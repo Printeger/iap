@@ -227,9 +227,9 @@ Acceptance:
 
 ## 8. Documentation automation (IEEE Trans Methodology)
 ### IAP-RQ-900: Auto-generate IEEE Trans methodology chapter (with flowchart)
-- [ ] 生成 `docs/methodology/methodology.tex`
-- [ ] 文档首图为系统流程图（从 `docs/figures/system_flow.*` 引用）
-- [ ] 从 TRACEABILITY 自动生成“模块-公式-接口-验证”骨架段落
+- [x] 生成 `docs/methodology/methodology.tex`
+- [x] 文档首图为系统流程图（从 `docs/figures/system_flow.*` 引用）
+- [x] 从 TRACEABILITY 自动生成"模块-公式-接口-验证"骨架段落
 
 Acceptance:
 - 一条命令生成 .tex；能编译（至少结构无误），并包含流程图占位与小节骨架。

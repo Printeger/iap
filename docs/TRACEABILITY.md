@@ -36,6 +36,7 @@
 | IAP-RQ-410 | Receding horizon loop | 执行Δt后重规划 | `IntegrityPlanner::execution_target()`, `plan()` | 调用`plan()`+`execution_target()`模拟多步闭环 | `chosen_traj_id, dt_execute` | **DONE** |
 | IAP-RQ-500 | 三种 baseline（Passive/CovMin/IntegAware） | 对比 integrity 驱动的优势 | `apps/iap_experiment.cpp` (run_baseline ×3) | 同场景三 baseline 均输出指标 CSV | `baseline, violation_frac, avg_PL, mission_success` | **DONE (stub)** |
 | IAP-RQ-510 | 指标：Time(PL>AL)%, AvgPL, MinIM, path/time/effort | 量化对比表格 | `include/iap/experiments/metrics.hpp` (MetricsCollector, write_comparison_table) | `ros2 run iap iap_experiment` 输出 /tmp/*_summary.md | `violation%, avg_PL, min_IM, path_len, time, effort` | **DONE (stub)** |
+| IAP-RQ-900 | 自动生成 IEEE Trans methodology.tex（流程图+模块小节+公式） | 论文写作辅助 | `tools/gen_methodology.py` → `docs/methodology/methodology.tex`, `docs/figures/system_flow.tex` | `python3 tools/gen_methodology.py` 生成 .tex；结构无误（12 env 平衡） | gen exit code 0; env mismatch=0 | **DONE** |
 | IAP-RQ-050 | IMU 健康度：饱和/模型失配 → noise inflation / alarm | 传感器健康度影响可信度 | `src/health/imu_health.*` | 人为制造饱和或异常噪声 | `acc_norm, gyro_norm, sat_flag, gamma_imu` | TODO |
 | IAP-RQ-060 | 规划目标：J(τ)=Σ hinge(PL_pred-AL)^2 + λ_goal*dist + λ_u*effort | 优化版 integrity-aware cost | `src/planner/cost.*` | 单步生成候选轨迹打分 | `J_total, J_integrity, J_goal, J_effort` | TODO |
 | IAP-RQ-070 | 预测层：对候选轨迹预测 PL_pred（baseline：代理；升级：ARAIM） | 预测可见/可观测集合与 PL_pred | `src/predictor/*` | 对比不同轨迹的 PL_pred 差异 | `PL_pred(s), AL(s), IM_pred(s)` | TODO |

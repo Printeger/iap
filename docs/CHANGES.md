@@ -6,7 +6,12 @@
 - (none)
 
 ## 2026-03-05
-- IAP-RQ-500/510: Experiments & metrics stubs.
+- IAP-RQ-900: Auto-generate IEEE Trans methodology chapter.
+  - `tools/gen_methodology.py`: reads `docs/TRACEABILITY.md` → writes `docs/methodology/methodology.tex` (IEEEtran class, TikZ flowchart, per-module subsections with formulas, traceability table) and `docs/figures/system_flow.tex` (standalone TikZ).
+  - Generated .tex has 12 balanced `\begin`/`\end` environments; structure verified.
+  - Formula skeletons for RQ-015/020/040/100/200/220/320/400 embedded.
+  - Run: `python3 tools/gen_methodology.py`
+- IAP-RQ-500/510: Experiment runner + metrics (Passive/CovMin/IntegAware baselines).
   - `include/iap/experiments/metrics.hpp`: MetricSample (stamp,PL,AL,IM,violation,path_increment,control_effort,mode); MetricsCollector (add/reset/log_summary/write_csv); ExperimentResult; write_comparison_table() → Markdown.
     * Metrics: Time(PL>AL)%, AvgPL, MinIM, path length, mission time, control effort, success.
   - `apps/iap_experiment.cpp`: iap_experiment node; runs three baselines (Passive/CovMin/IntegAware) against a synthetic degraded-zone scenario; writes per-baseline CSV + Markdown summary table to /tmp/.
