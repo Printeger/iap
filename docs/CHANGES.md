@@ -6,6 +6,7 @@
 - (none)
 
 ## 2026-03-05
+- IAP-RQ-001: Generate `docs/SPEC_VS_IMPL.md`：对照 spec/ 与代码现状，汇总已实现/待实现条目，建议新目录结构。
 - IAP-RQ-001: Renamed ROS2 package from `glim` to `iap`.
   - `src/glim/` → `src/iap/` (C++ source directory)
   - `include/glim/` → `include/iap/` (public header directory)

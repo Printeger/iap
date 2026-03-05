@@ -27,7 +27,7 @@ Acceptance:
 - [x] CMakeLists.txt 的 `project(...)` 改为 `iap`
 - [x] 所有依赖此包名的路径/launch/ament 导出同步更新
 - [x] 编译命令 `colcon build --packages-select iap` 可用
-- [ ] 阅读代码，/src/iap/docs/spec/ 文件夹中的内容，并对比哪些是代码中已经实现的，哪些是等待实现的，列成表格，整理记录为一个readme文件，供更新后续REQ。
+- [x] 阅读代码，/src/iap/docs/spec/ 文件夹中的内容，并对比哪些是代码中已经实现的，哪些是等待实现的，列成表格，整理记录为一个readme文件，供更新后续REQ。→ 见 `docs/SPEC_VS_IMPL.md`
 
 Acceptance:
 - colcon 能成功构建 `iap`，且 `ros2 pkg list | grep iap` 可见。生成readme
