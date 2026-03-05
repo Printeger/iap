@@ -334,43 +334,43 @@ Acceptance:
 
 ### IAP-RQ-241 Hypothesis set enumeration
 Talk: §6.2 fault hypotheses H0 + sat faults + trunk faults (+constellation optional)
-- [ ] Enumerate: H0 + each satellite single-fault + each trunk single-fault
-- [ ] Priors: P_sat from ISM config; P_trunk from confidence mapping
+- [x] Enumerate: H0 + each satellite single-fault + each trunk single-fault
+- [x] Priors: P_sat from ISM config; P_trunk from confidence mapping
 Acceptance:
 - Logs: N_f = 1 + N_sat + K_trunk (optionally +C)
 
 ### IAP-RQ-242 Full & subset solutions (solution separation)
 Talk: §6.4 compute full solution and subset solution by zeroing weights
-- [ ] Extract linearized WLS at epoch (G, r, W) from factor graph linearization
-- [ ] Compute p^(0) and p^(k) for each hypothesis k
+- [x] Extract linearized WLS at epoch (G, r, W) from factor graph linearization
+- [x] Compute p^(0) and p^(k) for each hypothesis k
 Acceptance:
 - Deterministic outputs; subset differs when faulted measurement removed.
 
 ### IAP-RQ-243 Separation statistics σ_ss,q,k
 Talk: §6.4.3 / §6.5
-- [ ] Compute separation vector d_k = p^(0) - p^(k)
-- [ ] Compute σ_ss,q,k projected to directions (E/N or horizontal) as in talk
+- [x] Compute separation vector d_k = p^(0) - p^(k)
+- [x] Compute σ_ss,q,k projected to directions (E/N or horizontal) as in talk
 Acceptance:
 - σ_ss increases when geometry weakens / fewer sats.
 
 ### IAP-RQ-244 Detection thresholds & multipliers (K_fa, K_md)
 Talk: §6.5 / §6.6
-- [ ] Allocate P_FA budgets across hypotheses
-- [ ] Compute thresholds T_q,k and K_md from P_fault and P_HMI budget
+- [x] Allocate P_FA budgets across hypotheses
+- [x] Compute thresholds T_q,k and K_md from P_fault and P_HMI budget
 Acceptance:
 - Changing P_FA/P_HMI changes thresholds monotonically (more strict → larger PL)
 
 ### IAP-RQ-245 Faulted PL and overall PL
 Talk: §6.6.2–6.6.3
-- [ ] Compute PL_faulted,q,k and PL_ff,q
-- [ ] Output PL_ARAIM = max(PL_ff, max_k PL_faulted,k)
+- [x] Compute PL_faulted,q,k and PL_ff,q
+- [x] Output PL_ARAIM = max(PL_ff, max_k PL_faulted,k)
 Acceptance:
 - Inject a biased satellite: PL rises; after exclusion/recompute PL drops.
 
 ### IAP-RQ-246 Close-loop FDE (exclude & recompute)
 Talk: when detected, exclude measurement and recompute solution
-- [ ] If |d_k| > T_q,k: flag measurement and rebuild weights/factors
-- [ ] Re-run solve for current epoch
+- [x] If |d_k| > T_q,k: flag measurement and rebuild weights/factors
+- [x] Re-run solve for current epoch
 Acceptance:
 - Logs show “detected→excluded→re-solved” loop.
 
@@ -380,25 +380,22 @@ Acceptance:
 
 ### IAP-RQ-331 Predicted ARAIM PL along candidate trajectory
 Talk: §7.2 predicted PL_ARAIM at future waypoints using predicted geometry
-- [ ] For each candidate waypoint: build predicted G/W using V_hat and (optional) predicted trunk visibility
-- [ ] Run Phase-3 ARAIM routine in “prediction mode” (no real residuals → use expected/noise model)
+- [x] For each candidate waypoint: build predicted G/W using V_hat and (optional) predicted trunk visibility
+- [x] Run Phase-3 ARAIM routine in "prediction mode" (no real residuals → use expected/noise model)
 Acceptance:
 - Under canopy candidates yield higher PL_pred_ARAIM; open path lower.
 
 ### IAP-RQ-421 Dynamic AL(τ) along trajectory
 Talk: AL derived from proximity to obstacles (future waypoints)
-- [ ] Query ESDF/distance field for each waypoint → AL_i
+- [x] Query ESDF/distance field for each waypoint → AL_i
 Acceptance:
 - Passing near obstacles yields lower AL_i.
 
 ### IAP-RQ-422 Planner uses (PL_pred_ARAIM_i - AL_i)
 Talk: §7.3 hinge cost
-- [ ] Replace constant AL with per-waypoint AL_i
-- [ ] Use PL_pred_ARAIM_i (not proxy) in hinge
+- [x] Replace constant AL with per-waypoint AL_i
+- [x] Use PL_pred_ARAIM_i (not proxy) in hinge
 Acceptance:
 - Planner chooses safer path even if longer when integrity violated.
 
 ---
-
-## Phase-5 (Optional): Learned search policy (Talk §8–§9)
-Status: OUT-OF-SCOPE for optimization track unless you explicitly want RL.

@@ -52,6 +52,14 @@ struct IntegrityReport {
   /// TDOP from trunk landmarks (inf = no trunks visible)
   double tdop = 1e9;
 
+  // --- ARAIM output (IAP-RQ-245/246) --------------------------------------
+  double pl_araim      = 1e9;  ///< ARAIM protection level [m] (valid when < 1e8)
+  double pl_ff         = 1e9;  ///< fault-free component of ARAIM PL [m]
+  int    araim_valid   = 0;    ///< 1 when ARAIM geometry was sufficient
+  int    araim_n_hyp   = 0;    ///< total number of fault hypotheses tested
+  int    araim_n_det   = 0;    ///< number of detected faults (IAP-RQ-246)
+  std::vector<int> araim_detected_rows; ///< design-matrix row indices of detected faults
+
   // --- Derived flags -------------------------------------------------------
   bool safe() const { return IM > 0.0; }
 };

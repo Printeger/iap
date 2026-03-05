@@ -5,6 +5,25 @@
 ## Unreleased
 - (none)
 
+## 2026-03-05 (Phase-4)
+- IAP-RQ-331/421/422: Predicted ARAIM PL in planner + per-waypoint AL.
+  - `include/iap/planner/predicted_araim.hpp` + `src/iap/planner/predicted_araim.cpp`: `PredictedAraimComputer`; calls `VisibilityPredictor::predict()` at each waypoint → builds `SatGeometry` list → `Araim::predict_geometry()` (r=0) → returns `pl_araim` (geometry-only upper bound).
+  - `include/iap/planner/trajectory_types.hpp`: `CandidateTrajectory` += `AL_pred` (per-waypoint Alert Limit vector).
+  - `include/iap/planner/integrity_planner.hpp` + `.cpp`: `Params::use_araim_pl`, `Params::araim_pred_params`; `set_occupancy()`, `set_epoch()`, `set_al_fn()` setters; `plan()` fills `AL_pred` via `al_fn_` callback and replaces `PL_pred[k]` with `araim_predictor_.predict_araim_pl(wpt)` when `use_araim_pl`; `evaluate()` uses `traj.AL_pred[k]` per step.
+  - CMakeLists.txt: +predicted_araim.cpp.
+  - `colcon build` passes.
+
+## 2026-03-05 (Phase-3)
+- IAP-RQ-241/242/243/244/245/246: Full ARAIM engine (single-fault, horizontal PL).
+  - `include/iap/integrity/araim_types.hpp`: `FaultHypothesis{type, row, sat_id, p_fault}`, `SubsetSolution{d_horiz, sigma_ss_E/N/horiz, threshold, pl_faulted, fault_detected}`, `AraimResult{valid, pl_ff, pl_araim, S0, hypotheses, subsets, n_det, detected_rows}`.
+  - `include/iap/integrity/araim.hpp`: `Araim` class; `Params{K_fa=4.5, K_md=5.5, K_ff=5.33}`; `run(epoch, n_trunk)` (real residuals + FDE); `predict_geometry(visible_sats)` (r=0, planning mode).
+  - `src/iap/integrity/araim.cpp`: `build_G/W/r(epoch)`; `enumerate_hypotheses()`; `compute_core()` — S0=(G^T W G)^{-1}; subset solutions exclude row k; σ_ss_horiz, threshold, pl_faulted per hypothesis; pl_ff=K_ff·√(S0[0,0]+S0[1,1]); pl_araim=max(pl_ff, max_k pl_faulted_k); FDE: detected_rows.
+  - `include/iap/gnss/gnss_types.hpp`: `SatObs` += `pr_residual` field (meas−pred [m]).
+  - `include/iap/integrity/integrity_types.hpp`: `IntegrityReport` += `pl_araim`, `pl_ff`, `araim_valid`, `araim_n_hyp`, `araim_n_det`, `araim_detected_rows`.
+  - `include/iap/integrity/integrity_monitor.hpp` + `.cpp`: `Params::araim_params`; private `Araim araim_`; `run_araim()` — calls `araim_.run()`, merges result into report (replaces `report.PL` with `pl_araim` when valid); trace log extended with `pl_araim/araim_n_hyp/araim_n_det`.
+  - CMakeLists.txt: +araim.cpp.
+  - `colcon build` passes.
+
 ## 2026-03-05 (Phase-2)
 - IAP-RQ-131/132/133: Trunk data association + TrunkFactor + confidence-weighted TDOP.
   - `include/iap/trunk/trunk_map.hpp` + `src/iap/trunk/trunk_map.cpp`: `TrunkMap` with EMA-smoothed landmark table; nearest-XY + radius-gate association; stale pruning; `confirmed_landmarks()`; `TrunkLandmark{id, center_xy, radius, confidence, seen_count, last_stamp}`.

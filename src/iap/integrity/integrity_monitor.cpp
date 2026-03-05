@@ -10,11 +10,12 @@
 namespace iap {
 
 // ---------------------------------------------------------------------------
-IntegrityMonitor::IntegrityMonitor() : params_(Params{}) {
+IntegrityMonitor::IntegrityMonitor() : params_(Params{}), araim_(Araim{}) {
   logger_ = glim::create_module_logger("integrity");
 }
 
-IntegrityMonitor::IntegrityMonitor(const Params& params) : params_(params) {
+IntegrityMonitor::IntegrityMonitor(const Params& params)
+: params_(params), araim_(params.araim_params) {
   logger_ = glim::create_module_logger("integrity");
 }
 
@@ -92,6 +93,39 @@ void IntegrityMonitor::run_gnss_gating(const GnssEpoch& epoch,
 }
 
 // ---------------------------------------------------------------------------
+void IntegrityMonitor::run_araim(const GnssEpoch& epoch,
+                                  int n_trunk_obs,
+                                  IntegrityReport& report) {
+  // IAP-RQ-241–246: run ARAIM and merge results into the report
+  const AraimResult ar = araim_.run(epoch, n_trunk_obs);
+
+  report.araim_valid  = ar.valid ? 1 : 0;
+  report.araim_n_hyp  = ar.n_hypotheses;
+  report.araim_n_det  = ar.n_detected;
+  report.araim_detected_rows = ar.detected_rows;
+
+  if (!ar.valid) return;
+
+  report.pl_araim = ar.pl_araim;
+  report.pl_ff    = ar.pl_ff;
+
+  // Replace the proxy PL with the ARAIM PL (ARAIM is more principled)
+  report.PL = ar.pl_araim;
+  report.IM = report.AL - report.PL;
+
+  if (ar.n_detected > 0) {
+    logger_->warn("ARAIM FDE: {} fault(s) detected; rows: {}",
+                  ar.n_detected,
+                  [&] {
+                    std::string s;
+                    for (int r : ar.detected_rows)
+                      s += std::to_string(r) + " ";
+                    return s;
+                  }());
+  }
+}
+
+// ---------------------------------------------------------------------------
 IntegrityMode IntegrityMonitor::update_mode(const IntegrityReport& report) {
   const double al = report.AL;
   const double pl = report.PL;
@@ -163,6 +197,12 @@ IntegrityReport IntegrityMonitor::compute(const glim::EstimationFrame&       fra
     run_gnss_gating(*epoch, report);
   }
 
+  // --- ARAIM (IAP-RQ-241–246) ---
+  if (epoch) {
+    const int n_trunk_obs = trunk ? static_cast<int>(trunk->trunks.size()) : 0;
+    run_araim(*epoch, n_trunk_obs, report);
+  }
+
   // --- TDOP (IAP-RQ-120) ---
   if (trunk) {
     report.tdop = trunk->tdop;
@@ -173,10 +213,11 @@ IntegrityReport IntegrityMonitor::compute(const glim::EstimationFrame&       fra
 
   logger_->trace(
     "integrity: PL={:.3f}m AL={:.3f}m IM={:.3f}m mode={} lambda_max={:.4f}"
-    " icp_degenerate={} gamma_lidar={:.2f} tdop={:.2f}",
+    " icp_degenerate={} gamma_lidar={:.2f} tdop={:.2f}"
+    " pl_araim={:.3f} araim_n_hyp={} araim_n_det={}",
     report.PL, report.AL, report.IM, to_string(report.mode),
     report.lambda_max_sigma_p, report.icp_degenerate, report.gamma_lidar,
-    report.tdop);
+    report.tdop, report.pl_araim, report.araim_n_hyp, report.araim_n_det);
 
   if (report.mode == IntegrityMode::ALERT) {
     logger_->warn("INTEGRITY ALERT: PL={:.3f} >= AL={:.3f}  IM={:.3f}",

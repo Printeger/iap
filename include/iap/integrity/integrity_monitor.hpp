@@ -4,6 +4,7 @@
 // IAP-RQ-220: GNSS per-satellite NIS gating
 
 #include <iap/integrity/integrity_types.hpp>
+#include <iap/integrity/araim.hpp>
 #include <iap/odometry/estimation_frame.hpp>
 #include <iap/gnss/gnss_types.hpp>
 #include <iap/trunk/trunk_types.hpp>
@@ -63,6 +64,9 @@ class IntegrityMonitor {
     double chi2_1dof_thresh  = 6.63;   ///< χ²(1) at p=0.01 for per-sat NIS exclusion
     double chi2_global_mult  = 3.0;    ///< global NIS threshold = mult * K * chi2_1dof
     double gamma_R_max       = 5.0;    ///< max downweight factor for a single satellite
+
+    // --- ARAIM (IAP-RQ-241–246) ---
+    Araim::Params araim_params;        ///< K_fa, K_md, K_ff, min_sats, etc.
   };
 
   IntegrityMonitor();
@@ -89,12 +93,16 @@ class IntegrityMonitor {
   double compute_PL(const glim::EstimationFrame& frame) const;
   double compute_AL() const;
   void   run_gnss_gating(const GnssEpoch& epoch, IntegrityReport& report) const;
+  void   run_araim(const GnssEpoch& epoch,
+                   int n_trunk_obs,
+                   IntegrityReport& report);   ///< IAP-RQ-241–246
   IntegrityMode update_mode(const IntegrityReport& report);
 
   Params params_;
   double obstacle_dist_ = 1e9;    ///< latest obstacle distance [m]
   IntegrityMode current_mode_     = IntegrityMode::NOMINAL;
   int    recovery_counter_        = 0;
+  Araim  araim_;                  ///< ARAIM engine (IAP-RQ-241–246)
 
   std::shared_ptr<spdlog::logger> logger_;
 };

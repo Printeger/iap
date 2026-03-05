@@ -34,6 +34,9 @@ struct SatObs {
   // ---- Canopy density (populated by VisibilityPredictor, IAP-RQ-313) -----
   double kappa = 0.0;  ///< occupancy ratio along LOS ∈ [0,1]; 0 = clear sky
 
+  // ---- Pseudorange residual (IAP-RQ-242: ARAIM solution separation) ------
+  double pr_residual = 0.0;  ///< r = pr_meas − pr_pred [m];  filled by GnssHandler
+
   // ---- NIS gating (populated by RQ-220) -----------------------------------
   double nis_pr  = 0.0;  ///< normalised innovation squared — pseudorange
   double nis_dop = 0.0;  ///< normalised innovation squared — Doppler

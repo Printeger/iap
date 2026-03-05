@@ -90,6 +90,10 @@ add_library(iap SHARED
   # trunk map data association + factor (IAP-RQ-131/132)
   src/iap/trunk/trunk_map.cpp
   src/iap/trunk/trunk_factor.cpp
+  # ARAIM engine (IAP-RQ-241–246)
+  src/iap/integrity/araim.cpp
+  # predicted ARAIM for planner (IAP-RQ-331)
+  src/iap/planner/predicted_araim.cpp
   # integrity monitoring (IAP-RQ-200/210/220)
   src/iap/integrity/integrity_monitor.cpp
   # planner (IAP-RQ-300/310/320)
