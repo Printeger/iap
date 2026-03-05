@@ -233,3 +233,172 @@ Acceptance:
 
 Acceptance:
 - 一条命令生成 .tex；能编译（至少结构无误），并包含流程图占位与小节骨架。
+
+# IAP Requirements Checklist (Talk-aligned, Next Phase)
+
+> Goal: 从“能跑的 baseline”升级到“符合 talk 公式/机制”的优化版（ARAIM + 预测可见性 + trunk factor）。
+
+## Legend
+- DONE: 已实现且机制对齐
+- APPROX: 有实现，但与 talk 仅近似（需升级）
+- GAP: talk 明确要求但缺失
+
+---
+
+## Phase-0: Baseline already present (do not rework unless needed)
+### IAP-RQ-020 GNSS factors (pseudorange+doppler, meas-pred)
+Status: DONE
+- Pseudorange residual = meas - (||p - p_sat|| + clk_bias[m])
+- Doppler residual = meas - (eᵀ(v_r - v_s) + clk_drift[m/s])
+Acceptance: residual/jacobians correct; per-sat factor exists.
+
+### IAP-RQ-100 Trunk detection + confidence
+Status: DONE
+- clustering + circle fit + confidence + TDOP proxy
+
+### IAP-RQ-200 Integrity outputs PL/AL/IM/mode
+Status: APPROX
+- PL currently covariance proxy (not ARAIM)
+- AL from obstacle distance ok
+
+### IAP-RQ-400 Planner cost shape
+Status: APPROX
+- hinge² exists, but PL_pred lacks trajectory dependence and is not ARAIM-pred
+
+---
+
+## Phase-1: Make prediction physically meaningful (Talk §3, §7)  [TOP PRIORITY]
+
+### IAP-RQ-311 Build/Expose local occupancy for ray checks
+Talk: §7.2 needs predicted visible satellites/landmarks under canopy.
+- [x] Provide a `LocalOccupancyGrid` (voxel hash or Octomap) from GLIM map/points
+- [x] Query API: `ray_occluded(origin, dir, max_range)` and `occupancy_ratio(origin, dir, L)`
+Acceptance:
+- Unit test with synthetic occupied voxels (ray hits / misses correct)
+
+### IAP-RQ-312 Predict satellite visibility set V^(τ) by ray casting
+Talk: §7.2 predicted V̂ used for predicted geometry and PL_pred.
+- [x] For each waypoint and each satellite direction, compute visibility (LOS not blocked within L_occ)
+- [x] Output: |V_hat| and per-sat visibility flags
+Acceptance:
+- In a canopy map, moving under cover reduces |V_hat|; open sky increases.
+
+### IAP-RQ-313 Estimate canopy density κ along LOS (prediction-time)
+Talk: §3.2 σ_eff(κ, θ) canopy term.
+- [x] Define κ = occupancy_ratio along LOS (0..1) or accumulated occupied length
+- [x] Log κ per satellite per waypoint
+Acceptance:
+- κ increases under dense canopy; near 0 in open.
+
+### IAP-RQ-314 Implement σ_eff(κ, θ) and weight matrix W
+Talk: §3.2 σ²_eff = σ²_c * exp(α κ / sin θ)
+- [x] Add params: α, σ_c, κ definition, elevation θ
+- [x] Replace/extend elevation-only sigma with canopy-aware sigma (at least in prediction)
+Acceptance:
+- Same elevation but higher κ → larger σ_eff; matches monotonicity.
+
+### IAP-RQ-321 Make PL_pred trajectory-dependent (replace sigma-only growth)
+Talk: §7.2 predicted covariance from predicted geometry/information
+- [x] At minimum: sigma_grow scaled by function f(|V_hat|, κ, lidar_obs_proxy)
+- [x] Better: maintain 3×3 Σ_p_pred and update via info increments
+Acceptance:
+- Different candidates yield different PL_pred sequences.
+
+---
+
+## Phase-2: Turn trunks into real constraints (Talk §4.2, §5.1)
+
+### IAP-RQ-131 Trunk data association & persistent IDs
+Talk: trunk landmarks L={c_k} in optimization window
+- [x] Maintain trunk map (local) with IDs
+- [x] Associate detections to map IDs (nearest in xy + radius gate)
+Acceptance:
+- Same trunk observed across frames keeps consistent ID > 80% in replay.
+
+### IAP-RQ-132 Trunk observation factor in factor graph (Full-B)
+Talk: §4.2 trunk residual + Σ_trunk
+- [x] Implement `TrunkFactor(x_t, c_k)` residual consistent with talk
+- [x] Implement covariance Σ_trunk (range/bearing/z) and confidence→noise
+Acceptance:
+- Enable trunk factors reduces Σ_p and PL_proxy in forest scenes.
+
+### IAP-RQ-133 TDOP weighted form (optional upgrade)
+Talk: TDOP = sqrt(tr((Gᵀ W G)^-1))
+- [x] Incorporate W from Σ_trunk/confidence
+Acceptance:
+- TDOP improves when trunks are angularly spread and confident.
+
+---
+
+## Phase-3: Implement ARAIM (Talk §6.4–6.6)  [CORE TALK COMPLIANCE]
+
+### IAP-RQ-241 Hypothesis set enumeration
+Talk: §6.2 fault hypotheses H0 + sat faults + trunk faults (+constellation optional)
+- [ ] Enumerate: H0 + each satellite single-fault + each trunk single-fault
+- [ ] Priors: P_sat from ISM config; P_trunk from confidence mapping
+Acceptance:
+- Logs: N_f = 1 + N_sat + K_trunk (optionally +C)
+
+### IAP-RQ-242 Full & subset solutions (solution separation)
+Talk: §6.4 compute full solution and subset solution by zeroing weights
+- [ ] Extract linearized WLS at epoch (G, r, W) from factor graph linearization
+- [ ] Compute p^(0) and p^(k) for each hypothesis k
+Acceptance:
+- Deterministic outputs; subset differs when faulted measurement removed.
+
+### IAP-RQ-243 Separation statistics σ_ss,q,k
+Talk: §6.4.3 / §6.5
+- [ ] Compute separation vector d_k = p^(0) - p^(k)
+- [ ] Compute σ_ss,q,k projected to directions (E/N or horizontal) as in talk
+Acceptance:
+- σ_ss increases when geometry weakens / fewer sats.
+
+### IAP-RQ-244 Detection thresholds & multipliers (K_fa, K_md)
+Talk: §6.5 / §6.6
+- [ ] Allocate P_FA budgets across hypotheses
+- [ ] Compute thresholds T_q,k and K_md from P_fault and P_HMI budget
+Acceptance:
+- Changing P_FA/P_HMI changes thresholds monotonically (more strict → larger PL)
+
+### IAP-RQ-245 Faulted PL and overall PL
+Talk: §6.6.2–6.6.3
+- [ ] Compute PL_faulted,q,k and PL_ff,q
+- [ ] Output PL_ARAIM = max(PL_ff, max_k PL_faulted,k)
+Acceptance:
+- Inject a biased satellite: PL rises; after exclusion/recompute PL drops.
+
+### IAP-RQ-246 Close-loop FDE (exclude & recompute)
+Talk: when detected, exclude measurement and recompute solution
+- [ ] If |d_k| > T_q,k: flag measurement and rebuild weights/factors
+- [ ] Re-run solve for current epoch
+Acceptance:
+- Logs show “detected→excluded→re-solved” loop.
+
+---
+
+## Phase-4: Integrity-aware planning must use predicted ARAIM PL (Talk §7.2–7.3)
+
+### IAP-RQ-331 Predicted ARAIM PL along candidate trajectory
+Talk: §7.2 predicted PL_ARAIM at future waypoints using predicted geometry
+- [ ] For each candidate waypoint: build predicted G/W using V_hat and (optional) predicted trunk visibility
+- [ ] Run Phase-3 ARAIM routine in “prediction mode” (no real residuals → use expected/noise model)
+Acceptance:
+- Under canopy candidates yield higher PL_pred_ARAIM; open path lower.
+
+### IAP-RQ-421 Dynamic AL(τ) along trajectory
+Talk: AL derived from proximity to obstacles (future waypoints)
+- [ ] Query ESDF/distance field for each waypoint → AL_i
+Acceptance:
+- Passing near obstacles yields lower AL_i.
+
+### IAP-RQ-422 Planner uses (PL_pred_ARAIM_i - AL_i)
+Talk: §7.3 hinge cost
+- [ ] Replace constant AL with per-waypoint AL_i
+- [ ] Use PL_pred_ARAIM_i (not proxy) in hinge
+Acceptance:
+- Planner chooses safer path even if longer when integrity violated.
+
+---
+
+## Phase-5 (Optional): Learned search policy (Talk §8–§9)
+Status: OUT-OF-SCOPE for optimization track unless you explicitly want RL.

@@ -81,8 +81,15 @@ add_library(iap SHARED
   src/iap/gnss/pseudorange_factor.cpp
   src/iap/gnss/doppler_factor.cpp
   src/iap/gnss/gnss_handler.cpp
+  # gnss visibility predictor (IAP-RQ-312/313)
+  src/iap/gnss/visibility_predictor.cpp
+  # local occupancy map (IAP-RQ-311)
+  src/iap/map/local_occupancy.cpp
   # trunk detection (IAP-RQ-100/110/120)
   src/iap/trunk/trunk_detector.cpp
+  # trunk map data association + factor (IAP-RQ-131/132)
+  src/iap/trunk/trunk_map.cpp
+  src/iap/trunk/trunk_factor.cpp
   # integrity monitoring (IAP-RQ-200/210/220)
   src/iap/integrity/integrity_monitor.cpp
   # planner (IAP-RQ-300/310/320)

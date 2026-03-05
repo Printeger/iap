@@ -31,6 +31,9 @@ struct SatObs {
   double elevation = 0.0;  ///< elevation angle [rad] — used for noise weighting
   double azimuth   = 0.0;  ///< azimuth angle   [rad]
 
+  // ---- Canopy density (populated by VisibilityPredictor, IAP-RQ-313) -----
+  double kappa = 0.0;  ///< occupancy ratio along LOS ∈ [0,1]; 0 = clear sky
+
   // ---- NIS gating (populated by RQ-220) -----------------------------------
   double nis_pr  = 0.0;  ///< normalised innovation squared — pseudorange
   double nis_dop = 0.0;  ///< normalised innovation squared — Doppler

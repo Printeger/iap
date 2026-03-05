@@ -8,6 +8,7 @@
 #include <numeric>
 #include <algorithm>
 #include <spdlog/spdlog.h>
+#include <iostream>
 
 namespace iap {
 namespace experiments {
