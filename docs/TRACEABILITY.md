@@ -16,7 +16,8 @@
 | Req ID | 需求描述 | Talk/Idea 对照点 | Implementation（文件/模块） | Test/Experiment（如何验证） | Logs/Metrics（必须输出） | 状态 |
 |---|---|---|---|---|---|---|
 | IAP-RQ-000 | Repo guardrails：AGENTS.md、doc-guard（pre-commit hook + tools/doc_guard.py）、docs 三件套 | — | `AGENTS.md`, `.githooks/pre-commit`, `tools/doc_guard.py`, `docs/` | 提交代码时 hook 拦截缺失文档；`git config core.hooksPath` = `.githooks` | hook exit code | **DONE** |
-| IAP-RQ-001 | Rename ROS2 package to `iap`：package.xml `<name>`，CMakeLists `project(iap)`，所有 cmake 目标/安装路径、源码/头文件目录 | — | `package.xml`, `CMakeLists.txt`, `src/iap/`, `include/iap/`, `cmake/iap-config.cmake.in` | `colcon build --packages-select iap` 成功；`ros2 pkg list \| grep iap` 可见 | build exit code 0 | **DONE** |
+| IAP-RQ-001 | Rename ROS2 package to `iap` | — | `package.xml`, `CMakeLists.txt`, `src/iap/`, `include/iap/`, `cmake/iap-config.cmake.in` | `colcon build --packages-select iap` 成功；`ros2 pkg list \| grep iap` 可见 | build exit code 0 | **DONE** |
+| IAP-RQ-002 | Build artifacts: compile_commands.json + 最小 demo | 开发基础设施 | `apps/iap_status.cpp`, `launch/iap_demo.launch.py`, `.clangd`, `CMakeLists.txt` (IAP_VERSION, install launch/) | `ros2 run iap iap_status config` 输出 OK; clangd 通过 .clangd 读取 build/iap/ | `iap_status: OK` | **DONE** |
 | IAP-RQ-010 | 从估计器导出位置协方差（或等价信息）用于 PL 计算 | 保护级别需基于不确定性 | `src/estimator/*` | 轨迹跑通并能取 Σp | `Sigma_p (or HPL/VPL)` | TODO |
 | IAP-RQ-020 | GNSS 紧耦合观测：伪距 + 多普勒建因子（含 clock bias/drift） | GNSS tightly-coupled | `src/gnss/factors/*` | 关闭/开启 GNSS 对比 | `res_pr, res_dop, clk, clk_dot` | TODO |
 | IAP-RQ-030 | GNSS per-satellite NIS gating：downweight / exclude（RAIM-ish baseline） | 卫星级完整性、FDE 思路 | `src/integrity/gnss_integrity.*` | 注入某卫星 bias，触发剔星 | `sat_nis, exclude_sats, gamma_R, global_nis` | TODO |

@@ -4,6 +4,9 @@ project(iap VERSION 1.2.1 LANGUAGES CXX)
 add_compile_options(-std=c++17)
 set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} "${CMAKE_CURRENT_LIST_DIR}/cmake")
 
+# Version string available as IAP_VERSION in all targets
+add_compile_definitions(IAP_VERSION="${PROJECT_VERSION}")
+
 if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
   set(CMAKE_BUILD_TYPE "RelWithDebInfo" CACHE STRING "Choose the type of build." FORCE)
   set_property(CACHE CMAKE_BUILD_TYPE PROPERTY STRINGS "Debug" "Release" "MinSizeRel" "RelWithDebInfo")
@@ -258,6 +261,14 @@ if(DEFINED ENV{ROS_VERSION})
   if($ENV{ROS_VERSION} EQUAL 2)
     # ROS2
     find_package(ament_cmake REQUIRED)
+
+    ## Demo / smoke-test executable (IAP-RQ-002)
+    add_executable(iap_status apps/iap_status.cpp)
+    target_link_libraries(iap_status iap)
+    list(APPEND iap_LIBRARIES iap_status)
+
+    install(TARGETS iap_status DESTINATION lib/iap)
+    install(DIRECTORY launch DESTINATION share/iap)
     install(DIRECTORY config DESTINATION share/iap)
     ament_export_include_directories(include ${EIGEN3_INCLUDE_DIR} ${OpenCV_INCLUDE_DIRS})
     ament_export_libraries(${iap_LIBRARIES} ${GTSAM_LIBRARIES} fmt spdlog::spdlog)

@@ -41,8 +41,8 @@ Acceptance:
 - colcon 能成功构建 `iap`，且 `ros2 pkg list | grep iap` 可见。
 
 ### IAP-RQ-002: Build artifacts
-- [ ] 生成 compile_commands.json（给 clangd）
-- [ ] 提供最小 demo 运行方式（README 或 apps/ 下可执行）
+- [x] 生成 compile_commands.json（给 clangd）
+- [x] 提供最小 demo 运行方式（README 或 apps/ 下可执行）
 
 Acceptance:
 - VSCode clangd 无红线；demo 可运行并产生日志。
