@@ -94,6 +94,7 @@ TrunkDetectionResult TrunkDetector::detect(const gtsam_points::PointCloud& frame
   result.stamp   = stamp;
   result.tdop    = params_.tdop_inf;
   result.tdop2   = params_.tdop_inf;
+  result.tdop_weighted = params_.tdop_inf;
 
   if (!frame.points || frame.size() == 0) {
     return result;
@@ -205,6 +206,7 @@ void TrunkDetector::compute_tdop(TrunkDetectionResult& result) const {
   const int K = static_cast<int>(result.trunks.size());
   result.tdop    = params_.tdop_inf;
   result.tdop2   = params_.tdop_inf;
+  result.tdop_weighted = params_.tdop_inf;
   result.lambda_min_H = 0.0;
 
   if (K < 2) return;
@@ -232,6 +234,25 @@ void TrunkDetector::compute_tdop(TrunkDetectionResult& result) const {
   // TDOP = sqrt(trace(H^{-1})) = sqrt(1/λ0 + 1/λ1)
   result.tdop2 = std::sqrt(1.0 / lambdas_0 + 1.0 / lambdas_1);
   result.tdop  = result.tdop2;  // 2D only for now
+
+  // IAP-RQ-133: Confidence-weighted TDOP
+  // W = diag(conf_k^2),  H_w = G^T W G,  TDOP_w = sqrt(trace(H_w^{-1}))
+  {
+    Eigen::VectorXd w(K);
+    for (int k = 0; k < K; ++k) {
+      const double c = std::max(result.trunks[k].confidence, 1e-3);
+      w(k) = c * c;
+    }
+    const Eigen::Matrix2d H_w = G.transpose() * w.asDiagonal() * G;
+    Eigen::SelfAdjointEigenSolver<Eigen::Matrix2d> eig_w(H_w);
+    const double l0 = eig_w.eigenvalues()(0);
+    const double l1 = eig_w.eigenvalues()(1);
+    if (l0 > 1e-9) {
+      result.tdop_weighted = std::sqrt(1.0 / l0 + 1.0 / l1);
+    } else {
+      result.tdop_weighted = params_.tdop_inf;
+    }
+  }
 }
 
 // ---------------------------------------------------------------------------

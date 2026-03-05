@@ -38,6 +38,7 @@ struct TrunkDetectionResult {
   // ---- TDOP metrics (IAP-RQ-120) ----------------------------------------
   double tdop  = 1e9;   ///< Tree DOP (= sqrt(trace(H^{-1})));  lower = better geometry
   double tdop2 = 1e9;   ///< TDOP considering only horizontal (2D: x,y)
+  double tdop_weighted = 1e9;  ///< confidence-weighted TDOP (IAP-RQ-133): W = diag(conf²), TDOP_W = sqrt(trace((G^T W G)^{-1}))
   double lambda_min_H = 0.0;  ///< smallest eigenvalue of G^T G (degenerate when ≈ 0)
 };
 
