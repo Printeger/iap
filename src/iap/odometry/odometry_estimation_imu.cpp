@@ -29,6 +29,7 @@ namespace glim {
 using Callbacks = OdometryEstimationCallbacks;
 
 using gtsam::symbol_shorthand::B;  // IMU bias
+using gtsam::symbol_shorthand::C;  // clock state [δt(m), δṫ(m/s)] (IAP-RQ-010)
 using gtsam::symbol_shorthand::V;  // IMU velocity   (v_world_imu)
 using gtsam::symbol_shorthand::X;  // IMU pose       (T_world_imu)
 
@@ -61,6 +62,9 @@ OdometryEstimationIMUParams::OdometryEstimationIMUParams() {
   use_isam2_dogleg = config.param<bool>("odometry_estimation", "use_isam2_dogleg", false);
   isam2_relinearize_skip = config.param<int>("odometry_estimation", "isam2_relinearize_skip", 1);
   isam2_relinearize_thresh = config.param<double>("odometry_estimation", "isam2_relinearize_thresh", 0.1);
+
+  clk_bias_noise  = config.param<double>("odometry_estimation", "clk_bias_noise",  100.0);
+  clk_drift_noise = config.param<double>("odometry_estimation", "clk_drift_noise", 1.0);
 
   validate_imu = config.param<bool>("odometry_estimation", "validate_imu", true);
   save_imu_rate_trajectory = config.param<bool>("odometry_estimation", "save_imu_rate_trajectory", false);
@@ -202,15 +206,23 @@ EstimationFrame::ConstPtr OdometryEstimationIMU::insert_frame(const Preprocessed
     new_stamps[X(0)] = raw_frame->stamp;
     new_stamps[V(0)] = raw_frame->stamp;
     new_stamps[B(0)] = raw_frame->stamp;
+    new_stamps[C(0)] = raw_frame->stamp;  // IAP-RQ-010: clock state
 
     new_values.insert(X(0), gtsam::Pose3(new_frame->T_world_imu.matrix()));
     new_values.insert(V(0), new_frame->v_world_imu);
     new_values.insert(B(0), gtsam::imuBias::ConstantBias(new_frame->imu_bias));
+    // IAP-RQ-010: clock state [δt(m), δṫ(m/s)] initialised to zero
+    new_values.insert(C(0), gtsam::Vector2(0.0, 0.0));
 
     // Prior for initial IMU states
     new_factors.emplace_shared<gtsam_points::LinearDampingFactor>(X(0), 6, params->init_pose_damping_scale);
     new_factors.emplace_shared<gtsam::PriorFactor<gtsam::Vector3>>(V(0), init_state->v_world_imu, gtsam::noiseModel::Isotropic::Precision(3, 1.0));
     new_factors.emplace_shared<gtsam_points::LinearDampingFactor>(B(0), 6, 1e6);
+    // IAP-RQ-010: loose prior on clock (will be dominated by GNSS factors in RQ-020)
+    const gtsam::Vector2 clk_noise_sigmas(params->clk_bias_noise, params->clk_drift_noise);
+    new_factors.emplace_shared<gtsam::PriorFactor<gtsam::Vector2>>(
+      C(0), gtsam::Vector2(0.0, 0.0),
+      gtsam::noiseModel::Diagonal::Sigmas(clk_noise_sigmas));
     new_factors.add(create_factors(current, nullptr, new_values));
 
     update_smoother(new_factors, new_values, new_stamps);
@@ -251,10 +263,24 @@ EstimationFrame::ConstPtr OdometryEstimationIMU::insert_frame(const Preprocessed
   new_stamps[X(current)] = raw_frame->stamp;
   new_stamps[V(current)] = raw_frame->stamp;
   new_stamps[B(current)] = raw_frame->stamp;
+  new_stamps[C(current)] = raw_frame->stamp;  // IAP-RQ-010: clock state
+
+  // Retrieve last clock estimate and predict forward
+  const gtsam::Vector2 last_clk = smoother->calculateEstimate<gtsam::Vector2>(C(last));
+  const double dt = raw_frame->stamp - last_stamp;
+  // Clock model: δt_next = δt + δṫ * Δt
+  const gtsam::Vector2 predicted_clk(last_clk(0) + last_clk(1) * dt, last_clk(1));
 
   new_values.insert(X(current), predicted_T_world_imu);
   new_values.insert(V(current), predicted_v_world_imu);
   new_values.insert(B(current), last_imu_bias);
+  new_values.insert(C(current), predicted_clk);  // IAP-RQ-010
+
+  // IAP-RQ-010: loose clock prior (keep states in graph; GNSS factors will dominate in RQ-020)
+  const gtsam::Vector2 clk_noise_sigmas(params->clk_bias_noise, params->clk_drift_noise);
+  new_factors.emplace_shared<gtsam::PriorFactor<gtsam::Vector2>>(
+    C(current), predicted_clk,
+    gtsam::noiseModel::Diagonal::Sigmas(clk_noise_sigmas));
 
   // Constant IMU bias assumption
   new_factors.add(
@@ -401,6 +427,16 @@ void OdometryEstimationIMU::update_frames(int current, const gtsam::NonlinearFac
       frames[i]->T_world_lidar = T_world_imu * T_imu_lidar;
       frames[i]->v_world_imu = v_world_imu;
       frames[i]->imu_bias = imu_bias;
+
+      // IAP-RQ-010: read back clock states [δt(m), δṫ(m/s)]
+      const auto clk = smoother->calculateEstimate<gtsam::Vector2>(C(i));
+      frames[i]->clk_bias  = clk(0);
+      frames[i]->clk_drift = clk(1);
+      logger->trace("state[{}]: p=({:.3f},{:.3f},{:.3f}) v=({:.3f},{:.3f},{:.3f}) clk_bias={:.4f}m clk_drift={:.4f}m/s",
+        i,
+        T_world_imu.translation().x(), T_world_imu.translation().y(), T_world_imu.translation().z(),
+        v_world_imu.x(), v_world_imu.y(), v_world_imu.z(),
+        clk(0), clk(1));
     } catch (std::out_of_range& e) {
       logger->error("caught {}", e.what());
       logger->error("current={}", current);

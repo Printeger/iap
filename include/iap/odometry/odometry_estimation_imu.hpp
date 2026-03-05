@@ -58,6 +58,10 @@ public:
   double isam2_relinearize_skip;
   double isam2_relinearize_thresh;
 
+  // IAP-RQ-010: clock noise parameters (loose priors until GNSS factors added)
+  double clk_bias_noise;   ///< Sigma for clock bias random-walk prior [m]
+  double clk_drift_noise;  ///< Sigma for clock drift random-walk prior [m/s]
+
   // Logging params
   bool validate_imu;
   bool save_imu_rate_trajectory;

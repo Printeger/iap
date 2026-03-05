@@ -87,7 +87,12 @@ public:
   Eigen::Isometry3d T_world_imu;    ///< IMU pose in the world space
 
   Eigen::Vector3d v_world_imu;           ///< IMU velocity in the world frame
-  Eigen::Matrix<double, 6, 1> imu_bias;  ///< IMU bias
+  Eigen::Matrix<double, 6, 1> imu_bias;  ///< IMU bias [ba(3), bg(3)]
+
+  // ---- IAP: clock states (IAP-RQ-010) -----------------------------------
+  double clk_bias  = 0.0;  ///< Receiver clock bias δt  [m] (c * dt)
+  double clk_drift = 0.0;  ///< Receiver clock drift δṫ [m/s] (c * dt_dot)
+  // -----------------------------------------------------------------------
 
   PreprocessedFrame::ConstPtr raw_frame;             ///< Raw input point cloud (LiDAR frame)
   Eigen::Matrix<double, 8, -1> imu_rate_trajectory;  ///< IMU-rate trajectory 8 x N  [t, x, y, z, qx, qy, qz, qw]

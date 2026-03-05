@@ -52,8 +52,8 @@ Acceptance:
 ## 2. Estimator（紧耦合 FGO / 滑窗）
 ### IAP-RQ-010: State definition matches talk
 - [x] 已有状态：p, v, q, b_a, b_g
-- [ ] 扩展状态：clk_bias, clk_drift（写入 EstimationFrame + factor graph key 管理）
-- [ ] 状态时序与滑窗边缘化可运行（扩展后不炸）
+- [x] 扩展状态：clk_bias, clk_drift（写入 EstimationFrame + factor graph key 管理）
+- [x] 状态时序与滑窗边缘化可运行（扩展后不炸）
 
 Acceptance:
 - 日志打印 state 关键量（p, v, clk_bias, clk_drift），滑窗运行稳定。
