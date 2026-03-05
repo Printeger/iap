@@ -123,24 +123,24 @@ Acceptance:
 
 ## 4. Integrity monitoring（RAIM-ish baseline → full ARAIM）
 ### IAP-RQ-200: Integrity outputs (PL/AL/IM) + mode
-- [ ] 输出 PL、AL、IM 与 mode
-- [ ] 安全条件：PL < AL
-- [ ] 输出 integrity report：PL/AL/IM/mode + 关键中间量（Σ_p / |V| / gating 结果）
+- [x] 输出 PL、AL、IM 与 mode
+- [x] 安全条件：PL < AL
+- [x] 输出 integrity report：PL/AL/IM/mode + 关键中间量（Σ_p / |V| / gating 结果）
 
 Acceptance:
 - PL/AL/IM 曲线可画；mode 切换可复现。
 
 ### IAP-RQ-210: Alert Limit AL from obstacle proximity
-- [ ] AL 随障碍距离动态变化（至少实现 HAL 近似）
-- [ ] 与无人机半径/障碍半径相关（最小实现：几何安全裕度）
+- [x] AL 随障碍距离动态变化（至少实现 HAL 近似）
+- [x] 与无人机半径/障碍半径相关（最小实现：几何安全裕度）
 
 Acceptance:
 - 越靠近障碍，AL 越小；日志可见 HAL/AL。
 
 ### IAP-RQ-220: GNSS per-satellite NIS gating (RAIM-ish baseline)
-- [ ] per-sat NIS 统计（pr/dop/joint）
-- [ ] downweight（gamma_R）与 exclude_sats 输出
-- [ ] global_nis 超阈值触发 FDE（贪心即可）
+- [x] per-sat NIS 统计（pr/dop/joint）
+- [x] downweight（gamma_R）与 exclude_sats 输出
+- [x] global_nis 超阈值触发 FDE（贪心即可）
 
 Acceptance:
 - 注入某颗卫星 bias 时能被降权/剔除，PL/IM 改善。

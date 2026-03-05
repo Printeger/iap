@@ -83,6 +83,8 @@ add_library(iap SHARED
   src/iap/gnss/gnss_handler.cpp
   # trunk detection (IAP-RQ-100/110/120)
   src/iap/trunk/trunk_detector.cpp
+  # integrity monitoring (IAP-RQ-200/210/220)
+  src/iap/integrity/integrity_monitor.cpp
   # odometry
   src/iap/odometry/callbacks.cpp
   src/iap/odometry/estimation_frame.cpp
