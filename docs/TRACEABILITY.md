@@ -32,6 +32,8 @@
 | IAP-RQ-300 | 候选轨迹生成（motion primitives） | 运动原语离散化候选轨迹 | `include/iap/planner/trajectory_types.hpp`, `trajectory_generator.hpp/.cpp` | 生成 M 条候选轨迹并可视化时间戳点序列 | `trajectory_count, speeds, yaw_rates` | **DONE** |
 | IAP-RQ-310 | 预测可见/可观测性集合（占位） | ray-check 遮挡预测 | `include/iap/planner/predicted_integrity.hpp/.cpp` (placeholder) | TODO: 接地图后做 ray-check；当前返回占位值 | `n_vis_placeholder` | **DONE (placeholder)** |
 | IAP-RQ-320 | 协方差传播 → Σ_pred → PL_pred | PL 预测供规划使用 | `include/iap/planner/predicted_integrity.hpp/.cpp` (sigma growth, K_pl=3.0) | PL_pred 随时间增长且不同轨迹有差异；σ_grow 可配置 | `PL_pred(s), sigma_pred(s)` | **DONE (baseline)** |
+| IAP-RQ-400 | Integrity-aware planning objective | hinge(PL_pred−AL)²代价+goal+effort | `include/iap/planner/integrity_planner.hpp/.cpp`; `evaluate()` | IM<0时选绕行轨迹；J_integrity > J_goal场景可复现 | `J_total, J_integrity, J_goal, J_effort` | **DONE** |
+| IAP-RQ-410 | Receding horizon loop | 执行Δt后重规划 | `IntegrityPlanner::execution_target()`, `plan()` | 调用`plan()`+`execution_target()`模拟多步闭环 | `chosen_traj_id, dt_execute` | **DONE** |
 | IAP-RQ-050 | IMU 健康度：饱和/模型失配 → noise inflation / alarm | 传感器健康度影响可信度 | `src/health/imu_health.*` | 人为制造饱和或异常噪声 | `acc_norm, gyro_norm, sat_flag, gamma_imu` | TODO |
 | IAP-RQ-060 | 规划目标：J(τ)=Σ hinge(PL_pred-AL)^2 + λ_goal*dist + λ_u*effort | 优化版 integrity-aware cost | `src/planner/cost.*` | 单步生成候选轨迹打分 | `J_total, J_integrity, J_goal, J_effort` | TODO |
 | IAP-RQ-070 | 预测层：对候选轨迹预测 PL_pred（baseline：代理；升级：ARAIM） | 预测可见/可观测集合与 PL_pred | `src/predictor/*` | 对比不同轨迹的 PL_pred 差异 | `PL_pred(s), AL(s), IM_pred(s)` | TODO |

@@ -88,6 +88,8 @@ add_library(iap SHARED
   # planner (IAP-RQ-300/310/320)
   src/iap/planner/trajectory_generator.cpp
   src/iap/planner/predicted_integrity.cpp
+  # planner integrity-aware (IAP-RQ-400/410)
+  src/iap/planner/integrity_planner.cpp
   # odometry
   src/iap/odometry/callbacks.cpp
   src/iap/odometry/estimation_frame.cpp

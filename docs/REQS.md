@@ -188,17 +188,17 @@ Acceptance:
 
 ## 6. Planning / Optimization（完整性驱动代价）
 ### IAP-RQ-400: Integrity-aware objective
-- [ ] 代价：Σ hinge(PL_pred - AL)^2 + λ_mission*dist_to_goal + λ_smooth*effort
-- [ ] hinge 使用 max(0,·)
-- [ ] mode=SEARCH 时提高 hinge 权重或加入“恢复可见卫星/可观测性”的项
+- [x] 代价：Σ hinge(PL_pred - AL)^2 + λ_mission*dist_to_goal + λ_smooth*effort
+- [x] hinge 使用 max(0,·)
+- [x] mode=SEARCH 时提高 hinge 权重或加入"恢复可见卫星/可观测性"的项
 
 Acceptance:
 - 在 IM 变小/为负时，planner 选择绕行策略以降低 hinge 项（安全优先而非时间最短）。
 
 ### IAP-RQ-410: Receding horizon loop
-- [ ] horizon H（2–5s），执行 Δt（0.2–0.5s），重复
-- [ ] 规划输出轨迹/控制给执行器（或输出 nav_msgs/Path 先占位）
-- [ ] estimator <-> planner 初值互供：planner 用 estimator 当前状态；planner 的第一段作为 estimator 的 short-horizon 预测初值（可选）
+- [x] horizon H（2–5s），执行 Δt（0.2–0.5s），重复
+- [x] 规划输出轨迹/控制给执行器（或输出 nav_msgs/Path 先占位）
+- [x] estimator <-> planner 初值互供：planner 用 estimator 当前状态；planner 的第一段作为 estimator 的 short-horizon 预测初值（可选）
 
 Acceptance:
 - 可复现“退化→SEARCH→恢复→继续”的闭环行为。

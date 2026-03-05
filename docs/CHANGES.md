@@ -6,6 +6,16 @@
 - (none)
 
 ## 2026-03-05
+- IAP-RQ-400/410: Integrity-aware planner + receding horizon loop.
+  - `include/iap/planner/integrity_planner.hpp`: IntegrityPlanner with Params (w_integrity, w_mission, w_smooth, search_weight_multiplier, dt_execute, al_default); `plan(pos0,vel0,yaw0,goal,sigma0,report)` → best CandidateTrajectory; `execution_target(chosen)` → first point ≥ dt_execute.
+  - `src/iap/planner/integrity_planner.cpp`:
+    * Generates candidates via TrajectoryGenerator (IAP-RQ-300).
+    * Predicts PL_pred via PredictedIntegrityComputer (IAP-RQ-320).
+    * Evaluates J_total = w_int * Σ hinge(PL_pred−AL)² + w_miss * dist + w_smooth * effort.
+    * mode==SEARCH boosts w_int by search_weight_multiplier (default ×5).
+    * `execution_target()` returns first waypoint at stamp ≥ dt_execute (receding horizon IAP-RQ-410).
+    * trace-log: n_candidates, best_id, J_total/J_int/J_goal/J_eff, AL, sigma0.
+  - `colcon build` passes [33.5s].
 - IAP-RQ-300/310/320: Planner modules — trajectory generator + predicted integrity.
   - `include/iap/planner/trajectory_types.hpp`: TrajectoryPoint (stamp, pos, vel, yaw), CandidateTrajectory (id, points[], PL_pred[], sigma_pred[], J_total/integrity/goal/effort).
   - `include/iap/planner/trajectory_generator.hpp/.cpp`: motion primitives (speed×yaw_rate×alt_rate grid); default speeds={0.5,1.0,1.5} m/s; yaw_rates={−0.3,0,0.3} rad/s; alt_rates={−0.2,0,0.2} m/s; horizon=3 s, dt=0.2 s; `generate(state)` → vector of CandidateTrajectory.
