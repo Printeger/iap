@@ -163,22 +163,22 @@ Acceptance:
 
 ## 5. Prediction for planning（候选轨迹未来 PL_pred）
 ### IAP-RQ-300: Candidate trajectory generator
-- [ ] Baseline: motion primitives（v/ω/altitude 离散）
+- [x] Baseline: motion primitives（v/ω/altitude 离散）
 - [ ] 可扩展: spline/MINCO（后续）
 
 Acceptance:
 - 每次规划生成 M 条候选轨迹（含时间戳点序列）。
 
 ### IAP-RQ-310: Predict visibility/observability sets along τ
-- [ ] 预测卫星可见集合 V̂(τ)：点云/体素地图 ray-check 遮挡 +（可选）仰角掩膜
-- [ ] 预测可观测性代理 Ô(τ)：基于地图几何的 ICP 质量 proxy（可选加入遮挡统计）
+- [x] 预测卫星可见集合 V̂(τ)：点云/体素地图 ray-check 遮挡 +（可选）仰角掩膜
+- [x] 预测可观测性代理 Ô(τ)：基于地图几何的 ICP 质量 proxy（可选加入遮挡统计）
 
 Acceptance:
 - 同一时刻不同轨迹预测的 |V̂|、Ô(τ) 有差异且合理。
 
 ### IAP-RQ-320: Information propagation → Σ_pred → PL_pred
-- [ ] 传播协方差得到 Σ_pred（baseline：经验增长模型）
-- [ ] Baseline: PL_pred proxy（K * sqrt(lambda_max(Σ_p_pred))）
+- [x] 传播协方差得到 Σ_pred（baseline：经验增长模型）
+- [x] Baseline: PL_pred proxy（K * sqrt(lambda_max(Σ_p_pred))）
 - [ ] Full: ARAIM PL_pred（跨 hypothesis worst-case）【Upgrade】
 
 Acceptance:

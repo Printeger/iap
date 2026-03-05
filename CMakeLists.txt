@@ -85,6 +85,9 @@ add_library(iap SHARED
   src/iap/trunk/trunk_detector.cpp
   # integrity monitoring (IAP-RQ-200/210/220)
   src/iap/integrity/integrity_monitor.cpp
+  # planner (IAP-RQ-300/310/320)
+  src/iap/planner/trajectory_generator.cpp
+  src/iap/planner/predicted_integrity.cpp
   # odometry
   src/iap/odometry/callbacks.cpp
   src/iap/odometry/estimation_frame.cpp
