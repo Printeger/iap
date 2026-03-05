@@ -119,3 +119,4 @@
   - All `glim_LIBRARIES` → `iap_LIBRARIES`; install paths `share/glim` → `share/iap`, `bin/glim` → `bin/iap`.
   - `colcon build --packages-select iap` passes; `ros2 pkg list | grep iap` shows `iap`.
 - Init: add traceability & agent rules. (IAP-RQ-000)
+

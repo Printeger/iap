@@ -5,8 +5,10 @@
 #include <iap/planner/trajectory_types.hpp>
 #include <iap/planner/trajectory_generator.hpp>
 #include <iap/planner/predicted_integrity.hpp>
+#include <iap/planner/predicted_araim.hpp>
 #include <iap/integrity/integrity_types.hpp>
 #include <Eigen/Core>
+#include <functional>
 #include <optional>
 #include <vector>
 
@@ -48,12 +50,29 @@ class IntegrityPlanner {
 
     // --- AL fallback ---
     double al_default  = 2.0;   ///< fallback AL when IntegrityReport not given [m]
+
+    // --- Phase-4 (IAP-RQ-331/421/422) ---
+    /// When true, replace PL_pred with ARAIM-predicted PL per waypoint
+    bool use_araim_pl  = true;
+    PredictedAraimComputer::Params araim_pred_params; ///< forward to PredictedAraimComputer
   };
 
   IntegrityPlanner();
   explicit IntegrityPlanner(const Params& p,
                             const TrajectoryGenerator::Params& gen_p = {},
                             const PredictedIntegrityComputer::Params& pic_p = {});
+
+  // --- Phase-4 setters (IAP-RQ-331/421/422) --------------------------------
+  /// Set occupancy grid for ARAIM prediction (forwarded to PredictedAraimComputer)
+  void set_occupancy(const LocalOccupancyGrid* grid);
+  /// Set GNSS epoch for ARAIM prediction
+  void set_epoch(const GnssEpoch* epoch);
+  /**
+   * @brief Set a per-waypoint Alert Limit callback (IAP-RQ-421).
+   * The function receives world-frame waypoint position and returns AL [m].
+   * Pass nullptr to use the scalar AL from IntegrityReport.
+   */
+  void set_al_fn(std::function<double(const Eigen::Vector3d&)> fn);
 
   /**
    * @brief Select the best candidate trajectory toward goal.
@@ -92,10 +111,7 @@ class IntegrityPlanner {
    * @brief Score a single candidate trajectory.
    * Fills J_integrity, J_goal, J_effort, J_total in-place.
    *
-   * @param traj        Candidate (PL_pred must already be filled)
-   * @param goal        Goal position [m]
-   * @param AL          Alert Limit for this step [m]
-   * @param w_integrity Effective integrity weight (may be boosted for SEARCH)
+   * Uses traj.AL_pred (per-waypoint) when non-empty; falls back to scalar AL.
    */
   void evaluate(CandidateTrajectory& traj,
                 const Eigen::Vector3d& goal,
@@ -108,6 +124,8 @@ class IntegrityPlanner {
   Params                      params_;
   TrajectoryGenerator         generator_;
   PredictedIntegrityComputer  predictor_;
+  PredictedAraimComputer      araim_predictor_;          ///< IAP-RQ-331
+  std::function<double(const Eigen::Vector3d&)> al_fn_; ///< IAP-RQ-421 (nullable)
 };
 
 }  // namespace iap

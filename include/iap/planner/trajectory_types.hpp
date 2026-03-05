@@ -21,11 +21,13 @@ struct CandidateTrajectory {
 
   std::vector<TrajectoryPoint> points;  ///< time-ordered waypoints
 
-  // ---- Predicted integrity (filled by PL predictor, IAP-RQ-320) ---------
+  // ---- Predicted integrity (filled by PL predictor, IAP-RQ-320/331) -----
   /// Predicted PL at each waypoint (same length as points after prediction)
   std::vector<double> PL_pred;
   /// Predicted covariance growth proxy sigma at each point
   std::vector<double> sigma_pred;
+  /// Per-waypoint Alert Limit (filled by IntegrityPlanner, IAP-RQ-421/422)
+  std::vector<double> AL_pred;
 
   // ---- Planning cost (filled by cost function, IAP-RQ-400) ---------------
   double J_total     = 0.0;

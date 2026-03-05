@@ -1,5 +1,6 @@
 // IAP-RQ-400: Integrity-aware planning objective
 // IAP-RQ-410: Receding horizon loop
+// IAP-RQ-331/421/422: ARAIM-predicted PL + per-waypoint AL
 
 #include <iap/planner/integrity_planner.hpp>
 #include <spdlog/spdlog.h>
@@ -20,17 +21,35 @@ IntegrityPlanner::IntegrityPlanner(const Params& p,
                                    const PredictedIntegrityComputer::Params& pic_p)
 : params_(p),
   generator_(gen_p),
-  predictor_(pic_p) {}
+  predictor_(pic_p),
+  araim_predictor_(p.araim_pred_params) {}
+
+// ----------------------------------------------------------------------------
+void IntegrityPlanner::set_occupancy(const LocalOccupancyGrid* grid) {
+  predictor_.set_occupancy(grid);
+  araim_predictor_.set_occupancy(grid);
+}
+
+void IntegrityPlanner::set_epoch(const GnssEpoch* epoch) {
+  predictor_.set_epoch(epoch);
+  araim_predictor_.set_epoch(epoch);
+}
+
+void IntegrityPlanner::set_al_fn(std::function<double(const Eigen::Vector3d&)> fn) {
+  al_fn_ = std::move(fn);
+}
 
 // ----------------------------------------------------------------------------
 void IntegrityPlanner::evaluate(CandidateTrajectory& traj,
                                 const Eigen::Vector3d& goal,
                                 double AL,
                                 double w_integrity) const {
-  // --- J_integrity: sum of hinge(PL_pred - AL)^2 ---
+  // --- J_integrity: sum of hinge(PL_pred_k - AL_k)^2 ---
+  // Use per-waypoint AL_pred when available (IAP-RQ-422); fall back to scalar AL
   double J_int = 0.0;
-  for (const double pl : traj.PL_pred) {
-    const double h = std::max(0.0, pl - AL);
+  for (std::size_t k = 0; k < traj.PL_pred.size(); ++k) {
+    const double al_k = (k < traj.AL_pred.size()) ? traj.AL_pred[k] : AL;
+    const double h = std::max(0.0, traj.PL_pred[k] - al_k);
     J_int += h * h;
   }
 
@@ -82,6 +101,27 @@ CandidateTrajectory IntegrityPlanner::plan(const Eigen::Vector3d& pos0,
 
   // Predict PL_pred for all candidates (IAP-RQ-320)
   predictor_.predict_all(candidates, sigma0);
+
+  // Phase-4: fill AL_pred per waypoint (IAP-RQ-421) and optionally
+  // replace PL_pred with ARAIM-predicted PL (IAP-RQ-331)
+  for (auto& traj : candidates) {
+    const int K = static_cast<int>(traj.points.size());
+    traj.AL_pred.resize(K, AL);
+
+    for (int k = 0; k < K; ++k) {
+      const Eigen::Vector3d& wpt_pos = traj.points[k].pos;
+
+      // Per-waypoint AL via user callback (IAP-RQ-421)
+      if (al_fn_) {
+        traj.AL_pred[k] = al_fn_(wpt_pos);
+      }
+
+      // Replace PL_pred with ARAIM prediction (IAP-RQ-331)
+      if (params_.use_araim_pl) {
+        traj.PL_pred[k] = araim_predictor_.predict_araim_pl(wpt_pos);
+      }
+    }
+ }
 
   // Evaluate cost and find best (IAP-RQ-400)
   double best_cost = std::numeric_limits<double>::infinity();
