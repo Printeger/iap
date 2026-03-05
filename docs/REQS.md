@@ -99,22 +99,22 @@ Acceptance:
 
 ## 3. Trunk geometric landmark（树干地标 + TDOP）【Upgrade】
 ### IAP-RQ-100: Trunk detection & parameterization
-- [ ] LiDAR 分割树干并拟合圆柱/圆（中心、半径）
-- [ ] 提供 detection confidence（用于 trunk fault prior）
+- [x] LiDAR 分割树干并拟合圆柱/圆（中心、半径）
+- [x] 提供 detection confidence（用于 trunk fault prior）
 
 Acceptance:
 - 日志/可视化中能看到 trunk 数量 K、半径分布、置信度。
 
 ### IAP-RQ-110: Trunk factor in FGO (optional baseline → full)
-- [ ] Baseline-A: trunk 仅用于健康度/噪声膨胀（不入图）
+- [x] Baseline-A: trunk 仅用于健康度/噪声膊胀（不入图）
 - [ ] Full-B: trunk 作为几何观测因子入图（可用于降低 Σ_p）
 
 Acceptance:
 - Full-B 开启时，Σ_p/PL 明显优于仅 GNSS+IMU(+LiDAR)。
 
 ### IAP-RQ-120: TDOP metric (Tree DOP)
-- [ ] 计算 TDOP 或其代理（角度多样性/几何强度）
-- [ ] TDOP 与 trunk 分布可视化/日志输出
+- [x] 计算 TDOP 或其代理（角度多样性/几何强度）
+- [x] TDOP 与 trunk 分布可视化/日志输出
 
 Acceptance:
 - 场景变化（树更分散/更集中）时 TDOP 有明显变化。

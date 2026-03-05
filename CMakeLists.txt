@@ -81,6 +81,8 @@ add_library(iap SHARED
   src/iap/gnss/pseudorange_factor.cpp
   src/iap/gnss/doppler_factor.cpp
   src/iap/gnss/gnss_handler.cpp
+  # trunk detection (IAP-RQ-100/110/120)
+  src/iap/trunk/trunk_detector.cpp
   # odometry
   src/iap/odometry/callbacks.cpp
   src/iap/odometry/estimation_frame.cpp

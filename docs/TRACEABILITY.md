@@ -23,6 +23,12 @@
 | IAP-RQ-020 | GNSS 紧耦合观测：伪距 + 多普勒建因子（含 clock bias/drift，per-sat） | GNSS tightly-coupled | `include/iap/gnss/`, `src/iap/gnss/` (PseudorangeFactor, DopplerFactor, GnssHandler) | 关闭/开启 GNSS 对比 | `res_pr, res_dop, clk, clk_dot` | **DONE** |
 | IAP-RQ-030 | GNSS per-satellite NIS gating：downweight / exclude（RAIM-ish baseline） | 卫星级完整性、FDE 思路 | `src/integrity/gnss_integrity.*` | 注入某卫星 bias，触发剔星 | `sat_nis, exclude_sats, gamma_R, global_nis` | TODO |
 | IAP-RQ-040 | LiDAR ICP 因子健康度：退化/错配检测 → noise inflation / drop factor | trunk/几何退化会影响可观测性 | `EstimationFrame::IcpQuality`, `odometry_estimation_cpu.cpp` (Hessian cond, gamma_lidar) | 走廊/单面结构场景退化 | `icp_rmse, inliers, cond, gamma_lidar, drop` | **DONE** |
+| IAP-RQ-100 | Trunk 检测与圆拟合（中心, 半径, confidence） | 树干几何地标 | `include/iap/trunk/trunk_types.hpp`, `trunk_detector.hpp/.cpp` (Kasa fit, grid BFS) | 对进树林场景启动，日志输出 trunk 数量/半径/置信度 | `trunk_count, radii, confidence[]` | **DONE** |
+| IAP-RQ-110 | Trunk 健康度因子接口 (Baseline-A: 不入图) | 树干布局影响 LiDAR 可观测性 | `TrunkDetector::health_factor()` ([0,1]) | health~0 时硬件应填充更大噪声 | `trunk_health` | **DONE (Baseline-A)** |
+| IAP-RQ-120 | TDOP 指标（角度多样性） | 树干几何与完整性联系 | `TrunkDetectionResult::tdop/tdop2/lambda_min_H` | 树更分散时 TDOP 下降 | `tdop, lambda_min_H` | **DONE** |
+| IAP-RQ-100 | Trunk 检测与圆拟合（中心, 半径, confidence） | 树干几何地标 | `include/iap/trunk/trunk_types.hpp`, `trunk_detector.hpp/.cpp` (Kasa fit, grid BFS) | 对进树林场景启动，日志输出 trunk 数量/半径/置信度 | `trunk_count, radii, confidence[]` | **DONE** |
+| IAP-RQ-110 | Trunk 健康度因子接口 (Baseline-A: 不入图) | 树干布局影响 LiDAR 可观测性 | `TrunkDetector::health_factor()` ([0,1]) | health~0 时硬件应填充更大噪声 | `trunk_health` | **DONE (Baseline-A)** |
+| IAP-RQ-120 | TDOP 指标（角度多样性） | 树干几何与完整性联系 | `TrunkDetectionResult::tdop/tdop2/lambda_min_H` | 树更分散时 TDOP 下降 | `tdop, lambda_min_H` | **DONE** |
 | IAP-RQ-050 | IMU 健康度：饱和/模型失配 → noise inflation / alarm | 传感器健康度影响可信度 | `src/health/imu_health.*` | 人为制造饱和或异常噪声 | `acc_norm, gyro_norm, sat_flag, gamma_imu` | TODO |
 | IAP-RQ-060 | 规划目标：J(τ)=Σ hinge(PL_pred-AL)^2 + λ_goal*dist + λ_u*effort | 优化版 integrity-aware cost | `src/planner/cost.*` | 单步生成候选轨迹打分 | `J_total, J_integrity, J_goal, J_effort` | TODO |
 | IAP-RQ-070 | 预测层：对候选轨迹预测 PL_pred（baseline：代理；升级：ARAIM） | 预测可见/可观测集合与 PL_pred | `src/predictor/*` | 对比不同轨迹的 PL_pred 差异 | `PL_pred(s), AL(s), IM_pred(s)` | TODO |

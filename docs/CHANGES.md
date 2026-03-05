@@ -6,6 +6,12 @@
 - (none)
 
 ## 2026-03-05
+- IAP-RQ-100/110/120: Trunk detection + TDOP metric + health factor.
+  - `include/iap/trunk/trunk_types.hpp`: TrunkObservation (center_xy, radius, confidence, bearing_xy, p_fault), TrunkDetectionResult (trunks, tdop, tdop2, lambda_min_H).
+  - `include/iap/trunk/trunk_detector.hpp`: TrunkDetector with Params; height+range filter; 8-connected grid BFS clustering; Kasa circle fit; TDOP = sqrt(trace(H⁻¹)) via SelfAdjointEigen; `health_factor()` scalar [0,1] (Baseline-A).
+  - `src/iap/trunk/trunk_detector.cpp`: implementation.
+  - Full-B (trunk as FGO factor) deferred to upgrade phase.
+  - `colcon build` passes.
 - IAP-RQ-040: ICP quality report + noise inflation in LiDAR odometry.
   - `EstimationFrame::IcpQuality`: inlier_count, inlier_fraction, rmse, cond_number, degeneracy_flag, gamma_lidar.
   - `OdometryEstimationCPUParams`: +`icp_cond_threshold` (500), +`gamma_lidar_max` (10.0).
