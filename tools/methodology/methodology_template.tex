@@ -1,0 +1,103 @@
+% Auto-generated IEEE Trans-style Methodology template for IAP
+% This file is used by tools/methodology/gen_methodology.py
+% Do not edit the generated docs/methodology/methodology.tex directly.
+
+\section{System Overview}
+Fig.~\ref{fig:system_flow} illustrates the overall pipeline.
+
+\begin{figure}[t]
+  \centering
+  \fbox{\parbox{0.95\linewidth}{\centering
+  \vspace{0.5em}
+  \textbf{Placeholder: system flowchart}\\
+  Put your exported figure at \texttt{docs/figures/system\_flow.pdf}\\
+  \vspace{0.5em}
+  }}
+  % If you have the file, replace the box with:
+  % \includegraphics[width=\linewidth]{../figures/system_flow.pdf}
+  \caption{Integrity-aware active perception pipeline (Estimator $\rightarrow$ Integrity $\rightarrow$ Prediction $\rightarrow$ Planning $\rightarrow$ Execution).}
+  \label{fig:system_flow}
+\end{figure}
+
+\subsection{Problem Statement}
+We consider a UAV equipped with GNSS (pseudorange + Doppler), IMU, and LiDAR. The goal is to reach a target while prioritizing navigation integrity. The system enforces a safety condition in terms of integrity margin:
+\begin{equation}
+\mathrm{IM}(t) = \mathrm{AL}(t) - \mathrm{PL}(t), \quad \mathrm{safe} \iff \mathrm{PL}(t) < \mathrm{AL}(t).
+\end{equation}
+
+\subsection{Key Contributions (Implementation-Oriented)}
+\begin{itemize}
+  \item Tight GNSS/IMU/LiDAR factor-graph estimator with real-time fixed-lag smoothing.
+  \item Integrity monitoring with per-satellite consistency checks (RAIM-ish baseline) and fused protection level output.
+  \item Receding-horizon integrity-aware planning with objective dominated by hinge$(\mathrm{PL}-\mathrm{AL})$ penalty.
+\end{itemize}
+
+\section{State and Sensor Models}
+\subsection{State Definition}
+We define the state at time $t$ as:
+\begin{equation}
+\mathbf{x}(t) = \{\mathbf{p}(t), \mathbf{v}(t), \mathbf{q}(t), \mathbf{b}_a(t), \mathbf{b}_g(t), \delta t(t), \dot{\delta t}(t)\}.
+\end{equation}
+
+\subsection{GNSS Pseudorange and Doppler}
+We use a tightly-coupled GNSS model with pseudorange and Doppler per satellite. Let $s$ index satellites and $\mathbf{p}_s(t)$ be the satellite position.
+\begin{align}
+\rho_s^{pred}(t) &\triangleq \|\mathbf{p}(t)-\mathbf{p}_s(t)\| + c\,\delta t(t),\\
+D_s^{pred}(t) &\triangleq \mathbf{u}_s(t)^\top(\mathbf{v}(t)-\mathbf{v}_s(t)) + c\,\dot{\delta t}(t),
+\end{align}
+where $\mathbf{u}_s(t)$ is the line-of-sight unit vector and $c$ is the speed of light.
+\emph{(Note: refine according to your exact Doppler convention.)}
+
+\subsection{IMU Preintegration}
+We employ IMU preintegration factors between adjacent key times within a fixed-lag window. Biases are estimated and can be inflated under health alarms.
+
+\subsection{LiDAR Factor}
+We start with scan-to-map ICP relative pose factors. Optionally, we extend to geometric trunk landmarks (cylinders) for predictable observability improvements.
+
+\section{Factor-Graph Estimation}
+We formulate a fixed-lag smoothing problem:
+\begin{equation}
+\hat{\mathbf{X}} = \arg\min_{\mathbf{X}} \sum_k \| \mathbf{r}_k(\mathbf{X}) \|_{\mathbf{\Omega}_k}^2,
+\end{equation}
+where $\mathbf{r}_k$ are residuals from GNSS, IMU, and LiDAR factors. We maintain an estimate of the position covariance block $\mathbf{\Sigma}_p(t)$ (or equivalent information matrix) for integrity computation.
+
+\section{Integrity Monitoring}
+\subsection{Protection Level and Alert Limit}
+Baseline PL proxy (engineering-friendly):
+\begin{equation}
+\mathrm{PL}(t) = K \sqrt{\lambda_{\max}(\mathbf{\Sigma}_p(t))}.
+\end{equation}
+Alert limit $\mathrm{AL}(t)$ is derived from obstacle clearance and mission safety margins.
+
+\subsection{Per-Satellite Consistency Checks (RAIM-ish Baseline)}
+For each satellite measurement, we compute residuals and a normalized innovation squared (NIS) statistic:
+\begin{equation}
+\mathrm{NIS}_{s} \approx \mathbf{r}_s^\top \mathbf{S}_s^{-1}\mathbf{r}_s,\quad \mathbf{S}_s \approx \mathbf{H}_s \mathbf{\Sigma}\mathbf{H}_s^\top + \mathbf{R}_s.
+\end{equation}
+We downweight or exclude satellites with large NIS, producing an integrity report used by the fused PL.
+
+\section{Prediction Along Candidate Trajectories}
+For each candidate trajectory $\tau$, we predict future visibility/observability and compute $\mathrm{PL}^{pred}(\tau)$ along sampled points. The baseline uses the PL proxy; an upgraded version replaces it with an ARAIM-style worst-case PL over fault hypotheses.
+
+\section{Integrity-Aware Planning and Execution}
+We solve a receding-horizon problem and execute only the first control segment:
+\begin{align}
+J(\tau) &= \sum_i \max(0, \mathrm{PL}^{pred}(s_i)-\mathrm{AL}(s_i))^2 \nonumber\\
+&\quad + \lambda_g\, d(\tau_{end}, \mathbf{p}_{goal}) + \lambda_u \sum_i \|\mathbf{u}_i\|^2 .
+\end{align}
+A mode machine (NOMINAL/CAUTION/SEARCH) switches behaviors based on $\mathrm{IM}$.
+
+\section{Implementation Notes}
+\begin{itemize}
+  \item Real-time constraints: keep estimator high-rate; planning lower-rate with warm-start.
+  \item Logs: PL/AL/IM, per-satellite NIS and exclusions, ICP quality, chosen trajectory cost decomposition.
+\end{itemize}
+
+\section{Traceability Summary}
+% Filled by generator from docs/TRACEABILITY.md
+{{TRACEABILITY_TABLE}}
+
+\section{Experimental Protocol and Metrics}
+We report integrity violation ratio (time with PL$>$AL), minimum IM, mission success, path length/time, and control effort.
+
+% End of template

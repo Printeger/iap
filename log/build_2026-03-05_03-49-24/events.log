@@ -1,0 +1,366 @@
+[0.000000] (-) TimerEvent: {}
+[0.000297] (iap) JobQueued: {'identifier': 'iap', 'dependencies': OrderedDict()}
+[0.000605] (iap) JobStarted: {'identifier': 'iap'}
+[0.004317] (iap) JobProgress: {'identifier': 'iap', 'progress': 'cmake'}
+[0.004510] (iap) Command: {'cmd': ['/usr/bin/cmake', '/home/dev/code/ws_iap/src/iap', '-DCMAKE_BUILD_TYPE=RelWithDebInfo', '-DCMAKE_EXPORT_COMPILE_COMMANDS=ON', '-DCMAKE_INSTALL_PREFIX=/home/dev/code/ws_iap/src/iap/install/iap'], 'cwd': '/home/dev/code/ws_iap/src/iap/build/iap', 'env': OrderedDict({'LIBRARY_PATH': '/usr/local/cuda/lib64/stubs', 'NV_LIBCUBLAS_VERSION': '12.5.3.2-1', 'NV_NVPROF_DEV_PACKAGE': 'cuda-nvprof-12-5=12.5.82-1', 'NV_CUDA_NSIGHT_COMPUTE_VERSION': '12.5.1-1', 'HOSTNAME': 'mint-X', 'GIT_ASKPASS': '/root/.vscode-server/bin/b6a47e94e326b5c209d118cf0f994d6065585705/extensions/git/dist/askpass.sh', 'SHLVL': '3', 'LD_LIBRARY_PATH': '/home/dev/code/ws_iap/install/glim/lib:/opt/ros/jazzy/lib/x86_64-linux-gnu:/opt/ros/jazzy/lib:/usr/local/lib:/usr/local/nvidia/lib:/usr/local/nvidia/lib64', 'BROWSER': '/root/.vscode-server/bin/b6a47e94e326b5c209d118cf0f994d6065585705/bin/helpers/browser.sh', 'HOME': '/root', 'OLDPWD': '/home/dev/code/ws_iap/src/iap', 'TERM_PROGRAM_VERSION': '1.109.3', 'NV_LIBCUBLAS_DEV_VERSION': '12.5.3.2-1', 'VSCODE_IPC_HOOK_CLI': '/tmp/vscode-ipc-97fdb329-091d-4092-b7e8-8eb8ba353665.sock', 'ROS_PYTHON_VERSION': '3', 'VSCODE_GIT_ASKPASS_MAIN': '/root/.vscode-server/bin/b6a47e94e326b5c209d118cf0f994d6065585705/extensions/git/dist/askpass-main.js', 'VSCODE_GIT_ASKPASS_NODE': '/root/.vscode-server/bin/b6a47e94e326b5c209d118cf0f994d6065585705/node', 'VSCODE_PYTHON_AUTOACTIVATE_GUARD': '1', 'COLORTERM': 'truecolor', 'NV_LIBNPP_PACKAGE': 'libnpp-12-5=12.3.0.159-1', 'REMOTE_CONTAINERS': 'true', 'CUDA_VERSION': '12.5.1', 'COLCON_PREFIX_PATH': '/home/dev/code/ws_iap/install', 'NV_NVPROF_VERSION': '12.5.82-1', 'ROS_DISTRO': 'jazzy', 'REMOTE_CONTAINERS_IPC': '/tmp/vscode-remote-containers-ipc-44bff082-fa32-445f-b58a-763d547d733e.sock', 'NV_LIBCUBLAS_PACKAGE_NAME': 'libcublas-12-5', 'NVIDIA_REQUIRE_CUDA': 'cuda>=12.5 brand=unknown,driver>=470,driver<471 brand=grid,driver>=470,driver<471 brand=tesla,driver>=470,driver<471 brand=nvidia,driver>=470,driver<471 brand=quadro,driver>=470,driver<471 brand=quadrortx,driver>=470,driver<471 brand=nvidiartx,driver>=470,driver<471 brand=vapps,driver>=470,driver<471 brand=vpc,driver>=470,driver<471 brand=vcs,driver>=470,driver<471 brand=vws,driver>=470,driver<471 brand=cloudgaming,driver>=470,driver<471 brand=unknown,driver>=535,driver<536 brand=grid,driver>=535,driver<536 brand=tesla,driver>=535,driver<536 brand=nvidia,driver>=535,driver<536 brand=quadro,driver>=535,driver<536 brand=quadrortx,driver>=535,driver<536 brand=nvidiartx,driver>=535,driver<536 brand=vapps,driver>=535,driver<536 brand=vpc,driver>=535,driver<536 brand=vcs,driver>=535,driver<536 brand=vws,driver>=535,driver<536 brand=cloudgaming,driver>=535,driver<536 brand=unknown,driver>=550,driver<551 brand=grid,driver>=550,driver<551 brand=tesla,driver>=550,driver<551 brand=nvidia,driver>=550,driver<551 brand=quadro,driver>=550,driver<551 brand=quadrortx,driver>=550,driver<551 brand=nvidiartx,driver>=550,driver<551 brand=vapps,driver>=550,driver<551 brand=vpc,driver>=550,driver<551 brand=vcs,driver>=550,driver<551 brand=vws,driver>=550,driver<551 brand=cloudgaming,driver>=550,driver<551', '_': '/usr/bin/colcon', 'ROS_VERSION': '2', 'NV_LIBCUSPARSE_VERSION': '12.5.1.3-1', 'NVIDIA_DRIVER_CAPABILITIES': 'compute,utility,graphics', 'NV_CUDA_LIB_VERSION': '12.5.1-1', 'NV_NVML_DEV_VERSION': '12.5.82-1', 'NV_LIBNPP_DEV_PACKAGE': 'libnpp-dev-12-5=12.3.0.159-1', 'TERM': 'xterm-256color', 'NV_CUDA_CUDART_VERSION': '12.5.82-1', 'HISTCONTROL': 'ignorespace', 'PATH': '/opt/ros/jazzy/bin:/root/.vscode-server/data/User/globalStorage/github.copilot-chat/debugCommand:/root/.vscode-server/data/User/globalStorage/github.copilot-chat/copilotCli:/root/.vscode-server/bin/b6a47e94e326b5c209d118cf0f994d6065585705/bin/remote-cli:/usr/local/nvidia/bin:/usr/local/cuda/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin', 'NV_LIBCUBLAS_DEV_PACKAGE_NAME': 'libcublas-dev-12-5', 'NV_LIBCUBLAS_PACKAGE': 'libcublas-12-5=12.5.3.2-1', 'NVARCH': 'x86_64', 'WITH_CUDA': 'ON', 'NV_LIBCUSPARSE_DEV_VERSION': '12.5.1.3-1', 'REMOTE_CONTAINERS_SOCKETS': '["/tmp/vscode-ssh-auth-44bff082-fa32-445f-b58a-763d547d733e.sock","/root/.gnupg/S.gpg-agent"]', 'DISPLAY': ':0', 'NVIDIA_PRODUCT_NAME': 'CUDA', 'LANG': 'C.UTF-8', 'NV_CUDA_CUDART_DEV_VERSION': '12.5.82-1', 'LS_COLORS': 'rs=0:di=01;34:ln=01;36:mh=00:pi=40;33:so=01;35:do=01;35:bd=40;33;01:cd=40;33;01:or=40;31;01:mi=00:su=37;41:sg=30;43:ca=00:tw=30;42:ow=34;42:st=37;44:ex=01;32:*.tar=01;31:*.tgz=01;31:*.arc=01;31:*.arj=01;31:*.taz=01;31:*.lha=01;31:*.lz4=01;31:*.lzh=01;31:*.lzma=01;31:*.tlz=01;31:*.txz=01;31:*.tzo=01;31:*.t7z=01;31:*.zip=01;31:*.z=01;31:*.dz=01;31:*.gz=01;31:*.lrz=01;31:*.lz=01;31:*.lzo=01;31:*.xz=01;31:*.zst=01;31:*.tzst=01;31:*.bz2=01;31:*.bz=01;31:*.tbz=01;31:*.tbz2=01;31:*.tz=01;31:*.deb=01;31:*.rpm=01;31:*.jar=01;31:*.war=01;31:*.ear=01;31:*.sar=01;31:*.rar=01;31:*.alz=01;31:*.ace=01;31:*.zoo=01;31:*.cpio=01;31:*.7z=01;31:*.rz=01;31:*.cab=01;31:*.wim=01;31:*.swm=01;31:*.dwm=01;31:*.esd=01;31:*.avif=01;35:*.jpg=01;35:*.jpeg=01;35:*.mjpg=01;35:*.mjpeg=01;35:*.gif=01;35:*.bmp=01;35:*.pbm=01;35:*.pgm=01;35:*.ppm=01;35:*.tga=01;35:*.xbm=01;35:*.xpm=01;35:*.tif=01;35:*.tiff=01;35:*.png=01;35:*.svg=01;35:*.svgz=01;35:*.mng=01;35:*.pcx=01;35:*.mov=01;35:*.mpg=01;35:*.mpeg=01;35:*.m2v=01;35:*.mkv=01;35:*.webm=01;35:*.webp=01;35:*.ogm=01;35:*.mp4=01;35:*.m4v=01;35:*.mp4v=01;35:*.vob=01;35:*.qt=01;35:*.nuv=01;35:*.wmv=01;35:*.asf=01;35:*.rm=01;35:*.rmvb=01;35:*.flc=01;35:*.avi=01;35:*.fli=01;35:*.flv=01;35:*.gl=01;35:*.dl=01;35:*.xcf=01;35:*.xwd=01;35:*.yuv=01;35:*.cgm=01;35:*.emf=01;35:*.ogv=01;35:*.ogx=01;35:*.aac=00;36:*.au=00;36:*.flac=00;36:*.m4a=00;36:*.mid=00;36:*.midi=00;36:*.mka=00;36:*.mp3=00;36:*.mpc=00;36:*.ogg=00;36:*.ra=00;36:*.wav=00;36:*.oga=00;36:*.opus=00;36:*.spx=00;36:*.xspf=00;36:*~=00;90:*#=00;90:*.bak=00;90:*.crdownload=00;90:*.dpkg-dist=00;90:*.dpkg-new=00;90:*.dpkg-old=00;90:*.dpkg-tmp=00;90:*.old=00;90:*.orig=00;90:*.part=00;90:*.rej=00;90:*.rpmnew=00;90:*.rpmorig=00;90:*.rpmsave=00;90:*.swp=00;90:*.tmp=00;90:*.ucf-dist=00;90:*.ucf-new=00;90:*.ucf-old=00;90:', 'VSCODE_GIT_IPC_HANDLE': '/tmp/vscode-git-5c83219d00.sock', 'TERM_PROGRAM': 'vscode', 'SSH_AUTH_SOCK': '/tmp/vscode-ssh-auth-44bff082-fa32-445f-b58a-763d547d733e.sock', 'AMENT_PREFIX_PATH': '/home/dev/code/ws_iap/install/glim:/opt/ros/jazzy', 'DEBIAN_FRONTEND': 'noninteractive', 'SHELL': '/bin/bash', 'NV_LIBCUBLAS_DEV_PACKAGE': 'libcublas-dev-12-5=12.5.3.2-1', 'NV_CUDA_NSIGHT_COMPUTE_DEV_PACKAGE': 'cuda-nsight-compute-12-5=12.5.1-1', 'NV_NVTX_VERSION': '12.5.82-1', 'NV_LIBNPP_VERSION': '12.3.0.159-1', 'ROS_AUTOMATIC_DISCOVERY_RANGE': 'SUBNET', 'VSCODE_GIT_ASKPASS_EXTRA_ARGS': '', 'GIT_PAGER': 'cat', 'PWD': '/home/dev/code/ws_iap/src/iap/build/iap', 'PYTHONPATH': '/opt/ros/jazzy/lib/python3.12/site-packages', 'NVIDIA_VISIBLE_DEVICES': 'all', 'COLCON': '1', 'NV_LIBNPP_DEV_VERSION': '12.3.0.159-1', 'CMAKE_PREFIX_PATH': '/home/dev/code/ws_iap/install/glim:/opt/ros/jazzy'}), 'shell': False}
+[0.041736] (iap) StdoutLine: {'line': b'-- The CXX compiler identification is GNU 13.3.0\n'}
+[0.050396] (iap) StdoutLine: {'line': b'-- Detecting CXX compiler ABI info\n'}
+[0.100013] (-) TimerEvent: {}
+[0.103910] (iap) StdoutLine: {'line': b'-- Detecting CXX compiler ABI info - done\n'}
+[0.109651] (iap) StdoutLine: {'line': b'-- Check for working CXX compiler: /usr/bin/c++ - skipped\n'}
+[0.109748] (iap) StdoutLine: {'line': b'-- Detecting CXX compile features\n'}
+[0.110031] (iap) StdoutLine: {'line': b'-- Detecting CXX compile features - done\n'}
+[0.115709] (iap) StdoutLine: {'line': b'-- Found Boost: /usr/lib/x86_64-linux-gnu/cmake/Boost-1.83.0/BoostConfig.cmake (found version "1.83.0") found components: serialization \n'}
+[0.192193] (iap) StdoutLine: {'line': b'-- Found Boost: /usr/lib/x86_64-linux-gnu/cmake/Boost-1.83.0/BoostConfig.cmake (found suitable version "1.83.0", minimum required is "1.65") found components: serialization system filesystem thread program_options date_time timer chrono regex \n'}
+[0.193637] (iap) StdoutLine: {'line': b'-- GTSAM include directory:  /usr/lib/cmake/GTSAM/../../../include\n'}
+[0.195052] (iap) StdoutLine: {'line': b'-- GTSAM include directory:  /usr/lib/cmake/GTSAM/../../../include\n'}
+[0.196507] (iap) StdoutLine: {'line': b'-- GTSAM include directory:  /usr/lib/cmake/GTSAM/../../../include\n'}
+[0.200069] (-) TimerEvent: {}
+[0.300185] (-) TimerEvent: {}
+[0.314045] (iap) StdoutLine: {'line': b'-- Found OpenMP_CXX: -fopenmp (found version "4.5") \n'}
+[0.314373] (iap) StdoutLine: {'line': b'-- Found OpenMP: TRUE (found version "4.5")  \n'}
+[0.318524] (iap) StdoutLine: {'line': b'-- Found Boost: /usr/lib/x86_64-linux-gnu/cmake/Boost-1.83.0/BoostConfig.cmake (found version "1.83.0") found components: filesystem graph \n'}
+[0.328838] (iap) StdoutLine: {'line': b'-- Found CUDAToolkit: /usr/local/cuda/targets/x86_64-linux/include (found version "12.5.82") \n'}
+[0.334767] (iap) StdoutLine: {'line': b'-- Found Threads: TRUE  \n'}
+[0.361697] (iap) StdoutLine: {'line': b'-- Found OpenMP_CXX: -fopenmp (found version "4.5") \n'}
+[0.371868] (iap) StdoutLine: {'line': b'-- Found OpenGL: /usr/lib/x86_64-linux-gnu/libOpenGL.so   \n'}
+[0.379261] (iap) StdoutLine: {'line': b'-- Found ZLIB: /usr/lib/x86_64-linux-gnu/libz.so (found version "1.3")  \n'}
+[0.385960] (iap) StdoutLine: {'line': b'-- Found PNG: /usr/lib/x86_64-linux-gnu/libpng.so (found version "1.6.43") \n'}
+[0.389723] (iap) StdoutLine: {'line': b'-- Found JPEG: /usr/lib/x86_64-linux-gnu/libjpeg.so (found version "80") \n'}
+[0.392823] (iap) StdoutLine: {'line': b'-- Found OpenCV: /usr (found version "4.6.0") found components: core \n'}
+[0.394451] (iap) StdoutLine: {'line': b'-- Found ament_cmake: 2.5.5 (/opt/ros/jazzy/share/ament_cmake/cmake)\n'}
+[0.400356] (-) TimerEvent: {}
+[0.460789] (iap) StdoutLine: {'line': b'-- Found Python3: /usr/bin/python3 (found version "3.12.3") found components: Interpreter \n'}
+[0.500581] (-) TimerEvent: {}
+[0.566259] (iap) StdoutLine: {'line': b'-- Configuring done (0.6s)\n'}
+[0.597840] (iap) StdoutLine: {'line': b'-- Generating done (0.0s)\n'}
+[0.600665] (-) TimerEvent: {}
+[0.603676] (iap) StdoutLine: {'line': b'-- Build files have been written to: /home/dev/code/ws_iap/src/iap/build/iap\n'}
+[0.608325] (iap) CommandEnded: {'returncode': 0}
+[0.608496] (iap) JobProgress: {'identifier': 'iap', 'progress': 'build'}
+[0.608505] (iap) Command: {'cmd': ['/usr/bin/cmake', '--build', '/home/dev/code/ws_iap/src/iap/build/iap', '--', '-j20', '-l20'], 'cwd': '/home/dev/code/ws_iap/src/iap/build/iap', 'env': OrderedDict({'LIBRARY_PATH': '/usr/local/cuda/lib64/stubs', 'NV_LIBCUBLAS_VERSION': '12.5.3.2-1', 'NV_NVPROF_DEV_PACKAGE': 'cuda-nvprof-12-5=12.5.82-1', 'NV_CUDA_NSIGHT_COMPUTE_VERSION': '12.5.1-1', 'HOSTNAME': 'mint-X', 'GIT_ASKPASS': '/root/.vscode-server/bin/b6a47e94e326b5c209d118cf0f994d6065585705/extensions/git/dist/askpass.sh', 'SHLVL': '3', 'LD_LIBRARY_PATH': '/home/dev/code/ws_iap/install/glim/lib:/opt/ros/jazzy/lib/x86_64-linux-gnu:/opt/ros/jazzy/lib:/usr/local/lib:/usr/local/nvidia/lib:/usr/local/nvidia/lib64', 'BROWSER': '/root/.vscode-server/bin/b6a47e94e326b5c209d118cf0f994d6065585705/bin/helpers/browser.sh', 'HOME': '/root', 'OLDPWD': '/home/dev/code/ws_iap/src/iap', 'TERM_PROGRAM_VERSION': '1.109.3', 'NV_LIBCUBLAS_DEV_VERSION': '12.5.3.2-1', 'VSCODE_IPC_HOOK_CLI': '/tmp/vscode-ipc-97fdb329-091d-4092-b7e8-8eb8ba353665.sock', 'ROS_PYTHON_VERSION': '3', 'VSCODE_GIT_ASKPASS_MAIN': '/root/.vscode-server/bin/b6a47e94e326b5c209d118cf0f994d6065585705/extensions/git/dist/askpass-main.js', 'VSCODE_GIT_ASKPASS_NODE': '/root/.vscode-server/bin/b6a47e94e326b5c209d118cf0f994d6065585705/node', 'VSCODE_PYTHON_AUTOACTIVATE_GUARD': '1', 'COLORTERM': 'truecolor', 'NV_LIBNPP_PACKAGE': 'libnpp-12-5=12.3.0.159-1', 'REMOTE_CONTAINERS': 'true', 'CUDA_VERSION': '12.5.1', 'COLCON_PREFIX_PATH': '/home/dev/code/ws_iap/install', 'NV_NVPROF_VERSION': '12.5.82-1', 'ROS_DISTRO': 'jazzy', 'REMOTE_CONTAINERS_IPC': '/tmp/vscode-remote-containers-ipc-44bff082-fa32-445f-b58a-763d547d733e.sock', 'NV_LIBCUBLAS_PACKAGE_NAME': 'libcublas-12-5', 'NVIDIA_REQUIRE_CUDA': 'cuda>=12.5 brand=unknown,driver>=470,driver<471 brand=grid,driver>=470,driver<471 brand=tesla,driver>=470,driver<471 brand=nvidia,driver>=470,driver<471 brand=quadro,driver>=470,driver<471 brand=quadrortx,driver>=470,driver<471 brand=nvidiartx,driver>=470,driver<471 brand=vapps,driver>=470,driver<471 brand=vpc,driver>=470,driver<471 brand=vcs,driver>=470,driver<471 brand=vws,driver>=470,driver<471 brand=cloudgaming,driver>=470,driver<471 brand=unknown,driver>=535,driver<536 brand=grid,driver>=535,driver<536 brand=tesla,driver>=535,driver<536 brand=nvidia,driver>=535,driver<536 brand=quadro,driver>=535,driver<536 brand=quadrortx,driver>=535,driver<536 brand=nvidiartx,driver>=535,driver<536 brand=vapps,driver>=535,driver<536 brand=vpc,driver>=535,driver<536 brand=vcs,driver>=535,driver<536 brand=vws,driver>=535,driver<536 brand=cloudgaming,driver>=535,driver<536 brand=unknown,driver>=550,driver<551 brand=grid,driver>=550,driver<551 brand=tesla,driver>=550,driver<551 brand=nvidia,driver>=550,driver<551 brand=quadro,driver>=550,driver<551 brand=quadrortx,driver>=550,driver<551 brand=nvidiartx,driver>=550,driver<551 brand=vapps,driver>=550,driver<551 brand=vpc,driver>=550,driver<551 brand=vcs,driver>=550,driver<551 brand=vws,driver>=550,driver<551 brand=cloudgaming,driver>=550,driver<551', '_': '/usr/bin/colcon', 'ROS_VERSION': '2', 'NV_LIBCUSPARSE_VERSION': '12.5.1.3-1', 'NVIDIA_DRIVER_CAPABILITIES': 'compute,utility,graphics', 'NV_CUDA_LIB_VERSION': '12.5.1-1', 'NV_NVML_DEV_VERSION': '12.5.82-1', 'NV_LIBNPP_DEV_PACKAGE': 'libnpp-dev-12-5=12.3.0.159-1', 'TERM': 'xterm-256color', 'NV_CUDA_CUDART_VERSION': '12.5.82-1', 'HISTCONTROL': 'ignorespace', 'PATH': '/opt/ros/jazzy/bin:/root/.vscode-server/data/User/globalStorage/github.copilot-chat/debugCommand:/root/.vscode-server/data/User/globalStorage/github.copilot-chat/copilotCli:/root/.vscode-server/bin/b6a47e94e326b5c209d118cf0f994d6065585705/bin/remote-cli:/usr/local/nvidia/bin:/usr/local/cuda/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin', 'NV_LIBCUBLAS_DEV_PACKAGE_NAME': 'libcublas-dev-12-5', 'NV_LIBCUBLAS_PACKAGE': 'libcublas-12-5=12.5.3.2-1', 'NVARCH': 'x86_64', 'WITH_CUDA': 'ON', 'NV_LIBCUSPARSE_DEV_VERSION': '12.5.1.3-1', 'REMOTE_CONTAINERS_SOCKETS': '["/tmp/vscode-ssh-auth-44bff082-fa32-445f-b58a-763d547d733e.sock","/root/.gnupg/S.gpg-agent"]', 'DISPLAY': ':0', 'NVIDIA_PRODUCT_NAME': 'CUDA', 'LANG': 'C.UTF-8', 'NV_CUDA_CUDART_DEV_VERSION': '12.5.82-1', 'LS_COLORS': 'rs=0:di=01;34:ln=01;36:mh=00:pi=40;33:so=01;35:do=01;35:bd=40;33;01:cd=40;33;01:or=40;31;01:mi=00:su=37;41:sg=30;43:ca=00:tw=30;42:ow=34;42:st=37;44:ex=01;32:*.tar=01;31:*.tgz=01;31:*.arc=01;31:*.arj=01;31:*.taz=01;31:*.lha=01;31:*.lz4=01;31:*.lzh=01;31:*.lzma=01;31:*.tlz=01;31:*.txz=01;31:*.tzo=01;31:*.t7z=01;31:*.zip=01;31:*.z=01;31:*.dz=01;31:*.gz=01;31:*.lrz=01;31:*.lz=01;31:*.lzo=01;31:*.xz=01;31:*.zst=01;31:*.tzst=01;31:*.bz2=01;31:*.bz=01;31:*.tbz=01;31:*.tbz2=01;31:*.tz=01;31:*.deb=01;31:*.rpm=01;31:*.jar=01;31:*.war=01;31:*.ear=01;31:*.sar=01;31:*.rar=01;31:*.alz=01;31:*.ace=01;31:*.zoo=01;31:*.cpio=01;31:*.7z=01;31:*.rz=01;31:*.cab=01;31:*.wim=01;31:*.swm=01;31:*.dwm=01;31:*.esd=01;31:*.avif=01;35:*.jpg=01;35:*.jpeg=01;35:*.mjpg=01;35:*.mjpeg=01;35:*.gif=01;35:*.bmp=01;35:*.pbm=01;35:*.pgm=01;35:*.ppm=01;35:*.tga=01;35:*.xbm=01;35:*.xpm=01;35:*.tif=01;35:*.tiff=01;35:*.png=01;35:*.svg=01;35:*.svgz=01;35:*.mng=01;35:*.pcx=01;35:*.mov=01;35:*.mpg=01;35:*.mpeg=01;35:*.m2v=01;35:*.mkv=01;35:*.webm=01;35:*.webp=01;35:*.ogm=01;35:*.mp4=01;35:*.m4v=01;35:*.mp4v=01;35:*.vob=01;35:*.qt=01;35:*.nuv=01;35:*.wmv=01;35:*.asf=01;35:*.rm=01;35:*.rmvb=01;35:*.flc=01;35:*.avi=01;35:*.fli=01;35:*.flv=01;35:*.gl=01;35:*.dl=01;35:*.xcf=01;35:*.xwd=01;35:*.yuv=01;35:*.cgm=01;35:*.emf=01;35:*.ogv=01;35:*.ogx=01;35:*.aac=00;36:*.au=00;36:*.flac=00;36:*.m4a=00;36:*.mid=00;36:*.midi=00;36:*.mka=00;36:*.mp3=00;36:*.mpc=00;36:*.ogg=00;36:*.ra=00;36:*.wav=00;36:*.oga=00;36:*.opus=00;36:*.spx=00;36:*.xspf=00;36:*~=00;90:*#=00;90:*.bak=00;90:*.crdownload=00;90:*.dpkg-dist=00;90:*.dpkg-new=00;90:*.dpkg-old=00;90:*.dpkg-tmp=00;90:*.old=00;90:*.orig=00;90:*.part=00;90:*.rej=00;90:*.rpmnew=00;90:*.rpmorig=00;90:*.rpmsave=00;90:*.swp=00;90:*.tmp=00;90:*.ucf-dist=00;90:*.ucf-new=00;90:*.ucf-old=00;90:', 'VSCODE_GIT_IPC_HANDLE': '/tmp/vscode-git-5c83219d00.sock', 'TERM_PROGRAM': 'vscode', 'SSH_AUTH_SOCK': '/tmp/vscode-ssh-auth-44bff082-fa32-445f-b58a-763d547d733e.sock', 'AMENT_PREFIX_PATH': '/home/dev/code/ws_iap/install/glim:/opt/ros/jazzy', 'DEBIAN_FRONTEND': 'noninteractive', 'SHELL': '/bin/bash', 'NV_LIBCUBLAS_DEV_PACKAGE': 'libcublas-dev-12-5=12.5.3.2-1', 'NV_CUDA_NSIGHT_COMPUTE_DEV_PACKAGE': 'cuda-nsight-compute-12-5=12.5.1-1', 'NV_NVTX_VERSION': '12.5.82-1', 'NV_LIBNPP_VERSION': '12.3.0.159-1', 'ROS_AUTOMATIC_DISCOVERY_RANGE': 'SUBNET', 'VSCODE_GIT_ASKPASS_EXTRA_ARGS': '', 'GIT_PAGER': 'cat', 'PWD': '/home/dev/code/ws_iap/src/iap/build/iap', 'PYTHONPATH': '/opt/ros/jazzy/lib/python3.12/site-packages', 'NVIDIA_VISIBLE_DEVICES': 'all', 'COLCON': '1', 'NV_LIBNPP_DEV_VERSION': '12.3.0.159-1', 'CMAKE_PREFIX_PATH': '/home/dev/code/ws_iap/install/glim:/opt/ros/jazzy'}), 'shell': False}
+[0.638358] (iap) StdoutLine: {'line': b'[  5%] Building CXX object CMakeFiles/iap.dir/src/iap/util/config.cpp.o\n'}
+[0.638574] (iap) StdoutLine: {'line': b'[  5%] Building CXX object CMakeFiles/iap.dir/src/iap/util/logging.cpp.o\n'}
+[0.638620] (iap) StdoutLine: {'line': b'[  5%] Building CXX object CMakeFiles/iap.dir/src/iap/util/export_factors.cpp.o\n'}
+[0.638653] (iap) StdoutLine: {'line': b'[  5%] Building CXX object CMakeFiles/iap.dir/src/iap/util/time_keeper.cpp.o\n'}
+[0.638684] (iap) StdoutLine: {'line': b'[  7%] Building CXX object CMakeFiles/iap.dir/src/iap/util/trajectory_manager.cpp.o\n'}
+[0.638719] (iap) StdoutLine: {'line': b'[  8%] Building CXX object CMakeFiles/iap.dir/src/iap/util/extension_module.cpp.o\n'}
+[0.638757] (iap) StdoutLine: {'line': b'[ 10%] Building CXX object CMakeFiles/iap.dir/src/iap/util/load_module.cpp.o\n'}
+[0.638883] (iap) StdoutLine: {'line': b'[ 11%] Building CXX object CMakeFiles/iap.dir/src/iap/util/data_validator.cpp.o\n'}
+[0.638917] (iap) StdoutLine: {'line': b'[ 13%] Building CXX object CMakeFiles/iap.dir/src/iap/preprocess/callbacks.cpp.o\n'}
+[0.638981] (iap) StdoutLine: {'line': b'[ 14%] Building CXX object CMakeFiles/iap.dir/src/iap/util/serialization.cpp.o\n'}
+[0.639181] (iap) StdoutLine: {'line': b'[ 16%] Building CXX object CMakeFiles/iap.dir/src/iap/preprocess/cloud_preprocessor.cpp.o\n'}
+[0.639296] (iap) StdoutLine: {'line': b'[ 17%] Building CXX object CMakeFiles/iap.dir/src/iap/common/imu_integration.cpp.o\n'}
+[0.639880] (iap) StdoutLine: {'line': b'[ 20%] Building CXX object CMakeFiles/iap.dir/src/iap/common/cloud_deskewing.cpp.o\n'}
+[0.639969] (iap) StdoutLine: {'line': b'[ 20%] Building CXX object CMakeFiles/iap.dir/src/iap/odometry/callbacks.cpp.o\n'}
+[0.640000] (iap) StdoutLine: {'line': b'[ 22%] Building CXX object CMakeFiles/iap.dir/src/iap/util/debug.cpp.o\n'}
+[0.640113] (iap) StdoutLine: {'line': b'[ 23%] Building CXX object CMakeFiles/iap.dir/src/iap/odometry/initial_state_estimation.cpp.o\n'}
+[0.641032] (iap) StdoutLine: {'line': b'[ 25%] Building CXX object CMakeFiles/iap.dir/src/iap/common/cloud_covariance_estimation.cpp.o\n'}
+[0.641110] (iap) StdoutLine: {'line': b'[ 28%] Building CXX object CMakeFiles/iap.dir/src/iap/odometry/estimation_frame.cpp.o\n'}
+[0.641147] (iap) StdoutLine: {'line': b'[ 26%] Building CXX object CMakeFiles/iap.dir/src/iap/common/imu_validation.cpp.o\n'}
+[0.641898] (iap) StdoutLine: {'line': b'[ 29%] Building CXX object CMakeFiles/iap.dir/src/iap/odometry/loose_initial_state_estimation.cpp.o\n'}
+[0.643138] (iap) StderrLine: {'line': b'/home/dev/code/ws_iap/src/iap/src/iap/util/config.cpp:1:10: fatal error: iap/util/config.hpp: No such file or directory\n'}
+[0.643309] (iap) StderrLine: {'line': b'    1 | #include <iap/util/config.hpp>\n'}
+[0.643350] (iap) StderrLine: {'line': b'      |          ^~~~~~~~~~~~~~~~~~~~~\n'}
+[0.643382] (iap) StderrLine: {'line': b'/home/dev/code/ws_iap/src/iap/src/iap/util/time_keeper.cpp:1:10: fatal error: iap/util/time_keeper.hpp: No such file or directory\n'}
+[0.643418] (iap) StderrLine: {'line': b'    1 | #include <iap/util/time_keeper.hpp>\n'}
+[0.643450] (iap) StderrLine: {'line': b'      |          ^~~~~~~~~~~~~~~~~~~~~~~~~~\n'}
+[0.643495] (iap) StderrLine: {'line': b'compilation terminated.\n'}
+[0.643626] (iap) StderrLine: {'line': b'compilation terminated.\n'}
+[0.643661] (iap) StderrLine: {'line': b'/home/dev/code/ws_iap/src/iap/src/iap/util/data_validator.cpp:1:10: fatal error: iap/util/data_validator.hpp: No such file or directory\n'}
+[0.643707] (iap) StderrLine: {'line': b'    1 | #include <iap/util/data_validator.hpp>\n'}
+[0.643735] (iap) StderrLine: {'line': b'      |          ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~\n'}
+[0.643762] (iap) StderrLine: {'line': b'compilation terminated.\n'}
+[0.643789] (iap) StderrLine: {'line': b'/home/dev/code/ws_iap/src/iap/src/iap/preprocess/callbacks.cpp:1:10: fatal error: iap/preprocess/callbacks.hpp: No such file or directory\n'}
+[0.643814] (iap) StderrLine: {'line': b'    1 | #include <iap/preprocess/callbacks.hpp>\n'}
+[0.643837] (iap) StderrLine: {'line': b'      |          ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~\n'}
+[0.643861] (iap) StderrLine: {'line': b'compilation terminated.\n'}
+[0.643884] (iap) StderrLine: {'line': b'/home/dev/code/ws_iap/src/iap/src/iap/util/trajectory_manager.cpp:1:10: fatal error: iap/util/trajectory_manager.hpp: No such file or directory\n'}
+[0.643907] (iap) StderrLine: {'line': b'    1 | #include <iap/util/trajectory_manager.hpp>\n'}
+[0.643930] (iap) StderrLine: {'line': b'      |          ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~\n'}
+[0.644039] (iap) StderrLine: {'line': b'/home/dev/code/ws_iap/src/iap/src/iap/util/load_module.cpp:1:10: fatal error: iap/util/load_module.hpp: No such file or directory\n'}
+[0.644062] (iap) StderrLine: {'line': b'    1 | #include <iap/util/load_module.hpp>\n'}
+[0.644085] (iap) StderrLine: {'line': b'      |          ^~~~~~~~~~~~~~~~~~~~~~~~~~\n'}
+[0.644108] (iap) StderrLine: {'line': b'compilation terminated.\n'}
+[0.644131] (iap) StderrLine: {'line': b'compilation terminated.\n'}
+[0.644153] (iap) StderrLine: {'line': b'/home/dev/code/ws_iap/src/iap/src/iap/util/extension_module.cpp:1:10: fatal error: iap/util/extension_module.hpp: No such file or directory\n'}
+[0.644175] (iap) StderrLine: {'line': b'    1 | #include <iap/util/extension_module.hpp>\n'}
+[0.644198] (iap) StderrLine: {'line': b'      |          ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~\n'}
+[0.644220] (iap) StderrLine: {'line': b'compilation terminated.\n'}
+[0.644242] (iap) StderrLine: {'line': b'/home/dev/code/ws_iap/src/iap/src/iap/util/serialization.cpp:1:10: fatal error: iap/util/serialization.hpp: No such file or directory\n'}
+[0.644265] (iap) StderrLine: {'line': b'    1 | #include <iap/util/serialization.hpp>\n'}
+[0.644286] (iap) StderrLine: {'line': b'      |          ^~~~~~~~~~~~~~~~~~~~~~~~~~~~\n'}
+[0.644307] (iap) StderrLine: {'line': b'compilation terminated.\n'}
+[0.644328] (iap) StderrLine: {'line': b'gmake[2]: *** [CMakeFiles/iap.dir/build.make:76: CMakeFiles/iap.dir/src/iap/util/config.cpp.o] Error 1\n'}
+[0.644349] (iap) StderrLine: {'line': b'gmake[2]: *** Waiting for unfinished jobs....\n'}
+[0.644370] (iap) StderrLine: {'line': b'gmake[2]: *** [CMakeFiles/iap.dir/build.make:160: CMakeFiles/iap.dir/src/iap/util/load_module.cpp.o] Error 1\n'}
+[0.644392] (iap) StderrLine: {'line': b'gmake[2]: *** [CMakeFiles/iap.dir/build.make:174: CMakeFiles/iap.dir/src/iap/util/data_validator.cpp.o] Error 1\n'}
+[0.644483] (iap) StderrLine: {'line': b'gmake[2]: *** [CMakeFiles/iap.dir/build.make:132: CMakeFiles/iap.dir/src/iap/util/trajectory_manager.cpp.o] Error 1\n'}
+[0.644505] (iap) StderrLine: {'line': b'gmake[2]: *** [CMakeFiles/iap.dir/build.make:146: CMakeFiles/iap.dir/src/iap/util/extension_module.cpp.o] Error 1\n'}
+[0.644526] (iap) StderrLine: {'line': b'/home/dev/code/ws_iap/src/iap/src/iap/odometry/initial_state_estimation.cpp:1:10: fatal error: iap/odometry/initial_state_estimation.hpp: No such file or directory\n'}
+[0.644590] (iap) StderrLine: {'line': b'    1 | #include <iap/odometry/initial_state_estimation.hpp>\n'}
+[0.644610] (iap) StderrLine: {'line': b'      |          ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~\n'}
+[0.644629] (iap) StderrLine: {'line': b'compilation terminated.\n'}
+[0.644648] (iap) StderrLine: {'line': b'gmake[2]: *** [CMakeFiles/iap.dir/build.make:118: CMakeFiles/iap.dir/src/iap/util/time_keeper.cpp.o] Error 1\n'}
+[0.644669] (iap) StderrLine: {'line': b'gmake[2]: *** [CMakeFiles/iap.dir/build.make:216: CMakeFiles/iap.dir/src/iap/preprocess/callbacks.cpp.o] Error 1\n'}
+[0.644688] (iap) StderrLine: {'line': b'gmake[2]: *** [CMakeFiles/iap.dir/build.make:188: CMakeFiles/iap.dir/src/iap/util/serialization.cpp.o] Error 1\n'}
+[0.644707] (iap) StderrLine: {'line': b'/home/dev/code/ws_iap/src/iap/src/iap/preprocess/cloud_preprocessor.cpp:1:10: fatal error: iap/preprocess/cloud_preprocessor.hpp: No such file or directory\n'}
+[0.644728] (iap) StderrLine: {'line': b'    1 | #include <iap/preprocess/cloud_preprocessor.hpp>\n'}
+[0.644749] (iap) StderrLine: {'line': b'      |          ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~\n'}
+[0.644770] (iap) StderrLine: {'line': b'compilation terminated.\n'}
+[0.644790] (iap) StderrLine: {'line': b'gmake[2]: *** [CMakeFiles/iap.dir/build.make:328: CMakeFiles/iap.dir/src/iap/odometry/initial_state_estimation.cpp.o] Error 1\n'}
+[0.644811] (iap) StderrLine: {'line': b'/home/dev/code/ws_iap/src/iap/src/iap/common/cloud_deskewing.cpp:1:10: fatal error: iap/common/cloud_deskewing.hpp: No such file or directory\n'}
+[0.644832] (iap) StderrLine: {'line': b'    1 | #include <iap/common/cloud_deskewing.hpp>\n'}
+[0.644853] (iap) StderrLine: {'line': b'      |          ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~\n'}
+[0.644875] (iap) StderrLine: {'line': b'compilation terminated.\n'}
+[0.644896] (iap) StderrLine: {'line': b'/home/dev/code/ws_iap/src/iap/src/iap/common/imu_integration.cpp:1:10: fatal error: iap/common/imu_integration.hpp: No such file or directory\n'}
+[0.644918] (iap) StderrLine: {'line': b'    1 | #include <iap/common/imu_integration.hpp>\n'}
+[0.644961] (iap) StderrLine: {'line': b'      |          ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~\n'}
+[0.644981] (iap) StderrLine: {'line': b'compilation terminated.\n'}
+[0.645000] (iap) StderrLine: {'line': b'/home/dev/code/ws_iap/src/iap/src/iap/odometry/callbacks.cpp:1:10: fatal error: iap/odometry/callbacks.hpp: No such file or directory\n'}
+[0.645018] (iap) StderrLine: {'line': b'    1 | #include <iap/odometry/callbacks.hpp>\n'}
+[0.645037] (iap) StderrLine: {'line': b'      |          ^~~~~~~~~~~~~~~~~~~~~~~~~~~~\n'}
+[0.645056] (iap) StderrLine: {'line': b'compilation terminated.\n'}
+[0.645075] (iap) StderrLine: {'line': b'gmake[2]: *** [CMakeFiles/iap.dir/build.make:230: CMakeFiles/iap.dir/src/iap/preprocess/cloud_preprocessor.cpp.o] Error 1\n'}
+[0.645094] (iap) StderrLine: {'line': b'/home/dev/code/ws_iap/src/iap/src/iap/odometry/estimation_frame.cpp:1:10: fatal error: iap/odometry/estimation_frame.hpp: No such file or directory\n'}
+[0.645114] (iap) StderrLine: {'line': b'    1 | #include <iap/odometry/estimation_frame.hpp>\n'}
+[0.645134] (iap) StderrLine: {'line': b'      |          ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~\n'}
+[0.645153] (iap) StderrLine: {'line': b'compilation terminated.\n'}
+[0.645174] (iap) StderrLine: {'line': b'gmake[2]: *** [CMakeFiles/iap.dir/build.make:272: CMakeFiles/iap.dir/src/iap/common/cloud_deskewing.cpp.o] Error 1\n'}
+[0.645193] (iap) StderrLine: {'line': b'gmake[2]: *** [CMakeFiles/iap.dir/build.make:244: CMakeFiles/iap.dir/src/iap/common/imu_integration.cpp.o] Error 1\n'}
+[0.645212] (iap) StderrLine: {'line': b'gmake[2]: *** [CMakeFiles/iap.dir/build.make:314: CMakeFiles/iap.dir/src/iap/odometry/estimation_frame.cpp.o] Error 1\n'}
+[0.645231] (iap) StderrLine: {'line': b'gmake[2]: *** [CMakeFiles/iap.dir/build.make:300: CMakeFiles/iap.dir/src/iap/odometry/callbacks.cpp.o] Error 1\n'}
+[0.645748] (iap) StderrLine: {'line': b'/home/dev/code/ws_iap/src/iap/src/iap/common/imu_validation.cpp:1:10: fatal error: iap/common/imu_validation.hpp: No such file or directory\n'}
+[0.645780] (iap) StderrLine: {'line': b'    1 | #include <iap/common/imu_validation.hpp>\n'}
+[0.645802] (iap) StderrLine: {'line': b'      |          ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~\n'}
+[0.645824] (iap) StderrLine: {'line': b'compilation terminated.\n'}
+[0.645872] (iap) StderrLine: {'line': b'/home/dev/code/ws_iap/src/iap/src/iap/common/cloud_covariance_estimation.cpp:1:10: fatal error: iap/common/cloud_covariance_estimation.hpp: No such file or directory\n'}
+[0.645894] (iap) StderrLine: {'line': b'    1 | #include <iap/common/cloud_covariance_estimation.hpp>\n'}
+[0.645915] (iap) StderrLine: {'line': b'      |          ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~\n'}
+[0.645934] (iap) StderrLine: {'line': b'compilation terminated.\n'}
+[0.645978] (iap) StderrLine: {'line': b'/home/dev/code/ws_iap/src/iap/src/iap/odometry/loose_initial_state_estimation.cpp:1:10: fatal error: iap/odometry/loose_initial_state_estimation.hpp: No such file or directory\n'}
+[0.646005] (iap) StderrLine: {'line': b'    1 | #include <iap/odometry/loose_initial_state_estimation.hpp>\n'}
+[0.646025] (iap) StderrLine: {'line': b'      |          ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~\n'}
+[0.646044] (iap) StderrLine: {'line': b'compilation terminated.\n'}
+[0.646130] (iap) StderrLine: {'line': b'gmake[2]: *** [CMakeFiles/iap.dir/build.make:286: CMakeFiles/iap.dir/src/iap/common/cloud_covariance_estimation.cpp.o] Error 1\n'}
+[0.646154] (iap) StderrLine: {'line': b'gmake[2]: *** [CMakeFiles/iap.dir/build.make:258: CMakeFiles/iap.dir/src/iap/common/imu_validation.cpp.o] Error 1\n'}
+[0.646288] (iap) StderrLine: {'line': b'gmake[2]: *** [CMakeFiles/iap.dir/build.make:342: CMakeFiles/iap.dir/src/iap/odometry/loose_initial_state_estimation.cpp.o] Error 1\n'}
+[0.673912] (iap) StderrLine: {'line': b'/home/dev/code/ws_iap/src/iap/src/iap/util/logging.cpp:2:10: fatal error: iap/util/config.hpp: No such file or directory\n'}
+[0.674038] (iap) StderrLine: {'line': b'    2 | #include <iap/util/config.hpp>\n'}
+[0.674073] (iap) StderrLine: {'line': b'      |          ^~~~~~~~~~~~~~~~~~~~~\n'}
+[0.674099] (iap) StderrLine: {'line': b'compilation terminated.\n'}
+[0.675257] (iap) StderrLine: {'line': b'gmake[2]: *** [CMakeFiles/iap.dir/build.make:90: CMakeFiles/iap.dir/src/iap/util/logging.cpp.o] Error 1\n'}
+[0.700756] (-) TimerEvent: {}
+[0.800917] (-) TimerEvent: {}
+[0.901087] (-) TimerEvent: {}
+[1.001257] (-) TimerEvent: {}
+[1.101505] (-) TimerEvent: {}
+[1.201670] (-) TimerEvent: {}
+[1.301823] (-) TimerEvent: {}
+[1.401971] (-) TimerEvent: {}
+[1.502200] (-) TimerEvent: {}
+[1.602352] (-) TimerEvent: {}
+[1.702575] (-) TimerEvent: {}
+[1.802752] (-) TimerEvent: {}
+[1.903058] (-) TimerEvent: {}
+[2.003307] (-) TimerEvent: {}
+[2.103546] (-) TimerEvent: {}
+[2.203812] (-) TimerEvent: {}
+[2.304055] (-) TimerEvent: {}
+[2.404211] (-) TimerEvent: {}
+[2.504378] (-) TimerEvent: {}
+[2.604647] (-) TimerEvent: {}
+[2.704865] (-) TimerEvent: {}
+[2.805017] (-) TimerEvent: {}
+[2.905258] (-) TimerEvent: {}
+[3.005446] (-) TimerEvent: {}
+[3.105625] (-) TimerEvent: {}
+[3.205873] (-) TimerEvent: {}
+[3.306083] (-) TimerEvent: {}
+[3.406286] (-) TimerEvent: {}
+[3.506525] (-) TimerEvent: {}
+[3.606768] (-) TimerEvent: {}
+[3.706995] (-) TimerEvent: {}
+[3.807221] (-) TimerEvent: {}
+[3.907443] (-) TimerEvent: {}
+[4.007626] (-) TimerEvent: {}
+[4.107870] (-) TimerEvent: {}
+[4.208116] (-) TimerEvent: {}
+[4.308360] (-) TimerEvent: {}
+[4.408521] (-) TimerEvent: {}
+[4.508711] (-) TimerEvent: {}
+[4.608929] (-) TimerEvent: {}
+[4.709184] (-) TimerEvent: {}
+[4.809421] (-) TimerEvent: {}
+[4.909610] (-) TimerEvent: {}
+[5.009782] (-) TimerEvent: {}
+[5.109941] (-) TimerEvent: {}
+[5.210165] (-) TimerEvent: {}
+[5.310370] (-) TimerEvent: {}
+[5.410537] (-) TimerEvent: {}
+[5.510821] (-) TimerEvent: {}
+[5.611061] (-) TimerEvent: {}
+[5.711340] (-) TimerEvent: {}
+[5.811593] (-) TimerEvent: {}
+[5.911743] (-) TimerEvent: {}
+[6.011961] (-) TimerEvent: {}
+[6.112193] (-) TimerEvent: {}
+[6.212426] (-) TimerEvent: {}
+[6.312694] (-) TimerEvent: {}
+[6.412939] (-) TimerEvent: {}
+[6.513182] (-) TimerEvent: {}
+[6.613410] (-) TimerEvent: {}
+[6.713683] (-) TimerEvent: {}
+[6.813894] (-) TimerEvent: {}
+[6.914055] (-) TimerEvent: {}
+[7.014300] (-) TimerEvent: {}
+[7.114589] (-) TimerEvent: {}
+[7.214746] (-) TimerEvent: {}
+[7.314898] (-) TimerEvent: {}
+[7.415149] (-) TimerEvent: {}
+[7.515416] (-) TimerEvent: {}
+[7.615588] (-) TimerEvent: {}
+[7.715736] (-) TimerEvent: {}
+[7.815884] (-) TimerEvent: {}
+[7.916132] (-) TimerEvent: {}
+[8.016287] (-) TimerEvent: {}
+[8.116530] (-) TimerEvent: {}
+[8.216690] (-) TimerEvent: {}
+[8.316846] (-) TimerEvent: {}
+[8.416990] (-) TimerEvent: {}
+[8.517144] (-) TimerEvent: {}
+[8.617399] (-) TimerEvent: {}
+[8.717738] (-) TimerEvent: {}
+[8.817890] (-) TimerEvent: {}
+[8.918036] (-) TimerEvent: {}
+[9.018245] (-) TimerEvent: {}
+[9.118509] (-) TimerEvent: {}
+[9.218821] (-) TimerEvent: {}
+[9.319060] (-) TimerEvent: {}
+[9.419305] (-) TimerEvent: {}
+[9.519563] (-) TimerEvent: {}
+[9.619855] (-) TimerEvent: {}
+[9.720007] (-) TimerEvent: {}
+[9.820251] (-) TimerEvent: {}
+[9.920499] (-) TimerEvent: {}
+[10.020765] (-) TimerEvent: {}
+[10.120923] (-) TimerEvent: {}
+[10.221161] (-) TimerEvent: {}
+[10.321377] (-) TimerEvent: {}
+[10.421647] (-) TimerEvent: {}
+[10.521909] (-) TimerEvent: {}
+[10.622166] (-) TimerEvent: {}
+[10.722430] (-) TimerEvent: {}
+[10.822613] (-) TimerEvent: {}
+[10.922915] (-) TimerEvent: {}
+[11.023061] (-) TimerEvent: {}
+[11.123290] (-) TimerEvent: {}
+[11.223531] (-) TimerEvent: {}
+[11.323693] (-) TimerEvent: {}
+[11.423927] (-) TimerEvent: {}
+[11.524128] (-) TimerEvent: {}
+[11.624368] (-) TimerEvent: {}
+[11.724542] (-) TimerEvent: {}
+[11.824816] (-) TimerEvent: {}
+[11.924986] (-) TimerEvent: {}
+[12.025150] (-) TimerEvent: {}
+[12.125386] (-) TimerEvent: {}
+[12.225666] (-) TimerEvent: {}
+[12.325890] (-) TimerEvent: {}
+[12.426150] (-) TimerEvent: {}
+[12.526401] (-) TimerEvent: {}
+[12.626667] (-) TimerEvent: {}
+[12.726813] (-) TimerEvent: {}
+[12.826959] (-) TimerEvent: {}
+[12.927107] (-) TimerEvent: {}
+[13.027392] (-) TimerEvent: {}
+[13.127523] (-) TimerEvent: {}
+[13.227683] (-) TimerEvent: {}
+[13.327946] (-) TimerEvent: {}
+[13.428216] (-) TimerEvent: {}
+[13.528486] (-) TimerEvent: {}
+[13.628658] (-) TimerEvent: {}
+[13.728806] (-) TimerEvent: {}
+[13.829046] (-) TimerEvent: {}
+[13.929264] (-) TimerEvent: {}
+[14.029522] (-) TimerEvent: {}
+[14.129833] (-) TimerEvent: {}
+[14.230067] (-) TimerEvent: {}
+[14.330271] (-) TimerEvent: {}
+[14.430598] (-) TimerEvent: {}
+[14.530834] (-) TimerEvent: {}
+[14.630982] (-) TimerEvent: {}
+[14.731171] (-) TimerEvent: {}
+[14.831393] (-) TimerEvent: {}
+[14.931646] (-) TimerEvent: {}
+[15.031799] (-) TimerEvent: {}
+[15.131948] (-) TimerEvent: {}
+[15.232169] (-) TimerEvent: {}
+[15.332373] (-) TimerEvent: {}
+[15.432613] (-) TimerEvent: {}
+[15.532765] (-) TimerEvent: {}
+[15.632910] (-) TimerEvent: {}
+[15.733072] (-) TimerEvent: {}
+[15.833281] (-) TimerEvent: {}
+[15.933506] (-) TimerEvent: {}
+[16.033659] (-) TimerEvent: {}
+[16.133807] (-) TimerEvent: {}
+[16.233954] (-) TimerEvent: {}
+[16.334171] (-) TimerEvent: {}
+[16.434387] (-) TimerEvent: {}
+[16.534520] (-) TimerEvent: {}
+[16.634671] (-) TimerEvent: {}
+[16.734820] (-) TimerEvent: {}
+[16.834966] (-) TimerEvent: {}
+[16.935208] (-) TimerEvent: {}
+[17.035448] (-) TimerEvent: {}
+[17.135625] (-) TimerEvent: {}
+[17.235774] (-) TimerEvent: {}
+[17.336035] (-) TimerEvent: {}
+[17.436240] (-) TimerEvent: {}
+[17.536477] (-) TimerEvent: {}
+[17.636610] (-) TimerEvent: {}
+[17.736787] (-) TimerEvent: {}
+[17.836937] (-) TimerEvent: {}
+[17.937148] (-) TimerEvent: {}
+[18.037310] (-) TimerEvent: {}
+[18.137543] (-) TimerEvent: {}
+[18.237692] (-) TimerEvent: {}
+[18.337841] (-) TimerEvent: {}
+[18.438078] (-) TimerEvent: {}
+[18.538317] (-) TimerEvent: {}
+[18.638606] (-) TimerEvent: {}
+[18.738840] (-) TimerEvent: {}
+[18.838997] (-) TimerEvent: {}
+[18.939247] (-) TimerEvent: {}
+[19.039475] (-) TimerEvent: {}
+[19.139624] (-) TimerEvent: {}
+[19.239784] (-) TimerEvent: {}
+[19.339933] (-) TimerEvent: {}
+[19.440171] (-) TimerEvent: {}
+[19.540333] (-) TimerEvent: {}
+[19.640579] (-) TimerEvent: {}
+[19.740819] (-) TimerEvent: {}
+[19.841058] (-) TimerEvent: {}
+[19.941302] (-) TimerEvent: {}
+[20.041550] (-) TimerEvent: {}
+[20.141797] (-) TimerEvent: {}
+[20.242025] (-) TimerEvent: {}
+[20.342203] (-) TimerEvent: {}
+[20.442436] (-) TimerEvent: {}
+[20.542720] (-) TimerEvent: {}
+[20.642879] (-) TimerEvent: {}
+[20.743031] (-) TimerEvent: {}
+[20.843280] (-) TimerEvent: {}
+[20.943516] (-) TimerEvent: {}
+[21.043801] (-) TimerEvent: {}
+[21.144053] (-) TimerEvent: {}
+[21.244271] (-) TimerEvent: {}
+[21.344429] (-) TimerEvent: {}
+[21.444582] (-) TimerEvent: {}
+[21.544735] (-) TimerEvent: {}
+[21.604915] (iap) StderrLine: {'line': b'gmake[1]: *** [CMakeFiles/Makefile2:107: CMakeFiles/iap.dir/all] Error 2\n'}
+[21.605161] (iap) StderrLine: {'line': b'gmake: *** [Makefile:146: all] Error 2\n'}
+[21.606708] (iap) CommandEnded: {'returncode': 2}
+[21.611592] (iap) JobEnded: {'identifier': 'iap', 'rc': 2}
+[21.621933] (-) EventReactorShutdown: {}

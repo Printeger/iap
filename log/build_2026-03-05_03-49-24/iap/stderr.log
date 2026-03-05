@@ -1,0 +1,93 @@
+/home/dev/code/ws_iap/src/iap/src/iap/util/config.cpp:1:10: fatal error: iap/util/config.hpp: No such file or directory
+    1 | #include <iap/util/config.hpp>
+      |          ^~~~~~~~~~~~~~~~~~~~~
+/home/dev/code/ws_iap/src/iap/src/iap/util/time_keeper.cpp:1:10: fatal error: iap/util/time_keeper.hpp: No such file or directory
+    1 | #include <iap/util/time_keeper.hpp>
+      |          ^~~~~~~~~~~~~~~~~~~~~~~~~~
+compilation terminated.
+compilation terminated.
+/home/dev/code/ws_iap/src/iap/src/iap/util/data_validator.cpp:1:10: fatal error: iap/util/data_validator.hpp: No such file or directory
+    1 | #include <iap/util/data_validator.hpp>
+      |          ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+compilation terminated.
+/home/dev/code/ws_iap/src/iap/src/iap/preprocess/callbacks.cpp:1:10: fatal error: iap/preprocess/callbacks.hpp: No such file or directory
+    1 | #include <iap/preprocess/callbacks.hpp>
+      |          ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+compilation terminated.
+/home/dev/code/ws_iap/src/iap/src/iap/util/trajectory_manager.cpp:1:10: fatal error: iap/util/trajectory_manager.hpp: No such file or directory
+    1 | #include <iap/util/trajectory_manager.hpp>
+      |          ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+/home/dev/code/ws_iap/src/iap/src/iap/util/load_module.cpp:1:10: fatal error: iap/util/load_module.hpp: No such file or directory
+    1 | #include <iap/util/load_module.hpp>
+      |          ^~~~~~~~~~~~~~~~~~~~~~~~~~
+compilation terminated.
+compilation terminated.
+/home/dev/code/ws_iap/src/iap/src/iap/util/extension_module.cpp:1:10: fatal error: iap/util/extension_module.hpp: No such file or directory
+    1 | #include <iap/util/extension_module.hpp>
+      |          ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+compilation terminated.
+/home/dev/code/ws_iap/src/iap/src/iap/util/serialization.cpp:1:10: fatal error: iap/util/serialization.hpp: No such file or directory
+    1 | #include <iap/util/serialization.hpp>
+      |          ^~~~~~~~~~~~~~~~~~~~~~~~~~~~
+compilation terminated.
+gmake[2]: *** [CMakeFiles/iap.dir/build.make:76: CMakeFiles/iap.dir/src/iap/util/config.cpp.o] Error 1
+gmake[2]: *** Waiting for unfinished jobs....
+gmake[2]: *** [CMakeFiles/iap.dir/build.make:160: CMakeFiles/iap.dir/src/iap/util/load_module.cpp.o] Error 1
+gmake[2]: *** [CMakeFiles/iap.dir/build.make:174: CMakeFiles/iap.dir/src/iap/util/data_validator.cpp.o] Error 1
+gmake[2]: *** [CMakeFiles/iap.dir/build.make:132: CMakeFiles/iap.dir/src/iap/util/trajectory_manager.cpp.o] Error 1
+gmake[2]: *** [CMakeFiles/iap.dir/build.make:146: CMakeFiles/iap.dir/src/iap/util/extension_module.cpp.o] Error 1
+/home/dev/code/ws_iap/src/iap/src/iap/odometry/initial_state_estimation.cpp:1:10: fatal error: iap/odometry/initial_state_estimation.hpp: No such file or directory
+    1 | #include <iap/odometry/initial_state_estimation.hpp>
+      |          ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+compilation terminated.
+gmake[2]: *** [CMakeFiles/iap.dir/build.make:118: CMakeFiles/iap.dir/src/iap/util/time_keeper.cpp.o] Error 1
+gmake[2]: *** [CMakeFiles/iap.dir/build.make:216: CMakeFiles/iap.dir/src/iap/preprocess/callbacks.cpp.o] Error 1
+gmake[2]: *** [CMakeFiles/iap.dir/build.make:188: CMakeFiles/iap.dir/src/iap/util/serialization.cpp.o] Error 1
+/home/dev/code/ws_iap/src/iap/src/iap/preprocess/cloud_preprocessor.cpp:1:10: fatal error: iap/preprocess/cloud_preprocessor.hpp: No such file or directory
+    1 | #include <iap/preprocess/cloud_preprocessor.hpp>
+      |          ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+compilation terminated.
+gmake[2]: *** [CMakeFiles/iap.dir/build.make:328: CMakeFiles/iap.dir/src/iap/odometry/initial_state_estimation.cpp.o] Error 1
+/home/dev/code/ws_iap/src/iap/src/iap/common/cloud_deskewing.cpp:1:10: fatal error: iap/common/cloud_deskewing.hpp: No such file or directory
+    1 | #include <iap/common/cloud_deskewing.hpp>
+      |          ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+compilation terminated.
+/home/dev/code/ws_iap/src/iap/src/iap/common/imu_integration.cpp:1:10: fatal error: iap/common/imu_integration.hpp: No such file or directory
+    1 | #include <iap/common/imu_integration.hpp>
+      |          ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+compilation terminated.
+/home/dev/code/ws_iap/src/iap/src/iap/odometry/callbacks.cpp:1:10: fatal error: iap/odometry/callbacks.hpp: No such file or directory
+    1 | #include <iap/odometry/callbacks.hpp>
+      |          ^~~~~~~~~~~~~~~~~~~~~~~~~~~~
+compilation terminated.
+gmake[2]: *** [CMakeFiles/iap.dir/build.make:230: CMakeFiles/iap.dir/src/iap/preprocess/cloud_preprocessor.cpp.o] Error 1
+/home/dev/code/ws_iap/src/iap/src/iap/odometry/estimation_frame.cpp:1:10: fatal error: iap/odometry/estimation_frame.hpp: No such file or directory
+    1 | #include <iap/odometry/estimation_frame.hpp>
+      |          ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+compilation terminated.
+gmake[2]: *** [CMakeFiles/iap.dir/build.make:272: CMakeFiles/iap.dir/src/iap/common/cloud_deskewing.cpp.o] Error 1
+gmake[2]: *** [CMakeFiles/iap.dir/build.make:244: CMakeFiles/iap.dir/src/iap/common/imu_integration.cpp.o] Error 1
+gmake[2]: *** [CMakeFiles/iap.dir/build.make:314: CMakeFiles/iap.dir/src/iap/odometry/estimation_frame.cpp.o] Error 1
+gmake[2]: *** [CMakeFiles/iap.dir/build.make:300: CMakeFiles/iap.dir/src/iap/odometry/callbacks.cpp.o] Error 1
+/home/dev/code/ws_iap/src/iap/src/iap/common/imu_validation.cpp:1:10: fatal error: iap/common/imu_validation.hpp: No such file or directory
+    1 | #include <iap/common/imu_validation.hpp>
+      |          ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+compilation terminated.
+/home/dev/code/ws_iap/src/iap/src/iap/common/cloud_covariance_estimation.cpp:1:10: fatal error: iap/common/cloud_covariance_estimation.hpp: No such file or directory
+    1 | #include <iap/common/cloud_covariance_estimation.hpp>
+      |          ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+compilation terminated.
+/home/dev/code/ws_iap/src/iap/src/iap/odometry/loose_initial_state_estimation.cpp:1:10: fatal error: iap/odometry/loose_initial_state_estimation.hpp: No such file or directory
+    1 | #include <iap/odometry/loose_initial_state_estimation.hpp>
+      |          ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+compilation terminated.
+gmake[2]: *** [CMakeFiles/iap.dir/build.make:286: CMakeFiles/iap.dir/src/iap/common/cloud_covariance_estimation.cpp.o] Error 1
+gmake[2]: *** [CMakeFiles/iap.dir/build.make:258: CMakeFiles/iap.dir/src/iap/common/imu_validation.cpp.o] Error 1
+gmake[2]: *** [CMakeFiles/iap.dir/build.make:342: CMakeFiles/iap.dir/src/iap/odometry/loose_initial_state_estimation.cpp.o] Error 1
+/home/dev/code/ws_iap/src/iap/src/iap/util/logging.cpp:2:10: fatal error: iap/util/config.hpp: No such file or directory
+    2 | #include <iap/util/config.hpp>
+      |          ^~~~~~~~~~~~~~~~~~~~~
+compilation terminated.
+gmake[2]: *** [CMakeFiles/iap.dir/build.make:90: CMakeFiles/iap.dir/src/iap/util/logging.cpp.o] Error 1
+gmake[1]: *** [CMakeFiles/Makefile2:107: CMakeFiles/iap.dir/all] Error 2
+gmake: *** [Makefile:146: all] Error 2

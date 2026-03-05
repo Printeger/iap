@@ -1,0 +1,6 @@
+Invoking command in '/home/dev/code/ws_iap/src/iap/build/iap': CMAKE_PREFIX_PATH=${CMAKE_PREFIX_PATH}:/opt/ros/jazzy /usr/bin/cmake /home/dev/code/ws_iap/src/iap -DCMAKE_BUILD_TYPE=RelWithDebInfo -DCMAKE_EXPORT_COMPILE_COMMANDS=ON -DCMAKE_INSTALL_PREFIX=/home/dev/code/ws_iap/src/iap/install/iap
+Invoked command in '/home/dev/code/ws_iap/src/iap/build/iap' returned '0': CMAKE_PREFIX_PATH=${CMAKE_PREFIX_PATH}:/opt/ros/jazzy /usr/bin/cmake /home/dev/code/ws_iap/src/iap -DCMAKE_BUILD_TYPE=RelWithDebInfo -DCMAKE_EXPORT_COMPILE_COMMANDS=ON -DCMAKE_INSTALL_PREFIX=/home/dev/code/ws_iap/src/iap/install/iap
+Invoking command in '/home/dev/code/ws_iap/src/iap/build/iap': CMAKE_PREFIX_PATH=${CMAKE_PREFIX_PATH}:/opt/ros/jazzy /usr/bin/cmake --build /home/dev/code/ws_iap/src/iap/build/iap -- -j20 -l20
+Invoked command in '/home/dev/code/ws_iap/src/iap/build/iap' returned '0': CMAKE_PREFIX_PATH=${CMAKE_PREFIX_PATH}:/opt/ros/jazzy /usr/bin/cmake --build /home/dev/code/ws_iap/src/iap/build/iap -- -j20 -l20
+Invoking command in '/home/dev/code/ws_iap/src/iap/build/iap': CMAKE_PREFIX_PATH=${CMAKE_PREFIX_PATH}:/opt/ros/jazzy /usr/bin/cmake --install /home/dev/code/ws_iap/src/iap/build/iap
+Invoked command in '/home/dev/code/ws_iap/src/iap/build/iap' returned '0': CMAKE_PREFIX_PATH=${CMAKE_PREFIX_PATH}:/opt/ros/jazzy /usr/bin/cmake --install /home/dev/code/ws_iap/src/iap/build/iap
