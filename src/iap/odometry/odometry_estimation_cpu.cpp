@@ -1,5 +1,6 @@
 #include <iap/odometry/odometry_estimation_cpu.hpp>
 
+#include <Eigen/SVD>  // IAP-RQ-040: condition number for ICP degeneracy
 #include <spdlog/spdlog.h>
 
 #include <gtsam/inference/Symbol.h>
@@ -48,6 +49,10 @@ OdometryEstimationCPUParams::OdometryEstimationCPUParams() : OdometryEstimationI
   vgicp_resolution = config.param<double>("odometry_estimation", "vgicp_resolution", 0.2);
   vgicp_voxelmap_levels = config.param<int>("odometry_estimation", "vgicp_voxelmap_levels", 2);
   vgicp_voxelmap_scaling_factor = config.param<double>("odometry_estimation", "vgicp_voxelmap_scaling_factor", 2.0);
+
+  // IAP-RQ-040: ICP quality / health
+  icp_cond_threshold = config.param<double>("odometry_estimation", "icp_cond_threshold", 500.0);
+  gamma_lidar_max    = config.param<double>("odometry_estimation", "gamma_lidar_max",    10.0);
 }
 
 OdometryEstimationCPUParams::~OdometryEstimationCPUParams() {}
@@ -154,17 +159,76 @@ gtsam::NonlinearFactorGraph OdometryEstimationCPU::create_factors(const int curr
   frames[current]->T_world_imu = frames[last]->T_world_imu * T_last_current;
   new_values.insert_or_assign(X(current), gtsam::Pose3(frames[current]->T_world_imu.matrix()));
 
+  // --- IAP-RQ-040: ICP quality report + noise inflation --------------------
+  // Re-linearize at optimal pose to populate correspondences & Hessian
+  auto gfg = matching_cost_factors.linearize(values);
+
+  // Condition number of the 6×6 Hessian diagonal block for pose X(current)
+  double cond_number = 1.0;
+  {
+    const auto H_blocks = gfg->hessianBlockDiagonal();
+    const auto it = H_blocks.find(X(current));
+    if (it != H_blocks.end()) {
+      Eigen::JacobiSVD<Eigen::MatrixXd> svd(it->second, Eigen::ComputeThinU | Eigen::ComputeThinV);
+      const auto& sv  = svd.singularValues();
+      const double sv_min = sv(sv.size() - 1);
+      const double sv_max = sv(0);
+      cond_number = (sv_min > 1e-10) ? sv_max / sv_min : 1e9;
+    }
+  }
+
+  // Inlier count / fraction — cast to concrete factor type
+  int    inlier_count    = 0;
+  double inlier_fraction = 0.0;
+  for (const auto& f : matching_cost_factors) {
+    if (auto* gicp = dynamic_cast<gtsam_points::IntegratedGICPFactor_<gtsam_points::iVox, gtsam_points::PointCloud>*>(f.get())) {
+      const double frac = gicp->inlier_fraction();
+      inlier_fraction += frac;
+      inlier_count    += static_cast<int>(frac * frames[current]->frame->size());
+    }
+    if (auto* vgicp = dynamic_cast<gtsam_points::IntegratedVGICPFactor*>(f.get())) {
+      inlier_fraction += vgicp->inlier_fraction();
+      inlier_count    += vgicp->num_inliers();
+    }
+  }
+  if (!matching_cost_factors.empty()) {
+    inlier_fraction /= static_cast<double>(matching_cost_factors.size());
+  }
+
+  // RMSE proxy: sqrt(total_error / inlier_count)
+  const double total_error = matching_cost_factors.error(values);
+  const double rmse        = std::sqrt(total_error / std::max(inlier_count, 1));
+
+  // Noise inflation: gamma_lidar = clamp(sqrt(cond/thresh), 1, max)
+  const double cond_threshold = params->icp_cond_threshold;
+  const bool   degeneracy_flag = (cond_number > cond_threshold);
+  const double gamma_lidar = degeneracy_flag
+    ? std::min(std::sqrt(cond_number / cond_threshold), params->gamma_lidar_max)
+    : 1.0;
+
+  // Populate quality report in the frame
+  auto& q          = frames[current]->icp_quality;
+  q.inlier_count   = inlier_count;
+  q.inlier_fraction= inlier_fraction;
+  q.rmse           = rmse;
+  q.cond_number    = cond_number;
+  q.degeneracy_flag= degeneracy_flag;
+  q.gamma_lidar    = gamma_lidar;
+
+  logger->trace(
+    "icp_quality[{}]: inliers={} ({:.1f}%) rmse={:.4f} cond={:.1f} degenerate={} gamma={:.2f}",
+    current, inlier_count, inlier_fraction * 100.0, rmse,
+    cond_number, degeneracy_flag, gamma_lidar);
+  // -------------------------------------------------------------------------
+
   gtsam::NonlinearFactorGraph factors;
 
-  // Get linearized matching cost factors
-  // const auto linearized = optimizer.last_linearized();
-  // for (int i = linearized->size() - matching_cost_factors.size(); i < linearized->size(); i++) {
-  //   factors.emplace_shared<gtsam::LinearContainerFactor>(linearized->at(i), values);
-  // }
-
-  // TODO: Extract a relative pose covariance from a frame-to-model matching result?
-  factors.emplace_shared<gtsam::BetweenFactor<gtsam::Pose3>>(X(last), X(current), gtsam::Pose3(T_last_current.matrix()), gtsam::noiseModel::Isotropic::Precision(6, 1e3));
-  factors.emplace_shared<gtsam::PriorFactor<gtsam::Pose3>>(X(current), gtsam::Pose3(T_target_imu.matrix()), gtsam::noiseModel::Isotropic::Precision(6, 1e3));
+  // LiDAR factor noise — inflated by gamma_lidar when degenerate (RQ-040)
+  // base precision = 1e3  →  base sigma = 1/sqrt(1e3) ≈ 0.032 m
+  // inflated sigma = base_sigma * gamma_lidar  →  inflated precision = base_precision / gamma²
+  const double lidar_precision = 1e3 / (gamma_lidar * gamma_lidar);
+  factors.emplace_shared<gtsam::BetweenFactor<gtsam::Pose3>>(X(last), X(current), gtsam::Pose3(T_last_current.matrix()), gtsam::noiseModel::Isotropic::Precision(6, lidar_precision));
+  factors.emplace_shared<gtsam::PriorFactor<gtsam::Pose3>>(X(current), gtsam::Pose3(T_target_imu.matrix()), gtsam::noiseModel::Isotropic::Precision(6, lidar_precision));
 
   update_target(current, T_target_imu);
   last_T_target_imu = T_target_imu;

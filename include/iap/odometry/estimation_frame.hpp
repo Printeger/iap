@@ -101,6 +101,19 @@ public:
   Eigen::Matrix3d sigma_p = Eigen::Matrix3d::Zero();
   // -----------------------------------------------------------------------
 
+  // ---- IAP: ICP quality report (IAP-RQ-040) ------------------------------
+  /// Quality metrics from the frame-to-model ICP/GICP/VGICP match.
+  struct IcpQuality {
+    int    inlier_count    = 0;    ///< number of inlier correspondences
+    double inlier_fraction = 0.0;  ///< inlier fraction [0,1]
+    double rmse            = 0.0;  ///< sqrt(error / inlier_count) [m]
+    double cond_number     = 1.0;  ///< condition number of approximate Hessian
+    bool   degeneracy_flag = false;///< true when cond_number > cond_threshold
+    double gamma_lidar     = 1.0;  ///< noise inflation factor (>= 1.0)
+  };
+  IcpQuality icp_quality;  ///< populated in odometry_estimation_cpu.cpp
+  // -----------------------------------------------------------------------
+
   PreprocessedFrame::ConstPtr raw_frame;             ///< Raw input point cloud (LiDAR frame)
   Eigen::Matrix<double, 8, -1> imu_rate_trajectory;  ///< IMU-rate trajectory 8 x N  [t, x, y, z, qx, qy, qz, qw]
 

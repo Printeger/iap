@@ -36,6 +36,11 @@ public:
   double vgicp_resolution;               ///< Voxelmap resolution (for VGICP)
   int vgicp_voxelmap_levels;             ///< Multi-resolution voxelmap levesl (for VGICP)
   double vgicp_voxelmap_scaling_factor;  ///< Multi-resolution voxelmap scaling factor (for VGICP)
+
+  // ---- IAP: ICP quality / health (IAP-RQ-040) ---------------------------
+  double icp_cond_threshold;  ///< Hessian condition number threshold for degeneracy (default 500)
+  double gamma_lidar_max;     ///< Maximum noise inflation factor for degenerate LiDAR (default 10.0)
+  // -----------------------------------------------------------------------
 };
 
 /**

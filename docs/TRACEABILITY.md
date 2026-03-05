@@ -22,7 +22,7 @@
 | IAP-RQ-015 | Expose Σ_p 位置协方差块（3×3）到 EstimationFrame；供 PL proxy 使用 | 保护级别需基于不确定性 | `estimation_frame.hpp` (+sigma_p), `odometry_estimation_imu.cpp` (marginalCovariance) | `trace` 日志含 `trace(Σ_p)` 和 `lambda_max(Σ_p)` | `trace_sigma_p, lambda_max_sigma_p, PL_proxy` | **DONE** |
 | IAP-RQ-020 | GNSS 紧耦合观测：伪距 + 多普勒建因子（含 clock bias/drift，per-sat） | GNSS tightly-coupled | `include/iap/gnss/`, `src/iap/gnss/` (PseudorangeFactor, DopplerFactor, GnssHandler) | 关闭/开启 GNSS 对比 | `res_pr, res_dop, clk, clk_dot` | **DONE** |
 | IAP-RQ-030 | GNSS per-satellite NIS gating：downweight / exclude（RAIM-ish baseline） | 卫星级完整性、FDE 思路 | `src/integrity/gnss_integrity.*` | 注入某卫星 bias，触发剔星 | `sat_nis, exclude_sats, gamma_R, global_nis` | TODO |
-| IAP-RQ-040 | LiDAR ICP 因子健康度：退化/错配检测 → noise inflation / drop factor | trunk/几何退化会影响可观测性 | `src/health/lidar_health.*` | 走廊/单面结构场景退化 | `icp_rmse, inliers, cond, gamma_lidar, drop` | TODO |
+| IAP-RQ-040 | LiDAR ICP 因子健康度：退化/错配检测 → noise inflation / drop factor | trunk/几何退化会影响可观测性 | `EstimationFrame::IcpQuality`, `odometry_estimation_cpu.cpp` (Hessian cond, gamma_lidar) | 走廊/单面结构场景退化 | `icp_rmse, inliers, cond, gamma_lidar, drop` | **DONE** |
 | IAP-RQ-050 | IMU 健康度：饱和/模型失配 → noise inflation / alarm | 传感器健康度影响可信度 | `src/health/imu_health.*` | 人为制造饱和或异常噪声 | `acc_norm, gyro_norm, sat_flag, gamma_imu` | TODO |
 | IAP-RQ-060 | 规划目标：J(τ)=Σ hinge(PL_pred-AL)^2 + λ_goal*dist + λ_u*effort | 优化版 integrity-aware cost | `src/planner/cost.*` | 单步生成候选轨迹打分 | `J_total, J_integrity, J_goal, J_effort` | TODO |
 | IAP-RQ-070 | 预测层：对候选轨迹预测 PL_pred（baseline：代理；升级：ARAIM） | 预测可见/可观测集合与 PL_pred | `src/predictor/*` | 对比不同轨迹的 PL_pred 差异 | `PL_pred(s), AL(s), IM_pred(s)` | TODO |

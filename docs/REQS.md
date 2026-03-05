@@ -88,8 +88,8 @@ Acceptance:
 
 ### IAP-RQ-040: LiDAR odometry / mapping factor baseline（GLIM baseline 已具备）
 - [x] 最小版本：scan-to-map ICP 相对位姿因子（CPU/GPU/CT 任一路可跑）
-- [ ] 输出 ICP quality report（inlier/rmse/cond/degeneracy/相对位姿协方差等）
-- [ ] health→noise inflation：当退化/错配时，对 LiDAR factor 噪声膨胀（而非硬剔除）
+- [x] 输出 ICP quality report（inlier/rmse/cond/degeneracy/相对位姿协方差等）
+- [x] health→noise inflation：当退化/错配时，对 LiDAR factor 噪声膊胀（而非硬剖除）
 
 Acceptance:
 - ICP 因子可开关；质量指标能打点输出；
