@@ -51,20 +51,20 @@
     // LiDAR config
     "global_shutter_lidar": false,
     "T_lidar_imu": [
-      0.006,
-      -0.012,
-      0.008,
+      0.0,
+      0.0,
+      0.0,
       0.0,
       0.0,
       0.0,
       1.0
-    ],
+    ], // Livox Avia: IMU co-located with LiDAR, identity transform
     "intensity_field": "intensity",
-    "ring_field": "",
+    "ring_field": "line", // Livox PointCloud2 uses 'line' as ring/laser-ID field
     // LiDAR per-point time settings
     "autoconf_perpoint_times": true,
     "autoconf_prefer_frame_time": false,
-    "perpoint_relative_time": true,
+    "perpoint_relative_time": false, // Livox timestamp field is absolute Unix time (float64 s)
     "perpoint_time_scale": 1.0,
     // Camera config (required for only extension modules)
     "global_shutter_camera": true,
