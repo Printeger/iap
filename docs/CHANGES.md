@@ -6,6 +6,12 @@
 - (none)
 
 ## 2026-03-05
+- IAP-RQ-020: GNSS measurement model — pseudorange + Doppler factors.
+  - New `include/iap/gnss/`: `gnss_types.hpp` (SatObs, GnssEpoch), `pseudorange_factor.hpp`, `doppler_factor.hpp`, `gnss_handler.hpp`.
+  - New `src/iap/gnss/`: `pseudorange_factor.cpp` (PseudorangeFactor: NoiseModelFactor2<Pose3,Vector2>, analytical Jacobians), `doppler_factor.cpp` (DopplerFactor: NoiseModelFactor3<Pose3,Vector3,Vector2>), `gnss_handler.cpp` (epoch queue, elevation-dependent noise, get_factors()).
+  - Each satellite is an independent observation channel (per-sat gating ready).
+  - Ephemeris (sat_pos/sat_vel) pre-computed outside factors; minimal stub accepted.
+  - `colcon build` passes.
 - IAP-RQ-015: Expose Σ_p from smoother marginal covariance.
   - `EstimationFrame`: +`sigma_p` (Eigen::Matrix3d, zero-init)
   - `odometry_estimation_imu.cpp`: `smoother->marginalCovariance(X(i))`; extract `pose_cov.block<3,3>(3,3)`; compute `trace`, `lambda_max` via SelfAdjointEigenSolver; `trace`-level log `sigma_p trace/lambda_max/PL_proxy`.

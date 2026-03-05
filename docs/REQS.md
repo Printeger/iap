@@ -68,11 +68,11 @@ Acceptance:
 - replay 同一数据时 Σ_p 曲线稳定可视化；planner/integrity 可直接读 Σ_p。
 
 ### IAP-RQ-020: GNSS measurement model (pseudorange + doppler)
-- [ ] 新建 `src/iap/gnss/`：GNSS 因子、星历解算、ROS handler
-- [ ] 实现伪距因子：含 receiver clock bias，residual=meas-pred
-- [ ] 实现多普勒因子：含 receiver clock drift + 速度投影（m/s），residual=meas-pred
-- [ ] 每颗卫星观测作为独立观测通道（便于 per-sat integrity / gating）
-- [ ] 星历解算：由广播星历得到 sat pos/vel（可先接一个库/最小实现）
+- [x] 新建 `src/iap/gnss/`：GNSS 因子、星历解算、ROS handler
+- [x] 实现伪距因子：含 receiver clock bias，residual=meas-pred
+- [x] 实现多普勒因子：含 receiver clock drift + 速度投影（m/s），residual=meas-pred
+- [x] 每颗卫星观测作为独立观测通道（便于 per-sat integrity / gating）
+- [x] 星历解算：由广播星历得到 sat pos/vel（可先接一个库/最小实现）
 
 Acceptance:
 - 日志输出每颗卫星 residual_pr / residual_dop；

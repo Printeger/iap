@@ -1,0 +1,46 @@
+#pragma once
+// IAP-RQ-020: GNSS types — per-satellite observation data
+
+#include <Eigen/Core>
+#include <string>
+#include <vector>
+
+namespace iap {
+
+/// @brief Per-satellite observation data for one epoch.
+///
+/// Each SatObs represents a single satellite observable channel;
+/// pseudorange and Doppler are carried as separate fields so that
+/// per-channel integrity gating (RQ-220) can admissibility-check them
+/// independently.
+struct SatObs {
+  int  sat_id        = 0;     ///< satellite PRN / composite ID
+  char constellation = 'G';  ///< 'G'=GPS, 'R'=GLONASS, 'E'=Galileo, 'C'=BeiDou
+
+  // ---- Measurements -------------------------------------------------------
+  double pr_meas  = 0.0;  ///< pseudorange measurement [m]
+  double dop_meas = 0.0;  ///< Doppler measurement [m/s]  (positive = approach)
+  double pr_sigma  = 5.0; ///< pseudorange 1-sigma noise [m]
+  double dop_sigma = 0.5; ///< Doppler    1-sigma noise [m/s]
+
+  // ---- Ephemeris-derived quantities (IAP-RQ-020: satellite state) ----------
+  Eigen::Vector3d sat_pos = Eigen::Vector3d::Zero();  ///< satellite ECEF position [m]
+  Eigen::Vector3d sat_vel = Eigen::Vector3d::Zero();  ///< satellite ECEF velocity [m/s]
+
+  // ---- Geometry -----------------------------------------------------------
+  double elevation = 0.0;  ///< elevation angle [rad] — used for noise weighting
+  double azimuth   = 0.0;  ///< azimuth angle   [rad]
+
+  // ---- NIS gating (populated by RQ-220) -----------------------------------
+  double nis_pr  = 0.0;  ///< normalised innovation squared — pseudorange
+  double nis_dop = 0.0;  ///< normalised innovation squared — Doppler
+  bool   excluded = false; ///< set true when FDE rejects the satellite
+};
+
+/// @brief All per-satellite observations at one GNSS epoch.
+struct GnssEpoch {
+  double stamp = 0.0;           ///< ROS timestamp [s]
+  std::vector<SatObs> sats;    ///< per-satellite channels
+};
+
+}  // namespace iap

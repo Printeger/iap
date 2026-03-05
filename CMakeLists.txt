@@ -77,6 +77,10 @@ add_library(iap SHARED
   src/iap/common/imu_validation.cpp
   src/iap/common/cloud_deskewing.cpp
   src/iap/common/cloud_covariance_estimation.cpp
+  # gnss (IAP-RQ-020)
+  src/iap/gnss/pseudorange_factor.cpp
+  src/iap/gnss/doppler_factor.cpp
+  src/iap/gnss/gnss_handler.cpp
   # odometry
   src/iap/odometry/callbacks.cpp
   src/iap/odometry/estimation_frame.cpp
