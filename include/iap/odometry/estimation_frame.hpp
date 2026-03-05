@@ -94,6 +94,13 @@ public:
   double clk_drift = 0.0;  ///< Receiver clock drift δṫ [m/s] (c * dt_dot)
   // -----------------------------------------------------------------------
 
+  // ---- IAP: position covariance (IAP-RQ-015) -----------------------------
+  /// 3×3 position covariance block Σ_p from smoother marginal.
+  /// Populated after each fixed-lag smoother update.
+  /// Use lambda_max(Σ_p) as PL proxy (see IAP-RQ-200).
+  Eigen::Matrix3d sigma_p = Eigen::Matrix3d::Zero();
+  // -----------------------------------------------------------------------
+
   PreprocessedFrame::ConstPtr raw_frame;             ///< Raw input point cloud (LiDAR frame)
   Eigen::Matrix<double, 8, -1> imu_rate_trajectory;  ///< IMU-rate trajectory 8 x N  [t, x, y, z, qx, qy, qz, qw]
 

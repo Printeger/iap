@@ -59,10 +59,10 @@ Acceptance:
 - 日志打印 state 关键量（p, v, clk_bias, clk_drift），滑窗运行稳定。
 
 ### IAP-RQ-015: Expose position covariance Σ_p（插在 RQ-010 后）
-- [ ] 从 smoother/后端导出位置协方差块 Σ_p（至少 3x3 position block）
-- [ ] 将 Σ_p 封装进 EstimationFrame（或等价输出结构）
-- [ ] 日志输出 `lambda_max(Σ_p)` / `trace(Σ_p)`（供 PL proxy 与回归测试）
-- [ ] 提供接口占位：未来可替换为更精确的 `H Σ H^T` 等传播（先不实现真算）
+- [x] 从 smoother/后端导出位置协方差块 Σ_p（至少 3x3 position block）
+- [x] 将 Σ_p 封装进 EstimationFrame（或等价输出结构）
+- [x] 日志输出 `lambda_max(Σ_p)` / `trace(Σ_p)`（供 PL proxy 与回归测试）
+- [x] 提供接口占位：未来可替换为更精确的 `H Σ H^T` 等传播（先不实现真算）
 
 Acceptance:
 - replay 同一数据时 Σ_p 曲线稳定可视化；planner/integrity 可直接读 Σ_p。

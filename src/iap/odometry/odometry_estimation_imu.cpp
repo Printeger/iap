@@ -1,4 +1,5 @@
 #include <iap/odometry/odometry_estimation_imu.hpp>
+#include <Eigen/Eigenvalues>
 
 #include <spdlog/spdlog.h>
 
@@ -432,6 +433,21 @@ void OdometryEstimationIMU::update_frames(int current, const gtsam::NonlinearFac
       const auto clk = smoother->calculateEstimate<gtsam::Vector2>(C(i));
       frames[i]->clk_bias  = clk(0);
       frames[i]->clk_drift = clk(1);
+
+      // IAP-RQ-015: extract position covariance Σ_p from smoother marginal
+      try {
+        const gtsam::Matrix pose_cov = smoother->marginalCovariance(X(i));  // 6×6 [rot|trans]
+        frames[i]->sigma_p = pose_cov.block<3, 3>(3, 3);  // translation block
+        const double trace_sigma_p = frames[i]->sigma_p.trace();
+        // Largest eigenvalue via SelfAdjointEigenSolver (cheapest for 3×3)
+        Eigen::SelfAdjointEigenSolver<Eigen::Matrix3d> eig(frames[i]->sigma_p, Eigen::EigenvaluesOnly);
+        const double lambda_max = eig.eigenvalues().maxCoeff();
+        logger->trace("sigma_p [{}]: trace={:.6f} lambda_max={:.6f} (PL_proxy={:.4f}m)",
+          i, trace_sigma_p, lambda_max, std::sqrt(std::max(0.0, lambda_max)));
+      } catch (const std::exception& e) {
+        logger->warn("marginalCovariance(X({})) failed: {}", i, e.what());
+      }
+
       logger->trace("state[{}]: p=({:.3f},{:.3f},{:.3f}) v=({:.3f},{:.3f},{:.3f}) clk_bias={:.4f}m clk_drift={:.4f}m/s",
         i,
         T_world_imu.translation().x(), T_world_imu.translation().y(), T_world_imu.translation().z(),

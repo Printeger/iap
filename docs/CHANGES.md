@@ -6,6 +6,10 @@
 - (none)
 
 ## 2026-03-05
+- IAP-RQ-015: Expose Σ_p from smoother marginal covariance.
+  - `EstimationFrame`: +`sigma_p` (Eigen::Matrix3d, zero-init)
+  - `odometry_estimation_imu.cpp`: `smoother->marginalCovariance(X(i))`; extract `pose_cov.block<3,3>(3,3)`; compute `trace`, `lambda_max` via SelfAdjointEigenSolver; `trace`-level log `sigma_p trace/lambda_max/PL_proxy`.
+  - Interface placeholder: downstream can read `frame->sigma_p`; replace block with exact `HΣH^T` when needed (RQ-320).
 - IAP-RQ-010: Extend state with `clk_bias`/`clk_drift` [δt m, δṫ m/s].
   - `EstimationFrame`: +`clk_bias`, +`clk_drift` (double)
   - `OdometryEstimationIMUParams`: +`clk_bias_noise`(100m), +`clk_drift_noise`(1m/s)
