@@ -6,6 +6,12 @@
 - (none)
 
 ## 2026-03-05
+- IAP-RQ-500/510: Experiments & metrics stubs.
+  - `include/iap/experiments/metrics.hpp`: MetricSample (stamp,PL,AL,IM,violation,path_increment,control_effort,mode); MetricsCollector (add/reset/log_summary/write_csv); ExperimentResult; write_comparison_table() → Markdown.
+    * Metrics: Time(PL>AL)%, AvgPL, MinIM, path length, mission time, control effort, success.
+  - `apps/iap_experiment.cpp`: iap_experiment node; runs three baselines (Passive/CovMin/IntegAware) against a synthetic degraded-zone scenario; writes per-baseline CSV + Markdown summary table to /tmp/.
+  - CMakeLists.txt: +iap_experiment executable.
+  - `colcon build` passes.
 - IAP-RQ-400/410: Integrity-aware planner + receding horizon loop.
   - `include/iap/planner/integrity_planner.hpp`: IntegrityPlanner with Params (w_integrity, w_mission, w_smooth, search_weight_multiplier, dt_execute, al_default); `plan(pos0,vel0,yaw0,goal,sigma0,report)` → best CandidateTrajectory; `execution_target(chosen)` → first point ≥ dt_execute.
   - `src/iap/planner/integrity_planner.cpp`:

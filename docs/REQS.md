@@ -207,18 +207,18 @@ Acceptance:
 
 ## 7. Experiments & Metrics
 ### IAP-RQ-500: Baselines
-- [ ] Passive（不主动，仅估计）
-- [ ] Covariance-min（active SLAM 风格，最小 Σ）
-- [ ] Integrity-aware（本方法）
+- [x] Passive（不主动，仅估计）
+- [x] Covariance-min（active SLAM 风格，最小 Σ）
+- [x] Integrity-aware（本方法）
 
 Acceptance:
 - 同一套场景下三者都能跑通并输出指标。
 
 ### IAP-RQ-510: Metrics
-- [ ] Time(PL>AL) %
-- [ ] Mission success rate
-- [ ] Avg PL / Min IM
-- [ ] Mission time, path length, control effort
+- [x] Time(PL>AL) %
+- [x] Mission success rate
+- [x] Avg PL / Min IM
+- [x] Mission time, path length, control effort
 
 Acceptance:
 - 输出表格/曲线可直接用于汇报。

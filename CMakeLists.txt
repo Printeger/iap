@@ -280,7 +280,12 @@ if(DEFINED ENV{ROS_VERSION})
     target_link_libraries(iap_status iap)
     list(APPEND iap_LIBRARIES iap_status)
 
-    install(TARGETS iap_status DESTINATION lib/iap)
+    ## Experiment runner (IAP-RQ-500/510)
+    add_executable(iap_experiment apps/iap_experiment.cpp)
+    target_link_libraries(iap_experiment iap)
+    list(APPEND iap_LIBRARIES iap_experiment)
+
+    install(TARGETS iap_status iap_experiment DESTINATION lib/iap)
     install(DIRECTORY launch DESTINATION share/iap)
     install(DIRECTORY config DESTINATION share/iap)
     ament_export_include_directories(include ${EIGEN3_INCLUDE_DIR} ${OpenCV_INCLUDE_DIRS})
