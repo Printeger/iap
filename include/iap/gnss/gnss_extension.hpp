@@ -82,8 +82,10 @@ class GnssExtensionModule : public glim::ExtensionModuleROS2 {
   GnssHandler gnss_handler_;
 
   // Current frame tracking (set by on_new_frame callback)
-  std::atomic<long>   last_frame_id_{-1};
-  std::atomic<double> last_frame_stamp_{0.0};
+  std::atomic<long>     last_frame_id_{-1};
+  std::atomic<double>   last_frame_stamp_{0.0};
+  std::atomic<uint64_t> epoch_count_{0};   ///< total epochs received
+  std::atomic<uint64_t> factor_count_{0};  ///< total smoother injections
 
   // Coordinate frame: ECEF origin + rotation ECEF→ENU
   mutable std::mutex  frame_mutex_;

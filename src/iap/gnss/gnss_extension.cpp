@@ -286,8 +286,15 @@ void GnssExtensionModule::on_range_meas_(
 
   if (!epoch.sats.empty()) {
     gnss_handler_.insert_epoch(epoch);
-    logger_->trace("gnss_ext: inserted epoch stamp={:.3f} n_sats={}",
-                   epoch.stamp, epoch.sats.size());
+    const uint64_t n = ++epoch_count_;
+    // Log first epoch, then every 100 (≈ ~10 s at 10 Hz)
+    if (n == 1 || n % 100 == 0) {
+      logger_->info("[gnss_ext] epoch #{} inserted: stamp={:.3f} n_sats={}",
+                    n, epoch.stamp, epoch.sats.size());
+    } else {
+      logger_->debug("[gnss_ext] epoch #{} inserted: stamp={:.3f} n_sats={}",
+                     n, epoch.stamp, epoch.sats.size());
+    }
   }
 }
 
@@ -307,13 +314,15 @@ void GnssExtensionModule::on_smoother_update_(
 
   if (gnss_factors.size() > 0) {
     new_factors.add(gnss_factors);
-    size_t n_pr = 0, n_dop = 0;
-    for (const auto& ep : consumed) {
-      n_pr  += ep.sats.size();
-      n_dop += ep.sats.size();
+    const uint64_t n = ++factor_count_;
+    // Log first injection, then every 100 frames
+    if (n == 1 || n % 100 == 0) {
+      logger_->info("[gnss_ext] injection #{}: {} GNSS factors → frame {} (stamp={:.3f})",
+                    n, gnss_factors.size(), frame_id, frame_stamp);
+    } else {
+      logger_->debug("[gnss_ext] injection #{}: {} GNSS factors → frame {} (stamp={:.3f})",
+                     n, gnss_factors.size(), frame_id, frame_stamp);
     }
-    logger_->debug("gnss_ext: added {} GNSS factors (frame_id={}, stamp={:.3f})",
-                   gnss_factors.size(), frame_id, frame_stamp);
   }
 }
 

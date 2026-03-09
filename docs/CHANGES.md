@@ -3,6 +3,9 @@
 > 规则：任何代码改动必须在这里记录，并包含 IAP-RQ-XXX。
 
 ## Unreleased
+- fix(gnss): raise epoch/factor injection log to `info` level (rate-limited: first + every 100).
+  Previously `trace`/`debug` — invisible at default level. Now readable in terminal & log file.
+  Added `epoch_count_` / `factor_count_` atomics to `GnssExtensionModule`.
 - IAP-RQ-020 (bridge): `GnssExtensionModule` — full ROS2 GNSS data pipeline.
   - `include/iap/gnss/gnss_extension.hpp` + `src/iap/gnss/gnss_extension.cpp`:
     `GnssExtensionModule : ExtensionModuleROS2`; subscribes `/ublox_driver/range_meas`,
