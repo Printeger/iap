@@ -3,6 +3,14 @@
 > 规则：任何代码改动必须在这里记录，并包含 IAP-RQ-XXX。
 
 ## Unreleased
+- fix(gnss): IAP-RQ-020 — `epoch.stamp` now derived from GPS observation time (UTC)
+  instead of `node_->get_clock()->now()` (wall clock).
+  - Root cause: wall clock during bag replay differs from bag recording time by months,
+    causing `GnssHandler::get_factors()` to drain all epochs as "too old" (delta >> `time_tolerance`).
+  - Fix: `gnss_comm::gpst2utc(obs_list[0]->time)` → UTC Unix time → `epoch.stamp`;
+    aligns with LiDAR `frame_stamp` within ±0.1 s.
+  - Adds a `std::call_once` diagnostic log on the first epoch: prints
+    `epoch UTC stamp`, `last_frame_stamp`, and `delta` for alignment verification.
 - feat(gnss): post-optimization diagnostic via `on_smoother_update_finish`.
   - Registers `on_smoother_update_finish` callback; fires after iSAM2 optimization.
   - Stores last-injected PR/Doppler factors (by key-count heuristic: 2=PR, 3=Dop).

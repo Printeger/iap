@@ -198,7 +198,27 @@ void GnssExtensionModule::on_range_meas_(
   if (obs_list.empty()) return;
 
   GnssEpoch epoch;
-  epoch.stamp = ros_stamp;
+  // Derive epoch stamp from the GPS observation time, converted to UTC.
+  // node_->get_clock()->now() returns the current wall clock, which differs
+  // from bag replay timestamps by the recording date offset (potentially months),
+  // causing get_factors() to drain all epochs as "too old".
+  // gnss_comm::gpst2utc() subtracts GPS leap seconds to give UTC Unix time,
+  // matching the LiDAR frame_stamp that glim extracts from the bag.
+  {
+    const auto utc_t = gnss_comm::gpst2utc(obs_list[0]->time);
+    epoch.stamp = static_cast<double>(utc_t.time) + utc_t.sec;
+  }
+
+  // One-time stamp alignment diagnostic
+  {
+    static std::once_flag once;
+    std::call_once(once, [&] {
+      logger_->info(
+          "[gnss_ext] first epoch UTC stamp={:.3f}  (last_frame_stamp={:.3f}  delta={:.3f}s)",
+          epoch.stamp, last_frame_stamp_.load(),
+          epoch.stamp - last_frame_stamp_.load());
+    });
+  }
 
   // Lock ephemeris cache for the duration of this epoch conversion
   std::lock_guard<std::mutex> eph_lk(ephem_mutex_);
