@@ -3,7 +3,20 @@
 > 规则：任何代码改动必须在这里记录，并包含 IAP-RQ-XXX。
 
 ## Unreleased
-- (none)
+- IAP-RQ-020 (bridge): `GnssExtensionModule` — full ROS2 GNSS data pipeline.
+  - `include/iap/gnss/gnss_extension.hpp` + `src/iap/gnss/gnss_extension.cpp`:
+    `GnssExtensionModule : ExtensionModuleROS2`; subscribes `/ublox_driver/range_meas`,
+    `/ublox_driver/ephem`, `/ublox_driver/glo_ephem`, `/ublox_driver/receiver_lla`.
+  - NavSatFix → WGS-84 geodetic → ECEF origin + ENU rotation matrix; thread-safe origin.
+  - `GnssMeasMsg` → L1 obs index, sat-clock-corrected pseudorange, Doppler m/s
+    (`dop = -dopp_hz × c/f`), sat ECEF pos/vel from `eph2pos/geph2pos`/vel,
+    transformed to local ENU; per-satellite elevation from ENU unit vector.
+  - `OdometryEstimationCallbacks::on_new_frame` → track `last_frame_id/stamp`.
+  - `on_smoother_update` → `GnssHandler::get_factors()` → inject into `new_factors`.
+  - `create_extension_module()` C entry-point for GLIM dlopen.
+  - CMakeLists.txt: `gnss_extension` SHARED lib; `find_package(glog, gnss_comm, sensor_msgs)`.
+  - `config/config_ros.json`: `libgnss_extension.so` added to `extension_modules`.
+  - `colcon build` passes; `libgnss_extension.so` exports all symbols.
 
 ## 2026-03-05 (Phase-4)
 - IAP-RQ-331/421/422: Predicted ARAIM PL in planner + per-waypoint AL.

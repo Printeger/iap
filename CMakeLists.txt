@@ -286,6 +286,23 @@ if(DEFINED ENV{ROS_VERSION})
     # ROS2
     find_package(ament_cmake REQUIRED)
 
+    ## GNSS ROS2 extension module (IAP-RQ-020 bridge)
+    find_package(glog REQUIRED)
+    find_package(gnss_comm REQUIRED)
+    find_package(sensor_msgs REQUIRED)
+    find_package(rclcpp REQUIRED)
+
+    add_library(gnss_extension SHARED
+      src/iap/gnss/gnss_extension.cpp
+    )
+    target_include_directories(gnss_extension PUBLIC
+      $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+    )
+    target_link_libraries(gnss_extension iap)
+    ament_target_dependencies(gnss_extension rclcpp sensor_msgs gnss_comm)
+    list(APPEND iap_LIBRARIES gnss_extension)
+    install(TARGETS gnss_extension DESTINATION lib)
+
     ## Demo / smoke-test executable (IAP-RQ-002)
     add_executable(iap_status apps/iap_status.cpp)
     target_link_libraries(iap_status iap)
