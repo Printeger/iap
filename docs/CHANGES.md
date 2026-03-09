@@ -3,6 +3,14 @@
 > 规则：任何代码改动必须在这里记录，并包含 IAP-RQ-XXX。
 
 ## Unreleased
+- fix(gnss): IAP-RQ-020 — inject `C(frame_id)` into `new_values`/`new_stamps` explicitly.
+  - Root cause: glim's `OdometryEstimationIMU::update_smoother()` (no clock variable)
+    takes precedence over IAP's override at runtime due to shared-library symbol resolution.
+    `C(frame_id)` was never added to the smoother → iSAM2 fallback discarded all GNSS factors.
+  - Fix: in `on_smoother_update_`, if `!new_values.exists(C(frame_id))`, insert
+    `Vector2(0,0)` initial estimate + `frame_stamp` in `new_stamps`.  Also always writes
+    `new_stamps[C(frame_id)] = frame_stamp` even when already present (odometry path).
+  - One-time `call_once` log confirms which path was taken ('not in new_values').
 - fix(gnss): IAP-RQ-020 — `epoch.stamp` now derived from GPS observation time (UTC)
   instead of `node_->get_clock()->now()` (wall clock).
   - Root cause: wall clock during bag replay differs from bag recording time by months,

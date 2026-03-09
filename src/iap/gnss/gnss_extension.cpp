@@ -330,8 +330,8 @@ void GnssExtensionModule::on_range_meas_(
 void GnssExtensionModule::on_smoother_update_(
     gtsam_points::IncrementalFixedLagSmootherExtWithFallback& /*smoother*/,
     gtsam::NonlinearFactorGraph&                              new_factors,
-    gtsam::Values&                                            /*new_values*/,
-    std::map<std::uint64_t, double>&                          /*new_stamps*/) {
+    gtsam::Values&                                            new_values,
+    std::map<std::uint64_t, double>&                          new_stamps) {
   const long   frame_id    = last_frame_id_.load();
   const double frame_stamp = last_frame_stamp_.load();
   if (frame_id < 0) return;
@@ -341,6 +341,28 @@ void GnssExtensionModule::on_smoother_update_(
       static_cast<int>(frame_id), frame_stamp, &consumed);
 
   if (gnss_factors.size() > 0) {
+    // Ensure C(frame_id) [clock bias (m), clock drift (m/s)] exists in new_values.
+    // glim's base OdometryEstimationIMU does not add C; due to dynamic symbol
+    // resolution glim's version may take precedence over IAP's override, leaving C
+    // absent from the smoother.  We always insert it here so GNSS factors are valid.
+    using gtsam::symbol_shorthand::C;
+    if (!new_values.exists(C(frame_id))) {
+      // Try to warm-start from smoother; fall back to zero.
+      // (Smoother may already have C from a previous frame's clock-walk model.)
+      new_values.insert(C(frame_id), gtsam::Vector2(0.0, 0.0));
+      new_stamps[C(frame_id)] = frame_stamp;
+
+      static std::once_flag once_clk;
+      std::call_once(once_clk, [&] {
+        logger_->info("[gnss_ext] C({}) not in new_values — inserted zero init "
+                      "(glim base class does not add clock variable)",
+                      frame_id);
+      });
+    } else {
+      // Make sure the stamp is registered even if odometry added the value
+      new_stamps[C(frame_id)] = frame_stamp;
+    }
+
     // Store a snapshot for post-optimization residual evaluation
     {
       std::lock_guard<std::mutex> lk(factors_mutex_);
