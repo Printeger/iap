@@ -3,6 +3,22 @@
 > 规则：任何代码改动必须在这里记录，并包含 IAP-RQ-XXX。
 
 ## Unreleased
+- feat(gnss): IAP-RQ-020 — full ECEF pipeline with E(0)/R(0) free variables.
+  - Replace local-ENU coordinate frame with ECEF throughout GNSS pipeline.
+  - `PseudorangeFactor`: `NoiseModelFactor4<Pose3, Vector2, Vector3, Rot3>` — keys X(i), C(i), E(0), R(0).
+    Corrections: Klobuchar iono, Hopfield trop, Sagnac, TGD. Analytical Jacobians for all 4 keys.
+  - `DopplerFactor`: `NoiseModelFactor4<Pose3, Vector3, Vector2, Rot3>` — keys X(i), V(i), C(i), R(0).
+    Sagnac velocity correction included.
+  - `GnssExtension`: inserts `E(0)` + `R(0)` with loose priors (σ_E=5 m, σ_R≈5°) on first GNSS
+    injection; stamps both on every injection to keep them alive in fixed-lag smoother.
+    Subscribes to `/ublox_driver/iono_params` (Klobuchar GPS coefficients).
+  - `GnssHandler::get_factors()` now takes `anc_ecef` parameter for Doppler Sagnac.
+  - `gnss_types`: `SatObs` gains `tgd`, `svddt`; `GnssEpoch` gains `gps_sec`, `iono_params`.
+  - `CMakeLists`: `ament_target_dependencies(iap gnss_comm)` so factor .cpp can include gnss_utility.
+  - svdt sign fix: `sat.pr_meas = pr + svdt * c` (ADD per RTKLIB/LIGO; previous commit used subtract).
+  - svddt correction applied to Doppler: `sat.dop_meas = dop_raw + svddt * c`.
+  - Elevation filter: skip satellites below 5° elevation.
+  - `ecef_to_local()` removed (no longer needed; factors work in ECEF directly).
 - fix(gnss): IAP-RQ-020 — apply svdt satellite clock correction to pseudorange.
   - Root cause: `sat.pr_meas` was storing raw pseudorange `pr` without subtracting the
     satellite clock error `svdt * CLIGHT`. Each GPS satellite has a unique clock offset

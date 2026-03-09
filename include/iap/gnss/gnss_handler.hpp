@@ -6,6 +6,7 @@
 #include <iap/gnss/doppler_factor.hpp>
 #include <gtsam/inference/Symbol.h>
 #include <gtsam/nonlinear/NonlinearFactorGraph.h>
+#include <Eigen/Core>
 #include <memory>
 #include <deque>
 #include <mutex>
@@ -20,9 +21,9 @@ namespace iap {
  *   // On ROS callback thread:
  *   gnss_handler->insert_epoch(epoch);
  *
- *   // In insert_frame(), after IMU pre-integration:
+ *   // In on_smoother_update_(), after IMU pre-integration:
  *   auto gnss_factors = gnss_handler->get_factors(current_idx, frame_stamp,
- *                                                  X_key, V_key, C_key);
+ *                                                  origin_ecef);
  *   new_factors.add(gnss_factors);
  * @endcode
  *
@@ -30,8 +31,10 @@ namespace iap {
  * `time_tolerance` seconds of `frame_stamp` and produces one
  * PseudorangeFactor + one DopplerFactor per non-excluded satellite.
  *
- * Ephemeris (sat_pos, sat_vel) is expected to be pre-resolved before
- * inserting the epoch — see the "可先接一个库" note in IAP-RQ-020.
+ * Satellite state (sat_pos, sat_vel) is stored in ECEF.  The receiver ECEF
+ * position is reconstructed inside each factor as:
+ *   P_ecef = R(0) * pose.translation() + E(0)
+ * where E(0) and R(0) are shared factor-graph variables.
  */
 class GnssHandler {
  public:
@@ -53,13 +56,16 @@ class GnssHandler {
   /**
    * @brief Collect all buffered epochs near @p frame_stamp and build factors.
    *
-   * @param frame_idx  Smoother index i (used to form keys X(i), V(i), C(i))
+   * @param frame_idx    Smoother index i (used to form keys X(i), V(i), C(i))
    * @param frame_stamp  Timestamp of the LiDAR/IMU frame [s]
+   * @param anc_ecef     ECEF coordinates of world-frame origin (passed to DopplerFactor
+   *                     for Sagnac correction; also used for fallback geometry).
    * @param[out] out_epochs  (optional) filled with consumed epochs for logging
    * @return Factor graph containing PseudorangeFactor + DopplerFactor per sat.
    */
-  gtsam::NonlinearFactorGraph get_factors(int    frame_idx,
-                                          double frame_stamp,
+  gtsam::NonlinearFactorGraph get_factors(int                     frame_idx,
+                                          double                  frame_stamp,
+                                          const Eigen::Vector3d&  anc_ecef,
                                           std::vector<GnssEpoch>* out_epochs = nullptr);
 
   /// Number of epochs waiting in the queue.

@@ -1,9 +1,10 @@
 #pragma once
-// IAP-RQ-020: pseudorange factor — single-satellite measurement model
+// IAP-RQ-020: pseudorange factor — single-satellite measurement model (ECEF frame)
 
 #include <gtsam/geometry/Pose3.h>
 #include <gtsam/nonlinear/NonlinearFactor.h>
 #include <Eigen/Core>
+#include <vector>
 
 namespace iap {
 
@@ -11,54 +12,72 @@ namespace iap {
  * @brief GTSAM factor for a single-satellite pseudorange measurement.
  *
  * Keys (IAP-RQ-010 / IAP-RQ-020):
- *   - _X_: Pose3  — receiver pose in world frame (ECEF or local ENU)
- *   - _C_: Vector2 = [δt (m), δṫ (m/s)] — receiver clock state
+ *   - _X_: Pose3   — receiver pose in glim world frame (T_world_imu)
+ *   - _C_: Vector2 — receiver clock state [δt (m), δṫ (m/s)]
+ *   - _E_: Vector3 — ECEF coordinates of world-frame origin [m]  (E(0))
+ *   - _R_: Rot3    — rotation: world → ECEF                      (R(0))
  *
- * Measurement model:
+ * Measurement model (in ECEF):
  * @code
- *   z_pr = ||p_r − p_s|| + δt + ε_pr
+ *   P_ecef  = R_ext * p_local + anc_ecef         // receiver ECEF position
+ *   rho     = ||P_ecef − p_s||                    // geometric range
+ *   Sagnac  = ω_E/c · (p_s.x·P_ecef.y − p_s.y·P_ecef.x)
+ *   z_pr    = rho + Sagnac + δt + iono + trop + tgd·c + ε_pr
  * @endcode
  *
- * Residual returned (whitened by noise model):
- * @code
- *   r = z_pr − ( ||p_r − p_s|| + δt )
- * @endcode
- *
- * Analytical Jacobians:
- *   - H_pose  (1×6):  [0 0 0, −eᵀ]            (rotation columns = 0)
- *   - H_clk   (1×2):  [−1, 0]                  (only bias, not drift)
- *
- * where e = (p_r − p_s) / ||p_r − p_s||.
+ * Analytical Jacobians (1-D residual):
+ *   - H_pose  (1×6): [0 0 0,  −eᵀ · R_ext]
+ *   - H_clk   (1×2): [−1,  0]
+ *   - H_ext   (1×3): −eᵀ                      (wrt anc_ecef)
+ *   - H_rot   (1×3): eᵀ · R_ext · skew(p_local)  (right-perturbation)
  */
 class PseudorangeFactor
-    : public gtsam::NoiseModelFactor2<gtsam::Pose3, gtsam::Vector2> {
+    : public gtsam::NoiseModelFactor4<gtsam::Pose3, gtsam::Vector2,
+                                       gtsam::Vector3, gtsam::Rot3> {
  public:
   EIGEN_MAKE_ALIGNED_OPERATOR_NEW
 
   PseudorangeFactor() = default;
 
   /**
-   * @param pose_key  Symbol for receiver pose (e.g. X(i))
-   * @param clk_key   Symbol for clock state   (e.g. C(i))
-   * @param pr_meas   Pseudorange measurement [m]
-   * @param sat_pos   Satellite ECEF position [m]
-   * @param noise     Noise model (typically Isotropic with sigma == pr_sigma)
+   * @param pose_key    Symbol for receiver pose       (e.g. X(i))
+   * @param clk_key     Symbol for clock state         (e.g. C(i))
+   * @param ext_key     Symbol for ECEF origin         (e.g. E(0))
+   * @param rot_key     Symbol for world→ECEF rotation  (e.g. R(0))
+   * @param pr_meas     Pseudorange measurement [m] (already svdt-corrected)
+   * @param sat_pos     Satellite ECEF position [m]
+   * @param tgd         Satellite group delay [s]
+   * @param gps_sec     GPS time [s] for iono/trop delay computation
+   * @param iono_params Klobuchar {α0..α3,β0..β3}; empty → skip iono correction
+   * @param noise       Noise model
    */
   PseudorangeFactor(gtsam::Key                   pose_key,
                     gtsam::Key                   clk_key,
+                    gtsam::Key                   ext_key,
+                    gtsam::Key                   rot_key,
                     double                       pr_meas,
                     const Eigen::Vector3d&       sat_pos,
+                    double                       tgd,
+                    double                       gps_sec,
+                    std::vector<double>          iono_params,
                     const gtsam::SharedNoiseModel& noise);
 
   /// Evaluate residual (and optional Jacobians).
-  gtsam::Vector evaluateError(const gtsam::Pose3&   pose,
-                               const gtsam::Vector2& clk,
-                               gtsam::OptionalMatrixType H_pose = nullptr,
-                               gtsam::OptionalMatrixType H_clk  = nullptr) const override;
+  gtsam::Vector evaluateError(const gtsam::Pose3&    pose,
+                               const gtsam::Vector2&  clk,
+                               const gtsam::Vector3&  anc_ecef,
+                               const gtsam::Rot3&     R_ext,
+                               gtsam::OptionalMatrixType H_pose    = nullptr,
+                               gtsam::OptionalMatrixType H_clk     = nullptr,
+                               gtsam::OptionalMatrixType H_ext     = nullptr,
+                               gtsam::OptionalMatrixType H_rot     = nullptr) const override;
 
  private:
-  double          pr_meas_;   ///< pseudorange measurement [m]
-  Eigen::Vector3d sat_pos_;   ///< satellite ECEF position [m]
+  double              pr_meas_;      ///< pseudorange measurement [m]
+  Eigen::Vector3d     sat_pos_;      ///< satellite ECEF position [m]
+  double              tgd_;          ///< group delay [s]
+  double              gps_sec_;      ///< GPS time [s]
+  std::vector<double> iono_params_;  ///< Klobuchar parameters (8 values or empty)
 };
 
 }  // namespace iap

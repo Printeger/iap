@@ -1,8 +1,17 @@
 #pragma once
 // IAP-RQ-020 (bridge): GNSS ROS2 extension module
-// Subscribes to /ublox_driver/range_meas + /ublox_driver/ephem + glo_ephem,
-// converts each epoch to GnssEpoch (with sat_pos/vel in local ENU frame) and
-// feeds it into GnssHandler, then injects factors via on_smoother_update.
+// Subscribes to /ublox_driver/range_meas + /ublox_driver/ephem + glo_ephem +
+// /ublox_driver/iono_params; converts each epoch to GnssEpoch with sat_pos/vel
+// in ECEF (no local transform), and feeds it into GnssHandler.
+//
+// Coordinate frame: ECEF
+//   Two shared factor-graph variables are inserted on first injection:
+//     E(0) = Vector3 : ECEF coordinates of glim world-frame origin  [m]
+//     R(0) = Rot3    : rotation world → ECEF  (self-calibrated with loose prior)
+//   Pseudorange/Doppler factors compute receiver ECEF position via:
+//     P_ecef = R(0) * X(i).translation() + E(0)
+//   This eliminates the hard-coded ENU assumption and allows the optimizer
+//   to correct for IMU initial heading error automatically.
 
 #include <Eigen/Core>
 #include <atomic>
@@ -10,6 +19,7 @@
 #include <memory>
 #include <mutex>
 #include <unordered_map>
+#include <vector>
 
 #include <gtsam/nonlinear/NonlinearFactorGraph.h>
 #include <gtsam/nonlinear/Values.h>
@@ -27,15 +37,16 @@ namespace iap {
  * Lifecycle:
  *   1. create_subscriptions() — called by glim_rosnode/glim_rosbag at start;
  *      registers ROS subscriptions and OdometryEstimationCallbacks hooks.
- *   2. on_range_meas_()      — converts GnssMeasMsg → GnssEpoch + sat_pos/vel
- *      transformed to local ENU; inserts into GnssHandler queue.
- *   3. on_smoother_update_() — pops epochs near the current frame stamp and
- *      appends PseudorangeFactor + DopplerFactor to new_factors.
+ *   2. on_range_meas_()      — converts GnssMeasMsg → GnssEpoch, keeps sat_pos/vel
+ *      in ECEF (no transform); inserts into GnssHandler queue.
+ *   3. on_smoother_update_() — on first call inserts E(0)/R(0) with priors;
+ *      pops epochs near the current frame stamp and appends factors.
  *
- * Coordinate frame:
- *   Satellite ECEF positions/velocities are rotated to the local ENU frame
- *   whose origin is set from the first NavSatFix message.  Distance is
- *   preserved under rotation, so ||p_r_local − p_s_local|| == ECEF range.
+ * ECEF alignment:
+ *   E(0) is seeded from NavSatFix origin ECEF coords; R(0) is seeded from the
+ *   ENU rotation at that point (= R_ecef_world_init_).  Both are free optimization
+ *   variables with loose priors (σ_E=5 m, σ_R≈5°) so the solver can correct
+ *   for IMU initial heading error automatically.
  */
 class GnssExtensionModule : public glim::ExtensionModuleROS2 {
  public:
@@ -60,6 +71,9 @@ class GnssExtensionModule : public glim::ExtensionModuleROS2 {
   template <typename NavSatFixT>
   void on_navsatfix_(const std::shared_ptr<const NavSatFixT>& msg);
 
+  template <typename GnssIonoMsgT>
+  void on_iono_params_(const std::shared_ptr<const GnssIonoMsgT>& msg);
+
   // ── Smoother update hooks ────────────────────────────────────────────────
   void on_smoother_update_(
       gtsam_points::IncrementalFixedLagSmootherExtWithFallback& smoother,
@@ -70,14 +84,6 @@ class GnssExtensionModule : public glim::ExtensionModuleROS2 {
   /// Called just AFTER optimization — reads clock state + evaluates residuals.
   void on_smoother_update_finish_(
       gtsam_points::IncrementalFixedLagSmootherExtWithFallback& smoother);
-
-  // ── Helpers ──────────────────────────────────────────────────────────────
-  /// Convert sat ECEF pos/vel to local ENU frame.  Returns false if origin
-  /// has not yet been set (NavSatFix not received yet).
-  bool ecef_to_local(const Eigen::Vector3d& ecef_pos,
-                     const Eigen::Vector3d& ecef_vel,
-                     Eigen::Vector3d&       local_pos,
-                     Eigen::Vector3d&       local_vel) const;
 
   // ── State ────────────────────────────────────────────────────────────────
   rclcpp::Node*       node_ = nullptr;
@@ -92,17 +98,21 @@ class GnssExtensionModule : public glim::ExtensionModuleROS2 {
   std::atomic<uint64_t> factor_count_{0};  ///< total smoother injections
   std::atomic<uint64_t> factor_count_diag_{0}; ///< post-opt diagnostic calls
 
-  // Coordinate frame: ECEF origin + rotation ECEF→ENU
+  // Coordinate frame: ECEF origin + seed rotation ECEF→world (used to init E(0)/R(0))
   mutable std::mutex  frame_mutex_;
   bool                origin_set_ = false;
-  Eigen::Vector3d     origin_ecef_{Eigen::Vector3d::Zero()};
-  Eigen::Matrix3d     R_ecef_to_local_{Eigen::Matrix3d::Identity()};
+  Eigen::Vector3d     origin_ecef_{Eigen::Vector3d::Zero()};  ///< NavSatFix ECEF origin
+  Eigen::Matrix3d     R_ecef_world_init_{Eigen::Matrix3d::Identity()}; ///< world→ECEF seed (ENU at NavSatFix)
+
+  // E(0)/R(0) insertion guard: only insert once, on first GNSS injection
+  std::atomic<bool>   ext_vars_inserted_{false};
+
+  // Ionosphere parameters (Klobuchar 8 coefficients α0-3, β0-3)
+  // Updated by /ublox_driver/iono_params subscription; accessed in on_range_meas_
+  mutable std::mutex      iono_mutex_;
+  std::vector<double>     iono_params_;  ///< empty until first iono msg received
 
   // Clock warm-start: last post-optimization clock state (from on_smoother_update_finish_).
-  // Used to propagate an initial value for C(frame_id) instead of cold-starting at [0,0].
-  // Propagation model: bias_next = bias + drift * dt,  drift_next = drift.
-  // Without this warm-start, iSAM2 must converge from 0 → ~300+ km in one step, which
-  // is impossible at real-time update rates, leaving huge PR residuals.
   std::atomic<double> last_clk_bias_{0.0};   ///< last optimized clock bias  [m]
   std::atomic<double> last_clk_drift_{0.0};  ///< last optimized clock drift [m/s]
   std::atomic<double> last_clk_stamp_{0.0};  ///< frame stamp of last stored clock

@@ -9,6 +9,8 @@
 using gtsam::symbol_shorthand::X;
 using gtsam::symbol_shorthand::V;
 using gtsam::symbol_shorthand::C;
+using gtsam::symbol_shorthand::E;  // ECEF origin of world frame  E(0)
+using gtsam::symbol_shorthand::R;  // world→ECEF rotation         R(0)
 
 namespace iap {
 
@@ -40,15 +42,15 @@ double GnssHandler::dop_sigma(double elevation) const {
 }
 
 gtsam::NonlinearFactorGraph GnssHandler::get_factors(
-    int    frame_idx,
-    double frame_stamp,
+    int                     frame_idx,
+    double                  frame_stamp,
+    const Eigen::Vector3d&  anc_ecef,
     std::vector<GnssEpoch>* out_epochs) {
 
   // Drain matching epochs from the queue
   std::vector<GnssEpoch> matched;
   {
     std::lock_guard<std::mutex> lk(mutex_);
-    // Use a mutable reference trick via const_cast since we need to modify queue
     auto& q = epoch_queue_;
     auto it = q.begin();
     while (it != q.end()) {
@@ -56,8 +58,7 @@ gtsam::NonlinearFactorGraph GnssHandler::get_factors(
         matched.push_back(std::move(*it));
         it = q.erase(it);
       } else if (it->stamp < frame_stamp - params_.time_tolerance) {
-        // Too old — discard silently
-        it = q.erase(it);
+        it = q.erase(it);  // too old — discard
       } else {
         ++it;
       }
@@ -72,27 +73,29 @@ gtsam::NonlinearFactorGraph GnssHandler::get_factors(
 
   for (const auto& epoch : matched) {
     for (const auto& sat : epoch.sats) {
-      // Skip excluded or below elevation mask
-      if (sat.excluded || sat.elevation < params_.min_elevation) {
-        continue;
-      }
+      if (sat.excluded || sat.elevation < params_.min_elevation) continue;
 
-      // IAP-RQ-020: each satellite is an independent observation channel
-      // Pseudorange factor — keys: X(i), C(i)
+      // ── PseudorangeFactor ────────────────────────────────────────────────
+      // Keys: X(i), C(i), E(0), R(0)
       const double sigma_pr = pr_sigma(sat.elevation);
       graph.emplace_shared<PseudorangeFactor>(
-        X(frame_idx), C(frame_idx),
+        X(frame_idx), C(frame_idx), E(0), R(0),
         sat.pr_meas,
         sat.sat_pos,
+        sat.tgd,
+        epoch.gps_sec,
+        epoch.iono_params,
         gtsam::noiseModel::Isotropic::Sigma(1, sigma_pr));
 
-      // Doppler factor — keys: X(i), V(i), C(i)
+      // ── DopplerFactor ──────────────────────────────────────────────────
+      // Keys: X(i), V(i), C(i), R(0)
       const double sigma_dop = dop_sigma(sat.elevation);
       graph.emplace_shared<DopplerFactor>(
-        X(frame_idx), V(frame_idx), C(frame_idx),
+        X(frame_idx), V(frame_idx), C(frame_idx), R(0),
         sat.dop_meas,
         sat.sat_pos,
         sat.sat_vel,
+        anc_ecef,
         gtsam::noiseModel::Isotropic::Sigma(1, sigma_dop));
     }
   }

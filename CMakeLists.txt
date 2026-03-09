@@ -298,6 +298,9 @@ if(DEFINED ENV{ROS_VERSION})
     target_include_directories(gnss_extension PUBLIC
       $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
     )
+    # gnss_comm headers needed by pseudorange_factor.cpp / doppler_factor.cpp
+    # which are compiled into the iap library target
+    ament_target_dependencies(iap gnss_comm)
     target_link_libraries(gnss_extension iap)
     ament_target_dependencies(gnss_extension rclcpp sensor_msgs gnss_comm)
     list(APPEND iap_LIBRARIES gnss_extension)

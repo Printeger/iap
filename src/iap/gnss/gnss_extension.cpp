@@ -1,10 +1,17 @@
 // IAP-RQ-020 (bridge): GNSS ROS2 extension module implementation.
 //
+// Coordinate system: ECEF
+//   Satellite positions/velocities stay in ECEF.
+//   Two shared factor-graph variables E(0) (ECEF origin) and R(0) (world→ECEF
+//   rotation) are inserted with loose priors on first GNSS injection and
+//   self-calibrate the world↔ECEF alignment automatically.
+//
 // Data flow:
 //   /ublox_driver/range_meas  →  on_range_meas_()  →  GnssHandler::insert_epoch()
 //   /ublox_driver/ephem       →  on_ephem_()        →  ephem_cache_[sat_id]
 //   /ublox_driver/glo_ephem   →  on_glo_ephem_()    →  glo_ephem_cache_[sat_id]
-//   /ublox_driver/receiver_lla→  on_navsatfix_()    →  origin_ecef_, R_ecef_to_local_
+//   /ublox_driver/receiver_lla→  on_navsatfix_()    →  origin_ecef_, R_ecef_world_init_
+//   /ublox_driver/iono_params →  on_iono_params_()  →  iono_params_
 //
 //   on_smoother_update_()  →  GnssHandler::get_factors()  →  new_factors
 
@@ -17,6 +24,8 @@
 #include <gtsam_points/optimizers/incremental_fixed_lag_smoother_with_fallback.hpp>
 #include <gtsam/inference/Symbol.h>
 #include <gtsam/nonlinear/NonlinearFactor.h>
+#include <gtsam/nonlinear/PriorFactor.h>
+#include <gtsam/geometry/Rot3.h>
 
 #include <gnss_comm/gnss_ros.hpp>
 #include <gnss_comm/gnss_utility.hpp>
@@ -24,6 +33,7 @@
 #include <gnss_comm/msg/gnss_meas_msg.hpp>
 #include <gnss_comm/msg/gnss_ephem_msg.hpp>
 #include <gnss_comm/msg/gnss_glo_ephem_msg.hpp>
+#include <gnss_comm/msg/gnss_ionosphere_parameter.hpp>
 #include <sensor_msgs/msg/nav_sat_fix.hpp>
 
 #include <iap/odometry/callbacks.hpp>
@@ -33,6 +43,12 @@
 namespace iap {
 
 using Callbacks = glim::OdometryEstimationCallbacks;
+
+using gtsam::symbol_shorthand::C;
+using gtsam::symbol_shorthand::E;  // ECEF origin  E(0)
+using gtsam::symbol_shorthand::R;  // world→ECEF   R(0)
+using gtsam::symbol_shorthand::V;
+using gtsam::symbol_shorthand::X;
 
 // ── WGS-84 constants ──────────────────────────────────────────────────────
 static constexpr double WGS84_A   = 6378137.0;
@@ -52,13 +68,13 @@ static Eigen::Vector3d geodetic_to_ecef(double lat, double lon, double alt) {
           (N * (1.0 - WGS84_E2) + alt) * sin_lat};
 }
 
-/// Build ENU←ECEF rotation matrix for a given geodetic reference point.
+/// Build ENU←ECEF rotation matrix for a given reference point.
+/// Rows are: East, North, Up expressed in ECEF.
 static Eigen::Matrix3d ecef_to_enu_rotation(double lat, double lon) {
   const double sin_lat = std::sin(lat);
   const double cos_lat = std::cos(lat);
   const double sin_lon = std::sin(lon);
   const double cos_lon = std::cos(lon);
-  //  rows: East, North, Up
   Eigen::Matrix3d R;
   R << -sin_lon,              cos_lon,             0.0,
        -sin_lat * cos_lon,  -sin_lat * sin_lon,    cos_lat,
@@ -124,7 +140,7 @@ GnssExtensionModule::create_subscriptions(rclcpp::Node& node) {
         on_glo_ephem_(msg);
       }));
 
-  // 4. Receiver position fix (NavSatFix) — used to set local-frame origin
+  // 4. Receiver position fix (NavSatFix) — seed for E(0)/R(0)
   using NavSat = sensor_msgs::msg::NavSatFix;
   subs.push_back(std::make_shared<glim::TopicSubscription<NavSat>>(
       "/ublox_driver/receiver_lla",
@@ -132,11 +148,19 @@ GnssExtensionModule::create_subscriptions(rclcpp::Node& node) {
         on_navsatfix_(msg);
       }));
 
+  // 5. Ionosphere parameters (Klobuchar 8-coefficient model)
+  using IonoMsg = gnss_comm::msg::GnssIonosphereParameter;
+  subs.push_back(std::make_shared<glim::TopicSubscription<IonoMsg>>(
+      "/ublox_driver/iono_params",
+      [this](const std::shared_ptr<const IonoMsg>& msg) {
+        on_iono_params_(msg);
+      }));
+
   logger_->info("GnssExtensionModule: subscriptions created");
   return subs;
 }
 
-// ── NavSatFix — set coordinate frame origin ───────────────────────────────────
+// ── NavSatFix — seed ECEF origin + world→ECEF rotation ───────────────────────
 template <typename NavSatFixT>
 void GnssExtensionModule::on_navsatfix_(
     const std::shared_ptr<const NavSatFixT>& msg) {
@@ -149,12 +173,33 @@ void GnssExtensionModule::on_navsatfix_(
 
   if (!std::isfinite(lat) || !std::isfinite(lon)) return;
 
-  origin_ecef_      = geodetic_to_ecef(lat, lon, alt);
-  R_ecef_to_local_  = ecef_to_enu_rotation(lat, lon);
-  origin_set_       = true;
+  origin_ecef_       = geodetic_to_ecef(lat, lon, alt);
+  // R_ecef_world_init_: seed rotation from glim world frame → ECEF.
+  // At startup the glim world frame ≈ local ENU, so world→ECEF = ENU→ECEF
+  // = (ENU←ECEF rotation)ᵀ = ecef_to_enu_rotation(lat,lon).transpose().
+  // This is used as the initial value for R(0); optimizer refines it.
+  R_ecef_world_init_ = ecef_to_enu_rotation(lat, lon).transpose();
+  origin_set_        = true;
 
-  logger_->info("GnssExtensionModule: local-ENU origin set — lat={:.6f}° lon={:.6f}°",
-                msg->latitude, msg->longitude);
+  logger_->info("GnssExtensionModule: ECEF origin set — lat={:.6f}° lon={:.6f}° "
+                "ECEF=[{:.0f},{:.0f},{:.0f}]m",
+                msg->latitude, msg->longitude,
+                origin_ecef_(0), origin_ecef_(1), origin_ecef_(2));
+}
+
+// ── Ionosphere parameters update ──────────────────────────────────────────────
+template <typename GnssIonoMsgT>
+void GnssExtensionModule::on_iono_params_(
+    const std::shared_ptr<const GnssIonoMsgT>& msg) {
+  if (!msg || msg->parameters.size() < 8) return;
+  // Only use GPS (type 0) Klobuchar parameters
+  if (msg->type != 0) return;
+  std::lock_guard<std::mutex> lk(iono_mutex_);
+  iono_params_.assign(msg->parameters.begin(), msg->parameters.begin() + 8);
+  static std::once_flag once;
+  std::call_once(once, [this] {
+    logger_->info("[gnss_ext] Klobuchar iono params received — ionospheric correction enabled");
+  });
 }
 
 // ── Ephemeris caching ─────────────────────────────────────────────────────────
@@ -174,18 +219,6 @@ void GnssExtensionModule::on_glo_ephem_(
   if (!ephem) return;
   std::lock_guard<std::mutex> lk(ephem_mutex_);
   glo_ephem_cache_[ephem->sat] = ephem;
-}
-
-// ── ECEF → local ENU coordinate transform ────────────────────────────────────
-bool GnssExtensionModule::ecef_to_local(const Eigen::Vector3d& ecef_pos,
-                                         const Eigen::Vector3d& ecef_vel,
-                                         Eigen::Vector3d&       local_pos,
-                                         Eigen::Vector3d&       local_vel) const {
-  std::lock_guard<std::mutex> lk(frame_mutex_);
-  if (!origin_set_) return false;
-  local_pos = R_ecef_to_local_ * (ecef_pos - origin_ecef_);
-  local_vel = R_ecef_to_local_ * ecef_vel;
-  return true;
 }
 
 // ── Range measurement → GnssEpoch → GnssHandler::insert_epoch() ──────────────
@@ -223,6 +256,28 @@ void GnssExtensionModule::on_range_meas_(
   // Lock ephemeris cache for the duration of this epoch conversion
   std::lock_guard<std::mutex> eph_lk(ephem_mutex_);
 
+  // Need origin_ecef_ for sat_azel elevation; read it once under lock
+  Eigen::Vector3d anc_ecef;
+  bool origin_ready = false;
+  {
+    std::lock_guard<std::mutex> flk(frame_mutex_);
+    if (origin_set_) { anc_ecef = origin_ecef_; origin_ready = true; }
+  }
+  if (!origin_ready) return;  // wait until NavSatFix seeds the origin
+
+  // Snapshot iono params (GPS L1 Klobuchar, 8 coefficients) if available
+  std::vector<double> iono_params_snap;
+  {
+    std::lock_guard<std::mutex> ilk(iono_mutex_);
+    iono_params_snap = iono_params_;
+  }
+
+  // GPS time in seconds (used by iono/trop correction functions)
+  const double gps_sec = static_cast<double>(obs_list[0]->time.time) + obs_list[0]->time.sec;
+
+  epoch.gps_sec = gps_sec;
+  epoch.iono_params = iono_params_snap;
+
   for (const auto& obs : obs_list) {
     if (!obs) continue;
 
@@ -242,6 +297,7 @@ void GnssExtensionModule::on_range_meas_(
     Eigen::Vector3d sat_ecef_pos = Eigen::Vector3d::Zero();
     Eigen::Vector3d sat_ecef_vel = Eigen::Vector3d::Zero();
     double svdt = 0.0, svddt = 0.0;
+    double tgd  = 0.0;
 
     if (sys == SYS_GLO) {
       // GLONASS
@@ -249,29 +305,32 @@ void GnssExtensionModule::on_range_meas_(
       if (it == glo_ephem_cache_.end()) continue;
       sat_ecef_pos = gnss_comm::geph2pos(obs->time, it->second, &svdt);
       sat_ecef_vel = gnss_comm::geph2vel(obs->time, it->second, &svddt);
+      // GLONASS has no group delay in eph; leave tgd = 0
     } else {
       // GPS / Galileo / BeiDou
       const auto it = ephem_cache_.find(sat_id);
       if (it == ephem_cache_.end()) continue;
       sat_ecef_pos = gnss_comm::eph2pos(obs->time, it->second, &svdt);
       sat_ecef_vel = gnss_comm::eph2vel(obs->time, it->second, &svddt);
+      tgd = it->second->tgd[0];  // TGD (seconds); factor multiplies by CLIGHT
     }
 
     if (!sat_ecef_pos.allFinite() || !sat_ecef_vel.allFinite()) continue;
 
-    // ── transform satellite state to local ENU frame ──
-    Eigen::Vector3d sat_local_pos, sat_local_vel;
-    if (!ecef_to_local(sat_ecef_pos, sat_ecef_vel, sat_local_pos, sat_local_vel)) {
-      // Origin not set yet — skip (can't form meaningful factor)
-      continue;
-    }
+    // ── elevation angle for noise weighting (uses origin_ecef_ as receiver) ──
+    double azel[2] = {0.0, M_PI / 2.0};  // {azimuth, elevation} — default π/2
+    gnss_comm::sat_azel(anc_ecef, sat_ecef_pos, azel);
+    const double elevation = azel[1];
+    const double azimuth   = azel[0];
 
-    // ── Doppler: Hz → m/s  (dop_meas = -dopp_hz * lambda) ──
+    // Skip satellites below 5° elevation (likely multipath / below horizon)
+    if (elevation < 5.0 * M_PI / 180.0) continue;
+
+    // ── Doppler: Hz → m/s  (range_rate = -dopp_hz * c/f) ──
     double dop_meas = 0.0;
     if (static_cast<int>(obs->dopp.size()) > l1_idx && freq > 0.0) {
       const double dopp_hz = obs->dopp[l1_idx];
       if (std::isfinite(dopp_hz)) {
-        // z_dop = eᵀ(v_r − v_s); range_rate = -dopp_hz * c/f
         dop_meas = -dopp_hz * (CLIGHT / freq);
       }
     }
@@ -286,33 +345,27 @@ void GnssExtensionModule::on_range_meas_(
       dop_sigma_override = obs->dopp_std[l1_idx] * (CLIGHT / freq);
     }
 
-    // ── compute elevation for noise weighting (approximate: use sat_local_pos) ──
-    // Elevation = angle above the local horizontal plane.
-    // In local ENU: Z-component is Up.  sat_local_pos gives satellite above origin.
-    double elevation = 0.3;  // ~17 deg fallback
-    if (sat_local_pos.norm() > 1e3) {
-      const Eigen::Vector3d dir = sat_local_pos.normalized();
-      elevation = std::asin(std::min(1.0, std::max(-1.0, dir.z())));
-    }
-
     SatObs sat;
     sat.sat_id        = static_cast<int>(sat_id);
     sat.constellation = (sys == SYS_GLO) ? 'R' :
                         (sys == SYS_GAL) ? 'E' :
                         (sys == SYS_BDS) ? 'C' : 'G';
-    // Apply satellite clock correction: pr_corrected = pr_raw - svdt * c
-    // svdt (seconds) is the satellite clock error returned by eph2pos/geph2pos.
-    // Each satellite has a unique offset (±1 µs ≈ ±300 m); without this
-    // correction every factor carries a different unmodelled bias, preventing
-    // the shared receiver clock state C(i) from converging.
-    sat.pr_meas       = pr - svdt * CLIGHT;
-    sat.dop_meas      = dop_meas;
+    // Apply satellite clock bias pre-correction (ADD sign per RTKLIB/LIGO convention):
+    //   pr_corrected = pr_raw + svdt * c
+    // The PseudorangeFactor prediction does NOT include svdt — measurement is
+    // expected to be pre-corrected here.
+    sat.pr_meas       = pr + svdt * CLIGHT;
+    // Doppler: same ADD sign — removes satellite clock frequency bias
+    sat.dop_meas      = dop_meas + svddt * CLIGHT;
     sat.pr_sigma      = (pr_sigma_override > 0.05) ? pr_sigma_override  : 5.0;
     sat.dop_sigma     = (dop_sigma_override > 0.01) ? dop_sigma_override : 0.5;
-    sat.sat_pos       = sat_local_pos;
-    sat.sat_vel       = sat_local_vel;
+    // Satellite state in ECEF — factors work directly in ECEF
+    sat.sat_pos       = sat_ecef_pos;
+    sat.sat_vel       = sat_ecef_vel;
     sat.elevation     = elevation;
-    sat.azimuth       = std::atan2(sat_local_pos.x(), sat_local_pos.y());
+    sat.azimuth       = azimuth;
+    sat.tgd           = tgd;
+    sat.svddt         = svddt;
 
     epoch.sats.push_back(sat);
   }
@@ -341,12 +394,44 @@ void GnssExtensionModule::on_smoother_update_(
   const double frame_stamp = last_frame_stamp_.load();
   if (frame_id < 0) return;
 
+  // Retrieve current ECEF anchor for get_factors()
+  Eigen::Vector3d anc_ecef;
+  Eigen::Matrix3d R_seed;
+  {
+    std::lock_guard<std::mutex> flk(frame_mutex_);
+    if (!origin_set_) return;
+    anc_ecef = origin_ecef_;
+    R_seed   = R_ecef_world_init_;
+  }
+
   std::vector<GnssEpoch> consumed;
   auto gnss_factors = gnss_handler_.get_factors(
-      static_cast<int>(frame_id), frame_stamp, &consumed);
+      static_cast<int>(frame_id), frame_stamp, anc_ecef, &consumed);
 
   if (gnss_factors.size() > 0) {
-    // Ensure C(frame_id) [clock bias (m), clock drift (m/s)] exists in new_values.
+    // ── First GNSS injection: insert E(0) and R(0) with loose priors ──────────
+    // E(0) = ECEF origin (vector3, σ=5 m)
+    // R(0) = world→ECEF rotation (Rot3, σ=5°≈0.087 rad), refined by optimizer
+    if (!ext_vars_inserted_.exchange(true)) {
+      const gtsam::Rot3 R0(R_seed);
+      new_values.insert(E(0), anc_ecef);
+      new_values.insert(R(0), R0);
+      new_factors.addPrior<gtsam::Vector3>(
+          E(0), anc_ecef,
+          gtsam::noiseModel::Diagonal::Sigmas(
+              (gtsam::Vector3() << 5.0, 5.0, 5.0).finished()));
+      new_factors.addPrior<gtsam::Rot3>(
+          R(0), R0,
+          gtsam::noiseModel::Isotropic::Sigma(3, 0.087));  // ~5°
+      logger_->info("[gnss_ext] E(0)/R(0) inserted — "
+                    "ECEF=[{:.0f},{:.0f},{:.0f}] σ_E=5m σ_R=5°",
+                    anc_ecef(0), anc_ecef(1), anc_ecef(2));
+    }
+    // Keep E(0)/R(0) alive in fixed-lag smoother on every injection
+    new_stamps[E(0)] = frame_stamp;
+    new_stamps[R(0)] = frame_stamp;
+
+    // ── Ensure C(frame_id) exists ─────────────────────────────────────────────
     // glim's base OdometryEstimationIMU does not add C; due to dynamic symbol
     // resolution glim's version may take precedence over IAP's override, leaving C
     // absent from the smoother.  We always insert it here so GNSS factors are valid.
@@ -355,7 +440,6 @@ void GnssExtensionModule::on_smoother_update_(
     // O(100-400 km).  iSAM2 cannot converge that far in one real-time step, leaving
     // huge PR residuals (~237 km) permanently.  Instead, propagate the last post-opt
     // clock estimate with the clock-walk model:  bias_next = bias + drift * dt.
-    using gtsam::symbol_shorthand::C;
     if (!new_values.exists(C(frame_id))) {
       // Warm-start: propagate last known clock state forward by dt
       gtsam::Vector2 init_clk(0.0, 0.0);
@@ -384,15 +468,20 @@ void GnssExtensionModule::on_smoother_update_(
     }
 
     // Store a snapshot for post-optimization residual evaluation
+    // Both PseudorangeFactor and DopplerFactor now have 4 keys.
+    // Distinguish: DopplerFactor includes V(frame_id); PseudorangeFactor does not.
     {
       std::lock_guard<std::mutex> lk(factors_mutex_);
       last_pr_factors_.clear();
       last_dop_factors_.clear();
       last_injected_frame_id_ = frame_id;
       for (const auto& f : gnss_factors) {
-        // PseudorangeFactor: 2 keys (X, C); DopplerFactor: 3 keys (X, V, C)
-        if (f->keys().size() == 2) last_pr_factors_.push_back(f);
-        else                       last_dop_factors_.push_back(f);
+        bool has_vel = false;
+        for (const auto k : f->keys()) {
+          if (k == V(static_cast<std::uint64_t>(frame_id))) { has_vel = true; break; }
+        }
+        if (has_vel) last_dop_factors_.push_back(f);
+        else         last_pr_factors_.push_back(f);
       }
     }
 

@@ -26,6 +26,8 @@ struct SatObs {
   // ---- Ephemeris-derived quantities (IAP-RQ-020: satellite state) ----------
   Eigen::Vector3d sat_pos = Eigen::Vector3d::Zero();  ///< satellite ECEF position [m]
   Eigen::Vector3d sat_vel = Eigen::Vector3d::Zero();  ///< satellite ECEF velocity [m/s]
+  double tgd    = 0.0;   ///< group delay [s] (GPS/GAL/BDS: Ephem::tgd[0]; GLONASS: 0)
+  double svddt  = 0.0;   ///< satellite clock drift rate [s/s] (from eph2vel/geph2vel)
 
   // ---- Geometry -----------------------------------------------------------
   double elevation = 0.0;  ///< elevation angle [rad] — used for noise weighting
@@ -45,8 +47,10 @@ struct SatObs {
 
 /// @brief All per-satellite observations at one GNSS epoch.
 struct GnssEpoch {
-  double stamp = 0.0;           ///< ROS timestamp [s]
-  std::vector<SatObs> sats;    ///< per-satellite channels
+  double stamp    = 0.0;           ///< UTC ROS timestamp [s]
+  double gps_sec  = 0.0;           ///< GPS time [s since GPS epoch] — for iono/trop models
+  std::vector<SatObs>    sats;     ///< per-satellite channels
+  std::vector<double>    iono_params;  ///< Klobuchar params {α0..α3, β0..β3}; empty → skip iono
 };
 
 }  // namespace iap
