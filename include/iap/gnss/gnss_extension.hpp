@@ -60,12 +60,16 @@ class GnssExtensionModule : public glim::ExtensionModuleROS2 {
   template <typename NavSatFixT>
   void on_navsatfix_(const std::shared_ptr<const NavSatFixT>& msg);
 
-  // ── Smoother update hook ─────────────────────────────────────────────────
+  // ── Smoother update hooks ────────────────────────────────────────────────
   void on_smoother_update_(
       gtsam_points::IncrementalFixedLagSmootherExtWithFallback& smoother,
       gtsam::NonlinearFactorGraph&                              new_factors,
       gtsam::Values&                                            new_values,
       std::map<std::uint64_t, double>&                          new_stamps);
+
+  /// Called just AFTER optimization — reads clock state + evaluates residuals.
+  void on_smoother_update_finish_(
+      gtsam_points::IncrementalFixedLagSmootherExtWithFallback& smoother);
 
   // ── Helpers ──────────────────────────────────────────────────────────────
   /// Convert sat ECEF pos/vel to local ENU frame.  Returns false if origin
@@ -86,12 +90,19 @@ class GnssExtensionModule : public glim::ExtensionModuleROS2 {
   std::atomic<double>   last_frame_stamp_{0.0};
   std::atomic<uint64_t> epoch_count_{0};   ///< total epochs received
   std::atomic<uint64_t> factor_count_{0};  ///< total smoother injections
+  std::atomic<uint64_t> factor_count_diag_{0}; ///< post-opt diagnostic calls
 
   // Coordinate frame: ECEF origin + rotation ECEF→ENU
   mutable std::mutex  frame_mutex_;
   bool                origin_set_ = false;
   Eigen::Vector3d     origin_ecef_{Eigen::Vector3d::Zero()};
   Eigen::Matrix3d     R_ecef_to_local_{Eigen::Matrix3d::Identity()};
+
+  // Last injected GNSS factors — evaluated post-optimization for diagnostics
+  std::mutex                                         factors_mutex_;
+  std::vector<gtsam::NonlinearFactor::shared_ptr>    last_pr_factors_;
+  std::vector<gtsam::NonlinearFactor::shared_ptr>    last_dop_factors_;
+  long                                               last_injected_frame_id_{-1};
 
   // Ephemeris caches (GPS/GAL/BDS and GLONASS)
   mutable std::mutex                                            ephem_mutex_;

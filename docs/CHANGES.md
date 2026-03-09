@@ -3,9 +3,13 @@
 > 规则：任何代码改动必须在这里记录，并包含 IAP-RQ-XXX。
 
 ## Unreleased
-- fix(gnss): raise epoch/factor injection log to `info` level (rate-limited: first + every 100).
-  Previously `trace`/`debug` — invisible at default level. Now readable in terminal & log file.
-  Added `epoch_count_` / `factor_count_` atomics to `GnssExtensionModule`.
+- feat(gnss): post-optimization diagnostic via `on_smoother_update_finish`.
+  - Registers `on_smoother_update_finish` callback; fires after iSAM2 optimization.
+  - Stores last-injected PR/Doppler factors (by key-count heuristic: 2=PR, 3=Dop).
+  - Queries `C(frame_id)` from smoother → `clk_bias [m]`, `clk_drift [m/s]`.
+  - Evaluates `NoiseModelFactor::unwhitenedError()` per factor → PR RMS [m], Dop RMS [m/s].
+  - Logs at `info` level (first call + every 50): `clk_bias / clk_drift / PR_rms / Dop_rms`.
+  - Adds `factor_count_diag_` counter and `last_pr_factors_`, `last_dop_factors_` storage.
 - IAP-RQ-020 (bridge): `GnssExtensionModule` — full ROS2 GNSS data pipeline.
   - `include/iap/gnss/gnss_extension.hpp` + `src/iap/gnss/gnss_extension.cpp`:
     `GnssExtensionModule : ExtensionModuleROS2`; subscribes `/ublox_driver/range_meas`,

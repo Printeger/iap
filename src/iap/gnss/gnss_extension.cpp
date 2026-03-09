@@ -11,10 +11,12 @@
 #include <iap/gnss/gnss_extension.hpp>
 
 #include <cmath>
+#include <numeric>
 #include <spdlog/spdlog.h>
 
 #include <gtsam_points/optimizers/incremental_fixed_lag_smoother_with_fallback.hpp>
 #include <gtsam/inference/Symbol.h>
+#include <gtsam/nonlinear/NonlinearFactor.h>
 
 #include <gnss_comm/gnss_ros.hpp>
 #include <gnss_comm/gnss_utility.hpp>
@@ -81,6 +83,12 @@ GnssExtensionModule::GnssExtensionModule()
       std::map<std::uint64_t, double>&                          new_stamps) {
     on_smoother_update_(smoother, new_factors, new_values, new_stamps);
   });
+
+  // Register on_smoother_update_finish to read post-optimization diagnostics
+  Callbacks::on_smoother_update_finish.add(
+      [this](gtsam_points::IncrementalFixedLagSmootherExtWithFallback& smoother) {
+        on_smoother_update_finish_(smoother);
+      });
 
   logger_->info("GnssExtensionModule created — waiting for NavSatFix origin");
 }
@@ -313,6 +321,19 @@ void GnssExtensionModule::on_smoother_update_(
       static_cast<int>(frame_id), frame_stamp, &consumed);
 
   if (gnss_factors.size() > 0) {
+    // Store a snapshot for post-optimization residual evaluation
+    {
+      std::lock_guard<std::mutex> lk(factors_mutex_);
+      last_pr_factors_.clear();
+      last_dop_factors_.clear();
+      last_injected_frame_id_ = frame_id;
+      for (const auto& f : gnss_factors) {
+        // PseudorangeFactor: 2 keys (X, C); DopplerFactor: 3 keys (X, V, C)
+        if (f->keys().size() == 2) last_pr_factors_.push_back(f);
+        else                       last_dop_factors_.push_back(f);
+      }
+    }
+
     new_factors.add(gnss_factors);
     const uint64_t n = ++factor_count_;
     // Log first injection, then every 100 frames
@@ -327,6 +348,92 @@ void GnssExtensionModule::on_smoother_update_(
 }
 
 }  // namespace iap
+
+// ── Post-optimization diagnostic (on_smoother_update_finish) ─────────────────
+// Reads clock state and evaluates pseudorange / Doppler residuals from the
+// smoother's current linearization point.  Fires after iSAM2 update.
+void iap::GnssExtensionModule::on_smoother_update_finish_(
+    gtsam_points::IncrementalFixedLagSmootherExtWithFallback& smoother) {
+
+  std::vector<gtsam::NonlinearFactor::shared_ptr> pr_factors, dop_factors;
+  long frame_id;
+  {
+    std::lock_guard<std::mutex> lk(factors_mutex_);
+    if (last_pr_factors_.empty() && last_dop_factors_.empty()) return;
+    pr_factors  = last_pr_factors_;
+    dop_factors = last_dop_factors_;
+    frame_id    = last_injected_frame_id_;
+    last_pr_factors_.clear();
+    last_dop_factors_.clear();
+  }
+
+  // ── 1. Clock state ────────────────────────────────────────────────────────────
+  double clk_bias = 0.0, clk_drift = 0.0;
+  bool clk_ok = false;
+  try {
+    using gtsam::symbol_shorthand::C;
+    const auto clk = smoother.calculateEstimate<gtsam::Vector2>(C(frame_id));
+    clk_bias  = clk(0);
+    clk_drift = clk(1);
+    clk_ok = true;
+  } catch (...) {}
+
+  // ── 2. Factor residuals ──────────────────────────────────────────────────────
+  // Evaluate unwhitened residuals: cast to NoiseModelFactor, call
+  // unwhitenedError(values).  For PseudorangeFactor dim=1 [m],
+  // for DopplerFactor dim=1 [m/s].
+  double pr_rms  = 0.0, dop_rms  = 0.0;
+  int    n_pr_ok = 0,   n_dop_ok = 0;
+  try {
+    const auto all_vals = smoother.calculateEstimate();
+
+    for (const auto& f : pr_factors) {
+      const auto nf = std::dynamic_pointer_cast<gtsam::NoiseModelFactor>(f);
+      if (!nf) continue;
+      try {
+        const auto r = nf->unwhitenedError(all_vals);
+        pr_rms += r.squaredNorm();
+        ++n_pr_ok;
+      } catch (...) {}
+    }
+    for (const auto& f : dop_factors) {
+      const auto nf = std::dynamic_pointer_cast<gtsam::NoiseModelFactor>(f);
+      if (!nf) continue;
+      try {
+        const auto r = nf->unwhitenedError(all_vals);
+        dop_rms += r.squaredNorm();
+        ++n_dop_ok;
+      } catch (...) {}
+    }
+  } catch (...) {}
+
+  if (n_pr_ok > 0)  pr_rms  = std::sqrt(pr_rms  / n_pr_ok);
+  if (n_dop_ok > 0) dop_rms = std::sqrt(dop_rms / n_dop_ok);
+
+  // ── 3. Log summary (rate-limited: first + every 50 calls) ─────────────────────
+  const uint64_t diag_n = ++factor_count_diag_;
+  if (diag_n == 1 || diag_n % 50 == 0) {
+    if (clk_ok) {
+      logger_->info(
+          "[gnss_ext] diag #{}: clk_bias={:.2f}m  clk_drift={:.4f}m/s "
+          "| PR rms={:.2f}m ({} sats)  Dop rms={:.4f}m/s ({} sats)",
+          diag_n, clk_bias, clk_drift,
+          pr_rms, n_pr_ok, dop_rms, n_dop_ok);
+    } else {
+      logger_->info(
+          "[gnss_ext] diag #{}: clock state unavailable "
+          "| PR rms={:.2f}m ({} sats)  Dop rms={:.4f}m/s ({} sats)",
+          diag_n, pr_rms, n_pr_ok, dop_rms, n_dop_ok);
+    }
+  } else {
+    if (clk_ok) {
+      logger_->debug(
+          "[gnss_ext] diag: clk_bias={:.2f}m  clk_drift={:.4f}m/s "
+          "PR_rms={:.2f}m  Dop_rms={:.4f}m/s",
+          clk_bias, clk_drift, pr_rms, dop_rms);
+    }
+  }
+}
 
 // ── GLIM plugin entry point ───────────────────────────────────────────────────
 extern "C" glim::ExtensionModule* create_extension_module() {
