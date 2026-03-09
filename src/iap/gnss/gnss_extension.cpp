@@ -300,7 +300,12 @@ void GnssExtensionModule::on_range_meas_(
     sat.constellation = (sys == SYS_GLO) ? 'R' :
                         (sys == SYS_GAL) ? 'E' :
                         (sys == SYS_BDS) ? 'C' : 'G';
-    sat.pr_meas       = pr;
+    // Apply satellite clock correction: pr_corrected = pr_raw - svdt * c
+    // svdt (seconds) is the satellite clock error returned by eph2pos/geph2pos.
+    // Each satellite has a unique offset (±1 µs ≈ ±300 m); without this
+    // correction every factor carries a different unmodelled bias, preventing
+    // the shared receiver clock state C(i) from converging.
+    sat.pr_meas       = pr - svdt * CLIGHT;
     sat.dop_meas      = dop_meas;
     sat.pr_sigma      = (pr_sigma_override > 0.05) ? pr_sigma_override  : 5.0;
     sat.dop_sigma     = (dop_sigma_override > 0.01) ? dop_sigma_override : 0.5;

@@ -3,6 +3,15 @@
 > 规则：任何代码改动必须在这里记录，并包含 IAP-RQ-XXX。
 
 ## Unreleased
+- fix(gnss): IAP-RQ-020 — apply svdt satellite clock correction to pseudorange.
+  - Root cause: `sat.pr_meas` was storing raw pseudorange `pr` without subtracting the
+    satellite clock error `svdt * CLIGHT`. Each GPS satellite has a unique clock offset
+    of ±1 µs ≈ ±300 m. Without correction, the shared receiver clock state `C(i)` received
+    conflicting information from each satellite, preventing convergence (PR rms = 237 km).
+  - Fix: `sat.pr_meas = pr - svdt * CLIGHT` in `on_range_meas_()`.
+    `eph2pos`/`geph2pos` already compute `svdt`; it is now applied.
+  - Expected outcome: `PR rms` drops from ~237 km to O(<20 m) after first convergence;
+    `clk_bias` converges to true receiver clock offset (~300–400 km).
 - fix(gnss): IAP-RQ-020 — clock warm-start to eliminate PR rms ~237 km divergence.
   - Root cause: `C(frame_id)` was always inserted as `[0,0]` (cold-start). iSAM2
     cannot converge receiver clock from 0 → ~350 km in one real-time linearization
