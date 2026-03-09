@@ -3,6 +3,16 @@
 > 规则：任何代码改动必须在这里记录，并包含 IAP-RQ-XXX。
 
 ## Unreleased
+- fix(gnss): IAP-RQ-020 — clock warm-start to eliminate PR rms ~237 km divergence.
+  - Root cause: `C(frame_id)` was always inserted as `[0,0]` (cold-start). iSAM2
+    cannot converge receiver clock from 0 → ~350 km in one real-time linearization
+    step, leaving large per-satellite pseudorange residuals that never collapsed.
+  - Fix: `on_smoother_update_finish_` stores post-opt `clk_bias / clk_drift /
+    frame_stamp` into atomics; next `on_smoother_update_` propagates them forward
+    with clock-walk model (`bias_next = bias + drift × dt`, `drift_next = drift`).
+  - Warm-start `call_once` log now includes initial bias/drift for observability.
+  - Expected outcome: `PR rms` drops from ~237 km → O(<10 m) after first convergence;
+    `clk_bias` rapidly tracks true receiver clock offset.
 - fix(gnss): IAP-RQ-020 — inject `C(frame_id)` into `new_values`/`new_stamps` explicitly.
   - Root cause: glim's `OdometryEstimationIMU::update_smoother()` (no clock variable)
     takes precedence over IAP's override at runtime due to shared-library symbol resolution.

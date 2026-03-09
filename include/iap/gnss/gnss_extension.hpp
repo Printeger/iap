@@ -98,6 +98,15 @@ class GnssExtensionModule : public glim::ExtensionModuleROS2 {
   Eigen::Vector3d     origin_ecef_{Eigen::Vector3d::Zero()};
   Eigen::Matrix3d     R_ecef_to_local_{Eigen::Matrix3d::Identity()};
 
+  // Clock warm-start: last post-optimization clock state (from on_smoother_update_finish_).
+  // Used to propagate an initial value for C(frame_id) instead of cold-starting at [0,0].
+  // Propagation model: bias_next = bias + drift * dt,  drift_next = drift.
+  // Without this warm-start, iSAM2 must converge from 0 → ~300+ km in one step, which
+  // is impossible at real-time update rates, leaving huge PR residuals.
+  std::atomic<double> last_clk_bias_{0.0};   ///< last optimized clock bias  [m]
+  std::atomic<double> last_clk_drift_{0.0};  ///< last optimized clock drift [m/s]
+  std::atomic<double> last_clk_stamp_{0.0};  ///< frame stamp of last stored clock
+
   // Last injected GNSS factors — evaluated post-optimization for diagnostics
   std::mutex                                         factors_mutex_;
   std::vector<gtsam::NonlinearFactor::shared_ptr>    last_pr_factors_;

@@ -345,18 +345,33 @@ void GnssExtensionModule::on_smoother_update_(
     // glim's base OdometryEstimationIMU does not add C; due to dynamic symbol
     // resolution glim's version may take precedence over IAP's override, leaving C
     // absent from the smoother.  We always insert it here so GNSS factors are valid.
+    //
+    // CRITICAL: do NOT cold-start at [0,0] — the receiver clock bias at bag time is
+    // O(100-400 km).  iSAM2 cannot converge that far in one real-time step, leaving
+    // huge PR residuals (~237 km) permanently.  Instead, propagate the last post-opt
+    // clock estimate with the clock-walk model:  bias_next = bias + drift * dt.
     using gtsam::symbol_shorthand::C;
     if (!new_values.exists(C(frame_id))) {
-      // Try to warm-start from smoother; fall back to zero.
-      // (Smoother may already have C from a previous frame's clock-walk model.)
-      new_values.insert(C(frame_id), gtsam::Vector2(0.0, 0.0));
+      // Warm-start: propagate last known clock state forward by dt
+      gtsam::Vector2 init_clk(0.0, 0.0);
+      const double prev_stamp = last_clk_stamp_.load();
+      if (prev_stamp > 0.0) {
+        const double dt = frame_stamp - prev_stamp;
+        if (dt > 0.0 && dt < 2.0) {  // guard against large gaps or backwards time
+          init_clk(0) = last_clk_bias_.load() + last_clk_drift_.load() * dt;
+          init_clk(1) = last_clk_drift_.load();
+        }
+      }
+
+      new_values.insert(C(frame_id), init_clk);
       new_stamps[C(frame_id)] = frame_stamp;
 
       static std::once_flag once_clk;
       std::call_once(once_clk, [&] {
-        logger_->info("[gnss_ext] C({}) not in new_values — inserted zero init "
+        logger_->info("[gnss_ext] C({}) not in new_values — inserting; "
+                      "warm-start: bias={:.0f}m drift={:.2f}m/s "
                       "(glim base class does not add clock variable)",
-                      frame_id);
+                      frame_id, init_clk(0), init_clk(1));
       });
     } else {
       // Make sure the stamp is registered even if odometry added the value
@@ -418,6 +433,10 @@ void iap::GnssExtensionModule::on_smoother_update_finish_(
     clk_bias  = clk(0);
     clk_drift = clk(1);
     clk_ok = true;
+    // Store for warm-starting C in the next on_smoother_update_ call
+    last_clk_bias_.store(clk_bias);
+    last_clk_drift_.store(clk_drift);
+    last_clk_stamp_.store(last_frame_stamp_.load());
   } catch (...) {}
 
   // ── 2. Factor residuals ──────────────────────────────────────────────────────
