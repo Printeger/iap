@@ -80,6 +80,7 @@ add_library(iap SHARED
   # gnss (IAP-RQ-020)
   src/iap/gnss/pseudorange_factor.cpp
   src/iap/gnss/doppler_factor.cpp
+  src/iap/gnss/clock_between_factor.cpp
   src/iap/gnss/gnss_handler.cpp
   # gnss visibility predictor (IAP-RQ-312/313)
   src/iap/gnss/visibility_predictor.cpp
@@ -90,6 +91,7 @@ add_library(iap SHARED
   # trunk map data association + factor (IAP-RQ-131/132)
   src/iap/trunk/trunk_map.cpp
   src/iap/trunk/trunk_factor.cpp
+  # trunk_extension.cpp is compiled into a separate ROS2 plugin (libtrunk_extension.so)
   # ARAIM engine (IAP-RQ-241–246)
   src/iap/integrity/araim.cpp
   # predicted ARAIM for planner (IAP-RQ-331)
@@ -290,6 +292,7 @@ if(DEFINED ENV{ROS_VERSION})
     find_package(glog REQUIRED)
     find_package(gnss_comm REQUIRED)
     find_package(sensor_msgs REQUIRED)
+    find_package(visualization_msgs REQUIRED)
     find_package(rclcpp REQUIRED)
 
     add_library(gnss_extension SHARED
@@ -305,6 +308,18 @@ if(DEFINED ENV{ROS_VERSION})
     ament_target_dependencies(gnss_extension rclcpp sensor_msgs gnss_comm)
     list(APPEND iap_LIBRARIES gnss_extension)
     install(TARGETS gnss_extension DESTINATION lib)
+
+    ## Trunk extension module (IAP-RQ-130: factor graph + RViz2 visualization)
+    add_library(trunk_extension SHARED
+      src/iap/trunk/trunk_extension.cpp
+    )
+    target_include_directories(trunk_extension PUBLIC
+      $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+    )
+    target_link_libraries(trunk_extension iap)
+    ament_target_dependencies(trunk_extension rclcpp visualization_msgs)
+    list(APPEND iap_LIBRARIES trunk_extension)
+    install(TARGETS trunk_extension DESTINATION lib)
 
     ## Demo / smoke-test executable (IAP-RQ-002)
     add_executable(iap_status apps/iap_status.cpp)

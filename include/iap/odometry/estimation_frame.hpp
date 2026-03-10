@@ -89,6 +89,29 @@ public:
   Eigen::Vector3d v_world_imu;           ///< IMU velocity in the world frame
   Eigen::Matrix<double, 6, 1> imu_bias;  ///< IMU bias [ba(3), bg(3)]
 
+  // ─── Original GLIM fields (offsets must match libglim.so ABI) ───────────
+  PreprocessedFrame::ConstPtr raw_frame;             ///< Raw input point cloud (LiDAR frame)
+  Eigen::Matrix<double, 8, -1> imu_rate_trajectory;  ///< IMU-rate trajectory 8 x N  [t, x, y, z, qx, qy, qz, qw]
+
+  FrameID frame_id;                                            ///< Coordinate frame of $frame
+  gtsam_points::PointCloud::ConstPtr frame;                    ///< Deskewed points for state estimation
+  std::vector<gtsam_points::GaussianVoxelMap::Ptr> voxelmaps;  ///< Multi-resolution voxelmaps
+
+  std::unordered_map<std::string, std::shared_ptr<void>> custom_data;  ///< User-defined custom data
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // IAP extensions — placed AFTER all original GLIM fields so that the memory
+  // layout of the base fields matches libglim.so exactly.  This avoids ABI
+  // mismatches when glim_rosnode (linked to /root/ros2_ws libglim.so) creates
+  // EstimationFrame objects that are read by IAP extension modules compiled
+  // against IAP headers.
+  //
+  // These fields are only written/read by IAP modules (odometry, GNSS) which
+  // allocate their own EstimationFrame objects with the full IAP-size layout.
+  // GLIM-allocated frames (from on_new_frame callback) are smaller and must
+  // NOT have these fields accessed.
+  // ═══════════════════════════════════════════════════════════════════════════
+
   // ---- IAP: clock states (IAP-RQ-010) -----------------------------------
   double clk_bias  = 0.0;  ///< Receiver clock bias δt  [m] (c * dt)
   double clk_drift = 0.0;  ///< Receiver clock drift δṫ [m/s] (c * dt_dot)
@@ -113,14 +136,5 @@ public:
   };
   IcpQuality icp_quality;  ///< populated in odometry_estimation_cpu.cpp
   // -----------------------------------------------------------------------
-
-  PreprocessedFrame::ConstPtr raw_frame;             ///< Raw input point cloud (LiDAR frame)
-  Eigen::Matrix<double, 8, -1> imu_rate_trajectory;  ///< IMU-rate trajectory 8 x N  [t, x, y, z, qx, qy, qz, qw]
-
-  FrameID frame_id;                                            ///< Coordinate frame of $frame
-  gtsam_points::PointCloud::ConstPtr frame;                    ///< Deskewed points for state estimation
-  std::vector<gtsam_points::GaussianVoxelMap::Ptr> voxelmaps;  ///< Multi-resolution voxelmaps
-
-  std::unordered_map<std::string, std::shared_ptr<void>> custom_data;  ///< User-defined custom data
 };
 }  // namespace glim
