@@ -107,6 +107,7 @@ void IntegrityMonitor::run_araim(const GnssEpoch& epoch,
   if (!ar.valid) return;
 
   report.pl_araim = ar.pl_araim;
+  report.vpl_araim = ar.vpl_araim;
   report.pl_ff    = ar.pl_ff;
 
   // Replace the proxy PL with the ARAIM PL (ARAIM is more principled)
@@ -207,6 +208,32 @@ IntegrityReport IntegrityMonitor::compute(const glim::EstimationFrame&       fra
   if (trunk) {
     report.tdop = trunk->tdop;
   }
+
+  // --- HAL from trunk geometry (IAP-RQ-210 / §4.8) ---
+  // HAL_t = γ_H · min_k( ‖p̂_xy - c_k‖ - r_k - r_drone )
+  if (trunk && !trunk->trunks.empty()) {
+    const Eigen::Vector2d p_xy = frame.T_world_imu.translation().head<2>();
+    double min_clearance = 1e9;
+    for (const auto& t : trunk->trunks) {
+      const double dist = (p_xy - t.center_xy).norm();
+      const double clearance = dist - t.radius - params_.r_drone;
+      min_clearance = std::min(min_clearance, clearance);
+    }
+    if (min_clearance > 0.0) {
+      report.HAL_trunk = params_.gamma_H * min_clearance;
+    } else {
+      // Already inside a trunk exclusion zone — HAL = 0 (immediate alert)
+      report.HAL_trunk = 0.0;
+    }
+  } else {
+    report.HAL_trunk = params_.HAL_trunk_default;
+  }
+
+  // Integrate HAL_trunk into AL (take the minimum)
+  report.AL = std::min(report.AL, report.HAL_trunk);
+
+  // Recompute IM after all AL/PL adjustments (ARAIM may have replaced PL, HAL may have reduced AL)
+  report.IM = report.AL - report.PL;
 
   // --- Mode state machine  ---
   report.mode = update_mode(report);

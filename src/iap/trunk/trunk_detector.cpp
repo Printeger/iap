@@ -198,6 +198,10 @@ TrunkDetectionResult TrunkDetector::detect(const gtsam_points::PointCloud& frame
   // ---- 4. Compute TDOP (IAP-RQ-120) --------------------------------------
   compute_tdop(result);
 
+  // ---- 5. Compute azimuth histogram (IAP-RQ-150) -------------------------
+  result.azimuth_histogram = compute_azimuth_histogram(
+      result.trunks, Eigen::Vector2d::Zero());
+
   return result;
 }
 

@@ -50,6 +50,7 @@ class PseudorangeFactor
    * @param gps_sec     GPS time [s] for iono/trop delay computation
    * @param iono_params Klobuchar {α0..α3,β0..β3}; empty → skip iono correction
    * @param noise       Noise model
+   * @param lever_arm   GNSS antenna offset in body frame [m] (l^b_GNSS)
    */
   PseudorangeFactor(gtsam::Key                   pose_key,
                     gtsam::Key                   clk_key,
@@ -60,7 +61,17 @@ class PseudorangeFactor
                     double                       tgd,
                     double                       gps_sec,
                     std::vector<double>          iono_params,
-                    const gtsam::SharedNoiseModel& noise);
+                    const gtsam::SharedNoiseModel& noise,
+                    const Eigen::Vector3d&       lever_arm = Eigen::Vector3d::Zero(),
+                    int                          sat_id    = 0,
+                    char                         constellation = 'G',
+                    double                       elevation = 0.0);
+
+  /// Accessors for debug logging
+  int    sat_id()        const { return sat_id_; }
+  char   constellation() const { return constellation_; }
+  double elevation()     const { return elevation_; }
+  double pr_meas()       const { return pr_meas_; }
 
   /// Evaluate residual (and optional Jacobians).
   gtsam::Vector evaluateError(const gtsam::Pose3&    pose,
@@ -78,6 +89,10 @@ class PseudorangeFactor
   double              tgd_;          ///< group delay [s]
   double              gps_sec_;      ///< GPS time [s]
   std::vector<double> iono_params_;  ///< Klobuchar parameters (8 values or empty)
+  Eigen::Vector3d     lever_arm_;    ///< GNSS antenna offset in body frame [m]
+  int                 sat_id_     = 0;    ///< satellite PRN
+  char                constellation_ = 'G'; ///< G/R/E/C
+  double              elevation_  = 0.0;  ///< elevation angle [rad]
 };
 
 }  // namespace iap

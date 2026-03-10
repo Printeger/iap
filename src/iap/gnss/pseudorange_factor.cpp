@@ -26,7 +26,11 @@ PseudorangeFactor::PseudorangeFactor(
     double                       tgd,
     double                       gps_sec,
     std::vector<double>          iono_params,
-    const gtsam::SharedNoiseModel& noise)
+    const gtsam::SharedNoiseModel& noise,
+    const Eigen::Vector3d&       lever_arm,
+    int                          sat_id,
+    char                         constellation,
+    double                       elevation)
     : gtsam::NoiseModelFactor4<gtsam::Pose3, gtsam::Vector2,
                                 gtsam::Vector3, gtsam::Rot3>(
           noise, pose_key, clk_key, ext_key, rot_key),
@@ -34,7 +38,11 @@ PseudorangeFactor::PseudorangeFactor(
       sat_pos_(sat_pos),
       tgd_(tgd),
       gps_sec_(gps_sec),
-      iono_params_(std::move(iono_params)) {}
+      iono_params_(std::move(iono_params)),
+      lever_arm_(lever_arm),
+      sat_id_(sat_id),
+      constellation_(constellation),
+      elevation_(elevation) {}
 
 gtsam::Vector PseudorangeFactor::evaluateError(
     const gtsam::Pose3&   pose,
@@ -48,7 +56,10 @@ gtsam::Vector PseudorangeFactor::evaluateError(
 
   const Eigen::Matrix3d R_mat  = R_ext.matrix();
   const Eigen::Vector3d p_local = pose.translation();
-  const Eigen::Vector3d P_ecef  = R_mat * p_local + anc_ecef;
+  // Lever-arm compensation: p_ant = p_body + R_wb * l^b_GNSS
+  // (pose.rotation() = R_world_body, so antenna pos in world = p + R * l)
+  const Eigen::Vector3d p_ant   = p_local + pose.rotation().matrix() * lever_arm_;
+  const Eigen::Vector3d P_ecef  = R_mat * p_ant + anc_ecef;
 
   constexpr double kEps = 1e-6;
   const Eigen::Vector3d dp  = P_ecef - sat_pos_;
@@ -82,15 +93,30 @@ gtsam::Vector PseudorangeFactor::evaluateError(
 
   // ── Jacobians ─────────────────────────────────────────────────────────────
   // GTSAM Pose3 tangent: [rot(0:2), trans(3:5)]
-  // d(rho)/d(P_ecef) = eᵀ
-  // d(P_ecef)/d(p_local) = R_mat    =>  d(rho)/d(p_local) = eᵀ R_mat
-  // d(residual)/d(p_local) = -eᵀ R_mat
+  // With lever arm l:  p_ant = p + R_wb * l
+  //   d(p_ant)/d(trans) = I  =>  d(P_ecef)/d(trans) = R_ext
+  //   d(p_ant)/d(rot)   = -R_wb * skew(l)  (right perturbation)
+  //   =>  d(P_ecef)/d(rot) = R_ext * (-R_wb * skew(l))
+  //   d(residual)/d(.) = -eᵀ * d(P_ecef)/d(.)
+  const Eigen::Matrix3d R_wb = pose.rotation().matrix();
   if (H_pose) {
     *H_pose = gtsam::Matrix::Zero(1, 6);
+    // Translation part: d(res)/d(trans) = -eᵀ R_ext
     const Eigen::RowVector3d eR = e.transpose() * R_mat;
     (*H_pose)(0, 3) = -eR(0);
     (*H_pose)(0, 4) = -eR(1);
     (*H_pose)(0, 5) = -eR(2);
+    // Rotation part: d(res)/d(rot) = eᵀ R_ext R_wb skew(l)
+    if (lever_arm_.squaredNorm() > 1e-12) {
+      const Eigen::Matrix3d skew_l = (Eigen::Matrix3d() <<
+          0, -lever_arm_(2), lever_arm_(1),
+          lever_arm_(2), 0, -lever_arm_(0),
+          -lever_arm_(1), lever_arm_(0), 0).finished();
+      const Eigen::RowVector3d rot_row = e.transpose() * R_mat * R_wb * skew_l;
+      (*H_pose)(0, 0) = rot_row(0);
+      (*H_pose)(0, 1) = rot_row(1);
+      (*H_pose)(0, 2) = rot_row(2);
+    }
   }
   if (H_clk) {
     *H_clk = gtsam::Matrix::Zero(1, 2);
@@ -105,13 +131,13 @@ gtsam::Vector PseudorangeFactor::evaluateError(
   }
   if (H_rot) {
     // Right-perturbation: R_new = R * Exp(δξ)
-    // d(R*v)/dξ = -R * skew(v)  =>  d(P_ecef)/dξ = -R_mat * skew(p_local)
-    // d(rho)/dξ = eᵀ * (-R_mat * skew(p_local)) = -eᵀ * R_mat * skew(p_local)
-    // d(residual)/dξ = eᵀ * R_mat * skew(p_local)
+    // d(R*v)/dξ = -R * skew(v)  =>  d(P_ecef)/dξ = -R_mat * skew(p_ant)
+    // d(rho)/dξ = eᵀ * (-R_mat * skew(p_ant))
+    // d(residual)/dξ = eᵀ * R_mat * skew(p_ant)  (sign: res = meas - pred)
     const Eigen::Matrix3d skew_p = (Eigen::Matrix3d() <<
-        0, -p_local(2), p_local(1),
-        p_local(2), 0, -p_local(0),
-        -p_local(1), p_local(0), 0).finished();
+        0, -p_ant(2), p_ant(1),
+        p_ant(2), 0, -p_ant(0),
+        -p_ant(1), p_ant(0), 0).finished();
     const Eigen::RowVector3d row = e.transpose() * R_mat * skew_p;
     *H_rot = gtsam::Matrix::Zero(1, 3);
     (*H_rot)(0, 0) = row(0);

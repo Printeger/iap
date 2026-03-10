@@ -59,7 +59,16 @@ class DopplerFactor
                 const Eigen::Vector3d&       sat_pos,
                 const Eigen::Vector3d&       sat_vel,
                 const Eigen::Vector3d&       anc_ecef_approx,
-                const gtsam::SharedNoiseModel& noise);
+                const gtsam::SharedNoiseModel& noise,
+                int                          sat_id    = 0,
+                char                         constellation = 'G',
+                double                       elevation = 0.0);
+
+  /// Accessors for debug logging
+  int    sat_id()        const { return sat_id_; }
+  char   constellation() const { return constellation_; }
+  double elevation()     const { return elevation_; }
+  double dop_meas()      const { return dop_meas_; }
 
   /// Evaluate residual (and optional Jacobians).
   gtsam::Vector evaluateError(const gtsam::Pose3&    pose,
@@ -76,6 +85,9 @@ class DopplerFactor
   Eigen::Vector3d sat_pos_;           ///< satellite ECEF position [m]
   Eigen::Vector3d sat_vel_;           ///< satellite ECEF velocity [m/s]
   Eigen::Vector3d anc_ecef_approx_;   ///< world-frame origin in ECEF (const; for Sagnac)
+  int             sat_id_     = 0;    ///< satellite PRN
+  char            constellation_ = 'G'; ///< G/R/E/C
+  double          elevation_  = 0.0;  ///< elevation angle [rad]
 };
 
 }  // namespace iap

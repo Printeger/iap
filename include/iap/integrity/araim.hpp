@@ -40,13 +40,18 @@ namespace iap {
 class Araim {
  public:
   struct Params {
-    double K_fa           = 4.50;   ///< false-alarm multiplier (detection threshold)
-    double K_md           = 5.50;   ///< missed-detection multiplier (faulted PL)
-    double K_ff           = 5.33;   ///< fault-free PL multiplier (≈ 10^{-7} tail)
+    double K_fa           = 4.50;   ///< false-alarm multiplier (fallback; prefer dynamic)
+    double K_md           = 5.50;   ///< missed-detection multiplier (fallback; prefer dynamic)
+    double K_ff           = 5.33;   ///< fault-free PL multiplier (fallback; prefer dynamic)
     double p_sat_default  = 1e-4;   ///< default prior fault probability (GNSS sat)
     double p_trunk_default= 1e-3;   ///< default prior fault probability (trunk landmark)
+    double p_const_default= 1e-8;   ///< default constellation-wide fault probability (IAP-RQ-241)
     double eps_degen      = 1e-10;  ///< minimum eigenvalue to accept inversion
     int    min_sats       = 4;      ///< minimum non-excluded sats for valid solution
+    // Dynamic integrity budget (IAP-RQ-244 §4.3)
+    double P_req          = 1e-7;   ///< required integrity risk per epoch
+    double P_FA_req       = 3.3e-7; ///< required false-alarm probability per epoch
+    bool   dynamic_budget = true;   ///< if true, compute K_fa/K_md/K_ff from P_req/P_FA_req
   };
 
   /// Per-satellite geometry specification for prediction mode.
@@ -115,6 +120,10 @@ class Araim {
                                   const Eigen::VectorXd& r,
                                   const std::vector<FaultHypothesis>& hyps,
                                   const Params& params);
+
+  /// @brief Inverse of the Q-function: Q_inv(p) = x s.t. Q(x) = p
+  /// where Q(x) = 0.5 * erfc(x / sqrt(2)).  Used for dynamic budget allocation.
+  static double Q_inv(double p);
 
   Params params_;
 };

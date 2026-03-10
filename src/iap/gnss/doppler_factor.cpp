@@ -22,14 +22,20 @@ DopplerFactor::DopplerFactor(
     const Eigen::Vector3d&       sat_pos,
     const Eigen::Vector3d&       sat_vel,
     const Eigen::Vector3d&       anc_ecef_approx,
-    const gtsam::SharedNoiseModel& noise)
+    const gtsam::SharedNoiseModel& noise,
+    int                          sat_id,
+    char                         constellation,
+    double                       elevation)
     : gtsam::NoiseModelFactor4<gtsam::Pose3, gtsam::Vector3,
                                 gtsam::Vector2, gtsam::Rot3>(
           noise, pose_key, vel_key, clk_key, rot_key),
       dop_meas_(dop_meas),
       sat_pos_(sat_pos),
       sat_vel_(sat_vel),
-      anc_ecef_approx_(anc_ecef_approx) {}
+      anc_ecef_approx_(anc_ecef_approx),
+      sat_id_(sat_id),
+      constellation_(constellation),
+      elevation_(elevation) {}
 
 gtsam::Vector DopplerFactor::evaluateError(
     const gtsam::Pose3&   pose,

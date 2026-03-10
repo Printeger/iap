@@ -65,6 +65,11 @@ class IntegrityMonitor {
     double chi2_global_mult  = 3.0;    ///< global NIS threshold = mult * K * chi2_1dof
     double gamma_R_max       = 5.0;    ///< max downweight factor for a single satellite
 
+    // --- HAL from trunk geometry (IAP-RQ-210 / §4.8) ---
+    double gamma_H           = 0.5;    ///< safety factor for trunk-based HAL
+    double r_drone            = 0.35;  ///< UAV equivalent collision radius [m]
+    double HAL_trunk_default  = 10.0;  ///< default HAL when no trunks visible [m]
+
     // --- ARAIM (IAP-RQ-241–246) ---
     Araim::Params araim_params;        ///< K_fa, K_md, K_ff, min_sats, etc.
   };

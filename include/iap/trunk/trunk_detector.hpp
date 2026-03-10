@@ -39,12 +39,12 @@ class TrunkDetector {
 
     // Clustering
     double grid_resolution  = 0.1;   ///< XY grid cell size for clustering [m]
-    int    min_cluster_pts  = 5;     ///< minimum points per cluster
-    int    max_cluster_pts  = 2000;  ///< maximum points per cluster (clutter guard)
+    int    min_cluster_pts  = 20;    ///< minimum points per cluster
+    int    max_cluster_pts  = 500;   ///< maximum points per cluster (clutter guard)
 
     // Circle fitting / validation
-    double radius_min        = 0.03;  ///< minimum plausible trunk radius [m]
-    double radius_max        = 0.40;  ///< maximum plausible trunk radius [m]
+    double radius_min        = 0.05;  ///< minimum plausible trunk radius [m]
+    double radius_max        = 0.50;  ///< maximum plausible trunk radius [m]
     double fit_tolerance     = 0.05;  ///< inlier distance tolerance for Kasa fit [m]
     double min_confidence    = 0.3;   ///< discard detections below this confidence
 
