@@ -67,6 +67,7 @@ GlobalMappingParams::GlobalMappingParams() {
   randomsampling_rate = config.param<double>("global_mapping", "randomsampling_rate", 1.0);
   max_implicit_loop_distance = config.param<double>("global_mapping", "max_implicit_loop_distance", 100.0);
   min_implicit_loop_overlap = config.param<double>("global_mapping", "min_implicit_loop_overlap", 0.1);
+  multiscan_window = config.param<int>("global_mapping", "multiscan_window", 0);
 
   enable_gpu = registration_error_factor_type.find("GPU") != std::string::npos;
 
@@ -109,6 +110,12 @@ GlobalMapping::GlobalMapping(const GlobalMappingParams& params) : params(params)
 #ifdef GTSAM_POINTS_USE_CUDA
   stream_buffer_roundrobin = std::make_shared<gtsam_points::StreamTempBufferRoundRobin>(64);
 #endif
+
+  if (params.multiscan_window > 0) {
+    logger->info("multiscan_window={}: global_mapping will only connect submaps within {} recent neighbors", params.multiscan_window, params.multiscan_window);
+  } else {
+    logger->info("multiscan_window=0: global_mapping will connect all overlapping submaps (original behavior)");
+  }
 
 #ifdef GTSAM_USE_TBB
   tbb_task_arena = std::make_shared<tbb::task_arena>(1);
@@ -309,6 +316,11 @@ void GlobalMapping::find_overlapping_submaps(double min_overlap) {
   double squared_max_implicit_loop_distance = params.max_implicit_loop_distance * params.max_implicit_loop_distance;
   for (int i = 0; i < submaps.size(); i++) {
     for (int j = i + 1; j < submaps.size(); j++) {
+      // multiscan_window: skip pairs beyond the temporal window
+      if (params.multiscan_window > 0 && (j - i) > params.multiscan_window) {
+        continue;
+      }
+
       if (existing_factors.count(Eigen::Vector3i(i, j, 0))) {
         continue;
       }
@@ -439,6 +451,11 @@ std::shared_ptr<gtsam::NonlinearFactorGraph> GlobalMapping::create_matching_cost
   double squared_max_implicit_loop_distance = params.max_implicit_loop_distance * params.max_implicit_loop_distance;
 
   for (int i = 0; i < current; i++) {
+    // multiscan_window: only connect submaps within recent N window
+    if (params.multiscan_window > 0 && (current - i) > params.multiscan_window) {
+      continue;
+    }
+
     const double squared_dist = (submaps[i]->T_world_origin.translation() - current_submap->T_world_origin.translation()).squaredNorm();
     if (squared_dist > squared_max_implicit_loop_distance) {
       continue;

@@ -47,6 +47,10 @@ public:
   double max_implicit_loop_distance;
   double min_implicit_loop_overlap;
 
+  // 0 = original global behavior (connect all overlapping submaps)
+  // >0 = only connect submaps within recent N window (point-to-multiscan, recommended with GNSS)
+  int multiscan_window;
+
   bool use_isam2_dogleg;
   double isam2_relinearize_skip;
   double isam2_relinearize_thresh;

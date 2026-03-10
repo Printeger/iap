@@ -3,6 +3,25 @@
 > 规则：任何代码改动必须在这里记录，并包含 IAP-RQ-XXX。
 
 ## Unreleased
+- fix(odometry): IAP-RQ-130 — fix EstimationFrame ABI layout mismatch vs libglim.so.
+  - IAP additions (`clk_bias`, `clk_drift`, `sigma_p`, `icp_quality`) were inserted before original GLIM fields, shifting `raw_frame` offset by ~136 bytes.
+  - Moved all IAP-added fields to **after** `custom_data` (struct tail), preserving original GLIM field offsets.
+  - SIGSEGV in `TrunkExtensionModule::on_new_frame_` resolved.
+- feat(trunk): IAP-RQ-130 — activate trunk FGO extension module with ROS2 visualization.
+  - `trunk_extension.hpp/cpp`: base class → `ExtensionModuleROS2`; added `create_subscriptions()`, `publish_markers_()`.
+  - `publish_markers_()`: detections as yellow-green cylinders (1 s TTL, ns=`det`), landmarks as bright-green cylinders + white text IDs (ns=`lm`/`lm_label`), DELETEALL on each update.
+  - `map_mutex_` guards all `map_.update()` / `map_.landmarks()` / `map_.confirmed_landmarks()` accesses.
+  - `CMakeLists.txt`: `trunk_extension.cpp` moved out of `libiap` → separate `trunk_extension` shared library with `rclcpp` + `visualization_msgs` deps.
+  - `config_ros.json`: `libtrunk_extension.so` added to `extension_modules`.
+  - Entry point: `extern "C" create_extension_module()` → `TrunkExtensionModule`.
+  - `on_new_frame_`: uses `frame->raw_frame->points` (CPU, always valid) instead of `*frame->frame` (may be GPU null).
+- feat(gnss): IAP-RQ-025 — externalize GNSS parameters to `config_gnss.json`.
+  - New `config/config_gnss.json` with 16 parameters (pr noise, canopy model, elevation cut, lever arm, clock Q, ECEF priors, debug CSV).
+  - `gnss_extension.cpp`: load all params via `glim::Config`; removed `IAP_GNSS_DEBUG_CSV` env-var fallback (config is sole source of truth).
+  - `gnss_handler_` changed to `std::unique_ptr<GnssHandler>` (fixes mutex move issue).
+- feat(mapping): IAP-RQ-045 — add `multiscan_window` parameter to global mapping.
+  - `GlobalMappingParams::multiscan_window` (default 3): keep last N frames for point-to-multiscan matching.
+  - Config key `global_mapping/multiscan_window` in `config_global_mapping_cpu.json` and `config_global_mapping_gpu.json`.
 - feat(gnss): IAP-RQ-020 — full ECEF pipeline with E(0)/R(0) free variables.
   - Replace local-ENU coordinate frame with ECEF throughout GNSS pipeline.
   - `PseudorangeFactor`: `NoiseModelFactor4<Pose3, Vector2, Vector3, Rot3>` — keys X(i), C(i), E(0), R(0).
