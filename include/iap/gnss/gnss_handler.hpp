@@ -4,6 +4,7 @@
 #include <iap/gnss/gnss_types.hpp>
 #include <iap/gnss/pseudorange_factor.hpp>
 #include <iap/gnss/doppler_factor.hpp>
+#include <iap/gnss/canopy_noise_model.hpp>
 #include <gtsam/inference/Symbol.h>
 #include <gtsam/nonlinear/NonlinearFactorGraph.h>
 #include <Eigen/Core>
@@ -43,8 +44,16 @@ class GnssHandler {
     double dop_noise_base  = 0.5;   ///< base Doppler noise [m/s]
     double elev_noise_exp  = 2.0;   ///< exponent for elevation-dependent weighting
     double time_tolerance  = 0.1;   ///< epoch window around frame stamp [s]
-    double min_elevation   = 0.087; ///< min elevation mask [rad] (~5 deg)
+    double min_elevation   = 0.1745; ///< min elevation mask [rad] (~10 deg)
     int    max_epoch_queue = 100;   ///< maximum buffered epochs (back-pressure guard)
+
+    /// Canopy noise model parameters for σ²_eff (IAP-RQ-314).
+    /// Used when SatObs::kappa > 0 to incorporate canopy-density weighting.
+    CanopyNoiseParams canopy;
+
+    /// GNSS antenna lever arm in body frame [m] (l^b_GNSS).
+    /// Set from physical measurement (antenna phase center → IMU origin).
+    Eigen::Vector3d lever_arm = Eigen::Vector3d::Zero();
   };
 
   GnssHandler();  ///< Default constructor (uses Params{} defaults)
@@ -72,8 +81,9 @@ class GnssHandler {
   std::size_t queue_size() const;
 
  private:
-  /// Elevation-dependent noise scaling: sigma = base / sin^exp(el).
-  double pr_sigma(double elevation) const;
+  /// Canopy-aware pseudorange noise: uses full σ²_eff model when κ available,
+  /// falls back to elevation-only scaling when κ ≈ 0.
+  double pr_sigma(double elevation, double kappa) const;
   double dop_sigma(double elevation) const;
 
   Params params_;

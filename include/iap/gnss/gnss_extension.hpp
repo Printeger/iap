@@ -15,6 +15,7 @@
 
 #include <Eigen/Core>
 #include <atomic>
+#include <fstream>
 #include <map>
 #include <memory>
 #include <mutex>
@@ -26,6 +27,7 @@
 #include <gtsam_points/optimizers/incremental_fixed_lag_smoother_with_fallback.hpp>
 #include <gnss_comm/gnss_constant.hpp>   // EphemPtr, GloEphemPtr, ObsPtr
 #include <iap/gnss/gnss_handler.hpp>
+#include <iap/gnss/clock_between_factor.hpp>
 #include <iap/util/extension_module_ros2.hpp>
 
 namespace iap {
@@ -89,7 +91,7 @@ class GnssExtensionModule : public glim::ExtensionModuleROS2 {
   rclcpp::Node*       node_ = nullptr;
   std::shared_ptr<spdlog::logger> logger_;
 
-  GnssHandler gnss_handler_;
+  std::unique_ptr<GnssHandler> gnss_handler_;
 
   // Current frame tracking (set by on_new_frame callback)
   std::atomic<long>     last_frame_id_{-1};
@@ -123,10 +125,28 @@ class GnssExtensionModule : public glim::ExtensionModuleROS2 {
   std::vector<gtsam::NonlinearFactor::shared_ptr>    last_dop_factors_;
   long                                               last_injected_frame_id_{-1};
 
+  // Clock between-epoch factor: tracks the previous GNSS-injected frame so
+  // that a ClockBetweenFactor can connect C(prev) → C(curr).
+  ClockBetweenFactor::Params clk_between_params_;  ///< q_bias, q_drift
+  long   prev_gnss_frame_id_{-1};     ///< frame_id of last GNSS injection (-1 = none)
+  double prev_gnss_frame_stamp_{0.0}; ///< stamp of last GNSS injection
+
+  // ECEF anchor prior sigmas (loaded from config_gnss.json)
+  double sigma_ecef_origin_{5.0};   ///< σ for E(0) prior [m]
+  double sigma_ecef_rot_{0.087};    ///< σ for R(0) prior [rad] (~5°)
+
   // Ephemeris caches (GPS/GAL/BDS and GLONASS)
   mutable std::mutex                                            ephem_mutex_;
   std::unordered_map<uint32_t, gnss_comm::EphemPtr>            ephem_cache_;
   std::unordered_map<uint32_t, gnss_comm::GloEphemPtr>         glo_ephem_cache_;
+
+  // ── Debug CSV logging ───────────────────────────────────────────────────
+  // Activated by config_gnss.json: "enable_debug_csv": true
+  // Or by setting gnss_debug_csv_ = true before first injection.
+  // Writes per-factor residuals to /tmp/iap_gnss_factor_debug.csv
+  bool                debug_csv_enabled_ = false;
+  std::ofstream       debug_csv_file_;
+  std::mutex          debug_csv_mutex_;
 };
 
 }  // namespace iap

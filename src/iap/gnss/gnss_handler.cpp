@@ -30,10 +30,12 @@ std::size_t GnssHandler::queue_size() const {
   return epoch_queue_.size();
 }
 
-double GnssHandler::pr_sigma(double elevation) const {
-  // Elevation-dependent noise: sigma = base / sin^exp(el)
-  const double s = std::sin(std::max(elevation, params_.min_elevation));
-  return params_.pr_noise_base / std::pow(s, params_.elev_noise_exp);
+double GnssHandler::pr_sigma(double elevation, double kappa) const {
+  // Full canopy noise model: σ²_eff = σ²_0 + σ²_mp/sin²θ + σ²_c·exp(α·κ/sinθ)
+  // When κ > 0, use the three-term canopy model (IAP-RQ-314).
+  // When κ ≈ 0, the canopy term degenerates to σ²_c and the model still
+  // provides correct elevation-dependent noise.
+  return sigma_eff_canopy(params_.canopy, kappa, elevation);
 }
 
 double GnssHandler::dop_sigma(double elevation) const {
@@ -77,7 +79,7 @@ gtsam::NonlinearFactorGraph GnssHandler::get_factors(
 
       // ── PseudorangeFactor ────────────────────────────────────────────────
       // Keys: X(i), C(i), E(0), R(0)
-      const double sigma_pr = pr_sigma(sat.elevation);
+      const double sigma_pr = pr_sigma(sat.elevation, sat.kappa);
       graph.emplace_shared<PseudorangeFactor>(
         X(frame_idx), C(frame_idx), E(0), R(0),
         sat.pr_meas,
@@ -85,7 +87,11 @@ gtsam::NonlinearFactorGraph GnssHandler::get_factors(
         sat.tgd,
         epoch.gps_sec,
         epoch.iono_params,
-        gtsam::noiseModel::Isotropic::Sigma(1, sigma_pr));
+        gtsam::noiseModel::Isotropic::Sigma(1, sigma_pr),
+        params_.lever_arm,
+        sat.sat_id,
+        sat.constellation,
+        sat.elevation);
 
       // ── DopplerFactor ──────────────────────────────────────────────────
       // Keys: X(i), V(i), C(i), R(0)
@@ -96,7 +102,10 @@ gtsam::NonlinearFactorGraph GnssHandler::get_factors(
         sat.sat_pos,
         sat.sat_vel,
         anc_ecef,
-        gtsam::noiseModel::Isotropic::Sigma(1, sigma_dop));
+        gtsam::noiseModel::Isotropic::Sigma(1, sigma_dop),
+        sat.sat_id,
+        sat.constellation,
+        sat.elevation);
     }
   }
 

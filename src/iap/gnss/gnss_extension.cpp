@@ -16,6 +16,7 @@
 //   on_smoother_update_()  →  GnssHandler::get_factors()  →  new_factors
 
 #include <iap/gnss/gnss_extension.hpp>
+#include <iap/gnss/clock_between_factor.hpp>
 
 #include <cmath>
 #include <numeric>
@@ -36,9 +37,14 @@
 #include <gnss_comm/msg/gnss_ionosphere_parameter.hpp>
 #include <sensor_msgs/msg/nav_sat_fix.hpp>
 
+#include <iap/gnss/pseudorange_factor.hpp>
+#include <iap/gnss/doppler_factor.hpp>
 #include <iap/odometry/callbacks.hpp>
 #include <iap/odometry/estimation_frame.hpp>
+#include <iap/util/config.hpp>
 #include <iap/util/logging.hpp>
+
+#include <iomanip>
 
 namespace iap {
 
@@ -85,6 +91,48 @@ static Eigen::Matrix3d ecef_to_enu_rotation(double lat, double lon) {
 // ─────────────────────────────────────────────────────────────────────────────
 GnssExtensionModule::GnssExtensionModule()
     : logger_(glim::create_module_logger("gnss_ext")) {
+  // ── Load GNSS config from config_gnss.json ──────────────────────────────
+  glim::Config config(glim::GlobalConfig::get_config_path("config_gnss"));
+
+  // GnssHandler::Params
+  GnssHandler::Params hp;
+  hp.pr_noise_base   = config.param<double>("gnss", "pr_noise_base", 5.0);
+  hp.dop_noise_base  = config.param<double>("gnss", "dop_noise_base", 0.5);
+  hp.elev_noise_exp  = config.param<double>("gnss", "elev_noise_exp", 2.0);
+  hp.time_tolerance  = config.param<double>("gnss", "time_tolerance", 0.1);
+  hp.max_epoch_queue = config.param<int>("gnss", "max_epoch_queue", 100);
+
+  const double min_elev_deg = config.param<double>("gnss", "min_elevation_deg", 10.0);
+  hp.min_elevation = min_elev_deg * M_PI / 180.0;  // convert deg → rad
+
+  // Canopy noise model
+  hp.canopy.sigma_0  = config.param<double>("gnss", "canopy_sigma_0", 1.0);
+  hp.canopy.sigma_mp = config.param<double>("gnss", "canopy_sigma_mp", 0.5);
+  hp.canopy.sigma_c  = config.param<double>("gnss", "canopy_sigma_c", 5.0);
+  hp.canopy.alpha    = config.param<double>("gnss", "canopy_alpha", 2.0);
+
+  // Lever arm
+  hp.lever_arm = config.param<Eigen::Vector3d>("gnss", "lever_arm", Eigen::Vector3d::Zero());
+
+  gnss_handler_ = std::make_unique<GnssHandler>(hp);
+
+  // ClockBetweenFactor params
+  clk_between_params_.q_bias  = config.param<double>("gnss", "clock_q_bias", 1.0);
+  clk_between_params_.q_drift = config.param<double>("gnss", "clock_q_drift", 0.1);
+
+  // ECEF anchor prior sigmas
+  sigma_ecef_origin_ = config.param<double>("gnss", "sigma_ecef_origin", 5.0);
+  sigma_ecef_rot_    = config.param<double>("gnss", "sigma_ecef_rot", 0.087);
+
+  logger_->info("[gnss_ext] Config loaded: pr_σ={} dop_σ={} elev_cut={:.0f}° "
+                "canopy=[{},{},{},α={}] lever=[{:.3f},{:.3f},{:.3f}] "
+                "clk_q=[{},{}] σ_E={} σ_R={:.3f}",
+                hp.pr_noise_base, hp.dop_noise_base, min_elev_deg,
+                hp.canopy.sigma_0, hp.canopy.sigma_mp, hp.canopy.sigma_c, hp.canopy.alpha,
+                hp.lever_arm(0), hp.lever_arm(1), hp.lever_arm(2),
+                clk_between_params_.q_bias, clk_between_params_.q_drift,
+                sigma_ecef_origin_, sigma_ecef_rot_);
+
   // Register on_new_frame to track frame index/stamp for factor injection
   Callbacks::on_new_frame.add([this](const glim::EstimationFrame::ConstPtr& f) {
     last_frame_id_.store(f->id);
@@ -107,6 +155,25 @@ GnssExtensionModule::GnssExtensionModule()
       });
 
   logger_->info("GnssExtensionModule created — waiting for NavSatFix origin");
+
+  // ── Debug CSV logging (from config_gnss.json) ──────────────────────────
+  const bool enable_csv = config.param<bool>("gnss", "enable_debug_csv", false);
+  logger_->info("[gnss_ext] enable_debug_csv={}", enable_csv);
+  if (enable_csv) {
+    debug_csv_enabled_ = true;
+    const std::string csv_path = config.param<std::string>(
+        "gnss", "debug_csv_path", "/tmp/iap_gnss_factor_debug.csv");
+    debug_csv_file_.open(csv_path, std::ios::out | std::ios::trunc);
+    if (debug_csv_file_.is_open()) {
+      debug_csv_file_ << "diag_n,stamp,frame_id,factor_type,sat_id,constellation,"
+                         "elevation_deg,measurement,residual,sigma,normalized_residual,"
+                         "clk_bias_m,clk_drift_ms\n";
+      logger_->info("[gnss_ext] Debug CSV logging ENABLED → {}", csv_path);
+    } else {
+      debug_csv_enabled_ = false;
+      logger_->warn("[gnss_ext] Failed to open debug CSV: {}", csv_path);
+    }
+  }
 }
 
 // ── create_subscriptions() ────────────────────────────────────────────────────
@@ -198,7 +265,10 @@ void GnssExtensionModule::on_iono_params_(
   iono_params_.assign(msg->parameters.begin(), msg->parameters.begin() + 8);
   static std::once_flag once;
   std::call_once(once, [this] {
-    logger_->info("[gnss_ext] Klobuchar iono params received — ionospheric correction enabled");
+    logger_->info("[gnss_ext] Klobuchar iono params received — ionospheric correction enabled.  "
+                  "alpha=[{:.4e},{:.4e},{:.4e},{:.4e}] beta=[{:.0f},{:.0f},{:.0f},{:.0f}]",
+                  iono_params_[0], iono_params_[1], iono_params_[2], iono_params_[3],
+                  iono_params_[4], iono_params_[5], iono_params_[6], iono_params_[7]);
   });
 }
 
@@ -272,6 +342,25 @@ void GnssExtensionModule::on_range_meas_(
     iono_params_snap = iono_params_;
   }
 
+  // Warn once if iono params have not been received — L1 single-frequency
+  // residuals will be significantly degraded without Klobuchar correction.
+  if (iono_params_snap.empty()) {
+    static std::once_flag iono_warn;
+    std::call_once(iono_warn, [this] {
+      logger_->warn("[gnss_ext] WARNING: no Klobuchar iono params received yet — "
+                    "ionospheric correction DISABLED.  L1 pseudorange residuals "
+                    "may be 10-25 m larger.  Ensure /ublox_driver/iono_params is published.");
+    });
+  } else {
+    static std::once_flag iono_use;
+    std::call_once(iono_use, [this, &iono_params_snap] {
+      logger_->info("[gnss_ext] Klobuchar iono correction ACTIVE for this epoch — "
+                    "alpha=[{:.4e},{:.4e},{:.4e},{:.4e}] beta=[{:.0f},{:.0f},{:.0f},{:.0f}]",
+                    iono_params_snap[0], iono_params_snap[1], iono_params_snap[2], iono_params_snap[3],
+                    iono_params_snap[4], iono_params_snap[5], iono_params_snap[6], iono_params_snap[7]);
+    });
+  }
+
   // GPS time in seconds (used by iono/trop correction functions)
   const double gps_sec = static_cast<double>(obs_list[0]->time.time) + obs_list[0]->time.sec;
 
@@ -292,6 +381,12 @@ void GnssExtensionModule::on_range_meas_(
     if (pr <= 0.0 || !std::isfinite(pr)) continue;
 
     // ── compute satellite position/velocity from ephemeris ──
+    // CRITICAL: satellite position must be evaluated at signal TRANSMISSION
+    // time t_tx ≈ t_rx − P/c, NOT at reception time t_rx.  During the ~67 ms
+    // transit, the satellite moves ~255 m in orbit.  Using reception-time
+    // positions causes per-satellite range errors of 30-70 m (the orbital-
+    // motion component projected onto each LOS), which directly inflate the
+    // pseudorange residuals.
     const uint32_t sat_id = obs->sat;
     const uint32_t sys    = gnss_comm::satsys(sat_id, nullptr);
     Eigen::Vector3d sat_ecef_pos = Eigen::Vector3d::Zero();
@@ -299,19 +394,25 @@ void GnssExtensionModule::on_range_meas_(
     double svdt = 0.0, svddt = 0.0;
     double tgd  = 0.0;
 
+    // Approximate signal transmission time: t_tx = t_rx − pr / c
+    // (One iteration is sufficient for < 1 m accuracy; the residual from
+    // not iterating is ~(3.8 km/s)² / c ≈ 0.05 mm — negligible.)
+    const double tau0 = pr / CLIGHT;  // transit time [s]
+    const auto t_tx = gnss_comm::time_add(obs->time, -tau0);
+
     if (sys == SYS_GLO) {
       // GLONASS
       const auto it = glo_ephem_cache_.find(sat_id);
       if (it == glo_ephem_cache_.end()) continue;
-      sat_ecef_pos = gnss_comm::geph2pos(obs->time, it->second, &svdt);
-      sat_ecef_vel = gnss_comm::geph2vel(obs->time, it->second, &svddt);
+      sat_ecef_pos = gnss_comm::geph2pos(t_tx, it->second, &svdt);
+      sat_ecef_vel = gnss_comm::geph2vel(t_tx, it->second, &svddt);
       // GLONASS has no group delay in eph; leave tgd = 0
     } else {
       // GPS / Galileo / BeiDou
       const auto it = ephem_cache_.find(sat_id);
       if (it == ephem_cache_.end()) continue;
-      sat_ecef_pos = gnss_comm::eph2pos(obs->time, it->second, &svdt);
-      sat_ecef_vel = gnss_comm::eph2vel(obs->time, it->second, &svddt);
+      sat_ecef_pos = gnss_comm::eph2pos(t_tx, it->second, &svdt);
+      sat_ecef_vel = gnss_comm::eph2vel(t_tx, it->second, &svddt);
       tgd = it->second->tgd[0];  // TGD (seconds); factor multiplies by CLIGHT
     }
 
@@ -323,8 +424,8 @@ void GnssExtensionModule::on_range_meas_(
     const double elevation = azel[1];
     const double azimuth   = azel[0];
 
-    // Skip satellites below 5° elevation (likely multipath / below horizon)
-    if (elevation < 5.0 * M_PI / 180.0) continue;
+    // Skip satellites below 10° elevation (checklist §1.1 cutoff ≥ 10°)
+    if (elevation < 10.0 * M_PI / 180.0) continue;
 
     // ── Doppler: Hz → m/s  (range_rate = -dopp_hz * c/f) ──
     double dop_meas = 0.0;
@@ -371,7 +472,7 @@ void GnssExtensionModule::on_range_meas_(
   }
 
   if (!epoch.sats.empty()) {
-    gnss_handler_.insert_epoch(epoch);
+    gnss_handler_->insert_epoch(epoch);
     const uint64_t n = ++epoch_count_;
     // Log first epoch, then every 100 (≈ ~10 s at 10 Hz)
     if (n == 1 || n % 100 == 0) {
@@ -405,13 +506,13 @@ void GnssExtensionModule::on_smoother_update_(
   }
 
   std::vector<GnssEpoch> consumed;
-  auto gnss_factors = gnss_handler_.get_factors(
+  auto gnss_factors = gnss_handler_->get_factors(
       static_cast<int>(frame_id), frame_stamp, anc_ecef, &consumed);
 
   if (gnss_factors.size() > 0) {
     // ── First GNSS injection: insert E(0) and R(0) with loose priors ──────────
-    // E(0) = ECEF origin (vector3, σ=5 m)
-    // R(0) = world→ECEF rotation (Rot3, σ=5°≈0.087 rad), refined by optimizer
+    // E(0) = ECEF origin (vector3), R(0) = world→ECEF rotation (Rot3)
+    // Prior sigmas loaded from config_gnss.json
     if (!ext_vars_inserted_.exchange(true)) {
       const gtsam::Rot3 R0(R_seed);
       new_values.insert(E(0), anc_ecef);
@@ -419,13 +520,14 @@ void GnssExtensionModule::on_smoother_update_(
       new_factors.addPrior<gtsam::Vector3>(
           E(0), anc_ecef,
           gtsam::noiseModel::Diagonal::Sigmas(
-              (gtsam::Vector3() << 5.0, 5.0, 5.0).finished()));
+              gtsam::Vector3::Constant(sigma_ecef_origin_)));
       new_factors.addPrior<gtsam::Rot3>(
           R(0), R0,
-          gtsam::noiseModel::Isotropic::Sigma(3, 0.087));  // ~5°
+          gtsam::noiseModel::Isotropic::Sigma(3, sigma_ecef_rot_));
       logger_->info("[gnss_ext] E(0)/R(0) inserted — "
-                    "ECEF=[{:.0f},{:.0f},{:.0f}] σ_E=5m σ_R=5°",
-                    anc_ecef(0), anc_ecef(1), anc_ecef(2));
+                    "ECEF=[{:.0f},{:.0f},{:.0f}] σ_E={}m σ_R={:.3f}rad",
+                    anc_ecef(0), anc_ecef(1), anc_ecef(2),
+                    sigma_ecef_origin_, sigma_ecef_rot_);
     }
     // Keep E(0)/R(0) alive in fixed-lag smoother on every injection
     new_stamps[E(0)] = frame_stamp;
@@ -466,6 +568,23 @@ void GnssExtensionModule::on_smoother_update_(
       // Make sure the stamp is registered even if odometry added the value
       new_stamps[C(frame_id)] = frame_stamp;
     }
+
+    // ── ClockBetweenFactor: connect C(prev) → C(curr) ───────────────────────
+    // Constant-drift random-walk model propagates clock information between
+    // consecutive GNSS-injected frames, preventing each epoch from having to
+    // solve the full ~113 km clock bias independently.
+    if (prev_gnss_frame_id_ >= 0) {
+      const double dt = frame_stamp - prev_gnss_frame_stamp_;
+      if (dt > 0.0 && dt < 2.0) {  // guard: only for reasonable gaps
+        auto clk_noise = ClockBetweenFactor::make_noise(dt, clk_between_params_);
+        new_factors.emplace_shared<ClockBetweenFactor>(
+            C(prev_gnss_frame_id_), C(frame_id), dt, clk_noise);
+        // Keep prev clock variable alive for the between-factor
+        new_stamps[C(prev_gnss_frame_id_)] = frame_stamp;
+      }
+    }
+    prev_gnss_frame_id_    = frame_id;
+    prev_gnss_frame_stamp_ = frame_stamp;
 
     // Store a snapshot for post-optimization residual evaluation
     // Both PseudorangeFactor and DopplerFactor now have 4 keys.
@@ -534,11 +653,23 @@ void iap::GnssExtensionModule::on_smoother_update_finish_(
   } catch (...) {}
 
   // ── 2. Factor residuals ──────────────────────────────────────────────────────
-  // Evaluate unwhitened residuals: cast to NoiseModelFactor, call
-  // unwhitenedError(values).  For PseudorangeFactor dim=1 [m],
-  // for DopplerFactor dim=1 [m/s].
   double pr_rms  = 0.0, dop_rms  = 0.0;
   int    n_pr_ok = 0,   n_dop_ok = 0;
+
+  // Per-factor detail vectors (only populated when debug CSV is enabled)
+  struct FactorDetail {
+    std::string type;       // "PR" or "DOP"
+    int         sat_id;
+    char        constellation;
+    double      elevation_deg;
+    double      measurement;
+    double      residual;
+    double      sigma;
+    double      normalized;
+  };
+  std::vector<FactorDetail> details;
+  const bool do_csv = debug_csv_enabled_;
+
   try {
     const auto all_vals = smoother.calculateEstimate();
 
@@ -547,8 +678,24 @@ void iap::GnssExtensionModule::on_smoother_update_finish_(
       if (!nf) continue;
       try {
         const auto r = nf->unwhitenedError(all_vals);
-        pr_rms += r.squaredNorm();
+        const double res = r(0);
+        pr_rms += res * res;
         ++n_pr_ok;
+
+        if (do_csv) {
+          const auto pf = std::dynamic_pointer_cast<PseudorangeFactor>(f);
+          double sigma = 5.0, meas = 0.0;
+          int sid = 0; char con = '?'; double elev = 0.0;
+          if (pf) {
+            sid = pf->sat_id(); con = pf->constellation();
+            elev = pf->elevation() * 180.0 / M_PI;
+            meas = pf->pr_meas();
+            // Extract sigma from noise model
+            const auto diag = std::dynamic_pointer_cast<gtsam::noiseModel::Diagonal>(nf->noiseModel());
+            if (diag) sigma = diag->sigma(0);
+          }
+          details.push_back({"PR", sid, con, elev, meas, res, sigma, (sigma > 0 ? res / sigma : 0.0)});
+        }
       } catch (...) {}
     }
     for (const auto& f : dop_factors) {
@@ -556,8 +703,23 @@ void iap::GnssExtensionModule::on_smoother_update_finish_(
       if (!nf) continue;
       try {
         const auto r = nf->unwhitenedError(all_vals);
-        dop_rms += r.squaredNorm();
+        const double res = r(0);
+        dop_rms += res * res;
         ++n_dop_ok;
+
+        if (do_csv) {
+          const auto df = std::dynamic_pointer_cast<DopplerFactor>(f);
+          double sigma = 0.5, meas = 0.0;
+          int sid = 0; char con = '?'; double elev = 0.0;
+          if (df) {
+            sid = df->sat_id(); con = df->constellation();
+            elev = df->elevation() * 180.0 / M_PI;
+            meas = df->dop_meas();
+            const auto diag = std::dynamic_pointer_cast<gtsam::noiseModel::Diagonal>(nf->noiseModel());
+            if (diag) sigma = diag->sigma(0);
+          }
+          details.push_back({"DOP", sid, con, elev, meas, res, sigma, (sigma > 0 ? res / sigma : 0.0)});
+        }
       } catch (...) {}
     }
   } catch (...) {}
@@ -565,8 +727,32 @@ void iap::GnssExtensionModule::on_smoother_update_finish_(
   if (n_pr_ok > 0)  pr_rms  = std::sqrt(pr_rms  / n_pr_ok);
   if (n_dop_ok > 0) dop_rms = std::sqrt(dop_rms / n_dop_ok);
 
-  // ── 3. Log summary (rate-limited: first + every 50 calls) ─────────────────────
+  // ── 3. Write debug CSV ────────────────────────────────────────────────────────
   const uint64_t diag_n = ++factor_count_diag_;
+  const double stamp = last_frame_stamp_.load();
+
+  if (do_csv && !details.empty()) {
+    std::lock_guard<std::mutex> csv_lk(debug_csv_mutex_);
+    for (const auto& d : details) {
+      debug_csv_file_
+        << diag_n << ","
+        << std::fixed << std::setprecision(3) << stamp << ","
+        << frame_id << ","
+        << d.type << ","
+        << d.sat_id << ","
+        << d.constellation << ","
+        << std::setprecision(1) << d.elevation_deg << ","
+        << std::setprecision(3) << d.measurement << ","
+        << std::setprecision(4) << d.residual << ","
+        << std::setprecision(4) << d.sigma << ","
+        << std::setprecision(4) << d.normalized << ","
+        << std::setprecision(2) << clk_bias << ","
+        << std::setprecision(4) << clk_drift << "\n";
+    }
+    debug_csv_file_.flush();
+  }
+
+  // ── 4. Log summary (rate-limited: first + every 50 calls) ─────────────────────
   if (diag_n == 1 || diag_n % 50 == 0) {
     if (clk_ok) {
       logger_->info(
