@@ -3,12 +3,15 @@
 // IAP-RQ-120: TDOP metric
 
 #include <iap/trunk/trunk_detector.hpp>
+#include <iap/util/timing_csv.hpp>
 
 #include <Eigen/Dense>
 #include <Eigen/Eigenvalues>
 
 #include <algorithm>
+#include <chrono>
 #include <cmath>
+#include <cstdio>
 #include <map>
 #include <queue>
 #include <tuple>
@@ -90,6 +93,7 @@ TrunkDetector::kasa_fit(const std::vector<Eigen::Vector2d>& pts) const {
 // ---------------------------------------------------------------------------
 TrunkDetectionResult TrunkDetector::detect(const gtsam_points::PointCloud& frame,
                                             double stamp) const {
+  const auto t0_trunk = std::chrono::high_resolution_clock::now();
   TrunkDetectionResult result;
   result.stamp   = stamp;
   result.tdop    = params_.tdop_inf;
@@ -201,6 +205,13 @@ TrunkDetectionResult TrunkDetector::detect(const gtsam_points::PointCloud& frame
   // ---- 5. Compute azimuth histogram (IAP-RQ-150) -------------------------
   result.azimuth_histogram = compute_azimuth_histogram(
       result.trunks, Eigen::Vector2d::Zero());
+
+  // IAP-RQ-002: timing measurement
+  {
+    const double elapsed_ms = std::chrono::duration<double, std::milli>(
+        std::chrono::high_resolution_clock::now() - t0_trunk).count();
+    timing_csv::append(stamp, "trunk_detector", elapsed_ms);
+  }
 
   return result;
 }

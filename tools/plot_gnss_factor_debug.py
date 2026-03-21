@@ -29,8 +29,23 @@ import numpy as np
 import pandas as pd
 
 
+OUT_DIR = Path("/home/dev/code/ws_iap/src/iap/tools/figs")
+
+
 def load_csv(path: str) -> pd.DataFrame:
-    df = pd.read_csv(path)
+    csv_path = Path(path)
+    if not csv_path.exists() and not csv_path.is_absolute():
+        alt = Path("/tmp") / csv_path
+        if alt.exists():
+            csv_path = alt
+    if not csv_path.exists():
+        raise FileNotFoundError(f"CSV not found: {path} (also tried: /tmp/{Path(path).name})")
+
+    try:
+        df = pd.read_csv(csv_path)
+    except pd.errors.ParserError as e:
+        print(f"[warn] CSV parse error ({e}); retrying with bad-line skipping")
+        df = pd.read_csv(csv_path, on_bad_lines="skip", engine="python")
     # Normalize column names (strip whitespace)
     df.columns = [c.strip() for c in df.columns]
     # Relative time from first stamp
@@ -612,16 +627,12 @@ def main():
         help="Path to the debug CSV file (default: /tmp/iap_gnss_factor_debug.csv)",
     )
     parser.add_argument(
-        "--out", default="/tmp/iap_gnss_plots",
-        help="Output directory for plots (default: /tmp/iap_gnss_plots)",
+        "--out", default=str(OUT_DIR),
+        help=f"Output directory for plots (default: {OUT_DIR})",
     )
     args = parser.parse_args()
 
     csv_path = Path(args.csv)
-    if not csv_path.exists():
-        print(f"ERROR: CSV not found: {csv_path}")
-        print("  Run with IAP_GNSS_DEBUG_CSV=1 to generate it.")
-        sys.exit(1)
 
     out_dir = Path(args.out)
     out_dir.mkdir(parents=True, exist_ok=True)

@@ -40,18 +40,33 @@ namespace iap {
 class Araim {
  public:
   struct Params {
-    double K_fa           = 4.50;   ///< false-alarm multiplier (fallback; prefer dynamic)
-    double K_md           = 5.50;   ///< missed-detection multiplier (fallback; prefer dynamic)
-    double K_ff           = 5.33;   ///< fault-free PL multiplier (fallback; prefer dynamic)
-    double p_sat_default  = 1e-4;   ///< default prior fault probability (GNSS sat)
-    double p_trunk_default= 1e-3;   ///< default prior fault probability (trunk landmark)
-    double p_const_default= 1e-8;   ///< default constellation-wide fault probability (IAP-RQ-241)
+    // --- Integrity budget (§1.8) --- per talk_spec.pdf
+    double P_HMI_req      = 1e-7;   ///< P_{HMI,req} integrity risk per epoch
+    double P_FA_req       = 1e-5;   ///< P_{FA,req} false-alarm rate per epoch
+    bool   dynamic_budget = true;   ///< compute K from P_HMI_req / P_FA_req
+
+    // --- Fallback K multipliers (used when dynamic_budget=false) ---
+    double K_fa           = 4.50;   ///< false-alarm multiplier
+    double K_md           = 5.50;   ///< missed-detection multiplier
+    double K_ff           = 5.42;   ///< fault-free PL multiplier ≈ Q^{-1}(2.5e-8)
+
+    // --- Fault prior probabilities (ISM, §1.7) ---
+    double p_sat_default  = 1e-5;   ///< P_{sat,i} per satellite
+    double p_const_GPS    = 1e-4;   ///< P_{const} GPS
+    double p_const_GAL    = 1e-4;   ///< P_{const} Galileo
+    double p_const_BDS    = 1e-4;   ///< P_{const} BeiDou
+    double p_const_GLO    = 1e-4;   ///< P_{const} GLONASS
+    double p_trunk_base   = 1e-3;   ///< P_{trunk} at confidence=1.0
+    double p_trunk_scale  = 0.1;    ///< P_{trunk,k} = p_trunk_base / conf^scale
+    double p_trunk_default= 1e-3;   ///< fallback when no confidence available
+    double p_const_default= 1e-8;   ///< deprecated fallback
+
+    // --- Geometry / numerical ---
     double eps_degen      = 1e-10;  ///< minimum eigenvalue to accept inversion
     int    min_sats       = 4;      ///< minimum non-excluded sats for valid solution
-    // Dynamic integrity budget (IAP-RQ-244 §4.3)
-    double P_req          = 1e-7;   ///< required integrity risk per epoch
-    double P_FA_req       = 3.3e-7; ///< required false-alarm probability per epoch
-    bool   dynamic_budget = true;   ///< if true, compute K_fa/K_md/K_ff from P_req/P_FA_req
+
+    // --- Legacy alias (for code that reads P_req) ---
+    double P_req          = 1e-7;   ///< alias for P_HMI_req
   };
 
   /// Per-satellite geometry specification for prediction mode.

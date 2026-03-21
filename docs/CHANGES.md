@@ -3,6 +3,33 @@
 > 规则：任何代码改动必须在这里记录，并包含 IAP-RQ-XXX。
 
 ## Unreleased
+- refactor(config): IAP-RQ-025 / IAP-RQ-000 — consolidate config directory from 18 → 15 files.
+  - **Merge 1 (logging)**: `config_logging.json` deleted; its `"logging"` section inlined into `config.json`.
+    `util/logging.cpp`: use `GlobalConfig::instance()` directly instead of loading a separate file.
+  - **Merge 2 (sensor + preprocess)**: `config_preprocess.json` deleted; its `"preprocess"` section
+    appended to `config_sensors.json`. `config.json` global manifest: removed `config_preprocess` key.
+    `preprocess/cloud_preprocessor.cpp`: now loads only `config_sensors` (one `Config` object) and
+    reads both `"sensors"` and `"preprocess"` sections from it.
+  - **Merge 3 (GNSS + integrity)**: `config_integrity.json` deleted; its `"integrity"` section appended
+    to `config_gnss.json`. `config.json` global manifest: removed `config_integrity` key (the existing
+    `config_gnss` key covers both). `integrity/integrity_extension.cpp:42`: changed
+    `get_config_path("config_integrity")` → `get_config_path("config_gnss")`.
+    `integrity/integrity_extension.hpp`: updated comments to reference `config_gnss.json`.
+  - No algorithmic or parameter changes — pure file consolidation.
+- feat(observability): IAP-RQ-200 / IAP-RQ-040 / IAP-RQ-002 — validation output & visualization suite.
+  - **IAP-RQ-200 (ARAIM CSV)**: `config_integrity.json` new flags `enable_araim_csv`/`araim_csv_path`.
+    `araim_debug.hpp`: added config constructor `AraimDebugCSV(bool, path)` and `write(report, AraimResult&)` overload that emits `row_type=epoch` + optional `row_type=worst_hyp` row with full per-hypothesis 3-term data.
+    `integrity_types.hpp`: added `K_fa_used` field to `IntegrityReport`.
+    `integrity_monitor.cpp`: `run_araim()` stores `last_araim_result_` and forwards `K_fa_used`.
+    `integrity_monitor.hpp`: `last_araim_result_` member + getter.
+    `integrity_extension.cpp`: reads config flags, instantiates `AraimDebugCSV`, calls `write()` each smoother update.
+    Bug fix: `integrity_extension.cpp:220` — `msg.k_fa_used = 0.0` → `= report.K_fa_used`.
+  - **IAP-RQ-040 (ICP CSV)**: `config_odometry_gpu.json` new flags `enable_icp_csv`/`icp_csv_path`.
+    `odometry_estimation_gpu.hpp/.cpp` and `cpu.hpp/.cpp`: params read config; `update_frames()` appends per-frame row `stamp,frame_id,rmse,inlier_fraction,condition_number,gamma_lidar,drop_flag`.
+  - **IAP-RQ-002 (timing)**: `std::chrono` instrumentation in `gnss_extension.cpp` (`on_smoother_update_finish_`), `integrity_monitor.cpp` (`compute()`), `araim.cpp` (`run()`), `trunk_detector.cpp` (`detect()`). Each writes `stamp,module,elapsed_ms` to `/tmp/iap_timing.csv`.
+  - **Trajectory CSV**: `config_integrity.json` new flags `enable_traj_csv`/`traj_csv_path`. `integrity_extension.cpp`: appends `stamp,x,y,z` after each smoother update for trajectory comparison.
+  - **Config GNSS CSV enabled**: `config_gnss.json` `enable_debug_csv` set to `true`.
+  - **Python plotting**: `tools/plot_araim_timeline.py` (Fig B1/B2/B3), `tools/plot_icp_timing.py` (Fig C1/C2), `tools/plot_trajectory_comparison.py` (Fig D1).
 - fix(odometry): IAP-RQ-130 — fix EstimationFrame ABI layout mismatch vs libglim.so.
   - IAP additions (`clk_bias`, `clk_drift`, `sigma_p`, `icp_quality`) were inserted before original GLIM fields, shifting `raw_frame` offset by ~136 bytes.
   - Moved all IAP-added fields to **after** `custom_data` (struct tail), preserving original GLIM field offsets.

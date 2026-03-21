@@ -1,6 +1,8 @@
 // IAP-RQ-131: TrunkMap data association & persistent landmark IDs
+// §2.6: EKF-style position covariance tracking for each landmark
 #include <iap/trunk/trunk_map.hpp>
 #include <spdlog/spdlog.h>
+#include <Eigen/LU>
 #include <cmath>
 #include <limits>
 
@@ -15,8 +17,6 @@ TrunkMap::TrunkMap(const Params& p) : params_{p} {}
 
 int TrunkMap::find_association(const TrunkObservation& obs,
                                const Eigen::Vector2d& sensor_xy) const {
-  // Observation centre in world XY (sensor XY + obs offset).
-  // For a sensor at origin the world position equals the sensor-frame position.
   const Eigen::Vector2d obs_xy = sensor_xy + obs.center_xy;
 
   int    best_idx  = -1;
@@ -28,7 +28,6 @@ int TrunkMap::find_association(const TrunkObservation& obs,
     const double dist = (obs_xy - lm.center_xy).norm();
     if (dist > params_.assoc_gate_m) continue;
 
-    // Radius check — optional but helps separate adjacent trunks.
     if (lm.radius > 0.0) {
       const double r_diff = std::abs(obs.radius - lm.radius);
       if (r_diff > params_.assoc_radius_ratio * lm.radius) continue;
@@ -62,11 +61,14 @@ TrunkMap::update(const TrunkDetectionResult& det,
   std::vector<std::pair<int, TrunkObservation>> result;
   result.reserve(det.trunks.size());
 
+  const Eigen::Matrix2d R_obs = Eigen::Matrix2d::Identity() *
+                                 (params_.sigma_obs * params_.sigma_obs);
+
   for (const auto& obs : det.trunks) {
     int idx = find_association(obs, sensor_xy);
 
     if (idx < 0) {
-      // New landmark
+      // New landmark — initialize with prior covariance
       TrunkLandmark lm;
       lm.id          = next_id_++;
       lm.center_xy   = sensor_xy + obs.center_xy;
@@ -74,20 +76,54 @@ TrunkMap::update(const TrunkDetectionResult& det,
       lm.confidence  = obs.confidence;
       lm.seen_count  = 1;
       lm.last_stamp  = det.stamp;
+      lm.confirmed   = false;
+      lm.active      = true;
+      lm.P           = Eigen::Matrix2d::Identity() *
+                        (params_.sigma_init * params_.sigma_init);
       landmarks_.push_back(lm);
 
       result.emplace_back(-1, obs);  // -1 → newly spawned
     } else {
-      // Update existing landmark via EMA
+      // Update existing landmark
       TrunkLandmark& lm = landmarks_[idx];
-      const Eigen::Vector2d new_xy = sensor_xy + obs.center_xy;
+      const Eigen::Vector2d z = sensor_xy + obs.center_xy;  // observation in world
 
+      if (params_.use_ekf) {
+        // §2.6: EKF update
+        // State: x = [cx, cy]  (landmark position)
+        // H = I₂ (direct observation of position)
+        // Innovation: y = z - x̂
+        const Eigen::Vector2d y = z - lm.center_xy;
+
+        // Process noise: Q = σ²_proc · dt · I₂
+        const double dt = std::max(det.stamp - lm.last_stamp, 0.001);
+        const Eigen::Matrix2d Q = Eigen::Matrix2d::Identity() *
+                                   (params_.sigma_process * params_.sigma_process * dt);
+
+        // Predict: P⁻ = P + Q
+        const Eigen::Matrix2d P_pred = lm.P + Q;
+
+        // Kalman gain: K = P⁻(P⁻ + R)^{-1}
+        const Eigen::Matrix2d S = P_pred + R_obs;
+        const Eigen::Matrix2d K = P_pred * S.inverse();
+
+        // Update
+        lm.center_xy = lm.center_xy + K * y;
+        lm.P = (Eigen::Matrix2d::Identity() - K) * P_pred;
+      } else {
+        // Fallback: simple EMA
+        const double a = params_.ema_alpha;
+        lm.center_xy = a * z + (1.0 - a) * lm.center_xy;
+      }
+
+      // EMA update for radius / confidence (always)
       const double a = params_.ema_alpha;
-      lm.center_xy  = a * new_xy + (1.0 - a) * lm.center_xy;
       lm.radius     = a * obs.radius + (1.0 - a) * lm.radius;
       lm.confidence = a * obs.confidence + (1.0 - a) * lm.confidence;
       lm.seen_count += 1;
       lm.last_stamp  = det.stamp;
+      lm.confirmed   = (lm.seen_count >= params_.min_confirm_count);
+      lm.active      = true;
 
       result.emplace_back(lm.id, obs);
     }

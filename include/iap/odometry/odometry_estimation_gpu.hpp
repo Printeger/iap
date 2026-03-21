@@ -1,5 +1,7 @@
 #pragma once
 
+#include <string>
+
 #include <iap/odometry/odometry_estimation_imu.hpp>
 
 namespace gtsam_points {
@@ -41,6 +43,13 @@ public:
   double keyframe_delta_trans;
   double keyframe_delta_rot;
   double keyframe_entropy_thresh;
+
+  // ---- IAP: ICP quality / health (IAP-RQ-040) ---------------------------
+  double icp_cond_threshold;  ///< Hessian condition number threshold for degeneracy (default 500)
+  double gamma_lidar_max;     ///< Maximum noise inflation factor for degenerate LiDAR (default 10.0)
+  bool        enable_icp_csv  = false;           ///< Write per-frame ICP quality CSV
+  std::string icp_csv_path    = "/tmp/iap_icp.csv";
+  // -----------------------------------------------------------------------
 };
 
 /**

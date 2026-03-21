@@ -1,6 +1,11 @@
 #include <iap/odometry/odometry_estimation_gpu.hpp>
 
+#include <Eigen/SVD>  // IAP-RQ-040: condition number for ICP degeneracy
 #include <spdlog/spdlog.h>
+
+#include <cerrno>
+#include <cstring>
+#include <filesystem>
 
 #include <gtsam/inference/Symbol.h>
 #include <gtsam/slam/BetweenFactor.h>
@@ -65,6 +70,15 @@ OdometryEstimationGPUParams::OdometryEstimationGPUParams() : OdometryEstimationI
   keyframe_delta_trans = config.param<double>("odometry_estimation", "keyframe_delta_trans", 1.0);
   keyframe_delta_rot = config.param<double>("odometry_estimation", "keyframe_delta_rot", 0.25);
   keyframe_entropy_thresh = config.param<double>("odometry_estimation", "keyframe_entropy_thresh", 0.99);
+
+  // IAP-RQ-040: ICP quality / health
+  icp_cond_threshold = config.param<double>("odometry_estimation", "icp_cond_threshold", 500.0);
+  gamma_lidar_max    = config.param<double>("odometry_estimation", "gamma_lidar_max",    10.0);
+  enable_icp_csv     = config.param<bool>("odometry_estimation", "enable_icp_csv", false);
+  icp_csv_path       = config.param<std::string>("odometry_estimation", "icp_csv_path",
+                                                  "/tmp/iap_icp.csv");
+
+  spdlog::info("[odometry_gpu] enable_icp_csv={} icp_csv_path={}", enable_icp_csv, icp_csv_path);
 }
 
 OdometryEstimationGPUParams::~OdometryEstimationGPUParams() {}
@@ -123,6 +137,131 @@ void OdometryEstimationGPU::update_frames(const int current, const gtsam::Nonlin
   }
 
   Callbacks::on_update_keyframes(keyframes);
+
+  // --- IAP-RQ-040: ICP quality assessment (post-smoother, at optimized pose) ----
+  if (!frames[current] || !frames[current]->frame->size()) {
+    static bool logged_empty_frame = false;
+    if (!logged_empty_frame) {
+      logger->info("[icp_csv] skip write: empty frame at current={}", current);
+      logged_empty_frame = true;
+    }
+    return;
+  }
+
+  // Collect only IntegratedVGICPFactorGPU factors whose keys are all in the smoother
+  gtsam::Values values = smoother->calculateEstimate();
+  gtsam::NonlinearFactorGraph vgicp_factors;
+  for (const auto& f : new_factors) {
+    if (!dynamic_cast<gtsam_points::IntegratedVGICPFactorGPU*>(f.get())) {
+      continue;
+    }
+    const bool all_valid = std::all_of(f->keys().begin(), f->keys().end(), [&](gtsam::Key k) { return values.exists(k); });
+    if (all_valid) {
+      vgicp_factors.push_back(f);
+    }
+  }
+
+  if (vgicp_factors.empty()) {
+    static bool logged_empty_vgicp = false;
+    if (!logged_empty_vgicp) {
+      logger->info("[icp_csv] skip write: no IntegratedVGICPFactorGPU in new_factors (new_factors={})", new_factors.size());
+      logged_empty_vgicp = true;
+    }
+    return;
+  }
+
+  // GPU linearization must precede CPU linearize to populate GPU-side correspondences
+  gtsam_points::NonlinearFactorSetGPU factor_set;
+  factor_set.add(vgicp_factors);
+  factor_set.linearize(values);
+
+  // CPU-side Hessian extraction
+  auto gfg = vgicp_factors.linearize(values);
+
+  // Condition number of the 6×6 Hessian block for X(current)
+  double cond_number = 1.0;
+  {
+    const auto H_blocks = gfg->hessianBlockDiagonal();
+    const auto it = H_blocks.find(X(current));
+    if (it != H_blocks.end()) {
+      Eigen::JacobiSVD<Eigen::MatrixXd> svd(it->second, Eigen::ComputeThinU | Eigen::ComputeThinV);
+      const auto& sv = svd.singularValues();
+      const double sv_min = sv(sv.size() - 1);
+      const double sv_max = sv(0);
+      cond_number = (sv_min > 1e-10) ? sv_max / sv_min : 1e9;
+    }
+  }
+
+  // Inlier count / fraction (populated after GPU linearization)
+  int    inlier_count    = 0;
+  double inlier_fraction = 0.0;
+  for (const auto& f : vgicp_factors) {
+    if (auto* vgicp = dynamic_cast<gtsam_points::IntegratedVGICPFactorGPU*>(f.get())) {
+      inlier_fraction += vgicp->inlier_fraction();
+      inlier_count    += vgicp->num_inliers();
+    }
+  }
+  if (!vgicp_factors.empty()) {
+    inlier_fraction /= static_cast<double>(vgicp_factors.size());
+  }
+
+  // RMSE proxy: sqrt(total_error / inlier_count)
+  const double total_error = vgicp_factors.error(values);
+  const double rmse        = std::sqrt(total_error / std::max(inlier_count, 1));
+
+  // Noise inflation factor
+  const double cond_threshold  = params->icp_cond_threshold;
+  const bool   degeneracy_flag = (cond_number > cond_threshold);
+  const double gamma_lidar     = degeneracy_flag
+    ? std::min(std::sqrt(cond_number / cond_threshold), params->gamma_lidar_max)
+    : 1.0;
+
+  auto& q          = frames[current]->icp_quality;
+  q.inlier_count   = inlier_count;
+  q.inlier_fraction= inlier_fraction;
+  q.rmse           = rmse;
+  q.cond_number    = cond_number;
+  q.degeneracy_flag= degeneracy_flag;
+  q.gamma_lidar    = gamma_lidar;
+
+  logger->trace(
+    "icp_quality[{}]: inliers={} ({:.1f}%) rmse={:.4f} cond={:.1f} degenerate={} gamma={:.2f}",
+    current, inlier_count, inlier_fraction * 100.0, rmse,
+    cond_number, degeneracy_flag, gamma_lidar);
+
+  // IAP-RQ-040: write ICP quality CSV row
+  if (params->enable_icp_csv) {
+    const std::filesystem::path csv_path(params->icp_csv_path);
+    if (csv_path.has_parent_path()) {
+      std::error_code ec;
+      std::filesystem::create_directories(csv_path.parent_path(), ec);
+      if (ec) {
+        logger->warn("failed to create ICP CSV parent directory '{}': {}", csv_path.parent_path().string(), ec.message());
+      }
+    }
+
+    static bool icp_csv_header_written = false;
+    static bool icp_csv_first_row_logged = false;
+    FILE* f = std::fopen(params->icp_csv_path.c_str(), icp_csv_header_written ? "a" : "w");
+    if (f) {
+      if (!icp_csv_header_written) {
+        std::fprintf(f, "stamp,frame_id,rmse,inlier_fraction,condition_number,gamma_lidar,drop_flag\n");
+        icp_csv_header_written = true;
+      }
+      std::fprintf(f, "%.6f,%ld,%.4f,%.4f,%.1f,%.4f,%d\n",
+                   frames[current]->stamp, static_cast<long>(current),
+                   rmse, inlier_fraction, cond_number, gamma_lidar,
+                   degeneracy_flag ? 1 : 0);
+      std::fclose(f);
+      if (!icp_csv_first_row_logged) {
+        logger->info("[icp_csv] first row written -> {}", params->icp_csv_path);
+        icp_csv_first_row_logged = true;
+      }
+    } else {
+      logger->warn("failed to open ICP CSV '{}': {}", params->icp_csv_path, std::strerror(errno));
+    }
+  }
+  // -------------------------------------------------------------------------
 }
 
 gtsam::NonlinearFactorGraph OdometryEstimationGPU::create_factors(const int current, const gtsam_points::shared_ptr<gtsam::ImuFactor>& imu_factor, gtsam::Values& new_values) {

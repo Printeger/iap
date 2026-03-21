@@ -77,7 +77,24 @@ GlobalConfig* GlobalConfig::instance(const std::string& config_path, bool overri
 std::string GlobalConfig::get_config_path(const std::string& config_name) {
   auto config = instance();
   const std::string directory = config->param<std::string>("global", "config_path", ".");
-  const std::string filename = config->param<std::string>("global", config_name, config_name + ".json");
+
+  if (config->has_param("global", config_name)) {
+    const auto filename = config->param<std::string>("global", config_name);
+    if (filename) {
+      return directory + "/" + *filename;
+    }
+    spdlog::warn("global/{} exists but is not a string; fallback to default filename", config_name);
+  }
+
+  if (config_name == "config_preprocess") {
+    const auto sensors_file = config->param<std::string>("global", "config_sensors");
+    if (sensors_file) {
+      spdlog::warn("global/config_preprocess not found; fallback to global/config_sensors ({})", *sensors_file);
+      return directory + "/" + *sensors_file;
+    }
+  }
+
+  const std::string filename = config_name + ".json";
   return directory + "/" + filename;
 }
 
@@ -89,10 +106,16 @@ void GlobalConfig::dump(const std::string& path) {
   const auto& json = std::any_cast<const nlohmann::json&>(config);
   for (const auto& param : json["global"].items()) {
     const std::string config_name = param.key();
-    const std::string config_file = param.value();
-    if (config_name == "config_path" || config_name == "config_ext") {
+    if (config_name.rfind("config_", 0) != 0 || config_name == "config_path" || config_name == "config_ext") {
       continue;
     }
+
+    if (!param.value().is_string()) {
+      spdlog::warn("skip dumping global/{} because value is not string", config_name);
+      continue;
+    }
+
+    const std::string config_file = param.value();
 
     spdlog::debug("dumping {} : {}", config_name, config_file);
     const Config conf(get_config_path(config_name));

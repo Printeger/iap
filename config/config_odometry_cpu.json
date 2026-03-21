@@ -32,6 +32,15 @@
     // Optimizer params
     "validate_imu": true,
     "save_imu_rate_trajectory": true,
-    "num_threads": 2
+    "num_threads": 2,
+    // Scan-to-multi-scan (GLIO2-style)
+    "use_scan_to_map": false,
+    "full_connection_window_size": 3,
+    "max_num_keyframes": 15,
+    "keyframe_update_strategy": "OVERLAP",
+    "keyframe_max_overlap": 0.7,
+    "keyframe_min_overlap": 0.01,
+    "keyframe_delta_trans": 2.0,
+    "keyframe_delta_rot": 0.5
   }
 }

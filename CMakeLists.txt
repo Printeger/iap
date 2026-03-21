@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.16)
-project(iap VERSION 1.2.1 LANGUAGES CXX)
+project(iap VERSION 1.2.1 LANGUAGES C CXX)
 
 add_compile_options(-std=c++17)
 set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} "${CMAKE_CURRENT_LIST_DIR}/cmake")
@@ -94,6 +94,8 @@ add_library(iap SHARED
   # trunk_extension.cpp is compiled into a separate ROS2 plugin (libtrunk_extension.so)
   # ARAIM engine (IAP-RQ-241–246)
   src/iap/integrity/araim.cpp
+  # FGO information matrix extraction (IAP-RQ-300)
+  src/iap/integrity/fgo_information_manager.cpp
   # predicted ARAIM for planner (IAP-RQ-331)
   src/iap/planner/predicted_araim.cpp
   # integrity monitoring (IAP-RQ-200/210/220)
@@ -288,6 +290,18 @@ if(DEFINED ENV{ROS_VERSION})
     # ROS2
     find_package(ament_cmake REQUIRED)
 
+    ## Message generation (IAP-RQ-500: ROS2 msgs)
+    find_package(rosidl_default_generators REQUIRED)
+    find_package(std_msgs REQUIRED)
+    rosidl_generate_interfaces(${PROJECT_NAME}_msgs
+      "msg/IntegrityReport.msg"
+      "msg/DynamicALResult.msg"
+      "msg/TrunkLandmark.msg"
+      "msg/MDPState.msg"
+      LIBRARY_NAME ${PROJECT_NAME}
+      DEPENDENCIES std_msgs
+    )
+
     ## GNSS ROS2 extension module (IAP-RQ-020 bridge)
     find_package(glog REQUIRED)
     find_package(gnss_comm REQUIRED)
@@ -321,6 +335,19 @@ if(DEFINED ENV{ROS_VERSION})
     list(APPEND iap_LIBRARIES trunk_extension)
     install(TARGETS trunk_extension DESTINATION lib)
 
+    ## Integrity extension module (IAP-RQ-200/210/220/240: ARAIM pipeline integration)
+    rosidl_get_typesupport_target(iap_msgs_cpp_ts ${PROJECT_NAME}_msgs "rosidl_typesupport_cpp")
+    add_library(integrity_extension SHARED
+      src/iap/integrity/integrity_extension.cpp
+    )
+    target_include_directories(integrity_extension PUBLIC
+      $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+    )
+    target_link_libraries(integrity_extension iap "${iap_msgs_cpp_ts}")
+    ament_target_dependencies(integrity_extension rclcpp std_msgs)
+    list(APPEND iap_LIBRARIES integrity_extension)
+    install(TARGETS integrity_extension DESTINATION lib)
+
     ## Demo / smoke-test executable (IAP-RQ-002)
     add_executable(iap_status apps/iap_status.cpp)
     target_link_libraries(iap_status iap)
@@ -334,6 +361,13 @@ if(DEFINED ENV{ROS_VERSION})
     install(TARGETS iap_status iap_experiment DESTINATION lib/iap)
     install(DIRECTORY launch DESTINATION share/iap)
     install(DIRECTORY config DESTINATION share/iap)
+
+    ## Tests (IAP-RQ-241–246, RQ-200, RQ-131)
+    if(BUILD_TESTING)
+      find_package(ament_cmake_gtest REQUIRED)
+      ament_add_gtest(test_araim test/test_araim.cpp)
+      target_link_libraries(test_araim iap)
+    endif()
     ament_export_include_directories(include ${EIGEN3_INCLUDE_DIR} ${OpenCV_INCLUDE_DIRS})
     ament_export_libraries(${iap_LIBRARIES} ${GTSAM_LIBRARIES} fmt spdlog::spdlog)
     ament_export_targets(iap-targets HAS_LIBRARY_TARGET)

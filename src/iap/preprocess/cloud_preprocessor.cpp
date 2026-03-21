@@ -20,22 +20,21 @@
 namespace glim {
 
 CloudPreprocessorParams::CloudPreprocessorParams() {
-  Config config(GlobalConfig::get_config_path("config_preprocess"));
   Config sensor_config(GlobalConfig::get_config_path("config_sensors"));
 
   global_shutter = sensor_config.param<bool>("sensors", "global_shutter_lidar", false);
 
-  distance_near_thresh = config.param<double>("preprocess", "distance_near_thresh", 1.0);
-  distance_far_thresh = config.param<double>("preprocess", "distance_far_thresh", 100.0);
-  use_random_grid_downsampling = config.param<bool>("preprocess", "use_random_grid_downsampling", false);
-  downsample_resolution = config.param<double>("preprocess", "downsample_resolution", 0.15);
-  downsample_target = config.param<int>("preprocess", "random_downsample_target", 0);
-  downsample_rate = config.param<double>("preprocess", "random_downsample_rate", 0.3);
-  enable_outlier_removal = config.param<bool>("preprocess", "enable_outlier_removal", false);
-  outlier_removal_k = config.param<int>("preprocess", "outlier_removal_k", 10);
-  outlier_std_mul_factor = config.param<double>("preprocess", "outlier_std_mul_factor", 2.0);
+  distance_near_thresh = sensor_config.param<double>("preprocess", "distance_near_thresh", 1.0);
+  distance_far_thresh = sensor_config.param<double>("preprocess", "distance_far_thresh", 100.0);
+  use_random_grid_downsampling = sensor_config.param<bool>("preprocess", "use_random_grid_downsampling", false);
+  downsample_resolution = sensor_config.param<double>("preprocess", "downsample_resolution", 0.15);
+  downsample_target = sensor_config.param<int>("preprocess", "random_downsample_target", 0);
+  downsample_rate = sensor_config.param<double>("preprocess", "random_downsample_rate", 0.3);
+  enable_outlier_removal = sensor_config.param<bool>("preprocess", "enable_outlier_removal", false);
+  outlier_removal_k = sensor_config.param<int>("preprocess", "outlier_removal_k", 10);
+  outlier_std_mul_factor = sensor_config.param<double>("preprocess", "outlier_std_mul_factor", 2.0);
 
-  enable_cropbox_filter = config.param<bool>("preprocess", "enable_cropbox_filter", false);
+  enable_cropbox_filter = sensor_config.param<bool>("preprocess", "enable_cropbox_filter", false);
   crop_bbox_frame = "lidar";
   crop_bbox_min.setZero();
   crop_bbox_max.setZero();
@@ -44,9 +43,9 @@ CloudPreprocessorParams::CloudPreprocessorParams() {
     Eigen::Isometry3d T_lidar_imu = sensor_config.param<Eigen::Isometry3d>("sensors", "T_lidar_imu", Eigen::Isometry3d::Identity());
     T_imu_lidar = T_lidar_imu.inverse();
 
-    crop_bbox_frame = config.param<std::string>("preprocess", "crop_bbox_frame", "lidar");
-    crop_bbox_min = config.param<Eigen::Vector3d>("preprocess", "crop_bbox_min", Eigen::Vector3d(0.0, 0.0, 0.0));
-    crop_bbox_max = config.param<Eigen::Vector3d>("preprocess", "crop_bbox_max", Eigen::Vector3d(0.0, 0.0, 0.0));
+    crop_bbox_frame = sensor_config.param<std::string>("preprocess", "crop_bbox_frame", "lidar");
+    crop_bbox_min = sensor_config.param<Eigen::Vector3d>("preprocess", "crop_bbox_min", Eigen::Vector3d(0.0, 0.0, 0.0));
+    crop_bbox_max = sensor_config.param<Eigen::Vector3d>("preprocess", "crop_bbox_max", Eigen::Vector3d(0.0, 0.0, 0.0));
 
     if (crop_bbox_frame != "lidar" && crop_bbox_frame != "imu") {
       throw std::runtime_error(fmt::format("Unsupported crop bbox frame: {}", crop_bbox_frame));
@@ -55,9 +54,9 @@ CloudPreprocessorParams::CloudPreprocessorParams() {
     }
   }
 
-  k_correspondences = config.param<int>("preprocess", "k_correspondences", 8);
+  k_correspondences = sensor_config.param<int>("preprocess", "k_correspondences", 8);
 
-  num_threads = config.param<int>("preprocess", "num_threads", 2);
+  num_threads = sensor_config.param<int>("preprocess", "num_threads", 2);
 }
 
 CloudPreprocessorParams::~CloudPreprocessorParams() {}

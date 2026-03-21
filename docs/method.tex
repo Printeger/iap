@@ -1,0 +1,474 @@
+\documentclass[journal]{IEEEtran}
+\usepackage{amsmath,amssymb,bm}
+\usepackage{graphicx}
+\usepackage{algorithm,algorithmic}
+\usepackage{booktabs}
+\usepackage{hyperref}
+
+% ---- notation macros --------------------------------------------------------
+\newcommand{\R}{\mathbb{R}}
+\newcommand{\SO}{\mathrm{SO}(3)}
+\newcommand{\norm}[1]{\left\|#1\right\|}
+\newcommand{\E}{\mathbf{E}}           % ECEF anchor E(0)
+\newcommand{\Rext}{\mathbf{R}}        % world→ECEF rotation R(0)
+\newcommand{\pe}{\mathbf{p}}
+\newcommand{\ve}{\mathbf{v}}
+\newcommand{\sat}[1]{{}^{(#1)}}       % superscript for satellite k
+\newcommand{\hinge}[1]{\left[#1\right]_+}  % hinge / ReLU
+\newcommand{\diag}{\mathrm{diag}}
+\newcommand{\tr}{\mathrm{tr}}
+% -----------------------------------------------------------------------------
+
+\begin{document}
+
+\section{Methodology}
+\label{sec:methodology}
+
+This section presents the Integrity-Aware Positioning (IAP) framework, a
+tightly-coupled LiDAR--IMU--GNSS state estimator augmented with
+ARAIM-based integrity monitoring and receding-horizon integrity-aware
+planning.  The pipeline (Fig.~\ref{fig:pipeline}) is structured around five
+interlocking modules: (i)~sliding-window factor-graph state estimation,
+(ii)~GNSS tight coupling via pseudorange and Doppler factors with
+self-calibrating ECEF alignment, (iii)~LiDAR trunk detection and
+geometric reliability assessment, (iv)~online ARAIM integrity monitoring
+with dynamic alert limits, and (v)~integrity-driven receding-horizon
+trajectory selection.
+
+% ---------------------------------------------------------------------------
+\subsection{System State and Factor Graph}
+\label{sec:state}
+% ---------------------------------------------------------------------------
+
+The state at keyframe $i$ is the tuple
+\begin{equation}
+  \mathcal{X}_i = \bigl\{
+    \pe_i \in \R^3,\;
+    \ve_i \in \R^3,\;
+    \mathbf{R}_i \in \SO,\;
+    \mathbf{b}_i^a \in \R^3,\;
+    \mathbf{b}_i^g \in \R^3,\;
+    \mathbf{c}_i \in \R^2
+  \bigr\},
+  \label{eq:state}
+\end{equation}
+where $\pe_i$, $\ve_i$, $\mathbf{R}_i$ are the IMU position, velocity and
+orientation in the LIO world frame $\mathcal{W}$; $\mathbf{b}_i^a$,
+$\mathbf{b}_i^g$ are accelerometer and gyroscope biases; and
+$\mathbf{c}_i = [\delta t_i,\,\dot{\delta t}_i]^\top$ collects the receiver
+clock bias and drift (both in metres and m\,s$^{-1}$).
+
+Two additional \emph{shared} variables self-calibrate the
+world-to-ECEF alignment across all keyframes:
+\begin{equation}
+  \E(0) \in \R^3 \quad (\text{ECEF anchor}), \qquad
+  \Rext(0) \in \SO \quad (\text{world}\to\text{ECEF rotation}).
+  \label{eq:shared_vars}
+\end{equation}
+These are initialised from the first NavSatFix fix and refined online
+with loose priors $\sigma_E = 5$\,m, $\sigma_R = 5^\circ$.
+
+The system employs an \emph{iSAM2} incremental fixed-lag smoother
+(GTSAM) whose graph $\mathcal{G}$ accumulates four factor types at each
+keyframe: IMU pre-integration, LiDAR ICP, GNSS pseudorange and Doppler.
+Between consecutive keyframes sharing GNSS epochs a
+\emph{clock-between factor} propagates the constant-drift random-walk
+model $\delta t_{i+1} = \delta t_i + \dot{\delta t}_i \,\Delta t$.
+
+% ---------------------------------------------------------------------------
+\subsection{IMU Pre-integration and LiDAR ICP}
+\label{sec:imu_lidar}
+% ---------------------------------------------------------------------------
+
+IMU measurements between keyframes $i$ and $i{+}1$ are summarised by a
+standard GTSAM pre-integration factor $f_{\mathrm{imu}}$ that encodes
+increments $\Delta\pe$, $\Delta\ve$, $\Delta\mathbf{R}$ as a function of
+biases~\cite{forster2017}.
+
+LiDAR scans are registered against a voxelised local map using
+point-to-plane ICP on \textit{gtsam\_points} Gaussian voxel
+maps~\cite{koide2023}. The condition number of the ICP Hessian $H$
+quantifies scan degeneracy:
+\begin{equation}
+  \kappa = \frac{\sigma_{\max}(H)}{\sigma_{\min}(H)}, \qquad
+  \gamma_{\mathrm{L}} = \min\!\left(\sqrt{\kappa / \kappa_{\mathrm{th}}},\;
+                                    \gamma_{\max}\right),
+  \label{eq:icp_health}
+\end{equation}
+and the ICP noise model is inflated by $\gamma_{\mathrm{L}}^2$ when
+$\kappa > \kappa_{\mathrm{th}}$, preventing degenerate geometries from
+over-constraining the estimator.
+
+% ---------------------------------------------------------------------------
+\subsection{GNSS Tight Coupling}
+\label{sec:gnss}
+% ---------------------------------------------------------------------------
+
+\subsubsection{Coordinate Transform}
+
+All GNSS factors operate in ECEF.  The antenna phase-centre position in
+ECEF is obtained from the world-frame state via
+\begin{equation}
+  \mathbf{P}_r^e = \Rext(0)\,\bigl(\pe_i +
+    \mathbf{R}_i\,\bm{\ell}\bigr) + \E(0),
+  \label{eq:ecef_pos}
+\end{equation}
+where $\bm{\ell}$ is the IMU-to-antenna lever arm expressed in the body
+frame.  Satellite positions $\mathbf{p}_k^e$ and velocities $\dot{\mathbf{p}}_k^e$
+are computed from broadcast ephemerides with satellite-clock correction
+$\delta t_s$ applied to the raw pseudorange before factor creation:
+$\rho_k^{\mathrm{corr}} = \rho_k^{\mathrm{raw}} + \delta t_s c$.
+
+\subsubsection{Pseudorange Factor}
+
+The predicted pseudorange for satellite $k$ is
+\begin{equation}
+  \hat{\rho}_k = \norm{\mathbf{P}_r^e - \mathbf{p}_k^e}
+               + \Delta_{\mathrm{sag},k}
+               + \delta t_i
+               + \Delta_{\mathrm{ion},k}
+               + \Delta_{\mathrm{trop},k}
+               + \tau_k c,
+  \label{eq:pr_pred}
+\end{equation}
+where $\Delta_{\mathrm{sag},k} = \frac{\omega_E}{c}(x_k P_{r,y}^e - y_k P_{r,x}^e)$
+is the Sagnac correction, $\Delta_{\mathrm{ion}}$ is the Klobuchar L1
+ionospheric delay, $\Delta_{\mathrm{trop}}$ is the tropospheric delay
+(Hopfield model), and $\tau_k$ is the group delay differential (TGD).
+The scalar residual is
+\begin{equation}
+  r_k^\rho = \rho_k^{\mathrm{corr}} - \hat{\rho}_k.
+  \label{eq:pr_residual}
+\end{equation}
+The noise standard deviation is elevation-weighted:
+$\sigma_k^\rho = \sigma_0 / \sin(\mathrm{el}_k) + \sigma_{\mathrm{mp}}$.
+
+The factor keys are $\{X(i),\,C(i),\,E(0),\,R(0)\}$; the non-zero
+Jacobian blocks are
+\begin{align}
+  \frac{\partial r_k^\rho}{\partial \pe_i}
+    &= -\mathbf{e}_k^\top \Rext(0), \label{eq:J_pos}\\
+  \frac{\partial r_k^\rho}{\partial \mathbf{R}_i}
+    &= \phantom{-}\mathbf{e}_k^\top \Rext(0)\,\mathbf{R}_i\,\lfloor\bm{\ell}\rfloor_\times,
+    \label{eq:J_rot}\\
+  \frac{\partial r_k^\rho}{\partial \E(0)}
+    &= -\mathbf{e}_k^\top, \label{eq:J_E0}\\
+  \frac{\partial r_k^\rho}{\partial \Rext(0)}
+    &= \phantom{-}\mathbf{e}_k^\top \Rext(0)\,\lfloor\mathbf{p}_{\mathrm{ant}}\rfloor_\times,
+    \label{eq:J_R0}
+\end{align}
+where $\mathbf{e}_k = (\mathbf{P}_r^e - \mathbf{p}_k^e)/\norm{\cdot}$
+is the unit line-of-sight vector and
+$\mathbf{p}_{\mathrm{ant}} = \pe_i + \mathbf{R}_i\bm{\ell}$ is the antenna
+position in the world frame.
+
+\subsubsection{Doppler Factor}
+
+The receiver velocity is transformed to ECEF as
+$\mathbf{V}_r^e = \Rext(0)\,\ve_i$.
+The predicted Doppler range-rate is
+\begin{equation}
+  \hat{d}_k = \mathbf{e}_k^\top\!\bigl(\mathbf{V}_r^e -
+    \dot{\mathbf{p}}_k^e\bigr)
+  + \dot{\delta t}_i + \dot{\Delta}_{\mathrm{sag},k},
+  \label{eq:dop_pred}
+\end{equation}
+where the Sagnac rate term is
+$\dot{\Delta}_{\mathrm{sag},k} = \tfrac{\omega_E}{c}
+(\dot{x}_k P_{r,y}^e + x_k V_{r,y}^e - \dot{y}_k P_{r,x}^e - y_k V_{r,x}^e)$.
+The residual $r_k^d = d_k^{\mathrm{meas}} - \hat{d}_k$ links keys
+$\{X(i),\,V(i),\,C(i),\,R(0)\}$.
+
+\subsubsection{Clock Propagation}
+
+The receiver clock state follows a constant-drift random-walk model.
+A \textit{ClockBetweenFactor} connects consecutive clock variables:
+\begin{equation}
+  \begin{bmatrix}\delta t_{i+1}\\\dot{\delta t}_{i+1}\end{bmatrix}
+  = \begin{bmatrix}1 & \Delta t \\ 0 & 1\end{bmatrix}
+    \begin{bmatrix}\delta t_i\\\dot{\delta t}_i\end{bmatrix}
+  + \mathbf{w}_c, \quad
+  \mathbf{w}_c \sim \mathcal{N}(0, Q_c \Delta t),
+  \label{eq:clock_model}
+\end{equation}
+where $Q_c = \diag(q_\delta,\, q_{\dot\delta})$ are process noise
+spectral densities configured from \texttt{config\_gnss.json}.
+
+% ---------------------------------------------------------------------------
+\subsection{LiDAR Trunk Detection}
+\label{sec:trunk}
+% ---------------------------------------------------------------------------
+
+Vertical cylindrical trunks are detected from each LiDAR scan by
+clustering a 2-D height-filtered grid and fitting a Kasa circle
+estimator to each cluster.  The fit yields centre $\mathbf{c}_k \in \R^2$,
+radius $r_k$, and a confidence score $\nu_k \in [0,1]$.  The angular
+diversity of the detected constellation is summarised by the
+\emph{Trunk DOP}:
+\begin{equation}
+  \mathrm{TDOP} = \sqrt{\tr\!\bigl((G_T^\top G_T)^{-1}\bigr)},
+  \quad G_{T,k,:} = \mathbf{e}_{k,xy}^\top,
+  \label{eq:tdop}
+\end{equation}
+where $\mathbf{e}_{k,xy}$ is the unit bearing to trunk $k$ in the
+horizontal plane.  A low TDOP indicates well-distributed landmarks;
+trunks are incorporated into the ARAIM hypothesis set as additional
+single-fault candidates (Sec.~\ref{sec:araim}).
+
+% ---------------------------------------------------------------------------
+\subsection{Integrity Monitoring}
+\label{sec:integrity}
+% ---------------------------------------------------------------------------
+
+\subsubsection{Protection Level Proxy}
+\label{sec:pl_proxy}
+
+A lightweight PL proxy is computed from the marginal position
+covariance $\Sigma_p \in \R^{3\times3}$ extracted from the smoother:
+\begin{equation}
+  \mathrm{PL}_{\mathrm{proxy}} = K_{\mathrm{pl}}\,
+    \sqrt{\lambda_{\max}(\Sigma_p)},
+    \qquad K_{\mathrm{pl}} = 3.
+  \label{eq:pl_proxy}
+\end{equation}
+This proxy is used as a fallback and for predicted-PL propagation in
+the planner.
+
+\subsubsection{NIS-Based Satellite Gating}
+\label{sec:nis}
+
+Per-satellite Normalised Innovation Squared (NIS) tests are applied
+before ARAIM to pre-screen gross faults:
+\begin{equation}
+  \mathrm{NIS}_k = \frac{(r_k^\rho)^2}{\sigma_k^2}
+  \;\overset{H_0}{\sim}\; \chi^2(1).
+  \label{eq:nis}
+\end{equation}
+Satellite $k$ is flagged and excluded when
+$\mathrm{NIS}_k > \chi^2_{1,\alpha}$ with $\alpha = 0.01$.
+A global test $\sum_k \mathrm{NIS}_k > \eta\, n_{\mathrm{sv}}\,\chi^2_{1,\alpha}$
+triggers a greedy FDE pass.
+
+\subsubsection{ARAIM}
+\label{sec:araim}
+
+IAP implements a WLS-mode ARAIM engine based on~\cite{blanch2015}.
+Given the linearised geometry matrix $G \in \R^{N\times4}$ (rows are
+$[-\mathbf{e}_k^\top,\,1]$ for each satellite $k$) and the diagonal
+weight matrix $W = \diag(1/\sigma_1^2,\ldots,1/\sigma_N^2)$, the
+all-in-view solution and covariance are
+\begin{equation}
+  S^{(0)} = (G^\top W G)^{-1}, \qquad
+  \hat{\mathbf{p}}^{(0)} = S^{(0)} G^\top W \mathbf{r}.
+  \label{eq:wls_full}
+\end{equation}
+
+The fault-hypothesis set consists of $N$ single-satellite hypotheses,
+one per-constellation fault, and $n_T$ trunk-landmark hypotheses,
+giving $N_f = N + N_{\mathrm{const}} + n_T$ hypotheses total.
+
+\paragraph{Dynamic Budget Allocation}
+The integrity risk budget is split equally between the fault-free
+hypothesis and all fault hypotheses~\cite{blanch2015}:
+\begin{align}
+  K_{\mathrm{ff}} &= Q^{-1}\!\bigl(P_{\mathrm{HMI,req}} / 4\bigr),
+    \label{eq:K_ff}\\
+  K_{\mathrm{fa}} &= Q^{-1}\!\bigl(P_{\mathrm{FA,req}} / (2 N_f)\bigr),
+    \label{eq:K_fa}\\
+  K_{\mathrm{md},k} &= Q^{-1}\!\Bigl(
+      P_{\mathrm{HMI,req}} / (2 N_f \cdot P_{\mathrm{prior},k})
+    \Bigr),
+  \label{eq:K_md}
+\end{align}
+where $Q^{-1}$ is the inverse complementary Gaussian CDF and
+$P_{\mathrm{prior},k}$ is the prior fault probability of hypothesis $k$.
+
+\paragraph{Subset Solutions}
+For each hypothesis $k$ the faulted rows are zeroed in $W$:
+\begin{equation}
+  S^{(k)} = (G^\top W_k G)^{-1}, \qquad
+  \hat{\mathbf{p}}^{(k)} = S^{(k)} G^\top W_k \mathbf{r}.
+  \label{eq:wls_subset}
+\end{equation}
+The position separation vector and its spread are
+\begin{equation}
+  \mathbf{d}_k = \hat{\mathbf{p}}^{(0)} - \hat{\mathbf{p}}^{(k)}, \qquad
+  \Sigma_{\mathrm{ss},k} \approx S^{(k)} - S^{(0)}.
+  \label{eq:separation}
+\end{equation}
+
+\paragraph{Three-Term Protection Level}
+The detection threshold and per-axis PL for hypothesis $k$ are
+\begin{align}
+  T_{q,k} &= K_{\mathrm{fa},k}\,\sigma_{\mathrm{ss},q,k},
+    \label{eq:T_qk}\\
+  \mathrm{PL}_{q,k} &= |d_{q,k}|
+    + K_{\mathrm{fa},k}\,\sigma_{\mathrm{ss},q,k}
+    + K_{\mathrm{md},k}\,\sigma_{q,k},
+  \label{eq:3term}
+\end{align}
+where $q \in \{E, N, U\}$, $\sigma_{\mathrm{ss},q,k} = \sqrt{\Sigma_{\mathrm{ss},k}[q,q]}$,
+and $\sigma_{q,k} = \sqrt{S^{(k)}[q,q]}$.
+Fault hypothesis $k$ is declared \emph{detected} when
+$|d_{q,k}| > T_{q,k}$ for any axis $q$.
+
+The total per-axis protection level takes the worst case across all
+hypotheses and the fault-free term:
+\begin{equation}
+  \mathrm{PL}_q = \max\!\Bigl(
+    K_{\mathrm{ff}}\,\sigma_{q,0}^{(0)},\;
+    \max_{k}\,\mathrm{PL}_{q,k}
+  \Bigr),
+  \label{eq:PL_total}
+\end{equation}
+from which the Horizontal and Vertical Protection Levels are
+\begin{equation}
+  \mathrm{HPL} = \max(\mathrm{PL}_E,\,\mathrm{PL}_N), \qquad
+  \mathrm{VPL} = \mathrm{PL}_U.
+  \label{eq:HPL_VPL}
+\end{equation}
+
+\subsubsection{Dynamic Alert Limit}
+\label{sec:al}
+
+The Horizontal Alert Limit is derived from the clearance to the
+nearest detected trunk:
+\begin{equation}
+  \mathrm{HAL} = \gamma_H \cdot
+    \min_k\!\Bigl(\norm{\hat{\pe}_{xy} - \mathbf{c}_k} - r_k - r_{\mathrm{UAV}}\Bigr),
+  \label{eq:hal}
+\end{equation}
+where $r_{\mathrm{UAV}}$ is the UAV body radius and $\gamma_H \leq 1$ is
+a safety margin factor.  The Vertical Alert Limit accounts for canopy
+height $h_c$ and minimum safe altitude $h_{\min}$:
+\begin{equation}
+  \mathrm{VAL} = \gamma_V \cdot
+    \min\!\bigl(h_t - h_c - h_{\min},\; \mathrm{VAL}_{\max}\bigr),
+  \label{eq:val}
+\end{equation}
+where $h_t$ is the current AGL altitude.  The combined dynamic alert
+limit and integrity margin are
+\begin{equation}
+  \mathrm{AL} = \max\!\bigl(\min(\mathrm{HAL},\,\mathrm{VAL}),\; a_{\min}\bigr),
+  \qquad
+  \mathrm{IM} = \mathrm{AL} - \mathrm{HPL}.
+  \label{eq:IM}
+\end{equation}
+The system is declared \emph{safe} when $\mathrm{IM} > 0$.
+
+\paragraph{Integrity State Machine}
+Three discrete states govern behaviour:
+\begin{itemize}
+  \item \textsc{Safe}: $\mathrm{IM} > 0$ and no excluded measurements.
+  \item \textsc{Safe\_Excluded}: $\mathrm{IM} > 0$ but one or more
+        satellites have been excluded by FDE; reverts to \textsc{Safe}
+        after $n_{\mathrm{rec}}$ consecutive safe frames with
+        $\mathrm{PL} < \eta_{\mathrm{rec}}\,\mathrm{AL}$.
+  \item \textsc{Unsafe}: $\mathrm{IM} \leq 0$; triggers integrity
+        recovery in the planner.
+\end{itemize}
+
+% ---------------------------------------------------------------------------
+\subsection{Integrity-Aware Planning}
+\label{sec:planning}
+% ---------------------------------------------------------------------------
+
+\subsubsection{Predicted Protection Level}
+
+For a candidate trajectory $\tau = \{\mathbf{p}_0,\ldots,\mathbf{p}_N\}$
+with waypoint times $\{t_k\}$, the PL at each future waypoint is
+predicted by propagating the current position uncertainty forward:
+\begin{equation}
+  \sigma_{\mathrm{pred}}(t_k) = \sqrt{
+    \sigma_{\mathrm{pred}}(t_{k-1})^2 + \sigma_g^2\,(t_k - t_{k-1})
+  },
+  \quad
+  \mathrm{PL}_{\mathrm{pred},k} = K_{\mathrm{pl}}\,\sigma_{\mathrm{pred}}(t_k),
+  \label{eq:pl_pred}
+\end{equation}
+where $\sigma_g$ is a configurable uncertainty growth rate
+(m\,$\sqrt{\mathrm{s}}^{-1}$) and $\sigma_{\mathrm{pred}}(t_0) =
+\sigma_p^{\mathrm{cur}}$ is the current position uncertainty.
+An optional ARAIM predictor replaces \eqref{eq:pl_pred} by running the
+ARAIM engine on the predicted visible-satellite geometry along $\tau$,
+obtained via ray-casting against the local occupancy map.
+
+\subsubsection{Cost Function}
+
+The receding-horizon trajectory selector evaluates $M$ motion
+primitives and chooses
+$\tau^* = \arg\min_\tau J(\tau)$, where
+\begin{multline}
+  J(\tau) =
+    w_I \sum_{k=0}^{N}
+      \hinge{\frac{\mathrm{HPL}_k}{\mathrm{AL}_k} - 1}^{\!2}
+    + w_T \sum_{k=1}^{N} |\Delta\psi_k|
+    \\
+    + w_m \norm{\mathbf{p}_N - \mathbf{p}_{\mathrm{goal}}}
+    + w_s \sum_{k=1}^{N} \norm{\Delta\ve_k}
+    + w_{\infty}\,\mathbb{1}_{\mathrm{infeasible}}(\tau).
+  \label{eq:cost}
+\end{multline}
+Here $\hinge{\cdot} = \max(0,\,\cdot)$ is the hinge (ReLU) function,
+$\Delta\psi_k$ is the heading change at waypoint $k$, and
+$\mathbb{1}_{\mathrm{infeasible}}$ penalises trajectories that enter
+the trunk exclusion zone or violate kinematic limits.
+A soft caution penalty $(\mathrm{HPL}_k/\mathrm{AL}_k - 0.8)^2$
+activates when $\mathrm{HPL}_k/\mathrm{AL}_k \in [0.8, 1.0)$.
+In \textsc{Unsafe} mode the weight $w_I$ is boosted by a factor of
+$5$ to prioritise integrity recovery.
+
+\subsubsection{Receding-Horizon Execution}
+
+At each planning cycle the first segment of $\tau^*$ is sent to the
+controller; the remainder is discarded.  The cycle repeats at every
+new keyframe, so the planning horizon continuously recedes.  If no
+trajectory satisfies $\mathrm{IM}_k > 0$ at all waypoints the system
+declares a \textsc{Hover} mode and commands zero velocity until
+integrity is restored.
+
+% ---------------------------------------------------------------------------
+\subsection{Summary}
+\label{sec:summary}
+% ---------------------------------------------------------------------------
+
+Table~\ref{tab:modules} summarises the five modules, their inputs and
+outputs, and the corresponding IAP requirement identifiers.
+
+\begin{table}[ht]
+\caption{IAP module summary}
+\label{tab:modules}
+\centering
+\small
+\begin{tabular}{@{}llll@{}}
+\toprule
+Module & Key Inputs & Key Outputs & Req. \\
+\midrule
+State Est.   & IMU, LiDAR, GNSS & $\pe,\ve,\mathbf{R},\Sigma_p,\mathbf{c}$ & RQ-010/015/020/040 \\
+GNSS Factors & $\rho_k^{\mathrm{corr}},d_k,\mathbf{p}_k^e$ & PR/Dop residuals, $\E(0),\Rext(0)$ & RQ-020/025 \\
+Trunk Det.   & LiDAR scan & $\{\mathbf{c}_k,r_k,\nu_k\}$, TDOP & RQ-100/110/120 \\
+Integrity    & $\Sigma_p$, GNSS epoch, trunks & HPL, VPL, AL, IM, state & RQ-200/210/220/240 \\
+Planner      & $J(\tau)$, $\mathrm{PL}_{\mathrm{pred}}$, AL & $\tau^*$, mode & RQ-300/320/400/410 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\begin{thebibliography}{9}
+\bibitem{forster2017}
+C.~Forster, L.~Carlone, F.~Dellaert, and D.~Scaramuzza,
+``On-manifold preintegration for real-time visual-inertial odometry,''
+\textit{IEEE Trans.\ Robot.}, vol.~33, no.~1, pp.~1--21, Feb.\ 2017.
+
+\bibitem{koide2023}
+K.~Koide, M.~Yokozuka, S.~Oishi, and A.~Banno,
+``Voxelized GICP for fast and accurate 3D point cloud registration,''
+in \textit{Proc.\ IEEE ICRA}, 2021.
+
+\bibitem{blanch2015}
+J.~Blanch, T.~Walter, P.~Enge, \textit{et al.},
+``Baseline advanced RAIM user algorithm and possible improvements,''
+\textit{IEEE Trans.\ Aerosp.\ Electron.\ Syst.}, vol.~51, no.~1,
+pp.~713--732, Jan.\ 2015.
+\end{thebibliography}
+
+\end{document}

@@ -18,7 +18,9 @@
 #include <iap/gnss/gnss_extension.hpp>
 #include <iap/gnss/clock_between_factor.hpp>
 
+#include <chrono>
 #include <cmath>
+#include <cstdio>
 #include <numeric>
 #include <spdlog/spdlog.h>
 
@@ -43,6 +45,8 @@
 #include <iap/odometry/estimation_frame.hpp>
 #include <iap/util/config.hpp>
 #include <iap/util/logging.hpp>
+#include <iap/util/shared_state.hpp>
+#include <iap/util/timing_csv.hpp>
 
 #include <iomanip>
 
@@ -155,6 +159,12 @@ GnssExtensionModule::GnssExtensionModule()
       });
 
   logger_->info("GnssExtensionModule created — waiting for NavSatFix origin");
+
+  // ── Timing CSV header (IAP-RQ-002) ─────────────────────────────────────
+  timing_csv::ensure_header();
+  logger_->info("[gnss_ext] timing_csv={} path={}",
+                timing_csv::enabled() ? "ENABLED" : "disabled",
+                timing_csv::path());
 
   // ── Debug CSV logging (from config_gnss.json) ──────────────────────────
   const bool enable_csv = config.param<bool>("gnss", "enable_debug_csv", false);
@@ -473,6 +483,7 @@ void GnssExtensionModule::on_range_meas_(
 
   if (!epoch.sats.empty()) {
     gnss_handler_->insert_epoch(epoch);
+    IapSharedState::instance().set_gnss_epoch(epoch);  // share with integrity_extension
     const uint64_t n = ++epoch_count_;
     // Log first epoch, then every 100 (≈ ~10 s at 10 Hz)
     if (n == 1 || n % 100 == 0) {
@@ -624,6 +635,7 @@ void GnssExtensionModule::on_smoother_update_(
 // smoother's current linearization point.  Fires after iSAM2 update.
 void iap::GnssExtensionModule::on_smoother_update_finish_(
     gtsam_points::IncrementalFixedLagSmootherExtWithFallback& smoother) {
+  const auto t0_gnss = std::chrono::high_resolution_clock::now();
 
   std::vector<gtsam::NonlinearFactor::shared_ptr> pr_factors, dop_factors;
   long frame_id;
@@ -773,6 +785,14 @@ void iap::GnssExtensionModule::on_smoother_update_finish_(
           "PR_rms={:.2f}m  Dop_rms={:.4f}m/s",
           clk_bias, clk_drift, pr_rms, dop_rms);
     }
+  }
+
+  // ── IAP-RQ-002: timing measurement ──────────────────────────────────────────
+  {
+    const double elapsed_ms = std::chrono::duration<double, std::milli>(
+        std::chrono::high_resolution_clock::now() - t0_gnss).count();
+    const double stamp = last_frame_stamp_.load();
+    timing_csv::append(stamp, "gnss_injection", elapsed_ms);
   }
 }
 

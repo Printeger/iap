@@ -18,6 +18,7 @@
 #include <iap/preprocess/preprocessed_frame.hpp>
 #include <iap/util/logging.hpp>
 #include <iap/util/extension_module.hpp>
+#include <iap/util/shared_state.hpp>
 
 namespace iap {
 
@@ -94,6 +95,9 @@ void TrunkExtensionModule::on_new_frame_(
     std::lock_guard<std::mutex> lk(map_mutex_);
     associations = map_.update(det_result, sensor_xy);
   }
+
+  // Share world-frame detection with integrity_extension for HAL computation
+  IapSharedState::instance().set_trunk_detection(det_result);
 
   // Queue for smoother injection
   PendingDetection pd;
@@ -196,6 +200,10 @@ void TrunkExtensionModule::on_smoother_update_(
       logger_->debug("[trunk_ext] +{} trunk factors (total={})", factors_added, n + factors_added);
     }
   }
+
+  // Publish confirmed landmark count for integrity_extension
+  IapSharedState::instance().set_n_confirmed_trunks(
+      static_cast<int>(inserted_landmarks_.size()));
 }
 
 // ── create_subscriptions: create the MarkerArray publisher ───────────────────

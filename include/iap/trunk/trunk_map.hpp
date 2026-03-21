@@ -1,5 +1,6 @@
 #pragma once
 // IAP-RQ-131: Trunk data association & persistent landmark IDs
+// §2.6: Trunk EKF — track per-landmark 2D position covariance
 
 #include <iap/trunk/trunk_types.hpp>
 #include <Eigen/Core>
@@ -9,6 +10,7 @@
 namespace iap {
 
 /// @brief One entry in the persistent trunk map.
+/// §2.6: Now tracks a 2×2 covariance for EKF-style position update.
 struct TrunkLandmark {
   int             id          = -1;  ///< unique landmark ID
   Eigen::Vector2d center_xy   = Eigen::Vector2d::Zero(); ///< best-estimate centre in world XY [m]
@@ -16,6 +18,14 @@ struct TrunkLandmark {
   double          confidence  = 0.0; ///< running-average confidence
   int             seen_count  = 0;   ///< number of times associated
   double          last_stamp  = 0.0; ///< timestamp of last observation [s]
+
+  // ── §2.6: EKF state ──
+  /// 2×2 position covariance (world frame) — initialized to σ²_init * I₂
+  Eigen::Matrix2d P = Eigen::Matrix2d::Identity() * 1.0;
+  /// True if this landmark has been confirmed (seen_count >= threshold)
+  bool confirmed = false;
+  /// True if this landmark is active in the current smoother window
+  bool active    = true;
 };
 
 /**
@@ -45,6 +55,12 @@ class TrunkMap {
     int    min_confirm_count   = 2;     ///< minimum sightings to "confirm" a landmark
     double stale_timeout_s     = 5.0;   ///< seconds without sighting before pruning
     double ema_alpha           = 0.3;   ///< EMA smoothing weight for position update
+
+    // ── §2.6: EKF parameters ──
+    double sigma_init          = 1.0;   ///< initial position std σ₀ for new landmarks [m]
+    double sigma_obs           = 0.15;  ///< observation noise σ_obs (range/bearing → XY) [m]
+    double sigma_process       = 0.01;  ///< process noise per second (drift model) [m/s]
+    bool   use_ekf             = true;  ///< if false, fall back to EMA update
   };
 
   TrunkMap();
