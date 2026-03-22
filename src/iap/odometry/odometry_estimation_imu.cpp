@@ -67,6 +67,9 @@ OdometryEstimationIMUParams::OdometryEstimationIMUParams() {
   clk_bias_noise  = config.param<double>("odometry_estimation", "clk_bias_noise",  100.0);
   clk_drift_noise = config.param<double>("odometry_estimation", "clk_drift_noise", 1.0);
 
+  clk_bias_relin_thresh  = config.param<double>("odometry_estimation", "clk_bias_relin_thresh",  500.0);
+  clk_drift_relin_thresh = config.param<double>("odometry_estimation", "clk_drift_relin_thresh", 5.0);
+
   validate_imu = config.param<bool>("odometry_estimation", "validate_imu", true);
   save_imu_rate_trajectory = config.param<bool>("odometry_estimation", "save_imu_rate_trajectory", false);
 
@@ -105,7 +108,24 @@ OdometryEstimationIMU::OdometryEstimationIMU(std::unique_ptr<OdometryEstimationI
   }
   isam2_params.findUnusedFactorSlots = true;
   isam2_params.relinearizeSkip = params->isam2_relinearize_skip;
-  isam2_params.setRelinearizeThreshold(params->isam2_relinearize_thresh);
+
+  // Per-type relinearization thresholds (IAP-RQ-010): clock state uses loose thresholds
+  // because clk_bias moves 100s of m/frame at cold-start, always triggering sync-mode
+  // GPU linearization if the tight default (0.1) is used.
+  // Key chars: x=Pose3(6), v=Vector3(3), b=imuBias(6), c=clk(2), e=ECEFpos(3), r=Rot3(3)
+  {
+    const double t = params->isam2_relinearize_thresh;
+    gtsam::FastMap<char, gtsam::Vector> relin_map;
+    relin_map['x'] = gtsam::Vector6::Constant(t);
+    relin_map['v'] = gtsam::Vector3::Constant(t);
+    relin_map['b'] = gtsam::Vector6::Constant(t);
+    relin_map['c'] = (gtsam::Vector2() << params->clk_bias_relin_thresh,
+                                          params->clk_drift_relin_thresh).finished();
+    relin_map['e'] = gtsam::Vector3::Constant(t);  // ECEF origin (rarely moves)
+    relin_map['r'] = gtsam::Vector3::Constant(t);  // world→ECEF rotation (rarely moves)
+    isam2_params.setRelinearizeThreshold(relin_map);
+  }
+
   smoother.reset(new FixedLagSmootherExt(params->smoother_lag, isam2_params));
 
 #ifdef GTSAM_USE_TBB

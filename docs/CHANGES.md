@@ -3,6 +3,11 @@
 > 规则：任何代码改动必须在这里记录，并包含 IAP-RQ-XXX。
 
 ## Unreleased
+- fix(clk-relin): IAP-RQ-010 — per-type iSAM2 relinearization threshold to eliminate sync-mode GPU linearization flood.
+  - Root cause: `clk_bias` jumps ~`drift×dt`=61×0.1=6m/frame at cold-start, always exceeding global threshold 0.1, forcing iSAM2 to re-linearize clock state every frame. Each re-linearization calls `IntegratedVGICPFactorGPU::linearize()` without pre-computed result → sync-mode GPU stall → warning flood.
+  - `odometry_estimation_imu.cpp`: replace single `setRelinearizeThreshold(double)` with `FastMap<char,Vector>` per key type: `x/v/b/e/r` keep 0.1; `c` (clock) uses `[clk_bias_relin_thresh, clk_drift_relin_thresh]`.
+  - `odometry_estimation_imu.hpp`: add `clk_bias_relin_thresh` / `clk_drift_relin_thresh` fields to Params.
+  - `config_odometry_gpu.json`: add `"clk_bias_relin_thresh": 500.0` / `"clk_drift_relin_thresh": 5.0`.
 - fix(warnings): IAP-RQ-003 / IAP-RQ-010 / IAP-RQ-200 — silence 6 startup/runtime warning categories.
   - **W1** `config_ros.json`: add missing `dump_path` key.
   - **W2** `config_odometry_gpu.json`: add `clk_bias_noise=100` / `clk_drift_noise=1` (IAP-RQ-010 params missing from config); bump `isam2_relinearize_skip` 1→5 to batch relinearization and eliminate sync-mode flood during GNSS injection.

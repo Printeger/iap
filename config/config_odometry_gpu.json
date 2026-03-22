@@ -52,6 +52,11 @@
     // Clock bias/drift process noise (IAP-RQ-010): units m/sqrt(s) and m/s/sqrt(s)
     "clk_bias_noise": 100,
     "clk_drift_noise": 1,
+    // Per-type iSAM2 relinearization thresholds for clock state (IAP-RQ-010)
+    // Clock bias can jump ~drift*dt = 61*0.1 = 6m/frame at cold-start, far exceeding
+    // the global threshold 0.1 and causing sync-mode GPU linearization every frame.
+    "clk_bias_relin_thresh": 500.0,
+    "clk_drift_relin_thresh": 5.0,
     // Voxel params
     "voxel_resolution": 0.25,
     "voxel_resolution_max": 0.5,

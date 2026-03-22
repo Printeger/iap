@@ -62,6 +62,11 @@ public:
   double clk_bias_noise;   ///< Sigma for clock bias random-walk prior [m]
   double clk_drift_noise;  ///< Sigma for clock drift random-walk prior [m/s]
 
+  // Per-type iSAM2 relinearization thresholds for clock state (IAP-RQ-010)
+  // Clock bias can legitimately move 100s of m/frame — keep loose to avoid sync-mode linearization
+  double clk_bias_relin_thresh;   ///< iSAM2 relinearize threshold for clock bias [m]
+  double clk_drift_relin_thresh;  ///< iSAM2 relinearize threshold for clock drift [m/s]
+
   // Logging params
   bool validate_imu;
   bool save_imu_rate_trajectory;
