@@ -3,6 +3,12 @@
 > 规则：任何代码改动必须在这里记录，并包含 IAP-RQ-XXX。
 
 ## Unreleased
+- fix(warnings): IAP-RQ-003 / IAP-RQ-010 / IAP-RQ-200 — silence 6 startup/runtime warning categories.
+  - **W1** `config_ros.json`: add missing `dump_path` key.
+  - **W2** `config_odometry_gpu.json`: add `clk_bias_noise=100` / `clk_drift_noise=1` (IAP-RQ-010 params missing from config); bump `isam2_relinearize_skip` 1→5 to batch relinearization and eliminate sync-mode flood during GNSS injection.
+  - **W3** `config_ros.json`: complete `imu_qos` / `points_qos` / `image_qos` with `history`, `reliability`, `durability` fields.
+  - **W4** `rviz_viewer.cpp`: skip `imu→lidar` TF when `imu_frame_id == lidar_frame_id` (Livox shares one frame — was spamming `TF_SELF_TRANSFORM`).
+  - **W6** `integrity_monitor.cpp`: distinguish `UNSAFE`-due-to-`PL>=AL` (warn) from `UNSAFE`-in-recovery-phase (info) — message was misleadingly printing `"PL=1.719 >= AL=10.000"` when 1.719 < 10.000.
 - feat(standalone): IAP-RQ-003 — self-contained ROS2 operation; no runtime dependency on `glim_ros` package.
   - **Root cause**: `config_ros.json` listed `librviz_viewer.so` and `libstandard_viewer.so` which only existed in GLIM's install. `iap_rosnode` silently skipped them via `continue`, leaving RViz blank.
   - **`librviz_viewer.so`**: ported from `glim_ros2/src/glim_ros/rviz_viewer.cpp` into `src/iap/util/rviz_viewer.{hpp,cpp}`. Publishes `~/aligned_points`, `~/odom`, `~/pose`, `~/map`; broadcasts TF `map→odom→base_frame` and `imu→lidar`.

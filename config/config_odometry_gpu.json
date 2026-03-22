@@ -45,9 +45,13 @@
     // Optimization params
     "smoother_lag": 5.0,
     "use_isam2_dogleg": false,
-    "isam2_relinearize_skip": 1,
+    // isam2_relinearize_skip increased from 1 to 5: batches relinearization, reduces sync-mode warnings
+    "isam2_relinearize_skip": 5,
     "isam2_relinearize_thresh": 0.1,
     "fix_imu_bias": false,
+    // Clock bias/drift process noise (IAP-RQ-010): units m/sqrt(s) and m/s/sqrt(s)
+    "clk_bias_noise": 100,
+    "clk_drift_noise": 1,
     // Voxel params
     "voxel_resolution": 0.25,
     "voxel_resolution_max": 0.5,

@@ -229,8 +229,8 @@ void RvizViewer::odometry_new_frame(const EstimationFrame::ConstPtr& new_frame, 
     trans.transform.rotation.w = quat_world_odom.w();
     tf_broadcaster->sendTransform(trans);
 
-    // IMU -> LiDAR
-    if (publish_imu2lidar) {
+    // IMU -> LiDAR (skip when frames are identical — Livox shares IMU/LiDAR frame)
+    if (publish_imu2lidar && imu_frame_id != lidar_frame_id) {
       trans.header.frame_id = imu_frame_id;
       trans.child_frame_id = lidar_frame_id;
       trans.transform.translation.x = T_lidar_imu.translation().x();

@@ -61,6 +61,7 @@
     "map_frame_id": "map",
     "publish_imu2lidar": true,
     "tf_time_offset": 1e-6,
+    "dump_path": "/tmp/dump",
     // Extension modules
     "extension_modules": [
       "libgnss_extension.so",
@@ -77,13 +78,24 @@
     // QoS options
     "imu_qos": {
       "profile": "sensor_data",
-      "depth": 1000
+      "depth": 1000,
+      "history": "keep_last",
+      "reliability": "best_effort",
+      "durability": "volatile"
     },
     "points_qos": {
-      "profile": "sensor_data"
+      "profile": "sensor_data",
+      "depth": 10,
+      "history": "keep_last",
+      "reliability": "best_effort",
+      "durability": "volatile"
     },
     "image_qos": {
-      "profile": "sensor_data"
+      "profile": "sensor_data",
+      "depth": 10,
+      "history": "keep_last",
+      "reliability": "best_effort",
+      "durability": "volatile"
     }
   }
 }

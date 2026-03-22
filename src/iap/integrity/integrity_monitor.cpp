@@ -399,8 +399,13 @@ IntegrityReport IntegrityMonitor::compute(const glim::EstimationFrame&       fra
     report.tdop, report.araim_n_hyp, report.araim_n_det, report.n_sv_used);
 
   if (report.state == IntegrityState::UNSAFE) {
-    logger_->warn("INTEGRITY UNSAFE: PL={:.3f} >= AL={:.3f}  IM={:.3f}",
-                  report.PL, report.AL, report.IM);
+    if (report.PL >= report.AL) {
+      logger_->warn("INTEGRITY UNSAFE: PL={:.3f} >= AL={:.3f}  IM={:.3f}", report.PL, report.AL, report.IM);
+    } else {
+      // State is UNSAFE due to cold-start recovery (initial state), not because PL>=AL
+      logger_->info("INTEGRITY RECOVERING: PL={:.3f} < AL={:.3f}  IM={:.3f} (need {} more safe frames)",
+                    report.PL, report.AL, report.IM, params_.recovery_count - recovery_counter_);
+    }
   } else if (report.state == IntegrityState::SAFE_EXCLUDED) {
     logger_->info("INTEGRITY SAFE_EXCLUDED: {} faults excluded, PL={:.3f} < AL={:.3f}",
                   report.araim_n_det, report.PL, report.AL);
