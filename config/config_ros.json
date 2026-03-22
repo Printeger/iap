@@ -63,7 +63,6 @@
     "tf_time_offset": 1e-6,
     // Extension modules
     "extension_modules": [
-      "libmemory_monitor.so",
       "libgnss_extension.so",
       "libtrunk_extension.so",
       "libintegrity_extension.so",

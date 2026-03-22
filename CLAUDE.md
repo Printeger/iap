@@ -45,25 +45,42 @@ CPU-only build: edit `config/config.json` to replace `config_odometry_gpu.json` 
 
 ## Running the System
 
-**Source order is critical** — IAP must precede GLIM so `dlopen()` picks IAP `.so` files first:
+**IAP-RQ-003: Standalone mode (preferred)** — IAP provides its own `iap_rosnode` with built-in
+RViz viewer and 3D standard viewer. No dependency on `glim_ros` package at runtime.
 
 ```bash
-source /root/ros2_ws/install/setup.bash         # provides glim_rosbag / glim_rosnode
-source /home/dev/code/ws_iap/install/setup.bash  # prepends IAP libs to LD_LIBRARY_PATH
-
-# Offline mapping (recommended)
-ros2 run glim_ros glim_rosbag \
-  --ros-args -p config_path:=/home/dev/code/ws_iap/src/iap/config \
-  -- /home/dev/code/ws_iap/src/iap/data/realsense_ros2
+source /home/dev/code/ws_iap/install/setup.bash  # IAP only — no glim_ros needed
 
 # Real-time mapping (terminal 1)
-ros2 run glim_ros glim_rosnode \
+ros2 run iap iap_rosnode \
   --ros-args -p config_path:=/home/dev/code/ws_iap/src/iap/config
 # Real-time mapping (terminal 2)
 ros2 bag play /home/dev/code/ws_iap/src/iap/data/realsense_ros2
 ```
 
-Verify IAP loaded (not the GLIM defaults): `echo $LD_LIBRARY_PATH | tr ':' '\n' | grep -E "iap|glim" | head -6` — IAP path must appear before `/root/ros2_ws`.
+RViz topics (under `/glim_rosnode/` namespace):
+- `~/aligned_points` — current scan aligned to world frame
+- `~/odom` — odometry pose (nav_msgs/Odometry)
+- `~/map` — accumulated global map (transient_local QoS)
+- TF tree: `map → odom → <imu_frame>`, `<imu_frame> → <lidar_frame>`
+
+**Legacy mode** (GLIM executables, still supported):
+
+```bash
+source /root/ros2_ws/install/setup.bash         # provides glim_rosbag / glim_rosnode
+source /home/dev/code/ws_iap/install/setup.bash  # must come AFTER glim — prepends IAP libs
+
+# Offline mapping
+ros2 run glim_ros glim_rosbag \
+  --ros-args -p config_path:=/home/dev/code/ws_iap/src/iap/config \
+  -- /home/dev/code/ws_iap/src/iap/data/realsense_ros2
+
+# Real-time mapping
+ros2 run glim_ros glim_rosnode \
+  --ros-args -p config_path:=/home/dev/code/ws_iap/src/iap/config
+```
+
+Verify IAP loaded (legacy mode only): `echo $LD_LIBRARY_PATH | tr ':' '\n' | grep -E "iap|glim" | head -6` — IAP path must appear before `/root/ros2_ws`.
 
 ---
 
@@ -81,9 +98,20 @@ Verify IAP loaded (not the GLIM defaults): `echo $LD_LIBRARY_PATH | tr ':' '\n' 
 
 ### Plugin Injection
 
-GLIM is a plugin host. It calls `dlopen()` to load algorithm modules at startup. IAP provides replacement `.so` files (`libodometry_estimation_gpu.so`, `libsub_mapping.so`, `libglobal_mapping.so`, etc.) that shadow GLIM's defaults. Sourcing `ws_iap/install/setup.bash` prepends the IAP `lib/` directory so GLIM finds IAP versions first.
+IAP's `iap_rosnode` is a self-contained ROS2 node. It calls `dlopen()` to load algorithm modules and extension modules at startup. All required `.so` files are now built within IAP itself:
 
-Extension modules (GNSS, trunk, integrity, rviz viewer) are listed in `config/config_ros.json` under `extension_modules` and are loaded separately at runtime.
+| Module | File | Description |
+|--------|------|-------------|
+| Algorithm | `libodometry_estimation_cpu/gpu.so` | LiDAR-IMU odometry |
+| Algorithm | `libsub_mapping.so` | Local submap builder |
+| Algorithm | `libglobal_mapping.so` | Global map optimizer |
+| Extension | `libgnss_extension.so` | GNSS pseudorange/Doppler bridge |
+| Extension | `libtrunk_extension.so` | Trunk detection visualization |
+| Extension | `libintegrity_extension.so` | ARAIM integrity output |
+| Extension | `librviz_viewer.so` | RViz2 TF + topic publisher (IAP-RQ-003) |
+| Extension | `libstandard_viewer.so` | Iridescence 3D desktop viewer (IAP-RQ-003) |
+
+Extension modules are listed in `config/config_ros.json` under `extension_modules` and loaded via `dlopen` at runtime. Legacy GLIM overlay mode (sourcing `/root/ros2_ws`) still works for `glim_rosbag` offline playback.
 
 ### Factor Graph (GTSAM)
 

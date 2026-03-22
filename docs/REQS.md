@@ -47,6 +47,17 @@ Acceptance:
 Acceptance:
 - VSCode clangd 无红线；demo 可运行并产生日志。
 
+### IAP-RQ-003: Standalone ROS2 operation (no runtime dependency on glim_ros)
+- [x] `iap_rosnode` 可独立启动，无需 source `/root/ros2_ws/install/setup.bash`
+- [x] `librviz_viewer.so` 由 IAP 自身提供（从 glim_ros 移植，头文件改 `<iap/...>`）
+- [x] `libstandard_viewer.so` 由 IAP 自身提供（从 glim 移植，头文件改 `<iap/...>`）
+- [x] `config_ros.json` 的 `extension_modules` 只引用 IAP 自产的 `.so`
+
+Acceptance:
+- `source install/setup.bash` 后 `ros2 run iap iap_rosnode` 启动；
+- RViz2 可见 `~/aligned_points`、`~/odom` 话题；
+- 3D 桌面查看器窗口正常弹出。
+
 ---
 
 ## 2. Estimator（紧耦合 FGO / 滑窗）

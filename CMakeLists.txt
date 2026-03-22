@@ -302,6 +302,11 @@ if(DEFINED ENV{ROS_VERSION})
       DEPENDENCIES std_msgs
     )
 
+    ## IAP-RQ-003: standalone dependencies (rviz_viewer + standard_viewer)
+    find_package(tf2_ros REQUIRED)
+    find_package(nav_msgs REQUIRED)
+    find_package(geometry_msgs REQUIRED)
+
     ## GNSS ROS2 extension module (IAP-RQ-020 bridge)
     find_package(glog REQUIRED)
     find_package(gnss_comm REQUIRED)
@@ -348,17 +353,37 @@ if(DEFINED ENV{ROS_VERSION})
     list(APPEND iap_LIBRARIES integrity_extension)
     install(TARGETS integrity_extension DESTINATION lib)
 
+    ## RViz2 visualization extension module (IAP-RQ-003: standalone operation)
+    add_library(rviz_viewer SHARED
+      src/iap/util/rviz_viewer.cpp
+    )
+    target_include_directories(rviz_viewer PUBLIC
+      $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+    )
+    target_compile_definitions(rviz_viewer PRIVATE GLIM_ROS2)
+    target_link_libraries(rviz_viewer iap)
+    ament_target_dependencies(rviz_viewer rclcpp sensor_msgs nav_msgs geometry_msgs tf2_ros)
+    list(APPEND iap_LIBRARIES rviz_viewer)
+    install(TARGETS rviz_viewer DESTINATION lib)
+
     ## Demo / smoke-test executable (IAP-RQ-002)
     add_executable(iap_status apps/iap_status.cpp)
     target_link_libraries(iap_status iap)
     list(APPEND iap_LIBRARIES iap_status)
+
+    ## Standalone ROS2 runtime host (phase-1: replace glim_rosnode)
+    add_executable(iap_rosnode apps/iap_rosnode.cpp)
+    target_link_libraries(iap_rosnode iap)
+    target_compile_definitions(iap_rosnode PRIVATE GLIM_ROS2)
+    ament_target_dependencies(iap_rosnode rclcpp sensor_msgs)
+    list(APPEND iap_LIBRARIES iap_rosnode)
 
     ## Experiment runner (IAP-RQ-500/510)
     add_executable(iap_experiment apps/iap_experiment.cpp)
     target_link_libraries(iap_experiment iap)
     list(APPEND iap_LIBRARIES iap_experiment)
 
-    install(TARGETS iap_status iap_experiment DESTINATION lib/iap)
+    install(TARGETS iap_status iap_experiment iap_rosnode DESTINATION lib/iap)
     install(DIRECTORY launch DESTINATION share/iap)
     install(DIRECTORY config DESTINATION share/iap)
 

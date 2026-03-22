@@ -3,6 +3,13 @@
 > 规则：任何代码改动必须在这里记录，并包含 IAP-RQ-XXX。
 
 ## Unreleased
+- feat(standalone): IAP-RQ-003 — self-contained ROS2 operation; no runtime dependency on `glim_ros` package.
+  - **Root cause**: `config_ros.json` listed `librviz_viewer.so` and `libstandard_viewer.so` which only existed in GLIM's install. `iap_rosnode` silently skipped them via `continue`, leaving RViz blank.
+  - **`librviz_viewer.so`**: ported from `glim_ros2/src/glim_ros/rviz_viewer.cpp` into `src/iap/util/rviz_viewer.{hpp,cpp}`. Publishes `~/aligned_points`, `~/odom`, `~/pose`, `~/map`; broadcasts TF `map→odom→base_frame` and `imu→lidar`.
+  - **`libstandard_viewer.so`**: ported from `glim/src/glim/viewer/standard_viewer*.cpp` (4 files) into `src/iap/util/standard_viewer*.{hpp,cpp}`. Iridescence 3D desktop viewer unchanged.
+  - **CMakeLists.txt**: added `find_package` for `tf2_ros`, `nav_msgs`, `geometry_msgs`; added `rviz_viewer` and `standard_viewer` shared library targets.
+  - **`config_ros.json`**: removed `libmemory_monitor.so` (GLIM-only, no IAP port needed).
+  - **CLAUDE.md**: updated primary run command to `ros2 run iap iap_rosnode`; legacy GLIM mode documented as secondary.
 - refactor(config): IAP-RQ-025 / IAP-RQ-000 — consolidate config directory from 18 → 15 files.
   - **Merge 1 (logging)**: `config_logging.json` deleted; its `"logging"` section inlined into `config.json`.
     `util/logging.cpp`: use `GlobalConfig::instance()` directly instead of loading a separate file.
