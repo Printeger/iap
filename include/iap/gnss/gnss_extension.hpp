@@ -58,6 +58,13 @@ class GnssExtensionModule : public glim::ExtensionModuleROS2 {
   std::vector<glim::GenericTopicSubscription::Ptr>
   create_subscriptions(rclcpp::Node& node) override;
 
+  enum class ClockChainState {
+    UNSEEDED,
+    SEEDED,
+    CHAIN_ACTIVE,
+    RECOVERING,
+  };
+
  private:
   // ── ROS topic handlers ──────────────────────────────────────────────────
   template <typename GnssMeasMsgT>
@@ -86,6 +93,10 @@ class GnssExtensionModule : public glim::ExtensionModuleROS2 {
   /// Called just AFTER optimization — reads clock state + evaluates residuals.
   void on_smoother_update_finish_(
       gtsam_points::IncrementalFixedLagSmootherExtWithFallback& smoother);
+
+  void reset_clock_chain_state_(const char* reason, double stamp);
+  void set_clock_chain_state_(ClockChainState next_state, const char* reason, double stamp, bool warn);
+  void log_clock_chain_summary_(uint64_t injection_count, double frame_stamp);
 
   // ── State ────────────────────────────────────────────────────────────────
   rclcpp::Node*       node_ = nullptr;
@@ -118,6 +129,8 @@ class GnssExtensionModule : public glim::ExtensionModuleROS2 {
   std::atomic<double> last_clk_bias_{0.0};   ///< last optimized clock bias  [m]
   std::atomic<double> last_clk_drift_{0.0};  ///< last optimized clock drift [m/s]
   std::atomic<double> last_clk_stamp_{0.0};  ///< frame stamp of last stored clock
+  std::string clock_owner_mode_{"dual"};
+  bool gnss_owns_clock_{true};
 
   // Last injected GNSS factors — evaluated post-optimization for diagnostics
   std::mutex                                         factors_mutex_;
@@ -130,6 +143,10 @@ class GnssExtensionModule : public glim::ExtensionModuleROS2 {
   ClockBetweenFactor::Params clk_between_params_;  ///< q_bias, q_drift
   long   prev_gnss_frame_id_{-1};     ///< frame_id of last GNSS injection (-1 = none)
   double prev_gnss_frame_stamp_{0.0}; ///< stamp of last GNSS injection
+  ClockChainState clock_chain_state_{ClockChainState::UNSEEDED};
+  uint64_t clock_prev_missing_count_{0};
+  uint64_t clock_curr_missing_count_{0};
+  uint64_t clock_reset_count_{0};
 
   // ECEF anchor prior sigmas (loaded from config_gnss.json)
   double sigma_ecef_origin_{5.0};   ///< σ for E(0) prior [m]

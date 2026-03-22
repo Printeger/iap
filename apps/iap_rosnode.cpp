@@ -14,6 +14,10 @@
 #include <sensor_msgs/msg/imu.hpp>
 #include <sensor_msgs/msg/point_cloud2.hpp>
 
+#include <gtsam_points/config.hpp>
+#include <gtsam_points/cuda/nonlinear_factor_set_gpu_create.hpp>
+#include <gtsam_points/optimizers/linearization_hook.hpp>
+
 #include <iap/mapping/async_global_mapping.hpp>
 #include <iap/mapping/async_sub_mapping.hpp>
 #include <iap/mapping/global_mapping_base.hpp>
@@ -41,6 +45,11 @@ public:
 
     logger_ = create_module_logger("glim");
     logger_->info("config_path: {}", resolved_config_path);
+
+  #ifdef GTSAM_POINTS_USE_CUDA
+    gtsam_points::LinearizationHook::register_hook([] { return gtsam_points::create_nonlinear_factor_set_gpu(); });
+    logger_->info("registered GPU linearization hook");
+  #endif
 
     preprocessor_ = std::make_unique<CloudPreprocessor>();
     time_keeper_ = std::make_unique<TimeKeeper>();

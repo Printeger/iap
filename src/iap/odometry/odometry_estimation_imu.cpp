@@ -13,6 +13,9 @@
 
 #include <iap/util/config.hpp>
 #include <iap/util/convert_to_string.hpp>
+#include <iap/util/key_lifecycle_monitor.hpp>
+#include <iap/util/relinearization_policy.hpp>
+#include <iap/util/shared_state.hpp>
 #include <iap/common/imu_integration.hpp>
 #include <iap/common/imu_validation.hpp>
 #include <iap/common/cloud_deskewing.hpp>
@@ -66,6 +69,7 @@ OdometryEstimationIMUParams::OdometryEstimationIMUParams() {
 
   clk_bias_noise  = config.param<double>("odometry_estimation", "clk_bias_noise",  100.0);
   clk_drift_noise = config.param<double>("odometry_estimation", "clk_drift_noise", 1.0);
+  clock_owner_mode = config.param<std::string>("odometry_estimation", "clock_owner_mode", "dual");
 
   clk_bias_relin_thresh  = config.param<double>("odometry_estimation", "clk_bias_relin_thresh",  500.0);
   clk_drift_relin_thresh = config.param<double>("odometry_estimation", "clk_drift_relin_thresh", 5.0);
@@ -102,6 +106,19 @@ OdometryEstimationIMU::OdometryEstimationIMU(std::unique_ptr<OdometryEstimationI
   deskewing.reset(new CloudDeskewing);
   covariance_estimation.reset(new CloudCovarianceEstimation(params->num_threads));
 
+  odometry_owns_clock_ = (params->clock_owner_mode != "gnss");
+  auto& lifecycle = KeyLifecycleMonitor::instance();
+  lifecycle.set_expected_owner('x', "odometry");
+  lifecycle.set_expected_owner('v', "odometry");
+  lifecycle.set_expected_owner('b', "odometry");
+  if (params->clock_owner_mode == "odometry") {
+    lifecycle.set_expected_owner('c', "odometry");
+  } else if (params->clock_owner_mode == "gnss") {
+    lifecycle.set_expected_owner('c', "gnss");
+  }
+
+  logger->info("clock_owner_mode={} odometry_owns_clock={}", params->clock_owner_mode, odometry_owns_clock_);
+
   gtsam::ISAM2Params isam2_params;
   if (params->use_isam2_dogleg) {
     isam2_params.setOptimizationParams(gtsam::ISAM2DoglegParams());
@@ -112,18 +129,22 @@ OdometryEstimationIMU::OdometryEstimationIMU(std::unique_ptr<OdometryEstimationI
   // Per-type relinearization thresholds (IAP-RQ-010): clock state uses loose thresholds
   // because clk_bias moves 100s of m/frame at cold-start, always triggering sync-mode
   // GPU linearization if the tight default (0.1) is used.
-  // Key chars: x=Pose3(6), v=Vector3(3), b=imuBias(6), c=clk(2), e=ECEFpos(3), r=Rot3(3)
+  // Key chars: x=Pose3(6), v=Vector3(3), b=imuBias(6), c=clk(2), e=ECEFpos(3), r=Rot3(3), l=trunk landmark Point2(2)
   {
     const double t = params->isam2_relinearize_thresh;
-    gtsam::FastMap<char, gtsam::Vector> relin_map;
-    relin_map['x'] = gtsam::Vector6::Constant(t);
-    relin_map['v'] = gtsam::Vector3::Constant(t);
-    relin_map['b'] = gtsam::Vector6::Constant(t);
-    relin_map['c'] = (gtsam::Vector2() << params->clk_bias_relin_thresh,
-                                          params->clk_drift_relin_thresh).finished();
-    relin_map['e'] = gtsam::Vector3::Constant(t);  // ECEF origin (rarely moves)
-    relin_map['r'] = gtsam::Vector3::Constant(t);  // world→ECEF rotation (rarely moves)
-    isam2_params.setRelinearizeThreshold(relin_map);
+    RelinearizationPolicyRegistry policy_registry;
+    policy_registry.register_policy('x', 6, gtsam::Vector6::Constant(t));
+    policy_registry.register_policy('v', 3, gtsam::Vector3::Constant(t));
+    policy_registry.register_policy('b', 6, gtsam::Vector6::Constant(t));
+    policy_registry.register_policy('c', 2, (gtsam::Vector2() << params->clk_bias_relin_thresh,
+                                                                params->clk_drift_relin_thresh).finished());
+    policy_registry.register_policy('e', 3, gtsam::Vector3::Constant(t));  // ECEF origin (rarely moves)
+    policy_registry.register_policy('r', 3, gtsam::Vector3::Constant(t));  // world→ECEF rotation (rarely moves)
+    policy_registry.register_policy('l', 2, gtsam::Vector2::Constant(t));  // trunk landmark Point2
+
+    policy_registry.validate_or_throw();
+    logger->info("relinearization policy {}", policy_registry.summary());
+    isam2_params.setRelinearizeThreshold(policy_registry.build_map());
   }
 
   smoother.reset(new FixedLagSmootherExt(params->smoother_lag, isam2_params));
@@ -227,27 +248,41 @@ EstimationFrame::ConstPtr OdometryEstimationIMU::insert_frame(const Preprocessed
     new_stamps[X(0)] = raw_frame->stamp;
     new_stamps[V(0)] = raw_frame->stamp;
     new_stamps[B(0)] = raw_frame->stamp;
-    new_stamps[C(0)] = raw_frame->stamp;  // IAP-RQ-010: clock state
+    if (odometry_owns_clock_) {
+      new_stamps[C(0)] = raw_frame->stamp;  // IAP-RQ-010: clock state
+    }
 
     new_values.insert(X(0), gtsam::Pose3(new_frame->T_world_imu.matrix()));
     new_values.insert(V(0), new_frame->v_world_imu);
     new_values.insert(B(0), gtsam::imuBias::ConstantBias(new_frame->imu_bias));
     // IAP-RQ-010: clock state [δt(m), δṫ(m/s)] initialised to zero
-    new_values.insert(C(0), gtsam::Vector2(0.0, 0.0));
+    if (odometry_owns_clock_) {
+      new_values.insert(C(0), gtsam::Vector2(0.0, 0.0));
+    }
+    auto& lifecycle = KeyLifecycleMonitor::instance();
+    lifecycle.record_write('x', "odometry");
+    lifecycle.record_write('v', "odometry");
+    lifecycle.record_write('b', "odometry");
+    if (odometry_owns_clock_) {
+      lifecycle.record_write('c', "odometry");
+    }
 
     // Prior for initial IMU states
     new_factors.emplace_shared<gtsam_points::LinearDampingFactor>(X(0), 6, params->init_pose_damping_scale);
     new_factors.emplace_shared<gtsam::PriorFactor<gtsam::Vector3>>(V(0), init_state->v_world_imu, gtsam::noiseModel::Isotropic::Precision(3, 1.0));
     new_factors.emplace_shared<gtsam_points::LinearDampingFactor>(B(0), 6, 1e6);
     // IAP-RQ-010: loose prior on clock (will be dominated by GNSS factors in RQ-020)
-    const gtsam::Vector2 clk_noise_sigmas(params->clk_bias_noise, params->clk_drift_noise);
-    new_factors.emplace_shared<gtsam::PriorFactor<gtsam::Vector2>>(
-      C(0), gtsam::Vector2(0.0, 0.0),
-      gtsam::noiseModel::Diagonal::Sigmas(clk_noise_sigmas));
+    if (odometry_owns_clock_) {
+      const gtsam::Vector2 clk_noise_sigmas(params->clk_bias_noise, params->clk_drift_noise);
+      new_factors.emplace_shared<gtsam::PriorFactor<gtsam::Vector2>>(
+        C(0), gtsam::Vector2(0.0, 0.0),
+        gtsam::noiseModel::Diagonal::Sigmas(clk_noise_sigmas));
+    }
     new_factors.add(create_factors(current, nullptr, new_values));
 
     update_smoother(new_factors, new_values, new_stamps);
     update_frames(current, new_factors);
+    KeyLifecycleMonitor::instance().maybe_log(logger, raw_frame->stamp, 400, 5.0);
 
     return frames.back();
   }
@@ -284,24 +319,40 @@ EstimationFrame::ConstPtr OdometryEstimationIMU::insert_frame(const Preprocessed
   new_stamps[X(current)] = raw_frame->stamp;
   new_stamps[V(current)] = raw_frame->stamp;
   new_stamps[B(current)] = raw_frame->stamp;
-  new_stamps[C(current)] = raw_frame->stamp;  // IAP-RQ-010: clock state
+  if (odometry_owns_clock_) {
+    new_stamps[C(current)] = raw_frame->stamp;  // IAP-RQ-010: clock state
+  }
 
-  // Retrieve last clock estimate and predict forward
-  const gtsam::Vector2 last_clk = smoother->calculateEstimate<gtsam::Vector2>(C(last));
-  const double dt = raw_frame->stamp - last_stamp;
-  // Clock model: δt_next = δt + δṫ * Δt
-  const gtsam::Vector2 predicted_clk(last_clk(0) + last_clk(1) * dt, last_clk(1));
+  gtsam::Vector2 predicted_clk(0.0, 0.0);
+  if (odometry_owns_clock_) {
+    // Retrieve last clock estimate and predict forward
+    const gtsam::Vector2 last_clk = smoother->calculateEstimate<gtsam::Vector2>(C(last));
+    const double dt = raw_frame->stamp - last_stamp;
+    // Clock model: δt_next = δt + δṫ * Δt
+    predicted_clk = gtsam::Vector2(last_clk(0) + last_clk(1) * dt, last_clk(1));
+  }
 
   new_values.insert(X(current), predicted_T_world_imu);
   new_values.insert(V(current), predicted_v_world_imu);
   new_values.insert(B(current), last_imu_bias);
-  new_values.insert(C(current), predicted_clk);  // IAP-RQ-010
+  if (odometry_owns_clock_) {
+    new_values.insert(C(current), predicted_clk);  // IAP-RQ-010
+  }
+  auto& lifecycle = KeyLifecycleMonitor::instance();
+  lifecycle.record_write('x', "odometry");
+  lifecycle.record_write('v', "odometry");
+  lifecycle.record_write('b', "odometry");
+  if (odometry_owns_clock_) {
+    lifecycle.record_write('c', "odometry");
+  }
 
   // IAP-RQ-010: loose clock prior (keep states in graph; GNSS factors will dominate in RQ-020)
-  const gtsam::Vector2 clk_noise_sigmas(params->clk_bias_noise, params->clk_drift_noise);
-  new_factors.emplace_shared<gtsam::PriorFactor<gtsam::Vector2>>(
-    C(current), predicted_clk,
-    gtsam::noiseModel::Diagonal::Sigmas(clk_noise_sigmas));
+  if (odometry_owns_clock_) {
+    const gtsam::Vector2 clk_noise_sigmas(params->clk_bias_noise, params->clk_drift_noise);
+    new_factors.emplace_shared<gtsam::PriorFactor<gtsam::Vector2>>(
+      C(current), predicted_clk,
+      gtsam::noiseModel::Diagonal::Sigmas(clk_noise_sigmas));
+  }
 
   // Constant IMU bias assumption
   new_factors.add(
@@ -415,6 +466,8 @@ EstimationFrame::ConstPtr OdometryEstimationIMU::insert_frame(const Preprocessed
     logger->warn("odometry estimation smoother fallback happened (time={})", raw_frame->stamp);
   }
 
+  KeyLifecycleMonitor::instance().maybe_log(logger, raw_frame->stamp, 400, 5.0);
+
   return frames[current];
 }
 
@@ -438,11 +491,36 @@ std::vector<EstimationFrame::ConstPtr> OdometryEstimationIMU::get_remaining_fram
 void OdometryEstimationIMU::update_frames(int current, const gtsam::NonlinearFactorGraph& new_factors) {
   logger->trace("update frames current={} marginalized_cursor={}", current, marginalized_cursor);
 
+  static uint64_t missing_clock_count = 0;
+  static uint64_t skipped_clock_read_count = 0;
+  static uint64_t clock_not_ready_count = 0;
+
+  gtsam::Values all_values;
+  try {
+    all_values = smoother->calculateEstimate();
+  } catch (const std::exception& e) {
+    logger->error("update_frames: calculateEstimate() failed: {}", e.what());
+    logger->error("current={}", current);
+    logger->error("marginalized_cursor={}", marginalized_cursor);
+    Callbacks::on_smoother_corruption(frames[current]->stamp);
+    fallback_smoother();
+    return;
+  }
+
   for (int i = marginalized_cursor; i < frames.size(); i++) {
     try {
-      Eigen::Isometry3d T_world_imu = Eigen::Isometry3d(smoother->calculateEstimate<gtsam::Pose3>(X(i)).matrix());
-      Eigen::Vector3d v_world_imu = smoother->calculateEstimate<gtsam::Vector3>(V(i));
-      Eigen::Matrix<double, 6, 1> imu_bias = smoother->calculateEstimate<gtsam::imuBias::ConstantBias>(B(i)).vector();
+      const bool has_x = all_values.exists(X(i));
+      const bool has_v = all_values.exists(V(i));
+      const bool has_b = all_values.exists(B(i));
+      if (!has_x || !has_v || !has_b) {
+        logger->warn("update_frames: missing core key at frame {} (X={} V={} B={}), skipping",
+          i, has_x, has_v, has_b);
+        continue;
+      }
+
+      Eigen::Isometry3d T_world_imu = Eigen::Isometry3d(all_values.at<gtsam::Pose3>(X(i)).matrix());
+      Eigen::Vector3d v_world_imu = all_values.at<gtsam::Vector3>(V(i));
+      Eigen::Matrix<double, 6, 1> imu_bias = all_values.at<gtsam::imuBias::ConstantBias>(B(i)).vector();
 
       frames[i]->T_world_imu = T_world_imu;
       frames[i]->T_world_lidar = T_world_imu * T_imu_lidar;
@@ -450,9 +528,49 @@ void OdometryEstimationIMU::update_frames(int current, const gtsam::NonlinearFac
       frames[i]->imu_bias = imu_bias;
 
       // IAP-RQ-010: read back clock states [δt(m), δṫ(m/s)]
-      const auto clk = smoother->calculateEstimate<gtsam::Vector2>(C(i));
-      frames[i]->clk_bias  = clk(0);
-      frames[i]->clk_drift = clk(1);
+      // In GNSS clock-owner mode, only read the current frame's clock state to avoid
+      // high-volume historical missing-key telemetry noise.
+      bool should_read_clock = true;
+      if (!odometry_owns_clock_ && i != current) {
+        should_read_clock = false;
+      }
+
+      if (!odometry_owns_clock_ && i == current) {
+        const bool clock_ready = iap::IapSharedState::instance().is_clock_ready(i);
+        if (!clock_ready) {
+          should_read_clock = false;
+          ++clock_not_ready_count;
+          if (clock_not_ready_count == 1 || clock_not_ready_count % 200 == 0) {
+            logger->info("update_frames: clock not ready for current frame {}, skip read [count={}]", i, clock_not_ready_count);
+          }
+        }
+      }
+
+      if (should_read_clock) {
+        if (all_values.exists(C(i))) {
+          const auto clk = all_values.at<gtsam::Vector2>(C(i));
+          frames[i]->clk_bias  = clk(0);
+          frames[i]->clk_drift = clk(1);
+        } else {
+          if (odometry_owns_clock_) {
+            KeyLifecycleMonitor::instance().record_missing('c', "odometry.update_frames.current_only");
+            ++missing_clock_count;
+            if (missing_clock_count == 1 || missing_clock_count % 200 == 0) {
+              logger->warn("update_frames: missing current clock key C({}), keep previous clock state [count={}]", i, missing_clock_count);
+            }
+          } else {
+            ++missing_clock_count;
+            if (missing_clock_count == 1 || missing_clock_count % 1000 == 0) {
+              logger->debug("update_frames: current clock key C({}) unavailable in gnss owner mode [count={}]", i, missing_clock_count);
+            }
+          }
+        }
+      } else {
+        ++skipped_clock_read_count;
+        if (skipped_clock_read_count == 1 || skipped_clock_read_count % 2000 == 0) {
+          logger->debug("update_frames: skip historical clock read in gnss owner mode [count={}]", skipped_clock_read_count);
+        }
+      }
 
       // IAP-RQ-015: extract position covariance Σ_p from smoother marginal
       try {
@@ -472,14 +590,10 @@ void OdometryEstimationIMU::update_frames(int current, const gtsam::NonlinearFac
         i,
         T_world_imu.translation().x(), T_world_imu.translation().y(), T_world_imu.translation().z(),
         v_world_imu.x(), v_world_imu.y(), v_world_imu.z(),
-        clk(0), clk(1));
-    } catch (std::out_of_range& e) {
-      logger->error("caught {}", e.what());
-      logger->error("current={}", current);
-      logger->error("marginalized_cursor={}", marginalized_cursor);
-      Callbacks::on_smoother_corruption(frames[current]->stamp);
-      fallback_smoother();
-      break;
+        frames[i]->clk_bias, frames[i]->clk_drift);
+    } catch (const std::exception& e) {
+      logger->error("update_frames: frame {} extraction failed: {}", i, e.what());
+      continue;
     }
   }
 }

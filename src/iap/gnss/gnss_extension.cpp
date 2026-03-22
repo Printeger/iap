@@ -44,6 +44,7 @@
 #include <iap/odometry/callbacks.hpp>
 #include <iap/odometry/estimation_frame.hpp>
 #include <iap/util/config.hpp>
+#include <iap/util/key_lifecycle_monitor.hpp>
 #include <iap/util/logging.hpp>
 #include <iap/util/shared_state.hpp>
 #include <iap/util/timing_csv.hpp>
@@ -59,6 +60,22 @@ using gtsam::symbol_shorthand::E;  // ECEF origin  E(0)
 using gtsam::symbol_shorthand::R;  // world→ECEF   R(0)
 using gtsam::symbol_shorthand::V;
 using gtsam::symbol_shorthand::X;
+
+namespace {
+const char* to_string(iap::GnssExtensionModule::ClockChainState state) {
+  switch (state) {
+    case iap::GnssExtensionModule::ClockChainState::UNSEEDED:
+      return "UNSEEDED";
+    case iap::GnssExtensionModule::ClockChainState::SEEDED:
+      return "SEEDED";
+    case iap::GnssExtensionModule::ClockChainState::CHAIN_ACTIVE:
+      return "CHAIN_ACTIVE";
+    case iap::GnssExtensionModule::ClockChainState::RECOVERING:
+      return "RECOVERING";
+  }
+  return "UNKNOWN";
+}
+}  // namespace
 
 // ── WGS-84 constants ──────────────────────────────────────────────────────
 static constexpr double WGS84_A   = 6378137.0;
@@ -97,6 +114,10 @@ GnssExtensionModule::GnssExtensionModule()
     : logger_(glim::create_module_logger("gnss_ext")) {
   // ── Load GNSS config from config_gnss.json ──────────────────────────────
   glim::Config config(glim::GlobalConfig::get_config_path("config_gnss"));
+  glim::Config odom_config(glim::GlobalConfig::get_config_path("config_odometry"));
+
+  clock_owner_mode_ = odom_config.param<std::string>("odometry_estimation", "clock_owner_mode", "dual");
+  gnss_owns_clock_ = (clock_owner_mode_ != "odometry");
 
   // GnssHandler::Params
   GnssHandler::Params hp;
@@ -136,6 +157,16 @@ GnssExtensionModule::GnssExtensionModule()
                 hp.lever_arm(0), hp.lever_arm(1), hp.lever_arm(2),
                 clk_between_params_.q_bias, clk_between_params_.q_drift,
                 sigma_ecef_origin_, sigma_ecef_rot_);
+  logger_->info("[gnss_ext] clock_owner_mode={} gnss_owns_clock={}", clock_owner_mode_, gnss_owns_clock_);
+
+  auto& lifecycle = glim::KeyLifecycleMonitor::instance();
+  lifecycle.set_expected_owner('e', "gnss");
+  lifecycle.set_expected_owner('r', "gnss");
+  if (clock_owner_mode_ == "gnss") {
+    lifecycle.set_expected_owner('c', "gnss");
+  } else if (clock_owner_mode_ == "odometry") {
+    lifecycle.set_expected_owner('c', "odometry");
+  }
 
   // Register on_new_frame to track frame index/stamp for factor injection
   Callbacks::on_new_frame.add([this](const glim::EstimationFrame::ConstPtr& f) {
@@ -157,6 +188,10 @@ GnssExtensionModule::GnssExtensionModule()
       [this](gtsam_points::IncrementalFixedLagSmootherExtWithFallback& smoother) {
         on_smoother_update_finish_(smoother);
       });
+
+  Callbacks::on_smoother_corruption.add([this](double stamp) {
+    reset_clock_chain_state_("smoother_corruption", stamp);
+  });
 
   logger_->info("GnssExtensionModule created — waiting for NavSatFix origin");
 
@@ -498,7 +533,7 @@ void GnssExtensionModule::on_range_meas_(
 
 // ── Injecting GNSS factors into the smoother ─────────────────────────────────
 void GnssExtensionModule::on_smoother_update_(
-    gtsam_points::IncrementalFixedLagSmootherExtWithFallback& /*smoother*/,
+  gtsam_points::IncrementalFixedLagSmootherExtWithFallback& smoother,
     gtsam::NonlinearFactorGraph&                              new_factors,
     gtsam::Values&                                            new_values,
     std::map<std::uint64_t, double>&                          new_stamps) {
@@ -521,6 +556,8 @@ void GnssExtensionModule::on_smoother_update_(
       static_cast<int>(frame_id), frame_stamp, anc_ecef, &consumed);
 
   if (gnss_factors.size() > 0) {
+    auto& lifecycle = glim::KeyLifecycleMonitor::instance();
+
     // ── First GNSS injection: insert E(0) and R(0) with loose priors ──────────
     // E(0) = ECEF origin (vector3), R(0) = world→ECEF rotation (Rot3)
     // Prior sigmas loaded from config_gnss.json
@@ -528,6 +565,8 @@ void GnssExtensionModule::on_smoother_update_(
       const gtsam::Rot3 R0(R_seed);
       new_values.insert(E(0), anc_ecef);
       new_values.insert(R(0), R0);
+      lifecycle.record_write('e', "gnss");
+      lifecycle.record_write('r', "gnss");
       new_factors.addPrior<gtsam::Vector3>(
           E(0), anc_ecef,
           gtsam::noiseModel::Diagonal::Sigmas(
@@ -554,6 +593,15 @@ void GnssExtensionModule::on_smoother_update_(
     // huge PR residuals (~237 km) permanently.  Instead, propagate the last post-opt
     // clock estimate with the clock-walk model:  bias_next = bias + drift * dt.
     if (!new_values.exists(C(frame_id))) {
+      if (!gnss_owns_clock_) {
+        lifecycle.record_missing('c', "gnss.owner_odometry_required");
+        if (clock_prev_missing_count_ == 0 || clock_prev_missing_count_ % 100 == 0) {
+          logger_->warn("[gnss_ext] C({}) missing while clock_owner_mode=odometry; skip GNSS factor injection for this frame", frame_id);
+        }
+        ++clock_prev_missing_count_;
+        return;
+      }
+
       // Warm-start: propagate last known clock state forward by dt
       gtsam::Vector2 init_clk(0.0, 0.0);
       const double prev_stamp = last_clk_stamp_.load();
@@ -567,6 +615,7 @@ void GnssExtensionModule::on_smoother_update_(
 
       new_values.insert(C(frame_id), init_clk);
       new_stamps[C(frame_id)] = frame_stamp;
+      lifecycle.record_write('c', "gnss");
 
       static std::once_flag once_clk;
       std::call_once(once_clk, [&] {
@@ -575,10 +624,18 @@ void GnssExtensionModule::on_smoother_update_(
                       "(glim base class does not add clock variable)",
                       frame_id, init_clk(0), init_clk(1));
       });
+      if (clock_chain_state_ == ClockChainState::UNSEEDED || clock_chain_state_ == ClockChainState::RECOVERING) {
+        set_clock_chain_state_(ClockChainState::SEEDED, "clock_seeded", frame_stamp, false);
+      }
     } else {
       // Make sure the stamp is registered even if odometry added the value
       new_stamps[C(frame_id)] = frame_stamp;
+      if (clock_chain_state_ == ClockChainState::UNSEEDED || clock_chain_state_ == ClockChainState::RECOVERING) {
+        set_clock_chain_state_(ClockChainState::SEEDED, "clock_observed", frame_stamp, false);
+      }
     }
+
+    IapSharedState::instance().set_clock_ready(frame_id, frame_stamp);
 
     // ── ClockBetweenFactor: connect C(prev) → C(curr) ───────────────────────
     // Constant-drift random-walk model propagates clock information between
@@ -587,11 +644,37 @@ void GnssExtensionModule::on_smoother_update_(
     if (prev_gnss_frame_id_ >= 0) {
       const double dt = frame_stamp - prev_gnss_frame_stamp_;
       if (dt > 0.0 && dt < 2.0) {  // guard: only for reasonable gaps
-        auto clk_noise = ClockBetweenFactor::make_noise(dt, clk_between_params_);
-        new_factors.emplace_shared<ClockBetweenFactor>(
-            C(prev_gnss_frame_id_), C(frame_id), dt, clk_noise);
-        // Keep prev clock variable alive for the between-factor
-        new_stamps[C(prev_gnss_frame_id_)] = frame_stamp;
+        const auto prev_clk_key = C(prev_gnss_frame_id_);
+        bool prev_clock_available = new_values.exists(prev_clk_key);
+        if (!prev_clock_available) {
+          try {
+            (void)smoother.calculateEstimate<gtsam::Vector2>(prev_clk_key);
+            prev_clock_available = true;
+          } catch (...) {
+            prev_clock_available = false;
+          }
+        }
+
+        if (prev_clock_available) {
+          auto clk_noise = ClockBetweenFactor::make_noise(dt, clk_between_params_);
+          new_factors.emplace_shared<ClockBetweenFactor>(
+              prev_clk_key, C(frame_id), dt, clk_noise);
+          // Keep prev clock variable alive for the between-factor
+          new_stamps[prev_clk_key] = frame_stamp;
+          if (clock_chain_state_ != ClockChainState::CHAIN_ACTIVE) {
+            set_clock_chain_state_(ClockChainState::CHAIN_ACTIVE, "clock_between_added", frame_stamp, false);
+          }
+        } else {
+          lifecycle.record_missing('c', "gnss.clock_between_prev");
+          ++clock_prev_missing_count_;
+          if (clock_prev_missing_count_ == 1 || clock_prev_missing_count_ % 100 == 0) {
+            logger_->warn("[gnss_ext] skip ClockBetweenFactor: missing previous clock C({}) at frame {} (stamp={:.3f}) [count={}]",
+                          prev_gnss_frame_id_, frame_id, frame_stamp, clock_prev_missing_count_);
+          }
+          prev_gnss_frame_id_ = -1;
+          prev_gnss_frame_stamp_ = 0.0;
+          set_clock_chain_state_(ClockChainState::SEEDED, "prev_clock_missing", frame_stamp, false);
+        }
       }
     }
     prev_gnss_frame_id_    = frame_id;
@@ -625,6 +708,63 @@ void GnssExtensionModule::on_smoother_update_(
       logger_->debug("[gnss_ext] injection #{}: {} GNSS factors → frame {} (stamp={:.3f})",
                      n, gnss_factors.size(), frame_id, frame_stamp);
     }
+
+    log_clock_chain_summary_(n, frame_stamp);
+    lifecycle.maybe_log(logger_, frame_stamp, 400, 5.0);
+  }
+}
+
+void GnssExtensionModule::set_clock_chain_state_(ClockChainState next_state, const char* reason, double stamp, bool warn) {
+  if (clock_chain_state_ == next_state) {
+    return;
+  }
+
+  const auto prev = clock_chain_state_;
+  clock_chain_state_ = next_state;
+
+  const char* prev_name = to_string(prev);
+  const char* next_name = to_string(next_state);
+  if (warn) {
+    logger_->warn("[gnss_ext] clock chain state: {} -> {} ({}) at {:.3f}", prev_name, next_name, reason, stamp);
+  } else {
+    logger_->info("[gnss_ext] clock chain state: {} -> {} ({}) at {:.3f}", prev_name, next_name, reason, stamp);
+  }
+}
+
+void GnssExtensionModule::log_clock_chain_summary_(uint64_t injection_count, double frame_stamp) {
+  if (injection_count == 1 || injection_count % 200 == 0) {
+    logger_->info("[gnss_ext] clock summary #{}: state={} prev_missing={} curr_missing={} resets={} stamp={:.3f}",
+                  injection_count,
+                  to_string(clock_chain_state_),
+                  clock_prev_missing_count_,
+                  clock_curr_missing_count_,
+                  clock_reset_count_,
+                  frame_stamp);
+  }
+}
+
+void GnssExtensionModule::reset_clock_chain_state_(const char* reason, double stamp) {
+  prev_gnss_frame_id_ = -1;
+  prev_gnss_frame_stamp_ = 0.0;
+  last_clk_bias_.store(0.0);
+  last_clk_drift_.store(0.0);
+  last_clk_stamp_.store(0.0);
+
+  {
+    std::lock_guard<std::mutex> lk(factors_mutex_);
+    last_pr_factors_.clear();
+    last_dop_factors_.clear();
+    last_injected_frame_id_ = -1;
+  }
+
+  IapSharedState::instance().clear_clock_ready();
+
+  ++clock_reset_count_;
+  set_clock_chain_state_(ClockChainState::RECOVERING, reason, stamp, true);
+
+  if (clock_reset_count_ == 1 || clock_reset_count_ % 20 == 0) {
+    logger_->warn("[gnss_ext] reset clock chain state due to {} at stamp {:.3f} [count={}]",
+                  reason, stamp, clock_reset_count_);
   }
 }
 
@@ -662,7 +802,19 @@ void iap::GnssExtensionModule::on_smoother_update_finish_(
     last_clk_bias_.store(clk_bias);
     last_clk_drift_.store(clk_drift);
     last_clk_stamp_.store(last_frame_stamp_.load());
+    if (clock_chain_state_ == ClockChainState::RECOVERING || clock_chain_state_ == ClockChainState::UNSEEDED) {
+      set_clock_chain_state_(ClockChainState::SEEDED, "post_opt_clock_available", last_frame_stamp_.load(), false);
+    }
   } catch (...) {}
+
+  if (!clk_ok) {
+    glim::KeyLifecycleMonitor::instance().record_missing('c', "gnss.post_opt");
+    ++clock_curr_missing_count_;
+    if (clock_curr_missing_count_ == 1 || clock_curr_missing_count_ % 100 == 0) {
+      logger_->warn("[gnss_ext] post-opt clock unavailable at frame {} [count={}]",
+                    frame_id, clock_curr_missing_count_);
+    }
+  }
 
   // ── 2. Factor residuals ──────────────────────────────────────────────────────
   double pr_rms  = 0.0, dop_rms  = 0.0;

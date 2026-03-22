@@ -11,6 +11,7 @@
   // use_isam2_dogleg            : Use the dogleg optimizer as the backend of ISAM2 that is slow but more robust
   // isam2_relinearize_skip      :
   // isam2_relinearize_thresh    :
+  // clock_owner_mode            : "dual" | "odometry" | "gnss" (symbol family 'c' ownership)
   // fix_imu_bias                : If true, disable IMU bias estimation and use the initial IMU bias
   //
   // --- Voxel params ---
@@ -48,6 +49,7 @@
     // isam2_relinearize_skip increased from 1 to 5: batches relinearization, reduces sync-mode warnings
     "isam2_relinearize_skip": 5,
     "isam2_relinearize_thresh": 0.1,
+    "clock_owner_mode": "gnss",
     "fix_imu_bias": false,
     // Clock bias/drift process noise (IAP-RQ-010): units m/sqrt(s) and m/s/sqrt(s)
     "clk_bias_noise": 100,

@@ -12,6 +12,7 @@
   // use_isam2_dogleg               :
   // isam2_relinearize_skip         :
   // isam2_relinearize_thresh       :
+  // clock_owner_mode               : "dual" | "odometry" | "gnss" (symbol family 'c' ownership)
   */
   "odometry_estimation": {
     "so_name": "libodometry_estimation_ct.so",
@@ -29,6 +30,7 @@
     "use_isam2_dogleg": false,
     "isam2_relinearize_skip": 1,
     "isam2_relinearize_thresh": 0.1,
+    "clock_owner_mode": "gnss",
     // Misc
     "num_threads": 4
   }

@@ -3,6 +3,13 @@
 > 规则：任何代码改动必须在这里记录，并包含 IAP-RQ-XXX。
 
 ## Unreleased
+- fix(clock-ownership): IAP-RQ-010 / IAP-RQ-200 — converge single-owner clock contract and suppress GNSS-owner read noise.
+  - Added `clock_owner_mode` (`dual|odometry|gnss`) wiring across odometry/GNSS/trunk; defaults switched to `gnss` in odometry configs.
+  - Added cross-module clock readiness marker in `IapSharedState` (`set_clock_ready/clear_clock_ready/is_clock_ready`).
+  - GNSS extension now sets readiness when `C(frame_id)` is prepared and clears it on clock-chain reset/recovery.
+  - Odometry in GNSS-owner mode now reads only `C(current)` and only when ready; non-ready frames are treated as warmup (no `c missing` warning storm).
+  - Added lifecycle/ownership observability hardening (`KeyLifecycleMonitor`) and per-symbol relinearization policy registry with startup validation (including `l:Point2` threshold dimension).
+  - Acceptance A/B replay (`dual` vs `gnss`) now shows `c missing=0`, `conflicts=0`, `violations=0`, and no hard optimizer errors.
 - fix(clk-relin): IAP-RQ-010 — per-type iSAM2 relinearization threshold to eliminate sync-mode GPU linearization flood.
   - Root cause: `clk_bias` jumps ~`drift×dt`=61×0.1=6m/frame at cold-start, always exceeding global threshold 0.1, forcing iSAM2 to re-linearize clock state every frame. Each re-linearization calls `IntegratedVGICPFactorGPU::linearize()` without pre-computed result → sync-mode GPU stall → warning flood.
   - `odometry_estimation_imu.cpp`: replace single `setRelinearizeThreshold(double)` with `FastMap<char,Vector>` per key type: `x/v/b/e/r` keep 0.1; `c` (clock) uses `[clk_bias_relin_thresh, clk_drift_relin_thresh]`.

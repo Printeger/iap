@@ -61,6 +61,7 @@ public:
   // IAP-RQ-010: clock noise parameters (loose priors until GNSS factors added)
   double clk_bias_noise;   ///< Sigma for clock bias random-walk prior [m]
   double clk_drift_noise;  ///< Sigma for clock drift random-walk prior [m/s]
+  std::string clock_owner_mode;  ///< dual | odometry | gnss
 
   // Per-type iSAM2 relinearization thresholds for clock state (IAP-RQ-010)
   // Clock bias can legitimately move 100s of m/frame — keep loose to avoid sync-mode linearization
@@ -121,6 +122,8 @@ protected:
   // Optimizer
   using FixedLagSmootherExt = gtsam_points::IncrementalFixedLagSmootherExtWithFallback;
   std::unique_ptr<FixedLagSmootherExt> smoother;
+
+  bool odometry_owns_clock_ = true;
 
   std::shared_ptr<void> tbb_task_arena;
 };

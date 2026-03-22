@@ -17,6 +17,7 @@
 #include <iap/odometry/estimation_frame.hpp>
 #include <iap/preprocess/preprocessed_frame.hpp>
 #include <iap/util/logging.hpp>
+#include <iap/util/key_lifecycle_monitor.hpp>
 #include <iap/util/extension_module.hpp>
 #include <iap/util/shared_state.hpp>
 
@@ -51,6 +52,8 @@ TrunkExtensionModule::TrunkExtensionModule(
       std::map<std::uint64_t, double>&                          new_stamps) {
     on_smoother_update_(smoother, new_factors, new_values, new_stamps);
   });
+
+  glim::KeyLifecycleMonitor::instance().set_expected_owner('l', "trunk");
 
   logger_->info("TrunkExtensionModule created");
 }
@@ -160,6 +163,7 @@ void TrunkExtensionModule::on_smoother_update_(
 
         if (!new_values.exists(lm_key)) {
           new_values.insert(lm_key, init_pos);
+          glim::KeyLifecycleMonitor::instance().record_write('l', "trunk");
         }
 
         // Loose prior on landmark position
@@ -199,6 +203,10 @@ void TrunkExtensionModule::on_smoother_update_(
     } else {
       logger_->debug("[trunk_ext] +{} trunk factors (total={})", factors_added, n + factors_added);
     }
+  }
+
+  if (!detections.empty()) {
+    glim::KeyLifecycleMonitor::instance().maybe_log(logger_, detections.back().stamp, 400, 5.0);
   }
 
   // Publish confirmed landmark count for integrity_extension

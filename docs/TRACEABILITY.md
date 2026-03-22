@@ -69,5 +69,8 @@
 ## 2. 未映射改动（临时区）
 > 如果你临时改了代码但还没决定它对应哪个需求，先把改动写在这里（提交前必须移入上表）。
 
-- (none)
+- 2026-03-22: IAP-RQ-010 / IAP-RQ-200
+  - GNSS clock single-owner contract收敛：`clock_owner_mode` 跨模块联动，默认切到 `gnss`。
+  - 增加 ready 时序契约：`IapSharedState::{set,clear,is}_clock_ready`；GNSS 生产 ready，odometry 在 GNSS-owner 下仅 `current+ready` 才读 `C(i)`。
+  - 观测与一致性：`KeyLifecycleMonitor` 记录 ownership/missing/conflict/violation；A/B 验收日志显示 `c missing/conflicts/violations = 0`，无 hard optimizer error。
 

@@ -67,6 +67,8 @@ add_library(iap SHARED
   src/iap/util/extension_module.cpp
   src/iap/util/load_module.cpp
   src/iap/util/data_validator.cpp
+  src/iap/util/relinearization_policy.cpp
+  src/iap/util/key_lifecycle_monitor.cpp
   src/iap/util/serialization.cpp
   src/iap/util/debug.cpp
   # preprocess

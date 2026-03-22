@@ -79,6 +79,29 @@ class IapSharedState {
     return latest_trunk_det_;
   }
 
+  // ── Clock readiness marker (GNSS owner mode) ─────────────────────────
+
+  /// Mark that C(frame_id) has been successfully prepared by GNSS injection.
+  void set_clock_ready(long frame_id, double stamp) {
+    clock_ready_frame_id_.store(frame_id, std::memory_order_relaxed);
+    clock_ready_stamp_.store(stamp, std::memory_order_relaxed);
+  }
+
+  /// Clear readiness marker (used during recovery/corruption reset).
+  void clear_clock_ready() {
+    clock_ready_frame_id_.store(-1, std::memory_order_relaxed);
+    clock_ready_stamp_.store(0.0, std::memory_order_relaxed);
+  }
+
+  /// True when GNSS has explicitly prepared clock state for this frame.
+  bool is_clock_ready(long frame_id) const {
+    return clock_ready_frame_id_.load(std::memory_order_relaxed) == frame_id;
+  }
+
+  double get_clock_ready_stamp() const {
+    return clock_ready_stamp_.load(std::memory_order_relaxed);
+  }
+
  private:
   IapSharedState() = default;
 
@@ -89,6 +112,9 @@ class IapSharedState {
 
   mutable std::mutex trunk_mutex_;
   std::optional<TrunkDetectionResult> latest_trunk_det_;
+
+  std::atomic<long> clock_ready_frame_id_{-1};
+  std::atomic<double> clock_ready_stamp_{0.0};
 };
 
 }  // namespace iap
