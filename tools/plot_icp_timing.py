@@ -110,7 +110,6 @@ def plot_C2(timing_df, icp_df, out_dir):
             f"{np.max(elapsed):.2f}",
         ])
 
-    ax_plot.axhline(100, color="red", linestyle="--", linewidth=0.6, label="100 ms (10 Hz limit)")
     ax_plot.set_ylabel("Elapsed [ms]")
     ax_plot.set_xlabel("Time [s]")
     ax_plot.set_title("Fig C2 — Per-Module Timing (each frame)")
