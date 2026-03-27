@@ -1,6 +1,5 @@
 devel/
 logs/
-log/
 build/
 bin/
 lib/
@@ -55,3 +54,9 @@ qtcreator-*
 
 # Catkin custom files
 CATKIN_IGNORE
+
+# Local runtime / colcon logs
+/log/*
+!/log/COLCON_IGNORE
+/log/latest
+/tools/log/
