@@ -6,6 +6,10 @@
   */
   "odometry_estimation": {
     "so_name": "libodometry_estimation_bspline.so",
+    // Frontend mode:
+    //   RECONSTRUCT   = phase-1A legacy path (discrete odom + post-hoc spline)
+    //   CT_LIDAR_CPU  = phase-1B minimal path (control-point window + CPU CT LiDAR factor)
+    "frontend_mode": "CT_LIDAR_CPU",
     // Initialization params
     "initialization_mode": "LOOSE",
     "initialization_window_size": 1.0,
@@ -31,6 +35,12 @@
     "vgicp_resolution": 0.25,
     "vgicp_voxelmap_levels": 2,
     "vgicp_voxelmap_scaling_factor": 2.0,
+    // Phase-1B continuous-time LiDAR factor settings
+    "max_correspondence_distance": 1.5,
+    "ctrl_point_anchor_inf_scale": 1e6,
+    "ctrl_point_prediction_inf_scale": 1e3,
+    "ctrl_point_smoothness_inf_scale": 1e2,
+    "lm_max_iterations": 8,
     // Continuous-time spline settings
     "spline_knot_mode": "uniform",
     "spline_nominal_dt": 0.0,

@@ -5,6 +5,10 @@
 
 ## 当前结论
 - 已完成 Phase 1A 的“连续时间骨架层”落地。
+- 已完成 Phase 1B 的最小可用版本：
+  - 控制点窗口状态设计
+  - 控制点 key 设计
+  - CPU 连续时间 LiDAR factor
 - 当前 `src/iap` 已具备：
   - 连续时间轨迹统一接口
   - B-spline 轨迹容器与时间查询能力
@@ -46,8 +50,11 @@
 - 新增 `libodometry_estimation_bspline.so` 创建入口
 
 当前行为：
-- 暂时复用现有 LiDAR-IMU odometry 主链作为状态来源。
-- 在 `update_frames()` 之后，将活动窗口中的离散状态重建为一条连续时间 B-spline。
+- 当前同时支持两条路径：
+  - `RECONSTRUCT`：保留 Phase 1A 的离散后重建 spline 路径
+  - `CT_LIDAR_CPU`：启用 4 控制点窗口 + CPU 连续时间 LiDAR factor 的最小主链
+- `CT_LIDAR_CPU` 路径不再只是 `update_frames()` 后的后处理重建。
+- 它会直接对活动控制点窗口做局部 LM 优化，再发布连续时间轨迹视图。
 - 通过两条路径发布：
   - `IapSharedState`
   - `EstimationFrame::custom_data`
@@ -57,7 +64,8 @@
   - 现有 mapping / viewer 可继续消费的输出形式
 
 注意：
-- 这一层现在是“离散后重建 continuous trajectory”，不是“优化变量本身就是 spline control points”。
+- `RECONSTRUCT` 仍然是“离散后重建 continuous trajectory”。
+- `CT_LIDAR_CPU` 已把 spline control points 引入为局部前端优化变量，但还不是最终的 fixed-lag smoother 主状态组织。
 
 ## 4. planner 接口预留
 - `PlannerInterface` 已新增默认 no-op：
@@ -68,6 +76,28 @@
 当前 planner 能做的事：
 - 在不改 `plan(...)` 主签名的前提下读取共享的 continuous trajectory。
 - 当前只基础使用了最新样本的不确定度，尚未在候选轨迹评分中深度使用完整 time query / spline window。
+
+## 5. Phase 1B 最小可用实现
+- 新增 `BSplineControlWindow`
+- 新增 4 控制点 key 设计：`symbol('s', idx)`
+- 新增 `IntegratedBSplineGICPFactor`
+- `OdometryEstimationBSpline` 新增 `frontend_mode = CT_LIDAR_CPU`
+
+当前 Phase 1B 路径的工作方式：
+- 不再只是“离散状态优化完成后再重建 spline”。
+- 现在可以直接对 4 个活动控制点构成的窗口做连续时间 LiDAR 优化。
+- 每个点按照点时间查询当前 segment 的 B-spline pose。
+- CPU LiDAR factor 当前采用最小可用实现：
+  - 4 个 pose control points
+  - per-point time query
+  - CPU GICP residual
+  - 局部 LM 优化
+
+当前 Phase 1B 的边界：
+- 这还是 local frontend，不是最终的 fixed-lag smoother 主链。
+- IMU 目前主要仍用于初始化/后续兼容链路，尚未作为 spline-native continuous-time factor 完整改写进图里。
+- GNSS 也尚未进入控制点窗口主链。
+- LiDAR factor 目前使用数值 pose Jacobian，是为了先打通最小可用版本；解析 Jacobian 和 GPU 版仍是后续工作。
 
 ## 验证状态
 
@@ -86,18 +116,23 @@ colcon test-result --all
 
 测试结果：
 - `test_araim` 通过
+- `test_bspline_control_window` 通过
 - `test_bspline_trajectory` 通过
-- 总计 `32 tests, 0 errors, 0 failures`
+- Phase 1B 代码已完成编译与测试通过
 
 ## 当前还没完成的关键部分
 
 ### 1. 还不是 spline-native estimator
-- 当前优化变量仍然主要来自旧的离散状态链路。
-- 还没有把控制点窗口作为主优化变量写入 GTSAM。
+- 当前 `CT_LIDAR_CPU` 路径已经把 4 控制点窗口作为局部优化变量引入。
+- 但它还不是最终的 fixed-lag GTSAM 主状态组织方式。
 
 ### 2. LiDAR 连续时间残差还没接入主链
-- 还没有把每点 `T(t)` 查询真正放进 LiDAR factor。
-- 还没有实现基于控制点窗口的 continuous-time LiDAR Jacobian / Hessian 累加。
+- 当前已经有 CPU 版连续时间 LiDAR factor。
+- 但它还是最小可用版本：
+  - 局部 4 控制点窗口
+  - 数值化 pose Jacobian
+  - 还没有 GPU 版
+  - 还没有与最终 fixed-lag 图结构完全统一
 
 ### 3. IMU 连续时间约束还没改写
 - 还没有将 IMU 约束改为直接约束 spline 的角速度 / 线加速度。
@@ -113,39 +148,27 @@ colcon test-result --all
 
 ## 下一步计划
 
-### Next Step 1：Phase 1B，先把连续时间 LiDAR + IMU 主链做成真的
+### Next Step 1：把 `CT_LIDAR_CPU` 从 local frontend 推进到 fixed-lag spline 主链
 目标：
-- 不再只是“离散状态后重建 spline”
-- 而是让 spline control points 成为 odometry 主状态的一部分
+- 让 spline control points 成为 odometry 主状态的一部分
+- 不再只依赖每帧局部 LM，而是进入真正的窗口滑动与边缘化
 
 建议子任务：
-- 定义控制点窗口的 key 组织方式
 - 设计 knot insertion / window slide / marginalization 策略
-- 先实现最小可用版本：
-  - LiDAR-only 或 LiDAR+IMU 的 spline window optimizer
-  - 保留现有兼容输出不变
+- 将当前 4 控制点 key 组织推广到多段窗口
+- 保留现有兼容输出不变
 
-### Next Step 2：优先改 LiDAR 因子
-目标：
-- 把 LiDAR 约束从“scan 参考 pose”推进到“按点时间查询 `T(t)`”
-
-建议子任务：
-- 在现有 deskew / factor 链路中识别最小改造入口
-- 先做 CPU 版本连续时间 LiDAR factor
-- 跑通之后再考虑 GPU 版本加速
-
-### Next Step 3：再改 IMU 约束
+### Next Step 2：补齐 IMU 连续时间约束
 目标：
 - 用 IMU 时间戳直接约束 spline 的速度、角速度、加速度
+- 让 IMU 不再只承担初始化和兼容链路职责
 
 建议子任务：
-- 先明确 spline 状态表达是否采用：
-  - pose control points
-  - SE(3) split pose/position parameterization
-  - 与 bias / clock 的联合状态布局
+- 明确 spline 状态表达是否采用纯 pose control points 还是 split pose/position parameterization
+- 设计与 bias / clock 的联合状态布局
 - 完成 IMU 残差与 Jacobian 数值校验
 
-### Next Step 4：Phase 1C，把 GNSS 纳入连续时间窗口
+### Next Step 3：Phase 1C，把 GNSS 纳入连续时间窗口
 目标：
 - pseudorange / doppler 按观测时间直接约束 spline 状态与 clock
 
@@ -153,6 +176,15 @@ colcon test-result --all
 - 明确 GNSS 因子从 extension 注入迁移到 odometry 内核的边界
 - 保留 `gnss_handler` 的缓存/星历/预处理职责
 - 将图注入职责逐步迁到 `OdometryEstimationBSpline`
+
+### Next Step 4：补齐 LiDAR continuous-time factor 的工程化能力
+目标：
+- 让当前 LiDAR factor 从“最小可用”走向“可长期演进”
+
+建议子任务：
+- 评估解析 Jacobian 替换数值 Jacobian
+- 设计 GPU 版 continuous-time LiDAR factor 的复用接口
+- 对比 `RECONSTRUCT` / `CT_LIDAR_CPU` / legacy CT-GICP 的耗时与精度
 
 ### Next Step 5：Phase 1D，planner 真正开始消费 continuous-time info
 目标：
@@ -167,16 +199,16 @@ colcon test-result --all
 - 为下一阶段 spline candidate planner 做接口验证
 
 ## 推荐的下一次实际开发顺序
-1. 先做 Phase 1B 的状态设计与 key 设计
-2. 先落一个 CPU 版连续时间 LiDAR factor
-3. 再把 IMU 约束切到 spline window
-4. 然后接 GNSS
-5. 最后再增强 planner 的 spline 利用率
+1. 把当前 `CT_LIDAR_CPU` 从 local LM frontend 推进到 fixed-lag spline window 主链
+2. 将 IMU 约束真正切到 spline window
+3. 把 GNSS 伪距 / 多普勒并入控制点窗口
+4. 完善 LiDAR factor 的 Jacobian / GPU 演进路径
+5. 最后增强 planner 对 continuous-time trajectory 的真实利用率
 
 ## 风险提醒
 - 当前 B-spline 轨迹层已经可用于接口联调，但不能把它误认为“后端已经连续时间化”。
 - 真正的工作量集中在：
-  - LiDAR continuous-time factor
+  - 将当前 LiDAR continuous-time factor 升级为真正主链的一部分
   - IMU continuous-time constraint
   - GTSAM 中控制点窗口的组织与边缘化
   - GNSS 时间戳约束并入

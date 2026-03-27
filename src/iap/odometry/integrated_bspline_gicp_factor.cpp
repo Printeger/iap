@@ -1,0 +1,240 @@
+#include <iap/odometry/integrated_bspline_gicp_factor.hpp>
+
+#include <gtsam/base/SymmetricBlockMatrix.h>
+#include <gtsam/linear/HessianFactor.h>
+#include <gtsam_points/ann/kdtree2.hpp>
+#include <gtsam_points/ann/ivox.hpp>
+
+#include <limits>
+
+namespace iap {
+
+namespace frame = gtsam_points::frame;
+
+IntegratedBSplineGICPFactor::IntegratedBSplineGICPFactor(
+  const std::array<gtsam::Key, kBSplineControlPointCount>& keys,
+  const std::shared_ptr<const gtsam_points::iVox>& target,
+  const std::shared_ptr<const gtsam_points::PointCloud>& source,
+  const std::shared_ptr<const gtsam_points::NearestNeighborSearch>& target_tree)
+: gtsam::NonlinearFactor(gtsam::KeyVector(keys.begin(), keys.end())),
+  target_(target),
+  source_(source) {
+  if (!frame::has_points(*target_) || !frame::has_covs(*target_)) {
+    throw std::runtime_error("IntegratedBSplineGICPFactor requires target points and covariances");
+  }
+  if (!frame::has_points(*source_) || !frame::has_covs(*source_) || !frame::has_times(*source_)) {
+    throw std::runtime_error("IntegratedBSplineGICPFactor requires source points, covariances, and times");
+  }
+
+  const double time_eps = 1e-3;
+  time_table_.reserve(frame::size(*source_) / 10 + 1);
+  time_indices_.reserve(frame::size(*source_));
+
+  for (int i = 0; i < frame::size(*source_); ++i) {
+    const double t = frame::time(*source_, i);
+    if (time_table_.empty() || t - time_table_.back() > time_eps) {
+      time_table_.push_back(t);
+    }
+    time_indices_.push_back(static_cast<int>(time_table_.size() - 1));
+  }
+
+  const double time_min = time_table_.empty() ? 0.0 : time_table_.front();
+  const double time_max = time_table_.empty() ? 1.0 : time_table_.back();
+  const double denom = std::max(1e-9, time_max - time_min);
+  for (auto& t : time_table_) {
+    t = (t - time_min) / denom;
+  }
+
+  if (target_tree) {
+    target_tree_ = target_tree;
+  } else {
+    target_tree_ = std::make_shared<gtsam_points::KdTree2<gtsam_points::iVox>>(target_);
+  }
+}
+
+std::array<gtsam::Pose3, kBSplineControlPointCount> IntegratedBSplineGICPFactor::control_poses(const gtsam::Values& values) const {
+  std::array<gtsam::Pose3, kBSplineControlPointCount> poses;
+  for (std::size_t i = 0; i < kBSplineControlPointCount; ++i) {
+    poses[i] = values.at<gtsam::Pose3>(keys_[i]);
+  }
+  return poses;
+}
+
+void IntegratedBSplineGICPFactor::update_poses(const gtsam::Values& values) const {
+  const auto poses = control_poses(values);
+
+  source_poses_.resize(time_table_.size());
+  pose_jacobians_.resize(time_table_.size());
+
+  for (std::size_t i = 0; i < time_table_.size(); ++i) {
+    const double u = time_table_[i];
+    const gtsam::Pose3 base_pose = BSplineControlWindow::interpolate(poses, u);
+    source_poses_[i] = base_pose;
+
+    for (std::size_t k = 0; k < kBSplineControlPointCount; ++k) {
+      gtsam::Matrix6 J = gtsam::Matrix6::Zero();
+      for (int d = 0; d < 6; ++d) {
+        gtsam::Vector6 delta = gtsam::Vector6::Zero();
+        delta(d) = numeric_eps_;
+
+        auto perturbed = poses;
+        perturbed[k] = perturbed[k].compose(gtsam::Pose3::Expmap(delta));
+
+        const gtsam::Pose3 pose_plus = BSplineControlWindow::interpolate(perturbed, u);
+        const gtsam::Vector6 xi = gtsam::Pose3::Logmap(base_pose.between(pose_plus));
+        J.col(d) = xi / numeric_eps_;
+      }
+      pose_jacobians_[i][k] = J;
+    }
+  }
+}
+
+void IntegratedBSplineGICPFactor::update_correspondences() const {
+  correspondences_.resize(frame::size(*source_));
+  mahalanobis_.resize(frame::size(*source_));
+
+  for (int i = 0; i < frame::size(*source_); ++i) {
+    const int time_index = time_indices_[static_cast<std::size_t>(i)];
+    const auto& pose = source_poses_[static_cast<std::size_t>(time_index)];
+    const auto& source_pt = frame::point(*source_, i);
+
+    const gtsam::Point3 transed_pt = pose * source_pt.template head<3>();
+
+    size_t k_index = static_cast<size_t>(-1);
+    double k_sq_dist = std::numeric_limits<double>::max();
+    const size_t num_found =
+      target_tree_->knn_search(transed_pt.data(), 1, &k_index, &k_sq_dist, max_correspondence_distance_sq_);
+
+    if (num_found == 0 || k_sq_dist > max_correspondence_distance_sq_) {
+      correspondences_[static_cast<std::size_t>(i)] = -1;
+      mahalanobis_[static_cast<std::size_t>(i)].setZero();
+      continue;
+    }
+
+    correspondences_[static_cast<std::size_t>(i)] = static_cast<long>(k_index);
+    const auto& target_cov = frame::cov(*target_, static_cast<long>(k_index));
+    const auto& source_cov = frame::cov(*source_, i);
+
+    Eigen::Matrix4d pose_matrix = pose.matrix();
+    Eigen::Matrix3d RCR = (target_cov + pose_matrix * source_cov * pose_matrix.transpose()).block<3, 3>(0, 0);
+    RCR.diagonal().array() += 1e-6;
+    mahalanobis_[static_cast<std::size_t>(i)] = RCR.inverse();
+  }
+}
+
+double IntegratedBSplineGICPFactor::error(const gtsam::Values& values) const {
+  update_poses(values);
+  update_correspondences();
+
+  double total_error = 0.0;
+  for (int i = 0; i < frame::size(*source_); ++i) {
+    const long target_index = correspondences_[static_cast<std::size_t>(i)];
+    if (target_index < 0) {
+      continue;
+    }
+
+    const int time_index = time_indices_[static_cast<std::size_t>(i)];
+    const auto& pose = source_poses_[static_cast<std::size_t>(time_index)];
+
+    const auto& source_pt = frame::point(*source_, i);
+    const auto& target_pt = frame::point(*target_, target_index);
+    const gtsam::Point3 transed_source_pt = pose.transformFrom(source_pt.template head<3>().eval());
+    const Eigen::Vector3d residual = transed_source_pt - target_pt.template head<3>();
+    total_error += residual.transpose() * mahalanobis_[static_cast<std::size_t>(i)] * residual;
+  }
+
+  return total_error;
+}
+
+gtsam::GaussianFactor::shared_ptr IntegratedBSplineGICPFactor::linearize(const gtsam::Values& values) const {
+  update_poses(values);
+  update_correspondences();
+
+  std::array<std::array<gtsam::Matrix6, kBSplineControlPointCount>, kBSplineControlPointCount> H;
+  std::array<gtsam::Vector6, kBSplineControlPointCount> b;
+  for (auto& row : H) {
+    for (auto& block : row) {
+      block.setZero();
+    }
+  }
+  for (auto& bi : b) {
+    bi.setZero();
+  }
+
+  double total_error = 0.0;
+  for (int i = 0; i < frame::size(*source_); ++i) {
+    const long target_index = correspondences_[static_cast<std::size_t>(i)];
+    if (target_index < 0) {
+      continue;
+    }
+
+    const int time_index = time_indices_[static_cast<std::size_t>(i)];
+    const auto& pose = source_poses_[static_cast<std::size_t>(time_index)];
+    const auto& pose_jacs = pose_jacobians_[static_cast<std::size_t>(time_index)];
+
+    const auto& source_pt = frame::point(*source_, i);
+    const auto& target_pt = frame::point(*target_, target_index);
+
+    gtsam::Matrix36 H_transed_pose;
+    const gtsam::Point3 transed_source_pt =
+      pose.transformFrom(source_pt.template head<3>().eval(), H_transed_pose);
+    const Eigen::Vector3d residual = transed_source_pt - target_pt.template head<3>();
+    const Eigen::Matrix3d& M = mahalanobis_[static_cast<std::size_t>(i)];
+
+    std::array<gtsam::Matrix36, kBSplineControlPointCount> J;
+    for (std::size_t k = 0; k < kBSplineControlPointCount; ++k) {
+      J[k] = H_transed_pose * pose_jacs[k];
+      b[k] += J[k].transpose() * M * residual;
+    }
+
+    for (std::size_t a = 0; a < kBSplineControlPointCount; ++a) {
+      for (std::size_t c = a; c < kBSplineControlPointCount; ++c) {
+        H[a][c] += J[a].transpose() * M * J[c];
+      }
+    }
+
+    total_error += residual.transpose() * M * residual;
+  }
+
+  std::vector<gtsam::DenseIndex> dims(kBSplineControlPointCount + 1, 6);
+  dims.back() = 1;
+  gtsam::SymmetricBlockMatrix augmented(dims);
+
+  for (std::size_t i = 0; i < kBSplineControlPointCount; ++i) {
+    augmented.setDiagonalBlock(static_cast<gtsam::DenseIndex>(i), H[i][i]);
+    for (std::size_t j = i + 1; j < kBSplineControlPointCount; ++j) {
+      augmented.setOffDiagonalBlock(static_cast<gtsam::DenseIndex>(i), static_cast<gtsam::DenseIndex>(j), H[i][j]);
+    }
+    augmented.setOffDiagonalBlock(static_cast<gtsam::DenseIndex>(i), static_cast<gtsam::DenseIndex>(kBSplineControlPointCount), -b[i]);
+  }
+  augmented.setDiagonalBlock(static_cast<gtsam::DenseIndex>(kBSplineControlPointCount), Eigen::Matrix<double, 1, 1>::Constant(total_error));
+
+  return std::make_shared<gtsam::HessianFactor>(keys_, augmented);
+}
+
+std::vector<Eigen::Vector4d> IntegratedBSplineGICPFactor::deskewed_source_points(const gtsam::Values& values, bool local) const {
+  update_poses(values);
+
+  std::vector<Eigen::Vector4d> points;
+  points.reserve(frame::size(*source_));
+
+  const gtsam::Pose3 reference = source_poses_.empty() ? gtsam::Pose3() : source_poses_.front();
+  for (int i = 0; i < frame::size(*source_); ++i) {
+    const int time_index = time_indices_[static_cast<std::size_t>(i)];
+    const auto& pose = source_poses_[static_cast<std::size_t>(time_index)];
+    const auto& source_pt = frame::point(*source_, i);
+
+    const gtsam::Point3 world_pt = pose.transformFrom(source_pt.template head<3>().eval());
+    Eigen::Vector4d pt = Eigen::Vector4d::Ones();
+    if (local) {
+      pt.template head<3>() = reference.transformTo(world_pt);
+    } else {
+      pt.template head<3>() = world_pt;
+    }
+    points.push_back(pt);
+  }
+
+  return points;
+}
+
+}  // namespace iap

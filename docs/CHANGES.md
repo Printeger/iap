@@ -3,6 +3,11 @@
 > 规则：任何代码改动必须在这里记录，并包含 IAP-RQ-XXX。
 
 ## Unreleased
+- feat(dev-ct-phase1b): IAP-RQ-300 / IAP-RQ-410 — start the minimal viable continuous-time odometry frontend.
+  - Added `BSplineControlWindow` and explicit control-point key design (`symbol('s', idx)`) for the active 4-knot spline window.
+  - Added `IntegratedBSplineGICPFactor`, a CPU continuous-time LiDAR factor over four pose control points with per-point time query and GICP residual accumulation.
+  - `OdometryEstimationBSpline` now has a new `frontend_mode = CT_LIDAR_CPU` path that uses the control-point window + local LM optimization instead of only reconstructing a spline after discrete odometry.
+  - Added `test_bspline_control_window.cpp` and expanded `config_odometry_bspline.json` with Phase-1B factor / prior settings.
 - feat(dev-ct-foundation): IAP-RQ-300 / IAP-RQ-410 — add the first continuous-time B-spline foundation for odometry and planner integration.
   - Added planner-facing continuous trajectory interfaces: `ContinuousTrajectoryView`, `SplineControlAccess`, `TrajectorySample`, `SplineWindowSnapshot`.
   - Added `BSplineTrajectory` with uniform/non-uniform cubic knot policies, time query, range sampling, knot/control-point snapshot export.

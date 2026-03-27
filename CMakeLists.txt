@@ -108,10 +108,12 @@ add_library(iap SHARED
   # planner integrity-aware (IAP-RQ-400/410)
   src/iap/planner/integrity_planner.cpp
   # odometry
+  src/iap/odometry/bspline_control_window.cpp
   src/iap/odometry/callbacks.cpp
   src/iap/odometry/bspline_trajectory.cpp
   src/iap/odometry/estimation_frame.cpp
   src/iap/odometry/initial_state_estimation.cpp
+  src/iap/odometry/integrated_bspline_gicp_factor.cpp
   src/iap/odometry/loose_initial_state_estimation.cpp
   src/iap/odometry/odometry_estimation_base.cpp
   src/iap/odometry/async_odometry_estimation.cpp
@@ -397,6 +399,8 @@ if(DEFINED ENV{ROS_VERSION})
       find_package(ament_cmake_gtest REQUIRED)
       ament_add_gtest(test_araim test/test_araim.cpp)
       target_link_libraries(test_araim iap)
+      ament_add_gtest(test_bspline_control_window test/test_bspline_control_window.cpp)
+      target_link_libraries(test_bspline_control_window iap)
       ament_add_gtest(test_bspline_trajectory test/test_bspline_trajectory.cpp)
       target_link_libraries(test_bspline_trajectory iap)
     endif()

@@ -2,15 +2,26 @@
 
 #include <Eigen/Eigenvalues>
 
+#include <gtsam/inference/Symbol.h>
+#include <gtsam/slam/BetweenFactor.h>
+#include <gtsam/slam/PriorFactor.h>
 #include <gtsam/nonlinear/NonlinearFactorGraph.h>
+#include <gtsam_points/ann/ivox.hpp>
+#include <gtsam_points/optimizers/levenberg_marquardt_ext.hpp>
+#include <gtsam_points/types/point_cloud_cpu.hpp>
 #include <spdlog/spdlog.h>
 
+#include <iap/common/cloud_covariance_estimation.hpp>
+#include <iap/odometry/initial_state_estimation.hpp>
 #include <iap/util/config.hpp>
 #include <iap/util/shared_state.hpp>
+#include <iap/odometry/callbacks.hpp>
 
 namespace glim {
 
 namespace {
+
+using Callbacks = OdometryEstimationCallbacks;
 
 iap::SplineKnotMode parse_knot_mode(const std::string& mode) {
   if (mode == "non_uniform" || mode == "non-uniform" || mode == "NON_UNIFORM") {
@@ -46,12 +57,28 @@ OdometryEstimationBSpline::OdometryEstimationBSpline(const OdometryEstimationBSp
   compatibility_sample_dt_(params.compatibility_sample_dt),
   publish_shared_trajectory_(params.publish_shared_trajectory),
   attach_trajectory_to_frames_(params.attach_trajectory_to_frames) {
+  Config config(GlobalConfig::get_config_path("config_odometry"));
   trajectory_params_.knot_mode = parse_knot_mode(params.spline_knot_mode);
   trajectory_params_.nominal_dt = params.spline_nominal_dt;
   trajectory_params_.finite_difference_dt = params.spline_finite_difference_dt;
   trajectory_params_.order = 3;
+  frontend_mode_ = config.param<std::string>("odometry_estimation", "frontend_mode", "RECONSTRUCT");
+  max_correspondence_distance_ = config.param<double>("odometry_estimation", "max_correspondence_distance", 1.5);
+  ctrl_point_anchor_inf_scale_ = config.param<double>("odometry_estimation", "ctrl_point_anchor_inf_scale", 1e6);
+  ctrl_point_prediction_inf_scale_ = config.param<double>("odometry_estimation", "ctrl_point_prediction_inf_scale", 1e3);
+  ctrl_point_smoothness_inf_scale_ = config.param<double>("odometry_estimation", "ctrl_point_smoothness_inf_scale", 1e2);
+  lm_max_iterations_ = config.param<int>("odometry_estimation", "lm_max_iterations", 8);
 
-  logger->info("odometry_bspline initialized knot_mode={} nominal_dt={:.4f} compatibility_sample_dt={:.4f}",
+  T_lidar_imu = params.T_lidar_imu;
+  T_imu_lidar = T_lidar_imu.inverse();
+  control_window_ = std::make_unique<iap::BSplineControlWindow>();
+  ct_target_ivox_ = std::make_shared<gtsam_points::iVox>(params.ivox_resolution);
+  ct_target_ivox_->voxel_insertion_setting().set_min_dist_in_cell(params.ivox_min_dist);
+  ct_target_ivox_->set_lru_horizon(params.lru_thresh);
+  ct_target_ivox_->set_neighbor_voxel_mode(1);
+
+  logger->info("odometry_bspline initialized frontend_mode={} knot_mode={} nominal_dt={:.4f} compatibility_sample_dt={:.4f}",
+    frontend_mode_,
     iap::to_string(trajectory_params_.knot_mode),
     trajectory_params_.nominal_dt,
     compatibility_sample_dt_);
@@ -69,23 +96,227 @@ void OdometryEstimationBSpline::update_frames(int current, const gtsam::Nonlinea
   publish_continuous_trajectory(current);
 }
 
+EstimationFrame::ConstPtr OdometryEstimationBSpline::insert_frame(
+  const PreprocessedFrame::Ptr& frame,
+  std::vector<EstimationFrame::ConstPtr>& marginalized_frames) {
+  if (frontend_mode_ == "CT_LIDAR_CPU") {
+    return insert_frame_ct_lidar(frame, marginalized_frames);
+  }
+  return insert_frame_reconstruct(frame, marginalized_frames);
+}
+
+EstimationFrame::ConstPtr OdometryEstimationBSpline::insert_frame_reconstruct(
+  const PreprocessedFrame::Ptr& frame,
+  std::vector<EstimationFrame::ConstPtr>& marginalized_frames) {
+  return OdometryEstimationCPU::insert_frame(frame, marginalized_frames);
+}
+
+gtsam_points::PointCloud::ConstPtr OdometryEstimationBSpline::create_lidar_source_cloud(
+  const PreprocessedFrame::Ptr& raw_frame) const {
+  auto frame_cpu = std::make_shared<gtsam_points::PointCloudCPU>(raw_frame->points);
+  frame_cpu->add_times(raw_frame->times);
+  covariance_estimation->estimate(raw_frame->points, raw_frame->neighbors, frame_cpu->normals_storage, frame_cpu->covs_storage);
+  frame_cpu->normals = frame_cpu->normals_storage.data();
+  frame_cpu->covs = frame_cpu->covs_storage.data();
+  return frame_cpu;
+}
+
+void OdometryEstimationBSpline::initialize_control_window(
+  const PreprocessedFrame::Ptr& raw_frame,
+  const gtsam::Pose3& initial_pose) {
+  control_window_->initialize(raw_frame->stamp, raw_frame->scan_end_time, initial_pose);
+}
+
+gtsam::Pose3 OdometryEstimationBSpline::predict_scan_end_pose(double scan_duration) const {
+  if (!control_window_ || !control_window_->initialized()) {
+    return gtsam::Pose3();
+  }
+
+  const gtsam::Pose3 last_start = control_window_->evaluate(0.0);
+  const gtsam::Pose3 last_end = control_window_->evaluate(1.0);
+  const double last_duration = std::max(1e-3, control_window_->segment_duration());
+  const double scale = scan_duration / last_duration;
+  const gtsam::Vector6 delta = gtsam::Pose3::Logmap(last_start.between(last_end));
+  return last_end.compose(gtsam::Pose3::Expmap(scale * delta));
+}
+
+void OdometryEstimationBSpline::insert_target_cloud(const EstimationFrame::Ptr& frame) {
+  auto transformed = gtsam_points::PointCloudCPU::clone(*frame->frame);
+  for (int i = 0; i < transformed->size(); ++i) {
+    transformed->points[i] = frame->T_world_lidar * frame->frame->points[i];
+    transformed->covs[i] = frame->T_world_lidar.matrix() * frame->frame->covs[i] * frame->T_world_lidar.matrix().transpose();
+  }
+  ct_target_ivox_->insert(*transformed);
+}
+
+void OdometryEstimationBSpline::update_frame_history(
+  const EstimationFrame::Ptr& frame,
+  std::vector<EstimationFrame::ConstPtr>& marginalized_frames) {
+  frames.push_back(frame);
+
+  while (marginalized_cursor < frames.size() - 1) {
+    const double span = frame->stamp - frames[marginalized_cursor]->stamp;
+    if (span < params->smoother_lag - 0.1) {
+      break;
+    }
+
+    marginalized_frames.push_back(frames[marginalized_cursor]);
+    frames[marginalized_cursor].reset();
+    marginalized_cursor++;
+  }
+
+  Callbacks::on_marginalized_frames(marginalized_frames);
+}
+
+EstimationFrame::ConstPtr OdometryEstimationBSpline::insert_frame_ct_lidar(
+  const PreprocessedFrame::Ptr& raw_frame,
+  std::vector<EstimationFrame::ConstPtr>& marginalized_frames) {
+  Callbacks::on_insert_frame(raw_frame);
+
+  const int current = frames.size();
+  const double scan_duration = std::max(1e-3, raw_frame->scan_end_time - raw_frame->stamp);
+
+  EstimationFrame::Ptr new_frame(new EstimationFrame);
+  new_frame->id = current;
+  new_frame->stamp = raw_frame->stamp;
+  new_frame->T_lidar_imu = T_lidar_imu;
+  new_frame->raw_frame = raw_frame;
+  new_frame->frame_id = FrameID::LIDAR;
+  new_frame->v_world_imu.setZero();
+  new_frame->imu_bias.setZero();
+
+  if (frames.empty()) {
+    EstimationFrame::ConstPtr init_state;
+    if (init_estimation) {
+      init_estimation->insert_frame(raw_frame);
+      init_state = init_estimation->initial_pose();
+    }
+
+    if (!init_state && init_estimation) {
+      logger->debug("waiting for initial IMU state estimation to be finished (bspline ct frontend)");
+      return nullptr;
+    }
+
+    const gtsam::Pose3 initial_pose = init_state
+      ? gtsam::Pose3(init_state->T_world_lidar.matrix())
+      : gtsam::Pose3();
+
+    initialize_control_window(raw_frame, initial_pose);
+
+    new_frame->T_world_lidar = Eigen::Isometry3d(initial_pose.matrix());
+    new_frame->T_world_imu = new_frame->T_world_lidar * T_lidar_imu;
+    new_frame->frame = create_lidar_source_cloud(raw_frame);
+
+    Callbacks::on_new_frame(new_frame);
+    insert_target_cloud(new_frame);
+    update_frame_history(new_frame, marginalized_frames);
+    publish_continuous_trajectory(current);
+
+    std::vector<EstimationFrame::ConstPtr> active_frames(frames.inner_begin(), frames.inner_end());
+    if (!active_frames.empty()) {
+      Callbacks::on_update_new_frame(active_frames.back());
+      Callbacks::on_update_frames(active_frames);
+    }
+
+    if (init_estimation) {
+      init_estimation.reset();
+    }
+    return new_frame;
+  }
+
+  const gtsam::Pose3 predicted_end_pose = predict_scan_end_pose(scan_duration);
+  control_window_->advance(raw_frame->stamp, raw_frame->scan_end_time, predicted_end_pose);
+
+  new_frame->frame = create_lidar_source_cloud(raw_frame);
+
+  gtsam::Values values = control_window_->values();
+  const auto states = control_window_->states();
+  const auto keys = control_window_->keys();
+
+  gtsam::NonlinearFactorGraph graph;
+  auto factor = std::make_shared<iap::IntegratedBSplineGICPFactor>(keys, ct_target_ivox_, new_frame->frame, ct_target_ivox_);
+  factor->set_num_threads(params->num_threads);
+  factor->set_max_correspondence_distance(max_correspondence_distance_);
+  graph.add(factor);
+
+  const auto anchor_noise = gtsam::noiseModel::Isotropic::Precision(6, ctrl_point_anchor_inf_scale_);
+  const auto pred_noise = gtsam::noiseModel::Isotropic::Precision(6, ctrl_point_prediction_inf_scale_);
+  const auto smooth_noise = gtsam::noiseModel::Isotropic::Precision(6, ctrl_point_smoothness_inf_scale_);
+
+  graph.emplace_shared<gtsam::PriorFactor<gtsam::Pose3>>(keys[0], states[0].pose, anchor_noise);
+  graph.emplace_shared<gtsam::PriorFactor<gtsam::Pose3>>(keys[1], states[1].pose, anchor_noise);
+  graph.emplace_shared<gtsam::PriorFactor<gtsam::Pose3>>(keys[2], states[2].pose, pred_noise);
+  graph.emplace_shared<gtsam::PriorFactor<gtsam::Pose3>>(keys[3], states[3].pose, pred_noise);
+
+  for (std::size_t i = 0; i + 1 < iap::kBSplineControlPointCount; ++i) {
+    graph.emplace_shared<gtsam::BetweenFactor<gtsam::Pose3>>(
+      keys[i],
+      keys[i + 1],
+      states[i].pose.between(states[i + 1].pose),
+      smooth_noise);
+  }
+
+  gtsam_points::LevenbergMarquardtExtParams lm_params;
+  lm_params.setlambdaInitial(1e-4);
+  lm_params.setAbsoluteErrorTol(1e-2);
+  lm_params.setMaxIterations(lm_max_iterations_);
+
+  try {
+    values = gtsam_points::LevenbergMarquardtOptimizerExt(graph, values, lm_params).optimize();
+  } catch (const std::exception& e) {
+    logger->error("bspline ct frontend optimization failed: {}", e.what());
+  }
+
+  control_window_->update_from_values(values);
+
+  const gtsam::Pose3 start_pose = control_window_->evaluate(0.0);
+  const gtsam::Pose3 end_pose = control_window_->evaluate(1.0);
+  new_frame->T_world_lidar = Eigen::Isometry3d(start_pose.matrix());
+  new_frame->T_world_imu = new_frame->T_world_lidar * T_lidar_imu;
+  new_frame->v_world_imu = (end_pose.translation() - start_pose.translation()) / scan_duration;
+
+  const auto deskewed_points = factor->deskewed_source_points(values, true);
+  const auto deskewed_covs = covariance_estimation->estimate(deskewed_points, raw_frame->neighbors);
+  for (int i = 0; i < new_frame->frame->size(); ++i) {
+    new_frame->frame->points[i] = deskewed_points[static_cast<std::size_t>(i)];
+    new_frame->frame->covs[i] = deskewed_covs[static_cast<std::size_t>(i)];
+  }
+
+  Callbacks::on_new_frame(new_frame);
+  insert_target_cloud(new_frame);
+  update_frame_history(new_frame, marginalized_frames);
+  publish_continuous_trajectory(current);
+
+  std::vector<EstimationFrame::ConstPtr> active_frames(frames.inner_begin(), frames.inner_end());
+  if (!active_frames.empty()) {
+    Callbacks::on_update_new_frame(active_frames.back());
+    Callbacks::on_update_frames(active_frames);
+  }
+
+  return new_frame;
+}
+
 void OdometryEstimationBSpline::publish_continuous_trajectory(int current) {
   (void)current;
 
   std::vector<iap::SplineControlPoint> control_points;
-  control_points.reserve(frames.inner_size());
+  if (frontend_mode_ == "CT_LIDAR_CPU" && control_window_ && control_window_->initialized()) {
+    control_points = control_window_->spline_control_points();
+  } else {
+    control_points.reserve(frames.inner_size());
 
-  for (auto it = frames.inner_begin(); it != frames.inner_end(); ++it) {
-    if (!(*it)) {
-      continue;
+    for (auto it = frames.inner_begin(); it != frames.inner_end(); ++it) {
+      if (!(*it)) {
+        continue;
+      }
+
+      iap::SplineControlPoint cp;
+      cp.stamp = (*it)->stamp;
+      cp.pose = (*it)->T_world_imu;
+      cp.vel = (*it)->v_world_imu;
+      cp.sigma = sigma_from_covariance((*it)->sigma_p);
+      control_points.push_back(cp);
     }
-
-    iap::SplineControlPoint cp;
-    cp.stamp = (*it)->stamp;
-    cp.pose = (*it)->T_world_imu;
-    cp.vel = (*it)->v_world_imu;
-    cp.sigma = sigma_from_covariance((*it)->sigma_p);
-    control_points.push_back(cp);
   }
 
   if (control_points.empty()) {
@@ -137,6 +368,9 @@ void OdometryEstimationBSpline::update_compatibility_trajectory(const std::share
 
     const double scan_start = (*it)->stamp;
     const double scan_end = std::max(scan_start, (*it)->raw_frame->scan_end_time);
+    if (scan_end < trajectory->start_time() || scan_start > trajectory->end_time()) {
+      continue;
+    }
     const auto samples = trajectory->sample_range(scan_start, scan_end, compatibility_sample_dt_);
     if (samples.empty()) {
       continue;
