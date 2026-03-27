@@ -1,5 +1,7 @@
 #include <iap/odometry/integrated_bspline_imu_factor.hpp>
 
+#include <algorithm>
+
 #include <gtsam/base/SymmetricBlockMatrix.h>
 #include <gtsam/linear/HessianFactor.h>
 
@@ -7,16 +9,30 @@ namespace iap {
 
 IntegratedBSplineIMUFactor::IntegratedBSplineIMUFactor(
   const std::array<gtsam::Key, kBSplineControlPointCount>& keys,
-  const gtsam::Pose3& measured_delta_imu,
+  double measurement_u,
+  double segment_duration,
+  const Eigen::Vector3d& measured_gyro,
+  const Eigen::Vector3d& measured_accel,
+  const Eigen::Vector3d& gyro_bias,
+  const Eigen::Vector3d& accel_bias,
   const gtsam::Pose3& T_lidar_imu,
-  double translational_precision,
-  double rotational_precision)
+  const Eigen::Vector3d& gravity_world,
+  double accelerometer_precision,
+  double gyroscope_precision,
+  double finite_difference_dt)
 : gtsam::NonlinearFactor(gtsam::KeyVector(keys.begin(), keys.end())),
-  measured_delta_imu_(measured_delta_imu),
-  T_lidar_imu_(T_lidar_imu) {
+  measurement_u_(std::clamp(measurement_u, 0.0, 1.0)),
+  segment_duration_(std::max(1e-3, segment_duration)),
+  measured_gyro_(measured_gyro),
+  measured_accel_(measured_accel),
+  gyro_bias_(gyro_bias),
+  accel_bias_(accel_bias),
+  T_lidar_imu_(T_lidar_imu),
+  gravity_world_(gravity_world),
+  finite_difference_dt_(std::max(1e-4, finite_difference_dt)) {
   information_.setZero();
-  information_.block<3, 3>(0, 0) = Eigen::Matrix3d::Identity() * translational_precision;
-  information_.block<3, 3>(3, 3) = Eigen::Matrix3d::Identity() * rotational_precision;
+  information_.block<3, 3>(0, 0) = Eigen::Matrix3d::Identity() * gyroscope_precision;
+  information_.block<3, 3>(3, 3) = Eigen::Matrix3d::Identity() * accelerometer_precision;
 }
 
 std::array<gtsam::Pose3, kBSplineControlPointCount> IntegratedBSplineIMUFactor::control_poses(const gtsam::Values& values) const {
@@ -27,19 +43,46 @@ std::array<gtsam::Pose3, kBSplineControlPointCount> IntegratedBSplineIMUFactor::
   return poses;
 }
 
-gtsam::Pose3 IntegratedBSplineIMUFactor::relative_delta_imu(
+gtsam::Pose3 IntegratedBSplineIMUFactor::imu_pose(
+  const std::array<gtsam::Pose3, kBSplineControlPointCount>& poses,
+  double u) const {
+  return BSplineControlWindow::interpolate(poses, u).compose(T_lidar_imu_);
+}
+
+IntegratedBSplineIMUFactor::IMUPrediction IntegratedBSplineIMUFactor::predict_sample(
   const std::array<gtsam::Pose3, kBSplineControlPointCount>& poses) const {
-  const gtsam::Pose3 start_lidar = BSplineControlWindow::interpolate(poses, 0.0);
-  const gtsam::Pose3 end_lidar = BSplineControlWindow::interpolate(poses, 1.0);
-  const gtsam::Pose3 start_imu = start_lidar.compose(T_lidar_imu_);
-  const gtsam::Pose3 end_imu = end_lidar.compose(T_lidar_imu_);
-  return start_imu.between(end_imu);
+  IMUPrediction prediction;
+
+  const double finite_difference_step = std::min(finite_difference_dt_, 0.25 * segment_duration_);
+  const double du = std::clamp(finite_difference_step / segment_duration_, 1e-4, 0.25);
+  const double center_u = std::clamp(measurement_u_, du, 1.0 - du);
+
+  const gtsam::Pose3 pose_prev = imu_pose(poses, center_u - du);
+  const gtsam::Pose3 pose_curr = imu_pose(poses, center_u);
+  const gtsam::Pose3 pose_next = imu_pose(poses, center_u + du);
+
+  const double dt = du * segment_duration_;
+  prediction.gyro = gtsam::Rot3::Logmap(pose_prev.rotation().between(pose_next.rotation())) / (2.0 * dt);
+
+  const Eigen::Vector3d vel_prev = (pose_curr.translation() - pose_prev.translation()) / dt;
+  const Eigen::Vector3d vel_next = (pose_next.translation() - pose_curr.translation()) / dt;
+  const Eigen::Vector3d accel_world = (vel_next - vel_prev) / dt;
+  prediction.accel = pose_curr.rotation().matrix().transpose() * (accel_world + gravity_world_);
+
+  return prediction;
 }
 
 gtsam::Vector6 IntegratedBSplineIMUFactor::residual(const gtsam::Values& values) const {
-  const auto poses = control_poses(values);
-  const gtsam::Pose3 predicted_delta = relative_delta_imu(poses);
-  return gtsam::Pose3::Logmap(measured_delta_imu_.between(predicted_delta));
+  return residual(control_poses(values));
+}
+
+gtsam::Vector6 IntegratedBSplineIMUFactor::residual(
+  const std::array<gtsam::Pose3, kBSplineControlPointCount>& poses) const {
+  const auto prediction = predict_sample(poses);
+  gtsam::Vector6 residual;
+  residual.head<3>() = prediction.gyro - (measured_gyro_ - gyro_bias_);
+  residual.tail<3>() = prediction.accel - (measured_accel_ - accel_bias_);
+  return residual;
 }
 
 void IntegratedBSplineIMUFactor::numeric_jacobians(
@@ -56,8 +99,7 @@ void IntegratedBSplineIMUFactor::numeric_jacobians(
       auto perturbed = poses;
       perturbed[k] = perturbed[k].compose(gtsam::Pose3::Expmap(delta));
 
-      const gtsam::Pose3 predicted_plus = relative_delta_imu(perturbed);
-      const gtsam::Vector6 residual_plus = gtsam::Pose3::Logmap(measured_delta_imu_.between(predicted_plus));
+      const gtsam::Vector6 residual_plus = residual(perturbed);
       J.col(d) = (residual_plus - base_residual) / numeric_eps_;
     }
 
@@ -72,7 +114,7 @@ double IntegratedBSplineIMUFactor::error(const gtsam::Values& values) const {
 
 gtsam::GaussianFactor::shared_ptr IntegratedBSplineIMUFactor::linearize(const gtsam::Values& values) const {
   const auto poses = control_poses(values);
-  const gtsam::Vector6 r = residual(values);
+  const gtsam::Vector6 r = residual(poses);
 
   PoseJacobianArray jacobians;
   numeric_jacobians(poses, r, jacobians);

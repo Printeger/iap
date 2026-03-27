@@ -41,8 +41,13 @@
     "ctrl_point_prediction_inf_scale": 1e3,
     "ctrl_point_smoothness_inf_scale": 1e2,
     "ctrl_point_marginal_inf_scale": 1e4,
+    // Continuous-time IMU sample factor settings:
+    //   imu_ct_trans_inf_scale = accelerometer residual precision
+    //   imu_ct_rot_inf_scale   = gyroscope residual precision
+    //   imu_ct_sample_stride   = downsample stride for per-segment IMU samples
     "imu_ct_trans_inf_scale": 10.0,
     "imu_ct_rot_inf_scale": 100.0,
+    "imu_ct_sample_stride": 4,
     "lm_max_iterations": 8,
     // Continuous-time spline settings
     "spline_knot_mode": "uniform",

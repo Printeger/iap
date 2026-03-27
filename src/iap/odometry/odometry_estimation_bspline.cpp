@@ -74,6 +74,7 @@ OdometryEstimationBSpline::OdometryEstimationBSpline(const OdometryEstimationBSp
   ctrl_point_marginal_inf_scale_ = config.param<double>("odometry_estimation", "ctrl_point_marginal_inf_scale", 1e4);
   imu_ct_trans_inf_scale_ = config.param<double>("odometry_estimation", "imu_ct_trans_inf_scale", 10.0);
   imu_ct_rot_inf_scale_ = config.param<double>("odometry_estimation", "imu_ct_rot_inf_scale", 100.0);
+  imu_ct_sample_stride_ = config.param<int>("odometry_estimation", "imu_ct_sample_stride", 4);
   lm_max_iterations_ = config.param<int>("odometry_estimation", "lm_max_iterations", 8);
 
   T_lidar_imu = params.T_lidar_imu;
@@ -177,35 +178,48 @@ std::shared_ptr<gtsam_points::iVox> OdometryEstimationBSpline::create_active_tar
   return inserted ? snapshot : ct_target_ivox_;
 }
 
-std::optional<gtsam::Pose3> OdometryEstimationBSpline::create_segment_imu_measurement(
+std::vector<OdometryEstimationBSpline::ActiveSplineIMUSample> OdometryEstimationBSpline::create_segment_imu_samples(
   const PreprocessedFrame::Ptr& raw_frame) const {
-  if (!imu_integration || !control_window_ || !control_window_->initialized()) {
-    return std::nullopt;
+  std::vector<ActiveSplineIMUSample> samples;
+  if (!imu_integration) {
+    return samples;
   }
 
-  const gtsam::Pose3 start_world_lidar = control_window_->evaluate(0.0);
-  const gtsam::Pose3 start_world_imu = start_world_lidar.compose(gtsam::Pose3(T_lidar_imu.matrix()));
-  const Eigen::Vector3d start_velocity = frames.empty() ? Eigen::Vector3d::Zero() : frames.back()->v_world_imu;
-  const gtsam::imuBias::ConstantBias imu_bias(
-    frames.empty() ? params->imu_bias : frames.back()->imu_bias);
-
-  std::vector<double> pred_times;
-  std::vector<Eigen::Isometry3d> pred_poses;
-  imu_integration->integrate_imu(
-    raw_frame->stamp,
-    raw_frame->scan_end_time,
-    gtsam::NavState(start_world_imu, start_velocity),
-    imu_bias,
-    pred_times,
-    pred_poses);
-
-  if (pred_poses.size() < 2) {
-    return std::nullopt;
+  const double scan_duration = std::max(1e-3, raw_frame->scan_end_time - raw_frame->stamp);
+  const double finite_difference_dt = std::min(trajectory_params_.finite_difference_dt, 0.25 * scan_duration);
+  const double sample_start = raw_frame->stamp + finite_difference_dt;
+  const double sample_end = raw_frame->scan_end_time - finite_difference_dt;
+  if (sample_end <= sample_start) {
+    return samples;
   }
 
-  const gtsam::Pose3 start_imu(pred_poses.front().matrix());
-  const gtsam::Pose3 end_imu(pred_poses.back().matrix());
-  return start_imu.between(end_imu);
+  std::vector<double> delta_times;
+  std::vector<Eigen::Matrix<double, 7, 1>> imu_data;
+  imu_integration->find_imu_data(sample_start, sample_end, delta_times, imu_data);
+  if (imu_data.empty()) {
+    return samples;
+  }
+
+  const std::size_t stride = static_cast<std::size_t>(std::max(1, imu_ct_sample_stride_));
+  auto append_sample = [&](std::size_t idx) {
+    const auto& imu = imu_data[idx];
+    ActiveSplineIMUSample sample;
+    sample.stamp = imu[0];
+    sample.u = std::clamp((sample.stamp - raw_frame->stamp) / scan_duration, 0.0, 1.0);
+    sample.linear_acc = imu.block<3, 1>(1, 0);
+    sample.angular_vel = imu.block<3, 1>(4, 0);
+    samples.push_back(sample);
+  };
+
+  for (std::size_t i = 0; i < imu_data.size(); i += stride) {
+    append_sample(i);
+  }
+
+  if ((imu_data.size() - 1) % stride != 0) {
+    append_sample(imu_data.size() - 1);
+  }
+
+  return samples;
 }
 
 void OdometryEstimationBSpline::update_marginal_prior_from_active_window() {
@@ -231,7 +245,11 @@ void OdometryEstimationBSpline::append_active_segment_constraint(
   segment.source = source;
   segment.target_snapshot = create_active_target_snapshot();
   segment.target_tree = std::make_shared<gtsam_points::KdTree2<gtsam_points::iVox>>(segment.target_snapshot);
-  segment.imu_delta = create_segment_imu_measurement(raw_frame);
+  segment.imu_samples = create_segment_imu_samples(raw_frame);
+
+  const Eigen::Matrix<double, 6, 1> imu_bias = frames.empty() ? params->imu_bias : frames.back()->imu_bias;
+  segment.accel_bias = imu_bias.head<3>();
+  segment.gyro_bias = imu_bias.tail<3>();
 
   const auto states = control_window_->states();
   for (std::size_t i = 0; i < iap::kBSplineControlPointCount; ++i) {
@@ -301,7 +319,7 @@ EstimationFrame::ConstPtr OdometryEstimationBSpline::insert_frame_ct_lidar(
   new_frame->raw_frame = raw_frame;
   new_frame->frame_id = FrameID::LIDAR;
   new_frame->v_world_imu.setZero();
-  new_frame->imu_bias.setZero();
+  new_frame->imu_bias = frames.empty() ? params->imu_bias : frames.back()->imu_bias;
 
   if (frames.empty()) {
     EstimationFrame::ConstPtr init_state;
@@ -324,6 +342,7 @@ EstimationFrame::ConstPtr OdometryEstimationBSpline::insert_frame_ct_lidar(
     new_frame->T_world_lidar = Eigen::Isometry3d(initial_pose.matrix());
     new_frame->T_world_imu = new_frame->T_world_lidar * T_lidar_imu;
     new_frame->frame = create_lidar_source_cloud(raw_frame);
+    new_frame->imu_bias = init_state ? init_state->imu_bias : params->imu_bias;
 
     Callbacks::on_new_frame(new_frame);
     insert_target_cloud(new_frame);
@@ -360,6 +379,7 @@ EstimationFrame::ConstPtr OdometryEstimationBSpline::insert_frame_ct_lidar(
 
   gtsam::NonlinearFactorGraph graph;
   std::shared_ptr<iap::IntegratedBSplineGICPFactor> current_factor;
+  std::size_t active_imu_factor_count = 0;
   for (std::size_t i = 0; i < active_segment_constraints_.size(); ++i) {
     const auto& segment = active_segment_constraints_[i];
 
@@ -374,14 +394,22 @@ EstimationFrame::ConstPtr OdometryEstimationBSpline::insert_frame_ct_lidar(
     factor->set_max_correspondence_distance(max_correspondence_distance_);
     graph.add(factor);
 
-    if (segment.imu_delta) {
+    for (const auto& imu_sample : segment.imu_samples) {
       auto imu_factor = std::make_shared<iap::IntegratedBSplineIMUFactor>(
         segment_keys,
-        *segment.imu_delta,
+        imu_sample.u,
+        std::max(1e-3, segment.scan_end - segment.stamp),
+        imu_sample.angular_vel,
+        imu_sample.linear_acc,
+        segment.gyro_bias,
+        segment.accel_bias,
         gtsam::Pose3(T_lidar_imu.matrix()),
+        gravity_world_,
         imu_ct_trans_inf_scale_,
-        imu_ct_rot_inf_scale_);
+        imu_ct_rot_inf_scale_,
+        trajectory_params_.finite_difference_dt);
       graph.add(imu_factor);
+      active_imu_factor_count++;
     }
 
     if (i + 1 == active_segment_constraints_.size()) {
@@ -460,9 +488,10 @@ EstimationFrame::ConstPtr OdometryEstimationBSpline::insert_frame_ct_lidar(
   }
 
   const auto keys = control_window_->keys();
-  logger->trace("bspline ct active_window={} active_segment_factors={} current_segment_keys={} {} {} {}",
+  logger->trace("bspline ct active_window={} active_segment_factors={} active_imu_factors={} current_segment_keys={} {} {} {}",
     active_states.size(),
     active_segment_constraints_.size(),
+    active_imu_factor_count,
     static_cast<std::uint64_t>(keys[0]),
     static_cast<std::uint64_t>(keys[1]),
     static_cast<std::uint64_t>(keys[2]),

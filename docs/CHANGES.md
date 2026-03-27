@@ -3,6 +3,10 @@
 > 规则：任何代码改动必须在这里记录，并包含 IAP-RQ-XXX。
 
 ## Unreleased
+- feat(dev-ct-imu-samples): IAP-RQ-300 / IAP-RQ-410 — replace the provisional IMU relative-pose hook with sample-based continuous-time gyro/acc factors.
+  - `IntegratedBSplineIMUFactor` now directly evaluates per-sample body angular velocity and specific force from the four pose control points instead of only comparing one segment-level relative pose.
+  - `OdometryEstimationBSpline` now freezes downsampled IMU samples for each active segment, carries per-segment fixed bias snapshots, and adds multiple IMU sample factors into the same shared fixed-lag LM graph.
+  - Expanded `config_odometry_bspline.json` with `imu_ct_sample_stride`, and updated `test_bspline_imu_factor.cpp` to validate stationary matching samples and mismatched sample residuals.
 - feat(dev-ct-imu): IAP-RQ-300 / IAP-RQ-410 — tighten fixed-lag target/prior handling and add a continuous-time IMU factor to the shared spline graph.
   - Added `IntegratedBSplineIMUFactor`, a minimal continuous-time IMU relative-pose factor over the four control points of each active segment.
   - `OdometryEstimationBSpline` now freezes a local target snapshot for each active segment, carries an explicit marginal prior for the lag-window boundary, and adds both LiDAR and IMU factors for every active segment into the same LM graph.

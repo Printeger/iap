@@ -10,9 +10,10 @@
 #include <iap/odometry/integrated_bspline_imu_factor.hpp>
 #include <iap/odometry/odometry_estimation_cpu.hpp>
 
+#include <Eigen/Core>
+
 #include <array>
 #include <cstddef>
-#include <optional>
 #include <vector>
 
 namespace gtsam {
@@ -52,17 +53,43 @@ class OdometryEstimationBSpline : public OdometryEstimationCPU {
   void update_frames(int current, const gtsam::NonlinearFactorGraph& new_factors) override;
 
  private:
+  struct ActiveSplineIMUSample {
+    double stamp = 0.0;
+    double u = 0.5;
+    Eigen::Vector3d linear_acc = Eigen::Vector3d::Zero();
+    Eigen::Vector3d angular_vel = Eigen::Vector3d::Zero();
+  };
+
+  struct ActiveSplineSegmentConstraint {
+    double stamp = 0.0;
+    double scan_end = 0.0;
+    std::array<std::size_t, iap::kBSplineControlPointCount> control_indices{};
+    gtsam_points::PointCloud::ConstPtr source;
+    std::shared_ptr<const gtsam_points::iVox> target_snapshot;
+    std::shared_ptr<const gtsam_points::NearestNeighborSearch> target_tree;
+    std::vector<ActiveSplineIMUSample> imu_samples;
+    Eigen::Vector3d accel_bias = Eigen::Vector3d::Zero();
+    Eigen::Vector3d gyro_bias = Eigen::Vector3d::Zero();
+  };
+
+  struct ActiveSplineMarginalPrior {
+    bool valid = false;
+    std::array<std::size_t, 2> control_indices{};
+    gtsam::Pose3 first_pose;
+    gtsam::Pose3 relative_delta;
+  };
+
   EstimationFrame::ConstPtr insert_frame_reconstruct(
     const PreprocessedFrame::Ptr& frame,
     std::vector<EstimationFrame::ConstPtr>& marginalized_frames);
- EstimationFrame::ConstPtr insert_frame_ct_lidar(
+  EstimationFrame::ConstPtr insert_frame_ct_lidar(
     const PreprocessedFrame::Ptr& frame,
     std::vector<EstimationFrame::ConstPtr>& marginalized_frames);
   void initialize_control_window(const PreprocessedFrame::Ptr& raw_frame, const gtsam::Pose3& initial_pose);
   gtsam::Pose3 predict_scan_end_pose(double scan_duration) const;
   gtsam_points::PointCloud::ConstPtr create_lidar_source_cloud(const PreprocessedFrame::Ptr& raw_frame) const;
   std::shared_ptr<gtsam_points::iVox> create_active_target_snapshot() const;
-  std::optional<gtsam::Pose3> create_segment_imu_measurement(const PreprocessedFrame::Ptr& raw_frame) const;
+  std::vector<ActiveSplineIMUSample> create_segment_imu_samples(const PreprocessedFrame::Ptr& raw_frame) const;
   void update_marginal_prior_from_active_window();
   void append_active_segment_constraint(
     const PreprocessedFrame::Ptr& raw_frame,
@@ -88,24 +115,9 @@ class OdometryEstimationBSpline : public OdometryEstimationCPU {
   double ctrl_point_marginal_inf_scale_ = 1e4;
   double imu_ct_trans_inf_scale_ = 10.0;
   double imu_ct_rot_inf_scale_ = 100.0;
+  int imu_ct_sample_stride_ = 4;
   int lm_max_iterations_ = 8;
-
-  struct ActiveSplineSegmentConstraint {
-    double stamp = 0.0;
-    double scan_end = 0.0;
-    std::array<std::size_t, iap::kBSplineControlPointCount> control_indices{};
-    gtsam_points::PointCloud::ConstPtr source;
-    std::shared_ptr<const gtsam_points::iVox> target_snapshot;
-    std::shared_ptr<const gtsam_points::NearestNeighborSearch> target_tree;
-    std::optional<gtsam::Pose3> imu_delta;
-  };
-
-  struct ActiveSplineMarginalPrior {
-    bool valid = false;
-    std::array<std::size_t, 2> control_indices{};
-    gtsam::Pose3 first_pose;
-    gtsam::Pose3 relative_delta;
-  };
+  Eigen::Vector3d gravity_world_ = Eigen::Vector3d::UnitZ() * 9.80665;
 
   std::shared_ptr<gtsam_points::iVox> ct_target_ivox_;
   std::unique_ptr<iap::BSplineControlWindow> control_window_;
