@@ -20,6 +20,12 @@
 - 已把 active window 内多个 segment 接入同一个 fixed-lag LM 图：
   - 每个 active segment 各自一条连续时间 LiDAR factor
   - 相邻 segment 通过共享控制点产生联合优化
+- 已补上更严格的 fixed-lag target / prior 策略：
+  - 每个 active segment 冻结 local target snapshot
+  - lag-window 起始边界使用显式 marginal prior
+- 已把最小可用的连续时间 IMU 因子接进同一个 fixed-lag LM 图：
+  - per-segment IMU relative-pose factor
+  - 与 LiDAR factors 共享同一组控制点变量
 - 当前 `src/iap` 已具备：
   - 连续时间轨迹统一接口
   - B-spline 轨迹容器与时间查询能力
@@ -104,19 +110,28 @@
 - 当前 active spline window 中的全部控制点已经进入 LM 变量集合，而不再只是发布给 planner / viewer。
 - 优化图目前包含：
   - active window 内多个 segment 的 LiDAR factors
+  - active window 内多个 segment 的 IMU factors
   - 全 active window 的 smoothness factors
-  - active window 两端的 anchor / prediction priors
+  - active window 起始边界的 marginal prior
+  - active window 尾端的 prediction priors
 - CPU LiDAR factor 当前采用最小可用实现：
   - 4 个 pose control points
   - per-point time query
   - CPU GICP residual
   - 局部 LM 优化
+- CPU IMU factor 当前采用最小可用实现：
+  - 4 个 pose control points
+  - per-segment IMU relative pose measurement
+  - 固定 bias 输入
+  - 数值 Jacobian
 
 当前 Phase 1B 的边界：
 - 这还是 local frontend，不是最终的 fixed-lag smoother 主链。
 - 新增的 fixed-lag window 现在已经进入优化变量层，并且多段 LiDAR segment factors 已经进入同一优化图。
-- 但当前所有 active segments 仍共享同一个 active target map，还不是严格意义上的 segment-specific target / marginal prior 设计。
+- 当前已经具备 segment-specific target snapshot 和显式 marginal prior 的雏形。
+- 但这些 prior 仍然是工程上的近似替代，不是严格的 Schur complement 边缘化结果。
 - IMU 目前主要仍用于初始化/后续兼容链路，尚未作为 spline-native continuous-time factor 完整改写进图里。
+- 新增的 IMU continuous-time factor 当前是最小可用 relative-pose 版本，还没有把 bias、速度、加速度作为联合状态显式优化。
 - GNSS 也尚未进入控制点窗口主链。
 - LiDAR factor 目前使用数值 pose Jacobian，是为了先打通最小可用版本；解析 Jacobian 和 GPU 版仍是后续工作。
 
@@ -138,8 +153,10 @@ colcon test-result --all
 测试结果：
 - `test_araim` 通过
 - `test_bspline_control_window` 通过
+- `test_bspline_imu_factor` 通过
 - `test_bspline_trajectory` 通过
 - `test_bspline_control_window` 现已覆盖 control buffer 扩展、lag pruning、values/update round-trip
+- `test_bspline_imu_factor` 现已覆盖 IMU factor 零残差与非零残差
 - Phase 1B 代码已完成编译与测试通过
 
 ## 当前还没完成的关键部分
@@ -149,20 +166,23 @@ colcon test-result --all
 - 当前 active spline window 已经具备 fixed-lag 形式的保存与裁剪。
 - 当前 active spline window 已经进入优化变量层。
 - 当前已经形成“多段 LiDAR factors + 共享控制点”的联合优化骨架。
-- 但它还不是最终的 fixed-lag GTSAM 主状态组织方式，也还没有成熟的边缘化/先验回灌。
+- 当前已经形成“多段 LiDAR factors + 多段 IMU factors + 共享控制点”的联合优化骨架。
+- 但它还不是最终的 fixed-lag GTSAM 主状态组织方式，也还没有成熟的 Schur 边缘化/先验回灌。
 
 ### 2. LiDAR 连续时间残差还没接入主链
 - 当前已经有 CPU 版连续时间 LiDAR factor。
 - 但它还是最小可用版本：
   - 当前已覆盖 active window 内多个 segment
-  - 但所有 active segments 仍共享同一个 active target map
+  - 已支持 segment-specific local target snapshot
+  - 但 snapshot 构造仍然是工程近似，并非最终 submap target 策略
   - 数值化 pose Jacobian
   - 还没有 GPU 版
   - 还没有与最终 fixed-lag 图结构完全统一
 
 ### 3. IMU 连续时间约束还没改写
-- 还没有将 IMU 约束改为直接约束 spline 的角速度 / 线加速度。
-- 当前 IMU 仍然主要走旧的预积分主线。
+- 当前已经有 per-segment IMU relative-pose factor。
+- 但还没有将 IMU 约束完全改为直接约束 spline 的角速度 / 线加速度。
+- 目前 bias 仍然是固定输入，速度/加速度也还没有作为 spline-native 联合状态进入图。
 
 ### 4. GNSS 还没下沉到 bspline odometry
 - 还没有把 pseudorange / doppler 的时间戳约束直接并入 spline window。
@@ -180,9 +200,9 @@ colcon test-result --all
 - 不再只依赖每帧局部 LM，而是进入真正的“多段窗口联合优化 + 边缘化”
 
 建议子任务：
-- 为多段 LiDAR factor 设计更严格的 target / prior 策略
-- 设计旧控制点边缘化与先验回灌策略
-- 评估是否需要 segment-specific target snapshot 或局部 submap target
+- 把当前工程化 marginal prior 升级为更接近真实边缘化的先验回灌
+- 评估是否需要 segment-specific local submap target 替代当前 snapshot 方案
+- 让旧控制点移出活动窗口时保留更严格的信息矩阵
 - 保留现有兼容输出不变
 
 ### Next Step 2：补齐 IMU 连续时间约束
@@ -191,8 +211,8 @@ colcon test-result --all
 - 让 IMU 不再只承担初始化和兼容链路职责
 
 建议子任务：
-- 明确 spline 状态表达是否采用纯 pose control points 还是 split pose/position parameterization
-- 设计与 bias / clock 的联合状态布局
+- 从当前 relative-pose IMU factor 继续推进到角速度 / 加速度约束
+- 设计 bias / velocity / clock 与 spline control points 的联合状态布局
 - 完成 IMU 残差与 Jacobian 数值校验
 
 ### Next Step 3：Phase 1C，把 GNSS 纳入连续时间窗口

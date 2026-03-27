@@ -40,6 +40,9 @@
     "ctrl_point_anchor_inf_scale": 1e6,
     "ctrl_point_prediction_inf_scale": 1e3,
     "ctrl_point_smoothness_inf_scale": 1e2,
+    "ctrl_point_marginal_inf_scale": 1e4,
+    "imu_ct_trans_inf_scale": 10.0,
+    "imu_ct_rot_inf_scale": 100.0,
     "lm_max_iterations": 8,
     // Continuous-time spline settings
     "spline_knot_mode": "uniform",

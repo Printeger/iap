@@ -8,12 +8,14 @@
 #include <gtsam/slam/BetweenFactor.h>
 #include <gtsam/slam/PriorFactor.h>
 #include <gtsam/nonlinear/NonlinearFactorGraph.h>
+#include <gtsam_points/ann/kdtree2.hpp>
 #include <gtsam_points/ann/ivox.hpp>
 #include <gtsam_points/optimizers/levenberg_marquardt_ext.hpp>
 #include <gtsam_points/types/point_cloud_cpu.hpp>
 #include <spdlog/spdlog.h>
 
 #include <iap/common/cloud_covariance_estimation.hpp>
+#include <iap/common/imu_integration.hpp>
 #include <iap/odometry/initial_state_estimation.hpp>
 #include <iap/util/config.hpp>
 #include <iap/util/shared_state.hpp>
@@ -69,6 +71,9 @@ OdometryEstimationBSpline::OdometryEstimationBSpline(const OdometryEstimationBSp
   ctrl_point_anchor_inf_scale_ = config.param<double>("odometry_estimation", "ctrl_point_anchor_inf_scale", 1e6);
   ctrl_point_prediction_inf_scale_ = config.param<double>("odometry_estimation", "ctrl_point_prediction_inf_scale", 1e3);
   ctrl_point_smoothness_inf_scale_ = config.param<double>("odometry_estimation", "ctrl_point_smoothness_inf_scale", 1e2);
+  ctrl_point_marginal_inf_scale_ = config.param<double>("odometry_estimation", "ctrl_point_marginal_inf_scale", 1e4);
+  imu_ct_trans_inf_scale_ = config.param<double>("odometry_estimation", "imu_ct_trans_inf_scale", 10.0);
+  imu_ct_rot_inf_scale_ = config.param<double>("odometry_estimation", "imu_ct_rot_inf_scale", 100.0);
   lm_max_iterations_ = config.param<int>("odometry_estimation", "lm_max_iterations", 8);
 
   T_lidar_imu = params.T_lidar_imu;
@@ -130,6 +135,7 @@ void OdometryEstimationBSpline::initialize_control_window(
   control_window_->initialize(raw_frame->stamp, raw_frame->scan_end_time, initial_pose);
   control_buffer_->reset_from_window(*control_window_);
   active_segment_constraints_.clear();
+  marginal_prior_ = ActiveSplineMarginalPrior();
 }
 
 gtsam::Pose3 OdometryEstimationBSpline::predict_scan_end_pose(double scan_duration) const {
@@ -145,14 +151,87 @@ gtsam::Pose3 OdometryEstimationBSpline::predict_scan_end_pose(double scan_durati
   return last_end.compose(gtsam::Pose3::Expmap(scale * delta));
 }
 
+std::shared_ptr<gtsam_points::iVox> OdometryEstimationBSpline::create_active_target_snapshot() const {
+  const auto* cpu_params = static_cast<const OdometryEstimationCPUParams*>(params.get());
+
+  auto snapshot = std::make_shared<gtsam_points::iVox>(cpu_params->ivox_resolution);
+  snapshot->voxel_insertion_setting().set_min_dist_in_cell(cpu_params->ivox_min_dist);
+  snapshot->set_lru_horizon(cpu_params->lru_thresh);
+  snapshot->set_neighbor_voxel_mode(1);
+
+  bool inserted = false;
+  for (auto it = frames.inner_begin(); it != frames.inner_end(); ++it) {
+    if (!(*it) || !(*it)->frame) {
+      continue;
+    }
+
+    auto transformed = gtsam_points::PointCloudCPU::clone(*(*it)->frame);
+    for (int i = 0; i < transformed->size(); ++i) {
+      transformed->points[i] = (*it)->T_world_lidar * (*it)->frame->points[i];
+      transformed->covs[i] = (*it)->T_world_lidar.matrix() * (*it)->frame->covs[i] * (*it)->T_world_lidar.matrix().transpose();
+    }
+    snapshot->insert(*transformed);
+    inserted = true;
+  }
+
+  return inserted ? snapshot : ct_target_ivox_;
+}
+
+std::optional<gtsam::Pose3> OdometryEstimationBSpline::create_segment_imu_measurement(
+  const PreprocessedFrame::Ptr& raw_frame) const {
+  if (!imu_integration || !control_window_ || !control_window_->initialized()) {
+    return std::nullopt;
+  }
+
+  const gtsam::Pose3 start_world_lidar = control_window_->evaluate(0.0);
+  const gtsam::Pose3 start_world_imu = start_world_lidar.compose(gtsam::Pose3(T_lidar_imu.matrix()));
+  const Eigen::Vector3d start_velocity = frames.empty() ? Eigen::Vector3d::Zero() : frames.back()->v_world_imu;
+  const gtsam::imuBias::ConstantBias imu_bias(
+    frames.empty() ? params->imu_bias : frames.back()->imu_bias);
+
+  std::vector<double> pred_times;
+  std::vector<Eigen::Isometry3d> pred_poses;
+  imu_integration->integrate_imu(
+    raw_frame->stamp,
+    raw_frame->scan_end_time,
+    gtsam::NavState(start_world_imu, start_velocity),
+    imu_bias,
+    pred_times,
+    pred_poses);
+
+  if (pred_poses.size() < 2) {
+    return std::nullopt;
+  }
+
+  const gtsam::Pose3 start_imu(pred_poses.front().matrix());
+  const gtsam::Pose3 end_imu(pred_poses.back().matrix());
+  return start_imu.between(end_imu);
+}
+
+void OdometryEstimationBSpline::update_marginal_prior_from_active_window() {
+  marginal_prior_ = ActiveSplineMarginalPrior();
+
+  if (!control_buffer_ || control_buffer_->size() < 2) {
+    return;
+  }
+
+  const auto& states = control_buffer_->states();
+  marginal_prior_.valid = true;
+  marginal_prior_.control_indices = {states[0].index, states[1].index};
+  marginal_prior_.first_pose = states[0].pose;
+  marginal_prior_.relative_delta = states[0].pose.between(states[1].pose);
+}
+
 void OdometryEstimationBSpline::append_active_segment_constraint(
-  double stamp,
-  double scan_end,
+  const PreprocessedFrame::Ptr& raw_frame,
   const gtsam_points::PointCloud::ConstPtr& source) {
   ActiveSplineSegmentConstraint segment;
-  segment.stamp = stamp;
-  segment.scan_end = scan_end;
+  segment.stamp = raw_frame->stamp;
+  segment.scan_end = raw_frame->scan_end_time;
   segment.source = source;
+  segment.target_snapshot = create_active_target_snapshot();
+  segment.target_tree = std::make_shared<gtsam_points::KdTree2<gtsam_points::iVox>>(segment.target_snapshot);
+  segment.imu_delta = create_segment_imu_measurement(raw_frame);
 
   const auto states = control_window_->states();
   for (std::size_t i = 0; i < iap::kBSplineControlPointCount; ++i) {
@@ -202,6 +281,7 @@ void OdometryEstimationBSpline::update_frame_history(
     control_buffer_->prune_before(min_active_stamp);
   }
   prune_active_segment_constraints(std::max(0.0, frame->stamp - params->smoother_lag));
+  update_marginal_prior_from_active_window();
 
   Callbacks::on_marginalized_frames(marginalized_frames);
 }
@@ -248,6 +328,7 @@ EstimationFrame::ConstPtr OdometryEstimationBSpline::insert_frame_ct_lidar(
     Callbacks::on_new_frame(new_frame);
     insert_target_cloud(new_frame);
     update_frame_history(new_frame, marginalized_frames);
+    update_marginal_prior_from_active_window();
     publish_continuous_trajectory(current);
 
     std::vector<EstimationFrame::ConstPtr> active_frames(frames.inner_begin(), frames.inner_end());
@@ -272,7 +353,7 @@ EstimationFrame::ConstPtr OdometryEstimationBSpline::insert_frame_ct_lidar(
 
   new_frame->frame = create_lidar_source_cloud(raw_frame);
   const auto factor_source = gtsam_points::PointCloudCPU::clone(*new_frame->frame);
-  append_active_segment_constraint(raw_frame->stamp, raw_frame->scan_end_time, factor_source);
+  append_active_segment_constraint(raw_frame, factor_source);
 
   gtsam::Values values = control_buffer_->values();
   const auto& active_states = control_buffer_->states();
@@ -288,10 +369,20 @@ EstimationFrame::ConstPtr OdometryEstimationBSpline::insert_frame_ct_lidar(
     }
 
     auto factor =
-      std::make_shared<iap::IntegratedBSplineGICPFactor>(segment_keys, ct_target_ivox_, segment.source, ct_target_ivox_);
+      std::make_shared<iap::IntegratedBSplineGICPFactor>(segment_keys, segment.target_snapshot, segment.source, segment.target_tree);
     factor->set_num_threads(params->num_threads);
     factor->set_max_correspondence_distance(max_correspondence_distance_);
     graph.add(factor);
+
+    if (segment.imu_delta) {
+      auto imu_factor = std::make_shared<iap::IntegratedBSplineIMUFactor>(
+        segment_keys,
+        *segment.imu_delta,
+        gtsam::Pose3(T_lidar_imu.matrix()),
+        imu_ct_trans_inf_scale_,
+        imu_ct_rot_inf_scale_);
+      graph.add(imu_factor);
+    }
 
     if (i + 1 == active_segment_constraints_.size()) {
       current_factor = factor;
@@ -306,18 +397,35 @@ EstimationFrame::ConstPtr OdometryEstimationBSpline::insert_frame_ct_lidar(
   const auto anchor_noise = gtsam::noiseModel::Isotropic::Precision(6, ctrl_point_anchor_inf_scale_);
   const auto pred_noise = gtsam::noiseModel::Isotropic::Precision(6, ctrl_point_prediction_inf_scale_);
   const auto smooth_noise = gtsam::noiseModel::Isotropic::Precision(6, ctrl_point_smoothness_inf_scale_);
+  const auto marginal_noise = gtsam::noiseModel::Isotropic::Precision(6, ctrl_point_marginal_inf_scale_);
 
-  if (!active_states.empty()) {
+  const bool use_marginal_prior =
+    marginal_prior_.valid &&
+    active_states.size() >= 2 &&
+    active_states[0].index == marginal_prior_.control_indices[0] &&
+    active_states[1].index == marginal_prior_.control_indices[1];
+
+  if (use_marginal_prior) {
+    graph.emplace_shared<gtsam::PriorFactor<gtsam::Pose3>>(
+      iap::bspline_control_point_key(active_states[0].index),
+      marginal_prior_.first_pose,
+      marginal_noise);
+    graph.emplace_shared<gtsam::BetweenFactor<gtsam::Pose3>>(
+      iap::bspline_control_point_key(active_states[0].index),
+      iap::bspline_control_point_key(active_states[1].index),
+      marginal_prior_.relative_delta,
+      marginal_noise);
+  } else if (!active_states.empty()) {
     graph.emplace_shared<gtsam::PriorFactor<gtsam::Pose3>>(
       iap::bspline_control_point_key(active_states.front().index),
       active_states.front().pose,
       anchor_noise);
-  }
-  if (active_states.size() >= 2) {
-    graph.emplace_shared<gtsam::PriorFactor<gtsam::Pose3>>(
-      iap::bspline_control_point_key(active_states[1].index),
-      active_states[1].pose,
-      anchor_noise);
+    if (active_states.size() >= 2) {
+      graph.emplace_shared<gtsam::PriorFactor<gtsam::Pose3>>(
+        iap::bspline_control_point_key(active_states[1].index),
+        active_states[1].pose,
+        anchor_noise);
+    }
   }
   if (active_states.size() >= 2) {
     const auto& pred_a = active_states[active_states.size() - 2];
@@ -362,6 +470,7 @@ EstimationFrame::ConstPtr OdometryEstimationBSpline::insert_frame_ct_lidar(
 
   control_buffer_->update_from_values(values);
   control_window_->update_from_values(values);
+  update_marginal_prior_from_active_window();
 
   const gtsam::Pose3 start_pose = control_window_->evaluate(0.0);
   const gtsam::Pose3 end_pose = control_window_->evaluate(1.0);

@@ -114,6 +114,7 @@ add_library(iap SHARED
   src/iap/odometry/estimation_frame.cpp
   src/iap/odometry/initial_state_estimation.cpp
   src/iap/odometry/integrated_bspline_gicp_factor.cpp
+  src/iap/odometry/integrated_bspline_imu_factor.cpp
   src/iap/odometry/loose_initial_state_estimation.cpp
   src/iap/odometry/odometry_estimation_base.cpp
   src/iap/odometry/async_odometry_estimation.cpp
@@ -401,6 +402,8 @@ if(DEFINED ENV{ROS_VERSION})
       target_link_libraries(test_araim iap)
       ament_add_gtest(test_bspline_control_window test/test_bspline_control_window.cpp)
       target_link_libraries(test_bspline_control_window iap)
+      ament_add_gtest(test_bspline_imu_factor test/test_bspline_imu_factor.cpp)
+      target_link_libraries(test_bspline_imu_factor iap)
       ament_add_gtest(test_bspline_trajectory test/test_bspline_trajectory.cpp)
       target_link_libraries(test_bspline_trajectory iap)
     endif()

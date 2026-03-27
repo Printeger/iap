@@ -3,6 +3,10 @@
 > 规则：任何代码改动必须在这里记录，并包含 IAP-RQ-XXX。
 
 ## Unreleased
+- feat(dev-ct-imu): IAP-RQ-300 / IAP-RQ-410 — tighten fixed-lag target/prior handling and add a continuous-time IMU factor to the shared spline graph.
+  - Added `IntegratedBSplineIMUFactor`, a minimal continuous-time IMU relative-pose factor over the four control points of each active segment.
+  - `OdometryEstimationBSpline` now freezes a local target snapshot for each active segment, carries an explicit marginal prior for the lag-window boundary, and adds both LiDAR and IMU factors for every active segment into the same LM graph.
+  - Added `test_bspline_imu_factor.cpp` and expanded `config_odometry_bspline.json` with marginal-prior / IMU factor weights.
 - feat(dev-ct-multiseg): IAP-RQ-300 / IAP-RQ-410 — add per-segment continuous-time LiDAR factors across the active spline window.
   - `OdometryEstimationBSpline` now stores active segment constraints (`raw source cloud + 4 control-point indices`) inside the lag window.
   - Each active segment now contributes its own `IntegratedBSplineGICPFactor` to the same LM graph, so overlapping control points are jointly optimized across multiple segments instead of only the newest one.
