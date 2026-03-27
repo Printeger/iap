@@ -26,6 +26,7 @@
 - 已把最小可用的连续时间 IMU 因子接进同一个 fixed-lag LM 图：
   - per-segment IMU sample factor
   - 直接按 IMU 时间戳约束 gyro / accel residual
+  - shared gyro bias / accel bias / gravity graph states
   - 与 LiDAR factors 共享同一组控制点变量
 - 当前 `src/iap` 已具备：
   - 连续时间轨迹统一接口
@@ -124,7 +125,7 @@
   - 4 个 pose control points
   - per-segment 下采样 IMU samples
   - 直接 gyro / accel residual
-  - 固定 bias 输入
+  - shared bias / gravity states
   - 数值 Jacobian
 
 当前 Phase 1B 的边界：
@@ -132,8 +133,8 @@
 - 新增的 fixed-lag window 现在已经进入优化变量层，并且多段 LiDAR segment factors 已经进入同一优化图。
 - 当前已经具备 segment-specific target snapshot 和显式 marginal prior 的雏形。
 - 但这些 prior 仍然是工程上的近似替代，不是严格的 Schur complement 边缘化结果。
-- IMU 现在已经开始按时间戳直接约束 spline 的角速度 / 线加速度，但仍是最小可用工程版。
-- 新增的 IMU continuous-time factor 当前仍没有把 bias、速度、加速度作为联合状态显式优化，Jacobians 也仍是数值形式。
+- IMU 现在已经开始按时间戳直接约束 spline 的角速度 / 线加速度，并且 bias / gravity 已进入联合优化。
+- 新增的 IMU continuous-time factor 当前仍没有把速度作为独立状态显式优化，Jacobians 也仍是数值形式。
 - GNSS 也尚未进入控制点窗口主链。
 - LiDAR factor 目前使用数值 pose Jacobian，是为了先打通最小可用版本；解析 Jacobian 和 GPU 版仍是后续工作。
 
@@ -158,7 +159,7 @@ colcon test-result --all
 - `test_bspline_imu_factor` 通过
 - `test_bspline_trajectory` 通过
 - `test_bspline_control_window` 现已覆盖 control buffer 扩展、lag pruning、values/update round-trip
-- `test_bspline_imu_factor` 现已覆盖静止匹配样本零残差与失配样本非零残差
+- `test_bspline_imu_factor` 现已覆盖静止匹配样本零残差、bias-state 补偿和 gravity-state 失配
 - Phase 1B 代码已完成编译与测试通过
 
 ## 当前还没完成的关键部分
@@ -184,7 +185,8 @@ colcon test-result --all
 ### 3. IMU 连续时间约束还没做完
 - 当前已经有 per-segment IMU sample factor。
 - 当前已经开始将 IMU 观测直接约束到 spline 的角速度 / 线加速度。
-- 但目前 bias 仍然是固定输入，速度/加速度也还没有作为 spline-native 联合状态进入图。
+- 当前 shared gyro bias / accel bias / gravity 已进入图。
+- 但速度仍然还没有作为 spline-native 联合状态进入图。
 - 当前 Jacobian 仍是数值形式，尚未做解析化和更严格的数值校验。
 
 ### 4. GNSS 还没下沉到 bspline odometry
@@ -214,8 +216,8 @@ colcon test-result --all
 - 让 IMU 不再只承担初始化和兼容链路职责
 
 建议子任务：
-- 在当前 gyro / accel sample factor 基础上补齐 velocity / gravity / bias 联合状态
-- 设计 bias / velocity / clock 与 spline control points 的联合状态布局
+- 在当前 gyro / accel sample factor 基础上补齐 velocity 联合状态
+- 设计 velocity / clock 与 spline control points 的联合状态布局
 - 完成 IMU 残差的解析 Jacobian 或更严格的数值校验
 
 ### Next Step 3：Phase 1C，把 GNSS 纳入连续时间窗口

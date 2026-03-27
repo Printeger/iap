@@ -3,6 +3,10 @@
 > 规则：任何代码改动必须在这里记录，并包含 IAP-RQ-XXX。
 
 ## Unreleased
+- feat(dev-ct-imu-state): IAP-RQ-300 / IAP-RQ-410 — promote shared IMU bias and gravity into explicit fixed-lag graph states.
+  - `IntegratedBSplineIMUFactor` now optimizes four pose control points together with shared gyro bias, accel bias, and gravity variables instead of baking them in as constants.
+  - `OdometryEstimationBSpline` now inserts shared bias/gravity values and priors into the active fixed-lag LM graph, then writes the optimized bias estimate back into `EstimationFrame`.
+  - Expanded `config_odometry_bspline.json` with `imu_ct_bias_inf_scale` / `imu_ct_gravity_inf_scale`, and updated `test_bspline_imu_factor.cpp` to cover bias-state compensation and gravity-state mismatch.
 - feat(dev-ct-imu-samples): IAP-RQ-300 / IAP-RQ-410 — replace the provisional IMU relative-pose hook with sample-based continuous-time gyro/acc factors.
   - `IntegratedBSplineIMUFactor` now directly evaluates per-sample body angular velocity and specific force from the four pose control points instead of only comparing one segment-level relative pose.
   - `OdometryEstimationBSpline` now freezes downsampled IMU samples for each active segment, carries per-segment fixed bias snapshots, and adds multiple IMU sample factors into the same shared fixed-lag LM graph.

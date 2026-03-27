@@ -68,8 +68,6 @@ class OdometryEstimationBSpline : public OdometryEstimationCPU {
     std::shared_ptr<const gtsam_points::iVox> target_snapshot;
     std::shared_ptr<const gtsam_points::NearestNeighborSearch> target_tree;
     std::vector<ActiveSplineIMUSample> imu_samples;
-    Eigen::Vector3d accel_bias = Eigen::Vector3d::Zero();
-    Eigen::Vector3d gyro_bias = Eigen::Vector3d::Zero();
   };
 
   struct ActiveSplineMarginalPrior {
@@ -115,8 +113,12 @@ class OdometryEstimationBSpline : public OdometryEstimationCPU {
   double ctrl_point_marginal_inf_scale_ = 1e4;
   double imu_ct_trans_inf_scale_ = 10.0;
   double imu_ct_rot_inf_scale_ = 100.0;
+  double imu_ct_bias_inf_scale_ = 1e3;
+  double imu_ct_gravity_inf_scale_ = 1e3;
   int imu_ct_sample_stride_ = 4;
   int lm_max_iterations_ = 8;
+  Eigen::Vector3d gyro_bias_ = Eigen::Vector3d::Zero();
+  Eigen::Vector3d accel_bias_ = Eigen::Vector3d::Zero();
   Eigen::Vector3d gravity_world_ = Eigen::Vector3d::UnitZ() * 9.80665;
 
   std::shared_ptr<gtsam_points::iVox> ct_target_ivox_;

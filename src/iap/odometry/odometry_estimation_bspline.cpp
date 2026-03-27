@@ -42,6 +42,18 @@ double sigma_from_covariance(const Eigen::Matrix3d& sigma_p) {
   return std::sqrt(std::max(0.0, eig.eigenvalues().maxCoeff()));
 }
 
+gtsam::Key bspline_gyro_bias_key() {
+  return gtsam::symbol('j', 0);
+}
+
+gtsam::Key bspline_accel_bias_key() {
+  return gtsam::symbol('k', 0);
+}
+
+gtsam::Key bspline_gravity_key() {
+  return gtsam::symbol('g', 0);
+}
+
 }  // namespace
 
 OdometryEstimationBSplineParams::OdometryEstimationBSplineParams() : OdometryEstimationCPUParams() {
@@ -74,11 +86,15 @@ OdometryEstimationBSpline::OdometryEstimationBSpline(const OdometryEstimationBSp
   ctrl_point_marginal_inf_scale_ = config.param<double>("odometry_estimation", "ctrl_point_marginal_inf_scale", 1e4);
   imu_ct_trans_inf_scale_ = config.param<double>("odometry_estimation", "imu_ct_trans_inf_scale", 10.0);
   imu_ct_rot_inf_scale_ = config.param<double>("odometry_estimation", "imu_ct_rot_inf_scale", 100.0);
+  imu_ct_bias_inf_scale_ = config.param<double>("odometry_estimation", "imu_ct_bias_inf_scale", 1e3);
+  imu_ct_gravity_inf_scale_ = config.param<double>("odometry_estimation", "imu_ct_gravity_inf_scale", 1e3);
   imu_ct_sample_stride_ = config.param<int>("odometry_estimation", "imu_ct_sample_stride", 4);
   lm_max_iterations_ = config.param<int>("odometry_estimation", "lm_max_iterations", 8);
 
   T_lidar_imu = params.T_lidar_imu;
   T_imu_lidar = T_lidar_imu.inverse();
+  accel_bias_ = params.imu_bias.head<3>();
+  gyro_bias_ = params.imu_bias.tail<3>();
   control_window_ = std::make_unique<iap::BSplineControlWindow>();
   control_buffer_ = std::make_unique<iap::BSplineControlWindowBuffer>();
   ct_target_ivox_ = std::make_shared<gtsam_points::iVox>(params.ivox_resolution);
@@ -247,10 +263,6 @@ void OdometryEstimationBSpline::append_active_segment_constraint(
   segment.target_tree = std::make_shared<gtsam_points::KdTree2<gtsam_points::iVox>>(segment.target_snapshot);
   segment.imu_samples = create_segment_imu_samples(raw_frame);
 
-  const Eigen::Matrix<double, 6, 1> imu_bias = frames.empty() ? params->imu_bias : frames.back()->imu_bias;
-  segment.accel_bias = imu_bias.head<3>();
-  segment.gyro_bias = imu_bias.tail<3>();
-
   const auto states = control_window_->states();
   for (std::size_t i = 0; i < iap::kBSplineControlPointCount; ++i) {
     segment.control_indices[i] = states[i].index;
@@ -319,7 +331,8 @@ EstimationFrame::ConstPtr OdometryEstimationBSpline::insert_frame_ct_lidar(
   new_frame->raw_frame = raw_frame;
   new_frame->frame_id = FrameID::LIDAR;
   new_frame->v_world_imu.setZero();
-  new_frame->imu_bias = frames.empty() ? params->imu_bias : frames.back()->imu_bias;
+  new_frame->imu_bias.head<3>() = accel_bias_;
+  new_frame->imu_bias.tail<3>() = gyro_bias_;
 
   if (frames.empty()) {
     EstimationFrame::ConstPtr init_state;
@@ -343,6 +356,8 @@ EstimationFrame::ConstPtr OdometryEstimationBSpline::insert_frame_ct_lidar(
     new_frame->T_world_imu = new_frame->T_world_lidar * T_lidar_imu;
     new_frame->frame = create_lidar_source_cloud(raw_frame);
     new_frame->imu_bias = init_state ? init_state->imu_bias : params->imu_bias;
+    accel_bias_ = new_frame->imu_bias.head<3>();
+    gyro_bias_ = new_frame->imu_bias.tail<3>();
 
     Callbacks::on_new_frame(new_frame);
     insert_target_cloud(new_frame);
@@ -376,6 +391,12 @@ EstimationFrame::ConstPtr OdometryEstimationBSpline::insert_frame_ct_lidar(
 
   gtsam::Values values = control_buffer_->values();
   const auto& active_states = control_buffer_->states();
+  const gtsam::Key gyro_bias_key = bspline_gyro_bias_key();
+  const gtsam::Key accel_bias_key = bspline_accel_bias_key();
+  const gtsam::Key gravity_key = bspline_gravity_key();
+  values.insert(gyro_bias_key, gyro_bias_);
+  values.insert(accel_bias_key, accel_bias_);
+  values.insert(gravity_key, gravity_world_);
 
   gtsam::NonlinearFactorGraph graph;
   std::shared_ptr<iap::IntegratedBSplineGICPFactor> current_factor;
@@ -397,14 +418,14 @@ EstimationFrame::ConstPtr OdometryEstimationBSpline::insert_frame_ct_lidar(
     for (const auto& imu_sample : segment.imu_samples) {
       auto imu_factor = std::make_shared<iap::IntegratedBSplineIMUFactor>(
         segment_keys,
+        gyro_bias_key,
+        accel_bias_key,
+        gravity_key,
         imu_sample.u,
         std::max(1e-3, segment.scan_end - segment.stamp),
         imu_sample.angular_vel,
         imu_sample.linear_acc,
-        segment.gyro_bias,
-        segment.accel_bias,
         gtsam::Pose3(T_lidar_imu.matrix()),
-        gravity_world_,
         imu_ct_trans_inf_scale_,
         imu_ct_rot_inf_scale_,
         trajectory_params_.finite_difference_dt);
@@ -426,6 +447,8 @@ EstimationFrame::ConstPtr OdometryEstimationBSpline::insert_frame_ct_lidar(
   const auto pred_noise = gtsam::noiseModel::Isotropic::Precision(6, ctrl_point_prediction_inf_scale_);
   const auto smooth_noise = gtsam::noiseModel::Isotropic::Precision(6, ctrl_point_smoothness_inf_scale_);
   const auto marginal_noise = gtsam::noiseModel::Isotropic::Precision(6, ctrl_point_marginal_inf_scale_);
+  const auto imu_bias_noise = gtsam::noiseModel::Isotropic::Precision(3, imu_ct_bias_inf_scale_);
+  const auto gravity_noise = gtsam::noiseModel::Isotropic::Precision(3, imu_ct_gravity_inf_scale_);
 
   const bool use_marginal_prior =
     marginal_prior_.valid &&
@@ -475,6 +498,9 @@ EstimationFrame::ConstPtr OdometryEstimationBSpline::insert_frame_ct_lidar(
       active_states[i].pose.between(active_states[i + 1].pose),
       smooth_noise);
   }
+  graph.emplace_shared<gtsam::PriorFactor<gtsam::Vector3>>(gyro_bias_key, gyro_bias_, imu_bias_noise);
+  graph.emplace_shared<gtsam::PriorFactor<gtsam::Vector3>>(accel_bias_key, accel_bias_, imu_bias_noise);
+  graph.emplace_shared<gtsam::PriorFactor<gtsam::Vector3>>(gravity_key, gravity_world_, gravity_noise);
 
   gtsam_points::LevenbergMarquardtExtParams lm_params;
   lm_params.setlambdaInitial(1e-4);
@@ -499,6 +525,9 @@ EstimationFrame::ConstPtr OdometryEstimationBSpline::insert_frame_ct_lidar(
 
   control_buffer_->update_from_values(values);
   control_window_->update_from_values(values);
+  gyro_bias_ = values.at<gtsam::Vector3>(gyro_bias_key);
+  accel_bias_ = values.at<gtsam::Vector3>(accel_bias_key);
+  gravity_world_ = values.at<gtsam::Vector3>(gravity_key);
   update_marginal_prior_from_active_window();
 
   const gtsam::Pose3 start_pose = control_window_->evaluate(0.0);
@@ -506,6 +535,8 @@ EstimationFrame::ConstPtr OdometryEstimationBSpline::insert_frame_ct_lidar(
   new_frame->T_world_lidar = Eigen::Isometry3d(start_pose.matrix());
   new_frame->T_world_imu = new_frame->T_world_lidar * T_lidar_imu;
   new_frame->v_world_imu = (end_pose.translation() - start_pose.translation()) / scan_duration;
+  new_frame->imu_bias.head<3>() = accel_bias_;
+  new_frame->imu_bias.tail<3>() = gyro_bias_;
 
   const auto deskewed_points = current_factor->deskewed_source_points(values, true);
   const auto deskewed_covs = covariance_estimation->estimate(deskewed_points, raw_frame->neighbors);
