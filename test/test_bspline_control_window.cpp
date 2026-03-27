@@ -51,3 +51,56 @@ TEST(BSplineControlWindowTest, EvaluateReturnsInterpolatedPose) {
   EXPECT_GT(mid.translation().x(), 0.0);
   EXPECT_LT(mid.translation().x(), 2.0);
 }
+
+TEST(BSplineControlWindowBufferTest, AppendWindowExtendsActiveControlSequence) {
+  iap::BSplineControlWindow window;
+  window.initialize(0.0, 0.1, gtsam::Pose3());
+
+  iap::BSplineControlWindowBuffer buffer;
+  buffer.reset_from_window(window);
+  EXPECT_EQ(buffer.size(), 4U);
+
+  gtsam::Pose3 predicted_end(gtsam::Rot3(), gtsam::Point3(1.0, 0.0, 0.0));
+  window.advance(0.1, 0.2, predicted_end);
+  buffer.append_window(window);
+
+  ASSERT_EQ(buffer.size(), 5U);
+  EXPECT_EQ(buffer.states().front().index, 0U);
+  EXPECT_EQ(buffer.states().back().index, 4U);
+}
+
+TEST(BSplineControlWindowBufferTest, PruneBeforeKeepsSplineSupportPoints) {
+  iap::BSplineControlWindow window;
+  window.initialize(0.0, 0.1, gtsam::Pose3());
+
+  iap::BSplineControlWindowBuffer buffer;
+  buffer.reset_from_window(window);
+
+  window.advance(0.1, 0.2, gtsam::Pose3(gtsam::Rot3(), gtsam::Point3(1.0, 0.0, 0.0)));
+  buffer.append_window(window);
+  window.advance(0.2, 0.3, gtsam::Pose3(gtsam::Rot3(), gtsam::Point3(2.0, 0.0, 0.0)));
+  buffer.append_window(window);
+
+  ASSERT_EQ(buffer.size(), 6U);
+  buffer.prune_before(0.25);
+
+  EXPECT_EQ(buffer.size(), 5U);
+  EXPECT_EQ(buffer.states().front().index, 1U);
+  EXPECT_LT(buffer.states().front().stamp, 0.25);
+  EXPECT_GE(buffer.states()[3].stamp, 0.25);
+}
+
+TEST(BSplineControlWindowBufferTest, ValuesRoundTripUpdatesStoredControlPoses) {
+  iap::BSplineControlWindow window;
+  window.initialize(0.0, 0.1, gtsam::Pose3());
+
+  iap::BSplineControlWindowBuffer buffer;
+  buffer.reset_from_window(window);
+
+  gtsam::Values values = buffer.values();
+  values.update(iap::bspline_control_point_key(2), gtsam::Pose3(gtsam::Rot3(), gtsam::Point3(3.0, 0.0, 0.0)));
+  buffer.update_from_values(values);
+
+  ASSERT_EQ(buffer.size(), 4U);
+  EXPECT_NEAR(buffer.states()[2].pose.translation().x(), 3.0, 1e-9);
+}

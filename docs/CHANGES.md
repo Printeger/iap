@@ -3,6 +3,14 @@
 > 规则：任何代码改动必须在这里记录，并包含 IAP-RQ-XXX。
 
 ## Unreleased
+- feat(dev-ct-joint-window): IAP-RQ-300 / IAP-RQ-410 — move the active spline window from publication-only state into the optimization variable set.
+  - `BSplineControlWindowBuffer` now exposes `keys()`, `values()`, and `update_from_values()` so the active lag-window control points can directly participate in optimization.
+  - `OdometryEstimationBSpline` now seeds LM from the whole active control window, adds smoothness factors across all active control points, and anchors/predicts the boundary control points while the current LiDAR factor still constrains the latest segment.
+  - Expanded `test_bspline_control_window.cpp` with buffer value round-trip coverage.
+- feat(dev-ct-window): IAP-RQ-300 / IAP-RQ-410 — extend the Phase-1B frontend with an active fixed-lag spline window skeleton.
+  - Added `BSplineControlWindowBuffer` to retain the active multi-segment control-point sequence instead of publishing only the latest 4-point segment.
+  - `OdometryEstimationBSpline` now resets/appends/prunes the active spline control window together with frame history marginalization, so planner/viewer/control-access consume the lag-window trajectory rather than a single segment.
+  - Expanded `test_bspline_control_window.cpp` with buffer growth and lag-pruning coverage.
 - feat(dev-ct-phase1b): IAP-RQ-300 / IAP-RQ-410 — start the minimal viable continuous-time odometry frontend.
   - Added `BSplineControlWindow` and explicit control-point key design (`symbol('s', idx)`) for the active 4-knot spline window.
   - Added `IntegratedBSplineGICPFactor`, a CPU continuous-time LiDAR factor over four pose control points with per-point time query and GICP residual accumulation.

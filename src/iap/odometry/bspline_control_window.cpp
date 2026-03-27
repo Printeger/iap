@@ -160,4 +160,109 @@ gtsam::Pose3 BSplineControlWindow::interpolate(
   return gtsam::Pose3(gtsam::Rot3(q.toRotationMatrix()), translation);
 }
 
+void BSplineControlWindowBuffer::clear() {
+  states_.clear();
+}
+
+void BSplineControlWindowBuffer::reset_from_window(const BSplineControlWindow& window) {
+  states_.assign(window.states().begin(), window.states().end());
+  sort_states();
+}
+
+void BSplineControlWindowBuffer::append_window(const BSplineControlWindow& window) {
+  for (const auto& state : window.states()) {
+    const auto found = std::find_if(states_.begin(), states_.end(), [&](const auto& existing) {
+      return existing.index == state.index;
+    });
+
+    if (found == states_.end()) {
+      states_.push_back(state);
+    } else {
+      *found = state;
+    }
+  }
+
+  sort_states();
+}
+
+void BSplineControlWindowBuffer::prune_before(double min_stamp) {
+  if (states_.empty()) {
+    return;
+  }
+
+  const auto first_active = std::find_if(states_.begin(), states_.end(), [&](const auto& state) {
+    return state.stamp >= min_stamp;
+  });
+
+  if (first_active == states_.end()) {
+    if (states_.size() > kBSplineControlPointCount) {
+      states_.erase(states_.begin(), states_.end() - static_cast<std::ptrdiff_t>(kBSplineControlPointCount));
+    }
+    return;
+  }
+
+  const auto active_offset = std::distance(states_.begin(), first_active);
+  const auto support = std::min<std::ptrdiff_t>(
+    active_offset,
+    static_cast<std::ptrdiff_t>(kBSplineControlPointCount - 1));
+  const auto keep_begin = first_active - support;
+
+  if (keep_begin > states_.begin()) {
+    states_.erase(states_.begin(), keep_begin);
+  }
+}
+
+void BSplineControlWindowBuffer::update_from_values(const gtsam::Values& values) {
+  for (auto& state : states_) {
+    const auto key = bspline_control_point_key(state.index);
+    if (values.exists(key)) {
+      state.pose = values.at<gtsam::Pose3>(key);
+    }
+  }
+}
+
+std::vector<gtsam::Key> BSplineControlWindowBuffer::keys() const {
+  std::vector<gtsam::Key> ordered_keys;
+  ordered_keys.reserve(states_.size());
+
+  for (const auto& state : states_) {
+    ordered_keys.push_back(bspline_control_point_key(state.index));
+  }
+
+  return ordered_keys;
+}
+
+gtsam::Values BSplineControlWindowBuffer::values() const {
+  gtsam::Values values;
+
+  for (const auto& state : states_) {
+    values.insert(bspline_control_point_key(state.index), state.pose);
+  }
+
+  return values;
+}
+
+std::vector<SplineControlPoint> BSplineControlWindowBuffer::spline_control_points() const {
+  std::vector<SplineControlPoint> cps;
+  cps.reserve(states_.size());
+
+  for (const auto& state : states_) {
+    SplineControlPoint cp;
+    cp.stamp = state.stamp;
+    cp.pose = Eigen::Isometry3d(state.pose.matrix());
+    cps.push_back(cp);
+  }
+
+  return cps;
+}
+
+void BSplineControlWindowBuffer::sort_states() {
+  std::sort(states_.begin(), states_.end(), [](const auto& lhs, const auto& rhs) {
+    if (lhs.stamp == rhs.stamp) {
+      return lhs.index < rhs.index;
+    }
+    return lhs.stamp < rhs.stamp;
+  });
+}
+
 }  // namespace iap

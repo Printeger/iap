@@ -9,6 +9,14 @@
   - 控制点窗口状态设计
   - 控制点 key 设计
   - CPU 连续时间 LiDAR factor
+- 已补上 active fixed-lag spline window 骨架：
+  - 多段控制点窗口缓存
+  - lag pruning
+  - 对 planner / viewer 发布整个 active control window
+- 已把 active control window 推进到优化变量层：
+  - 整窗控制点进入 LM 初值
+  - 全窗 smoothness factors
+  - 边界控制点 anchor / prediction priors
 - 当前 `src/iap` 已具备：
   - 连续时间轨迹统一接口
   - B-spline 轨迹容器与时间查询能力
@@ -79,6 +87,7 @@
 
 ## 5. Phase 1B 最小可用实现
 - 新增 `BSplineControlWindow`
+- 新增 `BSplineControlWindowBuffer`
 - 新增 4 控制点 key 设计：`symbol('s', idx)`
 - 新增 `IntegratedBSplineGICPFactor`
 - `OdometryEstimationBSpline` 新增 `frontend_mode = CT_LIDAR_CPU`
@@ -87,6 +96,13 @@
 - 不再只是“离散状态优化完成后再重建 spline”。
 - 现在可以直接对 4 个活动控制点构成的窗口做连续时间 LiDAR 优化。
 - 每个点按照点时间查询当前 segment 的 B-spline pose。
+- 当前 active spline window 会跨多帧保留控制点，并随 `smoother_lag` 做裁剪。
+- planner / viewer / `ContinuousTrajectoryView` 现在看到的是 active lag-window spline，而不是只有最新一个 segment。
+- 当前 active spline window 中的全部控制点已经进入 LM 变量集合，而不再只是发布给 planner / viewer。
+- 优化图目前包含：
+  - 最新 segment 的 LiDAR factor
+  - 全 active window 的 smoothness factors
+  - active window 两端的 anchor / prediction priors
 - CPU LiDAR factor 当前采用最小可用实现：
   - 4 个 pose control points
   - per-point time query
@@ -95,6 +111,7 @@
 
 当前 Phase 1B 的边界：
 - 这还是 local frontend，不是最终的 fixed-lag smoother 主链。
+- 新增的 fixed-lag window 现在已经进入优化变量层，但还没有把多段 LiDAR segment factors 一起放进同一优化图里。
 - IMU 目前主要仍用于初始化/后续兼容链路，尚未作为 spline-native continuous-time factor 完整改写进图里。
 - GNSS 也尚未进入控制点窗口主链。
 - LiDAR factor 目前使用数值 pose Jacobian，是为了先打通最小可用版本；解析 Jacobian 和 GPU 版仍是后续工作。
@@ -118,18 +135,22 @@ colcon test-result --all
 - `test_araim` 通过
 - `test_bspline_control_window` 通过
 - `test_bspline_trajectory` 通过
+- `test_bspline_control_window` 现已覆盖 control buffer 扩展、lag pruning、values/update round-trip
 - Phase 1B 代码已完成编译与测试通过
 
 ## 当前还没完成的关键部分
 
 ### 1. 还不是 spline-native estimator
 - 当前 `CT_LIDAR_CPU` 路径已经把 4 控制点窗口作为局部优化变量引入。
-- 但它还不是最终的 fixed-lag GTSAM 主状态组织方式。
+- 当前 active spline window 已经具备 fixed-lag 形式的保存与裁剪。
+- 当前 active spline window 已经进入优化变量层。
+- 但它还不是最终的 fixed-lag GTSAM 主状态组织方式，也还不是多段 LiDAR factors 联合优化。
 
 ### 2. LiDAR 连续时间残差还没接入主链
 - 当前已经有 CPU 版连续时间 LiDAR factor。
 - 但它还是最小可用版本：
-  - 局部 4 控制点窗口
+  - 当前主要只约束最新 segment
+  - 虽然整窗控制点已经进入变量集合，但多段历史 segment 还没有各自的 LiDAR factor
   - 数值化 pose Jacobian
   - 还没有 GPU 版
   - 还没有与最终 fixed-lag 图结构完全统一
@@ -151,11 +172,12 @@ colcon test-result --all
 ### Next Step 1：把 `CT_LIDAR_CPU` 从 local frontend 推进到 fixed-lag spline 主链
 目标：
 - 让 spline control points 成为 odometry 主状态的一部分
-- 不再只依赖每帧局部 LM，而是进入真正的窗口滑动与边缘化
+- 不再只依赖每帧局部 LM，而是进入真正的“多段窗口联合优化 + 边缘化”
 
 建议子任务：
-- 设计 knot insertion / window slide / marginalization 策略
-- 将当前 4 控制点 key 组织推广到多段窗口
+- 为 active window 内的多个 segment 建立各自的连续时间 LiDAR factors
+- 让多段相邻 segment 共享控制点并共同进入图优化
+- 设计旧控制点边缘化与先验回灌策略
 - 保留现有兼容输出不变
 
 ### Next Step 2：补齐 IMU 连续时间约束

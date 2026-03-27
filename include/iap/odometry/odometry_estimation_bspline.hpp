@@ -75,6 +75,7 @@ class OdometryEstimationBSpline : public OdometryEstimationCPU {
   int lm_max_iterations_ = 8;
   std::shared_ptr<gtsam_points::iVox> ct_target_ivox_;
   std::unique_ptr<iap::BSplineControlWindow> control_window_;
+  std::unique_ptr<iap::BSplineControlWindowBuffer> control_buffer_;
   std::shared_ptr<iap::BSplineTrajectory> latest_trajectory_;
 };
 
