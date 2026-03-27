@@ -11,6 +11,7 @@
 #include <iap/integrity/integrity_types.hpp>
 #include <Eigen/Core>
 #include <functional>
+#include <mutex>
 #include <optional>
 #include <vector>
 
@@ -80,6 +81,8 @@ class IntegrityPlanner : public PlannerInterface {
   TrajectoryPoint execution_target(const CandidateTrajectory& chosen) const override;
 
   void on_state_change(IntegrityState new_state) override;
+  void set_trajectory_view(std::shared_ptr<const ContinuousTrajectoryView> view) override;
+  void set_control_access(std::shared_ptr<const SplineControlAccess> access) override;
 
   const char* name() const override { return "RecedingHorizonPlanner"; }
 
@@ -101,6 +104,9 @@ class IntegrityPlanner : public PlannerInterface {
   PredictedIntegrityComputer  predictor_;
   PredictedAraimComputer      araim_predictor_;          ///< IAP-RQ-331
   std::function<double(const Eigen::Vector3d&)> al_fn_; ///< IAP-RQ-421 (nullable)
+  mutable std::mutex trajectory_mutex_;
+  std::shared_ptr<const ContinuousTrajectoryView> trajectory_view_;
+  std::shared_ptr<const SplineControlAccess> control_access_;
 };
 
 }  // namespace iap

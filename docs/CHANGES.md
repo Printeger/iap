@@ -3,6 +3,12 @@
 > 规则：任何代码改动必须在这里记录，并包含 IAP-RQ-XXX。
 
 ## Unreleased
+- feat(dev-ct-foundation): IAP-RQ-300 / IAP-RQ-410 — add the first continuous-time B-spline foundation for odometry and planner integration.
+  - Added planner-facing continuous trajectory interfaces: `ContinuousTrajectoryView`, `SplineControlAccess`, `TrajectorySample`, `SplineWindowSnapshot`.
+  - Added `BSplineTrajectory` with uniform/non-uniform cubic knot policies, time query, range sampling, knot/control-point snapshot export.
+  - Added `OdometryEstimationBSpline` and `config_odometry_bspline.json`. The new module currently reuses the existing LiDAR-IMU odometry backend, then publishes a continuous-time B-spline window via `IapSharedState` and `EstimationFrame::custom_data` while preserving legacy sampled outputs.
+  - `PlannerInterface` now has default no-op `set_trajectory_view()` / `set_control_access()` hooks; `IntegrityPlanner` can consume the published trajectory view without breaking the existing `plan(...)` signature.
+  - Added `test_bspline_trajectory.cpp` unit tests and updated `docs/dev_ct/PLANS.md` with current implementation status.
 - fix(clock-ownership): IAP-RQ-010 / IAP-RQ-200 — converge single-owner clock contract and suppress GNSS-owner read noise.
   - Added `clock_owner_mode` (`dual|odometry|gnss`) wiring across odometry/GNSS/trunk; defaults switched to `gnss` in odometry configs.
   - Added cross-module clock readiness marker in `IapSharedState` (`set_clock_ready/clear_clock_ready/is_clock_ready`).
@@ -261,4 +267,3 @@
   - All `glim_LIBRARIES` → `iap_LIBRARIES`; install paths `share/glim` → `share/iap`, `bin/glim` → `bin/iap`.
   - `colcon build --packages-select iap` passes; `ros2 pkg list | grep iap` shows `iap`.
 - Init: add traceability & agent rules. (IAP-RQ-000)
-

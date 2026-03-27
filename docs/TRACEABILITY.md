@@ -32,11 +32,11 @@
 | IAP-RQ-200 | Integrity 输出：PL/AL/IM/mode + 关键中间量; ARAIM CSV; K_fa_used 修复 | PL < AL 安全条件 | `integrity_types.hpp` (+K_fa_used); `araim_debug.hpp` (config constructor, write+worst_hyp); `integrity_monitor.hpp/.cpp` (last_araim_result_, K_fa_used forwarding); `integrity_extension.cpp` (CSV write, k_fa_used bug fix, traj CSV); `config_gnss.json` `"integrity"` section; **fix**: `integrity_monitor.cpp` distinguish UNSAFE-due-to-PL>=AL (warn) vs UNSAFE-in-recovery (info) | `python3 tools/plot_araim_timeline.py /tmp/iap_araim.csv` → Fig B1/B2/B3; IM>0 帧占比>80%; HPL<HAL 始终成立 | `/tmp/iap_araim.csv` (`row_type,stamp,HPL/VPL/HAL/VAL/IM,worst_hyp data`); `PL, AL, IM, mode, K_fa_used` | **DONE** |
 | IAP-RQ-210 | Alert Limit AL 由障碍距离动态给出 | 近障碍时 AL 缩小 | `IntegrityMonitor::compute_AL()`, `set_obstacle_distance()` | 越靠近障碍 AL 越小；日志可见 | `AL, obstacle_dist` | **DONE** |
 | IAP-RQ-220 | GNSS per-satellite NIS gating（RAIM-ish） | 卫星级 FDE | `IntegrityMonitor::run_gnss_gating()` (chi2 test, gamma_R, FDE greedy) | 注入 bias 卫星被降权/剔除 | `sat_nis, gamma_R, excluded_sats` | **DONE** |
-| IAP-RQ-300 | 候选轨迹生成（motion primitives） | 运动原语离散化候选轨迹 | `include/iap/planner/trajectory_types.hpp`, `trajectory_generator.hpp/.cpp` | 生成 M 条候选轨迹并可视化时间戳点序列 | `trajectory_count, speeds, yaw_rates` | **DONE** |
+| IAP-RQ-300 | 候选轨迹生成（motion primitives） | 运动原语离散化候选轨迹 | `include/iap/planner/trajectory_types.hpp`, `trajectory_generator.hpp/.cpp`; **dev_ct foundation**: `include/iap/planner/continuous_trajectory_view.hpp`, `include/iap/odometry/bspline_trajectory.hpp`, `src/iap/odometry/bspline_trajectory.cpp`, `test/test_bspline_trajectory.cpp` | 生成 M 条候选轨迹并可视化时间戳点序列；`test_bspline_trajectory` 校验 uniform/non-uniform spline query 与 window snapshot | `trajectory_count, speeds, yaw_rates`; `spline knot mode / control_point_count` | **DONE** |
 | IAP-RQ-310 | 预测可见/可观测性集合（占位） | ray-check 遮挡预测 | `include/iap/planner/predicted_integrity.hpp/.cpp` (placeholder) | TODO: 接地图后做 ray-check；当前返回占位值 | `n_vis_placeholder` | **DONE (placeholder)** |
 | IAP-RQ-320 | 协方差传播 → Σ_pred → PL_pred | PL 预测供规划使用 | `include/iap/planner/predicted_integrity.hpp/.cpp` (sigma growth, K_pl=3.0) | PL_pred 随时间增长且不同轨迹有差异；σ_grow 可配置 | `PL_pred(s), sigma_pred(s)` | **DONE (baseline)** |
 | IAP-RQ-400 | Integrity-aware planning objective | hinge(PL_pred−AL)²代价+goal+effort | `include/iap/planner/integrity_planner.hpp/.cpp`; `evaluate()` | IM<0时选绕行轨迹；J_integrity > J_goal场景可复现 | `J_total, J_integrity, J_goal, J_effort` | **DONE** |
-| IAP-RQ-410 | Receding horizon loop | 执行Δt后重规划 | `IntegrityPlanner::execution_target()`, `plan()` | 调用`plan()`+`execution_target()`模拟多步闭环 | `chosen_traj_id, dt_execute` | **DONE** |
+| IAP-RQ-410 | Receding horizon loop | 执行Δt后重规划 | `IntegrityPlanner::execution_target()`, `plan()`; **dev_ct foundation**: `PlannerInterface::set_trajectory_view/set_control_access`, `IntegrityPlanner` continuous-time view hookup, `IapSharedState` trajectory publication, `OdometryEstimationBSpline` sampled output bridge | 调用`plan()`+`execution_target()`模拟多步闭环；`test_bspline_trajectory` + odometry module startup smoke test verify planner can consume a published spline view without changing `plan(...)` signature | `chosen_traj_id, dt_execute`; `continuous trajectory available` | **DONE** |
 | IAP-RQ-500 | 三种 baseline（Passive/CovMin/IntegAware） | 对比 integrity 驱动的优势 | `apps/iap_experiment.cpp` (run_baseline ×3) | 同场景三 baseline 均输出指标 CSV | `baseline, violation_frac, avg_PL, mission_success` | **DONE (stub)** |
 | IAP-RQ-510 | 指标：Time(PL>AL)%, AvgPL, MinIM, path/time/effort | 量化对比表格 | `include/iap/experiments/metrics.hpp` (MetricsCollector, write_comparison_table) | `ros2 run iap iap_experiment` 输出 /tmp/*_summary.md | `violation%, avg_PL, min_IM, path_len, time, effort` | **DONE (stub)** |
 | IAP-RQ-900 | 自动生成 IEEE Trans methodology.tex（流程图+模块小节+公式） | 论文写作辅助 | `tools/gen_methodology.py` → `docs/methodology/methodology.tex`, `docs/figures/system_flow.tex` | `python3 tools/gen_methodology.py` 生成 .tex；结构无误（12 env 平衡） | gen exit code 0; env mismatch=0 | **DONE** |
@@ -69,8 +69,10 @@
 ## 2. 未映射改动（临时区）
 > 如果你临时改了代码但还没决定它对应哪个需求，先把改动写在这里（提交前必须移入上表）。
 
+- 2026-03-27: IAP-RQ-300 / IAP-RQ-410
+  - `OdometryEstimationBSpline` 目前是连续时间 B-spline 骨架层，不是最终的 spline-native LiDAR/IMU/GNSS factor graph。
+  - 现阶段它复用了现有 LiDAR-IMU odometry 后端，并在优化后发布 `ContinuousTrajectoryView` / `SplineControlAccess`，用于 planner / viewer / debug 接线与后续 Phase-1B/1C 演进。
 - 2026-03-22: IAP-RQ-010 / IAP-RQ-200
   - GNSS clock single-owner contract收敛：`clock_owner_mode` 跨模块联动，默认切到 `gnss`。
   - 增加 ready 时序契约：`IapSharedState::{set,clear,is}_clock_ready`；GNSS 生产 ready，odometry 在 GNSS-owner 下仅 `current+ready` 才读 `C(i)`。
   - 观测与一致性：`KeyLifecycleMonitor` 记录 ownership/missing/conflict/violation；A/B 验收日志显示 `c missing/conflicts/violations = 0`，无 hard optimizer error。
-

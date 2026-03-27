@@ -7,6 +7,7 @@
 // Future:
 //   - MDPPlanner (MDP/RL-based exploration)
 
+#include <iap/planner/continuous_trajectory_view.hpp>
 #include <iap/planner/trajectory_types.hpp>
 #include <iap/integrity/integrity_types.hpp>
 #include <Eigen/Core>
@@ -69,6 +70,21 @@ class PlannerInterface {
    * The planner may adjust its behavior (e.g., switch to hover).
    */
   virtual void on_state_change(IntegrityState new_state) { (void)new_state; }
+
+  /**
+   * @brief Optional continuous-time trajectory view for spline-aware planners.
+   *
+   * Default implementation is a no-op so legacy planners do not need changes.
+   */
+  virtual void set_trajectory_view(std::shared_ptr<const ContinuousTrajectoryView> view) { (void)view; }
+
+  /**
+   * @brief Optional read-only spline window access for future spline planners.
+   *
+   * Default implementation is a no-op so the current planner contract remains
+   * source-compatible.
+   */
+  virtual void set_control_access(std::shared_ptr<const SplineControlAccess> access) { (void)access; }
 
   /**
    * @brief Return a human-readable name for this planner.

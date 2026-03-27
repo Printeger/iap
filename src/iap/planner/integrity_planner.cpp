@@ -4,6 +4,7 @@
 // §5.2: Cost = HPL/AL ratio hinge + D_turn + dist_to_goal + effort + infeasibility
 
 #include <iap/planner/integrity_planner.hpp>
+#include <iap/util/shared_state.hpp>
 #include <spdlog/spdlog.h>
 #include <algorithm>
 #include <cmath>
@@ -42,6 +43,16 @@ void IntegrityPlanner::set_al_fn(std::function<double(const Eigen::Vector3d&)> f
 
 void IntegrityPlanner::on_state_change(IntegrityState /*new_state*/) {
   // Could adjust internal state; currently a no-op.
+}
+
+void IntegrityPlanner::set_trajectory_view(std::shared_ptr<const ContinuousTrajectoryView> view) {
+  std::lock_guard<std::mutex> lock(trajectory_mutex_);
+  trajectory_view_ = std::move(view);
+}
+
+void IntegrityPlanner::set_control_access(std::shared_ptr<const SplineControlAccess> access) {
+  std::lock_guard<std::mutex> lock(trajectory_mutex_);
+  control_access_ = std::move(access);
 }
 
 // ----------------------------------------------------------------------------
@@ -120,6 +131,20 @@ CandidateTrajectory IntegrityPlanner::plan(const Eigen::Vector3d& pos0,
                                            const Eigen::Vector3d& goal,
                                            double sigma0,
                                            const IntegrityReport* report) const {
+  std::shared_ptr<const ContinuousTrajectoryView> trajectory_view;
+  {
+    std::lock_guard<std::mutex> lock(trajectory_mutex_);
+    trajectory_view = trajectory_view_;
+  }
+  if (!trajectory_view) {
+    trajectory_view = IapSharedState::instance().get_continuous_trajectory_view();
+  }
+  if (trajectory_view) {
+    if (const auto latest = trajectory_view->latest_sample()) {
+      sigma0 = std::max(sigma0, latest->sigma);
+    }
+  }
+
   // Determine current AL and effective integrity weight
   double AL = params_.al_default;
   double w_int = params_.w_integrity;

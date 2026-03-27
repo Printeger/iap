@@ -109,12 +109,14 @@ add_library(iap SHARED
   src/iap/planner/integrity_planner.cpp
   # odometry
   src/iap/odometry/callbacks.cpp
+  src/iap/odometry/bspline_trajectory.cpp
   src/iap/odometry/estimation_frame.cpp
   src/iap/odometry/initial_state_estimation.cpp
   src/iap/odometry/loose_initial_state_estimation.cpp
   src/iap/odometry/odometry_estimation_base.cpp
   src/iap/odometry/async_odometry_estimation.cpp
   src/iap/odometry/odometry_estimation_imu.cpp
+  src/iap/odometry/odometry_estimation_bspline.cpp
   src/iap/odometry/odometry_estimation_ct.cpp
   src/iap/odometry/odometry_estimation_cpu.cpp
   # mapping
@@ -155,6 +157,7 @@ list(APPEND iap_LIBRARIES iap)
 
 # Create shared libraries for estimation modules
 list(APPEND module_srcs
+  src/iap/odometry/odometry_estimation_bspline_create.cpp
   src/iap/odometry/odometry_estimation_ct_create.cpp
   src/iap/odometry/odometry_estimation_cpu_create.cpp
   src/iap/mapping/sub_mapping_create.cpp
@@ -394,6 +397,8 @@ if(DEFINED ENV{ROS_VERSION})
       find_package(ament_cmake_gtest REQUIRED)
       ament_add_gtest(test_araim test/test_araim.cpp)
       target_link_libraries(test_araim iap)
+      ament_add_gtest(test_bspline_trajectory test/test_bspline_trajectory.cpp)
+      target_link_libraries(test_bspline_trajectory iap)
     endif()
     ament_export_include_directories(include ${EIGEN3_INCLUDE_DIR} ${OpenCV_INCLUDE_DIRS})
     ament_export_libraries(${iap_LIBRARIES} ${GTSAM_LIBRARIES} fmt spdlog::spdlog)

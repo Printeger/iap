@@ -23,8 +23,11 @@
 //     int  n     = IapSharedState::instance().get_n_confirmed_trunks();
 
 #include <iap/gnss/gnss_types.hpp>
+#include <iap/planner/continuous_trajectory_view.hpp>
 #include <iap/trunk/trunk_types.hpp>
 
+#include <atomic>
+#include <memory>
 #include <mutex>
 #include <optional>
 
@@ -102,6 +105,28 @@ class IapSharedState {
     return clock_ready_stamp_.load(std::memory_order_relaxed);
   }
 
+  // ── Continuous trajectory publication (dev_ct foundation) ─────────────
+
+  void set_continuous_trajectory_view(std::shared_ptr<const ContinuousTrajectoryView> view) {
+    std::lock_guard<std::mutex> lk(trajectory_mutex_);
+    latest_trajectory_view_ = std::move(view);
+  }
+
+  std::shared_ptr<const ContinuousTrajectoryView> get_continuous_trajectory_view() const {
+    std::lock_guard<std::mutex> lk(trajectory_mutex_);
+    return latest_trajectory_view_;
+  }
+
+  void set_spline_control_access(std::shared_ptr<const SplineControlAccess> access) {
+    std::lock_guard<std::mutex> lk(trajectory_mutex_);
+    latest_control_access_ = std::move(access);
+  }
+
+  std::shared_ptr<const SplineControlAccess> get_spline_control_access() const {
+    std::lock_guard<std::mutex> lk(trajectory_mutex_);
+    return latest_control_access_;
+  }
+
  private:
   IapSharedState() = default;
 
@@ -115,6 +140,10 @@ class IapSharedState {
 
   std::atomic<long> clock_ready_frame_id_{-1};
   std::atomic<double> clock_ready_stamp_{0.0};
+
+  mutable std::mutex trajectory_mutex_;
+  std::shared_ptr<const ContinuousTrajectoryView> latest_trajectory_view_;
+  std::shared_ptr<const SplineControlAccess> latest_control_access_;
 };
 
 }  // namespace iap
