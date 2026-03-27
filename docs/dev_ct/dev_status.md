@@ -28,6 +28,10 @@
   - 直接按 IMU 时间戳约束 gyro / accel residual
   - shared gyro bias / accel bias / gravity graph states
   - 与 LiDAR factors 共享同一组控制点变量
+- 已把 velocity 提升为 fixed-lag 图中的显式状态：
+  - 每个 active segment 通过 `symbol('u', idx)` 持有 velocity state
+  - 新增 velocity consistency factor 将 pose spline 与 velocity state 绑定
+  - `EstimationFrame::v_world_imu` 现在来自优化后的 velocity state，而不是临时 pose 差分
 - 当前 `src/iap` 已具备：
   - 连续时间轨迹统一接口
   - B-spline 轨迹容器与时间查询能力
@@ -113,6 +117,7 @@
 - 优化图目前包含：
   - active window 内多个 segment 的 LiDAR factors
   - active window 内多个 segment 的 IMU factors
+  - active window 内多个 segment 的 velocity factors
   - 全 active window 的 smoothness factors
   - active window 起始边界的 marginal prior
   - active window 尾端的 prediction priors
@@ -127,6 +132,11 @@
   - 直接 gyro / accel residual
   - shared bias / gravity states
   - 数值 Jacobian
+- CPU velocity factor 当前采用最小可用实现：
+  - 4 个 pose control points
+  - 1 个显式 velocity state
+  - 通过有限差分速度预测把 velocity 和 pose spline 绑定
+  - 当前主要用于把 velocity 纳入 fixed-lag 图状态组织
 
 当前 Phase 1B 的边界：
 - 这还是 local frontend，不是最终的 fixed-lag smoother 主链。
@@ -134,7 +144,8 @@
 - 当前已经具备 segment-specific target snapshot 和显式 marginal prior 的雏形。
 - 但这些 prior 仍然是工程上的近似替代，不是严格的 Schur complement 边缘化结果。
 - IMU 现在已经开始按时间戳直接约束 spline 的角速度 / 线加速度，并且 bias / gravity 已进入联合优化。
-- 新增的 IMU continuous-time factor 当前仍没有把速度作为独立状态显式优化，Jacobians 也仍是数值形式。
+- velocity 现在已经作为独立状态显式进入图，但 planner / control-access 侧还没有系统消费这组显式 velocity control states。
+- IMU / velocity continuous-time factors 的 Jacobian 目前仍是数值形式。
 - GNSS 也尚未进入控制点窗口主链。
 - LiDAR factor 目前使用数值 pose Jacobian，是为了先打通最小可用版本；解析 Jacobian 和 GPU 版仍是后续工作。
 
@@ -160,6 +171,7 @@ colcon test-result --all
 - `test_bspline_trajectory` 通过
 - `test_bspline_control_window` 现已覆盖 control buffer 扩展、lag pruning、values/update round-trip
 - `test_bspline_imu_factor` 现已覆盖静止匹配样本零残差、bias-state 补偿和 gravity-state 失配
+- `test_bspline_velocity_factor` 现已覆盖 matching velocity 零残差、mismatch 非零残差和 linearize 可用性
 - Phase 1B 代码已完成编译与测试通过
 
 ## 当前还没完成的关键部分
@@ -186,7 +198,7 @@ colcon test-result --all
 - 当前已经有 per-segment IMU sample factor。
 - 当前已经开始将 IMU 观测直接约束到 spline 的角速度 / 线加速度。
 - 当前 shared gyro bias / accel bias / gravity 已进入图。
-- 但速度仍然还没有作为 spline-native 联合状态进入图。
+- velocity 已进入图，但仍是通过独立 velocity consistency factor 与 pose spline 绑定的过渡形式。
 - 当前 Jacobian 仍是数值形式，尚未做解析化和更严格的数值校验。
 
 ### 4. GNSS 还没下沉到 bspline odometry
@@ -216,8 +228,8 @@ colcon test-result --all
 - 让 IMU 不再只承担初始化和兼容链路职责
 
 建议子任务：
-- 在当前 gyro / accel sample factor 基础上补齐 velocity 联合状态
-- 设计 velocity / clock 与 spline control points 的联合状态布局
+- 将显式 velocity state 发布到 trajectory/control-access，并让 planner/debug 能读取
+- 在当前 gyro / accel sample factor 基础上继续收敛 velocity / clock 与 spline control points 的联合状态布局
 - 完成 IMU 残差的解析 Jacobian 或更严格的数值校验
 
 ### Next Step 3：Phase 1C，把 GNSS 纳入连续时间窗口

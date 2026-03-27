@@ -88,6 +88,7 @@ OdometryEstimationBSpline::OdometryEstimationBSpline(const OdometryEstimationBSp
   imu_ct_rot_inf_scale_ = config.param<double>("odometry_estimation", "imu_ct_rot_inf_scale", 100.0);
   imu_ct_bias_inf_scale_ = config.param<double>("odometry_estimation", "imu_ct_bias_inf_scale", 1e3);
   imu_ct_gravity_inf_scale_ = config.param<double>("odometry_estimation", "imu_ct_gravity_inf_scale", 1e3);
+  velocity_ct_inf_scale_ = config.param<double>("odometry_estimation", "velocity_ct_inf_scale", 1e3);
   imu_ct_sample_stride_ = config.param<int>("odometry_estimation", "imu_ct_sample_stride", 4);
   lm_max_iterations_ = config.param<int>("odometry_estimation", "lm_max_iterations", 8);
 
@@ -267,6 +268,7 @@ void OdometryEstimationBSpline::append_active_segment_constraint(
   for (std::size_t i = 0; i < iap::kBSplineControlPointCount; ++i) {
     segment.control_indices[i] = states[i].index;
   }
+  segment.velocity_index = states[1].index;
 
   active_segment_constraints_.push_back(segment);
 }
@@ -401,8 +403,28 @@ EstimationFrame::ConstPtr OdometryEstimationBSpline::insert_frame_ct_lidar(
   gtsam::NonlinearFactorGraph graph;
   std::shared_ptr<iap::IntegratedBSplineGICPFactor> current_factor;
   std::size_t active_imu_factor_count = 0;
+  std::size_t active_velocity_factor_count = 0;
+  auto segment_poses_from_values = [&](const ActiveSplineSegmentConstraint& segment) {
+    std::array<gtsam::Pose3, iap::kBSplineControlPointCount> poses;
+    for (std::size_t k = 0; k < iap::kBSplineControlPointCount; ++k) {
+      poses[k] = values.at<gtsam::Pose3>(iap::bspline_control_point_key(segment.control_indices[k]));
+    }
+    return poses;
+  };
   for (std::size_t i = 0; i < active_segment_constraints_.size(); ++i) {
     const auto& segment = active_segment_constraints_[i];
+    const gtsam::Key velocity_key = iap::bspline_velocity_key(segment.velocity_index);
+
+    if (!values.exists(velocity_key)) {
+      const auto segment_poses = segment_poses_from_values(segment);
+      const gtsam::Vector3 velocity_guess =
+        iap::IntegratedBSplineVelocityFactor::predict_velocity(
+          segment_poses,
+          0.0,
+          std::max(1e-3, segment.scan_end - segment.stamp),
+          trajectory_params_.finite_difference_dt);
+      values.insert(velocity_key, velocity_guess);
+    }
 
     std::array<gtsam::Key, iap::kBSplineControlPointCount> segment_keys{};
     for (std::size_t k = 0; k < iap::kBSplineControlPointCount; ++k) {
@@ -414,6 +436,16 @@ EstimationFrame::ConstPtr OdometryEstimationBSpline::insert_frame_ct_lidar(
     factor->set_num_threads(params->num_threads);
     factor->set_max_correspondence_distance(max_correspondence_distance_);
     graph.add(factor);
+
+    auto velocity_factor = std::make_shared<iap::IntegratedBSplineVelocityFactor>(
+      segment_keys,
+      velocity_key,
+      0.0,
+      std::max(1e-3, segment.scan_end - segment.stamp),
+      velocity_ct_inf_scale_,
+      trajectory_params_.finite_difference_dt);
+    graph.add(velocity_factor);
+    active_velocity_factor_count++;
 
     for (const auto& imu_sample : segment.imu_samples) {
       auto imu_factor = std::make_shared<iap::IntegratedBSplineIMUFactor>(
@@ -514,9 +546,10 @@ EstimationFrame::ConstPtr OdometryEstimationBSpline::insert_frame_ct_lidar(
   }
 
   const auto keys = control_window_->keys();
-  logger->trace("bspline ct active_window={} active_segment_factors={} active_imu_factors={} current_segment_keys={} {} {} {}",
+  logger->trace("bspline ct active_window={} active_segment_factors={} active_velocity_factors={} active_imu_factors={} current_segment_keys={} {} {} {}",
     active_states.size(),
     active_segment_constraints_.size(),
+    active_velocity_factor_count,
     active_imu_factor_count,
     static_cast<std::uint64_t>(keys[0]),
     static_cast<std::uint64_t>(keys[1]),
@@ -534,7 +567,7 @@ EstimationFrame::ConstPtr OdometryEstimationBSpline::insert_frame_ct_lidar(
   const gtsam::Pose3 end_pose = control_window_->evaluate(1.0);
   new_frame->T_world_lidar = Eigen::Isometry3d(start_pose.matrix());
   new_frame->T_world_imu = new_frame->T_world_lidar * T_lidar_imu;
-  new_frame->v_world_imu = (end_pose.translation() - start_pose.translation()) / scan_duration;
+  new_frame->v_world_imu = values.at<gtsam::Vector3>(iap::bspline_velocity_key(control_window_->states()[1].index));
   new_frame->imu_bias.head<3>() = accel_bias_;
   new_frame->imu_bias.tail<3>() = gyro_bias_;
 

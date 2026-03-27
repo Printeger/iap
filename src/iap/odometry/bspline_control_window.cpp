@@ -36,6 +36,10 @@ gtsam::Key bspline_control_point_key(std::size_t index) {
   return gtsam::symbol('s', static_cast<uint64_t>(index));
 }
 
+gtsam::Key bspline_velocity_key(std::size_t index) {
+  return gtsam::symbol('u', static_cast<uint64_t>(index));
+}
+
 BSplineControlWindow::BSplineControlWindow() = default;
 
 void BSplineControlWindow::initialize(double scan_start, double scan_end, const gtsam::Pose3& initial_pose) {

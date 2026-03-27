@@ -8,6 +8,7 @@
 #include <iap/odometry/bspline_trajectory.hpp>
 #include <iap/odometry/integrated_bspline_gicp_factor.hpp>
 #include <iap/odometry/integrated_bspline_imu_factor.hpp>
+#include <iap/odometry/integrated_bspline_velocity_factor.hpp>
 #include <iap/odometry/odometry_estimation_cpu.hpp>
 
 #include <Eigen/Core>
@@ -64,6 +65,7 @@ class OdometryEstimationBSpline : public OdometryEstimationCPU {
     double stamp = 0.0;
     double scan_end = 0.0;
     std::array<std::size_t, iap::kBSplineControlPointCount> control_indices{};
+    std::size_t velocity_index = 0;
     gtsam_points::PointCloud::ConstPtr source;
     std::shared_ptr<const gtsam_points::iVox> target_snapshot;
     std::shared_ptr<const gtsam_points::NearestNeighborSearch> target_tree;
@@ -115,6 +117,7 @@ class OdometryEstimationBSpline : public OdometryEstimationCPU {
   double imu_ct_rot_inf_scale_ = 100.0;
   double imu_ct_bias_inf_scale_ = 1e3;
   double imu_ct_gravity_inf_scale_ = 1e3;
+  double velocity_ct_inf_scale_ = 1e3;
   int imu_ct_sample_stride_ = 4;
   int lm_max_iterations_ = 8;
   Eigen::Vector3d gyro_bias_ = Eigen::Vector3d::Zero();

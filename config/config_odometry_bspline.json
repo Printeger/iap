@@ -51,6 +51,7 @@
     "imu_ct_rot_inf_scale": 100.0,
     "imu_ct_bias_inf_scale": 1e3,
     "imu_ct_gravity_inf_scale": 1e3,
+    "velocity_ct_inf_scale": 1e3,
     "imu_ct_sample_stride": 4,
     "lm_max_iterations": 8,
     // Continuous-time spline settings
