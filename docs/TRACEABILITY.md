@@ -81,6 +81,9 @@
 - 2026-03-27: IAP-RQ-300 / IAP-RQ-410
   - 已将 active spline window 推进到优化变量层：整窗控制点现在会共同进入 LM 初值和 smoothness / boundary prior 图结构。
   - 当前仍是“整窗变量 + 最新 segment LiDAR factor”的过渡实现，尚未达到“多段 LiDAR factors 联合优化”的最终目标。
+- 2026-03-27: IAP-RQ-300 / IAP-RQ-410
+  - 已将 active window 内多个 segment 各自挂上连续时间 LiDAR factor，并在同一 LM 图内共享重叠控制点。
+  - 当前仍是过渡实现：多个 segment 共享同一个 active target map，尚未引入 segment-specific target snapshot，也还没有 IMU/GNSS 连续时间 factors。
 - 2026-03-22: IAP-RQ-010 / IAP-RQ-200
   - GNSS clock single-owner contract收敛：`clock_owner_mode` 跨模块联动，默认切到 `gnss`。
   - 增加 ready 时序契约：`IapSharedState::{set,clear,is}_clock_ready`；GNSS 生产 ready，odometry 在 GNSS-owner 下仅 `current+ready` 才读 `C(i)`。

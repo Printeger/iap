@@ -9,6 +9,10 @@
 #include <iap/odometry/integrated_bspline_gicp_factor.hpp>
 #include <iap/odometry/odometry_estimation_cpu.hpp>
 
+#include <array>
+#include <cstddef>
+#include <vector>
+
 namespace gtsam {
 class NonlinearFactorGraph;
 }
@@ -52,9 +56,11 @@ class OdometryEstimationBSpline : public OdometryEstimationCPU {
   EstimationFrame::ConstPtr insert_frame_ct_lidar(
     const PreprocessedFrame::Ptr& frame,
     std::vector<EstimationFrame::ConstPtr>& marginalized_frames);
-  void initialize_control_window(const PreprocessedFrame::Ptr& raw_frame, const gtsam::Pose3& initial_pose);
+ void initialize_control_window(const PreprocessedFrame::Ptr& raw_frame, const gtsam::Pose3& initial_pose);
   gtsam::Pose3 predict_scan_end_pose(double scan_duration) const;
   gtsam_points::PointCloud::ConstPtr create_lidar_source_cloud(const PreprocessedFrame::Ptr& raw_frame) const;
+  void append_active_segment_constraint(double stamp, double scan_end, const gtsam_points::PointCloud::ConstPtr& source);
+  void prune_active_segment_constraints(double min_stamp);
   void insert_target_cloud(const EstimationFrame::Ptr& frame);
   void update_frame_history(
     const EstimationFrame::Ptr& frame,
@@ -73,9 +79,18 @@ class OdometryEstimationBSpline : public OdometryEstimationCPU {
   double ctrl_point_prediction_inf_scale_ = 1e3;
   double ctrl_point_smoothness_inf_scale_ = 1e2;
   int lm_max_iterations_ = 8;
+
+  struct ActiveSplineSegmentConstraint {
+    double stamp = 0.0;
+    double scan_end = 0.0;
+    std::array<std::size_t, iap::kBSplineControlPointCount> control_indices{};
+    gtsam_points::PointCloud::ConstPtr source;
+  };
+
   std::shared_ptr<gtsam_points::iVox> ct_target_ivox_;
   std::unique_ptr<iap::BSplineControlWindow> control_window_;
   std::unique_ptr<iap::BSplineControlWindowBuffer> control_buffer_;
+  std::vector<ActiveSplineSegmentConstraint> active_segment_constraints_;
   std::shared_ptr<iap::BSplineTrajectory> latest_trajectory_;
 };
 

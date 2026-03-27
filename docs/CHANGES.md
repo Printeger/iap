@@ -3,6 +3,10 @@
 > 规则：任何代码改动必须在这里记录，并包含 IAP-RQ-XXX。
 
 ## Unreleased
+- feat(dev-ct-multiseg): IAP-RQ-300 / IAP-RQ-410 — add per-segment continuous-time LiDAR factors across the active spline window.
+  - `OdometryEstimationBSpline` now stores active segment constraints (`raw source cloud + 4 control-point indices`) inside the lag window.
+  - Each active segment now contributes its own `IntegratedBSplineGICPFactor` to the same LM graph, so overlapping control points are jointly optimized across multiple segments instead of only the newest one.
+  - Active segment constraints are pruned together with the lag window.
 - feat(dev-ct-joint-window): IAP-RQ-300 / IAP-RQ-410 — move the active spline window from publication-only state into the optimization variable set.
   - `BSplineControlWindowBuffer` now exposes `keys()`, `values()`, and `update_from_values()` so the active lag-window control points can directly participate in optimization.
   - `OdometryEstimationBSpline` now seeds LM from the whole active control window, adds smoothness factors across all active control points, and anchors/predicts the boundary control points while the current LiDAR factor still constrains the latest segment.

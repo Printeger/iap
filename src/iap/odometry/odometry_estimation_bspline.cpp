@@ -2,6 +2,7 @@
 
 #include <Eigen/Eigenvalues>
 
+#include <algorithm>
 #include <cstdint>
 #include <gtsam/inference/Symbol.h>
 #include <gtsam/slam/BetweenFactor.h>
@@ -128,6 +129,7 @@ void OdometryEstimationBSpline::initialize_control_window(
   const gtsam::Pose3& initial_pose) {
   control_window_->initialize(raw_frame->stamp, raw_frame->scan_end_time, initial_pose);
   control_buffer_->reset_from_window(*control_window_);
+  active_segment_constraints_.clear();
 }
 
 gtsam::Pose3 OdometryEstimationBSpline::predict_scan_end_pose(double scan_duration) const {
@@ -141,6 +143,33 @@ gtsam::Pose3 OdometryEstimationBSpline::predict_scan_end_pose(double scan_durati
   const double scale = scan_duration / last_duration;
   const gtsam::Vector6 delta = gtsam::Pose3::Logmap(last_start.between(last_end));
   return last_end.compose(gtsam::Pose3::Expmap(scale * delta));
+}
+
+void OdometryEstimationBSpline::append_active_segment_constraint(
+  double stamp,
+  double scan_end,
+  const gtsam_points::PointCloud::ConstPtr& source) {
+  ActiveSplineSegmentConstraint segment;
+  segment.stamp = stamp;
+  segment.scan_end = scan_end;
+  segment.source = source;
+
+  const auto states = control_window_->states();
+  for (std::size_t i = 0; i < iap::kBSplineControlPointCount; ++i) {
+    segment.control_indices[i] = states[i].index;
+  }
+
+  active_segment_constraints_.push_back(segment);
+}
+
+void OdometryEstimationBSpline::prune_active_segment_constraints(double min_stamp) {
+  auto keep_begin = std::find_if(active_segment_constraints_.begin(), active_segment_constraints_.end(), [&](const auto& segment) {
+    return segment.scan_end >= min_stamp;
+  });
+
+  if (keep_begin != active_segment_constraints_.begin()) {
+    active_segment_constraints_.erase(active_segment_constraints_.begin(), keep_begin);
+  }
 }
 
 void OdometryEstimationBSpline::insert_target_cloud(const EstimationFrame::Ptr& frame) {
@@ -172,6 +201,7 @@ void OdometryEstimationBSpline::update_frame_history(
     const double min_active_stamp = std::max(0.0, frame->stamp - params->smoother_lag);
     control_buffer_->prune_before(min_active_stamp);
   }
+  prune_active_segment_constraints(std::max(0.0, frame->stamp - params->smoother_lag));
 
   Callbacks::on_marginalized_frames(marginalized_frames);
 }
@@ -236,17 +266,42 @@ EstimationFrame::ConstPtr OdometryEstimationBSpline::insert_frame_ct_lidar(
   control_window_->advance(raw_frame->stamp, raw_frame->scan_end_time, predicted_end_pose);
   control_buffer_->append_window(*control_window_);
 
+  const double min_active_stamp = std::max(0.0, raw_frame->stamp - params->smoother_lag);
+  control_buffer_->prune_before(min_active_stamp);
+  prune_active_segment_constraints(min_active_stamp);
+
   new_frame->frame = create_lidar_source_cloud(raw_frame);
+  const auto factor_source = gtsam_points::PointCloudCPU::clone(*new_frame->frame);
+  append_active_segment_constraint(raw_frame->stamp, raw_frame->scan_end_time, factor_source);
 
   gtsam::Values values = control_buffer_->values();
   const auto& active_states = control_buffer_->states();
-  const auto keys = control_window_->keys();
 
   gtsam::NonlinearFactorGraph graph;
-  auto factor = std::make_shared<iap::IntegratedBSplineGICPFactor>(keys, ct_target_ivox_, new_frame->frame, ct_target_ivox_);
-  factor->set_num_threads(params->num_threads);
-  factor->set_max_correspondence_distance(max_correspondence_distance_);
-  graph.add(factor);
+  std::shared_ptr<iap::IntegratedBSplineGICPFactor> current_factor;
+  for (std::size_t i = 0; i < active_segment_constraints_.size(); ++i) {
+    const auto& segment = active_segment_constraints_[i];
+
+    std::array<gtsam::Key, iap::kBSplineControlPointCount> segment_keys{};
+    for (std::size_t k = 0; k < iap::kBSplineControlPointCount; ++k) {
+      segment_keys[k] = iap::bspline_control_point_key(segment.control_indices[k]);
+    }
+
+    auto factor =
+      std::make_shared<iap::IntegratedBSplineGICPFactor>(segment_keys, ct_target_ivox_, segment.source, ct_target_ivox_);
+    factor->set_num_threads(params->num_threads);
+    factor->set_max_correspondence_distance(max_correspondence_distance_);
+    graph.add(factor);
+
+    if (i + 1 == active_segment_constraints_.size()) {
+      current_factor = factor;
+    }
+  }
+
+  if (!current_factor) {
+    logger->error("bspline ct frontend failed to create current segment factor");
+    return nullptr;
+  }
 
   const auto anchor_noise = gtsam::noiseModel::Isotropic::Precision(6, ctrl_point_anchor_inf_scale_);
   const auto pred_noise = gtsam::noiseModel::Isotropic::Precision(6, ctrl_point_prediction_inf_scale_);
@@ -296,8 +351,10 @@ EstimationFrame::ConstPtr OdometryEstimationBSpline::insert_frame_ct_lidar(
     logger->error("bspline ct frontend optimization failed: {}", e.what());
   }
 
-  logger->trace("bspline ct active_window={} current_segment_keys={} {} {} {}",
+  const auto keys = control_window_->keys();
+  logger->trace("bspline ct active_window={} active_segment_factors={} current_segment_keys={} {} {} {}",
     active_states.size(),
+    active_segment_constraints_.size(),
     static_cast<std::uint64_t>(keys[0]),
     static_cast<std::uint64_t>(keys[1]),
     static_cast<std::uint64_t>(keys[2]),
@@ -312,7 +369,7 @@ EstimationFrame::ConstPtr OdometryEstimationBSpline::insert_frame_ct_lidar(
   new_frame->T_world_imu = new_frame->T_world_lidar * T_lidar_imu;
   new_frame->v_world_imu = (end_pose.translation() - start_pose.translation()) / scan_duration;
 
-  const auto deskewed_points = factor->deskewed_source_points(values, true);
+  const auto deskewed_points = current_factor->deskewed_source_points(values, true);
   const auto deskewed_covs = covariance_estimation->estimate(deskewed_points, raw_frame->neighbors);
   for (int i = 0; i < new_frame->frame->size(); ++i) {
     new_frame->frame->points[i] = deskewed_points[static_cast<std::size_t>(i)];

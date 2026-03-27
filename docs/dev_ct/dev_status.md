@@ -17,6 +17,9 @@
   - 整窗控制点进入 LM 初值
   - 全窗 smoothness factors
   - 边界控制点 anchor / prediction priors
+- 已把 active window 内多个 segment 接入同一个 fixed-lag LM 图：
+  - 每个 active segment 各自一条连续时间 LiDAR factor
+  - 相邻 segment 通过共享控制点产生联合优化
 - 当前 `src/iap` 已具备：
   - 连续时间轨迹统一接口
   - B-spline 轨迹容器与时间查询能力
@@ -100,7 +103,7 @@
 - planner / viewer / `ContinuousTrajectoryView` 现在看到的是 active lag-window spline，而不是只有最新一个 segment。
 - 当前 active spline window 中的全部控制点已经进入 LM 变量集合，而不再只是发布给 planner / viewer。
 - 优化图目前包含：
-  - 最新 segment 的 LiDAR factor
+  - active window 内多个 segment 的 LiDAR factors
   - 全 active window 的 smoothness factors
   - active window 两端的 anchor / prediction priors
 - CPU LiDAR factor 当前采用最小可用实现：
@@ -111,7 +114,8 @@
 
 当前 Phase 1B 的边界：
 - 这还是 local frontend，不是最终的 fixed-lag smoother 主链。
-- 新增的 fixed-lag window 现在已经进入优化变量层，但还没有把多段 LiDAR segment factors 一起放进同一优化图里。
+- 新增的 fixed-lag window 现在已经进入优化变量层，并且多段 LiDAR segment factors 已经进入同一优化图。
+- 但当前所有 active segments 仍共享同一个 active target map，还不是严格意义上的 segment-specific target / marginal prior 设计。
 - IMU 目前主要仍用于初始化/后续兼容链路，尚未作为 spline-native continuous-time factor 完整改写进图里。
 - GNSS 也尚未进入控制点窗口主链。
 - LiDAR factor 目前使用数值 pose Jacobian，是为了先打通最小可用版本；解析 Jacobian 和 GPU 版仍是后续工作。
@@ -144,13 +148,14 @@ colcon test-result --all
 - 当前 `CT_LIDAR_CPU` 路径已经把 4 控制点窗口作为局部优化变量引入。
 - 当前 active spline window 已经具备 fixed-lag 形式的保存与裁剪。
 - 当前 active spline window 已经进入优化变量层。
-- 但它还不是最终的 fixed-lag GTSAM 主状态组织方式，也还不是多段 LiDAR factors 联合优化。
+- 当前已经形成“多段 LiDAR factors + 共享控制点”的联合优化骨架。
+- 但它还不是最终的 fixed-lag GTSAM 主状态组织方式，也还没有成熟的边缘化/先验回灌。
 
 ### 2. LiDAR 连续时间残差还没接入主链
 - 当前已经有 CPU 版连续时间 LiDAR factor。
 - 但它还是最小可用版本：
-  - 当前主要只约束最新 segment
-  - 虽然整窗控制点已经进入变量集合，但多段历史 segment 还没有各自的 LiDAR factor
+  - 当前已覆盖 active window 内多个 segment
+  - 但所有 active segments 仍共享同一个 active target map
   - 数值化 pose Jacobian
   - 还没有 GPU 版
   - 还没有与最终 fixed-lag 图结构完全统一
@@ -175,9 +180,9 @@ colcon test-result --all
 - 不再只依赖每帧局部 LM，而是进入真正的“多段窗口联合优化 + 边缘化”
 
 建议子任务：
-- 为 active window 内的多个 segment 建立各自的连续时间 LiDAR factors
-- 让多段相邻 segment 共享控制点并共同进入图优化
+- 为多段 LiDAR factor 设计更严格的 target / prior 策略
 - 设计旧控制点边缘化与先验回灌策略
+- 评估是否需要 segment-specific target snapshot 或局部 submap target
 - 保留现有兼容输出不变
 
 ### Next Step 2：补齐 IMU 连续时间约束
