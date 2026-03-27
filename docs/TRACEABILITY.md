@@ -36,7 +36,7 @@
 | IAP-RQ-310 | 预测可见/可观测性集合（占位） | ray-check 遮挡预测 | `include/iap/planner/predicted_integrity.hpp/.cpp` (placeholder) | TODO: 接地图后做 ray-check；当前返回占位值 | `n_vis_placeholder` | **DONE (placeholder)** |
 | IAP-RQ-320 | 协方差传播 → Σ_pred → PL_pred | PL 预测供规划使用 | `include/iap/planner/predicted_integrity.hpp/.cpp` (sigma growth, K_pl=3.0) | PL_pred 随时间增长且不同轨迹有差异；σ_grow 可配置 | `PL_pred(s), sigma_pred(s)` | **DONE (baseline)** |
 | IAP-RQ-400 | Integrity-aware planning objective | hinge(PL_pred−AL)²代价+goal+effort | `include/iap/planner/integrity_planner.hpp/.cpp`; `evaluate()` | IM<0时选绕行轨迹；J_integrity > J_goal场景可复现 | `J_total, J_integrity, J_goal, J_effort` | **DONE** |
-| IAP-RQ-410 | Receding horizon loop | 执行Δt后重规划 | `IntegrityPlanner::execution_target()`, `plan()`; **dev_ct foundation**: `PlannerInterface::set_trajectory_view/set_control_access`, `IntegrityPlanner` continuous-time view hookup, `IapSharedState` trajectory publication, `OdometryEstimationBSpline` sampled output bridge | 调用`plan()`+`execution_target()`模拟多步闭环；`test_bspline_trajectory` + odometry module startup smoke test verify planner can consume a published spline view without changing `plan(...)` signature | `chosen_traj_id, dt_execute`; `continuous trajectory available` | **DONE** |
+| IAP-RQ-410 | Receding horizon loop | 执行Δt后重规划 | `IntegrityPlanner::execution_target()`, `plan()`; **dev_ct foundation**: `PlannerInterface::set_trajectory_view/set_control_access`, `IntegrityPlanner` continuous-time view hookup, `IapSharedState` trajectory publication, `OdometryEstimationBSpline` sampled output bridge, velocity-aware `BSplineTrajectory` sampling | 调用`plan()`+`execution_target()`模拟多步闭环；`test_bspline_trajectory` + odometry module startup smoke test verify planner can consume a published spline view without changing `plan(...)` signature；velocity-aware sampling 由 `test_bspline_trajectory` 覆盖 | `chosen_traj_id, dt_execute`; `continuous trajectory available`; `trajectory sample velocity` | **DONE** |
 | IAP-RQ-500 | 三种 baseline（Passive/CovMin/IntegAware） | 对比 integrity 驱动的优势 | `apps/iap_experiment.cpp` (run_baseline ×3) | 同场景三 baseline 均输出指标 CSV | `baseline, violation_frac, avg_PL, mission_success` | **DONE (stub)** |
 | IAP-RQ-510 | 指标：Time(PL>AL)%, AvgPL, MinIM, path/time/effort | 量化对比表格 | `include/iap/experiments/metrics.hpp` (MetricsCollector, write_comparison_table) | `ros2 run iap iap_experiment` 输出 /tmp/*_summary.md | `violation%, avg_PL, min_IM, path_len, time, effort` | **DONE (stub)** |
 | IAP-RQ-900 | 自动生成 IEEE Trans methodology.tex（流程图+模块小节+公式） | 论文写作辅助 | `tools/gen_methodology.py` → `docs/methodology/methodology.tex`, `docs/figures/system_flow.tex` | `python3 tools/gen_methodology.py` 生成 .tex；结构无误（12 env 平衡） | gen exit code 0; env mismatch=0 | **DONE** |
@@ -95,7 +95,7 @@
   - 当前 velocity 仍由控制点位姿差分导出，尚未作为独立状态进入图；IMU Jacobian 也仍然是数值形式。
 - 2026-03-27: IAP-RQ-300 / IAP-RQ-410
   - 已将 per-segment velocity 提升为 fixed-lag 图中的显式状态，并新增 `IntegratedBSplineVelocityFactor` 将 velocity state 与 pose spline 绑定。
-  - 当前 planner / control-access 还没有系统消费这组显式 velocity states；IMU / velocity Jacobian 也仍然是数值形式。
+-  - 当前 planner / control-access 已能读取这组显式 velocity states，但评分逻辑尚未系统消费它们；IMU / velocity Jacobian 也仍然是数值形式。
 - 2026-03-22: IAP-RQ-010 / IAP-RQ-200
   - GNSS clock single-owner contract收敛：`clock_owner_mode` 跨模块联动，默认切到 `gnss`。
   - 增加 ready 时序契约：`IapSharedState::{set,clear,is}_clock_ready`；GNSS 生产 ready，odometry 在 GNSS-owner 下仅 `current+ready` 才读 `C(i)`。

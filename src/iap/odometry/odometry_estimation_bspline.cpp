@@ -154,6 +154,7 @@ void OdometryEstimationBSpline::initialize_control_window(
   control_buffer_->reset_from_window(*control_window_);
   active_segment_constraints_.clear();
   marginal_prior_ = ActiveSplineMarginalPrior();
+  latest_ct_aux_values_.clear();
 }
 
 gtsam::Pose3 OdometryEstimationBSpline::predict_scan_end_pose(double scan_duration) const {
@@ -358,8 +359,11 @@ EstimationFrame::ConstPtr OdometryEstimationBSpline::insert_frame_ct_lidar(
     new_frame->T_world_imu = new_frame->T_world_lidar * T_lidar_imu;
     new_frame->frame = create_lidar_source_cloud(raw_frame);
     new_frame->imu_bias = init_state ? init_state->imu_bias : params->imu_bias;
+    new_frame->v_world_imu = init_state ? init_state->v_world_imu : Eigen::Vector3d::Zero();
     accel_bias_ = new_frame->imu_bias.head<3>();
     gyro_bias_ = new_frame->imu_bias.tail<3>();
+    latest_ct_aux_values_.clear();
+    latest_ct_aux_values_.insert(iap::bspline_velocity_key(control_window_->states()[1].index), new_frame->v_world_imu);
 
     Callbacks::on_new_frame(new_frame);
     insert_target_cloud(new_frame);
@@ -561,6 +565,14 @@ EstimationFrame::ConstPtr OdometryEstimationBSpline::insert_frame_ct_lidar(
   gyro_bias_ = values.at<gtsam::Vector3>(gyro_bias_key);
   accel_bias_ = values.at<gtsam::Vector3>(accel_bias_key);
   gravity_world_ = values.at<gtsam::Vector3>(gravity_key);
+  latest_ct_aux_values_.clear();
+  for (const auto& segment : active_segment_constraints_) {
+    const gtsam::Key velocity_key = iap::bspline_velocity_key(segment.velocity_index);
+    if (!values.exists(velocity_key) || latest_ct_aux_values_.exists(velocity_key)) {
+      continue;
+    }
+    latest_ct_aux_values_.insert(velocity_key, values.at<gtsam::Vector3>(velocity_key));
+  }
   update_marginal_prior_from_active_window();
 
   const gtsam::Pose3 start_pose = control_window_->evaluate(0.0);
@@ -597,7 +609,7 @@ void OdometryEstimationBSpline::publish_continuous_trajectory(int current) {
 
   std::vector<iap::SplineControlPoint> control_points;
   if (frontend_mode_ == "CT_LIDAR_CPU" && control_buffer_ && !control_buffer_->empty()) {
-    control_points = control_buffer_->spline_control_points();
+    control_points = control_buffer_->spline_control_points(&latest_ct_aux_values_);
   } else {
     control_points.reserve(frames.inner_size());
 

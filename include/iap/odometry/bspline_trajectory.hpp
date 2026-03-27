@@ -45,6 +45,8 @@ class BSplineTrajectory final : public ContinuousTrajectoryView, public SplineCo
   struct PoseBlend {
     Eigen::Vector3d position = Eigen::Vector3d::Zero();
     Eigen::Quaterniond orientation = Eigen::Quaterniond::Identity();
+    Eigen::Vector3d velocity = Eigen::Vector3d::Zero();
+    Eigen::Vector3d acceleration = Eigen::Vector3d::Zero();
     double sigma = 0.0;
   };
 
@@ -54,6 +56,7 @@ class BSplineTrajectory final : public ContinuousTrajectoryView, public SplineCo
   PoseBlend evaluate_pose_blend(double stamp) const;
   PoseBlend evaluate_linear_blend(double stamp) const;
   PoseBlend evaluate_bspline_blend(double stamp) const;
+  bool has_control_kinematics() const;
   TrajectorySample build_sample(double stamp) const;
 
   int find_span(double stamp) const;

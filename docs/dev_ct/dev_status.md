@@ -32,6 +32,10 @@
   - 每个 active segment 通过 `symbol('u', idx)` 持有 velocity state
   - 新增 velocity consistency factor 将 pose spline 与 velocity state 绑定
   - `EstimationFrame::v_world_imu` 现在来自优化后的 velocity state，而不是临时 pose 差分
+- 已把显式 velocity state 接到连续时间发布层：
+  - active window 的 control-point snapshot 现在会携带 velocity state
+  - `ContinuousTrajectoryView` 在有 control-point kinematics 时优先返回显式 velocity / acceleration
+  - planner / debug / control-access 看到的 spline window 不再是 pose-only 快照
 - 当前 `src/iap` 已具备：
   - 连续时间轨迹统一接口
   - B-spline 轨迹容器与时间查询能力
@@ -98,7 +102,8 @@
 
 当前 planner 能做的事：
 - 在不改 `plan(...)` 主签名的前提下读取共享的 continuous trajectory。
-- 当前只基础使用了最新样本的不确定度，尚未在候选轨迹评分中深度使用完整 time query / spline window。
+- 当前已经能够读取带显式 velocity 的 continuous trajectory / control window。
+- 但还只是基础使用了最新样本的不确定度，尚未在候选轨迹评分中深度使用完整 time query / spline window。
 
 ## 5. Phase 1B 最小可用实现
 - 新增 `BSplineControlWindow`
@@ -172,6 +177,8 @@ colcon test-result --all
 - `test_bspline_control_window` 现已覆盖 control buffer 扩展、lag pruning、values/update round-trip
 - `test_bspline_imu_factor` 现已覆盖静止匹配样本零残差、bias-state 补偿和 gravity-state 失配
 - `test_bspline_velocity_factor` 现已覆盖 matching velocity 零残差、mismatch 非零残差和 linearize 可用性
+- `test_bspline_control_window` 现已覆盖 velocity state 到 control-point snapshot 的发布
+- `test_bspline_trajectory` 现已覆盖带 control-point velocity 时的 trajectory sampling
 - Phase 1B 代码已完成编译与测试通过
 
 ## 当前还没完成的关键部分
@@ -228,8 +235,8 @@ colcon test-result --all
 - 让 IMU 不再只承担初始化和兼容链路职责
 
 建议子任务：
-- 将显式 velocity state 发布到 trajectory/control-access，并让 planner/debug 能读取
 - 在当前 gyro / accel sample factor 基础上继续收敛 velocity / clock 与 spline control points 的联合状态布局
+- 让 planner 评分真正消费 velocity-aware 的 continuous trajectory，而不只是读取最新样本 sigma
 - 完成 IMU 残差的解析 Jacobian 或更严格的数值校验
 
 ### Next Step 3：Phase 1C，把 GNSS 纳入连续时间窗口

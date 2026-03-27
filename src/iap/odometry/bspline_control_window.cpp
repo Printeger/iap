@@ -124,7 +124,7 @@ gtsam::Pose3 BSplineControlWindow::evaluate(double u) const {
   return interpolate(poses(), u);
 }
 
-std::vector<SplineControlPoint> BSplineControlWindow::spline_control_points() const {
+std::vector<SplineControlPoint> BSplineControlWindow::spline_control_points(const gtsam::Values* values) const {
   std::vector<SplineControlPoint> cps;
   cps.reserve(kBSplineControlPointCount);
 
@@ -132,6 +132,9 @@ std::vector<SplineControlPoint> BSplineControlWindow::spline_control_points() co
     SplineControlPoint cp;
     cp.stamp = state.stamp;
     cp.pose = Eigen::Isometry3d(state.pose.matrix());
+    if (values && values->exists(bspline_velocity_key(state.index))) {
+      cp.vel = values->at<gtsam::Vector3>(bspline_velocity_key(state.index));
+    }
     cps.push_back(cp);
   }
   return cps;
@@ -246,7 +249,7 @@ gtsam::Values BSplineControlWindowBuffer::values() const {
   return values;
 }
 
-std::vector<SplineControlPoint> BSplineControlWindowBuffer::spline_control_points() const {
+std::vector<SplineControlPoint> BSplineControlWindowBuffer::spline_control_points(const gtsam::Values* values) const {
   std::vector<SplineControlPoint> cps;
   cps.reserve(states_.size());
 
@@ -254,6 +257,9 @@ std::vector<SplineControlPoint> BSplineControlWindowBuffer::spline_control_point
     SplineControlPoint cp;
     cp.stamp = state.stamp;
     cp.pose = Eigen::Isometry3d(state.pose.matrix());
+    if (values && values->exists(bspline_velocity_key(state.index))) {
+      cp.vel = values->at<gtsam::Vector3>(bspline_velocity_key(state.index));
+    }
     cps.push_back(cp);
   }
 

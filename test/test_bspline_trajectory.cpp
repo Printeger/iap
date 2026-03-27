@@ -88,3 +88,23 @@ TEST(BSplineTrajectoryTest, RangeSamplingIncludesEndPoint) {
     EXPECT_GE(samples[i].stamp, samples[i - 1].stamp);
   }
 }
+
+TEST(BSplineTrajectoryTest, SampleUsesControlPointVelocityWhenAvailable) {
+  iap::BSplineTrajectory trajectory;
+
+  auto cp0 = make_control_point(0.0, Eigen::Vector3d(0.0, 0.0, 0.0), 0.0, 0.2);
+  auto cp1 = make_control_point(1.0, Eigen::Vector3d(1.0, 0.0, 0.0), 0.0, 0.3);
+  auto cp2 = make_control_point(2.0, Eigen::Vector3d(2.0, 0.0, 0.0), 0.0, 0.4);
+  auto cp3 = make_control_point(3.0, Eigen::Vector3d(3.0, 0.0, 0.0), 0.0, 0.5);
+  cp0.vel = Eigen::Vector3d(0.5, 0.0, 0.0);
+  cp1.vel = Eigen::Vector3d(1.0, 0.0, 0.0);
+  cp2.vel = Eigen::Vector3d(1.5, 0.0, 0.0);
+  cp3.vel = Eigen::Vector3d(2.0, 0.0, 0.0);
+
+  trajectory.set_control_points({cp0, cp1, cp2, cp3});
+
+  const auto sample = trajectory.sample(1.5);
+  ASSERT_TRUE(sample.has_value());
+  EXPECT_GT(sample->vel.x(), 1.0);
+  EXPECT_LT(sample->vel.x(), 2.0);
+}

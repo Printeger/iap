@@ -3,6 +3,10 @@
 > 规则：任何代码改动必须在这里记录，并包含 IAP-RQ-XXX。
 
 ## Unreleased
+- feat(dev-ct-trajectory-kinematics): IAP-RQ-300 / IAP-RQ-410 — publish explicit spline velocity states through control-access and trajectory sampling.
+  - `BSplineControlWindow` / `BSplineControlWindowBuffer` now export control-point snapshots with optional velocity states when the fixed-lag graph has them.
+  - `OdometryEstimationBSpline` now caches active velocity states for publication, seeds the initial spline snapshot with the initialization velocity, and exposes the active-window velocity states through `ContinuousTrajectoryView` / `SplineControlAccess`.
+  - `BSplineTrajectory` now blends control-point `vel/acc` when kinematic data is present instead of always finite-differencing pose, and trajectory/control-window tests were expanded accordingly.
 - feat(dev-ct-velocity): IAP-RQ-300 / IAP-RQ-410 — promote segment velocity into an explicit fixed-lag graph state.
   - Added `bspline_velocity_key(symbol('u', idx))` and `IntegratedBSplineVelocityFactor`, which ties each active segment's four pose control points to an explicit velocity state.
   - `OdometryEstimationBSpline` now seeds per-segment velocity variables, adds velocity consistency factors into the shared LM graph, and writes the optimized active velocity back into `EstimationFrame::v_world_imu`.

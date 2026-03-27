@@ -15,6 +15,7 @@
 
 #include <array>
 #include <cstddef>
+#include <gtsam/nonlinear/Values.h>
 #include <vector>
 
 namespace gtsam {
@@ -130,6 +131,7 @@ class OdometryEstimationBSpline : public OdometryEstimationCPU {
   std::vector<ActiveSplineSegmentConstraint> active_segment_constraints_;
   ActiveSplineMarginalPrior marginal_prior_;
   std::shared_ptr<iap::BSplineTrajectory> latest_trajectory_;
+  gtsam::Values latest_ct_aux_values_;
 };
 
 }  // namespace glim

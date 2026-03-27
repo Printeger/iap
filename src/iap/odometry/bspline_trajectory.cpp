@@ -233,6 +233,8 @@ BSplineTrajectory::PoseBlend BSplineTrajectory::evaluate_linear_blend(double sta
   if (control_points_.size() == 1) {
     blend.position = control_points_.front().pose.translation();
     blend.orientation = orientations_.front();
+    blend.velocity = control_points_.front().vel;
+    blend.acceleration = control_points_.front().acc;
     blend.sigma = control_points_.front().sigma;
     return blend;
   }
@@ -246,12 +248,16 @@ BSplineTrajectory::PoseBlend BSplineTrajectory::evaluate_linear_blend(double sta
   if (upper == control_points_.begin()) {
     blend.position = control_points_.front().pose.translation();
     blend.orientation = orientations_.front();
+    blend.velocity = control_points_.front().vel;
+    blend.acceleration = control_points_.front().acc;
     blend.sigma = control_points_.front().sigma;
     return blend;
   }
   if (upper == control_points_.end()) {
     blend.position = control_points_.back().pose.translation();
     blend.orientation = orientations_.back();
+    blend.velocity = control_points_.back().vel;
+    blend.acceleration = control_points_.back().acc;
     blend.sigma = control_points_.back().sigma;
     return blend;
   }
@@ -265,6 +271,8 @@ BSplineTrajectory::PoseBlend BSplineTrajectory::evaluate_linear_blend(double sta
 
   blend.position = (1.0 - u) * cp0.pose.translation() + u * cp1.pose.translation();
   blend.orientation = orientations_[idx0].slerp(u, orientations_[idx1]).normalized();
+  blend.velocity = (1.0 - u) * cp0.vel + u * cp1.vel;
+  blend.acceleration = (1.0 - u) * cp0.acc + u * cp1.acc;
   blend.sigma = (1.0 - u) * cp0.sigma + u * cp1.sigma;
   return blend;
 }
@@ -285,6 +293,8 @@ BSplineTrajectory::PoseBlend BSplineTrajectory::evaluate_bspline_blend(double st
     const double w = weights[static_cast<std::size_t>(j)];
     position += w * control_points_[static_cast<std::size_t>(idx)].pose.translation();
     q_coeffs += w * orientations_[static_cast<std::size_t>(idx)].coeffs();
+    blend.velocity += w * control_points_[static_cast<std::size_t>(idx)].vel;
+    blend.acceleration += w * control_points_[static_cast<std::size_t>(idx)].acc;
     sigma += w * control_points_[static_cast<std::size_t>(idx)].sigma;
   }
 
@@ -296,6 +306,12 @@ BSplineTrajectory::PoseBlend BSplineTrajectory::evaluate_bspline_blend(double st
   blend.orientation = Eigen::Quaterniond(q_coeffs).normalized();
   blend.sigma = std::max(0.0, sigma);
   return blend;
+}
+
+bool BSplineTrajectory::has_control_kinematics() const {
+  return std::any_of(control_points_.begin(), control_points_.end(), [](const auto& cp) {
+    return cp.vel.squaredNorm() > 1e-12 || cp.acc.squaredNorm() > 1e-12;
+  });
 }
 
 TrajectorySample BSplineTrajectory::build_sample(double stamp) const {
@@ -311,10 +327,14 @@ TrajectorySample BSplineTrajectory::build_sample(double stamp) const {
   sample.sigma = center.sigma;
 
   if (control_points_.size() <= 1) {
-    if (!control_points_.empty()) {
-      sample.vel = control_points_.front().vel;
-      sample.acc = control_points_.front().acc;
-    }
+    sample.vel = center.velocity;
+    sample.acc = center.acceleration;
+    return sample;
+  }
+
+  if (has_control_kinematics()) {
+    sample.vel = center.velocity;
+    sample.acc = center.acceleration;
     return sample;
   }
 

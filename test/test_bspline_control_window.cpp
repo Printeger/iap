@@ -104,3 +104,19 @@ TEST(BSplineControlWindowBufferTest, ValuesRoundTripUpdatesStoredControlPoses) {
   ASSERT_EQ(buffer.size(), 4U);
   EXPECT_NEAR(buffer.states()[2].pose.translation().x(), 3.0, 1e-9);
 }
+
+TEST(BSplineControlWindowBufferTest, SplineControlPointsExposeVelocityStateWhenProvided) {
+  iap::BSplineControlWindow window;
+  window.initialize(0.0, 0.1, gtsam::Pose3());
+
+  iap::BSplineControlWindowBuffer buffer;
+  buffer.reset_from_window(window);
+
+  gtsam::Values values;
+  values.insert(iap::bspline_velocity_key(1), gtsam::Vector3(1.5, 0.0, 0.0));
+
+  const auto control_points = buffer.spline_control_points(&values);
+  ASSERT_EQ(control_points.size(), 4U);
+  EXPECT_NEAR(control_points[1].vel.x(), 1.5, 1e-9);
+  EXPECT_NEAR(control_points[0].vel.norm(), 0.0, 1e-9);
+}

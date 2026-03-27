@@ -44,7 +44,7 @@ class BSplineControlWindow {
   double segment_duration() const;
 
   gtsam::Pose3 evaluate(double u) const;
-  std::vector<SplineControlPoint> spline_control_points() const;
+  std::vector<SplineControlPoint> spline_control_points(const gtsam::Values* values = nullptr) const;
 
   static std::array<double, kBSplineControlPointCount> basis(double u);
   static gtsam::Pose3 interpolate(const std::array<gtsam::Pose3, kBSplineControlPointCount>& poses, double u);
@@ -72,7 +72,7 @@ class BSplineControlWindowBuffer {
   std::vector<gtsam::Key> keys() const;
   gtsam::Values values() const;
   const std::vector<BSplineControlPointState>& states() const { return states_; }
-  std::vector<SplineControlPoint> spline_control_points() const;
+  std::vector<SplineControlPoint> spline_control_points(const gtsam::Values* values = nullptr) const;
 
  private:
   void sort_states();
