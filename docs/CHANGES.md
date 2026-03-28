@@ -3,6 +3,10 @@
 > 规则：任何代码改动必须在这里记录，并包含 IAP-RQ-XXX。
 
 ## Unreleased
+- feat(dev-ct-gnss-window): IAP-RQ-020 / IAP-RQ-300 / IAP-RQ-410 — align BSpline GNSS consumption with segment time windows instead of point-near-frame draining.
+  - `IapSharedState` now exposes `consume_gnss_epochs_in_range(start, end, tolerance)` so continuous-time odometry can drain all GNSS epochs that belong to one active spline segment.
+  - `OdometryEstimationBSpline` now consumes GNSS epochs over `[scan_start, scan_end]` with tolerance instead of only around `frame_stamp`, which is a better fit for continuous-time segment factor construction.
+  - Added `test_shared_state_gnss_queue.cpp` to verify range-based drain behavior and boundary tolerance handling.
 - feat(dev-ct-gnss): IAP-RQ-020 / IAP-RQ-300 / IAP-RQ-410 — start Phase 1C by injecting GNSS pseudorange/doppler directly into the BSpline control-window graph.
   - Added shared GNSS epoch queue + ECEF anchor publication to `IapSharedState`, and `GnssExtensionModule` now publishes the NavSat-derived ECEF anchor for continuous-time odometry consumption.
   - Added `IntegratedBSplinePseudorangeFactor` / `IntegratedBSplineDopplerFactor`, clock/ECEF key helpers, and wired `OdometryEstimationBSpline` to consume GNSS epochs per active segment, optimize per-segment clock states, and add GNSS factors/clock-between factors into the same fixed-lag LM graph as LiDAR/IMU/velocity.

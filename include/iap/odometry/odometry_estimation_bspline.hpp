@@ -97,7 +97,7 @@ class OdometryEstimationBSpline : public OdometryEstimationCPU {
   gtsam_points::PointCloud::ConstPtr create_lidar_source_cloud(const PreprocessedFrame::Ptr& raw_frame) const;
   std::shared_ptr<gtsam_points::iVox> create_active_target_snapshot() const;
   std::vector<ActiveSplineIMUSample> create_segment_imu_samples(const PreprocessedFrame::Ptr& raw_frame) const;
-  std::vector<iap::GnssEpoch> consume_segment_gnss_epochs(double frame_stamp) const;
+  std::vector<iap::GnssEpoch> consume_segment_gnss_epochs(double segment_start, double segment_end) const;
   void update_marginal_prior_from_active_window();
   void append_active_segment_constraint(
     const PreprocessedFrame::Ptr& raw_frame,

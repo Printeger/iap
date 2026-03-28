@@ -33,6 +33,7 @@
   - `OdometryEstimationBSpline` 已在 active segment 上直接挂接 continuous-time pseudorange / doppler factor
   - per-segment clock state、ECEF origin state、ECEF rotation state 已进入同一个 fixed-lag LM 图
   - GNSS clock-between factor 已在 active segment clock states 间接通
+  - GNSS epoch 现在按 segment 时间窗而不是按单一 frame stamp 被消费，更接近连续时间窗口约束
 - 已把 velocity 提升为 fixed-lag 图中的显式状态：
   - 每个 active segment 通过 `symbol('u', idx)` 持有 velocity state
   - 新增 velocity consistency factor 将 pose spline 与 velocity state 绑定
@@ -163,7 +164,7 @@
   - 1 个显式 segment clock state
   - shared ECEF origin / rotation anchor states
   - pseudorange / doppler 按 epoch 时间戳映射到 segment `u`
-  - GNSS epoch 由 `gnss_extension` 通过 shared queue 提供
+  - GNSS epoch 由 `gnss_extension` 通过 shared queue 提供，并按 `[scan_start, scan_end]` 时间窗消费
 
 当前 Phase 1B 的边界：
 - 这还是 local frontend，不是最终的 fixed-lag smoother 主链。
@@ -201,6 +202,7 @@ colcon test-result --all
 - `test_bspline_imu_factor` 现已覆盖静止匹配样本零残差、bias-state 补偿和 gravity-state 失配
 - `test_bspline_velocity_factor` 现已覆盖 matching velocity 零残差、mismatch 非零残差和 linearize 可用性
 - `test_bspline_gnss_factor` 现已覆盖 CT pseudorange / doppler factor 的零残差和 clock-state 吸收能力
+- `test_shared_state_gnss_queue` 现已覆盖 GNSS epoch queue 的 range-drain 行为和边界 tolerance
 - `test_bspline_control_window` 现已覆盖 velocity state 到 control-point snapshot 的发布
 - `test_bspline_trajectory` 现已覆盖带 control-point velocity 时的 trajectory sampling
 - `test_integrity_planner` 现已覆盖 planner 对 continuous-time sample 的种子状态消费、future sigma floor 和 future velocity-aware scoring
@@ -236,6 +238,7 @@ colcon test-result --all
 ### 4. GNSS 还没完全下沉到 bspline odometry
 - 当前已经把 pseudorange / doppler 的时间戳约束直接并入 spline window。
 - 当前 `OdometryEstimationBSpline` 已经会消费 shared GNSS epoch queue，并在 active segment 上建立 per-segment clock / anchor / GNSS factors。
+- 当前 shared queue 已经支持按 segment 时间窗 drain，segment 不再只消费单个 near-frame epoch。
 - 但 `gnss_handler` / `gnss_extension` 仍然负责 epoch 生成、星历处理和主缓存，尚未完全迁成“odometry 内核单一所有者”。
 - GNSS continuous-time factor 当前仍是最小可用版本，尚未补齐更严格的 Jacobian、边缘化和更长时域的 epoch/window 对齐策略。
 

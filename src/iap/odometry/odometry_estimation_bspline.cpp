@@ -257,8 +257,13 @@ std::vector<OdometryEstimationBSpline::ActiveSplineIMUSample> OdometryEstimation
   return samples;
 }
 
-std::vector<iap::GnssEpoch> OdometryEstimationBSpline::consume_segment_gnss_epochs(double frame_stamp) const {
-  return iap::IapSharedState::instance().consume_gnss_epochs_near(frame_stamp, gnss_time_tolerance_);
+std::vector<iap::GnssEpoch> OdometryEstimationBSpline::consume_segment_gnss_epochs(
+  double segment_start,
+  double segment_end) const {
+  return iap::IapSharedState::instance().consume_gnss_epochs_in_range(
+    segment_start,
+    segment_end,
+    gnss_time_tolerance_);
 }
 
 void OdometryEstimationBSpline::update_marginal_prior_from_active_window() {
@@ -424,7 +429,9 @@ EstimationFrame::ConstPtr OdometryEstimationBSpline::insert_frame_ct_lidar(
   const auto factor_source = gtsam_points::PointCloudCPU::clone(*new_frame->frame);
   append_active_segment_constraint(raw_frame, factor_source);
   if (!active_segment_constraints_.empty()) {
-    active_segment_constraints_.back().gnss_epochs = consume_segment_gnss_epochs(raw_frame->stamp);
+    active_segment_constraints_.back().gnss_epochs = consume_segment_gnss_epochs(
+      raw_frame->stamp,
+      raw_frame->scan_end_time);
   }
 
   gtsam::Values values = control_buffer_->values();

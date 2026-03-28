@@ -61,17 +61,19 @@ class IapSharedState {
     return latest_gnss_epoch_;
   }
 
-  /// Drains GNSS epochs that align with the requested stamp within tolerance.
-  std::vector<GnssEpoch> consume_gnss_epochs_near(double stamp, double tolerance) {
+  /// Drains GNSS epochs whose timestamps fall in [start - tolerance, end + tolerance].
+  std::vector<GnssEpoch> consume_gnss_epochs_in_range(double start, double end, double tolerance = 0.0) {
     std::lock_guard<std::mutex> lk(gnss_mutex_);
 
     std::vector<GnssEpoch> matched;
+    const double lower = std::min(start, end) - tolerance;
+    const double upper = std::max(start, end) + tolerance;
     auto it = gnss_epoch_queue_.begin();
     while (it != gnss_epoch_queue_.end()) {
-      if (std::abs(it->stamp - stamp) <= tolerance) {
+      if (it->stamp >= lower && it->stamp <= upper) {
         matched.push_back(std::move(*it));
         it = gnss_epoch_queue_.erase(it);
-      } else if (it->stamp < stamp - tolerance) {
+      } else if (it->stamp < lower) {
         it = gnss_epoch_queue_.erase(it);
       } else {
         ++it;
@@ -79,6 +81,11 @@ class IapSharedState {
     }
 
     return matched;
+  }
+
+  /// Convenience wrapper for point queries around a single stamp.
+  std::vector<GnssEpoch> consume_gnss_epochs_near(double stamp, double tolerance) {
+    return consume_gnss_epochs_in_range(stamp, stamp, tolerance);
   }
 
   // ── GNSS anchor ────────────────────────────────────────────────────────
