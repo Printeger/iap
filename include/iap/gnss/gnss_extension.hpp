@@ -1,8 +1,10 @@
 #pragma once
 // IAP-RQ-020 (bridge): GNSS ROS2 extension module
 // Subscribes to /ublox_driver/range_meas + /ublox_driver/ephem + glo_ephem +
-// /ublox_driver/iono_params; converts each epoch to GnssEpoch with sat_pos/vel
-// in ECEF (no local transform), and feeds it into GnssHandler.
+// /ublox_driver/iono_params.  The module now acts as ROS ingress plus legacy
+// bridge: it forwards raw observations/ephemeris/iono state to shared state,
+// while a reusable GnssEpochBuilder performs epoch assembly in both the legacy
+// bridge and the continuous-time BSpline odometry path.
 //
 // Coordinate frame: ECEF
 //   Two shared factor-graph variables are inserted on first injection:
@@ -19,13 +21,13 @@
 #include <map>
 #include <memory>
 #include <mutex>
-#include <unordered_map>
 #include <vector>
 
 #include <gtsam/nonlinear/NonlinearFactorGraph.h>
 #include <gtsam/nonlinear/Values.h>
 #include <gtsam_points/optimizers/incremental_fixed_lag_smoother_with_fallback.hpp>
 #include <gnss_comm/gnss_constant.hpp>   // EphemPtr, GloEphemPtr, ObsPtr
+#include <iap/gnss/gnss_epoch_builder.hpp>
 #include <iap/gnss/gnss_handler.hpp>
 #include <iap/gnss/clock_between_factor.hpp>
 #include <iap/util/extension_module_ros2.hpp>
@@ -102,6 +104,7 @@ class GnssExtensionModule : public glim::ExtensionModuleROS2 {
   rclcpp::Node*       node_ = nullptr;
   std::shared_ptr<spdlog::logger> logger_;
 
+  std::unique_ptr<GnssEpochBuilder> gnss_epoch_builder_;
   std::unique_ptr<GnssHandler> gnss_handler_;
 
   // Current frame tracking (set by on_new_frame callback)
@@ -119,11 +122,6 @@ class GnssExtensionModule : public glim::ExtensionModuleROS2 {
 
   // E(0)/R(0) insertion guard: only insert once, on first GNSS injection
   std::atomic<bool>   ext_vars_inserted_{false};
-
-  // Ionosphere parameters (Klobuchar 8 coefficients α0-3, β0-3)
-  // Updated by /ublox_driver/iono_params subscription; accessed in on_range_meas_
-  mutable std::mutex      iono_mutex_;
-  std::vector<double>     iono_params_;  ///< empty until first iono msg received
 
   // Clock warm-start: last post-optimization clock state (from on_smoother_update_finish_).
   std::atomic<double> last_clk_bias_{0.0};   ///< last optimized clock bias  [m]
@@ -151,11 +149,6 @@ class GnssExtensionModule : public glim::ExtensionModuleROS2 {
   // ECEF anchor prior sigmas (loaded from config_gnss.json)
   double sigma_ecef_origin_{5.0};   ///< σ for E(0) prior [m]
   double sigma_ecef_rot_{0.087};    ///< σ for R(0) prior [rad] (~5°)
-
-  // Ephemeris caches (GPS/GAL/BDS and GLONASS)
-  mutable std::mutex                                            ephem_mutex_;
-  std::unordered_map<uint32_t, gnss_comm::EphemPtr>            ephem_cache_;
-  std::unordered_map<uint32_t, gnss_comm::GloEphemPtr>         glo_ephem_cache_;
 
   // ── Debug CSV logging ───────────────────────────────────────────────────
   // Activated by config_gnss.json: "enable_debug_csv": true

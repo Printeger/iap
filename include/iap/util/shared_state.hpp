@@ -6,6 +6,8 @@
 //   There is no built-in mechanism for an extension to query data from
 //   another.  This singleton provides a thread-safe mailbox where:
 //     - gnss_extension writes the latest GnssEpoch after building each epoch.
+//     - gnss_extension also forwards raw GNSS observation batches, ephemeris
+//       updates, and ionosphere parameters for continuous-time odometry.
 //     - trunk_extension writes the confirmed landmark count after each
 //       smoother update.
 //     - integrity_extension reads both in on_smoother_update_finish to run
@@ -23,10 +25,12 @@
 //     int  n     = IapSharedState::instance().get_n_confirmed_trunks();
 //
 //   Reader (continuous-time odometry):
-//     auto pending = IapSharedState::instance().consume_pending_gnss_epochs();
-//     // Forward raw epochs into an odometry-owned GnssHandler.
+//     auto batches = IapSharedState::instance().consume_pending_gnss_raw_batches();
+//     auto eph     = IapSharedState::instance().consume_pending_gnss_ephemeris_updates();
+//     // Rebuild processed epochs inside an odometry-owned GNSS front-end.
 
 #include <iap/gnss/gnss_types.hpp>
+#include <iap/gnss/gnss_epoch_builder.hpp>
 #include <iap/planner/continuous_trajectory_view.hpp>
 #include <iap/trunk/trunk_types.hpp>
 
@@ -76,6 +80,56 @@ class IapSharedState {
       gnss_epoch_queue_.pop_front();
     }
     return pending;
+  }
+
+  void push_gnss_raw_observation_batch(const GnssRawObservationBatch& batch) {
+    std::lock_guard<std::mutex> lk(gnss_mutex_);
+    gnss_raw_batch_queue_.push_back(batch);
+    while (gnss_raw_batch_queue_.size() > gnss_raw_batch_queue_limit_) {
+      gnss_raw_batch_queue_.pop_front();
+    }
+  }
+
+  std::vector<GnssRawObservationBatch> consume_pending_gnss_raw_batches() {
+    std::lock_guard<std::mutex> lk(gnss_mutex_);
+
+    std::vector<GnssRawObservationBatch> batches;
+    batches.reserve(gnss_raw_batch_queue_.size());
+    while (!gnss_raw_batch_queue_.empty()) {
+      batches.push_back(std::move(gnss_raw_batch_queue_.front()));
+      gnss_raw_batch_queue_.pop_front();
+    }
+    return batches;
+  }
+
+  void push_gnss_ephemeris_update(const GnssEphemerisUpdate& update) {
+    std::lock_guard<std::mutex> lk(gnss_mutex_);
+    gnss_ephemeris_queue_.push_back(update);
+    while (gnss_ephemeris_queue_.size() > gnss_ephemeris_queue_limit_) {
+      gnss_ephemeris_queue_.pop_front();
+    }
+  }
+
+  std::vector<GnssEphemerisUpdate> consume_pending_gnss_ephemeris_updates() {
+    std::lock_guard<std::mutex> lk(gnss_mutex_);
+
+    std::vector<GnssEphemerisUpdate> updates;
+    updates.reserve(gnss_ephemeris_queue_.size());
+    while (!gnss_ephemeris_queue_.empty()) {
+      updates.push_back(std::move(gnss_ephemeris_queue_.front()));
+      gnss_ephemeris_queue_.pop_front();
+    }
+    return updates;
+  }
+
+  void set_gnss_iono_params(const std::vector<double>& iono_params) {
+    std::lock_guard<std::mutex> lk(gnss_mutex_);
+    latest_gnss_iono_params_ = iono_params;
+  }
+
+  std::vector<double> get_gnss_iono_params() const {
+    std::lock_guard<std::mutex> lk(gnss_mutex_);
+    return latest_gnss_iono_params_;
   }
 
   // ── GNSS anchor ────────────────────────────────────────────────────────
@@ -169,7 +223,12 @@ class IapSharedState {
   std::optional<GnssEpoch> latest_gnss_epoch_;
   std::optional<GnssAnchorState> latest_gnss_anchor_;
   std::deque<GnssEpoch> gnss_epoch_queue_;
+  std::deque<GnssRawObservationBatch> gnss_raw_batch_queue_;
+  std::deque<GnssEphemerisUpdate> gnss_ephemeris_queue_;
+  std::vector<double> latest_gnss_iono_params_;
   std::size_t gnss_epoch_queue_limit_ = 256;
+  std::size_t gnss_raw_batch_queue_limit_ = 128;
+  std::size_t gnss_ephemeris_queue_limit_ = 512;
 
   std::atomic<int> n_confirmed_trunks_{0};
 

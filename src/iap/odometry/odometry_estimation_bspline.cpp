@@ -54,6 +54,17 @@ iap::GnssHandler::Params make_gnss_handler_params(
   return params;
 }
 
+iap::GnssEpochBuilder::Params make_gnss_epoch_builder_params(
+  double min_elevation,
+  double pr_noise_base,
+  double dop_noise_base) {
+  iap::GnssEpochBuilder::Params params;
+  params.min_elevation = min_elevation;
+  params.default_pr_sigma = pr_noise_base;
+  params.default_dop_sigma = dop_noise_base;
+  return params;
+}
+
 double sigma_from_covariance(const Eigen::Matrix3d& sigma_p) {
   Eigen::SelfAdjointEigenSolver<Eigen::Matrix3d> eig(sigma_p, Eigen::EigenvaluesOnly);
   if (eig.info() != Eigen::Success) {
@@ -134,6 +145,10 @@ OdometryEstimationBSpline::OdometryEstimationBSpline(const OdometryEstimationBSp
   gyro_bias_ = params.imu_bias.tail<3>();
   control_window_ = std::make_unique<iap::BSplineControlWindow>();
   control_buffer_ = std::make_unique<iap::BSplineControlWindowBuffer>();
+  gnss_epoch_builder_ = std::make_unique<iap::GnssEpochBuilder>(make_gnss_epoch_builder_params(
+    gnss_min_elevation_,
+    gnss_pr_noise_base_,
+    gnss_dop_noise_base_));
   gnss_handler_ = std::make_unique<iap::GnssHandler>(make_gnss_handler_params(
     gnss_min_elevation_,
     gnss_pr_noise_base_,
@@ -295,13 +310,43 @@ std::vector<iap::GnssEpoch> OdometryEstimationBSpline::consume_segment_gnss_epoc
 }
 
 void OdometryEstimationBSpline::sync_gnss_epochs_from_shared_state() {
-  if (!gnss_handler_) {
+  if (!gnss_handler_ || !gnss_epoch_builder_) {
     return;
   }
 
-  auto pending_epochs = iap::IapSharedState::instance().consume_pending_gnss_epochs();
-  for (const auto& epoch : pending_epochs) {
-    gnss_handler_->insert_epoch(epoch);
+  auto& shared = iap::IapSharedState::instance();
+  if (const auto anchor = shared.get_gnss_anchor()) {
+    gnss_epoch_builder_->set_anchor(*anchor);
+  }
+
+  const auto iono_params = shared.get_gnss_iono_params();
+  if (!iono_params.empty()) {
+    gnss_epoch_builder_->set_iono_params(iono_params);
+  }
+
+  const auto ephemeris_updates = shared.consume_pending_gnss_ephemeris_updates();
+  for (const auto& update : ephemeris_updates) {
+    gnss_epoch_builder_->update_ephemeris(update);
+  }
+
+  const auto raw_batches = shared.consume_pending_gnss_raw_batches();
+  for (auto& batch : raw_batches) {
+    pending_raw_gnss_batches_.push_back(std::move(batch));
+  }
+
+  while (!pending_raw_gnss_batches_.empty()) {
+    const auto build_result = gnss_epoch_builder_->build_epoch(pending_raw_gnss_batches_.front());
+
+    if (build_result.status == iap::GnssEpochBuilder::BuildStatus::MissingAnchor ||
+        build_result.status == iap::GnssEpochBuilder::BuildStatus::MissingEphemeris) {
+      break;
+    }
+
+    if (build_result.status == iap::GnssEpochBuilder::BuildStatus::Success && build_result.epoch.has_value()) {
+      gnss_handler_->insert_epoch(*build_result.epoch);
+    }
+
+    pending_raw_gnss_batches_.pop_front();
   }
 }
 

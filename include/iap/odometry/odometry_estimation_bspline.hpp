@@ -6,6 +6,7 @@
 
 #include <iap/odometry/bspline_control_window.hpp>
 #include <iap/odometry/bspline_trajectory.hpp>
+#include <iap/gnss/gnss_epoch_builder.hpp>
 #include <iap/gnss/gnss_handler.hpp>
 #include <iap/odometry/integrated_bspline_gicp_factor.hpp>
 #include <iap/odometry/integrated_bspline_gnss_factor.hpp>
@@ -21,6 +22,7 @@
 #include <array>
 #include <cmath>
 #include <cstddef>
+#include <deque>
 #include <gtsam/nonlinear/Values.h>
 #include <vector>
 
@@ -154,7 +156,9 @@ class OdometryEstimationBSpline : public OdometryEstimationCPU {
   ActiveSplineMarginalPrior marginal_prior_;
   std::shared_ptr<iap::BSplineTrajectory> latest_trajectory_;
   gtsam::Values latest_ct_aux_values_;
+  std::unique_ptr<iap::GnssEpochBuilder> gnss_epoch_builder_;
   std::unique_ptr<iap::GnssHandler> gnss_handler_;
+  std::deque<iap::GnssRawObservationBatch> pending_raw_gnss_batches_;
 };
 
 }  // namespace glim

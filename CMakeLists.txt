@@ -83,6 +83,7 @@ add_library(iap SHARED
   src/iap/gnss/pseudorange_factor.cpp
   src/iap/gnss/doppler_factor.cpp
   src/iap/gnss/clock_between_factor.cpp
+  src/iap/gnss/gnss_epoch_builder.cpp
   src/iap/gnss/gnss_handler.cpp
   # gnss visibility predictor (IAP-RQ-312/313)
   src/iap/gnss/visibility_predictor.cpp
@@ -408,6 +409,8 @@ if(DEFINED ENV{ROS_VERSION})
       target_link_libraries(test_bspline_imu_factor iap)
       ament_add_gtest(test_bspline_gnss_factor test/test_bspline_gnss_factor.cpp)
       target_link_libraries(test_bspline_gnss_factor iap)
+      ament_add_gtest(test_gnss_epoch_builder test/test_gnss_epoch_builder.cpp)
+      target_link_libraries(test_gnss_epoch_builder iap)
       ament_add_gtest(test_gnss_handler_queue test/test_gnss_handler_queue.cpp)
       target_link_libraries(test_gnss_handler_queue iap)
       ament_add_gtest(test_shared_state_gnss_queue test/test_shared_state_gnss_queue.cpp)

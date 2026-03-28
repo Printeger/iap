@@ -48,3 +48,50 @@ TEST(SharedStateGnssQueueTest, ConsumePendingKeepsLatestEpochAvailable) {
   ASSERT_TRUE(latest.has_value());
   EXPECT_DOUBLE_EQ(latest->stamp, 10.25);
 }
+
+TEST(SharedStateGnssQueueTest, RawObservationMailboxDrainsInFifoOrder) {
+  auto& shared = iap::IapSharedState::instance();
+  (void)shared.consume_pending_gnss_raw_batches();
+
+  iap::GnssRawObservationBatch b0;
+  b0.ros_stamp = 1.0;
+  b0.observations.push_back(std::make_shared<gnss_comm::Obs>());
+  iap::GnssRawObservationBatch b1;
+  b1.ros_stamp = 2.0;
+  b1.observations.push_back(std::make_shared<gnss_comm::Obs>());
+
+  shared.push_gnss_raw_observation_batch(b0);
+  shared.push_gnss_raw_observation_batch(b1);
+
+  const auto batches = shared.consume_pending_gnss_raw_batches();
+  ASSERT_EQ(batches.size(), 2U);
+  EXPECT_DOUBLE_EQ(batches[0].ros_stamp, 1.0);
+  EXPECT_DOUBLE_EQ(batches[1].ros_stamp, 2.0);
+  EXPECT_TRUE(shared.consume_pending_gnss_raw_batches().empty());
+}
+
+TEST(SharedStateGnssQueueTest, EphemerisMailboxAndIonoStateAreAccessible) {
+  auto& shared = iap::IapSharedState::instance();
+  (void)shared.consume_pending_gnss_ephemeris_updates();
+
+  auto eph = std::make_shared<gnss_comm::Ephem>();
+  eph->sat = 11;
+  auto glo = std::make_shared<gnss_comm::GloEphem>();
+  glo->sat = 22;
+
+  shared.push_gnss_ephemeris_update(iap::GnssEphemerisUpdate{11, eph, nullptr});
+  shared.push_gnss_ephemeris_update(iap::GnssEphemerisUpdate{22, nullptr, glo});
+  shared.set_gnss_iono_params({1.0, 2.0, 3.0, 4.0});
+
+  const auto updates = shared.consume_pending_gnss_ephemeris_updates();
+  ASSERT_EQ(updates.size(), 2U);
+  ASSERT_TRUE(updates[0].ephem);
+  ASSERT_TRUE(updates[1].glo_ephem);
+  EXPECT_EQ(updates[0].ephem->sat, 11U);
+  EXPECT_EQ(updates[1].glo_ephem->sat, 22U);
+
+  const auto iono = shared.get_gnss_iono_params();
+  ASSERT_EQ(iono.size(), 4U);
+  EXPECT_DOUBLE_EQ(iono[0], 1.0);
+  EXPECT_DOUBLE_EQ(iono[3], 4.0);
+}

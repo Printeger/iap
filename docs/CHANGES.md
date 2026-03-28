@@ -3,6 +3,11 @@
 > 规则：任何代码改动必须在这里记录，并包含 IAP-RQ-XXX。
 
 ## Unreleased
+- feat(dev-ct-gnss-preproc): IAP-RQ-020 / IAP-RQ-300 / IAP-RQ-410 — move GNSS epoch assembly, ephemeris lookup, and raw preprocessing closer to `OdometryEstimationBSpline`.
+  - Added `GnssEpochBuilder`, a reusable GNSS front-end that converts raw observation batches plus ephemeris/iono/anchor state into processed ECEF `GnssEpoch` packets.
+  - `gnss_extension` now acts primarily as ROS ingress plus legacy bridge: it publishes raw GNSS batches, ephemeris updates, and ionosphere parameters to `IapSharedState`, while using the shared builder locally for legacy diagnostics/injection.
+  - `OdometryEstimationBSpline` now owns both `GnssEpochBuilder` and `GnssHandler`; it rebuilds processed epochs from raw shared-state mailboxes before segment-window GNSS factor construction.
+  - Added `test_gnss_epoch_builder.cpp`, expanded `test_shared_state_gnss_queue.cpp` for raw GNSS front-end mailboxes, and rewrote `docs/methodology/methodology.tex` in IEEE-style to document the continuous-time SLAM pipeline and measurement models.
 - feat(dev-ct-gnss-handler): IAP-RQ-020 / IAP-RQ-300 / IAP-RQ-410 — move BSpline GNSS buffering ownership into an odometry-owned `GnssHandler`.
   - `OdometryEstimationBSpline` now constructs and owns its own `GnssHandler`, drains raw epochs from `IapSharedState`, and consumes segment-window epochs through handler-managed buffering instead of directly range-draining shared state.
   - `GnssHandler` now exposes `consume_epochs_in_range(...)`, which unifies legacy discrete frame-near draining and the new continuous-time segment-window draining path.

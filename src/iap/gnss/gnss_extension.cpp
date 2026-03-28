@@ -7,11 +7,13 @@
 //   self-calibrate the world↔ECEF alignment automatically.
 //
 // Data flow:
-//   /ublox_driver/range_meas  →  on_range_meas_()  →  GnssHandler::insert_epoch()
-//   /ublox_driver/ephem       →  on_ephem_()        →  ephem_cache_[sat_id]
-//   /ublox_driver/glo_ephem   →  on_glo_ephem_()    →  glo_ephem_cache_[sat_id]
-//   /ublox_driver/receiver_lla→  on_navsatfix_()    →  origin_ecef_, R_ecef_world_init_
-//   /ublox_driver/iono_params →  on_iono_params_()  →  iono_params_
+//   /ublox_driver/range_meas  →  on_range_meas_()  →  raw batch shared-state publish
+//                                         ↘        →  GnssEpochBuilder::build_epoch()
+//                                                    →  GnssHandler::insert_epoch()
+//   /ublox_driver/ephem       →  on_ephem_()        →  builder/shared-state ephemeris update
+//   /ublox_driver/glo_ephem   →  on_glo_ephem_()    →  builder/shared-state ephemeris update
+//   /ublox_driver/receiver_lla→  on_navsatfix_()    →  origin_ecef_, R_ecef_world_init_, shared anchor
+//   /ublox_driver/iono_params →  on_iono_params_()  →  builder/shared-state iono params
 //
 //   on_smoother_update_()  →  GnssHandler::get_factors()  →  new_factors
 
@@ -75,13 +77,23 @@ const char* to_string(iap::GnssExtensionModule::ClockChainState state) {
   }
   return "UNKNOWN";
 }
+
+iap::GnssEpochBuilder::Params make_gnss_epoch_builder_params(
+  double min_elevation,
+  double pr_noise_base,
+  double dop_noise_base) {
+  iap::GnssEpochBuilder::Params params;
+  params.min_elevation = min_elevation;
+  params.default_pr_sigma = pr_noise_base;
+  params.default_dop_sigma = dop_noise_base;
+  return params;
+}
 }  // namespace
 
 // ── WGS-84 constants ──────────────────────────────────────────────────────
 static constexpr double WGS84_A   = 6378137.0;
 static constexpr double WGS84_F   = 1.0 / 298.257223563;
 static constexpr double WGS84_E2  = 2.0 * WGS84_F - WGS84_F * WGS84_F;
-static constexpr double CLIGHT    = 2.99792458e8;  ///< speed of light [m/s]
 
 /// Convert geodetic (lat,lon,alt) in radians/metres to ECEF [m].
 static Eigen::Vector3d geodetic_to_ecef(double lat, double lon, double alt) {
@@ -139,6 +151,10 @@ GnssExtensionModule::GnssExtensionModule()
   // Lever arm
   hp.lever_arm = config.param<Eigen::Vector3d>("gnss", "lever_arm", Eigen::Vector3d::Zero());
 
+  gnss_epoch_builder_ = std::make_unique<GnssEpochBuilder>(make_gnss_epoch_builder_params(
+    hp.min_elevation,
+    hp.pr_noise_base,
+    hp.dop_noise_base));
   gnss_handler_ = std::make_unique<GnssHandler>(hp);
 
   // ClockBetweenFactor params
@@ -296,6 +312,10 @@ void GnssExtensionModule::on_navsatfix_(
   GnssAnchorState anchor;
   anchor.origin_ecef = origin_ecef_;
   anchor.R_ecef_world = R_ecef_world_init_;
+  anchor.stamp = node_ ? node_->get_clock()->now().seconds() : 0.0;
+  if (gnss_epoch_builder_) {
+    gnss_epoch_builder_->set_anchor(anchor);
+  }
   IapSharedState::instance().set_gnss_anchor(anchor);
 
   logger_->info("GnssExtensionModule: ECEF origin set — lat={:.6f}° lon={:.6f}° "
@@ -311,14 +331,17 @@ void GnssExtensionModule::on_iono_params_(
   if (!msg || msg->parameters.size() < 8) return;
   // Only use GPS (type 0) Klobuchar parameters
   if (msg->type != 0) return;
-  std::lock_guard<std::mutex> lk(iono_mutex_);
-  iono_params_.assign(msg->parameters.begin(), msg->parameters.begin() + 8);
+  std::vector<double> iono_params(msg->parameters.begin(), msg->parameters.begin() + 8);
+  if (gnss_epoch_builder_) {
+    gnss_epoch_builder_->set_iono_params(iono_params);
+  }
+  IapSharedState::instance().set_gnss_iono_params(iono_params);
   static std::once_flag once;
-  std::call_once(once, [this] {
+  std::call_once(once, [this, iono_params] {
     logger_->info("[gnss_ext] Klobuchar iono params received — ionospheric correction enabled.  "
                   "alpha=[{:.4e},{:.4e},{:.4e},{:.4e}] beta=[{:.0f},{:.0f},{:.0f},{:.0f}]",
-                  iono_params_[0], iono_params_[1], iono_params_[2], iono_params_[3],
-                  iono_params_[4], iono_params_[5], iono_params_[6], iono_params_[7]);
+                  iono_params[0], iono_params[1], iono_params[2], iono_params[3],
+                  iono_params[4], iono_params[5], iono_params[6], iono_params[7]);
   });
 }
 
@@ -328,8 +351,10 @@ void GnssExtensionModule::on_ephem_(
     const std::shared_ptr<const GnssEphemMsgT>& msg) {
   auto ephem = gnss_comm::msg2ephem(msg);
   if (!ephem) return;
-  std::lock_guard<std::mutex> lk(ephem_mutex_);
-  ephem_cache_[ephem->sat] = ephem;
+  if (gnss_epoch_builder_) {
+    gnss_epoch_builder_->update_ephemeris(ephem);
+  }
+  IapSharedState::instance().push_gnss_ephemeris_update(GnssEphemerisUpdate{ephem->sat, ephem, nullptr});
 }
 
 template <typename GnssGloEphemMsgT>
@@ -337,8 +362,10 @@ void GnssExtensionModule::on_glo_ephem_(
     const std::shared_ptr<const GnssGloEphemMsgT>& msg) {
   auto ephem = gnss_comm::msg2glo_ephem(msg);
   if (!ephem) return;
-  std::lock_guard<std::mutex> lk(ephem_mutex_);
-  glo_ephem_cache_[ephem->sat] = ephem;
+  if (gnss_epoch_builder_) {
+    gnss_epoch_builder_->update_glo_ephemeris(ephem);
+  }
+  IapSharedState::instance().push_gnss_ephemeris_update(GnssEphemerisUpdate{ephem->sat, nullptr, ephem});
 }
 
 // ── Range measurement → GnssEpoch → GnssHandler::insert_epoch() ──────────────
@@ -346,23 +373,43 @@ template <typename GnssMeasMsgT>
 void GnssExtensionModule::on_range_meas_(
     const std::shared_ptr<const GnssMeasMsgT>& msg,
     double                                      ros_stamp) {
-  // Convert ROS message to gnss_comm obs list
   const auto obs_list = gnss_comm::msg2meas(msg);
   if (obs_list.empty()) return;
 
-  GnssEpoch epoch;
-  // Derive epoch stamp from the GPS observation time, converted to UTC.
-  // node_->get_clock()->now() returns the current wall clock, which differs
-  // from bag replay timestamps by the recording date offset (potentially months),
-  // causing get_factors() to drain all epochs as "too old".
-  // gnss_comm::gpst2utc() subtracts GPS leap seconds to give UTC Unix time,
-  // matching the LiDAR frame_stamp that glim extracts from the bag.
-  {
-    const auto utc_t = gnss_comm::gpst2utc(obs_list[0]->time);
-    epoch.stamp = static_cast<double>(utc_t.time) + utc_t.sec;
+  GnssRawObservationBatch raw_batch;
+  raw_batch.ros_stamp = ros_stamp;
+  raw_batch.observations = obs_list;
+  IapSharedState::instance().push_gnss_raw_observation_batch(raw_batch);
+
+  const auto iono_params = IapSharedState::instance().get_gnss_iono_params();
+  if (iono_params.empty()) {
+    static std::once_flag iono_warn;
+    std::call_once(iono_warn, [this] {
+      logger_->warn("[gnss_ext] WARNING: no Klobuchar iono params received yet — "
+                    "ionospheric correction DISABLED.  L1 pseudorange residuals "
+                    "may be 10-25 m larger.  Ensure /ublox_driver/iono_params is published.");
+    });
+  } else {
+    static std::once_flag iono_use;
+    std::call_once(iono_use, [this, iono_params] {
+      logger_->info("[gnss_ext] Klobuchar iono correction ACTIVE for this epoch — "
+                    "alpha=[{:.4e},{:.4e},{:.4e},{:.4e}] beta=[{:.0f},{:.0f},{:.0f},{:.0f}]",
+                    iono_params[0], iono_params[1], iono_params[2], iono_params[3],
+                    iono_params[4], iono_params[5], iono_params[6], iono_params[7]);
+    });
   }
 
-  // One-time stamp alignment diagnostic
+  if (!gnss_epoch_builder_) {
+    return;
+  }
+
+  const auto build_result = gnss_epoch_builder_->build_epoch(raw_batch);
+  if (build_result.status != GnssEpochBuilder::BuildStatus::Success || !build_result.epoch.has_value()) {
+    return;
+  }
+
+  const GnssEpoch& epoch = *build_result.epoch;
+
   {
     static std::once_flag once;
     std::call_once(once, [&] {
@@ -373,166 +420,15 @@ void GnssExtensionModule::on_range_meas_(
     });
   }
 
-  // Lock ephemeris cache for the duration of this epoch conversion
-  std::lock_guard<std::mutex> eph_lk(ephem_mutex_);
-
-  // Need origin_ecef_ for sat_azel elevation; read it once under lock
-  Eigen::Vector3d anc_ecef;
-  bool origin_ready = false;
-  {
-    std::lock_guard<std::mutex> flk(frame_mutex_);
-    if (origin_set_) { anc_ecef = origin_ecef_; origin_ready = true; }
-  }
-  if (!origin_ready) return;  // wait until NavSatFix seeds the origin
-
-  // Snapshot iono params (GPS L1 Klobuchar, 8 coefficients) if available
-  std::vector<double> iono_params_snap;
-  {
-    std::lock_guard<std::mutex> ilk(iono_mutex_);
-    iono_params_snap = iono_params_;
-  }
-
-  // Warn once if iono params have not been received — L1 single-frequency
-  // residuals will be significantly degraded without Klobuchar correction.
-  if (iono_params_snap.empty()) {
-    static std::once_flag iono_warn;
-    std::call_once(iono_warn, [this] {
-      logger_->warn("[gnss_ext] WARNING: no Klobuchar iono params received yet — "
-                    "ionospheric correction DISABLED.  L1 pseudorange residuals "
-                    "may be 10-25 m larger.  Ensure /ublox_driver/iono_params is published.");
-    });
+  gnss_handler_->insert_epoch(epoch);
+  IapSharedState::instance().set_gnss_epoch(epoch);  // share with integrity_extension
+  const uint64_t n = ++epoch_count_;
+  if (n == 1 || n % 100 == 0) {
+    logger_->info("[gnss_ext] epoch #{} inserted: stamp={:.3f} n_sats={}",
+                  n, epoch.stamp, epoch.sats.size());
   } else {
-    static std::once_flag iono_use;
-    std::call_once(iono_use, [this, &iono_params_snap] {
-      logger_->info("[gnss_ext] Klobuchar iono correction ACTIVE for this epoch — "
-                    "alpha=[{:.4e},{:.4e},{:.4e},{:.4e}] beta=[{:.0f},{:.0f},{:.0f},{:.0f}]",
-                    iono_params_snap[0], iono_params_snap[1], iono_params_snap[2], iono_params_snap[3],
-                    iono_params_snap[4], iono_params_snap[5], iono_params_snap[6], iono_params_snap[7]);
-    });
-  }
-
-  // GPS time in seconds (used by iono/trop correction functions)
-  const double gps_sec = static_cast<double>(obs_list[0]->time.time) + obs_list[0]->time.sec;
-
-  epoch.gps_sec = gps_sec;
-  epoch.iono_params = iono_params_snap;
-
-  for (const auto& obs : obs_list) {
-    if (!obs) continue;
-
-    // ── find L1 frequency index ──
-    int l1_idx = -1;
-    const double freq = gnss_comm::L1_freq(obs, &l1_idx);
-    if (l1_idx < 0 || freq < 0.0) continue;
-
-    // ── basic validity: need pseudorange ──
-    if (static_cast<int>(obs->psr.size()) <= l1_idx) continue;
-    const double pr = obs->psr[l1_idx];
-    if (pr <= 0.0 || !std::isfinite(pr)) continue;
-
-    // ── compute satellite position/velocity from ephemeris ──
-    // CRITICAL: satellite position must be evaluated at signal TRANSMISSION
-    // time t_tx ≈ t_rx − P/c, NOT at reception time t_rx.  During the ~67 ms
-    // transit, the satellite moves ~255 m in orbit.  Using reception-time
-    // positions causes per-satellite range errors of 30-70 m (the orbital-
-    // motion component projected onto each LOS), which directly inflate the
-    // pseudorange residuals.
-    const uint32_t sat_id = obs->sat;
-    const uint32_t sys    = gnss_comm::satsys(sat_id, nullptr);
-    Eigen::Vector3d sat_ecef_pos = Eigen::Vector3d::Zero();
-    Eigen::Vector3d sat_ecef_vel = Eigen::Vector3d::Zero();
-    double svdt = 0.0, svddt = 0.0;
-    double tgd  = 0.0;
-
-    // Approximate signal transmission time: t_tx = t_rx − pr / c
-    // (One iteration is sufficient for < 1 m accuracy; the residual from
-    // not iterating is ~(3.8 km/s)² / c ≈ 0.05 mm — negligible.)
-    const double tau0 = pr / CLIGHT;  // transit time [s]
-    const auto t_tx = gnss_comm::time_add(obs->time, -tau0);
-
-    if (sys == SYS_GLO) {
-      // GLONASS
-      const auto it = glo_ephem_cache_.find(sat_id);
-      if (it == glo_ephem_cache_.end()) continue;
-      sat_ecef_pos = gnss_comm::geph2pos(t_tx, it->second, &svdt);
-      sat_ecef_vel = gnss_comm::geph2vel(t_tx, it->second, &svddt);
-      // GLONASS has no group delay in eph; leave tgd = 0
-    } else {
-      // GPS / Galileo / BeiDou
-      const auto it = ephem_cache_.find(sat_id);
-      if (it == ephem_cache_.end()) continue;
-      sat_ecef_pos = gnss_comm::eph2pos(t_tx, it->second, &svdt);
-      sat_ecef_vel = gnss_comm::eph2vel(t_tx, it->second, &svddt);
-      tgd = it->second->tgd[0];  // TGD (seconds); factor multiplies by CLIGHT
-    }
-
-    if (!sat_ecef_pos.allFinite() || !sat_ecef_vel.allFinite()) continue;
-
-    // ── elevation angle for noise weighting (uses origin_ecef_ as receiver) ──
-    double azel[2] = {0.0, M_PI / 2.0};  // {azimuth, elevation} — default π/2
-    gnss_comm::sat_azel(anc_ecef, sat_ecef_pos, azel);
-    const double elevation = azel[1];
-    const double azimuth   = azel[0];
-
-    // Skip satellites below 10° elevation (checklist §1.1 cutoff ≥ 10°)
-    if (elevation < 10.0 * M_PI / 180.0) continue;
-
-    // ── Doppler: Hz → m/s  (range_rate = -dopp_hz * c/f) ──
-    double dop_meas = 0.0;
-    if (static_cast<int>(obs->dopp.size()) > l1_idx && freq > 0.0) {
-      const double dopp_hz = obs->dopp[l1_idx];
-      if (std::isfinite(dopp_hz)) {
-        dop_meas = -dopp_hz * (CLIGHT / freq);
-      }
-    }
-
-    // ── noise ──
-    double pr_sigma_override = -1.0;
-    if (static_cast<int>(obs->psr_std.size()) > l1_idx) {
-      pr_sigma_override = obs->psr_std[l1_idx];
-    }
-    double dop_sigma_override = -1.0;
-    if (static_cast<int>(obs->dopp_std.size()) > l1_idx && freq > 0.0) {
-      dop_sigma_override = obs->dopp_std[l1_idx] * (CLIGHT / freq);
-    }
-
-    SatObs sat;
-    sat.sat_id        = static_cast<int>(sat_id);
-    sat.constellation = (sys == SYS_GLO) ? 'R' :
-                        (sys == SYS_GAL) ? 'E' :
-                        (sys == SYS_BDS) ? 'C' : 'G';
-    // Apply satellite clock bias pre-correction (ADD sign per RTKLIB/LIGO convention):
-    //   pr_corrected = pr_raw + svdt * c
-    // The PseudorangeFactor prediction does NOT include svdt — measurement is
-    // expected to be pre-corrected here.
-    sat.pr_meas       = pr + svdt * CLIGHT;
-    // Doppler: same ADD sign — removes satellite clock frequency bias
-    sat.dop_meas      = dop_meas + svddt * CLIGHT;
-    sat.pr_sigma      = (pr_sigma_override > 0.05) ? pr_sigma_override  : 5.0;
-    sat.dop_sigma     = (dop_sigma_override > 0.01) ? dop_sigma_override : 0.5;
-    // Satellite state in ECEF — factors work directly in ECEF
-    sat.sat_pos       = sat_ecef_pos;
-    sat.sat_vel       = sat_ecef_vel;
-    sat.elevation     = elevation;
-    sat.azimuth       = azimuth;
-    sat.tgd           = tgd;
-    sat.svddt         = svddt;
-
-    epoch.sats.push_back(sat);
-  }
-
-  if (!epoch.sats.empty()) {
-    gnss_handler_->insert_epoch(epoch);
-    IapSharedState::instance().set_gnss_epoch(epoch);  // share with integrity_extension
-    const uint64_t n = ++epoch_count_;
-    // Log first epoch, then every 100 (≈ ~10 s at 10 Hz)
-    if (n == 1 || n % 100 == 0) {
-      logger_->info("[gnss_ext] epoch #{} inserted: stamp={:.3f} n_sats={}",
-                    n, epoch.stamp, epoch.sats.size());
-    } else {
-      logger_->debug("[gnss_ext] epoch #{} inserted: stamp={:.3f} n_sats={}",
-                     n, epoch.stamp, epoch.sats.size());
-    }
+    logger_->debug("[gnss_ext] epoch #{} inserted: stamp={:.3f} n_sats={}",
+                   n, epoch.stamp, epoch.sats.size());
   }
 }
 
