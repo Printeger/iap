@@ -3,6 +3,18 @@
 > 规则：任何代码改动必须在这里记录，并包含 IAP-RQ-XXX。
 
 ## Unreleased
+- feat(dev-ct-gnss): IAP-RQ-020 / IAP-RQ-300 / IAP-RQ-410 — start Phase 1C by injecting GNSS pseudorange/doppler directly into the BSpline control-window graph.
+  - Added shared GNSS epoch queue + ECEF anchor publication to `IapSharedState`, and `GnssExtensionModule` now publishes the NavSat-derived ECEF anchor for continuous-time odometry consumption.
+  - Added `IntegratedBSplinePseudorangeFactor` / `IntegratedBSplineDopplerFactor`, clock/ECEF key helpers, and wired `OdometryEstimationBSpline` to consume GNSS epochs per active segment, optimize per-segment clock states, and add GNSS factors/clock-between factors into the same fixed-lag LM graph as LiDAR/IMU/velocity.
+  - Added `test_bspline_gnss_factor.cpp` and updated `config_odometry_bspline.json` comments to reflect the initial Phase-1C GNSS path.
+- feat(dev-ct-planner-future): IAP-RQ-300 / IAP-RQ-400 / IAP-RQ-410 — let planner scoring consume future-time continuous-time trajectory samples.
+  - `IntegrityPlanner::plan()` now resolves its planning origin from `SplineControlAccess` when available, so the current seed stamp tracks the active control window instead of blindly using the latest published sample.
+  - Candidate evaluation now queries future-time `ContinuousTrajectoryView` samples at each waypoint, floors `sigma_pred` / `PL_pred` with the published spline uncertainty, and adds a short-horizon `w_ct_align` term from velocity / yaw mismatch to the published continuous-time trajectory.
+  - Expanded `test_integrity_planner.cpp` to verify future sigma flooring and future trajectory velocity alignment influence candidate selection.
+- feat(dev-ct-planner-seed): IAP-RQ-300 / IAP-RQ-410 — let the planner seed from the published continuous-time trajectory state.
+  - `IntegrityPlanner::plan()` now resolves its seed state from `ContinuousTrajectoryView::latest_sample()` when available, overriding fallback `pos0 / vel0 / yaw0 / sigma0` with the published spline state.
+  - Motion-primitive generation, smoothness cost, and turn cost now start from the velocity-aware continuous-time state instead of only using the trajectory view as a sigma source.
+  - Added `test_integrity_planner.cpp` and wired it into `CMakeLists.txt` to verify both state seeding and trajectory-view-driven candidate selection.
 - feat(dev-ct-trajectory-kinematics): IAP-RQ-300 / IAP-RQ-410 — publish explicit spline velocity states through control-access and trajectory sampling.
   - `BSplineControlWindow` / `BSplineControlWindowBuffer` now export control-point snapshots with optional velocity states when the fixed-lag graph has them.
   - `OdometryEstimationBSpline` now caches active velocity states for publication, seeds the initial spline snapshot with the initialization velocity, and exposes the active-window velocity states through `ContinuousTrajectoryView` / `SplineControlAccess`.

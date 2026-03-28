@@ -53,4 +53,11 @@ struct GnssEpoch {
   std::vector<double>    iono_params;  ///< Klobuchar params {α0..α3, β0..β3}; empty → skip iono
 };
 
+/// @brief Shared ECEF anchor state published by gnss_extension.
+struct GnssAnchorState {
+  double stamp = 0.0;
+  Eigen::Vector3d origin_ecef = Eigen::Vector3d::Zero();
+  Eigen::Matrix3d R_ecef_world = Eigen::Matrix3d::Identity();
+};
+
 }  // namespace iap

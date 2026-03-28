@@ -16,6 +16,9 @@ inline constexpr std::size_t kBSplineControlPointCount = 4;
 
 gtsam::Key bspline_control_point_key(std::size_t index);
 gtsam::Key bspline_velocity_key(std::size_t index);
+gtsam::Key bspline_clock_key(std::size_t index);
+gtsam::Key bspline_ecef_origin_key();
+gtsam::Key bspline_ecef_rot_key();
 
 struct BSplineControlPointState {
   std::size_t index = 0;

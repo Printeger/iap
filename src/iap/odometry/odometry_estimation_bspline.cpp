@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <cstdint>
+#include <cmath>
 #include <gtsam/inference/Symbol.h>
 #include <gtsam/slam/BetweenFactor.h>
 #include <gtsam/slam/PriorFactor.h>
@@ -91,6 +92,22 @@ OdometryEstimationBSpline::OdometryEstimationBSpline(const OdometryEstimationBSp
   velocity_ct_inf_scale_ = config.param<double>("odometry_estimation", "velocity_ct_inf_scale", 1e3);
   imu_ct_sample_stride_ = config.param<int>("odometry_estimation", "imu_ct_sample_stride", 4);
   lm_max_iterations_ = config.param<int>("odometry_estimation", "lm_max_iterations", 8);
+
+  Config gnss_config(GlobalConfig::get_config_path("config_gnss"));
+  gnss_time_tolerance_ = gnss_config.param<double>("gnss", "time_tolerance", 0.1);
+  gnss_min_elevation_ = gnss_config.param<double>("gnss", "min_elevation_deg", 10.0) * M_PI / 180.0;
+  gnss_pr_noise_base_ = gnss_config.param<double>("gnss", "pr_noise_base", 5.0);
+  gnss_dop_noise_base_ = gnss_config.param<double>("gnss", "dop_noise_base", 0.5);
+  gnss_elev_noise_exp_ = gnss_config.param<double>("gnss", "elev_noise_exp", 2.0);
+  gnss_sigma_ecef_origin_ = gnss_config.param<double>("gnss", "sigma_ecef_origin", 5.0);
+  gnss_sigma_ecef_rot_ = gnss_config.param<double>("gnss", "sigma_ecef_rot", 0.087);
+  gnss_lever_arm_ = gnss_config.param<Eigen::Vector3d>("gnss", "lever_arm", Eigen::Vector3d::Zero());
+  gnss_canopy_params_.sigma_0 = gnss_config.param<double>("gnss", "canopy_sigma_0", 1.0);
+  gnss_canopy_params_.sigma_mp = gnss_config.param<double>("gnss", "canopy_sigma_mp", 0.5);
+  gnss_canopy_params_.sigma_c = gnss_config.param<double>("gnss", "canopy_sigma_c", 5.0);
+  gnss_canopy_params_.alpha = gnss_config.param<double>("gnss", "canopy_alpha", 2.0);
+  gnss_clock_between_params_.q_bias = gnss_config.param<double>("gnss", "clock_q_bias", 1.0);
+  gnss_clock_between_params_.q_drift = gnss_config.param<double>("gnss", "clock_q_drift", 0.1);
 
   T_lidar_imu = params.T_lidar_imu;
   T_imu_lidar = T_lidar_imu.inverse();
@@ -240,6 +257,10 @@ std::vector<OdometryEstimationBSpline::ActiveSplineIMUSample> OdometryEstimation
   return samples;
 }
 
+std::vector<iap::GnssEpoch> OdometryEstimationBSpline::consume_segment_gnss_epochs(double frame_stamp) const {
+  return iap::IapSharedState::instance().consume_gnss_epochs_near(frame_stamp, gnss_time_tolerance_);
+}
+
 void OdometryEstimationBSpline::update_marginal_prior_from_active_window() {
   marginal_prior_ = ActiveSplineMarginalPrior();
 
@@ -387,6 +408,14 @@ EstimationFrame::ConstPtr OdometryEstimationBSpline::insert_frame_ct_lidar(
   control_window_->advance(raw_frame->stamp, raw_frame->scan_end_time, predicted_end_pose);
   control_buffer_->append_window(*control_window_);
 
+  if (const auto anchor = iap::IapSharedState::instance().get_gnss_anchor()) {
+    if (!gnss_anchor_initialized_) {
+      gnss_origin_ecef_ = anchor->origin_ecef;
+      gnss_ecef_rot_ = gtsam::Rot3(anchor->R_ecef_world);
+      gnss_anchor_initialized_ = true;
+    }
+  }
+
   const double min_active_stamp = std::max(0.0, raw_frame->stamp - params->smoother_lag);
   control_buffer_->prune_before(min_active_stamp);
   prune_active_segment_constraints(min_active_stamp);
@@ -394,6 +423,9 @@ EstimationFrame::ConstPtr OdometryEstimationBSpline::insert_frame_ct_lidar(
   new_frame->frame = create_lidar_source_cloud(raw_frame);
   const auto factor_source = gtsam_points::PointCloudCPU::clone(*new_frame->frame);
   append_active_segment_constraint(raw_frame, factor_source);
+  if (!active_segment_constraints_.empty()) {
+    active_segment_constraints_.back().gnss_epochs = consume_segment_gnss_epochs(raw_frame->stamp);
+  }
 
   gtsam::Values values = control_buffer_->values();
   const auto& active_states = control_buffer_->states();
@@ -408,6 +440,25 @@ EstimationFrame::ConstPtr OdometryEstimationBSpline::insert_frame_ct_lidar(
   std::shared_ptr<iap::IntegratedBSplineGICPFactor> current_factor;
   std::size_t active_imu_factor_count = 0;
   std::size_t active_velocity_factor_count = 0;
+  std::size_t active_gnss_pr_factor_count = 0;
+  std::size_t active_gnss_dop_factor_count = 0;
+  struct ActiveClockState {
+    gtsam::Key key = 0;
+    double stamp = 0.0;
+    gtsam::Vector2 value = gtsam::Vector2::Zero();
+  };
+  std::vector<ActiveClockState> active_clock_states;
+  const gtsam::Key ecef_origin_key = iap::bspline_ecef_origin_key();
+  const gtsam::Key ecef_rot_key = iap::bspline_ecef_rot_key();
+  const auto gnss_pr_sigma = [&](const iap::SatObs& sat) {
+    const double canopy_sigma = iap::sigma_eff_canopy(gnss_canopy_params_, sat.kappa, sat.elevation);
+    return std::max({1e-3, sat.pr_sigma, canopy_sigma, gnss_pr_noise_base_});
+  };
+  const auto gnss_dop_sigma = [&](const iap::SatObs& sat) {
+    const double sin_el = std::sin(std::max(sat.elevation, gnss_min_elevation_));
+    const double modeled = gnss_dop_noise_base_ / std::pow(std::max(0.052, sin_el), gnss_elev_noise_exp_);
+    return std::max({1e-3, sat.dop_sigma, modeled});
+  };
   auto segment_poses_from_values = [&](const ActiveSplineSegmentConstraint& segment) {
     std::array<gtsam::Pose3, iap::kBSplineControlPointCount> poses;
     for (std::size_t k = 0; k < iap::kBSplineControlPointCount; ++k) {
@@ -420,14 +471,18 @@ EstimationFrame::ConstPtr OdometryEstimationBSpline::insert_frame_ct_lidar(
     const gtsam::Key velocity_key = iap::bspline_velocity_key(segment.velocity_index);
 
     if (!values.exists(velocity_key)) {
-      const auto segment_poses = segment_poses_from_values(segment);
-      const gtsam::Vector3 velocity_guess =
-        iap::IntegratedBSplineVelocityFactor::predict_velocity(
-          segment_poses,
-          0.0,
-          std::max(1e-3, segment.scan_end - segment.stamp),
-          trajectory_params_.finite_difference_dt);
-      values.insert(velocity_key, velocity_guess);
+      if (latest_ct_aux_values_.exists(velocity_key)) {
+        values.insert(velocity_key, latest_ct_aux_values_.at<gtsam::Vector3>(velocity_key));
+      } else {
+        const auto segment_poses = segment_poses_from_values(segment);
+        const gtsam::Vector3 velocity_guess =
+          iap::IntegratedBSplineVelocityFactor::predict_velocity(
+            segment_poses,
+            0.0,
+            std::max(1e-3, segment.scan_end - segment.stamp),
+            trajectory_params_.finite_difference_dt);
+        values.insert(velocity_key, velocity_guess);
+      }
     }
 
     std::array<gtsam::Key, iap::kBSplineControlPointCount> segment_keys{};
@@ -469,6 +524,74 @@ EstimationFrame::ConstPtr OdometryEstimationBSpline::insert_frame_ct_lidar(
       active_imu_factor_count++;
     }
 
+    if (gnss_anchor_initialized_ && !segment.gnss_epochs.empty()) {
+      const gtsam::Key clock_key = iap::bspline_clock_key(segment.velocity_index);
+      if (!values.exists(clock_key)) {
+        gtsam::Vector2 init_clock = gtsam::Vector2::Zero();
+        if (latest_ct_aux_values_.exists(clock_key)) {
+          init_clock = latest_ct_aux_values_.at<gtsam::Vector2>(clock_key);
+        } else if (!active_clock_states.empty()) {
+          init_clock = active_clock_states.back().value;
+          const double dt = std::max(0.0, segment.stamp - active_clock_states.back().stamp);
+          init_clock(0) += init_clock(1) * dt;
+        }
+        values.insert(clock_key, init_clock);
+      }
+
+      if (!values.exists(ecef_origin_key)) {
+        values.insert(ecef_origin_key, gnss_origin_ecef_);
+      }
+      if (!values.exists(ecef_rot_key)) {
+        values.insert(ecef_rot_key, gnss_ecef_rot_);
+      }
+
+      active_clock_states.push_back(ActiveClockState{clock_key, segment.stamp, values.at<gtsam::Vector2>(clock_key)});
+
+      const double segment_duration = std::max(1e-3, segment.scan_end - segment.stamp);
+      for (const auto& epoch : segment.gnss_epochs) {
+        const double u = std::clamp((epoch.stamp - segment.stamp) / segment_duration, 0.0, 1.0);
+        for (const auto& sat : epoch.sats) {
+          if (sat.excluded || sat.elevation < gnss_min_elevation_) {
+            continue;
+          }
+
+          graph.add(std::make_shared<iap::IntegratedBSplinePseudorangeFactor>(
+            segment_keys,
+            clock_key,
+            ecef_origin_key,
+            ecef_rot_key,
+            u,
+            sat.pr_meas,
+            sat.sat_pos,
+            sat.tgd,
+            epoch.gps_sec,
+            epoch.iono_params,
+            gnss_pr_sigma(sat),
+            gnss_lever_arm_,
+            sat.sat_id,
+            sat.constellation,
+            sat.elevation));
+          active_gnss_pr_factor_count++;
+
+          graph.add(std::make_shared<iap::IntegratedBSplineDopplerFactor>(
+            segment_keys,
+            velocity_key,
+            clock_key,
+            ecef_rot_key,
+            u,
+            sat.dop_meas,
+            sat.sat_pos,
+            sat.sat_vel,
+            gnss_origin_ecef_,
+            gnss_dop_sigma(sat),
+            sat.sat_id,
+            sat.constellation,
+            sat.elevation));
+          active_gnss_dop_factor_count++;
+        }
+      }
+    }
+
     if (i + 1 == active_segment_constraints_.size()) {
       current_factor = factor;
     }
@@ -485,6 +608,8 @@ EstimationFrame::ConstPtr OdometryEstimationBSpline::insert_frame_ct_lidar(
   const auto marginal_noise = gtsam::noiseModel::Isotropic::Precision(6, ctrl_point_marginal_inf_scale_);
   const auto imu_bias_noise = gtsam::noiseModel::Isotropic::Precision(3, imu_ct_bias_inf_scale_);
   const auto gravity_noise = gtsam::noiseModel::Isotropic::Precision(3, imu_ct_gravity_inf_scale_);
+  const auto gnss_ecef_noise = gtsam::noiseModel::Diagonal::Sigmas(gtsam::Vector3::Constant(gnss_sigma_ecef_origin_));
+  const auto gnss_ecef_rot_noise = gtsam::noiseModel::Isotropic::Sigma(3, gnss_sigma_ecef_rot_);
 
   const bool use_marginal_prior =
     marginal_prior_.valid &&
@@ -537,6 +662,26 @@ EstimationFrame::ConstPtr OdometryEstimationBSpline::insert_frame_ct_lidar(
   graph.emplace_shared<gtsam::PriorFactor<gtsam::Vector3>>(gyro_bias_key, gyro_bias_, imu_bias_noise);
   graph.emplace_shared<gtsam::PriorFactor<gtsam::Vector3>>(accel_bias_key, accel_bias_, imu_bias_noise);
   graph.emplace_shared<gtsam::PriorFactor<gtsam::Vector3>>(gravity_key, gravity_world_, gravity_noise);
+  if (gnss_anchor_initialized_ && values.exists(ecef_origin_key) && values.exists(ecef_rot_key)) {
+    graph.emplace_shared<gtsam::PriorFactor<gtsam::Vector3>>(ecef_origin_key, gnss_origin_ecef_, gnss_ecef_noise);
+    graph.emplace_shared<gtsam::PriorFactor<gtsam::Rot3>>(ecef_rot_key, gnss_ecef_rot_, gnss_ecef_rot_noise);
+  }
+  if (!active_clock_states.empty()) {
+    const auto clock_prior_noise = gtsam::noiseModel::Diagonal::Sigmas(
+      (gtsam::Vector2() << params->clk_bias_noise, params->clk_drift_noise).finished());
+    graph.emplace_shared<gtsam::PriorFactor<gtsam::Vector2>>(
+      active_clock_states.front().key,
+      active_clock_states.front().value,
+      clock_prior_noise);
+    for (std::size_t i = 1; i < active_clock_states.size(); ++i) {
+      const double dt = std::max(1e-3, active_clock_states[i].stamp - active_clock_states[i - 1].stamp);
+      graph.emplace_shared<iap::ClockBetweenFactor>(
+        active_clock_states[i - 1].key,
+        active_clock_states[i].key,
+        dt,
+        iap::ClockBetweenFactor::make_noise(dt, gnss_clock_between_params_));
+    }
+  }
 
   gtsam_points::LevenbergMarquardtExtParams lm_params;
   lm_params.setlambdaInitial(1e-4);
@@ -550,11 +695,13 @@ EstimationFrame::ConstPtr OdometryEstimationBSpline::insert_frame_ct_lidar(
   }
 
   const auto keys = control_window_->keys();
-  logger->trace("bspline ct active_window={} active_segment_factors={} active_velocity_factors={} active_imu_factors={} current_segment_keys={} {} {} {}",
+  logger->trace("bspline ct active_window={} active_segment_factors={} active_velocity_factors={} active_imu_factors={} active_gnss_pr_factors={} active_gnss_dop_factors={} current_segment_keys={} {} {} {}",
     active_states.size(),
     active_segment_constraints_.size(),
     active_velocity_factor_count,
     active_imu_factor_count,
+    active_gnss_pr_factor_count,
+    active_gnss_dop_factor_count,
     static_cast<std::uint64_t>(keys[0]),
     static_cast<std::uint64_t>(keys[1]),
     static_cast<std::uint64_t>(keys[2]),
@@ -568,10 +715,21 @@ EstimationFrame::ConstPtr OdometryEstimationBSpline::insert_frame_ct_lidar(
   latest_ct_aux_values_.clear();
   for (const auto& segment : active_segment_constraints_) {
     const gtsam::Key velocity_key = iap::bspline_velocity_key(segment.velocity_index);
-    if (!values.exists(velocity_key) || latest_ct_aux_values_.exists(velocity_key)) {
-      continue;
+    if (values.exists(velocity_key) && !latest_ct_aux_values_.exists(velocity_key)) {
+      latest_ct_aux_values_.insert(velocity_key, values.at<gtsam::Vector3>(velocity_key));
     }
-    latest_ct_aux_values_.insert(velocity_key, values.at<gtsam::Vector3>(velocity_key));
+    const gtsam::Key clock_key = iap::bspline_clock_key(segment.velocity_index);
+    if (values.exists(clock_key) && !latest_ct_aux_values_.exists(clock_key)) {
+      latest_ct_aux_values_.insert(clock_key, values.at<gtsam::Vector2>(clock_key));
+    }
+  }
+  if (values.exists(ecef_origin_key)) {
+    gnss_origin_ecef_ = values.at<gtsam::Vector3>(ecef_origin_key);
+    gnss_anchor_initialized_ = true;
+  }
+  if (values.exists(ecef_rot_key)) {
+    gnss_ecef_rot_ = values.at<gtsam::Rot3>(ecef_rot_key);
+    gnss_anchor_initialized_ = true;
   }
   update_marginal_prior_from_active_window();
 
@@ -582,6 +740,15 @@ EstimationFrame::ConstPtr OdometryEstimationBSpline::insert_frame_ct_lidar(
   new_frame->v_world_imu = values.at<gtsam::Vector3>(iap::bspline_velocity_key(control_window_->states()[1].index));
   new_frame->imu_bias.head<3>() = accel_bias_;
   new_frame->imu_bias.tail<3>() = gyro_bias_;
+  const gtsam::Key current_clock_key = iap::bspline_clock_key(control_window_->states()[1].index);
+  if (values.exists(current_clock_key)) {
+    const auto clock = values.at<gtsam::Vector2>(current_clock_key);
+    new_frame->clk_bias = clock(0);
+    new_frame->clk_drift = clock(1);
+  } else if (!frames.empty() && frames.back()) {
+    new_frame->clk_bias = frames.back()->clk_bias;
+    new_frame->clk_drift = frames.back()->clk_drift;
+  }
 
   const auto deskewed_points = current_factor->deskewed_source_points(values, true);
   const auto deskewed_covs = covariance_estimation->estimate(deskewed_points, raw_frame->neighbors);

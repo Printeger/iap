@@ -27,9 +27,11 @@
 #include <iap/trunk/trunk_types.hpp>
 
 #include <atomic>
+#include <deque>
 #include <memory>
 #include <mutex>
 #include <optional>
+#include <vector>
 
 namespace iap {
 
@@ -47,12 +49,48 @@ class IapSharedState {
   void set_gnss_epoch(const GnssEpoch& epoch) {
     std::lock_guard<std::mutex> lk(gnss_mutex_);
     latest_gnss_epoch_ = epoch;
+    gnss_epoch_queue_.push_back(epoch);
+    while (gnss_epoch_queue_.size() > gnss_epoch_queue_limit_) {
+      gnss_epoch_queue_.pop_front();
+    }
   }
 
   /// Returns a copy of the latest GnssEpoch, or nullopt if none yet.
   std::optional<GnssEpoch> get_gnss_epoch() const {
     std::lock_guard<std::mutex> lk(gnss_mutex_);
     return latest_gnss_epoch_;
+  }
+
+  /// Drains GNSS epochs that align with the requested stamp within tolerance.
+  std::vector<GnssEpoch> consume_gnss_epochs_near(double stamp, double tolerance) {
+    std::lock_guard<std::mutex> lk(gnss_mutex_);
+
+    std::vector<GnssEpoch> matched;
+    auto it = gnss_epoch_queue_.begin();
+    while (it != gnss_epoch_queue_.end()) {
+      if (std::abs(it->stamp - stamp) <= tolerance) {
+        matched.push_back(std::move(*it));
+        it = gnss_epoch_queue_.erase(it);
+      } else if (it->stamp < stamp - tolerance) {
+        it = gnss_epoch_queue_.erase(it);
+      } else {
+        ++it;
+      }
+    }
+
+    return matched;
+  }
+
+  // ── GNSS anchor ────────────────────────────────────────────────────────
+
+  void set_gnss_anchor(const GnssAnchorState& anchor) {
+    std::lock_guard<std::mutex> lk(gnss_mutex_);
+    latest_gnss_anchor_ = anchor;
+  }
+
+  std::optional<GnssAnchorState> get_gnss_anchor() const {
+    std::lock_guard<std::mutex> lk(gnss_mutex_);
+    return latest_gnss_anchor_;
   }
 
   // ── Confirmed trunk count ─────────────────────────────────────────────
@@ -132,6 +170,9 @@ class IapSharedState {
 
   mutable std::mutex gnss_mutex_;
   std::optional<GnssEpoch> latest_gnss_epoch_;
+  std::optional<GnssAnchorState> latest_gnss_anchor_;
+  std::deque<GnssEpoch> gnss_epoch_queue_;
+  std::size_t gnss_epoch_queue_limit_ = 256;
 
   std::atomic<int> n_confirmed_trunks_{0};
 

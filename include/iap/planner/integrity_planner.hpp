@@ -27,6 +27,7 @@ namespace iap {
  * @code
  *   J(τ) = w_integrity * Σ_k hinge(HPL_pred_k / AL_k − 1)²
  *          + w_turn     * D_turn(τ)
+ *          + w_ct_align * D_ct(τ)
  *          + w_mission  * dist_to_goal(τ_end)
  *          + w_smooth   * effort(τ)
  *          + w_infeas   * I_{infeasible}(τ)
@@ -42,6 +43,7 @@ class IntegrityPlanner : public PlannerInterface {
     // --- cost weights (§5.2) ---
     double w_integrity = 2.0;   ///< HPL/AL ratio hinge weight
     double w_turn      = 0.5;   ///< D_turn penalty (cumulative heading change)
+    double w_ct_align  = 0.25;  ///< short-horizon alignment to published CT state
     double w_mission   = 1.0;   ///< dist-to-goal weight
     double w_smooth    = 0.1;   ///< effort (velocity derivative) weight
     double w_infeasible = 100.0; ///< infeasibility penalty (PL > AL anywhere)
@@ -94,7 +96,8 @@ class IntegrityPlanner : public PlannerInterface {
   void evaluate(CandidateTrajectory& traj,
                 const Eigen::Vector3d& goal,
                 double AL,
-                double w_integrity) const;
+                double w_integrity,
+                const std::vector<std::optional<TrajectorySample>>* future_samples = nullptr) const;
 
   const Params& params() const { return params_; }
 

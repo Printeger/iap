@@ -7,13 +7,18 @@
 #include <iap/odometry/bspline_control_window.hpp>
 #include <iap/odometry/bspline_trajectory.hpp>
 #include <iap/odometry/integrated_bspline_gicp_factor.hpp>
+#include <iap/odometry/integrated_bspline_gnss_factor.hpp>
 #include <iap/odometry/integrated_bspline_imu_factor.hpp>
 #include <iap/odometry/integrated_bspline_velocity_factor.hpp>
 #include <iap/odometry/odometry_estimation_cpu.hpp>
+#include <iap/gnss/canopy_noise_model.hpp>
+#include <iap/gnss/clock_between_factor.hpp>
+#include <iap/gnss/gnss_types.hpp>
 
 #include <Eigen/Core>
 
 #include <array>
+#include <cmath>
 #include <cstddef>
 #include <gtsam/nonlinear/Values.h>
 #include <vector>
@@ -71,6 +76,7 @@ class OdometryEstimationBSpline : public OdometryEstimationCPU {
     std::shared_ptr<const gtsam_points::iVox> target_snapshot;
     std::shared_ptr<const gtsam_points::NearestNeighborSearch> target_tree;
     std::vector<ActiveSplineIMUSample> imu_samples;
+    std::vector<iap::GnssEpoch> gnss_epochs;
   };
 
   struct ActiveSplineMarginalPrior {
@@ -91,6 +97,7 @@ class OdometryEstimationBSpline : public OdometryEstimationCPU {
   gtsam_points::PointCloud::ConstPtr create_lidar_source_cloud(const PreprocessedFrame::Ptr& raw_frame) const;
   std::shared_ptr<gtsam_points::iVox> create_active_target_snapshot() const;
   std::vector<ActiveSplineIMUSample> create_segment_imu_samples(const PreprocessedFrame::Ptr& raw_frame) const;
+  std::vector<iap::GnssEpoch> consume_segment_gnss_epochs(double frame_stamp) const;
   void update_marginal_prior_from_active_window();
   void append_active_segment_constraint(
     const PreprocessedFrame::Ptr& raw_frame,
@@ -121,6 +128,19 @@ class OdometryEstimationBSpline : public OdometryEstimationCPU {
   double velocity_ct_inf_scale_ = 1e3;
   int imu_ct_sample_stride_ = 4;
   int lm_max_iterations_ = 8;
+  double gnss_time_tolerance_ = 0.1;
+  double gnss_min_elevation_ = 10.0 * M_PI / 180.0;
+  double gnss_pr_noise_base_ = 5.0;
+  double gnss_dop_noise_base_ = 0.5;
+  double gnss_elev_noise_exp_ = 2.0;
+  double gnss_sigma_ecef_origin_ = 5.0;
+  double gnss_sigma_ecef_rot_ = 0.087;
+  Eigen::Vector3d gnss_lever_arm_ = Eigen::Vector3d::Zero();
+  iap::CanopyNoiseParams gnss_canopy_params_;
+  iap::ClockBetweenFactor::Params gnss_clock_between_params_;
+  bool gnss_anchor_initialized_ = false;
+  Eigen::Vector3d gnss_origin_ecef_ = Eigen::Vector3d::Zero();
+  gtsam::Rot3 gnss_ecef_rot_ = gtsam::Rot3::Identity();
   Eigen::Vector3d gyro_bias_ = Eigen::Vector3d::Zero();
   Eigen::Vector3d accel_bias_ = Eigen::Vector3d::Zero();
   Eigen::Vector3d gravity_world_ = Eigen::Vector3d::UnitZ() * 9.80665;

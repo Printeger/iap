@@ -293,6 +293,11 @@ void GnssExtensionModule::on_navsatfix_(
   R_ecef_world_init_ = ecef_to_enu_rotation(lat, lon).transpose();
   origin_set_        = true;
 
+  GnssAnchorState anchor;
+  anchor.origin_ecef = origin_ecef_;
+  anchor.R_ecef_world = R_ecef_world_init_;
+  IapSharedState::instance().set_gnss_anchor(anchor);
+
   logger_->info("GnssExtensionModule: ECEF origin set — lat={:.6f}° lon={:.6f}° "
                 "ECEF=[{:.0f},{:.0f},{:.0f}]m",
                 msg->latitude, msg->longitude,

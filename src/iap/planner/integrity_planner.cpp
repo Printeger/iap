@@ -12,6 +12,96 @@
 
 namespace iap {
 
+namespace {
+
+struct PlannerSeedState {
+  Eigen::Vector3d pos = Eigen::Vector3d::Zero();
+  Eigen::Vector3d vel = Eigen::Vector3d::Zero();
+  double yaw = 0.0;
+  double sigma = 0.0;
+  bool seeded_from_trajectory = false;
+};
+
+double wrap_angle(double angle) {
+  while (angle > M_PI) {
+    angle -= 2.0 * M_PI;
+  }
+  while (angle < -M_PI) {
+    angle += 2.0 * M_PI;
+  }
+  return angle;
+}
+
+PlannerSeedState resolve_seed_state(
+  const Eigen::Vector3d& pos0,
+  const Eigen::Vector3d& vel0,
+  double yaw0,
+  double sigma0,
+  const std::optional<TrajectorySample>& seed_sample) {
+  PlannerSeedState seed;
+  seed.pos = pos0;
+  seed.vel = vel0;
+  seed.yaw = yaw0;
+  seed.sigma = sigma0;
+
+  if (!seed_sample) {
+    return seed;
+  }
+  seed.pos = seed_sample->pose.translation();
+  seed.vel = seed_sample->vel;
+  seed.yaw = seed_sample->yaw;
+  seed.sigma = std::max(sigma0, seed_sample->sigma);
+  seed.seeded_from_trajectory = true;
+  return seed;
+}
+
+std::optional<TrajectorySample> resolve_planning_seed_sample(
+  const std::shared_ptr<const ContinuousTrajectoryView>& trajectory_view,
+  const std::shared_ptr<const SplineControlAccess>& control_access) {
+  if (!trajectory_view) {
+    return std::nullopt;
+  }
+
+  if (control_access) {
+    const auto control_points = control_access->control_points();
+    if (control_points.size() >= 2) {
+      const double current_stamp = control_points[control_points.size() - 2].stamp;
+      if (auto sample = trajectory_view->sample(current_stamp)) {
+        return sample;
+      }
+    } else if (control_points.size() == 1) {
+      if (auto sample = trajectory_view->sample(control_points.back().stamp)) {
+        return sample;
+      }
+    }
+  }
+
+  return trajectory_view->latest_sample();
+}
+
+std::vector<std::optional<TrajectorySample>> sample_future_trajectory(
+  const std::shared_ptr<const ContinuousTrajectoryView>& trajectory_view,
+  const std::optional<TrajectorySample>& seed_sample,
+  const std::vector<TrajectoryPoint>& points) {
+  std::vector<std::optional<TrajectorySample>> samples(points.size());
+  if (!trajectory_view || !seed_sample) {
+    return samples;
+  }
+
+  const double seed_stamp = seed_sample->stamp;
+  const double end_time = trajectory_view->end_time();
+  for (std::size_t i = 0; i < points.size(); ++i) {
+    const double query_stamp = seed_stamp + points[i].stamp;
+    if (query_stamp > end_time + 1e-9) {
+      continue;
+    }
+    samples[i] = trajectory_view->sample(query_stamp);
+  }
+  return samples;
+}
+
+}  // namespace
+
 // ----------------------------------------------------------------------------
 IntegrityPlanner::IntegrityPlanner()
 : params_(),
@@ -66,7 +156,8 @@ void IntegrityPlanner::set_control_access(std::shared_ptr<const SplineControlAcc
 void IntegrityPlanner::evaluate(CandidateTrajectory& traj,
                                 const Eigen::Vector3d& goal,
                                 double AL,
-                                double w_integrity) const {
+                                double w_integrity,
+                                const std::vector<std::optional<TrajectorySample>>* future_samples) const {
   // --- J_integrity: HPL/AL ratio hinge ---
   double J_int = 0.0;
   bool   infeasible = false;
@@ -112,11 +203,29 @@ void IntegrityPlanner::evaluate(CandidateTrajectory& traj,
     J_effort /= static_cast<double>(traj.points.size() - 1);
   }
 
+  double J_ct_align = 0.0;
+  std::size_t ct_match_count = 0;
+  if (future_samples && future_samples->size() == traj.points.size()) {
+    for (std::size_t i = 0; i < traj.points.size(); ++i) {
+      const auto& future = (*future_samples)[i];
+      if (!future) {
+        continue;
+      }
+      const double dyaw = wrap_angle(traj.points[i].yaw - future->yaw);
+      J_ct_align += (traj.points[i].vel - future->vel).norm() + 0.5 * std::abs(dyaw);
+      ct_match_count++;
+    }
+    if (ct_match_count > 0) {
+      J_ct_align /= static_cast<double>(ct_match_count);
+    }
+  }
+
   traj.J_integrity = w_integrity * J_int;
   traj.J_goal      = params_.w_mission * J_goal;
   traj.J_effort    = params_.w_smooth  * J_effort;
   traj.J_total     = traj.J_integrity + traj.J_goal + traj.J_effort
-                     + params_.w_turn * J_turn;
+                     + params_.w_turn * J_turn
+                     + params_.w_ct_align * J_ct_align;
 
   // Infeasibility penalty: large constant added if any waypoint has PL > AL
   if (infeasible) {
@@ -132,18 +241,21 @@ CandidateTrajectory IntegrityPlanner::plan(const Eigen::Vector3d& pos0,
                                            double sigma0,
                                            const IntegrityReport* report) const {
   std::shared_ptr<const ContinuousTrajectoryView> trajectory_view;
+  std::shared_ptr<const SplineControlAccess> control_access;
   {
     std::lock_guard<std::mutex> lock(trajectory_mutex_);
     trajectory_view = trajectory_view_;
+    control_access = control_access_;
   }
   if (!trajectory_view) {
     trajectory_view = IapSharedState::instance().get_continuous_trajectory_view();
   }
-  if (trajectory_view) {
-    if (const auto latest = trajectory_view->latest_sample()) {
-      sigma0 = std::max(sigma0, latest->sigma);
-    }
+  if (!control_access) {
+    control_access = IapSharedState::instance().get_spline_control_access();
   }
+  const std::optional<TrajectorySample> seed_sample =
+    resolve_planning_seed_sample(trajectory_view, control_access);
+  const PlannerSeedState seed = resolve_seed_state(pos0, vel0, yaw0, sigma0, seed_sample);
 
   // Determine current AL and effective integrity weight
   double AL = params_.al_default;
@@ -159,14 +271,14 @@ CandidateTrajectory IntegrityPlanner::plan(const Eigen::Vector3d& pos0,
   }
 
   // Generate candidates (IAP-RQ-300)
-  auto candidates = generator_.generate(pos0, vel0, yaw0);
+  auto candidates = generator_.generate(seed.pos, seed.vel, seed.yaw);
   if (candidates.empty()) {
     spdlog::warn("[IntegrityPlanner] No candidates generated.");
     return {};
   }
 
   // Predict PL_pred for all candidates (IAP-RQ-320)
-  predictor_.predict_all(candidates, sigma0);
+  predictor_.predict_all(candidates, seed.sigma);
 
   // Phase-4: fill AL_pred per waypoint and optionally replace PL_pred
   for (auto& traj : candidates) {
@@ -191,7 +303,16 @@ CandidateTrajectory IntegrityPlanner::plan(const Eigen::Vector3d& pos0,
   int    best_idx  = 0;
 
   for (auto& traj : candidates) {
-    evaluate(traj, goal, AL, w_int);
+    const auto future_samples = sample_future_trajectory(trajectory_view, seed_sample, traj.points);
+    for (std::size_t k = 0; k < future_samples.size() && k < traj.sigma_pred.size() && k < traj.PL_pred.size(); ++k) {
+      if (!future_samples[k]) {
+        continue;
+      }
+      traj.sigma_pred[k] = std::max(traj.sigma_pred[k], future_samples[k]->sigma);
+      traj.PL_pred[k] = std::max(traj.PL_pred[k], predictor_.params().K_pl * traj.sigma_pred[k]);
+    }
+
+    evaluate(traj, goal, AL, w_int, &future_samples);
     if (traj.J_total < best_cost) {
       best_cost = traj.J_total;
       best_idx  = traj.id;
@@ -200,12 +321,16 @@ CandidateTrajectory IntegrityPlanner::plan(const Eigen::Vector3d& pos0,
 
   spdlog::trace(
       "[IntegrityPlanner] plan: {} candidates; best_id={} J_total={:.3f} "
-      "(J_int={:.3f} J_goal={:.3f} J_eff={:.3f}) AL={:.3f} sigma0={:.4f}",
+      "(J_int={:.3f} J_goal={:.3f} J_eff={:.3f}) AL={:.3f} sigma0={:.4f} seed_from_ct={} "
+      "pos0=[{:.3f},{:.3f},{:.3f}] vel0=[{:.3f},{:.3f},{:.3f}] yaw0={:.3f}",
       candidates.size(), best_idx, best_cost,
       candidates[static_cast<std::size_t>(best_idx)].J_integrity,
       candidates[static_cast<std::size_t>(best_idx)].J_goal,
       candidates[static_cast<std::size_t>(best_idx)].J_effort,
-      AL, sigma0);
+      AL, seed.sigma, seed.seeded_from_trajectory,
+      seed.pos.x(), seed.pos.y(), seed.pos.z(),
+      seed.vel.x(), seed.vel.y(), seed.vel.z(),
+      seed.yaw);
 
   return candidates[static_cast<std::size_t>(best_idx)];
 }

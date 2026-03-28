@@ -40,6 +40,18 @@ gtsam::Key bspline_velocity_key(std::size_t index) {
   return gtsam::symbol('u', static_cast<uint64_t>(index));
 }
 
+gtsam::Key bspline_clock_key(std::size_t index) {
+  return gtsam::symbol('c', static_cast<uint64_t>(index));
+}
+
+gtsam::Key bspline_ecef_origin_key() {
+  return gtsam::symbol('e', 0);
+}
+
+gtsam::Key bspline_ecef_rot_key() {
+  return gtsam::symbol('r', 0);
+}
+
 BSplineControlWindow::BSplineControlWindow() = default;
 
 void BSplineControlWindow::initialize(double scan_start, double scan_end, const gtsam::Pose3& initial_pose) {
