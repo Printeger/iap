@@ -8,9 +8,10 @@
 #include <gtsam/inference/Symbol.h>
 #include <gtsam/nonlinear/NonlinearFactorGraph.h>
 #include <Eigen/Core>
-#include <memory>
 #include <deque>
+#include <memory>
 #include <mutex>
+#include <optional>
 
 namespace iap {
 
@@ -61,6 +62,18 @@ class GnssHandler {
 
   /// Insert a GNSS epoch (thread-safe; called on ROS subscriber callback).
   void insert_epoch(const GnssEpoch& epoch);
+
+  /**
+   * @brief Drain buffered epochs whose timestamps fall in
+   *        [start - tolerance, end + tolerance].
+   *
+   * When @p tolerance is not provided, Params::time_tolerance is used.
+   * Epochs older than the lower bound are discarded; future epochs stay queued.
+   */
+  std::vector<GnssEpoch> consume_epochs_in_range(
+    double start,
+    double end,
+    std::optional<double> tolerance = std::nullopt);
 
   /**
    * @brief Collect all buffered epochs near @p frame_stamp and build factors.

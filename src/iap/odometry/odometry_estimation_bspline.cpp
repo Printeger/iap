@@ -35,6 +35,25 @@ iap::SplineKnotMode parse_knot_mode(const std::string& mode) {
   return iap::SplineKnotMode::Uniform;
 }
 
+iap::GnssHandler::Params make_gnss_handler_params(
+  double min_elevation,
+  double pr_noise_base,
+  double dop_noise_base,
+  double elev_noise_exp,
+  double time_tolerance,
+  const Eigen::Vector3d& lever_arm,
+  const iap::CanopyNoiseParams& canopy_params) {
+  iap::GnssHandler::Params params;
+  params.pr_noise_base = pr_noise_base;
+  params.dop_noise_base = dop_noise_base;
+  params.elev_noise_exp = elev_noise_exp;
+  params.time_tolerance = time_tolerance;
+  params.min_elevation = min_elevation;
+  params.lever_arm = lever_arm;
+  params.canopy = canopy_params;
+  return params;
+}
+
 double sigma_from_covariance(const Eigen::Matrix3d& sigma_p) {
   Eigen::SelfAdjointEigenSolver<Eigen::Matrix3d> eig(sigma_p, Eigen::EigenvaluesOnly);
   if (eig.info() != Eigen::Success) {
@@ -115,6 +134,14 @@ OdometryEstimationBSpline::OdometryEstimationBSpline(const OdometryEstimationBSp
   gyro_bias_ = params.imu_bias.tail<3>();
   control_window_ = std::make_unique<iap::BSplineControlWindow>();
   control_buffer_ = std::make_unique<iap::BSplineControlWindowBuffer>();
+  gnss_handler_ = std::make_unique<iap::GnssHandler>(make_gnss_handler_params(
+    gnss_min_elevation_,
+    gnss_pr_noise_base_,
+    gnss_dop_noise_base_,
+    gnss_elev_noise_exp_,
+    gnss_time_tolerance_,
+    gnss_lever_arm_,
+    gnss_canopy_params_));
   ct_target_ivox_ = std::make_shared<gtsam_points::iVox>(params.ivox_resolution);
   ct_target_ivox_->voxel_insertion_setting().set_min_dist_in_cell(params.ivox_min_dist);
   ct_target_ivox_->set_lru_horizon(params.lru_thresh);
@@ -259,11 +286,23 @@ std::vector<OdometryEstimationBSpline::ActiveSplineIMUSample> OdometryEstimation
 
 std::vector<iap::GnssEpoch> OdometryEstimationBSpline::consume_segment_gnss_epochs(
   double segment_start,
-  double segment_end) const {
-  return iap::IapSharedState::instance().consume_gnss_epochs_in_range(
-    segment_start,
-    segment_end,
-    gnss_time_tolerance_);
+  double segment_end) {
+  sync_gnss_epochs_from_shared_state();
+  if (!gnss_handler_) {
+    return {};
+  }
+  return gnss_handler_->consume_epochs_in_range(segment_start, segment_end, gnss_time_tolerance_);
+}
+
+void OdometryEstimationBSpline::sync_gnss_epochs_from_shared_state() {
+  if (!gnss_handler_) {
+    return;
+  }
+
+  auto pending_epochs = iap::IapSharedState::instance().consume_pending_gnss_epochs();
+  for (const auto& epoch : pending_epochs) {
+    gnss_handler_->insert_epoch(epoch);
+  }
 }
 
 void OdometryEstimationBSpline::update_marginal_prior_from_active_window() {
@@ -349,6 +388,7 @@ EstimationFrame::ConstPtr OdometryEstimationBSpline::insert_frame_ct_lidar(
   const PreprocessedFrame::Ptr& raw_frame,
   std::vector<EstimationFrame::ConstPtr>& marginalized_frames) {
   Callbacks::on_insert_frame(raw_frame);
+  sync_gnss_epochs_from_shared_state();
 
   const int current = frames.size();
   const double scan_duration = std::max(1e-3, raw_frame->scan_end_time - raw_frame->stamp);

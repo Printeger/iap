@@ -6,6 +6,7 @@
 
 #include <iap/odometry/bspline_control_window.hpp>
 #include <iap/odometry/bspline_trajectory.hpp>
+#include <iap/gnss/gnss_handler.hpp>
 #include <iap/odometry/integrated_bspline_gicp_factor.hpp>
 #include <iap/odometry/integrated_bspline_gnss_factor.hpp>
 #include <iap/odometry/integrated_bspline_imu_factor.hpp>
@@ -97,7 +98,8 @@ class OdometryEstimationBSpline : public OdometryEstimationCPU {
   gtsam_points::PointCloud::ConstPtr create_lidar_source_cloud(const PreprocessedFrame::Ptr& raw_frame) const;
   std::shared_ptr<gtsam_points::iVox> create_active_target_snapshot() const;
   std::vector<ActiveSplineIMUSample> create_segment_imu_samples(const PreprocessedFrame::Ptr& raw_frame) const;
-  std::vector<iap::GnssEpoch> consume_segment_gnss_epochs(double segment_start, double segment_end) const;
+  void sync_gnss_epochs_from_shared_state();
+  std::vector<iap::GnssEpoch> consume_segment_gnss_epochs(double segment_start, double segment_end);
   void update_marginal_prior_from_active_window();
   void append_active_segment_constraint(
     const PreprocessedFrame::Ptr& raw_frame,
@@ -152,6 +154,7 @@ class OdometryEstimationBSpline : public OdometryEstimationCPU {
   ActiveSplineMarginalPrior marginal_prior_;
   std::shared_ptr<iap::BSplineTrajectory> latest_trajectory_;
   gtsam::Values latest_ct_aux_values_;
+  std::unique_ptr<iap::GnssHandler> gnss_handler_;
 };
 
 }  // namespace glim

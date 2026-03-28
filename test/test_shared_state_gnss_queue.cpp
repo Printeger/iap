@@ -2,9 +2,9 @@
 
 #include <iap/util/shared_state.hpp>
 
-TEST(SharedStateGnssQueueTest, ConsumeRangeDrainsOnlyMatchingEpochs) {
+TEST(SharedStateGnssQueueTest, ConsumePendingDrainsMailboxInFifoOrder) {
   auto& shared = iap::IapSharedState::instance();
-  (void)shared.consume_gnss_epochs_in_range(-1e9, 1e9, 0.0);
+  (void)shared.consume_pending_gnss_epochs();
 
   iap::GnssEpoch e0;
   e0.stamp = 1.00;
@@ -20,35 +20,31 @@ TEST(SharedStateGnssQueueTest, ConsumeRangeDrainsOnlyMatchingEpochs) {
   shared.set_gnss_epoch(e2);
   shared.set_gnss_epoch(e3);
 
-  const auto matched = shared.consume_gnss_epochs_in_range(1.0, 1.1, 0.0);
-  ASSERT_EQ(matched.size(), 2U);
-  EXPECT_DOUBLE_EQ(matched[0].stamp, 1.00);
-  EXPECT_DOUBLE_EQ(matched[1].stamp, 1.05);
+  const auto pending = shared.consume_pending_gnss_epochs();
+  ASSERT_EQ(pending.size(), 4U);
+  EXPECT_DOUBLE_EQ(pending[0].stamp, 1.00);
+  EXPECT_DOUBLE_EQ(pending[1].stamp, 1.05);
+  EXPECT_DOUBLE_EQ(pending[2].stamp, 1.20);
+  EXPECT_DOUBLE_EQ(pending[3].stamp, 2.00);
 
-  const auto remaining = shared.consume_gnss_epochs_in_range(1.15, 3.0, 0.0);
-  ASSERT_EQ(remaining.size(), 2U);
-  EXPECT_DOUBLE_EQ(remaining[0].stamp, 1.20);
-  EXPECT_DOUBLE_EQ(remaining[1].stamp, 2.00);
+  const auto drained = shared.consume_pending_gnss_epochs();
+  EXPECT_TRUE(drained.empty());
 }
 
-TEST(SharedStateGnssQueueTest, RangeToleranceExpandsWindowAtBoundaries) {
+TEST(SharedStateGnssQueueTest, ConsumePendingKeepsLatestEpochAvailable) {
   auto& shared = iap::IapSharedState::instance();
-  (void)shared.consume_gnss_epochs_in_range(-1e9, 1e9, 0.0);
+  (void)shared.consume_pending_gnss_epochs();
 
-  iap::GnssEpoch left;
-  left.stamp = 9.95;
-  iap::GnssEpoch center;
-  center.stamp = 10.00;
-  iap::GnssEpoch right;
-  right.stamp = 10.25;
+  iap::GnssEpoch e0;
+  e0.stamp = 9.95;
+  iap::GnssEpoch e1;
+  e1.stamp = 10.25;
 
-  shared.set_gnss_epoch(left);
-  shared.set_gnss_epoch(center);
-  shared.set_gnss_epoch(right);
+  shared.set_gnss_epoch(e0);
+  shared.set_gnss_epoch(e1);
+  (void)shared.consume_pending_gnss_epochs();
 
-  const auto matched = shared.consume_gnss_epochs_in_range(10.0, 10.2, 0.05);
-  ASSERT_EQ(matched.size(), 3U);
-  EXPECT_DOUBLE_EQ(matched[0].stamp, 9.95);
-  EXPECT_DOUBLE_EQ(matched[1].stamp, 10.00);
-  EXPECT_DOUBLE_EQ(matched[2].stamp, 10.25);
+  const auto latest = shared.get_gnss_epoch();
+  ASSERT_TRUE(latest.has_value());
+  EXPECT_DOUBLE_EQ(latest->stamp, 10.25);
 }

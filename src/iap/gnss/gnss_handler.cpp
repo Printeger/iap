@@ -25,6 +25,32 @@ void GnssHandler::insert_epoch(const GnssEpoch& epoch) {
   epoch_queue_.push_back(epoch);
 }
 
+std::vector<GnssEpoch> GnssHandler::consume_epochs_in_range(
+    double                start,
+    double                end,
+    std::optional<double> tolerance) {
+  const double window = tolerance.value_or(params_.time_tolerance);
+  const double lower = std::min(start, end) - window;
+  const double upper = std::max(start, end) + window;
+
+  std::vector<GnssEpoch> matched;
+  std::lock_guard<std::mutex> lk(mutex_);
+  auto& q = epoch_queue_;
+  auto it = q.begin();
+  while (it != q.end()) {
+    if (it->stamp >= lower && it->stamp <= upper) {
+      matched.push_back(std::move(*it));
+      it = q.erase(it);
+    } else if (it->stamp < lower) {
+      it = q.erase(it);
+    } else {
+      ++it;
+    }
+  }
+
+  return matched;
+}
+
 std::size_t GnssHandler::queue_size() const {
   std::lock_guard<std::mutex> lk(mutex_);
   return epoch_queue_.size();
@@ -48,24 +74,8 @@ gtsam::NonlinearFactorGraph GnssHandler::get_factors(
     double                  frame_stamp,
     const Eigen::Vector3d&  anc_ecef,
     std::vector<GnssEpoch>* out_epochs) {
-
-  // Drain matching epochs from the queue
-  std::vector<GnssEpoch> matched;
-  {
-    std::lock_guard<std::mutex> lk(mutex_);
-    auto& q = epoch_queue_;
-    auto it = q.begin();
-    while (it != q.end()) {
-      if (std::abs(it->stamp - frame_stamp) <= params_.time_tolerance) {
-        matched.push_back(std::move(*it));
-        it = q.erase(it);
-      } else if (it->stamp < frame_stamp - params_.time_tolerance) {
-        it = q.erase(it);  // too old — discard
-      } else {
-        ++it;
-      }
-    }
-  }
+  std::vector<GnssEpoch> matched =
+    consume_epochs_in_range(frame_stamp, frame_stamp, params_.time_tolerance);
 
   if (out_epochs) {
     *out_epochs = matched;

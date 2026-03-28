@@ -1,7 +1,7 @@
 # IAP 连续时间开发状态
 
 ## 更新时间
-- 2026-03-27
+- 2026-03-28
 
 ## 当前结论
 - 已完成 Phase 1A 的“连续时间骨架层”落地。
@@ -29,11 +29,13 @@
   - shared gyro bias / accel bias / gravity graph states
   - 与 LiDAR factors 共享同一组控制点变量
 - 已开始 Phase 1C 的最小可用接入：
-  - `gnss_extension` 已通过 shared state 发布 GNSS epoch queue 与 ECEF anchor
+  - `gnss_extension` 已通过 shared state 发布原始 GNSS epoch mailbox 与 ECEF anchor
   - `OdometryEstimationBSpline` 已在 active segment 上直接挂接 continuous-time pseudorange / doppler factor
   - per-segment clock state、ECEF origin state、ECEF rotation state 已进入同一个 fixed-lag LM 图
   - GNSS clock-between factor 已在 active segment clock states 间接通
   - GNSS epoch 现在按 segment 时间窗而不是按单一 frame stamp 被消费，更接近连续时间窗口约束
+  - `OdometryEstimationBSpline` 现在已经直接内聚自己的 `GnssHandler`
+  - shared state 现在只保留“原始 GNSS epoch 邮箱 + anchor”职责，不再承担 segment-range drain 语义
 - 已把 velocity 提升为 fixed-lag 图中的显式状态：
   - 每个 active segment 通过 `symbol('u', idx)` 持有 velocity state
   - 新增 velocity consistency factor 将 pose spline 与 velocity state 绑定
@@ -164,7 +166,7 @@
   - 1 个显式 segment clock state
   - shared ECEF origin / rotation anchor states
   - pseudorange / doppler 按 epoch 时间戳映射到 segment `u`
-  - GNSS epoch 由 `gnss_extension` 通过 shared queue 提供，并按 `[scan_start, scan_end]` 时间窗消费
+  - `OdometryEstimationBSpline` 现在直接持有 `GnssHandler`，GNSS epoch 由 `gnss_extension` 通过 shared raw mailbox 提供，再由 odometry-owned handler 按 `[scan_start, scan_end]` 时间窗消费
 
 当前 Phase 1B 的边界：
 - 这还是 local frontend，不是最终的 fixed-lag smoother 主链。
@@ -202,7 +204,8 @@ colcon test-result --all
 - `test_bspline_imu_factor` 现已覆盖静止匹配样本零残差、bias-state 补偿和 gravity-state 失配
 - `test_bspline_velocity_factor` 现已覆盖 matching velocity 零残差、mismatch 非零残差和 linearize 可用性
 - `test_bspline_gnss_factor` 现已覆盖 CT pseudorange / doppler factor 的零残差和 clock-state 吸收能力
-- `test_shared_state_gnss_queue` 现已覆盖 GNSS epoch queue 的 range-drain 行为和边界 tolerance
+- `test_gnss_handler_queue` 现已覆盖 `GnssHandler` 的 segment-range drain 行为和 future epoch 保留
+- `test_shared_state_gnss_queue` 现已覆盖 shared state 作为 raw GNSS mailbox 的 FIFO drain 与 latest-epoch 保留语义
 - `test_bspline_control_window` 现已覆盖 velocity state 到 control-point snapshot 的发布
 - `test_bspline_trajectory` 现已覆盖带 control-point velocity 时的 trajectory sampling
 - `test_integrity_planner` 现已覆盖 planner 对 continuous-time sample 的种子状态消费、future sigma floor 和 future velocity-aware scoring
@@ -237,9 +240,9 @@ colcon test-result --all
 
 ### 4. GNSS 还没完全下沉到 bspline odometry
 - 当前已经把 pseudorange / doppler 的时间戳约束直接并入 spline window。
-- 当前 `OdometryEstimationBSpline` 已经会消费 shared GNSS epoch queue，并在 active segment 上建立 per-segment clock / anchor / GNSS factors。
-- 当前 shared queue 已经支持按 segment 时间窗 drain，segment 不再只消费单个 near-frame epoch。
-- 但 `gnss_handler` / `gnss_extension` 仍然负责 epoch 生成、星历处理和主缓存，尚未完全迁成“odometry 内核单一所有者”。
+- 当前 `OdometryEstimationBSpline` 已经直接持有并驱动自己的 `GnssHandler`，并在 active segment 上建立 per-segment clock / anchor / GNSS factors。
+- 当前 shared state 只承担 raw epoch / anchor 发布，不再承担 segment-range drain。
+- 但 `gnss_extension` 仍然负责 epoch 生成、星历处理和原始观测预处理，尚未完全迁成“odometry 内核单一所有者”。
 - GNSS continuous-time factor 当前仍是最小可用版本，尚未补齐更严格的 Jacobian、边缘化和更长时域的 epoch/window 对齐策略。
 
 ### 5. planner 还没真正用 spline 做候选轨迹优化
@@ -275,7 +278,7 @@ colcon test-result --all
 
 建议子任务：
 - 明确 GNSS 因子从 extension 注入迁移到 odometry 内核的最终边界
-- 决定 shared queue 是过渡层还是把 `GnssHandler` 直接内聚进 `OdometryEstimationBSpline`
+- 评估是否继续把 epoch 组包 / 星历查询也从 `gnss_extension` 向 `OdometryEstimationBSpline` 收口
 - 补齐 GNSS factor 的更严格 Jacobian / clock prior / epoch-window 对齐策略
 
 ### Next Step 4：补齐 LiDAR continuous-time factor 的工程化能力

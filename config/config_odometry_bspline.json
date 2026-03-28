@@ -2,9 +2,10 @@
   /*** Phase-1 B-spline continuous-time odometry foundation ***
   // This module currently reuses the existing LiDAR-IMU odometry backend and
   // publishes a continuous-time B-spline trajectory view for planner/viewer.
-  // Phase-1C now includes a minimal spline-native GNSS path through the
-  // shared GNSS epoch queue + ECEF anchor, but full GNSS handler migration
-  // and stricter factor engineering remain follow-up work.
+  // Phase-1C now includes a spline-native GNSS path where BSpline odometry
+  // owns its own GnssHandler, drains raw epochs from shared state, and builds
+  // segment-time-window GNSS factors inside the same fixed-lag graph. Stricter
+  // Jacobian / marginalization engineering remains follow-up work.
   */
   "odometry_estimation": {
     "so_name": "libodometry_estimation_bspline.so",

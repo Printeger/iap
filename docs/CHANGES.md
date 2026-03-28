@@ -3,10 +3,14 @@
 > 规则：任何代码改动必须在这里记录，并包含 IAP-RQ-XXX。
 
 ## Unreleased
+- feat(dev-ct-gnss-handler): IAP-RQ-020 / IAP-RQ-300 / IAP-RQ-410 — move BSpline GNSS buffering ownership into an odometry-owned `GnssHandler`.
+  - `OdometryEstimationBSpline` now constructs and owns its own `GnssHandler`, drains raw epochs from `IapSharedState`, and consumes segment-window epochs through handler-managed buffering instead of directly range-draining shared state.
+  - `GnssHandler` now exposes `consume_epochs_in_range(...)`, which unifies legacy discrete frame-near draining and the new continuous-time segment-window draining path.
+  - `IapSharedState` GNSS queue is now treated as a raw mailbox (`consume_pending_gnss_epochs()`), and tests were split so `test_gnss_handler_queue.cpp` covers range draining while `test_shared_state_gnss_queue.cpp` covers mailbox draining semantics.
 - feat(dev-ct-gnss-window): IAP-RQ-020 / IAP-RQ-300 / IAP-RQ-410 — align BSpline GNSS consumption with segment time windows instead of point-near-frame draining.
-  - `IapSharedState` now exposes `consume_gnss_epochs_in_range(start, end, tolerance)` so continuous-time odometry can drain all GNSS epochs that belong to one active spline segment.
-  - `OdometryEstimationBSpline` now consumes GNSS epochs over `[scan_start, scan_end]` with tolerance instead of only around `frame_stamp`, which is a better fit for continuous-time segment factor construction.
-  - Added `test_shared_state_gnss_queue.cpp` to verify range-based drain behavior and boundary tolerance handling.
+  - Continuous-time GNSS consumption was widened from single `frame_stamp` matching to `[scan_start, scan_end]` segment windows, which is a better fit for continuous-time factor construction.
+  - That segment-window policy is now executed through the odometry-owned `GnssHandler`, while shared state remains only a raw mailbox.
+  - Queue-behavior coverage now lives in `test_gnss_handler_queue.cpp` and `test_shared_state_gnss_queue.cpp`.
 - feat(dev-ct-gnss): IAP-RQ-020 / IAP-RQ-300 / IAP-RQ-410 — start Phase 1C by injecting GNSS pseudorange/doppler directly into the BSpline control-window graph.
   - Added shared GNSS epoch queue + ECEF anchor publication to `IapSharedState`, and `GnssExtensionModule` now publishes the NavSat-derived ECEF anchor for continuous-time odometry consumption.
   - Added `IntegratedBSplinePseudorangeFactor` / `IntegratedBSplineDopplerFactor`, clock/ECEF key helpers, and wired `OdometryEstimationBSpline` to consume GNSS epochs per active segment, optimize per-segment clock states, and add GNSS factors/clock-between factors into the same fixed-lag LM graph as LiDAR/IMU/velocity.

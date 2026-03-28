@@ -21,6 +21,10 @@
 //   Reader (integrity_extension):
 //     auto epoch = IapSharedState::instance().get_gnss_epoch();  // optional<GnssEpoch>
 //     int  n     = IapSharedState::instance().get_n_confirmed_trunks();
+//
+//   Reader (continuous-time odometry):
+//     auto pending = IapSharedState::instance().consume_pending_gnss_epochs();
+//     // Forward raw epochs into an odometry-owned GnssHandler.
 
 #include <iap/gnss/gnss_types.hpp>
 #include <iap/planner/continuous_trajectory_view.hpp>
@@ -61,31 +65,17 @@ class IapSharedState {
     return latest_gnss_epoch_;
   }
 
-  /// Drains GNSS epochs whose timestamps fall in [start - tolerance, end + tolerance].
-  std::vector<GnssEpoch> consume_gnss_epochs_in_range(double start, double end, double tolerance = 0.0) {
+  /// Drains all pending raw GNSS epochs in FIFO order.
+  std::vector<GnssEpoch> consume_pending_gnss_epochs() {
     std::lock_guard<std::mutex> lk(gnss_mutex_);
 
-    std::vector<GnssEpoch> matched;
-    const double lower = std::min(start, end) - tolerance;
-    const double upper = std::max(start, end) + tolerance;
-    auto it = gnss_epoch_queue_.begin();
-    while (it != gnss_epoch_queue_.end()) {
-      if (it->stamp >= lower && it->stamp <= upper) {
-        matched.push_back(std::move(*it));
-        it = gnss_epoch_queue_.erase(it);
-      } else if (it->stamp < lower) {
-        it = gnss_epoch_queue_.erase(it);
-      } else {
-        ++it;
-      }
+    std::vector<GnssEpoch> pending;
+    pending.reserve(gnss_epoch_queue_.size());
+    while (!gnss_epoch_queue_.empty()) {
+      pending.push_back(std::move(gnss_epoch_queue_.front()));
+      gnss_epoch_queue_.pop_front();
     }
-
-    return matched;
-  }
-
-  /// Convenience wrapper for point queries around a single stamp.
-  std::vector<GnssEpoch> consume_gnss_epochs_near(double stamp, double tolerance) {
-    return consume_gnss_epochs_in_range(stamp, stamp, tolerance);
+    return pending;
   }
 
   // ── GNSS anchor ────────────────────────────────────────────────────────
