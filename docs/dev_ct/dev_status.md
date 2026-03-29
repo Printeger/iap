@@ -47,6 +47,8 @@
   - boundary velocity / clock state 已被结构化快照，并参与下一轮 fixed-lag prior 约束
   - 上一轮求解结束后，现在会对 boundary pose / velocity / clock 子集提取 joint marginal information，并缓存对应 linearization point
   - 下一轮 fixed-lag 求解会优先把这组 boundary information 以 `LinearContainerFactor(HessianFactor, linearization_point)` 的形式回灌到图里
+  - 当前又进一步推进到了 removable-factor survivor marginalization：上一轮 carried prior 与即将被 lag pruning 移除的旧 segment 因子，会先在当前图中完成优化，再统一边缘化成新的 survivor prior
+  - lag pruning 现在发生在 survivor prior 提取之后，而不是建图之前，这样滑出状态和滑出因子的有效信息不会在求解前直接丢掉
 - 已把 velocity 提升为 fixed-lag 图中的显式状态：
   - 每个 active segment 通过 `symbol('u', idx)` 持有 velocity state
   - 新增 velocity consistency factor 将 pose spline 与 velocity state 绑定
@@ -188,6 +190,7 @@
 - 但这些 prior 仍然是工程上的近似替代，不是严格的 Schur complement 边缘化结果。
 - 当前已将 boundary velocity / clock 从“仅作初值缓存”推进到“结构化 boundary prior”，但离真正的边缘化信息回灌还有距离。
 - 当前 boundary prior 已从“手工 pose / velocity / clock 约束”推进到“boundary 子集信息矩阵回灌”，更接近真实 Schur 边缘化；但它仍只覆盖边界子集，而不是对所有滑出状态做完整信息消元。
+- 当前 carried prior 已进一步升级为“对 removable graph 做 survivor marginalization”的形式，不再只盯住 boundary 子集；但它仍是按当前重建图的 removable factors 做图外线性化/回灌，还不是最终 fixed-lag smoother / Bayes tree 级别的完整边缘化实现。
 - IMU 现在已经开始按时间戳直接约束 spline 的角速度 / 线加速度，并且 bias / gravity 已进入联合优化。
 - velocity 现在已经作为独立状态显式进入图，planner 也已开始消费 latest continuous-time sample。
 - planner 现在已经开始消费 future-time continuous-time sample，但仍是基于已发布短窗的短时保守化/对齐评分。

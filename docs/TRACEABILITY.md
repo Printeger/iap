@@ -69,6 +69,10 @@
 ## 2. 未映射改动（临时区）
 > 如果你临时改了代码但还没决定它对应哪个需求，先把改动写在这里（提交前必须移入上表）。
 
+- 2026-03-29: IAP-RQ-020 / IAP-RQ-300 / IAP-RQ-410
+  - `OdometryEstimationBSpline` 不再在建图前立即裁掉超过 lag 边界的 control points / segment constraints，而是先带着这些“即将滑出”的状态完成当前轮优化。
+  - 新增 removable-factor marginalization：上一轮 carried prior 与本轮即将被 lag pruning 移除的 LiDAR/IMU/velocity/GNSS/clock/smoothness 因子会被单独收集、线性化，并对 survivor states 做边缘化。
+  - 新的 carried prior 不再只盯住 boundary pose / velocity / clock 子集，而是会覆盖修剪后仍然保留的 control points、surviving auxiliary states，以及 persistent shared IMU/GNSS alignment states。
 - 2026-03-28: IAP-RQ-020 / IAP-RQ-300 / IAP-RQ-410
   - 已开始按 `docs/dev_ct/SLAM_FINISH_PLAN.md` 执行 `M1 / WP1`，先收口 fixed-lag 主状态边界。
   - `OdometryEstimationBSpline::ActiveSplineMarginalPrior` 现在会结构化快照 boundary pose、boundary auxiliary index，以及对应的 velocity / clock state。

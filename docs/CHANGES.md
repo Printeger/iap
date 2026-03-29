@@ -3,6 +3,11 @@
 > 规则：任何代码改动必须在这里记录，并包含 IAP-RQ-XXX。
 
 ## Unreleased
+- feat(dev-ct-mainline-marginal): IAP-RQ-020 / IAP-RQ-300 / IAP-RQ-410 — push `SLAM_FINISH_PLAN` WP1 from boundary-subset replay toward removable-factor survivor marginalization.
+  - `OdometryEstimationBSpline` now keeps the soon-to-be-removed lag-window segment factors in the current solve instead of pruning them before graph construction.
+  - A dedicated removable graph is now assembled from the previous carried prior plus the LiDAR/IMU/velocity/GNSS/clock/smoothness factors that will disappear after lag pruning.
+  - After each solve, that removable graph is linearized and marginalized onto the next-iteration survivor state set (retained control points, retained auxiliary velocity/clock states, and persistent shared IMU/GNSS alignment states), then converted back into replayable `LinearContainerFactor`s.
+  - Lag pruning is now applied only after this survivor prior is extracted, which makes the fixed-lag carry-over closer to an actual Schur-style marginalization than the earlier boundary-only information replay.
 - feat(dev-ct-mainline-boundary): IAP-RQ-020 / IAP-RQ-300 / IAP-RQ-410 — start `SLAM_FINISH_PLAN` WP1 by turning fixed-lag boundary priors into a reusable boundary information prior.
   - `OdometryEstimationBSpline::ActiveSplineMarginalPrior` now snapshots not only the lag-window boundary poses but also the boundary auxiliary state index plus optional velocity / clock values.
   - After each solve, `OdometryEstimationBSpline` now attempts to extract a joint marginal information matrix over the boundary pose/velocity/clock subset and stores it together with the matching linearization point.

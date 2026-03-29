@@ -23,11 +23,11 @@
 #include <cmath>
 #include <cstddef>
 #include <deque>
+#include <gtsam/nonlinear/NonlinearFactorGraph.h>
 #include <gtsam/nonlinear/Values.h>
 #include <vector>
 
 namespace gtsam {
-class NonlinearFactorGraph;
 }
 
 namespace glim {
@@ -94,9 +94,7 @@ class OdometryEstimationBSpline : public OdometryEstimationCPU {
     gtsam::Vector2 clock = gtsam::Vector2::Zero();
     bool has_information = false;
     std::vector<gtsam::Key> information_keys;
-    std::vector<gtsam::DenseIndex> information_dims;
-    gtsam::Matrix information_matrix;
-    gtsam::Values linearization_point;
+    gtsam::NonlinearFactorGraph information_factors;
   };
 
   EstimationFrame::ConstPtr insert_frame_reconstruct(
@@ -112,11 +110,16 @@ class OdometryEstimationBSpline : public OdometryEstimationCPU {
   std::vector<ActiveSplineIMUSample> create_segment_imu_samples(const PreprocessedFrame::Ptr& raw_frame) const;
   void sync_gnss_epochs_from_shared_state();
   std::vector<iap::GnssEpoch> consume_segment_gnss_epochs(double segment_start, double segment_end);
+  std::vector<gtsam::Key> collect_marginal_survivor_keys(
+    const gtsam::Values& values,
+    double min_active_stamp,
+    bool include_clock) const;
+  void prune_active_ct_state(double min_active_stamp);
   void update_marginal_prior_from_active_window();
   void update_marginal_prior_information(
     const gtsam::NonlinearFactorGraph& graph,
     const gtsam::Values& values,
-    bool include_clock);
+    const std::vector<gtsam::Key>& survivor_keys);
   void append_active_segment_constraint(
     const PreprocessedFrame::Ptr& raw_frame,
     const gtsam_points::PointCloud::ConstPtr& source);
