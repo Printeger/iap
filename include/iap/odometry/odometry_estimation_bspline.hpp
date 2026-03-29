@@ -80,6 +80,10 @@ class OdometryEstimationBSpline : public OdometryEstimationCPU {
     BSplineLidarTargetMode mode = BSplineLidarTargetMode::ACTIVE_WINDOW_SNAPSHOT;
     std::size_t contributing_frames = 0;
     std::size_t point_count = 0;
+    std::size_t snapshot_frame_count = 0;
+    std::size_t snapshot_point_count = 0;
+    double snapshot_span_sec = 0.0;
+    bool snapshot_policy_accepted = false;
     double build_ms = 0.0;
   };
 
@@ -90,6 +94,10 @@ class OdometryEstimationBSpline : public OdometryEstimationCPU {
     BSplineLidarTargetMode target_mode = BSplineLidarTargetMode::ACTIVE_WINDOW_SNAPSHOT;
     std::size_t target_frame_count = 0;
     std::size_t target_point_count = 0;
+    std::size_t snapshot_frame_count = 0;
+    std::size_t snapshot_point_count = 0;
+    double snapshot_span_sec = 0.0;
+    bool snapshot_policy_accepted = false;
     double target_build_ms = 0.0;
     std::vector<ActiveSplineIMUSample> imu_samples;
     std::vector<iap::GnssEpoch> gnss_epochs;
@@ -153,10 +161,15 @@ class OdometryEstimationBSpline : public OdometryEstimationCPU {
     iap::IntegratedBSplineGICPFactor::RobustKernel::NONE;
   int lidar_correspondence_candidate_count_ = 3;
   double lidar_correspondence_accept_ratio_ = 0.0;
+  double lidar_correspondence_min_score_gap_ = 0.0;
   int lidar_snapshot_frame_window_ = 0;
+  int lidar_snapshot_min_frames_ = 2;
+  int lidar_snapshot_min_points_ = 64;
+  double lidar_snapshot_max_age_ = 0.0;
   double lidar_jacobian_numeric_eps_ = 1e-4;
   double lidar_outlier_mahalanobis_thresh_ = 0.0;
   double lidar_robust_kernel_width_ = 1.0;
+  double lidar_robust_weight_floor_ = 0.0;
   bool lidar_factor_profile_ = false;
   bool lidar_validate_linearization_ = false;
   double lidar_linearization_check_scale_ = 1e-4;

@@ -52,13 +52,23 @@
     // Number of most recent active frames used to build a frozen snapshot target.
     // <= 0 means use all active frames currently retained in the lag window.
     "ct_lidar_snapshot_frame_window": 8,
+    // Snapshot acceptance policy:
+    //   snapshot is used only when it has enough support; otherwise factor falls back to global ivox reference
+    "ct_lidar_snapshot_min_frames": 2,
+    "ct_lidar_snapshot_min_points": 64,
+    // Maximum age/span (seconds) allowed for the frozen snapshot support set.
+    // <= 0 disables explicit age gating.
+    "ct_lidar_snapshot_max_age": 0.0,
     // Correspondence search:
     //   candidates = k nearest target voxels evaluated per source point
     //   accept_ratio = Lowe-style ambiguity filter on best/second-best Mahalanobis score
     //                  <= 0 disables ambiguity rejection
+    //   score_gap = absolute Mahalanobis-score separation required between best/second-best
+    //               <= 0 disables this extra ambiguity gate
     "ct_lidar_correspondence_candidates": 3,
     "ct_lidar_correspondence_accept_ratio": 0.0,
-    // Numeric perturbation scale used by the remaining rotational finite-difference Jacobian block.
+    "ct_lidar_correspondence_min_score_gap": 0.0,
+    // Numeric perturbation scale kept only for the NUMERIC_FULL fallback / linearization A-B checks.
     "ct_lidar_jacobian_numeric_eps": 1e-4,
     // Optional outlier rejection on the whitened residual norm sqrt(r^T M r).
     // <= 0 disables explicit outlier rejection.
@@ -67,6 +77,9 @@
     //   NONE / HUBER / CAUCHY
     "ct_lidar_robust_kernel": "NONE",
     "ct_lidar_robust_kernel_width": 1.0,
+    // Reject correspondences whose robust weight falls below this floor after the soft kernel.
+    // <= 0 keeps purely soft robust weighting.
+    "ct_lidar_robust_weight_floor": 0.0,
     // Engineering hooks for LiDAR factor validation / profiling.
     "ct_lidar_profile_factor": false,
     "ct_lidar_validate_linearization": false,

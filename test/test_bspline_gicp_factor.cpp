@@ -5,6 +5,7 @@
 
 #include <iap/odometry/integrated_bspline_gicp_factor.hpp>
 
+#include <gtsam/linear/VectorValues.h>
 #include <gtsam_points/ann/ivox.hpp>
 #include <gtsam_points/types/point_cloud_cpu.hpp>
 
@@ -151,6 +152,7 @@ TEST(BSplineGICPFactorTest, ProfilingReportsMatchedCorrespondences) {
   EXPECT_EQ(stats.target_point_count, 4U);
   EXPECT_EQ(stats.matched_point_count, 4U);
   EXPECT_EQ(stats.inlier_point_count, 4U);
+  EXPECT_EQ(stats.rejected_robust_count, 0U);
   EXPECT_NEAR(stats.match_ratio, 1.0, 1e-9);
   EXPECT_NEAR(stats.inlier_ratio, 1.0, 1e-9);
   EXPECT_GE(stats.pose_update_ms, 0.0);
@@ -176,6 +178,47 @@ TEST(BSplineGICPFactorTest, SemiAnalyticLinearizationRemainsLocallyConsistentAtP
   EXPECT_TRUE(std::isfinite(check.predicted_error));
   EXPECT_TRUE(std::isfinite(check.actual_error));
   EXPECT_LT(check.rel_error, 0.9);
+}
+
+TEST(BSplineGICPFactorTest, SemiAnalyticPredictedErrorTracksNumericFullReference) {
+  auto numeric_factor = make_factor();
+  numeric_factor.set_jacobian_mode(iap::IntegratedBSplineGICPFactor::JacobianMode::NUMERIC_FULL);
+
+  auto semi_factor = make_factor();
+  semi_factor.set_jacobian_mode(iap::IntegratedBSplineGICPFactor::JacobianMode::SEMI_ANALYTIC);
+
+  auto values = make_identity_control_values();
+  values.update(
+    iap::bspline_control_point_key(0),
+    gtsam::Pose3(gtsam::Rot3::RzRyRx(0.02, -0.01, 0.01), gtsam::Point3(-0.01, 0.0, 0.0)));
+  values.update(
+    iap::bspline_control_point_key(1),
+    gtsam::Pose3(gtsam::Rot3::RzRyRx(-0.01, 0.03, -0.02), gtsam::Point3(0.03, -0.02, 0.0)));
+  values.update(
+    iap::bspline_control_point_key(2),
+    gtsam::Pose3(gtsam::Rot3::RzRyRx(0.01, 0.01, -0.03), gtsam::Point3(0.06, 0.01, 0.0)));
+
+  const auto numeric_linear = numeric_factor.linearize(values);
+  const auto semi_linear = semi_factor.linearize(values);
+  ASSERT_TRUE(static_cast<bool>(numeric_linear));
+  ASSERT_TRUE(static_cast<bool>(semi_linear));
+
+  gtsam::VectorValues delta;
+  for (std::size_t i = 0; i < iap::kBSplineControlPointCount; ++i) {
+    gtsam::Vector6 d;
+    d << 1.0, -0.5, 0.25, 0.4, -0.2, 0.1;
+    d *= 1e-5 * (1.0 + 0.1 * static_cast<double>(i));
+    delta.insert(iap::bspline_control_point_key(i), d);
+  }
+
+  const double numeric_pred = numeric_linear->error(delta);
+  const double semi_pred = semi_linear->error(delta);
+  const double rel_diff =
+    std::abs(numeric_pred - semi_pred) / std::max(1e-9, std::max(std::abs(numeric_pred), std::abs(semi_pred)));
+
+  EXPECT_TRUE(std::isfinite(numeric_pred));
+  EXPECT_TRUE(std::isfinite(semi_pred));
+  EXPECT_LT(rel_diff, 0.65);
 }
 
 TEST(BSplineGICPFactorTest, OutlierThresholdRejectsLargeResidualMatches) {
@@ -218,6 +261,28 @@ TEST(BSplineGICPFactorTest, RobustKernelDownweightsOutlierResiduals) {
   EXPECT_TRUE(std::isfinite(robust_error));
   EXPECT_LT(robust_error, plain_error);
   EXPECT_LT(robust_factor.last_profiling_stats().mean_robust_weight, 1.0);
+}
+
+TEST(BSplineGICPFactorTest, RobustWeightFloorRejectsHeavilyDownweightedMatches) {
+  auto baseline_factor = make_factor(make_outlier_source_cloud());
+  baseline_factor.set_enable_profiling(true);
+  baseline_factor.set_max_correspondence_distance(10.0);
+  baseline_factor.set_robust_kernel(iap::IntegratedBSplineGICPFactor::RobustKernel::HUBER, 1.0);
+
+  auto floor_factor = make_factor(make_outlier_source_cloud());
+  floor_factor.set_enable_profiling(true);
+  floor_factor.set_max_correspondence_distance(10.0);
+  floor_factor.set_robust_kernel(iap::IntegratedBSplineGICPFactor::RobustKernel::HUBER, 1.0);
+  floor_factor.set_robust_weight_floor(0.8);
+
+  const auto values = make_identity_control_values();
+  const double baseline_error = baseline_factor.error(values);
+  const double floor_error = floor_factor.error(values);
+
+  EXPECT_TRUE(std::isfinite(floor_error));
+  EXPECT_LE(floor_error, baseline_error);
+  EXPECT_LT(floor_factor.num_inliers(), baseline_factor.num_inliers());
+  EXPECT_GT(floor_factor.last_profiling_stats().rejected_robust_count, 0U);
 }
 
 TEST(BSplineGICPFactorTest, MahalanobisCandidateSelectionCanBeatNearestEuclideanNeighbor) {
@@ -284,6 +349,43 @@ TEST(BSplineGICPFactorTest, AmbiguityRatioCanRejectNearlyEquivalentCandidates) {
   factor.set_enable_profiling(true);
   factor.set_correspondence_candidate_count(2);
   factor.set_correspondence_accept_ratio(0.95);
+  factor.set_max_correspondence_distance(1.0);
+
+  const auto values = make_identity_control_values();
+  const double error = factor.error(values);
+  EXPECT_NEAR(error, 0.0, 1e-12);
+  EXPECT_EQ(factor.num_inliers(), 0);
+  EXPECT_EQ(factor.last_profiling_stats().rejected_ambiguity_count, 1U);
+}
+
+TEST(BSplineGICPFactorTest, CorrespondenceScoreGapCanRejectNearlyEquivalentCandidates) {
+  const std::vector<Eigen::Vector4d> target_points = {
+    Eigen::Vector4d(0.15, 0.0, 0.0, 1.0),
+    Eigen::Vector4d(0.25, 0.0, 0.0, 1.0),
+  };
+  const std::vector<Eigen::Matrix3d> target_covs = {
+    Eigen::Matrix3d::Identity() * 1e-3,
+    Eigen::Matrix3d::Identity() * 1e-3,
+  };
+  auto target_cloud = make_custom_cloud(target_points, target_covs);
+  auto target = std::make_shared<gtsam_points::iVox>(0.5);
+  target->voxel_insertion_setting().set_min_dist_in_cell(0.0);
+  target->set_neighbor_voxel_mode(1);
+  target->insert(*target_cloud);
+
+  const std::vector<Eigen::Vector4d> source_points = {
+    Eigen::Vector4d(0.20, 0.0, 0.0, 1.0),
+  };
+  const std::vector<Eigen::Matrix3d> source_covs = {
+    Eigen::Matrix3d::Identity() * 1e-3,
+  };
+  const std::vector<double> source_times = {0.0};
+  auto source_cloud = make_custom_cloud(source_points, source_covs, &source_times);
+
+  auto factor = make_factor(target, source_cloud);
+  factor.set_enable_profiling(true);
+  factor.set_correspondence_candidate_count(2);
+  factor.set_correspondence_min_score_gap(0.1);
   factor.set_max_correspondence_distance(1.0);
 
   const auto values = make_identity_control_values();

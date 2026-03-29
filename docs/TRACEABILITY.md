@@ -79,6 +79,10 @@
   - factor 现已支持 best/second-best Mahalanobis score 的 ambiguity rejection，并在 profiling stats 中新增 `rejected_ambiguity_count`，便于区分距离拒绝、模糊拒绝和 outlier gate 拒绝。
   - `SEMI_ANALYTIC` 路径现已把控制点旋转块的数值差分预缓存到“每个 spline time node 一次”，而不是在每个 source point 上反复做旋转差分，进一步降低 hot path 的重复数值线性化成本。
   - `test_bspline_gicp_factor.cpp` 现已新增 Mahalanobis candidate selection 优于单最近邻，以及 ambiguity-ratio 拒绝近似等价对应的专门测试。
+  - `SEMI_ANALYTIC` 路径现已进一步把旋转块改成 normalized-quaternion blend 的解析链式 Jacobian，减少对 time-node 级旋转数值差分缓存的依赖，同时保留 `NUMERIC_FULL` 作为 reference baseline。
+  - factor 现已新增 `correspondence_min_score_gap` 和 `robust_weight_floor` 两个工程化 gate，可分别收紧近似等价对应和被 soft kernel 严重降权的坏匹配；profiling stats 现已新增 `rejected_robust_count`。
+  - `OdometryEstimationBSpline` 现已把 snapshot target policy 收紧为“满足最小 frame/point 支持并可选 age gate 才使用 local snapshot，否则回退 global ivox reference”，并在 trace 日志中输出 snapshot support diagnostics。
+  - `test_bspline_gicp_factor.cpp` 现已补充 semi-analytic 对 `NUMERIC_FULL` 的 predicted-error 对照、absolute score-gap ambiguity rejection，以及 robust-weight-floor rejection 的专门测试。
 - 2026-03-29: IAP-RQ-020 / IAP-RQ-300 / IAP-RQ-410
   - `OdometryEstimationBSpline` 不再在建图前立即裁掉超过 lag 边界的 control points / segment constraints，而是先带着这些“即将滑出”的状态完成当前轮优化。
   - 新增 removable-factor marginalization：上一轮 carried prior 与本轮即将被 lag pruning 移除的 LiDAR/IMU/velocity/GNSS/clock/smoothness 因子会被单独收集、线性化，并对 survivor states 做边缘化。

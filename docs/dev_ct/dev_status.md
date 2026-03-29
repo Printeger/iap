@@ -89,6 +89,11 @@
   - `SEMI_ANALYTIC` 路径现已把控制点旋转块的数值差分从“每个 source point 反复计算”收口成“每个 spline time node 预缓存一次”，进一步减少 hot path 上的重复数值差分
   - `OdometryEstimationBSpline` 现已新增 `ct_lidar_correspondence_candidates` / `ct_lidar_correspondence_accept_ratio` 配置项，并把当前 factor 的候选数、ambiguity gate 和拒绝计数写入 CT LiDAR diagnostics
   - `test_bspline_gicp_factor` 现已新增 Mahalanobis candidate selection 和 ambiguity-ratio rejection 两类专门测试，作为后续继续推进解析 Jacobian / 更强 correspondence 策略的基线
+  - `SEMI_ANALYTIC` 路径现已进一步把旋转块推进成基于 normalized-quaternion blend 的解析链式 Jacobian，不再依赖“每个 time node 缓存数值旋转差分”的旧做法；`NUMERIC_FULL` 仍保留作为 A/B 和 debug 基线
+  - CT LiDAR correspondence 现已补上 absolute score-gap ambiguity gate，且 robust handling 现已支持 `robust_weight_floor`，可以把被 soft kernel 严重降权的对应直接硬拒绝；profiling stats 现已新增 `rejected_robust_count`
+  - snapshot target lifecycle 现已加上显式支持门槛：只有满足 `snapshot_min_frames / snapshot_min_points / snapshot_max_age` 的 frozen snapshot 才会作为 `ACTIVE_WINDOW_SNAPSHOT` 被采用，否则会明确回退到 global ivox reference
+  - `OdometryEstimationBSpline` 现已把 `ct_lidar_correspondence_min_score_gap`、`ct_lidar_robust_weight_floor`、`ct_lidar_snapshot_min_frames`、`ct_lidar_snapshot_min_points`、`ct_lidar_snapshot_max_age` 接成配置项，并在 CT LiDAR trace 日志中输出 `snapshot_frames / snapshot_points / snapshot_span_s / snapshot_policy`
+  - `test_bspline_gicp_factor` 现已继续补充：半解析旋转 Jacobian 相对 `NUMERIC_FULL` 的 predicted-error 对照、absolute score-gap ambiguity rejection，以及 robust-weight-floor 硬拒绝行为
 - planner 已开始真正消费 continuous-time state：
   - `IntegrityPlanner::plan()` 在可用时会优先使用 `SplineControlAccess` 锚定当前时刻，再从 `ContinuousTrajectoryView` 解析种子状态
   - motion primitives 现在从连续时间 `pos / vel / yaw / sigma` 出发，而不只是把 trajectory view 当成一个 `sigma0` 来源
@@ -195,7 +200,7 @@
   - per-point time query
   - CPU GICP residual
   - 局部 LM 优化
-  - 当前已支持 k-NN + Mahalanobis correspondence 选择、ambiguity rejection、outlier gate、robust kernel，以及半解析 Jacobian 下按 time node 预缓存的旋转差分块
+  - 当前已支持 k-NN + Mahalanobis correspondence 选择、ratio/score-gap ambiguity rejection、outlier gate、robust kernel、robust-weight floor，以及解析 quaternion-blend 旋转 Jacobian
 - CPU IMU factor 当前采用最小可用实现：
   - 4 个 pose control points
   - per-segment 下采样 IMU samples

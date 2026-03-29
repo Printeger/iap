@@ -20,6 +20,41 @@ double residual_norm_from_mahalanobis(const double mahalanobis_error) {
   return std::sqrt(std::max(0.0, mahalanobis_error));
 }
 
+Eigen::Matrix<double, 4, 3> quaternion_right_local_jacobian(const Eigen::Quaterniond& q) {
+  Eigen::Matrix<double, 4, 3> J = Eigen::Matrix<double, 4, 3>::Zero();
+  J.block<3, 3>(0, 0) = 0.5 * (q.w() * Eigen::Matrix3d::Identity() + gtsam::SO3::Hat(q.vec()));
+  J.row(3) = -0.5 * q.vec().transpose();
+  return J;
+}
+
+Eigen::Matrix4d normalized_vector_jacobian(const Eigen::Vector4d& coeffs) {
+  const double norm = coeffs.norm();
+  if (norm < 1e-9) {
+    return Eigen::Matrix4d::Zero();
+  }
+
+  const Eigen::Vector4d normalized = coeffs / norm;
+  return (Eigen::Matrix4d::Identity() - normalized * normalized.transpose()) / norm;
+}
+
+Eigen::Matrix<double, 3, 4> rotated_point_quaternion_jacobian(
+  const Eigen::Vector4d& coeffs,
+  const Eigen::Vector3d& point) {
+  Eigen::Matrix<double, 3, 4> J = Eigen::Matrix<double, 3, 4>::Zero();
+
+  const Eigen::Vector3d v = coeffs.head<3>();
+  const double w = coeffs[3];
+  const double vp = v.dot(point);
+
+  for (int j = 0; j < 3; ++j) {
+    const Eigen::Vector3d e = Eigen::Vector3d::Unit(j);
+    J.col(j) = -2.0 * v[j] * point + 2.0 * e * vp + 2.0 * v * point[j] + 2.0 * w * e.cross(point);
+  }
+  J.col(3) = 2.0 * w * point + 2.0 * v.cross(point);
+
+  return J;
+}
+
 }  // namespace
 
 IntegratedBSplineGICPFactor::IntegratedBSplineGICPFactor(
@@ -87,10 +122,12 @@ void IntegratedBSplineGICPFactor::update_poses(const gtsam::Values& values) cons
   source_poses_.resize(time_table_.size());
   if (jacobian_mode_ == JacobianMode::NUMERIC_FULL) {
     pose_jacobians_.resize(time_table_.size());
-    pose_rotation_jacobians_.clear();
+    blended_quaternion_coeffs_.clear();
+    blend_quaternion_jacobians_.clear();
   } else {
     pose_jacobians_.clear();
-    pose_rotation_jacobians_.resize(time_table_.size());
+    blended_quaternion_coeffs_.resize(time_table_.size());
+    blend_quaternion_jacobians_.resize(time_table_.size());
   }
 
   for (std::size_t i = 0; i < time_table_.size(); ++i) {
@@ -99,20 +136,35 @@ void IntegratedBSplineGICPFactor::update_poses(const gtsam::Values& values) cons
     source_poses_[i] = base_pose;
 
     if (jacobian_mode_ != JacobianMode::NUMERIC_FULL) {
+      const auto& weights = basis_table_[i];
+      Eigen::Quaterniond reference(poses[0].rotation().toQuaternion());
+      reference.normalize();
+
+      std::array<Eigen::Quaterniond, kBSplineControlPointCount> aligned;
+      Eigen::Vector4d blended_coeffs = Eigen::Vector4d::Zero();
       for (std::size_t k = 0; k < kBSplineControlPointCount; ++k) {
-        Eigen::Matrix<double, 6, 3> J = Eigen::Matrix<double, 6, 3>::Zero();
-        for (int d = 0; d < 3; ++d) {
-          gtsam::Vector6 delta = gtsam::Vector6::Zero();
-          delta(d) = numeric_eps_;
-
-          auto perturbed = poses;
-          perturbed[k] = perturbed[k].compose(gtsam::Pose3::Expmap(delta));
-
-          const gtsam::Pose3 pose_plus = BSplineControlWindow::interpolate(perturbed, u);
-          const gtsam::Vector6 xi = gtsam::Pose3::Logmap(base_pose.between(pose_plus));
-          J.col(d) = xi / numeric_eps_;
+        Eigen::Quaterniond q(poses[k].rotation().toQuaternion());
+        q.normalize();
+        if (reference.dot(q) < 0.0) {
+          q.coeffs() *= -1.0;
         }
-        pose_rotation_jacobians_[i][k] = J;
+        aligned[k] = q;
+        blended_coeffs += weights[k] * q.coeffs();
+      }
+
+      Eigen::Vector4d normalized_coeffs = blended_coeffs;
+      Eigen::Matrix4d normalization_jacobian = Eigen::Matrix4d::Zero();
+      if (blended_coeffs.norm() < 1e-9) {
+        normalized_coeffs = aligned[0].coeffs();
+      } else {
+        normalized_coeffs.normalize();
+        normalization_jacobian = normalized_vector_jacobian(blended_coeffs);
+      }
+      blended_quaternion_coeffs_[i] = normalized_coeffs;
+
+      for (std::size_t k = 0; k < kBSplineControlPointCount; ++k) {
+        blend_quaternion_jacobians_[i][k] =
+          normalization_jacobian * (weights[k] * quaternion_right_local_jacobian(aligned[k]));
       }
       continue;
     }
@@ -208,6 +260,15 @@ void IntegratedBSplineGICPFactor::update_correspondences() const {
       continue;
     }
 
+    if (correspondence_min_score_gap_ > 0.0 &&
+        second_best_score < std::numeric_limits<double>::max() &&
+        (second_best_score - best_score) <= correspondence_min_score_gap_) {
+      correspondences_[static_cast<std::size_t>(i)] = -1;
+      mahalanobis_[static_cast<std::size_t>(i)].setZero();
+      rejected_ambiguity_count_++;
+      continue;
+    }
+
     correspondences_[static_cast<std::size_t>(i)] = best_index;
     mahalanobis_[static_cast<std::size_t>(i)] = best_mahalanobis;
     matched_correspondence_count_++;
@@ -231,13 +292,12 @@ IntegratedBSplineGICPFactor::PointJacobianArray IntegratedBSplineGICPFactor::poi
   }
 
   const auto& weights = basis_table_[time_index];
-  gtsam::Matrix36 H_transed_pose = gtsam::Matrix36::Zero();
-  H_transed_pose.block<3, 3>(0, 0) = source_poses_[time_index].rotation().matrix() * -gtsam::SO3::Hat(source_point);
-  H_transed_pose.block<3, 3>(0, 3) = source_poses_[time_index].rotation().matrix();
+  const Eigen::Matrix<double, 3, 4> H_transed_quat =
+    rotated_point_quaternion_jacobian(blended_quaternion_coeffs_[time_index], source_point);
 
   for (std::size_t k = 0; k < kBSplineControlPointCount; ++k) {
     jacobians[k].setZero();
-    jacobians[k].block<3, 3>(0, 0) = H_transed_pose * pose_rotation_jacobians_[time_index][k];
+    jacobians[k].block<3, 3>(0, 0) = H_transed_quat * blend_quaternion_jacobians_[time_index][k];
     jacobians[k].block<3, 3>(0, 3) = weights[k] * control_poses[k].rotation().matrix();
   }
 
@@ -294,6 +354,7 @@ double IntegratedBSplineGICPFactor::error(const gtsam::Values& values) const {
 
   accepted_inlier_count_ = 0;
   rejected_outlier_count_ = 0;
+  rejected_robust_count_ = 0;
   robust_weight_sum_ = 0.0;
   double total_error = 0.0;
   for (int i = 0; i < frame::size(*source_); ++i) {
@@ -316,8 +377,14 @@ double IntegratedBSplineGICPFactor::error(const gtsam::Values& values) const {
       continue;
     }
 
+    const double weight = robust_weight(mahalanobis_error);
+    if (robust_weight_floor_ > 0.0 && weight < robust_weight_floor_) {
+      rejected_robust_count_++;
+      continue;
+    }
+
     accepted_inlier_count_++;
-    robust_weight_sum_ += robust_weight(mahalanobis_error);
+    robust_weight_sum_ += weight;
     total_error += robust_cost(mahalanobis_error);
   }
 
@@ -332,6 +399,7 @@ double IntegratedBSplineGICPFactor::error(const gtsam::Values& values) const {
     last_profile_.rejected_distance_count = rejected_distance_count_;
     last_profile_.rejected_ambiguity_count = rejected_ambiguity_count_;
     last_profile_.rejected_outlier_count = rejected_outlier_count_;
+    last_profile_.rejected_robust_count = rejected_robust_count_;
     last_profile_.match_ratio =
       last_profile_.source_point_count == 0 ? 0.0
                                             : static_cast<double>(matched_correspondence_count_) / last_profile_.source_point_count;
@@ -376,6 +444,7 @@ gtsam::GaussianFactor::shared_ptr IntegratedBSplineGICPFactor::linearize(const g
 
   accepted_inlier_count_ = 0;
   rejected_outlier_count_ = 0;
+  rejected_robust_count_ = 0;
   robust_weight_sum_ = 0.0;
   double total_error = 0.0;
   for (int i = 0; i < frame::size(*source_); ++i) {
@@ -400,8 +469,13 @@ gtsam::GaussianFactor::shared_ptr IntegratedBSplineGICPFactor::linearize(const g
       continue;
     }
 
-    accepted_inlier_count_++;
     const double weight = robust_weight(mahalanobis_error);
+    if (robust_weight_floor_ > 0.0 && weight < robust_weight_floor_) {
+      rejected_robust_count_++;
+      continue;
+    }
+
+    accepted_inlier_count_++;
     robust_weight_sum_ += weight;
 
     const auto point_jacs = point_jacobians(poses, static_cast<std::size_t>(time_index), source_pt.template head<3>().eval());
@@ -442,6 +516,7 @@ gtsam::GaussianFactor::shared_ptr IntegratedBSplineGICPFactor::linearize(const g
     last_profile_.rejected_distance_count = rejected_distance_count_;
     last_profile_.rejected_ambiguity_count = rejected_ambiguity_count_;
     last_profile_.rejected_outlier_count = rejected_outlier_count_;
+    last_profile_.rejected_robust_count = rejected_robust_count_;
     last_profile_.match_ratio =
       last_profile_.source_point_count == 0 ? 0.0
                                             : static_cast<double>(matched_correspondence_count_) / last_profile_.source_point_count;

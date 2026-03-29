@@ -3,6 +3,12 @@
 > 规则：任何代码改动必须在这里记录，并包含 IAP-RQ-XXX。
 
 ## Unreleased
+- feat(dev-ct-mainline-lidar-analytic): IAP-RQ-300 / IAP-RQ-410 — continue `M2 / WP2` by pushing CT LiDAR rotation Jacobians and target policy beyond the first semi-analytic baseline.
+  - `IntegratedBSplineGICPFactor` now evaluates the `SEMI_ANALYTIC` rotation block through an analytic quaternion-blend chain rule instead of caching per-time-node rotational finite differences, further reducing hot-path numeric differentiation while keeping `NUMERIC_FULL` as the fallback baseline.
+  - The factor now supports an additional absolute ambiguity gate (`ct_lidar_correspondence_min_score_gap`) plus a robust-weight floor (`ct_lidar_robust_weight_floor`), and profiling stats now expose `rejected_robust_count`.
+  - `OdometryEstimationBSpline` now tightens snapshot-target lifecycle with explicit minimum frame/point support and optional age gating before using `ACTIVE_WINDOW_SNAPSHOT`; undersupported snapshots fall back to the global ivox reference.
+  - CT LiDAR trace logs now include score-gap / robust-weight-floor diagnostics together with snapshot support statistics (`snapshot_frames`, `snapshot_points`, `snapshot_span_s`, `snapshot_policy`).
+  - `test_bspline_gicp_factor.cpp` now covers semi-analytic-vs-numeric predicted-error agreement, score-gap ambiguity rejection, and robust-weight-floor hard rejection.
 - feat(dev-ct-mainline-lidar-correspondence): IAP-RQ-300 / IAP-RQ-410 — continue `M2 / WP2` by strengthening CT LiDAR correspondence selection and reducing hot-path numerical differencing.
   - `IntegratedBSplineGICPFactor` now supports k-NN target candidate search with Mahalanobis-score selection instead of hardwiring a single nearest Euclidean correspondence.
   - The factor now exposes an ambiguity-rejection ratio on the best/second-best Mahalanobis scores and reports `rejected_ambiguity_count` in profiling stats.
