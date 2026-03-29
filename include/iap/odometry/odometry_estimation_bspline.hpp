@@ -148,19 +148,12 @@ class OdometryEstimationBSpline : public OdometryEstimationCPU {
   Eigen::Vector3d gnss_lever_arm_ = Eigen::Vector3d::Zero();
   iap::CanopyNoiseParams gnss_canopy_params_;
   iap::ClockBetweenFactor::Params gnss_clock_between_params_;
-  bool gnss_anchor_initialized_ = false;
-  Eigen::Vector3d gnss_origin_ecef_ = Eigen::Vector3d::Zero();
-  gtsam::Rot3 gnss_ecef_rot_ = gtsam::Rot3::Identity();
-  Eigen::Vector3d gyro_bias_ = Eigen::Vector3d::Zero();
-  Eigen::Vector3d accel_bias_ = Eigen::Vector3d::Zero();
-  Eigen::Vector3d gravity_world_ = Eigen::Vector3d::UnitZ() * 9.80665;
 
   std::shared_ptr<gtsam_points::iVox> ct_target_ivox_;
   std::unique_ptr<iap::BSplineControlWindow> control_window_;
   iap::BSplineFixedLagStateRegistryT<ActiveSplineSegmentConstraint> fixed_lag_registry_;
   ActiveSplineMarginalPrior marginal_prior_;
   std::shared_ptr<iap::BSplineTrajectory> latest_trajectory_;
-  gtsam::Values latest_ct_aux_values_;
   std::unique_ptr<iap::GnssEpochBuilder> gnss_epoch_builder_;
   std::unique_ptr<iap::GnssHandler> gnss_handler_;
   std::deque<iap::GnssRawObservationBatch> pending_raw_gnss_batches_;

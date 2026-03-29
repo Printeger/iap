@@ -10,6 +10,8 @@
 #include <algorithm>
 #include <array>
 #include <cstddef>
+#include <gtsam/geometry/Rot3.h>
+#include <gtsam/inference/Symbol.h>
 #include <gtsam/nonlinear/Values.h>
 #include <utility>
 #include <vector>
@@ -23,6 +25,15 @@ struct BSplineFixedLagSegmentState {
   std::size_t auxiliary_index = 0;
 };
 
+struct BSplineFixedLagSharedState {
+  gtsam::Vector3 gyro_bias = gtsam::Vector3::Zero();
+  gtsam::Vector3 accel_bias = gtsam::Vector3::Zero();
+  gtsam::Vector3 gravity = gtsam::Vector3(0.0, 0.0, 9.80665);
+  bool gnss_anchor_initialized = false;
+  gtsam::Vector3 ecef_origin = gtsam::Vector3::Zero();
+  gtsam::Rot3 ecef_rot = gtsam::Rot3::Identity();
+};
+
 template <typename SegmentT = BSplineFixedLagSegmentState>
 class BSplineFixedLagStateRegistryT {
  public:
@@ -31,6 +42,7 @@ class BSplineFixedLagStateRegistryT {
   void clear() {
     control_buffer_.clear();
     segments_.clear();
+    auxiliary_values_.clear();
   }
 
   void reset_from_window(const BSplineControlWindow& window) {
@@ -124,6 +136,91 @@ class BSplineFixedLagStateRegistryT {
     return filtered;
   }
 
+  void retain_active_auxiliary_values(bool include_clock = true) {
+    auxiliary_values_ = filter_aux_values(auxiliary_values_, include_clock);
+  }
+
+  void clear_auxiliary_values() {
+    auxiliary_values_.clear();
+  }
+
+  const gtsam::Values& auxiliary_values() const { return auxiliary_values_; }
+  gtsam::Values& auxiliary_values() { return auxiliary_values_; }
+
+  void set_shared_imu_state(
+    const gtsam::Vector3& gyro_bias,
+    const gtsam::Vector3& accel_bias,
+    const gtsam::Vector3& gravity) {
+    shared_state_.gyro_bias = gyro_bias;
+    shared_state_.accel_bias = accel_bias;
+    shared_state_.gravity = gravity;
+  }
+
+  void set_shared_gnss_anchor(
+    const gtsam::Vector3& ecef_origin,
+    const gtsam::Rot3& ecef_rot,
+    bool initialized = true) {
+    shared_state_.ecef_origin = ecef_origin;
+    shared_state_.ecef_rot = ecef_rot;
+    shared_state_.gnss_anchor_initialized = initialized;
+  }
+
+  const BSplineFixedLagSharedState& shared_state() const { return shared_state_; }
+  BSplineFixedLagSharedState& shared_state() { return shared_state_; }
+
+  void seed_shared_values(gtsam::Values& values, bool include_gnss_anchor) const {
+    if (!values.exists(gtsam::symbol('j', 0))) {
+      values.insert(gtsam::symbol('j', 0), shared_state_.gyro_bias);
+    }
+    if (!values.exists(gtsam::symbol('k', 0))) {
+      values.insert(gtsam::symbol('k', 0), shared_state_.accel_bias);
+    }
+    if (!values.exists(gtsam::symbol('g', 0))) {
+      values.insert(gtsam::symbol('g', 0), shared_state_.gravity);
+    }
+    if (include_gnss_anchor && shared_state_.gnss_anchor_initialized) {
+      if (!values.exists(bspline_ecef_origin_key())) {
+        values.insert(bspline_ecef_origin_key(), shared_state_.ecef_origin);
+      }
+      if (!values.exists(bspline_ecef_rot_key())) {
+        values.insert(bspline_ecef_rot_key(), shared_state_.ecef_rot);
+      }
+    }
+  }
+
+  void update_shared_state_from_values(const gtsam::Values& values) {
+    if (values.exists(gtsam::symbol('j', 0))) {
+      shared_state_.gyro_bias = values.at<gtsam::Vector3>(gtsam::symbol('j', 0));
+    }
+    if (values.exists(gtsam::symbol('k', 0))) {
+      shared_state_.accel_bias = values.at<gtsam::Vector3>(gtsam::symbol('k', 0));
+    }
+    if (values.exists(gtsam::symbol('g', 0))) {
+      shared_state_.gravity = values.at<gtsam::Vector3>(gtsam::symbol('g', 0));
+    }
+    if (values.exists(bspline_ecef_origin_key())) {
+      shared_state_.ecef_origin = values.at<gtsam::Vector3>(bspline_ecef_origin_key());
+      shared_state_.gnss_anchor_initialized = true;
+    }
+    if (values.exists(bspline_ecef_rot_key())) {
+      shared_state_.ecef_rot = values.at<gtsam::Rot3>(bspline_ecef_rot_key());
+      shared_state_.gnss_anchor_initialized = true;
+    }
+  }
+
+  std::vector<gtsam::Key> active_shared_keys(bool include_gnss_anchor) const {
+    std::vector<gtsam::Key> keys = {
+      gtsam::symbol('j', 0),
+      gtsam::symbol('k', 0),
+      gtsam::symbol('g', 0),
+    };
+    if (include_gnss_anchor && shared_state_.gnss_anchor_initialized) {
+      keys.push_back(bspline_ecef_origin_key());
+      keys.push_back(bspline_ecef_rot_key());
+    }
+    return keys;
+  }
+
   BSplineControlWindowBuffer& control_buffer() { return control_buffer_; }
   const BSplineControlWindowBuffer& control_buffer() const { return control_buffer_; }
 
@@ -142,6 +239,8 @@ class BSplineFixedLagStateRegistryT {
 
   BSplineControlWindowBuffer control_buffer_;
   std::vector<SegmentT> segments_;
+  gtsam::Values auxiliary_values_;
+  BSplineFixedLagSharedState shared_state_;
 };
 
 using BSplineFixedLagStateRegistry = BSplineFixedLagStateRegistryT<BSplineFixedLagSegmentState>;

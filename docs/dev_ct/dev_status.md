@@ -58,6 +58,9 @@
   - 已新增统一的 `BSplineFixedLagStateRegistry`，把 active control buffer、segment 生命周期和 auxiliary state 保留/裁剪规则收口到同一个 fixed-lag registry
   - `OdometryEstimationBSpline` 现在通过这套 registry 管理 window append、segment append、lag pruning 和 aux-value filtering，不再分别在 `control_buffer_`、`active_segment_constraints_` 和 `latest_ct_aux_values_` 上散落维护
   - 已补上 `test_bspline_fixed_lag_registry`，覆盖 control-buffer / segment 生命周期同步裁剪、aux-value filtering 和 reset/append 语义
+  - unified registry 现已进一步扩展到 shared fixed-lag states：`gyro bias / accel bias / gravity / ECEF origin / ECEF rotation` 的 seed、回填和图内 ownership 现在也由 registry 统一管理
+  - `OdometryEstimationBSpline` 不再单独持有这些 shared-state snapshot；shared IMU/GNSS states 现在和 active window 一样由 fixed-lag registry 统一提供给建图、优化后回写和持续发布链路
+  - `test_bspline_fixed_lag_registry` 现已补充 shared-state seed/update round-trip，覆盖 persistent IMU/GNSS shared-state lifecycle
 - 已把 velocity 提升为 fixed-lag 图中的显式状态：
   - 每个 active segment 通过 `symbol('u', idx)` 持有 velocity state
   - 新增 velocity consistency factor 将 pose spline 与 velocity state 绑定
@@ -202,7 +205,7 @@
 - 当前 carried prior 已进一步升级为“对 removable graph 做 survivor marginalization”的形式，不再只盯住 boundary 子集；但它仍是按当前重建图的 removable factors 做图外线性化/回灌，还不是最终 fixed-lag smoother / Bayes tree 级别的完整边缘化实现。
 - 当前已把 survivor/removable state/factor partition 抽成稳定工具层，并通过专门单测约束 carried prior 行为；但 prior 仍来自“当前轮 removable 子图”的图外重线性化，而不是增量 Bayes tree / fixed-lag smoother 的原生边缘化。
 - 当前 carried prior 已从“非线性因子回灌缓存”进一步收口为“线性图缓存 + replay 时再包装”的形式，减少了旧 prior 在 removable 子图里的重复线性化；但它仍然不是 fixed-lag smoother 原生 Bayes tree 边缘化。
-- 当前 fixed-lag lifecycle 已经开始由统一 registry 驱动，但完整的 state registry 还没有收口到 bias / gravity / ECEF anchor 这类 shared states；这仍是 M1 / WP1 后续要继续推进的部分。
+- 当前 fixed-lag lifecycle 已经进一步扩展到 bias / gravity / ECEF anchor 这类 shared states；但 shared-state ownership 还没有完全覆盖 future diagnostics / lifecycle telemetry / explicit state-machine outputs，这仍是 M1 / WP1 后续可以继续收口的部分。
 - IMU 现在已经开始按时间戳直接约束 spline 的角速度 / 线加速度，并且 bias / gravity 已进入联合优化。
 - velocity 现在已经作为独立状态显式进入图，planner 也已开始消费 latest continuous-time sample。
 - planner 现在已经开始消费 future-time continuous-time sample，但仍是基于已发布短窗的短时保守化/对齐评分。
@@ -240,6 +243,7 @@ colcon test-result --all
 - `test_bspline_marginalization` 现已覆盖 survivor/removable partition 归属，以及 carried prior 与参考 marginal graph 的误差一致性
 - `test_bspline_marginalization` 现已进一步覆盖 foreign-key ownership 检测，以及“上一轮线性 carried prior + 本轮 removable nonlinear 子图”的 prior 组合一致性
 - `test_bspline_fixed_lag_registry` 现已覆盖 unified fixed-lag registry 的窗口推进、segment 生命周期和 auxiliary state 过滤行为
+- `test_bspline_fixed_lag_registry` 现已进一步覆盖 shared fixed-lag states 的 seed/update 行为
 - `test_bspline_control_window` 现已覆盖 velocity state 到 control-point snapshot 的发布
 - `test_bspline_trajectory` 现已覆盖带 control-point velocity 时的 trajectory sampling
 - `test_integrity_planner` 现已覆盖 planner 对 continuous-time sample 的种子状态消费、future sigma floor 和 future velocity-aware scoring

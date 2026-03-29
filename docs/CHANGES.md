@@ -3,6 +3,10 @@
 > 规则：任何代码改动必须在这里记录，并包含 IAP-RQ-XXX。
 
 ## Unreleased
+- feat(dev-ct-mainline-shared-registry): IAP-RQ-020 / IAP-RQ-300 / IAP-RQ-410 — extend the unified fixed-lag registry to own shared IMU/GNSS state snapshots.
+  - `BSplineFixedLagStateRegistry` now owns persistent shared state snapshots for gyro bias, accel bias, gravity, ECEF origin, and ECEF rotation, and exposes seed/update helpers for graph construction and post-solve writeback.
+  - `OdometryEstimationBSpline` no longer maintains separate private snapshots for those shared states; the active fixed-lag registry now provides shared-state ownership to graph seeding, GNSS-anchor activation, optimization priors, and continuous-time publication.
+  - `test_bspline_fixed_lag_registry.cpp` now covers shared-state seed/update round-trip in addition to control-buffer/segment lifecycle behavior.
 - feat(dev-ct-mainline-registry): IAP-RQ-020 / IAP-RQ-300 / IAP-RQ-410 — introduce a unified fixed-lag lifecycle/state registry for the B-spline odometry mainline.
   - Added `BSplineFixedLagStateRegistry`, which owns the active control-buffer timeline together with the segment-level lifecycle used to retain/prune auxiliary velocity/clock states across the lag window.
   - `OdometryEstimationBSpline` now drives control-window append, segment append, lag pruning, marginalization-state export, and auxiliary-value filtering through that shared registry instead of maintaining separate `control_buffer_` / `active_segment_constraints_` / ad hoc aux pruning paths.

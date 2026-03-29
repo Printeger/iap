@@ -82,6 +82,9 @@
   - 新增 `BSplineFixedLagStateRegistry`，统一 active control buffer、segment 生命周期以及 auxiliary velocity/clock state 的保留与裁剪逻辑。
   - `OdometryEstimationBSpline` 现在通过该 registry 统一执行 window append、segment append、lag pruning、marginalization-state 导出和 auxiliary-value filtering。
   - 新增 `test_bspline_fixed_lag_registry.cpp`，校验 unified fixed-lag registry 的 control-buffer/segment 同步裁剪与 auxiliary state 生命周期行为。
+  - `BSplineFixedLagStateRegistry` 现已进一步纳入 shared IMU/GNSS states：gyro bias、accel bias、gravity、ECEF origin、ECEF rotation 的 seed/update 和 graph ownership 也由该 registry 统一管理。
+  - `OdometryEstimationBSpline` 不再单独维护这些 shared-state snapshot，而是通过 registry 统一完成 graph seeding、GNSS anchor 激活、求解后回写和持续发布。
+  - `test_bspline_fixed_lag_registry.cpp` 现已补充 shared-state seed/update round-trip 校验。
 - 2026-03-28: IAP-RQ-020 / IAP-RQ-300 / IAP-RQ-410
   - 已开始按 `docs/dev_ct/SLAM_FINISH_PLAN.md` 执行 `M1 / WP1`，先收口 fixed-lag 主状态边界。
   - `OdometryEstimationBSpline::ActiveSplineMarginalPrior` 现在会结构化快照 boundary pose、boundary auxiliary index，以及对应的 velocity / clock state。

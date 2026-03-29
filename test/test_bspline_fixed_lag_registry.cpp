@@ -5,6 +5,8 @@
 
 #include <iap/odometry/bspline_fixed_lag_registry.hpp>
 
+#include <gtsam/inference/Symbol.h>
+
 namespace {
 
 iap::BSplineFixedLagSegmentState make_segment_state(const iap::BSplineControlWindow& window) {
@@ -95,4 +97,49 @@ TEST(BSplineFixedLagRegistryTest, ResetAndAppendReturnOrderedLatestSegment) {
   registry.reset_from_window(window);
   EXPECT_TRUE(registry.segments().empty());
   EXPECT_EQ(registry.control_buffer().size(), 4U);
+}
+
+TEST(BSplineFixedLagRegistryTest, SharedStateSeedsAndUpdatesPersistentValues) {
+  iap::BSplineFixedLagStateRegistry registry;
+  registry.set_shared_imu_state(
+    gtsam::Vector3(0.1, 0.2, 0.3),
+    gtsam::Vector3(1.0, 2.0, 3.0),
+    gtsam::Vector3(0.0, 0.0, 9.7));
+  registry.set_shared_gnss_anchor(
+    gtsam::Vector3(10.0, 20.0, 30.0),
+    gtsam::Rot3::RzRyRx(0.1, 0.2, 0.3));
+
+  gtsam::Values values;
+  registry.seed_shared_values(values, false);
+  EXPECT_TRUE(values.exists(gtsam::symbol('j', 0)));
+  EXPECT_TRUE(values.exists(gtsam::symbol('k', 0)));
+  EXPECT_TRUE(values.exists(gtsam::symbol('g', 0)));
+  EXPECT_FALSE(values.exists(iap::bspline_ecef_origin_key()));
+  EXPECT_FALSE(values.exists(iap::bspline_ecef_rot_key()));
+
+  registry.seed_shared_values(values, true);
+  EXPECT_TRUE(values.exists(iap::bspline_ecef_origin_key()));
+  EXPECT_TRUE(values.exists(iap::bspline_ecef_rot_key()));
+  EXPECT_EQ(
+    registry.active_shared_keys(true),
+    (std::vector<gtsam::Key>{
+      gtsam::symbol('j', 0),
+      gtsam::symbol('k', 0),
+      gtsam::symbol('g', 0),
+      iap::bspline_ecef_origin_key(),
+      iap::bspline_ecef_rot_key(),
+    }));
+
+  values.update(gtsam::symbol('j', 0), gtsam::Vector3(0.4, 0.5, 0.6));
+  values.update(gtsam::symbol('k', 0), gtsam::Vector3(4.0, 5.0, 6.0));
+  values.update(gtsam::symbol('g', 0), gtsam::Vector3(0.0, 0.1, 9.81));
+  values.update(iap::bspline_ecef_origin_key(), gtsam::Vector3(11.0, 21.0, 31.0));
+  values.update(iap::bspline_ecef_rot_key(), gtsam::Rot3::RzRyRx(0.4, 0.5, 0.6));
+
+  registry.update_shared_state_from_values(values);
+  EXPECT_TRUE(registry.shared_state().gnss_anchor_initialized);
+  EXPECT_NEAR(registry.shared_state().gyro_bias.x(), 0.4, 1e-9);
+  EXPECT_NEAR(registry.shared_state().accel_bias.x(), 4.0, 1e-9);
+  EXPECT_NEAR(registry.shared_state().gravity.z(), 9.81, 1e-9);
+  EXPECT_NEAR(registry.shared_state().ecef_origin.x(), 11.0, 1e-9);
 }
