@@ -5,6 +5,7 @@
 // discrete outputs consumed by mapping / viewer modules.
 
 #include <iap/odometry/bspline_control_window.hpp>
+#include <iap/odometry/bspline_marginalization.hpp>
 #include <iap/odometry/bspline_trajectory.hpp>
 #include <iap/gnss/gnss_epoch_builder.hpp>
 #include <iap/gnss/gnss_handler.hpp>
@@ -26,9 +27,6 @@
 #include <gtsam/nonlinear/NonlinearFactorGraph.h>
 #include <gtsam/nonlinear/Values.h>
 #include <vector>
-
-namespace gtsam {
-}
 
 namespace glim {
 
@@ -110,10 +108,6 @@ class OdometryEstimationBSpline : public OdometryEstimationCPU {
   std::vector<ActiveSplineIMUSample> create_segment_imu_samples(const PreprocessedFrame::Ptr& raw_frame) const;
   void sync_gnss_epochs_from_shared_state();
   std::vector<iap::GnssEpoch> consume_segment_gnss_epochs(double segment_start, double segment_end);
-  std::vector<gtsam::Key> collect_marginal_survivor_keys(
-    const gtsam::Values& values,
-    double min_active_stamp,
-    bool include_clock) const;
   void prune_active_ct_state(double min_active_stamp);
   void update_marginal_prior_from_active_window();
   void update_marginal_prior_information(

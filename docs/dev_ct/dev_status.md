@@ -49,6 +49,9 @@
   - 下一轮 fixed-lag 求解会优先把这组 boundary information 以 `LinearContainerFactor(HessianFactor, linearization_point)` 的形式回灌到图里
   - 当前又进一步推进到了 removable-factor survivor marginalization：上一轮 carried prior 与即将被 lag pruning 移除的旧 segment 因子，会先在当前图中完成优化，再统一边缘化成新的 survivor prior
   - lag pruning 现在发生在 survivor prior 提取之后，而不是建图之前，这样滑出状态和滑出因子的有效信息不会在求解前直接丢掉
+  - 已新增稳定的 `BSplineMarginalizationPartition` 分区工具，统一判定 control points、auxiliary states 和 shared IMU/GNSS alignment states 的 survivor/removable 归属
+  - 已新增 `build_bspline_carried_prior(...)` 工具，将 removable nonlinear graph 线性化、边缘化到 survivor key 集合，并重新封装成可重放的 carried prior
+  - 已补上针对 carried prior 的专门单测，验证 survivor/removable 分区逻辑以及 carried prior 与参考 marginal graph 的误差一致性
 - 已把 velocity 提升为 fixed-lag 图中的显式状态：
   - 每个 active segment 通过 `symbol('u', idx)` 持有 velocity state
   - 新增 velocity consistency factor 将 pose spline 与 velocity state 绑定
@@ -191,6 +194,7 @@
 - 当前已将 boundary velocity / clock 从“仅作初值缓存”推进到“结构化 boundary prior”，但离真正的边缘化信息回灌还有距离。
 - 当前 boundary prior 已从“手工 pose / velocity / clock 约束”推进到“boundary 子集信息矩阵回灌”，更接近真实 Schur 边缘化；但它仍只覆盖边界子集，而不是对所有滑出状态做完整信息消元。
 - 当前 carried prior 已进一步升级为“对 removable graph 做 survivor marginalization”的形式，不再只盯住 boundary 子集；但它仍是按当前重建图的 removable factors 做图外线性化/回灌，还不是最终 fixed-lag smoother / Bayes tree 级别的完整边缘化实现。
+- 当前已把 survivor/removable state/factor partition 抽成稳定工具层，并通过专门单测约束 carried prior 行为；但 prior 仍来自“当前轮 removable 子图”的图外重线性化，而不是增量 Bayes tree / fixed-lag smoother 的原生边缘化。
 - IMU 现在已经开始按时间戳直接约束 spline 的角速度 / 线加速度，并且 bias / gravity 已进入联合优化。
 - velocity 现在已经作为独立状态显式进入图，planner 也已开始消费 latest continuous-time sample。
 - planner 现在已经开始消费 future-time continuous-time sample，但仍是基于已发布短窗的短时保守化/对齐评分。
@@ -225,6 +229,7 @@ colcon test-result --all
 - `test_gnss_epoch_builder` 现已覆盖 raw GNSS batch 在 anchor / ephemeris 缺失和完整条件下的 epoch 组包行为
 - `test_gnss_handler_queue` 现已覆盖 `GnssHandler` 的 segment-range drain 行为和 future epoch 保留
 - `test_shared_state_gnss_queue` 现已覆盖 shared state 对 processed epoch、raw observation batch、ephemeris update 和 iono state 的 mailbox 语义
+- `test_bspline_marginalization` 现已覆盖 survivor/removable partition 归属，以及 carried prior 与参考 marginal graph 的误差一致性
 - `test_bspline_control_window` 现已覆盖 velocity state 到 control-point snapshot 的发布
 - `test_bspline_trajectory` 现已覆盖带 control-point velocity 时的 trajectory sampling
 - `test_integrity_planner` 现已覆盖 planner 对 continuous-time sample 的种子状态消费、future sigma floor 和 future velocity-aware scoring

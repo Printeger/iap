@@ -110,6 +110,7 @@ add_library(iap SHARED
   src/iap/planner/integrity_planner.cpp
   # odometry
   src/iap/odometry/bspline_control_window.cpp
+  src/iap/odometry/bspline_marginalization.cpp
   src/iap/odometry/callbacks.cpp
   src/iap/odometry/bspline_trajectory.cpp
   src/iap/odometry/estimation_frame.cpp
@@ -421,6 +422,8 @@ if(DEFINED ENV{ROS_VERSION})
       target_link_libraries(test_bspline_velocity_factor iap)
       ament_add_gtest(test_bspline_trajectory test/test_bspline_trajectory.cpp)
       target_link_libraries(test_bspline_trajectory iap)
+      ament_add_gtest(test_bspline_marginalization test/test_bspline_marginalization.cpp)
+      target_link_libraries(test_bspline_marginalization iap)
     endif()
     ament_export_include_directories(include ${EIGEN3_INCLUDE_DIR} ${OpenCV_INCLUDE_DIRS})
     ament_export_libraries(${iap_LIBRARIES} ${GTSAM_LIBRARIES} fmt spdlog::spdlog)

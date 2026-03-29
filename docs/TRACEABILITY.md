@@ -73,6 +73,9 @@
   - `OdometryEstimationBSpline` 不再在建图前立即裁掉超过 lag 边界的 control points / segment constraints，而是先带着这些“即将滑出”的状态完成当前轮优化。
   - 新增 removable-factor marginalization：上一轮 carried prior 与本轮即将被 lag pruning 移除的 LiDAR/IMU/velocity/GNSS/clock/smoothness 因子会被单独收集、线性化，并对 survivor states 做边缘化。
   - 新的 carried prior 不再只盯住 boundary pose / velocity / clock 子集，而是会覆盖修剪后仍然保留的 control points、surviving auxiliary states，以及 persistent shared IMU/GNSS alignment states。
+  - 新增 `BSplineMarginalizationPartition`，统一 control points、auxiliary states 和 shared IMU/GNSS alignment states 的 survivor/removable 归属判定，减少 `OdometryEstimationBSpline` 内部零散的分区逻辑。
+  - 新增 `build_bspline_carried_prior(...)`，把 removable nonlinear graph 线性化后边缘化到 survivor key 集合，并重新封装为下一轮可重放的 carried prior。
+  - 新增 `test_bspline_marginalization.cpp`，专门校验 partition 归属以及 replayed carried prior 与参考 marginal graph 在 survivor perturbation 下的误差一致性。
 - 2026-03-28: IAP-RQ-020 / IAP-RQ-300 / IAP-RQ-410
   - 已开始按 `docs/dev_ct/SLAM_FINISH_PLAN.md` 执行 `M1 / WP1`，先收口 fixed-lag 主状态边界。
   - `OdometryEstimationBSpline::ActiveSplineMarginalPrior` 现在会结构化快照 boundary pose、boundary auxiliary index，以及对应的 velocity / clock state。

@@ -3,6 +3,11 @@
 > 规则：任何代码改动必须在这里记录，并包含 IAP-RQ-XXX。
 
 ## Unreleased
+- feat(dev-ct-mainline-carried-prior): IAP-RQ-020 / IAP-RQ-300 / IAP-RQ-410 — stabilize fixed-lag survivor/removable partitioning and add dedicated carried-prior tests.
+  - Added `BSplineMarginalizationPartition`, which centralizes survivor/removable state ownership for control points, segment auxiliary states, and persistent shared IMU/GNSS alignment states during lag pruning.
+  - Added `build_bspline_carried_prior(...)`, which linearizes the removable nonlinear subgraph, marginalizes it onto the retained survivor keys, and converts the result back into replayable `LinearContainerFactor`s for the next solve.
+  - `OdometryEstimationBSpline` now classifies LiDAR/IMU/velocity/GNSS/clock/smoothness factors against that shared partition, seeds GNSS clock states before partitioning, and only replays carried priors when every referenced key remains inside the current survivor set.
+  - Added `test_bspline_marginalization.cpp` to validate survivor/removable partition membership and verify that the replayed carried prior matches the reference marginal error on perturbed survivor states.
 - feat(dev-ct-mainline-marginal): IAP-RQ-020 / IAP-RQ-300 / IAP-RQ-410 — push `SLAM_FINISH_PLAN` WP1 from boundary-subset replay toward removable-factor survivor marginalization.
   - `OdometryEstimationBSpline` now keeps the soon-to-be-removed lag-window segment factors in the current solve instead of pruning them before graph construction.
   - A dedicated removable graph is now assembled from the previous carried prior plus the LiDAR/IMU/velocity/GNSS/clock/smoothness factors that will disappear after lag pruning.

@@ -8,7 +8,6 @@
 #include <gtsam/inference/Symbol.h>
 #include <gtsam/slam/BetweenFactor.h>
 #include <gtsam/slam/PriorFactor.h>
-#include <gtsam/nonlinear/LinearContainerFactor.h>
 #include <gtsam/nonlinear/NonlinearFactorGraph.h>
 #include <gtsam_points/ann/kdtree2.hpp>
 #include <gtsam_points/ann/ivox.hpp>
@@ -86,78 +85,31 @@ gtsam::Key bspline_gravity_key() {
   return gtsam::symbol('g', 0);
 }
 
-void append_unique_key(std::vector<gtsam::Key>& keys, gtsam::Key key) {
-  if (std::find(keys.begin(), keys.end(), key) == keys.end()) {
-    keys.push_back(key);
+template <typename Constraints>
+std::vector<iap::BSplineMarginalizationSegmentState> make_marginalization_segment_states(
+  const Constraints& constraints) {
+  std::vector<iap::BSplineMarginalizationSegmentState> states;
+  states.reserve(constraints.size());
+  for (const auto& constraint : constraints) {
+    iap::BSplineMarginalizationSegmentState state;
+    state.scan_end = constraint.scan_end;
+    state.control_indices = constraint.control_indices;
+    state.auxiliary_index = constraint.velocity_index;
+    states.push_back(state);
   }
-}
-
-std::vector<iap::BSplineControlPointState> pruned_buffer_states(
-  const iap::BSplineControlWindowBuffer& buffer,
-  double min_stamp) {
-  auto states = buffer.states();
-  if (states.empty()) {
-    return states;
-  }
-
-  const auto first_active = std::find_if(states.begin(), states.end(), [&](const auto& state) {
-    return state.stamp >= min_stamp;
-  });
-
-  if (first_active == states.end()) {
-    if (states.size() > iap::kBSplineControlPointCount) {
-      states.erase(states.begin(), states.end() - static_cast<std::ptrdiff_t>(iap::kBSplineControlPointCount));
-    }
-    return states;
-  }
-
-  const auto active_offset = std::distance(states.begin(), first_active);
-  const auto support = std::min<std::ptrdiff_t>(
-    active_offset,
-    static_cast<std::ptrdiff_t>(iap::kBSplineControlPointCount - 1));
-  const auto keep_begin = first_active - support;
-
-  if (keep_begin > states.begin()) {
-    states.erase(states.begin(), keep_begin);
-  }
-
   return states;
 }
 
-bool key_exists(const std::vector<gtsam::Key>& keys, gtsam::Key key) {
-  return std::find(keys.begin(), keys.end(), key) != keys.end();
+gtsam::KeyVector make_key_vector(const std::array<gtsam::Key, iap::kBSplineControlPointCount>& keys) {
+  return gtsam::KeyVector(keys.begin(), keys.end());
 }
 
-void insert_bspline_value(gtsam::Values& dst, const gtsam::Values& src, gtsam::Key key) {
-  const char c = gtsam::Symbol(key).chr();
-  switch (c) {
-    case 's':
-      dst.insert(key, src.at<gtsam::Pose3>(key));
-      return;
-    case 'u':
-      dst.insert(key, src.at<gtsam::Vector3>(key));
-      return;
-    case 'c':
-      dst.insert(key, src.at<gtsam::Vector2>(key));
-      return;
-    case 'g':
-      dst.insert(key, src.at<gtsam::Vector3>(key));
-      return;
-    case 'j':
-      dst.insert(key, src.at<gtsam::Vector3>(key));
-      return;
-    case 'k':
-      dst.insert(key, src.at<gtsam::Vector3>(key));
-      return;
-    case 'e':
-      dst.insert(key, src.at<gtsam::Vector3>(key));
-      return;
-    case 'r':
-      dst.insert(key, src.at<gtsam::Rot3>(key));
-      return;
-    default:
-      throw std::runtime_error(std::string("unsupported bspline marginal key '") + c + "'");
-  }
+gtsam::KeyVector make_key_vector(
+  const std::array<gtsam::Key, iap::kBSplineControlPointCount>& keys,
+  std::initializer_list<gtsam::Key> extra_keys) {
+  gtsam::KeyVector result(keys.begin(), keys.end());
+  result.insert(result.end(), extra_keys.begin(), extra_keys.end());
+  return result;
 }
 
 }  // namespace
@@ -425,52 +377,6 @@ void OdometryEstimationBSpline::sync_gnss_epochs_from_shared_state() {
   }
 }
 
-std::vector<gtsam::Key> OdometryEstimationBSpline::collect_marginal_survivor_keys(
-  const gtsam::Values& values,
-  double min_active_stamp,
-  bool include_clock) const {
-  std::vector<gtsam::Key> survivor_keys;
-  if (!control_buffer_) {
-    return survivor_keys;
-  }
-
-  const auto kept_states = pruned_buffer_states(*control_buffer_, min_active_stamp);
-  for (const auto& state : kept_states) {
-    append_unique_key(survivor_keys, iap::bspline_control_point_key(state.index));
-  }
-
-  for (const auto& segment : active_segment_constraints_) {
-    if (segment.scan_end < min_active_stamp) {
-      continue;
-    }
-
-    const gtsam::Key velocity_key = iap::bspline_velocity_key(segment.velocity_index);
-    if (values.exists(velocity_key)) {
-      append_unique_key(survivor_keys, velocity_key);
-    }
-
-    const gtsam::Key clock_key = iap::bspline_clock_key(segment.velocity_index);
-    if (include_clock && values.exists(clock_key)) {
-      append_unique_key(survivor_keys, clock_key);
-    }
-  }
-
-  const std::array<gtsam::Key, 5> persistent_keys = {
-    bspline_gyro_bias_key(),
-    bspline_accel_bias_key(),
-    bspline_gravity_key(),
-    iap::bspline_ecef_origin_key(),
-    iap::bspline_ecef_rot_key(),
-  };
-  for (const auto key : persistent_keys) {
-    if (values.exists(key)) {
-      append_unique_key(survivor_keys, key);
-    }
-  }
-
-  return survivor_keys;
-}
-
 void OdometryEstimationBSpline::prune_active_ct_state(double min_active_stamp) {
   if (control_buffer_) {
     control_buffer_->prune_before(min_active_stamp);
@@ -524,41 +430,10 @@ void OdometryEstimationBSpline::update_marginal_prior_information(
   const gtsam::NonlinearFactorGraph& graph,
   const gtsam::Values& values,
   const std::vector<gtsam::Key>& survivor_keys) {
-  if (graph.size() == 0 || survivor_keys.empty()) {
-    marginal_prior_.has_information = false;
-    marginal_prior_.information_keys.clear();
-    marginal_prior_.information_factors = gtsam::NonlinearFactorGraph();
-    return;
-  }
-
   try {
-    const auto linear_graph = graph.linearize(values);
-    const auto linear_keys = linear_graph->keys();
-
     std::vector<gtsam::Key> retained_keys;
-    retained_keys.reserve(survivor_keys.size());
-    for (const auto key : survivor_keys) {
-      if (linear_keys.exists(key)) {
-        retained_keys.push_back(key);
-      }
-    }
-
-    if (retained_keys.empty()) {
-      marginal_prior_.has_information = false;
-      marginal_prior_.information_keys.clear();
-      marginal_prior_.information_factors = gtsam::NonlinearFactorGraph();
-      return;
-    }
-
-    gtsam::Values linearization_point;
-    for (const auto key : retained_keys) {
-      insert_bspline_value(linearization_point, values, key);
-    }
-
-    const auto marginal_graph = linear_graph->marginal(retained_keys);
-
     marginal_prior_.information_factors =
-      gtsam::LinearContainerFactor::ConvertLinearGraph(*marginal_graph, linearization_point);
+      iap::build_bspline_carried_prior(graph, values, survivor_keys, &retained_keys);
     marginal_prior_.information_keys = retained_keys;
     marginal_prior_.has_information = marginal_prior_.information_factors.size() != 0;
   } catch (const std::exception& e) {
@@ -755,9 +630,46 @@ EstimationFrame::ConstPtr OdometryEstimationBSpline::insert_frame_ct_lidar(
     }
     return poses;
   };
+  std::vector<ActiveClockState> seeded_clock_states;
+  if (gnss_anchor_initialized_) {
+    for (const auto& segment : active_segment_constraints_) {
+      if (segment.gnss_epochs.empty()) {
+        continue;
+      }
+
+      const gtsam::Key clock_key = iap::bspline_clock_key(segment.velocity_index);
+      if (!values.exists(clock_key)) {
+        gtsam::Vector2 init_clock = gtsam::Vector2::Zero();
+        if (latest_ct_aux_values_.exists(clock_key)) {
+          init_clock = latest_ct_aux_values_.at<gtsam::Vector2>(clock_key);
+        } else if (!seeded_clock_states.empty()) {
+          init_clock = seeded_clock_states.back().value;
+          const double dt = std::max(0.0, segment.stamp - seeded_clock_states.back().stamp);
+          init_clock(0) += init_clock(1) * dt;
+        }
+        values.insert(clock_key, init_clock);
+      }
+
+      seeded_clock_states.push_back(ActiveClockState{clock_key, segment.stamp, values.at<gtsam::Vector2>(clock_key)});
+    }
+
+    if (!seeded_clock_states.empty()) {
+      if (!values.exists(ecef_origin_key)) {
+        values.insert(ecef_origin_key, gnss_origin_ecef_);
+      }
+      if (!values.exists(ecef_rot_key)) {
+        values.insert(ecef_rot_key, gnss_ecef_rot_);
+      }
+    }
+  }
+  const auto marginalization_partition = iap::build_bspline_marginalization_partition(
+    control_buffer_->states(),
+    make_marginalization_segment_states(active_segment_constraints_),
+    values,
+    min_active_stamp,
+    !seeded_clock_states.empty());
   for (std::size_t i = 0; i < active_segment_constraints_.size(); ++i) {
     const auto& segment = active_segment_constraints_[i];
-    const bool segment_survives = segment.scan_end >= min_active_stamp;
     const gtsam::Key velocity_key = iap::bspline_velocity_key(segment.velocity_index);
 
     if (!values.exists(velocity_key)) {
@@ -785,7 +697,7 @@ EstimationFrame::ConstPtr OdometryEstimationBSpline::insert_frame_ct_lidar(
     factor->set_num_threads(params->num_threads);
     factor->set_max_correspondence_distance(max_correspondence_distance_);
     graph.add(factor);
-    if (!segment_survives) {
+    if (marginalization_partition.should_marginalize_factor(make_key_vector(segment_keys))) {
       marginalization_graph.add(factor);
     }
 
@@ -797,7 +709,7 @@ EstimationFrame::ConstPtr OdometryEstimationBSpline::insert_frame_ct_lidar(
       velocity_ct_inf_scale_,
       trajectory_params_.finite_difference_dt);
     graph.add(velocity_factor);
-    if (!segment_survives) {
+    if (marginalization_partition.should_marginalize_factor(make_key_vector(segment_keys, {velocity_key}))) {
       marginalization_graph.add(velocity_factor);
     }
     active_velocity_factor_count++;
@@ -817,7 +729,8 @@ EstimationFrame::ConstPtr OdometryEstimationBSpline::insert_frame_ct_lidar(
         imu_ct_rot_inf_scale_,
         trajectory_params_.finite_difference_dt);
       graph.add(imu_factor);
-      if (!segment_survives) {
+      if (marginalization_partition.should_marginalize_factor(
+            make_key_vector(segment_keys, {gyro_bias_key, accel_bias_key, gravity_key}))) {
         marginalization_graph.add(imu_factor);
       }
       active_imu_factor_count++;
@@ -825,25 +738,6 @@ EstimationFrame::ConstPtr OdometryEstimationBSpline::insert_frame_ct_lidar(
 
     if (gnss_anchor_initialized_ && !segment.gnss_epochs.empty()) {
       const gtsam::Key clock_key = iap::bspline_clock_key(segment.velocity_index);
-      if (!values.exists(clock_key)) {
-        gtsam::Vector2 init_clock = gtsam::Vector2::Zero();
-        if (latest_ct_aux_values_.exists(clock_key)) {
-          init_clock = latest_ct_aux_values_.at<gtsam::Vector2>(clock_key);
-        } else if (!active_clock_states.empty()) {
-          init_clock = active_clock_states.back().value;
-          const double dt = std::max(0.0, segment.stamp - active_clock_states.back().stamp);
-          init_clock(0) += init_clock(1) * dt;
-        }
-        values.insert(clock_key, init_clock);
-      }
-
-      if (!values.exists(ecef_origin_key)) {
-        values.insert(ecef_origin_key, gnss_origin_ecef_);
-      }
-      if (!values.exists(ecef_rot_key)) {
-        values.insert(ecef_rot_key, gnss_ecef_rot_);
-      }
-
       active_clock_states.push_back(ActiveClockState{clock_key, segment.stamp, values.at<gtsam::Vector2>(clock_key)});
 
       const double segment_duration = std::max(1e-3, segment.scan_end - segment.stamp);
@@ -871,7 +765,8 @@ EstimationFrame::ConstPtr OdometryEstimationBSpline::insert_frame_ct_lidar(
             sat.constellation,
             sat.elevation);
           graph.add(pr_factor);
-          if (!segment_survives) {
+          if (marginalization_partition.should_marginalize_factor(
+                make_key_vector(segment_keys, {clock_key, ecef_origin_key, ecef_rot_key}))) {
             marginalization_graph.add(pr_factor);
           }
           active_gnss_pr_factor_count++;
@@ -891,7 +786,8 @@ EstimationFrame::ConstPtr OdometryEstimationBSpline::insert_frame_ct_lidar(
             sat.constellation,
             sat.elevation);
           graph.add(dop_factor);
-          if (!segment_survives) {
+          if (marginalization_partition.should_marginalize_factor(
+                make_key_vector(segment_keys, {velocity_key, clock_key, ecef_rot_key}))) {
             marginalization_graph.add(dop_factor);
           }
           active_gnss_dop_factor_count++;
@@ -920,7 +816,6 @@ EstimationFrame::ConstPtr OdometryEstimationBSpline::insert_frame_ct_lidar(
   const auto gnss_ecef_rot_noise = gtsam::noiseModel::Isotropic::Sigma(3, gnss_sigma_ecef_rot_);
   const auto clock_prior_noise = gtsam::noiseModel::Diagonal::Sigmas(
     (gtsam::Vector2() << params->clk_bias_noise, params->clk_drift_noise).finished());
-  const auto survivor_keys = collect_marginal_survivor_keys(values, min_active_stamp, !active_clock_states.empty());
 
   const bool use_marginal_prior =
     marginal_prior_.valid &&
@@ -933,7 +828,7 @@ EstimationFrame::ConstPtr OdometryEstimationBSpline::insert_frame_ct_lidar(
     std::all_of(
       marginal_prior_.information_keys.begin(),
       marginal_prior_.information_keys.end(),
-      [&](gtsam::Key key) { return values.exists(key); });
+      [&](gtsam::Key key) { return values.exists(key) && marginalization_partition.contains_survivor(key); });
 
   bool information_prior_attached = false;
   if (use_information_marginal_prior) {
@@ -1011,7 +906,7 @@ EstimationFrame::ConstPtr OdometryEstimationBSpline::insert_frame_ct_lidar(
       active_states[i].pose.between(active_states[i + 1].pose),
       smooth_noise);
     graph.add(smooth_factor);
-    if (!key_exists(survivor_keys, key_i) || !key_exists(survivor_keys, key_j)) {
+    if (marginalization_partition.should_marginalize_factor(gtsam::KeyVector{key_i, key_j})) {
       marginalization_graph.add(smooth_factor);
     }
   }
@@ -1025,7 +920,10 @@ EstimationFrame::ConstPtr OdometryEstimationBSpline::insert_frame_ct_lidar(
   if (!active_clock_states.empty()) {
     const bool clock_constrained_by_information_prior =
       information_prior_attached &&
-      key_exists(marginal_prior_.information_keys, active_clock_states.front().key);
+      std::find(
+        marginal_prior_.information_keys.begin(),
+        marginal_prior_.information_keys.end(),
+        active_clock_states.front().key) != marginal_prior_.information_keys.end();
     if (!clock_constrained_by_information_prior) {
       const bool use_clock_boundary_prior =
         use_marginal_prior &&
@@ -1050,8 +948,8 @@ EstimationFrame::ConstPtr OdometryEstimationBSpline::insert_frame_ct_lidar(
         dt,
         iap::ClockBetweenFactor::make_noise(dt, gnss_clock_between_params_));
       graph.add(clock_between);
-      if (!key_exists(survivor_keys, active_clock_states[i - 1].key) ||
-          !key_exists(survivor_keys, active_clock_states[i].key)) {
+      if (marginalization_partition.should_marginalize_factor(
+            gtsam::KeyVector{active_clock_states[i - 1].key, active_clock_states[i].key})) {
         marginalization_graph.add(clock_between);
       }
     }
@@ -1107,7 +1005,7 @@ EstimationFrame::ConstPtr OdometryEstimationBSpline::insert_frame_ct_lidar(
   }
   prune_active_ct_state(min_active_stamp);
   update_marginal_prior_from_active_window();
-  update_marginal_prior_information(marginalization_graph, values, survivor_keys);
+  update_marginal_prior_information(marginalization_graph, values, marginalization_partition.survivor_keys);
 
   const gtsam::Pose3 start_pose = control_window_->evaluate(0.0);
   const gtsam::Pose3 end_pose = control_window_->evaluate(1.0);
