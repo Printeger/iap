@@ -87,6 +87,16 @@ class OdometryEstimationBSpline : public OdometryEstimationCPU {
     std::array<std::size_t, 2> control_indices{};
     gtsam::Pose3 first_pose;
     gtsam::Pose3 relative_delta;
+    std::size_t auxiliary_index = 0;
+    bool has_velocity = false;
+    gtsam::Vector3 velocity = gtsam::Vector3::Zero();
+    bool has_clock = false;
+    gtsam::Vector2 clock = gtsam::Vector2::Zero();
+    bool has_information = false;
+    std::vector<gtsam::Key> information_keys;
+    std::vector<gtsam::DenseIndex> information_dims;
+    gtsam::Matrix information_matrix;
+    gtsam::Values linearization_point;
   };
 
   EstimationFrame::ConstPtr insert_frame_reconstruct(
@@ -103,6 +113,10 @@ class OdometryEstimationBSpline : public OdometryEstimationCPU {
   void sync_gnss_epochs_from_shared_state();
   std::vector<iap::GnssEpoch> consume_segment_gnss_epochs(double segment_start, double segment_end);
   void update_marginal_prior_from_active_window();
+  void update_marginal_prior_information(
+    const gtsam::NonlinearFactorGraph& graph,
+    const gtsam::Values& values,
+    bool include_clock);
   void append_active_segment_constraint(
     const PreprocessedFrame::Ptr& raw_frame,
     const gtsam_points::PointCloud::ConstPtr& source);

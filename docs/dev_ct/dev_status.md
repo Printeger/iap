@@ -1,7 +1,11 @@
 # IAP 连续时间开发状态
 
 ## 更新时间
-- 2026-03-28
+- 2026-03-29
+
+## 执行入口
+- 后续连续时间 SLAM 开发以 [SLAM_FINISH_PLAN.md](/home/dev/code/ws_iap/src/iap/docs/dev_ct/SLAM_FINISH_PLAN.md) 为唯一执行入口。
+- 本文档从现在开始只负责记录“当前状态、刚完成的增量和仍未完成的关键边界”，不再单独维护另一套并行开发计划。
 
 ## 当前结论
 - 已完成 Phase 1A 的“连续时间骨架层”落地。
@@ -38,6 +42,11 @@
   - shared state 现在只保留“原始 GNSS epoch 邮箱 + anchor”职责，不再承担 segment-range drain 语义
   - `OdometryEstimationBSpline` 现在还直接内聚了 `GnssEpochBuilder`
   - `gnss_extension` 已开始退回为“raw GNSS ingress + legacy bridge”：原始观测 batch、星历更新、iono 参数先进入 shared mailbox，再由 BSpline odometry 在内部完成 epoch 组包与预处理
+- 已开始按 [SLAM_FINISH_PLAN.md](/home/dev/code/ws_iap/src/iap/docs/dev_ct/SLAM_FINISH_PLAN.md) 执行 `M1 / WP1`：
+  - lag-window boundary prior 现在开始覆盖 boundary auxiliary state，而不再只覆盖最前两个 pose 控制点
+  - boundary velocity / clock state 已被结构化快照，并参与下一轮 fixed-lag prior 约束
+  - 上一轮求解结束后，现在会对 boundary pose / velocity / clock 子集提取 joint marginal information，并缓存对应 linearization point
+  - 下一轮 fixed-lag 求解会优先把这组 boundary information 以 `LinearContainerFactor(HessianFactor, linearization_point)` 的形式回灌到图里
 - 已把 velocity 提升为 fixed-lag 图中的显式状态：
   - 每个 active segment 通过 `symbol('u', idx)` 持有 velocity state
   - 新增 velocity consistency factor 将 pose spline 与 velocity state 绑定
@@ -177,6 +186,8 @@
 - 新增的 fixed-lag window 现在已经进入优化变量层，并且多段 LiDAR segment factors 已经进入同一优化图。
 - 当前已经具备 segment-specific target snapshot 和显式 marginal prior 的雏形。
 - 但这些 prior 仍然是工程上的近似替代，不是严格的 Schur complement 边缘化结果。
+- 当前已将 boundary velocity / clock 从“仅作初值缓存”推进到“结构化 boundary prior”，但离真正的边缘化信息回灌还有距离。
+- 当前 boundary prior 已从“手工 pose / velocity / clock 约束”推进到“boundary 子集信息矩阵回灌”，更接近真实 Schur 边缘化；但它仍只覆盖边界子集，而不是对所有滑出状态做完整信息消元。
 - IMU 现在已经开始按时间戳直接约束 spline 的角速度 / 线加速度，并且 bias / gravity 已进入联合优化。
 - velocity 现在已经作为独立状态显式进入图，planner 也已开始消费 latest continuous-time sample。
 - planner 现在已经开始消费 future-time continuous-time sample，但仍是基于已发布短窗的短时保守化/对齐评分。
@@ -257,6 +268,11 @@ colcon test-result --all
 - 还没有把 motion primitives 升级为 B-spline candidate planning。
 
 ## 下一步计划
+
+- 后续开发顺序统一以 [SLAM_FINISH_PLAN.md](/home/dev/code/ws_iap/src/iap/docs/dev_ct/SLAM_FINISH_PLAN.md) 为准。
+- 当前正在执行：
+  - `M1 / WP1`：把 `CT_LIDAR_CPU` 从 local frontend 推进到 fixed-lag 主链
+  - 当前这一步先收口 boundary prior，把 pose / velocity / clock 的 lag-window 边界约束组织到同一条主线上
 
 ### Next Step 1：把 `CT_LIDAR_CPU` 从 local frontend 推进到 fixed-lag spline 主链
 目标：

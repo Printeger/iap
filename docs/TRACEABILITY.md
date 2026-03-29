@@ -69,6 +69,11 @@
 ## 2. 未映射改动（临时区）
 > 如果你临时改了代码但还没决定它对应哪个需求，先把改动写在这里（提交前必须移入上表）。
 
+- 2026-03-28: IAP-RQ-020 / IAP-RQ-300 / IAP-RQ-410
+  - 已开始按 `docs/dev_ct/SLAM_FINISH_PLAN.md` 执行 `M1 / WP1`，先收口 fixed-lag 主状态边界。
+  - `OdometryEstimationBSpline::ActiveSplineMarginalPrior` 现在会结构化快照 boundary pose、boundary auxiliary index，以及对应的 velocity / clock state。
+  - 每轮求解结束后，`OdometryEstimationBSpline` 会对 boundary pose / velocity / clock 子集提取 `jointMarginalInformation(...)`，并保存与之匹配的 linearization point。
+  - 下一轮优化会优先把这组 boundary information 通过 `LinearContainerFactor(HessianFactor, linearization_point)` 回灌到 fixed-lag 图中；若提取失败，则回退到手工 pose / velocity / clock priors。
 - 2026-03-27: IAP-RQ-300 / IAP-RQ-410
   - `OdometryEstimationBSpline` 目前是连续时间 B-spline 骨架层，不是最终的 spline-native LiDAR/IMU/GNSS factor graph。
   - 现阶段它复用了现有 LiDAR-IMU odometry 后端，并在优化后发布 `ContinuousTrajectoryView` / `SplineControlAccess`，用于 planner / viewer / debug 接线与后续 Phase-1B/1C 演进。

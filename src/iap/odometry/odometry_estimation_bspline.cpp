@@ -8,7 +8,11 @@
 #include <gtsam/inference/Symbol.h>
 #include <gtsam/slam/BetweenFactor.h>
 #include <gtsam/slam/PriorFactor.h>
+#include <gtsam/nonlinear/LinearContainerFactor.h>
+#include <gtsam/nonlinear/Marginals.h>
 #include <gtsam/nonlinear/NonlinearFactorGraph.h>
+#include <gtsam/linear/HessianFactor.h>
+#include <gtsam/base/SymmetricBlockMatrix.h>
 #include <gtsam_points/ann/kdtree2.hpp>
 #include <gtsam_points/ann/ivox.hpp>
 #include <gtsam_points/optimizers/levenberg_marquardt_ext.hpp>
@@ -83,6 +87,75 @@ gtsam::Key bspline_accel_bias_key() {
 
 gtsam::Key bspline_gravity_key() {
   return gtsam::symbol('g', 0);
+}
+
+gtsam::DenseIndex bspline_key_dim(gtsam::Key key) {
+  const char c = gtsam::Symbol(key).chr();
+  switch (c) {
+    case 's':
+      return 6;
+    case 'u':
+      return 3;
+    case 'c':
+      return 2;
+    case 'e':
+      return 3;
+    case 'r':
+      return 3;
+    default:
+      throw std::runtime_error(std::string("unsupported bspline marginal key '") + c + "'");
+  }
+}
+
+void insert_bspline_value(gtsam::Values& dst, const gtsam::Values& src, gtsam::Key key) {
+  const char c = gtsam::Symbol(key).chr();
+  switch (c) {
+    case 's':
+      dst.insert(key, src.at<gtsam::Pose3>(key));
+      return;
+    case 'u':
+      dst.insert(key, src.at<gtsam::Vector3>(key));
+      return;
+    case 'c':
+      dst.insert(key, src.at<gtsam::Vector2>(key));
+      return;
+    case 'e':
+      dst.insert(key, src.at<gtsam::Vector3>(key));
+      return;
+    case 'r':
+      dst.insert(key, src.at<gtsam::Rot3>(key));
+      return;
+    default:
+      throw std::runtime_error(std::string("unsupported bspline marginal key '") + c + "'");
+  }
+}
+
+gtsam::HessianFactor make_information_prior_hessian(
+  const std::vector<gtsam::Key>& keys,
+  const std::vector<gtsam::DenseIndex>& dims,
+  const gtsam::Matrix& information_matrix) {
+  std::vector<gtsam::DenseIndex> augmented_dims = dims;
+  augmented_dims.push_back(1);
+  gtsam::SymmetricBlockMatrix augmented(augmented_dims);
+
+  gtsam::DenseIndex row_offset = 0;
+  for (std::size_t i = 0; i < dims.size(); ++i) {
+    gtsam::DenseIndex col_offset = row_offset;
+    augmented.setDiagonalBlock(
+      static_cast<gtsam::DenseIndex>(i),
+      information_matrix.block(row_offset, row_offset, dims[i], dims[i]));
+    for (std::size_t j = i + 1; j < dims.size(); ++j) {
+      col_offset += dims[j - 1];
+      augmented.setOffDiagonalBlock(
+        static_cast<gtsam::DenseIndex>(i),
+        static_cast<gtsam::DenseIndex>(j),
+        information_matrix.block(row_offset, col_offset, dims[i], dims[j]));
+    }
+    row_offset += dims[i];
+  }
+
+  augmented.setDiagonalBlock(static_cast<gtsam::DenseIndex>(dims.size()), Eigen::Matrix<double, 1, 1>::Zero());
+  return gtsam::HessianFactor(keys, augmented);
 }
 
 }  // namespace
@@ -362,6 +435,72 @@ void OdometryEstimationBSpline::update_marginal_prior_from_active_window() {
   marginal_prior_.control_indices = {states[0].index, states[1].index};
   marginal_prior_.first_pose = states[0].pose;
   marginal_prior_.relative_delta = states[0].pose.between(states[1].pose);
+  marginal_prior_.auxiliary_index = states[1].index;
+
+  const gtsam::Key velocity_key = iap::bspline_velocity_key(marginal_prior_.auxiliary_index);
+  if (latest_ct_aux_values_.exists(velocity_key)) {
+    marginal_prior_.has_velocity = true;
+    marginal_prior_.velocity = latest_ct_aux_values_.at<gtsam::Vector3>(velocity_key);
+  }
+
+  const gtsam::Key clock_key = iap::bspline_clock_key(marginal_prior_.auxiliary_index);
+  if (latest_ct_aux_values_.exists(clock_key)) {
+    marginal_prior_.has_clock = true;
+    marginal_prior_.clock = latest_ct_aux_values_.at<gtsam::Vector2>(clock_key);
+  }
+}
+
+void OdometryEstimationBSpline::update_marginal_prior_information(
+  const gtsam::NonlinearFactorGraph& graph,
+  const gtsam::Values& values,
+  bool include_clock) {
+  if (!marginal_prior_.valid) {
+    return;
+  }
+
+  try {
+    std::vector<gtsam::Key> keys;
+    keys.push_back(iap::bspline_control_point_key(marginal_prior_.control_indices[0]));
+    keys.push_back(iap::bspline_control_point_key(marginal_prior_.control_indices[1]));
+
+    const gtsam::Key velocity_key = iap::bspline_velocity_key(marginal_prior_.auxiliary_index);
+    if (values.exists(velocity_key)) {
+      keys.push_back(velocity_key);
+    }
+
+    const gtsam::Key clock_key = iap::bspline_clock_key(marginal_prior_.auxiliary_index);
+    if (include_clock && values.exists(clock_key)) {
+      keys.push_back(clock_key);
+    }
+
+    if (keys.size() < 2) {
+      return;
+    }
+
+    gtsam::Values linearization_point;
+    std::vector<gtsam::DenseIndex> dims;
+    dims.reserve(keys.size());
+    for (const auto key : keys) {
+      insert_bspline_value(linearization_point, values, key);
+      dims.push_back(bspline_key_dim(key));
+    }
+
+    const gtsam::Marginals marginals(graph, values, gtsam::Marginals::QR);
+    const auto joint_info = marginals.jointMarginalInformation(keys);
+
+    marginal_prior_.has_information = true;
+    marginal_prior_.information_keys = keys;
+    marginal_prior_.information_dims = dims;
+    marginal_prior_.information_matrix = joint_info.fullMatrix();
+    marginal_prior_.linearization_point = linearization_point;
+  } catch (const std::exception& e) {
+    marginal_prior_.has_information = false;
+    marginal_prior_.information_keys.clear();
+    marginal_prior_.information_dims.clear();
+    marginal_prior_.information_matrix.resize(0, 0);
+    marginal_prior_.linearization_point = gtsam::Values();
+    logger->warn("failed to build bspline marginal information prior: {}", e.what());
+  }
 }
 
 void OdometryEstimationBSpline::append_active_segment_constraint(
@@ -698,18 +837,42 @@ EstimationFrame::ConstPtr OdometryEstimationBSpline::insert_frame_ct_lidar(
   const auto pred_noise = gtsam::noiseModel::Isotropic::Precision(6, ctrl_point_prediction_inf_scale_);
   const auto smooth_noise = gtsam::noiseModel::Isotropic::Precision(6, ctrl_point_smoothness_inf_scale_);
   const auto marginal_noise = gtsam::noiseModel::Isotropic::Precision(6, ctrl_point_marginal_inf_scale_);
+  const auto velocity_prior_noise = gtsam::noiseModel::Isotropic::Precision(3, velocity_ct_inf_scale_);
   const auto imu_bias_noise = gtsam::noiseModel::Isotropic::Precision(3, imu_ct_bias_inf_scale_);
   const auto gravity_noise = gtsam::noiseModel::Isotropic::Precision(3, imu_ct_gravity_inf_scale_);
   const auto gnss_ecef_noise = gtsam::noiseModel::Diagonal::Sigmas(gtsam::Vector3::Constant(gnss_sigma_ecef_origin_));
   const auto gnss_ecef_rot_noise = gtsam::noiseModel::Isotropic::Sigma(3, gnss_sigma_ecef_rot_);
+  const auto clock_prior_noise = gtsam::noiseModel::Diagonal::Sigmas(
+    (gtsam::Vector2() << params->clk_bias_noise, params->clk_drift_noise).finished());
 
   const bool use_marginal_prior =
     marginal_prior_.valid &&
     active_states.size() >= 2 &&
     active_states[0].index == marginal_prior_.control_indices[0] &&
     active_states[1].index == marginal_prior_.control_indices[1];
+  const bool use_information_marginal_prior =
+    use_marginal_prior &&
+    marginal_prior_.has_information &&
+    marginal_prior_.information_keys.size() >= 2 &&
+    marginal_prior_.information_keys[0] == iap::bspline_control_point_key(active_states[0].index) &&
+    marginal_prior_.information_keys[1] == iap::bspline_control_point_key(active_states[1].index);
 
-  if (use_marginal_prior) {
+  bool information_prior_attached = false;
+  if (use_information_marginal_prior) {
+    try {
+      const auto hessian = make_information_prior_hessian(
+        marginal_prior_.information_keys,
+        marginal_prior_.information_dims,
+        marginal_prior_.information_matrix);
+      graph.add(std::make_shared<gtsam::LinearContainerFactor>(hessian, marginal_prior_.linearization_point));
+      information_prior_attached = true;
+    } catch (const std::exception& e) {
+      logger->warn("failed to attach bspline marginal information prior, fallback to handcrafted prior: {}", e.what());
+      marginal_prior_.has_information = false;
+    }
+  }
+
+  if (!information_prior_attached && use_marginal_prior) {
     graph.emplace_shared<gtsam::PriorFactor<gtsam::Pose3>>(
       iap::bspline_control_point_key(active_states[0].index),
       marginal_prior_.first_pose,
@@ -719,6 +882,12 @@ EstimationFrame::ConstPtr OdometryEstimationBSpline::insert_frame_ct_lidar(
       iap::bspline_control_point_key(active_states[1].index),
       marginal_prior_.relative_delta,
       marginal_noise);
+    if (marginal_prior_.has_velocity && values.exists(iap::bspline_velocity_key(marginal_prior_.auxiliary_index))) {
+      graph.emplace_shared<gtsam::PriorFactor<gtsam::Vector3>>(
+        iap::bspline_velocity_key(marginal_prior_.auxiliary_index),
+        marginal_prior_.velocity,
+        velocity_prior_noise);
+    }
   } else if (!active_states.empty()) {
     graph.emplace_shared<gtsam::PriorFactor<gtsam::Pose3>>(
       iap::bspline_control_point_key(active_states.front().index),
@@ -759,12 +928,22 @@ EstimationFrame::ConstPtr OdometryEstimationBSpline::insert_frame_ct_lidar(
     graph.emplace_shared<gtsam::PriorFactor<gtsam::Rot3>>(ecef_rot_key, gnss_ecef_rot_, gnss_ecef_rot_noise);
   }
   if (!active_clock_states.empty()) {
-    const auto clock_prior_noise = gtsam::noiseModel::Diagonal::Sigmas(
-      (gtsam::Vector2() << params->clk_bias_noise, params->clk_drift_noise).finished());
-    graph.emplace_shared<gtsam::PriorFactor<gtsam::Vector2>>(
-      active_clock_states.front().key,
-      active_clock_states.front().value,
-      clock_prior_noise);
+    const bool clock_constrained_by_information_prior =
+      information_prior_attached &&
+      marginal_prior_.has_clock &&
+      active_clock_states.front().key == iap::bspline_clock_key(marginal_prior_.auxiliary_index);
+    if (!clock_constrained_by_information_prior) {
+      const bool use_clock_boundary_prior =
+        use_marginal_prior &&
+        marginal_prior_.has_clock &&
+        active_clock_states.front().key == iap::bspline_clock_key(marginal_prior_.auxiliary_index);
+      const gtsam::Vector2 boundary_clock =
+        use_clock_boundary_prior ? marginal_prior_.clock : active_clock_states.front().value;
+      graph.emplace_shared<gtsam::PriorFactor<gtsam::Vector2>>(
+        active_clock_states.front().key,
+        boundary_clock,
+        clock_prior_noise);
+    }
     for (std::size_t i = 1; i < active_clock_states.size(); ++i) {
       const double dt = std::max(1e-3, active_clock_states[i].stamp - active_clock_states[i - 1].stamp);
       graph.emplace_shared<iap::ClockBetweenFactor>(
@@ -824,6 +1003,7 @@ EstimationFrame::ConstPtr OdometryEstimationBSpline::insert_frame_ct_lidar(
     gnss_anchor_initialized_ = true;
   }
   update_marginal_prior_from_active_window();
+  update_marginal_prior_information(graph, values, !active_clock_states.empty());
 
   const gtsam::Pose3 start_pose = control_window_->evaluate(0.0);
   const gtsam::Pose3 end_pose = control_window_->evaluate(1.0);

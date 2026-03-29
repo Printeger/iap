@@ -3,6 +3,11 @@
 > 规则：任何代码改动必须在这里记录，并包含 IAP-RQ-XXX。
 
 ## Unreleased
+- feat(dev-ct-mainline-boundary): IAP-RQ-020 / IAP-RQ-300 / IAP-RQ-410 — start `SLAM_FINISH_PLAN` WP1 by turning fixed-lag boundary priors into a reusable boundary information prior.
+  - `OdometryEstimationBSpline::ActiveSplineMarginalPrior` now snapshots not only the lag-window boundary poses but also the boundary auxiliary state index plus optional velocity / clock values.
+  - After each solve, `OdometryEstimationBSpline` now attempts to extract a joint marginal information matrix over the boundary pose/velocity/clock subset and stores it together with the matching linearization point.
+  - The next fixed-lag solve now prefers replaying that boundary information through a `LinearContainerFactor(HessianFactor, linearization_point)` and falls back to the earlier handcrafted pose/velocity/clock priors if marginal extraction fails.
+  - `docs/dev_ct/dev_status.md` now points to `docs/dev_ct/SLAM_FINISH_PLAN.md` as the sole execution entry for finishing the continuous-time SLAM stack.
 - feat(dev-ct-gnss-preproc): IAP-RQ-020 / IAP-RQ-300 / IAP-RQ-410 — move GNSS epoch assembly, ephemeris lookup, and raw preprocessing closer to `OdometryEstimationBSpline`.
   - Added `GnssEpochBuilder`, a reusable GNSS front-end that converts raw observation batches plus ephemeris/iono/anchor state into processed ECEF `GnssEpoch` packets.
   - `gnss_extension` now acts primarily as ROS ingress plus legacy bridge: it publishes raw GNSS batches, ephemeris updates, and ionosphere parameters to `IapSharedState`, while using the shared builder locally for legacy diagnostics/injection.
