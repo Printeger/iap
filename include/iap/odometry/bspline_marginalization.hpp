@@ -8,6 +8,7 @@
 #include <array>
 #include <cstddef>
 #include <gtsam/inference/Key.h>
+#include <gtsam/linear/GaussianFactorGraph.h>
 #include <gtsam/nonlinear/NonlinearFactorGraph.h>
 #include <gtsam/nonlinear/Values.h>
 #include <vector>
@@ -29,9 +30,36 @@ struct BSplineMarginalizationPartition {
   std::vector<gtsam::Key> survivor_keys;
   std::vector<gtsam::Key> removable_keys;
 
+  enum class FactorOwnership {
+    SurvivorOnly,
+    Removable,
+    Foreign,
+  };
+
+  struct FactorOwnershipInfo {
+    FactorOwnership ownership = FactorOwnership::Foreign;
+    std::vector<gtsam::Key> survivor_factor_keys;
+    std::vector<gtsam::Key> removable_factor_keys;
+    std::vector<gtsam::Key> foreign_keys;
+
+    bool is_survivor_only() const;
+    bool should_marginalize() const;
+  };
+
   bool contains_survivor(gtsam::Key key) const;
   bool contains_removed(gtsam::Key key) const;
+  FactorOwnershipInfo classify_factor(const gtsam::KeyVector& factor_keys) const;
   bool should_marginalize_factor(const gtsam::KeyVector& factor_keys) const;
+  bool can_replay_keys(const std::vector<gtsam::Key>& keys, const gtsam::Values& values) const;
+};
+
+struct BSplineCarriedPrior {
+  std::vector<gtsam::Key> retained_keys;
+  gtsam::Values linearization_point;
+  gtsam::GaussianFactorGraph linear_graph;
+
+  bool empty() const;
+  gtsam::NonlinearFactorGraph replay() const;
 };
 
 BSplineMarginalizationPartition build_bspline_marginalization_partition(
@@ -41,10 +69,10 @@ BSplineMarginalizationPartition build_bspline_marginalization_partition(
   double min_active_stamp,
   bool include_clock);
 
-gtsam::NonlinearFactorGraph build_bspline_carried_prior(
+BSplineCarriedPrior build_bspline_carried_prior(
   const gtsam::NonlinearFactorGraph& removable_graph,
   const gtsam::Values& values,
   const std::vector<gtsam::Key>& survivor_keys,
-  std::vector<gtsam::Key>* retained_keys = nullptr);
+  const BSplineCarriedPrior* previous_prior = nullptr);
 
 }  // namespace iap

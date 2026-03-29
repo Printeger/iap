@@ -429,17 +429,13 @@ void OdometryEstimationBSpline::update_marginal_prior_from_active_window() {
 void OdometryEstimationBSpline::update_marginal_prior_information(
   const gtsam::NonlinearFactorGraph& graph,
   const gtsam::Values& values,
-  const std::vector<gtsam::Key>& survivor_keys) {
+  const std::vector<gtsam::Key>& survivor_keys,
+  const iap::BSplineCarriedPrior* previous_prior) {
   try {
-    std::vector<gtsam::Key> retained_keys;
-    marginal_prior_.information_factors =
-      iap::build_bspline_carried_prior(graph, values, survivor_keys, &retained_keys);
-    marginal_prior_.information_keys = retained_keys;
-    marginal_prior_.has_information = marginal_prior_.information_factors.size() != 0;
+    marginal_prior_.carried_prior =
+      iap::build_bspline_carried_prior(graph, values, survivor_keys, previous_prior);
   } catch (const std::exception& e) {
-    marginal_prior_.has_information = false;
-    marginal_prior_.information_keys.clear();
-    marginal_prior_.information_factors = gtsam::NonlinearFactorGraph();
+    marginal_prior_.carried_prior = iap::BSplineCarriedPrior();
     logger->warn("failed to build bspline marginal survivor prior: {}", e.what());
   }
 }
@@ -592,6 +588,7 @@ EstimationFrame::ConstPtr OdometryEstimationBSpline::insert_frame_ct_lidar(
 
   gtsam::Values values = control_buffer_->values();
   const auto& active_states = control_buffer_->states();
+  const iap::BSplineCarriedPrior previous_carried_prior = marginal_prior_.carried_prior;
   const gtsam::Key gyro_bias_key = bspline_gyro_bias_key();
   const gtsam::Key accel_bias_key = bspline_accel_bias_key();
   const gtsam::Key gravity_key = bspline_gravity_key();
@@ -823,30 +820,23 @@ EstimationFrame::ConstPtr OdometryEstimationBSpline::insert_frame_ct_lidar(
     active_states[0].index == marginal_prior_.control_indices[0] &&
     active_states[1].index == marginal_prior_.control_indices[1];
   const bool use_information_marginal_prior =
-    marginal_prior_.has_information &&
-    marginal_prior_.information_factors.size() != 0 &&
-    std::all_of(
-      marginal_prior_.information_keys.begin(),
-      marginal_prior_.information_keys.end(),
-      [&](gtsam::Key key) { return values.exists(key) && marginalization_partition.contains_survivor(key); });
+    !marginal_prior_.carried_prior.empty() &&
+    marginalization_partition.can_replay_keys(marginal_prior_.carried_prior.retained_keys, values);
 
   bool information_prior_attached = false;
   if (use_information_marginal_prior) {
     try {
-      for (const auto& factor : marginal_prior_.information_factors) {
+      const auto replayed_prior = marginal_prior_.carried_prior.replay();
+      for (const auto& factor : replayed_prior) {
         if (!factor) {
           continue;
         }
-        const auto clone = factor->clone();
-        graph.add(clone);
-        marginalization_graph.add(clone->clone());
+        graph.add(factor->clone());
       }
       information_prior_attached = true;
     } catch (const std::exception& e) {
       logger->warn("failed to attach bspline marginal information prior, fallback to handcrafted prior: {}", e.what());
-      marginal_prior_.has_information = false;
-      marginal_prior_.information_keys.clear();
-      marginal_prior_.information_factors = gtsam::NonlinearFactorGraph();
+      marginal_prior_.carried_prior = iap::BSplineCarriedPrior();
     }
   }
 
@@ -921,9 +911,9 @@ EstimationFrame::ConstPtr OdometryEstimationBSpline::insert_frame_ct_lidar(
     const bool clock_constrained_by_information_prior =
       information_prior_attached &&
       std::find(
-        marginal_prior_.information_keys.begin(),
-        marginal_prior_.information_keys.end(),
-        active_clock_states.front().key) != marginal_prior_.information_keys.end();
+        marginal_prior_.carried_prior.retained_keys.begin(),
+        marginal_prior_.carried_prior.retained_keys.end(),
+        active_clock_states.front().key) != marginal_prior_.carried_prior.retained_keys.end();
     if (!clock_constrained_by_information_prior) {
       const bool use_clock_boundary_prior =
         use_marginal_prior &&
@@ -1005,7 +995,11 @@ EstimationFrame::ConstPtr OdometryEstimationBSpline::insert_frame_ct_lidar(
   }
   prune_active_ct_state(min_active_stamp);
   update_marginal_prior_from_active_window();
-  update_marginal_prior_information(marginalization_graph, values, marginalization_partition.survivor_keys);
+  update_marginal_prior_information(
+    marginalization_graph,
+    values,
+    marginalization_partition.survivor_keys,
+    previous_carried_prior.empty() ? nullptr : &previous_carried_prior);
 
   const gtsam::Pose3 start_pose = control_window_->evaluate(0.0);
   const gtsam::Pose3 end_pose = control_window_->evaluate(1.0);

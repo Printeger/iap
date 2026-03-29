@@ -76,6 +76,9 @@
   - 新增 `BSplineMarginalizationPartition`，统一 control points、auxiliary states 和 shared IMU/GNSS alignment states 的 survivor/removable 归属判定，减少 `OdometryEstimationBSpline` 内部零散的分区逻辑。
   - 新增 `build_bspline_carried_prior(...)`，把 removable nonlinear graph 线性化后边缘化到 survivor key 集合，并重新封装为下一轮可重放的 carried prior。
   - 新增 `test_bspline_marginalization.cpp`，专门校验 partition 归属以及 replayed carried prior 与参考 marginal graph 在 survivor perturbation 下的误差一致性。
+  - `BSplineMarginalizationPartition` 现已进一步提供 factor ownership 分类与 carried-prior replay 安全检查，显式区分 `survivor-only / removable / foreign`。
+  - carried prior 现已改为以 `GaussianFactorGraph + linearization_point + retained_keys` 的线性形式缓存；进入当前优化图时再转成 `LinearContainerFactor`，而不是继续把旧 prior 混进 removable nonlinear graph 再统一线性化。
+  - `test_bspline_marginalization.cpp` 现已补充 foreign-key ownership 检测，以及“上一轮线性 carried prior + 本轮 removable nonlinear factors”组合的一致性校验。
 - 2026-03-28: IAP-RQ-020 / IAP-RQ-300 / IAP-RQ-410
   - 已开始按 `docs/dev_ct/SLAM_FINISH_PLAN.md` 执行 `M1 / WP1`，先收口 fixed-lag 主状态边界。
   - `OdometryEstimationBSpline::ActiveSplineMarginalPrior` 现在会结构化快照 boundary pose、boundary auxiliary index，以及对应的 velocity / clock state。

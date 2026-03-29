@@ -90,9 +90,7 @@ class OdometryEstimationBSpline : public OdometryEstimationCPU {
     gtsam::Vector3 velocity = gtsam::Vector3::Zero();
     bool has_clock = false;
     gtsam::Vector2 clock = gtsam::Vector2::Zero();
-    bool has_information = false;
-    std::vector<gtsam::Key> information_keys;
-    gtsam::NonlinearFactorGraph information_factors;
+    iap::BSplineCarriedPrior carried_prior;
   };
 
   EstimationFrame::ConstPtr insert_frame_reconstruct(
@@ -113,7 +111,8 @@ class OdometryEstimationBSpline : public OdometryEstimationCPU {
   void update_marginal_prior_information(
     const gtsam::NonlinearFactorGraph& graph,
     const gtsam::Values& values,
-    const std::vector<gtsam::Key>& survivor_keys);
+    const std::vector<gtsam::Key>& survivor_keys,
+    const iap::BSplineCarriedPrior* previous_prior);
   void append_active_segment_constraint(
     const PreprocessedFrame::Ptr& raw_frame,
     const gtsam_points::PointCloud::ConstPtr& source);

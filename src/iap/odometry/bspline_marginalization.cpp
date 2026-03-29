@@ -77,6 +77,31 @@ void insert_bspline_value(gtsam::Values& dst, const gtsam::Values& src, gtsam::K
   }
 }
 
+void append_cloned_gaussian_factors(
+  gtsam::GaussianFactorGraph& dst,
+  const gtsam::GaussianFactorGraph& src) {
+  for (const auto& factor : src) {
+    if (!factor) {
+      continue;
+    }
+    dst.add(factor->clone());
+  }
+}
+
+gtsam::GaussianFactorGraph relinearize_carried_prior(
+  const BSplineCarriedPrior& prior,
+  const gtsam::Values& values) {
+  gtsam::GaussianFactorGraph linearized;
+  if (prior.empty()) {
+    return linearized;
+  }
+
+  const auto nonlinear_prior = prior.replay();
+  const auto relinearized = nonlinear_prior.linearize(values);
+  append_cloned_gaussian_factors(linearized, *relinearized);
+  return linearized;
+}
+
 gtsam::Key bspline_gyro_bias_key() {
   return gtsam::symbol('j', 0);
 }
@@ -91,6 +116,14 @@ gtsam::Key bspline_gravity_key() {
 
 }  // namespace
 
+bool BSplineMarginalizationPartition::FactorOwnershipInfo::is_survivor_only() const {
+  return ownership == FactorOwnership::SurvivorOnly;
+}
+
+bool BSplineMarginalizationPartition::FactorOwnershipInfo::should_marginalize() const {
+  return ownership == FactorOwnership::Removable;
+}
+
 bool BSplineMarginalizationPartition::contains_survivor(gtsam::Key key) const {
   return std::find(survivor_keys.begin(), survivor_keys.end(), key) != survivor_keys.end();
 }
@@ -99,10 +132,61 @@ bool BSplineMarginalizationPartition::contains_removed(gtsam::Key key) const {
   return std::find(removable_keys.begin(), removable_keys.end(), key) != removable_keys.end();
 }
 
+BSplineMarginalizationPartition::FactorOwnershipInfo
+BSplineMarginalizationPartition::classify_factor(const gtsam::KeyVector& factor_keys) const {
+  FactorOwnershipInfo info;
+
+  for (const auto key : factor_keys) {
+    if (contains_removed(key)) {
+      append_unique_key(info.removable_factor_keys, key);
+      continue;
+    }
+    if (contains_survivor(key)) {
+      append_unique_key(info.survivor_factor_keys, key);
+      continue;
+    }
+    append_unique_key(info.foreign_keys, key);
+  }
+
+  if (!info.foreign_keys.empty()) {
+    info.ownership = FactorOwnership::Foreign;
+  } else if (!info.removable_factor_keys.empty()) {
+    info.ownership = FactorOwnership::Removable;
+  } else {
+    info.ownership = FactorOwnership::SurvivorOnly;
+  }
+
+  return info;
+}
+
 bool BSplineMarginalizationPartition::should_marginalize_factor(const gtsam::KeyVector& factor_keys) const {
-  return std::any_of(factor_keys.begin(), factor_keys.end(), [&](gtsam::Key key) {
-    return contains_removed(key);
-  });
+  return classify_factor(factor_keys).should_marginalize();
+}
+
+bool BSplineMarginalizationPartition::can_replay_keys(
+  const std::vector<gtsam::Key>& keys,
+  const gtsam::Values& values) const {
+  if (keys.empty()) {
+    return false;
+  }
+
+  const auto ownership = classify_factor(gtsam::KeyVector(keys.begin(), keys.end()));
+  if (!ownership.is_survivor_only()) {
+    return false;
+  }
+
+  return std::all_of(keys.begin(), keys.end(), [&](gtsam::Key key) { return values.exists(key); });
+}
+
+bool BSplineCarriedPrior::empty() const {
+  return linear_graph.size() == 0 || retained_keys.empty();
+}
+
+gtsam::NonlinearFactorGraph BSplineCarriedPrior::replay() const {
+  if (empty()) {
+    return gtsam::NonlinearFactorGraph();
+  }
+  return gtsam::LinearContainerFactor::ConvertLinearGraph(linear_graph, linearization_point);
 }
 
 BSplineMarginalizationPartition build_bspline_marginalization_partition(
@@ -191,21 +275,29 @@ BSplineMarginalizationPartition build_bspline_marginalization_partition(
   return partition;
 }
 
-gtsam::NonlinearFactorGraph build_bspline_carried_prior(
+BSplineCarriedPrior build_bspline_carried_prior(
   const gtsam::NonlinearFactorGraph& removable_graph,
   const gtsam::Values& values,
   const std::vector<gtsam::Key>& survivor_keys,
-  std::vector<gtsam::Key>* retained_keys) {
-  gtsam::NonlinearFactorGraph carried_prior;
-  if (removable_graph.size() == 0 || survivor_keys.empty()) {
-    if (retained_keys) {
-      retained_keys->clear();
-    }
+  const BSplineCarriedPrior* previous_prior) {
+  BSplineCarriedPrior carried_prior;
+  if (survivor_keys.empty()) {
     return carried_prior;
   }
 
-  const auto linear_graph = removable_graph.linearize(values);
-  const auto linear_keys = linear_graph->keys();
+  gtsam::GaussianFactorGraph combined_linear_graph;
+  if (previous_prior && !previous_prior->empty()) {
+    append_cloned_gaussian_factors(combined_linear_graph, relinearize_carried_prior(*previous_prior, values));
+  }
+  if (removable_graph.size() != 0) {
+    const auto linear_graph = removable_graph.linearize(values);
+    append_cloned_gaussian_factors(combined_linear_graph, *linear_graph);
+  }
+  if (combined_linear_graph.size() == 0) {
+    return carried_prior;
+  }
+
+  const auto linear_keys = combined_linear_graph.keys();
 
   std::vector<gtsam::Key> retained;
   retained.reserve(survivor_keys.size());
@@ -215,9 +307,6 @@ gtsam::NonlinearFactorGraph build_bspline_carried_prior(
     }
   }
 
-  if (retained_keys) {
-    *retained_keys = retained;
-  }
   if (retained.empty()) {
     return carried_prior;
   }
@@ -227,8 +316,11 @@ gtsam::NonlinearFactorGraph build_bspline_carried_prior(
     insert_bspline_value(linearization_point, values, key);
   }
 
-  const auto marginal_graph = linear_graph->marginal(retained);
-  return gtsam::LinearContainerFactor::ConvertLinearGraph(*marginal_graph, linearization_point);
+  const auto marginal_graph = combined_linear_graph.marginal(retained);
+  carried_prior.retained_keys = retained;
+  carried_prior.linearization_point = linearization_point;
+  carried_prior.linear_graph = *marginal_graph;
+  return carried_prior;
 }
 
 }  // namespace iap
