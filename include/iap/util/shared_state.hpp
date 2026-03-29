@@ -31,6 +31,7 @@
 
 #include <iap/gnss/gnss_types.hpp>
 #include <iap/gnss/gnss_epoch_builder.hpp>
+#include <iap/odometry/bspline_fixed_lag_registry.hpp>
 #include <iap/planner/continuous_trajectory_view.hpp>
 #include <iap/trunk/trunk_types.hpp>
 
@@ -216,6 +217,21 @@ class IapSharedState {
     return latest_control_access_;
   }
 
+  void set_bspline_fixed_lag_telemetry(const BSplineFixedLagTelemetry& telemetry) {
+    std::lock_guard<std::mutex> lk(trajectory_mutex_);
+    latest_bspline_fixed_lag_telemetry_ = telemetry;
+  }
+
+  std::optional<BSplineFixedLagTelemetry> get_bspline_fixed_lag_telemetry() const {
+    std::lock_guard<std::mutex> lk(trajectory_mutex_);
+    return latest_bspline_fixed_lag_telemetry_;
+  }
+
+  void clear_bspline_fixed_lag_telemetry() {
+    std::lock_guard<std::mutex> lk(trajectory_mutex_);
+    latest_bspline_fixed_lag_telemetry_.reset();
+  }
+
  private:
   IapSharedState() = default;
 
@@ -241,6 +257,7 @@ class IapSharedState {
   mutable std::mutex trajectory_mutex_;
   std::shared_ptr<const ContinuousTrajectoryView> latest_trajectory_view_;
   std::shared_ptr<const SplineControlAccess> latest_control_access_;
+  std::optional<BSplineFixedLagTelemetry> latest_bspline_fixed_lag_telemetry_;
 };
 
 }  // namespace iap

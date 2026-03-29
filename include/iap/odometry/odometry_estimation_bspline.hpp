@@ -118,6 +118,7 @@ class OdometryEstimationBSpline : public OdometryEstimationCPU {
     const EstimationFrame::Ptr& frame,
     std::vector<EstimationFrame::ConstPtr>& marginalized_frames);
   void publish_continuous_trajectory(int current);
+  void publish_fixed_lag_telemetry(int current) const;
   void update_frame_attachment(const std::shared_ptr<iap::BSplineTrajectory>& trajectory) const;
   void update_compatibility_trajectory(const std::shared_ptr<iap::BSplineTrajectory>& trajectory) const;
 

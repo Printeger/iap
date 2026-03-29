@@ -3,6 +3,10 @@
 > 规则：任何代码改动必须在这里记录，并包含 IAP-RQ-XXX。
 
 ## Unreleased
+- feat(dev-ct-mainline-telemetry): IAP-RQ-020 / IAP-RQ-300 / IAP-RQ-410 — add explicit fixed-lag diagnostics, lifecycle telemetry, and state-machine output to the unified registry.
+  - `BSplineFixedLagStateRegistry` now publishes `BSplineFixedLagTelemetry`, which reports lag-window bounds, active segment range, auxiliary/shared-state counts, GNSS-anchor readiness, and lifecycle stages (`Empty / WindowSeeded / TrackingLidar / TrackingLidarGnss`).
+  - `OdometryEstimationBSpline` now publishes that telemetry through `IapSharedState` alongside the continuous trajectory view and also emits the lifecycle state in trace logs during each continuous-time update.
+  - `test_bspline_fixed_lag_registry.cpp` now covers telemetry/state-machine transitions and validates the corresponding count semantics across empty, seeded, LiDAR-tracking, and LiDAR+GNSS-tracking states.
 - feat(dev-ct-mainline-shared-registry): IAP-RQ-020 / IAP-RQ-300 / IAP-RQ-410 — extend the unified fixed-lag registry to own shared IMU/GNSS state snapshots.
   - `BSplineFixedLagStateRegistry` now owns persistent shared state snapshots for gyro bias, accel bias, gravity, ECEF origin, and ECEF rotation, and exposes seed/update helpers for graph construction and post-solve writeback.
   - `OdometryEstimationBSpline` no longer maintains separate private snapshots for those shared states; the active fixed-lag registry now provides shared-state ownership to graph seeding, GNSS-anchor activation, optimization priors, and continuous-time publication.

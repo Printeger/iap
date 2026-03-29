@@ -34,6 +34,44 @@ struct BSplineFixedLagSharedState {
   gtsam::Rot3 ecef_rot = gtsam::Rot3::Identity();
 };
 
+enum class BSplineFixedLagLifecycleState {
+  Empty,
+  WindowSeeded,
+  TrackingLidar,
+  TrackingLidarGnss,
+};
+
+inline const char* to_string(BSplineFixedLagLifecycleState state) {
+  switch (state) {
+    case BSplineFixedLagLifecycleState::Empty:
+      return "empty";
+    case BSplineFixedLagLifecycleState::WindowSeeded:
+      return "window_seeded";
+    case BSplineFixedLagLifecycleState::TrackingLidar:
+      return "tracking_lidar";
+    case BSplineFixedLagLifecycleState::TrackingLidarGnss:
+      return "tracking_lidar_gnss";
+  }
+  return "unknown";
+}
+
+struct BSplineFixedLagTelemetry {
+  double lag_start_stamp = 0.0;
+  double lag_end_stamp = 0.0;
+  double latest_segment_stamp = 0.0;
+  double latest_segment_end = 0.0;
+  std::size_t control_point_count = 0;
+  std::size_t segment_count = 0;
+  std::size_t active_auxiliary_count = 0;
+  std::size_t auxiliary_value_count = 0;
+  std::size_t active_shared_state_count = 0;
+  std::size_t newest_control_index = 0;
+  std::size_t newest_auxiliary_index = 0;
+  bool has_active_segment = false;
+  bool gnss_anchor_initialized = false;
+  BSplineFixedLagLifecycleState lifecycle_state = BSplineFixedLagLifecycleState::Empty;
+};
+
 template <typename SegmentT = BSplineFixedLagSegmentState>
 class BSplineFixedLagStateRegistryT {
  public:
@@ -219,6 +257,41 @@ class BSplineFixedLagStateRegistryT {
       keys.push_back(bspline_ecef_rot_key());
     }
     return keys;
+  }
+
+  BSplineFixedLagTelemetry telemetry() const {
+    BSplineFixedLagTelemetry telemetry;
+    telemetry.control_point_count = control_buffer_.size();
+    telemetry.segment_count = segments_.size();
+    telemetry.active_auxiliary_count = active_auxiliary_indices().size();
+    telemetry.auxiliary_value_count = auxiliary_values_.size();
+    telemetry.gnss_anchor_initialized = shared_state_.gnss_anchor_initialized;
+    telemetry.active_shared_state_count =
+      active_shared_keys(shared_state_.gnss_anchor_initialized).size();
+
+    if (control_buffer_.empty()) {
+      telemetry.lifecycle_state = BSplineFixedLagLifecycleState::Empty;
+      return telemetry;
+    }
+
+    telemetry.lag_start_stamp = control_buffer_.states().front().stamp;
+    telemetry.lag_end_stamp = control_buffer_.states().back().stamp;
+    telemetry.newest_control_index = control_buffer_.states().back().index;
+
+    if (segments_.empty()) {
+      telemetry.lifecycle_state = BSplineFixedLagLifecycleState::WindowSeeded;
+      return telemetry;
+    }
+
+    const auto& latest_segment = segments_.back();
+    telemetry.has_active_segment = true;
+    telemetry.latest_segment_stamp = latest_segment.stamp;
+    telemetry.latest_segment_end = latest_segment.scan_end;
+    telemetry.newest_auxiliary_index = latest_segment.auxiliary_index;
+    telemetry.lifecycle_state = shared_state_.gnss_anchor_initialized
+      ? BSplineFixedLagLifecycleState::TrackingLidarGnss
+      : BSplineFixedLagLifecycleState::TrackingLidar;
+    return telemetry;
   }
 
   BSplineControlWindowBuffer& control_buffer() { return control_buffer_; }

@@ -186,6 +186,7 @@ OdometryEstimationBSpline::~OdometryEstimationBSpline() {
   if (publish_shared_trajectory_) {
     iap::IapSharedState::instance().set_continuous_trajectory_view(nullptr);
     iap::IapSharedState::instance().set_spline_control_access(nullptr);
+    iap::IapSharedState::instance().clear_bspline_fixed_lag_telemetry();
   }
 }
 
@@ -512,6 +513,7 @@ EstimationFrame::ConstPtr OdometryEstimationBSpline::insert_frame_ct_lidar(
     update_frame_history(new_frame, marginalized_frames);
     update_marginal_prior_from_active_window();
     publish_continuous_trajectory(current);
+    publish_fixed_lag_telemetry(current);
 
     std::vector<EstimationFrame::ConstPtr> active_frames(frames.inner_begin(), frames.inner_end());
     if (!active_frames.empty()) {
@@ -971,6 +973,7 @@ EstimationFrame::ConstPtr OdometryEstimationBSpline::insert_frame_ct_lidar(
   insert_target_cloud(new_frame);
   update_frame_history(new_frame, marginalized_frames);
   publish_continuous_trajectory(current);
+  publish_fixed_lag_telemetry(current);
 
   std::vector<EstimationFrame::ConstPtr> active_frames(frames.inner_begin(), frames.inner_end());
   if (!active_frames.empty()) {
@@ -1019,6 +1022,30 @@ void OdometryEstimationBSpline::publish_continuous_trajectory(int current) {
     iap::IapSharedState::instance().set_continuous_trajectory_view(trajectory);
     iap::IapSharedState::instance().set_spline_control_access(trajectory);
   }
+}
+
+void OdometryEstimationBSpline::publish_fixed_lag_telemetry(int current) const {
+  (void)current;
+
+  auto telemetry = fixed_lag_registry_.telemetry();
+
+  if (publish_shared_trajectory_) {
+    iap::IapSharedState::instance().set_bspline_fixed_lag_telemetry(telemetry);
+  }
+
+  logger->trace(
+    "bspline fixed-lag telemetry state={} cps={} segs={} aux={} aux_values={} shared={} lag=[{:.3f}, {:.3f}] latest_segment=[{:.3f}, {:.3f}] anchor={}",
+    iap::to_string(telemetry.lifecycle_state),
+    telemetry.control_point_count,
+    telemetry.segment_count,
+    telemetry.active_auxiliary_count,
+    telemetry.auxiliary_value_count,
+    telemetry.active_shared_state_count,
+    telemetry.lag_start_stamp,
+    telemetry.lag_end_stamp,
+    telemetry.latest_segment_stamp,
+    telemetry.latest_segment_end,
+    telemetry.gnss_anchor_initialized);
 }
 
 void OdometryEstimationBSpline::update_frame_attachment(const std::shared_ptr<iap::BSplineTrajectory>& trajectory) const {

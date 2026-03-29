@@ -143,3 +143,56 @@ TEST(BSplineFixedLagRegistryTest, SharedStateSeedsAndUpdatesPersistentValues) {
   EXPECT_NEAR(registry.shared_state().gravity.z(), 9.81, 1e-9);
   EXPECT_NEAR(registry.shared_state().ecef_origin.x(), 11.0, 1e-9);
 }
+
+TEST(BSplineFixedLagRegistryTest, TelemetryTracksLifecycleTransitions) {
+  iap::BSplineFixedLagStateRegistry registry;
+
+  {
+    const auto telemetry = registry.telemetry();
+    EXPECT_EQ(telemetry.lifecycle_state, iap::BSplineFixedLagLifecycleState::Empty);
+    EXPECT_EQ(telemetry.control_point_count, 0U);
+    EXPECT_EQ(telemetry.segment_count, 0U);
+    EXPECT_FALSE(telemetry.has_active_segment);
+    EXPECT_EQ(telemetry.active_shared_state_count, 3U);
+  }
+
+  iap::BSplineControlWindow window;
+  window.initialize(2.0, 2.1, gtsam::Pose3());
+  registry.reset_from_window(window);
+
+  {
+    const auto telemetry = registry.telemetry();
+    EXPECT_EQ(telemetry.lifecycle_state, iap::BSplineFixedLagLifecycleState::WindowSeeded);
+    EXPECT_EQ(telemetry.control_point_count, 4U);
+    EXPECT_EQ(telemetry.segment_count, 0U);
+    EXPECT_FALSE(telemetry.has_active_segment);
+    EXPECT_DOUBLE_EQ(telemetry.lag_start_stamp, window.states().front().stamp);
+    EXPECT_DOUBLE_EQ(telemetry.lag_end_stamp, window.states().back().stamp);
+    EXPECT_EQ(telemetry.newest_control_index, window.states().back().index);
+  }
+
+  registry.append_segment(make_segment_state(window));
+
+  {
+    const auto telemetry = registry.telemetry();
+    EXPECT_EQ(telemetry.lifecycle_state, iap::BSplineFixedLagLifecycleState::TrackingLidar);
+    EXPECT_TRUE(telemetry.has_active_segment);
+    EXPECT_EQ(telemetry.segment_count, 1U);
+    EXPECT_EQ(telemetry.active_auxiliary_count, 1U);
+    EXPECT_EQ(telemetry.active_shared_state_count, 3U);
+    EXPECT_EQ(telemetry.newest_auxiliary_index, window.states()[1].index);
+    EXPECT_DOUBLE_EQ(telemetry.latest_segment_stamp, window.segment_start());
+    EXPECT_DOUBLE_EQ(telemetry.latest_segment_end, window.segment_end());
+  }
+
+  registry.set_shared_gnss_anchor(
+    gtsam::Vector3(100.0, 200.0, 300.0),
+    gtsam::Rot3::RzRyRx(0.01, 0.02, 0.03));
+
+  {
+    const auto telemetry = registry.telemetry();
+    EXPECT_EQ(telemetry.lifecycle_state, iap::BSplineFixedLagLifecycleState::TrackingLidarGnss);
+    EXPECT_TRUE(telemetry.gnss_anchor_initialized);
+    EXPECT_EQ(telemetry.active_shared_state_count, 5U);
+  }
+}

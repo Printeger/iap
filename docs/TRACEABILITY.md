@@ -85,6 +85,9 @@
   - `BSplineFixedLagStateRegistry` 现已进一步纳入 shared IMU/GNSS states：gyro bias、accel bias、gravity、ECEF origin、ECEF rotation 的 seed/update 和 graph ownership 也由该 registry 统一管理。
   - `OdometryEstimationBSpline` 不再单独维护这些 shared-state snapshot，而是通过 registry 统一完成 graph seeding、GNSS anchor 激活、求解后回写和持续发布。
   - `test_bspline_fixed_lag_registry.cpp` 现已补充 shared-state seed/update round-trip 校验。
+  - `BSplineFixedLagStateRegistry` 现已进一步提供 `BSplineFixedLagTelemetry`，显式输出 lag 区间、active segment、aux/shared-state 数量、GNSS anchor readiness 和 `Empty / WindowSeeded / TrackingLidar / TrackingLidarGnss` 生命周期阶段。
+  - `OdometryEstimationBSpline` 现已在 continuous-time 轨迹发布链路上同步向 `IapSharedState` 发布 fixed-lag telemetry，并以 trace 日志暴露生命周期状态机。
+  - `test_bspline_fixed_lag_registry.cpp` 现已补充 lifecycle telemetry/state-machine 单测，覆盖 empty、window-seeded、LiDAR-tracking 和 LiDAR+GNSS-tracking 的状态迁移与计数语义。
 - 2026-03-28: IAP-RQ-020 / IAP-RQ-300 / IAP-RQ-410
   - 已开始按 `docs/dev_ct/SLAM_FINISH_PLAN.md` 执行 `M1 / WP1`，先收口 fixed-lag 主状态边界。
   - `OdometryEstimationBSpline::ActiveSplineMarginalPrior` 现在会结构化快照 boundary pose、boundary auxiliary index，以及对应的 velocity / clock state。
