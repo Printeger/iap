@@ -6,12 +6,21 @@
 #include <gtsam_points/ann/ivox.hpp>
 #include <gtsam_points/types/point_cloud_cpu.hpp>
 
+#include <algorithm>
 #include <chrono>
 #include <limits>
 
 namespace iap {
 
 namespace frame = gtsam_points::frame;
+
+namespace {
+
+double residual_norm_from_mahalanobis(const double mahalanobis_error) {
+  return std::sqrt(std::max(0.0, mahalanobis_error));
+}
+
+}  // namespace
 
 IntegratedBSplineGICPFactor::IntegratedBSplineGICPFactor(
   const std::array<gtsam::Key, kBSplineControlPointCount>& keys,
@@ -46,6 +55,10 @@ IntegratedBSplineGICPFactor::IntegratedBSplineGICPFactor(
   for (auto& t : time_table_) {
     t = (t - time_min) / denom;
   }
+  basis_table_.reserve(time_table_.size());
+  for (const double t : time_table_) {
+    basis_table_.push_back(BSplineControlWindow::basis(t));
+  }
 
   if (target_tree) {
     target_tree_ = target_tree;
@@ -64,16 +77,28 @@ std::array<gtsam::Pose3, kBSplineControlPointCount> IntegratedBSplineGICPFactor:
   return poses;
 }
 
+double IntegratedBSplineGICPFactor::inlier_fraction() const {
+  return frame::size(*source_) == 0 ? 0.0 : static_cast<double>(accepted_inlier_count_) / frame::size(*source_);
+}
+
 void IntegratedBSplineGICPFactor::update_poses(const gtsam::Values& values) const {
   const auto poses = control_poses(values);
 
   source_poses_.resize(time_table_.size());
-  pose_jacobians_.resize(time_table_.size());
+  if (jacobian_mode_ == JacobianMode::NUMERIC_FULL) {
+    pose_jacobians_.resize(time_table_.size());
+  } else {
+    pose_jacobians_.clear();
+  }
 
   for (std::size_t i = 0; i < time_table_.size(); ++i) {
     const double u = time_table_[i];
     const gtsam::Pose3 base_pose = BSplineControlWindow::interpolate(poses, u);
     source_poses_[i] = base_pose;
+
+    if (jacobian_mode_ != JacobianMode::NUMERIC_FULL) {
+      continue;
+    }
 
     for (std::size_t k = 0; k < kBSplineControlPointCount; ++k) {
       gtsam::Matrix6 J = gtsam::Matrix6::Zero();
@@ -97,6 +122,7 @@ void IntegratedBSplineGICPFactor::update_correspondences() const {
   correspondences_.resize(frame::size(*source_));
   mahalanobis_.resize(frame::size(*source_));
   matched_correspondence_count_ = 0;
+  rejected_distance_count_ = 0;
 
   for (int i = 0; i < frame::size(*source_); ++i) {
     const int time_index = time_indices_[static_cast<std::size_t>(i)];
@@ -113,6 +139,7 @@ void IntegratedBSplineGICPFactor::update_correspondences() const {
     if (num_found == 0 || k_sq_dist > max_correspondence_distance_sq_) {
       correspondences_[static_cast<std::size_t>(i)] = -1;
       mahalanobis_[static_cast<std::size_t>(i)].setZero();
+      rejected_distance_count_++;
       continue;
     }
 
@@ -128,6 +155,85 @@ void IntegratedBSplineGICPFactor::update_correspondences() const {
   }
 }
 
+IntegratedBSplineGICPFactor::PointJacobianArray IntegratedBSplineGICPFactor::point_jacobians(
+  const std::array<gtsam::Pose3, kBSplineControlPointCount>& control_poses,
+  std::size_t time_index,
+  const Eigen::Vector3d& source_point) const {
+  PointJacobianArray jacobians;
+
+  if (jacobian_mode_ == JacobianMode::NUMERIC_FULL) {
+    gtsam::Matrix36 H_transed_pose;
+    source_poses_[time_index].transformFrom(source_point, H_transed_pose);
+
+    for (std::size_t k = 0; k < kBSplineControlPointCount; ++k) {
+      jacobians[k] = H_transed_pose * pose_jacobians_[time_index][k];
+    }
+    return jacobians;
+  }
+
+  const auto& weights = basis_table_[time_index];
+  const gtsam::Point3 base_world_point = source_poses_[time_index].transformFrom(source_point);
+
+  for (std::size_t k = 0; k < kBSplineControlPointCount; ++k) {
+    jacobians[k].setZero();
+    jacobians[k].block<3, 3>(0, 3) = weights[k] * control_poses[k].rotation().matrix();
+
+    for (int d = 0; d < 3; ++d) {
+      gtsam::Vector6 delta = gtsam::Vector6::Zero();
+      delta(d) = numeric_eps_;
+
+      auto perturbed = control_poses;
+      perturbed[k] = perturbed[k].compose(gtsam::Pose3::Expmap(delta));
+
+      const gtsam::Pose3 pose_plus = BSplineControlWindow::interpolate(perturbed, time_table_[time_index]);
+      const gtsam::Point3 world_point_plus = pose_plus.transformFrom(source_point);
+      jacobians[k].col(d) = (world_point_plus - base_world_point) / numeric_eps_;
+    }
+  }
+
+  return jacobians;
+}
+
+double IntegratedBSplineGICPFactor::robust_cost(const double mahalanobis_error) const {
+  const double residual_norm = residual_norm_from_mahalanobis(mahalanobis_error);
+
+  switch (robust_kernel_) {
+    case RobustKernel::NONE:
+      return mahalanobis_error;
+    case RobustKernel::HUBER:
+      if (residual_norm <= robust_kernel_width_) {
+        return mahalanobis_error;
+      }
+      return 2.0 * robust_kernel_width_ * residual_norm - robust_kernel_width_ * robust_kernel_width_;
+    case RobustKernel::CAUCHY: {
+      const double scaled = residual_norm / robust_kernel_width_;
+      return robust_kernel_width_ * robust_kernel_width_ * std::log1p(scaled * scaled);
+    }
+  }
+
+  return mahalanobis_error;
+}
+
+double IntegratedBSplineGICPFactor::robust_weight(const double mahalanobis_error) const {
+  const double residual_norm = residual_norm_from_mahalanobis(mahalanobis_error);
+
+  switch (robust_kernel_) {
+    case RobustKernel::NONE:
+      return 1.0;
+    case RobustKernel::HUBER:
+      if (residual_norm <= robust_kernel_width_) {
+        return 1.0;
+      }
+      return robust_kernel_width_ / std::max(1e-9, residual_norm);
+    case RobustKernel::CAUCHY: {
+      const double scaled = residual_norm / robust_kernel_width_;
+      return 1.0 / (1.0 + scaled * scaled);
+    }
+  }
+
+  return 1.0;
+}
+
 double IntegratedBSplineGICPFactor::error(const gtsam::Values& values) const {
   using Clock = std::chrono::steady_clock;
   const auto t_start = Clock::now();
@@ -136,6 +242,9 @@ double IntegratedBSplineGICPFactor::error(const gtsam::Values& values) const {
   update_correspondences();
   const auto t_corr = Clock::now();
 
+  accepted_inlier_count_ = 0;
+  rejected_outlier_count_ = 0;
+  robust_weight_sum_ = 0.0;
   double total_error = 0.0;
   for (int i = 0; i < frame::size(*source_); ++i) {
     const long target_index = correspondences_[static_cast<std::size_t>(i)];
@@ -150,7 +259,16 @@ double IntegratedBSplineGICPFactor::error(const gtsam::Values& values) const {
     const auto& target_pt = frame::point(*target_, target_index);
     const gtsam::Point3 transed_source_pt = pose.transformFrom(source_pt.template head<3>().eval());
     const Eigen::Vector3d residual = transed_source_pt - target_pt.template head<3>();
-    total_error += residual.transpose() * mahalanobis_[static_cast<std::size_t>(i)] * residual;
+    const double mahalanobis_error = residual.transpose() * mahalanobis_[static_cast<std::size_t>(i)] * residual;
+    if (outlier_mahalanobis_threshold_ > 0.0 &&
+        residual_norm_from_mahalanobis(mahalanobis_error) > outlier_mahalanobis_threshold_) {
+      rejected_outlier_count_++;
+      continue;
+    }
+
+    accepted_inlier_count_++;
+    robust_weight_sum_ += robust_weight(mahalanobis_error);
+    total_error += robust_cost(mahalanobis_error);
   }
 
   if (enable_profiling_) {
@@ -160,9 +278,17 @@ double IntegratedBSplineGICPFactor::error(const gtsam::Values& values) const {
     last_profile_.source_point_count = frame::size(*source_);
     last_profile_.target_point_count = target_->voxel_points().size();
     last_profile_.matched_point_count = matched_correspondence_count_;
+    last_profile_.inlier_point_count = accepted_inlier_count_;
+    last_profile_.rejected_distance_count = rejected_distance_count_;
+    last_profile_.rejected_outlier_count = rejected_outlier_count_;
     last_profile_.match_ratio =
       last_profile_.source_point_count == 0 ? 0.0
                                             : static_cast<double>(matched_correspondence_count_) / last_profile_.source_point_count;
+    last_profile_.inlier_ratio =
+      last_profile_.source_point_count == 0 ? 0.0
+                                            : static_cast<double>(accepted_inlier_count_) / last_profile_.source_point_count;
+    last_profile_.mean_robust_weight =
+      accepted_inlier_count_ == 0 ? 1.0 : robust_weight_sum_ / static_cast<double>(accepted_inlier_count_);
     last_profile_.pose_update_ms =
       std::chrono::duration<double, std::milli>(t_pose - t_start).count();
     last_profile_.correspondence_ms =
@@ -184,6 +310,7 @@ gtsam::GaussianFactor::shared_ptr IntegratedBSplineGICPFactor::linearize(const g
   const auto t_pose = Clock::now();
   update_correspondences();
   const auto t_corr = Clock::now();
+  const auto poses = control_poses(values);
 
   std::array<std::array<gtsam::Matrix6, kBSplineControlPointCount>, kBSplineControlPointCount> H;
   std::array<gtsam::Vector6, kBSplineControlPointCount> b;
@@ -196,6 +323,9 @@ gtsam::GaussianFactor::shared_ptr IntegratedBSplineGICPFactor::linearize(const g
     bi.setZero();
   }
 
+  accepted_inlier_count_ = 0;
+  rejected_outlier_count_ = 0;
+  robust_weight_sum_ = 0.0;
   double total_error = 0.0;
   for (int i = 0; i < frame::size(*source_); ++i) {
     const long target_index = correspondences_[static_cast<std::size_t>(i)];
@@ -205,30 +335,36 @@ gtsam::GaussianFactor::shared_ptr IntegratedBSplineGICPFactor::linearize(const g
 
     const int time_index = time_indices_[static_cast<std::size_t>(i)];
     const auto& pose = source_poses_[static_cast<std::size_t>(time_index)];
-    const auto& pose_jacs = pose_jacobians_[static_cast<std::size_t>(time_index)];
 
     const auto& source_pt = frame::point(*source_, i);
     const auto& target_pt = frame::point(*target_, target_index);
 
-    gtsam::Matrix36 H_transed_pose;
-    const gtsam::Point3 transed_source_pt =
-      pose.transformFrom(source_pt.template head<3>().eval(), H_transed_pose);
+    const gtsam::Point3 transed_source_pt = pose.transformFrom(source_pt.template head<3>().eval());
     const Eigen::Vector3d residual = transed_source_pt - target_pt.template head<3>();
     const Eigen::Matrix3d& M = mahalanobis_[static_cast<std::size_t>(i)];
+    const double mahalanobis_error = residual.transpose() * M * residual;
+    if (outlier_mahalanobis_threshold_ > 0.0 &&
+        residual_norm_from_mahalanobis(mahalanobis_error) > outlier_mahalanobis_threshold_) {
+      rejected_outlier_count_++;
+      continue;
+    }
 
-    std::array<gtsam::Matrix36, kBSplineControlPointCount> J;
+    accepted_inlier_count_++;
+    const double weight = robust_weight(mahalanobis_error);
+    robust_weight_sum_ += weight;
+
+    const auto point_jacs = point_jacobians(poses, static_cast<std::size_t>(time_index), source_pt.template head<3>().eval());
     for (std::size_t k = 0; k < kBSplineControlPointCount; ++k) {
-      J[k] = H_transed_pose * pose_jacs[k];
-      b[k] += J[k].transpose() * M * residual;
+      b[k] += weight * point_jacs[k].transpose() * M * residual;
     }
 
     for (std::size_t a = 0; a < kBSplineControlPointCount; ++a) {
       for (std::size_t c = a; c < kBSplineControlPointCount; ++c) {
-        H[a][c] += J[a].transpose() * M * J[c];
+        H[a][c] += weight * point_jacs[a].transpose() * M * point_jacs[c];
       }
     }
 
-    total_error += residual.transpose() * M * residual;
+    total_error += robust_cost(mahalanobis_error);
   }
 
   std::vector<gtsam::DenseIndex> dims(kBSplineControlPointCount + 1, 6);
@@ -251,9 +387,17 @@ gtsam::GaussianFactor::shared_ptr IntegratedBSplineGICPFactor::linearize(const g
     last_profile_.source_point_count = frame::size(*source_);
     last_profile_.target_point_count = target_->voxel_points().size();
     last_profile_.matched_point_count = matched_correspondence_count_;
+    last_profile_.inlier_point_count = accepted_inlier_count_;
+    last_profile_.rejected_distance_count = rejected_distance_count_;
+    last_profile_.rejected_outlier_count = rejected_outlier_count_;
     last_profile_.match_ratio =
       last_profile_.source_point_count == 0 ? 0.0
                                             : static_cast<double>(matched_correspondence_count_) / last_profile_.source_point_count;
+    last_profile_.inlier_ratio =
+      last_profile_.source_point_count == 0 ? 0.0
+                                            : static_cast<double>(accepted_inlier_count_) / last_profile_.source_point_count;
+    last_profile_.mean_robust_weight =
+      accepted_inlier_count_ == 0 ? 1.0 : robust_weight_sum_ / static_cast<double>(accepted_inlier_count_);
     last_profile_.pose_update_ms =
       std::chrono::duration<double, std::milli>(t_pose - t_start).count();
     last_profile_.correspondence_ms =

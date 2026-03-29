@@ -53,6 +53,45 @@ const char* to_string(BSplineLidarTargetMode mode) {
   return "unknown";
 }
 
+iap::IntegratedBSplineGICPFactor::JacobianMode parse_lidar_jacobian_mode(const std::string& mode) {
+  if (mode == "NUMERIC_FULL" || mode == "numeric_full" || mode == "numeric") {
+    return iap::IntegratedBSplineGICPFactor::JacobianMode::NUMERIC_FULL;
+  }
+  return iap::IntegratedBSplineGICPFactor::JacobianMode::SEMI_ANALYTIC;
+}
+
+const char* to_string(iap::IntegratedBSplineGICPFactor::JacobianMode mode) {
+  switch (mode) {
+    case iap::IntegratedBSplineGICPFactor::JacobianMode::NUMERIC_FULL:
+      return "numeric_full";
+    case iap::IntegratedBSplineGICPFactor::JacobianMode::SEMI_ANALYTIC:
+      return "semi_analytic";
+  }
+  return "unknown";
+}
+
+iap::IntegratedBSplineGICPFactor::RobustKernel parse_lidar_robust_kernel(const std::string& mode) {
+  if (mode == "HUBER" || mode == "huber") {
+    return iap::IntegratedBSplineGICPFactor::RobustKernel::HUBER;
+  }
+  if (mode == "CAUCHY" || mode == "cauchy") {
+    return iap::IntegratedBSplineGICPFactor::RobustKernel::CAUCHY;
+  }
+  return iap::IntegratedBSplineGICPFactor::RobustKernel::NONE;
+}
+
+const char* to_string(iap::IntegratedBSplineGICPFactor::RobustKernel mode) {
+  switch (mode) {
+    case iap::IntegratedBSplineGICPFactor::RobustKernel::NONE:
+      return "none";
+    case iap::IntegratedBSplineGICPFactor::RobustKernel::HUBER:
+      return "huber";
+    case iap::IntegratedBSplineGICPFactor::RobustKernel::CAUCHY:
+      return "cauchy";
+  }
+  return "unknown";
+}
+
 iap::GnssHandler::Params make_gnss_handler_params(
   double min_elevation,
   double pr_noise_base,
@@ -143,7 +182,15 @@ OdometryEstimationBSpline::OdometryEstimationBSpline(const OdometryEstimationBSp
   max_correspondence_distance_ = config.param<double>("odometry_estimation", "max_correspondence_distance", 1.5);
   lidar_target_mode_ = parse_lidar_target_mode(
     config.param<std::string>("odometry_estimation", "ct_lidar_target_mode", "ACTIVE_WINDOW_SNAPSHOT"));
+  lidar_jacobian_mode_ = parse_lidar_jacobian_mode(
+    config.param<std::string>("odometry_estimation", "ct_lidar_jacobian_mode", "SEMI_ANALYTIC"));
   lidar_snapshot_frame_window_ = config.param<int>("odometry_estimation", "ct_lidar_snapshot_frame_window", 0);
+  lidar_jacobian_numeric_eps_ = config.param<double>("odometry_estimation", "ct_lidar_jacobian_numeric_eps", 1e-4);
+  lidar_outlier_mahalanobis_thresh_ =
+    config.param<double>("odometry_estimation", "ct_lidar_outlier_mahalanobis_thresh", 0.0);
+  lidar_robust_kernel_ = parse_lidar_robust_kernel(
+    config.param<std::string>("odometry_estimation", "ct_lidar_robust_kernel", "NONE"));
+  lidar_robust_kernel_width_ = config.param<double>("odometry_estimation", "ct_lidar_robust_kernel_width", 1.0);
   lidar_factor_profile_ = config.param<bool>("odometry_estimation", "ct_lidar_profile_factor", false);
   lidar_validate_linearization_ = config.param<bool>("odometry_estimation", "ct_lidar_validate_linearization", false);
   lidar_linearization_check_scale_ =
@@ -202,13 +249,17 @@ OdometryEstimationBSpline::OdometryEstimationBSpline(const OdometryEstimationBSp
   ct_target_ivox_->set_lru_horizon(params.lru_thresh);
   ct_target_ivox_->set_neighbor_voxel_mode(1);
 
-  logger->info("odometry_bspline initialized frontend_mode={} knot_mode={} nominal_dt={:.4f} compatibility_sample_dt={:.4f} lidar_target_mode={} lidar_snapshot_window={} lidar_profile={} lidar_validate={}",
+  logger->info("odometry_bspline initialized frontend_mode={} knot_mode={} nominal_dt={:.4f} compatibility_sample_dt={:.4f} lidar_target_mode={} lidar_jacobian_mode={} lidar_snapshot_window={} lidar_outlier_thresh={:.3f} lidar_robust_kernel={} lidar_robust_width={:.3f} lidar_profile={} lidar_validate={}",
     frontend_mode_,
     iap::to_string(trajectory_params_.knot_mode),
     trajectory_params_.nominal_dt,
     compatibility_sample_dt_,
     ::glim::to_string(lidar_target_mode_),
+    ::glim::to_string(lidar_jacobian_mode_),
     lidar_snapshot_frame_window_,
+    lidar_outlier_mahalanobis_thresh_,
+    ::glim::to_string(lidar_robust_kernel_),
+    lidar_robust_kernel_width_,
     lidar_factor_profile_,
     lidar_validate_linearization_);
 }
@@ -712,6 +763,10 @@ EstimationFrame::ConstPtr OdometryEstimationBSpline::insert_frame_ct_lidar(
       std::make_shared<iap::IntegratedBSplineGICPFactor>(segment_keys, segment.target_snapshot, segment.source, segment.target_tree);
     factor->set_num_threads(params->num_threads);
     factor->set_max_correspondence_distance(max_correspondence_distance_);
+    factor->set_jacobian_mode(lidar_jacobian_mode_);
+    factor->set_numeric_eps(lidar_jacobian_numeric_eps_);
+    factor->set_outlier_mahalanobis_threshold(lidar_outlier_mahalanobis_thresh_);
+    factor->set_robust_kernel(lidar_robust_kernel_, lidar_robust_kernel_width_);
     factor->set_enable_profiling(lidar_factor_profile_);
     graph.add(factor);
     if (marginalization_partition.should_marginalize_factor(make_key_vector(segment_keys))) {
@@ -1016,15 +1071,24 @@ EstimationFrame::ConstPtr OdometryEstimationBSpline::insert_frame_ct_lidar(
     const auto& current_segment = fixed_lag_registry_.segments().back();
     const auto& profile = current_factor->last_profiling_stats();
     logger->trace(
-      "bspline ct lidar factor target_mode={} target_frames={} target_points={} target_build_ms={:.3f} stage={} matched={}/{} ratio={:.3f} pose_ms={:.3f} corr_ms={:.3f} accum_ms={:.3f} total_ms={:.3f} error={:.6f}",
+      "bspline ct lidar factor target_mode={} jacobian_mode={} robust_kernel={} robust_width={:.3f} outlier_thresh={:.3f} target_frames={} target_points={} target_build_ms={:.3f} stage={} matched={}/{} inliers={} rej_dist={} rej_outlier={} match_ratio={:.3f} inlier_ratio={:.3f} mean_w={:.3f} pose_ms={:.3f} corr_ms={:.3f} accum_ms={:.3f} total_ms={:.3f} error={:.6f}",
       ::glim::to_string(current_segment.target_mode),
+      ::glim::to_string(lidar_jacobian_mode_),
+      ::glim::to_string(lidar_robust_kernel_),
+      lidar_robust_kernel_width_,
+      lidar_outlier_mahalanobis_thresh_,
       current_segment.target_frame_count,
       current_segment.target_point_count,
       current_segment.target_build_ms,
       profile.stage,
       profile.matched_point_count,
       profile.source_point_count,
+      profile.inlier_point_count,
+      profile.rejected_distance_count,
+      profile.rejected_outlier_count,
       profile.match_ratio,
+      profile.inlier_ratio,
+      profile.mean_robust_weight,
       profile.pose_update_ms,
       profile.correspondence_ms,
       profile.accumulation_ms,
@@ -1065,6 +1129,13 @@ EstimationFrame::ConstPtr OdometryEstimationBSpline::insert_frame_ct_lidar(
   } else if (!frames.empty() && frames.back()) {
     new_frame->clk_bias = frames.back()->clk_bias;
     new_frame->clk_drift = frames.back()->clk_drift;
+  }
+  if (current_factor) {
+    const double factor_error = current_factor->error(values);
+    new_frame->icp_quality.inlier_count = current_factor->num_inliers();
+    new_frame->icp_quality.inlier_fraction = current_factor->inlier_fraction();
+    new_frame->icp_quality.rmse =
+      std::sqrt(factor_error / std::max(new_frame->icp_quality.inlier_count, 1));
   }
 
   const auto deskewed_points = current_factor->deskewed_source_points(values, true);

@@ -69,6 +69,12 @@
 ## 2. 未映射改动（临时区）
 > 如果你临时改了代码但还没决定它对应哪个需求，先把改动写在这里（提交前必须移入上表）。
 
+- 2026-03-29: IAP-RQ-300 / IAP-RQ-410
+  - 已继续按 `SLAM_FINISH_PLAN.md` 推进 `M2 / WP2`：`IntegratedBSplineGICPFactor` 现已支持 `NUMERIC_FULL / SEMI_ANALYTIC` 两种 Jacobian mode，默认走“解析 control-translation block + 数值 control-rotation block”的半解析路径，并保留 full-numeric 作为 A/B/debug 基线。
+  - continuous-time LiDAR factor 现已补上显式 outlier/robust handling：可按 whitened residual norm 做 outlier gate，并支持 `NONE / HUBER / CAUCHY` 三种 robust kernel 及其宽度配置。
+  - `OdometryEstimationBSpline` 现已将 LiDAR Jacobian mode、数值差分步长、outlier threshold、robust kernel 类型和宽度都接成配置项，并将当前 factor 的 inlier / rmse proxy 回填到 `EstimationFrame::icp_quality`。
+  - `IntegratedBSplineGICPFactor` profiling stats 现已扩展到 `matched / inlier / rejected_distance / rejected_outlier / inlier_ratio / mean_robust_weight`，用于后续 profiling / GPU 设计和退化分析。
+  - `test_bspline_gicp_factor.cpp` 现已补充 perturbed-state 下的半解析 linearization consistency 检查，以及 outlier threshold / robust kernel 对坏匹配抑制行为的专门测试。
 - 2026-03-29: IAP-RQ-020 / IAP-RQ-300 / IAP-RQ-410
   - `OdometryEstimationBSpline` 不再在建图前立即裁掉超过 lag 边界的 control points / segment constraints，而是先带着这些“即将滑出”的状态完成当前轮优化。
   - 新增 removable-factor marginalization：上一轮 carried prior 与本轮即将被 lag pruning 移除的 LiDAR/IMU/velocity/GNSS/clock/smoothness 因子会被单独收集、线性化，并对 survivor states 做边缘化。

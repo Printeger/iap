@@ -10,6 +10,7 @@
 #include <gtsam_points/types/point_cloud.hpp>
 
 #include <array>
+#include <algorithm>
 #include <cstddef>
 #include <vector>
 
@@ -27,12 +28,28 @@ class IntegratedBSplineGICPFactor : public gtsam::NonlinearFactor {
   EIGEN_MAKE_ALIGNED_OPERATOR_NEW
   using shared_ptr = std::shared_ptr<IntegratedBSplineGICPFactor>;
 
+  enum class JacobianMode {
+    NUMERIC_FULL,
+    SEMI_ANALYTIC,
+  };
+
+  enum class RobustKernel {
+    NONE,
+    HUBER,
+    CAUCHY,
+  };
+
   struct ProfilingStats {
     bool valid = false;
     std::size_t source_point_count = 0;
     std::size_t target_point_count = 0;
     std::size_t matched_point_count = 0;
+    std::size_t inlier_point_count = 0;
+    std::size_t rejected_distance_count = 0;
+    std::size_t rejected_outlier_count = 0;
     double match_ratio = 0.0;
+    double inlier_ratio = 0.0;
+    double mean_robust_weight = 1.0;
     double pose_update_ms = 0.0;
     double correspondence_ms = 0.0;
     double accumulation_ms = 0.0;
@@ -60,6 +77,18 @@ class IntegratedBSplineGICPFactor : public gtsam::NonlinearFactor {
   void set_num_threads(int num_threads) { num_threads_ = num_threads; }
   void set_max_correspondence_distance(double dist) { max_correspondence_distance_sq_ = dist * dist; }
   void set_enable_profiling(bool enable) { enable_profiling_ = enable; }
+  void set_jacobian_mode(JacobianMode mode) { jacobian_mode_ = mode; }
+  void set_numeric_eps(double eps) { numeric_eps_ = std::max(1e-8, eps); }
+  void set_outlier_mahalanobis_threshold(double threshold) { outlier_mahalanobis_threshold_ = std::max(0.0, threshold); }
+  void set_robust_kernel(RobustKernel kernel, double width) {
+    robust_kernel_ = kernel;
+    robust_kernel_width_ = std::max(1e-6, width);
+  }
+
+  JacobianMode jacobian_mode() const { return jacobian_mode_; }
+  RobustKernel robust_kernel() const { return robust_kernel_; }
+  double robust_kernel_width() const { return robust_kernel_width_; }
+  double outlier_mahalanobis_threshold() const { return outlier_mahalanobis_threshold_; }
 
   size_t dim() const override { return 6; }
   double error(const gtsam::Values& values) const override;
@@ -69,25 +98,39 @@ class IntegratedBSplineGICPFactor : public gtsam::NonlinearFactor {
   const std::vector<int>& time_indices() const { return time_indices_; }
   const std::vector<gtsam::Pose3>& source_poses() const { return source_poses_; }
   const ProfilingStats& last_profiling_stats() const { return last_profile_; }
+  int num_inliers() const { return static_cast<int>(accepted_inlier_count_); }
+  double inlier_fraction() const;
   std::vector<Eigen::Vector4d> deskewed_source_points(const gtsam::Values& values, bool local = true) const;
 
  private:
   using PoseJacobianArray = std::array<gtsam::Matrix6, kBSplineControlPointCount>;
+  using PointJacobianArray = std::array<gtsam::Matrix36, kBSplineControlPointCount>;
 
   std::array<gtsam::Pose3, kBSplineControlPointCount> control_poses(const gtsam::Values& values) const;
   void update_poses(const gtsam::Values& values) const;
   void update_correspondences() const;
+  PointJacobianArray point_jacobians(
+    const std::array<gtsam::Pose3, kBSplineControlPointCount>& control_poses,
+    std::size_t time_index,
+    const Eigen::Vector3d& source_point) const;
+  double robust_cost(double mahalanobis_error) const;
+  double robust_weight(double mahalanobis_error) const;
 
   int num_threads_ = 1;
   double max_correspondence_distance_sq_ = 1.0;
   double numeric_eps_ = 1e-4;
   bool enable_profiling_ = false;
+  JacobianMode jacobian_mode_ = JacobianMode::SEMI_ANALYTIC;
+  RobustKernel robust_kernel_ = RobustKernel::NONE;
+  double robust_kernel_width_ = 1.0;
+  double outlier_mahalanobis_threshold_ = 0.0;
 
   std::shared_ptr<const gtsam_points::NearestNeighborSearch> target_tree_;
   std::shared_ptr<const gtsam_points::iVox> target_;
   std::shared_ptr<const gtsam_points::PointCloud> source_;
 
   std::vector<double> time_table_;
+  std::vector<std::array<double, kBSplineControlPointCount>> basis_table_;
   std::vector<int> time_indices_;
 
   mutable std::vector<gtsam::Pose3> source_poses_;
@@ -95,6 +138,10 @@ class IntegratedBSplineGICPFactor : public gtsam::NonlinearFactor {
   mutable std::vector<long> correspondences_;
   mutable std::vector<Eigen::Matrix3d> mahalanobis_;
   mutable std::size_t matched_correspondence_count_ = 0;
+  mutable std::size_t rejected_distance_count_ = 0;
+  mutable std::size_t rejected_outlier_count_ = 0;
+  mutable std::size_t accepted_inlier_count_ = 0;
+  mutable double robust_weight_sum_ = 0.0;
   mutable ProfilingStats last_profile_;
 };
 

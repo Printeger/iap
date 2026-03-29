@@ -3,6 +3,12 @@
 > 规则：任何代码改动必须在这里记录，并包含 IAP-RQ-XXX。
 
 ## Unreleased
+- feat(dev-ct-mainline-lidar-jacobian): IAP-RQ-300 / IAP-RQ-410 — continue `M2 / WP2` by pushing the CT LiDAR factor from full numeric pose Jacobians to a semi-analytic engineering path.
+  - `IntegratedBSplineGICPFactor` now supports explicit Jacobian modes (`NUMERIC_FULL` / `SEMI_ANALYTIC`); the new default keeps analytic control-translation blocks and controlled finite-difference control-rotation blocks, while preserving the old full-numeric mode as an A/B/debug fallback.
+  - The factor now exposes explicit outlier/robust handling knobs: whitened-residual outlier gating plus `NONE / HUBER / CAUCHY` robust kernels with configurable widths.
+  - LiDAR profiling now reports matched/inlier/rejected counts together with inlier ratio and mean robust weight, and `OdometryEstimationBSpline` logs those diagnostics and publishes the resulting inlier/RMSE proxy back to `EstimationFrame::icp_quality`.
+  - `config_odometry_bspline.json` now includes `ct_lidar_jacobian_mode`, `ct_lidar_jacobian_numeric_eps`, `ct_lidar_outlier_mahalanobis_thresh`, `ct_lidar_robust_kernel`, and `ct_lidar_robust_kernel_width`.
+  - `test_bspline_gicp_factor.cpp` now covers perturbed-state semi-analytic linearization consistency together with outlier-threshold and robust-kernel behavior on bad correspondences.
 - feat(dev-ct-mainline-lidar): IAP-RQ-300 / IAP-RQ-410 — start `M2 / WP2` by engineering the continuous-time LiDAR factor target strategy and validation hooks.
   - `OdometryEstimationBSpline` now exposes explicit CT LiDAR target modes (`ACTIVE_WINDOW_SNAPSHOT` / `GLOBAL_IVOX_REFERENCE`) plus a snapshot frame-window parameter, so the lifecycle of frozen target snapshots is no longer implicit.
   - Active CT LiDAR segments now record target mode, contributing-frame count, target-point count, and target-build latency, and the current segment logs those diagnostics together with factor profiling output.

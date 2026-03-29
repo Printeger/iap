@@ -79,6 +79,11 @@
   - `IntegratedBSplineGICPFactor` 现已新增 linearization check 入口，支持用受控 perturbation 对比 Hessian 预测误差和实际非线性误差，作为后续解析 Jacobian 的基线校验工具
   - continuous-time target tree 现已统一从 `voxel_points()` 导出的 `PointCloud` 构建，避开了 `KdTree2<iVox>` 在 frame traits 上的不稳定路径
   - 已新增 `test_bspline_gicp_factor`，覆盖 LiDAR factor 的误差响应、linearization check 有效性和 profiling stats 行为
+  - `IntegratedBSplineGICPFactor` 现已从 `NUMERIC_FULL` 默认数值 pose Jacobian 推进到 `SEMI_ANALYTIC` 路径：控制点平移块改为显式解析 Jacobian，控制点旋转块保留受控数值差分，并保留 `NUMERIC_FULL` 作为 A/B 基线
+  - continuous-time LiDAR factor 现已补上显式 outlier / robust handling：支持 whitened residual norm 的 outlier gate，以及 `NONE / HUBER / CAUCHY` 三种 robust-kernel 策略
+  - `IntegratedBSplineGICPFactor` 现已输出更细的 correspondence 诊断：`matched / inlier / rejected_distance / rejected_outlier / inlier_ratio / mean_robust_weight`
+  - `OdometryEstimationBSpline` 现已把 LiDAR Jacobian mode、robust kernel、outlier threshold 接成配置项，并把当前 factor 的 inlier / rmse 结果回填到 `EstimationFrame::icp_quality`
+  - `test_bspline_gicp_factor` 现已进一步覆盖半解析 Jacobian 在扰动状态下的线性化一致性，以及 outlier threshold / robust kernel 对坏匹配的抑制行为
 - planner 已开始真正消费 continuous-time state：
   - `IntegrityPlanner::plan()` 在可用时会优先使用 `SplineControlAccess` 锚定当前时刻，再从 `ContinuousTrajectoryView` 解析种子状态
   - motion primitives 现在从连续时间 `pos / vel / yaw / sigma` 出发，而不只是把 trajectory view 当成一个 `sigma0` 来源
@@ -221,7 +226,7 @@
 - planner 现在已经开始消费 future-time continuous-time sample，但仍是基于已发布短窗的短时保守化/对齐评分。
 - IMU / velocity continuous-time factors 的 Jacobian 目前仍是数值形式。
 - GNSS 已经开始进入控制点窗口主链，但目前还是“shared queue + per-segment factor 接线”的最小实现。
-- LiDAR factor 目前仍使用数值 pose Jacobian，但已经补上 target strategy、profiling stats 和 linearization check 基线；解析 Jacobian 和 GPU 版仍是后续工作。
+- LiDAR factor 目前已切到“半解析 Jacobian + 受控数值旋转块”的过渡工程版，并补上 target strategy、profiling stats、outlier/robust handling 和 linearization check 基线；完整解析 Jacobian 和 GPU 版仍是后续工作。
 
 ## 验证状态
 

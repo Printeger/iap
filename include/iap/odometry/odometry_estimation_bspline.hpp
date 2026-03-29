@@ -147,7 +147,14 @@ class OdometryEstimationBSpline : public OdometryEstimationCPU {
   std::string frontend_mode_ = "RECONSTRUCT";
   double max_correspondence_distance_ = 1.0;
   BSplineLidarTargetMode lidar_target_mode_ = BSplineLidarTargetMode::ACTIVE_WINDOW_SNAPSHOT;
+  iap::IntegratedBSplineGICPFactor::JacobianMode lidar_jacobian_mode_ =
+    iap::IntegratedBSplineGICPFactor::JacobianMode::SEMI_ANALYTIC;
+  iap::IntegratedBSplineGICPFactor::RobustKernel lidar_robust_kernel_ =
+    iap::IntegratedBSplineGICPFactor::RobustKernel::NONE;
   int lidar_snapshot_frame_window_ = 0;
+  double lidar_jacobian_numeric_eps_ = 1e-4;
+  double lidar_outlier_mahalanobis_thresh_ = 0.0;
+  double lidar_robust_kernel_width_ = 1.0;
   bool lidar_factor_profile_ = false;
   bool lidar_validate_linearization_ = false;
   double lidar_linearization_check_scale_ = 1e-4;
