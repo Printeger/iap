@@ -3,6 +3,10 @@
 > 规则：任何代码改动必须在这里记录，并包含 IAP-RQ-XXX。
 
 ## Unreleased
+- feat(dev-ct-mainline-registry): IAP-RQ-020 / IAP-RQ-300 / IAP-RQ-410 — introduce a unified fixed-lag lifecycle/state registry for the B-spline odometry mainline.
+  - Added `BSplineFixedLagStateRegistry`, which owns the active control-buffer timeline together with the segment-level lifecycle used to retain/prune auxiliary velocity/clock states across the lag window.
+  - `OdometryEstimationBSpline` now drives control-window append, segment append, lag pruning, marginalization-state export, and auxiliary-value filtering through that shared registry instead of maintaining separate `control_buffer_` / `active_segment_constraints_` / ad hoc aux pruning paths.
+  - Added `test_bspline_fixed_lag_registry.cpp` to validate synchronized control-buffer pruning, surviving segment ownership, auxiliary-value filtering, and reset/append ordering semantics.
 - feat(dev-ct-mainline-carried-linear): IAP-RQ-020 / IAP-RQ-300 / IAP-RQ-410 — tighten carried-prior ownership and keep it in linear form between fixed-lag updates.
   - `BSplineMarginalizationPartition` now exposes explicit factor ownership classification (`survivor-only / removable / foreign`) and a replay-safety check for carried-prior keys, so state/factor ownership is no longer inferred ad hoc at each callsite.
   - `BSplineCarriedPrior` now stores the carried prior as a retained-key set plus linearization-point `GaussianFactorGraph`, and only converts it back into `LinearContainerFactor`s when replaying into the active optimization graph.

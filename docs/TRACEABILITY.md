@@ -79,6 +79,9 @@
   - `BSplineMarginalizationPartition` 现已进一步提供 factor ownership 分类与 carried-prior replay 安全检查，显式区分 `survivor-only / removable / foreign`。
   - carried prior 现已改为以 `GaussianFactorGraph + linearization_point + retained_keys` 的线性形式缓存；进入当前优化图时再转成 `LinearContainerFactor`，而不是继续把旧 prior 混进 removable nonlinear graph 再统一线性化。
   - `test_bspline_marginalization.cpp` 现已补充 foreign-key ownership 检测，以及“上一轮线性 carried prior + 本轮 removable nonlinear factors”组合的一致性校验。
+  - 新增 `BSplineFixedLagStateRegistry`，统一 active control buffer、segment 生命周期以及 auxiliary velocity/clock state 的保留与裁剪逻辑。
+  - `OdometryEstimationBSpline` 现在通过该 registry 统一执行 window append、segment append、lag pruning、marginalization-state 导出和 auxiliary-value filtering。
+  - 新增 `test_bspline_fixed_lag_registry.cpp`，校验 unified fixed-lag registry 的 control-buffer/segment 同步裁剪与 auxiliary state 生命周期行为。
 - 2026-03-28: IAP-RQ-020 / IAP-RQ-300 / IAP-RQ-410
   - 已开始按 `docs/dev_ct/SLAM_FINISH_PLAN.md` 执行 `M1 / WP1`，先收口 fixed-lag 主状态边界。
   - `OdometryEstimationBSpline::ActiveSplineMarginalPrior` 现在会结构化快照 boundary pose、boundary auxiliary index，以及对应的 velocity / clock state。

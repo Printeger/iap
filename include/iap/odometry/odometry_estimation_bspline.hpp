@@ -5,6 +5,7 @@
 // discrete outputs consumed by mapping / viewer modules.
 
 #include <iap/odometry/bspline_control_window.hpp>
+#include <iap/odometry/bspline_fixed_lag_registry.hpp>
 #include <iap/odometry/bspline_marginalization.hpp>
 #include <iap/odometry/bspline_trajectory.hpp>
 #include <iap/gnss/gnss_epoch_builder.hpp>
@@ -68,11 +69,7 @@ class OdometryEstimationBSpline : public OdometryEstimationCPU {
     Eigen::Vector3d angular_vel = Eigen::Vector3d::Zero();
   };
 
-  struct ActiveSplineSegmentConstraint {
-    double stamp = 0.0;
-    double scan_end = 0.0;
-    std::array<std::size_t, iap::kBSplineControlPointCount> control_indices{};
-    std::size_t velocity_index = 0;
+  struct ActiveSplineSegmentConstraint : public iap::BSplineFixedLagSegmentState {
     gtsam_points::PointCloud::ConstPtr source;
     std::shared_ptr<const gtsam_points::iVox> target_snapshot;
     std::shared_ptr<const gtsam_points::NearestNeighborSearch> target_tree;
@@ -116,7 +113,6 @@ class OdometryEstimationBSpline : public OdometryEstimationCPU {
   void append_active_segment_constraint(
     const PreprocessedFrame::Ptr& raw_frame,
     const gtsam_points::PointCloud::ConstPtr& source);
-  void prune_active_segment_constraints(double min_stamp);
   void insert_target_cloud(const EstimationFrame::Ptr& frame);
   void update_frame_history(
     const EstimationFrame::Ptr& frame,
@@ -161,8 +157,7 @@ class OdometryEstimationBSpline : public OdometryEstimationCPU {
 
   std::shared_ptr<gtsam_points::iVox> ct_target_ivox_;
   std::unique_ptr<iap::BSplineControlWindow> control_window_;
-  std::unique_ptr<iap::BSplineControlWindowBuffer> control_buffer_;
-  std::vector<ActiveSplineSegmentConstraint> active_segment_constraints_;
+  iap::BSplineFixedLagStateRegistryT<ActiveSplineSegmentConstraint> fixed_lag_registry_;
   ActiveSplineMarginalPrior marginal_prior_;
   std::shared_ptr<iap::BSplineTrajectory> latest_trajectory_;
   gtsam::Values latest_ct_aux_values_;
