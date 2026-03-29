@@ -87,8 +87,10 @@ void IntegratedBSplineGICPFactor::update_poses(const gtsam::Values& values) cons
   source_poses_.resize(time_table_.size());
   if (jacobian_mode_ == JacobianMode::NUMERIC_FULL) {
     pose_jacobians_.resize(time_table_.size());
+    pose_rotation_jacobians_.clear();
   } else {
     pose_jacobians_.clear();
+    pose_rotation_jacobians_.resize(time_table_.size());
   }
 
   for (std::size_t i = 0; i < time_table_.size(); ++i) {
@@ -97,6 +99,21 @@ void IntegratedBSplineGICPFactor::update_poses(const gtsam::Values& values) cons
     source_poses_[i] = base_pose;
 
     if (jacobian_mode_ != JacobianMode::NUMERIC_FULL) {
+      for (std::size_t k = 0; k < kBSplineControlPointCount; ++k) {
+        Eigen::Matrix<double, 6, 3> J = Eigen::Matrix<double, 6, 3>::Zero();
+        for (int d = 0; d < 3; ++d) {
+          gtsam::Vector6 delta = gtsam::Vector6::Zero();
+          delta(d) = numeric_eps_;
+
+          auto perturbed = poses;
+          perturbed[k] = perturbed[k].compose(gtsam::Pose3::Expmap(delta));
+
+          const gtsam::Pose3 pose_plus = BSplineControlWindow::interpolate(perturbed, u);
+          const gtsam::Vector6 xi = gtsam::Pose3::Logmap(base_pose.between(pose_plus));
+          J.col(d) = xi / numeric_eps_;
+        }
+        pose_rotation_jacobians_[i][k] = J;
+      }
       continue;
     }
 
@@ -123,6 +140,7 @@ void IntegratedBSplineGICPFactor::update_correspondences() const {
   mahalanobis_.resize(frame::size(*source_));
   matched_correspondence_count_ = 0;
   rejected_distance_count_ = 0;
+  rejected_ambiguity_count_ = 0;
 
   for (int i = 0; i < frame::size(*source_); ++i) {
     const int time_index = time_indices_[static_cast<std::size_t>(i)];
@@ -130,28 +148,69 @@ void IntegratedBSplineGICPFactor::update_correspondences() const {
     const auto& source_pt = frame::point(*source_, i);
 
     const gtsam::Point3 transed_pt = pose * source_pt.template head<3>();
-
-    size_t k_index = static_cast<size_t>(-1);
-    double k_sq_dist = std::numeric_limits<double>::max();
+    const std::size_t candidate_count = static_cast<std::size_t>(std::max(1, correspondence_candidate_count_));
+    std::vector<size_t> k_indices(candidate_count, static_cast<size_t>(-1));
+    std::vector<double> k_sq_dists(candidate_count, std::numeric_limits<double>::max());
     const size_t num_found =
-      target_tree_->knn_search(transed_pt.data(), 1, &k_index, &k_sq_dist, max_correspondence_distance_sq_);
+      target_tree_->knn_search(transed_pt.data(), candidate_count, k_indices.data(), k_sq_dists.data(), max_correspondence_distance_sq_);
 
-    if (num_found == 0 || k_sq_dist > max_correspondence_distance_sq_) {
+    if (num_found == 0) {
       correspondences_[static_cast<std::size_t>(i)] = -1;
       mahalanobis_[static_cast<std::size_t>(i)].setZero();
       rejected_distance_count_++;
       continue;
     }
 
-    correspondences_[static_cast<std::size_t>(i)] = static_cast<long>(k_index);
-    matched_correspondence_count_++;
-    const auto& target_cov = frame::cov(*target_, static_cast<long>(k_index));
     const auto& source_cov = frame::cov(*source_, i);
+    const Eigen::Matrix4d pose_matrix = pose.matrix();
+    double best_score = std::numeric_limits<double>::max();
+    double second_best_score = std::numeric_limits<double>::max();
+    long best_index = -1;
+    Eigen::Matrix3d best_mahalanobis = Eigen::Matrix3d::Zero();
 
-    Eigen::Matrix4d pose_matrix = pose.matrix();
-    Eigen::Matrix3d RCR = (target_cov + pose_matrix * source_cov * pose_matrix.transpose()).block<3, 3>(0, 0);
-    RCR.diagonal().array() += 1e-6;
-    mahalanobis_[static_cast<std::size_t>(i)] = RCR.inverse();
+    for (std::size_t c = 0; c < num_found; ++c) {
+      if (k_sq_dists[c] > max_correspondence_distance_sq_) {
+        continue;
+      }
+
+      const long target_index = static_cast<long>(k_indices[c]);
+      const auto& target_cov = frame::cov(*target_, target_index);
+      Eigen::Matrix3d RCR = (target_cov + pose_matrix * source_cov * pose_matrix.transpose()).block<3, 3>(0, 0);
+      RCR.diagonal().array() += 1e-6;
+      const Eigen::Matrix3d M = RCR.inverse();
+      const Eigen::Vector3d residual = transed_pt - frame::point(*target_, target_index).template head<3>();
+      const double score = residual.transpose() * M * residual;
+
+      if (score < best_score) {
+        second_best_score = best_score;
+        best_score = score;
+        best_index = target_index;
+        best_mahalanobis = M;
+      } else if (score < second_best_score) {
+        second_best_score = score;
+      }
+    }
+
+    if (best_index < 0) {
+      correspondences_[static_cast<std::size_t>(i)] = -1;
+      mahalanobis_[static_cast<std::size_t>(i)].setZero();
+      rejected_distance_count_++;
+      continue;
+    }
+
+    if (correspondence_accept_ratio_ > 0.0 &&
+        second_best_score < std::numeric_limits<double>::max() &&
+        second_best_score > 1e-9 &&
+        (best_score / second_best_score) >= correspondence_accept_ratio_) {
+      correspondences_[static_cast<std::size_t>(i)] = -1;
+      mahalanobis_[static_cast<std::size_t>(i)].setZero();
+      rejected_ambiguity_count_++;
+      continue;
+    }
+
+    correspondences_[static_cast<std::size_t>(i)] = best_index;
+    mahalanobis_[static_cast<std::size_t>(i)] = best_mahalanobis;
+    matched_correspondence_count_++;
   }
 }
 
@@ -172,23 +231,14 @@ IntegratedBSplineGICPFactor::PointJacobianArray IntegratedBSplineGICPFactor::poi
   }
 
   const auto& weights = basis_table_[time_index];
-  const gtsam::Point3 base_world_point = source_poses_[time_index].transformFrom(source_point);
+  gtsam::Matrix36 H_transed_pose = gtsam::Matrix36::Zero();
+  H_transed_pose.block<3, 3>(0, 0) = source_poses_[time_index].rotation().matrix() * -gtsam::SO3::Hat(source_point);
+  H_transed_pose.block<3, 3>(0, 3) = source_poses_[time_index].rotation().matrix();
 
   for (std::size_t k = 0; k < kBSplineControlPointCount; ++k) {
     jacobians[k].setZero();
+    jacobians[k].block<3, 3>(0, 0) = H_transed_pose * pose_rotation_jacobians_[time_index][k];
     jacobians[k].block<3, 3>(0, 3) = weights[k] * control_poses[k].rotation().matrix();
-
-    for (int d = 0; d < 3; ++d) {
-      gtsam::Vector6 delta = gtsam::Vector6::Zero();
-      delta(d) = numeric_eps_;
-
-      auto perturbed = control_poses;
-      perturbed[k] = perturbed[k].compose(gtsam::Pose3::Expmap(delta));
-
-      const gtsam::Pose3 pose_plus = BSplineControlWindow::interpolate(perturbed, time_table_[time_index]);
-      const gtsam::Point3 world_point_plus = pose_plus.transformFrom(source_point);
-      jacobians[k].col(d) = (world_point_plus - base_world_point) / numeric_eps_;
-    }
   }
 
   return jacobians;
@@ -280,6 +330,7 @@ double IntegratedBSplineGICPFactor::error(const gtsam::Values& values) const {
     last_profile_.matched_point_count = matched_correspondence_count_;
     last_profile_.inlier_point_count = accepted_inlier_count_;
     last_profile_.rejected_distance_count = rejected_distance_count_;
+    last_profile_.rejected_ambiguity_count = rejected_ambiguity_count_;
     last_profile_.rejected_outlier_count = rejected_outlier_count_;
     last_profile_.match_ratio =
       last_profile_.source_point_count == 0 ? 0.0
@@ -389,6 +440,7 @@ gtsam::GaussianFactor::shared_ptr IntegratedBSplineGICPFactor::linearize(const g
     last_profile_.matched_point_count = matched_correspondence_count_;
     last_profile_.inlier_point_count = accepted_inlier_count_;
     last_profile_.rejected_distance_count = rejected_distance_count_;
+    last_profile_.rejected_ambiguity_count = rejected_ambiguity_count_;
     last_profile_.rejected_outlier_count = rejected_outlier_count_;
     last_profile_.match_ratio =
       last_profile_.source_point_count == 0 ? 0.0

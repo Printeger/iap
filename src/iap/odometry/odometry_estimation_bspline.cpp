@@ -185,6 +185,10 @@ OdometryEstimationBSpline::OdometryEstimationBSpline(const OdometryEstimationBSp
   lidar_jacobian_mode_ = parse_lidar_jacobian_mode(
     config.param<std::string>("odometry_estimation", "ct_lidar_jacobian_mode", "SEMI_ANALYTIC"));
   lidar_snapshot_frame_window_ = config.param<int>("odometry_estimation", "ct_lidar_snapshot_frame_window", 0);
+  lidar_correspondence_candidate_count_ =
+    config.param<int>("odometry_estimation", "ct_lidar_correspondence_candidates", 3);
+  lidar_correspondence_accept_ratio_ =
+    config.param<double>("odometry_estimation", "ct_lidar_correspondence_accept_ratio", 0.0);
   lidar_jacobian_numeric_eps_ = config.param<double>("odometry_estimation", "ct_lidar_jacobian_numeric_eps", 1e-4);
   lidar_outlier_mahalanobis_thresh_ =
     config.param<double>("odometry_estimation", "ct_lidar_outlier_mahalanobis_thresh", 0.0);
@@ -249,13 +253,15 @@ OdometryEstimationBSpline::OdometryEstimationBSpline(const OdometryEstimationBSp
   ct_target_ivox_->set_lru_horizon(params.lru_thresh);
   ct_target_ivox_->set_neighbor_voxel_mode(1);
 
-  logger->info("odometry_bspline initialized frontend_mode={} knot_mode={} nominal_dt={:.4f} compatibility_sample_dt={:.4f} lidar_target_mode={} lidar_jacobian_mode={} lidar_snapshot_window={} lidar_outlier_thresh={:.3f} lidar_robust_kernel={} lidar_robust_width={:.3f} lidar_profile={} lidar_validate={}",
+  logger->info("odometry_bspline initialized frontend_mode={} knot_mode={} nominal_dt={:.4f} compatibility_sample_dt={:.4f} lidar_target_mode={} lidar_jacobian_mode={} lidar_k_candidates={} lidar_accept_ratio={:.3f} lidar_snapshot_window={} lidar_outlier_thresh={:.3f} lidar_robust_kernel={} lidar_robust_width={:.3f} lidar_profile={} lidar_validate={}",
     frontend_mode_,
     iap::to_string(trajectory_params_.knot_mode),
     trajectory_params_.nominal_dt,
     compatibility_sample_dt_,
     ::glim::to_string(lidar_target_mode_),
     ::glim::to_string(lidar_jacobian_mode_),
+    lidar_correspondence_candidate_count_,
+    lidar_correspondence_accept_ratio_,
     lidar_snapshot_frame_window_,
     lidar_outlier_mahalanobis_thresh_,
     ::glim::to_string(lidar_robust_kernel_),
@@ -765,6 +771,8 @@ EstimationFrame::ConstPtr OdometryEstimationBSpline::insert_frame_ct_lidar(
     factor->set_max_correspondence_distance(max_correspondence_distance_);
     factor->set_jacobian_mode(lidar_jacobian_mode_);
     factor->set_numeric_eps(lidar_jacobian_numeric_eps_);
+    factor->set_correspondence_candidate_count(lidar_correspondence_candidate_count_);
+    factor->set_correspondence_accept_ratio(lidar_correspondence_accept_ratio_);
     factor->set_outlier_mahalanobis_threshold(lidar_outlier_mahalanobis_thresh_);
     factor->set_robust_kernel(lidar_robust_kernel_, lidar_robust_kernel_width_);
     factor->set_enable_profiling(lidar_factor_profile_);
@@ -1071,9 +1079,11 @@ EstimationFrame::ConstPtr OdometryEstimationBSpline::insert_frame_ct_lidar(
     const auto& current_segment = fixed_lag_registry_.segments().back();
     const auto& profile = current_factor->last_profiling_stats();
     logger->trace(
-      "bspline ct lidar factor target_mode={} jacobian_mode={} robust_kernel={} robust_width={:.3f} outlier_thresh={:.3f} target_frames={} target_points={} target_build_ms={:.3f} stage={} matched={}/{} inliers={} rej_dist={} rej_outlier={} match_ratio={:.3f} inlier_ratio={:.3f} mean_w={:.3f} pose_ms={:.3f} corr_ms={:.3f} accum_ms={:.3f} total_ms={:.3f} error={:.6f}",
+      "bspline ct lidar factor target_mode={} jacobian_mode={} k_candidates={} accept_ratio={:.3f} robust_kernel={} robust_width={:.3f} outlier_thresh={:.3f} target_frames={} target_points={} target_build_ms={:.3f} stage={} matched={}/{} inliers={} rej_dist={} rej_ambiguity={} rej_outlier={} match_ratio={:.3f} inlier_ratio={:.3f} mean_w={:.3f} pose_ms={:.3f} corr_ms={:.3f} accum_ms={:.3f} total_ms={:.3f} error={:.6f}",
       ::glim::to_string(current_segment.target_mode),
       ::glim::to_string(lidar_jacobian_mode_),
+      lidar_correspondence_candidate_count_,
+      lidar_correspondence_accept_ratio_,
       ::glim::to_string(lidar_robust_kernel_),
       lidar_robust_kernel_width_,
       lidar_outlier_mahalanobis_thresh_,
@@ -1085,6 +1095,7 @@ EstimationFrame::ConstPtr OdometryEstimationBSpline::insert_frame_ct_lidar(
       profile.source_point_count,
       profile.inlier_point_count,
       profile.rejected_distance_count,
+      profile.rejected_ambiguity_count,
       profile.rejected_outlier_count,
       profile.match_ratio,
       profile.inlier_ratio,

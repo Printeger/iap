@@ -52,6 +52,12 @@
     // Number of most recent active frames used to build a frozen snapshot target.
     // <= 0 means use all active frames currently retained in the lag window.
     "ct_lidar_snapshot_frame_window": 8,
+    // Correspondence search:
+    //   candidates = k nearest target voxels evaluated per source point
+    //   accept_ratio = Lowe-style ambiguity filter on best/second-best Mahalanobis score
+    //                  <= 0 disables ambiguity rejection
+    "ct_lidar_correspondence_candidates": 3,
+    "ct_lidar_correspondence_accept_ratio": 0.0,
     // Numeric perturbation scale used by the remaining rotational finite-difference Jacobian block.
     "ct_lidar_jacobian_numeric_eps": 1e-4,
     // Optional outlier rejection on the whitened residual norm sqrt(r^T M r).

@@ -35,6 +35,22 @@ gtsam_points::PointCloudCPU::Ptr make_cloud(bool with_times) {
   return cloud;
 }
 
+gtsam_points::PointCloudCPU::Ptr make_custom_cloud(
+  const std::vector<Eigen::Vector4d>& points,
+  const std::vector<Eigen::Matrix3d>& cov3,
+  const std::vector<double>* times = nullptr) {
+  auto cloud = std::make_shared<gtsam_points::PointCloudCPU>(points);
+  std::vector<Eigen::Matrix4d> covs(points.size(), Eigen::Matrix4d::Zero());
+  for (std::size_t i = 0; i < covs.size(); ++i) {
+    covs[i].block<3, 3>(0, 0) = cov3[i];
+  }
+  cloud->add_covs(covs);
+  if (times) {
+    cloud->add_times(*times);
+  }
+  return cloud;
+}
+
 gtsam_points::PointCloudCPU::Ptr make_outlier_source_cloud() {
   std::vector<Eigen::Vector4d> points = {
     Eigen::Vector4d(0.0, 0.0, 0.0, 1.0),
@@ -63,13 +79,22 @@ gtsam::Values make_identity_control_values() {
 }
 
 iap::IntegratedBSplineGICPFactor make_factor(
+  const std::shared_ptr<gtsam_points::iVox>& target,
+  const gtsam_points::PointCloudCPU::Ptr& source_cloud);
+
+iap::IntegratedBSplineGICPFactor make_factor(
   const gtsam_points::PointCloudCPU::Ptr& source_cloud = make_cloud(true)) {
   auto target_cloud = make_cloud(false);
   auto target = std::make_shared<gtsam_points::iVox>(0.5);
   target->voxel_insertion_setting().set_min_dist_in_cell(0.0);
   target->set_neighbor_voxel_mode(1);
   target->insert(*target_cloud);
+  return make_factor(target, source_cloud);
+}
 
+iap::IntegratedBSplineGICPFactor make_factor(
+  const std::shared_ptr<gtsam_points::iVox>& target,
+  const gtsam_points::PointCloudCPU::Ptr& source_cloud) {
   std::array<gtsam::Key, iap::kBSplineControlPointCount> keys{};
   for (std::size_t i = 0; i < iap::kBSplineControlPointCount; ++i) {
     keys[i] = iap::bspline_control_point_key(i);
@@ -193,4 +218,77 @@ TEST(BSplineGICPFactorTest, RobustKernelDownweightsOutlierResiduals) {
   EXPECT_TRUE(std::isfinite(robust_error));
   EXPECT_LT(robust_error, plain_error);
   EXPECT_LT(robust_factor.last_profiling_stats().mean_robust_weight, 1.0);
+}
+
+TEST(BSplineGICPFactorTest, MahalanobisCandidateSelectionCanBeatNearestEuclideanNeighbor) {
+  const std::vector<Eigen::Vector4d> target_points = {
+    Eigen::Vector4d(0.15, 0.0, 0.0, 1.0),
+    Eigen::Vector4d(0.30, 0.0, 0.0, 1.0),
+  };
+  const std::vector<Eigen::Matrix3d> target_covs = {
+    Eigen::Matrix3d::Identity() * 1e-3,
+    Eigen::Matrix3d::Identity() * 10.0,
+  };
+  auto target_cloud = make_custom_cloud(target_points, target_covs);
+  auto target = std::make_shared<gtsam_points::iVox>(0.5);
+  target->voxel_insertion_setting().set_min_dist_in_cell(0.0);
+  target->set_neighbor_voxel_mode(1);
+  target->insert(*target_cloud);
+
+  const std::vector<Eigen::Vector4d> source_points = {
+    Eigen::Vector4d(0.20, 0.0, 0.0, 1.0),
+  };
+  const std::vector<Eigen::Matrix3d> source_covs = {
+    Eigen::Matrix3d::Identity() * 1e-3,
+  };
+  const std::vector<double> source_times = {0.0};
+  auto source_cloud = make_custom_cloud(source_points, source_covs, &source_times);
+
+  auto single_candidate = make_factor(target, source_cloud);
+  single_candidate.set_correspondence_candidate_count(1);
+  single_candidate.set_max_correspondence_distance(1.0);
+
+  auto multi_candidate = make_factor(target, source_cloud);
+  multi_candidate.set_correspondence_candidate_count(2);
+  multi_candidate.set_max_correspondence_distance(1.0);
+
+  const auto values = make_identity_control_values();
+  EXPECT_LT(multi_candidate.error(values), single_candidate.error(values));
+}
+
+TEST(BSplineGICPFactorTest, AmbiguityRatioCanRejectNearlyEquivalentCandidates) {
+  const std::vector<Eigen::Vector4d> target_points = {
+    Eigen::Vector4d(0.15, 0.0, 0.0, 1.0),
+    Eigen::Vector4d(0.25, 0.0, 0.0, 1.0),
+  };
+  const std::vector<Eigen::Matrix3d> target_covs = {
+    Eigen::Matrix3d::Identity() * 1e-3,
+    Eigen::Matrix3d::Identity() * 1e-3,
+  };
+  auto target_cloud = make_custom_cloud(target_points, target_covs);
+  auto target = std::make_shared<gtsam_points::iVox>(0.5);
+  target->voxel_insertion_setting().set_min_dist_in_cell(0.0);
+  target->set_neighbor_voxel_mode(1);
+  target->insert(*target_cloud);
+
+  const std::vector<Eigen::Vector4d> source_points = {
+    Eigen::Vector4d(0.20, 0.0, 0.0, 1.0),
+  };
+  const std::vector<Eigen::Matrix3d> source_covs = {
+    Eigen::Matrix3d::Identity() * 1e-3,
+  };
+  const std::vector<double> source_times = {0.0};
+  auto source_cloud = make_custom_cloud(source_points, source_covs, &source_times);
+
+  auto factor = make_factor(target, source_cloud);
+  factor.set_enable_profiling(true);
+  factor.set_correspondence_candidate_count(2);
+  factor.set_correspondence_accept_ratio(0.95);
+  factor.set_max_correspondence_distance(1.0);
+
+  const auto values = make_identity_control_values();
+  const double error = factor.error(values);
+  EXPECT_NEAR(error, 0.0, 1e-12);
+  EXPECT_EQ(factor.num_inliers(), 0);
+  EXPECT_EQ(factor.last_profiling_stats().rejected_ambiguity_count, 1U);
 }

@@ -46,6 +46,7 @@ class IntegratedBSplineGICPFactor : public gtsam::NonlinearFactor {
     std::size_t matched_point_count = 0;
     std::size_t inlier_point_count = 0;
     std::size_t rejected_distance_count = 0;
+    std::size_t rejected_ambiguity_count = 0;
     std::size_t rejected_outlier_count = 0;
     double match_ratio = 0.0;
     double inlier_ratio = 0.0;
@@ -79,6 +80,8 @@ class IntegratedBSplineGICPFactor : public gtsam::NonlinearFactor {
   void set_enable_profiling(bool enable) { enable_profiling_ = enable; }
   void set_jacobian_mode(JacobianMode mode) { jacobian_mode_ = mode; }
   void set_numeric_eps(double eps) { numeric_eps_ = std::max(1e-8, eps); }
+  void set_correspondence_candidate_count(int count) { correspondence_candidate_count_ = std::max(1, count); }
+  void set_correspondence_accept_ratio(double ratio) { correspondence_accept_ratio_ = ratio; }
   void set_outlier_mahalanobis_threshold(double threshold) { outlier_mahalanobis_threshold_ = std::max(0.0, threshold); }
   void set_robust_kernel(RobustKernel kernel, double width) {
     robust_kernel_ = kernel;
@@ -88,6 +91,8 @@ class IntegratedBSplineGICPFactor : public gtsam::NonlinearFactor {
   JacobianMode jacobian_mode() const { return jacobian_mode_; }
   RobustKernel robust_kernel() const { return robust_kernel_; }
   double robust_kernel_width() const { return robust_kernel_width_; }
+  int correspondence_candidate_count() const { return correspondence_candidate_count_; }
+  double correspondence_accept_ratio() const { return correspondence_accept_ratio_; }
   double outlier_mahalanobis_threshold() const { return outlier_mahalanobis_threshold_; }
 
   size_t dim() const override { return 6; }
@@ -104,6 +109,7 @@ class IntegratedBSplineGICPFactor : public gtsam::NonlinearFactor {
 
  private:
   using PoseJacobianArray = std::array<gtsam::Matrix6, kBSplineControlPointCount>;
+  using PoseRotationJacobianArray = std::array<Eigen::Matrix<double, 6, 3>, kBSplineControlPointCount>;
   using PointJacobianArray = std::array<gtsam::Matrix36, kBSplineControlPointCount>;
 
   std::array<gtsam::Pose3, kBSplineControlPointCount> control_poses(const gtsam::Values& values) const;
@@ -123,6 +129,8 @@ class IntegratedBSplineGICPFactor : public gtsam::NonlinearFactor {
   JacobianMode jacobian_mode_ = JacobianMode::SEMI_ANALYTIC;
   RobustKernel robust_kernel_ = RobustKernel::NONE;
   double robust_kernel_width_ = 1.0;
+  int correspondence_candidate_count_ = 3;
+  double correspondence_accept_ratio_ = 0.0;
   double outlier_mahalanobis_threshold_ = 0.0;
 
   std::shared_ptr<const gtsam_points::NearestNeighborSearch> target_tree_;
@@ -135,10 +143,12 @@ class IntegratedBSplineGICPFactor : public gtsam::NonlinearFactor {
 
   mutable std::vector<gtsam::Pose3> source_poses_;
   mutable std::vector<PoseJacobianArray> pose_jacobians_;
+  mutable std::vector<PoseRotationJacobianArray> pose_rotation_jacobians_;
   mutable std::vector<long> correspondences_;
   mutable std::vector<Eigen::Matrix3d> mahalanobis_;
   mutable std::size_t matched_correspondence_count_ = 0;
   mutable std::size_t rejected_distance_count_ = 0;
+  mutable std::size_t rejected_ambiguity_count_ = 0;
   mutable std::size_t rejected_outlier_count_ = 0;
   mutable std::size_t accepted_inlier_count_ = 0;
   mutable double robust_weight_sum_ = 0.0;

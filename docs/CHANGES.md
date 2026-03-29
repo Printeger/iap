@@ -3,6 +3,12 @@
 > 规则：任何代码改动必须在这里记录，并包含 IAP-RQ-XXX。
 
 ## Unreleased
+- feat(dev-ct-mainline-lidar-correspondence): IAP-RQ-300 / IAP-RQ-410 — continue `M2 / WP2` by strengthening CT LiDAR correspondence selection and reducing hot-path numerical differencing.
+  - `IntegratedBSplineGICPFactor` now supports k-NN target candidate search with Mahalanobis-score selection instead of hardwiring a single nearest Euclidean correspondence.
+  - The factor now exposes an ambiguity-rejection ratio on the best/second-best Mahalanobis scores and reports `rejected_ambiguity_count` in profiling stats.
+  - The `SEMI_ANALYTIC` Jacobian path now caches control-point rotation Jacobians per spline time node, so rotational finite differencing is no longer repeated per source point during the hot correspondence/linearization path.
+  - `OdometryEstimationBSpline` now wires `ct_lidar_correspondence_candidates` and `ct_lidar_correspondence_accept_ratio` through config/logging, and CT LiDAR trace logs now include ambiguity-rejection diagnostics alongside target/inlier stats.
+  - `test_bspline_gicp_factor.cpp` now covers Mahalanobis candidate selection beating nearest-Euclidean matching and ambiguity-ratio rejection of nearly equivalent correspondences.
 - feat(dev-ct-mainline-lidar-jacobian): IAP-RQ-300 / IAP-RQ-410 — continue `M2 / WP2` by pushing the CT LiDAR factor from full numeric pose Jacobians to a semi-analytic engineering path.
   - `IntegratedBSplineGICPFactor` now supports explicit Jacobian modes (`NUMERIC_FULL` / `SEMI_ANALYTIC`); the new default keeps analytic control-translation blocks and controlled finite-difference control-rotation blocks, while preserving the old full-numeric mode as an A/B/debug fallback.
   - The factor now exposes explicit outlier/robust handling knobs: whitened-residual outlier gating plus `NONE / HUBER / CAUCHY` robust kernels with configurable widths.

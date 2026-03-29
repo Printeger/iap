@@ -151,6 +151,8 @@ class OdometryEstimationBSpline : public OdometryEstimationCPU {
     iap::IntegratedBSplineGICPFactor::JacobianMode::SEMI_ANALYTIC;
   iap::IntegratedBSplineGICPFactor::RobustKernel lidar_robust_kernel_ =
     iap::IntegratedBSplineGICPFactor::RobustKernel::NONE;
+  int lidar_correspondence_candidate_count_ = 3;
+  double lidar_correspondence_accept_ratio_ = 0.0;
   int lidar_snapshot_frame_window_ = 0;
   double lidar_jacobian_numeric_eps_ = 1e-4;
   double lidar_outlier_mahalanobis_thresh_ = 0.0;

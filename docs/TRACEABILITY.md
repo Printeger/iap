@@ -75,6 +75,10 @@
   - `OdometryEstimationBSpline` 现已将 LiDAR Jacobian mode、数值差分步长、outlier threshold、robust kernel 类型和宽度都接成配置项，并将当前 factor 的 inlier / rmse proxy 回填到 `EstimationFrame::icp_quality`。
   - `IntegratedBSplineGICPFactor` profiling stats 现已扩展到 `matched / inlier / rejected_distance / rejected_outlier / inlier_ratio / mean_robust_weight`，用于后续 profiling / GPU 设计和退化分析。
   - `test_bspline_gicp_factor.cpp` 现已补充 perturbed-state 下的半解析 linearization consistency 检查，以及 outlier threshold / robust kernel 对坏匹配抑制行为的专门测试。
+  - CT LiDAR correspondence 现已从“单一最近欧氏邻点”推进到“k-NN 候选 + Mahalanobis score 选择”；`IntegratedBSplineGICPFactor` 新增 `correspondence_candidate_count` / `correspondence_accept_ratio` 配置能力，可在局部几何模糊时挑选更合理的 target match。
+  - factor 现已支持 best/second-best Mahalanobis score 的 ambiguity rejection，并在 profiling stats 中新增 `rejected_ambiguity_count`，便于区分距离拒绝、模糊拒绝和 outlier gate 拒绝。
+  - `SEMI_ANALYTIC` 路径现已把控制点旋转块的数值差分预缓存到“每个 spline time node 一次”，而不是在每个 source point 上反复做旋转差分，进一步降低 hot path 的重复数值线性化成本。
+  - `test_bspline_gicp_factor.cpp` 现已新增 Mahalanobis candidate selection 优于单最近邻，以及 ambiguity-ratio 拒绝近似等价对应的专门测试。
 - 2026-03-29: IAP-RQ-020 / IAP-RQ-300 / IAP-RQ-410
   - `OdometryEstimationBSpline` 不再在建图前立即裁掉超过 lag 边界的 control points / segment constraints，而是先带着这些“即将滑出”的状态完成当前轮优化。
   - 新增 removable-factor marginalization：上一轮 carried prior 与本轮即将被 lag pruning 移除的 LiDAR/IMU/velocity/GNSS/clock/smoothness 因子会被单独收集、线性化，并对 survivor states 做边缘化。
