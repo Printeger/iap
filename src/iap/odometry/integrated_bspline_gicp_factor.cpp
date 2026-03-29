@@ -827,6 +827,98 @@ IntegratedBSplineGICPFactor::DegeneracyDiagnostics IntegratedBSplineGICPFactor::
   return diagnostics;
 }
 
+BSplineLidarFactorProfile IntegratedBSplineGICPFactor::profiling_report() const {
+  BSplineLidarFactorProfile report;
+  report.valid = last_profile_.valid;
+  report.backend = BSplineLidarFactorBackend::CPU_GICP;
+  report.source_point_count = last_profile_.source_point_count;
+  report.target_point_count = last_profile_.target_point_count;
+  report.time_bucket_count = last_profile_.time_bucket_count;
+  report.max_time_bucket_population = last_profile_.max_time_bucket_population;
+  report.candidate_evaluation_count = last_profile_.candidate_evaluation_count;
+  report.matched_point_count = last_profile_.matched_point_count;
+  report.inlier_point_count = last_profile_.inlier_point_count;
+  report.unique_target_count = last_profile_.unique_target_count;
+  report.max_target_reuse = last_profile_.max_target_reuse;
+  report.comparative_score_count = last_profile_.comparative_score_count;
+  report.rejected_distance_count = last_profile_.rejected_distance_count;
+  report.rejected_ambiguity_count = last_profile_.rejected_ambiguity_count;
+  report.rejected_outlier_count = last_profile_.rejected_outlier_count;
+  report.rejected_robust_count = last_profile_.rejected_robust_count;
+  report.match_ratio = last_profile_.match_ratio;
+  report.inlier_ratio = last_profile_.inlier_ratio;
+  report.mean_time_bucket_population = last_profile_.mean_time_bucket_population;
+  report.mean_candidates_per_source = last_profile_.mean_candidates_per_source;
+  report.unique_target_ratio = last_profile_.unique_target_ratio;
+  report.max_target_reuse_ratio = last_profile_.max_target_reuse_ratio;
+  report.mean_match_distance = last_profile_.mean_match_distance;
+  report.max_match_distance = last_profile_.max_match_distance;
+  report.mean_match_score = last_profile_.mean_match_score;
+  report.mean_score_gap = last_profile_.mean_score_gap;
+  report.mean_score_ratio = last_profile_.mean_score_ratio;
+  report.mean_robust_weight = last_profile_.mean_robust_weight;
+  report.pose_update_ms = last_profile_.pose_update_ms;
+  report.correspondence_ms = last_profile_.correspondence_ms;
+  report.accumulation_ms = last_profile_.accumulation_ms;
+  report.total_ms = last_profile_.total_ms;
+  report.total_error = last_profile_.total_error;
+  report.stage = last_profile_.stage;
+  return report;
+}
+
+BSplineLidarFactorResult IntegratedBSplineGICPFactor::make_result(
+  double factor_error,
+  int inlier_count,
+  double inlier_fraction,
+  const NumericReferenceCheckResult* numeric_reference,
+  const DegeneracyDiagnostics* degeneracy) const {
+  BSplineLidarFactorResult result;
+  result.valid = last_profile_.valid;
+  result.backend = BSplineLidarFactorBackend::CPU_GICP;
+  result.factor_error = factor_error;
+  result.inlier_count = inlier_count;
+  result.inlier_fraction = inlier_fraction;
+  result.rmse = std::sqrt(std::max(0.0, factor_error) / std::max(inlier_count, 1));
+  result.profile = profiling_report();
+
+  if (numeric_reference) {
+    result.numeric_audit.valid = numeric_reference->valid;
+    result.numeric_audit.perturbation_scale = numeric_reference->perturbation_scale;
+    result.numeric_audit.numeric_rotation_predicted_error = numeric_reference->numeric_rotation_predicted_error;
+    result.numeric_audit.semi_rotation_predicted_error = numeric_reference->semi_rotation_predicted_error;
+    result.numeric_audit.rotation_actual_error = numeric_reference->rotation_actual_error;
+    result.numeric_audit.rotation_abs_error = numeric_reference->rotation_abs_error;
+    result.numeric_audit.rotation_rel_error = numeric_reference->rotation_rel_error;
+    result.numeric_audit.numeric_translation_predicted_error = numeric_reference->numeric_translation_predicted_error;
+    result.numeric_audit.semi_translation_predicted_error = numeric_reference->semi_translation_predicted_error;
+    result.numeric_audit.translation_actual_error = numeric_reference->translation_actual_error;
+    result.numeric_audit.translation_abs_error = numeric_reference->translation_abs_error;
+    result.numeric_audit.translation_rel_error = numeric_reference->translation_rel_error;
+    result.numeric_audit.axis_rotation_rel_error = numeric_reference->axis_rotation_rel_error;
+    result.numeric_audit.worst_rotation_axis = numeric_reference->worst_rotation_axis;
+    result.numeric_audit.max_rotation_axis_rel_error = numeric_reference->max_rotation_axis_rel_error;
+    result.numeric_audit.mean_rotation_axis_rel_error = numeric_reference->mean_rotation_axis_rel_error;
+  }
+
+  if (degeneracy) {
+    result.degeneracy.valid = degeneracy->valid;
+    result.degeneracy.empty_target = degeneracy->empty_target;
+    result.degeneracy.low_match_ratio = degeneracy->low_match_ratio;
+    result.degeneracy.low_inlier_ratio = degeneracy->low_inlier_ratio;
+    result.degeneracy.low_target_diversity = degeneracy->low_target_diversity;
+    result.degeneracy.high_target_reuse = degeneracy->high_target_reuse;
+    result.degeneracy.high_ambiguity_rejection = degeneracy->high_ambiguity_rejection;
+    result.degeneracy.weak_score_separation = degeneracy->weak_score_separation;
+    result.degeneracy.warning_count = degeneracy->warning_count;
+    result.degeneracy.ambiguity_rejection_ratio = degeneracy->ambiguity_rejection_ratio;
+    result.degeneracy.distance_rejection_ratio = degeneracy->distance_rejection_ratio;
+    result.degeneracy.outlier_rejection_ratio = degeneracy->outlier_rejection_ratio;
+    result.degeneracy.robust_rejection_ratio = degeneracy->robust_rejection_ratio;
+  }
+
+  return result;
+}
+
 std::vector<Eigen::Vector4d> IntegratedBSplineGICPFactor::deskewed_source_points(const gtsam::Values& values, bool local) const {
   update_poses(values);
 

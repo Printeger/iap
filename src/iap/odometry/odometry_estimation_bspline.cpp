@@ -750,6 +750,7 @@ EstimationFrame::ConstPtr OdometryEstimationBSpline::insert_frame_ct_lidar(
   gtsam::NonlinearFactorGraph graph;
   gtsam::NonlinearFactorGraph marginalization_graph;
   std::shared_ptr<iap::IntegratedBSplineGICPFactor> current_factor;
+  std::vector<std::shared_ptr<iap::IntegratedBSplineGICPFactor>> active_lidar_factors;
   std::size_t active_imu_factor_count = 0;
   std::size_t active_velocity_factor_count = 0;
   std::size_t active_gnss_pr_factor_count = 0;
@@ -848,6 +849,7 @@ EstimationFrame::ConstPtr OdometryEstimationBSpline::insert_frame_ct_lidar(
     factor->set_robust_kernel(lidar_robust_kernel_, lidar_robust_kernel_width_);
     factor->set_robust_weight_floor(lidar_robust_weight_floor_);
     factor->set_enable_profiling(lidar_factor_profile_ || lidar_warn_degeneracy_);
+    active_lidar_factors.push_back(factor);
     graph.add(factor);
     if (marginalization_partition.should_marginalize_factor(make_key_vector(segment_keys))) {
       marginalization_graph.add(factor);
@@ -1147,9 +1149,72 @@ EstimationFrame::ConstPtr OdometryEstimationBSpline::insert_frame_ct_lidar(
     marginalization_partition.survivor_keys,
     previous_carried_prior.empty() ? nullptr : &previous_carried_prior);
 
+  std::vector<iap::BSplineLidarFactorResult> lidar_results;
+  lidar_results.reserve(active_lidar_factors.size());
+  iap::BSplineLidarFactorResult current_lidar_result;
+  iap::IntegratedBSplineGICPFactor::NumericReferenceCheckResult current_numeric_check;
+  iap::IntegratedBSplineGICPFactor::DegeneracyDiagnostics current_degeneracy;
+  bool current_numeric_check_valid = false;
+  bool current_degeneracy_valid = false;
+
+  for (const auto& factor : active_lidar_factors) {
+    const double factor_error = factor->error(values);
+
+    const iap::IntegratedBSplineGICPFactor::DegeneracyDiagnostics* degeneracy_ptr = nullptr;
+    if (lidar_warn_degeneracy_) {
+      current_degeneracy = factor->diagnose_degeneracy(lidar_degeneracy_thresholds_);
+      degeneracy_ptr = &current_degeneracy;
+    }
+
+    const iap::IntegratedBSplineGICPFactor::NumericReferenceCheckResult* numeric_ptr = nullptr;
+    if (lidar_profile_numeric_reference_ && factor == current_factor) {
+      current_numeric_check = factor->check_against_numeric_full(values, lidar_numeric_reference_scale_);
+      current_numeric_check_valid = current_numeric_check.valid;
+      numeric_ptr = &current_numeric_check;
+    }
+
+    auto result = factor->make_result(factor_error, factor->num_inliers(), factor->inlier_fraction(), numeric_ptr, degeneracy_ptr);
+    if (factor == current_factor) {
+      current_lidar_result = result;
+      current_degeneracy_valid = degeneracy_ptr && degeneracy_ptr->valid;
+    }
+    lidar_results.push_back(result);
+  }
+
+  const auto lidar_window_summary = iap::aggregate_bspline_lidar_factor_results(lidar_results);
+
+  if (lidar_factor_profile_ && lidar_window_summary.valid) {
+    logger->trace(
+      "bspline ct lidar cpu-summary backend={} segments={} profiled={} warnings={} total_src={} total_tgt={} total_matched={} total_inliers={} weighted_match={:.3f} weighted_inlier={:.3f} mean_unique_ratio={:.3f} min_unique_ratio={:.3f} max_reuse_ratio={:.3f} max_ambiguity_rej={:.3f} max_numeric_rel={:.6f} max_axis_rel={:.6f} total_pose_ms={:.3f} total_corr_ms={:.3f} total_accum_ms={:.3f} total_factor_ms={:.3f} cand_eval={} mean_cand_per_src={:.2f} mean_bucket={:.2f} peak_bucket={}",
+      iap::to_string(iap::BSplineLidarFactorBackend::CPU_GICP),
+      lidar_window_summary.result_count,
+      lidar_window_summary.valid_profile_count,
+      lidar_window_summary.warning_result_count,
+      lidar_window_summary.total_source_point_count,
+      lidar_window_summary.total_target_point_count,
+      lidar_window_summary.total_matched_point_count,
+      lidar_window_summary.total_inlier_point_count,
+      lidar_window_summary.weighted_match_ratio,
+      lidar_window_summary.weighted_inlier_ratio,
+      lidar_window_summary.mean_unique_target_ratio,
+      lidar_window_summary.min_unique_target_ratio,
+      lidar_window_summary.max_target_reuse_ratio,
+      lidar_window_summary.max_ambiguity_rejection_ratio,
+      lidar_window_summary.max_numeric_rel_error,
+      lidar_window_summary.max_rotation_axis_rel_error,
+      lidar_window_summary.total_pose_update_ms,
+      lidar_window_summary.total_correspondence_ms,
+      lidar_window_summary.total_accumulation_ms,
+      lidar_window_summary.total_factor_ms,
+      lidar_window_summary.total_candidate_evaluation_count,
+      lidar_window_summary.mean_candidates_per_source,
+      lidar_window_summary.mean_time_bucket_population,
+      lidar_window_summary.max_time_bucket_population);
+  }
+
   if (lidar_factor_profile_) {
     const auto& current_segment = fixed_lag_registry_.segments().back();
-    const auto& profile = current_factor->last_profiling_stats();
+    const auto& profile = current_lidar_result.profile;
     logger->trace(
       "bspline ct lidar factor target_mode={} jacobian_mode={} k_candidates={} accept_ratio={:.3f} score_gap={:.3f} robust_kernel={} robust_width={:.3f} robust_w_floor={:.3f} outlier_thresh={:.3f} target_frames={} target_points={} snapshot_frames={} snapshot_points={} snapshot_span_s={:.3f} snapshot_policy={} target_build_ms={:.3f} stage={} time_buckets={} bucket_mean={:.2f} bucket_peak={} cand_eval={} cand_per_src={:.2f} matched={}/{} inliers={} rej_dist={} rej_ambiguity={} rej_outlier={} rej_robust={} match_ratio={:.3f} inlier_ratio={:.3f} mean_w={:.3f} uniq_targets={} uniq_ratio={:.3f} reuse_peak={} reuse_ratio={:.3f} mean_dist={:.4f} max_dist={:.4f} mean_score={:.4f} mean_gap={:.4f} mean_ratio={:.4f} pose_ms={:.3f} corr_ms={:.3f} accum_ms={:.3f} total_ms={:.3f} error={:.6f}",
       ::glim::to_string(current_segment.target_mode),
@@ -1219,8 +1284,8 @@ EstimationFrame::ConstPtr OdometryEstimationBSpline::insert_frame_ct_lidar(
   }
 
   if (lidar_profile_numeric_reference_) {
-    const auto check = current_factor->check_against_numeric_full(values, lidar_numeric_reference_scale_);
-    if (check.valid) {
+    if (current_numeric_check_valid) {
+      const auto& check = current_numeric_check;
       const double max_rel_error = std::max(check.rotation_rel_error, check.translation_rel_error);
       const auto level =
         max_rel_error > lidar_linearization_warn_ratio_ ? spdlog::level::warn : spdlog::level::trace;
@@ -1246,10 +1311,10 @@ EstimationFrame::ConstPtr OdometryEstimationBSpline::insert_frame_ct_lidar(
   }
 
   if (lidar_warn_degeneracy_) {
-    const auto diagnostics = current_factor->diagnose_degeneracy(lidar_degeneracy_thresholds_);
+    const auto& diagnostics = current_degeneracy;
     const bool snapshot_fallback =
       lidar_target_mode_ == BSplineLidarTargetMode::ACTIVE_WINDOW_SNAPSHOT && !fixed_lag_registry_.segments().back().snapshot_policy_accepted;
-    if (snapshot_fallback || (diagnostics.valid && diagnostics.has_warning())) {
+    if (snapshot_fallback || (current_degeneracy_valid && diagnostics.has_warning())) {
       std::string flags;
       auto append_flag = [&](const char* flag) {
         if (!flags.empty()) {
@@ -1324,9 +1389,9 @@ EstimationFrame::ConstPtr OdometryEstimationBSpline::insert_frame_ct_lidar(
     new_frame->clk_drift = frames.back()->clk_drift;
   }
   if (current_factor) {
-    const double factor_error = current_factor->error(values);
-    new_frame->icp_quality.inlier_count = current_factor->num_inliers();
-    new_frame->icp_quality.inlier_fraction = current_factor->inlier_fraction();
+    const double factor_error = current_lidar_result.factor_error;
+    new_frame->icp_quality.inlier_count = current_lidar_result.inlier_count;
+    new_frame->icp_quality.inlier_fraction = current_lidar_result.inlier_fraction;
     new_frame->icp_quality.rmse =
       std::sqrt(factor_error / std::max(new_frame->icp_quality.inlier_count, 1));
   }

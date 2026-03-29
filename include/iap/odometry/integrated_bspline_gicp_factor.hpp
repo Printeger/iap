@@ -2,6 +2,7 @@
 // IAP-RQ-300 / IAP-RQ-410:
 // Minimal CPU continuous-time LiDAR factor over four B-spline pose control points.
 
+#include <iap/odometry/bspline_lidar_factor_result.hpp>
 #include <iap/odometry/bspline_control_window.hpp>
 
 #include <gtsam/nonlinear/NonlinearFactor.h>
@@ -171,6 +172,13 @@ class IntegratedBSplineGICPFactor : public gtsam::NonlinearFactor {
   LinearizationCheckResult check_linearization(const gtsam::Values& values, double perturbation_scale = 1e-4) const;
   NumericReferenceCheckResult check_against_numeric_full(const gtsam::Values& values, double perturbation_scale = 1e-5) const;
   DegeneracyDiagnostics diagnose_degeneracy(const DegeneracyThresholds& thresholds) const;
+  BSplineLidarFactorProfile profiling_report() const;
+  BSplineLidarFactorResult make_result(
+    double factor_error,
+    int inlier_count,
+    double inlier_fraction,
+    const NumericReferenceCheckResult* numeric_reference = nullptr,
+    const DegeneracyDiagnostics* degeneracy = nullptr) const;
 
   const std::vector<int>& time_indices() const { return time_indices_; }
   const std::vector<gtsam::Pose3>& source_poses() const { return source_poses_; }

@@ -87,6 +87,10 @@
   - 该 numeric-reference 入口现已进一步补上 axis-wise 旋转块 audit，可分别对 3 个局部旋转轴输出 predicted-error 对照，并给出 `worst_rotation_axis / max_rotation_axis_rel_error / mean_rotation_axis_rel_error`。
   - CT LiDAR profiling 现已进一步输出 `unique_target_count / unique_target_ratio / max_target_reuse / max_target_reuse_ratio / mean(max)_match_distance / mean_match_score / mean_score_gap / mean_score_ratio`，用于识别 correspondence reuse 和 target degeneracy。
   - CT LiDAR profiling 现已新增 `time_bucket_count / max_time_bucket_population / mean_time_bucket_population / candidate_evaluation_count / mean_candidates_per_source`，作为后续 GPU 连续时间 LiDAR factor 设计的 baseline 指标。
+  - 已新增 `bspline_lidar_factor_result.hpp`，统一 `BSplineLidarFactorProfile / NumericAudit / DegeneracyReport / FactorResult / WindowProfileSummary`，作为 CPU 当前实现和 GPU 后续实现共享的 CT LiDAR profile/result 接口。
+  - `IntegratedBSplineGICPFactor` 现已支持 `profiling_report()` / `make_result(...)`，将单 factor 的 profiling、numeric-reference audit 和 degeneracy diagnostics 收口成一份可聚合结果，而不再只通过 ad-hoc trace 字段暴露。
+  - `OdometryEstimationBSpline` 现已在每轮求解后聚合 active-window 内所有 CT LiDAR factor 结果，并新增 `bspline ct lidar cpu-summary` 汇总日志，输出整窗 weighted match/inlier、candidate baseline、time-bucket baseline、numeric-audit 峰值和 warning 数量。
+  - `test_bspline_gicp_factor.cpp` 现已补充窗口级 result aggregation 单测，为后续 GPU CT LiDAR factor 复用同一 summary/result 接口提供回归基线。
   - CT LiDAR target lookup 现已统一回到 frozen `iVox` 的原生 search/index 域，避免把 copied-point KD-tree 返回的索引和 `iVox` 内部 point/cov 访问混用。
   - `IntegratedBSplineGICPFactor` 现已新增 `diagnose_degeneracy(...)`，把当前 target/correspondence 状态转成可重用的 warning flags；`OdometryEstimationBSpline` 进一步把 `ct_lidar_warn_*` 阈值接成配置并输出专门的 degeneracy warning line。
   - `OdometryEstimationBSpline` 现已把 `ct_lidar_profile_numeric_reference` / `ct_lidar_numeric_reference_scale` 接成配置项，并把 numeric-reference drift 与 correspondence degeneracy diagnostics 写入 CT LiDAR trace 日志。

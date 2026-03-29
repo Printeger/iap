@@ -102,6 +102,10 @@
   - `OdometryEstimationBSpline` 现已把 `ct_lidar_profile_numeric_reference` 和 `ct_lidar_numeric_reference_scale` 接成配置项，并在 CT LiDAR trace 日志中输出 numeric-reference drift 和 target/correspondence 退化诊断
   - `IntegratedBSplineGICPFactor` 现已新增 `diagnose_degeneracy(...)`，将当前 factor 的 correspondence/target 状态转成 `low_match_ratio / low_target_diversity / high_target_reuse / high_ambiguity_rejection / weak_score_separation` 等可重用告警标志；`OdometryEstimationBSpline` 也已把 `ct_lidar_warn_*` 阈值接成配置项，并新增专门的 `bspline ct lidar degeneracy` warning 日志
   - `test_bspline_gicp_factor` 现已补充 numeric-reference check API 以及 correspondence diversity / score diagnostics 的专门测试，为下一步继续减少剩余数值差分提供基线
+  - 已新增 `bspline_lidar_factor_result.hpp`，统一 CT LiDAR 的 `profile / numeric audit / degeneracy / factor result / window summary` 结果类型，作为“CPU 当前实现 + GPU 后续实现”共享的 profile/result 接口
+  - `IntegratedBSplineGICPFactor` 现已支持 `profiling_report()` 和 `make_result(...)`，可把当前 factor 的 profiling、numeric-reference audit 和 degeneracy diagnostics 收口成统一结果对象，而不再只依赖零散日志字段
+  - `OdometryEstimationBSpline` 现已在每轮 fixed-lag 求解后聚合 active window 内全部 CT LiDAR segment 的结果，并新增 `bspline ct lidar cpu-summary` 汇总日志，输出整窗 weighted match/inlier、候选评估量、time bucket baseline、numeric-audit 最大误差和 warning 计数
+  - `test_bspline_gicp_factor` 现已新增窗口级 result aggregation 单测，验证 CPU profiling baseline 汇总逻辑，作为后续 GPU CT LiDAR factor 复用同一接口的对照基线
 - planner 已开始真正消费 continuous-time state：
   - `IntegrityPlanner::plan()` 在可用时会优先使用 `SplineControlAccess` 锚定当前时刻，再从 `ContinuousTrajectoryView` 解析种子状态
   - motion primitives 现在从连续时间 `pos / vel / yaw / sigma` 出发，而不只是把 trajectory view 当成一个 `sigma0` 来源

@@ -3,6 +3,11 @@
 > 规则：任何代码改动必须在这里记录，并包含 IAP-RQ-XXX。
 
 ## Unreleased
+- feat(dev-ct-mainline-lidar-summary): IAP-RQ-300 / IAP-RQ-410 — continue `M2 / WP2` by summarizing CT LiDAR CPU profiling at the active-window level and extracting a GPU-ready result interface.
+  - Added `include/iap/odometry/bspline_lidar_factor_result.hpp`, which defines unified CPU/GPU-facing CT LiDAR profile/result payloads: `BSplineLidarFactorProfile`, `BSplineLidarNumericAudit`, `BSplineLidarDegeneracyReport`, `BSplineLidarFactorResult`, and `BSplineLidarWindowProfileSummary`.
+  - `IntegratedBSplineGICPFactor` now exports `profiling_report()` and `make_result(...)`, so per-factor profiling, numeric-reference audit, and degeneracy diagnostics are serialized into one reusable result object instead of being consumed only through ad-hoc logging fields.
+  - `OdometryEstimationBSpline` now aggregates all active CT LiDAR segment results after each solve and emits a dedicated `bspline ct lidar cpu-summary` trace line with weighted match/inlier ratios, candidate/bucket baselines, numeric-audit maxima, and warning counts for the whole active window.
+  - `test_bspline_gicp_factor.cpp` now includes a dedicated window-summary aggregation test, so the shared CPU-now / GPU-later result interface is covered by unit tests instead of only compile-time usage.
 - feat(dev-ct-mainline-lidar-warn): IAP-RQ-300 / IAP-RQ-410 — continue `M2 / WP2` with stronger CT LiDAR rotation-block auditing, degeneracy warnings, and GPU-facing profiling baselines.
   - `IntegratedBSplineGICPFactor::check_against_numeric_full(...)` now performs axis-wise rotation-block audits in addition to the previous aggregate rotation/translation check, and reports worst-axis / mean-axis relative disagreement against the `NUMERIC_FULL` baseline.
   - LiDAR profiling stats now expose GPU-oriented baseline fields: `time_bucket_count`, `max_time_bucket_population`, `mean_time_bucket_population`, `candidate_evaluation_count`, and `mean_candidates_per_source`.
