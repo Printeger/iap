@@ -2,6 +2,7 @@
 
 #include <gtsam/base/SymmetricBlockMatrix.h>
 #include <gtsam/linear/HessianFactor.h>
+#include <gtsam/linear/VectorValues.h>
 #include <gtsam_points/ann/kdtree2.hpp>
 #include <gtsam_points/ann/ivox.hpp>
 #include <gtsam_points/types/point_cloud_cpu.hpp>
@@ -9,6 +10,7 @@
 #include <algorithm>
 #include <chrono>
 #include <limits>
+#include <unordered_map>
 
 namespace iap {
 
@@ -98,9 +100,7 @@ IntegratedBSplineGICPFactor::IntegratedBSplineGICPFactor(
   if (target_tree) {
     target_tree_ = target_tree;
   } else {
-    std::shared_ptr<gtsam_points::PointCloud> target_points =
-      std::make_shared<gtsam_points::PointCloudCPU>(target_->voxel_points());
-    target_tree_ = std::make_shared<gtsam_points::KdTree2<gtsam_points::PointCloud>>(target_points);
+    target_tree_ = target_;
   }
 }
 
@@ -190,6 +190,9 @@ void IntegratedBSplineGICPFactor::update_poses(const gtsam::Values& values) cons
 void IntegratedBSplineGICPFactor::update_correspondences() const {
   correspondences_.resize(frame::size(*source_));
   mahalanobis_.resize(frame::size(*source_));
+  correspondence_sq_distances_.resize(frame::size(*source_));
+  correspondence_best_scores_.resize(frame::size(*source_));
+  correspondence_second_best_scores_.resize(frame::size(*source_));
   matched_correspondence_count_ = 0;
   rejected_distance_count_ = 0;
   rejected_ambiguity_count_ = 0;
@@ -209,6 +212,9 @@ void IntegratedBSplineGICPFactor::update_correspondences() const {
     if (num_found == 0) {
       correspondences_[static_cast<std::size_t>(i)] = -1;
       mahalanobis_[static_cast<std::size_t>(i)].setZero();
+      correspondence_sq_distances_[static_cast<std::size_t>(i)] = std::numeric_limits<double>::max();
+      correspondence_best_scores_[static_cast<std::size_t>(i)] = std::numeric_limits<double>::max();
+      correspondence_second_best_scores_[static_cast<std::size_t>(i)] = std::numeric_limits<double>::max();
       rejected_distance_count_++;
       continue;
     }
@@ -217,6 +223,7 @@ void IntegratedBSplineGICPFactor::update_correspondences() const {
     const Eigen::Matrix4d pose_matrix = pose.matrix();
     double best_score = std::numeric_limits<double>::max();
     double second_best_score = std::numeric_limits<double>::max();
+    double best_sq_dist = std::numeric_limits<double>::max();
     long best_index = -1;
     Eigen::Matrix3d best_mahalanobis = Eigen::Matrix3d::Zero();
 
@@ -236,6 +243,7 @@ void IntegratedBSplineGICPFactor::update_correspondences() const {
       if (score < best_score) {
         second_best_score = best_score;
         best_score = score;
+        best_sq_dist = k_sq_dists[c];
         best_index = target_index;
         best_mahalanobis = M;
       } else if (score < second_best_score) {
@@ -246,6 +254,9 @@ void IntegratedBSplineGICPFactor::update_correspondences() const {
     if (best_index < 0) {
       correspondences_[static_cast<std::size_t>(i)] = -1;
       mahalanobis_[static_cast<std::size_t>(i)].setZero();
+      correspondence_sq_distances_[static_cast<std::size_t>(i)] = std::numeric_limits<double>::max();
+      correspondence_best_scores_[static_cast<std::size_t>(i)] = std::numeric_limits<double>::max();
+      correspondence_second_best_scores_[static_cast<std::size_t>(i)] = std::numeric_limits<double>::max();
       rejected_distance_count_++;
       continue;
     }
@@ -256,6 +267,9 @@ void IntegratedBSplineGICPFactor::update_correspondences() const {
         (best_score / second_best_score) >= correspondence_accept_ratio_) {
       correspondences_[static_cast<std::size_t>(i)] = -1;
       mahalanobis_[static_cast<std::size_t>(i)].setZero();
+      correspondence_sq_distances_[static_cast<std::size_t>(i)] = best_sq_dist;
+      correspondence_best_scores_[static_cast<std::size_t>(i)] = best_score;
+      correspondence_second_best_scores_[static_cast<std::size_t>(i)] = second_best_score;
       rejected_ambiguity_count_++;
       continue;
     }
@@ -265,12 +279,18 @@ void IntegratedBSplineGICPFactor::update_correspondences() const {
         (second_best_score - best_score) <= correspondence_min_score_gap_) {
       correspondences_[static_cast<std::size_t>(i)] = -1;
       mahalanobis_[static_cast<std::size_t>(i)].setZero();
+      correspondence_sq_distances_[static_cast<std::size_t>(i)] = best_sq_dist;
+      correspondence_best_scores_[static_cast<std::size_t>(i)] = best_score;
+      correspondence_second_best_scores_[static_cast<std::size_t>(i)] = second_best_score;
       rejected_ambiguity_count_++;
       continue;
     }
 
     correspondences_[static_cast<std::size_t>(i)] = best_index;
     mahalanobis_[static_cast<std::size_t>(i)] = best_mahalanobis;
+    correspondence_sq_distances_[static_cast<std::size_t>(i)] = best_sq_dist;
+    correspondence_best_scores_[static_cast<std::size_t>(i)] = best_score;
+    correspondence_second_best_scores_[static_cast<std::size_t>(i)] = second_best_score;
     matched_correspondence_count_++;
   }
 }
@@ -344,6 +364,99 @@ double IntegratedBSplineGICPFactor::robust_weight(const double mahalanobis_error
   return 1.0;
 }
 
+void IntegratedBSplineGICPFactor::update_profiling_stats(
+  const char* stage,
+  double pose_update_ms,
+  double correspondence_ms,
+  double accumulation_ms,
+  double total_ms,
+  double total_error) const {
+  last_profile_.valid = true;
+  last_profile_.stage = stage;
+  last_profile_.source_point_count = frame::size(*source_);
+  last_profile_.target_point_count = target_->voxel_points().size();
+  last_profile_.matched_point_count = matched_correspondence_count_;
+  last_profile_.inlier_point_count = accepted_inlier_count_;
+  last_profile_.rejected_distance_count = rejected_distance_count_;
+  last_profile_.rejected_ambiguity_count = rejected_ambiguity_count_;
+  last_profile_.rejected_outlier_count = rejected_outlier_count_;
+  last_profile_.rejected_robust_count = rejected_robust_count_;
+  last_profile_.match_ratio =
+    last_profile_.source_point_count == 0 ? 0.0
+                                          : static_cast<double>(matched_correspondence_count_) / last_profile_.source_point_count;
+  last_profile_.inlier_ratio =
+    last_profile_.source_point_count == 0 ? 0.0
+                                          : static_cast<double>(accepted_inlier_count_) / last_profile_.source_point_count;
+  last_profile_.mean_robust_weight =
+    accepted_inlier_count_ == 0 ? 1.0 : robust_weight_sum_ / static_cast<double>(accepted_inlier_count_);
+  last_profile_.pose_update_ms = pose_update_ms;
+  last_profile_.correspondence_ms = correspondence_ms;
+  last_profile_.accumulation_ms = accumulation_ms;
+  last_profile_.total_ms = total_ms;
+  last_profile_.total_error = total_error;
+
+  last_profile_.unique_target_count = 0;
+  last_profile_.max_target_reuse = 0;
+  last_profile_.unique_target_ratio = 0.0;
+  last_profile_.max_target_reuse_ratio = 0.0;
+  last_profile_.mean_match_distance = 0.0;
+  last_profile_.max_match_distance = 0.0;
+  last_profile_.mean_match_score = 0.0;
+  last_profile_.mean_score_gap = 0.0;
+  last_profile_.mean_score_ratio = 0.0;
+
+  std::unordered_map<long, std::size_t> target_reuse_counts;
+  double distance_sum = 0.0;
+  double score_sum = 0.0;
+  double gap_sum = 0.0;
+  double ratio_sum = 0.0;
+  std::size_t accepted_score_count = 0;
+  std::size_t comparative_score_count = 0;
+
+  for (std::size_t i = 0; i < correspondences_.size(); ++i) {
+    const long target_index = correspondences_[i];
+    if (target_index >= 0) {
+      const double match_distance = std::sqrt(std::max(0.0, correspondence_sq_distances_[i]));
+      const double match_score = correspondence_best_scores_[i];
+      distance_sum += match_distance;
+      score_sum += match_score;
+      last_profile_.max_match_distance = std::max(last_profile_.max_match_distance, match_distance);
+      target_reuse_counts[target_index]++;
+      accepted_score_count++;
+    }
+
+    if (correspondence_best_scores_[i] < std::numeric_limits<double>::max() &&
+        correspondence_second_best_scores_[i] < std::numeric_limits<double>::max()) {
+      const double gap = correspondence_second_best_scores_[i] - correspondence_best_scores_[i];
+      const double ratio =
+        correspondence_best_scores_[i] / std::max(1e-9, correspondence_second_best_scores_[i]);
+      gap_sum += gap;
+      ratio_sum += ratio;
+      comparative_score_count++;
+    }
+  }
+
+  last_profile_.unique_target_count = target_reuse_counts.size();
+  for (const auto& [_, reuse_count] : target_reuse_counts) {
+    last_profile_.max_target_reuse = std::max(last_profile_.max_target_reuse, reuse_count);
+  }
+
+  if (matched_correspondence_count_ > 0) {
+    last_profile_.unique_target_ratio =
+      static_cast<double>(last_profile_.unique_target_count) / static_cast<double>(matched_correspondence_count_);
+    last_profile_.max_target_reuse_ratio =
+      static_cast<double>(last_profile_.max_target_reuse) / static_cast<double>(matched_correspondence_count_);
+  }
+  if (accepted_score_count > 0) {
+    last_profile_.mean_match_distance = distance_sum / static_cast<double>(accepted_score_count);
+    last_profile_.mean_match_score = score_sum / static_cast<double>(accepted_score_count);
+  }
+  if (comparative_score_count > 0) {
+    last_profile_.mean_score_gap = gap_sum / static_cast<double>(comparative_score_count);
+    last_profile_.mean_score_ratio = ratio_sum / static_cast<double>(comparative_score_count);
+  }
+}
+
 double IntegratedBSplineGICPFactor::error(const gtsam::Values& values) const {
   using Clock = std::chrono::steady_clock;
   const auto t_start = Clock::now();
@@ -390,33 +503,13 @@ double IntegratedBSplineGICPFactor::error(const gtsam::Values& values) const {
 
   if (enable_profiling_) {
     const auto t_end = Clock::now();
-    last_profile_.valid = true;
-    last_profile_.stage = "error";
-    last_profile_.source_point_count = frame::size(*source_);
-    last_profile_.target_point_count = target_->voxel_points().size();
-    last_profile_.matched_point_count = matched_correspondence_count_;
-    last_profile_.inlier_point_count = accepted_inlier_count_;
-    last_profile_.rejected_distance_count = rejected_distance_count_;
-    last_profile_.rejected_ambiguity_count = rejected_ambiguity_count_;
-    last_profile_.rejected_outlier_count = rejected_outlier_count_;
-    last_profile_.rejected_robust_count = rejected_robust_count_;
-    last_profile_.match_ratio =
-      last_profile_.source_point_count == 0 ? 0.0
-                                            : static_cast<double>(matched_correspondence_count_) / last_profile_.source_point_count;
-    last_profile_.inlier_ratio =
-      last_profile_.source_point_count == 0 ? 0.0
-                                            : static_cast<double>(accepted_inlier_count_) / last_profile_.source_point_count;
-    last_profile_.mean_robust_weight =
-      accepted_inlier_count_ == 0 ? 1.0 : robust_weight_sum_ / static_cast<double>(accepted_inlier_count_);
-    last_profile_.pose_update_ms =
-      std::chrono::duration<double, std::milli>(t_pose - t_start).count();
-    last_profile_.correspondence_ms =
-      std::chrono::duration<double, std::milli>(t_corr - t_pose).count();
-    last_profile_.accumulation_ms =
-      std::chrono::duration<double, std::milli>(t_end - t_corr).count();
-    last_profile_.total_ms =
-      std::chrono::duration<double, std::milli>(t_end - t_start).count();
-    last_profile_.total_error = total_error;
+    update_profiling_stats(
+      "error",
+      std::chrono::duration<double, std::milli>(t_pose - t_start).count(),
+      std::chrono::duration<double, std::milli>(t_corr - t_pose).count(),
+      std::chrono::duration<double, std::milli>(t_end - t_corr).count(),
+      std::chrono::duration<double, std::milli>(t_end - t_start).count(),
+      total_error);
   }
 
   return total_error;
@@ -507,33 +600,13 @@ gtsam::GaussianFactor::shared_ptr IntegratedBSplineGICPFactor::linearize(const g
 
   if (enable_profiling_) {
     const auto t_end = Clock::now();
-    last_profile_.valid = true;
-    last_profile_.stage = "linearize";
-    last_profile_.source_point_count = frame::size(*source_);
-    last_profile_.target_point_count = target_->voxel_points().size();
-    last_profile_.matched_point_count = matched_correspondence_count_;
-    last_profile_.inlier_point_count = accepted_inlier_count_;
-    last_profile_.rejected_distance_count = rejected_distance_count_;
-    last_profile_.rejected_ambiguity_count = rejected_ambiguity_count_;
-    last_profile_.rejected_outlier_count = rejected_outlier_count_;
-    last_profile_.rejected_robust_count = rejected_robust_count_;
-    last_profile_.match_ratio =
-      last_profile_.source_point_count == 0 ? 0.0
-                                            : static_cast<double>(matched_correspondence_count_) / last_profile_.source_point_count;
-    last_profile_.inlier_ratio =
-      last_profile_.source_point_count == 0 ? 0.0
-                                            : static_cast<double>(accepted_inlier_count_) / last_profile_.source_point_count;
-    last_profile_.mean_robust_weight =
-      accepted_inlier_count_ == 0 ? 1.0 : robust_weight_sum_ / static_cast<double>(accepted_inlier_count_);
-    last_profile_.pose_update_ms =
-      std::chrono::duration<double, std::milli>(t_pose - t_start).count();
-    last_profile_.correspondence_ms =
-      std::chrono::duration<double, std::milli>(t_corr - t_pose).count();
-    last_profile_.accumulation_ms =
-      std::chrono::duration<double, std::milli>(t_end - t_corr).count();
-    last_profile_.total_ms =
-      std::chrono::duration<double, std::milli>(t_end - t_start).count();
-    last_profile_.total_error = total_error;
+    update_profiling_stats(
+      "linearize",
+      std::chrono::duration<double, std::milli>(t_pose - t_start).count(),
+      std::chrono::duration<double, std::milli>(t_corr - t_pose).count(),
+      std::chrono::duration<double, std::milli>(t_end - t_corr).count(),
+      std::chrono::duration<double, std::milli>(t_end - t_start).count(),
+      total_error);
   }
 
   return std::make_shared<gtsam::HessianFactor>(keys_, augmented);
@@ -570,6 +643,89 @@ IntegratedBSplineGICPFactor::LinearizationCheckResult IntegratedBSplineGICPFacto
   result.abs_error = std::abs(result.actual_error - result.predicted_error);
   result.rel_error =
     result.abs_error / std::max(1e-9, std::max(std::abs(result.actual_error), std::abs(result.predicted_error)));
+  return result;
+}
+
+IntegratedBSplineGICPFactor::NumericReferenceCheckResult IntegratedBSplineGICPFactor::check_against_numeric_full(
+  const gtsam::Values& values,
+  double perturbation_scale) const {
+  NumericReferenceCheckResult result;
+  result.perturbation_scale = perturbation_scale;
+
+  if (perturbation_scale <= 0.0) {
+    return result;
+  }
+
+  std::array<gtsam::Key, kBSplineControlPointCount> keys{};
+  for (std::size_t i = 0; i < kBSplineControlPointCount; ++i) {
+    keys[i] = keys_[i];
+  }
+
+  auto configure_factor = [&](JacobianMode mode) {
+    IntegratedBSplineGICPFactor factor(keys, target_, source_, target_tree_);
+    factor.set_max_correspondence_distance(std::sqrt(max_correspondence_distance_sq_));
+    factor.set_enable_profiling(false);
+    factor.set_jacobian_mode(mode);
+    factor.set_numeric_eps(numeric_eps_);
+    factor.set_correspondence_candidate_count(correspondence_candidate_count_);
+    factor.set_correspondence_accept_ratio(correspondence_accept_ratio_);
+    factor.set_correspondence_min_score_gap(correspondence_min_score_gap_);
+    factor.set_outlier_mahalanobis_threshold(outlier_mahalanobis_threshold_);
+    factor.set_robust_kernel(robust_kernel_, robust_kernel_width_);
+    factor.set_robust_weight_floor(robust_weight_floor_);
+    return factor;
+  };
+
+  auto numeric_factor = configure_factor(JacobianMode::NUMERIC_FULL);
+  auto semi_factor = configure_factor(JacobianMode::SEMI_ANALYTIC);
+
+  const auto numeric_linear = numeric_factor.linearize(values);
+  const auto semi_linear = semi_factor.linearize(values);
+  if (!numeric_linear || !semi_linear) {
+    return result;
+  }
+
+  auto make_delta = [&](bool rotation_only) {
+    gtsam::VectorValues delta;
+    for (std::size_t i = 0; i < kBSplineControlPointCount; ++i) {
+      gtsam::Vector6 d = gtsam::Vector6::Zero();
+      const double scale = perturbation_scale * (1.0 + 0.1 * static_cast<double>(i));
+      if (rotation_only) {
+        d << 1.0, -0.7, 0.45, 0.0, 0.0, 0.0;
+      } else {
+        d << 0.0, 0.0, 0.0, 0.6, -0.35, 0.2;
+      }
+      d *= scale;
+      delta.insert(keys_[i], d);
+    }
+    return delta;
+  };
+
+  const auto rotation_delta = make_delta(true);
+  const auto translation_delta = make_delta(false);
+  const auto rotation_perturbed = values.retract(rotation_delta);
+  const auto translation_perturbed = values.retract(translation_delta);
+
+  result.valid = true;
+  result.numeric_rotation_predicted_error = numeric_linear->error(rotation_delta);
+  result.semi_rotation_predicted_error = semi_linear->error(rotation_delta);
+  result.rotation_actual_error = semi_factor.error(rotation_perturbed);
+  result.rotation_abs_error = std::abs(result.semi_rotation_predicted_error - result.numeric_rotation_predicted_error);
+  result.rotation_rel_error = result.rotation_abs_error /
+                              std::max(1e-9,
+                                       std::max(std::abs(result.semi_rotation_predicted_error),
+                                                std::abs(result.numeric_rotation_predicted_error)));
+
+  result.numeric_translation_predicted_error = numeric_linear->error(translation_delta);
+  result.semi_translation_predicted_error = semi_linear->error(translation_delta);
+  result.translation_actual_error = semi_factor.error(translation_perturbed);
+  result.translation_abs_error =
+    std::abs(result.semi_translation_predicted_error - result.numeric_translation_predicted_error);
+  result.translation_rel_error = result.translation_abs_error /
+                                 std::max(1e-9,
+                                          std::max(std::abs(result.semi_translation_predicted_error),
+                                                   std::abs(result.numeric_translation_predicted_error)));
+
   return result;
 }
 

@@ -45,12 +45,21 @@ class IntegratedBSplineGICPFactor : public gtsam::NonlinearFactor {
     std::size_t target_point_count = 0;
     std::size_t matched_point_count = 0;
     std::size_t inlier_point_count = 0;
+    std::size_t unique_target_count = 0;
+    std::size_t max_target_reuse = 0;
     std::size_t rejected_distance_count = 0;
     std::size_t rejected_ambiguity_count = 0;
     std::size_t rejected_outlier_count = 0;
     std::size_t rejected_robust_count = 0;
     double match_ratio = 0.0;
     double inlier_ratio = 0.0;
+    double unique_target_ratio = 0.0;
+    double max_target_reuse_ratio = 0.0;
+    double mean_match_distance = 0.0;
+    double max_match_distance = 0.0;
+    double mean_match_score = 0.0;
+    double mean_score_gap = 0.0;
+    double mean_score_ratio = 0.0;
     double mean_robust_weight = 1.0;
     double pose_update_ms = 0.0;
     double correspondence_ms = 0.0;
@@ -68,6 +77,21 @@ class IntegratedBSplineGICPFactor : public gtsam::NonlinearFactor {
     double actual_error = 0.0;
     double abs_error = 0.0;
     double rel_error = 0.0;
+  };
+
+  struct NumericReferenceCheckResult {
+    bool valid = false;
+    double perturbation_scale = 0.0;
+    double numeric_rotation_predicted_error = 0.0;
+    double semi_rotation_predicted_error = 0.0;
+    double rotation_actual_error = 0.0;
+    double rotation_abs_error = 0.0;
+    double rotation_rel_error = 0.0;
+    double numeric_translation_predicted_error = 0.0;
+    double semi_translation_predicted_error = 0.0;
+    double translation_actual_error = 0.0;
+    double translation_abs_error = 0.0;
+    double translation_rel_error = 0.0;
   };
 
   IntegratedBSplineGICPFactor(
@@ -104,6 +128,7 @@ class IntegratedBSplineGICPFactor : public gtsam::NonlinearFactor {
   double error(const gtsam::Values& values) const override;
   gtsam::GaussianFactor::shared_ptr linearize(const gtsam::Values& values) const override;
   LinearizationCheckResult check_linearization(const gtsam::Values& values, double perturbation_scale = 1e-4) const;
+  NumericReferenceCheckResult check_against_numeric_full(const gtsam::Values& values, double perturbation_scale = 1e-5) const;
 
   const std::vector<int>& time_indices() const { return time_indices_; }
   const std::vector<gtsam::Pose3>& source_poses() const { return source_poses_; }
@@ -124,6 +149,13 @@ class IntegratedBSplineGICPFactor : public gtsam::NonlinearFactor {
     const std::array<gtsam::Pose3, kBSplineControlPointCount>& control_poses,
     std::size_t time_index,
     const Eigen::Vector3d& source_point) const;
+  void update_profiling_stats(
+    const char* stage,
+    double pose_update_ms,
+    double correspondence_ms,
+    double accumulation_ms,
+    double total_ms,
+    double total_error) const;
   double robust_cost(double mahalanobis_error) const;
   double robust_weight(double mahalanobis_error) const;
 
@@ -154,6 +186,9 @@ class IntegratedBSplineGICPFactor : public gtsam::NonlinearFactor {
   mutable std::vector<QuaternionJacobianArray> blend_quaternion_jacobians_;
   mutable std::vector<long> correspondences_;
   mutable std::vector<Eigen::Matrix3d> mahalanobis_;
+  mutable std::vector<double> correspondence_sq_distances_;
+  mutable std::vector<double> correspondence_best_scores_;
+  mutable std::vector<double> correspondence_second_best_scores_;
   mutable std::size_t matched_correspondence_count_ = 0;
   mutable std::size_t rejected_distance_count_ = 0;
   mutable std::size_t rejected_ambiguity_count_ = 0;

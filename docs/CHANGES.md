@@ -3,6 +3,12 @@
 > 规则：任何代码改动必须在这里记录，并包含 IAP-RQ-XXX。
 
 ## Unreleased
+- feat(dev-ct-mainline-lidar-profile): IAP-RQ-300 / IAP-RQ-410 — continue `M2 / WP2` by adding numeric-reference diagnostics and clearer CT LiDAR degeneracy telemetry.
+  - `IntegratedBSplineGICPFactor` now provides `check_against_numeric_full(...)`, which compares the current semi-analytic linearization against a locally re-instantiated `NUMERIC_FULL` reference and separates rotation/translation predicted-error agreement.
+  - LiDAR profiling stats now expose correspondence-diversity and target-degeneracy indicators: `unique_target_count`, `max_target_reuse`, `unique_target_ratio`, `max_target_reuse_ratio`, `mean/max_match_distance`, `mean_match_score`, and best/second-best score gap/ratio aggregates.
+  - CT LiDAR target lookup now uses the native frozen `iVox` search structure directly, so correspondence indices and target point/covariance access share one consistent indexing domain instead of mixing copied-point KD-tree indices with `iVox` frame access.
+  - `OdometryEstimationBSpline` now wires `ct_lidar_profile_numeric_reference` and `ct_lidar_numeric_reference_scale`, and CT LiDAR trace logs now include both numeric-reference drift diagnostics and richer correspondence-degeneracy telemetry.
+  - `test_bspline_gicp_factor.cpp` now covers the numeric-reference check API as well as profiling of correspondence diversity / score diagnostics.
 - feat(dev-ct-mainline-lidar-analytic): IAP-RQ-300 / IAP-RQ-410 — continue `M2 / WP2` by pushing CT LiDAR rotation Jacobians and target policy beyond the first semi-analytic baseline.
   - `IntegratedBSplineGICPFactor` now evaluates the `SEMI_ANALYTIC` rotation block through an analytic quaternion-blend chain rule instead of caching per-time-node rotational finite differences, further reducing hot-path numeric differentiation while keeping `NUMERIC_FULL` as the fallback baseline.
   - The factor now supports an additional absolute ambiguity gate (`ct_lidar_correspondence_min_score_gap`) plus a robust-weight floor (`ct_lidar_robust_weight_floor`), and profiling stats now expose `rejected_robust_count`.

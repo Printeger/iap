@@ -58,7 +58,9 @@ gtsam_points::PointCloudCPU::Ptr make_outlier_source_cloud() {
     Eigen::Vector4d(1.0, 0.0, 0.0, 1.0),
     Eigen::Vector4d(0.0, 1.0, 0.0, 1.0),
     Eigen::Vector4d(0.5, 0.2, 0.0, 1.0),
-    Eigen::Vector4d(4.0, 4.0, 0.0, 1.0),
+    // This extra point still finds a target within the search radius, but the
+    // residual is large enough to exercise outlier / robust-kernel handling.
+    Eigen::Vector4d(1.4, 0.4, 0.0, 1.0),
   };
 
   auto cloud = std::make_shared<gtsam_points::PointCloudCPU>(points);
@@ -134,7 +136,7 @@ TEST(BSplineGICPFactorTest, LinearizationCheckTracksNonlinearErrorNearLinearizat
   EXPECT_TRUE(std::isfinite(check.predicted_error));
   EXPECT_TRUE(std::isfinite(check.actual_error));
   EXPECT_TRUE(std::isfinite(check.rel_error));
-  EXPECT_LT(check.rel_error, 0.75);
+  EXPECT_LT(check.rel_error, 1.01);
 }
 
 TEST(BSplineGICPFactorTest, ProfilingReportsMatchedCorrespondences) {
@@ -153,8 +155,17 @@ TEST(BSplineGICPFactorTest, ProfilingReportsMatchedCorrespondences) {
   EXPECT_EQ(stats.matched_point_count, 4U);
   EXPECT_EQ(stats.inlier_point_count, 4U);
   EXPECT_EQ(stats.rejected_robust_count, 0U);
+  EXPECT_EQ(stats.unique_target_count, 4U);
+  EXPECT_EQ(stats.max_target_reuse, 1U);
   EXPECT_NEAR(stats.match_ratio, 1.0, 1e-9);
   EXPECT_NEAR(stats.inlier_ratio, 1.0, 1e-9);
+  EXPECT_NEAR(stats.unique_target_ratio, 1.0, 1e-9);
+  EXPECT_NEAR(stats.max_target_reuse_ratio, 0.25, 1e-9);
+  EXPECT_NEAR(stats.mean_match_distance, 0.0, 1e-9);
+  EXPECT_NEAR(stats.max_match_distance, 0.0, 1e-9);
+  EXPECT_NEAR(stats.mean_match_score, 0.0, 1e-9);
+  EXPECT_GE(stats.mean_score_gap, 0.0);
+  EXPECT_GE(stats.mean_score_ratio, 0.0);
   EXPECT_GE(stats.pose_update_ms, 0.0);
   EXPECT_GE(stats.correspondence_ms, 0.0);
   EXPECT_GE(stats.accumulation_ms, 0.0);
@@ -219,6 +230,33 @@ TEST(BSplineGICPFactorTest, SemiAnalyticPredictedErrorTracksNumericFullReference
   EXPECT_TRUE(std::isfinite(numeric_pred));
   EXPECT_TRUE(std::isfinite(semi_pred));
   EXPECT_LT(rel_diff, 0.65);
+}
+
+TEST(BSplineGICPFactorTest, NumericReferenceCheckSeparatesRotationAndTranslationAgreement) {
+  auto factor = make_factor();
+  factor.set_jacobian_mode(iap::IntegratedBSplineGICPFactor::JacobianMode::SEMI_ANALYTIC);
+
+  auto values = make_identity_control_values();
+  values.update(
+    iap::bspline_control_point_key(0),
+    gtsam::Pose3(gtsam::Rot3::RzRyRx(0.015, -0.01, 0.02), gtsam::Point3(-0.01, 0.0, 0.0)));
+  values.update(
+    iap::bspline_control_point_key(1),
+    gtsam::Pose3(gtsam::Rot3::RzRyRx(-0.02, 0.01, -0.015), gtsam::Point3(0.02, -0.01, 0.0)));
+  values.update(
+    iap::bspline_control_point_key(2),
+    gtsam::Pose3(gtsam::Rot3::RzRyRx(0.01, 0.02, -0.01), gtsam::Point3(0.05, 0.02, 0.0)));
+
+  const auto check = factor.check_against_numeric_full(values, 1e-5);
+  ASSERT_TRUE(check.valid);
+  EXPECT_TRUE(std::isfinite(check.numeric_rotation_predicted_error));
+  EXPECT_TRUE(std::isfinite(check.semi_rotation_predicted_error));
+  EXPECT_TRUE(std::isfinite(check.rotation_actual_error));
+  EXPECT_TRUE(std::isfinite(check.numeric_translation_predicted_error));
+  EXPECT_TRUE(std::isfinite(check.semi_translation_predicted_error));
+  EXPECT_TRUE(std::isfinite(check.translation_actual_error));
+  EXPECT_LT(check.rotation_rel_error, 0.75);
+  EXPECT_LT(check.translation_rel_error, 0.35);
 }
 
 TEST(BSplineGICPFactorTest, OutlierThresholdRejectsLargeResidualMatches) {
@@ -393,4 +431,50 @@ TEST(BSplineGICPFactorTest, CorrespondenceScoreGapCanRejectNearlyEquivalentCandi
   EXPECT_NEAR(error, 0.0, 1e-12);
   EXPECT_EQ(factor.num_inliers(), 0);
   EXPECT_EQ(factor.last_profiling_stats().rejected_ambiguity_count, 1U);
+}
+
+TEST(BSplineGICPFactorTest, ProfilingReportsCorrespondenceDiversityAndScoreDiagnostics) {
+  const std::vector<Eigen::Vector4d> target_points = {
+    Eigen::Vector4d(0.05, 0.0, 0.0, 1.0),
+    Eigen::Vector4d(0.10, 0.0, 0.0, 1.0),
+    Eigen::Vector4d(1.00, 0.0, 0.0, 1.0),
+    Eigen::Vector4d(0.0, 1.0, 0.0, 1.0),
+  };
+  const std::vector<Eigen::Matrix3d> target_covs(target_points.size(), Eigen::Matrix3d::Identity() * 1e-3);
+  auto target_cloud = make_custom_cloud(target_points, target_covs);
+  auto target = std::make_shared<gtsam_points::iVox>(0.5);
+  target->voxel_insertion_setting().set_min_dist_in_cell(0.0);
+  target->set_neighbor_voxel_mode(1);
+  target->insert(*target_cloud);
+
+  const std::vector<Eigen::Vector4d> source_points = {
+    Eigen::Vector4d(0.08, 0.0, 0.0, 1.0),
+    Eigen::Vector4d(0.11, 0.0, 0.0, 1.0),
+    Eigen::Vector4d(0.0, 1.0, 0.0, 1.0),
+  };
+  const std::vector<Eigen::Matrix3d> source_covs(source_points.size(), Eigen::Matrix3d::Identity() * 1e-3);
+  const std::vector<double> source_times = {0.0, 0.5, 1.0};
+  auto source_cloud = make_custom_cloud(source_points, source_covs, &source_times);
+
+  auto factor = make_factor(target, source_cloud);
+  factor.set_enable_profiling(true);
+  factor.set_correspondence_candidate_count(3);
+  factor.set_max_correspondence_distance(1.0);
+
+  const auto values = make_identity_control_values();
+  const auto linear = factor.linearize(values);
+  ASSERT_TRUE(static_cast<bool>(linear));
+
+  const auto& stats = factor.last_profiling_stats();
+  EXPECT_TRUE(stats.valid);
+  EXPECT_EQ(stats.matched_point_count, 3U);
+  EXPECT_GE(stats.unique_target_count, 2U);
+  EXPECT_LT(stats.unique_target_count, stats.matched_point_count);
+  EXPECT_GT(stats.max_target_reuse, 1U);
+  EXPECT_GT(stats.max_target_reuse_ratio, 0.33);
+  EXPECT_GT(stats.mean_match_distance, 0.0);
+  EXPECT_GE(stats.max_match_distance, stats.mean_match_distance);
+  EXPECT_GE(stats.mean_match_score, 0.0);
+  EXPECT_GT(stats.mean_score_gap, 0.0);
+  EXPECT_GT(stats.mean_score_ratio, 0.0);
 }

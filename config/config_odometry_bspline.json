@@ -47,7 +47,7 @@
     "ct_lidar_target_mode": "ACTIVE_WINDOW_SNAPSHOT",
     // Jacobian mode:
     //   NUMERIC_FULL   = numeric pose Jacobian on all 6 DoF of each control pose
-    //   SEMI_ANALYTIC  = analytic control-translation block + numeric control-rotation block
+    //   SEMI_ANALYTIC  = analytic translation + normalized-quaternion-blend rotation chain rule
     "ct_lidar_jacobian_mode": "SEMI_ANALYTIC",
     // Number of most recent active frames used to build a frozen snapshot target.
     // <= 0 means use all active frames currently retained in the lag window.
@@ -68,7 +68,7 @@
     "ct_lidar_correspondence_candidates": 3,
     "ct_lidar_correspondence_accept_ratio": 0.0,
     "ct_lidar_correspondence_min_score_gap": 0.0,
-    // Numeric perturbation scale kept only for the NUMERIC_FULL fallback / linearization A-B checks.
+    // Numeric perturbation scale kept only for the NUMERIC_FULL fallback / profiling A-B checks.
     "ct_lidar_jacobian_numeric_eps": 1e-4,
     // Optional outlier rejection on the whitened residual norm sqrt(r^T M r).
     // <= 0 disables explicit outlier rejection.
@@ -83,8 +83,10 @@
     // Engineering hooks for LiDAR factor validation / profiling.
     "ct_lidar_profile_factor": false,
     "ct_lidar_validate_linearization": false,
+    "ct_lidar_profile_numeric_reference": false,
     "ct_lidar_linearization_check_scale": 1e-4,
     "ct_lidar_linearization_warn_ratio": 0.25,
+    "ct_lidar_numeric_reference_scale": 1e-5,
     "ctrl_point_anchor_inf_scale": 1e6,
     "ctrl_point_prediction_inf_scale": 1e3,
     "ctrl_point_smoothness_inf_scale": 1e2,

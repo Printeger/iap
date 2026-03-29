@@ -203,10 +203,14 @@ OdometryEstimationBSpline::OdometryEstimationBSpline(const OdometryEstimationBSp
   lidar_robust_weight_floor_ = config.param<double>("odometry_estimation", "ct_lidar_robust_weight_floor", 0.0);
   lidar_factor_profile_ = config.param<bool>("odometry_estimation", "ct_lidar_profile_factor", false);
   lidar_validate_linearization_ = config.param<bool>("odometry_estimation", "ct_lidar_validate_linearization", false);
+  lidar_profile_numeric_reference_ =
+    config.param<bool>("odometry_estimation", "ct_lidar_profile_numeric_reference", false);
   lidar_linearization_check_scale_ =
     config.param<double>("odometry_estimation", "ct_lidar_linearization_check_scale", 1e-4);
   lidar_linearization_warn_ratio_ =
     config.param<double>("odometry_estimation", "ct_lidar_linearization_warn_ratio", 0.25);
+  lidar_numeric_reference_scale_ =
+    config.param<double>("odometry_estimation", "ct_lidar_numeric_reference_scale", 1e-5);
   ctrl_point_anchor_inf_scale_ = config.param<double>("odometry_estimation", "ctrl_point_anchor_inf_scale", 1e6);
   ctrl_point_prediction_inf_scale_ = config.param<double>("odometry_estimation", "ctrl_point_prediction_inf_scale", 1e3);
   ctrl_point_smoothness_inf_scale_ = config.param<double>("odometry_estimation", "ctrl_point_smoothness_inf_scale", 1e2);
@@ -350,9 +354,7 @@ OdometryEstimationBSpline::ActiveSplineTargetReference OdometryEstimationBSpline
   if (lidar_target_mode_ == BSplineLidarTargetMode::GLOBAL_IVOX_REFERENCE && ct_target_ivox_ &&
       !ct_target_ivox_->voxel_points().empty()) {
     target_ref.target_snapshot = ct_target_ivox_;
-    std::shared_ptr<gtsam_points::PointCloud> target_points =
-      std::make_shared<gtsam_points::PointCloudCPU>(target_ref.target_snapshot->voxel_points());
-    target_ref.target_tree = std::make_shared<gtsam_points::KdTree2<gtsam_points::PointCloud>>(target_points);
+    target_ref.target_tree = target_ref.target_snapshot;
     target_ref.mode = BSplineLidarTargetMode::GLOBAL_IVOX_REFERENCE;
     target_ref.point_count = target_ref.target_snapshot->voxel_points().size();
     target_ref.build_ms = std::chrono::duration<double, std::milli>(Clock::now() - t_start).count();
@@ -420,9 +422,7 @@ OdometryEstimationBSpline::ActiveSplineTargetReference OdometryEstimationBSpline
   const bool global_reference_available = ct_target_ivox_ && !ct_target_ivox_->voxel_points().empty();
   if (snapshot_policy_accepted || (!global_reference_available && inserted)) {
     target_ref.target_snapshot = snapshot;
-    std::shared_ptr<gtsam_points::PointCloud> target_points =
-      std::make_shared<gtsam_points::PointCloudCPU>(target_ref.target_snapshot->voxel_points());
-    target_ref.target_tree = std::make_shared<gtsam_points::KdTree2<gtsam_points::PointCloud>>(target_points);
+    target_ref.target_tree = target_ref.target_snapshot;
     target_ref.mode = BSplineLidarTargetMode::ACTIVE_WINDOW_SNAPSHOT;
     target_ref.contributing_frames = target_ref.snapshot_frame_count;
     target_ref.point_count = target_ref.snapshot_point_count;
@@ -432,9 +432,7 @@ OdometryEstimationBSpline::ActiveSplineTargetReference OdometryEstimationBSpline
 
   target_ref.target_snapshot = global_reference_available ? ct_target_ivox_ : snapshot;
   target_ref.contributing_frames = inserted ? target_ref.snapshot_frame_count : 0;
-  std::shared_ptr<gtsam_points::PointCloud> target_points =
-    std::make_shared<gtsam_points::PointCloudCPU>(target_ref.target_snapshot->voxel_points());
-  target_ref.target_tree = std::make_shared<gtsam_points::KdTree2<gtsam_points::PointCloud>>(target_points);
+  target_ref.target_tree = target_ref.target_snapshot;
   target_ref.mode = BSplineLidarTargetMode::GLOBAL_IVOX_REFERENCE;
   target_ref.point_count = target_ref.target_snapshot ? target_ref.target_snapshot->voxel_points().size() : 0;
   target_ref.build_ms = std::chrono::duration<double, std::milli>(Clock::now() - t_start).count();
@@ -1140,7 +1138,7 @@ EstimationFrame::ConstPtr OdometryEstimationBSpline::insert_frame_ct_lidar(
     const auto& current_segment = fixed_lag_registry_.segments().back();
     const auto& profile = current_factor->last_profiling_stats();
     logger->trace(
-      "bspline ct lidar factor target_mode={} jacobian_mode={} k_candidates={} accept_ratio={:.3f} score_gap={:.3f} robust_kernel={} robust_width={:.3f} robust_w_floor={:.3f} outlier_thresh={:.3f} target_frames={} target_points={} snapshot_frames={} snapshot_points={} snapshot_span_s={:.3f} snapshot_policy={} target_build_ms={:.3f} stage={} matched={}/{} inliers={} rej_dist={} rej_ambiguity={} rej_outlier={} rej_robust={} match_ratio={:.3f} inlier_ratio={:.3f} mean_w={:.3f} pose_ms={:.3f} corr_ms={:.3f} accum_ms={:.3f} total_ms={:.3f} error={:.6f}",
+      "bspline ct lidar factor target_mode={} jacobian_mode={} k_candidates={} accept_ratio={:.3f} score_gap={:.3f} robust_kernel={} robust_width={:.3f} robust_w_floor={:.3f} outlier_thresh={:.3f} target_frames={} target_points={} snapshot_frames={} snapshot_points={} snapshot_span_s={:.3f} snapshot_policy={} target_build_ms={:.3f} stage={} matched={}/{} inliers={} rej_dist={} rej_ambiguity={} rej_outlier={} rej_robust={} match_ratio={:.3f} inlier_ratio={:.3f} mean_w={:.3f} uniq_targets={} uniq_ratio={:.3f} reuse_peak={} reuse_ratio={:.3f} mean_dist={:.4f} max_dist={:.4f} mean_score={:.4f} mean_gap={:.4f} mean_ratio={:.4f} pose_ms={:.3f} corr_ms={:.3f} accum_ms={:.3f} total_ms={:.3f} error={:.6f}",
       ::glim::to_string(current_segment.target_mode),
       ::glim::to_string(lidar_jacobian_mode_),
       lidar_correspondence_candidate_count_,
@@ -1168,6 +1166,15 @@ EstimationFrame::ConstPtr OdometryEstimationBSpline::insert_frame_ct_lidar(
       profile.match_ratio,
       profile.inlier_ratio,
       profile.mean_robust_weight,
+      profile.unique_target_count,
+      profile.unique_target_ratio,
+      profile.max_target_reuse,
+      profile.max_target_reuse_ratio,
+      profile.mean_match_distance,
+      profile.max_match_distance,
+      profile.mean_match_score,
+      profile.mean_score_gap,
+      profile.mean_score_ratio,
       profile.pose_update_ms,
       profile.correspondence_ms,
       profile.accumulation_ms,
@@ -1190,6 +1197,30 @@ EstimationFrame::ConstPtr OdometryEstimationBSpline::insert_frame_ct_lidar(
         check.actual_error,
         check.abs_error,
         check.rel_error);
+    }
+  }
+
+  if (lidar_profile_numeric_reference_) {
+    const auto check = current_factor->check_against_numeric_full(values, lidar_numeric_reference_scale_);
+    if (check.valid) {
+      const double max_rel_error = std::max(check.rotation_rel_error, check.translation_rel_error);
+      const auto level =
+        max_rel_error > lidar_linearization_warn_ratio_ ? spdlog::level::warn : spdlog::level::trace;
+      logger->log(
+        level,
+        "bspline ct lidar numeric-reference target_mode={} perturb={:.2e} rot_pred_num={:.6f} rot_pred_semi={:.6f} rot_actual={:.6f} rot_abs={:.6e} rot_rel={:.6f} trans_pred_num={:.6f} trans_pred_semi={:.6f} trans_actual={:.6f} trans_abs={:.6e} trans_rel={:.6f}",
+        ::glim::to_string(fixed_lag_registry_.segments().back().target_mode),
+        check.perturbation_scale,
+        check.numeric_rotation_predicted_error,
+        check.semi_rotation_predicted_error,
+        check.rotation_actual_error,
+        check.rotation_abs_error,
+        check.rotation_rel_error,
+        check.numeric_translation_predicted_error,
+        check.semi_translation_predicted_error,
+        check.translation_actual_error,
+        check.translation_abs_error,
+        check.translation_rel_error);
     }
   }
 
