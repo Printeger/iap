@@ -41,6 +41,18 @@
     "vgicp_voxelmap_scaling_factor": 2.0,
     // Phase-1B continuous-time LiDAR factor settings
     "max_correspondence_distance": 1.5,
+    // Target strategy:
+    //   ACTIVE_WINDOW_SNAPSHOT = freeze a local target built from the most recent active frames
+    //   GLOBAL_IVOX_REFERENCE  = use the rolling ct_target_ivox_ directly as factor target
+    "ct_lidar_target_mode": "ACTIVE_WINDOW_SNAPSHOT",
+    // Number of most recent active frames used to build a frozen snapshot target.
+    // <= 0 means use all active frames currently retained in the lag window.
+    "ct_lidar_snapshot_frame_window": 8,
+    // Engineering hooks for LiDAR factor validation / profiling.
+    "ct_lidar_profile_factor": false,
+    "ct_lidar_validate_linearization": false,
+    "ct_lidar_linearization_check_scale": 1e-4,
+    "ct_lidar_linearization_warn_ratio": 0.25,
     "ctrl_point_anchor_inf_scale": 1e6,
     "ctrl_point_prediction_inf_scale": 1e3,
     "ctrl_point_smoothness_inf_scale": 1e2,

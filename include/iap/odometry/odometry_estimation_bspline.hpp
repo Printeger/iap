@@ -47,6 +47,11 @@ struct OdometryEstimationBSplineParams : public OdometryEstimationCPUParams {
   bool attach_trajectory_to_frames = true;
 };
 
+enum class BSplineLidarTargetMode {
+  ACTIVE_WINDOW_SNAPSHOT,
+  GLOBAL_IVOX_REFERENCE,
+};
+
 class OdometryEstimationBSpline : public OdometryEstimationCPU {
  public:
   EIGEN_MAKE_ALIGNED_OPERATOR_NEW
@@ -69,10 +74,23 @@ class OdometryEstimationBSpline : public OdometryEstimationCPU {
     Eigen::Vector3d angular_vel = Eigen::Vector3d::Zero();
   };
 
+  struct ActiveSplineTargetReference {
+    std::shared_ptr<const gtsam_points::iVox> target_snapshot;
+    std::shared_ptr<const gtsam_points::NearestNeighborSearch> target_tree;
+    BSplineLidarTargetMode mode = BSplineLidarTargetMode::ACTIVE_WINDOW_SNAPSHOT;
+    std::size_t contributing_frames = 0;
+    std::size_t point_count = 0;
+    double build_ms = 0.0;
+  };
+
   struct ActiveSplineSegmentConstraint : public iap::BSplineFixedLagSegmentState {
     gtsam_points::PointCloud::ConstPtr source;
     std::shared_ptr<const gtsam_points::iVox> target_snapshot;
     std::shared_ptr<const gtsam_points::NearestNeighborSearch> target_tree;
+    BSplineLidarTargetMode target_mode = BSplineLidarTargetMode::ACTIVE_WINDOW_SNAPSHOT;
+    std::size_t target_frame_count = 0;
+    std::size_t target_point_count = 0;
+    double target_build_ms = 0.0;
     std::vector<ActiveSplineIMUSample> imu_samples;
     std::vector<iap::GnssEpoch> gnss_epochs;
   };
@@ -99,7 +117,7 @@ class OdometryEstimationBSpline : public OdometryEstimationCPU {
   void initialize_control_window(const PreprocessedFrame::Ptr& raw_frame, const gtsam::Pose3& initial_pose);
   gtsam::Pose3 predict_scan_end_pose(double scan_duration) const;
   gtsam_points::PointCloud::ConstPtr create_lidar_source_cloud(const PreprocessedFrame::Ptr& raw_frame) const;
-  std::shared_ptr<gtsam_points::iVox> create_active_target_snapshot() const;
+  ActiveSplineTargetReference create_active_target_reference() const;
   std::vector<ActiveSplineIMUSample> create_segment_imu_samples(const PreprocessedFrame::Ptr& raw_frame) const;
   void sync_gnss_epochs_from_shared_state();
   std::vector<iap::GnssEpoch> consume_segment_gnss_epochs(double segment_start, double segment_end);
@@ -128,6 +146,12 @@ class OdometryEstimationBSpline : public OdometryEstimationCPU {
   bool attach_trajectory_to_frames_ = true;
   std::string frontend_mode_ = "RECONSTRUCT";
   double max_correspondence_distance_ = 1.0;
+  BSplineLidarTargetMode lidar_target_mode_ = BSplineLidarTargetMode::ACTIVE_WINDOW_SNAPSHOT;
+  int lidar_snapshot_frame_window_ = 0;
+  bool lidar_factor_profile_ = false;
+  bool lidar_validate_linearization_ = false;
+  double lidar_linearization_check_scale_ = 1e-4;
+  double lidar_linearization_warn_ratio_ = 0.25;
   double ctrl_point_anchor_inf_scale_ = 1e6;
   double ctrl_point_prediction_inf_scale_ = 1e3;
   double ctrl_point_smoothness_inf_scale_ = 1e2;

@@ -4,7 +4,9 @@
 #include <gtsam/linear/HessianFactor.h>
 #include <gtsam_points/ann/kdtree2.hpp>
 #include <gtsam_points/ann/ivox.hpp>
+#include <gtsam_points/types/point_cloud_cpu.hpp>
 
+#include <chrono>
 #include <limits>
 
 namespace iap {
@@ -48,7 +50,9 @@ IntegratedBSplineGICPFactor::IntegratedBSplineGICPFactor(
   if (target_tree) {
     target_tree_ = target_tree;
   } else {
-    target_tree_ = std::make_shared<gtsam_points::KdTree2<gtsam_points::iVox>>(target_);
+    std::shared_ptr<gtsam_points::PointCloud> target_points =
+      std::make_shared<gtsam_points::PointCloudCPU>(target_->voxel_points());
+    target_tree_ = std::make_shared<gtsam_points::KdTree2<gtsam_points::PointCloud>>(target_points);
   }
 }
 
@@ -92,6 +96,7 @@ void IntegratedBSplineGICPFactor::update_poses(const gtsam::Values& values) cons
 void IntegratedBSplineGICPFactor::update_correspondences() const {
   correspondences_.resize(frame::size(*source_));
   mahalanobis_.resize(frame::size(*source_));
+  matched_correspondence_count_ = 0;
 
   for (int i = 0; i < frame::size(*source_); ++i) {
     const int time_index = time_indices_[static_cast<std::size_t>(i)];
@@ -112,6 +117,7 @@ void IntegratedBSplineGICPFactor::update_correspondences() const {
     }
 
     correspondences_[static_cast<std::size_t>(i)] = static_cast<long>(k_index);
+    matched_correspondence_count_++;
     const auto& target_cov = frame::cov(*target_, static_cast<long>(k_index));
     const auto& source_cov = frame::cov(*source_, i);
 
@@ -123,8 +129,12 @@ void IntegratedBSplineGICPFactor::update_correspondences() const {
 }
 
 double IntegratedBSplineGICPFactor::error(const gtsam::Values& values) const {
+  using Clock = std::chrono::steady_clock;
+  const auto t_start = Clock::now();
   update_poses(values);
+  const auto t_pose = Clock::now();
   update_correspondences();
+  const auto t_corr = Clock::now();
 
   double total_error = 0.0;
   for (int i = 0; i < frame::size(*source_); ++i) {
@@ -143,12 +153,37 @@ double IntegratedBSplineGICPFactor::error(const gtsam::Values& values) const {
     total_error += residual.transpose() * mahalanobis_[static_cast<std::size_t>(i)] * residual;
   }
 
+  if (enable_profiling_) {
+    const auto t_end = Clock::now();
+    last_profile_.valid = true;
+    last_profile_.stage = "error";
+    last_profile_.source_point_count = frame::size(*source_);
+    last_profile_.target_point_count = target_->voxel_points().size();
+    last_profile_.matched_point_count = matched_correspondence_count_;
+    last_profile_.match_ratio =
+      last_profile_.source_point_count == 0 ? 0.0
+                                            : static_cast<double>(matched_correspondence_count_) / last_profile_.source_point_count;
+    last_profile_.pose_update_ms =
+      std::chrono::duration<double, std::milli>(t_pose - t_start).count();
+    last_profile_.correspondence_ms =
+      std::chrono::duration<double, std::milli>(t_corr - t_pose).count();
+    last_profile_.accumulation_ms =
+      std::chrono::duration<double, std::milli>(t_end - t_corr).count();
+    last_profile_.total_ms =
+      std::chrono::duration<double, std::milli>(t_end - t_start).count();
+    last_profile_.total_error = total_error;
+  }
+
   return total_error;
 }
 
 gtsam::GaussianFactor::shared_ptr IntegratedBSplineGICPFactor::linearize(const gtsam::Values& values) const {
+  using Clock = std::chrono::steady_clock;
+  const auto t_start = Clock::now();
   update_poses(values);
+  const auto t_pose = Clock::now();
   update_correspondences();
+  const auto t_corr = Clock::now();
 
   std::array<std::array<gtsam::Matrix6, kBSplineControlPointCount>, kBSplineControlPointCount> H;
   std::array<gtsam::Vector6, kBSplineControlPointCount> b;
@@ -209,7 +244,62 @@ gtsam::GaussianFactor::shared_ptr IntegratedBSplineGICPFactor::linearize(const g
   }
   augmented.setDiagonalBlock(static_cast<gtsam::DenseIndex>(kBSplineControlPointCount), Eigen::Matrix<double, 1, 1>::Constant(total_error));
 
+  if (enable_profiling_) {
+    const auto t_end = Clock::now();
+    last_profile_.valid = true;
+    last_profile_.stage = "linearize";
+    last_profile_.source_point_count = frame::size(*source_);
+    last_profile_.target_point_count = target_->voxel_points().size();
+    last_profile_.matched_point_count = matched_correspondence_count_;
+    last_profile_.match_ratio =
+      last_profile_.source_point_count == 0 ? 0.0
+                                            : static_cast<double>(matched_correspondence_count_) / last_profile_.source_point_count;
+    last_profile_.pose_update_ms =
+      std::chrono::duration<double, std::milli>(t_pose - t_start).count();
+    last_profile_.correspondence_ms =
+      std::chrono::duration<double, std::milli>(t_corr - t_pose).count();
+    last_profile_.accumulation_ms =
+      std::chrono::duration<double, std::milli>(t_end - t_corr).count();
+    last_profile_.total_ms =
+      std::chrono::duration<double, std::milli>(t_end - t_start).count();
+    last_profile_.total_error = total_error;
+  }
+
   return std::make_shared<gtsam::HessianFactor>(keys_, augmented);
+}
+
+IntegratedBSplineGICPFactor::LinearizationCheckResult IntegratedBSplineGICPFactor::check_linearization(
+  const gtsam::Values& values,
+  double perturbation_scale) const {
+  LinearizationCheckResult result;
+  result.perturbation_scale = perturbation_scale;
+
+  if (perturbation_scale <= 0.0) {
+    return result;
+  }
+
+  const auto gaussian = std::dynamic_pointer_cast<gtsam::HessianFactor>(linearize(values));
+  if (!gaussian) {
+    return result;
+  }
+
+  gtsam::VectorValues delta;
+  for (std::size_t i = 0; i < kBSplineControlPointCount; ++i) {
+    gtsam::Vector6 d;
+    d << 1.0, -0.7, 0.5, -0.3, 0.2, -0.1;
+    d *= perturbation_scale * (1.0 + 0.15 * static_cast<double>(i));
+    delta.insert(keys_[i], d);
+  }
+
+  const gtsam::Values perturbed = values.retract(delta);
+  result.valid = true;
+  result.base_error = error(values);
+  result.predicted_error = gaussian->error(delta);
+  result.actual_error = error(perturbed);
+  result.abs_error = std::abs(result.actual_error - result.predicted_error);
+  result.rel_error =
+    result.abs_error / std::max(1e-9, std::max(std::abs(result.actual_error), std::abs(result.predicted_error)));
+  return result;
 }
 
 std::vector<Eigen::Vector4d> IntegratedBSplineGICPFactor::deskewed_source_points(const gtsam::Values& values, bool local) const {

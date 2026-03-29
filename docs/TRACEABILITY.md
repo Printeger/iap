@@ -88,6 +88,11 @@
   - `BSplineFixedLagStateRegistry` 现已进一步提供 `BSplineFixedLagTelemetry`，显式输出 lag 区间、active segment、aux/shared-state 数量、GNSS anchor readiness 和 `Empty / WindowSeeded / TrackingLidar / TrackingLidarGnss` 生命周期阶段。
   - `OdometryEstimationBSpline` 现已在 continuous-time 轨迹发布链路上同步向 `IapSharedState` 发布 fixed-lag telemetry，并以 trace 日志暴露生命周期状态机。
   - `test_bspline_fixed_lag_registry.cpp` 现已补充 lifecycle telemetry/state-machine 单测，覆盖 empty、window-seeded、LiDAR-tracking 和 LiDAR+GNSS-tracking 的状态迁移与计数语义。
+  - 已开始 `M2 / WP2` 的 LiDAR factor 工程化：`OdometryEstimationBSpline` 现已支持 `ACTIVE_WINDOW_SNAPSHOT / GLOBAL_IVOX_REFERENCE` 两种 CT LiDAR target mode，并新增 snapshot frame-window 参数来约束 frozen target 生命周期。
+  - active CT LiDAR segment 现已显式记录 target mode、contributing frames、target point count 和 target build latency，并将当前 segment 的 factor profiling / target diagnostics 输出到日志。
+  - `IntegratedBSplineGICPFactor` 现已新增 profiling stats 与 linearization check 入口，用于后续解析 Jacobian 的基线校验。
+  - CT LiDAR target tree 现已统一改为从 `voxel_points()` 导出的 `PointCloud` 构建，避免 `KdTree2<iVox>` 的 traits 不稳定路径。
+  - 新增 `test_bspline_gicp_factor.cpp`，覆盖 LiDAR factor 的误差响应、linearization check 有效性和 profiling stats 行为。
 - 2026-03-28: IAP-RQ-020 / IAP-RQ-300 / IAP-RQ-410
   - 已开始按 `docs/dev_ct/SLAM_FINISH_PLAN.md` 执行 `M1 / WP1`，先收口 fixed-lag 主状态边界。
   - `OdometryEstimationBSpline::ActiveSplineMarginalPrior` 现在会结构化快照 boundary pose、boundary auxiliary index，以及对应的 velocity / clock state。

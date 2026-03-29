@@ -72,6 +72,13 @@
   - active window 的 control-point snapshot 现在会携带 velocity state
   - `ContinuousTrajectoryView` 在有 control-point kinematics 时优先返回显式 velocity / acceleration
   - planner / debug / control-access 看到的 spline window 不再是 pose-only 快照
+- 已开始按 [SLAM_FINISH_PLAN.md](/home/dev/code/ws_iap/src/iap/docs/dev_ct/SLAM_FINISH_PLAN.md) 执行 `M2 / WP2`：
+  - continuous-time LiDAR factor 现已具备显式 target 策略配置：`ACTIVE_WINDOW_SNAPSHOT` 和 `GLOBAL_IVOX_REFERENCE` 两种模式可切换，并新增 snapshot frame-window 参数来收口 frozen target 的生命周期
+  - `OdometryEstimationBSpline` 现已为每个 active segment 记录 target mode / target frame count / target point count / target build time，并在当前帧 LiDAR factor 上输出这些 target diagnostics
+  - `IntegratedBSplineGICPFactor` 现已新增 profiling stats，能够报告 source/target 点数、匹配数、match ratio，以及 pose update / correspondence / accumulation / total 的耗时分解
+  - `IntegratedBSplineGICPFactor` 现已新增 linearization check 入口，支持用受控 perturbation 对比 Hessian 预测误差和实际非线性误差，作为后续解析 Jacobian 的基线校验工具
+  - continuous-time target tree 现已统一从 `voxel_points()` 导出的 `PointCloud` 构建，避开了 `KdTree2<iVox>` 在 frame traits 上的不稳定路径
+  - 已新增 `test_bspline_gicp_factor`，覆盖 LiDAR factor 的误差响应、linearization check 有效性和 profiling stats 行为
 - planner 已开始真正消费 continuous-time state：
   - `IntegrityPlanner::plan()` 在可用时会优先使用 `SplineControlAccess` 锚定当前时刻，再从 `ContinuousTrajectoryView` 解析种子状态
   - motion primitives 现在从连续时间 `pos / vel / yaw / sigma` 出发，而不只是把 trajectory view 当成一个 `sigma0` 来源
@@ -214,7 +221,7 @@
 - planner 现在已经开始消费 future-time continuous-time sample，但仍是基于已发布短窗的短时保守化/对齐评分。
 - IMU / velocity continuous-time factors 的 Jacobian 目前仍是数值形式。
 - GNSS 已经开始进入控制点窗口主链，但目前还是“shared queue + per-segment factor 接线”的最小实现。
-- LiDAR factor 目前使用数值 pose Jacobian，是为了先打通最小可用版本；解析 Jacobian 和 GPU 版仍是后续工作。
+- LiDAR factor 目前仍使用数值 pose Jacobian，但已经补上 target strategy、profiling stats 和 linearization check 基线；解析 Jacobian 和 GPU 版仍是后续工作。
 
 ## 验证状态
 
@@ -248,6 +255,7 @@ colcon test-result --all
 - `test_bspline_fixed_lag_registry` 现已覆盖 unified fixed-lag registry 的窗口推进、segment 生命周期和 auxiliary state 过滤行为
 - `test_bspline_fixed_lag_registry` 现已进一步覆盖 shared fixed-lag states 的 seed/update 行为
 - `test_bspline_fixed_lag_registry` 现已进一步覆盖 fixed-lag lifecycle telemetry/state-machine 的迁移与计数行为
+- `test_bspline_gicp_factor` 现已覆盖 continuous-time LiDAR factor 的误差响应、linearization check 有效性和 profiling stats 输出
 - `test_bspline_control_window` 现已覆盖 velocity state 到 control-point snapshot 的发布
 - `test_bspline_trajectory` 现已覆盖带 control-point velocity 时的 trajectory sampling
 - `test_integrity_planner` 现已覆盖 planner 对 continuous-time sample 的种子状态消费、future sigma floor 和 future velocity-aware scoring
