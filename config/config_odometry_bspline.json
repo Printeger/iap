@@ -87,6 +87,15 @@
     "ct_lidar_linearization_check_scale": 1e-4,
     "ct_lidar_linearization_warn_ratio": 0.25,
     "ct_lidar_numeric_reference_scale": 1e-5,
+    // Degeneracy warning policy for current target/correspondence quality.
+    // Thresholds <= 0 disable the corresponding warning.
+    "ct_lidar_warn_degeneracy": true,
+    "ct_lidar_warn_min_match_ratio": 0.5,
+    "ct_lidar_warn_min_inlier_ratio": 0.35,
+    "ct_lidar_warn_min_unique_target_ratio": 0.25,
+    "ct_lidar_warn_max_target_reuse_ratio": 0.5,
+    "ct_lidar_warn_max_ambiguity_rejection_ratio": 0.25,
+    "ct_lidar_warn_min_mean_score_gap": 0.05,
     "ctrl_point_anchor_inf_scale": 1e6,
     "ctrl_point_prediction_inf_scale": 1e3,
     "ctrl_point_smoothness_inf_scale": 1e2,

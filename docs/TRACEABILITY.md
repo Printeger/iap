@@ -84,10 +84,13 @@
   - `OdometryEstimationBSpline` 现已把 snapshot target policy 收紧为“满足最小 frame/point 支持并可选 age gate 才使用 local snapshot，否则回退 global ivox reference”，并在 trace 日志中输出 snapshot support diagnostics。
   - `test_bspline_gicp_factor.cpp` 现已补充 semi-analytic 对 `NUMERIC_FULL` 的 predicted-error 对照、absolute score-gap ambiguity rejection，以及 robust-weight-floor rejection 的专门测试。
   - `IntegratedBSplineGICPFactor` 现已新增 `check_against_numeric_full(...)`，可在当前状态下直接把 `SEMI_ANALYTIC` 和本地重建的 `NUMERIC_FULL` baseline 做 rotation / translation 分块 predicted-error 对照。
+  - 该 numeric-reference 入口现已进一步补上 axis-wise 旋转块 audit，可分别对 3 个局部旋转轴输出 predicted-error 对照，并给出 `worst_rotation_axis / max_rotation_axis_rel_error / mean_rotation_axis_rel_error`。
   - CT LiDAR profiling 现已进一步输出 `unique_target_count / unique_target_ratio / max_target_reuse / max_target_reuse_ratio / mean(max)_match_distance / mean_match_score / mean_score_gap / mean_score_ratio`，用于识别 correspondence reuse 和 target degeneracy。
+  - CT LiDAR profiling 现已新增 `time_bucket_count / max_time_bucket_population / mean_time_bucket_population / candidate_evaluation_count / mean_candidates_per_source`，作为后续 GPU 连续时间 LiDAR factor 设计的 baseline 指标。
   - CT LiDAR target lookup 现已统一回到 frozen `iVox` 的原生 search/index 域，避免把 copied-point KD-tree 返回的索引和 `iVox` 内部 point/cov 访问混用。
+  - `IntegratedBSplineGICPFactor` 现已新增 `diagnose_degeneracy(...)`，把当前 target/correspondence 状态转成可重用的 warning flags；`OdometryEstimationBSpline` 进一步把 `ct_lidar_warn_*` 阈值接成配置并输出专门的 degeneracy warning line。
   - `OdometryEstimationBSpline` 现已把 `ct_lidar_profile_numeric_reference` / `ct_lidar_numeric_reference_scale` 接成配置项，并把 numeric-reference drift 与 correspondence degeneracy diagnostics 写入 CT LiDAR trace 日志。
-  - `test_bspline_gicp_factor.cpp` 现已补充 numeric-reference API 和 correspondence diversity / score diagnostics 的专门测试。
+  - `test_bspline_gicp_factor.cpp` 现已补充 numeric-reference axis audit、profiling baseline、degeneracy diagnostics 和 ambiguity-rejection warning 的专门测试。
 - 2026-03-29: IAP-RQ-020 / IAP-RQ-300 / IAP-RQ-410
   - `OdometryEstimationBSpline` 不再在建图前立即裁掉超过 lag 边界的 control points / segment constraints，而是先带着这些“即将滑出”的状态完成当前轮优化。
   - 新增 removable-factor marginalization：上一轮 carried prior 与本轮即将被 lag pruning 移除的 LiDAR/IMU/velocity/GNSS/clock/smoothness 因子会被单独收集、线性化，并对 survivor states 做边缘化。

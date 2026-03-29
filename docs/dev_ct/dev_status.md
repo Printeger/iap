@@ -95,9 +95,12 @@
   - `OdometryEstimationBSpline` 现已把 `ct_lidar_correspondence_min_score_gap`、`ct_lidar_robust_weight_floor`、`ct_lidar_snapshot_min_frames`、`ct_lidar_snapshot_min_points`、`ct_lidar_snapshot_max_age` 接成配置项，并在 CT LiDAR trace 日志中输出 `snapshot_frames / snapshot_points / snapshot_span_s / snapshot_policy`
   - `test_bspline_gicp_factor` 现已继续补充：半解析旋转 Jacobian 相对 `NUMERIC_FULL` 的 predicted-error 对照、absolute score-gap ambiguity rejection，以及 robust-weight-floor 硬拒绝行为
   - `IntegratedBSplineGICPFactor` 现已新增 `check_against_numeric_full(...)`，可在当前状态下直接把 `SEMI_ANALYTIC` 结果和本地重建的 `NUMERIC_FULL` baseline 做 rotation/translation 分块对照，用于继续推进解析 Jacobian 时的工程化 profiling
+  - `check_against_numeric_full(...)` 现已进一步补上 axis-wise rotation audit：会分别对 3 个局部旋转轴做 predicted-error 对照，并输出 `worst_rotation_axis / max_rotation_axis_rel_error / mean_rotation_axis_rel_error`，用于继续剖析旋转块解析 Jacobian 的误差分布
   - CT LiDAR profiling stats 现已进一步输出 correspondence diversity / degeneracy 指标：`unique_target_count / unique_target_ratio / max_target_reuse / max_target_reuse_ratio / mean(max)_match_distance / mean_match_score / mean_score_gap / mean_score_ratio`
+  - CT LiDAR profiling 现已开始形成更系统的 GPU baseline：新增 `time_bucket_count / max_time_bucket_population / mean_time_bucket_population / candidate_evaluation_count / mean_candidates_per_source`，用于估计未来 GPU kernel batching 和 correspondence 开销
   - CT LiDAR target lookup 现已收口到 frozen `iVox` 自身的 search/index 域，不再把 `voxel_points()` 拷贝 KD-tree 的索引和 `iVox` 内部 point/cov 访问混用；当前 target point / covariance / correspondence index 已处于同一语义域
   - `OdometryEstimationBSpline` 现已把 `ct_lidar_profile_numeric_reference` 和 `ct_lidar_numeric_reference_scale` 接成配置项，并在 CT LiDAR trace 日志中输出 numeric-reference drift 和 target/correspondence 退化诊断
+  - `IntegratedBSplineGICPFactor` 现已新增 `diagnose_degeneracy(...)`，将当前 factor 的 correspondence/target 状态转成 `low_match_ratio / low_target_diversity / high_target_reuse / high_ambiguity_rejection / weak_score_separation` 等可重用告警标志；`OdometryEstimationBSpline` 也已把 `ct_lidar_warn_*` 阈值接成配置项，并新增专门的 `bspline ct lidar degeneracy` warning 日志
   - `test_bspline_gicp_factor` 现已补充 numeric-reference check API 以及 correspondence diversity / score diagnostics 的专门测试，为下一步继续减少剩余数值差分提供基线
 - planner 已开始真正消费 continuous-time state：
   - `IntegrityPlanner::plan()` 在可用时会优先使用 `SplineControlAccess` 锚定当前时刻，再从 `ContinuousTrajectoryView` 解析种子状态

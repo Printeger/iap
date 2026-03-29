@@ -85,6 +85,10 @@ IntegratedBSplineGICPFactor::IntegratedBSplineGICPFactor(
     }
     time_indices_.push_back(static_cast<int>(time_table_.size() - 1));
   }
+  time_bucket_populations_.assign(time_table_.size(), 0);
+  for (const int time_index : time_indices_) {
+    time_bucket_populations_[static_cast<std::size_t>(time_index)]++;
+  }
 
   const double time_min = time_table_.empty() ? 0.0 : time_table_.front();
   const double time_max = time_table_.empty() ? 1.0 : time_table_.back();
@@ -196,6 +200,7 @@ void IntegratedBSplineGICPFactor::update_correspondences() const {
   matched_correspondence_count_ = 0;
   rejected_distance_count_ = 0;
   rejected_ambiguity_count_ = 0;
+  candidate_evaluation_count_ = 0;
 
   for (int i = 0; i < frame::size(*source_); ++i) {
     const int time_index = time_indices_[static_cast<std::size_t>(i)];
@@ -238,6 +243,7 @@ void IntegratedBSplineGICPFactor::update_correspondences() const {
       RCR.diagonal().array() += 1e-6;
       const Eigen::Matrix3d M = RCR.inverse();
       const Eigen::Vector3d residual = transed_pt - frame::point(*target_, target_index).template head<3>();
+      candidate_evaluation_count_++;
       const double score = residual.transpose() * M * residual;
 
       if (score < best_score) {
@@ -375,6 +381,9 @@ void IntegratedBSplineGICPFactor::update_profiling_stats(
   last_profile_.stage = stage;
   last_profile_.source_point_count = frame::size(*source_);
   last_profile_.target_point_count = target_->voxel_points().size();
+  last_profile_.time_bucket_count = time_bucket_populations_.size();
+  last_profile_.max_time_bucket_population = 0;
+  last_profile_.candidate_evaluation_count = candidate_evaluation_count_;
   last_profile_.matched_point_count = matched_correspondence_count_;
   last_profile_.inlier_point_count = accepted_inlier_count_;
   last_profile_.rejected_distance_count = rejected_distance_count_;
@@ -387,6 +396,11 @@ void IntegratedBSplineGICPFactor::update_profiling_stats(
   last_profile_.inlier_ratio =
     last_profile_.source_point_count == 0 ? 0.0
                                           : static_cast<double>(accepted_inlier_count_) / last_profile_.source_point_count;
+  last_profile_.mean_time_bucket_population =
+    last_profile_.time_bucket_count == 0 ? 0.0 : static_cast<double>(last_profile_.source_point_count) / last_profile_.time_bucket_count;
+  last_profile_.mean_candidates_per_source =
+    last_profile_.source_point_count == 0 ? 0.0
+                                          : static_cast<double>(candidate_evaluation_count_) / last_profile_.source_point_count;
   last_profile_.mean_robust_weight =
     accepted_inlier_count_ == 0 ? 1.0 : robust_weight_sum_ / static_cast<double>(accepted_inlier_count_);
   last_profile_.pose_update_ms = pose_update_ms;
@@ -404,6 +418,7 @@ void IntegratedBSplineGICPFactor::update_profiling_stats(
   last_profile_.mean_match_score = 0.0;
   last_profile_.mean_score_gap = 0.0;
   last_profile_.mean_score_ratio = 0.0;
+  last_profile_.comparative_score_count = 0;
 
   std::unordered_map<long, std::size_t> target_reuse_counts;
   double distance_sum = 0.0;
@@ -435,6 +450,9 @@ void IntegratedBSplineGICPFactor::update_profiling_stats(
       comparative_score_count++;
     }
   }
+  for (const std::size_t population : time_bucket_populations_) {
+    last_profile_.max_time_bucket_population = std::max(last_profile_.max_time_bucket_population, population);
+  }
 
   last_profile_.unique_target_count = target_reuse_counts.size();
   for (const auto& [_, reuse_count] : target_reuse_counts) {
@@ -452,6 +470,7 @@ void IntegratedBSplineGICPFactor::update_profiling_stats(
     last_profile_.mean_match_score = score_sum / static_cast<double>(accepted_score_count);
   }
   if (comparative_score_count > 0) {
+    last_profile_.comparative_score_count = comparative_score_count;
     last_profile_.mean_score_gap = gap_sum / static_cast<double>(comparative_score_count);
     last_profile_.mean_score_ratio = ratio_sum / static_cast<double>(comparative_score_count);
   }
@@ -726,7 +745,86 @@ IntegratedBSplineGICPFactor::NumericReferenceCheckResult IntegratedBSplineGICPFa
                                           std::max(std::abs(result.semi_translation_predicted_error),
                                                    std::abs(result.numeric_translation_predicted_error)));
 
+  for (std::size_t axis = 0; axis < 3; ++axis) {
+    gtsam::VectorValues axis_delta;
+    for (std::size_t i = 0; i < kBSplineControlPointCount; ++i) {
+      gtsam::Vector6 d = gtsam::Vector6::Zero();
+      d(static_cast<int>(axis)) = perturbation_scale * (1.0 + 0.1 * static_cast<double>(i));
+      axis_delta.insert(keys_[i], d);
+    }
+
+    const auto axis_perturbed = values.retract(axis_delta);
+    result.numeric_axis_rotation_predicted_error[axis] = numeric_linear->error(axis_delta);
+    result.semi_axis_rotation_predicted_error[axis] = semi_linear->error(axis_delta);
+    result.axis_rotation_actual_error[axis] = semi_factor.error(axis_perturbed);
+    result.axis_rotation_abs_error[axis] =
+      std::abs(result.semi_axis_rotation_predicted_error[axis] - result.numeric_axis_rotation_predicted_error[axis]);
+    result.axis_rotation_rel_error[axis] =
+      result.axis_rotation_abs_error[axis] /
+      std::max(1e-9,
+               std::max(std::abs(result.semi_axis_rotation_predicted_error[axis]),
+                        std::abs(result.numeric_axis_rotation_predicted_error[axis])));
+    result.mean_rotation_axis_rel_error += result.axis_rotation_rel_error[axis];
+    if (result.axis_rotation_rel_error[axis] > result.max_rotation_axis_rel_error) {
+      result.max_rotation_axis_rel_error = result.axis_rotation_rel_error[axis];
+      result.worst_rotation_axis = axis;
+    }
+  }
+  result.mean_rotation_axis_rel_error /= 3.0;
+
   return result;
+}
+
+IntegratedBSplineGICPFactor::DegeneracyDiagnostics IntegratedBSplineGICPFactor::diagnose_degeneracy(
+  const DegeneracyThresholds& thresholds) const {
+  DegeneracyDiagnostics diagnostics;
+  diagnostics.valid = last_profile_.valid;
+  if (!diagnostics.valid) {
+    return diagnostics;
+  }
+
+  diagnostics.empty_target = last_profile_.target_point_count == 0;
+  diagnostics.ambiguity_rejection_ratio =
+    last_profile_.source_point_count == 0 ? 0.0
+                                          : static_cast<double>(last_profile_.rejected_ambiguity_count) /
+                                              last_profile_.source_point_count;
+  diagnostics.distance_rejection_ratio =
+    last_profile_.source_point_count == 0 ? 0.0
+                                          : static_cast<double>(last_profile_.rejected_distance_count) /
+                                              last_profile_.source_point_count;
+  diagnostics.outlier_rejection_ratio =
+    last_profile_.source_point_count == 0 ? 0.0
+                                          : static_cast<double>(last_profile_.rejected_outlier_count) /
+                                              last_profile_.source_point_count;
+  diagnostics.robust_rejection_ratio =
+    last_profile_.source_point_count == 0 ? 0.0
+                                          : static_cast<double>(last_profile_.rejected_robust_count) /
+                                              last_profile_.source_point_count;
+
+  diagnostics.low_match_ratio =
+    thresholds.min_match_ratio > 0.0 && last_profile_.match_ratio < thresholds.min_match_ratio;
+  diagnostics.low_inlier_ratio =
+    thresholds.min_inlier_ratio > 0.0 && last_profile_.inlier_ratio < thresholds.min_inlier_ratio;
+  diagnostics.low_target_diversity =
+    thresholds.min_unique_target_ratio > 0.0 && last_profile_.unique_target_ratio < thresholds.min_unique_target_ratio;
+  diagnostics.high_target_reuse =
+    thresholds.max_target_reuse_ratio > 0.0 && last_profile_.max_target_reuse_ratio > thresholds.max_target_reuse_ratio;
+  diagnostics.high_ambiguity_rejection =
+    thresholds.max_ambiguity_rejection_ratio > 0.0 &&
+    diagnostics.ambiguity_rejection_ratio > thresholds.max_ambiguity_rejection_ratio;
+  diagnostics.weak_score_separation =
+    thresholds.min_mean_score_gap > 0.0 &&
+    last_profile_.comparative_score_count > 0 &&
+    last_profile_.mean_score_gap < thresholds.min_mean_score_gap;
+
+  diagnostics.warning_count += diagnostics.empty_target ? 1U : 0U;
+  diagnostics.warning_count += diagnostics.low_match_ratio ? 1U : 0U;
+  diagnostics.warning_count += diagnostics.low_inlier_ratio ? 1U : 0U;
+  diagnostics.warning_count += diagnostics.low_target_diversity ? 1U : 0U;
+  diagnostics.warning_count += diagnostics.high_target_reuse ? 1U : 0U;
+  diagnostics.warning_count += diagnostics.high_ambiguity_rejection ? 1U : 0U;
+  diagnostics.warning_count += diagnostics.weak_score_separation ? 1U : 0U;
+  return diagnostics;
 }
 
 std::vector<Eigen::Vector4d> IntegratedBSplineGICPFactor::deskewed_source_points(const gtsam::Values& values, bool local) const {

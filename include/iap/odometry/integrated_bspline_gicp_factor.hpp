@@ -43,16 +43,22 @@ class IntegratedBSplineGICPFactor : public gtsam::NonlinearFactor {
     bool valid = false;
     std::size_t source_point_count = 0;
     std::size_t target_point_count = 0;
+    std::size_t time_bucket_count = 0;
+    std::size_t max_time_bucket_population = 0;
+    std::size_t candidate_evaluation_count = 0;
     std::size_t matched_point_count = 0;
     std::size_t inlier_point_count = 0;
     std::size_t unique_target_count = 0;
     std::size_t max_target_reuse = 0;
+    std::size_t comparative_score_count = 0;
     std::size_t rejected_distance_count = 0;
     std::size_t rejected_ambiguity_count = 0;
     std::size_t rejected_outlier_count = 0;
     std::size_t rejected_robust_count = 0;
     double match_ratio = 0.0;
     double inlier_ratio = 0.0;
+    double mean_time_bucket_population = 0.0;
+    double mean_candidates_per_source = 0.0;
     double unique_target_ratio = 0.0;
     double max_target_reuse_ratio = 0.0;
     double mean_match_distance = 0.0;
@@ -92,6 +98,41 @@ class IntegratedBSplineGICPFactor : public gtsam::NonlinearFactor {
     double translation_actual_error = 0.0;
     double translation_abs_error = 0.0;
     double translation_rel_error = 0.0;
+    std::array<double, 3> numeric_axis_rotation_predicted_error = {0.0, 0.0, 0.0};
+    std::array<double, 3> semi_axis_rotation_predicted_error = {0.0, 0.0, 0.0};
+    std::array<double, 3> axis_rotation_actual_error = {0.0, 0.0, 0.0};
+    std::array<double, 3> axis_rotation_abs_error = {0.0, 0.0, 0.0};
+    std::array<double, 3> axis_rotation_rel_error = {0.0, 0.0, 0.0};
+    std::size_t worst_rotation_axis = 0;
+    double max_rotation_axis_rel_error = 0.0;
+    double mean_rotation_axis_rel_error = 0.0;
+  };
+
+  struct DegeneracyThresholds {
+    double min_match_ratio = 0.0;
+    double min_inlier_ratio = 0.0;
+    double min_unique_target_ratio = 0.0;
+    double max_target_reuse_ratio = 0.0;
+    double max_ambiguity_rejection_ratio = 0.0;
+    double min_mean_score_gap = 0.0;
+  };
+
+  struct DegeneracyDiagnostics {
+    bool valid = false;
+    bool empty_target = false;
+    bool low_match_ratio = false;
+    bool low_inlier_ratio = false;
+    bool low_target_diversity = false;
+    bool high_target_reuse = false;
+    bool high_ambiguity_rejection = false;
+    bool weak_score_separation = false;
+    std::size_t warning_count = 0;
+    double ambiguity_rejection_ratio = 0.0;
+    double distance_rejection_ratio = 0.0;
+    double outlier_rejection_ratio = 0.0;
+    double robust_rejection_ratio = 0.0;
+
+    bool has_warning() const { return warning_count > 0; }
   };
 
   IntegratedBSplineGICPFactor(
@@ -129,6 +170,7 @@ class IntegratedBSplineGICPFactor : public gtsam::NonlinearFactor {
   gtsam::GaussianFactor::shared_ptr linearize(const gtsam::Values& values) const override;
   LinearizationCheckResult check_linearization(const gtsam::Values& values, double perturbation_scale = 1e-4) const;
   NumericReferenceCheckResult check_against_numeric_full(const gtsam::Values& values, double perturbation_scale = 1e-5) const;
+  DegeneracyDiagnostics diagnose_degeneracy(const DegeneracyThresholds& thresholds) const;
 
   const std::vector<int>& time_indices() const { return time_indices_; }
   const std::vector<gtsam::Pose3>& source_poses() const { return source_poses_; }
@@ -179,6 +221,7 @@ class IntegratedBSplineGICPFactor : public gtsam::NonlinearFactor {
   std::vector<double> time_table_;
   std::vector<std::array<double, kBSplineControlPointCount>> basis_table_;
   std::vector<int> time_indices_;
+  std::vector<std::size_t> time_bucket_populations_;
 
   mutable std::vector<gtsam::Pose3> source_poses_;
   mutable std::vector<PoseJacobianArray> pose_jacobians_;
@@ -195,6 +238,7 @@ class IntegratedBSplineGICPFactor : public gtsam::NonlinearFactor {
   mutable std::size_t rejected_outlier_count_ = 0;
   mutable std::size_t rejected_robust_count_ = 0;
   mutable std::size_t accepted_inlier_count_ = 0;
+  mutable std::size_t candidate_evaluation_count_ = 0;
   mutable double robust_weight_sum_ = 0.0;
   mutable ProfilingStats last_profile_;
 };

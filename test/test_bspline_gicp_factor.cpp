@@ -157,8 +157,13 @@ TEST(BSplineGICPFactorTest, ProfilingReportsMatchedCorrespondences) {
   EXPECT_EQ(stats.rejected_robust_count, 0U);
   EXPECT_EQ(stats.unique_target_count, 4U);
   EXPECT_EQ(stats.max_target_reuse, 1U);
+  EXPECT_EQ(stats.time_bucket_count, 4U);
+  EXPECT_EQ(stats.max_time_bucket_population, 1U);
+  EXPECT_GE(stats.candidate_evaluation_count, 4U);
   EXPECT_NEAR(stats.match_ratio, 1.0, 1e-9);
   EXPECT_NEAR(stats.inlier_ratio, 1.0, 1e-9);
+  EXPECT_NEAR(stats.mean_time_bucket_population, 1.0, 1e-9);
+  EXPECT_GE(stats.mean_candidates_per_source, 1.0);
   EXPECT_NEAR(stats.unique_target_ratio, 1.0, 1e-9);
   EXPECT_NEAR(stats.max_target_reuse_ratio, 0.25, 1e-9);
   EXPECT_NEAR(stats.mean_match_distance, 0.0, 1e-9);
@@ -255,6 +260,12 @@ TEST(BSplineGICPFactorTest, NumericReferenceCheckSeparatesRotationAndTranslation
   EXPECT_TRUE(std::isfinite(check.numeric_translation_predicted_error));
   EXPECT_TRUE(std::isfinite(check.semi_translation_predicted_error));
   EXPECT_TRUE(std::isfinite(check.translation_actual_error));
+  for (double axis_rel : check.axis_rotation_rel_error) {
+    EXPECT_TRUE(std::isfinite(axis_rel));
+  }
+  EXPECT_LT(check.max_rotation_axis_rel_error, 0.9);
+  EXPECT_LT(check.mean_rotation_axis_rel_error, 0.75);
+  EXPECT_LT(check.worst_rotation_axis, 3U);
   EXPECT_LT(check.rotation_rel_error, 0.75);
   EXPECT_LT(check.translation_rel_error, 0.35);
 }
@@ -477,4 +488,54 @@ TEST(BSplineGICPFactorTest, ProfilingReportsCorrespondenceDiversityAndScoreDiagn
   EXPECT_GE(stats.mean_match_score, 0.0);
   EXPECT_GT(stats.mean_score_gap, 0.0);
   EXPECT_GT(stats.mean_score_ratio, 0.0);
+
+  iap::IntegratedBSplineGICPFactor::DegeneracyThresholds thresholds;
+  thresholds.min_unique_target_ratio = stats.unique_target_ratio + 0.1;
+  thresholds.max_target_reuse_ratio = std::max(0.01, stats.max_target_reuse_ratio - 0.1);
+  const auto diagnostics = factor.diagnose_degeneracy(thresholds);
+  ASSERT_TRUE(diagnostics.valid);
+  EXPECT_TRUE(diagnostics.low_target_diversity);
+  EXPECT_TRUE(diagnostics.high_target_reuse);
+  EXPECT_TRUE(diagnostics.has_warning());
+}
+
+TEST(BSplineGICPFactorTest, DegeneracyDiagnosisFlagsHighAmbiguityRejection) {
+  const std::vector<Eigen::Vector4d> target_points = {
+    Eigen::Vector4d(0.15, 0.0, 0.0, 1.0),
+    Eigen::Vector4d(0.25, 0.0, 0.0, 1.0),
+  };
+  const std::vector<Eigen::Matrix3d> target_covs = {
+    Eigen::Matrix3d::Identity() * 1e-3,
+    Eigen::Matrix3d::Identity() * 1e-3,
+  };
+  auto target_cloud = make_custom_cloud(target_points, target_covs);
+  auto target = std::make_shared<gtsam_points::iVox>(0.5);
+  target->voxel_insertion_setting().set_min_dist_in_cell(0.0);
+  target->set_neighbor_voxel_mode(1);
+  target->insert(*target_cloud);
+
+  const std::vector<Eigen::Vector4d> source_points = {
+    Eigen::Vector4d(0.20, 0.0, 0.0, 1.0),
+  };
+  const std::vector<Eigen::Matrix3d> source_covs = {
+    Eigen::Matrix3d::Identity() * 1e-3,
+  };
+  const std::vector<double> source_times = {0.0};
+  auto source_cloud = make_custom_cloud(source_points, source_covs, &source_times);
+
+  auto factor = make_factor(target, source_cloud);
+  factor.set_enable_profiling(true);
+  factor.set_correspondence_candidate_count(2);
+  factor.set_correspondence_accept_ratio(0.95);
+  factor.set_max_correspondence_distance(1.0);
+
+  const auto values = make_identity_control_values();
+  EXPECT_NEAR(factor.error(values), 0.0, 1e-12);
+
+  iap::IntegratedBSplineGICPFactor::DegeneracyThresholds thresholds;
+  thresholds.max_ambiguity_rejection_ratio = 0.5;
+  const auto diagnostics = factor.diagnose_degeneracy(thresholds);
+  ASSERT_TRUE(diagnostics.valid);
+  EXPECT_TRUE(diagnostics.high_ambiguity_rejection);
+  EXPECT_TRUE(diagnostics.has_warning());
 }

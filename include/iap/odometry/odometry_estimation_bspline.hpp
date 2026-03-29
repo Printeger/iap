@@ -173,9 +173,11 @@ class OdometryEstimationBSpline : public OdometryEstimationCPU {
   bool lidar_factor_profile_ = false;
   bool lidar_validate_linearization_ = false;
   bool lidar_profile_numeric_reference_ = false;
+  bool lidar_warn_degeneracy_ = true;
   double lidar_linearization_check_scale_ = 1e-4;
   double lidar_linearization_warn_ratio_ = 0.25;
   double lidar_numeric_reference_scale_ = 1e-5;
+  iap::IntegratedBSplineGICPFactor::DegeneracyThresholds lidar_degeneracy_thresholds_;
   double ctrl_point_anchor_inf_scale_ = 1e6;
   double ctrl_point_prediction_inf_scale_ = 1e3;
   double ctrl_point_smoothness_inf_scale_ = 1e2;

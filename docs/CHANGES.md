@@ -3,6 +3,11 @@
 > 规则：任何代码改动必须在这里记录，并包含 IAP-RQ-XXX。
 
 ## Unreleased
+- feat(dev-ct-mainline-lidar-warn): IAP-RQ-300 / IAP-RQ-410 — continue `M2 / WP2` with stronger CT LiDAR rotation-block auditing, degeneracy warnings, and GPU-facing profiling baselines.
+  - `IntegratedBSplineGICPFactor::check_against_numeric_full(...)` now performs axis-wise rotation-block audits in addition to the previous aggregate rotation/translation check, and reports worst-axis / mean-axis relative disagreement against the `NUMERIC_FULL` baseline.
+  - LiDAR profiling stats now expose GPU-oriented baseline fields: `time_bucket_count`, `max_time_bucket_population`, `mean_time_bucket_population`, `candidate_evaluation_count`, and `mean_candidates_per_source`.
+  - Added `IntegratedBSplineGICPFactor::diagnose_degeneracy(...)`, which turns current target/correspondence quality into reusable warning flags (`low_match_ratio`, `low_target_diversity`, `high_target_reuse`, `high_ambiguity_rejection`, `weak_score_separation`, etc.).
+  - `OdometryEstimationBSpline` now wires explicit `ct_lidar_warn_*` thresholds, enables factor profiling automatically when degeneracy warnings are requested, logs a dedicated `bspline ct lidar degeneracy` warning line, and extends factor traces with the new bucket/candidate baseline metrics.
 - feat(dev-ct-mainline-lidar-profile): IAP-RQ-300 / IAP-RQ-410 — continue `M2 / WP2` by adding numeric-reference diagnostics and clearer CT LiDAR degeneracy telemetry.
   - `IntegratedBSplineGICPFactor` now provides `check_against_numeric_full(...)`, which compares the current semi-analytic linearization against a locally re-instantiated `NUMERIC_FULL` reference and separates rotation/translation predicted-error agreement.
   - LiDAR profiling stats now expose correspondence-diversity and target-degeneracy indicators: `unique_target_count`, `max_target_reuse`, `unique_target_ratio`, `max_target_reuse_ratio`, `mean/max_match_distance`, `mean_match_score`, and best/second-best score gap/ratio aggregates.
