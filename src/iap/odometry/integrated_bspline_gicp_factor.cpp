@@ -872,51 +872,53 @@ BSplineLidarFactorResult IntegratedBSplineGICPFactor::make_result(
   double inlier_fraction,
   const NumericReferenceCheckResult* numeric_reference,
   const DegeneracyDiagnostics* degeneracy) const {
-  BSplineLidarFactorResult result;
-  result.valid = last_profile_.valid;
-  result.backend = BSplineLidarFactorBackend::CPU_GICP;
-  result.factor_error = factor_error;
-  result.inlier_count = inlier_count;
-  result.inlier_fraction = inlier_fraction;
-  result.rmse = std::sqrt(std::max(0.0, factor_error) / std::max(inlier_count, 1));
-  result.profile = profiling_report();
+  const auto profile = profiling_report();
+  BSplineLidarNumericAudit numeric_report;
+  BSplineLidarDegeneracyReport degeneracy_report;
 
   if (numeric_reference) {
-    result.numeric_audit.valid = numeric_reference->valid;
-    result.numeric_audit.perturbation_scale = numeric_reference->perturbation_scale;
-    result.numeric_audit.numeric_rotation_predicted_error = numeric_reference->numeric_rotation_predicted_error;
-    result.numeric_audit.semi_rotation_predicted_error = numeric_reference->semi_rotation_predicted_error;
-    result.numeric_audit.rotation_actual_error = numeric_reference->rotation_actual_error;
-    result.numeric_audit.rotation_abs_error = numeric_reference->rotation_abs_error;
-    result.numeric_audit.rotation_rel_error = numeric_reference->rotation_rel_error;
-    result.numeric_audit.numeric_translation_predicted_error = numeric_reference->numeric_translation_predicted_error;
-    result.numeric_audit.semi_translation_predicted_error = numeric_reference->semi_translation_predicted_error;
-    result.numeric_audit.translation_actual_error = numeric_reference->translation_actual_error;
-    result.numeric_audit.translation_abs_error = numeric_reference->translation_abs_error;
-    result.numeric_audit.translation_rel_error = numeric_reference->translation_rel_error;
-    result.numeric_audit.axis_rotation_rel_error = numeric_reference->axis_rotation_rel_error;
-    result.numeric_audit.worst_rotation_axis = numeric_reference->worst_rotation_axis;
-    result.numeric_audit.max_rotation_axis_rel_error = numeric_reference->max_rotation_axis_rel_error;
-    result.numeric_audit.mean_rotation_axis_rel_error = numeric_reference->mean_rotation_axis_rel_error;
+    numeric_report.valid = numeric_reference->valid;
+    numeric_report.perturbation_scale = numeric_reference->perturbation_scale;
+    numeric_report.numeric_rotation_predicted_error = numeric_reference->numeric_rotation_predicted_error;
+    numeric_report.semi_rotation_predicted_error = numeric_reference->semi_rotation_predicted_error;
+    numeric_report.rotation_actual_error = numeric_reference->rotation_actual_error;
+    numeric_report.rotation_abs_error = numeric_reference->rotation_abs_error;
+    numeric_report.rotation_rel_error = numeric_reference->rotation_rel_error;
+    numeric_report.numeric_translation_predicted_error = numeric_reference->numeric_translation_predicted_error;
+    numeric_report.semi_translation_predicted_error = numeric_reference->semi_translation_predicted_error;
+    numeric_report.translation_actual_error = numeric_reference->translation_actual_error;
+    numeric_report.translation_abs_error = numeric_reference->translation_abs_error;
+    numeric_report.translation_rel_error = numeric_reference->translation_rel_error;
+    numeric_report.axis_rotation_rel_error = numeric_reference->axis_rotation_rel_error;
+    numeric_report.worst_rotation_axis = numeric_reference->worst_rotation_axis;
+    numeric_report.max_rotation_axis_rel_error = numeric_reference->max_rotation_axis_rel_error;
+    numeric_report.mean_rotation_axis_rel_error = numeric_reference->mean_rotation_axis_rel_error;
   }
 
   if (degeneracy) {
-    result.degeneracy.valid = degeneracy->valid;
-    result.degeneracy.empty_target = degeneracy->empty_target;
-    result.degeneracy.low_match_ratio = degeneracy->low_match_ratio;
-    result.degeneracy.low_inlier_ratio = degeneracy->low_inlier_ratio;
-    result.degeneracy.low_target_diversity = degeneracy->low_target_diversity;
-    result.degeneracy.high_target_reuse = degeneracy->high_target_reuse;
-    result.degeneracy.high_ambiguity_rejection = degeneracy->high_ambiguity_rejection;
-    result.degeneracy.weak_score_separation = degeneracy->weak_score_separation;
-    result.degeneracy.warning_count = degeneracy->warning_count;
-    result.degeneracy.ambiguity_rejection_ratio = degeneracy->ambiguity_rejection_ratio;
-    result.degeneracy.distance_rejection_ratio = degeneracy->distance_rejection_ratio;
-    result.degeneracy.outlier_rejection_ratio = degeneracy->outlier_rejection_ratio;
-    result.degeneracy.robust_rejection_ratio = degeneracy->robust_rejection_ratio;
+    degeneracy_report.valid = degeneracy->valid;
+    degeneracy_report.empty_target = degeneracy->empty_target;
+    degeneracy_report.low_match_ratio = degeneracy->low_match_ratio;
+    degeneracy_report.low_inlier_ratio = degeneracy->low_inlier_ratio;
+    degeneracy_report.low_target_diversity = degeneracy->low_target_diversity;
+    degeneracy_report.high_target_reuse = degeneracy->high_target_reuse;
+    degeneracy_report.high_ambiguity_rejection = degeneracy->high_ambiguity_rejection;
+    degeneracy_report.weak_score_separation = degeneracy->weak_score_separation;
+    degeneracy_report.warning_count = degeneracy->warning_count;
+    degeneracy_report.ambiguity_rejection_ratio = degeneracy->ambiguity_rejection_ratio;
+    degeneracy_report.distance_rejection_ratio = degeneracy->distance_rejection_ratio;
+    degeneracy_report.outlier_rejection_ratio = degeneracy->outlier_rejection_ratio;
+    degeneracy_report.robust_rejection_ratio = degeneracy->robust_rejection_ratio;
   }
 
-  return result;
+  return make_bspline_lidar_factor_result(
+    BSplineLidarFactorBackend::CPU_GICP,
+    factor_error,
+    inlier_count,
+    inlier_fraction,
+    &profile,
+    numeric_reference ? &numeric_report : nullptr,
+    degeneracy ? &degeneracy_report : nullptr);
 }
 
 std::vector<Eigen::Vector4d> IntegratedBSplineGICPFactor::deskewed_source_points(const gtsam::Values& values, bool local) const {

@@ -3,6 +3,12 @@
 > 规则：任何代码改动必须在这里记录，并包含 IAP-RQ-XXX。
 
 ## Unreleased
+- feat(dev-ct-mainline-lidar-gpu-surface): IAP-RQ-300 / IAP-RQ-410 — continue `M2 / WP2` by wiring the unified LiDAR result/profile interface into a real GPU caller path.
+  - `bspline_lidar_factor_result.hpp` now supports backend-agnostic builders (`make_bspline_lidar_factor_result(...)`, `make_bspline_lidar_minimal_result(...)`) and distinguishes `minimal` versus detailed profiles, so GPU factors that only expose inlier/error statistics can still return a valid unified result object.
+  - `BSplineLidarWindowProfileSummary` now tracks `detailed_profile_count` and `minimal_profile_count`, and only averages diversity / time-bucket / candidate metrics over detailed profiles. This keeps CPU summaries rich while allowing minimal GPU summaries to coexist without polluting those statistics.
+  - `IntegratedBSplineGICPFactor::make_result(...)` now routes through the same backend-agnostic result builder used by the GPU path, so CPU CT LiDAR and GPU LiDAR share one return-surface contract.
+  - `OdometryEstimationGPU` now constructs unified `BSplineLidarFactorResult` objects for `IntegratedVGICPFactorGPU` factors and emits a `vgicp gpu-summary` trace line. This is the first real GPU caller of the shared result/profile interface and serves as the return surface that future CT GPU LiDAR factors will plug into.
+  - `test_bspline_gicp_factor.cpp` now covers the minimal GPU result path and verifies that mixed-detail summaries preserve correct weighted match/inlier statistics.
 - feat(dev-ct-mainline-lidar-summary): IAP-RQ-300 / IAP-RQ-410 — continue `M2 / WP2` by summarizing CT LiDAR CPU profiling at the active-window level and extracting a GPU-ready result interface.
   - Added `include/iap/odometry/bspline_lidar_factor_result.hpp`, which defines unified CPU/GPU-facing CT LiDAR profile/result payloads: `BSplineLidarFactorProfile`, `BSplineLidarNumericAudit`, `BSplineLidarDegeneracyReport`, `BSplineLidarFactorResult`, and `BSplineLidarWindowProfileSummary`.
   - `IntegratedBSplineGICPFactor` now exports `profiling_report()` and `make_result(...)`, so per-factor profiling, numeric-reference audit, and degeneracy diagnostics are serialized into one reusable result object instead of being consumed only through ad-hoc logging fields.

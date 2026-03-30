@@ -616,3 +616,36 @@ TEST(BSplineGICPFactorTest, AggregateFactorResultsSummarizesWindowProfiles) {
   EXPECT_NEAR(summary.mean_time_bucket_population, 2.0, 1e-9);
   EXPECT_EQ(summary.max_time_bucket_population, 5U);
 }
+
+TEST(BSplineGICPFactorTest, MinimalGpuResultUsesUnifiedReturnSurface) {
+  const auto result = iap::make_bspline_lidar_minimal_result(
+    iap::BSplineLidarFactorBackend::GPU_GICP,
+    12.0,
+    6,
+    0.3,
+    20,
+    40,
+    "gpu_linearized");
+
+  ASSERT_TRUE(result.valid);
+  EXPECT_EQ(result.backend, iap::BSplineLidarFactorBackend::GPU_GICP);
+  EXPECT_TRUE(result.profile.valid);
+  EXPECT_TRUE(result.profile.minimal);
+  EXPECT_EQ(result.profile.backend, iap::BSplineLidarFactorBackend::GPU_GICP);
+  EXPECT_EQ(result.profile.source_point_count, 20U);
+  EXPECT_EQ(result.profile.target_point_count, 40U);
+  EXPECT_EQ(result.profile.matched_point_count, 6U);
+  EXPECT_EQ(result.profile.inlier_point_count, 6U);
+  EXPECT_NEAR(result.profile.match_ratio, 0.3, 1e-9);
+  EXPECT_NEAR(result.profile.inlier_ratio, 0.3, 1e-9);
+  EXPECT_STREQ(result.profile.stage, "gpu_linearized");
+  EXPECT_NEAR(result.rmse, std::sqrt(12.0 / 6.0), 1e-9);
+
+  const auto summary = iap::aggregate_bspline_lidar_factor_results({result});
+  ASSERT_TRUE(summary.valid);
+  EXPECT_EQ(summary.valid_profile_count, 1U);
+  EXPECT_EQ(summary.detailed_profile_count, 0U);
+  EXPECT_EQ(summary.minimal_profile_count, 1U);
+  EXPECT_NEAR(summary.weighted_match_ratio, 0.3, 1e-9);
+  EXPECT_NEAR(summary.weighted_inlier_ratio, 0.3, 1e-9);
+}

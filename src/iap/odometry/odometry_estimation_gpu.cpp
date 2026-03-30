@@ -1,4 +1,5 @@
 #include <iap/odometry/odometry_estimation_gpu.hpp>
+#include <iap/odometry/bspline_lidar_factor_result.hpp>
 
 #include <Eigen/SVD>  // IAP-RQ-040: condition number for ICP degeneracy
 #include <spdlog/spdlog.h>
@@ -209,6 +210,29 @@ void OdometryEstimationGPU::update_frames(const int current, const gtsam::Nonlin
   const double total_error = vgicp_factors.error(values);
   const double rmse        = std::sqrt(total_error / std::max(inlier_count, 1));
 
+  std::vector<iap::BSplineLidarFactorResult> gpu_results;
+  gpu_results.reserve(vgicp_factors.size());
+  for (const auto& f : vgicp_factors) {
+    auto* vgicp = dynamic_cast<gtsam_points::IntegratedVGICPFactorGPU*>(f.get());
+    if (!vgicp) {
+      continue;
+    }
+
+    const auto target = vgicp->get_target();
+    const std::size_t target_point_count =
+      target ? static_cast<std::size_t>(std::max(target->voxelmap_info.num_voxels, 0)) : 0;
+    const std::size_t source_point_count = frames[current] && frames[current]->frame ? frames[current]->frame->size() : 0;
+    gpu_results.push_back(iap::make_bspline_lidar_minimal_result(
+      iap::BSplineLidarFactorBackend::GPU_GICP,
+      f->error(values),
+      vgicp->num_inliers(),
+      vgicp->inlier_fraction(),
+      source_point_count,
+      target_point_count,
+      "gpu_linearized"));
+  }
+  const auto gpu_summary = iap::aggregate_bspline_lidar_factor_results(gpu_results);
+
   // Noise inflation factor
   const double cond_threshold  = params->icp_cond_threshold;
   const bool   degeneracy_flag = (cond_number > cond_threshold);
@@ -228,6 +252,22 @@ void OdometryEstimationGPU::update_frames(const int current, const gtsam::Nonlin
     "icp_quality[{}]: inliers={} ({:.1f}%) rmse={:.4f} cond={:.1f} degenerate={} gamma={:.2f}",
     current, inlier_count, inlier_fraction * 100.0, rmse,
     cond_number, degeneracy_flag, gamma_lidar);
+  if (gpu_summary.valid) {
+    logger->trace(
+      "vgicp gpu-summary backend={} factors={} valid={} detailed={} minimal={} total_src={} total_tgt={} total_inliers={} weighted_match={:.3f} weighted_inlier={:.3f} cond={:.1f} gamma={:.2f}",
+      iap::to_string(iap::BSplineLidarFactorBackend::GPU_GICP),
+      gpu_summary.result_count,
+      gpu_summary.valid_profile_count,
+      gpu_summary.detailed_profile_count,
+      gpu_summary.minimal_profile_count,
+      gpu_summary.total_source_point_count,
+      gpu_summary.total_target_point_count,
+      gpu_summary.total_inlier_point_count,
+      gpu_summary.weighted_match_ratio,
+      gpu_summary.weighted_inlier_ratio,
+      cond_number,
+      gamma_lidar);
+  }
 
   // IAP-RQ-040: write ICP quality CSV row
   if (params->enable_icp_csv) {

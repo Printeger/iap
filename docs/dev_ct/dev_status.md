@@ -106,6 +106,10 @@
   - `IntegratedBSplineGICPFactor` 现已支持 `profiling_report()` 和 `make_result(...)`，可把当前 factor 的 profiling、numeric-reference audit 和 degeneracy diagnostics 收口成统一结果对象，而不再只依赖零散日志字段
   - `OdometryEstimationBSpline` 现已在每轮 fixed-lag 求解后聚合 active window 内全部 CT LiDAR segment 的结果，并新增 `bspline ct lidar cpu-summary` 汇总日志，输出整窗 weighted match/inlier、候选评估量、time bucket baseline、numeric-audit 最大误差和 warning 计数
   - `test_bspline_gicp_factor` 现已新增窗口级 result aggregation 单测，验证 CPU profiling baseline 汇总逻辑，作为后续 GPU CT LiDAR factor 复用同一接口的对照基线
+  - 统一 result/profile 接口现已进一步收口成 backend-agnostic return surface：新增 `make_bspline_lidar_factor_result(...)` / `make_bspline_lidar_minimal_result(...)`，并显式区分 `minimal` 与 detailed profiles，允许 GPU factor 在暂时还拿不到完整 correspondence/timing 细节时，先返回一致的最小结果对象
+  - `BSplineLidarWindowProfileSummary` 现已区分 `detailed_profile_count` 和 `minimal_profile_count`，只对 detailed profiles 聚合 diversity / bucket / candidate / timing 指标，因此 CPU CT LiDAR 的 rich summary 和 GPU minimal summary 现在可以共用同一汇总器而互不污染
+  - `OdometryEstimationGPU` 现已成为这套统一返回面的第一个真实 GPU 调用方：现有 `IntegratedVGICPFactorGPU` 会被包装成统一 `BSplineLidarFactorResult`，并输出 `vgicp gpu-summary` trace，用作未来 CT GPU LiDAR factor 的直接返回面基线
+  - 当前这一步仍然是“GPU return surface 已接通”，不是“CT GPU LiDAR factor 已实现”；也就是说，odometry / logging / summary 侧已经 backend-ready，但真正的连续时间 GPU factor 本体仍是下一阶段工作
 - planner 已开始真正消费 continuous-time state：
   - `IntegrityPlanner::plan()` 在可用时会优先使用 `SplineControlAccess` 锚定当前时刻，再从 `ContinuousTrajectoryView` 解析种子状态
   - motion primitives 现在从连续时间 `pos / vel / yaw / sigma` 出发，而不只是把 trajectory view 当成一个 `sigma0` 来源

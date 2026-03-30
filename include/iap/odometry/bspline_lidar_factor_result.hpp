@@ -2,7 +2,9 @@
 // IAP-RQ-300 / IAP-RQ-410:
 // Unified CT LiDAR factor profile/result types shared by CPU now and GPU later.
 
+#include <algorithm>
 #include <array>
+#include <cmath>
 #include <cstddef>
 #include <vector>
 
@@ -25,6 +27,7 @@ inline const char* to_string(BSplineLidarFactorBackend backend) {
 
 struct BSplineLidarFactorProfile {
   bool valid = false;
+  bool minimal = false;
   BSplineLidarFactorBackend backend = BSplineLidarFactorBackend::CPU_GICP;
   std::size_t source_point_count = 0;
   std::size_t target_point_count = 0;
@@ -113,6 +116,8 @@ struct BSplineLidarWindowProfileSummary {
   bool valid = false;
   std::size_t result_count = 0;
   std::size_t valid_profile_count = 0;
+  std::size_t detailed_profile_count = 0;
+  std::size_t minimal_profile_count = 0;
   std::size_t warning_result_count = 0;
   std::size_t total_source_point_count = 0;
   std::size_t total_target_point_count = 0;
@@ -136,6 +141,77 @@ struct BSplineLidarWindowProfileSummary {
   std::size_t max_time_bucket_population = 0;
 };
 
+inline BSplineLidarFactorProfile make_bspline_lidar_minimal_profile(
+  BSplineLidarFactorBackend backend,
+  std::size_t source_point_count,
+  std::size_t target_point_count,
+  std::size_t matched_point_count,
+  std::size_t inlier_point_count,
+  const char* stage = "minimal") {
+  BSplineLidarFactorProfile profile;
+  profile.valid = true;
+  profile.minimal = true;
+  profile.backend = backend;
+  profile.source_point_count = source_point_count;
+  profile.target_point_count = target_point_count;
+  profile.matched_point_count = matched_point_count;
+  profile.inlier_point_count = inlier_point_count;
+  profile.match_ratio =
+    source_point_count == 0 ? 0.0 : static_cast<double>(matched_point_count) / static_cast<double>(source_point_count);
+  profile.inlier_ratio =
+    source_point_count == 0 ? 0.0 : static_cast<double>(inlier_point_count) / static_cast<double>(source_point_count);
+  profile.stage = stage;
+  return profile;
+}
+
+inline BSplineLidarFactorResult make_bspline_lidar_factor_result(
+  BSplineLidarFactorBackend backend,
+  double factor_error,
+  int inlier_count,
+  double inlier_fraction,
+  const BSplineLidarFactorProfile* profile = nullptr,
+  const BSplineLidarNumericAudit* numeric_audit = nullptr,
+  const BSplineLidarDegeneracyReport* degeneracy = nullptr) {
+  BSplineLidarFactorResult result;
+  result.valid = profile ? profile->valid : true;
+  result.backend = backend;
+  result.factor_error = factor_error;
+  result.inlier_count = inlier_count;
+  result.inlier_fraction = inlier_fraction;
+  result.rmse = std::sqrt(std::max(0.0, factor_error) / std::max(inlier_count, 1));
+
+  if (profile) {
+    result.profile = *profile;
+    result.profile.backend = backend;
+  }
+  if (numeric_audit) {
+    result.numeric_audit = *numeric_audit;
+  }
+  if (degeneracy) {
+    result.degeneracy = *degeneracy;
+  }
+
+  return result;
+}
+
+inline BSplineLidarFactorResult make_bspline_lidar_minimal_result(
+  BSplineLidarFactorBackend backend,
+  double factor_error,
+  int inlier_count,
+  double inlier_fraction,
+  std::size_t source_point_count,
+  std::size_t target_point_count,
+  const char* stage = "minimal") {
+  const auto profile = make_bspline_lidar_minimal_profile(
+    backend,
+    source_point_count,
+    target_point_count,
+    static_cast<std::size_t>(std::max(inlier_count, 0)),
+    static_cast<std::size_t>(std::max(inlier_count, 0)),
+    stage);
+  return make_bspline_lidar_factor_result(backend, factor_error, inlier_count, inlier_fraction, &profile);
+}
+
 inline BSplineLidarWindowProfileSummary aggregate_bspline_lidar_factor_results(
   const std::vector<BSplineLidarFactorResult>& results) {
   BSplineLidarWindowProfileSummary summary;
@@ -156,6 +232,8 @@ inline BSplineLidarWindowProfileSummary aggregate_bspline_lidar_factor_results(
 
     summary.valid = true;
     summary.valid_profile_count++;
+    summary.minimal_profile_count += result.profile.minimal ? 1U : 0U;
+    summary.detailed_profile_count += result.profile.minimal ? 0U : 1U;
     summary.warning_result_count += result.degeneracy.has_warning() ? 1U : 0U;
     summary.total_source_point_count += result.profile.source_point_count;
     summary.total_target_point_count += result.profile.target_point_count;
@@ -164,27 +242,33 @@ inline BSplineLidarWindowProfileSummary aggregate_bspline_lidar_factor_results(
     summary.total_candidate_evaluation_count += result.profile.candidate_evaluation_count;
     summary.weighted_match_ratio += static_cast<double>(result.profile.matched_point_count);
     summary.weighted_inlier_ratio += static_cast<double>(result.profile.inlier_point_count);
-    unique_target_ratio_sum += result.profile.unique_target_ratio;
-    mean_candidates_per_source_sum += result.profile.mean_candidates_per_source;
-    mean_time_bucket_population_sum += result.profile.mean_time_bucket_population;
-    summary.max_target_reuse_ratio = std::max(summary.max_target_reuse_ratio, result.profile.max_target_reuse_ratio);
-    summary.max_ambiguity_rejection_ratio =
-      std::max(summary.max_ambiguity_rejection_ratio, result.degeneracy.ambiguity_rejection_ratio);
-    summary.max_numeric_rel_error = std::max(
-      summary.max_numeric_rel_error,
-      std::max(result.numeric_audit.rotation_rel_error, result.numeric_audit.translation_rel_error));
-    summary.max_rotation_axis_rel_error =
-      std::max(summary.max_rotation_axis_rel_error, result.numeric_audit.max_rotation_axis_rel_error);
-    summary.total_pose_update_ms += result.profile.pose_update_ms;
-    summary.total_correspondence_ms += result.profile.correspondence_ms;
-    summary.total_accumulation_ms += result.profile.accumulation_ms;
-    summary.total_factor_ms += result.profile.total_ms;
-    summary.max_time_bucket_population =
-      std::max(summary.max_time_bucket_population, result.profile.max_time_bucket_population);
+    if (!result.profile.minimal) {
+      unique_target_ratio_sum += result.profile.unique_target_ratio;
+      mean_candidates_per_source_sum += result.profile.mean_candidates_per_source;
+      mean_time_bucket_population_sum += result.profile.mean_time_bucket_population;
+      summary.max_target_reuse_ratio = std::max(summary.max_target_reuse_ratio, result.profile.max_target_reuse_ratio);
+      summary.max_time_bucket_population =
+        std::max(summary.max_time_bucket_population, result.profile.max_time_bucket_population);
+      summary.total_pose_update_ms += result.profile.pose_update_ms;
+      summary.total_correspondence_ms += result.profile.correspondence_ms;
+      summary.total_accumulation_ms += result.profile.accumulation_ms;
+      summary.total_factor_ms += result.profile.total_ms;
 
-    if (!min_unique_target_ratio_initialized || result.profile.unique_target_ratio < summary.min_unique_target_ratio) {
-      summary.min_unique_target_ratio = result.profile.unique_target_ratio;
-      min_unique_target_ratio_initialized = true;
+      if (!min_unique_target_ratio_initialized || result.profile.unique_target_ratio < summary.min_unique_target_ratio) {
+        summary.min_unique_target_ratio = result.profile.unique_target_ratio;
+        min_unique_target_ratio_initialized = true;
+      }
+    }
+    if (result.degeneracy.valid) {
+      summary.max_ambiguity_rejection_ratio =
+        std::max(summary.max_ambiguity_rejection_ratio, result.degeneracy.ambiguity_rejection_ratio);
+    }
+    if (result.numeric_audit.valid) {
+      summary.max_numeric_rel_error = std::max(
+        summary.max_numeric_rel_error,
+        std::max(result.numeric_audit.rotation_rel_error, result.numeric_audit.translation_rel_error));
+      summary.max_rotation_axis_rel_error =
+        std::max(summary.max_rotation_axis_rel_error, result.numeric_audit.max_rotation_axis_rel_error);
     }
   }
 
@@ -196,9 +280,11 @@ inline BSplineLidarWindowProfileSummary aggregate_bspline_lidar_factor_results(
     summary.total_source_point_count == 0 ? 0.0 : summary.weighted_match_ratio / summary.total_source_point_count;
   summary.weighted_inlier_ratio =
     summary.total_source_point_count == 0 ? 0.0 : summary.weighted_inlier_ratio / summary.total_source_point_count;
-  summary.mean_unique_target_ratio = unique_target_ratio_sum / static_cast<double>(summary.valid_profile_count);
-  summary.mean_candidates_per_source = mean_candidates_per_source_sum / static_cast<double>(summary.valid_profile_count);
-  summary.mean_time_bucket_population = mean_time_bucket_population_sum / static_cast<double>(summary.valid_profile_count);
+  if (summary.detailed_profile_count > 0) {
+    summary.mean_unique_target_ratio = unique_target_ratio_sum / static_cast<double>(summary.detailed_profile_count);
+    summary.mean_candidates_per_source = mean_candidates_per_source_sum / static_cast<double>(summary.detailed_profile_count);
+    summary.mean_time_bucket_population = mean_time_bucket_population_sum / static_cast<double>(summary.detailed_profile_count);
+  }
   return summary;
 }
 

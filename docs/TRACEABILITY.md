@@ -91,6 +91,10 @@
   - `IntegratedBSplineGICPFactor` 现已支持 `profiling_report()` / `make_result(...)`，将单 factor 的 profiling、numeric-reference audit 和 degeneracy diagnostics 收口成一份可聚合结果，而不再只通过 ad-hoc trace 字段暴露。
   - `OdometryEstimationBSpline` 现已在每轮求解后聚合 active-window 内所有 CT LiDAR factor 结果，并新增 `bspline ct lidar cpu-summary` 汇总日志，输出整窗 weighted match/inlier、candidate baseline、time-bucket baseline、numeric-audit 峰值和 warning 数量。
   - `test_bspline_gicp_factor.cpp` 现已补充窗口级 result aggregation 单测，为后续 GPU CT LiDAR factor 复用同一 summary/result 接口提供回归基线。
+  - 统一 LiDAR return surface 现已扩展到 backend-agnostic builders：`make_bspline_lidar_factor_result(...)` / `make_bspline_lidar_minimal_result(...)` 支持 GPU factor 先以最小 profile（inlier/error/source-target counts）形式返回统一结果。
+  - `BSplineLidarWindowProfileSummary` 现已显式区分 `detailed_profile_count` 和 `minimal_profile_count`，确保 GPU minimal profiles 不会污染 CPU detailed profiles 的 diversity / timing / bucket 基线统计。
+  - `OdometryEstimationGPU` 现已把 `IntegratedVGICPFactorGPU` 封装成统一 `BSplineLidarFactorResult`，并新增 `vgicp gpu-summary` trace，作为未来 CT GPU LiDAR factor 复用这套 return surface 的真实 GPU caller baseline。
+  - `test_bspline_gicp_factor.cpp` 现已补充 minimal GPU result 和 minimal-profile summary 的专门单测，验证 unified return surface 在 GPU minimal 模式下的 weighted summary 语义。
   - CT LiDAR target lookup 现已统一回到 frozen `iVox` 的原生 search/index 域，避免把 copied-point KD-tree 返回的索引和 `iVox` 内部 point/cov 访问混用。
   - `IntegratedBSplineGICPFactor` 现已新增 `diagnose_degeneracy(...)`，把当前 target/correspondence 状态转成可重用的 warning flags；`OdometryEstimationBSpline` 进一步把 `ct_lidar_warn_*` 阈值接成配置并输出专门的 degeneracy warning line。
   - `OdometryEstimationBSpline` 现已把 `ct_lidar_profile_numeric_reference` / `ct_lidar_numeric_reference_scale` 接成配置项，并把 numeric-reference drift 与 correspondence degeneracy diagnostics 写入 CT LiDAR trace 日志。
