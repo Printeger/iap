@@ -3,6 +3,11 @@
 > 规则：任何代码改动必须在这里记录，并包含 IAP-RQ-XXX。
 
 ## Unreleased
+- feat(dev-ct-mainline-lidar-gpu-jacobian): IAP-RQ-300 / IAP-RQ-410 — continue `M2 / WP2` by pushing `CT_LIDAR_GPU` control-point Jacobians from numeric mapping to a shared semi-analytic path.
+  - Added `bspline_pose_jacobian.hpp`, which centralizes the normalized-quaternion-blend rotation chain rule and the analytic translation block used to map four control-pose perturbations into one spline pose perturbation.
+  - `IntegratedBSplineGICPFactorGPU` now supports `NUMERIC_FULL / SEMI_ANALYTIC` Jacobian modes and uses that shared helper so the GPU path no longer hardwires numeric control-point Jacobians.
+  - `OdometryEstimationBSpline` now forwards `ct_lidar_jacobian_mode` into the GPU CT LiDAR frontend as well, so CPU/GPU continuous-time LiDAR factors share the same Jacobian-mode configuration surface.
+  - `test_bspline_gicp_factor.cpp` now adds a CUDA-independent spline-pose Jacobian reference test, while the existing CUDA smoke test continues to cover end-to-end GPU factor linearization.
 - feat(dev-ct-mainline-lidar-gpu-factor): IAP-RQ-300 / IAP-RQ-410 — continue `M2 / WP2` by implementing the first real `CT_LIDAR_GPU` factor and wiring it into the B-spline active-window frontend.
   - Added `IntegratedBSplineGICPFactorGPU`, which groups a source scan into time buckets, evaluates one GPU `IntegratedVGICPFactorGPU` unary subfactor per bucket, and maps the resulting unary bucket Hessians back to the four B-spline control poses through numeric spline-pose Jacobians.
   - `OdometryEstimationBSpline` now accepts `frontend_mode = CT_LIDAR_GPU`, builds those GPU continuous-time LiDAR factors directly inside the active fixed-lag graph, and keeps the rest of the LiDAR/IMU/GNSS window lifecycle unchanged.

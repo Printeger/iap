@@ -7,6 +7,7 @@
 #include <gtsam_points/cuda/nonlinear_factor_set_gpu.hpp>
 #include <gtsam_points/types/point_cloud_cpu.hpp>
 
+#include <algorithm>
 #include <chrono>
 #include <limits>
 #include <stdexcept>
@@ -182,22 +183,12 @@ void IntegratedBSplineGICPFactorGPU::update_bucket_poses(const gtsam::Values& va
 
   for (std::size_t i = 0; i < bucket_factors_.size(); ++i) {
     const double u = bucket_factors_[i].u;
-    const gtsam::Pose3 base_pose = BSplineControlWindow::interpolate(poses, u);
-    bucket_poses_[i] = base_pose;
+    bucket_poses_[i] = BSplineControlWindow::interpolate(poses, u);
 
-    for (std::size_t k = 0; k < kBSplineControlPointCount; ++k) {
-      gtsam::Matrix6 J = gtsam::Matrix6::Zero();
-      for (int d = 0; d < 6; ++d) {
-        gtsam::Vector6 delta = gtsam::Vector6::Zero();
-        delta(d) = numeric_eps_;
-
-        auto perturbed = poses;
-        perturbed[k] = perturbed[k].compose(gtsam::Pose3::Expmap(delta));
-        const gtsam::Pose3 pose_plus = BSplineControlWindow::interpolate(perturbed, u);
-        const gtsam::Vector6 xi = gtsam::Pose3::Logmap(base_pose.between(pose_plus));
-        J.col(d) = xi / numeric_eps_;
-      }
-      bucket_pose_jacobians_[i][k] = J;
+    if (jacobian_mode_ == JacobianMode::NUMERIC_FULL) {
+      bucket_pose_jacobians_[i] = bspline_pose_jacobians_numeric(poses, u, numeric_eps_);
+    } else {
+      bucket_pose_jacobians_[i] = bspline_pose_jacobians_semi_analytic(poses, u);
     }
   }
 }

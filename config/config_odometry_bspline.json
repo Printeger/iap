@@ -46,7 +46,7 @@
     //   ACTIVE_WINDOW_SNAPSHOT = freeze a local target built from the most recent active frames
     //   GLOBAL_IVOX_REFERENCE  = use the rolling ct_target_ivox_ directly as factor target
     "ct_lidar_target_mode": "ACTIVE_WINDOW_SNAPSHOT",
-    // Jacobian mode:
+    // Jacobian mode for continuous-time LiDAR factors (CPU / GPU):
     //   NUMERIC_FULL   = numeric pose Jacobian on all 6 DoF of each control pose
     //   SEMI_ANALYTIC  = analytic translation + normalized-quaternion-blend rotation chain rule
     "ct_lidar_jacobian_mode": "SEMI_ANALYTIC",

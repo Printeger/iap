@@ -75,6 +75,19 @@ const char* to_string(iap::IntegratedBSplineGICPFactor::JacobianMode mode) {
   return "unknown";
 }
 
+#ifdef GTSAM_POINTS_USE_CUDA
+iap::IntegratedBSplineGICPFactorGPU::JacobianMode to_gpu_lidar_jacobian_mode(
+  iap::IntegratedBSplineGICPFactor::JacobianMode mode) {
+  switch (mode) {
+    case iap::IntegratedBSplineGICPFactor::JacobianMode::NUMERIC_FULL:
+      return iap::IntegratedBSplineGICPFactorGPU::JacobianMode::NUMERIC_FULL;
+    case iap::IntegratedBSplineGICPFactor::JacobianMode::SEMI_ANALYTIC:
+      return iap::IntegratedBSplineGICPFactorGPU::JacobianMode::SEMI_ANALYTIC;
+  }
+  return iap::IntegratedBSplineGICPFactorGPU::JacobianMode::SEMI_ANALYTIC;
+}
+#endif
+
 iap::IntegratedBSplineGICPFactor::RobustKernel parse_lidar_robust_kernel(const std::string& mode) {
   if (mode == "HUBER" || mode == "huber") {
     return iap::IntegratedBSplineGICPFactor::RobustKernel::HUBER;
@@ -886,6 +899,7 @@ EstimationFrame::ConstPtr OdometryEstimationBSpline::insert_frame_ct_lidar(
         segment.source,
         stream_buffer.first,
         stream_buffer.second);
+      factor->set_jacobian_mode(to_gpu_lidar_jacobian_mode(lidar_jacobian_mode_));
       factor->set_numeric_eps(lidar_jacobian_numeric_eps_);
       factor->set_enable_profiling(lidar_factor_profile_);
       active_lidar_gpu_factors.push_back(factor);

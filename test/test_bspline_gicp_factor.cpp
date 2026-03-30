@@ -3,6 +3,7 @@
 
 #include <gtest/gtest.h>
 
+#include <iap/odometry/bspline_pose_jacobian.hpp>
 #include <iap/odometry/integrated_bspline_gicp_factor.hpp>
 #include <gtsam_points/config.hpp>
 #ifdef GTSAM_POINTS_USE_CUDA
@@ -273,6 +274,40 @@ TEST(BSplineGICPFactorTest, NumericReferenceCheckSeparatesRotationAndTranslation
   EXPECT_LT(check.worst_rotation_axis, 3U);
   EXPECT_LT(check.rotation_rel_error, 0.75);
   EXPECT_LT(check.translation_rel_error, 0.35);
+}
+
+TEST(BSplineGICPFactorTest, SharedSplinePoseSemiAnalyticJacobianTracksNumericReference) {
+  std::array<gtsam::Pose3, iap::kBSplineControlPointCount> poses = {
+    gtsam::Pose3(gtsam::Rot3::RzRyRx(0.01, -0.02, 0.03), gtsam::Point3(-0.10, 0.02, 0.01)),
+    gtsam::Pose3(gtsam::Rot3::RzRyRx(-0.03, 0.01, -0.02), gtsam::Point3(0.05, -0.03, 0.00)),
+    gtsam::Pose3(gtsam::Rot3::RzRyRx(0.02, 0.04, -0.01), gtsam::Point3(0.18, 0.04, -0.02)),
+    gtsam::Pose3(gtsam::Rot3::RzRyRx(-0.01, -0.02, 0.02), gtsam::Point3(0.30, 0.08, 0.03)),
+  };
+
+  double worst_rotation_rel = 0.0;
+  double worst_translation_abs = 0.0;
+  for (double u : {0.05, 0.35, 0.72, 0.95}) {
+    const auto semi = iap::bspline_pose_jacobians_semi_analytic(poses, u);
+    const auto numeric = iap::bspline_pose_jacobians_numeric(poses, u, 1e-6);
+
+    for (std::size_t k = 0; k < iap::kBSplineControlPointCount; ++k) {
+      const auto semi_rot = semi[k].block<3, 3>(0, 0);
+      const auto numeric_rot = numeric[k].block<3, 3>(0, 0);
+      const auto semi_trans = semi[k].block<3, 3>(3, 3);
+      const auto numeric_trans = numeric[k].block<3, 3>(3, 3);
+
+      worst_rotation_rel = std::max(
+        worst_rotation_rel,
+        (semi_rot - numeric_rot).norm() / std::max(1e-9, numeric_rot.norm()));
+      worst_translation_abs = std::max(worst_translation_abs, (semi_trans - numeric_trans).norm());
+
+      EXPECT_LT((semi[k].block<3, 3>(0, 3).norm()), 1e-12);
+      EXPECT_LT((semi[k].block<3, 3>(3, 0).norm()), 1e-12);
+    }
+  }
+
+  EXPECT_LT(worst_rotation_rel, 0.30);
+  EXPECT_LT(worst_translation_abs, 1e-5);
 }
 
 TEST(BSplineGICPFactorTest, OutlierThresholdRejectsLargeResidualMatches) {
@@ -674,6 +709,7 @@ TEST(BSplineGICPFactorTest, GpuFactorLinearizesAndReturnsUnifiedProfile) {
   }
 
   iap::IntegratedBSplineGICPFactorGPU factor(keys, target, make_cloud(true));
+  factor.set_jacobian_mode(iap::IntegratedBSplineGICPFactorGPU::JacobianMode::SEMI_ANALYTIC);
   factor.set_numeric_eps(1e-4);
   factor.set_enable_profiling(true);
 

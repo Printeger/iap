@@ -6,6 +6,7 @@
 
 #include <iap/odometry/bspline_control_window.hpp>
 #include <iap/odometry/bspline_lidar_factor_result.hpp>
+#include <iap/odometry/bspline_pose_jacobian.hpp>
 #include <gtsam_points/config.hpp>
 
 #ifdef GTSAM_POINTS_USE_CUDA
@@ -33,6 +34,11 @@ class IntegratedBSplineGICPFactorGPU : public gtsam::NonlinearFactor {
   EIGEN_MAKE_ALIGNED_OPERATOR_NEW
   using shared_ptr = std::shared_ptr<IntegratedBSplineGICPFactorGPU>;
 
+  enum class JacobianMode {
+    NUMERIC_FULL,
+    SEMI_ANALYTIC,
+  };
+
   IntegratedBSplineGICPFactorGPU(
     const std::array<gtsam::Key, kBSplineControlPointCount>& keys,
     const std::shared_ptr<const gtsam_points::iVox>& target,
@@ -45,6 +51,8 @@ class IntegratedBSplineGICPFactorGPU : public gtsam::NonlinearFactor {
   gtsam::GaussianFactor::shared_ptr linearize(const gtsam::Values& values) const override;
 
   void set_enable_profiling(bool enable) { enable_profiling_ = enable; }
+  void set_jacobian_mode(JacobianMode mode) { jacobian_mode_ = mode; }
+  JacobianMode jacobian_mode() const { return jacobian_mode_; }
   void set_numeric_eps(double eps);
 
   BSplineLidarFactorProfile profiling_report() const;
@@ -78,6 +86,7 @@ class IntegratedBSplineGICPFactorGPU : public gtsam::NonlinearFactor {
     double total_ms,
     double total_error) const;
 
+  JacobianMode jacobian_mode_ = JacobianMode::SEMI_ANALYTIC;
   double numeric_eps_ = 1e-4;
   bool enable_profiling_ = false;
 
