@@ -11,6 +11,8 @@
 #include <iap/odometry/integrated_bspline_gicp_factor_gpu_kernel.hpp>
 #include <cuda_runtime_api.h>
 #include <gtsam_points/cuda/stream_temp_buffer_roundrobin.hpp>
+#include <gtsam_points/types/gaussian_voxelmap_gpu.hpp>
+#include <gtsam_points/types/point_cloud_gpu.hpp>
 #endif
 
 #include <gtsam/linear/VectorValues.h>
@@ -1010,6 +1012,31 @@ TEST(BSplineGICPFactorTest, GpuKernelFactorLinearizesAndReturnsUnifiedProfile) {
   EXPECT_TRUE(result.numeric_audit.valid);
 }
 
+std::shared_ptr<const iap::SharedTargetGpuResources> make_shared_target_gpu_resources(
+  const std::shared_ptr<const gtsam_points::iVox>& target,
+  std::size_t revision) {
+  auto target_cpu_points = target->voxel_data();
+  auto target_gpu = std::make_shared<gtsam_points::GaussianVoxelMapGPU>(
+    static_cast<float>(target->leaf_size()),
+    8192 * 2,
+    10,
+    1e-3,
+    nullptr);
+  if (target_cpu_points && target_cpu_points->size()) {
+    auto target_points_gpu = gtsam_points::PointCloudGPU::clone(*target_cpu_points, nullptr);
+    target_gpu->insert(*target_points_gpu);
+    cudaStreamSynchronize(nullptr);
+  }
+
+  auto resources = std::make_shared<iap::SharedTargetGpuResources>();
+  resources->target_cpu_points = std::move(target_cpu_points);
+  resources->target_gpu = std::move(target_gpu);
+  resources->point_count = resources->target_cpu_points ? static_cast<std::size_t>(resources->target_cpu_points->size()) : 0U;
+  resources->identity = target.get();
+  resources->revision = revision;
+  return resources;
+}
+
 TEST(BSplineGICPFactorTest, GpuKernelFactorRefreshesTargetWithoutRebuildingSourceStaging) {
   int device_count = 0;
   if (cudaGetDeviceCount(&device_count) != cudaSuccess || device_count == 0) {
@@ -1060,6 +1087,89 @@ TEST(BSplineGICPFactorTest, GpuKernelFactorRefreshesTargetWithoutRebuildingSourc
   const double error_b = factor.error(values);
 
   EXPECT_EQ(staging_a, staging_b);
+  EXPECT_NE(error_a, error_b);
+}
+
+TEST(BSplineGICPFactorTest, GpuKernelFactorCanBindSharedTargetResources) {
+  int device_count = 0;
+  if (cudaGetDeviceCount(&device_count) != cudaSuccess || device_count == 0) {
+    GTEST_SKIP() << "CUDA device is not available in the current test environment";
+  }
+
+  auto target_a = std::make_shared<gtsam_points::iVox>(0.5);
+  target_a->voxel_insertion_setting().set_min_dist_in_cell(0.0);
+  target_a->set_neighbor_voxel_mode(1);
+  target_a->insert(*make_cloud(false));
+
+  std::vector<Eigen::Vector4d> shifted_points = {
+    Eigen::Vector4d(0.3, 0.0, 0.0, 1.0),
+    Eigen::Vector4d(1.3, 0.0, 0.0, 1.0),
+    Eigen::Vector4d(0.3, 1.0, 0.0, 1.0),
+    Eigen::Vector4d(0.8, 0.2, 0.0, 1.0),
+  };
+  std::vector<Eigen::Matrix3d> cov3(shifted_points.size(), Eigen::Matrix3d::Identity() * 1e-3);
+  auto target_b_cloud = make_custom_cloud(shifted_points, cov3);
+  auto target_b = std::make_shared<gtsam_points::iVox>(0.5);
+  target_b->voxel_insertion_setting().set_min_dist_in_cell(0.0);
+  target_b->set_neighbor_voxel_mode(1);
+  target_b->insert(*target_b_cloud);
+
+  auto handle_a = std::make_shared<iap::SharedTargetHandle>(
+    iap::SharedTargetHandleMode::GlobalReference,
+    10,
+    target_a,
+    target_a,
+    0,
+    target_a->voxel_points().size(),
+    0,
+    0,
+    0.0,
+    true,
+    0.0,
+    make_shared_target_gpu_resources(target_a, 10));
+  auto handle_b = std::make_shared<iap::SharedTargetHandle>(
+    iap::SharedTargetHandleMode::GlobalReference,
+    11,
+    target_b,
+    target_b,
+    0,
+    target_b->voxel_points().size(),
+    0,
+    0,
+    0.0,
+    true,
+    0.0,
+    make_shared_target_gpu_resources(target_b, 11));
+
+  std::array<gtsam::Key, iap::kBSplineControlPointCount> keys{};
+  for (std::size_t i = 0; i < iap::kBSplineControlPointCount; ++i) {
+    keys[i] = iap::bspline_control_point_key(i);
+  }
+
+  gtsam_points::StreamTempBufferRoundRobin stream_buffers;
+  auto stream_buffer = stream_buffers.get_stream_buffer();
+  iap::IntegratedBSplineGICPFactorGPUKernel factor(
+    keys,
+    handle_a,
+    make_cloud(true),
+    stream_buffer.first,
+    stream_buffer.second);
+  factor.set_max_correspondence_distance(2.0);
+
+  const auto values = make_identity_control_values();
+  const void* staging_a = factor.source_staging_identity();
+  const void* target_resource_a = factor.target_resource_identity();
+  ASSERT_NE(staging_a, nullptr);
+  ASSERT_EQ(target_resource_a, handle_a->gpu_resources()->target_gpu.get());
+  const double error_a = factor.error(values);
+
+  factor.refresh_target_handle(handle_b);
+  const void* staging_b = factor.source_staging_identity();
+  const void* target_resource_b = factor.target_resource_identity();
+  const double error_b = factor.error(values);
+
+  EXPECT_EQ(staging_a, staging_b);
+  EXPECT_EQ(target_resource_b, handle_b->gpu_resources()->target_gpu.get());
   EXPECT_NE(error_a, error_b);
 }
 #endif

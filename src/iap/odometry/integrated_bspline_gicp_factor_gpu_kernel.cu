@@ -527,6 +527,55 @@ IntegratedBSplineGICPFactorGPUKernel::IntegratedBSplineGICPFactorGPUKernel(
   rebuild_target_gpu();
 }
 
+IntegratedBSplineGICPFactorGPUKernel::IntegratedBSplineGICPFactorGPUKernel(
+  const std::array<gtsam::Key, kBSplineControlPointCount>& keys,
+  std::shared_ptr<const iap::ISharedTargetHandle> target_handle,
+  const std::shared_ptr<const gtsam_points::PointCloud>& source,
+  CUstream_st* stream,
+  std::shared_ptr<gtsam_points::TempBufferManager> temp_buffer)
+: gtsam::NonlinearFactor(gtsam::KeyVector(keys.begin(), keys.end())),
+  stream_(stream),
+  temp_buffer_(std::move(temp_buffer)),
+  source_(source) {
+  if (!target_handle || !target_handle->target_snapshot()) {
+    throw std::runtime_error("IntegratedBSplineGICPFactorGPUKernel requires a non-null shared target handle");
+  }
+  if (!source_ || !frame::has_points(*source_) || !frame::has_covs(*source_) || !frame::has_times(*source_)) {
+    throw std::runtime_error("IntegratedBSplineGICPFactorGPUKernel requires source points, covariances, and times");
+  }
+
+  const double time_eps = 1e-3;
+  time_table_.reserve(frame::size(*source_) / 10 + 1);
+  time_indices_.reserve(frame::size(*source_));
+  normalized_times_.reserve(frame::size(*source_));
+
+  for (int i = 0; i < frame::size(*source_); ++i) {
+    const double t = frame::time(*source_, i);
+    if (time_table_.empty() || t - time_table_.back() > time_eps) {
+      time_table_.push_back(t);
+    }
+    time_indices_.push_back(static_cast<int>(time_table_.size() - 1));
+  }
+  time_bucket_populations_.assign(time_table_.size(), 0U);
+  for (const int time_index : time_indices_) {
+    time_bucket_populations_[static_cast<std::size_t>(time_index)]++;
+  }
+
+  const double time_min = time_table_.empty() ? 0.0 : time_table_.front();
+  const double time_max = time_table_.empty() ? 1.0 : time_table_.back();
+  const double denom = std::max(1e-9, time_max - time_min);
+  for (int i = 0; i < frame::size(*source_); ++i) {
+    const double t = frame::time(*source_, i);
+    normalized_times_.push_back(static_cast<float>((t - time_min) / denom));
+  }
+  for (auto& t : time_table_) {
+    t = (t - time_min) / denom;
+  }
+
+  ensure_source_gpu();
+  bind_target_handle(std::move(target_handle));
+}
+
 IntegratedBSplineGICPFactorGPUKernel::~IntegratedBSplineGICPFactorGPUKernel() {
   if (normalized_times_gpu_) {
     cudaFree(normalized_times_gpu_);
@@ -593,6 +642,23 @@ void IntegratedBSplineGICPFactorGPUKernel::ensure_source_gpu() const {
   }
 }
 
+void IntegratedBSplineGICPFactorGPUKernel::bind_target_handle(std::shared_ptr<const iap::ISharedTargetHandle> target_handle) {
+  if (!target_handle || !target_handle->target_snapshot()) {
+    throw std::runtime_error("IntegratedBSplineGICPFactorGPUKernel cannot bind a null target handle");
+  }
+
+  target_handle_ = std::move(target_handle);
+  target_ = target_handle_->target_snapshot();
+  const auto& gpu_resources = target_handle_->gpu_resources();
+  if (gpu_resources && gpu_resources->target_gpu) {
+    target_cpu_points_ = gpu_resources->target_cpu_points;
+    target_gpu_ = gpu_resources->target_gpu;
+    target_point_count_ = gpu_resources->point_count;
+  } else {
+    rebuild_target_gpu();
+  }
+}
+
 void IntegratedBSplineGICPFactorGPUKernel::rebuild_target_gpu() {
   target_cpu_points_ = target_->voxel_data();
   target_point_count_ = target_cpu_points_ ? static_cast<std::size_t>(target_cpu_points_->size()) : 0U;
@@ -612,8 +678,15 @@ void IntegratedBSplineGICPFactorGPUKernel::refresh_target(const std::shared_ptr<
   if (!target) {
     throw std::runtime_error("IntegratedBSplineGICPFactorGPUKernel cannot refresh to a null target");
   }
+  target_handle_.reset();
   target_ = target;
   rebuild_target_gpu();
+  last_profile_ = BSplineLidarFactorProfile();
+  last_inlier_count_ = 0;
+}
+
+void IntegratedBSplineGICPFactorGPUKernel::refresh_target_handle(std::shared_ptr<const iap::ISharedTargetHandle> target_handle) {
+  bind_target_handle(std::move(target_handle));
   last_profile_ = BSplineLidarFactorProfile();
   last_inlier_count_ = 0;
 }

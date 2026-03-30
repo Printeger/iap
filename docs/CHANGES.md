@@ -3,6 +3,13 @@
 > 规则：任何代码改动必须在这里记录，并包含 IAP-RQ-XXX。
 
 ## Unreleased
+- feat(dev-ct-refactor-solver): IAP-RQ-020 / IAP-RQ-300 / IAP-RQ-410 — start the staged continuous-time solver refactor toward a KERNEL-only public GPU route.
+  - Added `docs/dev_ct/README_REFACTOR_CT_SOLVER.md` as the execution spec for the odometry-side refactor. It freezes `CT_LIDAR_GPU + KERNEL` as the only intended public GPU route and describes the staged migration toward an incremental fixed-lag continuous-time solver with shared target ownership.
+  - Added `ICTSolveDomain / BSplineSolveDomain` in `include/iap/odometry/ct_solve_domain.hpp`, and `OdometryEstimationBSpline` now limits the default CT LiDAR solve scope to the current segment plus a configurable recent-overlap region (`ct_local_overlap_segments`) instead of treating the whole historical active-window as the public GPU solve domain.
+  - Added `ISharedTargetHandle / SharedTargetHandle` in `include/iap/odometry/shared_target_handle.hpp` and began routing active segment target metadata through a shared-handle abstraction, which is the first step away from per-segment target runtime ownership.
+  - `OdometryEstimationBSpline` now keeps a shared target-handle cache keyed by target identity/revision, and KERNEL factors now bind shared target GPU resources through `refresh_target_handle(...)` instead of rebuilding target-side GPU maps per factor refresh.
+  - `config_odometry_bspline.json` now defaults the public GPU route to `KERNEL`; selecting `BUCKET` now throws a deprecation error unless the internal-only escape hatch `IAP_ALLOW_DEPRECATED_BUCKET=1` is set for parity work.
+  - Added `test_ct_solve_domain.cpp` and `test_shared_target_handle.cpp` to lock the new solve-domain and shared-target-handle semantics before the remaining incremental fixed-lag solver migration lands, and expanded `test_bspline_gicp_factor.cpp` with KERNEL shared-target-resource coverage.
 - tool(dev-ct-mainline-lidar-baseline): IAP-RQ-300 / IAP-RQ-410 — add a reusable CT LiDAR baseline comparison script for cached-BUCKET vs KERNEL A/B runs.
   - Added `tools/compare_ct_lidar_baseline.py`, which reads one or more `ct_lidar_baseline.csv` exports, summarizes `window_summary` and current-factor metrics, and prints direct deltas across runs.
   - The script is intended for the GPU odometry finish phase where `cached BUCKET vs KERNEL` and `runtime vs diagnostic` need to be compared from the unified baseline CSV surface instead of by hand.

@@ -12,8 +12,12 @@
 - 已具备 `OdometryEstimationBSpline`、active spline window、多 segment LiDAR factor、IMU factor、GNSS factor、velocity state、clock state、continuous trajectory publishing。
 - 当前系统已经可以运行最小可用的 spline-native `LiDAR + IMU + GNSS` 联合优化骨架。
 - `CT_LIDAR_GPU` 已形成双后端结构：
-  - `BUCKET` 已冻结为稳定工程基线
+  - `BUCKET` 已退为内部过渡基线，不再是公开 runtime 路线
   - `KERNEL` 已完成第一版可运行 MVP，并接入 active-window odometry 主链与统一 result/profile/baseline surface
+- 连续时间 odometry 求解器重构现额外受 [README_REFACTOR_CT_SOLVER.md](/home/dev/code/ws_iap/src/iap/docs/dev_ct/README_REFACTOR_CT_SOLVER.md) 约束：
+  - 公开配置默认只保留 `KERNEL`
+  - `BUCKET` 只允许内部 parity / 一次性 A/B 使用
+  - 后续要继续从“每帧 full active-window batch graph”迁移到更接近 GLIM-style incremental fixed-lag + local CT solve domain 的组织方式
 - 当前主要缺口仍在：
   - 还不是最终的 fixed-lag 主状态组织。
   - LiDAR / IMU / GNSS 因子仍有“最小可用实现”成分。
@@ -39,6 +43,7 @@
 
 ## 执行原则
 - 先完成 SLAM 主线，再做新的 planner 功能。
+- 先按 [README_REFACTOR_CT_SOLVER.md](/home/dev/code/ws_iap/src/iap/docs/dev_ct/README_REFACTOR_CT_SOLVER.md) 收口连续时间 odometry 求解器，再继续做其余 GPU / benchmark 封板项。
 - 每个工作包都必须包含：
   - 代码改动
   - 配置改动

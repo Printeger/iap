@@ -16,9 +16,10 @@
     //   CT_LIDAR_GPU  = phase-1B/2 path (select GPU backend via ct_lidar_gpu_backend)
     "frontend_mode": "CT_LIDAR_GPU",
     // GPU backend for CT_LIDAR_GPU:
-    //   BUCKET = frozen engineering path; time-bucket GPU VGICP subfactors mapped back to 4 spline controls
-    //   KERNEL = experimental independent kernel-level spline-native CT LiDAR backend
-    "ct_lidar_gpu_backend": "BUCKET",
+    //   KERNEL = production continuous-time spline-native GPU LiDAR backend
+    // BUCKET is now internal-only for one-time parity work and is rejected in
+    // normal runtime unless IAP_ALLOW_DEPRECATED_BUCKET=1 is set explicitly.
+    "ct_lidar_gpu_backend": "KERNEL",
     // Initialization params
     "initialization_mode": "LOOSE",
     "initialization_window_size": 1.0,
@@ -115,6 +116,10 @@
     "ct_lidar_warn_max_target_reuse_ratio": 0.5,
     "ct_lidar_warn_max_ambiguity_rejection_ratio": 0.25,
     "ct_lidar_warn_min_mean_score_gap": 0.05,
+    // Local continuous-time solve domain:
+    // number of recent segment overlaps to keep alongside the current scan
+    // segment in the LiDAR/IMU/GNSS factor domain.
+    "ct_local_overlap_segments": 2,
     "ctrl_point_anchor_inf_scale": 1e6,
     "ctrl_point_prediction_inf_scale": 1e3,
     "ctrl_point_smoothness_inf_scale": 1e2,

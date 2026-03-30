@@ -4,10 +4,18 @@
 - 2026-03-30
 
 ## 执行入口
-- 后续连续时间 SLAM 开发以 [SLAM_FINISH_PLAN.md](/home/dev/code/ws_iap/src/iap/docs/dev_ct/SLAM_FINISH_PLAN.md) 为唯一执行入口。
+- 后续连续时间 SLAM 总体开发以 [SLAM_FINISH_PLAN.md](/home/dev/code/ws_iap/src/iap/docs/dev_ct/SLAM_FINISH_PLAN.md) 为主计划。
+- 连续时间 odometry 求解器重构以 [README_REFACTOR_CT_SOLVER.md](/home/dev/code/ws_iap/src/iap/docs/dev_ct/README_REFACTOR_CT_SOLVER.md) 为唯一执行规范。
 - 本文档从现在开始只负责记录“当前状态、刚完成的增量和仍未完成的关键边界”，不再单独维护另一套并行开发计划。
 
 ## 当前结论
+- `CT_LIDAR_GPU + KERNEL` 已成为唯一公开连续时间 GPU LiDAR 路线；`BUCKET` 现已退为内部过渡实现，只允许用于 parity / 一次性 A/B。
+- 已开始按 [README_REFACTOR_CT_SOLVER.md](/home/dev/code/ws_iap/src/iap/docs/dev_ct/README_REFACTOR_CT_SOLVER.md) 执行 `P0 / P1`：
+  - 已新增 `ICTSolveDomain / BSplineSolveDomain`
+  - 已新增 `ISharedTargetHandle / SharedTargetHandle`
+  - `OdometryEstimationBSpline` 现已默认按“当前 segment + 最近重叠段”的 local-domain 选择范围构建连续时间 LiDAR solve domain，而不再把全部历史 active-window segment 当成默认 LiDAR solve 域
+  - 公开 runtime 选择 `BUCKET` 时现在会直接报 deprecated error；只有设置 `IAP_ALLOW_DEPRECATED_BUCKET=1` 才允许内部过渡使用
+  - 已继续推进到 `P2` 的 shared-target 资源接线：`OdometryEstimationBSpline` 现已维护 shared target handle cache，而 `IntegratedBSplineGICPFactorGPUKernel` 已可直接绑定 shared target GPU resources，并在 target revision 变化时通过 handle refresh 切换 target-side GPU state，而不是在每个 factor 内重新构建 target GPU map
 - 已完成 Phase 1A 的“连续时间骨架层”落地。
 - 已完成 Phase 1B 的最小可用版本：
   - 控制点窗口状态设计
@@ -156,6 +164,12 @@
   - 还未完成 `cached BUCKET vs KERNEL`、`KERNEL runtime vs diagnostic` 的同配置长包 A/B
   - carried-prior / shared GNSS states 需要在 `KERNEL` 路径下完成长时 replay 验证，确保不再出现 `e0` 缺键和 GNSS 因子中途掉零
   - `KERNEL` 目前是“可运行 MVP”，还不是最终高性能 kernel-level CT LiDAR 实现
+- 连续时间求解器重构当前仍处于 `README_REFACTOR_CT_SOLVER` 的过渡阶段：
+  - 已落下公开路线冻结和 local-domain / shared-target 骨架
+  - 已落下 KERNEL shared-target GPU resource binding 与 handle-cache 语义
+  - 尚未完成长期存活的 incremental fixed-lag solver
+  - 尚未完成 shared target GPU handle 的统一 ownership
+  - 也尚未删除内部过渡用的 `BUCKET` 代码
 
 ## 本次已完成
 

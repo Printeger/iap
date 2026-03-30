@@ -6,6 +6,7 @@
 
 #include <iap/odometry/bspline_control_window.hpp>
 #include <iap/odometry/bspline_fixed_lag_registry.hpp>
+#include <iap/odometry/ct_solve_domain.hpp>
 #include <iap/odometry/bspline_marginalization.hpp>
 #include <iap/odometry/bspline_trajectory.hpp>
 #include <iap/gnss/gnss_epoch_builder.hpp>
@@ -15,6 +16,7 @@
 #include <iap/odometry/integrated_bspline_imu_factor.hpp>
 #include <iap/odometry/integrated_bspline_velocity_factor.hpp>
 #include <iap/odometry/odometry_estimation_cpu.hpp>
+#include <iap/odometry/shared_target_handle.hpp>
 #include <iap/gnss/canopy_noise_model.hpp>
 #include <iap/gnss/clock_between_factor.hpp>
 #include <iap/gnss/gnss_types.hpp>
@@ -29,6 +31,7 @@
 #include <gtsam/nonlinear/Values.h>
 #include <gtsam_points/config.hpp>
 #include <memory>
+#include <unordered_map>
 #include <vector>
 
 #ifdef GTSAM_POINTS_USE_CUDA
@@ -120,8 +123,29 @@ class OdometryEstimationBSpline : public OdometryEstimationCPU {
     std::size_t config_signature = 0;
   };
 
+  struct SharedTargetHandleCacheKey {
+    iap::SharedTargetHandleMode mode = iap::SharedTargetHandleMode::Snapshot;
+    const void* identity = nullptr;
+    std::size_t revision = 0;
+
+    bool operator==(const SharedTargetHandleCacheKey& other) const {
+      return mode == other.mode && identity == other.identity && revision == other.revision;
+    }
+  };
+
+  struct SharedTargetHandleCacheKeyHash {
+    std::size_t operator()(const SharedTargetHandleCacheKey& key) const {
+      std::size_t seed = 0;
+      seed ^= static_cast<std::size_t>(key.mode) + 0x9e3779b97f4a7c15ULL + (seed << 6U) + (seed >> 2U);
+      seed ^= std::hash<const void*>{}(key.identity) + 0x9e3779b97f4a7c15ULL + (seed << 6U) + (seed >> 2U);
+      seed ^= std::hash<std::size_t>{}(key.revision) + 0x9e3779b97f4a7c15ULL + (seed << 6U) + (seed >> 2U);
+      return seed;
+    }
+  };
+
   struct ActiveSplineSegmentConstraint : public iap::BSplineFixedLagSegmentState {
     gtsam_points::PointCloud::ConstPtr source;
+    std::shared_ptr<iap::ISharedTargetHandle> target_handle;
     std::shared_ptr<const gtsam_points::iVox> target_snapshot;
     std::shared_ptr<const gtsam_points::NearestNeighborSearch> target_tree;
     BSplineLidarTargetMode target_mode = BSplineLidarTargetMode::ACTIVE_WINDOW_SNAPSHOT;
@@ -165,6 +189,7 @@ class OdometryEstimationBSpline : public OdometryEstimationCPU {
   gtsam::Pose3 predict_scan_end_pose(double scan_duration) const;
   gtsam_points::PointCloud::ConstPtr create_lidar_source_cloud(const PreprocessedFrame::Ptr& raw_frame) const;
   ActiveSplineTargetReference create_active_target_reference() const;
+  std::shared_ptr<iap::ISharedTargetHandle> create_active_target_handle();
   std::vector<ActiveSplineIMUSample> create_segment_imu_samples(const PreprocessedFrame::Ptr& raw_frame) const;
   void sync_gnss_epochs_from_shared_state();
   std::vector<iap::GnssEpoch> consume_segment_gnss_epochs(double segment_start, double segment_end);
@@ -189,6 +214,7 @@ class OdometryEstimationBSpline : public OdometryEstimationCPU {
   bool lidar_collect_window_results() const;
   std::size_t lidar_factor_config_signature(bool use_gpu_lidar) const;
   std::size_t lidar_target_revision(const ActiveSplineSegmentConstraint& segment) const;
+  iap::BSplineSolveDomain build_solve_domain() const;
   ActiveSplineLidarFactorCacheKey make_lidar_factor_cache_key(
     const ActiveSplineSegmentConstraint& segment,
     bool use_gpu_lidar) const;
@@ -246,6 +272,7 @@ class OdometryEstimationBSpline : public OdometryEstimationCPU {
   bool lidar_warn_degeneracy_ = true;
   bool lidar_export_baseline_csv_ = false;
   bool pipeline_profile_ = false;
+  std::size_t local_domain_overlap_segments_ = 2;
   double lidar_linearization_check_scale_ = 1e-4;
   double lidar_linearization_warn_ratio_ = 0.25;
   double lidar_numeric_reference_scale_ = 1e-5;
@@ -282,6 +309,11 @@ class OdometryEstimationBSpline : public OdometryEstimationCPU {
   std::unique_ptr<iap::GnssHandler> gnss_handler_;
   std::deque<iap::GnssRawObservationBatch> pending_raw_gnss_batches_;
   std::size_t ct_target_revision_ = 0;
+  std::unordered_map<
+    SharedTargetHandleCacheKey,
+    std::weak_ptr<iap::ISharedTargetHandle>,
+    SharedTargetHandleCacheKeyHash>
+    shared_target_handle_cache_;
   bool lidar_baseline_csv_header_written_ = false;
   bool lidar_baseline_csv_first_row_logged_ = false;
 #ifdef GTSAM_POINTS_USE_CUDA

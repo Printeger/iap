@@ -69,6 +69,13 @@
 ## 2. 未映射改动（临时区）
 > 如果你临时改了代码但还没决定它对应哪个需求，先把改动写在这里（提交前必须移入上表）。
 
+- 2026-03-30: IAP-RQ-020 / IAP-RQ-300 / IAP-RQ-410
+  - 新增 `docs/dev_ct/README_REFACTOR_CT_SOLVER.md`，正式将连续时间 odometry 求解器重构收口到“KERNEL-only public route + staged incremental fixed-lag migration”的执行规范。
+  - 新增 `include/iap/odometry/ct_solve_domain.hpp`，引入 `ICTSolveDomain / BSplineSolveDomain`，并在 `OdometryEstimationBSpline` 中把公开连续时间 LiDAR solve scope 收口到“当前 segment + 最近重叠段”，不再默认覆盖全部历史 active-window segment。
+  - 新增 `include/iap/odometry/shared_target_handle.hpp`，引入 `ISharedTargetHandle / SharedTargetHandle`，开始把 active segment 的 target metadata 从 per-segment runtime ownership 迁移到 shared target handle 语义。
+  - `OdometryEstimationBSpline` 现已维护按 `target identity + revision` 复用的 shared target handle cache，`IntegratedBSplineGICPFactorGPUKernel` 也已通过 `refresh_target_handle(...)` 直接绑定 shared target GPU resources，从而把 KERNEL 的 target refresh 从“每个 factor 重建 target GPU map”推进到“共享 target-side GPU resource handle”。
+  - `config_odometry_bspline.json` 与 `OdometryEstimationBSpline` 现已把 `KERNEL` 固定为公开默认 GPU route；公开选择 `BUCKET` 时会直接报 deprecated error，只有设置 `IAP_ALLOW_DEPRECATED_BUCKET=1` 才允许内部 parity / 一次性 A/B 使用。
+  - 新增 `test_ct_solve_domain.cpp` 与 `test_shared_target_handle.cpp`，分别覆盖 local-domain 选择/retirement 语义和 shared-target-handle revision/identity/metadata 语义；`test_bspline_gicp_factor.cpp` 现已进一步覆盖 KERNEL 通过 shared target resources 绑定/切换 target-side GPU state 的路径。
 - 2026-03-29: IAP-RQ-300 / IAP-RQ-410
   - `OdometryEstimationBSpline` 现已把 `BUCKET` frontend 分成 runtime / diagnostic 两种结果回收模式：默认运行态只回收当前 segment 的必要 LiDAR result，用于 `icp_quality` 和连续时间主链输出；整窗 full `make_result / aggregate / numeric audit / degeneracy` 只在 profile / CSV / warning 开关开启时执行。
   - active-window LiDAR factor 现已进入缓存复用阶段：CPU CT LiDAR factor 会在 active segment 生命周期内直接复用；GPU `BUCKET` factor 也会保留 source bucketization，仅在 target identity/revision 变化时刷新 target-side GPU resources。
