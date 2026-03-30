@@ -6,6 +6,9 @@
 #include <array>
 #include <cmath>
 #include <cstddef>
+#include <cstdio>
+#include <iomanip>
+#include <sstream>
 #include <vector>
 
 namespace iap {
@@ -59,6 +62,12 @@ struct BSplineLidarFactorProfile {
   double correspondence_ms = 0.0;
   double accumulation_ms = 0.0;
   double total_ms = 0.0;
+  double kernel_pose_query_ms = 0.0;
+  double kernel_correspondence_ms = 0.0;
+  double kernel_residual_weight_ms = 0.0;
+  double kernel_reduction_ms = 0.0;
+  double host_sync_ms = 0.0;
+  double host_result_pack_ms = 0.0;
   double total_error = 0.0;
   const char* stage = "none";
 };
@@ -136,10 +145,30 @@ struct BSplineLidarWindowProfileSummary {
   double total_correspondence_ms = 0.0;
   double total_accumulation_ms = 0.0;
   double total_factor_ms = 0.0;
+  double total_kernel_pose_query_ms = 0.0;
+  double total_kernel_correspondence_ms = 0.0;
+  double total_kernel_residual_weight_ms = 0.0;
+  double total_kernel_reduction_ms = 0.0;
+  double total_host_sync_ms = 0.0;
+  double total_host_result_pack_ms = 0.0;
   double mean_candidates_per_source = 0.0;
   double mean_time_bucket_population = 0.0;
   std::size_t max_time_bucket_population = 0;
 };
+
+struct BSplineLidarBaselineExport {
+  bool valid = false;
+  double stamp = 0.0;
+  const char* frontend_mode = "unknown";
+  BSplineLidarFactorBackend backend = BSplineLidarFactorBackend::CPU_GICP;
+  int current_factor_index = -1;
+  BSplineLidarWindowProfileSummary summary;
+  std::vector<BSplineLidarFactorResult> factor_results;
+};
+
+inline int bspline_lidar_csv_bool(bool value) {
+  return value ? 1 : 0;
+}
 
 inline BSplineLidarFactorProfile make_bspline_lidar_minimal_profile(
   BSplineLidarFactorBackend backend,
@@ -253,6 +282,12 @@ inline BSplineLidarWindowProfileSummary aggregate_bspline_lidar_factor_results(
       summary.total_correspondence_ms += result.profile.correspondence_ms;
       summary.total_accumulation_ms += result.profile.accumulation_ms;
       summary.total_factor_ms += result.profile.total_ms;
+      summary.total_kernel_pose_query_ms += result.profile.kernel_pose_query_ms;
+      summary.total_kernel_correspondence_ms += result.profile.kernel_correspondence_ms;
+      summary.total_kernel_residual_weight_ms += result.profile.kernel_residual_weight_ms;
+      summary.total_kernel_reduction_ms += result.profile.kernel_reduction_ms;
+      summary.total_host_sync_ms += result.profile.host_sync_ms;
+      summary.total_host_result_pack_ms += result.profile.host_result_pack_ms;
 
       if (!min_unique_target_ratio_initialized || result.profile.unique_target_ratio < summary.min_unique_target_ratio) {
         summary.min_unique_target_ratio = result.profile.unique_target_ratio;
@@ -286,6 +321,196 @@ inline BSplineLidarWindowProfileSummary aggregate_bspline_lidar_factor_results(
     summary.mean_time_bucket_population = mean_time_bucket_population_sum / static_cast<double>(summary.detailed_profile_count);
   }
   return summary;
+}
+
+inline BSplineLidarBaselineExport make_bspline_lidar_baseline_export(
+  const double stamp,
+  const char* frontend_mode,
+  const std::vector<BSplineLidarFactorResult>& results,
+  const int current_factor_index = -1) {
+  BSplineLidarBaselineExport export_data;
+  export_data.stamp = stamp;
+  export_data.frontend_mode = frontend_mode ? frontend_mode : "unknown";
+  export_data.current_factor_index = current_factor_index;
+  export_data.factor_results = results;
+  export_data.summary = aggregate_bspline_lidar_factor_results(results);
+  export_data.valid = export_data.summary.valid || !results.empty();
+
+  for (const auto& result : results) {
+    if (result.valid) {
+      export_data.backend = result.backend;
+      return export_data;
+    }
+  }
+
+  return export_data;
+}
+
+inline const char* bspline_lidar_baseline_csv_header() {
+  return "stamp,row_type,frontend_mode,backend,segment_index,is_current,valid,profile_valid,profile_minimal,"
+         "warning_count,source_points,target_points,time_buckets,max_time_bucket_population,"
+         "candidate_evaluation_count,matched_points,inlier_points,unique_targets,max_target_reuse,"
+         "match_ratio,inlier_ratio,unique_target_ratio,max_target_reuse_ratio,mean_match_distance,"
+         "max_match_distance,mean_match_score,mean_score_gap,mean_score_ratio,mean_robust_weight,"
+         "pose_ms,correspondence_ms,accumulation_ms,total_ms,kernel_pose_query_ms,"
+         "kernel_correspondence_ms,kernel_residual_weight_ms,kernel_reduction_ms,host_sync_ms,"
+         "host_result_pack_ms,total_error,factor_error,rmse,"
+         "inlier_count,inlier_fraction,numeric_valid,numeric_rotation_rel_error,"
+         "numeric_translation_rel_error,numeric_max_axis_rel_error,numeric_mean_axis_rel_error,"
+         "numeric_worst_axis,degeneracy_valid,deg_empty_target,deg_low_match,deg_low_inlier,"
+         "deg_low_target_diversity,deg_high_target_reuse,deg_high_ambiguity_rejection,"
+         "deg_weak_score_separation,ambiguity_rejection_ratio,distance_rejection_ratio,"
+         "outlier_rejection_ratio,robust_rejection_ratio,summary_result_count,"
+         "summary_valid_profile_count,summary_detailed_profile_count,summary_minimal_profile_count,"
+         "summary_warning_result_count,summary_total_source_points,summary_total_target_points,"
+         "summary_total_matched_points,summary_total_inlier_points,summary_total_candidate_eval,"
+         "summary_weighted_match_ratio,summary_weighted_inlier_ratio,summary_mean_unique_target_ratio,"
+         "summary_min_unique_target_ratio,summary_max_target_reuse_ratio,"
+         "summary_max_ambiguity_rejection_ratio,summary_max_numeric_rel_error,"
+         "summary_max_rotation_axis_rel_error,summary_total_pose_ms,summary_total_corr_ms,"
+         "summary_total_accum_ms,summary_total_factor_ms,summary_total_kernel_pose_query_ms,"
+         "summary_total_kernel_correspondence_ms,summary_total_kernel_residual_weight_ms,"
+         "summary_total_kernel_reduction_ms,summary_total_host_sync_ms,"
+         "summary_total_host_result_pack_ms,summary_mean_candidates_per_source,"
+         "summary_mean_time_bucket_population,summary_max_time_bucket_population\n";
+}
+
+inline void write_bspline_lidar_baseline_csv_header(std::FILE* file) {
+  if (!file) {
+    return;
+  }
+  std::fputs(bspline_lidar_baseline_csv_header(), file);
+}
+
+inline void write_bspline_lidar_baseline_csv(std::FILE* file, const BSplineLidarBaselineExport& export_data) {
+  if (!file || !export_data.valid) {
+    return;
+  }
+
+  const auto write_row = [&](const char* row_type, int segment_index, bool is_current, const BSplineLidarFactorResult* result_ptr) {
+    BSplineLidarFactorResult empty_result;
+    const BSplineLidarFactorResult& result = result_ptr ? *result_ptr : empty_result;
+    const BSplineLidarFactorProfile& profile = result.profile;
+    const BSplineLidarNumericAudit& numeric = result.numeric_audit;
+    const BSplineLidarDegeneracyReport& degeneracy = result.degeneracy;
+    const auto& summary = export_data.summary;
+
+    std::ostringstream row;
+    row << std::fixed << std::setprecision(9);
+    bool first = true;
+    const auto add = [&](const auto& value) {
+      if (!first) {
+        row << ',';
+      }
+      first = false;
+      row << value;
+    };
+
+    add(export_data.stamp);
+    add(row_type);
+    add(export_data.frontend_mode);
+    add(to_string(result_ptr ? result.backend : export_data.backend));
+    add(segment_index);
+    add(bspline_lidar_csv_bool(is_current));
+    add(bspline_lidar_csv_bool(result_ptr ? result.valid : summary.valid));
+    add(bspline_lidar_csv_bool(profile.valid));
+    add(bspline_lidar_csv_bool(profile.minimal));
+    add(degeneracy.warning_count);
+    add(profile.source_point_count);
+    add(profile.target_point_count);
+    add(profile.time_bucket_count);
+    add(profile.max_time_bucket_population);
+    add(profile.candidate_evaluation_count);
+    add(profile.matched_point_count);
+    add(profile.inlier_point_count);
+    add(profile.unique_target_count);
+    add(profile.max_target_reuse);
+    add(profile.match_ratio);
+    add(profile.inlier_ratio);
+    add(profile.unique_target_ratio);
+    add(profile.max_target_reuse_ratio);
+    add(profile.mean_match_distance);
+    add(profile.max_match_distance);
+    add(profile.mean_match_score);
+    add(profile.mean_score_gap);
+    add(profile.mean_score_ratio);
+    add(profile.mean_robust_weight);
+    add(profile.pose_update_ms);
+    add(profile.correspondence_ms);
+    add(profile.accumulation_ms);
+    add(profile.total_ms);
+    add(profile.kernel_pose_query_ms);
+    add(profile.kernel_correspondence_ms);
+    add(profile.kernel_residual_weight_ms);
+    add(profile.kernel_reduction_ms);
+    add(profile.host_sync_ms);
+    add(profile.host_result_pack_ms);
+    add(profile.total_error);
+    add(result.factor_error);
+    add(result.rmse);
+    add(result.inlier_count);
+    add(result.inlier_fraction);
+    add(bspline_lidar_csv_bool(numeric.valid));
+    add(numeric.rotation_rel_error);
+    add(numeric.translation_rel_error);
+    add(numeric.max_rotation_axis_rel_error);
+    add(numeric.mean_rotation_axis_rel_error);
+    add(numeric.worst_rotation_axis);
+    add(bspline_lidar_csv_bool(degeneracy.valid));
+    add(bspline_lidar_csv_bool(degeneracy.empty_target));
+    add(bspline_lidar_csv_bool(degeneracy.low_match_ratio));
+    add(bspline_lidar_csv_bool(degeneracy.low_inlier_ratio));
+    add(bspline_lidar_csv_bool(degeneracy.low_target_diversity));
+    add(bspline_lidar_csv_bool(degeneracy.high_target_reuse));
+    add(bspline_lidar_csv_bool(degeneracy.high_ambiguity_rejection));
+    add(bspline_lidar_csv_bool(degeneracy.weak_score_separation));
+    add(degeneracy.ambiguity_rejection_ratio);
+    add(degeneracy.distance_rejection_ratio);
+    add(degeneracy.outlier_rejection_ratio);
+    add(degeneracy.robust_rejection_ratio);
+    add(summary.result_count);
+    add(summary.valid_profile_count);
+    add(summary.detailed_profile_count);
+    add(summary.minimal_profile_count);
+    add(summary.warning_result_count);
+    add(summary.total_source_point_count);
+    add(summary.total_target_point_count);
+    add(summary.total_matched_point_count);
+    add(summary.total_inlier_point_count);
+    add(summary.total_candidate_evaluation_count);
+    add(summary.weighted_match_ratio);
+    add(summary.weighted_inlier_ratio);
+    add(summary.mean_unique_target_ratio);
+    add(summary.min_unique_target_ratio);
+    add(summary.max_target_reuse_ratio);
+    add(summary.max_ambiguity_rejection_ratio);
+    add(summary.max_numeric_rel_error);
+    add(summary.max_rotation_axis_rel_error);
+    add(summary.total_pose_update_ms);
+    add(summary.total_correspondence_ms);
+    add(summary.total_accumulation_ms);
+    add(summary.total_factor_ms);
+    add(summary.total_kernel_pose_query_ms);
+    add(summary.total_kernel_correspondence_ms);
+    add(summary.total_kernel_residual_weight_ms);
+    add(summary.total_kernel_reduction_ms);
+    add(summary.total_host_sync_ms);
+    add(summary.total_host_result_pack_ms);
+    add(summary.mean_candidates_per_source);
+    add(summary.mean_time_bucket_population);
+    add(summary.max_time_bucket_population);
+    row << '\n';
+    std::fputs(row.str().c_str(), file);
+  };
+
+  write_row("window_summary", -1, false, nullptr);
+  for (std::size_t i = 0; i < export_data.factor_results.size(); ++i) {
+    write_row(
+      "factor_result",
+      static_cast<int>(i),
+      export_data.current_factor_index == static_cast<int>(i),
+      &export_data.factor_results[i]);
+  }
 }
 
 }  // namespace iap

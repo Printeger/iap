@@ -102,6 +102,14 @@ gtsam::GaussianFactorGraph relinearize_carried_prior(
   return linearized;
 }
 
+bool carried_prior_keys_exist(
+  const BSplineCarriedPrior& prior,
+  const gtsam::Values& values) {
+  return std::all_of(prior.retained_keys.begin(), prior.retained_keys.end(), [&](gtsam::Key key) {
+    return values.exists(key);
+  });
+}
+
 gtsam::Key bspline_gyro_bias_key() {
   return gtsam::symbol('j', 0);
 }
@@ -286,7 +294,7 @@ BSplineCarriedPrior build_bspline_carried_prior(
   }
 
   gtsam::GaussianFactorGraph combined_linear_graph;
-  if (previous_prior && !previous_prior->empty()) {
+  if (previous_prior && !previous_prior->empty() && carried_prior_keys_exist(*previous_prior, values)) {
     append_cloned_gaussian_factors(combined_linear_graph, relinearize_carried_prior(*previous_prior, values));
   }
   if (removable_graph.size() != 0) {

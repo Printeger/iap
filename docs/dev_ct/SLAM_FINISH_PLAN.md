@@ -1,7 +1,7 @@
 # IAP Continuous-Time SLAM Finish Plan
 
 ## 更新时间
-- 2026-03-28
+- 2026-03-30
 
 ## 文档目的
 - 将当前连续时间 `LiDAR + IMU + GNSS` SLAM 从“最小可用骨架”推进到“工程化完备版本”。
@@ -11,6 +11,9 @@
 ## 当前基线
 - 已具备 `OdometryEstimationBSpline`、active spline window、多 segment LiDAR factor、IMU factor、GNSS factor、velocity state、clock state、continuous trajectory publishing。
 - 当前系统已经可以运行最小可用的 spline-native `LiDAR + IMU + GNSS` 联合优化骨架。
+- `CT_LIDAR_GPU` 已形成双后端结构：
+  - `BUCKET` 已冻结为稳定工程基线
+  - `KERNEL` 已完成第一版可运行 MVP，并接入 active-window odometry 主链与统一 result/profile/baseline surface
 - 当前主要缺口仍在：
   - 还不是最终的 fixed-lag 主状态组织。
   - LiDAR / IMU / GNSS 因子仍有“最小可用实现”成分。
@@ -18,6 +21,7 @@
   - 多类 Jacobian 仍是数值形式。
   - `gnss_extension` 仍保留部分长期 ownership。
   - mapping / 长时运行 / 退化恢复 / benchmark 还没有形成封板级验收。
+  - GPU odometry 还没有完成 `cached BUCKET vs KERNEL`、`KERNEL runtime vs diagnostic` 的同配置 A/B，也还没有完成 `KERNEL` 路径下 shared GNSS state 生命周期的长包验收。
 
 ## 总体目标
 1. 让 `OdometryEstimationBSpline` 成为连续时间 SLAM 的主 odometry，而不是局部 frontend 过渡层。
@@ -97,6 +101,10 @@
 - 完善 correspondence / outlier / robust kernel 策略。
 - 统一 deskew、source time query、target covariance 使用方式。
 - 增加 profiling hook，为后续 GPU 版复用做接口准备。
+- 冻结 `BUCKET` 为稳定基线，并把 `KERNEL` 推进成真正可验收的 GPU 主线后端。
+- 保持 `runtime mode` 与 `diagnostic mode` 的显式边界：
+  - runtime 默认只回收当前 factor
+  - diagnostic 才执行整窗 result / CSV / numeric audit / degeneracy
 
 建议涉及文件：
 - `include/iap/odometry/integrated_bspline_gicp_factor.hpp`
@@ -107,6 +115,8 @@
 - LiDAR 因子不再依赖数值 pose Jacobian。
 - 新增单测覆盖 Jacobian 正确性和 correspondence 稳定性。
 - replay 下连续时间 LiDAR 因子的收敛质量不低于当前最小版本。
+- `cached BUCKET` 与 `KERNEL` 可在同一配置下导出统一 baseline CSV 并完成直接 A/B。
+- `KERNEL runtime` 的 `post_lidar_result_ms` 明显低于 `KERNEL diagnostic`。
 
 ### M3：IMU Continuous-Time 约束完成
 目标：
@@ -232,7 +242,7 @@
 
 ### M7：性能、GPU 与 Benchmark
 目标：
-- 在正确性稳定后完成性能基线与下一阶段 GPU 准备。
+- 在正确性稳定后完成性能基线、GPU odometry 封板，以及下一阶段更深层 kernel 优化准备。
 
 核心任务：
 - 基准对比：
@@ -245,12 +255,14 @@
   - 边缘化耗时
   - 内存占用
 - 明确 GPU 路线：
-  - continuous-time LiDAR factor 哪些部分可以上 GPU
-  - 当前 CPU 因子如何抽象复用接口
+  - `BUCKET` 作为稳定基线的长期定位
+  - `KERNEL` 的 kernel-stage baseline、numeric parity 和 runtime/diagnostic 双模式
+  - 是否还需要继续推进 kernel 级 correspondence / reduction 优化
 
 完成标准：
 - 有 benchmark 表格和 replay 数据支撑。
-- GPU 路线形成明确设计，不再停留在方向性讨论。
+- `cached BUCKET vs KERNEL`、`KERNEL runtime vs diagnostic` 的 A/B 数据完整。
+- GPU 路线不再停留在方向性讨论，而是有已接入主线的 `KERNEL` backend 和后续优化清单。
 
 ### M8：封板文档与发布前验收
 目标：
@@ -298,6 +310,9 @@
 - 解析 Jacobian
 - target 策略收敛
 - correspondence 与 robust handling
+- 冻结 `BUCKET` 为稳定工程基线
+- 完成 `KERNEL` backend 的最小可运行实现并接入统一 result/profile/baseline surface
+- 形成 `cached BUCKET vs KERNEL`、`runtime vs diagnostic` 的直接 A/B 能力
 
 依赖：
 - WP1
@@ -305,6 +320,7 @@
 验收：
 - Jacobian 测试
 - A/B 精度与耗时对比
+- CUDA smoke test、current-factor numeric parity、target-refresh 生命周期测试
 
 ### WP3：IMU 因子完成
 优先级：P0

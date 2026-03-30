@@ -1,7 +1,7 @@
 # IAP 连续时间开发状态
 
 ## 更新时间
-- 2026-03-29
+- 2026-03-30
 
 ## 执行入口
 - 后续连续时间 SLAM 开发以 [SLAM_FINISH_PLAN.md](/home/dev/code/ws_iap/src/iap/docs/dev_ct/SLAM_FINISH_PLAN.md) 为唯一执行入口。
@@ -73,6 +73,10 @@
   - `ContinuousTrajectoryView` 在有 control-point kinematics 时优先返回显式 velocity / acceleration
   - planner / debug / control-access 看到的 spline window 不再是 pose-only 快照
 - 已开始按 [SLAM_FINISH_PLAN.md](/home/dev/code/ws_iap/src/iap/docs/dev_ct/SLAM_FINISH_PLAN.md) 执行 `M2 / WP2`：
+  - `BUCKET` 现已进入“稳定基线 + runtime/diagnostic 双模式”阶段：当 `ct_lidar_profile_factor / ct_lidar_profile_numeric_reference / ct_lidar_export_baseline_csv / ct_lidar_warn_degeneracy` 都关闭时，运行态只会回收当前 segment 的必要 LiDAR 结果用于 `icp_quality`，不再默认扫描整窗 active LiDAR factors 做完整 diagnostics
+  - active-window LiDAR factor 生命周期现已开始缓存化：CPU CT LiDAR factor 会按 active segment 复用，GPU `BUCKET` factor 也会复用 source bucketization，并在 global target 变化时只刷新 target-side GPU resources，而不是每窗从零重建整个 factor
+  - pipeline profiling 现已进一步把 BUCKET 热点拆成 cache/build/refresh/result 子阶段：`graph_lidar_factor_new_build_ms / graph_lidar_factor_target_refresh_ms / graph_lidar_factor_reused_attach_ms / cache hit-miss counts / post_lidar_factor_error_ms / numeric_audit_ms / degeneracy_ms / result_pack_ms / window_aggregate_ms`
+  - carried prior / shared GNSS state 生命周期现已补上缺键容错：当上一轮 carried prior 的 retained key 在当前 values 中不存在时，会自动跳过这部分 previous prior 的 relinearization；GNSS anchor 初始化时，ECEF shared states 也会稳定地 seed 到当前 BSpline values 中，避免 `key "e0" not exist in the Values` 再次打断 continuous-time GNSS 链路
   - continuous-time LiDAR factor 现已具备显式 target 策略配置：`ACTIVE_WINDOW_SNAPSHOT` 和 `GLOBAL_IVOX_REFERENCE` 两种模式可切换，并新增 snapshot frame-window 参数来收口 frozen target 的生命周期
   - `OdometryEstimationBSpline` 现已为每个 active segment 记录 target mode / target frame count / target point count / target build time，并在当前帧 LiDAR factor 上输出这些 target diagnostics
   - `IntegratedBSplineGICPFactor` 现已新增 profiling stats，能够报告 source/target 点数、匹配数、match ratio，以及 pose update / correspondence / accumulation / total 的耗时分解
@@ -119,6 +123,16 @@
   - GPU factor 的 `profiling_report()` 现已在保留 GPU timing baseline 的同时，懒加载同一 frozen target / 当前 spline pose 上的 CPU-side correspondence audit，因此 `candidate_evaluation_count / unique_target_ratio / max_target_reuse_ratio / mean_score_gap / rejection counts` 等 richer diagnostics 现在也能进入 `bspline ct lidar gpu-summary` / `gpu-factor` 汇总
   - `OdometryEstimationBSpline` 现已在 `CT_LIDAR_GPU` 路径下输出 numeric-reference drift 日志和 degeneracy warning，并将 LiDAR correspondence / robust / warning 配置完整下发到 GPU CT factor
   - CUDA 环境现已验证可跑：`test_bspline_gicp_factor` 的 GPU smoke tests 已改成与生产路径一致地分配 stream/temp-buffer，并在真实 GPU 上覆盖 GPU factor linearization、detailed unified profile、runtime numeric-reference audit 和 degeneracy diagnostics
+  - 统一 `BSplineLidarFactorResult / WindowProfileSummary` 返回面现已进一步扩展为可导出的 baseline surface：新增 `BSplineLidarBaselineExport` 以及 CSV helpers，可把每轮 active-window 的 CT LiDAR 结果导出成一条 `window_summary` 和多条 `factor_result` 记录
+  - `OdometryEstimationBSpline` 现已支持 `ct_lidar_export_baseline_csv / ct_lidar_baseline_csv_path`，并会在 `CT_LIDAR_CPU` / `CT_LIDAR_GPU` 两条路径下统一导出 active-window baseline CSV；后续 GPU kernel-level CT LiDAR 优化将直接以这份文件作为 A/B baseline 输入，而不再只依赖 trace log
+  - `test_bspline_gicp_factor` 现已补上 baseline CSV export 单测，验证 unified result surface 的 summary/factor rows 和 current-factor 标记，作为后续继续抽象 GPU kernel result/profile 接口的回归基线
+  - `CT_LIDAR_GPU` 现已新增 `ct_lidar_gpu_backend = BUCKET | KERNEL` 运行时切换：当前工程实现已明确冻结为 `BUCKET` backend，而 `KERNEL` backend 现已从预留入口推进成第一版可运行 MVP，不再是单纯的 fail-fast placeholder
+  - 这意味着后续 kernel-level spline-native GPU LiDAR 可以在不破坏现有工程版测试和回归基线的前提下并行开发；当前 baseline CSV / unified result surface 也将继续作为两个 backend 的共同 A/B 验证面
+  - `IntegratedBSplineGICPFactorGPUKernel` 现已完成第一版独立实现：不再经过 `bucket pose -> unary VGICP -> map back` 这层中间表示，而是直接在 GPU 上按点时间戳查询 4 控制点 spline pose、做 correspondence / gating / robust weighting，并累计控制点窗口的 `24x24` Hessian / `24x1` gradient
+  - `OdometryEstimationBSpline` 现已在 `CT_LIDAR_GPU + KERNEL` 下真正挂接这条新 factor，并为 `BUCKET` / `KERNEL` 分别保留独立 cache slot；`KERNEL` 也继续复用 unified result/profile/baseline CSV surface，不新增第二套导出格式
+  - `BSplineLidarFactorProfile` / baseline CSV 现已扩展 kernel-stage 字段：`kernel_pose_query_ms / kernel_correspondence_ms / kernel_residual_weight_ms / kernel_reduction_ms / host_sync_ms / host_result_pack_ms`，作为 `cached BUCKET vs KERNEL` 后续 A/B 的统一 profile 面
+  - `test_bspline_gicp_factor` 现已新增 `GpuKernelFactorLinearizesAndReturnsUnifiedProfile` 与 `GpuKernelFactorRefreshesTargetWithoutRebuildingSourceStaging` 两类 CUDA 测试，覆盖 KERNEL smoke path、current-factor numeric parity，以及 target refresh 不重建 source staging 的生命周期约束
+  - 当前 `KERNEL` 仍是 MVP：kernel-stage timing 还没完全拆成稳定的子阶段基线，也还没完成 `cached BUCKET vs KERNEL` 与 `runtime vs diagnostic` 的同配置长包 A/B，这两项已经成为当前 GPU 收口阶段的首要剩余任务
 - planner 已开始真正消费 continuous-time state：
   - `IntegrityPlanner::plan()` 在可用时会优先使用 `SplineControlAccess` 锚定当前时刻，再从 `ContinuousTrajectoryView` 解析种子状态
   - motion primitives 现在从连续时间 `pos / vel / yaw / sigma` 出发，而不只是把 trajectory view 当成一个 `sigma0` 来源
@@ -130,6 +144,18 @@
   - 新的 `OdometryEstimationBSpline` 模块骨架
   - planner 读取连续时间轨迹的接口预留与基础接线
 - 当前实现已经具备最小可用的 spline-native `LiDAR + IMU + GNSS` 联合优化骨架，但还不是最终工程化完成版本。
+- 当前 `BUCKET` GPU 路径已经从“可运行工程版”推进到“可作为稳定 A/B baseline 的运行态实现”，下一步可以在不破坏这条基线的前提下继续推进真正的 kernel-level CT LiDAR backend。
+- `CT_LIDAR_GPU_KERNEL` 已完成第一版 MVP：
+  - 已新增独立 `IntegratedBSplineGICPFactorGPUKernel`
+  - 已直接在 GPU 上按点时间戳查询 4 控制点 spline pose、做 correspondence / gating / robust weighting，并累计 `24x24` Hessian / `24x1` gradient
+  - 已接入 `OdometryEstimationBSpline` 的 active-window 图，不再是单纯的预留入口
+  - 已复用统一 `BSplineLidarFactorResult / WindowProfileSummary / baseline CSV` 返回面
+  - 已补上 CUDA smoke test、current-factor numeric parity 和 target-refresh 不重建 source staging 的单测
+- 当前距离“GPU odometry 封板”还差的关键项已经收敛到：
+  - `KERNEL` kernel-stage profiling 仍需从当前单体 timing 继续细拆成 pose-query / correspondence / residual-weight / reduction / host-sync 等稳定 A/B 指标
+  - 还未完成 `cached BUCKET vs KERNEL`、`KERNEL runtime vs diagnostic` 的同配置长包 A/B
+  - carried-prior / shared GNSS states 需要在 `KERNEL` 路径下完成长时 replay 验证，确保不再出现 `e0` 缺键和 GNSS 因子中途掉零
+  - `KERNEL` 目前是“可运行 MVP”，还不是最终高性能 kernel-level CT LiDAR 实现
 
 ## 本次已完成
 

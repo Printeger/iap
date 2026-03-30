@@ -213,3 +213,41 @@ TEST(BSplineMarginalizationTest, CarriedPriorCanComposeWithPreviousLinearPrior) 
   const auto delta = linearization_point.localCoordinates(perturbed_subset);
   EXPECT_NEAR(replayed23.error(perturbed), marginal_reference->error(delta), 1e-8);
 }
+
+TEST(BSplineMarginalizationTest, CarriedPriorIgnoresPreviousPriorWhenRetainedKeysAreMissing) {
+  const gtsam::Key s0 = iap::bspline_control_point_key(0);
+  const gtsam::Key s1 = iap::bspline_control_point_key(1);
+  const gtsam::Key e0 = iap::bspline_ecef_origin_key();
+
+  gtsam::Values seeded_values;
+  seeded_values.insert(s0, translated_pose(0.0));
+  seeded_values.insert(s1, translated_pose(1.0));
+  seeded_values.insert(e0, gtsam::Vector3(1.0, 2.0, 3.0));
+
+  const auto pose_noise = gtsam::noiseModel::Isotropic::Precision(6, 100.0);
+  const auto ecef_noise = gtsam::noiseModel::Isotropic::Precision(3, 10.0);
+
+  gtsam::NonlinearFactorGraph base_graph;
+  base_graph.emplace_shared<gtsam::PriorFactor<gtsam::Pose3>>(s0, translated_pose(0.0), pose_noise);
+  base_graph.emplace_shared<gtsam::BetweenFactor<gtsam::Pose3>>(
+    s0,
+    s1,
+    translated_pose(0.0).between(translated_pose(1.0)),
+    pose_noise);
+  base_graph.emplace_shared<gtsam::PriorFactor<gtsam::Vector3>>(e0, gtsam::Vector3(1.0, 2.0, 3.0), ecef_noise);
+
+  const auto previous_prior = iap::build_bspline_carried_prior(base_graph, seeded_values, {s1, e0});
+  ASSERT_FALSE(previous_prior.empty());
+
+  gtsam::Values current_values;
+  current_values.insert(s1, translated_pose(1.0));
+
+  gtsam::NonlinearFactorGraph next_graph;
+  next_graph.emplace_shared<gtsam::PriorFactor<gtsam::Pose3>>(s1, translated_pose(1.0), pose_noise);
+
+  EXPECT_NO_THROW({
+    const auto carried = iap::build_bspline_carried_prior(next_graph, current_values, {s1}, &previous_prior);
+    EXPECT_FALSE(carried.empty());
+    EXPECT_EQ(carried.retained_keys, (std::vector<gtsam::Key>{s1}));
+  });
+}

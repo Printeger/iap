@@ -70,6 +70,10 @@
 > 如果你临时改了代码但还没决定它对应哪个需求，先把改动写在这里（提交前必须移入上表）。
 
 - 2026-03-29: IAP-RQ-300 / IAP-RQ-410
+  - `OdometryEstimationBSpline` 现已把 `BUCKET` frontend 分成 runtime / diagnostic 两种结果回收模式：默认运行态只回收当前 segment 的必要 LiDAR result，用于 `icp_quality` 和连续时间主链输出；整窗 full `make_result / aggregate / numeric audit / degeneracy` 只在 profile / CSV / warning 开关开启时执行。
+  - active-window LiDAR factor 现已进入缓存复用阶段：CPU CT LiDAR factor 会在 active segment 生命周期内直接复用；GPU `BUCKET` factor 也会保留 source bucketization，仅在 target identity/revision 变化时刷新 target-side GPU resources。
+  - `bspline ct pipeline-summary` 现已进一步输出 `graph_lidar_factor_new_build_ms / graph_lidar_factor_target_refresh_ms / graph_lidar_factor_reused_attach_ms / cache hit-miss / post_lidar_factor_error_ms / post_lidar_numeric_audit_ms / post_lidar_degeneracy_ms / post_lidar_result_pack_ms / post_lidar_window_aggregate_ms`，作为 cached-BUCKET 与未来 KERNEL backend 的统一 A/B baseline。
+  - carried prior builder 现已对 previous prior retained keys 做缺键过滤，ECEF shared states 也会在 GNSS anchor 已初始化时稳定 seed 到当前 values 中；对应 regression 已补到 `test_bspline_marginalization.cpp`，直接覆盖此前 `key "e0" does not exist in the Values` 的 shared-state lifecycle failure。
   - 已继续按 `SLAM_FINISH_PLAN.md` 推进 `M2 / WP2`：`IntegratedBSplineGICPFactor` 现已支持 `NUMERIC_FULL / SEMI_ANALYTIC` 两种 Jacobian mode，默认走“解析 control-translation block + 数值 control-rotation block”的半解析路径，并保留 full-numeric 作为 A/B/debug 基线。
   - continuous-time LiDAR factor 现已补上显式 outlier/robust handling：可按 whitened residual norm 做 outlier gate，并支持 `NONE / HUBER / CAUCHY` 三种 robust kernel 及其宽度配置。
   - `OdometryEstimationBSpline` 现已将 LiDAR Jacobian mode、数值差分步长、outlier threshold、robust kernel 类型和宽度都接成配置项，并将当前 factor 的 inlier / rmse proxy 回填到 `EstimationFrame::icp_quality`。
@@ -107,6 +111,13 @@
   - `IntegratedBSplineGICPFactor` 现已新增 `diagnose_degeneracy(...)`，把当前 target/correspondence 状态转成可重用的 warning flags；`OdometryEstimationBSpline` 进一步把 `ct_lidar_warn_*` 阈值接成配置并输出专门的 degeneracy warning line。
   - `OdometryEstimationBSpline` 现已把 `ct_lidar_profile_numeric_reference` / `ct_lidar_numeric_reference_scale` 接成配置项，并把 numeric-reference drift 与 correspondence degeneracy diagnostics 写入 CT LiDAR trace 日志。
   - `test_bspline_gicp_factor.cpp` 现已补充 numeric-reference axis audit、profiling baseline、degeneracy diagnostics 和 ambiguity-rejection warning 的专门测试。
+  - `bspline_lidar_factor_result.hpp` 现已进一步扩展为 `BSplineLidarBaselineExport` + CSV helpers；`OdometryEstimationBSpline` 新增 `ct_lidar_export_baseline_csv / ct_lidar_baseline_csv_path` 配置，可把每轮 active-window CT LiDAR 结果统一导出为 `window_summary + factor_result rows`，作为后续 GPU kernel-level CT LiDAR 优化的稳定 baseline/result 文件接口。
+  - `test_bspline_gicp_factor.cpp` 现已补充 baseline CSV export 单测，验证 unified result surface 的 header、summary/factor row 以及 current-factor 标记语义。
+  - `OdometryEstimationBSpline` 现已新增 `ct_lidar_gpu_backend = BUCKET | KERNEL` 配置；当前工程 GPU CT LiDAR 路径已冻结为 `BUCKET` backend，而未来 kernel-level spline-native GPU backend 将通过独立 `KERNEL` 入口接入，不会与现有工程版运行时语义混用。
+  - `IntegratedBSplineGICPFactorGPUKernel` 现已作为独立 backend 落地：该 factor 直接在 GPU 上按点时间戳查询 4 控制点 spline pose、做 correspondence / gating / robust weighting，并累计 `24x24` Hessian / `24x1` gradient，不再经过 `bucket pose -> unary VGICP -> map back` 的中间层。
+  - `OdometryEstimationBSpline` 现已把 `CT_LIDAR_GPU + KERNEL` 直接接入 active-window 主链，并为 `BUCKET` / `KERNEL` 分别保留独立 cache slot；这使得冻结的 BUCKET baseline 和新的 KERNEL backend 可以在同一条 odometry 生命周期中直接 A/B，而不会相互污染缓存语义。
+  - `BSplineLidarFactorProfile / WindowProfileSummary / baseline CSV` 现已补充 kernel-stage timing 字段：`kernel_pose_query_ms / kernel_correspondence_ms / kernel_residual_weight_ms / kernel_reduction_ms / host_sync_ms / host_result_pack_ms`，作为后续 `cached BUCKET vs KERNEL` 的统一比较面。
+  - `test_bspline_gicp_factor.cpp` 现已新增 `GpuKernelFactorLinearizesAndReturnsUnifiedProfile` 与 `GpuKernelFactorRefreshesTargetWithoutRebuildingSourceStaging` 两类 CUDA 测试，覆盖 KERNEL smoke path、current-factor numeric parity，以及 target refresh 不重建 source-side staging 的生命周期要求。
 - 2026-03-29: IAP-RQ-020 / IAP-RQ-300 / IAP-RQ-410
   - `OdometryEstimationBSpline` 不再在建图前立即裁掉超过 lag 边界的 control points / segment constraints，而是先带着这些“即将滑出”的状态完成当前轮优化。
   - 新增 removable-factor marginalization：上一轮 carried prior 与本轮即将被 lag pruning 移除的 LiDAR/IMU/velocity/GNSS/clock/smoothness 因子会被单独收集、线性化，并对 survivor states 做边缘化。

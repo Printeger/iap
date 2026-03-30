@@ -65,18 +65,7 @@ IntegratedBSplineGICPFactorGPU::IntegratedBSplineGICPFactorGPU(
     throw std::runtime_error("IntegratedBSplineGICPFactorGPU requires source points, covariances, and times");
   }
 
-  target_cpu_points_ = target_->voxel_data();
-  target_point_count_ = target_cpu_points_ ? static_cast<std::size_t>(target_cpu_points_->size()) : 0U;
-  target_gpu_ = std::make_shared<gtsam_points::GaussianVoxelMapGPU>(
-    static_cast<float>(target_->leaf_size()),
-    8192 * 2,
-    10,
-    1e-3,
-    stream_);
-  if (target_cpu_points_ && target_cpu_points_->size()) {
-    auto target_points_gpu = gtsam_points::PointCloudGPU::clone(*target_cpu_points_, stream_);
-    target_gpu_->insert(*target_points_gpu);
-  }
+  rebuild_target_gpu();
 
   const double time_eps = 1e-3;
   time_table_.reserve(frame::size(*source_) / 10 + 1);
@@ -104,8 +93,34 @@ IntegratedBSplineGICPFactorGPU::IntegratedBSplineGICPFactorGPU(
   build_bucket_factors();
 }
 
+void IntegratedBSplineGICPFactorGPU::rebuild_target_gpu() {
+  target_cpu_points_ = target_->voxel_data();
+  target_point_count_ = target_cpu_points_ ? static_cast<std::size_t>(target_cpu_points_->size()) : 0U;
+  target_gpu_ = std::make_shared<gtsam_points::GaussianVoxelMapGPU>(
+    static_cast<float>(target_->leaf_size()),
+    8192 * 2,
+    10,
+    1e-3,
+    stream_);
+  if (target_cpu_points_ && target_cpu_points_->size()) {
+    auto target_points_gpu = gtsam_points::PointCloudGPU::clone(*target_cpu_points_, stream_);
+    target_gpu_->insert(*target_points_gpu);
+  }
+}
+
 void IntegratedBSplineGICPFactorGPU::set_numeric_eps(double eps) {
   numeric_eps_ = std::max(1e-8, eps);
+}
+
+void IntegratedBSplineGICPFactorGPU::refresh_target(const std::shared_ptr<const gtsam_points::iVox>& target) {
+  if (!target) {
+    throw std::runtime_error("IntegratedBSplineGICPFactorGPU cannot refresh to a null target");
+  }
+  target_ = target;
+  rebuild_target_gpu();
+  build_bucket_factors();
+  last_profile_ = BSplineLidarFactorProfile();
+  last_inlier_count_ = 0;
 }
 
 std::array<gtsam::Pose3, kBSplineControlPointCount> IntegratedBSplineGICPFactorGPU::control_poses(
@@ -130,54 +145,59 @@ gtsam::Values IntegratedBSplineGICPFactorGPU::control_pose_values() const {
 }
 
 void IntegratedBSplineGICPFactorGPU::build_bucket_factors() {
-  bucket_factors_.clear();
   bucket_graph_.resize(0);
 
   if (time_table_.empty()) {
     return;
   }
 
-  std::vector<std::vector<int>> bucket_point_indices(time_table_.size());
-  for (int i = 0; i < frame::size(*source_); ++i) {
-    bucket_point_indices[static_cast<std::size_t>(time_indices_[static_cast<std::size_t>(i)])].push_back(i);
+  if (bucket_factors_.empty()) {
+    std::vector<std::vector<int>> bucket_point_indices(time_table_.size());
+    for (int i = 0; i < frame::size(*source_); ++i) {
+      bucket_point_indices[static_cast<std::size_t>(time_indices_[static_cast<std::size_t>(i)])].push_back(i);
+    }
+
+    for (std::size_t i = 0; i < bucket_point_indices.size(); ++i) {
+      const auto& point_indices = bucket_point_indices[i];
+      if (point_indices.empty()) {
+        continue;
+      }
+
+      std::vector<Eigen::Vector4d> bucket_points;
+      bucket_points.reserve(point_indices.size());
+      std::vector<Eigen::Matrix4d> bucket_covs;
+      bucket_covs.reserve(point_indices.size());
+      std::vector<Eigen::Vector4d> bucket_normals;
+      if (frame::has_normals(*source_)) {
+        bucket_normals.reserve(point_indices.size());
+      }
+
+      for (const int point_index : point_indices) {
+        bucket_points.emplace_back(frame::point(*source_, point_index));
+        bucket_covs.emplace_back(frame::cov(*source_, point_index));
+        if (frame::has_normals(*source_)) {
+          bucket_normals.emplace_back(frame::normal(*source_, point_index));
+        }
+      }
+
+      auto bucket_gpu = std::make_shared<gtsam_points::PointCloudGPU>();
+      bucket_gpu->add_points(bucket_points, stream_);
+      bucket_gpu->add_covs(bucket_covs, stream_);
+      if (!bucket_normals.empty()) {
+        bucket_gpu->add_normals(bucket_normals, stream_);
+      }
+
+      BucketFactor bucket;
+      bucket.stamp = time_table_[i];
+      bucket.u = time_table_[i];
+      bucket.key = bucket_pose_key(i);
+      bucket.point_count = point_indices.size();
+      bucket.source_gpu = bucket_gpu;
+      bucket_factors_.push_back(std::move(bucket));
+    }
   }
 
-  for (std::size_t i = 0; i < bucket_point_indices.size(); ++i) {
-    const auto& point_indices = bucket_point_indices[i];
-    if (point_indices.empty()) {
-      continue;
-    }
-
-    std::vector<Eigen::Vector4d> bucket_points;
-    bucket_points.reserve(point_indices.size());
-    std::vector<Eigen::Matrix4d> bucket_covs;
-    bucket_covs.reserve(point_indices.size());
-    std::vector<Eigen::Vector4d> bucket_normals;
-    if (frame::has_normals(*source_)) {
-      bucket_normals.reserve(point_indices.size());
-    }
-
-    for (const int point_index : point_indices) {
-      bucket_points.emplace_back(frame::point(*source_, point_index));
-      bucket_covs.emplace_back(frame::cov(*source_, point_index));
-      if (frame::has_normals(*source_)) {
-        bucket_normals.emplace_back(frame::normal(*source_, point_index));
-      }
-    }
-
-    auto bucket_gpu = std::make_shared<gtsam_points::PointCloudGPU>();
-    bucket_gpu->add_points(bucket_points, stream_);
-    bucket_gpu->add_covs(bucket_covs, stream_);
-    if (!bucket_normals.empty()) {
-      bucket_gpu->add_normals(bucket_normals, stream_);
-    }
-
-    BucketFactor bucket;
-    bucket.stamp = time_table_[i];
-    bucket.u = time_table_[i];
-    bucket.key = bucket_pose_key(i);
-    bucket.point_count = point_indices.size();
-    bucket.source_gpu = bucket_gpu;
+  for (auto& bucket : bucket_factors_) {
     bucket.factor = std::make_shared<gtsam_points::IntegratedVGICPFactorGPU>(
       gtsam::Pose3(),
       bucket.key,
@@ -187,7 +207,6 @@ void IntegratedBSplineGICPFactorGPU::build_bucket_factors() {
       temp_buffer_);
     bucket.factor->set_enable_surface_validation(frame::has_normals(*source_));
     bucket_graph_.add(bucket.factor);
-    bucket_factors_.push_back(std::move(bucket));
   }
 }
 

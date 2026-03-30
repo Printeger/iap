@@ -8,6 +8,7 @@
 #include <gtsam_points/config.hpp>
 #ifdef GTSAM_POINTS_USE_CUDA
 #include <iap/odometry/integrated_bspline_gicp_factor_gpu.hpp>
+#include <iap/odometry/integrated_bspline_gicp_factor_gpu_kernel.hpp>
 #include <cuda_runtime_api.h>
 #include <gtsam_points/cuda/stream_temp_buffer_roundrobin.hpp>
 #endif
@@ -17,6 +18,8 @@
 #include <gtsam_points/types/point_cloud_cpu.hpp>
 
 #include <cmath>
+#include <cstdio>
+#include <string>
 
 namespace {
 
@@ -113,6 +116,22 @@ iap::IntegratedBSplineGICPFactor make_factor(
   iap::IntegratedBSplineGICPFactor factor(keys, target, source_cloud);
   factor.set_max_correspondence_distance(2.0);
   return factor;
+}
+
+std::string read_file_contents(std::FILE* file) {
+  std::string contents;
+  if (!file) {
+    return contents;
+  }
+
+  std::fflush(file);
+  std::rewind(file);
+
+  char buffer[1024];
+  while (std::fgets(buffer, sizeof(buffer), file)) {
+    contents += buffer;
+  }
+  return contents;
 }
 
 }  // namespace
@@ -691,6 +710,56 @@ TEST(BSplineGICPFactorTest, MinimalGpuResultUsesUnifiedReturnSurface) {
   EXPECT_NEAR(summary.weighted_inlier_ratio, 0.3, 1e-9);
 }
 
+TEST(BSplineGICPFactorTest, BaselineExportWritesWindowAndFactorRows) {
+  auto first = iap::make_bspline_lidar_minimal_result(
+    iap::BSplineLidarFactorBackend::GPU_GICP,
+    4.0,
+    2,
+    0.5,
+    4,
+    8,
+    "gpu_bucket");
+  first.degeneracy.valid = true;
+  first.degeneracy.warning_count = 1;
+
+  auto second = iap::make_bspline_lidar_minimal_result(
+    iap::BSplineLidarFactorBackend::GPU_GICP,
+    9.0,
+    3,
+    0.75,
+    4,
+    8,
+    "gpu_bucket");
+
+  const auto export_data =
+    iap::make_bspline_lidar_baseline_export(12.5, "CT_LIDAR_GPU", {first, second}, 1);
+  ASSERT_TRUE(export_data.valid);
+  EXPECT_EQ(export_data.backend, iap::BSplineLidarFactorBackend::GPU_GICP);
+  EXPECT_EQ(export_data.current_factor_index, 1);
+  EXPECT_EQ(export_data.factor_results.size(), 2U);
+
+  std::FILE* file = std::tmpfile();
+  ASSERT_NE(file, nullptr);
+  iap::write_bspline_lidar_baseline_csv_header(file);
+  iap::write_bspline_lidar_baseline_csv(file, export_data);
+
+  const std::string csv = read_file_contents(file);
+  std::fclose(file);
+
+  EXPECT_NE(csv.find("stamp,row_type,frontend_mode,backend"), std::string::npos);
+  EXPECT_NE(csv.find("window_summary,CT_LIDAR_GPU,GPU_GICP,-1,0"), std::string::npos);
+  EXPECT_NE(csv.find("factor_result,CT_LIDAR_GPU,GPU_GICP,0,0"), std::string::npos);
+  EXPECT_NE(csv.find("factor_result,CT_LIDAR_GPU,GPU_GICP,1,1"), std::string::npos);
+
+  int newline_count = 0;
+  for (const char ch : csv) {
+    if (ch == '\n') {
+      newline_count++;
+    }
+  }
+  EXPECT_EQ(newline_count, 4);
+}
+
 #ifdef GTSAM_POINTS_USE_CUDA
 TEST(BSplineGICPFactorTest, GpuFactorLinearizesAndReturnsUnifiedProfile) {
   int device_count = 0;
@@ -814,5 +883,183 @@ TEST(BSplineGICPFactorTest, GpuFactorDegeneracyDiagnosticsReportOutlierHeavyScen
   const auto profile = factor.profiling_report();
   EXPECT_FALSE(profile.minimal);
   EXPECT_GE(profile.rejected_outlier_count + profile.rejected_robust_count, 1U);
+}
+
+TEST(BSplineGICPFactorTest, GpuFactorCanRefreshTargetWithoutRebuildingSourceBuckets) {
+  int device_count = 0;
+  if (cudaGetDeviceCount(&device_count) != cudaSuccess || device_count == 0) {
+    GTEST_SKIP() << "CUDA device is not available in the current test environment";
+  }
+
+  auto target_a = std::make_shared<gtsam_points::iVox>(0.5);
+  target_a->voxel_insertion_setting().set_min_dist_in_cell(0.0);
+  target_a->set_neighbor_voxel_mode(1);
+  target_a->insert(*make_cloud(false));
+
+  std::vector<Eigen::Vector4d> shifted_points = {
+    Eigen::Vector4d(0.3, 0.0, 0.0, 1.0),
+    Eigen::Vector4d(1.3, 0.0, 0.0, 1.0),
+    Eigen::Vector4d(0.3, 1.0, 0.0, 1.0),
+    Eigen::Vector4d(0.8, 0.2, 0.0, 1.0),
+  };
+  std::vector<Eigen::Matrix3d> cov3(shifted_points.size(), Eigen::Matrix3d::Identity() * 1e-3);
+  auto target_b_cloud = make_custom_cloud(shifted_points, cov3);
+  auto target_b = std::make_shared<gtsam_points::iVox>(0.5);
+  target_b->voxel_insertion_setting().set_min_dist_in_cell(0.0);
+  target_b->set_neighbor_voxel_mode(1);
+  target_b->insert(*target_b_cloud);
+
+  std::array<gtsam::Key, iap::kBSplineControlPointCount> keys{};
+  for (std::size_t i = 0; i < iap::kBSplineControlPointCount; ++i) {
+    keys[i] = iap::bspline_control_point_key(i);
+  }
+
+  gtsam_points::StreamTempBufferRoundRobin stream_buffers;
+  auto stream_buffer = stream_buffers.get_stream_buffer();
+  iap::IntegratedBSplineGICPFactorGPU factor(keys, target_a, make_cloud(true), stream_buffer.first, stream_buffer.second);
+  factor.set_enable_profiling(true);
+  factor.set_max_correspondence_distance(2.0);
+
+  const auto values = make_identity_control_values();
+  const double error_a = factor.error(values);
+  const auto profile_a = factor.profiling_report();
+  ASSERT_TRUE(profile_a.valid);
+  ASSERT_EQ(profile_a.time_bucket_count, 4U);
+
+  factor.refresh_target(target_b);
+  const double error_b = factor.error(values);
+  const auto profile_b = factor.profiling_report();
+  ASSERT_TRUE(profile_b.valid);
+  EXPECT_EQ(profile_b.time_bucket_count, profile_a.time_bucket_count);
+  EXPECT_EQ(profile_b.source_point_count, profile_a.source_point_count);
+  EXPECT_NE(error_a, error_b);
+}
+
+TEST(BSplineGICPFactorTest, GpuKernelFactorLinearizesAndReturnsUnifiedProfile) {
+  int device_count = 0;
+  if (cudaGetDeviceCount(&device_count) != cudaSuccess || device_count == 0) {
+    GTEST_SKIP() << "CUDA device is not available in the current test environment";
+  }
+
+  auto target_cloud = make_cloud(false);
+  auto target = std::make_shared<gtsam_points::iVox>(0.5);
+  target->voxel_insertion_setting().set_min_dist_in_cell(0.0);
+  target->set_neighbor_voxel_mode(1);
+  target->insert(*target_cloud);
+
+  std::array<gtsam::Key, iap::kBSplineControlPointCount> keys{};
+  for (std::size_t i = 0; i < iap::kBSplineControlPointCount; ++i) {
+    keys[i] = iap::bspline_control_point_key(i);
+  }
+
+  gtsam_points::StreamTempBufferRoundRobin stream_buffers;
+  auto stream_buffer = stream_buffers.get_stream_buffer();
+  iap::IntegratedBSplineGICPFactorGPUKernel factor(
+    keys,
+    target,
+    make_cloud(true),
+    stream_buffer.first,
+    stream_buffer.second);
+  factor.set_jacobian_mode(iap::IntegratedBSplineGICPFactor::JacobianMode::SEMI_ANALYTIC);
+  factor.set_numeric_eps(1e-4);
+  factor.set_max_correspondence_distance(2.0);
+  factor.set_correspondence_candidate_count(2);
+  factor.set_correspondence_accept_ratio(0.99);
+  factor.set_correspondence_min_score_gap(1e-6);
+  factor.set_outlier_mahalanobis_threshold(10.0);
+  factor.set_robust_kernel(iap::IntegratedBSplineGICPFactor::RobustKernel::HUBER, 1.0);
+  factor.set_robust_weight_floor(0.0);
+  factor.set_enable_profiling(true);
+
+  const auto values = make_identity_control_values();
+  const auto linear = factor.linearize(values);
+  ASSERT_TRUE(static_cast<bool>(linear));
+
+  const double factor_error = factor.error(values);
+  const auto profile = factor.profiling_report();
+  ASSERT_TRUE(profile.valid);
+  EXPECT_EQ(profile.backend, iap::BSplineLidarFactorBackend::GPU_GICP);
+  EXPECT_GE(profile.source_point_count, 4U);
+  EXPECT_GE(profile.target_point_count, 4U);
+  EXPECT_GE(profile.matched_point_count, 1U);
+  EXPECT_GE(profile.inlier_point_count, 1U);
+  EXPECT_GE(profile.correspondence_ms, 0.0);
+  EXPECT_GE(profile.host_sync_ms, 0.0);
+  EXPECT_GE(profile.total_ms, 0.0);
+
+  const auto numeric_audit = factor.check_against_numeric_full(values, 1e-5);
+  ASSERT_TRUE(numeric_audit.valid);
+  EXPECT_LT(numeric_audit.rotation_rel_error, 1.0);
+  EXPECT_LT(numeric_audit.translation_rel_error, 1.0);
+
+  iap::IntegratedBSplineGICPFactor::DegeneracyThresholds thresholds;
+  thresholds.min_match_ratio = 0.2;
+  thresholds.min_inlier_ratio = 0.2;
+  const auto degeneracy = factor.diagnose_degeneracy(thresholds);
+  ASSERT_TRUE(degeneracy.valid);
+
+  const auto result = factor.make_result(
+    factor_error,
+    factor.num_inliers(),
+    factor.inlier_fraction(),
+    &numeric_audit,
+    &degeneracy);
+  ASSERT_TRUE(result.valid);
+  EXPECT_EQ(result.backend, iap::BSplineLidarFactorBackend::GPU_GICP);
+  EXPECT_TRUE(result.profile.valid);
+  EXPECT_TRUE(result.numeric_audit.valid);
+}
+
+TEST(BSplineGICPFactorTest, GpuKernelFactorRefreshesTargetWithoutRebuildingSourceStaging) {
+  int device_count = 0;
+  if (cudaGetDeviceCount(&device_count) != cudaSuccess || device_count == 0) {
+    GTEST_SKIP() << "CUDA device is not available in the current test environment";
+  }
+
+  auto target_a = std::make_shared<gtsam_points::iVox>(0.5);
+  target_a->voxel_insertion_setting().set_min_dist_in_cell(0.0);
+  target_a->set_neighbor_voxel_mode(1);
+  target_a->insert(*make_cloud(false));
+
+  std::vector<Eigen::Vector4d> shifted_points = {
+    Eigen::Vector4d(0.3, 0.0, 0.0, 1.0),
+    Eigen::Vector4d(1.3, 0.0, 0.0, 1.0),
+    Eigen::Vector4d(0.3, 1.0, 0.0, 1.0),
+    Eigen::Vector4d(0.8, 0.2, 0.0, 1.0),
+  };
+  std::vector<Eigen::Matrix3d> cov3(shifted_points.size(), Eigen::Matrix3d::Identity() * 1e-3);
+  auto target_b_cloud = make_custom_cloud(shifted_points, cov3);
+  auto target_b = std::make_shared<gtsam_points::iVox>(0.5);
+  target_b->voxel_insertion_setting().set_min_dist_in_cell(0.0);
+  target_b->set_neighbor_voxel_mode(1);
+  target_b->insert(*target_b_cloud);
+
+  std::array<gtsam::Key, iap::kBSplineControlPointCount> keys{};
+  for (std::size_t i = 0; i < iap::kBSplineControlPointCount; ++i) {
+    keys[i] = iap::bspline_control_point_key(i);
+  }
+
+  gtsam_points::StreamTempBufferRoundRobin stream_buffers;
+  auto stream_buffer = stream_buffers.get_stream_buffer();
+  iap::IntegratedBSplineGICPFactorGPUKernel factor(
+    keys,
+    target_a,
+    make_cloud(true),
+    stream_buffer.first,
+    stream_buffer.second);
+  factor.set_enable_profiling(true);
+  factor.set_max_correspondence_distance(2.0);
+
+  const auto values = make_identity_control_values();
+  const void* staging_a = factor.source_staging_identity();
+  ASSERT_NE(staging_a, nullptr);
+  const double error_a = factor.error(values);
+
+  factor.refresh_target(target_b);
+  const void* staging_b = factor.source_staging_identity();
+  const double error_b = factor.error(values);
+
+  EXPECT_EQ(staging_a, staging_b);
+  EXPECT_NE(error_a, error_b);
 }
 #endif

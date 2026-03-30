@@ -43,6 +43,11 @@ else()
   set(GLIM_USE_OPENCV 0)
 endif()
 
+if(BUILD_WITH_CUDA)
+  find_package(CUDAToolkit REQUIRED)
+  enable_language(CUDA)
+endif()
+
 ###########
 ## Build ##
 ###########
@@ -54,6 +59,7 @@ if(BUILD_WITH_CUDA)
     set(BUILD_WITH_CUDA OFF CACHE BOOL "gtsam_points is not built with CUDA" FORCE)
   else()
     set(GPU_SRCS
+      src/iap/odometry/integrated_bspline_gicp_factor_gpu_kernel.cu
       src/iap/odometry/integrated_bspline_gicp_factor_gpu.cpp
       src/iap/odometry/odometry_estimation_gpu.cpp)
   endif()
@@ -154,11 +160,15 @@ target_link_libraries(iap
   Eigen3::Eigen
   gtsam
   gtsam_points::gtsam_points
+  $<$<BOOL:${BUILD_WITH_CUDA}>:CUDA::cudart>
   OpenMP::OpenMP_CXX
   spdlog::spdlog
   $<TARGET_NAME_IF_EXISTS:Iridescence::Iridescence>
   ${OpenCV_LIBRARIES}
 )
+if(BUILD_WITH_CUDA)
+  set_target_properties(iap PROPERTIES CUDA_STANDARD 17 CUDA_STANDARD_REQUIRED ON)
+endif()
 if(BUILD_WITH_OPENCV)
   target_compile_definitions(iap PUBLIC GLIM_USE_OPENCV)
 endif()
