@@ -95,6 +95,10 @@
   - `BSplineLidarWindowProfileSummary` 现已显式区分 `detailed_profile_count` 和 `minimal_profile_count`，确保 GPU minimal profiles 不会污染 CPU detailed profiles 的 diversity / timing / bucket 基线统计。
   - `OdometryEstimationGPU` 现已把 `IntegratedVGICPFactorGPU` 封装成统一 `BSplineLidarFactorResult`，并新增 `vgicp gpu-summary` trace，作为未来 CT GPU LiDAR factor 复用这套 return surface 的真实 GPU caller baseline。
   - `test_bspline_gicp_factor.cpp` 现已补充 minimal GPU result 和 minimal-profile summary 的专门单测，验证 unified return surface 在 GPU minimal 模式下的 weighted summary 语义。
+  - 已新增 `IntegratedBSplineGICPFactorGPU`：source scan 会按 per-point time bucket 切分成多个 GPU unary `IntegratedVGICPFactorGPU` 子因子，并通过 4 控制点 spline pose 的数值 Jacobian，把 bucket Hessian 回映射到控制点窗口，形成真正的连续时间 GPU LiDAR factor 本体。
+  - `OdometryEstimationBSpline` 现已支持 `frontend_mode = CT_LIDAR_GPU`，并把这类 GPU CT LiDAR factor 直接挂入 active-window 图优化；同一条 fixed-lag LiDAR/IMU/GNSS 生命周期主线现在已可选择 CPU 或 GPU CT LiDAR frontend。
+  - 新的 GPU CT factor 现已复用统一的 `BSplineLidarFactorResult / WindowProfileSummary` 返回面，并新增 `bspline ct lidar gpu-summary` 与 `gpu-factor` trace；当前 GPU profiling 以 minimal profile 为主，但已经输出 bucket 数、bucket 峰值、pose/GPU/total time 等后续 kernel 优化所需的基线指标。
+  - `test_bspline_gicp_factor.cpp` 现已补充 `IntegratedBSplineGICPFactorGPU` 的 CUDA smoke test，验证该 factor 能 linearize 并返回有效统一 GPU result/profile。
   - CT LiDAR target lookup 现已统一回到 frozen `iVox` 的原生 search/index 域，避免把 copied-point KD-tree 返回的索引和 `iVox` 内部 point/cov 访问混用。
   - `IntegratedBSplineGICPFactor` 现已新增 `diagnose_degeneracy(...)`，把当前 target/correspondence 状态转成可重用的 warning flags；`OdometryEstimationBSpline` 进一步把 `ct_lidar_warn_*` 阈值接成配置并输出专门的 degeneracy warning line。
   - `OdometryEstimationBSpline` 现已把 `ct_lidar_profile_numeric_reference` / `ct_lidar_numeric_reference_scale` 接成配置项，并把 numeric-reference drift 与 correspondence degeneracy diagnostics 写入 CT LiDAR trace 日志。

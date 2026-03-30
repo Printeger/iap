@@ -53,7 +53,9 @@ if(BUILD_WITH_CUDA)
     message(WARNING "gtsam_points is not built with CUDA!!")
     set(BUILD_WITH_CUDA OFF CACHE BOOL "gtsam_points is not built with CUDA" FORCE)
   else()
-    set(GPU_SRCS src/iap/odometry/odometry_estimation_gpu.cpp)
+    set(GPU_SRCS
+      src/iap/odometry/integrated_bspline_gicp_factor_gpu.cpp
+      src/iap/odometry/odometry_estimation_gpu.cpp)
   endif()
 endif()
 

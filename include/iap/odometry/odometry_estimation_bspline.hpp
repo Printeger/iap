@@ -27,7 +27,14 @@
 #include <deque>
 #include <gtsam/nonlinear/NonlinearFactorGraph.h>
 #include <gtsam/nonlinear/Values.h>
+#include <gtsam_points/config.hpp>
 #include <vector>
+
+#ifdef GTSAM_POINTS_USE_CUDA
+namespace gtsam_points {
+class StreamTempBufferRoundRobin;
+}
+#endif
 
 namespace glim {
 
@@ -208,6 +215,9 @@ class OdometryEstimationBSpline : public OdometryEstimationCPU {
   std::unique_ptr<iap::GnssEpochBuilder> gnss_epoch_builder_;
   std::unique_ptr<iap::GnssHandler> gnss_handler_;
   std::deque<iap::GnssRawObservationBatch> pending_raw_gnss_batches_;
+#ifdef GTSAM_POINTS_USE_CUDA
+  std::unique_ptr<gtsam_points::StreamTempBufferRoundRobin> ct_lidar_gpu_stream_buffers_;
+#endif
 };
 
 }  // namespace glim

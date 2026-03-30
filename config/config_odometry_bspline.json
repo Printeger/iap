@@ -13,6 +13,7 @@
     // Frontend mode:
     //   RECONSTRUCT   = phase-1A legacy path (discrete odom + post-hoc spline)
     //   CT_LIDAR_CPU  = phase-1B minimal path (control-point window + CPU CT LiDAR factor)
+    //   CT_LIDAR_GPU  = phase-1B/2 path (time-bucket GPU VGICP subfactors mapped back to 4 spline controls)
     "frontend_mode": "CT_LIDAR_CPU",
     // Initialization params
     "initialization_mode": "LOOSE",

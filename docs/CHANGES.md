@@ -3,6 +3,11 @@
 > 规则：任何代码改动必须在这里记录，并包含 IAP-RQ-XXX。
 
 ## Unreleased
+- feat(dev-ct-mainline-lidar-gpu-factor): IAP-RQ-300 / IAP-RQ-410 — continue `M2 / WP2` by implementing the first real `CT_LIDAR_GPU` factor and wiring it into the B-spline active-window frontend.
+  - Added `IntegratedBSplineGICPFactorGPU`, which groups a source scan into time buckets, evaluates one GPU `IntegratedVGICPFactorGPU` unary subfactor per bucket, and maps the resulting unary bucket Hessians back to the four B-spline control poses through numeric spline-pose Jacobians.
+  - `OdometryEstimationBSpline` now accepts `frontend_mode = CT_LIDAR_GPU`, builds those GPU continuous-time LiDAR factors directly inside the active fixed-lag graph, and keeps the rest of the LiDAR/IMU/GNSS window lifecycle unchanged.
+  - The new GPU CT factor reuses the shared `BSplineLidarFactorResult` / `WindowProfileSummary` return surface, emits dedicated `bspline ct lidar gpu-summary` / `gpu-factor` traces, and supports local deskewing through the same four-control-point spline pose query used during optimization.
+  - `config_odometry_bspline.json` now documents `CT_LIDAR_GPU`, and `test_bspline_gicp_factor.cpp` now includes a CUDA smoke test that linearizes the new factor and verifies it returns a valid unified GPU profile/result object.
 - feat(dev-ct-mainline-lidar-gpu-surface): IAP-RQ-300 / IAP-RQ-410 — continue `M2 / WP2` by wiring the unified LiDAR result/profile interface into a real GPU caller path.
   - `bspline_lidar_factor_result.hpp` now supports backend-agnostic builders (`make_bspline_lidar_factor_result(...)`, `make_bspline_lidar_minimal_result(...)`) and distinguishes `minimal` versus detailed profiles, so GPU factors that only expose inlier/error statistics can still return a valid unified result object.
   - `BSplineLidarWindowProfileSummary` now tracks `detailed_profile_count` and `minimal_profile_count`, and only averages diversity / time-bucket / candidate metrics over detailed profiles. This keeps CPU summaries rich while allowing minimal GPU summaries to coexist without polluting those statistics.

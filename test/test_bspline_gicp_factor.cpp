@@ -4,6 +4,11 @@
 #include <gtest/gtest.h>
 
 #include <iap/odometry/integrated_bspline_gicp_factor.hpp>
+#include <gtsam_points/config.hpp>
+#ifdef GTSAM_POINTS_USE_CUDA
+#include <iap/odometry/integrated_bspline_gicp_factor_gpu.hpp>
+#include <cuda_runtime_api.h>
+#endif
 
 #include <gtsam/linear/VectorValues.h>
 #include <gtsam_points/ann/ivox.hpp>
@@ -649,3 +654,44 @@ TEST(BSplineGICPFactorTest, MinimalGpuResultUsesUnifiedReturnSurface) {
   EXPECT_NEAR(summary.weighted_match_ratio, 0.3, 1e-9);
   EXPECT_NEAR(summary.weighted_inlier_ratio, 0.3, 1e-9);
 }
+
+#ifdef GTSAM_POINTS_USE_CUDA
+TEST(BSplineGICPFactorTest, GpuFactorLinearizesAndReturnsUnifiedProfile) {
+  int device_count = 0;
+  if (cudaGetDeviceCount(&device_count) != cudaSuccess || device_count == 0) {
+    GTEST_SKIP() << "CUDA device is not available in the current test environment";
+  }
+
+  auto target_cloud = make_cloud(false);
+  auto target = std::make_shared<gtsam_points::iVox>(0.5);
+  target->voxel_insertion_setting().set_min_dist_in_cell(0.0);
+  target->set_neighbor_voxel_mode(1);
+  target->insert(*target_cloud);
+
+  std::array<gtsam::Key, iap::kBSplineControlPointCount> keys{};
+  for (std::size_t i = 0; i < iap::kBSplineControlPointCount; ++i) {
+    keys[i] = iap::bspline_control_point_key(i);
+  }
+
+  iap::IntegratedBSplineGICPFactorGPU factor(keys, target, make_cloud(true));
+  factor.set_numeric_eps(1e-4);
+  factor.set_enable_profiling(true);
+
+  const auto values = make_identity_control_values();
+  const auto linear = factor.linearize(values);
+  ASSERT_TRUE(static_cast<bool>(linear));
+
+  const double factor_error = factor.error(values);
+  const auto result = factor.make_result(factor_error, factor.num_inliers(), factor.inlier_fraction());
+  ASSERT_TRUE(result.valid);
+  EXPECT_EQ(result.backend, iap::BSplineLidarFactorBackend::GPU_GICP);
+  EXPECT_TRUE(result.profile.valid);
+  EXPECT_TRUE(result.profile.minimal);
+  EXPECT_EQ(result.profile.source_point_count, 4U);
+  EXPECT_EQ(result.profile.time_bucket_count, 4U);
+  EXPECT_EQ(result.profile.max_time_bucket_population, 1U);
+  EXPECT_GE(result.profile.pose_update_ms, 0.0);
+  EXPECT_GE(result.profile.correspondence_ms, 0.0);
+  EXPECT_GE(result.profile.total_ms, 0.0);
+}
+#endif
