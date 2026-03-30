@@ -12,8 +12,10 @@
 - `CT_LIDAR_GPU + KERNEL` 已成为唯一公开连续时间 GPU LiDAR 路线；`BUCKET` 现已退为内部过渡实现，只允许用于 parity / 一次性 A/B。
 - 已开始按 [README_REFACTOR_CT_SOLVER.md](/home/dev/code/ws_iap/src/iap/docs/dev_ct/README_REFACTOR_CT_SOLVER.md) 执行 `P0 / P1`：
   - 已新增 `ICTSolveDomain / BSplineSolveDomain`
+  - 已新增 `BSplineIncrementalSolverSkeleton`
   - 已新增 `ISharedTargetHandle / SharedTargetHandle`
   - `OdometryEstimationBSpline` 现已默认按“当前 segment + 最近重叠段”的 local-domain 选择范围构建连续时间 LiDAR solve domain，而不再把全部历史 active-window segment 当成默认 LiDAR solve 域
+  - `OdometryEstimationBSpline` 现已显式产出 continuous-time solve-domain 的增量生命周期载荷：active/new/retired segments、new/retired keys，以及后续长期存活 fixed-lag smoother 需要的 `new_values / new_stamps` skeleton，不再把这层生命周期隐式埋在单次 `insert_frame_ct_lidar()` 逻辑中
   - 公开 runtime 选择 `BUCKET` 时现在会直接报 deprecated error；只有设置 `IAP_ALLOW_DEPRECATED_BUCKET=1` 才允许内部过渡使用
   - 已继续推进到 `P2` 的 shared-target 资源接线：`OdometryEstimationBSpline` 现已维护 shared target handle cache，而 `IntegratedBSplineGICPFactorGPUKernel` 已可直接绑定 shared target GPU resources，并在 target revision 变化时通过 handle refresh 切换 target-side GPU state，而不是在每个 factor 内重新构建 target GPU map
 - 已完成 Phase 1A 的“连续时间骨架层”落地。
@@ -166,6 +168,7 @@
   - `KERNEL` 目前是“可运行 MVP”，还不是最终高性能 kernel-level CT LiDAR 实现
 - 连续时间求解器重构当前仍处于 `README_REFACTOR_CT_SOLVER` 的过渡阶段：
   - 已落下公开路线冻结和 local-domain / shared-target 骨架
+  - 已落下 `BSplineIncrementalSolverSkeleton`，开始显式表达 segment/key add-remove 生命周期和 future smoother payload
   - 已落下 KERNEL shared-target GPU resource binding 与 handle-cache 语义
   - 尚未完成长期存活的 incremental fixed-lag solver
   - 尚未完成 shared target GPU handle 的统一 ownership

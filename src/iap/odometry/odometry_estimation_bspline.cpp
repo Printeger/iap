@@ -448,6 +448,7 @@ void OdometryEstimationBSpline::initialize_control_window(
   const gtsam::Pose3& initial_pose) {
   control_window_->initialize(raw_frame->stamp, raw_frame->scan_end_time, initial_pose);
   fixed_lag_registry_.reset_from_window(*control_window_);
+  incremental_solver_skeleton_.reset();
   marginal_prior_ = ActiveSplineMarginalPrior();
   fixed_lag_registry_.clear_auxiliary_values();
   ct_target_revision_ = 0;
@@ -1058,6 +1059,7 @@ EstimationFrame::ConstPtr OdometryEstimationBSpline::insert_frame_ct_lidar(
     double segment_prepare_ms = 0.0;
     double target_build_ms = 0.0;
     double gnss_epoch_fetch_ms = 0.0;
+    double incremental_domain_prepare_ms = 0.0;
     double marginalization_partition_ms = 0.0;
     double graph_build_ms = 0.0;
     double graph_lidar_factor_ms = 0.0;
@@ -1098,6 +1100,11 @@ EstimationFrame::ConstPtr OdometryEstimationBSpline::insert_frame_ct_lidar(
     std::size_t graph_lidar_factor_cache_hit_count = 0;
     std::size_t graph_lidar_factor_cache_miss_count = 0;
     std::size_t graph_lidar_factor_refresh_count = 0;
+    std::size_t incremental_active_segment_count = 0;
+    std::size_t incremental_new_segment_count = 0;
+    std::size_t incremental_retired_segment_count = 0;
+    std::size_t incremental_new_key_count = 0;
+    std::size_t incremental_retired_key_count = 0;
   } pipeline_timing;
 
   Callbacks::on_insert_frame(raw_frame);
@@ -1210,6 +1217,22 @@ EstimationFrame::ConstPtr OdometryEstimationBSpline::insert_frame_ct_lidar(
     logger->error("bspline ct frontend could not build a non-empty local solve domain");
     return nullptr;
   }
+  const auto incremental_delta = [&] {
+    const auto t_incremental_prepare_start = Clock::now();
+    auto delta = incremental_solver_skeleton_.prepare_update(
+      solve_domain,
+      active_states,
+      fixed_lag_registry_.shared_state(),
+      values,
+      raw_frame->stamp);
+    pipeline_timing.incremental_domain_prepare_ms = elapsed_ms(t_incremental_prepare_start, Clock::now());
+    pipeline_timing.incremental_active_segment_count = delta.active_segment_ordinals.size();
+    pipeline_timing.incremental_new_segment_count = delta.newly_active_segment_ordinals.size();
+    pipeline_timing.incremental_retired_segment_count = delta.retired_segment_ordinals.size();
+    pipeline_timing.incremental_new_key_count = delta.new_keys.size();
+    pipeline_timing.incremental_retired_key_count = delta.retired_keys.size();
+    return delta;
+  }();
   const auto solve_segment_ordinals = solve_domain.active_segment_ordinals();
   const std::size_t current_segment_ordinal = solve_segment_ordinals.back();
   const iap::BSplineCarriedPrior previous_carried_prior = marginal_prior_.carried_prior;
@@ -1292,6 +1315,15 @@ EstimationFrame::ConstPtr OdometryEstimationBSpline::insert_frame_ct_lidar(
     pipeline_timing.marginalization_partition_ms = elapsed_ms(t_partition_start, Clock::now());
     return partition;
   }();
+  logger->trace(
+    "bspline ct incremental-domain active_segments={} new_segments={} retired_segments={} new_keys={} retired_keys={} start={:.3f} end={:.3f}",
+    incremental_delta.active_segment_ordinals.size(),
+    incremental_delta.newly_active_segment_ordinals.size(),
+    incremental_delta.retired_segment_ordinals.size(),
+    incremental_delta.new_keys.size(),
+    incremental_delta.retired_keys.size(),
+    solve_domain.start_time(),
+    solve_domain.end_time());
   const auto t_graph_build_start = Clock::now();
   const bool enable_lidar_profile_surface =
     lidar_factor_profile_ || lidar_warn_degeneracy_ || lidar_export_baseline_csv_;
@@ -2404,6 +2436,7 @@ EstimationFrame::ConstPtr OdometryEstimationBSpline::insert_frame_ct_lidar(
       pipeline_timing.source_cloud_ms +
       pipeline_timing.segment_prepare_ms +
       pipeline_timing.gnss_epoch_fetch_ms +
+      pipeline_timing.incremental_domain_prepare_ms +
       pipeline_timing.marginalization_partition_ms +
       pipeline_timing.graph_build_ms +
       pipeline_timing.lm_optimize_ms +
@@ -2411,7 +2444,7 @@ EstimationFrame::ConstPtr OdometryEstimationBSpline::insert_frame_ct_lidar(
       pipeline_timing.postprocess_ms;
     const double unprofiled_ms = std::max(0.0, pipeline_timing.window_wall_ms - profiled_stage_sum);
     logger->info(
-      "bspline ct pipeline-summary frontend={} gpu_backend={} lidar_result_scope={} frame={} scan_dt={:.3f} smoother_lag={:.2f} active_states={} active_segments={} gnss_mailbox_sync_ms={:.3f} source_cloud_ms={:.3f} segment_prepare_ms={:.3f} target_build_ms={:.3f} gnss_epoch_fetch_ms={:.3f} marginalization_partition_ms={:.3f} graph_build_ms={:.3f} graph_lidar_factor_ms={:.3f} graph_lidar_factor_new_build_ms={:.3f} graph_lidar_factor_target_refresh_ms={:.3f} graph_lidar_factor_reused_attach_ms={:.3f} graph_lidar_factor_cache_hits={} graph_lidar_factor_cache_misses={} graph_lidar_factor_refreshes={} graph_velocity_factor_ms={:.3f} imu_factor_assembly_ms={:.3f} gnss_factor_assembly_ms={:.3f} carried_prior_attach_ms={:.3f} graph_prediction_prior_ms={:.3f} graph_smoothness_ms={:.3f} graph_shared_prior_ms={:.3f} graph_clock_factor_ms={:.3f} lm_optimize_ms={:.3f} marginalization_ms={:.3f} prune_active_ms={:.3f} carried_prior_update_ms={:.3f} postprocess_ms={:.3f} post_lidar_result_ms={:.3f} post_lidar_factor_error_ms={:.3f} post_lidar_numeric_audit_ms={:.3f} post_lidar_degeneracy_ms={:.3f} post_lidar_result_pack_ms={:.3f} post_lidar_window_aggregate_ms={:.3f} post_lidar_csv_ms={:.3f} post_lidar_log_ms={:.3f} post_frame_state_ms={:.3f} post_deskew_ms={:.3f} post_covariance_ms={:.3f} post_frame_store_ms={:.3f} post_target_insert_ms={:.3f} post_history_update_ms={:.3f} post_publish_traj_ms={:.3f} post_publish_telemetry_ms={:.3f} post_callback_ms={:.3f} wall_ms={:.3f} unprofiled_ms={:.3f} lidar_factor_ms={:.3f} lidar_pose_ms={:.3f} lidar_corr_ms={:.3f} factor_results={} imu_factors={} gnss_pr_factors={} gnss_dop_factors={} velocity_factors={}",
+      "bspline ct pipeline-summary frontend={} gpu_backend={} lidar_result_scope={} frame={} scan_dt={:.3f} smoother_lag={:.2f} active_states={} active_segments={} gnss_mailbox_sync_ms={:.3f} source_cloud_ms={:.3f} segment_prepare_ms={:.3f} target_build_ms={:.3f} gnss_epoch_fetch_ms={:.3f} incremental_domain_prepare_ms={:.3f} incremental_active_segments={} incremental_new_segments={} incremental_retired_segments={} incremental_new_keys={} incremental_retired_keys={} marginalization_partition_ms={:.3f} graph_build_ms={:.3f} graph_lidar_factor_ms={:.3f} graph_lidar_factor_new_build_ms={:.3f} graph_lidar_factor_target_refresh_ms={:.3f} graph_lidar_factor_reused_attach_ms={:.3f} graph_lidar_factor_cache_hits={} graph_lidar_factor_cache_misses={} graph_lidar_factor_refreshes={} graph_velocity_factor_ms={:.3f} imu_factor_assembly_ms={:.3f} gnss_factor_assembly_ms={:.3f} carried_prior_attach_ms={:.3f} graph_prediction_prior_ms={:.3f} graph_smoothness_ms={:.3f} graph_shared_prior_ms={:.3f} graph_clock_factor_ms={:.3f} lm_optimize_ms={:.3f} marginalization_ms={:.3f} prune_active_ms={:.3f} carried_prior_update_ms={:.3f} postprocess_ms={:.3f} post_lidar_result_ms={:.3f} post_lidar_factor_error_ms={:.3f} post_lidar_numeric_audit_ms={:.3f} post_lidar_degeneracy_ms={:.3f} post_lidar_result_pack_ms={:.3f} post_lidar_window_aggregate_ms={:.3f} post_lidar_csv_ms={:.3f} post_lidar_log_ms={:.3f} post_frame_state_ms={:.3f} post_deskew_ms={:.3f} post_covariance_ms={:.3f} post_frame_store_ms={:.3f} post_target_insert_ms={:.3f} post_history_update_ms={:.3f} post_publish_traj_ms={:.3f} post_publish_telemetry_ms={:.3f} post_callback_ms={:.3f} wall_ms={:.3f} unprofiled_ms={:.3f} lidar_factor_ms={:.3f} lidar_pose_ms={:.3f} lidar_corr_ms={:.3f} factor_results={} imu_factors={} gnss_pr_factors={} gnss_dop_factors={} velocity_factors={}",
       frontend_mode_,
       ::glim::to_string(lidar_gpu_backend_),
       collect_window_lidar_results ? "window" : "current_only",
@@ -2425,6 +2458,12 @@ EstimationFrame::ConstPtr OdometryEstimationBSpline::insert_frame_ct_lidar(
       pipeline_timing.segment_prepare_ms,
       pipeline_timing.target_build_ms,
       pipeline_timing.gnss_epoch_fetch_ms,
+      pipeline_timing.incremental_domain_prepare_ms,
+      pipeline_timing.incremental_active_segment_count,
+      pipeline_timing.incremental_new_segment_count,
+      pipeline_timing.incremental_retired_segment_count,
+      pipeline_timing.incremental_new_key_count,
+      pipeline_timing.incremental_retired_key_count,
       pipeline_timing.marginalization_partition_ms,
       pipeline_timing.graph_build_ms,
       pipeline_timing.graph_lidar_factor_ms,

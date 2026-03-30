@@ -6,6 +6,7 @@
 
 #include <iap/odometry/bspline_control_window.hpp>
 #include <iap/odometry/bspline_fixed_lag_registry.hpp>
+#include <iap/odometry/ct_incremental_solver_skeleton.hpp>
 #include <iap/odometry/ct_solve_domain.hpp>
 #include <iap/odometry/bspline_marginalization.hpp>
 #include <iap/odometry/bspline_trajectory.hpp>
@@ -303,6 +304,7 @@ class OdometryEstimationBSpline : public OdometryEstimationCPU {
   std::shared_ptr<gtsam_points::iVox> ct_target_ivox_;
   std::unique_ptr<iap::BSplineControlWindow> control_window_;
   iap::BSplineFixedLagStateRegistryT<ActiveSplineSegmentConstraint> fixed_lag_registry_;
+  iap::BSplineIncrementalSolverSkeleton incremental_solver_skeleton_;
   ActiveSplineMarginalPrior marginal_prior_;
   std::shared_ptr<iap::BSplineTrajectory> latest_trajectory_;
   std::unique_ptr<iap::GnssEpochBuilder> gnss_epoch_builder_;

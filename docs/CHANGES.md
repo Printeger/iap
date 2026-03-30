@@ -3,6 +3,10 @@
 > 规则：任何代码改动必须在这里记录，并包含 IAP-RQ-XXX。
 
 ## Unreleased
+- feat(dev-ct-refactor-solver-skeleton): IAP-RQ-020 / IAP-RQ-300 / IAP-RQ-410 — add an explicit incremental CT solver lifecycle skeleton on top of the current batch-compatible B-spline odometry path.
+  - Added `include/iap/odometry/ct_incremental_solver_skeleton.hpp` and `src/iap/odometry/ct_incremental_solver_skeleton.cpp`, introducing `BSplineIncrementalSolverSkeleton` and `CTSolverLifecycleDelta` to track active/new/retired local-domain segments, new/retired keys, and the future incremental-smoother payload (`new_values / new_stamps`) outside the monolithic `insert_frame_ct_lidar()` implementation.
+  - `OdometryEstimationBSpline` now resets and advances that skeleton each scan, emits incremental-domain trace/timing fields (`incremental_domain_prepare_ms`, active/new/retired segment counts, new/retired key counts), and therefore no longer keeps the key/segment add-remove surface implicit inside the batch-compatible solve path.
+  - Added `test_ct_incremental_solver_skeleton.cpp` to lock the expected solve-domain lifecycle semantics before the real long-lived incremental fixed-lag solver replaces the current compatibility shell.
 - feat(dev-ct-refactor-solver): IAP-RQ-020 / IAP-RQ-300 / IAP-RQ-410 — start the staged continuous-time solver refactor toward a KERNEL-only public GPU route.
   - Added `docs/dev_ct/README_REFACTOR_CT_SOLVER.md` as the execution spec for the odometry-side refactor. It freezes `CT_LIDAR_GPU + KERNEL` as the only intended public GPU route and describes the staged migration toward an incremental fixed-lag continuous-time solver with shared target ownership.
   - Added `ICTSolveDomain / BSplineSolveDomain` in `include/iap/odometry/ct_solve_domain.hpp`, and `OdometryEstimationBSpline` now limits the default CT LiDAR solve scope to the current segment plus a configurable recent-overlap region (`ct_local_overlap_segments`) instead of treating the whole historical active-window as the public GPU solve domain.

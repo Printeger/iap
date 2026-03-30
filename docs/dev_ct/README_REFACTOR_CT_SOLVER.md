@@ -58,7 +58,8 @@ Current status:
 - `ISharedTargetHandle / SharedTargetHandle` 已落下。
 - `OdometryEstimationBSpline` 已开始通过 shared handle cache 复用 target identity/revision。
 - `IntegratedBSplineGICPFactorGPUKernel` 已支持直接绑定 shared target GPU resources，并在 target revision 变化时通过 `refresh_target_handle(...)` 只切换 target-side resources。
-- 真正长期存活的 incremental fixed-lag solver 仍未完成；当前仍处于 batch-compatible 过渡壳。
+- `BSplineIncrementalSolverSkeleton` 已落下，开始显式追踪 local solve-domain 的 active/new/retired segments、new/retired keys，以及未来增量 fixed-lag solver 所需的 `new_values / new_stamps` 生命周期载荷。
+- 真正 authoritative 的长期存活 incremental fixed-lag solver 仍未完成；当前仍处于 batch-compatible 过渡壳，但 solver lifetime 和 key/segment 生命周期接口已不再只是文档概念。
 
 ### P3. Shared-state and carried-prior stabilization
 
@@ -94,3 +95,4 @@ Current status:
 3. Make `BUCKET` internal-only at runtime.
 4. Move the LiDAR solve loop to current-domain plus recent-overlap selection.
 5. Keep KERNEL on the existing unified result/profile/baseline surface.
+6. Introduce an explicit incremental solver skeleton so add/remove lifecycle and future smoother payloads are no longer embedded ad hoc inside `insert_frame_ct_lidar()`.

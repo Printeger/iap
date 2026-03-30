@@ -18,6 +18,7 @@
   - 公开配置默认只保留 `KERNEL`
   - `BUCKET` 只允许内部 parity / 一次性 A/B 使用
   - 后续要继续从“每帧 full active-window batch graph”迁移到更接近 GLIM-style incremental fixed-lag + local CT solve domain 的组织方式
+  - `BSplineIncrementalSolverSkeleton` 已开始显式追踪 active/new/retired CT solve-domain segments 与 key lifecycle，作为后续长期存活 fixed-lag solver owner 的兼容壳
 - 当前主要缺口仍在：
   - 还不是最终的 fixed-lag 主状态组织。
   - LiDAR / IMU / GNSS 因子仍有“最小可用实现”成分。

@@ -119,6 +119,7 @@ add_library(iap SHARED
   # odometry
   src/iap/odometry/bspline_control_window.cpp
   src/iap/odometry/bspline_marginalization.cpp
+  src/iap/odometry/ct_incremental_solver_skeleton.cpp
   src/iap/odometry/callbacks.cpp
   src/iap/odometry/bspline_trajectory.cpp
   src/iap/odometry/estimation_frame.cpp
@@ -442,6 +443,8 @@ if(DEFINED ENV{ROS_VERSION})
       target_link_libraries(test_bspline_fixed_lag_registry iap)
       ament_add_gtest(test_ct_solve_domain test/test_ct_solve_domain.cpp)
       target_link_libraries(test_ct_solve_domain iap)
+      ament_add_gtest(test_ct_incremental_solver_skeleton test/test_ct_incremental_solver_skeleton.cpp)
+      target_link_libraries(test_ct_incremental_solver_skeleton iap)
       ament_add_gtest(test_shared_target_handle test/test_shared_target_handle.cpp)
       target_link_libraries(test_shared_target_handle iap)
     endif()
