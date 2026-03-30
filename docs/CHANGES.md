@@ -3,6 +3,12 @@
 > 规则：任何代码改动必须在这里记录，并包含 IAP-RQ-XXX。
 
 ## Unreleased
+- feat(dev-ct-mainline-lidar-gpu-audit): IAP-RQ-300 / IAP-RQ-410 — continue `M2 / WP2` by giving `CT_LIDAR_GPU` a real runtime audit/diagnostic return surface and enabling non-skipped CUDA smoke tests.
+  - `IntegratedBSplineGICPFactorGPU` now accepts the same correspondence/outlier/robust policy knobs as the CPU CT factor (`max_correspondence_distance`, candidate count, ambiguity ratio / score-gap gates, outlier threshold, robust kernel, robust weight floor), so the GPU path has a matching configuration surface for runtime audit and diagnostics.
+  - GPU CT LiDAR now exposes `check_against_numeric_full(...)` and `diagnose_degeneracy(...)`, and `make_result(...)` can carry unified `numeric_audit` / `degeneracy` payloads in the same `BSplineLidarFactorResult` object returned by the CPU path.
+  - `profiling_report()` on the GPU factor now lazily enriches the minimal GPU timing profile with CPU-side correspondence audit metrics over the same frozen target / current spline poses, yielding `candidate_evaluation_count`, diversity / reuse statistics, score-gap telemetry, and rejection counters while keeping GPU timings as the authoritative runtime baseline.
+  - `OdometryEstimationBSpline` now forwards the full CT LiDAR correspondence / robust / warning config surface into `CT_LIDAR_GPU`, emits GPU numeric-reference audit logs, emits GPU degeneracy warnings, and upgrades `bspline ct lidar gpu-summary` / `gpu-factor` traces from minimal timing-only output to the same unified result/profile vocabulary used on the CPU path.
+  - The CUDA smoke tests in `test_bspline_gicp_factor.cpp` now allocate stream/temp-buffer resources exactly like the production odometry path, run on real CUDA hardware when available, and cover GPU factor linearization, unified detailed profile generation, runtime numeric-reference audit, and degeneracy diagnostics.
 - feat(dev-ct-mainline-lidar-gpu-jacobian): IAP-RQ-300 / IAP-RQ-410 — continue `M2 / WP2` by pushing `CT_LIDAR_GPU` control-point Jacobians from numeric mapping to a shared semi-analytic path.
   - Added `bspline_pose_jacobian.hpp`, which centralizes the normalized-quaternion-blend rotation chain rule and the analytic translation block used to map four control-pose perturbations into one spline pose perturbation.
   - `IntegratedBSplineGICPFactorGPU` now supports `NUMERIC_FULL / SEMI_ANALYTIC` Jacobian modes and uses that shared helper so the GPU path no longer hardwires numeric control-point Jacobians.

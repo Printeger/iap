@@ -7,6 +7,7 @@
 #include <iap/odometry/bspline_control_window.hpp>
 #include <iap/odometry/bspline_lidar_factor_result.hpp>
 #include <iap/odometry/bspline_pose_jacobian.hpp>
+#include <iap/odometry/integrated_bspline_gicp_factor.hpp>
 #include <gtsam_points/config.hpp>
 
 #ifdef GTSAM_POINTS_USE_CUDA
@@ -54,9 +55,27 @@ class IntegratedBSplineGICPFactorGPU : public gtsam::NonlinearFactor {
   void set_jacobian_mode(JacobianMode mode) { jacobian_mode_ = mode; }
   JacobianMode jacobian_mode() const { return jacobian_mode_; }
   void set_numeric_eps(double eps);
+  void set_max_correspondence_distance(double dist) { max_correspondence_distance_sq_ = dist * dist; }
+  void set_correspondence_candidate_count(int count) { correspondence_candidate_count_ = std::max(1, count); }
+  void set_correspondence_accept_ratio(double ratio) { correspondence_accept_ratio_ = ratio; }
+  void set_correspondence_min_score_gap(double gap) { correspondence_min_score_gap_ = std::max(0.0, gap); }
+  void set_outlier_mahalanobis_threshold(double threshold) { outlier_mahalanobis_threshold_ = std::max(0.0, threshold); }
+  void set_robust_weight_floor(double floor) { robust_weight_floor_ = std::clamp(floor, 0.0, 1.0); }
+  void set_robust_kernel(IntegratedBSplineGICPFactor::RobustKernel kernel, double width) {
+    robust_kernel_ = kernel;
+    robust_kernel_width_ = std::max(1e-6, width);
+  }
 
   BSplineLidarFactorProfile profiling_report() const;
-  BSplineLidarFactorResult make_result(double factor_error, int inlier_count, double inlier_fraction) const;
+  BSplineLidarNumericAudit check_against_numeric_full(const gtsam::Values& values, double perturbation_scale = 1e-5) const;
+  BSplineLidarDegeneracyReport diagnose_degeneracy(
+    const IntegratedBSplineGICPFactor::DegeneracyThresholds& thresholds) const;
+  BSplineLidarFactorResult make_result(
+    double factor_error,
+    int inlier_count,
+    double inlier_fraction,
+    const BSplineLidarNumericAudit* numeric_audit = nullptr,
+    const BSplineLidarDegeneracyReport* degeneracy = nullptr) const;
 
   int num_inliers() const { return last_inlier_count_; }
   double inlier_fraction() const;
@@ -64,6 +83,14 @@ class IntegratedBSplineGICPFactorGPU : public gtsam::NonlinearFactor {
 
  private:
   using PoseJacobianArray = std::array<gtsam::Matrix6, kBSplineControlPointCount>;
+
+  struct BucketSystem {
+    std::vector<gtsam::Matrix6> info_mats;
+    std::vector<gtsam::Vector6> linear_terms;
+    double constant = 0.0;
+    double total_error = 0.0;
+    int inlier_count = 0;
+  };
 
   struct BucketFactor {
     double stamp = 0.0;
@@ -75,9 +102,20 @@ class IntegratedBSplineGICPFactorGPU : public gtsam::NonlinearFactor {
   };
 
   std::array<gtsam::Pose3, kBSplineControlPointCount> control_poses(const gtsam::Values& values) const;
+  gtsam::Values control_pose_values() const;
   void build_bucket_factors();
   void update_bucket_poses(const gtsam::Values& values) const;
+  std::vector<PoseJacobianArray> compute_bucket_pose_jacobians(
+    const std::array<gtsam::Pose3, kBSplineControlPointCount>& poses,
+    JacobianMode mode) const;
   gtsam::Values bucket_values() const;
+  BucketSystem collect_bucket_system(const gtsam::Values& bucket_vals) const;
+  void map_bucket_system(
+    const BucketSystem& system,
+    const std::vector<PoseJacobianArray>& pose_jacobians,
+    Eigen::Matrix<double, 24, 24>* H,
+    Eigen::Matrix<double, 24, 1>* g) const;
+  void ensure_detailed_profile() const;
   void update_profile(
     const char* stage,
     double pose_update_ms,
@@ -89,6 +127,14 @@ class IntegratedBSplineGICPFactorGPU : public gtsam::NonlinearFactor {
   JacobianMode jacobian_mode_ = JacobianMode::SEMI_ANALYTIC;
   double numeric_eps_ = 1e-4;
   bool enable_profiling_ = false;
+  double max_correspondence_distance_sq_ = 1.0;
+  int correspondence_candidate_count_ = 3;
+  double correspondence_accept_ratio_ = 0.0;
+  double correspondence_min_score_gap_ = 0.0;
+  double outlier_mahalanobis_threshold_ = 0.0;
+  double robust_weight_floor_ = 0.0;
+  IntegratedBSplineGICPFactor::RobustKernel robust_kernel_ = IntegratedBSplineGICPFactor::RobustKernel::NONE;
+  double robust_kernel_width_ = 1.0;
 
   CUstream_st* stream_ = nullptr;
   gtsam_points::TempBufferManager::Ptr temp_buffer_;
@@ -105,6 +151,8 @@ class IntegratedBSplineGICPFactorGPU : public gtsam::NonlinearFactor {
 
   mutable std::vector<gtsam::Pose3> bucket_poses_;
   mutable std::vector<PoseJacobianArray> bucket_pose_jacobians_;
+  mutable std::array<gtsam::Pose3, kBSplineControlPointCount> last_control_poses_;
+  mutable bool last_control_poses_valid_ = false;
   mutable BSplineLidarFactorProfile last_profile_;
   mutable int last_inlier_count_ = 0;
 };

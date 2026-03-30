@@ -115,7 +115,10 @@
   - `CT_LIDAR_GPU` 现已把控制点 Jacobian 从纯数值映射推进到与 CPU 对齐的 `NUMERIC_FULL / SEMI_ANALYTIC` 两档：默认半解析路径通过共享的 `bspline_pose_jacobian.hpp` 计算 normalized-quaternion-blend 旋转块和解析平移块，只保留 `NUMERIC_FULL` 作为 GPU A/B baseline
   - `OdometryEstimationBSpline` 现已把 `ct_lidar_jacobian_mode` 真正下发到 GPU CT LiDAR factor，而不再只作用于 CPU CT LiDAR factor
   - `test_bspline_gicp_factor` 现已补上不依赖 CUDA 设备的 spline-pose Jacobian 数值对照测试，并保留 `IntegratedBSplineGICPFactorGPU` 的 CUDA smoke test，验证 GPU factor 仍能 linearize 并返回统一 GPU result/profile
-  - 当前 `CT_LIDAR_GPU` 仍是 MVP：GPU correspondence / residual / reduction 已经进入 CT factor 本体，控制点 Jacobian 已推进到半解析路径，但 GPU path 还没有补上 CPU 路径里那套完整的 ambiguity/outlier/degeneracy diagnostics，也还没有提供与 `NUMERIC_FULL` 同等级的运行时 numeric-reference audit
+  - `CT_LIDAR_GPU` 现已补上更接近 CPU 的 runtime audit / diagnostics：GPU factor 现在支持 `check_against_numeric_full(...)`、`diagnose_degeneracy(...)`、统一的 `numeric_audit / degeneracy` result payload，以及与 CPU 对齐的 correspondence / robust / outlier 配置面
+  - GPU factor 的 `profiling_report()` 现已在保留 GPU timing baseline 的同时，懒加载同一 frozen target / 当前 spline pose 上的 CPU-side correspondence audit，因此 `candidate_evaluation_count / unique_target_ratio / max_target_reuse_ratio / mean_score_gap / rejection counts` 等 richer diagnostics 现在也能进入 `bspline ct lidar gpu-summary` / `gpu-factor` 汇总
+  - `OdometryEstimationBSpline` 现已在 `CT_LIDAR_GPU` 路径下输出 numeric-reference drift 日志和 degeneracy warning，并将 LiDAR correspondence / robust / warning 配置完整下发到 GPU CT factor
+  - CUDA 环境现已验证可跑：`test_bspline_gicp_factor` 的 GPU smoke tests 已改成与生产路径一致地分配 stream/temp-buffer，并在真实 GPU 上覆盖 GPU factor linearization、detailed unified profile、runtime numeric-reference audit 和 degeneracy diagnostics
 - planner 已开始真正消费 continuous-time state：
   - `IntegrityPlanner::plan()` 在可用时会优先使用 `SplineControlAccess` 锚定当前时刻，再从 `ContinuousTrajectoryView` 解析种子状态
   - motion primitives 现在从连续时间 `pos / vel / yaw / sigma` 出发，而不只是把 trajectory view 当成一个 `sigma0` 来源

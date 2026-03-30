@@ -901,7 +901,14 @@ EstimationFrame::ConstPtr OdometryEstimationBSpline::insert_frame_ct_lidar(
         stream_buffer.second);
       factor->set_jacobian_mode(to_gpu_lidar_jacobian_mode(lidar_jacobian_mode_));
       factor->set_numeric_eps(lidar_jacobian_numeric_eps_);
-      factor->set_enable_profiling(lidar_factor_profile_);
+      factor->set_max_correspondence_distance(max_correspondence_distance_);
+      factor->set_correspondence_candidate_count(lidar_correspondence_candidate_count_);
+      factor->set_correspondence_accept_ratio(lidar_correspondence_accept_ratio_);
+      factor->set_correspondence_min_score_gap(lidar_correspondence_min_score_gap_);
+      factor->set_outlier_mahalanobis_threshold(lidar_outlier_mahalanobis_thresh_);
+      factor->set_robust_kernel(lidar_robust_kernel_, lidar_robust_kernel_width_);
+      factor->set_robust_weight_floor(lidar_robust_weight_floor_);
+      factor->set_enable_profiling(lidar_factor_profile_ || lidar_warn_degeneracy_);
       active_lidar_gpu_factors.push_back(factor);
       graph.add(factor);
       if (marginalization_partition.should_marginalize_factor(make_key_vector(segment_keys))) {
@@ -1226,8 +1233,12 @@ EstimationFrame::ConstPtr OdometryEstimationBSpline::insert_frame_ct_lidar(
   iap::BSplineLidarFactorResult current_lidar_result;
   iap::IntegratedBSplineGICPFactor::NumericReferenceCheckResult current_numeric_check;
   iap::IntegratedBSplineGICPFactor::DegeneracyDiagnostics current_degeneracy;
+  iap::BSplineLidarNumericAudit current_gpu_numeric_check;
+  iap::BSplineLidarDegeneracyReport current_gpu_degeneracy;
   bool current_numeric_check_valid = false;
   bool current_degeneracy_valid = false;
+  bool current_gpu_numeric_check_valid = false;
+  bool current_gpu_degeneracy_valid = false;
 
   if (!use_gpu_lidar) {
     for (const auto& factor : active_lidar_cpu_factors) {
@@ -1257,9 +1268,25 @@ EstimationFrame::ConstPtr OdometryEstimationBSpline::insert_frame_ct_lidar(
 #ifdef GTSAM_POINTS_USE_CUDA
     for (const auto& factor : active_lidar_gpu_factors) {
       const double factor_error = factor->error(values);
-      auto result = factor->make_result(factor_error, factor->num_inliers(), factor->inlier_fraction());
+
+      const iap::BSplineLidarDegeneracyReport* degeneracy_ptr = nullptr;
+      if (lidar_warn_degeneracy_) {
+        current_gpu_degeneracy = factor->diagnose_degeneracy(lidar_degeneracy_thresholds_);
+        current_gpu_degeneracy_valid = current_gpu_degeneracy.valid;
+        degeneracy_ptr = &current_gpu_degeneracy;
+      }
+
+      const iap::BSplineLidarNumericAudit* numeric_ptr = nullptr;
+      if (lidar_profile_numeric_reference_ && factor == current_gpu_factor) {
+        current_gpu_numeric_check = factor->check_against_numeric_full(values, lidar_numeric_reference_scale_);
+        current_gpu_numeric_check_valid = current_gpu_numeric_check.valid;
+        numeric_ptr = &current_gpu_numeric_check;
+      }
+
+      auto result = factor->make_result(factor_error, factor->num_inliers(), factor->inlier_fraction(), numeric_ptr, degeneracy_ptr);
       if (factor == current_gpu_factor) {
         current_lidar_result = result;
+        current_gpu_degeneracy_valid = degeneracy_ptr && degeneracy_ptr->valid;
       }
       lidar_results.push_back(result);
     }
@@ -1298,20 +1325,29 @@ EstimationFrame::ConstPtr OdometryEstimationBSpline::insert_frame_ct_lidar(
         lidar_window_summary.max_time_bucket_population);
     } else {
       logger->trace(
-        "bspline ct lidar gpu-summary backend={} segments={} valid={} detailed={} minimal={} total_src={} total_tgt={} total_inliers={} weighted_match={:.3f} weighted_inlier={:.3f} total_pose_ms={:.3f} total_gpu_ms={:.3f} total_factor_ms={:.3f} mean_bucket={:.2f} peak_bucket={}",
+        "bspline ct lidar gpu-summary backend={} segments={} profiled={} warnings={} total_src={} total_tgt={} total_matched={} total_inliers={} weighted_match={:.3f} weighted_inlier={:.3f} mean_unique_ratio={:.3f} min_unique_ratio={:.3f} max_reuse_ratio={:.3f} max_ambiguity_rej={:.3f} max_numeric_rel={:.6f} max_axis_rel={:.6f} total_pose_ms={:.3f} total_corr_ms={:.3f} total_accum_ms={:.3f} total_factor_ms={:.3f} cand_eval={} mean_cand_per_src={:.2f} mean_bucket={:.2f} peak_bucket={}",
         iap::to_string(iap::BSplineLidarFactorBackend::GPU_GICP),
         lidar_window_summary.result_count,
         lidar_window_summary.valid_profile_count,
-        lidar_window_summary.detailed_profile_count,
-        lidar_window_summary.minimal_profile_count,
+        lidar_window_summary.warning_result_count,
         lidar_window_summary.total_source_point_count,
         lidar_window_summary.total_target_point_count,
+        lidar_window_summary.total_matched_point_count,
         lidar_window_summary.total_inlier_point_count,
         lidar_window_summary.weighted_match_ratio,
         lidar_window_summary.weighted_inlier_ratio,
+        lidar_window_summary.mean_unique_target_ratio,
+        lidar_window_summary.min_unique_target_ratio,
+        lidar_window_summary.max_target_reuse_ratio,
+        lidar_window_summary.max_ambiguity_rejection_ratio,
+        lidar_window_summary.max_numeric_rel_error,
+        lidar_window_summary.max_rotation_axis_rel_error,
         lidar_window_summary.total_pose_update_ms,
         lidar_window_summary.total_correspondence_ms,
+        lidar_window_summary.total_accumulation_ms,
         lidar_window_summary.total_factor_ms,
+        lidar_window_summary.total_candidate_evaluation_count,
+        lidar_window_summary.mean_candidates_per_source,
         lidar_window_summary.mean_time_bucket_population,
         lidar_window_summary.max_time_bucket_population);
     }
@@ -1371,8 +1407,16 @@ EstimationFrame::ConstPtr OdometryEstimationBSpline::insert_frame_ct_lidar(
         profile.total_error);
     } else {
       logger->trace(
-        "bspline ct lidar gpu-factor target_mode={} target_frames={} target_points={} snapshot_frames={} snapshot_points={} snapshot_span_s={:.3f} snapshot_policy={} target_build_ms={:.3f} stage={} buckets={} bucket_mean={:.2f} bucket_peak={} matched={}/{} inliers={} match_ratio={:.3f} inlier_ratio={:.3f} pose_ms={:.3f} gpu_ms={:.3f} total_ms={:.3f} error={:.6f}",
+        "bspline ct lidar gpu-factor target_mode={} jacobian_mode={} k_candidates={} accept_ratio={:.3f} score_gap={:.3f} robust_kernel={} robust_width={:.3f} robust_w_floor={:.3f} outlier_thresh={:.3f} target_frames={} target_points={} snapshot_frames={} snapshot_points={} snapshot_span_s={:.3f} snapshot_policy={} target_build_ms={:.3f} stage={} time_buckets={} bucket_mean={:.2f} bucket_peak={} cand_eval={} cand_per_src={:.2f} matched={}/{} inliers={} rej_dist={} rej_ambiguity={} rej_outlier={} rej_robust={} match_ratio={:.3f} inlier_ratio={:.3f} mean_w={:.3f} uniq_targets={} uniq_ratio={:.3f} reuse_peak={} reuse_ratio={:.3f} mean_dist={:.4f} max_dist={:.4f} mean_score={:.4f} mean_gap={:.4f} mean_ratio={:.4f} pose_ms={:.3f} corr_ms={:.3f} accum_ms={:.3f} total_ms={:.3f} error={:.6f}",
         ::glim::to_string(current_segment.target_mode),
+        ::glim::to_string(lidar_jacobian_mode_),
+        lidar_correspondence_candidate_count_,
+        lidar_correspondence_accept_ratio_,
+        lidar_correspondence_min_score_gap_,
+        ::glim::to_string(lidar_robust_kernel_),
+        lidar_robust_kernel_width_,
+        lidar_robust_weight_floor_,
+        lidar_outlier_mahalanobis_thresh_,
         current_segment.target_frame_count,
         current_segment.target_point_count,
         current_segment.snapshot_frame_count,
@@ -1384,13 +1428,30 @@ EstimationFrame::ConstPtr OdometryEstimationBSpline::insert_frame_ct_lidar(
         profile.time_bucket_count,
         profile.mean_time_bucket_population,
         profile.max_time_bucket_population,
+        profile.candidate_evaluation_count,
+        profile.mean_candidates_per_source,
         profile.matched_point_count,
         profile.source_point_count,
         profile.inlier_point_count,
+        profile.rejected_distance_count,
+        profile.rejected_ambiguity_count,
+        profile.rejected_outlier_count,
+        profile.rejected_robust_count,
         profile.match_ratio,
         profile.inlier_ratio,
+        profile.mean_robust_weight,
+        profile.unique_target_count,
+        profile.unique_target_ratio,
+        profile.max_target_reuse,
+        profile.max_target_reuse_ratio,
+        profile.mean_match_distance,
+        profile.max_match_distance,
+        profile.mean_match_score,
+        profile.mean_score_gap,
+        profile.mean_score_ratio,
         profile.pose_update_ms,
         profile.correspondence_ms,
+        profile.accumulation_ms,
         profile.total_ms,
         current_lidar_result.factor_error);
     }
@@ -1439,6 +1500,35 @@ EstimationFrame::ConstPtr OdometryEstimationBSpline::insert_frame_ct_lidar(
         check.translation_abs_error,
         check.translation_rel_error);
     }
+  }
+
+  if (use_gpu_lidar && lidar_profile_numeric_reference_) {
+#ifdef GTSAM_POINTS_USE_CUDA
+    if (current_gpu_numeric_check_valid) {
+      const auto& check = current_gpu_numeric_check;
+      const double max_rel_error = std::max(check.rotation_rel_error, check.translation_rel_error);
+      const auto level =
+        max_rel_error > lidar_linearization_warn_ratio_ ? spdlog::level::warn : spdlog::level::trace;
+      logger->log(
+        level,
+        "bspline ct lidar gpu numeric-reference target_mode={} perturb={:.2e} rot_pred_num={:.6f} rot_pred_semi={:.6f} rot_actual={:.6f} rot_abs={:.6e} rot_rel={:.6f} rot_axis_max_rel={:.6f} rot_axis_mean_rel={:.6f} rot_axis_worst={} trans_pred_num={:.6f} trans_pred_semi={:.6f} trans_actual={:.6f} trans_abs={:.6e} trans_rel={:.6f}",
+        ::glim::to_string(fixed_lag_registry_.segments().back().target_mode),
+        check.perturbation_scale,
+        check.numeric_rotation_predicted_error,
+        check.semi_rotation_predicted_error,
+        check.rotation_actual_error,
+        check.rotation_abs_error,
+        check.rotation_rel_error,
+        check.max_rotation_axis_rel_error,
+        check.mean_rotation_axis_rel_error,
+        check.worst_rotation_axis,
+        check.numeric_translation_predicted_error,
+        check.semi_translation_predicted_error,
+        check.translation_actual_error,
+        check.translation_abs_error,
+        check.translation_rel_error);
+    }
+#endif
   }
 
   if (!use_gpu_lidar && lidar_warn_degeneracy_) {
@@ -1501,6 +1591,70 @@ EstimationFrame::ConstPtr OdometryEstimationBSpline::insert_frame_ct_lidar(
         profile.max_time_bucket_population,
         profile.mean_time_bucket_population);
     }
+  }
+
+  if (use_gpu_lidar && lidar_warn_degeneracy_) {
+#ifdef GTSAM_POINTS_USE_CUDA
+    const auto& diagnostics = current_gpu_degeneracy;
+    const bool snapshot_fallback =
+      lidar_target_mode_ == BSplineLidarTargetMode::ACTIVE_WINDOW_SNAPSHOT && !fixed_lag_registry_.segments().back().snapshot_policy_accepted;
+    if (snapshot_fallback || (current_gpu_degeneracy_valid && diagnostics.has_warning())) {
+      std::string flags;
+      auto append_flag = [&](const char* flag) {
+        if (!flags.empty()) {
+          flags += "|";
+        }
+        flags += flag;
+      };
+
+      if (snapshot_fallback) {
+        append_flag("snapshot_fallback");
+      }
+      if (diagnostics.empty_target) {
+        append_flag("empty_target");
+      }
+      if (diagnostics.low_match_ratio) {
+        append_flag("low_match");
+      }
+      if (diagnostics.low_inlier_ratio) {
+        append_flag("low_inlier");
+      }
+      if (diagnostics.low_target_diversity) {
+        append_flag("low_target_diversity");
+      }
+      if (diagnostics.high_target_reuse) {
+        append_flag("high_target_reuse");
+      }
+      if (diagnostics.high_ambiguity_rejection) {
+        append_flag("high_ambiguity_rejection");
+      }
+      if (diagnostics.weak_score_separation) {
+        append_flag("weak_score_separation");
+      }
+      if (flags.empty()) {
+        flags = "none";
+      }
+
+      const auto& current_segment = fixed_lag_registry_.segments().back();
+      const auto& profile = current_lidar_result.profile;
+      logger->warn(
+        "bspline ct lidar gpu degeneracy target_mode={} flags={} snapshot_policy={} target_frames={} target_points={} match_ratio={:.3f} inlier_ratio={:.3f} uniq_ratio={:.3f} reuse_ratio={:.3f} ambiguity_rej_ratio={:.3f} score_gap={:.4f} cand_eval={} bucket_peak={} bucket_mean={:.2f}",
+        ::glim::to_string(current_segment.target_mode),
+        flags,
+        current_segment.snapshot_policy_accepted,
+        current_segment.target_frame_count,
+        current_segment.target_point_count,
+        profile.match_ratio,
+        profile.inlier_ratio,
+        profile.unique_target_ratio,
+        profile.max_target_reuse_ratio,
+        diagnostics.ambiguity_rejection_ratio,
+        profile.mean_score_gap,
+        profile.candidate_evaluation_count,
+        profile.max_time_bucket_population,
+        profile.mean_time_bucket_population);
+    }
+#endif
   }
 
   const gtsam::Pose3 start_pose = control_window_->evaluate(0.0);

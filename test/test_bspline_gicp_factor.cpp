@@ -9,6 +9,7 @@
 #ifdef GTSAM_POINTS_USE_CUDA
 #include <iap/odometry/integrated_bspline_gicp_factor_gpu.hpp>
 #include <cuda_runtime_api.h>
+#include <gtsam_points/cuda/stream_temp_buffer_roundrobin.hpp>
 #endif
 
 #include <gtsam/linear/VectorValues.h>
@@ -708,9 +709,18 @@ TEST(BSplineGICPFactorTest, GpuFactorLinearizesAndReturnsUnifiedProfile) {
     keys[i] = iap::bspline_control_point_key(i);
   }
 
-  iap::IntegratedBSplineGICPFactorGPU factor(keys, target, make_cloud(true));
+  gtsam_points::StreamTempBufferRoundRobin stream_buffers;
+  auto stream_buffer = stream_buffers.get_stream_buffer();
+  iap::IntegratedBSplineGICPFactorGPU factor(keys, target, make_cloud(true), stream_buffer.first, stream_buffer.second);
   factor.set_jacobian_mode(iap::IntegratedBSplineGICPFactorGPU::JacobianMode::SEMI_ANALYTIC);
   factor.set_numeric_eps(1e-4);
+  factor.set_max_correspondence_distance(2.0);
+  factor.set_correspondence_candidate_count(2);
+  factor.set_correspondence_accept_ratio(0.99);
+  factor.set_correspondence_min_score_gap(1e-6);
+  factor.set_outlier_mahalanobis_threshold(10.0);
+  factor.set_robust_kernel(iap::IntegratedBSplineGICPFactor::RobustKernel::HUBER, 1.0);
+  factor.set_robust_weight_floor(0.0);
   factor.set_enable_profiling(true);
 
   const auto values = make_identity_control_values();
@@ -718,16 +728,91 @@ TEST(BSplineGICPFactorTest, GpuFactorLinearizesAndReturnsUnifiedProfile) {
   ASSERT_TRUE(static_cast<bool>(linear));
 
   const double factor_error = factor.error(values);
-  const auto result = factor.make_result(factor_error, factor.num_inliers(), factor.inlier_fraction());
+  const auto numeric_audit = factor.check_against_numeric_full(values, 1e-5);
+  ASSERT_TRUE(numeric_audit.valid);
+
+  iap::IntegratedBSplineGICPFactor::DegeneracyThresholds thresholds;
+  thresholds.min_match_ratio = 0.2;
+  thresholds.min_inlier_ratio = 0.2;
+  thresholds.min_unique_target_ratio = 0.2;
+  thresholds.max_target_reuse_ratio = 0.8;
+  thresholds.max_ambiguity_rejection_ratio = 0.8;
+  thresholds.min_mean_score_gap = 1e-6;
+  const auto degeneracy = factor.diagnose_degeneracy(thresholds);
+  ASSERT_TRUE(degeneracy.valid);
+
+  const auto result = factor.make_result(
+    factor_error,
+    factor.num_inliers(),
+    factor.inlier_fraction(),
+    &numeric_audit,
+    &degeneracy);
   ASSERT_TRUE(result.valid);
   EXPECT_EQ(result.backend, iap::BSplineLidarFactorBackend::GPU_GICP);
   EXPECT_TRUE(result.profile.valid);
-  EXPECT_TRUE(result.profile.minimal);
+  EXPECT_FALSE(result.profile.minimal);
   EXPECT_EQ(result.profile.source_point_count, 4U);
   EXPECT_EQ(result.profile.time_bucket_count, 4U);
   EXPECT_EQ(result.profile.max_time_bucket_population, 1U);
+  EXPECT_GE(result.profile.candidate_evaluation_count, 4U);
+  EXPECT_GE(result.profile.matched_point_count, 4U);
+  EXPECT_GE(result.profile.unique_target_count, 1U);
+  EXPECT_GE(result.profile.mean_candidates_per_source, 1.0);
   EXPECT_GE(result.profile.pose_update_ms, 0.0);
   EXPECT_GE(result.profile.correspondence_ms, 0.0);
   EXPECT_GE(result.profile.total_ms, 0.0);
+  EXPECT_TRUE(result.numeric_audit.valid);
+  EXPECT_TRUE(result.degeneracy.valid);
+}
+
+TEST(BSplineGICPFactorTest, GpuFactorDegeneracyDiagnosticsReportOutlierHeavyScene) {
+  int device_count = 0;
+  if (cudaGetDeviceCount(&device_count) != cudaSuccess || device_count == 0) {
+    GTEST_SKIP() << "CUDA device is not available in the current test environment";
+  }
+
+  auto target_cloud = make_cloud(false);
+  auto target = std::make_shared<gtsam_points::iVox>(0.5);
+  target->voxel_insertion_setting().set_min_dist_in_cell(0.0);
+  target->set_neighbor_voxel_mode(1);
+  target->insert(*target_cloud);
+
+  std::array<gtsam::Key, iap::kBSplineControlPointCount> keys{};
+  for (std::size_t i = 0; i < iap::kBSplineControlPointCount; ++i) {
+    keys[i] = iap::bspline_control_point_key(i);
+  }
+
+  gtsam_points::StreamTempBufferRoundRobin stream_buffers;
+  auto stream_buffer = stream_buffers.get_stream_buffer();
+  iap::IntegratedBSplineGICPFactorGPU factor(
+    keys,
+    target,
+    make_outlier_source_cloud(),
+    stream_buffer.first,
+    stream_buffer.second);
+  factor.set_jacobian_mode(iap::IntegratedBSplineGICPFactorGPU::JacobianMode::SEMI_ANALYTIC);
+  factor.set_numeric_eps(1e-4);
+  factor.set_max_correspondence_distance(2.0);
+  factor.set_correspondence_candidate_count(2);
+  factor.set_outlier_mahalanobis_threshold(0.05);
+  factor.set_robust_kernel(iap::IntegratedBSplineGICPFactor::RobustKernel::CAUCHY, 0.1);
+  factor.set_robust_weight_floor(0.5);
+  factor.set_enable_profiling(true);
+
+  const auto values = make_identity_control_values();
+  factor.error(values);
+
+  iap::IntegratedBSplineGICPFactor::DegeneracyThresholds thresholds;
+  thresholds.min_match_ratio = 0.9;
+  thresholds.min_inlier_ratio = 0.9;
+  thresholds.min_unique_target_ratio = 0.9;
+  thresholds.max_target_reuse_ratio = 0.4;
+  const auto degeneracy = factor.diagnose_degeneracy(thresholds);
+  ASSERT_TRUE(degeneracy.valid);
+  EXPECT_TRUE(degeneracy.has_warning());
+
+  const auto profile = factor.profiling_report();
+  EXPECT_FALSE(profile.minimal);
+  EXPECT_GE(profile.rejected_outlier_count + profile.rejected_robust_count, 1U);
 }
 #endif
