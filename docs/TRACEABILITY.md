@@ -101,6 +101,10 @@
   - 同一轮 headless 长包验证现已跑到 400+ frame，期间未再出现 `key "e0"`、`ValuesKeyDoesNotExist`、`failed to build bspline marginal survivor prior` 或 `authoritative incremental update failed`；这说明 shared-state / carried-prior 的阻断性 missing-key failure 已不再打断 KERNEL authoritative 路径，但 GNSS 后段 `factor_count = 0` 的现象仍需继续验收解释。
 
 - 2026-03-31: IAP-RQ-020 / IAP-RQ-300 / IAP-RQ-410
+  - `OdometryEstimationBSpline` 现已在 authoritative incremental `smoother->update(...)` 前记录旧 factor 总数，并在 `getNewFactorsIndices()` 与本地 `added_factor_owners` 数量不一致时，按本轮实际提交的 `graph.size()` 合成稳定的新因子索引区间。
+  - 这条 fallback 直接消除了 `BSplineIncrementalSolverSkeleton::commit_update owner/index size mismatch` 导致的 KERNEL incremental path 中断；运行时若触发 fallback，会输出 `bspline ct authoritative incremental update remapped factor indices ...` warning 供后续继续观察 ISAM2 返回语义。
+
+- 2026-03-31: IAP-RQ-020 / IAP-RQ-300 / IAP-RQ-410
   - `ActiveSplineSegmentConstraint` 现已把 velocity / IMU / GNSS continuous-time factors 也收口进 per-segment 生命周期缓存；当前 batch-compatible 壳不再为同一 active solve-domain segment 每帧重新构造这些非 LiDAR 因子。
   - `OdometryEstimationBSpline` 现在会复用 cached velocity factor、cached IMU factor 列表以及 cached GNSS factor 列表，并继续与已存在的 LiDAR factor cache 协同工作，从而把更多 factor ownership 从 per-scan batch 建图逻辑前移到 solve-domain 生命周期层。
 

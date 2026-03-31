@@ -2020,12 +2020,26 @@ EstimationFrame::ConstPtr OdometryEstimationBSpline::insert_frame_ct_lidar(
     auto incremental_stamps = incremental_delta.new_stamps;
 
     try {
+      const std::size_t factor_count_before_update = smoother->getFactors().size();
       smoother->update(
         graph,
         incremental_new_values,
         incremental_stamps,
         factors_to_remove);
-      const auto new_factor_indices = smoother->getISAM2Result().getNewFactorsIndices();
+      gtsam::FactorIndices new_factor_indices = smoother->getISAM2Result().getNewFactorsIndices();
+      if (new_factor_indices.size() != added_factor_owners.size()) {
+        new_factor_indices.clear();
+        new_factor_indices.reserve(graph.size());
+        for (std::size_t i = 0; i < graph.size(); ++i) {
+          new_factor_indices.push_back(factor_count_before_update + i);
+        }
+        logger->warn(
+          "bspline ct authoritative incremental update remapped factor indices from graph size because result/new-owner mismatch result={} owners={} graph={} remove={}",
+          smoother->getISAM2Result().getNewFactorsIndices().size(),
+          added_factor_owners.size(),
+          graph.size(),
+          factors_to_remove.size());
+      }
       incremental_solver_skeleton_.commit_update(new_factor_indices, added_factor_owners);
       values = smoother->calculateEstimate();
     } catch (const std::exception& e) {

@@ -3,6 +3,9 @@
 > 规则：任何代码改动必须在这里记录，并包含 IAP-RQ-XXX。
 
 ## Unreleased
+- fix(dev-ct-incremental-index): IAP-RQ-020 / IAP-RQ-300 / IAP-RQ-410 — stabilize authoritative incremental factor ownership when GTSAM does not report `newFactorsIndices`.
+  - `OdometryEstimationBSpline` now records `smoother->getFactors().size()` before each authoritative incremental update and falls back to a graph-sized synthetic factor-index range when `getNewFactorsIndices()` does not match the locally tracked `added_factor_owners`.
+  - This prevents `BSplineIncrementalSolverSkeleton::commit_update owner/index size mismatch` from aborting the KERNEL incremental path when ISAM2 reports an empty or mismatched new-factor index list.
 - refactor(dev-ct-target-mirror): IAP-RQ-020 / IAP-RQ-300 / IAP-RQ-410 — remove per-segment runtime target mirrors from the B-spline odometry hot path.
   - `ActiveSplineSegmentConstraint` now keeps only the authoritative shared `target_handle`; the old per-segment `target_mode / target_frame_count / target_point_count / snapshot_* / target_build_ms` runtime mirrors have been removed.
   - `OdometryEstimationBSpline` now derives target metadata directly from `ISharedTargetHandle` for cache keys, factor tracing, degeneracy warnings, and pipeline timing, which eliminates the remaining “segment metadata matches but factor target entity drifted” risk.
