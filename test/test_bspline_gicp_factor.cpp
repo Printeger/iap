@@ -137,6 +137,12 @@ std::string read_file_contents(std::FILE* file) {
 
 }  // namespace
 
+#ifdef GTSAM_POINTS_USE_CUDA
+std::shared_ptr<iap::SharedTargetHandle> make_shared_target_handle(
+  const std::shared_ptr<const gtsam_points::iVox>& target,
+  std::size_t revision);
+#endif
+
 TEST(BSplineGICPFactorTest, ErrorChangesWhenControlPosesArePerturbed) {
   auto factor = make_factor();
   auto values = make_identity_control_values();
@@ -773,6 +779,7 @@ TEST(BSplineGICPFactorTest, GpuKernelFactorLinearizesAndReturnsUnifiedProfile) {
   target->voxel_insertion_setting().set_min_dist_in_cell(0.0);
   target->set_neighbor_voxel_mode(1);
   target->insert(*target_cloud);
+  auto handle = make_shared_target_handle(target, 1);
 
   std::array<gtsam::Key, iap::kBSplineControlPointCount> keys{};
   for (std::size_t i = 0; i < iap::kBSplineControlPointCount; ++i) {
@@ -783,7 +790,7 @@ TEST(BSplineGICPFactorTest, GpuKernelFactorLinearizesAndReturnsUnifiedProfile) {
   auto stream_buffer = stream_buffers.get_stream_buffer();
   iap::IntegratedBSplineGICPFactorGPUKernel factor(
     keys,
-    target,
+    handle,
     make_cloud(true),
     stream_buffer.first,
     stream_buffer.second);
@@ -862,6 +869,24 @@ std::shared_ptr<const iap::SharedTargetGpuResources> make_shared_target_gpu_reso
   return resources;
 }
 
+std::shared_ptr<iap::SharedTargetHandle> make_shared_target_handle(
+  const std::shared_ptr<const gtsam_points::iVox>& target,
+  std::size_t revision) {
+  return std::make_shared<iap::SharedTargetHandle>(
+    iap::SharedTargetHandleMode::GlobalReference,
+    revision,
+    target,
+    target,
+    0,
+    target->voxel_points().size(),
+    0,
+    0,
+    0.0,
+    true,
+    0.0,
+    make_shared_target_gpu_resources(target, revision));
+}
+
 TEST(BSplineGICPFactorTest, GpuKernelFactorRefreshesTargetWithoutRebuildingSourceStaging) {
   int device_count = 0;
   if (cudaGetDeviceCount(&device_count) != cudaSuccess || device_count == 0) {
@@ -885,6 +910,8 @@ TEST(BSplineGICPFactorTest, GpuKernelFactorRefreshesTargetWithoutRebuildingSourc
   target_b->voxel_insertion_setting().set_min_dist_in_cell(0.0);
   target_b->set_neighbor_voxel_mode(1);
   target_b->insert(*target_b_cloud);
+  auto handle_a = make_shared_target_handle(target_a, 10);
+  auto handle_b = make_shared_target_handle(target_b, 11);
 
   std::array<gtsam::Key, iap::kBSplineControlPointCount> keys{};
   for (std::size_t i = 0; i < iap::kBSplineControlPointCount; ++i) {
@@ -895,7 +922,7 @@ TEST(BSplineGICPFactorTest, GpuKernelFactorRefreshesTargetWithoutRebuildingSourc
   auto stream_buffer = stream_buffers.get_stream_buffer();
   iap::IntegratedBSplineGICPFactorGPUKernel factor(
     keys,
-    target_a,
+    handle_a,
     make_cloud(true),
     stream_buffer.first,
     stream_buffer.second);
@@ -907,11 +934,13 @@ TEST(BSplineGICPFactorTest, GpuKernelFactorRefreshesTargetWithoutRebuildingSourc
   ASSERT_NE(staging_a, nullptr);
   const double error_a = factor.error(values);
 
-  factor.refresh_target(target_b);
+  EXPECT_TRUE(factor.target_matches(*handle_a));
+  factor.rebind_target(handle_b);
   const void* staging_b = factor.source_staging_identity();
   const double error_b = factor.error(values);
 
   EXPECT_EQ(staging_a, staging_b);
+  EXPECT_TRUE(factor.target_matches(*handle_b));
   EXPECT_NE(error_a, error_b);
 }
 
@@ -939,32 +968,8 @@ TEST(BSplineGICPFactorTest, GpuKernelFactorCanBindSharedTargetResources) {
   target_b->set_neighbor_voxel_mode(1);
   target_b->insert(*target_b_cloud);
 
-  auto handle_a = std::make_shared<iap::SharedTargetHandle>(
-    iap::SharedTargetHandleMode::GlobalReference,
-    10,
-    target_a,
-    target_a,
-    0,
-    target_a->voxel_points().size(),
-    0,
-    0,
-    0.0,
-    true,
-    0.0,
-    make_shared_target_gpu_resources(target_a, 10));
-  auto handle_b = std::make_shared<iap::SharedTargetHandle>(
-    iap::SharedTargetHandleMode::GlobalReference,
-    11,
-    target_b,
-    target_b,
-    0,
-    target_b->voxel_points().size(),
-    0,
-    0,
-    0.0,
-    true,
-    0.0,
-    make_shared_target_gpu_resources(target_b, 11));
+  auto handle_a = make_shared_target_handle(target_a, 10);
+  auto handle_b = make_shared_target_handle(target_b, 11);
 
   std::array<gtsam::Key, iap::kBSplineControlPointCount> keys{};
   for (std::size_t i = 0; i < iap::kBSplineControlPointCount; ++i) {
@@ -988,13 +993,15 @@ TEST(BSplineGICPFactorTest, GpuKernelFactorCanBindSharedTargetResources) {
   ASSERT_EQ(target_resource_a, handle_a->gpu_resources()->target_gpu.get());
   const double error_a = factor.error(values);
 
-  factor.refresh_target_handle(handle_b);
+  EXPECT_TRUE(factor.target_matches(*handle_a));
+  factor.rebind_target(handle_b);
   const void* staging_b = factor.source_staging_identity();
   const void* target_resource_b = factor.target_resource_identity();
   const double error_b = factor.error(values);
 
   EXPECT_EQ(staging_a, staging_b);
   EXPECT_EQ(target_resource_b, handle_b->gpu_resources()->target_gpu.get());
+  EXPECT_TRUE(factor.target_matches(*handle_b));
   EXPECT_NE(error_a, error_b);
 }
 #endif

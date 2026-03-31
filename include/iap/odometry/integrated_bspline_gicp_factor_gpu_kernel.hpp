@@ -41,13 +41,14 @@ class IntegratedBSplineGICPFactorGPUKernel : public gtsam::NonlinearFactor {
 
   IntegratedBSplineGICPFactorGPUKernel(
     const std::array<gtsam::Key, kBSplineControlPointCount>& keys,
-    const std::shared_ptr<const gtsam_points::iVox>& target,
+    std::shared_ptr<const iap::ISharedTargetHandle> target_handle,
     const std::shared_ptr<const gtsam_points::PointCloud>& source,
     CUstream_st* stream = nullptr,
     std::shared_ptr<gtsam_points::TempBufferManager> temp_buffer = nullptr);
   IntegratedBSplineGICPFactorGPUKernel(
     const std::array<gtsam::Key, kBSplineControlPointCount>& keys,
-    std::shared_ptr<const iap::ISharedTargetHandle> target_handle,
+    std::shared_ptr<const iap::SharedTargetGpuResources> target_gpu_resources,
+    const std::shared_ptr<const gtsam_points::iVox>& target_snapshot,
     const std::shared_ptr<const gtsam_points::PointCloud>& source,
     CUstream_st* stream = nullptr,
     std::shared_ptr<gtsam_points::TempBufferManager> temp_buffer = nullptr);
@@ -76,8 +77,8 @@ class IntegratedBSplineGICPFactorGPUKernel : public gtsam::NonlinearFactor {
   BSplineLidarNumericAudit check_against_numeric_full(const gtsam::Values& values, double perturbation_scale = 1e-5) const;
   BSplineLidarDegeneracyReport diagnose_degeneracy(
     const IntegratedBSplineGICPFactor::DegeneracyThresholds& thresholds) const;
-  void refresh_target(const std::shared_ptr<const gtsam_points::iVox>& target);
-  void refresh_target_handle(std::shared_ptr<const iap::ISharedTargetHandle> target_handle);
+  bool target_matches(const iap::ISharedTargetHandle& target_handle) const;
+  void rebind_target(std::shared_ptr<const iap::ISharedTargetHandle> target_handle);
   BSplineLidarFactorResult make_result(
     double factor_error,
     int inlier_count,
@@ -91,12 +92,17 @@ class IntegratedBSplineGICPFactorGPUKernel : public gtsam::NonlinearFactor {
 
   const void* source_staging_identity() const { return source_gpu_.get(); }
   const void* target_resource_identity() const { return target_gpu_.get(); }
+  const void* target_identity() const { return target_identity_; }
+  std::size_t target_revision() const { return target_revision_; }
 
  private:
   struct EvaluationResult;
 
   std::array<gtsam::Pose3, kBSplineControlPointCount> control_poses(const gtsam::Values& values) const;
   void bind_target_handle(std::shared_ptr<const iap::ISharedTargetHandle> target_handle);
+  void bind_target_gpu_resources(
+    std::shared_ptr<const iap::SharedTargetGpuResources> target_gpu_resources,
+    std::shared_ptr<const gtsam_points::iVox> target_snapshot);
   void rebuild_target_gpu();
   void ensure_source_gpu() const;
   EvaluationResult evaluate(const gtsam::Values& values, bool compute_hessian) const;
@@ -131,6 +137,8 @@ class IntegratedBSplineGICPFactorGPUKernel : public gtsam::NonlinearFactor {
   std::vector<double> time_table_;
   std::vector<int> time_indices_;
   std::vector<std::size_t> time_bucket_populations_;
+  const void* target_identity_ = nullptr;
+  std::size_t target_revision_ = 0;
   std::size_t target_point_count_ = 0;
   mutable float* normalized_times_gpu_ = nullptr;
   mutable float* linearized_hessian_gpu_ = nullptr;

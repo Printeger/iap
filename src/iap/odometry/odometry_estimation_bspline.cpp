@@ -675,33 +675,45 @@ void OdometryEstimationBSpline::refresh_active_target_handles() {
     return;
   }
 
+  // Keep runtime GLOBAL_IVOX_REFERENCE segments frozen until factor ownership is
+  // fully shared-handle-native. The newest segment already binds the latest
+  // target handle during append_active_segment_constraint(...), so rebinding
+  // historical active segments here only makes their target time-varying.
+  if (!lidar_collect_window_results()) {
+    return;
+  }
+
   auto shared_handle = create_active_target_handle();
   if (!shared_handle) {
     return;
   }
 
-  for (auto& segment : fixed_lag_registry_.segments()) {
-    if (segment.target_mode != BSplineLidarTargetMode::GLOBAL_IVOX_REFERENCE) {
-      continue;
-    }
-
-    if (segment.target_handle &&
-        segment.target_handle->identity() == shared_handle->identity() &&
-        segment.target_handle->revision() == shared_handle->revision()) {
-      continue;
-    }
-
-    segment.target_handle = shared_handle;
-    segment.target_snapshot = shared_handle->target_snapshot();
-    segment.target_tree = shared_handle->target_tree();
-    segment.target_frame_count = shared_handle->contributing_frames();
-    segment.target_point_count = shared_handle->point_count();
-    segment.snapshot_frame_count = shared_handle->snapshot_frame_count();
-    segment.snapshot_point_count = shared_handle->snapshot_point_count();
-    segment.snapshot_span_sec = shared_handle->snapshot_span_sec();
-    segment.snapshot_policy_accepted = shared_handle->snapshot_policy_accepted();
-    segment.target_build_ms = shared_handle->build_ms();
+  auto& current_segment = fixed_lag_registry_.segments().back();
+  if (current_segment.target_mode != BSplineLidarTargetMode::GLOBAL_IVOX_REFERENCE) {
+    return;
   }
+
+  const bool target_changed =
+    !current_segment.target_handle ||
+    current_segment.target_handle->identity() != shared_handle->identity() ||
+    current_segment.target_handle->revision() != shared_handle->revision();
+  if (!target_changed) {
+    return;
+  }
+
+  // Any target identity/revision change must force the segment's persistent
+  // factor inventory through an explicit incremental remove/add cycle. Merely
+  // updating segment metadata would leave the authoritative solver shell with a
+  // stale ownership view of the LiDAR factor.
+  current_segment.force_incremental_readd = true;
+  current_segment.target_handle = shared_handle;
+  current_segment.target_frame_count = shared_handle->contributing_frames();
+  current_segment.target_point_count = shared_handle->point_count();
+  current_segment.snapshot_frame_count = shared_handle->snapshot_frame_count();
+  current_segment.snapshot_point_count = shared_handle->snapshot_point_count();
+  current_segment.snapshot_span_sec = shared_handle->snapshot_span_sec();
+  current_segment.snapshot_policy_accepted = shared_handle->snapshot_policy_accepted();
+  current_segment.target_build_ms = shared_handle->build_ms();
 }
 
 std::vector<OdometryEstimationBSpline::ActiveSplineIMUSample> OdometryEstimationBSpline::create_segment_imu_samples(
@@ -920,9 +932,9 @@ void OdometryEstimationBSpline::append_active_segment_constraint(
   segment.stamp = raw_frame->stamp;
   segment.scan_end = raw_frame->scan_end_time;
   segment.source = source;
+  // Freeze a single target handle at append time. Historical segments should
+  // not maintain mutable target mirrors that can drift away from factor state.
   segment.target_handle = create_active_target_handle();
-  segment.target_snapshot = segment.target_handle->target_snapshot();
-  segment.target_tree = segment.target_handle->target_tree();
   segment.target_mode = segment.target_handle->mode() == iap::SharedTargetHandleMode::GlobalReference
                           ? BSplineLidarTargetMode::GLOBAL_IVOX_REFERENCE
                           : BSplineLidarTargetMode::ACTIVE_WINDOW_SNAPSHOT;
@@ -1018,7 +1030,7 @@ OdometryEstimationBSpline::make_lidar_factor_cache_key(
   key.target_mode = segment.target_mode;
   key.control_indices = segment.control_indices;
   key.source_identity = segment.source.get();
-  key.target_identity = segment.target_handle ? segment.target_handle->identity() : segment.target_snapshot.get();
+  key.target_identity = segment.target_handle ? segment.target_handle->identity() : nullptr;
   key.target_revision = lidar_target_revision(segment);
   key.config_signature = lidar_factor_config_signature(use_gpu_lidar);
   return key;
@@ -1197,15 +1209,17 @@ std::shared_ptr<iap::IntegratedBSplineGICPFactor> OdometryEstimationBSpline::get
     segment.lidar_factor_cache.target_identity == desired_key.target_identity;
 
   if (!key_match) {
+    const auto target_snapshot = segment.target_handle ? segment.target_handle->target_snapshot() : nullptr;
+    const auto target_tree = segment.target_handle ? segment.target_handle->target_tree() : nullptr;
     auto factor = std::make_shared<iap::IntegratedBSplineGICPFactor>(
       std::array<gtsam::Key, iap::kBSplineControlPointCount>{
         iap::bspline_control_point_key(segment.control_indices[0]),
         iap::bspline_control_point_key(segment.control_indices[1]),
         iap::bspline_control_point_key(segment.control_indices[2]),
         iap::bspline_control_point_key(segment.control_indices[3])},
-      segment.target_snapshot,
+      target_snapshot,
       segment.source,
-      segment.target_tree);
+      target_tree);
     factor->set_num_threads(params->num_threads);
     factor->set_max_correspondence_distance(max_correspondence_distance_);
     factor->set_jacobian_mode(lidar_jacobian_mode_);
@@ -1277,9 +1291,9 @@ std::shared_ptr<iap::IntegratedBSplineGICPFactorGPUKernel> OdometryEstimationBSp
   } else {
     segment.cached_gpu_kernel_factor->set_enable_profiling(enable_profile_surface);
     if (can_refresh_target &&
-        (segment.lidar_factor_cache.target_identity != desired_key.target_identity ||
-         segment.lidar_factor_cache.target_revision != desired_key.target_revision)) {
-      segment.cached_gpu_kernel_factor->refresh_target_handle(segment.target_handle);
+        segment.target_handle &&
+        !segment.cached_gpu_kernel_factor->target_matches(*segment.target_handle)) {
+      segment.cached_gpu_kernel_factor->rebind_target(segment.target_handle);
       segment.lidar_factor_cache = desired_key;
       if (target_refreshed) {
         *target_refreshed = true;

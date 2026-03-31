@@ -70,6 +70,11 @@
 > 如果你临时改了代码但还没决定它对应哪个需求，先把改动写在这里（提交前必须移入上表）。
 
 - 2026-03-31: IAP-RQ-020 / IAP-RQ-300 / IAP-RQ-410
+  - `ActiveSplineSegmentConstraint` 不再维护会被 runtime 改写的 `target_snapshot / target_tree` 镜像状态；segment 在 append 时冻结一次 `target_handle`，CPU LiDAR factor 改为按需从 handle 读取 target。
+  - `IntegratedBSplineGICPFactorGPUKernel` 现在显式保存 `target_identity / target_revision`，并提供 `target_matches(...)` / `rebind_target(...)`，使 factor 缓存复用判断真正下沉到残差对象层，而不是只靠外部 segment metadata。
+  - `OdometryEstimationBSpline::refresh_active_target_handles()` 现在在检测到 target handle 的 `identity/revision` 变化时显式置 `force_incremental_readd = true`；因此任何 target change 都会驱动 authoritative incremental remove/add，而不是只更新 segment metadata。
+
+- 2026-03-31: IAP-RQ-020 / IAP-RQ-300 / IAP-RQ-410
   - `CT_LIDAR_GPU + KERNEL` 现已完成本轮 README_REFACTOR 路线切换：旧 `IntegratedBSplineGICPFactorGPU` (`BUCKET`) 已从 `CMakeLists.txt`、运行时集成和 `test_bspline_gicp_factor.cpp` 中删除，公开配置也只保留 `ct_lidar_gpu_backend = KERNEL`。
   - shared GNSS state / carried-prior 的长包阻断项已通过 headless KERNEL 回放验收：最新验证中未再出现 `key "e0"`、`ValuesKeyDoesNotExist`、`failed to build bspline marginal survivor prior`、`authoritative incremental update failed`，并且后段窗口不再出现 `gnss_pr_factors = 0 / gnss_dop_factors = 0` 的塌零。
   - 为支撑上述验收，`IapSharedState` 与 `GnssHandler` 的 raw/epoch queue 容量已提升，`OdometryEstimationBSpline` 也已支持把迟到 epoch 回填到仍然活跃的 solve-domain segments，并在需要时触发 authoritative incremental factor re-add。

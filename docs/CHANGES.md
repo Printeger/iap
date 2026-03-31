@@ -3,6 +3,10 @@
 > 规则：任何代码改动必须在这里记录，并包含 IAP-RQ-XXX。
 
 ## Unreleased
+- fix(dev-ct-kernel-target-ownership): IAP-RQ-020 / IAP-RQ-300 / IAP-RQ-410 — tighten the shared-target ownership path so target changes trigger explicit incremental re-add instead of metadata-only drift.
+  - `ActiveSplineSegmentConstraint` no longer keeps mutable `target_snapshot / target_tree` mirrors; segments freeze a single `target_handle` at append time and derive CPU factor target state from that handle on demand.
+  - `IntegratedBSplineGICPFactorGPUKernel` now stores target identity/revision internally, exposes `target_matches(...)` and `rebind_target(...)`, and accepts shared target ownership directly through `ISharedTargetHandle` or `SharedTargetGpuResources`.
+  - `OdometryEstimationBSpline::refresh_active_target_handles()` now marks `force_incremental_readd = true` whenever a segment target handle identity/revision changes, so the authoritative incremental path removes/adds the affected LiDAR factor instead of silently updating segment metadata.
 - feat(dev-ct-refactor-kernel-only): IAP-RQ-020 / IAP-RQ-300 / IAP-RQ-410 — finish the solver-route refactor by validating authoritative KERNEL long runs and removing BUCKET runtime code.
   - `CT_LIDAR_GPU + KERNEL` now owns the authoritative long-lived continuous-time fixed-lag solve path; the persistent incremental smoother lifecycle remains in place for solve-domain LiDAR / velocity / IMU / GNSS factors, while the remaining prior/shared shell stays on the same KERNEL-only route.
   - Increased GNSS raw/epoch mailbox capacity and added delayed epoch backfill into active segments, which eliminated the observed late-run `gnss_pr_factors = 0 / gnss_dop_factors = 0` collapse during headless KERNEL replay while preserving the previous `e0` / missing-key fixes.

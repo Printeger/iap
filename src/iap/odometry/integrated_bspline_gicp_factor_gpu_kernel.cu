@@ -479,56 +479,6 @@ __global__ void evaluate_ct_lidar_kernel(
 
 IntegratedBSplineGICPFactorGPUKernel::IntegratedBSplineGICPFactorGPUKernel(
   const std::array<gtsam::Key, kBSplineControlPointCount>& keys,
-  const std::shared_ptr<const gtsam_points::iVox>& target,
-  const std::shared_ptr<const gtsam_points::PointCloud>& source,
-  CUstream_st* stream,
-  std::shared_ptr<gtsam_points::TempBufferManager> temp_buffer)
-: gtsam::NonlinearFactor(gtsam::KeyVector(keys.begin(), keys.end())),
-  stream_(stream),
-  temp_buffer_(std::move(temp_buffer)),
-  target_(target),
-  source_(source) {
-  if (!target_) {
-    throw std::runtime_error("IntegratedBSplineGICPFactorGPUKernel requires a target iVox snapshot");
-  }
-  if (!source_ || !frame::has_points(*source_) || !frame::has_covs(*source_) || !frame::has_times(*source_)) {
-    throw std::runtime_error("IntegratedBSplineGICPFactorGPUKernel requires source points, covariances, and times");
-  }
-
-  const double time_eps = 1e-3;
-  time_table_.reserve(frame::size(*source_) / 10 + 1);
-  time_indices_.reserve(frame::size(*source_));
-  normalized_times_.reserve(frame::size(*source_));
-
-  for (int i = 0; i < frame::size(*source_); ++i) {
-    const double t = frame::time(*source_, i);
-    if (time_table_.empty() || t - time_table_.back() > time_eps) {
-      time_table_.push_back(t);
-    }
-    time_indices_.push_back(static_cast<int>(time_table_.size() - 1));
-  }
-  time_bucket_populations_.assign(time_table_.size(), 0U);
-  for (const int time_index : time_indices_) {
-    time_bucket_populations_[static_cast<std::size_t>(time_index)]++;
-  }
-
-  const double time_min = time_table_.empty() ? 0.0 : time_table_.front();
-  const double time_max = time_table_.empty() ? 1.0 : time_table_.back();
-  const double denom = std::max(1e-9, time_max - time_min);
-  for (int i = 0; i < frame::size(*source_); ++i) {
-    const double t = frame::time(*source_, i);
-    normalized_times_.push_back(static_cast<float>((t - time_min) / denom));
-  }
-  for (auto& t : time_table_) {
-    t = (t - time_min) / denom;
-  }
-
-  ensure_source_gpu();
-  rebuild_target_gpu();
-}
-
-IntegratedBSplineGICPFactorGPUKernel::IntegratedBSplineGICPFactorGPUKernel(
-  const std::array<gtsam::Key, kBSplineControlPointCount>& keys,
   std::shared_ptr<const iap::ISharedTargetHandle> target_handle,
   const std::shared_ptr<const gtsam_points::PointCloud>& source,
   CUstream_st* stream,
@@ -574,6 +524,56 @@ IntegratedBSplineGICPFactorGPUKernel::IntegratedBSplineGICPFactorGPUKernel(
 
   ensure_source_gpu();
   bind_target_handle(std::move(target_handle));
+}
+
+IntegratedBSplineGICPFactorGPUKernel::IntegratedBSplineGICPFactorGPUKernel(
+  const std::array<gtsam::Key, kBSplineControlPointCount>& keys,
+  std::shared_ptr<const iap::SharedTargetGpuResources> target_gpu_resources,
+  const std::shared_ptr<const gtsam_points::iVox>& target_snapshot,
+  const std::shared_ptr<const gtsam_points::PointCloud>& source,
+  CUstream_st* stream,
+  std::shared_ptr<gtsam_points::TempBufferManager> temp_buffer)
+: gtsam::NonlinearFactor(gtsam::KeyVector(keys.begin(), keys.end())),
+  stream_(stream),
+  temp_buffer_(std::move(temp_buffer)),
+  source_(source) {
+  if (!target_gpu_resources) {
+    throw std::runtime_error("IntegratedBSplineGICPFactorGPUKernel requires non-null shared target GPU resources");
+  }
+  if (!source_ || !frame::has_points(*source_) || !frame::has_covs(*source_) || !frame::has_times(*source_)) {
+    throw std::runtime_error("IntegratedBSplineGICPFactorGPUKernel requires source points, covariances, and times");
+  }
+
+  const double time_eps = 1e-3;
+  time_table_.reserve(frame::size(*source_) / 10 + 1);
+  time_indices_.reserve(frame::size(*source_));
+  normalized_times_.reserve(frame::size(*source_));
+
+  for (int i = 0; i < frame::size(*source_); ++i) {
+    const double t = frame::time(*source_, i);
+    if (time_table_.empty() || t - time_table_.back() > time_eps) {
+      time_table_.push_back(t);
+    }
+    time_indices_.push_back(static_cast<int>(time_table_.size() - 1));
+  }
+  time_bucket_populations_.assign(time_table_.size(), 0U);
+  for (const int time_index : time_indices_) {
+    time_bucket_populations_[static_cast<std::size_t>(time_index)]++;
+  }
+
+  const double time_min = time_table_.empty() ? 0.0 : time_table_.front();
+  const double time_max = time_table_.empty() ? 1.0 : time_table_.back();
+  const double denom = std::max(1e-9, time_max - time_min);
+  for (int i = 0; i < frame::size(*source_); ++i) {
+    const double t = frame::time(*source_, i);
+    normalized_times_.push_back(static_cast<float>((t - time_min) / denom));
+  }
+  for (auto& t : time_table_) {
+    t = (t - time_min) / denom;
+  }
+
+  ensure_source_gpu();
+  bind_target_gpu_resources(std::move(target_gpu_resources), target_snapshot);
 }
 
 IntegratedBSplineGICPFactorGPUKernel::~IntegratedBSplineGICPFactorGPUKernel() {
@@ -649,12 +649,34 @@ void IntegratedBSplineGICPFactorGPUKernel::bind_target_handle(std::shared_ptr<co
 
   target_handle_ = std::move(target_handle);
   target_ = target_handle_->target_snapshot();
+  target_identity_ = target_handle_->identity();
+  target_revision_ = target_handle_->revision();
   const auto& gpu_resources = target_handle_->gpu_resources();
   if (gpu_resources && gpu_resources->target_gpu) {
     target_cpu_points_ = gpu_resources->target_cpu_points;
     target_gpu_ = gpu_resources->target_gpu;
     target_point_count_ = gpu_resources->point_count;
   } else {
+    rebuild_target_gpu();
+  }
+}
+
+void IntegratedBSplineGICPFactorGPUKernel::bind_target_gpu_resources(
+  std::shared_ptr<const iap::SharedTargetGpuResources> target_gpu_resources,
+  std::shared_ptr<const gtsam_points::iVox> target_snapshot) {
+  target_handle_.reset();
+  target_ = std::move(target_snapshot);
+  target_identity_ = target_gpu_resources->identity;
+  target_revision_ = target_gpu_resources->revision;
+  target_cpu_points_ = target_gpu_resources->target_cpu_points;
+  target_gpu_ = target_gpu_resources->target_gpu;
+  target_point_count_ = target_gpu_resources->point_count;
+
+  if (!target_gpu_) {
+    if (!target_) {
+      throw std::runtime_error(
+        "IntegratedBSplineGICPFactorGPUKernel requires a target snapshot when rebuilding GPU resources");
+    }
     rebuild_target_gpu();
   }
 }
@@ -674,18 +696,11 @@ void IntegratedBSplineGICPFactorGPUKernel::rebuild_target_gpu() {
   }
 }
 
-void IntegratedBSplineGICPFactorGPUKernel::refresh_target(const std::shared_ptr<const gtsam_points::iVox>& target) {
-  if (!target) {
-    throw std::runtime_error("IntegratedBSplineGICPFactorGPUKernel cannot refresh to a null target");
-  }
-  target_handle_.reset();
-  target_ = target;
-  rebuild_target_gpu();
-  last_profile_ = BSplineLidarFactorProfile();
-  last_inlier_count_ = 0;
+bool IntegratedBSplineGICPFactorGPUKernel::target_matches(const iap::ISharedTargetHandle& target_handle) const {
+  return target_identity_ == target_handle.identity() && target_revision_ == target_handle.revision();
 }
 
-void IntegratedBSplineGICPFactorGPUKernel::refresh_target_handle(std::shared_ptr<const iap::ISharedTargetHandle> target_handle) {
+void IntegratedBSplineGICPFactorGPUKernel::rebind_target(std::shared_ptr<const iap::ISharedTargetHandle> target_handle) {
   bind_target_handle(std::move(target_handle));
   last_profile_ = BSplineLidarFactorProfile();
   last_inlier_count_ = 0;

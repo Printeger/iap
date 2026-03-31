@@ -145,8 +145,6 @@ class OdometryEstimationBSpline : public OdometryEstimationCPU {
   struct ActiveSplineSegmentConstraint : public iap::BSplineFixedLagSegmentState {
     gtsam_points::PointCloud::ConstPtr source;
     std::shared_ptr<iap::ISharedTargetHandle> target_handle;
-    std::shared_ptr<const gtsam_points::iVox> target_snapshot;
-    std::shared_ptr<const gtsam_points::NearestNeighborSearch> target_tree;
     BSplineLidarTargetMode target_mode = BSplineLidarTargetMode::ACTIVE_WINDOW_SNAPSHOT;
     std::size_t target_frame_count = 0;
     std::size_t target_point_count = 0;
