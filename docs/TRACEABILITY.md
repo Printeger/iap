@@ -70,6 +70,12 @@
 > 如果你临时改了代码但还没决定它对应哪个需求，先把改动写在这里（提交前必须移入上表）。
 
 - 2026-03-31: IAP-RQ-300 / IAP-RQ-410
+  - `BSplineTrajectory` 现已新增 `set_snapshot()` 与 `set_layout()`，可直接消费显式 knots + control snapshot，或消费 `SplineStateLayout + Values` 快照。
+  - `set_control_points()` 现已降级为兼容 wrapper：它只负责按旧逻辑重建 knots/snapshot，然后转调新的 snapshot 主路径；`rebuild_knots()` 也只再服务于这条 legacy 入口。
+  - `sample() / latest_sample() / sample_range() / clone_window() / knot_vector()` 现已优先面向显式 knot state；其中 layout 路径优先通过 `SplineEvaluator` 采样，snapshot 路径继续保留显式-knot B-spline 查询语义。
+  - planner/viewer 对外接口没变，`SplineWindowSnapshot` 只是被进一步明确为 layout-backed trajectory publication 的 adapter boundary。
+
+- 2026-03-31: IAP-RQ-300 / IAP-RQ-410
   - 已新增 `SplineSensorModel / SplineLocalSupport / SplineStateLayout / SplineEvaluator`，作为 explicit-knot / unified spline query 主线的第一批 core 类型。
   - `SplineStateLayout::support_at()` 现已基于显式 knot vector 查找 active span，并产出 `ctrl_indices + pose_keys + query_time + u + dt`；不再依赖“隐式 nominal_dt 推 span”的旧假设。
   - `SplineEvaluator` 第一版现已提供 uniform cubic `basis / basis_d1 / basis_d2`，以及 `eval_pose / eval_world_velocity / eval_world_acceleration`，其中 sensor time offset 和 pose extrinsic 已纳入统一查询入口。

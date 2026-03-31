@@ -2,6 +2,8 @@
 // IAP-RQ-300 / IAP-RQ-410:
 // Phase-1 continuous-time trajectory backbone for planner / viewer / debug.
 
+#include <iap/odometry/spline_evaluator.hpp>
+#include <iap/odometry/spline_state_layout.hpp>
 #include <iap/planner/continuous_trajectory_view.hpp>
 
 #include <Eigen/Core>
@@ -14,15 +16,13 @@
 
 namespace iap {
 
-class SplineEvaluator;
-class SplineStateLayout;
-
 class BSplineTrajectory final : public ContinuousTrajectoryView, public SplineControlAccess {
  public:
-  // Commit 1 note:
-  // The explicit-knot SplineStateLayout / SplineEvaluator core now exists, but
-  // this adapter intentionally remains snapshot-driven until later commits
-  // switch the publication path onto the unified spline-native query stack.
+  // Commit 2 note:
+  // Explicit-knot snapshots/layouts are now the primary publication path for
+  // this adapter. The legacy set_control_points() entry remains as a
+  // compatibility wrapper that rebuilds a window snapshot and forwards to the
+  // new snapshot-driven path.
   struct Params {
     SplineKnotMode knot_mode = SplineKnotMode::Uniform;
     int order = 3;
@@ -34,6 +34,8 @@ class BSplineTrajectory final : public ContinuousTrajectoryView, public SplineCo
   explicit BSplineTrajectory(const Params& params);
 
   void set_control_points(const std::vector<SplineControlPoint>& control_points);
+  void set_snapshot(const SplineWindowSnapshot& snapshot);
+  void set_layout(std::shared_ptr<const SplineStateLayout> layout, const gtsam::Values* values = nullptr);
 
   bool empty() const override;
   double start_time() const override;
@@ -57,9 +59,16 @@ class BSplineTrajectory final : public ContinuousTrajectoryView, public SplineCo
     double sigma = 0.0;
   };
 
+  void clear_layout_binding();
+  void refresh_orientations();
+  void rebuild_meta_from_current_data();
   void rebuild_knots();
   double effective_nominal_dt() const;
+  SplineKnotMode infer_knot_mode() const;
   double clamp_stamp(double stamp) const;
+  std::vector<SplineControlPoint> control_points_from_layout() const;
+  SplineSensorId layout_sensor_id() const;
+  std::optional<TrajectorySample> sample_from_layout(double stamp) const;
   PoseBlend evaluate_pose_blend(double stamp) const;
   PoseBlend evaluate_linear_blend(double stamp) const;
   PoseBlend evaluate_bspline_blend(double stamp) const;
@@ -74,6 +83,9 @@ class BSplineTrajectory final : public ContinuousTrajectoryView, public SplineCo
   std::vector<SplineControlPoint> control_points_;
   std::vector<Eigen::Quaterniond> orientations_;
   std::vector<double> knots_;
+  std::shared_ptr<const SplineStateLayout> layout_;
+  std::shared_ptr<SplineEvaluator> evaluator_;
+  std::shared_ptr<const gtsam::Values> layout_values_;
 };
 
 }  // namespace iap

@@ -3,7 +3,6 @@
 #include <algorithm>
 #include <cmath>
 #include <limits>
-#include <numeric>
 
 namespace iap {
 
@@ -17,6 +16,22 @@ double unwrap_yaw(const Eigen::Quaterniond& q) {
   return Eigen::Quaterniond(q.normalized()).toRotationMatrix().eulerAngles(2, 1, 0)[0];
 }
 
+SplineControlPoint make_control_point(
+  const BSplineControlPointState& state,
+  const gtsam::Values* values) {
+  SplineControlPoint cp;
+  cp.stamp = state.stamp;
+  cp.pose = Eigen::Isometry3d::Identity();
+
+  gtsam::Pose3 pose = state.pose;
+  if (values && values->exists(bspline_control_point_key(state.index))) {
+    pose = values->at<gtsam::Pose3>(bspline_control_point_key(state.index));
+  }
+
+  cp.pose.matrix() = pose.matrix();
+  return cp;
+}
+
 }  // namespace
 
 BSplineTrajectory::BSplineTrajectory() : BSplineTrajectory(Params()) {}
@@ -26,36 +41,69 @@ BSplineTrajectory::BSplineTrajectory(const Params& params) : params_(params) {
   meta_.knot_mode = params_.knot_mode;
 }
 
+void BSplineTrajectory::clear_layout_binding() {
+  layout_.reset();
+  evaluator_.reset();
+  layout_values_.reset();
+}
+
 void BSplineTrajectory::set_control_points(const std::vector<SplineControlPoint>& control_points) {
+  clear_layout_binding();
+
   control_points_ = control_points;
   std::sort(control_points_.begin(), control_points_.end(), [](const auto& lhs, const auto& rhs) {
     return lhs.stamp < rhs.stamp;
   });
 
-  orientations_.clear();
-  orientations_.reserve(control_points_.size());
+  refresh_orientations();
+  rebuild_meta_from_current_data();
+  rebuild_knots();
 
-  Eigen::Quaterniond prev = Eigen::Quaterniond::Identity();
-  bool first = true;
-  for (const auto& cp : control_points_) {
-    Eigen::Quaterniond q(cp.pose.linear());
-    q.normalize();
-    if (!first && prev.dot(q) < 0.0) {
-      q.coeffs() *= -1.0;
-    }
-    orientations_.push_back(q);
-    prev = q;
-    first = false;
+  SplineWindowSnapshot snapshot;
+  snapshot.meta = meta_;
+  snapshot.knots = knots_;
+  snapshot.control_points = control_points_;
+  set_snapshot(snapshot);
+}
+
+void BSplineTrajectory::set_snapshot(const SplineWindowSnapshot& snapshot) {
+  clear_layout_binding();
+
+  control_points_ = snapshot.control_points;
+  knots_ = snapshot.knots;
+
+  if (knots_.empty() && !control_points_.empty()) {
+    rebuild_meta_from_current_data();
+    rebuild_knots();
+  } else {
+    refresh_orientations();
+    rebuild_meta_from_current_data();
   }
 
-  meta_.control_point_count = control_points_.size();
-  meta_.t_min = control_points_.empty() ? 0.0 : control_points_.front().stamp;
-  meta_.t_max = control_points_.empty() ? 0.0 : control_points_.back().stamp;
-  meta_.nominal_dt = effective_nominal_dt();
-  meta_.knot_mode = params_.knot_mode;
-  meta_.order = std::max(1, params_.order);
+  if (snapshot.meta.order > 0) {
+    meta_.order = snapshot.meta.order;
+  }
+}
 
-  rebuild_knots();
+void BSplineTrajectory::set_layout(std::shared_ptr<const SplineStateLayout> layout, const gtsam::Values* values) {
+  layout_ = std::move(layout);
+  evaluator_ = layout_ ? std::make_shared<SplineEvaluator>(layout_) : nullptr;
+  layout_values_ = values ? std::make_shared<gtsam::Values>(*values) : nullptr;
+
+  if (!layout_) {
+    control_points_.clear();
+    orientations_.clear();
+    knots_.clear();
+    meta_ = SplineMeta{};
+    meta_.order = std::max(1, params_.order);
+    meta_.knot_mode = params_.knot_mode;
+    return;
+  }
+
+  control_points_ = control_points_from_layout();
+  knots_ = layout_->knots();
+  refresh_orientations();
+  rebuild_meta_from_current_data();
 }
 
 bool BSplineTrajectory::empty() const {
@@ -75,22 +123,27 @@ SplineMeta BSplineTrajectory::meta() const {
 }
 
 std::optional<TrajectorySample> BSplineTrajectory::sample(double stamp) const {
-  if (control_points_.empty()) {
+  if (empty()) {
     return std::nullopt;
   }
+
+  if (layout_ && evaluator_) {
+    return sample_from_layout(clamp_stamp(stamp));
+  }
+
   return build_sample(clamp_stamp(stamp));
 }
 
 std::optional<TrajectorySample> BSplineTrajectory::latest_sample() const {
-  if (control_points_.empty()) {
+  if (empty()) {
     return std::nullopt;
   }
-  return build_sample(end_time());
+  return sample(end_time());
 }
 
 std::vector<TrajectorySample> BSplineTrajectory::sample_range(double start, double end, double step) const {
   std::vector<TrajectorySample> samples;
-  if (control_points_.empty()) {
+  if (empty()) {
     return samples;
   }
 
@@ -115,10 +168,14 @@ std::vector<TrajectorySample> BSplineTrajectory::sample_range(double start, doub
   }
 
   for (double t = clamped_start; t < clamped_end; t += step) {
-    samples.push_back(build_sample(t));
+    if (const auto s = sample(t)) {
+      samples.push_back(*s);
+    }
   }
   if (samples.empty() || std::abs(samples.back().stamp - clamped_end) > 1e-9) {
-    samples.push_back(build_sample(clamped_end));
+    if (const auto s = sample(clamped_end)) {
+      samples.push_back(*s);
+    }
   }
 
   return samples;
@@ -138,6 +195,45 @@ SplineWindowSnapshot BSplineTrajectory::clone_window() const {
   snapshot.knots = knots_;
   snapshot.control_points = control_points_;
   return snapshot;
+}
+
+void BSplineTrajectory::refresh_orientations() {
+  orientations_.clear();
+  orientations_.reserve(control_points_.size());
+
+  Eigen::Quaterniond prev = Eigen::Quaterniond::Identity();
+  bool first = true;
+  for (const auto& cp : control_points_) {
+    Eigen::Quaterniond q(cp.pose.linear());
+    q.normalize();
+    if (!first && prev.dot(q) < 0.0) {
+      q.coeffs() *= -1.0;
+    }
+    orientations_.push_back(q);
+    prev = q;
+    first = false;
+  }
+}
+
+void BSplineTrajectory::rebuild_meta_from_current_data() {
+  meta_.order = std::max(1, params_.order);
+  meta_.control_point_count = control_points_.size();
+  meta_.knot_count = knots_.size();
+  meta_.nominal_dt = effective_nominal_dt();
+  meta_.knot_mode = knots_.empty() ? params_.knot_mode : infer_knot_mode();
+
+  if (!knots_.empty() && knots_.size() >= static_cast<std::size_t>(meta_.order + 2)) {
+    const std::size_t degree = static_cast<std::size_t>(std::min(3, std::max(1, meta_.order)));
+    const std::size_t end_idx = knots_.size() > degree ? knots_.size() - degree - 1 : knots_.size() - 1;
+    meta_.t_min = knots_[degree];
+    meta_.t_max = knots_[end_idx];
+  } else if (!control_points_.empty()) {
+    meta_.t_min = control_points_.front().stamp;
+    meta_.t_max = control_points_.back().stamp;
+  } else {
+    meta_.t_min = 0.0;
+    meta_.t_max = 0.0;
+  }
 }
 
 void BSplineTrajectory::rebuild_knots() {
@@ -160,8 +256,8 @@ void BSplineTrajectory::rebuild_knots() {
   }
 
   const int interior_count = num_control_points - degree - 1;
-  const double t0 = meta_.t_min;
-  const double t1 = meta_.t_max;
+  const double t0 = control_points_.front().stamp;
+  const double t1 = control_points_.back().stamp;
   const double span = safe_span(t0, t1);
 
   for (int i = 0; i <= degree; ++i) {
@@ -192,6 +288,21 @@ void BSplineTrajectory::rebuild_knots() {
 }
 
 double BSplineTrajectory::effective_nominal_dt() const {
+  if (!knots_.empty()) {
+    double total = 0.0;
+    std::size_t count = 0;
+    for (std::size_t i = 1; i < knots_.size(); ++i) {
+      const double dt = knots_[i] - knots_[i - 1];
+      if (dt > 1e-9) {
+        total += dt;
+        ++count;
+      }
+    }
+    if (count > 0) {
+      return total / static_cast<double>(count);
+    }
+  }
+
   if (params_.nominal_dt > 0.0) {
     return params_.nominal_dt;
   }
@@ -211,15 +322,83 @@ double BSplineTrajectory::effective_nominal_dt() const {
   return count > 0 ? total / static_cast<double>(count) : 0.0;
 }
 
+SplineKnotMode BSplineTrajectory::infer_knot_mode() const {
+  double reference_dt = 0.0;
+  for (std::size_t i = 1; i < knots_.size(); ++i) {
+    const double dt = knots_[i] - knots_[i - 1];
+    if (dt <= 1e-9) {
+      continue;
+    }
+    if (reference_dt <= 0.0) {
+      reference_dt = dt;
+      continue;
+    }
+    if (std::abs(dt - reference_dt) > 1e-6) {
+      return SplineKnotMode::NonUniform;
+    }
+  }
+  return SplineKnotMode::Uniform;
+}
+
 double BSplineTrajectory::clamp_stamp(double stamp) const {
-  if (control_points_.empty()) {
+  if (empty()) {
     return stamp;
   }
   return std::clamp(stamp, start_time(), end_time());
 }
 
+std::vector<SplineControlPoint> BSplineTrajectory::control_points_from_layout() const {
+  std::vector<SplineControlPoint> cps;
+  if (!layout_) {
+    return cps;
+  }
+
+  cps.reserve(layout_->controls().size());
+  const gtsam::Values* values = layout_values_ ? layout_values_.get() : nullptr;
+  for (const auto& state : layout_->controls()) {
+    cps.push_back(make_control_point(state, values));
+  }
+  return cps;
+}
+
+SplineSensorId BSplineTrajectory::layout_sensor_id() const {
+  if (layout_ && layout_->sensor_model(SplineSensorId::Lidar).has_value()) {
+    return SplineSensorId::Lidar;
+  }
+  return SplineSensorId::Imu;
+}
+
+std::optional<TrajectorySample> BSplineTrajectory::sample_from_layout(double stamp) const {
+  if (!layout_ || !evaluator_) {
+    return std::nullopt;
+  }
+
+  const SplineSensorId sensor = layout_sensor_id();
+  const auto support = layout_->support_at(stamp, sensor);
+  if (!support) {
+    return std::nullopt;
+  }
+
+  const gtsam::Values empty_values;
+  const gtsam::Values& values = layout_values_ ? *layout_values_ : empty_values;
+  const gtsam::Pose3 pose = evaluator_->eval_pose(values, *support, sensor);
+  const Eigen::Vector3d velocity = evaluator_->eval_world_velocity(values, *support, sensor);
+  const Eigen::Vector3d acceleration = evaluator_->eval_world_acceleration(values, *support, sensor);
+  const Eigen::Quaterniond q(pose.rotation().toQuaternion());
+
+  TrajectorySample sample;
+  sample.stamp = stamp;
+  sample.pose = Eigen::Isometry3d::Identity();
+  sample.pose.matrix() = pose.matrix();
+  sample.vel = velocity;
+  sample.acc = acceleration;
+  sample.yaw = unwrap_yaw(q);
+  sample.sigma = 0.0;
+  return sample;
+}
+
 BSplineTrajectory::PoseBlend BSplineTrajectory::evaluate_pose_blend(double stamp) const {
-  if (control_points_.size() < 4) {
+  if (control_points_.size() < 4 || knots_.size() < control_points_.size() + 4) {
     return evaluate_linear_blend(stamp);
   }
   return evaluate_bspline_blend(stamp);

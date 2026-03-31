@@ -3,6 +3,10 @@
 > 规则：任何代码改动必须在这里记录，并包含 IAP-RQ-XXX。
 
 ## Unreleased
+- feat(dev-ct-trajectory-explicit-knots): IAP-RQ-300 / IAP-RQ-410 — upgrade `BSplineTrajectory` to treat explicit-knot snapshots/layouts as the primary adapter input.
+  - Added `BSplineTrajectory::set_snapshot(...)` and `set_layout(...)`, so the planner/viewer trajectory adapter can now consume an explicit-knot `SplineWindowSnapshot` or a `SplineStateLayout + Values` snapshot directly.
+  - `sample() / latest_sample() / sample_range() / clone_window() / knot_vector()` now prefer the explicit-knot snapshot/layout state, while the old `set_control_points()` path only remains as a compatibility wrapper that rebuilds a snapshot and forwards to the new path.
+  - `ContinuousTrajectoryView::SplineWindowSnapshot` is now documented as the adapter boundary for layout-backed publication as well, keeping planner/viewer-facing semantics unchanged while the odometry runtime still uses the old publication call site.
 - feat(dev-ct-spline-core): IAP-RQ-300 / IAP-RQ-410 — add the first explicit-knot spline core types without switching the odometry runtime yet.
   - Added `SplineSensorModel`, `SplineLocalSupport`, `SplineStateLayout`, and `SplineEvaluator` as the first unified spline-native core for explicit knots, sensor time offsets, sensor extrinsics, and span-local basis queries.
   - `SplineStateLayout::support_at()` now resolves the active cubic span directly from the explicit knot vector instead of inferring it from a nominal segment duration, while `SplineEvaluator` provides uniform-cubic `basis / basis_d1 / basis_d2 / pose / world velocity / world acceleration`.
