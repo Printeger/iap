@@ -165,6 +165,12 @@
   - `IntegratedBSplineGICPFactor` 现已新增 profiling stats 与 linearization check 入口，用于后续解析 Jacobian 的基线校验。
   - CT LiDAR target tree 现已统一改为从 `voxel_points()` 导出的 `PointCloud` 构建，避免 `KdTree2<iVox>` 的 traits 不稳定路径。
   - 新增 `test_bspline_gicp_factor.cpp`，覆盖 LiDAR factor 的误差响应、linearization check 有效性和 profiling stats 行为。
+- 2026-03-31: IAP-RQ-300 / IAP-RQ-410
+  - 已开始按 `ct-iap_spec.md` 执行 `Commit 4`，先只切 IMU factor 主路径，不触碰 GNSS / LiDAR 因子。
+  - 新增 `SplineStampContext` 和 `IntegratedSplineIMUFactor`；IMU 因子主逻辑不再以 `measurement_u / segment_duration / finite_difference_dt` 为接口，而是改为持有 `SplineLocalSupport + SplineStateLayout + SplineEvaluator`。
+  - `IntegratedBSplineIMUFactor` 旧构造函数仍保留，但已收敛成 legacy wrapper：内部会临时构造兼容 layout/context 并转调新的 evaluator-driven 实现。
+  - `OdometryEstimationBSpline` 现已为每个 active segment 构建轻量 `SplineStateLayout`，并通过 `support_at(sample.stamp, Imu)` 装配 IMU factor，确保 sample-time 查询入口统一到 spline-native support。
+  - IMU numeric Jacobian 仍为数值形式，但现在围绕 active control poses 直接扰动 `Values`，残差中的 basis / pose / velocity / acceleration 查询统一来自 `SplineEvaluator`。
 - 2026-03-28: IAP-RQ-020 / IAP-RQ-300 / IAP-RQ-410
   - 已开始按 `docs/dev_ct/SLAM_FINISH_PLAN.md` 执行 `M1 / WP1`，先收口 fixed-lag 主状态边界。
   - `OdometryEstimationBSpline::ActiveSplineMarginalPrior` 现在会结构化快照 boundary pose、boundary auxiliary index，以及对应的 velocity / clock state。

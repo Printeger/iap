@@ -3,6 +3,10 @@
 > 规则：任何代码改动必须在这里记录，并包含 IAP-RQ-XXX。
 
 ## Unreleased
+- feat(dev-ct-imu-spline-native): IAP-RQ-300 / IAP-RQ-410 — switch the IMU factor main path to spline-native support/evaluator queries while retaining the legacy wrapper.
+  - Added `SplineStampContext` plus the new `IntegratedSplineIMUFactor`, so the IMU sample factor no longer treats `measurement_u / segment_duration / finite_difference_dt` as its primary runtime interface and instead predicts pose/gyro/accel from `SplineLocalSupport + SplineEvaluator`.
+  - `IntegratedBSplineIMUFactor` now remains only as a compatibility wrapper that builds a temporary legacy explicit-knot layout and forwards to the new evaluator-driven path.
+  - `OdometryEstimationBSpline` now creates a per-segment IMU `SplineStateLayout` and assembles IMU factors via `layout->support_at(sample.stamp, Imu)`, while leaving GNSS/LiDAR factor paths untouched in this commit.
 - feat(dev-ct-window-manager): IAP-RQ-300 / IAP-RQ-410 — upgrade the B-spline control window and registry representation toward explicit-knot active-window management.
   - `BSplineControlWindow` now owns `std::vector<BSplineControlPointState>` plus explicit `knots`, and adds `seed_uniform`, `seed_with_knots`, `extend_to`, `support_at`, and `supports_in_range` while keeping `initialize / advance / evaluate / keys / poses` as legacy-compatible wrappers.
   - `BSplineFixedLagSegmentState` and `BSplineMarginalizationSegmentState` now carry `span_begin_idx / span_end_idx / active_control_indices` in addition to the old fixed `control_indices` compatibility field, so the fixed-lag registry can describe multi-span active-control sets instead of only one `array<4>` segment view.

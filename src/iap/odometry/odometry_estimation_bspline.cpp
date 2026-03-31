@@ -566,6 +566,50 @@ std::vector<OdometryEstimationBSpline::ActiveSplineIMUSample> OdometryEstimation
   return samples;
 }
 
+std::shared_ptr<const iap::SplineStateLayout> OdometryEstimationBSpline::create_segment_imu_layout(
+  const ActiveSplineSegmentConstraint& segment) const {
+  auto layout = std::make_shared<iap::SplineStateLayout>();
+
+  std::vector<iap::BSplineControlPointState> controls;
+  controls.reserve(iap::kBSplineControlPointCount);
+  const auto& buffered_states = fixed_lag_registry_.control_buffer().states();
+
+  for (const auto control_index : segment.control_indices) {
+    const auto it = std::find_if(buffered_states.begin(), buffered_states.end(), [&](const auto& state) {
+      return state.index == control_index;
+    });
+    if (it == buffered_states.end()) {
+      return nullptr;
+    }
+    controls.push_back(*it);
+  }
+
+  const double span_start = segment.stamp;
+  const double span_end = std::max(segment.scan_end, segment.stamp + 1e-3);
+  layout->set_controls(std::move(controls));
+  layout->set_knots({
+    span_start,
+    span_start,
+    span_start,
+    span_start,
+    span_end,
+    span_end,
+    span_end,
+    span_end,
+  });
+
+  // Commit 4 compatibility note:
+  // The active spline control poses still live in the LiDAR frame, so the IMU
+  // sensor slot stores the inverse extrinsic here to let the current evaluator
+  // recover world->imu queries without rewriting sensor semantics yet.
+  iap::SplineSensorModel imu_model;
+  imu_model.id = iap::SplineSensorId::Imu;
+  imu_model.T_sensor_imu = Eigen::Isometry3d(T_imu_lidar.matrix());
+  layout->set_sensor_model(iap::SplineSensorId::Imu, imu_model);
+
+  return layout;
+}
+
 std::vector<iap::GnssEpoch> OdometryEstimationBSpline::consume_segment_gnss_epochs(
   double segment_start,
   double segment_end) {
@@ -1367,20 +1411,31 @@ EstimationFrame::ConstPtr OdometryEstimationBSpline::insert_frame_ct_lidar(
     pipeline_timing.graph_velocity_factor_ms += elapsed_ms(t_graph_velocity_start, Clock::now());
 
     const auto t_imu_factor_start = Clock::now();
+    const auto segment_imu_layout = create_segment_imu_layout(segment);
     for (const auto& imu_sample : segment.imu_samples) {
-      auto imu_factor = std::make_shared<iap::IntegratedBSplineIMUFactor>(
-        segment_keys,
+      if (!segment_imu_layout) {
+        continue;
+      }
+
+      const auto support = segment_imu_layout->support_at(imu_sample.stamp, iap::SplineSensorId::Imu);
+      if (!support) {
+        continue;
+      }
+
+      iap::SplineStampContext ctx;
+      ctx.support = *support;
+      ctx.sensor_id = iap::SplineSensorId::Imu;
+
+      auto imu_factor = std::make_shared<iap::IntegratedSplineIMUFactor>(
+        ctx,
         gyro_bias_key,
         accel_bias_key,
         gravity_key,
-        imu_sample.u,
-        std::max(1e-3, segment.scan_end - segment.stamp),
         imu_sample.angular_vel,
         imu_sample.linear_acc,
-        gtsam::Pose3(T_lidar_imu.matrix()),
         imu_ct_trans_inf_scale_,
         imu_ct_rot_inf_scale_,
-        trajectory_params_.finite_difference_dt);
+        segment_imu_layout);
       graph.add(imu_factor);
       if (marginalization_partition.should_marginalize_factor(
             make_key_vector(segment_keys, {gyro_bias_key, accel_bias_key, gravity_key}))) {
