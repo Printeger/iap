@@ -3,6 +3,9 @@
 > 规则：任何代码改动必须在这里记录，并包含 IAP-RQ-XXX。
 
 ## Unreleased
+- fix(dev-ct-kernel-target-freeze): IAP-RQ-020 / IAP-RQ-300 / IAP-RQ-410 — freeze runtime global-target handles at append time so historical CT LiDAR constraints stop tracking the mutable rolling target.
+  - `OdometryEstimationBSpline::create_active_target_reference()` now clones the current `ct_target_ivox_` into a frozen `iVox` snapshot for runtime `GLOBAL_IVOX_REFERENCE`; historical active segments therefore keep the target they were born with instead of observing later target insertions through a shared mutable handle.
+  - Diagnostic collection still keeps the latest shared handle semantics, but runtime `GLOBAL_IVOX_REFERENCE` no longer aliases the live rolling target object.
 - fix(dev-ct-kernel-target-ownership): IAP-RQ-020 / IAP-RQ-300 / IAP-RQ-410 — tighten the shared-target ownership path so target changes trigger explicit incremental re-add instead of metadata-only drift.
   - `ActiveSplineSegmentConstraint` no longer keeps mutable `target_snapshot / target_tree` mirrors; segments freeze a single `target_handle` at append time and derive CPU factor target state from that handle on demand.
   - `IntegratedBSplineGICPFactorGPUKernel` now stores target identity/revision internally, exposes `target_matches(...)` and `rebind_target(...)`, and accepts shared target ownership directly through `ISharedTargetHandle` or `SharedTargetGpuResources`.

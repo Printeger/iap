@@ -84,6 +84,10 @@
   - 这让当前 batch-compatible 求解壳在“图组织方式”上更接近 `README_REFACTOR_CT_SOLVER` 所要求的 GLIM-style local-domain / incremental fixed-lag 路线，即使 authoritative long-lived solver 仍未最终替换完成。
 
 - 2026-03-31: IAP-RQ-020 / IAP-RQ-300 / IAP-RQ-410
+  - `OdometryEstimationBSpline::create_active_target_reference()` 现在会在 runtime `GLOBAL_IVOX_REFERENCE` 下把当前 `ct_target_ivox_` 克隆成冻结的 `iVox` snapshot；因此新进入窗口的 segment 只在 append 时拿一次 target，历史 active segments 不再通过 shared handle 间接跟踪后续 target 插入。
+  - 这让 shared handle 继续承担 identity/revision / GPU resource 元数据语义，但运行态约束对象看到的是固定 target，从而先把 target 生命周期稳定住。
+
+- 2026-03-31: IAP-RQ-020 / IAP-RQ-300 / IAP-RQ-410
   - `BSplineIncrementalSolverSkeleton` 现已开始按稳定的 solve-domain segment id（`auxiliary_index`）而不是临时 ordinal 跟踪 active/new/retired segments；这让 KERNEL authoritative 路径可以按稳定 owner 维护 local-domain segment-local factor inventory。
   - `OdometryEstimationBSpline` 现已为 authoritative `CT_LIDAR_GPU + KERNEL` 路径维护 `incremental_segment_factor_indices_` 与 `incremental_prior_factor_indices_`：retired/replaced solve-domain segment 会显式 remove 对应 smoother factor indices，而仍然活跃的 solve-domain segment-local LiDAR / velocity / IMU / GNSS factors 则不会在每帧被整批 replace。
   - 同一轮 headless 长包验证现已跑到 400+ frame，期间未再出现 `key "e0"`、`ValuesKeyDoesNotExist`、`failed to build bspline marginal survivor prior` 或 `authoritative incremental update failed`；这说明 shared-state / carried-prior 的阻断性 missing-key failure 已不再打断 KERNEL authoritative 路径，但 GNSS 后段 `factor_count = 0` 的现象仍需继续验收解释。

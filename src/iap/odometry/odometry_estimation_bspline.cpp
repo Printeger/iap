@@ -137,6 +137,21 @@ const char* to_string(iap::IntegratedBSplineGICPFactor::JacobianMode mode) {
   return "unknown";
 }
 
+std::shared_ptr<gtsam_points::iVox> clone_target_snapshot(
+  const gtsam_points::iVox& source,
+  const OdometryEstimationCPUParams& params) {
+  auto snapshot = std::make_shared<gtsam_points::iVox>(params.ivox_resolution);
+  snapshot->voxel_insertion_setting().set_min_dist_in_cell(params.ivox_min_dist);
+  snapshot->set_lru_horizon(params.lru_thresh);
+  snapshot->set_neighbor_voxel_mode(1);
+
+  auto target_cpu_points = source.voxel_data();
+  if (target_cpu_points && target_cpu_points->size()) {
+    snapshot->insert(*target_cpu_points);
+  }
+  return snapshot;
+}
+
 #ifdef GTSAM_POINTS_USE_CUDA
 std::shared_ptr<const iap::SharedTargetGpuResources> build_shared_target_gpu_resources(
   const std::shared_ptr<const gtsam_points::iVox>& target_snapshot,
@@ -537,10 +552,13 @@ OdometryEstimationBSpline::ActiveSplineTargetReference OdometryEstimationBSpline
   const auto t_start = Clock::now();
   const auto* cpu_params = static_cast<const OdometryEstimationCPUParams*>(params.get());
   ActiveSplineTargetReference target_ref;
+  const bool freeze_runtime_global_reference = !lidar_collect_window_results();
 
   if (lidar_target_mode_ == BSplineLidarTargetMode::GLOBAL_IVOX_REFERENCE && ct_target_ivox_ &&
       !ct_target_ivox_->voxel_points().empty()) {
-    target_ref.target_snapshot = ct_target_ivox_;
+    target_ref.target_snapshot = freeze_runtime_global_reference
+                                   ? clone_target_snapshot(*ct_target_ivox_, *cpu_params)
+                                   : ct_target_ivox_;
     target_ref.target_tree = target_ref.target_snapshot;
     target_ref.mode = BSplineLidarTargetMode::GLOBAL_IVOX_REFERENCE;
     target_ref.point_count = target_ref.target_snapshot->voxel_points().size();
@@ -617,7 +635,11 @@ OdometryEstimationBSpline::ActiveSplineTargetReference OdometryEstimationBSpline
     return target_ref;
   }
 
-  target_ref.target_snapshot = global_reference_available ? ct_target_ivox_ : snapshot;
+  target_ref.target_snapshot = global_reference_available
+                                 ? (freeze_runtime_global_reference
+                                      ? clone_target_snapshot(*ct_target_ivox_, *cpu_params)
+                                      : ct_target_ivox_)
+                                 : snapshot;
   target_ref.contributing_frames = inserted ? target_ref.snapshot_frame_count : 0;
   target_ref.target_tree = target_ref.target_snapshot;
   target_ref.mode = BSplineLidarTargetMode::GLOBAL_IVOX_REFERENCE;

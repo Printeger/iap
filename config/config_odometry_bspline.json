@@ -47,7 +47,9 @@
     "max_correspondence_distance": 1.5,
     // Target strategy:
     //   ACTIVE_WINDOW_SNAPSHOT = freeze a local target built from the most recent active frames
-    //   GLOBAL_IVOX_REFERENCE  = use the rolling ct_target_ivox_ directly as factor target
+    //   GLOBAL_IVOX_REFERENCE  = use the current global ivox as the source of a factor target
+    //                            runtime path freezes a per-segment snapshot at append time,
+    //                            while diagnostic collection may still inspect the latest handle
     // Speed-test profile:
     //   prefer the rolling global reference to avoid rebuilding a frozen
     //   active-window snapshot target every update.
