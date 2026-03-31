@@ -92,3 +92,47 @@ TEST(CTIncrementalSolverSkeleton, TracksNewAndRetiredKeysAcrossSolveDomains) {
   EXPECT_FALSE(second_delta.new_values.exists(iap::bspline_control_point_key(1)));
   EXPECT_DOUBLE_EQ(second_delta.new_stamps.at(iap::bspline_ecef_origin_key()), 3.0);
 }
+
+TEST(CTIncrementalSolverSkeleton, OwnsPersistentSegmentAndPriorFactorIndices) {
+  std::vector<iap::BSplineControlPointState> control_states = {
+    {0, 0.0, translated_pose(0.0)},
+    {1, 1.0, translated_pose(1.0)},
+    {2, 2.0, translated_pose(2.0)},
+    {3, 3.0, translated_pose(3.0)},
+    {4, 4.0, translated_pose(4.0)},
+  };
+  std::vector<iap::BSplineFixedLagSegmentState> segments = {
+    {1.0, 2.0, {0, 1, 2, 3}, 1},
+    {2.0, 3.0, {1, 2, 3, 4}, 2},
+  };
+
+  gtsam::Values values;
+  for (const auto& state : control_states) {
+    values.insert(iap::bspline_control_point_key(state.index), state.pose);
+  }
+  values.insert(iap::bspline_velocity_key(2), gtsam::Vector3(2.0, 0.0, 0.0));
+
+  iap::BSplineFixedLagSharedState shared_state;
+  shared_state.gyro_bias = gtsam::Vector3::Zero();
+  shared_state.accel_bias = gtsam::Vector3::Zero();
+  shared_state.gravity = gtsam::Vector3(0.0, 0.0, 9.81);
+
+  iap::BSplineIncrementalSolverSkeleton skeleton;
+  const auto domain = iap::BSplineSolveDomain::from_segments(segments, 0);
+  const auto delta = skeleton.prepare_update(domain, control_states, shared_state, values, 3.0);
+
+  auto factors_to_remove = skeleton.begin_update(delta);
+  EXPECT_TRUE(factors_to_remove.empty());
+  EXPECT_FALSE(skeleton.segment_has_persistent_factors(2));
+
+  skeleton.commit_update(
+    gtsam::FactorIndices{10, 11, 12},
+    std::vector<std::optional<std::size_t>>{std::size_t(2), std::size_t(2), std::nullopt});
+  EXPECT_TRUE(skeleton.segment_has_persistent_factors(2));
+
+  skeleton.release_segment_factors(2, &factors_to_remove);
+  ASSERT_EQ(factors_to_remove.size(), 2U);
+  EXPECT_EQ(factors_to_remove[0], 10U);
+  EXPECT_EQ(factors_to_remove[1], 11U);
+  EXPECT_FALSE(skeleton.segment_has_persistent_factors(2));
+}

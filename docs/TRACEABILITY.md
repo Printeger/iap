@@ -84,6 +84,10 @@
   - 这让当前 batch-compatible 求解壳在“图组织方式”上更接近 `README_REFACTOR_CT_SOLVER` 所要求的 GLIM-style local-domain / incremental fixed-lag 路线，即使 authoritative long-lived solver 仍未最终替换完成。
 
 - 2026-03-31: IAP-RQ-020 / IAP-RQ-300 / IAP-RQ-410
+  - `BSplineIncrementalSolverSkeleton` 现在不仅跟踪 solve-domain 的 active/new/retired keys/segments，还直接接管 persistent segment factor indices 与 prior factor indices；`begin_update(...) / release_segment_factors(...) / commit_update(...)` 把 authoritative incremental add-remove bookkeeping 从 `OdometryEstimationBSpline` 主热路径里抽走了。
+  - `OdometryEstimationBSpline::insert_frame_ct_lidar()` 现已直接迭代 `solve_domain.active_segments()`，并通过上述 solver-owner API 决定 segment 是否需要 persistent reuse / explicit re-add；因此 `BSplineSolveDomain` 不再只是“加了类和计数日志”，而是已经真正参与 hot path 的 runtime ownership。
+
+- 2026-03-31: IAP-RQ-020 / IAP-RQ-300 / IAP-RQ-410
   - 生产路径中的 `BUCKET` 文件已经删除，因此这轮把“重复 linearize/error pass”收敛落实在仍在服役的 `IntegratedBSplineGICPFactorGPUKernel` 上：factor 现在会按四个控制点位姿缓存最近一次 evaluation，`linearize()` 后若 `error()` 在同一状态上调用，将直接复用同一次 GPU evaluation 结果。
   - 这样先去掉了一条 bucket-era 的重复求值模式，降低了 KERNEL 路径的性能和数值调试复杂度，而不改变残差数学。
 
@@ -93,7 +97,7 @@
 
 - 2026-03-31: IAP-RQ-020 / IAP-RQ-300 / IAP-RQ-410
   - `BSplineIncrementalSolverSkeleton` 现已开始按稳定的 solve-domain segment id（`auxiliary_index`）而不是临时 ordinal 跟踪 active/new/retired segments；这让 KERNEL authoritative 路径可以按稳定 owner 维护 local-domain segment-local factor inventory。
-  - `OdometryEstimationBSpline` 现已为 authoritative `CT_LIDAR_GPU + KERNEL` 路径维护 `incremental_segment_factor_indices_` 与 `incremental_prior_factor_indices_`：retired/replaced solve-domain segment 会显式 remove 对应 smoother factor indices，而仍然活跃的 solve-domain segment-local LiDAR / velocity / IMU / GNSS factors 则不会在每帧被整批 replace。
+  - 这层 authoritative inventory 现在已经进一步下沉到 `BSplineIncrementalSolverSkeleton` 自身，不再由 `OdometryEstimationBSpline` 直接维护 `incremental_segment_factor_indices_ / incremental_prior_factor_indices_` 成员。
   - 同一轮 headless 长包验证现已跑到 400+ frame，期间未再出现 `key "e0"`、`ValuesKeyDoesNotExist`、`failed to build bspline marginal survivor prior` 或 `authoritative incremental update failed`；这说明 shared-state / carried-prior 的阻断性 missing-key failure 已不再打断 KERNEL authoritative 路径，但 GNSS 后段 `factor_count = 0` 的现象仍需继续验收解释。
 
 - 2026-03-31: IAP-RQ-020 / IAP-RQ-300 / IAP-RQ-410

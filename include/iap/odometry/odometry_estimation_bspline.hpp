@@ -322,8 +322,6 @@ class OdometryEstimationBSpline : public OdometryEstimationCPU {
     std::weak_ptr<iap::ISharedTargetHandle>,
     SharedTargetHandleCacheKeyHash>
     shared_target_handle_cache_;
-  std::unordered_map<std::size_t, gtsam::FactorIndices> incremental_segment_factor_indices_;
-  gtsam::FactorIndices incremental_prior_factor_indices_;
   bool lidar_baseline_csv_header_written_ = false;
   bool lidar_baseline_csv_first_row_logged_ = false;
 #ifdef GTSAM_POINTS_USE_CUDA

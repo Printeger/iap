@@ -24,6 +24,7 @@
 #include <spdlog/spdlog.h>
 
 #include <limits>
+#include <optional>
 #include <iap/common/cloud_covariance_estimation.hpp>
 #include <iap/common/imu_integration.hpp>
 #include <iap/odometry/initial_state_estimation.hpp>
@@ -529,8 +530,6 @@ void OdometryEstimationBSpline::initialize_control_window(
   pending_segment_gnss_epochs_.clear();
   ct_target_revision_ = 0;
   shared_target_handle_cache_.clear();
-  incremental_segment_factor_indices_.clear();
-  incremental_prior_factor_indices_.clear();
   reset_bspline_incremental_smoother();
 }
 
@@ -891,7 +890,7 @@ void OdometryEstimationBSpline::distribute_pending_gnss_epochs_to_active_segment
       segment_it->cached_gnss_pr_factors.clear();
       segment_it->cached_gnss_dop_factors.clear();
       segment_it->gnss_factor_revision = 0;
-      if (incremental_segment_factor_indices_.count(segment_it->auxiliary_index) > 0) {
+      if (incremental_solver_skeleton_.segment_has_persistent_factors(segment_it->auxiliary_index)) {
         segment_it->force_incremental_readd = true;
       }
     }
@@ -1531,8 +1530,8 @@ EstimationFrame::ConstPtr OdometryEstimationBSpline::insert_frame_ct_lidar(
     pipeline_timing.incremental_retired_key_count = delta.retired_keys.size();
     return delta;
   }();
-  const auto solve_segment_ordinals = solve_domain.active_segment_ordinals();
-  const std::size_t current_segment_ordinal = solve_segment_ordinals.back();
+  const auto& solve_domain_segments = solve_domain.active_segments();
+  const std::size_t current_segment_ordinal = solve_domain_segments.back().ordinal;
   const bool use_authoritative_incremental_solver =
     use_gpu_lidar && lidar_gpu_backend_ == BSplineGpuLidarBackend::KERNEL;
   const auto is_newly_active_segment_id = [&](std::size_t segment_id) {
@@ -1585,8 +1584,8 @@ EstimationFrame::ConstPtr OdometryEstimationBSpline::insert_frame_ct_lidar(
   };
   std::vector<ActiveClockState> seeded_clock_states;
   if (fixed_lag_registry_.shared_state().gnss_anchor_initialized) {
-    for (const auto segment_ordinal : solve_segment_ordinals) {
-      const auto& segment = fixed_lag_registry_.segments()[segment_ordinal];
+    for (const auto& solve_domain_segment : solve_domain_segments) {
+      const auto& segment = fixed_lag_registry_.segments()[solve_domain_segment.ordinal];
       if (segment.gnss_epochs.empty()) {
         continue;
       }
@@ -1630,47 +1629,31 @@ EstimationFrame::ConstPtr OdometryEstimationBSpline::insert_frame_ct_lidar(
     solve_domain.end_time());
   gtsam::FactorIndices factors_to_remove;
   if (use_authoritative_incremental_solver) {
-    factors_to_remove = incremental_prior_factor_indices_;
-    incremental_prior_factor_indices_.clear();
-
-    for (const auto retired_segment_id : incremental_delta.retired_segment_ids) {
-      const auto factor_it = incremental_segment_factor_indices_.find(retired_segment_id);
-      if (factor_it == incremental_segment_factor_indices_.end()) {
-        continue;
-      }
-
-      factors_to_remove.insert(
-        factors_to_remove.end(),
-        factor_it->second.begin(),
-        factor_it->second.end());
-      incremental_segment_factor_indices_.erase(factor_it);
-    }
+    factors_to_remove = incremental_solver_skeleton_.begin_update(incremental_delta);
   }
-  std::vector<std::size_t> added_segment_factor_owners;
+  std::vector<std::optional<std::size_t>> added_factor_owners;
   auto remember_added_segment_factor = [&](std::size_t segment_id) {
     if (use_authoritative_incremental_solver) {
-      added_segment_factor_owners.push_back(segment_id);
+      added_factor_owners.emplace_back(segment_id);
+    }
+  };
+  auto remember_added_prior_factor = [&]() {
+    if (use_authoritative_incremental_solver) {
+      added_factor_owners.emplace_back(std::nullopt);
     }
   };
   const auto t_graph_build_start = Clock::now();
   const bool enable_lidar_profile_surface =
     lidar_factor_profile_ || lidar_warn_degeneracy_ || lidar_export_baseline_csv_;
-  for (const auto segment_ordinal : solve_segment_ordinals) {
-    auto& segment = fixed_lag_registry_.segments()[segment_ordinal];
+  for (const auto& solve_domain_segment : solve_domain_segments) {
+    auto& segment = fixed_lag_registry_.segments()[solve_domain_segment.ordinal];
     const bool segment_newly_active =
       use_authoritative_incremental_solver && is_newly_active_segment_id(segment.auxiliary_index);
     bool segment_force_readd = use_authoritative_incremental_solver && segment.force_incremental_readd;
     const gtsam::Key velocity_key = iap::bspline_velocity_key(segment.auxiliary_index);
 
     if (segment_force_readd) {
-      const auto factor_it = incremental_segment_factor_indices_.find(segment.auxiliary_index);
-      if (factor_it != incremental_segment_factor_indices_.end()) {
-        factors_to_remove.insert(
-          factors_to_remove.end(),
-          factor_it->second.begin(),
-          factor_it->second.end());
-        incremental_segment_factor_indices_.erase(factor_it);
-      }
+      incremental_solver_skeleton_.release_segment_factors(segment.auxiliary_index, &factors_to_remove);
     }
 
     if (!values.exists(velocity_key)) {
@@ -1718,7 +1701,7 @@ EstimationFrame::ConstPtr OdometryEstimationBSpline::insert_frame_ct_lidar(
         pipeline_timing.graph_lidar_factor_reused_attach_ms += elapsed_ms(t_lidar_attach_start, t_lidar_attach_end);
       }
 
-      if (segment_ordinal == current_segment_ordinal) {
+      if (solve_domain_segment.ordinal == current_segment_ordinal) {
         current_cpu_factor = factor;
       }
       pipeline_timing.graph_lidar_factor_ms += elapsed_ms(t_graph_lidar_start, Clock::now());
@@ -1754,18 +1737,13 @@ EstimationFrame::ConstPtr OdometryEstimationBSpline::insert_frame_ct_lidar(
       if (use_authoritative_incremental_solver &&
           !segment_newly_active &&
           !cache_hit &&
-          incremental_segment_factor_indices_.count(segment.auxiliary_index) > 0) {
-        const auto factor_it = incremental_segment_factor_indices_.find(segment.auxiliary_index);
-        factors_to_remove.insert(
-          factors_to_remove.end(),
-          factor_it->second.begin(),
-          factor_it->second.end());
-        incremental_segment_factor_indices_.erase(factor_it);
+          incremental_solver_skeleton_.segment_has_persistent_factors(segment.auxiliary_index)) {
+        incremental_solver_skeleton_.release_segment_factors(segment.auxiliary_index, &factors_to_remove);
         segment_force_readd = true;
       }
 
       const bool segment_has_persistent_factors =
-        incremental_segment_factor_indices_.count(segment.auxiliary_index) > 0;
+        use_authoritative_incremental_solver && incremental_solver_skeleton_.segment_has_persistent_factors(segment.auxiliary_index);
       const bool segment_should_add =
         !use_authoritative_incremental_solver || !segment_has_persistent_factors || segment_newly_active || segment_force_readd;
 
@@ -1782,7 +1760,7 @@ EstimationFrame::ConstPtr OdometryEstimationBSpline::insert_frame_ct_lidar(
       if (cache_hit && !target_refreshed && segment_should_add) {
         pipeline_timing.graph_lidar_factor_reused_attach_ms += elapsed_ms(t_lidar_attach_start, t_lidar_attach_end);
       }
-      if (segment_ordinal == current_segment_ordinal) {
+      if (solve_domain_segment.ordinal == current_segment_ordinal) {
         current_gpu_kernel_factor = factor;
       }
       pipeline_timing.graph_lidar_factor_ms += elapsed_ms(t_graph_lidar_start, Clock::now());
@@ -1795,7 +1773,7 @@ EstimationFrame::ConstPtr OdometryEstimationBSpline::insert_frame_ct_lidar(
     const auto t_graph_velocity_start = Clock::now();
     auto velocity_factor = get_or_create_velocity_factor(segment);
     const bool segment_has_persistent_factors =
-      use_authoritative_incremental_solver && incremental_segment_factor_indices_.count(segment.auxiliary_index) > 0;
+      use_authoritative_incremental_solver && incremental_solver_skeleton_.segment_has_persistent_factors(segment.auxiliary_index);
     const bool segment_should_add =
       !use_authoritative_incremental_solver || !segment_has_persistent_factors || segment_newly_active || segment_force_readd;
     if (segment_should_add) {
@@ -1940,11 +1918,13 @@ EstimationFrame::ConstPtr OdometryEstimationBSpline::insert_frame_ct_lidar(
       iap::bspline_control_point_key(solve_domain_control_states.front().index),
       solve_domain_control_states.front().pose,
       anchor_noise);
+    remember_added_prior_factor();
     if (solve_domain_control_states.size() >= 2) {
       graph.emplace_shared<gtsam::PriorFactor<gtsam::Pose3>>(
         iap::bspline_control_point_key(solve_domain_control_states[1].index),
         solve_domain_control_states[1].pose,
       anchor_noise);
+      remember_added_prior_factor();
     }
   }
   pipeline_timing.carried_prior_attach_ms = elapsed_ms(t_carried_prior_attach_start, Clock::now());
@@ -1957,10 +1937,12 @@ EstimationFrame::ConstPtr OdometryEstimationBSpline::insert_frame_ct_lidar(
       iap::bspline_control_point_key(pred_a.index),
       pred_a.pose,
       pred_noise);
+    remember_added_prior_factor();
     graph.emplace_shared<gtsam::PriorFactor<gtsam::Pose3>>(
       iap::bspline_control_point_key(pred_b.index),
       pred_b.pose,
       pred_noise);
+    remember_added_prior_factor();
   }
   pipeline_timing.graph_prediction_prior_ms = elapsed_ms(t_graph_prediction_prior_start, Clock::now());
 
@@ -1974,6 +1956,7 @@ EstimationFrame::ConstPtr OdometryEstimationBSpline::insert_frame_ct_lidar(
       solve_domain_control_states[i].pose.between(solve_domain_control_states[i + 1].pose),
       smooth_noise);
     graph.add(smooth_factor);
+    remember_added_prior_factor();
     if (marginalization_partition.should_marginalize_factor(gtsam::KeyVector{key_i, key_j})) {
       marginalization_graph.add(smooth_factor);
     }
@@ -1982,11 +1965,16 @@ EstimationFrame::ConstPtr OdometryEstimationBSpline::insert_frame_ct_lidar(
 
   const auto t_graph_shared_prior_start = Clock::now();
   graph.emplace_shared<gtsam::PriorFactor<gtsam::Vector3>>(gyro_bias_key, shared_state.gyro_bias, imu_bias_noise);
+  remember_added_prior_factor();
   graph.emplace_shared<gtsam::PriorFactor<gtsam::Vector3>>(accel_bias_key, shared_state.accel_bias, imu_bias_noise);
+  remember_added_prior_factor();
   graph.emplace_shared<gtsam::PriorFactor<gtsam::Vector3>>(gravity_key, shared_state.gravity, gravity_noise);
+  remember_added_prior_factor();
   if (shared_state.gnss_anchor_initialized && values.exists(ecef_origin_key) && values.exists(ecef_rot_key)) {
     graph.emplace_shared<gtsam::PriorFactor<gtsam::Vector3>>(ecef_origin_key, shared_state.ecef_origin, gnss_ecef_noise);
+    remember_added_prior_factor();
     graph.emplace_shared<gtsam::PriorFactor<gtsam::Rot3>>(ecef_rot_key, shared_state.ecef_rot, gnss_ecef_rot_noise);
+    remember_added_prior_factor();
   }
   pipeline_timing.graph_shared_prior_ms = elapsed_ms(t_graph_shared_prior_start, Clock::now());
 
@@ -2010,6 +1998,7 @@ EstimationFrame::ConstPtr OdometryEstimationBSpline::insert_frame_ct_lidar(
         boundary_clock,
         clock_prior_noise);
       graph.add(clock_prior);
+      remember_added_prior_factor();
       if (use_clock_boundary_prior) {
         marginalization_graph.add(clock_prior);
       }
@@ -2022,6 +2011,7 @@ EstimationFrame::ConstPtr OdometryEstimationBSpline::insert_frame_ct_lidar(
         dt,
         iap::ClockBetweenFactor::make_noise(dt, gnss_clock_between_params_));
       graph.add(clock_between);
+      remember_added_prior_factor();
       if (marginalization_partition.should_marginalize_factor(
             gtsam::KeyVector{active_clock_states[i - 1].key, active_clock_states[i].key})) {
         marginalization_graph.add(clock_between);
@@ -2046,14 +2036,7 @@ EstimationFrame::ConstPtr OdometryEstimationBSpline::insert_frame_ct_lidar(
         incremental_stamps,
         factors_to_remove);
       const auto new_factor_indices = smoother->getISAM2Result().getNewFactorsIndices();
-      incremental_prior_factor_indices_.clear();
-      for (std::size_t i = 0; i < new_factor_indices.size(); ++i) {
-        if (i < added_segment_factor_owners.size()) {
-          incremental_segment_factor_indices_[added_segment_factor_owners[i]].push_back(new_factor_indices[i]);
-        } else {
-          incremental_prior_factor_indices_.push_back(new_factor_indices[i]);
-        }
-      }
+      incremental_solver_skeleton_.commit_update(new_factor_indices, added_factor_owners);
       values = smoother->calculateEstimate();
     } catch (const std::exception& e) {
       logger->error("bspline ct authoritative incremental update failed: {}", e.what());

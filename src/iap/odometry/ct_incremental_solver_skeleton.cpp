@@ -115,6 +115,8 @@ void BSplineIncrementalSolverSkeleton::reset() {
   last_active_segment_ids_.clear();
   known_keys_.clear();
   last_delta_ = CTSolverLifecycleDelta();
+  segment_factor_indices_.clear();
+  prior_factor_indices_.clear();
 }
 
 CTSolverLifecycleDelta BSplineIncrementalSolverSkeleton::prepare_update(
@@ -193,6 +195,57 @@ CTSolverLifecycleDelta BSplineIncrementalSolverSkeleton::prepare_update(
   last_active_segment_ids_ = delta.active_segment_ids;
   last_delta_ = delta;
   return last_delta_;
+}
+
+gtsam::FactorIndices BSplineIncrementalSolverSkeleton::begin_update(const CTSolverLifecycleDelta& delta) {
+  gtsam::FactorIndices factors_to_remove = prior_factor_indices_;
+  prior_factor_indices_.clear();
+
+  for (const auto retired_segment_id : delta.retired_segment_ids) {
+    release_segment_factors(retired_segment_id, &factors_to_remove);
+  }
+
+  return factors_to_remove;
+}
+
+void BSplineIncrementalSolverSkeleton::release_segment_factors(
+  std::size_t segment_id,
+  gtsam::FactorIndices* factors_to_remove) {
+  if (!factors_to_remove) {
+    return;
+  }
+
+  const auto factor_it = segment_factor_indices_.find(segment_id);
+  if (factor_it == segment_factor_indices_.end()) {
+    return;
+  }
+
+  factors_to_remove->insert(
+    factors_to_remove->end(),
+    factor_it->second.begin(),
+    factor_it->second.end());
+  segment_factor_indices_.erase(factor_it);
+}
+
+bool BSplineIncrementalSolverSkeleton::segment_has_persistent_factors(std::size_t segment_id) const {
+  return segment_factor_indices_.count(segment_id) > 0;
+}
+
+void BSplineIncrementalSolverSkeleton::commit_update(
+  const gtsam::FactorIndices& new_factor_indices,
+  const std::vector<std::optional<std::size_t>>& factor_owners) {
+  if (new_factor_indices.size() != factor_owners.size()) {
+    throw std::runtime_error("BSplineIncrementalSolverSkeleton::commit_update owner/index size mismatch");
+  }
+
+  prior_factor_indices_.clear();
+  for (std::size_t i = 0; i < new_factor_indices.size(); ++i) {
+    if (factor_owners[i].has_value()) {
+      segment_factor_indices_[*factor_owners[i]].push_back(new_factor_indices[i]);
+    } else {
+      prior_factor_indices_.push_back(new_factor_indices[i]);
+    }
+  }
 }
 
 }  // namespace iap

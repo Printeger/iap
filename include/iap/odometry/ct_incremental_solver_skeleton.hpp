@@ -11,6 +11,8 @@
 #include <gtsam/nonlinear/Values.h>
 
 #include <cstddef>
+#include <optional>
+#include <unordered_map>
 #include <vector>
 
 namespace iap {
@@ -47,6 +49,13 @@ class BSplineIncrementalSolverSkeleton {
     const gtsam::Values& authoritative_values,
     double current_stamp);
 
+  gtsam::FactorIndices begin_update(const CTSolverLifecycleDelta& delta);
+  void release_segment_factors(std::size_t segment_id, gtsam::FactorIndices* factors_to_remove);
+  bool segment_has_persistent_factors(std::size_t segment_id) const;
+  void commit_update(
+    const gtsam::FactorIndices& new_factor_indices,
+    const std::vector<std::optional<std::size_t>>& factor_owners);
+
   const CTSolverLifecycleDelta& last_delta() const { return last_delta_; }
 
  private:
@@ -54,6 +63,8 @@ class BSplineIncrementalSolverSkeleton {
   std::vector<std::size_t> last_active_segment_ids_;
   std::vector<gtsam::Key> known_keys_;
   CTSolverLifecycleDelta last_delta_;
+  std::unordered_map<std::size_t, gtsam::FactorIndices> segment_factor_indices_;
+  gtsam::FactorIndices prior_factor_indices_;
 };
 
 }  // namespace iap

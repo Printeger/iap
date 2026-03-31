@@ -3,6 +3,9 @@
 > 规则：任何代码改动必须在这里记录，并包含 IAP-RQ-XXX。
 
 ## Unreleased
+- feat(dev-ct-incremental-owner): IAP-RQ-020 / IAP-RQ-300 / IAP-RQ-410 — move authoritative incremental factor ownership out of `OdometryEstimationBSpline` and into the local-domain solver owner.
+  - `BSplineIncrementalSolverSkeleton` now owns persistent per-segment and prior factor indices, exposes `begin_update(...) / release_segment_factors(...) / commit_update(...)`, and becomes the authoritative owner of incremental add-remove bookkeeping instead of leaving that state in `odometry_estimation_bspline.cpp`.
+  - `OdometryEstimationBSpline::insert_frame_ct_lidar()` now iterates the hot path directly over `solve_domain.active_segments()` and uses the solver-owner API to decide segment persistence / explicit re-add, which makes the local CT solve-domain a true runtime owner instead of a diagnostics-only helper.
 - perf(dev-ct-kernel-eval-cache): IAP-RQ-300 / IAP-RQ-410 — collapse repeated KERNEL factor passes by reusing the latest evaluation for identical control poses.
   - `IntegratedBSplineGICPFactorGPUKernel` now caches the most recent evaluation keyed by the active four control poses and reuses it when `error()` follows `linearize()` on the same state, instead of launching a second identical GPU pass.
   - This does not change factor math, but it removes one of the bucket-era “duplicate linearize/error pass” patterns from the production KERNEL route and makes runtime profiling/debugging simpler.
