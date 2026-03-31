@@ -36,8 +36,37 @@ class IntegratedBSplineGICPFactorGPUKernel : public gtsam::NonlinearFactor {
   EIGEN_MAKE_ALIGNED_OPERATOR_NEW
   using shared_ptr = std::shared_ptr<IntegratedBSplineGICPFactorGPUKernel>;
 
-  struct DeviceControlPose;
+ struct DeviceControlPose;
   struct DeviceKernelStats;
+  struct EvaluationResult {
+    bool valid = false;
+    Eigen::Matrix<float, 24, 24, Eigen::RowMajor> H =
+      Eigen::Matrix<float, 24, 24, Eigen::RowMajor>::Zero();
+    Eigen::Matrix<float, 24, 1> b = Eigen::Matrix<float, 24, 1>::Zero();
+    double total_error = 0.0;
+    int matched_count = 0;
+    int inlier_count = 0;
+    int rejected_distance_count = 0;
+    int rejected_ambiguity_count = 0;
+    int rejected_outlier_count = 0;
+    int rejected_robust_count = 0;
+    int candidate_evaluation_count = 0;
+    int comparative_score_count = 0;
+    double mean_robust_weight = 1.0;
+    double mean_match_distance = 0.0;
+    double max_match_distance = 0.0;
+    double mean_match_score = 0.0;
+    double mean_score_gap = 0.0;
+    double mean_score_ratio = 0.0;
+    double kernel_pose_query_ms = 0.0;
+    double kernel_correspondence_ms = 0.0;
+    double kernel_residual_weight_ms = 0.0;
+    double kernel_reduction_ms = 0.0;
+    double host_sync_ms = 0.0;
+    double host_result_pack_ms = 0.0;
+    double total_ms = 0.0;
+    std::vector<int> matched_target_indices;
+  };
 
   IntegratedBSplineGICPFactorGPUKernel(
     const std::array<gtsam::Key, kBSplineControlPointCount>& keys,
@@ -96,9 +125,8 @@ class IntegratedBSplineGICPFactorGPUKernel : public gtsam::NonlinearFactor {
   std::size_t target_revision() const { return target_revision_; }
 
  private:
-  struct EvaluationResult;
-
   std::array<gtsam::Pose3, kBSplineControlPointCount> control_poses(const gtsam::Values& values) const;
+  bool cached_evaluation_matches(const std::array<gtsam::Pose3, kBSplineControlPointCount>& poses, bool require_hessian) const;
   void bind_target_handle(std::shared_ptr<const iap::ISharedTargetHandle> target_handle);
   void bind_target_gpu_resources(
     std::shared_ptr<const iap::SharedTargetGpuResources> target_gpu_resources,
@@ -106,6 +134,9 @@ class IntegratedBSplineGICPFactorGPUKernel : public gtsam::NonlinearFactor {
   void rebuild_target_gpu();
   void ensure_source_gpu() const;
   EvaluationResult evaluate(const gtsam::Values& values, bool compute_hessian) const;
+  EvaluationResult evaluate_with_control_poses(
+    const std::array<gtsam::Pose3, kBSplineControlPointCount>& poses,
+    bool compute_hessian) const;
   void update_profile(const EvaluationResult& eval, const char* stage) const;
   std::shared_ptr<gtsam::HessianFactor> make_hessian_factor(const EvaluationResult& eval) const;
   std::shared_ptr<IntegratedBSplineGICPFactor> make_cpu_reference_factor(
@@ -148,6 +179,9 @@ class IntegratedBSplineGICPFactorGPUKernel : public gtsam::NonlinearFactor {
 
   mutable std::array<gtsam::Pose3, kBSplineControlPointCount> last_control_poses_;
   mutable bool last_control_poses_valid_ = false;
+  mutable EvaluationResult last_evaluation_;
+  mutable bool last_evaluation_valid_ = false;
+  mutable bool last_evaluation_has_hessian_ = false;
   mutable BSplineLidarFactorProfile last_profile_;
   mutable int last_inlier_count_ = 0;
 };

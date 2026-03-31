@@ -84,6 +84,10 @@
   - 这让当前 batch-compatible 求解壳在“图组织方式”上更接近 `README_REFACTOR_CT_SOLVER` 所要求的 GLIM-style local-domain / incremental fixed-lag 路线，即使 authoritative long-lived solver 仍未最终替换完成。
 
 - 2026-03-31: IAP-RQ-020 / IAP-RQ-300 / IAP-RQ-410
+  - 生产路径中的 `BUCKET` 文件已经删除，因此这轮把“重复 linearize/error pass”收敛落实在仍在服役的 `IntegratedBSplineGICPFactorGPUKernel` 上：factor 现在会按四个控制点位姿缓存最近一次 evaluation，`linearize()` 后若 `error()` 在同一状态上调用，将直接复用同一次 GPU evaluation 结果。
+  - 这样先去掉了一条 bucket-era 的重复求值模式，降低了 KERNEL 路径的性能和数值调试复杂度，而不改变残差数学。
+
+- 2026-03-31: IAP-RQ-020 / IAP-RQ-300 / IAP-RQ-410
   - `OdometryEstimationBSpline::create_active_target_reference()` 现在会在 runtime `GLOBAL_IVOX_REFERENCE` 下把当前 `ct_target_ivox_` 克隆成冻结的 `iVox` snapshot；因此新进入窗口的 segment 只在 append 时拿一次 target，历史 active segments 不再通过 shared handle 间接跟踪后续 target 插入。
   - 这让 shared handle 继续承担 identity/revision / GPU resource 元数据语义，但运行态约束对象看到的是固定 target，从而先把 target 生命周期稳定住。
 

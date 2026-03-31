@@ -173,36 +173,6 @@ struct IntegratedBSplineGICPFactorGPUKernel::DeviceKernelStats {
   float sum_score_ratio = 0.0f;
 };
 
-struct IntegratedBSplineGICPFactorGPUKernel::EvaluationResult {
-  bool valid = false;
-  Eigen::Matrix<float, kStateDim, kStateDim, Eigen::RowMajor> H =
-    Eigen::Matrix<float, kStateDim, kStateDim, Eigen::RowMajor>::Zero();
-  Eigen::Matrix<float, kStateDim, 1> b = Eigen::Matrix<float, kStateDim, 1>::Zero();
-  double total_error = 0.0;
-  int matched_count = 0;
-  int inlier_count = 0;
-  int rejected_distance_count = 0;
-  int rejected_ambiguity_count = 0;
-  int rejected_outlier_count = 0;
-  int rejected_robust_count = 0;
-  int candidate_evaluation_count = 0;
-  int comparative_score_count = 0;
-  double mean_robust_weight = 1.0;
-  double mean_match_distance = 0.0;
-  double max_match_distance = 0.0;
-  double mean_match_score = 0.0;
-  double mean_score_gap = 0.0;
-  double mean_score_ratio = 0.0;
-  double kernel_pose_query_ms = 0.0;
-  double kernel_correspondence_ms = 0.0;
-  double kernel_residual_weight_ms = 0.0;
-  double kernel_reduction_ms = 0.0;
-  double host_sync_ms = 0.0;
-  double host_result_pack_ms = 0.0;
-  double total_ms = 0.0;
-  std::vector<int> matched_target_indices;
-};
-
 namespace {
 
 struct DeviceControlSet {
@@ -704,10 +674,29 @@ void IntegratedBSplineGICPFactorGPUKernel::rebind_target(std::shared_ptr<const i
   bind_target_handle(std::move(target_handle));
   last_profile_ = BSplineLidarFactorProfile();
   last_inlier_count_ = 0;
+  last_evaluation_valid_ = false;
+  last_evaluation_has_hessian_ = false;
 }
 
-IntegratedBSplineGICPFactorGPUKernel::EvaluationResult IntegratedBSplineGICPFactorGPUKernel::evaluate(
-  const gtsam::Values& values,
+bool IntegratedBSplineGICPFactorGPUKernel::cached_evaluation_matches(
+  const std::array<gtsam::Pose3, kBSplineControlPointCount>& poses,
+  bool require_hessian) const {
+  if (!last_evaluation_valid_ || !last_control_poses_valid_) {
+    return false;
+  }
+  if (require_hessian && !last_evaluation_has_hessian_) {
+    return false;
+  }
+  for (std::size_t i = 0; i < kBSplineControlPointCount; ++i) {
+    if (!last_control_poses_[i].matrix().isApprox(poses[i].matrix(), 1e-12)) {
+      return false;
+    }
+  }
+  return true;
+}
+
+IntegratedBSplineGICPFactorGPUKernel::EvaluationResult IntegratedBSplineGICPFactorGPUKernel::evaluate_with_control_poses(
+  const std::array<gtsam::Pose3, kBSplineControlPointCount>& poses,
   bool compute_hessian) const {
   if (compute_hessian && jacobian_mode_ != IntegratedBSplineGICPFactor::JacobianMode::SEMI_ANALYTIC) {
     throw std::runtime_error(
@@ -716,7 +705,6 @@ IntegratedBSplineGICPFactorGPUKernel::EvaluationResult IntegratedBSplineGICPFact
 
   EvaluationResult eval;
   const auto t_start = std::chrono::steady_clock::now();
-  const auto poses = control_poses(values);
   last_control_poses_ = poses;
   last_control_poses_valid_ = true;
 
@@ -843,6 +831,21 @@ IntegratedBSplineGICPFactorGPUKernel::EvaluationResult IntegratedBSplineGICPFact
   eval.host_sync_ms = std::chrono::duration<double, std::milli>(t_after_sync - t_start).count() - eval.kernel_correspondence_ms;
   eval.host_result_pack_ms = std::chrono::duration<double, std::milli>(t_pack_end - t_pack_start).count();
   eval.total_ms = std::chrono::duration<double, std::milli>(t_pack_end - t_start).count();
+  return eval;
+}
+
+IntegratedBSplineGICPFactorGPUKernel::EvaluationResult IntegratedBSplineGICPFactorGPUKernel::evaluate(
+  const gtsam::Values& values,
+  bool compute_hessian) const {
+  const auto poses = control_poses(values);
+  if (cached_evaluation_matches(poses, compute_hessian)) {
+    return last_evaluation_;
+  }
+
+  auto eval = evaluate_with_control_poses(poses, compute_hessian);
+  last_evaluation_ = eval;
+  last_evaluation_valid_ = true;
+  last_evaluation_has_hessian_ = compute_hessian;
   return eval;
 }
 

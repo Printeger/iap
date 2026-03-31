@@ -3,6 +3,9 @@
 > 规则：任何代码改动必须在这里记录，并包含 IAP-RQ-XXX。
 
 ## Unreleased
+- perf(dev-ct-kernel-eval-cache): IAP-RQ-300 / IAP-RQ-410 — collapse repeated KERNEL factor passes by reusing the latest evaluation for identical control poses.
+  - `IntegratedBSplineGICPFactorGPUKernel` now caches the most recent evaluation keyed by the active four control poses and reuses it when `error()` follows `linearize()` on the same state, instead of launching a second identical GPU pass.
+  - This does not change factor math, but it removes one of the bucket-era “duplicate linearize/error pass” patterns from the production KERNEL route and makes runtime profiling/debugging simpler.
 - fix(dev-ct-kernel-target-freeze): IAP-RQ-020 / IAP-RQ-300 / IAP-RQ-410 — freeze runtime global-target handles at append time so historical CT LiDAR constraints stop tracking the mutable rolling target.
   - `OdometryEstimationBSpline::create_active_target_reference()` now clones the current `ct_target_ivox_` into a frozen `iVox` snapshot for runtime `GLOBAL_IVOX_REFERENCE`; historical active segments therefore keep the target they were born with instead of observing later target insertions through a shared mutable handle.
   - Diagnostic collection still keeps the latest shared handle semantics, but runtime `GLOBAL_IVOX_REFERENCE` no longer aliases the live rolling target object.
