@@ -42,7 +42,6 @@ class TempBufferManager;
 }
 
 namespace iap {
-class IntegratedBSplineGICPFactorGPU;
 class IntegratedBSplineGICPFactorGPUKernel;
 }
 
@@ -73,7 +72,6 @@ enum class BSplineLidarTargetMode {
 };
 
 enum class BSplineGpuLidarBackend {
-  BUCKET,
   KERNEL,
 };
 
@@ -115,7 +113,7 @@ class OdometryEstimationBSpline : public OdometryEstimationCPU {
   struct ActiveSplineLidarFactorCacheKey {
     bool valid = false;
     bool gpu = false;
-    BSplineGpuLidarBackend gpu_backend = BSplineGpuLidarBackend::BUCKET;
+    BSplineGpuLidarBackend gpu_backend = BSplineGpuLidarBackend::KERNEL;
     BSplineLidarTargetMode target_mode = BSplineLidarTargetMode::ACTIVE_WINDOW_SNAPSHOT;
     std::array<std::size_t, iap::kBSplineControlPointCount> control_indices{};
     const void* source_identity = nullptr;
@@ -159,6 +157,9 @@ class OdometryEstimationBSpline : public OdometryEstimationCPU {
     double target_build_ms = 0.0;
     std::vector<ActiveSplineIMUSample> imu_samples;
     std::vector<iap::GnssEpoch> gnss_epochs;
+    std::size_t gnss_epoch_revision = 0;
+    std::size_t gnss_factor_revision = 0;
+    bool force_incremental_readd = false;
     ActiveSplineLidarFactorCacheKey lidar_factor_cache;
     std::shared_ptr<iap::IntegratedBSplineGICPFactor> cached_cpu_factor;
     std::shared_ptr<iap::IntegratedBSplineVelocityFactor> cached_velocity_factor;
@@ -166,7 +167,6 @@ class OdometryEstimationBSpline : public OdometryEstimationCPU {
     std::vector<std::shared_ptr<iap::IntegratedBSplinePseudorangeFactor>> cached_gnss_pr_factors;
     std::vector<std::shared_ptr<iap::IntegratedBSplineDopplerFactor>> cached_gnss_dop_factors;
 #ifdef GTSAM_POINTS_USE_CUDA
-    std::shared_ptr<iap::IntegratedBSplineGICPFactorGPU> cached_gpu_bucket_factor;
     std::shared_ptr<iap::IntegratedBSplineGICPFactorGPUKernel> cached_gpu_kernel_factor;
 #endif
   };
@@ -199,6 +199,7 @@ class OdometryEstimationBSpline : public OdometryEstimationCPU {
   std::vector<ActiveSplineIMUSample> create_segment_imu_samples(const PreprocessedFrame::Ptr& raw_frame) const;
   void sync_gnss_epochs_from_shared_state();
   std::vector<iap::GnssEpoch> consume_segment_gnss_epochs(double segment_start, double segment_end);
+  void distribute_pending_gnss_epochs_to_active_segments();
   void prune_active_ct_state(double min_active_stamp);
   void update_marginal_prior_from_active_window();
   void update_marginal_prior_information(
@@ -239,20 +240,12 @@ class OdometryEstimationBSpline : public OdometryEstimationCPU {
   std::shared_ptr<iap::IntegratedBSplineGICPFactor> get_or_create_cpu_lidar_factor(
     ActiveSplineSegmentConstraint& segment,
     bool* cache_hit);
-#ifdef GTSAM_POINTS_USE_CUDA
-  std::shared_ptr<iap::IntegratedBSplineGICPFactorGPU> get_or_create_gpu_bucket_lidar_factor(
-    ActiveSplineSegmentConstraint& segment,
-    CUstream_st* stream,
-    std::shared_ptr<gtsam_points::TempBufferManager> temp_buffer,
-    bool* cache_hit,
-    bool* target_refreshed);
   std::shared_ptr<iap::IntegratedBSplineGICPFactorGPUKernel> get_or_create_gpu_kernel_lidar_factor(
     ActiveSplineSegmentConstraint& segment,
     CUstream_st* stream,
     std::shared_ptr<gtsam_points::TempBufferManager> temp_buffer,
     bool* cache_hit,
     bool* target_refreshed);
-#endif
   void maybe_export_lidar_baseline_csv(
     double stamp,
     const std::vector<iap::BSplineLidarFactorResult>& results,
@@ -265,7 +258,7 @@ class OdometryEstimationBSpline : public OdometryEstimationCPU {
   std::string frontend_mode_ = "RECONSTRUCT";
   double max_correspondence_distance_ = 1.0;
   BSplineLidarTargetMode lidar_target_mode_ = BSplineLidarTargetMode::ACTIVE_WINDOW_SNAPSHOT;
-  BSplineGpuLidarBackend lidar_gpu_backend_ = BSplineGpuLidarBackend::BUCKET;
+  BSplineGpuLidarBackend lidar_gpu_backend_ = BSplineGpuLidarBackend::KERNEL;
   iap::IntegratedBSplineGICPFactor::JacobianMode lidar_jacobian_mode_ =
     iap::IntegratedBSplineGICPFactor::JacobianMode::SEMI_ANALYTIC;
   iap::IntegratedBSplineGICPFactor::RobustKernel lidar_robust_kernel_ =
@@ -324,12 +317,15 @@ class OdometryEstimationBSpline : public OdometryEstimationCPU {
   std::unique_ptr<iap::GnssEpochBuilder> gnss_epoch_builder_;
   std::unique_ptr<iap::GnssHandler> gnss_handler_;
   std::deque<iap::GnssRawObservationBatch> pending_raw_gnss_batches_;
+  std::deque<iap::GnssEpoch> pending_segment_gnss_epochs_;
   std::size_t ct_target_revision_ = 0;
   std::unordered_map<
     SharedTargetHandleCacheKey,
     std::weak_ptr<iap::ISharedTargetHandle>,
     SharedTargetHandleCacheKeyHash>
     shared_target_handle_cache_;
+  std::unordered_map<std::size_t, gtsam::FactorIndices> incremental_segment_factor_indices_;
+  gtsam::FactorIndices incremental_prior_factor_indices_;
   bool lidar_baseline_csv_header_written_ = false;
   bool lidar_baseline_csv_first_row_logged_ = false;
 #ifdef GTSAM_POINTS_USE_CUDA

@@ -1,9 +1,8 @@
 #pragma once
 // IAP-RQ-020 / IAP-RQ-300 / IAP-RQ-410:
-// Explicit local-domain lifecycle skeleton for the continuous-time incremental
-// solver refactor. This does not replace the authoritative batch-compatible
-// solver yet; it establishes the persistent key/segment add-remove surface that
-// later phases will promote into the production fixed-lag solver owner.
+// Explicit local-domain lifecycle helper for the continuous-time incremental
+// solver refactor. It tracks the persistent key/segment add-remove surface used
+// by the authoritative KERNEL fixed-lag solver owner.
 
 #include <iap/odometry/bspline_fixed_lag_registry.hpp>
 #include <iap/odometry/ct_solve_domain.hpp>
@@ -20,6 +19,9 @@ struct CTSolverLifecycleDelta {
   std::vector<std::size_t> active_segment_ordinals;
   std::vector<std::size_t> newly_active_segment_ordinals;
   std::vector<std::size_t> retired_segment_ordinals;
+  std::vector<std::size_t> active_segment_ids;
+  std::vector<std::size_t> newly_active_segment_ids;
+  std::vector<std::size_t> retired_segment_ids;
   std::vector<gtsam::Key> active_control_keys;
   std::vector<gtsam::Key> active_auxiliary_keys;
   std::vector<gtsam::Key> active_shared_keys;
@@ -49,6 +51,7 @@ class BSplineIncrementalSolverSkeleton {
 
  private:
   std::vector<std::size_t> last_active_segment_ordinals_;
+  std::vector<std::size_t> last_active_segment_ids_;
   std::vector<gtsam::Key> known_keys_;
   CTSolverLifecycleDelta last_delta_;
 };

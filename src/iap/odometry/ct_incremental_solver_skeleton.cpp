@@ -112,6 +112,7 @@ std::vector<gtsam::Key> active_shared_keys(
 
 void BSplineIncrementalSolverSkeleton::reset() {
   last_active_segment_ordinals_.clear();
+  last_active_segment_ids_.clear();
   known_keys_.clear();
   last_delta_ = CTSolverLifecycleDelta();
 }
@@ -127,6 +128,7 @@ CTSolverLifecycleDelta BSplineIncrementalSolverSkeleton::prepare_update(
   delta.active_control_keys = domain.active_control_keys();
 
   for (const auto& segment : domain.active_segments()) {
+    append_unique(delta.active_segment_ids, segment.auxiliary_index);
     append_unique(delta.active_auxiliary_keys, bspline_velocity_key(segment.auxiliary_index));
     if (authoritative_values.exists(bspline_clock_key(segment.auxiliary_index))) {
       append_unique(delta.active_auxiliary_keys, bspline_clock_key(segment.auxiliary_index));
@@ -143,6 +145,16 @@ CTSolverLifecycleDelta BSplineIncrementalSolverSkeleton::prepare_update(
   for (const auto segment_ordinal : last_active_segment_ordinals_) {
     if (!contains_value(delta.active_segment_ordinals, segment_ordinal)) {
       delta.retired_segment_ordinals.push_back(segment_ordinal);
+    }
+  }
+  for (const auto segment_id : delta.active_segment_ids) {
+    if (!contains_value(last_active_segment_ids_, segment_id)) {
+      delta.newly_active_segment_ids.push_back(segment_id);
+    }
+  }
+  for (const auto segment_id : last_active_segment_ids_) {
+    if (!contains_value(delta.active_segment_ids, segment_id)) {
+      delta.retired_segment_ids.push_back(segment_id);
     }
   }
 
@@ -178,6 +190,7 @@ CTSolverLifecycleDelta BSplineIncrementalSolverSkeleton::prepare_update(
 
   known_keys_ = delta.active_keys;
   last_active_segment_ordinals_ = delta.active_segment_ordinals;
+  last_active_segment_ids_ = delta.active_segment_ids;
   last_delta_ = delta;
   return last_delta_;
 }

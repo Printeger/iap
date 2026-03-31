@@ -55,6 +55,10 @@ TEST(CTIncrementalSolverSkeleton, TracksNewAndRetiredKeysAcrossSolveDomains) {
 
   EXPECT_EQ(first_delta.active_segment_ordinals.size(), 1U);
   EXPECT_EQ(first_delta.newly_active_segment_ordinals.size(), 1U);
+  ASSERT_EQ(first_delta.active_segment_ids.size(), 1U);
+  ASSERT_EQ(first_delta.newly_active_segment_ids.size(), 1U);
+  EXPECT_EQ(first_delta.active_segment_ids.front(), 1U);
+  EXPECT_EQ(first_delta.newly_active_segment_ids.front(), 1U);
   EXPECT_EQ(first_delta.new_keys.size(), first_delta.active_keys.size());
   EXPECT_TRUE(first_delta.new_values.exists(iap::bspline_control_point_key(0)));
   EXPECT_TRUE(first_delta.new_values.exists(iap::bspline_velocity_key(1)));
@@ -70,6 +74,12 @@ TEST(CTIncrementalSolverSkeleton, TracksNewAndRetiredKeysAcrossSolveDomains) {
   EXPECT_EQ(second_delta.active_segment_ordinals.size(), 1U);
   EXPECT_EQ(second_delta.newly_active_segment_ordinals.size(), 1U);
   EXPECT_EQ(second_delta.retired_segment_ordinals.size(), 1U);
+  ASSERT_EQ(second_delta.active_segment_ids.size(), 1U);
+  ASSERT_EQ(second_delta.newly_active_segment_ids.size(), 1U);
+  ASSERT_EQ(second_delta.retired_segment_ids.size(), 1U);
+  EXPECT_EQ(second_delta.active_segment_ids.front(), 2U);
+  EXPECT_EQ(second_delta.newly_active_segment_ids.front(), 2U);
+  EXPECT_EQ(second_delta.retired_segment_ids.front(), 1U);
   EXPECT_TRUE(std::find(
                 second_delta.new_keys.begin(),
                 second_delta.new_keys.end(),

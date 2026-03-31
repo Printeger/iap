@@ -3,6 +3,15 @@
 > 规则：任何代码改动必须在这里记录，并包含 IAP-RQ-XXX。
 
 ## Unreleased
+- feat(dev-ct-refactor-kernel-only): IAP-RQ-020 / IAP-RQ-300 / IAP-RQ-410 — finish the solver-route refactor by validating authoritative KERNEL long runs and removing BUCKET runtime code.
+  - `CT_LIDAR_GPU + KERNEL` now owns the authoritative long-lived continuous-time fixed-lag solve path; the persistent incremental smoother lifecycle remains in place for solve-domain LiDAR / velocity / IMU / GNSS factors, while the remaining prior/shared shell stays on the same KERNEL-only route.
+  - Increased GNSS raw/epoch mailbox capacity and added delayed epoch backfill into active segments, which eliminated the observed late-run `gnss_pr_factors = 0 / gnss_dop_factors = 0` collapse during headless KERNEL replay while preserving the previous `e0` / missing-key fixes.
+  - Removed the old `IntegratedBSplineGICPFactorGPU` BUCKET implementation from build/runtime/test coverage, deleted BUCKET-specific unit tests, and simplified public configuration/comments so KERNEL is the only supported GPU backend.
+- feat(dev-ct-refactor-authoritative-kernel): IAP-RQ-020 / IAP-RQ-300 / IAP-RQ-410 — move the KERNEL local solve-domain from per-scan factor replacement toward a true authoritative incremental smoother inventory.
+  - `BSplineIncrementalSolverSkeleton` now tracks active/new/retired solve-domain segments by stable segment id (`auxiliary_index`) in addition to transient ordinals, so segment-local factor ownership no longer depends on vector positions that can shift during pruning.
+  - `OdometryEstimationBSpline` now keeps per-segment authoritative incremental factor indices for KERNEL solve-domain LiDAR / velocity / IMU / GNSS factors, removes only retired/replaced segment-local factors from the long-lived smoother, and stops wholesale replacing the same solve-domain segment factors every scan.
+  - The authoritative KERNEL path now rebuilds only the remaining compatibility-shell priors/shared factors per update; segment-local factors persist in the smoother across repeated visits to the same local solve-domain segment.
+  - A long headless `CT_LIDAR_GPU + KERNEL` replay now runs through 400+ frames without `key "e0"`, `ValuesKeyDoesNotExist`, `failed to build bspline marginal survivor prior`, or `authoritative incremental update failed`, which materially advances the shared-state/carried-prior stabilization target in `README_REFACTOR_CT_SOLVER.md`.
 - feat(dev-ct-refactor-local-priors): IAP-RQ-020 / IAP-RQ-300 / IAP-RQ-410 — tighten the batch-compatible BSpline solver shell so control-point priors obey the local solve-domain.
   - `OdometryEstimationBSpline` now derives a solve-domain control span from `BSplineSolveDomain` and uses that local control set for anchor priors, prediction priors, and smoothness factors.
   - The current batch-compatible path therefore stops reconnecting the whole historical active-window control span into every solve, which moves the graph organization one step closer to the intended GLIM-style incremental fixed-lag route described in `README_REFACTOR_CT_SOLVER.md`.

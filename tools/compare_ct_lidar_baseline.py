@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
-# IAP-RQ-300 / IAP-RQ-410: compare CT LiDAR baseline CSV exports across BUCKET/KERNEL and runtime/diagnostic runs.
+# IAP-RQ-300 / IAP-RQ-410: compare CT LiDAR baseline CSV exports across
+# different KERNEL runs, runtime/diagnostic modes, or archived historical runs.
 # Usage:
-#   python3 tools/compare_ct_lidar_baseline.py bucket=/tmp/bucket.csv kernel=/tmp/kernel.csv
+#   python3 tools/compare_ct_lidar_baseline.py run_a=/tmp/a.csv run_b=/tmp/b.csv
 
 from __future__ import annotations
 

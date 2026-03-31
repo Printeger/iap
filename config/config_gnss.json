@@ -47,7 +47,7 @@
     // Satellite filter
     "min_elevation_deg": 10.0,
     "time_tolerance": 0.1,
-    "max_epoch_queue": 100,
+    "max_epoch_queue": 4096,
 
     // Lever arm: antenna phase center in body frame [m]
     "lever_arm": [0.0, 0.0, 0.0],

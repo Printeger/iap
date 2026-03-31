@@ -9,20 +9,23 @@
 - 本文档从现在开始只负责记录“当前状态、刚完成的增量和仍未完成的关键边界”，不再单独维护另一套并行开发计划。
 
 ## 当前结论
-- `CT_LIDAR_GPU + KERNEL` 已成为唯一公开连续时间 GPU LiDAR 路线；`BUCKET` 现已退为内部过渡实现，只允许用于 parity / 一次性 A/B。
+- `CT_LIDAR_GPU + KERNEL` 已成为唯一连续时间 GPU LiDAR 路线；`BUCKET` 代码、配置入口和测试覆盖已从生产路径移除。
 - 已开始按 [README_REFACTOR_CT_SOLVER.md](/home/dev/code/ws_iap/src/iap/docs/dev_ct/README_REFACTOR_CT_SOLVER.md) 执行 `P0 / P1`：
   - 已新增 `ICTSolveDomain / BSplineSolveDomain`
   - 已新增 `BSplineIncrementalSolverSkeleton`
   - 已新增 `ISharedTargetHandle / SharedTargetHandle`
   - `OdometryEstimationBSpline` 现已默认按“当前 segment + 最近重叠段”的 local-domain 选择范围构建连续时间 LiDAR solve domain，而不再把全部历史 active-window segment 当成默认 LiDAR solve 域
   - `OdometryEstimationBSpline` 现已显式产出 continuous-time solve-domain 的增量生命周期载荷：active/new/retired segments、new/retired keys，以及后续长期存活 fixed-lag smoother 需要的 `new_values / new_stamps` skeleton，不再把这层生命周期隐式埋在单次 `insert_frame_ct_lidar()` 逻辑中
-  - 公开 runtime 选择 `BUCKET` 时现在会直接报 deprecated error；只有设置 `IAP_ALLOW_DEPRECATED_BUCKET=1` 才允许内部过渡使用
   - 已继续推进到 `P2` 的 shared-target 资源接线：`OdometryEstimationBSpline` 现已维护 shared target handle cache，而 `IntegratedBSplineGICPFactorGPUKernel` 已可直接绑定 shared target GPU resources，并在 target revision 变化时通过 handle refresh 切换 target-side GPU state，而不是在每个 factor 内重新构建 target GPU map
   - 已开始推进到 `P3` 的 shared-state / carried-prior 收口：`BSplineFixedLagStateRegistry` 现已新增显式 `seed_clock_values(...)`，而 `OdometryEstimationBSpline` 现在会在 `BSplineIncrementalSolverSkeleton::prepare_update(...)` 之前，先把 shared `j / k / g / e / r` states 与 solve-domain 需要的 `c` keys 种入 authoritative `Values`
   - B-spline 路径现已通过 `reset_bspline_incremental_smoother()` 重置一套 CT 专用 smoother shell，并显式注册 `s / u / j / k / g / c / e / r` 的 relinearization policy；后续长期存活 incremental fixed-lag solver 不再只能沿用 legacy discrete-time 的 threshold 集
   - 已补上 `test_bspline_fixed_lag_registry` 的 solve-domain clock seeding 回归测试，覆盖 auxiliary-values reuse、clock propagation 和“已有值不被覆盖”的语义
   - 当前 batch-compatible 壳又进一步开始把 factor lifecycle 从 per-scan batch 路径中剥离：velocity / IMU / GNSS factors 现已按 active segment 生命周期进入持久化 cache，`OdometryEstimationBSpline` 不再为同一 solve-domain segment 每帧重复构造这些非 LiDAR 因子
   - 当前 batch-compatible 壳又进一步开始把 control-point priors 从“整窗默认回连”收紧到 local solve-domain：anchor / prediction / smoothness priors 现在只覆盖当前 solve-domain 的 control span，不再默认把历史 active-window control states 全部拖进当前 solve
+  - `BSplineIncrementalSolverSkeleton` 现已开始按稳定的 solve-domain segment id（`auxiliary_index`）表达 active/new/retired 生命周期，而不再只靠临时 ordinal；这让 authoritative incremental smoother 可以按稳定 owner 跟踪 solve-domain segment-local factor inventory
+  - `CT_LIDAR_GPU + KERNEL` authoritative 路径现已开始把 solve-domain segment-local LiDAR / velocity / IMU / GNSS factors 真正持久化到长期存活 smoother 中：new / retired segment 显式 add/remove，已存在 segment 不再每帧整批 replace
+  - 针对 shared-state / carried-prior 的 headless 长包回放现已稳定通过：未再出现 `key "e0"`、`ValuesKeyDoesNotExist`、`failed to build bspline marginal survivor prior` 或 `authoritative incremental update failed`
+  - 通过提升 GNSS raw/epoch mailbox 容量与 delayed-backfill 到 active segments，后段窗口 `gnss_pr_factors / gnss_dop_factors = 0` 的塌零现象已在最新 KERNEL headless 长包验证中消失
 - 已完成 Phase 1A 的“连续时间骨架层”落地。
 - 已完成 Phase 1B 的最小可用版本：
   - 控制点窗口状态设计
@@ -167,19 +170,18 @@
   - 已复用统一 `BSplineLidarFactorResult / WindowProfileSummary / baseline CSV` 返回面
   - 已补上 CUDA smoke test、current-factor numeric parity 和 target-refresh 不重建 source staging 的单测
 - 当前距离“GPU odometry 封板”还差的关键项已经收敛到：
-  - `KERNEL` kernel-stage profiling 仍需从当前单体 timing 继续细拆成 pose-query / correspondence / residual-weight / reduction / host-sync 等稳定 A/B 指标
-  - 还未完成 `cached BUCKET vs KERNEL`、`KERNEL runtime vs diagnostic` 的同配置长包 A/B
-  - carried-prior / shared GNSS states 需要在 `KERNEL` 路径下完成长时 replay 验证，确保不再出现 `e0` 缺键和 GNSS 因子中途掉零
-  - `KERNEL` 目前是“可运行 MVP”，还不是最终高性能 kernel-level CT LiDAR 实现
-- 连续时间求解器重构当前仍处于 `README_REFACTOR_CT_SOLVER` 的过渡阶段：
+  - `KERNEL` kernel-stage profiling 仍需继续细拆成 pose-query / correspondence / residual-weight / reduction / host-sync 等更稳定的性能基线
+  - 增量 fixed-lag 主求解器仍可继续做 solver/update 级别的性能收尾
+  - `KERNEL` 已是稳定生产路线，但仍有进一步提效空间
+- 连续时间求解器重构现已完成 `README_REFACTOR_CT_SOLVER` 主路线切换：
   - 已落下公开路线冻结和 local-domain / shared-target 骨架
   - 已落下 `BSplineIncrementalSolverSkeleton`，开始显式表达 segment/key add-remove 生命周期和 future smoother payload
   - 已落下 KERNEL shared-target GPU resource binding 与 handle-cache 语义
   - 已开始把 shared GNSS/ECEF/clock state ownership 从 batch-compatible 建图后半段前移到增量生命周期入口
   - 已开始把 per-segment velocity / IMU / GNSS factor inventory 从每帧临时构造推进到 solve-domain 生命周期缓存
-  - 尚未完成长期存活的 incremental fixed-lag solver
-  - 尚未完成 shared target GPU handle 的统一 ownership
-  - 也尚未删除内部过渡用的 `BUCKET` 代码
+  - 已开始把 solve-domain segment-local factor inventory 真正迁到 authoritative incremental smoother 中，但 local-domain priors / shared shell 仍残留 batch-compatible 兼容层
+  - shared target GPU handle 的统一 ownership 已进入 KERNEL runtime 热路径：target-side GPU resource 现在跟随 shared handle revision 刷新，而不再在每个 factor 内独立重建
+  - `BUCKET` 的生产代码路径、配置入口和相关测试已删除；历史分析文档仅作为归档保留
 
 ## 本次已完成
 

@@ -242,9 +242,9 @@ class IapSharedState {
   std::deque<GnssRawObservationBatch> gnss_raw_batch_queue_;
   std::deque<GnssEphemerisUpdate> gnss_ephemeris_queue_;
   std::vector<double> latest_gnss_iono_params_;
-  std::size_t gnss_epoch_queue_limit_ = 256;
-  std::size_t gnss_raw_batch_queue_limit_ = 128;
-  std::size_t gnss_ephemeris_queue_limit_ = 512;
+  std::size_t gnss_epoch_queue_limit_ = 4096;
+  std::size_t gnss_raw_batch_queue_limit_ = 4096;
+  std::size_t gnss_ephemeris_queue_limit_ = 2048;
 
   std::atomic<int> n_confirmed_trunks_{0};
 

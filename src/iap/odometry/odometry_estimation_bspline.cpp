@@ -23,6 +23,7 @@
 #include <gtsam_points/types/point_cloud_cpu.hpp>
 #include <spdlog/spdlog.h>
 
+#include <limits>
 #include <iap/common/cloud_covariance_estimation.hpp>
 #include <iap/common/imu_integration.hpp>
 #include <iap/odometry/initial_state_estimation.hpp>
@@ -36,7 +37,6 @@
 #include <gtsam_points/cuda/stream_temp_buffer_roundrobin.hpp>
 #include <gtsam_points/types/gaussian_voxelmap_gpu.hpp>
 #include <gtsam_points/types/point_cloud_gpu.hpp>
-#include <iap/odometry/integrated_bspline_gicp_factor_gpu.hpp>
 #include <iap/odometry/integrated_bspline_gicp_factor_gpu_kernel.hpp>
 #endif
 
@@ -50,6 +50,34 @@ template <typename T>
 void hash_combine(std::size_t* seed, const T& value) {
   const std::size_t hashed = std::hash<T>{}(value);
   *seed ^= hashed + 0x9e3779b97f4a7c15ULL + (*seed << 6U) + (*seed >> 2U);
+}
+
+void copy_bspline_value_if_present(gtsam::Values& dst, const gtsam::Values& src, gtsam::Key key) {
+  if (dst.exists(key) || !src.exists(key)) {
+    return;
+  }
+
+  const char c = gtsam::Symbol(key).chr();
+  switch (c) {
+    case 's':
+      dst.insert(key, src.at<gtsam::Pose3>(key));
+      return;
+    case 'u':
+    case 'g':
+    case 'j':
+    case 'k':
+    case 'e':
+      dst.insert(key, src.at<gtsam::Vector3>(key));
+      return;
+    case 'c':
+      dst.insert(key, src.at<gtsam::Vector2>(key));
+      return;
+    case 'r':
+      dst.insert(key, src.at<gtsam::Rot3>(key));
+      return;
+    default:
+      throw std::runtime_error(std::string("unsupported bspline value copy key '") + c + "'");
+  }
 }
 
 iap::SplineKnotMode parse_knot_mode(const std::string& mode) {
@@ -80,13 +108,12 @@ BSplineGpuLidarBackend parse_gpu_lidar_backend(const std::string& mode) {
   if (mode == "KERNEL" || mode == "kernel" || mode == "ct_kernel") {
     return BSplineGpuLidarBackend::KERNEL;
   }
-  return BSplineGpuLidarBackend::BUCKET;
+  throw std::runtime_error(
+    "CT_LIDAR_GPU backend BUCKET has been removed. Use ct_lidar_gpu_backend=KERNEL.");
 }
 
 const char* to_string(BSplineGpuLidarBackend backend) {
   switch (backend) {
-    case BSplineGpuLidarBackend::BUCKET:
-      return "bucket";
     case BSplineGpuLidarBackend::KERNEL:
       return "kernel";
   }
@@ -111,17 +138,6 @@ const char* to_string(iap::IntegratedBSplineGICPFactor::JacobianMode mode) {
 }
 
 #ifdef GTSAM_POINTS_USE_CUDA
-iap::IntegratedBSplineGICPFactorGPU::JacobianMode to_gpu_lidar_jacobian_mode(
-  iap::IntegratedBSplineGICPFactor::JacobianMode mode) {
-  switch (mode) {
-    case iap::IntegratedBSplineGICPFactor::JacobianMode::NUMERIC_FULL:
-      return iap::IntegratedBSplineGICPFactorGPU::JacobianMode::NUMERIC_FULL;
-    case iap::IntegratedBSplineGICPFactor::JacobianMode::SEMI_ANALYTIC:
-      return iap::IntegratedBSplineGICPFactorGPU::JacobianMode::SEMI_ANALYTIC;
-  }
-  return iap::IntegratedBSplineGICPFactorGPU::JacobianMode::SEMI_ANALYTIC;
-}
-
 std::shared_ptr<const iap::SharedTargetGpuResources> build_shared_target_gpu_resources(
   const std::shared_ptr<const gtsam_points::iVox>& target_snapshot,
   std::size_t revision) {
@@ -180,6 +196,7 @@ iap::GnssHandler::Params make_gnss_handler_params(
   double dop_noise_base,
   double elev_noise_exp,
   double time_tolerance,
+  int max_epoch_queue,
   const Eigen::Vector3d& lever_arm,
   const iap::CanopyNoiseParams& canopy_params) {
   iap::GnssHandler::Params params;
@@ -187,6 +204,7 @@ iap::GnssHandler::Params make_gnss_handler_params(
   params.dop_noise_base = dop_noise_base;
   params.elev_noise_exp = elev_noise_exp;
   params.time_tolerance = time_tolerance;
+  params.max_epoch_queue = max_epoch_queue;
   params.min_elevation = min_elevation;
   params.lever_arm = lever_arm;
   params.canopy = canopy_params;
@@ -234,6 +252,21 @@ gtsam::KeyVector make_key_vector(
   gtsam::KeyVector result(keys.begin(), keys.end());
   result.insert(result.end(), extra_keys.begin(), extra_keys.end());
   return result;
+}
+
+template <typename SegmentT>
+bool segment_accepts_gnss_epoch(const SegmentT& segment, const iap::GnssEpoch& epoch, double tolerance) {
+  const double lower = segment.stamp - tolerance;
+  const double upper = segment.scan_end + tolerance;
+  return epoch.stamp >= lower && epoch.stamp <= upper;
+}
+
+template <typename SegmentT>
+bool segment_has_gnss_epoch(const SegmentT& segment, const iap::GnssEpoch& epoch) {
+  constexpr double kStampEps = 1e-6;
+  return std::any_of(segment.gnss_epochs.begin(), segment.gnss_epochs.end(), [&](const auto& existing) {
+    return std::abs(existing.stamp - epoch.stamp) <= kStampEps && std::abs(existing.gps_sec - epoch.gps_sec) <= kStampEps;
+  });
 }
 
 }  // namespace
@@ -330,6 +363,7 @@ OdometryEstimationBSpline::OdometryEstimationBSpline(const OdometryEstimationBSp
 
   Config gnss_config(GlobalConfig::get_config_path("config_gnss"));
   gnss_time_tolerance_ = gnss_config.param<double>("gnss", "time_tolerance", 0.1);
+  const int gnss_max_epoch_queue = gnss_config.param<int>("gnss", "max_epoch_queue", 4096);
   gnss_min_elevation_ = gnss_config.param<double>("gnss", "min_elevation_deg", 10.0) * M_PI / 180.0;
   gnss_pr_noise_base_ = gnss_config.param<double>("gnss", "pr_noise_base", 5.0);
   gnss_dop_noise_base_ = gnss_config.param<double>("gnss", "dop_noise_base", 0.5);
@@ -361,23 +395,15 @@ OdometryEstimationBSpline::OdometryEstimationBSpline(const OdometryEstimationBSp
     gnss_dop_noise_base_,
     gnss_elev_noise_exp_,
     gnss_time_tolerance_,
+    gnss_max_epoch_queue,
     gnss_lever_arm_,
     gnss_canopy_params_));
   ct_target_ivox_ = std::make_shared<gtsam_points::iVox>(params.ivox_resolution);
   ct_target_ivox_->voxel_insertion_setting().set_min_dist_in_cell(params.ivox_min_dist);
   ct_target_ivox_->set_lru_horizon(params.lru_thresh);
   ct_target_ivox_->set_neighbor_voxel_mode(1);
-  if (frontend_mode_ == "CT_LIDAR_GPU" && lidar_gpu_backend_ == BSplineGpuLidarBackend::BUCKET) {
-    const char* allow_bucket = std::getenv("IAP_ALLOW_DEPRECATED_BUCKET");
-    if (!(allow_bucket && std::strcmp(allow_bucket, "1") == 0)) {
-      throw std::runtime_error(
-        "CT_LIDAR_GPU backend BUCKET is deprecated and internal-only. "
-        "Use ct_lidar_gpu_backend=KERNEL. Set IAP_ALLOW_DEPRECATED_BUCKET=1 only for internal parity work.");
-    }
-    logger->warn("CT_LIDAR_GPU backend BUCKET enabled via IAP_ALLOW_DEPRECATED_BUCKET=1 for internal parity work");
-  }
 #ifdef GTSAM_POINTS_USE_CUDA
-  if (frontend_mode_ == "CT_LIDAR_GPU" && lidar_gpu_backend_ == BSplineGpuLidarBackend::BUCKET) {
+  if (frontend_mode_ == "CT_LIDAR_GPU") {
     ct_lidar_gpu_stream_buffers_ = std::make_unique<gtsam_points::StreamTempBufferRoundRobin>();
   }
 #endif
@@ -485,8 +511,11 @@ void OdometryEstimationBSpline::initialize_control_window(
   incremental_solver_skeleton_.reset();
   marginal_prior_ = ActiveSplineMarginalPrior();
   fixed_lag_registry_.clear_auxiliary_values();
+  pending_segment_gnss_epochs_.clear();
   ct_target_revision_ = 0;
   shared_target_handle_cache_.clear();
+  incremental_segment_factor_indices_.clear();
+  incremental_prior_factor_indices_.clear();
   reset_bspline_incremental_smoother();
 }
 
@@ -765,9 +794,75 @@ void OdometryEstimationBSpline::sync_gnss_epochs_from_shared_state() {
 
     if (build_result.status == iap::GnssEpochBuilder::BuildStatus::Success && build_result.epoch.has_value()) {
       gnss_handler_->insert_epoch(*build_result.epoch);
+      pending_segment_gnss_epochs_.push_back(*build_result.epoch);
     }
 
     pending_raw_gnss_batches_.pop_front();
+  }
+}
+
+void OdometryEstimationBSpline::distribute_pending_gnss_epochs_to_active_segments() {
+  auto& segments = fixed_lag_registry_.segments();
+  if (segments.empty() || pending_segment_gnss_epochs_.empty()) {
+    return;
+  }
+
+  const double lower_keep = segments.front().stamp - gnss_time_tolerance_;
+  const double upper_keep = segments.back().scan_end + gnss_time_tolerance_;
+
+  auto best_segment_for_epoch = [&](const iap::GnssEpoch& epoch) -> std::vector<ActiveSplineSegmentConstraint>::iterator {
+    auto best_it = segments.end();
+    double best_distance = std::numeric_limits<double>::max();
+
+    for (auto it = segments.begin(); it != segments.end(); ++it) {
+      if (!segment_accepts_gnss_epoch(*it, epoch, gnss_time_tolerance_)) {
+        continue;
+      }
+
+      const double center = 0.5 * (it->stamp + it->scan_end);
+      const double distance = std::abs(epoch.stamp - center);
+      if (distance < best_distance) {
+        best_distance = distance;
+        best_it = it;
+      }
+    }
+
+    return best_it;
+  };
+
+  auto epoch_it = pending_segment_gnss_epochs_.begin();
+  while (epoch_it != pending_segment_gnss_epochs_.end()) {
+    if (epoch_it->stamp < lower_keep) {
+      epoch_it = pending_segment_gnss_epochs_.erase(epoch_it);
+      continue;
+    }
+
+    if (epoch_it->stamp > upper_keep) {
+      break;
+    }
+
+    auto segment_it = best_segment_for_epoch(*epoch_it);
+    if (segment_it == segments.end()) {
+      ++epoch_it;
+      continue;
+    }
+
+    if (!segment_has_gnss_epoch(*segment_it, *epoch_it)) {
+      segment_it->gnss_epochs.push_back(*epoch_it);
+      std::sort(
+        segment_it->gnss_epochs.begin(),
+        segment_it->gnss_epochs.end(),
+        [](const auto& lhs, const auto& rhs) { return lhs.stamp < rhs.stamp; });
+      segment_it->gnss_epoch_revision++;
+      segment_it->cached_gnss_pr_factors.clear();
+      segment_it->cached_gnss_dop_factors.clear();
+      segment_it->gnss_factor_revision = 0;
+      if (incremental_segment_factor_indices_.count(segment_it->auxiliary_index) > 0) {
+        segment_it->force_incremental_readd = true;
+      }
+    }
+
+    epoch_it = pending_segment_gnss_epochs_.erase(epoch_it);
   }
 }
 
@@ -1002,10 +1097,12 @@ void OdometryEstimationBSpline::ensure_gnss_factor_cache(
   }
 
   if (!fixed_lag_registry_.shared_state().gnss_anchor_initialized || segment.gnss_epochs.empty()) {
+    segment.gnss_factor_revision = segment.gnss_epoch_revision;
     return;
   }
 
-  if (!segment.cached_gnss_pr_factors.empty() || !segment.cached_gnss_dop_factors.empty()) {
+  if (segment.gnss_factor_revision == segment.gnss_epoch_revision &&
+      (!segment.cached_gnss_pr_factors.empty() || !segment.cached_gnss_dop_factors.empty())) {
     if (pr_factor_count) {
       *pr_factor_count = segment.cached_gnss_pr_factors.size();
     }
@@ -1014,6 +1111,9 @@ void OdometryEstimationBSpline::ensure_gnss_factor_cache(
     }
     return;
   }
+
+  segment.cached_gnss_pr_factors.clear();
+  segment.cached_gnss_dop_factors.clear();
 
   std::array<gtsam::Key, iap::kBSplineControlPointCount> segment_keys{};
   for (std::size_t k = 0; k < iap::kBSplineControlPointCount; ++k) {
@@ -1084,6 +1184,7 @@ void OdometryEstimationBSpline::ensure_gnss_factor_cache(
   if (dop_factor_count) {
     *dop_factor_count = segment.cached_gnss_dop_factors.size();
   }
+  segment.gnss_factor_revision = segment.gnss_epoch_revision;
 }
 
 std::shared_ptr<iap::IntegratedBSplineGICPFactor> OdometryEstimationBSpline::get_or_create_cpu_lidar_factor(
@@ -1126,71 +1227,6 @@ std::shared_ptr<iap::IntegratedBSplineGICPFactor> OdometryEstimationBSpline::get
   }
 
   return segment.cached_cpu_factor;
-}
-
-#ifdef GTSAM_POINTS_USE_CUDA
-std::shared_ptr<iap::IntegratedBSplineGICPFactorGPU> OdometryEstimationBSpline::get_or_create_gpu_bucket_lidar_factor(
-  ActiveSplineSegmentConstraint& segment,
-  CUstream_st* stream,
-  std::shared_ptr<gtsam_points::TempBufferManager> temp_buffer,
-  bool* cache_hit,
-  bool* target_refreshed) {
-  const auto desired_key = make_lidar_factor_cache_key(segment, true);
-  const bool enable_profile_surface =
-    lidar_factor_profile_ || lidar_warn_degeneracy_ || lidar_export_baseline_csv_ || lidar_profile_numeric_reference_;
-  const bool cache_base_match =
-    segment.cached_gpu_bucket_factor && same_lidar_factor_cache_base(segment.lidar_factor_cache, desired_key);
-  const bool can_refresh_target =
-    cache_base_match &&
-    segment.lidar_factor_cache.target_mode == desired_key.target_mode &&
-    segment.lidar_factor_cache.source_identity == desired_key.source_identity;
-
-  if (!cache_base_match) {
-    auto factor = std::make_shared<iap::IntegratedBSplineGICPFactorGPU>(
-      std::array<gtsam::Key, iap::kBSplineControlPointCount>{
-        iap::bspline_control_point_key(segment.control_indices[0]),
-        iap::bspline_control_point_key(segment.control_indices[1]),
-        iap::bspline_control_point_key(segment.control_indices[2]),
-        iap::bspline_control_point_key(segment.control_indices[3])},
-      segment.target_snapshot,
-      segment.source,
-      stream,
-      temp_buffer);
-    factor->set_jacobian_mode(to_gpu_lidar_jacobian_mode(lidar_jacobian_mode_));
-    factor->set_numeric_eps(lidar_jacobian_numeric_eps_);
-    factor->set_max_correspondence_distance(max_correspondence_distance_);
-    factor->set_correspondence_candidate_count(lidar_correspondence_candidate_count_);
-    factor->set_correspondence_accept_ratio(lidar_correspondence_accept_ratio_);
-    factor->set_correspondence_min_score_gap(lidar_correspondence_min_score_gap_);
-    factor->set_outlier_mahalanobis_threshold(lidar_outlier_mahalanobis_thresh_);
-    factor->set_robust_kernel(lidar_robust_kernel_, lidar_robust_kernel_width_);
-    factor->set_robust_weight_floor(lidar_robust_weight_floor_);
-    factor->set_enable_profiling(lidar_factor_profile_ || lidar_warn_degeneracy_ || lidar_export_baseline_csv_);
-    segment.cached_gpu_bucket_factor = factor;
-    segment.lidar_factor_cache = desired_key;
-    if (cache_hit) {
-      *cache_hit = false;
-    }
-    if (target_refreshed) {
-      *target_refreshed = false;
-    }
-  } else {
-    if (segment.lidar_factor_cache.target_identity != desired_key.target_identity ||
-        segment.lidar_factor_cache.target_revision != desired_key.target_revision) {
-      segment.cached_gpu_bucket_factor->refresh_target(segment.target_snapshot);
-      segment.lidar_factor_cache = desired_key;
-      if (target_refreshed) {
-        *target_refreshed = true;
-      }
-    } else if (target_refreshed) {
-      *target_refreshed = false;
-    }
-    if (cache_hit) {
-      *cache_hit = true;
-    }
-  }
-
-  return segment.cached_gpu_bucket_factor;
 }
 
 std::shared_ptr<iap::IntegratedBSplineGICPFactorGPUKernel> OdometryEstimationBSpline::get_or_create_gpu_kernel_lidar_factor(
@@ -1258,7 +1294,6 @@ std::shared_ptr<iap::IntegratedBSplineGICPFactorGPUKernel> OdometryEstimationBSp
 
   return segment.cached_gpu_kernel_factor;
 }
-#endif
 
 EstimationFrame::ConstPtr OdometryEstimationBSpline::insert_frame_ct_lidar(
   const PreprocessedFrame::Ptr& raw_frame,
@@ -1417,11 +1452,9 @@ EstimationFrame::ConstPtr OdometryEstimationBSpline::insert_frame_ct_lidar(
       pipeline_timing.target_build_ms = fixed_lag_registry_.segments().back().target_build_ms;
     }
   }
-  if (!fixed_lag_registry_.segments().empty()) {
+  {
     const auto t_gnss_epoch_start = Clock::now();
-    fixed_lag_registry_.segments().back().gnss_epochs = consume_segment_gnss_epochs(
-      raw_frame->stamp,
-      raw_frame->scan_end_time);
+    distribute_pending_gnss_epochs_to_active_segments();
     pipeline_timing.gnss_epoch_fetch_ms = elapsed_ms(t_gnss_epoch_start, Clock::now());
   }
   refresh_active_target_handles();
@@ -1464,6 +1497,14 @@ EstimationFrame::ConstPtr OdometryEstimationBSpline::insert_frame_ct_lidar(
   }();
   const auto solve_segment_ordinals = solve_domain.active_segment_ordinals();
   const std::size_t current_segment_ordinal = solve_segment_ordinals.back();
+  const bool use_authoritative_incremental_solver =
+    use_gpu_lidar && lidar_gpu_backend_ == BSplineGpuLidarBackend::KERNEL;
+  const auto is_newly_active_segment_id = [&](std::size_t segment_id) {
+    return std::find(
+             incremental_delta.newly_active_segment_ids.begin(),
+             incremental_delta.newly_active_segment_ids.end(),
+             segment_id) != incremental_delta.newly_active_segment_ids.end();
+  };
   const iap::BSplineCarriedPrior previous_carried_prior = marginal_prior_.carried_prior;
   const gtsam::Key gyro_bias_key = bspline_gyro_bias_key();
   const gtsam::Key accel_bias_key = bspline_accel_bias_key();
@@ -1484,8 +1525,6 @@ EstimationFrame::ConstPtr OdometryEstimationBSpline::insert_frame_ct_lidar(
   std::shared_ptr<iap::IntegratedBSplineGICPFactor> current_cpu_factor;
   std::vector<std::shared_ptr<iap::IntegratedBSplineGICPFactor>> active_lidar_cpu_factors;
 #ifdef GTSAM_POINTS_USE_CUDA
-  std::shared_ptr<iap::IntegratedBSplineGICPFactorGPU> current_gpu_factor;
-  std::vector<std::shared_ptr<iap::IntegratedBSplineGICPFactorGPU>> active_lidar_gpu_factors;
   std::shared_ptr<iap::IntegratedBSplineGICPFactorGPUKernel> current_gpu_kernel_factor;
   std::vector<std::shared_ptr<iap::IntegratedBSplineGICPFactorGPUKernel>> active_lidar_gpu_kernel_factors;
 #endif
@@ -1553,12 +1592,50 @@ EstimationFrame::ConstPtr OdometryEstimationBSpline::insert_frame_ct_lidar(
     incremental_delta.retired_keys.size(),
     solve_domain.start_time(),
     solve_domain.end_time());
+  gtsam::FactorIndices factors_to_remove;
+  if (use_authoritative_incremental_solver) {
+    factors_to_remove = incremental_prior_factor_indices_;
+    incremental_prior_factor_indices_.clear();
+
+    for (const auto retired_segment_id : incremental_delta.retired_segment_ids) {
+      const auto factor_it = incremental_segment_factor_indices_.find(retired_segment_id);
+      if (factor_it == incremental_segment_factor_indices_.end()) {
+        continue;
+      }
+
+      factors_to_remove.insert(
+        factors_to_remove.end(),
+        factor_it->second.begin(),
+        factor_it->second.end());
+      incremental_segment_factor_indices_.erase(factor_it);
+    }
+  }
+  std::vector<std::size_t> added_segment_factor_owners;
+  auto remember_added_segment_factor = [&](std::size_t segment_id) {
+    if (use_authoritative_incremental_solver) {
+      added_segment_factor_owners.push_back(segment_id);
+    }
+  };
   const auto t_graph_build_start = Clock::now();
   const bool enable_lidar_profile_surface =
     lidar_factor_profile_ || lidar_warn_degeneracy_ || lidar_export_baseline_csv_;
   for (const auto segment_ordinal : solve_segment_ordinals) {
     auto& segment = fixed_lag_registry_.segments()[segment_ordinal];
+    const bool segment_newly_active =
+      use_authoritative_incremental_solver && is_newly_active_segment_id(segment.auxiliary_index);
+    bool segment_force_readd = use_authoritative_incremental_solver && segment.force_incremental_readd;
     const gtsam::Key velocity_key = iap::bspline_velocity_key(segment.auxiliary_index);
+
+    if (segment_force_readd) {
+      const auto factor_it = incremental_segment_factor_indices_.find(segment.auxiliary_index);
+      if (factor_it != incremental_segment_factor_indices_.end()) {
+        factors_to_remove.insert(
+          factors_to_remove.end(),
+          factor_it->second.begin(),
+          factor_it->second.end());
+        incremental_segment_factor_indices_.erase(factor_it);
+      }
+    }
 
     if (!values.exists(velocity_key)) {
       if (fixed_lag_registry_.auxiliary_values().exists(velocity_key)) {
@@ -1611,98 +1688,68 @@ EstimationFrame::ConstPtr OdometryEstimationBSpline::insert_frame_ct_lidar(
       pipeline_timing.graph_lidar_factor_ms += elapsed_ms(t_graph_lidar_start, Clock::now());
     } else {
 #ifdef GTSAM_POINTS_USE_CUDA
-      switch (lidar_gpu_backend_) {
-        case BSplineGpuLidarBackend::BUCKET: {
-          const auto t_graph_lidar_start = Clock::now();
-          if (!ct_lidar_gpu_stream_buffers_) {
-            ct_lidar_gpu_stream_buffers_ = std::make_unique<gtsam_points::StreamTempBufferRoundRobin>();
-          }
-          auto stream_buffer = ct_lidar_gpu_stream_buffers_->get_stream_buffer();
-          bool cache_hit = false;
-          bool target_refreshed = false;
-          const auto t_lidar_prepare_start = Clock::now();
-          auto factor = get_or_create_gpu_bucket_lidar_factor(
-            segment,
-            stream_buffer.first,
-            stream_buffer.second,
-            &cache_hit,
-            &target_refreshed);
-          factor->set_enable_profiling(enable_lidar_profile_surface);
-          const auto t_lidar_prepare_end = Clock::now();
-          if (cache_hit) {
-            pipeline_timing.graph_lidar_factor_cache_hit_count++;
-            if (target_refreshed) {
-              pipeline_timing.graph_lidar_factor_refresh_count++;
-              pipeline_timing.graph_lidar_factor_target_refresh_ms += elapsed_ms(t_lidar_prepare_start, t_lidar_prepare_end);
-            }
-          } else {
-            pipeline_timing.graph_lidar_factor_cache_miss_count++;
-            pipeline_timing.graph_lidar_factor_new_build_ms += elapsed_ms(t_lidar_prepare_start, t_lidar_prepare_end);
-          }
-
-          const auto t_lidar_attach_start = Clock::now();
-          active_lidar_gpu_factors.push_back(factor);
-          graph.add(factor);
-          if (marginalization_partition.should_marginalize_factor(make_key_vector(segment_keys))) {
-            marginalization_graph.add(factor);
-          }
-          const auto t_lidar_attach_end = Clock::now();
-          if (cache_hit && !target_refreshed) {
-            pipeline_timing.graph_lidar_factor_reused_attach_ms += elapsed_ms(t_lidar_attach_start, t_lidar_attach_end);
-          }
-
-          if (segment_ordinal == current_segment_ordinal) {
-            current_gpu_factor = factor;
-          }
-          pipeline_timing.graph_lidar_factor_ms += elapsed_ms(t_graph_lidar_start, Clock::now());
-          break;
+      const auto t_graph_lidar_start = Clock::now();
+      if (!ct_lidar_gpu_stream_buffers_) {
+        ct_lidar_gpu_stream_buffers_ = std::make_unique<gtsam_points::StreamTempBufferRoundRobin>();
+      }
+      auto stream_buffer = ct_lidar_gpu_stream_buffers_->get_stream_buffer();
+      bool cache_hit = false;
+      bool target_refreshed = false;
+      const auto t_lidar_prepare_start = Clock::now();
+      auto factor = get_or_create_gpu_kernel_lidar_factor(
+        segment,
+        stream_buffer.first,
+        stream_buffer.second,
+        &cache_hit,
+        &target_refreshed);
+      factor->set_enable_profiling(enable_lidar_profile_surface);
+      const auto t_lidar_prepare_end = Clock::now();
+      if (cache_hit) {
+        pipeline_timing.graph_lidar_factor_cache_hit_count++;
+        if (target_refreshed) {
+          pipeline_timing.graph_lidar_factor_refresh_count++;
+          pipeline_timing.graph_lidar_factor_target_refresh_ms += elapsed_ms(t_lidar_prepare_start, t_lidar_prepare_end);
         }
-        case BSplineGpuLidarBackend::KERNEL:
-        {
-          const auto t_graph_lidar_start = Clock::now();
-          if (!ct_lidar_gpu_stream_buffers_) {
-            ct_lidar_gpu_stream_buffers_ = std::make_unique<gtsam_points::StreamTempBufferRoundRobin>();
-          }
-          auto stream_buffer = ct_lidar_gpu_stream_buffers_->get_stream_buffer();
-          bool cache_hit = false;
-          bool target_refreshed = false;
-          const auto t_lidar_prepare_start = Clock::now();
-          auto factor = get_or_create_gpu_kernel_lidar_factor(
-            segment,
-            stream_buffer.first,
-            stream_buffer.second,
-            &cache_hit,
-            &target_refreshed);
-          factor->set_enable_profiling(enable_lidar_profile_surface);
-          const auto t_lidar_prepare_end = Clock::now();
-          if (cache_hit) {
-            pipeline_timing.graph_lidar_factor_cache_hit_count++;
-            if (target_refreshed) {
-              pipeline_timing.graph_lidar_factor_refresh_count++;
-              pipeline_timing.graph_lidar_factor_target_refresh_ms += elapsed_ms(t_lidar_prepare_start, t_lidar_prepare_end);
-            }
-          } else {
-            pipeline_timing.graph_lidar_factor_cache_miss_count++;
-            pipeline_timing.graph_lidar_factor_new_build_ms += elapsed_ms(t_lidar_prepare_start, t_lidar_prepare_end);
-          }
+      } else {
+        pipeline_timing.graph_lidar_factor_cache_miss_count++;
+        pipeline_timing.graph_lidar_factor_new_build_ms += elapsed_ms(t_lidar_prepare_start, t_lidar_prepare_end);
+      }
 
-          const auto t_lidar_attach_start = Clock::now();
-          active_lidar_gpu_kernel_factors.push_back(factor);
-          graph.add(factor);
-          if (marginalization_partition.should_marginalize_factor(make_key_vector(segment_keys))) {
-            marginalization_graph.add(factor);
-          }
-          const auto t_lidar_attach_end = Clock::now();
-          if (cache_hit && !target_refreshed) {
-            pipeline_timing.graph_lidar_factor_reused_attach_ms += elapsed_ms(t_lidar_attach_start, t_lidar_attach_end);
-          }
-          if (segment_ordinal == current_segment_ordinal) {
-            current_gpu_kernel_factor = factor;
-          }
-          pipeline_timing.graph_lidar_factor_ms += elapsed_ms(t_graph_lidar_start, Clock::now());
-          break;
+      if (use_authoritative_incremental_solver &&
+          !segment_newly_active &&
+          !cache_hit &&
+          incremental_segment_factor_indices_.count(segment.auxiliary_index) > 0) {
+        const auto factor_it = incremental_segment_factor_indices_.find(segment.auxiliary_index);
+        factors_to_remove.insert(
+          factors_to_remove.end(),
+          factor_it->second.begin(),
+          factor_it->second.end());
+        incremental_segment_factor_indices_.erase(factor_it);
+        segment_force_readd = true;
+      }
+
+      const bool segment_has_persistent_factors =
+        incremental_segment_factor_indices_.count(segment.auxiliary_index) > 0;
+      const bool segment_should_add =
+        !use_authoritative_incremental_solver || !segment_has_persistent_factors || segment_newly_active || segment_force_readd;
+
+      const auto t_lidar_attach_start = Clock::now();
+      active_lidar_gpu_kernel_factors.push_back(factor);
+      if (segment_should_add) {
+        graph.add(factor);
+        remember_added_segment_factor(segment.auxiliary_index);
+        if (marginalization_partition.should_marginalize_factor(make_key_vector(segment_keys))) {
+          marginalization_graph.add(factor);
         }
       }
+      const auto t_lidar_attach_end = Clock::now();
+      if (cache_hit && !target_refreshed && segment_should_add) {
+        pipeline_timing.graph_lidar_factor_reused_attach_ms += elapsed_ms(t_lidar_attach_start, t_lidar_attach_end);
+      }
+      if (segment_ordinal == current_segment_ordinal) {
+        current_gpu_kernel_factor = factor;
+      }
+      pipeline_timing.graph_lidar_factor_ms += elapsed_ms(t_graph_lidar_start, Clock::now());
 #else
       logger->error("CT_LIDAR_GPU requested but CUDA support is unavailable");
       return nullptr;
@@ -1711,19 +1758,29 @@ EstimationFrame::ConstPtr OdometryEstimationBSpline::insert_frame_ct_lidar(
 
     const auto t_graph_velocity_start = Clock::now();
     auto velocity_factor = get_or_create_velocity_factor(segment);
-    graph.add(velocity_factor);
-    if (marginalization_partition.should_marginalize_factor(make_key_vector(segment_keys, {velocity_key}))) {
-      marginalization_graph.add(velocity_factor);
+    const bool segment_has_persistent_factors =
+      use_authoritative_incremental_solver && incremental_segment_factor_indices_.count(segment.auxiliary_index) > 0;
+    const bool segment_should_add =
+      !use_authoritative_incremental_solver || !segment_has_persistent_factors || segment_newly_active || segment_force_readd;
+    if (segment_should_add) {
+      graph.add(velocity_factor);
+      remember_added_segment_factor(segment.auxiliary_index);
+      if (marginalization_partition.should_marginalize_factor(make_key_vector(segment_keys, {velocity_key}))) {
+        marginalization_graph.add(velocity_factor);
+      }
     }
     active_velocity_factor_count++;
     pipeline_timing.graph_velocity_factor_ms += elapsed_ms(t_graph_velocity_start, Clock::now());
 
     const auto t_imu_factor_start = Clock::now();
     for (const auto& imu_factor : get_or_create_imu_factors(segment)) {
-      graph.add(imu_factor);
-      if (marginalization_partition.should_marginalize_factor(
-            make_key_vector(segment_keys, {gyro_bias_key, accel_bias_key, gravity_key}))) {
-        marginalization_graph.add(imu_factor);
+      if (segment_should_add) {
+        graph.add(imu_factor);
+        remember_added_segment_factor(segment.auxiliary_index);
+        if (marginalization_partition.should_marginalize_factor(
+              make_key_vector(segment_keys, {gyro_bias_key, accel_bias_key, gravity_key}))) {
+          marginalization_graph.add(imu_factor);
+        }
       }
       active_imu_factor_count++;
     }
@@ -1737,17 +1794,23 @@ EstimationFrame::ConstPtr OdometryEstimationBSpline::insert_frame_ct_lidar(
       std::size_t segment_dop_factor_count = 0;
       ensure_gnss_factor_cache(segment, &segment_pr_factor_count, &segment_dop_factor_count);
       for (const auto& pr_factor : segment.cached_gnss_pr_factors) {
-        graph.add(pr_factor);
-        if (marginalization_partition.should_marginalize_factor(
-              make_key_vector(segment_keys, {clock_key, ecef_origin_key, ecef_rot_key}))) {
-          marginalization_graph.add(pr_factor);
+        if (segment_should_add) {
+          graph.add(pr_factor);
+          remember_added_segment_factor(segment.auxiliary_index);
+          if (marginalization_partition.should_marginalize_factor(
+                make_key_vector(segment_keys, {clock_key, ecef_origin_key, ecef_rot_key}))) {
+            marginalization_graph.add(pr_factor);
+          }
         }
       }
       for (const auto& dop_factor : segment.cached_gnss_dop_factors) {
-        graph.add(dop_factor);
-        if (marginalization_partition.should_marginalize_factor(
-              make_key_vector(segment_keys, {velocity_key, clock_key, ecef_rot_key}))) {
-          marginalization_graph.add(dop_factor);
+        if (segment_should_add) {
+          graph.add(dop_factor);
+          remember_added_segment_factor(segment.auxiliary_index);
+          if (marginalization_partition.should_marginalize_factor(
+                make_key_vector(segment_keys, {velocity_key, clock_key, ecef_rot_key}))) {
+            marginalization_graph.add(dop_factor);
+          }
         }
       }
       active_gnss_pr_factor_count += segment_pr_factor_count;
@@ -1755,11 +1818,14 @@ EstimationFrame::ConstPtr OdometryEstimationBSpline::insert_frame_ct_lidar(
       pipeline_timing.gnss_factor_assembly_ms += elapsed_ms(t_gnss_factor_start, Clock::now());
     }
 
+    if (segment_should_add) {
+      segment.force_incremental_readd = false;
+    }
+
   }
 
   if (!current_cpu_factor && 
 #ifdef GTSAM_POINTS_USE_CUDA
-      !current_gpu_factor &&
       !current_gpu_kernel_factor
 #else
       true
@@ -1783,11 +1849,13 @@ EstimationFrame::ConstPtr OdometryEstimationBSpline::insert_frame_ct_lidar(
   const auto& shared_state = fixed_lag_registry_.shared_state();
 
   const bool use_marginal_prior =
+    !use_authoritative_incremental_solver &&
     marginal_prior_.valid &&
     solve_domain_control_states.size() >= 2 &&
     solve_domain_control_states[0].index == marginal_prior_.control_indices[0] &&
     solve_domain_control_states[1].index == marginal_prior_.control_indices[1];
   const bool use_information_marginal_prior =
+    !use_authoritative_incremental_solver &&
     !marginal_prior_.carried_prior.empty() &&
     marginalization_partition.can_replay_keys(marginal_prior_.carried_prior.retained_keys, values);
 
@@ -1927,16 +1995,44 @@ EstimationFrame::ConstPtr OdometryEstimationBSpline::insert_frame_ct_lidar(
   pipeline_timing.graph_clock_factor_ms = elapsed_ms(t_graph_clock_factor_start, Clock::now());
   pipeline_timing.graph_build_ms = elapsed_ms(t_graph_build_start, Clock::now());
 
-  gtsam_points::LevenbergMarquardtExtParams lm_params;
-  lm_params.setlambdaInitial(1e-4);
-  lm_params.setAbsoluteErrorTol(1e-2);
-  lm_params.setMaxIterations(lm_max_iterations_);
-
   const auto t_optimize_start = Clock::now();
-  try {
-    values = gtsam_points::LevenbergMarquardtOptimizerExt(graph, values, lm_params).optimize();
-  } catch (const std::exception& e) {
-    logger->error("bspline ct frontend optimization failed: {}", e.what());
+  if (use_authoritative_incremental_solver) {
+    gtsam::Values incremental_new_values = incremental_delta.new_values;
+    for (const auto key : incremental_delta.new_keys) {
+      copy_bspline_value_if_present(incremental_new_values, values, key);
+    }
+    auto incremental_stamps = incremental_delta.new_stamps;
+
+    try {
+      smoother->update(
+        graph,
+        incremental_new_values,
+        incremental_stamps,
+        factors_to_remove);
+      const auto new_factor_indices = smoother->getISAM2Result().getNewFactorsIndices();
+      incremental_prior_factor_indices_.clear();
+      for (std::size_t i = 0; i < new_factor_indices.size(); ++i) {
+        if (i < added_segment_factor_owners.size()) {
+          incremental_segment_factor_indices_[added_segment_factor_owners[i]].push_back(new_factor_indices[i]);
+        } else {
+          incremental_prior_factor_indices_.push_back(new_factor_indices[i]);
+        }
+      }
+      values = smoother->calculateEstimate();
+    } catch (const std::exception& e) {
+      logger->error("bspline ct authoritative incremental update failed: {}", e.what());
+    }
+  } else {
+    gtsam_points::LevenbergMarquardtExtParams lm_params;
+    lm_params.setlambdaInitial(1e-4);
+    lm_params.setAbsoluteErrorTol(1e-2);
+    lm_params.setMaxIterations(lm_max_iterations_);
+
+    try {
+      values = gtsam_points::LevenbergMarquardtOptimizerExt(graph, values, lm_params).optimize();
+    } catch (const std::exception& e) {
+      logger->error("bspline ct frontend optimization failed: {}", e.what());
+    }
   }
   pipeline_timing.lm_optimize_ms = elapsed_ms(t_optimize_start, Clock::now());
 
@@ -1972,7 +2068,9 @@ EstimationFrame::ConstPtr OdometryEstimationBSpline::insert_frame_ct_lidar(
     prune_active_ct_state(min_active_stamp);
     pipeline_timing.prune_active_ms = elapsed_ms(t_prune_start, Clock::now());
   }
-  {
+  if (use_authoritative_incremental_solver) {
+    marginal_prior_ = ActiveSplineMarginalPrior();
+  } else {
     const auto t_carried_prior_update_start = Clock::now();
     update_marginal_prior_from_active_window();
     update_marginal_prior_information(
@@ -1990,11 +2088,7 @@ EstimationFrame::ConstPtr OdometryEstimationBSpline::insert_frame_ct_lidar(
     1,
     use_gpu_lidar
 #ifdef GTSAM_POINTS_USE_CUDA
-      ? (collect_window_lidar_results
-          ? (lidar_gpu_backend_ == BSplineGpuLidarBackend::BUCKET
-               ? active_lidar_gpu_factors.size()
-               : active_lidar_gpu_kernel_factors.size())
-          : 1U)
+      ? (collect_window_lidar_results ? active_lidar_gpu_kernel_factors.size() : 1U)
 #else
       ? 0
 #endif
@@ -2045,40 +2139,6 @@ EstimationFrame::ConstPtr OdometryEstimationBSpline::insert_frame_ct_lidar(
   };
 
 #ifdef GTSAM_POINTS_USE_CUDA
-  auto process_gpu_factor = [&](const std::shared_ptr<iap::IntegratedBSplineGICPFactorGPU>& factor, bool current_factor) {
-    const auto t_factor_error_start = Clock::now();
-    const double factor_error = factor->error(values);
-    pipeline_timing.post_lidar_factor_error_ms += elapsed_ms(t_factor_error_start, Clock::now());
-
-    const iap::BSplineLidarDegeneracyReport* degeneracy_ptr = nullptr;
-    if (lidar_warn_degeneracy_) {
-      const auto t_degeneracy_start = Clock::now();
-      current_gpu_degeneracy = factor->diagnose_degeneracy(lidar_degeneracy_thresholds_);
-      current_gpu_degeneracy_valid = current_gpu_degeneracy.valid;
-      pipeline_timing.post_lidar_degeneracy_ms += elapsed_ms(t_degeneracy_start, Clock::now());
-      degeneracy_ptr = &current_gpu_degeneracy;
-    }
-
-    const iap::BSplineLidarNumericAudit* numeric_ptr = nullptr;
-    if (lidar_profile_numeric_reference_ && current_factor) {
-      const auto t_numeric_start = Clock::now();
-      current_gpu_numeric_check = factor->check_against_numeric_full(values, lidar_numeric_reference_scale_);
-      current_gpu_numeric_check_valid = current_gpu_numeric_check.valid;
-      pipeline_timing.post_lidar_numeric_audit_ms += elapsed_ms(t_numeric_start, Clock::now());
-      numeric_ptr = &current_gpu_numeric_check;
-    }
-
-    const auto t_result_pack_start = Clock::now();
-    auto result = factor->make_result(factor_error, factor->num_inliers(), factor->inlier_fraction(), numeric_ptr, degeneracy_ptr);
-    pipeline_timing.post_lidar_result_pack_ms += elapsed_ms(t_result_pack_start, Clock::now());
-    if (current_factor) {
-      current_lidar_result = result;
-      current_gpu_degeneracy_valid = degeneracy_ptr && degeneracy_ptr->valid;
-      current_lidar_result_index = static_cast<int>(lidar_results.size());
-    }
-    lidar_results.push_back(std::move(result));
-  };
-
   auto process_gpu_kernel_factor = [&](const std::shared_ptr<iap::IntegratedBSplineGICPFactorGPUKernel>& factor, bool current_factor) {
     const auto t_factor_error_start = Clock::now();
     const double factor_error = factor->error(values);
@@ -2125,18 +2185,10 @@ EstimationFrame::ConstPtr OdometryEstimationBSpline::insert_frame_ct_lidar(
   } else {
 #ifdef GTSAM_POINTS_USE_CUDA
     if (collect_window_lidar_results) {
-      if (lidar_gpu_backend_ == BSplineGpuLidarBackend::BUCKET) {
-        for (const auto& factor : active_lidar_gpu_factors) {
-          process_gpu_factor(factor, factor == current_gpu_factor);
-        }
-      } else {
-        for (const auto& factor : active_lidar_gpu_kernel_factors) {
-          process_gpu_kernel_factor(factor, factor == current_gpu_kernel_factor);
-        }
+      for (const auto& factor : active_lidar_gpu_kernel_factors) {
+        process_gpu_kernel_factor(factor, factor == current_gpu_kernel_factor);
       }
-    } else if (lidar_gpu_backend_ == BSplineGpuLidarBackend::BUCKET && current_gpu_factor) {
-      process_gpu_factor(current_gpu_factor, true);
-    } else if (lidar_gpu_backend_ == BSplineGpuLidarBackend::KERNEL && current_gpu_kernel_factor) {
+    } else if (current_gpu_kernel_factor) {
       process_gpu_kernel_factor(current_gpu_kernel_factor, true);
     }
 #endif
@@ -2550,9 +2602,7 @@ EstimationFrame::ConstPtr OdometryEstimationBSpline::insert_frame_ct_lidar(
     deskewed_points = current_cpu_factor->deskewed_source_points(values, true);
   } else {
 #ifdef GTSAM_POINTS_USE_CUDA
-    if (lidar_gpu_backend_ == BSplineGpuLidarBackend::BUCKET) {
-      deskewed_points = current_gpu_factor->deskewed_source_points(values, true);
-    } else if (current_gpu_kernel_factor) {
+    if (current_gpu_kernel_factor) {
       deskewed_points = current_gpu_kernel_factor->deskewed_source_points(values, true);
     }
 #endif

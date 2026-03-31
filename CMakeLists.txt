@@ -60,7 +60,6 @@ if(BUILD_WITH_CUDA)
   else()
     set(GPU_SRCS
       src/iap/odometry/integrated_bspline_gicp_factor_gpu_kernel.cu
-      src/iap/odometry/integrated_bspline_gicp_factor_gpu.cpp
       src/iap/odometry/odometry_estimation_gpu.cpp)
   endif()
 endif()

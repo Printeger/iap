@@ -70,8 +70,18 @@
 > 如果你临时改了代码但还没决定它对应哪个需求，先把改动写在这里（提交前必须移入上表）。
 
 - 2026-03-31: IAP-RQ-020 / IAP-RQ-300 / IAP-RQ-410
+  - `CT_LIDAR_GPU + KERNEL` 现已完成本轮 README_REFACTOR 路线切换：旧 `IntegratedBSplineGICPFactorGPU` (`BUCKET`) 已从 `CMakeLists.txt`、运行时集成和 `test_bspline_gicp_factor.cpp` 中删除，公开配置也只保留 `ct_lidar_gpu_backend = KERNEL`。
+  - shared GNSS state / carried-prior 的长包阻断项已通过 headless KERNEL 回放验收：最新验证中未再出现 `key "e0"`、`ValuesKeyDoesNotExist`、`failed to build bspline marginal survivor prior`、`authoritative incremental update failed`，并且后段窗口不再出现 `gnss_pr_factors = 0 / gnss_dop_factors = 0` 的塌零。
+  - 为支撑上述验收，`IapSharedState` 与 `GnssHandler` 的 raw/epoch queue 容量已提升，`OdometryEstimationBSpline` 也已支持把迟到 epoch 回填到仍然活跃的 solve-domain segments，并在需要时触发 authoritative incremental factor re-add。
+
+- 2026-03-31: IAP-RQ-020 / IAP-RQ-300 / IAP-RQ-410
   - `OdometryEstimationBSpline` 现已进一步按 `BSplineSolveDomain` 收紧 control-point anchor / prediction / smoothness priors，只让当前 local solve-domain control span 进入这部分先验，而不再默认把整条历史 active-window control states 全部拖回当前 solve。
   - 这让当前 batch-compatible 求解壳在“图组织方式”上更接近 `README_REFACTOR_CT_SOLVER` 所要求的 GLIM-style local-domain / incremental fixed-lag 路线，即使 authoritative long-lived solver 仍未最终替换完成。
+
+- 2026-03-31: IAP-RQ-020 / IAP-RQ-300 / IAP-RQ-410
+  - `BSplineIncrementalSolverSkeleton` 现已开始按稳定的 solve-domain segment id（`auxiliary_index`）而不是临时 ordinal 跟踪 active/new/retired segments；这让 KERNEL authoritative 路径可以按稳定 owner 维护 local-domain segment-local factor inventory。
+  - `OdometryEstimationBSpline` 现已为 authoritative `CT_LIDAR_GPU + KERNEL` 路径维护 `incremental_segment_factor_indices_` 与 `incremental_prior_factor_indices_`：retired/replaced solve-domain segment 会显式 remove 对应 smoother factor indices，而仍然活跃的 solve-domain segment-local LiDAR / velocity / IMU / GNSS factors 则不会在每帧被整批 replace。
+  - 同一轮 headless 长包验证现已跑到 400+ frame，期间未再出现 `key "e0"`、`ValuesKeyDoesNotExist`、`failed to build bspline marginal survivor prior` 或 `authoritative incremental update failed`；这说明 shared-state / carried-prior 的阻断性 missing-key failure 已不再打断 KERNEL authoritative 路径，但 GNSS 后段 `factor_count = 0` 的现象仍需继续验收解释。
 
 - 2026-03-31: IAP-RQ-020 / IAP-RQ-300 / IAP-RQ-410
   - `ActiveSplineSegmentConstraint` 现已把 velocity / IMU / GNSS continuous-time factors 也收口进 per-segment 生命周期缓存；当前 batch-compatible 壳不再为同一 active solve-domain segment 每帧重新构造这些非 LiDAR 因子。

@@ -11,12 +11,9 @@
 ## 当前基线
 - 已具备 `OdometryEstimationBSpline`、active spline window、多 segment LiDAR factor、IMU factor、GNSS factor、velocity state、clock state、continuous trajectory publishing。
 - 当前系统已经可以运行最小可用的 spline-native `LiDAR + IMU + GNSS` 联合优化骨架。
-- `CT_LIDAR_GPU` 已形成双后端结构：
-  - `BUCKET` 已退为内部过渡基线，不再是公开 runtime 路线
-  - `KERNEL` 已完成第一版可运行 MVP，并接入 active-window odometry 主链与统一 result/profile/baseline surface
+- `CT_LIDAR_GPU` 现已只保留 `KERNEL` 生产后端；旧 `BUCKET` 已从公开配置、运行时接线和测试覆盖中移除。
 - 连续时间 odometry 求解器重构现额外受 [README_REFACTOR_CT_SOLVER.md](/home/dev/code/ws_iap/src/iap/docs/dev_ct/README_REFACTOR_CT_SOLVER.md) 约束：
-  - 公开配置默认只保留 `KERNEL`
-  - `BUCKET` 只允许内部 parity / 一次性 A/B 使用
+  - 公开配置只保留 `KERNEL`
   - 后续要继续从“每帧 full active-window batch graph”迁移到更接近 GLIM-style incremental fixed-lag + local CT solve domain 的组织方式
   - `BSplineIncrementalSolverSkeleton` 已开始显式追踪 active/new/retired CT solve-domain segments 与 key lifecycle，作为后续长期存活 fixed-lag solver owner 的兼容壳
   - `BSplineFixedLagStateRegistry::seed_clock_values(...)` 与 shared-state 前置 seeding 现已落下，开始把 `j / k / g / e / r / c` 的 authoritative ownership 前移到增量生命周期入口
@@ -27,7 +24,7 @@
   - 多类 Jacobian 仍是数值形式。
   - `gnss_extension` 仍保留部分长期 ownership。
   - mapping / 长时运行 / 退化恢复 / benchmark 还没有形成封板级验收。
-  - GPU odometry 还没有完成 `cached BUCKET vs KERNEL`、`KERNEL runtime vs diagnostic` 的同配置 A/B，也还没有完成 `KERNEL` 路径下 shared GNSS state 生命周期的长包验收。
+  - `KERNEL` 路径下 shared GNSS state 生命周期的长包验收已经通过；剩余主要是 solver/update 性能继续收尾。
 
 ## 总体目标
 1. 让 `OdometryEstimationBSpline` 成为连续时间 SLAM 的主 odometry，而不是局部 frontend 过渡层。
@@ -53,7 +50,7 @@
   - 文档改动
   - 验收命令
 - 优先保证状态组织和信息流正确，再追求 GPU 和性能优化。
-- 所有新功能默认保持对 legacy discrete / legacy CT-GICP 路径的并存兼容。
+- 所有新功能默认保持对 legacy discrete / CPU CT fallback 路径的并存兼容。
 
 ## 里程碑
 
@@ -108,7 +105,7 @@
 - 完善 correspondence / outlier / robust kernel 策略。
 - 统一 deskew、source time query、target covariance 使用方式。
 - 增加 profiling hook，为后续 GPU 版复用做接口准备。
-- 冻结 `BUCKET` 为稳定基线，并把 `KERNEL` 推进成真正可验收的 GPU 主线后端。
+- 保持 `KERNEL` 作为唯一 GPU 主线后端，并继续做性能/诊断收尾。
 - 保持 `runtime mode` 与 `diagnostic mode` 的显式边界：
   - runtime 默认只回收当前 factor
   - diagnostic 才执行整窗 result / CSV / numeric audit / degeneracy
@@ -122,7 +119,7 @@
 - LiDAR 因子不再依赖数值 pose Jacobian。
 - 新增单测覆盖 Jacobian 正确性和 correspondence 稳定性。
 - replay 下连续时间 LiDAR 因子的收敛质量不低于当前最小版本。
-- `cached BUCKET` 与 `KERNEL` 可在同一配置下导出统一 baseline CSV 并完成直接 A/B。
+- `KERNEL` 运行态与诊断态可在同一配置下导出统一 baseline CSV 并完成直接 A/B。
 - `KERNEL runtime` 的 `post_lidar_result_ms` 明显低于 `KERNEL diagnostic`。
 
 ### M3：IMU Continuous-Time 约束完成

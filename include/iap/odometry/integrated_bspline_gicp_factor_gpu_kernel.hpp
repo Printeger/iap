@@ -1,8 +1,8 @@
 #pragma once
 // IAP-RQ-300 / IAP-RQ-410:
-// Dedicated kernel-level GPU continuous-time LiDAR factor. Unlike the frozen
-// BUCKET backend, this factor evaluates per-point spline poses directly on the
-// GPU and accumulates a 24x24 system over the four control poses.
+// Dedicated kernel-level GPU continuous-time LiDAR factor. This factor
+// evaluates per-point spline poses directly on the GPU and accumulates a 24x24
+// system over the four control poses.
 
 #include <iap/odometry/bspline_control_window.hpp>
 #include <iap/odometry/bspline_lidar_factor_result.hpp>

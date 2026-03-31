@@ -13,12 +13,10 @@
     // Frontend mode:
     //   RECONSTRUCT   = phase-1A legacy path (discrete odom + post-hoc spline)
     //   CT_LIDAR_CPU  = phase-1B minimal path (control-point window + CPU CT LiDAR factor)
-    //   CT_LIDAR_GPU  = phase-1B/2 path (select GPU backend via ct_lidar_gpu_backend)
+    //   CT_LIDAR_GPU  = authoritative continuous-time GPU path
     "frontend_mode": "CT_LIDAR_GPU",
     // GPU backend for CT_LIDAR_GPU:
-    //   KERNEL = production continuous-time spline-native GPU LiDAR backend
-    // BUCKET is now internal-only for one-time parity work and is rejected in
-    // normal runtime unless IAP_ALLOW_DEPRECATED_BUCKET=1 is set explicitly.
+    //   KERNEL = the only supported continuous-time spline-native GPU LiDAR backend
     "ct_lidar_gpu_backend": "KERNEL",
     // Initialization params
     "initialization_mode": "LOOSE",
