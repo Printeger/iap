@@ -69,6 +69,11 @@
 ## 2. 未映射改动（临时区）
 > 如果你临时改了代码但还没决定它对应哪个需求，先把改动写在这里（提交前必须移入上表）。
 
+- 2026-03-31: IAP-RQ-300 / IAP-RQ-410
+  - `Commit 0` 现已先冻结迁移边界：`config_odometry_bspline.json` 与 `OdometryEstimationBSpline` 的缺省回退路径都明确以 `CT_LIDAR_CPU` 作为当前主线入口。
+  - GPU 路线的优先级说明已补入配置注释：CPU path 为后续 explicit-knot / unified-evaluator 重构主线，GPU `BUCKET` 第二优先，GPU `KERNEL` 保持 experimental 且最后适配。
+  - `odometry_estimation_bspline.hpp/.cpp` 顶部现已新增迁移注释，明确当前实现仍是 fixed 4-control-point local spline window，这一步只建立 guardrail/TODO 边界，不改变算法、残差模型、ROS/plugin 接口或日志关键字。
+
 - 2026-03-29: IAP-RQ-300 / IAP-RQ-410
   - `OdometryEstimationBSpline` 现已把 `BUCKET` frontend 分成 runtime / diagnostic 两种结果回收模式：默认运行态只回收当前 segment 的必要 LiDAR result，用于 `icp_quality` 和连续时间主链输出；整窗 full `make_result / aggregate / numeric audit / degeneracy` 只在 profile / CSV / warning 开关开启时执行。
   - active-window LiDAR factor 现已进入缓存复用阶段：CPU CT LiDAR factor 会在 active segment 生命周期内直接复用；GPU `BUCKET` factor 也会保留 source bucketization，仅在 target identity/revision 变化时刷新 target-side GPU resources。

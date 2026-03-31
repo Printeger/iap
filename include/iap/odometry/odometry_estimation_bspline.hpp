@@ -3,6 +3,14 @@
 // Phase-1 B-spline odometry module. Builds a continuous-time trajectory view
 // on top of the current LiDAR-IMU odometry pipeline without breaking legacy
 // discrete outputs consumed by mapping / viewer modules.
+//
+// Commit 0 migration boundary:
+// The current implementation still uses the fixed 4-control-point local spline
+// window as its operational path. Follow-up commits will migrate toward an
+// explicit knot vector plus unified spline evaluator shared by IMU, GNSS, and
+// LiDAR queries. This commit intentionally does not change algorithms,
+// residuals, public interfaces, ROS/plugin wiring, or logging keywords; it
+// only freezes the migration boundary and the CPU-first rollout order.
 
 #include <iap/odometry/bspline_control_window.hpp>
 #include <iap/odometry/bspline_fixed_lag_registry.hpp>
@@ -221,7 +229,9 @@ class OdometryEstimationBSpline : public OdometryEstimationCPU {
   double compatibility_sample_dt_ = 0.01;
   bool publish_shared_trajectory_ = true;
   bool attach_trajectory_to_frames_ = true;
-  std::string frontend_mode_ = "RECONSTRUCT";
+  // Commit 0 guardrail: keep CPU CT LiDAR as the default mainline whenever the
+  // config is missing, while preserving all legacy frontends as explicit opt-ins.
+  std::string frontend_mode_ = "CT_LIDAR_CPU";
   double max_correspondence_distance_ = 1.0;
   BSplineLidarTargetMode lidar_target_mode_ = BSplineLidarTargetMode::ACTIVE_WINDOW_SNAPSHOT;
   BSplineGpuLidarBackend lidar_gpu_backend_ = BSplineGpuLidarBackend::BUCKET;

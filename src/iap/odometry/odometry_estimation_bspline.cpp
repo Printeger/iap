@@ -1,4 +1,11 @@
 #include <iap/odometry/odometry_estimation_bspline.hpp>
+// Commit 0 migration boundary:
+// This translation unit still executes the existing fixed 4-control-point local
+// spline window path. Follow-up work will introduce an explicit knot vector and
+// a unified spline evaluator shared by IMU/GNSS/LiDAR factor assembly. For this
+// commit we only freeze the migration boundary and CPU-first frontend default;
+// math behavior, residual models, public interfaces, plugin names, shared-state
+// integration, ROS topics, and log keywords stay unchanged.
 
 #include <Eigen/Eigenvalues>
 
@@ -224,7 +231,7 @@ OdometryEstimationBSpline::OdometryEstimationBSpline(const OdometryEstimationBSp
   trajectory_params_.nominal_dt = params.spline_nominal_dt;
   trajectory_params_.finite_difference_dt = params.spline_finite_difference_dt;
   trajectory_params_.order = 3;
-  frontend_mode_ = config.param<std::string>("odometry_estimation", "frontend_mode", "RECONSTRUCT");
+  frontend_mode_ = config.param<std::string>("odometry_estimation", "frontend_mode", "CT_LIDAR_CPU");
   max_correspondence_distance_ = config.param<double>("odometry_estimation", "max_correspondence_distance", 1.5);
   lidar_target_mode_ = parse_lidar_target_mode(
     config.param<std::string>("odometry_estimation", "ct_lidar_target_mode", "ACTIVE_WINDOW_SNAPSHOT"));

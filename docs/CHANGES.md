@@ -3,6 +3,10 @@
 > 规则：任何代码改动必须在这里记录，并包含 IAP-RQ-XXX。
 
 ## Unreleased
+- chore(dev-ct-migration-boundary): IAP-RQ-300 / IAP-RQ-410 — freeze the CPU-first migration boundary for the upcoming explicit-knot spline refactor.
+  - `config_odometry_bspline.json` now makes `CT_LIDAR_CPU` the explicit default frontend again and documents the migration order: CPU mainline first, GPU `BUCKET` second, GPU `KERNEL` experimental/last.
+  - `odometry_estimation_bspline.hpp/.cpp` now carry top-level migration notes stating that the current runtime still uses the fixed 4-control-point local spline window and that this commit does not change residual math, public interfaces, ROS/plugin wiring, or logging keywords.
+  - The BSpline odometry frontend fallback path now also defaults to `CT_LIDAR_CPU` when the config key is absent, so the code-level guardrail matches the config-level default.
 - tool(dev-ct-mainline-lidar-baseline): IAP-RQ-300 / IAP-RQ-410 — add a reusable CT LiDAR baseline comparison script for cached-BUCKET vs KERNEL A/B runs.
   - Added `tools/compare_ct_lidar_baseline.py`, which reads one or more `ct_lidar_baseline.csv` exports, summarizes `window_summary` and current-factor metrics, and prints direct deltas across runs.
   - The script is intended for the GPU odometry finish phase where `cached BUCKET vs KERNEL` and `runtime vs diagnostic` need to be compared from the unified baseline CSV surface instead of by hand.

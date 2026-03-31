@@ -12,10 +12,18 @@
     "so_name": "libodometry_estimation_bspline.so",
     // Frontend mode:
     //   RECONSTRUCT   = phase-1A legacy path (discrete odom + post-hoc spline)
-    //   CT_LIDAR_CPU  = phase-1B minimal path (control-point window + CPU CT LiDAR factor)
+    //   CT_LIDAR_CPU  = phase-1B migration mainline (control-point window + CPU CT LiDAR factor)
     //   CT_LIDAR_GPU  = phase-1B/2 path (select GPU backend via ct_lidar_gpu_backend)
-    "frontend_mode": "CT_LIDAR_GPU",
+    // Commit 0 migration boundary:
+    //   default to CT_LIDAR_CPU while the codebase moves from the current
+    //   fixed 4-control-point local spline window toward an explicit knot
+    //   vector plus unified spline evaluator. This commit does not change
+    //   math behavior or residual models; it only freezes the migration order.
+    "frontend_mode": "CT_LIDAR_CPU",
     // GPU backend for CT_LIDAR_GPU:
+    //   CPU path is the refactor mainline.
+    //   BUCKET is the second-priority GPU adaptation path after the CPU path is stable.
+    //   KERNEL remains experimental and is the last path to align with unified spline query semantics.
     //   BUCKET = frozen engineering path; time-bucket GPU VGICP subfactors mapped back to 4 spline controls
     //   KERNEL = experimental independent kernel-level spline-native CT LiDAR backend
     "ct_lidar_gpu_backend": "BUCKET",
