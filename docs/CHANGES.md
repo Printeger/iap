@@ -3,6 +3,10 @@
 > 规则：任何代码改动必须在这里记录，并包含 IAP-RQ-XXX。
 
 ## Unreleased
+- feat(dev-ct-spline-core): IAP-RQ-300 / IAP-RQ-410 — add the first explicit-knot spline core types without switching the odometry runtime yet.
+  - Added `SplineSensorModel`, `SplineLocalSupport`, `SplineStateLayout`, and `SplineEvaluator` as the first unified spline-native core for explicit knots, sensor time offsets, sensor extrinsics, and span-local basis queries.
+  - `SplineStateLayout::support_at()` now resolves the active cubic span directly from the explicit knot vector instead of inferring it from a nominal segment duration, while `SplineEvaluator` provides uniform-cubic `basis / basis_d1 / basis_d2 / pose / world velocity / world acceleration`.
+  - `BSplineTrajectory` and `ContinuousTrajectoryView` were only lightly annotated to mark explicit knots as the future authoritative path; the existing planner/viewer snapshot adapter and the odometry runtime remain unchanged in this commit.
 - chore(dev-ct-migration-boundary): IAP-RQ-300 / IAP-RQ-410 — freeze the CPU-first migration boundary for the upcoming explicit-knot spline refactor.
   - `config_odometry_bspline.json` now makes `CT_LIDAR_CPU` the explicit default frontend again and documents the migration order: CPU mainline first, GPU `BUCKET` second, GPU `KERNEL` experimental/last.
   - `odometry_estimation_bspline.hpp/.cpp` now carry top-level migration notes stating that the current runtime still uses the fixed 4-control-point local spline window and that this commit does not change residual math, public interfaces, ROS/plugin wiring, or logging keywords.

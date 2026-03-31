@@ -70,6 +70,12 @@
 > 如果你临时改了代码但还没决定它对应哪个需求，先把改动写在这里（提交前必须移入上表）。
 
 - 2026-03-31: IAP-RQ-300 / IAP-RQ-410
+  - 已新增 `SplineSensorModel / SplineLocalSupport / SplineStateLayout / SplineEvaluator`，作为 explicit-knot / unified spline query 主线的第一批 core 类型。
+  - `SplineStateLayout::support_at()` 现已基于显式 knot vector 查找 active span，并产出 `ctrl_indices + pose_keys + query_time + u + dt`；不再依赖“隐式 nominal_dt 推 span”的旧假设。
+  - `SplineEvaluator` 第一版现已提供 uniform cubic `basis / basis_d1 / basis_d2`，以及 `eval_pose / eval_world_velocity / eval_world_acceleration`，其中 sensor time offset 和 pose extrinsic 已纳入统一查询入口。
+  - 现有 `BSplineTrajectory` / planner-facing `SplineWindowSnapshot` 只做了轻量注释级修改，旧发布/主流程尚未切到这套 core，上层运行时行为保持不变。
+
+- 2026-03-31: IAP-RQ-300 / IAP-RQ-410
   - `Commit 0` 现已先冻结迁移边界：`config_odometry_bspline.json` 与 `OdometryEstimationBSpline` 的缺省回退路径都明确以 `CT_LIDAR_CPU` 作为当前主线入口。
   - GPU 路线的优先级说明已补入配置注释：CPU path 为后续 explicit-knot / unified-evaluator 重构主线，GPU `BUCKET` 第二优先，GPU `KERNEL` 保持 experimental 且最后适配。
   - `odometry_estimation_bspline.hpp/.cpp` 顶部现已新增迁移注释，明确当前实现仍是 fixed 4-control-point local spline window，这一步只建立 guardrail/TODO 边界，不改变算法、残差模型、ROS/plugin 接口或日志关键字。

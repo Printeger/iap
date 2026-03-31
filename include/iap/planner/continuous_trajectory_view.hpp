@@ -59,6 +59,9 @@ struct SplineMeta {
 };
 
 struct SplineWindowSnapshot {
+  // Explicit knots are the authoritative spline-time layout whenever they are
+  // populated; later adapters may keep legacy uniform reconstruction only as a
+  // compatibility fallback.
   SplineMeta meta;
   std::vector<double> knots;
   std::vector<SplineControlPoint> control_points;

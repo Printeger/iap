@@ -14,8 +14,15 @@
 
 namespace iap {
 
+class SplineEvaluator;
+class SplineStateLayout;
+
 class BSplineTrajectory final : public ContinuousTrajectoryView, public SplineControlAccess {
  public:
+  // Commit 1 note:
+  // The explicit-knot SplineStateLayout / SplineEvaluator core now exists, but
+  // this adapter intentionally remains snapshot-driven until later commits
+  // switch the publication path onto the unified spline-native query stack.
   struct Params {
     SplineKnotMode knot_mode = SplineKnotMode::Uniform;
     int order = 3;

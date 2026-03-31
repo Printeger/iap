@@ -120,6 +120,7 @@ add_library(iap SHARED
   src/iap/odometry/bspline_control_window.cpp
   src/iap/odometry/bspline_marginalization.cpp
   src/iap/odometry/callbacks.cpp
+  src/iap/odometry/spline_evaluator.cpp
   src/iap/odometry/bspline_trajectory.cpp
   src/iap/odometry/estimation_frame.cpp
   src/iap/odometry/initial_state_estimation.cpp
