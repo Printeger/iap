@@ -21,6 +21,8 @@
   - 已开始推进到 `P3` 的 shared-state / carried-prior 收口：`BSplineFixedLagStateRegistry` 现已新增显式 `seed_clock_values(...)`，而 `OdometryEstimationBSpline` 现在会在 `BSplineIncrementalSolverSkeleton::prepare_update(...)` 之前，先把 shared `j / k / g / e / r` states 与 solve-domain 需要的 `c` keys 种入 authoritative `Values`
   - B-spline 路径现已通过 `reset_bspline_incremental_smoother()` 重置一套 CT 专用 smoother shell，并显式注册 `s / u / j / k / g / c / e / r` 的 relinearization policy；后续长期存活 incremental fixed-lag solver 不再只能沿用 legacy discrete-time 的 threshold 集
   - 已补上 `test_bspline_fixed_lag_registry` 的 solve-domain clock seeding 回归测试，覆盖 auxiliary-values reuse、clock propagation 和“已有值不被覆盖”的语义
+  - 当前 batch-compatible 壳又进一步开始把 factor lifecycle 从 per-scan batch 路径中剥离：velocity / IMU / GNSS factors 现已按 active segment 生命周期进入持久化 cache，`OdometryEstimationBSpline` 不再为同一 solve-domain segment 每帧重复构造这些非 LiDAR 因子
+  - 当前 batch-compatible 壳又进一步开始把 control-point priors 从“整窗默认回连”收紧到 local solve-domain：anchor / prediction / smoothness priors 现在只覆盖当前 solve-domain 的 control span，不再默认把历史 active-window control states 全部拖进当前 solve
 - 已完成 Phase 1A 的“连续时间骨架层”落地。
 - 已完成 Phase 1B 的最小可用版本：
   - 控制点窗口状态设计
@@ -174,6 +176,7 @@
   - 已落下 `BSplineIncrementalSolverSkeleton`，开始显式表达 segment/key add-remove 生命周期和 future smoother payload
   - 已落下 KERNEL shared-target GPU resource binding 与 handle-cache 语义
   - 已开始把 shared GNSS/ECEF/clock state ownership 从 batch-compatible 建图后半段前移到增量生命周期入口
+  - 已开始把 per-segment velocity / IMU / GNSS factor inventory 从每帧临时构造推进到 solve-domain 生命周期缓存
   - 尚未完成长期存活的 incremental fixed-lag solver
   - 尚未完成 shared target GPU handle 的统一 ownership
   - 也尚未删除内部过渡用的 `BUCKET` 代码

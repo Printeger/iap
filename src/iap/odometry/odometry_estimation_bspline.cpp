@@ -640,6 +640,41 @@ std::shared_ptr<iap::ISharedTargetHandle> OdometryEstimationBSpline::create_acti
   return handle;
 }
 
+void OdometryEstimationBSpline::refresh_active_target_handles() {
+  if (fixed_lag_registry_.segments().empty() ||
+      lidar_target_mode_ != BSplineLidarTargetMode::GLOBAL_IVOX_REFERENCE) {
+    return;
+  }
+
+  auto shared_handle = create_active_target_handle();
+  if (!shared_handle) {
+    return;
+  }
+
+  for (auto& segment : fixed_lag_registry_.segments()) {
+    if (segment.target_mode != BSplineLidarTargetMode::GLOBAL_IVOX_REFERENCE) {
+      continue;
+    }
+
+    if (segment.target_handle &&
+        segment.target_handle->identity() == shared_handle->identity() &&
+        segment.target_handle->revision() == shared_handle->revision()) {
+      continue;
+    }
+
+    segment.target_handle = shared_handle;
+    segment.target_snapshot = shared_handle->target_snapshot();
+    segment.target_tree = shared_handle->target_tree();
+    segment.target_frame_count = shared_handle->contributing_frames();
+    segment.target_point_count = shared_handle->point_count();
+    segment.snapshot_frame_count = shared_handle->snapshot_frame_count();
+    segment.snapshot_point_count = shared_handle->snapshot_point_count();
+    segment.snapshot_span_sec = shared_handle->snapshot_span_sec();
+    segment.snapshot_policy_accepted = shared_handle->snapshot_policy_accepted();
+    segment.target_build_ms = shared_handle->build_ms();
+  }
+}
+
 std::vector<OdometryEstimationBSpline::ActiveSplineIMUSample> OdometryEstimationBSpline::create_segment_imu_samples(
   const PreprocessedFrame::Ptr& raw_frame) const {
   std::vector<ActiveSplineIMUSample> samples;
@@ -904,6 +939,151 @@ bool OdometryEstimationBSpline::same_lidar_factor_cache_base(
          lhs.control_indices == rhs.control_indices &&
          lhs.source_identity == rhs.source_identity &&
          lhs.config_signature == rhs.config_signature;
+}
+
+std::shared_ptr<iap::IntegratedBSplineVelocityFactor> OdometryEstimationBSpline::get_or_create_velocity_factor(
+  ActiveSplineSegmentConstraint& segment) {
+  if (!segment.cached_velocity_factor) {
+    std::array<gtsam::Key, iap::kBSplineControlPointCount> segment_keys{};
+    for (std::size_t k = 0; k < iap::kBSplineControlPointCount; ++k) {
+      segment_keys[k] = iap::bspline_control_point_key(segment.control_indices[k]);
+    }
+
+    segment.cached_velocity_factor = std::make_shared<iap::IntegratedBSplineVelocityFactor>(
+      segment_keys,
+      iap::bspline_velocity_key(segment.auxiliary_index),
+      0.0,
+      std::max(1e-3, segment.scan_end - segment.stamp),
+      velocity_ct_inf_scale_,
+      trajectory_params_.finite_difference_dt);
+  }
+
+  return segment.cached_velocity_factor;
+}
+
+const std::vector<std::shared_ptr<iap::IntegratedBSplineIMUFactor>>& OdometryEstimationBSpline::get_or_create_imu_factors(
+  ActiveSplineSegmentConstraint& segment) {
+  if (segment.cached_imu_factors.empty() && !segment.imu_samples.empty()) {
+    std::array<gtsam::Key, iap::kBSplineControlPointCount> segment_keys{};
+    for (std::size_t k = 0; k < iap::kBSplineControlPointCount; ++k) {
+      segment_keys[k] = iap::bspline_control_point_key(segment.control_indices[k]);
+    }
+
+    segment.cached_imu_factors.reserve(segment.imu_samples.size());
+    for (const auto& imu_sample : segment.imu_samples) {
+      segment.cached_imu_factors.push_back(std::make_shared<iap::IntegratedBSplineIMUFactor>(
+        segment_keys,
+        bspline_gyro_bias_key(),
+        bspline_accel_bias_key(),
+        bspline_gravity_key(),
+        imu_sample.u,
+        std::max(1e-3, segment.scan_end - segment.stamp),
+        imu_sample.angular_vel,
+        imu_sample.linear_acc,
+        gtsam::Pose3(T_lidar_imu.matrix()),
+        imu_ct_trans_inf_scale_,
+        imu_ct_rot_inf_scale_,
+        trajectory_params_.finite_difference_dt));
+    }
+  }
+
+  return segment.cached_imu_factors;
+}
+
+void OdometryEstimationBSpline::ensure_gnss_factor_cache(
+  ActiveSplineSegmentConstraint& segment,
+  std::size_t* pr_factor_count,
+  std::size_t* dop_factor_count) {
+  if (pr_factor_count) {
+    *pr_factor_count = 0;
+  }
+  if (dop_factor_count) {
+    *dop_factor_count = 0;
+  }
+
+  if (!fixed_lag_registry_.shared_state().gnss_anchor_initialized || segment.gnss_epochs.empty()) {
+    return;
+  }
+
+  if (!segment.cached_gnss_pr_factors.empty() || !segment.cached_gnss_dop_factors.empty()) {
+    if (pr_factor_count) {
+      *pr_factor_count = segment.cached_gnss_pr_factors.size();
+    }
+    if (dop_factor_count) {
+      *dop_factor_count = segment.cached_gnss_dop_factors.size();
+    }
+    return;
+  }
+
+  std::array<gtsam::Key, iap::kBSplineControlPointCount> segment_keys{};
+  for (std::size_t k = 0; k < iap::kBSplineControlPointCount; ++k) {
+    segment_keys[k] = iap::bspline_control_point_key(segment.control_indices[k]);
+  }
+
+  const gtsam::Key velocity_key = iap::bspline_velocity_key(segment.auxiliary_index);
+  const gtsam::Key clock_key = iap::bspline_clock_key(segment.auxiliary_index);
+  const gtsam::Key ecef_origin_key = iap::bspline_ecef_origin_key();
+  const gtsam::Key ecef_rot_key = iap::bspline_ecef_rot_key();
+  const double segment_duration = std::max(1e-3, segment.scan_end - segment.stamp);
+  const auto& shared_state = fixed_lag_registry_.shared_state();
+
+  const auto gnss_pr_sigma = [&](const iap::SatObs& sat) {
+    const double canopy_sigma = iap::sigma_eff_canopy(gnss_canopy_params_, sat.kappa, sat.elevation);
+    return std::max({1e-3, sat.pr_sigma, canopy_sigma, gnss_pr_noise_base_});
+  };
+  const auto gnss_dop_sigma = [&](const iap::SatObs& sat) {
+    const double sin_el = std::sin(std::max(sat.elevation, gnss_min_elevation_));
+    const double modeled = gnss_dop_noise_base_ / std::pow(std::max(0.052, sin_el), gnss_elev_noise_exp_);
+    return std::max({1e-3, sat.dop_sigma, modeled});
+  };
+
+  for (const auto& epoch : segment.gnss_epochs) {
+    const double u = std::clamp((epoch.stamp - segment.stamp) / segment_duration, 0.0, 1.0);
+    for (const auto& sat : epoch.sats) {
+      if (sat.excluded || sat.elevation < gnss_min_elevation_) {
+        continue;
+      }
+
+      segment.cached_gnss_pr_factors.push_back(std::make_shared<iap::IntegratedBSplinePseudorangeFactor>(
+        segment_keys,
+        clock_key,
+        ecef_origin_key,
+        ecef_rot_key,
+        u,
+        sat.pr_meas,
+        sat.sat_pos,
+        sat.tgd,
+        epoch.gps_sec,
+        epoch.iono_params,
+        gnss_pr_sigma(sat),
+        gnss_lever_arm_,
+        sat.sat_id,
+        sat.constellation,
+        sat.elevation));
+
+      segment.cached_gnss_dop_factors.push_back(std::make_shared<iap::IntegratedBSplineDopplerFactor>(
+        segment_keys,
+        velocity_key,
+        clock_key,
+        ecef_rot_key,
+        u,
+        sat.dop_meas,
+        sat.sat_pos,
+        sat.sat_vel,
+        shared_state.ecef_origin,
+        gnss_dop_sigma(sat),
+        sat.sat_id,
+        sat.constellation,
+        sat.elevation));
+    }
+  }
+
+  if (pr_factor_count) {
+    *pr_factor_count = segment.cached_gnss_pr_factors.size();
+  }
+  if (dop_factor_count) {
+    *dop_factor_count = segment.cached_gnss_dop_factors.size();
+  }
 }
 
 std::shared_ptr<iap::IntegratedBSplineGICPFactor> OdometryEstimationBSpline::get_or_create_cpu_lidar_factor(
@@ -1244,6 +1424,7 @@ EstimationFrame::ConstPtr OdometryEstimationBSpline::insert_frame_ct_lidar(
       raw_frame->scan_end_time);
     pipeline_timing.gnss_epoch_fetch_ms = elapsed_ms(t_gnss_epoch_start, Clock::now());
   }
+  refresh_active_target_handles();
 
   gtsam::Values values = fixed_lag_registry_.control_buffer().values();
   fixed_lag_registry_.seed_shared_values(values, fixed_lag_registry_.shared_state().gnss_anchor_initialized);
@@ -1287,6 +1468,16 @@ EstimationFrame::ConstPtr OdometryEstimationBSpline::insert_frame_ct_lidar(
   const gtsam::Key gyro_bias_key = bspline_gyro_bias_key();
   const gtsam::Key accel_bias_key = bspline_accel_bias_key();
   const gtsam::Key gravity_key = bspline_gravity_key();
+  const auto solve_domain_control_keys = solve_domain.active_control_keys();
+  std::vector<iap::BSplineControlPointState> solve_domain_control_states;
+  solve_domain_control_states.reserve(solve_domain_control_keys.size());
+  for (const auto& state : active_states) {
+    const gtsam::Key key = iap::bspline_control_point_key(state.index);
+    if (std::find(solve_domain_control_keys.begin(), solve_domain_control_keys.end(), key) !=
+        solve_domain_control_keys.end()) {
+      solve_domain_control_states.push_back(state);
+    }
+  }
 
   gtsam::NonlinearFactorGraph graph;
   gtsam::NonlinearFactorGraph marginalization_graph;
@@ -1310,15 +1501,6 @@ EstimationFrame::ConstPtr OdometryEstimationBSpline::insert_frame_ct_lidar(
   std::vector<ActiveClockState> active_clock_states;
   const gtsam::Key ecef_origin_key = iap::bspline_ecef_origin_key();
   const gtsam::Key ecef_rot_key = iap::bspline_ecef_rot_key();
-  const auto gnss_pr_sigma = [&](const iap::SatObs& sat) {
-    const double canopy_sigma = iap::sigma_eff_canopy(gnss_canopy_params_, sat.kappa, sat.elevation);
-    return std::max({1e-3, sat.pr_sigma, canopy_sigma, gnss_pr_noise_base_});
-  };
-  const auto gnss_dop_sigma = [&](const iap::SatObs& sat) {
-    const double sin_el = std::sin(std::max(sat.elevation, gnss_min_elevation_));
-    const double modeled = gnss_dop_noise_base_ / std::pow(std::max(0.052, sin_el), gnss_elev_noise_exp_);
-    return std::max({1e-3, sat.dop_sigma, modeled});
-  };
   auto segment_poses_from_values = [&](const ActiveSplineSegmentConstraint& segment) {
     std::array<gtsam::Pose3, iap::kBSplineControlPointCount> poses;
     for (std::size_t k = 0; k < iap::kBSplineControlPointCount; ++k) {
@@ -1528,13 +1710,7 @@ EstimationFrame::ConstPtr OdometryEstimationBSpline::insert_frame_ct_lidar(
     }
 
     const auto t_graph_velocity_start = Clock::now();
-    auto velocity_factor = std::make_shared<iap::IntegratedBSplineVelocityFactor>(
-      segment_keys,
-      velocity_key,
-      0.0,
-      std::max(1e-3, segment.scan_end - segment.stamp),
-      velocity_ct_inf_scale_,
-      trajectory_params_.finite_difference_dt);
+    auto velocity_factor = get_or_create_velocity_factor(segment);
     graph.add(velocity_factor);
     if (marginalization_partition.should_marginalize_factor(make_key_vector(segment_keys, {velocity_key}))) {
       marginalization_graph.add(velocity_factor);
@@ -1543,20 +1719,7 @@ EstimationFrame::ConstPtr OdometryEstimationBSpline::insert_frame_ct_lidar(
     pipeline_timing.graph_velocity_factor_ms += elapsed_ms(t_graph_velocity_start, Clock::now());
 
     const auto t_imu_factor_start = Clock::now();
-    for (const auto& imu_sample : segment.imu_samples) {
-      auto imu_factor = std::make_shared<iap::IntegratedBSplineIMUFactor>(
-        segment_keys,
-        gyro_bias_key,
-        accel_bias_key,
-        gravity_key,
-        imu_sample.u,
-        std::max(1e-3, segment.scan_end - segment.stamp),
-        imu_sample.angular_vel,
-        imu_sample.linear_acc,
-        gtsam::Pose3(T_lidar_imu.matrix()),
-        imu_ct_trans_inf_scale_,
-        imu_ct_rot_inf_scale_,
-        trajectory_params_.finite_difference_dt);
+    for (const auto& imu_factor : get_or_create_imu_factors(segment)) {
       graph.add(imu_factor);
       if (marginalization_partition.should_marginalize_factor(
             make_key_vector(segment_keys, {gyro_bias_key, accel_bias_key, gravity_key}))) {
@@ -1570,60 +1733,25 @@ EstimationFrame::ConstPtr OdometryEstimationBSpline::insert_frame_ct_lidar(
       const auto t_gnss_factor_start = Clock::now();
       const gtsam::Key clock_key = iap::bspline_clock_key(segment.auxiliary_index);
       active_clock_states.push_back(ActiveClockState{clock_key, segment.stamp, values.at<gtsam::Vector2>(clock_key)});
-
-      const double segment_duration = std::max(1e-3, segment.scan_end - segment.stamp);
-      for (const auto& epoch : segment.gnss_epochs) {
-        const double u = std::clamp((epoch.stamp - segment.stamp) / segment_duration, 0.0, 1.0);
-        for (const auto& sat : epoch.sats) {
-          if (sat.excluded || sat.elevation < gnss_min_elevation_) {
-            continue;
-          }
-
-          auto pr_factor = std::make_shared<iap::IntegratedBSplinePseudorangeFactor>(
-            segment_keys,
-            clock_key,
-            ecef_origin_key,
-            ecef_rot_key,
-            u,
-            sat.pr_meas,
-            sat.sat_pos,
-            sat.tgd,
-            epoch.gps_sec,
-            epoch.iono_params,
-            gnss_pr_sigma(sat),
-            gnss_lever_arm_,
-            sat.sat_id,
-            sat.constellation,
-            sat.elevation);
-          graph.add(pr_factor);
-          if (marginalization_partition.should_marginalize_factor(
-                make_key_vector(segment_keys, {clock_key, ecef_origin_key, ecef_rot_key}))) {
-            marginalization_graph.add(pr_factor);
-          }
-          active_gnss_pr_factor_count++;
-
-          auto dop_factor = std::make_shared<iap::IntegratedBSplineDopplerFactor>(
-            segment_keys,
-            velocity_key,
-            clock_key,
-            ecef_rot_key,
-            u,
-            sat.dop_meas,
-            sat.sat_pos,
-            sat.sat_vel,
-            fixed_lag_registry_.shared_state().ecef_origin,
-            gnss_dop_sigma(sat),
-            sat.sat_id,
-            sat.constellation,
-            sat.elevation);
-          graph.add(dop_factor);
-          if (marginalization_partition.should_marginalize_factor(
-                make_key_vector(segment_keys, {velocity_key, clock_key, ecef_rot_key}))) {
-            marginalization_graph.add(dop_factor);
-          }
-          active_gnss_dop_factor_count++;
+      std::size_t segment_pr_factor_count = 0;
+      std::size_t segment_dop_factor_count = 0;
+      ensure_gnss_factor_cache(segment, &segment_pr_factor_count, &segment_dop_factor_count);
+      for (const auto& pr_factor : segment.cached_gnss_pr_factors) {
+        graph.add(pr_factor);
+        if (marginalization_partition.should_marginalize_factor(
+              make_key_vector(segment_keys, {clock_key, ecef_origin_key, ecef_rot_key}))) {
+          marginalization_graph.add(pr_factor);
         }
       }
+      for (const auto& dop_factor : segment.cached_gnss_dop_factors) {
+        graph.add(dop_factor);
+        if (marginalization_partition.should_marginalize_factor(
+              make_key_vector(segment_keys, {velocity_key, clock_key, ecef_rot_key}))) {
+          marginalization_graph.add(dop_factor);
+        }
+      }
+      active_gnss_pr_factor_count += segment_pr_factor_count;
+      active_gnss_dop_factor_count += segment_dop_factor_count;
       pipeline_timing.gnss_factor_assembly_ms += elapsed_ms(t_gnss_factor_start, Clock::now());
     }
 
@@ -1656,9 +1784,9 @@ EstimationFrame::ConstPtr OdometryEstimationBSpline::insert_frame_ct_lidar(
 
   const bool use_marginal_prior =
     marginal_prior_.valid &&
-    active_states.size() >= 2 &&
-    active_states[0].index == marginal_prior_.control_indices[0] &&
-    active_states[1].index == marginal_prior_.control_indices[1];
+    solve_domain_control_states.size() >= 2 &&
+    solve_domain_control_states[0].index == marginal_prior_.control_indices[0] &&
+    solve_domain_control_states[1].index == marginal_prior_.control_indices[1];
   const bool use_information_marginal_prior =
     !marginal_prior_.carried_prior.empty() &&
     marginalization_partition.can_replay_keys(marginal_prior_.carried_prior.retained_keys, values);
@@ -1683,12 +1811,12 @@ EstimationFrame::ConstPtr OdometryEstimationBSpline::insert_frame_ct_lidar(
 
   if (!information_prior_attached && use_marginal_prior) {
     auto pose_prior = std::make_shared<gtsam::PriorFactor<gtsam::Pose3>>(
-      iap::bspline_control_point_key(active_states[0].index),
+      iap::bspline_control_point_key(solve_domain_control_states[0].index),
       marginal_prior_.first_pose,
       marginal_noise);
     auto delta_prior = std::make_shared<gtsam::BetweenFactor<gtsam::Pose3>>(
-      iap::bspline_control_point_key(active_states[0].index),
-      iap::bspline_control_point_key(active_states[1].index),
+      iap::bspline_control_point_key(solve_domain_control_states[0].index),
+      iap::bspline_control_point_key(solve_domain_control_states[1].index),
       marginal_prior_.relative_delta,
       marginal_noise);
     graph.add(pose_prior);
@@ -1703,24 +1831,24 @@ EstimationFrame::ConstPtr OdometryEstimationBSpline::insert_frame_ct_lidar(
       graph.add(velocity_prior);
       marginalization_graph.add(velocity_prior);
     }
-  } else if (!active_states.empty()) {
+  } else if (!solve_domain_control_states.empty()) {
     graph.emplace_shared<gtsam::PriorFactor<gtsam::Pose3>>(
-      iap::bspline_control_point_key(active_states.front().index),
-      active_states.front().pose,
+      iap::bspline_control_point_key(solve_domain_control_states.front().index),
+      solve_domain_control_states.front().pose,
       anchor_noise);
-    if (active_states.size() >= 2) {
+    if (solve_domain_control_states.size() >= 2) {
       graph.emplace_shared<gtsam::PriorFactor<gtsam::Pose3>>(
-        iap::bspline_control_point_key(active_states[1].index),
-        active_states[1].pose,
+        iap::bspline_control_point_key(solve_domain_control_states[1].index),
+        solve_domain_control_states[1].pose,
       anchor_noise);
     }
   }
   pipeline_timing.carried_prior_attach_ms = elapsed_ms(t_carried_prior_attach_start, Clock::now());
 
   const auto t_graph_prediction_prior_start = Clock::now();
-  if (active_states.size() >= 2) {
-    const auto& pred_a = active_states[active_states.size() - 2];
-    const auto& pred_b = active_states.back();
+  if (solve_domain_control_states.size() >= 2) {
+    const auto& pred_a = solve_domain_control_states[solve_domain_control_states.size() - 2];
+    const auto& pred_b = solve_domain_control_states.back();
     graph.emplace_shared<gtsam::PriorFactor<gtsam::Pose3>>(
       iap::bspline_control_point_key(pred_a.index),
       pred_a.pose,
@@ -1733,13 +1861,13 @@ EstimationFrame::ConstPtr OdometryEstimationBSpline::insert_frame_ct_lidar(
   pipeline_timing.graph_prediction_prior_ms = elapsed_ms(t_graph_prediction_prior_start, Clock::now());
 
   const auto t_graph_smoothness_start = Clock::now();
-  for (std::size_t i = 0; i + 1 < active_states.size(); ++i) {
-    const gtsam::Key key_i = iap::bspline_control_point_key(active_states[i].index);
-    const gtsam::Key key_j = iap::bspline_control_point_key(active_states[i + 1].index);
+  for (std::size_t i = 0; i + 1 < solve_domain_control_states.size(); ++i) {
+    const gtsam::Key key_i = iap::bspline_control_point_key(solve_domain_control_states[i].index);
+    const gtsam::Key key_j = iap::bspline_control_point_key(solve_domain_control_states[i + 1].index);
     auto smooth_factor = std::make_shared<gtsam::BetweenFactor<gtsam::Pose3>>(
       key_i,
       key_j,
-      active_states[i].pose.between(active_states[i + 1].pose),
+      solve_domain_control_states[i].pose.between(solve_domain_control_states[i + 1].pose),
       smooth_noise);
     graph.add(smooth_factor);
     if (marginalization_partition.should_marginalize_factor(gtsam::KeyVector{key_i, key_j})) {

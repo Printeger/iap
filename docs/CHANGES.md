@@ -3,6 +3,13 @@
 > 规则：任何代码改动必须在这里记录，并包含 IAP-RQ-XXX。
 
 ## Unreleased
+- feat(dev-ct-refactor-local-priors): IAP-RQ-020 / IAP-RQ-300 / IAP-RQ-410 — tighten the batch-compatible BSpline solver shell so control-point priors obey the local solve-domain.
+  - `OdometryEstimationBSpline` now derives a solve-domain control span from `BSplineSolveDomain` and uses that local control set for anchor priors, prediction priors, and smoothness factors.
+  - The current batch-compatible path therefore stops reconnecting the whole historical active-window control span into every solve, which moves the graph organization one step closer to the intended GLIM-style incremental fixed-lag route described in `README_REFACTOR_CT_SOLVER.md`.
+- feat(dev-ct-refactor-factor-cache): IAP-RQ-020 / IAP-RQ-300 / IAP-RQ-410 — continue moving per-segment factor ownership out of the per-scan batch path.
+  - `ActiveSplineSegmentConstraint` now keeps persistent caches for velocity, IMU, and GNSS CT factors in addition to the existing LiDAR-factor cache.
+  - `OdometryEstimationBSpline` now reuses those per-segment factor objects across repeated solve-domain visits instead of reconstructing velocity / IMU / GNSS factors for every active segment on every scan.
+  - This keeps the current batch-compatible solve shell intact while moving more of the local-domain factor lifecycle toward the future authoritative incremental fixed-lag solver owner described in `README_REFACTOR_CT_SOLVER.md`.
 - feat(dev-ct-refactor-shared-state): IAP-RQ-020 / IAP-RQ-300 / IAP-RQ-410 — move shared-state and clock ownership closer to the future authoritative incremental CT solver path.
   - Added `BSplineFixedLagStateRegistry::seed_clock_values(...)`, which seeds solve-domain clock states into `gtsam::Values` by reusing auxiliary snapshots when available and propagating bias/drift across contiguous active segments when they are not.
   - `OdometryEstimationBSpline` now seeds shared GNSS/ECEF alignment states (`j / k / g / e / r`) plus the solve-domain clock keys before `BSplineIncrementalSolverSkeleton::prepare_update(...)`, so the incremental lifecycle skeleton observes the same authoritative key set that future carried-prior replay and key-retirement logic will use.

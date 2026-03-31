@@ -70,6 +70,14 @@
 > 如果你临时改了代码但还没决定它对应哪个需求，先把改动写在这里（提交前必须移入上表）。
 
 - 2026-03-31: IAP-RQ-020 / IAP-RQ-300 / IAP-RQ-410
+  - `OdometryEstimationBSpline` 现已进一步按 `BSplineSolveDomain` 收紧 control-point anchor / prediction / smoothness priors，只让当前 local solve-domain control span 进入这部分先验，而不再默认把整条历史 active-window control states 全部拖回当前 solve。
+  - 这让当前 batch-compatible 求解壳在“图组织方式”上更接近 `README_REFACTOR_CT_SOLVER` 所要求的 GLIM-style local-domain / incremental fixed-lag 路线，即使 authoritative long-lived solver 仍未最终替换完成。
+
+- 2026-03-31: IAP-RQ-020 / IAP-RQ-300 / IAP-RQ-410
+  - `ActiveSplineSegmentConstraint` 现已把 velocity / IMU / GNSS continuous-time factors 也收口进 per-segment 生命周期缓存；当前 batch-compatible 壳不再为同一 active solve-domain segment 每帧重新构造这些非 LiDAR 因子。
+  - `OdometryEstimationBSpline` 现在会复用 cached velocity factor、cached IMU factor 列表以及 cached GNSS factor 列表，并继续与已存在的 LiDAR factor cache 协同工作，从而把更多 factor ownership 从 per-scan batch 建图逻辑前移到 solve-domain 生命周期层。
+
+- 2026-03-31: IAP-RQ-020 / IAP-RQ-300 / IAP-RQ-410
   - `BSplineFixedLagStateRegistry` 现已新增 `seed_clock_values(...)`，开始把 solve-domain 所需的 segment clock states 显式种入 authoritative `Values`，而不是只在 batch-compatible 建图后半段按需补齐。
   - `OdometryEstimationBSpline` 现在会在 `BSplineIncrementalSolverSkeleton::prepare_update(...)` 之前，先种 shared `j / k / g / e / r` states 和局部求解域真正需要的 `c` keys，使 future incremental fixed-lag solver / carried-prior replay / key retirement 能共享同一份 authoritative key set。
   - B-spline 路径现已通过 `reset_bspline_incremental_smoother()` 重置一套 CT 专用 smoother shell，并显式注册 `s / u / j / k / g / c / e / r` 的 relinearization policy，避免未来长期存活 incremental solver 继续隐式沿用 legacy discrete-time threshold 集。

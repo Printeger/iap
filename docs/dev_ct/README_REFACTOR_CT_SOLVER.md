@@ -61,6 +61,8 @@ Current status:
 - `BSplineIncrementalSolverSkeleton` 已落下，开始显式追踪 local solve-domain 的 active/new/retired segments、new/retired keys，以及未来增量 fixed-lag solver 所需的 `new_values / new_stamps` 生命周期载荷。
 - `BSplineFixedLagStateRegistry::seed_clock_values(...)` 已落下；`OdometryEstimationBSpline` 现在会在 `BSplineIncrementalSolverSkeleton::prepare_update(...)` 之前，先把 shared `j / k / g / e / r` states 和 solve-domain 需要的 `c` keys 显式种入 authoritative `Values`。
 - B-spline 路径现在会通过 `reset_bspline_incremental_smoother()` 重置一套 CT 专用 smoother shell，并显式注册 `s / u / j / k / g / c / e / r` 的 relinearization policy，未来长期存活 incremental fixed-lag solver 不再只能继承 legacy discrete-time 的 threshold 集。
+- per-segment 的 velocity / IMU / GNSS factors 现已开始收口成持久化 cache；`OdometryEstimationBSpline` 不再每帧都为同一 active solve-domain segment 重新 `make_shared` 这些非 LiDAR 因子，而是开始复用 segment 生命周期内稳定的 factor inventory。
+- control-point anchor / prediction / smoothness priors 现已开始按 local solve-domain 控制点集合收口；batch-compatible 壳不再默认把整条历史 active-window control span 全部通过先验重新拖进当前 solve。
 - 真正 authoritative 的长期存活 incremental fixed-lag solver 仍未完成；当前仍处于 batch-compatible 过渡壳，但 solver lifetime 和 key/segment 生命周期接口已不再只是文档概念。
 
 ### P3. Shared-state and carried-prior stabilization

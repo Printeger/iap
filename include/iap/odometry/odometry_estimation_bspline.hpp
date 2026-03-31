@@ -161,6 +161,10 @@ class OdometryEstimationBSpline : public OdometryEstimationCPU {
     std::vector<iap::GnssEpoch> gnss_epochs;
     ActiveSplineLidarFactorCacheKey lidar_factor_cache;
     std::shared_ptr<iap::IntegratedBSplineGICPFactor> cached_cpu_factor;
+    std::shared_ptr<iap::IntegratedBSplineVelocityFactor> cached_velocity_factor;
+    std::vector<std::shared_ptr<iap::IntegratedBSplineIMUFactor>> cached_imu_factors;
+    std::vector<std::shared_ptr<iap::IntegratedBSplinePseudorangeFactor>> cached_gnss_pr_factors;
+    std::vector<std::shared_ptr<iap::IntegratedBSplineDopplerFactor>> cached_gnss_dop_factors;
 #ifdef GTSAM_POINTS_USE_CUDA
     std::shared_ptr<iap::IntegratedBSplineGICPFactorGPU> cached_gpu_bucket_factor;
     std::shared_ptr<iap::IntegratedBSplineGICPFactorGPUKernel> cached_gpu_kernel_factor;
@@ -191,6 +195,7 @@ class OdometryEstimationBSpline : public OdometryEstimationCPU {
   gtsam_points::PointCloud::ConstPtr create_lidar_source_cloud(const PreprocessedFrame::Ptr& raw_frame) const;
   ActiveSplineTargetReference create_active_target_reference() const;
   std::shared_ptr<iap::ISharedTargetHandle> create_active_target_handle();
+  void refresh_active_target_handles();
   std::vector<ActiveSplineIMUSample> create_segment_imu_samples(const PreprocessedFrame::Ptr& raw_frame) const;
   void sync_gnss_epochs_from_shared_state();
   std::vector<iap::GnssEpoch> consume_segment_gnss_epochs(double segment_start, double segment_end);
@@ -223,6 +228,14 @@ class OdometryEstimationBSpline : public OdometryEstimationCPU {
   bool same_lidar_factor_cache_base(
     const ActiveSplineLidarFactorCacheKey& lhs,
     const ActiveSplineLidarFactorCacheKey& rhs) const;
+  std::shared_ptr<iap::IntegratedBSplineVelocityFactor> get_or_create_velocity_factor(
+    ActiveSplineSegmentConstraint& segment);
+  const std::vector<std::shared_ptr<iap::IntegratedBSplineIMUFactor>>& get_or_create_imu_factors(
+    ActiveSplineSegmentConstraint& segment);
+  void ensure_gnss_factor_cache(
+    ActiveSplineSegmentConstraint& segment,
+    std::size_t* pr_factor_count = nullptr,
+    std::size_t* dop_factor_count = nullptr);
   std::shared_ptr<iap::IntegratedBSplineGICPFactor> get_or_create_cpu_lidar_factor(
     ActiveSplineSegmentConstraint& segment,
     bool* cache_hit);
