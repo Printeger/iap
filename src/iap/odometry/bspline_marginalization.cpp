@@ -220,6 +220,15 @@ BSplineMarginalizationPartition build_bspline_marginalization_partition(
       continue;
     }
 
+    for (const auto control_index : segment.active_control_indices) {
+      if (!has_index(partition.survivor_control_indices, control_index)) {
+        partition.survivor_control_indices.push_back(control_index);
+      }
+      if (values.exists(bspline_control_point_key(control_index))) {
+        append_unique_key(partition.survivor_keys, bspline_control_point_key(control_index));
+      }
+    }
+
     if (!has_index(partition.survivor_auxiliary_indices, segment.auxiliary_index)) {
       partition.survivor_auxiliary_indices.push_back(segment.auxiliary_index);
     }

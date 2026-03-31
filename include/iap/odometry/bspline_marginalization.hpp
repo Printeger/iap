@@ -17,6 +17,9 @@ namespace iap {
 
 struct BSplineMarginalizationSegmentState {
   double scan_end = 0.0;
+  int span_begin_idx = -1;
+  int span_end_idx = -1;
+  std::vector<std::size_t> active_control_indices;
   std::array<std::size_t, kBSplineControlPointCount> control_indices{};
   std::size_t auxiliary_index = 0;
 };

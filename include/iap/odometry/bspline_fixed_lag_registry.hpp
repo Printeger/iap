@@ -21,6 +21,9 @@ namespace iap {
 struct BSplineFixedLagSegmentState {
   double stamp = 0.0;
   double scan_end = 0.0;
+  int span_begin_idx = -1;
+  int span_end_idx = -1;
+  std::vector<std::size_t> active_control_indices;
   std::array<std::size_t, kBSplineControlPointCount> control_indices{};
   std::size_t auxiliary_index = 0;
 };
@@ -148,6 +151,9 @@ class BSplineFixedLagStateRegistryT {
     for (const auto& segment : segments_) {
       BSplineMarginalizationSegmentState state;
       state.scan_end = segment.scan_end;
+      state.span_begin_idx = segment.span_begin_idx;
+      state.span_end_idx = segment.span_end_idx;
+      state.active_control_indices = segment.active_control_indices;
       state.control_indices = segment.control_indices;
       state.auxiliary_index = segment.auxiliary_index;
       states.push_back(state);

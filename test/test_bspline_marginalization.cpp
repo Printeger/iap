@@ -49,23 +49,22 @@ std::vector<iap::BSplineControlPointState> make_buffer_states() {
 }
 
 std::vector<iap::BSplineMarginalizationSegmentState> make_segment_states() {
-  return {
-    iap::BSplineMarginalizationSegmentState{
-      2.5,
-      {0, 1, 2, 3},
-      1,
-    },
-    iap::BSplineMarginalizationSegmentState{
-      4.5,
-      {3, 4, 5, 6},
-      4,
-    },
-    iap::BSplineMarginalizationSegmentState{
-      6.5,
-      {4, 5, 6, 7},
-      6,
-    },
-  };
+  std::vector<iap::BSplineMarginalizationSegmentState> states(3);
+  states[0].scan_end = 2.5;
+  states[0].active_control_indices = {0, 1, 2, 3};
+  states[0].control_indices = {0, 1, 2, 3};
+  states[0].auxiliary_index = 1;
+
+  states[1].scan_end = 4.5;
+  states[1].active_control_indices = {3, 4, 5, 6};
+  states[1].control_indices = {3, 4, 5, 6};
+  states[1].auxiliary_index = 4;
+
+  states[2].scan_end = 6.5;
+  states[2].active_control_indices = {4, 5, 6, 7};
+  states[2].control_indices = {4, 5, 6, 7};
+  states[2].auxiliary_index = 6;
+  return states;
 }
 
 }  // namespace

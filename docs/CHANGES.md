@@ -3,6 +3,10 @@
 > 规则：任何代码改动必须在这里记录，并包含 IAP-RQ-XXX。
 
 ## Unreleased
+- feat(dev-ct-window-manager): IAP-RQ-300 / IAP-RQ-410 — upgrade the B-spline control window and registry representation toward explicit-knot active-window management.
+  - `BSplineControlWindow` now owns `std::vector<BSplineControlPointState>` plus explicit `knots`, and adds `seed_uniform`, `seed_with_knots`, `extend_to`, `support_at`, and `supports_in_range` while keeping `initialize / advance / evaluate / keys / poses` as legacy-compatible wrappers.
+  - `BSplineFixedLagSegmentState` and `BSplineMarginalizationSegmentState` now carry `span_begin_idx / span_end_idx / active_control_indices` in addition to the old fixed `control_indices` compatibility field, so the fixed-lag registry can describe multi-span active-control sets instead of only one `array<4>` segment view.
+  - The marginalization partition path now honors `active_control_indices` when marking survivor control keys, but the existing odometry assembly still compiles against the retained legacy wrappers in this commit.
 - feat(dev-ct-trajectory-explicit-knots): IAP-RQ-300 / IAP-RQ-410 — upgrade `BSplineTrajectory` to treat explicit-knot snapshots/layouts as the primary adapter input.
   - Added `BSplineTrajectory::set_snapshot(...)` and `set_layout(...)`, so the planner/viewer trajectory adapter can now consume an explicit-knot `SplineWindowSnapshot` or a `SplineStateLayout + Values` snapshot directly.
   - `sample() / latest_sample() / sample_range() / clone_window() / knot_vector()` now prefer the explicit-knot snapshot/layout state, while the old `set_control_points()` path only remains as a compatibility wrapper that rebuilds a snapshot and forwards to the new path.

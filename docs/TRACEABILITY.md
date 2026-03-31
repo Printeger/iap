@@ -70,6 +70,12 @@
 > 如果你临时改了代码但还没决定它对应哪个需求，先把改动写在这里（提交前必须移入上表）。
 
 - 2026-03-31: IAP-RQ-300 / IAP-RQ-410
+  - `BSplineControlWindow` 内部状态现已从固定 `array<4>` 升级为 `explicit knots + vector<BSplineControlPointState>`，并新增 `seed_uniform / seed_with_knots / extend_to / support_at / supports_in_range / knots()`。
+  - 旧 `initialize / advance / evaluate / keys / poses` 入口仍保留，但现在只是兼容 wrapper，默认继续围绕 latest local 4-control support 工作，因此现有 odometry 主流程无需同步改动也能编译通过。
+  - `BSplineFixedLagSegmentState` 与 `BSplineMarginalizationSegmentState` 现已扩展为 `span_begin_idx / span_end_idx / active_control_indices + auxiliary_index`，从数据表示上摆脱“一个 segment 只绑定一个固定四控制点数组”的假设。
+  - `test_bspline_marginalization.cpp` 已同步改成显式填充新的 segment metadata 字段，保证 survivor/removable partition 仍然可编译验证。
+
+- 2026-03-31: IAP-RQ-300 / IAP-RQ-410
   - `BSplineTrajectory` 现已新增 `set_snapshot()` 与 `set_layout()`，可直接消费显式 knots + control snapshot，或消费 `SplineStateLayout + Values` 快照。
   - `set_control_points()` 现已降级为兼容 wrapper：它只负责按旧逻辑重建 knots/snapshot，然后转调新的 snapshot 主路径；`rebuild_knots()` 也只再服务于这条 legacy 入口。
   - `sample() / latest_sample() / sample_range() / clone_window() / knot_vector()` 现已优先面向显式 knot state；其中 layout 路径优先通过 `SplineEvaluator` 采样，snapshot 路径继续保留显式-knot B-spline 查询语义。
