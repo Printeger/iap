@@ -138,6 +138,13 @@ const char* to_string(iap::IntegratedBSplineGICPFactor::JacobianMode mode) {
   return "unknown";
 }
 
+BSplineLidarTargetMode target_mode_from_handle(const std::shared_ptr<const iap::ISharedTargetHandle>& handle) {
+  if (handle && handle->mode() == iap::SharedTargetHandleMode::GlobalReference) {
+    return BSplineLidarTargetMode::GLOBAL_IVOX_REFERENCE;
+  }
+  return BSplineLidarTargetMode::ACTIVE_WINDOW_SNAPSHOT;
+}
+
 std::shared_ptr<gtsam_points::iVox> clone_target_snapshot(
   const gtsam_points::iVox& source,
   const OdometryEstimationCPUParams& params) {
@@ -710,7 +717,7 @@ void OdometryEstimationBSpline::refresh_active_target_handles() {
   }
 
   auto& current_segment = fixed_lag_registry_.segments().back();
-  if (current_segment.target_mode != BSplineLidarTargetMode::GLOBAL_IVOX_REFERENCE) {
+  if (target_mode_from_handle(current_segment.target_handle) != BSplineLidarTargetMode::GLOBAL_IVOX_REFERENCE) {
     return;
   }
 
@@ -728,13 +735,6 @@ void OdometryEstimationBSpline::refresh_active_target_handles() {
   // stale ownership view of the LiDAR factor.
   current_segment.force_incremental_readd = true;
   current_segment.target_handle = shared_handle;
-  current_segment.target_frame_count = shared_handle->contributing_frames();
-  current_segment.target_point_count = shared_handle->point_count();
-  current_segment.snapshot_frame_count = shared_handle->snapshot_frame_count();
-  current_segment.snapshot_point_count = shared_handle->snapshot_point_count();
-  current_segment.snapshot_span_sec = shared_handle->snapshot_span_sec();
-  current_segment.snapshot_policy_accepted = shared_handle->snapshot_policy_accepted();
-  current_segment.target_build_ms = shared_handle->build_ms();
 }
 
 std::vector<OdometryEstimationBSpline::ActiveSplineIMUSample> OdometryEstimationBSpline::create_segment_imu_samples(
@@ -956,16 +956,6 @@ void OdometryEstimationBSpline::append_active_segment_constraint(
   // Freeze a single target handle at append time. Historical segments should
   // not maintain mutable target mirrors that can drift away from factor state.
   segment.target_handle = create_active_target_handle();
-  segment.target_mode = segment.target_handle->mode() == iap::SharedTargetHandleMode::GlobalReference
-                          ? BSplineLidarTargetMode::GLOBAL_IVOX_REFERENCE
-                          : BSplineLidarTargetMode::ACTIVE_WINDOW_SNAPSHOT;
-  segment.target_frame_count = segment.target_handle->contributing_frames();
-  segment.target_point_count = segment.target_handle->point_count();
-  segment.snapshot_frame_count = segment.target_handle->snapshot_frame_count();
-  segment.snapshot_point_count = segment.target_handle->snapshot_point_count();
-  segment.snapshot_span_sec = segment.target_handle->snapshot_span_sec();
-  segment.snapshot_policy_accepted = segment.target_handle->snapshot_policy_accepted();
-  segment.target_build_ms = segment.target_handle->build_ms();
   segment.imu_samples = create_segment_imu_samples(raw_frame);
 
   const auto states = control_window_->states();
@@ -1032,8 +1022,7 @@ std::size_t OdometryEstimationBSpline::lidar_factor_config_signature(bool use_gp
 }
 
 std::size_t OdometryEstimationBSpline::lidar_target_revision(const ActiveSplineSegmentConstraint& segment) const {
-  return segment.target_handle ? segment.target_handle->revision()
-                               : (segment.target_mode == BSplineLidarTargetMode::GLOBAL_IVOX_REFERENCE ? ct_target_revision_ : 0U);
+  return segment.target_handle ? segment.target_handle->revision() : 0U;
 }
 
 iap::BSplineSolveDomain OdometryEstimationBSpline::build_solve_domain() const {
@@ -1048,7 +1037,7 @@ OdometryEstimationBSpline::make_lidar_factor_cache_key(
   key.valid = true;
   key.gpu = use_gpu_lidar;
   key.gpu_backend = lidar_gpu_backend_;
-  key.target_mode = segment.target_mode;
+  key.target_mode = target_mode_from_handle(segment.target_handle);
   key.control_indices = segment.control_indices;
   key.source_identity = segment.source.get();
   key.target_identity = segment.target_handle ? segment.target_handle->identity() : nullptr;
@@ -1484,7 +1473,8 @@ EstimationFrame::ConstPtr OdometryEstimationBSpline::insert_frame_ct_lidar(
     append_active_segment_constraint(raw_frame, factor_source);
     pipeline_timing.segment_prepare_ms = elapsed_ms(t_segment_prepare_start, Clock::now());
     if (!fixed_lag_registry_.segments().empty()) {
-      pipeline_timing.target_build_ms = fixed_lag_registry_.segments().back().target_build_ms;
+      const auto& target_handle = fixed_lag_registry_.segments().back().target_handle;
+      pipeline_timing.target_build_ms = target_handle ? target_handle->build_ms() : 0.0;
     }
   }
   {
@@ -2285,11 +2275,12 @@ EstimationFrame::ConstPtr OdometryEstimationBSpline::insert_frame_ct_lidar(
 
   if (lidar_factor_profile_) {
     const auto& current_segment = fixed_lag_registry_.segments().back();
+    const auto& current_target_handle = current_segment.target_handle;
     const auto& profile = current_lidar_result.profile;
     if (!use_gpu_lidar) {
       logger->trace(
         "bspline ct lidar factor target_mode={} jacobian_mode={} k_candidates={} accept_ratio={:.3f} score_gap={:.3f} robust_kernel={} robust_width={:.3f} robust_w_floor={:.3f} outlier_thresh={:.3f} target_frames={} target_points={} snapshot_frames={} snapshot_points={} snapshot_span_s={:.3f} snapshot_policy={} target_build_ms={:.3f} stage={} time_buckets={} bucket_mean={:.2f} bucket_peak={} cand_eval={} cand_per_src={:.2f} matched={}/{} inliers={} rej_dist={} rej_ambiguity={} rej_outlier={} rej_robust={} match_ratio={:.3f} inlier_ratio={:.3f} mean_w={:.3f} uniq_targets={} uniq_ratio={:.3f} reuse_peak={} reuse_ratio={:.3f} mean_dist={:.4f} max_dist={:.4f} mean_score={:.4f} mean_gap={:.4f} mean_ratio={:.4f} pose_ms={:.3f} corr_ms={:.3f} accum_ms={:.3f} total_ms={:.3f} error={:.6f}",
-        ::glim::to_string(current_segment.target_mode),
+        ::glim::to_string(target_mode_from_handle(current_target_handle)),
         ::glim::to_string(lidar_jacobian_mode_),
         lidar_correspondence_candidate_count_,
         lidar_correspondence_accept_ratio_,
@@ -2298,13 +2289,13 @@ EstimationFrame::ConstPtr OdometryEstimationBSpline::insert_frame_ct_lidar(
         lidar_robust_kernel_width_,
         lidar_robust_weight_floor_,
         lidar_outlier_mahalanobis_thresh_,
-        current_segment.target_frame_count,
-        current_segment.target_point_count,
-        current_segment.snapshot_frame_count,
-        current_segment.snapshot_point_count,
-        current_segment.snapshot_span_sec,
-        current_segment.snapshot_policy_accepted,
-        current_segment.target_build_ms,
+        current_target_handle ? current_target_handle->contributing_frames() : 0U,
+        current_target_handle ? current_target_handle->point_count() : 0U,
+        current_target_handle ? current_target_handle->snapshot_frame_count() : 0U,
+        current_target_handle ? current_target_handle->snapshot_point_count() : 0U,
+        current_target_handle ? current_target_handle->snapshot_span_sec() : 0.0,
+        current_target_handle ? current_target_handle->snapshot_policy_accepted() : false,
+        current_target_handle ? current_target_handle->build_ms() : 0.0,
         profile.stage,
         profile.time_bucket_count,
         profile.mean_time_bucket_population,
@@ -2338,7 +2329,7 @@ EstimationFrame::ConstPtr OdometryEstimationBSpline::insert_frame_ct_lidar(
     } else {
       logger->trace(
         "bspline ct lidar gpu-factor target_mode={} jacobian_mode={} k_candidates={} accept_ratio={:.3f} score_gap={:.3f} robust_kernel={} robust_width={:.3f} robust_w_floor={:.3f} outlier_thresh={:.3f} target_frames={} target_points={} snapshot_frames={} snapshot_points={} snapshot_span_s={:.3f} snapshot_policy={} target_build_ms={:.3f} stage={} time_buckets={} bucket_mean={:.2f} bucket_peak={} cand_eval={} cand_per_src={:.2f} matched={}/{} inliers={} rej_dist={} rej_ambiguity={} rej_outlier={} rej_robust={} match_ratio={:.3f} inlier_ratio={:.3f} mean_w={:.3f} uniq_targets={} uniq_ratio={:.3f} reuse_peak={} reuse_ratio={:.3f} mean_dist={:.4f} max_dist={:.4f} mean_score={:.4f} mean_gap={:.4f} mean_ratio={:.4f} pose_ms={:.3f} corr_ms={:.3f} accum_ms={:.3f} total_ms={:.3f} error={:.6f}",
-        ::glim::to_string(current_segment.target_mode),
+        ::glim::to_string(target_mode_from_handle(current_target_handle)),
         ::glim::to_string(lidar_jacobian_mode_),
         lidar_correspondence_candidate_count_,
         lidar_correspondence_accept_ratio_,
@@ -2347,13 +2338,13 @@ EstimationFrame::ConstPtr OdometryEstimationBSpline::insert_frame_ct_lidar(
         lidar_robust_kernel_width_,
         lidar_robust_weight_floor_,
         lidar_outlier_mahalanobis_thresh_,
-        current_segment.target_frame_count,
-        current_segment.target_point_count,
-        current_segment.snapshot_frame_count,
-        current_segment.snapshot_point_count,
-        current_segment.snapshot_span_sec,
-        current_segment.snapshot_policy_accepted,
-        current_segment.target_build_ms,
+        current_target_handle ? current_target_handle->contributing_frames() : 0U,
+        current_target_handle ? current_target_handle->point_count() : 0U,
+        current_target_handle ? current_target_handle->snapshot_frame_count() : 0U,
+        current_target_handle ? current_target_handle->snapshot_point_count() : 0U,
+        current_target_handle ? current_target_handle->snapshot_span_sec() : 0.0,
+        current_target_handle ? current_target_handle->snapshot_policy_accepted() : false,
+        current_target_handle ? current_target_handle->build_ms() : 0.0,
         profile.stage,
         profile.time_bucket_count,
         profile.mean_time_bucket_population,
@@ -2390,12 +2381,13 @@ EstimationFrame::ConstPtr OdometryEstimationBSpline::insert_frame_ct_lidar(
   if (!use_gpu_lidar && lidar_validate_linearization_) {
     const auto check = current_cpu_factor->check_linearization(values, lidar_linearization_check_scale_);
     if (check.valid) {
+      const auto& current_target_handle = fixed_lag_registry_.segments().back().target_handle;
       const auto level =
         check.rel_error > lidar_linearization_warn_ratio_ ? spdlog::level::warn : spdlog::level::trace;
       logger->log(
         level,
         "bspline ct lidar linearization target_mode={} perturb={:.2e} base_error={:.6f} predicted={:.6f} actual={:.6f} abs={:.6e} rel={:.6f}",
-        ::glim::to_string(fixed_lag_registry_.segments().back().target_mode),
+        ::glim::to_string(target_mode_from_handle(current_target_handle)),
         check.perturbation_scale,
         check.base_error,
         check.predicted_error,
@@ -2407,6 +2399,7 @@ EstimationFrame::ConstPtr OdometryEstimationBSpline::insert_frame_ct_lidar(
 
   if (!use_gpu_lidar && lidar_profile_numeric_reference_) {
     if (current_numeric_check_valid) {
+      const auto& current_target_handle = fixed_lag_registry_.segments().back().target_handle;
       const auto& check = current_numeric_check;
       const double max_rel_error = std::max(check.rotation_rel_error, check.translation_rel_error);
       const auto level =
@@ -2414,7 +2407,7 @@ EstimationFrame::ConstPtr OdometryEstimationBSpline::insert_frame_ct_lidar(
       logger->log(
         level,
         "bspline ct lidar numeric-reference target_mode={} perturb={:.2e} rot_pred_num={:.6f} rot_pred_semi={:.6f} rot_actual={:.6f} rot_abs={:.6e} rot_rel={:.6f} rot_axis_max_rel={:.6f} rot_axis_mean_rel={:.6f} rot_axis_worst={} trans_pred_num={:.6f} trans_pred_semi={:.6f} trans_actual={:.6f} trans_abs={:.6e} trans_rel={:.6f}",
-        ::glim::to_string(fixed_lag_registry_.segments().back().target_mode),
+        ::glim::to_string(target_mode_from_handle(current_target_handle)),
         check.perturbation_scale,
         check.numeric_rotation_predicted_error,
         check.semi_rotation_predicted_error,
@@ -2435,6 +2428,7 @@ EstimationFrame::ConstPtr OdometryEstimationBSpline::insert_frame_ct_lidar(
   if (use_gpu_lidar && lidar_profile_numeric_reference_) {
 #ifdef GTSAM_POINTS_USE_CUDA
     if (current_gpu_numeric_check_valid) {
+      const auto& current_target_handle = fixed_lag_registry_.segments().back().target_handle;
       const auto& check = current_gpu_numeric_check;
       const double max_rel_error = std::max(check.rotation_rel_error, check.translation_rel_error);
       const auto level =
@@ -2442,7 +2436,7 @@ EstimationFrame::ConstPtr OdometryEstimationBSpline::insert_frame_ct_lidar(
       logger->log(
         level,
         "bspline ct lidar gpu numeric-reference target_mode={} perturb={:.2e} rot_pred_num={:.6f} rot_pred_semi={:.6f} rot_actual={:.6f} rot_abs={:.6e} rot_rel={:.6f} rot_axis_max_rel={:.6f} rot_axis_mean_rel={:.6f} rot_axis_worst={} trans_pred_num={:.6f} trans_pred_semi={:.6f} trans_actual={:.6f} trans_abs={:.6e} trans_rel={:.6f}",
-        ::glim::to_string(fixed_lag_registry_.segments().back().target_mode),
+        ::glim::to_string(target_mode_from_handle(current_target_handle)),
         check.perturbation_scale,
         check.numeric_rotation_predicted_error,
         check.semi_rotation_predicted_error,
@@ -2463,8 +2457,12 @@ EstimationFrame::ConstPtr OdometryEstimationBSpline::insert_frame_ct_lidar(
 
   if (!use_gpu_lidar && lidar_warn_degeneracy_) {
     const auto& diagnostics = current_degeneracy;
+    const auto& current_segment = fixed_lag_registry_.segments().back();
+    const auto& current_target_handle = current_segment.target_handle;
     const bool snapshot_fallback =
-      lidar_target_mode_ == BSplineLidarTargetMode::ACTIVE_WINDOW_SNAPSHOT && !fixed_lag_registry_.segments().back().snapshot_policy_accepted;
+      lidar_target_mode_ == BSplineLidarTargetMode::ACTIVE_WINDOW_SNAPSHOT &&
+      current_target_handle &&
+      !current_target_handle->snapshot_policy_accepted();
     if (snapshot_fallback || (current_degeneracy_valid && diagnostics.has_warning())) {
       std::string flags;
       auto append_flag = [&](const char* flag) {
@@ -2502,15 +2500,14 @@ EstimationFrame::ConstPtr OdometryEstimationBSpline::insert_frame_ct_lidar(
         flags = "none";
       }
 
-      const auto& current_segment = fixed_lag_registry_.segments().back();
       const auto& profile = current_cpu_factor->last_profiling_stats();
       logger->warn(
         "bspline ct lidar degeneracy target_mode={} flags={} snapshot_policy={} target_frames={} target_points={} match_ratio={:.3f} inlier_ratio={:.3f} uniq_ratio={:.3f} reuse_ratio={:.3f} ambiguity_rej_ratio={:.3f} score_gap={:.4f} cand_eval={} bucket_peak={} bucket_mean={:.2f}",
-        ::glim::to_string(current_segment.target_mode),
+        ::glim::to_string(target_mode_from_handle(current_target_handle)),
         flags,
-        current_segment.snapshot_policy_accepted,
-        current_segment.target_frame_count,
-        current_segment.target_point_count,
+        current_target_handle ? current_target_handle->snapshot_policy_accepted() : false,
+        current_target_handle ? current_target_handle->contributing_frames() : 0U,
+        current_target_handle ? current_target_handle->point_count() : 0U,
         profile.match_ratio,
         profile.inlier_ratio,
         profile.unique_target_ratio,
@@ -2526,8 +2523,12 @@ EstimationFrame::ConstPtr OdometryEstimationBSpline::insert_frame_ct_lidar(
   if (use_gpu_lidar && lidar_warn_degeneracy_) {
 #ifdef GTSAM_POINTS_USE_CUDA
     const auto& diagnostics = current_gpu_degeneracy;
+    const auto& current_segment = fixed_lag_registry_.segments().back();
+    const auto& current_target_handle = current_segment.target_handle;
     const bool snapshot_fallback =
-      lidar_target_mode_ == BSplineLidarTargetMode::ACTIVE_WINDOW_SNAPSHOT && !fixed_lag_registry_.segments().back().snapshot_policy_accepted;
+      lidar_target_mode_ == BSplineLidarTargetMode::ACTIVE_WINDOW_SNAPSHOT &&
+      current_target_handle &&
+      !current_target_handle->snapshot_policy_accepted();
     if (snapshot_fallback || (current_gpu_degeneracy_valid && diagnostics.has_warning())) {
       std::string flags;
       auto append_flag = [&](const char* flag) {
@@ -2565,15 +2566,14 @@ EstimationFrame::ConstPtr OdometryEstimationBSpline::insert_frame_ct_lidar(
         flags = "none";
       }
 
-      const auto& current_segment = fixed_lag_registry_.segments().back();
       const auto& profile = current_lidar_result.profile;
       logger->warn(
         "bspline ct lidar gpu degeneracy target_mode={} flags={} snapshot_policy={} target_frames={} target_points={} match_ratio={:.3f} inlier_ratio={:.3f} uniq_ratio={:.3f} reuse_ratio={:.3f} ambiguity_rej_ratio={:.3f} score_gap={:.4f} cand_eval={} bucket_peak={} bucket_mean={:.2f}",
-        ::glim::to_string(current_segment.target_mode),
+        ::glim::to_string(target_mode_from_handle(current_target_handle)),
         flags,
-        current_segment.snapshot_policy_accepted,
-        current_segment.target_frame_count,
-        current_segment.target_point_count,
+        current_target_handle ? current_target_handle->snapshot_policy_accepted() : false,
+        current_target_handle ? current_target_handle->contributing_frames() : 0U,
+        current_target_handle ? current_target_handle->point_count() : 0U,
         profile.match_ratio,
         profile.inlier_ratio,
         profile.unique_target_ratio,

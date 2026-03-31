@@ -145,14 +145,6 @@ class OdometryEstimationBSpline : public OdometryEstimationCPU {
   struct ActiveSplineSegmentConstraint : public iap::BSplineFixedLagSegmentState {
     gtsam_points::PointCloud::ConstPtr source;
     std::shared_ptr<iap::ISharedTargetHandle> target_handle;
-    BSplineLidarTargetMode target_mode = BSplineLidarTargetMode::ACTIVE_WINDOW_SNAPSHOT;
-    std::size_t target_frame_count = 0;
-    std::size_t target_point_count = 0;
-    std::size_t snapshot_frame_count = 0;
-    std::size_t snapshot_point_count = 0;
-    double snapshot_span_sec = 0.0;
-    bool snapshot_policy_accepted = false;
-    double target_build_ms = 0.0;
     std::vector<ActiveSplineIMUSample> imu_samples;
     std::vector<iap::GnssEpoch> gnss_epochs;
     std::size_t gnss_epoch_revision = 0;

@@ -3,6 +3,9 @@
 > 规则：任何代码改动必须在这里记录，并包含 IAP-RQ-XXX。
 
 ## Unreleased
+- refactor(dev-ct-target-mirror): IAP-RQ-020 / IAP-RQ-300 / IAP-RQ-410 — remove per-segment runtime target mirrors from the B-spline odometry hot path.
+  - `ActiveSplineSegmentConstraint` now keeps only the authoritative shared `target_handle`; the old per-segment `target_mode / target_frame_count / target_point_count / snapshot_* / target_build_ms` runtime mirrors have been removed.
+  - `OdometryEstimationBSpline` now derives target metadata directly from `ISharedTargetHandle` for cache keys, factor tracing, degeneracy warnings, and pipeline timing, which eliminates the remaining “segment metadata matches but factor target entity drifted” risk.
 - feat(dev-ct-incremental-owner): IAP-RQ-020 / IAP-RQ-300 / IAP-RQ-410 — move authoritative incremental factor ownership out of `OdometryEstimationBSpline` and into the local-domain solver owner.
   - `BSplineIncrementalSolverSkeleton` now owns persistent per-segment and prior factor indices, exposes `begin_update(...) / release_segment_factors(...) / commit_update(...)`, and becomes the authoritative owner of incremental add-remove bookkeeping instead of leaving that state in `odometry_estimation_bspline.cpp`.
   - `OdometryEstimationBSpline::insert_frame_ct_lidar()` now iterates the hot path directly over `solve_domain.active_segments()` and uses the solver-owner API to decide segment persistence / explicit re-add, which makes the local CT solve-domain a true runtime owner instead of a diagnostics-only helper.
