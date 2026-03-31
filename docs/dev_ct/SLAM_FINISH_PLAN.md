@@ -1,7 +1,7 @@
 # IAP Continuous-Time SLAM Finish Plan
 
 ## 更新时间
-- 2026-03-30
+- 2026-03-31
 
 ## 文档目的
 - 将当前连续时间 `LiDAR + IMU + GNSS` SLAM 从“最小可用骨架”推进到“工程化完备版本”。
@@ -19,6 +19,7 @@
   - `BUCKET` 只允许内部 parity / 一次性 A/B 使用
   - 后续要继续从“每帧 full active-window batch graph”迁移到更接近 GLIM-style incremental fixed-lag + local CT solve domain 的组织方式
   - `BSplineIncrementalSolverSkeleton` 已开始显式追踪 active/new/retired CT solve-domain segments 与 key lifecycle，作为后续长期存活 fixed-lag solver owner 的兼容壳
+  - `BSplineFixedLagStateRegistry::seed_clock_values(...)` 与 shared-state 前置 seeding 现已落下，开始把 `j / k / g / e / r / c` 的 authoritative ownership 前移到增量生命周期入口
 - 当前主要缺口仍在：
   - 还不是最终的 fixed-lag 主状态组织。
   - LiDAR / IMU / GNSS 因子仍有“最小可用实现”成分。

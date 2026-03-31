@@ -69,6 +69,12 @@
 ## 2. 未映射改动（临时区）
 > 如果你临时改了代码但还没决定它对应哪个需求，先把改动写在这里（提交前必须移入上表）。
 
+- 2026-03-31: IAP-RQ-020 / IAP-RQ-300 / IAP-RQ-410
+  - `BSplineFixedLagStateRegistry` 现已新增 `seed_clock_values(...)`，开始把 solve-domain 所需的 segment clock states 显式种入 authoritative `Values`，而不是只在 batch-compatible 建图后半段按需补齐。
+  - `OdometryEstimationBSpline` 现在会在 `BSplineIncrementalSolverSkeleton::prepare_update(...)` 之前，先种 shared `j / k / g / e / r` states 和局部求解域真正需要的 `c` keys，使 future incremental fixed-lag solver / carried-prior replay / key retirement 能共享同一份 authoritative key set。
+  - B-spline 路径现已通过 `reset_bspline_incremental_smoother()` 重置一套 CT 专用 smoother shell，并显式注册 `s / u / j / k / g / c / e / r` 的 relinearization policy，避免未来长期存活 incremental solver 继续隐式沿用 legacy discrete-time threshold 集。
+  - `test_bspline_fixed_lag_registry.cpp` 已补上 solve-domain clock seeding 回归测试，覆盖 auxiliary clock reuse、bias/drift forward propagation 与已有时钟状态保留语义。
+
 - 2026-03-30: IAP-RQ-020 / IAP-RQ-300 / IAP-RQ-410
   - 新增 `docs/dev_ct/README_REFACTOR_CT_SOLVER.md`，正式将连续时间 odometry 求解器重构收口到“KERNEL-only public route + staged incremental fixed-lag migration”的执行规范。
   - 新增 `include/iap/odometry/ct_solve_domain.hpp`，引入 `ICTSolveDomain / BSplineSolveDomain`，并在 `OdometryEstimationBSpline` 中把公开连续时间 LiDAR solve scope 收口到“当前 segment + 最近重叠段”，不再默认覆盖全部历史 active-window segment。

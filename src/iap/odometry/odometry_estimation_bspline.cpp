@@ -14,9 +14,11 @@
 #include <gtsam/inference/Symbol.h>
 #include <gtsam/slam/BetweenFactor.h>
 #include <gtsam/slam/PriorFactor.h>
+#include <gtsam/nonlinear/ISAM2Params.h>
 #include <gtsam/nonlinear/NonlinearFactorGraph.h>
 #include <gtsam_points/ann/kdtree2.hpp>
 #include <gtsam_points/ann/ivox.hpp>
+#include <gtsam_points/optimizers/incremental_fixed_lag_smoother_with_fallback.hpp>
 #include <gtsam_points/optimizers/levenberg_marquardt_ext.hpp>
 #include <gtsam_points/types/point_cloud_cpu.hpp>
 #include <spdlog/spdlog.h>
@@ -25,6 +27,7 @@
 #include <iap/common/imu_integration.hpp>
 #include <iap/odometry/initial_state_estimation.hpp>
 #include <iap/util/config.hpp>
+#include <iap/util/relinearization_policy.hpp>
 #include <iap/util/shared_state.hpp>
 #include <iap/odometry/callbacks.hpp>
 
@@ -378,6 +381,7 @@ OdometryEstimationBSpline::OdometryEstimationBSpline(const OdometryEstimationBSp
     ct_lidar_gpu_stream_buffers_ = std::make_unique<gtsam_points::StreamTempBufferRoundRobin>();
   }
 #endif
+  reset_bspline_incremental_smoother();
   logger->info("odometry_bspline initialized frontend_mode={} lidar_gpu_backend={} knot_mode={} nominal_dt={:.4f} compatibility_sample_dt={:.4f} lidar_target_mode={} lidar_jacobian_mode={} lidar_k_candidates={} lidar_accept_ratio={:.3f} lidar_score_gap={:.3f} lidar_snapshot_window={} lidar_snapshot_min_frames={} lidar_snapshot_min_points={} lidar_snapshot_max_age={:.3f} lidar_outlier_thresh={:.3f} lidar_robust_kernel={} lidar_robust_width={:.3f} lidar_robust_w_floor={:.3f} lidar_profile={} lidar_validate={} ct_pipeline_profile={} lidar_baseline_csv={} lidar_baseline_path={} ct_local_overlap_segments={}",
     frontend_mode_,
     ::glim::to_string(lidar_gpu_backend_),
@@ -443,6 +447,36 @@ gtsam_points::PointCloud::ConstPtr OdometryEstimationBSpline::create_lidar_sourc
   return frame_cpu;
 }
 
+void OdometryEstimationBSpline::reset_bspline_incremental_smoother() {
+  gtsam::ISAM2Params isam2_params;
+  if (params->use_isam2_dogleg) {
+    isam2_params.setOptimizationParams(gtsam::ISAM2DoglegParams());
+  }
+  isam2_params.findUnusedFactorSlots = true;
+  isam2_params.relinearizeSkip = params->isam2_relinearize_skip;
+
+  {
+    const double t = params->isam2_relinearize_thresh;
+    RelinearizationPolicyRegistry policy_registry;
+    policy_registry.register_policy('s', 6, gtsam::Vector6::Constant(t));
+    policy_registry.register_policy('u', 3, gtsam::Vector3::Constant(t));
+    policy_registry.register_policy('j', 3, gtsam::Vector3::Constant(t));
+    policy_registry.register_policy('k', 3, gtsam::Vector3::Constant(t));
+    policy_registry.register_policy('g', 3, gtsam::Vector3::Constant(t));
+    policy_registry.register_policy(
+      'c',
+      2,
+      (gtsam::Vector2() << params->clk_bias_relin_thresh, params->clk_drift_relin_thresh).finished());
+    policy_registry.register_policy('e', 3, gtsam::Vector3::Constant(t));
+    policy_registry.register_policy('r', 3, gtsam::Vector3::Constant(t));
+    policy_registry.validate_or_throw();
+    logger->info("bspline incremental relinearization policy {}", policy_registry.summary());
+    isam2_params.setRelinearizeThreshold(policy_registry.build_map());
+  }
+
+  smoother.reset(new FixedLagSmootherExt(params->smoother_lag, isam2_params));
+}
+
 void OdometryEstimationBSpline::initialize_control_window(
   const PreprocessedFrame::Ptr& raw_frame,
   const gtsam::Pose3& initial_pose) {
@@ -453,6 +487,7 @@ void OdometryEstimationBSpline::initialize_control_window(
   fixed_lag_registry_.clear_auxiliary_values();
   ct_target_revision_ = 0;
   shared_target_handle_cache_.clear();
+  reset_bspline_incremental_smoother();
 }
 
 gtsam::Pose3 OdometryEstimationBSpline::predict_scan_end_pose(double scan_duration) const {
@@ -1211,12 +1246,25 @@ EstimationFrame::ConstPtr OdometryEstimationBSpline::insert_frame_ct_lidar(
   }
 
   gtsam::Values values = fixed_lag_registry_.control_buffer().values();
+  fixed_lag_registry_.seed_shared_values(values, fixed_lag_registry_.shared_state().gnss_anchor_initialized);
   const auto& active_states = fixed_lag_registry_.control_buffer().states();
   const auto solve_domain = build_solve_domain();
   if (solve_domain.empty()) {
     logger->error("bspline ct frontend could not build a non-empty local solve domain");
     return nullptr;
   }
+
+  fixed_lag_registry_.seed_clock_values(
+    values,
+    solve_domain.active_segments(),
+    [&](const iap::CTSolveDomainSegment& segment_state) {
+      if (!fixed_lag_registry_.shared_state().gnss_anchor_initialized) {
+        return false;
+      }
+      const auto& segment = fixed_lag_registry_.segments()[segment_state.ordinal];
+      return !segment.gnss_epochs.empty();
+    });
+
   const auto incremental_delta = [&] {
     const auto t_incremental_prepare_start = Clock::now();
     auto delta = incremental_solver_skeleton_.prepare_update(
@@ -1239,7 +1287,6 @@ EstimationFrame::ConstPtr OdometryEstimationBSpline::insert_frame_ct_lidar(
   const gtsam::Key gyro_bias_key = bspline_gyro_bias_key();
   const gtsam::Key accel_bias_key = bspline_accel_bias_key();
   const gtsam::Key gravity_key = bspline_gravity_key();
-  fixed_lag_registry_.seed_shared_values(values, fixed_lag_registry_.shared_state().gnss_anchor_initialized);
 
   gtsam::NonlinearFactorGraph graph;
   gtsam::NonlinearFactorGraph marginalization_graph;

@@ -226,6 +226,46 @@ class BSplineFixedLagStateRegistryT {
     }
   }
 
+  template <typename SegmentRange, typename Predicate>
+  std::vector<gtsam::Key> seed_clock_values(
+    gtsam::Values& values,
+    const SegmentRange& segments,
+    Predicate&& should_seed_clock) const {
+    std::vector<gtsam::Key> seeded_keys;
+    bool have_previous_seed = false;
+    double previous_stamp = 0.0;
+    gtsam::Vector2 previous_clock = gtsam::Vector2::Zero();
+
+    for (const auto& segment : segments) {
+      if (!should_seed_clock(segment)) {
+        continue;
+      }
+
+      const gtsam::Key clock_key = bspline_clock_key(segment.auxiliary_index);
+      if (!values.exists(clock_key)) {
+        gtsam::Vector2 init_clock = gtsam::Vector2::Zero();
+        if (auxiliary_values_.exists(clock_key)) {
+          init_clock = auxiliary_values_.at<gtsam::Vector2>(clock_key);
+        } else if (have_previous_seed) {
+          init_clock = previous_clock;
+          const double dt = std::max(0.0, segment.stamp - previous_stamp);
+          init_clock(0) += init_clock(1) * dt;
+        }
+        values.insert(clock_key, init_clock);
+      }
+
+      previous_clock = values.at<gtsam::Vector2>(clock_key);
+      previous_stamp = segment.stamp;
+      have_previous_seed = true;
+
+      if (std::find(seeded_keys.begin(), seeded_keys.end(), clock_key) == seeded_keys.end()) {
+        seeded_keys.push_back(clock_key);
+      }
+    }
+
+    return seeded_keys;
+  }
+
   void update_shared_state_from_values(const gtsam::Values& values) {
     if (values.exists(gtsam::symbol('j', 0))) {
       shared_state_.gyro_bias = values.at<gtsam::Vector3>(gtsam::symbol('j', 0));

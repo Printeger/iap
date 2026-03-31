@@ -59,6 +59,8 @@ Current status:
 - `OdometryEstimationBSpline` 已开始通过 shared handle cache 复用 target identity/revision。
 - `IntegratedBSplineGICPFactorGPUKernel` 已支持直接绑定 shared target GPU resources，并在 target revision 变化时通过 `refresh_target_handle(...)` 只切换 target-side resources。
 - `BSplineIncrementalSolverSkeleton` 已落下，开始显式追踪 local solve-domain 的 active/new/retired segments、new/retired keys，以及未来增量 fixed-lag solver 所需的 `new_values / new_stamps` 生命周期载荷。
+- `BSplineFixedLagStateRegistry::seed_clock_values(...)` 已落下；`OdometryEstimationBSpline` 现在会在 `BSplineIncrementalSolverSkeleton::prepare_update(...)` 之前，先把 shared `j / k / g / e / r` states 和 solve-domain 需要的 `c` keys 显式种入 authoritative `Values`。
+- B-spline 路径现在会通过 `reset_bspline_incremental_smoother()` 重置一套 CT 专用 smoother shell，并显式注册 `s / u / j / k / g / c / e / r` 的 relinearization policy，未来长期存活 incremental fixed-lag solver 不再只能继承 legacy discrete-time 的 threshold 集。
 - 真正 authoritative 的长期存活 incremental fixed-lag solver 仍未完成；当前仍处于 batch-compatible 过渡壳，但 solver lifetime 和 key/segment 生命周期接口已不再只是文档概念。
 
 ### P3. Shared-state and carried-prior stabilization
@@ -68,6 +70,11 @@ Current status:
 - Long-bag acceptance requires:
   - no missing-key carried-prior warnings
   - no GNSS factor collapse caused by replay/ownership bugs
+
+Current status:
+- shared `ecef_origin / ecef_rot` seeding 与 solve-domain clock seeding 已开始从 batch-compatible 建图后半段前移到增量生命周期入口。
+- `BSplineIncrementalSolverSkeleton` 现在看到的 authoritative `Values` 已包含 shared GNSS/ECEF alignment states 和 solve-domain 需要的 segment clock keys，这为后续 carried-prior replay / key retirement 提供了正确的入口语义。
+- shared-state 的长期回放验收、authoritative long-lived incremental fixed-lag solver、以及无 `e0` 缺键的长包验证仍未完成。
 
 ### P4. Acceptance and BUCKET deletion
 
@@ -96,3 +103,5 @@ Current status:
 4. Move the LiDAR solve loop to current-domain plus recent-overlap selection.
 5. Keep KERNEL on the existing unified result/profile/baseline surface.
 6. Introduce an explicit incremental solver skeleton so add/remove lifecycle and future smoother payloads are no longer embedded ad hoc inside `insert_frame_ct_lidar()`.
+7. Move shared `ecef_origin / ecef_rot / clock` seeding to happen before incremental delta preparation, so local solve-domain lifecycle and future carried-prior replay observe the same authoritative key set.
+8. Replace the remaining batch-compatible solver shell with an authoritative long-lived incremental fixed-lag solver owner, then finish long-bag shared GNSS state validation before deleting BUCKET.

@@ -204,6 +204,7 @@ class OdometryEstimationBSpline : public OdometryEstimationCPU {
   void append_active_segment_constraint(
     const PreprocessedFrame::Ptr& raw_frame,
     const gtsam_points::PointCloud::ConstPtr& source);
+  void reset_bspline_incremental_smoother();
   void insert_target_cloud(const EstimationFrame::Ptr& frame);
   void update_frame_history(
     const EstimationFrame::Ptr& frame,

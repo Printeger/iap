@@ -3,6 +3,11 @@
 > 规则：任何代码改动必须在这里记录，并包含 IAP-RQ-XXX。
 
 ## Unreleased
+- feat(dev-ct-refactor-shared-state): IAP-RQ-020 / IAP-RQ-300 / IAP-RQ-410 — move shared-state and clock ownership closer to the future authoritative incremental CT solver path.
+  - Added `BSplineFixedLagStateRegistry::seed_clock_values(...)`, which seeds solve-domain clock states into `gtsam::Values` by reusing auxiliary snapshots when available and propagating bias/drift across contiguous active segments when they are not.
+  - `OdometryEstimationBSpline` now seeds shared GNSS/ECEF alignment states (`j / k / g / e / r`) plus the solve-domain clock keys before `BSplineIncrementalSolverSkeleton::prepare_update(...)`, so the incremental lifecycle skeleton observes the same authoritative key set that future carried-prior replay and key-retirement logic will use.
+  - Added `reset_bspline_incremental_smoother()` and explicit B-spline relinearization policies for `s / u / j / k / g / c / e / r`, decoupling the continuous-time incremental-solver shell from the legacy discrete-time threshold registry.
+  - Expanded `test_bspline_fixed_lag_registry.cpp` with a regression test covering clock seeding from auxiliary values, forward propagation across active segments, and preservation of already-inserted clock states.
 - feat(dev-ct-refactor-solver-skeleton): IAP-RQ-020 / IAP-RQ-300 / IAP-RQ-410 — add an explicit incremental CT solver lifecycle skeleton on top of the current batch-compatible B-spline odometry path.
   - Added `include/iap/odometry/ct_incremental_solver_skeleton.hpp` and `src/iap/odometry/ct_incremental_solver_skeleton.cpp`, introducing `BSplineIncrementalSolverSkeleton` and `CTSolverLifecycleDelta` to track active/new/retired local-domain segments, new/retired keys, and the future incremental-smoother payload (`new_values / new_stamps`) outside the monolithic `insert_frame_ct_lidar()` implementation.
   - `OdometryEstimationBSpline` now resets and advances that skeleton each scan, emits incremental-domain trace/timing fields (`incremental_domain_prepare_ms`, active/new/retired segment counts, new/retired key counts), and therefore no longer keeps the key/segment add-remove surface implicit inside the batch-compatible solve path.

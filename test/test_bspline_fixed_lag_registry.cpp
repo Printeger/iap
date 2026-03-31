@@ -144,6 +144,53 @@ TEST(BSplineFixedLagRegistryTest, SharedStateSeedsAndUpdatesPersistentValues) {
   EXPECT_NEAR(registry.shared_state().ecef_origin.x(), 11.0, 1e-9);
 }
 
+TEST(BSplineFixedLagRegistryTest, ClockSeedingReusesAuxValuesAndPropagatesAcrossSegments) {
+  iap::BSplineFixedLagStateRegistry registry;
+
+  gtsam::Values values;
+  values.insert(iap::bspline_clock_key(4), gtsam::Vector2(40.0, 0.25));
+
+  registry.auxiliary_values().insert(iap::bspline_clock_key(1), gtsam::Vector2(10.0, 0.5));
+
+  std::vector<iap::BSplineFixedLagSegmentState> segments = {
+    {1.0, 2.0, {0, 1, 2, 3}, 1},
+    {2.0, 3.0, {1, 2, 3, 4}, 2},
+    {3.0, 4.0, {2, 3, 4, 5}, 3},
+    {4.0, 5.0, {3, 4, 5, 6}, 4},
+  };
+
+  const auto seeded = registry.seed_clock_values(
+    values,
+    segments,
+    [](const iap::BSplineFixedLagSegmentState& segment) {
+      return segment.auxiliary_index != 3U;
+    });
+
+  EXPECT_EQ(
+    seeded,
+    (std::vector<gtsam::Key>{
+      iap::bspline_clock_key(1),
+      iap::bspline_clock_key(2),
+      iap::bspline_clock_key(4),
+    }));
+
+  ASSERT_TRUE(values.exists(iap::bspline_clock_key(1)));
+  ASSERT_TRUE(values.exists(iap::bspline_clock_key(2)));
+  ASSERT_FALSE(values.exists(iap::bspline_clock_key(3)));
+  ASSERT_TRUE(values.exists(iap::bspline_clock_key(4)));
+
+  const auto clock_1 = values.at<gtsam::Vector2>(iap::bspline_clock_key(1));
+  const auto clock_2 = values.at<gtsam::Vector2>(iap::bspline_clock_key(2));
+  const auto clock_4 = values.at<gtsam::Vector2>(iap::bspline_clock_key(4));
+
+  EXPECT_DOUBLE_EQ(clock_1(0), 10.0);
+  EXPECT_DOUBLE_EQ(clock_1(1), 0.5);
+  EXPECT_DOUBLE_EQ(clock_2(0), 10.5);
+  EXPECT_DOUBLE_EQ(clock_2(1), 0.5);
+  EXPECT_DOUBLE_EQ(clock_4(0), 40.0);
+  EXPECT_DOUBLE_EQ(clock_4(1), 0.25);
+}
+
 TEST(BSplineFixedLagRegistryTest, TelemetryTracksLifecycleTransitions) {
   iap::BSplineFixedLagStateRegistry registry;
 

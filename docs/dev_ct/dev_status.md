@@ -1,7 +1,7 @@
 # IAP 连续时间开发状态
 
 ## 更新时间
-- 2026-03-30
+- 2026-03-31
 
 ## 执行入口
 - 后续连续时间 SLAM 总体开发以 [SLAM_FINISH_PLAN.md](/home/dev/code/ws_iap/src/iap/docs/dev_ct/SLAM_FINISH_PLAN.md) 为主计划。
@@ -18,6 +18,9 @@
   - `OdometryEstimationBSpline` 现已显式产出 continuous-time solve-domain 的增量生命周期载荷：active/new/retired segments、new/retired keys，以及后续长期存活 fixed-lag smoother 需要的 `new_values / new_stamps` skeleton，不再把这层生命周期隐式埋在单次 `insert_frame_ct_lidar()` 逻辑中
   - 公开 runtime 选择 `BUCKET` 时现在会直接报 deprecated error；只有设置 `IAP_ALLOW_DEPRECATED_BUCKET=1` 才允许内部过渡使用
   - 已继续推进到 `P2` 的 shared-target 资源接线：`OdometryEstimationBSpline` 现已维护 shared target handle cache，而 `IntegratedBSplineGICPFactorGPUKernel` 已可直接绑定 shared target GPU resources，并在 target revision 变化时通过 handle refresh 切换 target-side GPU state，而不是在每个 factor 内重新构建 target GPU map
+  - 已开始推进到 `P3` 的 shared-state / carried-prior 收口：`BSplineFixedLagStateRegistry` 现已新增显式 `seed_clock_values(...)`，而 `OdometryEstimationBSpline` 现在会在 `BSplineIncrementalSolverSkeleton::prepare_update(...)` 之前，先把 shared `j / k / g / e / r` states 与 solve-domain 需要的 `c` keys 种入 authoritative `Values`
+  - B-spline 路径现已通过 `reset_bspline_incremental_smoother()` 重置一套 CT 专用 smoother shell，并显式注册 `s / u / j / k / g / c / e / r` 的 relinearization policy；后续长期存活 incremental fixed-lag solver 不再只能沿用 legacy discrete-time 的 threshold 集
+  - 已补上 `test_bspline_fixed_lag_registry` 的 solve-domain clock seeding 回归测试，覆盖 auxiliary-values reuse、clock propagation 和“已有值不被覆盖”的语义
 - 已完成 Phase 1A 的“连续时间骨架层”落地。
 - 已完成 Phase 1B 的最小可用版本：
   - 控制点窗口状态设计
@@ -170,6 +173,7 @@
   - 已落下公开路线冻结和 local-domain / shared-target 骨架
   - 已落下 `BSplineIncrementalSolverSkeleton`，开始显式表达 segment/key add-remove 生命周期和 future smoother payload
   - 已落下 KERNEL shared-target GPU resource binding 与 handle-cache 语义
+  - 已开始把 shared GNSS/ECEF/clock state ownership 从 batch-compatible 建图后半段前移到增量生命周期入口
   - 尚未完成长期存活的 incremental fixed-lag solver
   - 尚未完成 shared target GPU handle 的统一 ownership
   - 也尚未删除内部过渡用的 `BUCKET` 代码
