@@ -3,6 +3,10 @@
 > 规则：任何代码改动必须在这里记录，并包含 IAP-RQ-XXX。
 
 ## Unreleased
+- feat(dev-ct-gnss-spline-evaluator): IAP-RQ-020 / IAP-RQ-300 / IAP-RQ-410 — switch the GNSS factor main path to unified spline support/evaluator queries.
+  - Added `IntegratedSplinePseudorangeFactor` and `IntegratedSplineDopplerFactor`, so GNSS pseudorange / Doppler assembly now enters through `SplineStampContext + SplineStateLayout + SplineEvaluator` instead of direct `BSplineControlWindow::interpolate(u)` calls.
+  - `SplineSensorModel` is now explicitly documented as the shared place for GNSS antenna extrinsics too, and `OdometryEstimationBSpline` now registers a `Gnss` sensor model per active segment before calling `layout->support_at(epoch.stamp, Gnss)`.
+  - The old `IntegratedBSplinePseudorangeFactor` / `IntegratedBSplineDopplerFactor` constructors remain as compatibility wrappers; clock state, ECEF anchor / rotation, and GNSS clock-between handling stay unchanged in this commit.
 - feat(dev-ct-imu-spline-native): IAP-RQ-300 / IAP-RQ-410 — switch the IMU factor main path to spline-native support/evaluator queries while retaining the legacy wrapper.
   - Added `SplineStampContext` plus the new `IntegratedSplineIMUFactor`, so the IMU sample factor no longer treats `measurement_u / segment_duration / finite_difference_dt` as its primary runtime interface and instead predicts pose/gyro/accel from `SplineLocalSupport + SplineEvaluator`.
   - `IntegratedBSplineIMUFactor` now remains only as a compatibility wrapper that builds a temporary legacy explicit-knot layout and forwards to the new evaluator-driven path.

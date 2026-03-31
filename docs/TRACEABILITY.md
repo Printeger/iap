@@ -171,6 +171,12 @@
   - `IntegratedBSplineIMUFactor` 旧构造函数仍保留，但已收敛成 legacy wrapper：内部会临时构造兼容 layout/context 并转调新的 evaluator-driven 实现。
   - `OdometryEstimationBSpline` 现已为每个 active segment 构建轻量 `SplineStateLayout`，并通过 `support_at(sample.stamp, Imu)` 装配 IMU factor，确保 sample-time 查询入口统一到 spline-native support。
   - IMU numeric Jacobian 仍为数值形式，但现在围绕 active control poses 直接扰动 `Values`，残差中的 basis / pose / velocity / acceleration 查询统一来自 `SplineEvaluator`。
+- 2026-03-31: IAP-RQ-020 / IAP-RQ-300 / IAP-RQ-410
+  - 已开始按 `ct-iap_spec.md` 执行 `Commit 5`，把 GNSS factor 的几何查询入口切到统一 spline evaluator，但不改 clock / anchor / rotation / between-factor 的状态设计。
+  - 新增 `IntegratedSplinePseudorangeFactor` 和 `IntegratedSplineDopplerFactor`；pseudorange / Doppler 装配现在都会先构造 `SplineStampContext`，再通过 `SplineStateLayout::support_at(epoch.stamp, Gnss)` 进入 evaluator。
+  - `SplineSensorModel` 现在显式承载 GNSS 天线外参注册；`OdometryEstimationBSpline` 会按 active segment 构建一个带 `Gnss` sensor model 的 layout，再统一查询 GNSS 天线位姿。
+  - `IntegratedBSplinePseudorangeFactor` / `IntegratedBSplineDopplerFactor` 旧构造函数仍保留为兼容 wrapper；旧的 clock state、ECEF origin/rotation、GNSS clock-between 路径没有改。
+  - GNSS 数值 Jacobian 仍保留在 control-pose 层，但几何 residual 使用的接收机 pose / antenna query 已统一改为 `SplineEvaluator` 提供。
 - 2026-03-28: IAP-RQ-020 / IAP-RQ-300 / IAP-RQ-410
   - 已开始按 `docs/dev_ct/SLAM_FINISH_PLAN.md` 执行 `M1 / WP1`，先收口 fixed-lag 主状态边界。
   - `OdometryEstimationBSpline::ActiveSplineMarginalPrior` 现在会结构化快照 boundary pose、boundary auxiliary index，以及对应的 velocity / clock state。
