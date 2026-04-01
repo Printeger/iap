@@ -178,6 +178,11 @@
   - `IntegratedBSplinePseudorangeFactor` / `IntegratedBSplineDopplerFactor` 旧构造函数仍保留为兼容 wrapper；旧的 clock state、ECEF origin/rotation、GNSS clock-between 路径没有改。
   - GNSS 数值 Jacobian 仍保留在 control-pose 层，但几何 residual 使用的接收机 pose / antenna query 已统一改为 `SplineEvaluator` 提供。
 - 2026-04-01: IAP-RQ-300 / IAP-RQ-410
+  - 已开始按 `ct-iap_spec.md` 执行 `Commit 13`，补充 focused regression 与维护文档，明确 explicit-knot `SplineStateLayout + SplineEvaluator` 已是 spline-native 主线，同时不改变运行时算法行为。
+  - 新增 `test_bspline_spline_query.cpp`，直接覆盖 `SplineStateLayout::support_at()` / `supports_in_range()` 在显式非均匀 knots、sensor time offset、span-local `dt/u`、control-index / pose-key 选择上的契约，并校验 `SplineEvaluator` 的 basis / derivative / velocity 查询在 uniform 与 non-uniform support 上保持稳定。
+  - `test_bspline_marginalization.cpp` 现已补充 bucket-style shared-control 回归，验证 `SplineActiveStateSet` 与 registry pruning 在 multi-span / bucket 复用下会保留仍被引用的 control points 与 auxiliary states。
+  - `docs/dev_ct/dev_status.md` 已同步收口维护边界：CPU + explicit-knot layout/evaluator 是主线，GPU `BUCKET` 是稳定 baseline，GPU `KERNEL` 继续保持 experimental，旧 fixed-window/control-point 入口只作为 compatibility façade 保留。
+- 2026-04-01: IAP-RQ-300 / IAP-RQ-410
   - 已开始按 `ct-iap_spec.md` 执行 `Commit 11`，把 experimental GPU `KERNEL` LiDAR 路径的主接口迁移到 `SplineBucketContext + SplineLocalSupport`，与 CPU / GPU `BUCKET` 的显式-knot 查询语义保持一致。
   - `IntegratedBSplineGICPFactorGPUKernel` 现在直接接收 `SplineBucketContext`、使用 `ctx.support.pose_keys` 作为因子 key、只为 `ctx.point_indices` 构建 source-side staging，并把旧的 fixed-window key-array 构造函数保留为 legacy compatibility wrapper。
   - `OdometryEstimationBSpline` 现在会在 `CT_LIDAR_GPU + KERNEL` 下复用 `create_segment_lidar_buckets(...)`，按 bucket context 构建/缓存 KERNEL factors，并以 `make_key_vector(bucket_ctx.support)` 进入 marginalization ownership 判定；`KERNEL` 仍保持 experimental/opt-in。

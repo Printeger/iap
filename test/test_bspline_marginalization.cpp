@@ -229,6 +229,113 @@ TEST(BSplineMarginalizationTest, RegistryPruneFollowsActiveStateSetReferences) {
   EXPECT_TRUE(registry.auxiliary_values().exists(iap::bspline_clock_key(6)));
 }
 
+TEST(BSplineMarginalizationTest, ActiveStateSetKeepsControlsSharedAcrossBucketStyleReferences) {
+  auto segment_states = make_multispan_segment_states();
+  iap::BSplineMarginalizationSegmentState bucket_state_a;
+  bucket_state_a.scan_end = 5.1;
+  bucket_state_a.span_begin_idx = 3;
+  bucket_state_a.span_end_idx = 4;
+  bucket_state_a.active_control_indices = {3, 4, 5, 6};
+  bucket_state_a.control_indices = {3, 4, 5, 6};
+  bucket_state_a.auxiliary_index = 5;
+  segment_states.push_back(bucket_state_a);
+
+  iap::BSplineMarginalizationSegmentState bucket_state_b;
+  bucket_state_b.scan_end = 5.4;
+  bucket_state_b.span_begin_idx = 4;
+  bucket_state_b.span_end_idx = 5;
+  bucket_state_b.active_control_indices = {4, 5, 6, 7};
+  bucket_state_b.control_indices = {4, 5, 6, 7};
+  bucket_state_b.auxiliary_index = 6;
+  segment_states.push_back(bucket_state_b);
+
+  auto active_state_set = iap::build_spline_active_state_set(
+    make_buffer_states(),
+    segment_states,
+    make_partition_values(),
+    4.9,
+    true);
+
+  std::sort(active_state_set.active_control_indices.begin(), active_state_set.active_control_indices.end());
+  std::sort(active_state_set.removable_control_indices.begin(), active_state_set.removable_control_indices.end());
+  std::sort(active_state_set.active_auxiliary_indices.begin(), active_state_set.active_auxiliary_indices.end());
+  std::sort(active_state_set.removable_auxiliary_indices.begin(), active_state_set.removable_auxiliary_indices.end());
+
+  EXPECT_EQ(active_state_set.active_control_indices, (std::vector<std::size_t>{3, 4, 5, 6, 7}));
+  EXPECT_EQ(active_state_set.removable_control_indices, (std::vector<std::size_t>{0, 1, 2}));
+  EXPECT_EQ(active_state_set.active_auxiliary_indices, (std::vector<std::size_t>{4, 5, 6}));
+  EXPECT_EQ(active_state_set.removable_auxiliary_indices, (std::vector<std::size_t>{1}));
+  EXPECT_TRUE(active_state_set.contains_active_key(iap::bspline_control_point_key(3)));
+  EXPECT_TRUE(active_state_set.contains_active_key(iap::bspline_control_point_key(6)));
+  EXPECT_FALSE(active_state_set.contains_removed_key(iap::bspline_control_point_key(3)));
+
+  const auto partition = iap::build_bspline_marginalization_partition(
+    make_buffer_states(),
+    segment_states,
+    make_partition_values(),
+    4.9,
+    true);
+  EXPECT_FALSE(partition.should_marginalize_factor(
+    gtsam::KeyVector{iap::bspline_control_point_key(3), iap::bspline_control_point_key(4), iap::bspline_velocity_key(5)}));
+  EXPECT_TRUE(partition.should_marginalize_factor(
+    gtsam::KeyVector{iap::bspline_control_point_key(2), iap::bspline_control_point_key(3)}));
+}
+
+TEST(BSplineMarginalizationTest, RegistryPruneRetainsControlsSharedAcrossBucketStyleReferences) {
+  iap::BSplineControlWindow window;
+  window.seed_with_knots(make_window_knots(), make_window_poses());
+
+  iap::BSplineFixedLagStateRegistry registry;
+  registry.reset_from_window(window);
+
+  for (const auto& segment : make_multispan_segment_states()) {
+    iap::BSplineFixedLagSegmentState registry_segment;
+    registry_segment.scan_end = segment.scan_end;
+    registry_segment.span_begin_idx = segment.span_begin_idx;
+    registry_segment.span_end_idx = segment.span_end_idx;
+    registry_segment.active_control_indices = segment.active_control_indices;
+    registry_segment.control_indices = segment.control_indices;
+    registry_segment.auxiliary_index = segment.auxiliary_index;
+    registry.append_segment(registry_segment);
+  }
+
+  iap::BSplineFixedLagSegmentState bucket_segment_a;
+  bucket_segment_a.scan_end = 5.1;
+  bucket_segment_a.span_begin_idx = 3;
+  bucket_segment_a.span_end_idx = 4;
+  bucket_segment_a.active_control_indices = {3, 4, 5, 6};
+  bucket_segment_a.control_indices = {3, 4, 5, 6};
+  bucket_segment_a.auxiliary_index = 5;
+  registry.append_segment(bucket_segment_a);
+
+  iap::BSplineFixedLagSegmentState bucket_segment_b;
+  bucket_segment_b.scan_end = 5.4;
+  bucket_segment_b.span_begin_idx = 4;
+  bucket_segment_b.span_end_idx = 5;
+  bucket_segment_b.active_control_indices = {4, 5, 6, 7};
+  bucket_segment_b.control_indices = {4, 5, 6, 7};
+  bucket_segment_b.auxiliary_index = 6;
+  registry.append_segment(bucket_segment_b);
+
+  registry.auxiliary_values().insert(iap::bspline_velocity_key(1), gtsam::Vector3(1.0, 0.0, 0.0));
+  registry.auxiliary_values().insert(iap::bspline_velocity_key(4), gtsam::Vector3(4.0, 0.0, 0.0));
+  registry.auxiliary_values().insert(iap::bspline_velocity_key(5), gtsam::Vector3(5.0, 0.0, 0.0));
+  registry.auxiliary_values().insert(iap::bspline_velocity_key(6), gtsam::Vector3(6.0, 0.0, 0.0));
+
+  const auto active_state_set = registry.active_state_set(make_partition_values(), 4.9, true);
+  registry.prune_to_active_state_set(4.9, active_state_set, true);
+
+  std::vector<std::size_t> retained_indices;
+  for (const auto& state : registry.control_buffer().states()) {
+    retained_indices.push_back(state.index);
+  }
+  EXPECT_EQ(retained_indices, (std::vector<std::size_t>{3, 4, 5, 6, 7}));
+  EXPECT_TRUE(registry.auxiliary_values().exists(iap::bspline_velocity_key(4)));
+  EXPECT_TRUE(registry.auxiliary_values().exists(iap::bspline_velocity_key(5)));
+  EXPECT_TRUE(registry.auxiliary_values().exists(iap::bspline_velocity_key(6)));
+  EXPECT_FALSE(registry.auxiliary_values().exists(iap::bspline_velocity_key(1)));
+}
+
 TEST(BSplineMarginalizationTest, CarriedPriorMatchesReferenceMarginalError) {
   const gtsam::Key s0 = iap::bspline_control_point_key(0);
   const gtsam::Key s1 = iap::bspline_control_point_key(1);

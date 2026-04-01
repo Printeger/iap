@@ -3,6 +3,10 @@
 > 规则：任何代码改动必须在这里记录，并包含 IAP-RQ-XXX。
 
 ## Unreleased
+- test(dev-ct-spline-native-regression-baseline): IAP-RQ-300 / IAP-RQ-410 — lock the spline-native explicit-knot mainline with focused regression coverage and maintenance docs.
+  - Added `test_bspline_spline_query.cpp` to pin `SplineStateLayout::support_at()` / `supports_in_range()` behavior on explicit non-uniform knots, including sensor time offsets, span-local `dt/u`, pose-key selection, and evaluator-level derivative/velocity checks.
+  - Extended `test_bspline_marginalization.cpp` with bucket-style shared-control regressions so active-state partitioning and registry pruning retain still-referenced controls / auxiliary states across multi-span support reuse.
+  - Updated `docs/dev_ct/dev_status.md` and `docs/TRACEABILITY.md` to mark the explicit-knot `SplineStateLayout + SplineEvaluator` path as the spline-native mainline, keep GPU `BUCKET` as the stable baseline, and keep legacy wrappers / GPU `KERNEL` clearly outside the maintenance baseline.
 - feat(dev-ct-gpu-kernel-bucket-context): IAP-RQ-300 / IAP-RQ-410 — align the experimental GPU KERNEL continuous-time LiDAR path with `SplineBucketContext` and bucket-scoped support ownership.
   - `IntegratedBSplineGICPFactorGPUKernel` now takes `SplineBucketContext` as its main constructor contract, stages only `ctx.point_indices`, derives factor keys from `ctx.support.pose_keys`, and keeps the old fixed-window key-array constructor only as a legacy compatibility wrapper for the experimental path.
   - `OdometryEstimationBSpline` now routes `CT_LIDAR_GPU + KERNEL` through `create_segment_lidar_buckets(...)`, attaching one KERNEL factor per bucket context and classifying marginalization ownership with `make_key_vector(bucket_ctx.support)` instead of the old segment-level shortcut.

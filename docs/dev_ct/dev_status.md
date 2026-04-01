@@ -1,7 +1,7 @@
 # IAP 连续时间开发状态
 
 ## 更新时间
-- 2026-03-30
+- 2026-04-01
 
 ## 执行入口
 - 后续连续时间 SLAM 开发以 [SLAM_FINISH_PLAN.md](/home/dev/code/ws_iap/src/iap/docs/dev_ct/SLAM_FINISH_PLAN.md) 为唯一执行入口。
@@ -144,6 +144,9 @@
   - 新的 `OdometryEstimationBSpline` 模块骨架
   - planner 读取连续时间轨迹的接口预留与基础接线
 - 当前实现已经具备最小可用的 spline-native `LiDAR + IMU + GNSS` 联合优化骨架，但还不是最终工程化完成版本。
+- explicit-knot `SplineStateLayout + SplineEvaluator` 现已成为 spline-native 查询与回归维护主线；`support_at(...) / supports_in_range(...)`、sensor offset、span-local `dt/u` 与 evaluator basis/kinematics 行为已有专门 regression 覆盖。
+- fixed-lag ownership 的维护基线现已明确收口到 `SplineActiveStateSet + BSplineMarginalizationPartition + BSplineFixedLagStateRegistry`；multi-span / bucket-style shared-control 引用需要按 active-state 语义保留，而不是退回旧的固定四控制点假设。
+- 旧 fixed-window / control-point helper 与旧 factor 构造函数仍作为 compatibility façade 保留，但不再代表主线语义或新的回归基线。
 - 当前 `BUCKET` GPU 路径已经从“可运行工程版”推进到“可作为稳定 A/B baseline 的运行态实现”，下一步可以在不破坏这条基线的前提下继续推进真正的 kernel-level CT LiDAR backend。
 - `CT_LIDAR_GPU_KERNEL` 已完成第一版 MVP：
   - 已新增独立 `IntegratedBSplineGICPFactorGPUKernel`
