@@ -329,10 +329,7 @@ gtsam::Rot3 IntegratedSplineDopplerFactor::anchor_rotation(const gtsam::Values& 
 }
 
 Eigen::Vector3d IntegratedSplineDopplerFactor::receiver_velocity(const gtsam::Values& values) const {
-  if (!evaluator_) {
-    return Eigen::Vector3d::Zero();
-  }
-  return evaluator_->eval_world_velocity(values, ctx_.support, ctx_.sensor_id);
+  return values.at<gtsam::Vector3>(keys_[kBSplineControlPointCount + 0]);
 }
 
 gtsam::Pose3 IntegratedSplineDopplerFactor::receiver_pose(const gtsam::Values& values) const {

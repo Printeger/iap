@@ -3,6 +3,9 @@
 > 规则：任何代码改动必须在这里记录，并包含 IAP-RQ-XXX。
 
 ## Unreleased
+- fix(dev-ct-gnss-doppler-velocity-state): IAP-RQ-020 / IAP-RQ-300 / IAP-RQ-410 — make the spline-native GNSS Doppler wrapper honor the explicit fixed-lag velocity state.
+  - `IntegratedSplineDopplerFactor` now reads the receiver velocity from its velocity-state key when evaluating residuals and linearization, instead of recomputing world velocity from spline poses.
+  - This restores the intended contract with `DopplerFactor` and makes `test_bspline_gnss_factor` zero-residual checks pass again for matching velocity/clock states.
 - test(dev-ct-spline-native-regression-baseline): IAP-RQ-300 / IAP-RQ-410 — lock the spline-native explicit-knot mainline with focused regression coverage and maintenance docs.
   - Added `test_bspline_spline_query.cpp` to pin `SplineStateLayout::support_at()` / `supports_in_range()` behavior on explicit non-uniform knots, including sensor time offsets, span-local `dt/u`, pose-key selection, and evaluator-level derivative/velocity checks.
   - Extended `test_bspline_marginalization.cpp` with bucket-style shared-control regressions so active-state partitioning and registry pruning retain still-referenced controls / auxiliary states across multi-span support reuse.
