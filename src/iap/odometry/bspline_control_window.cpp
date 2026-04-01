@@ -1,6 +1,7 @@
 #include <iap/odometry/bspline_control_window.hpp>
 
 #include <algorithm>
+#include <stdexcept>
 
 #include <gtsam/inference/Symbol.h>
 
@@ -156,6 +157,71 @@ void BSplineControlWindow::seed_with_knots(const std::vector<double>& knots, con
   }
 }
 
+void BSplineControlWindow::extend_with_knots(const std::vector<double>& new_knots, const std::vector<gtsam::Pose3>& poses) {
+  if (!initialized_) {
+    if (new_knots.empty() || poses.empty()) {
+      throw std::invalid_argument("extend_with_knots requires non-empty initialization inputs");
+    }
+    if (poses.size() < kBSplineControlPointCount) {
+      throw std::invalid_argument("extend_with_knots requires at least 4 poses to initialize");
+    }
+    if (new_knots.size() != poses.size() + kBSplineControlPointCount) {
+      throw std::invalid_argument("extend_with_knots initialization requires knots.size() == poses.size() + 4");
+    }
+    for (std::size_t i = 1; i < new_knots.size(); ++i) {
+      if (new_knots[i] < new_knots[i - 1] - 1e-9) {
+        throw std::invalid_argument("extend_with_knots initialization knots must be nondecreasing");
+      }
+    }
+    seed_with_knots(new_knots, poses);
+    return;
+  }
+
+  if (new_knots.empty() && poses.empty()) {
+    return;
+  }
+  if (new_knots.size() != poses.size()) {
+    throw std::invalid_argument("extend_with_knots requires one pose per new knot");
+  }
+  if (knots_.size() != states_.size() + kBSplineControlPointCount) {
+    throw std::invalid_argument("extend_with_knots requires explicit knot layout");
+  }
+
+  double previous = domain_end();
+  for (double knot : new_knots) {
+    if (knot <= previous + 1e-9) {
+      throw std::invalid_argument("extend_with_knots requires strictly increasing future knots beyond current domain");
+    }
+    previous = knot;
+  }
+
+  const std::size_t append_count = poses.size();
+  const std::size_t old_state_count = states_.size();
+
+  std::vector<double> updated_knots;
+  updated_knots.reserve(knots_.size() + append_count);
+  updated_knots.insert(
+    updated_knots.end(),
+    knots_.begin(),
+    knots_.end() - static_cast<std::ptrdiff_t>(kBSplineControlPointCount - 1));
+  updated_knots.insert(updated_knots.end(), new_knots.begin(), new_knots.end());
+  updated_knots.insert(updated_knots.end(), kBSplineControlPointCount - 1, new_knots.back());
+  knots_ = std::move(updated_knots);
+
+  for (std::size_t i = 0; i < append_count; ++i) {
+    const std::size_t state_index = old_state_count + i;
+    states_.push_back(BSplineControlPointState{
+      next_index_++,
+      greville_abscissa(knots_, state_index),
+      poses[i]});
+  }
+
+  const double dt = knots_[states_.size() - 1] - knots_[states_.size() - 2];
+  if (dt > 1e-9) {
+    last_scan_span_ = dt;
+  }
+}
+
 void BSplineControlWindow::extend_to(double new_end_time, const gtsam::Pose3& predicted_pose) {
   if (!initialized_) {
     seed_uniform(new_end_time - last_scan_span_, new_end_time, predicted_pose);
@@ -171,12 +237,10 @@ void BSplineControlWindow::extend_to(double new_end_time, const gtsam::Pose3& pr
   states_.push_back(BSplineControlPointState{next_index_++, new_end_time, predicted_pose});
 
   if (knots_.size() == states_.size() - 1 + kBSplineControlPointCount) {
-    std::vector<double> new_knots;
-    new_knots.reserve(knots_.size() + 1);
-    const std::size_t keep_count = states_.size();
-    new_knots.insert(new_knots.end(), knots_.begin(), knots_.begin() + static_cast<std::ptrdiff_t>(keep_count));
-    new_knots.insert(new_knots.end(), kBSplineControlPointCount, new_end_time);
-    knots_ = std::move(new_knots);
+    std::vector<double> updated_knots = knots_;
+    updated_knots.insert(updated_knots.end() - static_cast<std::ptrdiff_t>(kBSplineControlPointCount), new_end_time);
+    updated_knots.back() = new_end_time;
+    knots_ = std::move(updated_knots);
   } else {
     last_scan_span_ = dt;
     rebuild_uniform_knots_from_latest_segment();

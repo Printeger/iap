@@ -247,7 +247,15 @@ std::vector<std::size_t> support_control_indices(
 OdometryEstimationBSplineParams::OdometryEstimationBSplineParams() : OdometryEstimationCPUParams() {
   Config config(GlobalConfig::get_config_path("config_odometry"));
   spline_knot_mode = config.param<std::string>("odometry_estimation", "spline_knot_mode", "uniform");
+  spline_knot_policy = config.param<std::string>("odometry_estimation", "spline_knot_policy", "IMU_ACTIVITY");
   spline_nominal_dt = config.param<double>("odometry_estimation", "spline_nominal_dt", 0.0);
+  spline_min_dt = config.param<double>("odometry_estimation", "spline_min_dt", 0.03);
+  spline_max_dt = config.param<double>("odometry_estimation", "spline_max_dt", 0.15);
+  spline_extend_horizon = config.param<double>("odometry_estimation", "spline_extend_horizon", 0.2);
+  spline_activity_gyro_gain = config.param<double>("odometry_estimation", "spline_activity_gyro_gain", 1.0);
+  spline_activity_acc_gain = config.param<double>("odometry_estimation", "spline_activity_acc_gain", 1.0);
+  spline_target_density_coarse = config.param<int>("odometry_estimation", "spline_target_density_coarse", 1);
+  spline_target_density_fine = config.param<int>("odometry_estimation", "spline_target_density_fine", 4);
   spline_finite_difference_dt = config.param<double>("odometry_estimation", "spline_finite_difference_dt", 0.01);
   compatibility_sample_dt = config.param<double>("odometry_estimation", "compatibility_sample_dt", 0.01);
   publish_shared_trajectory = config.param<bool>("odometry_estimation", "publish_shared_trajectory", true);
@@ -265,6 +273,16 @@ OdometryEstimationBSpline::OdometryEstimationBSpline(const OdometryEstimationBSp
   trajectory_params_.knot_mode = parse_knot_mode(params.spline_knot_mode);
   trajectory_params_.nominal_dt = params.spline_nominal_dt;
   trajectory_params_.finite_difference_dt = params.spline_finite_difference_dt;
+  spline_knot_policy_name_ = params.spline_knot_policy;
+  spline_min_dt_ = params.spline_min_dt;
+  spline_max_dt_ = params.spline_max_dt;
+  spline_extend_horizon_ = params.spline_extend_horizon;
+  spline_knot_policy_params_.min_dt = params.spline_min_dt;
+  spline_knot_policy_params_.max_dt = params.spline_max_dt;
+  spline_knot_policy_params_.activity_gyro_gain = params.spline_activity_gyro_gain;
+  spline_knot_policy_params_.activity_acc_gain = params.spline_activity_acc_gain;
+  spline_knot_policy_params_.target_density_coarse = params.spline_target_density_coarse;
+  spline_knot_policy_params_.target_density_fine = params.spline_target_density_fine;
   trajectory_params_.order = 3;
   frontend_mode_ = config.param<std::string>("odometry_estimation", "frontend_mode", "CT_LIDAR_CPU");
   max_correspondence_distance_ = config.param<double>("odometry_estimation", "max_correspondence_distance", 1.5);
@@ -600,6 +618,43 @@ std::vector<OdometryEstimationBSpline::ActiveSplineIMUSample> OdometryEstimation
   }
 
   return samples;
+}
+
+std::vector<double> OdometryEstimationBSpline::decide_segment_knots(
+  const PreprocessedFrame::Ptr& raw_frame,
+  const std::vector<ActiveSplineIMUSample>& imu_samples) const {
+  const double segment_start = raw_frame->scan_end_time;
+  const double segment_end = raw_frame->scan_end_time + std::max(spline_extend_horizon_, spline_max_dt_);
+
+  if (trajectory_params_.knot_mode != iap::SplineKnotMode::NonUniform) {
+    iap::UniformSplineKnotPolicy policy(std::max(1e-3, spline_max_dt_));
+    return policy.decide(segment_start, segment_end, {}).knots;
+  }
+
+  std::vector<iap::SplinePolicyImuSample> policy_samples;
+  policy_samples.reserve(imu_samples.size());
+  for (const auto& sample : imu_samples) {
+    iap::SplinePolicyImuSample policy_sample;
+    policy_sample.stamp = sample.stamp;
+    policy_sample.linear_acc = sample.linear_acc;
+    policy_sample.angular_vel = sample.angular_vel;
+    policy_samples.push_back(policy_sample);
+  }
+
+  if (spline_knot_policy_name_ == "IMU_ACTIVITY") {
+    iap::ImuActivitySplineKnotPolicy policy(spline_knot_policy_params_);
+    return policy.decide(segment_start, segment_end, policy_samples).knots;
+  }
+
+  iap::UniformSplineKnotPolicy policy(std::max(1e-3, spline_max_dt_));
+  return policy.decide(segment_start, segment_end, policy_samples).knots;
+}
+
+std::vector<gtsam::Pose3> OdometryEstimationBSpline::make_future_control_poses(
+  const std::vector<double>& new_knots,
+  const gtsam::Pose3& predicted_end_pose) const {
+  std::vector<gtsam::Pose3> poses(new_knots.size(), predicted_end_pose);
+  return poses;
 }
 
 std::shared_ptr<const iap::SplineStateLayout> OdometryEstimationBSpline::build_active_window_layout() const {
@@ -1273,7 +1328,14 @@ EstimationFrame::ConstPtr OdometryEstimationBSpline::insert_frame_ct_lidar(
   }
 
   const gtsam::Pose3 predicted_end_pose = predict_scan_end_pose(scan_duration);
-  control_window_->advance(raw_frame->stamp, raw_frame->scan_end_time, predicted_end_pose);
+  const auto imu_samples = create_segment_imu_samples(raw_frame);
+  if (trajectory_params_.knot_mode == iap::SplineKnotMode::NonUniform) {
+    const auto new_knots = decide_segment_knots(raw_frame, imu_samples);
+    const auto new_poses = make_future_control_poses(new_knots, predicted_end_pose);
+    control_window_->extend_with_knots(new_knots, new_poses);
+  } else {
+    control_window_->advance(raw_frame->stamp, raw_frame->scan_end_time, predicted_end_pose);
+  }
   fixed_lag_registry_.append_window(*control_window_);
   refresh_active_window_layout();
 

@@ -16,6 +16,7 @@
 #include <iap/odometry/bspline_fixed_lag_registry.hpp>
 #include <iap/odometry/bspline_marginalization.hpp>
 #include <iap/odometry/bspline_trajectory.hpp>
+#include <iap/odometry/spline_knot_policy.hpp>
 #include <iap/gnss/gnss_epoch_builder.hpp>
 #include <iap/gnss/gnss_handler.hpp>
 #include <iap/odometry/integrated_bspline_gicp_factor.hpp>
@@ -64,7 +65,15 @@ struct OdometryEstimationBSplineParams : public OdometryEstimationCPUParams {
 
  public:
   std::string spline_knot_mode;
+  std::string spline_knot_policy = "IMU_ACTIVITY";
   double spline_nominal_dt = 0.0;
+  double spline_min_dt = 0.03;
+  double spline_max_dt = 0.15;
+  double spline_extend_horizon = 0.2;
+  double spline_activity_gyro_gain = 1.0;
+  double spline_activity_acc_gain = 1.0;
+  int spline_target_density_coarse = 1;
+  int spline_target_density_fine = 4;
   double spline_finite_difference_dt = 0.01;
   double compatibility_sample_dt = 0.01;
   bool publish_shared_trajectory = true;
@@ -174,6 +183,8 @@ class OdometryEstimationBSpline : public OdometryEstimationCPU {
   gtsam_points::PointCloud::ConstPtr create_lidar_source_cloud(const PreprocessedFrame::Ptr& raw_frame) const;
   ActiveSplineTargetReference create_active_target_reference() const;
   std::vector<ActiveSplineIMUSample> create_segment_imu_samples(const PreprocessedFrame::Ptr& raw_frame) const;
+  std::vector<double> decide_segment_knots(const PreprocessedFrame::Ptr& raw_frame, const std::vector<ActiveSplineIMUSample>& imu_samples) const;
+  std::vector<gtsam::Pose3> make_future_control_poses(const std::vector<double>& new_knots, const gtsam::Pose3& predicted_end_pose) const;
   std::shared_ptr<const iap::SplineStateLayout> build_active_window_layout() const;
   void refresh_active_window_layout();
   std::shared_ptr<const iap::SplineStateLayout> create_segment_imu_layout(const ActiveSplineSegmentConstraint& segment) const;
@@ -234,6 +245,11 @@ class OdometryEstimationBSpline : public OdometryEstimationCPU {
   double compatibility_sample_dt_ = 0.01;
   bool publish_shared_trajectory_ = true;
   bool attach_trajectory_to_frames_ = true;
+  std::string spline_knot_policy_name_ = "IMU_ACTIVITY";
+  double spline_min_dt_ = 0.03;
+  double spline_max_dt_ = 0.15;
+  double spline_extend_horizon_ = 0.2;
+  iap::ImuActivitySplineKnotPolicy::Params spline_knot_policy_params_;
   // Commit 0 guardrail: keep CPU CT LiDAR as the default mainline whenever the
   // config is missing, while preserving all legacy frontends as explicit opt-ins.
   std::string frontend_mode_ = "CT_LIDAR_CPU";

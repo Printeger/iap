@@ -45,6 +45,7 @@ class BSplineControlWindow {
   bool initialized() const { return initialized_; }
   void seed_uniform(double t0, double t1, const gtsam::Pose3& initial_pose);
   void seed_with_knots(const std::vector<double>& knots, const std::vector<gtsam::Pose3>& poses);
+  void extend_with_knots(const std::vector<double>& new_knots, const std::vector<gtsam::Pose3>& poses);
   void extend_to(double new_end_time, const gtsam::Pose3& predicted_pose);
   void initialize(double scan_start, double scan_end, const gtsam::Pose3& initial_pose);
   void advance(double scan_start, double scan_end, const gtsam::Pose3& predicted_end_pose);

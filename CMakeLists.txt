@@ -118,6 +118,7 @@ add_library(iap SHARED
   src/iap/planner/integrity_planner.cpp
   # odometry
   src/iap/odometry/bspline_control_window.cpp
+  src/iap/odometry/spline_knot_policy.cpp
   src/iap/odometry/bspline_marginalization.cpp
   src/iap/odometry/callbacks.cpp
   src/iap/odometry/spline_evaluator.cpp
@@ -419,6 +420,8 @@ if(DEFINED ENV{ROS_VERSION})
       target_link_libraries(test_araim iap)
       ament_add_gtest(test_bspline_control_window test/test_bspline_control_window.cpp)
       target_link_libraries(test_bspline_control_window iap)
+      ament_add_gtest(test_spline_knot_policy test/test_spline_knot_policy.cpp)
+      target_link_libraries(test_spline_knot_policy iap)
       ament_add_gtest(test_bspline_gicp_factor test/test_bspline_gicp_factor.cpp)
       target_link_libraries(test_bspline_gicp_factor iap)
       ament_add_gtest(test_bspline_imu_factor test/test_bspline_imu_factor.cpp)

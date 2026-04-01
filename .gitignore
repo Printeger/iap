@@ -17,6 +17,7 @@ msg/*ActionResult.msg
 msg/*Feedback.msg
 msg/*Goal.msg
 msg/*Result.msg
+!msg/DynamicALResult.msg
 msg/_*.py
 build_isolated/
 devel_isolated/

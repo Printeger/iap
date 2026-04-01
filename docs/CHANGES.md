@@ -3,6 +3,11 @@
 > 规则：任何代码改动必须在这里记录，并包含 IAP-RQ-XXX。
 
 ## Unreleased
+- feat(dev-ct-nonuniform-knot-policy): IAP-RQ-300 / IAP-RQ-410 — add Commit 9 adaptive explicit-knot placement for non-uniform B-spline odometry.
+  - Added `SplineKnotPolicy` with `UniformSplineKnotPolicy` and `ImuActivitySplineKnotPolicy`, so short-horizon IMU activity can choose bounded future knot density without putting policy logic inside `BSplineControlWindow`.
+  - `BSplineControlWindow` now supports `extend_with_knots(...)`, allowing odometry to append already-decided explicit future knots while preserving explicit-knot layout semantics and queryability.
+  - `OdometryEstimationBSpline` now parses Commit 9 knot-policy config, converts active IMU samples into policy input, and extends the active window with non-uniform future knots on the `non_uniform` runtime path.
+  - Added minimal regression coverage in `test_spline_knot_policy.cpp` and `test_bspline_control_window.cpp` for adaptive spacing and explicit-knot window extension behavior.
 - feat(dev-ct-active-state-marginalization): IAP-RQ-020 / IAP-RQ-300 / IAP-RQ-410 — rewrite fixed-lag marginalization around active spans / active keys instead of legacy segment ownership.
   - Added `SplineActiveStateSet` plus registry-side `active_span_indices(...)`, `active_control_references(...)`, and `active_state_set(...)` queries, so the fixed-lag window can now explain which spans and control points remain live before deciding the drop set.
   - `OdometryEstimationBSpline` now seeds active auxiliary states first, builds `SplineActiveStateSet` as the primary marginalization input, and classifies CPU LiDAR bucket / IMU / GNSS factors against their actual support pose keys instead of the legacy `segment.control_indices` shortcut.
