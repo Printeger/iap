@@ -3,6 +3,10 @@
 > 规则：任何代码改动必须在这里记录，并包含 IAP-RQ-XXX。
 
 ## Unreleased
+- feat(dev-ct-lidar-buckets): IAP-RQ-300 / IAP-RQ-410 — switch the CPU CT LiDAR main path to bucketized spline-native GICP factors.
+  - Added `SplineBucketContext` plus the new `IntegratedSplineGICPFactor`, so the CPU LiDAR graph no longer attaches one mega factor to the whole scan and instead builds multiple bucket factors, each bound to one `SplineLocalSupport` and a subset of source point indices.
+  - `OdometryEstimationBSpline` now creates per-segment LiDAR bucket contexts from explicit scan-time buckets and routes the CPU main path through those bucket factors, while the old `IntegratedBSplineGICPFactor` cache path is retained as a compatibility/reference factor for deskewing and post-opt diagnostics.
+  - Existing GICP/VGICP-style correspondence search, robust kernels, profiling, numeric audit, and degeneracy diagnostics are kept; only the LiDAR factor assembly responsibility moved from whole-scan tables into the bucket scheduler in this commit.
 - feat(dev-ct-gnss-spline-evaluator): IAP-RQ-020 / IAP-RQ-300 / IAP-RQ-410 — switch the GNSS factor main path to unified spline support/evaluator queries.
   - Added `IntegratedSplinePseudorangeFactor` and `IntegratedSplineDopplerFactor`, so GNSS pseudorange / Doppler assembly now enters through `SplineStampContext + SplineStateLayout + SplineEvaluator` instead of direct `BSplineControlWindow::interpolate(u)` calls.
   - `SplineSensorModel` is now explicitly documented as the shared place for GNSS antenna extrinsics too, and `OdometryEstimationBSpline` now registers a `Gnss` sensor model per active segment before calling `layout->support_at(epoch.stamp, Gnss)`.
