@@ -39,6 +39,14 @@ class IntegratedBSplineGICPFactorGPUKernel : public gtsam::NonlinearFactor {
   struct DeviceKernelStats;
 
   IntegratedBSplineGICPFactorGPUKernel(
+    const SplineBucketContext& ctx,
+    const std::shared_ptr<const gtsam_points::iVox>& target,
+    const std::shared_ptr<const gtsam_points::PointCloud>& source,
+    CUstream_st* stream = nullptr,
+    std::shared_ptr<gtsam_points::TempBufferManager> temp_buffer = nullptr);
+
+  // Legacy compatibility wrapper for the pre-Commit-11 experimental KERNEL path.
+  IntegratedBSplineGICPFactorGPUKernel(
     const std::array<gtsam::Key, kBSplineControlPointCount>& keys,
     const std::shared_ptr<const gtsam_points::iVox>& target,
     const std::shared_ptr<const gtsam_points::PointCloud>& source,
@@ -92,7 +100,7 @@ class IntegratedBSplineGICPFactorGPUKernel : public gtsam::NonlinearFactor {
   EvaluationResult evaluate(const gtsam::Values& values, bool compute_hessian) const;
   void update_profile(const EvaluationResult& eval, const char* stage) const;
   std::shared_ptr<gtsam::HessianFactor> make_hessian_factor(const EvaluationResult& eval) const;
-  std::shared_ptr<IntegratedBSplineGICPFactor> make_cpu_reference_factor(
+  std::shared_ptr<IntegratedSplineGICPFactor> make_cpu_reference_factor(
     IntegratedBSplineGICPFactor::JacobianMode mode) const;
 
   IntegratedBSplineGICPFactor::JacobianMode jacobian_mode_ =
@@ -111,6 +119,7 @@ class IntegratedBSplineGICPFactorGPUKernel : public gtsam::NonlinearFactor {
 
   CUstream_st* stream_ = nullptr;
   std::shared_ptr<gtsam_points::TempBufferManager> temp_buffer_;
+  SplineBucketContext ctx_;
   std::shared_ptr<const gtsam_points::iVox> target_;
   std::shared_ptr<const gtsam_points::PointCloud> source_;
   mutable std::shared_ptr<gtsam_points::PointCloudGPU> source_gpu_;
@@ -118,7 +127,6 @@ class IntegratedBSplineGICPFactorGPUKernel : public gtsam::NonlinearFactor {
   std::shared_ptr<gtsam_points::PointCloudCPU> target_cpu_points_;
   std::vector<float> normalized_times_;
   std::vector<double> time_table_;
-  std::vector<int> time_indices_;
   std::vector<std::size_t> time_bucket_populations_;
   std::size_t target_point_count_ = 0;
   mutable float* normalized_times_gpu_ = nullptr;

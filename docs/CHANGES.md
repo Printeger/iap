@@ -3,6 +3,14 @@
 > 规则：任何代码改动必须在这里记录，并包含 IAP-RQ-XXX。
 
 ## Unreleased
+- feat(dev-ct-gpu-kernel-bucket-context): IAP-RQ-300 / IAP-RQ-410 — align the experimental GPU KERNEL continuous-time LiDAR path with `SplineBucketContext` and bucket-scoped support ownership.
+  - `IntegratedBSplineGICPFactorGPUKernel` now takes `SplineBucketContext` as its main constructor contract, stages only `ctx.point_indices`, derives factor keys from `ctx.support.pose_keys`, and keeps the old fixed-window key-array constructor only as a legacy compatibility wrapper for the experimental path.
+  - `OdometryEstimationBSpline` now routes `CT_LIDAR_GPU + KERNEL` through `create_segment_lidar_buckets(...)`, attaching one KERNEL factor per bucket context and classifying marginalization ownership with `make_key_vector(bucket_ctx.support)` instead of the old segment-level shortcut.
+  - Updated CUDA regression coverage in `test_bspline_gicp_factor.cpp` so the KERNEL tests construct explicit bucket contexts directly and verify refreshed-target behavior against a freshly constructed factor on the new target.
+- feat(dev-ct-legacy-wrapper-markers): IAP-RQ-300 / IAP-RQ-410 — mark remaining fixed-window spline interfaces as compatibility wrappers while keeping them buildable.
+  - Added explicit legacy-wrapper annotations to the old fixed-window constructors in `integrated_bspline_imu_factor.hpp`, `integrated_bspline_gnss_factor.hpp`, and `integrated_bspline_gicp_factor.hpp`.
+  - Added lightweight compatibility notes to `bspline_control_window.hpp` and `bspline_trajectory.hpp`, clarifying that explicit-knot layouts / snapshots are the mainline and the old helpers remain for migration compatibility.
+  - Refined `config_odometry_bspline.json` comments so GPU `KERNEL` remains clearly experimental even after the interface alignment.
 - feat(dev-ct-gpu-bucket-context): IAP-RQ-300 / IAP-RQ-410 — align the GPU BUCKET continuous-time LiDAR path with `SplineBucketContext` and explicit-knot support scheduling.
   - `IntegratedSplineGICPFactorGPU` now consumes `SplineBucketContext`, stages only `ctx.point_indices`, and queries the spline pose/Jacobian mapping from `ctx.support.u` instead of rebuilding whole-scan `time_table_ / time_indices_` inside the factor.
   - `OdometryEstimationBSpline` now routes `CT_LIDAR_GPU + BUCKET` through the same `create_segment_lidar_buckets(...)` scheduler used by the CPU path, attaching one GPU bucket factor per support bucket while leaving `KERNEL` unchanged.

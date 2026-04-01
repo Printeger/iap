@@ -40,6 +40,10 @@ class BSplineControlWindow {
  public:
   EIGEN_MAKE_ALIGNED_OPERATOR_NEW
 
+  // Commit 12 note:
+  // This window remains as the legacy bootstrap / compatibility façade for the
+  // fixed-4-control-point rollout. New mainline scheduling and query ownership
+  // should prefer explicit-knot layouts / supports when available.
   BSplineControlWindow();
 
   bool initialized() const { return initialized_; }

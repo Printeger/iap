@@ -988,15 +988,12 @@ TEST(BSplineGICPFactorTest, GpuKernelFactorLinearizesAndReturnsUnifiedProfile) {
   target->set_neighbor_voxel_mode(1);
   target->insert(*target_cloud);
 
-  std::array<gtsam::Key, iap::kBSplineControlPointCount> keys{};
-  for (std::size_t i = 0; i < iap::kBSplineControlPointCount; ++i) {
-    keys[i] = iap::bspline_control_point_key(i);
-  }
+  const auto bucket_ctx = make_full_bucket_context();
 
   gtsam_points::StreamTempBufferRoundRobin stream_buffers;
   auto stream_buffer = stream_buffers.get_stream_buffer();
   iap::IntegratedBSplineGICPFactorGPUKernel factor(
-    keys,
+    bucket_ctx,
     target,
     make_cloud(true),
     stream_buffer.first,
@@ -1075,15 +1072,12 @@ TEST(BSplineGICPFactorTest, GpuKernelFactorRefreshesTargetWithoutRebuildingSourc
   target_b->set_neighbor_voxel_mode(1);
   target_b->insert(*target_b_cloud);
 
-  std::array<gtsam::Key, iap::kBSplineControlPointCount> keys{};
-  for (std::size_t i = 0; i < iap::kBSplineControlPointCount; ++i) {
-    keys[i] = iap::bspline_control_point_key(i);
-  }
+  const auto bucket_ctx = make_full_bucket_context();
 
   gtsam_points::StreamTempBufferRoundRobin stream_buffers;
   auto stream_buffer = stream_buffers.get_stream_buffer();
   iap::IntegratedBSplineGICPFactorGPUKernel factor(
-    keys,
+    bucket_ctx,
     target_a,
     make_cloud(true),
     stream_buffer.first,
@@ -1095,12 +1089,36 @@ TEST(BSplineGICPFactorTest, GpuKernelFactorRefreshesTargetWithoutRebuildingSourc
   const void* staging_a = factor.source_staging_identity();
   ASSERT_NE(staging_a, nullptr);
   const double error_a = factor.error(values);
+  const auto profile_a = factor.profiling_report();
+  ASSERT_TRUE(profile_a.valid);
+  ASSERT_EQ(profile_a.time_bucket_count, 1U);
 
   factor.refresh_target(target_b);
   const void* staging_b = factor.source_staging_identity();
+
+  iap::IntegratedBSplineGICPFactorGPUKernel fresh_factor(
+    bucket_ctx,
+    target_b,
+    make_cloud(true),
+    stream_buffer.first,
+    stream_buffer.second);
+  fresh_factor.set_enable_profiling(true);
+  fresh_factor.set_max_correspondence_distance(2.0);
+
   const double error_b = factor.error(values);
+  const auto profile_b = factor.profiling_report();
+  const double fresh_error_b = fresh_factor.error(values);
+  const auto fresh_profile_b = fresh_factor.profiling_report();
 
   EXPECT_EQ(staging_a, staging_b);
   EXPECT_NE(error_a, error_b);
+  ASSERT_TRUE(profile_b.valid);
+  ASSERT_TRUE(fresh_profile_b.valid);
+  EXPECT_DOUBLE_EQ(error_b, fresh_error_b);
+  EXPECT_EQ(profile_b.time_bucket_count, 1U);
+  EXPECT_EQ(profile_b.time_bucket_count, fresh_profile_b.time_bucket_count);
+  EXPECT_EQ(profile_b.source_point_count, fresh_profile_b.source_point_count);
+  EXPECT_EQ(profile_b.target_point_count, fresh_profile_b.target_point_count);
+  EXPECT_EQ(profile_b.inlier_point_count, fresh_profile_b.inlier_point_count);
 }
 #endif

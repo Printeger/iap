@@ -143,6 +143,8 @@ class IntegratedBSplineGICPFactor : public gtsam::NonlinearFactor {
     bool has_warning() const { return warning_count > 0; }
   };
 
+  // Legacy compatibility wrapper: keeps the fixed-window key-array LiDAR factor
+  // entry point available while the mainline uses `SplineBucketContext`.
   IntegratedBSplineGICPFactor(
     const std::array<gtsam::Key, kBSplineControlPointCount>& keys,
     const std::shared_ptr<const gtsam_points::iVox>& target,

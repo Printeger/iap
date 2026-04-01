@@ -33,6 +33,8 @@ class BSplineTrajectory final : public ContinuousTrajectoryView, public SplineCo
   BSplineTrajectory();
   explicit BSplineTrajectory(const Params& params);
 
+  // Legacy compatibility wrapper for callers that still publish raw control
+  // points instead of explicit-knot snapshots/layout bindings.
   void set_control_points(const std::vector<SplineControlPoint>& control_points);
   void set_snapshot(const SplineWindowSnapshot& snapshot);
   void set_layout(std::shared_ptr<const SplineStateLayout> layout, const gtsam::Values* values = nullptr);

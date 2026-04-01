@@ -123,6 +123,7 @@ class OdometryEstimationBSpline : public OdometryEstimationCPU {
     BSplineGpuLidarBackend gpu_backend = BSplineGpuLidarBackend::BUCKET;
     BSplineLidarTargetMode target_mode = BSplineLidarTargetMode::ACTIVE_WINDOW_SNAPSHOT;
     std::array<std::size_t, iap::kBSplineControlPointCount> control_indices{};
+    std::size_t bucket_u_signature = 0;
     const void* source_identity = nullptr;
     const void* target_identity = nullptr;
     std::size_t target_revision = 0;
@@ -221,6 +222,7 @@ class OdometryEstimationBSpline : public OdometryEstimationCPU {
     bool* cache_hit,
     bool* target_refreshed);
   std::shared_ptr<iap::IntegratedBSplineGICPFactorGPUKernel> get_or_create_gpu_kernel_lidar_factor(
+    const iap::SplineBucketContext& bucket_ctx,
     ActiveSplineSegmentConstraint& segment,
     CUstream_st* stream,
     std::shared_ptr<gtsam_points::TempBufferManager> temp_buffer,

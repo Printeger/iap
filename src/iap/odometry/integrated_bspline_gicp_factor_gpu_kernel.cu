@@ -478,14 +478,15 @@ __global__ void evaluate_ct_lidar_kernel(
 }  // namespace
 
 IntegratedBSplineGICPFactorGPUKernel::IntegratedBSplineGICPFactorGPUKernel(
-  const std::array<gtsam::Key, kBSplineControlPointCount>& keys,
+  const SplineBucketContext& ctx,
   const std::shared_ptr<const gtsam_points::iVox>& target,
   const std::shared_ptr<const gtsam_points::PointCloud>& source,
   CUstream_st* stream,
   std::shared_ptr<gtsam_points::TempBufferManager> temp_buffer)
-: gtsam::NonlinearFactor(gtsam::KeyVector(keys.begin(), keys.end())),
+: gtsam::NonlinearFactor(gtsam::KeyVector(ctx.support.pose_keys.begin(), ctx.support.pose_keys.end())),
   stream_(stream),
   temp_buffer_(std::move(temp_buffer)),
+  ctx_(ctx),
   target_(target),
   source_(source) {
   if (!target_) {
@@ -495,37 +496,43 @@ IntegratedBSplineGICPFactorGPUKernel::IntegratedBSplineGICPFactorGPUKernel(
     throw std::runtime_error("IntegratedBSplineGICPFactorGPUKernel requires source points, covariances, and times");
   }
 
-  const double time_eps = 1e-3;
-  time_table_.reserve(frame::size(*source_) / 10 + 1);
-  time_indices_.reserve(frame::size(*source_));
-  normalized_times_.reserve(frame::size(*source_));
-
-  for (int i = 0; i < frame::size(*source_); ++i) {
-    const double t = frame::time(*source_, i);
-    if (time_table_.empty() || t - time_table_.back() > time_eps) {
-      time_table_.push_back(t);
-    }
-    time_indices_.push_back(static_cast<int>(time_table_.size() - 1));
-  }
-  time_bucket_populations_.assign(time_table_.size(), 0U);
-  for (const int time_index : time_indices_) {
-    time_bucket_populations_[static_cast<std::size_t>(time_index)]++;
-  }
-
-  const double time_min = time_table_.empty() ? 0.0 : time_table_.front();
-  const double time_max = time_table_.empty() ? 1.0 : time_table_.back();
-  const double denom = std::max(1e-9, time_max - time_min);
-  for (int i = 0; i < frame::size(*source_); ++i) {
-    const double t = frame::time(*source_, i);
-    normalized_times_.push_back(static_cast<float>((t - time_min) / denom));
-  }
-  for (auto& t : time_table_) {
-    t = (t - time_min) / denom;
+  normalized_times_.reserve(ctx_.point_indices.size());
+  time_table_.push_back(ctx_.support.query_time);
+  time_bucket_populations_.assign(1, ctx_.point_indices.size());
+  for (std::size_t i = 0; i < ctx_.point_indices.size(); ++i) {
+    normalized_times_.push_back(static_cast<float>(ctx_.support.u));
   }
 
   ensure_source_gpu();
   rebuild_target_gpu();
 }
+
+IntegratedBSplineGICPFactorGPUKernel::IntegratedBSplineGICPFactorGPUKernel(
+  const std::array<gtsam::Key, kBSplineControlPointCount>& keys,
+  const std::shared_ptr<const gtsam_points::iVox>& target,
+  const std::shared_ptr<const gtsam_points::PointCloud>& source,
+  CUstream_st* stream,
+  std::shared_ptr<gtsam_points::TempBufferManager> temp_buffer)
+: IntegratedBSplineGICPFactorGPUKernel(
+    [&keys, &source] {
+      SplineBucketContext ctx;
+      for (std::size_t i = 0; i < kBSplineControlPointCount; ++i) {
+        ctx.support.pose_keys[i] = keys[i];
+        ctx.support.ctrl_indices[i] = i;
+      }
+      ctx.support.u = 0.5;
+      if (source) {
+        ctx.point_indices.reserve(frame::size(*source));
+        for (int i = 0; i < frame::size(*source); ++i) {
+          ctx.point_indices.push_back(i);
+        }
+      }
+      return ctx;
+    }(),
+    target,
+    source,
+    stream,
+    std::move(temp_buffer)) {}
 
 IntegratedBSplineGICPFactorGPUKernel::~IntegratedBSplineGICPFactorGPUKernel() {
   if (normalized_times_gpu_) {
@@ -565,7 +572,29 @@ std::array<gtsam::Pose3, kBSplineControlPointCount> IntegratedBSplineGICPFactorG
 
 void IntegratedBSplineGICPFactorGPUKernel::ensure_source_gpu() const {
   if (!source_gpu_) {
-    source_gpu_ = gtsam_points::PointCloudGPU::clone(*source_, stream_);
+    std::vector<Eigen::Vector4d> bucket_points;
+    bucket_points.reserve(ctx_.point_indices.size());
+    std::vector<Eigen::Matrix4d> bucket_covs;
+    bucket_covs.reserve(ctx_.point_indices.size());
+    std::vector<Eigen::Vector4d> bucket_normals;
+    if (frame::has_normals(*source_)) {
+      bucket_normals.reserve(ctx_.point_indices.size());
+    }
+
+    for (const int point_index : ctx_.point_indices) {
+      bucket_points.emplace_back(frame::point(*source_, point_index));
+      bucket_covs.emplace_back(frame::cov(*source_, point_index));
+      if (frame::has_normals(*source_)) {
+        bucket_normals.emplace_back(frame::normal(*source_, point_index));
+      }
+    }
+
+    source_gpu_ = std::make_shared<gtsam_points::PointCloudGPU>();
+    source_gpu_->add_points(bucket_points, stream_);
+    source_gpu_->add_covs(bucket_covs, stream_);
+    if (!bucket_normals.empty()) {
+      source_gpu_->add_normals(bucket_normals, stream_);
+    }
   }
 
   if (!normalized_times_gpu_ && !normalized_times_.empty()) {
@@ -588,7 +617,7 @@ void IntegratedBSplineGICPFactorGPUKernel::ensure_source_gpu() const {
     throw_if_cuda_error(
       cudaMalloc(
         reinterpret_cast<void**>(&matched_target_indices_gpu_),
-        sizeof(int) * std::max<std::size_t>(1, frame::size(*source_))),
+        sizeof(int) * std::max<std::size_t>(1, ctx_.point_indices.size())),
       "cudaMalloc matched_target_indices_gpu");
   }
 }
@@ -655,7 +684,7 @@ IntegratedBSplineGICPFactorGPUKernel::EvaluationResult IntegratedBSplineGICPFact
   throw_if_cuda_error(cudaMemsetAsync(linearized_gradient_gpu_, 0, sizeof(float) * kStateDim, stream_), "cudaMemset linearized_gradient_gpu");
   throw_if_cuda_error(cudaMemsetAsync(kernel_stats_gpu_, 0, sizeof(DeviceKernelStats), stream_), "cudaMemset kernel_stats_gpu");
   throw_if_cuda_error(
-    cudaMemsetAsync(matched_target_indices_gpu_, 0xFF, sizeof(int) * std::max<std::size_t>(1, frame::size(*source_)), stream_),
+    cudaMemsetAsync(matched_target_indices_gpu_, 0xFF, sizeof(int) * std::max<std::size_t>(1, ctx_.point_indices.size()), stream_),
     "cudaMemset matched_target_indices_gpu");
 
   cudaEvent_t kernel_start;
@@ -664,7 +693,7 @@ IntegratedBSplineGICPFactorGPUKernel::EvaluationResult IntegratedBSplineGICPFact
   throw_if_cuda_error(cudaEventCreate(&kernel_end), "cudaEventCreate kernel_end");
   throw_if_cuda_error(cudaEventRecord(kernel_start, stream_), "cudaEventRecord kernel_start");
 
-  const int num_points = static_cast<int>(frame::size(*source_));
+  const int num_points = static_cast<int>(ctx_.point_indices.size());
   const int num_blocks = std::max(1, (num_points + kThreadsPerBlock - 1) / kThreadsPerBlock);
   evaluate_ct_lidar_kernel<<<num_blocks, kThreadsPerBlock, 0, stream_>>>(
     control_set,
@@ -761,7 +790,7 @@ IntegratedBSplineGICPFactorGPUKernel::EvaluationResult IntegratedBSplineGICPFact
 void IntegratedBSplineGICPFactorGPUKernel::update_profile(const EvaluationResult& eval, const char* stage) const {
   auto profile = make_bspline_lidar_minimal_profile(
     BSplineLidarFactorBackend::GPU_GICP,
-    static_cast<std::size_t>(frame::size(*source_)),
+    ctx_.point_indices.size(),
     target_point_count_,
     static_cast<std::size_t>(std::max(eval.matched_count, 0)),
     static_cast<std::size_t>(std::max(eval.inlier_count, 0)),
@@ -774,7 +803,7 @@ void IntegratedBSplineGICPFactorGPUKernel::update_profile(const EvaluationResult
   profile.mean_time_bucket_population =
     time_bucket_populations_.empty()
       ? 0.0
-      : static_cast<double>(frame::size(*source_)) / static_cast<double>(time_bucket_populations_.size());
+      : static_cast<double>(ctx_.point_indices.size()) / static_cast<double>(time_bucket_populations_.size());
   profile.candidate_evaluation_count = static_cast<std::size_t>(std::max(eval.candidate_evaluation_count, 0));
   profile.matched_point_count = static_cast<std::size_t>(std::max(eval.matched_count, 0));
   profile.inlier_point_count = static_cast<std::size_t>(std::max(eval.inlier_count, 0));
@@ -861,13 +890,9 @@ std::shared_ptr<gtsam::HessianFactor> IntegratedBSplineGICPFactorGPUKernel::make
   return std::make_shared<gtsam::HessianFactor>(keys_, augmented);
 }
 
-std::shared_ptr<IntegratedBSplineGICPFactor> IntegratedBSplineGICPFactorGPUKernel::make_cpu_reference_factor(
+std::shared_ptr<IntegratedSplineGICPFactor> IntegratedBSplineGICPFactorGPUKernel::make_cpu_reference_factor(
   IntegratedBSplineGICPFactor::JacobianMode mode) const {
-  std::array<gtsam::Key, kBSplineControlPointCount> keys{};
-  for (std::size_t i = 0; i < kBSplineControlPointCount; ++i) {
-    keys[i] = keys_[i];
-  }
-  auto factor = std::make_shared<IntegratedBSplineGICPFactor>(keys, target_, source_, target_);
+  auto factor = std::make_shared<IntegratedSplineGICPFactor>(ctx_, target_, source_, target_);
   factor->set_enable_profiling(false);
   factor->set_jacobian_mode(mode);
   factor->set_numeric_eps(numeric_eps_);
@@ -894,7 +919,7 @@ gtsam::GaussianFactor::shared_ptr IntegratedBSplineGICPFactorGPUKernel::lineariz
 }
 
 double IntegratedBSplineGICPFactorGPUKernel::inlier_fraction() const {
-  const auto source_size = static_cast<std::size_t>(std::max(frame::size(*source_), 0));
+  const auto source_size = ctx_.point_indices.size();
   return source_size == 0 ? 0.0 : static_cast<double>(last_inlier_count_) / static_cast<double>(source_size);
 }
 
@@ -1054,18 +1079,14 @@ std::vector<Eigen::Vector4d> IntegratedBSplineGICPFactorGPUKernel::deskewed_sour
   bool local) const {
   const auto poses = control_poses(values);
   std::vector<Eigen::Vector4d> points;
-  points.reserve(frame::size(*source_));
-  const gtsam::Pose3 reference = BSplineControlWindow::interpolate(poses, 0.0);
+  points.reserve(ctx_.point_indices.size());
+  const gtsam::Pose3 reference = BSplineControlWindow::interpolate(poses, ctx_.support.u);
 
-  const double time_min = time_table_.empty() ? 0.0 : time_table_.front();
-  const double time_max = time_table_.empty() ? 1.0 : time_table_.back();
-  (void)time_min;
-  (void)time_max;
-
-  for (int i = 0; i < frame::size(*source_); ++i) {
-    const double u = normalized_times_[static_cast<std::size_t>(i)];
+  for (std::size_t i = 0; i < ctx_.point_indices.size(); ++i) {
+    const int point_index = ctx_.point_indices[i];
+    const double u = normalized_times_[i];
     const auto pose = BSplineControlWindow::interpolate(poses, u);
-    const auto world_pt = pose.transformFrom(frame::point(*source_, i).template head<3>().eval());
+    const auto world_pt = pose.transformFrom(frame::point(*source_, point_index).template head<3>().eval());
     Eigen::Vector4d pt = Eigen::Vector4d::Ones();
     pt.head<3>() = local ? reference.transformTo(world_pt) : world_pt;
     points.push_back(pt);

@@ -25,7 +25,7 @@
     //   BUCKET is the second-priority GPU adaptation path after the CPU path is stable.
     //   KERNEL remains experimental and is the last path to align with unified spline query semantics.
     //   BUCKET = frozen engineering path; time-bucket GPU VGICP subfactors mapped back to 4 spline controls
-    //   KERNEL = experimental independent kernel-level spline-native CT LiDAR backend
+    //   KERNEL = experimental bucket-context-aligned kernel backend; interface-aligned first, tuning later
     "ct_lidar_gpu_backend": "BUCKET",
     // Initialization params
     "initialization_mode": "LOOSE",

@@ -178,6 +178,16 @@
   - `IntegratedBSplinePseudorangeFactor` / `IntegratedBSplineDopplerFactor` 旧构造函数仍保留为兼容 wrapper；旧的 clock state、ECEF origin/rotation、GNSS clock-between 路径没有改。
   - GNSS 数值 Jacobian 仍保留在 control-pose 层，但几何 residual 使用的接收机 pose / antenna query 已统一改为 `SplineEvaluator` 提供。
 - 2026-04-01: IAP-RQ-300 / IAP-RQ-410
+  - 已开始按 `ct-iap_spec.md` 执行 `Commit 11`，把 experimental GPU `KERNEL` LiDAR 路径的主接口迁移到 `SplineBucketContext + SplineLocalSupport`，与 CPU / GPU `BUCKET` 的显式-knot 查询语义保持一致。
+  - `IntegratedBSplineGICPFactorGPUKernel` 现在直接接收 `SplineBucketContext`、使用 `ctx.support.pose_keys` 作为因子 key、只为 `ctx.point_indices` 构建 source-side staging，并把旧的 fixed-window key-array 构造函数保留为 legacy compatibility wrapper。
+  - `OdometryEstimationBSpline` 现在会在 `CT_LIDAR_GPU + KERNEL` 下复用 `create_segment_lidar_buckets(...)`，按 bucket context 构建/缓存 KERNEL factors，并以 `make_key_vector(bucket_ctx.support)` 进入 marginalization ownership 判定；`KERNEL` 仍保持 experimental/opt-in。
+  - `test_bspline_gicp_factor.cpp` 的 CUDA KERNEL smoke / refresh regression 已切到显式 `SplineBucketContext` 输入，并增加 refreshed-target 与 fresh-factor on new target 的结果对比覆盖。
+- 2026-04-01: IAP-RQ-300 / IAP-RQ-410
+  - 已开始按 `ct-iap_spec.md` 执行 `Commit 12`，先收窄遗留 fixed-window spline API 的语义，把它们明确标记为 compatibility wrappers，而不删除 public entry points。
+  - `integrated_bspline_imu_factor.hpp`、`integrated_bspline_gnss_factor.hpp`、`integrated_bspline_gicp_factor.hpp` 现已为旧构造函数补充 legacy-wrapper 注释，明确它们只是向 spline-native `SplineStampContext` / `SplineBucketContext` 主路径转发。
+  - `bspline_control_window.hpp` 与 `bspline_trajectory.hpp` 现已补充轻量兼容性说明，强调 explicit-knot layouts / snapshots 是主路径，而旧窗口/控制点入口只作为迁移期兼容 façade 保留。
+  - `config_odometry_bspline.json` 的 GPU backend 注释已补充说明：`KERNEL` 即便完成接口对齐，仍然保持 experimental，工程默认与调优主线仍为 `BUCKET` / CPU。
+- 2026-04-01: IAP-RQ-300 / IAP-RQ-410
   - 已开始按 `ct-iap_spec.md` 执行 `Commit 10`，把 GPU `BUCKET` LiDAR 主路径从旧的整帧内部 time-bucketing 契约迁移到 `SplineBucketContext + SplineLocalSupport`，与 CPU bucket scheduler 保持一致。
   - `IntegratedSplineGICPFactorGPU` 现已改为直接接收 `SplineBucketContext`，只为 `ctx.point_indices` 构建 source-side GPU staging，并通过 `ctx.support.u / ctx.support.pose_keys` 做统一的 spline pose 查询与 Jacobian 映射；旧的 whole-scan `time_table_ / time_indices_` 不再是该主路径接口。
   - `OdometryEstimationBSpline` 现在会在 `CT_LIDAR_GPU + BUCKET` 下复用 `create_segment_lidar_buckets(...)`，为每个 bucket context 构建一个 GPU factor，并按 `make_key_vector(bucket_ctx.support)` 进入优化图和 marginalization 判定；`KERNEL` backend 保持独立实验路径不变。

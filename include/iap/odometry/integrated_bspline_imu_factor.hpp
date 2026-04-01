@@ -81,6 +81,9 @@ class IntegratedBSplineIMUFactor : public IntegratedSplineIMUFactor {
   using shared_ptr = std::shared_ptr<IntegratedBSplineIMUFactor>;
   using IntegratedSplineIMUFactor::IntegratedSplineIMUFactor;
 
+  // Legacy compatibility wrapper: keeps the fixed-window `(pose_keys, measurement_u,
+  // segment_duration)` entry point alive while forwarding to the spline-native
+  // `SplineStampContext + SplineStateLayout` implementation.
   IntegratedBSplineIMUFactor(
     const std::array<gtsam::Key, kBSplineControlPointCount>& pose_keys,
     gtsam::Key gyro_bias_key,

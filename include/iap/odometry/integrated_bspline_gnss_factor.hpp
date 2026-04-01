@@ -81,6 +81,9 @@ class IntegratedBSplinePseudorangeFactor : public IntegratedSplinePseudorangeFac
   using shared_ptr = std::shared_ptr<IntegratedBSplinePseudorangeFactor>;
   using IntegratedSplinePseudorangeFactor::IntegratedSplinePseudorangeFactor;
 
+  // Legacy compatibility wrapper: preserves the old fixed-window pseudorange
+  // constructor while forwarding into the spline-native
+  // `SplineStampContext + SplineStateLayout` path.
   IntegratedBSplinePseudorangeFactor(
     const std::array<gtsam::Key, kBSplineControlPointCount>& pose_keys,
     gtsam::Key clock_key,
@@ -143,6 +146,9 @@ class IntegratedBSplineDopplerFactor : public IntegratedSplineDopplerFactor {
   using shared_ptr = std::shared_ptr<IntegratedBSplineDopplerFactor>;
   using IntegratedSplineDopplerFactor::IntegratedSplineDopplerFactor;
 
+  // Legacy compatibility wrapper: preserves the old fixed-window doppler
+  // constructor while forwarding into the spline-native
+  // `SplineStampContext + SplineStateLayout` path.
   IntegratedBSplineDopplerFactor(
     const std::array<gtsam::Key, kBSplineControlPointCount>& pose_keys,
     gtsam::Key velocity_key,
