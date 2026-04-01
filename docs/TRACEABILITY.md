@@ -177,6 +177,10 @@
   - `SplineSensorModel` 现在显式承载 GNSS 天线外参注册；`OdometryEstimationBSpline` 会按 active segment 构建一个带 `Gnss` sensor model 的 layout，再统一查询 GNSS 天线位姿。
   - `IntegratedBSplinePseudorangeFactor` / `IntegratedBSplineDopplerFactor` 旧构造函数仍保留为兼容 wrapper；旧的 clock state、ECEF origin/rotation、GNSS clock-between 路径没有改。
   - GNSS 数值 Jacobian 仍保留在 control-pose 层，但几何 residual 使用的接收机 pose / antenna query 已统一改为 `SplineEvaluator` 提供。
+- 2026-04-01: IAP-RQ-300 / IAP-RQ-410
+  - 更新 `.gitignore`，忽略 `.worktrees/`、`docs/ct-iap_spec.md` 与 `docs/superpowers/` 这些本地 Claude/worktree 产物，避免它们干扰 `src/iap` 主线回归/文档提交边界。
+  - Implementation: `.gitignore`
+  - Validation: `git status --short`
 - 2026-04-01: IAP-RQ-020 / IAP-RQ-300 / IAP-RQ-410
   - 修正 `IntegratedSplineDopplerFactor` 的速度输入契约：现在直接读取 velocity-state key，而不再从 spline pose 重新求导 world velocity，和底层 `DopplerFactor(Pose, Velocity, Clock, Rot)` 接口保持一致。
   - `test_bspline_gnss_factor.cpp` 的 Doppler 零残差与 clock-drift 覆盖已恢复为通过状态，验证 fixed-lag 显式 velocity / clock state 能解释匹配观测。

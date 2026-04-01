@@ -60,3 +60,8 @@ CATKIN_IGNORE
 !/log/COLCON_IGNORE
 /log/latest
 /tools/log/
+
+# Local Claude/worktree artifacts
+/.worktrees/
+/docs/ct-iap_spec.md
+/docs/superpowers/

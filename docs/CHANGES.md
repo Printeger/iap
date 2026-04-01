@@ -3,6 +3,9 @@
 > 规则：任何代码改动必须在这里记录，并包含 IAP-RQ-XXX。
 
 ## Unreleased
+- chore(dev-ct-local-artifact-ignore): IAP-RQ-300 / IAP-RQ-410 — ignore local Claude/worktree planning artifacts so the spline-native mainline repo status stays clean.
+  - Added `.worktrees/`, `docs/ct-iap_spec.md`, and `docs/superpowers/` to `.gitignore` as local-only artifacts outside the maintained source baseline.
+  - Keeps commit-scoped regression/doc work focused on tracked `src/iap` sources without bundling per-session planning/worktree noise.
 - fix(dev-ct-gnss-doppler-velocity-state): IAP-RQ-020 / IAP-RQ-300 / IAP-RQ-410 — make the spline-native GNSS Doppler wrapper honor the explicit fixed-lag velocity state.
   - `IntegratedSplineDopplerFactor` now reads the receiver velocity from its velocity-state key when evaluating residuals and linearization, instead of recomputing world velocity from spline poses.
   - This restores the intended contract with `DopplerFactor` and makes `test_bspline_gnss_factor` zero-residual checks pass again for matching velocity/clock states.
