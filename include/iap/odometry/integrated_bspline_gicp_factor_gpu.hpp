@@ -31,18 +31,18 @@ struct CUstream_st;
 
 namespace iap {
 
-class IntegratedBSplineGICPFactorGPU : public gtsam::NonlinearFactor {
+class IntegratedSplineGICPFactorGPU : public gtsam::NonlinearFactor {
  public:
   EIGEN_MAKE_ALIGNED_OPERATOR_NEW
-  using shared_ptr = std::shared_ptr<IntegratedBSplineGICPFactorGPU>;
+  using shared_ptr = std::shared_ptr<IntegratedSplineGICPFactorGPU>;
 
   enum class JacobianMode {
     NUMERIC_FULL,
     SEMI_ANALYTIC,
   };
 
-  IntegratedBSplineGICPFactorGPU(
-    const std::array<gtsam::Key, kBSplineControlPointCount>& keys,
+  IntegratedSplineGICPFactorGPU(
+    const SplineBucketContext& ctx,
     const std::shared_ptr<const gtsam_points::iVox>& target,
     const std::shared_ptr<const gtsam_points::PointCloud>& source,
     CUstream_st* stream = nullptr,
@@ -82,6 +82,7 @@ class IntegratedBSplineGICPFactorGPU : public gtsam::NonlinearFactor {
   int num_inliers() const { return last_inlier_count_; }
   double inlier_fraction() const;
   std::vector<Eigen::Vector4d> deskewed_source_points(const gtsam::Values& values, bool local = true) const;
+  std::shared_ptr<gtsam_points::PointCloudGPU> source_staging_identity() const { return source_gpu_; }
 
  private:
   using PoseJacobianArray = std::array<gtsam::Matrix6, kBSplineControlPointCount>;
@@ -94,30 +95,22 @@ class IntegratedBSplineGICPFactorGPU : public gtsam::NonlinearFactor {
     int inlier_count = 0;
   };
 
-  struct BucketFactor {
-    double stamp = 0.0;
-    double u = 0.0;
-    gtsam::Key key = 0;
-    std::size_t point_count = 0;
-    std::shared_ptr<gtsam_points::PointCloudGPU> source_gpu;
-    std::shared_ptr<gtsam_points::IntegratedVGICPFactorGPU> factor;
-  };
-
   std::array<gtsam::Pose3, kBSplineControlPointCount> control_poses(const gtsam::Values& values) const;
   gtsam::Values control_pose_values() const;
   void rebuild_target_gpu();
-  void build_bucket_factors();
-  void update_bucket_poses(const gtsam::Values& values) const;
-  std::vector<PoseJacobianArray> compute_bucket_pose_jacobians(
+  void build_bucket_factor();
+  void update_bucket_pose(const gtsam::Values& values) const;
+  PoseJacobianArray compute_bucket_pose_jacobians(
     const std::array<gtsam::Pose3, kBSplineControlPointCount>& poses,
     JacobianMode mode) const;
   gtsam::Values bucket_values() const;
   BucketSystem collect_bucket_system(const gtsam::Values& bucket_vals) const;
   void map_bucket_system(
     const BucketSystem& system,
-    const std::vector<PoseJacobianArray>& pose_jacobians,
+    const PoseJacobianArray& pose_jacobians,
     Eigen::Matrix<double, 24, 24>* H,
     Eigen::Matrix<double, 24, 1>* g) const;
+  std::shared_ptr<IntegratedSplineGICPFactor> make_cpu_audit_factor() const;
   void ensure_detailed_profile() const;
   void update_profile(
     const char* stage,
@@ -141,24 +134,27 @@ class IntegratedBSplineGICPFactorGPU : public gtsam::NonlinearFactor {
 
   CUstream_st* stream_ = nullptr;
   gtsam_points::TempBufferManager::Ptr temp_buffer_;
+  SplineBucketContext ctx_;
   std::shared_ptr<const gtsam_points::iVox> target_;
   std::shared_ptr<const gtsam_points::PointCloud> source_;
   std::shared_ptr<gtsam_points::GaussianVoxelMapGPU> target_gpu_;
   std::shared_ptr<gtsam_points::PointCloudCPU> target_cpu_points_;
-  std::vector<BucketFactor> bucket_factors_;
-  gtsam::NonlinearFactorGraph bucket_graph_;
-  std::vector<double> time_table_;
-  std::vector<int> time_indices_;
-  std::vector<std::size_t> time_bucket_populations_;
+  std::shared_ptr<gtsam_points::PointCloudGPU> source_gpu_;
+  std::shared_ptr<gtsam_points::IntegratedVGICPFactorGPU> bucket_factor_;
   std::size_t target_point_count_ = 0;
 
-  mutable std::vector<gtsam::Pose3> bucket_poses_;
-  mutable std::vector<PoseJacobianArray> bucket_pose_jacobians_;
+  mutable gtsam::Pose3 bucket_pose_;
+  mutable PoseJacobianArray bucket_pose_jacobians_;
   mutable std::array<gtsam::Pose3, kBSplineControlPointCount> last_control_poses_;
+  mutable bool bucket_pose_valid_ = false;
+  mutable bool bucket_pose_jacobians_valid_ = false;
+  mutable std::shared_ptr<gtsam_points::PointCloudGPU> source_staging_identity_cache_;
   mutable bool last_control_poses_valid_ = false;
   mutable BSplineLidarFactorProfile last_profile_;
   mutable int last_inlier_count_ = 0;
 };
+
+using IntegratedBSplineGICPFactorGPU = IntegratedSplineGICPFactorGPU;
 
 }  // namespace iap
 

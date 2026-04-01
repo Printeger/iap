@@ -46,7 +46,8 @@ class TempBufferManager;
 }
 
 namespace iap {
-class IntegratedBSplineGICPFactorGPU;
+class IntegratedSplineGICPFactorGPU;
+using IntegratedBSplineGICPFactorGPU = IntegratedSplineGICPFactorGPU;
 class IntegratedBSplineGICPFactorGPUKernel;
 }
 
@@ -213,6 +214,7 @@ class OdometryEstimationBSpline : public OdometryEstimationCPU {
     bool* cache_hit);
 #ifdef GTSAM_POINTS_USE_CUDA
   std::shared_ptr<iap::IntegratedBSplineGICPFactorGPU> get_or_create_gpu_bucket_lidar_factor(
+    const iap::SplineBucketContext& bucket_ctx,
     ActiveSplineSegmentConstraint& segment,
     CUstream_st* stream,
     std::shared_ptr<gtsam_points::TempBufferManager> temp_buffer,

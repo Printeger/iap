@@ -2,13 +2,13 @@
 
 #ifdef GTSAM_POINTS_USE_CUDA
 
-#include <gtsam/inference/Symbol.h>
 #include <gtsam/linear/HessianFactor.h>
 #include <gtsam_points/cuda/nonlinear_factor_set_gpu.hpp>
 #include <gtsam_points/types/point_cloud_cpu.hpp>
 
 #include <algorithm>
 #include <chrono>
+#include <cmath>
 #include <limits>
 #include <stdexcept>
 
@@ -17,10 +17,6 @@ namespace iap {
 namespace frame = gtsam_points::frame;
 
 namespace {
-
-gtsam::Key bucket_pose_key(std::size_t index) {
-  return gtsam::symbol('q', static_cast<uint64_t>(index));
-}
 
 std::vector<gtsam::Matrix> hessian_upper_blocks(const Eigen::MatrixXd& hessian) {
   constexpr int kBlockDim = 6;
@@ -47,53 +43,30 @@ std::vector<gtsam::Vector> linear_term_blocks(const Eigen::VectorXd& linear_term
 
 }  // namespace
 
-IntegratedBSplineGICPFactorGPU::IntegratedBSplineGICPFactorGPU(
-  const std::array<gtsam::Key, kBSplineControlPointCount>& keys,
+IntegratedSplineGICPFactorGPU::IntegratedSplineGICPFactorGPU(
+  const SplineBucketContext& ctx,
   const std::shared_ptr<const gtsam_points::iVox>& target,
   const std::shared_ptr<const gtsam_points::PointCloud>& source,
   CUstream_st* stream,
   gtsam_points::TempBufferManager::Ptr temp_buffer)
-: gtsam::NonlinearFactor(gtsam::KeyVector(keys.begin(), keys.end())),
+: gtsam::NonlinearFactor(gtsam::KeyVector(ctx.support.pose_keys.begin(), ctx.support.pose_keys.end())),
   stream_(stream),
   temp_buffer_(std::move(temp_buffer)),
+  ctx_(ctx),
   target_(target),
   source_(source) {
   if (!target_) {
-    throw std::runtime_error("IntegratedBSplineGICPFactorGPU requires a target iVox snapshot");
+    throw std::runtime_error("IntegratedSplineGICPFactorGPU requires a target iVox snapshot");
   }
   if (!source_ || !frame::has_points(*source_) || !frame::has_covs(*source_) || !frame::has_times(*source_)) {
-    throw std::runtime_error("IntegratedBSplineGICPFactorGPU requires source points, covariances, and times");
+    throw std::runtime_error("IntegratedSplineGICPFactorGPU requires source points, covariances, and times");
   }
 
   rebuild_target_gpu();
-
-  const double time_eps = 1e-3;
-  time_table_.reserve(frame::size(*source_) / 10 + 1);
-  time_indices_.reserve(frame::size(*source_));
-  for (int i = 0; i < frame::size(*source_); ++i) {
-    const double t = frame::time(*source_, i);
-    if (time_table_.empty() || t - time_table_.back() > time_eps) {
-      time_table_.push_back(t);
-    }
-    time_indices_.push_back(static_cast<int>(time_table_.size() - 1));
-  }
-
-  time_bucket_populations_.assign(time_table_.size(), 0U);
-  for (const int time_index : time_indices_) {
-    time_bucket_populations_[static_cast<std::size_t>(time_index)]++;
-  }
-
-  const double time_min = time_table_.empty() ? 0.0 : time_table_.front();
-  const double time_max = time_table_.empty() ? 1.0 : time_table_.back();
-  const double denom = std::max(1e-9, time_max - time_min);
-  for (auto& t : time_table_) {
-    t = (t - time_min) / denom;
-  }
-
-  build_bucket_factors();
+  build_bucket_factor();
 }
 
-void IntegratedBSplineGICPFactorGPU::rebuild_target_gpu() {
+void IntegratedSplineGICPFactorGPU::rebuild_target_gpu() {
   target_cpu_points_ = target_->voxel_data();
   target_point_count_ = target_cpu_points_ ? static_cast<std::size_t>(target_cpu_points_->size()) : 0U;
   target_gpu_ = std::make_shared<gtsam_points::GaussianVoxelMapGPU>(
@@ -108,22 +81,60 @@ void IntegratedBSplineGICPFactorGPU::rebuild_target_gpu() {
   }
 }
 
-void IntegratedBSplineGICPFactorGPU::set_numeric_eps(double eps) {
+void IntegratedSplineGICPFactorGPU::build_bucket_factor() {
+  if (!source_gpu_) {
+    std::vector<Eigen::Vector4d> bucket_points;
+    bucket_points.reserve(ctx_.point_indices.size());
+    std::vector<Eigen::Matrix4d> bucket_covs;
+    bucket_covs.reserve(ctx_.point_indices.size());
+    std::vector<Eigen::Vector4d> bucket_normals;
+    if (frame::has_normals(*source_)) {
+      bucket_normals.reserve(ctx_.point_indices.size());
+    }
+
+    for (const int point_index : ctx_.point_indices) {
+      bucket_points.emplace_back(frame::point(*source_, point_index));
+      bucket_covs.emplace_back(frame::cov(*source_, point_index));
+      if (frame::has_normals(*source_)) {
+        bucket_normals.emplace_back(frame::normal(*source_, point_index));
+      }
+    }
+
+    source_gpu_ = std::make_shared<gtsam_points::PointCloudGPU>();
+    source_gpu_->add_points(bucket_points, stream_);
+    source_gpu_->add_covs(bucket_covs, stream_);
+    if (!bucket_normals.empty()) {
+      source_gpu_->add_normals(bucket_normals, stream_);
+    }
+    source_staging_identity_cache_ = source_gpu_;
+  }
+
+  bucket_factor_ = std::make_shared<gtsam_points::IntegratedVGICPFactorGPU>(
+    gtsam::Pose3(),
+    ctx_.support.pose_keys.front(),
+    target_gpu_,
+    source_gpu_,
+    stream_,
+    temp_buffer_);
+  bucket_factor_->set_enable_surface_validation(frame::has_normals(*source_));
+}
+
+void IntegratedSplineGICPFactorGPU::set_numeric_eps(double eps) {
   numeric_eps_ = std::max(1e-8, eps);
 }
 
-void IntegratedBSplineGICPFactorGPU::refresh_target(const std::shared_ptr<const gtsam_points::iVox>& target) {
+void IntegratedSplineGICPFactorGPU::refresh_target(const std::shared_ptr<const gtsam_points::iVox>& target) {
   if (!target) {
-    throw std::runtime_error("IntegratedBSplineGICPFactorGPU cannot refresh to a null target");
+    throw std::runtime_error("IntegratedSplineGICPFactorGPU cannot refresh to a null target");
   }
   target_ = target;
   rebuild_target_gpu();
-  build_bucket_factors();
+  build_bucket_factor();
   last_profile_ = BSplineLidarFactorProfile();
   last_inlier_count_ = 0;
 }
 
-std::array<gtsam::Pose3, kBSplineControlPointCount> IntegratedBSplineGICPFactorGPU::control_poses(
+std::array<gtsam::Pose3, kBSplineControlPointCount> IntegratedSplineGICPFactorGPU::control_poses(
   const gtsam::Values& values) const {
   std::array<gtsam::Pose3, kBSplineControlPointCount> poses;
   for (std::size_t i = 0; i < kBSplineControlPointCount; ++i) {
@@ -132,7 +143,7 @@ std::array<gtsam::Pose3, kBSplineControlPointCount> IntegratedBSplineGICPFactorG
   return poses;
 }
 
-gtsam::Values IntegratedBSplineGICPFactorGPU::control_pose_values() const {
+gtsam::Values IntegratedSplineGICPFactorGPU::control_pose_values() const {
   gtsam::Values values;
   if (!last_control_poses_valid_) {
     return values;
@@ -144,185 +155,108 @@ gtsam::Values IntegratedBSplineGICPFactorGPU::control_pose_values() const {
   return values;
 }
 
-void IntegratedBSplineGICPFactorGPU::build_bucket_factors() {
-  bucket_graph_.resize(0);
-
-  if (time_table_.empty()) {
-    return;
-  }
-
-  if (bucket_factors_.empty()) {
-    std::vector<std::vector<int>> bucket_point_indices(time_table_.size());
-    for (int i = 0; i < frame::size(*source_); ++i) {
-      bucket_point_indices[static_cast<std::size_t>(time_indices_[static_cast<std::size_t>(i)])].push_back(i);
-    }
-
-    for (std::size_t i = 0; i < bucket_point_indices.size(); ++i) {
-      const auto& point_indices = bucket_point_indices[i];
-      if (point_indices.empty()) {
-        continue;
-      }
-
-      std::vector<Eigen::Vector4d> bucket_points;
-      bucket_points.reserve(point_indices.size());
-      std::vector<Eigen::Matrix4d> bucket_covs;
-      bucket_covs.reserve(point_indices.size());
-      std::vector<Eigen::Vector4d> bucket_normals;
-      if (frame::has_normals(*source_)) {
-        bucket_normals.reserve(point_indices.size());
-      }
-
-      for (const int point_index : point_indices) {
-        bucket_points.emplace_back(frame::point(*source_, point_index));
-        bucket_covs.emplace_back(frame::cov(*source_, point_index));
-        if (frame::has_normals(*source_)) {
-          bucket_normals.emplace_back(frame::normal(*source_, point_index));
-        }
-      }
-
-      auto bucket_gpu = std::make_shared<gtsam_points::PointCloudGPU>();
-      bucket_gpu->add_points(bucket_points, stream_);
-      bucket_gpu->add_covs(bucket_covs, stream_);
-      if (!bucket_normals.empty()) {
-        bucket_gpu->add_normals(bucket_normals, stream_);
-      }
-
-      BucketFactor bucket;
-      bucket.stamp = time_table_[i];
-      bucket.u = time_table_[i];
-      bucket.key = bucket_pose_key(i);
-      bucket.point_count = point_indices.size();
-      bucket.source_gpu = bucket_gpu;
-      bucket_factors_.push_back(std::move(bucket));
-    }
-  }
-
-  for (auto& bucket : bucket_factors_) {
-    bucket.factor = std::make_shared<gtsam_points::IntegratedVGICPFactorGPU>(
-      gtsam::Pose3(),
-      bucket.key,
-      target_gpu_,
-      bucket.source_gpu,
-      stream_,
-      temp_buffer_);
-    bucket.factor->set_enable_surface_validation(frame::has_normals(*source_));
-    bucket_graph_.add(bucket.factor);
-  }
-}
-
-std::vector<IntegratedBSplineGICPFactorGPU::PoseJacobianArray> IntegratedBSplineGICPFactorGPU::compute_bucket_pose_jacobians(
-  const std::array<gtsam::Pose3, kBSplineControlPointCount>& poses,
-  JacobianMode mode) const {
-  std::vector<PoseJacobianArray> pose_jacobians(bucket_factors_.size());
-  for (std::size_t i = 0; i < bucket_factors_.size(); ++i) {
-    const double u = bucket_factors_[i].u;
-    if (mode == JacobianMode::NUMERIC_FULL) {
-      pose_jacobians[i] = bspline_pose_jacobians_numeric(poses, u, numeric_eps_);
-    } else {
-      pose_jacobians[i] = bspline_pose_jacobians_semi_analytic(poses, u);
-    }
-  }
-  return pose_jacobians;
-}
-
-void IntegratedBSplineGICPFactorGPU::update_bucket_poses(const gtsam::Values& values) const {
+void IntegratedSplineGICPFactorGPU::update_bucket_pose(const gtsam::Values& values) const {
   const auto poses = control_poses(values);
   last_control_poses_ = poses;
   last_control_poses_valid_ = true;
-  bucket_poses_.resize(bucket_factors_.size());
-
-  for (std::size_t i = 0; i < bucket_factors_.size(); ++i) {
-    const double u = bucket_factors_[i].u;
-    bucket_poses_[i] = BSplineControlWindow::interpolate(poses, u);
-  }
+  bucket_pose_ = BSplineControlWindow::interpolate(poses, ctx_.support.u);
+  bucket_pose_valid_ = true;
   bucket_pose_jacobians_ = compute_bucket_pose_jacobians(poses, jacobian_mode_);
+  bucket_pose_jacobians_valid_ = true;
 }
 
-gtsam::Values IntegratedBSplineGICPFactorGPU::bucket_values() const {
-  gtsam::Values values;
-  for (std::size_t i = 0; i < bucket_factors_.size(); ++i) {
-    values.insert(bucket_factors_[i].key, bucket_poses_[i]);
+IntegratedSplineGICPFactorGPU::PoseJacobianArray IntegratedSplineGICPFactorGPU::compute_bucket_pose_jacobians(
+  const std::array<gtsam::Pose3, kBSplineControlPointCount>& poses,
+  JacobianMode mode) const {
+  if (mode == JacobianMode::NUMERIC_FULL) {
+    return bspline_pose_jacobians_numeric(poses, ctx_.support.u, numeric_eps_);
   }
+  return bspline_pose_jacobians_semi_analytic(poses, ctx_.support.u);
+}
+
+gtsam::Values IntegratedSplineGICPFactorGPU::bucket_values() const {
+  gtsam::Values values;
+  values.insert(ctx_.support.pose_keys.front(), bucket_pose_);
   return values;
 }
 
-IntegratedBSplineGICPFactorGPU::BucketSystem IntegratedBSplineGICPFactorGPU::collect_bucket_system(
+IntegratedSplineGICPFactorGPU::BucketSystem IntegratedSplineGICPFactorGPU::collect_bucket_system(
   const gtsam::Values& bucket_vals) const {
   BucketSystem system;
-  system.info_mats.reserve(bucket_factors_.size());
-  system.linear_terms.reserve(bucket_factors_.size());
+  system.info_mats.reserve(1);
+  system.linear_terms.reserve(1);
 
   gtsam_points::NonlinearFactorSetGPU factor_set;
-  factor_set.add(bucket_graph_);
+  gtsam::NonlinearFactorGraph bucket_graph;
+  bucket_graph.add(bucket_factor_);
+  factor_set.add(bucket_graph);
   factor_set.linearize(bucket_vals);
 
-  for (const auto& bucket : bucket_factors_) {
-    const auto gaussian = bucket.factor->linearize(bucket_vals);
-    auto hessian = std::dynamic_pointer_cast<gtsam::HessianFactor>(gaussian);
-    if (!hessian) {
-      system.info_mats.emplace_back(gtsam::Matrix6::Zero());
-      system.linear_terms.emplace_back(gtsam::Vector6::Zero());
-      continue;
-    }
-
-    system.info_mats.emplace_back(hessian->information());
-    system.linear_terms.emplace_back(hessian->linearTerm());
-    system.constant += hessian->constantTerm();
-    system.total_error += bucket.factor->error(bucket_vals);
-    system.inlier_count += bucket.factor->num_inliers();
+  const auto gaussian = bucket_factor_->linearize(bucket_vals);
+  auto hessian = std::dynamic_pointer_cast<gtsam::HessianFactor>(gaussian);
+  if (!hessian) {
+    system.info_mats.emplace_back(gtsam::Matrix6::Zero());
+    system.linear_terms.emplace_back(gtsam::Vector6::Zero());
+    return system;
   }
 
+  system.info_mats.emplace_back(hessian->information());
+  system.linear_terms.emplace_back(hessian->linearTerm());
+  system.constant += hessian->constantTerm();
+  system.total_error += bucket_factor_->error(bucket_vals);
+  system.inlier_count += bucket_factor_->num_inliers();
   return system;
 }
 
-void IntegratedBSplineGICPFactorGPU::map_bucket_system(
+void IntegratedSplineGICPFactorGPU::map_bucket_system(
   const BucketSystem& system,
-  const std::vector<PoseJacobianArray>& pose_jacobians,
+  const PoseJacobianArray& pose_jacobians,
   Eigen::Matrix<double, 24, 24>* H,
   Eigen::Matrix<double, 24, 1>* g) const {
   H->setZero();
   g->setZero();
 
-  for (std::size_t i = 0; i < bucket_factors_.size(); ++i) {
-    Eigen::Matrix<double, 6, 24> J = Eigen::Matrix<double, 6, 24>::Zero();
-    for (std::size_t k = 0; k < kBSplineControlPointCount; ++k) {
-      J.block<6, 6>(0, 6 * k) = pose_jacobians[i][k];
-    }
-
-    *H += J.transpose() * system.info_mats[i] * J;
-    *g += J.transpose() * system.linear_terms[i];
+  if (system.info_mats.empty() || system.linear_terms.empty()) {
+    return;
   }
+
+  Eigen::Matrix<double, 6, 24> J = Eigen::Matrix<double, 6, 24>::Zero();
+  for (std::size_t k = 0; k < kBSplineControlPointCount; ++k) {
+    J.block<6, 6>(0, 6 * k) = pose_jacobians[k];
+  }
+
+  *H += J.transpose() * system.info_mats.front() * J;
+  *g += J.transpose() * system.linear_terms.front();
 }
 
-void IntegratedBSplineGICPFactorGPU::ensure_detailed_profile() const {
+std::shared_ptr<IntegratedSplineGICPFactor> IntegratedSplineGICPFactorGPU::make_cpu_audit_factor() const {
+  auto factor = std::make_shared<IntegratedSplineGICPFactor>(ctx_, target_, source_, target_);
+  factor->set_enable_profiling(true);
+  factor->set_jacobian_mode(IntegratedBSplineGICPFactor::JacobianMode::SEMI_ANALYTIC);
+  factor->set_numeric_eps(numeric_eps_);
+  factor->set_max_correspondence_distance(std::sqrt(max_correspondence_distance_sq_));
+  factor->set_correspondence_candidate_count(correspondence_candidate_count_);
+  factor->set_correspondence_accept_ratio(correspondence_accept_ratio_);
+  factor->set_correspondence_min_score_gap(correspondence_min_score_gap_);
+  factor->set_outlier_mahalanobis_threshold(outlier_mahalanobis_threshold_);
+  factor->set_robust_kernel(robust_kernel_, robust_kernel_width_);
+  factor->set_robust_weight_floor(robust_weight_floor_);
+  return factor;
+}
+
+void IntegratedSplineGICPFactorGPU::ensure_detailed_profile() const {
   if (!last_profile_.valid || !last_profile_.minimal || !last_control_poses_valid_) {
     return;
   }
 
-  std::array<gtsam::Key, kBSplineControlPointCount> control_keys{};
-  for (std::size_t i = 0; i < kBSplineControlPointCount; ++i) {
-    control_keys[i] = keys_[i];
-  }
-
-  IntegratedBSplineGICPFactor cpu_audit_factor(control_keys, target_, source_, target_);
-  cpu_audit_factor.set_enable_profiling(true);
-  cpu_audit_factor.set_jacobian_mode(IntegratedBSplineGICPFactor::JacobianMode::SEMI_ANALYTIC);
-  cpu_audit_factor.set_numeric_eps(numeric_eps_);
-  cpu_audit_factor.set_max_correspondence_distance(std::sqrt(max_correspondence_distance_sq_));
-  cpu_audit_factor.set_correspondence_candidate_count(correspondence_candidate_count_);
-  cpu_audit_factor.set_correspondence_accept_ratio(correspondence_accept_ratio_);
-  cpu_audit_factor.set_correspondence_min_score_gap(correspondence_min_score_gap_);
-  cpu_audit_factor.set_outlier_mahalanobis_threshold(outlier_mahalanobis_threshold_);
-  cpu_audit_factor.set_robust_kernel(robust_kernel_, robust_kernel_width_);
-  cpu_audit_factor.set_robust_weight_floor(robust_weight_floor_);
-
+  const auto cpu_audit_factor = make_cpu_audit_factor();
   const gtsam::Values cpu_values = control_pose_values();
   if (cpu_values.size() != kBSplineControlPointCount) {
     return;
   }
 
-  cpu_audit_factor.error(cpu_values);
-  const auto audit_profile = cpu_audit_factor.profiling_report();
+  cpu_audit_factor->error(cpu_values);
+  const auto audit_profile = cpu_audit_factor->profiling_report();
   if (!audit_profile.valid) {
     return;
   }
@@ -361,7 +295,7 @@ void IntegratedBSplineGICPFactorGPU::ensure_detailed_profile() const {
   last_profile_.mean_robust_weight = audit_profile.mean_robust_weight;
 }
 
-void IntegratedBSplineGICPFactorGPU::update_profile(
+void IntegratedSplineGICPFactorGPU::update_profile(
   const char* stage,
   double pose_update_ms,
   double gpu_linearize_ms,
@@ -370,18 +304,14 @@ void IntegratedBSplineGICPFactorGPU::update_profile(
   double total_error) const {
   auto profile = make_bspline_lidar_minimal_profile(
     BSplineLidarFactorBackend::GPU_GICP,
-    static_cast<std::size_t>(frame::size(*source_)),
+    ctx_.point_indices.size(),
     target_point_count_,
     static_cast<std::size_t>(std::max(last_inlier_count_, 0)),
     static_cast<std::size_t>(std::max(last_inlier_count_, 0)),
     stage);
-  profile.time_bucket_count = time_table_.size();
-  profile.max_time_bucket_population =
-    time_bucket_populations_.empty() ? 0U : *std::max_element(time_bucket_populations_.begin(), time_bucket_populations_.end());
-  profile.mean_time_bucket_population =
-    time_bucket_populations_.empty()
-      ? 0.0
-      : static_cast<double>(frame::size(*source_)) / static_cast<double>(time_bucket_populations_.size());
+  profile.time_bucket_count = 1;
+  profile.max_time_bucket_population = ctx_.point_indices.size();
+  profile.mean_time_bucket_population = static_cast<double>(ctx_.point_indices.size());
   profile.pose_update_ms = pose_update_ms;
   profile.correspondence_ms = gpu_linearize_ms;
   profile.accumulation_ms = reduction_ms;
@@ -390,11 +320,11 @@ void IntegratedBSplineGICPFactorGPU::update_profile(
   last_profile_ = profile;
 }
 
-double IntegratedBSplineGICPFactorGPU::error(const gtsam::Values& values) const {
+double IntegratedSplineGICPFactorGPU::error(const gtsam::Values& values) const {
   using Clock = std::chrono::steady_clock;
   const auto t_start = Clock::now();
   const auto t_pose_start = Clock::now();
-  update_bucket_poses(values);
+  update_bucket_pose(values);
   const auto t_pose_end = Clock::now();
 
   const gtsam::Values bucket_vals = bucket_values();
@@ -414,11 +344,11 @@ double IntegratedBSplineGICPFactorGPU::error(const gtsam::Values& values) const 
   return system.total_error;
 }
 
-gtsam::GaussianFactor::shared_ptr IntegratedBSplineGICPFactorGPU::linearize(const gtsam::Values& values) const {
+gtsam::GaussianFactor::shared_ptr IntegratedSplineGICPFactorGPU::linearize(const gtsam::Values& values) const {
   using Clock = std::chrono::steady_clock;
   const auto t_start = Clock::now();
   const auto t_pose_start = Clock::now();
-  update_bucket_poses(values);
+  update_bucket_pose(values);
   const auto t_pose_end = Clock::now();
 
   const gtsam::Values bucket_vals = bucket_values();
@@ -448,19 +378,18 @@ gtsam::GaussianFactor::shared_ptr IntegratedBSplineGICPFactorGPU::linearize(cons
   return std::make_shared<gtsam::HessianFactor>(keys_, Gs, gs, system.constant);
 }
 
-double IntegratedBSplineGICPFactorGPU::inlier_fraction() const {
-  const auto source_size = static_cast<std::size_t>(std::max(frame::size(*source_), 0));
-  return source_size == 0 ? 0.0 : static_cast<double>(last_inlier_count_) / static_cast<double>(source_size);
+double IntegratedSplineGICPFactorGPU::inlier_fraction() const {
+  return ctx_.point_indices.empty() ? 0.0 : static_cast<double>(last_inlier_count_) / static_cast<double>(ctx_.point_indices.size());
 }
 
-BSplineLidarFactorProfile IntegratedBSplineGICPFactorGPU::profiling_report() const {
+BSplineLidarFactorProfile IntegratedSplineGICPFactorGPU::profiling_report() const {
   if (enable_profiling_ && last_profile_.valid) {
     ensure_detailed_profile();
   }
   return last_profile_;
 }
 
-BSplineLidarNumericAudit IntegratedBSplineGICPFactorGPU::check_against_numeric_full(
+BSplineLidarNumericAudit IntegratedSplineGICPFactorGPU::check_against_numeric_full(
   const gtsam::Values& values,
   double perturbation_scale) const {
   BSplineLidarNumericAudit result;
@@ -472,24 +401,24 @@ BSplineLidarNumericAudit IntegratedBSplineGICPFactorGPU::check_against_numeric_f
 
   const auto saved_profile = last_profile_;
   const auto saved_inliers = last_inlier_count_;
-  const auto saved_bucket_poses = bucket_poses_;
+  const auto saved_bucket_pose = bucket_pose_;
+  const auto saved_bucket_pose_valid = bucket_pose_valid_;
   const auto saved_bucket_pose_jacobians = bucket_pose_jacobians_;
+  const auto saved_bucket_pose_jacobians_valid = bucket_pose_jacobians_valid_;
   const auto saved_control_poses = last_control_poses_;
   const auto saved_control_valid = last_control_poses_valid_;
 
   const auto poses = control_poses(values);
   last_control_poses_ = poses;
   last_control_poses_valid_ = true;
-  bucket_poses_.resize(bucket_factors_.size());
-  for (std::size_t i = 0; i < bucket_factors_.size(); ++i) {
-    bucket_poses_[i] = BSplineControlWindow::interpolate(poses, bucket_factors_[i].u);
-  }
+  bucket_pose_ = BSplineControlWindow::interpolate(poses, ctx_.support.u);
+  bucket_pose_valid_ = true;
   const auto bucket_vals = bucket_values();
   const auto system = collect_bucket_system(bucket_vals);
   const auto numeric_jacobians = compute_bucket_pose_jacobians(poses, JacobianMode::NUMERIC_FULL);
   const auto semi_jacobians = compute_bucket_pose_jacobians(poses, JacobianMode::SEMI_ANALYTIC);
 
-  auto make_factor = [&](const std::vector<PoseJacobianArray>& jacobians) {
+  auto make_factor = [&](const PoseJacobianArray& jacobians) {
     Eigen::Matrix<double, 24, 24> H = Eigen::Matrix<double, 24, 24>::Zero();
     Eigen::Matrix<double, 24, 1> g = Eigen::Matrix<double, 24, 1>::Zero();
     map_bucket_system(system, jacobians, &H, &g);
@@ -563,14 +492,16 @@ BSplineLidarNumericAudit IntegratedBSplineGICPFactorGPU::check_against_numeric_f
 
   last_profile_ = saved_profile;
   last_inlier_count_ = saved_inliers;
-  bucket_poses_ = saved_bucket_poses;
+  bucket_pose_ = saved_bucket_pose;
+  bucket_pose_valid_ = saved_bucket_pose_valid;
   bucket_pose_jacobians_ = saved_bucket_pose_jacobians;
+  bucket_pose_jacobians_valid_ = saved_bucket_pose_jacobians_valid;
   last_control_poses_ = saved_control_poses;
   last_control_poses_valid_ = saved_control_valid;
   return result;
 }
 
-BSplineLidarDegeneracyReport IntegratedBSplineGICPFactorGPU::diagnose_degeneracy(
+BSplineLidarDegeneracyReport IntegratedSplineGICPFactorGPU::diagnose_degeneracy(
   const IntegratedBSplineGICPFactor::DegeneracyThresholds& thresholds) const {
   ensure_detailed_profile();
 
@@ -624,7 +555,7 @@ BSplineLidarDegeneracyReport IntegratedBSplineGICPFactorGPU::diagnose_degeneracy
   return diagnostics;
 }
 
-BSplineLidarFactorResult IntegratedBSplineGICPFactorGPU::make_result(
+BSplineLidarFactorResult IntegratedSplineGICPFactorGPU::make_result(
   double factor_error,
   int inlier_count,
   double inlier_fraction,
@@ -641,21 +572,18 @@ BSplineLidarFactorResult IntegratedBSplineGICPFactorGPU::make_result(
     degeneracy);
 }
 
-std::vector<Eigen::Vector4d> IntegratedBSplineGICPFactorGPU::deskewed_source_points(
+std::vector<Eigen::Vector4d> IntegratedSplineGICPFactorGPU::deskewed_source_points(
   const gtsam::Values& values,
   bool local) const {
-  update_bucket_poses(values);
+  update_bucket_pose(values);
 
   std::vector<Eigen::Vector4d> points;
-  points.reserve(frame::size(*source_));
+  points.reserve(ctx_.point_indices.size());
 
-  const gtsam::Pose3 reference = bucket_poses_.empty() ? gtsam::Pose3() : bucket_poses_.front();
-  for (int i = 0; i < frame::size(*source_); ++i) {
-    const int time_index = time_indices_[static_cast<std::size_t>(i)];
-    const auto& pose = bucket_poses_[static_cast<std::size_t>(time_index)];
-    const auto& source_pt = frame::point(*source_, i);
-
-    const gtsam::Point3 world_pt = pose.transformFrom(source_pt.template head<3>().eval());
+  const gtsam::Pose3 reference = bucket_pose_;
+  for (const int point_index : ctx_.point_indices) {
+    const auto& source_pt = frame::point(*source_, point_index);
+    const gtsam::Point3 world_pt = bucket_pose_.transformFrom(source_pt.template head<3>().eval());
     Eigen::Vector4d pt = Eigen::Vector4d::Ones();
     if (local) {
       pt.template head<3>() = reference.transformTo(world_pt);

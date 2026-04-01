@@ -178,6 +178,11 @@
   - `IntegratedBSplinePseudorangeFactor` / `IntegratedBSplineDopplerFactor` 旧构造函数仍保留为兼容 wrapper；旧的 clock state、ECEF origin/rotation、GNSS clock-between 路径没有改。
   - GNSS 数值 Jacobian 仍保留在 control-pose 层，但几何 residual 使用的接收机 pose / antenna query 已统一改为 `SplineEvaluator` 提供。
 - 2026-04-01: IAP-RQ-300 / IAP-RQ-410
+  - 已开始按 `ct-iap_spec.md` 执行 `Commit 10`，把 GPU `BUCKET` LiDAR 主路径从旧的整帧内部 time-bucketing 契约迁移到 `SplineBucketContext + SplineLocalSupport`，与 CPU bucket scheduler 保持一致。
+  - `IntegratedSplineGICPFactorGPU` 现已改为直接接收 `SplineBucketContext`，只为 `ctx.point_indices` 构建 source-side GPU staging，并通过 `ctx.support.u / ctx.support.pose_keys` 做统一的 spline pose 查询与 Jacobian 映射；旧的 whole-scan `time_table_ / time_indices_` 不再是该主路径接口。
+  - `OdometryEstimationBSpline` 现在会在 `CT_LIDAR_GPU + BUCKET` 下复用 `create_segment_lidar_buckets(...)`，为每个 bucket context 构建一个 GPU factor，并按 `make_key_vector(bucket_ctx.support)` 进入优化图和 marginalization 判定；`KERNEL` backend 保持独立实验路径不变。
+  - `test_bspline_gicp_factor.cpp` 已更新 CUDA smoke / refresh regression，使其直接构造 `SplineBucketContext`，并覆盖 unified GPU profile/result 与 target refresh 不重建 source staging 的新契约。
+- 2026-04-01: IAP-RQ-300 / IAP-RQ-410
   - 已开始按 `ct-iap_spec.md` 执行 `Commit 8`，把 fixed-lag marginalization 的主输入从旧的 `segment.control_indices + auxiliary_index` 提升为 `SplineActiveStateSet`，先构造 active spans / active controls / active keys，再决定 drop set。
   - `BSplineFixedLagStateRegistry` 现已提供 `active_span_indices(...)`、`active_control_references(...)`、`active_state_set(...)` 和 `prune_to_active_state_set(...)`；multi-span bucket / IMU / GNSS 仍在引用的 control point 不会再因为时间窗裁剪而被提前移除。
   - `OdometryEstimationBSpline` 现在会先补齐 active velocity / clock states，再基于 `SplineActiveStateSet` 构造 marginalization partition；CPU LiDAR bucket、IMU、GNSS 因子进入 carried-prior / marginalization graph 时也统一按各自真实 `support.pose_keys` 判定 ownership，而不再复用旧的 segment-level 四控制点假设。

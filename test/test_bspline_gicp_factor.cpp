@@ -105,6 +105,17 @@ iap::IntegratedBSplineGICPFactor make_factor(
   return make_factor(target, source_cloud);
 }
 
+iap::SplineBucketContext make_full_bucket_context() {
+  iap::SplineBucketContext ctx;
+  for (std::size_t i = 0; i < iap::kBSplineControlPointCount; ++i) {
+    ctx.support.ctrl_indices[i] = i;
+    ctx.support.pose_keys[i] = iap::bspline_control_point_key(i);
+  }
+  ctx.support.u = 0.5;
+  ctx.point_indices = {0, 1, 2, 3};
+  return ctx;
+}
+
 iap::IntegratedBSplineGICPFactor make_factor(
   const std::shared_ptr<gtsam_points::iVox>& target,
   const gtsam_points::PointCloudCPU::Ptr& source_cloud) {
@@ -114,6 +125,14 @@ iap::IntegratedBSplineGICPFactor make_factor(
   }
 
   iap::IntegratedBSplineGICPFactor factor(keys, target, source_cloud);
+  factor.set_max_correspondence_distance(2.0);
+  return factor;
+}
+
+iap::IntegratedSplineGICPFactor make_bucket_factor(
+  const std::shared_ptr<gtsam_points::iVox>& target,
+  const gtsam_points::PointCloudCPU::Ptr& source_cloud) {
+  iap::IntegratedSplineGICPFactor factor(make_full_bucket_context(), target, source_cloud);
   factor.set_max_correspondence_distance(2.0);
   return factor;
 }
@@ -773,14 +792,14 @@ TEST(BSplineGICPFactorTest, GpuFactorLinearizesAndReturnsUnifiedProfile) {
   target->set_neighbor_voxel_mode(1);
   target->insert(*target_cloud);
 
-  std::array<gtsam::Key, iap::kBSplineControlPointCount> keys{};
-  for (std::size_t i = 0; i < iap::kBSplineControlPointCount; ++i) {
-    keys[i] = iap::bspline_control_point_key(i);
-  }
-
   gtsam_points::StreamTempBufferRoundRobin stream_buffers;
   auto stream_buffer = stream_buffers.get_stream_buffer();
-  iap::IntegratedBSplineGICPFactorGPU factor(keys, target, make_cloud(true), stream_buffer.first, stream_buffer.second);
+  iap::IntegratedBSplineGICPFactorGPU factor(
+    make_full_bucket_context(),
+    target,
+    make_cloud(true),
+    stream_buffer.first,
+    stream_buffer.second);
   factor.set_jacobian_mode(iap::IntegratedBSplineGICPFactorGPU::JacobianMode::SEMI_ANALYTIC);
   factor.set_numeric_eps(1e-4);
   factor.set_max_correspondence_distance(2.0);
@@ -821,8 +840,8 @@ TEST(BSplineGICPFactorTest, GpuFactorLinearizesAndReturnsUnifiedProfile) {
   EXPECT_TRUE(result.profile.valid);
   EXPECT_FALSE(result.profile.minimal);
   EXPECT_EQ(result.profile.source_point_count, 4U);
-  EXPECT_EQ(result.profile.time_bucket_count, 4U);
-  EXPECT_EQ(result.profile.max_time_bucket_population, 1U);
+  EXPECT_EQ(result.profile.time_bucket_count, 1U);
+  EXPECT_EQ(result.profile.max_time_bucket_population, 4U);
   EXPECT_GE(result.profile.candidate_evaluation_count, 4U);
   EXPECT_GE(result.profile.matched_point_count, 4U);
   EXPECT_GE(result.profile.unique_target_count, 1U);
@@ -846,15 +865,13 @@ TEST(BSplineGICPFactorTest, GpuFactorDegeneracyDiagnosticsReportOutlierHeavyScen
   target->set_neighbor_voxel_mode(1);
   target->insert(*target_cloud);
 
-  std::array<gtsam::Key, iap::kBSplineControlPointCount> keys{};
-  for (std::size_t i = 0; i < iap::kBSplineControlPointCount; ++i) {
-    keys[i] = iap::bspline_control_point_key(i);
-  }
+  iap::SplineBucketContext ctx = make_full_bucket_context();
+  ctx.point_indices = {0, 1, 2, 3, 4};
 
   gtsam_points::StreamTempBufferRoundRobin stream_buffers;
   auto stream_buffer = stream_buffers.get_stream_buffer();
   iap::IntegratedBSplineGICPFactorGPU factor(
-    keys,
+    ctx,
     target,
     make_outlier_source_cloud(),
     stream_buffer.first,
@@ -909,30 +926,54 @@ TEST(BSplineGICPFactorTest, GpuFactorCanRefreshTargetWithoutRebuildingSourceBuck
   target_b->set_neighbor_voxel_mode(1);
   target_b->insert(*target_b_cloud);
 
-  std::array<gtsam::Key, iap::kBSplineControlPointCount> keys{};
-  for (std::size_t i = 0; i < iap::kBSplineControlPointCount; ++i) {
-    keys[i] = iap::bspline_control_point_key(i);
-  }
+  const auto bucket_ctx = make_full_bucket_context();
 
   gtsam_points::StreamTempBufferRoundRobin stream_buffers;
   auto stream_buffer = stream_buffers.get_stream_buffer();
-  iap::IntegratedBSplineGICPFactorGPU factor(keys, target_a, make_cloud(true), stream_buffer.first, stream_buffer.second);
+  iap::IntegratedBSplineGICPFactorGPU factor(
+    bucket_ctx,
+    target_a,
+    make_cloud(true),
+    stream_buffer.first,
+    stream_buffer.second);
   factor.set_enable_profiling(true);
   factor.set_max_correspondence_distance(2.0);
+
+  const auto source_staging_identity_a = factor.source_staging_identity();
+  ASSERT_TRUE(static_cast<bool>(source_staging_identity_a));
 
   const auto values = make_identity_control_values();
   const double error_a = factor.error(values);
   const auto profile_a = factor.profiling_report();
   ASSERT_TRUE(profile_a.valid);
-  ASSERT_EQ(profile_a.time_bucket_count, 4U);
+  ASSERT_EQ(profile_a.time_bucket_count, 1U);
 
   factor.refresh_target(target_b);
+  const auto source_staging_identity_b = factor.source_staging_identity();
+  ASSERT_EQ(source_staging_identity_a.get(), source_staging_identity_b.get());
+
+  iap::IntegratedBSplineGICPFactorGPU fresh_factor(
+    bucket_ctx,
+    target_b,
+    make_cloud(true),
+    stream_buffer.first,
+    stream_buffer.second);
+  fresh_factor.set_enable_profiling(true);
+  fresh_factor.set_max_correspondence_distance(2.0);
+
   const double error_b = factor.error(values);
   const auto profile_b = factor.profiling_report();
+  const double fresh_error_b = fresh_factor.error(values);
+  const auto fresh_profile_b = fresh_factor.profiling_report();
   ASSERT_TRUE(profile_b.valid);
+  ASSERT_TRUE(fresh_profile_b.valid);
   EXPECT_EQ(profile_b.time_bucket_count, profile_a.time_bucket_count);
   EXPECT_EQ(profile_b.source_point_count, profile_a.source_point_count);
   EXPECT_NE(error_a, error_b);
+  EXPECT_DOUBLE_EQ(error_b, fresh_error_b);
+  EXPECT_EQ(profile_b.source_point_count, fresh_profile_b.source_point_count);
+  EXPECT_EQ(profile_b.target_point_count, fresh_profile_b.target_point_count);
+  EXPECT_EQ(profile_b.inlier_point_count, fresh_profile_b.inlier_point_count);
 }
 
 TEST(BSplineGICPFactorTest, GpuKernelFactorLinearizesAndReturnsUnifiedProfile) {
