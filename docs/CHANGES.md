@@ -3,6 +3,10 @@
 > 规则：任何代码改动必须在这里记录，并包含 IAP-RQ-XXX。
 
 ## Unreleased
+- feat(dev-ct-odometry-layout-scheduler): IAP-RQ-300 / IAP-RQ-410 — rewrite the B-spline odometry scheduler around an active explicit-knot layout/evaluator.
+  - `OdometryEstimationBSpline` now maintains a unified active-window `SplineStateLayout + SplineEvaluator`, refreshes it during window seed/advance/prune, and registers `Imu / Lidar / Gnss` sensor models on that shared layout instead of rebuilding separate local assembly surfaces as the main path.
+  - IMU, GNSS, and CPU LiDAR bucket assembly now all query support directly from that active-window layout (`support_at(sample/epoch/query_time, sensor)`), while `append_active_segment_constraint(...)` also records active span/control coverage from the new scheduler view.
+  - Continuous trajectory publication no longer reconstructs from `control_buffer().spline_control_points()` on the CT path; it now publishes the shared view through `BSplineTrajectory::set_layout(...)`, with the old control-window/control-point path kept only as a legacy fallback.
 - feat(dev-ct-lidar-buckets): IAP-RQ-300 / IAP-RQ-410 — switch the CPU CT LiDAR main path to bucketized spline-native GICP factors.
   - Added `SplineBucketContext` plus the new `IntegratedSplineGICPFactor`, so the CPU LiDAR graph no longer attaches one mega factor to the whole scan and instead builds multiple bucket factors, each bound to one `SplineLocalSupport` and a subset of source point indices.
   - `OdometryEstimationBSpline` now creates per-segment LiDAR bucket contexts from explicit scan-time buckets and routes the CPU main path through those bucket factors, while the old `IntegratedBSplineGICPFactor` cache path is retained as a compatibility/reference factor for deskewing and post-opt diagnostics.

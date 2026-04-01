@@ -208,45 +208,26 @@ gtsam::KeyVector make_key_vector(
   return result;
 }
 
-std::shared_ptr<const iap::SplineStateLayout> make_segment_gnss_layout(
-  const std::vector<iap::BSplineControlPointState>& buffered_states,
-  const std::array<std::size_t, iap::kBSplineControlPointCount>& control_indices,
-  double span_start,
-  double span_end,
-  const Eigen::Isometry3d& T_imu_lidar,
-  const Eigen::Vector3d& gnss_lever_arm) {
-  auto layout = std::make_shared<iap::SplineStateLayout>();
+std::vector<std::size_t> support_control_indices(
+  const iap::SplineStateLayout& layout,
+  const std::vector<iap::SplineLocalSupport>& supports) {
+  std::vector<std::size_t> indices;
+  indices.reserve(supports.size() * iap::kBSplineControlPointCount);
 
-  std::vector<iap::BSplineControlPointState> controls;
-  controls.reserve(iap::kBSplineControlPointCount);
-  for (const auto control_index : control_indices) {
-    const auto it = std::find_if(buffered_states.begin(), buffered_states.end(), [&](const auto& state) {
-      return state.index == control_index;
-    });
-    if (it == buffered_states.end()) {
-      return nullptr;
+  for (const auto& support : supports) {
+    for (const auto ctrl_idx : support.ctrl_indices) {
+      if (ctrl_idx >= layout.controls().size()) {
+        continue;
+      }
+
+      const auto control_index = layout.controls()[ctrl_idx].index;
+      if (std::find(indices.begin(), indices.end(), control_index) == indices.end()) {
+        indices.push_back(control_index);
+      }
     }
-    controls.push_back(*it);
   }
 
-  layout->set_controls(std::move(controls));
-  layout->set_knots({
-    span_start,
-    span_start,
-    span_start,
-    span_start,
-    span_end,
-    span_end,
-    span_end,
-    span_end,
-  });
-
-  iap::SplineSensorModel gnss_model;
-  gnss_model.id = iap::SplineSensorId::Gnss;
-  gnss_model.T_sensor_imu = Eigen::Translation3d(gnss_lever_arm) * T_imu_lidar;
-  layout->set_sensor_model(iap::SplineSensorId::Gnss, gnss_model);
-
-  return layout;
+  return indices;
 }
 
 }  // namespace
@@ -452,6 +433,7 @@ void OdometryEstimationBSpline::initialize_control_window(
   const gtsam::Pose3& initial_pose) {
   control_window_->initialize(raw_frame->stamp, raw_frame->scan_end_time, initial_pose);
   fixed_lag_registry_.reset_from_window(*control_window_);
+  refresh_active_window_layout();
   marginal_prior_ = ActiveSplineMarginalPrior();
   fixed_lag_registry_.clear_auxiliary_values();
   ct_target_revision_ = 0;
@@ -608,87 +590,75 @@ std::vector<OdometryEstimationBSpline::ActiveSplineIMUSample> OdometryEstimation
   return samples;
 }
 
-std::shared_ptr<const iap::SplineStateLayout> OdometryEstimationBSpline::create_segment_imu_layout(
-  const ActiveSplineSegmentConstraint& segment) const {
-  auto layout = std::make_shared<iap::SplineStateLayout>();
-
-  std::vector<iap::BSplineControlPointState> controls;
-  controls.reserve(iap::kBSplineControlPointCount);
-  const auto& buffered_states = fixed_lag_registry_.control_buffer().states();
-
-  for (const auto control_index : segment.control_indices) {
-    const auto it = std::find_if(buffered_states.begin(), buffered_states.end(), [&](const auto& state) {
-      return state.index == control_index;
-    });
-    if (it == buffered_states.end()) {
-      return nullptr;
-    }
-    controls.push_back(*it);
+std::shared_ptr<const iap::SplineStateLayout> OdometryEstimationBSpline::build_active_window_layout() const {
+  const auto& states = fixed_lag_registry_.control_buffer().states();
+  if (states.size() < iap::kBSplineControlPointCount) {
+    return nullptr;
   }
 
-  const double span_start = segment.stamp;
-  const double span_end = std::max(segment.scan_end, segment.stamp + 1e-3);
-  layout->set_controls(std::move(controls));
-  layout->set_knots({
-    span_start,
-    span_start,
-    span_start,
-    span_start,
-    span_end,
-    span_end,
-    span_end,
-    span_end,
-  });
+  std::vector<double> knots;
+  const auto& segments = fixed_lag_registry_.segments();
+  const std::size_t expected_knot_count = states.size() + iap::kBSplineControlPointCount;
+  if (!segments.empty() && states.size() == segments.size() + iap::kBSplineControlPointCount - 1) {
+    const double start_stamp = segments.front().stamp;
+    double last_knot = start_stamp;
+    knots.assign(iap::kBSplineControlPointCount, start_stamp);
+    for (const auto& segment : segments) {
+      last_knot = std::max(last_knot, segment.scan_end);
+      knots.push_back(last_knot);
+    }
+    knots.resize(expected_knot_count, last_knot);
+  } else if (control_window_ && control_window_->initialized() && control_window_->knots().size() == expected_knot_count) {
+    knots = control_window_->knots();
+  } else {
+    const double start_stamp = states[1].stamp;
+    double last_knot = std::max(start_stamp + 1e-3, states[states.size() - 2].stamp);
+    knots.assign(iap::kBSplineControlPointCount, start_stamp);
+    knots.push_back(last_knot);
+    knots.resize(expected_knot_count, last_knot);
+  }
 
-  // Commit 4 compatibility note:
-  // The active spline control poses still live in the LiDAR frame, so the IMU
-  // sensor slot stores the inverse extrinsic here to let the current evaluator
-  // recover world->imu queries without rewriting sensor semantics yet.
+  auto layout = std::make_shared<iap::SplineStateLayout>();
+  layout->set_controls(states);
+  layout->set_knots(std::move(knots));
+
   iap::SplineSensorModel imu_model;
   imu_model.id = iap::SplineSensorId::Imu;
   imu_model.T_sensor_imu = Eigen::Isometry3d(T_imu_lidar.matrix());
   layout->set_sensor_model(iap::SplineSensorId::Imu, imu_model);
 
-  return layout;
-}
-
-std::shared_ptr<const iap::SplineStateLayout> OdometryEstimationBSpline::create_segment_lidar_layout(
-  const ActiveSplineSegmentConstraint& segment) const {
-  auto layout = std::make_shared<iap::SplineStateLayout>();
-
-  std::vector<iap::BSplineControlPointState> controls;
-  controls.reserve(iap::kBSplineControlPointCount);
-  const auto& buffered_states = fixed_lag_registry_.control_buffer().states();
-
-  for (const auto control_index : segment.control_indices) {
-    const auto it = std::find_if(buffered_states.begin(), buffered_states.end(), [&](const auto& state) {
-      return state.index == control_index;
-    });
-    if (it == buffered_states.end()) {
-      return nullptr;
-    }
-    controls.push_back(*it);
-  }
-
-  const double span_start = segment.stamp;
-  const double span_end = std::max(segment.scan_end, segment.stamp + 1e-3);
-  layout->set_controls(std::move(controls));
-  layout->set_knots({
-    span_start,
-    span_start,
-    span_start,
-    span_start,
-    span_end,
-    span_end,
-    span_end,
-    span_end,
-  });
-
   iap::SplineSensorModel lidar_model;
   lidar_model.id = iap::SplineSensorId::Lidar;
   layout->set_sensor_model(iap::SplineSensorId::Lidar, lidar_model);
 
+  iap::SplineSensorModel gnss_model;
+  gnss_model.id = iap::SplineSensorId::Gnss;
+  gnss_model.T_sensor_imu = Eigen::Translation3d(gnss_lever_arm_) * T_imu_lidar;
+  layout->set_sensor_model(iap::SplineSensorId::Gnss, gnss_model);
+
   return layout;
+}
+
+void OdometryEstimationBSpline::refresh_active_window_layout() {
+  active_window_layout_ = build_active_window_layout();
+  active_window_evaluator_ = active_window_layout_
+    ? std::make_shared<iap::SplineEvaluator>(active_window_layout_)
+    : nullptr;
+}
+
+std::shared_ptr<const iap::SplineStateLayout> OdometryEstimationBSpline::create_segment_imu_layout(
+  const ActiveSplineSegmentConstraint& segment) const {
+  (void)segment;
+  // Commit 7 legacy note:
+  // Segment-local layout builders remain as fallback surfaces, but the main
+  // scheduler path now binds factors against the unified active-window layout.
+  return active_window_layout_ ? active_window_layout_ : build_active_window_layout();
+}
+
+std::shared_ptr<const iap::SplineStateLayout> OdometryEstimationBSpline::create_segment_lidar_layout(
+  const ActiveSplineSegmentConstraint& segment) const {
+  (void)segment;
+  return active_window_layout_ ? active_window_layout_ : build_active_window_layout();
 }
 
 std::vector<iap::SplineBucketContext> OdometryEstimationBSpline::create_segment_lidar_buckets(
@@ -698,7 +668,7 @@ std::vector<iap::SplineBucketContext> OdometryEstimationBSpline::create_segment_
     return buckets;
   }
 
-  const auto layout = create_segment_lidar_layout(segment);
+  const auto layout = active_window_layout_ ? active_window_layout_ : create_segment_lidar_layout(segment);
   if (!layout) {
     return buckets;
   }
@@ -885,7 +855,20 @@ void OdometryEstimationBSpline::append_active_segment_constraint(
   }
   segment.auxiliary_index = states[1].index;
 
-  fixed_lag_registry_.append_segment(std::move(segment));
+  auto& appended = fixed_lag_registry_.append_segment(std::move(segment));
+  appended.active_control_indices.assign(appended.control_indices.begin(), appended.control_indices.end());
+  refresh_active_window_layout();
+  if (active_window_layout_) {
+    const auto supports = active_window_layout_->supports_in_range(
+      raw_frame->stamp,
+      std::max(raw_frame->scan_end_time, raw_frame->stamp + 1e-3),
+      iap::SplineSensorId::Lidar);
+    appended.active_control_indices = support_control_indices(*active_window_layout_, supports);
+    if (!supports.empty()) {
+      appended.span_begin_idx = supports.front().span_idx;
+      appended.span_end_idx = supports.back().span_idx;
+    }
+  }
 }
 
 void OdometryEstimationBSpline::insert_target_cloud(const EstimationFrame::Ptr& frame) {
@@ -1279,6 +1262,7 @@ EstimationFrame::ConstPtr OdometryEstimationBSpline::insert_frame_ct_lidar(
   const gtsam::Pose3 predicted_end_pose = predict_scan_end_pose(scan_duration);
   control_window_->advance(raw_frame->stamp, raw_frame->scan_end_time, predicted_end_pose);
   fixed_lag_registry_.append_window(*control_window_);
+  refresh_active_window_layout();
 
   if (const auto anchor = iap::IapSharedState::instance().get_gnss_anchor()) {
     fixed_lag_registry_.set_shared_gnss_anchor(anchor->origin_ecef, gtsam::Rot3(anchor->R_ecef_world));
@@ -1392,6 +1376,7 @@ EstimationFrame::ConstPtr OdometryEstimationBSpline::insert_frame_ct_lidar(
   const auto t_graph_build_start = Clock::now();
   const bool enable_lidar_profile_surface =
     lidar_factor_profile_ || lidar_warn_degeneracy_ || lidar_export_baseline_csv_;
+  const auto factor_layout = active_window_layout_ ? active_window_layout_ : build_active_window_layout();
   for (std::size_t i = 0; i < fixed_lag_registry_.segments().size(); ++i) {
     auto& segment = fixed_lag_registry_.segments()[i];
     const gtsam::Key velocity_key = iap::bspline_velocity_key(segment.auxiliary_index);
@@ -1577,13 +1562,12 @@ EstimationFrame::ConstPtr OdometryEstimationBSpline::insert_frame_ct_lidar(
     pipeline_timing.graph_velocity_factor_ms += elapsed_ms(t_graph_velocity_start, Clock::now());
 
     const auto t_imu_factor_start = Clock::now();
-    const auto segment_imu_layout = create_segment_imu_layout(segment);
     for (const auto& imu_sample : segment.imu_samples) {
-      if (!segment_imu_layout) {
+      if (!factor_layout) {
         continue;
       }
 
-      const auto support = segment_imu_layout->support_at(imu_sample.stamp, iap::SplineSensorId::Imu);
+      const auto support = factor_layout->support_at(imu_sample.stamp, iap::SplineSensorId::Imu);
       if (!support) {
         continue;
       }
@@ -1601,7 +1585,7 @@ EstimationFrame::ConstPtr OdometryEstimationBSpline::insert_frame_ct_lidar(
         imu_sample.linear_acc,
         imu_ct_trans_inf_scale_,
         imu_ct_rot_inf_scale_,
-        segment_imu_layout);
+        factor_layout);
       graph.add(imu_factor);
       if (marginalization_partition.should_marginalize_factor(
             make_key_vector(segment_keys, {gyro_bias_key, accel_bias_key, gravity_key}))) {
@@ -1615,20 +1599,13 @@ EstimationFrame::ConstPtr OdometryEstimationBSpline::insert_frame_ct_lidar(
       const auto t_gnss_factor_start = Clock::now();
       const gtsam::Key clock_key = iap::bspline_clock_key(segment.auxiliary_index);
       active_clock_states.push_back(ActiveClockState{clock_key, segment.stamp, values.at<gtsam::Vector2>(clock_key)});
-      const auto segment_gnss_layout = make_segment_gnss_layout(
-        fixed_lag_registry_.control_buffer().states(),
-        segment.control_indices,
-        segment.stamp,
-        std::max(segment.scan_end, segment.stamp + 1e-3),
-        T_imu_lidar,
-        gnss_lever_arm_);
-      if (!segment_gnss_layout) {
+      if (!factor_layout) {
         pipeline_timing.gnss_factor_assembly_ms += elapsed_ms(t_gnss_factor_start, Clock::now());
         continue;
       }
 
       for (const auto& epoch : segment.gnss_epochs) {
-        const auto support = segment_gnss_layout->support_at(epoch.stamp, iap::SplineSensorId::Gnss);
+        const auto support = factor_layout->support_at(epoch.stamp, iap::SplineSensorId::Gnss);
         if (!support) {
           continue;
         }
@@ -1659,7 +1636,7 @@ EstimationFrame::ConstPtr OdometryEstimationBSpline::insert_frame_ct_lidar(
             ecef_origin_key,
             ecef_rot_key,
             pr_obs,
-            segment_gnss_layout);
+            factor_layout);
           graph.add(pr_factor);
           if (marginalization_partition.should_marginalize_factor(
                 make_key_vector(segment_keys, {clock_key, ecef_origin_key, ecef_rot_key}))) {
@@ -1683,7 +1660,7 @@ EstimationFrame::ConstPtr OdometryEstimationBSpline::insert_frame_ct_lidar(
             clock_key,
             ecef_rot_key,
             dop_obs,
-            segment_gnss_layout);
+            factor_layout);
           graph.add(dop_factor);
           if (marginalization_partition.should_marginalize_factor(
                 make_key_vector(segment_keys, {velocity_key, clock_key, ecef_rot_key}))) {
@@ -1910,6 +1887,7 @@ EstimationFrame::ConstPtr OdometryEstimationBSpline::insert_frame_ct_lidar(
   {
     const auto t_prune_start = Clock::now();
     prune_active_ct_state(min_active_stamp);
+    refresh_active_window_layout();
     pipeline_timing.prune_active_ms = elapsed_ms(t_prune_start, Clock::now());
   }
   {
@@ -2499,8 +2477,17 @@ EstimationFrame::ConstPtr OdometryEstimationBSpline::insert_frame_ct_lidar(
   pipeline_timing.post_lidar_log_ms = elapsed_ms(t_post_lidar_log_start, Clock::now());
 
   const auto t_post_frame_state_start = Clock::now();
-  const gtsam::Pose3 start_pose = control_window_->evaluate(0.0);
-  const gtsam::Pose3 end_pose = control_window_->evaluate(1.0);
+  auto evaluate_lidar_pose = [&](double stamp, double legacy_u) {
+    if (active_window_layout_ && active_window_evaluator_) {
+      if (const auto support = active_window_layout_->support_at(stamp, iap::SplineSensorId::Lidar)) {
+        return active_window_evaluator_->eval_pose(values, *support, iap::SplineSensorId::Lidar);
+      }
+    }
+    return control_window_->evaluate(legacy_u);
+  };
+  const gtsam::Pose3 start_pose = evaluate_lidar_pose(raw_frame->stamp, 0.0);
+  const gtsam::Pose3 end_pose = evaluate_lidar_pose(raw_frame->scan_end_time, 1.0);
+  (void)end_pose;
   new_frame->T_world_lidar = Eigen::Isometry3d(start_pose.matrix());
   new_frame->T_world_imu = new_frame->T_world_lidar * T_lidar_imu;
   new_frame->v_world_imu = values.at<gtsam::Vector3>(iap::bspline_velocity_key(control_window_->states()[1].index));
@@ -2669,11 +2656,12 @@ EstimationFrame::ConstPtr OdometryEstimationBSpline::insert_frame_ct_lidar(
 void OdometryEstimationBSpline::publish_continuous_trajectory(int current) {
   (void)current;
 
-  std::vector<iap::SplineControlPoint> control_points;
-  if ((frontend_mode_ == "CT_LIDAR_CPU" || frontend_mode_ == "CT_LIDAR_GPU") &&
-      !fixed_lag_registry_.control_buffer().empty()) {
-    control_points = fixed_lag_registry_.control_buffer().spline_control_points(&fixed_lag_registry_.auxiliary_values());
+  auto trajectory = std::make_shared<iap::BSplineTrajectory>(trajectory_params_);
+  if ((frontend_mode_ == "CT_LIDAR_CPU" || frontend_mode_ == "CT_LIDAR_GPU") && active_window_layout_) {
+    gtsam::Values trajectory_values = fixed_lag_registry_.control_buffer().values();
+    trajectory->set_layout(active_window_layout_, &trajectory_values);
   } else {
+    std::vector<iap::SplineControlPoint> control_points;
     control_points.reserve(frames.inner_size());
 
     for (auto it = frames.inner_begin(); it != frames.inner_end(); ++it) {
@@ -2688,14 +2676,18 @@ void OdometryEstimationBSpline::publish_continuous_trajectory(int current) {
       cp.sigma = sigma_from_covariance((*it)->sigma_p);
       control_points.push_back(cp);
     }
+
+    if (control_points.empty()) {
+      return;
+    }
+
+    trajectory->set_control_points(control_points);
   }
 
-  if (control_points.empty()) {
+  if (trajectory->empty()) {
     return;
   }
 
-  auto trajectory = std::make_shared<iap::BSplineTrajectory>(trajectory_params_);
-  trajectory->set_control_points(control_points);
   latest_trajectory_ = trajectory;
 
   update_frame_attachment(trajectory);

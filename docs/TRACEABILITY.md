@@ -178,6 +178,11 @@
   - `IntegratedBSplinePseudorangeFactor` / `IntegratedBSplineDopplerFactor` 旧构造函数仍保留为兼容 wrapper；旧的 clock state、ECEF origin/rotation、GNSS clock-between 路径没有改。
   - GNSS 数值 Jacobian 仍保留在 control-pose 层，但几何 residual 使用的接收机 pose / antenna query 已统一改为 `SplineEvaluator` 提供。
 - 2026-04-01: IAP-RQ-300 / IAP-RQ-410
+  - 已开始按 `ct-iap_spec.md` 执行 `Commit 7`，把 `odometry_estimation_bspline` 的主调度层改成围绕 active-window `SplineStateLayout + SplineEvaluator` 组织，而不再以临时 control-window 装配 helper 为主路径。
+  - `OdometryEstimationBSpline` 现在会在初始化、每帧窗口推进、以及 prune 后刷新统一的 explicit-knot active layout，并在同一个 layout 上注册 `Imu / Lidar / Gnss` sensor models。
+  - IMU、GNSS、CPU LiDAR bucket 装配现已统一从 active-window layout 做 `support_at(...)` 查询；`append_active_segment_constraint(...)` 也会记录来自该 layout 的 span coverage 和 active control indices。
+  - 连续轨迹发布已切到 `BSplineTrajectory::set_layout(...)` 主路径，不再在 CT 路径里从 `control_buffer().spline_control_points()` 反向重建；旧的 `control_window_` / segment-local layout helpers 仍保留为兼容 fallback。
+- 2026-04-01: IAP-RQ-300 / IAP-RQ-410
   - 已开始按 `ct-iap_spec.md` 执行 `Commit 6`，先只把 CPU LiDAR 主路径改成按 knot span / time bucket 切分的 spline-native GICP 装配，不改 GPU backend。
   - 新增 `SplineBucketContext` 和 `IntegratedSplineGICPFactor`；每个 CPU LiDAR 因子现在只持有一个 `SplineLocalSupport` 和一个 source point 子集，而不再在因子内部维护整帧 `time_table_ / basis_table_ / time_indices_`。
   - `OdometryEstimationBSpline` 现已新增 LiDAR bucket scheduler：按 scan 内点时间聚类生成 bucket，再通过 `SplineStateLayout::support_at(query_time, Lidar)` 绑定 local support 并装配多个 bucket factors。

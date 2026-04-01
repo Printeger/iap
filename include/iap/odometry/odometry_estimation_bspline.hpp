@@ -174,6 +174,8 @@ class OdometryEstimationBSpline : public OdometryEstimationCPU {
   gtsam_points::PointCloud::ConstPtr create_lidar_source_cloud(const PreprocessedFrame::Ptr& raw_frame) const;
   ActiveSplineTargetReference create_active_target_reference() const;
   std::vector<ActiveSplineIMUSample> create_segment_imu_samples(const PreprocessedFrame::Ptr& raw_frame) const;
+  std::shared_ptr<const iap::SplineStateLayout> build_active_window_layout() const;
+  void refresh_active_window_layout();
   std::shared_ptr<const iap::SplineStateLayout> create_segment_imu_layout(const ActiveSplineSegmentConstraint& segment) const;
   std::shared_ptr<const iap::SplineStateLayout> create_segment_lidar_layout(const ActiveSplineSegmentConstraint& segment) const;
   std::vector<iap::SplineBucketContext> create_segment_lidar_buckets(const ActiveSplineSegmentConstraint& segment) const;
@@ -287,9 +289,16 @@ class OdometryEstimationBSpline : public OdometryEstimationCPU {
   iap::ClockBetweenFactor::Params gnss_clock_between_params_;
 
   std::shared_ptr<gtsam_points::iVox> ct_target_ivox_;
+  // Commit 7 note:
+  // `control_window_` is now a legacy bootstrap/advance helper used to keep the
+  // current fixed-4-control-point rollout stable while the scheduler, factor
+  // assembly, and trajectory publication move to explicit-knot layout/evaluator
+  // paths owned by `active_window_layout_`.
   std::unique_ptr<iap::BSplineControlWindow> control_window_;
   iap::BSplineFixedLagStateRegistryT<ActiveSplineSegmentConstraint> fixed_lag_registry_;
   ActiveSplineMarginalPrior marginal_prior_;
+  std::shared_ptr<const iap::SplineStateLayout> active_window_layout_;
+  std::shared_ptr<iap::SplineEvaluator> active_window_evaluator_;
   std::shared_ptr<iap::BSplineTrajectory> latest_trajectory_;
   std::unique_ptr<iap::GnssEpochBuilder> gnss_epoch_builder_;
   std::unique_ptr<iap::GnssHandler> gnss_handler_;
