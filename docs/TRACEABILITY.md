@@ -178,6 +178,11 @@
   - `IntegratedBSplinePseudorangeFactor` / `IntegratedBSplineDopplerFactor` 旧构造函数仍保留为兼容 wrapper；旧的 clock state、ECEF origin/rotation、GNSS clock-between 路径没有改。
   - GNSS 数值 Jacobian 仍保留在 control-pose 层，但几何 residual 使用的接收机 pose / antenna query 已统一改为 `SplineEvaluator` 提供。
 - 2026-04-01: IAP-RQ-300 / IAP-RQ-410
+  - 已开始按 `ct-iap_spec.md` 执行 `Commit 8`，把 fixed-lag marginalization 的主输入从旧的 `segment.control_indices + auxiliary_index` 提升为 `SplineActiveStateSet`，先构造 active spans / active controls / active keys，再决定 drop set。
+  - `BSplineFixedLagStateRegistry` 现已提供 `active_span_indices(...)`、`active_control_references(...)`、`active_state_set(...)` 和 `prune_to_active_state_set(...)`；multi-span bucket / IMU / GNSS 仍在引用的 control point 不会再因为时间窗裁剪而被提前移除。
+  - `OdometryEstimationBSpline` 现在会先补齐 active velocity / clock states，再基于 `SplineActiveStateSet` 构造 marginalization partition；CPU LiDAR bucket、IMU、GNSS 因子进入 carried-prior / marginalization graph 时也统一按各自真实 `support.pose_keys` 判定 ownership，而不再复用旧的 segment-level 四控制点假设。
+  - carried prior 框架本身保持不变：仍然沿用 `BSplineCarriedPrior` 的 replay / relinearize 数据流，只是 survivor key 集合现在来自新的 active-state partition 规则。
+- 2026-04-01: IAP-RQ-300 / IAP-RQ-410
   - 已开始按 `ct-iap_spec.md` 执行 `Commit 7`，把 `odometry_estimation_bspline` 的主调度层改成围绕 active-window `SplineStateLayout + SplineEvaluator` 组织，而不再以临时 control-window 装配 helper 为主路径。
   - `OdometryEstimationBSpline` 现在会在初始化、每帧窗口推进、以及 prune 后刷新统一的 explicit-knot active layout，并在同一个 layout 上注册 `Imu / Lidar / Gnss` sensor models。
   - IMU、GNSS、CPU LiDAR bucket 装配现已统一从 active-window layout 做 `support_at(...)` 查询；`append_active_segment_constraint(...)` 也会记录来自该 layout 的 span coverage 和 active control indices。

@@ -200,10 +200,22 @@ gtsam::KeyVector make_key_vector(const std::array<gtsam::Key, iap::kBSplineContr
   return gtsam::KeyVector(keys.begin(), keys.end());
 }
 
+gtsam::KeyVector make_key_vector(const iap::SplineLocalSupport& support) {
+  return gtsam::KeyVector(support.pose_keys.begin(), support.pose_keys.end());
+}
+
 gtsam::KeyVector make_key_vector(
   const std::array<gtsam::Key, iap::kBSplineControlPointCount>& keys,
   std::initializer_list<gtsam::Key> extra_keys) {
   gtsam::KeyVector result(keys.begin(), keys.end());
+  result.insert(result.end(), extra_keys.begin(), extra_keys.end());
+  return result;
+}
+
+gtsam::KeyVector make_key_vector(
+  const iap::SplineLocalSupport& support,
+  std::initializer_list<gtsam::Key> extra_keys) {
+  gtsam::KeyVector result(support.pose_keys.begin(), support.pose_keys.end());
   result.insert(result.end(), extra_keys.begin(), extra_keys.end());
   return result;
 }
@@ -782,9 +794,10 @@ void OdometryEstimationBSpline::sync_gnss_epochs_from_shared_state() {
   }
 }
 
-void OdometryEstimationBSpline::prune_active_ct_state(double min_active_stamp) {
-  fixed_lag_registry_.prune_before(min_active_stamp);
-  fixed_lag_registry_.retain_active_auxiliary_values(true);
+void OdometryEstimationBSpline::prune_active_ct_state(
+  double min_active_stamp,
+  const iap::SplineActiveStateSet& active_state_set) {
+  fixed_lag_registry_.prune_to_active_state_set(min_active_stamp, active_state_set, true);
 }
 
 void OdometryEstimationBSpline::update_marginal_prior_from_active_window() {
@@ -1362,17 +1375,36 @@ EstimationFrame::ConstPtr OdometryEstimationBSpline::insert_frame_ct_lidar(
     }
 
   }
-  const iap::BSplineMarginalizationPartition marginalization_partition = [&] {
+  for (const auto& segment : fixed_lag_registry_.segments()) {
+    const gtsam::Key velocity_key = iap::bspline_velocity_key(segment.auxiliary_index);
+    if (values.exists(velocity_key)) {
+      continue;
+    }
+
+    if (fixed_lag_registry_.auxiliary_values().exists(velocity_key)) {
+      values.insert(velocity_key, fixed_lag_registry_.auxiliary_values().at<gtsam::Vector3>(velocity_key));
+      continue;
+    }
+
+    const auto segment_poses = segment_poses_from_values(segment);
+    const gtsam::Vector3 velocity_guess =
+      iap::IntegratedBSplineVelocityFactor::predict_velocity(
+        segment_poses,
+        0.0,
+        std::max(1e-3, segment.scan_end - segment.stamp),
+        trajectory_params_.finite_difference_dt);
+    values.insert(velocity_key, velocity_guess);
+  }
+
+  const bool include_clock_states = !seeded_clock_states.empty();
+  const iap::SplineActiveStateSet active_state_set = [&] {
     const auto t_partition_start = Clock::now();
-    auto partition = iap::build_bspline_marginalization_partition(
-      fixed_lag_registry_.control_buffer().states(),
-      fixed_lag_registry_.marginalization_segment_states(),
-      values,
-      min_active_stamp,
-      !seeded_clock_states.empty());
+    auto active_state_set = fixed_lag_registry_.active_state_set(values, min_active_stamp, include_clock_states);
     pipeline_timing.marginalization_partition_ms = elapsed_ms(t_partition_start, Clock::now());
-    return partition;
+    return active_state_set;
   }();
+  const iap::BSplineMarginalizationPartition marginalization_partition =
+    iap::build_bspline_marginalization_partition(active_state_set);
   const auto t_graph_build_start = Clock::now();
   const bool enable_lidar_profile_surface =
     lidar_factor_profile_ || lidar_warn_degeneracy_ || lidar_export_baseline_csv_;
@@ -1431,10 +1463,12 @@ EstimationFrame::ConstPtr OdometryEstimationBSpline::insert_frame_ct_lidar(
       pipeline_timing.graph_lidar_factor_new_build_ms += elapsed_ms(t_lidar_prepare_start, t_lidar_prepare_end);
 
       const auto t_lidar_attach_start = Clock::now();
-      for (const auto& factor : segment_bucket_factors) {
+      for (std::size_t bucket_idx = 0; bucket_idx < segment_bucket_factors.size(); ++bucket_idx) {
+        const auto& factor = segment_bucket_factors[bucket_idx];
+        const auto& bucket_ctx = bucket_contexts[bucket_idx];
         active_lidar_cpu_factors.push_back(factor);
         graph.add(factor);
-        if (marginalization_partition.should_marginalize_factor(make_key_vector(segment_keys))) {
+        if (marginalization_partition.should_marginalize_factor(make_key_vector(bucket_ctx.support))) {
           marginalization_graph.add(factor);
         }
       }
@@ -1588,7 +1622,7 @@ EstimationFrame::ConstPtr OdometryEstimationBSpline::insert_frame_ct_lidar(
         factor_layout);
       graph.add(imu_factor);
       if (marginalization_partition.should_marginalize_factor(
-            make_key_vector(segment_keys, {gyro_bias_key, accel_bias_key, gravity_key}))) {
+            make_key_vector(ctx.support, {gyro_bias_key, accel_bias_key, gravity_key}))) {
         marginalization_graph.add(imu_factor);
       }
       active_imu_factor_count++;
@@ -1639,7 +1673,7 @@ EstimationFrame::ConstPtr OdometryEstimationBSpline::insert_frame_ct_lidar(
             factor_layout);
           graph.add(pr_factor);
           if (marginalization_partition.should_marginalize_factor(
-                make_key_vector(segment_keys, {clock_key, ecef_origin_key, ecef_rot_key}))) {
+                make_key_vector(ctx.support, {clock_key, ecef_origin_key, ecef_rot_key}))) {
             marginalization_graph.add(pr_factor);
           }
           active_gnss_pr_factor_count++;
@@ -1663,7 +1697,7 @@ EstimationFrame::ConstPtr OdometryEstimationBSpline::insert_frame_ct_lidar(
             factor_layout);
           graph.add(dop_factor);
           if (marginalization_partition.should_marginalize_factor(
-                make_key_vector(segment_keys, {velocity_key, clock_key, ecef_rot_key}))) {
+                make_key_vector(ctx.support, {velocity_key, clock_key, ecef_rot_key}))) {
             marginalization_graph.add(dop_factor);
           }
           active_gnss_dop_factor_count++;
@@ -1886,7 +1920,7 @@ EstimationFrame::ConstPtr OdometryEstimationBSpline::insert_frame_ct_lidar(
   }
   {
     const auto t_prune_start = Clock::now();
-    prune_active_ct_state(min_active_stamp);
+    prune_active_ct_state(min_active_stamp, active_state_set);
     refresh_active_window_layout();
     pipeline_timing.prune_active_ms = elapsed_ms(t_prune_start, Clock::now());
   }
@@ -1896,7 +1930,7 @@ EstimationFrame::ConstPtr OdometryEstimationBSpline::insert_frame_ct_lidar(
     update_marginal_prior_information(
       marginalization_graph,
       values,
-      marginalization_partition.survivor_keys,
+      active_state_set.active_keys(),
       previous_carried_prior.empty() ? nullptr : &previous_carried_prior);
     pipeline_timing.carried_prior_update_ms = elapsed_ms(t_carried_prior_update_start, Clock::now());
   }

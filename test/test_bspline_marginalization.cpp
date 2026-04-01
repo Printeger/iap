@@ -4,6 +4,9 @@
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
+
+#include <iap/odometry/bspline_fixed_lag_registry.hpp>
 #include <iap/odometry/bspline_marginalization.hpp>
 
 #include <gtsam/inference/Symbol.h>
@@ -67,6 +70,44 @@ std::vector<iap::BSplineMarginalizationSegmentState> make_segment_states() {
   return states;
 }
 
+std::vector<iap::BSplineMarginalizationSegmentState> make_multispan_segment_states() {
+  std::vector<iap::BSplineMarginalizationSegmentState> states(3);
+  states[0].scan_end = 2.5;
+  states[0].span_begin_idx = 0;
+  states[0].span_end_idx = 1;
+  states[0].active_control_indices = {0, 1, 2, 3};
+  states[0].control_indices = {0, 1, 2, 3};
+  states[0].auxiliary_index = 1;
+
+  states[1].scan_end = 4.6;
+  states[1].span_begin_idx = 2;
+  states[1].span_end_idx = 3;
+  states[1].active_control_indices = {2, 3, 4, 5};
+  states[1].control_indices = {2, 3, 4, 5};
+  states[1].auxiliary_index = 4;
+
+  states[2].scan_end = 5.8;
+  states[2].span_begin_idx = 4;
+  states[2].span_end_idx = 6;
+  states[2].active_control_indices = {2, 3, 4, 5, 6, 7};
+  states[2].control_indices = {4, 5, 6, 7};
+  states[2].auxiliary_index = 6;
+  return states;
+}
+
+std::vector<gtsam::Pose3> make_window_poses() {
+  std::vector<gtsam::Pose3> poses;
+  poses.reserve(8);
+  for (std::size_t i = 0; i < 8; ++i) {
+    poses.push_back(translated_pose(static_cast<double>(i)));
+  }
+  return poses;
+}
+
+std::vector<double> make_window_knots() {
+  return {0.0, 0.0, 0.0, 0.0, 1.0, 2.0, 3.0, 4.0, 6.0, 6.0, 6.0, 6.0};
+}
+
 }  // namespace
 
 TEST(BSplineMarginalizationTest, PartitionKeepsSupportPointsAndPersistentStates) {
@@ -106,6 +147,86 @@ TEST(BSplineMarginalizationTest, PartitionKeepsSupportPointsAndPersistentStates)
   EXPECT_TRUE(partition.can_replay_keys(
     {iap::bspline_control_point_key(6), iap::bspline_velocity_key(6), iap::bspline_clock_key(6)},
     values));
+}
+
+TEST(BSplineMarginalizationTest, ActiveStateSetKeepsMultiSpanReferencedControls) {
+  const gtsam::Values values = make_partition_values();
+  auto active_state_set = iap::build_spline_active_state_set(
+    make_buffer_states(),
+    make_multispan_segment_states(),
+    values,
+    4.4,
+    true);
+
+  std::sort(active_state_set.active_span_indices.begin(), active_state_set.active_span_indices.end());
+  std::sort(active_state_set.active_control_indices.begin(), active_state_set.active_control_indices.end());
+  std::sort(active_state_set.removable_control_indices.begin(), active_state_set.removable_control_indices.end());
+  std::sort(active_state_set.active_auxiliary_indices.begin(), active_state_set.active_auxiliary_indices.end());
+  std::sort(active_state_set.removable_auxiliary_indices.begin(), active_state_set.removable_auxiliary_indices.end());
+
+  EXPECT_EQ(active_state_set.active_span_indices, (std::vector<int>{2, 3, 4, 5, 6}));
+  EXPECT_EQ(active_state_set.active_control_indices, (std::vector<std::size_t>{2, 3, 4, 5, 6, 7}));
+  EXPECT_EQ(active_state_set.removable_control_indices, (std::vector<std::size_t>{0, 1}));
+  EXPECT_EQ(active_state_set.active_auxiliary_indices, (std::vector<std::size_t>{4, 6}));
+  EXPECT_EQ(active_state_set.removable_auxiliary_indices, (std::vector<std::size_t>{1}));
+
+  EXPECT_TRUE(active_state_set.contains_active_key(iap::bspline_control_point_key(2)));
+  EXPECT_TRUE(active_state_set.contains_active_key(iap::bspline_velocity_key(4)));
+  EXPECT_TRUE(active_state_set.contains_active_key(iap::bspline_clock_key(6)));
+  EXPECT_TRUE(active_state_set.contains_removed_key(iap::bspline_control_point_key(1)));
+  EXPECT_TRUE(active_state_set.contains_removed_key(iap::bspline_velocity_key(1)));
+}
+
+TEST(BSplineMarginalizationTest, RegistryPruneFollowsActiveStateSetReferences) {
+  iap::BSplineControlWindow window;
+  window.seed_with_knots(make_window_knots(), make_window_poses());
+
+  iap::BSplineFixedLagStateRegistry registry;
+  registry.reset_from_window(window);
+  for (const auto& segment : make_multispan_segment_states()) {
+    iap::BSplineFixedLagSegmentState registry_segment;
+    registry_segment.scan_end = segment.scan_end;
+    registry_segment.span_begin_idx = segment.span_begin_idx;
+    registry_segment.span_end_idx = segment.span_end_idx;
+    registry_segment.active_control_indices = segment.active_control_indices;
+    registry_segment.control_indices = segment.control_indices;
+    registry_segment.auxiliary_index = segment.auxiliary_index;
+    registry.append_segment(registry_segment);
+  }
+
+  registry.auxiliary_values().insert(iap::bspline_velocity_key(1), gtsam::Vector3(1.0, 0.0, 0.0));
+  registry.auxiliary_values().insert(iap::bspline_velocity_key(4), gtsam::Vector3(4.0, 0.0, 0.0));
+  registry.auxiliary_values().insert(iap::bspline_velocity_key(6), gtsam::Vector3(6.0, 0.0, 0.0));
+  registry.auxiliary_values().insert(iap::bspline_clock_key(4), gtsam::Vector2(10.0, 0.1));
+  registry.auxiliary_values().insert(iap::bspline_clock_key(6), gtsam::Vector2(20.0, 0.2));
+
+  const auto spans = registry.active_span_indices(4.4);
+  ASSERT_EQ(spans, (std::vector<int>{2, 3, 4, 5, 6}));
+
+  auto references = registry.active_control_references(4.4);
+  std::sort(references.begin(), references.end(), [](const auto& lhs, const auto& rhs) {
+    return lhs.control_index < rhs.control_index;
+  });
+  ASSERT_EQ(references.size(), 6U);
+  EXPECT_EQ(references.front().control_index, 2U);
+  EXPECT_EQ(references.front().reference_count, 2U);
+  EXPECT_EQ(references.back().control_index, 7U);
+  EXPECT_EQ(references.back().reference_count, 1U);
+
+  const auto active_state_set = registry.active_state_set(make_partition_values(), 4.4, true);
+  registry.prune_to_active_state_set(4.4, active_state_set, true);
+
+  std::vector<std::size_t> retained_indices;
+  for (const auto& state : registry.control_buffer().states()) {
+    retained_indices.push_back(state.index);
+  }
+  EXPECT_EQ(retained_indices, (std::vector<std::size_t>{2, 3, 4, 5, 6, 7}));
+
+  EXPECT_FALSE(registry.auxiliary_values().exists(iap::bspline_velocity_key(1)));
+  EXPECT_TRUE(registry.auxiliary_values().exists(iap::bspline_velocity_key(4)));
+  EXPECT_TRUE(registry.auxiliary_values().exists(iap::bspline_velocity_key(6)));
+  EXPECT_TRUE(registry.auxiliary_values().exists(iap::bspline_clock_key(4)));
+  EXPECT_TRUE(registry.auxiliary_values().exists(iap::bspline_clock_key(6)));
 }
 
 TEST(BSplineMarginalizationTest, CarriedPriorMatchesReferenceMarginalError) {

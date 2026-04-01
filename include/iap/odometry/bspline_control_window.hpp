@@ -98,6 +98,7 @@ class BSplineControlWindowBuffer {
   void reset_from_window(const BSplineControlWindow& window);
   void append_window(const BSplineControlWindow& window);
   void prune_before(double min_stamp);
+  void retain_control_indices(const std::vector<std::size_t>& control_indices);
   void update_from_values(const gtsam::Values& values);
 
   std::vector<gtsam::Key> keys() const;

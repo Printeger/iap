@@ -24,8 +24,25 @@ struct BSplineMarginalizationSegmentState {
   std::size_t auxiliary_index = 0;
 };
 
+struct SplineActiveStateSet {
+  double min_active_stamp = 0.0;
+  std::vector<int> active_span_indices;
+  std::vector<std::size_t> active_control_indices;
+  std::vector<std::size_t> removable_control_indices;
+  std::vector<std::size_t> active_auxiliary_indices;
+  std::vector<std::size_t> removable_auxiliary_indices;
+  std::vector<gtsam::Key> active_pose_keys;
+  std::vector<gtsam::Key> active_aux_keys;
+  std::vector<gtsam::Key> removable_keys;
+
+  std::vector<gtsam::Key> active_keys() const;
+  bool contains_active_key(gtsam::Key key) const;
+  bool contains_removed_key(gtsam::Key key) const;
+};
+
 struct BSplineMarginalizationPartition {
   double min_active_stamp = 0.0;
+  SplineActiveStateSet active_state_set;
   std::vector<std::size_t> survivor_control_indices;
   std::vector<std::size_t> removable_control_indices;
   std::vector<std::size_t> survivor_auxiliary_indices;
@@ -64,6 +81,16 @@ struct BSplineCarriedPrior {
   bool empty() const;
   gtsam::NonlinearFactorGraph replay() const;
 };
+
+SplineActiveStateSet build_spline_active_state_set(
+  const std::vector<BSplineControlPointState>& buffer_states,
+  const std::vector<BSplineMarginalizationSegmentState>& segment_states,
+  const gtsam::Values& values,
+  double min_active_stamp,
+  bool include_clock);
+
+BSplineMarginalizationPartition build_bspline_marginalization_partition(
+  const SplineActiveStateSet& active_state_set);
 
 BSplineMarginalizationPartition build_bspline_marginalization_partition(
   const std::vector<BSplineControlPointState>& buffer_states,

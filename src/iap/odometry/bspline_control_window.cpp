@@ -484,6 +484,20 @@ void BSplineControlWindowBuffer::prune_before(double min_stamp) {
   }
 }
 
+void BSplineControlWindowBuffer::retain_control_indices(const std::vector<std::size_t>& control_indices) {
+  if (control_indices.empty()) {
+    states_.clear();
+    return;
+  }
+
+  states_.erase(
+    std::remove_if(states_.begin(), states_.end(), [&](const auto& state) {
+      return std::find(control_indices.begin(), control_indices.end(), state.index) == control_indices.end();
+    }),
+    states_.end());
+  sort_states();
+}
+
 void BSplineControlWindowBuffer::update_from_values(const gtsam::Values& values) {
   for (auto& state : states_) {
     const auto key = bspline_control_point_key(state.index);

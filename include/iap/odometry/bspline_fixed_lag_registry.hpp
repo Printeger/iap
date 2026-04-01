@@ -75,6 +75,13 @@ struct BSplineFixedLagTelemetry {
   BSplineFixedLagLifecycleState lifecycle_state = BSplineFixedLagLifecycleState::Empty;
 };
 
+struct BSplineFixedLagControlReference {
+  std::size_t control_index = 0;
+  std::size_t reference_count = 0;
+  std::vector<int> active_span_indices;
+  std::vector<std::size_t> auxiliary_indices;
+};
+
 template <typename SegmentT = BSplineFixedLagSegmentState>
 class BSplineFixedLagStateRegistryT {
  public:
@@ -144,6 +151,72 @@ class BSplineFixedLagStateRegistryT {
     });
   }
 
+  std::vector<int> active_span_indices(double min_active_stamp) const {
+    std::vector<int> indices;
+    for (const auto& segment : segments_) {
+      if (segment.scan_end < min_active_stamp) {
+        continue;
+      }
+      for (int span = segment.span_begin_idx; span >= 0 && span <= segment.span_end_idx; ++span) {
+        if (std::find(indices.begin(), indices.end(), span) == indices.end()) {
+          indices.push_back(span);
+        }
+      }
+    }
+    return indices;
+  }
+
+  std::vector<BSplineFixedLagControlReference> active_control_references(double min_active_stamp) const {
+    std::vector<BSplineFixedLagControlReference> references;
+
+    for (const auto& segment : segments_) {
+      if (segment.scan_end < min_active_stamp) {
+        continue;
+      }
+
+      const auto referenced_controls = [&]() {
+        if (!segment.active_control_indices.empty()) {
+          return segment.active_control_indices;
+        }
+        return std::vector<std::size_t>(segment.control_indices.begin(), segment.control_indices.end());
+      }();
+
+      for (const auto control_index : referenced_controls) {
+        auto it = std::find_if(references.begin(), references.end(), [&](const auto& reference) {
+          return reference.control_index == control_index;
+        });
+        if (it == references.end()) {
+          references.push_back(BSplineFixedLagControlReference{control_index});
+          it = std::prev(references.end());
+        }
+
+        it->reference_count++;
+        if (std::find(it->auxiliary_indices.begin(), it->auxiliary_indices.end(), segment.auxiliary_index) == it->auxiliary_indices.end()) {
+          it->auxiliary_indices.push_back(segment.auxiliary_index);
+        }
+        for (int span = segment.span_begin_idx; span >= 0 && span <= segment.span_end_idx; ++span) {
+          if (std::find(it->active_span_indices.begin(), it->active_span_indices.end(), span) == it->active_span_indices.end()) {
+            it->active_span_indices.push_back(span);
+          }
+        }
+      }
+    }
+
+    return references;
+  }
+
+  SplineActiveStateSet active_state_set(
+    const gtsam::Values& values,
+    double min_active_stamp,
+    bool include_clock) const {
+    return build_spline_active_state_set(
+      control_buffer_.states(),
+      marginalization_segment_states(),
+      values,
+      min_active_stamp,
+      include_clock);
+  }
+
   std::vector<BSplineMarginalizationSegmentState> marginalization_segment_states() const {
     std::vector<BSplineMarginalizationSegmentState> states;
     states.reserve(segments_.size());
@@ -160,6 +233,27 @@ class BSplineFixedLagStateRegistryT {
     }
 
     return states;
+  }
+
+  void prune_to_active_state_set(
+    double min_stamp,
+    const SplineActiveStateSet& active_state_set,
+    bool include_clock = true) {
+    if (active_state_set.active_control_indices.empty()) {
+      control_buffer_.prune_before(min_stamp);
+    } else {
+      control_buffer_.retain_control_indices(active_state_set.active_control_indices);
+    }
+
+    const auto keep_begin = std::find_if(segments_.begin(), segments_.end(), [&](const auto& segment) {
+      return segment.scan_end >= min_stamp;
+    });
+
+    if (keep_begin != segments_.begin()) {
+      segments_.erase(segments_.begin(), keep_begin);
+    }
+
+    retain_active_auxiliary_values(active_state_set, include_clock);
   }
 
   gtsam::Values filter_aux_values(const gtsam::Values& values, bool include_clock = true) const {
@@ -180,8 +274,35 @@ class BSplineFixedLagStateRegistryT {
     return filtered;
   }
 
+  gtsam::Values filter_aux_values(
+    const gtsam::Values& values,
+    const SplineActiveStateSet& active_state_set,
+    bool include_clock = true) const {
+    gtsam::Values filtered;
+
+    for (const auto aux_index : active_state_set.active_auxiliary_indices) {
+      const auto velocity_key = bspline_velocity_key(aux_index);
+      if (values.exists(velocity_key) && !filtered.exists(velocity_key)) {
+        filtered.insert(velocity_key, values.at<gtsam::Vector3>(velocity_key));
+      }
+
+      const auto clock_key = bspline_clock_key(aux_index);
+      if (include_clock && values.exists(clock_key) && !filtered.exists(clock_key)) {
+        filtered.insert(clock_key, values.at<gtsam::Vector2>(clock_key));
+      }
+    }
+
+    return filtered;
+  }
+
   void retain_active_auxiliary_values(bool include_clock = true) {
     auxiliary_values_ = filter_aux_values(auxiliary_values_, include_clock);
+  }
+
+  void retain_active_auxiliary_values(
+    const SplineActiveStateSet& active_state_set,
+    bool include_clock = true) {
+    auxiliary_values_ = filter_aux_values(auxiliary_values_, active_state_set, include_clock);
   }
 
   void clear_auxiliary_values() {

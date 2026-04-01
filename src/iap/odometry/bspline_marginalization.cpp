@@ -17,6 +17,13 @@ void append_unique_key(std::vector<gtsam::Key>& keys, gtsam::Key key) {
   }
 }
 
+template <typename T>
+void append_unique_value(std::vector<T>& values, const T& value) {
+  if (std::find(values.begin(), values.end(), value) == values.end()) {
+    values.push_back(value);
+  }
+}
+
 std::vector<BSplineControlPointState> prune_buffer_states_copy(
   const std::vector<BSplineControlPointState>& buffer_states,
   double min_stamp) {
@@ -51,6 +58,14 @@ std::vector<BSplineControlPointState> prune_buffer_states_copy(
 
 bool has_index(const std::vector<std::size_t>& indices, std::size_t index) {
   return std::find(indices.begin(), indices.end(), index) != indices.end();
+}
+
+std::vector<std::size_t> segment_reference_indices(const BSplineMarginalizationSegmentState& segment) {
+  if (!segment.active_control_indices.empty()) {
+    return segment.active_control_indices;
+  }
+
+  return std::vector<std::size_t>(segment.control_indices.begin(), segment.control_indices.end());
 }
 
 void insert_bspline_value(gtsam::Values& dst, const gtsam::Values& src, gtsam::Key key) {
@@ -123,6 +138,23 @@ gtsam::Key bspline_gravity_key() {
 }
 
 }  // namespace
+
+std::vector<gtsam::Key> SplineActiveStateSet::active_keys() const {
+  std::vector<gtsam::Key> keys = active_pose_keys;
+  for (const auto key : active_aux_keys) {
+    append_unique_key(keys, key);
+  }
+  return keys;
+}
+
+bool SplineActiveStateSet::contains_active_key(gtsam::Key key) const {
+  return std::find(active_pose_keys.begin(), active_pose_keys.end(), key) != active_pose_keys.end() ||
+    std::find(active_aux_keys.begin(), active_aux_keys.end(), key) != active_aux_keys.end();
+}
+
+bool SplineActiveStateSet::contains_removed_key(gtsam::Key key) const {
+  return std::find(removable_keys.begin(), removable_keys.end(), key) != removable_keys.end();
+}
 
 bool BSplineMarginalizationPartition::FactorOwnershipInfo::is_survivor_only() const {
   return ownership == FactorOwnership::SurvivorOnly;
@@ -197,21 +229,21 @@ gtsam::NonlinearFactorGraph BSplineCarriedPrior::replay() const {
   return gtsam::LinearContainerFactor::ConvertLinearGraph(linear_graph, linearization_point);
 }
 
-BSplineMarginalizationPartition build_bspline_marginalization_partition(
+SplineActiveStateSet build_spline_active_state_set(
   const std::vector<BSplineControlPointState>& buffer_states,
   const std::vector<BSplineMarginalizationSegmentState>& segment_states,
   const gtsam::Values& values,
   double min_active_stamp,
   bool include_clock) {
-  BSplineMarginalizationPartition partition;
-  partition.min_active_stamp = min_active_stamp;
+  SplineActiveStateSet active_state_set;
+  active_state_set.min_active_stamp = min_active_stamp;
 
   const auto kept_states = prune_buffer_states_copy(buffer_states, min_active_stamp);
-  partition.survivor_control_indices.reserve(kept_states.size());
+  active_state_set.active_control_indices.reserve(kept_states.size());
   for (const auto& state : kept_states) {
-    partition.survivor_control_indices.push_back(state.index);
+    append_unique_value(active_state_set.active_control_indices, state.index);
     if (values.exists(bspline_control_point_key(state.index))) {
-      append_unique_key(partition.survivor_keys, bspline_control_point_key(state.index));
+      append_unique_key(active_state_set.active_pose_keys, bspline_control_point_key(state.index));
     }
   }
 
@@ -220,27 +252,33 @@ BSplineMarginalizationPartition build_bspline_marginalization_partition(
       continue;
     }
 
-    for (const auto control_index : segment.active_control_indices) {
-      if (!has_index(partition.survivor_control_indices, control_index)) {
-        partition.survivor_control_indices.push_back(control_index);
+    for (int span = segment.span_begin_idx; span >= 0 && span <= segment.span_end_idx; ++span) {
+      append_unique_value(active_state_set.active_span_indices, span);
+    }
+
+    for (const auto control_index : segment_reference_indices(segment)) {
+      if (!has_index(active_state_set.active_control_indices, control_index)) {
+        active_state_set.active_control_indices.push_back(control_index);
       }
       if (values.exists(bspline_control_point_key(control_index))) {
-        append_unique_key(partition.survivor_keys, bspline_control_point_key(control_index));
+        append_unique_key(active_state_set.active_pose_keys, bspline_control_point_key(control_index));
       }
     }
 
-    if (!has_index(partition.survivor_auxiliary_indices, segment.auxiliary_index)) {
-      partition.survivor_auxiliary_indices.push_back(segment.auxiliary_index);
+    if (!has_index(active_state_set.active_auxiliary_indices, segment.auxiliary_index)) {
+      active_state_set.active_auxiliary_indices.push_back(segment.auxiliary_index);
     }
+  }
 
-    const gtsam::Key velocity_key = bspline_velocity_key(segment.auxiliary_index);
+  for (const auto aux_index : active_state_set.active_auxiliary_indices) {
+    const gtsam::Key velocity_key = bspline_velocity_key(aux_index);
     if (values.exists(velocity_key)) {
-      append_unique_key(partition.survivor_keys, velocity_key);
+      append_unique_key(active_state_set.active_aux_keys, velocity_key);
     }
 
-    const gtsam::Key clock_key = bspline_clock_key(segment.auxiliary_index);
+    const gtsam::Key clock_key = bspline_clock_key(aux_index);
     if (include_clock && values.exists(clock_key)) {
-      append_unique_key(partition.survivor_keys, clock_key);
+      append_unique_key(active_state_set.active_aux_keys, clock_key);
     }
   }
 
@@ -253,42 +291,75 @@ BSplineMarginalizationPartition build_bspline_marginalization_partition(
   };
   for (const auto key : persistent_keys) {
     if (values.exists(key)) {
-      append_unique_key(partition.survivor_keys, key);
+      append_unique_key(active_state_set.active_aux_keys, key);
     }
   }
 
   for (const auto& state : buffer_states) {
-    if (has_index(partition.survivor_control_indices, state.index)) {
+    if (has_index(active_state_set.active_control_indices, state.index)) {
       continue;
     }
-    if (!has_index(partition.removable_control_indices, state.index)) {
-      partition.removable_control_indices.push_back(state.index);
+    if (!has_index(active_state_set.removable_control_indices, state.index)) {
+      active_state_set.removable_control_indices.push_back(state.index);
     }
     if (values.exists(bspline_control_point_key(state.index))) {
-      append_unique_key(partition.removable_keys, bspline_control_point_key(state.index));
+      append_unique_key(active_state_set.removable_keys, bspline_control_point_key(state.index));
     }
   }
 
   for (const auto& segment : segment_states) {
-    if (segment.scan_end >= min_active_stamp || has_index(partition.survivor_auxiliary_indices, segment.auxiliary_index)) {
+    if (segment.scan_end >= min_active_stamp ||
+        has_index(active_state_set.active_auxiliary_indices, segment.auxiliary_index)) {
       continue;
     }
 
-    if (!has_index(partition.removable_auxiliary_indices, segment.auxiliary_index)) {
-      partition.removable_auxiliary_indices.push_back(segment.auxiliary_index);
-    }
-
-    const gtsam::Key velocity_key = bspline_velocity_key(segment.auxiliary_index);
-    if (values.exists(velocity_key)) {
-      append_unique_key(partition.removable_keys, velocity_key);
-    }
-
-    const gtsam::Key clock_key = bspline_clock_key(segment.auxiliary_index);
-    if (include_clock && values.exists(clock_key)) {
-      append_unique_key(partition.removable_keys, clock_key);
+    if (!has_index(active_state_set.removable_auxiliary_indices, segment.auxiliary_index)) {
+      active_state_set.removable_auxiliary_indices.push_back(segment.auxiliary_index);
     }
   }
 
+  for (const auto aux_index : active_state_set.removable_auxiliary_indices) {
+    const gtsam::Key velocity_key = bspline_velocity_key(aux_index);
+    if (values.exists(velocity_key)) {
+      append_unique_key(active_state_set.removable_keys, velocity_key);
+    }
+
+    const gtsam::Key clock_key = bspline_clock_key(aux_index);
+    if (include_clock && values.exists(clock_key)) {
+      append_unique_key(active_state_set.removable_keys, clock_key);
+    }
+  }
+
+  return active_state_set;
+}
+
+BSplineMarginalizationPartition build_bspline_marginalization_partition(
+  const SplineActiveStateSet& active_state_set) {
+  BSplineMarginalizationPartition partition;
+  partition.min_active_stamp = active_state_set.min_active_stamp;
+  partition.active_state_set = active_state_set;
+  partition.survivor_control_indices = active_state_set.active_control_indices;
+  partition.removable_control_indices = active_state_set.removable_control_indices;
+  partition.survivor_auxiliary_indices = active_state_set.active_auxiliary_indices;
+  partition.removable_auxiliary_indices = active_state_set.removable_auxiliary_indices;
+  partition.survivor_keys = active_state_set.active_keys();
+  partition.removable_keys = active_state_set.removable_keys;
+  return partition;
+}
+
+BSplineMarginalizationPartition build_bspline_marginalization_partition(
+  const std::vector<BSplineControlPointState>& buffer_states,
+  const std::vector<BSplineMarginalizationSegmentState>& segment_states,
+  const gtsam::Values& values,
+  double min_active_stamp,
+  bool include_clock) {
+  const auto active_state_set = build_spline_active_state_set(
+    buffer_states,
+    segment_states,
+    values,
+    min_active_stamp,
+    include_clock);
+  auto partition = build_bspline_marginalization_partition(active_state_set);
   return partition;
 }
 

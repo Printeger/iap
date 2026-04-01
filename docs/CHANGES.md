@@ -3,6 +3,10 @@
 > 规则：任何代码改动必须在这里记录，并包含 IAP-RQ-XXX。
 
 ## Unreleased
+- feat(dev-ct-active-state-marginalization): IAP-RQ-020 / IAP-RQ-300 / IAP-RQ-410 — rewrite fixed-lag marginalization around active spans / active keys instead of legacy segment ownership.
+  - Added `SplineActiveStateSet` plus registry-side `active_span_indices(...)`, `active_control_references(...)`, and `active_state_set(...)` queries, so the fixed-lag window can now explain which spans and control points remain live before deciding the drop set.
+  - `OdometryEstimationBSpline` now seeds active auxiliary states first, builds `SplineActiveStateSet` as the primary marginalization input, and classifies CPU LiDAR bucket / IMU / GNSS factors against their actual support pose keys instead of the legacy `segment.control_indices` shortcut.
+  - Active-window pruning now retains control-buffer states and auxiliary values through `prune_to_active_state_set(...)`, preventing multi-span bucket/support references from dropping still-live control points while keeping the carried-prior pipeline unchanged.
 - feat(dev-ct-odometry-layout-scheduler): IAP-RQ-300 / IAP-RQ-410 — rewrite the B-spline odometry scheduler around an active explicit-knot layout/evaluator.
   - `OdometryEstimationBSpline` now maintains a unified active-window `SplineStateLayout + SplineEvaluator`, refreshes it during window seed/advance/prune, and registers `Imu / Lidar / Gnss` sensor models on that shared layout instead of rebuilding separate local assembly surfaces as the main path.
   - IMU, GNSS, and CPU LiDAR bucket assembly now all query support directly from that active-window layout (`support_at(sample/epoch/query_time, sensor)`), while `append_active_segment_constraint(...)` also records active span/control coverage from the new scheduler view.

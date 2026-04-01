@@ -181,7 +181,7 @@ class OdometryEstimationBSpline : public OdometryEstimationCPU {
   std::vector<iap::SplineBucketContext> create_segment_lidar_buckets(const ActiveSplineSegmentConstraint& segment) const;
   void sync_gnss_epochs_from_shared_state();
   std::vector<iap::GnssEpoch> consume_segment_gnss_epochs(double segment_start, double segment_end);
-  void prune_active_ct_state(double min_active_stamp);
+  void prune_active_ct_state(double min_active_stamp, const iap::SplineActiveStateSet& active_state_set);
   void update_marginal_prior_from_active_window();
   void update_marginal_prior_information(
     const gtsam::NonlinearFactorGraph& graph,
