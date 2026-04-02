@@ -1,6 +1,8 @@
 #pragma once
 // IAP-RQ-300 / IAP-RQ-410:
 // Minimal CPU continuous-time LiDAR factor over four B-spline pose control points.
+// Mainline use: local CT frontend only.
+// Backend must consume summarized outputs, not raw LiDAR bucket factors.
 
 #include <iap/odometry/bspline_lidar_factor_result.hpp>
 #include <iap/odometry/bspline_control_window.hpp>

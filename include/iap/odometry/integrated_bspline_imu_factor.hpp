@@ -2,6 +2,8 @@
 // IAP-RQ-300 / IAP-RQ-410:
 // Minimal continuous-time IMU sample factor over four B-spline pose control points,
 // shared gyro/accel bias states, and a shared gravity state.
+// Mainline use: local CT frontend only.
+// Backend must consume summarized outputs, not raw IMU sample factors.
 
 #include <iap/odometry/spline_evaluator.hpp>
 

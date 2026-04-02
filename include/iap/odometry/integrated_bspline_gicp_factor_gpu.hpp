@@ -4,6 +4,8 @@
 // control points. Uses GPU VGICP subfactors over time buckets and maps their
 // unary Hessians back to the four control poses. The future kernel-level
 // spline-native backend is intended to live behind a separate runtime switch.
+// Mainline use: local CT frontend only (GPU BUCKET path).
+// Backend must consume summarized outputs, not raw GPU LiDAR bucket factors.
 
 #include <iap/odometry/bspline_control_window.hpp>
 #include <iap/odometry/bspline_lidar_factor_result.hpp>

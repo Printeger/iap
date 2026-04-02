@@ -7,6 +7,13 @@
 - 后续连续时间 SLAM 开发以 [SLAM_FINISH_PLAN.md](/home/dev/code/ws_iap/src/iap/docs/dev_ct/SLAM_FINISH_PLAN.md) 为唯一执行入口。
 - 本文档从现在开始只负责记录“当前状态、刚完成的增量和仍未完成的关键边界”，不再单独维护另一套并行开发计划。
 
+## Hybrid CT target boundary
+
+- Local frontend owns LiDAR registration, IMU sample fitting, local spline control updates, and dense per-bucket factor construction.
+- Compact backend owns GNSS, shared navigation states, mapping/publication handoff, and carried priors over summarized states only.
+- Mainline target: CPU frontend + optional GPU BUCKET frontend acceleration.
+- Non-mainline target: GPU KERNEL stays experimental and does not define the architecture.
+
 ## 当前结论
 - 已完成 Phase 1A 的“连续时间骨架层”落地。
 - 已完成 Phase 1B 的最小可用版本：
