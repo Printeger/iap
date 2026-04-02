@@ -5,12 +5,19 @@
 
 #include <iap/odometry/ct_local_frontend.hpp>
 
+#include <iap/odometry/integrated_bspline_gicp_factor.hpp>
+#include <iap/odometry/integrated_bspline_imu_factor.hpp>
+
 #include <gtsam/inference/Symbol.h>
+#include <gtsam/nonlinear/NonlinearFactorGraph.h>
+#include <gtsam_points/optimizers/levenberg_marquardt_ext.hpp>
+#include <gtsam_points/types/point_cloud_cpu.hpp>
 
 #include <algorithm>
 #include <array>
 #include <cmath>
 #include <limits>
+#include <numeric>
 
 namespace iap {
 
@@ -120,6 +127,8 @@ std::vector<BSplineControlPointState> make_frontend_controls(
 std::vector<double> make_frontend_knots(double scan_start, double scan_end) {
   const double duration = std::max(kMinFrontendScanDuration, scan_end - scan_start);
   const double knot_end = scan_start + duration;
+  // Clamped cubic B-spline: degree+1 repeated knots at each end.
+  // kBSplineControlPointCount=4 controls → 4+4=8 knots.
   return {
     scan_start,
     scan_start,
@@ -232,15 +241,97 @@ CTLocalFrontendResult CTLocalFrontend::run(const Input& input) const {
 
   seed_frontend_local_values(controls, input.target_frame, &result.local_values);
 
+  // IAP-RQ-300 / IAP-RQ-410: Build factor graph, attach IMU and LiDAR factors, run LM solve.
+  auto layout_ptr = std::make_shared<const SplineStateLayout>(result.layout);
+  gtsam::NonlinearFactorGraph graph;
+
+  // --- IMU factors ---
+  // Attach one IntegratedSplineIMUFactor per IMU sample that falls within the spline domain.
+  for (const auto& imu_sample : input.imu_samples) {
+    const auto support = result.layout.support_at(imu_sample.stamp, SplineSensorId::Imu);
+    if (!support) {
+      continue;
+    }
+
+    SplineStampContext ctx;
+    ctx.support = *support;
+    ctx.sensor_id = SplineSensorId::Imu;
+
+    auto imu_factor = std::make_shared<IntegratedSplineIMUFactor>(
+      ctx,
+      gtsam::symbol('j', 0),  // gyro_bias_key
+      gtsam::symbol('k', 0),  // accel_bias_key
+      gtsam::symbol('g', 0),  // gravity_key
+      imu_sample.angular_vel,
+      imu_sample.linear_acc,
+      input.accelerometer_precision,
+      input.gyroscope_precision,
+      layout_ptr);
+    graph.add(imu_factor);
+  }
+
+  // --- LiDAR GICP factors (CPU only) ---
+  // For each source frame, build a PointCloudCPU and attach one IntegratedSplineGICPFactor.
+  // Gracefully skip if target_ivox is null.
+  std::size_t actual_lidar_factor_count = 0;
+  if (input.target_ivox) {
+    for (const auto& source_frame : input.source_frames) {
+      if (!source_frame || source_frame->points.empty()) {
+        continue;
+      }
+
+      // Build a minimal CPU point cloud from raw points and per-point times.
+      auto source_cloud = std::make_shared<gtsam_points::PointCloudCPU>(source_frame->points);
+      if (!source_frame->times.empty()) {
+        source_cloud->add_times(source_frame->times);
+      }
+
+      // Use the frame stamp as the query time for the support.
+      const double query_stamp = source_frame->stamp;
+      const auto support = result.layout.support_at(query_stamp, SplineSensorId::Lidar);
+      if (!support) {
+        continue;
+      }
+
+      SplineBucketContext ctx;
+      ctx.support = *support;
+      ctx.sensor_id = SplineSensorId::Lidar;
+      ctx.point_indices.resize(static_cast<std::size_t>(source_cloud->size()));
+      std::iota(ctx.point_indices.begin(), ctx.point_indices.end(), 0);
+
+      auto lidar_factor = std::make_shared<IntegratedSplineGICPFactor>(ctx, input.target_ivox, source_cloud);
+      lidar_factor->set_max_correspondence_distance(input.max_correspondence_distance);
+      graph.add(lidar_factor);
+      ++actual_lidar_factor_count;
+    }
+  }
+
+  // --- LM solve ---
+  // Run only when the graph has at least one factor; keep seeded values on failure.
+  if (!graph.empty()) {
+    gtsam_points::LevenbergMarquardtExtParams lm_params;
+    lm_params.setlambdaInitial(1e-4);
+    lm_params.setAbsoluteErrorTol(1e-2);
+    lm_params.setMaxIterations(input.lm_max_iterations);
+
+    try {
+      result.local_values =
+        gtsam_points::LevenbergMarquardtOptimizerExt(graph, result.local_values, lm_params).optimize();
+    } catch (const std::exception&) {
+      // Keep seeded values on solver failure.
+    }
+  }
+
   const auto active_supports = result.layout.supports_in_range(scan_start, scan_end, SplineSensorId::Lidar);
   result.backend_summary.active_pose_keys = collect_active_pose_keys(active_supports);
   result.backend_summary.active_control_indices = collect_active_control_indices(result.layout, active_supports);
   result.backend_summary.pose_key_count = result.backend_summary.active_pose_keys.size();
-  result.backend_summary.lidar_factor_count = count_lidar_buckets(input.source_frames);
+  result.backend_summary.lidar_factor_count = actual_lidar_factor_count;
   result.backend_summary.has_velocity_state = result.local_values.exists(bspline_velocity_key(controls.back().index));
   result.backend_summary.has_bias_state =
     result.local_values.exists(gtsam::symbol('j', 0)) &&
-    result.local_values.exists(gtsam::symbol('k', 0));
+    result.local_values.exists(gtsam::symbol('k', 0)) &&
+    result.local_values.exists(gtsam::symbol('g', 0));
 
   return result;
 }

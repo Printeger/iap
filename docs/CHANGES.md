@@ -3,12 +3,18 @@
 > 规则：任何代码改动必须在这里记录，并包含 IAP-RQ-XXX。
 
 ## Unreleased
-- feat(ct-compact-backend-gnss-update): IAP-RQ-300 / IAP-RQ-410 — implement CTCompactBackend::update() with GNSS pseudorange and Doppler factor assembly.
-  - Added `Input` struct to `CTCompactBackend` carrying GNSS epochs, ECEF anchor state, and noise parameters.
-  - Implemented `update()` which assembles `IntegratedSplinePseudorangeFactor` and `IntegratedSplineDopplerFactor` into the provided graph using the layout from `CTLocalFrontendResult`.
-  - Seeds clock states (`bspline_clock_key`) and ECEF anchor states (`bspline_ecef_origin_key`, `bspline_ecef_rot_key`) into values.
-  - `debug_stats()` now returns the actual `gnss_factor_count` from the last `update()` call; `raw_lidar_factor_count` stays 0 always.
-  - Extended `test_ct_compact_backend.cpp` with 3 new tests: `UpdateWithNoGnssEpochsDoesNothing`, `UpdateWithGnssEpochsAddsFactors`, `UpdateNeverAddsRawLidarFactors`.
+- fix(ct-local-frontend-quality): IAP-RQ-300 / IAP-RQ-410 — fix code quality issues in CTLocalFrontend.
+  - CRITICAL-1: `has_bias_state` now also checks gravity key `gtsam::symbol('g', 0)`.
+  - CRITICAL-2: `lidar_factor_count` now counts only factors actually added to the graph (tracked via `actual_lidar_factor_count` inside the LiDAR loop), not the pre-loop bucket estimate.
+  - IMPORTANT-3: Added comment to `make_frontend_knots` explaining the 8-element clamped cubic B-spline knot vector.
+  - IMPORTANT-4: Strengthened `ImuSamplesChangesValues` test threshold from `> 0.0` to `> 1e-9`.
+  - IMPORTANT-2: Verified `imu_sensor_model_from_target` `.inverse()` is correct — reference uses `T_imu_lidar = T_lidar_imu.inverse()` for `T_sensor_imu`; no change needed.
+- feat(ct-local-frontend-real-solve): IAP-RQ-300 / IAP-RQ-410 — attach IMU/LiDAR factors and run LM solve in CTLocalFrontend.
+  - Extended `CTLocalFrontend::Input` with `imu_samples`, `target_ivox`, `lm_max_iterations`, `accelerometer_precision`, `gyroscope_precision`, `max_correspondence_distance`.
+  - Added `CTLocalFrontend::IMUSample` nested struct (stamp, angular_vel, linear_acc).
+  - `CTLocalFrontend::run()` now builds a `NonlinearFactorGraph`, attaches `IntegratedSplineIMUFactor` per IMU sample and `IntegratedSplineGICPFactor` per source frame (CPU only), then solves with `LevenbergMarquardtOptimizerExt`.
+  - Gracefully skips LiDAR factors when `target_ivox` is null; keeps seeded values on solver exception.
+  - Extended `test_ct_local_frontend.cpp` with two new tests: `ImuSamplesChangesValues` and `NullTargetIvoxSkipsLidarFactors`.
 - docs(dev-ct-hybrid-runtime-validation): IAP-RQ-300 / IAP-RQ-410 — document hybrid CT runtime validation modes and fix config for CPU mainline.
   - Set `frontend_mode=CT_LIDAR_CPU` and `ct_lidar_gpu_backend=BUCKET` as the default validated config (was GPU+KERNEL experimental).
   - Added Task 7 validation commands with explicit `source` + `ros2 launch` steps for CPU, GPU BUCKET, and GPU KERNEL modes.
