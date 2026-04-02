@@ -16,6 +16,8 @@
 #include <iap/odometry/bspline_fixed_lag_registry.hpp>
 #include <iap/odometry/bspline_marginalization.hpp>
 #include <iap/odometry/bspline_trajectory.hpp>
+#include <iap/odometry/ct_compact_backend.hpp>
+#include <iap/odometry/ct_local_frontend.hpp>
 #include <iap/gnss/gnss_epoch_builder.hpp>
 #include <iap/gnss/gnss_handler.hpp>
 #include <iap/odometry/integrated_bspline_gicp_factor.hpp>
@@ -235,6 +237,10 @@ class OdometryEstimationBSpline : public OdometryEstimationCPU {
     int current_factor_index);
 
   iap::BSplineTrajectory::Params trajectory_params_;
+  // Planned hybrid split: orchestrator bridges CTLocalFrontend and CTCompactBackend.
+  // Task 5 wires these as members; Task 6+ migrates real factor assembly behind them.
+  iap::CTLocalFrontend ct_local_frontend_;
+  iap::CTCompactBackend ct_compact_backend_;
   double compatibility_sample_dt_ = 0.01;
   bool publish_shared_trajectory_ = true;
   bool attach_trajectory_to_frames_ = true;

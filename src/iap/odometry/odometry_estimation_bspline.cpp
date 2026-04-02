@@ -1119,6 +1119,12 @@ std::shared_ptr<iap::IntegratedBSplineGICPFactorGPUKernel> OdometryEstimationBSp
 EstimationFrame::ConstPtr OdometryEstimationBSpline::insert_frame_ct_lidar(
   const PreprocessedFrame::Ptr& raw_frame,
   std::vector<EstimationFrame::ConstPtr>& marginalized_frames) {
+  // Planned hybrid orchestration boundary (Task 5):
+  // Future: auto local_result = ct_local_frontend_.run(make_frontend_input(raw_frame));
+  // Future: ct_compact_backend_.update(local_result, &graph_, &values_);
+  // Future: publish_continuous_trajectory(local_result.layout, local_result.local_values);
+  // Until real factor assembly is migrated behind CTLocalFrontend (Task 6+),
+  // the existing monolithic path below remains the active runtime path.
   using Clock = std::chrono::steady_clock;
   const auto t_window_start = Clock::now();
   const auto elapsed_ms = [](const Clock::time_point& start, const Clock::time_point& end) {
