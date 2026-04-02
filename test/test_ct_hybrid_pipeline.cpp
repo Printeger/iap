@@ -40,3 +40,20 @@ TEST(CTHybridPipeline, FrontendSummaryFlowsToBackendOnly) {
   EXPECT_EQ(stats.raw_lidar_factor_count, 0U);
   EXPECT_EQ(stats.gnss_factor_count, 0U);
 }
+
+TEST(CTHybridPipeline, GnssStaysBackendSideInAllVerifiedModes) {
+  // Mainline verified modes: CT_LIDAR_CPU, CT_LIDAR_GPU + BUCKET.
+  // Experimental mode: CT_LIDAR_GPU + KERNEL.
+  // GNSS remains backend-side in all verified modes.
+  iap::CTBackendSummary summary;
+  summary.pose_key_count = 4;
+  summary.lidar_factor_count = 8;
+
+  iap::CTCompactBackend backend;
+  const auto stats = backend.debug_stats(summary);
+
+  // Frontend summary carries no GNSS — backend owns GNSS factor assembly.
+  EXPECT_EQ(stats.raw_lidar_factor_count, 0U);
+  EXPECT_EQ(stats.gnss_factor_count, 0U);
+  EXPECT_EQ(stats.summary_pose_count, 4U);
+}

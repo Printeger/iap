@@ -3,6 +3,11 @@
 > 规则：任何代码改动必须在这里记录，并包含 IAP-RQ-XXX。
 
 ## Unreleased
+- test(dev-ct-hybrid-arch-regressions): IAP-RQ-300 / IAP-RQ-410 — lock hybrid CT architecture regressions: graph-size control, supported-mode boundary, GNSS backend-side invariant.
+  - `test_ct_hybrid_pipeline`: 4 tests covering staged call order, graph-size regression, summary flow, and GNSS backend-side invariant across all verified modes.
+  - `test_ct_local_frontend`: 2 tests covering compact summary shape and frontend-only LiDAR/IMU ownership.
+  - `test_ct_compact_backend`: 2 tests covering backend raw-LiDAR exclusion and GNSS-only factor ownership.
+  - Updated `docs/dev_ct/dev_status.md` with verified modes and regression lock note.
 - plan(dev-ct-hybrid-architecture): IAP-RQ-300 / IAP-RQ-410 — define the hybrid migration boundary: C-LIUO-style local CT frontend, GLIM-style compact backend handoff, IAP GNSS/integrity retained.
 - chore(dev-ct-local-artifact-ignore): IAP-RQ-300 / IAP-RQ-410 — ignore local Claude/worktree planning artifacts so the spline-native mainline repo status stays clean.
   - Added `.worktrees/`, `docs/ct-iap_spec.md`, and `docs/superpowers/` to `.gitignore` as local-only artifacts outside the maintained source baseline.

@@ -14,6 +14,13 @@
 - Mainline target: CPU frontend + optional GPU BUCKET frontend acceleration.
 - Non-mainline target: GPU KERNEL stays experimental and does not define the architecture.
 
+## Hybrid CT verified modes
+
+- Mainline verified modes: `CT_LIDAR_CPU`, `CT_LIDAR_GPU + BUCKET`.
+- Experimental mode: `CT_LIDAR_GPU + KERNEL`.
+- GNSS remains backend-side in all verified modes.
+- Architecture regressions locked in: `test_ct_local_frontend`, `test_ct_compact_backend`, `test_ct_hybrid_pipeline`.
+
 ## 当前结论
 - 已完成 Phase 1A 的“连续时间骨架层”落地。
 - 已完成 Phase 1B 的最小可用版本：
