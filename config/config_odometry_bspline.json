@@ -19,6 +19,16 @@
     //   fixed 4-control-point local spline window toward an explicit knot
     //   vector plus unified spline evaluator. This commit does not change
     //   math behavior or residual models; it only freezes the migration order.
+    //
+    // Task 7 runtime validation modes (set frontend_mode + ct_lidar_gpu_backend accordingly):
+    //   Step 1 — CPU mainline:   frontend_mode=CT_LIDAR_CPU
+    //                            launch: ros2 launch iap iap_rosnode.launch.py mode:=bag compute_mode:=cpu
+    //   Step 2 — GPU BUCKET:     frontend_mode=CT_LIDAR_GPU, ct_lidar_gpu_backend=BUCKET
+    //                            launch: ros2 launch iap iap_rosnode.launch.py mode:=bag compute_mode:=gpu
+    //   Step 3 — GPU KERNEL:     frontend_mode=CT_LIDAR_GPU, ct_lidar_gpu_backend=KERNEL (experimental)
+    //                            launch: ros2 launch iap iap_rosnode.launch.py mode:=bag compute_mode:=gpu
+    // NOTE: compute_mode in the launch file only switches sub_mapping/global_mapping configs.
+    //       The odometry frontend_mode must be set here directly.
     "frontend_mode": "CT_LIDAR_CPU",
     // GPU backend for CT_LIDAR_GPU:
     //   CPU path is the refactor mainline.
@@ -100,16 +110,16 @@
     // <= 0 keeps purely soft robust weighting.
     "ct_lidar_robust_weight_floor": 0.0,
     // Engineering hooks for LiDAR factor validation / profiling.
-    "ct_lidar_profile_factor": true,
+    "ct_lidar_profile_factor": false,
     "ct_lidar_validate_linearization": false,
-    "ct_lidar_profile_numeric_reference": true,
+    "ct_lidar_profile_numeric_reference": false,
     // Window-level wall-clock profiling for the continuous-time BSpline frontend.
     // Logs source/target preparation, IMU/GNSS factor assembly, LM optimize,
     // and carried-prior / marginalization timing.
-    "ct_profile_pipeline": true,
+    "ct_profile_pipeline": false,
     // Export one active-window summary row plus one row per CT LiDAR factor.
     // This is the baseline surface used for future GPU kernel-level A/B profiling.
-    "ct_lidar_export_baseline_csv": true,
+    "ct_lidar_export_baseline_csv": false,
     "ct_lidar_baseline_csv_path": "/tmp/iap_ct_lidar_baseline.csv",
     "ct_lidar_linearization_check_scale": 1e-4,
     "ct_lidar_linearization_warn_ratio": 0.25,

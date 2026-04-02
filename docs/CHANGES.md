@@ -3,6 +3,11 @@
 > 规则：任何代码改动必须在这里记录，并包含 IAP-RQ-XXX。
 
 ## Unreleased
+- docs(dev-ct-hybrid-runtime-validation): IAP-RQ-300 / IAP-RQ-410 — document hybrid CT runtime validation modes and fix config for CPU mainline.
+  - Set `frontend_mode=CT_LIDAR_CPU` and `ct_lidar_gpu_backend=BUCKET` as the default validated config (was GPU+KERNEL experimental).
+  - Added Task 7 validation commands with explicit `source` + `ros2 launch` steps for CPU, GPU BUCKET, and GPU KERNEL modes.
+  - Added note that `compute_mode` in the launch file only switches sub_mapping/global_mapping; odometry `frontend_mode` must be set in `config_odometry_bspline.json` directly.
+  - Added `## Hybrid CT validation notes` section to README.md.
 - test(dev-ct-hybrid-arch-regressions): IAP-RQ-300 / IAP-RQ-410 — lock hybrid CT architecture regressions: graph-size control, supported-mode boundary, GNSS backend-side invariant.
   - `test_ct_hybrid_pipeline`: 4 tests covering staged call order, graph-size regression, summary flow, and GNSS backend-side invariant across all verified modes.
   - `test_ct_local_frontend`: 2 tests covering compact summary shape and frontend-only LiDAR/IMU ownership.
