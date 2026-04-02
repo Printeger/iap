@@ -1,6 +1,8 @@
 #pragma once
 // IAP-RQ-020 / IAP-RQ-300 / IAP-RQ-410:
 // Continuous-time GNSS factors over the shared B-spline control window.
+// Mainline use: compact backend only.
+// Local frontend must not attach GNSS factors directly into its dense LiDAR graph.
 
 #include <iap/gnss/doppler_factor.hpp>
 #include <iap/gnss/pseudorange_factor.hpp>

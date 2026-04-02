@@ -129,6 +129,7 @@ add_library(iap SHARED
   src/iap/odometry/integrated_bspline_imu_factor.cpp
   src/iap/odometry/integrated_bspline_velocity_factor.cpp
   src/iap/odometry/ct_local_frontend.cpp
+  src/iap/odometry/ct_compact_backend.cpp
   src/iap/odometry/loose_initial_state_estimation.cpp
   src/iap/odometry/odometry_estimation_base.cpp
   src/iap/odometry/async_odometry_estimation.cpp
@@ -446,6 +447,8 @@ if(DEFINED ENV{ROS_VERSION})
       target_link_libraries(test_bspline_spline_query iap)
       ament_add_gtest(test_ct_local_frontend test/test_ct_local_frontend.cpp)
       target_link_libraries(test_ct_local_frontend iap)
+      ament_add_gtest(test_ct_compact_backend test/test_ct_compact_backend.cpp)
+      target_link_libraries(test_ct_compact_backend iap)
     endif()
     ament_export_include_directories(include ${EIGEN3_INCLUDE_DIR} ${OpenCV_INCLUDE_DIRS})
     ament_export_libraries(${iap_LIBRARIES} ${GTSAM_LIBRARIES} fmt spdlog::spdlog)
