@@ -3,6 +3,12 @@
 > 规则：任何代码改动必须在这里记录，并包含 IAP-RQ-XXX。
 
 ## Unreleased
+- feat(ct-compact-backend-gnss-update): IAP-RQ-300 / IAP-RQ-410 — implement CTCompactBackend::update() with GNSS pseudorange and Doppler factor assembly.
+  - Added `Input` struct to `CTCompactBackend` carrying GNSS epochs, ECEF anchor state, and noise parameters.
+  - Implemented `update()` which assembles `IntegratedSplinePseudorangeFactor` and `IntegratedSplineDopplerFactor` into the provided graph using the layout from `CTLocalFrontendResult`.
+  - Seeds clock states (`bspline_clock_key`) and ECEF anchor states (`bspline_ecef_origin_key`, `bspline_ecef_rot_key`) into values.
+  - `debug_stats()` now returns the actual `gnss_factor_count` from the last `update()` call; `raw_lidar_factor_count` stays 0 always.
+  - Extended `test_ct_compact_backend.cpp` with 3 new tests: `UpdateWithNoGnssEpochsDoesNothing`, `UpdateWithGnssEpochsAddsFactors`, `UpdateNeverAddsRawLidarFactors`.
 - docs(dev-ct-hybrid-runtime-validation): IAP-RQ-300 / IAP-RQ-410 — document hybrid CT runtime validation modes and fix config for CPU mainline.
   - Set `frontend_mode=CT_LIDAR_CPU` and `ct_lidar_gpu_backend=BUCKET` as the default validated config (was GPU+KERNEL experimental).
   - Added Task 7 validation commands with explicit `source` + `ros2 launch` steps for CPU, GPU BUCKET, and GPU KERNEL modes.
