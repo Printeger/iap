@@ -3,6 +3,11 @@
 > 规则：任何代码改动必须在这里记录，并包含 IAP-RQ-XXX。
 
 ## Unreleased
+- test(ct-arch-regressions): IAP-RQ-300 / IAP-RQ-410 — strengthen hybrid CT architecture regressions with real graph-size, GNSS-boundary, and supported-mode behavioral tests.
+  - Replaced `GnssStaysBackendSideInAllVerifiedModes` with `GnssFactorsNeverInFrontendGraph`: now builds a real frontend run, verifies the frontend API has no GNSS field (architectural enforcement), feeds GNSS to the backend, and asserts 2 factors (PR + Doppler) appear in the backend graph while the frontend summary carries no GNSS count.
+  - Replaced `BackendGraphStaysSmallerThanFrontendAssembly` (hardcoded literals) with `BackendGraphSmallerThanRealFrontendAssembly`: builds a real frontend with 5 IMU samples, proves frontend assembled factors via `has_bias_state == true` and `has_velocity_state == true`, then asserts the backend graph is empty (no GNSS anchor) while the frontend did real work.
+  - Added `AllVerifiedModesProduceValidBackendHandoff`: exercises the CT_LIDAR_CPU, CT_LIDAR_GPU+BUCKET, and CT_LIDAR_GPU+KERNEL (experimental) API boundary — all three produce a valid layout and backend handoff without throwing.
+  - Tests 1, 2, 5, 6 (CTHybridPipeline suite) are unchanged.
 - fix(ct-local-frontend-quality): IAP-RQ-300 / IAP-RQ-410 — fix code quality issues in CTLocalFrontend.
   - CRITICAL-1: `has_bias_state` now also checks gravity key `gtsam::symbol('g', 0)`.
   - CRITICAL-2: `lidar_factor_count` now counts only factors actually added to the graph (tracked via `actual_lidar_factor_count` inside the LiDAR loop), not the pre-loop bucket estimate.
