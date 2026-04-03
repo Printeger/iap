@@ -20,6 +20,10 @@
 - Experimental mode: `CT_LIDAR_GPU + KERNEL`.
 - GNSS remains backend-side in all verified modes.
 - Architecture regressions locked in: `test_ct_local_frontend`, `test_ct_compact_backend`, `test_ct_hybrid_pipeline`.
+- Behavioral regressions (Task 6) added to `test_ct_hybrid_pipeline`:
+  - `GnssFactorsNeverInFrontendGraph`: verifies GNSS API boundary — frontend Input has no GNSS field, backend graph gets PR+Doppler factors.
+  - `BackendGraphSmallerThanRealFrontendAssembly`: verifies real graph-size regression — frontend assembles IMU factors (has_bias_state/has_velocity_state), backend graph stays empty without GNSS anchor.
+  - `AllVerifiedModesProduceValidBackendHandoff`: verifies CT_LIDAR_CPU, CT_LIDAR_GPU+BUCKET, CT_LIDAR_GPU+KERNEL (experimental) all produce valid layout and backend handoff.
 
 ## 当前结论
 - 已完成 Phase 1A 的“连续时间骨架层”落地。
