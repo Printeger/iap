@@ -12,12 +12,15 @@
 #include <algorithm>
 #include <cerrno>
 #include <chrono>
+#include <cstdio>
 #include <cstdint>
 #include <cmath>
 #include <cstring>
 #include <filesystem>
 #include <functional>
+#include <iomanip>
 #include <numeric>
+#include <sstream>
 #include <gtsam/inference/Symbol.h>
 #include <gtsam/slam/BetweenFactor.h>
 #include <gtsam/slam/PriorFactor.h>
@@ -116,6 +119,259 @@ const char* to_string(iap::CTLocalFrontend::LidarBucketMode mode) {
       return "single_bucket";
   }
   return "unknown";
+}
+
+const char* frontend_frame_profile_csv_header() {
+  return "frame_id,stamp,frontend_mode,frontend_only_mode,bucket_mode,actual_bucket_count,total_source_points,"
+         "preprocess_ms,target_map_prep_ms,warning_count_for_frame,bucket_build_ms,lidar_factor_build_ms,"
+         "imu_factor_build_ms,lm_solve_ms,marginalization_ms,backend_update_ms,backend_optimize_ms,publish_ms,"
+         "local_mapping_update_ms,global_mapping_update_ms,submap_registration_ms,active_control_point_count,"
+         "active_pose_key_count,local_state_dimension,imu_sample_count,imu_factor_count,imu_residual_count,"
+         "lidar_factor_count,lidar_residual_count,gnss_factor_count,local_residual_count,carried_prior_count,"
+         "backend_factor_count,backend_state_count,lm_iteration_count,lm_trace_expected,lm_trace_emitted,"
+         "lm_trace_row_count,lm_initial_cost,lm_final_cost,lm_rejected_step_count,lm_damping_change_count,"
+         "target_snapshot_clone_ms,target_voxel_lookup_prep_ms,target_covariance_prep_ms,"
+         "source_to_target_transform_ms\n";
+}
+
+const char* frontend_lidar_factor_profile_csv_header() {
+  return "frame_id,stamp,source_frame_index,bucket_index,bucket_mode,representative_time,points_in_bucket,"
+         "valid_correspondence_count,match_ratio,inlier_ratio,target_point_count,candidate_evaluation_count,"
+         "lookup_or_correspondence_ms,accumulation_ms,factor_total_ms,time_bucket_count,"
+         "mean_time_bucket_population,max_time_bucket_population\n";
+}
+
+const char* frontend_lm_iteration_csv_header() {
+  return "frame_id,stamp,iteration_index,cost_before,cost_after,accepted,lambda_before,lambda_after,linear_solve_ms\n";
+}
+
+const char* frame_warning_profile_csv_header() {
+  return "frame_id,stamp,warning_count,warning_categories,top_warning_message\n";
+}
+
+std::string csv_escape(const std::string& value) {
+  if (value.find_first_of(",\"\n\r") == std::string::npos) {
+    return value;
+  }
+
+  std::string escaped;
+  escaped.reserve(value.size() + 2);
+  escaped.push_back('"');
+  for (const char ch : value) {
+    if (ch == '"') {
+      escaped.push_back('"');
+    }
+    escaped.push_back(ch);
+  }
+  escaped.push_back('"');
+  return escaped;
+}
+
+void write_frontend_frame_profile_row(std::FILE* file, const iap::FrontendFrameProfile& profile) {
+  if (!file) {
+    return;
+  }
+
+  std::ostringstream row;
+  row << std::fixed << std::setprecision(9);
+  bool first = true;
+  const auto add = [&](const auto& value) {
+    if (!first) {
+      row << ',';
+    }
+    first = false;
+    row << value;
+  };
+
+  add(profile.frame_id);
+  add(profile.stamp);
+  add(profile.frontend_mode);
+  add(profile.frontend_only_mode ? 1 : 0);
+  add(profile.bucket_mode);
+  add(profile.actual_bucket_count);
+  add(profile.total_source_points);
+  add(profile.preprocess_ms);
+  add(profile.target_map_prep_ms);
+  add(profile.warning_count_for_frame);
+  add(profile.bucket_build_ms);
+  add(profile.lidar_factor_build_ms);
+  add(profile.imu_factor_build_ms);
+  add(profile.lm_solve_ms);
+  add(profile.marginalization_ms);
+  add(profile.backend_update_ms);
+  add(profile.backend_optimize_ms);
+  add(profile.publish_ms);
+  add(profile.local_mapping_update_ms);
+  add(profile.global_mapping_update_ms);
+  add(profile.submap_registration_ms);
+  add(profile.active_control_point_count);
+  add(profile.active_pose_key_count);
+  add(profile.local_state_dimension);
+  add(profile.imu_sample_count);
+  add(profile.imu_factor_count);
+  add(profile.imu_residual_count);
+  add(profile.lidar_factor_count);
+  add(profile.lidar_residual_count);
+  add(profile.gnss_factor_count);
+  add(profile.local_residual_count);
+  add(profile.carried_prior_count);
+  add(profile.backend_factor_count);
+  add(profile.backend_state_count);
+  add(profile.lm_iteration_count);
+  add(profile.lm_trace_expected ? 1 : 0);
+  add(profile.lm_trace_emitted ? 1 : 0);
+  add(profile.lm_trace_row_count);
+  add(profile.lm_initial_cost);
+  add(profile.lm_final_cost);
+  add(profile.lm_rejected_step_count);
+  add(profile.lm_damping_change_count);
+  add(profile.target_snapshot_clone_ms);
+  add(profile.target_voxel_lookup_prep_ms);
+  add(profile.target_covariance_prep_ms);
+  add(profile.source_to_target_transform_ms);
+  row << '\n';
+  std::fputs(row.str().c_str(), file);
+}
+
+void write_frontend_lidar_factor_profile_rows(
+  std::FILE* file,
+  const int frame_id,
+  const double stamp,
+  const std::vector<iap::FrontendBucketProfileRow>& profiles) {
+  if (!file) {
+    return;
+  }
+
+  for (const auto& profile : profiles) {
+    std::ostringstream row;
+    row << std::fixed << std::setprecision(9);
+    bool first = true;
+    const auto add = [&](const auto& value) {
+      if (!first) {
+        row << ',';
+      }
+      first = false;
+      row << value;
+    };
+
+    add(frame_id);
+    add(stamp);
+    add(profile.source_frame_index);
+    add(profile.bucket_index);
+    add(profile.bucket_mode);
+    add(profile.representative_time);
+    add(profile.points_in_bucket);
+    add(profile.valid_correspondence_count);
+    add(profile.match_ratio);
+    add(profile.inlier_ratio);
+    add(profile.target_point_count);
+    add(profile.candidate_evaluation_count);
+    add(profile.lookup_or_correspondence_ms);
+    add(profile.accumulation_ms);
+    add(profile.factor_total_ms);
+    add(profile.time_bucket_count);
+    add(profile.mean_time_bucket_population);
+    add(profile.max_time_bucket_population);
+    row << '\n';
+    std::fputs(row.str().c_str(), file);
+  }
+}
+
+void write_frontend_lm_iteration_rows(
+  std::FILE* file,
+  const int frame_id,
+  const double stamp,
+  const std::vector<iap::FrontendLMIterationProfileRow>& iterations) {
+  if (!file) {
+    return;
+  }
+
+  for (const auto& iteration : iterations) {
+    std::ostringstream row;
+    row << std::fixed << std::setprecision(9);
+    bool first = true;
+    const auto add = [&](const auto& value) {
+      if (!first) {
+        row << ',';
+      }
+      first = false;
+      row << value;
+    };
+
+    add(frame_id);
+    add(stamp);
+    add(iteration.iteration_index);
+    add(iteration.cost_before);
+    add(iteration.cost_after);
+    add(iteration.accepted ? 1 : 0);
+    add(iteration.lambda_before);
+    add(iteration.lambda_after);
+    add(iteration.linear_solve_ms);
+    row << '\n';
+    std::fputs(row.str().c_str(), file);
+  }
+}
+
+void write_frame_warning_profile_row(
+  std::FILE* file,
+  const int frame_id,
+  const double stamp,
+  const std::size_t warning_count,
+  const std::string& warning_categories,
+  const std::string& top_warning_message) {
+  if (!file) {
+    return;
+  }
+
+  std::ostringstream row;
+  row << std::fixed << std::setprecision(9);
+  row << frame_id << ','
+      << stamp << ','
+      << warning_count << ','
+      << csv_escape(warning_categories) << ','
+      << csv_escape(top_warning_message) << '\n';
+  std::fputs(row.str().c_str(), file);
+}
+
+double frontend_frame_wall_ms(const iap::FrontendFrameProfile& profile) {
+  return
+    profile.preprocess_ms +
+    profile.target_map_prep_ms +
+    profile.bucket_build_ms +
+    profile.lidar_factor_build_ms +
+    profile.imu_factor_build_ms +
+    profile.lm_solve_ms +
+    profile.marginalization_ms +
+    profile.backend_update_ms +
+    profile.backend_optimize_ms +
+    profile.publish_ms +
+    profile.local_mapping_update_ms +
+    profile.global_mapping_update_ms +
+    profile.submap_registration_ms;
+}
+
+const char* frontend_frame_top_stage(const iap::FrontendFrameProfile& profile) {
+  const std::array<std::pair<const char*, double>, 13> stages = {{
+    {"preprocess", profile.preprocess_ms},
+    {"target_map_prep", profile.target_map_prep_ms},
+    {"bucket_build", profile.bucket_build_ms},
+    {"lidar_factor_build", profile.lidar_factor_build_ms},
+    {"imu_factor_build", profile.imu_factor_build_ms},
+    {"lm_solve", profile.lm_solve_ms},
+    {"marginalization", profile.marginalization_ms},
+    {"backend_update", profile.backend_update_ms},
+    {"backend_optimize", profile.backend_optimize_ms},
+    {"publish", profile.publish_ms},
+    {"local_mapping_update", profile.local_mapping_update_ms},
+    {"global_mapping_update", profile.global_mapping_update_ms},
+    {"submap_registration", profile.submap_registration_ms},
+  }};
+
+  return std::max_element(
+           stages.begin(),
+           stages.end(),
+           [](const auto& lhs, const auto& rhs) { return lhs.second < rhs.second; })
+    ->first;
 }
 
 iap::IntegratedBSplineGICPFactor::JacobianMode parse_lidar_jacobian_mode(const std::string& mode) {
@@ -324,7 +580,12 @@ OdometryEstimationBSpline::OdometryEstimationBSpline(const OdometryEstimationBSp
     config.param<std::string>("odometry_estimation", "ct_lidar_robust_kernel", "NONE"));
   lidar_robust_kernel_width_ = config.param<double>("odometry_estimation", "ct_lidar_robust_kernel_width", 1.0);
   lidar_robust_weight_floor_ = config.param<double>("odometry_estimation", "ct_lidar_robust_weight_floor", 0.0);
+  frontend_frame_profile_enabled_ = log_config.profiling.frontend_frame;
   lidar_factor_profile_ = log_config.profiling.lidar_factor;
+  frontend_lm_iteration_profile_enabled_ = log_config.profiling.frontend_lm_iteration;
+  frame_warning_profile_enabled_ = log_config.profiling.frame_warning_profile;
+  target_map_prep_breakdown_enabled_ = log_config.profiling.target_map_prep_breakdown;
+  graph_problem_size_enabled_ = log_config.profiling.graph_problem_size;
   lidar_validate_linearization_ = log_config.profiling.linearization_check;
   lidar_profile_numeric_reference_ = log_config.profiling.numeric_reference;
   pipeline_profile_ = iap::resolve_log_value<bool>(
@@ -343,6 +604,14 @@ OdometryEstimationBSpline::OdometryEstimationBSpline(const OdometryEstimationBSp
     config.param<double>("odometry_estimation", "ct_lidar_numeric_reference_scale", 1e-5);
   lidar_baseline_csv_path_ =
     iap::LogPaths::instance().export_path(log_config.export_outputs.baseline_csv_file).string();
+  frontend_frame_profile_csv_path_ =
+    iap::LogPaths::instance().profiling_path(log_config.profiling.frontend_frame_file).string();
+  frontend_lidar_factor_profile_csv_path_ =
+    iap::LogPaths::instance().profiling_path(log_config.profiling.lidar_factor_file).string();
+  frontend_lm_iteration_csv_path_ =
+    iap::LogPaths::instance().profiling_path(log_config.profiling.frontend_lm_iteration_file).string();
+  frame_warning_profile_csv_path_ =
+    iap::LogPaths::instance().profiling_path(log_config.profiling.frame_warning_profile_file).string();
   lidar_degeneracy_thresholds_.min_match_ratio =
     log_config.warnings.lidar_degeneracy.min_match_ratio;
   lidar_degeneracy_thresholds_.min_inlier_ratio =
@@ -411,6 +680,19 @@ OdometryEstimationBSpline::OdometryEstimationBSpline(const OdometryEstimationBSp
     ct_lidar_gpu_stream_buffers_ = std::make_unique<gtsam_points::StreamTempBufferRoundRobin>();
   }
 #endif
+  if (frontend_lm_iteration_profile_enabled_ && !frontend_frame_profile_enabled_) {
+    logger->warn(
+      "frontend LM iteration profiling is enabled while frontend frame profiling is disabled; only '{}' will be emitted",
+      frontend_lm_iteration_csv_path_);
+  }
+  if (target_map_prep_breakdown_enabled_ && !frontend_frame_profile_enabled_) {
+    logger->warn(
+      "target_map_prep_breakdown requires log.profiling.frontend_frame=true; substage telemetry will remain disabled");
+  }
+  if (graph_problem_size_enabled_ && !frontend_frame_profile_enabled_) {
+    logger->warn(
+      "graph_problem_size requires log.profiling.frontend_frame=true; graph telemetry columns will remain disabled");
+  }
   logger->info("odometry_bspline initialized frontend_mode={} frontend_only_mode={} lidar_gpu_backend={} lidar_bucket_mode={} lidar_bucket_time_eps={:.6f} lidar_max_buckets={} lidar_fixed_buckets={} knot_mode={} nominal_dt={:.4f} compatibility_sample_dt={:.4f} lidar_target_mode={} lidar_jacobian_mode={} lidar_k_candidates={} lidar_accept_ratio={:.3f} lidar_score_gap={:.3f} lidar_snapshot_window={} lidar_snapshot_min_frames={} lidar_snapshot_min_points={} lidar_snapshot_max_age={:.3f} lidar_outlier_thresh={:.3f} lidar_robust_kernel={} lidar_robust_width={:.3f} lidar_robust_w_floor={:.3f} lidar_profile={} lidar_validate={} ct_pipeline_profile={} lidar_baseline_csv={} lidar_baseline_path={}",
     frontend_mode_,
     frontend_only_mode_,
@@ -517,13 +799,17 @@ OdometryEstimationBSpline::ActiveSplineTargetReference OdometryEstimationBSpline
     target_ref.mode = BSplineLidarTargetMode::GLOBAL_IVOX_REFERENCE;
     target_ref.point_count = target_ref.target_snapshot->voxel_points().size();
     target_ref.build_ms = std::chrono::duration<double, std::milli>(Clock::now() - t_start).count();
+    target_ref.target_voxel_lookup_prep_ms = target_ref.build_ms;
     return target_ref;
   }
 
+  const auto t_snapshot_setup_start = Clock::now();
   auto snapshot = std::make_shared<gtsam_points::iVox>(cpu_params->ivox_resolution);
   snapshot->voxel_insertion_setting().set_min_dist_in_cell(cpu_params->ivox_min_dist);
   snapshot->set_lru_horizon(cpu_params->lru_thresh);
   snapshot->set_neighbor_voxel_mode(1);
+  target_ref.target_voxel_lookup_prep_ms +=
+    std::chrono::duration<double, std::milli>(Clock::now() - t_snapshot_setup_start).count();
 
   std::vector<EstimationFrame::ConstPtr> active_frames(frames.inner_begin(), frames.inner_end());
   std::size_t first_frame_index = 0;
@@ -545,13 +831,22 @@ OdometryEstimationBSpline::ActiveSplineTargetReference OdometryEstimationBSpline
       }
     }
 
+    const auto t_clone_start = Clock::now();
     auto transformed = gtsam_points::PointCloudCPU::clone(*active_frames[i]->frame);
+    target_ref.target_snapshot_clone_ms +=
+      std::chrono::duration<double, std::milli>(Clock::now() - t_clone_start).count();
+    const auto t_transform_start = Clock::now();
     for (int j = 0; j < transformed->size(); ++j) {
       transformed->points[j] = active_frames[i]->T_world_lidar * active_frames[i]->frame->points[j];
       transformed->covs[j] =
         active_frames[i]->T_world_lidar.matrix() * active_frames[i]->frame->covs[j] * active_frames[i]->T_world_lidar.matrix().transpose();
     }
+    target_ref.source_to_target_transform_ms +=
+      std::chrono::duration<double, std::milli>(Clock::now() - t_transform_start).count();
+    const auto t_insert_start = Clock::now();
     snapshot->insert(*transformed);
+    target_ref.target_voxel_lookup_prep_ms +=
+      std::chrono::duration<double, std::milli>(Clock::now() - t_insert_start).count();
     inserted = true;
     if (target_ref.snapshot_frame_count == 0) {
       snapshot_start_stamp = active_frames[i]->stamp;
@@ -1237,6 +1532,30 @@ EstimationFrame::ConstPtr OdometryEstimationBSpline::insert_frame_ct_lidar(
   const auto ct_frontend_input = make_frontend_input(raw_frame, new_frame->frame);
   const auto ct_local_result = ct_local_frontend_.run(ct_frontend_input);
   if (frontend_only_mode_) {
+    iap::FrontendFrameProfile frontend_frame_profile = ct_local_result.processed.frame_profile;
+    frontend_frame_profile.frame_id = new_frame->id;
+    frontend_frame_profile.stamp = raw_frame->stamp;
+    frontend_frame_profile.frontend_mode = frontend_mode_;
+    frontend_frame_profile.frontend_only_mode = true;
+    frontend_frame_profile.preprocess_ms = pipeline_timing.source_cloud_ms;
+    frontend_frame_profile.target_map_prep_ms = ct_frontend_input.target_map_prep_ms;
+    if (frontend_frame_profile_enabled_ && target_map_prep_breakdown_enabled_) {
+      frontend_frame_profile.target_snapshot_clone_ms = ct_frontend_input.target_snapshot_clone_ms;
+      frontend_frame_profile.target_voxel_lookup_prep_ms = ct_frontend_input.target_voxel_lookup_prep_ms;
+      frontend_frame_profile.target_covariance_prep_ms = ct_frontend_input.target_covariance_prep_ms;
+      frontend_frame_profile.source_to_target_transform_ms = ct_frontend_input.source_to_target_transform_ms;
+    }
+    frontend_frame_profile.marginalization_ms = 0.0;
+    frontend_frame_profile.backend_update_ms = 0.0;
+    frontend_frame_profile.backend_optimize_ms = 0.0;
+    frontend_frame_profile.local_mapping_update_ms = 0.0;
+    frontend_frame_profile.global_mapping_update_ms = 0.0;
+    frontend_frame_profile.submap_registration_ms = 0.0;
+    frontend_frame_profile.gnss_factor_count = 0;
+    frontend_frame_profile.carried_prior_count = 0;
+    frontend_frame_profile.backend_factor_count = 0;
+    frontend_frame_profile.backend_state_count = 0;
+
     const auto frontend_layout = std::make_shared<const iap::SplineStateLayout>(ct_local_result.layout);
     auto frontend_evaluator = frontend_layout
       ? std::make_shared<iap::SplineEvaluator>(frontend_layout)
@@ -1312,17 +1631,40 @@ EstimationFrame::ConstPtr OdometryEstimationBSpline::insert_frame_ct_lidar(
     Callbacks::on_new_frame(new_frame);
     insert_target_cloud(new_frame);
     update_frame_history(new_frame, marginalized_frames);
-    publish_continuous_trajectory_from_layout(frontend_layout, ct_local_result.local_values);
-    if (publish_shared_trajectory_) {
-      iap::IapSharedState::instance().clear_bspline_fixed_lag_telemetry();
+    {
+      const auto t_publish_start = Clock::now();
+      publish_continuous_trajectory_from_layout(frontend_layout, ct_local_result.local_values);
+      if (publish_shared_trajectory_) {
+        iap::IapSharedState::instance().clear_bspline_fixed_lag_telemetry();
+      }
+      frontend_frame_profile.publish_ms = elapsed_ms(t_publish_start, Clock::now());
     }
-    log_frontend_only_stats(ct_local_result);
 
     std::vector<EstimationFrame::ConstPtr> active_frames(frames.inner_begin(), frames.inner_end());
     if (!active_frames.empty()) {
       Callbacks::on_update_new_frame(active_frames.back());
       Callbacks::on_update_frames(active_frames);
     }
+
+    const auto frame_warning_profile = build_frame_warning_profile(
+      frontend_frame_profile.frame_id,
+      frontend_frame_profile.stamp,
+      ct_frontend_input,
+      ct_local_result,
+      frontend_frame_profile);
+    frontend_frame_profile.warning_count_for_frame = frame_warning_profile.warning_count;
+
+    maybe_write_frontend_frame_profile(frontend_frame_profile);
+    maybe_write_lidar_factor_profiles(
+      frontend_frame_profile.frame_id,
+      frontend_frame_profile.stamp,
+      ct_local_result.processed.bucket_profiles);
+    maybe_write_frontend_lm_iterations(
+      frontend_frame_profile.frame_id,
+      frontend_frame_profile.stamp,
+      ct_local_result.processed.lm_iterations);
+    maybe_write_frame_warning_profile(frame_warning_profile);
+    log_frontend_only_stats(frontend_frame_profile);
 
     return new_frame;
   }
@@ -2953,14 +3295,195 @@ void OdometryEstimationBSpline::maybe_export_lidar_baseline_csv(
     export_data.summary.total_factor_ms);
 }
 
-void OdometryEstimationBSpline::log_frontend_only_stats(const iap::CTLocalFrontendResult& local_result) const {
+void OdometryEstimationBSpline::maybe_write_frontend_frame_profile(const iap::FrontendFrameProfile& profile) {
+  if (!frontend_frame_profile_enabled_) {
+    return;
+  }
+
+  std::FILE* file = std::fopen(frontend_frame_profile_csv_path_.c_str(), frontend_frame_profile_header_written_ ? "a" : "w");
+  if (!file) {
+    logger->warn(
+      "failed to open frontend frame profile csv path={} errno={} ({})",
+      frontend_frame_profile_csv_path_,
+      errno,
+      std::strerror(errno));
+    return;
+  }
+
+  if (!frontend_frame_profile_header_written_) {
+    std::fputs(frontend_frame_profile_csv_header(), file);
+    frontend_frame_profile_header_written_ = true;
+  }
+
+  write_frontend_frame_profile_row(file, profile);
+  std::fclose(file);
+}
+
+void OdometryEstimationBSpline::maybe_write_lidar_factor_profiles(
+  const int frame_id,
+  const double stamp,
+  const std::vector<iap::FrontendBucketProfileRow>& profiles) {
+  if (!lidar_factor_profile_ || profiles.empty()) {
+    return;
+  }
+
+  std::FILE* file = std::fopen(
+    frontend_lidar_factor_profile_csv_path_.c_str(),
+    frontend_lidar_factor_profile_header_written_ ? "a" : "w");
+  if (!file) {
+    logger->warn(
+      "failed to open frontend lidar factor profile csv path={} errno={} ({})",
+      frontend_lidar_factor_profile_csv_path_,
+      errno,
+      std::strerror(errno));
+    return;
+  }
+
+  if (!frontend_lidar_factor_profile_header_written_) {
+    std::fputs(frontend_lidar_factor_profile_csv_header(), file);
+    frontend_lidar_factor_profile_header_written_ = true;
+  }
+
+  write_frontend_lidar_factor_profile_rows(file, frame_id, stamp, profiles);
+  std::fclose(file);
+}
+
+void OdometryEstimationBSpline::maybe_write_frontend_lm_iterations(
+  const int frame_id,
+  const double stamp,
+  const std::vector<iap::FrontendLMIterationProfileRow>& iterations) {
+  if (!frontend_lm_iteration_profile_enabled_ || iterations.empty()) {
+    return;
+  }
+
+  std::FILE* file = std::fopen(
+    frontend_lm_iteration_csv_path_.c_str(),
+    frontend_lm_iteration_header_written_ ? "a" : "w");
+  if (!file) {
+    logger->warn(
+      "failed to open frontend lm iteration csv path={} errno={} ({})",
+      frontend_lm_iteration_csv_path_,
+      errno,
+      std::strerror(errno));
+    return;
+  }
+
+  if (!frontend_lm_iteration_header_written_) {
+    std::fputs(frontend_lm_iteration_csv_header(), file);
+    frontend_lm_iteration_header_written_ = true;
+  }
+
+  write_frontend_lm_iteration_rows(file, frame_id, stamp, iterations);
+  std::fclose(file);
+}
+
+void OdometryEstimationBSpline::maybe_write_frame_warning_profile(const FrameWarningProfileRow& row) {
+  if (!frame_warning_profile_enabled_) {
+    return;
+  }
+
+  std::FILE* file = std::fopen(
+    frame_warning_profile_csv_path_.c_str(),
+    frame_warning_profile_header_written_ ? "a" : "w");
+  if (!file) {
+    logger->warn(
+      "failed to open frame warning profile csv path={} errno={} ({})",
+      frame_warning_profile_csv_path_,
+      errno,
+      std::strerror(errno));
+    return;
+  }
+
+  if (!frame_warning_profile_header_written_) {
+    std::fputs(frame_warning_profile_csv_header(), file);
+    frame_warning_profile_header_written_ = true;
+  }
+
+  write_frame_warning_profile_row(
+    file,
+    row.frame_id,
+    row.stamp,
+    row.warning_count,
+    row.warning_categories,
+    row.top_warning_message);
+  std::fclose(file);
+}
+
+OdometryEstimationBSpline::FrameWarningProfileRow OdometryEstimationBSpline::build_frame_warning_profile(
+  const int frame_id,
+  const double stamp,
+  const iap::CTLocalFrontend::Input& input,
+  const iap::CTLocalFrontendResult& local_result,
+  const iap::FrontendFrameProfile& profile) const {
+  FrameWarningProfileRow row;
+  row.frame_id = frame_id;
+  row.stamp = stamp;
+
+  std::vector<std::string> categories;
+  std::vector<std::string> messages;
+  const auto add_warning = [&](const std::string& category, const std::string& message) {
+    if (std::find(categories.begin(), categories.end(), category) == categories.end()) {
+      categories.push_back(category);
+    }
+    messages.push_back(message);
+  };
+
+  if (!input.target_ivox || input.target_ivox->voxel_points().empty()) {
+    add_warning("target_map", "target map unavailable for local CT frontend solve");
+  }
+  if (profile.total_source_points == 0) {
+    add_warning("data_gap", "source cloud was empty for local CT frontend solve");
+  }
+  if (profile.imu_sample_count > 0 && profile.imu_residual_count == 0) {
+    add_warning("data_gap", "imu samples were present but no IMU residuals were attached");
+  }
+  if (lidar_warn_degeneracy_ && local_result.processed.lidar_window_summary.valid) {
+    const auto& summary = local_result.processed.lidar_window_summary;
+    if (summary.weighted_match_ratio < lidar_degeneracy_thresholds_.min_match_ratio ||
+        summary.weighted_inlier_ratio < lidar_degeneracy_thresholds_.min_inlier_ratio) {
+      std::ostringstream oss;
+      oss << std::fixed << std::setprecision(3)
+          << "low LiDAR support match_ratio=" << summary.weighted_match_ratio
+          << " inlier_ratio=" << summary.weighted_inlier_ratio;
+      add_warning("degeneracy", oss.str());
+    }
+  }
+  if (profile.lm_trace_expected && !profile.lm_trace_emitted) {
+    add_warning("optimizer", "lm iteration trace was expected but no rows were emitted");
+  } else if (input.lm_max_iterations > 0 && profile.lm_iteration_count >= input.lm_max_iterations) {
+    add_warning("optimizer", "lm solve reached the configured max iteration count");
+  }
+  if (messages.empty() && profile.total_source_points > 0 && profile.actual_bucket_count == 0) {
+    add_warning("other", "no lidar buckets were emitted for a non-empty source cloud");
+  }
+
+  row.warning_count = messages.size();
+  for (std::size_t i = 0; i < categories.size(); ++i) {
+    if (i > 0) {
+      row.warning_categories += ';';
+    }
+    row.warning_categories += categories[i];
+  }
+  row.top_warning_message = messages.empty() ? std::string{} : messages.front();
+  return row;
+}
+
+void OdometryEstimationBSpline::log_frontend_only_stats(const iap::FrontendFrameProfile& profile) const {
+  constexpr double kSlowFrontendFrameThresholdMs = 50.0;
+  const double wall_ms = frontend_frame_wall_ms(profile);
+  if (wall_ms < kSlowFrontendFrameThresholdMs) {
+    return;
+  }
+
   logger->info(
-    "bspline ct frontend-only stats buckets={} local_solve_ms={:.3f} lidar_residuals={} imu_residuals={} active_local_controls={}",
-    local_result.debug_stats.bucket_count,
-    local_result.debug_stats.local_solve_time_ms,
-    local_result.debug_stats.lidar_residual_count,
-    local_result.debug_stats.imu_residual_count,
-    local_result.debug_stats.active_local_controls.size());
+    "frame={} wall_ms={:.3f} top_stage={} buckets={} lidar_factors={} imu_residuals={} lm_iters={}",
+    profile.frame_id,
+    wall_ms,
+    frontend_frame_top_stage(profile),
+    profile.actual_bucket_count,
+    profile.lidar_factor_count,
+    profile.imu_residual_count,
+    profile.lm_iteration_count);
 }
 
 // IAP-RQ-300 / IAP-RQ-410: Build CTLocalFrontend::Input from the current raw frame and frame history.
@@ -2991,11 +3514,20 @@ iap::CTLocalFrontend::Input OdometryEstimationBSpline::make_frontend_input(
     target_ref.target_snapshot && !target_ref.target_snapshot->voxel_points().empty()
       ? target_ref.target_snapshot
       : nullptr;
+  input.target_map_prep_ms = target_ref.build_ms;
+  if (frontend_frame_profile_enabled_ && target_map_prep_breakdown_enabled_) {
+    input.target_snapshot_clone_ms = target_ref.target_snapshot_clone_ms;
+    input.target_voxel_lookup_prep_ms = target_ref.target_voxel_lookup_prep_ms;
+    input.target_covariance_prep_ms = target_ref.target_covariance_prep_ms;
+    input.source_to_target_transform_ms = target_ref.source_to_target_transform_ms;
+  }
   input.bucket_config = lidar_bucket_config_;
   input.lm_max_iterations = lm_max_iterations_;
   input.accelerometer_precision = imu_ct_trans_inf_scale_;
   input.gyroscope_precision = imu_ct_rot_inf_scale_;
   input.max_correspondence_distance = max_correspondence_distance_;
+  input.enable_lm_iteration_trace = frontend_lm_iteration_profile_enabled_;
+  input.enable_graph_problem_size = frontend_frame_profile_enabled_ && graph_problem_size_enabled_;
 
   const auto imu_samples = create_segment_imu_samples(raw_frame);
   input.imu_samples.reserve(imu_samples.size());

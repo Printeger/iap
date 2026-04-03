@@ -200,12 +200,48 @@ LogConfig load_log_config_impl() {
     "global.timing_csv_path",
     "log.profiling.pipeline_file",
     config.profiling.pipeline_file);
+  config.profiling.frontend_frame = resolve_log_value<bool>(
+    nested_param<bool>({"log", "profiling"}, "frontend_frame"),
+    std::nullopt,
+    "",
+    "log.profiling.frontend_frame",
+    config.profiling.frontend_frame);
+  config.profiling.frontend_frame_file = resolve_log_value<std::string>(
+    nested_param<std::string>({"log", "profiling"}, "frontend_frame_file"),
+    std::nullopt,
+    "",
+    "log.profiling.frontend_frame_file",
+    config.profiling.frontend_frame_file);
   config.profiling.lidar_factor = resolve_log_value<bool>(
     nested_param<bool>({"log", "profiling"}, "lidar_factor"),
     bool_param(odom_config, "odometry_estimation", "ct_lidar_profile_factor"),
     "odometry_estimation.ct_lidar_profile_factor",
     "log.profiling.lidar_factor",
     config.profiling.lidar_factor);
+  config.profiling.frontend_lm_iteration = resolve_log_value<bool>(
+    nested_param<bool>({"log", "profiling"}, "frontend_lm_iteration"),
+    std::nullopt,
+    "",
+    "log.profiling.frontend_lm_iteration",
+    config.profiling.frontend_lm_iteration);
+  config.profiling.frame_warning_profile = resolve_log_value<bool>(
+    nested_param<bool>({"log", "profiling"}, "frame_warning_profile"),
+    std::nullopt,
+    "",
+    "log.profiling.frame_warning_profile",
+    config.profiling.frame_warning_profile);
+  config.profiling.target_map_prep_breakdown = resolve_log_value<bool>(
+    nested_param<bool>({"log", "profiling"}, "target_map_prep_breakdown"),
+    std::nullopt,
+    "",
+    "log.profiling.target_map_prep_breakdown",
+    config.profiling.target_map_prep_breakdown);
+  config.profiling.graph_problem_size = resolve_log_value<bool>(
+    nested_param<bool>({"log", "profiling"}, "graph_problem_size"),
+    std::nullopt,
+    "",
+    "log.profiling.graph_problem_size",
+    config.profiling.graph_problem_size);
   config.profiling.numeric_reference = resolve_log_value<bool>(
     nested_param<bool>({"log", "profiling"}, "numeric_reference"),
     bool_param(odom_config, "odometry_estimation", "ct_lidar_profile_numeric_reference"),
@@ -224,6 +260,18 @@ LogConfig load_log_config_impl() {
     "",
     "log.profiling.lidar_factor_file",
     config.profiling.lidar_factor_file);
+  config.profiling.frontend_lm_iteration_file = resolve_log_value<std::string>(
+    nested_param<std::string>({"log", "profiling"}, "frontend_lm_iteration_file"),
+    std::nullopt,
+    "",
+    "log.profiling.frontend_lm_iteration_file",
+    config.profiling.frontend_lm_iteration_file);
+  config.profiling.frame_warning_profile_file = resolve_log_value<std::string>(
+    nested_param<std::string>({"log", "profiling"}, "frame_warning_profile_file"),
+    std::nullopt,
+    "",
+    "log.profiling.frame_warning_profile_file",
+    config.profiling.frame_warning_profile_file);
   config.profiling.numeric_reference_file = resolve_log_value<std::string>(
     nested_param<std::string>({"log", "profiling"}, "numeric_reference_file"),
     std::nullopt,
@@ -414,6 +462,12 @@ LogConfig load_log_config_impl() {
     "",
     "log.metadata.write_build_info",
     config.metadata.write_build_info);
+  config.metadata.write_mode_manifest = resolve_log_value<bool>(
+    nested_param<bool>({"log", "metadata"}, "write_mode_manifest"),
+    std::nullopt,
+    "",
+    "log.metadata.write_mode_manifest",
+    config.metadata.write_mode_manifest);
   config.metadata.config_snapshot_file = resolve_log_value<std::string>(
     nested_param<std::string>({"log", "metadata"}, "config_snapshot_file"),
     std::nullopt,
@@ -438,14 +492,23 @@ LogConfig load_log_config_impl() {
     "",
     "log.metadata.build_info_file",
     config.metadata.build_info_file);
+  config.metadata.mode_manifest_file = resolve_log_value<std::string>(
+    nested_param<std::string>({"log", "metadata"}, "mode_manifest_file"),
+    std::nullopt,
+    "",
+    "log.metadata.mode_manifest_file",
+    config.metadata.mode_manifest_file);
 
   config.profiling.enable = resolve_log_value<bool>(
     nested_param<bool>({"log", "profiling"}, "enable"),
     std::nullopt,
     "",
     "log.profiling.enable",
-    config.profiling.pipeline || config.profiling.lidar_factor ||
-      config.profiling.numeric_reference || config.profiling.linearization_check);
+    config.profiling.pipeline || config.profiling.frontend_frame ||
+      config.profiling.lidar_factor || config.profiling.frontend_lm_iteration ||
+      config.profiling.frame_warning_profile || config.profiling.target_map_prep_breakdown ||
+      config.profiling.graph_problem_size || config.profiling.numeric_reference ||
+      config.profiling.linearization_check);
 
   return config;
 }

@@ -60,13 +60,22 @@ class CTLocalFrontend {
     std::vector<IMUSample> imu_samples;
     // IAP-RQ-300 / IAP-RQ-410: LiDAR registration target (null = skip LiDAR factors).
     std::shared_ptr<const gtsam_points::iVox> target_ivox;
+    double target_map_prep_ms{0.0};
+    double target_snapshot_clone_ms{0.0};
+    double target_voxel_lookup_prep_ms{0.0};
+    double target_covariance_prep_ms{0.0};
+    double source_to_target_transform_ms{0.0};
     BucketConfig bucket_config;
     // Solver parameters.
     int lm_max_iterations{10};
     double accelerometer_precision{1.0};
     double gyroscope_precision{1.0};
     double max_correspondence_distance{1.0};
+    bool enable_lm_iteration_trace{false};
+    bool enable_graph_problem_size{false};
   };
+
+  static const char* bucket_mode_name(LidarBucketMode mode);
 
   static std::vector<SplineBucketContext> create_lidar_buckets(
     const SplineStateLayout& layout,

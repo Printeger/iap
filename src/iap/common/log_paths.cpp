@@ -146,6 +146,27 @@ std::optional<nlohmann::json> try_read_json(const std::filesystem::path& path) {
   return json;
 }
 
+std::optional<glim::Config> load_named_config_if_exists(const std::string& config_name) {
+  const auto path = glim::GlobalConfig::get_config_path(config_name);
+  if (path.empty() || !std::filesystem::exists(path)) {
+    return std::nullopt;
+  }
+  return glim::Config(path);
+}
+
+bool module_list_contains(
+  const std::vector<std::string>& modules,
+  std::initializer_list<const char*> patterns) {
+  for (const auto& module : modules) {
+    for (const char* pattern : patterns) {
+      if (module.find(pattern) != std::string::npos) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
 std::string run_command_capture(const std::string& command) {
   std::array<char, 256> buffer {};
   std::string output;
@@ -284,6 +305,39 @@ void write_metadata_files(const LogPaths& paths, const LogConfig& config) {
     oss << "compiled_at=" << __DATE__ << " " << __TIME__ << "\n";
     oss << "package_root=" << paths.package_root().string() << "\n";
     write_text_file(paths.metadata_path(config.metadata.build_info_file), oss.str());
+  }
+
+  if (config.metadata.write_mode_manifest) {
+    nlohmann::json manifest;
+    const auto odom_config = load_named_config_if_exists("config_odometry");
+    const auto ros_config = load_named_config_if_exists("config_ros");
+
+    const bool frontend_only_expected =
+      odom_config ? odom_config->param<bool>("odometry_estimation", "frontend_only_mode", false) : false;
+    const bool backend_expected_active = !frontend_only_expected;
+
+    const bool enable_local_mapping =
+      ros_config ? ros_config->param<bool>("glim_ros", "enable_local_mapping", true) : false;
+    const bool enable_global_mapping =
+      ros_config ? ros_config->param<bool>("glim_ros", "enable_global_mapping", true) : false;
+    const bool mapping_expected_active = enable_local_mapping || enable_global_mapping;
+
+    const std::vector<std::string> extension_modules =
+      ros_config ? ros_config->param<std::vector<std::string>>("glim_ros", "extension_modules", {}) : std::vector<std::string>{};
+    const bool gnss_expected_active = module_list_contains(extension_modules, {"gnss", "integrity"});
+
+    manifest["frontend_only_expected"] = frontend_only_expected;
+    manifest["frontend_only_observed"] = frontend_only_expected;
+    manifest["backend_expected_active"] = backend_expected_active;
+    manifest["backend_observed_active"] = backend_expected_active;
+    manifest["mapping_expected_active"] = mapping_expected_active;
+    manifest["mapping_observed_active"] = mapping_expected_active;
+    manifest["gnss_expected_active"] = gnss_expected_active;
+    manifest["gnss_observed_active"] = gnss_expected_active;
+    manifest["observation_basis"] = "config";
+    manifest["configured_extension_modules"] = extension_modules;
+
+    write_json_file(paths.metadata_path(config.metadata.mode_manifest_file), manifest);
   }
 }
 

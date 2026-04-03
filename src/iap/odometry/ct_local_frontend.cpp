@@ -31,9 +31,40 @@ using Clock = std::chrono::steady_clock;
 constexpr double kMinFrontendScanDuration = 1e-3;
 constexpr double kDefaultFrontendScanDuration = 0.1;
 
+double elapsed_ms(const Clock::time_point& start, const Clock::time_point& end) {
+  return std::chrono::duration<double, std::milli>(end - start).count();
+}
+
+std::size_t compute_local_state_dimension(const SplineStateLayout& layout, const gtsam::Values& values) {
+  std::size_t dimension = 0;
+  for (const auto& control : layout.controls()) {
+    if (values.exists(bspline_control_point_key(control.index))) {
+      dimension += 6;
+    }
+  }
+  if (!layout.controls().empty() && values.exists(bspline_velocity_key(layout.controls().back().index))) {
+    dimension += 3;
+  }
+  if (values.exists(gtsam::symbol('j', 0))) {
+    dimension += 3;
+  }
+  if (values.exists(gtsam::symbol('k', 0))) {
+    dimension += 3;
+  }
+  if (values.exists(gtsam::symbol('g', 0))) {
+    dimension += 3;
+  }
+  return dimension;
+}
+
 struct BucketAccumulator {
   std::vector<int> point_indices;
   double time_sum = 0.0;
+};
+
+struct PlannedBucketContext {
+  SplineBucketContext context;
+  double representative_time = 0.0;
 };
 
 double source_frame_start(const CTLocalFrontend::SourceFrameInput& source_frame) {
@@ -274,6 +305,76 @@ std::vector<BucketAccumulator> plan_bucket_accumulators(
   return single_bucket_accumulators(source_frame);
 }
 
+const char* bucket_mode_name(CTLocalFrontend::LidarBucketMode mode) {
+  switch (mode) {
+    case CTLocalFrontend::LidarBucketMode::TIME_EPS:
+      return "TIME_EPS";
+    case CTLocalFrontend::LidarBucketMode::FIXED_COUNT:
+      return "FIXED_COUNT";
+    case CTLocalFrontend::LidarBucketMode::SINGLE_BUCKET:
+      return "SINGLE_BUCKET";
+  }
+
+  return "TIME_EPS";
+}
+
+std::vector<PlannedBucketContext> create_profiled_lidar_buckets(
+  const SplineStateLayout& layout,
+  const CTLocalFrontend::SourceFrameInput& source_frame,
+  const CTLocalFrontend::BucketConfig& bucket_config) {
+  std::vector<PlannedBucketContext> bucket_contexts;
+  const std::size_t point_count = source_point_count(source_frame);
+  if (point_count == 0) {
+    return bucket_contexts;
+  }
+
+  const auto accumulators = plan_bucket_accumulators(source_frame, bucket_config);
+  const double scan_start = source_frame_start(source_frame);
+  const double scan_end = std::max(scan_start, source_frame_end(source_frame));
+  const double scan_center = 0.5 * (scan_start + scan_end);
+
+  auto append_bucket = [&](const BucketAccumulator& bucket, CTLocalFrontend::LidarBucketMode bucket_mode) {
+    if (bucket.point_indices.empty()) {
+      return;
+    }
+
+    const double representative_time = bucket_representative_time(bucket, source_frame, bucket_mode);
+    const auto support = layout.support_at(scan_start + representative_time, SplineSensorId::Lidar);
+    if (!support) {
+      return;
+    }
+
+    PlannedBucketContext ctx;
+    ctx.context.support = *support;
+    ctx.context.sensor_id = SplineSensorId::Lidar;
+    ctx.context.point_indices = bucket.point_indices;
+    ctx.representative_time = representative_time;
+    bucket_contexts.push_back(std::move(ctx));
+  };
+
+  for (const auto& bucket : accumulators) {
+    append_bucket(bucket, bucket_config.mode);
+  }
+
+  if (!bucket_contexts.empty()) {
+    return bucket_contexts;
+  }
+
+  const auto fallback_support = layout.support_at(scan_center, SplineSensorId::Lidar);
+  if (!fallback_support) {
+    return bucket_contexts;
+  }
+
+  PlannedBucketContext fallback_ctx;
+  fallback_ctx.context.support = *fallback_support;
+  fallback_ctx.context.sensor_id = SplineSensorId::Lidar;
+  fallback_ctx.context.point_indices.resize(point_count);
+  std::iota(fallback_ctx.context.point_indices.begin(), fallback_ctx.context.point_indices.end(), 0);
+  fallback_ctx.representative_time = std::max(0.0, scan_center - scan_start);
+  bucket_contexts.push_back(std::move(fallback_ctx));
+  return bucket_contexts;
+}
+
 std::vector<BSplineControlPointState> make_frontend_controls(
   double scan_start,
   double scan_end,
@@ -403,57 +504,18 @@ gtsam_points::PointCloud::ConstPtr ensure_source_cloud(const CTLocalFrontend::So
 
 }  // namespace
 
+const char* CTLocalFrontend::bucket_mode_name(LidarBucketMode mode) {
+  return iap::bucket_mode_name(mode);
+}
+
 std::vector<SplineBucketContext> CTLocalFrontend::create_lidar_buckets(
   const SplineStateLayout& layout,
   const SourceFrameInput& source_frame,
   const BucketConfig& bucket_config) {
   std::vector<SplineBucketContext> bucket_contexts;
-  const std::size_t point_count = source_point_count(source_frame);
-  if (point_count == 0) {
-    return bucket_contexts;
+  for (const auto& bucket : create_profiled_lidar_buckets(layout, source_frame, bucket_config)) {
+    bucket_contexts.push_back(bucket.context);
   }
-
-  const auto accumulators = plan_bucket_accumulators(source_frame, bucket_config);
-  const double scan_start = source_frame_start(source_frame);
-  const double scan_center = 0.5 * (scan_start + std::max(scan_start, source_frame_end(source_frame)));
-
-  auto append_bucket = [&](const BucketAccumulator& bucket, LidarBucketMode bucket_mode) {
-    if (bucket.point_indices.empty()) {
-      return;
-    }
-
-    const double representative_time = bucket_representative_time(bucket, source_frame, bucket_mode);
-    const auto support = layout.support_at(scan_start + representative_time, SplineSensorId::Lidar);
-    if (!support) {
-      return;
-    }
-
-    SplineBucketContext ctx;
-    ctx.support = *support;
-    ctx.sensor_id = SplineSensorId::Lidar;
-    ctx.point_indices = bucket.point_indices;
-    bucket_contexts.push_back(std::move(ctx));
-  };
-
-  for (const auto& bucket : accumulators) {
-    append_bucket(bucket, bucket_config.mode);
-  }
-
-  if (!bucket_contexts.empty()) {
-    return bucket_contexts;
-  }
-
-  const auto fallback_support = layout.support_at(scan_center, SplineSensorId::Lidar);
-  if (!fallback_support) {
-    return bucket_contexts;
-  }
-
-  SplineBucketContext fallback_ctx;
-  fallback_ctx.support = *fallback_support;
-  fallback_ctx.sensor_id = SplineSensorId::Lidar;
-  fallback_ctx.point_indices.resize(point_count);
-  std::iota(fallback_ctx.point_indices.begin(), fallback_ctx.point_indices.end(), 0);
-  bucket_contexts.push_back(std::move(fallback_ctx));
   return bucket_contexts;
 }
 
@@ -478,12 +540,21 @@ CTLocalFrontendResult CTLocalFrontend::run(const Input& input) const {
   result.layout.set_sensor_model(SplineSensorId::Lidar, lidar_model);
 
   seed_frontend_local_values(controls, input.target_frame, &result.local_values);
+  result.processed.frame_profile.stamp = scan_start;
+  result.processed.frame_profile.bucket_mode = bucket_mode_name(input.bucket_config.mode);
+  result.processed.frame_profile.imu_sample_count = input.imu_samples.size();
+  result.processed.frame_profile.lm_trace_expected = input.enable_lm_iteration_trace;
+  result.processed.frame_profile.target_snapshot_clone_ms = input.target_snapshot_clone_ms;
+  result.processed.frame_profile.target_voxel_lookup_prep_ms = input.target_voxel_lookup_prep_ms;
+  result.processed.frame_profile.target_covariance_prep_ms = input.target_covariance_prep_ms;
+  result.processed.frame_profile.source_to_target_transform_ms = input.source_to_target_transform_ms;
 
   auto layout_ptr = std::make_shared<const SplineStateLayout>(result.layout);
   gtsam::NonlinearFactorGraph graph;
   std::size_t active_imu_factor_count = 0;
   std::size_t actual_lidar_factor_count = 0;
 
+  const auto t_imu_build_start = Clock::now();
   for (const auto& imu_sample : input.imu_samples) {
     const auto support = result.layout.support_at(imu_sample.stamp, SplineSensorId::Imu);
     if (!support) {
@@ -507,9 +578,12 @@ CTLocalFrontendResult CTLocalFrontend::run(const Input& input) const {
     graph.add(imu_factor);
     ++active_imu_factor_count;
   }
+  result.processed.frame_profile.imu_factor_build_ms = elapsed_ms(t_imu_build_start, Clock::now());
 
   struct LidarFactorEntry {
     std::size_t source_index = 0;
+    std::size_t bucket_index = 0;
+    double representative_time = 0.0;
     SplineBucketContext bucket_ctx;
     std::shared_ptr<IntegratedSplineGICPFactor> factor;
   };
@@ -525,56 +599,130 @@ CTLocalFrontendResult CTLocalFrontend::run(const Input& input) const {
       continue;
     }
 
-    const auto bucket_contexts = create_lidar_buckets(result.layout, prepared_source, input.bucket_config);
+    result.processed.frame_profile.total_source_points += static_cast<std::size_t>(frame::size(*prepared_source.source_cloud));
+
+    const auto t_bucket_build_start = Clock::now();
+    const auto bucket_contexts = create_profiled_lidar_buckets(result.layout, prepared_source, input.bucket_config);
+    result.processed.frame_profile.bucket_build_ms += elapsed_ms(t_bucket_build_start, Clock::now());
     result.debug_stats.bucket_count += bucket_contexts.size();
+    result.processed.frame_profile.actual_bucket_count += bucket_contexts.size();
     if (!input.target_ivox || input.target_ivox->voxel_points().empty()) {
       continue;
     }
 
-    for (const auto& bucket_ctx : bucket_contexts) {
+    for (std::size_t bucket_index = 0; bucket_index < bucket_contexts.size(); ++bucket_index) {
+      const auto& bucket_ctx = bucket_contexts[bucket_index];
+      const auto t_lidar_factor_build_start = Clock::now();
       auto lidar_factor = std::make_shared<IntegratedSplineGICPFactor>(
-        bucket_ctx,
+        bucket_ctx.context,
         input.target_ivox,
         prepared_source.source_cloud);
       lidar_factor->set_max_correspondence_distance(input.max_correspondence_distance);
       lidar_factor->set_enable_profiling(true);
       graph.add(lidar_factor);
+      result.processed.frame_profile.lidar_factor_build_ms += elapsed_ms(t_lidar_factor_build_start, Clock::now());
 
       lidar_factor_entries.push_back(LidarFactorEntry{
         source_index,
-        bucket_ctx,
+        bucket_index,
+        bucket_ctx.representative_time,
+        bucket_ctx.context,
         lidar_factor,
       });
-      result.debug_stats.lidar_residual_count += bucket_ctx.point_indices.size();
+      result.debug_stats.lidar_residual_count += bucket_ctx.context.point_indices.size();
       ++actual_lidar_factor_count;
     }
   }
 
+  double lm_initial_cost = 0.0;
+  double lm_final_cost = 0.0;
   if (!graph.empty()) {
     gtsam_points::LevenbergMarquardtExtParams lm_params;
     lm_params.setlambdaInitial(1e-4);
     lm_params.setAbsoluteErrorTol(1e-2);
     lm_params.setMaxIterations(input.lm_max_iterations);
+    lm_initial_cost = graph.error(result.local_values);
 
+    double previous_cost = lm_initial_cost;
+    double previous_lambda = 1e-4;
+    if (input.enable_lm_iteration_trace) {
+      lm_params.callback = [&](const gtsam_points::LevenbergMarquardtOptimizationStatus& status, const gtsam::Values&) {
+        FrontendLMIterationProfileRow row;
+        row.iteration_index = std::max(status.iterations, static_cast<int>(result.processed.lm_iterations.size() + 1));
+        row.cost_before = previous_cost;
+        row.cost_after = status.error;
+        row.accepted = status.solve_success && status.cost_change < 0.0;
+        row.lambda_before = previous_lambda;
+        row.lambda_after = status.lambda;
+        row.linear_solve_ms = status.linear_solver_time;
+        result.processed.lm_iterations.push_back(row);
+
+        previous_cost = status.error;
+        previous_lambda = status.lambda;
+      };
+    }
+
+    const auto t_lm_solve_start = Clock::now();
     try {
-      result.local_values =
-        gtsam_points::LevenbergMarquardtOptimizerExt(graph, result.local_values, lm_params).optimize();
+      gtsam_points::LevenbergMarquardtOptimizerExt optimizer(graph, result.local_values, lm_params);
+      result.local_values = optimizer.optimize();
     } catch (const std::exception&) {
       // Keep seeded values on solver failure.
     }
+    result.processed.frame_profile.lm_solve_ms = elapsed_ms(t_lm_solve_start, Clock::now());
+    lm_final_cost = graph.error(result.local_values);
   }
+  result.processed.frame_profile.lm_initial_cost = lm_initial_cost;
+  result.processed.frame_profile.lm_final_cost = lm_final_cost;
+  result.processed.frame_profile.lm_iteration_count = static_cast<int>(result.processed.lm_iterations.size());
+  result.processed.frame_profile.lm_trace_emitted = !result.processed.lm_iterations.empty();
+  result.processed.frame_profile.lm_trace_row_count = static_cast<int>(result.processed.lm_iterations.size());
+  result.processed.frame_profile.lm_rejected_step_count = static_cast<int>(std::count_if(
+    result.processed.lm_iterations.begin(),
+    result.processed.lm_iterations.end(),
+    [](const FrontendLMIterationProfileRow& row) { return !row.accepted; }));
+  result.processed.frame_profile.lm_damping_change_count = static_cast<int>(std::count_if(
+    result.processed.lm_iterations.begin(),
+    result.processed.lm_iterations.end(),
+    [](const FrontendLMIterationProfileRow& row) {
+      return std::abs(row.lambda_after - row.lambda_before) > 1e-12;
+    }));
 
   result.debug_stats.imu_residual_count = active_imu_factor_count;
+  result.processed.frame_profile.imu_factor_count =
+    input.enable_graph_problem_size ? active_imu_factor_count : 0;
+  result.processed.frame_profile.imu_residual_count = active_imu_factor_count;
 
   if (!lidar_factor_entries.empty()) {
     result.processed.lidar_results.reserve(lidar_factor_entries.size());
+    result.processed.bucket_profiles.reserve(lidar_factor_entries.size());
     for (const auto& entry : lidar_factor_entries) {
       const double factor_error = entry.factor->error(result.local_values);
       result.processed.total_lidar_factor_error += factor_error;
-      result.processed.lidar_results.push_back(entry.factor->make_result(
+      const auto factor_result = entry.factor->make_result(
         factor_error,
         entry.factor->num_inliers(),
-        entry.factor->inlier_fraction()));
+        entry.factor->inlier_fraction());
+      result.processed.lidar_results.push_back(factor_result);
+
+      FrontendBucketProfileRow bucket_profile;
+      bucket_profile.source_frame_index = entry.source_index;
+      bucket_profile.bucket_index = entry.bucket_index;
+      bucket_profile.bucket_mode = bucket_mode_name(input.bucket_config.mode);
+      bucket_profile.representative_time = entry.representative_time;
+      bucket_profile.points_in_bucket = entry.bucket_ctx.point_indices.size();
+      bucket_profile.valid_correspondence_count = factor_result.profile.matched_point_count;
+      bucket_profile.match_ratio = factor_result.profile.match_ratio;
+      bucket_profile.inlier_ratio = factor_result.profile.inlier_ratio;
+      bucket_profile.target_point_count = factor_result.profile.target_point_count;
+      bucket_profile.candidate_evaluation_count = factor_result.profile.candidate_evaluation_count;
+      bucket_profile.lookup_or_correspondence_ms = factor_result.profile.correspondence_ms;
+      bucket_profile.accumulation_ms = factor_result.profile.accumulation_ms;
+      bucket_profile.factor_total_ms = factor_result.profile.total_ms;
+      bucket_profile.time_bucket_count = factor_result.profile.time_bucket_count;
+      bucket_profile.mean_time_bucket_population = factor_result.profile.mean_time_bucket_population;
+      bucket_profile.max_time_bucket_population = factor_result.profile.max_time_bucket_population;
+      result.processed.bucket_profiles.push_back(std::move(bucket_profile));
     }
     result.processed.lidar_window_summary =
       aggregate_bspline_lidar_factor_results(result.processed.lidar_results);
@@ -622,6 +770,20 @@ CTLocalFrontendResult CTLocalFrontend::run(const Input& input) const {
   result.debug_stats.active_local_controls = result.backend_summary.active_control_indices;
   result.debug_stats.local_solve_time_ms =
     std::chrono::duration<double, std::milli>(Clock::now() - t_run_start).count();
+  result.processed.frame_profile.active_control_point_count = result.backend_summary.active_control_indices.size();
+  result.processed.frame_profile.active_pose_key_count = result.backend_summary.pose_key_count;
+  result.processed.frame_profile.imu_sample_count = input.imu_samples.size();
+  result.processed.frame_profile.lidar_factor_count = actual_lidar_factor_count;
+  result.processed.frame_profile.lidar_residual_count = result.debug_stats.lidar_residual_count;
+  if (input.enable_graph_problem_size) {
+    result.processed.frame_profile.local_state_dimension =
+      compute_local_state_dimension(result.layout, result.local_values);
+    result.processed.frame_profile.local_residual_count =
+      result.processed.frame_profile.lidar_residual_count +
+      result.processed.frame_profile.imu_residual_count +
+      result.processed.frame_profile.gnss_factor_count +
+      result.processed.frame_profile.carried_prior_count;
+  }
 
   return result;
 }

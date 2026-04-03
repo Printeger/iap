@@ -37,7 +37,15 @@
     },
     "profiling": {
       "pipeline_file": "pipeline_timing.csv",
+      "frontend_frame": true,
+      "frontend_frame_file": "frontend_frame_profile.csv",
       "lidar_factor_file": "lidar_factor_profile.csv",
+      "frontend_lm_iteration": false,
+      "frontend_lm_iteration_file": "frontend_lm_iteration.csv",
+      "frame_warning_profile": false,
+      "frame_warning_profile_file": "frame_warning_profile.csv",
+      "target_map_prep_breakdown": false,
+      "graph_problem_size": false,
       "numeric_reference_file": "numeric_reference.csv",
       "linearization_check_file": "linearization_check.csv"
     },
@@ -60,10 +68,12 @@
       "write_config_snapshot": true,
       "write_git_revision": true,
       "write_build_info": true,
+      "write_mode_manifest": false,
       "config_snapshot_file": "config_snapshot.json",
       "run_info_file": "run_info.json",
       "git_rev_file": "git_rev.txt",
-      "build_info_file": "build_info.txt"
+      "build_info_file": "build_info.txt",
+      "mode_manifest_file": "mode_manifest.json"
     }
   },
 

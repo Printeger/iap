@@ -117,6 +117,18 @@ class OdometryEstimationBSpline : public OdometryEstimationCPU {
     double snapshot_span_sec = 0.0;
     bool snapshot_policy_accepted = false;
     double build_ms = 0.0;
+    double target_snapshot_clone_ms = 0.0;
+    double target_voxel_lookup_prep_ms = 0.0;
+    double target_covariance_prep_ms = 0.0;
+    double source_to_target_transform_ms = 0.0;
+  };
+
+  struct FrameWarningProfileRow {
+    int frame_id = -1;
+    double stamp = 0.0;
+    std::size_t warning_count = 0;
+    std::string warning_categories;
+    std::string top_warning_message;
   };
 
   struct ActiveSplineLidarFactorCacheKey {
@@ -238,7 +250,23 @@ class OdometryEstimationBSpline : public OdometryEstimationCPU {
     double stamp,
     const std::vector<iap::BSplineLidarFactorResult>& results,
     int current_factor_index);
-  void log_frontend_only_stats(const iap::CTLocalFrontendResult& local_result) const;
+  void maybe_write_frontend_frame_profile(const iap::FrontendFrameProfile& profile);
+  void maybe_write_lidar_factor_profiles(
+    int frame_id,
+    double stamp,
+    const std::vector<iap::FrontendBucketProfileRow>& profiles);
+  void maybe_write_frontend_lm_iterations(
+    int frame_id,
+    double stamp,
+    const std::vector<iap::FrontendLMIterationProfileRow>& iterations);
+  void maybe_write_frame_warning_profile(const FrameWarningProfileRow& row);
+  FrameWarningProfileRow build_frame_warning_profile(
+    int frame_id,
+    double stamp,
+    const iap::CTLocalFrontend::Input& input,
+    const iap::CTLocalFrontendResult& local_result,
+    const iap::FrontendFrameProfile& profile) const;
+  void log_frontend_only_stats(const iap::FrontendFrameProfile& profile) const;
 
   // IAP-RQ-300 / IAP-RQ-410: Hybrid orchestration helpers (Task 5).
   // Build the CTLocalFrontend::Input from the current raw frame and frame history.
@@ -279,7 +307,12 @@ class OdometryEstimationBSpline : public OdometryEstimationCPU {
   double lidar_outlier_mahalanobis_thresh_ = 0.0;
   double lidar_robust_kernel_width_ = 1.0;
   double lidar_robust_weight_floor_ = 0.0;
+  bool frontend_frame_profile_enabled_ = true;
   bool lidar_factor_profile_ = false;
+  bool frontend_lm_iteration_profile_enabled_ = false;
+  bool frame_warning_profile_enabled_ = false;
+  bool target_map_prep_breakdown_enabled_ = false;
+  bool graph_problem_size_enabled_ = false;
   bool lidar_validate_linearization_ = false;
   bool lidar_profile_numeric_reference_ = false;
   bool lidar_warn_degeneracy_ = true;
@@ -289,6 +322,10 @@ class OdometryEstimationBSpline : public OdometryEstimationCPU {
   double lidar_linearization_warn_ratio_ = 0.25;
   double lidar_numeric_reference_scale_ = 1e-5;
   std::string lidar_baseline_csv_path_ = "ct_lidar_baseline.csv";
+  std::string frontend_frame_profile_csv_path_ = "frontend_frame_profile.csv";
+  std::string frontend_lidar_factor_profile_csv_path_ = "lidar_factor_profile.csv";
+  std::string frontend_lm_iteration_csv_path_ = "frontend_lm_iteration.csv";
+  std::string frame_warning_profile_csv_path_ = "frame_warning_profile.csv";
   iap::IntegratedBSplineGICPFactor::DegeneracyThresholds lidar_degeneracy_thresholds_;
   double ctrl_point_anchor_inf_scale_ = 1e6;
   double ctrl_point_prediction_inf_scale_ = 1e3;
@@ -330,6 +367,13 @@ class OdometryEstimationBSpline : public OdometryEstimationCPU {
   std::size_t ct_target_revision_ = 0;
   bool lidar_baseline_csv_header_written_ = false;
   bool lidar_baseline_csv_first_row_logged_ = false;
+  bool frontend_frame_profile_header_written_ = false;
+  bool frontend_lidar_factor_profile_header_written_ = false;
+  bool frontend_lm_iteration_header_written_ = false;
+  bool frame_warning_profile_header_written_ = false;
+  bool frontend_iteration_without_frame_warned_ = false;
+  bool target_map_breakdown_without_frame_warned_ = false;
+  bool graph_problem_size_without_frame_warned_ = false;
 #ifdef GTSAM_POINTS_USE_CUDA
   std::unique_ptr<gtsam_points::StreamTempBufferRoundRobin> ct_lidar_gpu_stream_buffers_;
 #endif

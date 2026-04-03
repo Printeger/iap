@@ -22,11 +22,19 @@ struct RuntimeLogConfig {
 struct ProfilingLogConfig {
   bool enable = false;
   bool pipeline = false;
+  bool frontend_frame = true;
   bool lidar_factor = false;
+  bool frontend_lm_iteration = false;
+  bool frame_warning_profile = false;
+  bool target_map_prep_breakdown = false;
+  bool graph_problem_size = false;
   bool numeric_reference = false;
   bool linearization_check = false;
   std::string pipeline_file = "pipeline_timing.csv";
+  std::string frontend_frame_file = "frontend_frame_profile.csv";
   std::string lidar_factor_file = "lidar_factor_profile.csv";
+  std::string frontend_lm_iteration_file = "frontend_lm_iteration.csv";
+  std::string frame_warning_profile_file = "frame_warning_profile.csv";
   std::string numeric_reference_file = "numeric_reference.csv";
   std::string linearization_check_file = "linearization_check.csv";
 };
@@ -74,10 +82,12 @@ struct MetadataLogConfig {
   bool write_config_snapshot = true;
   bool write_git_revision = true;
   bool write_build_info = true;
+  bool write_mode_manifest = false;
   std::string config_snapshot_file = "config_snapshot.json";
   std::string run_info_file = "run_info.json";
   std::string git_rev_file = "git_rev.txt";
   std::string build_info_file = "build_info.txt";
+  std::string mode_manifest_file = "mode_manifest.json";
 };
 
 struct LogConfig {

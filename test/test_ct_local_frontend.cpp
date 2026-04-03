@@ -17,6 +17,7 @@
 
 #include <Eigen/Core>
 #include <memory>
+#include <numeric>
 #include <vector>
 
 namespace {
@@ -237,6 +238,12 @@ TEST(CTLocalFrontendSolve, DebugStatsCarryBucketsAndResidualCounts) {
   input.target_frame = target;
   input.target_ivox = make_target_ivox();
   input.bucket_config.mode = iap::CTLocalFrontend::LidarBucketMode::SINGLE_BUCKET;
+  input.enable_lm_iteration_trace = true;
+  input.enable_graph_problem_size = true;
+  input.target_snapshot_clone_ms = 1.25;
+  input.target_voxel_lookup_prep_ms = 2.5;
+  input.target_covariance_prep_ms = 0.75;
+  input.source_to_target_transform_ms = 0.5;
   input.source_frames.push_back(make_source_input(
     {
       Eigen::Vector4d(0.0, 0.0, 0.0, 1.0),
@@ -262,4 +269,50 @@ TEST(CTLocalFrontendSolve, DebugStatsCarryBucketsAndResidualCounts) {
   EXPECT_EQ(result.debug_stats.imu_residual_count, 3U);
   EXPECT_FALSE(result.debug_stats.active_local_controls.empty());
   EXPECT_EQ(result.backend_summary.lidar_factor_count, 1U);
+
+  EXPECT_EQ(result.processed.frame_profile.bucket_mode, "SINGLE_BUCKET");
+  EXPECT_EQ(result.processed.frame_profile.actual_bucket_count, 1U);
+  EXPECT_EQ(result.processed.frame_profile.imu_sample_count, 3U);
+  EXPECT_EQ(result.processed.frame_profile.imu_factor_count, 3U);
+  EXPECT_EQ(result.processed.frame_profile.imu_residual_count, 3U);
+  EXPECT_EQ(result.processed.frame_profile.lidar_factor_count, 1U);
+  EXPECT_EQ(result.processed.frame_profile.lidar_residual_count, 3U);
+  EXPECT_EQ(result.processed.frame_profile.local_residual_count, 6U);
+  EXPECT_GT(result.processed.frame_profile.local_state_dimension, 0U);
+  EXPECT_GE(result.processed.frame_profile.bucket_build_ms, 0.0);
+  EXPECT_GE(result.processed.frame_profile.lidar_factor_build_ms, 0.0);
+  EXPECT_GE(result.processed.frame_profile.imu_factor_build_ms, 0.0);
+  EXPECT_GE(result.processed.frame_profile.lm_solve_ms, 0.0);
+  EXPECT_TRUE(result.processed.frame_profile.lm_trace_expected);
+  EXPECT_EQ(
+    result.processed.frame_profile.lm_trace_emitted,
+    !result.processed.lm_iterations.empty());
+  EXPECT_EQ(
+    result.processed.frame_profile.lm_trace_row_count,
+    static_cast<int>(result.processed.lm_iterations.size()));
+  EXPECT_GE(result.processed.frame_profile.lm_initial_cost, 0.0);
+  EXPECT_GE(result.processed.frame_profile.lm_final_cost, 0.0);
+  EXPECT_EQ(
+    result.processed.frame_profile.lm_iteration_count,
+    static_cast<int>(result.processed.lm_iterations.size()));
+  EXPECT_DOUBLE_EQ(result.processed.frame_profile.target_snapshot_clone_ms, 1.25);
+  EXPECT_DOUBLE_EQ(result.processed.frame_profile.target_voxel_lookup_prep_ms, 2.5);
+  EXPECT_DOUBLE_EQ(result.processed.frame_profile.target_covariance_prep_ms, 0.75);
+  EXPECT_DOUBLE_EQ(result.processed.frame_profile.source_to_target_transform_ms, 0.5);
+
+  ASSERT_EQ(result.processed.bucket_profiles.size(), 1U);
+  EXPECT_EQ(result.processed.bucket_profiles.front().bucket_mode, "SINGLE_BUCKET");
+  EXPECT_EQ(result.processed.bucket_profiles.front().bucket_index, 0U);
+  EXPECT_EQ(result.processed.bucket_profiles.front().points_in_bucket, 3U);
+  EXPECT_GE(result.processed.bucket_profiles.front().representative_time, 0.0);
+  EXPECT_GE(result.processed.bucket_profiles.front().factor_total_ms, 0.0);
+
+  const auto profiled_points = std::accumulate(
+    result.processed.bucket_profiles.begin(),
+    result.processed.bucket_profiles.end(),
+    std::size_t{0},
+    [](std::size_t sum, const iap::FrontendBucketProfileRow& row) {
+      return sum + row.points_in_bucket;
+    });
+  EXPECT_EQ(profiled_points, 3U);
 }
