@@ -7,18 +7,69 @@
     "config_viewer": "config_viewer.json",
     "config_preprocess": "config_preprocess.json",
     "config_sensors": "config_sensors.json",
-    // "config_odometry": "config_odometry_gpu.json",
+    // "config_odometry": "config_odometry_cpu.json",
     "config_odometry": "config_odometry_bspline.json",
-    "config_sub_mapping": "config_sub_mapping_gpu.json",
-    "config_global_mapping": "config_global_mapping_gpu.json",
+    "config_sub_mapping": "config_sub_mapping_cpu.json",
+    "config_global_mapping": "config_global_mapping_cpu.json",
     "config_gnss": "config_gnss.json",
     "enable_timing_csv": true,
-    "timing_csv_path": "/home/dev/code/ws_iap/src/iap/log/res/iap_timing.csv"
+    "timing_csv_path": "pipeline_timing.csv"
+  },
+
+  /*** Unified Runtime Log Layout ***/
+  "log": {
+    "root_dir": "log",
+    "run_dir_mode": "TIMESTAMP",
+    "run_name": "",
+    "create_latest_symlink": true,
+    "keep_last_n_runs": 20,
+    "runtime": {
+      "enable_console": true,
+      "enable_file": true,
+      "level": "INFO",
+      "split_warnings_file": false,
+      "main_file_name": "glim_main.log",
+      "module_file_pattern": "glim_{module}.log",
+      "warnings_file_name": "warnings.log",
+      "rotate_files": true,
+      "max_file_size_kb": 8192,
+      "max_files": 10
+    },
+    "profiling": {
+      "pipeline_file": "pipeline_timing.csv",
+      "lidar_factor_file": "lidar_factor_profile.csv",
+      "numeric_reference_file": "numeric_reference.csv",
+      "linearization_check_file": "linearization_check.csv"
+    },
+    "export": {
+      "baseline_csv_file": "ct_lidar_baseline.csv",
+      "icp_quality_csv_file": "icp_quality.csv",
+      "gnss_factor_debug_csv_file": "gnss_factor_debug.csv",
+      "araim_csv_file": "araim.csv",
+      "integrity_trajectory_csv_file": "integrity_trajectory.csv",
+      "local_frontend_trajectory_file": "local_frontend_trajectory.csv",
+      "backend_summary_file": "backend_summary.csv",
+      "bucket_stats_file": "bucket_stats.csv"
+    },
+    "shared_output": {
+      "publish_shared_trajectory": true,
+      "attach_trajectory_to_frames": true,
+      "attach_imu_rate_trajectory": true
+    },
+    "metadata": {
+      "write_config_snapshot": true,
+      "write_git_revision": true,
+      "write_build_info": true,
+      "config_snapshot_file": "config_snapshot.json",
+      "run_info_file": "run_info.json",
+      "git_rev_file": "git_rev.txt",
+      "build_info_file": "build_info.txt"
+    }
   },
 
   /*** Logging ***/
   "logging": {
-    "log_dir": "/home/dev/code/ws_iap/src/iap/log/",
+    "log_dir": "log",
     "save_logs": true,
     "rotate_logs": true,
     "max_file_size_kb": 8192,

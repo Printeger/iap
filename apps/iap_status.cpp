@@ -19,6 +19,7 @@
 
 int main(int argc, char** argv) {
   const std::string config_dir = (argc > 1) ? argv[1] : "config";
+  glim::GlobalConfig::instance(config_dir, true);
 
   auto logger = glim::create_module_logger("iap_status");
 

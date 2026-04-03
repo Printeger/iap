@@ -1,6 +1,6 @@
 {
   "logging": {
-    "log_dir": "/home/dev/code/ws_iap/src/iap/log/",
+    "log_dir": "log",
     "save_logs": true,
     "rotate_logs": true,
     "max_file_size_kb": 8192,

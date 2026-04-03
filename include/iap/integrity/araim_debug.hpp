@@ -11,6 +11,7 @@
 #include <spdlog/spdlog.h>
 
 #include <fstream>
+#include <filesystem>
 #include <iomanip>
 #include <memory>
 #include <mutex>
@@ -83,6 +84,11 @@ class AraimDebugLogger {
 
 inline void AraimDebugCSV::open_file(const std::string& path) {
   path_ = path;
+  const std::filesystem::path file_path(path_);
+  if (file_path.has_parent_path()) {
+    std::error_code ec;
+    std::filesystem::create_directories(file_path.parent_path(), ec);
+  }
   file_.open(path_, std::ios::out | std::ios::trunc);
   if (!file_.is_open()) {
     spdlog::warn("[araim_debug] Failed to open CSV: {}", path_);

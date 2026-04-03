@@ -1,5 +1,7 @@
 #pragma once
 
+#include <iap/common/log_config.hpp>
+#include <iap/common/log_paths.hpp>
 #include <iap/util/config.hpp>
 
 #include <cstdio>
@@ -14,24 +16,11 @@ inline std::mutex& file_mutex() {
 }
 
 inline bool enabled() {
-  static bool initialized = false;
-  static bool value = true;
-  if (!initialized) {
-    value = glim::GlobalConfig::instance()->param<bool>("global", "enable_timing_csv", true);
-    initialized = true;
-  }
-  return value;
+  return iap::get_log_config().profiling.pipeline;
 }
 
-inline const std::string& path() {
-  static bool initialized = false;
-  static std::string value = "/home/dev/code/ws_iap/src/iap/log/res/iap_timing.csv";
-  if (!initialized) {
-    value = glim::GlobalConfig::instance()->param<std::string>(
-        "global", "timing_csv_path", "/home/dev/code/ws_iap/src/iap/log/res/iap_timing.csv");
-    initialized = true;
-  }
-  return value;
+inline std::string path() {
+  return iap::LogPaths::instance().profiling_path(iap::get_log_config().profiling.pipeline_file).string();
 }
 
 inline void ensure_header() {

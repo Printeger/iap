@@ -11,6 +11,7 @@
 #include <gtsam_points/factors/linear_damping_factor.hpp>
 #include <gtsam_points/optimizers/incremental_fixed_lag_smoother_with_fallback.hpp>
 
+#include <iap/common/log_config.hpp>
 #include <iap/util/config.hpp>
 #include <iap/util/convert_to_string.hpp>
 #include <iap/util/key_lifecycle_monitor.hpp>
@@ -76,6 +77,7 @@ OdometryEstimationIMUParams::OdometryEstimationIMUParams() {
 
   validate_imu = config.param<bool>("odometry_estimation", "validate_imu", true);
   save_imu_rate_trajectory = config.param<bool>("odometry_estimation", "save_imu_rate_trajectory", false);
+  save_imu_rate_trajectory = iap::get_log_config().shared_output.attach_imu_rate_trajectory;
 
   num_threads = config.param<int>("odometry_estimation", "num_threads", 4);
   num_smoother_update_threads = 1;

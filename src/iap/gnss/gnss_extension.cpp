@@ -41,6 +41,8 @@
 #include <gnss_comm/msg/gnss_ionosphere_parameter.hpp>
 #include <sensor_msgs/msg/nav_sat_fix.hpp>
 
+#include <iap/common/log_config.hpp>
+#include <iap/common/log_paths.hpp>
 #include <iap/gnss/pseudorange_factor.hpp>
 #include <iap/gnss/doppler_factor.hpp>
 #include <iap/odometry/callbacks.hpp>
@@ -218,12 +220,14 @@ GnssExtensionModule::GnssExtensionModule()
                 timing_csv::path());
 
   // ── Debug CSV logging (from config_gnss.json) ──────────────────────────
-  const bool enable_csv = config.param<bool>("gnss", "enable_debug_csv", false);
+  const bool enable_csv = iap::get_log_config().export_outputs.gnss_factor_debug_csv;
   logger_->info("[gnss_ext] enable_debug_csv={}", enable_csv);
   if (enable_csv) {
     debug_csv_enabled_ = true;
-    const std::string csv_path = config.param<std::string>(
-        "gnss", "debug_csv_path", "/tmp/iap_gnss_factor_debug.csv");
+    const std::string csv_path =
+      iap::LogPaths::instance()
+        .export_path(iap::get_log_config().export_outputs.gnss_factor_debug_csv_file)
+        .string();
     debug_csv_file_.open(csv_path, std::ios::out | std::ios::trunc);
     if (debug_csv_file_.is_open()) {
       debug_csv_file_ << "diag_n,stamp,frame_id,factor_type,sat_id,constellation,"

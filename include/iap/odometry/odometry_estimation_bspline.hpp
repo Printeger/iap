@@ -200,6 +200,9 @@ class OdometryEstimationBSpline : public OdometryEstimationCPU {
     const EstimationFrame::Ptr& frame,
     std::vector<EstimationFrame::ConstPtr>& marginalized_frames);
   void publish_continuous_trajectory(int current);
+  void publish_continuous_trajectory_from_layout(
+    std::shared_ptr<const iap::SplineStateLayout> layout,
+    const gtsam::Values& values);
   void publish_fixed_lag_telemetry(int current) const;
   void update_frame_attachment(const std::shared_ptr<iap::BSplineTrajectory>& trajectory) const;
   void update_compatibility_trajectory(const std::shared_ptr<iap::BSplineTrajectory>& trajectory) const;
@@ -235,10 +238,13 @@ class OdometryEstimationBSpline : public OdometryEstimationCPU {
     double stamp,
     const std::vector<iap::BSplineLidarFactorResult>& results,
     int current_factor_index);
+  void log_frontend_only_stats(const iap::CTLocalFrontendResult& local_result) const;
 
   // IAP-RQ-300 / IAP-RQ-410: Hybrid orchestration helpers (Task 5).
   // Build the CTLocalFrontend::Input from the current raw frame and frame history.
-  iap::CTLocalFrontend::Input make_frontend_input(const PreprocessedFrame::Ptr& raw_frame) const;
+  iap::CTLocalFrontend::Input make_frontend_input(
+    const PreprocessedFrame::Ptr& raw_frame,
+    const gtsam_points::PointCloud::ConstPtr& prepared_source_cloud) const;
   // Build the CTCompactBackend::Input from the local frontend result and shared GNSS state.
   iap::CTCompactBackend::Input make_backend_input(const iap::CTLocalFrontendResult& local_result) const;
 
@@ -253,7 +259,9 @@ class OdometryEstimationBSpline : public OdometryEstimationCPU {
   // Commit 0 guardrail: keep CPU CT LiDAR as the default mainline whenever the
   // config is missing, while preserving all legacy frontends as explicit opt-ins.
   std::string frontend_mode_ = "CT_LIDAR_CPU";
+  bool frontend_only_mode_ = false;
   double max_correspondence_distance_ = 1.0;
+  iap::CTLocalFrontend::BucketConfig lidar_bucket_config_;
   BSplineLidarTargetMode lidar_target_mode_ = BSplineLidarTargetMode::ACTIVE_WINDOW_SNAPSHOT;
   BSplineGpuLidarBackend lidar_gpu_backend_ = BSplineGpuLidarBackend::BUCKET;
   iap::IntegratedBSplineGICPFactor::JacobianMode lidar_jacobian_mode_ =
@@ -280,7 +288,7 @@ class OdometryEstimationBSpline : public OdometryEstimationCPU {
   double lidar_linearization_check_scale_ = 1e-4;
   double lidar_linearization_warn_ratio_ = 0.25;
   double lidar_numeric_reference_scale_ = 1e-5;
-  std::string lidar_baseline_csv_path_ = "/tmp/iap_ct_lidar_baseline.csv";
+  std::string lidar_baseline_csv_path_ = "ct_lidar_baseline.csv";
   iap::IntegratedBSplineGICPFactor::DegeneracyThresholds lidar_degeneracy_thresholds_;
   double ctrl_point_anchor_inf_scale_ = 1e6;
   double ctrl_point_prediction_inf_scale_ = 1e3;

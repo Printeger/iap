@@ -28,6 +28,8 @@
 #include <gtsam_points/types/point_cloud_cpu.hpp>
 #include <spdlog/spdlog.h>
 
+#include <iap/common/log_config.hpp>
+#include <iap/common/log_paths.hpp>
 #include <iap/common/cloud_covariance_estimation.hpp>
 #include <iap/common/imu_integration.hpp>
 #include <iap/odometry/initial_state_estimation.hpp>
@@ -90,6 +92,28 @@ const char* to_string(BSplineGpuLidarBackend backend) {
       return "bucket";
     case BSplineGpuLidarBackend::KERNEL:
       return "kernel";
+  }
+  return "unknown";
+}
+
+iap::CTLocalFrontend::LidarBucketMode parse_lidar_bucket_mode(const std::string& mode) {
+  if (mode == "FIXED_COUNT" || mode == "fixed_count" || mode == "fixed") {
+    return iap::CTLocalFrontend::LidarBucketMode::FIXED_COUNT;
+  }
+  if (mode == "SINGLE_BUCKET" || mode == "single_bucket" || mode == "single") {
+    return iap::CTLocalFrontend::LidarBucketMode::SINGLE_BUCKET;
+  }
+  return iap::CTLocalFrontend::LidarBucketMode::TIME_EPS;
+}
+
+const char* to_string(iap::CTLocalFrontend::LidarBucketMode mode) {
+  switch (mode) {
+    case iap::CTLocalFrontend::LidarBucketMode::TIME_EPS:
+      return "time_eps";
+    case iap::CTLocalFrontend::LidarBucketMode::FIXED_COUNT:
+      return "fixed_count";
+    case iap::CTLocalFrontend::LidarBucketMode::SINGLE_BUCKET:
+      return "single_bucket";
   }
   return "unknown";
 }
@@ -250,8 +274,8 @@ OdometryEstimationBSplineParams::OdometryEstimationBSplineParams() : OdometryEst
   spline_nominal_dt = config.param<double>("odometry_estimation", "spline_nominal_dt", 0.0);
   spline_finite_difference_dt = config.param<double>("odometry_estimation", "spline_finite_difference_dt", 0.01);
   compatibility_sample_dt = config.param<double>("odometry_estimation", "compatibility_sample_dt", 0.01);
-  publish_shared_trajectory = config.param<bool>("odometry_estimation", "publish_shared_trajectory", true);
-  attach_trajectory_to_frames = config.param<bool>("odometry_estimation", "attach_trajectory_to_frames", true);
+  publish_shared_trajectory = iap::get_log_config().shared_output.publish_shared_trajectory;
+  attach_trajectory_to_frames = iap::get_log_config().shared_output.attach_trajectory_to_frames;
 }
 
 OdometryEstimationBSplineParams::~OdometryEstimationBSplineParams() {}
@@ -262,12 +286,21 @@ OdometryEstimationBSpline::OdometryEstimationBSpline(const OdometryEstimationBSp
   publish_shared_trajectory_(params.publish_shared_trajectory),
   attach_trajectory_to_frames_(params.attach_trajectory_to_frames) {
   Config config(GlobalConfig::get_config_path("config_odometry"));
+  const auto& log_config = iap::get_log_config();
   trajectory_params_.knot_mode = parse_knot_mode(params.spline_knot_mode);
   trajectory_params_.nominal_dt = params.spline_nominal_dt;
   trajectory_params_.finite_difference_dt = params.spline_finite_difference_dt;
   trajectory_params_.order = 3;
   frontend_mode_ = config.param<std::string>("odometry_estimation", "frontend_mode", "CT_LIDAR_CPU");
+  frontend_only_mode_ = config.param<bool>("odometry_estimation", "frontend_only_mode", false);
   max_correspondence_distance_ = config.param<double>("odometry_estimation", "max_correspondence_distance", 1.5);
+  lidar_bucket_config_.mode = parse_lidar_bucket_mode(
+    config.param<std::string>("odometry_estimation", "ct_lidar_bucket_mode", "TIME_EPS"));
+  lidar_bucket_config_.time_eps = config.param<double>("odometry_estimation", "ct_lidar_bucket_time_eps", 1e-3);
+  lidar_bucket_config_.max_buckets_per_scan =
+    config.param<int>("odometry_estimation", "ct_lidar_max_buckets_per_scan", 0);
+  lidar_bucket_config_.fixed_buckets_per_scan =
+    config.param<int>("odometry_estimation", "ct_lidar_fixed_buckets_per_scan", 8);
   lidar_target_mode_ = parse_lidar_target_mode(
     config.param<std::string>("odometry_estimation", "ct_lidar_target_mode", "ACTIVE_WINDOW_SNAPSHOT"));
   lidar_gpu_backend_ = parse_gpu_lidar_backend(
@@ -291,35 +324,37 @@ OdometryEstimationBSpline::OdometryEstimationBSpline(const OdometryEstimationBSp
     config.param<std::string>("odometry_estimation", "ct_lidar_robust_kernel", "NONE"));
   lidar_robust_kernel_width_ = config.param<double>("odometry_estimation", "ct_lidar_robust_kernel_width", 1.0);
   lidar_robust_weight_floor_ = config.param<double>("odometry_estimation", "ct_lidar_robust_weight_floor", 0.0);
-  lidar_factor_profile_ = config.param<bool>("odometry_estimation", "ct_lidar_profile_factor", false);
-  lidar_validate_linearization_ = config.param<bool>("odometry_estimation", "ct_lidar_validate_linearization", false);
-  lidar_profile_numeric_reference_ =
-    config.param<bool>("odometry_estimation", "ct_lidar_profile_numeric_reference", false);
-  pipeline_profile_ = config.param<bool>("odometry_estimation", "ct_profile_pipeline", false);
-  lidar_warn_degeneracy_ = config.param<bool>("odometry_estimation", "ct_lidar_warn_degeneracy", true);
-  lidar_export_baseline_csv_ = config.param<bool>("odometry_estimation", "ct_lidar_export_baseline_csv", false);
+  lidar_factor_profile_ = log_config.profiling.lidar_factor;
+  lidar_validate_linearization_ = log_config.profiling.linearization_check;
+  lidar_profile_numeric_reference_ = log_config.profiling.numeric_reference;
+  pipeline_profile_ = iap::resolve_log_value<bool>(
+    iap::log_bool({"log", "profiling"}, "pipeline"),
+    config.param<bool>("odometry_estimation", "ct_profile_pipeline"),
+    "odometry_estimation.ct_profile_pipeline",
+    "log.profiling.pipeline",
+    false);
+  lidar_warn_degeneracy_ = log_config.warnings.lidar_degeneracy.enable;
+  lidar_export_baseline_csv_ = log_config.export_outputs.baseline_csv;
   lidar_linearization_check_scale_ =
     config.param<double>("odometry_estimation", "ct_lidar_linearization_check_scale", 1e-4);
   lidar_linearization_warn_ratio_ =
     config.param<double>("odometry_estimation", "ct_lidar_linearization_warn_ratio", 0.25);
   lidar_numeric_reference_scale_ =
     config.param<double>("odometry_estimation", "ct_lidar_numeric_reference_scale", 1e-5);
-  lidar_baseline_csv_path_ = config.param<std::string>(
-    "odometry_estimation",
-    "ct_lidar_baseline_csv_path",
-    "/tmp/iap_ct_lidar_baseline.csv");
+  lidar_baseline_csv_path_ =
+    iap::LogPaths::instance().export_path(log_config.export_outputs.baseline_csv_file).string();
   lidar_degeneracy_thresholds_.min_match_ratio =
-    config.param<double>("odometry_estimation", "ct_lidar_warn_min_match_ratio", 0.0);
+    log_config.warnings.lidar_degeneracy.min_match_ratio;
   lidar_degeneracy_thresholds_.min_inlier_ratio =
-    config.param<double>("odometry_estimation", "ct_lidar_warn_min_inlier_ratio", 0.0);
+    log_config.warnings.lidar_degeneracy.min_inlier_ratio;
   lidar_degeneracy_thresholds_.min_unique_target_ratio =
-    config.param<double>("odometry_estimation", "ct_lidar_warn_min_unique_target_ratio", 0.0);
+    log_config.warnings.lidar_degeneracy.min_unique_target_ratio;
   lidar_degeneracy_thresholds_.max_target_reuse_ratio =
-    config.param<double>("odometry_estimation", "ct_lidar_warn_max_target_reuse_ratio", 0.0);
+    log_config.warnings.lidar_degeneracy.max_target_reuse_ratio;
   lidar_degeneracy_thresholds_.max_ambiguity_rejection_ratio =
-    config.param<double>("odometry_estimation", "ct_lidar_warn_max_ambiguity_rejection_ratio", 0.0);
+    log_config.warnings.lidar_degeneracy.max_ambiguity_rejection_ratio;
   lidar_degeneracy_thresholds_.min_mean_score_gap =
-    config.param<double>("odometry_estimation", "ct_lidar_warn_min_mean_score_gap", 0.0);
+    log_config.warnings.lidar_degeneracy.min_mean_score_gap;
   ctrl_point_anchor_inf_scale_ = config.param<double>("odometry_estimation", "ctrl_point_anchor_inf_scale", 1e6);
   ctrl_point_prediction_inf_scale_ = config.param<double>("odometry_estimation", "ctrl_point_prediction_inf_scale", 1e3);
   ctrl_point_smoothness_inf_scale_ = config.param<double>("odometry_estimation", "ctrl_point_smoothness_inf_scale", 1e2);
@@ -376,9 +411,14 @@ OdometryEstimationBSpline::OdometryEstimationBSpline(const OdometryEstimationBSp
     ct_lidar_gpu_stream_buffers_ = std::make_unique<gtsam_points::StreamTempBufferRoundRobin>();
   }
 #endif
-  logger->info("odometry_bspline initialized frontend_mode={} lidar_gpu_backend={} knot_mode={} nominal_dt={:.4f} compatibility_sample_dt={:.4f} lidar_target_mode={} lidar_jacobian_mode={} lidar_k_candidates={} lidar_accept_ratio={:.3f} lidar_score_gap={:.3f} lidar_snapshot_window={} lidar_snapshot_min_frames={} lidar_snapshot_min_points={} lidar_snapshot_max_age={:.3f} lidar_outlier_thresh={:.3f} lidar_robust_kernel={} lidar_robust_width={:.3f} lidar_robust_w_floor={:.3f} lidar_profile={} lidar_validate={} ct_pipeline_profile={} lidar_baseline_csv={} lidar_baseline_path={}",
+  logger->info("odometry_bspline initialized frontend_mode={} frontend_only_mode={} lidar_gpu_backend={} lidar_bucket_mode={} lidar_bucket_time_eps={:.6f} lidar_max_buckets={} lidar_fixed_buckets={} knot_mode={} nominal_dt={:.4f} compatibility_sample_dt={:.4f} lidar_target_mode={} lidar_jacobian_mode={} lidar_k_candidates={} lidar_accept_ratio={:.3f} lidar_score_gap={:.3f} lidar_snapshot_window={} lidar_snapshot_min_frames={} lidar_snapshot_min_points={} lidar_snapshot_max_age={:.3f} lidar_outlier_thresh={:.3f} lidar_robust_kernel={} lidar_robust_width={:.3f} lidar_robust_w_floor={:.3f} lidar_profile={} lidar_validate={} ct_pipeline_profile={} lidar_baseline_csv={} lidar_baseline_path={}",
     frontend_mode_,
+    frontend_only_mode_,
     ::glim::to_string(lidar_gpu_backend_),
+    ::glim::to_string(lidar_bucket_config_.mode),
+    lidar_bucket_config_.time_eps,
+    lidar_bucket_config_.max_buckets_per_scan,
+    lidar_bucket_config_.fixed_buckets_per_scan,
     iap::to_string(trajectory_params_.knot_mode),
     trajectory_params_.nominal_dt,
     compatibility_sample_dt_,
@@ -675,71 +715,16 @@ std::shared_ptr<const iap::SplineStateLayout> OdometryEstimationBSpline::create_
 
 std::vector<iap::SplineBucketContext> OdometryEstimationBSpline::create_segment_lidar_buckets(
   const ActiveSplineSegmentConstraint& segment) const {
-  std::vector<iap::SplineBucketContext> buckets;
-  if (!segment.source || !gtsam_points::frame::has_times(*segment.source) || gtsam_points::frame::size(*segment.source) == 0) {
-    return buckets;
-  }
-
   const auto layout = active_window_layout_ ? active_window_layout_ : create_segment_lidar_layout(segment);
   if (!layout) {
-    return buckets;
+    return {};
   }
 
-  const double time_eps = 1e-3;
-  std::vector<int> point_indices;
-  point_indices.reserve(gtsam_points::frame::size(*segment.source));
-  double bucket_time_sum = 0.0;
-  double bucket_anchor_time = gtsam_points::frame::time(*segment.source, 0);
-
-  auto flush_bucket = [&](double mean_relative_time) {
-    if (point_indices.empty()) {
-      return;
-    }
-
-    const double query_time = segment.stamp + mean_relative_time;
-    const auto support = layout->support_at(query_time, iap::SplineSensorId::Lidar);
-    if (!support) {
-      point_indices.clear();
-      bucket_time_sum = 0.0;
-      return;
-    }
-
-    iap::SplineBucketContext ctx;
-    ctx.support = *support;
-    ctx.sensor_id = iap::SplineSensorId::Lidar;
-    ctx.point_indices = point_indices;
-    buckets.push_back(std::move(ctx));
-
-    point_indices.clear();
-    bucket_time_sum = 0.0;
-  };
-
-  for (int i = 0; i < gtsam_points::frame::size(*segment.source); ++i) {
-    const double relative_time = gtsam_points::frame::time(*segment.source, i);
-    if (!point_indices.empty() && std::abs(relative_time - bucket_anchor_time) > time_eps) {
-      flush_bucket(bucket_time_sum / static_cast<double>(point_indices.size()));
-      bucket_anchor_time = relative_time;
-    }
-
-    point_indices.push_back(i);
-    bucket_time_sum += relative_time;
-  }
-
-  flush_bucket(point_indices.empty() ? bucket_anchor_time : bucket_time_sum / static_cast<double>(point_indices.size()));
-
-  if (buckets.empty()) {
-    const auto fallback_support = layout->support_at(0.5 * (segment.stamp + segment.scan_end), iap::SplineSensorId::Lidar);
-    if (fallback_support) {
-      iap::SplineBucketContext ctx;
-      ctx.support = *fallback_support;
-      ctx.sensor_id = iap::SplineSensorId::Lidar;
-      ctx.point_indices.resize(gtsam_points::frame::size(*segment.source));
-      std::iota(ctx.point_indices.begin(), ctx.point_indices.end(), 0);
-      buckets.push_back(std::move(ctx));
-    }
-  }
-
-  return buckets;
+  iap::CTLocalFrontend::SourceFrameInput source_frame;
+  source_frame.source_cloud = segment.source;
+  source_frame.scan_start = segment.stamp;
+  source_frame.scan_end = segment.scan_end;
+  return iap::CTLocalFrontend::create_lidar_buckets(*layout, source_frame, lidar_bucket_config_);
 }
 
 std::vector<iap::GnssEpoch> OdometryEstimationBSpline::consume_segment_gnss_epochs(
@@ -1119,13 +1104,6 @@ std::shared_ptr<iap::IntegratedBSplineGICPFactorGPUKernel> OdometryEstimationBSp
 EstimationFrame::ConstPtr OdometryEstimationBSpline::insert_frame_ct_lidar(
   const PreprocessedFrame::Ptr& raw_frame,
   std::vector<EstimationFrame::ConstPtr>& marginalized_frames) {
-  // IAP-RQ-300 / IAP-RQ-410: Hybrid orchestration boundary (Task 5).
-  // Run the local frontend to get an optimized layout and compact summary,
-  // then feed GNSS epochs into the compact backend graph.
-  // The monolithic factor assembly below continues to run as the active solver path;
-  // the frontend result is used for GNSS backend assembly and trajectory publication.
-  const auto ct_frontend_input = make_frontend_input(raw_frame);
-  const auto ct_local_result = ct_local_frontend_.run(ct_frontend_input);
   using Clock = std::chrono::steady_clock;
   const auto t_window_start = Clock::now();
   const auto elapsed_ms = [](const Clock::time_point& start, const Clock::time_point& end) {
@@ -1250,6 +1228,105 @@ EstimationFrame::ConstPtr OdometryEstimationBSpline::insert_frame_ct_lidar(
     return new_frame;
   }
 
+  {
+    const auto t_source_start = Clock::now();
+    new_frame->frame = create_lidar_source_cloud(raw_frame);
+    pipeline_timing.source_cloud_ms = elapsed_ms(t_source_start, Clock::now());
+  }
+
+  const auto ct_frontend_input = make_frontend_input(raw_frame, new_frame->frame);
+  const auto ct_local_result = ct_local_frontend_.run(ct_frontend_input);
+  if (frontend_only_mode_) {
+    const auto frontend_layout = std::make_shared<const iap::SplineStateLayout>(ct_local_result.layout);
+    auto frontend_evaluator = frontend_layout
+      ? std::make_shared<iap::SplineEvaluator>(frontend_layout)
+      : nullptr;
+    auto evaluate_frontend_pose = [&](double stamp, const gtsam::Pose3& fallback) {
+      if (!frontend_layout || !frontend_evaluator) {
+        return fallback;
+      }
+
+      if (const auto support = frontend_layout->support_at(stamp, iap::SplineSensorId::Lidar)) {
+        return frontend_evaluator->eval_pose(ct_local_result.local_values, *support, iap::SplineSensorId::Lidar);
+      }
+      return fallback;
+    };
+
+    const gtsam::Pose3 fallback_pose = frames.back()
+      ? gtsam::Pose3(frames.back()->T_world_lidar.matrix())
+      : gtsam::Pose3();
+    const gtsam::Pose3 start_pose = evaluate_frontend_pose(raw_frame->stamp, fallback_pose);
+
+    new_frame->T_world_lidar = Eigen::Isometry3d(start_pose.matrix());
+    new_frame->T_world_imu = new_frame->T_world_lidar * T_lidar_imu;
+
+    const auto& frontend_controls = ct_local_result.layout.controls();
+    if (!frontend_controls.empty()) {
+      const gtsam::Key velocity_key = iap::bspline_velocity_key(frontend_controls.back().index);
+      if (ct_local_result.local_values.exists(velocity_key)) {
+        new_frame->v_world_imu = ct_local_result.local_values.at<gtsam::Vector3>(velocity_key);
+      }
+    }
+    if (ct_local_result.local_values.exists(gtsam::symbol('k', 0))) {
+      new_frame->imu_bias.head<3>() = ct_local_result.local_values.at<gtsam::Vector3>(gtsam::symbol('k', 0));
+    }
+    if (ct_local_result.local_values.exists(gtsam::symbol('j', 0))) {
+      new_frame->imu_bias.tail<3>() = ct_local_result.local_values.at<gtsam::Vector3>(gtsam::symbol('j', 0));
+    }
+    if (!frames.empty() && frames.back()) {
+      new_frame->clk_bias = frames.back()->clk_bias;
+      new_frame->clk_drift = frames.back()->clk_drift;
+    }
+    fixed_lag_registry_.set_shared_imu_state(
+      new_frame->imu_bias.tail<3>(),
+      new_frame->imu_bias.head<3>(),
+      fixed_lag_registry_.shared_state().gravity);
+
+    auto deskewed_frame = ct_local_result.processed.deskewed_source_cloud
+      ? gtsam_points::PointCloudCPU::clone(*ct_local_result.processed.deskewed_source_cloud)
+      : gtsam_points::PointCloudCPU::clone(*new_frame->frame);
+    std::vector<Eigen::Vector4d> deskewed_points;
+    deskewed_points.reserve(static_cast<std::size_t>(deskewed_frame->size()));
+    for (int i = 0; i < deskewed_frame->size(); ++i) {
+      deskewed_points.push_back(deskewed_frame->points[i]);
+    }
+    const auto deskewed_covs = covariance_estimation->estimate(deskewed_points, raw_frame->neighbors);
+    for (int i = 0; i < deskewed_frame->size(); ++i) {
+      deskewed_frame->points[i] = deskewed_points[static_cast<std::size_t>(i)];
+      if (static_cast<std::size_t>(i) < deskewed_covs.size()) {
+        deskewed_frame->covs[i] = deskewed_covs[static_cast<std::size_t>(i)];
+      }
+    }
+    new_frame->frame = deskewed_frame;
+
+    if (ct_local_result.processed.lidar_window_summary.valid) {
+      new_frame->icp_quality.inlier_count =
+        static_cast<int>(ct_local_result.processed.lidar_window_summary.total_inlier_point_count);
+      new_frame->icp_quality.inlier_fraction =
+        ct_local_result.processed.lidar_window_summary.weighted_inlier_ratio;
+      new_frame->icp_quality.rmse = std::sqrt(
+        ct_local_result.processed.total_lidar_factor_error /
+        std::max(new_frame->icp_quality.inlier_count, 1));
+    }
+
+    Callbacks::on_new_frame(new_frame);
+    insert_target_cloud(new_frame);
+    update_frame_history(new_frame, marginalized_frames);
+    publish_continuous_trajectory_from_layout(frontend_layout, ct_local_result.local_values);
+    if (publish_shared_trajectory_) {
+      iap::IapSharedState::instance().clear_bspline_fixed_lag_telemetry();
+    }
+    log_frontend_only_stats(ct_local_result);
+
+    std::vector<EstimationFrame::ConstPtr> active_frames(frames.inner_begin(), frames.inner_end());
+    if (!active_frames.empty()) {
+      Callbacks::on_update_new_frame(active_frames.back());
+      Callbacks::on_update_frames(active_frames);
+    }
+
+    return new_frame;
+  }
+
   const gtsam::Pose3 predicted_end_pose = predict_scan_end_pose(scan_duration);
   control_window_->advance(raw_frame->stamp, raw_frame->scan_end_time, predicted_end_pose);
   fixed_lag_registry_.append_window(*control_window_);
@@ -1260,12 +1337,6 @@ EstimationFrame::ConstPtr OdometryEstimationBSpline::insert_frame_ct_lidar(
   }
 
   const double min_active_stamp = std::max(0.0, raw_frame->stamp - params->smoother_lag);
-
-  {
-    const auto t_source_start = Clock::now();
-    new_frame->frame = create_lidar_source_cloud(raw_frame);
-    pipeline_timing.source_cloud_ms = elapsed_ms(t_source_start, Clock::now());
-  }
   const auto factor_source = gtsam_points::PointCloudCPU::clone(*new_frame->frame);
   {
     const auto t_segment_prepare_start = Clock::now();
@@ -2685,33 +2756,55 @@ EstimationFrame::ConstPtr OdometryEstimationBSpline::insert_frame_ct_lidar(
 void OdometryEstimationBSpline::publish_continuous_trajectory(int current) {
   (void)current;
 
-  auto trajectory = std::make_shared<iap::BSplineTrajectory>(trajectory_params_);
   if ((frontend_mode_ == "CT_LIDAR_CPU" || frontend_mode_ == "CT_LIDAR_GPU") && active_window_layout_) {
     gtsam::Values trajectory_values = fixed_lag_registry_.control_buffer().values();
-    trajectory->set_layout(active_window_layout_, &trajectory_values);
-  } else {
-    std::vector<iap::SplineControlPoint> control_points;
-    control_points.reserve(frames.inner_size());
-
-    for (auto it = frames.inner_begin(); it != frames.inner_end(); ++it) {
-      if (!(*it)) {
-        continue;
-      }
-
-      iap::SplineControlPoint cp;
-      cp.stamp = (*it)->stamp;
-      cp.pose = (*it)->T_world_imu;
-      cp.vel = (*it)->v_world_imu;
-      cp.sigma = sigma_from_covariance((*it)->sigma_p);
-      control_points.push_back(cp);
-    }
-
-    if (control_points.empty()) {
-      return;
-    }
-
-    trajectory->set_control_points(control_points);
+    publish_continuous_trajectory_from_layout(active_window_layout_, trajectory_values);
+    return;
   }
+
+  auto trajectory = std::make_shared<iap::BSplineTrajectory>(trajectory_params_);
+  std::vector<iap::SplineControlPoint> control_points;
+  control_points.reserve(frames.inner_size());
+
+  for (auto it = frames.inner_begin(); it != frames.inner_end(); ++it) {
+    if (!(*it)) {
+      continue;
+    }
+
+    iap::SplineControlPoint cp;
+    cp.stamp = (*it)->stamp;
+    cp.pose = (*it)->T_world_imu;
+    cp.vel = (*it)->v_world_imu;
+    cp.sigma = sigma_from_covariance((*it)->sigma_p);
+    control_points.push_back(cp);
+  }
+
+  if (control_points.empty()) {
+    return;
+  }
+
+  trajectory->set_control_points(control_points);
+
+  if (trajectory->empty()) {
+    return;
+  }
+
+  latest_trajectory_ = trajectory;
+
+  update_frame_attachment(trajectory);
+  update_compatibility_trajectory(trajectory);
+
+  if (publish_shared_trajectory_) {
+    iap::IapSharedState::instance().set_continuous_trajectory_view(trajectory);
+    iap::IapSharedState::instance().set_spline_control_access(trajectory);
+  }
+}
+
+void OdometryEstimationBSpline::publish_continuous_trajectory_from_layout(
+  std::shared_ptr<const iap::SplineStateLayout> layout,
+  const gtsam::Values& values) {
+  auto trajectory = std::make_shared<iap::BSplineTrajectory>(trajectory_params_);
+  trajectory->set_layout(std::move(layout), &values);
 
   if (trajectory->empty()) {
     return;
@@ -2860,24 +2953,59 @@ void OdometryEstimationBSpline::maybe_export_lidar_baseline_csv(
     export_data.summary.total_factor_ms);
 }
 
+void OdometryEstimationBSpline::log_frontend_only_stats(const iap::CTLocalFrontendResult& local_result) const {
+  logger->info(
+    "bspline ct frontend-only stats buckets={} local_solve_ms={:.3f} lidar_residuals={} imu_residuals={} active_local_controls={}",
+    local_result.debug_stats.bucket_count,
+    local_result.debug_stats.local_solve_time_ms,
+    local_result.debug_stats.lidar_residual_count,
+    local_result.debug_stats.imu_residual_count,
+    local_result.debug_stats.active_local_controls.size());
+}
+
 // IAP-RQ-300 / IAP-RQ-410: Build CTLocalFrontend::Input from the current raw frame and frame history.
-// The actual CTLocalFrontend::Input only carries target_frame and source_frames; solver params
-// are internal to the frontend. This helper wires the available estimation context into those fields.
+// This helper wires target selection, bucket config, prepared source cloud, and
+// IMU samples into the local frontend contract.
 iap::CTLocalFrontend::Input OdometryEstimationBSpline::make_frontend_input(
-  const PreprocessedFrame::Ptr& raw_frame) const {
+  const PreprocessedFrame::Ptr& raw_frame,
+  const gtsam_points::PointCloud::ConstPtr& prepared_source_cloud) const {
   iap::CTLocalFrontend::Input input;
 
-  // Target frame: use the most recent estimation frame as the pose prior.
   if (!frames.empty() && frames.back()) {
     input.target_frame = frames.back();
   }
 
-  // Source frames: wrap raw_frame points as RawPoints.
   auto source = std::make_shared<glim::RawPoints>();
   source->stamp = raw_frame->stamp;
   source->points = raw_frame->points;
   source->times = raw_frame->times;
-  input.source_frames.push_back(source);
+  input.source_frames.push_back(iap::CTLocalFrontend::SourceFrameInput{
+    source,
+    prepared_source_cloud,
+    raw_frame->stamp,
+    raw_frame->scan_end_time,
+  });
+
+  const auto target_ref = create_active_target_reference();
+  input.target_ivox =
+    target_ref.target_snapshot && !target_ref.target_snapshot->voxel_points().empty()
+      ? target_ref.target_snapshot
+      : nullptr;
+  input.bucket_config = lidar_bucket_config_;
+  input.lm_max_iterations = lm_max_iterations_;
+  input.accelerometer_precision = imu_ct_trans_inf_scale_;
+  input.gyroscope_precision = imu_ct_rot_inf_scale_;
+  input.max_correspondence_distance = max_correspondence_distance_;
+
+  const auto imu_samples = create_segment_imu_samples(raw_frame);
+  input.imu_samples.reserve(imu_samples.size());
+  for (const auto& sample : imu_samples) {
+    input.imu_samples.push_back(iap::CTLocalFrontend::IMUSample{
+      sample.stamp,
+      sample.angular_vel,
+      sample.linear_acc,
+    });
+  }
 
   return input;
 }

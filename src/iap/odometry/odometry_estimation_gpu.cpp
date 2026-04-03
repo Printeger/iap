@@ -25,6 +25,8 @@
 #include <gtsam_points/optimizers/incremental_fixed_lag_smoother_with_fallback.hpp>
 #include <gtsam_points/cuda/nonlinear_factor_set_gpu.hpp>
 
+#include <iap/common/log_config.hpp>
+#include <iap/common/log_paths.hpp>
 #include <iap/util/config.hpp>
 #include <iap/common/imu_integration.hpp>
 #include <iap/common/cloud_deskewing.hpp>
@@ -77,7 +79,11 @@ OdometryEstimationGPUParams::OdometryEstimationGPUParams() : OdometryEstimationI
   gamma_lidar_max    = config.param<double>("odometry_estimation", "gamma_lidar_max",    10.0);
   enable_icp_csv     = config.param<bool>("odometry_estimation", "enable_icp_csv", false);
   icp_csv_path       = config.param<std::string>("odometry_estimation", "icp_csv_path",
-                                                  "/tmp/iap_icp.csv");
+                                                  "icp_quality.csv");
+  enable_icp_csv     = iap::get_log_config().export_outputs.icp_quality_csv;
+  icp_csv_path       = iap::LogPaths::instance()
+                         .export_path(iap::get_log_config().export_outputs.icp_quality_csv_file)
+                         .string();
 
   spdlog::info("[odometry_gpu] enable_icp_csv={} icp_csv_path={}", enable_icp_csv, icp_csv_path);
 }

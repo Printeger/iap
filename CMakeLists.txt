@@ -83,6 +83,8 @@ add_library(iap SHARED
   src/iap/preprocess/callbacks.cpp
   src/iap/preprocess/cloud_preprocessor.cpp
   # common process
+  src/iap/common/log_config.cpp
+  src/iap/common/log_paths.cpp
   src/iap/common/imu_integration.cpp
   src/iap/common/imu_validation.cpp
   src/iap/common/cloud_deskewing.cpp

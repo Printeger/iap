@@ -261,11 +261,11 @@ TEST(BSplineMarginalizationTest, ActiveStateSetKeepsControlsSharedAcrossBucketSt
   std::sort(active_state_set.active_auxiliary_indices.begin(), active_state_set.active_auxiliary_indices.end());
   std::sort(active_state_set.removable_auxiliary_indices.begin(), active_state_set.removable_auxiliary_indices.end());
 
-  EXPECT_EQ(active_state_set.active_control_indices, (std::vector<std::size_t>{3, 4, 5, 6, 7}));
-  EXPECT_EQ(active_state_set.removable_control_indices, (std::vector<std::size_t>{0, 1, 2}));
-  EXPECT_EQ(active_state_set.active_auxiliary_indices, (std::vector<std::size_t>{4, 5, 6}));
-  EXPECT_EQ(active_state_set.removable_auxiliary_indices, (std::vector<std::size_t>{1}));
-  EXPECT_TRUE(active_state_set.contains_active_key(iap::bspline_control_point_key(3)));
+  EXPECT_EQ(active_state_set.active_control_indices, (std::vector<std::size_t>{2, 3, 4, 5, 6, 7}));
+  EXPECT_EQ(active_state_set.removable_control_indices, (std::vector<std::size_t>{0, 1}));
+  EXPECT_EQ(active_state_set.active_auxiliary_indices, (std::vector<std::size_t>{5, 6}));
+  EXPECT_EQ(active_state_set.removable_auxiliary_indices, (std::vector<std::size_t>{1, 4}));
+  EXPECT_TRUE(active_state_set.contains_active_key(iap::bspline_control_point_key(2)));
   EXPECT_TRUE(active_state_set.contains_active_key(iap::bspline_control_point_key(6)));
   EXPECT_FALSE(active_state_set.contains_removed_key(iap::bspline_control_point_key(3)));
 
@@ -277,8 +277,10 @@ TEST(BSplineMarginalizationTest, ActiveStateSetKeepsControlsSharedAcrossBucketSt
     true);
   EXPECT_FALSE(partition.should_marginalize_factor(
     gtsam::KeyVector{iap::bspline_control_point_key(3), iap::bspline_control_point_key(4), iap::bspline_velocity_key(5)}));
-  EXPECT_TRUE(partition.should_marginalize_factor(
+  EXPECT_FALSE(partition.should_marginalize_factor(
     gtsam::KeyVector{iap::bspline_control_point_key(2), iap::bspline_control_point_key(3)}));
+  EXPECT_TRUE(partition.should_marginalize_factor(
+    gtsam::KeyVector{iap::bspline_control_point_key(1), iap::bspline_control_point_key(2)}));
 }
 
 TEST(BSplineMarginalizationTest, RegistryPruneRetainsControlsSharedAcrossBucketStyleReferences) {
@@ -329,8 +331,8 @@ TEST(BSplineMarginalizationTest, RegistryPruneRetainsControlsSharedAcrossBucketS
   for (const auto& state : registry.control_buffer().states()) {
     retained_indices.push_back(state.index);
   }
-  EXPECT_EQ(retained_indices, (std::vector<std::size_t>{3, 4, 5, 6, 7}));
-  EXPECT_TRUE(registry.auxiliary_values().exists(iap::bspline_velocity_key(4)));
+  EXPECT_EQ(retained_indices, (std::vector<std::size_t>{2, 3, 4, 5, 6, 7}));
+  EXPECT_FALSE(registry.auxiliary_values().exists(iap::bspline_velocity_key(4)));
   EXPECT_TRUE(registry.auxiliary_values().exists(iap::bspline_velocity_key(5)));
   EXPECT_TRUE(registry.auxiliary_values().exists(iap::bspline_velocity_key(6)));
   EXPECT_FALSE(registry.auxiliary_values().exists(iap::bspline_velocity_key(1)));

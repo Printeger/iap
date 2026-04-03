@@ -30,6 +30,10 @@
     // NOTE: compute_mode in the launch file only switches sub_mapping/global_mapping configs.
     //       The odometry frontend_mode must be set here directly.
     "frontend_mode": "CT_LIDAR_CPU",
+    // Frontend-only runtime:
+    //   false = keep the current hybrid runtime (local frontend + monolithic active-window main path during migration)
+    //   true  = run only the local CT frontend, skip compact backend optimize and skip the old monolithic active-window solve
+    "frontend_only_mode": true,
     // GPU backend for CT_LIDAR_GPU:
     //   CPU path is the refactor mainline.
     //   BUCKET is the second-priority GPU adaptation path after the CPU path is stable.
@@ -71,6 +75,15 @@
     //   prefer the rolling global reference to avoid rebuilding a frozen
     //   active-window snapshot target every update.
     "ct_lidar_target_mode": "GLOBAL_IVOX_REFERENCE",
+    // Local frontend bucket scheduler:
+    //   TIME_EPS      = split by per-point relative-time threshold and optionally merge adjacent buckets to max_buckets
+    //   FIXED_COUNT   = split each scan into a fixed number of uniform time buckets
+    //   SINGLE_BUCKET = keep one bucket per scan, representative time = mean point time
+    "ct_lidar_bucket_mode": "SINGLE_BUCKET",
+    "ct_lidar_bucket_time_eps": 1e-3,
+    // <= 0 disables the TIME_EPS post-split cap.
+    "ct_lidar_max_buckets_per_scan": 0,
+    "ct_lidar_fixed_buckets_per_scan": 8,
     // Jacobian mode for continuous-time LiDAR factors (CPU / GPU):
     //   NUMERIC_FULL   = numeric pose Jacobian on all 6 DoF of each control pose
     //   SEMI_ANALYTIC  = analytic translation + normalized-quaternion-blend rotation chain rule
@@ -120,7 +133,7 @@
     // Export one active-window summary row plus one row per CT LiDAR factor.
     // This is the baseline surface used for future GPU kernel-level A/B profiling.
     "ct_lidar_export_baseline_csv": false,
-    "ct_lidar_baseline_csv_path": "/tmp/iap_ct_lidar_baseline.csv",
+    "ct_lidar_baseline_csv_path": "ct_lidar_baseline.csv",
     "ct_lidar_linearization_check_scale": 1e-4,
     "ct_lidar_linearization_warn_ratio": 0.25,
     "ct_lidar_numeric_reference_scale": 1e-5,

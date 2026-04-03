@@ -62,7 +62,7 @@
 
     // Debug CSV (set true to enable; replaces IAP_GNSS_DEBUG_CSV env var)
     "enable_debug_csv": true,
-    "debug_csv_path": "/home/dev/code/ws_iap/src/iap/log/res/iap_gnss_factor_debug.csv"
+    "debug_csv_path": "gnss_factor_debug.csv"
   },
 
   /*** Integrity Extension Module Configuration (IAP-RQ-200/210/220/240) ***
@@ -115,10 +115,10 @@
 
     // ARAIM debug CSV (IAP-RQ-200 observability)
     "enable_araim_csv":   true,
-    "araim_csv_path":     "/home/dev/code/ws_iap/src/iap/log/res/iap_araim.csv",
+    "araim_csv_path":     "araim.csv",
 
     // Trajectory CSV (for Fig D1 comparison)
     "enable_traj_csv":    true,
-    "traj_csv_path":      "/home/dev/code/ws_iap/src/iap/log/res/traj_with_gnss.csv"
+    "traj_csv_path":      "integrity_trajectory.csv"
   }
 }

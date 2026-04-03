@@ -95,24 +95,35 @@ This runs the odometry path only.
 
 Default log directories:
 
-- `src/iap/log/`
-- Common result folder: `src/iap/log/res/`
+- Package-root log root: `src/iap/log/`
+- Each run creates its own timestamped directory under `src/iap/log/`
+- `src/iap/log/latest` points to the most recent run when symlink creation is enabled
 
-If `global.enable_timing_csv=true` in `config/config.json`, it writes:
+Run directory layout:
 
-- `src/iap/log/res/iap_timing.csv`
+- `runtime/` for `glim_main.log` and per-module `glim_<module>.log`
+- `profiling/` for timing and factor profiling CSV files
+- `export/` for ARAIM / GNSS / ICP / CT LiDAR CSV exports
+- `metadata/` for `run_info.json`, config snapshot, git revision, and build info
+
+Useful paths in the latest run:
+
+- `src/iap/log/latest/profiling/pipeline_timing.csv`
+- `src/iap/log/latest/export/araim.csv`
+- `src/iap/log/latest/export/gnss_factor_debug.csv`
+- `src/iap/log/latest/export/icp_quality.csv`
 
 Useful analysis scripts:
 
 ```bash
 # ARAIM timeline
-python3 tools/plot_araim_timeline.py src/iap/log/res/iap_araim.csv src/iap/log/res
+python3 tools/plot_araim_timeline.py src/iap/log/latest/export/araim.csv src/iap/log/latest/export
 
 # GNSS factor diagnostics
-python3 tools/plot_gnss_factor_debug.py --csv src/iap/log/res/iap_gnss_factor_debug.csv --out src/iap/log/res
+python3 tools/plot_gnss_factor_debug.py --csv src/iap/log/latest/export/gnss_factor_debug.csv --out src/iap/log/latest/export
 
 # ICP + module timing
-python3 tools/plot_icp_timing.py src/iap/log/res/iap_icp.csv src/iap/log/res/iap_timing.csv src/iap/log/res
+python3 tools/plot_icp_timing.py src/iap/log/latest/export/icp_quality.csv src/iap/log/latest/profiling/pipeline_timing.csv src/iap/log/latest/export
 ```
 
 ---

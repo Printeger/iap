@@ -23,6 +23,8 @@
 #include <std_msgs/msg/header.hpp>
 #include <rclcpp/rclcpp.hpp>
 
+#include <iap/common/log_config.hpp>
+#include <iap/common/log_paths.hpp>
 #include <iap/integrity/araim_debug.hpp>
 #include <iap/odometry/callbacks.hpp>
 #include <iap/odometry/estimation_frame.hpp>
@@ -78,17 +80,19 @@ IntegrityExtensionModule::IntegrityExtensionModule()
   monitor_ = IntegrityMonitor(mp);
 
   // ── ARAIM debug CSV (IAP-RQ-200 observability) ───────────────────────────
-  const bool araim_csv_en = config.param<bool>("integrity", "enable_araim_csv", false);
-  const std::string araim_csv_path = config.param<std::string>(
-      "integrity", "araim_csv_path", "/tmp/iap_araim.csv");
+  const bool araim_csv_en = iap::get_log_config().export_outputs.araim_csv;
+  const std::string araim_csv_path =
+    iap::LogPaths::instance().export_path(iap::get_log_config().export_outputs.araim_csv_file).string();
   araim_debug_csv_ = std::make_unique<AraimDebugCSV>(araim_csv_en, araim_csv_path);
   logger_->info("[IntegrityExt] ARAIM CSV: {} → {}",
                 araim_csv_en ? "ENABLED" : "disabled", araim_csv_path);
 
   // ── Trajectory CSV ────────────────────────────────────────────────────────
-  const bool traj_en = config.param<bool>("integrity", "enable_traj_csv", false);
-  const std::string traj_path = config.param<std::string>(
-      "integrity", "traj_csv_path", "/tmp/traj_with_gnss.csv");
+  const bool traj_en = iap::get_log_config().export_outputs.integrity_trajectory_csv;
+  const std::string traj_path =
+    iap::LogPaths::instance()
+      .export_path(iap::get_log_config().export_outputs.integrity_trajectory_csv_file)
+      .string();
   if (traj_en) {
     traj_csv_file_ = std::fopen(traj_path.c_str(), "w");
     if (traj_csv_file_) {

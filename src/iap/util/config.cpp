@@ -1,6 +1,8 @@
 #include <iap/util/config.hpp>
 
 #include <boost/filesystem.hpp>
+#include <iap/common/log_config.hpp>
+#include <iap/common/log_paths.hpp>
 #include <iap/util/config_impl.hpp>
 
 namespace glim {
@@ -70,6 +72,8 @@ GlobalConfig* GlobalConfig::instance(const std::string& config_path, bool overri
 
     inst = new GlobalConfig(config_path + "/config.json");
     inst->override_param("global", "config_path", config_path);
+    iap::reset_log_config();
+    iap::LogPaths::reset();
   }
   return inst;
 }

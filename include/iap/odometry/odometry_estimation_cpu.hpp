@@ -43,7 +43,7 @@ public:
   double icp_cond_threshold;  ///< Hessian condition number threshold for degeneracy (default 500)
   double gamma_lidar_max;     ///< Maximum noise inflation factor for degenerate LiDAR (default 10.0)
   bool        enable_icp_csv  = false;           ///< Write per-frame ICP quality CSV
-  std::string icp_csv_path    = "/tmp/iap_icp.csv";
+  std::string icp_csv_path    = "icp_quality.csv";
   // -----------------------------------------------------------------------
 
   // ---- Scan-to-multi-scan (GLIO2-style) -----------------------------------

@@ -13,9 +13,38 @@
 #include <gtsam/nonlinear/NonlinearFactorGraph.h>
 #include <gtsam/nonlinear/Values.h>
 #include <gtsam/geometry/Rot3.h>
+#include <gtsam_points/types/point_cloud_cpu.hpp>
 
 #include <Eigen/Core>
+#include <array>
 #include <memory>
+
+namespace {
+
+iap::CTLocalFrontend::SourceFrameInput make_source_input(
+  const std::vector<Eigen::Vector4d>& points,
+  const std::vector<double>& times,
+  double scan_start = 0.0,
+  double scan_end = 0.1) {
+  auto raw = std::make_shared<glim::RawPoints>();
+  raw->stamp = scan_start;
+  raw->points = points;
+  raw->times = times;
+
+  auto cloud = std::make_shared<gtsam_points::PointCloudCPU>(points);
+  if (!times.empty()) {
+    cloud->add_times(times);
+  }
+
+  return iap::CTLocalFrontend::SourceFrameInput{
+    raw,
+    cloud,
+    scan_start,
+    scan_end,
+  };
+}
+
+}  // namespace
 
 // Test 1: frontend run() produces a result that backend update() can consume
 TEST(CTHybridPipeline, FrontendResultFlowsToBackendUpdate) {
@@ -178,14 +207,11 @@ TEST(CTHybridPipeline, FrontendWithSourceFramesProducesNonEmptySummary) {
   target->imu_bias = Eigen::Matrix<double, 6, 1>::Zero();
 
   // Build a source frame with points
-  auto source = std::make_shared<glim::RawPoints>();
-  source->stamp = 0.0;
-  source->points = {Eigen::Vector4d(1.0, 0.0, 0.0, 1.0), Eigen::Vector4d(2.0, 0.0, 0.0, 1.0)};
-  source->times = {0.02, 0.05};
-
   iap::CTLocalFrontend::Input f_input;
   f_input.target_frame = target;
-  f_input.source_frames.push_back(source);
+  f_input.source_frames.push_back(make_source_input(
+    {Eigen::Vector4d(1.0, 0.0, 0.0, 1.0), Eigen::Vector4d(2.0, 0.0, 0.0, 1.0)},
+    {0.02, 0.05}));
 
   iap::CTLocalFrontend frontend;
   const auto local_result = frontend.run(f_input);
@@ -221,14 +247,11 @@ TEST(CTHybridPipeline, BackendWithGnssAnchorAddsPseudorangeAndDopplerFactors) {
   target->v_world_imu = Eigen::Vector3d::Zero();
   target->imu_bias = Eigen::Matrix<double, 6, 1>::Zero();
 
-  auto source = std::make_shared<glim::RawPoints>();
-  source->stamp = 0.0;
-  source->points = {Eigen::Vector4d(1.0, 0.0, 0.0, 1.0)};
-  source->times = {0.05};
-
   iap::CTLocalFrontend::Input f_input;
   f_input.target_frame = target;
-  f_input.source_frames.push_back(source);
+  f_input.source_frames.push_back(make_source_input(
+    {Eigen::Vector4d(1.0, 0.0, 0.0, 1.0)},
+    {0.05}));
 
   iap::CTLocalFrontend frontend;
   const auto local_result = frontend.run(f_input);
@@ -288,11 +311,6 @@ TEST(CTHybridPipelineRegression, AllVerifiedModesProduceValidBackendHandoff) {
   target->v_world_imu = Eigen::Vector3d::Zero();
   target->imu_bias = Eigen::Matrix<double, 6, 1>::Zero();
 
-  auto source = std::make_shared<glim::RawPoints>();
-  source->stamp = 0.0;
-  source->points = {Eigen::Vector4d(1.0, 0.0, 0.0, 1.0)};
-  source->times = {0.05};
-
   iap::CTLocalFrontend frontend;
 
   // Helper: verify a result produces a valid backend handoff.
@@ -321,7 +339,9 @@ TEST(CTHybridPipelineRegression, AllVerifiedModesProduceValidBackendHandoff) {
   {
     iap::CTLocalFrontend::Input input;
     input.target_frame = target;
-    input.source_frames.push_back(source);
+    input.source_frames.push_back(make_source_input(
+      {Eigen::Vector4d(1.0, 0.0, 0.0, 1.0)},
+      {0.05}));
     input.target_ivox = nullptr;
     verify_handoff(frontend.run(input), "CT_LIDAR_CPU");
   }
@@ -331,7 +351,9 @@ TEST(CTHybridPipelineRegression, AllVerifiedModesProduceValidBackendHandoff) {
   {
     iap::CTLocalFrontend::Input input;
     input.target_frame = target;
-    input.source_frames.push_back(source);
+    input.source_frames.push_back(make_source_input(
+      {Eigen::Vector4d(1.0, 0.0, 0.0, 1.0)},
+      {0.05}));
     input.target_ivox = nullptr;
     verify_handoff(frontend.run(input), "CT_LIDAR_GPU+BUCKET");
   }
@@ -340,8 +362,55 @@ TEST(CTHybridPipelineRegression, AllVerifiedModesProduceValidBackendHandoff) {
   {
     iap::CTLocalFrontend::Input input;
     input.target_frame = target;
-    input.source_frames.push_back(source);
+    input.source_frames.push_back(make_source_input(
+      {Eigen::Vector4d(1.0, 0.0, 0.0, 1.0)},
+      {0.05}));
     input.target_ivox = nullptr;
     verify_handoff(frontend.run(input), "CT_LIDAR_GPU+KERNEL (experimental)");
+  }
+}
+
+TEST(CTHybridPipelineRegression, BucketModesPreserveCompactBackendBoundary) {
+  auto target = std::make_shared<glim::EstimationFrame>();
+  target->stamp = 0.0;
+  target->T_world_lidar = Eigen::Isometry3d::Identity();
+  target->T_lidar_imu = Eigen::Isometry3d::Identity();
+  target->v_world_imu = Eigen::Vector3d::Zero();
+  target->imu_bias = Eigen::Matrix<double, 6, 1>::Zero();
+
+  const auto source = make_source_input(
+    {
+      Eigen::Vector4d(0.0, 0.0, 0.0, 1.0),
+      Eigen::Vector4d(1.0, 0.0, 0.0, 1.0),
+      Eigen::Vector4d(2.0, 0.0, 0.0, 1.0),
+    },
+    {0.0, 0.03, 0.06});
+
+  const std::array<iap::CTLocalFrontend::LidarBucketMode, 3> modes = {
+    iap::CTLocalFrontend::LidarBucketMode::TIME_EPS,
+    iap::CTLocalFrontend::LidarBucketMode::FIXED_COUNT,
+    iap::CTLocalFrontend::LidarBucketMode::SINGLE_BUCKET,
+  };
+
+  for (const auto mode : modes) {
+    iap::CTLocalFrontend::Input input;
+    input.target_frame = target;
+    input.source_frames.push_back(source);
+    input.bucket_config.mode = mode;
+    input.bucket_config.fixed_buckets_per_scan = 2;
+
+    iap::CTLocalFrontend frontend;
+    const auto local_result = frontend.run(input);
+
+    iap::CTCompactBackend backend;
+    iap::CTCompactBackend::Input backend_input;
+    backend_input.gnss_anchor_initialized = false;
+    gtsam::NonlinearFactorGraph graph;
+    gtsam::Values values;
+    backend.update(local_result, backend_input, &graph, &values);
+
+    const auto stats = backend.debug_stats(local_result.backend_summary);
+    EXPECT_EQ(stats.raw_lidar_factor_count, 0U);
+    EXPECT_EQ(graph.size(), 0U);
   }
 }

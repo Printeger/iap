@@ -1,4 +1,10 @@
 #include <filesystem>
+#include <algorithm>
+#include <cctype>
+#include <string>
+
+#include <iap/common/log_config.hpp>
+#include <iap/common/log_paths.hpp>
 #include <iap/util/config.hpp>
 #include <iap/util/logging.hpp>
 #include <spdlog/spdlog.h>
@@ -18,6 +24,24 @@ void set_default_logger(const std::shared_ptr<spdlog::logger>& logger) {
 
 namespace {
 std::shared_ptr<spdlog::sinks::ringbuffer_sink_mt> ringbuffer_sink;
+
+spdlog::level::level_enum parse_level(const std::string& level) {
+  const std::string normalized = [&level] {
+    std::string lower = level;
+    std::transform(lower.begin(), lower.end(), lower.begin(), [](unsigned char c) {
+      return static_cast<char>(std::tolower(c));
+    });
+    return lower;
+  }();
+
+  if (normalized == "trace") return spdlog::level::trace;
+  if (normalized == "debug") return spdlog::level::debug;
+  if (normalized == "warn" || normalized == "warning") return spdlog::level::warn;
+  if (normalized == "err" || normalized == "error") return spdlog::level::err;
+  if (normalized == "critical") return spdlog::level::critical;
+  if (normalized == "off") return spdlog::level::off;
+  return spdlog::level::info;
+}
 }
 
 std::shared_ptr<spdlog::sinks::ringbuffer_sink_mt> get_ringbuffer_sink(int buffer_size) {
@@ -33,34 +57,45 @@ std::shared_ptr<spdlog::logger> create_module_logger(const std::string& module_n
     return logger;
   }
 
-  const auto* config = glim::GlobalConfig::instance();
-  const std::string log_dir = config->param<std::string>("logging", "log_dir", std::string("/tmp"));
-  const std::string log_filename = module_name == "glim" ? "main" : module_name;
-
-  if (!std::filesystem::exists(log_dir)) {
-    std::filesystem::create_directories(log_dir);
-  }
+  const auto& log_config = iap::get_log_config();
+  const auto& log_paths = iap::LogPaths::instance();
+  const auto level = parse_level(log_config.runtime.level);
 
   logger = spdlog::stdout_color_mt(module_name);
   logger->sinks().push_back(get_ringbuffer_sink());
 
-  if (!config->param<bool>("logging", "save_logs", true)) {
-    return logger;
-  }
-
-  if (config->param<bool>("logging", "rotate_logs", true)) {
-    const size_t max_file_size_kb = config->param<int>("logging", "max_file_size_kb", 8192);
-    const size_t max_file_size_bytes = max_file_size_kb * 1024;
-    const size_t max_files = config->param<int>("logging", "max_files", 10);
-
-    auto rotating_sink = std::make_shared<spdlog::sinks::rotating_file_sink_mt>(log_dir + "/glim_" + log_filename + ".log", max_file_size_bytes, max_files);
-    logger->sinks().push_back(rotating_sink);
+  if (log_config.runtime.enable_console) {
+    logger->set_level(level);
   } else {
-    auto file_sink = std::make_shared<spdlog::sinks::basic_file_sink_mt>(log_dir + "/glim_" + log_filename + ".log", true);
-    logger->sinks().push_back(file_sink);
+    logger->sinks().clear();
   }
 
-  logger->set_level(get_default_logger()->level());
+  if (log_config.runtime.enable_file) {
+    const std::filesystem::path log_file =
+      module_name == "glim" ? log_paths.runtime_main_log_path() : log_paths.runtime_module_log_path(module_name);
+
+    if (log_config.runtime.rotate_files) {
+      const size_t max_file_size_bytes =
+        static_cast<size_t>(std::max(log_config.runtime.max_file_size_kb, 1)) * 1024ULL;
+      const size_t max_files = static_cast<size_t>(std::max(log_config.runtime.max_files, 1));
+      auto rotating_sink = std::make_shared<spdlog::sinks::rotating_file_sink_mt>(
+        log_file.string(), max_file_size_bytes, max_files);
+      logger->sinks().push_back(rotating_sink);
+    } else {
+      auto file_sink = std::make_shared<spdlog::sinks::basic_file_sink_mt>(log_file.string(), true);
+      logger->sinks().push_back(file_sink);
+    }
+
+    if (log_config.runtime.split_warnings_file) {
+      auto warnings_sink =
+        std::make_shared<spdlog::sinks::basic_file_sink_mt>(log_paths.warnings_log_path().string(), true);
+      warnings_sink->set_level(spdlog::level::warn);
+      logger->sinks().push_back(warnings_sink);
+    }
+  }
+
+  logger->set_level(level);
+  spdlog::set_level(level);
 
   return logger;
 }
