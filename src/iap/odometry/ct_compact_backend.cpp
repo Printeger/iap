@@ -65,7 +65,7 @@ void CTCompactBackend::update(
   }
   // Seed velocity state if not present (required by Doppler factor).
   if (!values->exists(velocity_key)) {
-    values->insert(velocity_key, gtsam::Vector3::Zero());
+    values->insert(velocity_key, gtsam::Vector3(0.0, 0.0, 0.0));
   }
 
   for (std::size_t epoch_index = 0; epoch_index < input.gnss_epochs.size(); ++epoch_index) {
@@ -99,6 +99,9 @@ void CTCompactBackend::update(
 
       auto pr_factor = std::make_shared<IntegratedSplinePseudorangeFactor>(
         ctx, clock_key, ecef_origin_key, ecef_rot_key, pr_obs, layout_ptr);
+      // Note: gnss_lever_arm from Input is not yet forwarded to IntegratedSplinePseudorangeFactor
+      // because the new-style spline-native constructor does not expose a lever arm parameter.
+      // TODO(Task 6): propagate lever arm through SplineSensorModel::T_sensor_imu offset.
       graph->add(pr_factor);
       gnss_factor_count++;
 

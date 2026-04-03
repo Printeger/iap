@@ -236,6 +236,12 @@ class OdometryEstimationBSpline : public OdometryEstimationCPU {
     const std::vector<iap::BSplineLidarFactorResult>& results,
     int current_factor_index);
 
+  // IAP-RQ-300 / IAP-RQ-410: Hybrid orchestration helpers (Task 5).
+  // Build the CTLocalFrontend::Input from the current raw frame and frame history.
+  iap::CTLocalFrontend::Input make_frontend_input(const PreprocessedFrame::Ptr& raw_frame) const;
+  // Build the CTCompactBackend::Input from the local frontend result and shared GNSS state.
+  iap::CTCompactBackend::Input make_backend_input(const iap::CTLocalFrontendResult& local_result) const;
+
   iap::BSplineTrajectory::Params trajectory_params_;
   // Planned hybrid split: orchestrator bridges CTLocalFrontend and CTCompactBackend.
   // Task 5 wires these as members; Task 6+ migrates real factor assembly behind them.

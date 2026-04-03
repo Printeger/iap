@@ -1119,12 +1119,13 @@ std::shared_ptr<iap::IntegratedBSplineGICPFactorGPUKernel> OdometryEstimationBSp
 EstimationFrame::ConstPtr OdometryEstimationBSpline::insert_frame_ct_lidar(
   const PreprocessedFrame::Ptr& raw_frame,
   std::vector<EstimationFrame::ConstPtr>& marginalized_frames) {
-  // Planned hybrid orchestration boundary (Task 5):
-  // Future: auto local_result = ct_local_frontend_.run(make_frontend_input(raw_frame));
-  // Future: ct_compact_backend_.update(local_result, &graph_, &values_);
-  // Future: publish_continuous_trajectory(local_result.layout, local_result.local_values);
-  // Until real factor assembly is migrated behind CTLocalFrontend (Task 6+),
-  // the existing monolithic path below remains the active runtime path.
+  // IAP-RQ-300 / IAP-RQ-410: Hybrid orchestration boundary (Task 5).
+  // Run the local frontend to get an optimized layout and compact summary,
+  // then feed GNSS epochs into the compact backend graph.
+  // The monolithic factor assembly below continues to run as the active solver path;
+  // the frontend result is used for GNSS backend assembly and trajectory publication.
+  const auto ct_frontend_input = make_frontend_input(raw_frame);
+  const auto ct_local_result = ct_local_frontend_.run(ct_frontend_input);
   using Clock = std::chrono::steady_clock;
   const auto t_window_start = Clock::now();
   const auto elapsed_ms = [](const Clock::time_point& start, const Clock::time_point& end) {
@@ -1876,6 +1877,14 @@ EstimationFrame::ConstPtr OdometryEstimationBSpline::insert_frame_ct_lidar(
     logger->error("bspline ct frontend optimization failed: {}", e.what());
   }
   pipeline_timing.lm_optimize_ms = elapsed_ms(t_optimize_start, Clock::now());
+
+  // IAP-RQ-300 / IAP-RQ-410: Feed GNSS epochs into the compact backend graph
+  // using the frontend layout. This runs after the monolithic LM solve so the
+  // backend can use the same graph/values that the solver just updated.
+  {
+    const auto ct_backend_input = make_backend_input(ct_local_result);
+    ct_compact_backend_.update(ct_local_result, ct_backend_input, &graph, &values);
+  }
 
   const auto keys = control_window_->keys();
   logger->trace("bspline ct active_window={} active_segment_factors={} active_velocity_factors={} active_imu_factors={} active_gnss_pr_factors={} active_gnss_dop_factors={} current_segment_keys={} {} {} {}",
@@ -2849,6 +2858,55 @@ void OdometryEstimationBSpline::maybe_export_lidar_baseline_csv(
     export_data.current_factor_index,
     export_data.summary.warning_result_count,
     export_data.summary.total_factor_ms);
+}
+
+// IAP-RQ-300 / IAP-RQ-410: Build CTLocalFrontend::Input from the current raw frame and frame history.
+// The actual CTLocalFrontend::Input only carries target_frame and source_frames; solver params
+// are internal to the frontend. This helper wires the available estimation context into those fields.
+iap::CTLocalFrontend::Input OdometryEstimationBSpline::make_frontend_input(
+  const PreprocessedFrame::Ptr& raw_frame) const {
+  iap::CTLocalFrontend::Input input;
+
+  // Target frame: use the most recent estimation frame as the pose prior.
+  if (!frames.empty() && frames.back()) {
+    input.target_frame = frames.back();
+  }
+
+  // Source frames: wrap raw_frame points as RawPoints.
+  auto source = std::make_shared<glim::RawPoints>();
+  source->stamp = raw_frame->stamp;
+  source->points = raw_frame->points;
+  source->times = raw_frame->times;
+  input.source_frames.push_back(source);
+
+  return input;
+}
+
+// IAP-RQ-300 / IAP-RQ-410: Build CTCompactBackend::Input from shared GNSS state.
+// The local_result parameter is reserved for future layout-driven GNSS key selection (Task 6+).
+iap::CTCompactBackend::Input OdometryEstimationBSpline::make_backend_input(
+  const iap::CTLocalFrontendResult& local_result) const {
+  // local_result.layout is available for Task 6+ key derivation; not used here yet.
+  iap::CTCompactBackend::Input input;
+
+  if (!fixed_lag_registry_.segments().empty()) {
+    input.gnss_epochs = fixed_lag_registry_.segments().back().gnss_epochs;
+  }
+
+  const auto& shared = fixed_lag_registry_.shared_state();
+  input.gnss_anchor_initialized = shared.gnss_anchor_initialized;
+  input.ecef_origin = shared.ecef_origin;
+  input.ecef_rot = shared.ecef_rot;
+  input.gnss_pr_noise_base = gnss_pr_noise_base_;
+  input.gnss_dop_noise_base = gnss_dop_noise_base_;
+  input.gnss_min_elevation = gnss_min_elevation_;
+  input.gnss_elev_noise_exp = gnss_elev_noise_exp_;
+  // TODO(Task 6): forward gnss_canopy_params_ and gnss_clock_between_params_ to backend Input.
+  // Note: epoch gating uses layout domain bounds; gnss_time_tolerance_ is applied
+  // upstream in consume_segment_gnss_epochs before epochs reach the backend.
+  input.gnss_lever_arm = gnss_lever_arm_;
+
+  return input;
 }
 
 }  // namespace glim

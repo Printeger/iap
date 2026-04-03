@@ -12,6 +12,8 @@
 #include <cstddef>
 #include <vector>
 
+#include <Eigen/Core>
+
 #include <gtsam/geometry/Rot3.h>
 #include <gtsam/base/Vector.h>
 
@@ -38,8 +40,10 @@ class CTCompactBackend {
     std::vector<iap::GnssEpoch> gnss_epochs;
     // ECEF anchor state (needed for pseudorange/Doppler factors)
     bool gnss_anchor_initialized{false};
-    gtsam::Vector3 ecef_origin = gtsam::Vector3::Zero();
+    gtsam::Vector3 ecef_origin{0.0, 0.0, 0.0};
     gtsam::Rot3 ecef_rot = gtsam::Rot3::Identity();
+    // GNSS lever arm (antenna offset from IMU in IMU frame)
+    Eigen::Vector3d gnss_lever_arm = Eigen::Vector3d::Zero();
     // Noise parameters
     double gnss_pr_noise_base{1.0};
     double gnss_dop_noise_base{0.1};
