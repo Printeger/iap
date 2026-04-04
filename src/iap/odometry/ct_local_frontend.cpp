@@ -6,6 +6,7 @@
 #include <iap/odometry/ct_local_frontend.hpp>
 
 #include <iap/odometry/integrated_bspline_imu_factor.hpp>
+#include <iap/odometry/integrated_bspline_velocity_factor.hpp>
 
 #include <gtsam/inference/Symbol.h>
 #include <gtsam/nonlinear/NonlinearFactorGraph.h>
@@ -517,6 +518,135 @@ std::vector<SplineBucketContext> CTLocalFrontend::create_lidar_buckets(
     bucket_contexts.push_back(bucket.context);
   }
   return bucket_contexts;
+}
+
+BSplineLocalLayerContribution CTLocalFrontend::assemble_local_layer(const LayerInput& input) const {
+  BSplineLocalLayerContribution contribution;
+  contribution.activation.enabled = input.graph_context.local_layer_enabled;
+  contribution.processed.frame_profile.bucket_mode = bucket_mode_name(input.bucket_config.mode);
+  contribution.processed.frame_profile.local_layer_enabled = input.graph_context.local_layer_enabled;
+
+  if (!input.graph_context.local_layer_enabled || !input.graph_context.layout) {
+    return contribution;
+  }
+
+  const auto& layout = *input.graph_context.layout;
+  for (const auto& segment : input.segments) {
+    for (const auto control_index : segment.control_indices) {
+      const int control_int = static_cast<int>(control_index);
+      if (std::find(
+            contribution.activation.active_control_indices.begin(),
+            contribution.activation.active_control_indices.end(),
+            control_int) == contribution.activation.active_control_indices.end()) {
+        contribution.activation.active_control_indices.push_back(control_int);
+      }
+    }
+    if (std::find(
+          contribution.activation.active_auxiliary_indices.begin(),
+          contribution.activation.active_auxiliary_indices.end(),
+          segment.auxiliary_index) == contribution.activation.active_auxiliary_indices.end()) {
+      contribution.activation.active_auxiliary_indices.push_back(segment.auxiliary_index);
+    }
+
+    const gtsam::Key velocity_key = bspline_velocity_key(segment.auxiliary_index);
+    contribution.graph.add(std::make_shared<IntegratedBSplineVelocityFactor>(
+      segment.control_indices,
+      velocity_key,
+      0.0,
+      std::max(1e-3, segment.source_frame.scan_end - segment.source_frame.scan_start),
+      input.velocity_precision,
+      input.finite_difference_dt));
+    ++contribution.velocity_factor_count;
+
+    const auto t_imu_build_start = Clock::now();
+    for (const auto& imu_sample : segment.imu_samples) {
+      const auto support = layout.support_at(imu_sample.stamp, SplineSensorId::Imu);
+      if (!support) {
+        continue;
+      }
+
+      SplineStampContext ctx;
+      ctx.support = *support;
+      ctx.sensor_id = SplineSensorId::Imu;
+
+      contribution.graph.add(std::make_shared<IntegratedSplineIMUFactor>(
+        ctx,
+        gtsam::symbol('j', 0),
+        gtsam::symbol('k', 0),
+        gtsam::symbol('g', 0),
+        imu_sample.angular_vel,
+        imu_sample.linear_acc,
+        input.accelerometer_precision,
+        input.gyroscope_precision,
+        input.graph_context.layout));
+      ++contribution.imu_factor_count;
+    }
+    contribution.processed.frame_profile.imu_factor_build_ms += elapsed_ms(t_imu_build_start, Clock::now());
+
+    auto prepared_source_cloud = ensure_source_cloud(segment.source_frame);
+    if (!prepared_source_cloud || frame::size(*prepared_source_cloud) == 0) {
+      continue;
+    }
+
+    contribution.processed.frame_profile.total_source_points +=
+      static_cast<std::size_t>(frame::size(*prepared_source_cloud));
+    contribution.processed.frame_profile.imu_sample_count += segment.imu_samples.size();
+
+    const auto t_bucket_build_start = Clock::now();
+    const auto bucket_contexts = create_profiled_lidar_buckets(layout, segment.source_frame, input.bucket_config);
+    contribution.processed.frame_profile.bucket_build_ms += elapsed_ms(t_bucket_build_start, Clock::now());
+    contribution.debug_stats.bucket_count += bucket_contexts.size();
+    contribution.processed.frame_profile.actual_bucket_count += bucket_contexts.size();
+
+    if (!segment.target_ivox || segment.target_ivox->voxel_points().empty()) {
+      continue;
+    }
+
+    for (std::size_t bucket_index = 0; bucket_index < bucket_contexts.size(); ++bucket_index) {
+      const auto& bucket_ctx = bucket_contexts[bucket_index];
+      const auto t_lidar_build_start = Clock::now();
+      auto factor = std::make_shared<IntegratedSplineGICPFactor>(
+        bucket_ctx.context,
+        segment.target_ivox,
+        prepared_source_cloud,
+        segment.target_tree);
+      factor->set_max_correspondence_distance(input.max_correspondence_distance);
+      factor->set_enable_profiling(input.enable_lidar_factor_profiling);
+      factor->set_jacobian_mode(input.jacobian_mode);
+      factor->set_numeric_eps(input.numeric_eps);
+      factor->set_correspondence_candidate_count(input.correspondence_candidate_count);
+      factor->set_correspondence_accept_ratio(input.correspondence_accept_ratio);
+      factor->set_correspondence_min_score_gap(input.correspondence_min_score_gap);
+      factor->set_outlier_mahalanobis_threshold(input.outlier_mahalanobis_threshold);
+      factor->set_robust_kernel(input.robust_kernel, input.robust_kernel_width);
+      factor->set_robust_weight_floor(input.robust_weight_floor);
+      contribution.graph.add(factor);
+      contribution.processed.frame_profile.lidar_factor_build_ms += elapsed_ms(t_lidar_build_start, Clock::now());
+
+      contribution.lidar_factor_handles.push_back(BSplineLocalLayerContribution::LidarFactorHandle{
+        segment.source_frame_index,
+        bucket_index,
+        bucket_ctx.representative_time,
+        bucket_ctx.context,
+        factor,
+      });
+      contribution.debug_stats.lidar_residual_count += bucket_ctx.context.point_indices.size();
+      ++contribution.lidar_factor_count;
+    }
+  }
+
+  contribution.debug_stats.imu_residual_count = contribution.imu_factor_count;
+  contribution.debug_stats.active_local_controls = contribution.activation.active_control_indices;
+  contribution.processed.frame_profile.active_control_point_count =
+    contribution.activation.active_control_indices.size();
+  contribution.processed.frame_profile.imu_factor_count =
+    input.enable_graph_problem_size ? contribution.imu_factor_count : 0;
+  contribution.processed.frame_profile.imu_residual_count = contribution.imu_factor_count;
+  contribution.processed.frame_profile.lidar_factor_count = contribution.lidar_factor_count;
+  contribution.processed.frame_profile.lidar_residual_count = contribution.debug_stats.lidar_residual_count;
+  contribution.processed.frame_profile.local_layer_factor_count = contribution.factor_count();
+  contribution.processed.frame_profile.local_layer_active_state_count = contribution.activation.active_state_count();
+  return contribution;
 }
 
 CTLocalFrontendResult CTLocalFrontend::run(const Input& input) const {

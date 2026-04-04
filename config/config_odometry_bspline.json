@@ -33,7 +33,11 @@
     // Frontend-only runtime:
     //   false = keep the current hybrid runtime (local frontend + monolithic active-window main path during migration)
     //   true  = run only the local CT frontend, skip compact backend optimize and skip the old monolithic active-window solve
-    "frontend_only_mode": true,
+    "frontend_only_mode": false,
+    // Temporary migration guard:
+    //   true  = keep the legacy two-stage BSpline path for A/B and rapid rollback
+    //   false = use the unified single-optimize odometry graph path
+    "use_legacy_bspline_two_stage_path": false,
     // GPU backend for CT_LIDAR_GPU:
     //   CPU path is the refactor mainline.
     //   BUCKET is the second-priority GPU adaptation path after the CPU path is stable.
@@ -42,7 +46,7 @@
     //   KERNEL = experimental bucket-context-aligned kernel backend; interface-aligned first, tuning later
     "ct_lidar_gpu_backend": "BUCKET",
     // Initialization params
-    "initialization_mode": "LOOSE",
+    "initialization_mode": "LOOSE", //NAIVE  LOOSE
     "initialization_window_size": 1.0,
     "init_pose_damping_scale": 1e10,
     // Optimizer params

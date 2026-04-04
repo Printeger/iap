@@ -159,6 +159,44 @@ TEST(CTCompactBackendUpdate, UpdateNeverAddsRawLidarFactors) {
   EXPECT_EQ(stats.raw_lidar_factor_count, 0U);
 }
 
+TEST(CTCompactBackendLayer, AssembleNavigationLayerBuildsUnifiedContribution) {
+  iap::CTCompactBackend backend;
+  auto local_result = make_local_result_with_gnss_coverage();
+
+  iap::CTCompactBackend::LayerInput input;
+  input.graph_context.layout = std::make_shared<const iap::SplineStateLayout>(local_result.layout);
+  input.graph_context.navigation_layer_enabled = true;
+  input.gnss_anchor_initialized = true;
+  input.ecef_origin = gtsam::Vector3(0.0, 0.0, 0.0);
+  input.ecef_rot = gtsam::Rot3::Identity();
+  input.gnss_pr_noise_base = 1.0;
+  input.gnss_dop_noise_base = 0.1;
+  input.gnss_min_elevation = 0.0;
+
+  iap::CTCompactBackend::LayerSegmentInput segment;
+  segment.stamp = 0.5;
+  segment.auxiliary_index = 3;
+  segment.gnss_epochs = make_gnss_input_with_one_sat().gnss_epochs;
+  input.segments.push_back(std::move(segment));
+
+  gtsam::Values values;
+  for (std::size_t i = 0; i < 4; ++i) {
+    values.insert(iap::bspline_control_point_key(i), gtsam::Pose3());
+  }
+
+  const auto contribution = backend.assemble_navigation_layer(input, &values);
+  EXPECT_TRUE(contribution.activation.enabled);
+  EXPECT_TRUE(contribution.activation.include_clock_states);
+  EXPECT_EQ(contribution.gnss_pr_factor_count, 1U);
+  EXPECT_EQ(contribution.gnss_dop_factor_count, 1U);
+  EXPECT_EQ(contribution.graph.size(), 2U);
+  EXPECT_EQ(contribution.activation.active_auxiliary_indices.size(), 1U);
+  EXPECT_TRUE(values.exists(iap::bspline_ecef_origin_key()));
+  EXPECT_TRUE(values.exists(iap::bspline_ecef_rot_key()));
+  EXPECT_TRUE(values.exists(iap::bspline_clock_key(3)));
+  EXPECT_TRUE(values.exists(iap::bspline_velocity_key(3)));
+}
+
 // IAP-RQ-300 / IAP-RQ-410: update() with null graph or values must be a no-op (no crash).
 TEST(CTCompactBackendContract, NullGraphOrValuesIsNoOp) {
   iap::CTCompactBackend backend;

@@ -226,6 +226,52 @@ TEST(CTLocalFrontendBuckets, SupportsConfiguredBucketModes) {
   EXPECT_EQ(single_buckets.front().point_indices.size(), 6U);
 }
 
+TEST(CTLocalFrontendLayer, AssembleLocalLayerBuildsUnifiedContribution) {
+  iap::CTLocalFrontend frontend;
+  iap::CTLocalFrontend::LayerInput input;
+  input.graph_context.layout = std::make_shared<const iap::SplineStateLayout>(make_lidar_layout());
+  input.graph_context.local_layer_enabled = true;
+  input.bucket_config.mode = iap::CTLocalFrontend::LidarBucketMode::SINGLE_BUCKET;
+  input.velocity_precision = 1e3;
+  input.finite_difference_dt = 0.01;
+  input.max_correspondence_distance = 1.5;
+  input.enable_lidar_factor_profiling = true;
+  input.enable_graph_problem_size = true;
+
+  iap::CTLocalFrontend::LayerSegmentInput segment;
+  segment.source_frame_index = 0;
+  segment.source_frame = make_source_input(
+    {
+      Eigen::Vector4d(0.0, 0.0, 0.0, 1.0),
+      Eigen::Vector4d(0.5, 0.0, 0.0, 1.0),
+      Eigen::Vector4d(0.0, 0.5, 0.0, 1.0),
+    },
+    {0.0, 0.04, 0.08});
+  segment.target_ivox = make_target_ivox();
+  segment.control_indices = {0, 1, 2, 3};
+  segment.auxiliary_index = 3;
+  for (int i = 0; i < 3; ++i) {
+    segment.imu_samples.push_back(iap::CTLocalFrontend::IMUSample{
+      0.01 + i * 0.02,
+      Eigen::Vector3d(0.05, 0.0, 0.0),
+      Eigen::Vector3d(0.0, 0.0, 9.80665),
+    });
+  }
+  input.segments.push_back(std::move(segment));
+
+  const auto contribution = frontend.assemble_local_layer(input);
+  EXPECT_TRUE(contribution.activation.enabled);
+  EXPECT_EQ(contribution.velocity_factor_count, 1U);
+  EXPECT_EQ(contribution.imu_factor_count, 3U);
+  EXPECT_EQ(contribution.lidar_factor_count, 1U);
+  EXPECT_EQ(contribution.factor_count(), 5U);
+  EXPECT_EQ(contribution.graph.size(), 5U);
+  EXPECT_EQ(contribution.processed.frame_profile.actual_bucket_count, 1U);
+  EXPECT_FALSE(contribution.activation.active_control_indices.empty());
+  EXPECT_EQ(contribution.activation.active_auxiliary_indices.size(), 1U);
+  EXPECT_EQ(contribution.processed.frame_profile.local_layer_factor_count, contribution.factor_count());
+}
+
 TEST(CTLocalFrontendSolve, DebugStatsCarryBucketsAndResidualCounts) {
   auto target = std::make_shared<glim::EstimationFrame>();
   target->stamp = 0.0;

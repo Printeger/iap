@@ -20,6 +20,7 @@ struct FlatContainer;
 template <typename VoxelContents>
 class IncrementalVoxelMap;
 using iVox = IncrementalVoxelMap<FlatContainer>;
+class NearestNeighborSearch;
 }  // namespace gtsam_points
 
 namespace iap {
@@ -75,6 +76,41 @@ class CTLocalFrontend {
     bool enable_graph_problem_size{false};
   };
 
+  struct LayerSegmentInput {
+    std::size_t source_frame_index{0};
+    SourceFrameInput source_frame;
+    std::vector<IMUSample> imu_samples;
+    std::shared_ptr<const gtsam_points::iVox> target_ivox;
+    std::shared_ptr<const gtsam_points::NearestNeighborSearch> target_tree;
+    std::array<std::size_t, kBSplineControlPointCount> control_indices{};
+    std::size_t auxiliary_index{0};
+  };
+
+  struct LayerInput {
+    BSplineUnifiedGraphContext graph_context;
+    std::vector<LayerSegmentInput> segments;
+    BucketConfig bucket_config;
+    int lm_max_iterations{10};
+    double accelerometer_precision{1.0};
+    double gyroscope_precision{1.0};
+    double velocity_precision{1.0};
+    double finite_difference_dt{0.01};
+    double max_correspondence_distance{1.0};
+    bool enable_lidar_factor_profiling{false};
+    bool enable_graph_problem_size{false};
+    IntegratedSplineGICPFactor::JacobianMode jacobian_mode{
+      IntegratedSplineGICPFactor::JacobianMode::SEMI_ANALYTIC};
+    double numeric_eps{1e-4};
+    int correspondence_candidate_count{1};
+    double correspondence_accept_ratio{0.0};
+    double correspondence_min_score_gap{0.0};
+    double outlier_mahalanobis_threshold{0.0};
+    IntegratedSplineGICPFactor::RobustKernel robust_kernel{
+      IntegratedSplineGICPFactor::RobustKernel::NONE};
+    double robust_kernel_width{1.0};
+    double robust_weight_floor{0.0};
+  };
+
   static const char* bucket_mode_name(LidarBucketMode mode);
 
   static std::vector<SplineBucketContext> create_lidar_buckets(
@@ -82,6 +118,7 @@ class CTLocalFrontend {
     const SourceFrameInput& source_frame,
     const BucketConfig& bucket_config);
 
+  BSplineLocalLayerContribution assemble_local_layer(const LayerInput& input) const;
   CTLocalFrontendResult run(const Input& input) const;
 };
 

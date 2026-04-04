@@ -3,6 +3,7 @@
 // Compact handoff summary from the hybrid CT local frontend to the compact backend.
 
 #include <iap/odometry/bspline_lidar_factor_result.hpp>
+#include <iap/odometry/integrated_bspline_gicp_factor.hpp>
 #include <iap/odometry/spline_state_layout.hpp>
 
 #include <cstddef>
@@ -10,6 +11,7 @@
 #include <vector>
 
 #include <gtsam/inference/Key.h>
+#include <gtsam/nonlinear/NonlinearFactorGraph.h>
 #include <gtsam/nonlinear/Values.h>
 #include <gtsam_points/types/point_cloud.hpp>
 
@@ -66,6 +68,7 @@ struct FrontendFrameProfile {
   double stamp{0.0};
   std::string frontend_mode{"unknown"};
   bool frontend_only_mode{false};
+  bool use_legacy_two_stage_path{false};
   std::string bucket_mode{"TIME_EPS"};
   std::size_t actual_bucket_count{0};
   std::size_t total_source_points{0};
@@ -86,6 +89,14 @@ struct FrontendFrameProfile {
   std::size_t active_control_point_count{0};
   std::size_t active_pose_key_count{0};
   std::size_t local_state_dimension{0};
+  int optimize_count{0};
+  bool local_layer_enabled{false};
+  bool navigation_layer_enabled{false};
+  std::size_t local_layer_factor_count{0};
+  std::size_t navigation_layer_factor_count{0};
+  std::size_t local_layer_active_state_count{0};
+  std::size_t navigation_layer_active_state_count{0};
+  bool carried_prior_replay_success{false};
   std::size_t imu_sample_count{0};
   std::size_t imu_factor_count{0};
   std::size_t imu_residual_count{0};
@@ -118,6 +129,58 @@ struct CTLocalFrontendProcessedOutput {
   FrontendFrameProfile frame_profile;
   std::vector<FrontendBucketProfileRow> bucket_profiles;
   std::vector<FrontendLMIterationProfileRow> lm_iterations;
+};
+
+struct BSplineUnifiedGraphContext {
+  std::shared_ptr<const SplineStateLayout> layout;
+  double min_active_stamp{0.0};
+  bool frontend_only_mode{false};
+  bool local_layer_enabled{true};
+  bool navigation_layer_enabled{true};
+};
+
+struct BSplineLayerActivation {
+  bool enabled{false};
+  bool include_clock_states{false};
+  bool retain_shared_gnss_anchor{false};
+  std::vector<int> active_control_indices;
+  std::vector<std::size_t> active_auxiliary_indices;
+  gtsam::KeyVector retained_keys;
+
+  std::size_t active_state_count() const {
+    return active_control_indices.size() + active_auxiliary_indices.size() + retained_keys.size();
+  }
+};
+
+struct BSplineLocalLayerContribution {
+  struct LidarFactorHandle {
+    std::size_t source_frame_index{0};
+    std::size_t bucket_index{0};
+    double representative_time{0.0};
+    SplineBucketContext bucket_ctx;
+    std::shared_ptr<IntegratedSplineGICPFactor> factor;
+  };
+
+  gtsam::NonlinearFactorGraph graph;
+  BSplineLayerActivation activation;
+  CTLocalFrontendDebugStats debug_stats;
+  CTLocalFrontendProcessedOutput processed;
+  std::vector<LidarFactorHandle> lidar_factor_handles;
+  std::size_t lidar_factor_count{0};
+  std::size_t imu_factor_count{0};
+  std::size_t velocity_factor_count{0};
+
+  std::size_t factor_count() const { return graph.size(); }
+};
+
+struct BSplineNavigationLayerContribution {
+  gtsam::NonlinearFactorGraph graph;
+  BSplineLayerActivation activation;
+  std::size_t gnss_pr_factor_count{0};
+  std::size_t gnss_dop_factor_count{0};
+  std::size_t clock_factor_count{0};
+
+  std::size_t factor_count() const { return graph.size(); }
 };
 
 struct CTLocalFrontendResult {

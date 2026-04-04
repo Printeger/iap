@@ -185,6 +185,12 @@ class OdometryEstimationBSpline : public OdometryEstimationCPU {
   EstimationFrame::ConstPtr insert_frame_ct_lidar(
     const PreprocessedFrame::Ptr& frame,
     std::vector<EstimationFrame::ConstPtr>& marginalized_frames);
+  EstimationFrame::ConstPtr insert_frame_ct_lidar_legacy_two_stage(
+    const PreprocessedFrame::Ptr& frame,
+    std::vector<EstimationFrame::ConstPtr>& marginalized_frames);
+  EstimationFrame::ConstPtr insert_frame_ct_lidar_unified_graph(
+    const PreprocessedFrame::Ptr& frame,
+    std::vector<EstimationFrame::ConstPtr>& marginalized_frames);
   void initialize_control_window(const PreprocessedFrame::Ptr& raw_frame, const gtsam::Pose3& initial_pose);
   gtsam::Pose3 predict_scan_end_pose(double scan_duration) const;
   gtsam_points::PointCloud::ConstPtr create_lidar_source_cloud(const PreprocessedFrame::Ptr& raw_frame) const;
@@ -273,8 +279,14 @@ class OdometryEstimationBSpline : public OdometryEstimationCPU {
   iap::CTLocalFrontend::Input make_frontend_input(
     const PreprocessedFrame::Ptr& raw_frame,
     const gtsam_points::PointCloud::ConstPtr& prepared_source_cloud) const;
+  iap::CTLocalFrontend::LayerInput make_local_layer_input(
+    const gtsam::Values& values,
+    std::shared_ptr<const iap::SplineStateLayout> factor_layout) const;
   // Build the CTCompactBackend::Input from the local frontend result and shared GNSS state.
   iap::CTCompactBackend::Input make_backend_input(const iap::CTLocalFrontendResult& local_result) const;
+  iap::CTCompactBackend::LayerInput make_navigation_layer_input(
+    std::shared_ptr<const iap::SplineStateLayout> factor_layout,
+    bool navigation_layer_enabled) const;
 
   iap::BSplineTrajectory::Params trajectory_params_;
   // Planned hybrid split: orchestrator bridges CTLocalFrontend and CTCompactBackend.
@@ -288,6 +300,7 @@ class OdometryEstimationBSpline : public OdometryEstimationCPU {
   // config is missing, while preserving all legacy frontends as explicit opt-ins.
   std::string frontend_mode_ = "CT_LIDAR_CPU";
   bool frontend_only_mode_ = false;
+  bool use_legacy_bspline_two_stage_path_ = false;
   double max_correspondence_distance_ = 1.0;
   iap::CTLocalFrontend::BucketConfig lidar_bucket_config_;
   BSplineLidarTargetMode lidar_target_mode_ = BSplineLidarTargetMode::ACTIVE_WINDOW_SNAPSHOT;

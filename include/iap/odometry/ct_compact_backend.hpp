@@ -51,8 +51,31 @@ class CTCompactBackend {
     double gnss_elev_noise_exp{2.0};
   };
 
+  struct LayerSegmentInput {
+    double stamp{0.0};
+    std::size_t auxiliary_index{0};
+    std::vector<iap::GnssEpoch> gnss_epochs;
+  };
+
+  struct LayerInput {
+    BSplineUnifiedGraphContext graph_context;
+    std::vector<LayerSegmentInput> segments;
+    bool gnss_anchor_initialized{false};
+    gtsam::Vector3 ecef_origin{0.0, 0.0, 0.0};
+    gtsam::Rot3 ecef_rot = gtsam::Rot3::Identity();
+    Eigen::Vector3d gnss_lever_arm = Eigen::Vector3d::Zero();
+    double gnss_pr_noise_base{1.0};
+    double gnss_dop_noise_base{0.1};
+    double gnss_min_elevation{0.0};
+    double gnss_elev_noise_exp{2.0};
+  };
+
   // IAP-RQ-300 / IAP-RQ-410: Assemble GNSS pseudorange and Doppler factors into graph/values
   // using the layout from local_result. Never adds raw LiDAR or IMU factors.
+  BSplineNavigationLayerContribution assemble_navigation_layer(
+    const LayerInput& input,
+    gtsam::Values* values);
+
   void update(
     const CTLocalFrontendResult& local_result,
     const Input& input,
