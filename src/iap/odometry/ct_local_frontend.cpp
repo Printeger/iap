@@ -532,6 +532,7 @@ BSplineLocalLayerContribution CTLocalFrontend::assemble_local_layer(const LayerI
 
   const auto& layout = *input.graph_context.layout;
   for (const auto& segment : input.segments) {
+    std::array<gtsam::Key, kBSplineControlPointCount> segment_pose_keys{};
     for (const auto control_index : segment.control_indices) {
       const int control_int = static_cast<int>(control_index);
       if (std::find(
@@ -540,6 +541,9 @@ BSplineLocalLayerContribution CTLocalFrontend::assemble_local_layer(const LayerI
             control_int) == contribution.activation.active_control_indices.end()) {
         contribution.activation.active_control_indices.push_back(control_int);
       }
+    }
+    for (std::size_t i = 0; i < kBSplineControlPointCount; ++i) {
+      segment_pose_keys[i] = bspline_control_point_key(segment.control_indices[i]);
     }
     if (std::find(
           contribution.activation.active_auxiliary_indices.begin(),
@@ -550,7 +554,7 @@ BSplineLocalLayerContribution CTLocalFrontend::assemble_local_layer(const LayerI
 
     const gtsam::Key velocity_key = bspline_velocity_key(segment.auxiliary_index);
     contribution.graph.add(std::make_shared<IntegratedBSplineVelocityFactor>(
-      segment.control_indices,
+      segment_pose_keys,
       velocity_key,
       0.0,
       std::max(1e-3, segment.source_frame.scan_end - segment.source_frame.scan_start),
