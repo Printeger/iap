@@ -88,6 +88,7 @@ class CTLocalFrontend {
 
   struct LayerInput {
     BSplineUnifiedGraphContext graph_context;
+    std::shared_ptr<const SplineStateLayout> imu_layout_override;
     std::vector<LayerSegmentInput> segments;
     BucketConfig bucket_config;
     int lm_max_iterations{10};

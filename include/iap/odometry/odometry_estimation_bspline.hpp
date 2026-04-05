@@ -200,7 +200,12 @@ class OdometryEstimationBSpline : public OdometryEstimationCPU {
   gtsam_points::PointCloud::ConstPtr create_lidar_source_cloud(const PreprocessedFrame::Ptr& raw_frame) const;
   ActiveSplineTargetReference create_active_target_reference() const;
   std::vector<ActiveSplineIMUSample> create_segment_imu_samples(const PreprocessedFrame::Ptr& raw_frame) const;
+  std::shared_ptr<const iap::SplineStateLayout> build_layout_from_controls_and_knots(
+    std::vector<iap::BSplineControlPointState> controls,
+    std::vector<double> knots) const;
   std::shared_ptr<const iap::SplineStateLayout> build_active_window_layout() const;
+  std::shared_ptr<const iap::SplineStateLayout> build_segment_local_layout(
+    const ActiveSplineSegmentConstraint& segment) const;
   void refresh_active_window_layout();
   std::shared_ptr<const iap::SplineStateLayout> create_segment_imu_layout(const ActiveSplineSegmentConstraint& segment) const;
   std::shared_ptr<const iap::SplineStateLayout> create_segment_lidar_layout(const ActiveSplineSegmentConstraint& segment) const;

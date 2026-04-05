@@ -557,6 +557,8 @@ BSplineLocalLayerContribution CTLocalFrontend::assemble_local_layer(const LayerI
   }
 
   const auto& layout = *input.graph_context.layout;
+  const auto imu_layout_ptr = input.imu_layout_override ? input.imu_layout_override : input.graph_context.layout;
+  const auto& imu_layout = imu_layout_ptr ? *imu_layout_ptr : layout;
   for (const auto& segment : input.segments) {
     std::array<gtsam::Key, kBSplineControlPointCount> segment_pose_keys{};
     for (const auto control_index : segment.control_indices) {
@@ -584,11 +586,11 @@ BSplineLocalLayerContribution CTLocalFrontend::assemble_local_layer(const LayerI
 
     const auto t_imu_build_start = Clock::now();
     for (const auto& imu_sample : segment.imu_samples) {
-      const auto support = layout.support_at(imu_sample.stamp, SplineSensorId::Imu);
+      const auto support = imu_layout.support_at(imu_sample.stamp, SplineSensorId::Imu);
       if (!support) {
         continue;
       }
-      append_support_control_indices(layout, *support, &contribution.activation.active_control_indices);
+      append_support_control_indices(imu_layout, *support, &contribution.activation.active_control_indices);
 
       SplineStampContext ctx;
       ctx.support = *support;
@@ -603,7 +605,7 @@ BSplineLocalLayerContribution CTLocalFrontend::assemble_local_layer(const LayerI
         imu_sample.linear_acc,
         input.accelerometer_precision,
         input.gyroscope_precision,
-        input.graph_context.layout));
+        imu_layout_ptr));
       ++contribution.imu_factor_count;
     }
     contribution.processed.frame_profile.imu_factor_build_ms += elapsed_ms(t_imu_build_start, Clock::now());
