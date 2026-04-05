@@ -91,11 +91,17 @@ class BSplineFixedLagStateRegistryT {
     control_buffer_.clear();
     segments_.clear();
     auxiliary_values_.clear();
+    announced_control_indices_.clear();
+    announced_auxiliary_indices_.clear();
+    announced_persistent_keys_.clear();
   }
 
   void reset_from_window(const BSplineControlWindow& window) {
     control_buffer_.reset_from_window(window);
     segments_.clear();
+    announced_control_indices_.clear();
+    announced_auxiliary_indices_.clear();
+    announced_persistent_keys_.clear();
   }
 
   void append_window(const BSplineControlWindow& window) {
@@ -309,6 +315,73 @@ class BSplineFixedLagStateRegistryT {
     auxiliary_values_.clear();
   }
 
+  bool control_index_announced(std::size_t index) const {
+    return std::find(announced_control_indices_.begin(), announced_control_indices_.end(), index) !=
+           announced_control_indices_.end();
+  }
+
+  bool auxiliary_index_announced(std::size_t index) const {
+    return std::find(announced_auxiliary_indices_.begin(), announced_auxiliary_indices_.end(), index) !=
+           announced_auxiliary_indices_.end();
+  }
+
+  bool persistent_key_announced(gtsam::Key key) const {
+    return std::find(announced_persistent_keys_.begin(), announced_persistent_keys_.end(), key) !=
+           announced_persistent_keys_.end();
+  }
+
+  void mark_control_index_announced(std::size_t index) {
+    if (!control_index_announced(index)) {
+      announced_control_indices_.push_back(index);
+    }
+  }
+
+  void mark_auxiliary_index_announced(std::size_t index) {
+    if (!auxiliary_index_announced(index)) {
+      announced_auxiliary_indices_.push_back(index);
+    }
+  }
+
+  void mark_persistent_key_announced(gtsam::Key key) {
+    if (!persistent_key_announced(key)) {
+      announced_persistent_keys_.push_back(key);
+    }
+  }
+
+  void retire_announced_keys(const gtsam::KeyVector& keys) {
+    auto retire_control = [&](std::size_t index) {
+      announced_control_indices_.erase(
+        std::remove(announced_control_indices_.begin(), announced_control_indices_.end(), index),
+        announced_control_indices_.end());
+    };
+    auto retire_aux = [&](std::size_t index) {
+      announced_auxiliary_indices_.erase(
+        std::remove(announced_auxiliary_indices_.begin(), announced_auxiliary_indices_.end(), index),
+        announced_auxiliary_indices_.end());
+    };
+    auto retire_persistent = [&](gtsam::Key key) {
+      announced_persistent_keys_.erase(
+        std::remove(announced_persistent_keys_.begin(), announced_persistent_keys_.end(), key),
+        announced_persistent_keys_.end());
+    };
+
+    for (const auto key : keys) {
+      const auto symbol = gtsam::Symbol(key);
+      switch (symbol.chr()) {
+        case 's':
+          retire_control(symbol.index());
+          break;
+        case 'u':
+        case 'c':
+          retire_aux(symbol.index());
+          break;
+        default:
+          retire_persistent(key);
+          break;
+      }
+    }
+  }
+
   const gtsam::Values& auxiliary_values() const { return auxiliary_values_; }
   gtsam::Values& auxiliary_values() { return auxiliary_values_; }
 
@@ -441,6 +514,9 @@ class BSplineFixedLagStateRegistryT {
   std::vector<SegmentT> segments_;
   gtsam::Values auxiliary_values_;
   BSplineFixedLagSharedState shared_state_;
+  std::vector<std::size_t> announced_control_indices_;
+  std::vector<std::size_t> announced_auxiliary_indices_;
+  gtsam::KeyVector announced_persistent_keys_;
 };
 
 using BSplineFixedLagStateRegistry = BSplineFixedLagStateRegistryT<BSplineFixedLagSegmentState>;

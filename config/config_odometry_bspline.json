@@ -38,6 +38,10 @@
     //   true  = keep the legacy two-stage BSpline path for A/B and rapid rollback
     //   false = use the unified single-optimize odometry graph path
     "use_legacy_bspline_two_stage_path": false,
+    // Unified BSpline solver mode:
+    //   BATCH_LM             = per-frame rebuild + batch LM on the unified graph
+    //   INCREMENTAL_SMOOTHER = delta-only graph updates into an incremental fixed-lag smoother
+    "bspline_unified_solver_mode": "INCREMENTAL_SMOOTHER",
     // GPU backend for CT_LIDAR_GPU:
     //   CPU path is the refactor mainline.
     //   BUCKET is the second-priority GPU adaptation path after the CPU path is stable.

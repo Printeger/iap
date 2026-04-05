@@ -14,6 +14,7 @@
 
 #include <iap/odometry/bspline_control_window.hpp>
 #include <iap/odometry/bspline_fixed_lag_registry.hpp>
+#include <iap/odometry/bspline_graph_solver.hpp>
 #include <iap/odometry/bspline_marginalization.hpp>
 #include <iap/odometry/bspline_trajectory.hpp>
 #include <iap/odometry/ct_compact_backend.hpp>
@@ -191,6 +192,9 @@ class OdometryEstimationBSpline : public OdometryEstimationCPU {
   EstimationFrame::ConstPtr insert_frame_ct_lidar_unified_graph(
     const PreprocessedFrame::Ptr& frame,
     std::vector<EstimationFrame::ConstPtr>& marginalized_frames);
+  EstimationFrame::ConstPtr insert_frame_ct_lidar_incremental_graph(
+    const PreprocessedFrame::Ptr& frame,
+    std::vector<EstimationFrame::ConstPtr>& marginalized_frames);
   void initialize_control_window(const PreprocessedFrame::Ptr& raw_frame, const gtsam::Pose3& initial_pose);
   gtsam::Pose3 predict_scan_end_pose(double scan_duration) const;
   gtsam_points::PointCloud::ConstPtr create_lidar_source_cloud(const PreprocessedFrame::Ptr& raw_frame) const;
@@ -282,11 +286,21 @@ class OdometryEstimationBSpline : public OdometryEstimationCPU {
   iap::CTLocalFrontend::LayerInput make_local_layer_input(
     const gtsam::Values& values,
     std::shared_ptr<const iap::SplineStateLayout> factor_layout) const;
+  iap::CTLocalFrontend::LayerInput make_local_layer_delta_input(
+    const ActiveSplineSegmentConstraint& segment,
+    std::shared_ptr<const iap::SplineStateLayout> factor_layout) const;
   // Build the CTCompactBackend::Input from the local frontend result and shared GNSS state.
   iap::CTCompactBackend::Input make_backend_input(const iap::CTLocalFrontendResult& local_result) const;
   iap::CTCompactBackend::LayerInput make_navigation_layer_input(
     std::shared_ptr<const iap::SplineStateLayout> factor_layout,
     bool navigation_layer_enabled) const;
+  iap::CTCompactBackend::LayerInput make_navigation_layer_delta_input(
+    const ActiveSplineSegmentConstraint& current_segment,
+    const ActiveSplineSegmentConstraint* previous_segment,
+    std::shared_ptr<const iap::SplineStateLayout> factor_layout,
+    const gtsam::KeyVector& existing_keys,
+    bool navigation_layer_enabled) const;
+  void reset_unified_graph_solver();
 
   iap::BSplineTrajectory::Params trajectory_params_;
   // Planned hybrid split: orchestrator bridges CTLocalFrontend and CTCompactBackend.
@@ -301,6 +315,7 @@ class OdometryEstimationBSpline : public OdometryEstimationCPU {
   std::string frontend_mode_ = "CT_LIDAR_CPU";
   bool frontend_only_mode_ = false;
   bool use_legacy_bspline_two_stage_path_ = false;
+  iap::BSplineUnifiedSolverMode unified_solver_mode_ = iap::BSplineUnifiedSolverMode::BATCH_LM;
   double max_correspondence_distance_ = 1.0;
   iap::CTLocalFrontend::BucketConfig lidar_bucket_config_;
   BSplineLidarTargetMode lidar_target_mode_ = BSplineLidarTargetMode::ACTIVE_WINDOW_SNAPSHOT;
@@ -374,6 +389,7 @@ class OdometryEstimationBSpline : public OdometryEstimationCPU {
   std::shared_ptr<const iap::SplineStateLayout> active_window_layout_;
   std::shared_ptr<iap::SplineEvaluator> active_window_evaluator_;
   std::shared_ptr<iap::BSplineTrajectory> latest_trajectory_;
+  std::unique_ptr<iap::IBSplineGraphSolver> unified_graph_solver_;
   std::unique_ptr<iap::GnssEpochBuilder> gnss_epoch_builder_;
   std::unique_ptr<iap::GnssHandler> gnss_handler_;
   std::deque<iap::GnssRawObservationBatch> pending_raw_gnss_batches_;

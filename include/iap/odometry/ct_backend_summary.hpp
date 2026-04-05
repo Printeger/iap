@@ -96,6 +96,11 @@ struct FrontendFrameProfile {
   std::size_t navigation_layer_factor_count{0};
   std::size_t local_layer_active_state_count{0};
   std::size_t navigation_layer_active_state_count{0};
+  std::string solver_mode{"BATCH_LM"};
+  std::size_t new_factor_count{0};
+  std::size_t new_value_count{0};
+  std::size_t retired_key_count{0};
+  bool fallback_used{false};
   bool carried_prior_replay_success{false};
   std::size_t imu_sample_count{0};
   std::size_t imu_factor_count{0};
@@ -137,6 +142,7 @@ struct BSplineUnifiedGraphContext {
   bool frontend_only_mode{false};
   bool local_layer_enabled{true};
   bool navigation_layer_enabled{true};
+  gtsam::KeyVector existing_keys;
 };
 
 struct BSplineLayerActivation {

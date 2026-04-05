@@ -120,6 +120,7 @@ add_library(iap SHARED
   src/iap/planner/integrity_planner.cpp
   # odometry
   src/iap/odometry/bspline_control_window.cpp
+  src/iap/odometry/bspline_graph_solver.cpp
   src/iap/odometry/bspline_marginalization.cpp
   src/iap/odometry/callbacks.cpp
   src/iap/odometry/spline_evaluator.cpp

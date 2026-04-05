@@ -121,6 +121,13 @@ const char* to_string(iap::CTLocalFrontend::LidarBucketMode mode) {
   return "unknown";
 }
 
+iap::BSplineUnifiedSolverMode parse_bspline_unified_solver_mode(const std::string& mode) {
+  if (mode == "INCREMENTAL_SMOOTHER" || mode == "incremental_smoother" || mode == "incremental") {
+    return iap::BSplineUnifiedSolverMode::INCREMENTAL_SMOOTHER;
+  }
+  return iap::BSplineUnifiedSolverMode::BATCH_LM;
+}
+
 const char* frontend_frame_profile_csv_header() {
   return "frame_id,stamp,frontend_mode,frontend_only_mode,use_legacy_two_stage_path,bucket_mode,actual_bucket_count,total_source_points,"
          "preprocess_ms,target_map_prep_ms,warning_count_for_frame,bucket_build_ms,lidar_factor_build_ms,"
@@ -128,7 +135,7 @@ const char* frontend_frame_profile_csv_header() {
          "local_mapping_update_ms,global_mapping_update_ms,submap_registration_ms,active_control_point_count,"
          "active_pose_key_count,local_state_dimension,optimize_count,local_layer_enabled,navigation_layer_enabled,"
          "local_layer_factor_count,navigation_layer_factor_count,local_layer_active_state_count,navigation_layer_active_state_count,"
-         "carried_prior_replay_success,imu_sample_count,imu_factor_count,imu_residual_count,"
+         "solver_mode,new_factor_count,new_value_count,retired_key_count,fallback_used,carried_prior_replay_success,imu_sample_count,imu_factor_count,imu_residual_count,"
          "lidar_factor_count,lidar_residual_count,gnss_factor_count,local_residual_count,carried_prior_count,"
          "backend_factor_count,backend_state_count,lm_iteration_count,lm_trace_expected,lm_trace_emitted,"
          "lm_trace_row_count,lm_initial_cost,lm_final_cost,lm_rejected_step_count,lm_damping_change_count,"
@@ -217,6 +224,11 @@ void write_frontend_frame_profile_row(std::FILE* file, const iap::FrontendFrameP
   add(profile.navigation_layer_factor_count);
   add(profile.local_layer_active_state_count);
   add(profile.navigation_layer_active_state_count);
+  add(profile.solver_mode);
+  add(profile.new_factor_count);
+  add(profile.new_value_count);
+  add(profile.retired_key_count);
+  add(profile.fallback_used ? 1 : 0);
   add(profile.carried_prior_replay_success ? 1 : 0);
   add(profile.imu_sample_count);
   add(profile.imu_factor_count);
@@ -533,6 +545,21 @@ std::vector<std::size_t> support_control_indices(
   return indices;
 }
 
+void append_unique_key(gtsam::KeyVector* keys, gtsam::Key key) {
+  if (!keys) {
+    return;
+  }
+  if (std::find(keys->begin(), keys->end(), key) == keys->end()) {
+    keys->push_back(key);
+  }
+}
+
+gtsam::KeyVector sort_unique_keys(gtsam::KeyVector keys) {
+  std::sort(keys.begin(), keys.end());
+  keys.erase(std::unique(keys.begin(), keys.end()), keys.end());
+  return keys;
+}
+
 }  // namespace
 
 OdometryEstimationBSplineParams::OdometryEstimationBSplineParams() : OdometryEstimationCPUParams() {
@@ -562,6 +589,8 @@ OdometryEstimationBSpline::OdometryEstimationBSpline(const OdometryEstimationBSp
   frontend_only_mode_ = config.param<bool>("odometry_estimation", "frontend_only_mode", false);
   use_legacy_bspline_two_stage_path_ =
     config.param<bool>("odometry_estimation", "use_legacy_bspline_two_stage_path", false);
+  unified_solver_mode_ = parse_bspline_unified_solver_mode(
+    config.param<std::string>("odometry_estimation", "bspline_unified_solver_mode", "INCREMENTAL_SMOOTHER"));
   max_correspondence_distance_ = config.param<double>("odometry_estimation", "max_correspondence_distance", 1.5);
   lidar_bucket_config_.mode = parse_lidar_bucket_mode(
     config.param<std::string>("odometry_estimation", "ct_lidar_bucket_mode", "TIME_EPS"));
@@ -693,6 +722,7 @@ OdometryEstimationBSpline::OdometryEstimationBSpline(const OdometryEstimationBSp
     ct_lidar_gpu_stream_buffers_ = std::make_unique<gtsam_points::StreamTempBufferRoundRobin>();
   }
 #endif
+  reset_unified_graph_solver();
   if (frontend_lm_iteration_profile_enabled_ && !frontend_frame_profile_enabled_) {
     logger->warn(
       "frontend LM iteration profiling is enabled while frontend frame profiling is disabled; only '{}' will be emitted",
@@ -706,10 +736,11 @@ OdometryEstimationBSpline::OdometryEstimationBSpline(const OdometryEstimationBSp
     logger->warn(
       "graph_problem_size requires log.profiling.frontend_frame=true; graph telemetry columns will remain disabled");
   }
-  logger->info("odometry_bspline initialized frontend_mode={} frontend_only_mode={} use_legacy_bspline_two_stage_path={} lidar_gpu_backend={} lidar_bucket_mode={} lidar_bucket_time_eps={:.6f} lidar_max_buckets={} lidar_fixed_buckets={} knot_mode={} nominal_dt={:.4f} compatibility_sample_dt={:.4f} lidar_target_mode={} lidar_jacobian_mode={} lidar_k_candidates={} lidar_accept_ratio={:.3f} lidar_score_gap={:.3f} lidar_snapshot_window={} lidar_snapshot_min_frames={} lidar_snapshot_min_points={} lidar_snapshot_max_age={:.3f} lidar_outlier_thresh={:.3f} lidar_robust_kernel={} lidar_robust_width={:.3f} lidar_robust_w_floor={:.3f} lidar_profile={} lidar_validate={} ct_pipeline_profile={} lidar_baseline_csv={} lidar_baseline_path={}",
+  logger->info("odometry_bspline initialized frontend_mode={} frontend_only_mode={} use_legacy_bspline_two_stage_path={} bspline_unified_solver_mode={} lidar_gpu_backend={} lidar_bucket_mode={} lidar_bucket_time_eps={:.6f} lidar_max_buckets={} lidar_fixed_buckets={} knot_mode={} nominal_dt={:.4f} compatibility_sample_dt={:.4f} lidar_target_mode={} lidar_jacobian_mode={} lidar_k_candidates={} lidar_accept_ratio={:.3f} lidar_score_gap={:.3f} lidar_snapshot_window={} lidar_snapshot_min_frames={} lidar_snapshot_min_points={} lidar_snapshot_max_age={:.3f} lidar_outlier_thresh={:.3f} lidar_robust_kernel={} lidar_robust_width={:.3f} lidar_robust_w_floor={:.3f} lidar_profile={} lidar_validate={} ct_pipeline_profile={} lidar_baseline_csv={} lidar_baseline_path={}",
     frontend_mode_,
     frontend_only_mode_,
     use_legacy_bspline_two_stage_path_,
+    iap::to_string(unified_solver_mode_),
     ::glim::to_string(lidar_gpu_backend_),
     ::glim::to_string(lidar_bucket_config_.mode),
     lidar_bucket_config_.time_eps,
@@ -781,6 +812,7 @@ void OdometryEstimationBSpline::initialize_control_window(
   const gtsam::Pose3& initial_pose) {
   control_window_->initialize(raw_frame->stamp, raw_frame->scan_end_time, initial_pose);
   fixed_lag_registry_.reset_from_window(*control_window_);
+  reset_unified_graph_solver();
   refresh_active_window_layout();
   marginal_prior_ = ActiveSplineMarginalPrior();
   fixed_lag_registry_.clear_auxiliary_values();
@@ -1416,6 +1448,9 @@ EstimationFrame::ConstPtr OdometryEstimationBSpline::insert_frame_ct_lidar(
   const bool use_gpu_lidar = frontend_mode_ == "CT_LIDAR_GPU";
   if (use_legacy_bspline_two_stage_path_ || use_gpu_lidar) {
     return insert_frame_ct_lidar_legacy_two_stage(raw_frame, marginalized_frames);
+  }
+  if (unified_solver_mode_ == iap::BSplineUnifiedSolverMode::INCREMENTAL_SMOOTHER) {
+    return insert_frame_ct_lidar_incremental_graph(raw_frame, marginalized_frames);
   }
   return insert_frame_ct_lidar_unified_graph(raw_frame, marginalized_frames);
 }
@@ -3755,6 +3790,661 @@ EstimationFrame::ConstPtr OdometryEstimationBSpline::insert_frame_ct_lidar_unifi
   return new_frame;
 }
 
+EstimationFrame::ConstPtr OdometryEstimationBSpline::insert_frame_ct_lidar_incremental_graph(
+  const PreprocessedFrame::Ptr& raw_frame,
+  std::vector<EstimationFrame::ConstPtr>& marginalized_frames) {
+  using Clock = std::chrono::steady_clock;
+  const auto t_window_start = Clock::now();
+  const auto elapsed_ms = [](const Clock::time_point& start, const Clock::time_point& end) {
+    return std::chrono::duration<double, std::milli>(end - start).count();
+  };
+
+  struct IncrementalTiming {
+    double gnss_mailbox_sync_ms{0.0};
+    double source_cloud_ms{0.0};
+    double segment_prepare_ms{0.0};
+    double target_build_ms{0.0};
+    double gnss_epoch_fetch_ms{0.0};
+    double solver_update_ms{0.0};
+    double prune_active_ms{0.0};
+    double marginalization_ms{0.0};
+    double postprocess_ms{0.0};
+    double post_publish_traj_ms{0.0};
+    double post_publish_telemetry_ms{0.0};
+    double post_callback_ms{0.0};
+    double post_target_insert_ms{0.0};
+    double post_history_update_ms{0.0};
+    double window_wall_ms{0.0};
+  } timing;
+
+  Callbacks::on_insert_frame(raw_frame);
+  {
+    const auto t_sync_start = Clock::now();
+    sync_gnss_epochs_from_shared_state();
+    timing.gnss_mailbox_sync_ms = elapsed_ms(t_sync_start, Clock::now());
+  }
+
+  const int current = frames.size();
+  const double scan_duration = std::max(1e-3, raw_frame->scan_end_time - raw_frame->stamp);
+
+  EstimationFrame::Ptr new_frame(new EstimationFrame);
+  new_frame->id = current;
+  new_frame->stamp = raw_frame->stamp;
+  new_frame->T_lidar_imu = T_lidar_imu;
+  new_frame->raw_frame = raw_frame;
+  new_frame->frame_id = FrameID::LIDAR;
+  new_frame->v_world_imu.setZero();
+  new_frame->imu_bias.head<3>() = fixed_lag_registry_.shared_state().accel_bias;
+  new_frame->imu_bias.tail<3>() = fixed_lag_registry_.shared_state().gyro_bias;
+
+  if (frames.empty()) {
+    EstimationFrame::ConstPtr init_state;
+    if (init_estimation) {
+      init_estimation->insert_frame(raw_frame);
+      init_state = init_estimation->initial_pose();
+    }
+
+    if (!init_state && init_estimation) {
+      logger->debug("waiting for initial IMU state estimation to be finished (bspline incremental graph)");
+      return nullptr;
+    }
+
+    const gtsam::Pose3 initial_pose = init_state
+      ? gtsam::Pose3(init_state->T_world_lidar.matrix())
+      : gtsam::Pose3();
+
+    initialize_control_window(raw_frame, initial_pose);
+
+    new_frame->T_world_lidar = Eigen::Isometry3d(initial_pose.matrix());
+    new_frame->T_world_imu = new_frame->T_world_lidar * T_lidar_imu;
+    new_frame->frame = create_lidar_source_cloud(raw_frame);
+    new_frame->imu_bias = init_state ? init_state->imu_bias : params->imu_bias;
+    new_frame->v_world_imu = init_state ? init_state->v_world_imu : Eigen::Vector3d::Zero();
+    fixed_lag_registry_.set_shared_imu_state(
+      new_frame->imu_bias.tail<3>(),
+      new_frame->imu_bias.head<3>(),
+      fixed_lag_registry_.shared_state().gravity);
+    fixed_lag_registry_.clear_auxiliary_values();
+    fixed_lag_registry_.auxiliary_values().insert(
+      iap::bspline_velocity_key(control_window_->states()[1].index),
+      new_frame->v_world_imu);
+
+    Callbacks::on_new_frame(new_frame);
+    insert_target_cloud(new_frame);
+    update_frame_history(new_frame, marginalized_frames);
+    publish_continuous_trajectory(current);
+    publish_fixed_lag_telemetry(current);
+
+    std::vector<EstimationFrame::ConstPtr> active_frames(frames.inner_begin(), frames.inner_end());
+    if (!active_frames.empty()) {
+      Callbacks::on_update_new_frame(active_frames.back());
+      Callbacks::on_update_frames(active_frames);
+    }
+
+    if (init_estimation) {
+      init_estimation.reset();
+    }
+    return new_frame;
+  }
+
+  {
+    const auto t_source_start = Clock::now();
+    new_frame->frame = create_lidar_source_cloud(raw_frame);
+    timing.source_cloud_ms = elapsed_ms(t_source_start, Clock::now());
+  }
+
+  const gtsam::Pose3 predicted_end_pose = predict_scan_end_pose(scan_duration);
+  control_window_->advance(raw_frame->stamp, raw_frame->scan_end_time, predicted_end_pose);
+  fixed_lag_registry_.append_window(*control_window_);
+  refresh_active_window_layout();
+
+  if (!frontend_only_mode_) {
+    if (const auto anchor = iap::IapSharedState::instance().get_gnss_anchor()) {
+      fixed_lag_registry_.set_shared_gnss_anchor(anchor->origin_ecef, gtsam::Rot3(anchor->R_ecef_world));
+    }
+  }
+
+  const double min_active_stamp = std::max(0.0, raw_frame->stamp - params->smoother_lag);
+  const auto factor_source = gtsam_points::PointCloudCPU::clone(*new_frame->frame);
+  {
+    const auto t_segment_prepare_start = Clock::now();
+    append_active_segment_constraint(raw_frame, factor_source);
+    timing.segment_prepare_ms = elapsed_ms(t_segment_prepare_start, Clock::now());
+    if (!fixed_lag_registry_.segments().empty()) {
+      timing.target_build_ms = fixed_lag_registry_.segments().back().target_build_ms;
+    }
+  }
+  if (!fixed_lag_registry_.segments().empty() && !frontend_only_mode_) {
+    const auto t_gnss_epoch_start = Clock::now();
+    fixed_lag_registry_.segments().back().gnss_epochs = consume_segment_gnss_epochs(
+      raw_frame->stamp,
+      raw_frame->scan_end_time);
+    timing.gnss_epoch_fetch_ms = elapsed_ms(t_gnss_epoch_start, Clock::now());
+  }
+
+  if (!unified_graph_solver_) {
+    reset_unified_graph_solver();
+  }
+
+  auto factor_layout = active_window_layout_ ? active_window_layout_ : build_active_window_layout();
+  if (!factor_layout) {
+    logger->error("bspline incremental graph failed to build active-window layout");
+    return nullptr;
+  }
+
+  const auto& current_segment = fixed_lag_registry_.segments().back();
+  const ActiveSplineSegmentConstraint* previous_segment =
+    fixed_lag_registry_.segments().size() >= 2 ? &fixed_lag_registry_.segments()[fixed_lag_registry_.segments().size() - 2] : nullptr;
+  const bool navigation_layer_enabled = !frontend_only_mode_;
+
+  gtsam::Values mirror_values = fixed_lag_registry_.control_buffer().values();
+  fixed_lag_registry_.seed_shared_values(
+    mirror_values,
+    navigation_layer_enabled && fixed_lag_registry_.shared_state().gnss_anchor_initialized);
+  for (const auto key : fixed_lag_registry_.auxiliary_values().keys()) {
+    if (!mirror_values.exists(key)) {
+      mirror_values.insert(key, fixed_lag_registry_.auxiliary_values().at(key));
+    }
+  }
+
+  const gtsam::Key current_velocity_key = iap::bspline_velocity_key(current_segment.auxiliary_index);
+  if (!mirror_values.exists(current_velocity_key)) {
+    if (fixed_lag_registry_.auxiliary_values().exists(current_velocity_key)) {
+      mirror_values.insert(current_velocity_key, fixed_lag_registry_.auxiliary_values().at<gtsam::Vector3>(current_velocity_key));
+    } else {
+      std::array<gtsam::Pose3, iap::kBSplineControlPointCount> segment_poses{};
+      for (std::size_t k = 0; k < iap::kBSplineControlPointCount; ++k) {
+        segment_poses[k] = mirror_values.at<gtsam::Pose3>(iap::bspline_control_point_key(current_segment.control_indices[k]));
+      }
+      const gtsam::Vector3 velocity_guess =
+        iap::IntegratedBSplineVelocityFactor::predict_velocity(
+          segment_poses,
+          0.0,
+          std::max(1e-3, current_segment.scan_end - current_segment.stamp),
+          trajectory_params_.finite_difference_dt);
+      mirror_values.insert(current_velocity_key, velocity_guess);
+    }
+  }
+
+  const auto active_state_set =
+    fixed_lag_registry_.active_state_set(mirror_values, min_active_stamp, navigation_layer_enabled);
+
+  auto local_input = make_local_layer_delta_input(current_segment, factor_layout);
+  local_input.graph_context.min_active_stamp = min_active_stamp;
+  local_input.graph_context.existing_keys = unified_graph_solver_->current_active_keys();
+  const auto local_contribution = ct_local_frontend_.assemble_local_layer(local_input);
+
+  iap::BSplineGraphDelta delta;
+  delta.layout = factor_layout;
+  delta.current_frame_stamp = raw_frame->stamp;
+  delta.min_active_stamp = min_active_stamp;
+  delta.current_auxiliary_index = current_segment.auxiliary_index;
+  delta.local_layer_enabled = local_contribution.activation.enabled;
+  delta.navigation_layer_enabled = navigation_layer_enabled;
+  delta.local_layer_factor_count = local_contribution.factor_count();
+  delta.active_pose_keys = active_state_set.active_pose_keys;
+  delta.active_aux_keys = active_state_set.active_aux_keys;
+  delta.persistent_keys = sort_unique_keys(fixed_lag_registry_.active_shared_keys(
+    navigation_layer_enabled && fixed_lag_registry_.shared_state().gnss_anchor_initialized));
+
+  gtsam::KeyVector newly_announced_keys;
+  const auto& active_states = fixed_lag_registry_.control_buffer().states();
+  const auto& shared_state = fixed_lag_registry_.shared_state();
+  const auto anchor_noise = gtsam::noiseModel::Isotropic::Precision(6, ctrl_point_anchor_inf_scale_);
+  const auto pred_noise = gtsam::noiseModel::Isotropic::Precision(6, ctrl_point_prediction_inf_scale_);
+  const auto smooth_noise = gtsam::noiseModel::Isotropic::Precision(6, ctrl_point_smoothness_inf_scale_);
+  const auto velocity_prior_noise = gtsam::noiseModel::Isotropic::Precision(3, velocity_ct_inf_scale_);
+  const auto imu_bias_noise = gtsam::noiseModel::Isotropic::Precision(3, imu_ct_bias_inf_scale_);
+  const auto gravity_noise = gtsam::noiseModel::Isotropic::Precision(3, imu_ct_gravity_inf_scale_);
+  const auto gnss_ecef_noise = gtsam::noiseModel::Diagonal::Sigmas(gtsam::Vector3::Constant(gnss_sigma_ecef_origin_));
+  const auto gnss_ecef_rot_noise = gtsam::noiseModel::Isotropic::Sigma(3, gnss_sigma_ecef_rot_);
+  const auto clock_prior_noise = gtsam::noiseModel::Diagonal::Sigmas(
+    (gtsam::Vector2() << params->clk_bias_noise, params->clk_drift_noise).finished());
+
+  const auto current_active_keys = unified_graph_solver_->current_active_keys();
+  const auto key_known = [&](gtsam::Key key) {
+    return std::find(current_active_keys.begin(), current_active_keys.end(), key) != current_active_keys.end() ||
+           delta.new_values.exists(key);
+  };
+
+  std::vector<std::size_t> local_control_indices;
+  local_control_indices.reserve(local_contribution.activation.active_control_indices.size() + current_segment.control_indices.size());
+  for (const auto& factor : local_contribution.graph) {
+    if (!factor) {
+      continue;
+    }
+    for (const auto key : factor->keys()) {
+      if (gtsam::Symbol(key).chr() == 's') {
+        local_control_indices.push_back(gtsam::Symbol(key).index());
+      }
+    }
+  }
+  for (const auto control_index : current_segment.control_indices) {
+    local_control_indices.push_back(control_index);
+  }
+  local_control_indices = sort_unique_keys(std::move(local_control_indices));
+
+  for (const auto control_index : local_control_indices) {
+    if (fixed_lag_registry_.control_index_announced(control_index)) {
+      const auto pose_key = iap::bspline_control_point_key(control_index);
+      delta.new_stamps[pose_key] = current_segment.scan_end;
+      continue;
+    }
+    const gtsam::Key pose_key = iap::bspline_control_point_key(control_index);
+    if (key_known(pose_key)) {
+      delta.new_stamps[pose_key] = current_segment.scan_end;
+      continue;
+    }
+    const auto state_it = std::find_if(active_states.begin(), active_states.end(), [&](const auto& state) {
+      return state.index == control_index;
+    });
+    if (state_it == active_states.end()) {
+      continue;
+    }
+    delta.new_values.insert(pose_key, state_it->pose);
+    delta.new_stamps[pose_key] = current_segment.scan_end;
+    append_unique_key(&newly_announced_keys, pose_key);
+  }
+
+  if (!fixed_lag_registry_.auxiliary_index_announced(current_segment.auxiliary_index) && !key_known(current_velocity_key)) {
+    delta.new_values.insert(current_velocity_key, mirror_values.at<gtsam::Vector3>(current_velocity_key));
+    delta.new_stamps[current_velocity_key] = current_segment.scan_end;
+    append_unique_key(&newly_announced_keys, current_velocity_key);
+  }
+
+  const gtsam::Key gyro_bias_key = bspline_gyro_bias_key();
+  const gtsam::Key accel_bias_key = bspline_accel_bias_key();
+  const gtsam::Key gravity_key = bspline_gravity_key();
+  if (!fixed_lag_registry_.persistent_key_announced(gyro_bias_key) && !key_known(gyro_bias_key)) {
+    delta.new_values.insert(gyro_bias_key, shared_state.gyro_bias);
+    append_unique_key(&newly_announced_keys, gyro_bias_key);
+  }
+  if (!fixed_lag_registry_.persistent_key_announced(accel_bias_key) && !key_known(accel_bias_key)) {
+    delta.new_values.insert(accel_bias_key, shared_state.accel_bias);
+    append_unique_key(&newly_announced_keys, accel_bias_key);
+  }
+  if (!fixed_lag_registry_.persistent_key_announced(gravity_key) && !key_known(gravity_key)) {
+    delta.new_values.insert(gravity_key, shared_state.gravity);
+    append_unique_key(&newly_announced_keys, gravity_key);
+  }
+
+  if (delta.new_values.exists(gyro_bias_key)) {
+    delta.new_factors.emplace_shared<gtsam::PriorFactor<gtsam::Vector3>>(gyro_bias_key, shared_state.gyro_bias, imu_bias_noise);
+  }
+  if (delta.new_values.exists(accel_bias_key)) {
+    delta.new_factors.emplace_shared<gtsam::PriorFactor<gtsam::Vector3>>(accel_bias_key, shared_state.accel_bias, imu_bias_noise);
+  }
+  if (delta.new_values.exists(gravity_key)) {
+    delta.new_factors.emplace_shared<gtsam::PriorFactor<gtsam::Vector3>>(gravity_key, shared_state.gravity, gravity_noise);
+  }
+
+  const bool anchor_enabled = navigation_layer_enabled && shared_state.gnss_anchor_initialized;
+  const gtsam::Key ecef_origin_key = iap::bspline_ecef_origin_key();
+  const gtsam::Key ecef_rot_key = iap::bspline_ecef_rot_key();
+  if (anchor_enabled && !fixed_lag_registry_.persistent_key_announced(ecef_origin_key) && !key_known(ecef_origin_key)) {
+    delta.new_values.insert(ecef_origin_key, shared_state.ecef_origin);
+    append_unique_key(&newly_announced_keys, ecef_origin_key);
+    delta.new_factors.emplace_shared<gtsam::PriorFactor<gtsam::Vector3>>(ecef_origin_key, shared_state.ecef_origin, gnss_ecef_noise);
+  }
+  if (anchor_enabled && !fixed_lag_registry_.persistent_key_announced(ecef_rot_key) && !key_known(ecef_rot_key)) {
+    delta.new_values.insert(ecef_rot_key, shared_state.ecef_rot);
+    append_unique_key(&newly_announced_keys, ecef_rot_key);
+    delta.new_factors.emplace_shared<gtsam::PriorFactor<gtsam::Rot3>>(ecef_rot_key, shared_state.ecef_rot, gnss_ecef_rot_noise);
+  }
+
+  // The incremental fixed-lag smoother may pull shared singleton states into
+  // additional re-elimination cliques during timestamp-based retirement. Keep
+  // their timestamps refreshed so retirement bookkeeping can reason about the
+  // full connected component without trying to evict these persistent keys.
+  delta.new_stamps[gyro_bias_key] = raw_frame->stamp;
+  delta.new_stamps[accel_bias_key] = raw_frame->stamp;
+  delta.new_stamps[gravity_key] = raw_frame->stamp;
+  if (anchor_enabled) {
+    delta.new_stamps[ecef_origin_key] = raw_frame->stamp;
+    delta.new_stamps[ecef_rot_key] = raw_frame->stamp;
+  }
+
+  const bool first_incremental_segment = current_active_keys.empty();
+  if (first_incremental_segment && local_control_indices.size() >= 2) {
+    const auto pose_key_0 = iap::bspline_control_point_key(local_control_indices[0]);
+    const auto pose_key_1 = iap::bspline_control_point_key(local_control_indices[1]);
+    const auto pose_0 = mirror_values.at<gtsam::Pose3>(pose_key_0);
+    const auto pose_1 = mirror_values.at<gtsam::Pose3>(pose_key_1);
+    delta.new_factors.emplace_shared<gtsam::PriorFactor<gtsam::Pose3>>(pose_key_0, pose_0, anchor_noise);
+    delta.new_factors.emplace_shared<gtsam::PriorFactor<gtsam::Pose3>>(pose_key_1, pose_1, anchor_noise);
+  }
+
+  for (const auto control_index : local_control_indices) {
+    const auto pose_key = iap::bspline_control_point_key(control_index);
+    if (!delta.new_values.exists(pose_key)) {
+      continue;
+    }
+    delta.new_factors.emplace_shared<gtsam::PriorFactor<gtsam::Pose3>>(
+      pose_key,
+      mirror_values.at<gtsam::Pose3>(pose_key),
+      pred_noise);
+  }
+  for (std::size_t i = 1; i < active_states.size(); ++i) {
+    const auto& prev_state = active_states[i - 1];
+    const auto& curr_state = active_states[i];
+    const gtsam::Key prev_key = iap::bspline_control_point_key(prev_state.index);
+    const gtsam::Key curr_key = iap::bspline_control_point_key(curr_state.index);
+    if (!delta.new_values.exists(curr_key)) {
+      continue;
+    }
+    delta.new_factors.emplace_shared<gtsam::BetweenFactor<gtsam::Pose3>>(
+      prev_key,
+      curr_key,
+      prev_state.pose.between(curr_state.pose),
+      smooth_noise);
+  }
+  if (delta.new_values.exists(current_velocity_key)) {
+    delta.new_factors.emplace_shared<gtsam::PriorFactor<gtsam::Vector3>>(
+      current_velocity_key,
+      mirror_values.at<gtsam::Vector3>(current_velocity_key),
+      velocity_prior_noise);
+  }
+
+  auto navigation_input = make_navigation_layer_delta_input(
+    current_segment,
+    previous_segment,
+    factor_layout,
+    current_active_keys,
+    navigation_layer_enabled);
+  navigation_input.graph_context.min_active_stamp = min_active_stamp;
+  auto navigation_contribution = ct_compact_backend_.assemble_navigation_layer(navigation_input, &delta.new_values);
+  delta.navigation_layer_factor_count = navigation_contribution.factor_count();
+
+  const gtsam::Key current_clock_key = iap::bspline_clock_key(current_segment.auxiliary_index);
+  if (delta.new_values.exists(current_clock_key)) {
+    delta.new_stamps[current_clock_key] = current_segment.scan_end;
+    append_unique_key(&newly_announced_keys, current_clock_key);
+    if (!previous_segment) {
+      delta.new_factors.emplace_shared<gtsam::PriorFactor<gtsam::Vector2>>(
+        current_clock_key,
+        delta.new_values.at<gtsam::Vector2>(current_clock_key),
+        clock_prior_noise);
+    }
+  }
+
+  for (const auto& factor : local_contribution.graph) {
+    if (factor) {
+      delta.new_factors.push_back(factor);
+    }
+  }
+  for (const auto& factor : navigation_contribution.graph) {
+    if (factor) {
+      delta.new_factors.push_back(factor);
+    }
+  }
+
+  for (const auto key : local_control_indices) {
+    append_unique_key(&delta.query_keys, iap::bspline_control_point_key(key));
+  }
+  append_unique_key(&delta.query_keys, current_velocity_key);
+  if (navigation_contribution.activation.enabled) {
+    append_unique_key(&delta.query_keys, current_clock_key);
+  }
+  for (const auto key : delta.persistent_keys) {
+    append_unique_key(&delta.query_keys, key);
+  }
+  delta.query_keys = sort_unique_keys(std::move(delta.query_keys));
+
+  const auto t_solver_update_start = Clock::now();
+  const auto solver_result = unified_graph_solver_->apply_delta(delta);
+  timing.solver_update_ms = elapsed_ms(t_solver_update_start, Clock::now());
+
+  for (const auto control_index : local_control_indices) {
+    if (delta.new_values.exists(iap::bspline_control_point_key(control_index))) {
+      fixed_lag_registry_.mark_control_index_announced(control_index);
+    }
+  }
+  if (delta.new_values.exists(current_velocity_key)) {
+    fixed_lag_registry_.mark_auxiliary_index_announced(current_segment.auxiliary_index);
+  }
+  if (delta.new_values.exists(current_clock_key)) {
+    fixed_lag_registry_.mark_auxiliary_index_announced(current_segment.auxiliary_index);
+  }
+  for (const auto key : delta.persistent_keys) {
+    if (delta.new_values.exists(key)) {
+      fixed_lag_registry_.mark_persistent_key_announced(key);
+    }
+  }
+  fixed_lag_registry_.retire_announced_keys(solver_result.retired_keys);
+
+  fixed_lag_registry_.control_buffer().update_from_values(solver_result.estimate_subset);
+  control_window_->update_from_values(solver_result.estimate_subset);
+  fixed_lag_registry_.update_shared_state_from_values(solver_result.estimate_subset);
+  fixed_lag_registry_.clear_auxiliary_values();
+  for (const auto key : solver_result.active_aux_keys) {
+    if (!solver_result.estimate_subset.exists(key)) {
+      continue;
+    }
+    const char chr = gtsam::Symbol(key).chr();
+    if (chr == 'u') {
+      fixed_lag_registry_.auxiliary_values().insert(key, solver_result.estimate_subset.at<gtsam::Vector3>(key));
+    } else if (chr == 'c') {
+      fixed_lag_registry_.auxiliary_values().insert(key, solver_result.estimate_subset.at<gtsam::Vector2>(key));
+    }
+  }
+
+  gtsam::Values evaluation_values = fixed_lag_registry_.control_buffer().values();
+  for (const auto key : fixed_lag_registry_.auxiliary_values().keys()) {
+    if (!evaluation_values.exists(key)) {
+      evaluation_values.insert(key, fixed_lag_registry_.auxiliary_values().at(key));
+    }
+  }
+  for (const auto key : solver_result.estimate_subset.keys()) {
+    if (evaluation_values.exists(key)) {
+      evaluation_values.update(key, solver_result.estimate_subset.at(key));
+    } else {
+      evaluation_values.insert(key, solver_result.estimate_subset.at(key));
+    }
+  }
+  fixed_lag_registry_.seed_shared_values(
+    evaluation_values,
+    navigation_layer_enabled && fixed_lag_registry_.shared_state().gnss_anchor_initialized);
+
+  iap::SplineActiveStateSet post_active_state_set =
+    fixed_lag_registry_.active_state_set(evaluation_values, min_active_stamp, navigation_layer_enabled);
+  {
+    const auto t_prune_start = Clock::now();
+    prune_active_ct_state(min_active_stamp, post_active_state_set);
+    refresh_active_window_layout();
+    timing.prune_active_ms = elapsed_ms(t_prune_start, Clock::now());
+  }
+  marginal_prior_ = ActiveSplineMarginalPrior();
+  update_marginal_prior_from_active_window();
+  timing.marginalization_ms = timing.prune_active_ms;
+
+  const auto t_postprocess_start = Clock::now();
+  auto current_handle_it = local_contribution.lidar_factor_handles.empty()
+    ? local_contribution.lidar_factor_handles.end()
+    : std::prev(local_contribution.lidar_factor_handles.end());
+  if (current_handle_it == local_contribution.lidar_factor_handles.end()) {
+    logger->error("bspline incremental graph failed to build current lidar factor");
+    return nullptr;
+  }
+
+  std::vector<iap::BSplineLidarFactorResult> lidar_results;
+  std::vector<iap::FrontendBucketProfileRow> bucket_profiles;
+  int current_lidar_result_index = -1;
+  iap::BSplineLidarFactorResult current_lidar_result;
+  const bool collect_window_lidar_results = lidar_collect_window_results();
+
+  auto append_lidar_result = [&](const iap::BSplineLocalLayerContribution::LidarFactorHandle& handle, bool current_factor) {
+    const double factor_error = handle.factor->error(evaluation_values);
+    auto factor_result = handle.factor->make_result(
+      factor_error,
+      handle.factor->num_inliers(),
+      handle.factor->inlier_fraction());
+    if (current_factor) {
+      current_lidar_result = factor_result;
+      current_lidar_result_index = static_cast<int>(lidar_results.size());
+    }
+    lidar_results.push_back(factor_result);
+
+    iap::FrontendBucketProfileRow bucket_profile;
+    bucket_profile.source_frame_index = handle.source_frame_index;
+    bucket_profile.bucket_index = handle.bucket_index;
+    bucket_profile.bucket_mode = iap::CTLocalFrontend::bucket_mode_name(lidar_bucket_config_.mode);
+    bucket_profile.representative_time = handle.representative_time;
+    bucket_profile.points_in_bucket = handle.bucket_ctx.point_indices.size();
+    bucket_profile.valid_correspondence_count = factor_result.profile.matched_point_count;
+    bucket_profile.match_ratio = factor_result.profile.match_ratio;
+    bucket_profile.inlier_ratio = factor_result.profile.inlier_ratio;
+    bucket_profile.target_point_count = factor_result.profile.target_point_count;
+    bucket_profile.candidate_evaluation_count = factor_result.profile.candidate_evaluation_count;
+    bucket_profile.lookup_or_correspondence_ms = factor_result.profile.correspondence_ms;
+    bucket_profile.accumulation_ms = factor_result.profile.accumulation_ms;
+    bucket_profile.factor_total_ms = factor_result.profile.total_ms;
+    bucket_profile.time_bucket_count = factor_result.profile.time_bucket_count;
+    bucket_profile.mean_time_bucket_population = factor_result.profile.mean_time_bucket_population;
+    bucket_profile.max_time_bucket_population = factor_result.profile.max_time_bucket_population;
+    bucket_profiles.push_back(std::move(bucket_profile));
+  };
+
+  if (collect_window_lidar_results) {
+    for (const auto& handle : local_contribution.lidar_factor_handles) {
+      append_lidar_result(handle, &handle == &(*current_handle_it));
+    }
+  } else {
+    append_lidar_result(*current_handle_it, true);
+  }
+
+  maybe_export_lidar_baseline_csv(raw_frame->stamp, lidar_results, current_lidar_result_index);
+
+  auto evaluate_lidar_pose = [&](double stamp, double legacy_u) {
+    if (active_window_layout_ && active_window_evaluator_) {
+      if (const auto support = active_window_layout_->support_at(stamp, iap::SplineSensorId::Lidar)) {
+        return active_window_evaluator_->eval_pose(evaluation_values, *support, iap::SplineSensorId::Lidar);
+      }
+    }
+    return control_window_->evaluate(legacy_u);
+  };
+  const gtsam::Pose3 start_pose = evaluate_lidar_pose(raw_frame->stamp, 0.0);
+  new_frame->T_world_lidar = Eigen::Isometry3d(start_pose.matrix());
+  new_frame->T_world_imu = new_frame->T_world_lidar * T_lidar_imu;
+  new_frame->v_world_imu = evaluation_values.exists(current_velocity_key)
+    ? evaluation_values.at<gtsam::Vector3>(current_velocity_key)
+    : Eigen::Vector3d::Zero();
+  new_frame->imu_bias.head<3>() = fixed_lag_registry_.shared_state().accel_bias;
+  new_frame->imu_bias.tail<3>() = fixed_lag_registry_.shared_state().gyro_bias;
+  if (evaluation_values.exists(current_clock_key)) {
+    const auto clock = evaluation_values.at<gtsam::Vector2>(current_clock_key);
+    new_frame->clk_bias = clock(0);
+    new_frame->clk_drift = clock(1);
+  } else if (!frames.empty() && frames.back()) {
+    new_frame->clk_bias = frames.back()->clk_bias;
+    new_frame->clk_drift = frames.back()->clk_drift;
+  }
+  if (current_lidar_result.valid) {
+    new_frame->icp_quality.inlier_count = current_lidar_result.inlier_count;
+    new_frame->icp_quality.inlier_fraction = current_lidar_result.inlier_fraction;
+    new_frame->icp_quality.rmse =
+      std::sqrt(current_lidar_result.factor_error / std::max(new_frame->icp_quality.inlier_count, 1));
+  }
+
+  auto deskewed_points = current_handle_it->factor->deskewed_source_points(evaluation_values, true);
+  const auto deskewed_covs = covariance_estimation->estimate(deskewed_points, raw_frame->neighbors);
+  for (int i = 0; i < new_frame->frame->size(); ++i) {
+    new_frame->frame->points[i] = deskewed_points[static_cast<std::size_t>(i)];
+    new_frame->frame->covs[i] = deskewed_covs[static_cast<std::size_t>(i)];
+  }
+
+  {
+    const auto t_callback_start = Clock::now();
+    Callbacks::on_new_frame(new_frame);
+    timing.post_callback_ms += elapsed_ms(t_callback_start, Clock::now());
+  }
+  {
+    const auto t_target_insert_start = Clock::now();
+    insert_target_cloud(new_frame);
+    timing.post_target_insert_ms = elapsed_ms(t_target_insert_start, Clock::now());
+  }
+  {
+    const auto t_history_start = Clock::now();
+    update_frame_history(new_frame, marginalized_frames);
+    timing.post_history_update_ms = elapsed_ms(t_history_start, Clock::now());
+  }
+  {
+    const auto t_publish_start = Clock::now();
+    publish_continuous_trajectory(current);
+    timing.post_publish_traj_ms = elapsed_ms(t_publish_start, Clock::now());
+  }
+  {
+    const auto t_telemetry_start = Clock::now();
+    publish_fixed_lag_telemetry(current);
+    timing.post_publish_telemetry_ms = elapsed_ms(t_telemetry_start, Clock::now());
+  }
+
+  std::vector<EstimationFrame::ConstPtr> active_frames(frames.inner_begin(), frames.inner_end());
+  if (!active_frames.empty()) {
+    const auto t_callback_start = Clock::now();
+    Callbacks::on_update_new_frame(active_frames.back());
+    Callbacks::on_update_frames(active_frames);
+    timing.post_callback_ms += elapsed_ms(t_callback_start, Clock::now());
+  }
+
+  timing.postprocess_ms = elapsed_ms(t_postprocess_start, Clock::now());
+  timing.window_wall_ms = elapsed_ms(t_window_start, Clock::now());
+
+  iap::FrontendFrameProfile frontend_frame_profile = local_contribution.processed.frame_profile;
+  frontend_frame_profile.frame_id = new_frame->id;
+  frontend_frame_profile.stamp = raw_frame->stamp;
+  frontend_frame_profile.frontend_mode = frontend_mode_;
+  frontend_frame_profile.frontend_only_mode = frontend_only_mode_;
+  frontend_frame_profile.use_legacy_two_stage_path = false;
+  frontend_frame_profile.preprocess_ms = timing.source_cloud_ms;
+  frontend_frame_profile.target_map_prep_ms = timing.target_build_ms;
+  frontend_frame_profile.lm_solve_ms = timing.solver_update_ms;
+  frontend_frame_profile.marginalization_ms = timing.marginalization_ms;
+  frontend_frame_profile.backend_update_ms = 0.0;
+  frontend_frame_profile.backend_optimize_ms = 0.0;
+  frontend_frame_profile.publish_ms = timing.post_publish_traj_ms + timing.post_publish_telemetry_ms + timing.post_callback_ms;
+  frontend_frame_profile.local_mapping_update_ms = 0.0;
+  frontend_frame_profile.global_mapping_update_ms = 0.0;
+  frontend_frame_profile.submap_registration_ms = 0.0;
+  frontend_frame_profile.active_control_point_count = post_active_state_set.active_control_indices.size();
+  frontend_frame_profile.active_pose_key_count = post_active_state_set.active_pose_keys.size();
+  frontend_frame_profile.optimize_count = solver_result.optimize_count;
+  frontend_frame_profile.local_layer_enabled = local_contribution.activation.enabled;
+  frontend_frame_profile.navigation_layer_enabled = navigation_contribution.activation.enabled;
+  frontend_frame_profile.local_layer_factor_count = local_contribution.factor_count();
+  frontend_frame_profile.navigation_layer_factor_count = navigation_contribution.factor_count();
+  frontend_frame_profile.local_layer_active_state_count = local_contribution.activation.active_state_count();
+  frontend_frame_profile.navigation_layer_active_state_count = navigation_contribution.activation.active_state_count();
+  frontend_frame_profile.solver_mode = iap::to_string(unified_solver_mode_);
+  frontend_frame_profile.new_factor_count = delta.new_factors.size();
+  frontend_frame_profile.new_value_count = delta.new_values.size();
+  frontend_frame_profile.retired_key_count = solver_result.retired_keys.size();
+  frontend_frame_profile.fallback_used = solver_result.fallback_used;
+  frontend_frame_profile.carried_prior_replay_success = false;
+  frontend_frame_profile.imu_factor_count = local_contribution.imu_factor_count;
+  frontend_frame_profile.imu_residual_count = local_contribution.debug_stats.imu_residual_count;
+  frontend_frame_profile.lidar_factor_count = local_contribution.lidar_factor_count;
+  frontend_frame_profile.lidar_residual_count = local_contribution.debug_stats.lidar_residual_count;
+  frontend_frame_profile.gnss_factor_count =
+    navigation_contribution.gnss_pr_factor_count + navigation_contribution.gnss_dop_factor_count;
+  frontend_frame_profile.carried_prior_count = 0;
+  frontend_frame_profile.backend_factor_count = navigation_contribution.factor_count();
+  frontend_frame_profile.backend_state_count = navigation_contribution.activation.active_state_count();
+  frontend_frame_profile.local_residual_count =
+    frontend_frame_profile.lidar_residual_count +
+    frontend_frame_profile.imu_residual_count +
+    frontend_frame_profile.gnss_factor_count;
+  frontend_frame_profile.lm_initial_cost = solver_result.initial_cost;
+  frontend_frame_profile.lm_final_cost = solver_result.final_cost;
+
+  maybe_write_frontend_frame_profile(frontend_frame_profile);
+  maybe_write_lidar_factor_profiles(frontend_frame_profile.frame_id, frontend_frame_profile.stamp, bucket_profiles);
+  if (frontend_only_mode_) {
+    log_frontend_only_stats(frontend_frame_profile);
+  }
+
+  return new_frame;
+}
+
 void OdometryEstimationBSpline::publish_continuous_trajectory(int current) {
   (void)current;
 
@@ -4255,6 +4945,55 @@ iap::CTLocalFrontend::LayerInput OdometryEstimationBSpline::make_local_layer_inp
   return input;
 }
 
+iap::CTLocalFrontend::LayerInput OdometryEstimationBSpline::make_local_layer_delta_input(
+  const ActiveSplineSegmentConstraint& segment,
+  std::shared_ptr<const iap::SplineStateLayout> factor_layout) const {
+  iap::CTLocalFrontend::LayerInput input;
+  input.graph_context.layout = std::move(factor_layout);
+  input.graph_context.min_active_stamp = std::max(0.0, segment.stamp - params->smoother_lag);
+  input.graph_context.frontend_only_mode = frontend_only_mode_;
+  input.graph_context.local_layer_enabled = true;
+  input.graph_context.navigation_layer_enabled = !frontend_only_mode_;
+  input.bucket_config = lidar_bucket_config_;
+  input.lm_max_iterations = lm_max_iterations_;
+  input.accelerometer_precision = imu_ct_trans_inf_scale_;
+  input.gyroscope_precision = imu_ct_rot_inf_scale_;
+  input.velocity_precision = velocity_ct_inf_scale_;
+  input.finite_difference_dt = trajectory_params_.finite_difference_dt;
+  input.max_correspondence_distance = max_correspondence_distance_;
+  input.enable_lidar_factor_profiling = lidar_factor_profile_ || lidar_warn_degeneracy_ || lidar_export_baseline_csv_;
+  input.enable_graph_problem_size = frontend_frame_profile_enabled_ && graph_problem_size_enabled_;
+  input.jacobian_mode = lidar_jacobian_mode_;
+  input.numeric_eps = lidar_jacobian_numeric_eps_;
+  input.correspondence_candidate_count = lidar_correspondence_candidate_count_;
+  input.correspondence_accept_ratio = lidar_correspondence_accept_ratio_;
+  input.correspondence_min_score_gap = lidar_correspondence_min_score_gap_;
+  input.outlier_mahalanobis_threshold = lidar_outlier_mahalanobis_thresh_;
+  input.robust_kernel = lidar_robust_kernel_;
+  input.robust_kernel_width = lidar_robust_kernel_width_;
+  input.robust_weight_floor = lidar_robust_weight_floor_;
+
+  iap::CTLocalFrontend::LayerSegmentInput layer_segment;
+  layer_segment.source_frame_index = fixed_lag_registry_.segments().empty() ? 0U : fixed_lag_registry_.segments().size() - 1U;
+  layer_segment.source_frame.source_cloud = segment.source;
+  layer_segment.source_frame.scan_start = segment.stamp;
+  layer_segment.source_frame.scan_end = segment.scan_end;
+  layer_segment.target_ivox = segment.target_snapshot;
+  layer_segment.target_tree = segment.target_tree;
+  layer_segment.control_indices = segment.control_indices;
+  layer_segment.auxiliary_index = segment.auxiliary_index;
+  layer_segment.imu_samples.reserve(segment.imu_samples.size());
+  for (const auto& imu_sample : segment.imu_samples) {
+    layer_segment.imu_samples.push_back(iap::CTLocalFrontend::IMUSample{
+      imu_sample.stamp,
+      imu_sample.angular_vel,
+      imu_sample.linear_acc,
+    });
+  }
+  input.segments.push_back(std::move(layer_segment));
+  return input;
+}
+
 // IAP-RQ-300 / IAP-RQ-410: Build CTCompactBackend::Input from shared GNSS state.
 // The local_result parameter is reserved for future layout-driven GNSS key selection (Task 6+).
 iap::CTCompactBackend::Input OdometryEstimationBSpline::make_backend_input(
@@ -4310,6 +5049,58 @@ iap::CTCompactBackend::LayerInput OdometryEstimationBSpline::make_navigation_lay
   }
 
   return input;
+}
+
+iap::CTCompactBackend::LayerInput OdometryEstimationBSpline::make_navigation_layer_delta_input(
+  const ActiveSplineSegmentConstraint& current_segment,
+  const ActiveSplineSegmentConstraint* previous_segment,
+  std::shared_ptr<const iap::SplineStateLayout> factor_layout,
+  const gtsam::KeyVector& existing_keys,
+  bool navigation_layer_enabled) const {
+  iap::CTCompactBackend::LayerInput input;
+  input.graph_context.layout = std::move(factor_layout);
+  input.graph_context.min_active_stamp = std::max(0.0, current_segment.stamp - params->smoother_lag);
+  input.graph_context.frontend_only_mode = frontend_only_mode_;
+  input.graph_context.local_layer_enabled = true;
+  input.graph_context.navigation_layer_enabled = navigation_layer_enabled;
+  input.graph_context.existing_keys = existing_keys;
+
+  const auto& shared = fixed_lag_registry_.shared_state();
+  input.gnss_anchor_initialized = shared.gnss_anchor_initialized;
+  input.ecef_origin = shared.ecef_origin;
+  input.ecef_rot = shared.ecef_rot;
+  input.gnss_pr_noise_base = gnss_pr_noise_base_;
+  input.gnss_dop_noise_base = gnss_dop_noise_base_;
+  input.gnss_min_elevation = gnss_min_elevation_;
+  input.gnss_elev_noise_exp = gnss_elev_noise_exp_;
+  input.gnss_lever_arm = gnss_lever_arm_;
+
+  iap::CTCompactBackend::LayerSegmentInput layer_segment;
+  layer_segment.stamp = current_segment.stamp;
+  layer_segment.auxiliary_index = current_segment.auxiliary_index;
+  layer_segment.gnss_epochs = current_segment.gnss_epochs;
+  if (previous_segment) {
+    layer_segment.has_previous_auxiliary = true;
+    layer_segment.previous_auxiliary_index = previous_segment->auxiliary_index;
+    layer_segment.previous_stamp = previous_segment->stamp;
+  }
+  input.segments.push_back(std::move(layer_segment));
+  return input;
+}
+
+void OdometryEstimationBSpline::reset_unified_graph_solver() {
+  if (unified_solver_mode_ == iap::BSplineUnifiedSolverMode::INCREMENTAL_SMOOTHER) {
+    gtsam::ISAM2Params incremental_params;
+    if (params->use_isam2_dogleg) {
+      incremental_params.setOptimizationParams(gtsam::ISAM2DoglegParams());
+    }
+    incremental_params.findUnusedFactorSlots = true;
+    incremental_params.relinearizeSkip = params->isam2_relinearize_skip;
+    incremental_params.setRelinearizeThreshold(params->isam2_relinearize_thresh);
+    unified_graph_solver_ = std::make_unique<iap::IncrementalSmootherSolver>(params->smoother_lag, incremental_params);
+  } else {
+    unified_graph_solver_ = std::make_unique<iap::BatchLMSolver>(lm_max_iterations_);
+  }
 }
 
 }  // namespace glim

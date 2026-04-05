@@ -6,6 +6,7 @@
 #include <iap/odometry/ct_compact_backend.hpp>
 #include <iap/odometry/ct_backend_summary.hpp>
 #include <iap/odometry/integrated_bspline_gnss_factor.hpp>
+#include <iap/gnss/clock_between_factor.hpp>
 #include <iap/gnss/gnss_types.hpp>
 #include <gtsam/nonlinear/NonlinearFactorGraph.h>
 #include <gtsam/nonlinear/Values.h>
@@ -15,6 +16,15 @@
 #include <cmath>
 
 namespace iap {
+
+namespace {
+
+bool key_exists_in_context(const BSplineUnifiedGraphContext& context, const gtsam::Values& values, gtsam::Key key) {
+  return values.exists(key) ||
+         std::find(context.existing_keys.begin(), context.existing_keys.end(), key) != context.existing_keys.end();
+}
+
+}
 
 BSplineNavigationLayerContribution CTCompactBackend::assemble_navigation_layer(
   const LayerInput& input,
@@ -37,10 +47,10 @@ BSplineNavigationLayerContribution CTCompactBackend::assemble_navigation_layer(
   const gtsam::Key ecef_origin_key = bspline_ecef_origin_key();
   const gtsam::Key ecef_rot_key = bspline_ecef_rot_key();
 
-  if (!values->exists(ecef_origin_key)) {
+  if (!key_exists_in_context(input.graph_context, *values, ecef_origin_key)) {
     values->insert(ecef_origin_key, input.ecef_origin);
   }
-  if (!values->exists(ecef_rot_key)) {
+  if (!key_exists_in_context(input.graph_context, *values, ecef_rot_key)) {
     values->insert(ecef_rot_key, input.ecef_rot);
   }
   contribution.activation.retained_keys = {ecef_origin_key, ecef_rot_key};
@@ -54,14 +64,27 @@ BSplineNavigationLayerContribution CTCompactBackend::assemble_navigation_layer(
     const gtsam::Key clock_key = bspline_clock_key(segment.auxiliary_index);
     const gtsam::Key velocity_key = bspline_velocity_key(segment.auxiliary_index);
 
-    if (!values->exists(clock_key)) {
+    if (!key_exists_in_context(input.graph_context, *values, clock_key)) {
       values->insert(clock_key, gtsam::Vector2(0.0, 0.0));
     }
-    if (!values->exists(velocity_key)) {
+    if (!key_exists_in_context(input.graph_context, *values, velocity_key)) {
       values->insert(velocity_key, gtsam::Vector3(0.0, 0.0, 0.0));
     }
 
     contribution.activation.active_auxiliary_indices.push_back(segment.auxiliary_index);
+
+    if (segment.has_previous_auxiliary) {
+      const gtsam::Key previous_clock_key = bspline_clock_key(segment.previous_auxiliary_index);
+      if (key_exists_in_context(input.graph_context, *values, previous_clock_key)) {
+        const double dt = std::max(1e-3, segment.stamp - segment.previous_stamp);
+        contribution.graph.add(std::make_shared<iap::ClockBetweenFactor>(
+          previous_clock_key,
+          clock_key,
+          dt,
+          iap::ClockBetweenFactor::make_noise(dt, iap::ClockBetweenFactor::Params())));
+        ++contribution.clock_factor_count;
+      }
+    }
 
     for (const auto& epoch : segment.gnss_epochs) {
       const auto support = input.graph_context.layout->support_at(epoch.stamp, SplineSensorId::Gnss);
@@ -130,7 +153,6 @@ BSplineNavigationLayerContribution CTCompactBackend::assemble_navigation_layer(
       contribution.activation.active_auxiliary_indices.begin(),
       contribution.activation.active_auxiliary_indices.end()),
     contribution.activation.active_auxiliary_indices.end());
-  contribution.clock_factor_count = contribution.activation.active_auxiliary_indices.size();
   last_gnss_factor_count_ = gnss_factor_count;
   return contribution;
 }

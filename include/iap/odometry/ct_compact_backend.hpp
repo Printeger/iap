@@ -54,6 +54,9 @@ class CTCompactBackend {
   struct LayerSegmentInput {
     double stamp{0.0};
     std::size_t auxiliary_index{0};
+    bool has_previous_auxiliary{false};
+    std::size_t previous_auxiliary_index{0};
+    double previous_stamp{0.0};
     std::vector<iap::GnssEpoch> gnss_epochs;
   };
 
