@@ -4473,9 +4473,9 @@ EstimationFrame::ConstPtr OdometryEstimationBSpline::insert_frame_ct_lidar_incre
     const gtsam::Key prev_key = iap::bspline_control_point_key(prev_it->index);
     const gtsam::Key curr_key = iap::bspline_control_point_key(curr_it->index);
     if (!key_known(prev_key)) {
-      delta.new_values.insert(prev_key, prev_it->pose);
-      delta.new_stamps[prev_key] = current_segment.scan_end;
-      append_unique_key(&newly_announced_keys, prev_key);
+      // Commit 3: keep smoothness strictly neighbor-local inside the current
+      // incremental graph instead of re-inserting a retired predecessor.
+      continue;
     }
     delta.new_factors.emplace_shared<gtsam::BetweenFactor<gtsam::Pose3>>(
       prev_key,
