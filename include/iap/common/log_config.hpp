@@ -24,6 +24,8 @@ struct ProfilingLogConfig {
   bool pipeline = false;
   bool frontend_frame = true;
   bool lidar_factor = false;
+  bool solver_update_profile = false;
+  bool lidar_factor_internal_profile = false;
   bool frontend_lm_iteration = false;
   bool frame_warning_profile = false;
   bool target_map_prep_breakdown = false;
@@ -33,6 +35,8 @@ struct ProfilingLogConfig {
   std::string pipeline_file = "pipeline_timing.csv";
   std::string frontend_frame_file = "frontend_frame_profile.csv";
   std::string lidar_factor_file = "lidar_factor_profile.csv";
+  std::string solver_update_profile_file = "solver_update_profile.csv";
+  std::string lidar_factor_internal_profile_file = "lidar_factor_internal_profile.csv";
   std::string frontend_lm_iteration_file = "frontend_lm_iteration.csv";
   std::string frame_warning_profile_file = "frame_warning_profile.csv";
   std::string numeric_reference_file = "numeric_reference.csv";

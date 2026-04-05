@@ -63,6 +63,77 @@ struct FrontendBucketProfileRow {
   std::size_t max_time_bucket_population{0};
 };
 
+struct SolverUpdateProfileRow {
+  int frame_id{-1};
+  double frame_stamp{0.0};
+  std::string solver_mode{"BATCH_LM"};
+  bool frontend_only_mode{false};
+  bool local_layer_enabled{false};
+  bool navigation_layer_enabled{false};
+  bool used_incremental_solver{false};
+  bool fallback_used{false};
+  std::size_t new_factor_count{0};
+  std::size_t new_value_count{0};
+  std::size_t new_stamp_count{0};
+  std::size_t query_key_count{0};
+  std::size_t retired_key_count{0};
+  std::size_t active_control_point_count{0};
+  std::size_t active_pose_key_count{0};
+  std::size_t active_aux_key_count{0};
+  std::size_t persistent_key_count{0};
+  std::size_t local_state_dimension{0};
+  std::size_t local_residual_count{0};
+  double solver_update_ms{0.0};
+  double estimate_query_ms{0.0};
+  double fallback_rebuild_ms{0.0};
+  double relinearization_ms{0.0};
+  double linearization_ms{0.0};
+  double elimination_ms{0.0};
+  double delta_solve_ms{0.0};
+  std::size_t relinearized_variable_count{0};
+  std::size_t reeliminated_variable_count{0};
+  std::size_t relinearized_factor_count{0};
+  std::size_t linearized_factor_count{0};
+  std::size_t bayes_tree_clique_count{0};
+  std::size_t affected_variable_count{0};
+  std::size_t observed_key_count{0};
+  std::size_t new_factor_index_count{0};
+  std::size_t current_nonlinear_factor_count{0};
+  double isam_reported_update_ms{0.0};
+  int optimize_count{0};
+  double initial_error{0.0};
+  double final_error{0.0};
+  double error_drop_ratio{0.0};
+  int iteration_count{0};
+  std::string solver_status{"unavailable"};
+};
+
+struct LidarFactorInternalProfileRow {
+  int frame_id{-1};
+  double frame_stamp{0.0};
+  std::string bucket_mode{"TIME_EPS"};
+  std::size_t bucket_count{0};
+  std::size_t factor_index{0};
+  double representative_time{0.0};
+  std::size_t points_in_bucket{0};
+  std::size_t source_point_count{0};
+  std::size_t target_candidate_count{0};
+  std::size_t valid_correspondence_count{0};
+  std::size_t effective_residual_count{0};
+  double factor_total_ms{0.0};
+  double correspondence_ms{0.0};
+  double covariance_lookup_ms{0.0};
+  double residual_eval_ms{0.0};
+  double jacobian_eval_ms{0.0};
+  double match_ratio{0.0};
+  double inlier_ratio{0.0};
+  double best_distance_mean{0.0};
+  double best_second_gap_mean{0.0};
+  std::size_t support_control_count{0};
+  std::size_t support_pose_key_count{0};
+  std::size_t active_control_point_count{0};
+};
+
 struct FrontendFrameProfile {
   int frame_id{-1};
   double stamp{0.0};

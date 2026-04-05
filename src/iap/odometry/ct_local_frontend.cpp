@@ -36,6 +36,32 @@ double elapsed_ms(const Clock::time_point& start, const Clock::time_point& end) 
   return std::chrono::duration<double, std::milli>(end - start).count();
 }
 
+void append_unique_control_index(std::vector<int>* indices, int control_index) {
+  if (!indices) {
+    return;
+  }
+  if (std::find(indices->begin(), indices->end(), control_index) == indices->end()) {
+    indices->push_back(control_index);
+  }
+}
+
+void append_support_control_indices(
+  const SplineStateLayout& layout,
+  const SplineLocalSupport& support,
+  std::vector<int>* indices) {
+  if (!indices) {
+    return;
+  }
+
+  const auto& controls = layout.controls();
+  for (const auto ctrl_idx : support.ctrl_indices) {
+    if (ctrl_idx >= controls.size()) {
+      continue;
+    }
+    append_unique_control_index(indices, static_cast<int>(controls[ctrl_idx].index));
+  }
+}
+
 std::size_t compute_local_state_dimension(const SplineStateLayout& layout, const gtsam::Values& values) {
   std::size_t dimension = 0;
   for (const auto& control : layout.controls()) {
@@ -534,13 +560,7 @@ BSplineLocalLayerContribution CTLocalFrontend::assemble_local_layer(const LayerI
   for (const auto& segment : input.segments) {
     std::array<gtsam::Key, kBSplineControlPointCount> segment_pose_keys{};
     for (const auto control_index : segment.control_indices) {
-      const int control_int = static_cast<int>(control_index);
-      if (std::find(
-            contribution.activation.active_control_indices.begin(),
-            contribution.activation.active_control_indices.end(),
-            control_int) == contribution.activation.active_control_indices.end()) {
-        contribution.activation.active_control_indices.push_back(control_int);
-      }
+      append_unique_control_index(&contribution.activation.active_control_indices, static_cast<int>(control_index));
     }
     for (std::size_t i = 0; i < kBSplineControlPointCount; ++i) {
       segment_pose_keys[i] = bspline_control_point_key(segment.control_indices[i]);
@@ -568,6 +588,7 @@ BSplineLocalLayerContribution CTLocalFrontend::assemble_local_layer(const LayerI
       if (!support) {
         continue;
       }
+      append_support_control_indices(layout, *support, &contribution.activation.active_control_indices);
 
       SplineStampContext ctx;
       ctx.support = *support;
@@ -608,6 +629,7 @@ BSplineLocalLayerContribution CTLocalFrontend::assemble_local_layer(const LayerI
 
     for (std::size_t bucket_index = 0; bucket_index < bucket_contexts.size(); ++bucket_index) {
       const auto& bucket_ctx = bucket_contexts[bucket_index];
+      append_support_control_indices(layout, bucket_ctx.context.support, &contribution.activation.active_control_indices);
       const auto t_lidar_build_start = Clock::now();
       auto factor = std::make_shared<IntegratedSplineGICPFactor>(
         bucket_ctx.context,

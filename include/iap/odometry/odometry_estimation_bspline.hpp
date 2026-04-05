@@ -261,10 +261,12 @@ class OdometryEstimationBSpline : public OdometryEstimationCPU {
     const std::vector<iap::BSplineLidarFactorResult>& results,
     int current_factor_index);
   void maybe_write_frontend_frame_profile(const iap::FrontendFrameProfile& profile);
+  void maybe_write_solver_update_profile(const iap::SolverUpdateProfileRow& row);
   void maybe_write_lidar_factor_profiles(
     int frame_id,
     double stamp,
     const std::vector<iap::FrontendBucketProfileRow>& profiles);
+  void maybe_write_lidar_factor_internal_profiles(const std::vector<iap::LidarFactorInternalProfileRow>& rows);
   void maybe_write_frontend_lm_iterations(
     int frame_id,
     double stamp,
@@ -337,6 +339,8 @@ class OdometryEstimationBSpline : public OdometryEstimationCPU {
   double lidar_robust_weight_floor_ = 0.0;
   bool frontend_frame_profile_enabled_ = true;
   bool lidar_factor_profile_ = false;
+  bool solver_update_profile_enabled_ = false;
+  bool lidar_factor_internal_profile_enabled_ = false;
   bool frontend_lm_iteration_profile_enabled_ = false;
   bool frame_warning_profile_enabled_ = false;
   bool target_map_prep_breakdown_enabled_ = false;
@@ -352,6 +356,8 @@ class OdometryEstimationBSpline : public OdometryEstimationCPU {
   std::string lidar_baseline_csv_path_ = "ct_lidar_baseline.csv";
   std::string frontend_frame_profile_csv_path_ = "frontend_frame_profile.csv";
   std::string frontend_lidar_factor_profile_csv_path_ = "lidar_factor_profile.csv";
+  std::string solver_update_profile_csv_path_ = "solver_update_profile.csv";
+  std::string lidar_factor_internal_profile_csv_path_ = "lidar_factor_internal_profile.csv";
   std::string frontend_lm_iteration_csv_path_ = "frontend_lm_iteration.csv";
   std::string frame_warning_profile_csv_path_ = "frame_warning_profile.csv";
   iap::IntegratedBSplineGICPFactor::DegeneracyThresholds lidar_degeneracy_thresholds_;
@@ -398,6 +404,8 @@ class OdometryEstimationBSpline : public OdometryEstimationCPU {
   bool lidar_baseline_csv_first_row_logged_ = false;
   bool frontend_frame_profile_header_written_ = false;
   bool frontend_lidar_factor_profile_header_written_ = false;
+  bool solver_update_profile_header_written_ = false;
+  bool lidar_factor_internal_profile_header_written_ = false;
   bool frontend_lm_iteration_header_written_ = false;
   bool frame_warning_profile_header_written_ = false;
   bool frontend_iteration_without_frame_warned_ = false;

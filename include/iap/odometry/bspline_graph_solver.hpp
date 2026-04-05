@@ -9,6 +9,7 @@
 
 #include <cstddef>
 #include <memory>
+#include <string>
 
 namespace iap {
 
@@ -24,6 +25,7 @@ struct BSplineGraphDelta {
   gtsam::Values new_values;
   gtsam::FixedLagSmootherKeyTimestampMap new_stamps;
   gtsam::KeyVector query_keys;
+  gtsam::KeyVector mirror_sync_keys;
   gtsam::KeyVector active_pose_keys;
   gtsam::KeyVector active_aux_keys;
   gtsam::KeyVector persistent_keys;
@@ -47,6 +49,24 @@ struct BSplineSolverResult {
   int optimize_count{0};
   bool fallback_used{false};
   bool used_incremental_solver{false};
+  double estimate_query_ms{0.0};
+  double fallback_rebuild_ms{0.0};
+  double relinearization_ms{0.0};
+  double linearization_ms{0.0};
+  double elimination_ms{0.0};
+  double delta_solve_ms{0.0};
+  std::size_t relinearized_variable_count{0};
+  std::size_t reeliminated_variable_count{0};
+  std::size_t relinearized_factor_count{0};
+  std::size_t linearized_factor_count{0};
+  std::size_t bayes_tree_clique_count{0};
+  std::size_t affected_variable_count{0};
+  std::size_t observed_key_count{0};
+  std::size_t new_factor_index_count{0};
+  std::size_t current_nonlinear_factor_count{0};
+  double isam_reported_update_ms{0.0};
+  int iteration_count{0};
+  std::string solver_status{"unavailable"};
 };
 
 class IBSplineGraphSolver {

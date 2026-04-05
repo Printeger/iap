@@ -66,6 +66,8 @@ FRONTEND_STAGE_COLUMNS = [
 CSV_ARTIFACTS = [
     ("frontend_frame_profile", "profiling/frontend_frame_profile.csv"),
     ("lidar_factor_profile", "profiling/lidar_factor_profile.csv"),
+    ("solver_update_profile", "profiling/solver_update_profile.csv"),
+    ("lidar_factor_internal_profile", "profiling/lidar_factor_internal_profile.csv"),
     ("frontend_lm_iteration", "profiling/frontend_lm_iteration.csv"),
     ("frame_warning_profile", "profiling/frame_warning_profile.csv"),
     ("pipeline_timing", "profiling/pipeline_timing.csv"),
@@ -376,6 +378,8 @@ def build_config_summary(configs: dict[str, Any], runtime_summary: dict[str, Any
         if get_nested(log_cfg, "profiling", "lidar_factor") is not None
         else odom_block.get("ct_lidar_profile_factor")
     )
+    summary["solver_update_profile"] = get_nested(log_cfg, "profiling", "solver_update_profile")
+    summary["lidar_factor_internal_profile"] = get_nested(log_cfg, "profiling", "lidar_factor_internal_profile")
     summary["frontend_lm_iteration_profile"] = get_nested(log_cfg, "profiling", "frontend_lm_iteration")
     summary["frame_warning_profile"] = get_nested(log_cfg, "profiling", "frame_warning_profile")
     summary["target_map_prep_breakdown"] = get_nested(log_cfg, "profiling", "target_map_prep_breakdown")
@@ -400,6 +404,15 @@ def build_config_summary(configs: dict[str, Any], runtime_summary: dict[str, Any
     summary["enable_global_mapping"] = ros_block.get("enable_global_mapping")
     summary["extension_modules"] = ros_block.get("extension_modules")
     summary["write_mode_manifest"] = get_nested(log_cfg, "metadata", "write_mode_manifest")
+    run_info = metadata.get("run_info", {}) if isinstance(metadata.get("run_info", {}), dict) else {}
+    for key in [
+        "config_log_profiling_solver_update_profile",
+        "runtime_log_profiling_solver_update_profile",
+        "config_log_profiling_lidar_factor_internal_profile",
+        "runtime_log_profiling_lidar_factor_internal_profile",
+    ]:
+        if key in run_info:
+            summary[key] = run_info[key]
 
     init_kv = runtime_summary.get("odometry_init", {})
     for key in ["frontend_mode", "frontend_only_mode", "lidar_bucket_mode", "lidar_target_mode"]:
@@ -440,6 +453,8 @@ def artifact_enabled(name: str, configs: dict[str, Any], config_summary: dict[st
     mapping: dict[str, Any] = {
         "pipeline_timing": get_nested(log_cfg, "profiling", "pipeline") if get_nested(log_cfg, "profiling", "pipeline") is not None else global_cfg.get("enable_timing_csv"),
         "lidar_factor_profile": get_nested(log_cfg, "profiling", "lidar_factor") if get_nested(log_cfg, "profiling", "lidar_factor") is not None else (True if maybe_bool(config_summary.get("frontend_only_mode")) else odom_cfg.get("ct_lidar_profile_factor")),
+        "solver_update_profile": get_nested(log_cfg, "profiling", "solver_update_profile"),
+        "lidar_factor_internal_profile": get_nested(log_cfg, "profiling", "lidar_factor_internal_profile"),
         "frontend_frame_profile": get_nested(log_cfg, "profiling", "frontend_frame") if get_nested(log_cfg, "profiling", "frontend_frame") is not None else maybe_bool(config_summary.get("frontend_only_mode")),
         "frontend_lm_iteration": get_nested(log_cfg, "profiling", "frontend_lm_iteration") if get_nested(log_cfg, "profiling", "frontend_lm_iteration") is not None else maybe_bool(config_summary.get("frontend_only_mode")),
         "frame_warning_profile": get_nested(log_cfg, "profiling", "frame_warning_profile"),
@@ -763,6 +778,270 @@ def analyze_lidar_bucket_profile(bucket_df: pd.DataFrame, out_dir: Path, render_
             fig.savefig(out_path, dpi=150)
             plt.close(fig)
             analysis["fig_lidar_bucket_load"] = str(out_path)
+
+    return analysis
+
+
+def analyze_solver_update(
+    solver_df: pd.DataFrame | None,
+    frame_df: pd.DataFrame | None,
+    out_dir: Path,
+    render_plots: bool = True,
+) -> dict[str, Any]:
+    analysis: dict[str, Any] = {"available": False}
+    if solver_df is None or solver_df.empty:
+        return analysis
+
+    df = solver_df.copy()
+    analysis["available"] = True
+    analysis["row_count"] = int(len(df))
+    analysis["solver_modes"] = sorted(df["solver_mode"].dropna().astype(str).unique().tolist()) if "solver_mode" in df else []
+    analysis["used_incremental_solver_values"] = (
+        sorted(df["used_incremental_solver"].dropna().astype(int).unique().tolist())
+        if "used_incremental_solver" in df else []
+    )
+    analysis["local_layer_enabled_values"] = (
+        sorted(df["local_layer_enabled"].dropna().astype(int).unique().tolist())
+        if "local_layer_enabled" in df else []
+    )
+    analysis["navigation_layer_enabled_values"] = (
+        sorted(df["navigation_layer_enabled"].dropna().astype(int).unique().tolist())
+        if "navigation_layer_enabled" in df else []
+    )
+    analysis["fallback_used_values"] = (
+        sorted(df["fallback_used"].dropna().astype(int).unique().tolist())
+        if "fallback_used" in df else []
+    )
+
+    for col in [
+        "solver_update_ms",
+        "estimate_query_ms",
+        "fallback_rebuild_ms",
+        "relinearization_ms",
+        "linearization_ms",
+        "elimination_ms",
+        "delta_solve_ms",
+        "new_factor_count",
+        "new_value_count",
+        "retired_key_count",
+        "active_control_point_count",
+        "active_pose_key_count",
+        "active_aux_key_count",
+        "persistent_key_count",
+        "relinearized_variable_count",
+        "reeliminated_variable_count",
+        "relinearized_factor_count",
+        "linearized_factor_count",
+        "bayes_tree_clique_count",
+        "affected_variable_count",
+        "observed_key_count",
+        "new_factor_index_count",
+        "current_nonlinear_factor_count",
+        "isam_reported_update_ms",
+    ]:
+        if col in df.columns:
+            series = df[col].fillna(0)
+            analysis[f"{col}_mean"] = float(series.mean())
+            analysis[f"{col}_p95"] = pct(series, 0.95)
+            analysis[f"{col}_max"] = float(series.max())
+
+    if {"solver_update_ms", "estimate_query_ms", "fallback_rebuild_ms", "relinearization_ms", "linearization_ms", "elimination_ms", "delta_solve_ms"}.issubset(df.columns):
+        stage_cols = [
+            "estimate_query_ms",
+            "fallback_rebuild_ms",
+            "relinearization_ms",
+            "linearization_ms",
+            "elimination_ms",
+            "delta_solve_ms",
+        ]
+        stage_summary = []
+        denom = max(float(df["solver_update_ms"].fillna(0).mean()), 1e-9)
+        for col in stage_cols:
+            col_series = df[col].fillna(0)
+            stage_summary.append({
+                "stage": col,
+                "mean_ms": float(col_series.mean()),
+                "p95_ms": pct(col_series, 0.95),
+                "max_ms": float(col_series.max()),
+                "mean_share": float(col_series.mean() / denom),
+            })
+        stage_summary.sort(key=lambda item: item["mean_ms"], reverse=True)
+        analysis["stage_summary"] = stage_summary
+        unavailable = [
+            item["stage"] for item in stage_summary
+            if item["mean_ms"] == 0.0 and item["p95_ms"] == 0.0 and item["max_ms"] == 0.0
+        ]
+        analysis["unavailable_internal_fields"] = unavailable
+        analysis["unavailable_internal_timing"] = bool(
+            {"relinearization_ms", "linearization_ms", "elimination_ms"}.issubset(set(unavailable))
+        )
+
+    if {"active_control_point_count", "new_factor_count"}.issubset(df.columns) and len(df) >= 3:
+        pair = df[["active_control_point_count", "new_factor_count"]].dropna()
+        if len(pair) >= 3 and float(pair["active_control_point_count"].std(ddof=0)) > 0.0 and float(pair["new_factor_count"].std(ddof=0)) > 0.0:
+            analysis["new_factor_vs_active_window_corr"] = float(pair["active_control_point_count"].corr(pair["new_factor_count"], method="pearson"))
+    if {"active_control_point_count", "new_value_count"}.issubset(df.columns) and len(df) >= 3:
+        pair = df[["active_control_point_count", "new_value_count"]].dropna()
+        if len(pair) >= 3 and float(pair["active_control_point_count"].std(ddof=0)) > 0.0 and float(pair["new_value_count"].std(ddof=0)) > 0.0:
+            analysis["new_value_vs_active_window_corr"] = float(pair["active_control_point_count"].corr(pair["new_value_count"], method="pearson"))
+
+    correlation_specs = [
+        ("reeliminated_variable_count", "reeliminated_variable_vs_solver_update_corr"),
+        ("relinearized_variable_count", "relinearized_variable_vs_solver_update_corr"),
+        ("relinearized_factor_count", "recalculated_factor_vs_solver_update_corr"),
+        ("affected_variable_count", "affected_variable_vs_solver_update_corr"),
+    ]
+    for col, out_key in correlation_specs:
+        if {col, "solver_update_ms"}.issubset(df.columns) and len(df) >= 3:
+            pair = df[[col, "solver_update_ms"]].dropna()
+            if len(pair) >= 3 and float(pair[col].std(ddof=0)) > 0.0 and float(pair["solver_update_ms"].std(ddof=0)) > 0.0:
+                analysis[out_key] = float(pair[col].corr(pair["solver_update_ms"], method="pearson"))
+
+    if "solver_update_ms" in df.columns:
+        slow = df.sort_values("solver_update_ms", ascending=False).head(10)
+        keep_cols = [
+            "frame_id",
+            "frame_stamp",
+            "solver_mode",
+            "solver_update_ms",
+            "delta_solve_ms",
+            "relinearization_ms",
+            "linearization_ms",
+            "elimination_ms",
+            "new_factor_count",
+            "new_value_count",
+            "active_control_point_count",
+            "active_aux_key_count",
+            "affected_variable_count",
+            "reeliminated_variable_count",
+            "relinearized_variable_count",
+            "relinearized_factor_count",
+            "solver_status",
+        ]
+        analysis["slow_updates"] = slow[[c for c in keep_cols if c in slow.columns]].to_dict(orient="records")
+
+    if render_plots and "solver_update_ms" in df.columns:
+        ensure_dir(out_dir)
+        x = df["frame_id"] if "frame_id" in df.columns else np.arange(len(df))
+
+        fig, ax = plt.subplots(figsize=(12, 5))
+        ax.plot(x, df["solver_update_ms"], label="solver_update_ms", color="#111111", linewidth=1.2)
+        for col, color in [
+            ("delta_solve_ms", "#d62728"),
+            ("estimate_query_ms", "#1f77b4"),
+            ("relinearization_ms", "#2ca02c"),
+            ("linearization_ms", "#9467bd"),
+            ("elimination_ms", "#ff7f0e"),
+        ]:
+            if col in df.columns:
+                ax.plot(x, df[col].fillna(0), label=col, linewidth=0.9, alpha=0.85, color=color)
+        ax.set_title("Solver Update Timeline")
+        ax.set_xlabel("frame_id")
+        ax.set_ylabel("ms")
+        ax.grid(True, alpha=0.3)
+        ax.legend(fontsize=8, ncol=3)
+        fig.tight_layout()
+        out_path = out_dir / "solver_update_timeline.png"
+        fig.savefig(out_path, dpi=150)
+        plt.close(fig)
+        analysis["fig_solver_update_timeline"] = str(out_path)
+
+        if {"active_control_point_count", "new_factor_count"}.issubset(df.columns):
+            fig, ax = plt.subplots(figsize=(7, 5))
+            scatter = ax.scatter(
+                df["active_control_point_count"],
+                df["new_factor_count"],
+                c=df["solver_update_ms"],
+                cmap="viridis",
+                s=18,
+                alpha=0.75,
+            )
+            ax.set_xlabel("active_control_point_count")
+            ax.set_ylabel("new_factor_count")
+            ax.set_title("Delta Size vs Active Window")
+            ax.grid(True, alpha=0.3)
+            cbar = fig.colorbar(scatter, ax=ax)
+            cbar.set_label("solver_update_ms")
+            fig.tight_layout()
+            out_path = out_dir / "solver_delta_vs_active_window.png"
+            fig.savefig(out_path, dpi=150)
+            plt.close(fig)
+            analysis["fig_solver_delta_vs_active_window"] = str(out_path)
+
+    return analysis
+
+
+def analyze_lidar_factor_internal(internal_df: pd.DataFrame | None, out_dir: Path, render_plots: bool = True) -> dict[str, Any]:
+    analysis: dict[str, Any] = {"available": False}
+    if internal_df is None or internal_df.empty:
+        return analysis
+
+    df = internal_df.copy()
+    analysis["available"] = True
+    analysis["row_count"] = int(len(df))
+    analysis["bucket_modes"] = sorted(df["bucket_mode"].dropna().astype(str).unique().tolist()) if "bucket_mode" in df else []
+    for col in [
+        "points_in_bucket",
+        "valid_correspondence_count",
+        "effective_residual_count",
+        "factor_total_ms",
+        "correspondence_ms",
+        "match_ratio",
+        "inlier_ratio",
+        "best_distance_mean",
+        "best_second_gap_mean",
+    ]:
+        if col in df.columns:
+            series = df[col].fillna(0)
+            analysis[f"{col}_mean"] = float(series.mean())
+            analysis[f"{col}_p95"] = pct(series, 0.95)
+            analysis[f"{col}_max"] = float(series.max())
+
+    if {"factor_total_ms", "correspondence_ms"}.issubset(df.columns):
+        total = df["factor_total_ms"].fillna(0).sum()
+        corr = df["correspondence_ms"].fillna(0).sum()
+        analysis["correspondence_share_of_factor_total"] = float(corr / total) if total > 0 else 0.0
+
+    if "factor_total_ms" in df.columns:
+        slow = df.sort_values("factor_total_ms", ascending=False).head(10)
+        keep_cols = [
+            "frame_id",
+            "factor_index",
+            "bucket_mode",
+            "points_in_bucket",
+            "valid_correspondence_count",
+            "effective_residual_count",
+            "factor_total_ms",
+            "correspondence_ms",
+            "match_ratio",
+            "inlier_ratio",
+        ]
+        analysis["slow_factors"] = slow[[c for c in keep_cols if c in slow.columns]].to_dict(orient="records")
+
+    if render_plots and {"points_in_bucket", "factor_total_ms"}.issubset(df.columns):
+        ensure_dir(out_dir)
+
+        fig, ax = plt.subplots(figsize=(7, 5))
+        scatter = ax.scatter(
+            df["points_in_bucket"],
+            df["factor_total_ms"],
+            c=df["valid_correspondence_count"] if "valid_correspondence_count" in df else "#4c78a8",
+            cmap="viridis",
+            s=18,
+            alpha=0.75,
+        )
+        ax.set_xlabel("points_in_bucket")
+        ax.set_ylabel("factor_total_ms")
+        ax.set_title("LiDAR Factor Internal Load")
+        ax.grid(True, alpha=0.3)
+        if "valid_correspondence_count" in df:
+            cbar = fig.colorbar(scatter, ax=ax)
+            cbar.set_label("valid_correspondence_count")
+        fig.tight_layout()
+        out_path = out_dir / "lidar_factor_internal_load.png"
+        fig.savefig(out_path, dpi=150)
+        plt.close(fig)
+        analysis["fig_lidar_factor_internal_load"] = str(out_path)
 
     return analysis
 
@@ -1208,6 +1487,8 @@ def detect_findings(
     artifact_statuses: list[ArtifactStatus],
     mode_consistency: dict[str, Any],
     frontend_analysis: dict[str, Any],
+    solver_update_analysis: dict[str, Any],
+    lidar_factor_internal_analysis: dict[str, Any],
     optimizer_analysis: dict[str, Any],
     target_map_analysis: dict[str, Any],
     bucket_analysis: dict[str, Any],
@@ -1298,6 +1579,103 @@ def detect_findings(
                 "evidence": f"lm_iteration_trace_reason={optimizer_analysis.get('lm_iteration_trace_reason', 'unknown')}",
             })
 
+    if solver_update_analysis.get("available"):
+        stage_summary = solver_update_analysis.get("stage_summary", [])
+        if stage_summary:
+            top = stage_summary[0]
+            findings.append({
+                "severity": "info",
+                "title": f"Dominant solver-update substage is {top['stage']}",
+                "evidence": f"mean={top['mean_ms']:.3f} ms, share={100.0 * top['mean_share']:.1f}%",
+            })
+
+        unavailable = solver_update_analysis.get("unavailable_internal_fields", [])
+        if unavailable and float(solver_update_analysis.get("solver_update_ms_mean", 0.0)) > 0.0:
+            findings.append({
+                "severity": "warn",
+                "title": "solver 内部 telemetry blind spot",
+                "evidence": ", ".join(unavailable[:6]),
+            })
+
+        if (
+            bool(solver_update_analysis.get("unavailable_internal_timing"))
+            and (
+                (isinstance(solver_update_analysis.get("reeliminated_variable_vs_solver_update_corr"), float)
+                 and solver_update_analysis.get("reeliminated_variable_vs_solver_update_corr", 0.0) > 0.7)
+                or
+                (isinstance(solver_update_analysis.get("recalculated_factor_vs_solver_update_corr"), float)
+                 and solver_update_analysis.get("recalculated_factor_vs_solver_update_corr", 0.0) > 0.7)
+            )
+        ):
+            findings.append({
+                "severity": "warn",
+                "title": "likely pseudo-incremental heavy reelimination/relinearization pressure",
+                "evidence": (
+                    f"corr(reeliminated,solver_update)="
+                    f"{solver_update_analysis.get('reeliminated_variable_vs_solver_update_corr', 'n/a')}; "
+                    f"corr(recalculated_factor,solver_update)="
+                    f"{solver_update_analysis.get('recalculated_factor_vs_solver_update_corr', 'n/a')}"
+                ),
+            })
+
+        fallback_used_values = solver_update_analysis.get("fallback_used_values", [])
+        if (
+            "fallback_rebuild_ms_mean" in solver_update_analysis
+            and float(solver_update_analysis.get("fallback_rebuild_ms_mean", 0.0)) == 0.0
+            and all(int(v) == 0 for v in fallback_used_values)
+        ):
+            findings.append({
+                "severity": "info",
+                "title": "no evidence of fallback/reseed cost",
+                "evidence": "fallback_used stayed 0 and fallback_rebuild_ms stayed 0 for this run",
+            })
+
+        new_factor_corr = solver_update_analysis.get("new_factor_vs_active_window_corr")
+        new_value_corr = solver_update_analysis.get("new_value_vs_active_window_corr")
+        if (
+            isinstance(new_factor_corr, float) and new_factor_corr > 0.85
+        ) or (
+            isinstance(new_value_corr, float) and new_value_corr > 0.85
+        ):
+            findings.append({
+                "severity": "warn",
+                "title": "incremental delta path may be drifting toward window-wide rebuild",
+                "evidence": (
+                    f"corr(new_factor,active_window)={new_factor_corr if new_factor_corr is not None else 'n/a'}; "
+                    f"corr(new_value,active_window)={new_value_corr if new_value_corr is not None else 'n/a'}"
+                ),
+            })
+        elif isinstance(new_factor_corr, float) and isinstance(new_value_corr, float):
+            findings.append({
+                "severity": "info",
+                "title": "delta-only structure still healthy",
+                "evidence": (
+                    f"corr(new_factor,active_window)={new_factor_corr:.3f}; "
+                    f"corr(new_value,active_window)={new_value_corr:.3f}"
+                ),
+            })
+
+    if lidar_factor_internal_analysis.get("available"):
+        if (
+            float(lidar_factor_internal_analysis.get("points_in_bucket_p95", 0.0)) > 5000
+            or float(lidar_factor_internal_analysis.get("factor_total_ms_p95", 0.0)) > 20.0
+        ):
+            findings.append({
+                "severity": "warn",
+                "title": "single-bucket lidar factor overload is visible",
+                "evidence": (
+                    f"points_in_bucket_p95={lidar_factor_internal_analysis.get('points_in_bucket_p95', 0.0):.1f}, "
+                    f"factor_total_ms_p95={lidar_factor_internal_analysis.get('factor_total_ms_p95', 0.0):.3f}"
+                ),
+            })
+
+        if "correspondence_share_of_factor_total" in lidar_factor_internal_analysis:
+            findings.append({
+                "severity": "info",
+                "title": "LiDAR factor correspondence cost share captured",
+                "evidence": f"correspondence_share={100.0 * lidar_factor_internal_analysis.get('correspondence_share_of_factor_total', 0.0):.1f}%",
+            })
+
     if target_map_analysis.get("available") and target_map_analysis.get("is_black_box"):
         findings.append({
             "severity": "warn",
@@ -1323,6 +1701,8 @@ def recommend_next_steps(
     artifact_statuses: list[ArtifactStatus],
     mode_consistency: dict[str, Any],
     frontend_analysis: dict[str, Any],
+    solver_update_analysis: dict[str, Any],
+    lidar_factor_internal_analysis: dict[str, Any],
     optimizer_analysis: dict[str, Any],
     slow_frame_analysis: dict[str, Any],
     target_map_analysis: dict[str, Any],
@@ -1345,9 +1725,52 @@ def recommend_next_steps(
         recommendations["Immediate next checks"].append(
             "Capture lidar_factor_profile.csv when investigating SINGLE_BUCKET performance so bucket load can be separated from optimizer cost."
         )
+    if status_map.get("solver_update_profile") and status_map["solver_update_profile"].status in {"missing", "expected_missing"}:
+        recommendations["Immediate next checks"].append(
+            "Enable log.profiling.solver_update_profile when debugging unified BSpline solver bottlenecks."
+        )
+    if status_map.get("lidar_factor_internal_profile") and status_map["lidar_factor_internal_profile"].status in {"missing", "expected_missing"}:
+        recommendations["Immediate next checks"].append(
+            "Enable log.profiling.lidar_factor_internal_profile when investigating SINGLE_BUCKET factor overload."
+        )
     if status_map.get("frontend_lm_iteration") and optimizer_analysis.get("lm_iteration_rows_present") is False:
         recommendations["Instrumentation gaps to fill"].append(
             "Gate optimizer iteration trace behind a dedicated config flag such as log.profiling.frontend_lm_iteration and emit rows whenever LM callback activity occurs."
+        )
+    if solver_update_analysis.get("available") and solver_update_analysis.get("unavailable_internal_fields"):
+        recommendations["Instrumentation gaps to fill"].append(
+            "Keep unavailable solver-internal fields explicit. If more detail is needed, extend repo-local BSpline solver telemetry instead of inferring hidden iSAM2 phases."
+        )
+    if (
+        solver_update_analysis.get("available")
+        and bool(solver_update_analysis.get("unavailable_internal_timing"))
+        and (
+            (isinstance(solver_update_analysis.get("reeliminated_variable_vs_solver_update_corr"), float)
+             and solver_update_analysis.get("reeliminated_variable_vs_solver_update_corr", 0.0) > 0.7)
+            or
+            (isinstance(solver_update_analysis.get("recalculated_factor_vs_solver_update_corr"), float)
+             and solver_update_analysis.get("recalculated_factor_vs_solver_update_corr", 0.0) > 0.7)
+        )
+    ):
+        recommendations["Immediate next checks"].append(
+            "High solver-update correlation with reeliminated/recalculated counts suggests Bayes-tree churn; test smaller smoother_lag and lower active-window coupling before changing math."
+        )
+    new_factor_corr = solver_update_analysis.get("new_factor_vs_active_window_corr")
+    new_value_corr = solver_update_analysis.get("new_value_vs_active_window_corr")
+    if (
+        isinstance(new_factor_corr, float) and new_factor_corr > 0.85
+    ) or (
+        isinstance(new_value_corr, float) and new_value_corr > 0.85
+    ):
+        recommendations["Likely code changes"].append(
+            "Re-check delta assembly so new_factor_count/new_value_count stay tied to newly appended segment(s), not active-window size."
+        )
+    if (
+        lidar_factor_internal_analysis.get("available")
+        and float(lidar_factor_internal_analysis.get("correspondence_share_of_factor_total", 0.0)) > 0.6
+    ):
+        recommendations["Immediate next checks"].append(
+            "Correspondence dominates LiDAR factor cost; inspect candidate count, accept ratio, and target density before changing solver settings."
         )
     if slow_frame_analysis.get("warning_count_available") is False:
         recommendations["Instrumentation gaps to fill"].append(
@@ -1411,6 +1834,8 @@ def render_report_markdown(
     runtime_summary: dict[str, Any],
     mode_consistency: dict[str, Any],
     frontend_analysis: dict[str, Any],
+    solver_update_analysis: dict[str, Any],
+    lidar_factor_internal_analysis: dict[str, Any],
     slow_frame_analysis: dict[str, Any],
     optimizer_analysis: dict[str, Any],
     target_map_analysis: dict[str, Any],
@@ -1572,6 +1997,72 @@ def render_report_markdown(
         ))
     else:
         lines.append("LiDAR bucket profiling was not available for this run.")
+        lines.append("")
+
+    lines.append("## Solver Update Analysis")
+    lines.append("")
+    if solver_update_analysis.get("available"):
+        lines.append(md_table(
+            ["Metric", "Value"],
+            [
+                ["row_count", solver_update_analysis.get("row_count", 0)],
+                ["solver_modes", ", ".join(solver_update_analysis.get("solver_modes", [])) or "_none_"],
+                ["used_incremental_solver_values", ", ".join(str(v) for v in solver_update_analysis.get("used_incremental_solver_values", [])) or "_none_"],
+                ["fallback_used_values", ", ".join(str(v) for v in solver_update_analysis.get("fallback_used_values", [])) or "_none_"],
+                ["solver_update_ms_mean", f"{solver_update_analysis.get('solver_update_ms_mean', 0.0):.3f}" if "solver_update_ms_mean" in solver_update_analysis else "n/a"],
+                ["solver_update_ms_p95", f"{solver_update_analysis.get('solver_update_ms_p95', 0.0):.3f}" if "solver_update_ms_p95" in solver_update_analysis else "n/a"],
+                ["isam_reported_update_ms_mean", f"{solver_update_analysis.get('isam_reported_update_ms_mean', 0.0):.3f}" if "isam_reported_update_ms_mean" in solver_update_analysis else "n/a"],
+                ["new_factor_count_mean", f"{solver_update_analysis.get('new_factor_count_mean', 0.0):.3f}" if "new_factor_count_mean" in solver_update_analysis else "n/a"],
+                ["new_value_count_mean", f"{solver_update_analysis.get('new_value_count_mean', 0.0):.3f}" if "new_value_count_mean" in solver_update_analysis else "n/a"],
+                ["reeliminated_variable_count_mean", f"{solver_update_analysis.get('reeliminated_variable_count_mean', 0.0):.3f}" if "reeliminated_variable_count_mean" in solver_update_analysis else "n/a"],
+                ["observed_key_count_mean", f"{solver_update_analysis.get('observed_key_count_mean', 0.0):.3f}" if "observed_key_count_mean" in solver_update_analysis else "n/a"],
+                ["current_nonlinear_factor_count_mean", f"{solver_update_analysis.get('current_nonlinear_factor_count_mean', 0.0):.3f}" if "current_nonlinear_factor_count_mean" in solver_update_analysis else "n/a"],
+                ["new_factor_vs_active_window_corr", f"{solver_update_analysis.get('new_factor_vs_active_window_corr', 'n/a')}"],
+                ["new_value_vs_active_window_corr", f"{solver_update_analysis.get('new_value_vs_active_window_corr', 'n/a')}"],
+                ["reeliminated_variable_vs_solver_update_corr", f"{solver_update_analysis.get('reeliminated_variable_vs_solver_update_corr', 'n/a')}"],
+                ["relinearized_variable_vs_solver_update_corr", f"{solver_update_analysis.get('relinearized_variable_vs_solver_update_corr', 'n/a')}"],
+                ["recalculated_factor_vs_solver_update_corr", f"{solver_update_analysis.get('recalculated_factor_vs_solver_update_corr', 'n/a')}"],
+                ["unavailable_internal_timing", solver_update_analysis.get("unavailable_internal_timing", False)],
+                ["unavailable_internal_fields", ", ".join(solver_update_analysis.get("unavailable_internal_fields", [])) or "_none_"],
+            ],
+        ))
+        if solver_update_analysis.get("stage_summary"):
+            stage_rows = [
+                [
+                    item["stage"],
+                    f"{item['mean_ms']:.3f}",
+                    f"{item['p95_ms']:.3f}",
+                    f"{item['max_ms']:.3f}",
+                    f"{100.0 * item['mean_share']:.1f}%",
+                ]
+                for item in solver_update_analysis.get("stage_summary", [])
+            ]
+            lines.append("Solver-update stage breakdown:")
+            lines.append("")
+            lines.append(md_table(["Stage", "Mean ms", "P95 ms", "Max ms", "Mean Share"], stage_rows))
+    else:
+        lines.append("solver_update_profile.csv was not available for this run.")
+        lines.append("")
+
+    lines.append("## LiDAR Factor Internal Load")
+    lines.append("")
+    if lidar_factor_internal_analysis.get("available"):
+        lines.append(md_table(
+            ["Metric", "Value"],
+            [
+                ["row_count", lidar_factor_internal_analysis.get("row_count", 0)],
+                ["bucket_modes", ", ".join(lidar_factor_internal_analysis.get("bucket_modes", [])) or "_none_"],
+                ["points_in_bucket_mean", f"{lidar_factor_internal_analysis.get('points_in_bucket_mean', 0.0):.1f}" if "points_in_bucket_mean" in lidar_factor_internal_analysis else "n/a"],
+                ["points_in_bucket_p95", f"{lidar_factor_internal_analysis.get('points_in_bucket_p95', 0.0):.1f}" if "points_in_bucket_p95" in lidar_factor_internal_analysis else "n/a"],
+                ["factor_total_ms_mean", f"{lidar_factor_internal_analysis.get('factor_total_ms_mean', 0.0):.3f}" if "factor_total_ms_mean" in lidar_factor_internal_analysis else "n/a"],
+                ["factor_total_ms_p95", f"{lidar_factor_internal_analysis.get('factor_total_ms_p95', 0.0):.3f}" if "factor_total_ms_p95" in lidar_factor_internal_analysis else "n/a"],
+                ["correspondence_share_of_factor_total", f"{100.0 * lidar_factor_internal_analysis.get('correspondence_share_of_factor_total', 0.0):.1f}%" if "correspondence_share_of_factor_total" in lidar_factor_internal_analysis else "n/a"],
+                ["match_ratio_mean", f"{lidar_factor_internal_analysis.get('match_ratio_mean', 0.0):.3f}" if "match_ratio_mean" in lidar_factor_internal_analysis else "n/a"],
+                ["inlier_ratio_mean", f"{lidar_factor_internal_analysis.get('inlier_ratio_mean', 0.0):.3f}" if "inlier_ratio_mean" in lidar_factor_internal_analysis else "n/a"],
+            ],
+        ))
+    else:
+        lines.append("lidar_factor_internal_profile.csv was not available for this run.")
         lines.append("")
 
     if pipeline_analysis.get("available"):
@@ -1799,6 +2290,17 @@ def main() -> int:
         figs_dir,
         render_plots=not args.no_plots,
     )
+    solver_update_analysis = analyze_solver_update(
+        dataframes.get("solver_update_profile"),
+        dataframes.get("frontend_frame_profile"),
+        figs_dir,
+        render_plots=not args.no_plots,
+    )
+    lidar_factor_internal_analysis = analyze_lidar_factor_internal(
+        dataframes.get("lidar_factor_internal_profile"),
+        figs_dir,
+        render_plots=not args.no_plots,
+    )
     pipeline_analysis = analyze_pipeline_timing(
         dataframes.get("pipeline_timing"),
         figs_dir,
@@ -1842,6 +2344,8 @@ def main() -> int:
         artifact_statuses=artifact_statuses,
         mode_consistency=mode_consistency,
         frontend_analysis=frontend_analysis,
+        solver_update_analysis=solver_update_analysis,
+        lidar_factor_internal_analysis=lidar_factor_internal_analysis,
         optimizer_analysis=optimizer_analysis,
         target_map_analysis=target_map_analysis,
         bucket_analysis=bucket_analysis,
@@ -1851,6 +2355,8 @@ def main() -> int:
         artifact_statuses=artifact_statuses,
         mode_consistency=mode_consistency,
         frontend_analysis=frontend_analysis,
+        solver_update_analysis=solver_update_analysis,
+        lidar_factor_internal_analysis=lidar_factor_internal_analysis,
         optimizer_analysis=optimizer_analysis,
         slow_frame_analysis=slow_frame_analysis,
         target_map_analysis=target_map_analysis,
@@ -1867,6 +2373,8 @@ def main() -> int:
         runtime_summary=runtime_summary,
         mode_consistency=mode_consistency,
         frontend_analysis=frontend_analysis,
+        solver_update_analysis=solver_update_analysis,
+        lidar_factor_internal_analysis=lidar_factor_internal_analysis,
         slow_frame_analysis=slow_frame_analysis,
         optimizer_analysis=optimizer_analysis,
         target_map_analysis=target_map_analysis,
@@ -1900,6 +2408,8 @@ def main() -> int:
         },
         "mode_consistency": mode_consistency,
         "frontend_analysis": frontend_analysis,
+        "solver_update_analysis": solver_update_analysis,
+        "lidar_factor_internal_analysis": lidar_factor_internal_analysis,
         "slow_frame_analysis": slow_frame_analysis,
         "optimizer_analysis": optimizer_analysis,
         "target_map_analysis": target_map_analysis,

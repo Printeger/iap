@@ -218,6 +218,18 @@ LogConfig load_log_config_impl() {
     "odometry_estimation.ct_lidar_profile_factor",
     "log.profiling.lidar_factor",
     config.profiling.lidar_factor);
+  config.profiling.solver_update_profile = resolve_log_value<bool>(
+    nested_param<bool>({"log", "profiling"}, "solver_update_profile"),
+    bool_param(odom_config, "odometry_estimation", "bspline_solver_update_profile"),
+    "odometry_estimation.bspline_solver_update_profile",
+    "log.profiling.solver_update_profile",
+    config.profiling.solver_update_profile);
+  config.profiling.lidar_factor_internal_profile = resolve_log_value<bool>(
+    nested_param<bool>({"log", "profiling"}, "lidar_factor_internal_profile"),
+    bool_param(odom_config, "odometry_estimation", "ct_lidar_internal_profile"),
+    "odometry_estimation.ct_lidar_internal_profile",
+    "log.profiling.lidar_factor_internal_profile",
+    config.profiling.lidar_factor_internal_profile);
   config.profiling.frontend_lm_iteration = resolve_log_value<bool>(
     nested_param<bool>({"log", "profiling"}, "frontend_lm_iteration"),
     std::nullopt,
@@ -260,6 +272,18 @@ LogConfig load_log_config_impl() {
     "",
     "log.profiling.lidar_factor_file",
     config.profiling.lidar_factor_file);
+  config.profiling.solver_update_profile_file = resolve_log_value<std::string>(
+    nested_param<std::string>({"log", "profiling"}, "solver_update_profile_file"),
+    std::nullopt,
+    "",
+    "log.profiling.solver_update_profile_file",
+    config.profiling.solver_update_profile_file);
+  config.profiling.lidar_factor_internal_profile_file = resolve_log_value<std::string>(
+    nested_param<std::string>({"log", "profiling"}, "lidar_factor_internal_profile_file"),
+    std::nullopt,
+    "",
+    "log.profiling.lidar_factor_internal_profile_file",
+    config.profiling.lidar_factor_internal_profile_file);
   config.profiling.frontend_lm_iteration_file = resolve_log_value<std::string>(
     nested_param<std::string>({"log", "profiling"}, "frontend_lm_iteration_file"),
     std::nullopt,
@@ -505,7 +529,9 @@ LogConfig load_log_config_impl() {
     "",
     "log.profiling.enable",
     config.profiling.pipeline || config.profiling.frontend_frame ||
-      config.profiling.lidar_factor || config.profiling.frontend_lm_iteration ||
+      config.profiling.lidar_factor || config.profiling.solver_update_profile ||
+      config.profiling.lidar_factor_internal_profile ||
+      config.profiling.frontend_lm_iteration ||
       config.profiling.frame_warning_profile || config.profiling.target_map_prep_breakdown ||
       config.profiling.graph_problem_size || config.profiling.numeric_reference ||
       config.profiling.linearization_check);

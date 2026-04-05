@@ -150,6 +150,26 @@ const char* frontend_lidar_factor_profile_csv_header() {
          "mean_time_bucket_population,max_time_bucket_population\n";
 }
 
+const char* solver_update_profile_csv_header() {
+  return "frame_id,frame_stamp,solver_mode,frontend_only_mode,local_layer_enabled,navigation_layer_enabled,"
+         "used_incremental_solver,fallback_used,new_factor_count,new_value_count,new_stamp_count,query_key_count,"
+         "retired_key_count,active_control_point_count,active_pose_key_count,active_aux_key_count,persistent_key_count,"
+         "local_state_dimension,local_residual_count,solver_update_ms,estimate_query_ms,fallback_rebuild_ms,"
+         "relinearization_ms,linearization_ms,elimination_ms,delta_solve_ms,relinearized_variable_count,"
+         "reeliminated_variable_count,relinearized_factor_count,linearized_factor_count,bayes_tree_clique_count,"
+         "affected_variable_count,observed_key_count,new_factor_index_count,current_nonlinear_factor_count,"
+         "isam_reported_update_ms,optimize_count,initial_error,final_error,error_drop_ratio,iteration_count,"
+         "solver_status\n";
+}
+
+const char* lidar_factor_internal_profile_csv_header() {
+  return "frame_id,frame_stamp,bucket_mode,bucket_count,factor_index,representative_time,points_in_bucket,"
+         "source_point_count,target_candidate_count,valid_correspondence_count,effective_residual_count,"
+         "factor_total_ms,correspondence_ms,covariance_lookup_ms,residual_eval_ms,jacobian_eval_ms,match_ratio,"
+         "inlier_ratio,best_distance_mean,best_second_gap_mean,support_control_count,support_pose_key_count,"
+         "active_control_point_count\n";
+}
+
 const char* frontend_lm_iteration_csv_header() {
   return "frame_id,stamp,iteration_index,cost_before,cost_after,accepted,lambda_before,lambda_after,linear_solve_ms\n";
 }
@@ -174,6 +194,49 @@ std::string csv_escape(const std::string& value) {
   }
   escaped.push_back('"');
   return escaped;
+}
+
+double error_drop_ratio(double initial_error, double final_error) {
+  if (!(initial_error > 0.0) || !std::isfinite(initial_error) || !std::isfinite(final_error)) {
+    return 0.0;
+  }
+  return (initial_error - final_error) / initial_error;
+}
+
+iap::LidarFactorInternalProfileRow make_lidar_factor_internal_profile_row(
+  int frame_id,
+  double frame_stamp,
+  const std::string& bucket_mode,
+  std::size_t bucket_count,
+  std::size_t factor_index,
+  const iap::BSplineLocalLayerContribution::LidarFactorHandle& handle,
+  const iap::BSplineLidarFactorResult& factor_result,
+  std::size_t active_control_point_count) {
+  iap::LidarFactorInternalProfileRow row;
+  row.frame_id = frame_id;
+  row.frame_stamp = frame_stamp;
+  row.bucket_mode = bucket_mode;
+  row.bucket_count = bucket_count;
+  row.factor_index = factor_index;
+  row.representative_time = handle.representative_time;
+  row.points_in_bucket = handle.bucket_ctx.point_indices.size();
+  row.source_point_count = factor_result.profile.source_point_count;
+  row.target_candidate_count = factor_result.profile.candidate_evaluation_count;
+  row.valid_correspondence_count = factor_result.profile.matched_point_count;
+  row.effective_residual_count = factor_result.profile.inlier_point_count;
+  row.factor_total_ms = factor_result.profile.total_ms;
+  row.correspondence_ms = factor_result.profile.correspondence_ms;
+  row.covariance_lookup_ms = 0.0;
+  row.residual_eval_ms = 0.0;
+  row.jacobian_eval_ms = 0.0;
+  row.match_ratio = factor_result.profile.match_ratio;
+  row.inlier_ratio = factor_result.profile.inlier_ratio;
+  row.best_distance_mean = factor_result.profile.mean_match_distance;
+  row.best_second_gap_mean = factor_result.profile.mean_score_gap;
+  row.support_control_count = handle.bucket_ctx.support.ctrl_indices.size();
+  row.support_pose_key_count = handle.bucket_ctx.support.pose_keys.size();
+  row.active_control_point_count = active_control_point_count;
+  return row;
 }
 
 void write_frontend_frame_profile_row(std::FILE* file, const iap::FrontendFrameProfile& profile) {
@@ -295,6 +358,115 @@ void write_frontend_lidar_factor_profile_rows(
     add(profile.time_bucket_count);
     add(profile.mean_time_bucket_population);
     add(profile.max_time_bucket_population);
+    row << '\n';
+    std::fputs(row.str().c_str(), file);
+  }
+}
+
+void write_solver_update_profile_row(std::FILE* file, const iap::SolverUpdateProfileRow& row_data) {
+  if (!file) {
+    return;
+  }
+
+  std::ostringstream row;
+  row << std::fixed << std::setprecision(9);
+  bool first = true;
+  const auto add = [&](const auto& value) {
+    if (!first) {
+      row << ',';
+    }
+    first = false;
+    row << value;
+  };
+
+  add(row_data.frame_id);
+  add(row_data.frame_stamp);
+  add(row_data.solver_mode);
+  add(row_data.frontend_only_mode ? 1 : 0);
+  add(row_data.local_layer_enabled ? 1 : 0);
+  add(row_data.navigation_layer_enabled ? 1 : 0);
+  add(row_data.used_incremental_solver ? 1 : 0);
+  add(row_data.fallback_used ? 1 : 0);
+  add(row_data.new_factor_count);
+  add(row_data.new_value_count);
+  add(row_data.new_stamp_count);
+  add(row_data.query_key_count);
+  add(row_data.retired_key_count);
+  add(row_data.active_control_point_count);
+  add(row_data.active_pose_key_count);
+  add(row_data.active_aux_key_count);
+  add(row_data.persistent_key_count);
+  add(row_data.local_state_dimension);
+  add(row_data.local_residual_count);
+  add(row_data.solver_update_ms);
+  add(row_data.estimate_query_ms);
+  add(row_data.fallback_rebuild_ms);
+  add(row_data.relinearization_ms);
+  add(row_data.linearization_ms);
+  add(row_data.elimination_ms);
+  add(row_data.delta_solve_ms);
+  add(row_data.relinearized_variable_count);
+  add(row_data.reeliminated_variable_count);
+  add(row_data.relinearized_factor_count);
+  add(row_data.linearized_factor_count);
+  add(row_data.bayes_tree_clique_count);
+  add(row_data.affected_variable_count);
+  add(row_data.observed_key_count);
+  add(row_data.new_factor_index_count);
+  add(row_data.current_nonlinear_factor_count);
+  add(row_data.isam_reported_update_ms);
+  add(row_data.optimize_count);
+  add(row_data.initial_error);
+  add(row_data.final_error);
+  add(row_data.error_drop_ratio);
+  add(row_data.iteration_count);
+  add(row_data.solver_status);
+  row << '\n';
+  std::fputs(row.str().c_str(), file);
+}
+
+void write_lidar_factor_internal_profile_rows(
+  std::FILE* file,
+  const std::vector<iap::LidarFactorInternalProfileRow>& rows_data) {
+  if (!file) {
+    return;
+  }
+
+  for (const auto& row_data : rows_data) {
+    std::ostringstream row;
+    row << std::fixed << std::setprecision(9);
+    bool first = true;
+    const auto add = [&](const auto& value) {
+      if (!first) {
+        row << ',';
+      }
+      first = false;
+      row << value;
+    };
+
+    add(row_data.frame_id);
+    add(row_data.frame_stamp);
+    add(row_data.bucket_mode);
+    add(row_data.bucket_count);
+    add(row_data.factor_index);
+    add(row_data.representative_time);
+    add(row_data.points_in_bucket);
+    add(row_data.source_point_count);
+    add(row_data.target_candidate_count);
+    add(row_data.valid_correspondence_count);
+    add(row_data.effective_residual_count);
+    add(row_data.factor_total_ms);
+    add(row_data.correspondence_ms);
+    add(row_data.covariance_lookup_ms);
+    add(row_data.residual_eval_ms);
+    add(row_data.jacobian_eval_ms);
+    add(row_data.match_ratio);
+    add(row_data.inlier_ratio);
+    add(row_data.best_distance_mean);
+    add(row_data.best_second_gap_mean);
+    add(row_data.support_control_count);
+    add(row_data.support_pose_key_count);
+    add(row_data.active_control_point_count);
     row << '\n';
     std::fputs(row.str().c_str(), file);
   }
@@ -560,6 +732,32 @@ gtsam::KeyVector sort_unique_keys(gtsam::KeyVector keys) {
   return keys;
 }
 
+std::vector<std::size_t> sort_unique_control_indices(std::vector<std::size_t> indices) {
+  std::sort(indices.begin(), indices.end());
+  indices.erase(std::unique(indices.begin(), indices.end()), indices.end());
+  return indices;
+}
+
+std::vector<std::size_t> control_indices_from_activation(const iap::BSplineLayerActivation& activation) {
+  std::vector<std::size_t> indices;
+  indices.reserve(activation.active_control_indices.size());
+  for (const auto control_index : activation.active_control_indices) {
+    if (control_index >= 0) {
+      indices.push_back(static_cast<std::size_t>(control_index));
+    }
+  }
+  return sort_unique_control_indices(std::move(indices));
+}
+
+gtsam::KeyVector pose_keys_from_control_indices(const std::vector<std::size_t>& control_indices) {
+  gtsam::KeyVector keys;
+  keys.reserve(control_indices.size());
+  for (const auto control_index : control_indices) {
+    keys.push_back(iap::bspline_control_point_key(control_index));
+  }
+  return sort_unique_keys(std::move(keys));
+}
+
 }  // namespace
 
 OdometryEstimationBSplineParams::OdometryEstimationBSplineParams() : OdometryEstimationCPUParams() {
@@ -624,6 +822,8 @@ OdometryEstimationBSpline::OdometryEstimationBSpline(const OdometryEstimationBSp
   lidar_robust_weight_floor_ = config.param<double>("odometry_estimation", "ct_lidar_robust_weight_floor", 0.0);
   frontend_frame_profile_enabled_ = log_config.profiling.frontend_frame;
   lidar_factor_profile_ = log_config.profiling.lidar_factor;
+  solver_update_profile_enabled_ = log_config.profiling.solver_update_profile;
+  lidar_factor_internal_profile_enabled_ = log_config.profiling.lidar_factor_internal_profile;
   frontend_lm_iteration_profile_enabled_ = log_config.profiling.frontend_lm_iteration;
   frame_warning_profile_enabled_ = log_config.profiling.frame_warning_profile;
   target_map_prep_breakdown_enabled_ = log_config.profiling.target_map_prep_breakdown;
@@ -650,6 +850,10 @@ OdometryEstimationBSpline::OdometryEstimationBSpline(const OdometryEstimationBSp
     iap::LogPaths::instance().profiling_path(log_config.profiling.frontend_frame_file).string();
   frontend_lidar_factor_profile_csv_path_ =
     iap::LogPaths::instance().profiling_path(log_config.profiling.lidar_factor_file).string();
+  solver_update_profile_csv_path_ =
+    iap::LogPaths::instance().profiling_path(log_config.profiling.solver_update_profile_file).string();
+  lidar_factor_internal_profile_csv_path_ =
+    iap::LogPaths::instance().profiling_path(log_config.profiling.lidar_factor_internal_profile_file).string();
   frontend_lm_iteration_csv_path_ =
     iap::LogPaths::instance().profiling_path(log_config.profiling.frontend_lm_iteration_file).string();
   frame_warning_profile_csv_path_ =
@@ -3563,12 +3767,14 @@ EstimationFrame::ConstPtr OdometryEstimationBSpline::insert_frame_ct_lidar_unifi
   lm_params.setAbsoluteErrorTol(1e-2);
   lm_params.setMaxIterations(lm_max_iterations_);
   const double lm_initial_cost = graph.empty() ? 0.0 : graph.error(values);
+  std::string batch_solver_status = graph.empty() ? "no_factors" : "ok";
 
   const auto t_optimize_start = Clock::now();
   try {
     values = gtsam_points::LevenbergMarquardtOptimizerExt(graph, values, lm_params).optimize();
   } catch (const std::exception& e) {
     logger->error("bspline unified graph optimization failed: {}", e.what());
+    batch_solver_status = "exception";
   }
   timing.lm_optimize_ms = elapsed_ms(t_optimize_start, Clock::now());
   const double lm_final_cost = graph.empty() ? 0.0 : graph.error(values);
@@ -3617,6 +3823,7 @@ EstimationFrame::ConstPtr OdometryEstimationBSpline::insert_frame_ct_lidar_unifi
 
   std::vector<iap::BSplineLidarFactorResult> lidar_results;
   std::vector<iap::FrontendBucketProfileRow> bucket_profiles;
+  std::vector<iap::LidarFactorInternalProfileRow> lidar_internal_rows;
   int current_lidar_result_index = -1;
   iap::BSplineLidarFactorResult current_lidar_result;
   const bool collect_window_lidar_results = lidar_collect_window_results();
@@ -3651,6 +3858,15 @@ EstimationFrame::ConstPtr OdometryEstimationBSpline::insert_frame_ct_lidar_unifi
     bucket_profile.mean_time_bucket_population = factor_result.profile.mean_time_bucket_population;
     bucket_profile.max_time_bucket_population = factor_result.profile.max_time_bucket_population;
     bucket_profiles.push_back(std::move(bucket_profile));
+    lidar_internal_rows.push_back(make_lidar_factor_internal_profile_row(
+      new_frame->id,
+      raw_frame->stamp,
+      iap::CTLocalFrontend::bucket_mode_name(lidar_bucket_config_.mode),
+      local_contribution.lidar_factor_handles.size(),
+      lidar_internal_rows.size(),
+      handle,
+      factor_result,
+      active_state_set.active_control_indices.size()));
   };
 
   if (collect_window_lidar_results) {
@@ -3763,6 +3979,11 @@ EstimationFrame::ConstPtr OdometryEstimationBSpline::insert_frame_ct_lidar_unifi
   frontend_frame_profile.navigation_layer_factor_count = navigation_contribution.factor_count();
   frontend_frame_profile.local_layer_active_state_count = local_contribution.activation.active_state_count();
   frontend_frame_profile.navigation_layer_active_state_count = navigation_contribution.activation.active_state_count();
+  frontend_frame_profile.solver_mode = iap::to_string(iap::BSplineUnifiedSolverMode::BATCH_LM);
+  frontend_frame_profile.new_factor_count = graph.size();
+  frontend_frame_profile.new_value_count = values.size();
+  frontend_frame_profile.retired_key_count = 0;
+  frontend_frame_profile.fallback_used = (batch_solver_status != "ok" && batch_solver_status != "no_factors");
   frontend_frame_profile.carried_prior_replay_success = information_prior_attached;
   frontend_frame_profile.imu_factor_count = local_contribution.imu_factor_count;
   frontend_frame_profile.imu_residual_count = local_contribution.debug_stats.imu_residual_count;
@@ -3781,8 +4002,54 @@ EstimationFrame::ConstPtr OdometryEstimationBSpline::insert_frame_ct_lidar_unifi
   frontend_frame_profile.lm_initial_cost = lm_initial_cost;
   frontend_frame_profile.lm_final_cost = lm_final_cost;
 
+  iap::SolverUpdateProfileRow solver_update_row;
+  solver_update_row.frame_id = frontend_frame_profile.frame_id;
+  solver_update_row.frame_stamp = frontend_frame_profile.stamp;
+  solver_update_row.solver_mode = frontend_frame_profile.solver_mode;
+  solver_update_row.frontend_only_mode = frontend_frame_profile.frontend_only_mode;
+  solver_update_row.local_layer_enabled = frontend_frame_profile.local_layer_enabled;
+  solver_update_row.navigation_layer_enabled = frontend_frame_profile.navigation_layer_enabled;
+  solver_update_row.used_incremental_solver = false;
+  solver_update_row.fallback_used = frontend_frame_profile.fallback_used;
+  solver_update_row.new_factor_count = graph.size();
+  solver_update_row.new_value_count = values.size();
+  solver_update_row.new_stamp_count = 0;
+  solver_update_row.query_key_count = 0;
+  solver_update_row.retired_key_count = 0;
+  solver_update_row.active_control_point_count = frontend_frame_profile.active_control_point_count;
+  solver_update_row.active_pose_key_count = frontend_frame_profile.active_pose_key_count;
+  solver_update_row.active_aux_key_count = active_state_set.active_aux_keys.size();
+  solver_update_row.persistent_key_count = fixed_lag_registry_.active_shared_keys(navigation_layer_enabled).size();
+  solver_update_row.local_state_dimension = frontend_frame_profile.local_state_dimension;
+  solver_update_row.local_residual_count = frontend_frame_profile.local_residual_count;
+  solver_update_row.solver_update_ms = timing.lm_optimize_ms;
+  solver_update_row.estimate_query_ms = 0.0;
+  solver_update_row.fallback_rebuild_ms = 0.0;
+  solver_update_row.relinearization_ms = 0.0;
+  solver_update_row.linearization_ms = 0.0;
+  solver_update_row.elimination_ms = 0.0;
+  solver_update_row.delta_solve_ms = timing.lm_optimize_ms;
+  solver_update_row.relinearized_variable_count = active_state_set.active_keys().size();
+  solver_update_row.reeliminated_variable_count = 0;
+  solver_update_row.relinearized_factor_count = graph.size();
+  solver_update_row.linearized_factor_count = graph.size();
+  solver_update_row.bayes_tree_clique_count = 0;
+  solver_update_row.affected_variable_count = active_state_set.active_keys().size();
+  solver_update_row.observed_key_count = 0;
+  solver_update_row.new_factor_index_count = 0;
+  solver_update_row.current_nonlinear_factor_count = graph.size();
+  solver_update_row.isam_reported_update_ms = 0.0;
+  solver_update_row.optimize_count = 1;
+  solver_update_row.initial_error = lm_initial_cost;
+  solver_update_row.final_error = lm_final_cost;
+  solver_update_row.error_drop_ratio = error_drop_ratio(lm_initial_cost, lm_final_cost);
+  solver_update_row.iteration_count = frontend_frame_profile.lm_iteration_count;
+  solver_update_row.solver_status = batch_solver_status;
+
   maybe_write_frontend_frame_profile(frontend_frame_profile);
+  maybe_write_solver_update_profile(solver_update_row);
   maybe_write_lidar_factor_profiles(frontend_frame_profile.frame_id, frontend_frame_profile.stamp, bucket_profiles);
+  maybe_write_lidar_factor_internal_profiles(lidar_internal_rows);
   if (frontend_only_mode_) {
     log_frontend_only_stats(frontend_frame_profile);
   }
@@ -3932,7 +4199,7 @@ EstimationFrame::ConstPtr OdometryEstimationBSpline::insert_frame_ct_lidar_incre
     return nullptr;
   }
 
-  const auto& current_segment = fixed_lag_registry_.segments().back();
+  auto& current_segment = fixed_lag_registry_.segments().back();
   const ActiveSplineSegmentConstraint* previous_segment =
     fixed_lag_registry_.segments().size() >= 2 ? &fixed_lag_registry_.segments()[fixed_lag_registry_.segments().size() - 2] : nullptr;
   const bool navigation_layer_enabled = !frontend_only_mode_;
@@ -3966,13 +4233,25 @@ EstimationFrame::ConstPtr OdometryEstimationBSpline::insert_frame_ct_lidar_incre
     }
   }
 
-  const auto active_state_set =
-    fixed_lag_registry_.active_state_set(mirror_values, min_active_stamp, navigation_layer_enabled);
-
   auto local_input = make_local_layer_delta_input(current_segment, factor_layout);
   local_input.graph_context.min_active_stamp = min_active_stamp;
   local_input.graph_context.existing_keys = unified_graph_solver_->current_active_keys();
   const auto local_contribution = ct_local_frontend_.assemble_local_layer(local_input);
+
+  auto segment_support_control_indices = control_indices_from_activation(local_contribution.activation);
+  if (segment_support_control_indices.empty()) {
+    segment_support_control_indices = sort_unique_control_indices(std::vector<std::size_t>(
+      current_segment.active_control_indices.begin(),
+      current_segment.active_control_indices.end()));
+  }
+  if (segment_support_control_indices.empty()) {
+    segment_support_control_indices.assign(current_segment.control_indices.begin(), current_segment.control_indices.end());
+    segment_support_control_indices = sort_unique_control_indices(std::move(segment_support_control_indices));
+  }
+  current_segment.active_control_indices = segment_support_control_indices;
+
+  const auto active_state_set =
+    fixed_lag_registry_.active_state_set(mirror_values, min_active_stamp, navigation_layer_enabled);
 
   iap::BSplineGraphDelta delta;
   delta.layout = factor_layout;
@@ -4007,24 +4286,9 @@ EstimationFrame::ConstPtr OdometryEstimationBSpline::insert_frame_ct_lidar_incre
            delta.new_values.exists(key);
   };
 
-  std::vector<std::size_t> local_control_indices;
-  local_control_indices.reserve(local_contribution.activation.active_control_indices.size() + current_segment.control_indices.size());
-  for (const auto& factor : local_contribution.graph) {
-    if (!factor) {
-      continue;
-    }
-    for (const auto key : factor->keys()) {
-      if (gtsam::Symbol(key).chr() == 's') {
-        local_control_indices.push_back(gtsam::Symbol(key).index());
-      }
-    }
-  }
-  for (const auto control_index : current_segment.control_indices) {
-    local_control_indices.push_back(control_index);
-  }
-  local_control_indices = sort_unique_keys(std::move(local_control_indices));
-
-  for (const auto control_index : local_control_indices) {
+  std::vector<std::size_t> new_control_indices;
+  new_control_indices.reserve(segment_support_control_indices.size());
+  for (const auto control_index : segment_support_control_indices) {
     if (fixed_lag_registry_.control_index_announced(control_index)) {
       const auto pose_key = iap::bspline_control_point_key(control_index);
       delta.new_stamps[pose_key] = current_segment.scan_end;
@@ -4044,6 +4308,7 @@ EstimationFrame::ConstPtr OdometryEstimationBSpline::insert_frame_ct_lidar_incre
     delta.new_values.insert(pose_key, state_it->pose);
     delta.new_stamps[pose_key] = current_segment.scan_end;
     append_unique_key(&newly_announced_keys, pose_key);
+    new_control_indices.push_back(control_index);
   }
 
   if (!fixed_lag_registry_.auxiliary_index_announced(current_segment.auxiliary_index) && !key_known(current_velocity_key)) {
@@ -4105,16 +4370,16 @@ EstimationFrame::ConstPtr OdometryEstimationBSpline::insert_frame_ct_lidar_incre
   }
 
   const bool first_incremental_segment = current_active_keys.empty();
-  if (first_incremental_segment && local_control_indices.size() >= 2) {
-    const auto pose_key_0 = iap::bspline_control_point_key(local_control_indices[0]);
-    const auto pose_key_1 = iap::bspline_control_point_key(local_control_indices[1]);
+  if (first_incremental_segment && segment_support_control_indices.size() >= 2) {
+    const auto pose_key_0 = iap::bspline_control_point_key(segment_support_control_indices[0]);
+    const auto pose_key_1 = iap::bspline_control_point_key(segment_support_control_indices[1]);
     const auto pose_0 = mirror_values.at<gtsam::Pose3>(pose_key_0);
     const auto pose_1 = mirror_values.at<gtsam::Pose3>(pose_key_1);
     delta.new_factors.emplace_shared<gtsam::PriorFactor<gtsam::Pose3>>(pose_key_0, pose_0, anchor_noise);
     delta.new_factors.emplace_shared<gtsam::PriorFactor<gtsam::Pose3>>(pose_key_1, pose_1, anchor_noise);
   }
 
-  for (const auto control_index : local_control_indices) {
+  for (const auto control_index : segment_support_control_indices) {
     const auto pose_key = iap::bspline_control_point_key(control_index);
     if (!delta.new_values.exists(pose_key)) {
       continue;
@@ -4124,18 +4389,20 @@ EstimationFrame::ConstPtr OdometryEstimationBSpline::insert_frame_ct_lidar_incre
       mirror_values.at<gtsam::Pose3>(pose_key),
       pred_noise);
   }
-  for (std::size_t i = 1; i < active_states.size(); ++i) {
-    const auto& prev_state = active_states[i - 1];
-    const auto& curr_state = active_states[i];
-    const gtsam::Key prev_key = iap::bspline_control_point_key(prev_state.index);
-    const gtsam::Key curr_key = iap::bspline_control_point_key(curr_state.index);
-    if (!delta.new_values.exists(curr_key)) {
+  for (const auto control_index : new_control_indices) {
+    const auto curr_it = std::find_if(active_states.begin(), active_states.end(), [&](const auto& state) {
+      return state.index == control_index;
+    });
+    if (curr_it == active_states.end() || curr_it == active_states.begin()) {
       continue;
     }
+    const auto prev_it = std::prev(curr_it);
+    const gtsam::Key prev_key = iap::bspline_control_point_key(prev_it->index);
+    const gtsam::Key curr_key = iap::bspline_control_point_key(curr_it->index);
     delta.new_factors.emplace_shared<gtsam::BetweenFactor<gtsam::Pose3>>(
       prev_key,
       curr_key,
-      prev_state.pose.between(curr_state.pose),
+      prev_it->pose.between(curr_it->pose),
       smooth_noise);
   }
   if (delta.new_values.exists(current_velocity_key)) {
@@ -4178,23 +4445,30 @@ EstimationFrame::ConstPtr OdometryEstimationBSpline::insert_frame_ct_lidar_incre
     }
   }
 
-  for (const auto key : local_control_indices) {
+  delta.query_keys = pose_keys_from_control_indices(segment_support_control_indices);
+  delta.mirror_sync_keys = active_state_set.active_pose_keys;
+  for (const auto key : current_segment.control_indices) {
     append_unique_key(&delta.query_keys, iap::bspline_control_point_key(key));
+    append_unique_key(&delta.mirror_sync_keys, iap::bspline_control_point_key(key));
   }
   append_unique_key(&delta.query_keys, current_velocity_key);
+  append_unique_key(&delta.mirror_sync_keys, current_velocity_key);
   if (navigation_contribution.activation.enabled) {
     append_unique_key(&delta.query_keys, current_clock_key);
+    append_unique_key(&delta.mirror_sync_keys, current_clock_key);
   }
   for (const auto key : delta.persistent_keys) {
     append_unique_key(&delta.query_keys, key);
+    append_unique_key(&delta.mirror_sync_keys, key);
   }
   delta.query_keys = sort_unique_keys(std::move(delta.query_keys));
+  delta.mirror_sync_keys = sort_unique_keys(std::move(delta.mirror_sync_keys));
 
   const auto t_solver_update_start = Clock::now();
   const auto solver_result = unified_graph_solver_->apply_delta(delta);
   timing.solver_update_ms = elapsed_ms(t_solver_update_start, Clock::now());
 
-  for (const auto control_index : local_control_indices) {
+  for (const auto control_index : segment_support_control_indices) {
     if (delta.new_values.exists(iap::bspline_control_point_key(control_index))) {
       fixed_lag_registry_.mark_control_index_announced(control_index);
     }
@@ -4268,6 +4542,7 @@ EstimationFrame::ConstPtr OdometryEstimationBSpline::insert_frame_ct_lidar_incre
 
   std::vector<iap::BSplineLidarFactorResult> lidar_results;
   std::vector<iap::FrontendBucketProfileRow> bucket_profiles;
+  std::vector<iap::LidarFactorInternalProfileRow> lidar_internal_rows;
   int current_lidar_result_index = -1;
   iap::BSplineLidarFactorResult current_lidar_result;
   const bool collect_window_lidar_results = lidar_collect_window_results();
@@ -4302,6 +4577,15 @@ EstimationFrame::ConstPtr OdometryEstimationBSpline::insert_frame_ct_lidar_incre
     bucket_profile.mean_time_bucket_population = factor_result.profile.mean_time_bucket_population;
     bucket_profile.max_time_bucket_population = factor_result.profile.max_time_bucket_population;
     bucket_profiles.push_back(std::move(bucket_profile));
+    lidar_internal_rows.push_back(make_lidar_factor_internal_profile_row(
+      new_frame->id,
+      raw_frame->stamp,
+      iap::CTLocalFrontend::bucket_mode_name(lidar_bucket_config_.mode),
+      local_contribution.lidar_factor_handles.size(),
+      lidar_internal_rows.size(),
+      handle,
+      factor_result,
+      post_active_state_set.active_control_indices.size()));
   };
 
   if (collect_window_lidar_results) {
@@ -4436,8 +4720,54 @@ EstimationFrame::ConstPtr OdometryEstimationBSpline::insert_frame_ct_lidar_incre
   frontend_frame_profile.lm_initial_cost = solver_result.initial_cost;
   frontend_frame_profile.lm_final_cost = solver_result.final_cost;
 
+  iap::SolverUpdateProfileRow solver_update_row;
+  solver_update_row.frame_id = frontend_frame_profile.frame_id;
+  solver_update_row.frame_stamp = frontend_frame_profile.stamp;
+  solver_update_row.solver_mode = frontend_frame_profile.solver_mode;
+  solver_update_row.frontend_only_mode = frontend_frame_profile.frontend_only_mode;
+  solver_update_row.local_layer_enabled = frontend_frame_profile.local_layer_enabled;
+  solver_update_row.navigation_layer_enabled = frontend_frame_profile.navigation_layer_enabled;
+  solver_update_row.used_incremental_solver = solver_result.used_incremental_solver;
+  solver_update_row.fallback_used = solver_result.fallback_used;
+  solver_update_row.new_factor_count = delta.new_factors.size();
+  solver_update_row.new_value_count = delta.new_values.size();
+  solver_update_row.new_stamp_count = delta.new_stamps.size();
+  solver_update_row.query_key_count = delta.query_keys.size();
+  solver_update_row.retired_key_count = solver_result.retired_keys.size();
+  solver_update_row.active_control_point_count = frontend_frame_profile.active_control_point_count;
+  solver_update_row.active_pose_key_count = frontend_frame_profile.active_pose_key_count;
+  solver_update_row.active_aux_key_count = solver_result.active_aux_keys.size();
+  solver_update_row.persistent_key_count = delta.persistent_keys.size();
+  solver_update_row.local_state_dimension = frontend_frame_profile.local_state_dimension;
+  solver_update_row.local_residual_count = frontend_frame_profile.local_residual_count;
+  solver_update_row.solver_update_ms = timing.solver_update_ms;
+  solver_update_row.estimate_query_ms = solver_result.estimate_query_ms;
+  solver_update_row.fallback_rebuild_ms = solver_result.fallback_rebuild_ms;
+  solver_update_row.relinearization_ms = solver_result.relinearization_ms;
+  solver_update_row.linearization_ms = solver_result.linearization_ms;
+  solver_update_row.elimination_ms = solver_result.elimination_ms;
+  solver_update_row.delta_solve_ms = solver_result.delta_solve_ms;
+  solver_update_row.relinearized_variable_count = solver_result.relinearized_variable_count;
+  solver_update_row.reeliminated_variable_count = solver_result.reeliminated_variable_count;
+  solver_update_row.relinearized_factor_count = solver_result.relinearized_factor_count;
+  solver_update_row.linearized_factor_count = solver_result.linearized_factor_count;
+  solver_update_row.bayes_tree_clique_count = solver_result.bayes_tree_clique_count;
+  solver_update_row.affected_variable_count = solver_result.affected_variable_count;
+  solver_update_row.observed_key_count = solver_result.observed_key_count;
+  solver_update_row.new_factor_index_count = solver_result.new_factor_index_count;
+  solver_update_row.current_nonlinear_factor_count = solver_result.current_nonlinear_factor_count;
+  solver_update_row.isam_reported_update_ms = solver_result.isam_reported_update_ms;
+  solver_update_row.optimize_count = solver_result.optimize_count;
+  solver_update_row.initial_error = solver_result.initial_cost;
+  solver_update_row.final_error = solver_result.final_cost;
+  solver_update_row.error_drop_ratio = error_drop_ratio(solver_result.initial_cost, solver_result.final_cost);
+  solver_update_row.iteration_count = solver_result.iteration_count;
+  solver_update_row.solver_status = solver_result.solver_status;
+
   maybe_write_frontend_frame_profile(frontend_frame_profile);
+  maybe_write_solver_update_profile(solver_update_row);
   maybe_write_lidar_factor_profiles(frontend_frame_profile.frame_id, frontend_frame_profile.stamp, bucket_profiles);
+  maybe_write_lidar_factor_internal_profiles(lidar_internal_rows);
   if (frontend_only_mode_) {
     log_frontend_only_stats(frontend_frame_profile);
   }
@@ -4669,6 +4999,32 @@ void OdometryEstimationBSpline::maybe_write_frontend_frame_profile(const iap::Fr
   std::fclose(file);
 }
 
+void OdometryEstimationBSpline::maybe_write_solver_update_profile(const iap::SolverUpdateProfileRow& row) {
+  if (!solver_update_profile_enabled_) {
+    return;
+  }
+
+  std::FILE* file = std::fopen(
+    solver_update_profile_csv_path_.c_str(),
+    solver_update_profile_header_written_ ? "a" : "w");
+  if (!file) {
+    logger->warn(
+      "failed to open solver update profile csv path={} errno={} ({})",
+      solver_update_profile_csv_path_,
+      errno,
+      std::strerror(errno));
+    return;
+  }
+
+  if (!solver_update_profile_header_written_) {
+    std::fputs(solver_update_profile_csv_header(), file);
+    solver_update_profile_header_written_ = true;
+  }
+
+  write_solver_update_profile_row(file, row);
+  std::fclose(file);
+}
+
 void OdometryEstimationBSpline::maybe_write_lidar_factor_profiles(
   const int frame_id,
   const double stamp,
@@ -4695,6 +5051,33 @@ void OdometryEstimationBSpline::maybe_write_lidar_factor_profiles(
   }
 
   write_frontend_lidar_factor_profile_rows(file, frame_id, stamp, profiles);
+  std::fclose(file);
+}
+
+void OdometryEstimationBSpline::maybe_write_lidar_factor_internal_profiles(
+  const std::vector<iap::LidarFactorInternalProfileRow>& rows) {
+  if (!lidar_factor_internal_profile_enabled_ || rows.empty()) {
+    return;
+  }
+
+  std::FILE* file = std::fopen(
+    lidar_factor_internal_profile_csv_path_.c_str(),
+    lidar_factor_internal_profile_header_written_ ? "a" : "w");
+  if (!file) {
+    logger->warn(
+      "failed to open lidar factor internal profile csv path={} errno={} ({})",
+      lidar_factor_internal_profile_csv_path_,
+      errno,
+      std::strerror(errno));
+    return;
+  }
+
+  if (!lidar_factor_internal_profile_header_written_) {
+    std::fputs(lidar_factor_internal_profile_csv_header(), file);
+    lidar_factor_internal_profile_header_written_ = true;
+  }
+
+  write_lidar_factor_internal_profile_rows(file, rows);
   std::fclose(file);
 }
 
@@ -4907,7 +5290,8 @@ iap::CTLocalFrontend::LayerInput OdometryEstimationBSpline::make_local_layer_inp
   input.velocity_precision = velocity_ct_inf_scale_;
   input.finite_difference_dt = trajectory_params_.finite_difference_dt;
   input.max_correspondence_distance = max_correspondence_distance_;
-  input.enable_lidar_factor_profiling = lidar_factor_profile_ || lidar_warn_degeneracy_ || lidar_export_baseline_csv_;
+  input.enable_lidar_factor_profiling =
+    lidar_factor_profile_ || lidar_warn_degeneracy_ || lidar_export_baseline_csv_ || lidar_factor_internal_profile_enabled_;
   input.enable_graph_problem_size = frontend_frame_profile_enabled_ && graph_problem_size_enabled_;
   input.jacobian_mode = lidar_jacobian_mode_;
   input.numeric_eps = lidar_jacobian_numeric_eps_;
@@ -4961,7 +5345,8 @@ iap::CTLocalFrontend::LayerInput OdometryEstimationBSpline::make_local_layer_del
   input.velocity_precision = velocity_ct_inf_scale_;
   input.finite_difference_dt = trajectory_params_.finite_difference_dt;
   input.max_correspondence_distance = max_correspondence_distance_;
-  input.enable_lidar_factor_profiling = lidar_factor_profile_ || lidar_warn_degeneracy_ || lidar_export_baseline_csv_;
+  input.enable_lidar_factor_profiling =
+    lidar_factor_profile_ || lidar_warn_degeneracy_ || lidar_export_baseline_csv_ || lidar_factor_internal_profile_enabled_;
   input.enable_graph_problem_size = frontend_frame_profile_enabled_ && graph_problem_size_enabled_;
   input.jacobian_mode = lidar_jacobian_mode_;
   input.numeric_eps = lidar_jacobian_numeric_eps_;

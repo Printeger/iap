@@ -5,6 +5,7 @@
 #include <gtsam_points/optimizers/levenberg_marquardt_ext.hpp>
 
 #include <algorithm>
+#include <chrono>
 #include <unordered_set>
 #include <vector>
 
@@ -82,6 +83,11 @@ bool factor_keys_active(
     }
   }
   return true;
+}
+
+double elapsed_ms(const std::chrono::steady_clock::time_point& start,
+                  const std::chrono::steady_clock::time_point& end) {
+  return std::chrono::duration<double, std::milli>(end - start).count();
 }
 
 gtsam::NonlinearFactorGraph filter_graph(
@@ -162,30 +168,50 @@ BSplineSolverResult BatchLMSolver::apply_delta(const BSplineGraphDelta& delta) {
   BSplineSolverResult result;
   result.optimize_count = 1;
   result.used_incremental_solver = false;
+  result.relinearized_variable_count = next_active_keys.size();
+  result.reeliminated_variable_count = 0;
   result.retired_keys = difference(previous_active_keys, next_active_keys);
   result.active_pose_keys = partition_keys_by_symbol(next_active_keys, 's');
   result.active_aux_keys = active_aux_keys_from(next_active_keys);
+  result.relinearized_factor_count = 0;
+  result.linearized_factor_count = 0;
+  result.bayes_tree_clique_count = 0;
+  result.affected_variable_count = next_active_keys.size();
+  result.observed_key_count = 0;
+  result.new_factor_index_count = 0;
+  result.current_nonlinear_factor_count = factors_.size();
+  result.isam_reported_update_ms = 0.0;
+  result.iteration_count = 0;
+  result.solver_status = "no_factors";
 
   if (!factors_.empty()) {
     gtsam_points::LevenbergMarquardtExtParams lm_params;
     lm_params.setlambdaInitial(1e-4);
     lm_params.setAbsoluteErrorTol(1e-2);
     lm_params.setMaxIterations(max_iterations_);
+    const auto t_opt_start = std::chrono::steady_clock::now();
     result.initial_cost = factors_.error(values_);
     try {
       values_ = gtsam_points::LevenbergMarquardtOptimizerExt(factors_, values_, lm_params).optimize();
+      result.solver_status = "ok";
     } catch (const std::exception&) {
       result.fallback_used = true;
+      result.solver_status = "exception";
     }
+    result.delta_solve_ms = elapsed_ms(t_opt_start, std::chrono::steady_clock::now());
     result.final_cost = factors_.empty() ? 0.0 : factors_.error(values_);
+    result.relinearized_factor_count = factors_.size();
+    result.linearized_factor_count = factors_.size();
+    result.current_nonlinear_factor_count = factors_.size();
   }
 
   current_active_keys_ = next_active_keys;
+  const auto t_estimate_start = std::chrono::steady_clock::now();
   result.estimate_subset = extract_subset(values_, merge_keys(
     delta.query_keys,
-    result.active_pose_keys,
-    result.active_aux_keys,
+    delta.mirror_sync_keys,
     delta.persistent_keys));
+  result.estimate_query_ms = elapsed_ms(t_estimate_start, std::chrono::steady_clock::now());
   return result;
 }
 
@@ -217,18 +243,36 @@ BSplineSolverResult IncrementalSmootherSolver::apply_delta(const BSplineGraphDel
   result.used_incremental_solver = true;
   const gtsam::KeyVector previous_active_keys = current_active_keys_;
 
+  const auto t_update_start = std::chrono::steady_clock::now();
   smoother_->update(delta.new_factors, delta.new_values, delta.new_stamps);
+  result.delta_solve_ms = elapsed_ms(t_update_start, std::chrono::steady_clock::now());
   result.fallback_used = false;
+  result.solver_status = "ok";
+  const auto& isam_result = smoother_->getISAM2Result();
+  result.initial_cost = isam_result.errorBefore.value_or(0.0);
+  result.final_cost = isam_result.errorAfter.value_or(0.0);
+  result.relinearized_variable_count = isam_result.variablesRelinearized;
+  result.reeliminated_variable_count = isam_result.variablesReeliminated;
+  result.relinearized_factor_count = isam_result.factorsRecalculated;
+  result.linearized_factor_count = smoother_->getLinearFactors().size();
+  result.bayes_tree_clique_count = isam_result.cliques;
+  result.affected_variable_count = isam_result.markedKeys.size();
+  result.observed_key_count = isam_result.observedKeys.size();
+  result.new_factor_index_count = isam_result.newFactorsIndices.size();
+  result.current_nonlinear_factor_count = smoother_->getFactors().size();
+  result.isam_reported_update_ms = 0.0;
+  result.iteration_count = 0;
 
+  const auto t_estimate_start = std::chrono::steady_clock::now();
   const gtsam::Values all_values = smoother_->calculateEstimate();
+  result.estimate_query_ms = elapsed_ms(t_estimate_start, std::chrono::steady_clock::now());
   current_active_keys_ = sort_unique_keys(smoother_->getLinearizationPoint().keys());
   result.retired_keys = difference(previous_active_keys, current_active_keys_);
   result.active_pose_keys = partition_keys_by_symbol(current_active_keys_, 's');
   result.active_aux_keys = active_aux_keys_from(current_active_keys_);
   result.estimate_subset = extract_subset(all_values, merge_keys(
     delta.query_keys,
-    result.active_pose_keys,
-    result.active_aux_keys,
+    delta.mirror_sync_keys,
     delta.persistent_keys));
   return result;
 }
