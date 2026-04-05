@@ -64,6 +64,11 @@ struct BSplineSolverResult {
   std::size_t observed_key_count{0};
   std::size_t new_factor_index_count{0};
   std::size_t current_nonlinear_factor_count{0};
+  std::size_t active_window_imu_factor_count{0};
+  std::size_t active_window_velocity_factor_count{0};
+  std::size_t active_window_lidar_factor_count{0};
+  std::size_t active_window_prior_factor_count{0};
+  std::size_t active_window_shared_jkg_touching_factor_count{0};
   double isam_reported_update_ms{0.0};
   int iteration_count{0};
   std::string solver_status{"unavailable"};

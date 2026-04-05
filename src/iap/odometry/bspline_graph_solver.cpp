@@ -1,7 +1,14 @@
 #include <iap/odometry/bspline_graph_solver.hpp>
 
+#include <iap/gnss/clock_between_factor.hpp>
+#include <iap/odometry/integrated_bspline_gicp_factor.hpp>
+#include <iap/odometry/integrated_bspline_imu_factor.hpp>
+#include <iap/odometry/integrated_bspline_velocity_factor.hpp>
+
 #include <gtsam/inference/Symbol.h>
 #include <gtsam/nonlinear/LevenbergMarquardtParams.h>
+#include <gtsam/nonlinear/PriorFactor.h>
+#include <gtsam/slam/BetweenFactor.h>
 #include <gtsam_points/optimizers/levenberg_marquardt_ext.hpp>
 
 #include <algorithm>
@@ -123,6 +130,73 @@ gtsam::KeyVector active_aux_keys_from(const gtsam::KeyVector& keys) {
   return sort_unique_keys(std::move(filtered));
 }
 
+struct ActiveWindowFactorCounts {
+  std::size_t imu_factor_count{0};
+  std::size_t velocity_factor_count{0};
+  std::size_t lidar_factor_count{0};
+  std::size_t prior_factor_count{0};
+  std::size_t shared_jkg_touching_factor_count{0};
+};
+
+bool factor_touches_shared_jkg(const gtsam::NonlinearFactor& factor) {
+  for (const auto key : factor.keys()) {
+    const char chr = gtsam::Symbol(key).chr();
+    if (chr == 'j' || chr == 'k' || chr == 'g') {
+      return true;
+    }
+  }
+  return false;
+}
+
+bool is_imu_factor(const gtsam::NonlinearFactor::shared_ptr& factor) {
+  return dynamic_cast<IntegratedSplineIMUFactor*>(factor.get()) != nullptr;
+}
+
+bool is_velocity_factor(const gtsam::NonlinearFactor::shared_ptr& factor) {
+  return dynamic_cast<IntegratedBSplineVelocityFactor*>(factor.get()) != nullptr;
+}
+
+bool is_lidar_factor(const gtsam::NonlinearFactor::shared_ptr& factor) {
+  return dynamic_cast<IntegratedSplineGICPFactor*>(factor.get()) != nullptr ||
+         dynamic_cast<IntegratedBSplineGICPFactor*>(factor.get()) != nullptr;
+}
+
+bool is_prior_like_factor(const gtsam::NonlinearFactor::shared_ptr& factor) {
+  return dynamic_cast<gtsam::PriorFactor<gtsam::Pose3>*>(factor.get()) != nullptr ||
+         dynamic_cast<gtsam::PriorFactor<gtsam::Vector3>*>(factor.get()) != nullptr ||
+         dynamic_cast<gtsam::PriorFactor<gtsam::Vector2>*>(factor.get()) != nullptr ||
+         dynamic_cast<gtsam::PriorFactor<gtsam::Rot3>*>(factor.get()) != nullptr ||
+         dynamic_cast<gtsam::BetweenFactor<gtsam::Pose3>*>(factor.get()) != nullptr ||
+         dynamic_cast<iap::ClockBetweenFactor*>(factor.get()) != nullptr;
+}
+
+ActiveWindowFactorCounts count_active_window_factors(
+  const gtsam::NonlinearFactorGraph& graph,
+  const gtsam::KeyVector& active_keys) {
+  const auto active_key_set = to_key_set(active_keys);
+  ActiveWindowFactorCounts counts;
+  for (const auto& factor : graph) {
+    if (!factor_keys_active(factor, active_key_set)) {
+      continue;
+    }
+
+    if (is_imu_factor(factor)) {
+      ++counts.imu_factor_count;
+    } else if (is_velocity_factor(factor)) {
+      ++counts.velocity_factor_count;
+    } else if (is_lidar_factor(factor)) {
+      ++counts.lidar_factor_count;
+    } else if (is_prior_like_factor(factor)) {
+      ++counts.prior_factor_count;
+    }
+
+    if (factor && factor_touches_shared_jkg(*factor)) {
+      ++counts.shared_jkg_touching_factor_count;
+    }
+  }
+  return counts;
+}
+
 }  // namespace
 
 const char* to_string(BSplineUnifiedSolverMode mode) {
@@ -180,6 +254,11 @@ BSplineSolverResult BatchLMSolver::apply_delta(const BSplineGraphDelta& delta) {
   result.observed_key_count = 0;
   result.new_factor_index_count = 0;
   result.current_nonlinear_factor_count = factors_.size();
+  result.active_window_imu_factor_count = 0;
+  result.active_window_velocity_factor_count = 0;
+  result.active_window_lidar_factor_count = 0;
+  result.active_window_prior_factor_count = 0;
+  result.active_window_shared_jkg_touching_factor_count = 0;
   result.isam_reported_update_ms = 0.0;
   result.iteration_count = 0;
   result.solver_status = "no_factors";
@@ -206,6 +285,12 @@ BSplineSolverResult BatchLMSolver::apply_delta(const BSplineGraphDelta& delta) {
   }
 
   current_active_keys_ = next_active_keys;
+  const auto active_window_counts = count_active_window_factors(factors_, current_active_keys_);
+  result.active_window_imu_factor_count = active_window_counts.imu_factor_count;
+  result.active_window_velocity_factor_count = active_window_counts.velocity_factor_count;
+  result.active_window_lidar_factor_count = active_window_counts.lidar_factor_count;
+  result.active_window_prior_factor_count = active_window_counts.prior_factor_count;
+  result.active_window_shared_jkg_touching_factor_count = active_window_counts.shared_jkg_touching_factor_count;
   const auto t_estimate_start = std::chrono::steady_clock::now();
   result.estimate_subset = extract_subset(values_, merge_keys(
     delta.query_keys,
@@ -242,6 +327,8 @@ BSplineSolverResult IncrementalSmootherSolver::apply_delta(const BSplineGraphDel
   result.optimize_count = 1;
   result.used_incremental_solver = true;
   const gtsam::KeyVector previous_active_keys = current_active_keys_;
+  const gtsam::KeyVector active_window_keys =
+    merge_keys(delta.active_pose_keys, delta.active_aux_keys, delta.persistent_keys);
 
   const auto t_update_start = std::chrono::steady_clock::now();
   smoother_->update(delta.new_factors, delta.new_values, delta.new_stamps);
@@ -260,6 +347,11 @@ BSplineSolverResult IncrementalSmootherSolver::apply_delta(const BSplineGraphDel
   result.observed_key_count = isam_result.observedKeys.size();
   result.new_factor_index_count = isam_result.newFactorsIndices.size();
   result.current_nonlinear_factor_count = smoother_->getFactors().size();
+  result.active_window_imu_factor_count = 0;
+  result.active_window_velocity_factor_count = 0;
+  result.active_window_lidar_factor_count = 0;
+  result.active_window_prior_factor_count = 0;
+  result.active_window_shared_jkg_touching_factor_count = 0;
   result.isam_reported_update_ms = 0.0;
   result.iteration_count = 0;
 
@@ -267,6 +359,12 @@ BSplineSolverResult IncrementalSmootherSolver::apply_delta(const BSplineGraphDel
   const gtsam::Values all_values = smoother_->calculateEstimate();
   result.estimate_query_ms = elapsed_ms(t_estimate_start, std::chrono::steady_clock::now());
   current_active_keys_ = sort_unique_keys(smoother_->getLinearizationPoint().keys());
+  const auto active_window_counts = count_active_window_factors(smoother_->getFactors(), active_window_keys);
+  result.active_window_imu_factor_count = active_window_counts.imu_factor_count;
+  result.active_window_velocity_factor_count = active_window_counts.velocity_factor_count;
+  result.active_window_lidar_factor_count = active_window_counts.lidar_factor_count;
+  result.active_window_prior_factor_count = active_window_counts.prior_factor_count;
+  result.active_window_shared_jkg_touching_factor_count = active_window_counts.shared_jkg_touching_factor_count;
   result.retired_keys = difference(previous_active_keys, current_active_keys_);
   result.active_pose_keys = partition_keys_by_symbol(current_active_keys_, 's');
   result.active_aux_keys = active_aux_keys_from(current_active_keys_);

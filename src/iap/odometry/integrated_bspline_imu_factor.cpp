@@ -76,6 +76,10 @@ SplineStampContext make_legacy_context(
   return ctx;
 }
 
+double finite_difference_step(const SplineStampContext& ctx) {
+  return std::clamp(0.1 * std::max(ctx.support.dt, 1e-3), 1e-4, 1e-2);
+}
+
 }  // namespace
 
 IntegratedSplineIMUFactor::IntegratedSplineIMUFactor(
@@ -140,6 +144,20 @@ std::optional<SplineLocalSupport> IntegratedSplineIMUFactor::support_for_query_t
   return layout_->support_at(query_time - time_offset, ctx_.sensor_id);
 }
 
+bool IntegratedSplineIMUFactor::centered_difference_valid(
+  const SplineStampContext& ctx,
+  const SplineStateLayout& layout) {
+  if (layout.knots().size() < kBSplineControlPointCount) {
+    return false;
+  }
+
+  const double query_time = ctx.support.query_time;
+  const double domain_start = layout.knots()[kBSplineControlPointCount - 1];
+  const double domain_end = layout.knots()[layout.controls().size()];
+  const double h = finite_difference_step(ctx);
+  return query_time - h >= domain_start && query_time + h <= domain_end;
+}
+
 gtsam::Pose3 IntegratedSplineIMUFactor::pose_at_query_time(const gtsam::Values& values, double query_time) const {
   if (!evaluator_) {
     return gtsam::Pose3();
@@ -184,9 +202,9 @@ IntegratedSplineIMUFactor::IMUPrediction IntegratedSplineIMUFactor::predict_samp
   const double query_time = ctx_.support.query_time;
   const double domain_start = spline_domain_start();
   const double domain_end = spline_domain_end();
-  const double h = std::clamp(0.1 * std::max(ctx_.support.dt, 1e-3), 1e-4, 1e-2);
+  const double h = finite_difference_step(ctx_);
 
-  if (query_time - h >= domain_start && query_time + h <= domain_end) {
+  if (centered_difference_valid(ctx_, *layout_)) {
     const gtsam::Pose3 pose_prev = pose_at_query_time(values, query_time - h);
     const gtsam::Pose3 pose_next = pose_at_query_time(values, query_time + h);
     prediction.gyro =

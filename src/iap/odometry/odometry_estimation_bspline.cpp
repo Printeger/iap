@@ -158,8 +158,9 @@ const char* solver_update_profile_csv_header() {
          "relinearization_ms,linearization_ms,elimination_ms,delta_solve_ms,relinearized_variable_count,"
          "reeliminated_variable_count,relinearized_factor_count,linearized_factor_count,bayes_tree_clique_count,"
          "affected_variable_count,observed_key_count,new_factor_index_count,current_nonlinear_factor_count,"
-         "isam_reported_update_ms,optimize_count,initial_error,final_error,error_drop_ratio,iteration_count,"
-         "solver_status\n";
+         "active_window_imu_factor_count,active_window_velocity_factor_count,active_window_lidar_factor_count,"
+         "active_window_prior_factor_count,active_window_shared_jkg_touching_factor_count,isam_reported_update_ms,"
+         "optimize_count,initial_error,final_error,error_drop_ratio,iteration_count,solver_status\n";
 }
 
 const char* lidar_factor_internal_profile_csv_header() {
@@ -414,6 +415,11 @@ void write_solver_update_profile_row(std::FILE* file, const iap::SolverUpdatePro
   add(row_data.observed_key_count);
   add(row_data.new_factor_index_count);
   add(row_data.current_nonlinear_factor_count);
+  add(row_data.active_window_imu_factor_count);
+  add(row_data.active_window_velocity_factor_count);
+  add(row_data.active_window_lidar_factor_count);
+  add(row_data.active_window_prior_factor_count);
+  add(row_data.active_window_shared_jkg_touching_factor_count);
   add(row_data.isam_reported_update_ms);
   add(row_data.optimize_count);
   add(row_data.initial_error);
@@ -1161,6 +1167,26 @@ std::vector<OdometryEstimationBSpline::ActiveSplineIMUSample> OdometryEstimation
   std::vector<double> delta_times;
   std::vector<Eigen::Matrix<double, 7, 1>> imu_data;
   imu_integration->find_imu_data(sample_start, sample_end, delta_times, imu_data);
+  if (imu_data.empty()) {
+    return samples;
+  }
+
+  std::vector<Eigen::Matrix<double, 7, 1>> filtered_imu_data;
+  filtered_imu_data.reserve(imu_data.size());
+  constexpr double kImuSampleWindowEps = 1e-9;
+  for (const auto& imu : imu_data) {
+    const double imu_stamp = imu[0];
+    if (imu_stamp + kImuSampleWindowEps < sample_start || imu_stamp - kImuSampleWindowEps > sample_end) {
+      continue;
+    }
+    if (!filtered_imu_data.empty() &&
+        std::abs(filtered_imu_data.back()[0] - imu_stamp) <= kImuSampleWindowEps) {
+      filtered_imu_data.back() = imu;
+      continue;
+    }
+    filtered_imu_data.push_back(imu);
+  }
+  imu_data = std::move(filtered_imu_data);
   if (imu_data.empty()) {
     return samples;
   }
@@ -4535,7 +4561,13 @@ EstimationFrame::ConstPtr OdometryEstimationBSpline::insert_frame_ct_lidar_incre
     append_unique_key(&delta.query_keys, current_clock_key);
     append_unique_key(&delta.mirror_sync_keys, current_clock_key);
   }
+  const gtsam::KeyVector shared_imu_keys{gyro_bias_key, accel_bias_key, gravity_key};
   for (const auto key : delta.persistent_keys) {
+    const bool is_shared_imu_key =
+      std::find(shared_imu_keys.begin(), shared_imu_keys.end(), key) != shared_imu_keys.end();
+    if (is_shared_imu_key && !local_contribution.uses_shared_imu_state) {
+      continue;
+    }
     append_unique_key(&delta.query_keys, key);
     append_unique_key(&delta.mirror_sync_keys, key);
   }
@@ -4566,7 +4598,9 @@ EstimationFrame::ConstPtr OdometryEstimationBSpline::insert_frame_ct_lidar_incre
 
   fixed_lag_registry_.control_buffer().update_from_values(solver_result.estimate_subset);
   control_window_->update_from_values(solver_result.estimate_subset);
-  fixed_lag_registry_.update_shared_state_from_values(solver_result.estimate_subset);
+  if (local_contribution.uses_shared_imu_state || navigation_layer_enabled) {
+    fixed_lag_registry_.update_shared_state_from_values(solver_result.estimate_subset);
+  }
   fixed_lag_registry_.clear_auxiliary_values();
   for (const auto key : solver_result.active_aux_keys) {
     if (!solver_result.estimate_subset.exists(key)) {
@@ -4834,6 +4868,12 @@ EstimationFrame::ConstPtr OdometryEstimationBSpline::insert_frame_ct_lidar_incre
   solver_update_row.observed_key_count = solver_result.observed_key_count;
   solver_update_row.new_factor_index_count = solver_result.new_factor_index_count;
   solver_update_row.current_nonlinear_factor_count = solver_result.current_nonlinear_factor_count;
+  solver_update_row.active_window_imu_factor_count = solver_result.active_window_imu_factor_count;
+  solver_update_row.active_window_velocity_factor_count = solver_result.active_window_velocity_factor_count;
+  solver_update_row.active_window_lidar_factor_count = solver_result.active_window_lidar_factor_count;
+  solver_update_row.active_window_prior_factor_count = solver_result.active_window_prior_factor_count;
+  solver_update_row.active_window_shared_jkg_touching_factor_count =
+    solver_result.active_window_shared_jkg_touching_factor_count;
   solver_update_row.isam_reported_update_ms = solver_result.isam_reported_update_ms;
   solver_update_row.optimize_count = solver_result.optimize_count;
   solver_update_row.initial_error = solver_result.initial_cost;

@@ -38,6 +38,7 @@ class IntegratedSplineIMUFactor : public gtsam::NonlinearFactor {
   size_t dim() const override { return 6; }
   double error(const gtsam::Values& values) const override;
   gtsam::GaussianFactor::shared_ptr linearize(const gtsam::Values& values) const override;
+  static bool centered_difference_valid(const SplineStampContext& ctx, const SplineStateLayout& layout);
 
  protected:
   struct IMUPrediction {

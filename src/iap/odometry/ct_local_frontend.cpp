@@ -590,11 +590,13 @@ BSplineLocalLayerContribution CTLocalFrontend::assemble_local_layer(const LayerI
       if (!support) {
         continue;
       }
-      append_support_control_indices(imu_layout, *support, &contribution.activation.active_control_indices);
-
       SplineStampContext ctx;
       ctx.support = *support;
       ctx.sensor_id = SplineSensorId::Imu;
+      if (!IntegratedSplineIMUFactor::centered_difference_valid(ctx, imu_layout)) {
+        continue;
+      }
+      append_support_control_indices(imu_layout, *support, &contribution.activation.active_control_indices);
 
       contribution.graph.add(std::make_shared<IntegratedSplineIMUFactor>(
         ctx,
@@ -607,6 +609,7 @@ BSplineLocalLayerContribution CTLocalFrontend::assemble_local_layer(const LayerI
         input.gyroscope_precision,
         imu_layout_ptr));
       ++contribution.imu_factor_count;
+      contribution.uses_shared_imu_state = true;
     }
     contribution.processed.frame_profile.imu_factor_build_ms += elapsed_ms(t_imu_build_start, Clock::now());
 

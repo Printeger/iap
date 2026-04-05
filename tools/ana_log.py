@@ -837,6 +837,11 @@ def analyze_solver_update(
         "observed_key_count",
         "new_factor_index_count",
         "current_nonlinear_factor_count",
+        "active_window_imu_factor_count",
+        "active_window_velocity_factor_count",
+        "active_window_lidar_factor_count",
+        "active_window_prior_factor_count",
+        "active_window_shared_jkg_touching_factor_count",
         "isam_reported_update_ms",
     ]:
         if col in df.columns:
@@ -844,6 +849,14 @@ def analyze_solver_update(
             analysis[f"{col}_mean"] = float(series.mean())
             analysis[f"{col}_p95"] = pct(series, 0.95)
             analysis[f"{col}_max"] = float(series.max())
+
+    if {"active_window_shared_jkg_touching_factor_count", "active_window_imu_factor_count"}.issubset(df.columns):
+        shared = df["active_window_shared_jkg_touching_factor_count"].fillna(0)
+        imu = df["active_window_imu_factor_count"].fillna(0)
+        non_imu_shared = (shared - imu).clip(lower=0)
+        analysis["active_window_non_imu_shared_jkg_factor_count_mean"] = float(non_imu_shared.mean())
+        analysis["active_window_non_imu_shared_jkg_factor_count_p95"] = pct(non_imu_shared, 0.95)
+        analysis["active_window_non_imu_shared_jkg_factor_count_max"] = float(non_imu_shared.max())
 
     if {"solver_update_ms", "estimate_query_ms", "fallback_rebuild_ms", "relinearization_ms", "linearization_ms", "elimination_ms", "delta_solve_ms"}.issubset(df.columns):
         stage_cols = [
@@ -890,6 +903,8 @@ def analyze_solver_update(
         ("relinearized_variable_count", "relinearized_variable_vs_solver_update_corr"),
         ("relinearized_factor_count", "recalculated_factor_vs_solver_update_corr"),
         ("affected_variable_count", "affected_variable_vs_solver_update_corr"),
+        ("active_window_imu_factor_count", "active_window_imu_factor_vs_solver_update_corr"),
+        ("active_window_shared_jkg_touching_factor_count", "active_window_shared_jkg_touching_factor_vs_solver_update_corr"),
     ]
     for col, out_key in correlation_specs:
         if {col, "solver_update_ms"}.issubset(df.columns) and len(df) >= 3:
@@ -912,6 +927,11 @@ def analyze_solver_update(
             "new_value_count",
             "active_control_point_count",
             "active_aux_key_count",
+            "active_window_imu_factor_count",
+            "active_window_velocity_factor_count",
+            "active_window_lidar_factor_count",
+            "active_window_prior_factor_count",
+            "active_window_shared_jkg_touching_factor_count",
             "affected_variable_count",
             "reeliminated_variable_count",
             "relinearized_variable_count",
@@ -1655,6 +1675,18 @@ def detect_findings(
                 ),
             })
 
+        shared_jkg_corr = solver_update_analysis.get("active_window_shared_jkg_touching_factor_vs_solver_update_corr")
+        if isinstance(shared_jkg_corr, float) and shared_jkg_corr > 0.7:
+            findings.append({
+                "severity": "warn",
+                "title": "active shared j/k/g touching factor set tracks solver pressure",
+                "evidence": (
+                    f"corr(active_window_shared_jkg_touching_factor_count,solver_update_ms)={shared_jkg_corr:.3f}; "
+                    f"active_window_shared_jkg_touching_factor_count_mean="
+                    f"{solver_update_analysis.get('active_window_shared_jkg_touching_factor_count_mean', 0.0):.3f}"
+                ),
+            })
+
     if lidar_factor_internal_analysis.get("available"):
         if (
             float(lidar_factor_internal_analysis.get("points_in_bucket_p95", 0.0)) > 5000
@@ -1754,6 +1786,11 @@ def recommend_next_steps(
     ):
         recommendations["Immediate next checks"].append(
             "High solver-update correlation with reeliminated/recalculated counts suggests Bayes-tree churn; test smaller smoother_lag and lower active-window coupling before changing math."
+        )
+    shared_jkg_corr = solver_update_analysis.get("active_window_shared_jkg_touching_factor_vs_solver_update_corr")
+    if isinstance(shared_jkg_corr, float) and shared_jkg_corr > 0.7:
+        recommendations["Immediate next checks"].append(
+            "active_window_shared_jkg_touching_factor_count now tracks solver_update_ms; focus next on reducing active IMU factors or their shared j/k/g sensitivity before spending effort on query-side trimming."
         )
     new_factor_corr = solver_update_analysis.get("new_factor_vs_active_window_corr")
     new_value_corr = solver_update_analysis.get("new_value_vs_active_window_corr")
@@ -2017,8 +2054,16 @@ def render_report_markdown(
                 ["reeliminated_variable_count_mean", f"{solver_update_analysis.get('reeliminated_variable_count_mean', 0.0):.3f}" if "reeliminated_variable_count_mean" in solver_update_analysis else "n/a"],
                 ["observed_key_count_mean", f"{solver_update_analysis.get('observed_key_count_mean', 0.0):.3f}" if "observed_key_count_mean" in solver_update_analysis else "n/a"],
                 ["current_nonlinear_factor_count_mean", f"{solver_update_analysis.get('current_nonlinear_factor_count_mean', 0.0):.3f}" if "current_nonlinear_factor_count_mean" in solver_update_analysis else "n/a"],
+                ["active_window_imu_factor_count_mean", f"{solver_update_analysis.get('active_window_imu_factor_count_mean', 0.0):.3f}" if "active_window_imu_factor_count_mean" in solver_update_analysis else "n/a"],
+                ["active_window_velocity_factor_count_mean", f"{solver_update_analysis.get('active_window_velocity_factor_count_mean', 0.0):.3f}" if "active_window_velocity_factor_count_mean" in solver_update_analysis else "n/a"],
+                ["active_window_lidar_factor_count_mean", f"{solver_update_analysis.get('active_window_lidar_factor_count_mean', 0.0):.3f}" if "active_window_lidar_factor_count_mean" in solver_update_analysis else "n/a"],
+                ["active_window_prior_factor_count_mean", f"{solver_update_analysis.get('active_window_prior_factor_count_mean', 0.0):.3f}" if "active_window_prior_factor_count_mean" in solver_update_analysis else "n/a"],
+                ["active_window_shared_jkg_touching_factor_count_mean", f"{solver_update_analysis.get('active_window_shared_jkg_touching_factor_count_mean', 0.0):.3f}" if "active_window_shared_jkg_touching_factor_count_mean" in solver_update_analysis else "n/a"],
+                ["active_window_non_imu_shared_jkg_factor_count_mean", f"{solver_update_analysis.get('active_window_non_imu_shared_jkg_factor_count_mean', 0.0):.3f}" if "active_window_non_imu_shared_jkg_factor_count_mean" in solver_update_analysis else "n/a"],
                 ["new_factor_vs_active_window_corr", f"{solver_update_analysis.get('new_factor_vs_active_window_corr', 'n/a')}"],
                 ["new_value_vs_active_window_corr", f"{solver_update_analysis.get('new_value_vs_active_window_corr', 'n/a')}"],
+                ["active_window_imu_factor_vs_solver_update_corr", f"{solver_update_analysis.get('active_window_imu_factor_vs_solver_update_corr', 'n/a')}"],
+                ["active_window_shared_jkg_touching_factor_vs_solver_update_corr", f"{solver_update_analysis.get('active_window_shared_jkg_touching_factor_vs_solver_update_corr', 'n/a')}"],
                 ["reeliminated_variable_vs_solver_update_corr", f"{solver_update_analysis.get('reeliminated_variable_vs_solver_update_corr', 'n/a')}"],
                 ["relinearized_variable_vs_solver_update_corr", f"{solver_update_analysis.get('relinearized_variable_vs_solver_update_corr', 'n/a')}"],
                 ["recalculated_factor_vs_solver_update_corr", f"{solver_update_analysis.get('recalculated_factor_vs_solver_update_corr', 'n/a')}"],

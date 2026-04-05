@@ -7,6 +7,7 @@
 #include <iap/odometry/ct_backend_summary.hpp>
 #include <iap/odometry/ct_local_frontend.hpp>
 #include <iap/odometry/estimation_frame.hpp>
+#include <iap/odometry/integrated_bspline_velocity_factor.hpp>
 #include <iap/util/raw_points.hpp>
 
 #include <gtsam/geometry/Pose3.h>
@@ -16,6 +17,7 @@
 #include <gtsam_points/types/point_cloud_cpu.hpp>
 
 #include <Eigen/Core>
+#include <algorithm>
 #include <memory>
 #include <numeric>
 #include <vector>
@@ -270,6 +272,88 @@ TEST(CTLocalFrontendLayer, AssembleLocalLayerBuildsUnifiedContribution) {
   EXPECT_FALSE(contribution.activation.active_control_indices.empty());
   EXPECT_EQ(contribution.activation.active_auxiliary_indices.size(), 1U);
   EXPECT_EQ(contribution.processed.frame_profile.local_layer_factor_count, contribution.factor_count());
+  EXPECT_TRUE(contribution.uses_shared_imu_state);
+}
+
+TEST(CTLocalFrontendLayer, AssembleLocalLayerSkipsBoundaryImuSamplesWithoutCenteredDifference) {
+  iap::CTLocalFrontend frontend;
+  iap::CTLocalFrontend::LayerInput input;
+  input.graph_context.layout = std::make_shared<const iap::SplineStateLayout>(make_lidar_layout());
+  input.graph_context.local_layer_enabled = true;
+  input.bucket_config.mode = iap::CTLocalFrontend::LidarBucketMode::SINGLE_BUCKET;
+  input.velocity_precision = 1e3;
+  input.finite_difference_dt = 0.01;
+
+  iap::CTLocalFrontend::LayerSegmentInput segment;
+  segment.source_frame_index = 0;
+  segment.source_frame = make_source_input(
+    {
+      Eigen::Vector4d(0.0, 0.0, 0.0, 1.0),
+      Eigen::Vector4d(0.5, 0.0, 0.0, 1.0),
+      Eigen::Vector4d(0.0, 0.5, 0.0, 1.0),
+    },
+    {0.0, 0.04, 0.08});
+  segment.control_indices = {0, 1, 2, 3};
+  segment.auxiliary_index = 3;
+  segment.imu_samples.push_back(iap::CTLocalFrontend::IMUSample{
+    0.005,
+    Eigen::Vector3d(0.05, 0.0, 0.0),
+    Eigen::Vector3d(0.0, 0.0, 9.80665),
+  });
+  segment.imu_samples.push_back(iap::CTLocalFrontend::IMUSample{
+    0.03,
+    Eigen::Vector3d(0.05, 0.0, 0.0),
+    Eigen::Vector3d(0.0, 0.0, 9.80665),
+  });
+  segment.imu_samples.push_back(iap::CTLocalFrontend::IMUSample{
+    0.095,
+    Eigen::Vector3d(0.05, 0.0, 0.0),
+    Eigen::Vector3d(0.0, 0.0, 9.80665),
+  });
+  input.segments.push_back(std::move(segment));
+
+  const auto contribution = frontend.assemble_local_layer(input);
+  EXPECT_EQ(contribution.velocity_factor_count, 1U);
+  EXPECT_EQ(contribution.imu_factor_count, 1U);
+  EXPECT_TRUE(contribution.uses_shared_imu_state);
+  EXPECT_EQ(contribution.factor_count(), 2U);
+}
+
+TEST(CTLocalFrontendLayer, VelocityFactorStaysLocalToCurrentSegment) {
+  iap::CTLocalFrontend frontend;
+  iap::CTLocalFrontend::LayerInput input;
+  input.graph_context.layout = std::make_shared<const iap::SplineStateLayout>(make_lidar_layout());
+  input.graph_context.local_layer_enabled = true;
+  input.bucket_config.mode = iap::CTLocalFrontend::LidarBucketMode::SINGLE_BUCKET;
+  input.velocity_precision = 1e3;
+  input.finite_difference_dt = 0.01;
+
+  iap::CTLocalFrontend::LayerSegmentInput segment;
+  segment.source_frame_index = 0;
+  segment.source_frame = make_source_input(
+    {Eigen::Vector4d(0.0, 0.0, 0.0, 1.0)},
+    {0.0});
+  segment.control_indices = {10, 11, 12, 13};
+  segment.auxiliary_index = 13;
+  input.segments.push_back(std::move(segment));
+
+  const auto contribution = frontend.assemble_local_layer(input);
+  ASSERT_EQ(contribution.velocity_factor_count, 1U);
+  ASSERT_EQ(contribution.graph.size(), 1U);
+  ASSERT_TRUE(contribution.graph[0]);
+  const auto velocity_factor = std::dynamic_pointer_cast<iap::IntegratedBSplineVelocityFactor>(contribution.graph[0]);
+  ASSERT_TRUE(velocity_factor);
+
+  const auto& keys = velocity_factor->keys();
+  ASSERT_EQ(keys.size(), 5U);
+  EXPECT_EQ(keys[0], iap::bspline_control_point_key(10));
+  EXPECT_EQ(keys[1], iap::bspline_control_point_key(11));
+  EXPECT_EQ(keys[2], iap::bspline_control_point_key(12));
+  EXPECT_EQ(keys[3], iap::bspline_control_point_key(13));
+  EXPECT_EQ(keys[4], iap::bspline_velocity_key(13));
+  EXPECT_EQ(std::count(keys.begin(), keys.end(), gtsam::symbol('j', 0)), 0);
+  EXPECT_EQ(std::count(keys.begin(), keys.end(), gtsam::symbol('k', 0)), 0);
+  EXPECT_EQ(std::count(keys.begin(), keys.end(), gtsam::symbol('g', 0)), 0);
 }
 
 TEST(CTLocalFrontendSolve, DebugStatsCarryBucketsAndResidualCounts) {
