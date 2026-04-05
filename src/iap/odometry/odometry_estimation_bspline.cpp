@@ -21,6 +21,7 @@
 #include <iomanip>
 #include <numeric>
 #include <sstream>
+#include <unordered_map>
 #include <gtsam/inference/Symbol.h>
 #include <gtsam/slam/BetweenFactor.h>
 #include <gtsam/slam/PriorFactor.h>
@@ -159,7 +160,14 @@ const char* solver_update_profile_csv_header() {
          "reeliminated_variable_count,relinearized_factor_count,linearized_factor_count,bayes_tree_clique_count,"
          "affected_variable_count,observed_key_count,new_factor_index_count,current_nonlinear_factor_count,"
          "active_window_imu_factor_count,active_window_velocity_factor_count,active_window_lidar_factor_count,"
-         "active_window_prior_factor_count,active_window_shared_jkg_touching_factor_count,isam_reported_update_ms,"
+         "active_window_lidar_current_segment_factor_count,active_window_lidar_old_segment_factor_count,"
+         "active_window_prior_factor_count,active_window_shared_jkg_touching_factor_count,"
+         "recalculated_imu_factor_count,recalculated_velocity_factor_count,recalculated_lidar_factor_count,"
+         "recalculated_lidar_current_segment_factor_count,recalculated_lidar_old_segment_factor_count,"
+         "recalculated_lidar_same_support_factor_count,recalculated_lidar_cross_support_factor_count,"
+         "recalculated_prior_factor_count,recalculated_shared_jkg_touching_factor_count,"
+         "relinearized_pose_variable_count,relinearized_aux_variable_count,relinearized_shared_variable_count,"
+         "affected_pose_key_count,affected_aux_key_count,affected_shared_key_count,isam_reported_update_ms,"
          "optimize_count,initial_error,final_error,error_drop_ratio,iteration_count,solver_status\n";
 }
 
@@ -418,8 +426,25 @@ void write_solver_update_profile_row(std::FILE* file, const iap::SolverUpdatePro
   add(row_data.active_window_imu_factor_count);
   add(row_data.active_window_velocity_factor_count);
   add(row_data.active_window_lidar_factor_count);
+  add(row_data.active_window_lidar_current_segment_factor_count);
+  add(row_data.active_window_lidar_old_segment_factor_count);
   add(row_data.active_window_prior_factor_count);
   add(row_data.active_window_shared_jkg_touching_factor_count);
+  add(row_data.recalculated_imu_factor_count);
+  add(row_data.recalculated_velocity_factor_count);
+  add(row_data.recalculated_lidar_factor_count);
+  add(row_data.recalculated_lidar_current_segment_factor_count);
+  add(row_data.recalculated_lidar_old_segment_factor_count);
+  add(row_data.recalculated_lidar_same_support_factor_count);
+  add(row_data.recalculated_lidar_cross_support_factor_count);
+  add(row_data.recalculated_prior_factor_count);
+  add(row_data.recalculated_shared_jkg_touching_factor_count);
+  add(row_data.relinearized_pose_variable_count);
+  add(row_data.relinearized_aux_variable_count);
+  add(row_data.relinearized_shared_variable_count);
+  add(row_data.affected_pose_key_count);
+  add(row_data.affected_aux_key_count);
+  add(row_data.affected_shared_key_count);
   add(row_data.isam_reported_update_ms);
   add(row_data.optimize_count);
   add(row_data.initial_error);
@@ -723,6 +748,14 @@ std::vector<std::size_t> support_control_indices(
   return indices;
 }
 
+std::vector<std::size_t> lidar_handle_support_control_indices(
+  const iap::BSplineLocalLayerContribution::LidarFactorHandle& handle) {
+  auto indices = handle.support_control_indices;
+  std::sort(indices.begin(), indices.end());
+  indices.erase(std::unique(indices.begin(), indices.end()), indices.end());
+  return indices;
+}
+
 void append_unique_key(gtsam::KeyVector* keys, gtsam::Key key) {
   if (!keys) {
     return;
@@ -753,6 +786,64 @@ std::vector<std::size_t> control_indices_from_activation(const iap::BSplineLayer
     }
   }
   return sort_unique_control_indices(std::move(indices));
+}
+
+template <typename SegmentT>
+std::vector<std::size_t> boundary_overlap_control_indices(
+  const std::vector<SegmentT>& segments,
+  const iap::SplineActiveStateSet& active_state_set,
+  double min_active_stamp) {
+  std::vector<std::size_t> indices;
+  for (const auto& segment : segments) {
+    if (segment.scan_end >= min_active_stamp) {
+      continue;
+    }
+
+    bool overlaps_active_controls = false;
+    for (const auto control_index : segment.control_indices) {
+      if (std::find(
+            active_state_set.active_control_indices.begin(),
+            active_state_set.active_control_indices.end(),
+            control_index) != active_state_set.active_control_indices.end()) {
+        overlaps_active_controls = true;
+        indices.push_back(control_index);
+      }
+    }
+
+    if (!overlaps_active_controls) {
+      continue;
+    }
+  }
+
+  return sort_unique_control_indices(std::move(indices));
+}
+
+template <typename SegmentT>
+std::vector<std::size_t> boundary_overlap_auxiliary_indices(
+  const std::vector<SegmentT>& segments,
+  const std::vector<std::size_t>& boundary_control_indices,
+  double min_active_stamp) {
+  std::vector<std::size_t> indices;
+  for (const auto& segment : segments) {
+    if (segment.scan_end >= min_active_stamp) {
+      continue;
+    }
+
+    const bool overlaps_boundary_controls =
+      std::any_of(segment.control_indices.begin(), segment.control_indices.end(), [&](std::size_t control_index) {
+        return std::find(boundary_control_indices.begin(), boundary_control_indices.end(), control_index) !=
+          boundary_control_indices.end();
+      });
+    if (!overlaps_boundary_controls) {
+      continue;
+    }
+
+    indices.push_back(segment.auxiliary_index);
+  }
+
+  std::sort(indices.begin(), indices.end());
+  indices.erase(std::unique(indices.begin(), indices.end()), indices.end());
+  return indices;
 }
 
 gtsam::KeyVector pose_keys_from_control_indices(const std::vector<std::size_t>& control_indices) {
@@ -1346,6 +1437,75 @@ active_window_fallback:
   return active_window_layout_ ? active_window_layout_ : build_active_window_layout();
 }
 
+std::shared_ptr<const iap::SplineStateLayout> OdometryEstimationBSpline::build_strict_segment_local_layout(
+  const ActiveSplineSegmentConstraint& segment) const {
+  if (control_window_ && control_window_->initialized()) {
+    const auto& window_states = control_window_->states();
+    const auto& window_knots = control_window_->knots();
+    if (window_states.size() >= iap::kBSplineControlPointCount &&
+        window_knots.size() >= window_states.size() + iap::kBSplineControlPointCount) {
+      const std::size_t begin = window_states.size() - iap::kBSplineControlPointCount;
+      bool indices_match = true;
+      for (std::size_t i = 0; i < iap::kBSplineControlPointCount; ++i) {
+        if (window_states[begin + i].index != segment.control_indices[i]) {
+          indices_match = false;
+          break;
+        }
+      }
+      if (indices_match) {
+        std::vector<iap::BSplineControlPointState> local_controls(
+          window_states.begin() + static_cast<std::ptrdiff_t>(begin),
+          window_states.end());
+        std::vector<double> local_knots(
+          window_knots.begin() + static_cast<std::ptrdiff_t>(begin),
+          window_knots.begin() + static_cast<std::ptrdiff_t>(begin + (2 * iap::kBSplineControlPointCount)));
+        if (const auto layout = build_layout_from_controls_and_knots(std::move(local_controls), std::move(local_knots))) {
+          return layout;
+        }
+      }
+    }
+  }
+
+  if (active_window_layout_) {
+    const auto& controls = active_window_layout_->controls();
+    const auto& knots = active_window_layout_->knots();
+    std::array<std::size_t, iap::kBSplineControlPointCount> offsets{};
+    bool offsets_valid = true;
+    for (std::size_t i = 0; i < iap::kBSplineControlPointCount; ++i) {
+      const auto it = std::find_if(controls.begin(), controls.end(), [&](const auto& state) {
+        return state.index == segment.control_indices[i];
+      });
+      if (it == controls.end()) {
+        offsets_valid = false;
+        break;
+      }
+      offsets[i] = static_cast<std::size_t>(std::distance(controls.begin(), it));
+    }
+
+    if (offsets_valid) {
+      auto sorted_offsets = offsets;
+      std::sort(sorted_offsets.begin(), sorted_offsets.end());
+      const std::size_t begin = sorted_offsets.front();
+      const std::size_t end = sorted_offsets.back();
+      const bool contiguous = end - begin + 1 == iap::kBSplineControlPointCount;
+      const bool knot_range_valid = knots.size() >= begin + (2 * iap::kBSplineControlPointCount);
+      if (contiguous && knot_range_valid) {
+        std::vector<iap::BSplineControlPointState> local_controls(
+          controls.begin() + static_cast<std::ptrdiff_t>(begin),
+          controls.begin() + static_cast<std::ptrdiff_t>(begin + iap::kBSplineControlPointCount));
+        std::vector<double> local_knots(
+          knots.begin() + static_cast<std::ptrdiff_t>(begin),
+          knots.begin() + static_cast<std::ptrdiff_t>(begin + (2 * iap::kBSplineControlPointCount)));
+        if (const auto layout = build_layout_from_controls_and_knots(std::move(local_controls), std::move(local_knots))) {
+          return layout;
+        }
+      }
+    }
+  }
+
+  return nullptr;
+}
+
 void OdometryEstimationBSpline::refresh_active_window_layout() {
   active_window_layout_ = build_active_window_layout();
   active_window_evaluator_ = active_window_layout_
@@ -1360,7 +1520,7 @@ std::shared_ptr<const iap::SplineStateLayout> OdometryEstimationBSpline::create_
 
 std::shared_ptr<const iap::SplineStateLayout> OdometryEstimationBSpline::create_segment_lidar_layout(
   const ActiveSplineSegmentConstraint& segment) const {
-  return build_segment_local_layout(segment);
+  return build_strict_segment_local_layout(segment);
 }
 
 std::vector<iap::SplineBucketContext> OdometryEstimationBSpline::create_segment_lidar_buckets(
@@ -4143,6 +4303,17 @@ EstimationFrame::ConstPtr OdometryEstimationBSpline::insert_frame_ct_lidar_unifi
   solver_update_row.observed_key_count = 0;
   solver_update_row.new_factor_index_count = 0;
   solver_update_row.current_nonlinear_factor_count = graph.size();
+  solver_update_row.recalculated_imu_factor_count = 0;
+  solver_update_row.recalculated_velocity_factor_count = 0;
+  solver_update_row.recalculated_lidar_factor_count = 0;
+  solver_update_row.recalculated_prior_factor_count = 0;
+  solver_update_row.recalculated_shared_jkg_touching_factor_count = 0;
+  solver_update_row.relinearized_pose_variable_count = 0;
+  solver_update_row.relinearized_aux_variable_count = 0;
+  solver_update_row.relinearized_shared_variable_count = 0;
+  solver_update_row.affected_pose_key_count = 0;
+  solver_update_row.affected_aux_key_count = 0;
+  solver_update_row.affected_shared_key_count = 0;
   solver_update_row.isam_reported_update_ms = 0.0;
   solver_update_row.optimize_count = 1;
   solver_update_row.initial_error = lm_initial_cost;
@@ -4340,6 +4511,7 @@ EstimationFrame::ConstPtr OdometryEstimationBSpline::insert_frame_ct_lidar_incre
 
   auto local_input = make_local_layer_delta_input(current_segment, factor_layout);
   local_input.imu_layout_override = create_segment_imu_layout(current_segment);
+  local_input.lidar_layout_override = create_segment_lidar_layout(current_segment);
   local_input.graph_context.min_active_stamp = min_active_stamp;
   local_input.graph_context.existing_keys = unified_graph_solver_->current_active_keys();
   const auto local_contribution = ct_local_frontend_.assemble_local_layer(local_input);
@@ -4358,12 +4530,18 @@ EstimationFrame::ConstPtr OdometryEstimationBSpline::insert_frame_ct_lidar_incre
 
   const auto active_state_set =
     fixed_lag_registry_.active_state_set(mirror_values, min_active_stamp, navigation_layer_enabled);
+  const auto boundary_control_indices =
+    boundary_overlap_control_indices(fixed_lag_registry_.segments(), active_state_set, min_active_stamp);
+  const auto boundary_auxiliary_indices =
+    boundary_overlap_auxiliary_indices(fixed_lag_registry_.segments(), boundary_control_indices, min_active_stamp);
 
   iap::BSplineGraphDelta delta;
   delta.layout = factor_layout;
   delta.current_frame_stamp = raw_frame->stamp;
   delta.min_active_stamp = min_active_stamp;
   delta.current_auxiliary_index = current_segment.auxiliary_index;
+  delta.current_lidar_source_frame_index =
+    local_input.segments.empty() ? 0U : local_input.segments.front().source_frame_index;
   delta.local_layer_enabled = local_contribution.activation.enabled;
   delta.navigation_layer_enabled = navigation_layer_enabled;
   delta.local_layer_factor_count = local_contribution.factor_count();
@@ -4371,6 +4549,15 @@ EstimationFrame::ConstPtr OdometryEstimationBSpline::insert_frame_ct_lidar_incre
   delta.active_aux_keys = active_state_set.active_aux_keys;
   delta.persistent_keys = sort_unique_keys(fixed_lag_registry_.active_shared_keys(
     navigation_layer_enabled && fixed_lag_registry_.shared_state().gnss_anchor_initialized));
+  for (const auto& handle : local_contribution.lidar_factor_handles) {
+    const auto support_control_indices = lidar_handle_support_control_indices(handle);
+    delta.current_lidar_support_control_indices.insert(
+      delta.current_lidar_support_control_indices.end(),
+      support_control_indices.begin(),
+      support_control_indices.end());
+  }
+  delta.current_lidar_support_control_indices =
+    sort_unique_control_indices(std::move(delta.current_lidar_support_control_indices));
 
   gtsam::KeyVector newly_announced_keys;
   const auto& active_states = fixed_lag_registry_.control_buffer().states();
@@ -4388,18 +4575,33 @@ EstimationFrame::ConstPtr OdometryEstimationBSpline::insert_frame_ct_lidar_incre
 
   const auto current_active_keys = unified_graph_solver_->current_active_keys();
   const auto key_known = [&](gtsam::Key key) {
-    return std::find(current_active_keys.begin(), current_active_keys.end(), key) != current_active_keys.end() ||
-           delta.new_values.exists(key);
+    return unified_graph_solver_->has_key(key) || delta.new_values.exists(key);
   };
+
+  for (const auto control_index : boundary_control_indices) {
+    const gtsam::Key pose_key = iap::bspline_control_point_key(control_index);
+    if (key_known(pose_key)) {
+      append_unique_key(&delta.active_pose_keys, pose_key);
+    }
+  }
+  for (const auto auxiliary_index : boundary_auxiliary_indices) {
+    const gtsam::Key velocity_key = iap::bspline_velocity_key(auxiliary_index);
+    if (key_known(velocity_key)) {
+      append_unique_key(&delta.active_aux_keys, velocity_key);
+    }
+    if (navigation_layer_enabled) {
+      const gtsam::Key clock_key = iap::bspline_clock_key(auxiliary_index);
+      if (key_known(clock_key)) {
+        append_unique_key(&delta.active_aux_keys, clock_key);
+      }
+    }
+  }
+  delta.active_pose_keys = sort_unique_keys(std::move(delta.active_pose_keys));
+  delta.active_aux_keys = sort_unique_keys(std::move(delta.active_aux_keys));
 
   std::vector<std::size_t> new_control_indices;
   new_control_indices.reserve(segment_support_control_indices.size());
   for (const auto control_index : segment_support_control_indices) {
-    if (fixed_lag_registry_.control_index_announced(control_index)) {
-      const auto pose_key = iap::bspline_control_point_key(control_index);
-      delta.new_stamps[pose_key] = current_segment.scan_end;
-      continue;
-    }
     const gtsam::Key pose_key = iap::bspline_control_point_key(control_index);
     if (key_known(pose_key)) {
       delta.new_stamps[pose_key] = current_segment.scan_end;
@@ -4414,13 +4616,33 @@ EstimationFrame::ConstPtr OdometryEstimationBSpline::insert_frame_ct_lidar_incre
     delta.new_values.insert(pose_key, state_it->pose);
     delta.new_stamps[pose_key] = current_segment.scan_end;
     append_unique_key(&newly_announced_keys, pose_key);
-    new_control_indices.push_back(control_index);
+    if (!fixed_lag_registry_.control_index_announced(control_index)) {
+      new_control_indices.push_back(control_index);
+    }
   }
 
-  if (!fixed_lag_registry_.auxiliary_index_announced(current_segment.auxiliary_index) && !key_known(current_velocity_key)) {
+  if (!key_known(current_velocity_key)) {
     delta.new_values.insert(current_velocity_key, mirror_values.at<gtsam::Vector3>(current_velocity_key));
     delta.new_stamps[current_velocity_key] = current_segment.scan_end;
     append_unique_key(&newly_announced_keys, current_velocity_key);
+  }
+  for (const auto control_index : boundary_control_indices) {
+    const gtsam::Key pose_key = iap::bspline_control_point_key(control_index);
+    if (key_known(pose_key)) {
+      delta.new_stamps[pose_key] = current_segment.scan_end;
+    }
+  }
+  for (const auto auxiliary_index : boundary_auxiliary_indices) {
+    const gtsam::Key velocity_key = iap::bspline_velocity_key(auxiliary_index);
+    if (key_known(velocity_key)) {
+      delta.new_stamps[velocity_key] = current_segment.scan_end;
+    }
+    if (navigation_layer_enabled) {
+      const gtsam::Key clock_key = iap::bspline_clock_key(auxiliary_index);
+      if (key_known(clock_key)) {
+        delta.new_stamps[clock_key] = current_segment.scan_end;
+      }
+    }
   }
 
   const gtsam::Key gyro_bias_key = bspline_gyro_bias_key();
@@ -4538,9 +4760,24 @@ EstimationFrame::ConstPtr OdometryEstimationBSpline::insert_frame_ct_lidar_incre
     }
   }
 
+  std::unordered_map<const gtsam::NonlinearFactor*, iap::BSplineLidarFactorTelemetryMetadata> lidar_metadata_by_factor;
+  lidar_metadata_by_factor.reserve(local_contribution.lidar_factor_handles.size());
+  for (const auto& handle : local_contribution.lidar_factor_handles) {
+    auto metadata = iap::BSplineLidarFactorTelemetryMetadata{};
+    metadata.source_frame_index = handle.source_frame_index;
+    metadata.support_control_indices = lidar_handle_support_control_indices(handle);
+    lidar_metadata_by_factor.emplace(handle.factor.get(), std::move(metadata));
+  }
+
   for (const auto& factor : local_contribution.graph) {
     if (factor) {
+      const std::size_t delta_factor_index = delta.new_factors.size();
       delta.new_factors.push_back(factor);
+      const auto lidar_metadata_it = lidar_metadata_by_factor.find(factor.get());
+      if (lidar_metadata_it != lidar_metadata_by_factor.end()) {
+        lidar_metadata_it->second.delta_factor_index = delta_factor_index;
+        delta.lidar_factor_metadata.push_back(lidar_metadata_it->second);
+      }
     }
   }
   for (const auto& factor : navigation_contribution.graph) {
@@ -4560,6 +4797,22 @@ EstimationFrame::ConstPtr OdometryEstimationBSpline::insert_frame_ct_lidar_incre
   if (navigation_contribution.activation.enabled) {
     append_unique_key(&delta.query_keys, current_clock_key);
     append_unique_key(&delta.mirror_sync_keys, current_clock_key);
+  }
+  for (const auto control_index : boundary_control_indices) {
+    const gtsam::Key pose_key = iap::bspline_control_point_key(control_index);
+    append_unique_key(&delta.mirror_sync_keys, pose_key);
+  }
+  for (const auto auxiliary_index : boundary_auxiliary_indices) {
+    const gtsam::Key velocity_key = iap::bspline_velocity_key(auxiliary_index);
+    if (key_known(velocity_key)) {
+      append_unique_key(&delta.mirror_sync_keys, velocity_key);
+    }
+    if (navigation_layer_enabled) {
+      const gtsam::Key clock_key = iap::bspline_clock_key(auxiliary_index);
+      if (key_known(clock_key)) {
+        append_unique_key(&delta.mirror_sync_keys, clock_key);
+      }
+    }
   }
   const gtsam::KeyVector shared_imu_keys{gyro_bias_key, accel_bias_key, gravity_key};
   for (const auto key : delta.persistent_keys) {
@@ -4871,9 +5124,33 @@ EstimationFrame::ConstPtr OdometryEstimationBSpline::insert_frame_ct_lidar_incre
   solver_update_row.active_window_imu_factor_count = solver_result.active_window_imu_factor_count;
   solver_update_row.active_window_velocity_factor_count = solver_result.active_window_velocity_factor_count;
   solver_update_row.active_window_lidar_factor_count = solver_result.active_window_lidar_factor_count;
+  solver_update_row.active_window_lidar_current_segment_factor_count =
+    solver_result.active_window_lidar_current_segment_factor_count;
+  solver_update_row.active_window_lidar_old_segment_factor_count =
+    solver_result.active_window_lidar_old_segment_factor_count;
   solver_update_row.active_window_prior_factor_count = solver_result.active_window_prior_factor_count;
   solver_update_row.active_window_shared_jkg_touching_factor_count =
     solver_result.active_window_shared_jkg_touching_factor_count;
+  solver_update_row.recalculated_imu_factor_count = solver_result.recalculated_imu_factor_count;
+  solver_update_row.recalculated_velocity_factor_count = solver_result.recalculated_velocity_factor_count;
+  solver_update_row.recalculated_lidar_factor_count = solver_result.recalculated_lidar_factor_count;
+  solver_update_row.recalculated_lidar_current_segment_factor_count =
+    solver_result.recalculated_lidar_current_segment_factor_count;
+  solver_update_row.recalculated_lidar_old_segment_factor_count =
+    solver_result.recalculated_lidar_old_segment_factor_count;
+  solver_update_row.recalculated_lidar_same_support_factor_count =
+    solver_result.recalculated_lidar_same_support_factor_count;
+  solver_update_row.recalculated_lidar_cross_support_factor_count =
+    solver_result.recalculated_lidar_cross_support_factor_count;
+  solver_update_row.recalculated_prior_factor_count = solver_result.recalculated_prior_factor_count;
+  solver_update_row.recalculated_shared_jkg_touching_factor_count =
+    solver_result.recalculated_shared_jkg_touching_factor_count;
+  solver_update_row.relinearized_pose_variable_count = solver_result.relinearized_pose_variable_count;
+  solver_update_row.relinearized_aux_variable_count = solver_result.relinearized_aux_variable_count;
+  solver_update_row.relinearized_shared_variable_count = solver_result.relinearized_shared_variable_count;
+  solver_update_row.affected_pose_key_count = solver_result.affected_pose_key_count;
+  solver_update_row.affected_aux_key_count = solver_result.affected_aux_key_count;
+  solver_update_row.affected_shared_key_count = solver_result.affected_shared_key_count;
   solver_update_row.isam_reported_update_ms = solver_result.isam_reported_update_ms;
   solver_update_row.optimize_count = solver_result.optimize_count;
   solver_update_row.initial_error = solver_result.initial_cost;
@@ -5598,6 +5875,7 @@ void OdometryEstimationBSpline::reset_unified_graph_solver() {
       incremental_params.setOptimizationParams(gtsam::ISAM2DoglegParams());
     }
     incremental_params.findUnusedFactorSlots = true;
+    incremental_params.enableDetailedResults = solver_update_profile_enabled_;
     incremental_params.relinearizeSkip = params->isam2_relinearize_skip;
     incremental_params.setRelinearizeThreshold(params->isam2_relinearize_thresh);
     unified_graph_solver_ = std::make_unique<iap::IncrementalSmootherSolver>(params->smoother_lag, incremental_params);

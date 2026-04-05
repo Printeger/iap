@@ -58,11 +58,35 @@ iap::CTLocalFrontend::SourceFrameInput make_source_input(
 }
 
 iap::SplineStateLayout make_lidar_layout(double start = 0.0, double end = 0.1) {
+  return [&]() {
+    iap::SplineStateLayout layout;
+    std::vector<iap::BSplineControlPointState> controls;
+    for (std::size_t i = 0; i < iap::kBSplineControlPointCount; ++i) {
+      controls.push_back(iap::BSplineControlPointState{
+        i,
+        start + (end - start) * static_cast<double>(i) / static_cast<double>(iap::kBSplineControlPointCount - 1),
+        gtsam::Pose3(),
+      });
+    }
+    layout.set_controls(controls);
+    layout.set_knots({start, start, start, start, end, end, end, end});
+
+    iap::SplineSensorModel lidar_model;
+    lidar_model.id = iap::SplineSensorId::Lidar;
+    layout.set_sensor_model(iap::SplineSensorId::Lidar, lidar_model);
+    return layout;
+  }();
+}
+
+iap::SplineStateLayout make_lidar_layout_with_indices(
+  std::array<std::size_t, iap::kBSplineControlPointCount> control_indices,
+  double start = 0.0,
+  double end = 0.1) {
   iap::SplineStateLayout layout;
   std::vector<iap::BSplineControlPointState> controls;
   for (std::size_t i = 0; i < iap::kBSplineControlPointCount; ++i) {
     controls.push_back(iap::BSplineControlPointState{
-      i,
+      control_indices[i],
       start + (end - start) * static_cast<double>(i) / static_cast<double>(iap::kBSplineControlPointCount - 1),
       gtsam::Pose3(),
     });
@@ -354,6 +378,38 @@ TEST(CTLocalFrontendLayer, VelocityFactorStaysLocalToCurrentSegment) {
   EXPECT_EQ(std::count(keys.begin(), keys.end(), gtsam::symbol('j', 0)), 0);
   EXPECT_EQ(std::count(keys.begin(), keys.end(), gtsam::symbol('k', 0)), 0);
   EXPECT_EQ(std::count(keys.begin(), keys.end(), gtsam::symbol('g', 0)), 0);
+}
+
+TEST(CTLocalFrontendLayer, LidarSupportLookupUsesOverrideLayout) {
+  iap::CTLocalFrontend frontend;
+  iap::CTLocalFrontend::LayerInput input;
+  input.graph_context.layout = std::make_shared<const iap::SplineStateLayout>(
+    make_lidar_layout_with_indices({10, 11, 12, 13}));
+  input.lidar_layout_override = std::make_shared<const iap::SplineStateLayout>(
+    make_lidar_layout_with_indices({20, 21, 22, 23}));
+  input.graph_context.local_layer_enabled = true;
+  input.bucket_config.mode = iap::CTLocalFrontend::LidarBucketMode::SINGLE_BUCKET;
+  input.max_correspondence_distance = 1.5;
+
+  iap::CTLocalFrontend::LayerSegmentInput segment;
+  segment.source_frame_index = 0;
+  segment.source_frame = make_source_input(
+    {
+      Eigen::Vector4d(0.0, 0.0, 0.0, 1.0),
+      Eigen::Vector4d(0.5, 0.0, 0.0, 1.0),
+      Eigen::Vector4d(0.0, 0.5, 0.0, 1.0),
+    },
+    {0.0, 0.04, 0.08});
+  segment.target_ivox = make_target_ivox();
+  segment.control_indices = {10, 11, 12, 13};
+  segment.auxiliary_index = 13;
+  input.segments.push_back(std::move(segment));
+
+  const auto contribution = frontend.assemble_local_layer(input);
+  ASSERT_EQ(contribution.lidar_factor_handles.size(), 1U);
+  EXPECT_EQ(
+    contribution.lidar_factor_handles.front().support_control_indices,
+    (std::vector<std::size_t>{20, 21, 22, 23}));
 }
 
 TEST(CTLocalFrontendSolve, DebugStatsCarryBucketsAndResidualCounts) {

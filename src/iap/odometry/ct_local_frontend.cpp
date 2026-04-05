@@ -62,6 +62,24 @@ void append_support_control_indices(
   }
 }
 
+std::vector<std::size_t> support_control_indices(
+  const SplineStateLayout& layout,
+  const SplineLocalSupport& support) {
+  std::vector<std::size_t> indices;
+  const auto& controls = layout.controls();
+  indices.reserve(kBSplineControlPointCount);
+  for (const auto ctrl_idx : support.ctrl_indices) {
+    if (ctrl_idx >= controls.size()) {
+      continue;
+    }
+    const auto control_index = controls[ctrl_idx].index;
+    if (std::find(indices.begin(), indices.end(), control_index) == indices.end()) {
+      indices.push_back(control_index);
+    }
+  }
+  return indices;
+}
+
 std::size_t compute_local_state_dimension(const SplineStateLayout& layout, const gtsam::Values& values) {
   std::size_t dimension = 0;
   for (const auto& control : layout.controls()) {
@@ -559,6 +577,8 @@ BSplineLocalLayerContribution CTLocalFrontend::assemble_local_layer(const LayerI
   const auto& layout = *input.graph_context.layout;
   const auto imu_layout_ptr = input.imu_layout_override ? input.imu_layout_override : input.graph_context.layout;
   const auto& imu_layout = imu_layout_ptr ? *imu_layout_ptr : layout;
+  const auto lidar_layout_ptr = input.lidar_layout_override ? input.lidar_layout_override : input.graph_context.layout;
+  const auto& lidar_layout = lidar_layout_ptr ? *lidar_layout_ptr : layout;
   for (const auto& segment : input.segments) {
     std::array<gtsam::Key, kBSplineControlPointCount> segment_pose_keys{};
     for (const auto control_index : segment.control_indices) {
@@ -623,7 +643,7 @@ BSplineLocalLayerContribution CTLocalFrontend::assemble_local_layer(const LayerI
     contribution.processed.frame_profile.imu_sample_count += segment.imu_samples.size();
 
     const auto t_bucket_build_start = Clock::now();
-    const auto bucket_contexts = create_profiled_lidar_buckets(layout, segment.source_frame, input.bucket_config);
+    const auto bucket_contexts = create_profiled_lidar_buckets(lidar_layout, segment.source_frame, input.bucket_config);
     contribution.processed.frame_profile.bucket_build_ms += elapsed_ms(t_bucket_build_start, Clock::now());
     contribution.debug_stats.bucket_count += bucket_contexts.size();
     contribution.processed.frame_profile.actual_bucket_count += bucket_contexts.size();
@@ -634,7 +654,8 @@ BSplineLocalLayerContribution CTLocalFrontend::assemble_local_layer(const LayerI
 
     for (std::size_t bucket_index = 0; bucket_index < bucket_contexts.size(); ++bucket_index) {
       const auto& bucket_ctx = bucket_contexts[bucket_index];
-      append_support_control_indices(layout, bucket_ctx.context.support, &contribution.activation.active_control_indices);
+      append_support_control_indices(lidar_layout, bucket_ctx.context.support, &contribution.activation.active_control_indices);
+      const auto bucket_support_control_indices = support_control_indices(lidar_layout, bucket_ctx.context.support);
       const auto t_lidar_build_start = Clock::now();
       auto factor = std::make_shared<IntegratedSplineGICPFactor>(
         bucket_ctx.context,
@@ -659,6 +680,7 @@ BSplineLocalLayerContribution CTLocalFrontend::assemble_local_layer(const LayerI
         bucket_index,
         bucket_ctx.representative_time,
         bucket_ctx.context,
+        bucket_support_control_indices,
         factor,
       });
       contribution.debug_stats.lidar_residual_count += bucket_ctx.context.point_indices.size();

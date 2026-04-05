@@ -206,6 +206,8 @@ class OdometryEstimationBSpline : public OdometryEstimationCPU {
   std::shared_ptr<const iap::SplineStateLayout> build_active_window_layout() const;
   std::shared_ptr<const iap::SplineStateLayout> build_segment_local_layout(
     const ActiveSplineSegmentConstraint& segment) const;
+  std::shared_ptr<const iap::SplineStateLayout> build_strict_segment_local_layout(
+    const ActiveSplineSegmentConstraint& segment) const;
   void refresh_active_window_layout();
   std::shared_ptr<const iap::SplineStateLayout> create_segment_imu_layout(const ActiveSplineSegmentConstraint& segment) const;
   std::shared_ptr<const iap::SplineStateLayout> create_segment_lidar_layout(const ActiveSplineSegmentConstraint& segment) const;
