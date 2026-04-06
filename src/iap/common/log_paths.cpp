@@ -167,6 +167,13 @@ bool module_list_contains(
   return false;
 }
 
+std::string normalize_final_pose_surface(const std::string& surface) {
+  if (surface == "strict_local" || surface == "STRICT_LOCAL" || surface == "strict") {
+    return "strict_local";
+  }
+  return "active_window";
+}
+
 std::string run_command_capture(const std::string& command) {
   std::array<char, 256> buffer {};
   std::string output;
@@ -266,6 +273,12 @@ void write_metadata_files(const LogPaths& paths, const LogConfig& config) {
   run_info["runtime_log_profiling_lidar_factor_internal_profile"] = config.profiling.lidar_factor_internal_profile;
   run_info["config_log_profiling_jump_diagnostics"] = config.profiling.jump_diagnostics;
   run_info["runtime_log_profiling_jump_diagnostics"] = config.profiling.jump_diagnostics;
+  if (const auto odom_config = load_named_config_if_exists("config_odometry")) {
+    const std::string configured_final_pose_surface =
+      odom_config->param<std::string>("odometry_estimation", "final_pose_surface", "strict_local");
+    run_info["config_final_pose_surface"] = configured_final_pose_surface;
+    run_info["runtime_final_pose_surface"] = normalize_final_pose_surface(configured_final_pose_surface);
+  }
   write_json_file(paths.metadata_path(config.metadata.run_info_file), run_info);
 
   if (config.metadata.write_config_snapshot) {

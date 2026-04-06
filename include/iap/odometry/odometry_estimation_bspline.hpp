@@ -85,6 +85,11 @@ enum class BSplineGpuLidarBackend {
   KERNEL,
 };
 
+enum class BSplineFinalPoseSurface {
+  ACTIVE_WINDOW,
+  STRICT_LOCAL,
+};
+
 class OdometryEstimationBSpline : public OdometryEstimationCPU {
  public:
   EIGEN_MAKE_ALIGNED_OPERATOR_NEW
@@ -165,6 +170,22 @@ class OdometryEstimationBSpline : public OdometryEstimationCPU {
     double frontend_pose_qz{0.0};
     double frontend_pose_qw{1.0};
 
+    double post_solve_query_pose_tx{0.0};
+    double post_solve_query_pose_ty{0.0};
+    double post_solve_query_pose_tz{0.0};
+    double post_solve_query_pose_qx{0.0};
+    double post_solve_query_pose_qy{0.0};
+    double post_solve_query_pose_qz{0.0};
+    double post_solve_query_pose_qw{1.0};
+
+    double postsolve_strict_local_pose_tx{0.0};
+    double postsolve_strict_local_pose_ty{0.0};
+    double postsolve_strict_local_pose_tz{0.0};
+    double postsolve_strict_local_pose_qx{0.0};
+    double postsolve_strict_local_pose_qy{0.0};
+    double postsolve_strict_local_pose_qz{0.0};
+    double postsolve_strict_local_pose_qw{1.0};
+
     double final_pose_tx{0.0};
     double final_pose_ty{0.0};
     double final_pose_tz{0.0};
@@ -175,6 +196,16 @@ class OdometryEstimationBSpline : public OdometryEstimationCPU {
 
     double delta_start_to_frontend_translation_norm{0.0};
     double delta_start_to_frontend_rotation_rad{0.0};
+    double delta_frontend_to_postsolve_query_translation_norm{0.0};
+    double delta_frontend_to_postsolve_query_rotation_rad{0.0};
+    double delta_frontend_to_postsolve_strict_local_translation_norm{0.0};
+    double delta_frontend_to_postsolve_strict_local_rotation_rad{0.0};
+    double delta_postsolve_query_to_final_translation_norm{0.0};
+    double delta_postsolve_query_to_final_rotation_rad{0.0};
+    double delta_postsolve_strict_local_to_final_translation_norm{0.0};
+    double delta_postsolve_strict_local_to_final_rotation_rad{0.0};
+    double delta_postsolve_active_window_to_postsolve_strict_local_translation_norm{0.0};
+    double delta_postsolve_active_window_to_postsolve_strict_local_rotation_rad{0.0};
     double delta_frontend_to_final_translation_norm{0.0};
     double delta_frontend_to_final_rotation_rad{0.0};
 
@@ -188,6 +219,14 @@ class OdometryEstimationBSpline : public OdometryEstimationCPU {
     std::string lidar_support_keys_summary;
     std::size_t frontend_pose_support_key_count{0};
     std::string frontend_pose_support_keys_summary;
+    std::size_t postsolve_query_support_key_count{0};
+    std::string postsolve_query_support_keys_summary;
+    std::string postsolve_query_layout_name;
+    std::string postsolve_query_support_mismatch_reason{"none"};
+    std::size_t postsolve_strict_local_support_key_count{0};
+    std::string postsolve_strict_local_support_keys_summary;
+    std::string postsolve_strict_local_layout_name;
+    std::string postsolve_strict_local_support_mismatch_reason{"none"};
 
     double match_ratio{0.0};
     double inlier_ratio{0.0};
@@ -207,9 +246,17 @@ class OdometryEstimationBSpline : public OdometryEstimationCPU {
     double source_to_target_transform_ms{0.0};
 
     double solver_update_ms{0.0};
+    std::size_t reeliminated_variable_count{0};
+    std::size_t relinearized_pose_variable_count{0};
+    std::size_t relinearized_aux_variable_count{0};
+    std::size_t relinearized_shared_variable_count{0};
+    std::size_t recalculated_velocity_factor_count{0};
+    std::size_t recalculated_prior_factor_count{0};
+    std::size_t recalculated_imu_factor_count{0};
     std::size_t recalculated_lidar_factor_count{0};
     std::size_t recalculated_lidar_current_segment_factor_count{0};
     std::size_t recalculated_lidar_same_support_factor_count{0};
+    std::size_t recalculated_lidar_cross_support_factor_count{0};
 
     double pose_guess_translation_norm{0.0};
     double pose_guess_rotation_rad{0.0};
@@ -420,6 +467,7 @@ class OdometryEstimationBSpline : public OdometryEstimationCPU {
   bool frontend_only_mode_ = false;
   bool use_legacy_bspline_two_stage_path_ = false;
   iap::BSplineUnifiedSolverMode unified_solver_mode_ = iap::BSplineUnifiedSolverMode::BATCH_LM;
+  BSplineFinalPoseSurface final_pose_surface_ = BSplineFinalPoseSurface::STRICT_LOCAL;
   double max_correspondence_distance_ = 1.0;
   iap::CTLocalFrontend::BucketConfig lidar_bucket_config_;
   BSplineLidarTargetMode lidar_target_mode_ = BSplineLidarTargetMode::ACTIVE_WINDOW_SNAPSHOT;

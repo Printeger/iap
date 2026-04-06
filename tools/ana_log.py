@@ -363,6 +363,7 @@ def build_config_summary(configs: dict[str, Any], runtime_summary: dict[str, Any
     summary["run_dir_mode"] = get_nested(log_cfg, "run_dir_mode") or get_nested(metadata.get("run_info", {}), "run_dir_mode")
     summary["frontend_mode"] = odom_block.get("frontend_mode")
     summary["frontend_only_mode"] = odom_block.get("frontend_only_mode")
+    summary["final_pose_surface"] = odom_block.get("final_pose_surface")
     summary["bucket_mode"] = odom_block.get("ct_lidar_bucket_mode")
     summary["bucket_time_eps"] = odom_block.get("ct_lidar_bucket_time_eps")
     summary["bucket_fixed_count"] = odom_block.get("ct_lidar_fixed_buckets_per_scan")
@@ -414,12 +415,14 @@ def build_config_summary(configs: dict[str, Any], runtime_summary: dict[str, Any
         "runtime_log_profiling_lidar_factor_internal_profile",
         "config_log_profiling_jump_diagnostics",
         "runtime_log_profiling_jump_diagnostics",
+        "config_final_pose_surface",
+        "runtime_final_pose_surface",
     ]:
         if key in run_info:
             summary[key] = run_info[key]
 
     init_kv = runtime_summary.get("odometry_init", {})
-    for key in ["frontend_mode", "frontend_only_mode", "lidar_bucket_mode", "lidar_target_mode"]:
+    for key in ["frontend_mode", "frontend_only_mode", "lidar_bucket_mode", "lidar_target_mode", "final_pose_surface"]:
         if key in init_kv:
             summary[f"runtime_{key}"] = init_kv[key]
 
@@ -1208,7 +1211,10 @@ def analyze_pipeline_timing(pipeline_df: pd.DataFrame, out_dir: Path, render_plo
     return analysis
 
 
-def analyze_jump_diagnostics(jump_df: pd.DataFrame | None) -> dict[str, Any]:
+def analyze_jump_diagnostics(
+    jump_df: pd.DataFrame | None,
+    runtime_final_pose_surface: str = "active_window",
+) -> dict[str, Any]:
     analysis: dict[str, Any] = {"available": False}
     if jump_df is None or jump_df.empty:
         return analysis
@@ -1225,12 +1231,24 @@ def analyze_jump_diagnostics(jump_df: pd.DataFrame | None) -> dict[str, Any]:
         "frontend_pose_query_time",
         "delta_start_to_frontend_translation_norm",
         "delta_start_to_frontend_rotation_rad",
+        "delta_frontend_to_postsolve_query_translation_norm",
+        "delta_frontend_to_postsolve_query_rotation_rad",
+        "delta_frontend_to_postsolve_strict_local_translation_norm",
+        "delta_frontend_to_postsolve_strict_local_rotation_rad",
+        "delta_postsolve_query_to_final_translation_norm",
+        "delta_postsolve_query_to_final_rotation_rad",
+        "delta_postsolve_strict_local_to_final_translation_norm",
+        "delta_postsolve_strict_local_to_final_rotation_rad",
+        "delta_postsolve_active_window_to_postsolve_strict_local_translation_norm",
+        "delta_postsolve_active_window_to_postsolve_strict_local_rotation_rad",
         "delta_frontend_to_final_translation_norm",
         "delta_frontend_to_final_rotation_rad",
         "start_pose_frozen_before_factor_injection",
         "start_pose_frozen_before_solver_update",
         "start_pose_support_key_count",
         "start_pose_support_mismatch_flag",
+        "postsolve_query_support_key_count",
+        "postsolve_strict_local_support_key_count",
         "match_ratio",
         "inlier_ratio",
         "points_in_bucket",
@@ -1247,7 +1265,16 @@ def analyze_jump_diagnostics(jump_df: pd.DataFrame | None) -> dict[str, Any]:
         "source_to_target_transform_ms",
         "factor_total_ms",
         "solver_update_ms",
+        "reeliminated_variable_count",
+        "relinearized_pose_variable_count",
+        "relinearized_aux_variable_count",
+        "relinearized_shared_variable_count",
+        "recalculated_velocity_factor_count",
+        "recalculated_prior_factor_count",
+        "recalculated_imu_factor_count",
+        "recalculated_lidar_factor_count",
         "recalculated_lidar_same_support_factor_count",
+        "recalculated_lidar_cross_support_factor_count",
         "recalculated_lidar_current_segment_factor_count",
     ]
     for column in metric_columns:
@@ -1256,6 +1283,7 @@ def analyze_jump_diagnostics(jump_df: pd.DataFrame | None) -> dict[str, Any]:
 
     analysis["available"] = True
     analysis["jump_rows"] = int(len(df))
+    analysis["runtime_final_pose_surface"] = runtime_final_pose_surface
 
     string_columns = [
         "start_pose_source_kind",
@@ -1264,6 +1292,12 @@ def analyze_jump_diagnostics(jump_df: pd.DataFrame | None) -> dict[str, Any]:
         "lidar_support_keys_summary",
         "frontend_pose_support_keys_summary",
         "frontend_pose_query_support_keys_summary",
+        "postsolve_query_support_keys_summary",
+        "postsolve_query_layout_name",
+        "postsolve_query_support_mismatch_reason",
+        "postsolve_strict_local_support_keys_summary",
+        "postsolve_strict_local_layout_name",
+        "postsolve_strict_local_support_mismatch_reason",
         "carried_boundary_oldest_key_summary",
         "oldest_survivor_key_summary",
     ]
@@ -1287,16 +1321,54 @@ def analyze_jump_diagnostics(jump_df: pd.DataFrame | None) -> dict[str, Any]:
         analysis[f"{prefix}_abs_p95"] = pct(clean, 0.95)
         analysis[f"{prefix}_abs_max"] = float(clean.max())
 
+    def numeric_mean(frame: pd.DataFrame, column: str) -> float:
+        if column not in frame.columns:
+            return math.nan
+        clean = pd.to_numeric(frame[column], errors="coerce").dropna()
+        if clean.empty:
+            return math.nan
+        return float(clean.mean())
+
+    def is_nonempty_text(value: Any) -> bool:
+        return isinstance(value, str) and value.strip() != ""
+
     summary_specs = [
         ("delta_start_to_frontend_translation_norm", "start_to_frontend_translation"),
         ("delta_start_to_frontend_rotation_rad", "start_to_frontend_rotation"),
+        ("delta_frontend_to_postsolve_query_translation_norm", "frontend_to_postsolve_query_translation"),
+        ("delta_frontend_to_postsolve_query_rotation_rad", "frontend_to_postsolve_query_rotation"),
+        ("delta_frontend_to_postsolve_strict_local_translation_norm", "frontend_to_postsolve_strict_local_translation"),
+        ("delta_frontend_to_postsolve_strict_local_rotation_rad", "frontend_to_postsolve_strict_local_rotation"),
+        ("delta_postsolve_query_to_final_translation_norm", "postsolve_query_to_final_translation"),
+        ("delta_postsolve_query_to_final_rotation_rad", "postsolve_query_to_final_rotation"),
+        ("delta_postsolve_strict_local_to_final_translation_norm", "postsolve_strict_local_to_final_translation"),
+        ("delta_postsolve_strict_local_to_final_rotation_rad", "postsolve_strict_local_to_final_rotation"),
+        (
+            "delta_postsolve_active_window_to_postsolve_strict_local_translation_norm",
+            "postsolve_active_window_to_postsolve_strict_local_translation",
+        ),
+        (
+            "delta_postsolve_active_window_to_postsolve_strict_local_rotation_rad",
+            "postsolve_active_window_to_postsolve_strict_local_rotation",
+        ),
         ("delta_frontend_to_final_translation_norm", "frontend_to_final_translation"),
         ("delta_frontend_to_final_rotation_rad", "frontend_to_final_rotation"),
     ]
     for column, prefix in summary_specs:
-        if column not in df.columns:
-            continue
-        summarize_series(df[column], prefix)
+        if column in df.columns:
+            summarize_series(df[column], prefix)
+
+    alias_prefixes = [
+        ("frontend_to_postsolve_query_translation", "frontend_to_postsolve_active_window_translation"),
+        ("frontend_to_postsolve_query_rotation", "frontend_to_postsolve_active_window_rotation"),
+        ("postsolve_query_to_final_translation", "postsolve_active_window_to_final_translation"),
+        ("postsolve_query_to_final_rotation", "postsolve_active_window_to_final_rotation"),
+    ]
+    for source_prefix, alias_prefix in alias_prefixes:
+        for suffix in ["mean", "p95", "max"]:
+            key = f"{source_prefix}_{suffix}"
+            if key in analysis:
+                analysis[f"{alias_prefix}_{suffix}"] = analysis[key]
 
     if "start_pose_source_kind" in df.columns:
         source_counts = df["start_pose_source_kind"].replace({"": "unknown"}).value_counts()
@@ -1369,6 +1441,16 @@ def analyze_jump_diagnostics(jump_df: pd.DataFrame | None) -> dict[str, Any]:
             "start_pose_frozen_before_solver_update",
             "delta_start_to_frontend_translation_norm",
             "delta_start_to_frontend_rotation_rad",
+            "delta_frontend_to_postsolve_query_translation_norm",
+            "delta_frontend_to_postsolve_query_rotation_rad",
+            "delta_frontend_to_postsolve_strict_local_translation_norm",
+            "delta_frontend_to_postsolve_strict_local_rotation_rad",
+            "delta_postsolve_query_to_final_translation_norm",
+            "delta_postsolve_query_to_final_rotation_rad",
+            "delta_postsolve_strict_local_to_final_translation_norm",
+            "delta_postsolve_strict_local_to_final_rotation_rad",
+            "delta_postsolve_active_window_to_postsolve_strict_local_translation_norm",
+            "delta_postsolve_active_window_to_postsolve_strict_local_rotation_rad",
             "delta_frontend_to_final_translation_norm",
             "delta_frontend_to_final_rotation_rad",
             "lidar_layout_domain_begin",
@@ -1380,11 +1462,28 @@ def analyze_jump_diagnostics(jump_df: pd.DataFrame | None) -> dict[str, Any]:
             "lidar_support_keys_summary",
             "frontend_pose_support_keys_summary",
             "frontend_pose_query_support_keys_summary",
+            "postsolve_query_support_key_count",
+            "postsolve_query_support_keys_summary",
+            "postsolve_query_layout_name",
+            "postsolve_query_support_mismatch_reason",
+            "postsolve_strict_local_support_key_count",
+            "postsolve_strict_local_support_keys_summary",
+            "postsolve_strict_local_layout_name",
+            "postsolve_strict_local_support_mismatch_reason",
             "carried_boundary_oldest_key_summary",
             "oldest_survivor_key_summary",
-            "recalculated_lidar_same_support_factor_count",
-            "recalculated_lidar_current_segment_factor_count",
             "solver_update_ms",
+            "reeliminated_variable_count",
+            "relinearized_pose_variable_count",
+            "relinearized_aux_variable_count",
+            "relinearized_shared_variable_count",
+            "recalculated_velocity_factor_count",
+            "recalculated_prior_factor_count",
+            "recalculated_imu_factor_count",
+            "recalculated_lidar_factor_count",
+            "recalculated_lidar_same_support_factor_count",
+            "recalculated_lidar_cross_support_factor_count",
+            "recalculated_lidar_current_segment_factor_count",
             "match_ratio",
             "inlier_ratio",
             "points_in_bucket",
@@ -1416,6 +1515,12 @@ def analyze_jump_diagnostics(jump_df: pd.DataFrame | None) -> dict[str, Any]:
         if "delta_start_to_frontend_translation_norm" in df.columns
         else pd.DataFrame()
     )
+    top_final_df = (
+        df.sort_values("delta_frontend_to_final_translation_norm", ascending=False).head(10)
+        if "delta_frontend_to_final_translation_norm" in df.columns
+        else pd.DataFrame()
+    )
+
     if not top_start_df.empty and "start_pose_support_mismatch_reason" in top_start_df.columns:
         top_reason_counts = (
             top_start_df["start_pose_support_mismatch_reason"]
@@ -1439,18 +1544,37 @@ def analyze_jump_diagnostics(jump_df: pd.DataFrame | None) -> dict[str, Any]:
             if column in top_start_df.columns:
                 summarize_series(top_start_df[column], prefix)
 
-    frontend_score = max(
-        float(analysis.get("start_to_frontend_translation_p95", 0.0)),
-        float(analysis.get("start_to_frontend_translation_max", 0.0)),
-        float(analysis.get("start_to_frontend_rotation_p95", 0.0) / 0.3) if analysis.get("start_to_frontend_rotation_p95") is not None else 0.0,
-        float(analysis.get("start_to_frontend_rotation_max", 0.0) / 0.3) if analysis.get("start_to_frontend_rotation_max") is not None else 0.0,
-    )
-    solver_score = max(
-        float(analysis.get("frontend_to_final_translation_p95", 0.0)),
-        float(analysis.get("frontend_to_final_translation_max", 0.0)),
-        float(analysis.get("frontend_to_final_rotation_p95", 0.0) / 0.3) if analysis.get("frontend_to_final_rotation_p95") is not None else 0.0,
-        float(analysis.get("frontend_to_final_rotation_max", 0.0) / 0.3) if analysis.get("frontend_to_final_rotation_max") is not None else 0.0,
-    )
+    if not top_final_df.empty and "postsolve_query_support_mismatch_reason" in top_final_df.columns:
+        postsolve_reason_counts = (
+            top_final_df["postsolve_query_support_mismatch_reason"]
+            .replace({"": "none"})
+            .value_counts()
+        )
+        analysis["top_postsolve_query_support_mismatch_reason_counts"] = {
+            str(key): int(value) for key, value in postsolve_reason_counts.items()
+        }
+    if not top_final_df.empty and "postsolve_strict_local_support_mismatch_reason" in top_final_df.columns:
+        postsolve_strict_reason_counts = (
+            top_final_df["postsolve_strict_local_support_mismatch_reason"]
+            .replace({"": "none"})
+            .value_counts()
+        )
+        analysis["top_postsolve_strict_local_support_mismatch_reason_counts"] = {
+            str(key): int(value) for key, value in postsolve_strict_reason_counts.items()
+        }
+
+    def stage_score(translation_prefix: str, rotation_prefix: str) -> float:
+        components = [
+            float(analysis.get(f"{translation_prefix}_p95", 0.0) or 0.0),
+            float(analysis.get(f"{translation_prefix}_max", 0.0) or 0.0),
+            float(analysis.get(f"{rotation_prefix}_p95", 0.0) or 0.0) / 0.3,
+            float(analysis.get(f"{rotation_prefix}_max", 0.0) or 0.0) / 0.3,
+        ]
+        finite_components = [value for value in components if math.isfinite(value)]
+        return max(finite_components) if finite_components else 0.0
+
+    frontend_score = stage_score("start_to_frontend_translation", "start_to_frontend_rotation")
+    solver_score = stage_score("frontend_to_final_translation", "frontend_to_final_rotation")
     analysis["frontend_stage_score"] = frontend_score
     analysis["solver_stage_score"] = solver_score
     if frontend_score > 1.2 * max(solver_score, 1e-9) and frontend_score > 1.0:
@@ -1473,13 +1597,12 @@ def analyze_jump_diagnostics(jump_df: pd.DataFrame | None) -> dict[str, Any]:
         analysis.get("start_pose_frozen_before_factor_injection_counts", {}).get("false", 0)
         + analysis.get("start_pose_frozen_before_solver_update_counts", {}).get("false", 0)
     )
-    overall_accept = float(pd.to_numeric(df.get("accept_ratio"), errors="coerce").dropna().mean()) if "accept_ratio" in df.columns else math.nan
-    top_accept = float(pd.to_numeric(top_start_df.get("accept_ratio"), errors="coerce").dropna().mean()) if not top_start_df.empty and "accept_ratio" in top_start_df.columns else math.nan
-    overall_target_points = float(pd.to_numeric(df.get("target_point_count"), errors="coerce").dropna().mean()) if "target_point_count" in df.columns else math.nan
-    top_target_points = float(pd.to_numeric(top_start_df.get("target_point_count"), errors="coerce").dropna().mean()) if not top_start_df.empty and "target_point_count" in top_start_df.columns else math.nan
-    overall_target_voxels = float(pd.to_numeric(df.get("target_voxel_count"), errors="coerce").dropna().mean()) if "target_voxel_count" in df.columns else math.nan
-    top_target_voxels = float(pd.to_numeric(top_start_df.get("target_voxel_count"), errors="coerce").dropna().mean()) if not top_start_df.empty and "target_voxel_count" in top_start_df.columns else math.nan
-
+    overall_accept = numeric_mean(df, "accept_ratio")
+    top_accept = numeric_mean(top_start_df, "accept_ratio")
+    overall_target_points = numeric_mean(df, "target_point_count")
+    top_target_points = numeric_mean(top_start_df, "target_point_count")
+    overall_target_voxels = numeric_mean(df, "target_voxel_count")
+    top_target_voxels = numeric_mean(top_start_df, "target_voxel_count")
     query_time_abs_p95 = float(
         analysis.get("start_pose_query_time_minus_frontend_pose_query_time_abs_p95", 0.0)
     )
@@ -1519,6 +1642,172 @@ def analyze_jump_diagnostics(jump_df: pd.DataFrame | None) -> dict[str, Any]:
             f"|start_query-frontend_query| p95={query_time_abs_p95:.6f}"
         )
     analysis["frontend_jump_cause_evidence"] = "; ".join(evidence_parts)
+
+    top_postsolve_reason_counts = analysis.get("top_postsolve_query_support_mismatch_reason_counts", {})
+    top_postsolve_reason_total = max(sum(top_postsolve_reason_counts.values()), 1)
+    boundary_reason_share = top_postsolve_reason_counts.get("boundary_shift", 0) / top_postsolve_reason_total
+    support_diff_share = (
+        top_postsolve_reason_counts.get("boundary_shift", 0)
+        + top_postsolve_reason_counts.get("support_keys_different", 0)
+    ) / top_postsolve_reason_total
+    top_postsolve_strict_reason_counts = analysis.get(
+        "top_postsolve_strict_local_support_mismatch_reason_counts",
+        {},
+    )
+
+    assignment_negligible = (
+        float(analysis.get("postsolve_query_to_final_translation_p95", 0.0)) < 0.1
+        and float(analysis.get("postsolve_query_to_final_translation_max", 0.0)) < 0.5
+        and float(analysis.get("postsolve_query_to_final_rotation_p95", 0.0)) < 0.03
+        and float(analysis.get("postsolve_query_to_final_rotation_max", 0.0)) < 0.1
+    )
+
+    churn_columns = [
+        "solver_update_ms",
+        "reeliminated_variable_count",
+        "relinearized_pose_variable_count",
+        "relinearized_aux_variable_count",
+        "relinearized_shared_variable_count",
+        "recalculated_velocity_factor_count",
+        "recalculated_prior_factor_count",
+        "recalculated_imu_factor_count",
+        "recalculated_lidar_cross_support_factor_count",
+    ]
+    elevated_churn_columns: list[str] = []
+    for column in churn_columns:
+        if column not in df.columns or top_final_df.empty:
+            continue
+        overall = pd.to_numeric(df[column], errors="coerce").dropna()
+        top = pd.to_numeric(top_final_df[column], errors="coerce").dropna()
+        if overall.empty or top.empty:
+            continue
+        overall_p95 = pct(overall, 0.95)
+        overall_median = float(overall.median())
+        top_mean = float(top.mean())
+        analysis[f"top_frontend_to_final_{column}_mean"] = top_mean
+        if top_mean > 0.0 and top_mean > max(overall_p95, overall_median) * 1.05:
+            elevated_churn_columns.append(column)
+
+    solver_churn_suspicious = len(elevated_churn_columns) >= 2
+    cross_support_elevated = "recalculated_lidar_cross_support_factor_count" in elevated_churn_columns
+    boundary_key_present = (
+        not top_final_df.empty
+        and (
+            top_final_df.get("carried_boundary_oldest_key_summary", pd.Series(dtype=str)).map(is_nonempty_text).any()
+            or top_final_df.get("oldest_survivor_key_summary", pd.Series(dtype=str)).map(is_nonempty_text).any()
+        )
+    )
+    boundary_amplified = (
+        (boundary_reason_share >= 0.3 or support_diff_share >= 0.5)
+        and (cross_support_elevated or boundary_key_present)
+    )
+
+    active_window_score = stage_score(
+        "frontend_to_postsolve_query_translation",
+        "frontend_to_postsolve_query_rotation",
+    )
+    strict_local_score = stage_score(
+        "frontend_to_postsolve_strict_local_translation",
+        "frontend_to_postsolve_strict_local_rotation",
+    )
+    active_vs_strict_score = stage_score(
+        "postsolve_active_window_to_postsolve_strict_local_translation",
+        "postsolve_active_window_to_postsolve_strict_local_rotation",
+    )
+    analysis["frontend_to_postsolve_active_window_stage_score"] = active_window_score
+    analysis["frontend_to_postsolve_strict_local_stage_score"] = strict_local_score
+    analysis["postsolve_active_window_to_postsolve_strict_local_stage_score"] = active_vs_strict_score
+
+    surface_dominated = (
+        assignment_negligible
+        and active_window_score > 1.0
+        and strict_local_score < active_window_score * 0.35
+        and active_vs_strict_score > 1.0
+    )
+    solver_result_dominated = (
+        active_window_score > 1.0
+        and strict_local_score > 1.0
+        and strict_local_score >= active_window_score * 0.7
+    )
+    mixed_surface_and_solver = (
+        active_window_score > 1.0
+        and strict_local_score > 1.0
+        and strict_local_score < active_window_score * 0.7
+    )
+
+    if surface_dominated:
+        analysis["frontend_to_final_jump_cause"] = "frontend->final jump appears active-window postsolve-surface dominated"
+    elif solver_result_dominated:
+        analysis["frontend_to_final_jump_cause"] = "frontend->final jump appears solver-result dominated"
+    elif mixed_surface_and_solver:
+        analysis["frontend_to_final_jump_cause"] = "frontend->final jump appears mixed; strict-local postsolve still far from frontend"
+    else:
+        analysis["frontend_to_final_jump_cause"] = "frontend->final jump cause not strongly isolated"
+
+    postsolve_evidence: list[str] = []
+    if top_postsolve_reason_counts:
+        postsolve_evidence.append(
+            "top active-window reasons="
+            + ", ".join(f"{key}:{value}" for key, value in top_postsolve_reason_counts.items())
+        )
+    if top_postsolve_strict_reason_counts:
+        postsolve_evidence.append(
+            "top strict-local reasons="
+            + ", ".join(f"{key}:{value}" for key, value in top_postsolve_strict_reason_counts.items())
+        )
+    postsolve_evidence.append(
+        f"frontend->postsolve_active_window p95={analysis.get('frontend_to_postsolve_query_translation_p95', 0.0):.3f} m"
+    )
+    postsolve_evidence.append(
+        f"frontend->postsolve_strict_local p95={analysis.get('frontend_to_postsolve_strict_local_translation_p95', 0.0):.3f} m"
+    )
+    postsolve_evidence.append(
+        f"active_window->strict_local p95={analysis.get('postsolve_active_window_to_postsolve_strict_local_translation_p95', 0.0):.3f} m"
+    )
+    postsolve_evidence.append(
+        f"postsolve_active_window->final p95={analysis.get('postsolve_query_to_final_translation_p95', 0.0):.3f} m"
+    )
+    if boundary_amplified:
+        postsolve_evidence.append("boundary/carry markers elevated")
+    if elevated_churn_columns:
+        postsolve_evidence.append(
+            "elevated churn=" + ", ".join(elevated_churn_columns)
+        )
+    analysis["frontend_to_final_jump_cause_evidence"] = "; ".join(postsolve_evidence)
+
+    final_score = stage_score(
+        "frontend_to_final_translation",
+        "frontend_to_final_rotation",
+    )
+    analysis["frontend_to_final_stage_score"] = final_score
+    if runtime_final_pose_surface == "strict_local":
+        strict_local_surface_reduces_jump = (
+            active_window_score > 1.0
+            and final_score < active_window_score * 0.35
+            and active_vs_strict_score > 1.0
+        )
+        strict_local_surface_partial_mitigation = (
+            active_window_score > 1.0
+            and final_score > 1.0
+            and final_score < active_window_score * 0.7
+        )
+        if strict_local_surface_reduces_jump:
+            analysis["final_pose_surface_effect"] = "strict-local final pose surface significantly reduces frontend->final jump"
+        elif strict_local_surface_partial_mitigation:
+            analysis["final_pose_surface_effect"] = "final pose surface switch mitigates jump but solver-result residual remains"
+        elif final_score > 1.0:
+            analysis["final_pose_surface_effect"] = "strict-local final pose surface does not sufficiently reduce jump"
+        else:
+            analysis["final_pose_surface_effect"] = "strict-local final pose surface keeps frontend->final jump low"
+
+        effect_evidence = [
+            f"runtime_final_pose_surface={runtime_final_pose_surface}",
+            f"frontend->final p95={analysis.get('frontend_to_final_translation_p95', 0.0):.3f} m",
+            f"frontend->final rot_p95={analysis.get('frontend_to_final_rotation_p95', 0.0):.3f} rad",
+            f"frontend->postsolve_active_window p95={analysis.get('frontend_to_postsolve_query_translation_p95', 0.0):.3f} m",
+            f"postsolve_active_window->strict_local p95={analysis.get('postsolve_active_window_to_postsolve_strict_local_translation_p95', 0.0):.3f} m",
+        ]
+        analysis["final_pose_surface_effect_evidence"] = "; ".join(effect_evidence)
 
     return analysis
 
@@ -2007,6 +2296,7 @@ def detect_findings(
     if jump_analysis.get("available"):
         dominance = jump_analysis.get("dominance", "jump diagnostics available")
         frontend_cause = jump_analysis.get("frontend_jump_cause")
+        frontend_to_final_cause = jump_analysis.get("frontend_to_final_jump_cause")
         top_front = jump_analysis.get("top_start_to_frontend_translation_frames", [])
         top_solver = jump_analysis.get("top_frontend_to_final_translation_frames", [])
         dominance_evidence_parts = [
@@ -2036,6 +2326,41 @@ def detect_findings(
                 "title": frontend_cause,
                 "evidence": jump_analysis.get("frontend_jump_cause_evidence", ""),
             })
+        if frontend_to_final_cause:
+            findings.append({
+                "severity": "warn" if "dominated" in frontend_to_final_cause or "suspicious" in frontend_to_final_cause or "amplified" in frontend_to_final_cause or "mixed" in frontend_to_final_cause else "info",
+                "title": frontend_to_final_cause,
+                "evidence": jump_analysis.get("frontend_to_final_jump_cause_evidence", ""),
+            })
+        final_pose_surface_effect = jump_analysis.get("final_pose_surface_effect")
+        if final_pose_surface_effect:
+            findings.append({
+                "severity": "info" if "keeps" in final_pose_surface_effect else "warn",
+                "title": final_pose_surface_effect,
+                "evidence": jump_analysis.get("final_pose_surface_effect_evidence", ""),
+            })
+        runtime_final_pose_surface = jump_analysis.get("runtime_final_pose_surface")
+        if (
+            runtime_final_pose_surface == "strict_local"
+            and final_pose_surface_effect == "strict-local final pose surface significantly reduces frontend->final jump"
+        ):
+            findings.append({
+                "severity": "info",
+                "title": "strict-local final pose surface is now the intended default",
+                "evidence": (
+                    f"runtime_final_pose_surface={runtime_final_pose_surface}; "
+                    f"frontend->final p95={(jump_analysis.get('frontend_to_final_translation_p95') or 0.0):.3f} m; "
+                    f"active_window->strict_local p95={(jump_analysis.get('postsolve_active_window_to_postsolve_strict_local_translation_p95') or 0.0):.3f} m"
+                ),
+            })
+            findings.append({
+                "severity": "info",
+                "title": "active-window surface remains available for debug/regression only",
+                "evidence": (
+                    "active-window postsolve diagnostics and surface-difference telemetry remain enabled; "
+                    "use final_pose_surface=active_window only for regression reproduction and boundary-surface comparison"
+                ),
+            })
         if top_solver:
             frame = top_solver[0]
             findings.append({
@@ -2043,10 +2368,14 @@ def detect_findings(
                 "title": f"largest frontend->final jump frame is {frame.get('frame_id', '?')}",
                 "evidence": (
                     f"delta={(frame.get('delta_frontend_to_final_translation_norm') or 0.0):.3f} m; "
-                    f"layout=[{(frame.get('lidar_layout_domain_begin') or 0.0):.6f},{(frame.get('lidar_layout_domain_end') or 0.0):.6f}]; "
-                    f"support={frame.get('lidar_support_keys_summary', '')}; "
+                    f"frontend->postsolve_active_window={(frame.get('delta_frontend_to_postsolve_query_translation_norm') or 0.0):.3f} m; "
+                    f"frontend->postsolve_strict_local={(frame.get('delta_frontend_to_postsolve_strict_local_translation_norm') or 0.0):.3f} m; "
+                    f"active_window->strict_local={(frame.get('delta_postsolve_active_window_to_postsolve_strict_local_translation_norm') or 0.0):.3f} m; "
+                    f"postsolve_active_window->final={(frame.get('delta_postsolve_query_to_final_translation_norm') or 0.0):.3f} m; "
+                    f"postsolve_reason={frame.get('postsolve_query_support_mismatch_reason', '')}; "
+                    f"strict_reason={frame.get('postsolve_strict_local_support_mismatch_reason', '')}; "
                     f"same_support_recalc={frame.get('recalculated_lidar_same_support_factor_count', 'n/a')}; "
-                    f"current_segment_recalc={frame.get('recalculated_lidar_current_segment_factor_count', 'n/a')}"
+                    f"cross_support_recalc={frame.get('recalculated_lidar_cross_support_factor_count', 'n/a')}"
                 ),
             })
 
@@ -2390,6 +2719,35 @@ def recommend_next_steps(
         recommendations["Immediate next checks"].append(
             "Top start->frontend jump frames now implicate both start-pose semantics and target quality; validate the frozen start_pose path first, then inspect target snapshot/voxel degradation on the same frames."
         )
+    frontend_to_final_cause = jump_analysis.get("frontend_to_final_jump_cause")
+    if frontend_to_final_cause == "frontend->final jump appears active-window postsolve-surface dominated":
+        recommendations["Immediate next checks"].append(
+            "Top frontend->final jump frames now implicate the active-window post-solve query surface; compare active-window and strict-local postsolve support on the same frames before changing solver math."
+        )
+    elif frontend_to_final_cause == "frontend->final jump appears solver-result dominated":
+        recommendations["Immediate next checks"].append(
+            "Top frontend->final jump frames now still look far from frontend even on strict-local postsolve; inspect solver-side state movement and churn before changing the final query surface."
+        )
+    elif frontend_to_final_cause == "frontend->final jump appears mixed; strict-local postsolve still far from frontend":
+        recommendations["Immediate next checks"].append(
+            "Top frontend->final jump frames improve on strict-local postsolve but are still not clean; compare boundary oldest/survivor drift against the remaining strict-local solver movement before choosing between boundary semantics and solver-state fixes."
+        )
+    final_pose_surface_effect = jump_analysis.get("final_pose_surface_effect")
+    if final_pose_surface_effect == "strict-local final pose surface significantly reduces frontend->final jump":
+        recommendations["Immediate next checks"].append(
+            "Strict-local final pose already suppresses most frontend->final jump; next narrow the fix to final pose query semantics and boundary/survivor alignment before touching solver math."
+        )
+        recommendations["Immediate next checks"].append(
+            "Keep active_window available only as a regression/debug switch when reproducing boundary-shift failures; do not use it as the default final pose surface."
+        )
+    elif final_pose_surface_effect == "final pose surface switch mitigates jump but solver-result residual remains":
+        recommendations["Immediate next checks"].append(
+            "Strict-local final pose helps but does not fully clean the run; compare remaining frontend->final residual against boundary oldest/survivor drift before deciding between surface alignment and solver-side cleanup."
+        )
+    elif final_pose_surface_effect == "strict-local final pose surface does not sufficiently reduce jump":
+        recommendations["Immediate next checks"].append(
+            "Strict-local final pose did not suppress frontend->final jump enough; shift attention to solver-result motion and boundary carry semantics rather than publish-surface selection alone."
+        )
     new_factor_corr = solver_update_analysis.get("new_factor_vs_active_window_corr")
     new_value_corr = solver_update_analysis.get("new_value_vs_active_window_corr")
     if (
@@ -2497,6 +2855,8 @@ def render_report_markdown(
             ["timestamp", run_info.get("timestamp", "")],
             ["package_root", run_info.get("package_root", "")],
             ["git_rev", metadata.get("git_rev", "")],
+            ["config_final_pose_surface", run_info.get("config_final_pose_surface", "")],
+            ["runtime_final_pose_surface", run_info.get("runtime_final_pose_surface", "")],
             ["build_info", metadata.get("build_info", "").replace("\n", "; ")],
         ],
     ))
@@ -2663,6 +3023,7 @@ def render_report_markdown(
                 ["frontend_to_final_rotation_mean", f"{jump_analysis.get('frontend_to_final_rotation_mean', 0.0):.3f}"],
                 ["frontend_to_final_rotation_p95", f"{jump_analysis.get('frontend_to_final_rotation_p95', 0.0):.3f}"],
                 ["frontend_to_final_rotation_max", f"{jump_analysis.get('frontend_to_final_rotation_max', 0.0):.3f}"],
+                ["frontend_to_final_jump_cause", jump_analysis.get("frontend_to_final_jump_cause", "n/a")],
             ],
         ))
         lines.append("Frontend jump consistency summary:")
@@ -2700,6 +3061,96 @@ def render_report_markdown(
                 ],
             ],
         ))
+        lines.append("Postsolve surface comparison:")
+        lines.append("")
+        lines.append(md_table(
+            ["Metric", "Value"],
+            [
+                [
+                    "frontend->postsolve_active_window translation (mean/p95/max)",
+                    f"{jump_analysis.get('frontend_to_postsolve_active_window_translation_mean', 0.0):.3f} / "
+                    f"{jump_analysis.get('frontend_to_postsolve_active_window_translation_p95', 0.0):.3f} / "
+                    f"{jump_analysis.get('frontend_to_postsolve_active_window_translation_max', 0.0):.3f}",
+                ],
+                [
+                    "frontend->postsolve_active_window rotation (mean/p95/max)",
+                    f"{jump_analysis.get('frontend_to_postsolve_active_window_rotation_mean', 0.0):.3f} / "
+                    f"{jump_analysis.get('frontend_to_postsolve_active_window_rotation_p95', 0.0):.3f} / "
+                    f"{jump_analysis.get('frontend_to_postsolve_active_window_rotation_max', 0.0):.3f}",
+                ],
+                [
+                    "frontend->postsolve_strict_local translation (mean/p95/max)",
+                    f"{jump_analysis.get('frontend_to_postsolve_strict_local_translation_mean', 0.0):.3f} / "
+                    f"{jump_analysis.get('frontend_to_postsolve_strict_local_translation_p95', 0.0):.3f} / "
+                    f"{jump_analysis.get('frontend_to_postsolve_strict_local_translation_max', 0.0):.3f}",
+                ],
+                [
+                    "frontend->postsolve_strict_local rotation (mean/p95/max)",
+                    f"{jump_analysis.get('frontend_to_postsolve_strict_local_rotation_mean', 0.0):.3f} / "
+                    f"{jump_analysis.get('frontend_to_postsolve_strict_local_rotation_p95', 0.0):.3f} / "
+                    f"{jump_analysis.get('frontend_to_postsolve_strict_local_rotation_max', 0.0):.3f}",
+                ],
+                [
+                    "postsolve_active_window->postsolve_strict_local translation (mean/p95/max)",
+                    f"{jump_analysis.get('postsolve_active_window_to_postsolve_strict_local_translation_mean', 0.0):.3f} / "
+                    f"{jump_analysis.get('postsolve_active_window_to_postsolve_strict_local_translation_p95', 0.0):.3f} / "
+                    f"{jump_analysis.get('postsolve_active_window_to_postsolve_strict_local_translation_max', 0.0):.3f}",
+                ],
+                [
+                    "postsolve_active_window->postsolve_strict_local rotation (mean/p95/max)",
+                    f"{jump_analysis.get('postsolve_active_window_to_postsolve_strict_local_rotation_mean', 0.0):.3f} / "
+                    f"{jump_analysis.get('postsolve_active_window_to_postsolve_strict_local_rotation_p95', 0.0):.3f} / "
+                    f"{jump_analysis.get('postsolve_active_window_to_postsolve_strict_local_rotation_max', 0.0):.3f}",
+                ],
+                [
+                    "postsolve_active_window->final translation (mean/p95/max)",
+                    f"{jump_analysis.get('postsolve_active_window_to_final_translation_mean', 0.0):.3f} / "
+                    f"{jump_analysis.get('postsolve_active_window_to_final_translation_p95', 0.0):.3f} / "
+                    f"{jump_analysis.get('postsolve_active_window_to_final_translation_max', 0.0):.3f}",
+                ],
+                [
+                    "postsolve_active_window->final rotation (mean/p95/max)",
+                    f"{jump_analysis.get('postsolve_active_window_to_final_rotation_mean', 0.0):.3f} / "
+                    f"{jump_analysis.get('postsolve_active_window_to_final_rotation_p95', 0.0):.3f} / "
+                    f"{jump_analysis.get('postsolve_active_window_to_final_rotation_max', 0.0):.3f}",
+                ],
+            ],
+        ))
+        if jump_analysis.get("runtime_final_pose_surface") == "strict_local":
+            lines.append("Strict-local final pose experiment:")
+            lines.append("")
+            lines.append(md_table(
+                ["Metric", "Value"],
+                [
+                    ["runtime_final_pose_surface", jump_analysis.get("runtime_final_pose_surface", "")],
+                    ["surface_policy", "strict_local intended default; active_window retained for debug/regression only"],
+                    ["final_pose_surface_effect", jump_analysis.get("final_pose_surface_effect", "n/a")],
+                    [
+                        "frontend->final translation (mean/p95/max)",
+                        f"{jump_analysis.get('frontend_to_final_translation_mean', 0.0):.3f} / "
+                        f"{jump_analysis.get('frontend_to_final_translation_p95', 0.0):.3f} / "
+                        f"{jump_analysis.get('frontend_to_final_translation_max', 0.0):.3f}",
+                    ],
+                    [
+                        "frontend->final rotation (mean/p95/max)",
+                        f"{jump_analysis.get('frontend_to_final_rotation_mean', 0.0):.3f} / "
+                        f"{jump_analysis.get('frontend_to_final_rotation_p95', 0.0):.3f} / "
+                        f"{jump_analysis.get('frontend_to_final_rotation_max', 0.0):.3f}",
+                    ],
+                    [
+                        "postsolve_active_window->strict_local translation (mean/p95/max)",
+                        f"{jump_analysis.get('postsolve_active_window_to_postsolve_strict_local_translation_mean', 0.0):.3f} / "
+                        f"{jump_analysis.get('postsolve_active_window_to_postsolve_strict_local_translation_p95', 0.0):.3f} / "
+                        f"{jump_analysis.get('postsolve_active_window_to_postsolve_strict_local_translation_max', 0.0):.3f}",
+                    ],
+                    [
+                        "postsolve_active_window->strict_local rotation (mean/p95/max)",
+                        f"{jump_analysis.get('postsolve_active_window_to_postsolve_strict_local_rotation_mean', 0.0):.3f} / "
+                        f"{jump_analysis.get('postsolve_active_window_to_postsolve_strict_local_rotation_p95', 0.0):.3f} / "
+                        f"{jump_analysis.get('postsolve_active_window_to_postsolve_strict_local_rotation_max', 0.0):.3f}",
+                    ],
+                ],
+            ))
         start_rows = [
             [
                 item.get("frame_id", ""),
@@ -2745,19 +3196,102 @@ def render_report_markdown(
                 item.get("frame_id", ""),
                 f"{(item.get('delta_frontend_to_final_translation_norm') or 0.0):.3f}",
                 f"{(item.get('delta_frontend_to_final_rotation_rad') or 0.0):.3f}",
+                f"{(item.get('delta_frontend_to_postsolve_query_translation_norm') or 0.0):.3f}",
+                f"{(item.get('delta_frontend_to_postsolve_strict_local_translation_norm') or 0.0):.3f}",
+                f"{(item.get('delta_postsolve_active_window_to_postsolve_strict_local_translation_norm') or 0.0):.3f}",
+                f"{(item.get('delta_postsolve_query_to_final_translation_norm') or 0.0):.3f}",
+                item.get("postsolve_query_support_mismatch_reason", ""),
+                item.get("postsolve_strict_local_support_mismatch_reason", ""),
+                item.get("postsolve_query_layout_name", ""),
                 f"{(item.get('solver_update_ms') or 0.0):.3f}",
                 item.get("carried_boundary_oldest_key_summary", ""),
                 item.get("oldest_survivor_key_summary", ""),
-                item.get("lidar_support_keys_summary", ""),
+                item.get("postsolve_query_support_keys_summary", ""),
+                item.get("postsolve_strict_local_support_keys_summary", ""),
+                item.get("reeliminated_variable_count", ""),
+                item.get("relinearized_pose_variable_count", ""),
+                item.get("relinearized_aux_variable_count", ""),
+                item.get("relinearized_shared_variable_count", ""),
                 item.get("recalculated_lidar_current_segment_factor_count", ""),
+                item.get("recalculated_lidar_same_support_factor_count", ""),
+                item.get("recalculated_lidar_cross_support_factor_count", ""),
             ]
             for item in jump_analysis.get("top_frontend_to_final_translation_frames", [])
         ]
         lines.append("Top jump frames by frontend->final translation:")
         lines.append("")
         lines.append(md_table(
-            ["frame_id", "delta_t_m", "delta_r_rad", "solver_update_ms", "carried_boundary_oldest", "oldest_survivor", "lidar_support", "current_segment_recalc"],
+            [
+                "frame_id",
+                "delta_t_m",
+                "delta_r_rad",
+                "front->postsolve_active_window",
+                "front->postsolve_strict_local",
+                "active_window->strict_local",
+                "postsolve_active_window->final",
+                "postsolve_reason",
+                "postsolve_strict_reason",
+                "postsolve_layout",
+                "solver_update_ms",
+                "carried_boundary_oldest",
+                "oldest_survivor",
+                "postsolve_active_window_support",
+                "postsolve_strict_local_support",
+                "reelim",
+                "relin_pose",
+                "relin_aux",
+                "relin_shared",
+                "current_segment_recalc",
+                "same_support_recalc",
+                "cross_support_recalc",
+            ],
             solver_rows,
+        ))
+        boundary_rows = [
+            [
+                item.get("frame_id", ""),
+                item.get("carried_boundary_oldest_key_summary", ""),
+                item.get("oldest_survivor_key_summary", ""),
+                item.get("postsolve_query_support_keys_summary", ""),
+                item.get("postsolve_query_support_mismatch_reason", ""),
+                item.get("postsolve_strict_local_support_keys_summary", ""),
+                item.get("postsolve_strict_local_support_mismatch_reason", ""),
+                f"{(item.get('solver_update_ms') or 0.0):.3f}",
+                f"{(item.get('reeliminated_variable_count') or 0):.0f}",
+                f"{(item.get('relinearized_pose_variable_count') or 0):.0f}",
+                f"{(item.get('relinearized_aux_variable_count') or 0):.0f}",
+                f"{(item.get('relinearized_shared_variable_count') or 0):.0f}",
+                f"{(item.get('recalculated_velocity_factor_count') or 0):.0f}",
+                f"{(item.get('recalculated_prior_factor_count') or 0):.0f}",
+                f"{(item.get('recalculated_imu_factor_count') or 0):.0f}",
+                f"{(item.get('recalculated_lidar_same_support_factor_count') or 0):.0f}",
+                f"{(item.get('recalculated_lidar_cross_support_factor_count') or 0):.0f}",
+            ]
+            for item in jump_analysis.get("top_frontend_to_final_translation_frames", [])
+        ]
+        lines.append("Boundary amplification summary on top frontend->final jump frames:")
+        lines.append("")
+        lines.append(md_table(
+            [
+                "frame_id",
+                "carried_boundary_oldest",
+                "oldest_survivor",
+                "postsolve_active_window_support",
+                "postsolve_reason",
+                "postsolve_strict_local_support",
+                "postsolve_strict_reason",
+                "solver_update_ms",
+                "reelim",
+                "relin_pose",
+                "relin_aux",
+                "relin_shared",
+                "recalc_velocity",
+                "recalc_prior",
+                "recalc_imu",
+                "recalc_same",
+                "recalc_cross",
+            ],
+            boundary_rows,
         ))
     else:
         lines.append("jump_diagnostics.csv was not available for this run.")
@@ -3146,7 +3680,10 @@ def main() -> int:
         figs_dir,
         render_plots=not args.no_plots,
     )
-    jump_analysis = analyze_jump_diagnostics(dataframes.get("jump_diagnostics"))
+    jump_analysis = analyze_jump_diagnostics(
+        dataframes.get("jump_diagnostics"),
+        str(config_summary.get("runtime_final_pose_surface") or config_summary.get("final_pose_surface") or "active_window"),
+    )
     lidar_factor_internal_analysis = analyze_lidar_factor_internal(
         dataframes.get("lidar_factor_internal_profile"),
         figs_dir,

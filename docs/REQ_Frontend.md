@@ -18,6 +18,12 @@
   这说明当前 frontend-only / odometry-only 模式的模块边界、发布链和 RViz 订阅链没有彻底对齐。
 - 当前现象表现为：固定点云和当前帧点云能看到，但代表无人机的坐标轴不动、无轨迹、地图不更新。这很像 frontend 在运行，但 RViz 仍在订阅 full-system/mapping 路径上的 topic/TF。
 
+补充说明（CT 主路径 final pose surface）
+- 当前 CT 主路径默认 final pose surface 已切到 `strict_local`。
+- 默认写入 `new_frame->T_world_lidar / T_world_imu` 的 final pose 来自 strict-local postsolve query，而不是 active-window postsolve query。
+- 这样做是为了避免 active-window postsolve surface 在 boundary/carry-overlap 下产生大幅 surface shift。
+- `active_window` 仍然保留，但只建议用于 regression、debug 和 boundary-surface 对照复现，不再推荐作为默认 final pose surface。
+
 一、需要实现的模式契约
 
 请把 frontend-only 做成强制模式契约，而不是只靠文档约定。

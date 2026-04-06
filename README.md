@@ -55,6 +55,16 @@ By default, these modules are loaded from `extension_modules` in `config/config_
 
 Also, `clock_owner_mode` defaults to `gnss` (see `config_odometry_{gpu,cpu,ct}.json`).
 
+For the CT B-spline odometry path, the final published pose now defaults to
+the strict-local post-solve query surface via
+`odometry_estimation.final_pose_surface = strict_local` in
+`config/config_odometry_bspline.json`.
+
+- `strict_local` is the intended default because it avoids the large
+  boundary-shifted post-solve surface jumps seen with the active-window query.
+- `active_window` is still supported, but only for debug, regression, and
+  boundary-surface comparison runs.
+
 ### B. LiDAR + IMU only (disable GNSS)
 
 Edit `config/config_ros.json` and remove from `extension_modules`:

@@ -42,6 +42,10 @@
     //   BATCH_LM             = per-frame rebuild + batch LM on the unified graph
     //   INCREMENTAL_SMOOTHER = delta-only graph updates into an incremental fixed-lag smoother
     "bspline_unified_solver_mode": "INCREMENTAL_SMOOTHER",
+    // Final pose query surface:
+    //   strict_local  = intended default final pose surface; publish the post-solve strict local LiDAR surface
+    //   active_window = debug / regression / boundary-surface comparison only
+    "final_pose_surface": "strict_local",
     // GPU backend for CT_LIDAR_GPU:
     //   CPU path is the refactor mainline.
     //   BUCKET is the second-priority GPU adaptation path after the CPU path is stable.
