@@ -61,6 +61,8 @@ class CTLocalFrontend {
     std::vector<IMUSample> imu_samples;
     // IAP-RQ-300 / IAP-RQ-410: LiDAR registration target (null = skip LiDAR factors).
     std::shared_ptr<const gtsam_points::iVox> target_ivox;
+    std::size_t target_point_count{0};
+    std::size_t target_voxel_count{0};
     double target_map_prep_ms{0.0};
     double target_snapshot_clone_ms{0.0};
     double target_voxel_lookup_prep_ms{0.0};

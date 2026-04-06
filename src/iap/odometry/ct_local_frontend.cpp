@@ -37,6 +37,14 @@ double elapsed_ms(const Clock::time_point& start, const Clock::time_point& end) 
   return std::chrono::duration<double, std::milli>(end - start).count();
 }
 
+double pose_translation_delta_norm(const gtsam::Pose3& lhs, const gtsam::Pose3& rhs) {
+  return lhs.between(rhs).translation().norm();
+}
+
+double pose_rotation_delta_rad(const gtsam::Pose3& lhs, const gtsam::Pose3& rhs) {
+  return gtsam::Rot3::Logmap(lhs.between(rhs).rotation()).norm();
+}
+
 void append_unique_control_index(std::vector<int>* indices, int control_index) {
   if (!indices) {
     return;
@@ -1071,10 +1079,18 @@ CTLocalFrontendResult CTLocalFrontend::run(const Input& input) const {
       entry.factor->inlier_fraction());
     result.pose_diagnostics.representative_bucket_index = i;
     result.pose_diagnostics.representative_time = entry_query_time;
+    result.pose_diagnostics.bucket_representative_time = entry.representative_time;
     result.pose_diagnostics.points_in_bucket = entry.bucket_ctx.point_indices.size();
     result.pose_diagnostics.match_ratio = factor_result.profile.match_ratio;
     result.pose_diagnostics.inlier_ratio = factor_result.profile.inlier_ratio;
     result.pose_diagnostics.factor_total_ms = factor_result.profile.total_ms;
+    result.pose_diagnostics.candidate_correspondence_count = factor_result.profile.candidate_evaluation_count;
+    result.pose_diagnostics.accepted_correspondence_count = factor_result.profile.matched_point_count;
+    result.pose_diagnostics.accept_ratio =
+      factor_result.profile.candidate_evaluation_count == 0
+        ? 0.0
+        : static_cast<double>(factor_result.profile.matched_point_count) /
+            static_cast<double>(factor_result.profile.candidate_evaluation_count);
   }
   result.pose_diagnostics.lidar_support_keys =
     sort_unique_keys(std::move(result.pose_diagnostics.lidar_support_keys));
@@ -1086,6 +1102,10 @@ CTLocalFrontendResult CTLocalFrontend::run(const Input& input) const {
       result.pose_diagnostics.lidar_support_control_indices.begin(),
       result.pose_diagnostics.lidar_support_control_indices.end()),
     result.pose_diagnostics.lidar_support_control_indices.end());
+  result.pose_diagnostics.registration_delta_translation_norm =
+    pose_translation_delta_norm(result.pose_diagnostics.seed_pose, result.pose_diagnostics.optimized_pose);
+  result.pose_diagnostics.registration_delta_rotation_rad =
+    pose_rotation_delta_rad(result.pose_diagnostics.seed_pose, result.pose_diagnostics.optimized_pose);
 
   return result;
 }
@@ -1219,10 +1239,18 @@ CTLocalFrontendShadowResult CTLocalFrontend::run_shadow_diagnostics(
       handle.factor->inlier_fraction());
     result.pose_diagnostics.representative_bucket_index = i;
     result.pose_diagnostics.representative_time = entry_query_time;
+    result.pose_diagnostics.bucket_representative_time = handle.representative_time;
     result.pose_diagnostics.points_in_bucket = handle.bucket_ctx.point_indices.size();
     result.pose_diagnostics.match_ratio = factor_result.profile.match_ratio;
     result.pose_diagnostics.inlier_ratio = factor_result.profile.inlier_ratio;
     result.pose_diagnostics.factor_total_ms = factor_result.profile.total_ms;
+    result.pose_diagnostics.candidate_correspondence_count = factor_result.profile.candidate_evaluation_count;
+    result.pose_diagnostics.accepted_correspondence_count = factor_result.profile.matched_point_count;
+    result.pose_diagnostics.accept_ratio =
+      factor_result.profile.candidate_evaluation_count == 0
+        ? 0.0
+        : static_cast<double>(factor_result.profile.matched_point_count) /
+            static_cast<double>(factor_result.profile.candidate_evaluation_count);
   }
   result.pose_diagnostics.lidar_support_keys =
     sort_unique_keys(std::move(result.pose_diagnostics.lidar_support_keys));
@@ -1231,6 +1259,10 @@ CTLocalFrontendShadowResult CTLocalFrontend::run_shadow_diagnostics(
     std::unique(lidar_support_controls.begin(), lidar_support_controls.end()),
     lidar_support_controls.end());
   result.pose_diagnostics.lidar_support_control_indices = std::move(lidar_support_controls);
+  result.pose_diagnostics.registration_delta_translation_norm =
+    pose_translation_delta_norm(result.pose_diagnostics.seed_pose, result.pose_diagnostics.optimized_pose);
+  result.pose_diagnostics.registration_delta_rotation_rad =
+    pose_rotation_delta_rad(result.pose_diagnostics.seed_pose, result.pose_diagnostics.optimized_pose);
 
   result.debug_stats.local_solve_time_ms =
     std::chrono::duration<double, std::milli>(Clock::now() - t_run_start).count();

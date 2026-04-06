@@ -113,6 +113,7 @@ class OdometryEstimationBSpline : public OdometryEstimationCPU {
     BSplineLidarTargetMode mode = BSplineLidarTargetMode::ACTIVE_WINDOW_SNAPSHOT;
     std::size_t contributing_frames = 0;
     std::size_t point_count = 0;
+    std::size_t voxel_count = 0;
     std::size_t snapshot_frame_count = 0;
     std::size_t snapshot_point_count = 0;
     double snapshot_span_sec = 0.0;
@@ -136,10 +137,17 @@ class OdometryEstimationBSpline : public OdometryEstimationCPU {
   struct JumpDiagnosticsRow {
     int frame_id{-1};
     double frame_stamp{0.0};
+    double raw_frame_stamp{0.0};
     double scan_begin_time{0.0};
     double scan_end_time{0.0};
     double representative_time{0.0};
+    double bucket_representative_time{0.0};
+    double start_pose_query_time{0.0};
+    double frontend_pose_query_time{0.0};
     long long current_segment_id{-1};
+    std::string start_pose_source_kind{"unknown"};
+    bool start_pose_frozen_before_factor_injection{false};
+    bool start_pose_frozen_before_solver_update{false};
 
     double start_pose_tx{0.0};
     double start_pose_ty{0.0};
@@ -172,6 +180,10 @@ class OdometryEstimationBSpline : public OdometryEstimationCPU {
 
     double lidar_layout_domain_begin{0.0};
     double lidar_layout_domain_end{0.0};
+    std::size_t start_pose_support_key_count{0};
+    std::string start_pose_support_keys_summary;
+    bool start_pose_support_mismatch_flag{false};
+    std::string start_pose_support_mismatch_reason{"none"};
     std::size_t lidar_support_key_count{0};
     std::string lidar_support_keys_summary;
     std::size_t frontend_pose_support_key_count{0};
@@ -180,8 +192,19 @@ class OdometryEstimationBSpline : public OdometryEstimationCPU {
     double match_ratio{0.0};
     double inlier_ratio{0.0};
     std::size_t points_in_bucket{0};
+    std::size_t candidate_correspondence_count{0};
+    std::size_t accepted_correspondence_count{0};
+    double accept_ratio{0.0};
+    double registration_delta_translation_norm{0.0};
+    double registration_delta_rotation_rad{0.0};
     double factor_total_ms{0.0};
     double target_map_prep_ms{0.0};
+    std::size_t target_point_count{0};
+    std::size_t target_voxel_count{0};
+    double target_snapshot_clone_ms{0.0};
+    double target_voxel_lookup_prep_ms{0.0};
+    double target_covariance_prep_ms{0.0};
+    double source_to_target_transform_ms{0.0};
 
     double solver_update_ms{0.0};
     std::size_t recalculated_lidar_factor_count{0};
@@ -193,7 +216,6 @@ class OdometryEstimationBSpline : public OdometryEstimationCPU {
     std::string carried_boundary_oldest_key_summary;
     std::string oldest_survivor_key_summary;
     bool uses_local_lidar_layout_override{false};
-    double frontend_pose_query_time{0.0};
     std::string frontend_pose_query_support_keys_summary;
   };
 
@@ -218,11 +240,16 @@ class OdometryEstimationBSpline : public OdometryEstimationCPU {
     BSplineLidarTargetMode target_mode = BSplineLidarTargetMode::ACTIVE_WINDOW_SNAPSHOT;
     std::size_t target_frame_count = 0;
     std::size_t target_point_count = 0;
+    std::size_t target_voxel_count = 0;
     std::size_t snapshot_frame_count = 0;
     std::size_t snapshot_point_count = 0;
     double snapshot_span_sec = 0.0;
     bool snapshot_policy_accepted = false;
     double target_build_ms = 0.0;
+    double target_snapshot_clone_ms = 0.0;
+    double target_voxel_lookup_prep_ms = 0.0;
+    double target_covariance_prep_ms = 0.0;
+    double source_to_target_transform_ms = 0.0;
     std::vector<ActiveSplineIMUSample> imu_samples;
     std::vector<iap::GnssEpoch> gnss_epochs;
     ActiveSplineLidarFactorCacheKey lidar_factor_cache;

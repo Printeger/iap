@@ -54,6 +54,10 @@ namespace {
 
 using Callbacks = OdometryEstimationCallbacks;
 
+gtsam::KeyVector sort_unique_keys(gtsam::KeyVector keys);
+std::string summarize_keys(const gtsam::KeyVector& raw_keys, std::size_t limit);
+gtsam::KeyVector support_pose_keys(const iap::SplineLocalSupport& support);
+
 template <typename T>
 void hash_combine(std::size_t* seed, const T& value) {
   const std::size_t hashed = std::hash<T>{}(value);
@@ -189,19 +193,25 @@ const char* frame_warning_profile_csv_header() {
 }
 
 const char* jump_diagnostics_csv_header() {
-  return "frame_id,frame_stamp,scan_begin_time,scan_end_time,representative_time,current_segment_id,"
+  return "frame_id,frame_stamp,raw_frame_stamp,scan_begin_time,scan_end_time,representative_time,bucket_representative_time,"
+         "start_pose_query_time,frontend_pose_query_time,current_segment_id,start_pose_source_kind,"
+         "start_pose_frozen_before_factor_injection,start_pose_frozen_before_solver_update,"
          "start_pose_tx,start_pose_ty,start_pose_tz,start_pose_qx,start_pose_qy,start_pose_qz,start_pose_qw,"
          "frontend_pose_tx,frontend_pose_ty,frontend_pose_tz,frontend_pose_qx,frontend_pose_qy,frontend_pose_qz,frontend_pose_qw,"
          "final_pose_tx,final_pose_ty,final_pose_tz,final_pose_qx,final_pose_qy,final_pose_qz,final_pose_qw,"
          "delta_start_to_frontend_translation_norm,delta_start_to_frontend_rotation_rad,"
          "delta_frontend_to_final_translation_norm,delta_frontend_to_final_rotation_rad,"
-         "lidar_layout_domain_begin,lidar_layout_domain_end,lidar_support_key_count,lidar_support_keys_summary,"
+         "lidar_layout_domain_begin,lidar_layout_domain_end,start_pose_support_key_count,start_pose_support_keys_summary,"
+         "start_pose_support_mismatch_flag,start_pose_support_mismatch_reason,lidar_support_key_count,lidar_support_keys_summary,"
          "frontend_pose_support_key_count,frontend_pose_support_keys_summary,"
-         "match_ratio,inlier_ratio,points_in_bucket,factor_total_ms,target_map_prep_ms,"
+         "match_ratio,inlier_ratio,points_in_bucket,candidate_correspondence_count,accepted_correspondence_count,"
+         "accept_ratio,registration_delta_translation_norm,registration_delta_rotation_rad,factor_total_ms,target_map_prep_ms,"
+         "target_point_count,target_voxel_count,target_snapshot_clone_ms,target_voxel_lookup_prep_ms,"
+         "target_covariance_prep_ms,source_to_target_transform_ms,"
          "solver_update_ms,recalculated_lidar_factor_count,recalculated_lidar_current_segment_factor_count,"
          "recalculated_lidar_same_support_factor_count,pose_guess_translation_norm,pose_guess_rotation_rad,"
          "carried_boundary_oldest_key_summary,oldest_survivor_key_summary,uses_local_lidar_layout_override,"
-         "frontend_pose_query_time,frontend_pose_query_support_keys_summary\n";
+         "frontend_pose_query_support_keys_summary\n";
 }
 
 std::string csv_escape(const std::string& value) {
@@ -292,6 +302,69 @@ gtsam::Pose3 evaluate_pose_from_layout(
   }
   auto evaluator = std::make_shared<iap::SplineEvaluator>(layout);
   return evaluator->eval_pose(values, *support, sensor);
+}
+
+struct LayoutQueryDiagnostics {
+  bool layout_available{false};
+  bool query_time_in_domain{false};
+  bool has_support{false};
+  double domain_begin{0.0};
+  double domain_end{0.0};
+  gtsam::KeyVector support_keys;
+};
+
+LayoutQueryDiagnostics inspect_layout_query(
+  const std::shared_ptr<const iap::SplineStateLayout>& layout,
+  double query_time,
+  iap::SplineSensorId sensor) {
+  LayoutQueryDiagnostics diagnostics;
+  diagnostics.layout_available = static_cast<bool>(layout);
+  const auto [domain_begin, domain_end] = layout_domain_bounds(layout);
+  diagnostics.domain_begin = domain_begin;
+  diagnostics.domain_end = domain_end;
+  diagnostics.query_time_in_domain =
+    diagnostics.layout_available &&
+    domain_begin <= query_time + 1e-9 &&
+    query_time <= domain_end + 1e-9;
+  if (!layout) {
+    return diagnostics;
+  }
+  if (const auto support = layout->support_at(query_time, sensor)) {
+    diagnostics.has_support = true;
+    diagnostics.support_keys = support_pose_keys(*support);
+  }
+  return diagnostics;
+}
+
+void populate_start_pose_support_diagnostics(
+  glim::OdometryEstimationBSpline::JumpDiagnosticsRow* row,
+  const LayoutQueryDiagnostics& start_layout,
+  const LayoutQueryDiagnostics& strict_layout) {
+  if (!row) {
+    return;
+  }
+
+  row->start_pose_support_key_count = start_layout.support_keys.size();
+  row->start_pose_support_keys_summary = summarize_keys(start_layout.support_keys, 8);
+  row->start_pose_support_mismatch_flag = false;
+  row->start_pose_support_mismatch_reason = "none";
+
+  if (!strict_layout.layout_available) {
+    row->start_pose_support_mismatch_flag = true;
+    row->start_pose_support_mismatch_reason = "strict_layout_unavailable";
+    return;
+  }
+
+  if (!strict_layout.query_time_in_domain || !strict_layout.has_support) {
+    row->start_pose_support_mismatch_flag = true;
+    row->start_pose_support_mismatch_reason = "query_time_layout_domain_mismatch";
+    return;
+  }
+
+  if (sort_unique_keys(start_layout.support_keys) != sort_unique_keys(strict_layout.support_keys)) {
+    row->start_pose_support_mismatch_flag = true;
+    row->start_pose_support_mismatch_reason = "keys_mismatch";
+  }
 }
 
 iap::LidarFactorInternalProfileRow make_lidar_factor_internal_profile_row(
@@ -659,10 +732,17 @@ void write_jump_diagnostics_row(std::FILE* file, const glim::OdometryEstimationB
 
   add(row_data.frame_id);
   add(row_data.frame_stamp);
+  add(row_data.raw_frame_stamp);
   add(row_data.scan_begin_time);
   add(row_data.scan_end_time);
   add(row_data.representative_time);
+  add(row_data.bucket_representative_time);
+  add(row_data.start_pose_query_time);
+  add(row_data.frontend_pose_query_time);
   add(row_data.current_segment_id);
+  add(csv_escape(row_data.start_pose_source_kind));
+  add(row_data.start_pose_frozen_before_factor_injection ? 1 : 0);
+  add(row_data.start_pose_frozen_before_solver_update ? 1 : 0);
   add(row_data.start_pose_tx);
   add(row_data.start_pose_ty);
   add(row_data.start_pose_tz);
@@ -690,6 +770,10 @@ void write_jump_diagnostics_row(std::FILE* file, const glim::OdometryEstimationB
   add(row_data.delta_frontend_to_final_rotation_rad);
   add(row_data.lidar_layout_domain_begin);
   add(row_data.lidar_layout_domain_end);
+  add(row_data.start_pose_support_key_count);
+  add(csv_escape(row_data.start_pose_support_keys_summary));
+  add(row_data.start_pose_support_mismatch_flag ? 1 : 0);
+  add(csv_escape(row_data.start_pose_support_mismatch_reason));
   add(row_data.lidar_support_key_count);
   add(csv_escape(row_data.lidar_support_keys_summary));
   add(row_data.frontend_pose_support_key_count);
@@ -697,8 +781,19 @@ void write_jump_diagnostics_row(std::FILE* file, const glim::OdometryEstimationB
   add(row_data.match_ratio);
   add(row_data.inlier_ratio);
   add(row_data.points_in_bucket);
+  add(row_data.candidate_correspondence_count);
+  add(row_data.accepted_correspondence_count);
+  add(row_data.accept_ratio);
+  add(row_data.registration_delta_translation_norm);
+  add(row_data.registration_delta_rotation_rad);
   add(row_data.factor_total_ms);
   add(row_data.target_map_prep_ms);
+  add(row_data.target_point_count);
+  add(row_data.target_voxel_count);
+  add(row_data.target_snapshot_clone_ms);
+  add(row_data.target_voxel_lookup_prep_ms);
+  add(row_data.target_covariance_prep_ms);
+  add(row_data.source_to_target_transform_ms);
   add(row_data.solver_update_ms);
   add(row_data.recalculated_lidar_factor_count);
   add(row_data.recalculated_lidar_current_segment_factor_count);
@@ -708,7 +803,6 @@ void write_jump_diagnostics_row(std::FILE* file, const glim::OdometryEstimationB
   add(csv_escape(row_data.carried_boundary_oldest_key_summary));
   add(csv_escape(row_data.oldest_survivor_key_summary));
   add(row_data.uses_local_lidar_layout_override ? 1 : 0);
-  add(row_data.frontend_pose_query_time);
   add(csv_escape(row_data.frontend_pose_query_support_keys_summary));
   row << '\n';
   std::fputs(row.str().c_str(), file);
@@ -1360,6 +1454,7 @@ OdometryEstimationBSpline::ActiveSplineTargetReference OdometryEstimationBSpline
     target_ref.target_tree = target_ref.target_snapshot;
     target_ref.mode = BSplineLidarTargetMode::GLOBAL_IVOX_REFERENCE;
     target_ref.point_count = target_ref.target_snapshot->voxel_points().size();
+    target_ref.voxel_count = target_ref.target_snapshot->num_voxels();
     target_ref.build_ms = std::chrono::duration<double, std::milli>(Clock::now() - t_start).count();
     target_ref.target_voxel_lookup_prep_ms = target_ref.build_ms;
     return target_ref;
@@ -1442,6 +1537,7 @@ OdometryEstimationBSpline::ActiveSplineTargetReference OdometryEstimationBSpline
     target_ref.mode = BSplineLidarTargetMode::ACTIVE_WINDOW_SNAPSHOT;
     target_ref.contributing_frames = target_ref.snapshot_frame_count;
     target_ref.point_count = target_ref.snapshot_point_count;
+    target_ref.voxel_count = snapshot->num_voxels();
     target_ref.build_ms = std::chrono::duration<double, std::milli>(Clock::now() - t_start).count();
     return target_ref;
   }
@@ -1451,6 +1547,7 @@ OdometryEstimationBSpline::ActiveSplineTargetReference OdometryEstimationBSpline
   target_ref.target_tree = target_ref.target_snapshot;
   target_ref.mode = BSplineLidarTargetMode::GLOBAL_IVOX_REFERENCE;
   target_ref.point_count = target_ref.target_snapshot ? target_ref.target_snapshot->voxel_points().size() : 0;
+  target_ref.voxel_count = target_ref.target_snapshot ? target_ref.target_snapshot->num_voxels() : 0;
   target_ref.build_ms = std::chrono::duration<double, std::milli>(Clock::now() - t_start).count();
   return target_ref;
 }
@@ -1865,11 +1962,16 @@ void OdometryEstimationBSpline::append_active_segment_constraint(
   segment.target_mode = target_ref.mode;
   segment.target_frame_count = target_ref.contributing_frames;
   segment.target_point_count = target_ref.point_count;
+  segment.target_voxel_count = target_ref.voxel_count;
   segment.snapshot_frame_count = target_ref.snapshot_frame_count;
   segment.snapshot_point_count = target_ref.snapshot_point_count;
   segment.snapshot_span_sec = target_ref.snapshot_span_sec;
   segment.snapshot_policy_accepted = target_ref.snapshot_policy_accepted;
   segment.target_build_ms = target_ref.build_ms;
+  segment.target_snapshot_clone_ms = target_ref.target_snapshot_clone_ms;
+  segment.target_voxel_lookup_prep_ms = target_ref.target_voxel_lookup_prep_ms;
+  segment.target_covariance_prep_ms = target_ref.target_covariance_prep_ms;
+  segment.source_to_target_transform_ms = target_ref.source_to_target_transform_ms;
   segment.imu_samples = create_segment_imu_samples(raw_frame);
 
   const auto states = control_window_->states();
@@ -2414,14 +2516,21 @@ EstimationFrame::ConstPtr OdometryEstimationBSpline::insert_frame_ct_lidar_legac
       JumpDiagnosticsRow jump_row;
       jump_row.frame_id = new_frame->id;
       jump_row.frame_stamp = raw_frame->stamp;
+      jump_row.raw_frame_stamp = raw_frame->stamp;
       jump_row.scan_begin_time = raw_frame->stamp;
       jump_row.scan_end_time = raw_frame->scan_end_time;
       jump_row.representative_time = ct_local_result.pose_diagnostics.representative_time > 0.0
         ? ct_local_result.pose_diagnostics.representative_time
         : ct_local_result.pose_diagnostics.query_time;
+      jump_row.bucket_representative_time = ct_local_result.pose_diagnostics.bucket_representative_time;
+      jump_row.start_pose_query_time = ct_local_result.pose_diagnostics.query_time;
+      jump_row.frontend_pose_query_time = ct_local_result.pose_diagnostics.query_time;
       jump_row.current_segment_id = ct_local_result.layout.controls().empty()
         ? -1LL
         : static_cast<long long>(ct_local_result.layout.controls().back().index);
+      jump_row.start_pose_source_kind = "legacy_two_stage_seed";
+      jump_row.start_pose_frozen_before_factor_injection = true;
+      jump_row.start_pose_frozen_before_solver_update = true;
 
       const gtsam::Pose3 start_pose_imu =
         ct_local_result.pose_diagnostics.seed_pose * pose3_from_isometry(T_lidar_imu);
@@ -2465,6 +2574,11 @@ EstimationFrame::ConstPtr OdometryEstimationBSpline::insert_frame_ct_lidar_legac
         pose_rotation_delta_rad(frontend_pose_imu, final_pose_imu);
       jump_row.lidar_layout_domain_begin = ct_local_result.pose_diagnostics.layout_domain_begin;
       jump_row.lidar_layout_domain_end = ct_local_result.pose_diagnostics.layout_domain_end;
+      jump_row.start_pose_support_key_count = ct_local_result.pose_diagnostics.query_support_keys.size();
+      jump_row.start_pose_support_keys_summary =
+        summarize_keys(ct_local_result.pose_diagnostics.query_support_keys);
+      jump_row.start_pose_support_mismatch_flag = false;
+      jump_row.start_pose_support_mismatch_reason = "none";
       jump_row.lidar_support_key_count = ct_local_result.pose_diagnostics.lidar_support_keys.size();
       jump_row.lidar_support_keys_summary = summarize_keys(ct_local_result.pose_diagnostics.lidar_support_keys);
       jump_row.frontend_pose_support_key_count = ct_local_result.pose_diagnostics.query_support_keys.size();
@@ -2473,8 +2587,23 @@ EstimationFrame::ConstPtr OdometryEstimationBSpline::insert_frame_ct_lidar_legac
       jump_row.match_ratio = ct_local_result.pose_diagnostics.match_ratio;
       jump_row.inlier_ratio = ct_local_result.pose_diagnostics.inlier_ratio;
       jump_row.points_in_bucket = ct_local_result.pose_diagnostics.points_in_bucket;
+      jump_row.candidate_correspondence_count =
+        ct_local_result.pose_diagnostics.candidate_correspondence_count;
+      jump_row.accepted_correspondence_count =
+        ct_local_result.pose_diagnostics.accepted_correspondence_count;
+      jump_row.accept_ratio = ct_local_result.pose_diagnostics.accept_ratio;
+      jump_row.registration_delta_translation_norm =
+        ct_local_result.pose_diagnostics.registration_delta_translation_norm;
+      jump_row.registration_delta_rotation_rad =
+        ct_local_result.pose_diagnostics.registration_delta_rotation_rad;
       jump_row.factor_total_ms = ct_local_result.pose_diagnostics.factor_total_ms;
       jump_row.target_map_prep_ms = ct_frontend_input.target_map_prep_ms;
+      jump_row.target_point_count = ct_frontend_input.target_point_count;
+      jump_row.target_voxel_count = ct_frontend_input.target_voxel_count;
+      jump_row.target_snapshot_clone_ms = ct_frontend_input.target_snapshot_clone_ms;
+      jump_row.target_voxel_lookup_prep_ms = ct_frontend_input.target_voxel_lookup_prep_ms;
+      jump_row.target_covariance_prep_ms = ct_frontend_input.target_covariance_prep_ms;
+      jump_row.source_to_target_transform_ms = ct_frontend_input.source_to_target_transform_ms;
       jump_row.solver_update_ms = 0.0;
       jump_row.recalculated_lidar_factor_count = 0;
       jump_row.recalculated_lidar_current_segment_factor_count = 0;
@@ -2487,7 +2616,6 @@ EstimationFrame::ConstPtr OdometryEstimationBSpline::insert_frame_ct_lidar_legac
       jump_row.oldest_survivor_key_summary =
         summarize_oldest_key(ct_local_result.backend_summary.active_pose_keys);
       jump_row.uses_local_lidar_layout_override = false;
-      jump_row.frontend_pose_query_time = ct_local_result.pose_diagnostics.query_time;
       jump_row.frontend_pose_query_support_keys_summary =
         summarize_keys(ct_local_result.pose_diagnostics.query_support_keys);
       maybe_write_jump_diagnostics(jump_row);
@@ -3858,14 +3986,21 @@ EstimationFrame::ConstPtr OdometryEstimationBSpline::insert_frame_ct_lidar_legac
     JumpDiagnosticsRow jump_row;
     jump_row.frame_id = new_frame->id;
     jump_row.frame_stamp = raw_frame->stamp;
+    jump_row.raw_frame_stamp = raw_frame->stamp;
     jump_row.scan_begin_time = raw_frame->stamp;
     jump_row.scan_end_time = raw_frame->scan_end_time;
     jump_row.representative_time = ct_local_result.pose_diagnostics.representative_time > 0.0
       ? ct_local_result.pose_diagnostics.representative_time
       : ct_local_result.pose_diagnostics.query_time;
+    jump_row.bucket_representative_time = ct_local_result.pose_diagnostics.bucket_representative_time;
+    jump_row.start_pose_query_time = ct_local_result.pose_diagnostics.query_time;
+    jump_row.frontend_pose_query_time = ct_local_result.pose_diagnostics.query_time;
     jump_row.current_segment_id = fixed_lag_registry_.segments().empty()
       ? -1LL
       : static_cast<long long>(fixed_lag_registry_.segments().back().auxiliary_index);
+    jump_row.start_pose_source_kind = "legacy_two_stage_seed";
+    jump_row.start_pose_frozen_before_factor_injection = true;
+    jump_row.start_pose_frozen_before_solver_update = true;
 
     const gtsam::Pose3 start_pose_imu =
       ct_local_result.pose_diagnostics.seed_pose * pose3_from_isometry(T_lidar_imu);
@@ -3909,6 +4044,11 @@ EstimationFrame::ConstPtr OdometryEstimationBSpline::insert_frame_ct_lidar_legac
       pose_rotation_delta_rad(frontend_pose_imu, final_pose_imu);
     jump_row.lidar_layout_domain_begin = ct_local_result.pose_diagnostics.layout_domain_begin;
     jump_row.lidar_layout_domain_end = ct_local_result.pose_diagnostics.layout_domain_end;
+    jump_row.start_pose_support_key_count = ct_local_result.pose_diagnostics.query_support_keys.size();
+    jump_row.start_pose_support_keys_summary =
+      summarize_keys(ct_local_result.pose_diagnostics.query_support_keys);
+    jump_row.start_pose_support_mismatch_flag = false;
+    jump_row.start_pose_support_mismatch_reason = "none";
     jump_row.lidar_support_key_count = ct_local_result.pose_diagnostics.lidar_support_keys.size();
     jump_row.lidar_support_keys_summary = summarize_keys(ct_local_result.pose_diagnostics.lidar_support_keys);
     jump_row.frontend_pose_support_key_count = ct_local_result.pose_diagnostics.query_support_keys.size();
@@ -3917,8 +4057,23 @@ EstimationFrame::ConstPtr OdometryEstimationBSpline::insert_frame_ct_lidar_legac
     jump_row.match_ratio = ct_local_result.pose_diagnostics.match_ratio;
     jump_row.inlier_ratio = ct_local_result.pose_diagnostics.inlier_ratio;
     jump_row.points_in_bucket = ct_local_result.pose_diagnostics.points_in_bucket;
+    jump_row.candidate_correspondence_count =
+      ct_local_result.pose_diagnostics.candidate_correspondence_count;
+    jump_row.accepted_correspondence_count =
+      ct_local_result.pose_diagnostics.accepted_correspondence_count;
+    jump_row.accept_ratio = ct_local_result.pose_diagnostics.accept_ratio;
+    jump_row.registration_delta_translation_norm =
+      ct_local_result.pose_diagnostics.registration_delta_translation_norm;
+    jump_row.registration_delta_rotation_rad =
+      ct_local_result.pose_diagnostics.registration_delta_rotation_rad;
     jump_row.factor_total_ms = ct_local_result.pose_diagnostics.factor_total_ms;
     jump_row.target_map_prep_ms = ct_frontend_input.target_map_prep_ms;
+    jump_row.target_point_count = ct_frontend_input.target_point_count;
+    jump_row.target_voxel_count = ct_frontend_input.target_voxel_count;
+    jump_row.target_snapshot_clone_ms = ct_frontend_input.target_snapshot_clone_ms;
+    jump_row.target_voxel_lookup_prep_ms = ct_frontend_input.target_voxel_lookup_prep_ms;
+    jump_row.target_covariance_prep_ms = ct_frontend_input.target_covariance_prep_ms;
+    jump_row.source_to_target_transform_ms = ct_frontend_input.source_to_target_transform_ms;
     jump_row.solver_update_ms = pipeline_timing.lm_optimize_ms;
     jump_row.recalculated_lidar_factor_count = 0;
     jump_row.recalculated_lidar_current_segment_factor_count = 0;
@@ -3932,7 +4087,6 @@ EstimationFrame::ConstPtr OdometryEstimationBSpline::insert_frame_ct_lidar_legac
       summarize_oldest_key(previous_carried_prior.retained_keys);
     jump_row.oldest_survivor_key_summary = summarize_oldest_key(active_state_set.active_keys());
     jump_row.uses_local_lidar_layout_override = false;
-    jump_row.frontend_pose_query_time = ct_local_result.pose_diagnostics.query_time;
     jump_row.frontend_pose_query_support_keys_summary =
       summarize_keys(ct_local_result.pose_diagnostics.query_support_keys);
     maybe_write_jump_diagnostics(jump_row);
@@ -4193,8 +4347,11 @@ EstimationFrame::ConstPtr OdometryEstimationBSpline::insert_frame_ct_lidar_unifi
     return nullptr;
   }
 
+  const auto strict_lidar_layout = fixed_lag_registry_.segments().empty()
+    ? std::shared_ptr<const iap::SplineStateLayout>{}
+    : create_segment_lidar_layout(fixed_lag_registry_.segments().back());
   const gtsam::Pose3 pre_solve_start_pose_lidar = evaluate_pose_from_layout(
-    factor_layout,
+    strict_lidar_layout,
     values,
     raw_frame->stamp,
     iap::SplineSensorId::Lidar,
@@ -4204,7 +4361,7 @@ EstimationFrame::ConstPtr OdometryEstimationBSpline::insert_frame_ct_lidar_unifi
     const auto& current_segment = fixed_lag_registry_.segments().back();
     auto shadow_input = make_local_layer_delta_input(current_segment, factor_layout);
     shadow_input.imu_layout_override = create_segment_imu_layout(current_segment);
-    shadow_input.lidar_layout_override = create_segment_lidar_layout(current_segment);
+    shadow_input.lidar_layout_override = strict_lidar_layout;
     shadow_input.graph_context.min_active_stamp = min_active_stamp;
     frontend_shadow_result =
       ct_local_frontend_.run_shadow_diagnostics(shadow_input, values, raw_frame->stamp);
@@ -4730,20 +4887,21 @@ EstimationFrame::ConstPtr OdometryEstimationBSpline::insert_frame_ct_lidar_unifi
     JumpDiagnosticsRow jump_row;
     jump_row.frame_id = frontend_frame_profile.frame_id;
     jump_row.frame_stamp = frontend_frame_profile.stamp;
+    jump_row.raw_frame_stamp = raw_frame->stamp;
     jump_row.scan_begin_time = raw_frame->stamp;
     jump_row.scan_end_time = raw_frame->scan_end_time;
+    jump_row.start_pose_query_time = raw_frame->stamp;
     jump_row.current_segment_id = fixed_lag_registry_.segments().empty()
       ? -1LL
       : static_cast<long long>(fixed_lag_registry_.segments().back().auxiliary_index);
+    jump_row.start_pose_source_kind = "pre_solve_strict_local_layout";
+    jump_row.start_pose_frozen_before_factor_injection = true;
+    jump_row.start_pose_frozen_before_solver_update = true;
 
-    gtsam::KeyVector frontend_query_keys;
-    const auto fallback_support = factor_layout
-      ? factor_layout->support_at(raw_frame->stamp, iap::SplineSensorId::Lidar)
-      : std::nullopt;
-    if (fallback_support) {
-      frontend_query_keys = support_pose_keys(*fallback_support);
-    }
-    const auto [fallback_domain_begin, fallback_domain_end] = layout_domain_bounds(factor_layout);
+    const auto start_layout_diag =
+      inspect_layout_query(strict_lidar_layout, jump_row.start_pose_query_time, iap::SplineSensorId::Lidar);
+    const auto strict_layout_diag = start_layout_diag;
+    const auto [fallback_domain_begin, fallback_domain_end] = layout_domain_bounds(strict_lidar_layout);
     const gtsam::Pose3 frontend_pose_lidar = frontend_shadow_result.pose_diagnostics.valid
       ? frontend_shadow_result.pose_diagnostics.optimized_pose
       : pre_solve_start_pose_lidar;
@@ -4793,20 +4951,39 @@ EstimationFrame::ConstPtr OdometryEstimationBSpline::insert_frame_ct_lidar_unifi
     jump_row.lidar_layout_domain_end = frontend_shadow_result.pose_diagnostics.valid
       ? frontend_shadow_result.pose_diagnostics.layout_domain_end
       : fallback_domain_end;
+    populate_start_pose_support_diagnostics(&jump_row, start_layout_diag, strict_layout_diag);
     jump_row.lidar_support_key_count = frontend_shadow_result.pose_diagnostics.lidar_support_keys.size();
     jump_row.lidar_support_keys_summary =
       summarize_keys(frontend_shadow_result.pose_diagnostics.lidar_support_keys);
     jump_row.frontend_pose_support_key_count = frontend_shadow_result.pose_diagnostics.valid
       ? frontend_shadow_result.pose_diagnostics.query_support_keys.size()
-      : frontend_query_keys.size();
+      : strict_layout_diag.support_keys.size();
     jump_row.frontend_pose_support_keys_summary = frontend_shadow_result.pose_diagnostics.valid
       ? summarize_keys(frontend_shadow_result.pose_diagnostics.query_support_keys)
-      : summarize_keys(frontend_query_keys);
+      : summarize_keys(strict_layout_diag.support_keys);
     jump_row.match_ratio = frontend_shadow_result.pose_diagnostics.match_ratio;
     jump_row.inlier_ratio = frontend_shadow_result.pose_diagnostics.inlier_ratio;
     jump_row.points_in_bucket = frontend_shadow_result.pose_diagnostics.points_in_bucket;
+    jump_row.candidate_correspondence_count =
+      frontend_shadow_result.pose_diagnostics.candidate_correspondence_count;
+    jump_row.accepted_correspondence_count =
+      frontend_shadow_result.pose_diagnostics.accepted_correspondence_count;
+    jump_row.accept_ratio = frontend_shadow_result.pose_diagnostics.accept_ratio;
+    jump_row.registration_delta_translation_norm =
+      frontend_shadow_result.pose_diagnostics.registration_delta_translation_norm;
+    jump_row.registration_delta_rotation_rad =
+      frontend_shadow_result.pose_diagnostics.registration_delta_rotation_rad;
     jump_row.factor_total_ms = frontend_shadow_result.pose_diagnostics.factor_total_ms;
     jump_row.target_map_prep_ms = timing.target_build_ms;
+    if (!fixed_lag_registry_.segments().empty()) {
+      const auto& current_segment = fixed_lag_registry_.segments().back();
+      jump_row.target_point_count = current_segment.target_point_count;
+      jump_row.target_voxel_count = current_segment.target_voxel_count;
+      jump_row.target_snapshot_clone_ms = current_segment.target_snapshot_clone_ms;
+      jump_row.target_voxel_lookup_prep_ms = current_segment.target_voxel_lookup_prep_ms;
+      jump_row.target_covariance_prep_ms = current_segment.target_covariance_prep_ms;
+      jump_row.source_to_target_transform_ms = current_segment.source_to_target_transform_ms;
+    }
     jump_row.solver_update_ms = timing.lm_optimize_ms;
     jump_row.recalculated_lidar_factor_count = 0;
     jump_row.recalculated_lidar_current_segment_factor_count = 0;
@@ -4828,6 +5005,7 @@ EstimationFrame::ConstPtr OdometryEstimationBSpline::insert_frame_ct_lidar_unifi
     jump_row.representative_time = frontend_shadow_result.pose_diagnostics.representative_time > 0.0
       ? frontend_shadow_result.pose_diagnostics.representative_time
       : jump_row.frontend_pose_query_time;
+    jump_row.bucket_representative_time = frontend_shadow_result.pose_diagnostics.bucket_representative_time;
     maybe_write_jump_diagnostics(jump_row);
     maybe_log_jump_event(jump_row);
   }
@@ -5025,7 +5203,7 @@ EstimationFrame::ConstPtr OdometryEstimationBSpline::insert_frame_ct_lidar_incre
   local_input.graph_context.min_active_stamp = min_active_stamp;
   local_input.graph_context.existing_keys = unified_graph_solver_->current_active_keys();
   const gtsam::Pose3 pre_solve_start_pose_lidar = evaluate_pose_from_layout(
-    factor_layout,
+    local_input.lidar_layout_override,
     mirror_values,
     raw_frame->stamp,
     iap::SplineSensorId::Lidar,
@@ -5684,19 +5862,20 @@ EstimationFrame::ConstPtr OdometryEstimationBSpline::insert_frame_ct_lidar_incre
     JumpDiagnosticsRow jump_row;
     jump_row.frame_id = frontend_frame_profile.frame_id;
     jump_row.frame_stamp = frontend_frame_profile.stamp;
+    jump_row.raw_frame_stamp = raw_frame->stamp;
     jump_row.scan_begin_time = raw_frame->stamp;
     jump_row.scan_end_time = raw_frame->scan_end_time;
+    jump_row.start_pose_query_time = raw_frame->stamp;
     jump_row.current_segment_id = static_cast<long long>(current_segment.auxiliary_index);
+    jump_row.start_pose_source_kind = "pre_solve_strict_local_layout";
+    jump_row.start_pose_frozen_before_factor_injection = true;
+    jump_row.start_pose_frozen_before_solver_update = true;
 
-    const auto fallback_lidar_layout =
-      local_input.lidar_layout_override ? local_input.lidar_layout_override : factor_layout;
-    gtsam::KeyVector fallback_query_keys;
-    if (fallback_lidar_layout) {
-      if (const auto support = fallback_lidar_layout->support_at(raw_frame->stamp, iap::SplineSensorId::Lidar)) {
-        fallback_query_keys = support_pose_keys(*support);
-      }
-    }
-    const auto [fallback_domain_begin, fallback_domain_end] = layout_domain_bounds(fallback_lidar_layout);
+    const auto strict_lidar_layout = local_input.lidar_layout_override;
+    const auto start_layout_diag =
+      inspect_layout_query(strict_lidar_layout, jump_row.start_pose_query_time, iap::SplineSensorId::Lidar);
+    const auto strict_layout_diag = start_layout_diag;
+    const auto [fallback_domain_begin, fallback_domain_end] = layout_domain_bounds(strict_lidar_layout);
     const gtsam::Pose3 frontend_pose_lidar = frontend_shadow_result.pose_diagnostics.valid
       ? frontend_shadow_result.pose_diagnostics.optimized_pose
       : pre_solve_start_pose_lidar;
@@ -5746,20 +5925,36 @@ EstimationFrame::ConstPtr OdometryEstimationBSpline::insert_frame_ct_lidar_incre
     jump_row.lidar_layout_domain_end = frontend_shadow_result.pose_diagnostics.valid
       ? frontend_shadow_result.pose_diagnostics.layout_domain_end
       : fallback_domain_end;
+    populate_start_pose_support_diagnostics(&jump_row, start_layout_diag, strict_layout_diag);
     jump_row.lidar_support_key_count = frontend_shadow_result.pose_diagnostics.lidar_support_keys.size();
     jump_row.lidar_support_keys_summary =
       summarize_keys(frontend_shadow_result.pose_diagnostics.lidar_support_keys);
     jump_row.frontend_pose_support_key_count = frontend_shadow_result.pose_diagnostics.valid
       ? frontend_shadow_result.pose_diagnostics.query_support_keys.size()
-      : fallback_query_keys.size();
+      : strict_layout_diag.support_keys.size();
     jump_row.frontend_pose_support_keys_summary = frontend_shadow_result.pose_diagnostics.valid
       ? summarize_keys(frontend_shadow_result.pose_diagnostics.query_support_keys)
-      : summarize_keys(fallback_query_keys);
+      : summarize_keys(strict_layout_diag.support_keys);
     jump_row.match_ratio = frontend_shadow_result.pose_diagnostics.match_ratio;
     jump_row.inlier_ratio = frontend_shadow_result.pose_diagnostics.inlier_ratio;
     jump_row.points_in_bucket = frontend_shadow_result.pose_diagnostics.points_in_bucket;
+    jump_row.candidate_correspondence_count =
+      frontend_shadow_result.pose_diagnostics.candidate_correspondence_count;
+    jump_row.accepted_correspondence_count =
+      frontend_shadow_result.pose_diagnostics.accepted_correspondence_count;
+    jump_row.accept_ratio = frontend_shadow_result.pose_diagnostics.accept_ratio;
+    jump_row.registration_delta_translation_norm =
+      frontend_shadow_result.pose_diagnostics.registration_delta_translation_norm;
+    jump_row.registration_delta_rotation_rad =
+      frontend_shadow_result.pose_diagnostics.registration_delta_rotation_rad;
     jump_row.factor_total_ms = frontend_shadow_result.pose_diagnostics.factor_total_ms;
     jump_row.target_map_prep_ms = timing.target_build_ms;
+    jump_row.target_point_count = current_segment.target_point_count;
+    jump_row.target_voxel_count = current_segment.target_voxel_count;
+    jump_row.target_snapshot_clone_ms = current_segment.target_snapshot_clone_ms;
+    jump_row.target_voxel_lookup_prep_ms = current_segment.target_voxel_lookup_prep_ms;
+    jump_row.target_covariance_prep_ms = current_segment.target_covariance_prep_ms;
+    jump_row.source_to_target_transform_ms = current_segment.source_to_target_transform_ms;
     jump_row.solver_update_ms = timing.solver_update_ms;
     jump_row.recalculated_lidar_factor_count = solver_result.recalculated_lidar_factor_count;
     jump_row.recalculated_lidar_current_segment_factor_count =
@@ -5789,6 +5984,7 @@ EstimationFrame::ConstPtr OdometryEstimationBSpline::insert_frame_ct_lidar_incre
     jump_row.representative_time = frontend_shadow_result.pose_diagnostics.representative_time > 0.0
       ? frontend_shadow_result.pose_diagnostics.representative_time
       : jump_row.frontend_pose_query_time;
+    jump_row.bucket_representative_time = frontend_shadow_result.pose_diagnostics.bucket_representative_time;
     maybe_write_jump_diagnostics(jump_row);
     maybe_log_jump_event(jump_row);
   }
@@ -6204,7 +6400,8 @@ void OdometryEstimationBSpline::maybe_log_jump_event(const JumpDiagnosticsRow& r
   logger->warn(
     "jump-diagnostics frame={} start=({:.3f},{:.3f},{:.3f}) frontend=({:.3f},{:.3f},{:.3f}) final=({:.3f},{:.3f},{:.3f}) "
     "d_start_frontend_t={:.3f} d_start_frontend_r={:.3f} d_frontend_final_t={:.3f} d_frontend_final_r={:.3f} "
-    "layout=[{:.6f},{:.6f}] lidar_support_keys={} frontend_support_keys={} solver_update_ms={:.3f} "
+    "layout=[{:.6f},{:.6f}] start_source={} start_support_reason={} lidar_support_keys={} frontend_support_keys={} "
+    "accept_ratio={:.3f} target_points={} target_voxels={} solver_update_ms={:.3f} "
     "recalc_same_support={} recalc_current_segment={}",
     row.frame_id,
     row.start_pose_tx,
@@ -6222,8 +6419,13 @@ void OdometryEstimationBSpline::maybe_log_jump_event(const JumpDiagnosticsRow& r
     row.delta_frontend_to_final_rotation_rad,
     row.lidar_layout_domain_begin,
     row.lidar_layout_domain_end,
+    row.start_pose_source_kind,
+    row.start_pose_support_mismatch_reason,
     row.lidar_support_keys_summary,
     row.frontend_pose_support_keys_summary,
+    row.accept_ratio,
+    row.target_point_count,
+    row.target_voxel_count,
     row.solver_update_ms,
     row.recalculated_lidar_same_support_factor_count,
     row.recalculated_lidar_current_segment_factor_count);
@@ -6334,6 +6536,8 @@ iap::CTLocalFrontend::Input OdometryEstimationBSpline::make_frontend_input(
     target_ref.target_snapshot && !target_ref.target_snapshot->voxel_points().empty()
       ? target_ref.target_snapshot
       : nullptr;
+  input.target_point_count = target_ref.point_count;
+  input.target_voxel_count = target_ref.voxel_count;
   input.target_map_prep_ms = target_ref.build_ms;
   if (frontend_frame_profile_enabled_ && target_map_prep_breakdown_enabled_) {
     input.target_snapshot_clone_ms = target_ref.target_snapshot_clone_ms;

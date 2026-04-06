@@ -236,11 +236,17 @@ struct FrontendPoseDiagnostics {
   double layout_domain_begin{0.0};
   double layout_domain_end{0.0};
   double representative_time{0.0};
+  double bucket_representative_time{0.0};
   std::size_t representative_bucket_index{0};
   std::size_t points_in_bucket{0};
   double match_ratio{0.0};
   double inlier_ratio{0.0};
   double factor_total_ms{0.0};
+  std::size_t candidate_correspondence_count{0};
+  std::size_t accepted_correspondence_count{0};
+  double accept_ratio{0.0};
+  double registration_delta_translation_norm{0.0};
+  double registration_delta_rotation_rad{0.0};
   bool uses_local_lidar_layout_override{false};
   gtsam::Pose3 seed_pose;
   gtsam::Pose3 optimized_pose;

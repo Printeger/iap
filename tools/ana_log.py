@@ -1215,13 +1215,36 @@ def analyze_jump_diagnostics(jump_df: pd.DataFrame | None) -> dict[str, Any]:
 
     df = jump_df.copy()
     metric_columns = [
+        "frame_stamp",
+        "raw_frame_stamp",
+        "scan_begin_time",
+        "scan_end_time",
+        "representative_time",
+        "bucket_representative_time",
+        "start_pose_query_time",
+        "frontend_pose_query_time",
         "delta_start_to_frontend_translation_norm",
         "delta_start_to_frontend_rotation_rad",
         "delta_frontend_to_final_translation_norm",
         "delta_frontend_to_final_rotation_rad",
+        "start_pose_frozen_before_factor_injection",
+        "start_pose_frozen_before_solver_update",
+        "start_pose_support_key_count",
+        "start_pose_support_mismatch_flag",
         "match_ratio",
         "inlier_ratio",
         "points_in_bucket",
+        "candidate_correspondence_count",
+        "accepted_correspondence_count",
+        "accept_ratio",
+        "registration_delta_translation_norm",
+        "registration_delta_rotation_rad",
+        "target_point_count",
+        "target_voxel_count",
+        "target_snapshot_clone_ms",
+        "target_voxel_lookup_prep_ms",
+        "target_covariance_prep_ms",
+        "source_to_target_transform_ms",
         "factor_total_ms",
         "solver_update_ms",
         "recalculated_lidar_same_support_factor_count",
@@ -1234,6 +1257,36 @@ def analyze_jump_diagnostics(jump_df: pd.DataFrame | None) -> dict[str, Any]:
     analysis["available"] = True
     analysis["jump_rows"] = int(len(df))
 
+    string_columns = [
+        "start_pose_source_kind",
+        "start_pose_support_keys_summary",
+        "start_pose_support_mismatch_reason",
+        "lidar_support_keys_summary",
+        "frontend_pose_support_keys_summary",
+        "frontend_pose_query_support_keys_summary",
+        "carried_boundary_oldest_key_summary",
+        "oldest_survivor_key_summary",
+    ]
+    for column in string_columns:
+        if column in df.columns:
+            df[column] = df[column].fillna("").astype(str)
+
+    def summarize_series(series: pd.Series, prefix: str) -> None:
+        clean = pd.to_numeric(series, errors="coerce").dropna()
+        if clean.empty:
+            return
+        analysis[f"{prefix}_mean"] = float(clean.mean())
+        analysis[f"{prefix}_p95"] = pct(clean, 0.95)
+        analysis[f"{prefix}_max"] = float(clean.max())
+
+    def summarize_abs_series(series: pd.Series, prefix: str) -> None:
+        clean = pd.to_numeric(series, errors="coerce").dropna().abs()
+        if clean.empty:
+            return
+        analysis[f"{prefix}_abs_mean"] = float(clean.mean())
+        analysis[f"{prefix}_abs_p95"] = pct(clean, 0.95)
+        analysis[f"{prefix}_abs_max"] = float(clean.max())
+
     summary_specs = [
         ("delta_start_to_frontend_translation_norm", "start_to_frontend_translation"),
         ("delta_start_to_frontend_rotation_rad", "start_to_frontend_rotation"),
@@ -1243,12 +1296,59 @@ def analyze_jump_diagnostics(jump_df: pd.DataFrame | None) -> dict[str, Any]:
     for column, prefix in summary_specs:
         if column not in df.columns:
             continue
-        series = pd.to_numeric(df[column], errors="coerce").dropna()
-        if series.empty:
+        summarize_series(df[column], prefix)
+
+    if "start_pose_source_kind" in df.columns:
+        source_counts = df["start_pose_source_kind"].replace({"": "unknown"}).value_counts()
+        analysis["start_pose_source_kind_counts"] = {
+            str(key): int(value) for key, value in source_counts.items()
+        }
+
+    for flag_column in [
+        "start_pose_frozen_before_factor_injection",
+        "start_pose_frozen_before_solver_update",
+    ]:
+        if flag_column not in df.columns:
             continue
-        analysis[f"{prefix}_mean"] = float(series.mean())
-        analysis[f"{prefix}_p95"] = pct(series, 0.95)
-        analysis[f"{prefix}_max"] = float(series.max())
+        values = pd.to_numeric(df[flag_column], errors="coerce").fillna(0.0)
+        analysis[f"{flag_column}_counts"] = {
+            "true": int((values != 0).sum()),
+            "false": int((values == 0).sum()),
+        }
+
+    if "start_pose_support_mismatch_reason" in df.columns:
+        reason_counts = (
+            df["start_pose_support_mismatch_reason"]
+            .replace({"": "none"})
+            .value_counts()
+        )
+        analysis["start_pose_support_mismatch_reason_counts"] = {
+            str(key): int(value) for key, value in reason_counts.items()
+        }
+
+    time_delta_specs = [
+        (
+            "start_pose_query_time",
+            "representative_time",
+            "start_pose_query_time_minus_representative_time",
+        ),
+        (
+            "frontend_pose_query_time",
+            "representative_time",
+            "frontend_pose_query_time_minus_representative_time",
+        ),
+        (
+            "start_pose_query_time",
+            "frontend_pose_query_time",
+            "start_pose_query_time_minus_frontend_pose_query_time",
+        ),
+    ]
+    for lhs, rhs, prefix in time_delta_specs:
+        if lhs not in df.columns or rhs not in df.columns:
+            continue
+        delta = pd.to_numeric(df[lhs], errors="coerce") - pd.to_numeric(df[rhs], errors="coerce")
+        summarize_series(delta, prefix)
+        summarize_abs_series(delta, prefix)
 
     def top_frames(column: str, limit: int = 10) -> list[dict[str, Any]]:
         if column not in df.columns:
@@ -1256,16 +1356,27 @@ def analyze_jump_diagnostics(jump_df: pd.DataFrame | None) -> dict[str, Any]:
         keep_columns = [
             "frame_id",
             "frame_stamp",
+            "raw_frame_stamp",
             "scan_begin_time",
             "scan_end_time",
             "representative_time",
+            "bucket_representative_time",
+            "start_pose_query_time",
+            "frontend_pose_query_time",
             "current_segment_id",
+            "start_pose_source_kind",
+            "start_pose_frozen_before_factor_injection",
+            "start_pose_frozen_before_solver_update",
             "delta_start_to_frontend_translation_norm",
             "delta_start_to_frontend_rotation_rad",
             "delta_frontend_to_final_translation_norm",
             "delta_frontend_to_final_rotation_rad",
             "lidar_layout_domain_begin",
             "lidar_layout_domain_end",
+            "start_pose_support_key_count",
+            "start_pose_support_keys_summary",
+            "start_pose_support_mismatch_flag",
+            "start_pose_support_mismatch_reason",
             "lidar_support_keys_summary",
             "frontend_pose_support_keys_summary",
             "frontend_pose_query_support_keys_summary",
@@ -1277,6 +1388,17 @@ def analyze_jump_diagnostics(jump_df: pd.DataFrame | None) -> dict[str, Any]:
             "match_ratio",
             "inlier_ratio",
             "points_in_bucket",
+            "candidate_correspondence_count",
+            "accepted_correspondence_count",
+            "accept_ratio",
+            "registration_delta_translation_norm",
+            "registration_delta_rotation_rad",
+            "target_point_count",
+            "target_voxel_count",
+            "target_snapshot_clone_ms",
+            "target_voxel_lookup_prep_ms",
+            "target_covariance_prep_ms",
+            "source_to_target_transform_ms",
         ]
         available_columns = [c for c in keep_columns if c in df.columns]
         ranked = df.sort_values(column, ascending=False).head(limit)
@@ -1288,6 +1410,34 @@ def analyze_jump_diagnostics(jump_df: pd.DataFrame | None) -> dict[str, Any]:
     analysis["top_frontend_to_final_translation_frames"] = top_frames(
         "delta_frontend_to_final_translation_norm"
     )
+
+    top_start_df = (
+        df.sort_values("delta_start_to_frontend_translation_norm", ascending=False).head(10)
+        if "delta_start_to_frontend_translation_norm" in df.columns
+        else pd.DataFrame()
+    )
+    if not top_start_df.empty and "start_pose_support_mismatch_reason" in top_start_df.columns:
+        top_reason_counts = (
+            top_start_df["start_pose_support_mismatch_reason"]
+            .replace({"": "none"})
+            .value_counts()
+        )
+        analysis["top_start_pose_support_mismatch_reason_counts"] = {
+            str(key): int(value) for key, value in top_reason_counts.items()
+        }
+
+    if not top_start_df.empty:
+        for column, prefix in [
+            ("accept_ratio", "top_start_to_frontend_accept_ratio"),
+            ("match_ratio", "top_start_to_frontend_match_ratio"),
+            ("inlier_ratio", "top_start_to_frontend_inlier_ratio"),
+            ("target_point_count", "top_start_to_frontend_target_point_count"),
+            ("target_voxel_count", "top_start_to_frontend_target_voxel_count"),
+            ("candidate_correspondence_count", "top_start_to_frontend_candidate_correspondence_count"),
+            ("accepted_correspondence_count", "top_start_to_frontend_accepted_correspondence_count"),
+        ]:
+            if column in top_start_df.columns:
+                summarize_series(top_start_df[column], prefix)
 
     frontend_score = max(
         float(analysis.get("start_to_frontend_translation_p95", 0.0)),
@@ -1311,6 +1461,64 @@ def analyze_jump_diagnostics(jump_df: pd.DataFrame | None) -> dict[str, Any]:
         analysis["dominance"] = "jump appears mixed; frontend likely first cause"
     else:
         analysis["dominance"] = "no strong jump dominance detected"
+
+    top_reason_counts = analysis.get("top_start_pose_support_mismatch_reason_counts", {})
+    top_reason_total = max(sum(top_reason_counts.values()), 1)
+    query_reason_share = top_reason_counts.get("query_time_layout_domain_mismatch", 0) / top_reason_total
+    semantics_reason_share = (
+        top_reason_counts.get("keys_mismatch", 0)
+        + top_reason_counts.get("strict_layout_unavailable", 0)
+    ) / top_reason_total
+    frozen_false_count = (
+        analysis.get("start_pose_frozen_before_factor_injection_counts", {}).get("false", 0)
+        + analysis.get("start_pose_frozen_before_solver_update_counts", {}).get("false", 0)
+    )
+    overall_accept = float(pd.to_numeric(df.get("accept_ratio"), errors="coerce").dropna().mean()) if "accept_ratio" in df.columns else math.nan
+    top_accept = float(pd.to_numeric(top_start_df.get("accept_ratio"), errors="coerce").dropna().mean()) if not top_start_df.empty and "accept_ratio" in top_start_df.columns else math.nan
+    overall_target_points = float(pd.to_numeric(df.get("target_point_count"), errors="coerce").dropna().mean()) if "target_point_count" in df.columns else math.nan
+    top_target_points = float(pd.to_numeric(top_start_df.get("target_point_count"), errors="coerce").dropna().mean()) if not top_start_df.empty and "target_point_count" in top_start_df.columns else math.nan
+    overall_target_voxels = float(pd.to_numeric(df.get("target_voxel_count"), errors="coerce").dropna().mean()) if "target_voxel_count" in df.columns else math.nan
+    top_target_voxels = float(pd.to_numeric(top_start_df.get("target_voxel_count"), errors="coerce").dropna().mean()) if not top_start_df.empty and "target_voxel_count" in top_start_df.columns else math.nan
+
+    query_time_abs_p95 = float(
+        analysis.get("start_pose_query_time_minus_frontend_pose_query_time_abs_p95", 0.0)
+    )
+    semantics_suspicious = semantics_reason_share >= 0.4 or frozen_false_count > 0
+    query_suspicious = query_reason_share >= 0.4 or query_time_abs_p95 > 0.01
+    quality_suspicious = (
+        (math.isfinite(overall_accept) and math.isfinite(top_accept) and top_accept < 0.8 * max(overall_accept, 1e-6))
+        or (math.isfinite(overall_target_points) and math.isfinite(top_target_points) and top_target_points < 0.8 * max(overall_target_points, 1.0))
+        or (math.isfinite(overall_target_voxels) and math.isfinite(top_target_voxels) and top_target_voxels < 0.8 * max(overall_target_voxels, 1.0))
+    )
+
+    if query_suspicious and query_reason_share >= max(0.4, semantics_reason_share):
+        analysis["frontend_jump_cause"] = "frontend jump appears query-time mismatch dominated"
+    elif semantics_suspicious and quality_suspicious:
+        analysis["frontend_jump_cause"] = "frontend jump appears mixed; start-pose and target quality both suspicious"
+    elif semantics_suspicious:
+        analysis["frontend_jump_cause"] = "frontend jump appears start-pose-semantics dominated"
+    elif quality_suspicious:
+        analysis["frontend_jump_cause"] = "frontend jump appears target/correspondence-quality dominated"
+    else:
+        analysis["frontend_jump_cause"] = "frontend jump cause not strongly isolated"
+
+    evidence_parts: list[str] = []
+    if top_reason_counts:
+        evidence_parts.append(
+            "top mismatch reasons="
+            + ", ".join(f"{key}:{value}" for key, value in top_reason_counts.items())
+        )
+    if math.isfinite(top_accept):
+        evidence_parts.append(f"top accept_ratio_mean={top_accept:.3f}")
+    if math.isfinite(top_target_points):
+        evidence_parts.append(f"top target_point_count_mean={top_target_points:.1f}")
+    if math.isfinite(top_target_voxels):
+        evidence_parts.append(f"top target_voxel_count_mean={top_target_voxels:.1f}")
+    if query_time_abs_p95 > 0.0:
+        evidence_parts.append(
+            f"|start_query-frontend_query| p95={query_time_abs_p95:.6f}"
+        )
+    analysis["frontend_jump_cause_evidence"] = "; ".join(evidence_parts)
 
     return analysis
 
@@ -1798,6 +2006,7 @@ def detect_findings(
 
     if jump_analysis.get("available"):
         dominance = jump_analysis.get("dominance", "jump diagnostics available")
+        frontend_cause = jump_analysis.get("frontend_jump_cause")
         top_front = jump_analysis.get("top_start_to_frontend_translation_frames", [])
         top_solver = jump_analysis.get("top_frontend_to_final_translation_frames", [])
         dominance_evidence_parts = [
@@ -1821,6 +2030,12 @@ def detect_findings(
             "title": dominance,
             "evidence": "; ".join(part for part in dominance_evidence_parts if part),
         })
+        if frontend_cause:
+            findings.append({
+                "severity": "warn" if "dominated" in frontend_cause or "suspicious" in frontend_cause else "info",
+                "title": frontend_cause,
+                "evidence": jump_analysis.get("frontend_jump_cause_evidence", ""),
+            })
         if top_solver:
             frame = top_solver[0]
             findings.append({
@@ -2158,6 +2373,23 @@ def recommend_next_steps(
         recommendations["Immediate next checks"].append(
             "Jump diagnostics show both stages moving; fix start->frontend inconsistencies first, then verify whether solver/boundary still amplifies the corrected frontend pose."
         )
+    frontend_cause = jump_analysis.get("frontend_jump_cause")
+    if frontend_cause == "frontend jump appears start-pose-semantics dominated":
+        recommendations["Immediate next checks"].append(
+            "Top start->frontend jump frames now point at start-pose semantics; verify strict-local pre-solve start_pose capture, freeze timing, and the query support used to form start_pose."
+        )
+    elif frontend_cause == "frontend jump appears query-time mismatch dominated":
+        recommendations["Immediate next checks"].append(
+            "Top start->frontend jump frames now point at query-time/layout-domain mismatch; compare raw_frame_stamp, start/frontend query times, representative_time, and strict local layout domain on the worst frames."
+        )
+    elif frontend_cause == "frontend jump appears target/correspondence-quality dominated":
+        recommendations["Immediate next checks"].append(
+            "Top start->frontend jump frames now point at target/correspondence degradation; inspect accept_ratio, matched/candidate counts, and target point/voxel counts before changing solver logic."
+        )
+    elif frontend_cause == "frontend jump appears mixed; start-pose and target quality both suspicious":
+        recommendations["Immediate next checks"].append(
+            "Top start->frontend jump frames now implicate both start-pose semantics and target quality; validate the frozen start_pose path first, then inspect target snapshot/voxel degradation on the same frames."
+        )
     new_factor_corr = solver_update_analysis.get("new_factor_vs_active_window_corr")
     new_value_corr = solver_update_analysis.get("new_value_vs_active_window_corr")
     if (
@@ -2407,11 +2639,18 @@ def render_report_markdown(
     lines.append("## Jump Diagnostics")
     lines.append("")
     if jump_analysis.get("available"):
+        source_counts = jump_analysis.get("start_pose_source_kind_counts", {})
+        source_counts_text = ", ".join(f"{k}:{v}" for k, v in source_counts.items()) or "_none_"
+        mismatch_counts = jump_analysis.get("start_pose_support_mismatch_reason_counts", {})
+        mismatch_counts_text = ", ".join(f"{k}:{v}" for k, v in mismatch_counts.items()) or "_none_"
+        frozen_before_factor = jump_analysis.get("start_pose_frozen_before_factor_injection_counts", {})
+        frozen_before_solver = jump_analysis.get("start_pose_frozen_before_solver_update_counts", {})
         lines.append(md_table(
             ["Metric", "Value"],
             [
                 ["jump_rows", jump_analysis.get("jump_rows", 0)],
                 ["dominance", jump_analysis.get("dominance", "n/a")],
+                ["frontend_jump_cause", jump_analysis.get("frontend_jump_cause", "n/a")],
                 ["start_to_frontend_translation_mean", f"{jump_analysis.get('start_to_frontend_translation_mean', 0.0):.3f}"],
                 ["start_to_frontend_translation_p95", f"{jump_analysis.get('start_to_frontend_translation_p95', 0.0):.3f}"],
                 ["start_to_frontend_translation_max", f"{jump_analysis.get('start_to_frontend_translation_max', 0.0):.3f}"],
@@ -2426,23 +2665,79 @@ def render_report_markdown(
                 ["frontend_to_final_rotation_max", f"{jump_analysis.get('frontend_to_final_rotation_max', 0.0):.3f}"],
             ],
         ))
+        lines.append("Frontend jump consistency summary:")
+        lines.append("")
+        lines.append(md_table(
+            ["Metric", "Value"],
+            [
+                ["start_pose_source_kind_counts", source_counts_text],
+                [
+                    "start_pose_frozen_before_factor_injection_counts",
+                    f"true:{frozen_before_factor.get('true', 0)}, false:{frozen_before_factor.get('false', 0)}",
+                ],
+                [
+                    "start_pose_frozen_before_solver_update_counts",
+                    f"true:{frozen_before_solver.get('true', 0)}, false:{frozen_before_solver.get('false', 0)}",
+                ],
+                ["start_pose_support_mismatch_reason_counts", mismatch_counts_text],
+                [
+                    "start_pose_query_time - representative_time (mean/p95/max)",
+                    f"{jump_analysis.get('start_pose_query_time_minus_representative_time_mean', 0.0):.6f} / "
+                    f"{jump_analysis.get('start_pose_query_time_minus_representative_time_p95', 0.0):.6f} / "
+                    f"{jump_analysis.get('start_pose_query_time_minus_representative_time_max', 0.0):.6f}",
+                ],
+                [
+                    "frontend_pose_query_time - representative_time (mean/p95/max)",
+                    f"{jump_analysis.get('frontend_pose_query_time_minus_representative_time_mean', 0.0):.6f} / "
+                    f"{jump_analysis.get('frontend_pose_query_time_minus_representative_time_p95', 0.0):.6f} / "
+                    f"{jump_analysis.get('frontend_pose_query_time_minus_representative_time_max', 0.0):.6f}",
+                ],
+                [
+                    "start_pose_query_time - frontend_pose_query_time (mean/p95/max)",
+                    f"{jump_analysis.get('start_pose_query_time_minus_frontend_pose_query_time_mean', 0.0):.6f} / "
+                    f"{jump_analysis.get('start_pose_query_time_minus_frontend_pose_query_time_p95', 0.0):.6f} / "
+                    f"{jump_analysis.get('start_pose_query_time_minus_frontend_pose_query_time_max', 0.0):.6f}",
+                ],
+            ],
+        ))
         start_rows = [
             [
                 item.get("frame_id", ""),
                 f"{(item.get('delta_start_to_frontend_translation_norm') or 0.0):.3f}",
                 f"{(item.get('delta_start_to_frontend_rotation_rad') or 0.0):.3f}",
+                item.get("start_pose_source_kind", ""),
+                item.get("start_pose_support_mismatch_reason", ""),
                 f"{(item.get('lidar_layout_domain_begin') or 0.0):.6f}",
                 f"{(item.get('lidar_layout_domain_end') or 0.0):.6f}",
-                item.get("lidar_support_keys_summary", ""),
-                item.get("frontend_pose_support_keys_summary", ""),
-                item.get("recalculated_lidar_same_support_factor_count", ""),
+                f"{(item.get('candidate_correspondence_count') or 0):.0f}",
+                f"{(item.get('accepted_correspondence_count') or 0):.0f}",
+                f"{(item.get('accept_ratio') or 0.0):.3f}",
+                f"{(item.get('match_ratio') or 0.0):.3f}",
+                f"{(item.get('inlier_ratio') or 0.0):.3f}",
+                f"{(item.get('target_point_count') or 0):.0f}",
+                f"{(item.get('target_voxel_count') or 0):.0f}",
             ]
             for item in jump_analysis.get("top_start_to_frontend_translation_frames", [])
         ]
         lines.append("Top jump frames by start->frontend translation:")
         lines.append("")
         lines.append(md_table(
-            ["frame_id", "delta_t_m", "delta_r_rad", "layout_begin", "layout_end", "lidar_support", "frontend_support", "same_support_recalc"],
+            [
+                "frame_id",
+                "delta_t_m",
+                "delta_r_rad",
+                "start_source",
+                "mismatch_reason",
+                "layout_begin",
+                "layout_end",
+                "candidates",
+                "accepted",
+                "accept_ratio",
+                "match_ratio",
+                "inlier_ratio",
+                "target_points",
+                "target_voxels",
+            ],
             start_rows,
         ))
         solver_rows = [
