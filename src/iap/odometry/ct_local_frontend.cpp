@@ -7,6 +7,7 @@
 
 #include <iap/odometry/integrated_bspline_imu_factor.hpp>
 #include <iap/odometry/integrated_bspline_velocity_factor.hpp>
+#include <iap/odometry/spline_evaluator.hpp>
 
 #include <gtsam/inference/Symbol.h>
 #include <gtsam/nonlinear/NonlinearFactorGraph.h>
@@ -45,6 +46,21 @@ void append_unique_control_index(std::vector<int>* indices, int control_index) {
   }
 }
 
+void append_unique_key(gtsam::KeyVector* keys, gtsam::Key key) {
+  if (!keys) {
+    return;
+  }
+  if (std::find(keys->begin(), keys->end(), key) == keys->end()) {
+    keys->push_back(key);
+  }
+}
+
+gtsam::KeyVector sort_unique_keys(gtsam::KeyVector keys) {
+  std::sort(keys.begin(), keys.end());
+  keys.erase(std::unique(keys.begin(), keys.end()), keys.end());
+  return keys;
+}
+
 void append_support_control_indices(
   const SplineStateLayout& layout,
   const SplineLocalSupport& support,
@@ -78,6 +94,20 @@ std::vector<std::size_t> support_control_indices(
     }
   }
   return indices;
+}
+
+gtsam::KeyVector support_pose_keys(const SplineLocalSupport& support) {
+  return sort_unique_keys(gtsam::KeyVector(support.pose_keys.begin(), support.pose_keys.end()));
+}
+
+std::pair<double, double> layout_domain_bounds(const SplineStateLayout& layout) {
+  const auto& knots = layout.knots();
+  const auto& controls = layout.controls();
+  if (controls.size() < kBSplineControlPointCount ||
+      knots.size() != controls.size() + kBSplineControlPointCount) {
+    return {0.0, 0.0};
+  }
+  return {knots[3], knots[controls.size()]};
 }
 
 std::size_t compute_local_state_dimension(const SplineStateLayout& layout, const gtsam::Values& values) {
@@ -547,6 +577,23 @@ gtsam_points::PointCloud::ConstPtr ensure_source_cloud(const CTLocalFrontend::So
   return source_cloud;
 }
 
+gtsam::Pose3 evaluate_pose_from_layout(
+  const std::shared_ptr<const SplineStateLayout>& layout,
+  const gtsam::Values& values,
+  double query_time,
+  SplineSensorId sensor,
+  const gtsam::Pose3& fallback) {
+  if (!layout) {
+    return fallback;
+  }
+  const auto support = layout->support_at(query_time, sensor);
+  if (!support) {
+    return fallback;
+  }
+  auto evaluator = std::make_shared<SplineEvaluator>(layout);
+  return evaluator->eval_pose(values, *support, sensor);
+}
+
 }  // namespace
 
 const char* CTLocalFrontend::bucket_mode_name(LidarBucketMode mode) {
@@ -723,6 +770,7 @@ CTLocalFrontendResult CTLocalFrontend::run(const Input& input) const {
   result.layout.set_sensor_model(SplineSensorId::Lidar, lidar_model);
 
   seed_frontend_local_values(controls, input.target_frame, &result.local_values);
+  const gtsam::Values seeded_local_values = result.local_values;
   result.processed.frame_profile.stamp = scan_start;
   result.processed.frame_profile.bucket_mode = bucket_mode_name(input.bucket_config.mode);
   result.processed.frame_profile.imu_sample_count = input.imu_samples.size();
@@ -968,6 +1016,225 @@ CTLocalFrontendResult CTLocalFrontend::run(const Input& input) const {
       result.processed.frame_profile.carried_prior_count;
   }
 
+  const double query_time = input.source_frames.empty()
+    ? scan_start
+    : source_frame_start(input.source_frames.back());
+  const gtsam::Pose3 fallback_pose = pose_guess_from_target(input.target_frame);
+  result.pose_diagnostics.seed_pose = fallback_pose;
+  result.pose_diagnostics.optimized_pose = fallback_pose;
+  result.pose_diagnostics.query_time = query_time;
+  result.pose_diagnostics.uses_local_lidar_layout_override = false;
+  const auto [domain_begin, domain_end] = layout_domain_bounds(result.layout);
+  result.pose_diagnostics.layout_domain_begin = domain_begin;
+  result.pose_diagnostics.layout_domain_end = domain_end;
+  if (layout_ptr) {
+    if (const auto support = layout_ptr->support_at(query_time, SplineSensorId::Lidar)) {
+      result.pose_diagnostics.valid = true;
+      result.pose_diagnostics.query_support_keys = support_pose_keys(*support);
+      result.pose_diagnostics.query_support_control_indices =
+        support_control_indices(result.layout, *support);
+      result.pose_diagnostics.seed_pose = evaluate_pose_from_layout(
+        layout_ptr,
+        seeded_local_values,
+        query_time,
+        SplineSensorId::Lidar,
+        fallback_pose);
+      result.pose_diagnostics.optimized_pose = evaluate_pose_from_layout(
+        layout_ptr,
+        result.local_values,
+        query_time,
+        SplineSensorId::Lidar,
+        fallback_pose);
+    }
+  }
+  double closest_query_delta = std::numeric_limits<double>::infinity();
+  for (std::size_t i = 0; i < lidar_factor_entries.size(); ++i) {
+    const auto& entry = lidar_factor_entries[i];
+    for (const auto key : entry.bucket_ctx.support.pose_keys) {
+      append_unique_key(&result.pose_diagnostics.lidar_support_keys, key);
+    }
+    const auto support_indices = support_control_indices(result.layout, entry.bucket_ctx.support);
+    result.pose_diagnostics.lidar_support_control_indices.insert(
+      result.pose_diagnostics.lidar_support_control_indices.end(),
+      support_indices.begin(),
+      support_indices.end());
+    const double entry_query_time = entry.bucket_ctx.support.query_time;
+    const double query_delta = std::abs(entry_query_time - query_time);
+    if (query_delta >= closest_query_delta) {
+      continue;
+    }
+    closest_query_delta = query_delta;
+    const double factor_error = entry.factor->error(result.local_values);
+    const auto factor_result = entry.factor->make_result(
+      factor_error,
+      entry.factor->num_inliers(),
+      entry.factor->inlier_fraction());
+    result.pose_diagnostics.representative_bucket_index = i;
+    result.pose_diagnostics.representative_time = entry_query_time;
+    result.pose_diagnostics.points_in_bucket = entry.bucket_ctx.point_indices.size();
+    result.pose_diagnostics.match_ratio = factor_result.profile.match_ratio;
+    result.pose_diagnostics.inlier_ratio = factor_result.profile.inlier_ratio;
+    result.pose_diagnostics.factor_total_ms = factor_result.profile.total_ms;
+  }
+  result.pose_diagnostics.lidar_support_keys =
+    sort_unique_keys(std::move(result.pose_diagnostics.lidar_support_keys));
+  std::sort(
+    result.pose_diagnostics.lidar_support_control_indices.begin(),
+    result.pose_diagnostics.lidar_support_control_indices.end());
+  result.pose_diagnostics.lidar_support_control_indices.erase(
+    std::unique(
+      result.pose_diagnostics.lidar_support_control_indices.begin(),
+      result.pose_diagnostics.lidar_support_control_indices.end()),
+    result.pose_diagnostics.lidar_support_control_indices.end());
+
+  return result;
+}
+
+CTLocalFrontendShadowResult CTLocalFrontend::run_shadow_diagnostics(
+  const LayerInput& input,
+  const gtsam::Values& seed_values,
+  double query_time) const {
+  CTLocalFrontendShadowResult result;
+  const auto t_run_start = Clock::now();
+
+  LayerInput profiling_input = input;
+  profiling_input.enable_lidar_factor_profiling = true;
+  const auto contribution = assemble_local_layer(profiling_input);
+  result.debug_stats = contribution.debug_stats;
+  result.processed = contribution.processed;
+
+  gtsam::Values optimized_values = seed_values;
+  double lm_initial_cost = 0.0;
+  double lm_final_cost = 0.0;
+  if (!contribution.graph.empty()) {
+    gtsam_points::LevenbergMarquardtExtParams lm_params;
+    lm_params.setlambdaInitial(1e-4);
+    lm_params.setAbsoluteErrorTol(1e-2);
+    lm_params.setMaxIterations(input.lm_max_iterations);
+    lm_initial_cost = contribution.graph.error(optimized_values);
+    const auto t_lm_start = Clock::now();
+    try {
+      gtsam_points::LevenbergMarquardtOptimizerExt optimizer(contribution.graph, optimized_values, lm_params);
+      optimized_values = optimizer.optimize();
+    } catch (const std::exception&) {
+      // Keep seed values on diagnostics-only solver failure.
+    }
+    result.processed.frame_profile.lm_solve_ms = elapsed_ms(t_lm_start, Clock::now());
+    lm_final_cost = contribution.graph.error(optimized_values);
+  }
+  result.processed.frame_profile.lm_initial_cost = lm_initial_cost;
+  result.processed.frame_profile.lm_final_cost = lm_final_cost;
+
+  if (!contribution.lidar_factor_handles.empty()) {
+    result.processed.lidar_results.reserve(contribution.lidar_factor_handles.size());
+    result.processed.bucket_profiles.reserve(contribution.lidar_factor_handles.size());
+    for (const auto& handle : contribution.lidar_factor_handles) {
+      const double factor_error = handle.factor->error(optimized_values);
+      result.processed.total_lidar_factor_error += factor_error;
+      const auto factor_result = handle.factor->make_result(
+        factor_error,
+        handle.factor->num_inliers(),
+        handle.factor->inlier_fraction());
+      result.processed.lidar_results.push_back(factor_result);
+
+      FrontendBucketProfileRow bucket_profile;
+      bucket_profile.source_frame_index = handle.source_frame_index;
+      bucket_profile.bucket_index = handle.bucket_index;
+      bucket_profile.bucket_mode = bucket_mode_name(input.bucket_config.mode);
+      bucket_profile.representative_time = handle.representative_time;
+      bucket_profile.points_in_bucket = handle.bucket_ctx.point_indices.size();
+      bucket_profile.valid_correspondence_count = factor_result.profile.matched_point_count;
+      bucket_profile.match_ratio = factor_result.profile.match_ratio;
+      bucket_profile.inlier_ratio = factor_result.profile.inlier_ratio;
+      bucket_profile.target_point_count = factor_result.profile.target_point_count;
+      bucket_profile.candidate_evaluation_count = factor_result.profile.candidate_evaluation_count;
+      bucket_profile.lookup_or_correspondence_ms = factor_result.profile.correspondence_ms;
+      bucket_profile.accumulation_ms = factor_result.profile.accumulation_ms;
+      bucket_profile.factor_total_ms = factor_result.profile.total_ms;
+      bucket_profile.time_bucket_count = factor_result.profile.time_bucket_count;
+      bucket_profile.mean_time_bucket_population = factor_result.profile.mean_time_bucket_population;
+      bucket_profile.max_time_bucket_population = factor_result.profile.max_time_bucket_population;
+      result.processed.bucket_profiles.push_back(std::move(bucket_profile));
+    }
+    result.processed.lidar_window_summary =
+      aggregate_bspline_lidar_factor_results(result.processed.lidar_results);
+  }
+
+  const auto lidar_layout_ptr = input.lidar_layout_override ? input.lidar_layout_override : input.graph_context.layout;
+  const auto lidar_layout = lidar_layout_ptr ? *lidar_layout_ptr : SplineStateLayout{};
+  result.pose_diagnostics.query_time = query_time;
+  result.pose_diagnostics.uses_local_lidar_layout_override = static_cast<bool>(input.lidar_layout_override);
+  const auto [domain_begin, domain_end] = layout_domain_bounds(lidar_layout);
+  result.pose_diagnostics.layout_domain_begin = domain_begin;
+  result.pose_diagnostics.layout_domain_end = domain_end;
+
+  const gtsam::Pose3 fallback_pose =
+    evaluate_pose_from_layout(lidar_layout_ptr, seed_values, query_time, SplineSensorId::Lidar, gtsam::Pose3());
+  result.pose_diagnostics.seed_pose = fallback_pose;
+  result.pose_diagnostics.optimized_pose = fallback_pose;
+  if (lidar_layout_ptr) {
+    if (const auto support = lidar_layout_ptr->support_at(query_time, SplineSensorId::Lidar)) {
+      result.pose_diagnostics.valid = true;
+      result.pose_diagnostics.query_support_keys = support_pose_keys(*support);
+      result.pose_diagnostics.query_support_control_indices =
+        support_control_indices(lidar_layout, *support);
+      result.pose_diagnostics.seed_pose = evaluate_pose_from_layout(
+        lidar_layout_ptr,
+        seed_values,
+        query_time,
+        SplineSensorId::Lidar,
+        fallback_pose);
+      result.pose_diagnostics.optimized_pose = evaluate_pose_from_layout(
+        lidar_layout_ptr,
+        optimized_values,
+        query_time,
+        SplineSensorId::Lidar,
+        fallback_pose);
+    }
+  }
+
+  double closest_query_delta = std::numeric_limits<double>::infinity();
+  std::vector<std::size_t> lidar_support_controls;
+  for (std::size_t i = 0; i < contribution.lidar_factor_handles.size(); ++i) {
+    const auto& handle = contribution.lidar_factor_handles[i];
+    for (const auto key : handle.bucket_ctx.support.pose_keys) {
+      append_unique_key(&result.pose_diagnostics.lidar_support_keys, key);
+    }
+    const auto handle_support_controls = support_control_indices(lidar_layout, handle.bucket_ctx.support);
+    lidar_support_controls.insert(
+      lidar_support_controls.end(),
+      handle_support_controls.begin(),
+      handle_support_controls.end());
+
+    const double entry_query_time = handle.bucket_ctx.support.query_time;
+    const double query_delta = std::abs(entry_query_time - query_time);
+    if (query_delta >= closest_query_delta) {
+      continue;
+    }
+    closest_query_delta = query_delta;
+    const double factor_error = handle.factor->error(optimized_values);
+    const auto factor_result = handle.factor->make_result(
+      factor_error,
+      handle.factor->num_inliers(),
+      handle.factor->inlier_fraction());
+    result.pose_diagnostics.representative_bucket_index = i;
+    result.pose_diagnostics.representative_time = entry_query_time;
+    result.pose_diagnostics.points_in_bucket = handle.bucket_ctx.point_indices.size();
+    result.pose_diagnostics.match_ratio = factor_result.profile.match_ratio;
+    result.pose_diagnostics.inlier_ratio = factor_result.profile.inlier_ratio;
+    result.pose_diagnostics.factor_total_ms = factor_result.profile.total_ms;
+  }
+  result.pose_diagnostics.lidar_support_keys =
+    sort_unique_keys(std::move(result.pose_diagnostics.lidar_support_keys));
+  std::sort(lidar_support_controls.begin(), lidar_support_controls.end());
+  lidar_support_controls.erase(
+    std::unique(lidar_support_controls.begin(), lidar_support_controls.end()),
+    lidar_support_controls.end());
+  result.pose_diagnostics.lidar_support_control_indices = std::move(lidar_support_controls);
+
+  result.debug_stats.local_solve_time_ms =
+    std::chrono::duration<double, std::milli>(Clock::now() - t_run_start).count();
+  result.valid = result.pose_diagnostics.valid;
   return result;
 }
 

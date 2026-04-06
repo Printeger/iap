@@ -28,6 +28,7 @@ struct ProfilingLogConfig {
   bool lidar_factor_internal_profile = false;
   bool frontend_lm_iteration = false;
   bool frame_warning_profile = false;
+  bool jump_diagnostics = false;
   bool target_map_prep_breakdown = false;
   bool graph_problem_size = false;
   bool numeric_reference = false;
@@ -39,6 +40,7 @@ struct ProfilingLogConfig {
   std::string lidar_factor_internal_profile_file = "lidar_factor_internal_profile.csv";
   std::string frontend_lm_iteration_file = "frontend_lm_iteration.csv";
   std::string frame_warning_profile_file = "frame_warning_profile.csv";
+  std::string jump_diagnostics_file = "jump_diagnostics.csv";
   std::string numeric_reference_file = "numeric_reference.csv";
   std::string linearization_check_file = "linearization_check.csv";
 };

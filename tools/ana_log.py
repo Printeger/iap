@@ -70,6 +70,7 @@ CSV_ARTIFACTS = [
     ("lidar_factor_internal_profile", "profiling/lidar_factor_internal_profile.csv"),
     ("frontend_lm_iteration", "profiling/frontend_lm_iteration.csv"),
     ("frame_warning_profile", "profiling/frame_warning_profile.csv"),
+    ("jump_diagnostics", "profiling/jump_diagnostics.csv"),
     ("pipeline_timing", "profiling/pipeline_timing.csv"),
     ("numeric_reference", "profiling/numeric_reference.csv"),
     ("linearization_check", "profiling/linearization_check.csv"),
@@ -382,6 +383,7 @@ def build_config_summary(configs: dict[str, Any], runtime_summary: dict[str, Any
     summary["lidar_factor_internal_profile"] = get_nested(log_cfg, "profiling", "lidar_factor_internal_profile")
     summary["frontend_lm_iteration_profile"] = get_nested(log_cfg, "profiling", "frontend_lm_iteration")
     summary["frame_warning_profile"] = get_nested(log_cfg, "profiling", "frame_warning_profile")
+    summary["jump_diagnostics"] = get_nested(log_cfg, "profiling", "jump_diagnostics")
     summary["target_map_prep_breakdown"] = get_nested(log_cfg, "profiling", "target_map_prep_breakdown")
     summary["graph_problem_size"] = get_nested(log_cfg, "profiling", "graph_problem_size")
     summary["gnss_debug_csv"] = (
@@ -410,6 +412,8 @@ def build_config_summary(configs: dict[str, Any], runtime_summary: dict[str, Any
         "runtime_log_profiling_solver_update_profile",
         "config_log_profiling_lidar_factor_internal_profile",
         "runtime_log_profiling_lidar_factor_internal_profile",
+        "config_log_profiling_jump_diagnostics",
+        "runtime_log_profiling_jump_diagnostics",
     ]:
         if key in run_info:
             summary[key] = run_info[key]
@@ -458,6 +462,7 @@ def artifact_enabled(name: str, configs: dict[str, Any], config_summary: dict[st
         "frontend_frame_profile": get_nested(log_cfg, "profiling", "frontend_frame") if get_nested(log_cfg, "profiling", "frontend_frame") is not None else maybe_bool(config_summary.get("frontend_only_mode")),
         "frontend_lm_iteration": get_nested(log_cfg, "profiling", "frontend_lm_iteration") if get_nested(log_cfg, "profiling", "frontend_lm_iteration") is not None else maybe_bool(config_summary.get("frontend_only_mode")),
         "frame_warning_profile": get_nested(log_cfg, "profiling", "frame_warning_profile"),
+        "jump_diagnostics": get_nested(log_cfg, "profiling", "jump_diagnostics"),
         "numeric_reference": get_nested(log_cfg, "profiling", "numeric_reference") if get_nested(log_cfg, "profiling", "numeric_reference") is not None else odom_cfg.get("ct_lidar_profile_numeric_reference"),
         "linearization_check": get_nested(log_cfg, "profiling", "linearization_check") if get_nested(log_cfg, "profiling", "linearization_check") is not None else odom_cfg.get("ct_lidar_validate_linearization"),
         "ct_lidar_baseline": get_nested(log_cfg, "export", "baseline_csv") if get_nested(log_cfg, "export", "baseline_csv") is not None else odom_cfg.get("ct_lidar_export_baseline_csv"),
@@ -840,8 +845,25 @@ def analyze_solver_update(
         "active_window_imu_factor_count",
         "active_window_velocity_factor_count",
         "active_window_lidar_factor_count",
+        "active_window_lidar_current_segment_factor_count",
+        "active_window_lidar_old_segment_factor_count",
         "active_window_prior_factor_count",
         "active_window_shared_jkg_touching_factor_count",
+        "recalculated_imu_factor_count",
+        "recalculated_velocity_factor_count",
+        "recalculated_lidar_factor_count",
+        "recalculated_lidar_current_segment_factor_count",
+        "recalculated_lidar_old_segment_factor_count",
+        "recalculated_lidar_same_support_factor_count",
+        "recalculated_lidar_cross_support_factor_count",
+        "recalculated_prior_factor_count",
+        "recalculated_shared_jkg_touching_factor_count",
+        "relinearized_pose_variable_count",
+        "relinearized_aux_variable_count",
+        "relinearized_shared_variable_count",
+        "affected_pose_key_count",
+        "affected_aux_key_count",
+        "affected_shared_key_count",
         "isam_reported_update_ms",
     ]:
         if col in df.columns:
@@ -857,6 +879,37 @@ def analyze_solver_update(
         analysis["active_window_non_imu_shared_jkg_factor_count_mean"] = float(non_imu_shared.mean())
         analysis["active_window_non_imu_shared_jkg_factor_count_p95"] = pct(non_imu_shared, 0.95)
         analysis["active_window_non_imu_shared_jkg_factor_count_max"] = float(non_imu_shared.max())
+
+    if {
+        "relinearized_factor_count",
+        "recalculated_imu_factor_count",
+        "recalculated_velocity_factor_count",
+        "recalculated_lidar_factor_count",
+        "recalculated_prior_factor_count",
+    }.issubset(df.columns):
+        unclassified = (
+            df["relinearized_factor_count"].fillna(0)
+            - df["recalculated_imu_factor_count"].fillna(0)
+            - df["recalculated_velocity_factor_count"].fillna(0)
+            - df["recalculated_lidar_factor_count"].fillna(0)
+            - df["recalculated_prior_factor_count"].fillna(0)
+        ).clip(lower=0)
+        analysis["recalculated_unclassified_factor_count_mean"] = float(unclassified.mean())
+        analysis["recalculated_unclassified_factor_count_p95"] = pct(unclassified, 0.95)
+        analysis["recalculated_unclassified_factor_count_max"] = float(unclassified.max())
+        if "solver_update_ms" in df.columns and len(df) >= 3:
+            pair = pd.DataFrame({
+                "recalculated_unclassified_factor_count": unclassified,
+                "solver_update_ms": df["solver_update_ms"].fillna(0),
+            }).dropna()
+            if (
+                len(pair) >= 3
+                and float(pair["recalculated_unclassified_factor_count"].std(ddof=0)) > 0.0
+                and float(pair["solver_update_ms"].std(ddof=0)) > 0.0
+            ):
+                analysis["recalculated_unclassified_factor_vs_solver_update_corr"] = float(
+                    pair["recalculated_unclassified_factor_count"].corr(pair["solver_update_ms"], method="pearson")
+                )
 
     if {"solver_update_ms", "estimate_query_ms", "fallback_rebuild_ms", "relinearization_ms", "linearization_ms", "elimination_ms", "delta_solve_ms"}.issubset(df.columns):
         stage_cols = [
@@ -904,7 +957,18 @@ def analyze_solver_update(
         ("relinearized_factor_count", "recalculated_factor_vs_solver_update_corr"),
         ("affected_variable_count", "affected_variable_vs_solver_update_corr"),
         ("active_window_imu_factor_count", "active_window_imu_factor_vs_solver_update_corr"),
+        ("active_window_lidar_current_segment_factor_count", "active_window_lidar_current_segment_factor_vs_solver_update_corr"),
+        ("active_window_lidar_old_segment_factor_count", "active_window_lidar_old_segment_factor_vs_solver_update_corr"),
         ("active_window_shared_jkg_touching_factor_count", "active_window_shared_jkg_touching_factor_vs_solver_update_corr"),
+        ("recalculated_imu_factor_count", "recalculated_imu_factor_vs_solver_update_corr"),
+        ("recalculated_velocity_factor_count", "recalculated_velocity_factor_vs_solver_update_corr"),
+        ("recalculated_lidar_factor_count", "recalculated_lidar_factor_vs_solver_update_corr"),
+        ("recalculated_lidar_current_segment_factor_count", "recalculated_lidar_current_segment_factor_vs_solver_update_corr"),
+        ("recalculated_lidar_old_segment_factor_count", "recalculated_lidar_old_segment_factor_vs_solver_update_corr"),
+        ("recalculated_lidar_same_support_factor_count", "recalculated_lidar_same_support_factor_vs_solver_update_corr"),
+        ("recalculated_lidar_cross_support_factor_count", "recalculated_lidar_cross_support_factor_vs_solver_update_corr"),
+        ("recalculated_prior_factor_count", "recalculated_prior_factor_vs_solver_update_corr"),
+        ("recalculated_shared_jkg_touching_factor_count", "recalculated_shared_jkg_touching_factor_vs_solver_update_corr"),
     ]
     for col, out_key in correlation_specs:
         if {col, "solver_update_ms"}.issubset(df.columns) and len(df) >= 3:
@@ -930,8 +994,19 @@ def analyze_solver_update(
             "active_window_imu_factor_count",
             "active_window_velocity_factor_count",
             "active_window_lidar_factor_count",
+            "active_window_lidar_current_segment_factor_count",
+            "active_window_lidar_old_segment_factor_count",
             "active_window_prior_factor_count",
             "active_window_shared_jkg_touching_factor_count",
+            "recalculated_imu_factor_count",
+            "recalculated_velocity_factor_count",
+            "recalculated_lidar_factor_count",
+            "recalculated_lidar_current_segment_factor_count",
+            "recalculated_lidar_old_segment_factor_count",
+            "recalculated_lidar_same_support_factor_count",
+            "recalculated_lidar_cross_support_factor_count",
+            "recalculated_prior_factor_count",
+            "recalculated_shared_jkg_touching_factor_count",
             "affected_variable_count",
             "reeliminated_variable_count",
             "relinearized_variable_count",
@@ -939,6 +1014,29 @@ def analyze_solver_update(
             "solver_status",
         ]
         analysis["slow_updates"] = slow[[c for c in keep_cols if c in slow.columns]].to_dict(orient="records")
+
+    dominant_candidates = []
+    for family_name, corr_key, mean_key in [
+        ("IMU", "recalculated_imu_factor_vs_solver_update_corr", "recalculated_imu_factor_count_mean"),
+        ("VELOCITY", "recalculated_velocity_factor_vs_solver_update_corr", "recalculated_velocity_factor_count_mean"),
+        ("LIDAR", "recalculated_lidar_factor_vs_solver_update_corr", "recalculated_lidar_factor_count_mean"),
+        ("PRIOR", "recalculated_prior_factor_vs_solver_update_corr", "recalculated_prior_factor_count_mean"),
+    ]:
+        corr = analysis.get(corr_key)
+        if isinstance(corr, float):
+            dominant_candidates.append({
+                "family": family_name,
+                "corr": corr,
+                "mean": float(analysis.get(mean_key, 0.0)),
+            })
+    dominant_candidates.sort(key=lambda item: item["corr"], reverse=True)
+    if dominant_candidates:
+        analysis["recalculated_family_candidates"] = dominant_candidates
+        analysis["dominant_recalculated_family"] = dominant_candidates[0]["family"]
+        analysis["dominant_recalculated_family_corr"] = dominant_candidates[0]["corr"]
+        if len(dominant_candidates) > 1:
+            analysis["second_recalculated_family"] = dominant_candidates[1]["family"]
+            analysis["second_recalculated_family_corr"] = dominant_candidates[1]["corr"]
 
     if render_plots and "solver_update_ms" in df.columns:
         ensure_dir(out_dir)
@@ -1107,6 +1205,113 @@ def analyze_pipeline_timing(pipeline_df: pd.DataFrame, out_dir: Path, render_plo
             fig.savefig(out_path, dpi=150)
             plt.close(fig)
             analysis["fig_pipeline_module_timing"] = str(out_path)
+    return analysis
+
+
+def analyze_jump_diagnostics(jump_df: pd.DataFrame | None) -> dict[str, Any]:
+    analysis: dict[str, Any] = {"available": False}
+    if jump_df is None or jump_df.empty:
+        return analysis
+
+    df = jump_df.copy()
+    metric_columns = [
+        "delta_start_to_frontend_translation_norm",
+        "delta_start_to_frontend_rotation_rad",
+        "delta_frontend_to_final_translation_norm",
+        "delta_frontend_to_final_rotation_rad",
+        "match_ratio",
+        "inlier_ratio",
+        "points_in_bucket",
+        "factor_total_ms",
+        "solver_update_ms",
+        "recalculated_lidar_same_support_factor_count",
+        "recalculated_lidar_current_segment_factor_count",
+    ]
+    for column in metric_columns:
+        if column in df.columns:
+            df[column] = pd.to_numeric(df[column], errors="coerce")
+
+    analysis["available"] = True
+    analysis["jump_rows"] = int(len(df))
+
+    summary_specs = [
+        ("delta_start_to_frontend_translation_norm", "start_to_frontend_translation"),
+        ("delta_start_to_frontend_rotation_rad", "start_to_frontend_rotation"),
+        ("delta_frontend_to_final_translation_norm", "frontend_to_final_translation"),
+        ("delta_frontend_to_final_rotation_rad", "frontend_to_final_rotation"),
+    ]
+    for column, prefix in summary_specs:
+        if column not in df.columns:
+            continue
+        series = pd.to_numeric(df[column], errors="coerce").dropna()
+        if series.empty:
+            continue
+        analysis[f"{prefix}_mean"] = float(series.mean())
+        analysis[f"{prefix}_p95"] = pct(series, 0.95)
+        analysis[f"{prefix}_max"] = float(series.max())
+
+    def top_frames(column: str, limit: int = 10) -> list[dict[str, Any]]:
+        if column not in df.columns:
+            return []
+        keep_columns = [
+            "frame_id",
+            "frame_stamp",
+            "scan_begin_time",
+            "scan_end_time",
+            "representative_time",
+            "current_segment_id",
+            "delta_start_to_frontend_translation_norm",
+            "delta_start_to_frontend_rotation_rad",
+            "delta_frontend_to_final_translation_norm",
+            "delta_frontend_to_final_rotation_rad",
+            "lidar_layout_domain_begin",
+            "lidar_layout_domain_end",
+            "lidar_support_keys_summary",
+            "frontend_pose_support_keys_summary",
+            "frontend_pose_query_support_keys_summary",
+            "carried_boundary_oldest_key_summary",
+            "oldest_survivor_key_summary",
+            "recalculated_lidar_same_support_factor_count",
+            "recalculated_lidar_current_segment_factor_count",
+            "solver_update_ms",
+            "match_ratio",
+            "inlier_ratio",
+            "points_in_bucket",
+        ]
+        available_columns = [c for c in keep_columns if c in df.columns]
+        ranked = df.sort_values(column, ascending=False).head(limit)
+        return ranked[available_columns].replace({np.nan: None}).to_dict(orient="records")
+
+    analysis["top_start_to_frontend_translation_frames"] = top_frames(
+        "delta_start_to_frontend_translation_norm"
+    )
+    analysis["top_frontend_to_final_translation_frames"] = top_frames(
+        "delta_frontend_to_final_translation_norm"
+    )
+
+    frontend_score = max(
+        float(analysis.get("start_to_frontend_translation_p95", 0.0)),
+        float(analysis.get("start_to_frontend_translation_max", 0.0)),
+        float(analysis.get("start_to_frontend_rotation_p95", 0.0) / 0.3) if analysis.get("start_to_frontend_rotation_p95") is not None else 0.0,
+        float(analysis.get("start_to_frontend_rotation_max", 0.0) / 0.3) if analysis.get("start_to_frontend_rotation_max") is not None else 0.0,
+    )
+    solver_score = max(
+        float(analysis.get("frontend_to_final_translation_p95", 0.0)),
+        float(analysis.get("frontend_to_final_translation_max", 0.0)),
+        float(analysis.get("frontend_to_final_rotation_p95", 0.0) / 0.3) if analysis.get("frontend_to_final_rotation_p95") is not None else 0.0,
+        float(analysis.get("frontend_to_final_rotation_max", 0.0) / 0.3) if analysis.get("frontend_to_final_rotation_max") is not None else 0.0,
+    )
+    analysis["frontend_stage_score"] = frontend_score
+    analysis["solver_stage_score"] = solver_score
+    if frontend_score > 1.2 * max(solver_score, 1e-9) and frontend_score > 1.0:
+        analysis["dominance"] = "jump appears frontend-dominated"
+    elif solver_score > 1.2 * max(frontend_score, 1e-9) and solver_score > 1.0:
+        analysis["dominance"] = "jump appears solver/boundary-dominated"
+    elif max(frontend_score, solver_score) > 1.0:
+        analysis["dominance"] = "jump appears mixed; frontend likely first cause"
+    else:
+        analysis["dominance"] = "no strong jump dominance detected"
+
     return analysis
 
 
@@ -1507,6 +1712,7 @@ def detect_findings(
     artifact_statuses: list[ArtifactStatus],
     mode_consistency: dict[str, Any],
     frontend_analysis: dict[str, Any],
+    jump_analysis: dict[str, Any],
     solver_update_analysis: dict[str, Any],
     lidar_factor_internal_analysis: dict[str, Any],
     optimizer_analysis: dict[str, Any],
@@ -1587,6 +1793,45 @@ def detect_findings(
                 "evidence": (
                     f"mean points_per_bucket={bucket_analysis.get('points_in_bucket_mean', 0.0):.1f}, "
                     f"mean factor_total_ms={bucket_analysis.get('factor_total_mean_ms', 0.0):.3f}"
+                ),
+            })
+
+    if jump_analysis.get("available"):
+        dominance = jump_analysis.get("dominance", "jump diagnostics available")
+        top_front = jump_analysis.get("top_start_to_frontend_translation_frames", [])
+        top_solver = jump_analysis.get("top_frontend_to_final_translation_frames", [])
+        dominance_evidence_parts = [
+            f"jump_rows={jump_analysis.get('jump_rows', 0)}",
+            f"start->frontend p95={jump_analysis.get('start_to_frontend_translation_p95', 0.0):.3f} m",
+            f"frontend->final p95={jump_analysis.get('frontend_to_final_translation_p95', 0.0):.3f} m",
+        ]
+        if top_front:
+            frame = top_front[0]
+            dominance_evidence_parts.append(
+                f"top start->frontend frame={frame.get('frame_id', '?')} layout=[{(frame.get('lidar_layout_domain_begin') or 0.0):.6f},{(frame.get('lidar_layout_domain_end') or 0.0):.6f}]"
+            )
+            dominance_evidence_parts.append(
+                f"support={frame.get('lidar_support_keys_summary', '')} query={frame.get('frontend_pose_support_keys_summary', '')}"
+            )
+            dominance_evidence_parts.append(
+                f"same_support_recalc={frame.get('recalculated_lidar_same_support_factor_count', 'n/a')}"
+            )
+        findings.append({
+            "severity": "warn" if "jump appears" in dominance else "info",
+            "title": dominance,
+            "evidence": "; ".join(part for part in dominance_evidence_parts if part),
+        })
+        if top_solver:
+            frame = top_solver[0]
+            findings.append({
+                "severity": "info",
+                "title": f"largest frontend->final jump frame is {frame.get('frame_id', '?')}",
+                "evidence": (
+                    f"delta={(frame.get('delta_frontend_to_final_translation_norm') or 0.0):.3f} m; "
+                    f"layout=[{(frame.get('lidar_layout_domain_begin') or 0.0):.6f},{(frame.get('lidar_layout_domain_end') or 0.0):.6f}]; "
+                    f"support={frame.get('lidar_support_keys_summary', '')}; "
+                    f"same_support_recalc={frame.get('recalculated_lidar_same_support_factor_count', 'n/a')}; "
+                    f"current_segment_recalc={frame.get('recalculated_lidar_current_segment_factor_count', 'n/a')}"
                 ),
             })
 
@@ -1675,15 +1920,118 @@ def detect_findings(
                 ),
             })
 
-        shared_jkg_corr = solver_update_analysis.get("active_window_shared_jkg_touching_factor_vs_solver_update_corr")
-        if isinstance(shared_jkg_corr, float) and shared_jkg_corr > 0.7:
+        dominant_family = solver_update_analysis.get("dominant_recalculated_family")
+        dominant_family_corr = solver_update_analysis.get("dominant_recalculated_family_corr")
+        second_family_corr = solver_update_analysis.get("second_recalculated_family_corr")
+        if (
+            isinstance(dominant_family, str)
+            and isinstance(dominant_family_corr, float)
+            and dominant_family_corr >= 0.7
+            and (
+                second_family_corr is None
+                or not isinstance(second_family_corr, float)
+                or dominant_family_corr - second_family_corr >= 0.1
+            )
+        ):
             findings.append({
                 "severity": "warn",
-                "title": "active shared j/k/g touching factor set tracks solver pressure",
+                "title": f"solver churn appears {dominant_family}-family dominated",
+                "evidence": f"corr(recalculated_{dominant_family.lower()}_factor_count,solver_update_ms)={dominant_family_corr:.3f}",
+            })
+
+        active_family_corrs = [
+            solver_update_analysis.get("active_window_imu_factor_vs_solver_update_corr"),
+            solver_update_analysis.get("active_window_shared_jkg_touching_factor_vs_solver_update_corr"),
+        ]
+        max_active_family_corr = max(
+            [corr for corr in active_family_corrs if isinstance(corr, float)],
+            default=None,
+        )
+        if (
+            isinstance(max_active_family_corr, float)
+            and max_active_family_corr < 0.4
+            and isinstance(dominant_family_corr, float)
+            and dominant_family_corr >= 0.7
+        ):
+            findings.append({
+                "severity": "info",
+                "title": "active factor family size does not explain runtime; recalculated family mix does",
                 "evidence": (
-                    f"corr(active_window_shared_jkg_touching_factor_count,solver_update_ms)={shared_jkg_corr:.3f}; "
-                    f"active_window_shared_jkg_touching_factor_count_mean="
-                    f"{solver_update_analysis.get('active_window_shared_jkg_touching_factor_count_mean', 0.0):.3f}"
+                    f"max corr(active_window_family,solver_update_ms)={max_active_family_corr:.3f}; "
+                    f"dominant recalculated family={dominant_family} "
+                    f"(corr={dominant_family_corr:.3f})"
+                ),
+            })
+
+        recalculated_shared_jkg_corr = solver_update_analysis.get("recalculated_shared_jkg_touching_factor_vs_solver_update_corr")
+        active_window_shared_jkg_mean = solver_update_analysis.get("active_window_shared_jkg_touching_factor_count_mean", 0.0)
+        if (
+            isinstance(active_window_shared_jkg_mean, (int, float))
+            and float(active_window_shared_jkg_mean) > 0.0
+            and isinstance(recalculated_shared_jkg_corr, float)
+            and isinstance(dominant_family_corr, float)
+            and recalculated_shared_jkg_corr < dominant_family_corr - 0.2
+        ):
+            findings.append({
+                "severity": "info",
+                "title": "shared j/k/g touching factors are numerous but not the dominant recalculated family",
+                "evidence": (
+                    f"active_window_shared_jkg_touching_factor_count_mean={float(active_window_shared_jkg_mean):.3f}; "
+                    f"corr(recalculated_shared_jkg_touching_factor_count,solver_update_ms)={recalculated_shared_jkg_corr:.3f}; "
+                    f"dominant_family={dominant_family} "
+                    f"(corr={dominant_family_corr:.3f})"
+                ),
+            })
+
+        unclassified_recalculated_mean = solver_update_analysis.get("recalculated_unclassified_factor_count_mean")
+        if isinstance(unclassified_recalculated_mean, (int, float)) and float(unclassified_recalculated_mean) > 0.0:
+            findings.append({
+                "severity": "info",
+                "title": "non-odometry factor families contribute to recalculation pressure",
+                "evidence": (
+                    f"recalculated_unclassified_factor_count_mean={float(unclassified_recalculated_mean):.3f}; "
+                    f"corr(recalculated_unclassified_factor_count,solver_update_ms)="
+                    f"{solver_update_analysis.get('recalculated_unclassified_factor_vs_solver_update_corr', 'n/a')}"
+                ),
+            })
+
+        old_segment_corr = solver_update_analysis.get("recalculated_lidar_old_segment_factor_vs_solver_update_corr")
+        current_segment_corr = solver_update_analysis.get("recalculated_lidar_current_segment_factor_vs_solver_update_corr")
+        if (
+            isinstance(old_segment_corr, float)
+            and old_segment_corr >= 0.7
+            and (
+                not isinstance(current_segment_corr, float)
+                or old_segment_corr - current_segment_corr >= 0.1
+            )
+        ):
+            findings.append({
+                "severity": "warn",
+                "title": "solver churn appears old-segment LiDAR dominated",
+                "evidence": (
+                    f"corr(recalculated_lidar_old_segment_factor_count,solver_update_ms)={old_segment_corr:.3f}; "
+                    f"corr(recalculated_lidar_current_segment_factor_count,solver_update_ms)="
+                    f"{current_segment_corr if isinstance(current_segment_corr, float) else 'n/a'}"
+                ),
+            })
+
+        cross_support_corr = solver_update_analysis.get("recalculated_lidar_cross_support_factor_vs_solver_update_corr")
+        same_support_corr = solver_update_analysis.get("recalculated_lidar_same_support_factor_vs_solver_update_corr")
+        if (
+            isinstance(cross_support_corr, float)
+            and cross_support_corr >= 0.7
+            and (
+                not isinstance(same_support_corr, float)
+                or cross_support_corr - same_support_corr >= 0.1
+            )
+        ):
+            findings.append({
+                "severity": "warn",
+                "title": "solver churn appears cross-support LiDAR dominated",
+                "evidence": (
+                    f"corr(recalculated_lidar_cross_support_factor_count,solver_update_ms)={cross_support_corr:.3f}; "
+                    f"corr(recalculated_lidar_same_support_factor_count,solver_update_ms)="
+                    f"{same_support_corr if isinstance(same_support_corr, float) else 'n/a'}"
                 ),
             })
 
@@ -1733,6 +2081,7 @@ def recommend_next_steps(
     artifact_statuses: list[ArtifactStatus],
     mode_consistency: dict[str, Any],
     frontend_analysis: dict[str, Any],
+    jump_analysis: dict[str, Any],
     solver_update_analysis: dict[str, Any],
     lidar_factor_internal_analysis: dict[str, Any],
     optimizer_analysis: dict[str, Any],
@@ -1760,6 +2109,10 @@ def recommend_next_steps(
     if status_map.get("solver_update_profile") and status_map["solver_update_profile"].status in {"missing", "expected_missing"}:
         recommendations["Immediate next checks"].append(
             "Enable log.profiling.solver_update_profile when debugging unified BSpline solver bottlenecks."
+        )
+    if status_map.get("jump_diagnostics") and status_map["jump_diagnostics"].status in {"missing", "expected_missing"}:
+        recommendations["Immediate next checks"].append(
+            "Enable log.profiling.jump_diagnostics when you need frame-by-frame localization of start/frontend/final pose jumps."
         )
     if status_map.get("lidar_factor_internal_profile") and status_map["lidar_factor_internal_profile"].status in {"missing", "expected_missing"}:
         recommendations["Immediate next checks"].append(
@@ -1791,6 +2144,19 @@ def recommend_next_steps(
     if isinstance(shared_jkg_corr, float) and shared_jkg_corr > 0.7:
         recommendations["Immediate next checks"].append(
             "active_window_shared_jkg_touching_factor_count now tracks solver_update_ms; focus next on reducing active IMU factors or their shared j/k/g sensitivity before spending effort on query-side trimming."
+        )
+    dominance = jump_analysis.get("dominance")
+    if dominance == "jump appears frontend-dominated":
+        recommendations["Immediate next checks"].append(
+            "Top jump frames already show start->frontend motion first; inspect current-segment LiDAR local layout, support keys, representative/query time, and evaluate_frontend_pose semantics before changing solver math."
+        )
+    elif dominance == "jump appears solver/boundary-dominated":
+        recommendations["Immediate next checks"].append(
+            "Top jump frames already show frontend->final motion first; inspect carried prior, oldest survivor, boundary overlap semantics, and LiDAR same-support recalculation churn before touching frontend registration."
+        )
+    elif dominance == "jump appears mixed; frontend likely first cause":
+        recommendations["Immediate next checks"].append(
+            "Jump diagnostics show both stages moving; fix start->frontend inconsistencies first, then verify whether solver/boundary still amplifies the corrected frontend pose."
         )
     new_factor_corr = solver_update_analysis.get("new_factor_vs_active_window_corr")
     new_value_corr = solver_update_analysis.get("new_value_vs_active_window_corr")
@@ -1871,6 +2237,7 @@ def render_report_markdown(
     runtime_summary: dict[str, Any],
     mode_consistency: dict[str, Any],
     frontend_analysis: dict[str, Any],
+    jump_analysis: dict[str, Any],
     solver_update_analysis: dict[str, Any],
     lidar_factor_internal_analysis: dict[str, Any],
     slow_frame_analysis: dict[str, Any],
@@ -1953,6 +2320,7 @@ def render_report_markdown(
         ["runtime_log_files", len(runtime_summary.get("files", []))],
         ["runtime_total_lines", runtime_summary.get("total_lines", 0)],
         ["frontend_frame_count", frontend_analysis.get("frame_count", 0)],
+        ["jump_rows", jump_analysis.get("jump_rows", 0)],
         ["pipeline_timing_rows", pipeline_analysis.get("row_count", 0)],
         ["waiting_messages", len(runtime_summary.get("waiting_messages", []))],
     ]
@@ -2036,6 +2404,70 @@ def render_report_markdown(
         lines.append("LiDAR bucket profiling was not available for this run.")
         lines.append("")
 
+    lines.append("## Jump Diagnostics")
+    lines.append("")
+    if jump_analysis.get("available"):
+        lines.append(md_table(
+            ["Metric", "Value"],
+            [
+                ["jump_rows", jump_analysis.get("jump_rows", 0)],
+                ["dominance", jump_analysis.get("dominance", "n/a")],
+                ["start_to_frontend_translation_mean", f"{jump_analysis.get('start_to_frontend_translation_mean', 0.0):.3f}"],
+                ["start_to_frontend_translation_p95", f"{jump_analysis.get('start_to_frontend_translation_p95', 0.0):.3f}"],
+                ["start_to_frontend_translation_max", f"{jump_analysis.get('start_to_frontend_translation_max', 0.0):.3f}"],
+                ["start_to_frontend_rotation_mean", f"{jump_analysis.get('start_to_frontend_rotation_mean', 0.0):.3f}"],
+                ["start_to_frontend_rotation_p95", f"{jump_analysis.get('start_to_frontend_rotation_p95', 0.0):.3f}"],
+                ["start_to_frontend_rotation_max", f"{jump_analysis.get('start_to_frontend_rotation_max', 0.0):.3f}"],
+                ["frontend_to_final_translation_mean", f"{jump_analysis.get('frontend_to_final_translation_mean', 0.0):.3f}"],
+                ["frontend_to_final_translation_p95", f"{jump_analysis.get('frontend_to_final_translation_p95', 0.0):.3f}"],
+                ["frontend_to_final_translation_max", f"{jump_analysis.get('frontend_to_final_translation_max', 0.0):.3f}"],
+                ["frontend_to_final_rotation_mean", f"{jump_analysis.get('frontend_to_final_rotation_mean', 0.0):.3f}"],
+                ["frontend_to_final_rotation_p95", f"{jump_analysis.get('frontend_to_final_rotation_p95', 0.0):.3f}"],
+                ["frontend_to_final_rotation_max", f"{jump_analysis.get('frontend_to_final_rotation_max', 0.0):.3f}"],
+            ],
+        ))
+        start_rows = [
+            [
+                item.get("frame_id", ""),
+                f"{(item.get('delta_start_to_frontend_translation_norm') or 0.0):.3f}",
+                f"{(item.get('delta_start_to_frontend_rotation_rad') or 0.0):.3f}",
+                f"{(item.get('lidar_layout_domain_begin') or 0.0):.6f}",
+                f"{(item.get('lidar_layout_domain_end') or 0.0):.6f}",
+                item.get("lidar_support_keys_summary", ""),
+                item.get("frontend_pose_support_keys_summary", ""),
+                item.get("recalculated_lidar_same_support_factor_count", ""),
+            ]
+            for item in jump_analysis.get("top_start_to_frontend_translation_frames", [])
+        ]
+        lines.append("Top jump frames by start->frontend translation:")
+        lines.append("")
+        lines.append(md_table(
+            ["frame_id", "delta_t_m", "delta_r_rad", "layout_begin", "layout_end", "lidar_support", "frontend_support", "same_support_recalc"],
+            start_rows,
+        ))
+        solver_rows = [
+            [
+                item.get("frame_id", ""),
+                f"{(item.get('delta_frontend_to_final_translation_norm') or 0.0):.3f}",
+                f"{(item.get('delta_frontend_to_final_rotation_rad') or 0.0):.3f}",
+                f"{(item.get('solver_update_ms') or 0.0):.3f}",
+                item.get("carried_boundary_oldest_key_summary", ""),
+                item.get("oldest_survivor_key_summary", ""),
+                item.get("lidar_support_keys_summary", ""),
+                item.get("recalculated_lidar_current_segment_factor_count", ""),
+            ]
+            for item in jump_analysis.get("top_frontend_to_final_translation_frames", [])
+        ]
+        lines.append("Top jump frames by frontend->final translation:")
+        lines.append("")
+        lines.append(md_table(
+            ["frame_id", "delta_t_m", "delta_r_rad", "solver_update_ms", "carried_boundary_oldest", "oldest_survivor", "lidar_support", "current_segment_recalc"],
+            solver_rows,
+        ))
+    else:
+        lines.append("jump_diagnostics.csv was not available for this run.")
+        lines.append("")
+
     lines.append("## Solver Update Analysis")
     lines.append("")
     if solver_update_analysis.get("available"):
@@ -2057,16 +2489,48 @@ def render_report_markdown(
                 ["active_window_imu_factor_count_mean", f"{solver_update_analysis.get('active_window_imu_factor_count_mean', 0.0):.3f}" if "active_window_imu_factor_count_mean" in solver_update_analysis else "n/a"],
                 ["active_window_velocity_factor_count_mean", f"{solver_update_analysis.get('active_window_velocity_factor_count_mean', 0.0):.3f}" if "active_window_velocity_factor_count_mean" in solver_update_analysis else "n/a"],
                 ["active_window_lidar_factor_count_mean", f"{solver_update_analysis.get('active_window_lidar_factor_count_mean', 0.0):.3f}" if "active_window_lidar_factor_count_mean" in solver_update_analysis else "n/a"],
+                ["active_window_lidar_current_segment_factor_count_mean", f"{solver_update_analysis.get('active_window_lidar_current_segment_factor_count_mean', 0.0):.3f}" if "active_window_lidar_current_segment_factor_count_mean" in solver_update_analysis else "n/a"],
+                ["active_window_lidar_old_segment_factor_count_mean", f"{solver_update_analysis.get('active_window_lidar_old_segment_factor_count_mean', 0.0):.3f}" if "active_window_lidar_old_segment_factor_count_mean" in solver_update_analysis else "n/a"],
                 ["active_window_prior_factor_count_mean", f"{solver_update_analysis.get('active_window_prior_factor_count_mean', 0.0):.3f}" if "active_window_prior_factor_count_mean" in solver_update_analysis else "n/a"],
                 ["active_window_shared_jkg_touching_factor_count_mean", f"{solver_update_analysis.get('active_window_shared_jkg_touching_factor_count_mean', 0.0):.3f}" if "active_window_shared_jkg_touching_factor_count_mean" in solver_update_analysis else "n/a"],
                 ["active_window_non_imu_shared_jkg_factor_count_mean", f"{solver_update_analysis.get('active_window_non_imu_shared_jkg_factor_count_mean', 0.0):.3f}" if "active_window_non_imu_shared_jkg_factor_count_mean" in solver_update_analysis else "n/a"],
+                ["recalculated_imu_factor_count_mean", f"{solver_update_analysis.get('recalculated_imu_factor_count_mean', 0.0):.3f}" if "recalculated_imu_factor_count_mean" in solver_update_analysis else "n/a"],
+                ["recalculated_velocity_factor_count_mean", f"{solver_update_analysis.get('recalculated_velocity_factor_count_mean', 0.0):.3f}" if "recalculated_velocity_factor_count_mean" in solver_update_analysis else "n/a"],
+                ["recalculated_lidar_factor_count_mean", f"{solver_update_analysis.get('recalculated_lidar_factor_count_mean', 0.0):.3f}" if "recalculated_lidar_factor_count_mean" in solver_update_analysis else "n/a"],
+                ["recalculated_lidar_current_segment_factor_count_mean", f"{solver_update_analysis.get('recalculated_lidar_current_segment_factor_count_mean', 0.0):.3f}" if "recalculated_lidar_current_segment_factor_count_mean" in solver_update_analysis else "n/a"],
+                ["recalculated_lidar_old_segment_factor_count_mean", f"{solver_update_analysis.get('recalculated_lidar_old_segment_factor_count_mean', 0.0):.3f}" if "recalculated_lidar_old_segment_factor_count_mean" in solver_update_analysis else "n/a"],
+                ["recalculated_lidar_same_support_factor_count_mean", f"{solver_update_analysis.get('recalculated_lidar_same_support_factor_count_mean', 0.0):.3f}" if "recalculated_lidar_same_support_factor_count_mean" in solver_update_analysis else "n/a"],
+                ["recalculated_lidar_cross_support_factor_count_mean", f"{solver_update_analysis.get('recalculated_lidar_cross_support_factor_count_mean', 0.0):.3f}" if "recalculated_lidar_cross_support_factor_count_mean" in solver_update_analysis else "n/a"],
+                ["recalculated_prior_factor_count_mean", f"{solver_update_analysis.get('recalculated_prior_factor_count_mean', 0.0):.3f}" if "recalculated_prior_factor_count_mean" in solver_update_analysis else "n/a"],
+                ["recalculated_shared_jkg_touching_factor_count_mean", f"{solver_update_analysis.get('recalculated_shared_jkg_touching_factor_count_mean', 0.0):.3f}" if "recalculated_shared_jkg_touching_factor_count_mean" in solver_update_analysis else "n/a"],
+                ["recalculated_unclassified_factor_count_mean", f"{solver_update_analysis.get('recalculated_unclassified_factor_count_mean', 0.0):.3f}" if "recalculated_unclassified_factor_count_mean" in solver_update_analysis else "n/a"],
+                ["relinearized_pose_variable_count_mean", f"{solver_update_analysis.get('relinearized_pose_variable_count_mean', 0.0):.3f}" if "relinearized_pose_variable_count_mean" in solver_update_analysis else "n/a"],
+                ["relinearized_aux_variable_count_mean", f"{solver_update_analysis.get('relinearized_aux_variable_count_mean', 0.0):.3f}" if "relinearized_aux_variable_count_mean" in solver_update_analysis else "n/a"],
+                ["relinearized_shared_variable_count_mean", f"{solver_update_analysis.get('relinearized_shared_variable_count_mean', 0.0):.3f}" if "relinearized_shared_variable_count_mean" in solver_update_analysis else "n/a"],
+                ["affected_pose_key_count_mean", f"{solver_update_analysis.get('affected_pose_key_count_mean', 0.0):.3f}" if "affected_pose_key_count_mean" in solver_update_analysis else "n/a"],
+                ["affected_aux_key_count_mean", f"{solver_update_analysis.get('affected_aux_key_count_mean', 0.0):.3f}" if "affected_aux_key_count_mean" in solver_update_analysis else "n/a"],
+                ["affected_shared_key_count_mean", f"{solver_update_analysis.get('affected_shared_key_count_mean', 0.0):.3f}" if "affected_shared_key_count_mean" in solver_update_analysis else "n/a"],
                 ["new_factor_vs_active_window_corr", f"{solver_update_analysis.get('new_factor_vs_active_window_corr', 'n/a')}"],
                 ["new_value_vs_active_window_corr", f"{solver_update_analysis.get('new_value_vs_active_window_corr', 'n/a')}"],
                 ["active_window_imu_factor_vs_solver_update_corr", f"{solver_update_analysis.get('active_window_imu_factor_vs_solver_update_corr', 'n/a')}"],
+                ["active_window_lidar_current_segment_factor_vs_solver_update_corr", f"{solver_update_analysis.get('active_window_lidar_current_segment_factor_vs_solver_update_corr', 'n/a')}"],
+                ["active_window_lidar_old_segment_factor_vs_solver_update_corr", f"{solver_update_analysis.get('active_window_lidar_old_segment_factor_vs_solver_update_corr', 'n/a')}"],
                 ["active_window_shared_jkg_touching_factor_vs_solver_update_corr", f"{solver_update_analysis.get('active_window_shared_jkg_touching_factor_vs_solver_update_corr', 'n/a')}"],
+                ["recalculated_imu_factor_vs_solver_update_corr", f"{solver_update_analysis.get('recalculated_imu_factor_vs_solver_update_corr', 'n/a')}"],
+                ["recalculated_velocity_factor_vs_solver_update_corr", f"{solver_update_analysis.get('recalculated_velocity_factor_vs_solver_update_corr', 'n/a')}"],
+                ["recalculated_lidar_factor_vs_solver_update_corr", f"{solver_update_analysis.get('recalculated_lidar_factor_vs_solver_update_corr', 'n/a')}"],
+                ["recalculated_lidar_current_segment_factor_vs_solver_update_corr", f"{solver_update_analysis.get('recalculated_lidar_current_segment_factor_vs_solver_update_corr', 'n/a')}"],
+                ["recalculated_lidar_old_segment_factor_vs_solver_update_corr", f"{solver_update_analysis.get('recalculated_lidar_old_segment_factor_vs_solver_update_corr', 'n/a')}"],
+                ["recalculated_lidar_same_support_factor_vs_solver_update_corr", f"{solver_update_analysis.get('recalculated_lidar_same_support_factor_vs_solver_update_corr', 'n/a')}"],
+                ["recalculated_lidar_cross_support_factor_vs_solver_update_corr", f"{solver_update_analysis.get('recalculated_lidar_cross_support_factor_vs_solver_update_corr', 'n/a')}"],
+                ["recalculated_prior_factor_vs_solver_update_corr", f"{solver_update_analysis.get('recalculated_prior_factor_vs_solver_update_corr', 'n/a')}"],
+                ["recalculated_shared_jkg_touching_factor_vs_solver_update_corr", f"{solver_update_analysis.get('recalculated_shared_jkg_touching_factor_vs_solver_update_corr', 'n/a')}"],
+                ["recalculated_unclassified_factor_vs_solver_update_corr", f"{solver_update_analysis.get('recalculated_unclassified_factor_vs_solver_update_corr', 'n/a')}"],
                 ["reeliminated_variable_vs_solver_update_corr", f"{solver_update_analysis.get('reeliminated_variable_vs_solver_update_corr', 'n/a')}"],
                 ["relinearized_variable_vs_solver_update_corr", f"{solver_update_analysis.get('relinearized_variable_vs_solver_update_corr', 'n/a')}"],
                 ["recalculated_factor_vs_solver_update_corr", f"{solver_update_analysis.get('recalculated_factor_vs_solver_update_corr', 'n/a')}"],
+                ["dominant_recalculated_family", solver_update_analysis.get("dominant_recalculated_family", "n/a")],
+                ["dominant_recalculated_family_corr", f"{solver_update_analysis.get('dominant_recalculated_family_corr', 'n/a')}"],
                 ["unavailable_internal_timing", solver_update_analysis.get("unavailable_internal_timing", False)],
                 ["unavailable_internal_fields", ", ".join(solver_update_analysis.get("unavailable_internal_fields", [])) or "_none_"],
             ],
@@ -2085,6 +2549,52 @@ def render_report_markdown(
             lines.append("Solver-update stage breakdown:")
             lines.append("")
             lines.append(md_table(["Stage", "Mean ms", "P95 ms", "Max ms", "Mean Share"], stage_rows))
+        recalculated_family_rows = []
+        for label, key_prefix, corr_key in [
+            ("IMU", "recalculated_imu_factor_count", "recalculated_imu_factor_vs_solver_update_corr"),
+            ("VELOCITY", "recalculated_velocity_factor_count", "recalculated_velocity_factor_vs_solver_update_corr"),
+            ("LIDAR", "recalculated_lidar_factor_count", "recalculated_lidar_factor_vs_solver_update_corr"),
+            ("PRIOR", "recalculated_prior_factor_count", "recalculated_prior_factor_vs_solver_update_corr"),
+            ("SHARED_JKG_TOUCHING", "recalculated_shared_jkg_touching_factor_count", "recalculated_shared_jkg_touching_factor_vs_solver_update_corr"),
+            ("UNCLASSIFIED", "recalculated_unclassified_factor_count", "recalculated_unclassified_factor_vs_solver_update_corr"),
+        ]:
+            mean_key = f"{key_prefix}_mean"
+            if mean_key not in solver_update_analysis:
+                continue
+            recalculated_family_rows.append([
+                label,
+                f"{solver_update_analysis.get(mean_key, 0.0):.3f}",
+                f"{solver_update_analysis.get(f'{key_prefix}_p95', 0.0):.3f}",
+                f"{solver_update_analysis.get(f'{key_prefix}_max', 0.0):.3f}",
+                f"{solver_update_analysis.get(corr_key, 'n/a')}",
+            ])
+        if recalculated_family_rows:
+            lines.append("Recalculated factor family breakdown:")
+            lines.append("")
+            lines.append(md_table(["Family", "Mean", "P95", "Max", "Corr vs solver_update_ms"], recalculated_family_rows))
+        lidar_churn_rows = []
+        for label, key_prefix, corr_key in [
+            ("ACTIVE_CURRENT_SEGMENT", "active_window_lidar_current_segment_factor_count", "active_window_lidar_current_segment_factor_vs_solver_update_corr"),
+            ("ACTIVE_OLD_SEGMENT", "active_window_lidar_old_segment_factor_count", "active_window_lidar_old_segment_factor_vs_solver_update_corr"),
+            ("RECALC_CURRENT_SEGMENT", "recalculated_lidar_current_segment_factor_count", "recalculated_lidar_current_segment_factor_vs_solver_update_corr"),
+            ("RECALC_OLD_SEGMENT", "recalculated_lidar_old_segment_factor_count", "recalculated_lidar_old_segment_factor_vs_solver_update_corr"),
+            ("RECALC_SUPPORT_OVERLAP", "recalculated_lidar_same_support_factor_count", "recalculated_lidar_same_support_factor_vs_solver_update_corr"),
+            ("RECALC_CROSS_SUPPORT", "recalculated_lidar_cross_support_factor_count", "recalculated_lidar_cross_support_factor_vs_solver_update_corr"),
+        ]:
+            mean_key = f"{key_prefix}_mean"
+            if mean_key not in solver_update_analysis:
+                continue
+            lidar_churn_rows.append([
+                label,
+                f"{solver_update_analysis.get(mean_key, 0.0):.3f}",
+                f"{solver_update_analysis.get(f'{key_prefix}_p95', 0.0):.3f}",
+                f"{solver_update_analysis.get(f'{key_prefix}_max', 0.0):.3f}",
+                f"{solver_update_analysis.get(corr_key, 'n/a')}",
+            ])
+        if lidar_churn_rows:
+            lines.append("LiDAR churn split:")
+            lines.append("")
+            lines.append(md_table(["Bucket", "Mean", "P95", "Max", "Corr vs solver_update_ms"], lidar_churn_rows))
     else:
         lines.append("solver_update_profile.csv was not available for this run.")
         lines.append("")
@@ -2341,6 +2851,7 @@ def main() -> int:
         figs_dir,
         render_plots=not args.no_plots,
     )
+    jump_analysis = analyze_jump_diagnostics(dataframes.get("jump_diagnostics"))
     lidar_factor_internal_analysis = analyze_lidar_factor_internal(
         dataframes.get("lidar_factor_internal_profile"),
         figs_dir,
@@ -2389,6 +2900,7 @@ def main() -> int:
         artifact_statuses=artifact_statuses,
         mode_consistency=mode_consistency,
         frontend_analysis=frontend_analysis,
+        jump_analysis=jump_analysis,
         solver_update_analysis=solver_update_analysis,
         lidar_factor_internal_analysis=lidar_factor_internal_analysis,
         optimizer_analysis=optimizer_analysis,
@@ -2400,6 +2912,7 @@ def main() -> int:
         artifact_statuses=artifact_statuses,
         mode_consistency=mode_consistency,
         frontend_analysis=frontend_analysis,
+        jump_analysis=jump_analysis,
         solver_update_analysis=solver_update_analysis,
         lidar_factor_internal_analysis=lidar_factor_internal_analysis,
         optimizer_analysis=optimizer_analysis,
@@ -2418,6 +2931,7 @@ def main() -> int:
         runtime_summary=runtime_summary,
         mode_consistency=mode_consistency,
         frontend_analysis=frontend_analysis,
+        jump_analysis=jump_analysis,
         solver_update_analysis=solver_update_analysis,
         lidar_factor_internal_analysis=lidar_factor_internal_analysis,
         slow_frame_analysis=slow_frame_analysis,
@@ -2453,6 +2967,7 @@ def main() -> int:
         },
         "mode_consistency": mode_consistency,
         "frontend_analysis": frontend_analysis,
+        "jump_analysis": jump_analysis,
         "solver_update_analysis": solver_update_analysis,
         "lidar_factor_internal_analysis": lidar_factor_internal_analysis,
         "slow_frame_analysis": slow_frame_analysis,

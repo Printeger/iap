@@ -264,6 +264,8 @@ void write_metadata_files(const LogPaths& paths, const LogConfig& config) {
   run_info["runtime_log_profiling_solver_update_profile"] = config.profiling.solver_update_profile;
   run_info["config_log_profiling_lidar_factor_internal_profile"] = config.profiling.lidar_factor_internal_profile;
   run_info["runtime_log_profiling_lidar_factor_internal_profile"] = config.profiling.lidar_factor_internal_profile;
+  run_info["config_log_profiling_jump_diagnostics"] = config.profiling.jump_diagnostics;
+  run_info["runtime_log_profiling_jump_diagnostics"] = config.profiling.jump_diagnostics;
   write_json_file(paths.metadata_path(config.metadata.run_info_file), run_info);
 
   if (config.metadata.write_config_snapshot) {

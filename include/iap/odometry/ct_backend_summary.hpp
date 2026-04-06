@@ -10,6 +10,7 @@
 #include <string>
 #include <vector>
 
+#include <gtsam/geometry/Pose3.h>
 #include <gtsam/inference/Key.h>
 #include <gtsam/nonlinear/NonlinearFactorGraph.h>
 #include <gtsam/nonlinear/Values.h>
@@ -102,8 +103,25 @@ struct SolverUpdateProfileRow {
   std::size_t active_window_imu_factor_count{0};
   std::size_t active_window_velocity_factor_count{0};
   std::size_t active_window_lidar_factor_count{0};
+  std::size_t active_window_lidar_current_segment_factor_count{0};
+  std::size_t active_window_lidar_old_segment_factor_count{0};
   std::size_t active_window_prior_factor_count{0};
   std::size_t active_window_shared_jkg_touching_factor_count{0};
+  std::size_t recalculated_imu_factor_count{0};
+  std::size_t recalculated_velocity_factor_count{0};
+  std::size_t recalculated_lidar_factor_count{0};
+  std::size_t recalculated_lidar_current_segment_factor_count{0};
+  std::size_t recalculated_lidar_old_segment_factor_count{0};
+  std::size_t recalculated_lidar_same_support_factor_count{0};
+  std::size_t recalculated_lidar_cross_support_factor_count{0};
+  std::size_t recalculated_prior_factor_count{0};
+  std::size_t recalculated_shared_jkg_touching_factor_count{0};
+  std::size_t relinearized_pose_variable_count{0};
+  std::size_t relinearized_aux_variable_count{0};
+  std::size_t relinearized_shared_variable_count{0};
+  std::size_t affected_pose_key_count{0};
+  std::size_t affected_aux_key_count{0};
+  std::size_t affected_shared_key_count{0};
   double isam_reported_update_ms{0.0};
   int optimize_count{0};
   double initial_error{0.0};
@@ -212,6 +230,26 @@ struct CTLocalFrontendProcessedOutput {
   std::vector<FrontendLMIterationProfileRow> lm_iterations;
 };
 
+struct FrontendPoseDiagnostics {
+  bool valid{false};
+  double query_time{0.0};
+  double layout_domain_begin{0.0};
+  double layout_domain_end{0.0};
+  double representative_time{0.0};
+  std::size_t representative_bucket_index{0};
+  std::size_t points_in_bucket{0};
+  double match_ratio{0.0};
+  double inlier_ratio{0.0};
+  double factor_total_ms{0.0};
+  bool uses_local_lidar_layout_override{false};
+  gtsam::Pose3 seed_pose;
+  gtsam::Pose3 optimized_pose;
+  gtsam::KeyVector lidar_support_keys;
+  gtsam::KeyVector query_support_keys;
+  std::vector<std::size_t> lidar_support_control_indices;
+  std::vector<std::size_t> query_support_control_indices;
+};
+
 struct BSplineUnifiedGraphContext {
   std::shared_ptr<const SplineStateLayout> layout;
   double min_active_stamp{0.0};
@@ -240,6 +278,7 @@ struct BSplineLocalLayerContribution {
     std::size_t bucket_index{0};
     double representative_time{0.0};
     SplineBucketContext bucket_ctx;
+    std::vector<std::size_t> support_control_indices;
     std::shared_ptr<IntegratedSplineGICPFactor> factor;
   };
 
@@ -270,6 +309,14 @@ struct CTLocalFrontendResult {
   SplineStateLayout layout;
   gtsam::Values local_values;
   CTBackendSummary backend_summary;
+  CTLocalFrontendDebugStats debug_stats;
+  CTLocalFrontendProcessedOutput processed;
+  FrontendPoseDiagnostics pose_diagnostics;
+};
+
+struct CTLocalFrontendShadowResult {
+  bool valid{false};
+  FrontendPoseDiagnostics pose_diagnostics;
   CTLocalFrontendDebugStats debug_stats;
   CTLocalFrontendProcessedOutput processed;
 };

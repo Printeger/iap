@@ -242,6 +242,12 @@ LogConfig load_log_config_impl() {
     "",
     "log.profiling.frame_warning_profile",
     config.profiling.frame_warning_profile);
+  config.profiling.jump_diagnostics = resolve_log_value<bool>(
+    nested_param<bool>({"log", "profiling"}, "jump_diagnostics"),
+    std::nullopt,
+    "",
+    "log.profiling.jump_diagnostics",
+    config.profiling.jump_diagnostics);
   config.profiling.target_map_prep_breakdown = resolve_log_value<bool>(
     nested_param<bool>({"log", "profiling"}, "target_map_prep_breakdown"),
     std::nullopt,
@@ -296,6 +302,12 @@ LogConfig load_log_config_impl() {
     "",
     "log.profiling.frame_warning_profile_file",
     config.profiling.frame_warning_profile_file);
+  config.profiling.jump_diagnostics_file = resolve_log_value<std::string>(
+    nested_param<std::string>({"log", "profiling"}, "jump_diagnostics_file"),
+    std::nullopt,
+    "",
+    "log.profiling.jump_diagnostics_file",
+    config.profiling.jump_diagnostics_file);
   config.profiling.numeric_reference_file = resolve_log_value<std::string>(
     nested_param<std::string>({"log", "profiling"}, "numeric_reference_file"),
     std::nullopt,
@@ -532,7 +544,8 @@ LogConfig load_log_config_impl() {
       config.profiling.lidar_factor || config.profiling.solver_update_profile ||
       config.profiling.lidar_factor_internal_profile ||
       config.profiling.frontend_lm_iteration ||
-      config.profiling.frame_warning_profile || config.profiling.target_map_prep_breakdown ||
+      config.profiling.frame_warning_profile || config.profiling.jump_diagnostics ||
+      config.profiling.target_map_prep_breakdown ||
       config.profiling.graph_problem_size || config.profiling.numeric_reference ||
       config.profiling.linearization_check);
 

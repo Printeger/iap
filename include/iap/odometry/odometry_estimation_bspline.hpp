@@ -124,6 +124,7 @@ class OdometryEstimationBSpline : public OdometryEstimationCPU {
     double source_to_target_transform_ms = 0.0;
   };
 
+ public:
   struct FrameWarningProfileRow {
     int frame_id = -1;
     double stamp = 0.0;
@@ -132,6 +133,71 @@ class OdometryEstimationBSpline : public OdometryEstimationCPU {
     std::string top_warning_message;
   };
 
+  struct JumpDiagnosticsRow {
+    int frame_id{-1};
+    double frame_stamp{0.0};
+    double scan_begin_time{0.0};
+    double scan_end_time{0.0};
+    double representative_time{0.0};
+    long long current_segment_id{-1};
+
+    double start_pose_tx{0.0};
+    double start_pose_ty{0.0};
+    double start_pose_tz{0.0};
+    double start_pose_qx{0.0};
+    double start_pose_qy{0.0};
+    double start_pose_qz{0.0};
+    double start_pose_qw{1.0};
+
+    double frontend_pose_tx{0.0};
+    double frontend_pose_ty{0.0};
+    double frontend_pose_tz{0.0};
+    double frontend_pose_qx{0.0};
+    double frontend_pose_qy{0.0};
+    double frontend_pose_qz{0.0};
+    double frontend_pose_qw{1.0};
+
+    double final_pose_tx{0.0};
+    double final_pose_ty{0.0};
+    double final_pose_tz{0.0};
+    double final_pose_qx{0.0};
+    double final_pose_qy{0.0};
+    double final_pose_qz{0.0};
+    double final_pose_qw{1.0};
+
+    double delta_start_to_frontend_translation_norm{0.0};
+    double delta_start_to_frontend_rotation_rad{0.0};
+    double delta_frontend_to_final_translation_norm{0.0};
+    double delta_frontend_to_final_rotation_rad{0.0};
+
+    double lidar_layout_domain_begin{0.0};
+    double lidar_layout_domain_end{0.0};
+    std::size_t lidar_support_key_count{0};
+    std::string lidar_support_keys_summary;
+    std::size_t frontend_pose_support_key_count{0};
+    std::string frontend_pose_support_keys_summary;
+
+    double match_ratio{0.0};
+    double inlier_ratio{0.0};
+    std::size_t points_in_bucket{0};
+    double factor_total_ms{0.0};
+    double target_map_prep_ms{0.0};
+
+    double solver_update_ms{0.0};
+    std::size_t recalculated_lidar_factor_count{0};
+    std::size_t recalculated_lidar_current_segment_factor_count{0};
+    std::size_t recalculated_lidar_same_support_factor_count{0};
+
+    double pose_guess_translation_norm{0.0};
+    double pose_guess_rotation_rad{0.0};
+    std::string carried_boundary_oldest_key_summary;
+    std::string oldest_survivor_key_summary;
+    bool uses_local_lidar_layout_override{false};
+    double frontend_pose_query_time{0.0};
+    std::string frontend_pose_query_support_keys_summary;
+  };
+
+ private:
   struct ActiveSplineLidarFactorCacheKey {
     bool valid = false;
     bool gpu = false;
@@ -279,6 +345,8 @@ class OdometryEstimationBSpline : public OdometryEstimationCPU {
     double stamp,
     const std::vector<iap::FrontendLMIterationProfileRow>& iterations);
   void maybe_write_frame_warning_profile(const FrameWarningProfileRow& row);
+  void maybe_write_jump_diagnostics(const JumpDiagnosticsRow& row);
+  void maybe_log_jump_event(const JumpDiagnosticsRow& row) const;
   FrameWarningProfileRow build_frame_warning_profile(
     int frame_id,
     double stamp,
@@ -350,6 +418,7 @@ class OdometryEstimationBSpline : public OdometryEstimationCPU {
   bool lidar_factor_internal_profile_enabled_ = false;
   bool frontend_lm_iteration_profile_enabled_ = false;
   bool frame_warning_profile_enabled_ = false;
+  bool jump_diagnostics_enabled_ = false;
   bool target_map_prep_breakdown_enabled_ = false;
   bool graph_problem_size_enabled_ = false;
   bool lidar_validate_linearization_ = false;
@@ -367,6 +436,7 @@ class OdometryEstimationBSpline : public OdometryEstimationCPU {
   std::string lidar_factor_internal_profile_csv_path_ = "lidar_factor_internal_profile.csv";
   std::string frontend_lm_iteration_csv_path_ = "frontend_lm_iteration.csv";
   std::string frame_warning_profile_csv_path_ = "frame_warning_profile.csv";
+  std::string jump_diagnostics_csv_path_ = "jump_diagnostics.csv";
   iap::IntegratedBSplineGICPFactor::DegeneracyThresholds lidar_degeneracy_thresholds_;
   double ctrl_point_anchor_inf_scale_ = 1e6;
   double ctrl_point_prediction_inf_scale_ = 1e3;
@@ -415,6 +485,7 @@ class OdometryEstimationBSpline : public OdometryEstimationCPU {
   bool lidar_factor_internal_profile_header_written_ = false;
   bool frontend_lm_iteration_header_written_ = false;
   bool frame_warning_profile_header_written_ = false;
+  bool jump_diagnostics_header_written_ = false;
   bool frontend_iteration_without_frame_warned_ = false;
   bool target_map_breakdown_without_frame_warned_ = false;
   bool graph_problem_size_without_frame_warned_ = false;

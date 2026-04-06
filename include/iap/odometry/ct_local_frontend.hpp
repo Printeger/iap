@@ -122,6 +122,10 @@ class CTLocalFrontend {
 
   BSplineLocalLayerContribution assemble_local_layer(const LayerInput& input) const;
   CTLocalFrontendResult run(const Input& input) const;
+  CTLocalFrontendShadowResult run_shadow_diagnostics(
+    const LayerInput& input,
+    const gtsam::Values& seed_values,
+    double query_time) const;
 };
 
 }  // namespace iap
