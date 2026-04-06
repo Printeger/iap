@@ -364,6 +364,10 @@ def build_config_summary(configs: dict[str, Any], runtime_summary: dict[str, Any
     summary["frontend_mode"] = odom_block.get("frontend_mode")
     summary["frontend_only_mode"] = odom_block.get("frontend_only_mode")
     summary["final_pose_surface"] = odom_block.get("final_pose_surface")
+    summary["gravity_mode"] = odom_block.get("exp.gravity_mode")
+    summary["gravity_fixed_norm_value"] = odom_block.get("exp.gravity_fixed_norm_value")
+    summary["gravity_tilt_limit_rad"] = odom_block.get("exp.gravity_tilt_limit_rad")
+    summary["gravity_warmup_freeze_frames"] = odom_block.get("exp.gravity_warmup_freeze_frames")
     summary["exp_freeze_gravity"] = odom_block.get("exp_freeze_gravity")
     summary["exp_freeze_gyro_bias"] = odom_block.get("exp_freeze_gyro_bias")
     summary["exp_freeze_accel_bias"] = odom_block.get("exp_freeze_accel_bias")
@@ -422,6 +426,14 @@ def build_config_summary(configs: dict[str, Any], runtime_summary: dict[str, Any
         "runtime_log_profiling_jump_diagnostics",
         "config_final_pose_surface",
         "runtime_final_pose_surface",
+        "config_gravity_mode",
+        "runtime_gravity_mode",
+        "config_gravity_fixed_norm_value",
+        "runtime_gravity_fixed_norm_value",
+        "config_gravity_tilt_limit_rad",
+        "runtime_gravity_tilt_limit_rad",
+        "config_gravity_warmup_freeze_frames",
+        "runtime_gravity_warmup_freeze_frames",
         "config_exp_freeze_gravity",
         "runtime_exp_freeze_gravity",
         "config_exp_freeze_gyro_bias",
@@ -1339,6 +1351,10 @@ def analyze_jump_diagnostics(
         or experiment_config.get("experiment_name")
         or "baseline"
     )
+    analysis["runtime_gravity_mode"] = experiment_config.get("runtime_gravity_mode", "normal")
+    analysis["runtime_gravity_fixed_norm_value"] = experiment_config.get("runtime_gravity_fixed_norm_value")
+    analysis["runtime_gravity_tilt_limit_rad"] = experiment_config.get("runtime_gravity_tilt_limit_rad")
+    analysis["runtime_gravity_warmup_freeze_frames"] = experiment_config.get("runtime_gravity_warmup_freeze_frames")
     for key in [
         "runtime_exp_freeze_gravity",
         "runtime_exp_freeze_gyro_bias",
@@ -2249,7 +2265,10 @@ def analyze_jump_diagnostics(
         if experiment_name == "baseline":
             return "baseline strict-local run"
         mapping = {
-            "freeze_gravity": "freezing gravity",
+            "legacy_freeze_gravity": "legacy freeze-style gravity",
+            "gravity_fixed_norm": "fixed-norm gravity",
+            "gravity_limited_tilt": "limited-tilt gravity",
+            "gravity_warmup_freeze_then_release": "warmup-freeze gravity",
             "freeze_gyro_bias": "freezing gyro bias",
             "freeze_accel_bias": "freezing accel bias",
             "disable_velocity_factor": "disabling velocity factor",
@@ -2265,16 +2284,19 @@ def analyze_jump_diagnostics(
     yaw_max = float(analysis.get("frontend_to_final_yaw_abs_max", 0.0) or 0.0)
     rotation_p95 = float(analysis.get("frontend_to_final_rotation_p95", 0.0) or 0.0)
     translation_p95 = float(analysis.get("frontend_to_final_translation_p95", 0.0) or 0.0)
+    jump_rows = int(analysis.get("jump_rows", 0) or 0)
     accept_ratio_mean = analysis.get("accept_ratio_mean")
     match_ratio_mean = analysis.get("match_ratio_mean")
     inlier_ratio_mean = analysis.get("inlier_ratio_mean")
     solver_update_ms_mean = analysis.get("solver_update_ms_mean")
+    run_incomplete = jump_rows < 200
     registration_degraded = (
-        (isinstance(accept_ratio_mean, float) and math.isfinite(accept_ratio_mean) and accept_ratio_mean < 0.70)
-        or (isinstance(match_ratio_mean, float) and math.isfinite(match_ratio_mean) and match_ratio_mean < 0.70)
-        or (isinstance(inlier_ratio_mean, float) and math.isfinite(inlier_ratio_mean) and inlier_ratio_mean < 0.60)
-        or translation_p95 > 1.0
-        or (isinstance(solver_update_ms_mean, float) and math.isfinite(solver_update_ms_mean) and solver_update_ms_mean > 40.0)
+        (isinstance(accept_ratio_mean, float) and math.isfinite(accept_ratio_mean) and accept_ratio_mean < 0.85)
+        or (isinstance(match_ratio_mean, float) and math.isfinite(match_ratio_mean) and match_ratio_mean < 0.35)
+        or (isinstance(inlier_ratio_mean, float) and math.isfinite(inlier_ratio_mean) and inlier_ratio_mean < 0.35)
+        or translation_p95 > 2.0
+        or (isinstance(solver_update_ms_mean, float) and math.isfinite(solver_update_ms_mean) and solver_update_ms_mean > 250.0)
+        or run_incomplete
     )
     yaw_low = yaw_p95 <= 0.25 and rotation_p95 <= 0.45
     yaw_partial = yaw_p95 <= 0.45 and rotation_p95 <= 0.75
@@ -2282,14 +2304,20 @@ def analyze_jump_diagnostics(
         analysis["isolation_effect"] = "baseline strict-local run for yaw isolation comparison"
     else:
         action = experiment_action_label(experiment_name)
-        if registration_degraded:
+        if experiment_name == "legacy_freeze_gravity" and registration_degraded:
+            analysis["isolation_effect"] = "freeze-style gravity remains unstable and should not be used as the fix"
+        elif registration_degraded:
             analysis["isolation_effect"] = (
-                f"{action} reduces yaw residual but causes unacceptable registration degradation"
+                f"{action} changes residual behavior but introduces instability or incompleteness"
             )
         elif yaw_low:
-            analysis["isolation_effect"] = f"{action} significantly reduces yaw residual"
+            analysis["isolation_effect"] = (
+                f"{action} significantly reduces yaw residual and keeps run stability acceptable"
+            )
         elif yaw_partial:
-            analysis["isolation_effect"] = f"{action} partially reduces yaw residual"
+            analysis["isolation_effect"] = (
+                f"{action} mildly reduces yaw residual without harming completeness"
+            )
         else:
             analysis["isolation_effect"] = f"{action} has little effect"
     analysis["isolation_effect_evidence"] = "; ".join(
@@ -4203,6 +4231,10 @@ def render_report_markdown(
                 ["Metric", "Value"],
                 [
                     ["runtime_experiment_name", jump_analysis.get("runtime_experiment_name", "baseline")],
+                    ["runtime_gravity_mode", jump_analysis.get("runtime_gravity_mode", "n/a")],
+                    ["runtime_gravity_fixed_norm_value", jump_analysis.get("runtime_gravity_fixed_norm_value", "n/a")],
+                    ["runtime_gravity_tilt_limit_rad", jump_analysis.get("runtime_gravity_tilt_limit_rad", "n/a")],
+                    ["runtime_gravity_warmup_freeze_frames", jump_analysis.get("runtime_gravity_warmup_freeze_frames", "n/a")],
                     ["runtime_exp_freeze_gravity", jump_analysis.get("runtime_exp_freeze_gravity", "n/a")],
                     ["runtime_exp_freeze_gyro_bias", jump_analysis.get("runtime_exp_freeze_gyro_bias", "n/a")],
                     ["runtime_exp_freeze_accel_bias", jump_analysis.get("runtime_exp_freeze_accel_bias", "n/a")],
@@ -4295,6 +4327,32 @@ def render_report_markdown(
                     ["delta_yaw_vs_accel_bias_norm", f"{jump_analysis.get('delta_yaw_vs_accel_bias_norm', 'n/a')}"],
                     ["delta_yaw_vs_gravity_dir_tilt", f"{jump_analysis.get('delta_yaw_vs_gravity_dir_tilt', 'n/a')}"],
                     ["delta_yaw_vs_delta_gravity_dir", f"{jump_analysis.get('delta_yaw_vs_delta_gravity_dir', 'n/a')}"],
+                ],
+            ))
+            lines.append("Gravity Experiment Summary:")
+            lines.append("")
+            lines.append(md_table(
+                ["Metric", "Value"],
+                [
+                    ["runtime_experiment_name", jump_analysis.get("runtime_experiment_name", "baseline")],
+                    ["runtime_final_pose_surface", jump_analysis.get("runtime_final_pose_surface", "n/a")],
+                    ["runtime_gravity_mode", jump_analysis.get("runtime_gravity_mode", "n/a")],
+                    ["runtime_gravity_fixed_norm_value", jump_analysis.get("runtime_gravity_fixed_norm_value", "n/a")],
+                    ["runtime_gravity_tilt_limit_rad", jump_analysis.get("runtime_gravity_tilt_limit_rad", "n/a")],
+                    ["runtime_gravity_warmup_freeze_frames", jump_analysis.get("runtime_gravity_warmup_freeze_frames", "n/a")],
+                    ["frontend_frame_count", frontend_analysis.get("frame_count", 0)],
+                    ["jump_rows", jump_analysis.get("jump_rows", 0)],
+                    ["yaw_p95", f"{jump_analysis.get('frontend_to_final_yaw_abs_p95', 0.0):.3f}"],
+                    ["yaw_max", f"{jump_analysis.get('frontend_to_final_yaw_abs_max', 0.0):.3f}"],
+                    ["rotation_p95", f"{jump_analysis.get('frontend_to_final_rotation_p95', 0.0):.3f}"],
+                    ["translation_p95", f"{jump_analysis.get('frontend_to_final_translation_p95', 0.0):.3f}"],
+                    ["xy_norm_p95", f"{jump_analysis.get('frontend_to_final_xy_norm_p95', 0.0):.3f}"],
+                    ["abs_dz_p95", f"{jump_analysis.get('frontend_to_final_abs_dz_abs_p95', 0.0):.3f}"],
+                    ["solver_update_ms_mean", f"{jump_analysis.get('solver_update_ms_mean', 0.0):.3f}" if isinstance(jump_analysis.get('solver_update_ms_mean'), float) and math.isfinite(jump_analysis.get('solver_update_ms_mean')) else "n/a"],
+                    ["accept_ratio_mean", f"{jump_analysis.get('accept_ratio_mean', 0.0):.3f}" if isinstance(jump_analysis.get('accept_ratio_mean'), float) and math.isfinite(jump_analysis.get('accept_ratio_mean')) else "n/a"],
+                    ["match_ratio_mean", f"{jump_analysis.get('match_ratio_mean', 0.0):.3f}" if isinstance(jump_analysis.get('match_ratio_mean'), float) and math.isfinite(jump_analysis.get('match_ratio_mean')) else "n/a"],
+                    ["inlier_ratio_mean", f"{jump_analysis.get('inlier_ratio_mean', 0.0):.3f}" if isinstance(jump_analysis.get('inlier_ratio_mean'), float) and math.isfinite(jump_analysis.get('inlier_ratio_mean')) else "n/a"],
+                    ["isolation_effect", jump_analysis.get("isolation_effect", "n/a")],
                 ],
             ))
             lines.append("Isolation Experiment Summary:")

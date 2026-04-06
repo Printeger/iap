@@ -174,7 +174,23 @@ std::string normalize_final_pose_surface(const std::string& surface) {
   return "active_window";
 }
 
+std::string normalize_gravity_mode(const std::string& mode) {
+  if (mode == "fixed_norm" || mode == "FIXED_NORM" || mode == "fixed-norm") {
+    return "fixed_norm";
+  }
+  if (mode == "limited_tilt" || mode == "LIMITED_TILT" || mode == "limited-tilt") {
+    return "limited_tilt";
+  }
+  if (mode == "warmup_freeze_then_release" ||
+      mode == "WARMUP_FREEZE_THEN_RELEASE" ||
+      mode == "warmup-freeze-then-release") {
+    return "warmup_freeze_then_release";
+  }
+  return "normal";
+}
+
 std::string yaw_isolation_experiment_name(
+  const std::string& gravity_mode,
   bool freeze_gravity,
   bool freeze_gyro_bias,
   bool freeze_accel_bias,
@@ -182,7 +198,9 @@ std::string yaw_isolation_experiment_name(
   bool disable_current_velocity_prior) {
   std::vector<std::string> parts;
   if (freeze_gravity) {
-    parts.emplace_back("freeze_gravity");
+    parts.emplace_back("legacy_freeze_gravity");
+  } else if (gravity_mode != "normal") {
+    parts.emplace_back("gravity_" + gravity_mode);
   }
   if (freeze_gyro_bias) {
     parts.emplace_back("freeze_gyro_bias");
@@ -312,6 +330,14 @@ void write_metadata_files(const LogPaths& paths, const LogConfig& config) {
   if (const auto odom_config = load_named_config_if_exists("config_odometry")) {
     const std::string configured_final_pose_surface =
       odom_config->param<std::string>("odometry_estimation", "final_pose_surface", "strict_local");
+    const std::string configured_gravity_mode =
+      odom_config->param<std::string>("odometry_estimation", "exp.gravity_mode", "normal");
+    const double configured_gravity_fixed_norm_value =
+      odom_config->param<double>("odometry_estimation", "exp.gravity_fixed_norm_value", 9.80665);
+    const double configured_gravity_tilt_limit_rad =
+      odom_config->param<double>("odometry_estimation", "exp.gravity_tilt_limit_rad", 0.02);
+    const int configured_gravity_warmup_freeze_frames =
+      odom_config->param<int>("odometry_estimation", "exp.gravity_warmup_freeze_frames", 20);
     const bool configured_exp_freeze_gravity =
       odom_config->param<bool>("odometry_estimation", "exp_freeze_gravity", false);
     const bool configured_exp_freeze_gyro_bias =
@@ -324,6 +350,15 @@ void write_metadata_files(const LogPaths& paths, const LogConfig& config) {
       odom_config->param<bool>("odometry_estimation", "exp_disable_current_velocity_prior", false);
     run_info["config_final_pose_surface"] = configured_final_pose_surface;
     run_info["runtime_final_pose_surface"] = normalize_final_pose_surface(configured_final_pose_surface);
+    run_info["config_gravity_mode"] = configured_gravity_mode;
+    run_info["runtime_gravity_mode"] =
+      configured_exp_freeze_gravity ? "legacy_freeze_gravity" : normalize_gravity_mode(configured_gravity_mode);
+    run_info["config_gravity_fixed_norm_value"] = configured_gravity_fixed_norm_value;
+    run_info["runtime_gravity_fixed_norm_value"] = configured_gravity_fixed_norm_value;
+    run_info["config_gravity_tilt_limit_rad"] = configured_gravity_tilt_limit_rad;
+    run_info["runtime_gravity_tilt_limit_rad"] = configured_gravity_tilt_limit_rad;
+    run_info["config_gravity_warmup_freeze_frames"] = configured_gravity_warmup_freeze_frames;
+    run_info["runtime_gravity_warmup_freeze_frames"] = configured_gravity_warmup_freeze_frames;
     run_info["config_exp_freeze_gravity"] = configured_exp_freeze_gravity;
     run_info["runtime_exp_freeze_gravity"] = configured_exp_freeze_gravity;
     run_info["config_exp_freeze_gyro_bias"] = configured_exp_freeze_gyro_bias;
@@ -335,6 +370,7 @@ void write_metadata_files(const LogPaths& paths, const LogConfig& config) {
     run_info["config_exp_disable_current_velocity_prior"] = configured_exp_disable_current_velocity_prior;
     run_info["runtime_exp_disable_current_velocity_prior"] = configured_exp_disable_current_velocity_prior;
     run_info["runtime_experiment_name"] = yaw_isolation_experiment_name(
+      normalize_gravity_mode(configured_gravity_mode),
       configured_exp_freeze_gravity,
       configured_exp_freeze_gyro_bias,
       configured_exp_freeze_accel_bias,

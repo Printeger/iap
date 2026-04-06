@@ -162,7 +162,48 @@ const char* to_string(BSplineFinalPoseSurface surface) {
   return "active_window";
 }
 
+BSplineGravityMode parse_gravity_mode(const std::string& mode, bool* used_fallback = nullptr) {
+  if (used_fallback) {
+    *used_fallback = false;
+  }
+
+  if (mode == "normal" || mode == "NORMAL") {
+    return BSplineGravityMode::NORMAL;
+  }
+  if (mode == "fixed_norm" || mode == "FIXED_NORM" || mode == "fixed-norm") {
+    return BSplineGravityMode::FIXED_NORM;
+  }
+  if (mode == "limited_tilt" || mode == "LIMITED_TILT" || mode == "limited-tilt") {
+    return BSplineGravityMode::LIMITED_TILT;
+  }
+  if (mode == "warmup_freeze_then_release" ||
+      mode == "WARMUP_FREEZE_THEN_RELEASE" ||
+      mode == "warmup-freeze-then-release") {
+    return BSplineGravityMode::WARMUP_FREEZE_THEN_RELEASE;
+  }
+
+  if (used_fallback) {
+    *used_fallback = true;
+  }
+  return BSplineGravityMode::NORMAL;
+}
+
+const char* to_string(BSplineGravityMode mode) {
+  switch (mode) {
+    case BSplineGravityMode::NORMAL:
+      return "normal";
+    case BSplineGravityMode::FIXED_NORM:
+      return "fixed_norm";
+    case BSplineGravityMode::LIMITED_TILT:
+      return "limited_tilt";
+    case BSplineGravityMode::WARMUP_FREEZE_THEN_RELEASE:
+      return "warmup_freeze_then_release";
+  }
+  return "normal";
+}
+
 std::string yaw_isolation_experiment_name_from_flags(
+  const BSplineGravityMode gravity_mode,
   const bool freeze_gravity,
   const bool freeze_gyro_bias,
   const bool freeze_accel_bias,
@@ -170,7 +211,9 @@ std::string yaw_isolation_experiment_name_from_flags(
   const bool disable_current_velocity_prior) {
   std::vector<std::string> parts;
   if (freeze_gravity) {
-    parts.emplace_back("freeze_gravity");
+    parts.emplace_back("legacy_freeze_gravity");
+  } else if (gravity_mode != BSplineGravityMode::NORMAL) {
+    parts.emplace_back(std::string("gravity_") + to_string(gravity_mode));
   }
   if (freeze_gyro_bias) {
     parts.emplace_back("freeze_gyro_bias");
@@ -1723,21 +1766,42 @@ bool OdometryEstimationBSpline::any_shared_imu_freeze_experiment_enabled() const
   return exp_freeze_gravity_ || exp_freeze_gyro_bias_ || exp_freeze_accel_bias_;
 }
 
+bool OdometryEstimationBSpline::any_soft_gravity_experiment_enabled() const {
+  return gravity_mode_ != BSplineGravityMode::NORMAL;
+}
+
+bool OdometryEstimationBSpline::any_gravity_isolation_experiment_enabled() const {
+  return exp_freeze_gravity_ || any_soft_gravity_experiment_enabled();
+}
+
 bool OdometryEstimationBSpline::any_yaw_isolation_experiment_enabled() const {
   return any_shared_imu_freeze_experiment_enabled() ||
+    any_soft_gravity_experiment_enabled() ||
     exp_disable_velocity_factor_ ||
     exp_disable_current_velocity_prior_;
 }
 
+bool OdometryEstimationBSpline::gravity_warmup_freeze_active(const int frame_id) const {
+  return gravity_mode_ == BSplineGravityMode::WARMUP_FREEZE_THEN_RELEASE &&
+    gravity_warmup_freeze_frames_ > 0 &&
+    frame_id >= 0 &&
+    frame_id < gravity_warmup_freeze_frames_;
+}
+
 void OdometryEstimationBSpline::maybe_latch_isolation_freeze_anchor(
   const iap::BSplineFixedLagSharedState& candidate) {
-  if (!any_shared_imu_freeze_experiment_enabled() || isolation_freeze_anchor_latched_) {
+  if ((!any_shared_imu_freeze_experiment_enabled() && !any_soft_gravity_experiment_enabled()) ||
+      isolation_freeze_anchor_latched_) {
     return;
   }
   isolation_freeze_anchor_ = candidate;
   isolation_freeze_anchor_latched_ = true;
+  if (any_gravity_isolation_experiment_enabled()) {
+    last_applied_gravity_ = candidate.gravity;
+    last_applied_gravity_initialized_ = true;
+  }
   logger->info(
-    "latched yaw-isolation freeze anchor experiment={} gyro_bias=[{:.6f},{:.6f},{:.6f}] accel_bias=[{:.6f},{:.6f},{:.6f}] gravity=[{:.6f},{:.6f},{:.6f}]",
+    "latched yaw-isolation anchor experiment={} gyro_bias=[{:.6f},{:.6f},{:.6f}] accel_bias=[{:.6f},{:.6f},{:.6f}] gravity=[{:.6f},{:.6f},{:.6f}] gravity_mode={}",
     runtime_experiment_name(),
     isolation_freeze_anchor_.gyro_bias.x(),
     isolation_freeze_anchor_.gyro_bias.y(),
@@ -1747,42 +1811,146 @@ void OdometryEstimationBSpline::maybe_latch_isolation_freeze_anchor(
     isolation_freeze_anchor_.accel_bias.z(),
     isolation_freeze_anchor_.gravity.x(),
     isolation_freeze_anchor_.gravity.y(),
-    isolation_freeze_anchor_.gravity.z());
+    isolation_freeze_anchor_.gravity.z(),
+    to_string(gravity_mode_));
 }
 
-iap::BSplineFixedLagSharedState OdometryEstimationBSpline::effective_shared_imu_state() const {
-  auto state = fixed_lag_registry_.shared_state();
-  if (!any_shared_imu_freeze_experiment_enabled() || !isolation_freeze_anchor_latched_) {
+iap::BSplineFixedLagSharedState OdometryEstimationBSpline::effective_shared_imu_state(
+  const iap::BSplineFixedLagSharedState& candidate,
+  const int frame_id) const {
+  auto state = candidate;
+  if (!any_yaw_isolation_experiment_enabled()) {
     return state;
   }
-  if (exp_freeze_gyro_bias_) {
+
+  const auto normalized_or_fallback = [](const gtsam::Vector3& value, const gtsam::Vector3& fallback) {
+    const double value_norm = value.norm();
+    if (std::isfinite(value_norm) && value_norm > 1e-9) {
+      return gtsam::Vector3(value / value_norm);
+    }
+    const double fallback_norm = fallback.norm();
+    if (std::isfinite(fallback_norm) && fallback_norm > 1e-9) {
+      return gtsam::Vector3(fallback / fallback_norm);
+    }
+    return gtsam::Vector3(gtsam::Vector3::UnitZ());
+  };
+  const auto norm_or_fallback = [](const gtsam::Vector3& value, const double fallback_norm) {
+    const double value_norm = value.norm();
+    if (std::isfinite(value_norm) && value_norm > 1e-9) {
+      return value_norm;
+    }
+    if (std::isfinite(fallback_norm) && fallback_norm > 1e-9) {
+      return fallback_norm;
+    }
+    return 9.80665;
+  };
+  const auto slerp_clamped_direction =
+    [&](const gtsam::Vector3& reference, const gtsam::Vector3& target, const double max_angle_rad) {
+      const auto ref_dir = normalized_or_fallback(reference, gtsam::Vector3::UnitZ());
+      const auto target_dir = normalized_or_fallback(target, ref_dir);
+      if (!std::isfinite(max_angle_rad)) {
+        return target_dir;
+      }
+      if (max_angle_rad <= 0.0) {
+        return ref_dir;
+      }
+      const double cos_theta = std::clamp(static_cast<double>(ref_dir.dot(target_dir)), -1.0, 1.0);
+      const double angle = std::acos(cos_theta);
+      if (!std::isfinite(angle) || angle <= max_angle_rad) {
+        return target_dir;
+      }
+      const double t = std::clamp(max_angle_rad / angle, 0.0, 1.0);
+      const double sin_theta = std::sin(angle);
+      if (std::abs(sin_theta) < 1e-6) {
+        return normalized_or_fallback((1.0 - t) * ref_dir + t * target_dir, ref_dir);
+      }
+      return normalized_or_fallback(
+        (std::sin((1.0 - t) * angle) / sin_theta) * ref_dir +
+          (std::sin(t * angle) / sin_theta) * target_dir,
+        ref_dir);
+    };
+
+  if (exp_freeze_gyro_bias_ && isolation_freeze_anchor_latched_) {
     state.gyro_bias = isolation_freeze_anchor_.gyro_bias;
   }
-  if (exp_freeze_accel_bias_) {
+  if (exp_freeze_accel_bias_ && isolation_freeze_anchor_latched_) {
     state.accel_bias = isolation_freeze_anchor_.accel_bias;
   }
-  if (exp_freeze_gravity_) {
+  if (exp_freeze_gravity_ && isolation_freeze_anchor_latched_) {
     state.gravity = isolation_freeze_anchor_.gravity;
+    return state;
+  }
+  if (!any_soft_gravity_experiment_enabled()) {
+    return state;
+  }
+
+  const gtsam::Vector3 anchor_gravity =
+    isolation_freeze_anchor_latched_ ? isolation_freeze_anchor_.gravity : gtsam::Vector3(0.0, 0.0, 9.80665);
+  const gtsam::Vector3 reference_gravity =
+    last_applied_gravity_initialized_ ? last_applied_gravity_ : anchor_gravity;
+  switch (gravity_mode_) {
+    case BSplineGravityMode::NORMAL:
+      break;
+    case BSplineGravityMode::FIXED_NORM: {
+      const double fixed_norm =
+        (std::isfinite(gravity_fixed_norm_value_) && gravity_fixed_norm_value_ > 1e-9) ? gravity_fixed_norm_value_ : 9.80665;
+      const auto direction = normalized_or_fallback(state.gravity, anchor_gravity);
+      state.gravity = direction * fixed_norm;
+      break;
+    }
+    case BSplineGravityMode::LIMITED_TILT: {
+      const auto limited_direction =
+        slerp_clamped_direction(reference_gravity, state.gravity, gravity_tilt_limit_rad_);
+      const double gravity_norm = norm_or_fallback(state.gravity, reference_gravity.norm());
+      state.gravity = limited_direction * gravity_norm;
+      break;
+    }
+    case BSplineGravityMode::WARMUP_FREEZE_THEN_RELEASE: {
+      if (gravity_warmup_freeze_active(frame_id) && isolation_freeze_anchor_latched_) {
+        state.gravity = isolation_freeze_anchor_.gravity;
+      }
+      break;
+    }
   }
   return state;
 }
 
-void OdometryEstimationBSpline::apply_effective_shared_imu_state_to_registry() {
-  if (!any_shared_imu_freeze_experiment_enabled() || !isolation_freeze_anchor_latched_) {
+iap::BSplineFixedLagSharedState OdometryEstimationBSpline::effective_shared_imu_state(const int frame_id) const {
+  return effective_shared_imu_state(fixed_lag_registry_.shared_state(), frame_id);
+}
+
+void OdometryEstimationBSpline::apply_effective_shared_imu_state_to_registry(const int frame_id) {
+  if (!any_yaw_isolation_experiment_enabled()) {
     return;
   }
-  const auto frozen_state = effective_shared_imu_state();
+  const auto frozen_state = effective_shared_imu_state(frame_id);
   fixed_lag_registry_.set_shared_imu_state(
     frozen_state.gyro_bias,
     frozen_state.accel_bias,
     frozen_state.gravity);
+  if (any_gravity_isolation_experiment_enabled()) {
+    last_applied_gravity_ = frozen_state.gravity;
+    last_applied_gravity_initialized_ = true;
+  }
 }
 
-void OdometryEstimationBSpline::enforce_frozen_shared_values(gtsam::Values* values) const {
-  if (!values || !any_shared_imu_freeze_experiment_enabled() || !isolation_freeze_anchor_latched_) {
+void OdometryEstimationBSpline::enforce_frozen_shared_values(
+  gtsam::Values* values,
+  const int frame_id) const {
+  if (!values || !any_yaw_isolation_experiment_enabled()) {
     return;
   }
-  const auto frozen_state = effective_shared_imu_state();
+  auto candidate = fixed_lag_registry_.shared_state();
+  if (values->exists(bspline_gyro_bias_key())) {
+    candidate.gyro_bias = values->at<gtsam::Vector3>(bspline_gyro_bias_key());
+  }
+  if (values->exists(bspline_accel_bias_key())) {
+    candidate.accel_bias = values->at<gtsam::Vector3>(bspline_accel_bias_key());
+  }
+  if (values->exists(bspline_gravity_key())) {
+    candidate.gravity = values->at<gtsam::Vector3>(bspline_gravity_key());
+  }
+  const auto frozen_state = effective_shared_imu_state(candidate, frame_id);
   const auto update_or_insert_vec3 = [&](gtsam::Key key, const gtsam::Vector3& value) {
     if (values->exists(key)) {
       values->update(key, value);
@@ -1796,13 +1964,14 @@ void OdometryEstimationBSpline::enforce_frozen_shared_values(gtsam::Values* valu
   if (exp_freeze_accel_bias_) {
     update_or_insert_vec3(bspline_accel_bias_key(), frozen_state.accel_bias);
   }
-  if (exp_freeze_gravity_) {
+  if (exp_freeze_gravity_ || any_soft_gravity_experiment_enabled()) {
     update_or_insert_vec3(bspline_gravity_key(), frozen_state.gravity);
   }
 }
 
 std::string OdometryEstimationBSpline::runtime_experiment_name() const {
   return yaw_isolation_experiment_name_from_flags(
+    gravity_mode_,
     exp_freeze_gravity_,
     exp_freeze_gyro_bias_,
     exp_freeze_accel_bias_,
@@ -1841,6 +2010,24 @@ OdometryEstimationBSpline::OdometryEstimationBSpline(const OdometryEstimationBSp
         to_string(final_pose_surface_));
     }
   }
+  {
+    const std::string configured_gravity_mode =
+      config.param<std::string>("odometry_estimation", "exp.gravity_mode", "normal");
+    bool used_gravity_mode_fallback = false;
+    gravity_mode_ = parse_gravity_mode(configured_gravity_mode, &used_gravity_mode_fallback);
+    if (used_gravity_mode_fallback) {
+      logger->warn(
+        "unsupported odometry_estimation.exp.gravity_mode='{}'; fallback to '{}'",
+        configured_gravity_mode,
+        to_string(gravity_mode_));
+    }
+  }
+  gravity_fixed_norm_value_ =
+    config.param<double>("odometry_estimation", "exp.gravity_fixed_norm_value", 9.80665);
+  gravity_tilt_limit_rad_ =
+    config.param<double>("odometry_estimation", "exp.gravity_tilt_limit_rad", 0.02);
+  gravity_warmup_freeze_frames_ =
+    config.param<int>("odometry_estimation", "exp.gravity_warmup_freeze_frames", 20);
   exp_freeze_gravity_ =
     config.param<bool>("odometry_estimation", "exp_freeze_gravity", false);
   exp_freeze_gyro_bias_ =
@@ -1970,6 +2157,7 @@ OdometryEstimationBSpline::OdometryEstimationBSpline(const OdometryEstimationBSp
     params.imu_bias.tail<3>(),
     params.imu_bias.head<3>(),
     Eigen::Vector3d::UnitZ() * 9.80665);
+  last_applied_gravity_ = fixed_lag_registry_.shared_state().gravity;
   gnss_epoch_builder_ = std::make_unique<iap::GnssEpochBuilder>(make_gnss_epoch_builder_params(
     gnss_min_elevation_,
     gnss_pr_noise_base_,
@@ -2005,13 +2193,17 @@ OdometryEstimationBSpline::OdometryEstimationBSpline(const OdometryEstimationBSp
     logger->warn(
       "graph_problem_size requires log.profiling.frontend_frame=true; graph telemetry columns will remain disabled");
   }
-  logger->info("odometry_bspline initialized frontend_mode={} frontend_only_mode={} use_legacy_bspline_two_stage_path={} bspline_unified_solver_mode={} final_pose_surface={} yaw_isolation_experiment={} freeze_gravity={} freeze_gyro_bias={} freeze_accel_bias={} disable_velocity_factor={} disable_current_velocity_prior={} lidar_gpu_backend={} lidar_bucket_mode={} lidar_bucket_time_eps={:.6f} lidar_max_buckets={} lidar_fixed_buckets={} knot_mode={} nominal_dt={:.4f} compatibility_sample_dt={:.4f} lidar_target_mode={} lidar_jacobian_mode={} lidar_k_candidates={} lidar_accept_ratio={:.3f} lidar_score_gap={:.3f} lidar_snapshot_window={} lidar_snapshot_min_frames={} lidar_snapshot_min_points={} lidar_snapshot_max_age={:.3f} lidar_outlier_thresh={:.3f} lidar_robust_kernel={} lidar_robust_width={:.3f} lidar_robust_w_floor={:.3f} lidar_profile={} lidar_validate={} ct_pipeline_profile={} lidar_baseline_csv={} lidar_baseline_path={}",
+  logger->info("odometry_bspline initialized frontend_mode={} frontend_only_mode={} use_legacy_bspline_two_stage_path={} bspline_unified_solver_mode={} final_pose_surface={} yaw_isolation_experiment={} gravity_mode={} gravity_fixed_norm_value={:.6f} gravity_tilt_limit_rad={:.6f} gravity_warmup_freeze_frames={} freeze_gravity={} freeze_gyro_bias={} freeze_accel_bias={} disable_velocity_factor={} disable_current_velocity_prior={} lidar_gpu_backend={} lidar_bucket_mode={} lidar_bucket_time_eps={:.6f} lidar_max_buckets={} lidar_fixed_buckets={} knot_mode={} nominal_dt={:.4f} compatibility_sample_dt={:.4f} lidar_target_mode={} lidar_jacobian_mode={} lidar_k_candidates={} lidar_accept_ratio={:.3f} lidar_score_gap={:.3f} lidar_snapshot_window={} lidar_snapshot_min_frames={} lidar_snapshot_min_points={} lidar_snapshot_max_age={:.3f} lidar_outlier_thresh={:.3f} lidar_robust_kernel={} lidar_robust_width={:.3f} lidar_robust_w_floor={:.3f} lidar_profile={} lidar_validate={} ct_pipeline_profile={} lidar_baseline_csv={} lidar_baseline_path={}",
     frontend_mode_,
     frontend_only_mode_,
     use_legacy_bspline_two_stage_path_,
     iap::to_string(unified_solver_mode_),
     to_string(final_pose_surface_),
     runtime_experiment_name(),
+    to_string(gravity_mode_),
+    gravity_fixed_norm_value_,
+    gravity_tilt_limit_rad_,
+    gravity_warmup_freeze_frames_,
     exp_freeze_gravity_,
     exp_freeze_gyro_bias_,
     exp_freeze_accel_bias_,
@@ -3016,7 +3208,7 @@ EstimationFrame::ConstPtr OdometryEstimationBSpline::insert_frame_ct_lidar_legac
       new_frame->imu_bias.head<3>(),
       fixed_lag_registry_.shared_state().gravity);
     maybe_latch_isolation_freeze_anchor(fixed_lag_registry_.shared_state());
-    apply_effective_shared_imu_state_to_registry();
+    apply_effective_shared_imu_state_to_registry(current);
     fixed_lag_registry_.clear_auxiliary_values();
     fixed_lag_registry_.auxiliary_values().insert(iap::bspline_velocity_key(control_window_->states()[1].index), new_frame->v_world_imu);
 
@@ -3127,7 +3319,7 @@ EstimationFrame::ConstPtr OdometryEstimationBSpline::insert_frame_ct_lidar_legac
       new_frame->imu_bias.head<3>(),
       fixed_lag_registry_.shared_state().gravity);
     maybe_latch_isolation_freeze_anchor(fixed_lag_registry_.shared_state());
-    apply_effective_shared_imu_state_to_registry();
+    apply_effective_shared_imu_state_to_registry(current);
 
     auto deskewed_frame = ct_local_result.processed.deskewed_source_cloud
       ? gtsam_points::PointCloudCPU::clone(*ct_local_result.processed.deskewed_source_cloud)
@@ -3406,7 +3598,7 @@ EstimationFrame::ConstPtr OdometryEstimationBSpline::insert_frame_ct_lidar_legac
   const gtsam::Key gyro_bias_key = bspline_gyro_bias_key();
   const gtsam::Key accel_bias_key = bspline_accel_bias_key();
   const gtsam::Key gravity_key = bspline_gravity_key();
-  apply_effective_shared_imu_state_to_registry();
+  apply_effective_shared_imu_state_to_registry(current);
   fixed_lag_registry_.seed_shared_values(values, fixed_lag_registry_.shared_state().gnss_anchor_initialized);
 
   gtsam::NonlinearFactorGraph graph;
@@ -3840,7 +4032,7 @@ EstimationFrame::ConstPtr OdometryEstimationBSpline::insert_frame_ct_lidar_legac
   const auto gnss_ecef_rot_noise = gtsam::noiseModel::Isotropic::Sigma(3, gnss_sigma_ecef_rot_);
   const auto clock_prior_noise = gtsam::noiseModel::Diagonal::Sigmas(
     (gtsam::Vector2() << params->clk_bias_noise, params->clk_drift_noise).finished());
-  const auto shared_state = effective_shared_imu_state();
+  const auto shared_state = effective_shared_imu_state(current);
   const bool shared_state_frozen =
     any_shared_imu_freeze_experiment_enabled() && isolation_freeze_anchor_latched_;
 
@@ -4034,9 +4226,12 @@ EstimationFrame::ConstPtr OdometryEstimationBSpline::insert_frame_ct_lidar_legac
     static_cast<std::uint64_t>(keys[2]),
     static_cast<std::uint64_t>(keys[3]));
 
+  enforce_frozen_shared_values(&values, current);
   fixed_lag_registry_.control_buffer().update_from_values(values);
   control_window_->update_from_values(values);
   fixed_lag_registry_.update_shared_state_from_values(values);
+  maybe_latch_isolation_freeze_anchor(fixed_lag_registry_.shared_state());
+  apply_effective_shared_imu_state_to_registry(current);
   fixed_lag_registry_.clear_auxiliary_values();
   for (const auto& segment : fixed_lag_registry_.segments()) {
     const gtsam::Key velocity_key = iap::bspline_velocity_key(segment.auxiliary_index);
@@ -5076,7 +5271,7 @@ EstimationFrame::ConstPtr OdometryEstimationBSpline::insert_frame_ct_lidar_unifi
       new_frame->imu_bias.head<3>(),
       fixed_lag_registry_.shared_state().gravity);
     maybe_latch_isolation_freeze_anchor(fixed_lag_registry_.shared_state());
-    apply_effective_shared_imu_state_to_registry();
+    apply_effective_shared_imu_state_to_registry(current);
     fixed_lag_registry_.clear_auxiliary_values();
     fixed_lag_registry_.auxiliary_values().insert(iap::bspline_velocity_key(control_window_->states()[1].index), new_frame->v_world_imu);
 
@@ -5137,7 +5332,7 @@ EstimationFrame::ConstPtr OdometryEstimationBSpline::insert_frame_ct_lidar_unifi
   gtsam::Values values = fixed_lag_registry_.control_buffer().values();
   const iap::BSplineCarriedPrior previous_carried_prior = marginal_prior_.carried_prior;
   const bool navigation_layer_enabled = !frontend_only_mode_ && fixed_lag_registry_.shared_state().gnss_anchor_initialized;
-  apply_effective_shared_imu_state_to_registry();
+  apply_effective_shared_imu_state_to_registry(current);
   fixed_lag_registry_.seed_shared_values(values, navigation_layer_enabled);
 
   for (const auto& segment : fixed_lag_registry_.segments()) {
@@ -5250,7 +5445,7 @@ EstimationFrame::ConstPtr OdometryEstimationBSpline::insert_frame_ct_lidar_unifi
   const auto gnss_ecef_rot_noise = gtsam::noiseModel::Isotropic::Sigma(3, gnss_sigma_ecef_rot_);
   const auto clock_prior_noise = gtsam::noiseModel::Diagonal::Sigmas(
     (gtsam::Vector2() << params->clk_bias_noise, params->clk_drift_noise).finished());
-  const auto shared_state = effective_shared_imu_state();
+  const auto shared_state = effective_shared_imu_state(current);
   const bool shared_state_frozen =
     any_shared_imu_freeze_experiment_enabled() && isolation_freeze_anchor_latched_;
 
@@ -5443,12 +5638,12 @@ EstimationFrame::ConstPtr OdometryEstimationBSpline::insert_frame_ct_lidar_unifi
   timing.lm_optimize_ms = elapsed_ms(t_optimize_start, Clock::now());
   const double lm_final_cost = graph.empty() ? 0.0 : graph.error(values);
 
-  enforce_frozen_shared_values(&values);
+  enforce_frozen_shared_values(&values, current);
   fixed_lag_registry_.control_buffer().update_from_values(values);
   control_window_->update_from_values(values);
   fixed_lag_registry_.update_shared_state_from_values(values);
   maybe_latch_isolation_freeze_anchor(fixed_lag_registry_.shared_state());
-  apply_effective_shared_imu_state_to_registry();
+  apply_effective_shared_imu_state_to_registry(current);
   fixed_lag_registry_.clear_auxiliary_values();
   for (const auto& segment : fixed_lag_registry_.segments()) {
     const gtsam::Key velocity_key = iap::bspline_velocity_key(segment.auxiliary_index);
@@ -6032,7 +6227,7 @@ EstimationFrame::ConstPtr OdometryEstimationBSpline::insert_frame_ct_lidar_incre
       new_frame->imu_bias.head<3>(),
       fixed_lag_registry_.shared_state().gravity);
     maybe_latch_isolation_freeze_anchor(fixed_lag_registry_.shared_state());
-    apply_effective_shared_imu_state_to_registry();
+    apply_effective_shared_imu_state_to_registry(current);
     fixed_lag_registry_.clear_auxiliary_values();
     fixed_lag_registry_.auxiliary_values().insert(
       iap::bspline_velocity_key(control_window_->states()[1].index),
@@ -6106,7 +6301,7 @@ EstimationFrame::ConstPtr OdometryEstimationBSpline::insert_frame_ct_lidar_incre
     fixed_lag_registry_.segments().size() >= 2 ? &fixed_lag_registry_.segments()[fixed_lag_registry_.segments().size() - 2] : nullptr;
   const bool navigation_layer_enabled = !frontend_only_mode_;
 
-  apply_effective_shared_imu_state_to_registry();
+  apply_effective_shared_imu_state_to_registry(current);
   gtsam::Values mirror_values = fixed_lag_registry_.control_buffer().values();
   fixed_lag_registry_.seed_shared_values(
     mirror_values,
@@ -6211,7 +6406,7 @@ EstimationFrame::ConstPtr OdometryEstimationBSpline::insert_frame_ct_lidar_incre
   const auto gnss_ecef_rot_noise = gtsam::noiseModel::Isotropic::Sigma(3, gnss_sigma_ecef_rot_);
   const auto clock_prior_noise = gtsam::noiseModel::Diagonal::Sigmas(
     (gtsam::Vector2() << params->clk_bias_noise, params->clk_drift_noise).finished());
-  const auto shared_state = effective_shared_imu_state();
+  const auto shared_state = effective_shared_imu_state(current);
   const bool shared_state_frozen =
     any_shared_imu_freeze_experiment_enabled() && isolation_freeze_anchor_latched_;
 
@@ -6518,14 +6713,14 @@ EstimationFrame::ConstPtr OdometryEstimationBSpline::insert_frame_ct_lidar_incre
   }
   fixed_lag_registry_.retire_announced_keys(solver_result.retired_keys);
 
-  enforce_frozen_shared_values(&solver_result.estimate_subset);
+  enforce_frozen_shared_values(&solver_result.estimate_subset, current);
   fixed_lag_registry_.control_buffer().update_from_values(solver_result.estimate_subset);
   control_window_->update_from_values(solver_result.estimate_subset);
   if (local_contribution.uses_shared_imu_state || navigation_layer_enabled) {
     fixed_lag_registry_.update_shared_state_from_values(solver_result.estimate_subset);
   }
   maybe_latch_isolation_freeze_anchor(fixed_lag_registry_.shared_state());
-  apply_effective_shared_imu_state_to_registry();
+  apply_effective_shared_imu_state_to_registry(current);
   fixed_lag_registry_.clear_auxiliary_values();
   for (const auto key : solver_result.active_aux_keys) {
     if (!solver_result.estimate_subset.exists(key)) {

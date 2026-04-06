@@ -90,6 +90,13 @@ enum class BSplineFinalPoseSurface {
   STRICT_LOCAL,
 };
 
+enum class BSplineGravityMode {
+  NORMAL,
+  FIXED_NORM,
+  LIMITED_TILT,
+  WARMUP_FREEZE_THEN_RELEASE,
+};
+
 class OdometryEstimationBSpline : public OdometryEstimationCPU {
  public:
   EIGEN_MAKE_ALIGNED_OPERATOR_NEW
@@ -479,11 +486,17 @@ class OdometryEstimationBSpline : public OdometryEstimationCPU {
     const gtsam::KeyVector& existing_keys,
     bool navigation_layer_enabled) const;
   bool any_shared_imu_freeze_experiment_enabled() const;
+  bool any_soft_gravity_experiment_enabled() const;
+  bool any_gravity_isolation_experiment_enabled() const;
   bool any_yaw_isolation_experiment_enabled() const;
+  bool gravity_warmup_freeze_active(int frame_id) const;
   void maybe_latch_isolation_freeze_anchor(const iap::BSplineFixedLagSharedState& candidate);
-  iap::BSplineFixedLagSharedState effective_shared_imu_state() const;
-  void apply_effective_shared_imu_state_to_registry();
-  void enforce_frozen_shared_values(gtsam::Values* values) const;
+  iap::BSplineFixedLagSharedState effective_shared_imu_state(int frame_id) const;
+  iap::BSplineFixedLagSharedState effective_shared_imu_state(
+    const iap::BSplineFixedLagSharedState& candidate,
+    int frame_id) const;
+  void apply_effective_shared_imu_state_to_registry(int frame_id);
+  void enforce_frozen_shared_values(gtsam::Values* values, int frame_id) const;
   std::string runtime_experiment_name() const;
   void reset_unified_graph_solver();
 
@@ -502,6 +515,10 @@ class OdometryEstimationBSpline : public OdometryEstimationCPU {
   bool use_legacy_bspline_two_stage_path_ = false;
   iap::BSplineUnifiedSolverMode unified_solver_mode_ = iap::BSplineUnifiedSolverMode::BATCH_LM;
   BSplineFinalPoseSurface final_pose_surface_ = BSplineFinalPoseSurface::STRICT_LOCAL;
+  BSplineGravityMode gravity_mode_ = BSplineGravityMode::NORMAL;
+  double gravity_fixed_norm_value_ = 9.80665;
+  double gravity_tilt_limit_rad_ = 0.02;
+  int gravity_warmup_freeze_frames_ = 20;
   bool exp_freeze_gravity_ = false;
   bool exp_freeze_gyro_bias_ = false;
   bool exp_freeze_accel_bias_ = false;
@@ -509,6 +526,8 @@ class OdometryEstimationBSpline : public OdometryEstimationCPU {
   bool exp_disable_current_velocity_prior_ = false;
   bool isolation_freeze_anchor_latched_ = false;
   iap::BSplineFixedLagSharedState isolation_freeze_anchor_;
+  bool last_applied_gravity_initialized_ = false;
+  gtsam::Vector3 last_applied_gravity_ = gtsam::Vector3(0.0, 0.0, 9.80665);
   double isolation_freeze_prior_precision_ = 1e12;
   double max_correspondence_distance_ = 1.0;
   iap::CTLocalFrontend::BucketConfig lidar_bucket_config_;

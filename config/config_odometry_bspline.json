@@ -47,9 +47,19 @@
     //   active_window = debug / regression / boundary-surface comparison only
     "final_pose_surface": "strict_local",
     // Strict-local yaw residual isolation experiments (default off):
-    //   freeze_*                 = hold the corresponding shared IMU/gravity state at the first initialized tracking estimate
-    //   disable_velocity_factor  = skip IntegratedBSplineVelocityFactor construction
+    //   exp.gravity_mode = soft gravity-handling experiment path
+    //     normal                    = current behavior
+    //     fixed_norm                = keep gravity magnitude fixed while direction can update
+    //     limited_tilt              = clamp gravity direction change per update
+    //     warmup_freeze_then_release = hold gravity at the startup anchor for the first N frames, then release
+    //   exp_freeze_gravity          = legacy hard-freeze reference experiment
+    //   freeze_*                    = hold the corresponding shared IMU/gravity state at the first initialized tracking estimate
+    //   disable_velocity_factor     = skip IntegratedBSplineVelocityFactor construction
     //   disable_current_velocity_prior = skip explicit odometry-created current velocity prior hooks
+    "exp.gravity_mode": "normal",
+    "exp.gravity_fixed_norm_value": 9.80665,
+    "exp.gravity_tilt_limit_rad": 0.02,
+    "exp.gravity_warmup_freeze_frames": 20,
     "exp_freeze_gravity": false,
     "exp_freeze_gyro_bias": false,
     "exp_freeze_accel_bias": false,
