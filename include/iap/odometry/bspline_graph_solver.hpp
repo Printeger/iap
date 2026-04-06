@@ -1,5 +1,6 @@
 #pragma once
 
+#include <iap/odometry/bspline_lidar_factor_churn.hpp>
 #include <iap/odometry/spline_state_layout.hpp>
 
 #include <gtsam/nonlinear/NonlinearFactorGraph.h>
@@ -10,6 +11,7 @@
 #include <cstddef>
 #include <memory>
 #include <string>
+#include <unordered_map>
 
 namespace iap {
 
@@ -33,10 +35,13 @@ struct BSplineGraphDelta {
   double current_frame_stamp{0.0};
   double min_active_stamp{0.0};
   std::size_t current_auxiliary_index{0};
+  std::size_t current_lidar_source_frame_index{0};
   bool local_layer_enabled{false};
   bool navigation_layer_enabled{false};
   std::size_t local_layer_factor_count{0};
   std::size_t navigation_layer_factor_count{0};
+  std::vector<std::size_t> current_lidar_support_control_indices;
+  std::vector<BSplineLidarFactorTelemetryMetadata> lidar_factor_metadata;
 };
 
 struct BSplineSolverResult {
@@ -67,8 +72,25 @@ struct BSplineSolverResult {
   std::size_t active_window_imu_factor_count{0};
   std::size_t active_window_velocity_factor_count{0};
   std::size_t active_window_lidar_factor_count{0};
+  std::size_t active_window_lidar_current_segment_factor_count{0};
+  std::size_t active_window_lidar_old_segment_factor_count{0};
   std::size_t active_window_prior_factor_count{0};
   std::size_t active_window_shared_jkg_touching_factor_count{0};
+  std::size_t recalculated_imu_factor_count{0};
+  std::size_t recalculated_velocity_factor_count{0};
+  std::size_t recalculated_lidar_factor_count{0};
+  std::size_t recalculated_lidar_current_segment_factor_count{0};
+  std::size_t recalculated_lidar_old_segment_factor_count{0};
+  std::size_t recalculated_lidar_same_support_factor_count{0};
+  std::size_t recalculated_lidar_cross_support_factor_count{0};
+  std::size_t recalculated_prior_factor_count{0};
+  std::size_t recalculated_shared_jkg_touching_factor_count{0};
+  std::size_t relinearized_pose_variable_count{0};
+  std::size_t relinearized_aux_variable_count{0};
+  std::size_t relinearized_shared_variable_count{0};
+  std::size_t affected_pose_key_count{0};
+  std::size_t affected_aux_key_count{0};
+  std::size_t affected_shared_key_count{0};
   double isam_reported_update_ms{0.0};
   int iteration_count{0};
   std::string solver_status{"unavailable"};
@@ -120,6 +142,7 @@ private:
   gtsam::ISAM2Params isam2_params_;
   std::unique_ptr<gtsam_points::IncrementalFixedLagSmootherExt> smoother_;
   gtsam::KeyVector current_active_keys_;
+  BSplineLidarFactorMetadataMap lidar_factor_metadata_by_index_;
 };
 
 }  // namespace iap

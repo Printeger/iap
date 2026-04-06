@@ -120,6 +120,8 @@ add_library(iap SHARED
   src/iap/planner/integrity_planner.cpp
   # odometry
   src/iap/odometry/bspline_control_window.cpp
+  src/iap/odometry/bspline_factor_family.cpp
+  src/iap/odometry/bspline_lidar_factor_churn.cpp
   src/iap/odometry/bspline_graph_solver.cpp
   src/iap/odometry/bspline_marginalization.cpp
   src/iap/odometry/callbacks.cpp
@@ -446,6 +448,8 @@ if(DEFINED ENV{ROS_VERSION})
       target_link_libraries(test_bspline_marginalization iap)
       ament_add_gtest(test_bspline_fixed_lag_registry test/test_bspline_fixed_lag_registry.cpp)
       target_link_libraries(test_bspline_fixed_lag_registry iap)
+      ament_add_gtest(test_bspline_factor_family test/test_bspline_factor_family.cpp)
+      target_link_libraries(test_bspline_factor_family iap)
       ament_add_gtest(test_bspline_spline_query test/test_bspline_spline_query.cpp)
       target_link_libraries(test_bspline_spline_query iap)
       ament_add_gtest(test_ct_local_frontend test/test_ct_local_frontend.cpp)

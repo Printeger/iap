@@ -45,8 +45,8 @@
   // image_qos              : QoS options for image topic subscription. See imu_qos for details.
   "glim_ros": {
     // Backend modules
-    "enable_local_mapping": true,
-    "enable_global_mapping": true,
+    "enable_local_mapping": false,
+    "enable_global_mapping": false,
     // Points config
     "keep_raw_points": false,
     // IMU config
@@ -61,10 +61,13 @@
     "map_frame_id": "map",
     "publish_imu2lidar": true,
     "tf_time_offset": 1e-6,
+    // Frontend RViz outputs (published only when odometry_estimation.frontend_only_mode=true)
+    "frontend_pose_topic": "/iap/frontend/pose",
+    "frontend_path_topic": "/iap/frontend/path",
     "dump_path": "/tmp/dump",
     // Extension modules
     "extension_modules": [
-      "libgnss_extension.so",
+      // "libgnss_extension.so",
       "libtrunk_extension.so",
       "libintegrity_extension.so",
       "libstandard_viewer.so",

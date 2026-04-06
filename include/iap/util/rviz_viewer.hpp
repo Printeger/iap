@@ -14,6 +14,7 @@
 #include <tf2_ros/transform_broadcaster.h>
 
 #include <nav_msgs/msg/odometry.hpp>
+#include <nav_msgs/msg/path.hpp>
 #include <geometry_msgs/msg/pose_stamped.hpp>
 #include <sensor_msgs/msg/point_cloud2.hpp>
 
@@ -65,6 +66,9 @@ private:
   std::string map_frame_id;
   bool publish_imu2lidar;
   double tf_time_offset;
+  bool frontend_visualization_enabled_ = false;
+  std::string frontend_pose_topic_ = "/iap/frontend/pose";
+  std::string frontend_path_topic_ = "/iap/frontend/path";
 
   std::shared_ptr<rclcpp::Publisher<sensor_msgs::msg::PointCloud2>> points_pub;
   std::shared_ptr<rclcpp::Publisher<sensor_msgs::msg::PointCloud2>> aligned_points_pub;
@@ -82,6 +86,10 @@ private:
   std::shared_ptr<rclcpp::Publisher<geometry_msgs::msg::PoseStamped>> pose_corrected_pub;
   std::shared_ptr<rclcpp::Publisher<nav_msgs::msg::Odometry>> odom_scanend_corrected_pub;
   std::shared_ptr<rclcpp::Publisher<geometry_msgs::msg::PoseStamped>> pose_scanend_corrected_pub;
+  std::shared_ptr<rclcpp::Publisher<geometry_msgs::msg::PoseStamped>> frontend_pose_pub;
+  std::shared_ptr<rclcpp::Publisher<nav_msgs::msg::Path>> frontend_path_pub;
+  nav_msgs::msg::Path frontend_path_msg_;
+  double last_frontend_path_stamp_ = -1.0;
 
   std::mutex trajectory_mutex;
   std::unique_ptr<TrajectoryManager> trajectory;

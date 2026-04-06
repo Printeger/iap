@@ -20,6 +20,7 @@ namespace glim {
 
 RvizViewer::RvizViewer() : logger(create_module_logger("rviz")) {
   const Config config(GlobalConfig::get_config_path("config_ros"));
+  const Config odom_config(GlobalConfig::get_config_path("config_odometry"));
 
   imu_frame_id = config.param<std::string>("glim_ros", "imu_frame_id", "");
   lidar_frame_id = config.param<std::string>("glim_ros", "lidar_frame_id", "");
@@ -32,6 +33,13 @@ RvizViewer::RvizViewer() : logger(create_module_logger("rviz")) {
   map_frame_id = config.param<std::string>("glim_ros", "map_frame_id", "map");
   publish_imu2lidar = config.param<bool>("glim_ros", "publish_imu2lidar", true);
   tf_time_offset = config.param<double>("glim_ros", "tf_time_offset", 1e-6);
+  frontend_visualization_enabled_ =
+    odom_config.param<bool>("odometry_estimation", "frontend_only_mode", false);
+  frontend_pose_topic_ =
+    config.param<std::string>("glim_ros", "frontend_pose_topic", "/iap/frontend/pose");
+  frontend_path_topic_ =
+    config.param<std::string>("glim_ros", "frontend_path_topic", "/iap/frontend/path");
+  frontend_path_msg_.header.frame_id = map_frame_id;
 
   last_globalmap_pub_time = rclcpp::Clock(rcl_clock_type_t::RCL_ROS_TIME).now();
   trajectory.reset(new TrajectoryManager);
@@ -90,6 +98,12 @@ std::vector<GenericTopicSubscription::Ptr> RvizViewer::create_subscriptions(rclc
   pose_corrected_pub = node.create_publisher<geometry_msgs::msg::PoseStamped>("~/pose_corrected", 10);
   odom_scanend_corrected_pub = node.create_publisher<nav_msgs::msg::Odometry>("~/odom_scanend_corrected", 10);
   pose_scanend_corrected_pub = node.create_publisher<geometry_msgs::msg::PoseStamped>("~/pose_scanend_corrected", 10);
+
+  if (frontend_visualization_enabled_) {
+    frontend_pose_pub = node.create_publisher<geometry_msgs::msg::PoseStamped>(frontend_pose_topic_, 10);
+    frontend_path_pub = node.create_publisher<nav_msgs::msg::Path>(frontend_path_topic_, 10);
+    logger->info("frontend RViz pose/path publishers enabled: pose_topic={} path_topic={}", frontend_pose_topic_, frontend_path_topic_);
+  }
 
   return {};
 }
@@ -313,6 +327,36 @@ void RvizViewer::odometry_new_frame(const EstimationFrame::ConstPtr& new_frame, 
     pose_pub->publish(pose);
 
     logger->debug("published pose (stamp={})", new_frame->stamp);
+  }
+
+  if (frontend_visualization_enabled_ && !corrected) {
+    geometry_msgs::msg::PoseStamped frontend_pose;
+    frontend_pose.header.stamp = stamp;
+    frontend_pose.header.frame_id = map_frame_id;
+    frontend_pose.pose.position.x = T_world_imu.translation().x();
+    frontend_pose.pose.position.y = T_world_imu.translation().y();
+    frontend_pose.pose.position.z = T_world_imu.translation().z();
+    frontend_pose.pose.orientation.x = quat_world_imu.x();
+    frontend_pose.pose.orientation.y = quat_world_imu.y();
+    frontend_pose.pose.orientation.z = quat_world_imu.z();
+    frontend_pose.pose.orientation.w = quat_world_imu.w();
+
+    if (frontend_pose_pub && frontend_pose_pub->get_subscription_count()) {
+      frontend_pose_pub->publish(frontend_pose);
+    }
+
+    if (new_frame->stamp + 1e-6 < last_frontend_path_stamp_) {
+      frontend_path_msg_.poses.clear();
+    }
+    last_frontend_path_stamp_ = new_frame->stamp;
+
+    frontend_path_msg_.header.stamp = stamp;
+    frontend_path_msg_.header.frame_id = map_frame_id;
+    frontend_path_msg_.poses.push_back(frontend_pose);
+
+    if (frontend_path_pub && frontend_path_pub->get_subscription_count()) {
+      frontend_path_pub->publish(frontend_path_msg_);
+    }
   }
 
   auto& pose_scan_end_pub = !corrected ? this->pose_scanend_pub : this->pose_scanend_corrected_pub;
