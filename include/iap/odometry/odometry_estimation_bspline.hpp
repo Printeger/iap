@@ -208,6 +208,30 @@ class OdometryEstimationBSpline : public OdometryEstimationCPU {
     double delta_postsolve_active_window_to_postsolve_strict_local_rotation_rad{0.0};
     double delta_frontend_to_final_translation_norm{0.0};
     double delta_frontend_to_final_rotation_rad{0.0};
+    double delta_frontend_to_final_yaw_rad{0.0};
+    double delta_frontend_to_final_pitch_rad{0.0};
+    double delta_frontend_to_final_roll_rad{0.0};
+    double delta_frontend_to_final_dx{0.0};
+    double delta_frontend_to_final_dy{0.0};
+    double delta_frontend_to_final_dz{0.0};
+    double current_velocity_norm{0.0};
+    double current_velocity_heading_rad{0.0};
+    bool current_velocity_heading_valid{false};
+    std::size_t velocity_factor_count{0};
+    std::size_t prior_factor_count{0};
+    bool uses_shared_imu_state{false};
+    double frontend_world_to_lidar_yaw{0.0};
+    double frontend_world_to_imu_yaw{0.0};
+    double final_world_to_lidar_yaw{0.0};
+    double final_world_to_imu_yaw{0.0};
+    double lidar_to_imu_extrinsic_yaw{0.0};
+    std::string yaw_chain_consistency_flag{"none"};
+    double gyro_bias_norm{0.0};
+    double accel_bias_norm{0.0};
+    double gravity_world_x{0.0};
+    double gravity_world_y{0.0};
+    double gravity_world_z{0.0};
+    double gravity_dir_tilt_rad{0.0};
 
     double lidar_layout_domain_begin{0.0};
     double lidar_layout_domain_end{0.0};
@@ -227,6 +251,9 @@ class OdometryEstimationBSpline : public OdometryEstimationCPU {
     std::string postsolve_strict_local_support_keys_summary;
     std::string postsolve_strict_local_layout_name;
     std::string postsolve_strict_local_support_mismatch_reason{"none"};
+    std::size_t strict_local_query_support_key_count{0};
+    std::string strict_local_query_support_keys_summary;
+    std::string strict_local_query_reason{"none"};
 
     double match_ratio{0.0};
     double inlier_ratio{0.0};
@@ -451,6 +478,13 @@ class OdometryEstimationBSpline : public OdometryEstimationCPU {
     std::shared_ptr<const iap::SplineStateLayout> factor_layout,
     const gtsam::KeyVector& existing_keys,
     bool navigation_layer_enabled) const;
+  bool any_shared_imu_freeze_experiment_enabled() const;
+  bool any_yaw_isolation_experiment_enabled() const;
+  void maybe_latch_isolation_freeze_anchor(const iap::BSplineFixedLagSharedState& candidate);
+  iap::BSplineFixedLagSharedState effective_shared_imu_state() const;
+  void apply_effective_shared_imu_state_to_registry();
+  void enforce_frozen_shared_values(gtsam::Values* values) const;
+  std::string runtime_experiment_name() const;
   void reset_unified_graph_solver();
 
   iap::BSplineTrajectory::Params trajectory_params_;
@@ -468,6 +502,14 @@ class OdometryEstimationBSpline : public OdometryEstimationCPU {
   bool use_legacy_bspline_two_stage_path_ = false;
   iap::BSplineUnifiedSolverMode unified_solver_mode_ = iap::BSplineUnifiedSolverMode::BATCH_LM;
   BSplineFinalPoseSurface final_pose_surface_ = BSplineFinalPoseSurface::STRICT_LOCAL;
+  bool exp_freeze_gravity_ = false;
+  bool exp_freeze_gyro_bias_ = false;
+  bool exp_freeze_accel_bias_ = false;
+  bool exp_disable_velocity_factor_ = false;
+  bool exp_disable_current_velocity_prior_ = false;
+  bool isolation_freeze_anchor_latched_ = false;
+  iap::BSplineFixedLagSharedState isolation_freeze_anchor_;
+  double isolation_freeze_prior_precision_ = 1e12;
   double max_correspondence_distance_ = 1.0;
   iap::CTLocalFrontend::BucketConfig lidar_bucket_config_;
   BSplineLidarTargetMode lidar_target_mode_ = BSplineLidarTargetMode::ACTIVE_WINDOW_SNAPSHOT;

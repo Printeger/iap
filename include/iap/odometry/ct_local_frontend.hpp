@@ -113,6 +113,7 @@ class CTLocalFrontend {
       IntegratedSplineGICPFactor::RobustKernel::NONE};
     double robust_kernel_width{1.0};
     double robust_weight_floor{0.0};
+    bool enable_velocity_factor{true};
   };
 
   static const char* bucket_mode_name(LidarBucketMode mode);

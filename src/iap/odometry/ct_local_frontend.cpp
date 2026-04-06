@@ -650,14 +650,16 @@ BSplineLocalLayerContribution CTLocalFrontend::assemble_local_layer(const LayerI
     }
 
     const gtsam::Key velocity_key = bspline_velocity_key(segment.auxiliary_index);
-    contribution.graph.add(std::make_shared<IntegratedBSplineVelocityFactor>(
-      segment_pose_keys,
-      velocity_key,
-      0.0,
-      std::max(1e-3, segment.source_frame.scan_end - segment.source_frame.scan_start),
-      input.velocity_precision,
-      input.finite_difference_dt));
-    ++contribution.velocity_factor_count;
+    if (input.enable_velocity_factor) {
+      contribution.graph.add(std::make_shared<IntegratedBSplineVelocityFactor>(
+        segment_pose_keys,
+        velocity_key,
+        0.0,
+        std::max(1e-3, segment.source_frame.scan_end - segment.source_frame.scan_start),
+        input.velocity_precision,
+        input.finite_difference_dt));
+      ++contribution.velocity_factor_count;
+    }
 
     const auto t_imu_build_start = Clock::now();
     for (const auto& imu_sample : segment.imu_samples) {

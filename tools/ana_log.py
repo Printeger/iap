@@ -364,6 +364,11 @@ def build_config_summary(configs: dict[str, Any], runtime_summary: dict[str, Any
     summary["frontend_mode"] = odom_block.get("frontend_mode")
     summary["frontend_only_mode"] = odom_block.get("frontend_only_mode")
     summary["final_pose_surface"] = odom_block.get("final_pose_surface")
+    summary["exp_freeze_gravity"] = odom_block.get("exp_freeze_gravity")
+    summary["exp_freeze_gyro_bias"] = odom_block.get("exp_freeze_gyro_bias")
+    summary["exp_freeze_accel_bias"] = odom_block.get("exp_freeze_accel_bias")
+    summary["exp_disable_velocity_factor"] = odom_block.get("exp_disable_velocity_factor")
+    summary["exp_disable_current_velocity_prior"] = odom_block.get("exp_disable_current_velocity_prior")
     summary["bucket_mode"] = odom_block.get("ct_lidar_bucket_mode")
     summary["bucket_time_eps"] = odom_block.get("ct_lidar_bucket_time_eps")
     summary["bucket_fixed_count"] = odom_block.get("ct_lidar_fixed_buckets_per_scan")
@@ -417,6 +422,17 @@ def build_config_summary(configs: dict[str, Any], runtime_summary: dict[str, Any
         "runtime_log_profiling_jump_diagnostics",
         "config_final_pose_surface",
         "runtime_final_pose_surface",
+        "config_exp_freeze_gravity",
+        "runtime_exp_freeze_gravity",
+        "config_exp_freeze_gyro_bias",
+        "runtime_exp_freeze_gyro_bias",
+        "config_exp_freeze_accel_bias",
+        "runtime_exp_freeze_accel_bias",
+        "config_exp_disable_velocity_factor",
+        "runtime_exp_disable_velocity_factor",
+        "config_exp_disable_current_velocity_prior",
+        "runtime_exp_disable_current_velocity_prior",
+        "runtime_experiment_name",
     ]:
         if key in run_info:
             summary[key] = run_info[key]
@@ -1214,6 +1230,7 @@ def analyze_pipeline_timing(pipeline_df: pd.DataFrame, out_dir: Path, render_plo
 def analyze_jump_diagnostics(
     jump_df: pd.DataFrame | None,
     runtime_final_pose_surface: str = "active_window",
+    experiment_config: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     analysis: dict[str, Any] = {"available": False}
     if jump_df is None or jump_df.empty:
@@ -1243,12 +1260,36 @@ def analyze_jump_diagnostics(
         "delta_postsolve_active_window_to_postsolve_strict_local_rotation_rad",
         "delta_frontend_to_final_translation_norm",
         "delta_frontend_to_final_rotation_rad",
+        "delta_frontend_to_final_yaw_rad",
+        "delta_frontend_to_final_pitch_rad",
+        "delta_frontend_to_final_roll_rad",
+        "delta_frontend_to_final_dx",
+        "delta_frontend_to_final_dy",
+        "delta_frontend_to_final_dz",
+        "current_velocity_norm",
+        "current_velocity_heading_rad",
+        "current_velocity_heading_valid",
+        "velocity_factor_count",
+        "prior_factor_count",
+        "uses_shared_imu_state",
+        "frontend_world_to_lidar_yaw",
+        "frontend_world_to_imu_yaw",
+        "final_world_to_lidar_yaw",
+        "final_world_to_imu_yaw",
+        "lidar_to_imu_extrinsic_yaw",
+        "gyro_bias_norm",
+        "accel_bias_norm",
+        "gravity_world_x",
+        "gravity_world_y",
+        "gravity_world_z",
+        "gravity_dir_tilt_rad",
         "start_pose_frozen_before_factor_injection",
         "start_pose_frozen_before_solver_update",
         "start_pose_support_key_count",
         "start_pose_support_mismatch_flag",
         "postsolve_query_support_key_count",
         "postsolve_strict_local_support_key_count",
+        "strict_local_query_support_key_count",
         "match_ratio",
         "inlier_ratio",
         "points_in_bucket",
@@ -1281,9 +1322,31 @@ def analyze_jump_diagnostics(
         if column in df.columns:
             df[column] = pd.to_numeric(df[column], errors="coerce")
 
+    if (
+        "strict_local_query_support_key_count" not in df.columns
+        and "postsolve_strict_local_support_key_count" in df.columns
+    ):
+        df["strict_local_query_support_key_count"] = pd.to_numeric(
+            df["postsolve_strict_local_support_key_count"], errors="coerce"
+        )
+
     analysis["available"] = True
     analysis["jump_rows"] = int(len(df))
     analysis["runtime_final_pose_surface"] = runtime_final_pose_surface
+    experiment_config = experiment_config or {}
+    analysis["runtime_experiment_name"] = (
+        experiment_config.get("runtime_experiment_name")
+        or experiment_config.get("experiment_name")
+        or "baseline"
+    )
+    for key in [
+        "runtime_exp_freeze_gravity",
+        "runtime_exp_freeze_gyro_bias",
+        "runtime_exp_freeze_accel_bias",
+        "runtime_exp_disable_velocity_factor",
+        "runtime_exp_disable_current_velocity_prior",
+    ]:
+        analysis[key] = maybe_bool(experiment_config.get(key))
 
     string_columns = [
         "start_pose_source_kind",
@@ -1298,12 +1361,39 @@ def analyze_jump_diagnostics(
         "postsolve_strict_local_support_keys_summary",
         "postsolve_strict_local_layout_name",
         "postsolve_strict_local_support_mismatch_reason",
+        "strict_local_query_support_keys_summary",
+        "strict_local_query_reason",
+        "yaw_chain_consistency_flag",
         "carried_boundary_oldest_key_summary",
         "oldest_survivor_key_summary",
     ]
     for column in string_columns:
         if column in df.columns:
             df[column] = df[column].fillna("").astype(str)
+
+    if (
+        "strict_local_query_support_keys_summary" not in df.columns
+        and "postsolve_strict_local_support_keys_summary" in df.columns
+    ):
+        df["strict_local_query_support_keys_summary"] = (
+            df["postsolve_strict_local_support_keys_summary"].fillna("").astype(str)
+        )
+    if "strict_local_query_reason" not in df.columns:
+        if "postsolve_strict_local_support_mismatch_reason" in df.columns:
+            df["strict_local_query_reason"] = (
+                df["postsolve_strict_local_support_mismatch_reason"]
+                .fillna("")
+                .astype(str)
+                .replace(
+                    {
+                        "support_keys_different": "support_mismatch",
+                        "layout_unavailable": "other",
+                        "query_time_outside_layout": "other",
+                    }
+                )
+            )
+        else:
+            df["strict_local_query_reason"] = "other"
 
     def summarize_series(series: pd.Series, prefix: str) -> None:
         clean = pd.to_numeric(series, errors="coerce").dropna()
@@ -1321,6 +1411,70 @@ def analyze_jump_diagnostics(
         analysis[f"{prefix}_abs_p95"] = pct(clean, 0.95)
         analysis[f"{prefix}_abs_max"] = float(clean.max())
 
+    def safe_corr(
+        frame: pd.DataFrame,
+        lhs: str,
+        rhs: str,
+        *,
+        lhs_abs: bool = False,
+    ) -> float | None:
+        if lhs not in frame.columns or rhs not in frame.columns:
+            return None
+        lhs_series = pd.to_numeric(frame[lhs], errors="coerce")
+        rhs_series = pd.to_numeric(frame[rhs], errors="coerce")
+        if lhs_abs:
+            lhs_series = lhs_series.abs()
+        pair = (
+            pd.DataFrame({"lhs": lhs_series, "rhs": rhs_series})
+            .replace([np.inf, -np.inf], np.nan)
+            .dropna()
+        )
+        if len(pair) < 2 or pair["lhs"].nunique() < 2 or pair["rhs"].nunique() < 2:
+            return None
+        corr_value = pair["lhs"].corr(pair["rhs"], method="pearson")
+        if pd.isna(corr_value):
+            return None
+        return float(corr_value)
+
+    def normalize_angle_rad(angle_rad: float) -> float:
+        return math.atan2(math.sin(angle_rad), math.cos(angle_rad))
+
+    def angle_diff_series(lhs: pd.Series, rhs: pd.Series) -> pd.Series:
+        lhs_numeric = pd.to_numeric(lhs, errors="coerce")
+        rhs_numeric = pd.to_numeric(rhs, errors="coerce")
+        raw = lhs_numeric - rhs_numeric
+        return raw.map(
+            lambda value: normalize_angle_rad(float(value)) if pd.notna(value) else math.nan
+        )
+
+    def sorted_frame_delta(
+        frame: pd.DataFrame,
+        column: str,
+        *,
+        angular: bool = False,
+        valid_column: str | None = None,
+    ) -> pd.Series:
+        if column not in frame.columns:
+            return pd.Series(np.nan, index=frame.index, dtype=float)
+
+        sort_columns = ["frame_stamp"] if "frame_stamp" in frame.columns else []
+        if "frame_id" in frame.columns:
+            sort_columns.append("frame_id")
+        ordered = frame.sort_values(sort_columns) if sort_columns else frame.copy()
+        current = pd.to_numeric(ordered[column], errors="coerce")
+        previous = current.shift(1)
+        if angular:
+            delta = angle_diff_series(current, previous)
+        else:
+            delta = current - previous
+
+        valid_mask = current.notna() & previous.notna()
+        if valid_column and valid_column in ordered.columns:
+            valid_values = pd.to_numeric(ordered[valid_column], errors="coerce").fillna(0.0) != 0.0
+            valid_mask &= valid_values & valid_values.shift(1, fill_value=False)
+        delta = delta.where(valid_mask, np.nan)
+        return delta.reindex(frame.index)
+
     def numeric_mean(frame: pd.DataFrame, column: str) -> float:
         if column not in frame.columns:
             return math.nan
@@ -1328,6 +1482,16 @@ def analyze_jump_diagnostics(
         if clean.empty:
             return math.nan
         return float(clean.mean())
+
+    analysis["solver_update_ms_mean"] = numeric_mean(df, "solver_update_ms")
+    analysis["accept_ratio_mean"] = numeric_mean(df, "accept_ratio")
+    analysis["match_ratio_mean"] = numeric_mean(df, "match_ratio")
+    analysis["inlier_ratio_mean"] = numeric_mean(df, "inlier_ratio")
+
+    def top_frame_score(translation_value: Any, rotation_value: Any) -> float:
+        translation = float(translation_value or 0.0)
+        rotation = float(rotation_value or 0.0)
+        return max(translation / 1.0, rotation / 0.3)
 
     def is_nonempty_text(value: Any) -> bool:
         return isinstance(value, str) and value.strip() != ""
@@ -1357,6 +1521,62 @@ def analyze_jump_diagnostics(
     for column, prefix in summary_specs:
         if column in df.columns:
             summarize_series(df[column], prefix)
+
+    strict_local_residual_specs = [
+        ("delta_frontend_to_final_yaw_rad", "frontend_to_final_yaw"),
+        ("delta_frontend_to_final_pitch_rad", "frontend_to_final_pitch"),
+        ("delta_frontend_to_final_roll_rad", "frontend_to_final_roll"),
+        ("delta_frontend_to_final_dx", "frontend_to_final_dx"),
+        ("delta_frontend_to_final_dy", "frontend_to_final_dy"),
+        ("delta_frontend_to_final_dz", "frontend_to_final_dz"),
+    ]
+    for column, prefix in strict_local_residual_specs:
+        if column in df.columns:
+            summarize_series(df[column], prefix)
+            summarize_abs_series(df[column], prefix)
+
+    if {"delta_frontend_to_final_dx", "delta_frontend_to_final_dy"} <= set(df.columns):
+        xy_norm = np.hypot(
+            pd.to_numeric(df["delta_frontend_to_final_dx"], errors="coerce"),
+            pd.to_numeric(df["delta_frontend_to_final_dy"], errors="coerce"),
+        )
+        summarize_series(pd.Series(xy_norm), "frontend_to_final_xy_norm")
+    if "delta_frontend_to_final_dz" in df.columns:
+        summarize_abs_series(df["delta_frontend_to_final_dz"], "frontend_to_final_dz")
+        summarize_abs_series(df["delta_frontend_to_final_dz"], "frontend_to_final_abs_dz")
+
+    if {
+        "frontend_world_to_lidar_yaw",
+        "frontend_world_to_imu_yaw",
+        "final_world_to_lidar_yaw",
+        "final_world_to_imu_yaw",
+    } <= set(df.columns):
+        frontend_lidar_delta = angle_diff_series(
+            df["final_world_to_lidar_yaw"], df["frontend_world_to_lidar_yaw"]
+        )
+        frontend_imu_delta = angle_diff_series(
+            df["final_world_to_imu_yaw"], df["frontend_world_to_imu_yaw"]
+        )
+        df["yaw_space_gap_rad"] = angle_diff_series(frontend_imu_delta, frontend_lidar_delta).abs()
+        summarize_series(df["yaw_space_gap_rad"], "yaw_space_gap")
+        summarize_abs_series(df["yaw_space_gap_rad"], "yaw_space_gap")
+
+    derived_delta_specs = [
+        ("current_velocity_heading_rad", "delta_velocity_heading_rad", True, "current_velocity_heading_valid"),
+        ("final_world_to_lidar_yaw", "world_to_lidar_yaw_shift", True, None),
+        ("final_world_to_imu_yaw", "world_to_imu_yaw_shift", True, None),
+        ("gyro_bias_norm", "delta_gyro_bias_norm", False, None),
+        ("accel_bias_norm", "delta_accel_bias_norm", False, None),
+        ("gravity_dir_tilt_rad", "delta_gravity_dir_rad", True, None),
+    ]
+    for source_column, out_column, angular, valid_column in derived_delta_specs:
+        if source_column in df.columns:
+            df[out_column] = sorted_frame_delta(
+                df,
+                source_column,
+                angular=angular,
+                valid_column=valid_column,
+            )
 
     alias_prefixes = [
         ("frontend_to_postsolve_query_translation", "frontend_to_postsolve_active_window_translation"),
@@ -1396,6 +1616,14 @@ def analyze_jump_diagnostics(
         )
         analysis["start_pose_support_mismatch_reason_counts"] = {
             str(key): int(value) for key, value in reason_counts.items()
+        }
+
+    if "strict_local_query_reason" in df.columns:
+        strict_local_reason_counts = (
+            df["strict_local_query_reason"].replace({"": "other"}).value_counts()
+        )
+        analysis["strict_local_query_reason_counts"] = {
+            str(key): int(value) for key, value in strict_local_reason_counts.items()
         }
 
     time_delta_specs = [
@@ -1453,6 +1681,30 @@ def analyze_jump_diagnostics(
             "delta_postsolve_active_window_to_postsolve_strict_local_rotation_rad",
             "delta_frontend_to_final_translation_norm",
             "delta_frontend_to_final_rotation_rad",
+            "delta_frontend_to_final_yaw_rad",
+            "delta_frontend_to_final_pitch_rad",
+            "delta_frontend_to_final_roll_rad",
+            "delta_frontend_to_final_dx",
+            "delta_frontend_to_final_dy",
+            "delta_frontend_to_final_dz",
+            "current_velocity_norm",
+            "current_velocity_heading_rad",
+            "current_velocity_heading_valid",
+            "velocity_factor_count",
+            "prior_factor_count",
+            "uses_shared_imu_state",
+            "frontend_world_to_lidar_yaw",
+            "frontend_world_to_imu_yaw",
+            "final_world_to_lidar_yaw",
+            "final_world_to_imu_yaw",
+            "lidar_to_imu_extrinsic_yaw",
+            "yaw_chain_consistency_flag",
+            "gyro_bias_norm",
+            "accel_bias_norm",
+            "gravity_world_x",
+            "gravity_world_y",
+            "gravity_world_z",
+            "gravity_dir_tilt_rad",
             "lidar_layout_domain_begin",
             "lidar_layout_domain_end",
             "start_pose_support_key_count",
@@ -1470,6 +1722,9 @@ def analyze_jump_diagnostics(
             "postsolve_strict_local_support_keys_summary",
             "postsolve_strict_local_layout_name",
             "postsolve_strict_local_support_mismatch_reason",
+            "strict_local_query_support_key_count",
+            "strict_local_query_support_keys_summary",
+            "strict_local_query_reason",
             "carried_boundary_oldest_key_summary",
             "oldest_survivor_key_summary",
             "solver_update_ms",
@@ -1520,6 +1775,54 @@ def analyze_jump_diagnostics(
         if "delta_frontend_to_final_translation_norm" in df.columns
         else pd.DataFrame()
     )
+    top_final_rotation_df = (
+        df.sort_values("delta_frontend_to_final_rotation_rad", ascending=False).head(10)
+        if "delta_frontend_to_final_rotation_rad" in df.columns
+        else pd.DataFrame()
+    )
+    top_yaw_df = (
+        df.assign(
+            delta_frontend_to_final_yaw_abs=lambda frame: pd.to_numeric(
+                frame["delta_frontend_to_final_yaw_rad"], errors="coerce"
+            ).abs()
+        )
+        .sort_values("delta_frontend_to_final_yaw_abs", ascending=False)
+        .head(10)
+        if "delta_frontend_to_final_yaw_rad" in df.columns
+        else pd.DataFrame()
+    )
+
+    top_strict_local_residual_df = pd.DataFrame()
+    if not top_final_df.empty or not top_final_rotation_df.empty:
+        combined = pd.concat([top_final_df, top_final_rotation_df], ignore_index=False)
+        if "frame_id" in combined.columns:
+            combined = combined.loc[~combined["frame_id"].duplicated(keep="first")]
+        combined = combined.copy()
+        combined["strict_local_residual_score"] = combined.apply(
+            lambda row: top_frame_score(
+                row.get("delta_frontend_to_final_translation_norm", 0.0),
+                row.get("delta_frontend_to_final_rotation_rad", 0.0),
+            ),
+            axis=1,
+        )
+        top_strict_local_residual_df = combined.sort_values(
+            "strict_local_residual_score", ascending=False
+        ).head(20)
+
+    top_yaw_residual_df = pd.DataFrame()
+    if not top_yaw_df.empty or not top_final_rotation_df.empty:
+        combined = pd.concat([top_yaw_df, top_final_rotation_df], ignore_index=False)
+        if "frame_id" in combined.columns:
+            combined = combined.loc[~combined["frame_id"].duplicated(keep="first")]
+        combined = combined.copy()
+        combined["yaw_residual_score"] = combined.apply(
+            lambda row: max(
+                abs(float(row.get("delta_frontend_to_final_yaw_rad", 0.0) or 0.0)) / 0.3,
+                float(row.get("delta_frontend_to_final_rotation_rad", 0.0) or 0.0) / 0.3,
+            ),
+            axis=1,
+        )
+        top_yaw_residual_df = combined.sort_values("yaw_residual_score", ascending=False).head(20)
 
     if not top_start_df.empty and "start_pose_support_mismatch_reason" in top_start_df.columns:
         top_reason_counts = (
@@ -1562,6 +1865,139 @@ def analyze_jump_diagnostics(
         analysis["top_postsolve_strict_local_support_mismatch_reason_counts"] = {
             str(key): int(value) for key, value in postsolve_strict_reason_counts.items()
         }
+    if not top_strict_local_residual_df.empty and "strict_local_query_reason" in top_strict_local_residual_df.columns:
+        strict_local_top_reason_counts = (
+            top_strict_local_residual_df["strict_local_query_reason"]
+            .replace({"": "other"})
+            .value_counts()
+        )
+        analysis["top_strict_local_query_reason_counts"] = {
+            str(key): int(value) for key, value in strict_local_top_reason_counts.items()
+        }
+    if not top_yaw_residual_df.empty and "yaw_chain_consistency_flag" in top_yaw_residual_df.columns:
+        top_yaw_chain_counts = (
+            top_yaw_residual_df["yaw_chain_consistency_flag"]
+            .replace({"": "other"})
+            .value_counts()
+        )
+        analysis["top_yaw_chain_consistency_flag_counts"] = {
+            str(key): int(value) for key, value in top_yaw_chain_counts.items()
+        }
+        inconsistent_top_yaw = int(
+            top_yaw_chain_counts.drop(labels=["none"], errors="ignore").sum()
+        )
+        analysis["yaw_chain_inconsistency_count_on_top_frames"] = inconsistent_top_yaw
+        analysis["top_yaw_chain_inconsistency_ratio"] = (
+            inconsistent_top_yaw / len(top_yaw_residual_df)
+            if len(top_yaw_residual_df) > 0
+            else 0.0
+        )
+
+    if not top_strict_local_residual_df.empty:
+        residual_keep_columns = [
+            "frame_id",
+            "frame_stamp",
+            "delta_frontend_to_final_translation_norm",
+            "delta_frontend_to_final_rotation_rad",
+            "delta_frontend_to_final_yaw_rad",
+            "delta_frontend_to_final_pitch_rad",
+            "delta_frontend_to_final_roll_rad",
+            "delta_frontend_to_final_dx",
+            "delta_frontend_to_final_dy",
+            "delta_frontend_to_final_dz",
+            "current_velocity_norm",
+            "current_velocity_heading_rad",
+            "current_velocity_heading_valid",
+            "velocity_factor_count",
+            "prior_factor_count",
+            "uses_shared_imu_state",
+            "frontend_world_to_lidar_yaw",
+            "frontend_world_to_imu_yaw",
+            "final_world_to_lidar_yaw",
+            "final_world_to_imu_yaw",
+            "lidar_to_imu_extrinsic_yaw",
+            "yaw_chain_consistency_flag",
+            "gyro_bias_norm",
+            "accel_bias_norm",
+            "gravity_world_x",
+            "gravity_world_y",
+            "gravity_world_z",
+            "gravity_dir_tilt_rad",
+            "solver_update_ms",
+            "reeliminated_variable_count",
+            "relinearized_pose_variable_count",
+            "relinearized_aux_variable_count",
+            "relinearized_shared_variable_count",
+            "recalculated_velocity_factor_count",
+            "recalculated_prior_factor_count",
+            "recalculated_imu_factor_count",
+            "recalculated_lidar_factor_count",
+            "recalculated_lidar_same_support_factor_count",
+            "recalculated_lidar_cross_support_factor_count",
+            "recalculated_lidar_current_segment_factor_count",
+            "strict_local_query_reason",
+            "strict_local_query_support_keys_summary",
+        ]
+        available_residual_columns = [
+            column for column in residual_keep_columns if column in top_strict_local_residual_df.columns
+        ]
+        analysis["top_strict_local_residual_frames"] = (
+            top_strict_local_residual_df[available_residual_columns]
+            .replace({np.nan: None})
+            .to_dict(orient="records")
+        )
+    if not top_yaw_residual_df.empty:
+        yaw_keep_columns = [
+            "frame_id",
+            "frame_stamp",
+            "delta_frontend_to_final_translation_norm",
+            "delta_frontend_to_final_rotation_rad",
+            "delta_frontend_to_final_yaw_rad",
+            "delta_frontend_to_final_pitch_rad",
+            "delta_frontend_to_final_roll_rad",
+            "delta_frontend_to_final_dx",
+            "delta_frontend_to_final_dy",
+            "delta_frontend_to_final_dz",
+            "solver_update_ms",
+            "reeliminated_variable_count",
+            "relinearized_pose_variable_count",
+            "relinearized_aux_variable_count",
+            "relinearized_shared_variable_count",
+            "recalculated_velocity_factor_count",
+            "recalculated_prior_factor_count",
+            "recalculated_imu_factor_count",
+            "recalculated_lidar_factor_count",
+            "recalculated_lidar_same_support_factor_count",
+            "recalculated_lidar_cross_support_factor_count",
+            "recalculated_lidar_current_segment_factor_count",
+            "current_velocity_norm",
+            "current_velocity_heading_rad",
+            "current_velocity_heading_valid",
+            "velocity_factor_count",
+            "prior_factor_count",
+            "uses_shared_imu_state",
+            "frontend_world_to_lidar_yaw",
+            "frontend_world_to_imu_yaw",
+            "final_world_to_lidar_yaw",
+            "final_world_to_imu_yaw",
+            "lidar_to_imu_extrinsic_yaw",
+            "yaw_chain_consistency_flag",
+            "gyro_bias_norm",
+            "accel_bias_norm",
+            "gravity_world_x",
+            "gravity_world_y",
+            "gravity_world_z",
+            "gravity_dir_tilt_rad",
+            "strict_local_query_reason",
+        ]
+        available_yaw_columns = [
+            column for column in yaw_keep_columns if column in top_yaw_residual_df.columns
+        ]
+        analysis["top_yaw_residual_frames"] = (
+            top_yaw_residual_df[available_yaw_columns]
+            .replace({np.nan: None})
+            .to_dict(orient="records")
+        )
 
     def stage_score(translation_prefix: str, rotation_prefix: str) -> float:
         components = [
@@ -1808,6 +2244,502 @@ def analyze_jump_diagnostics(
             f"postsolve_active_window->strict_local p95={analysis.get('postsolve_active_window_to_postsolve_strict_local_translation_p95', 0.0):.3f} m",
         ]
         analysis["final_pose_surface_effect_evidence"] = "; ".join(effect_evidence)
+
+    def experiment_action_label(experiment_name: str) -> str:
+        if experiment_name == "baseline":
+            return "baseline strict-local run"
+        mapping = {
+            "freeze_gravity": "freezing gravity",
+            "freeze_gyro_bias": "freezing gyro bias",
+            "freeze_accel_bias": "freezing accel bias",
+            "disable_velocity_factor": "disabling velocity factor",
+            "disable_current_velocity_prior": "disabling current velocity prior",
+        }
+        parts = [mapping.get(part, part.replace("_", " ")) for part in experiment_name.split("+") if part]
+        if not parts:
+            return "baseline strict-local run"
+        return parts[0] if len(parts) == 1 else " + ".join(parts)
+
+    experiment_name = str(analysis.get("runtime_experiment_name") or "baseline")
+    yaw_p95 = float(analysis.get("frontend_to_final_yaw_abs_p95", 0.0) or 0.0)
+    yaw_max = float(analysis.get("frontend_to_final_yaw_abs_max", 0.0) or 0.0)
+    rotation_p95 = float(analysis.get("frontend_to_final_rotation_p95", 0.0) or 0.0)
+    translation_p95 = float(analysis.get("frontend_to_final_translation_p95", 0.0) or 0.0)
+    accept_ratio_mean = analysis.get("accept_ratio_mean")
+    match_ratio_mean = analysis.get("match_ratio_mean")
+    inlier_ratio_mean = analysis.get("inlier_ratio_mean")
+    solver_update_ms_mean = analysis.get("solver_update_ms_mean")
+    registration_degraded = (
+        (isinstance(accept_ratio_mean, float) and math.isfinite(accept_ratio_mean) and accept_ratio_mean < 0.70)
+        or (isinstance(match_ratio_mean, float) and math.isfinite(match_ratio_mean) and match_ratio_mean < 0.70)
+        or (isinstance(inlier_ratio_mean, float) and math.isfinite(inlier_ratio_mean) and inlier_ratio_mean < 0.60)
+        or translation_p95 > 1.0
+        or (isinstance(solver_update_ms_mean, float) and math.isfinite(solver_update_ms_mean) and solver_update_ms_mean > 40.0)
+    )
+    yaw_low = yaw_p95 <= 0.25 and rotation_p95 <= 0.45
+    yaw_partial = yaw_p95 <= 0.45 and rotation_p95 <= 0.75
+    if experiment_name == "baseline":
+        analysis["isolation_effect"] = "baseline strict-local run for yaw isolation comparison"
+    else:
+        action = experiment_action_label(experiment_name)
+        if registration_degraded:
+            analysis["isolation_effect"] = (
+                f"{action} reduces yaw residual but causes unacceptable registration degradation"
+            )
+        elif yaw_low:
+            analysis["isolation_effect"] = f"{action} significantly reduces yaw residual"
+        elif yaw_partial:
+            analysis["isolation_effect"] = f"{action} partially reduces yaw residual"
+        else:
+            analysis["isolation_effect"] = f"{action} has little effect"
+    analysis["isolation_effect_evidence"] = "; ".join(
+        [
+            f"experiment_name={experiment_name}",
+            f"yaw_p95={yaw_p95:.3f}",
+            f"yaw_max={yaw_max:.3f}",
+            f"rotation_p95={rotation_p95:.3f}",
+            f"translation_p95={translation_p95:.3f}",
+            (
+                f"solver_update_ms_mean={solver_update_ms_mean:.3f}"
+                if isinstance(solver_update_ms_mean, float) and math.isfinite(solver_update_ms_mean)
+                else "solver_update_ms_mean=n/a"
+            ),
+            (
+                f"accept_ratio_mean={accept_ratio_mean:.3f}"
+                if isinstance(accept_ratio_mean, float) and math.isfinite(accept_ratio_mean)
+                else "accept_ratio_mean=n/a"
+            ),
+            (
+                f"match_ratio_mean={match_ratio_mean:.3f}"
+                if isinstance(match_ratio_mean, float) and math.isfinite(match_ratio_mean)
+                else "match_ratio_mean=n/a"
+            ),
+            (
+                f"inlier_ratio_mean={inlier_ratio_mean:.3f}"
+                if isinstance(inlier_ratio_mean, float) and math.isfinite(inlier_ratio_mean)
+                else "inlier_ratio_mean=n/a"
+            ),
+        ]
+    )
+
+    translation_score = max(
+        float(analysis.get("frontend_to_final_translation_p95", 0.0) or 0.0) / 1.0,
+        float(analysis.get("frontend_to_final_translation_max", 0.0) or 0.0) / 1.0,
+    )
+    rotation_score = max(
+        float(analysis.get("frontend_to_final_rotation_p95", 0.0) or 0.0) / 0.3,
+        float(analysis.get("frontend_to_final_rotation_max", 0.0) or 0.0) / 0.3,
+    )
+    analysis["strict_local_translation_score"] = translation_score
+    analysis["strict_local_rotation_score"] = rotation_score
+    if rotation_score > 1.25 * max(translation_score, 1e-9):
+        analysis["strict_local_residual_dominance"] = "strict-local residual appears rotation-dominated"
+    elif translation_score > 1.25 * max(rotation_score, 1e-9):
+        analysis["strict_local_residual_dominance"] = "strict-local residual appears translation-dominated"
+    else:
+        analysis["strict_local_residual_dominance"] = "strict-local residual appears mixed"
+
+    yaw_score = max(
+        float(analysis.get("frontend_to_final_yaw_abs_p95", 0.0) or 0.0) / 0.3,
+        float(analysis.get("frontend_to_final_yaw_abs_max", 0.0) or 0.0) / 0.3,
+    )
+    pitchroll_score = max(
+        float(analysis.get("frontend_to_final_pitch_abs_p95", 0.0) or 0.0) / 0.3,
+        float(analysis.get("frontend_to_final_roll_abs_p95", 0.0) or 0.0) / 0.3,
+        float(analysis.get("frontend_to_final_pitch_abs_max", 0.0) or 0.0) / 0.3,
+        float(analysis.get("frontend_to_final_roll_abs_max", 0.0) or 0.0) / 0.3,
+    )
+    analysis["strict_local_yaw_score"] = yaw_score
+    analysis["strict_local_pitchroll_score"] = pitchroll_score
+    if analysis["strict_local_residual_dominance"] != "strict-local residual appears rotation-dominated":
+        analysis["strict_local_rotation_subtype"] = "strict-local residual orientation split is secondary"
+    elif yaw_score > 1.25 * max(pitchroll_score, 1e-9):
+        analysis["strict_local_rotation_subtype"] = "strict-local residual appears yaw-dominated"
+    elif pitchroll_score > 1.25 * max(yaw_score, 1e-9):
+        analysis["strict_local_rotation_subtype"] = "strict-local residual appears pitch/roll-dominated"
+    else:
+        analysis["strict_local_rotation_subtype"] = "strict-local residual orientation split is mixed"
+
+    strict_local_correlation_specs = {
+        "delta_rotation_vs_solver_update_ms": (
+            "delta_frontend_to_final_rotation_rad",
+            "solver_update_ms",
+            False,
+        ),
+        "delta_rotation_vs_recalc_imu": (
+            "delta_frontend_to_final_rotation_rad",
+            "recalculated_imu_factor_count",
+            False,
+        ),
+        "delta_rotation_vs_recalc_prior": (
+            "delta_frontend_to_final_rotation_rad",
+            "recalculated_prior_factor_count",
+            False,
+        ),
+        "delta_rotation_vs_recalc_velocity": (
+            "delta_frontend_to_final_rotation_rad",
+            "recalculated_velocity_factor_count",
+            False,
+        ),
+        "delta_rotation_vs_relin_shared": (
+            "delta_frontend_to_final_rotation_rad",
+            "relinearized_shared_variable_count",
+            False,
+        ),
+        "delta_translation_vs_solver_update_ms": (
+            "delta_frontend_to_final_translation_norm",
+            "solver_update_ms",
+            False,
+        ),
+        "delta_translation_vs_recalc_lidar": (
+            "delta_frontend_to_final_translation_norm",
+            "recalculated_lidar_factor_count",
+            False,
+        ),
+        "delta_z_vs_recalc_imu": (
+            "delta_frontend_to_final_dz",
+            "recalculated_imu_factor_count",
+            True,
+        ),
+        "delta_yaw_vs_recalc_imu": (
+            "delta_frontend_to_final_yaw_rad",
+            "recalculated_imu_factor_count",
+            True,
+        ),
+        "delta_yaw_vs_recalc_prior": (
+            "delta_frontend_to_final_yaw_rad",
+            "recalculated_prior_factor_count",
+            True,
+        ),
+        "delta_yaw_vs_relin_shared": (
+            "delta_frontend_to_final_yaw_rad",
+            "relinearized_shared_variable_count",
+            True,
+        ),
+        "delta_yaw_vs_recalc_velocity": (
+            "delta_frontend_to_final_yaw_rad",
+            "recalculated_velocity_factor_count",
+            True,
+        ),
+        "delta_yaw_vs_current_velocity_norm": (
+            "delta_frontend_to_final_yaw_rad",
+            "current_velocity_norm",
+            True,
+        ),
+        "delta_yaw_vs_delta_velocity_heading": (
+            "delta_frontend_to_final_yaw_rad",
+            "delta_velocity_heading_rad",
+            True,
+        ),
+        "delta_yaw_vs_world_to_lidar_yaw_shift": (
+            "delta_frontend_to_final_yaw_rad",
+            "world_to_lidar_yaw_shift",
+            True,
+        ),
+        "delta_yaw_vs_world_to_imu_yaw_shift": (
+            "delta_frontend_to_final_yaw_rad",
+            "world_to_imu_yaw_shift",
+            True,
+        ),
+        "delta_yaw_vs_extrinsic_yaw_probe": (
+            "delta_frontend_to_final_yaw_rad",
+            "lidar_to_imu_extrinsic_yaw",
+            True,
+        ),
+        "delta_yaw_vs_gyro_bias_norm": (
+            "delta_frontend_to_final_yaw_rad",
+            "gyro_bias_norm",
+            True,
+        ),
+        "delta_yaw_vs_accel_bias_norm": (
+            "delta_frontend_to_final_yaw_rad",
+            "accel_bias_norm",
+            True,
+        ),
+        "delta_yaw_vs_gravity_dir_tilt": (
+            "delta_frontend_to_final_yaw_rad",
+            "gravity_dir_tilt_rad",
+            True,
+        ),
+        "delta_yaw_vs_delta_gravity_dir": (
+            "delta_frontend_to_final_yaw_rad",
+            "delta_gravity_dir_rad",
+            True,
+        ),
+    }
+    for out_key, (lhs, rhs, lhs_abs) in strict_local_correlation_specs.items():
+        corr_value = safe_corr(df, lhs, rhs, lhs_abs=lhs_abs)
+        if corr_value is not None:
+            analysis[out_key] = corr_value
+
+    def dominant_corr(items: dict[str, str]) -> tuple[str | None, float | None]:
+        best_name: str | None = None
+        best_value: float | None = None
+        for label, key in items.items():
+            value = analysis.get(key)
+            if not isinstance(value, float) or not math.isfinite(value):
+                continue
+            if best_value is None or abs(value) > abs(best_value):
+                best_name = label
+                best_value = value
+        return best_name, best_value
+
+    rotation_corr_name, rotation_corr_value = dominant_corr(
+        {
+            "solver_update_ms": "delta_rotation_vs_solver_update_ms",
+            "recalc_imu": "delta_rotation_vs_recalc_imu",
+            "recalc_prior": "delta_rotation_vs_recalc_prior",
+            "recalc_velocity": "delta_rotation_vs_recalc_velocity",
+            "relin_shared": "delta_rotation_vs_relin_shared",
+            "delta_yaw_vs_recalc_imu": "delta_yaw_vs_recalc_imu",
+            "delta_yaw_vs_recalc_prior": "delta_yaw_vs_recalc_prior",
+            "delta_yaw_vs_relin_shared": "delta_yaw_vs_relin_shared",
+            "delta_yaw_vs_recalc_velocity": "delta_yaw_vs_recalc_velocity",
+            "delta_yaw_vs_current_velocity_norm": "delta_yaw_vs_current_velocity_norm",
+            "delta_yaw_vs_delta_velocity_heading": "delta_yaw_vs_delta_velocity_heading",
+        }
+    )
+    translation_corr_name, translation_corr_value = dominant_corr(
+        {
+            "solver_update_ms": "delta_translation_vs_solver_update_ms",
+            "recalc_lidar": "delta_translation_vs_recalc_lidar",
+            "delta_z_vs_recalc_imu": "delta_z_vs_recalc_imu",
+        }
+    )
+    if rotation_corr_name is not None and rotation_corr_value is not None:
+        analysis["strict_local_rotation_primary_correlation"] = (
+            f"{rotation_corr_name}:{rotation_corr_value:.3f}"
+        )
+    if translation_corr_name is not None and translation_corr_value is not None:
+        analysis["strict_local_translation_primary_correlation"] = (
+            f"{translation_corr_name}:{translation_corr_value:.3f}"
+        )
+
+    strict_local_reason_counts = analysis.get("top_strict_local_query_reason_counts", {})
+    strict_local_reason_total = sum(strict_local_reason_counts.values())
+    strict_local_query_non_none_share = (
+        (strict_local_reason_total - strict_local_reason_counts.get("none", 0)) / strict_local_reason_total
+        if strict_local_reason_total > 0
+        else 0.0
+    )
+    strict_local_query_side_suspicious = strict_local_query_non_none_share >= 0.4
+
+    dominance_label = analysis.get("strict_local_residual_dominance", "")
+    if strict_local_query_side_suspicious:
+        analysis["strict_local_residual_cause"] = "strict-local residual likely includes query-side orientation inconsistency"
+    elif (
+        dominance_label == "strict-local residual appears rotation-dominated"
+        and rotation_corr_name in {
+            "recalc_imu",
+            "recalc_prior",
+            "recalc_velocity",
+            "relin_shared",
+            "delta_yaw_vs_recalc_imu",
+            "delta_yaw_vs_recalc_prior",
+            "delta_yaw_vs_relin_shared",
+            "delta_yaw_vs_recalc_velocity",
+            "delta_yaw_vs_current_velocity_norm",
+            "delta_yaw_vs_delta_velocity_heading",
+        }
+        and rotation_corr_value is not None
+        and abs(rotation_corr_value) >= 0.3
+    ):
+        analysis["strict_local_residual_cause"] = "strict-local residual more likely reflects solver-side orientation drift"
+    elif (
+        dominance_label == "strict-local residual appears translation-dominated"
+        and translation_corr_name == "recalc_lidar"
+        and translation_corr_value is not None
+        and abs(translation_corr_value) >= 0.3
+    ):
+        analysis["strict_local_residual_cause"] = "strict-local residual more likely reflects translation-side factor consistency"
+    elif (
+        dominance_label == "strict-local residual appears mixed"
+        and rotation_corr_value is not None
+        and translation_corr_value is not None
+        and abs(rotation_corr_value) >= 0.2
+        and abs(translation_corr_value) >= 0.2
+    ):
+        analysis["strict_local_residual_cause"] = "strict-local residual appears mixed; IMU/prior and LiDAR both suspicious"
+    elif dominance_label == "strict-local residual appears rotation-dominated":
+        analysis["strict_local_residual_cause"] = "strict-local residual may still reflect orientation-side semantics or frame-convention mismatch"
+    else:
+        analysis["strict_local_residual_cause"] = "strict-local residual cause not strongly isolated"
+
+    residual_evidence: list[str] = []
+    if strict_local_reason_counts:
+        residual_evidence.append(
+            "top strict-local reasons="
+            + ", ".join(f"{key}:{value}" for key, value in strict_local_reason_counts.items())
+        )
+    if rotation_corr_name is not None and rotation_corr_value is not None:
+        residual_evidence.append(f"rotation corr={rotation_corr_name}:{rotation_corr_value:.3f}")
+    if translation_corr_name is not None and translation_corr_value is not None:
+        residual_evidence.append(f"translation corr={translation_corr_name}:{translation_corr_value:.3f}")
+    residual_evidence.append(
+        f"frontend->final t_p95={analysis.get('frontend_to_final_translation_p95', 0.0):.3f} m"
+    )
+    residual_evidence.append(
+        f"frontend->final r_p95={analysis.get('frontend_to_final_rotation_p95', 0.0):.3f} rad"
+    )
+    residual_evidence.append(
+        f"yaw_abs_p95={analysis.get('frontend_to_final_yaw_abs_p95', 0.0):.3f} rad"
+    )
+    residual_evidence.append(
+        f"abs_dz_p95={analysis.get('frontend_to_final_abs_dz_abs_p95', 0.0):.3f} m"
+    )
+    analysis["strict_local_residual_cause_evidence"] = "; ".join(residual_evidence)
+
+    def available_weighted_score(weighted_values: list[tuple[float, float | None]]) -> float:
+        available = [(weight, value) for weight, value in weighted_values if value is not None and math.isfinite(value)]
+        if not available:
+            return 0.0
+        total_weight = sum(weight for weight, _ in available)
+        if total_weight <= 0.0:
+            return 0.0
+        return 100.0 * sum(weight * value for weight, value in available) / total_weight
+
+    def norm_corr(value: Any) -> float | None:
+        if not isinstance(value, (int, float)) or not math.isfinite(float(value)):
+            return None
+        return min(abs(float(value)) / 0.60, 1.0)
+
+    def norm_gap(value: Any, threshold: float) -> float | None:
+        if not isinstance(value, (int, float)) or not math.isfinite(float(value)):
+            return None
+        return min(abs(float(value)) / threshold, 1.0)
+
+    yaw_space_gap_p95 = analysis.get("yaw_space_gap_p95")
+    top_yaw_chain_inconsistency_ratio = analysis.get("top_yaw_chain_inconsistency_ratio")
+
+    candidate_a_score = available_weighted_score([
+        (0.30, norm_corr(analysis.get("delta_yaw_vs_recalc_velocity"))),
+        (0.25, norm_corr(analysis.get("delta_yaw_vs_recalc_prior"))),
+        (0.20, norm_corr(analysis.get("delta_yaw_vs_relin_shared"))),
+        (0.15, norm_corr(analysis.get("delta_yaw_vs_current_velocity_norm"))),
+        (0.10, norm_corr(analysis.get("delta_yaw_vs_delta_velocity_heading"))),
+    ])
+    candidate_b_score = available_weighted_score([
+        (0.40, float(top_yaw_chain_inconsistency_ratio) if isinstance(top_yaw_chain_inconsistency_ratio, (int, float)) and math.isfinite(float(top_yaw_chain_inconsistency_ratio)) else None),
+        (0.35, norm_gap(yaw_space_gap_p95, 0.20)),
+        (0.15, norm_corr(analysis.get("delta_yaw_vs_world_to_lidar_yaw_shift"))),
+        (0.10, norm_corr(analysis.get("delta_yaw_vs_world_to_imu_yaw_shift"))),
+    ])
+    candidate_c_score = available_weighted_score([
+        (0.25, norm_corr(analysis.get("delta_yaw_vs_recalc_imu"))),
+        (0.20, norm_corr(analysis.get("delta_yaw_vs_gyro_bias_norm"))),
+        (0.15, norm_corr(analysis.get("delta_yaw_vs_accel_bias_norm"))),
+        (0.20, norm_corr(analysis.get("delta_yaw_vs_gravity_dir_tilt"))),
+        (0.20, norm_corr(analysis.get("delta_yaw_vs_delta_gravity_dir"))),
+    ])
+
+    analysis["candidate_A_velocity_prior_shared_score"] = candidate_a_score
+    analysis["candidate_B_orientation_semantics_score"] = candidate_b_score
+    analysis["candidate_C_imu_bias_gravity_score"] = candidate_c_score
+
+    candidate_labels = {
+        "A": "velocity / prior / shared-state yaw coupling",
+        "B": "orientation semantics / frame-convention / extrinsic yaw usage",
+        "C": "IMU / bias / gravity",
+    }
+    candidate_next_fix_targets = {
+        "A": "velocity/prior/shared-state yaw handling",
+        "B": "orientation semantics / frame-convention / extrinsic yaw usage",
+        "C": "IMU/bias/gravity handling",
+    }
+    candidate_evidence = {
+        "A": "; ".join(
+            part
+            for part in [
+                f"delta_yaw_vs_recalc_velocity={analysis.get('delta_yaw_vs_recalc_velocity', 'n/a')}",
+                f"delta_yaw_vs_recalc_prior={analysis.get('delta_yaw_vs_recalc_prior', 'n/a')}",
+                f"delta_yaw_vs_relin_shared={analysis.get('delta_yaw_vs_relin_shared', 'n/a')}",
+                f"delta_yaw_vs_current_velocity_norm={analysis.get('delta_yaw_vs_current_velocity_norm', 'n/a')}",
+                f"delta_yaw_vs_delta_velocity_heading={analysis.get('delta_yaw_vs_delta_velocity_heading', 'n/a')}",
+            ]
+            if part
+        ),
+        "B": "; ".join(
+            part
+            for part in [
+                f"top_yaw_chain_inconsistency_ratio={analysis.get('top_yaw_chain_inconsistency_ratio', 0.0):.3f}" if isinstance(analysis.get("top_yaw_chain_inconsistency_ratio"), (int, float)) else "top_yaw_chain_inconsistency_ratio=n/a",
+                f"yaw_space_gap_p95={analysis.get('yaw_space_gap_p95', 'n/a')}",
+                f"delta_yaw_vs_world_to_lidar_yaw_shift={analysis.get('delta_yaw_vs_world_to_lidar_yaw_shift', 'n/a')}",
+                f"delta_yaw_vs_world_to_imu_yaw_shift={analysis.get('delta_yaw_vs_world_to_imu_yaw_shift', 'n/a')}",
+                f"delta_yaw_vs_extrinsic_yaw_probe={analysis.get('delta_yaw_vs_extrinsic_yaw_probe', 'n/a')}",
+            ]
+            if part
+        ),
+        "C": "; ".join(
+            part
+            for part in [
+                f"delta_yaw_vs_recalc_imu={analysis.get('delta_yaw_vs_recalc_imu', 'n/a')}",
+                f"delta_yaw_vs_gyro_bias_norm={analysis.get('delta_yaw_vs_gyro_bias_norm', 'n/a')}",
+                f"delta_yaw_vs_accel_bias_norm={analysis.get('delta_yaw_vs_accel_bias_norm', 'n/a')}",
+                f"delta_yaw_vs_gravity_dir_tilt={analysis.get('delta_yaw_vs_gravity_dir_tilt', 'n/a')}",
+                f"delta_yaw_vs_delta_gravity_dir={analysis.get('delta_yaw_vs_delta_gravity_dir', 'n/a')}",
+            ]
+            if part
+        ),
+    }
+
+    ranked_candidates = sorted(
+        [
+            ("A", candidate_a_score),
+            ("B", candidate_b_score),
+            ("C", candidate_c_score),
+        ],
+        key=lambda item: item[1],
+        reverse=True,
+    )
+    leader_key, leader_score = ranked_candidates[0]
+    second_key, second_score = ranked_candidates[1]
+    weakest_key, weakest_score = ranked_candidates[2]
+    analysis["yaw_root_cause_leader"] = leader_key
+    analysis["yaw_root_cause_second"] = second_key
+    analysis["yaw_root_cause_weakest"] = weakest_key
+    analysis["yaw_root_cause_leader_label"] = candidate_labels[leader_key]
+    analysis["yaw_root_cause_second_label"] = candidate_labels[second_key]
+    analysis["yaw_root_cause_weakest_label"] = candidate_labels[weakest_key]
+    analysis["yaw_root_cause_next_fix_target"] = candidate_next_fix_targets[leader_key]
+    analysis["yaw_root_cause_leader_evidence"] = candidate_evidence[leader_key]
+    analysis["yaw_root_cause_second_evidence"] = candidate_evidence[second_key]
+    analysis["yaw_root_cause_weakest_evidence"] = candidate_evidence[weakest_key]
+
+    if leader_score - second_score >= 15.0:
+        if leader_key == "A":
+            analysis["yaw_root_cause_summary"] = "yaw residual appears velocity/prior/shared-state dominated"
+        elif leader_key == "B":
+            analysis["yaw_root_cause_summary"] = "yaw residual appears orientation semantics / frame-convention dominated"
+        else:
+            analysis["yaw_root_cause_summary"] = "yaw residual appears IMU/bias/gravity dominated"
+    else:
+        analysis["yaw_root_cause_summary"] = (
+            f"yaw residual appears mixed; {leader_key} strongest, {second_key} second, {weakest_key} weakest"
+        )
+    analysis["yaw_root_cause_evidence"] = (
+        f"A={candidate_a_score:.1f} ({candidate_evidence['A']}); "
+        f"B={candidate_b_score:.1f} ({candidate_evidence['B']}); "
+        f"C={candidate_c_score:.1f} ({candidate_evidence['C']})"
+    )
+
+    if dominance_label == "strict-local residual appears rotation-dominated":
+        if strict_local_query_side_suspicious:
+            analysis["strict_local_residual_cause"] = (
+                "strict-local residual likely includes query-side orientation inconsistency"
+            )
+        elif leader_key == "B":
+            analysis["strict_local_residual_cause"] = (
+                "strict-local residual may still reflect orientation-side semantics or frame-convention mismatch"
+            )
+        else:
+            analysis["strict_local_residual_cause"] = (
+                "strict-local residual more likely reflects solver-side orientation drift"
+            )
+        analysis["strict_local_residual_cause_evidence"] = (
+            analysis.get("strict_local_residual_cause_evidence", "")
+            + ("; " if analysis.get("strict_local_residual_cause_evidence") else "")
+            + f"yaw shootout={analysis['yaw_root_cause_summary']}"
+        )
 
     return analysis
 
@@ -2339,6 +3271,44 @@ def detect_findings(
                 "title": final_pose_surface_effect,
                 "evidence": jump_analysis.get("final_pose_surface_effect_evidence", ""),
             })
+        strict_local_residual_dominance = jump_analysis.get("strict_local_residual_dominance")
+        if strict_local_residual_dominance:
+            findings.append({
+                "severity": "warn" if "dominated" in strict_local_residual_dominance or "mixed" in strict_local_residual_dominance else "info",
+                "title": strict_local_residual_dominance,
+                "evidence": jump_analysis.get("strict_local_residual_cause_evidence", ""),
+            })
+        strict_local_rotation_subtype = jump_analysis.get("strict_local_rotation_subtype")
+        if strict_local_rotation_subtype and strict_local_rotation_subtype in {
+            "strict-local residual appears yaw-dominated",
+            "strict-local residual appears pitch/roll-dominated",
+        }:
+            findings.append({
+                "severity": "info",
+                "title": strict_local_rotation_subtype,
+                "evidence": jump_analysis.get("strict_local_residual_cause_evidence", ""),
+            })
+        strict_local_residual_cause = jump_analysis.get("strict_local_residual_cause")
+        if strict_local_residual_cause and "not strongly isolated" not in strict_local_residual_cause:
+            findings.append({
+                "severity": "warn" if "suspicious" in strict_local_residual_cause or "drift" in strict_local_residual_cause or "inconsistency" in strict_local_residual_cause else "info",
+                "title": strict_local_residual_cause,
+                "evidence": jump_analysis.get("strict_local_residual_cause_evidence", ""),
+            })
+        yaw_root_cause_summary = jump_analysis.get("yaw_root_cause_summary")
+        if yaw_root_cause_summary:
+            findings.append({
+                "severity": "warn" if "dominated" in yaw_root_cause_summary or "mixed" in yaw_root_cause_summary else "info",
+                "title": yaw_root_cause_summary,
+                "evidence": jump_analysis.get("yaw_root_cause_evidence", ""),
+            })
+        isolation_effect = jump_analysis.get("isolation_effect")
+        if isolation_effect and "baseline strict-local run" not in isolation_effect:
+            findings.append({
+                "severity": "warn" if "unacceptable" in isolation_effect or "little effect" in isolation_effect else "info",
+                "title": isolation_effect,
+                "evidence": jump_analysis.get("isolation_effect_evidence", ""),
+            })
         runtime_final_pose_surface = jump_analysis.get("runtime_final_pose_surface")
         if (
             runtime_final_pose_surface == "strict_local"
@@ -2359,6 +3329,29 @@ def detect_findings(
                 "evidence": (
                     "active-window postsolve diagnostics and surface-difference telemetry remain enabled; "
                     "use final_pose_surface=active_window only for regression reproduction and boundary-surface comparison"
+                ),
+            })
+        top_strict_local = jump_analysis.get("top_strict_local_residual_frames", [])
+        if top_strict_local:
+            frame = top_strict_local[0]
+            findings.append({
+                "severity": "info",
+                "title": f"largest strict-local residual frame is {frame.get('frame_id', '?')}",
+                "evidence": (
+                    f"delta_t={(frame.get('delta_frontend_to_final_translation_norm') or 0.0):.3f} m; "
+                    f"delta_r={(frame.get('delta_frontend_to_final_rotation_rad') or 0.0):.3f} rad; "
+                    f"yaw/pitch/roll="
+                    f"{(frame.get('delta_frontend_to_final_yaw_rad') or 0.0):.3f}/"
+                    f"{(frame.get('delta_frontend_to_final_pitch_rad') or 0.0):.3f}/"
+                    f"{(frame.get('delta_frontend_to_final_roll_rad') or 0.0):.3f} rad; "
+                    f"dx/dy/dz="
+                    f"{(frame.get('delta_frontend_to_final_dx') or 0.0):.3f}/"
+                    f"{(frame.get('delta_frontend_to_final_dy') or 0.0):.3f}/"
+                    f"{(frame.get('delta_frontend_to_final_dz') or 0.0):.3f} m; "
+                    f"strict_local_query_reason={frame.get('strict_local_query_reason', '')}; "
+                    f"recalc_imu={frame.get('recalculated_imu_factor_count', 'n/a')}; "
+                    f"recalc_prior={frame.get('recalculated_prior_factor_count', 'n/a')}; "
+                    f"relin_shared={frame.get('relinearized_shared_variable_count', 'n/a')}"
                 ),
             })
         if top_solver:
@@ -2748,6 +3741,54 @@ def recommend_next_steps(
         recommendations["Immediate next checks"].append(
             "Strict-local final pose did not suppress frontend->final jump enough; shift attention to solver-result motion and boundary carry semantics rather than publish-surface selection alone."
         )
+    strict_local_residual_dominance = jump_analysis.get("strict_local_residual_dominance")
+    strict_local_rotation_subtype = jump_analysis.get("strict_local_rotation_subtype")
+    strict_local_residual_cause = jump_analysis.get("strict_local_residual_cause")
+    if strict_local_residual_cause == "strict-local residual more likely reflects solver-side orientation drift":
+        recommendations["Immediate next checks"].append(
+            "Strict-local residual now looks solver-side and orientation-led; inspect IMU / prior / velocity / shared-state updates on the top residual frames before changing query surfaces again."
+        )
+    elif strict_local_residual_cause == "strict-local residual likely includes query-side orientation inconsistency":
+        recommendations["Immediate next checks"].append(
+            "Strict-local residual still shows query-side inconsistency; compare strict-local support, fallback paths, and orientation extraction semantics on the top residual frames before touching solver math."
+        )
+    elif strict_local_residual_cause == "strict-local residual more likely reflects translation-side factor consistency":
+        recommendations["Immediate next checks"].append(
+            "Strict-local residual is now more translation-led; inspect LiDAR-side factor consistency and frame-to-frame translation corrections before changing IMU-side states."
+        )
+    elif strict_local_residual_cause == "strict-local residual appears mixed; IMU/prior and LiDAR both suspicious":
+        recommendations["Immediate next checks"].append(
+            "Strict-local residual still looks mixed; split the next audit between IMU/prior/shared-state churn and LiDAR translation consistency on the same top residual frames."
+        )
+    elif strict_local_residual_dominance == "strict-local residual appears rotation-dominated":
+        recommendations["Immediate next checks"].append(
+            "Strict-local residual is now rotation-led; prioritize orientation-side telemetry and state updates over translation-only tuning."
+        )
+    elif strict_local_residual_dominance == "strict-local residual appears translation-dominated":
+        recommendations["Immediate next checks"].append(
+            "Strict-local residual is now translation-led; prioritize LiDAR/translation consistency and vertical-vs-planar drift shape before revisiting orientation semantics."
+        )
+    if strict_local_rotation_subtype == "strict-local residual appears yaw-dominated":
+        recommendations["Likely code changes"].append(
+            "If the next audit confirms solver-side yaw drift with stable strict-local support, narrow the fix to IMU/prior/shared-state yaw handling before considering extrinsics."
+        )
+    elif strict_local_rotation_subtype == "strict-local residual appears pitch/roll-dominated":
+        recommendations["Likely code changes"].append(
+            "If the next audit confirms pitch/roll-led residual with weak solver correlations, check strict-local orientation semantics and LiDAR-IMU frame convention before changing LiDAR factors."
+        )
+    yaw_root_cause_leader = jump_analysis.get("yaw_root_cause_leader")
+    if yaw_root_cause_leader == "A":
+        recommendations["Immediate next checks"].append(
+            "Yaw shootout now ranks velocity/prior/shared-state coupling highest; the next minimum fix should focus on yaw handling around velocity, prior, and shared-state updates before revisiting frame semantics."
+        )
+    elif yaw_root_cause_leader == "B":
+        recommendations["Immediate next checks"].append(
+            "Yaw shootout now ranks orientation semantics highest; the next minimum fix should focus on world->lidar/world->imu yaw interpretation and extrinsic/frame-convention handling before touching solver weights."
+        )
+    elif yaw_root_cause_leader == "C":
+        recommendations["Immediate next checks"].append(
+            "Yaw shootout now ranks IMU/bias/gravity highest; the next minimum fix should focus on gyro/accel bias and gravity handling before revisiting velocity/prior coupling."
+        )
     new_factor_corr = solver_update_analysis.get("new_factor_vs_active_window_corr")
     new_value_corr = solver_update_analysis.get("new_value_vs_active_window_corr")
     if (
@@ -3003,6 +4044,8 @@ def render_report_markdown(
         source_counts_text = ", ".join(f"{k}:{v}" for k, v in source_counts.items()) or "_none_"
         mismatch_counts = jump_analysis.get("start_pose_support_mismatch_reason_counts", {})
         mismatch_counts_text = ", ".join(f"{k}:{v}" for k, v in mismatch_counts.items()) or "_none_"
+        strict_local_query_counts = jump_analysis.get("strict_local_query_reason_counts", {})
+        strict_local_query_counts_text = ", ".join(f"{k}:{v}" for k, v in strict_local_query_counts.items()) or "_none_"
         frozen_before_factor = jump_analysis.get("start_pose_frozen_before_factor_injection_counts", {})
         frozen_before_solver = jump_analysis.get("start_pose_frozen_before_solver_update_counts", {})
         lines.append(md_table(
@@ -3024,6 +4067,8 @@ def render_report_markdown(
                 ["frontend_to_final_rotation_p95", f"{jump_analysis.get('frontend_to_final_rotation_p95', 0.0):.3f}"],
                 ["frontend_to_final_rotation_max", f"{jump_analysis.get('frontend_to_final_rotation_max', 0.0):.3f}"],
                 ["frontend_to_final_jump_cause", jump_analysis.get("frontend_to_final_jump_cause", "n/a")],
+                ["strict_local_residual_dominance", jump_analysis.get("strict_local_residual_dominance", "n/a")],
+                ["strict_local_residual_cause", jump_analysis.get("strict_local_residual_cause", "n/a")],
             ],
         ))
         lines.append("Frontend jump consistency summary:")
@@ -3053,6 +4098,7 @@ def render_report_markdown(
                     f"{jump_analysis.get('frontend_pose_query_time_minus_representative_time_p95', 0.0):.6f} / "
                     f"{jump_analysis.get('frontend_pose_query_time_minus_representative_time_max', 0.0):.6f}",
                 ],
+                ["strict_local_query_reason_counts", strict_local_query_counts_text],
                 [
                     "start_pose_query_time - frontend_pose_query_time (mean/p95/max)",
                     f"{jump_analysis.get('start_pose_query_time_minus_frontend_pose_query_time_mean', 0.0):.6f} / "
@@ -3149,6 +4195,150 @@ def render_report_markdown(
                         f"{jump_analysis.get('postsolve_active_window_to_postsolve_strict_local_rotation_p95', 0.0):.3f} / "
                         f"{jump_analysis.get('postsolve_active_window_to_postsolve_strict_local_rotation_max', 0.0):.3f}",
                     ],
+                ],
+            ))
+            lines.append("Strict-local residual diagnostics:")
+            lines.append("")
+            lines.append(md_table(
+                ["Metric", "Value"],
+                [
+                    ["runtime_experiment_name", jump_analysis.get("runtime_experiment_name", "baseline")],
+                    ["runtime_exp_freeze_gravity", jump_analysis.get("runtime_exp_freeze_gravity", "n/a")],
+                    ["runtime_exp_freeze_gyro_bias", jump_analysis.get("runtime_exp_freeze_gyro_bias", "n/a")],
+                    ["runtime_exp_freeze_accel_bias", jump_analysis.get("runtime_exp_freeze_accel_bias", "n/a")],
+                    ["runtime_exp_disable_velocity_factor", jump_analysis.get("runtime_exp_disable_velocity_factor", "n/a")],
+                    ["runtime_exp_disable_current_velocity_prior", jump_analysis.get("runtime_exp_disable_current_velocity_prior", "n/a")],
+                    ["strict_local_residual_dominance", jump_analysis.get("strict_local_residual_dominance", "n/a")],
+                    ["strict_local_rotation_subtype", jump_analysis.get("strict_local_rotation_subtype", "n/a")],
+                    ["strict_local_residual_cause", jump_analysis.get("strict_local_residual_cause", "n/a")],
+                    [
+                        "frontend->final translation (mean/p95/max)",
+                        f"{jump_analysis.get('frontend_to_final_translation_mean', 0.0):.3f} / "
+                        f"{jump_analysis.get('frontend_to_final_translation_p95', 0.0):.3f} / "
+                        f"{jump_analysis.get('frontend_to_final_translation_max', 0.0):.3f}",
+                    ],
+                    [
+                        "frontend->final rotation (mean/p95/max)",
+                        f"{jump_analysis.get('frontend_to_final_rotation_mean', 0.0):.3f} / "
+                        f"{jump_analysis.get('frontend_to_final_rotation_p95', 0.0):.3f} / "
+                        f"{jump_analysis.get('frontend_to_final_rotation_max', 0.0):.3f}",
+                    ],
+                    [
+                        "frontend->final yaw residual abs (mean/p95/max)",
+                        f"{jump_analysis.get('frontend_to_final_yaw_abs_mean', 0.0):.3f} / "
+                        f"{jump_analysis.get('frontend_to_final_yaw_abs_p95', 0.0):.3f} / "
+                        f"{jump_analysis.get('frontend_to_final_yaw_abs_max', 0.0):.3f}",
+                    ],
+                    [
+                        "frontend->final pitch residual abs (mean/p95/max)",
+                        f"{jump_analysis.get('frontend_to_final_pitch_abs_mean', 0.0):.3f} / "
+                        f"{jump_analysis.get('frontend_to_final_pitch_abs_p95', 0.0):.3f} / "
+                        f"{jump_analysis.get('frontend_to_final_pitch_abs_max', 0.0):.3f}",
+                    ],
+                    [
+                        "frontend->final roll residual abs (mean/p95/max)",
+                        f"{jump_analysis.get('frontend_to_final_roll_abs_mean', 0.0):.3f} / "
+                        f"{jump_analysis.get('frontend_to_final_roll_abs_p95', 0.0):.3f} / "
+                        f"{jump_analysis.get('frontend_to_final_roll_abs_max', 0.0):.3f}",
+                    ],
+                    [
+                        "frontend->final dx (mean/p95/max)",
+                        f"{jump_analysis.get('frontend_to_final_dx_mean', 0.0):.3f} / "
+                        f"{jump_analysis.get('frontend_to_final_dx_p95', 0.0):.3f} / "
+                        f"{jump_analysis.get('frontend_to_final_dx_max', 0.0):.3f}",
+                    ],
+                    [
+                        "frontend->final dy (mean/p95/max)",
+                        f"{jump_analysis.get('frontend_to_final_dy_mean', 0.0):.3f} / "
+                        f"{jump_analysis.get('frontend_to_final_dy_p95', 0.0):.3f} / "
+                        f"{jump_analysis.get('frontend_to_final_dy_max', 0.0):.3f}",
+                    ],
+                    [
+                        "frontend->final dz (mean/p95/max)",
+                        f"{jump_analysis.get('frontend_to_final_dz_mean', 0.0):.3f} / "
+                        f"{jump_analysis.get('frontend_to_final_dz_p95', 0.0):.3f} / "
+                        f"{jump_analysis.get('frontend_to_final_dz_max', 0.0):.3f}",
+                    ],
+                    [
+                        "frontend->final xy_norm (mean/p95/max)",
+                        f"{jump_analysis.get('frontend_to_final_xy_norm_mean', 0.0):.3f} / "
+                        f"{jump_analysis.get('frontend_to_final_xy_norm_p95', 0.0):.3f} / "
+                        f"{jump_analysis.get('frontend_to_final_xy_norm_max', 0.0):.3f}",
+                    ],
+                    [
+                        "frontend->final abs_dz (mean/p95/max)",
+                        f"{jump_analysis.get('frontend_to_final_abs_dz_abs_mean', 0.0):.3f} / "
+                        f"{jump_analysis.get('frontend_to_final_abs_dz_abs_p95', 0.0):.3f} / "
+                        f"{jump_analysis.get('frontend_to_final_abs_dz_abs_max', 0.0):.3f}",
+                    ],
+                    ["strict_local_query_reason_counts", strict_local_query_counts_text],
+                    ["rotation_primary_corr", jump_analysis.get("strict_local_rotation_primary_correlation", "n/a")],
+                    ["translation_primary_corr", jump_analysis.get("strict_local_translation_primary_correlation", "n/a")],
+                    ["delta_rotation_vs_solver_update_ms", f"{jump_analysis.get('delta_rotation_vs_solver_update_ms', 'n/a')}"],
+                    ["delta_rotation_vs_recalc_imu", f"{jump_analysis.get('delta_rotation_vs_recalc_imu', 'n/a')}"],
+                    ["delta_rotation_vs_recalc_prior", f"{jump_analysis.get('delta_rotation_vs_recalc_prior', 'n/a')}"],
+                    ["delta_rotation_vs_recalc_velocity", f"{jump_analysis.get('delta_rotation_vs_recalc_velocity', 'n/a')}"],
+                    ["delta_rotation_vs_relin_shared", f"{jump_analysis.get('delta_rotation_vs_relin_shared', 'n/a')}"],
+                    ["delta_translation_vs_solver_update_ms", f"{jump_analysis.get('delta_translation_vs_solver_update_ms', 'n/a')}"],
+                    ["delta_translation_vs_recalc_lidar", f"{jump_analysis.get('delta_translation_vs_recalc_lidar', 'n/a')}"],
+                    ["delta_z_vs_recalc_imu", f"{jump_analysis.get('delta_z_vs_recalc_imu', 'n/a')}"],
+                    ["delta_yaw_vs_recalc_imu", f"{jump_analysis.get('delta_yaw_vs_recalc_imu', 'n/a')}"],
+                    ["delta_yaw_vs_recalc_prior", f"{jump_analysis.get('delta_yaw_vs_recalc_prior', 'n/a')}"],
+                    ["delta_yaw_vs_relin_shared", f"{jump_analysis.get('delta_yaw_vs_relin_shared', 'n/a')}"],
+                    ["delta_yaw_vs_recalc_velocity", f"{jump_analysis.get('delta_yaw_vs_recalc_velocity', 'n/a')}"],
+                    ["delta_yaw_vs_current_velocity_norm", f"{jump_analysis.get('delta_yaw_vs_current_velocity_norm', 'n/a')}"],
+                    ["delta_yaw_vs_delta_velocity_heading", f"{jump_analysis.get('delta_yaw_vs_delta_velocity_heading', 'n/a')}"],
+                    ["delta_yaw_vs_world_to_lidar_yaw_shift", f"{jump_analysis.get('delta_yaw_vs_world_to_lidar_yaw_shift', 'n/a')}"],
+                    ["delta_yaw_vs_world_to_imu_yaw_shift", f"{jump_analysis.get('delta_yaw_vs_world_to_imu_yaw_shift', 'n/a')}"],
+                    ["delta_yaw_vs_extrinsic_yaw_probe", f"{jump_analysis.get('delta_yaw_vs_extrinsic_yaw_probe', 'n/a')}"],
+                    ["delta_yaw_vs_gyro_bias_norm", f"{jump_analysis.get('delta_yaw_vs_gyro_bias_norm', 'n/a')}"],
+                    ["delta_yaw_vs_accel_bias_norm", f"{jump_analysis.get('delta_yaw_vs_accel_bias_norm', 'n/a')}"],
+                    ["delta_yaw_vs_gravity_dir_tilt", f"{jump_analysis.get('delta_yaw_vs_gravity_dir_tilt', 'n/a')}"],
+                    ["delta_yaw_vs_delta_gravity_dir", f"{jump_analysis.get('delta_yaw_vs_delta_gravity_dir', 'n/a')}"],
+                ],
+            ))
+            lines.append("Isolation Experiment Summary:")
+            lines.append("")
+            lines.append(md_table(
+                ["Metric", "Value"],
+                [
+                    ["experiment_name", jump_analysis.get("runtime_experiment_name", "baseline")],
+                    ["runtime_final_pose_surface", jump_analysis.get("runtime_final_pose_surface", "n/a")],
+                    ["freeze_gravity", jump_analysis.get("runtime_exp_freeze_gravity", "n/a")],
+                    ["freeze_gyro_bias", jump_analysis.get("runtime_exp_freeze_gyro_bias", "n/a")],
+                    ["freeze_accel_bias", jump_analysis.get("runtime_exp_freeze_accel_bias", "n/a")],
+                    ["disable_velocity_factor", jump_analysis.get("runtime_exp_disable_velocity_factor", "n/a")],
+                    ["disable_current_velocity_prior", jump_analysis.get("runtime_exp_disable_current_velocity_prior", "n/a")],
+                    ["yaw_p95", f"{jump_analysis.get('frontend_to_final_yaw_abs_p95', 0.0):.3f}"],
+                    ["yaw_max", f"{jump_analysis.get('frontend_to_final_yaw_abs_max', 0.0):.3f}"],
+                    ["rotation_p95", f"{jump_analysis.get('frontend_to_final_rotation_p95', 0.0):.3f}"],
+                    ["translation_p95", f"{jump_analysis.get('frontend_to_final_translation_p95', 0.0):.3f}"],
+                    ["solver_update_ms_mean", f"{jump_analysis.get('solver_update_ms_mean', 0.0):.3f}" if isinstance(jump_analysis.get('solver_update_ms_mean'), float) and math.isfinite(jump_analysis.get('solver_update_ms_mean')) else "n/a"],
+                    ["accept_ratio_mean", f"{jump_analysis.get('accept_ratio_mean', 0.0):.3f}" if isinstance(jump_analysis.get('accept_ratio_mean'), float) and math.isfinite(jump_analysis.get('accept_ratio_mean')) else "n/a"],
+                    ["match_ratio_mean", f"{jump_analysis.get('match_ratio_mean', 0.0):.3f}" if isinstance(jump_analysis.get('match_ratio_mean'), float) and math.isfinite(jump_analysis.get('match_ratio_mean')) else "n/a"],
+                    ["inlier_ratio_mean", f"{jump_analysis.get('inlier_ratio_mean', 0.0):.3f}" if isinstance(jump_analysis.get('inlier_ratio_mean'), float) and math.isfinite(jump_analysis.get('inlier_ratio_mean')) else "n/a"],
+                    ["isolation_effect", jump_analysis.get("isolation_effect", "n/a")],
+                ],
+            ))
+            lines.append("Yaw root-cause shootout summary:")
+            lines.append("")
+            lines.append(md_table(
+                ["Metric", "Value"],
+                [
+                    ["yaw_root_cause_summary", jump_analysis.get("yaw_root_cause_summary", "n/a")],
+                    ["candidate_A_velocity_prior_shared_score", f"{jump_analysis.get('candidate_A_velocity_prior_shared_score', 0.0):.1f}"],
+                    ["candidate_B_orientation_semantics_score", f"{jump_analysis.get('candidate_B_orientation_semantics_score', 0.0):.1f}"],
+                    ["candidate_C_imu_bias_gravity_score", f"{jump_analysis.get('candidate_C_imu_bias_gravity_score', 0.0):.1f}"],
+                    ["leader", f"{jump_analysis.get('yaw_root_cause_leader', 'n/a')}: {jump_analysis.get('yaw_root_cause_leader_label', 'n/a')}"],
+                    ["second", f"{jump_analysis.get('yaw_root_cause_second', 'n/a')}: {jump_analysis.get('yaw_root_cause_second_label', 'n/a')}"],
+                    ["weakest", f"{jump_analysis.get('yaw_root_cause_weakest', 'n/a')}: {jump_analysis.get('yaw_root_cause_weakest_label', 'n/a')}"],
+                    ["next_minimum_fix_target", jump_analysis.get("yaw_root_cause_next_fix_target", "n/a")],
+                    ["top_yaw_chain_inconsistency_ratio", f"{jump_analysis.get('top_yaw_chain_inconsistency_ratio', 0.0):.3f}"],
+                    ["yaw_chain_inconsistency_count_on_top_frames", jump_analysis.get("yaw_chain_inconsistency_count_on_top_frames", 0)],
+                    ["yaw_space_gap_p95", f"{jump_analysis.get('yaw_space_gap_p95', 0.0):.3f}"],
+                    ["leader_evidence", jump_analysis.get("yaw_root_cause_leader_evidence", "")],
+                    ["second_evidence", jump_analysis.get("yaw_root_cause_second_evidence", "")],
+                    ["weakest_evidence", jump_analysis.get("yaw_root_cause_weakest_evidence", "")],
                 ],
             ))
         start_rows = [
@@ -3292,6 +4482,143 @@ def render_report_markdown(
                 "recalc_cross",
             ],
             boundary_rows,
+        ))
+        strict_local_residual_rows = [
+            [
+                item.get("frame_id", ""),
+                f"{(item.get('delta_frontend_to_final_translation_norm') or 0.0):.3f}",
+                f"{(item.get('delta_frontend_to_final_rotation_rad') or 0.0):.3f}",
+                f"{(item.get('delta_frontend_to_final_yaw_rad') or 0.0):.3f}",
+                f"{(item.get('delta_frontend_to_final_pitch_rad') or 0.0):.3f}",
+                f"{(item.get('delta_frontend_to_final_roll_rad') or 0.0):.3f}",
+                f"{(item.get('delta_frontend_to_final_dx') or 0.0):.3f}",
+                f"{(item.get('delta_frontend_to_final_dy') or 0.0):.3f}",
+                f"{(item.get('delta_frontend_to_final_dz') or 0.0):.3f}",
+                f"{(item.get('solver_update_ms') or 0.0):.3f}",
+                f"{(item.get('reeliminated_variable_count') or 0):.0f}",
+                f"{(item.get('relinearized_pose_variable_count') or 0):.0f}",
+                f"{(item.get('relinearized_aux_variable_count') or 0):.0f}",
+                f"{(item.get('relinearized_shared_variable_count') or 0):.0f}",
+                f"{(item.get('recalculated_velocity_factor_count') or 0):.0f}",
+                f"{(item.get('recalculated_prior_factor_count') or 0):.0f}",
+                f"{(item.get('recalculated_imu_factor_count') or 0):.0f}",
+                f"{(item.get('recalculated_lidar_factor_count') or 0):.0f}",
+                f"{(item.get('recalculated_lidar_same_support_factor_count') or 0):.0f}",
+                f"{(item.get('recalculated_lidar_cross_support_factor_count') or 0):.0f}",
+                f"{(item.get('recalculated_lidar_current_segment_factor_count') or 0):.0f}",
+                item.get("strict_local_query_reason", ""),
+                item.get("strict_local_query_support_keys_summary", ""),
+            ]
+            for item in jump_analysis.get("top_strict_local_residual_frames", [])
+        ]
+        lines.append("Top strict-local residual frames:")
+        lines.append("")
+        lines.append(md_table(
+            [
+                "frame_id",
+                "delta_t_m",
+                "delta_r_rad",
+                "delta_yaw",
+                "delta_pitch",
+                "delta_roll",
+                "delta_dx",
+                "delta_dy",
+                "delta_dz",
+                "solver_update_ms",
+                "reelim",
+                "relin_pose",
+                "relin_aux",
+                "relin_shared",
+                "recalc_velocity",
+                "recalc_prior",
+                "recalc_imu",
+                "recalc_lidar",
+                "same_support",
+                "cross_support",
+                "current_segment_recalc",
+                "strict_local_query_reason",
+                "strict_local_query_support",
+            ],
+            strict_local_residual_rows,
+        ))
+        top_yaw_rows = [
+            [
+                item.get("frame_id", ""),
+                f"{(item.get('delta_frontend_to_final_yaw_rad') or 0.0):.3f}",
+                f"{(item.get('delta_frontend_to_final_pitch_rad') or 0.0):.3f}",
+                f"{(item.get('delta_frontend_to_final_roll_rad') or 0.0):.3f}",
+                f"{(item.get('delta_frontend_to_final_translation_norm') or 0.0):.3f}",
+                f"{(item.get('solver_update_ms') or 0.0):.3f}",
+                f"{(item.get('reeliminated_variable_count') or 0):.0f}",
+                f"{(item.get('relinearized_pose_variable_count') or 0):.0f}",
+                f"{(item.get('relinearized_aux_variable_count') or 0):.0f}",
+                f"{(item.get('relinearized_shared_variable_count') or 0):.0f}",
+                f"{(item.get('recalculated_velocity_factor_count') or 0):.0f}",
+                f"{(item.get('recalculated_prior_factor_count') or 0):.0f}",
+                f"{(item.get('recalculated_imu_factor_count') or 0):.0f}",
+                f"{(item.get('recalculated_lidar_factor_count') or 0):.0f}",
+                f"{(item.get('recalculated_lidar_same_support_factor_count') or 0):.0f}",
+                f"{(item.get('recalculated_lidar_cross_support_factor_count') or 0):.0f}",
+                f"{(item.get('current_velocity_norm') or 0.0):.3f}",
+                f"{(item.get('current_velocity_heading_rad') or 0.0):.3f}",
+                f"{(item.get('velocity_factor_count') or 0):.0f}",
+                f"{(item.get('prior_factor_count') or 0):.0f}",
+                f"{(item.get('uses_shared_imu_state') or 0):.0f}",
+                f"{(item.get('frontend_world_to_lidar_yaw') or 0.0):.3f}",
+                f"{(item.get('frontend_world_to_imu_yaw') or 0.0):.3f}",
+                f"{(item.get('final_world_to_lidar_yaw') or 0.0):.3f}",
+                f"{(item.get('final_world_to_imu_yaw') or 0.0):.3f}",
+                f"{(item.get('lidar_to_imu_extrinsic_yaw') or 0.0):.3f}",
+                item.get("yaw_chain_consistency_flag", ""),
+                f"{(item.get('gyro_bias_norm') or 0.0):.6f}",
+                f"{(item.get('accel_bias_norm') or 0.0):.6f}",
+                (
+                    f"[{(item.get('gravity_world_x') or 0.0):.3f},"
+                    f"{(item.get('gravity_world_y') or 0.0):.3f},"
+                    f"{(item.get('gravity_world_z') or 0.0):.3f}] / "
+                    f"tilt={(item.get('gravity_dir_tilt_rad') or 0.0):.3f}"
+                ),
+                item.get("strict_local_query_reason", ""),
+            ]
+            for item in jump_analysis.get("top_yaw_residual_frames", [])
+        ]
+        lines.append("Top yaw residual frames:")
+        lines.append("")
+        lines.append(md_table(
+            [
+                "frame_id",
+                "delta_yaw",
+                "delta_pitch",
+                "delta_roll",
+                "delta_t_m",
+                "solver_update_ms",
+                "reelim",
+                "relin_pose",
+                "relin_aux",
+                "relin_shared",
+                "recalc_velocity",
+                "recalc_prior",
+                "recalc_imu",
+                "recalc_lidar",
+                "same_support",
+                "cross_support",
+                "current_velocity_norm",
+                "current_velocity_heading",
+                "velocity_factor_count",
+                "prior_factor_count",
+                "uses_shared_imu_state",
+                "frontend_w_l_yaw",
+                "frontend_w_i_yaw",
+                "final_w_l_yaw",
+                "final_w_i_yaw",
+                "lidar_to_imu_extrinsic_yaw",
+                "yaw_chain_consistency_flag",
+                "gyro_bias_norm",
+                "accel_bias_norm",
+                "gravity_probe",
+                "strict_local_query_reason",
+            ],
+            top_yaw_rows,
         ))
     else:
         lines.append("jump_diagnostics.csv was not available for this run.")
@@ -3683,6 +5010,7 @@ def main() -> int:
     jump_analysis = analyze_jump_diagnostics(
         dataframes.get("jump_diagnostics"),
         str(config_summary.get("runtime_final_pose_surface") or config_summary.get("final_pose_surface") or "active_window"),
+        config_summary,
     )
     lidar_factor_internal_analysis = analyze_lidar_factor_internal(
         dataframes.get("lidar_factor_internal_profile"),

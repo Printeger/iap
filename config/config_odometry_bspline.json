@@ -46,6 +46,15 @@
     //   strict_local  = intended default final pose surface; publish the post-solve strict local LiDAR surface
     //   active_window = debug / regression / boundary-surface comparison only
     "final_pose_surface": "strict_local",
+    // Strict-local yaw residual isolation experiments (default off):
+    //   freeze_*                 = hold the corresponding shared IMU/gravity state at the first initialized tracking estimate
+    //   disable_velocity_factor  = skip IntegratedBSplineVelocityFactor construction
+    //   disable_current_velocity_prior = skip explicit odometry-created current velocity prior hooks
+    "exp_freeze_gravity": false,
+    "exp_freeze_gyro_bias": false,
+    "exp_freeze_accel_bias": false,
+    "exp_disable_velocity_factor": false,
+    "exp_disable_current_velocity_prior": false,
     // GPU backend for CT_LIDAR_GPU:
     //   CPU path is the refactor mainline.
     //   BUCKET is the second-priority GPU adaptation path after the CPU path is stable.

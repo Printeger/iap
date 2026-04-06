@@ -174,6 +174,42 @@ std::string normalize_final_pose_surface(const std::string& surface) {
   return "active_window";
 }
 
+std::string yaw_isolation_experiment_name(
+  bool freeze_gravity,
+  bool freeze_gyro_bias,
+  bool freeze_accel_bias,
+  bool disable_velocity_factor,
+  bool disable_current_velocity_prior) {
+  std::vector<std::string> parts;
+  if (freeze_gravity) {
+    parts.emplace_back("freeze_gravity");
+  }
+  if (freeze_gyro_bias) {
+    parts.emplace_back("freeze_gyro_bias");
+  }
+  if (freeze_accel_bias) {
+    parts.emplace_back("freeze_accel_bias");
+  }
+  if (disable_velocity_factor) {
+    parts.emplace_back("disable_velocity_factor");
+  }
+  if (disable_current_velocity_prior) {
+    parts.emplace_back("disable_current_velocity_prior");
+  }
+  if (parts.empty()) {
+    return "baseline";
+  }
+
+  std::ostringstream oss;
+  for (std::size_t i = 0; i < parts.size(); ++i) {
+    if (i > 0) {
+      oss << "+";
+    }
+    oss << parts[i];
+  }
+  return oss.str();
+}
+
 std::string run_command_capture(const std::string& command) {
   std::array<char, 256> buffer {};
   std::string output;
@@ -276,8 +312,34 @@ void write_metadata_files(const LogPaths& paths, const LogConfig& config) {
   if (const auto odom_config = load_named_config_if_exists("config_odometry")) {
     const std::string configured_final_pose_surface =
       odom_config->param<std::string>("odometry_estimation", "final_pose_surface", "strict_local");
+    const bool configured_exp_freeze_gravity =
+      odom_config->param<bool>("odometry_estimation", "exp_freeze_gravity", false);
+    const bool configured_exp_freeze_gyro_bias =
+      odom_config->param<bool>("odometry_estimation", "exp_freeze_gyro_bias", false);
+    const bool configured_exp_freeze_accel_bias =
+      odom_config->param<bool>("odometry_estimation", "exp_freeze_accel_bias", false);
+    const bool configured_exp_disable_velocity_factor =
+      odom_config->param<bool>("odometry_estimation", "exp_disable_velocity_factor", false);
+    const bool configured_exp_disable_current_velocity_prior =
+      odom_config->param<bool>("odometry_estimation", "exp_disable_current_velocity_prior", false);
     run_info["config_final_pose_surface"] = configured_final_pose_surface;
     run_info["runtime_final_pose_surface"] = normalize_final_pose_surface(configured_final_pose_surface);
+    run_info["config_exp_freeze_gravity"] = configured_exp_freeze_gravity;
+    run_info["runtime_exp_freeze_gravity"] = configured_exp_freeze_gravity;
+    run_info["config_exp_freeze_gyro_bias"] = configured_exp_freeze_gyro_bias;
+    run_info["runtime_exp_freeze_gyro_bias"] = configured_exp_freeze_gyro_bias;
+    run_info["config_exp_freeze_accel_bias"] = configured_exp_freeze_accel_bias;
+    run_info["runtime_exp_freeze_accel_bias"] = configured_exp_freeze_accel_bias;
+    run_info["config_exp_disable_velocity_factor"] = configured_exp_disable_velocity_factor;
+    run_info["runtime_exp_disable_velocity_factor"] = configured_exp_disable_velocity_factor;
+    run_info["config_exp_disable_current_velocity_prior"] = configured_exp_disable_current_velocity_prior;
+    run_info["runtime_exp_disable_current_velocity_prior"] = configured_exp_disable_current_velocity_prior;
+    run_info["runtime_experiment_name"] = yaw_isolation_experiment_name(
+      configured_exp_freeze_gravity,
+      configured_exp_freeze_gyro_bias,
+      configured_exp_freeze_accel_bias,
+      configured_exp_disable_velocity_factor,
+      configured_exp_disable_current_velocity_prior);
   }
   write_json_file(paths.metadata_path(config.metadata.run_info_file), run_info);
 
