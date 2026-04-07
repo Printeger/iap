@@ -13,6 +13,8 @@
 #include <gtsam_points/types/point_cloud.hpp>
 
 #include <memory>
+#include <limits>
+#include <string>
 #include <vector>
 
 namespace gtsam_points {
@@ -62,6 +64,9 @@ class CTLocalFrontend {
   struct Input {
     glim::EstimationFrame::ConstPtr target_frame;
     std::vector<SourceFrameInput> source_frames;
+    double frontend_target_time{std::numeric_limits<double>::quiet_NaN()};
+    std::string frontend_target_time_kind{"scan_start"};
+    std::string frontend_target_time_source{"current_source_frame.scan_start"};
     // IAP-RQ-300 / IAP-RQ-410: IMU measurements in the scan window for CT solve.
     std::vector<IMUSample> imu_samples;
     // Optional seed-only IMU stream. This may start before the current scan so

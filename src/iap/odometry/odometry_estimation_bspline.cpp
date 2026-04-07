@@ -468,8 +468,10 @@ const char* frame_warning_profile_csv_header() {
 }
 
 const char* jump_diagnostics_csv_header() {
-  return "frame_id,frame_stamp,raw_frame_stamp,scan_begin_time,scan_end_time,representative_time,bucket_representative_time,"
-         "start_pose_query_time,frontend_pose_query_time,current_segment_id,start_pose_source_kind,"
+  return "frame_id,frame_stamp,raw_frame_stamp,scan_begin_time,scan_end_time,frontend_target_time,bucket_query_time,"
+         "seed_integration_end_time,frontend_target_time_consistent,frontend_target_time_offset_vs_representative,"
+         "frontend_target_time_offset_vs_scan_start,frontend_target_time_offset_vs_scan_end,"
+         "representative_time,bucket_representative_time,start_pose_query_time,frontend_pose_query_time,current_segment_id,start_pose_source_kind,"
          "start_pose_frozen_before_factor_injection,start_pose_frozen_before_solver_update,frontend_seed_mode,"
          "frontend_seed_source,frontend_seed_fallback_used,frontend_seed_imu_sample_count,"
          "start_pose_tx,start_pose_ty,start_pose_tz,start_pose_qx,start_pose_qy,start_pose_qz,start_pose_qw,"
@@ -1448,6 +1450,13 @@ void write_jump_diagnostics_row(std::FILE* file, const glim::OdometryEstimationB
   add(row_data.raw_frame_stamp);
   add(row_data.scan_begin_time);
   add(row_data.scan_end_time);
+  add(row_data.frontend_target_time);
+  add(row_data.bucket_query_time);
+  add(row_data.seed_integration_end_time);
+  add(row_data.frontend_target_time_consistent ? 1 : 0);
+  add(row_data.frontend_target_time_offset_vs_representative);
+  add(row_data.frontend_target_time_offset_vs_scan_start);
+  add(row_data.frontend_target_time_offset_vs_scan_end);
   add(row_data.representative_time);
   add(row_data.bucket_representative_time);
   add(row_data.start_pose_query_time);
@@ -2055,6 +2064,14 @@ const char* OdometryEstimationBSpline::runtime_frontend_seed_source_name() const
   return "last_pose_copy";
 }
 
+const char* OdometryEstimationBSpline::runtime_frontend_target_time_kind_name() const {
+  return "scan_start";
+}
+
+const char* OdometryEstimationBSpline::runtime_frontend_target_time_source_name() const {
+  return "current_source_frame.scan_start";
+}
+
 bool OdometryEstimationBSpline::imu_forward_prediction_enabled() const {
   return frontend_seed_mode_ == iap::CTLocalFrontend::FrontendSeedMode::IMU_FORWARD_PREDICTION;
 }
@@ -2090,6 +2107,37 @@ void OdometryEstimationBSpline::record_frontend_seed_observation(
   if (observation.source == "imu_forward_prediction") {
     runtime_frontend_seed_imu_success_observed_ = true;
   }
+}
+
+void OdometryEstimationBSpline::record_frontend_target_time_observation(
+  const double frontend_target_time,
+  const double start_pose_query_time,
+  const double frontend_pose_query_time,
+  const double seed_integration_end_time,
+  const double bucket_query_time,
+  const double representative_time,
+  const double scan_start_time,
+  const double scan_end_time) const {
+  constexpr double kTargetTimeContractEps = 1e-6;
+  runtime_frontend_target_time_observed_ = true;
+  runtime_frontend_target_time_ = frontend_target_time;
+  runtime_frontend_representative_time_ = representative_time;
+  runtime_frontend_scan_start_time_ = scan_start_time;
+  runtime_frontend_scan_end_time_ = scan_end_time;
+  runtime_start_pose_query_time_ = start_pose_query_time;
+  runtime_frontend_pose_query_time_ = frontend_pose_query_time;
+  runtime_seed_integration_end_time_ = seed_integration_end_time;
+  runtime_bucket_query_time_ = bucket_query_time;
+  runtime_frontend_target_time_consistent_ =
+    std::isfinite(frontend_target_time) &&
+    std::isfinite(start_pose_query_time) &&
+    std::isfinite(frontend_pose_query_time) &&
+    std::isfinite(seed_integration_end_time) &&
+    std::isfinite(bucket_query_time) &&
+    std::abs(frontend_target_time - start_pose_query_time) <= kTargetTimeContractEps &&
+    std::abs(frontend_target_time - frontend_pose_query_time) <= kTargetTimeContractEps &&
+    std::abs(frontend_target_time - seed_integration_end_time) <= kTargetTimeContractEps &&
+    std::abs(frontend_target_time - bucket_query_time) <= kTargetTimeContractEps;
 }
 
 gtsam::Key OdometryEstimationBSpline::gyro_bias_key_for_auxiliary(const std::size_t auxiliary_index) const {
@@ -2326,6 +2374,18 @@ void OdometryEstimationBSpline::sync_runtime_mode_metadata(const bool force) con
             << (runtime_frontend_seed_fallback_used_ ? 1 : 0) << '|'
             << runtime_frontend_seed_source_name() << '|'
             << runtime_frontend_seed_imu_sample_count_ << '|'
+            << runtime_frontend_target_time_kind_name() << '|'
+            << runtime_frontend_target_time_source_name() << '|'
+            << (runtime_frontend_target_time_observed_ ? 1 : 0) << '|'
+            << runtime_frontend_target_time_ << '|'
+            << runtime_start_pose_query_time_ << '|'
+            << runtime_frontend_pose_query_time_ << '|'
+            << runtime_seed_integration_end_time_ << '|'
+            << runtime_bucket_query_time_ << '|'
+            << runtime_frontend_representative_time_ << '|'
+            << runtime_frontend_scan_start_time_ << '|'
+            << runtime_frontend_scan_end_time_ << '|'
+            << (runtime_frontend_target_time_consistent_ ? 1 : 0) << '|'
             << to_string(velocity_state_mode_) << '|'
             << to_string(runtime_velocity_state_mode_) << '|'
             << to_string(velocity_mode_policy_) << '|'
@@ -2355,6 +2415,20 @@ void OdometryEstimationBSpline::sync_runtime_mode_metadata(const bool force) con
   patch["runtime_frontend_seed_fallback_used"] = runtime_frontend_seed_fallback_used_;
   patch["runtime_frontend_seed_source"] = runtime_frontend_seed_source_name();
   patch["runtime_frontend_seed_imu_sample_count"] = runtime_frontend_seed_imu_sample_count_;
+  patch["runtime_frontend_target_time_kind"] = runtime_frontend_target_time_kind_name();
+  patch["runtime_frontend_target_time_source"] = runtime_frontend_target_time_source_name();
+  patch["runtime_frontend_target_time"] = runtime_frontend_target_time_;
+  patch["runtime_start_pose_query_time"] = runtime_start_pose_query_time_;
+  patch["runtime_frontend_pose_query_time"] = runtime_frontend_pose_query_time_;
+  patch["runtime_seed_integration_end_time"] = runtime_seed_integration_end_time_;
+  patch["runtime_bucket_query_time"] = runtime_bucket_query_time_;
+  patch["runtime_frontend_target_time_consistent"] = runtime_frontend_target_time_consistent_;
+  patch["runtime_frontend_target_time_offset_vs_representative"] =
+    runtime_frontend_target_time_ - runtime_frontend_representative_time_;
+  patch["runtime_frontend_target_time_offset_vs_scan_start"] =
+    runtime_frontend_target_time_ - runtime_frontend_scan_start_time_;
+  patch["runtime_frontend_target_time_offset_vs_scan_end"] =
+    runtime_frontend_target_time_ - runtime_frontend_scan_end_time_;
   patch["runtime_velocity_state_mode"] = to_string(runtime_velocity_state_mode_);
   patch["runtime_velocity_mode_policy"] = to_string(velocity_mode_policy_);
   patch["runtime_has_gnss_constraints"] = runtime_has_gnss_constraints_;
@@ -4040,6 +4114,15 @@ EstimationFrame::ConstPtr OdometryEstimationBSpline::insert_frame_ct_lidar_legac
       ct_local_result.pose_diagnostics.seed_fallback_used,
       ct_local_result.pose_diagnostics.seed_imu_sample_count,
     });
+    record_frontend_target_time_observation(
+      ct_local_result.pose_diagnostics.frontend_target_time,
+      ct_local_result.pose_diagnostics.query_time,
+      ct_local_result.pose_diagnostics.query_time,
+      ct_local_result.pose_diagnostics.seed_integration_end_time,
+      ct_local_result.pose_diagnostics.bucket_query_time,
+      ct_local_result.pose_diagnostics.representative_time,
+      raw_frame->stamp,
+      raw_frame->scan_end_time);
     sync_runtime_mode_metadata();
     iap::FrontendFrameProfile frontend_frame_profile = ct_local_result.processed.frame_profile;
     frontend_frame_profile.frame_id = new_frame->id;
@@ -4180,6 +4263,17 @@ EstimationFrame::ConstPtr OdometryEstimationBSpline::insert_frame_ct_lidar_legac
       jump_row.raw_frame_stamp = raw_frame->stamp;
       jump_row.scan_begin_time = raw_frame->stamp;
       jump_row.scan_end_time = raw_frame->scan_end_time;
+      jump_row.frontend_target_time = ct_local_result.pose_diagnostics.frontend_target_time;
+      jump_row.bucket_query_time = ct_local_result.pose_diagnostics.bucket_query_time;
+      jump_row.seed_integration_end_time = ct_local_result.pose_diagnostics.seed_integration_end_time;
+      jump_row.frontend_target_time_consistent =
+        ct_local_result.pose_diagnostics.frontend_target_time_consistent;
+      jump_row.frontend_target_time_offset_vs_representative =
+        jump_row.frontend_target_time - ct_local_result.pose_diagnostics.representative_time;
+      jump_row.frontend_target_time_offset_vs_scan_start =
+        jump_row.frontend_target_time - jump_row.scan_begin_time;
+      jump_row.frontend_target_time_offset_vs_scan_end =
+        jump_row.frontend_target_time - jump_row.scan_end_time;
       jump_row.representative_time = ct_local_result.pose_diagnostics.representative_time > 0.0
         ? ct_local_result.pose_diagnostics.representative_time
         : ct_local_result.pose_diagnostics.query_time;
@@ -4426,8 +4520,17 @@ EstimationFrame::ConstPtr OdometryEstimationBSpline::insert_frame_ct_lidar_legac
   const bool velocity_optimized = velocity_optimized_for_solve(solve_has_gnss);
   record_runtime_mode_resolution(solve_has_gnss, velocity_explicit_optimization_for_solve, velocity_optimized);
   const FrontendSeedObservation frontend_seed_observation =
-    inspect_frontend_seed_observation(raw_frame->scan_end_time);
+    inspect_frontend_seed_observation(raw_frame->stamp);
   record_frontend_seed_observation(frontend_seed_observation);
+  record_frontend_target_time_observation(
+    ct_local_result.pose_diagnostics.frontend_target_time,
+    ct_local_result.pose_diagnostics.query_time,
+    ct_local_result.pose_diagnostics.query_time,
+    ct_local_result.pose_diagnostics.seed_integration_end_time,
+    ct_local_result.pose_diagnostics.bucket_query_time,
+    ct_local_result.pose_diagnostics.representative_time,
+    raw_frame->stamp,
+    raw_frame->scan_end_time);
   sync_runtime_mode_metadata();
 
   gtsam::Values values = fixed_lag_registry_.control_buffer().values();
@@ -5851,6 +5954,17 @@ EstimationFrame::ConstPtr OdometryEstimationBSpline::insert_frame_ct_lidar_legac
     jump_row.raw_frame_stamp = raw_frame->stamp;
     jump_row.scan_begin_time = raw_frame->stamp;
     jump_row.scan_end_time = raw_frame->scan_end_time;
+    jump_row.frontend_target_time = ct_local_result.pose_diagnostics.frontend_target_time;
+    jump_row.bucket_query_time = ct_local_result.pose_diagnostics.bucket_query_time;
+    jump_row.seed_integration_end_time = ct_local_result.pose_diagnostics.seed_integration_end_time;
+    jump_row.frontend_target_time_consistent =
+      ct_local_result.pose_diagnostics.frontend_target_time_consistent;
+    jump_row.frontend_target_time_offset_vs_representative =
+      jump_row.frontend_target_time - ct_local_result.pose_diagnostics.representative_time;
+    jump_row.frontend_target_time_offset_vs_scan_start =
+      jump_row.frontend_target_time - jump_row.scan_begin_time;
+    jump_row.frontend_target_time_offset_vs_scan_end =
+      jump_row.frontend_target_time - jump_row.scan_end_time;
     jump_row.representative_time = ct_local_result.pose_diagnostics.representative_time > 0.0
       ? ct_local_result.pose_diagnostics.representative_time
       : ct_local_result.pose_diagnostics.query_time;
@@ -6049,6 +6163,12 @@ EstimationFrame::ConstPtr OdometryEstimationBSpline::insert_frame_ct_lidar_legac
     jump_row.uses_local_lidar_layout_override = false;
     jump_row.frontend_pose_query_support_keys_summary =
       summarize_keys(ct_local_result.pose_diagnostics.query_support_keys);
+    jump_row.frontend_target_time_offset_vs_representative =
+      jump_row.frontend_target_time - jump_row.representative_time;
+    jump_row.frontend_target_time_offset_vs_scan_start =
+      jump_row.frontend_target_time - jump_row.scan_begin_time;
+    jump_row.frontend_target_time_offset_vs_scan_end =
+      jump_row.frontend_target_time - jump_row.scan_end_time;
     maybe_write_jump_diagnostics(jump_row);
     maybe_log_jump_event(jump_row);
   }
@@ -6280,7 +6400,7 @@ EstimationFrame::ConstPtr OdometryEstimationBSpline::insert_frame_ct_lidar_unifi
   const bool velocity_optimized = velocity_optimized_for_solve(solve_has_gnss);
   record_runtime_mode_resolution(solve_has_gnss, velocity_explicit_optimization_for_solve, velocity_optimized);
   const FrontendSeedObservation frontend_seed_observation =
-    inspect_frontend_seed_observation(raw_frame->scan_end_time);
+    inspect_frontend_seed_observation(raw_frame->stamp);
   record_frontend_seed_observation(frontend_seed_observation);
   sync_runtime_mode_metadata();
 
@@ -6328,10 +6448,11 @@ EstimationFrame::ConstPtr OdometryEstimationBSpline::insert_frame_ct_lidar_unifi
   const auto strict_lidar_layout = fixed_lag_registry_.segments().empty()
     ? std::shared_ptr<const iap::SplineStateLayout>{}
     : create_segment_lidar_layout(fixed_lag_registry_.segments().back());
+  const double frontend_target_time = raw_frame->stamp;
   const gtsam::Pose3 pre_solve_start_pose_lidar = evaluate_pose_from_layout(
     strict_lidar_layout,
     values,
-    raw_frame->stamp,
+    frontend_target_time,
     iap::SplineSensorId::Lidar,
     control_window_->evaluate(0.0));
   iap::CTLocalFrontendShadowResult frontend_shadow_result;
@@ -6342,7 +6463,19 @@ EstimationFrame::ConstPtr OdometryEstimationBSpline::insert_frame_ct_lidar_unifi
     shadow_input.lidar_layout_override = strict_lidar_layout;
     shadow_input.graph_context.min_active_stamp = min_active_stamp;
     frontend_shadow_result =
-      ct_local_frontend_.run_shadow_diagnostics(shadow_input, values, raw_frame->stamp);
+      ct_local_frontend_.run_shadow_diagnostics(shadow_input, values, frontend_target_time);
+    record_frontend_target_time_observation(
+      frontend_shadow_result.pose_diagnostics.frontend_target_time,
+      frontend_target_time,
+      frontend_shadow_result.pose_diagnostics.valid
+        ? frontend_shadow_result.pose_diagnostics.query_time
+        : frontend_target_time,
+      frontend_shadow_result.pose_diagnostics.seed_integration_end_time,
+      frontend_shadow_result.pose_diagnostics.bucket_query_time,
+      frontend_shadow_result.pose_diagnostics.representative_time,
+      raw_frame->stamp,
+      raw_frame->scan_end_time);
+    sync_runtime_mode_metadata();
   }
 
   auto local_input = make_local_layer_input(values, factor_layout);
@@ -6959,7 +7092,12 @@ EstimationFrame::ConstPtr OdometryEstimationBSpline::insert_frame_ct_lidar_unifi
     jump_row.raw_frame_stamp = raw_frame->stamp;
     jump_row.scan_begin_time = raw_frame->stamp;
     jump_row.scan_end_time = raw_frame->scan_end_time;
-    jump_row.start_pose_query_time = raw_frame->stamp;
+    jump_row.frontend_target_time = frontend_shadow_result.pose_diagnostics.frontend_target_time;
+    jump_row.bucket_query_time = frontend_shadow_result.pose_diagnostics.bucket_query_time;
+    jump_row.seed_integration_end_time = frontend_shadow_result.pose_diagnostics.seed_integration_end_time;
+    jump_row.frontend_target_time_consistent =
+      frontend_shadow_result.pose_diagnostics.frontend_target_time_consistent;
+    jump_row.start_pose_query_time = frontend_target_time;
     jump_row.current_segment_id = fixed_lag_registry_.segments().empty()
       ? -1LL
       : static_cast<long long>(fixed_lag_registry_.segments().back().auxiliary_index);
@@ -7188,12 +7326,18 @@ EstimationFrame::ConstPtr OdometryEstimationBSpline::insert_frame_ct_lidar_unifi
       frontend_shadow_result.pose_diagnostics.uses_local_lidar_layout_override;
     jump_row.frontend_pose_query_time = frontend_shadow_result.pose_diagnostics.valid
       ? frontend_shadow_result.pose_diagnostics.query_time
-      : raw_frame->stamp;
+      : frontend_target_time;
     jump_row.frontend_pose_query_support_keys_summary = jump_row.frontend_pose_support_keys_summary;
     jump_row.representative_time = frontend_shadow_result.pose_diagnostics.representative_time > 0.0
       ? frontend_shadow_result.pose_diagnostics.representative_time
       : jump_row.frontend_pose_query_time;
     jump_row.bucket_representative_time = frontend_shadow_result.pose_diagnostics.bucket_representative_time;
+    jump_row.frontend_target_time_offset_vs_representative =
+      jump_row.frontend_target_time - jump_row.representative_time;
+    jump_row.frontend_target_time_offset_vs_scan_start =
+      jump_row.frontend_target_time - jump_row.scan_begin_time;
+    jump_row.frontend_target_time_offset_vs_scan_end =
+      jump_row.frontend_target_time - jump_row.scan_end_time;
     maybe_write_jump_diagnostics(jump_row);
     maybe_log_jump_event(jump_row);
   }
@@ -7364,7 +7508,7 @@ EstimationFrame::ConstPtr OdometryEstimationBSpline::insert_frame_ct_lidar_incre
   const bool velocity_optimized = velocity_optimized_for_solve(solve_has_gnss);
   record_runtime_mode_resolution(solve_has_gnss, velocity_explicit_optimization_for_solve, velocity_optimized);
   const FrontendSeedObservation frontend_seed_observation =
-    inspect_frontend_seed_observation(raw_frame->scan_end_time);
+    inspect_frontend_seed_observation(raw_frame->stamp);
   record_frontend_seed_observation(frontend_seed_observation);
   sync_runtime_mode_metadata();
 
@@ -7415,16 +7559,29 @@ EstimationFrame::ConstPtr OdometryEstimationBSpline::insert_frame_ct_lidar_incre
   local_input.lidar_layout_override = create_segment_lidar_layout(current_segment);
   local_input.graph_context.min_active_stamp = min_active_stamp;
   local_input.graph_context.existing_keys = unified_graph_solver_->current_active_keys();
+  const double frontend_target_time = raw_frame->stamp;
   const gtsam::Pose3 pre_solve_start_pose_lidar = evaluate_pose_from_layout(
     local_input.lidar_layout_override,
     mirror_values,
-    raw_frame->stamp,
+    frontend_target_time,
     iap::SplineSensorId::Lidar,
     control_window_->evaluate(0.0));
   iap::CTLocalFrontendShadowResult frontend_shadow_result;
   if (jump_diagnostics_enabled_) {
     frontend_shadow_result =
-      ct_local_frontend_.run_shadow_diagnostics(local_input, mirror_values, raw_frame->stamp);
+      ct_local_frontend_.run_shadow_diagnostics(local_input, mirror_values, frontend_target_time);
+    record_frontend_target_time_observation(
+      frontend_shadow_result.pose_diagnostics.frontend_target_time,
+      frontend_target_time,
+      frontend_shadow_result.pose_diagnostics.valid
+        ? frontend_shadow_result.pose_diagnostics.query_time
+        : frontend_target_time,
+      frontend_shadow_result.pose_diagnostics.seed_integration_end_time,
+      frontend_shadow_result.pose_diagnostics.bucket_query_time,
+      frontend_shadow_result.pose_diagnostics.representative_time,
+      raw_frame->stamp,
+      raw_frame->scan_end_time);
+    sync_runtime_mode_metadata();
   }
   const auto local_contribution = ct_local_frontend_.assemble_local_layer(local_input);
 
@@ -8251,7 +8408,12 @@ EstimationFrame::ConstPtr OdometryEstimationBSpline::insert_frame_ct_lidar_incre
     jump_row.raw_frame_stamp = raw_frame->stamp;
     jump_row.scan_begin_time = raw_frame->stamp;
     jump_row.scan_end_time = raw_frame->scan_end_time;
-    jump_row.start_pose_query_time = raw_frame->stamp;
+    jump_row.frontend_target_time = frontend_shadow_result.pose_diagnostics.frontend_target_time;
+    jump_row.bucket_query_time = frontend_shadow_result.pose_diagnostics.bucket_query_time;
+    jump_row.seed_integration_end_time = frontend_shadow_result.pose_diagnostics.seed_integration_end_time;
+    jump_row.frontend_target_time_consistent =
+      frontend_shadow_result.pose_diagnostics.frontend_target_time_consistent;
+    jump_row.start_pose_query_time = frontend_target_time;
     jump_row.current_segment_id = static_cast<long long>(current_segment.auxiliary_index);
     jump_row.start_pose_source_kind = "pre_solve_strict_local_layout";
     jump_row.start_pose_frozen_before_factor_injection = true;
@@ -8482,12 +8644,18 @@ EstimationFrame::ConstPtr OdometryEstimationBSpline::insert_frame_ct_lidar_incre
       frontend_shadow_result.pose_diagnostics.uses_local_lidar_layout_override;
     jump_row.frontend_pose_query_time = frontend_shadow_result.pose_diagnostics.valid
       ? frontend_shadow_result.pose_diagnostics.query_time
-      : raw_frame->stamp;
+      : frontend_target_time;
     jump_row.frontend_pose_query_support_keys_summary = jump_row.frontend_pose_support_keys_summary;
     jump_row.representative_time = frontend_shadow_result.pose_diagnostics.representative_time > 0.0
       ? frontend_shadow_result.pose_diagnostics.representative_time
       : jump_row.frontend_pose_query_time;
     jump_row.bucket_representative_time = frontend_shadow_result.pose_diagnostics.bucket_representative_time;
+    jump_row.frontend_target_time_offset_vs_representative =
+      jump_row.frontend_target_time - jump_row.representative_time;
+    jump_row.frontend_target_time_offset_vs_scan_start =
+      jump_row.frontend_target_time - jump_row.scan_begin_time;
+    jump_row.frontend_target_time_offset_vs_scan_end =
+      jump_row.frontend_target_time - jump_row.scan_end_time;
     maybe_write_jump_diagnostics(jump_row);
     maybe_log_jump_event(jump_row);
   }
@@ -9038,6 +9206,9 @@ iap::CTLocalFrontend::Input OdometryEstimationBSpline::make_frontend_input(
   const PreprocessedFrame::Ptr& raw_frame,
   const gtsam_points::PointCloud::ConstPtr& prepared_source_cloud) const {
   iap::CTLocalFrontend::Input input;
+  input.frontend_target_time = raw_frame->stamp;
+  input.frontend_target_time_kind = runtime_frontend_target_time_kind_name();
+  input.frontend_target_time_source = runtime_frontend_target_time_source_name();
 
   if (!frames.empty() && frames.back()) {
     input.target_frame = frames.back();
@@ -9093,7 +9264,7 @@ iap::CTLocalFrontend::Input OdometryEstimationBSpline::make_frontend_input(
   if (imu_forward_prediction_enabled() && input.target_frame) {
     input.seed_imu_samples = create_frontend_seed_imu_samples(
       input.target_frame->stamp,
-      raw_frame->scan_end_time);
+      input.frontend_target_time);
   }
 
   return input;

@@ -307,10 +307,13 @@ TEST(CTLocalFrontendSolve, ImuForwardPredictionSeedDiffersFromLastPoseCopy) {
 
   iap::CTLocalFrontend::Input last_pose_input;
   last_pose_input.target_frame = target;
+  last_pose_input.frontend_target_time = 0.10;
   last_pose_input.seed_mode = iap::CTLocalFrontend::FrontendSeedMode::LAST_POSE_COPY;
   last_pose_input.source_frames.push_back(make_source_input(
     {Eigen::Vector4d(1.0, 0.0, 0.0, 1.0)},
-    {0.05}));
+    {0.05},
+    0.10,
+    0.20));
   last_pose_input.imu_samples = seed_imu_samples;
   last_pose_input.seed_imu_samples = seed_imu_samples;
 
@@ -340,6 +343,16 @@ TEST(CTLocalFrontendSolve, ImuForwardPredictionSeedDiffersFromLastPoseCopy) {
   EXPECT_EQ(imu_seed_result.processed.frame_profile.frontend_seed_source, "imu_forward_prediction");
   EXPECT_FALSE(imu_seed_result.processed.frame_profile.frontend_seed_fallback_used);
   EXPECT_EQ(imu_seed_result.processed.frame_profile.frontend_seed_imu_sample_count, seed_imu_samples.size());
+  EXPECT_DOUBLE_EQ(last_pose_result.pose_diagnostics.frontend_target_time, 0.10);
+  EXPECT_DOUBLE_EQ(last_pose_result.pose_diagnostics.query_time, 0.10);
+  EXPECT_DOUBLE_EQ(last_pose_result.pose_diagnostics.bucket_query_time, 0.10);
+  EXPECT_DOUBLE_EQ(last_pose_result.pose_diagnostics.seed_integration_end_time, 0.10);
+  EXPECT_TRUE(last_pose_result.pose_diagnostics.frontend_target_time_consistent);
+  EXPECT_DOUBLE_EQ(imu_seed_result.pose_diagnostics.frontend_target_time, 0.10);
+  EXPECT_DOUBLE_EQ(imu_seed_result.pose_diagnostics.query_time, 0.10);
+  EXPECT_DOUBLE_EQ(imu_seed_result.pose_diagnostics.bucket_query_time, 0.10);
+  EXPECT_DOUBLE_EQ(imu_seed_result.pose_diagnostics.seed_integration_end_time, 0.10);
+  EXPECT_TRUE(imu_seed_result.pose_diagnostics.frontend_target_time_consistent);
 }
 
 TEST(CTLocalFrontendSolve, ImuForwardPredictionFallsBackWhenSeedSamplesMissing) {
@@ -353,10 +366,13 @@ TEST(CTLocalFrontendSolve, ImuForwardPredictionFallsBackWhenSeedSamplesMissing) 
 
   iap::CTLocalFrontend::Input input;
   input.target_frame = target;
+  input.frontend_target_time = 0.10;
   input.seed_mode = iap::CTLocalFrontend::FrontendSeedMode::IMU_FORWARD_PREDICTION;
   input.source_frames.push_back(make_source_input(
     {Eigen::Vector4d(1.0, 0.0, 0.0, 1.0)},
-    {0.05}));
+    {0.05},
+    0.10,
+    0.20));
 
   iap::CTLocalFrontend frontend;
   const auto result = frontend.run(input);
@@ -367,6 +383,64 @@ TEST(CTLocalFrontendSolve, ImuForwardPredictionFallsBackWhenSeedSamplesMissing) 
   EXPECT_EQ(result.processed.frame_profile.frontend_seed_source, "imu_forward_prediction_fallback_last_pose_copy");
   EXPECT_TRUE(result.processed.frame_profile.frontend_seed_fallback_used);
   EXPECT_EQ(result.processed.frame_profile.frontend_seed_imu_sample_count, 0U);
+  EXPECT_DOUBLE_EQ(result.pose_diagnostics.frontend_target_time, 0.10);
+  EXPECT_DOUBLE_EQ(result.pose_diagnostics.query_time, 0.10);
+  EXPECT_DOUBLE_EQ(result.pose_diagnostics.bucket_query_time, 0.10);
+  EXPECT_DOUBLE_EQ(result.pose_diagnostics.seed_integration_end_time, 0.10);
+  EXPECT_TRUE(result.pose_diagnostics.frontend_target_time_consistent);
+}
+
+TEST(CTLocalFrontendSolve, FrontendTargetTimeContractIsExplicitAndConsistent) {
+  auto target = std::make_shared<glim::EstimationFrame>();
+  target->stamp = 0.0;
+  target->T_world_lidar = Eigen::Isometry3d::Identity();
+  target->T_lidar_imu = Eigen::Isometry3d::Identity();
+  target->T_world_imu = target->T_world_lidar * target->T_lidar_imu;
+  target->v_world_imu = Eigen::Vector3d::Zero();
+  target->imu_bias = Eigen::Matrix<double, 6, 1>::Zero();
+
+  iap::CTLocalFrontend::Input input;
+  input.target_frame = target;
+  input.frontend_target_time = 0.10;
+  input.seed_mode = iap::CTLocalFrontend::FrontendSeedMode::LAST_POSE_COPY;
+  input.target_ivox = make_target_ivox();
+  input.source_frames.push_back(make_source_input(
+    {
+      Eigen::Vector4d(0.0, 0.0, 0.0, 1.0),
+      Eigen::Vector4d(1.0, 0.0, 0.0, 1.0),
+    },
+    {0.00, 0.05},
+    0.10,
+    0.20));
+
+  iap::CTLocalFrontend frontend;
+  const auto result = frontend.run(input);
+  EXPECT_TRUE(result.pose_diagnostics.valid);
+  EXPECT_DOUBLE_EQ(result.pose_diagnostics.frontend_target_time, 0.10);
+  EXPECT_DOUBLE_EQ(result.pose_diagnostics.query_time, 0.10);
+  EXPECT_DOUBLE_EQ(result.pose_diagnostics.bucket_query_time, 0.10);
+  EXPECT_DOUBLE_EQ(result.pose_diagnostics.seed_integration_end_time, 0.10);
+  EXPECT_TRUE(result.pose_diagnostics.frontend_target_time_consistent);
+}
+
+TEST(CTLocalFrontendSolve, ShadowDiagnosticsConsumeProvidedQueryTimeAsFrontendTargetTime) {
+  iap::CTLocalFrontend frontend;
+  iap::CTLocalFrontend::LayerInput input;
+  input.graph_context.layout = std::make_shared<const iap::SplineStateLayout>(make_lidar_layout(0.10, 0.20));
+  input.lidar_layout_override = input.graph_context.layout;
+
+  gtsam::Values seed_values;
+  for (std::size_t i = 0; i < iap::kBSplineControlPointCount; ++i) {
+    seed_values.insert(iap::bspline_control_point_key(i), gtsam::Pose3());
+  }
+
+  const auto result = frontend.run_shadow_diagnostics(input, seed_values, 0.10);
+  EXPECT_TRUE(result.pose_diagnostics.valid);
+  EXPECT_DOUBLE_EQ(result.pose_diagnostics.frontend_target_time, 0.10);
+  EXPECT_DOUBLE_EQ(result.pose_diagnostics.query_time, 0.10);
+  EXPECT_DOUBLE_EQ(result.pose_diagnostics.bucket_query_time, 0.10);
+  EXPECT_DOUBLE_EQ(result.pose_diagnostics.seed_integration_end_time, 0.10);
+  EXPECT_TRUE(result.pose_diagnostics.frontend_target_time_consistent);
 }
 
 TEST(CTLocalFrontendBuckets, SupportsConfiguredBucketModes) {

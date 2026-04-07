@@ -177,6 +177,13 @@ class OdometryEstimationBSpline : public OdometryEstimationCPU {
     double raw_frame_stamp{0.0};
     double scan_begin_time{0.0};
     double scan_end_time{0.0};
+    double frontend_target_time{0.0};
+    double bucket_query_time{0.0};
+    double seed_integration_end_time{0.0};
+    bool frontend_target_time_consistent{false};
+    double frontend_target_time_offset_vs_representative{0.0};
+    double frontend_target_time_offset_vs_scan_start{0.0};
+    double frontend_target_time_offset_vs_scan_end{0.0};
     double representative_time{0.0};
     double bucket_representative_time{0.0};
     double start_pose_query_time{0.0};
@@ -543,6 +550,8 @@ class OdometryEstimationBSpline : public OdometryEstimationCPU {
   const char* runtime_bias_writeback_mode_name() const;
   const char* runtime_frontend_seed_mode_name() const;
   const char* runtime_frontend_seed_source_name() const;
+  const char* runtime_frontend_target_time_kind_name() const;
+  const char* runtime_frontend_target_time_source_name() const;
   bool imu_forward_prediction_enabled() const;
   struct FrontendSeedObservation {
     std::string mode{"last_pose_copy"};
@@ -552,6 +561,15 @@ class OdometryEstimationBSpline : public OdometryEstimationCPU {
   };
   FrontendSeedObservation inspect_frontend_seed_observation(double seed_end_stamp) const;
   void record_frontend_seed_observation(const FrontendSeedObservation& observation) const;
+  void record_frontend_target_time_observation(
+    double frontend_target_time,
+    double start_pose_query_time,
+    double frontend_pose_query_time,
+    double seed_integration_end_time,
+    double bucket_query_time,
+    double representative_time,
+    double scan_start_time,
+    double scan_end_time) const;
   gtsam::Key gyro_bias_key_for_auxiliary(std::size_t auxiliary_index) const;
   gtsam::Key accel_bias_key_for_auxiliary(std::size_t auxiliary_index) const;
   bool authoritative_previous_bias_auxiliary_index(
@@ -628,6 +646,16 @@ class OdometryEstimationBSpline : public OdometryEstimationCPU {
   mutable bool runtime_frontend_seed_observed_ = false;
   mutable bool runtime_frontend_seed_imu_success_observed_ = false;
   mutable std::size_t runtime_frontend_seed_imu_sample_count_ = 0;
+  mutable bool runtime_frontend_target_time_observed_ = false;
+  mutable double runtime_frontend_target_time_ = 0.0;
+  mutable double runtime_frontend_representative_time_ = 0.0;
+  mutable double runtime_frontend_scan_start_time_ = 0.0;
+  mutable double runtime_frontend_scan_end_time_ = 0.0;
+  mutable double runtime_start_pose_query_time_ = 0.0;
+  mutable double runtime_frontend_pose_query_time_ = 0.0;
+  mutable double runtime_seed_integration_end_time_ = 0.0;
+  mutable double runtime_bucket_query_time_ = 0.0;
+  mutable bool runtime_frontend_target_time_consistent_ = false;
   mutable std::string last_runtime_mode_metadata_signature_;
   double gravity_fixed_norm_value_ = 9.80665;
   double gravity_tilt_limit_rad_ = 0.02;

@@ -497,6 +497,17 @@ void write_metadata_files(const LogPaths& paths, const LogConfig& config) {
     run_info["runtime_frontend_seed_fallback_used"] = false;
     run_info["runtime_frontend_seed_source"] = "last_pose_copy";
     run_info["runtime_frontend_seed_imu_sample_count"] = 0;
+    run_info["runtime_frontend_target_time_kind"] = "scan_start";
+    run_info["runtime_frontend_target_time_source"] = "current_source_frame.scan_start";
+    run_info["runtime_frontend_target_time"] = 0.0;
+    run_info["runtime_start_pose_query_time"] = 0.0;
+    run_info["runtime_frontend_pose_query_time"] = 0.0;
+    run_info["runtime_seed_integration_end_time"] = 0.0;
+    run_info["runtime_bucket_query_time"] = 0.0;
+    run_info["runtime_frontend_target_time_consistent"] = false;
+    run_info["runtime_frontend_target_time_offset_vs_representative"] = 0.0;
+    run_info["runtime_frontend_target_time_offset_vs_scan_start"] = 0.0;
+    run_info["runtime_frontend_target_time_offset_vs_scan_end"] = 0.0;
     run_info["runtime_has_gnss_constraints"] = false;
     run_info["runtime_velocity_optimized"] =
       configured_velocity_state_mode == "optimize" && configured_velocity_mode_policy == "always_optimize";

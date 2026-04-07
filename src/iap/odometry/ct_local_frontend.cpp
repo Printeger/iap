@@ -498,7 +498,40 @@ struct FrontendMotionSeed {
   std::string seed_source = "last_pose_copy";
   bool seed_fallback_used = false;
   std::size_t seed_imu_sample_count = 0;
+  double seed_integration_end_time = 0.0;
 };
+
+double resolve_frontend_target_time(
+  const CTLocalFrontend::Input& input,
+  const double fallback_time) {
+  if (std::isfinite(input.frontend_target_time)) {
+    return input.frontend_target_time;
+  }
+  if (!input.source_frames.empty()) {
+    return source_frame_start(input.source_frames.back());
+  }
+  return fallback_time;
+}
+
+bool frontend_target_time_contract_consistent(
+  const double frontend_target_time,
+  const double start_pose_query_time,
+  const double frontend_pose_query_time,
+  const double seed_integration_end_time,
+  const double bucket_query_time) {
+  constexpr double kTargetTimeContractEps = 1e-6;
+  if (!std::isfinite(frontend_target_time) ||
+      !std::isfinite(start_pose_query_time) ||
+      !std::isfinite(frontend_pose_query_time) ||
+      !std::isfinite(seed_integration_end_time) ||
+      !std::isfinite(bucket_query_time)) {
+    return false;
+  }
+  return std::abs(frontend_target_time - start_pose_query_time) <= kTargetTimeContractEps &&
+    std::abs(frontend_target_time - frontend_pose_query_time) <= kTargetTimeContractEps &&
+    std::abs(frontend_target_time - seed_integration_end_time) <= kTargetTimeContractEps &&
+    std::abs(frontend_target_time - bucket_query_time) <= kTargetTimeContractEps;
+}
 
 std::vector<CTLocalFrontend::IMUSample> normalized_seed_imu_samples(
   const CTLocalFrontend::Input& input,
@@ -529,9 +562,11 @@ FrontendMotionSeed make_frontend_motion_seed(
   double scan_end,
   const CTLocalFrontend::Input& input) {
   FrontendMotionSeed seed;
+  const double frontend_target_time = resolve_frontend_target_time(input, scan_start);
   seed.controls = make_frontend_controls(scan_start, scan_end, pose_guess_from_target(input.target_frame));
   seed.velocity_world = input.target_frame ? input.target_frame->v_world_imu : Eigen::Vector3d::Zero();
   seed.seed_mode = CTLocalFrontend::frontend_seed_mode_name(input.seed_mode);
+  seed.seed_integration_end_time = frontend_target_time;
 
   if (input.seed_mode != CTLocalFrontend::FrontendSeedMode::IMU_FORWARD_PREDICTION ||
       !input.target_frame ||
@@ -546,18 +581,13 @@ FrontendMotionSeed make_frontend_motion_seed(
   const gtsam::Pose3 initial_pose_world_imu(input.target_frame->T_world_imu.matrix());
   const Eigen::Vector3d accel_bias = input.target_frame->imu_bias.head<3>();
   const Eigen::Vector3d gyro_bias = input.target_frame->imu_bias.tail<3>();
-  const auto samples = normalized_seed_imu_samples(input, input.target_frame->stamp, scan_end);
+  const auto samples =
+    normalized_seed_imu_samples(input, input.target_frame->stamp, frontend_target_time);
   seed.seed_imu_sample_count = samples.size();
   if (samples.empty()) {
     seed.seed_source = "imu_forward_prediction_fallback_last_pose_copy";
     seed.seed_fallback_used = true;
     return seed;
-  }
-
-  std::vector<double> target_times;
-  target_times.reserve(seed.controls.size());
-  for (const auto& control : seed.controls) {
-    target_times.push_back(control.stamp);
   }
 
   const Eigen::Isometry3d T_imu_lidar =
@@ -596,22 +626,43 @@ FrontendMotionSeed make_frontend_motion_seed(
     current_time = target_time;
   };
 
-  for (std::size_t i = 0; i < seed.controls.size(); ++i) {
-    const double target_time = seed.controls[i].stamp;
-    while (sample_index + 1 < samples.size() && samples[sample_index + 1].stamp < target_time - 1e-9) {
-      integrate_to(samples[sample_index + 1].stamp, samples[sample_index]);
-      ++sample_index;
-    }
-    integrate_to(target_time, samples[sample_index]);
-    const gtsam::Pose3 predicted_pose_world_lidar =
-      current_pose_world_imu.compose(gtsam::Pose3(T_imu_lidar.matrix()));
-    seed.controls[i].pose = predicted_pose_world_lidar;
+  while (sample_index + 1 < samples.size() &&
+         samples[sample_index + 1].stamp < frontend_target_time - 1e-9) {
+    integrate_to(samples[sample_index + 1].stamp, samples[sample_index]);
+    ++sample_index;
+  }
+  integrate_to(frontend_target_time, samples[sample_index]);
+  const gtsam::Pose3 predicted_pose_world_lidar =
+    current_pose_world_imu.compose(gtsam::Pose3(T_imu_lidar.matrix()));
+  for (auto& control : seed.controls) {
+    control.pose = predicted_pose_world_lidar;
   }
 
   seed.velocity_world = current_velocity_world;
   seed.used_imu_forward_prediction = true;
   seed.seed_source = "imu_forward_prediction";
   return seed;
+}
+
+void populate_frontend_target_time_diagnostics(
+  FrontendPoseDiagnostics* diagnostics,
+  const double frontend_target_time,
+  const double start_pose_query_time,
+  const double frontend_pose_query_time,
+  const double seed_integration_end_time,
+  const double bucket_query_time) {
+  if (!diagnostics) {
+    return;
+  }
+  diagnostics->frontend_target_time = frontend_target_time;
+  diagnostics->bucket_query_time = bucket_query_time;
+  diagnostics->seed_integration_end_time = seed_integration_end_time;
+  diagnostics->frontend_target_time_consistent = frontend_target_time_contract_consistent(
+    frontend_target_time,
+    start_pose_query_time,
+    frontend_pose_query_time,
+    seed_integration_end_time,
+    bucket_query_time);
 }
 
 std::vector<double> make_frontend_knots(double scan_start, double scan_end) {
@@ -926,6 +977,7 @@ CTLocalFrontendResult CTLocalFrontend::run(const Input& input) const {
 
   const double scan_start = frontend_scan_start(input);
   const double scan_end = frontend_scan_end(input, scan_start);
+  const double frontend_target_time = resolve_frontend_target_time(input, scan_start);
   const auto motion_seed = make_frontend_motion_seed(scan_start, scan_end, input);
   const auto& controls = motion_seed.controls;
   const std::size_t auxiliary_index = frontend_seed_auxiliary_index(controls);
@@ -1221,9 +1273,7 @@ CTLocalFrontendResult CTLocalFrontend::run(const Input& input) const {
       result.processed.frame_profile.carried_prior_count;
   }
 
-  const double query_time = input.source_frames.empty()
-    ? scan_start
-    : source_frame_start(input.source_frames.back());
+  const double query_time = frontend_target_time;
   const gtsam::Pose3 fallback_pose = pose_guess_from_target(input.target_frame);
   result.pose_diagnostics.seed_pose = fallback_pose;
   result.pose_diagnostics.optimized_pose = fallback_pose;
@@ -1233,6 +1283,13 @@ CTLocalFrontendResult CTLocalFrontend::run(const Input& input) const {
   result.pose_diagnostics.seed_source = motion_seed.seed_source;
   result.pose_diagnostics.seed_fallback_used = motion_seed.seed_fallback_used;
   result.pose_diagnostics.seed_imu_sample_count = motion_seed.seed_imu_sample_count;
+  populate_frontend_target_time_diagnostics(
+    &result.pose_diagnostics,
+    frontend_target_time,
+    query_time,
+    query_time,
+    motion_seed.seed_integration_end_time,
+    frontend_target_time);
   const auto [domain_begin, domain_end] = layout_domain_bounds(result.layout);
   result.pose_diagnostics.layout_domain_begin = domain_begin;
   result.pose_diagnostics.layout_domain_end = domain_end;
@@ -1268,7 +1325,7 @@ CTLocalFrontendResult CTLocalFrontend::run(const Input& input) const {
       support_indices.begin(),
       support_indices.end());
     const double entry_query_time = entry.bucket_ctx.support.query_time;
-    const double query_delta = std::abs(entry_query_time - query_time);
+    const double query_delta = std::abs(entry_query_time - frontend_target_time);
     if (query_delta >= closest_query_delta) {
       continue;
     }
@@ -1307,6 +1364,13 @@ CTLocalFrontendResult CTLocalFrontend::run(const Input& input) const {
     pose_translation_delta_norm(result.pose_diagnostics.seed_pose, result.pose_diagnostics.optimized_pose);
   result.pose_diagnostics.registration_delta_rotation_rad =
     pose_rotation_delta_rad(result.pose_diagnostics.seed_pose, result.pose_diagnostics.optimized_pose);
+  populate_frontend_target_time_diagnostics(
+    &result.pose_diagnostics,
+    frontend_target_time,
+    query_time,
+    query_time,
+    motion_seed.seed_integration_end_time,
+    frontend_target_time);
 
   return result;
 }
@@ -1384,6 +1448,13 @@ CTLocalFrontendShadowResult CTLocalFrontend::run_shadow_diagnostics(
   const auto lidar_layout_ptr = input.lidar_layout_override ? input.lidar_layout_override : input.graph_context.layout;
   const auto lidar_layout = lidar_layout_ptr ? *lidar_layout_ptr : SplineStateLayout{};
   result.pose_diagnostics.query_time = query_time;
+  populate_frontend_target_time_diagnostics(
+    &result.pose_diagnostics,
+    query_time,
+    query_time,
+    query_time,
+    query_time,
+    query_time);
   result.pose_diagnostics.uses_local_lidar_layout_override = static_cast<bool>(input.lidar_layout_override);
   result.pose_diagnostics.seed_mode = "last_pose_copy";
   result.pose_diagnostics.seed_source = "pre_solve_strict_local_layout";
@@ -1468,6 +1539,13 @@ CTLocalFrontendShadowResult CTLocalFrontend::run_shadow_diagnostics(
     pose_translation_delta_norm(result.pose_diagnostics.seed_pose, result.pose_diagnostics.optimized_pose);
   result.pose_diagnostics.registration_delta_rotation_rad =
     pose_rotation_delta_rad(result.pose_diagnostics.seed_pose, result.pose_diagnostics.optimized_pose);
+  populate_frontend_target_time_diagnostics(
+    &result.pose_diagnostics,
+    query_time,
+    query_time,
+    query_time,
+    query_time,
+    query_time);
 
   result.debug_stats.local_solve_time_ms =
     std::chrono::duration<double, std::milli>(Clock::now() - t_run_start).count();

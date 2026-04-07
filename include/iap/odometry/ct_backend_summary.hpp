@@ -238,6 +238,10 @@ struct CTLocalFrontendProcessedOutput {
 struct FrontendPoseDiagnostics {
   bool valid{false};
   double query_time{0.0};
+  double frontend_target_time{0.0};
+  double bucket_query_time{0.0};
+  double seed_integration_end_time{0.0};
+  bool frontend_target_time_consistent{false};
   double layout_domain_begin{0.0};
   double layout_domain_end{0.0};
   double representative_time{0.0};

@@ -475,6 +475,17 @@ def build_config_summary(configs: dict[str, Any], runtime_summary: dict[str, Any
         "runtime_frontend_seed_fallback_used",
         "runtime_frontend_seed_source",
         "runtime_frontend_seed_imu_sample_count",
+        "runtime_frontend_target_time_kind",
+        "runtime_frontend_target_time_source",
+        "runtime_frontend_target_time",
+        "runtime_start_pose_query_time",
+        "runtime_frontend_pose_query_time",
+        "runtime_seed_integration_end_time",
+        "runtime_bucket_query_time",
+        "runtime_frontend_target_time_consistent",
+        "runtime_frontend_target_time_offset_vs_representative",
+        "runtime_frontend_target_time_offset_vs_scan_start",
+        "runtime_frontend_target_time_offset_vs_scan_end",
         "runtime_has_gnss_constraints",
         "runtime_velocity_optimized",
         "runtime_experiment_name",
@@ -1717,6 +1728,17 @@ def analyze_jump_diagnostics(
         )
     if "frontend_seed_imu_sample_count" in df.columns:
         summarize_series(df["frontend_seed_imu_sample_count"], "frontend_seed_imu_sample_count")
+    if "frontend_target_time_consistent" in df.columns:
+        consistent_values = pd.to_numeric(df["frontend_target_time_consistent"], errors="coerce").fillna(0.0)
+        analysis["frontend_target_time_consistent_counts"] = {
+            "true": int((consistent_values != 0).sum()),
+            "false": int((consistent_values == 0).sum()),
+        }
+        analysis["frontend_target_time_consistency_ratio"] = (
+            analysis["frontend_target_time_consistent_counts"]["true"] / len(df)
+            if len(df) > 0
+            else 0.0
+        )
 
     for flag_column in [
         "start_pose_frozen_before_factor_injection",
@@ -1764,6 +1786,41 @@ def analyze_jump_diagnostics(
             "frontend_pose_query_time",
             "start_pose_query_time_minus_frontend_pose_query_time",
         ),
+        (
+            "frontend_target_time",
+            "representative_time",
+            "frontend_target_time_minus_representative_time",
+        ),
+        (
+            "frontend_target_time",
+            "scan_begin_time",
+            "frontend_target_time_minus_scan_begin_time",
+        ),
+        (
+            "frontend_target_time",
+            "scan_end_time",
+            "frontend_target_time_minus_scan_end_time",
+        ),
+        (
+            "frontend_target_time",
+            "start_pose_query_time",
+            "frontend_target_time_minus_start_pose_query_time",
+        ),
+        (
+            "frontend_target_time",
+            "frontend_pose_query_time",
+            "frontend_target_time_minus_frontend_pose_query_time",
+        ),
+        (
+            "frontend_target_time",
+            "seed_integration_end_time",
+            "frontend_target_time_minus_seed_integration_end_time",
+        ),
+        (
+            "frontend_target_time",
+            "bucket_query_time",
+            "frontend_target_time_minus_bucket_query_time",
+        ),
     ]
     for lhs, rhs, prefix in time_delta_specs:
         if lhs not in df.columns or rhs not in df.columns:
@@ -1791,6 +1848,10 @@ def analyze_jump_diagnostics(
             "frontend_seed_source",
             "frontend_seed_fallback_used",
             "frontend_seed_imu_sample_count",
+            "frontend_target_time",
+            "bucket_query_time",
+            "seed_integration_end_time",
+            "frontend_target_time_consistent",
             "start_pose_frozen_before_factor_injection",
             "start_pose_frozen_before_solver_update",
             "delta_start_to_frontend_translation_norm",
@@ -3664,6 +3725,11 @@ def detect_findings(
         config_summary.get("runtime_frontend_seed_source") or "last_pose_copy"
     )
     runtime_frontend_seed_imu_sample_count = config_summary.get("runtime_frontend_seed_imu_sample_count", "n/a")
+    runtime_frontend_target_time_kind = config_summary.get("runtime_frontend_target_time_kind", "n/a")
+    runtime_frontend_target_time_source = config_summary.get("runtime_frontend_target_time_source", "n/a")
+    runtime_frontend_target_time_consistent = maybe_bool(
+        config_summary.get("runtime_frontend_target_time_consistent")
+    )
     runtime_velocity_optimized = maybe_bool(config_summary.get("runtime_velocity_optimized"))
     runtime_has_gnss_constraints = maybe_bool(config_summary.get("runtime_has_gnss_constraints"))
     top_jump_frames = jump_analysis.get("top_frontend_to_final_translation_frames", [])
@@ -3790,6 +3856,31 @@ def detect_findings(
                     f"runtime_frontend_seed_fallback_used={runtime_frontend_seed_fallback_used}, "
                     f"runtime_frontend_seed_source={runtime_frontend_seed_source}, "
                     f"seed_fallback_frame_count={fallback_frames}"
+                ),
+            })
+
+    consistency_ratio = jump_analysis.get("frontend_target_time_consistency_ratio")
+    if runtime_frontend_target_time_kind != "n/a":
+        if runtime_frontend_target_time_consistent is True:
+            findings.append({
+                "severity": "info",
+                "title": "frontend target time is now explicitly defined as current scan_start",
+                "evidence": (
+                    f"runtime_frontend_target_time_kind={runtime_frontend_target_time_kind}, "
+                    f"runtime_frontend_target_time_source={runtime_frontend_target_time_source}, "
+                    f"runtime_frontend_target_time_consistent={runtime_frontend_target_time_consistent}, "
+                    f"frontend_target_time_consistency_ratio={consistency_ratio}"
+                ),
+            })
+        else:
+            findings.append({
+                "severity": "warn",
+                "title": "pre-solve target-time contract still inconsistent",
+                "evidence": (
+                    f"runtime_frontend_target_time_kind={runtime_frontend_target_time_kind}, "
+                    f"runtime_frontend_target_time_source={runtime_frontend_target_time_source}, "
+                    f"runtime_frontend_target_time_consistent={runtime_frontend_target_time_consistent}, "
+                    f"frontend_target_time_consistency_ratio={consistency_ratio}"
                 ),
             })
 
@@ -4802,6 +4893,8 @@ def render_report_markdown(
             [
                 ["start_pose_source_kind_counts", source_counts_text],
                 ["frontend_seed_source_counts", frontend_seed_counts_text],
+                ["runtime_frontend_target_time_kind", config_summary.get("runtime_frontend_target_time_kind", "n/a")],
+                ["runtime_frontend_target_time_source", config_summary.get("runtime_frontend_target_time_source", "n/a")],
                 ["seed_fallback_frame_count", jump_analysis.get("seed_fallback_frame_count", 0)],
                 ["seed_fallback_frame_ratio", f"{jump_analysis.get('seed_fallback_frame_ratio', 0.0):.3f}"],
                 [
@@ -4831,12 +4924,61 @@ def render_report_markdown(
                     f"{jump_analysis.get('frontend_pose_query_time_minus_representative_time_p95', 0.0):.6f} / "
                     f"{jump_analysis.get('frontend_pose_query_time_minus_representative_time_max', 0.0):.6f}",
                 ],
+                [
+                    "frontend_target_time_consistent_counts",
+                    (
+                        f"true:{(jump_analysis.get('frontend_target_time_consistent_counts') or {}).get('true', 0)}, "
+                        f"false:{(jump_analysis.get('frontend_target_time_consistent_counts') or {}).get('false', 0)}"
+                    ),
+                ],
                 ["strict_local_query_reason_counts", strict_local_query_counts_text],
                 [
                     "start_pose_query_time - frontend_pose_query_time (mean/p95/max)",
                     f"{jump_analysis.get('start_pose_query_time_minus_frontend_pose_query_time_mean', 0.0):.6f} / "
                     f"{jump_analysis.get('start_pose_query_time_minus_frontend_pose_query_time_p95', 0.0):.6f} / "
                     f"{jump_analysis.get('start_pose_query_time_minus_frontend_pose_query_time_max', 0.0):.6f}",
+                ],
+                [
+                    "frontend_target_time - start_pose_query_time (mean/p95/max)",
+                    f"{jump_analysis.get('frontend_target_time_minus_start_pose_query_time_mean', 0.0):.6f} / "
+                    f"{jump_analysis.get('frontend_target_time_minus_start_pose_query_time_p95', 0.0):.6f} / "
+                    f"{jump_analysis.get('frontend_target_time_minus_start_pose_query_time_max', 0.0):.6f}",
+                ],
+                [
+                    "frontend_target_time - frontend_pose_query_time (mean/p95/max)",
+                    f"{jump_analysis.get('frontend_target_time_minus_frontend_pose_query_time_mean', 0.0):.6f} / "
+                    f"{jump_analysis.get('frontend_target_time_minus_frontend_pose_query_time_p95', 0.0):.6f} / "
+                    f"{jump_analysis.get('frontend_target_time_minus_frontend_pose_query_time_max', 0.0):.6f}",
+                ],
+                [
+                    "frontend_target_time - seed_integration_end_time (mean/p95/max)",
+                    f"{jump_analysis.get('frontend_target_time_minus_seed_integration_end_time_mean', 0.0):.6f} / "
+                    f"{jump_analysis.get('frontend_target_time_minus_seed_integration_end_time_p95', 0.0):.6f} / "
+                    f"{jump_analysis.get('frontend_target_time_minus_seed_integration_end_time_max', 0.0):.6f}",
+                ],
+                [
+                    "frontend_target_time - bucket_query_time (mean/p95/max)",
+                    f"{jump_analysis.get('frontend_target_time_minus_bucket_query_time_mean', 0.0):.6f} / "
+                    f"{jump_analysis.get('frontend_target_time_minus_bucket_query_time_p95', 0.0):.6f} / "
+                    f"{jump_analysis.get('frontend_target_time_minus_bucket_query_time_max', 0.0):.6f}",
+                ],
+                [
+                    "frontend_target_time - representative_time (mean/p95/max)",
+                    f"{jump_analysis.get('frontend_target_time_minus_representative_time_mean', 0.0):.6f} / "
+                    f"{jump_analysis.get('frontend_target_time_minus_representative_time_p95', 0.0):.6f} / "
+                    f"{jump_analysis.get('frontend_target_time_minus_representative_time_max', 0.0):.6f}",
+                ],
+                [
+                    "frontend_target_time - scan_begin_time (mean/p95/max)",
+                    f"{jump_analysis.get('frontend_target_time_minus_scan_begin_time_mean', 0.0):.6f} / "
+                    f"{jump_analysis.get('frontend_target_time_minus_scan_begin_time_p95', 0.0):.6f} / "
+                    f"{jump_analysis.get('frontend_target_time_minus_scan_begin_time_max', 0.0):.6f}",
+                ],
+                [
+                    "frontend_target_time - scan_end_time (mean/p95/max)",
+                    f"{jump_analysis.get('frontend_target_time_minus_scan_end_time_mean', 0.0):.6f} / "
+                    f"{jump_analysis.get('frontend_target_time_minus_scan_end_time_p95', 0.0):.6f} / "
+                    f"{jump_analysis.get('frontend_target_time_minus_scan_end_time_max', 0.0):.6f}",
                 ],
             ],
         ))
