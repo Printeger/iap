@@ -302,13 +302,20 @@ class OdometryEstimationBSpline : public OdometryEstimationCPU {
     std::string postsolve_query_support_keys_summary;
     std::string postsolve_query_layout_name;
     std::string postsolve_query_support_mismatch_reason{"none"};
+    std::string postsolve_active_window_value_source_kind{"unknown"};
     std::size_t postsolve_strict_local_support_key_count{0};
     std::string postsolve_strict_local_support_keys_summary;
     std::string postsolve_strict_local_layout_name;
     std::string postsolve_strict_local_support_mismatch_reason{"none"};
+    std::string postsolve_strict_local_value_source_kind{"unknown"};
     std::size_t strict_local_query_support_key_count{0};
     std::string strict_local_query_support_keys_summary;
     std::string strict_local_query_reason{"none"};
+    bool postsolve_value_source_consistent{false};
+    std::string postsolve_query_frame_convention_kind{"unknown"};
+    std::string postsolve_extrinsic_application_kind{"unknown"};
+    std::string final_materialization_source_kind{"unknown"};
+    bool new_frame_consumes_final_truth_only{false};
 
     double match_ratio{0.0};
     double inlier_ratio{0.0};
@@ -342,6 +349,10 @@ class OdometryEstimationBSpline : public OdometryEstimationCPU {
 
     double pose_guess_translation_norm{0.0};
     double pose_guess_rotation_rad{0.0};
+    std::size_t retained_pose_control_key_count{0};
+    std::size_t strict_local_needed_support_key_count{0};
+    long long retained_minus_strict_local_key_excess{0};
+    std::string carried_prior_retained_keys_summary;
     std::string carried_boundary_oldest_key_summary;
     std::string oldest_survivor_key_summary;
     bool uses_local_lidar_layout_override{false};
@@ -402,6 +413,21 @@ class OdometryEstimationBSpline : public OdometryEstimationCPU {
     iap::BSplineCarriedPrior carried_prior;
   };
 
+  struct PostsolveEvaluationContext {
+    gtsam::Values authoritative_values;
+    std::shared_ptr<const iap::SplineStateLayout> active_window_layout;
+    std::shared_ptr<iap::SplineEvaluator> active_window_evaluator;
+    std::shared_ptr<const iap::SplineStateLayout> strict_local_layout;
+    double query_time{0.0};
+    std::string active_window_value_source_kind{"unknown"};
+    std::string strict_local_value_source_kind{"unknown"};
+    bool value_source_consistent{false};
+    std::string frame_convention_kind{"unknown"};
+    std::string extrinsic_application_kind{"unknown"};
+    std::string final_materialization_source_kind{"unknown"};
+    bool new_frame_consumes_final_truth_only{false};
+  };
+
   EstimationFrame::ConstPtr insert_frame_reconstruct(
     const PreprocessedFrame::Ptr& frame,
     std::vector<EstimationFrame::ConstPtr>& marginalized_frames);
@@ -441,8 +467,22 @@ class OdometryEstimationBSpline : public OdometryEstimationCPU {
   void update_marginal_prior_information(
     const gtsam::NonlinearFactorGraph& graph,
     const gtsam::Values& values,
-    const std::vector<gtsam::Key>& survivor_keys,
+    const std::vector<gtsam::Key>& carried_prior_retained_keys,
     const iap::BSplineCarriedPrior* previous_prior);
+  struct BoundaryBridgeSelection {
+    gtsam::KeyVector strict_local_needed_support_keys;
+    gtsam::KeyVector carried_prior_retained_keys;
+    gtsam::KeyVector boundary_anchor_keys;
+  };
+  BoundaryBridgeSelection build_boundary_bridge_selection(
+    const iap::SplineActiveStateSet& active_state_set,
+    const gtsam::KeyVector& strict_local_query_support_keys,
+    const std::vector<std::size_t>& fallback_control_indices,
+    std::size_t current_auxiliary_index,
+    bool velocity_in_graph,
+    bool include_clock_key,
+    const gtsam::KeyVector& navigation_retained_keys,
+    const gtsam::Values& values) const;
   void append_active_segment_constraint(
     const PreprocessedFrame::Ptr& raw_frame,
     const gtsam_points::PointCloud::ConstPtr& source);
@@ -579,6 +619,20 @@ class OdometryEstimationBSpline : public OdometryEstimationCPU {
   void seed_bias_values_for_auxiliary(std::size_t auxiliary_index, gtsam::Values* values) const;
   void seed_bias_values_for_active_segments(gtsam::Values* values) const;
   void mirror_bias_cache_from_values(const gtsam::Values& values);
+  gtsam::Values build_postsolve_authoritative_values(
+    const gtsam::Values& solve_values,
+    bool navigation_layer_enabled) const;
+  void sync_postsolve_registry_mirrors(
+    const gtsam::Values& postsolve_authoritative_values,
+    int frame_id,
+    bool update_shared_state_from_values);
+  PostsolveEvaluationContext build_postsolve_evaluation_context(
+    const gtsam::Values& solve_values,
+    const ActiveSplineSegmentConstraint* current_segment,
+    double query_time,
+    bool navigation_layer_enabled,
+    const char* value_source_kind) const;
+  void record_postsolve_evaluation_observation(const PostsolveEvaluationContext& context) const;
   void write_frame_bias_from_values(
     const gtsam::Values& values,
     std::size_t auxiliary_index,
@@ -656,6 +710,14 @@ class OdometryEstimationBSpline : public OdometryEstimationCPU {
   mutable double runtime_seed_integration_end_time_ = 0.0;
   mutable double runtime_bucket_query_time_ = 0.0;
   mutable bool runtime_frontend_target_time_consistent_ = false;
+  mutable bool runtime_postsolve_observed_ = false;
+  mutable std::string runtime_postsolve_active_window_value_source_kind_ = "unknown";
+  mutable std::string runtime_postsolve_strict_local_value_source_kind_ = "unknown";
+  mutable bool runtime_postsolve_value_source_consistent_ = false;
+  mutable std::string runtime_postsolve_query_frame_convention_kind_ = "unknown";
+  mutable std::string runtime_postsolve_extrinsic_application_kind_ = "unknown";
+  mutable std::string runtime_final_materialization_source_kind_ = "unknown";
+  mutable bool runtime_new_frame_consumes_final_truth_only_ = false;
   mutable std::string last_runtime_mode_metadata_signature_;
   double gravity_fixed_norm_value_ = 9.80665;
   double gravity_tilt_limit_rad_ = 0.02;

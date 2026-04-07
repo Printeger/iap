@@ -369,14 +369,33 @@ SplineActiveStateSet build_spline_active_state_set(
 
 BSplineMarginalizationPartition build_bspline_marginalization_partition(
   const SplineActiveStateSet& active_state_set) {
+  return build_bspline_marginalization_partition(
+    active_state_set,
+    active_state_set.active_pose_keys,
+    active_state_set.active_keys(),
+    filter_bspline_survivor_anchor_keys(active_state_set.active_keys(), true));
+}
+
+BSplineMarginalizationPartition build_bspline_marginalization_partition(
+  const SplineActiveStateSet& active_state_set,
+  const std::vector<gtsam::Key>& strict_local_needed_support_keys,
+  const std::vector<gtsam::Key>& carried_prior_retained_keys,
+  const std::vector<gtsam::Key>& boundary_anchor_keys) {
   BSplineMarginalizationPartition partition;
   partition.min_active_stamp = active_state_set.min_active_stamp;
   partition.active_state_set = active_state_set;
+  partition.active_solve_keys = sort_unique_keys(active_state_set.active_keys());
+  partition.strict_local_needed_support_keys =
+    sort_unique_keys(gtsam::KeyVector(strict_local_needed_support_keys.begin(), strict_local_needed_support_keys.end()));
+  partition.carried_prior_retained_keys =
+    sort_unique_keys(gtsam::KeyVector(carried_prior_retained_keys.begin(), carried_prior_retained_keys.end()));
+  partition.boundary_anchor_keys =
+    sort_unique_keys(gtsam::KeyVector(boundary_anchor_keys.begin(), boundary_anchor_keys.end()));
   partition.survivor_control_indices = active_state_set.active_control_indices;
   partition.removable_control_indices = active_state_set.removable_control_indices;
   partition.survivor_auxiliary_indices = active_state_set.active_auxiliary_indices;
   partition.removable_auxiliary_indices = active_state_set.removable_auxiliary_indices;
-  partition.survivor_keys = active_state_set.active_keys();
+  partition.survivor_keys = partition.active_solve_keys;
   partition.removable_keys = active_state_set.removable_keys;
   return partition;
 }

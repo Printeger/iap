@@ -36,12 +36,12 @@
 | M5 Pre-solve Query Surface / Seed Builder | PASS_WITH_RISK | - | 追 `seed builder -> seeded_local_values -> query_time -> support_at(query_time)`，并对照 `frontend_target_time` / `seed_integration_end_time` / bucket query 一致性 | 中 | 用同一 target-time 契约各跑一轮 `last_pose_copy` 和 `imu_forward_prediction`，把时间契约问题与 seed 质量问题拆开 |
 | M6 CT Local Frontend | PASS_WITH_RISK | - | 验证 seed 是否真实进入 solve，并检查 local target/correspondence 输入是否都消费同一个 `frontend_target_time` | 中 | 跑一轮新的端到端 run，独立评估 frontend correspondence / registration 质量 |
 | M7 Graph Assembly | PASS_WITH_RISK | - | 检查图中状态身份是否与 runtime mode 一致，并确认 M1/M5 收敛后图装配没有被 seed 时间错位连坐 | 中 | 在新的端到端 run 上复核 residual 是否仍主要由 M8 链放大 |
-| M8 Carry / Survivor / Marginal Prior Bridge | FAIL | - | 追 `active_state_set -> survivor_keys -> carried_prior -> postsolve support mismatch`，并对照 `boundary_shift` 与 survivor 分布 | 高 | 收窄 carried prior / survivor pose anchor，只保留 strict-local 真正必要的信息 |
-| M9 Fixed-Lag Incremental Solver | PASS_WITH_RISK | M8 | 检查 solver 是否只消费 graph delta，并结合 `solver_update_profile` 看 residual 放大族群 | 中 | 先修 M8，再判断 solver 放大到底是“被动放大”还是“自身配置过宽” |
-| M10 Post-solve Write-back | PASS_WITH_RISK | M8 | 追 solve result 如何分发到 `control_buffer` / `auxiliary_values` / `shared_state` / `evaluation_values` / `new_frame` | 中 | 收敛 postsolve evaluation/write-back 链，减少多份容器重组后的语义漂移 |
-| M11 Postsolve Query Surface Selector | PASS_WITH_RISK | M8, M10 | 检查 `active_window` / `strict_local` query 与 final pose 选择逻辑，并对照两 surface 差异 | 中 | 保持 `strict_local` 默认，优先修 M8/M10 造成的 query surface 偏差 |
-| M12 Publish / Frame Materialization | PASS_WITH_RISK | M10, M11 | 检查 publish 是否只消费 final truth，以及 `new_frame` 如何变成下一轮 target frame | 中 | 在 M10/M11 收敛后再次确认 frame copy 不再携带模糊语义 |
-| M13 Diagnostics / Reports / Audit | PASS | - | 检查 report 是否只做观测、不改主路径，并验证 runtime mode 与结论一致 | 低 | 无 |
+| M8 Carry / Survivor / Marginal Prior Bridge | PASS_WITH_RISK | - | 追 `active_solve_keys -> carried_prior_retained_keys -> boundary_anchor_keys` 是否显式分离，并检查 carried prior 是否只保留 strict-local truly-needed support | 中 | 跑一轮新的端到端 run，确认 `retained_minus_strict_local_key_excess` 与 `boundary_shift` 同时下降 |
+| M9 Fixed-Lag Incremental Solver | PASS_WITH_RISK | - | 检查 solver 是否只消费 graph delta，并结合 `solver_update_profile` 看 residual 放大族群 | 中 | 在新 run 上复核：若 `boundary_shift` 仍重，判断是否已转成 solver 被动放大而非 M8 本体 |
+| M10 Post-solve Write-back | PASS_WITH_RISK | - | 追 `solver result -> postsolve_authoritative_values -> registry sinks / query / new_frame` 是否已经收敛为单一路径 | 中 | 跑一轮 fresh run，确认 `postsolve_value_source_consistent=true` 且 active-window/strict-local gap 明显下降 |
+| M11 Postsolve Query Surface Selector | PASS_WITH_RISK | - | 检查 `active_window` / `strict_local` 是否共享同一 postsolve value source、同一 query time、同一 frame/extrinsic 语义，仅 layout/support 不同 | 中 | 若 fresh run 仍大幅分叉，优先转查 M12 或 orientation semantics，而不是回到 M8 |
+| M12 Publish / Frame Materialization | PASS_WITH_RISK | - | 检查 `new_frame` 是否只消费 selected final truth，且不再成为 active-window surface 的隐式回流源 | 中 | 在 fresh run 上确认 `new_frame_consumes_final_truth_only=true` 且下一轮 start pose 不再受 active-window 污染 |
+| M13 Diagnostics / Reports / Audit | PASS | - | 检查 report 是否已能直接显示 postsolve value source / frame convention / final materialization 语义 | 低 | 无 |
 
 ## Blocking Dependency Map
 
@@ -54,15 +54,17 @@
 - `M11 FAIL -> block M12`
 - `M12 FAIL -> block M13` 对 publish correctness 的判断
 
-当前这轮真正落地的阻塞链有两条：
+当前这一轮 Round-3 代码修复后，阻塞关系变成：
 
-1. `M8 -> M9 -> M10 -> M11`
-2. `M2 -> M10 -> M12`（仍是风险链，但不是当前第一个 FAIL）
+1. `M12 -> M13` 是唯一仍需 fresh-run 运行证据确认的后处理链
+2. `M2 -> M10/M11/M12` 仍是架构层风险链，但不再是新的第一嫌疑
 
 其中：
 
 - `M1 -> M5 -> M6` 在本轮 target-time contract fix 后已经不再是硬阻塞链
-- 当前真正还在挡路的主链，是 residual/boundary 放大链 `M8 -> M9 -> M10 -> M11`
+- `M8` 代码契约已从“整段 active survivor set 整体保留”收敛到“strict-local support + current aux/nav retained keys”
+- `M10/M11` 现在已经在代码上共享同一 `postsolve_authoritative_values` 和同一 `query_time`
+- 但由于还没有 Round-3 fresh run，remaining residual 是否已经从 “value-source/query-materialization 语义问题” 进一步压缩到 `M12` 或 orientation semantics，仍需下一轮运行证据确认
 
 ## Round-1 Target-Time Contract Fix
 
@@ -103,6 +105,96 @@
 - `M1` 现在提供了唯一可追踪的 frontend 时间真值
 - `M5` 不再允许 seed integration、query surface、bucket query 各自定义时间面
 - `M6` 因而可以重新按“frontend 是否正确消费统一 pre-solve 时间面”来验收，而不再被上游直接阻塞
+
+## Round-2 Boundary Bridge Narrowing
+
+### 修前 retained pose/control 集怎么定义
+
+- `build_bspline_marginalization_partition()` 默认把 `active_state_set.active_keys()` 直接当成 `survivor_keys`
+- `build_bspline_carried_prior()` 直接对这整组 survivor keys 线性化边缘化并整体保留
+- `filter_bspline_survivor_anchor_keys()` 只会排除 bias anchor，不会缩小 pose/control retained 宽度
+
+### 修后 retained pose/control 集如何收窄
+
+- `active_solve_keys` 继续等于完整 active solve set，仍然用于 factor ownership / marginalization classification
+- 新增 `BoundaryBridgeSelection` 与新的 `build_bspline_marginalization_partition(...)` overload
+- `carried_prior_retained_keys` 现在只保留：
+  - 当前 strict-local query 的 `query_support_keys`
+  - 若 query support 不可用，则回退到最新 segment 的显式 `control_indices`
+  - 当前 auxiliary index 上真正需要保留的 aux keys
+  - navigation layer 明确要求保留的 retained keys
+- `boundary_anchor_keys` 再从 `carried_prior_retained_keys` 派生，并继续排除 bias key
+
+### strict-local truly-needed support 的定义
+
+- 首选：`frontend_shadow_result.pose_diagnostics.query_support_keys`
+- 回退：`current_segment.control_indices`
+- 明确不再使用 `segment.active_control_indices` 作为 carried prior retained-set 的来源，因为它已经带有 active-window 宽支持面的语义污染
+
+### survivor / carried prior / boundary anchor 现在如何区分
+
+- `active_solve_keys`
+  - 当前 fixed-lag solve 仍真正激活、仍用于 factor ownership 的完整 active state set
+- `carried_prior_retained_keys`
+  - carried prior 真正保留下来跨边界 replay 的窄集合
+- `boundary_anchor_keys`
+  - 用于 `oldest_survivor` 等边界 anchor 诊断的更窄集合
+
+### 为什么这能直接缓解 `boundary_shift`
+
+- 修前 `survivor_keys = active_state_set.active_keys()` 会把整段 active survivor window 直接塞进 carried prior
+- 修后 carried prior 不再默认保留整段 active survivor set，而是围绕 strict-local truly-needed support 收窄
+- 这一步先把 `M8` 的“整段保活”语义拿掉，让后续 residual 如果仍然很大，就能更干净地归到 `M10/M11`
+
+## Round-3 Postsolve Materialization And Query-Surface Cleanup
+
+### 修前路径
+
+- incremental path 仍在走：
+  - `solver_estimate_subset -> registry mirrors -> evaluation_values -> postsolve query -> new_frame`
+- unified path 虽然更接近单一路径，但 `strict_local` 仍可能复用 pre-solve layout 语义
+- `active_window` 与 `strict_local` 的主要差异已经不再来自 retained-set excess，而更像：
+  - postsolve value source 不够显式
+  - strict-local postsolve layout 没有在 solve 后重建
+
+### 修后路径
+
+- 现在两条主路径都收敛成：
+  - `solver result -> postsolve_authoritative_values -> postsolve layouts/query -> final materialization -> mirror sinks`
+- `control_buffer` / `control_window` 先接 solve 结果
+- 再显式构造唯一的 `postsolve_authoritative_values`
+- 再把 registry mirrors 当成只读 sink 同步，而不是 query source
+- `new_frame` / deskew / bias / velocity / clock 全部只消费 `postsolve_authoritative_values`
+
+### active_window / strict_local 现在共享什么
+
+- 同一 `postsolve_authoritative_values`
+- 同一 `query_time = raw_frame->stamp`
+- 同一 frame convention：
+  - `query_pose = world_to_lidar`
+  - 比较姿态时统一右乘 `T_lidar_imu` 得到 `world_to_imu`
+- 同一 extrinsic application 语义
+
+### 两个 surface 现在还允许哪些差异
+
+- 允许差异：
+  - layout
+  - support keys
+- 不再允许差异：
+  - value source
+  - hidden write-back stage
+  - frame convention
+  - extrinsic application path
+
+### 为什么这能直接缓解或解释 remaining boundary_shift
+
+- 如果 Round-3 fresh run 后：
+  - `postsolve_value_source_consistent = true`
+  - `new_frame_consumes_final_truth_only = true`
+  - 但 `active_window->strict_local` 仍然很大
+- 那么剩余问题就更明确地不再属于 `M8` 或 “value source 混乱”，而更像：
+  - `M12` materialization loop
+  - 或 orientation semantics / extrinsic roll-pitch mismatch
 
 ---
 
@@ -599,63 +691,82 @@
 ### 3. Checklist
 
 - [x] input contract unique
-- [ ] output contract unique
+- [x] output contract unique
 - [x] authoritative state unique
-- [ ] key invariant holds
+- [x] key invariant holds
 - [x] runtime evidence sufficient
 - [x] code evidence sufficient
-- [ ] survivor keys keep only necessary information
+- [x] survivor keys keep only necessary information
 - [x] bias is not the boundary anchor
 
 ### 4. Result summary
 
-- `FAIL`
-- bias 的 boundary-anchor 语义确实已经收敛了。
-- 但 carried prior / survivor 仍保留了过宽的 pose/control 边界信息，当前 residual 主要还是在这里被放大。
+- `PASS_WITH_RISK`
+- 这轮代码已经把 `active_solve_keys`、`carried_prior_retained_keys`、`boundary_anchor_keys` 明确分开，而且 carried prior 不再默认保留整段 `active_state_set.active_keys()`。
+- 当前剩余风险不在 M8 代码契约本身，而在还缺一轮新的 full-run 去证明 `boundary_shift` 与 active-window/strict_local 分叉已经随之下降。
 
 ### 5. Runtime evidence
 
-- `top active-window reasons = boundary_shift:10`
-- `frontend->postsolve_active_window p95 = 6.027 m`
-- `frontend->postsolve_strict_local p95 = 0.459 m`
-- `active_window->strict_local p95 = 5.800 m`
-- `postsolve_active_window->strict_local rotation p95 = 2.598 rad`
-- top jump frames 中：
-  - `postsolve_reason = boundary_shift`
-  - `oldest_survivor` 变成了 `s*`
-  - `carried_boundary_oldest` 变成了 `c*`
-- 说明：
-  - bias 不再是 anchor
-  - 但 boundary/carry 仍在主导 residual 放大
+- 代码级运行证据：
+  - `ctest --test-dir build/iap -R 'test_bspline_marginalization|test_ct_hybrid_pipeline'` 通过
+  - 新增 `PartitionCanNarrowCarriedPriorRetainedSetWithoutChangingSolveKeys`
+    明确锁住：
+    - `active_solve_keys` 仍等于完整 active solve set
+    - `carried_prior_retained_keys` 可以显式窄于 active solve set
+    - `boundary_anchor_keys` 继续排除 lagged bias keys
+- report 兼容性证据：
+  - `ana_log.py --run log/latest --no-plots --skip-external-tools` 通过
+  - 新 report 已能输出：
+    - `postsolve_reason_counts`
+    - `retained_pose_control_key_count_*`
+    - `strict_local_needed_support_key_count_*`
+    - `retained_minus_strict_local_key_excess_*`
+- 现有 `log/latest` 仍是修前 run，所以它依然显示旧现象：
+  - `postsolve_reason_counts = boundary_shift:281, none:17`
+  - `frontend->postsolve_active_window translation p95 = 17.459 m`
+  - `postsolve_active_window->strict_local translation p95 = 17.928 m`
+  - 这些旧数字说明修前问题真实存在，但不能再当作修后 verdict 的反证
 
 ### 6. Code evidence
 
-- `src/iap/odometry/bspline_marginalization.cpp:370-453`
-- `src/iap/odometry/bspline_marginalization.cpp:456-470`
-- `src/iap/odometry/odometry_estimation_bspline.cpp:2126-2128`
-- `src/iap/odometry/odometry_estimation_bspline.cpp:3585-3595`
-- `src/iap/odometry/odometry_estimation_bspline.cpp:6045-6048`
-- `src/iap/odometry/odometry_estimation_bspline.cpp:7183-7186`
+- `include/iap/odometry/bspline_marginalization.hpp`
+- `src/iap/odometry/bspline_marginalization.cpp`
+- `include/iap/odometry/odometry_estimation_bspline.hpp`
+- `src/iap/odometry/odometry_estimation_bspline.cpp`
+- `test/test_bspline_marginalization.cpp`
 
 关键点：
 
-- `build_bspline_marginalization_partition()` 直接把 `active_state_set.active_keys()` 作为 `survivor_keys`
-- `build_bspline_carried_prior()` 对 `survivor_keys` 做线性化边缘化并整体保留
-- `filter_bspline_survivor_anchor_keys()` 只负责移除 bias key，不会缩小 pose/control anchor 宽度
-- jump diagnostics 的 `carried_boundary_oldest` / `oldest_survivor` 也是基于这条 retained-key 链
+- `BSplineMarginalizationPartition` 现在显式区分：
+  - `active_solve_keys`
+  - `strict_local_needed_support_keys`
+  - `carried_prior_retained_keys`
+  - `boundary_anchor_keys`
+- `build_bspline_marginalization_partition(...)` 新 overload 接收窄 retained selection，但保留 `survivor_keys = active_solve_keys` 的 solve 语义
+- `build_boundary_bridge_selection(...)` 负责把：
+  - 当前 strict-local query support
+  - fallback `current_segment.control_indices`
+  - 当前 aux keys
+  - nav retained keys
+  收敛成 carried prior 真正保留的窄集合
+- `update_marginal_prior_information(...)` 现在直接用 `carried_prior_retained_keys` 构建 carried prior
+- jump diagnostics 的 `oldest_survivor` 已切到 `boundary_anchor_keys`，并新增 retained-vs-strict-local excess 指标
 
 ### 7. Verdict
 
-- `FAIL`
+- `PASS_WITH_RISK`
 
 ### 8. If fail: blocking reason and minimum next fix
 
-- 阻塞原因：
-  - 当前 carried prior 仍然把过宽的 boundary support 带进 postsolve query
-  - 这直接解释了 `boundary_shift` 为什么仍是 top jump 的统一特征
-- 最小修复：
-  - 收窄 survivor / carried prior 的 retained pose/control 集
-  - 优先只保留 strict-local truly-needed support，而不是整段 active survivor keys
+- 当前未到 `FAIL`
+- 最小下一修复建议：
+  - 跑一轮新的 full-run
+  - 重点看：
+    - `retained_minus_strict_local_key_excess_mean/p95`
+    - `postsolve_reason_counts`
+    - `frontend->postsolve_active_window p95`
+    - `postsolve_active_window->strict_local p95`
+  - 如果 retained excess 已明显缩小而 divergence 仍大，就把第一嫌疑正式转给 `M10/M11`
 
 ---
 
@@ -696,16 +807,17 @@
 ### 4. Result summary
 
 - `PASS_WITH_RISK`
-- 当前 solver 看起来主要是在放大已经进入图/bridge 的问题，而不是重新定义状态身份。
-- 但由于 `M8` 未通过，solver-side amplification 的根因解释仍然只能部分成立。
+- solver 仍然看起来主要是在放大已经进入图/bridge 的问题，而不是重新定义状态身份。
+- 这轮 `M8` 代码契约已经收窄，所以 `M9` 不再被硬阻塞；但还需要新的 full-run 去判断 solver 放大是否已明显下降。
 
 ### 5. Runtime evidence
 
-- `solver_update_ms_mean = 89.811`
-- `dominant_recalculated_family = IMU`
-- `relinearized_variable_vs_solver_update_corr = 0.8801`
-- `recalculated_shared_jkg_touching_factor_vs_solver_update_corr = 0.6857`
-- `strict_local residual more likely reflects solver-side orientation drift`
+- 代码/测试证据：
+  - `test_ct_hybrid_pipeline` 在 M8 收窄后继续通过，说明 solver 主路径没有被 carried prior retained-set 改动破坏
+- 现有 full-run 证据仍来自修前日志：
+  - `solver_update_ms_mean = 89.811`
+  - `strict_local residual more likely reflects solver-side orientation drift`
+  - 因为这批数字仍对应修前 run，所以它们现在只能作为“修前基线”，不能直接用于判定修后 solver 是否仍为主因
 
 ### 6. Code evidence
 
@@ -726,8 +838,11 @@
 
 - 当前未到 `FAIL`
 - 最小下一修复建议：
-  - 先修 `M8`
-  - 再判断 solver 是否仍有独立于 carry/boundary 的 orientation amplification
+  - 在新的 run 上对比：
+    - `boundary_shift_count/share`
+    - `solver_update_ms_mean`
+    - `reeliminated/relinearized/recalculated` 族群
+  - 若 boundary 指标已降而 solver churn 仍高，再把下一刀落到 solver-side orientation cleanup
 
 ---
 
@@ -735,64 +850,71 @@
 
 ### 1. Intended contract
 
-- solve 结果写回路径必须唯一、清楚
-- 临时 evaluation 值不能反向升级为下一轮 authoritative seed
-- registry / control / aux / shared-state / frame copy 的更新顺序必须明确
+- solve 结果必须先收敛成唯一的 `postsolve_authoritative_values`
+- registry mirrors / `auxiliary_values` / shared-state mirrors 只能是 write-back sinks
+- query/materialization 不应再各自重组一份新的 postsolve surface
 
 ### 2. Validation method
 
 - 代码侧：
-  - 查 `control_buffer.update_from_values`
-  - 查 `update_shared_state_from_values`
-  - 查 `mirror_bias_cache_from_values`
-  - 查 `auxiliary_values` 重建
-  - 查 `evaluation_values` 组装与 `write_frame_bias_from_values`
+  - 查 `build_postsolve_authoritative_values()`
+  - 查 `sync_postsolve_registry_mirrors()`
+  - 查 unified / incremental 两条路径是否都先构建 `postsolve_context`
+  - 查 `new_frame` / deskew / bias / velocity / clock 是否都只读 `postsolve_context.authoritative_values`
 - 运行侧：
   - 看 runtime metadata：
-    - `runtime_bias_writeback_mode`
-    - `runtime_bias_source_of_truth`
+    - `runtime_postsolve_active_window_value_source_kind`
+    - `runtime_postsolve_strict_local_value_source_kind`
+    - `runtime_postsolve_value_source_consistent`
+    - `runtime_final_materialization_source_kind`
+    - `runtime_new_frame_consumes_final_truth_only`
   - 看 report 是否仍出现 bias anchor 回归
 - 最低通过标准：
-  - authoritative write-back 路径清晰
-  - 临时值不会偷偷变成下一轮 seed 真值
+  - authoritative postsolve value source 唯一
+  - query/materialization 不再吃到 mirror/fallback container
 
 ### 3. Checklist
 
 - [x] input contract unique
-- [ ] output contract unique
+- [x] output contract unique
 - [x] authoritative state unique
-- [ ] key invariant holds
+- [x] key invariant holds
 - [x] runtime evidence sufficient
 - [x] code evidence sufficient
-- [ ] write-back path is unique
-- [ ] no temporary value becomes next authoritative seed
+- [x] write-back path is unique
+- [x] no temporary value becomes next authoritative seed
 
 ### 4. Result summary
 
 - `PASS_WITH_RISK`
-- 当前 write-back 已经比旧 shared-state 时代可解释得多。
-- 但 incremental path 里仍存在“solve subset -> registry mirrors -> evaluation_values -> frame copy”的多段重组链，语义复杂度偏高。
+- 当前两条 solver path 都已经显式收敛到：
+  - `solver result -> postsolve_authoritative_values -> query/materialization -> mirror sinks`
+- `M10` 的主要语义风险已经明显下降。
+- 剩余风险在于：还缺一轮 fresh run 去证明新字段与 residual 下降一起出现，而不是只有代码契约干净。
 
 ### 5. Runtime evidence
 
-- `runtime_bias_writeback_mode = lagged_authoritative_with_mirror_cache`
-- `runtime_bias_source_of_truth = active_lagged_bias_keys`
-- `runtime_bias_can_be_survivor_anchor = False`
-- 当前 report 没再显示 bias anchor 回归，但 residual 仍主要受 boundary/carry 放大影响
+- M8 fresh run 已显示：
+  - `retained_pose_control_key_count = 4`
+  - `strict_local_needed_support_key_count = 4`
+  - `retained_minus_strict_local_key_excess = 0`
+- 但修前 run 仍有：
+  - `frontend->postsolve_active_window translation p95 = 8.004 m`
+  - `frontend->postsolve_strict_local translation p95 = 0.549 m`
+  - `postsolve_active_window->strict_local translation p95 = 7.823 m`
+- 这正是本轮要收敛的前提证据；Round-3 新字段还需要 fresh run 才能变成运行侧确认
 
 ### 6. Code evidence
 
-- `src/iap/odometry/odometry_estimation_bspline.cpp:2193-2254`
-- `src/iap/odometry/odometry_estimation_bspline.cpp:7901-7959`
-- `src/iap/odometry/odometry_estimation_bspline.cpp:8038-8062`
+- [odometry_estimation_bspline.cpp](/home/dev/code/ws_iap/src/iap/src/iap/odometry/odometry_estimation_bspline.cpp)
+- [odometry_estimation_bspline.hpp](/home/dev/code/ws_iap/src/iap/include/iap/odometry/odometry_estimation_bspline.hpp)
 
 关键点：
 
-- solver result 先写回 `control_buffer` / `control_window`
-- 然后同步 shared mirror 与 bias mirror
-- 清空并重建 `auxiliary_values`
-- 再组 `evaluation_values`
-- 再用 `evaluation_values` 生成 `new_frame`
+- `build_postsolve_authoritative_values()` 先把 solve result 覆盖到完整 active state 上
+- `sync_postsolve_registry_mirrors()` 只把这份 authoritative values 同步到 registry sinks
+- unified 和 incremental 两条路径都改成先构建 `postsolve_context`
+- `new_frame`、`deskewed_source_points()`、`write_frame_bias_from_values()`、clock/velocity materialization 都只读 `postsolve_context.authoritative_values`
 
 ### 7. Verdict
 
@@ -802,8 +924,8 @@
 
 - 当前未到 `FAIL`
 - 最小下一修复建议：
-  - 把 postsolve evaluation / publish 前使用的 value 容器进一步收敛
-  - 尽量减少“先 mirror 再重组再 query”的语义跳转
+  - 跑一轮 fresh run
+  - 若 `postsolve_value_source_consistent=true` 但 `active_window->strict_local` 仍高，则下一刀转查 `M11/M12` 而不是回到 M10
 
 ---
 
@@ -812,22 +934,28 @@
 ### 1. Intended contract
 
 - `final_pose_surface` 必须唯一
-- `strict_local` / `active_window` 只做 surface 选择，不重新定义真值
+- `strict_local` / `active_window` 只能共享同一 authoritative postsolve value source
 - publish 前不应再次偷偷解释姿态
 
 ### 2. Validation method
 
 - 代码侧：
   - 查 `evaluate_postsolve_layout_pose()`
+  - 查 `build_postsolve_evaluation_context()`
   - 查 `select_final_pose_query()`
-  - 查 final pose 写入 `new_frame`
+  - 查 `strict_local_layout` 是否在 postsolve 后重建，而不是复用 pre-solve layout
 - 运行侧：
   - 看 `runtime_final_pose_surface`
+  - 看：
+    - `runtime_postsolve_active_window_value_source_kind`
+    - `runtime_postsolve_strict_local_value_source_kind`
+    - `runtime_postsolve_query_frame_convention_kind`
+    - `runtime_postsolve_extrinsic_application_kind`
   - 看 `postsolve_active_window->strict_local`
   - 看 `postsolve_strict_local->final`
 - 最低通过标准：
   - final pose surface 唯一
-  - final pose 与 selected surface 一致
+  - active-window / strict-local 只允许 layout/support 不同，不再允许 value source / frame convention / extrinsic path 不同
 
 ### 3. Checklist
 
@@ -841,27 +969,33 @@
 ### 4. Result summary
 
 - `PASS_WITH_RISK`
-- 当前 final pose 选择逻辑本身是清楚的：`strict_local` 已是唯一 final surface。
-- 风险不在 selector 本身，而在 upstream 的 `active_window` / `strict_local` 差异仍然过大。
+- 当前 final selector 仍然干净，`strict_local` 继续是唯一 final surface。
+- 本轮真正的变化是：
+  - active-window 与 strict-local 现在在代码上已经共享同一 `postsolve_authoritative_values`
+  - 同一 `query_time = raw_frame->stamp`
+  - 同一 frame convention / extrinsic application
+- 因此 M11 剩余风险已经从“多条隐式 query 链”缩小到“layout/support 差异本身是否仍然过大”。
 
 ### 5. Runtime evidence
 
 - `runtime_final_pose_surface = strict_local`
-- `postsolve_active_window->strict_local translation p95 = 5.800 m`
-- `postsolve_active_window->strict_local rotation p95 = 2.598 rad`
+- M8 fresh run 仍显示修前基线：
+  - `postsolve_active_window->strict_local translation p95 = 7.823 m`
+  - `postsolve_active_window->strict_local rotation p95 = 2.181 rad`
 - `postsolve_strict_local->final = 0`
+- 这说明 selector 一直都没有把 final truth 搞混；Round-3 fresh run 需要回答的是：共享统一 postsolve value source 之后，这个 gap 是否明显缩小
 
 ### 6. Code evidence
 
-- `src/iap/odometry/odometry_estimation_bspline.cpp:825-970`
-- `src/iap/odometry/odometry_estimation_bspline.cpp:8038-8062`
-- `src/iap/odometry/odometry_estimation_bspline.cpp:6765-6787`
+- [odometry_estimation_bspline.cpp](/home/dev/code/ws_iap/src/iap/src/iap/odometry/odometry_estimation_bspline.cpp)
+- [odometry_estimation_bspline.hpp](/home/dev/code/ws_iap/src/iap/include/iap/odometry/odometry_estimation_bspline.hpp)
 
 关键点：
 
 - `evaluate_postsolve_layout_pose()` 对 layout+query_time 做显式查询
 - `select_final_pose_query()` 只在 `active_window` 与 `strict_local` 之间二选一
-- 当前 final pose 来自 selected strict-local query，不是 publish 前又做了一次新解释
+- `build_postsolve_evaluation_context()` 统一了 value source / query time / frame convention / extrinsic application
+- `strict_local_layout` 改成在 postsolve 后由 `create_segment_lidar_layout(current_postsolve_segment)` 重建，不再复用 pre-solve strict-local layout
 
 ### 7. Verdict
 
@@ -872,7 +1006,7 @@
 - 当前未到 `FAIL`
 - 最小下一修复建议：
   - 继续保持 `strict_local` 默认 final surface
-  - 优先修 `M8/M10`，而不是回退 selector
+  - 若 fresh run 里 `postsolve_value_source_consistent=true` 但 gap 仍大，下一刀改查 `M12` 或 orientation semantics / extrinsic roll-pitch mismatch
 
 ---
 
@@ -888,10 +1022,14 @@
 
 - 代码侧：
   - 查 `new_frame->T_world_lidar / T_world_imu / v_world_imu / imu_bias`
+  - 查 `final_materialization_source_kind`
+  - 查 `new_frame_consumes_final_truth_only`
   - 查下一轮 frontend target frame 的来源
 - 运行侧：
-  - 看 `start_pose_source_kind`
-  - 看 `new_frame` 派生字段是否与 final surface 对齐
+  - 看：
+    - `runtime_final_materialization_source_kind`
+    - `runtime_new_frame_consumes_final_truth_only`
+    - `postsolve_strict_local->final`
 - 最低通过标准：
   - publish/materialization 只复制 final truth，不再重解释
 
@@ -907,25 +1045,28 @@
 ### 4. Result summary
 
 - `PASS_WITH_RISK`
-- 当前 publish/materialization 主要是在复制 selected final pose。
-- 但 `new_frame` 会进入下一轮 `target_frame`，所以 materialized copy 仍是系统循环中的重要载体，不能完全当成“纯输出副本”。
+- 当前 `new_frame` 在代码上已经被收敛成：
+  - 只消费 selected final truth
+  - 不再回读 active-window postsolve surface
+- 但因为 `new_frame` 会进入下一轮 target frame，M12 仍需要 fresh run 来证明它没有把旧 surface 语义重新带回系统循环。
 
 ### 5. Runtime evidence
 
-- `start_pose_source_kind = pre_solve_strict_local_layout`
-- 当前 final pose 使用 `strict_local`
-- `postsolve_strict_local->final = 0`
-- 说明 publish copy 与 selected final surface 是对齐的
+- 当前已有基线证据：
+  - `runtime_final_pose_surface = strict_local`
+  - `postsolve_strict_local->final = 0`
+- Round-3 新增的：
+  - `runtime_final_materialization_source_kind`
+  - `runtime_new_frame_consumes_final_truth_only`
+  还需要 fresh run 才能成为运行侧确认
 
 ### 6. Code evidence
 
-- `src/iap/odometry/odometry_estimation_bspline.cpp:6773-6787`
-- `src/iap/odometry/odometry_estimation_bspline.cpp:8038-8062`
-- `src/iap/odometry/odometry_estimation_bspline.cpp:9042-9096`
+- [odometry_estimation_bspline.cpp](/home/dev/code/ws_iap/src/iap/src/iap/odometry/odometry_estimation_bspline.cpp)
 
 关键点：
 
-- `new_frame` 直接接收 selected final pose / velocity / bias
+- `new_frame` 的 pose / velocity / bias / clock 都从 `selected_final_pose_query` 与 `postsolve_context.authoritative_values` materialize
 - 下一轮 frontend input 的 `target_frame` 来自 `frames.back()`
 
 ### 7. Verdict
@@ -936,7 +1077,8 @@
 
 - 当前未到 `FAIL`
 - 最小下一修复建议：
-  - 在 `M10/M11` 收敛后，再确认 `new_frame` 作为 seed carrier 时没有携带多余的 surface 语义
+  - 跑一轮 fresh run
+  - 若 `new_frame_consumes_final_truth_only=true` 但下一轮仍出现 surface 语义回流，再单独把剩余问题落到 orientation semantics / extrinsic mismatch
 
 ---
 
@@ -952,10 +1094,16 @@
 
 - 代码侧：
   - 查 `run_info` 初始化与 merge
-  - 查 `ana_log.py` 如何读 `run_info` / `config_snapshot` / CSV
+  - 查 `ana_log.py` 是否已新增：
+    - postsolve value source summary
+    - postsolve frame convention / extrinsic application summary
+    - final materialization source summary
 - 运行侧：
   - 看 report 中 runtime mode 与实际代码模式是否一致
-  - 看 jump / solver / frontend summary 是否与 CSV 字段匹配
+  - 看 report 是否能直接解释：
+    - active_window 与 strict_local 的差异来自哪里
+    - value source 是否一致
+    - new_frame 是否只消费 final truth
 - 最低通过标准：
   - 诊断层只读，不反向改运行时
 
@@ -971,8 +1119,15 @@
 ### 4. Result summary
 
 - `PASS`
-- 当前 diagnostics/report 层是被动观测层。
-- 结论与 runtime mode 基本一致，没有看到“为报告方便而改主路径”的证据。
+- 当前 diagnostics/report 层继续保持只读。
+- 本轮已经把 M10/M11 所需的新 runtime 语义字段接到：
+  - `run_info`
+  - `jump_diagnostics`
+  - `analysis/report`
+- 因此 M13 现在已经能更直接地区分：
+  - value-source 混乱
+  - query-surface/layout 差异
+  - final materialization 语义
 
 ### 5. Runtime evidence
 
@@ -983,18 +1138,20 @@
   - `runtime_frontend_seed_mode`
   - `runtime_velocity_state_mode`
   - 与 `run_info.json` 对齐
-- report 还能复盘：
-  - `boundary_shift`
-  - `oldest_survivor`
-  - `seed_source`
-  - `pitch_vs_roll_dominance`
+- 本轮又新增：
+  - `runtime_postsolve_active_window_value_source_kind`
+  - `runtime_postsolve_strict_local_value_source_kind`
+  - `runtime_postsolve_value_source_consistent`
+  - `runtime_postsolve_query_frame_convention_kind`
+  - `runtime_postsolve_extrinsic_application_kind`
+  - `runtime_final_materialization_source_kind`
+  - `runtime_new_frame_consumes_final_truth_only`
 
 ### 6. Code evidence
 
-- `src/iap/common/log_paths.cpp:440-503`
-- `src/iap/common/log_paths.cpp:671-681`
-- `tools/ana_log.py:426-483`
-- `tools/ana_log.py:4559-4597`
+- [log_paths.cpp](/home/dev/code/ws_iap/src/iap/src/iap/common/log_paths.cpp)
+- [ana_log.py](/home/dev/code/ws_iap/src/iap/tools/ana_log.py)
+- [README_blocking_module_audit.md](/home/dev/code/ws_iap/src/iap/docs/README_blocking_module_audit.md)
 
 关键点：
 
@@ -1016,49 +1173,65 @@
 
 ### 1. 当前第一个 FAIL 的模块是谁？
 
-- `M8 Carry / Survivor / Marginal Prior Bridge`
+- 当前这轮只重审 `M10/M11/M12/M13` 后，没有新的硬 `FAIL`。
+- 当前最先需要 fresh-run 运行证据确认的，不再是 `M8`，而是 `M12 Publish / Frame Materialization` 的闭环语义。
 
 原因：
 
-- `M1/M5` 在本轮已经收敛到统一的 frontend target-time contract。
-- 当前仍然稳定 `FAIL` 的最前一层，就是 `boundary_shift` 持续主导 residual 的 `M8`。
+- `M10/M11` 在代码上已经统一到同一 `postsolve_authoritative_values`
+- `M12` 才是这条链真正把 final truth 送进下一轮循环的最后一跳
+- 所以如果 fresh run 之后 residual 仍然大，最值得优先核实的是：`new_frame` 是否真的只消费 final truth
 
 ### 2. 当前最关键的阻塞链是哪个？
 
-- `M8 -> M9 -> M10 -> M11`
+- 当前最关键的高风险链已经从：
+  - `M8 -> M9 -> M10 -> M11`
+  收缩为：
+  - `M12 -> M13`
 
 解释：
 
-- `M1 -> M5 -> M6` 在本轮之后已经不再是硬阻塞链
-- 当前真正阻塞 residual / drift 继续往下分解的，是 `M8` 带头的 boundary/carry 放大链
+- `M1 -> M5 -> M6` 之前已经解阻
+- `M8` retained-set excess 已经到 0
+- `M10/M11` 这轮已经在代码上把 value source / query time / frame convention / extrinsic path 统一掉
+- 如果 fresh run 里 gap 还在，下一嫌疑就更像 `M12` 或 orientation semantics
 
 ### 3. 哪个模块一旦修好，最可能让后面一整串模块的判断重新有效？
 
-- 现在最值的是 `M8 Carry / Survivor / Marginal Prior Bridge`。
+- 现在最值的下一刀，已经从 `M8/M10/M11` 转到 `M12 Publish / Frame Materialization`。
 
 原因：
 
-- `M1/M5` 已经把 pre-solve target time 讲清楚了。
-- 当前如果不先收窄 `M8` 的 survivor / carried prior anchor，`M9/M10/M11` 对 solver 放大、write-back、surface selector 的很多判断仍会继续被 boundary_shift 连坐。
+- `M10/M11` 现在已经把 “solve result 到 postsolve query”的语义收敛清楚
+- 真正会把姿态物化成下一轮 target frame 的，是 `new_frame`
+- 因此如果 fresh run 之后 residual 仍不够好，修好 `M12` 最可能让后续判断重新变得干净
 
 ### 4. 当前 residual / drift 最可能主要在哪一段被放大？
 
-- 主要放大段在 `M8-M11`，尤其是：
+- 现有 fresh run 里，主要放大段仍然在 postsolve surfaces 上，尤其是：
   - `frontend -> postsolve_active_window`
   - `postsolve_active_window -> strict_local`
 
 直接证据：
 
-- `frontend->postsolve_active_window p95 = 6.027 m`
-- `frontend->postsolve_strict_local p95 = 0.459 m`
-- `active_window->strict_local p95 = 5.800 m`
-- top jump frames 的主因统一是 `boundary_shift`
+- `frontend->postsolve_active_window p95 = 8.004 m`
+- `frontend->postsolve_strict_local p95 = 0.549 m`
+- `active_window->strict_local p95 = 7.823 m`
+- `postsolve_reason_counts = boundary_shift:261, none:17`
+
+补充说明：
+
+- retained-set excess 已经是 0，所以这段放大更不像 M8
+- Round-3 fresh run 将决定：这段放大是否已经从 “value/query 语义链” 真正进一步压缩到 `M12` 或 orientation semantics
 
 ### 5. 为什么现在应该先修这个模块，而不是继续试新的局部想法？
 
-- 因为现在 `M1/M5` 这条最早的契约失败已经被收敛掉了。
-- 再继续试 seed 数值、局部 prior、或别的开关，只会重新把问题搅回“到底是 pre-solve 还是 boundary”这种混合归因。
+- 因为现在：
+  - `M1/M5` 已经收敛
+  - `M8` retained-set excess 已经到 0
+  - `M10/M11` 也已经把 postsolve authoritative source 和 query tuple 统一掉
+- 再去试新的 seed 数值、局部 prior、或新的实验开关，只会重新把问题搅回混合归因。
 - 当前路线更清楚了：
-  1. 维持现在统一的 frontend target-time contract
-  2. 下一刀直接修 `M8`
-  3. 然后再重新判断 `M9/M10/M11` 到底还有多少独立问题
+  1. 跑一轮 Round-3 fresh run
+  2. 用新增的 value-source / materialization 字段确认 `M10/M11` 是否已经真正干净
+  3. 如果它们已经干净但 gap 仍大，下一刀就明确落到 `M12` 或 orientation semantics，而不再回头重猜 `M8/M10/M11`

@@ -375,6 +375,10 @@ def build_config_summary(configs: dict[str, Any], runtime_summary: dict[str, Any
     summary["velocity_mode_policy"] = odom_block.get("velocity_mode_policy")
     summary["bias_state_mode"] = odom_block.get("bias_state_mode")
     summary["frontend_seed_mode"] = odom_block.get("frontend_seed_mode")
+    summary["smoother_lag"] = odom_block.get("smoother_lag")
+    summary["ctrl_point_prediction_inf_scale"] = odom_block.get("ctrl_point_prediction_inf_scale")
+    summary["ctrl_point_smoothness_inf_scale"] = odom_block.get("ctrl_point_smoothness_inf_scale")
+    summary["ctrl_point_marginal_inf_scale"] = odom_block.get("ctrl_point_marginal_inf_scale")
     summary["exp_freeze_gravity"] = odom_block.get("exp_freeze_gravity")
     summary["exp_freeze_gyro_bias"] = odom_block.get("exp_freeze_gyro_bias")
     summary["exp_freeze_accel_bias"] = odom_block.get("exp_freeze_accel_bias")
@@ -486,6 +490,21 @@ def build_config_summary(configs: dict[str, Any], runtime_summary: dict[str, Any
         "runtime_frontend_target_time_offset_vs_representative",
         "runtime_frontend_target_time_offset_vs_scan_start",
         "runtime_frontend_target_time_offset_vs_scan_end",
+        "runtime_postsolve_active_window_value_source_kind",
+        "runtime_postsolve_strict_local_value_source_kind",
+        "runtime_postsolve_value_source_consistent",
+        "runtime_postsolve_query_frame_convention_kind",
+        "runtime_postsolve_extrinsic_application_kind",
+        "runtime_final_materialization_source_kind",
+        "runtime_new_frame_consumes_final_truth_only",
+        "config_smoother_lag",
+        "runtime_smoother_lag",
+        "config_ctrl_point_prediction_inf_scale",
+        "runtime_ctrl_point_prediction_inf_scale",
+        "config_ctrl_point_smoothness_inf_scale",
+        "runtime_ctrl_point_smoothness_inf_scale",
+        "config_ctrl_point_marginal_inf_scale",
+        "runtime_ctrl_point_marginal_inf_scale",
         "runtime_has_gnss_constraints",
         "runtime_velocity_optimized",
         "runtime_experiment_name",
@@ -1454,7 +1473,13 @@ def analyze_jump_diagnostics(
         "postsolve_strict_local_support_mismatch_reason",
         "strict_local_query_support_keys_summary",
         "strict_local_query_reason",
+        "postsolve_active_window_value_source_kind",
+        "postsolve_strict_local_value_source_kind",
+        "postsolve_query_frame_convention_kind",
+        "postsolve_extrinsic_application_kind",
+        "final_materialization_source_kind",
         "yaw_chain_consistency_flag",
+        "carried_prior_retained_keys_summary",
         "carried_boundary_oldest_key_summary",
         "oldest_survivor_key_summary",
     ]
@@ -1573,6 +1598,209 @@ def analyze_jump_diagnostics(
         if clean.empty:
             return math.nan
         return float(clean.mean())
+
+    def ordered_frame(frame: pd.DataFrame) -> pd.DataFrame:
+        sort_columns = ["frame_stamp"] if "frame_stamp" in frame.columns else []
+        if "frame_id" in frame.columns:
+            sort_columns.append("frame_id")
+        return frame.sort_values(sort_columns) if sort_columns else frame.copy()
+
+    def quaternion_to_rpy(
+        qx_value: Any,
+        qy_value: Any,
+        qz_value: Any,
+        qw_value: Any,
+    ) -> tuple[float, float, float]:
+        try:
+            qx = float(qx_value)
+            qy = float(qy_value)
+            qz = float(qz_value)
+            qw = float(qw_value)
+        except (TypeError, ValueError):
+            return math.nan, math.nan, math.nan
+        norm = math.sqrt(qx * qx + qy * qy + qz * qz + qw * qw)
+        if not math.isfinite(norm) or norm <= 0.0:
+            return math.nan, math.nan, math.nan
+        qx /= norm
+        qy /= norm
+        qz /= norm
+        qw /= norm
+        sinr_cosp = 2.0 * (qw * qx + qy * qz)
+        cosr_cosp = 1.0 - 2.0 * (qx * qx + qy * qy)
+        roll = math.atan2(sinr_cosp, cosr_cosp)
+        sinp = 2.0 * (qw * qy - qz * qx)
+        if abs(sinp) >= 1.0:
+            pitch = math.copysign(math.pi / 2.0, sinp)
+        else:
+            pitch = math.asin(sinp)
+        siny_cosp = 2.0 * (qw * qz + qx * qy)
+        cosy_cosp = 1.0 - 2.0 * (qy * qy + qz * qz)
+        yaw = math.atan2(siny_cosp, cosy_cosp)
+        return roll, pitch, yaw
+
+    def populate_pose_rpy_columns(frame: pd.DataFrame, pose_prefix: str, out_prefix: str) -> None:
+        quat_columns = [
+            f"{pose_prefix}_qx",
+            f"{pose_prefix}_qy",
+            f"{pose_prefix}_qz",
+            f"{pose_prefix}_qw",
+        ]
+        if not set(quat_columns) <= set(frame.columns):
+            return
+        rpy = frame[quat_columns].apply(
+            lambda row: quaternion_to_rpy(
+                row[quat_columns[0]],
+                row[quat_columns[1]],
+                row[quat_columns[2]],
+                row[quat_columns[3]],
+            ),
+            axis=1,
+            result_type="expand",
+        )
+        rpy.columns = [
+            f"{out_prefix}_roll_rad",
+            f"{out_prefix}_pitch_rad",
+            f"{out_prefix}_yaw_rad",
+        ]
+        for column in rpy.columns:
+            frame[column] = pd.to_numeric(rpy[column], errors="coerce")
+
+    def summarize_signed_effective_series(
+        series: pd.Series,
+        summary_prefix: str,
+        *,
+        magnitude_threshold: float = 0.02,
+    ) -> dict[str, Any]:
+        signed = pd.to_numeric(series, errors="coerce").dropna()
+        effective = signed[signed.abs() >= magnitude_threshold]
+        summary: dict[str, Any] = {
+            "signed_count": int(len(signed)),
+            "effective_count": int(len(effective)),
+        }
+        if effective.empty:
+            analysis[f"{summary_prefix}_positive_ratio"] = 0.0
+            analysis[f"{summary_prefix}_negative_ratio"] = 0.0
+            analysis[f"cumulative_{summary_prefix}_indicator"] = 0.0
+            return summary
+        positive_ratio = float((effective > 0.0).mean())
+        negative_ratio = float((effective < 0.0).mean())
+        cumulative_signed = float(effective.sum())
+        signed_mean = float(effective.mean())
+        signed_min = float(effective.min())
+        signed_max = float(effective.max())
+        p95_abs = pct(effective.abs(), 0.95)
+        max_abs = float(effective.abs().max())
+        summary.update(
+            {
+                "signed_mean": signed_mean,
+                "signed_min": signed_min,
+                "signed_max": signed_max,
+                "p95_abs": p95_abs,
+                "max_abs": max_abs,
+                "positive_ratio": positive_ratio,
+                "negative_ratio": negative_ratio,
+                "cumulative_signed": cumulative_signed,
+            }
+        )
+        analysis[f"{summary_prefix}_positive_ratio"] = positive_ratio
+        analysis[f"{summary_prefix}_negative_ratio"] = negative_ratio
+        analysis[f"cumulative_{summary_prefix}_indicator"] = cumulative_signed
+        analysis[f"{summary_prefix}_summary"] = (
+            f"mean={signed_mean:.3f} rad; p95_abs={p95_abs:.3f} rad; "
+            f"max_abs={max_abs:.3f} rad; positive_ratio={positive_ratio:.3f}; "
+            f"negative_ratio={negative_ratio:.3f}; cumulative={cumulative_signed:.3f} rad"
+        )
+        return summary
+
+    def find_monotonic_segment(
+        frame: pd.DataFrame,
+        column: str,
+        *,
+        stage_label: str,
+        axis_label: str,
+        magnitude_threshold: float = 0.02,
+        window_size: int = 5,
+        cumulative_threshold: float = 0.15,
+    ) -> dict[str, Any] | None:
+        if column not in frame.columns:
+            return None
+        ordered = ordered_frame(frame)
+        signed = pd.to_numeric(ordered[column], errors="coerce")
+        if signed.dropna().empty:
+            return None
+        for start_index in range(max(len(ordered) - window_size + 1, 0)):
+            window = ordered.iloc[start_index : start_index + window_size].copy()
+            if len(window) < window_size:
+                continue
+            window_signed = pd.to_numeric(window[column], errors="coerce")
+            valid = window_signed.dropna()
+            if len(valid) < window_size:
+                continue
+            effective = valid[valid.abs() >= magnitude_threshold]
+            if len(effective) < window_size:
+                continue
+            positive_ratio = float((effective > 0.0).mean())
+            negative_ratio = float((effective < 0.0).mean())
+            sign_ratio = max(positive_ratio, negative_ratio)
+            cumulative_signed = float(effective.sum())
+            if sign_ratio < 0.8 or abs(cumulative_signed) < cumulative_threshold:
+                continue
+            start_row = window.iloc[0]
+            end_row = window.iloc[-1]
+            return {
+                "axis": axis_label,
+                "stage": stage_label,
+                "direction": "positive" if positive_ratio >= negative_ratio else "negative",
+                "start_frame_id": int(start_row["frame_id"]) if "frame_id" in window.columns and pd.notna(start_row.get("frame_id")) else None,
+                "end_frame_id": int(end_row["frame_id"]) if "frame_id" in window.columns and pd.notna(end_row.get("frame_id")) else None,
+                "start_stamp": float(start_row["frame_stamp"]) if "frame_stamp" in window.columns and pd.notna(start_row.get("frame_stamp")) else math.nan,
+                "end_stamp": float(end_row["frame_stamp"]) if "frame_stamp" in window.columns and pd.notna(end_row.get("frame_stamp")) else math.nan,
+                "cumulative_signed_delta": cumulative_signed,
+                "positive_ratio": positive_ratio,
+                "negative_ratio": negative_ratio,
+                "window_size": int(window_size),
+            }
+        return None
+
+    def primary_stage_corr(
+        frame: pd.DataFrame,
+        column: str,
+        *,
+        use_abs: bool = True,
+    ) -> tuple[str | None, float | None]:
+        corr_specs = {
+            "solver_update_ms": "solver_update_ms",
+            "relin_shared": "relinearized_shared_variable_count",
+            "recalc_imu": "recalculated_imu_factor_count",
+            "recalc_prior": "recalculated_prior_factor_count",
+            "recalc_lidar_cross_support": "recalculated_lidar_cross_support_factor_count",
+        }
+        best_name: str | None = None
+        best_value: float | None = None
+        for label, rhs in corr_specs.items():
+            corr_value = safe_corr(frame, column, rhs, lhs_abs=use_abs)
+            if corr_value is None:
+                continue
+            if best_value is None or abs(corr_value) > abs(best_value):
+                best_name = label
+                best_value = corr_value
+        return best_name, best_value
+
+    def top_signed_frame_subset(
+        frame: pd.DataFrame,
+        column: str,
+        *,
+        ascending: bool,
+        limit: int = 10,
+    ) -> pd.DataFrame:
+        if column not in frame.columns:
+            return pd.DataFrame()
+        working = frame.copy()
+        working["__signed_metric__"] = pd.to_numeric(working[column], errors="coerce")
+        working = working.dropna(subset=["__signed_metric__"])
+        if working.empty:
+            return working
+        return working.sort_values("__signed_metric__", ascending=ascending).head(limit)
 
     analysis["solver_update_ms_mean"] = numeric_mean(df, "solver_update_ms")
     analysis["accept_ratio_mean"] = numeric_mean(df, "accept_ratio")
@@ -1728,6 +1956,13 @@ def analyze_jump_diagnostics(
         )
     if "frontend_seed_imu_sample_count" in df.columns:
         summarize_series(df["frontend_seed_imu_sample_count"], "frontend_seed_imu_sample_count")
+    for column, prefix in [
+        ("retained_pose_control_key_count", "retained_pose_control_key_count"),
+        ("strict_local_needed_support_key_count", "strict_local_needed_support_key_count"),
+        ("retained_minus_strict_local_key_excess", "retained_minus_strict_local_key_excess"),
+    ]:
+        if column in df.columns:
+            summarize_series(df[column], prefix)
     if "frontend_target_time_consistent" in df.columns:
         consistent_values = pd.to_numeric(df["frontend_target_time_consistent"], errors="coerce").fillna(0.0)
         analysis["frontend_target_time_consistent_counts"] = {
@@ -1769,6 +2004,52 @@ def analyze_jump_diagnostics(
         analysis["strict_local_query_reason_counts"] = {
             str(key): int(value) for key, value in strict_local_reason_counts.items()
         }
+    if "postsolve_query_support_mismatch_reason" in df.columns:
+        postsolve_reason_counts = (
+            df["postsolve_query_support_mismatch_reason"].replace({"": "none"}).value_counts()
+        )
+        analysis["postsolve_reason_counts"] = {
+            str(key): int(value) for key, value in postsolve_reason_counts.items()
+        }
+        analysis["boundary_shift_count"] = int(postsolve_reason_counts.get("boundary_shift", 0))
+    if "postsolve_strict_local_support_mismatch_reason" in df.columns:
+        postsolve_strict_reason_counts = (
+            df["postsolve_strict_local_support_mismatch_reason"]
+            .replace({"": "none"})
+            .value_counts()
+        )
+        analysis["postsolve_strict_reason_counts"] = {
+            str(key): int(value) for key, value in postsolve_strict_reason_counts.items()
+        }
+    for column in [
+        "postsolve_active_window_value_source_kind",
+        "postsolve_strict_local_value_source_kind",
+        "postsolve_query_frame_convention_kind",
+        "postsolve_extrinsic_application_kind",
+        "final_materialization_source_kind",
+    ]:
+        if column in df.columns:
+            counts = df[column].replace({"": "unknown"}).value_counts()
+            analysis[f"{column}_counts"] = {
+                str(key): int(value) for key, value in counts.items()
+            }
+            if not counts.empty:
+                analysis[f"{column}_summary"] = str(counts.index[0])
+    for column in [
+        "postsolve_value_source_consistent",
+        "new_frame_consumes_final_truth_only",
+    ]:
+        if column in df.columns:
+            values = pd.to_numeric(df[column], errors="coerce").fillna(0.0)
+            analysis[f"{column}_counts"] = {
+                "true": int((values != 0).sum()),
+                "false": int((values == 0).sum()),
+            }
+            analysis[f"{column}_ratio"] = (
+                analysis[f"{column}_counts"]["true"] / len(df)
+                if len(df) > 0
+                else 0.0
+            )
 
     time_delta_specs = [
         (
@@ -1924,6 +2205,17 @@ def analyze_jump_diagnostics(
             "strict_local_query_support_key_count",
             "strict_local_query_support_keys_summary",
             "strict_local_query_reason",
+            "postsolve_active_window_value_source_kind",
+            "postsolve_strict_local_value_source_kind",
+            "postsolve_value_source_consistent",
+            "postsolve_query_frame_convention_kind",
+            "postsolve_extrinsic_application_kind",
+            "final_materialization_source_kind",
+            "new_frame_consumes_final_truth_only",
+            "retained_pose_control_key_count",
+            "strict_local_needed_support_key_count",
+            "retained_minus_strict_local_key_excess",
+            "carried_prior_retained_keys_summary",
             "carried_boundary_oldest_key_summary",
             "oldest_survivor_key_summary",
             "solver_update_ms",
@@ -1979,6 +2271,12 @@ def analyze_jump_diagnostics(
         if "delta_frontend_to_final_rotation_rad" in df.columns
         else pd.DataFrame()
     )
+
+    populate_pose_rpy_columns(df, "start_pose", "start")
+    populate_pose_rpy_columns(df, "frontend_pose", "frontend")
+    populate_pose_rpy_columns(df, "postsolve_strict_local_pose", "postsolve_strict_local")
+    populate_pose_rpy_columns(df, "final_pose", "final")
+
     top_yaw_df = (
         df.assign(
             delta_frontend_to_final_yaw_abs=lambda frame: pd.to_numeric(
@@ -2011,6 +2309,30 @@ def analyze_jump_diagnostics(
         .head(10)
         if "delta_frontend_to_final_roll_rad" in df.columns
         else pd.DataFrame()
+    )
+    top_positive_roll_df = top_signed_frame_subset(
+        df,
+        "delta_frontend_to_final_roll_rad",
+        ascending=False,
+        limit=10,
+    )
+    top_negative_roll_df = top_signed_frame_subset(
+        df,
+        "delta_frontend_to_final_roll_rad",
+        ascending=True,
+        limit=10,
+    )
+    top_positive_pitch_df = top_signed_frame_subset(
+        df,
+        "delta_frontend_to_final_pitch_rad",
+        ascending=False,
+        limit=10,
+    )
+    top_negative_pitch_df = top_signed_frame_subset(
+        df,
+        "delta_frontend_to_final_pitch_rad",
+        ascending=True,
+        limit=10,
     )
 
     top_strict_local_residual_df = pd.DataFrame()
@@ -2290,6 +2612,55 @@ def analyze_jump_diagnostics(
             .to_dict(orient="records")
         )
 
+    signed_pose_keep_columns = [
+        "frame_id",
+        "frame_stamp",
+        "start_roll_rad",
+        "frontend_roll_rad",
+        "postsolve_strict_local_roll_rad",
+        "final_roll_rad",
+        "start_pitch_rad",
+        "frontend_pitch_rad",
+        "postsolve_strict_local_pitch_rad",
+        "final_pitch_rad",
+        "delta_start_to_frontend_roll_rad",
+        "delta_frontend_to_postsolve_strict_local_roll_rad",
+        "delta_postsolve_active_window_to_postsolve_strict_local_roll_rad",
+        "delta_frontend_to_final_roll_rad",
+        "delta_start_to_frontend_pitch_rad",
+        "delta_frontend_to_postsolve_strict_local_pitch_rad",
+        "delta_postsolve_active_window_to_postsolve_strict_local_pitch_rad",
+        "delta_frontend_to_final_pitch_rad",
+        "solver_update_ms",
+        "relinearized_shared_variable_count",
+        "recalculated_imu_factor_count",
+        "recalculated_prior_factor_count",
+        "recalculated_lidar_cross_support_factor_count",
+        "match_ratio",
+        "inlier_ratio",
+        "target_point_count",
+        "target_voxel_count",
+        "strict_local_query_reason",
+        "postsolve_query_support_mismatch_reason",
+    ]
+    signed_table_specs = [
+        ("top_positive_roll_drift_frames", top_positive_roll_df),
+        ("top_negative_roll_drift_frames", top_negative_roll_df),
+        ("top_positive_pitch_drift_frames", top_positive_pitch_df),
+        ("top_negative_pitch_drift_frames", top_negative_pitch_df),
+    ]
+    for out_key, top_df in signed_table_specs:
+        if top_df.empty:
+            continue
+        available_columns = [
+            column for column in signed_pose_keep_columns if column in top_df.columns
+        ]
+        analysis[out_key] = (
+            top_df[available_columns]
+            .replace({np.nan: None})
+            .to_dict(orient="records")
+        )
+
     def stage_score(translation_prefix: str, rotation_prefix: str) -> float:
         components = [
             float(analysis.get(f"{translation_prefix}_p95", 0.0) or 0.0),
@@ -2444,6 +2815,133 @@ def analyze_jump_diagnostics(
     analysis["frontend_to_postsolve_active_window_stage_score"] = active_window_score
     analysis["frontend_to_postsolve_strict_local_stage_score"] = strict_local_score
     analysis["postsolve_active_window_to_postsolve_strict_local_stage_score"] = active_vs_strict_score
+
+    retained_excess_mean = analysis.get("retained_minus_strict_local_key_excess_mean")
+    retained_excess_p95 = analysis.get("retained_minus_strict_local_key_excess_p95")
+    retained_count_mean = analysis.get("retained_pose_control_key_count_mean")
+    strict_support_mean = analysis.get("strict_local_needed_support_key_count_mean")
+    if all(
+        value is not None and math.isfinite(float(value))
+        for value in [retained_excess_mean, retained_excess_p95, retained_count_mean, strict_support_mean]
+    ):
+        retained_excess_mean = float(retained_excess_mean)
+        retained_excess_p95 = float(retained_excess_p95)
+        retained_count_mean = float(retained_count_mean)
+        strict_support_mean = float(strict_support_mean)
+        if retained_excess_mean <= 1.0 and retained_excess_p95 <= 2.0:
+            analysis["boundary_bridge_narrowing_summary"] = (
+                "carried prior retained set now tracks strict-local support instead of full active survivor keys"
+            )
+        else:
+            analysis["boundary_bridge_narrowing_summary"] = (
+                "boundary bridge still retains a wider pose/control window than strict-local support"
+            )
+        analysis["boundary_bridge_narrowing_evidence"] = (
+            f"retained_pose_control_key_count mean/p95="
+            f"{retained_count_mean:.2f}/{analysis.get('retained_pose_control_key_count_p95', 0.0):.2f}; "
+            f"strict_local_needed_support_key_count mean/p95="
+            f"{strict_support_mean:.2f}/{analysis.get('strict_local_needed_support_key_count_p95', 0.0):.2f}; "
+            f"retained_minus_strict_local_key_excess mean/p95={retained_excess_mean:.2f}/{retained_excess_p95:.2f}"
+        )
+        if (
+            retained_excess_mean <= 1.0
+            and active_vs_strict_score > 1.0
+            and float(analysis.get("postsolve_active_window_to_postsolve_strict_local_translation_p95", 0.0)) > 1.0
+        ):
+            analysis["boundary_bridge_followup_summary"] = (
+                "boundary bridge narrowing did not materially reduce active-window/strict-local divergence; M10/M11 now become the next likely suspects"
+            )
+            analysis["boundary_bridge_followup_evidence"] = (
+                analysis["boundary_bridge_narrowing_evidence"]
+                + "; "
+                + f"active_window->strict_local translation p95="
+                f"{analysis.get('postsolve_active_window_to_postsolve_strict_local_translation_p95', 0.0):.3f} m; "
+                + f"rotation p95={analysis.get('postsolve_active_window_to_postsolve_strict_local_rotation_p95', 0.0):.3f} rad"
+            )
+
+    has_postsolve_value_source_observation = any(
+        key in analysis
+        for key in [
+            "postsolve_active_window_value_source_kind_summary",
+            "postsolve_strict_local_value_source_kind_summary",
+            "postsolve_query_frame_convention_kind_summary",
+            "postsolve_extrinsic_application_kind_summary",
+            "final_materialization_source_kind_summary",
+            "postsolve_value_source_consistent_counts",
+            "new_frame_consumes_final_truth_only_counts",
+        ]
+    )
+    if has_postsolve_value_source_observation:
+        postsolve_value_source_consistent_ratio = float(
+            analysis.get("postsolve_value_source_consistent_ratio", 0.0) or 0.0
+        )
+        new_frame_final_truth_ratio = float(
+            analysis.get("new_frame_consumes_final_truth_only_ratio", 0.0) or 0.0
+        )
+        active_window_value_source_summary = str(
+            analysis.get("postsolve_active_window_value_source_kind_summary", "n/a")
+        )
+        strict_local_value_source_summary = str(
+            analysis.get("postsolve_strict_local_value_source_kind_summary", "n/a")
+        )
+        frame_convention_summary = str(
+            analysis.get("postsolve_query_frame_convention_kind_summary", "n/a")
+        )
+        extrinsic_application_summary = str(
+            analysis.get("postsolve_extrinsic_application_kind_summary", "n/a")
+        )
+        final_materialization_source_summary = str(
+            analysis.get("final_materialization_source_kind_summary", "n/a")
+        )
+        if (
+            postsolve_value_source_consistent_ratio >= 0.999
+            and active_window_value_source_summary != "n/a"
+            and strict_local_value_source_summary != "n/a"
+        ):
+            analysis["postsolve_value_source_summary"] = (
+                "active_window and strict_local now share one authoritative postsolve value source"
+            )
+            analysis["postsolve_value_source_evidence"] = (
+                f"active_window={active_window_value_source_summary}; "
+                f"strict_local={strict_local_value_source_summary}; "
+                f"value_source_consistent_ratio={postsolve_value_source_consistent_ratio:.3f}"
+            )
+        else:
+            analysis["postsolve_value_source_summary"] = (
+                "active_window and strict_local still do not share one consistently observed postsolve value source"
+            )
+            analysis["postsolve_value_source_evidence"] = (
+                f"active_window={active_window_value_source_summary}; "
+                f"strict_local={strict_local_value_source_summary}; "
+                f"value_source_consistent_ratio={postsolve_value_source_consistent_ratio:.3f}"
+            )
+        if new_frame_final_truth_ratio >= 0.999:
+            analysis["final_materialization_summary"] = "new_frame now consumes final truth only"
+        else:
+            analysis["final_materialization_summary"] = (
+                "new_frame may still consume non-final postsolve materialization on some frames"
+            )
+        analysis["final_materialization_evidence"] = (
+            f"final_materialization_source={final_materialization_source_summary}; "
+            f"new_frame_consumes_final_truth_only_ratio={new_frame_final_truth_ratio:.3f}; "
+            f"frame_convention={frame_convention_summary}; "
+            f"extrinsic_application={extrinsic_application_summary}"
+        )
+        if (
+            postsolve_value_source_consistent_ratio >= 0.999
+            and active_vs_strict_score > 1.0
+            and float(analysis.get("postsolve_active_window_to_postsolve_strict_local_translation_p95", 0.0)) > 1.0
+        ):
+            analysis["postsolve_surface_followup_summary"] = (
+                "postsolve value source is now consistent; remaining active-window/strict-local divergence more likely reflects query-surface/layout semantics than value-source mismatch"
+            )
+            analysis["postsolve_surface_followup_evidence"] = (
+                analysis["postsolve_value_source_evidence"]
+                + "; "
+                + f"active_window->strict_local translation p95="
+                + f"{analysis.get('postsolve_active_window_to_postsolve_strict_local_translation_p95', 0.0):.3f} m; "
+                + f"rotation p95={analysis.get('postsolve_active_window_to_postsolve_strict_local_rotation_p95', 0.0):.3f} rad"
+            )
 
     surface_dominated = (
         assignment_negligible
@@ -3176,6 +3674,208 @@ def analyze_jump_diagnostics(
         ]
     )
 
+    roll_drift_summary = summarize_signed_effective_series(
+        df.get("delta_frontend_to_final_roll_rad", pd.Series(dtype=float)),
+        "roll_drift",
+        magnitude_threshold=0.02,
+    )
+    pitch_drift_summary = summarize_signed_effective_series(
+        df.get("delta_frontend_to_final_pitch_rad", pd.Series(dtype=float)),
+        "pitch_drift",
+        magnitude_threshold=0.02,
+    )
+
+    stage_signed_specs = [
+        (
+            "start->frontend",
+            "delta_start_to_frontend_roll_rad",
+            "delta_start_to_frontend_pitch_rad",
+        ),
+        (
+            "frontend->postsolve_strict_local",
+            "delta_frontend_to_postsolve_strict_local_roll_rad",
+            "delta_frontend_to_postsolve_strict_local_pitch_rad",
+        ),
+        (
+            "postsolve_active_window->strict_local",
+            "delta_postsolve_active_window_to_postsolve_strict_local_roll_rad",
+            "delta_postsolve_active_window_to_postsolve_strict_local_pitch_rad",
+        ),
+        (
+            "frontend->final",
+            "delta_frontend_to_final_roll_rad",
+            "delta_frontend_to_final_pitch_rad",
+        ),
+    ]
+
+    def candidate_sort_key(item: dict[str, Any]) -> tuple[float, int]:
+        stamp = item.get("start_stamp")
+        if not isinstance(stamp, (int, float)) or not math.isfinite(float(stamp)):
+            stamp = math.inf
+        frame_id = item.get("start_frame_id")
+        if not isinstance(frame_id, int):
+            frame_id = 1 << 30
+        return float(stamp), int(frame_id)
+
+    roll_candidates: list[dict[str, Any]] = []
+    pitch_candidates: list[dict[str, Any]] = []
+    for stage_label, roll_column, pitch_column in stage_signed_specs:
+        roll_candidate = find_monotonic_segment(
+            df,
+            roll_column,
+            stage_label=stage_label,
+            axis_label="roll",
+            magnitude_threshold=0.02,
+            window_size=5,
+            cumulative_threshold=0.15,
+        )
+        if roll_candidate:
+            roll_candidates.append(roll_candidate)
+        pitch_candidate = find_monotonic_segment(
+            df,
+            pitch_column,
+            stage_label=stage_label,
+            axis_label="pitch",
+            magnitude_threshold=0.02,
+            window_size=5,
+            cumulative_threshold=0.15,
+        )
+        if pitch_candidate:
+            pitch_candidates.append(pitch_candidate)
+
+    earliest_roll_candidate = min(roll_candidates, key=candidate_sort_key) if roll_candidates else None
+    earliest_pitch_candidate = min(pitch_candidates, key=candidate_sort_key) if pitch_candidates else None
+    earliest_candidates = [candidate for candidate in [earliest_roll_candidate, earliest_pitch_candidate] if candidate]
+    earliest_candidate = min(earliest_candidates, key=candidate_sort_key) if earliest_candidates else None
+
+    roll_primary_stage = (
+        earliest_roll_candidate["stage"]
+        if earliest_roll_candidate
+        else dominant_pitchroll_stage[0]
+    )
+    pitch_primary_stage = (
+        earliest_pitch_candidate["stage"]
+        if earliest_pitch_candidate
+        else dominant_pitchroll_stage[0]
+    )
+    analysis["roll_drift_primary_stage"] = roll_primary_stage
+    analysis["pitch_drift_primary_stage"] = pitch_primary_stage
+
+    if earliest_candidate:
+        analysis["earliest_monotonic_drift_segment_candidate"] = (
+            f"{earliest_candidate['axis']} {earliest_candidate['stage']} "
+            f"direction={earliest_candidate['direction']} "
+            f"frames={earliest_candidate.get('start_frame_id', 'n/a')}-{earliest_candidate.get('end_frame_id', 'n/a')} "
+            f"cumulative={earliest_candidate['cumulative_signed_delta']:.3f} rad "
+            f"(positive_ratio={earliest_candidate['positive_ratio']:.3f}, "
+            f"negative_ratio={earliest_candidate['negative_ratio']:.3f})"
+        )
+
+    stage_column_by_name = {
+        "start->frontend": {
+            "roll": "delta_start_to_frontend_roll_rad",
+            "pitch": "delta_start_to_frontend_pitch_rad",
+        },
+        "frontend->postsolve_strict_local": {
+            "roll": "delta_frontend_to_postsolve_strict_local_roll_rad",
+            "pitch": "delta_frontend_to_postsolve_strict_local_pitch_rad",
+        },
+        "postsolve_active_window->strict_local": {
+            "roll": "delta_postsolve_active_window_to_postsolve_strict_local_roll_rad",
+            "pitch": "delta_postsolve_active_window_to_postsolve_strict_local_pitch_rad",
+        },
+        "frontend->final": {
+            "roll": "delta_frontend_to_final_roll_rad",
+            "pitch": "delta_frontend_to_final_pitch_rad",
+        },
+    }
+
+    for out_prefix, stage_name, axis_name in [
+        ("roll_drift_primary", roll_primary_stage, "roll"),
+        ("pitch_drift_primary", pitch_primary_stage, "pitch"),
+        ("frontend_to_postsolve_strict_local_roll", "frontend->postsolve_strict_local", "roll"),
+        ("postsolve_active_window_to_strict_local_roll", "postsolve_active_window->strict_local", "roll"),
+        ("frontend_to_postsolve_strict_local_pitch", "frontend->postsolve_strict_local", "pitch"),
+        ("postsolve_active_window_to_strict_local_pitch", "postsolve_active_window->strict_local", "pitch"),
+    ]:
+        column = stage_column_by_name.get(stage_name, {}).get(axis_name)
+        if not column:
+            continue
+        corr_name, corr_value = primary_stage_corr(df, column, use_abs=True)
+        if corr_name is not None and corr_value is not None:
+            analysis[f"{out_prefix}_primary_corr"] = f"{corr_name}:{corr_value:.3f}"
+
+    final_roll_positive_ratio = float(analysis.get("roll_drift_positive_ratio", 0.0) or 0.0)
+    final_roll_negative_ratio = float(analysis.get("roll_drift_negative_ratio", 0.0) or 0.0)
+    final_roll_cumulative = float(analysis.get("cumulative_roll_drift_indicator", 0.0) or 0.0)
+    if (
+        max(final_roll_positive_ratio, final_roll_negative_ratio) >= 0.8
+        and abs(final_roll_cumulative) >= 0.15
+    ):
+        analysis["signed_roll_drift_interpretation"] = (
+            "frontend->final signed roll drift supports a one-sided trend"
+        )
+    elif earliest_roll_candidate:
+        analysis["signed_roll_drift_interpretation"] = (
+            "frontend->final signed roll drift is not strongly one-sided; earliest monotonic roll segment appears on an intermediate stage"
+        )
+    else:
+        analysis["signed_roll_drift_interpretation"] = (
+            "signed roll drift does not show a strong monotonic one-sided trend"
+        )
+
+    frame_convention_summary = str(
+        analysis.get("postsolve_query_frame_convention_kind_summary", "n/a")
+    )
+    extrinsic_application_summary = str(
+        analysis.get("postsolve_extrinsic_application_kind_summary", "n/a")
+    )
+    postsolve_value_source_consistent_ratio = float(
+        analysis.get("postsolve_value_source_consistent_ratio", 0.0) or 0.0
+    )
+    frame_convention_consistent = (
+        frame_convention_summary != "n/a"
+        and extrinsic_application_summary != "n/a"
+        and "mixed" not in frame_convention_summary
+        and "mixed" not in extrinsic_application_summary
+        and postsolve_value_source_consistent_ratio >= 0.999
+    )
+    if frame_convention_consistent:
+        analysis["roll_pitch_frame_convention_summary"] = (
+            "active_window / strict_local / final all use query_pose=world_to_lidar and compare_pose=world_to_imu via right-multiply T_lidar_imu; no surface-specific frame-convention split observed"
+        )
+    else:
+        analysis["roll_pitch_frame_convention_summary"] = (
+            "roll/pitch frame convention or extrinsic application remains mixed across observed postsolve surfaces"
+        )
+
+    strict_local_roll_corr_text = analysis.get("frontend_to_postsolve_strict_local_roll_primary_corr", "")
+    strict_local_roll_corr_value = None
+    if isinstance(strict_local_roll_corr_text, str) and ":" in strict_local_roll_corr_text:
+        try:
+            strict_local_roll_corr_value = float(strict_local_roll_corr_text.split(":")[-1])
+        except ValueError:
+            strict_local_roll_corr_value = None
+
+    if not frame_convention_consistent:
+        analysis["roll_pitch_next_minimum_fix_target"] = "roll/pitch extrinsic/frame-convention chain"
+    elif (
+        roll_primary_stage == "frontend->postsolve_strict_local"
+        and isinstance(strict_local_roll_corr_value, float)
+        and abs(strict_local_roll_corr_value) >= 0.3
+    ):
+        analysis["roll_pitch_next_minimum_fix_target"] = "M9 solver-side orientation chain"
+    elif (
+        roll_primary_stage == "postsolve_active_window->strict_local"
+        and isinstance(strict_local_roll_corr_value, float)
+        and abs(strict_local_roll_corr_value) >= 0.3
+    ):
+        analysis["roll_pitch_next_minimum_fix_target"] = "M9 solver-side orientation chain (boundary amplification remains downstream carrier)"
+    elif roll_primary_stage == "postsolve_active_window->strict_local":
+        analysis["roll_pitch_next_minimum_fix_target"] = "boundary amplification follow-up outside M9"
+    else:
+        analysis["roll_pitch_next_minimum_fix_target"] = "M9 solver-side orientation chain"
+
     return analysis
 
 
@@ -3658,6 +4358,354 @@ def analyze_seed_mode_comparison(
     return comparison
 
 
+def as_float(value: Any) -> float | None:
+    if isinstance(value, (int, float)):
+        numeric = float(value)
+        return numeric if math.isfinite(numeric) else None
+    if isinstance(value, str):
+        text = value.strip()
+        if not text:
+            return None
+        try:
+            numeric = float(text)
+        except ValueError:
+            return None
+        return numeric if math.isfinite(numeric) else None
+    return None
+
+
+def classify_m9_levels(config_summary: dict[str, Any]) -> dict[str, Any]:
+    smoother_lag = (
+        as_float(config_summary.get("runtime_smoother_lag"))
+        or as_float(config_summary.get("config_smoother_lag"))
+        or as_float(config_summary.get("smoother_lag"))
+    )
+    pred_inf_scale = (
+        as_float(config_summary.get("runtime_ctrl_point_prediction_inf_scale"))
+        or as_float(config_summary.get("config_ctrl_point_prediction_inf_scale"))
+        or as_float(config_summary.get("ctrl_point_prediction_inf_scale"))
+    )
+    smooth_inf_scale = (
+        as_float(config_summary.get("runtime_ctrl_point_smoothness_inf_scale"))
+        or as_float(config_summary.get("config_ctrl_point_smoothness_inf_scale"))
+        or as_float(config_summary.get("ctrl_point_smoothness_inf_scale"))
+    )
+    marginal_inf_scale = (
+        as_float(config_summary.get("runtime_ctrl_point_marginal_inf_scale"))
+        or as_float(config_summary.get("config_ctrl_point_marginal_inf_scale"))
+        or as_float(config_summary.get("ctrl_point_marginal_inf_scale"))
+    )
+    lag_level = "unknown"
+    if smoother_lag is not None:
+        lag_level = "smaller" if smoother_lag <= 0.40 else "baseline"
+    coupling_level = "unknown"
+    if pred_inf_scale is not None and smooth_inf_scale is not None:
+        coupling_level = (
+            "lower"
+            if pred_inf_scale <= 7.5e2 and smooth_inf_scale <= 7.5e1
+            else "baseline"
+        )
+    return {
+        "smoother_lag": smoother_lag,
+        "ctrl_point_prediction_inf_scale": pred_inf_scale,
+        "ctrl_point_smoothness_inf_scale": smooth_inf_scale,
+        "ctrl_point_marginal_inf_scale": marginal_inf_scale,
+        "smoother_lag_level": lag_level,
+        "active_window_coupling_level": coupling_level,
+    }
+
+
+def load_m9_matrix_run_bundle(run_dir: Path, scratch_dir: Path) -> dict[str, Any]:
+    metadata = load_metadata(run_dir)
+    runtime_summary = parse_runtime_logs(run_dir)
+    configs = load_runtime_configs(metadata)
+    config_summary = build_config_summary(configs, runtime_summary, metadata)
+    dataframes = load_available_frames(run_dir)
+    jump_analysis = analyze_jump_diagnostics(
+        dataframes.get("jump_diagnostics"),
+        str(
+            config_summary.get("runtime_final_pose_surface")
+            or config_summary.get("final_pose_surface")
+            or "active_window"
+        ),
+        config_summary,
+    )
+    solver_update_analysis = analyze_solver_update(
+        dataframes.get("solver_update_profile"),
+        dataframes.get("frontend_frame_profile"),
+        scratch_dir / run_dir.name,
+        render_plots=False,
+    )
+    return {
+        "run_dir": run_dir,
+        "metadata": metadata,
+        "config_summary": config_summary,
+        "jump_analysis": jump_analysis,
+        "solver_update_analysis": solver_update_analysis,
+    }
+
+
+def build_m9_matrix_row(
+    run_dir: Path,
+    metadata: dict[str, Any],
+    config_summary: dict[str, Any],
+    jump_analysis: dict[str, Any],
+    solver_update_analysis: dict[str, Any],
+) -> dict[str, Any]:
+    levels = classify_m9_levels(config_summary)
+    run_info = metadata.get("run_info", {}) if isinstance(metadata.get("run_info"), dict) else {}
+    postsolve_reason_counts = jump_analysis.get("postsolve_reason_counts", {})
+    boundary_shift_count = 0
+    if isinstance(postsolve_reason_counts, dict):
+        boundary_shift_count = int(postsolve_reason_counts.get("boundary_shift", 0))
+    row = {
+        "run_name": run_info.get("run_name") or run_dir.name,
+        "run_dir": str(run_dir),
+        "smoother_lag": levels["smoother_lag"],
+        "smoother_lag_level": levels["smoother_lag_level"],
+        "ctrl_point_prediction_inf_scale": levels["ctrl_point_prediction_inf_scale"],
+        "ctrl_point_smoothness_inf_scale": levels["ctrl_point_smoothness_inf_scale"],
+        "ctrl_point_marginal_inf_scale": levels["ctrl_point_marginal_inf_scale"],
+        "active_window_coupling_level": levels["active_window_coupling_level"],
+        "signed_roll_primary_stage": jump_analysis.get("roll_drift_primary_stage", "n/a"),
+        "signed_pitch_primary_stage": jump_analysis.get("pitch_drift_primary_stage", "n/a"),
+        "frontend_to_postsolve_strict_local_signed_roll_mean": jump_analysis.get(
+            "frontend_to_postsolve_strict_local_roll_mean"
+        ),
+        "frontend_to_postsolve_strict_local_signed_roll_p95": jump_analysis.get(
+            "frontend_to_postsolve_strict_local_roll_p95"
+        ),
+        "frontend_to_postsolve_strict_local_signed_roll_max": jump_analysis.get(
+            "frontend_to_postsolve_strict_local_roll_max"
+        ),
+        "frontend_to_postsolve_strict_local_signed_pitch_mean": jump_analysis.get(
+            "frontend_to_postsolve_strict_local_pitch_mean"
+        ),
+        "frontend_to_postsolve_strict_local_signed_pitch_p95": jump_analysis.get(
+            "frontend_to_postsolve_strict_local_pitch_p95"
+        ),
+        "frontend_to_postsolve_strict_local_signed_pitch_max": jump_analysis.get(
+            "frontend_to_postsolve_strict_local_pitch_max"
+        ),
+        "frontend_to_postsolve_strict_local_roll_abs_p95": jump_analysis.get(
+            "frontend_to_postsolve_strict_local_roll_abs_p95"
+        ),
+        "frontend_to_postsolve_strict_local_pitch_abs_p95": jump_analysis.get(
+            "frontend_to_postsolve_strict_local_pitch_abs_p95"
+        ),
+        "frontend_to_postsolve_strict_local_rotation_p95": jump_analysis.get(
+            "frontend_to_postsolve_strict_local_rotation_p95"
+        ),
+        "frontend_to_postsolve_strict_local_rotation_max": jump_analysis.get(
+            "frontend_to_postsolve_strict_local_rotation_max"
+        ),
+        "frontend_to_final_roll_abs_p95": jump_analysis.get("frontend_to_final_roll_abs_p95"),
+        "frontend_to_final_roll_abs_max": jump_analysis.get("frontend_to_final_roll_abs_max"),
+        "frontend_to_final_pitch_abs_p95": jump_analysis.get("frontend_to_final_pitch_abs_p95"),
+        "frontend_to_final_pitch_abs_max": jump_analysis.get("frontend_to_final_pitch_abs_max"),
+        "solver_update_ms_mean": solver_update_analysis.get("solver_update_ms_mean"),
+        "solver_update_ms_p95": solver_update_analysis.get("solver_update_ms_p95"),
+        "reelim_mean": solver_update_analysis.get("reeliminated_variable_count_mean"),
+        "reelim_p95": solver_update_analysis.get("reeliminated_variable_count_p95"),
+        "recalc_imu_mean": solver_update_analysis.get("recalculated_imu_factor_count_mean"),
+        "recalc_imu_p95": solver_update_analysis.get("recalculated_imu_factor_count_p95"),
+        "relin_shared_mean": solver_update_analysis.get("relinearized_shared_variable_count_mean"),
+        "relin_shared_p95": solver_update_analysis.get("relinearized_shared_variable_count_p95"),
+        "recalc_prior_mean": solver_update_analysis.get("recalculated_prior_factor_count_mean"),
+        "recalc_prior_p95": solver_update_analysis.get("recalculated_prior_factor_count_p95"),
+        "recalc_lidar_cross_support_mean": solver_update_analysis.get(
+            "recalculated_lidar_cross_support_factor_count_mean"
+        ),
+        "recalc_lidar_cross_support_p95": solver_update_analysis.get(
+            "recalculated_lidar_cross_support_factor_count_p95"
+        ),
+        "postsolve_active_window_to_strict_local_translation_p95": jump_analysis.get(
+            "postsolve_active_window_to_postsolve_strict_local_translation_p95"
+        ),
+        "postsolve_active_window_to_strict_local_rotation_p95": jump_analysis.get(
+            "postsolve_active_window_to_postsolve_strict_local_rotation_p95"
+        ),
+        "boundary_shift_count": boundary_shift_count,
+        "match_ratio_mean": jump_analysis.get("match_ratio_mean"),
+        "inlier_ratio_mean": jump_analysis.get("inlier_ratio_mean"),
+    }
+    return row
+
+
+def analyze_m9_min_matrix(
+    current_run_dir: Path,
+    current_metadata: dict[str, Any],
+    current_config_summary: dict[str, Any],
+    current_jump_analysis: dict[str, Any],
+    current_solver_update_analysis: dict[str, Any],
+    matrix_run_dirs: list[Path],
+    scratch_dir: Path,
+) -> dict[str, Any]:
+    analysis: dict[str, Any] = {"available": False}
+    unique_run_dirs: list[Path] = []
+    seen: set[str] = set()
+    for candidate in [current_run_dir, *matrix_run_dirs]:
+        resolved = str(candidate.resolve())
+        if resolved in seen:
+            continue
+        seen.add(resolved)
+        unique_run_dirs.append(candidate.resolve())
+    if len(unique_run_dirs) < 2:
+        return analysis
+
+    rows: list[dict[str, Any]] = [
+        build_m9_matrix_row(
+            current_run_dir.resolve(),
+            current_metadata,
+            current_config_summary,
+            current_jump_analysis,
+            current_solver_update_analysis,
+        )
+    ]
+
+    for run_dir in unique_run_dirs:
+        if run_dir == current_run_dir.resolve():
+            continue
+        bundle = load_m9_matrix_run_bundle(run_dir, scratch_dir)
+        rows.append(
+            build_m9_matrix_row(
+                run_dir,
+                bundle["metadata"],
+                bundle["config_summary"],
+                bundle["jump_analysis"],
+                bundle["solver_update_analysis"],
+            )
+        )
+
+    baseline_row = next(
+        (
+            row for row in rows
+            if row.get("smoother_lag_level") == "baseline"
+            and row.get("active_window_coupling_level") == "baseline"
+        ),
+        None,
+    )
+    if baseline_row is None:
+        return analysis
+
+    def safe_rel_change(current: Any, baseline: Any) -> float | None:
+        current_value = as_float(current)
+        baseline_value = as_float(baseline)
+        if current_value is None or baseline_value is None or abs(baseline_value) < 1e-9:
+            return None
+        return (current_value - baseline_value) / abs(baseline_value)
+
+    def strict_local_drift_drop(candidate: dict[str, Any], baseline: dict[str, Any]) -> bool:
+        current_score = max(
+            as_float(candidate.get("frontend_to_postsolve_strict_local_roll_abs_p95")) or 0.0,
+            as_float(candidate.get("frontend_to_postsolve_strict_local_pitch_abs_p95")) or 0.0,
+        )
+        baseline_score = max(
+            as_float(baseline.get("frontend_to_postsolve_strict_local_roll_abs_p95")) or 0.0,
+            as_float(baseline.get("frontend_to_postsolve_strict_local_pitch_abs_p95")) or 0.0,
+        )
+        change = safe_rel_change(current_score, baseline_score)
+        return change is not None and change <= -0.10
+
+    def boundary_gap_drop(candidate: dict[str, Any], baseline: dict[str, Any]) -> bool:
+        gap_candidates = [
+            safe_rel_change(
+                candidate.get("postsolve_active_window_to_strict_local_translation_p95"),
+                baseline.get("postsolve_active_window_to_strict_local_translation_p95"),
+            ),
+            safe_rel_change(
+                candidate.get("postsolve_active_window_to_strict_local_rotation_p95"),
+                baseline.get("postsolve_active_window_to_strict_local_rotation_p95"),
+            ),
+            safe_rel_change(
+                candidate.get("boundary_shift_count"),
+                baseline.get("boundary_shift_count"),
+            ),
+        ]
+        valid = [value for value in gap_candidates if value is not None]
+        return bool(valid) and min(valid) <= -0.10
+
+    def solver_churn_drop(candidate: dict[str, Any], baseline: dict[str, Any]) -> bool:
+        tracked_keys = [
+            "solver_update_ms_mean",
+            "reelim_mean",
+            "recalc_imu_mean",
+            "relin_shared_mean",
+            "recalc_prior_mean",
+            "recalc_lidar_cross_support_mean",
+        ]
+        reductions = 0
+        for key in tracked_keys:
+            change = safe_rel_change(candidate.get(key), baseline.get(key))
+            if change is not None and change <= -0.10:
+                reductions += 1
+        solver_update_change = safe_rel_change(
+            candidate.get("solver_update_ms_mean"),
+            baseline.get("solver_update_ms_mean"),
+        )
+        return solver_update_change is not None and solver_update_change <= -0.10 and reductions >= 3
+
+    row_by_levels = {
+        (row.get("smoother_lag_level"), row.get("active_window_coupling_level")): row
+        for row in rows
+    }
+    smaller_lag_row = row_by_levels.get(("smaller", "baseline"))
+    lower_coupling_row = row_by_levels.get(("baseline", "lower"))
+    combined_row = row_by_levels.get(("smaller", "lower"))
+
+    effect_summaries: list[str] = []
+    next_fix_target = "M9 solver-side orientation chain"
+
+    def effect_summary(
+        label: str,
+        row: dict[str, Any] | None,
+    ) -> str:
+        nonlocal next_fix_target
+        if row is None:
+            return f"{label}: missing run"
+        strict_drop = strict_local_drift_drop(row, baseline_row)
+        churn_drop = solver_churn_drop(row, baseline_row)
+        gap_drop = boundary_gap_drop(row, baseline_row)
+        if strict_drop and churn_drop:
+            next_fix_target = "M9 solver-side orientation chain"
+            return f"{label}: reduces strict-local signed roll/pitch drift together with solver churn"
+        if (not strict_drop) and gap_drop:
+            next_fix_target = "boundary amplification, not strict-local solver core"
+            return f"{label}: mainly reduces active-window amplification, not strict-local drift"
+        return f"{label}: does not materially reduce strict-local drift or active-window amplification"
+
+    effect_summaries.append(effect_summary("smaller smoother_lag", smaller_lag_row))
+    effect_summaries.append(effect_summary("lower active-window coupling", lower_coupling_row))
+    effect_summaries.append(effect_summary("combined smaller smoother_lag + lower coupling", combined_row))
+
+    if combined_row and strict_local_drift_drop(combined_row, baseline_row) and solver_churn_drop(combined_row, baseline_row):
+        summary = "M9 solver-side orientation amplification / Bayes-tree churn is the primary remaining cause"
+        verdict = "m9_primary"
+        next_fix_target = "M9 solver-side orientation chain"
+    elif combined_row and (not strict_local_drift_drop(combined_row, baseline_row)) and boundary_gap_drop(combined_row, baseline_row):
+        summary = "lower coupling mainly reduces boundary amplification, not strict-local drift"
+        verdict = "boundary_primary"
+        next_fix_target = "boundary amplification follow-up, not M9 solver core"
+    else:
+        summary = (
+            "remaining drift is not primarily controlled by smoother_lag / active-window coupling; "
+            "next fix should move to factor-family or orientation-semantics chain"
+        )
+        verdict = "matrix_inconclusive"
+        next_fix_target = "factor-family or orientation-semantics chain"
+
+    analysis["available"] = True
+    analysis["rows"] = rows
+    analysis["baseline_run_name"] = baseline_row.get("run_name", "")
+    analysis["summary"] = summary
+    analysis["verdict"] = verdict
+    analysis["smaller_smoother_lag_effect"] = effect_summaries[0]
+    analysis["lower_active_window_coupling_effect"] = effect_summaries[1]
+    analysis["combined_effect"] = effect_summaries[2]
+    analysis["next_minimum_fix_target"] = next_fix_target
+    return analysis
+
+
 def detect_seed_compare_findings(seed_compare_analysis: dict[str, Any]) -> list[dict[str, str]]:
     findings: list[dict[str, str]] = []
     if not seed_compare_analysis.get("available"):
@@ -3681,6 +4729,29 @@ def detect_seed_compare_findings(seed_compare_analysis: dict[str, Any]) -> list[
             "title": "Seed Improvement Comparison",
             "evidence": f"{summary}; " + "; ".join(evidence),
         })
+    return findings
+
+
+def detect_m9_matrix_findings(m9_matrix_analysis: dict[str, Any]) -> list[dict[str, str]]:
+    findings: list[dict[str, str]] = []
+    if not m9_matrix_analysis.get("available"):
+        return findings
+    summary = str(m9_matrix_analysis.get("summary") or "").strip()
+    if not summary:
+        return findings
+    effect_parts = [
+        str(m9_matrix_analysis.get("smaller_smoother_lag_effect") or "").strip(),
+        str(m9_matrix_analysis.get("lower_active_window_coupling_effect") or "").strip(),
+        str(m9_matrix_analysis.get("combined_effect") or "").strip(),
+    ]
+    evidence = "; ".join(part for part in effect_parts if part)
+    findings.append(
+        {
+            "severity": "info" if "primary remaining cause" in summary else "warn",
+            "title": "M9 Minimal Matrix Summary",
+            "evidence": f"{summary}; {evidence}".strip("; "),
+        }
+    )
     return findings
 
 
@@ -4057,6 +5128,63 @@ def detect_findings(
                 "title": pitch_roll_root_cause_summary,
                 "evidence": jump_analysis.get("pitch_roll_root_cause_evidence", ""),
             })
+        signed_roll_drift_interpretation = jump_analysis.get("signed_roll_drift_interpretation")
+        if signed_roll_drift_interpretation:
+            findings.append({
+                "severity": "warn" if "one-sided trend" in signed_roll_drift_interpretation else "info",
+                "title": signed_roll_drift_interpretation,
+                "evidence": (
+                    f"roll_summary={jump_analysis.get('roll_drift_summary', 'n/a')}; "
+                    f"primary_stage={jump_analysis.get('roll_drift_primary_stage', 'n/a')}; "
+                    f"earliest_monotonic={jump_analysis.get('earliest_monotonic_drift_segment_candidate', 'n/a')}"
+                ),
+            })
+        roll_pitch_frame_convention_summary = jump_analysis.get("roll_pitch_frame_convention_summary")
+        if roll_pitch_frame_convention_summary:
+            findings.append({
+                "severity": "info" if "no surface-specific frame-convention split" in roll_pitch_frame_convention_summary else "warn",
+                "title": roll_pitch_frame_convention_summary,
+                "evidence": (
+                    f"frame_convention={jump_analysis.get('postsolve_query_frame_convention_kind_summary', 'n/a')}; "
+                    f"extrinsic_application={jump_analysis.get('postsolve_extrinsic_application_kind_summary', 'n/a')}; "
+                    f"next_target={jump_analysis.get('roll_pitch_next_minimum_fix_target', 'n/a')}"
+                ),
+            })
+        boundary_bridge_narrowing_summary = jump_analysis.get("boundary_bridge_narrowing_summary")
+        if boundary_bridge_narrowing_summary:
+            findings.append({
+                "severity": "info" if "tracks strict-local support" in boundary_bridge_narrowing_summary else "warn",
+                "title": boundary_bridge_narrowing_summary,
+                "evidence": jump_analysis.get("boundary_bridge_narrowing_evidence", ""),
+            })
+        boundary_bridge_followup_summary = jump_analysis.get("boundary_bridge_followup_summary")
+        if boundary_bridge_followup_summary:
+            findings.append({
+                "severity": "warn",
+                "title": boundary_bridge_followup_summary,
+                "evidence": jump_analysis.get("boundary_bridge_followup_evidence", ""),
+            })
+        postsolve_value_source_summary = jump_analysis.get("postsolve_value_source_summary")
+        if postsolve_value_source_summary:
+            findings.append({
+                "severity": "info" if "share one authoritative" in postsolve_value_source_summary else "warn",
+                "title": postsolve_value_source_summary,
+                "evidence": jump_analysis.get("postsolve_value_source_evidence", ""),
+            })
+        final_materialization_summary = jump_analysis.get("final_materialization_summary")
+        if final_materialization_summary:
+            findings.append({
+                "severity": "info" if "final truth only" in final_materialization_summary else "warn",
+                "title": final_materialization_summary,
+                "evidence": jump_analysis.get("final_materialization_evidence", ""),
+            })
+        postsolve_surface_followup_summary = jump_analysis.get("postsolve_surface_followup_summary")
+        if postsolve_surface_followup_summary:
+            findings.append({
+                "severity": "warn",
+                "title": postsolve_surface_followup_summary,
+                "evidence": jump_analysis.get("postsolve_surface_followup_evidence", ""),
+            })
         yaw_root_cause_summary = jump_analysis.get("yaw_root_cause_summary")
         if yaw_root_cause_summary:
             findings.append({
@@ -4129,6 +5257,9 @@ def detect_findings(
                     f"postsolve_active_window->final={(frame.get('delta_postsolve_query_to_final_translation_norm') or 0.0):.3f} m; "
                     f"postsolve_reason={frame.get('postsolve_query_support_mismatch_reason', '')}; "
                     f"strict_reason={frame.get('postsolve_strict_local_support_mismatch_reason', '')}; "
+                    f"value_source={frame.get('postsolve_active_window_value_source_kind', '')}/"
+                    f"{frame.get('postsolve_strict_local_value_source_kind', '')}; "
+                    f"value_source_consistent={int(frame.get('postsolve_value_source_consistent') or 0)}; "
                     f"same_support_recalc={frame.get('recalculated_lidar_same_support_factor_count', 'n/a')}; "
                     f"cross_support_recalc={frame.get('recalculated_lidar_cross_support_factor_count', 'n/a')}"
                 ),
@@ -4642,6 +5773,7 @@ def render_report_markdown(
     correlation_analysis: dict[str, Any],
     pipeline_analysis: dict[str, Any],
     seed_compare_analysis: dict[str, Any],
+    m9_matrix_analysis: dict[str, Any],
     findings: list[dict[str, str]],
     recommendations: dict[str, list[str]],
     external_results: list[dict[str, Any]],
@@ -4719,6 +5851,82 @@ def render_report_markdown(
             ])
         lines.append("")
         lines.append(md_table(["Metric", "Baseline", "Current", "Delta"], metric_rows))
+
+    if m9_matrix_analysis.get("available"):
+        lines.append("## M9 Minimal Matrix Summary")
+        lines.append("")
+        lines.append(md_table(
+            ["Key", "Value"],
+            [
+                ["baseline_run_name", m9_matrix_analysis.get("baseline_run_name", "n/a")],
+                ["summary", m9_matrix_analysis.get("summary", "n/a")],
+                ["smaller_smoother_lag_effect", m9_matrix_analysis.get("smaller_smoother_lag_effect", "n/a")],
+                ["lower_active_window_coupling_effect", m9_matrix_analysis.get("lower_active_window_coupling_effect", "n/a")],
+                ["combined_effect", m9_matrix_analysis.get("combined_effect", "n/a")],
+                ["next_minimum_fix_target", m9_matrix_analysis.get("next_minimum_fix_target", "n/a")],
+            ],
+        ))
+        matrix_rows = []
+        for row in m9_matrix_analysis.get("rows", []):
+            matrix_rows.append([
+                row.get("run_name", "n/a"),
+                row.get("smoother_lag_level", "n/a"),
+                row.get("active_window_coupling_level", "n/a"),
+                f"{(row.get('smoother_lag') or 0.0):.3f}" if row.get("smoother_lag") is not None else "n/a",
+                f"{(row.get('ctrl_point_prediction_inf_scale') or 0.0):.1f}" if row.get("ctrl_point_prediction_inf_scale") is not None else "n/a",
+                f"{(row.get('ctrl_point_smoothness_inf_scale') or 0.0):.1f}" if row.get("ctrl_point_smoothness_inf_scale") is not None else "n/a",
+                row.get("signed_roll_primary_stage", "n/a"),
+                row.get("signed_pitch_primary_stage", "n/a"),
+                (
+                    f"{(row.get('frontend_to_postsolve_strict_local_signed_roll_mean') or 0.0):.3f} / "
+                    f"{(row.get('frontend_to_postsolve_strict_local_signed_roll_p95') or 0.0):.3f} / "
+                    f"{(row.get('frontend_to_postsolve_strict_local_signed_roll_max') or 0.0):.3f}"
+                ) if row.get("frontend_to_postsolve_strict_local_signed_roll_mean") is not None else "n/a",
+                (
+                    f"{(row.get('frontend_to_postsolve_strict_local_signed_pitch_mean') or 0.0):.3f} / "
+                    f"{(row.get('frontend_to_postsolve_strict_local_signed_pitch_p95') or 0.0):.3f} / "
+                    f"{(row.get('frontend_to_postsolve_strict_local_signed_pitch_max') or 0.0):.3f}"
+                ) if row.get("frontend_to_postsolve_strict_local_signed_pitch_mean") is not None else "n/a",
+                f"{(row.get('frontend_to_final_roll_abs_p95') or 0.0):.3f}" if row.get("frontend_to_final_roll_abs_p95") is not None else "n/a",
+                f"{(row.get('frontend_to_final_pitch_abs_p95') or 0.0):.3f}" if row.get("frontend_to_final_pitch_abs_p95") is not None else "n/a",
+                (
+                    f"{(row.get('solver_update_ms_mean') or 0.0):.3f} / "
+                    f"{(row.get('solver_update_ms_p95') or 0.0):.3f}"
+                ) if row.get("solver_update_ms_mean") is not None else "n/a",
+                f"{(row.get('reelim_mean') or 0.0):.3f}" if row.get("reelim_mean") is not None else "n/a",
+                f"{(row.get('recalc_imu_mean') or 0.0):.3f}" if row.get("recalc_imu_mean") is not None else "n/a",
+                f"{(row.get('relin_shared_mean') or 0.0):.3f}" if row.get("relin_shared_mean") is not None else "n/a",
+                f"{(row.get('recalc_prior_mean') or 0.0):.3f}" if row.get("recalc_prior_mean") is not None else "n/a",
+                f"{(row.get('recalc_lidar_cross_support_mean') or 0.0):.3f}" if row.get("recalc_lidar_cross_support_mean") is not None else "n/a",
+                f"{(row.get('postsolve_active_window_to_strict_local_rotation_p95') or 0.0):.3f}" if row.get("postsolve_active_window_to_strict_local_rotation_p95") is not None else "n/a",
+                row.get("boundary_shift_count", "n/a"),
+            ])
+        lines.append("")
+        lines.append(md_table(
+            [
+                "run_name",
+                "lag_level",
+                "coupling_level",
+                "smoother_lag",
+                "pred_inf",
+                "smooth_inf",
+                "signed_roll_primary_stage",
+                "signed_pitch_primary_stage",
+                "frontend->postsolve_strict_local signed_roll mean/p95/max",
+                "frontend->postsolve_strict_local signed_pitch mean/p95/max",
+                "frontend->final roll p95",
+                "frontend->final pitch p95",
+                "solver_update_ms mean/p95",
+                "reelim_mean",
+                "recalc_imu_mean",
+                "relin_shared_mean",
+                "recalc_prior_mean",
+                "recalc_lidar_cross_support_mean",
+                "active_window->strict_local rotation p95",
+                "boundary_shift_count",
+            ],
+            matrix_rows,
+        ))
 
     lines.append("## Artifact Coverage")
     lines.append("")
@@ -4861,6 +6069,35 @@ def render_report_markdown(
         mismatch_counts_text = ", ".join(f"{k}:{v}" for k, v in mismatch_counts.items()) or "_none_"
         strict_local_query_counts = jump_analysis.get("strict_local_query_reason_counts", {})
         strict_local_query_counts_text = ", ".join(f"{k}:{v}" for k, v in strict_local_query_counts.items()) or "_none_"
+        postsolve_reason_counts_text = ", ".join(
+            f"{k}:{v}" for k, v in jump_analysis.get("postsolve_reason_counts", {}).items()
+        ) or "_none_"
+        postsolve_strict_reason_counts_text = ", ".join(
+            f"{k}:{v}" for k, v in jump_analysis.get("postsolve_strict_reason_counts", {}).items()
+        ) or "_none_"
+        postsolve_active_window_value_source_text = ", ".join(
+            f"{k}:{v}" for k, v in jump_analysis.get("postsolve_active_window_value_source_kind_counts", {}).items()
+        ) or "_none_"
+        postsolve_strict_local_value_source_text = ", ".join(
+            f"{k}:{v}" for k, v in jump_analysis.get("postsolve_strict_local_value_source_kind_counts", {}).items()
+        ) or "_none_"
+        postsolve_frame_convention_text = ", ".join(
+            f"{k}:{v}" for k, v in jump_analysis.get("postsolve_query_frame_convention_kind_counts", {}).items()
+        ) or "_none_"
+        postsolve_extrinsic_text = ", ".join(
+            f"{k}:{v}" for k, v in jump_analysis.get("postsolve_extrinsic_application_kind_counts", {}).items()
+        ) or "_none_"
+        final_materialization_source_text = ", ".join(
+            f"{k}:{v}" for k, v in jump_analysis.get("final_materialization_source_kind_counts", {}).items()
+        ) or "_none_"
+        postsolve_value_source_consistent_counts = jump_analysis.get(
+            "postsolve_value_source_consistent_counts",
+            {},
+        )
+        new_frame_final_truth_counts = jump_analysis.get(
+            "new_frame_consumes_final_truth_only_counts",
+            {},
+        )
         frozen_before_factor = jump_analysis.get("start_pose_frozen_before_factor_injection_counts", {})
         frozen_before_solver = jump_analysis.get("start_pose_frozen_before_solver_update_counts", {})
         lines.append(md_table(
@@ -5035,8 +6272,58 @@ def render_report_markdown(
                     f"{jump_analysis.get('postsolve_active_window_to_final_rotation_p95', 0.0):.3f} / "
                     f"{jump_analysis.get('postsolve_active_window_to_final_rotation_max', 0.0):.3f}",
                 ],
+                [
+                    "postsolve_reason_counts",
+                    postsolve_reason_counts_text,
+                ],
+                ["postsolve_strict_reason_counts", postsolve_strict_reason_counts_text],
+                ["postsolve_active_window_value_source_kind_counts", postsolve_active_window_value_source_text],
+                ["postsolve_strict_local_value_source_kind_counts", postsolve_strict_local_value_source_text],
+                [
+                    "postsolve_value_source_consistent_counts",
+                    f"true:{postsolve_value_source_consistent_counts.get('true', 0)}, "
+                    f"false:{postsolve_value_source_consistent_counts.get('false', 0)}",
+                ],
+                ["postsolve_query_frame_convention_kind_counts", postsolve_frame_convention_text],
+                ["postsolve_extrinsic_application_kind_counts", postsolve_extrinsic_text],
+                ["final_materialization_source_kind_counts", final_materialization_source_text],
+                [
+                    "new_frame_consumes_final_truth_only_counts",
+                    f"true:{new_frame_final_truth_counts.get('true', 0)}, "
+                    f"false:{new_frame_final_truth_counts.get('false', 0)}",
+                ],
             ],
         ))
+        if "retained_pose_control_key_count_mean" in jump_analysis:
+            lines.append("Boundary bridge narrowing:")
+            lines.append("")
+            lines.append(md_table(
+                ["Metric", "Value"],
+                [
+                    [
+                        "retained_pose_control_key_count (mean/p95/max)",
+                        f"{jump_analysis.get('retained_pose_control_key_count_mean', 0.0):.2f} / "
+                        f"{jump_analysis.get('retained_pose_control_key_count_p95', 0.0):.2f} / "
+                        f"{jump_analysis.get('retained_pose_control_key_count_max', 0.0):.2f}",
+                    ],
+                    [
+                        "strict_local_needed_support_key_count (mean/p95/max)",
+                        f"{jump_analysis.get('strict_local_needed_support_key_count_mean', 0.0):.2f} / "
+                        f"{jump_analysis.get('strict_local_needed_support_key_count_p95', 0.0):.2f} / "
+                        f"{jump_analysis.get('strict_local_needed_support_key_count_max', 0.0):.2f}",
+                    ],
+                    [
+                        "retained_minus_strict_local_key_excess (mean/p95/max)",
+                        f"{jump_analysis.get('retained_minus_strict_local_key_excess_mean', 0.0):.2f} / "
+                        f"{jump_analysis.get('retained_minus_strict_local_key_excess_p95', 0.0):.2f} / "
+                        f"{jump_analysis.get('retained_minus_strict_local_key_excess_max', 0.0):.2f}",
+                    ],
+                    [
+                        "boundary_bridge_narrowing_summary",
+                        jump_analysis.get("boundary_bridge_narrowing_summary", "n/a"),
+                    ],
+                ],
+            ))
         if jump_analysis.get("runtime_final_pose_surface") == "strict_local":
             lines.append("Strict-local final pose experiment:")
             lines.append("")
@@ -5092,6 +6379,12 @@ def render_report_markdown(
                     ["strict_local_rotation_subtype", jump_analysis.get("strict_local_rotation_subtype", "n/a")],
                     ["strict_local_residual_cause", jump_analysis.get("strict_local_residual_cause", "n/a")],
                     ["pitch_roll_root_cause_summary", jump_analysis.get("pitch_roll_root_cause_summary", "n/a")],
+                    ["signed_roll_drift_summary", jump_analysis.get("roll_drift_summary", "n/a")],
+                    ["signed_pitch_drift_summary", jump_analysis.get("pitch_drift_summary", "n/a")],
+                    ["roll_drift_primary_stage", jump_analysis.get("roll_drift_primary_stage", "n/a")],
+                    ["pitch_drift_primary_stage", jump_analysis.get("pitch_drift_primary_stage", "n/a")],
+                    ["roll_pitch_frame_convention_summary", jump_analysis.get("roll_pitch_frame_convention_summary", "n/a")],
+                    ["roll_pitch_next_minimum_fix_target", jump_analysis.get("roll_pitch_next_minimum_fix_target", "n/a")],
                     [
                         "frontend->final translation (mean/p95/max)",
                         f"{jump_analysis.get('frontend_to_final_translation_mean', 0.0):.3f} / "
@@ -5259,6 +6552,70 @@ def render_report_markdown(
                 ["Stage", "Pitch/Roll Score"],
                 pitch_roll_stage_rows,
             ))
+        lines.append("Signed roll/pitch drift audit:")
+        lines.append("")
+        lines.append(md_table(
+            ["Metric", "Value"],
+            [
+                ["signed_roll_drift_summary", jump_analysis.get("roll_drift_summary", "n/a")],
+                ["signed_pitch_drift_summary", jump_analysis.get("pitch_drift_summary", "n/a")],
+                ["roll_drift_positive_ratio", f"{jump_analysis.get('roll_drift_positive_ratio', 0.0):.3f}"],
+                ["roll_drift_negative_ratio", f"{jump_analysis.get('roll_drift_negative_ratio', 0.0):.3f}"],
+                ["pitch_drift_positive_ratio", f"{jump_analysis.get('pitch_drift_positive_ratio', 0.0):.3f}"],
+                ["pitch_drift_negative_ratio", f"{jump_analysis.get('pitch_drift_negative_ratio', 0.0):.3f}"],
+                ["cumulative_roll_drift_indicator", f"{jump_analysis.get('cumulative_roll_drift_indicator', 0.0):.3f}"],
+                ["cumulative_pitch_drift_indicator", f"{jump_analysis.get('cumulative_pitch_drift_indicator', 0.0):.3f}"],
+                ["roll_drift_primary_stage", jump_analysis.get("roll_drift_primary_stage", "n/a")],
+                ["pitch_drift_primary_stage", jump_analysis.get("pitch_drift_primary_stage", "n/a")],
+                ["earliest_monotonic_drift_segment_candidate", jump_analysis.get("earliest_monotonic_drift_segment_candidate", "n/a")],
+                ["signed_roll_drift_interpretation", jump_analysis.get("signed_roll_drift_interpretation", "n/a")],
+                ["frontend_to_postsolve_strict_local_roll_primary_corr", jump_analysis.get("frontend_to_postsolve_strict_local_roll_primary_corr", "n/a")],
+                ["postsolve_active_window_to_strict_local_roll_primary_corr", jump_analysis.get("postsolve_active_window_to_strict_local_roll_primary_corr", "n/a")],
+                ["frontend_to_postsolve_strict_local_pitch_primary_corr", jump_analysis.get("frontend_to_postsolve_strict_local_pitch_primary_corr", "n/a")],
+                ["postsolve_active_window_to_strict_local_pitch_primary_corr", jump_analysis.get("postsolve_active_window_to_strict_local_pitch_primary_corr", "n/a")],
+                ["roll_pitch_frame_convention_summary", jump_analysis.get("roll_pitch_frame_convention_summary", "n/a")],
+                ["roll_pitch_next_minimum_fix_target", jump_analysis.get("roll_pitch_next_minimum_fix_target", "n/a")],
+            ],
+        ))
+        lines.append("Frame convention / extrinsic audit:")
+        lines.append("")
+        lines.append(md_table(
+            ["Stage", "Pose Semantic", "Source Variable", "Transform Chain", "Extrinsic Application Side", "Resulting Frame"],
+            [
+                [
+                    "strict_local query pose",
+                    "world->lidar",
+                    "postsolve_strict_local_query.pose_lidar",
+                    "query_pose=world_to_lidar; compare_pose=pose_lidar * T_lidar_imu",
+                    "right_multiply_T_lidar_imu",
+                    "world->imu for compare, world->lidar for query",
+                ],
+                [
+                    "active_window query pose",
+                    "world->lidar",
+                    "postsolve_publish_query.pose_lidar",
+                    "query_pose=world_to_lidar; compare_pose=pose_lidar * T_lidar_imu",
+                    "right_multiply_T_lidar_imu",
+                    "world->imu for compare, world->lidar for query",
+                ],
+                [
+                    "final pose",
+                    "world->lidar (selected strict_local by default)",
+                    "selected_final_query.pose_lidar / new_frame->T_world_lidar",
+                    "final lidar pose -> final imu pose via right multiply T_lidar_imu",
+                    "right_multiply_T_lidar_imu",
+                    "world->lidar final truth, world->imu materialized companion",
+                ],
+                [
+                    "compare pose summary",
+                    jump_analysis.get("postsolve_query_frame_convention_kind_summary", "n/a"),
+                    "runtime_postsolve_query_frame_convention_kind",
+                    jump_analysis.get("postsolve_query_frame_convention_kind_summary", "n/a"),
+                    jump_analysis.get("postsolve_extrinsic_application_kind_summary", "n/a"),
+                    "world->imu via query_pose_lidar_right_multiply_T_lidar_imu",
+                ],
+            ],
+        ))
         start_rows = [
             [
                 item.get("frame_id", ""),
@@ -5311,11 +6668,20 @@ def render_report_markdown(
                 item.get("postsolve_query_support_mismatch_reason", ""),
                 item.get("postsolve_strict_local_support_mismatch_reason", ""),
                 item.get("postsolve_query_layout_name", ""),
+                item.get("postsolve_active_window_value_source_kind", ""),
+                item.get("postsolve_strict_local_value_source_kind", ""),
+                f"{int(item.get('postsolve_value_source_consistent') or 0)}",
+                item.get("final_materialization_source_kind", ""),
+                f"{int(item.get('new_frame_consumes_final_truth_only') or 0)}",
                 f"{(item.get('solver_update_ms') or 0.0):.3f}",
                 item.get("carried_boundary_oldest_key_summary", ""),
                 item.get("oldest_survivor_key_summary", ""),
+                f"{(item.get('retained_pose_control_key_count') or 0):.0f}",
+                f"{(item.get('strict_local_needed_support_key_count') or 0):.0f}",
+                f"{(item.get('retained_minus_strict_local_key_excess') or 0):.0f}",
                 item.get("postsolve_query_support_keys_summary", ""),
                 item.get("postsolve_strict_local_support_keys_summary", ""),
+                item.get("carried_prior_retained_keys_summary", ""),
                 item.get("reeliminated_variable_count", ""),
                 item.get("relinearized_pose_variable_count", ""),
                 item.get("relinearized_aux_variable_count", ""),
@@ -5340,11 +6706,20 @@ def render_report_markdown(
                 "postsolve_reason",
                 "postsolve_strict_reason",
                 "postsolve_layout",
+                "aw_value_source",
+                "strict_value_source",
+                "value_source_consistent",
+                "final_materialization_source",
+                "new_frame_final_only",
                 "solver_update_ms",
                 "carried_boundary_oldest",
                 "oldest_survivor",
+                "retained_pose_keys",
+                "strict_local_keys",
+                "retained_excess",
                 "postsolve_active_window_support",
                 "postsolve_strict_local_support",
+                "carried_prior_retained_keys",
                 "reelim",
                 "relin_pose",
                 "relin_aux",
@@ -5364,6 +6739,17 @@ def render_report_markdown(
                 item.get("postsolve_query_support_mismatch_reason", ""),
                 item.get("postsolve_strict_local_support_keys_summary", ""),
                 item.get("postsolve_strict_local_support_mismatch_reason", ""),
+                f"{(item.get('retained_pose_control_key_count') or 0):.0f}",
+                f"{(item.get('strict_local_needed_support_key_count') or 0):.0f}",
+                f"{(item.get('retained_minus_strict_local_key_excess') or 0):.0f}",
+                item.get("carried_prior_retained_keys_summary", ""),
+                item.get("postsolve_active_window_value_source_kind", ""),
+                item.get("postsolve_strict_local_value_source_kind", ""),
+                f"{int(item.get('postsolve_value_source_consistent') or 0)}",
+                item.get("postsolve_query_frame_convention_kind", ""),
+                item.get("postsolve_extrinsic_application_kind", ""),
+                item.get("final_materialization_source_kind", ""),
+                f"{int(item.get('new_frame_consumes_final_truth_only') or 0)}",
                 f"{(item.get('solver_update_ms') or 0.0):.3f}",
                 f"{(item.get('reeliminated_variable_count') or 0):.0f}",
                 f"{(item.get('relinearized_pose_variable_count') or 0):.0f}",
@@ -5388,6 +6774,17 @@ def render_report_markdown(
                 "postsolve_reason",
                 "postsolve_strict_local_support",
                 "postsolve_strict_reason",
+                "retained_pose_keys",
+                "strict_local_keys",
+                "retained_excess",
+                "carried_prior_retained_keys",
+                "aw_value_source",
+                "strict_value_source",
+                "value_source_consistent",
+                "frame_convention",
+                "extrinsic_application",
+                "final_materialization_source",
+                "new_frame_final_only",
                 "solver_update_ms",
                 "reelim",
                 "relin_pose",
@@ -5646,6 +7043,75 @@ def render_report_markdown(
             ],
             top_roll_rows,
         ))
+        signed_drift_table_specs = [
+            ("Top positive roll drift frames:", "top_positive_roll_drift_frames"),
+            ("Top negative roll drift frames:", "top_negative_roll_drift_frames"),
+            ("Top positive pitch drift frames:", "top_positive_pitch_drift_frames"),
+            ("Top negative pitch drift frames:", "top_negative_pitch_drift_frames"),
+        ]
+        for title, key in signed_drift_table_specs:
+            signed_rows = [
+                [
+                    item.get("frame_id", ""),
+                    f"{(item.get('frame_stamp') or 0.0):.6f}",
+                    f"{(item.get('start_roll_rad') or 0.0):.3f}",
+                    f"{(item.get('frontend_roll_rad') or 0.0):.3f}",
+                    f"{(item.get('postsolve_strict_local_roll_rad') or 0.0):.3f}",
+                    f"{(item.get('final_roll_rad') or 0.0):.3f}",
+                    f"{(item.get('start_pitch_rad') or 0.0):.3f}",
+                    f"{(item.get('frontend_pitch_rad') or 0.0):.3f}",
+                    f"{(item.get('postsolve_strict_local_pitch_rad') or 0.0):.3f}",
+                    f"{(item.get('final_pitch_rad') or 0.0):.3f}",
+                    f"{(item.get('delta_start_to_frontend_roll_rad') or 0.0):.3f}",
+                    f"{(item.get('delta_frontend_to_postsolve_strict_local_roll_rad') or 0.0):.3f}",
+                    f"{(item.get('delta_postsolve_active_window_to_postsolve_strict_local_roll_rad') or 0.0):.3f}",
+                    f"{(item.get('delta_frontend_to_final_roll_rad') or 0.0):.3f}",
+                    f"{(item.get('delta_start_to_frontend_pitch_rad') or 0.0):.3f}",
+                    f"{(item.get('delta_frontend_to_postsolve_strict_local_pitch_rad') or 0.0):.3f}",
+                    f"{(item.get('delta_postsolve_active_window_to_postsolve_strict_local_pitch_rad') or 0.0):.3f}",
+                    f"{(item.get('delta_frontend_to_final_pitch_rad') or 0.0):.3f}",
+                    f"{(item.get('solver_update_ms') or 0.0):.3f}",
+                    f"{(item.get('relinearized_shared_variable_count') or 0):.0f}",
+                    f"{(item.get('recalculated_imu_factor_count') or 0):.0f}",
+                    f"{(item.get('recalculated_prior_factor_count') or 0):.0f}",
+                    f"{(item.get('recalculated_lidar_cross_support_factor_count') or 0):.0f}",
+                    item.get("strict_local_query_reason", ""),
+                    item.get("postsolve_query_support_mismatch_reason", ""),
+                ]
+                for item in jump_analysis.get(key, [])
+            ]
+            lines.append(title)
+            lines.append("")
+            lines.append(md_table(
+                [
+                    "frame_id",
+                    "timestamp",
+                    "start_roll",
+                    "frontend_roll",
+                    "postsolve_strict_local_roll",
+                    "final_roll",
+                    "start_pitch",
+                    "frontend_pitch",
+                    "postsolve_strict_local_pitch",
+                    "final_pitch",
+                    "d_roll_start_frontend",
+                    "d_roll_frontend_postsolve_strict",
+                    "d_roll_active_window_strict",
+                    "d_roll_frontend_final",
+                    "d_pitch_start_frontend",
+                    "d_pitch_frontend_postsolve_strict",
+                    "d_pitch_active_window_strict",
+                    "d_pitch_frontend_final",
+                    "solver_update_ms",
+                    "relin_shared",
+                    "recalc_imu",
+                    "recalc_prior",
+                    "recalc_lidar_cross_support",
+                    "strict_local_query_reason",
+                    "postsolve_reason",
+                ],
+                signed_rows,
+            ))
     else:
         lines.append("jump_diagnostics.csv was not available for this run.")
         lines.append("")
@@ -5995,6 +7461,12 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Analyze one IAP run directory and generate a report.")
     parser.add_argument("--run", default=str(DEFAULT_RUN), help=f"Run directory to analyze (default: {DEFAULT_RUN})")
     parser.add_argument("--baseline-run", default="", help="Optional baseline run directory for seed-mode comparison")
+    parser.add_argument(
+        "--matrix-runs",
+        nargs="*",
+        default=[],
+        help="Optional run directories for the M9 2x2 matrix summary; current --run is included automatically",
+    )
     parser.add_argument("--out", default="", help="Output analysis directory (default: <run>/analysis)")
     parser.add_argument("--no-plots", action="store_true", help="Skip new plots generated by ana_log.py")
     parser.add_argument("--skip-external-tools", action="store_true", help="Do not invoke existing ICP/GNSS/ARAIM plot scripts")
@@ -6006,6 +7478,7 @@ def main() -> int:
     args = parse_args()
     run_dir = resolve_run_dir(args.run)
     baseline_run_dir = resolve_run_dir(args.baseline_run) if args.baseline_run else None
+    matrix_run_dirs = [resolve_run_dir(item) for item in args.matrix_runs]
     out_dir = Path(args.out).resolve() if args.out else (run_dir / "analysis")
     figs_dir = out_dir / "figs"
     ensure_dir(figs_dir)
@@ -6089,6 +7562,15 @@ def main() -> int:
         current_jump_analysis=jump_analysis,
         baseline_run_dir=baseline_run_dir,
     )
+    m9_matrix_analysis = analyze_m9_min_matrix(
+        current_run_dir=run_dir,
+        current_metadata=metadata,
+        current_config_summary=config_summary,
+        current_jump_analysis=jump_analysis,
+        current_solver_update_analysis=solver_update_analysis,
+        matrix_run_dirs=matrix_run_dirs,
+        scratch_dir=figs_dir / "m9_matrix",
+    )
 
     findings = detect_findings(
         config_summary=config_summary,
@@ -6105,6 +7587,7 @@ def main() -> int:
         pipeline_analysis=pipeline_analysis,
     )
     findings.extend(detect_seed_compare_findings(seed_compare_analysis))
+    findings.extend(detect_m9_matrix_findings(m9_matrix_analysis))
     recommendations = recommend_next_steps(
         artifact_statuses=artifact_statuses,
         mode_consistency=mode_consistency,
@@ -6140,6 +7623,7 @@ def main() -> int:
         correlation_analysis=correlation_analysis,
         pipeline_analysis=pipeline_analysis,
         seed_compare_analysis=seed_compare_analysis,
+        m9_matrix_analysis=m9_matrix_analysis,
         findings=findings,
         recommendations=recommendations,
         external_results=external_results,
@@ -6177,6 +7661,7 @@ def main() -> int:
         "correlation_analysis": correlation_analysis,
         "pipeline_analysis": pipeline_analysis,
         "seed_compare_analysis": seed_compare_analysis,
+        "m9_matrix_analysis": m9_matrix_analysis,
         "findings": findings,
         "recommendations": recommendations,
         "external_results": external_results,

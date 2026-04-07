@@ -508,6 +508,29 @@ void write_metadata_files(const LogPaths& paths, const LogConfig& config) {
     run_info["runtime_frontend_target_time_offset_vs_representative"] = 0.0;
     run_info["runtime_frontend_target_time_offset_vs_scan_start"] = 0.0;
     run_info["runtime_frontend_target_time_offset_vs_scan_end"] = 0.0;
+    run_info["runtime_postsolve_active_window_value_source_kind"] = "unknown";
+    run_info["runtime_postsolve_strict_local_value_source_kind"] = "unknown";
+    run_info["runtime_postsolve_value_source_consistent"] = false;
+    run_info["runtime_postsolve_query_frame_convention_kind"] = "unknown";
+    run_info["runtime_postsolve_extrinsic_application_kind"] = "unknown";
+    run_info["runtime_final_materialization_source_kind"] = "unknown";
+    run_info["runtime_new_frame_consumes_final_truth_only"] = false;
+    const double configured_smoother_lag =
+      odom_config->param<double>("odometry_estimation", "smoother_lag", 0.5);
+    const double configured_ctrl_point_prediction_inf_scale =
+      odom_config->param<double>("odometry_estimation", "ctrl_point_prediction_inf_scale", 1e3);
+    const double configured_ctrl_point_smoothness_inf_scale =
+      odom_config->param<double>("odometry_estimation", "ctrl_point_smoothness_inf_scale", 1e2);
+    const double configured_ctrl_point_marginal_inf_scale =
+      odom_config->param<double>("odometry_estimation", "ctrl_point_marginal_inf_scale", 1e4);
+    run_info["config_smoother_lag"] = configured_smoother_lag;
+    run_info["runtime_smoother_lag"] = configured_smoother_lag;
+    run_info["config_ctrl_point_prediction_inf_scale"] = configured_ctrl_point_prediction_inf_scale;
+    run_info["runtime_ctrl_point_prediction_inf_scale"] = configured_ctrl_point_prediction_inf_scale;
+    run_info["config_ctrl_point_smoothness_inf_scale"] = configured_ctrl_point_smoothness_inf_scale;
+    run_info["runtime_ctrl_point_smoothness_inf_scale"] = configured_ctrl_point_smoothness_inf_scale;
+    run_info["config_ctrl_point_marginal_inf_scale"] = configured_ctrl_point_marginal_inf_scale;
+    run_info["runtime_ctrl_point_marginal_inf_scale"] = configured_ctrl_point_marginal_inf_scale;
     run_info["runtime_has_gnss_constraints"] = false;
     run_info["runtime_velocity_optimized"] =
       configured_velocity_state_mode == "optimize" && configured_velocity_mode_policy == "always_optimize";

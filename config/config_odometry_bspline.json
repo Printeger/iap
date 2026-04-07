@@ -71,7 +71,7 @@
     "velocity_state_mode": "keep_but_not_optimize",
     "velocity_mode_policy": "auto_disable_without_gnss",
     "bias_state_mode": "lagged_keyed",
-    "frontend_seed_mode": "imu_forward_prediction",
+    "frontend_seed_mode": "last_pose_copy",
     // Strict-local yaw residual isolation experiments (default off):
     //   exp.gravity_mode = soft gravity-handling experiment path
     //     normal                    = current behavior

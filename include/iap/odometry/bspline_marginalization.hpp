@@ -43,6 +43,10 @@ struct SplineActiveStateSet {
 struct BSplineMarginalizationPartition {
   double min_active_stamp = 0.0;
   SplineActiveStateSet active_state_set;
+  std::vector<gtsam::Key> active_solve_keys;
+  std::vector<gtsam::Key> strict_local_needed_support_keys;
+  std::vector<gtsam::Key> carried_prior_retained_keys;
+  std::vector<gtsam::Key> boundary_anchor_keys;
   std::vector<std::size_t> survivor_control_indices;
   std::vector<std::size_t> removable_control_indices;
   std::vector<std::size_t> survivor_auxiliary_indices;
@@ -95,6 +99,12 @@ SplineActiveStateSet build_spline_active_state_set(
 
 BSplineMarginalizationPartition build_bspline_marginalization_partition(
   const SplineActiveStateSet& active_state_set);
+
+BSplineMarginalizationPartition build_bspline_marginalization_partition(
+  const SplineActiveStateSet& active_state_set,
+  const std::vector<gtsam::Key>& strict_local_needed_support_keys,
+  const std::vector<gtsam::Key>& carried_prior_retained_keys,
+  const std::vector<gtsam::Key>& boundary_anchor_keys);
 
 BSplineMarginalizationPartition build_bspline_marginalization_partition(
   const std::vector<BSplineControlPointState>& buffer_states,

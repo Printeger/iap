@@ -20,6 +20,12 @@ gtsam::Pose3 translated_pose(double x) {
   return gtsam::Pose3(gtsam::Rot3(), gtsam::Point3(x, 0.0, 0.0));
 }
 
+gtsam::KeyVector sorted_keys(gtsam::KeyVector keys) {
+  std::sort(keys.begin(), keys.end());
+  keys.erase(std::unique(keys.begin(), keys.end()), keys.end());
+  return keys;
+}
+
 gtsam::Values make_partition_values() {
   gtsam::Values values;
   for (std::size_t i = 0; i < 8; ++i) {
@@ -239,6 +245,59 @@ TEST(BSplineMarginalizationTest, SurvivorAnchorFilterCanExcludeLaggedBiasKeys) {
     anchorable.begin(),
     anchorable.end(),
     iap::bspline_velocity_key(6)) != anchorable.end());
+}
+
+TEST(BSplineMarginalizationTest, PartitionCanNarrowCarriedPriorRetainedSetWithoutChangingSolveKeys) {
+  const gtsam::Values values = make_partition_values();
+  const auto active_state_set = iap::build_spline_active_state_set(
+    make_buffer_states(),
+    make_segment_states(),
+    values,
+    5.1,
+    true,
+    true,
+    false,
+    false,
+    true);
+
+  const gtsam::KeyVector strict_local_needed_support_keys = sorted_keys(gtsam::KeyVector{
+    iap::bspline_control_point_key(6),
+    iap::bspline_control_point_key(7),
+  });
+  const gtsam::KeyVector carried_prior_retained_keys = sorted_keys(gtsam::KeyVector{
+    iap::bspline_control_point_key(6),
+    iap::bspline_control_point_key(7),
+    iap::bspline_velocity_key(6),
+    iap::bspline_clock_key(6),
+    iap::bspline_gyro_bias_key(6),
+    iap::bspline_accel_bias_key(6),
+    iap::bspline_ecef_origin_key(),
+    iap::bspline_ecef_rot_key(),
+  });
+  const gtsam::KeyVector boundary_anchor_keys =
+    iap::filter_bspline_survivor_anchor_keys(carried_prior_retained_keys, false);
+
+  const auto partition = iap::build_bspline_marginalization_partition(
+    active_state_set,
+    strict_local_needed_support_keys,
+    carried_prior_retained_keys,
+    boundary_anchor_keys);
+
+  EXPECT_EQ(partition.active_solve_keys, sorted_keys(active_state_set.active_keys()));
+  EXPECT_EQ(partition.survivor_keys, sorted_keys(active_state_set.active_keys()));
+  EXPECT_EQ(partition.strict_local_needed_support_keys, strict_local_needed_support_keys);
+  EXPECT_EQ(partition.carried_prior_retained_keys, carried_prior_retained_keys);
+  EXPECT_EQ(partition.boundary_anchor_keys, boundary_anchor_keys);
+  EXPECT_LT(partition.carried_prior_retained_keys.size(), partition.active_solve_keys.size());
+  EXPECT_FALSE(std::find(
+    partition.boundary_anchor_keys.begin(),
+    partition.boundary_anchor_keys.end(),
+    iap::bspline_gyro_bias_key(6)) != partition.boundary_anchor_keys.end());
+  EXPECT_FALSE(std::find(
+    partition.boundary_anchor_keys.begin(),
+    partition.boundary_anchor_keys.end(),
+    iap::bspline_accel_bias_key(6)) != partition.boundary_anchor_keys.end());
+  EXPECT_TRUE(partition.can_replay_keys(partition.carried_prior_retained_keys, values));
 }
 
 TEST(BSplineMarginalizationTest, RegistryPruneFollowsActiveStateSetReferences) {
