@@ -46,6 +46,32 @@
     //   strict_local  = intended default final pose surface; publish the post-solve strict local LiDAR surface
     //   active_window = debug / regression / boundary-surface comparison only
     "final_pose_surface": "strict_local",
+    // Formal lifecycle-alignment modes:
+    //   gravity_state_mode:
+    //     shared_optimized   = legacy CT behavior; gravity is a persistent shared graph state
+    //     external_reference = GLIM-style reference gravity; odometry consumes a fixed external vector
+    //   gravity_reference_source:
+    //     startup_seed = latch startup/shared seed as authoritative external gravity reference
+    //     config_vector = use gravity_reference_vector as the authoritative external reference
+    //   velocity_state_mode:
+    //     optimize               = keep velocity as an actively optimized odometry state
+    //     keep_but_not_optimize  = keep velocity for publish/bookkeeping, but do not actively optimize it
+    //   velocity_mode_policy:
+    //     always_optimize            = preserve legacy behavior when velocity_state_mode=optimize
+    //     auto_disable_without_gnss  = resolve to keep_but_not_optimize on solves without GNSS/Doppler constraints
+    //   bias_state_mode:
+    //     shared_singleton = legacy CT behavior; gyro/accel bias stay on persistent shared j0/k0
+    //     lagged_keyed     = GLIM-style lagged bias lifecycle; bias follows active lagged auxiliary keys
+    //   frontend_seed_mode:
+    //     last_pose_copy         = legacy CT behavior; current frontend controls copy the last pose
+    //     imu_forward_prediction = seed current frontend controls from IMU forward prediction
+    "gravity_state_mode": "external_reference",
+    "gravity_reference_source": "startup_seed",
+    "gravity_reference_vector": [0.0, 0.0, 9.80665],
+    "velocity_state_mode": "keep_but_not_optimize",
+    "velocity_mode_policy": "auto_disable_without_gnss",
+    "bias_state_mode": "lagged_keyed",
+    "frontend_seed_mode": "imu_forward_prediction",
     // Strict-local yaw residual isolation experiments (default off):
     //   exp.gravity_mode = soft gravity-handling experiment path
     //     normal                    = current behavior

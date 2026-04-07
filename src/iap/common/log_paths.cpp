@@ -16,6 +16,8 @@
 #include <nlohmann/json.hpp>
 #include <spdlog/spdlog.h>
 
+#include <Eigen/Core>
+
 #include <iap/common/log_config.hpp>
 #include <iap/util/config.hpp>
 
@@ -189,6 +191,52 @@ std::string normalize_gravity_mode(const std::string& mode) {
   return "normal";
 }
 
+std::string normalize_gravity_state_mode(const std::string& mode) {
+  if (mode == "external_reference" || mode == "EXTERNAL_REFERENCE" || mode == "external-reference") {
+    return "external_reference";
+  }
+  return "shared_optimized";
+}
+
+std::string normalize_gravity_reference_source(const std::string& source) {
+  if (source == "config_vector" || source == "CONFIG_VECTOR" || source == "config-vector") {
+    return "config_vector";
+  }
+  return "startup_seed";
+}
+
+std::string normalize_velocity_state_mode(const std::string& mode) {
+  if (mode == "keep_but_not_optimize" || mode == "KEEP_BUT_NOT_OPTIMIZE" || mode == "keep-but-not-optimize") {
+    return "keep_but_not_optimize";
+  }
+  return "optimize";
+}
+
+std::string normalize_velocity_mode_policy(const std::string& policy) {
+  if (policy == "auto_disable_without_gnss" ||
+      policy == "AUTO_DISABLE_WITHOUT_GNSS" ||
+      policy == "auto-disable-without-gnss") {
+    return "auto_disable_without_gnss";
+  }
+  return "always_optimize";
+}
+
+std::string normalize_bias_state_mode(const std::string& mode) {
+  if (mode == "lagged_keyed" || mode == "LAGGED_KEYED" || mode == "lagged-keyed") {
+    return "lagged_keyed";
+  }
+  return "shared_singleton";
+}
+
+std::string normalize_frontend_seed_mode(const std::string& mode) {
+  if (mode == "imu_forward_prediction" ||
+      mode == "IMU_FORWARD_PREDICTION" ||
+      mode == "imu-forward-prediction") {
+    return "imu_forward_prediction";
+  }
+  return "last_pose_copy";
+}
+
 std::string yaw_isolation_experiment_name(
   const std::string& gravity_mode,
   bool freeze_gravity,
@@ -264,6 +312,30 @@ void write_json_file(const std::filesystem::path& path, const nlohmann::json& js
     return;
   }
   ofs << std::setw(2) << json << std::endl;
+}
+
+nlohmann::json read_json_file_or_empty(const std::filesystem::path& path) {
+  if (!std::filesystem::exists(path)) {
+    return nlohmann::json::object();
+  }
+
+  std::ifstream ifs(path);
+  if (!ifs) {
+    spdlog::warn("failed to open {}", path.string());
+    return nlohmann::json::object();
+  }
+
+  try {
+    nlohmann::json json;
+    ifs >> json;
+    if (!json.is_object()) {
+      return nlohmann::json::object();
+    }
+    return json;
+  } catch (const std::exception& e) {
+    spdlog::warn("failed to parse {}: {}", path.string(), e.what());
+    return nlohmann::json::object();
+  }
 }
 
 void update_latest_symlink(const std::filesystem::path& root_dir, const std::filesystem::path& run_dir) {
@@ -348,8 +420,38 @@ void write_metadata_files(const LogPaths& paths, const LogConfig& config) {
       odom_config->param<bool>("odometry_estimation", "exp_disable_velocity_factor", false);
     const bool configured_exp_disable_current_velocity_prior =
       odom_config->param<bool>("odometry_estimation", "exp_disable_current_velocity_prior", false);
+    const std::string configured_gravity_state_mode = normalize_gravity_state_mode(
+      odom_config->param<std::string>("odometry_estimation", "gravity_state_mode", "shared_optimized"));
+    const std::string configured_gravity_reference_source = normalize_gravity_reference_source(
+      odom_config->param<std::string>("odometry_estimation", "gravity_reference_source", "startup_seed"));
+    const Eigen::Vector3d configured_gravity_reference_vector =
+      odom_config->param<Eigen::Vector3d>(
+        "odometry_estimation",
+        "gravity_reference_vector",
+        Eigen::Vector3d(0.0, 0.0, 9.80665));
+    const std::string configured_velocity_state_mode = normalize_velocity_state_mode(
+      odom_config->param<std::string>("odometry_estimation", "velocity_state_mode", "optimize"));
+    const std::string configured_velocity_mode_policy = normalize_velocity_mode_policy(
+      odom_config->param<std::string>("odometry_estimation", "velocity_mode_policy", "always_optimize"));
+    const std::string configured_bias_state_mode = normalize_bias_state_mode(
+      odom_config->param<std::string>("odometry_estimation", "bias_state_mode", "shared_singleton"));
+    const std::string configured_frontend_seed_mode = normalize_frontend_seed_mode(
+      odom_config->param<std::string>("odometry_estimation", "frontend_seed_mode", "last_pose_copy"));
     run_info["config_final_pose_surface"] = configured_final_pose_surface;
     run_info["runtime_final_pose_surface"] = normalize_final_pose_surface(configured_final_pose_surface);
+    run_info["config_gravity_state_mode"] = configured_gravity_state_mode;
+    run_info["runtime_gravity_state_mode"] = configured_gravity_state_mode;
+    run_info["config_gravity_reference_source"] = configured_gravity_reference_source;
+    run_info["runtime_gravity_reference_source"] =
+      configured_gravity_state_mode == "external_reference"
+        ? configured_gravity_reference_source
+        : "shared_optimized_graph_state";
+    run_info["config_gravity_reference_vector"] = {
+      configured_gravity_reference_vector.x(),
+      configured_gravity_reference_vector.y(),
+      configured_gravity_reference_vector.z(),
+    };
+    run_info["runtime_gravity_reference_vector"] = run_info["config_gravity_reference_vector"];
     run_info["config_gravity_mode"] = configured_gravity_mode;
     run_info["runtime_gravity_mode"] =
       configured_exp_freeze_gravity ? "legacy_freeze_gravity" : normalize_gravity_mode(configured_gravity_mode);
@@ -369,6 +471,35 @@ void write_metadata_files(const LogPaths& paths, const LogConfig& config) {
     run_info["runtime_exp_disable_velocity_factor"] = configured_exp_disable_velocity_factor;
     run_info["config_exp_disable_current_velocity_prior"] = configured_exp_disable_current_velocity_prior;
     run_info["runtime_exp_disable_current_velocity_prior"] = configured_exp_disable_current_velocity_prior;
+    run_info["config_velocity_state_mode"] = configured_velocity_state_mode;
+    run_info["runtime_velocity_state_mode"] = configured_velocity_state_mode;
+    run_info["config_velocity_mode_policy"] = configured_velocity_mode_policy;
+    run_info["runtime_velocity_mode_policy"] = configured_velocity_mode_policy;
+    run_info["config_bias_state_mode"] = configured_bias_state_mode;
+    run_info["runtime_bias_state_mode"] = configured_bias_state_mode;
+    run_info["runtime_bias_optimized"] = true;
+    run_info["runtime_bias_source_of_truth"] =
+      configured_bias_state_mode == "lagged_keyed"
+        ? "active_lagged_bias_keys"
+        : "shared_singleton_registry";
+    run_info["runtime_bias_transition_prior_enabled"] = configured_bias_state_mode == "lagged_keyed";
+    run_info["runtime_bias_transition_prior_strength"] =
+      odom_config->param<double>("odometry_estimation", "imu_ct_bias_inf_scale", 1e3);
+    run_info["runtime_bias_can_be_survivor_anchor"] = configured_bias_state_mode != "lagged_keyed";
+    run_info["runtime_bias_writeback_mode"] =
+      configured_bias_state_mode == "lagged_keyed"
+        ? "lagged_authoritative_with_mirror_cache"
+        : "shared_singleton_authoritative_writeback";
+    run_info["config_frontend_seed_mode"] = configured_frontend_seed_mode;
+    run_info["runtime_frontend_seed_mode"] = configured_frontend_seed_mode;
+    run_info["runtime_imu_forward_prediction_enabled"] =
+      configured_frontend_seed_mode == "imu_forward_prediction";
+    run_info["runtime_frontend_seed_fallback_used"] = false;
+    run_info["runtime_frontend_seed_source"] = "last_pose_copy";
+    run_info["runtime_frontend_seed_imu_sample_count"] = 0;
+    run_info["runtime_has_gnss_constraints"] = false;
+    run_info["runtime_velocity_optimized"] =
+      configured_velocity_state_mode == "optimize" && configured_velocity_mode_policy == "always_optimize";
     run_info["runtime_experiment_name"] = yaw_isolation_experiment_name(
       normalize_gravity_mode(configured_gravity_mode),
       configured_exp_freeze_gravity,
@@ -535,6 +666,19 @@ std::filesystem::path LogPaths::export_path(const std::string& file_name) const 
 
 std::filesystem::path LogPaths::metadata_path(const std::string& file_name) const {
   return metadata_dir_ / file_name;
+}
+
+void merge_run_info_metadata(const nlohmann::json& patch) {
+  if (!patch.is_object() || patch.empty()) {
+    return;
+  }
+
+  const auto path = LogPaths::instance().metadata_path(get_log_config().metadata.run_info_file);
+  auto run_info = read_json_file_or_empty(path);
+  for (const auto& [key, value] : patch.items()) {
+    run_info[key] = value;
+  }
+  write_json_file(path, run_info);
 }
 
 }  // namespace iap

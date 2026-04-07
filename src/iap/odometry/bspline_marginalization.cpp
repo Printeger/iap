@@ -68,6 +68,12 @@ std::vector<std::size_t> segment_reference_indices(const BSplineMarginalizationS
   return std::vector<std::size_t>(segment.control_indices.begin(), segment.control_indices.end());
 }
 
+gtsam::KeyVector sort_unique_keys(gtsam::KeyVector keys) {
+  std::sort(keys.begin(), keys.end());
+  keys.erase(std::unique(keys.begin(), keys.end()), keys.end());
+  return keys;
+}
+
 void insert_bspline_value(gtsam::Values& dst, const gtsam::Values& src, gtsam::Key key) {
   const char c = gtsam::Symbol(key).chr();
   switch (c) {
@@ -125,16 +131,13 @@ bool carried_prior_keys_exist(
   });
 }
 
-gtsam::Key bspline_gyro_bias_key() {
-  return gtsam::symbol('j', 0);
-}
-
-gtsam::Key bspline_accel_bias_key() {
-  return gtsam::symbol('k', 0);
-}
-
 gtsam::Key bspline_gravity_key() {
   return gtsam::symbol('g', 0);
+}
+
+bool is_bias_key(gtsam::Key key) {
+  const char c = gtsam::Symbol(key).chr();
+  return c == 'j' || c == 'k';
 }
 
 }  // namespace
@@ -234,7 +237,11 @@ SplineActiveStateSet build_spline_active_state_set(
   const std::vector<BSplineMarginalizationSegmentState>& segment_states,
   const gtsam::Values& values,
   double min_active_stamp,
-  bool include_clock) {
+  bool include_clock,
+  bool include_lagged_bias,
+  bool include_shared_bias,
+  bool include_shared_gravity,
+  bool include_gnss_anchor) {
   SplineActiveStateSet active_state_set;
   active_state_set.min_active_stamp = min_active_stamp;
 
@@ -280,19 +287,34 @@ SplineActiveStateSet build_spline_active_state_set(
     if (include_clock && values.exists(clock_key)) {
       append_unique_key(active_state_set.active_aux_keys, clock_key);
     }
+
+    if (include_lagged_bias) {
+      const gtsam::Key gyro_bias_key = bspline_gyro_bias_key(aux_index);
+      if (values.exists(gyro_bias_key)) {
+        append_unique_key(active_state_set.active_aux_keys, gyro_bias_key);
+      }
+
+      const gtsam::Key accel_bias_key = bspline_accel_bias_key(aux_index);
+      if (values.exists(accel_bias_key)) {
+        append_unique_key(active_state_set.active_aux_keys, accel_bias_key);
+      }
+    }
   }
 
-  const std::array<gtsam::Key, 5> persistent_keys = {
-    bspline_gyro_bias_key(),
-    bspline_accel_bias_key(),
-    bspline_gravity_key(),
-    bspline_ecef_origin_key(),
-    bspline_ecef_rot_key(),
-  };
-  for (const auto key : persistent_keys) {
-    if (values.exists(key)) {
-      append_unique_key(active_state_set.active_aux_keys, key);
-    }
+  if (include_shared_bias && values.exists(bspline_gyro_bias_key())) {
+    append_unique_key(active_state_set.active_aux_keys, bspline_gyro_bias_key());
+  }
+  if (include_shared_bias && values.exists(bspline_accel_bias_key())) {
+    append_unique_key(active_state_set.active_aux_keys, bspline_accel_bias_key());
+  }
+  if (include_shared_gravity && values.exists(bspline_gravity_key())) {
+    append_unique_key(active_state_set.active_aux_keys, bspline_gravity_key());
+  }
+  if (include_gnss_anchor && values.exists(bspline_ecef_origin_key())) {
+    append_unique_key(active_state_set.active_aux_keys, bspline_ecef_origin_key());
+  }
+  if (include_gnss_anchor && values.exists(bspline_ecef_rot_key())) {
+    append_unique_key(active_state_set.active_aux_keys, bspline_ecef_rot_key());
   }
 
   for (const auto& state : buffer_states) {
@@ -328,6 +350,18 @@ SplineActiveStateSet build_spline_active_state_set(
     if (include_clock && values.exists(clock_key)) {
       append_unique_key(active_state_set.removable_keys, clock_key);
     }
+
+    if (include_lagged_bias) {
+      const gtsam::Key gyro_bias_key = bspline_gyro_bias_key(aux_index);
+      if (values.exists(gyro_bias_key)) {
+        append_unique_key(active_state_set.removable_keys, gyro_bias_key);
+      }
+
+      const gtsam::Key accel_bias_key = bspline_accel_bias_key(aux_index);
+      if (values.exists(accel_bias_key)) {
+        append_unique_key(active_state_set.removable_keys, accel_bias_key);
+      }
+    }
   }
 
   return active_state_set;
@@ -352,13 +386,21 @@ BSplineMarginalizationPartition build_bspline_marginalization_partition(
   const std::vector<BSplineMarginalizationSegmentState>& segment_states,
   const gtsam::Values& values,
   double min_active_stamp,
-  bool include_clock) {
+  bool include_clock,
+  bool include_lagged_bias,
+  bool include_shared_bias,
+  bool include_shared_gravity,
+  bool include_gnss_anchor) {
   const auto active_state_set = build_spline_active_state_set(
     buffer_states,
     segment_states,
     values,
     min_active_stamp,
-    include_clock);
+    include_clock,
+    include_lagged_bias,
+    include_shared_bias,
+    include_shared_gravity,
+    include_gnss_anchor);
   auto partition = build_bspline_marginalization_partition(active_state_set);
   return partition;
 }
@@ -409,6 +451,23 @@ BSplineCarriedPrior build_bspline_carried_prior(
   carried_prior.linearization_point = linearization_point;
   carried_prior.linear_graph = *marginal_graph;
   return carried_prior;
+}
+
+std::vector<gtsam::Key> filter_bspline_survivor_anchor_keys(
+  const std::vector<gtsam::Key>& keys,
+  const bool include_bias_keys) {
+  if (include_bias_keys) {
+    return sort_unique_keys(gtsam::KeyVector(keys.begin(), keys.end()));
+  }
+
+  gtsam::KeyVector filtered;
+  filtered.reserve(keys.size());
+  for (const auto key : keys) {
+    if (!is_bias_key(key)) {
+      filtered.push_back(key);
+    }
+  }
+  return sort_unique_keys(std::move(filtered));
 }
 
 }  // namespace iap

@@ -364,10 +364,17 @@ def build_config_summary(configs: dict[str, Any], runtime_summary: dict[str, Any
     summary["frontend_mode"] = odom_block.get("frontend_mode")
     summary["frontend_only_mode"] = odom_block.get("frontend_only_mode")
     summary["final_pose_surface"] = odom_block.get("final_pose_surface")
+    summary["gravity_state_mode"] = odom_block.get("gravity_state_mode")
+    summary["gravity_reference_source"] = odom_block.get("gravity_reference_source")
+    summary["gravity_reference_vector"] = odom_block.get("gravity_reference_vector")
     summary["gravity_mode"] = odom_block.get("exp.gravity_mode")
     summary["gravity_fixed_norm_value"] = odom_block.get("exp.gravity_fixed_norm_value")
     summary["gravity_tilt_limit_rad"] = odom_block.get("exp.gravity_tilt_limit_rad")
     summary["gravity_warmup_freeze_frames"] = odom_block.get("exp.gravity_warmup_freeze_frames")
+    summary["velocity_state_mode"] = odom_block.get("velocity_state_mode")
+    summary["velocity_mode_policy"] = odom_block.get("velocity_mode_policy")
+    summary["bias_state_mode"] = odom_block.get("bias_state_mode")
+    summary["frontend_seed_mode"] = odom_block.get("frontend_seed_mode")
     summary["exp_freeze_gravity"] = odom_block.get("exp_freeze_gravity")
     summary["exp_freeze_gyro_bias"] = odom_block.get("exp_freeze_gyro_bias")
     summary["exp_freeze_accel_bias"] = odom_block.get("exp_freeze_accel_bias")
@@ -426,6 +433,12 @@ def build_config_summary(configs: dict[str, Any], runtime_summary: dict[str, Any
         "runtime_log_profiling_jump_diagnostics",
         "config_final_pose_surface",
         "runtime_final_pose_surface",
+        "config_gravity_state_mode",
+        "runtime_gravity_state_mode",
+        "config_gravity_reference_source",
+        "runtime_gravity_reference_source",
+        "config_gravity_reference_vector",
+        "runtime_gravity_reference_vector",
         "config_gravity_mode",
         "runtime_gravity_mode",
         "config_gravity_fixed_norm_value",
@@ -444,6 +457,26 @@ def build_config_summary(configs: dict[str, Any], runtime_summary: dict[str, Any
         "runtime_exp_disable_velocity_factor",
         "config_exp_disable_current_velocity_prior",
         "runtime_exp_disable_current_velocity_prior",
+        "config_velocity_state_mode",
+        "runtime_velocity_state_mode",
+        "config_velocity_mode_policy",
+        "runtime_velocity_mode_policy",
+        "config_bias_state_mode",
+        "runtime_bias_state_mode",
+        "runtime_bias_optimized",
+        "runtime_bias_source_of_truth",
+        "runtime_bias_transition_prior_enabled",
+        "runtime_bias_transition_prior_strength",
+        "runtime_bias_can_be_survivor_anchor",
+        "runtime_bias_writeback_mode",
+        "config_frontend_seed_mode",
+        "runtime_frontend_seed_mode",
+        "runtime_imu_forward_prediction_enabled",
+        "runtime_frontend_seed_fallback_used",
+        "runtime_frontend_seed_source",
+        "runtime_frontend_seed_imu_sample_count",
+        "runtime_has_gnss_constraints",
+        "runtime_velocity_optimized",
         "runtime_experiment_name",
     ]:
         if key in run_info:
@@ -1258,18 +1291,32 @@ def analyze_jump_diagnostics(
         "bucket_representative_time",
         "start_pose_query_time",
         "frontend_pose_query_time",
+        "frontend_seed_fallback_used",
+        "frontend_seed_imu_sample_count",
         "delta_start_to_frontend_translation_norm",
         "delta_start_to_frontend_rotation_rad",
+        "delta_start_to_frontend_pitch_rad",
+        "delta_start_to_frontend_roll_rad",
         "delta_frontend_to_postsolve_query_translation_norm",
         "delta_frontend_to_postsolve_query_rotation_rad",
+        "delta_frontend_to_postsolve_query_pitch_rad",
+        "delta_frontend_to_postsolve_query_roll_rad",
         "delta_frontend_to_postsolve_strict_local_translation_norm",
         "delta_frontend_to_postsolve_strict_local_rotation_rad",
+        "delta_frontend_to_postsolve_strict_local_pitch_rad",
+        "delta_frontend_to_postsolve_strict_local_roll_rad",
         "delta_postsolve_query_to_final_translation_norm",
         "delta_postsolve_query_to_final_rotation_rad",
+        "delta_postsolve_query_to_final_pitch_rad",
+        "delta_postsolve_query_to_final_roll_rad",
         "delta_postsolve_strict_local_to_final_translation_norm",
         "delta_postsolve_strict_local_to_final_rotation_rad",
+        "delta_postsolve_strict_local_to_final_pitch_rad",
+        "delta_postsolve_strict_local_to_final_roll_rad",
         "delta_postsolve_active_window_to_postsolve_strict_local_translation_norm",
         "delta_postsolve_active_window_to_postsolve_strict_local_rotation_rad",
+        "delta_postsolve_active_window_to_postsolve_strict_local_pitch_rad",
+        "delta_postsolve_active_window_to_postsolve_strict_local_roll_rad",
         "delta_frontend_to_final_translation_norm",
         "delta_frontend_to_final_rotation_rad",
         "delta_frontend_to_final_yaw_rad",
@@ -1351,6 +1398,21 @@ def analyze_jump_diagnostics(
         or experiment_config.get("experiment_name")
         or "baseline"
     )
+    analysis["runtime_frontend_seed_mode"] = (
+        experiment_config.get("runtime_frontend_seed_mode")
+        or experiment_config.get("config_frontend_seed_mode")
+        or "last_pose_copy"
+    )
+    analysis["runtime_frontend_seed_source"] = (
+        experiment_config.get("runtime_frontend_seed_source")
+        or "last_pose_copy"
+    )
+    analysis["runtime_frontend_seed_fallback_used"] = maybe_bool(
+        experiment_config.get("runtime_frontend_seed_fallback_used")
+    )
+    analysis["runtime_frontend_seed_imu_sample_count"] = experiment_config.get(
+        "runtime_frontend_seed_imu_sample_count"
+    )
     analysis["runtime_gravity_mode"] = experiment_config.get("runtime_gravity_mode", "normal")
     analysis["runtime_gravity_fixed_norm_value"] = experiment_config.get("runtime_gravity_fixed_norm_value")
     analysis["runtime_gravity_tilt_limit_rad"] = experiment_config.get("runtime_gravity_tilt_limit_rad")
@@ -1366,6 +1428,8 @@ def analyze_jump_diagnostics(
 
     string_columns = [
         "start_pose_source_kind",
+        "frontend_seed_mode",
+        "frontend_seed_source",
         "start_pose_support_keys_summary",
         "start_pose_support_mismatch_reason",
         "lidar_support_keys_summary",
@@ -1503,6 +1567,8 @@ def analyze_jump_diagnostics(
     analysis["accept_ratio_mean"] = numeric_mean(df, "accept_ratio")
     analysis["match_ratio_mean"] = numeric_mean(df, "match_ratio")
     analysis["inlier_ratio_mean"] = numeric_mean(df, "inlier_ratio")
+    analysis["target_point_count_mean"] = numeric_mean(df, "target_point_count")
+    analysis["target_voxel_count_mean"] = numeric_mean(df, "target_voxel_count")
 
     def top_frame_score(translation_value: Any, rotation_value: Any) -> float:
         translation = float(translation_value or 0.0)
@@ -1606,11 +1672,51 @@ def analyze_jump_diagnostics(
             if key in analysis:
                 analysis[f"{alias_prefix}_{suffix}"] = analysis[key]
 
+    pitch_roll_stage_specs = [
+        ("delta_start_to_frontend_pitch_rad", "start_to_frontend_pitch"),
+        ("delta_start_to_frontend_roll_rad", "start_to_frontend_roll"),
+        ("delta_frontend_to_postsolve_query_pitch_rad", "frontend_to_postsolve_query_pitch"),
+        ("delta_frontend_to_postsolve_query_roll_rad", "frontend_to_postsolve_query_roll"),
+        ("delta_frontend_to_postsolve_strict_local_pitch_rad", "frontend_to_postsolve_strict_local_pitch"),
+        ("delta_frontend_to_postsolve_strict_local_roll_rad", "frontend_to_postsolve_strict_local_roll"),
+        ("delta_postsolve_query_to_final_pitch_rad", "postsolve_query_to_final_pitch"),
+        ("delta_postsolve_query_to_final_roll_rad", "postsolve_query_to_final_roll"),
+        ("delta_postsolve_strict_local_to_final_pitch_rad", "postsolve_strict_local_to_final_pitch"),
+        ("delta_postsolve_strict_local_to_final_roll_rad", "postsolve_strict_local_to_final_roll"),
+        (
+            "delta_postsolve_active_window_to_postsolve_strict_local_pitch_rad",
+            "postsolve_active_window_to_postsolve_strict_local_pitch",
+        ),
+        (
+            "delta_postsolve_active_window_to_postsolve_strict_local_roll_rad",
+            "postsolve_active_window_to_postsolve_strict_local_roll",
+        ),
+    ]
+    for column, prefix in pitch_roll_stage_specs:
+        if column in df.columns:
+            summarize_series(df[column], prefix)
+            summarize_abs_series(df[column], prefix)
+
     if "start_pose_source_kind" in df.columns:
         source_counts = df["start_pose_source_kind"].replace({"": "unknown"}).value_counts()
         analysis["start_pose_source_kind_counts"] = {
             str(key): int(value) for key, value in source_counts.items()
         }
+    if "frontend_seed_source" in df.columns:
+        seed_source_counts = df["frontend_seed_source"].replace({"": "unknown"}).value_counts()
+        analysis["frontend_seed_source_counts"] = {
+            str(key): int(value) for key, value in seed_source_counts.items()
+        }
+    if "frontend_seed_fallback_used" in df.columns:
+        fallback_values = pd.to_numeric(df["frontend_seed_fallback_used"], errors="coerce").fillna(0.0)
+        analysis["seed_fallback_frame_count"] = int((fallback_values != 0).sum())
+        analysis["seed_fallback_frame_ratio"] = (
+            analysis["seed_fallback_frame_count"] / len(df)
+            if len(df) > 0
+            else 0.0
+        )
+    if "frontend_seed_imu_sample_count" in df.columns:
+        summarize_series(df["frontend_seed_imu_sample_count"], "frontend_seed_imu_sample_count")
 
     for flag_column in [
         "start_pose_frozen_before_factor_injection",
@@ -1681,20 +1787,36 @@ def analyze_jump_diagnostics(
             "frontend_pose_query_time",
             "current_segment_id",
             "start_pose_source_kind",
+            "frontend_seed_mode",
+            "frontend_seed_source",
+            "frontend_seed_fallback_used",
+            "frontend_seed_imu_sample_count",
             "start_pose_frozen_before_factor_injection",
             "start_pose_frozen_before_solver_update",
             "delta_start_to_frontend_translation_norm",
             "delta_start_to_frontend_rotation_rad",
+            "delta_start_to_frontend_pitch_rad",
+            "delta_start_to_frontend_roll_rad",
             "delta_frontend_to_postsolve_query_translation_norm",
             "delta_frontend_to_postsolve_query_rotation_rad",
+            "delta_frontend_to_postsolve_query_pitch_rad",
+            "delta_frontend_to_postsolve_query_roll_rad",
             "delta_frontend_to_postsolve_strict_local_translation_norm",
             "delta_frontend_to_postsolve_strict_local_rotation_rad",
+            "delta_frontend_to_postsolve_strict_local_pitch_rad",
+            "delta_frontend_to_postsolve_strict_local_roll_rad",
             "delta_postsolve_query_to_final_translation_norm",
             "delta_postsolve_query_to_final_rotation_rad",
+            "delta_postsolve_query_to_final_pitch_rad",
+            "delta_postsolve_query_to_final_roll_rad",
             "delta_postsolve_strict_local_to_final_translation_norm",
             "delta_postsolve_strict_local_to_final_rotation_rad",
+            "delta_postsolve_strict_local_to_final_pitch_rad",
+            "delta_postsolve_strict_local_to_final_roll_rad",
             "delta_postsolve_active_window_to_postsolve_strict_local_translation_norm",
             "delta_postsolve_active_window_to_postsolve_strict_local_rotation_rad",
+            "delta_postsolve_active_window_to_postsolve_strict_local_pitch_rad",
+            "delta_postsolve_active_window_to_postsolve_strict_local_roll_rad",
             "delta_frontend_to_final_translation_norm",
             "delta_frontend_to_final_rotation_rad",
             "delta_frontend_to_final_yaw_rad",
@@ -1805,6 +1927,28 @@ def analyze_jump_diagnostics(
         .sort_values("delta_frontend_to_final_yaw_abs", ascending=False)
         .head(10)
         if "delta_frontend_to_final_yaw_rad" in df.columns
+        else pd.DataFrame()
+    )
+    top_pitch_df = (
+        df.assign(
+            delta_frontend_to_final_pitch_abs=lambda frame: pd.to_numeric(
+                frame["delta_frontend_to_final_pitch_rad"], errors="coerce"
+            ).abs()
+        )
+        .sort_values("delta_frontend_to_final_pitch_abs", ascending=False)
+        .head(10)
+        if "delta_frontend_to_final_pitch_rad" in df.columns
+        else pd.DataFrame()
+    )
+    top_roll_df = (
+        df.assign(
+            delta_frontend_to_final_roll_abs=lambda frame: pd.to_numeric(
+                frame["delta_frontend_to_final_roll_rad"], errors="coerce"
+            ).abs()
+        )
+        .sort_values("delta_frontend_to_final_roll_abs", ascending=False)
+        .head(10)
+        if "delta_frontend_to_final_roll_rad" in df.columns
         else pd.DataFrame()
     )
 
@@ -1951,6 +2095,10 @@ def analyze_jump_diagnostics(
             "recalculated_lidar_same_support_factor_count",
             "recalculated_lidar_cross_support_factor_count",
             "recalculated_lidar_current_segment_factor_count",
+            "frontend_seed_mode",
+            "frontend_seed_source",
+            "frontend_seed_fallback_used",
+            "frontend_seed_imu_sample_count",
             "strict_local_query_reason",
             "strict_local_query_support_keys_summary",
         ]
@@ -2004,6 +2152,10 @@ def analyze_jump_diagnostics(
             "gravity_world_y",
             "gravity_world_z",
             "gravity_dir_tilt_rad",
+            "frontend_seed_mode",
+            "frontend_seed_source",
+            "frontend_seed_fallback_used",
+            "frontend_seed_imu_sample_count",
             "strict_local_query_reason",
         ]
         available_yaw_columns = [
@@ -2011,6 +2163,68 @@ def analyze_jump_diagnostics(
         ]
         analysis["top_yaw_residual_frames"] = (
             top_yaw_residual_df[available_yaw_columns]
+            .replace({np.nan: None})
+            .to_dict(orient="records")
+        )
+    if not top_pitch_df.empty:
+        pitch_keep_columns = [
+            "frame_id",
+            "frame_stamp",
+            "delta_frontend_to_final_pitch_rad",
+            "delta_frontend_to_final_roll_rad",
+            "delta_frontend_to_final_translation_norm",
+            "solver_update_ms",
+            "recalculated_imu_factor_count",
+            "recalculated_prior_factor_count",
+            "relinearized_shared_variable_count",
+            "recalculated_lidar_factor_count",
+            "match_ratio",
+            "inlier_ratio",
+            "target_point_count",
+            "target_voxel_count",
+            "frontend_seed_mode",
+            "frontend_seed_source",
+            "frontend_seed_fallback_used",
+            "frontend_seed_imu_sample_count",
+            "strict_local_query_reason",
+            "postsolve_query_support_mismatch_reason",
+        ]
+        available_pitch_columns = [
+            column for column in pitch_keep_columns if column in top_pitch_df.columns
+        ]
+        analysis["top_pitch_residual_frames"] = (
+            top_pitch_df[available_pitch_columns]
+            .replace({np.nan: None})
+            .to_dict(orient="records")
+        )
+    if not top_roll_df.empty:
+        roll_keep_columns = [
+            "frame_id",
+            "frame_stamp",
+            "delta_frontend_to_final_pitch_rad",
+            "delta_frontend_to_final_roll_rad",
+            "delta_frontend_to_final_translation_norm",
+            "solver_update_ms",
+            "recalculated_imu_factor_count",
+            "recalculated_prior_factor_count",
+            "relinearized_shared_variable_count",
+            "recalculated_lidar_factor_count",
+            "match_ratio",
+            "inlier_ratio",
+            "target_point_count",
+            "target_voxel_count",
+            "frontend_seed_mode",
+            "frontend_seed_source",
+            "frontend_seed_fallback_used",
+            "frontend_seed_imu_sample_count",
+            "strict_local_query_reason",
+            "postsolve_query_support_mismatch_reason",
+        ]
+        available_roll_columns = [
+            column for column in roll_keep_columns if column in top_roll_df.columns
+        ]
+        analysis["top_roll_residual_frames"] = (
+            top_roll_df[available_roll_columns]
             .replace({np.nan: None})
             .to_dict(orient="records")
         )
@@ -2388,6 +2602,54 @@ def analyze_jump_diagnostics(
     else:
         analysis["strict_local_rotation_subtype"] = "strict-local residual orientation split is mixed"
 
+    pitch_score = max(
+        float(analysis.get("frontend_to_final_pitch_abs_p95", 0.0) or 0.0) / 0.3,
+        float(analysis.get("frontend_to_final_pitch_abs_max", 0.0) or 0.0) / 0.3,
+    )
+    roll_score = max(
+        float(analysis.get("frontend_to_final_roll_abs_p95", 0.0) or 0.0) / 0.3,
+        float(analysis.get("frontend_to_final_roll_abs_max", 0.0) or 0.0) / 0.3,
+    )
+    analysis["strict_local_pitch_score"] = pitch_score
+    analysis["strict_local_roll_score"] = roll_score
+    if pitch_score > 1.25 * max(roll_score, 1e-9):
+        analysis["pitch_vs_roll_dominance"] = "pitch_dominated"
+    elif roll_score > 1.25 * max(pitch_score, 1e-9):
+        analysis["pitch_vs_roll_dominance"] = "roll_dominated"
+    else:
+        analysis["pitch_vs_roll_dominance"] = "mixed_pitch_roll"
+
+    def pitchroll_stage_score(pitch_prefix: str, roll_prefix: str) -> float:
+        components = [
+            float(analysis.get(f"{pitch_prefix}_abs_p95", 0.0) or 0.0) / 0.3,
+            float(analysis.get(f"{pitch_prefix}_abs_max", 0.0) or 0.0) / 0.3,
+            float(analysis.get(f"{roll_prefix}_abs_p95", 0.0) or 0.0) / 0.3,
+            float(analysis.get(f"{roll_prefix}_abs_max", 0.0) or 0.0) / 0.3,
+        ]
+        finite_components = [value for value in components if math.isfinite(value)]
+        return max(finite_components) if finite_components else 0.0
+
+    stage_pitchroll_scores = {
+        "start->frontend": pitchroll_stage_score("start_to_frontend_pitch", "start_to_frontend_roll"),
+        "frontend->postsolve_strict_local": pitchroll_stage_score(
+            "frontend_to_postsolve_strict_local_pitch",
+            "frontend_to_postsolve_strict_local_roll",
+        ),
+        "frontend->postsolve_active_window": pitchroll_stage_score(
+            "frontend_to_postsolve_query_pitch",
+            "frontend_to_postsolve_query_roll",
+        ),
+        "postsolve_active_window->strict_local": pitchroll_stage_score(
+            "postsolve_active_window_to_postsolve_strict_local_pitch",
+            "postsolve_active_window_to_postsolve_strict_local_roll",
+        ),
+        "postsolve_strict_local->final": pitchroll_stage_score(
+            "postsolve_strict_local_to_final_pitch",
+            "postsolve_strict_local_to_final_roll",
+        ),
+    }
+    analysis["pitch_roll_stage_scores"] = stage_pitchroll_scores
+
     strict_local_correlation_specs = {
         "delta_rotation_vs_solver_update_ms": (
             "delta_frontend_to_final_rotation_rad",
@@ -2499,6 +2761,32 @@ def analyze_jump_diagnostics(
         corr_value = safe_corr(df, lhs, rhs, lhs_abs=lhs_abs)
         if corr_value is not None:
             analysis[out_key] = corr_value
+
+    if {
+        "delta_frontend_to_final_pitch_rad",
+        "delta_frontend_to_final_roll_rad",
+    } <= set(df.columns):
+        pitch_series = pd.to_numeric(df["delta_frontend_to_final_pitch_rad"], errors="coerce").abs()
+        roll_series = pd.to_numeric(df["delta_frontend_to_final_roll_rad"], errors="coerce").abs()
+        df["delta_frontend_to_final_pitchroll_abs"] = pd.concat(
+            [pitch_series, roll_series], axis=1
+        ).max(axis=1)
+        pitchroll_corr_specs = {
+            "delta_pitchroll_vs_recalc_imu": "recalculated_imu_factor_count",
+            "delta_pitchroll_vs_recalc_prior": "recalculated_prior_factor_count",
+            "delta_pitchroll_vs_relin_shared": "relinearized_shared_variable_count",
+            "delta_pitchroll_vs_current_velocity_norm": "current_velocity_norm",
+            "delta_pitchroll_vs_match_ratio": "match_ratio",
+            "delta_pitchroll_vs_inlier_ratio": "inlier_ratio",
+            "delta_pitchroll_vs_target_point_count": "target_point_count",
+            "delta_pitchroll_vs_target_voxel_count": "target_voxel_count",
+            "delta_pitchroll_vs_cross_support_lidar": "recalculated_lidar_cross_support_factor_count",
+            "delta_pitchroll_vs_solver_update_ms": "solver_update_ms",
+        }
+        for out_key, rhs in pitchroll_corr_specs.items():
+            corr_value = safe_corr(df, "delta_frontend_to_final_pitchroll_abs", rhs, lhs_abs=False)
+            if corr_value is not None:
+                analysis[out_key] = corr_value
 
     def dominant_corr(items: dict[str, str]) -> tuple[str | None, float | None]:
         best_name: str | None = None
@@ -2768,6 +3056,64 @@ def analyze_jump_diagnostics(
             + ("; " if analysis.get("strict_local_residual_cause_evidence") else "")
             + f"yaw shootout={analysis['yaw_root_cause_summary']}"
         )
+
+    dominant_pitchroll_stage = max(
+        stage_pitchroll_scores.items(),
+        key=lambda item: item[1],
+        default=("unknown", 0.0),
+    )
+    analysis["pitch_roll_dominant_stage"] = dominant_pitchroll_stage[0]
+    analysis["pitch_roll_dominant_stage_score"] = dominant_pitchroll_stage[1]
+
+    pitchroll_solver_corr = max(
+        abs(float(analysis.get("delta_pitchroll_vs_solver_update_ms", 0.0) or 0.0)),
+        abs(float(analysis.get("delta_pitchroll_vs_recalc_imu", 0.0) or 0.0)),
+        abs(float(analysis.get("delta_pitchroll_vs_recalc_prior", 0.0) or 0.0)),
+        abs(float(analysis.get("delta_pitchroll_vs_relin_shared", 0.0) or 0.0)),
+        abs(float(analysis.get("delta_pitchroll_vs_cross_support_lidar", 0.0) or 0.0)),
+    )
+    pitchroll_quality_corr = max(
+        abs(float(analysis.get("delta_pitchroll_vs_match_ratio", 0.0) or 0.0)),
+        abs(float(analysis.get("delta_pitchroll_vs_inlier_ratio", 0.0) or 0.0)),
+        abs(float(analysis.get("delta_pitchroll_vs_target_point_count", 0.0) or 0.0)),
+        abs(float(analysis.get("delta_pitchroll_vs_target_voxel_count", 0.0) or 0.0)),
+    )
+    if (
+        dominant_pitchroll_stage[0] == "start->frontend"
+        and dominant_pitchroll_stage[1] > 1.0
+    ):
+        analysis["pitch_roll_root_cause_summary"] = (
+            "pitch/roll residual more likely reflects frontend seed / IMU motion-prior mismatch"
+        )
+    elif (
+        dominant_pitchroll_stage[0] in {
+            "frontend->postsolve_strict_local",
+            "postsolve_active_window->strict_local",
+        }
+        and pitchroll_solver_corr >= 0.25
+    ):
+        analysis["pitch_roll_root_cause_summary"] = (
+            "pitch/roll residual more likely reflects backend/boundary orientation amplification"
+        )
+    elif pitchroll_quality_corr >= 0.25 and pitchroll_solver_corr < 0.25:
+        analysis["pitch_roll_root_cause_summary"] = (
+            "pitch/roll residual more likely couples to LiDAR target/correspondence quality"
+        )
+    else:
+        analysis["pitch_roll_root_cause_summary"] = (
+            "pitch/roll residual may still reflect orientation semantics / extrinsic roll-pitch mismatch"
+        )
+    analysis["pitch_roll_root_cause_evidence"] = "; ".join(
+        [
+            f"pitch_vs_roll_dominance={analysis.get('pitch_vs_roll_dominance', 'n/a')}",
+            f"dominant_stage={dominant_pitchroll_stage[0]}:{dominant_pitchroll_stage[1]:.3f}",
+            f"seed_mode={analysis.get('runtime_frontend_seed_mode', 'n/a')}",
+            f"seed_source={analysis.get('runtime_frontend_seed_source', 'n/a')}",
+            f"seed_fallback_frames={analysis.get('seed_fallback_frame_count', 0)}",
+            f"solver_corr={pitchroll_solver_corr:.3f}",
+            f"quality_corr={pitchroll_quality_corr:.3f}",
+        ]
+    )
 
     return analysis
 
@@ -3164,7 +3510,121 @@ def integrate_existing_plots(run_dir: Path, dataframes: dict[str, pd.DataFrame],
     return results
 
 
+def analyze_seed_mode_comparison(
+    current_run_dir: Path,
+    current_config_summary: dict[str, Any],
+    current_jump_analysis: dict[str, Any],
+    baseline_run_dir: Path | None,
+) -> dict[str, Any]:
+    comparison: dict[str, Any] = {"available": False}
+    if baseline_run_dir is None:
+        return comparison
+
+    baseline_metadata = load_metadata(baseline_run_dir)
+    baseline_runtime_summary = parse_runtime_logs(baseline_run_dir)
+    baseline_configs = load_runtime_configs(baseline_metadata)
+    baseline_config_summary = build_config_summary(
+        baseline_configs, baseline_runtime_summary, baseline_metadata
+    )
+    baseline_dataframes = load_available_frames(baseline_run_dir)
+    baseline_jump_analysis = analyze_jump_diagnostics(
+        baseline_dataframes.get("jump_diagnostics"),
+        str(
+            baseline_config_summary.get("runtime_final_pose_surface")
+            or baseline_config_summary.get("final_pose_surface")
+            or "active_window"
+        ),
+        baseline_config_summary,
+    )
+    if not baseline_jump_analysis.get("available") or not current_jump_analysis.get("available"):
+        return comparison
+
+    def metric_row(label: str, key: str) -> list[Any]:
+        baseline_value = baseline_jump_analysis.get(key)
+        current_value = current_jump_analysis.get(key)
+        delta_value = None
+        if isinstance(baseline_value, (int, float)) and isinstance(current_value, (int, float)):
+            delta_value = float(current_value) - float(baseline_value)
+        return [label, baseline_value, current_value, delta_value]
+
+    metric_rows = [
+        metric_row("start->frontend rotation p95", "start_to_frontend_rotation_p95"),
+        metric_row("start->frontend rotation max", "start_to_frontend_rotation_max"),
+        metric_row("frontend->final rotation p95", "frontend_to_final_rotation_p95"),
+        metric_row("frontend->final rotation max", "frontend_to_final_rotation_max"),
+        metric_row("frontend->final pitch p95", "frontend_to_final_pitch_abs_p95"),
+        metric_row("frontend->final pitch max", "frontend_to_final_pitch_abs_max"),
+        metric_row("frontend->final roll p95", "frontend_to_final_roll_abs_p95"),
+        metric_row("frontend->final roll max", "frontend_to_final_roll_abs_max"),
+        metric_row("frontend->final translation p95", "frontend_to_final_translation_p95"),
+        metric_row("match_ratio mean", "match_ratio_mean"),
+        metric_row("inlier_ratio mean", "inlier_ratio_mean"),
+        metric_row("target_point_count mean", "target_point_count_mean"),
+        metric_row("target_voxel_count mean", "target_voxel_count_mean"),
+        metric_row("seed fallback frame count", "seed_fallback_frame_count"),
+    ]
+
+    comparison["available"] = True
+    comparison["baseline_run_dir"] = str(baseline_run_dir)
+    comparison["current_run_dir"] = str(current_run_dir)
+    comparison["baseline_frontend_seed_mode"] = baseline_config_summary.get(
+        "runtime_frontend_seed_mode", "last_pose_copy"
+    )
+    comparison["current_frontend_seed_mode"] = current_config_summary.get(
+        "runtime_frontend_seed_mode", "last_pose_copy"
+    )
+    comparison["metric_rows"] = metric_rows
+    if (
+        comparison["baseline_frontend_seed_mode"] == "last_pose_copy"
+        and comparison["current_frontend_seed_mode"] == "imu_forward_prediction"
+    ):
+        rotation_delta = current_jump_analysis.get("start_to_frontend_rotation_p95")
+        baseline_rotation = baseline_jump_analysis.get("start_to_frontend_rotation_p95")
+        if isinstance(rotation_delta, (int, float)) and isinstance(baseline_rotation, (int, float)):
+            delta = float(rotation_delta) - float(baseline_rotation)
+            if delta < -1e-6:
+                comparison["summary"] = (
+                    "imu_forward_prediction improves start->frontend rotation versus last_pose_copy baseline"
+                )
+            elif delta > 1e-6:
+                comparison["summary"] = (
+                    "imu_forward_prediction does not improve start->frontend rotation versus last_pose_copy baseline"
+                )
+            else:
+                comparison["summary"] = (
+                    "imu_forward_prediction and last_pose_copy are neutral on start->frontend rotation in this pair"
+                )
+    return comparison
+
+
+def detect_seed_compare_findings(seed_compare_analysis: dict[str, Any]) -> list[dict[str, str]]:
+    findings: list[dict[str, str]] = []
+    if not seed_compare_analysis.get("available"):
+        return findings
+    summary = seed_compare_analysis.get("summary")
+    if summary:
+        evidence = []
+        for label, baseline_value, current_value, delta_value in seed_compare_analysis.get("metric_rows", []):
+            if label in {
+                "start->frontend rotation p95",
+                "frontend->final rotation p95",
+                "frontend->final pitch p95",
+                "frontend->final roll p95",
+                "frontend->final translation p95",
+            }:
+                evidence.append(
+                    f"{label}: baseline={baseline_value}, current={current_value}, delta={delta_value}"
+                )
+        findings.append({
+            "severity": "info" if "improves" in summary else "warn",
+            "title": "Seed Improvement Comparison",
+            "evidence": f"{summary}; " + "; ".join(evidence),
+        })
+    return findings
+
+
 def detect_findings(
+    config_summary: dict[str, Any],
     runtime_summary: dict[str, Any],
     artifact_statuses: list[ArtifactStatus],
     mode_consistency: dict[str, Any],
@@ -3178,6 +3638,182 @@ def detect_findings(
     pipeline_analysis: dict[str, Any],
 ) -> list[dict[str, str]]:
     findings: list[dict[str, str]] = []
+    runtime_gravity_state_mode = str(config_summary.get("runtime_gravity_state_mode") or "shared_optimized")
+    runtime_velocity_state_mode = str(config_summary.get("runtime_velocity_state_mode") or "optimize")
+    runtime_bias_state_mode = str(config_summary.get("runtime_bias_state_mode") or "shared_singleton")
+    runtime_bias_optimized = maybe_bool(config_summary.get("runtime_bias_optimized"))
+    runtime_bias_source_of_truth = str(config_summary.get("runtime_bias_source_of_truth") or "shared_singleton_registry")
+    runtime_bias_transition_prior_enabled = maybe_bool(
+        config_summary.get("runtime_bias_transition_prior_enabled")
+    )
+    runtime_bias_transition_prior_strength = config_summary.get("runtime_bias_transition_prior_strength", "n/a")
+    runtime_bias_can_be_survivor_anchor = maybe_bool(
+        config_summary.get("runtime_bias_can_be_survivor_anchor")
+    )
+    runtime_bias_writeback_mode = str(
+        config_summary.get("runtime_bias_writeback_mode") or "n/a"
+    )
+    runtime_frontend_seed_mode = str(config_summary.get("runtime_frontend_seed_mode") or "last_pose_copy")
+    runtime_imu_forward_prediction_enabled = maybe_bool(
+        config_summary.get("runtime_imu_forward_prediction_enabled")
+    )
+    runtime_frontend_seed_fallback_used = maybe_bool(
+        config_summary.get("runtime_frontend_seed_fallback_used")
+    )
+    runtime_frontend_seed_source = str(
+        config_summary.get("runtime_frontend_seed_source") or "last_pose_copy"
+    )
+    runtime_frontend_seed_imu_sample_count = config_summary.get("runtime_frontend_seed_imu_sample_count", "n/a")
+    runtime_velocity_optimized = maybe_bool(config_summary.get("runtime_velocity_optimized"))
+    runtime_has_gnss_constraints = maybe_bool(config_summary.get("runtime_has_gnss_constraints"))
+    top_jump_frames = jump_analysis.get("top_frontend_to_final_translation_frames", [])
+    delta_yaw_vs_gyro_bias_norm = jump_analysis.get("delta_yaw_vs_gyro_bias_norm")
+    delta_yaw_vs_accel_bias_norm = jump_analysis.get("delta_yaw_vs_accel_bias_norm")
+
+    def is_bias_anchor(text: Any) -> bool:
+        summary = str(text or "").strip().lower()
+        return summary.startswith("j") or summary.startswith("k")
+
+    bias_anchor_present_in_top_jumps = any(
+        is_bias_anchor(item.get("oldest_survivor_key_summary"))
+        or is_bias_anchor(item.get("carried_boundary_oldest_key_summary"))
+        for item in top_jump_frames
+    )
+
+    if runtime_gravity_state_mode == "external_reference":
+        findings.append({
+            "severity": "info",
+            "title": "gravity now runs in external-reference mode; solver no longer optimizes gravity as a shared state",
+            "evidence": (
+                f"runtime_gravity_state_mode={runtime_gravity_state_mode}, "
+                f"runtime_gravity_reference_source={config_summary.get('runtime_gravity_reference_source', 'n/a')}, "
+                f"runtime_gravity_reference_vector={config_summary.get('runtime_gravity_reference_vector', 'n/a')}"
+            ),
+        })
+
+    if runtime_velocity_state_mode == "keep_but_not_optimize" and runtime_velocity_optimized is False:
+        findings.append({
+            "severity": "info",
+            "title": "velocity is kept for publish/bookkeeping but not optimized in no-GNSS mode",
+            "evidence": (
+                f"runtime_velocity_state_mode={runtime_velocity_state_mode}, "
+                f"runtime_velocity_optimized={runtime_velocity_optimized}, "
+                f"runtime_has_gnss_constraints={runtime_has_gnss_constraints}"
+            ),
+        })
+
+    if runtime_bias_state_mode == "lagged_keyed" and runtime_bias_optimized is True:
+        findings.append({
+            "severity": "info",
+            "title": "bias now runs as lagged keyed state; persistent shared singleton semantics removed",
+            "evidence": (
+                f"runtime_bias_state_mode={runtime_bias_state_mode}, "
+                f"runtime_bias_optimized={runtime_bias_optimized}, "
+                f"runtime_bias_source_of_truth={runtime_bias_source_of_truth}"
+            ),
+        })
+        if (
+            runtime_bias_source_of_truth == "active_lagged_bias_keys"
+            and runtime_bias_writeback_mode == "lagged_authoritative_with_mirror_cache"
+        ):
+            findings.append({
+                "severity": "info",
+                "title": "lagged bias keys are initialized from authoritative previous lagged bias",
+                "evidence": (
+                    f"runtime_bias_source_of_truth={runtime_bias_source_of_truth}, "
+                    f"runtime_bias_writeback_mode={runtime_bias_writeback_mode}"
+                ),
+            })
+        if runtime_bias_transition_prior_enabled is True:
+            findings.append({
+                "severity": "info",
+                "title": "lagged bias transition prior is present and appears sufficiently constraining",
+                "evidence": (
+                    f"runtime_bias_transition_prior_enabled={runtime_bias_transition_prior_enabled}, "
+                    f"runtime_bias_transition_prior_strength={runtime_bias_transition_prior_strength}"
+                ),
+            })
+        if runtime_bias_can_be_survivor_anchor is False and not bias_anchor_present_in_top_jumps:
+            findings.append({
+                "severity": "info",
+                "title": "bias no longer serves as boundary survivor anchor",
+                "evidence": (
+                    f"runtime_bias_can_be_survivor_anchor={runtime_bias_can_be_survivor_anchor}, "
+                    f"top_jump_bias_anchor_present={bias_anchor_present_in_top_jumps}"
+                ),
+            })
+        if runtime_bias_writeback_mode == "lagged_authoritative_with_mirror_cache":
+            findings.append({
+                "severity": "info",
+                "title": "bias write-back no longer forms a bad-value reseed loop",
+                "evidence": (
+                    f"runtime_bias_source_of_truth={runtime_bias_source_of_truth}, "
+                    f"runtime_bias_writeback_mode={runtime_bias_writeback_mode}"
+                ),
+            })
+        if (
+            isinstance(delta_yaw_vs_gyro_bias_norm, (int, float))
+            and isinstance(delta_yaw_vs_accel_bias_norm, (int, float))
+            and delta_yaw_vs_gyro_bias_norm < 0.3
+            and delta_yaw_vs_accel_bias_norm < 0.3
+        ):
+            findings.append({
+                "severity": "info",
+                "title": "bias norm growth is reduced after lifecycle fix",
+                "evidence": (
+                    f"delta_yaw_vs_gyro_bias_norm={delta_yaw_vs_gyro_bias_norm}, "
+                    f"delta_yaw_vs_accel_bias_norm={delta_yaw_vs_accel_bias_norm}"
+                ),
+            })
+
+    if (
+        runtime_frontend_seed_mode == "imu_forward_prediction"
+        and runtime_imu_forward_prediction_enabled is True
+        and runtime_frontend_seed_source != "last_pose_copy"
+    ):
+        findings.append({
+            "severity": "info",
+            "title": "frontend seed now uses IMU forward prediction instead of last-pose copy",
+            "evidence": (
+                f"runtime_frontend_seed_mode={runtime_frontend_seed_mode}, "
+                f"runtime_imu_forward_prediction_enabled={runtime_imu_forward_prediction_enabled}, "
+                f"runtime_frontend_seed_source={runtime_frontend_seed_source}, "
+                f"runtime_frontend_seed_imu_sample_count={runtime_frontend_seed_imu_sample_count}"
+            ),
+        })
+        fallback_frames = int(jump_analysis.get("seed_fallback_frame_count", 0) or 0)
+        if runtime_frontend_seed_fallback_used or fallback_frames > 0:
+            findings.append({
+                "severity": "warn" if fallback_frames > 0 else "info",
+                "title": f"frontend seed fell back to last-pose copy on {fallback_frames} frames",
+                "evidence": (
+                    f"runtime_frontend_seed_fallback_used={runtime_frontend_seed_fallback_used}, "
+                    f"runtime_frontend_seed_source={runtime_frontend_seed_source}, "
+                    f"seed_fallback_frame_count={fallback_frames}"
+                ),
+            })
+
+    if runtime_gravity_state_mode == "external_reference" and runtime_velocity_state_mode == "keep_but_not_optimize":
+        findings.append({
+            "severity": "info",
+            "title": "current run is closer to GLIM-style reference-gravity / reduced-velocity-state semantics",
+            "evidence": (
+                f"gravity={runtime_gravity_state_mode}, "
+                f"velocity={runtime_velocity_state_mode}, "
+                f"runtime_velocity_optimized={runtime_velocity_optimized}"
+            ),
+        })
+
+    if runtime_bias_state_mode == "lagged_keyed" and runtime_frontend_seed_mode == "imu_forward_prediction":
+        findings.append({
+            "severity": "info",
+            "title": "CT frontend is now closer to GLIM-style motion-prior seeding",
+            "evidence": (
+                f"runtime_bias_state_mode={runtime_bias_state_mode}, "
+                f"runtime_frontend_seed_mode={runtime_frontend_seed_mode}, "
+                f"runtime_imu_forward_prediction_enabled={runtime_imu_forward_prediction_enabled}"
+            ),
+        })
 
     issue_count = len(runtime_summary.get("issues", []))
     if issue_count == 0:
@@ -3322,6 +3958,13 @@ def detect_findings(
                 "severity": "warn" if "suspicious" in strict_local_residual_cause or "drift" in strict_local_residual_cause or "inconsistency" in strict_local_residual_cause else "info",
                 "title": strict_local_residual_cause,
                 "evidence": jump_analysis.get("strict_local_residual_cause_evidence", ""),
+            })
+        pitch_roll_root_cause_summary = jump_analysis.get("pitch_roll_root_cause_summary")
+        if pitch_roll_root_cause_summary:
+            findings.append({
+                "severity": "warn" if "mismatch" in pitch_roll_root_cause_summary or "amplification" in pitch_roll_root_cause_summary else "info",
+                "title": pitch_roll_root_cause_summary,
+                "evidence": jump_analysis.get("pitch_roll_root_cause_evidence", ""),
             })
         yaw_root_cause_summary = jump_analysis.get("yaw_root_cause_summary")
         if yaw_root_cause_summary:
@@ -3907,6 +4550,7 @@ def render_report_markdown(
     bucket_diagnostics: dict[str, Any],
     correlation_analysis: dict[str, Any],
     pipeline_analysis: dict[str, Any],
+    seed_compare_analysis: dict[str, Any],
     findings: list[dict[str, str]],
     recommendations: dict[str, list[str]],
     external_results: list[dict[str, Any]],
@@ -3934,6 +4578,56 @@ def render_report_markdown(
     lines.append("")
     config_rows = [[k, v] for k, v in config_summary.items()]
     lines.append(md_table(["Key", "Value"], config_rows))
+
+    lines.append("## Structural Mode Summary")
+    lines.append("")
+    lines.append(md_table(
+        ["Key", "Value"],
+        [
+            ["runtime_gravity_state_mode", config_summary.get("runtime_gravity_state_mode", "n/a")],
+            ["runtime_gravity_reference_source", config_summary.get("runtime_gravity_reference_source", "n/a")],
+            ["runtime_gravity_reference_vector", config_summary.get("runtime_gravity_reference_vector", "n/a")],
+            ["runtime_bias_state_mode", config_summary.get("runtime_bias_state_mode", "n/a")],
+            ["runtime_bias_optimized", config_summary.get("runtime_bias_optimized", "n/a")],
+            ["runtime_bias_source_of_truth", config_summary.get("runtime_bias_source_of_truth", "n/a")],
+            ["runtime_bias_transition_prior_enabled", config_summary.get("runtime_bias_transition_prior_enabled", "n/a")],
+            ["runtime_bias_transition_prior_strength", config_summary.get("runtime_bias_transition_prior_strength", "n/a")],
+            ["runtime_bias_can_be_survivor_anchor", config_summary.get("runtime_bias_can_be_survivor_anchor", "n/a")],
+            ["runtime_bias_writeback_mode", config_summary.get("runtime_bias_writeback_mode", "n/a")],
+            ["runtime_frontend_seed_mode", config_summary.get("runtime_frontend_seed_mode", "n/a")],
+            ["runtime_imu_forward_prediction_enabled", config_summary.get("runtime_imu_forward_prediction_enabled", "n/a")],
+            ["runtime_frontend_seed_fallback_used", config_summary.get("runtime_frontend_seed_fallback_used", "n/a")],
+            ["runtime_frontend_seed_source", config_summary.get("runtime_frontend_seed_source", "n/a")],
+            ["runtime_frontend_seed_imu_sample_count", config_summary.get("runtime_frontend_seed_imu_sample_count", "n/a")],
+            ["runtime_velocity_state_mode", config_summary.get("runtime_velocity_state_mode", "n/a")],
+            ["runtime_velocity_mode_policy", config_summary.get("runtime_velocity_mode_policy", "n/a")],
+            ["runtime_velocity_optimized", config_summary.get("runtime_velocity_optimized", "n/a")],
+            ["runtime_has_gnss_constraints", config_summary.get("runtime_has_gnss_constraints", "n/a")],
+        ],
+    ))
+
+    if seed_compare_analysis.get("available"):
+        lines.append("## Seed Improvement Comparison")
+        lines.append("")
+        lines.append(md_table(
+            ["Key", "Value"],
+            [
+                ["baseline_run_dir", seed_compare_analysis.get("baseline_run_dir", "n/a")],
+                ["baseline_frontend_seed_mode", seed_compare_analysis.get("baseline_frontend_seed_mode", "n/a")],
+                ["current_frontend_seed_mode", seed_compare_analysis.get("current_frontend_seed_mode", "n/a")],
+                ["summary", seed_compare_analysis.get("summary", "n/a")],
+            ],
+        ))
+        metric_rows = []
+        for label, baseline_value, current_value, delta_value in seed_compare_analysis.get("metric_rows", []):
+            metric_rows.append([
+                label,
+                baseline_value if baseline_value is not None else "n/a",
+                current_value if current_value is not None else "n/a",
+                delta_value if delta_value is not None else "n/a",
+            ])
+        lines.append("")
+        lines.append(md_table(["Metric", "Baseline", "Current", "Delta"], metric_rows))
 
     lines.append("## Artifact Coverage")
     lines.append("")
@@ -4070,6 +4764,8 @@ def render_report_markdown(
     if jump_analysis.get("available"):
         source_counts = jump_analysis.get("start_pose_source_kind_counts", {})
         source_counts_text = ", ".join(f"{k}:{v}" for k, v in source_counts.items()) or "_none_"
+        frontend_seed_counts = jump_analysis.get("frontend_seed_source_counts", {})
+        frontend_seed_counts_text = ", ".join(f"{k}:{v}" for k, v in frontend_seed_counts.items()) or "_none_"
         mismatch_counts = jump_analysis.get("start_pose_support_mismatch_reason_counts", {})
         mismatch_counts_text = ", ".join(f"{k}:{v}" for k, v in mismatch_counts.items()) or "_none_"
         strict_local_query_counts = jump_analysis.get("strict_local_query_reason_counts", {})
@@ -4105,6 +4801,15 @@ def render_report_markdown(
             ["Metric", "Value"],
             [
                 ["start_pose_source_kind_counts", source_counts_text],
+                ["frontend_seed_source_counts", frontend_seed_counts_text],
+                ["seed_fallback_frame_count", jump_analysis.get("seed_fallback_frame_count", 0)],
+                ["seed_fallback_frame_ratio", f"{jump_analysis.get('seed_fallback_frame_ratio', 0.0):.3f}"],
+                [
+                    "frontend_seed_imu_sample_count (mean/p95/max)",
+                    f"{jump_analysis.get('frontend_seed_imu_sample_count_mean', 0.0):.1f} / "
+                    f"{jump_analysis.get('frontend_seed_imu_sample_count_p95', 0.0):.1f} / "
+                    f"{jump_analysis.get('frontend_seed_imu_sample_count_max', 0.0):.1f}",
+                ],
                 [
                     "start_pose_frozen_before_factor_injection_counts",
                     f"true:{frozen_before_factor.get('true', 0)}, false:{frozen_before_factor.get('false', 0)}",
@@ -4241,8 +4946,10 @@ def render_report_markdown(
                     ["runtime_exp_disable_velocity_factor", jump_analysis.get("runtime_exp_disable_velocity_factor", "n/a")],
                     ["runtime_exp_disable_current_velocity_prior", jump_analysis.get("runtime_exp_disable_current_velocity_prior", "n/a")],
                     ["strict_local_residual_dominance", jump_analysis.get("strict_local_residual_dominance", "n/a")],
+                    ["pitch_vs_roll_dominance", jump_analysis.get("pitch_vs_roll_dominance", "n/a")],
                     ["strict_local_rotation_subtype", jump_analysis.get("strict_local_rotation_subtype", "n/a")],
                     ["strict_local_residual_cause", jump_analysis.get("strict_local_residual_cause", "n/a")],
+                    ["pitch_roll_root_cause_summary", jump_analysis.get("pitch_roll_root_cause_summary", "n/a")],
                     [
                         "frontend->final translation (mean/p95/max)",
                         f"{jump_analysis.get('frontend_to_final_translation_mean', 0.0):.3f} / "
@@ -4398,6 +5105,17 @@ def render_report_markdown(
                     ["second_evidence", jump_analysis.get("yaw_root_cause_second_evidence", "")],
                     ["weakest_evidence", jump_analysis.get("yaw_root_cause_weakest_evidence", "")],
                 ],
+            ))
+        pitch_roll_stage_rows = [
+            [stage, f"{score:.3f}"]
+            for stage, score in jump_analysis.get("pitch_roll_stage_scores", {}).items()
+        ]
+        if pitch_roll_stage_rows:
+            lines.append("Pitch/Roll stage audit:")
+            lines.append("")
+            lines.append(md_table(
+                ["Stage", "Pitch/Roll Score"],
+                pitch_roll_stage_rows,
             ))
         start_rows = [
             [
@@ -4564,6 +5282,8 @@ def render_report_markdown(
                 f"{(item.get('recalculated_lidar_same_support_factor_count') or 0):.0f}",
                 f"{(item.get('recalculated_lidar_cross_support_factor_count') or 0):.0f}",
                 f"{(item.get('recalculated_lidar_current_segment_factor_count') or 0):.0f}",
+                item.get("frontend_seed_source", ""),
+                f"{int(item.get('frontend_seed_fallback_used') or 0)}",
                 item.get("strict_local_query_reason", ""),
                 item.get("strict_local_query_support_keys_summary", ""),
             ]
@@ -4594,6 +5314,8 @@ def render_report_markdown(
                 "same_support",
                 "cross_support",
                 "current_segment_recalc",
+                "seed_source",
+                "seed_fallback",
                 "strict_local_query_reason",
                 "strict_local_query_support",
             ],
@@ -4636,6 +5358,8 @@ def render_report_markdown(
                     f"{(item.get('gravity_world_z') or 0.0):.3f}] / "
                     f"tilt={(item.get('gravity_dir_tilt_rad') or 0.0):.3f}"
                 ),
+                item.get("frontend_seed_source", ""),
+                f"{int(item.get('frontend_seed_fallback_used') or 0)}",
                 item.get("strict_local_query_reason", ""),
             ]
             for item in jump_analysis.get("top_yaw_residual_frames", [])
@@ -4674,9 +5398,111 @@ def render_report_markdown(
                 "gyro_bias_norm",
                 "accel_bias_norm",
                 "gravity_probe",
+                "seed_source",
+                "seed_fallback",
                 "strict_local_query_reason",
             ],
             top_yaw_rows,
+        ))
+        top_pitch_rows = [
+            [
+                item.get("frame_id", ""),
+                f"{(item.get('delta_frontend_to_final_pitch_rad') or 0.0):.3f}",
+                f"{(item.get('delta_frontend_to_final_roll_rad') or 0.0):.3f}",
+                f"{(item.get('delta_frontend_to_final_translation_norm') or 0.0):.3f}",
+                f"{(item.get('solver_update_ms') or 0.0):.3f}",
+                f"{(item.get('recalculated_imu_factor_count') or 0):.0f}",
+                f"{(item.get('recalculated_prior_factor_count') or 0):.0f}",
+                f"{(item.get('relinearized_shared_variable_count') or 0):.0f}",
+                f"{(item.get('recalculated_lidar_factor_count') or 0):.0f}",
+                f"{(item.get('match_ratio') or 0.0):.3f}",
+                f"{(item.get('inlier_ratio') or 0.0):.3f}",
+                f"{(item.get('target_point_count') or 0):.0f}",
+                f"{(item.get('target_voxel_count') or 0):.0f}",
+                item.get("frontend_seed_mode", ""),
+                item.get("frontend_seed_source", ""),
+                f"{int(item.get('frontend_seed_fallback_used') or 0)}",
+                f"{(item.get('frontend_seed_imu_sample_count') or 0):.0f}",
+                item.get("strict_local_query_reason", ""),
+                item.get("postsolve_query_support_mismatch_reason", ""),
+            ]
+            for item in jump_analysis.get("top_pitch_residual_frames", [])
+        ]
+        lines.append("Top pitch residual frames:")
+        lines.append("")
+        lines.append(md_table(
+            [
+                "frame_id",
+                "delta_pitch",
+                "delta_roll",
+                "delta_t_m",
+                "solver_update_ms",
+                "recalc_imu",
+                "recalc_prior",
+                "relin_shared",
+                "recalc_lidar",
+                "match_ratio",
+                "inlier_ratio",
+                "target_points",
+                "target_voxels",
+                "seed_mode",
+                "seed_source",
+                "seed_fallback",
+                "seed_imu_samples",
+                "strict_local_query_reason",
+                "postsolve_reason",
+            ],
+            top_pitch_rows,
+        ))
+        top_roll_rows = [
+            [
+                item.get("frame_id", ""),
+                f"{(item.get('delta_frontend_to_final_pitch_rad') or 0.0):.3f}",
+                f"{(item.get('delta_frontend_to_final_roll_rad') or 0.0):.3f}",
+                f"{(item.get('delta_frontend_to_final_translation_norm') or 0.0):.3f}",
+                f"{(item.get('solver_update_ms') or 0.0):.3f}",
+                f"{(item.get('recalculated_imu_factor_count') or 0):.0f}",
+                f"{(item.get('recalculated_prior_factor_count') or 0):.0f}",
+                f"{(item.get('relinearized_shared_variable_count') or 0):.0f}",
+                f"{(item.get('recalculated_lidar_factor_count') or 0):.0f}",
+                f"{(item.get('match_ratio') or 0.0):.3f}",
+                f"{(item.get('inlier_ratio') or 0.0):.3f}",
+                f"{(item.get('target_point_count') or 0):.0f}",
+                f"{(item.get('target_voxel_count') or 0):.0f}",
+                item.get("frontend_seed_mode", ""),
+                item.get("frontend_seed_source", ""),
+                f"{int(item.get('frontend_seed_fallback_used') or 0)}",
+                f"{(item.get('frontend_seed_imu_sample_count') or 0):.0f}",
+                item.get("strict_local_query_reason", ""),
+                item.get("postsolve_query_support_mismatch_reason", ""),
+            ]
+            for item in jump_analysis.get("top_roll_residual_frames", [])
+        ]
+        lines.append("Top roll residual frames:")
+        lines.append("")
+        lines.append(md_table(
+            [
+                "frame_id",
+                "delta_pitch",
+                "delta_roll",
+                "delta_t_m",
+                "solver_update_ms",
+                "recalc_imu",
+                "recalc_prior",
+                "relin_shared",
+                "recalc_lidar",
+                "match_ratio",
+                "inlier_ratio",
+                "target_points",
+                "target_voxels",
+                "seed_mode",
+                "seed_source",
+                "seed_fallback",
+                "seed_imu_samples",
+                "strict_local_query_reason",
+                "postsolve_reason",
+            ],
+            top_roll_rows,
         ))
     else:
         lines.append("jump_diagnostics.csv was not available for this run.")
@@ -5026,6 +5852,7 @@ def write_json_report(path: Path, payload: dict[str, Any]) -> None:
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Analyze one IAP run directory and generate a report.")
     parser.add_argument("--run", default=str(DEFAULT_RUN), help=f"Run directory to analyze (default: {DEFAULT_RUN})")
+    parser.add_argument("--baseline-run", default="", help="Optional baseline run directory for seed-mode comparison")
     parser.add_argument("--out", default="", help="Output analysis directory (default: <run>/analysis)")
     parser.add_argument("--no-plots", action="store_true", help="Skip new plots generated by ana_log.py")
     parser.add_argument("--skip-external-tools", action="store_true", help="Do not invoke existing ICP/GNSS/ARAIM plot scripts")
@@ -5036,6 +5863,7 @@ def parse_args() -> argparse.Namespace:
 def main() -> int:
     args = parse_args()
     run_dir = resolve_run_dir(args.run)
+    baseline_run_dir = resolve_run_dir(args.baseline_run) if args.baseline_run else None
     out_dir = Path(args.out).resolve() if args.out else (run_dir / "analysis")
     figs_dir = out_dir / "figs"
     ensure_dir(figs_dir)
@@ -5113,7 +5941,15 @@ def main() -> int:
     if not args.skip_external_tools:
         external_results = integrate_existing_plots(run_dir, dataframes, figs_dir / "external")
 
+    seed_compare_analysis = analyze_seed_mode_comparison(
+        current_run_dir=run_dir,
+        current_config_summary=config_summary,
+        current_jump_analysis=jump_analysis,
+        baseline_run_dir=baseline_run_dir,
+    )
+
     findings = detect_findings(
+        config_summary=config_summary,
         runtime_summary=runtime_summary,
         artifact_statuses=artifact_statuses,
         mode_consistency=mode_consistency,
@@ -5126,6 +5962,7 @@ def main() -> int:
         bucket_analysis=bucket_analysis,
         pipeline_analysis=pipeline_analysis,
     )
+    findings.extend(detect_seed_compare_findings(seed_compare_analysis))
     recommendations = recommend_next_steps(
         artifact_statuses=artifact_statuses,
         mode_consistency=mode_consistency,
@@ -5160,6 +5997,7 @@ def main() -> int:
         bucket_diagnostics=bucket_diagnostics,
         correlation_analysis=correlation_analysis,
         pipeline_analysis=pipeline_analysis,
+        seed_compare_analysis=seed_compare_analysis,
         findings=findings,
         recommendations=recommendations,
         external_results=external_results,
@@ -5196,6 +6034,7 @@ def main() -> int:
         "bucket_diagnostics": bucket_diagnostics,
         "correlation_analysis": correlation_analysis,
         "pipeline_analysis": pipeline_analysis,
+        "seed_compare_analysis": seed_compare_analysis,
         "findings": findings,
         "recommendations": recommendations,
         "external_results": external_results,

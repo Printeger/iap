@@ -144,6 +144,67 @@ TEST(BSplineFixedLagRegistryTest, SharedStateSeedsAndUpdatesPersistentValues) {
   EXPECT_NEAR(registry.shared_state().ecef_origin.x(), 11.0, 1e-9);
 }
 
+TEST(BSplineFixedLagRegistryTest, ExternalReferenceGravitySkipsGraphSeedAndWriteback) {
+  iap::BSplineFixedLagStateRegistry registry;
+  registry.set_shared_imu_state(
+    gtsam::Vector3(0.1, 0.2, 0.3),
+    gtsam::Vector3(1.0, 2.0, 3.0),
+    gtsam::Vector3(0.0, 0.0, 9.7));
+  registry.set_gravity_shared_optimized(false);
+
+  gtsam::Values values;
+  registry.seed_shared_values(values, false);
+  EXPECT_TRUE(values.exists(gtsam::symbol('j', 0)));
+  EXPECT_TRUE(values.exists(gtsam::symbol('k', 0)));
+  EXPECT_FALSE(values.exists(gtsam::symbol('g', 0)));
+  EXPECT_EQ(
+    registry.active_shared_keys(false),
+    (std::vector<gtsam::Key>{gtsam::symbol('j', 0), gtsam::symbol('k', 0)}));
+
+  values.insert(gtsam::symbol('g', 0), gtsam::Vector3(1.0, 1.0, 1.0));
+  registry.update_shared_state_from_values(values);
+  EXPECT_NEAR(registry.shared_state().gravity.x(), 0.0, 1e-9);
+  EXPECT_NEAR(registry.shared_state().gravity.y(), 0.0, 1e-9);
+  EXPECT_NEAR(registry.shared_state().gravity.z(), 9.7, 1e-9);
+
+  const auto telemetry = registry.telemetry();
+  EXPECT_EQ(telemetry.active_shared_state_count, 2U);
+}
+
+TEST(BSplineFixedLagRegistryTest, LaggedBiasModeDropsSharedBiasSingletonSemantics) {
+  iap::BSplineControlWindow window;
+  window.initialize(0.0, 0.1, gtsam::Pose3());
+
+  iap::BSplineFixedLagStateRegistry registry;
+  registry.set_bias_shared_singleton(false);
+  registry.reset_from_window(window);
+  registry.append_segment(make_segment_state(window));
+
+  gtsam::Values seeded_values;
+  registry.seed_shared_values(seeded_values, false);
+  EXPECT_FALSE(seeded_values.exists(gtsam::symbol('j', 0)));
+  EXPECT_FALSE(seeded_values.exists(gtsam::symbol('k', 0)));
+  EXPECT_TRUE(seeded_values.exists(gtsam::symbol('g', 0)));
+
+  gtsam::Values aux_values;
+  aux_values.insert(iap::bspline_velocity_key(1), gtsam::Vector3(1.0, 0.0, 0.0));
+  aux_values.insert(iap::bspline_gyro_bias_key(1), gtsam::Vector3(0.1, 0.2, 0.3));
+  aux_values.insert(iap::bspline_accel_bias_key(1), gtsam::Vector3(1.0, 2.0, 3.0));
+  aux_values.insert(gtsam::symbol('j', 0), gtsam::Vector3(9.0, 9.0, 9.0));
+  aux_values.insert(gtsam::symbol('k', 0), gtsam::Vector3(8.0, 8.0, 8.0));
+
+  const auto filtered = registry.filter_aux_values(aux_values, false);
+  EXPECT_TRUE(filtered.exists(iap::bspline_velocity_key(1)));
+  EXPECT_TRUE(filtered.exists(iap::bspline_gyro_bias_key(1)));
+  EXPECT_TRUE(filtered.exists(iap::bspline_accel_bias_key(1)));
+  EXPECT_FALSE(filtered.exists(gtsam::symbol('j', 0)));
+  EXPECT_FALSE(filtered.exists(gtsam::symbol('k', 0)));
+
+  EXPECT_EQ(registry.active_shared_keys(false), (std::vector<gtsam::Key>{gtsam::symbol('g', 0)}));
+  const auto telemetry = registry.telemetry();
+  EXPECT_EQ(telemetry.active_shared_state_count, 1U);
+}
+
 TEST(BSplineFixedLagRegistryTest, TelemetryTracksLifecycleTransitions) {
   iap::BSplineFixedLagStateRegistry registry;
 

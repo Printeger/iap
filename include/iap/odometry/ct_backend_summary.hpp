@@ -24,6 +24,7 @@ struct CTBackendSummary {
   std::size_t pose_key_count{0};
   std::size_t lidar_factor_count{0};
   bool has_velocity_state{false};
+  // Bias states remain explicit even when gravity is supplied as an external reference.
   bool has_bias_state{false};
 };
 
@@ -163,6 +164,10 @@ struct FrontendFrameProfile {
   std::string frontend_mode{"unknown"};
   bool frontend_only_mode{false};
   bool use_legacy_two_stage_path{false};
+  std::string frontend_seed_mode{"last_pose_copy"};
+  std::string frontend_seed_source{"last_pose_copy"};
+  bool frontend_seed_fallback_used{false};
+  std::size_t frontend_seed_imu_sample_count{0};
   std::string bucket_mode{"TIME_EPS"};
   std::size_t actual_bucket_count{0};
   std::size_t total_source_points{0};
@@ -248,6 +253,10 @@ struct FrontendPoseDiagnostics {
   double registration_delta_translation_norm{0.0};
   double registration_delta_rotation_rad{0.0};
   bool uses_local_lidar_layout_override{false};
+  std::string seed_mode{"last_pose_copy"};
+  std::string seed_source{"last_pose_copy"};
+  bool seed_fallback_used{false};
+  std::size_t seed_imu_sample_count{0};
   gtsam::Pose3 seed_pose;
   gtsam::Pose3 optimized_pose;
   gtsam::KeyVector lidar_support_keys;

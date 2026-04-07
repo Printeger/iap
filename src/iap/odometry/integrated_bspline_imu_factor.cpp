@@ -22,6 +22,16 @@ gtsam::KeyVector make_factor_keys(
   return keys;
 }
 
+gtsam::KeyVector make_factor_keys(
+  const SplineStampContext& ctx,
+  gtsam::Key gyro_bias_key,
+  gtsam::Key accel_bias_key) {
+  gtsam::KeyVector keys(ctx.support.pose_keys.begin(), ctx.support.pose_keys.end());
+  keys.push_back(gyro_bias_key);
+  keys.push_back(accel_bias_key);
+  return keys;
+}
+
 std::shared_ptr<const SplineStateLayout> make_legacy_layout(
   const std::array<gtsam::Key, kBSplineControlPointCount>& pose_keys,
   double segment_duration,
@@ -103,6 +113,29 @@ IntegratedSplineIMUFactor::IntegratedSplineIMUFactor(
   information_.block<3, 3>(3, 3) = Eigen::Matrix3d::Identity() * accelerometer_precision;
 }
 
+IntegratedSplineIMUFactor::IntegratedSplineIMUFactor(
+  const SplineStampContext& ctx,
+  gtsam::Key gyro_bias_key,
+  gtsam::Key accel_bias_key,
+  const Eigen::Vector3d& external_gravity_world,
+  const Eigen::Vector3d& measured_gyro,
+  const Eigen::Vector3d& measured_accel,
+  double accelerometer_precision,
+  double gyroscope_precision,
+  std::shared_ptr<const SplineStateLayout> layout)
+: gtsam::NonlinearFactor(make_factor_keys(ctx, gyro_bias_key, accel_bias_key)),
+  ctx_(ctx),
+  layout_(std::move(layout)),
+  evaluator_(layout_ ? std::make_shared<SplineEvaluator>(layout_) : nullptr),
+  uses_external_gravity_(true),
+  external_gravity_world_(external_gravity_world),
+  measured_gyro_(measured_gyro),
+  measured_accel_(measured_accel) {
+  information_.setZero();
+  information_.block<3, 3>(0, 0) = Eigen::Matrix3d::Identity() * gyroscope_precision;
+  information_.block<3, 3>(3, 3) = Eigen::Matrix3d::Identity() * accelerometer_precision;
+}
+
 IntegratedBSplineIMUFactor::IntegratedBSplineIMUFactor(
   const std::array<gtsam::Key, kBSplineControlPointCount>& pose_keys,
   gtsam::Key gyro_bias_key,
@@ -131,7 +164,9 @@ IntegratedSplineIMUFactor::IMUStateVariables IntegratedSplineIMUFactor::state_va
   IMUStateVariables state;
   state.gyro_bias = values.at<gtsam::Vector3>(keys_[kBSplineControlPointCount + 0]);
   state.accel_bias = values.at<gtsam::Vector3>(keys_[kBSplineControlPointCount + 1]);
-  state.gravity_world = values.at<gtsam::Vector3>(keys_[kBSplineControlPointCount + 2]);
+  state.gravity_world = uses_external_gravity_
+    ? external_gravity_world_
+    : values.at<gtsam::Vector3>(keys_[kBSplineControlPointCount + 2]);
   return state;
 }
 
@@ -284,12 +319,22 @@ gtsam::GaussianFactor::shared_ptr IntegratedSplineIMUFactor::linearize(const gts
   J[kBSplineControlPointCount + 0].topRows<3>().setIdentity();
   J[kBSplineControlPointCount + 1] = Eigen::MatrixXd::Zero(6, 3);
   J[kBSplineControlPointCount + 1].bottomRows<3>().setIdentity();
-  J[kBSplineControlPointCount + 2] = Eigen::MatrixXd::Zero(6, 3);
-  J[kBSplineControlPointCount + 2].bottomRows<3>() = prediction.body_R_world;
+  if (!uses_external_gravity_) {
+    J[kBSplineControlPointCount + 2] = Eigen::MatrixXd::Zero(6, 3);
+    J[kBSplineControlPointCount + 2].bottomRows<3>() = prediction.body_R_world;
+  }
 
-  std::vector<gtsam::DenseIndex> dims{
-    6, 6, 6, 6, 3, 3, 3, 1,
-  };
+  std::vector<gtsam::DenseIndex> dims;
+  dims.reserve(keys_.size() + 1);
+  for (std::size_t i = 0; i < kBSplineControlPointCount; ++i) {
+    dims.push_back(6);
+  }
+  dims.push_back(3);
+  dims.push_back(3);
+  if (!uses_external_gravity_) {
+    dims.push_back(3);
+  }
+  dims.push_back(1);
   gtsam::SymmetricBlockMatrix augmented(dims);
 
   for (std::size_t i = 0; i < keys_.size(); ++i) {

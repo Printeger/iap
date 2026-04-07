@@ -87,7 +87,11 @@ SplineActiveStateSet build_spline_active_state_set(
   const std::vector<BSplineMarginalizationSegmentState>& segment_states,
   const gtsam::Values& values,
   double min_active_stamp,
-  bool include_clock);
+  bool include_clock,
+  bool include_lagged_bias = false,
+  bool include_shared_bias = true,
+  bool include_shared_gravity = true,
+  bool include_gnss_anchor = true);
 
 BSplineMarginalizationPartition build_bspline_marginalization_partition(
   const SplineActiveStateSet& active_state_set);
@@ -97,12 +101,20 @@ BSplineMarginalizationPartition build_bspline_marginalization_partition(
   const std::vector<BSplineMarginalizationSegmentState>& segment_states,
   const gtsam::Values& values,
   double min_active_stamp,
-  bool include_clock);
+  bool include_clock,
+  bool include_lagged_bias = false,
+  bool include_shared_bias = true,
+  bool include_shared_gravity = true,
+  bool include_gnss_anchor = true);
 
 BSplineCarriedPrior build_bspline_carried_prior(
   const gtsam::NonlinearFactorGraph& removable_graph,
   const gtsam::Values& values,
   const std::vector<gtsam::Key>& survivor_keys,
   const BSplineCarriedPrior* previous_prior = nullptr);
+
+std::vector<gtsam::Key> filter_bspline_survivor_anchor_keys(
+  const std::vector<gtsam::Key>& keys,
+  bool include_bias_keys = true);
 
 }  // namespace iap

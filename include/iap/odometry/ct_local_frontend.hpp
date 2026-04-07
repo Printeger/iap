@@ -33,6 +33,11 @@ class CTLocalFrontend {
     SINGLE_BUCKET,
   };
 
+  enum class FrontendSeedMode {
+    LAST_POSE_COPY,
+    IMU_FORWARD_PREDICTION,
+  };
+
   struct BucketConfig {
     LidarBucketMode mode{LidarBucketMode::TIME_EPS};
     double time_eps{1e-3};
@@ -59,6 +64,10 @@ class CTLocalFrontend {
     std::vector<SourceFrameInput> source_frames;
     // IAP-RQ-300 / IAP-RQ-410: IMU measurements in the scan window for CT solve.
     std::vector<IMUSample> imu_samples;
+    // Optional seed-only IMU stream. This may start before the current scan so
+    // frontend seed construction can perform a forward prediction without
+    // changing the factor assembly window.
+    std::vector<IMUSample> seed_imu_samples;
     // IAP-RQ-300 / IAP-RQ-410: LiDAR registration target (null = skip LiDAR factors).
     std::shared_ptr<const gtsam_points::iVox> target_ivox;
     std::size_t target_point_count{0};
@@ -74,6 +83,10 @@ class CTLocalFrontend {
     double accelerometer_precision{1.0};
     double gyroscope_precision{1.0};
     double max_correspondence_distance{1.0};
+    FrontendSeedMode seed_mode{FrontendSeedMode::LAST_POSE_COPY};
+    bool use_lagged_bias{false};
+    bool use_external_gravity{false};
+    Eigen::Vector3d gravity_world = Eigen::Vector3d::UnitZ() * 9.80665;
     bool enable_lm_iteration_trace{false};
     bool enable_graph_problem_size{false};
   };
@@ -114,9 +127,13 @@ class CTLocalFrontend {
     double robust_kernel_width{1.0};
     double robust_weight_floor{0.0};
     bool enable_velocity_factor{true};
+    bool use_lagged_bias{false};
+    bool use_external_gravity{false};
+    Eigen::Vector3d gravity_world = Eigen::Vector3d::UnitZ() * 9.80665;
   };
 
   static const char* bucket_mode_name(LidarBucketMode mode);
+  static const char* frontend_seed_mode_name(FrontendSeedMode mode);
 
   static std::vector<SplineBucketContext> create_lidar_buckets(
     const SplineStateLayout& layout,

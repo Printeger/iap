@@ -220,7 +220,11 @@ class BSplineFixedLagStateRegistryT {
       marginalization_segment_states(),
       values,
       min_active_stamp,
-      include_clock);
+      include_clock,
+      !bias_shared_singleton_,
+      bias_shared_singleton_,
+      gravity_shared_optimized_,
+      true);
   }
 
   std::vector<BSplineMarginalizationSegmentState> marginalization_segment_states() const {
@@ -275,6 +279,18 @@ class BSplineFixedLagStateRegistryT {
       if (include_clock && values.exists(clock_key) && !filtered.exists(clock_key)) {
         filtered.insert(clock_key, values.at<gtsam::Vector2>(clock_key));
       }
+
+      if (!bias_shared_singleton_) {
+        const auto gyro_bias_key = bspline_gyro_bias_key(segment.auxiliary_index);
+        if (values.exists(gyro_bias_key) && !filtered.exists(gyro_bias_key)) {
+          filtered.insert(gyro_bias_key, values.at<gtsam::Vector3>(gyro_bias_key));
+        }
+
+        const auto accel_bias_key = bspline_accel_bias_key(segment.auxiliary_index);
+        if (values.exists(accel_bias_key) && !filtered.exists(accel_bias_key)) {
+          filtered.insert(accel_bias_key, values.at<gtsam::Vector3>(accel_bias_key));
+        }
+      }
     }
 
     return filtered;
@@ -295,6 +311,18 @@ class BSplineFixedLagStateRegistryT {
       const auto clock_key = bspline_clock_key(aux_index);
       if (include_clock && values.exists(clock_key) && !filtered.exists(clock_key)) {
         filtered.insert(clock_key, values.at<gtsam::Vector2>(clock_key));
+      }
+
+      if (!bias_shared_singleton_) {
+        const auto gyro_bias_key = bspline_gyro_bias_key(aux_index);
+        if (values.exists(gyro_bias_key) && !filtered.exists(gyro_bias_key)) {
+          filtered.insert(gyro_bias_key, values.at<gtsam::Vector3>(gyro_bias_key));
+        }
+
+        const auto accel_bias_key = bspline_accel_bias_key(aux_index);
+        if (values.exists(accel_bias_key) && !filtered.exists(accel_bias_key)) {
+          filtered.insert(accel_bias_key, values.at<gtsam::Vector3>(accel_bias_key));
+        }
       }
     }
 
@@ -385,6 +413,11 @@ class BSplineFixedLagStateRegistryT {
   const gtsam::Values& auxiliary_values() const { return auxiliary_values_; }
   gtsam::Values& auxiliary_values() { return auxiliary_values_; }
 
+  void set_gravity_shared_optimized(bool enabled) { gravity_shared_optimized_ = enabled; }
+  bool gravity_shared_optimized() const { return gravity_shared_optimized_; }
+  void set_bias_shared_singleton(bool enabled) { bias_shared_singleton_ = enabled; }
+  bool bias_shared_singleton() const { return bias_shared_singleton_; }
+
   void set_shared_imu_state(
     const gtsam::Vector3& gyro_bias,
     const gtsam::Vector3& accel_bias,
@@ -407,13 +440,13 @@ class BSplineFixedLagStateRegistryT {
   BSplineFixedLagSharedState& shared_state() { return shared_state_; }
 
   void seed_shared_values(gtsam::Values& values, bool include_gnss_anchor) const {
-    if (!values.exists(gtsam::symbol('j', 0))) {
-      values.insert(gtsam::symbol('j', 0), shared_state_.gyro_bias);
+    if (bias_shared_singleton_ && !values.exists(bspline_gyro_bias_key())) {
+      values.insert(bspline_gyro_bias_key(), shared_state_.gyro_bias);
     }
-    if (!values.exists(gtsam::symbol('k', 0))) {
-      values.insert(gtsam::symbol('k', 0), shared_state_.accel_bias);
+    if (bias_shared_singleton_ && !values.exists(bspline_accel_bias_key())) {
+      values.insert(bspline_accel_bias_key(), shared_state_.accel_bias);
     }
-    if (!values.exists(gtsam::symbol('g', 0))) {
+    if (gravity_shared_optimized_ && !values.exists(gtsam::symbol('g', 0))) {
       values.insert(gtsam::symbol('g', 0), shared_state_.gravity);
     }
     if (include_gnss_anchor && shared_state_.gnss_anchor_initialized) {
@@ -427,13 +460,13 @@ class BSplineFixedLagStateRegistryT {
   }
 
   void update_shared_state_from_values(const gtsam::Values& values) {
-    if (values.exists(gtsam::symbol('j', 0))) {
-      shared_state_.gyro_bias = values.at<gtsam::Vector3>(gtsam::symbol('j', 0));
+    if (bias_shared_singleton_ && values.exists(bspline_gyro_bias_key())) {
+      shared_state_.gyro_bias = values.at<gtsam::Vector3>(bspline_gyro_bias_key());
     }
-    if (values.exists(gtsam::symbol('k', 0))) {
-      shared_state_.accel_bias = values.at<gtsam::Vector3>(gtsam::symbol('k', 0));
+    if (bias_shared_singleton_ && values.exists(bspline_accel_bias_key())) {
+      shared_state_.accel_bias = values.at<gtsam::Vector3>(bspline_accel_bias_key());
     }
-    if (values.exists(gtsam::symbol('g', 0))) {
+    if (gravity_shared_optimized_ && values.exists(gtsam::symbol('g', 0))) {
       shared_state_.gravity = values.at<gtsam::Vector3>(gtsam::symbol('g', 0));
     }
     if (values.exists(bspline_ecef_origin_key())) {
@@ -447,11 +480,14 @@ class BSplineFixedLagStateRegistryT {
   }
 
   std::vector<gtsam::Key> active_shared_keys(bool include_gnss_anchor) const {
-    std::vector<gtsam::Key> keys = {
-      gtsam::symbol('j', 0),
-      gtsam::symbol('k', 0),
-      gtsam::symbol('g', 0),
-    };
+    std::vector<gtsam::Key> keys;
+    if (bias_shared_singleton_) {
+      keys.push_back(bspline_gyro_bias_key());
+      keys.push_back(bspline_accel_bias_key());
+    }
+    if (gravity_shared_optimized_) {
+      keys.push_back(gtsam::symbol('g', 0));
+    }
     if (include_gnss_anchor && shared_state_.gnss_anchor_initialized) {
       keys.push_back(bspline_ecef_origin_key());
       keys.push_back(bspline_ecef_rot_key());
@@ -514,6 +550,8 @@ class BSplineFixedLagStateRegistryT {
   std::vector<SegmentT> segments_;
   gtsam::Values auxiliary_values_;
   BSplineFixedLagSharedState shared_state_;
+  bool bias_shared_singleton_ = true;
+  bool gravity_shared_optimized_ = true;
   std::vector<std::size_t> announced_control_indices_;
   std::vector<std::size_t> announced_auxiliary_indices_;
   gtsam::KeyVector announced_persistent_keys_;

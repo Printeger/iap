@@ -60,6 +60,14 @@ gtsam::Key bspline_clock_key(std::size_t index) {
   return gtsam::symbol('c', static_cast<uint64_t>(index));
 }
 
+gtsam::Key bspline_gyro_bias_key(std::size_t index) {
+  return gtsam::symbol('j', static_cast<uint64_t>(index));
+}
+
+gtsam::Key bspline_accel_bias_key(std::size_t index) {
+  return gtsam::symbol('k', static_cast<uint64_t>(index));
+}
+
 gtsam::Key bspline_ecef_origin_key() {
   return gtsam::symbol('e', 0);
 }

@@ -1,7 +1,8 @@
 #pragma once
 // IAP-RQ-300 / IAP-RQ-410:
 // Minimal continuous-time IMU sample factor over four B-spline pose control points,
-// shared gyro/accel bias states, and a shared gravity state.
+// shared gyro/accel bias states, and either a shared gravity state key or an
+// external fixed gravity reference vector.
 // Mainline use: local CT frontend only.
 // Backend must consume summarized outputs, not raw IMU sample factors.
 
@@ -29,6 +30,16 @@ class IntegratedSplineIMUFactor : public gtsam::NonlinearFactor {
     gtsam::Key gyro_bias_key,
     gtsam::Key accel_bias_key,
     gtsam::Key gravity_key,
+    const Eigen::Vector3d& measured_gyro,
+    const Eigen::Vector3d& measured_accel,
+    double accelerometer_precision,
+    double gyroscope_precision,
+    std::shared_ptr<const SplineStateLayout> layout);
+  IntegratedSplineIMUFactor(
+    const SplineStampContext& ctx,
+    gtsam::Key gyro_bias_key,
+    gtsam::Key accel_bias_key,
+    const Eigen::Vector3d& external_gravity_world,
     const Eigen::Vector3d& measured_gyro,
     const Eigen::Vector3d& measured_accel,
     double accelerometer_precision,
@@ -72,6 +83,8 @@ class IntegratedSplineIMUFactor : public gtsam::NonlinearFactor {
   SplineStampContext ctx_;
   std::shared_ptr<const SplineStateLayout> layout_;
   std::shared_ptr<SplineEvaluator> evaluator_;
+  bool uses_external_gravity_ = false;
+  Eigen::Vector3d external_gravity_world_ = Eigen::Vector3d::UnitZ() * 9.80665;
   Eigen::Vector3d measured_gyro_ = Eigen::Vector3d::Zero();
   Eigen::Vector3d measured_accel_ = Eigen::Vector3d::Zero();
   gtsam::Matrix6 information_ = gtsam::Matrix6::Identity();

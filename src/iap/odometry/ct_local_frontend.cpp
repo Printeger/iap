@@ -45,6 +45,18 @@ double pose_rotation_delta_rad(const gtsam::Pose3& lhs, const gtsam::Pose3& rhs)
   return gtsam::Rot3::Logmap(lhs.between(rhs).rotation()).norm();
 }
 
+std::size_t frontend_seed_auxiliary_index(const std::vector<BSplineControlPointState>& controls) {
+  return controls.empty() ? 0U : controls.back().index;
+}
+
+gtsam::Key frontend_gyro_bias_key(std::size_t auxiliary_index, bool use_lagged_bias) {
+  return use_lagged_bias ? bspline_gyro_bias_key(auxiliary_index) : bspline_gyro_bias_key();
+}
+
+gtsam::Key frontend_accel_bias_key(std::size_t auxiliary_index, bool use_lagged_bias) {
+  return use_lagged_bias ? bspline_accel_bias_key(auxiliary_index) : bspline_accel_bias_key();
+}
+
 void append_unique_control_index(std::vector<int>* indices, int control_index) {
   if (!indices) {
     return;
@@ -125,17 +137,17 @@ std::size_t compute_local_state_dimension(const SplineStateLayout& layout, const
       dimension += 6;
     }
   }
-  if (!layout.controls().empty() && values.exists(bspline_velocity_key(layout.controls().back().index))) {
-    dimension += 3;
-  }
-  if (values.exists(gtsam::symbol('j', 0))) {
-    dimension += 3;
-  }
-  if (values.exists(gtsam::symbol('k', 0))) {
-    dimension += 3;
-  }
-  if (values.exists(gtsam::symbol('g', 0))) {
-    dimension += 3;
+  for (const auto key : values.keys()) {
+    switch (gtsam::Symbol(key).chr()) {
+      case 'u':
+      case 'j':
+      case 'k':
+      case 'g':
+        dimension += 3;
+        break;
+      default:
+        break;
+    }
   }
   return dimension;
 }
@@ -478,6 +490,130 @@ std::vector<BSplineControlPointState> make_frontend_controls(
   return controls;
 }
 
+struct FrontendMotionSeed {
+  std::vector<BSplineControlPointState> controls;
+  Eigen::Vector3d velocity_world = Eigen::Vector3d::Zero();
+  bool used_imu_forward_prediction = false;
+  std::string seed_mode = "last_pose_copy";
+  std::string seed_source = "last_pose_copy";
+  bool seed_fallback_used = false;
+  std::size_t seed_imu_sample_count = 0;
+};
+
+std::vector<CTLocalFrontend::IMUSample> normalized_seed_imu_samples(
+  const CTLocalFrontend::Input& input,
+  double start_time,
+  double end_time) {
+  std::vector<CTLocalFrontend::IMUSample> samples =
+    input.seed_imu_samples.empty() ? input.imu_samples : input.seed_imu_samples;
+  samples.erase(
+    std::remove_if(
+      samples.begin(),
+      samples.end(),
+      [&](const auto& sample) { return sample.stamp < start_time - 1e-9 || sample.stamp > end_time + 1e-9; }),
+    samples.end());
+  std::sort(samples.begin(), samples.end(), [](const auto& lhs, const auto& rhs) { return lhs.stamp < rhs.stamp; });
+  samples.erase(
+    std::unique(
+      samples.begin(),
+      samples.end(),
+      [](const auto& lhs, const auto& rhs) { return std::abs(lhs.stamp - rhs.stamp) <= 1e-9; }),
+    samples.end());
+  return samples;
+}
+
+gtsam::Pose3 pose_guess_from_target(const glim::EstimationFrame::ConstPtr& target_frame);
+
+FrontendMotionSeed make_frontend_motion_seed(
+  double scan_start,
+  double scan_end,
+  const CTLocalFrontend::Input& input) {
+  FrontendMotionSeed seed;
+  seed.controls = make_frontend_controls(scan_start, scan_end, pose_guess_from_target(input.target_frame));
+  seed.velocity_world = input.target_frame ? input.target_frame->v_world_imu : Eigen::Vector3d::Zero();
+  seed.seed_mode = CTLocalFrontend::frontend_seed_mode_name(input.seed_mode);
+
+  if (input.seed_mode != CTLocalFrontend::FrontendSeedMode::IMU_FORWARD_PREDICTION ||
+      !input.target_frame ||
+      seed.controls.empty()) {
+    if (input.seed_mode == CTLocalFrontend::FrontendSeedMode::IMU_FORWARD_PREDICTION) {
+      seed.seed_source = "imu_forward_prediction_fallback_last_pose_copy";
+      seed.seed_fallback_used = true;
+    }
+    return seed;
+  }
+
+  const gtsam::Pose3 initial_pose_world_imu(input.target_frame->T_world_imu.matrix());
+  const Eigen::Vector3d accel_bias = input.target_frame->imu_bias.head<3>();
+  const Eigen::Vector3d gyro_bias = input.target_frame->imu_bias.tail<3>();
+  const auto samples = normalized_seed_imu_samples(input, input.target_frame->stamp, scan_end);
+  seed.seed_imu_sample_count = samples.size();
+  if (samples.empty()) {
+    seed.seed_source = "imu_forward_prediction_fallback_last_pose_copy";
+    seed.seed_fallback_used = true;
+    return seed;
+  }
+
+  std::vector<double> target_times;
+  target_times.reserve(seed.controls.size());
+  for (const auto& control : seed.controls) {
+    target_times.push_back(control.stamp);
+  }
+
+  const Eigen::Isometry3d T_imu_lidar =
+    input.target_frame ? input.target_frame->T_lidar_imu.inverse() : Eigen::Isometry3d::Identity();
+  gtsam::Pose3 current_pose_world_imu = initial_pose_world_imu;
+  Eigen::Vector3d current_velocity_world = seed.velocity_world;
+  double current_time = input.target_frame->stamp;
+  std::size_t sample_index = 0;
+  while (sample_index + 1 < samples.size() && samples[sample_index + 1].stamp <= current_time) {
+    ++sample_index;
+  }
+
+  const auto integrate_to = [&](double target_time, const CTLocalFrontend::IMUSample& sample) {
+    const double dt = target_time - current_time;
+    if (dt <= 1e-9) {
+      return;
+    }
+
+    const Eigen::Vector3d corrected_gyro = sample.angular_vel - gyro_bias;
+    const Eigen::Vector3d corrected_accel_body = sample.linear_acc - accel_bias;
+    const Eigen::Matrix3d world_R_imu = current_pose_world_imu.rotation().matrix();
+    const Eigen::Vector3d world_accel = world_R_imu * corrected_accel_body - input.gravity_world;
+    const gtsam::Point3 current_translation = current_pose_world_imu.translation();
+    const Eigen::Vector3d current_translation_vec(
+      current_translation.x(),
+      current_translation.y(),
+      current_translation.z());
+    const Eigen::Vector3d translated =
+      current_translation_vec + current_velocity_world * dt + 0.5 * world_accel * dt * dt;
+    const gtsam::Rot3 rotated =
+      current_pose_world_imu.rotation().compose(gtsam::Rot3::Expmap(corrected_gyro * dt));
+    current_pose_world_imu = gtsam::Pose3(
+      rotated,
+      gtsam::Point3(translated.x(), translated.y(), translated.z()));
+    current_velocity_world += world_accel * dt;
+    current_time = target_time;
+  };
+
+  for (std::size_t i = 0; i < seed.controls.size(); ++i) {
+    const double target_time = seed.controls[i].stamp;
+    while (sample_index + 1 < samples.size() && samples[sample_index + 1].stamp < target_time - 1e-9) {
+      integrate_to(samples[sample_index + 1].stamp, samples[sample_index]);
+      ++sample_index;
+    }
+    integrate_to(target_time, samples[sample_index]);
+    const gtsam::Pose3 predicted_pose_world_lidar =
+      current_pose_world_imu.compose(gtsam::Pose3(T_imu_lidar.matrix()));
+    seed.controls[i].pose = predicted_pose_world_lidar;
+  }
+
+  seed.velocity_world = current_velocity_world;
+  seed.used_imu_forward_prediction = true;
+  seed.seed_source = "imu_forward_prediction";
+  return seed;
+}
+
 std::vector<double> make_frontend_knots(double scan_start, double scan_end) {
   const double duration = std::max(kMinFrontendScanDuration, scan_end - scan_start);
   const double knot_end = scan_start + duration;
@@ -550,23 +686,23 @@ std::vector<int> collect_active_control_indices(
 
 void seed_frontend_local_values(
   const std::vector<BSplineControlPointState>& controls,
-  const glim::EstimationFrame::ConstPtr& target_frame,
+  const Eigen::Vector3d& world_velocity,
+  const Eigen::Vector3d& accel_bias,
+  const Eigen::Vector3d& gyro_bias,
+  gtsam::Key gyro_bias_key,
+  gtsam::Key accel_bias_key,
+  bool use_external_gravity,
+  const Eigen::Vector3d& gravity_world,
   gtsam::Values* values) {
   for (const auto& control : controls) {
     values->insert(bspline_control_point_key(control.index), control.pose);
   }
-
-  const Eigen::Vector3d world_velocity =
-    target_frame ? target_frame->v_world_imu : Eigen::Vector3d::Zero();
   values->insert(bspline_velocity_key(controls.back().index), world_velocity);
-
-  const Eigen::Vector3d accel_bias =
-    target_frame ? Eigen::Vector3d(target_frame->imu_bias.head<3>()) : Eigen::Vector3d::Zero();
-  const Eigen::Vector3d gyro_bias =
-    target_frame ? Eigen::Vector3d(target_frame->imu_bias.tail<3>()) : Eigen::Vector3d::Zero();
-  values->insert(gtsam::symbol('j', 0), gyro_bias);
-  values->insert(gtsam::symbol('k', 0), accel_bias);
-  values->insert(gtsam::symbol('g', 0), Eigen::Vector3d::UnitZ() * 9.80665);
+  values->insert(gyro_bias_key, gyro_bias);
+  values->insert(accel_bias_key, accel_bias);
+  if (!use_external_gravity) {
+    values->insert(gtsam::symbol('g', 0), gravity_world);
+  }
 }
 
 gtsam_points::PointCloud::ConstPtr ensure_source_cloud(const CTLocalFrontend::SourceFrameInput& source_frame) {
@@ -606,6 +742,16 @@ gtsam::Pose3 evaluate_pose_from_layout(
 
 const char* CTLocalFrontend::bucket_mode_name(LidarBucketMode mode) {
   return iap::bucket_mode_name(mode);
+}
+
+const char* CTLocalFrontend::frontend_seed_mode_name(FrontendSeedMode mode) {
+  switch (mode) {
+    case FrontendSeedMode::LAST_POSE_COPY:
+      return "last_pose_copy";
+    case FrontendSeedMode::IMU_FORWARD_PREDICTION:
+      return "imu_forward_prediction";
+  }
+  return "last_pose_copy";
 }
 
 std::vector<SplineBucketContext> CTLocalFrontend::create_lidar_buckets(
@@ -650,6 +796,8 @@ BSplineLocalLayerContribution CTLocalFrontend::assemble_local_layer(const LayerI
     }
 
     const gtsam::Key velocity_key = bspline_velocity_key(segment.auxiliary_index);
+    const gtsam::Key gyro_bias_key = frontend_gyro_bias_key(segment.auxiliary_index, input.use_lagged_bias);
+    const gtsam::Key accel_bias_key = frontend_accel_bias_key(segment.auxiliary_index, input.use_lagged_bias);
     if (input.enable_velocity_factor) {
       contribution.graph.add(std::make_shared<IntegratedBSplineVelocityFactor>(
         segment_pose_keys,
@@ -675,16 +823,29 @@ BSplineLocalLayerContribution CTLocalFrontend::assemble_local_layer(const LayerI
       }
       append_support_control_indices(imu_layout, *support, &contribution.activation.active_control_indices);
 
-      contribution.graph.add(std::make_shared<IntegratedSplineIMUFactor>(
-        ctx,
-        gtsam::symbol('j', 0),
-        gtsam::symbol('k', 0),
-        gtsam::symbol('g', 0),
-        imu_sample.angular_vel,
-        imu_sample.linear_acc,
-        input.accelerometer_precision,
-        input.gyroscope_precision,
-        imu_layout_ptr));
+      if (input.use_external_gravity) {
+        contribution.graph.add(std::make_shared<IntegratedSplineIMUFactor>(
+          ctx,
+          gyro_bias_key,
+          accel_bias_key,
+          input.gravity_world,
+          imu_sample.angular_vel,
+          imu_sample.linear_acc,
+          input.accelerometer_precision,
+          input.gyroscope_precision,
+          imu_layout_ptr));
+      } else {
+        contribution.graph.add(std::make_shared<IntegratedSplineIMUFactor>(
+          ctx,
+          gyro_bias_key,
+          accel_bias_key,
+          gtsam::symbol('g', 0),
+          imu_sample.angular_vel,
+          imu_sample.linear_acc,
+          input.accelerometer_precision,
+          input.gyroscope_precision,
+          imu_layout_ptr));
+      }
       ++contribution.imu_factor_count;
       contribution.uses_shared_imu_state = true;
     }
@@ -765,7 +926,15 @@ CTLocalFrontendResult CTLocalFrontend::run(const Input& input) const {
 
   const double scan_start = frontend_scan_start(input);
   const double scan_end = frontend_scan_end(input, scan_start);
-  const auto controls = make_frontend_controls(scan_start, scan_end, pose_guess_from_target(input.target_frame));
+  const auto motion_seed = make_frontend_motion_seed(scan_start, scan_end, input);
+  const auto& controls = motion_seed.controls;
+  const std::size_t auxiliary_index = frontend_seed_auxiliary_index(controls);
+  const gtsam::Key gyro_bias_key = frontend_gyro_bias_key(auxiliary_index, input.use_lagged_bias);
+  const gtsam::Key accel_bias_key = frontend_accel_bias_key(auxiliary_index, input.use_lagged_bias);
+  const Eigen::Vector3d accel_bias =
+    input.target_frame ? Eigen::Vector3d(input.target_frame->imu_bias.head<3>()) : Eigen::Vector3d::Zero();
+  const Eigen::Vector3d gyro_bias =
+    input.target_frame ? Eigen::Vector3d(input.target_frame->imu_bias.tail<3>()) : Eigen::Vector3d::Zero();
 
   result.layout.set_controls(controls);
   result.layout.set_knots(make_frontend_knots(scan_start, scan_end));
@@ -779,9 +948,22 @@ CTLocalFrontendResult CTLocalFrontend::run(const Input& input) const {
   lidar_model.id = SplineSensorId::Lidar;
   result.layout.set_sensor_model(SplineSensorId::Lidar, lidar_model);
 
-  seed_frontend_local_values(controls, input.target_frame, &result.local_values);
+  seed_frontend_local_values(
+    controls,
+    motion_seed.velocity_world,
+    accel_bias,
+    gyro_bias,
+    gyro_bias_key,
+    accel_bias_key,
+    input.use_external_gravity,
+    input.gravity_world,
+    &result.local_values);
   const gtsam::Values seeded_local_values = result.local_values;
   result.processed.frame_profile.stamp = scan_start;
+  result.processed.frame_profile.frontend_seed_mode = motion_seed.seed_mode;
+  result.processed.frame_profile.frontend_seed_source = motion_seed.seed_source;
+  result.processed.frame_profile.frontend_seed_fallback_used = motion_seed.seed_fallback_used;
+  result.processed.frame_profile.frontend_seed_imu_sample_count = motion_seed.seed_imu_sample_count;
   result.processed.frame_profile.bucket_mode = bucket_mode_name(input.bucket_config.mode);
   result.processed.frame_profile.imu_sample_count = input.imu_samples.size();
   result.processed.frame_profile.lm_trace_expected = input.enable_lm_iteration_trace;
@@ -806,16 +988,30 @@ CTLocalFrontendResult CTLocalFrontend::run(const Input& input) const {
     ctx.support = *support;
     ctx.sensor_id = SplineSensorId::Imu;
 
-    auto imu_factor = std::make_shared<IntegratedSplineIMUFactor>(
-      ctx,
-      gtsam::symbol('j', 0),
-      gtsam::symbol('k', 0),
-      gtsam::symbol('g', 0),
-      imu_sample.angular_vel,
-      imu_sample.linear_acc,
-      input.accelerometer_precision,
-      input.gyroscope_precision,
-      layout_ptr);
+    IntegratedSplineIMUFactor::shared_ptr imu_factor;
+    if (input.use_external_gravity) {
+      imu_factor = std::make_shared<IntegratedSplineIMUFactor>(
+        ctx,
+        gyro_bias_key,
+        accel_bias_key,
+        input.gravity_world,
+        imu_sample.angular_vel,
+        imu_sample.linear_acc,
+        input.accelerometer_precision,
+        input.gyroscope_precision,
+        layout_ptr);
+    } else {
+      imu_factor = std::make_shared<IntegratedSplineIMUFactor>(
+        ctx,
+        gyro_bias_key,
+        accel_bias_key,
+        gtsam::symbol('g', 0),
+        imu_sample.angular_vel,
+        imu_sample.linear_acc,
+        input.accelerometer_precision,
+        input.gyroscope_precision,
+        layout_ptr);
+    }
     graph.add(imu_factor);
     ++active_imu_factor_count;
   }
@@ -1004,9 +1200,8 @@ CTLocalFrontendResult CTLocalFrontend::run(const Input& input) const {
   result.backend_summary.lidar_factor_count = actual_lidar_factor_count;
   result.backend_summary.has_velocity_state = result.local_values.exists(bspline_velocity_key(controls.back().index));
   result.backend_summary.has_bias_state =
-    result.local_values.exists(gtsam::symbol('j', 0)) &&
-    result.local_values.exists(gtsam::symbol('k', 0)) &&
-    result.local_values.exists(gtsam::symbol('g', 0));
+    result.local_values.exists(gyro_bias_key) &&
+    result.local_values.exists(accel_bias_key);
 
   result.debug_stats.active_local_controls = result.backend_summary.active_control_indices;
   result.debug_stats.local_solve_time_ms =
@@ -1034,6 +1229,10 @@ CTLocalFrontendResult CTLocalFrontend::run(const Input& input) const {
   result.pose_diagnostics.optimized_pose = fallback_pose;
   result.pose_diagnostics.query_time = query_time;
   result.pose_diagnostics.uses_local_lidar_layout_override = false;
+  result.pose_diagnostics.seed_mode = motion_seed.seed_mode;
+  result.pose_diagnostics.seed_source = motion_seed.seed_source;
+  result.pose_diagnostics.seed_fallback_used = motion_seed.seed_fallback_used;
+  result.pose_diagnostics.seed_imu_sample_count = motion_seed.seed_imu_sample_count;
   const auto [domain_begin, domain_end] = layout_domain_bounds(result.layout);
   result.pose_diagnostics.layout_domain_begin = domain_begin;
   result.pose_diagnostics.layout_domain_end = domain_end;
@@ -1186,6 +1385,10 @@ CTLocalFrontendShadowResult CTLocalFrontend::run_shadow_diagnostics(
   const auto lidar_layout = lidar_layout_ptr ? *lidar_layout_ptr : SplineStateLayout{};
   result.pose_diagnostics.query_time = query_time;
   result.pose_diagnostics.uses_local_lidar_layout_override = static_cast<bool>(input.lidar_layout_override);
+  result.pose_diagnostics.seed_mode = "last_pose_copy";
+  result.pose_diagnostics.seed_source = "pre_solve_strict_local_layout";
+  result.pose_diagnostics.seed_fallback_used = false;
+  result.pose_diagnostics.seed_imu_sample_count = 0;
   const auto [domain_begin, domain_end] = layout_domain_bounds(lidar_layout);
   result.pose_diagnostics.layout_domain_begin = domain_begin;
   result.pose_diagnostics.layout_domain_end = domain_end;

@@ -97,6 +97,31 @@ enum class BSplineGravityMode {
   WARMUP_FREEZE_THEN_RELEASE,
 };
 
+enum class BSplineGravityStateMode {
+  SHARED_OPTIMIZED,
+  EXTERNAL_REFERENCE,
+};
+
+enum class BSplineGravityReferenceSource {
+  STARTUP_SEED,
+  CONFIG_VECTOR,
+};
+
+enum class BSplineVelocityStateMode {
+  OPTIMIZE,
+  KEEP_BUT_NOT_OPTIMIZE,
+};
+
+enum class BSplineVelocityModePolicy {
+  ALWAYS_OPTIMIZE,
+  AUTO_DISABLE_WITHOUT_GNSS,
+};
+
+enum class BSplineBiasStateMode {
+  SHARED_SINGLETON,
+  LAGGED_KEYED,
+};
+
 class OdometryEstimationBSpline : public OdometryEstimationCPU {
  public:
   EIGEN_MAKE_ALIGNED_OPERATOR_NEW
@@ -160,6 +185,10 @@ class OdometryEstimationBSpline : public OdometryEstimationCPU {
     std::string start_pose_source_kind{"unknown"};
     bool start_pose_frozen_before_factor_injection{false};
     bool start_pose_frozen_before_solver_update{false};
+    std::string frontend_seed_mode{"last_pose_copy"};
+    std::string frontend_seed_source{"last_pose_copy"};
+    bool frontend_seed_fallback_used{false};
+    std::size_t frontend_seed_imu_sample_count{0};
 
     double start_pose_tx{0.0};
     double start_pose_ty{0.0};
@@ -203,16 +232,28 @@ class OdometryEstimationBSpline : public OdometryEstimationCPU {
 
     double delta_start_to_frontend_translation_norm{0.0};
     double delta_start_to_frontend_rotation_rad{0.0};
+    double delta_start_to_frontend_pitch_rad{0.0};
+    double delta_start_to_frontend_roll_rad{0.0};
     double delta_frontend_to_postsolve_query_translation_norm{0.0};
     double delta_frontend_to_postsolve_query_rotation_rad{0.0};
+    double delta_frontend_to_postsolve_query_pitch_rad{0.0};
+    double delta_frontend_to_postsolve_query_roll_rad{0.0};
     double delta_frontend_to_postsolve_strict_local_translation_norm{0.0};
     double delta_frontend_to_postsolve_strict_local_rotation_rad{0.0};
+    double delta_frontend_to_postsolve_strict_local_pitch_rad{0.0};
+    double delta_frontend_to_postsolve_strict_local_roll_rad{0.0};
     double delta_postsolve_query_to_final_translation_norm{0.0};
     double delta_postsolve_query_to_final_rotation_rad{0.0};
+    double delta_postsolve_query_to_final_pitch_rad{0.0};
+    double delta_postsolve_query_to_final_roll_rad{0.0};
     double delta_postsolve_strict_local_to_final_translation_norm{0.0};
     double delta_postsolve_strict_local_to_final_rotation_rad{0.0};
+    double delta_postsolve_strict_local_to_final_pitch_rad{0.0};
+    double delta_postsolve_strict_local_to_final_roll_rad{0.0};
     double delta_postsolve_active_window_to_postsolve_strict_local_translation_norm{0.0};
     double delta_postsolve_active_window_to_postsolve_strict_local_rotation_rad{0.0};
+    double delta_postsolve_active_window_to_postsolve_strict_local_pitch_rad{0.0};
+    double delta_postsolve_active_window_to_postsolve_strict_local_roll_rad{0.0};
     double delta_frontend_to_final_translation_norm{0.0};
     double delta_frontend_to_final_rotation_rad{0.0};
     double delta_frontend_to_final_yaw_rad{0.0};
@@ -485,6 +526,55 @@ class OdometryEstimationBSpline : public OdometryEstimationCPU {
     std::shared_ptr<const iap::SplineStateLayout> factor_layout,
     const gtsam::KeyVector& existing_keys,
     bool navigation_layer_enabled) const;
+  bool gravity_graph_key_enabled() const;
+  bool gravity_external_reference_enabled() const;
+  bool bias_shared_singleton_mode() const;
+  bool bias_lagged_keyed_mode() const;
+  gtsam::Vector3 sanitized_gravity_vector(const gtsam::Vector3& gravity) const;
+  void set_external_gravity_reference(
+    const gtsam::Vector3& gravity_world,
+    BSplineGravityReferenceSource source);
+  gtsam::Vector3 authoritative_gravity_reference() const;
+  const char* runtime_gravity_reference_source_name() const;
+  const char* runtime_bias_source_of_truth_name() const;
+  bool runtime_bias_transition_prior_enabled() const;
+  double runtime_bias_transition_prior_strength() const;
+  bool runtime_bias_can_be_survivor_anchor() const;
+  const char* runtime_bias_writeback_mode_name() const;
+  const char* runtime_frontend_seed_mode_name() const;
+  const char* runtime_frontend_seed_source_name() const;
+  bool imu_forward_prediction_enabled() const;
+  struct FrontendSeedObservation {
+    std::string mode{"last_pose_copy"};
+    std::string source{"last_pose_copy"};
+    bool fallback_used{false};
+    std::size_t imu_sample_count{0};
+  };
+  FrontendSeedObservation inspect_frontend_seed_observation(double seed_end_stamp) const;
+  void record_frontend_seed_observation(const FrontendSeedObservation& observation) const;
+  gtsam::Key gyro_bias_key_for_auxiliary(std::size_t auxiliary_index) const;
+  gtsam::Key accel_bias_key_for_auxiliary(std::size_t auxiliary_index) const;
+  bool authoritative_previous_bias_auxiliary_index(
+    std::size_t auxiliary_index,
+    std::size_t* previous_auxiliary_index) const;
+  gtsam::KeyVector bias_anchorable_survivor_keys(const gtsam::KeyVector& keys) const;
+  void seed_bias_values_for_auxiliary(std::size_t auxiliary_index, gtsam::Values* values) const;
+  void seed_bias_values_for_active_segments(gtsam::Values* values) const;
+  void mirror_bias_cache_from_values(const gtsam::Values& values);
+  void write_frame_bias_from_values(
+    const gtsam::Values& values,
+    std::size_t auxiliary_index,
+    EstimationFrame* frame) const;
+  bool solve_has_gnss_constraints(const ActiveSplineSegmentConstraint& segment) const;
+  bool solve_has_gnss_constraints() const;
+  bool velocity_explicit_optimization_enabled(bool solve_has_gnss_constraints) const;
+  bool velocity_optimized_for_solve(bool solve_has_gnss_constraints) const;
+  BSplineVelocityStateMode resolved_velocity_state_mode(bool solve_has_gnss_constraints) const;
+  void record_runtime_mode_resolution(
+    bool solve_has_gnss_constraints,
+    bool velocity_explicit_optimization_enabled,
+    bool velocity_optimized);
+  void sync_runtime_mode_metadata(bool force = false) const;
   bool any_shared_imu_freeze_experiment_enabled() const;
   bool any_soft_gravity_experiment_enabled() const;
   bool any_gravity_isolation_experiment_enabled() const;
@@ -499,6 +589,9 @@ class OdometryEstimationBSpline : public OdometryEstimationCPU {
   void enforce_frozen_shared_values(gtsam::Values* values, int frame_id) const;
   std::string runtime_experiment_name() const;
   void reset_unified_graph_solver();
+  std::vector<iap::CTLocalFrontend::IMUSample> create_frontend_seed_imu_samples(
+    double start_stamp,
+    double end_stamp) const;
 
   iap::BSplineTrajectory::Params trajectory_params_;
   // Planned hybrid split: orchestrator bridges CTLocalFrontend and CTCompactBackend.
@@ -515,7 +608,27 @@ class OdometryEstimationBSpline : public OdometryEstimationCPU {
   bool use_legacy_bspline_two_stage_path_ = false;
   iap::BSplineUnifiedSolverMode unified_solver_mode_ = iap::BSplineUnifiedSolverMode::BATCH_LM;
   BSplineFinalPoseSurface final_pose_surface_ = BSplineFinalPoseSurface::STRICT_LOCAL;
+  BSplineGravityStateMode gravity_state_mode_ = BSplineGravityStateMode::SHARED_OPTIMIZED;
+  BSplineGravityReferenceSource gravity_reference_source_ = BSplineGravityReferenceSource::STARTUP_SEED;
+  gtsam::Vector3 gravity_reference_vector_config_ = gtsam::Vector3(0.0, 0.0, 9.80665);
+  gtsam::Vector3 external_gravity_reference_ = gtsam::Vector3(0.0, 0.0, 9.80665);
   BSplineGravityMode gravity_mode_ = BSplineGravityMode::NORMAL;
+  BSplineBiasStateMode bias_state_mode_ = BSplineBiasStateMode::SHARED_SINGLETON;
+  gtsam::Vector3 bias_bootstrap_gyro_ = gtsam::Vector3::Zero();
+  gtsam::Vector3 bias_bootstrap_accel_ = gtsam::Vector3::Zero();
+  BSplineVelocityStateMode velocity_state_mode_ = BSplineVelocityStateMode::OPTIMIZE;
+  BSplineVelocityModePolicy velocity_mode_policy_ = BSplineVelocityModePolicy::ALWAYS_OPTIMIZE;
+  iap::CTLocalFrontend::FrontendSeedMode frontend_seed_mode_ =
+    iap::CTLocalFrontend::FrontendSeedMode::LAST_POSE_COPY;
+  mutable bool runtime_has_gnss_constraints_ = false;
+  mutable bool runtime_bias_optimized_ = true;
+  mutable bool runtime_velocity_optimized_ = true;
+  mutable BSplineVelocityStateMode runtime_velocity_state_mode_ = BSplineVelocityStateMode::OPTIMIZE;
+  mutable bool runtime_frontend_seed_fallback_used_ = false;
+  mutable bool runtime_frontend_seed_observed_ = false;
+  mutable bool runtime_frontend_seed_imu_success_observed_ = false;
+  mutable std::size_t runtime_frontend_seed_imu_sample_count_ = 0;
+  mutable std::string last_runtime_mode_metadata_signature_;
   double gravity_fixed_norm_value_ = 9.80665;
   double gravity_tilt_limit_rad_ = 0.02;
   int gravity_warmup_freeze_frames_ = 20;

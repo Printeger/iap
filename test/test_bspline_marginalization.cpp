@@ -31,6 +31,12 @@ gtsam::Values make_partition_values() {
   values.insert(iap::bspline_velocity_key(6), gtsam::Vector3(6.0, 0.0, 0.0));
   values.insert(iap::bspline_clock_key(4), gtsam::Vector2(10.0, 0.1));
   values.insert(iap::bspline_clock_key(6), gtsam::Vector2(20.0, 0.2));
+  values.insert(iap::bspline_gyro_bias_key(1), gtsam::Vector3(0.1, 0.0, 0.0));
+  values.insert(iap::bspline_accel_bias_key(1), gtsam::Vector3(1.0, 0.0, 0.0));
+  values.insert(iap::bspline_gyro_bias_key(4), gtsam::Vector3(0.4, 0.0, 0.0));
+  values.insert(iap::bspline_accel_bias_key(4), gtsam::Vector3(4.0, 0.0, 0.0));
+  values.insert(iap::bspline_gyro_bias_key(6), gtsam::Vector3(0.6, 0.0, 0.0));
+  values.insert(iap::bspline_accel_bias_key(6), gtsam::Vector3(6.0, 0.0, 0.0));
   values.insert(gtsam::symbol('j', 0), gtsam::Vector3(0.0, 0.0, 0.0));
   values.insert(gtsam::symbol('k', 0), gtsam::Vector3(0.0, 0.0, 0.0));
   values.insert(gtsam::symbol('g', 0), gtsam::Vector3(0.0, 0.0, 9.81));
@@ -177,6 +183,64 @@ TEST(BSplineMarginalizationTest, ActiveStateSetKeepsMultiSpanReferencedControls)
   EXPECT_TRUE(active_state_set.contains_removed_key(iap::bspline_velocity_key(1)));
 }
 
+TEST(BSplineMarginalizationTest, ActiveStateSetCanTrackLaggedBiasInsteadOfSharedSingleton) {
+  const gtsam::Values values = make_partition_values();
+  auto active_state_set = iap::build_spline_active_state_set(
+    make_buffer_states(),
+    make_segment_states(),
+    values,
+    5.1,
+    true,
+    true,
+    false,
+    true,
+    true);
+
+  EXPECT_TRUE(active_state_set.contains_active_key(iap::bspline_gyro_bias_key(6)));
+  EXPECT_TRUE(active_state_set.contains_active_key(iap::bspline_accel_bias_key(6)));
+  EXPECT_TRUE(active_state_set.contains_removed_key(iap::bspline_gyro_bias_key(4)));
+  EXPECT_TRUE(active_state_set.contains_removed_key(iap::bspline_accel_bias_key(4)));
+  EXPECT_FALSE(active_state_set.contains_active_key(gtsam::symbol('j', 0)));
+  EXPECT_FALSE(active_state_set.contains_active_key(gtsam::symbol('k', 0)));
+
+  const auto partition = iap::build_bspline_marginalization_partition(active_state_set);
+  EXPECT_TRUE(partition.contains_survivor(iap::bspline_gyro_bias_key(6)));
+  EXPECT_TRUE(partition.contains_removed(iap::bspline_accel_bias_key(4)));
+  EXPECT_FALSE(partition.contains_survivor(gtsam::symbol('j', 0)));
+}
+
+TEST(BSplineMarginalizationTest, SurvivorAnchorFilterCanExcludeLaggedBiasKeys) {
+  const gtsam::Values values = make_partition_values();
+  const auto active_state_set = iap::build_spline_active_state_set(
+    make_buffer_states(),
+    make_segment_states(),
+    values,
+    5.1,
+    true,
+    true,
+    false,
+    true,
+    true);
+
+  const auto anchorable = iap::filter_bspline_survivor_anchor_keys(active_state_set.active_keys(), false);
+  EXPECT_FALSE(std::find(
+    anchorable.begin(),
+    anchorable.end(),
+    iap::bspline_gyro_bias_key(6)) != anchorable.end());
+  EXPECT_FALSE(std::find(
+    anchorable.begin(),
+    anchorable.end(),
+    iap::bspline_accel_bias_key(6)) != anchorable.end());
+  EXPECT_TRUE(std::find(
+    anchorable.begin(),
+    anchorable.end(),
+    iap::bspline_control_point_key(6)) != anchorable.end());
+  EXPECT_TRUE(std::find(
+    anchorable.begin(),
+    anchorable.end(),
+    iap::bspline_velocity_key(6)) != anchorable.end());
+}
+
 TEST(BSplineMarginalizationTest, RegistryPruneFollowsActiveStateSetReferences) {
   iap::BSplineControlWindow window;
   window.seed_with_knots(make_window_knots(), make_window_poses());
@@ -227,6 +291,42 @@ TEST(BSplineMarginalizationTest, RegistryPruneFollowsActiveStateSetReferences) {
   EXPECT_TRUE(registry.auxiliary_values().exists(iap::bspline_velocity_key(6)));
   EXPECT_TRUE(registry.auxiliary_values().exists(iap::bspline_clock_key(4)));
   EXPECT_TRUE(registry.auxiliary_values().exists(iap::bspline_clock_key(6)));
+}
+
+TEST(BSplineMarginalizationTest, RegistryPruneDropsRetiredLaggedBiasMirrors) {
+  iap::BSplineControlWindow window;
+  window.seed_with_knots(make_window_knots(), make_window_poses());
+
+  iap::BSplineFixedLagStateRegistry registry;
+  registry.set_bias_shared_singleton(false);
+  registry.reset_from_window(window);
+  for (const auto& segment : make_segment_states()) {
+    iap::BSplineFixedLagSegmentState registry_segment;
+    registry_segment.scan_end = segment.scan_end;
+    registry_segment.span_begin_idx = segment.span_begin_idx;
+    registry_segment.span_end_idx = segment.span_end_idx;
+    registry_segment.active_control_indices = segment.active_control_indices;
+    registry_segment.control_indices = segment.control_indices;
+    registry_segment.auxiliary_index = segment.auxiliary_index;
+    registry.append_segment(registry_segment);
+  }
+
+  registry.auxiliary_values().insert(iap::bspline_gyro_bias_key(1), gtsam::Vector3(0.1, 0.0, 0.0));
+  registry.auxiliary_values().insert(iap::bspline_accel_bias_key(1), gtsam::Vector3(1.0, 0.0, 0.0));
+  registry.auxiliary_values().insert(iap::bspline_gyro_bias_key(4), gtsam::Vector3(0.4, 0.0, 0.0));
+  registry.auxiliary_values().insert(iap::bspline_accel_bias_key(4), gtsam::Vector3(4.0, 0.0, 0.0));
+  registry.auxiliary_values().insert(iap::bspline_gyro_bias_key(6), gtsam::Vector3(0.6, 0.0, 0.0));
+  registry.auxiliary_values().insert(iap::bspline_accel_bias_key(6), gtsam::Vector3(6.0, 0.0, 0.0));
+
+  const auto active_state_set = registry.active_state_set(make_partition_values(), 5.1, true);
+  registry.prune_to_active_state_set(5.1, active_state_set, true);
+
+  EXPECT_FALSE(registry.auxiliary_values().exists(iap::bspline_gyro_bias_key(1)));
+  EXPECT_FALSE(registry.auxiliary_values().exists(iap::bspline_accel_bias_key(1)));
+  EXPECT_FALSE(registry.auxiliary_values().exists(iap::bspline_gyro_bias_key(4)));
+  EXPECT_FALSE(registry.auxiliary_values().exists(iap::bspline_accel_bias_key(4)));
+  EXPECT_TRUE(registry.auxiliary_values().exists(iap::bspline_gyro_bias_key(6)));
+  EXPECT_TRUE(registry.auxiliary_values().exists(iap::bspline_accel_bias_key(6)));
 }
 
 TEST(BSplineMarginalizationTest, ActiveStateSetKeepsControlsSharedAcrossBucketStyleReferences) {

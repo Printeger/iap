@@ -7,6 +7,7 @@
 #include <iap/odometry/ct_backend_summary.hpp>
 #include <iap/odometry/ct_local_frontend.hpp>
 #include <iap/odometry/estimation_frame.hpp>
+#include <iap/odometry/integrated_bspline_imu_factor.hpp>
 #include <iap/odometry/integrated_bspline_velocity_factor.hpp>
 #include <iap/util/raw_points.hpp>
 
@@ -219,6 +220,155 @@ TEST(CTLocalFrontendSolve, NullTargetIvoxSkipsLidarFactors) {
   });
 }
 
+TEST(CTLocalFrontendSolve, ExternalGravityRunKeepsBiasStateWithoutGravityKey) {
+  auto target = std::make_shared<glim::EstimationFrame>();
+  target->stamp = 0.0;
+  target->T_world_lidar = Eigen::Isometry3d::Identity();
+  target->T_lidar_imu = Eigen::Isometry3d::Identity();
+  target->T_world_imu = target->T_world_lidar * target->T_lidar_imu;
+  target->v_world_imu = Eigen::Vector3d::Zero();
+  target->imu_bias = Eigen::Matrix<double, 6, 1>::Zero();
+
+  iap::CTLocalFrontend::Input input;
+  input.target_frame = target;
+  input.use_external_gravity = true;
+  input.gravity_world = Eigen::Vector3d(0.0, 0.0, 9.81);
+  input.source_frames.push_back(make_source_input(
+    {Eigen::Vector4d(1.0, 0.0, 0.0, 1.0)},
+    {0.05}));
+  input.imu_samples.push_back(iap::CTLocalFrontend::IMUSample{
+    0.03,
+    Eigen::Vector3d(0.05, 0.0, 0.0),
+    Eigen::Vector3d(0.0, 0.0, 9.80665),
+  });
+
+  iap::CTLocalFrontend frontend;
+  const auto result = frontend.run(input);
+  EXPECT_FALSE(result.local_values.exists(gtsam::symbol('g', 0)));
+  EXPECT_TRUE(result.backend_summary.has_bias_state);
+}
+
+TEST(CTLocalFrontendSolve, LaggedBiasRunSeedsLaggedBiasKeysInsteadOfSharedSingleton) {
+  auto target = std::make_shared<glim::EstimationFrame>();
+  target->stamp = 0.0;
+  target->T_world_lidar = Eigen::Isometry3d::Identity();
+  target->T_lidar_imu = Eigen::Isometry3d::Identity();
+  target->T_world_imu = target->T_world_lidar * target->T_lidar_imu;
+  target->v_world_imu = Eigen::Vector3d::Zero();
+  target->imu_bias = Eigen::Matrix<double, 6, 1>::Zero();
+
+  iap::CTLocalFrontend::Input input;
+  input.target_frame = target;
+  input.use_lagged_bias = true;
+  input.source_frames.push_back(make_source_input(
+    {Eigen::Vector4d(1.0, 0.0, 0.0, 1.0)},
+    {0.05}));
+  input.imu_samples.push_back(iap::CTLocalFrontend::IMUSample{
+    0.03,
+    Eigen::Vector3d(0.05, 0.0, 0.0),
+    Eigen::Vector3d(0.0, 0.0, 9.80665),
+  });
+
+  iap::CTLocalFrontend frontend;
+  const auto result = frontend.run(input);
+  EXPECT_TRUE(result.local_values.exists(gtsam::symbol('j', 3)));
+  EXPECT_TRUE(result.local_values.exists(gtsam::symbol('k', 3)));
+  EXPECT_FALSE(result.local_values.exists(gtsam::symbol('j', 0)));
+  EXPECT_FALSE(result.local_values.exists(gtsam::symbol('k', 0)));
+  EXPECT_TRUE(result.backend_summary.has_bias_state);
+}
+
+TEST(CTLocalFrontendSolve, ImuForwardPredictionSeedDiffersFromLastPoseCopy) {
+  auto target = std::make_shared<glim::EstimationFrame>();
+  target->stamp = 0.0;
+  target->T_world_lidar = Eigen::Isometry3d::Identity();
+  target->T_lidar_imu = Eigen::Isometry3d::Identity();
+  target->T_world_imu = target->T_world_lidar * target->T_lidar_imu;
+  target->v_world_imu = Eigen::Vector3d::Zero();
+  target->imu_bias = Eigen::Matrix<double, 6, 1>::Zero();
+
+  const std::vector<iap::CTLocalFrontend::IMUSample> seed_imu_samples{
+    iap::CTLocalFrontend::IMUSample{
+      0.00,
+      Eigen::Vector3d::Zero(),
+      Eigen::Vector3d(1.0, 0.0, 9.80665),
+    },
+    iap::CTLocalFrontend::IMUSample{
+      0.05,
+      Eigen::Vector3d::Zero(),
+      Eigen::Vector3d(1.0, 0.0, 9.80665),
+    },
+    iap::CTLocalFrontend::IMUSample{
+      0.10,
+      Eigen::Vector3d::Zero(),
+      Eigen::Vector3d(1.0, 0.0, 9.80665),
+    },
+  };
+
+  iap::CTLocalFrontend::Input last_pose_input;
+  last_pose_input.target_frame = target;
+  last_pose_input.seed_mode = iap::CTLocalFrontend::FrontendSeedMode::LAST_POSE_COPY;
+  last_pose_input.source_frames.push_back(make_source_input(
+    {Eigen::Vector4d(1.0, 0.0, 0.0, 1.0)},
+    {0.05}));
+  last_pose_input.imu_samples = seed_imu_samples;
+  last_pose_input.seed_imu_samples = seed_imu_samples;
+
+  auto imu_seed_input = last_pose_input;
+  imu_seed_input.seed_mode = iap::CTLocalFrontend::FrontendSeedMode::IMU_FORWARD_PREDICTION;
+
+  iap::CTLocalFrontend frontend;
+  const auto last_pose_result = frontend.run(last_pose_input);
+  const auto imu_seed_result = frontend.run(imu_seed_input);
+
+  ASSERT_EQ(last_pose_result.layout.controls().size(), iap::kBSplineControlPointCount);
+  ASSERT_EQ(imu_seed_result.layout.controls().size(), iap::kBSplineControlPointCount);
+
+  const auto& last_pose_seed = last_pose_result.layout.controls().back().pose;
+  const auto& imu_seed = imu_seed_result.layout.controls().back().pose;
+  EXPECT_NEAR(last_pose_seed.translation().x(), 0.0, 1e-9);
+  EXPECT_GT(imu_seed.translation().x(), 1e-4);
+  EXPECT_EQ(last_pose_result.pose_diagnostics.seed_mode, "last_pose_copy");
+  EXPECT_EQ(last_pose_result.pose_diagnostics.seed_source, "last_pose_copy");
+  EXPECT_FALSE(last_pose_result.pose_diagnostics.seed_fallback_used);
+  EXPECT_EQ(last_pose_result.pose_diagnostics.seed_imu_sample_count, 0U);
+  EXPECT_EQ(imu_seed_result.pose_diagnostics.seed_mode, "imu_forward_prediction");
+  EXPECT_EQ(imu_seed_result.pose_diagnostics.seed_source, "imu_forward_prediction");
+  EXPECT_FALSE(imu_seed_result.pose_diagnostics.seed_fallback_used);
+  EXPECT_EQ(imu_seed_result.pose_diagnostics.seed_imu_sample_count, seed_imu_samples.size());
+  EXPECT_EQ(imu_seed_result.processed.frame_profile.frontend_seed_mode, "imu_forward_prediction");
+  EXPECT_EQ(imu_seed_result.processed.frame_profile.frontend_seed_source, "imu_forward_prediction");
+  EXPECT_FALSE(imu_seed_result.processed.frame_profile.frontend_seed_fallback_used);
+  EXPECT_EQ(imu_seed_result.processed.frame_profile.frontend_seed_imu_sample_count, seed_imu_samples.size());
+}
+
+TEST(CTLocalFrontendSolve, ImuForwardPredictionFallsBackWhenSeedSamplesMissing) {
+  auto target = std::make_shared<glim::EstimationFrame>();
+  target->stamp = 0.0;
+  target->T_world_lidar = Eigen::Isometry3d::Identity();
+  target->T_lidar_imu = Eigen::Isometry3d::Identity();
+  target->T_world_imu = target->T_world_lidar * target->T_lidar_imu;
+  target->v_world_imu = Eigen::Vector3d::Zero();
+  target->imu_bias = Eigen::Matrix<double, 6, 1>::Zero();
+
+  iap::CTLocalFrontend::Input input;
+  input.target_frame = target;
+  input.seed_mode = iap::CTLocalFrontend::FrontendSeedMode::IMU_FORWARD_PREDICTION;
+  input.source_frames.push_back(make_source_input(
+    {Eigen::Vector4d(1.0, 0.0, 0.0, 1.0)},
+    {0.05}));
+
+  iap::CTLocalFrontend frontend;
+  const auto result = frontend.run(input);
+  EXPECT_EQ(result.pose_diagnostics.seed_mode, "imu_forward_prediction");
+  EXPECT_EQ(result.pose_diagnostics.seed_source, "imu_forward_prediction_fallback_last_pose_copy");
+  EXPECT_TRUE(result.pose_diagnostics.seed_fallback_used);
+  EXPECT_EQ(result.pose_diagnostics.seed_imu_sample_count, 0U);
+  EXPECT_EQ(result.processed.frame_profile.frontend_seed_source, "imu_forward_prediction_fallback_last_pose_copy");
+  EXPECT_TRUE(result.processed.frame_profile.frontend_seed_fallback_used);
+  EXPECT_EQ(result.processed.frame_profile.frontend_seed_imu_sample_count, 0U);
+}
+
 TEST(CTLocalFrontendBuckets, SupportsConfiguredBucketModes) {
   const auto layout = make_lidar_layout();
   const auto source = make_source_input(
@@ -341,6 +491,124 @@ TEST(CTLocalFrontendLayer, AssembleLocalLayerSkipsBoundaryImuSamplesWithoutCente
   EXPECT_EQ(contribution.imu_factor_count, 1U);
   EXPECT_TRUE(contribution.uses_shared_imu_state);
   EXPECT_EQ(contribution.factor_count(), 2U);
+}
+
+TEST(CTLocalFrontendLayer, ExternalGravityUsesFixedReferenceWithoutGravityKey) {
+  iap::CTLocalFrontend frontend;
+  iap::CTLocalFrontend::LayerInput input;
+  input.graph_context.layout = std::make_shared<const iap::SplineStateLayout>(make_lidar_layout());
+  input.graph_context.local_layer_enabled = true;
+  input.bucket_config.mode = iap::CTLocalFrontend::LidarBucketMode::SINGLE_BUCKET;
+  input.velocity_precision = 1e3;
+  input.finite_difference_dt = 0.01;
+  input.enable_velocity_factor = false;
+  input.use_external_gravity = true;
+  input.gravity_world = Eigen::Vector3d(0.0, 0.0, 9.81);
+
+  iap::CTLocalFrontend::LayerSegmentInput segment;
+  segment.source_frame_index = 0;
+  segment.source_frame = make_source_input(
+    {Eigen::Vector4d(0.0, 0.0, 0.0, 1.0)},
+    {0.05});
+  segment.control_indices = {0, 1, 2, 3};
+  segment.auxiliary_index = 3;
+  segment.imu_samples.push_back(iap::CTLocalFrontend::IMUSample{
+    0.03,
+    Eigen::Vector3d(0.05, 0.0, 0.0),
+    Eigen::Vector3d(0.0, 0.0, 9.80665),
+  });
+  input.segments.push_back(std::move(segment));
+
+  const auto contribution = frontend.assemble_local_layer(input);
+  EXPECT_EQ(contribution.velocity_factor_count, 0U);
+  EXPECT_EQ(contribution.imu_factor_count, 1U);
+
+  bool found_external_gravity_imu_factor = false;
+  for (const auto& factor : contribution.graph) {
+    const auto imu_factor = std::dynamic_pointer_cast<iap::IntegratedSplineIMUFactor>(factor);
+    if (!imu_factor) {
+      continue;
+    }
+    found_external_gravity_imu_factor = true;
+    EXPECT_EQ(imu_factor->keys().size(), 6U);
+    EXPECT_EQ(std::count(imu_factor->keys().begin(), imu_factor->keys().end(), gtsam::symbol('g', 0)), 0);
+  }
+  EXPECT_TRUE(found_external_gravity_imu_factor);
+}
+
+TEST(CTLocalFrontendLayer, LaggedBiasUsesPerSegmentBiasKeysInsteadOfSharedSingleton) {
+  iap::CTLocalFrontend frontend;
+  iap::CTLocalFrontend::LayerInput input;
+  input.graph_context.layout = std::make_shared<const iap::SplineStateLayout>(make_lidar_layout());
+  input.graph_context.local_layer_enabled = true;
+  input.bucket_config.mode = iap::CTLocalFrontend::LidarBucketMode::SINGLE_BUCKET;
+  input.velocity_precision = 1e3;
+  input.finite_difference_dt = 0.01;
+  input.enable_velocity_factor = false;
+  input.use_lagged_bias = true;
+
+  iap::CTLocalFrontend::LayerSegmentInput segment;
+  segment.source_frame_index = 0;
+  segment.source_frame = make_source_input(
+    {Eigen::Vector4d(0.0, 0.0, 0.0, 1.0)},
+    {0.05});
+  segment.control_indices = {10, 11, 12, 13};
+  segment.auxiliary_index = 13;
+  segment.imu_samples.push_back(iap::CTLocalFrontend::IMUSample{
+    0.03,
+    Eigen::Vector3d(0.05, 0.0, 0.0),
+    Eigen::Vector3d(0.0, 0.0, 9.80665),
+  });
+  input.segments.push_back(std::move(segment));
+
+  const auto contribution = frontend.assemble_local_layer(input);
+  ASSERT_EQ(contribution.imu_factor_count, 1U);
+
+  bool found_lagged_bias_imu_factor = false;
+  for (const auto& factor : contribution.graph) {
+    const auto imu_factor = std::dynamic_pointer_cast<iap::IntegratedSplineIMUFactor>(factor);
+    if (!imu_factor) {
+      continue;
+    }
+    found_lagged_bias_imu_factor = true;
+    EXPECT_EQ(std::count(imu_factor->keys().begin(), imu_factor->keys().end(), gtsam::symbol('j', 13)), 1);
+    EXPECT_EQ(std::count(imu_factor->keys().begin(), imu_factor->keys().end(), gtsam::symbol('k', 13)), 1);
+    EXPECT_EQ(std::count(imu_factor->keys().begin(), imu_factor->keys().end(), gtsam::symbol('j', 0)), 0);
+    EXPECT_EQ(std::count(imu_factor->keys().begin(), imu_factor->keys().end(), gtsam::symbol('k', 0)), 0);
+  }
+  EXPECT_TRUE(found_lagged_bias_imu_factor);
+}
+
+TEST(CTLocalFrontendLayer, DisableVelocityFactorKeepsLayerFreeOfVelocityDrive) {
+  iap::CTLocalFrontend frontend;
+  iap::CTLocalFrontend::LayerInput input;
+  input.graph_context.layout = std::make_shared<const iap::SplineStateLayout>(make_lidar_layout());
+  input.graph_context.local_layer_enabled = true;
+  input.bucket_config.mode = iap::CTLocalFrontend::LidarBucketMode::SINGLE_BUCKET;
+  input.velocity_precision = 1e3;
+  input.finite_difference_dt = 0.01;
+  input.enable_velocity_factor = false;
+
+  iap::CTLocalFrontend::LayerSegmentInput segment;
+  segment.source_frame_index = 0;
+  segment.source_frame = make_source_input(
+    {Eigen::Vector4d(0.0, 0.0, 0.0, 1.0)},
+    {0.05});
+  segment.control_indices = {10, 11, 12, 13};
+  segment.auxiliary_index = 13;
+  segment.imu_samples.push_back(iap::CTLocalFrontend::IMUSample{
+    0.03,
+    Eigen::Vector3d(0.05, 0.0, 0.0),
+    Eigen::Vector3d(0.0, 0.0, 9.80665),
+  });
+  input.segments.push_back(std::move(segment));
+
+  const auto contribution = frontend.assemble_local_layer(input);
+  EXPECT_EQ(contribution.velocity_factor_count, 0U);
+  for (const auto& factor : contribution.graph) {
+    const auto velocity_factor = std::dynamic_pointer_cast<iap::IntegratedBSplineVelocityFactor>(factor);
+    EXPECT_FALSE(static_cast<bool>(velocity_factor));
+  }
 }
 
 TEST(CTLocalFrontendLayer, VelocityFactorStaysLocalToCurrentSegment) {

@@ -3,6 +3,8 @@
 #include <filesystem>
 #include <string>
 
+#include <nlohmann/json.hpp>
+
 namespace iap {
 
 class LogPaths {
@@ -37,5 +39,7 @@ private:
   std::filesystem::path export_dir_;
   std::filesystem::path metadata_dir_;
 };
+
+void merge_run_info_metadata(const nlohmann::json& patch);
 
 }  // namespace iap
