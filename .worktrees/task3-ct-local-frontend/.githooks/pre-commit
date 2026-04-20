@@ -1,0 +1,26 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# 获取 staged 文件列表
+STAGED=$(git diff --cached --name-only)
+
+# 判断是否修改了 src/iap 下的“代码/构建/配置”文件
+IAP_CHANGED=$(echo "$STAGED" | grep -E '^src/iap/.*\.(c|cc|cpp|h|hpp|py|cmake|txt|xml|yaml|yml|launch\.py)$|^src/iap/(CMakeLists\.txt|package\.xml)' || true)
+
+if [[ -n "$IAP_CHANGED" ]]; then
+  # 需要同时更新两份文档
+  DOC1=$(echo "$STAGED" | grep -E '^docs/CHANGES\.md$' || true)
+  DOC2=$(echo "$STAGED" | grep -E '^docs/TRACEABILITY\.md$' || true)
+
+  if [[ -z "$DOC1" || -z "$DOC2" ]]; then
+    echo "❌ 检测到你修改了 src/iap/**，但未同时 staged 以下文档："
+    echo "   - docs/CHANGES.md"
+    echo "   - docs/TRACEABILITY.md"
+    echo ""
+    echo "请先更新并 git add 这两份文档，再提交。"
+    echo "（如确需跳过：临时用 IAP_SKIP_DOCS=1 git commit ...，但不建议）"
+    exit 1
+  fi
+fi
+
+exit 0

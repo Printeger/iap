@@ -1,0 +1,164 @@
+{
+  /*** Phase-1 B-spline continuous-time odometry foundation ***
+  // This module currently reuses the existing LiDAR-IMU odometry backend and
+  // publishes a continuous-time B-spline trajectory view for planner/viewer.
+  // Phase-1C now includes a spline-native GNSS path where BSpline odometry
+  // owns both its own GnssEpochBuilder and GnssHandler, rebuilds processed
+  // epochs from raw shared-state GNSS mailboxes, and builds segment-time-window
+  // GNSS factors inside the same fixed-lag graph. Stricter Jacobian /
+  // marginalization engineering remains follow-up work.
+  */
+  "odometry_estimation": {
+    "so_name": "libodometry_estimation_bspline.so",
+    // Frontend mode:
+    //   RECONSTRUCT   = phase-1A legacy path (discrete odom + post-hoc spline)
+    //   CT_LIDAR_CPU  = phase-1B migration mainline (control-point window + CPU CT LiDAR factor)
+    //   CT_LIDAR_GPU  = phase-1B/2 path (select GPU backend via ct_lidar_gpu_backend)
+    // Commit 0 migration boundary:
+    //   default to CT_LIDAR_CPU while the codebase moves from the current
+    //   fixed 4-control-point local spline window toward an explicit knot
+    //   vector plus unified spline evaluator. This commit does not change
+    //   math behavior or residual models; it only freezes the migration order.
+    "frontend_mode": "CT_LIDAR_CPU",
+    // GPU backend for CT_LIDAR_GPU:
+    //   CPU path is the refactor mainline.
+    //   BUCKET is the second-priority GPU adaptation path after the CPU path is stable.
+    //   KERNEL remains experimental and is the last path to align with unified spline query semantics.
+    //   BUCKET = frozen engineering path; time-bucket GPU VGICP subfactors mapped back to 4 spline controls
+    //   KERNEL = experimental bucket-context-aligned kernel backend; interface-aligned first, tuning later
+    "ct_lidar_gpu_backend": "BUCKET",
+    // Initialization params
+    "initialization_mode": "LOOSE",
+    "initialization_window_size": 1.0,
+    "init_pose_damping_scale": 1e10,
+    // Optimizer params
+    "smoother_lag": 2.0,
+    "use_isam2_dogleg": false,
+    "isam2_relinearize_skip": 1,
+    "isam2_relinearize_thresh": 0.1,
+    "clock_owner_mode": "gnss",
+    "fix_imu_bias": false,
+    "clk_bias_noise": 100.0,
+    "clk_drift_noise": 1.0,
+    "clk_bias_relin_thresh": 500.0,
+    "clk_drift_relin_thresh": 5.0,
+    // Registration settings
+    "registration_type": "VGICP",
+    "max_iterations": 5,
+    "lru_thresh": 100,
+    "target_downsampling_rate": 0.1,
+    "ivox_resolution": 0.5,
+    "ivox_min_dist": 0.1,
+    "vgicp_resolution": 0.25,
+    "vgicp_voxelmap_levels": 2,
+    "vgicp_voxelmap_scaling_factor": 2.0,
+    // Phase-1B continuous-time LiDAR factor settings
+    "max_correspondence_distance": 1.5,
+    // Target strategy:
+    //   ACTIVE_WINDOW_SNAPSHOT = freeze a local target built from the most recent active frames
+    //   GLOBAL_IVOX_REFERENCE  = use the rolling ct_target_ivox_ directly as factor target
+    // Speed-test profile:
+    //   prefer the rolling global reference to avoid rebuilding a frozen
+    //   active-window snapshot target every update.
+    "ct_lidar_target_mode": "GLOBAL_IVOX_REFERENCE",
+    // Jacobian mode for continuous-time LiDAR factors (CPU / GPU):
+    //   NUMERIC_FULL   = numeric pose Jacobian on all 6 DoF of each control pose
+    //   SEMI_ANALYTIC  = analytic translation + normalized-quaternion-blend rotation chain rule
+    "ct_lidar_jacobian_mode": "SEMI_ANALYTIC",
+    // Number of most recent active frames used to build a frozen snapshot target.
+    // <= 0 means use all active frames currently retained in the lag window.
+    "ct_lidar_snapshot_frame_window": 8,
+    // Snapshot acceptance policy:
+    //   snapshot is used only when it has enough support; otherwise factor falls back to global ivox reference
+    "ct_lidar_snapshot_min_frames": 2,
+    "ct_lidar_snapshot_min_points": 64,
+    // Maximum age/span (seconds) allowed for the frozen snapshot support set.
+    // <= 0 disables explicit age gating.
+    "ct_lidar_snapshot_max_age": 0.0,
+    // Correspondence search:
+    //   candidates = k nearest target voxels evaluated per source point
+    //   accept_ratio = Lowe-style ambiguity filter on best/second-best Mahalanobis score
+    //                  <= 0 disables ambiguity rejection
+    //   score_gap = absolute Mahalanobis-score separation required between best/second-best
+    //               <= 0 disables this extra ambiguity gate
+    // Speed-test profile:
+    //   use single-candidate correspondence to minimize per-point GPU/CPU-side
+    //   candidate evaluation overhead. Increase this again for robustness A/B tests.
+    "ct_lidar_correspondence_candidates": 1,
+    "ct_lidar_correspondence_accept_ratio": 0.0,
+    "ct_lidar_correspondence_min_score_gap": 0.0,
+    // Numeric perturbation scale kept only for the NUMERIC_FULL fallback / profiling A-B checks.
+    "ct_lidar_jacobian_numeric_eps": 1e-4,
+    // Optional outlier rejection on the whitened residual norm sqrt(r^T M r).
+    // <= 0 disables explicit outlier rejection.
+    "ct_lidar_outlier_mahalanobis_thresh": 0.0,
+    // Robust kernel on the whitened residual norm:
+    //   NONE / HUBER / CAUCHY
+    "ct_lidar_robust_kernel": "NONE",
+    "ct_lidar_robust_kernel_width": 1.0,
+    // Reject correspondences whose robust weight falls below this floor after the soft kernel.
+    // <= 0 keeps purely soft robust weighting.
+    "ct_lidar_robust_weight_floor": 0.0,
+    // Engineering hooks for LiDAR factor validation / profiling.
+    "ct_lidar_profile_factor": true,
+    "ct_lidar_validate_linearization": false,
+    "ct_lidar_profile_numeric_reference": true,
+    // Window-level wall-clock profiling for the continuous-time BSpline frontend.
+    // Logs source/target preparation, IMU/GNSS factor assembly, LM optimize,
+    // and carried-prior / marginalization timing.
+    "ct_profile_pipeline": true,
+    // Export one active-window summary row plus one row per CT LiDAR factor.
+    // This is the baseline surface used for future GPU kernel-level A/B profiling.
+    "ct_lidar_export_baseline_csv": true,
+    "ct_lidar_baseline_csv_path": "/tmp/iap_ct_lidar_baseline.csv",
+    "ct_lidar_linearization_check_scale": 1e-4,
+    "ct_lidar_linearization_warn_ratio": 0.25,
+    "ct_lidar_numeric_reference_scale": 1e-5,
+    // Degeneracy warning policy for current target/correspondence quality.
+    // Thresholds <= 0 disable the corresponding warning.
+    "ct_lidar_warn_degeneracy": false,
+    "ct_lidar_warn_min_match_ratio": 0.5,
+    "ct_lidar_warn_min_inlier_ratio": 0.35,
+    "ct_lidar_warn_min_unique_target_ratio": 0.25,
+    "ct_lidar_warn_max_target_reuse_ratio": 0.5,
+    "ct_lidar_warn_max_ambiguity_rejection_ratio": 0.25,
+    "ct_lidar_warn_min_mean_score_gap": 0.05,
+    "ctrl_point_anchor_inf_scale": 1e6,
+    "ctrl_point_prediction_inf_scale": 1e3,
+    "ctrl_point_smoothness_inf_scale": 1e2,
+    "ctrl_point_marginal_inf_scale": 1e4,
+    // Continuous-time IMU sample factor settings:
+    //   imu_ct_trans_inf_scale = accelerometer residual precision
+    //   imu_ct_rot_inf_scale   = gyroscope residual precision
+    //   imu_ct_bias_inf_scale  = shared accel/gyro bias prior precision
+    //   imu_ct_gravity_inf_scale = shared gravity prior precision
+    //   imu_ct_sample_stride   = downsample stride for per-segment IMU samples
+    "imu_ct_trans_inf_scale": 10.0,
+    "imu_ct_rot_inf_scale": 100.0,
+    "imu_ct_bias_inf_scale": 1e3,
+    "imu_ct_gravity_inf_scale": 1e3,
+    "velocity_ct_inf_scale": 1e3,
+    "imu_ct_sample_stride": 4,
+    "lm_max_iterations": 8,
+    // Continuous-time spline settings
+    "spline_knot_mode": "uniform",
+    "spline_nominal_dt": 0.0,
+    "spline_finite_difference_dt": 0.01,
+    "compatibility_sample_dt": 0.01,
+    "publish_shared_trajectory": true,
+    "attach_trajectory_to_frames": true,
+    // Legacy-compatible outputs
+    "validate_imu": true,
+    "save_imu_rate_trajectory": true,
+    "num_threads": 2,
+    // Scan-to-multi-scan (VGICP)
+    "use_scan_to_map": false,
+    "full_connection_window_size": 3,
+    "max_num_keyframes": 15,
+    "keyframe_update_strategy": "OVERLAP",
+    "keyframe_max_overlap": 0.7,
+    "keyframe_min_overlap": 0.01,
+    "keyframe_delta_trans": 2.0,
+    "keyframe_delta_rot": 0.5
+  }
+}

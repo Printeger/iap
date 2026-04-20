@@ -1,0 +1,320 @@
+\documentclass[journal]{IEEEtran}
+\usepackage{amsmath,amssymb,bm}
+\usepackage{graphicx}
+\usepackage{hyperref}
+\usepackage{booktabs}
+
+\begin{document}
+
+\section{Methodology}
+\label{sec:methodology}
+
+This section presents the continuous-time Integrity-Aware Planning (IAP)
+pipeline implemented in the updated \texttt{iap} system. The estimator is now
+organized around a fixed-lag B-spline state, where LiDAR, IMU, and GNSS are
+jointly fused inside one continuous-time optimization window. In addition, the
+GNSS front-end boundary is shifted toward the odometry core: the ROS extension
+mainly acts as a transport layer for raw observations and navigation products,
+whereas \texttt{OdometryEstimationBSpline} owns the continuous-time GNSS
+preprocessing, epoch assembly, and factor construction.
+
+\subsection{System Overview}
+\label{sec:system_overview}
+
+The overall information flow is shown in Fig.~\ref{fig:system_flow}. LiDAR scan
+points, IMU packets, and GNSS raw measurements are first time-stamped and
+buffered. The LiDAR-IMU-GNSS odometry core then maintains an active spline
+window and solves for the control poses, kinematic states, inertial states, and
+GNSS clock/alignment states in a unified fixed-lag graph. The optimized
+continuous-time trajectory is published both to the mapping stack and to the
+planner through a read-only trajectory view.
+
+\begin{figure}[!t]
+  \centering
+  \includegraphics[width=\columnwidth]{docs/figures/system_flow.pdf}
+  \caption{Continuous-time IAP pipeline. The GNSS ROS bridge publishes raw
+  observation batches, ephemeris updates, and anchor information, while the
+  continuous-time odometry core performs epoch assembly and measurement
+  modeling inside the fixed-lag optimization window.}
+  \label{fig:system_flow}
+\end{figure}
+
+\subsection{Continuous-Time State Parameterization}
+\label{sec:ct_state}
+
+Let the active fixed-lag window contain $N_s$ spline control poses
+$\{\mathbf{S}_j\}_{j=0}^{N_s-1}$, where $\mathbf{S}_j \in \mathrm{SE}(3)$.
+Each active segment is supported by four consecutive control poses. In
+addition, the estimator carries explicit kinematic and sensor states:
+\begin{equation}
+\mathcal{X} =
+\left\{
+\mathbf{S}_j,\,
+\mathbf{u}_j,\,
+\mathbf{c}_j,\,
+\mathbf{b}_g,\,
+\mathbf{b}_a,\,
+\mathbf{g}^w,\,
+\mathbf{E}_0,\,
+\mathbf{R}_{ew}
+\right\},
+\label{eq:full_state}
+\end{equation}
+where $\mathbf{u}_j \in \mathbb{R}^3$ is the segment velocity state,
+$\mathbf{c}_j = [\delta t_j,\ \dot{\delta t}_j]^\top$ is the GNSS clock
+bias-drift state, $\mathbf{b}_g$ and $\mathbf{b}_a$ are the gyroscope and
+accelerometer biases, $\mathbf{g}^w$ is the gravity vector in the world frame,
+$\mathbf{E}_0 \in \mathbb{R}^3$ is the ECEF origin of the local world frame,
+and $\mathbf{R}_{ew} \in \mathrm{SO}(3)$ maps world coordinates to ECEF.
+
+For a normalized scan time $u \in [0,1]$, the cubic B-spline basis is
+\begin{equation}
+\bm{\beta}(u) =
+\begin{bmatrix}
+\beta_0(u) & \beta_1(u) & \beta_2(u) & \beta_3(u)
+\end{bmatrix}^{\top},
+\label{eq:bspline_basis_vector}
+\end{equation}
+with
+\begin{align}
+\beta_0(u) &= \frac{1 - 3u + 3u^2 - u^3}{6}, &
+\beta_1(u) &= \frac{4 - 6u^2 + 3u^3}{6}, \nonumber\\
+\beta_2(u) &= \frac{1 + 3u + 3u^2 - 3u^3}{6}, &
+\beta_3(u) &= \frac{u^3}{6}.
+\label{eq:bspline_basis}
+\end{align}
+The world-frame translation is evaluated by
+\begin{equation}
+\mathbf{p}(u) = \sum_{k=0}^{3} \beta_k(u)\,\mathbf{p}_{j+k},
+\label{eq:bspline_translation}
+\end{equation}
+and the orientation is obtained from normalized quaternion blending of the
+support poses. The resulting continuous-time pose is denoted by
+\begin{equation}
+\mathbf{T}(u) = \mathrm{Interp}\!\left(
+\mathbf{S}_j,\mathbf{S}_{j+1},\mathbf{S}_{j+2},\mathbf{S}_{j+3};u
+\right).
+\label{eq:bspline_pose}
+\end{equation}
+
+\subsection{GNSS Front-End Migration Toward the Odometry Core}
+\label{sec:gnss_frontend}
+
+The GNSS front-end is decomposed into a ROS ingress layer and an odometry-owned
+epoch builder. The ROS ingress receives three asynchronous streams:
+\begin{equation}
+\mathcal{M}^{\text{raw}}_m,\qquad
+\mathcal{E}_m,\qquad
+\bm{\alpha\beta}_m,
+\label{eq:gnss_streams}
+\end{equation}
+where $\mathcal{M}^{\text{raw}}_m$ is the raw pseudorange/Doppler batch,
+$\mathcal{E}_m$ denotes the current broadcast ephemeris update set, and
+$\bm{\alpha\beta}_m$ denotes the Klobuchar ionospheric coefficients.
+These quantities are forwarded to the shared mailbox, and the
+\texttt{OdometryEstimationBSpline} instance owns a \texttt{GnssEpochBuilder}
+that assembles processed epochs in the same time domain as the spline window.
+
+For each satellite observation $k$ in batch $m$, the transmit time is
+approximated by
+\begin{equation}
+t_{k,\mathrm{tx}} \approx t_{k,\mathrm{rx}} - \frac{\rho_k}{c},
+\label{eq:tx_time}
+\end{equation}
+where $\rho_k$ is the measured pseudorange and $c$ is the speed of light.
+Using the broadcast ephemeris, the builder computes the ECEF satellite state
+$\mathbf{p}^{e}_{s,k}(t_{k,\mathrm{tx}})$ and
+$\mathbf{v}^{e}_{s,k}(t_{k,\mathrm{tx}})$, and forms the corrected
+measurements
+\begin{align}
+\tilde{\rho}_k &= \rho_k + c\,\delta t^{sv}_k, \label{eq:rho_corrected}\\
+\tilde{d}_k &= d_k + c\,\dot{\delta t}^{sv}_k,
+\label{eq:doppler_corrected}
+\end{align}
+where $\delta t^{sv}_k$ and $\dot{\delta t}^{sv}_k$ are the broadcast satellite
+clock bias and drift. The resulting processed epoch
+\begin{equation}
+\mathcal{Z}^{\text{gnss}}_m =
+\left\{
+t_m,\,
+\{\tilde{\rho}_k,\tilde{d}_k,\mathbf{p}^{e}_{s,k},\mathbf{v}^{e}_{s,k}\}_{k=1}^{n_m},\,
+\bm{\alpha\beta}_m
+\right\}
+\label{eq:processed_epoch}
+\end{equation}
+is inserted into the odometry-owned \texttt{GnssHandler}, which then performs
+segment-time-window draining for factor generation.
+
+\subsection{Continuous-Time Measurement Models}
+\label{sec:measurement_models}
+
+\subsubsection{LiDAR Constraint}
+
+Each LiDAR point $\mathbf{p}^{\ell}_n$ is associated with a normalized time
+$u_n$ inside the active segment. Its deskewed world-frame location is
+\begin{equation}
+\mathbf{p}^{w}_n = \mathbf{T}(u_n)\,\mathbf{p}^{\ell}_n.
+\label{eq:lidar_world_point}
+\end{equation}
+Given a matched target point $\mathbf{q}^{w}_n$ and the GICP Mahalanobis matrix
+$\mathbf{M}_n$, the continuous-time LiDAR residual is
+\begin{equation}
+r^{L}_n = \left(\mathbf{p}^{w}_n - \mathbf{q}^{w}_n\right)^{\top}
+\mathbf{M}_n
+\left(\mathbf{p}^{w}_n - \mathbf{q}^{w}_n\right).
+\label{eq:lidar_residual}
+\end{equation}
+All active segments contribute LiDAR factors simultaneously, so overlapping
+control poses are jointly constrained by multiple temporally adjacent scans.
+
+\subsubsection{IMU Constraint}
+
+For each IMU sample at normalized time $u_m$, the gyroscope prediction is
+approximated by finite differencing the interpolated orientations:
+\begin{equation}
+\hat{\bm{\omega}}(u_m) \approx
+\frac{
+\log\!\left(
+\mathbf{R}(u_m-\Delta u)^{\top}\mathbf{R}(u_m+\Delta u)
+\right)
+}{2\Delta t},
+\label{eq:imu_gyro_pred}
+\end{equation}
+where $\Delta t = \Delta u \, \Delta T_{\mathrm{seg}}$.
+The specific-force prediction is
+\begin{equation}
+\hat{\mathbf{a}}(u_m) =
+\mathbf{R}(u_m)^{\top}
+\left(
+\ddot{\mathbf{p}}(u_m) + \mathbf{g}^w
+\right).
+\label{eq:imu_acc_pred}
+\end{equation}
+The stacked IMU residual is
+\begin{equation}
+\mathbf{r}^{I}_m =
+\begin{bmatrix}
+\hat{\bm{\omega}}(u_m) - \left(\bm{\omega}^{m}_m - \mathbf{b}_g\right) \\
+\hat{\mathbf{a}}(u_m) - \left(\mathbf{a}^{m}_m - \mathbf{b}_a\right)
+\end{bmatrix}.
+\label{eq:imu_residual}
+\end{equation}
+
+\subsubsection{GNSS Pseudorange and Doppler Constraints}
+
+The receiver position at time $u$ is mapped to ECEF by
+\begin{equation}
+\mathbf{p}^{e}_r(u) = \mathbf{R}_{ew}\,\mathbf{p}(u) + \mathbf{E}_0.
+\label{eq:ecef_receiver_position}
+\end{equation}
+For a GNSS observation assigned to segment state $\mathbf{c}_j$, the
+pseudorange residual is
+\begin{equation}
+r^{\rho}_{k} =
+\tilde{\rho}_k -
+h_{\rho}\!\left(
+\mathbf{T}(u_k), \mathbf{c}_j, \mathbf{E}_0, \mathbf{R}_{ew},
+\mathbf{p}^{e}_{s,k}, \bm{\alpha\beta}_m, \mathrm{TGD}_k
+\right),
+\label{eq:ct_pr_residual}
+\end{equation}
+where $h_{\rho}(\cdot)$ includes geometric range, receiver clock bias,
+ionospheric delay, tropospheric delay, Sagnac compensation, and group delay.
+The Doppler residual is
+\begin{equation}
+r^{d}_{k} =
+\tilde{d}_k -
+h_{d}\!\left(
+\mathbf{T}(u_k), \mathbf{u}_j, \mathbf{c}_j, \mathbf{R}_{ew},
+\mathbf{p}^{e}_{s,k}, \mathbf{v}^{e}_{s,k}
+\right),
+\label{eq:ct_doppler_residual}
+\end{equation}
+where $h_d(\cdot)$ includes the line-of-sight range rate, receiver clock drift,
+and Earth-rotation compensation. Segment-level clock states are linked by the
+clock random-walk model
+\begin{equation}
+\mathbf{c}_{j+1} = \mathbf{F}(\Delta t_j)\,\mathbf{c}_j + \mathbf{w}^{c}_j,
+\label{eq:clock_between}
+\end{equation}
+with $\mathbf{F}(\Delta t_j)$ defined by the constant-drift clock process.
+
+\subsection{Fixed-Lag Joint Optimization}
+\label{sec:fixed_lag}
+
+At each scan update, the estimator solves
+\begin{equation}
+\begin{aligned}
+\min_{\mathcal{X}} \quad
+& \sum_{n \in \mathcal{L}} \|r^L_n\|^2
+ + \sum_{m \in \mathcal{I}} \|\mathbf{r}^{I}_m\|^2_{\bm{\Omega}_I}
+ + \sum_{k \in \mathcal{P}} \|r^{\rho}_{k}\|^2_{\sigma_{\rho,k}^{-2}} \\
+& + \sum_{k \in \mathcal{D}} \|r^{d}_{k}\|^2_{\sigma_{d,k}^{-2}}
+ + \sum_{j \in \mathcal{V}} \|\mathbf{u}_j - \hat{\mathbf{u}}_j\|^2_{\bm{\Omega}_u}
+ + \|\mathbf{r}^{\mathrm{prior}}\|^2_{\bm{\Omega}_{\mathrm{prior}}},
+\end{aligned}
+\label{eq:joint_objective}
+\end{equation}
+where $\mathcal{L}$, $\mathcal{I}$, $\mathcal{P}$, $\mathcal{D}$, and
+$\mathcal{V}$ denote the LiDAR, IMU, pseudorange, Doppler, and velocity factor
+sets, respectively. The prior term contains boundary anchors, clock-between
+constraints, gravity/bias priors, and the current approximation of the
+marginalized information from states leaving the lag window.
+
+The optimized state is published in two forms. First, a sampled
+\texttt{EstimationFrame} is produced for backward compatibility with mapping and
+visualization. Second, the native continuous-time window is exposed through
+\texttt{ContinuousTrajectoryView} and \texttt{SplineControlAccess}, allowing
+other modules to query
+\begin{equation}
+\mathcal{S}(t) =
+\left\{
+\mathbf{T}(t),\,
+\dot{\mathbf{p}}(t),\,
+\ddot{\mathbf{p}}(t),\,
+\psi(t),\,
+\sigma(t)
+\right\},
+\label{eq:trajectory_sample}
+\end{equation}
+where $\psi(t)$ is the yaw angle and $\sigma(t)$ is the published uncertainty
+proxy.
+
+\subsection{Integrity-Aware Planning Interface}
+\label{sec:planner_interface}
+
+The planner does not yet optimize spline control points directly, but it already
+consumes the continuous-time trajectory as its seed and short-horizon
+consistency reference. For a candidate trajectory $\tau$, the current planner
+uses
+\begin{equation}
+J(\tau) =
+w_I \sum_{k}
+\left[\max\!\left(0,\mathrm{PL}_{\mathrm{pred},k}-\mathrm{AL}_k\right)\right]^2
++ w_G J_{\mathrm{goal}}(\tau)
++ w_U J_{\mathrm{effort}}(\tau)
++ w_C J_{\mathrm{ct}}(\tau),
+\label{eq:planner_cost}
+\end{equation}
+where $J_{\mathrm{ct}}(\tau)$ penalizes mismatch between the candidate
+short-horizon motion and the published continuous-time state
+$\mathcal{S}(t)$. This design preserves the current motion-primitive planner
+while preparing a direct transition to spline-native planning in the next stage.
+
+\subsection{Implementation Summary}
+\label{sec:implementation_summary}
+
+The current continuous-time SLAM implementation therefore differs from the
+previous discrete-time pipeline in three aspects:
+\begin{enumerate}
+  \item LiDAR, IMU, and GNSS residuals are evaluated against one shared
+        continuous-time spline window rather than a per-frame pose sequence.
+  \item GNSS preprocessing is no longer terminated at the ROS extension; the
+        odometry core owns the epoch builder and drains segment-aligned GNSS
+        measurements directly for factor construction.
+  \item The optimized spline state is exported as a first-class trajectory
+        interface, which allows planner-side integrity scoring to depend on the
+        continuous-time estimate without breaking legacy modules.
+\end{enumerate}
+
+\end{document}
