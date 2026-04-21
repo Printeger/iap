@@ -11,32 +11,64 @@ Use `iap_rosnode` as the primary runtime entry. `glim_rosnode` is not required f
 ### 构建
 
 ```bash
-cd /home/dev/code/ws_iap
+source /root/ros2_ws/install/setup.bash
+cd /home/dev/ws_iap
 
 colcon build --symlink-install \
   --packages-select iap \
   --cmake-args -DCMAKE_BUILD_TYPE=RelWithDebInfo
 ```
 
-### Run (two terminals)
+### Run (recommended, single terminal)
+
+```bash
+source /root/ros2_ws/install/setup.bash
+cd /home/dev/ws_iap
+source install/setup.bash
+
+ros2 launch iap iap_rosnode.launch.py
+```
+
+The launch defaults are aligned with this repository layout:
+
+- `config_path:=/home/dev/ws_iap/src/iap/config`
+- `bag_path:=@src/iap/data/realsense_ros2`
+
+Optional overrides:
+
+```bash
+source /root/ros2_ws/install/setup.bash
+cd /home/dev/ws_iap
+source install/setup.bash
+
+ros2 launch iap iap_rosnode.launch.py \
+  config_path:=/home/dev/ws_iap/src/iap/config \
+  bag_path:=@src/iap/data/realsense_ros2 \
+  mode:=bag \
+  bag_rate:=1.0
+```
+
+### Run (manual split, two terminals)
 
 Terminal 1: start IAP node
 
 ```bash
-cd /home/dev/code/ws_iap
+source /root/ros2_ws/install/setup.bash
+cd /home/dev/ws_iap
 source install/setup.bash
 
 ros2 run iap iap_rosnode \
-  --ros-args -p config_path:=/home/dev/code/ws_iap/src/iap/config
+  --ros-args -p config_path:=/home/dev/ws_iap/src/iap/config
 ```
 
 Terminal 2: play bag
 
 ```bash
-cd /home/dev/code/ws_iap
+source /root/ros2_ws/install/setup.bash
+cd /home/dev/ws_iap
 source install/setup.bash
 
-ros2 bag play /home/dev/code/ws_iap/src/iap/data/realsense_ros2
+ros2 bag play /home/dev/ws_iap/src/iap/data/realsense_ros2
 ```
 
 ---
@@ -119,9 +151,10 @@ python3 tools/plot_icp_timing.py src/iap/log/res/iap_icp.csv src/iap/log/res/iap
 
 ## 5) Troubleshooting
 
-### `ros2 run iap iap_rosnode` fails to start
+### `ros2 launch iap iap_rosnode.launch.py` fails to start
 
-- Confirm `source /home/dev/code/ws_iap/install/setup.bash` is executed.
+- Confirm `source /root/ros2_ws/install/setup.bash` is executed.
+- Confirm `source /home/dev/ws_iap/install/setup.bash` is executed.
 - Confirm `colcon build --packages-select iap` succeeded.
 
 ### `/rtcm` warning while playing bag
