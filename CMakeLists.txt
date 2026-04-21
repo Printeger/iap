@@ -96,6 +96,7 @@ add_library(iap SHARED
   # trunk_extension.cpp is compiled into a separate ROS2 plugin (libtrunk_extension.so)
   # ARAIM engine (IAP-RQ-241–246)
   src/iap/integrity/araim.cpp
+  src/iap/integrity/lidar_araim.cpp
   # FGO information matrix extraction (IAP-RQ-300)
   src/iap/integrity/fgo_information_manager.cpp
   # predicted ARAIM for planner (IAP-RQ-331)

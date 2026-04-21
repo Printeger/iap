@@ -7,6 +7,8 @@
 
 #include <iap/integrity/integrity_types.hpp>
 #include <iap/integrity/araim.hpp>
+#include <iap/integrity/fgo_information_matrix.hpp>
+#include <iap/integrity/lidar_araim.hpp>
 #include <iap/odometry/estimation_frame.hpp>
 #include <iap/gnss/gnss_types.hpp>
 #include <iap/trunk/trunk_types.hpp>
@@ -71,6 +73,7 @@ class IntegrityMonitor {
 
     // --- ARAIM (IAP-RQ-241–246) ---
     Araim::Params araim_params;        ///< K_fa, K_md, K_ff, min_sats, etc.
+    LidarAraim::Params lidar_araim_params;  ///< LiDAR ARAIM parameters
   };
 
   IntegrityMonitor();
@@ -95,11 +98,16 @@ class IntegrityMonitor {
    */
   IntegrityReport compute(const glim::EstimationFrame& frame,
                           const GnssEpoch*  epoch = nullptr,
-                          const TrunkDetectionResult* trunk = nullptr);
+                          const TrunkDetectionResult* trunk = nullptr,
+                          const FGOPositionInfo* fgo_info = nullptr,
+                          const LidarAraimSnapshot* lidar_snapshot = nullptr);
 
   IntegrityState current_state() const { return current_state_; }
   const Params& params() const { return params_; }
   const AraimResult& last_araim_result() const { return last_araim_result_; }
+  const LidarAraimResult& last_lidar_araim_result() const {
+    return last_lidar_araim_result_;
+  }
 
  private:
   double compute_PL_proxy(const glim::EstimationFrame& frame) const;
@@ -109,6 +117,9 @@ class IntegrityMonitor {
   void   run_araim(const GnssEpoch& epoch,
                    int n_trunk_obs,
                    IntegrityReport& report);
+  void   run_lidar_araim(const LidarAraimSnapshot& snapshot,
+                         const FGOPositionInfo* fgo_info,
+                         IntegrityReport& report);
   IntegrityState update_state(const IntegrityReport& report);
   IntegrityMode  update_mode_legacy(const IntegrityReport& report);
 
@@ -121,7 +132,9 @@ class IntegrityMonitor {
   IntegrityMode  current_mode_  = IntegrityMode::NOMINAL;  ///< legacy
   int    recovery_counter_      = 0;
   Araim  araim_;
+  LidarAraim lidar_araim_;
   AraimResult last_araim_result_;
+  LidarAraimResult last_lidar_araim_result_;
 
   std::shared_ptr<spdlog::logger> logger_;
 };

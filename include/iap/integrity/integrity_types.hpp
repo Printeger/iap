@@ -145,6 +145,17 @@ struct IntegrityReport {
   double PDOP              = 1e9;
   double sigma_H           = 1e9;  ///< fault-free horizontal σ [m]
 
+  // --- LiDAR ARAIM diagnostics -------------------------------------------
+  int    lidar_valid   = 0;
+  int    lidar_n_hyp   = 0;
+  int    lidar_n_det   = 0;
+  double lidar_PL_E    = 1e9;
+  double lidar_PL_N    = 1e9;
+  double lidar_PL_U    = 1e9;
+  double lidar_HPL     = 1e9;
+  double lidar_VPL     = 1e9;
+  std::string lidar_worst_mode = "NONE";
+
   // --- Trunk geometry summary ---------------------------------------------
   int    n_trunks_observed = 0;
 

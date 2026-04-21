@@ -55,8 +55,10 @@ class IntegrityExtensionModule : public glim::ExtensionModuleROS2 {
  private:
   // ── Callbacks ─────────────────────────────────────────────────────────
   void on_new_frame_(const glim::EstimationFrame::ConstPtr& frame);
+  void on_update_new_frame_(const glim::EstimationFrame::ConstPtr& frame);
   void on_smoother_update_finish_(
       gtsam_points::IncrementalFixedLagSmootherExtWithFallback& smoother);
+  void maybe_publish_integrity_();
 
   // ── Config ────────────────────────────────────────────────────────────
   bool        enable_;           ///< master enable
@@ -71,7 +73,10 @@ class IntegrityExtensionModule : public glim::ExtensionModuleROS2 {
 
   // ── Cached frame state (from on_new_frame callback) ───────────────────
   mutable std::mutex             frame_mutex_;
-  glim::EstimationFrame::ConstPtr latest_frame_;
+  glim::EstimationFrame::ConstPtr latest_raw_frame_;
+  glim::EstimationFrame::ConstPtr latest_updated_frame_;
+  FGOPositionInfo latest_fgo_snapshot_;
+  long last_published_frame_id_ = -1;
 
   // ── ROS publisher ─────────────────────────────────────────────────────
   // Using void* to avoid including the generated msg header in this header.

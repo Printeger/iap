@@ -9,6 +9,7 @@
 
 #include <gtsam/inference/Symbol.h>
 #include <gtsam/slam/BetweenFactor.h>
+#include <gtsam/linear/HessianFactor.h>
 #include <gtsam/nonlinear/LinearContainerFactor.h>
 
 #include <gtsam_points/ann/ivox.hpp>
@@ -26,12 +27,26 @@
 #include <iap/common/cloud_covariance_estimation.hpp>
 
 #include <iap/odometry/callbacks.hpp>
+#include <iap/integrity/lidar_araim.hpp>
 
 #ifdef GTSAM_USE_TBB
 #include <tbb/task_arena.h>
 #endif
 
 namespace glim {
+
+namespace {
+
+double condition_number_6x6(const Eigen::Matrix<double, 6, 6>& H) {
+  Eigen::JacobiSVD<Eigen::Matrix<double, 6, 6>> svd(
+      H, Eigen::ComputeThinU | Eigen::ComputeThinV);
+  const auto& sv = svd.singularValues();
+  const double sv_min = sv(sv.size() - 1);
+  const double sv_max = sv(0);
+  return (sv_min > 1e-10) ? sv_max / sv_min : 1e9;
+}
+
+}  // namespace
 
 using Callbacks = OdometryEstimationCallbacks;
 
@@ -140,31 +155,92 @@ gtsam::NonlinearFactorGraph OdometryEstimationCPU::create_factors(const int curr
     gtsam::NonlinearFactorGraph all_matching_factors;
     gtsam::Values pred_values;
     pred_values.insert(X(current), gtsam::Pose3(frames[current]->T_world_imu.matrix()));
+    iap::LidarAraimSnapshot lidar_snapshot;
+    lidar_snapshot.stamp = frames[current]->stamp;
+    lidar_snapshot.frame_id = frames[current]->id;
+    lidar_snapshot.T_world_imu = frames[current]->T_world_imu;
 
     // ② Lambda: binary factor — both poses variable in smoother
-    const auto create_binary_factor = [&](gtsam::Key target_key, gtsam::Key source_key, const EstimationFrame::ConstPtr& target_frame) {
-      for (const auto& voxelmap : target_frame->voxelmaps) {
+    const auto append_lidar_block =
+        [&](const gtsam_points::IntegratedVGICPFactor::shared_ptr& factor,
+            const EstimationFrame::ConstPtr& target_frame,
+            const bool target_is_fixed,
+            const int level_id,
+            const double voxel_resolution) {
+      const auto gaussian_factor = factor->linearize(pred_values);
+      gtsam::HessianFactor hessian(*gaussian_factor);
+      const auto H_blocks = hessian.hessianBlockDiagonal();
+      const auto hit = H_blocks.find(X(current));
+      if (hit == H_blocks.end()) {
+        return;
+      }
+
+      const auto key_it = std::find(hessian.begin(), hessian.end(), X(current));
+      if (key_it == hessian.end()) {
+        return;
+      }
+
+      Eigen::Matrix<double, 6, 6> H_source = hit->second;
+      Eigen::Matrix<double, 6, 1> b_source = hessian.linearTerm(key_it);
+      const double error = factor->error(pred_values);
+
+      iap::LidarAraimBlock block;
+      block.source_frame_id = frames[current]->id;
+      block.target_frame_id = target_frame ? target_frame->id : -1;
+      block.target_is_fixed = target_is_fixed;
+      block.level_id = level_id;
+      block.voxel_resolution = voxel_resolution;
+      block.backend = iap::LidarAraimBlock::Backend::CPU;
+      block.num_inliers = factor->num_inliers();
+      block.inlier_fraction = factor->inlier_fraction();
+      block.rmse_proxy = std::sqrt(error / std::max(block.num_inliers, 1));
+      block.cond_proxy = condition_number_6x6(H_source);
+      block.gamma_lidar = frames[current]->icp_quality.gamma_lidar;
+      block.age_sec = target_frame
+          ? std::max(0.0, frames[current]->stamp - target_frame->stamp)
+          : 0.0;
+      block.Lambda_B = H_source;
+      block.eta_B = b_source;
+      lidar_snapshot.blocks.push_back(std::move(block));
+    };
+
+    const auto create_binary_factor = [&](gtsam::Key target_key,
+                                          gtsam::Key source_key,
+                                          const EstimationFrame::ConstPtr& target_frame) {
+      for (int level_id = 0;
+           level_id < static_cast<int>(target_frame->voxelmaps.size());
+           ++level_id) {
+        const auto& voxelmap = target_frame->voxelmaps[static_cast<std::size_t>(level_id)];
         auto f = gtsam::make_shared<gtsam_points::IntegratedVGICPFactor>(target_key, source_key, voxelmap, frames[current]->frame);
         f->set_num_threads(params->num_threads);
         all_matching_factors.add(f);
+        append_lidar_block(
+            f, target_frame, false, level_id, voxelmap->voxel_resolution());
       }
     };
 
     // ③ Lambda: unary factor — target pose is fixed (out of smoother window)
-    const auto create_unary_factor = [&](const gtsam::Pose3& fixed_pose, gtsam::Key source_key, const EstimationFrame::ConstPtr& target_frame) {
-      for (const auto& voxelmap : target_frame->voxelmaps) {
+    const auto create_unary_factor = [&](const gtsam::Pose3& fixed_pose,
+                                         gtsam::Key source_key,
+                                         const EstimationFrame::ConstPtr& target_frame) {
+      for (int level_id = 0;
+           level_id < static_cast<int>(target_frame->voxelmaps.size());
+           ++level_id) {
+        const auto& voxelmap = target_frame->voxelmaps[static_cast<std::size_t>(level_id)];
         auto f = gtsam::make_shared<gtsam_points::IntegratedVGICPFactor>(fixed_pose, source_key, voxelmap, frames[current]->frame);
         f->set_num_threads(params->num_threads);
         all_matching_factors.add(f);
+        append_lidar_block(
+            f, target_frame, true, level_id, voxelmap->voxel_resolution());
       }
     };
 
     // ④ Full connection window: binary factors to recent frames
     for (int target = std::max(0, current - params->full_connection_window_size); target < current; target++) {
-      create_binary_factor(X(target), X(current), frames[target]);
       if (!pred_values.exists(X(target))) {
         pred_values.insert(X(target), gtsam::Pose3(frames[target]->T_world_imu.matrix()));
       }
+      create_binary_factor(X(target), X(current), frames[target]);
     }
 
     // ⑤ Keyframe connections
@@ -180,10 +256,10 @@ gtsam::NonlinearFactorGraph OdometryEstimationCPU::create_factors(const int curr
         create_unary_factor(fixed_pose, X(current), keyframe);
       } else {
         // Keyframe still in smoother window: binary factor
-        create_binary_factor(X(keyframe->id), X(current), keyframe);
         if (!pred_values.exists(X(keyframe->id))) {
           pred_values.insert(X(keyframe->id), gtsam::Pose3(keyframe->T_world_imu.matrix()));
         }
+        create_binary_factor(X(keyframe->id), X(current), keyframe);
       }
     }
 
@@ -237,6 +313,13 @@ gtsam::NonlinearFactorGraph OdometryEstimationCPU::create_factors(const int curr
     q.cond_number    = cond_number;
     q.degeneracy_flag= degeneracy_flag;
     q.gamma_lidar    = gamma_lidar;
+    for (auto& block : lidar_snapshot.blocks) {
+      block.gamma_lidar = gamma_lidar;
+    }
+    lidar_snapshot.current_icp_quality = q;
+    lidar_snapshot.valid = !lidar_snapshot.blocks.empty();
+    frames[current]->custom_data["lidar_araim_snapshot"] =
+        std::make_shared<iap::LidarAraimSnapshot>(lidar_snapshot);
 
     logger->trace(
       "icp_quality[{}]: inliers={} ({:.1f}%) rmse={:.4f} cond={:.1f} degenerate={} gamma={:.2f}",

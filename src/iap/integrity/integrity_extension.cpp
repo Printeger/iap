@@ -75,6 +75,29 @@ IntegrityExtensionModule::IntegrityExtensionModule()
   mp.gamma_V            = config.param<double>("integrity", "gamma_V",            mp.gamma_V);
   mp.h_min              = config.param<double>("integrity", "h_min",              mp.h_min);
   mp.VAL_default        = config.param<double>("integrity", "VAL_default",        mp.VAL_default);
+  auto maybe_override_double = [&](const char* key, double& value) {
+    if (config.has_param("integrity", key)) {
+      value = config.param<double>("integrity", key, value);
+    }
+  };
+  auto& lp = mp.lidar_araim_params;
+  maybe_override_double("lidar_araim_p_hmi_req", lp.P_HMI_req);
+  maybe_override_double("lidar_araim_p_fa_req", lp.P_FA_req);
+  maybe_override_double("lidar_araim_k_fa", lp.K_fa);
+  maybe_override_double("lidar_araim_k_md", lp.K_md);
+  maybe_override_double("lidar_araim_k_ff", lp.K_ff);
+  maybe_override_double("lidar_araim_eps_degen", lp.eps_degen);
+  maybe_override_double("lidar_araim_p_source", lp.p_source);
+  maybe_override_double("lidar_araim_p_target", lp.p_target);
+  maybe_override_double("lidar_araim_p_level", lp.p_level);
+  maybe_override_double("lidar_araim_rmse_ref", lp.rmse_ref);
+  maybe_override_double("lidar_araim_age_ref_sec", lp.age_ref_sec);
+  maybe_override_double("lidar_araim_w_rmse", lp.w_rmse);
+  maybe_override_double("lidar_araim_w_inlier", lp.w_inlier);
+  maybe_override_double("lidar_araim_w_cond", lp.w_cond);
+  maybe_override_double("lidar_araim_w_age", lp.w_age);
+  maybe_override_double("lidar_araim_alpha_h", lp.alpha_H);
+  maybe_override_double("lidar_araim_alpha_v", lp.alpha_V);
   monitor_ = IntegrityMonitor(mp);
 
   // ── ARAIM debug CSV (IAP-RQ-200 observability) ───────────────────────────
@@ -105,6 +128,11 @@ IntegrityExtensionModule::IntegrityExtensionModule()
         on_new_frame_(f);
       });
 
+  Callbacks::on_update_new_frame.add(
+      [this](const glim::EstimationFrame::ConstPtr& f) {
+        on_update_new_frame_(f);
+      });
+
   Callbacks::on_smoother_update_finish.add(
       [this](gtsam_points::IncrementalFixedLagSmootherExtWithFallback& sm) {
         on_smoother_update_finish_(sm);
@@ -130,68 +158,93 @@ IntegrityExtensionModule::create_subscriptions(rclcpp::Node& node) {
 void IntegrityExtensionModule::on_new_frame_(
     const glim::EstimationFrame::ConstPtr& frame) {
   std::lock_guard<std::mutex> lk(frame_mutex_);
-  latest_frame_ = frame;
+  latest_raw_frame_ = frame;
+}
+
+void IntegrityExtensionModule::on_update_new_frame_(
+    const glim::EstimationFrame::ConstPtr& frame) {
+  {
+    std::lock_guard<std::mutex> lk(frame_mutex_);
+    latest_updated_frame_ = frame;
+  }
+  maybe_publish_integrity_();
 }
 
 // ── on_smoother_update_finish: compute integrity + publish ───────────────────
 void IntegrityExtensionModule::on_smoother_update_finish_(
     gtsam_points::IncrementalFixedLagSmootherExtWithFallback& smoother) {
-
-  // ── 1. Retrieve cached frame (safe GLIM fields only) ─────────────────────
-  glim::EstimationFrame::ConstPtr frame;
+  long frame_id = -1;
+  double frame_stamp = 0.0;
   {
     std::lock_guard<std::mutex> lk(frame_mutex_);
-    frame = latest_frame_;
+    if (latest_raw_frame_) {
+      frame_id = latest_raw_frame_->id;
+      frame_stamp = latest_raw_frame_->stamp;
+    } else if (latest_updated_frame_) {
+      frame_id = latest_updated_frame_->id;
+      frame_stamp = latest_updated_frame_->stamp;
+    }
   }
-  if (!frame) return;
 
-  // Read SAFE original GLIM fields (always valid regardless of allocation source)
-  const long   frame_id    = frame->id;
-  const double frame_stamp = frame->stamp;
-  const Eigen::Isometry3d T_world_imu = frame->T_world_imu;
+  if (frame_id < 0) return;
 
-  // ── 2. FGO sigma_p extraction ─────────────────────────────────────────────
   if (enable_fgo_info_) {
     fgo_info_.extract(smoother, frame_id, frame_stamp);
   }
+  {
+    std::lock_guard<std::mutex> lk(frame_mutex_);
+    latest_fgo_snapshot_ = fgo_info_.latest();
+  }
+  maybe_publish_integrity_();
+}
 
-  // ── 3. Build proxy EstimationFrame for IntegrityMonitor::compute() ────────
-  // We create a LOCAL IAP-allocated EstimationFrame so that ALL fields are
-  // valid (IAP extension fields are present in the full IAP layout).
-  // We set only the fields actually used by IntegrityMonitor::compute():
-  //   - stamp          → report.stamp
-  //   - T_world_imu   → trunk HAL geometry (2D position)
-  //   - sigma_p       → PL proxy fallback / stronger FGO snapshot entry point
-  //   - icp_quality   → report flags (use safe defaults: no degeneracy)
-  auto proxy = std::make_shared<glim::EstimationFrame>();
-  proxy->id         = frame_id;
-  proxy->stamp      = frame_stamp;
-  proxy->T_world_imu = T_world_imu;
+void IntegrityExtensionModule::maybe_publish_integrity_() {
+  glim::EstimationFrame::ConstPtr frame;
   FGOPositionInfo fgo_snapshot;
-  const bool have_fgo_snapshot = enable_fgo_info_ && fgo_info_.has_data();
-  if (have_fgo_snapshot) {
-    fgo_snapshot = fgo_info_.latest();
+  {
+    std::lock_guard<std::mutex> lk(frame_mutex_);
+    frame = latest_updated_frame_;
+    fgo_snapshot = latest_fgo_snapshot_;
+    if (!frame || frame->id == last_published_frame_id_) {
+      return;
+    }
+    if (enable_fgo_info_ && fgo_snapshot.frame_id != frame->id) {
+      return;
+    }
+    last_published_frame_id_ = frame->id;
   }
 
-  // sigma_p: prefer the latest richer FGO snapshot; fall back to scalar
-  // identity (2 m 1-sigma) when no valid marginal is available.
+  const bool have_fgo_snapshot =
+      enable_fgo_info_ && fgo_snapshot.valid;
+
+  auto proxy = std::make_shared<glim::EstimationFrame>();
+  *proxy = *frame;
   if (have_fgo_snapshot && fgo_snapshot.pose_cov_valid) {
     proxy->sigma_p = fgo_snapshot.sigma_p;
   } else {
-    proxy->sigma_p = Eigen::Matrix3d::Identity() * 4.0;  // 2m placeholder
+    proxy->sigma_p = Eigen::Matrix3d::Identity() * 4.0;
   }
-  // icp_quality: leave at zero-initialized defaults (no degeneracy flagged)
-  //   proxy->icp_quality.degeneracy_flag = false; (already default)
-  //   proxy->icp_quality.gamma_lidar     = 1.0;   (already default)
 
-  // ── 4. GNSS epoch from shared state ──────────────────────────────────────
+  LidarAraimSnapshot lidar_snapshot;
+  const auto* lidar_ptr =
+      frame->get_custom_data<LidarAraimSnapshot>("lidar_araim_snapshot");
+  const LidarAraimSnapshot* lidar_snapshot_ptr = nullptr;
+  if (lidar_ptr) {
+    lidar_snapshot = *lidar_ptr;
+    if (have_fgo_snapshot && fgo_snapshot.pose_cov_valid) {
+      lidar_snapshot.pose_cov_6x6 = fgo_snapshot.pose_cov_6x6;
+      lidar_snapshot.valid = lidar_snapshot.valid && fgo_snapshot.pose_cov_valid;
+    }
+    lidar_snapshot_ptr = &lidar_snapshot;
+  }
+
   std::optional<GnssEpoch>  epoch_opt;
   const GnssEpoch*          epoch_ptr = nullptr;
 
   if (enable_araim_) {
     epoch_opt = IapSharedState::instance().get_gnss_epoch();
     if (epoch_opt.has_value()) {
-      const double dt = std::abs(epoch_opt->stamp - frame_stamp);
+      const double dt = std::abs(epoch_opt->stamp - frame->stamp);
       if (dt < 1.0) {
         epoch_ptr = &*epoch_opt;
       } else {
@@ -204,24 +257,24 @@ void IntegrityExtensionModule::on_smoother_update_finish_(
     }
   }
 
-  // ── 5. Trunk detection from shared state ─────────────────────────────────
   std::optional<TrunkDetectionResult> trunk_opt;
   const TrunkDetectionResult*         trunk_ptr = nullptr;
 
   if (enable_dynamic_al_) {
     trunk_opt = IapSharedState::instance().get_trunk_detection();
     if (trunk_opt.has_value() && !trunk_opt->trunks.empty()) {
-      const double dt = std::abs(trunk_opt->stamp - frame_stamp);
+      const double dt = std::abs(trunk_opt->stamp - frame->stamp);
       if (dt < 0.5) {
         trunk_ptr = &*trunk_opt;
       }
     }
   }
 
-  // ── 6. Run integrity monitor ──────────────────────────────────────────────
-  const IntegrityReport report = monitor_.compute(*proxy, epoch_ptr, trunk_ptr);
+  const IntegrityReport report = monitor_.compute(
+      *proxy, epoch_ptr, trunk_ptr,
+      have_fgo_snapshot ? &fgo_snapshot : nullptr,
+      lidar_snapshot_ptr);
 
-  // ── 7. Publish IntegrityReport message ───────────────────────────────────
   if (!pub_erased_) return;
   auto& pub = *std::static_pointer_cast<
       rclcpp::Publisher<iap::msg::IntegrityReport>>(pub_erased_);
@@ -271,36 +324,35 @@ void IntegrityExtensionModule::on_smoother_update_finish_(
 
   pub.publish(msg);
 
-  // ── 8. ARAIM debug CSV (IAP-RQ-200) ──────────────────────────────────────
   if (araim_debug_csv_) {
     araim_debug_csv_->write(report, monitor_.last_araim_result());
   }
 
-  // ── 9. Trajectory CSV ─────────────────────────────────────────────────────
   if (traj_csv_file_) {
-    const auto& t = T_world_imu.translation();
+    const auto& t = frame->T_world_imu.translation();
     std::fprintf(traj_csv_file_, "%.6f,%.4f,%.4f,%.4f\n",
-                 frame_stamp, t.x(), t.y(), t.z());
+                 frame->stamp, t.x(), t.y(), t.z());
     std::fflush(traj_csv_file_);
   }
 
-  // ── 10. Rate-limited console log ──────────────────────────────────────────
   const uint64_t n = ++report_count_;
   if (n == 1 || n % 50 == 0) {
     logger_->info(
         "[IntegrityExt] #{}: stamp={:.3f} state={} HPL={:.2f}m VPL={:.2f}m "
-        "HAL={:.2f}m IM={:.2f}m n_sv={} n_trunks={} fgo_valid={} fgo_factors={}",
+        "HAL={:.2f}m IM={:.2f}m n_sv={} n_trunks={} fgo_valid={} "
+        "fgo_factors={} lidar_hyp={} lidar_HPL={:.2f} mode={}",
         n, report.stamp, to_string(report.state),
         report.HPL, report.VPL, report.HAL, report.IM,
         report.n_sv_used, report.n_trunks_observed,
         have_fgo_snapshot && fgo_snapshot.valid,
-        have_fgo_snapshot ? fgo_snapshot.n_total_factors : 0);
+        have_fgo_snapshot ? fgo_snapshot.n_total_factors : 0,
+        report.lidar_n_hyp, report.lidar_HPL, report.lidar_worst_mode);
   } else {
     logger_->debug(
         "[IntegrityExt] stamp={:.3f} state={} HPL={:.2f}m VPL={:.2f}m "
-        "HAL={:.2f}m n_sv={}",
+        "HAL={:.2f}m n_sv={} lidar_hyp={}",
         report.stamp, to_string(report.state),
-        report.HPL, report.VPL, report.HAL, report.n_sv_used);
+        report.HPL, report.VPL, report.HAL, report.n_sv_used, report.lidar_n_hyp);
   }
 }
 

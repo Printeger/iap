@@ -3,11 +3,13 @@
 #include <Eigen/SVD>  // IAP-RQ-040: condition number for ICP degeneracy
 #include <spdlog/spdlog.h>
 
+#include <algorithm>
 #include <cerrno>
 #include <cstring>
 #include <filesystem>
 
 #include <gtsam/inference/Symbol.h>
+#include <gtsam/linear/HessianFactor.h>
 #include <gtsam/slam/BetweenFactor.h>
 
 #include <gtsam_points/cuda/cuda_stream.hpp>
@@ -29,9 +31,23 @@
 #include <iap/common/cloud_deskewing.hpp>
 #include <iap/common/cloud_covariance_estimation.hpp>
 
+#include <iap/integrity/lidar_araim.hpp>
 #include <iap/odometry/callbacks.hpp>
 
 namespace glim {
+
+namespace {
+
+double condition_number_6x6(const Eigen::Matrix<double, 6, 6>& H) {
+  Eigen::JacobiSVD<Eigen::Matrix<double, 6, 6>> svd(
+      H, Eigen::ComputeThinU | Eigen::ComputeThinV);
+  const auto& sv = svd.singularValues();
+  const double sv_min = sv(sv.size() - 1);
+  const double sv_max = sv(0);
+  return (sv_min > 1e-10) ? sv_max / sv_min : 1e9;
+}
+
+}  // namespace
 
 using Callbacks = OdometryEstimationCallbacks;
 
@@ -140,6 +156,13 @@ void OdometryEstimationGPU::update_frames(const int current, const gtsam::Nonlin
 
   // --- IAP-RQ-040: ICP quality assessment (post-smoother, at optimized pose) ----
   if (!frames[current] || !frames[current]->frame->size()) {
+    if (frames[current]) {
+      if (auto* lidar_snapshot =
+              frames[current]->get_custom_data<iap::LidarAraimSnapshot>(
+                  "lidar_araim_snapshot")) {
+        lidar_snapshot->valid = false;
+      }
+    }
     static bool logged_empty_frame = false;
     if (!logged_empty_frame) {
       logger->info("[icp_csv] skip write: empty frame at current={}", current);
@@ -162,6 +185,11 @@ void OdometryEstimationGPU::update_frames(const int current, const gtsam::Nonlin
   }
 
   if (vgicp_factors.empty()) {
+    if (auto* lidar_snapshot =
+            frames[current]->get_custom_data<iap::LidarAraimSnapshot>(
+                "lidar_araim_snapshot")) {
+      lidar_snapshot->valid = false;
+    }
     static bool logged_empty_vgicp = false;
     if (!logged_empty_vgicp) {
       logger->info("[icp_csv] skip write: no IntegratedVGICPFactorGPU in new_factors (new_factors={})", new_factors.size());
@@ -224,6 +252,16 @@ void OdometryEstimationGPU::update_frames(const int current, const gtsam::Nonlin
   q.degeneracy_flag= degeneracy_flag;
   q.gamma_lidar    = gamma_lidar;
 
+  if (auto* lidar_snapshot =
+          frames[current]->get_custom_data<iap::LidarAraimSnapshot>(
+              "lidar_araim_snapshot")) {
+    lidar_snapshot->current_icp_quality = q;
+    lidar_snapshot->valid = !lidar_snapshot->blocks.empty();
+    for (auto& block : lidar_snapshot->blocks) {
+      block.gamma_lidar = gamma_lidar;
+    }
+  }
+
   logger->trace(
     "icp_quality[{}]: inliers={} ({:.1f}%) rmse={:.4f} cond={:.1f} degenerate={} gamma={:.2f}",
     current, inlier_count, inlier_fraction * 100.0, rmse,
@@ -269,7 +307,46 @@ gtsam::NonlinearFactorGraph OdometryEstimationGPU::create_factors(const int curr
     return gtsam::NonlinearFactorGraph();
   }
 
-  const auto create_binary_factor = [this](
+  struct PendingLidarBlock {
+    gtsam_points::IntegratedVGICPFactorGPU::shared_ptr factor;
+    iap::LidarAraimBlock block;
+  };
+
+  const auto params = static_cast<OdometryEstimationGPUParams*>(this->params.get());
+
+  gtsam::Values pred_values;
+  pred_values.insert(X(current), gtsam::Pose3(frames[current]->T_world_imu.matrix()));
+
+  iap::LidarAraimSnapshot lidar_snapshot;
+  lidar_snapshot.stamp = frames[current]->stamp;
+  lidar_snapshot.frame_id = frames[current]->id;
+  lidar_snapshot.T_world_imu = frames[current]->T_world_imu;
+
+  std::vector<PendingLidarBlock> pending_blocks;
+
+  const auto append_block_metadata =
+      [this, current, &pending_blocks](
+          const gtsam_points::IntegratedVGICPFactorGPU::shared_ptr& factor,
+          const glim::EstimationFrame::ConstPtr& target,
+          const bool target_is_fixed,
+          const int level_id,
+          const double voxel_resolution) {
+        iap::LidarAraimBlock block;
+        block.source_frame_id = frames[current]->id;
+        block.target_frame_id = target ? target->id : -1;
+        block.target_is_fixed = target_is_fixed;
+        block.level_id = level_id;
+        block.voxel_resolution = voxel_resolution;
+        block.backend = iap::LidarAraimBlock::Backend::GPU;
+        block.gamma_lidar = frames[current]->icp_quality.gamma_lidar;
+        block.age_sec = target
+            ? std::max(0.0, frames[current]->stamp - target->stamp)
+            : 0.0;
+
+        pending_blocks.push_back({factor, std::move(block)});
+      };
+
+  const auto create_binary_factor = [this, &append_block_metadata](
                                       gtsam::NonlinearFactorGraph& factors,
                                       gtsam::Key target_key,
                                       gtsam::Key source_key,
@@ -279,14 +356,18 @@ gtsam::NonlinearFactorGraph OdometryEstimationGPU::create_factors(const int curr
     const auto& stream = stream_buffer.first;
     const auto& buffer = stream_buffer.second;
 
-    for (const auto& voxelmap : target->voxelmaps) {
+    for (int level_id = 0; level_id < static_cast<int>(target->voxelmaps.size());
+         ++level_id) {
+      const auto& voxelmap = target->voxelmaps[static_cast<std::size_t>(level_id)];
       auto factor = gtsam::make_shared<gtsam_points::IntegratedVGICPFactorGPU>(target_key, source_key, voxelmap, source->frame, stream, buffer);
       factor->set_enable_surface_validation(true);
       factors.add(factor);
+      append_block_metadata(
+          factor, target, false, level_id, voxelmap->voxel_resolution());
     }
   };
 
-  const auto create_unary_factor = [this](
+  const auto create_unary_factor = [this, &append_block_metadata](
                                      gtsam::NonlinearFactorGraph& factors,
                                      const gtsam::Pose3& fixed_target_pose,
                                      gtsam::Key source_key,
@@ -296,14 +377,16 @@ gtsam::NonlinearFactorGraph OdometryEstimationGPU::create_factors(const int curr
     const auto& stream = stream_buffer.first;
     const auto& buffer = stream_buffer.second;
 
-    for (const auto& voxelmap : target->voxelmaps) {
+    for (int level_id = 0; level_id < static_cast<int>(target->voxelmaps.size());
+         ++level_id) {
+      const auto& voxelmap = target->voxelmaps[static_cast<std::size_t>(level_id)];
       auto factor = gtsam::make_shared<gtsam_points::IntegratedVGICPFactorGPU>(fixed_target_pose, source_key, voxelmap, source->frame, stream, buffer);
       factor->set_enable_surface_validation(true);
       factors.add(factor);
+      append_block_metadata(
+          factor, target, true, level_id, voxelmap->voxel_resolution());
     }
   };
-
-  const auto params = static_cast<OdometryEstimationGPUParams*>(this->params.get());
 
   gtsam::NonlinearFactorGraph factors;
   if (current == 0) {
@@ -316,6 +399,9 @@ gtsam::NonlinearFactorGraph OdometryEstimationGPU::create_factors(const int curr
       continue;
     }
 
+    if (!pred_values.exists(X(target))) {
+      pred_values.insert(X(target), gtsam::Pose3(frames[target]->T_world_imu.matrix()));
+    }
     create_binary_factor(factors, X(target), X(current), frames[target], frames[current]);
   }
 
@@ -337,9 +423,51 @@ gtsam::NonlinearFactorGraph OdometryEstimationGPU::create_factors(const int curr
     } else {
       // Create binary factor
       const int target = keyframe->id;
+      if (!pred_values.exists(X(target))) {
+        pred_values.insert(X(target), gtsam::Pose3(frames[target]->T_world_imu.matrix()));
+      }
       create_binary_factor(factors, X(target), X(current), frames[target], frames[current]);
     }
   }
+
+  if (!factors.empty() && !pending_blocks.empty()) {
+    gtsam_points::NonlinearFactorSetGPU factor_set;
+    factor_set.add(factors);
+    factor_set.linearize(pred_values);
+
+    for (auto& pending : pending_blocks) {
+      const auto gaussian_factor = pending.factor->linearize(pred_values);
+      if (!gaussian_factor) {
+        continue;
+      }
+
+      gtsam::HessianFactor hessian(*gaussian_factor);
+      const auto H_blocks = hessian.hessianBlockDiagonal();
+      const auto hit = H_blocks.find(X(current));
+      if (hit == H_blocks.end()) {
+        continue;
+      }
+
+      const auto key_it = std::find(hessian.begin(), hessian.end(), X(current));
+      if (key_it == hessian.end()) {
+        continue;
+      }
+
+      pending.block.Lambda_B = hit->second;
+      pending.block.eta_B = hessian.linearTerm(key_it);
+      pending.block.num_inliers = pending.factor->num_inliers();
+      pending.block.inlier_fraction = pending.factor->inlier_fraction();
+      pending.block.rmse_proxy = std::sqrt(
+          pending.factor->error(pred_values) /
+          std::max(pending.block.num_inliers, 1));
+      pending.block.cond_proxy = condition_number_6x6(pending.block.Lambda_B);
+
+      lidar_snapshot.blocks.push_back(std::move(pending.block));
+    }
+  }
+
+  frames[current]->custom_data["lidar_araim_snapshot"] =
+      std::make_shared<iap::LidarAraimSnapshot>(lidar_snapshot);
 
   return factors;
 }

@@ -113,6 +113,7 @@ inline void AraimDebugCSV::write_header() {
         << "PL_E,PL_N,PL_U,pl_ff,K_ff,K_fa,"
         << "n_sv,n_const,PDOP,sigma_H,"
         << "n_hyp,n_det,n_trunks,tdop,"
+        << "lidar_valid,lidar_n_hyp,lidar_n_det,lidar_HPL,lidar_mode,"
         << "hyp_index,sat_id,d_E,d_N,d_U,"
         << "sigma_ss_E,sigma_ss_N,sigma_ss_U,"
         << "sigma_k_E,sigma_k_N,sigma_k_U,"
@@ -134,6 +135,9 @@ inline void AraimDebugCSV::write_epoch_row(const IntegrityReport& report) {
         << report.PDOP << "," << report.sigma_H << ","
         << report.araim_n_hyp << "," << report.araim_n_det << ","
         << report.n_trunks_observed << "," << report.tdop << ","
+        << report.lidar_valid << "," << report.lidar_n_hyp << ","
+        << report.lidar_n_det << "," << report.lidar_HPL << ","
+        << report.lidar_worst_mode << ","
         << ",,,,,,,,,,,,\n";  // hyp columns empty for epoch row
 }
 
@@ -148,7 +152,8 @@ inline void AraimDebugCSV::write_worst_hyp_row(const IntegrityReport& report,
         << ",,,"                          // PL_E PL_N PL_U
         << ",,,,"                         // pl_ff K_ff K_fa
         << ",,,,,"                        // n_sv n_const PDOP sigma_H n_hyp
-        << ",,,,"                         // n_det n_trunks tdop  (then hyp cols)
+        << ",,,,,"                        // n_det n_trunks tdop lidar_valid
+        << ",,,,"                         // lidar_n_hyp lidar_n_det lidar_HPL lidar_mode
         << hyp_index << "," << sat_id << ","
         << ss.d_E << "," << ss.d_N << "," << ss.d_U << ","
         << ss.sigma_ss_E << "," << ss.sigma_ss_N << "," << ss.sigma_ss_U << ","

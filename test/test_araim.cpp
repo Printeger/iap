@@ -11,6 +11,7 @@
 #include <iap/integrity/araim.hpp>
 #include <iap/integrity/araim_types.hpp>
 #include <iap/integrity/fgo_information_matrix.hpp>
+#include <iap/integrity/lidar_araim.hpp>
 #include <iap/integrity/integrity_types.hpp>
 #include <iap/integrity/integrity_monitor.hpp>
 #include <iap/trunk/trunk_map.hpp>
@@ -58,6 +59,65 @@ class AraimTest : public ::testing::Test {
       epoch.sats.push_back(s);
     }
     return epoch;
+  }
+};
+
+class LidarAraimTest : public ::testing::Test {
+ protected:
+  LidarAraim::Params default_params() {
+    LidarAraim::Params p;
+    p.dynamic_budget = false;
+    p.K_ff = 5.0;
+    p.K_fa = 4.0;
+    p.K_md = 3.0;
+    p.alpha_H = 0.5;
+    p.alpha_V = 0.75;
+    p.rmse_ref = 0.2;
+    p.age_ref_sec = 1.0;
+    return p;
+  }
+
+  FGOPositionInfo make_fgo(double sigma_diag = 0.1) {
+    FGOPositionInfo info;
+    info.valid = true;
+    info.pose_cov_valid = true;
+    info.frame_id = 42;
+    info.pose_cov_6x6 = Eigen::Matrix<double, 6, 6>::Identity() * sigma_diag;
+    info.sigma_p = info.pose_cov_6x6.block<3, 3>(3, 3);
+    return info;
+  }
+
+  LidarAraimSnapshot make_snapshot() {
+    LidarAraimSnapshot snapshot;
+    snapshot.valid = true;
+    snapshot.frame_id = 42;
+    snapshot.stamp = 10.0;
+    snapshot.pose_cov_6x6 = Eigen::Matrix<double, 6, 6>::Identity() * 0.1;
+    snapshot.current_icp_quality.gamma_lidar = 1.2;
+    return snapshot;
+  }
+
+  LidarAraimBlock make_block(long target_frame_id,
+                             int level_id,
+                             double lambda_diag,
+                             double eta_e,
+                             double rmse = 0.1,
+                             double inlier_fraction = 0.9,
+                             double cond = 2.0,
+                             double age_sec = 0.1) {
+    LidarAraimBlock block;
+    block.source_frame_id = 42;
+    block.target_frame_id = target_frame_id;
+    block.level_id = level_id;
+    block.voxel_resolution = 0.2 * std::pow(2.0, level_id);
+    block.num_inliers = 100;
+    block.inlier_fraction = inlier_fraction;
+    block.rmse_proxy = rmse;
+    block.cond_proxy = cond;
+    block.age_sec = age_sec;
+    block.Lambda_B = Eigen::Matrix<double, 6, 6>::Identity() * lambda_diag;
+    block.eta_B(3) = eta_e;
+    return block;
   }
 };
 
@@ -308,6 +368,86 @@ TEST_F(AraimTest, ParallelMatchesSerial) {
   }
 }
 
+TEST_F(LidarAraimTest, HypothesesEnumerateSourceTargetAndLevel) {
+  LidarAraim araim(default_params());
+  auto snapshot = make_snapshot();
+  snapshot.blocks.push_back(make_block(10, 0, 1.0, 0.0));
+  snapshot.blocks.push_back(make_block(10, 1, 1.0, 0.0));
+  snapshot.blocks.push_back(make_block(20, 0, 1.0, 0.0));
+
+  const auto result = araim.run(snapshot, make_fgo());
+  ASSERT_TRUE(result.valid);
+  EXPECT_EQ(result.n_hypotheses, 5);
+}
+
+TEST_F(LidarAraimTest, SingleBlockSubsetMatchesManualSolve) {
+  auto params = default_params();
+  params.alpha_H = 0.0;
+  params.alpha_V = 0.0;
+  LidarAraim araim(params);
+  auto snapshot = make_snapshot();
+  snapshot.blocks.push_back(make_block(10, 0, 1.0, 1.0));
+
+  const auto result = araim.run(snapshot, make_fgo());
+  ASSERT_TRUE(result.valid);
+  ASSERT_EQ(result.subsets.size(), 3u);  // source + target + level
+
+  const auto& ss = result.subsets.front();  // H_SOURCE removes the only block
+  ASSERT_TRUE(ss.valid);
+
+  const double lambda_f = 10.0 - 1.0;
+  const double sigma_f = 1.0 / lambda_f;
+  const double d = -1.0 / lambda_f;
+  const double sigma_ss = std::sqrt(std::max(0.0, sigma_f - 0.1));
+  const double expected_pl =
+      std::abs(d) + params.K_fa * sigma_ss + params.K_md * std::sqrt(sigma_f);
+
+  EXPECT_NEAR(ss.d_E, d, 1e-12);
+  EXPECT_NEAR(ss.sigma_k_E, std::sqrt(sigma_f), 1e-12);
+  EXPECT_NEAR(ss.PL_E, expected_pl, 1e-12);
+}
+
+TEST_F(LidarAraimTest, BiasModelIncreasesProtectionLevel) {
+  auto params = default_params();
+  params.alpha_H = 1.0;
+  params.alpha_V = 1.0;
+  LidarAraim araim(params);
+
+  auto good = make_snapshot();
+  good.blocks.push_back(make_block(10, 0, 1.0, 0.0, 0.05, 0.98, 1.2, 0.05));
+
+  auto bad = make_snapshot();
+  bad.blocks.push_back(make_block(10, 0, 1.0, 0.0, 0.5, 0.4, 50.0, 3.0));
+
+  const auto good_result = araim.run(good, make_fgo());
+  const auto bad_result = araim.run(bad, make_fgo());
+
+  ASSERT_TRUE(good_result.valid);
+  ASSERT_TRUE(bad_result.valid);
+  EXPECT_GT(bad_result.HPL, good_result.HPL);
+  EXPECT_GT(bad_result.VPL, good_result.VPL);
+}
+
+TEST_F(LidarAraimTest, GpuBackendBlocksProduceValidGroupedResult) {
+  LidarAraim araim(default_params());
+  auto snapshot = make_snapshot();
+
+  auto block0 = make_block(10, 0, 1.0, 0.2);
+  auto block1 = make_block(20, 1, 1.5, 0.4);
+  block0.backend = LidarAraimBlock::Backend::GPU;
+  block1.backend = LidarAraimBlock::Backend::GPU;
+
+  snapshot.blocks.push_back(block0);
+  snapshot.blocks.push_back(block1);
+
+  const auto result = araim.run(snapshot, make_fgo());
+  ASSERT_TRUE(result.valid);
+  EXPECT_EQ(result.n_hypotheses, 5);
+  EXPECT_EQ(result.n_detected, 0);
+  EXPECT_GT(result.HPL, 0.0);
+  EXPECT_GT(result.VPL, 0.0);
+}
+
 // ============================================================================
 // §2: IntegrityState transitions
 // ============================================================================
@@ -378,6 +518,109 @@ TEST(IntegrityReportTest, SafeWhenPLLessThanAL) {
   rep.IM = rep.AL - rep.PL;
   EXPECT_TRUE(rep.safe());
   EXPECT_TRUE(rep.is_available());
+}
+
+TEST(IntegrityMonitorTest, LidarOnlyPLOverridesFallbackByMax) {
+  IntegrityMonitor::Params params;
+  params.K_pl = 1.0;
+  params.HAL_trunk_default = 100.0;
+  params.VAL_default = 100.0;
+  params.lidar_araim_params.dynamic_budget = false;
+  params.lidar_araim_params.K_ff = 5.0;
+  params.lidar_araim_params.K_fa = 4.0;
+  params.lidar_araim_params.K_md = 3.0;
+  params.lidar_araim_params.alpha_H = 0.0;
+  params.lidar_araim_params.alpha_V = 0.0;
+
+  IntegrityMonitor monitor(params);
+
+  glim::EstimationFrame frame;
+  frame.stamp = 10.0;
+  frame.sigma_p = Eigen::Matrix3d::Identity() * 0.01;
+
+  FGOPositionInfo fgo;
+  fgo.valid = true;
+  fgo.pose_cov_valid = true;
+  fgo.frame_id = 42;
+  fgo.pose_cov_6x6 = Eigen::Matrix<double, 6, 6>::Identity() * 0.1;
+  fgo.sigma_p = fgo.pose_cov_6x6.block<3, 3>(3, 3);
+
+  LidarAraimSnapshot snapshot;
+  snapshot.valid = true;
+  snapshot.frame_id = 42;
+  snapshot.stamp = frame.stamp;
+  snapshot.pose_cov_6x6 = fgo.pose_cov_6x6;
+
+  LidarAraimBlock block;
+  block.source_frame_id = 42;
+  block.target_frame_id = 10;
+  block.level_id = 0;
+  block.num_inliers = 100;
+  block.inlier_fraction = 0.9;
+  block.rmse_proxy = 0.1;
+  block.cond_proxy = 2.0;
+  block.age_sec = 0.1;
+  block.Lambda_B = Eigen::Matrix<double, 6, 6>::Identity();
+  block.eta_B(3) = 1.0;
+  snapshot.blocks.push_back(block);
+
+  const auto report = monitor.compute(frame, nullptr, nullptr, &fgo, &snapshot);
+  EXPECT_EQ(report.lidar_valid, 1);
+  EXPECT_GT(report.lidar_HPL, 0.1);
+  EXPECT_DOUBLE_EQ(report.HPL, report.lidar_HPL);
+  EXPECT_DOUBLE_EQ(report.PL, report.lidar_HPL);
+}
+
+TEST(IntegrityMonitorTest, LidarOnlyGpuBlocksOverrideFallbackByMax) {
+  IntegrityMonitor::Params params;
+  params.K_pl = 1.0;
+  params.HAL_trunk_default = 100.0;
+  params.VAL_default = 100.0;
+  params.lidar_araim_params.dynamic_budget = false;
+  params.lidar_araim_params.K_ff = 5.0;
+  params.lidar_araim_params.K_fa = 4.0;
+  params.lidar_araim_params.K_md = 3.0;
+  params.lidar_araim_params.alpha_H = 0.0;
+  params.lidar_araim_params.alpha_V = 0.0;
+
+  IntegrityMonitor monitor(params);
+
+  glim::EstimationFrame frame;
+  frame.stamp = 20.0;
+  frame.sigma_p = Eigen::Matrix3d::Identity() * 0.01;
+
+  FGOPositionInfo fgo;
+  fgo.valid = true;
+  fgo.pose_cov_valid = true;
+  fgo.frame_id = 43;
+  fgo.pose_cov_6x6 = Eigen::Matrix<double, 6, 6>::Identity() * 0.1;
+  fgo.sigma_p = fgo.pose_cov_6x6.block<3, 3>(3, 3);
+
+  LidarAraimSnapshot snapshot;
+  snapshot.valid = true;
+  snapshot.frame_id = 43;
+  snapshot.stamp = frame.stamp;
+  snapshot.pose_cov_6x6 = fgo.pose_cov_6x6;
+
+  LidarAraimBlock block;
+  block.source_frame_id = 43;
+  block.target_frame_id = 11;
+  block.level_id = 0;
+  block.backend = LidarAraimBlock::Backend::GPU;
+  block.num_inliers = 120;
+  block.inlier_fraction = 0.92;
+  block.rmse_proxy = 0.08;
+  block.cond_proxy = 1.5;
+  block.age_sec = 0.05;
+  block.Lambda_B = Eigen::Matrix<double, 6, 6>::Identity();
+  block.eta_B(3) = 0.8;
+  snapshot.blocks.push_back(block);
+
+  const auto report = monitor.compute(frame, nullptr, nullptr, &fgo, &snapshot);
+  EXPECT_EQ(report.lidar_valid, 1);
+  EXPECT_GT(report.lidar_HPL, 0.1);
+  EXPECT_DOUBLE_EQ(report.HPL, report.lidar_HPL);
+  EXPECT_DOUBLE_EQ(report.PL, report.lidar_HPL);
 }
 
 // ============================================================================

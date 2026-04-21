@@ -15,12 +15,15 @@
 namespace iap {
 
 // ---------------------------------------------------------------------------
-IntegrityMonitor::IntegrityMonitor() : params_(Params{}), araim_(Araim{}) {
+IntegrityMonitor::IntegrityMonitor()
+    : params_(Params{}), araim_(Araim{}), lidar_araim_(LidarAraim{}) {
   logger_ = glim::create_module_logger("integrity");
 }
 
 IntegrityMonitor::IntegrityMonitor(const Params& params)
-: params_(params), araim_(params.araim_params) {
+: params_(params),
+  araim_(params.araim_params),
+  lidar_araim_(params.lidar_araim_params) {
   logger_ = glim::create_module_logger("integrity");
 }
 
@@ -229,6 +232,35 @@ void IntegrityMonitor::run_araim(const GnssEpoch& epoch,
 }
 
 // ---------------------------------------------------------------------------
+void IntegrityMonitor::run_lidar_araim(const LidarAraimSnapshot& snapshot,
+                                        const FGOPositionInfo* fgo_info,
+                                        IntegrityReport& report) {
+  const FGOPositionInfo empty_fgo;
+  const auto& fgo = fgo_info ? *fgo_info : empty_fgo;
+  const LidarAraimResult lr = lidar_araim_.run(snapshot, fgo);
+
+  report.lidar_valid = lr.valid ? 1 : 0;
+  report.lidar_n_hyp = lr.n_hypotheses;
+  report.lidar_n_det = lr.n_detected;
+  report.lidar_PL_E  = lr.PL_E;
+  report.lidar_PL_N  = lr.PL_N;
+  report.lidar_PL_U  = lr.PL_U;
+  report.lidar_HPL   = lr.HPL;
+  report.lidar_VPL   = lr.VPL;
+  report.lidar_worst_mode = lr.worst_mode;
+  last_lidar_araim_result_ = lr;
+
+  if (!lr.valid) return;
+
+  report.PL_E = std::max(report.PL_E, lr.PL_E);
+  report.PL_N = std::max(report.PL_N, lr.PL_N);
+  report.PL_U = std::max(report.PL_U, lr.PL_U);
+  report.HPL  = std::max(report.HPL, lr.HPL);
+  report.VPL  = std::max(report.VPL, lr.VPL);
+  report.PL   = std::max(report.PL, lr.HPL);
+}
+
+// ---------------------------------------------------------------------------
 // §1.13: Three-state integrity state machine
 // ---------------------------------------------------------------------------
 IntegrityState IntegrityMonitor::update_state(const IntegrityReport& report) {
@@ -325,15 +357,22 @@ IntegrityMode IntegrityMonitor::update_mode_legacy(const IntegrityReport& report
 }
 
 // ---------------------------------------------------------------------------
-IntegrityReport IntegrityMonitor::compute(const glim::EstimationFrame&       frame,
-                                           const GnssEpoch*             epoch,
-                                           const TrunkDetectionResult*  trunk) {
+IntegrityReport IntegrityMonitor::compute(const glim::EstimationFrame& frame,
+                                           const GnssEpoch* epoch,
+                                           const TrunkDetectionResult* trunk,
+                                           const FGOPositionInfo* fgo_info,
+                                           const LidarAraimSnapshot* lidar_snapshot) {
   const auto t0_integrity = std::chrono::high_resolution_clock::now();
   IntegrityReport report;
   report.stamp = frame.stamp;
 
   // --- PL fallback (IAP-RQ-200) ---
   report.PL = compute_PL_proxy(frame);
+  report.PL_E = report.PL_N = report.PL_U = report.PL;
+  report.HPL = report.PL;
+  report.VPL = report.PL;
+  report.pl_araim = report.PL;
+  report.vpl_araim = report.PL;
   report.lambda_max_sigma_p = [&] {
     Eigen::SelfAdjointEigenSolver<Eigen::Matrix3d> eig(frame.sigma_p, Eigen::EigenvaluesOnly);
     return eig.eigenvalues().maxCoeff();
@@ -372,6 +411,10 @@ IntegrityReport IntegrityMonitor::compute(const glim::EstimationFrame&       fra
     run_araim(*epoch, n_trunk_obs, report);
   }
 
+  if (lidar_snapshot) {
+    run_lidar_araim(*lidar_snapshot, fgo_info, report);
+  }
+
   // --- TDOP (IAP-RQ-120) ---
   if (trunk) {
     report.tdop = trunk->tdop;
@@ -392,11 +435,12 @@ IntegrityReport IntegrityMonitor::compute(const glim::EstimationFrame&       fra
   logger_->trace(
     "integrity: PL={:.3f}m HPL={:.3f} VPL={:.3f} HAL={:.3f} VAL={:.3f} AL={:.3f}m IM={:.3f}m "
     "state={} lambda_max={:.4f} icp_degen={} gamma_lidar={:.2f} "
-    "tdop={:.2f} araim_n_hyp={} araim_n_det={} n_sv={}",
+    "tdop={:.2f} araim_n_hyp={} araim_n_det={} lidar_n_hyp={} lidar_HPL={:.3f} n_sv={}",
     report.PL, report.HPL, report.VPL, report.HAL, report.VAL,
     report.AL, report.IM, to_string(report.state),
     report.lambda_max_sigma_p, report.icp_degenerate, report.gamma_lidar,
-    report.tdop, report.araim_n_hyp, report.araim_n_det, report.n_sv_used);
+    report.tdop, report.araim_n_hyp, report.araim_n_det,
+    report.lidar_n_hyp, report.lidar_HPL, report.n_sv_used);
 
   if (report.state == IntegrityState::UNSAFE) {
     if (report.PL >= report.AL) {
