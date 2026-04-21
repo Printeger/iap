@@ -6,6 +6,8 @@ set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} "${CMAKE_CURRENT_LIST_DIR}/cmake")
 
 # Version string available as IAP_VERSION in all targets
 add_compile_definitions(IAP_VERSION="${PROJECT_VERSION}")
+add_compile_definitions(IAP_BUILD_TYPE="${CMAKE_BUILD_TYPE}")
+add_compile_definitions(IAP_SOURCE_ROOT="${CMAKE_CURRENT_SOURCE_DIR}")
 
 if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
   set(CMAKE_BUILD_TYPE "RelWithDebInfo" CACHE STRING "Choose the type of build." FORCE)
@@ -61,6 +63,7 @@ add_library(iap SHARED
   # util
   src/iap/util/config.cpp
   src/iap/util/logging.cpp
+  src/iap/util/run_log_manager.cpp
   src/iap/util/export_factors.cpp
   src/iap/util/time_keeper.cpp
   src/iap/util/trajectory_manager.cpp
@@ -395,6 +398,8 @@ if(DEFINED ENV{ROS_VERSION})
       find_package(ament_cmake_gtest REQUIRED)
       ament_add_gtest(test_araim test/test_araim.cpp)
       target_link_libraries(test_araim iap)
+      ament_add_gtest(test_run_log_manager test/test_run_log_manager.cpp)
+      target_link_libraries(test_run_log_manager iap)
     endif()
     ament_export_include_directories(include ${EIGEN3_INCLUDE_DIR} ${OpenCV_INCLUDE_DIRS})
     ament_export_libraries(${iap_LIBRARIES} ${GTSAM_LIBRARIES} fmt spdlog::spdlog)

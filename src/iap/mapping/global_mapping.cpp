@@ -31,6 +31,7 @@
 
 #include <iap/util/config.hpp>
 #include <iap/util/serialization.hpp>
+#include <iap/util/run_log_manager.hpp>
 #include <iap/common/imu_integration.hpp>
 #include <iap/mapping/callbacks.hpp>
 
@@ -647,8 +648,12 @@ void GlobalMapping::save(const std::string& path) {
     submaps[i]->save((boost::format("%s/%06d") % path % i).str());
   }
 
-  logger->info("saving config");
-  GlobalConfig::instance()->dump(path + "/config");
+  logger->info("saving config snapshot");
+  if (auto* run_logs = RunLogManager::get_if_initialized()) {
+    GlobalConfig::instance()->dump(run_logs->metadata_path("config").string());
+  } else {
+    GlobalConfig::instance()->dump(path + "/config");
+  }
 }
 
 

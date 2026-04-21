@@ -27,6 +27,7 @@
 #include <gtsam_points/cuda/nonlinear_factor_set_gpu.hpp>
 
 #include <iap/util/config.hpp>
+#include <iap/util/run_log_manager.hpp>
 #include <iap/common/imu_integration.hpp>
 #include <iap/common/cloud_deskewing.hpp>
 #include <iap/common/cloud_covariance_estimation.hpp>
@@ -93,6 +94,9 @@ OdometryEstimationGPUParams::OdometryEstimationGPUParams() : OdometryEstimationI
   enable_icp_csv     = config.param<bool>("odometry_estimation", "enable_icp_csv", false);
   icp_csv_path       = config.param<std::string>("odometry_estimation", "icp_csv_path",
                                                   "/tmp/iap_icp.csv");
+  if (const auto* run_logs = RunLogManager::get_if_initialized()) {
+    icp_csv_path = run_logs->export_path("iap_icp.csv").string();
+  }
 
   spdlog::info("[odometry_gpu] enable_icp_csv={} icp_csv_path={}", enable_icp_csv, icp_csv_path);
 }

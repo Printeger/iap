@@ -17,6 +17,7 @@ msg/*ActionResult.msg
 msg/*Feedback.msg
 msg/*Goal.msg
 msg/*Result.msg
+!msg/DynamicALResult.msg
 msg/_*.py
 build_isolated/
 devel_isolated/
@@ -39,7 +40,11 @@ CMakeLists.txt.user
 
 srv/_*.py
 *.pcd
-*.pyc
+*.py[cod]
+__pycache__/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
 qtcreator-*
 *.user
 
@@ -57,6 +62,12 @@ CATKIN_IGNORE
 
 # Local runtime / colcon logs
 /log/*
+!/log/
 !/log/COLCON_IGNORE
 /log/latest
+/log/latest/
+/log/**/*.log
+/log/**/analysis/
 /tools/log/
+/tools/build/
+/tools/install/

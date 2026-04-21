@@ -46,10 +46,12 @@
 #include <iap/util/config.hpp>
 #include <iap/util/key_lifecycle_monitor.hpp>
 #include <iap/util/logging.hpp>
+#include <iap/util/run_log_manager.hpp>
 #include <iap/util/shared_state.hpp>
 #include <iap/util/timing_csv.hpp>
 
 #include <iomanip>
+#include <filesystem>
 
 namespace iap {
 
@@ -206,8 +208,16 @@ GnssExtensionModule::GnssExtensionModule()
   logger_->info("[gnss_ext] enable_debug_csv={}", enable_csv);
   if (enable_csv) {
     debug_csv_enabled_ = true;
-    const std::string csv_path = config.param<std::string>(
+    std::string csv_path = config.param<std::string>(
         "gnss", "debug_csv_path", "/tmp/iap_gnss_factor_debug.csv");
+    if (const auto* run_logs = glim::RunLogManager::get_if_initialized()) {
+      csv_path = run_logs->export_path("iap_gnss_factor_debug.csv").string();
+    }
+    const std::filesystem::path csv_file_path(csv_path);
+    if (csv_file_path.has_parent_path()) {
+      std::error_code ec;
+      std::filesystem::create_directories(csv_file_path.parent_path(), ec);
+    }
     debug_csv_file_.open(csv_path, std::ios::out | std::ios::trunc);
     if (debug_csv_file_.is_open()) {
       debug_csv_file_ << "diag_n,stamp,frame_id,factor_type,sat_id,constellation,"

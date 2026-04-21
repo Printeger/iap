@@ -28,7 +28,10 @@
 #include <iap/odometry/estimation_frame.hpp>
 #include <iap/util/config.hpp>
 #include <iap/util/logging.hpp>
+#include <iap/util/run_log_manager.hpp>
 #include <iap/util/shared_state.hpp>
+
+#include <filesystem>
 
 namespace iap {
 
@@ -102,17 +105,28 @@ IntegrityExtensionModule::IntegrityExtensionModule()
 
   // ── ARAIM debug CSV (IAP-RQ-200 observability) ───────────────────────────
   const bool araim_csv_en = config.param<bool>("integrity", "enable_araim_csv", false);
-  const std::string araim_csv_path = config.param<std::string>(
+  std::string araim_csv_path = config.param<std::string>(
       "integrity", "araim_csv_path", "/tmp/iap_araim.csv");
+  if (const auto* run_logs = glim::RunLogManager::get_if_initialized()) {
+    araim_csv_path = run_logs->export_path("iap_araim.csv").string();
+  }
   araim_debug_csv_ = std::make_unique<AraimDebugCSV>(araim_csv_en, araim_csv_path);
   logger_->info("[IntegrityExt] ARAIM CSV: {} → {}",
                 araim_csv_en ? "ENABLED" : "disabled", araim_csv_path);
 
   // ── Trajectory CSV ────────────────────────────────────────────────────────
   const bool traj_en = config.param<bool>("integrity", "enable_traj_csv", false);
-  const std::string traj_path = config.param<std::string>(
+  std::string traj_path = config.param<std::string>(
       "integrity", "traj_csv_path", "/tmp/traj_with_gnss.csv");
+  if (const auto* run_logs = glim::RunLogManager::get_if_initialized()) {
+    traj_path = run_logs->export_path("traj_with_gnss.csv").string();
+  }
   if (traj_en) {
+    const std::filesystem::path traj_csv_path(traj_path);
+    if (traj_csv_path.has_parent_path()) {
+      std::error_code ec;
+      std::filesystem::create_directories(traj_csv_path.parent_path(), ec);
+    }
     traj_csv_file_ = std::fopen(traj_path.c_str(), "w");
     if (traj_csv_file_) {
       std::fprintf(traj_csv_file_, "stamp,x,y,z\n");

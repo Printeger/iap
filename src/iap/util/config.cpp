@@ -1,6 +1,7 @@
 #include <iap/util/config.hpp>
 
 #include <boost/filesystem.hpp>
+#include <filesystem>
 #include <iap/util/config_impl.hpp>
 
 namespace glim {
@@ -74,6 +75,10 @@ GlobalConfig* GlobalConfig::instance(const std::string& config_path, bool overri
   return inst;
 }
 
+GlobalConfig* GlobalConfig::get_if_initialized() {
+  return inst;
+}
+
 std::string GlobalConfig::get_config_path(const std::string& config_name) {
   auto config = instance();
   const std::string directory = config->param<std::string>("global", "config_path", ".");
@@ -98,27 +103,44 @@ std::string GlobalConfig::get_config_path(const std::string& config_name) {
   return directory + "/" + filename;
 }
 
-void GlobalConfig::dump(const std::string& path) {
-  spdlog::debug("dumping config to {} (config_path={})", path, param<std::string>("global", "config_path", "."));
-  boost::filesystem::create_directories(path);
-  this->save(path + "/config.json");
+std::vector<std::pair<std::string, std::string>> GlobalConfig::list_config_paths() const {
+  std::vector<std::pair<std::string, std::string>> paths;
 
   const auto& json = std::any_cast<const nlohmann::json&>(config);
-  for (const auto& param : json["global"].items()) {
+  auto global_itr = json.find("global");
+  if (global_itr == json.end() || !global_itr->is_object()) {
+    return paths;
+  }
+
+  for (const auto& param : global_itr->items()) {
     const std::string config_name = param.key();
     if (config_name.rfind("config_", 0) != 0 || config_name == "config_path" || config_name == "config_ext") {
       continue;
     }
 
     if (!param.value().is_string()) {
-      spdlog::warn("skip dumping global/{} because value is not string", config_name);
+      spdlog::warn("skip listing global/{} because value is not string", config_name);
       continue;
     }
 
-    const std::string config_file = param.value();
+    paths.emplace_back(config_name, get_config_path(config_name));
+  }
+
+  return paths;
+}
+
+void GlobalConfig::dump(const std::string& path) {
+  spdlog::debug("dumping config to {} (config_path={})", path, param<std::string>("global", "config_path", "."));
+  boost::filesystem::create_directories(path);
+  this->save(path + "/config.json");
+
+  for (const auto& config_path : list_config_paths()) {
+    const auto& config_name = config_path.first;
+    const auto& resolved_path = config_path.second;
+    const auto config_file = std::filesystem::path(resolved_path).filename().string();
 
     spdlog::debug("dumping {} : {}", config_name, config_file);
-    const Config conf(get_config_path(config_name));
+    const Config conf(resolved_path);
     conf.save(path + "/" + config_file);
   }
 

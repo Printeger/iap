@@ -16,14 +16,23 @@
 #include <string>
 #include <iap/util/config.hpp>
 #include <iap/util/logging.hpp>
+#include <iap/util/run_log_manager.hpp>
 
 int main(int argc, char** argv) {
   const std::string config_dir = (argc > 1) ? argv[1] : "config";
 
+  glim::GlobalConfig::instance(config_dir, true);
+  auto& run_logs = glim::RunLogManager::initialize("iap_status", config_dir);
+  run_logs.write_run_info();
+  glim::GlobalConfig::instance()->dump(run_logs.metadata_path("config").string());
+
+  auto main_logger = glim::create_module_logger("glim");
+  glim::set_default_logger(main_logger);
   auto logger = glim::create_module_logger("iap_status");
 
   logger->info("=== IAP status check (v{}) ===", IAP_VERSION);
   logger->info("Config dir : {}", config_dir);
+  logger->info("Run dir    : {}", run_logs.run_dir().string());
 
   // Try loading the base config (non-fatal if not found)
   try {

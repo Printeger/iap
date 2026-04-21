@@ -29,6 +29,7 @@
 #include <iap/util/extension_module.hpp>
 #include <iap/util/extension_module_ros2.hpp>
 #include <iap/util/logging.hpp>
+#include <iap/util/run_log_manager.hpp>
 #include <iap/util/ros_cloud_converter.hpp>
 #include <iap/util/time_keeper.hpp>
 
@@ -42,9 +43,14 @@ public:
 
     const std::string resolved_config_path = config_path.empty() ? "config" : config_path;
     GlobalConfig::instance(resolved_config_path, true);
+    auto& run_logs = RunLogManager::initialize("iap_rosnode", resolved_config_path);
+    run_logs.write_run_info();
+    GlobalConfig::instance()->dump(run_logs.metadata_path("config").string());
 
     logger_ = create_module_logger("glim");
+    glim::set_default_logger(logger_);
     logger_->info("config_path: {}", resolved_config_path);
+    logger_->info("run_dir: {}", run_logs.run_dir().string());
 
   #ifdef GTSAM_POINTS_USE_CUDA
     gtsam_points::LinearizationHook::register_hook([] { return gtsam_points::create_nonlinear_factor_set_gpu(); });
@@ -74,7 +80,9 @@ public:
     intensity_field_ = sensor_config.param<std::string>("sensors", "intensity_field", "intensity");
     ring_field_ = sensor_config.param<std::string>("sensors", "ring_field", "ring");
 
-    dump_path_ = config_ros.param<std::string>("glim_ros", "dump_path", "/tmp/dump");
+    const std::string legacy_dump_path = config_ros.param<std::string>("glim_ros", "dump_path", "/tmp/dump");
+    dump_path_ = run_logs.export_path("dump").string();
+    logger_->info("dump_path: {} (legacy config value: {})", dump_path_, legacy_dump_path);
 
     load_core_modules();
     load_extension_modules(config_ros);
@@ -125,13 +133,14 @@ public:
       async_global_->save(dump_path_);
     }
 
-    auto* global = GlobalConfig::instance();
-    if (global) {
-      global->dump(dump_path_ + "/config");
-    }
-
     for (const auto& ext : extensions_) {
       ext->at_exit(dump_path_);
+    }
+
+    if (auto* global = GlobalConfig::get_if_initialized()) {
+      auto& run_logs = RunLogManager::instance();
+      global->dump(run_logs.metadata_path("config").string());
+      run_logs.write_run_info();
     }
   }
 

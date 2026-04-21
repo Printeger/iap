@@ -127,24 +127,29 @@ This runs the odometry path only.
 
 Default log directories:
 
-- `src/iap/log/`
-- Common result folder: `src/iap/log/res/`
+- `src/iap/log/<timestamp>/`
+- `src/iap/log/latest -> <timestamp>/`
+- Per-run folders:
+  `runtime/`
+  `profiling/`
+  `export/`
+  `metadata/`
 
 If `global.enable_timing_csv=true` in `config/config.json`, it writes:
 
-- `src/iap/log/res/iap_timing.csv`
+- `src/iap/log/latest/profiling/iap_timing.csv`
 
 Useful analysis scripts:
 
 ```bash
 # ARAIM timeline
-python3 tools/plot_araim_timeline.py src/iap/log/res/iap_araim.csv src/iap/log/res
+python3 tools/plot_araim_timeline.py src/iap/log/latest/export/iap_araim.csv src/iap/log/latest/export
 
 # GNSS factor diagnostics
-python3 tools/plot_gnss_factor_debug.py --csv src/iap/log/res/iap_gnss_factor_debug.csv --out src/iap/log/res
+python3 tools/plot_gnss_factor_debug.py --csv src/iap/log/latest/export/iap_gnss_factor_debug.csv --out src/iap/log/latest/export
 
 # ICP + module timing
-python3 tools/plot_icp_timing.py src/iap/log/res/iap_icp.csv src/iap/log/res/iap_timing.csv src/iap/log/res
+python3 tools/plot_icp_timing.py src/iap/log/latest/export/iap_icp.csv src/iap/log/latest/profiling/iap_timing.csv src/iap/log/latest/export
 ```
 
 ---

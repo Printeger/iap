@@ -13,4 +13,6 @@ std::shared_ptr<spdlog::sinks::ringbuffer_sink_mt> get_ringbuffer_sink(int buffe
 
 std::shared_ptr<spdlog::logger> create_module_logger(const std::string& module_name);
 
+std::string sanitize_log_name(const std::string& name);
+
 }  // namespace glim

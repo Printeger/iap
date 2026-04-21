@@ -12,12 +12,12 @@
     "config_global_mapping": "config_global_mapping_gpu.json",
     "config_gnss": "config_gnss.json",
     "enable_timing_csv": true,
-    "timing_csv_path": "/home/dev/code/ws_iap/src/iap/log/res/iap_timing.csv"
+    "timing_csv_path": "/home/dev/ws_iap/src/iap/log/res/iap_timing.csv"
   },
 
   /*** Logging ***/
   "logging": {
-    "log_dir": "/home/dev/code/ws_iap/src/iap/log/",
+    "log_dir": "/home/dev/ws_iap/src/iap/log/",
     "save_logs": true,
     "rotate_logs": true,
     "max_file_size_kb": 8192,

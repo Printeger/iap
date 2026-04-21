@@ -1,8 +1,10 @@
 #pragma once
 
 #include <iap/util/config.hpp>
+#include <iap/util/run_log_manager.hpp>
 
 #include <cstdio>
+#include <filesystem>
 #include <mutex>
 #include <string>
 
@@ -24,12 +26,12 @@ inline bool enabled() {
 }
 
 inline const std::string& path() {
-  static bool initialized = false;
   static std::string value = "/home/dev/code/ws_iap/src/iap/log/res/iap_timing.csv";
-  if (!initialized) {
+  if (const auto* run_logs = glim::RunLogManager::get_if_initialized()) {
+    value = run_logs->profiling_path("iap_timing.csv").string();
+  } else if (value == "/home/dev/code/ws_iap/src/iap/log/res/iap_timing.csv") {
     value = glim::GlobalConfig::instance()->param<std::string>(
         "global", "timing_csv_path", "/home/dev/code/ws_iap/src/iap/log/res/iap_timing.csv");
-    initialized = true;
   }
   return value;
 }
@@ -38,6 +40,11 @@ inline void ensure_header() {
   static std::once_flag once;
   std::call_once(once, [] {
     if (!enabled()) return;
+    const std::filesystem::path csv_path(path());
+    if (csv_path.has_parent_path()) {
+      std::error_code ec;
+      std::filesystem::create_directories(csv_path.parent_path(), ec);
+    }
     FILE* f = std::fopen(path().c_str(), "w");
     if (!f) return;
     std::fprintf(f, "stamp,module,elapsed_ms\n");

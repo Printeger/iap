@@ -24,6 +24,10 @@
 #include <iostream>
 #include <spdlog/spdlog.h>
 
+#include <iap/util/config.hpp>
+#include <iap/util/logging.hpp>
+#include <iap/util/run_log_manager.hpp>
+
 namespace iap {
 namespace experiments {
 
@@ -127,8 +131,12 @@ ExperimentResult run_baseline(int baseline, const std::string& label,
   mc.set_mission_success(success);
   mc.log_summary(label);
 
-  const std::string csv_path =
+  std::string csv_path =
       "/tmp/iap_experiment_" + scenario + "_" + label + ".csv";
+  if (const auto* run_logs = glim::RunLogManager::get_if_initialized()) {
+    csv_path = run_logs->export_path(
+      "iap_experiment_" + scenario + "_" + label + ".csv").string();
+  }
   mc.write_csv(csv_path);
 
   ExperimentResult r;
@@ -148,17 +156,28 @@ ExperimentResult run_baseline(int baseline, const std::string& label,
 
 // ---------------------------------------------------------------------------
 int main(int argc, char** argv) {
-  spdlog::set_level(spdlog::level::info);
-
   std::string scenario = "synthetic_forest_01";
+  std::string config_dir = "config";
   for (int i = 1; i < argc; ++i) {
     const std::string arg(argv[i]);
     if (arg.rfind("--scenario=", 0) == 0) {
       scenario = arg.substr(11);
+    } else if (arg.rfind("--config_dir=", 0) == 0) {
+      config_dir = arg.substr(13);
     }
   }
 
+  glim::GlobalConfig::instance(config_dir, true);
+  auto& run_logs = glim::RunLogManager::initialize("iap_experiment", config_dir);
+  run_logs.write_run_info();
+  glim::GlobalConfig::instance()->dump(run_logs.metadata_path("config").string());
+
+  auto main_logger = glim::create_module_logger("glim");
+  glim::set_default_logger(main_logger);
+  spdlog::set_level(spdlog::level::info);
+
   spdlog::info("[iap_experiment] scenario='{}'", scenario);
+  spdlog::info("[iap_experiment] run_dir='{}'", run_logs.run_dir().string());
 
   std::vector<iap::experiments::ExperimentResult> results;
 
@@ -172,7 +191,11 @@ int main(int argc, char** argv) {
   results.push_back(iap::experiments::run_baseline(2, "IntegAware", scenario));
 
   // Write comparison table
-  const std::string table_path = "/tmp/iap_experiment_" + scenario + "_summary.md";
+  std::string table_path = "/tmp/iap_experiment_" + scenario + "_summary.md";
+  if (const auto* initialized_run_logs = glim::RunLogManager::get_if_initialized()) {
+    table_path = initialized_run_logs->export_path(
+      "iap_experiment_" + scenario + "_summary.md").string();
+  }
   iap::experiments::write_comparison_table(results, table_path);
   iap::experiments::write_comparison_table(results, "");  // also to stdout
 

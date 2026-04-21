@@ -5,6 +5,7 @@
 #include <string>
 #include <memory>
 #include <optional>
+#include <utility>
 
 namespace glim {
 
@@ -117,7 +118,11 @@ private:
 public:
   static GlobalConfig* instance(const std::string& config_path = std::string(), bool override_path = false);
 
+  static GlobalConfig* get_if_initialized();
+
   static std::string get_config_path(const std::string& config_name);
+
+  std::vector<std::pair<std::string, std::string>> list_config_paths() const;
 
   /**
    * @brief Dump all involved config parameters
