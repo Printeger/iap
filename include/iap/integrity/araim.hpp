@@ -65,6 +65,10 @@ class Araim {
     double eps_degen      = 1e-10;  ///< minimum eigenvalue to accept inversion
     int    min_sats       = 4;      ///< minimum non-excluded sats for valid solution
 
+    // --- Hypothesis evaluation performance ---
+    bool   parallel_hypotheses = true;  ///< evaluate subset hypotheses in parallel
+    int    hypothesis_threads  = 0;     ///< 0 = use OpenMP runtime default
+
     // --- Legacy alias (for code that reads P_req) ---
     double P_req          = 1e-7;   ///< alias for P_HMI_req
   };
@@ -119,7 +123,7 @@ class Araim {
 
   /// Enumerate fault hypotheses from epochs sats + n_trunk.
   static std::vector<FaultHypothesis> enumerate_hypotheses(
-      const GnssEpoch& epoch, int n_trunk, double p_trunk);
+      const GnssEpoch& epoch, int n_trunk, const Params& params);
 
   /**
    * @brief Core ARAIM computation.

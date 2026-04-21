@@ -11,6 +11,8 @@
 #include <memory>
 #include <mutex>
 #include <spdlog/spdlog.h>
+#include <string>
+#include <vector>
 
 // Forward declarations to avoid heavy GTSAM headers in this header
 namespace gtsam_points {
@@ -23,13 +25,22 @@ namespace iap {
 /// @brief Per-epoch snapshot of FGO-derived position information.
 struct FGOPositionInfo {
   double stamp          = 0.0;     ///< timestamp of the extraction
+  long   frame_id       = -1;      ///< frame id of the extracted pose key
   bool   valid          = false;   ///< true if extraction succeeded
+  bool   pose_cov_valid = false;   ///< true if pose_cov_6x6 and sigma_p are valid
 
   /// Position covariance Σ^(0)_{p,p} (3×3, ENU or world frame)
   Eigen::Matrix3d sigma_p = Eigen::Matrix3d::Identity();
 
   /// Information matrix block Λ_{p,p} = Σ^{-1}_{p,p}
   Eigen::Matrix3d lambda_p = Eigen::Matrix3d::Zero();
+
+  /// Full 6×6 pose covariance marginal for Pose3 [rot(3) | trans(3)]
+  Eigen::Matrix<double, 6, 6> pose_cov_6x6 =
+      Eigen::Matrix<double, 6, 6>::Zero();
+
+  /// Current nominal pose translation in world frame.
+  Eigen::Vector3d p_world = Eigen::Vector3d::Zero();
 
   /// Per-axis position sigmas [m]
   double sigma_E = 1e9;
@@ -40,9 +51,19 @@ struct FGOPositionInfo {
   Eigen::Vector3d eig_vals = Eigen::Vector3d::Constant(1e9);
 
   /// Contributing factor count (how many GNSS+trunk factors are in the window)
+  int n_total_factors = 0;
   int n_gnss_factors  = 0;
   int n_trunk_factors = 0;
   int n_imu_factors   = 0;
+  int n_clock_factors = 0;
+  int n_other_factors = 0;
+  int window_key_count = 0;
+
+  /// Lightweight metadata snapshots for downstream integrity/debug use.
+  std::vector<int> gnss_sat_ids;
+  std::vector<char> gnss_constellations;
+  std::vector<int> trunk_landmark_ids;
+  std::vector<std::string> factor_type_tags;
 };
 
 // ---------------------------------------------------------------------------

@@ -10,6 +10,7 @@
 
 #include <iap/integrity/araim.hpp>
 #include <iap/integrity/araim_types.hpp>
+#include <iap/integrity/fgo_information_matrix.hpp>
 #include <iap/integrity/integrity_types.hpp>
 #include <iap/integrity/integrity_monitor.hpp>
 #include <iap/trunk/trunk_map.hpp>
@@ -260,6 +261,53 @@ TEST_F(AraimTest, S0IsPositiveSemidefinite) {
   }
 }
 
+// ---------------------------------------------------------------------------
+// T11: Parallel and serial hypothesis evaluation are numerically equivalent
+// ---------------------------------------------------------------------------
+TEST_F(AraimTest, ParallelMatchesSerial) {
+  Araim::Params serial_params = default_params();
+  serial_params.parallel_hypotheses = false;
+
+  Araim::Params parallel_params = default_params();
+  parallel_params.parallel_hypotheses = true;
+  parallel_params.hypothesis_threads = 2;
+
+  Araim serial_araim(serial_params);
+  Araim parallel_araim(parallel_params);
+  GnssEpoch epoch = make_epoch(10);
+
+  AraimResult serial = serial_araim.run(epoch, 2);
+  AraimResult parallel = parallel_araim.run(epoch, 2);
+
+  ASSERT_TRUE(serial.valid);
+  ASSERT_TRUE(parallel.valid);
+  ASSERT_EQ(serial.subsets.size(), parallel.subsets.size());
+  ASSERT_EQ(serial.hypotheses.size(), parallel.hypotheses.size());
+
+  EXPECT_NEAR(serial.HPL, parallel.HPL, 1e-12);
+  EXPECT_NEAR(serial.VPL, parallel.VPL, 1e-12);
+  EXPECT_NEAR(serial.PL_E, parallel.PL_E, 1e-12);
+  EXPECT_NEAR(serial.PL_N, parallel.PL_N, 1e-12);
+  EXPECT_NEAR(serial.PL_U, parallel.PL_U, 1e-12);
+  EXPECT_EQ(serial.n_detected, parallel.n_detected);
+  EXPECT_EQ(serial.worst_hyp, parallel.worst_hyp);
+  EXPECT_EQ(serial.excluded_prns, parallel.excluded_prns);
+  EXPECT_EQ(serial.excluded_trunk_ids, parallel.excluded_trunk_ids);
+
+  for (std::size_t i = 0; i < serial.subsets.size(); ++i) {
+    const auto& a = serial.subsets[i];
+    const auto& b = parallel.subsets[i];
+    EXPECT_EQ(a.hyp_index, b.hyp_index);
+    EXPECT_NEAR(a.PL_E, b.PL_E, 1e-12);
+    EXPECT_NEAR(a.PL_N, b.PL_N, 1e-12);
+    EXPECT_NEAR(a.PL_U, b.PL_U, 1e-12);
+    EXPECT_NEAR(a.d_E, b.d_E, 1e-12);
+    EXPECT_NEAR(a.d_N, b.d_N, 1e-12);
+    EXPECT_NEAR(a.d_U, b.d_U, 1e-12);
+    EXPECT_EQ(a.fault_detected, b.fault_detected);
+  }
+}
+
 // ============================================================================
 // §2: IntegrityState transitions
 // ============================================================================
@@ -294,6 +342,20 @@ TEST(DynamicALResultTest, DefaultsAreConservative) {
   EXPECT_EQ(al.nearest_trunk_id, -1);
   EXPECT_GE(al.nearest_trunk_dist, 1e9);
   EXPECT_TRUE(al.al_from_trunk);
+}
+
+TEST(FGOPositionInfoTest, DefaultsAreConservative) {
+  FGOPositionInfo info;
+  EXPECT_FALSE(info.valid);
+  EXPECT_FALSE(info.pose_cov_valid);
+  EXPECT_EQ(info.frame_id, -1);
+  EXPECT_EQ(info.n_total_factors, 0);
+  EXPECT_EQ(info.n_gnss_factors, 0);
+  EXPECT_EQ(info.n_trunk_factors, 0);
+  EXPECT_EQ(info.n_imu_factors, 0);
+  EXPECT_EQ(info.window_key_count, 0);
+  EXPECT_TRUE(info.gnss_sat_ids.empty());
+  EXPECT_TRUE(info.trunk_landmark_ids.empty());
 }
 
 // ============================================================================

@@ -6,16 +6,64 @@
 
 #include <iap/integrity/araim.hpp>
 #include <iap/util/timing_csv.hpp>
-#include <Eigen/Eigenvalues>
+#include <Eigen/Cholesky>
 #include <spdlog/spdlog.h>
 #include <algorithm>
 #include <chrono>
 #include <cmath>
 #include <cstdio>
 #include <unordered_map>
-#include <unordered_set>
+
+#ifdef _OPENMP
+#include <omp.h>
+#endif
 
 namespace iap {
+
+namespace {
+
+using Matrix4d = Eigen::Matrix4d;
+using Vector4d = Eigen::Vector4d;
+
+int infer_constellation_id(int sat_id) {
+  if (sat_id >= 1 && sat_id <= 32) return 0;       // GPS
+  if (sat_id >= 33 && sat_id <= 56) return 3;      // GLONASS
+  if (sat_id >= 57 && sat_id <= 88) return 1;      // Galileo
+  if (sat_id >= 89 && sat_id <= 152) return 2;     // BeiDou
+  return -1;
+}
+
+double constellation_prior(int const_id, const Araim::Params& p) {
+  switch (const_id) {
+    case 0: return p.p_const_GPS;
+    case 1: return p.p_const_GAL;
+    case 2: return p.p_const_BDS;
+    case 3: return p.p_const_GLO;
+    default: return p.p_const_default;
+  }
+}
+
+bool factorize_normal_matrix(const Matrix4d& A,
+                             double eps_degen,
+                             Eigen::LDLT<Matrix4d>* ldlt) {
+  ldlt->compute(A);
+  if (ldlt->info() != Eigen::Success) {
+    return false;
+  }
+
+  const Eigen::Vector4d d = ldlt->vectorD();
+  if (!d.allFinite()) {
+    return false;
+  }
+
+  return d.minCoeff() >= eps_degen;
+}
+
+Matrix4d covariance_from_factorization(const Eigen::LDLT<Matrix4d>& ldlt) {
+  return ldlt.solve(Matrix4d::Identity());
+}
+
+}  // namespace
 
 // ---------------------------------------------------------------------------
 Araim::Araim() : params_{} {}
@@ -114,7 +162,7 @@ Eigen::VectorXd Araim::build_r(const GnssEpoch& epoch) {
 // ---------------------------------------------------------------------------
 
 std::vector<FaultHypothesis> Araim::enumerate_hypotheses(
-    const GnssEpoch& epoch, int n_trunk, double p_trunk) {
+    const GnssEpoch& epoch, int n_trunk, const Params& params) {
 
   std::vector<FaultHypothesis> hyps;
   hyps.reserve(epoch.sats.size() + 10 + static_cast<std::size_t>(n_trunk));
@@ -128,14 +176,10 @@ std::vector<FaultHypothesis> Araim::enumerate_hypotheses(
     h.type    = FaultHypothesis::Type::GNSS_SAT;
     h.row     = row;
     h.sat_id  = s.sat_id;
-    h.p_fault = 1e-5;  // P_{sat,i} per §1.7 / ISM
+    h.p_fault = params.p_sat_default;
     hyps.push_back(h);
 
-    int cid = -1;
-    if (s.sat_id >= 1  && s.sat_id <= 32)  cid = 0;
-    else if (s.sat_id >= 33 && s.sat_id <= 56)  cid = 3;
-    else if (s.sat_id >= 57 && s.sat_id <= 88)  cid = 1;
-    else if (s.sat_id >= 89 && s.sat_id <= 152) cid = 2;
+    const int cid = infer_constellation_id(s.sat_id);
     if (cid >= 0) {
       const_rows[cid].push_back(row);
     }
@@ -150,7 +194,7 @@ std::vector<FaultHypothesis> Araim::enumerate_hypotheses(
     h.row       = -1;
     h.sat_id    = -1;
     h.const_id  = cid;
-    h.p_fault   = 1e-4;  // P_{const,c} per §1.7
+    h.p_fault   = constellation_prior(cid, params);
     h.const_rows = rows;
     hyps.push_back(h);
   }
@@ -162,7 +206,7 @@ std::vector<FaultHypothesis> Araim::enumerate_hypotheses(
     h.row      = -1;
     h.sat_id   = -1;
     h.trunk_id = k;
-    h.p_fault  = p_trunk;
+    h.p_fault  = params.p_trunk_default;
     hyps.push_back(h);
   }
 
@@ -184,22 +228,31 @@ AraimResult Araim::compute_core(const Eigen::MatrixXd& G,
 
   const int N = static_cast<int>(G.rows());
 
-  // ─── Full solution S0 = (G^T W G)^{-1}  → Σ^(0) ────────────────────
-  const Eigen::Matrix4d A0 = G.transpose() * W.asDiagonal() * G;
+  std::vector<Matrix4d> row_outer(static_cast<std::size_t>(N), Matrix4d::Zero());
+  std::vector<Vector4d> row_rhs(static_cast<std::size_t>(N), Vector4d::Zero());
 
-  Eigen::SelfAdjointEigenSolver<Eigen::Matrix4d> eig0(A0, Eigen::EigenvaluesOnly);
-  if (eig0.eigenvalues().minCoeff() < p.eps_degen) {
-    spdlog::trace("[ARAIM] Degenerate geometry (min_eig={:.2e}); returning invalid.",
-                  eig0.eigenvalues().minCoeff());
+  Matrix4d A0 = Matrix4d::Zero();
+  Vector4d rhs0 = Vector4d::Zero();
+  for (int i = 0; i < N; ++i) {
+    const Vector4d gi = G.row(i).transpose();
+    row_outer[static_cast<std::size_t>(i)] = W(i) * (gi * gi.transpose());
+    row_rhs[static_cast<std::size_t>(i)] = W(i) * gi * r(i);
+    A0 += row_outer[static_cast<std::size_t>(i)];
+    rhs0 += row_rhs[static_cast<std::size_t>(i)];
+  }
+
+  Eigen::LDLT<Matrix4d> ldlt0;
+  if (!factorize_normal_matrix(A0, p.eps_degen, &ldlt0)) {
+    spdlog::trace("[ARAIM] Degenerate geometry in nominal solve; returning invalid.");
     result.valid = false;
     return result;
   }
 
-  result.S0 = A0.inverse();
+  result.S0 = covariance_from_factorization(ldlt0);
   result.valid = true;
 
   // Full position estimate (4-vector: E, N, U, clk)
-  const Eigen::Vector4d p0 = result.S0 * G.transpose() * W.asDiagonal() * r;
+  const Vector4d p0 = ldlt0.solve(rhs0);
 
   // ─── Dynamic budget allocation (§1.8) ────────────────────────────────
   const int N_f = static_cast<int>(hyps.size());
@@ -234,14 +287,10 @@ AraimResult Araim::compute_core(const Eigen::MatrixXd& G,
   double worst_PL_E = result.pl_ff_E;
   double worst_PL_N = result.pl_ff_N;
   double worst_PL_U = result.pl_ff_V;
-  int    worst_idx  = -1;
-
   // ─── Per-hypothesis subset solutions ─────────────────────────────────
-  result.subsets.reserve(hyps.size());
-
-  for (int hi = 0; hi < static_cast<int>(hyps.size()); ++hi) {
-    const FaultHypothesis& hyp = hyps[hi];
-
+  std::vector<SubsetSolution> subsets(hyps.size());
+  auto evaluate_hypothesis = [&](int hi) {
+    const FaultHypothesis& hyp = hyps[static_cast<std::size_t>(hi)];
     SubsetSolution ss;
     ss.hyp_index   = hi;
     ss.row_removed = hyp.row;
@@ -249,50 +298,43 @@ AraimResult Araim::compute_core(const Eigen::MatrixXd& G,
     // Trunk hypotheses have no row in G → zero GNSS contribution
     // (Trunk FGO contribution handled in compute_core_fgo; here WLS only)
     if (hyp.type == FaultHypothesis::Type::TRUNK) {
-      result.subsets.push_back(ss);
-      continue;
+      return ss;
     }
 
-    // Build subset weights: zero out the relevant row(s)
-    Eigen::VectorXd Wk = W;
+    Matrix4d Ak = A0;
+    Vector4d rhsk = rhs0;
     if (hyp.type == FaultHypothesis::Type::CONSTELLATION) {
       for (int cr : hyp.const_rows) {
-        if (cr >= 0 && cr < N) Wk(cr) = 0.0;
+        if (cr >= 0 && cr < N) {
+          Ak -= row_outer[static_cast<std::size_t>(cr)];
+          rhsk -= row_rhs[static_cast<std::size_t>(cr)];
+        }
       }
     } else {
       if (hyp.row >= 0 && hyp.row < N) {
-        Wk(hyp.row) = 0.0;
+        Ak -= row_outer[static_cast<std::size_t>(hyp.row)];
+        rhsk -= row_rhs[static_cast<std::size_t>(hyp.row)];
       } else {
-        result.subsets.push_back(ss);
-        continue;
+        return ss;
       }
     }
 
-    const Eigen::Matrix4d Ak = G.transpose() * Wk.asDiagonal() * G;
-
-    // Subset degeneracy check
-    Eigen::SelfAdjointEigenSolver<Eigen::Matrix4d> eigk(Ak, Eigen::EigenvaluesOnly);
-    if (eigk.eigenvalues().minCoeff() < p.eps_degen) {
+    Eigen::LDLT<Matrix4d> ldltk;
+    if (!factorize_normal_matrix(Ak, p.eps_degen, &ldltk)) {
       ss.sigma_ss_E = ss.sigma_ss_N = ss.sigma_ss_horiz = 1e9;
       ss.sigma_ss_U = 1e9;
       ss.sigma_k_E = ss.sigma_k_N = ss.sigma_k_U = 1e9;
       ss.PL_E = ss.PL_N = ss.PL_U = 1e9;
       ss.pl_faulted = 1e9;
       ss.pl_faulted_V = 1e9;
-      result.subsets.push_back(ss);
-      if (ss.pl_faulted > std::max(worst_PL_E, worst_PL_N)) {
-        worst_PL_E = worst_PL_N = 1e9;
-        worst_PL_U = 1e9;
-        worst_idx = hi;
-      }
-      continue;
+      return ss;
     }
 
-    const Eigen::Matrix4d Sk = Ak.inverse();
-    const Eigen::Vector4d pk = Sk * G.transpose() * Wk.asDiagonal() * r;
+    const Matrix4d Sk = covariance_from_factorization(ldltk);
+    const Vector4d pk = ldltk.solve(rhsk);
 
     // ── §1.9 Step B: Separation vector d_k = p̂^(0) - p̂^(k) ──
-    const Eigen::Vector4d dk = p0 - pk;
+    const Vector4d dk = p0 - pk;
     ss.d_E     = dk(0);
     ss.d_N     = dk(1);
     ss.d_U     = dk(2);
@@ -350,21 +392,71 @@ AraimResult Araim::compute_core(const Eigen::MatrixXd& G,
     // HPL_k = max(PL_E,k, PL_N,k);  VPL_k = PL_U,k
     ss.pl_faulted   = std::max(ss.PL_E, ss.PL_N);
     ss.pl_faulted_V = ss.PL_U;
+    return ss;
+  };
 
-    // Track worst per-axis
-    if (ss.PL_E > worst_PL_E) { worst_PL_E = ss.PL_E; }
-    if (ss.PL_N > worst_PL_N) { worst_PL_N = ss.PL_N; }
-    if (ss.PL_U > worst_PL_U) { worst_PL_U = ss.PL_U; }
+  const bool use_parallel =
+      p.parallel_hypotheses && subsets.size() > 1;
 
-    // Track worst hypothesis index (by horizontal PL)
-    if (ss.pl_faulted > std::max(worst_PL_E, worst_PL_N)) {
-      worst_idx = hi;
+#ifdef _OPENMP
+  if (use_parallel) {
+    if (p.hypothesis_threads > 0) {
+#pragma omp parallel for schedule(static) num_threads(p.hypothesis_threads)
+      for (int hi = 0; hi < static_cast<int>(hyps.size()); ++hi) {
+        subsets[static_cast<std::size_t>(hi)] = evaluate_hypothesis(hi);
+      }
+    } else {
+#pragma omp parallel for schedule(static)
+      for (int hi = 0; hi < static_cast<int>(hyps.size()); ++hi) {
+        subsets[static_cast<std::size_t>(hi)] = evaluate_hypothesis(hi);
+      }
     }
-
-    result.subsets.push_back(ss);
+  } else {
+    for (int hi = 0; hi < static_cast<int>(hyps.size()); ++hi) {
+      subsets[static_cast<std::size_t>(hi)] = evaluate_hypothesis(hi);
+    }
   }
+#else
+  for (int hi = 0; hi < static_cast<int>(hyps.size()); ++hi) {
+    subsets[static_cast<std::size_t>(hi)] = evaluate_hypothesis(hi);
+  }
+#endif
+  result.subsets = std::move(subsets);
 
   // ─── §1.11: Total PL per axis  PL_q = max(PL_{q,0}, max_k PL_{q,k}) ──
+  result.worst_hyp = -1;
+  double max_hpl_k = 0.0;
+  result.n_detected = 0;
+  result.detected_rows.clear();
+  result.excluded_prns.clear();
+  result.excluded_trunk_ids.clear();
+
+  for (int i = 0; i < static_cast<int>(result.subsets.size()); ++i) {
+    const auto& ss = result.subsets[static_cast<std::size_t>(i)];
+
+    if (ss.PL_E > worst_PL_E) worst_PL_E = ss.PL_E;
+    if (ss.PL_N > worst_PL_N) worst_PL_N = ss.PL_N;
+    if (ss.PL_U > worst_PL_U) worst_PL_U = ss.PL_U;
+
+    if (ss.pl_faulted > max_hpl_k) {
+      max_hpl_k = ss.pl_faulted;
+      result.worst_hyp = i;
+    }
+
+    if (ss.fault_detected) {
+      ++result.n_detected;
+      result.detected_rows.push_back(ss.row_removed);
+      if (ss.hyp_index >= 0 && ss.hyp_index < static_cast<int>(hyps.size())) {
+        const auto& hyp = hyps[static_cast<std::size_t>(ss.hyp_index)];
+        if (hyp.type == FaultHypothesis::Type::GNSS_SAT && hyp.sat_id >= 0) {
+          result.excluded_prns.push_back(hyp.sat_id);
+        } else if (hyp.type == FaultHypothesis::Type::TRUNK && hyp.trunk_id >= 0) {
+          result.excluded_trunk_ids.push_back(hyp.trunk_id);
+        }
+      }
+    }
+  }
+
   result.PL_E = worst_PL_E;
   result.PL_N = worst_PL_N;
   result.PL_U = worst_PL_U;
@@ -374,34 +466,6 @@ AraimResult Araim::compute_core(const Eigen::MatrixXd& G,
   result.VPL       = result.PL_U;
   result.pl_araim  = result.HPL;   // backward compat alias
   result.vpl_araim = result.VPL;
-
-  // Find actual worst hypothesis among subsets
-  result.worst_hyp = -1;
-  double max_hpl_k = 0.0;
-  for (int i = 0; i < static_cast<int>(result.subsets.size()); ++i) {
-    if (result.subsets[i].pl_faulted > max_hpl_k) {
-      max_hpl_k = result.subsets[i].pl_faulted;
-      result.worst_hyp = i;
-    }
-  }
-
-  // ─── FDE summary (IAP-RQ-246) ──
-  result.n_detected = 0;
-  for (const auto& ss : result.subsets) {
-    if (ss.fault_detected) {
-      ++result.n_detected;
-      result.detected_rows.push_back(ss.row_removed);
-      // Track excluded PRNs / trunk IDs
-      if (ss.hyp_index >= 0 && ss.hyp_index < static_cast<int>(hyps.size())) {
-        const auto& hyp = hyps[ss.hyp_index];
-        if (hyp.type == FaultHypothesis::Type::GNSS_SAT && hyp.sat_id >= 0) {
-          result.excluded_prns.push_back(hyp.sat_id);
-        } else if (hyp.type == FaultHypothesis::Type::TRUNK && hyp.trunk_id >= 0) {
-          result.excluded_trunk_ids.push_back(hyp.trunk_id);
-        }
-      }
-    }
-  }
 
   return result;
 }
@@ -429,7 +493,7 @@ AraimResult Araim::run(const GnssEpoch& epoch, int n_trunk_obs) const {
   const Eigen::VectorXd W = build_W(epoch);
   const Eigen::VectorXd r = build_r(epoch);
 
-  auto hyps = enumerate_hypotheses(epoch, n_trunk_obs, params_.p_trunk_default);
+  auto hyps = enumerate_hypotheses(epoch, n_trunk_obs, params_);
 
   AraimResult result = compute_core(G, W, r, hyps, params_);
   result.n_hypotheses = static_cast<int>(hyps.size());

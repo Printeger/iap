@@ -3,6 +3,18 @@
 > 规则：任何代码改动必须在这里记录，并包含 IAP-RQ-XXX。
 
 ## Unreleased
+- perf(araim-fgo): IAP-RQ-241 / IAP-RQ-242 / IAP-RQ-243 / IAP-RQ-244 / IAP-RQ-245 / IAP-RQ-246 / IAP-RQ-300 — parallel hypothesis loop, inverse-free subset solves, and stronger FGO snapshot.
+  - `araim.hpp`: added `parallel_hypotheses` and `hypothesis_threads` controls to make serial/parallel validation explicit.
+  - `araim.cpp`: refactored `compute_core()` to precompute nominal normal-equation contributions, reuse per-row matrix/RHS terms across hypotheses, replace explicit `A.inverse()` with `LDLT` solves, and evaluate subset hypotheses into fixed-size result slots with optional OpenMP `parallel for`.
+  - `enumerate_hypotheses()` now uses configured satellite / constellation / trunk priors instead of hard-coded fault probabilities.
+  - `fgo_information_matrix.hpp` + `fgo_information_manager.cpp`: expanded `FGOPositionInfo` with `frame_id`, `p_world`, full 6x6 pose covariance, factor totals, key-count summary, GNSS sat/constellation lists, trunk landmark ids, and factor type tags derived from the smoother graph.
+  - `integrity_extension.cpp`: switched proxy-frame FGO consumption to a single richer snapshot read, keeping `sigma_p` fallback behavior unchanged while exposing stronger FGO context to future integrity work.
+  - `test/test_araim.cpp`: added serial-vs-parallel numerical equivalence coverage and default-value checks for the stronger FGO snapshot structure.
+  - Validation:
+    - `colcon build --packages-select iap --cmake-args -DBUILD_WITH_CUDA=OFF -DBUILD_WITH_VIEWER=OFF`
+    - `colcon test --packages-select iap --return-code-on-test-failure`
+    - Ad hoc benchmark (`24 sats + 8 trunk hyps`, 2000 iters): serial `0.0136 ms`, parallel `0.0193 ms`, `HPL delta = 0`
+    - Ad hoc benchmark (`48 sats + 16 trunk hyps`, 1500 iters): serial `0.0207 ms`, parallel `0.0202 ms`, speedup `1.02x`, `HPL delta = 0`
 - fix(clock-ownership): IAP-RQ-010 / IAP-RQ-200 — converge single-owner clock contract and suppress GNSS-owner read noise.
   - Added `clock_owner_mode` (`dual|odometry|gnss`) wiring across odometry/GNSS/trunk; defaults switched to `gnss` in odometry configs.
   - Added cross-module clock readiness marker in `IapSharedState` (`set_clock_ready/clear_clock_ready/is_clock_ready`).
@@ -261,4 +273,3 @@
   - All `glim_LIBRARIES` → `iap_LIBRARIES`; install paths `share/glim` → `share/iap`, `bin/glim` → `bin/iap`.
   - `colcon build --packages-select iap` passes; `ros2 pkg list | grep iap` shows `iap`.
 - Init: add traceability & agent rules. (IAP-RQ-000)
-

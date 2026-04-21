@@ -161,15 +161,22 @@ void IntegrityExtensionModule::on_smoother_update_finish_(
   // We set only the fields actually used by IntegrityMonitor::compute():
   //   - stamp          → report.stamp
   //   - T_world_imu   → trunk HAL geometry (2D position)
-  //   - sigma_p       → PL proxy fallback
+  //   - sigma_p       → PL proxy fallback / stronger FGO snapshot entry point
   //   - icp_quality   → report flags (use safe defaults: no degeneracy)
   auto proxy = std::make_shared<glim::EstimationFrame>();
   proxy->id         = frame_id;
   proxy->stamp      = frame_stamp;
   proxy->T_world_imu = T_world_imu;
-  // sigma_p: prefer FGO marginal; fall back to scalar identity (2 m 1-sigma)
-  if (enable_fgo_info_ && fgo_info_.has_data()) {
-    proxy->sigma_p = fgo_info_.latest().sigma_p;
+  FGOPositionInfo fgo_snapshot;
+  const bool have_fgo_snapshot = enable_fgo_info_ && fgo_info_.has_data();
+  if (have_fgo_snapshot) {
+    fgo_snapshot = fgo_info_.latest();
+  }
+
+  // sigma_p: prefer the latest richer FGO snapshot; fall back to scalar
+  // identity (2 m 1-sigma) when no valid marginal is available.
+  if (have_fgo_snapshot && fgo_snapshot.pose_cov_valid) {
+    proxy->sigma_p = fgo_snapshot.sigma_p;
   } else {
     proxy->sigma_p = Eigen::Matrix3d::Identity() * 4.0;  // 2m placeholder
   }
@@ -282,10 +289,12 @@ void IntegrityExtensionModule::on_smoother_update_finish_(
   if (n == 1 || n % 50 == 0) {
     logger_->info(
         "[IntegrityExt] #{}: stamp={:.3f} state={} HPL={:.2f}m VPL={:.2f}m "
-        "HAL={:.2f}m IM={:.2f}m n_sv={} n_trunks={}",
+        "HAL={:.2f}m IM={:.2f}m n_sv={} n_trunks={} fgo_valid={} fgo_factors={}",
         n, report.stamp, to_string(report.state),
         report.HPL, report.VPL, report.HAL, report.IM,
-        report.n_sv_used, report.n_trunks_observed);
+        report.n_sv_used, report.n_trunks_observed,
+        have_fgo_snapshot && fgo_snapshot.valid,
+        have_fgo_snapshot ? fgo_snapshot.n_total_factors : 0);
   } else {
     logger_->debug(
         "[IntegrityExt] stamp={:.3f} state={} HPL={:.2f}m VPL={:.2f}m "
