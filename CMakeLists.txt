@@ -359,6 +359,18 @@ if(DEFINED ENV{ROS_VERSION})
     list(APPEND iap_LIBRARIES integrity_extension)
     install(TARGETS integrity_extension DESTINATION lib)
 
+    ## Simulation bridge extension module (IAP <-> EGO sim adapter)
+    add_library(sim_extension SHARED
+      src/iap/sim/sim_extension.cpp
+    )
+    target_include_directories(sim_extension PUBLIC
+      $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+    )
+    target_link_libraries(sim_extension iap)
+    ament_target_dependencies(sim_extension rclcpp nav_msgs)
+    list(APPEND iap_LIBRARIES sim_extension)
+    install(TARGETS sim_extension DESTINATION lib)
+
     ## RViz2 visualization extension module (IAP-RQ-003: standalone operation)
     add_library(rviz_viewer SHARED
       src/iap/util/rviz_viewer.cpp

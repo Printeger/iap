@@ -1,0 +1,108 @@
+# IAP ARAIM / Integrity Monitoring Parameters
+# Reference: talk_spec.pdf §1.7–§1.13
+# All parameters are loaded by the integrity extension module.
+
+# ============================================================================
+# §1.8: Integrity budget allocation
+# ============================================================================
+araim:
+  # Required integrity risk per epoch (§1.8)
+  P_HMI_req: 1.0e-7
+  # Required false-alarm rate per epoch (§1.8)
+  P_FA_req: 1.0e-5
+  # Enable dynamic K allocation from P_HMI / P_FA
+  dynamic_budget: true
+
+  # Fallback K multipliers (used when dynamic_budget=false)
+  K_fa: 4.50          # false-alarm multiplier
+  K_md: 5.50          # missed-detection multiplier
+  K_ff: 5.42          # fault-free PL multiplier ≈ Q^{-1}(2.5e-8)
+
+  # ── §1.7: Fault prior probabilities (ISM) ──
+  p_sat_default: 1.0e-5     # P_{sat,i} per satellite
+  p_const_GPS:   1.0e-4     # P_{const} GPS
+  p_const_GAL:   1.0e-4     # P_{const} Galileo
+  p_const_BDS:   1.0e-4     # P_{const} BeiDou
+  p_const_GLO:   1.0e-4     # P_{const} GLONASS
+
+  # ── Trunk landmark fault priors ──
+  p_trunk_base:    1.0e-3   # P_{trunk} at confidence=1.0
+  p_trunk_scale:   0.1      # P_{trunk,k} = p_trunk_base / conf^scale
+  p_trunk_default: 1.0e-3   # fallback when no confidence available
+
+  # Geometry / numerical
+  eps_degen: 1.0e-10         # minimum eigenvalue for valid inversion
+  min_sats:  4               # minimum non-excluded sats
+
+# ============================================================================
+# §1.12: Dynamic Alert Limit (HAL + VAL)
+# ============================================================================
+integrity_monitor:
+  # ── PL proxy (fallback when ARAIM unavailable) ──
+  K_pl: 3.0
+
+  # ── HAL from trunk geometry (§1.12 horizontal) ──
+  gamma_H: 0.5              # safety factor
+  r_drone: 0.35             # UAV collision radius [m]
+  HAL_trunk_default: 10.0   # default HAL when no trunks visible [m]
+
+  # ── VAL from altitude bounds (§1.12 vertical) ──
+  gamma_V: 0.8              # vertical safety factor
+  h_min: 2.0                # minimum safe height above canopy [m]
+  canopy_height_default: 5.0 # fallback canopy height [m]
+  VAL_max: 50.0             # maximum VAL clamp [m]
+  VAL_default: 20.0         # default VAL when altitude unavailable [m]
+
+  # ── Legacy obstacle AL ──
+  al_min: 0.5               # minimum AL [m]
+  al_scale: 1.0
+  uav_radius: 0.3
+  default_al: 2.0
+
+  # ── §1.13: State machine thresholds ──
+  caution_fraction: 0.8     # PL > 0.8*AL → SAFE_EXCLUDED consideration
+  nominal_fraction: 0.6     # PL < 0.6*AL → SAFE
+  recovery_count: 5         # consecutive frames to clear SAFE_EXCLUDED
+
+  # ── NIS gating (IAP-RQ-220) ──
+  chi2_1dof_thresh: 6.63
+  chi2_global_mult: 3.0
+  gamma_R_max: 5.0
+
+# ============================================================================
+# §5: Planner parameters
+# ============================================================================
+planner:
+  # ── Cost weights (§5.2) ──
+  w_integrity: 2.0           # HPL/AL ratio hinge weight
+  w_turn: 0.5                # cumulative heading change cost
+  w_mission: 1.0             # distance-to-goal weight
+  w_smooth: 0.1              # velocity smoothness weight
+  w_infeasible: 100.0        # infeasibility penalty
+
+  search_weight_multiplier: 5.0  # boost w_integrity in SAFE_EXCLUDED/UNSAFE
+
+  # ── Receding horizon (IAP-RQ-410) ──
+  dt_execute: 0.2            # execution segment length [s]
+  al_default: 2.0            # fallback AL [m]
+  use_araim_pl: true         # use ARAIM-predicted PL per waypoint
+
+# ============================================================================
+# FGO Information Matrix (IAP-RQ-300)
+# ============================================================================
+fgo_info:
+  count_factors: true
+  min_eigenvalue: 1.0e-12
+
+# ============================================================================
+# Debug infrastructure (§11)
+# ============================================================================
+debug:
+  enable_csv: true          # write per-epoch CSV (controlled by IAP_DEBUG_CSV=1)
+  csv_path: "/tmp/iap_araim_debug.csv"
+  enable_rviz_markers: true
+  marker_topic: "/iap/integrity_markers"
+  report_topic: "/iap/integrity"
+  al_result_topic: "/iap/dynamic_al"
+  trunk_topic: "/iap/trunk_landmarks"
+  mdp_state_topic: "/iap/mdp_state"

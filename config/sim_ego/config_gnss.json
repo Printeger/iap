@@ -1,0 +1,124 @@
+{
+  /*** GNSS Extension Module Configuration ***
+  //
+  // --- Pseudorange / Doppler noise ---
+  // pr_noise_base     : Base pseudorange noise [m] (used only as fallback; canopy model preferred)
+  // dop_noise_base    : Base Doppler noise [m/s]
+  // elev_noise_exp    : Exponent for elevation-based Doppler noise weighting
+  //
+  // --- Canopy noise model  (σ²_eff = σ²_0 + σ²_mp/sin²θ + σ²_c·exp(α·κ/sinθ)) ---
+  // canopy_sigma_0    : Floor pseudorange noise σ_0 [m]
+  // canopy_sigma_mp   : Multipath noise amplitude σ_mp [m]
+  // canopy_sigma_c    : Canopy base noise σ_c [m]
+  // canopy_alpha      : Canopy amplification factor α
+  //
+  // --- Satellite filter ---
+  // min_elevation_deg : Minimum satellite elevation cutoff [deg]
+  // time_tolerance    : Epoch-frame matching window [s]
+  // max_epoch_queue   : Maximum buffered GNSS epochs (back-pressure guard)
+  //
+  // --- Lever arm ---
+  // lever_arm         : GNSS antenna phase center → IMU origin in body frame [m] (x,y,z)
+  //
+  // --- Clock between-factor (constant-drift random-walk) ---
+  // clock_q_bias      : Clock bias random-walk density [m/√s]   (TCXO typical: 1.0)
+  // clock_q_drift     : Clock drift random-walk density [m/s/√s] (TCXO typical: 0.1)
+  //
+  // --- ECEF anchor priors (E(0) / R(0)) ---
+  // sigma_ecef_origin : Prior σ for ECEF origin E(0) [m]        (loose: 5.0)
+  // sigma_ecef_rot    : Prior σ for world→ECEF rotation R(0) [rad] (~5°=0.087)
+  //
+  // --- Debug ---
+  // enable_debug_csv  : Write per-factor residual CSV to debug_csv_path (replaces env IAP_GNSS_DEBUG_CSV)
+  // debug_csv_path    : Output path for the debug CSV file
+  */
+  "gnss": {
+    // Pseudorange / Doppler
+    "pr_noise_base": 5.0,
+    "dop_noise_base": 0.5,
+    "elev_noise_exp": 2.0,
+
+    // Canopy noise model
+    "canopy_sigma_0": 1.0,
+    "canopy_sigma_mp": 0.5,
+    "canopy_sigma_c": 5.0,
+    "canopy_alpha": 2.0,
+
+    // Satellite filter
+    "min_elevation_deg": 10.0,
+    "time_tolerance": 0.1,
+    "max_epoch_queue": 100,
+
+    // Lever arm: antenna phase center in body frame [m]
+    "lever_arm": [0.0, 0.0, 0.0],
+
+    // Clock between-factor
+    "clock_q_bias": 1.0,
+    "clock_q_drift": 0.1,
+
+    // ECEF anchor priors
+    "sigma_ecef_origin": 5.0,
+    "sigma_ecef_rot": 0.087,
+
+    // Debug CSV (set true to enable; replaces IAP_GNSS_DEBUG_CSV env var)
+    "enable_debug_csv": true,
+    "debug_csv_path": "/home/dev/ws_iap/src/iap/log/res/iap_gnss_factor_debug.csv"
+  },
+
+  /*** Integrity Extension Module Configuration (IAP-RQ-200/210/220/240) ***
+  //  (merged from config_integrity.json)
+  //
+  // --- Master switch ---
+  // enable            : bool  — set false to disable the whole module (no callbacks)
+  //
+  // --- Sub-component switches ---
+  // enable_araim      : bool  — run ARAIM protection level computation
+  //                            (requires GNSS epoch from gnss_extension)
+  // enable_fgo_info   : bool  — extract smoother marginal covariance for σ_p
+  //                            (improves PL proxy when ARAIM is unavailable)
+  // enable_dynamic_al : bool  — compute HAL from trunk geometry + VAL from
+  //                            altitude/canopy bounds (§1.12)
+  //
+  // --- Publisher ---
+  // publish_topic     : str   — ROS2 topic for iap::msg::IntegrityReport
+  //
+  // --- IntegrityMonitor parameters ---
+  // K_pl              : float — coverage factor for PL = K_pl * sqrt(λ_max(Σ_p))
+  //                            (used as fallback when ARAIM unavailable)
+  // gamma_H           : float — HAL safety scale: HAL = γ_H * (d_nearest − r_k − r_drone)
+  // r_drone           : float — UAV collision radius [m]
+  // HAL_trunk_default : float — default HAL when no trunks are visible [m]
+  // gamma_V           : float — VAL safety scale: VAL = γ_V * (h_t − h_canopy − h_min)
+  // h_min             : float — minimum safe AGL clearance [m]
+  // VAL_default       : float — default VAL when altitude info unavailable [m]
+  ***/
+  "integrity": {
+    // Master enable — set false to run glim without any integrity overhead
+    "enable":             true,
+
+    // Sub-component enables
+    "enable_araim":       true,
+    "enable_fgo_info":    true,
+    "enable_dynamic_al":  true,
+
+    // Publisher
+    "publish_topic":      "/iap/integrity",
+
+    // IntegrityMonitor parameters (defaults match talk_spec §1.12)
+    "K_pl":               3.0,
+    "gamma_H":            0.5,
+    "r_drone":            0.35,
+    "HAL_trunk_default":  10.0,
+    "gamma_V":            0.8,
+    "h_min":              2.0,
+    "VAL_default":        20.0,
+
+    // ARAIM debug CSV (IAP-RQ-200 observability)
+    "enable_araim_csv":   true,
+    "araim_csv_path":     "/home/dev/ws_iap/src/iap/log/res/iap_araim.csv",
+
+    // Trajectory CSV (for Fig D1 comparison)
+    "enable_traj_csv":    true,
+    "traj_csv_path":      "/home/dev/ws_iap/src/iap/log/res/traj_with_gnss.csv"
+  }
+}
