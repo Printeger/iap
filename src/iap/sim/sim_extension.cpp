@@ -51,6 +51,52 @@ Eigen::Vector3d position_of(const nav_msgs::msg::Odometry& odom) {
       odom.pose.pose.position.z);
 }
 
+Eigen::Isometry3d odom_to_pose(const nav_msgs::msg::Odometry& odom) {
+  Eigen::Quaterniond q(
+      odom.pose.pose.orientation.w,
+      odom.pose.pose.orientation.x,
+      odom.pose.pose.orientation.y,
+      odom.pose.pose.orientation.z);
+  q.normalize();
+
+  Eigen::Isometry3d pose = Eigen::Isometry3d::Identity();
+  pose.linear() = q.toRotationMatrix();
+  pose.translation() = position_of(odom);
+  return pose;
+}
+
+nav_msgs::msg::Odometry pose_to_odom(
+    const Eigen::Isometry3d& pose,
+    const Eigen::Vector3d& velocity,
+    const builtin_interfaces::msg::Time& stamp,
+    const std::string& frame_id,
+    const std::string& child_frame_id) {
+  nav_msgs::msg::Odometry odom;
+  odom.header.stamp = stamp;
+  odom.header.frame_id = frame_id;
+  odom.child_frame_id = child_frame_id;
+
+  const Eigen::Vector3d t = pose.translation();
+  const Eigen::Quaterniond q(pose.linear());
+  odom.pose.pose.position.x = t.x();
+  odom.pose.pose.position.y = t.y();
+  odom.pose.pose.position.z = t.z();
+  odom.pose.pose.orientation.x = q.x();
+  odom.pose.pose.orientation.y = q.y();
+  odom.pose.pose.orientation.z = q.z();
+  odom.pose.pose.orientation.w = q.w();
+
+  odom.twist.twist.linear.x = velocity.x();
+  odom.twist.twist.linear.y = velocity.y();
+  odom.twist.twist.linear.z = velocity.z();
+  return odom;
+}
+
+double rotation_angle_deg(const Eigen::Matrix3d& R) {
+  const Eigen::AngleAxisd angle_axis(R);
+  return std::abs(angle_axis.angle()) * 180.0 / M_PI;
+}
+
 }  // namespace
 
 class SimExtensionModule : public glim::ExtensionModuleROS2 {
@@ -143,24 +189,8 @@ private:
       return;
     }
 
-    nav_msgs::msg::Odometry odom;
-    odom.header.stamp = to_msg_time(frame->stamp);
-    odom.header.frame_id = planner_odom_frame_id_;
-    odom.child_frame_id = planner_body_frame_id_;
-
-    const Eigen::Vector3d t = frame->T_world_imu.translation();
-    const Eigen::Quaterniond q(frame->T_world_imu.linear());
-    odom.pose.pose.position.x = t.x();
-    odom.pose.pose.position.y = t.y();
-    odom.pose.pose.position.z = t.z();
-    odom.pose.pose.orientation.x = q.x();
-    odom.pose.pose.orientation.y = q.y();
-    odom.pose.pose.orientation.z = q.z();
-    odom.pose.pose.orientation.w = q.w();
-
-    odom.twist.twist.linear.x = frame->v_world_imu.x();
-    odom.twist.twist.linear.y = frame->v_world_imu.y();
-    odom.twist.twist.linear.z = frame->v_world_imu.z();
+    Eigen::Isometry3d T_est = frame->T_world_imu;
+    Eigen::Vector3d v_est = frame->v_world_imu;
 
     bool publish_odom = true;
     {
@@ -170,18 +200,21 @@ private:
           if (!have_truth_) {
             publish_odom = false;
           } else {
-            alignment_offset_ = position_of(latest_truth_) - position_of(odom);
+            const Eigen::Isometry3d T_truth = odom_to_pose(latest_truth_);
+            T_truth_est_ = T_truth * T_est.inverse();
             alignment_initialized_ = true;
             logger_->info(
-                "[sim_ext] initialized planner odom alignment offset=[{:.3f},{:.3f},{:.3f}]",
-                alignment_offset_.x(), alignment_offset_.y(), alignment_offset_.z());
+                "[sim_ext] initialized planner odom SE3 alignment translation=[{:.3f},{:.3f},{:.3f}] rotation_deg={:.3f}",
+                T_truth_est_.translation().x(),
+                T_truth_est_.translation().y(),
+                T_truth_est_.translation().z(),
+                rotation_angle_deg(T_truth_est_.linear()));
           }
         }
 
         if (alignment_initialized_) {
-          odom.pose.pose.position.x += alignment_offset_.x();
-          odom.pose.pose.position.y += alignment_offset_.y();
-          odom.pose.pose.position.z += alignment_offset_.z();
+          T_est = T_truth_est_ * T_est;
+          v_est = T_truth_est_.linear() * v_est;
         }
       }
 
@@ -189,12 +222,18 @@ private:
         return;
       }
 
+      const nav_msgs::msg::Odometry odom = pose_to_odom(
+          T_est,
+          v_est,
+          to_msg_time(frame->stamp),
+          planner_odom_frame_id_,
+          planner_body_frame_id_);
       latest_estimate_ = odom;
       have_estimate_ = true;
-    }
 
-    if (planner_odom_pub_) {
-      planner_odom_pub_->publish(odom);
+      if (planner_odom_pub_) {
+        planner_odom_pub_->publish(odom);
+      }
     }
   }
 
@@ -245,7 +284,7 @@ private:
   bool have_truth_ = false;
   bool have_estimate_ = false;
   bool alignment_initialized_ = false;
-  Eigen::Vector3d alignment_offset_ = Eigen::Vector3d::Zero();
+  Eigen::Isometry3d T_truth_est_ = Eigen::Isometry3d::Identity();
   nav_msgs::msg::Odometry latest_truth_;
   nav_msgs::msg::Odometry latest_estimate_;
   std::ofstream metrics_csv_;

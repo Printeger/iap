@@ -1,6 +1,7 @@
 #include <atomic>
 #include <chrono>
 #include <cmath>
+#include <cstdlib>
 #include <memory>
 #include <mutex>
 #include <stdexcept>
@@ -39,13 +40,18 @@ class IapRosNode : public rclcpp::Node {
 public:
   IapRosNode() : rclcpp::Node("glim_rosnode") {
     declare_parameter<std::string>("config_path", "");
+    declare_parameter<std::string>("imu_topic", "");
+    declare_parameter<std::string>("points_topic", "");
     const std::string config_path = get_parameter("config_path").as_string();
-
-    const std::string resolved_config_path = config_path.empty() ? "config" : config_path;
+    const char* env_config_path = std::getenv("IAP_CONFIG_PATH");
+    const std::string resolved_config_path =
+      !config_path.empty() ? config_path : ((env_config_path && *env_config_path) ? std::string(env_config_path) : "config");
+    RCLCPP_INFO(get_logger(), "iap init stage=config path=%s", resolved_config_path.c_str());
     GlobalConfig::instance(resolved_config_path, true);
     auto& run_logs = RunLogManager::initialize("iap_rosnode", resolved_config_path);
     run_logs.write_run_info();
     GlobalConfig::instance()->dump(run_logs.metadata_path("config").string());
+    RCLCPP_INFO(get_logger(), "iap init stage=run_logs ready dir=%s", run_logs.run_dir().string().c_str());
 
     logger_ = create_module_logger("glim");
     glim::set_default_logger(logger_);
@@ -68,6 +74,14 @@ public:
 
     imu_topic_ = config_ros.param<std::string>("glim_ros", "imu_topic", "/imu");
     points_topic_ = config_ros.param<std::string>("glim_ros", "points_topic", "/points");
+    const std::string imu_topic_override = get_parameter("imu_topic").as_string();
+    const std::string points_topic_override = get_parameter("points_topic").as_string();
+    if (!imu_topic_override.empty()) {
+      imu_topic_ = imu_topic_override;
+    }
+    if (!points_topic_override.empty()) {
+      points_topic_ = points_topic_override;
+    }
 
     imu_time_offset_ = config_ros.param<double>("glim_ros", "imu_time_offset", 0.0);
     points_time_offset_ = config_ros.param<double>("glim_ros", "points_time_offset", 0.0);
@@ -84,11 +98,20 @@ public:
     dump_path_ = run_logs.export_path("dump").string();
     logger_->info("dump_path: {} (legacy config value: {})", dump_path_, legacy_dump_path);
 
+    RCLCPP_INFO(get_logger(), "iap init stage=load_core_modules");
     load_core_modules();
+    RCLCPP_INFO(get_logger(), "iap init stage=load_extension_modules");
     load_extension_modules(config_ros);
+    RCLCPP_INFO(get_logger(), "iap init stage=create_core_subscriptions");
     create_core_subscriptions();
+    RCLCPP_INFO(get_logger(), "iap init stage=create_input_status_timer");
+    input_status_timer_ = create_wall_timer(
+      std::chrono::seconds(2),
+      [this]() { log_input_status(); });
 
+    RCLCPP_INFO(get_logger(), "iap init stage=queue_thread_start");
     queue_thread_ = std::thread([this] { queue_bridge_loop(); });
+    RCLCPP_INFO(get_logger(), "iap init stage=ready");
 
     extension_watchdog_timer_ = create_wall_timer(
       std::chrono::milliseconds(200),
@@ -269,6 +292,16 @@ private:
       imu_topic_,
       imu_qos,
       [this](const sensor_msgs::msg::Imu::ConstSharedPtr msg) {
+        ++imu_msg_count_;
+        if (!logged_first_imu_) {
+          logged_first_imu_ = true;
+          RCLCPP_INFO(
+            get_logger(),
+            "iap input first imu stamp=%.6f frame_id=%s",
+            to_sec(msg->header.stamp),
+            msg->header.frame_id.c_str());
+        }
+
         sync_frame_metadata_from_imu(msg->header.frame_id);
 
         const double stamp = to_sec(msg->header.stamp) + imu_time_offset_;
@@ -293,25 +326,58 @@ private:
         }
       });
 
+    RCLCPP_INFO(
+      get_logger(),
+      "iap subscribed imu_topic=%s points_topic=%s",
+      imu_topic_.c_str(),
+      points_topic_.c_str());
+
     points_sub_ = create_subscription<sensor_msgs::msg::PointCloud2>(
       points_topic_,
       points_qos,
       [this](const sensor_msgs::msg::PointCloud2::ConstSharedPtr msg) {
+        ++points_msg_count_;
+        if (!logged_first_points_) {
+          logged_first_points_ = true;
+          RCLCPP_INFO(
+            get_logger(),
+            "iap input first points stamp=%.6f frame_id=%s width=%u height=%u fields=%zu",
+            to_sec(msg->header.stamp),
+            msg->header.frame_id.c_str(),
+            msg->width,
+            msg->height,
+            msg->fields.size());
+        }
+
         sync_frame_metadata_from_lidar(msg->header.frame_id);
 
         auto raw_points = extract_raw_points(*msg, intensity_field_, ring_field_);
         if (!raw_points) {
+          ++dropped_points_count_;
           return;
         }
 
         raw_points->stamp = to_sec(msg->header.stamp) + points_time_offset_;
         if (!time_keeper_->process(raw_points)) {
+          ++dropped_points_count_;
           return;
         }
 
         auto preprocessed = preprocessor_->preprocess(raw_points);
         if (!preprocessed || preprocessed->size() == 0) {
+          ++dropped_points_count_;
           return;
+        }
+
+        ++accepted_points_frames_;
+        if (!logged_first_preprocessed_) {
+          logged_first_preprocessed_ = true;
+          RCLCPP_INFO(
+            get_logger(),
+            "iap input first preprocessed frame stamp=%.6f points=%d scan_end=%.6f",
+            preprocessed->stamp,
+            preprocessed->size(),
+            preprocessed->scan_end_time);
         }
 
         if (!keep_raw_points_) {
@@ -395,6 +461,20 @@ private:
     return auto_scale_;
   }
 
+  void log_input_status() {
+    const size_t imu_publishers = imu_sub_ ? imu_sub_->get_publisher_count() : 0;
+    const size_t points_publishers = points_sub_ ? points_sub_->get_publisher_count() : 0;
+    RCLCPP_INFO(
+      get_logger(),
+      "iap input status imu_count=%zu points_count=%zu accepted_frames=%zu dropped_points=%zu imu_publishers=%zu points_publishers=%zu",
+      imu_msg_count_,
+      points_msg_count_,
+      accepted_points_frames_,
+      dropped_points_count_,
+      imu_publishers,
+      points_publishers);
+  }
+
   void queue_bridge_loop() {
     while (!queue_thread_stop_.load()) {
       if (async_odom_) {
@@ -457,11 +537,19 @@ private:
   rclcpp::Subscription<sensor_msgs::msg::Imu>::SharedPtr imu_sub_;
   rclcpp::Subscription<sensor_msgs::msg::PointCloud2>::SharedPtr points_sub_;
   rclcpp::TimerBase::SharedPtr extension_watchdog_timer_;
+  rclcpp::TimerBase::SharedPtr input_status_timer_;
 
   std::mutex meta_sync_mutex_;
   bool imu_frame_meta_written_ = false;
   bool lidar_frame_meta_written_ = false;
   bool base_frame_meta_written_ = false;
+  std::size_t imu_msg_count_ = 0;
+  std::size_t points_msg_count_ = 0;
+  std::size_t accepted_points_frames_ = 0;
+  std::size_t dropped_points_count_ = 0;
+  bool logged_first_imu_ = false;
+  bool logged_first_points_ = false;
+  bool logged_first_preprocessed_ = false;
 
   std::thread queue_thread_;
   std::atomic_bool queue_thread_stop_{false};

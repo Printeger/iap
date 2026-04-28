@@ -34,6 +34,8 @@ rclcpp::TimerBase::SharedPtr local_sensing_timer;
 bool has_global_map = false;
 bool has_local_map = false;
 bool has_odom = false;
+bool logged_first_odom = false;
+bool logged_first_lidar_publish = false;
 
 nav_msgs::msg::Odometry _odom;
 
@@ -72,6 +74,14 @@ void rcvOdometryCallbck(const nav_msgs::msg::Odometry& odom) {
     return;*/
   has_odom = true;
   _odom = odom;
+  if (!logged_first_odom) {
+    logged_first_odom = true;
+    RCLCPP_INFO(
+        rclcpp::get_logger("pcl_render_node"),
+        "first odometry stamp=%.6f frame_id=%s",
+        rclcpp::Time(odom.header.stamp).seconds(),
+        odom.header.frame_id.c_str());
+  }
 }
 
 pcl::PointCloud<pcl::PointXYZ> _cloud_all_map, _local_map;
@@ -162,6 +172,15 @@ void renderSensedPoints(/*const rclcpp::TimerBase event*/) {
   _local_map_pcd.header.frame_id = "map";
 
   pub_cloud->publish(_local_map_pcd);
+  if (!logged_first_lidar_publish) {
+    logged_first_lidar_publish = true;
+    RCLCPP_INFO(
+        rclcpp::get_logger("pcl_render_node"),
+        "first lidar publish stamp=%.6f points=%zu frame_id=%s",
+        rclcpp::Time(_local_map_pcd.header.stamp).seconds(),
+        _local_map.points.size(),
+        _local_map_pcd.header.frame_id.c_str());
+  }
 }
 
 void rcvLocalPointCloudCallBack(
@@ -204,6 +223,12 @@ int main(int argc, char** argv) {
 
   // 发布者：点云数据
   pub_cloud = node->create_publisher<sensor_msgs::msg::PointCloud2>("pcl_render_node/cloud", 10);
+  RCLCPP_INFO(
+      node->get_logger(),
+      "pcl_render ready cloud_topic=pcl_render_node/cloud sensing_horizon=%.3f sensing_rate=%.3f map_resolution=%.3f",
+      sensing_horizon,
+      sensing_rate,
+      _resolution);
 
   // 定时器：控制渲染频率
   double sensing_duration = 1.0 / sensing_rate * 2.5;

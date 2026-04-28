@@ -1,0 +1,190 @@
+#include <cmath>
+#include <string>
+
+#include <nav_msgs/msg/odometry.hpp>
+#include <rclcpp/rclcpp.hpp>
+
+namespace {
+
+using Odom = nav_msgs::msg::Odometry;
+
+class Demo3OdomMux : public rclcpp::Node {
+public:
+  Demo3OdomMux() : rclcpp::Node("demo3_odom_mux") {
+    truth_odom_topic_ =
+        declare_parameter<std::string>("truth_odom_topic", "/sim/drone_0/truth_odom");
+    iap_odom_topic_ =
+        declare_parameter<std::string>("iap_odom_topic", "/iap_rosnode/odom");
+    control_odom_topic_ =
+        declare_parameter<std::string>("control_odom_topic", "/demo3/control_odom");
+    iap_lock_sample_count_ = declare_parameter<int>("iap_lock_sample_count", 3);
+    iap_freshness_sec_ = declare_parameter<double>("iap_freshness_sec", 0.3);
+
+    control_odom_pub_ = create_publisher<Odom>(control_odom_topic_, rclcpp::QoS(20));
+
+    truth_odom_sub_ = create_subscription<Odom>(
+        truth_odom_topic_,
+        rclcpp::QoS(20),
+        [this](const Odom::SharedPtr msg) { on_truth_odom(msg); });
+
+    iap_odom_sub_ = create_subscription<Odom>(
+        iap_odom_topic_,
+        rclcpp::QoS(20),
+        [this](const Odom::SharedPtr msg) { on_iap_odom(msg); });
+
+    status_timer_ = create_wall_timer(
+        std::chrono::seconds(1),
+        [this]() { log_status(); });
+
+    RCLCPP_INFO(
+        get_logger(),
+        "mode=truth_bootstrap truth_odom_topic=%s iap_odom_topic=%s control_odom_topic=%s",
+        truth_odom_topic_.c_str(),
+        iap_odom_topic_.c_str(),
+        control_odom_topic_.c_str());
+  }
+
+private:
+  void on_truth_odom(const Odom::SharedPtr& msg) {
+    if (!msg) {
+      return;
+    }
+
+    ++truth_odom_count_;
+    last_truth_stamp_ = rclcpp::Time(msg->header.stamp);
+    have_truth_stamp_ = true;
+
+    if (!logged_first_truth_) {
+      logged_first_truth_ = true;
+      RCLCPP_INFO(
+          get_logger(),
+          "received first truth odom stamp=%.6f",
+          last_truth_stamp_.seconds());
+    }
+
+    if (mode_ == Mode::kTruthBootstrap) {
+      control_odom_pub_->publish(*msg);
+    }
+  }
+
+  void on_iap_odom(const Odom::SharedPtr& msg) {
+    if (!msg) {
+      return;
+    }
+
+    const rclcpp::Time stamp(msg->header.stamp);
+    const bool stamp_increasing = !have_last_iap_stamp_ || stamp > last_iap_stamp_;
+    const double age_sec = std::fabs((now() - stamp).seconds());
+    const bool fresh_enough = age_sec <= iap_freshness_sec_;
+    const bool valid_sample = stamp_increasing && fresh_enough;
+
+    ++iap_odom_count_;
+
+    if (!logged_first_iap_) {
+      logged_first_iap_ = true;
+      RCLCPP_INFO(
+          get_logger(),
+          "received first iap odom stamp=%.6f age=%.3f",
+          stamp.seconds(),
+          age_sec);
+    }
+
+    if (valid_sample) {
+      consecutive_valid_iap_samples_ =
+          stamp_increasing ? consecutive_valid_iap_samples_ + 1 : 1;
+    } else {
+      consecutive_valid_iap_samples_ = 0;
+      if ((invalid_iap_sample_count_++ % 20) == 0) {
+        RCLCPP_WARN(
+            get_logger(),
+            "iap odom rejected stamp_increasing=%s fresh_enough=%s age=%.3f stamp=%.6f",
+            stamp_increasing ? "true" : "false",
+            fresh_enough ? "true" : "false",
+            age_sec,
+            stamp.seconds());
+      }
+    }
+
+    last_iap_stamp_ = stamp;
+    have_last_iap_stamp_ = true;
+
+    if (mode_ == Mode::kTruthBootstrap &&
+        consecutive_valid_iap_samples_ >= iap_lock_sample_count_) {
+      mode_ = Mode::kIapLocked;
+      RCLCPP_INFO(
+          get_logger(),
+          "mode=iap_locked valid_samples=%d stamp=%.6f age=%.3f",
+          consecutive_valid_iap_samples_,
+          stamp.seconds(),
+          age_sec);
+    }
+
+    if (mode_ == Mode::kIapLocked) {
+      control_odom_pub_->publish(*msg);
+    }
+  }
+
+private:
+  void log_status() {
+    const char* mode_name =
+        mode_ == Mode::kTruthBootstrap ? "truth_bootstrap" : "iap_locked";
+
+    if (have_last_iap_stamp_) {
+      const double iap_age_sec = std::fabs((now() - last_iap_stamp_).seconds());
+      RCLCPP_INFO(
+          get_logger(),
+          "status mode=%s truth_count=%zu iap_count=%zu valid_iap_streak=%d iap_age=%.3f",
+          mode_name,
+          truth_odom_count_,
+          iap_odom_count_,
+          consecutive_valid_iap_samples_,
+          iap_age_sec);
+      return;
+    }
+
+    RCLCPP_INFO(
+        get_logger(),
+        "status mode=%s truth_count=%zu iap_count=%zu valid_iap_streak=%d iap_age=n/a",
+        mode_name,
+        truth_odom_count_,
+        iap_odom_count_,
+        consecutive_valid_iap_samples_);
+  }
+
+  enum class Mode {
+    kTruthBootstrap,
+    kIapLocked,
+  };
+
+  Mode mode_ = Mode::kTruthBootstrap;
+
+  std::string truth_odom_topic_;
+  std::string iap_odom_topic_;
+  std::string control_odom_topic_;
+  int iap_lock_sample_count_ = 3;
+  double iap_freshness_sec_ = 0.3;
+  int consecutive_valid_iap_samples_ = 0;
+  std::size_t truth_odom_count_ = 0;
+  std::size_t iap_odom_count_ = 0;
+  std::size_t invalid_iap_sample_count_ = 0;
+  bool logged_first_truth_ = false;
+  bool logged_first_iap_ = false;
+  bool have_truth_stamp_ = false;
+  bool have_last_iap_stamp_ = false;
+  rclcpp::Time last_truth_stamp_{0, 0, RCL_SYSTEM_TIME};
+  rclcpp::Time last_iap_stamp_{0, 0, RCL_SYSTEM_TIME};
+
+  rclcpp::Publisher<Odom>::SharedPtr control_odom_pub_;
+  rclcpp::Subscription<Odom>::SharedPtr truth_odom_sub_;
+  rclcpp::Subscription<Odom>::SharedPtr iap_odom_sub_;
+  rclcpp::TimerBase::SharedPtr status_timer_;
+};
+
+}  // namespace
+
+int main(int argc, char** argv) {
+  rclcpp::init(argc, argv);
+  rclcpp::spin(std::make_shared<Demo3OdomMux>());
+  rclcpp::shutdown();
+  return 0;
+}

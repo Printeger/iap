@@ -3,6 +3,18 @@
 > 规则：任何代码改动必须在这里记录，并包含 IAP-RQ-XXX。
 
 ## Unreleased
+- feat(demo4-dynamics): IAP-RQ-002 / IAP-RQ-003 — add a complete real quadrotor dynamics control chain on top of `launch/demo1.launch`.
+  - `launch/demo4.launch`: keeps demo1's map, local sensing, and RViz flow, but replaces fake truth odometry with `hover PositionCommand -> SO3ControlComponent -> SO3Command -> so3_quadrotor_simulator -> truth odom/IMU`.
+  - `poscmd_2_odom`: adds `hover_cmd_publisher`, a steady `quadrotor_msgs/PositionCommand` source for controller input and visualization.
+  - `config/sim_ego/demo4.rviz`: makes the global obstacle cloud and simulated LiDAR displays visibly prominent for demo inspection.
+  - `config/sim_ego/fastdds_udp_only.xml` + `demo4.launch`: force FastDDS to use UDP transport for this demo, avoiding stale `/dev/shm/fastrtps_*` lock files that can make RViz discover point-cloud topics but receive no samples.
+  - `apps/demo4_lidar_body_bridge.cpp`: converts demo4's map-frame simulated cloud into a lidar-frame scan topic for IAP odometry.
+  - `so3_quadrotor_simulator`: adds optional `iap_imu/enable` + `iap_imu/topic` parameters that publish an extra ROS-standard IMU specific-force topic for IAP while preserving the original simulator `imu` output.
+  - `apps/iap_rosnode.cpp`: allows launch-time `imu_topic` / `points_topic` overrides, so demo4 can wire simulated IMU and bridge cloud without cloning config files.
+  - `config/sim_demo4/config.json`: demo4-specific IAP config that reuses `sim_ego` settings and selects the GPU odometry/sub-mapping/global-mapping configs for the simulated LiDAR-IMU pipeline.
+  - `config/sim_demo4/config_ros.json`: demo4-specific ROS config that wires `/sim/drone_0/imu_iap` + `/sim/drone_0/lidar_body` and disables `libtrunk_extension.so`, so simulated random-forest cylinders do not inject trunk factors while validating LiDAR-IMU odometry.
+  - `demo4.launch`: starts `demo4_lidar_body_bridge` and `iap_rosnode` by default (`start_iap:=true`) with `/sim/drone_0/imu_iap` and `/sim/drone_0/lidar_body`.
+  - Run: `ros2 launch iap demo4.launch`
 - perf(araim-fgo): IAP-RQ-241 / IAP-RQ-242 / IAP-RQ-243 / IAP-RQ-244 / IAP-RQ-245 / IAP-RQ-246 / IAP-RQ-300 — parallel hypothesis loop, inverse-free subset solves, and stronger FGO snapshot.
   - `araim.hpp`: added `parallel_hypotheses` and `hypothesis_threads` controls to make serial/parallel validation explicit.
   - `araim.cpp`: refactored `compute_core()` to precompute nominal normal-equation contributions, reuse per-row matrix/RHS terms across hypotheses, replace explicit `A.inverse()` with `LDLT` solves, and evaluate subset hypotheses into fixed-size result slots with optional OpenMP `parallel for`.

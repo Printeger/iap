@@ -38,6 +38,8 @@ void stateToOdomMsg(const QuadrotorSimulator::Quadrotor::State &state,
                     nav_msgs::msg::Odometry &odom);
 void quadToImuMsg(const QuadrotorSimulator::Quadrotor &quad,
                   sensor_msgs::msg::Imu &imu);
+void quadToIapImuMsg(const QuadrotorSimulator::Quadrotor &quad,
+                     sensor_msgs::msg::Imu &imu);
 
 static Control
 // 根据无人机的当前状态和目标控制指令计算四个电机所需的转速（RPM）
@@ -251,6 +253,27 @@ void quadToImuMsg(const QuadrotorSimulator::Quadrotor &quad, sensor_msgs::msg::I
     imu.linear_acceleration.z = quad.getAcc()[2];
 }
 
+void quadToIapImuMsg(const QuadrotorSimulator::Quadrotor &quad, sensor_msgs::msg::Imu &imu)
+{
+    QuadrotorSimulator::Quadrotor::State state = quad.getState();
+    Eigen::Quaterniond q(state.R);
+    imu.orientation.x = q.x();
+    imu.orientation.y = q.y();
+    imu.orientation.z = q.z();
+    imu.orientation.w = q.w();
+
+    imu.angular_velocity.x = state.omega(0);
+    imu.angular_velocity.y = state.omega(1);
+    imu.angular_velocity.z = state.omega(2);
+
+    const Eigen::Vector3d gravity_world(0.0, 0.0, -9.81);
+    const Eigen::Vector3d specific_force_body =
+        state.R.transpose() * (quad.getAcc() - gravity_world);
+    imu.linear_acceleration.x = specific_force_body.x();
+    imu.linear_acceleration.y = specific_force_body.y();
+    imu.linear_acceleration.z = specific_force_body.z();
+}
+
 int main(int argc, char **argv)
 {
     rclcpp::init(argc, argv);
@@ -279,6 +302,8 @@ int main(int argc, char **argv)
     node->declare_parameter("rate/simulation", 1000.0);
     node->declare_parameter("rate/odom", 100.0);
     node->declare_parameter("quadrotor_name", "quadrotor");
+    node->declare_parameter("iap_imu/enable", false);
+    node->declare_parameter("iap_imu/topic", std::string("imu_iap"));
 
     QuadrotorSimulator::Quadrotor quad;
     double _init_x, _init_y, _init_z;
@@ -301,6 +326,18 @@ int main(int argc, char **argv)
     std::string quad_name;
     quad_name = node->get_parameter("quadrotor_name").as_string();
 
+    const bool publish_iap_imu = node->get_parameter("iap_imu/enable").as_bool();
+    const std::string iap_imu_topic = node->get_parameter("iap_imu/topic").as_string();
+    auto iap_imu_pub_ = publish_iap_imu
+        ? node->create_publisher<sensor_msgs::msg::Imu>(iap_imu_topic, 10)
+        : nullptr;
+    if (publish_iap_imu) {
+        RCLCPP_INFO(
+            node->get_logger(),
+            "IAP IMU topic enabled: %s",
+            iap_imu_topic.c_str());
+    }
+
     QuadrotorSimulator::Quadrotor::State state = quad.getState();
 
     rclcpp::Rate r(simulation_rate);
@@ -314,6 +351,8 @@ int main(int argc, char **argv)
 
     sensor_msgs::msg::Imu imu;
     imu.header.frame_id = "imu";
+    sensor_msgs::msg::Imu iap_imu;
+    iap_imu.header.frame_id = "imu";
 
     rclcpp::Time next_odom_pub_time = node->now();
     while (rclcpp::ok())
@@ -343,11 +382,16 @@ int main(int argc, char **argv)
             next_odom_pub_time += odom_pub_duration;
             odom_msg.header.stamp = tnow;
             imu.header.stamp = tnow;
+            iap_imu.header.stamp = tnow;
             auto state = quad.getState();
             stateToOdomMsg(state, odom_msg);
             quadToImuMsg(quad, imu);
             odom_pub_->publish(odom_msg);
             imu_pub_->publish(imu);
+            if (iap_imu_pub_) {
+                quadToIapImuMsg(quad, iap_imu);
+                iap_imu_pub_->publish(iap_imu);
+            }
         }
 
         r.sleep();

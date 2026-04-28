@@ -37,6 +37,7 @@ include_directories(
 # 添加可执行文件
 add_executable(poscmd_2_odom src/poscmd_2_odom.cpp)
 add_executable(circle_cmd_publisher src/circle_cmd_publisher.cpp)
+add_executable(hover_cmd_publisher src/hover_cmd_publisher.cpp)
 
 # 链接依赖库
 ament_target_dependencies(poscmd_2_odom
@@ -51,8 +52,13 @@ ament_target_dependencies(circle_cmd_publisher
   quadrotor_msgs
 )
 
+ament_target_dependencies(hover_cmd_publisher
+  rclcpp
+  quadrotor_msgs
+)
+
 # 安装可执行文件
-install(TARGETS poscmd_2_odom circle_cmd_publisher
+install(TARGETS poscmd_2_odom circle_cmd_publisher hover_cmd_publisher
   DESTINATION lib/${PROJECT_NAME})
 
 # 让ament自动管理

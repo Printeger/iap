@@ -401,7 +401,25 @@ if(DEFINED ENV{ROS_VERSION})
     target_link_libraries(iap_experiment iap)
     list(APPEND iap_LIBRARIES iap_experiment)
 
-    install(TARGETS iap_status iap_experiment iap_rosnode DESTINATION lib/iap)
+    ## Demo3 odometry mux (truth bootstrap -> IAP odom lock)
+    add_executable(demo3_odom_mux apps/demo3_odom_mux.cpp)
+    target_link_libraries(demo3_odom_mux iap)
+    ament_target_dependencies(demo3_odom_mux rclcpp nav_msgs)
+    list(APPEND iap_LIBRARIES demo3_odom_mux)
+
+    ## Demo3 IAP bridge (default glim_rosnode topics -> /iap_rosnode/* aliases)
+    add_executable(demo3_iap_bridge apps/demo3_iap_bridge.cpp)
+    target_link_libraries(demo3_iap_bridge iap)
+    ament_target_dependencies(demo3_iap_bridge rclcpp nav_msgs sensor_msgs)
+    list(APPEND iap_LIBRARIES demo3_iap_bridge)
+
+    ## Demo4 LiDAR bridge (map-frame simulated cloud -> body/lidar-frame scan for IAP)
+    add_executable(demo4_lidar_body_bridge apps/demo4_lidar_body_bridge.cpp)
+    target_link_libraries(demo4_lidar_body_bridge iap)
+    ament_target_dependencies(demo4_lidar_body_bridge rclcpp nav_msgs sensor_msgs)
+    list(APPEND iap_LIBRARIES demo4_lidar_body_bridge)
+
+    install(TARGETS iap_status iap_experiment iap_rosnode demo3_odom_mux demo3_iap_bridge demo4_lidar_body_bridge DESTINATION lib/iap)
     install(DIRECTORY launch DESTINATION share/iap)
     install(DIRECTORY config DESTINATION share/iap)
 

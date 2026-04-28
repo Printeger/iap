@@ -69,6 +69,8 @@ rclcpp::TimerBase::SharedPtr estimation_timer;
 bool has_global_map = false;
 bool has_local_map = false;
 bool has_odom = false;
+bool logged_first_odom = false;
+bool logged_first_lidar_publish = false;
 
 Eigen::Matrix4d cam02body;
 Eigen::Matrix4d cam2world;
@@ -111,6 +113,14 @@ void rcvOdometryCallback(const nav_msgs::msg::Odometry::SharedPtr odom)
 {
   has_odom = true;
   _odom = *odom;
+  if (!logged_first_odom) {
+    logged_first_odom = true;
+    RCLCPP_INFO(
+      rclcpp::get_logger("pcl_render_node"),
+      "first odometry stamp=%.6f frame_id=%s",
+      rclcpp::Time(odom->header.stamp).seconds(),
+      odom->header.frame_id.c_str());
+  }
   Eigen::Matrix4d Pose_receive = Eigen::Matrix4d::Identity();
 
   // 存储得到的姿态信息
@@ -303,6 +313,15 @@ void render_pcl_world()
 
     // 发布点云
     pub_pcl_world->publish(local_map_pcl);
+    if (!logged_first_lidar_publish) {
+      logged_first_lidar_publish = true;
+      RCLCPP_INFO(
+        rclcpp::get_logger("pcl_render_node"),
+        "first lidar publish stamp=%.6f points=%zu frame_id=%s",
+        rclcpp::Time(local_map_pcl.header.stamp).seconds(),
+        localMap.points.size(),
+        local_map_pcl.header.frame_id.c_str());
+    }
 }
 
 // 无需传递时间，直接使用 ROS2 时钟来获取当前时间
