@@ -1,0 +1,69 @@
+{
+  "glim_ros": {
+    "enable_local_mapping": true,
+    "enable_global_mapping": true,
+    "keep_raw_points": false,
+
+    "imu_time_offset": 0.0,
+    "points_time_offset": 0.0,
+    "acc_scale": 0.0,
+
+    "imu_frame_id": "",
+    "lidar_frame_id": "",
+    "base_frame_id": "",
+    "odom_frame_id": "odom",
+    "map_frame_id": "map",
+    "publish_imu2lidar": true,
+    "tf_time_offset": 1e-6,
+    "dump_path": "/tmp/dump",
+
+    "extension_modules": [
+      "libgnss_extension.so",
+      "libintegrity_extension.so",
+      "libsim_extension.so",
+      "libstandard_viewer.so",
+      "librviz_viewer.so"
+    ],
+
+    "imu_topic": "/sim/drone_0/imu_iap",
+    "points_topic": "/sim/drone_0/lidar_body",
+    "image_topic": "/camera/infra1/image_rect_raw",
+    "sim": {
+      "truth_odom_topic": "/sim/drone_0/truth_odom",
+      "planner_odom_topic": "/drone_0_visual_slam/odom",
+      "planner_odom_frame_id": "map",
+      "planner_body_frame_id": "imu",
+      "align_planner_odom_to_truth": true,
+      "alignment_mode": "static_window",
+      "alignment_min_samples": 20,
+      "alignment_max_duration": 8.0,
+      "alignment_truth_speed_thresh": 0.05,
+      "alignment_est_speed_thresh": 0.05,
+      "alignment_publish_before_ready": false,
+      "enable_metrics_csv": true,
+      "metrics_csv_path": "/tmp/demo7_iap_sim_truth_vs_est.csv"
+    },
+
+    "imu_qos": {
+      "profile": "sensor_data",
+      "depth": 1000,
+      "history": "keep_last",
+      "reliability": "best_effort",
+      "durability": "volatile"
+    },
+    "points_qos": {
+      "profile": "sensor_data",
+      "depth": 10,
+      "history": "keep_last",
+      "reliability": "best_effort",
+      "durability": "volatile"
+    },
+    "image_qos": {
+      "profile": "sensor_data",
+      "depth": 10,
+      "history": "keep_last",
+      "reliability": "best_effort",
+      "durability": "volatile"
+    }
+  }
+}

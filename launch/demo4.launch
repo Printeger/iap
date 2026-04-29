@@ -15,6 +15,7 @@
   <arg name="iap_lidar_topic" default="/sim/drone_0/lidar_body"/>
   <arg name="position_cmd_topic" default="/demo4/hover_position_cmd"/>
   <arg name="start_iap" default="true"/>
+  <arg name="start_gnss_sim" default="true"/>
   <arg name="publish_iap_imu" default="true"/>
   <arg name="iap_config_path" default="$(find-pkg-share iap)/config/sim_demo4"/>
   <arg name="backend_delay" default="3.0"/>
@@ -71,6 +72,11 @@
       <remap from="cmd" to="/demo4/so3_cmd"/>
       <remap from="force_disturbance" to="/demo4/force_disturbance"/>
       <remap from="moment_disturbance" to="/demo4/moment_disturbance"/>
+    </node>
+
+    <node pkg="gnss_sim" exec="gnss_sim_node"
+          name="demo4_gnss_sim_node" output="screen" if="$(var start_gnss_sim)">
+      <param name="truth_odom_topic" value="$(var truth_odom_topic)"/>
     </node>
 
     <node pkg="poscmd_2_odom" exec="hover_cmd_publisher" name="demo4_hover_cmd_publisher" output="screen">
