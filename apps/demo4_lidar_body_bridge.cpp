@@ -2,10 +2,10 @@
 #include <cstdint>
 #include <algorithm>
 #include <deque>
+#include <limits>
 #include <mutex>
 #include <optional>
 #include <string>
-#include <utility>
 #include <vector>
 
 #include <Eigen/Geometry>
@@ -132,10 +132,11 @@ public:
     output_cloud_topic_ =
         declare_parameter<std::string>("output_cloud_topic", "/sim/drone_0/lidar_body");
     output_frame_id_ = declare_parameter<std::string>("output_frame_id", "lidar");
+    max_odom_lookup_dt_ = declare_parameter<double>("max_odom_lookup_dt", 0.05);
 
     cloud_pub_ = create_publisher<sensor_msgs::msg::PointCloud2>(
         output_cloud_topic_,
-        rclcpp::SensorDataQoS().keep_last(5));
+        rclcpp::SensorDataQoS().keep_last(1));
 
     odom_sub_ = create_subscription<nav_msgs::msg::Odometry>(
         input_odom_topic_,
@@ -146,18 +147,19 @@ public:
 
     cloud_sub_ = create_subscription<sensor_msgs::msg::PointCloud2>(
         input_cloud_topic_,
-        rclcpp::SensorDataQoS().keep_last(5),
+        rclcpp::SensorDataQoS().keep_last(1),
         [this](const sensor_msgs::msg::PointCloud2::ConstSharedPtr msg) {
           handle_cloud(msg);
         });
 
     RCLCPP_INFO(
         get_logger(),
-        "demo4 lidar body bridge ready cloud=%s odom=%s output=%s frame=%s",
+        "demo4 lidar body bridge ready cloud=%s odom=%s output=%s frame=%s max_odom_lookup_dt=%.3f",
         input_cloud_topic_.c_str(),
         input_odom_topic_.c_str(),
         output_cloud_topic_.c_str(),
-        output_frame_id_.c_str());
+        output_frame_id_.c_str(),
+        max_odom_lookup_dt_);
   }
 
 private:
@@ -174,96 +176,51 @@ private:
         odom_buffer_.pop_front();
       }
     }
-
-    process_pending_clouds();
   }
 
   void handle_cloud(const sensor_msgs::msg::PointCloud2::ConstSharedPtr& msg) {
     const double stamp = rclcpp::Time(msg->header.stamp).seconds();
     std::optional<Eigen::Isometry3d> pose;
-    bool too_old = false;
+    std::string drop_reason;
     {
       std::lock_guard<std::mutex> lock(mutex_);
-      pose = lookup_pose_locked(stamp, too_old);
-      if (!pose && !too_old) {
-        pending_clouds_.push_back(msg);
-        while (pending_clouds_.size() > max_pending_clouds_) {
-          RCLCPP_WARN_THROTTLE(
-              get_logger(),
-              *get_clock(),
-              2000,
-              "dropping queued lidar frame because odom lookup is lagging");
-          pending_clouds_.pop_front();
-        }
-      }
+      pose = lookup_pose_locked(stamp, drop_reason);
     }
 
     if (pose) {
       convert_cloud(*msg, pose->inverse());
-    } else if (too_old) {
+    } else {
       RCLCPP_WARN_THROTTLE(
           get_logger(),
           *get_clock(),
           2000,
-          "dropping lidar frame stamp=%.6f because it is older than the odom buffer",
-          stamp);
+          "dropping lidar frame stamp=%.6f because %s",
+          stamp,
+          drop_reason.c_str());
     }
   }
 
-  void process_pending_clouds() {
-    std::vector<std::pair<sensor_msgs::msg::PointCloud2::ConstSharedPtr, Eigen::Isometry3d>>
-        ready_clouds;
-
-    {
-      std::lock_guard<std::mutex> lock(mutex_);
-      while (!pending_clouds_.empty()) {
-        const auto& cloud = pending_clouds_.front();
-        const double stamp = rclcpp::Time(cloud->header.stamp).seconds();
-        bool too_old = false;
-        auto pose = lookup_pose_locked(stamp, too_old);
-
-        if (pose) {
-          ready_clouds.emplace_back(cloud, pose->inverse());
-          pending_clouds_.pop_front();
-          continue;
-        }
-
-        if (too_old) {
-          RCLCPP_WARN_THROTTLE(
-              get_logger(),
-              *get_clock(),
-              2000,
-              "dropping queued lidar frame stamp=%.6f because it is older than the odom buffer",
-              stamp);
-          pending_clouds_.pop_front();
-          continue;
-        }
-
-        break;
-      }
-    }
-
-    for (const auto& [cloud, T_body_map] : ready_clouds) {
-      convert_cloud(*cloud, T_body_map);
-    }
-  }
-
-  std::optional<Eigen::Isometry3d> lookup_pose_locked(double stamp, bool& too_old) const {
-    too_old = false;
+  std::optional<Eigen::Isometry3d> lookup_pose_locked(double stamp, std::string& drop_reason) const {
     if (odom_buffer_.empty()) {
+      drop_reason = "odom buffer is empty";
       return std::nullopt;
     }
 
     constexpr double kEpsilon = 1e-6;
     if (stamp < odom_buffer_.front().stamp - kEpsilon) {
-      too_old = true;
+      drop_reason = "it is older than the odom buffer";
       return std::nullopt;
     }
     if (stamp > odom_buffer_.back().stamp + kEpsilon) {
+      drop_reason = "it is newer than the odom buffer";
       return std::nullopt;
     }
 
     if (std::abs(stamp - odom_buffer_.front().stamp) <= kEpsilon) {
+      if (nearest_odom_dt_locked(stamp) > max_odom_lookup_dt_) {
+        drop_reason = "nearest odom is outside max_odom_lookup_dt";
+        return std::nullopt;
+      }
       return odom_buffer_.front().T_map_body;
     }
 
@@ -271,6 +228,12 @@ private:
       const auto& before = odom_buffer_[i - 1];
       const auto& after = odom_buffer_[i];
       if (stamp <= after.stamp + kEpsilon) {
+        const double nearest_dt =
+            std::min(std::abs(stamp - before.stamp), std::abs(after.stamp - stamp));
+        if (nearest_dt > max_odom_lookup_dt_) {
+          drop_reason = "nearest odom is outside max_odom_lookup_dt";
+          return std::nullopt;
+        }
         if (std::abs(stamp - after.stamp) <= kEpsilon) {
           return after.T_map_body;
         }
@@ -279,6 +242,14 @@ private:
     }
 
     return odom_buffer_.back().T_map_body;
+  }
+
+  double nearest_odom_dt_locked(double stamp) const {
+    double best_dt = std::numeric_limits<double>::infinity();
+    for (const auto& odom : odom_buffer_) {
+      best_dt = std::min(best_dt, std::abs(stamp - odom.stamp));
+    }
+    return best_dt;
   }
 
   void convert_cloud(const sensor_msgs::msg::PointCloud2& input, const Eigen::Isometry3d& T_body_map) {
@@ -356,9 +327,8 @@ private:
 
   std::mutex mutex_;
   std::deque<StampedPose> odom_buffer_;
-  std::deque<sensor_msgs::msg::PointCloud2::ConstSharedPtr> pending_clouds_;
   double odom_buffer_duration_ = 2.0;
-  std::size_t max_pending_clouds_ = 30;
+  double max_odom_lookup_dt_ = 0.05;
   bool logged_first_output_ = false;
 
   rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr cloud_pub_;

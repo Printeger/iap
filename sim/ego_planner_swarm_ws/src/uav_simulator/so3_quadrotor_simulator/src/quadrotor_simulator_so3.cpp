@@ -33,6 +33,7 @@ typedef struct _Disturbance
 
 static Command command;
 static Disturbance disturbance;
+static bool command_received = false;
 
 void stateToOdomMsg(const QuadrotorSimulator::Quadrotor::State &state,
                     nav_msgs::msg::Odometry &odom);
@@ -176,6 +177,7 @@ getControl(const QuadrotorSimulator::Quadrotor &quad, const Command &cmd)
 static void
 cmd_callback(const quadrotor_msgs::msg::SO3Command::ConstPtr &cmd)
 {
+    command_received = true;
     command.force[0] = cmd->force.x;
     command.force[1] = cmd->force.y;
     command.force[2] = cmd->force.z;
@@ -267,8 +269,10 @@ void quadToIapImuMsg(const QuadrotorSimulator::Quadrotor &quad, sensor_msgs::msg
     imu.angular_velocity.z = state.omega(2);
 
     const Eigen::Vector3d gravity_world(0.0, 0.0, -9.81);
+    const Eigen::Vector3d acceleration_world =
+        command_received ? quad.getAcc() : Eigen::Vector3d::Zero();
     const Eigen::Vector3d specific_force_body =
-        state.R.transpose() * (quad.getAcc() - gravity_world);
+        state.R.transpose() * (acceleration_world - gravity_world);
     imu.linear_acceleration.x = specific_force_body.x();
     imu.linear_acceleration.y = specific_force_body.y();
     imu.linear_acceleration.z = specific_force_body.z();
@@ -304,6 +308,7 @@ int main(int argc, char **argv)
     node->declare_parameter("quadrotor_name", "quadrotor");
     node->declare_parameter("iap_imu/enable", false);
     node->declare_parameter("iap_imu/topic", std::string("imu_iap"));
+    node->declare_parameter("simulator/hold_until_cmd", false);
 
     QuadrotorSimulator::Quadrotor quad;
     double _init_x, _init_y, _init_z;
@@ -328,6 +333,7 @@ int main(int argc, char **argv)
 
     const bool publish_iap_imu = node->get_parameter("iap_imu/enable").as_bool();
     const std::string iap_imu_topic = node->get_parameter("iap_imu/topic").as_string();
+    const bool hold_until_cmd = node->get_parameter("simulator/hold_until_cmd").as_bool();
     auto iap_imu_pub_ = publish_iap_imu
         ? node->create_publisher<sensor_msgs::msg::Imu>(iap_imu_topic, 10)
         : nullptr;
@@ -370,10 +376,13 @@ int main(int argc, char **argv)
             }
         }
 
-        quad.setInput(control.rpm[0], control.rpm[1], control.rpm[2], control.rpm[3]);
-        quad.setExternalForce(disturbance.f);
-        quad.setExternalMoment(disturbance.m);
-        quad.step(dt);
+        if (!hold_until_cmd || command_received)
+        {
+            quad.setInput(control.rpm[0], control.rpm[1], control.rpm[2], control.rpm[3]);
+            quad.setExternalForce(disturbance.f);
+            quad.setExternalMoment(disturbance.m);
+            quad.step(dt);
+        }
 
         rclcpp::Time tnow = node->now();
 

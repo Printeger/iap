@@ -58,6 +58,11 @@ uniform_real_distribution<double> rand_radius2_;
 uniform_real_distribution<double> rand_theta_;
 uniform_real_distribution<double> rand_z_;
 
+bool z_anchor_enable_;
+double z_anchor_center_x_, z_anchor_center_y_, z_anchor_radius_;
+double z_anchor_z_low_, z_anchor_z_high_, z_anchor_post_step_;
+int z_anchor_post_num_;
+
 sensor_msgs::msg::PointCloud2 globalMap_pcd;
 pcl::PointCloud<pcl::PointXYZ> cloudMap;
 
@@ -71,6 +76,175 @@ bool isInClearZone(double x, double y) {
   const Eigen::Vector2d init(_init_x, _init_y);
   const Eigen::Vector2d target(_target_x, _target_y);
   return (p - init).norm() < _clear_radius || (p - target).norm() < _clear_radius;
+}
+
+void addZAnchorFeatures(pcl::PointCloud<pcl::PointXYZ>& cloud) {
+  if (!z_anchor_enable_) return;
+
+  pcl::PointXYZ pt;
+  const double radius = std::max(z_anchor_radius_, _clear_radius + 0.5);
+  const double z_low = z_anchor_z_low_;
+  const double z_high = std::max(z_anchor_z_high_, z_low + 2.0 * _resolution);
+  const double z_mid = 0.5 * (z_low + z_high);
+  const double step = std::max(_resolution, 0.05);
+
+  auto push_point = [&](double x, double y, double z) {
+    pt.x = static_cast<float>(x);
+    pt.y = static_cast<float>(y);
+    pt.z = static_cast<float>(z);
+    cloud.push_back(pt);
+  };
+
+  auto basis = [&](double angle) {
+    const Eigen::Vector2d radial(std::cos(angle), std::sin(angle));
+    const Eigen::Vector2d tangent(-std::sin(angle), std::cos(angle));
+    return std::make_pair(radial, tangent);
+  };
+
+  auto origin_at = [&](double angle, double r_offset) {
+    return Eigen::Vector2d(
+        z_anchor_center_x_ + (radius + r_offset) * std::cos(angle),
+        z_anchor_center_y_ + (radius + r_offset) * std::sin(angle));
+  };
+
+  auto add_vertical_post = [&](const Eigen::Vector2d& p, double z0, double z1) {
+    for (double z = z0; z <= z1 + 1e-6; z += step) {
+      push_point(p.x(), p.y(), z);
+    }
+  };
+
+  auto add_wall = [&](const Eigen::Vector2d& origin,
+                      const Eigen::Vector2d& dir,
+                      double length,
+                      double z0,
+                      double z1,
+                      double thickness) {
+    const Eigen::Vector2d d = dir.normalized();
+    const Eigen::Vector2d n(-d.y(), d.x());
+    for (double u = 0.0; u <= length + 1e-6; u += step) {
+      for (double w = -0.5 * thickness; w <= 0.5 * thickness + 1e-6; w += step) {
+        const Eigen::Vector2d xy = origin + u * d + w * n;
+        for (double z = z0; z <= z1 + 1e-6; z += step) {
+          push_point(xy.x(), xy.y(), z);
+        }
+      }
+    }
+  };
+
+  auto add_horizontal_shelf = [&](const Eigen::Vector2d& origin,
+                                  const Eigen::Vector2d& dir,
+                                  double length,
+                                  double width,
+                                  double z) {
+    const Eigen::Vector2d d = dir.normalized();
+    const Eigen::Vector2d n(-d.y(), d.x());
+    for (double u = 0.0; u <= length + 1e-6; u += step) {
+      for (double w = -0.5 * width; w <= 0.5 * width + 1e-6; w += step) {
+        const Eigen::Vector2d xy = origin + u * d + w * n;
+        push_point(xy.x(), xy.y(), z);
+      }
+    }
+  };
+
+  auto add_stairs = [&](const Eigen::Vector2d& origin,
+                        const Eigen::Vector2d& dir,
+                        int count,
+                        double tread,
+                        double width,
+                        double z0,
+                        double dz) {
+    const Eigen::Vector2d d = dir.normalized();
+    for (int i = 0; i < count; ++i) {
+      const Eigen::Vector2d base = origin + static_cast<double>(i) * tread * d;
+      add_horizontal_shelf(base, d, tread, width, z0 + static_cast<double>(i) * dz);
+      add_wall(base, d, step, z0, z0 + static_cast<double>(i) * dz, width);
+    }
+  };
+
+  auto add_slanted_wall = [&](const Eigen::Vector2d& origin,
+                              const Eigen::Vector2d& dir,
+                              double length,
+                              double z0,
+                              double z1,
+                              double thickness) {
+    const Eigen::Vector2d d = dir.normalized();
+    const Eigen::Vector2d n(-d.y(), d.x());
+    for (double u = 0.0; u <= length + 1e-6; u += step) {
+      const double alpha = length > 1e-6 ? u / length : 0.0;
+      const double top = z0 + alpha * (z1 - z0);
+      for (double w = -0.5 * thickness; w <= 0.5 * thickness + 1e-6; w += step) {
+        const Eigen::Vector2d xy = origin + u * d + w * n;
+        for (double z = z0; z <= top + 1e-6; z += step) {
+          push_point(xy.x(), xy.y(), z);
+        }
+      }
+    }
+  };
+
+  // Asymmetric sparse structures outside the flight circle. These provide
+  // vertical edges and height discontinuities without a closed, periodic ring.
+  const double angles[] = {0.31, 1.44, 2.63, 3.52, 4.08, 5.02, 5.43};
+  const double offsets[] = {0.00, 0.55, -0.20, -0.65, 0.80, 0.35, 0.25};
+
+  {
+    auto [radial, tangent] = basis(angles[0]);
+    const Eigen::Vector2d o = origin_at(angles[0], offsets[0]);
+    add_wall(o, tangent, 1.2, z_low, z_mid + 0.25, 0.18);
+    add_wall(o, radial, 0.8, z_low, z_high - 0.2, 0.18);
+    add_horizontal_shelf(o + 0.25 * tangent, radial, 0.55, 0.45, z_mid);
+  }
+
+  {
+    auto [radial, tangent] = basis(angles[1]);
+    const Eigen::Vector2d o = origin_at(angles[1], offsets[1]);
+    add_stairs(o, -0.7 * radial + tangent, 5, 0.28, 0.75, z_low + 0.15, 0.22);
+    add_vertical_post(o + 1.3 * tangent, z_low, z_high);
+  }
+
+  {
+    auto [radial, tangent] = basis(angles[2]);
+    const Eigen::Vector2d o = origin_at(angles[2], offsets[2]);
+    add_slanted_wall(o, 0.5 * radial + tangent, 1.6, z_low, z_high, 0.20);
+  }
+
+  {
+    auto [radial, tangent] = basis(angles[3]);
+    const Eigen::Vector2d o = origin_at(angles[3], offsets[3]);
+    add_wall(o, 0.35 * radial - tangent, 0.85, z_low + 0.15, z_mid + 0.15, 0.16);
+    add_wall(o + 0.45 * radial - 0.25 * tangent, radial + 0.15 * tangent, 0.55, z_low, z_high - 0.55, 0.14);
+    add_horizontal_shelf(o - 0.35 * tangent, radial, 0.55, 0.30, z_high - 0.55);
+  }
+
+  {
+    auto [radial, tangent] = basis(angles[4]);
+    const Eigen::Vector2d o = origin_at(angles[4], offsets[4]);
+    add_vertical_post(o - 0.35 * tangent, z_low, z_high - 0.35);
+    add_vertical_post(o + 0.45 * tangent, z_low + 0.25, z_high);
+    add_horizontal_shelf(o - 0.35 * tangent, tangent, 0.8, 0.2, z_high - 0.25);
+  }
+
+  {
+    auto [radial, tangent] = basis(angles[5]);
+    const Eigen::Vector2d o = origin_at(angles[5], offsets[5]);
+    add_stairs(o, -0.25 * radial - tangent, 4, 0.24, 0.55, z_low + 0.35, 0.30);
+    add_wall(o + 0.7 * radial, tangent, 0.45, z_low, z_mid + 0.55, 0.14);
+  }
+
+  {
+    auto [radial, tangent] = basis(angles[6]);
+    const Eigen::Vector2d o = origin_at(angles[6], offsets[6]);
+    add_wall(o, -radial + 0.35 * tangent, 0.95, z_low, z_low + 0.9, 0.16);
+    add_horizontal_shelf(o + 0.45 * tangent, radial, 0.65, 0.35, z_low + 1.45);
+  }
+
+  RCLCPP_INFO(
+      rclcpp::get_logger("RandomMapGenerateCylinder"),
+      "Added asymmetric z-anchor features center=(%.2f, %.2f) radius=%.2f z=[%.2f, %.2f] structures=7",
+      z_anchor_center_x_,
+      z_anchor_center_y_,
+      radius,
+      z_low,
+      z_high);
 }
 
 // 随机地图生成
@@ -165,6 +339,8 @@ void RandomMapGenerate() {
           }
     }
   }
+
+  addZAnchorFeatures(cloudMap);
 
   cloudMap.width = cloudMap.points.size();
   cloudMap.height = 1;
@@ -297,6 +473,8 @@ void RandomMapGenerateCylinder() {
           }
     }
   }
+
+  addZAnchorFeatures(cloudMap);
 
   cloudMap.width = cloudMap.points.size();
   cloudMap.height = 1;
@@ -461,6 +639,15 @@ int main(int argc, char **argv)
     node->declare_parameter("ObstacleShape/theta", 7.0);
     node->declare_parameter("ObstacleShape/seed", 0);
 
+    node->declare_parameter("ZAnchor/enable", false);
+    node->declare_parameter("ZAnchor/center_x", 0.0);
+    node->declare_parameter("ZAnchor/center_y", 0.0);
+    node->declare_parameter("ZAnchor/radius", 3.8);
+    node->declare_parameter("ZAnchor/z_low", 0.7);
+    node->declare_parameter("ZAnchor/z_high", 3.1);
+    node->declare_parameter("ZAnchor/post_num", 12);
+    node->declare_parameter("ZAnchor/post_step", 0.2);
+
     node->declare_parameter("sensing/radius", 10.0);
     node->declare_parameter("sensing/rate", 10.0);
     node->declare_parameter("min_distance", 1.0);
@@ -488,6 +675,15 @@ int main(int argc, char **argv)
     node->get_parameter("ObstacleShape/z_h", z_h_);
     node->get_parameter("ObstacleShape/theta", theta_);
     node->get_parameter("ObstacleShape/seed", _seed);
+
+    node->get_parameter("ZAnchor/enable", z_anchor_enable_);
+    node->get_parameter("ZAnchor/center_x", z_anchor_center_x_);
+    node->get_parameter("ZAnchor/center_y", z_anchor_center_y_);
+    node->get_parameter("ZAnchor/radius", z_anchor_radius_);
+    node->get_parameter("ZAnchor/z_low", z_anchor_z_low_);
+    node->get_parameter("ZAnchor/z_high", z_anchor_z_high_);
+    node->get_parameter("ZAnchor/post_num", z_anchor_post_num_);
+    node->get_parameter("ZAnchor/post_step", z_anchor_post_step_);
 
     node->get_parameter("sensing/radius", _sensing_range);
     node->get_parameter("sensing/rate", _sense_rate);

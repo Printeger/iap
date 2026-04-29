@@ -6,7 +6,7 @@
 
     "imu_time_offset": 0.0,
     "points_time_offset": 0.0,
-    "acc_scale": 1.0,
+    "acc_scale": 0.0,
 
     "imu_frame_id": "",
     "lidar_frame_id": "",
@@ -34,8 +34,12 @@
       "planner_odom_frame_id": "map",
       "planner_body_frame_id": "imu",
       "align_planner_odom_to_truth": true,
-      "alignment_max_time_diff": 0.05,
-      "truth_cache_duration": 2.0,
+      "alignment_mode": "static_window",
+      "alignment_min_samples": 20,
+      "alignment_max_duration": 8.0,
+      "alignment_truth_speed_thresh": 0.05,
+      "alignment_est_speed_thresh": 0.05,
+      "alignment_publish_before_ready": false,
       "enable_metrics_csv": true,
       "metrics_csv_path": "/tmp/iap_sim_truth_vs_est.csv"
     },
@@ -49,7 +53,7 @@
     },
     "points_qos": {
       "profile": "sensor_data",
-      "depth": 1,
+      "depth": 10,
       "history": "keep_last",
       "reliability": "best_effort",
       "durability": "volatile"

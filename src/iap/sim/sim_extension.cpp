@@ -12,9 +12,12 @@
 #include <Eigen/Geometry>
 
 #include <cmath>
+#include <deque>
 #include <filesystem>
 #include <fstream>
+#include <limits>
 #include <mutex>
+#include <optional>
 #include <string>
 
 namespace iap {
@@ -115,6 +118,10 @@ public:
         {"glim_ros", "sim"}, "planner_body_frame_id", "imu");
     align_planner_odom_to_truth_ = config.param_nested<bool>(
         {"glim_ros", "sim"}, "align_planner_odom_to_truth", true);
+    alignment_max_time_diff_ = config.param_nested<double>(
+        {"glim_ros", "sim"}, "alignment_max_time_diff", 0.05);
+    truth_cache_duration_ = config.param_nested<double>(
+        {"glim_ros", "sim"}, "truth_cache_duration", 2.0);
     enable_metrics_csv_ = config.param_nested<bool>(
         {"glim_ros", "sim"}, "enable_metrics_csv", true);
     metrics_csv_path_ = config.param_nested<std::string>(
@@ -134,9 +141,10 @@ public:
         });
 
     logger_->info(
-        "[sim_ext] truth_odom_topic={} planner_odom_topic={} align_to_truth={} metrics_csv={}",
+        "[sim_ext] truth_odom_topic={} planner_odom_topic={} align_to_truth={} alignment_max_dt={:.3f}s metrics_csv={}",
         truth_odom_topic_, planner_odom_topic_,
         align_planner_odom_to_truth_ ? "true" : "false",
+        alignment_max_time_diff_,
         enable_metrics_csv_ ? metrics_csv_path_ : std::string("disabled"));
   }
 
@@ -197,14 +205,28 @@ private:
       std::lock_guard<std::mutex> lock(mutex_);
       if (align_planner_odom_to_truth_) {
         if (!alignment_initialized_) {
-          if (!have_truth_) {
+          const auto matched_truth = find_truth_odom_near_stamp_(frame->stamp);
+          if (!matched_truth) {
+            ++alignment_miss_count_;
+            if (alignment_miss_count_ == 1 || alignment_miss_count_ % 50 == 0) {
+              logger_->warn(
+                  "[sim_ext] waiting for truth odom near first estimate stamp={:.6f} max_dt={:.3f}s cache_size={}",
+                  frame->stamp,
+                  alignment_max_time_diff_,
+                  truth_cache_.size());
+            }
             publish_odom = false;
           } else {
-            const Eigen::Isometry3d T_truth = odom_to_pose(latest_truth_);
+            const double truth_stamp = msg_time_to_sec(matched_truth->header.stamp);
+            const double alignment_dt = std::abs(truth_stamp - frame->stamp);
+            const Eigen::Isometry3d T_truth = odom_to_pose(*matched_truth);
             T_truth_est_ = T_truth * T_est.inverse();
             alignment_initialized_ = true;
             logger_->info(
-                "[sim_ext] initialized planner odom SE3 alignment translation=[{:.3f},{:.3f},{:.3f}] rotation_deg={:.3f}",
+                "[sim_ext] initialized planner odom SE3 alignment truth_stamp={:.6f} est_stamp={:.6f} dt={:.6f}s translation=[{:.3f},{:.3f},{:.3f}] rotation_deg={:.3f}",
+                truth_stamp,
+                frame->stamp,
+                alignment_dt,
                 T_truth_est_.translation().x(),
                 T_truth_est_.translation().y(),
                 T_truth_est_.translation().z(),
@@ -245,6 +267,8 @@ private:
     std::lock_guard<std::mutex> lock(mutex_);
     latest_truth_ = *msg;
     have_truth_ = true;
+    truth_cache_.push_back(*msg);
+    prune_truth_cache_(msg_time_to_sec(msg->header.stamp));
 
     if (!enable_metrics_csv_) {
       return;
@@ -269,6 +293,35 @@ private:
                  << error << '\n';
   }
 
+  void prune_truth_cache_(const double latest_stamp) {
+    const double oldest_allowed = latest_stamp - truth_cache_duration_;
+    while (!truth_cache_.empty() &&
+           msg_time_to_sec(truth_cache_.front().header.stamp) < oldest_allowed) {
+      truth_cache_.pop_front();
+    }
+  }
+
+  std::optional<nav_msgs::msg::Odometry> find_truth_odom_near_stamp_(const double stamp) const {
+    if (truth_cache_.empty()) {
+      return std::nullopt;
+    }
+
+    double best_dt = std::numeric_limits<double>::infinity();
+    const nav_msgs::msg::Odometry* best = nullptr;
+    for (const auto& odom : truth_cache_) {
+      const double dt = std::abs(msg_time_to_sec(odom.header.stamp) - stamp);
+      if (dt < best_dt) {
+        best_dt = dt;
+        best = &odom;
+      }
+    }
+
+    if (!best || best_dt > alignment_max_time_diff_) {
+      return std::nullopt;
+    }
+    return *best;
+  }
+
 private:
   std::shared_ptr<spdlog::logger> logger_;
 
@@ -277,6 +330,8 @@ private:
   std::string planner_odom_frame_id_;
   std::string planner_body_frame_id_;
   bool align_planner_odom_to_truth_ = true;
+  double alignment_max_time_diff_ = 0.05;
+  double truth_cache_duration_ = 2.0;
   bool enable_metrics_csv_ = true;
   std::string metrics_csv_path_;
 
@@ -284,9 +339,11 @@ private:
   bool have_truth_ = false;
   bool have_estimate_ = false;
   bool alignment_initialized_ = false;
+  std::size_t alignment_miss_count_ = 0;
   Eigen::Isometry3d T_truth_est_ = Eigen::Isometry3d::Identity();
   nav_msgs::msg::Odometry latest_truth_;
   nav_msgs::msg::Odometry latest_estimate_;
+  std::deque<nav_msgs::msg::Odometry> truth_cache_;
   std::ofstream metrics_csv_;
 
   rclcpp::Publisher<nav_msgs::msg::Odometry>::SharedPtr planner_odom_pub_;

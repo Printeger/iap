@@ -5,14 +5,19 @@
   <arg name="ground_y" default="0.0"/>
   <arg name="ground_z" default="0.0"/>
   <arg name="takeoff_height" default="2.0"/>
-  <arg name="ground_hold_duration" default="10.0"/>
+  <arg name="ground_hold_duration" default="18.0"/>
   <arg name="takeoff_duration" default="10.0"/>
   <arg name="hover_duration" default="10.0"/>
   <arg name="move_to_circle_duration" default="5.0"/>
   <arg name="circle_radius" default="1.0"/>
-  <arg name="circle_period" default="40.0"/>
+  <arg name="circle_period" default="20.0"/>
   <arg name="circle_yaw_mode" default="tangent"/>
   <arg name="circle_clear_radius" default="3.0"/>
+  <arg name="z_anchor_enable" default="true"/>
+  <arg name="z_anchor_radius" default="5.0"/>
+  <arg name="z_anchor_z_low" default="0.7"/>
+  <arg name="z_anchor_z_high" default="3.1"/>
+  <arg name="z_anchor_post_num" default="12"/>
   <arg name="map_size_x" default="30.0"/>
   <arg name="map_size_y" default="20.0"/>
   <arg name="map_size_z" default="4.0"/>
@@ -24,10 +29,14 @@
   <arg name="sim_lidar_topic" default="/sim/drone_0/lidar"/>
   <arg name="iap_lidar_topic" default="/sim/drone_0/lidar_body"/>
   <arg name="position_cmd_topic" default="/demo6/staged_position_cmd"/>
+  <arg name="desired_odom_topic" default="/demo6/desired/odom"/>
   <arg name="start_iap" default="true"/>
   <arg name="publish_iap_imu" default="true"/>
   <arg name="iap_config_path" default="$(find-pkg-share iap)/config/sim_demo4"/>
   <arg name="backend_delay" default="3.0"/>
+  <arg name="iap_start_delay" default="6.0"/>
+  <arg name="control_viz_start_delay" default="8.0"/>
+  <arg name="lidar_body_max_odom_lookup_dt" default="0.05"/>
 
   <set_env name="QT_X11_NO_MITSHM" value="1"/>
   <set_env name="XDG_RUNTIME_DIR" value="/tmp/runtime-root"/>
@@ -35,7 +44,7 @@
            value="$(find-pkg-share iap)/config/sim_ego/fastdds_udp_only.xml"/>
 
   <node pkg="rviz2" exec="rviz2" name="demo6_rviz" output="screen" if="$(var start_rviz)"
-        args="-d $(find-pkg-share iap)/config/sim_ego/demo4.rviz"/>
+        args="-d $(find-pkg-share iap)/config/sim_ego/demo6.rviz"/>
 
   <timer period="$(var backend_delay)">
     <node pkg="map_generator" exec="random_forest" name="demo6_random_forest" output="screen">
@@ -61,6 +70,14 @@
       <param name="ObstacleShape/z_l" value="0.7"/>
       <param name="ObstacleShape/z_h" value="1.3"/>
       <param name="ObstacleShape/theta" value="0.5"/>
+      <param name="ZAnchor/enable" value="$(var z_anchor_enable)"/>
+      <param name="ZAnchor/center_x" value="$(var ground_x)"/>
+      <param name="ZAnchor/center_y" value="$(var ground_y)"/>
+      <param name="ZAnchor/radius" value="$(var z_anchor_radius)"/>
+      <param name="ZAnchor/z_low" value="$(var z_anchor_z_low)"/>
+      <param name="ZAnchor/z_high" value="$(var z_anchor_z_high)"/>
+      <param name="ZAnchor/post_num" value="$(var z_anchor_post_num)"/>
+      <param name="ZAnchor/post_step" value="$(var map_resolution)"/>
       <param name="sensing/radius" value="10.0"/>
       <param name="sensing/rate" value="1.0"/>
       <param name="min_distance" value="1.0"/>
@@ -74,6 +91,7 @@
       <param name="simulator/init_state_x" value="$(var ground_x)"/>
       <param name="simulator/init_state_y" value="$(var ground_y)"/>
       <param name="simulator/init_state_z" value="$(var ground_z)"/>
+      <param name="simulator/hold_until_cmd" value="true"/>
       <param name="iap_imu/enable" value="$(var publish_iap_imu)"/>
       <param name="iap_imu/topic" value="$(var iap_imu_topic)"/>
       <remap from="odom" to="$(var truth_odom_topic)"/>
@@ -101,6 +119,46 @@
       <param name="frame_id" value="map"/>
     </node>
 
+    <node pkg="local_sensing" exec="pcl_render_node" name="drone_0_pcl_render_node" output="screen">
+      <remap from="global_map" to="/map_generator/global_cloud"/>
+      <remap from="local_map" to="/map_generator/local_cloud"/>
+      <remap from="odometry" to="$(var truth_odom_topic)"/>
+      <remap from="pcl_render_node/cloud" to="$(var sim_lidar_topic)"/>
+      <param name="sensing_horizon" value="10.0"/>
+      <param name="sensing_rate" value="15.0"/>
+      <param name="estimation_rate" value="15.0"/>
+      <param name="map/x_size" value="$(var map_size_x)"/>
+      <param name="map/y_size" value="$(var map_size_y)"/>
+      <param name="map/z_size" value="$(var map_size_z)"/>
+      <param name="map/resolution" value="$(var map_resolution)"/>
+    </node>
+
+    <node pkg="iap" exec="demo4_lidar_body_bridge" name="demo6_lidar_body_bridge" output="screen" if="$(var start_iap)">
+      <param name="input_cloud_topic" value="$(var sim_lidar_topic)"/>
+      <param name="input_odom_topic" value="$(var truth_odom_topic)"/>
+      <param name="output_cloud_topic" value="$(var iap_lidar_topic)"/>
+      <param name="output_frame_id" value="lidar"/>
+      <param name="max_odom_lookup_dt" value="$(var lidar_body_max_odom_lookup_dt)"/>
+    </node>
+  </timer>
+
+  <timer period="$(var iap_start_delay)">
+    <node pkg="iap" exec="iap_rosnode" name="demo6_iap_rosnode" output="screen" if="$(var start_iap)">
+      <param name="config_path" value="$(var iap_config_path)"/>
+      <param name="imu_topic" value="$(var iap_imu_topic)"/>
+      <param name="points_topic" value="$(var iap_lidar_topic)"/>
+    </node>
+  </timer>
+
+  <timer period="$(var control_viz_start_delay)">
+    <node pkg="poscmd_2_odom" exec="poscmd_2_odom" name="demo6_desired_poscmd_to_odom" output="screen">
+      <remap from="command" to="$(var position_cmd_topic)"/>
+      <remap from="odometry" to="$(var desired_odom_topic)"/>
+      <param name="init_x" value="$(var ground_x)"/>
+      <param name="init_y" value="$(var ground_y)"/>
+      <param name="init_z" value="$(var ground_z)"/>
+    </node>
+
     <node_container pkg="rclcpp_components" exec="component_container"
                     name="demo6_so3_control_container" namespace="" output="screen">
       <composable_node pkg="so3_control" plugin="SO3ControlComponent"
@@ -121,36 +179,9 @@
         <remap from="motors" to="/demo6/motors"/>
         <remap from="corrections" to="/demo6/corrections"/>
         <remap from="so3_cmd" to="/demo6/so3_cmd"/>
-        <remap from="imu" to="$(var sim_imu_topic)"/>
+        <remap from="imu" to="$(var iap_imu_topic)"/>
       </composable_node>
     </node_container>
-
-    <node pkg="local_sensing" exec="pcl_render_node" name="drone_0_pcl_render_node" output="screen">
-      <remap from="global_map" to="/map_generator/global_cloud"/>
-      <remap from="local_map" to="/map_generator/local_cloud"/>
-      <remap from="odometry" to="$(var truth_odom_topic)"/>
-      <remap from="pcl_render_node/cloud" to="$(var sim_lidar_topic)"/>
-      <param name="sensing_horizon" value="10.0"/>
-      <param name="sensing_rate" value="15.0"/>
-      <param name="estimation_rate" value="15.0"/>
-      <param name="map/x_size" value="$(var map_size_x)"/>
-      <param name="map/y_size" value="$(var map_size_y)"/>
-      <param name="map/z_size" value="$(var map_size_z)"/>
-      <param name="map/resolution" value="$(var map_resolution)"/>
-    </node>
-
-    <node pkg="iap" exec="demo4_lidar_body_bridge" name="demo6_lidar_body_bridge" output="screen" if="$(var start_iap)">
-      <param name="input_cloud_topic" value="$(var sim_lidar_topic)"/>
-      <param name="input_odom_topic" value="$(var truth_odom_topic)"/>
-      <param name="output_cloud_topic" value="$(var iap_lidar_topic)"/>
-      <param name="output_frame_id" value="lidar"/>
-    </node>
-
-    <node pkg="iap" exec="iap_rosnode" name="demo6_iap_rosnode" output="screen" if="$(var start_iap)">
-      <param name="config_path" value="$(var iap_config_path)"/>
-      <param name="imu_topic" value="$(var iap_imu_topic)"/>
-      <param name="points_topic" value="$(var iap_lidar_topic)"/>
-    </node>
 
     <node pkg="odom_visualization" exec="odom_visualization" name="demo6_odom_visualization" output="screen">
       <remap from="odom" to="$(var control_odom_topic)"/>
@@ -169,6 +200,44 @@
       <param name="color/a" value="1.0"/>
       <param name="tf45" value="false"/>
       <param name="drone_id" value="$(var drone_id)"/>
+    </node>
+
+    <node pkg="odom_visualization" exec="odom_visualization" name="demo6_truth_odom_visualization" output="screen">
+      <remap from="odom" to="$(var truth_odom_topic)"/>
+      <remap from="cmd" to="$(var position_cmd_topic)"/>
+      <remap from="pose" to="/demo6/truth/pose"/>
+      <remap from="path" to="/demo6/truth/path"/>
+      <remap from="robot" to="/demo6/truth/robot"/>
+      <remap from="velocity" to="/demo6/truth/velocity"/>
+      <remap from="sensor" to="/demo6/truth/sensor_status"/>
+      <remap from="time_gap" to="/demo6/truth/time_gap"/>
+      <param name="frame_id" value="map"/>
+      <param name="robot_scale" value="1.0"/>
+      <param name="color/r" value="1.0"/>
+      <param name="color/g" value="0.15"/>
+      <param name="color/b" value="0.1"/>
+      <param name="color/a" value="1.0"/>
+      <param name="tf45" value="false"/>
+      <param name="drone_id" value="10"/>
+    </node>
+
+    <node pkg="odom_visualization" exec="odom_visualization" name="demo6_desired_odom_visualization" output="screen">
+      <remap from="odom" to="$(var desired_odom_topic)"/>
+      <remap from="cmd" to="$(var position_cmd_topic)"/>
+      <remap from="pose" to="/demo6/desired/pose"/>
+      <remap from="path" to="/demo6/desired/path"/>
+      <remap from="robot" to="/demo6/desired/robot"/>
+      <remap from="velocity" to="/demo6/desired/velocity"/>
+      <remap from="sensor" to="/demo6/desired/sensor_status"/>
+      <remap from="time_gap" to="/demo6/desired/time_gap"/>
+      <param name="frame_id" value="map"/>
+      <param name="robot_scale" value="1.0"/>
+      <param name="color/r" value="1.0"/>
+      <param name="color/g" value="0.86"/>
+      <param name="color/b" value="0.05"/>
+      <param name="color/a" value="1.0"/>
+      <param name="tf45" value="false"/>
+      <param name="drone_id" value="20"/>
     </node>
   </timer>
 </launch>
