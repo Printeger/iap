@@ -189,8 +189,20 @@ void IntegrityMonitor::run_araim(const GnssEpoch& epoch,
   report.araim_n_hyp  = ar.n_hypotheses;
   report.araim_n_det  = ar.n_detected;
   report.araim_detected_rows = ar.detected_rows;
+  report.gnss_valid   = ar.valid ? 1 : 0;
+  report.gnss_n_hyp   = ar.n_hypotheses;
+  report.gnss_n_det   = ar.n_detected;
 
   if (!ar.valid) return;
+
+  report.gnss_HPL       = ar.HPL;
+  report.gnss_VPL       = ar.VPL;
+  report.gnss_PL_E      = ar.PL_E;
+  report.gnss_PL_N      = ar.PL_N;
+  report.gnss_PL_U      = ar.PL_U;
+  report.gnss_pl_ff     = ar.pl_ff;
+  report.gnss_K_ff_used = ar.K_ff_used;
+  report.gnss_K_fa_used = ar.K_fa_used;
 
   // Forward per-axis ARAIM results (§1.11)
   report.HPL       = ar.HPL;
@@ -216,6 +228,9 @@ void IntegrityMonitor::run_araim(const GnssEpoch& epoch,
 
   // Replace the proxy PL with the ARAIM HPL (more principled)
   report.PL = ar.HPL;
+  report.final_HPL_source = "GNSS";
+  report.final_VPL_source = "GNSS";
+  report.final_PL_source  = "GNSS";
 
   if (ar.n_detected > 0) {
     logger_->warn("ARAIM FDE: {} fault(s) detected; PRNs: {}",
@@ -255,9 +270,18 @@ void IntegrityMonitor::run_lidar_araim(const LidarAraimSnapshot& snapshot,
   report.PL_E = std::max(report.PL_E, lr.PL_E);
   report.PL_N = std::max(report.PL_N, lr.PL_N);
   report.PL_U = std::max(report.PL_U, lr.PL_U);
-  report.HPL  = std::max(report.HPL, lr.HPL);
-  report.VPL  = std::max(report.VPL, lr.VPL);
-  report.PL   = std::max(report.PL, lr.HPL);
+  if (lr.HPL > report.HPL) {
+    report.HPL = lr.HPL;
+    report.final_HPL_source = "LIDAR";
+  }
+  if (lr.VPL > report.VPL) {
+    report.VPL = lr.VPL;
+    report.final_VPL_source = "LIDAR";
+  }
+  if (lr.HPL > report.PL) {
+    report.PL = lr.HPL;
+    report.final_PL_source = "LIDAR";
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -373,6 +397,9 @@ IntegrityReport IntegrityMonitor::compute(const glim::EstimationFrame& frame,
   report.VPL = report.PL;
   report.pl_araim = report.PL;
   report.vpl_araim = report.PL;
+  report.final_HPL_source = "FALLBACK";
+  report.final_VPL_source = "FALLBACK";
+  report.final_PL_source  = "FALLBACK";
   report.lambda_max_sigma_p = [&] {
     Eigen::SelfAdjointEigenSolver<Eigen::Matrix3d> eig(frame.sigma_p, Eigen::EigenvaluesOnly);
     return eig.eigenvalues().maxCoeff();

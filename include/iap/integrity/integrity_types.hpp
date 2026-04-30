@@ -139,6 +139,19 @@ struct IntegrityReport {
   int    araim_n_det   = 0;
   std::vector<int> araim_detected_rows;
 
+  // --- GNSS ARAIM source split diagnostics -------------------------------
+  int    gnss_valid     = 0;
+  double gnss_PL_E      = 1e9;
+  double gnss_PL_N      = 1e9;
+  double gnss_PL_U      = 1e9;
+  double gnss_HPL       = 1e9;
+  double gnss_VPL       = 1e9;
+  double gnss_pl_ff     = 1e9;
+  double gnss_K_ff_used = 0.0;
+  double gnss_K_fa_used = 0.0;
+  int    gnss_n_hyp     = 0;
+  int    gnss_n_det     = 0;
+
   // --- GNSS quality summary -----------------------------------------------
   int    n_sv_used         = 0;
   int    n_constellations  = 0;
@@ -155,6 +168,11 @@ struct IntegrityReport {
   double lidar_HPL     = 1e9;
   double lidar_VPL     = 1e9;
   std::string lidar_worst_mode = "NONE";
+
+  // --- Final fused PL source diagnostics ----------------------------------
+  std::string final_HPL_source = "UNKNOWN";
+  std::string final_VPL_source = "UNKNOWN";
+  std::string final_PL_source  = "UNKNOWN";
 
   // --- Trunk geometry summary ---------------------------------------------
   int    n_trunks_observed = 0;

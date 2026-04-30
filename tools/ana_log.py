@@ -587,6 +587,7 @@ def analyze_araim(rows: list[dict[str, str]]) -> dict[str, Any]:
     worst_hyp = [row for row in rows if row.get("row_type") == "worst_hyp"]
     states = Counter(row.get("state", "unknown") for row in epochs)
     unsafe_count = states.get("UNSAFE", 0)
+    source_split = analyze_integrity_source_split(epochs)
     return {
         "available": True,
         "row_count": len(rows),
@@ -601,6 +602,57 @@ def analyze_araim(rows: list[dict[str, str]]) -> dict[str, Any]:
         "IM": stats(numeric_values(epochs, "IM")),
         "n_hyp": stats(numeric_values(epochs, "n_hyp")),
         "n_det": stats(numeric_values(epochs, "n_det")),
+        "source_split": source_split,
+    }
+
+
+def analyze_integrity_source_split(epochs: list[dict[str, str]]) -> dict[str, Any]:
+    if not epochs:
+        return {"available": False, "mode": "unavailable"}
+
+    has_new_columns = any(
+        "final_HPL_source" in row and "gnss_HPL" in row and row.get("gnss_HPL") not in (None, "")
+        for row in epochs
+    )
+    if has_new_columns:
+        return {
+            "available": True,
+            "mode": "explicit_columns",
+            "final_HPL_source_counts": dict(Counter(row.get("final_HPL_source", "UNKNOWN") or "UNKNOWN" for row in epochs)),
+            "final_VPL_source_counts": dict(Counter(row.get("final_VPL_source", "UNKNOWN") or "UNKNOWN" for row in epochs)),
+            "final_PL_source_counts": dict(Counter(row.get("final_PL_source", "UNKNOWN") or "UNKNOWN" for row in epochs)),
+            "final_HPL": stats(numeric_values(epochs, "HPL")),
+            "final_VPL": stats(numeric_values(epochs, "VPL")),
+            "gnss_HPL": stats(numeric_values(epochs, "gnss_HPL")),
+            "gnss_VPL": stats(numeric_values(epochs, "gnss_VPL")),
+            "lidar_HPL": stats(numeric_values(epochs, "lidar_HPL")),
+            "lidar_VPL": stats(numeric_values(epochs, "lidar_VPL")),
+            "gnss_valid_count": sum(1 for row in epochs if boolish(row.get("gnss_valid")) is True),
+            "lidar_valid_count": sum(1 for row in epochs if boolish(row.get("lidar_valid")) is True),
+        }
+
+    inferred_counts = Counter()
+    for row in epochs:
+        hpl = to_float(row.get("HPL"))
+        lidar_hpl = to_float(row.get("lidar_HPL"))
+        if hpl is not None and lidar_hpl is not None and abs(hpl - lidar_hpl) <= max(1e-6, 1e-6 * abs(hpl)):
+            inferred_counts["likely_lidar_dominated"] += 1
+        else:
+            inferred_counts["likely_non_lidar_or_unknown"] += 1
+    return {
+        "available": True,
+        "mode": "inferred_from_legacy_columns",
+        "final_HPL_source_counts": dict(inferred_counts),
+        "final_VPL_source_counts": {},
+        "final_PL_source_counts": {},
+        "final_HPL": stats(numeric_values(epochs, "HPL")),
+        "final_VPL": stats(numeric_values(epochs, "VPL")),
+        "gnss_HPL": {"count": 0, "mean": 0.0, "p50": 0.0, "p95": 0.0, "p99": 0.0, "max": 0.0, "min": 0.0},
+        "gnss_VPL": {"count": 0, "mean": 0.0, "p50": 0.0, "p95": 0.0, "p99": 0.0, "max": 0.0, "min": 0.0},
+        "lidar_HPL": stats(numeric_values(epochs, "lidar_HPL")),
+        "lidar_VPL": stats(numeric_values(epochs, "lidar_VPL")),
+        "gnss_valid_count": 0,
+        "lidar_valid_count": sum(1 for row in epochs if boolish(row.get("lidar_valid")) is True),
     }
 
 
@@ -706,8 +758,25 @@ def analyze_sim_truth_integrity(
         hal = to_float(epoch.get("HAL")) or 0.0
         val = to_float(epoch.get("VAL")) or 0.0
         state = (epoch.get("state") or "unknown").strip()
-        hpl_covers = horizontal_error <= hpl
-        vpl_covers = vertical_error <= vpl
+        lidar_hpl = to_float(epoch.get("lidar_HPL"))
+        lidar_vpl = to_float(epoch.get("lidar_VPL"))
+        gnss_hpl = to_float(epoch.get("gnss_HPL"))
+        gnss_vpl = to_float(epoch.get("gnss_VPL"))
+        final_hpl_source = epoch.get("final_HPL_source") or ""
+        final_vpl_source = epoch.get("final_VPL_source") or ""
+        final_pl_source = epoch.get("final_PL_source") or ""
+        if not final_hpl_source and lidar_hpl is not None and abs(hpl - lidar_hpl) <= max(1e-6, 1e-6 * abs(hpl)):
+            final_hpl_source = "LIKELY_LIDAR_LEGACY"
+        if not final_vpl_source and lidar_vpl is not None and abs(vpl - lidar_vpl) <= max(1e-6, 1e-6 * abs(vpl)):
+            final_vpl_source = "LIKELY_LIDAR_LEGACY"
+        if not final_pl_source:
+            final_pl_source = final_hpl_source
+        final_hpl_covers = horizontal_error <= hpl
+        final_vpl_covers = vertical_error <= vpl
+        gnss_hpl_covers = horizontal_error <= gnss_hpl if gnss_hpl is not None else None
+        gnss_vpl_covers = vertical_error <= gnss_vpl if gnss_vpl is not None else None
+        lidar_hpl_covers = horizontal_error <= lidar_hpl if lidar_hpl is not None else None
+        lidar_vpl_covers = vertical_error <= lidar_vpl if lidar_vpl is not None else None
         safe_but_hazard = state == "SAFE" and (horizontal_error > hal or vertical_error > val)
         unsafe_but_within_alert = state == "UNSAFE" and horizontal_error <= hal and vertical_error <= val
 
@@ -734,8 +803,21 @@ def analyze_sim_truth_integrity(
             "VAL": val,
             "IM": to_float(epoch.get("IM")) or 0.0,
             "state": state,
-            "hpl_covers_error": hpl_covers,
-            "vpl_covers_error": vpl_covers,
+            "final_HPL_source": final_hpl_source,
+            "final_VPL_source": final_vpl_source,
+            "final_PL_source": final_pl_source,
+            "gnss_HPL": gnss_hpl,
+            "gnss_VPL": gnss_vpl,
+            "lidar_HPL": lidar_hpl,
+            "lidar_VPL": lidar_vpl,
+            "hpl_covers_error": final_hpl_covers,
+            "vpl_covers_error": final_vpl_covers,
+            "final_hpl_covers_error": final_hpl_covers,
+            "final_vpl_covers_error": final_vpl_covers,
+            "gnss_hpl_covers_error": gnss_hpl_covers,
+            "gnss_vpl_covers_error": gnss_vpl_covers,
+            "lidar_hpl_covers_error": lidar_hpl_covers,
+            "lidar_vpl_covers_error": lidar_vpl_covers,
             "safe_but_hazard": safe_but_hazard,
             "unsafe_but_within_alert": unsafe_but_within_alert,
             "n_sv": to_float(epoch.get("n_sv")) or 0.0,
@@ -777,16 +859,53 @@ def analyze_sim_truth_integrity(
 
     matched = len(validation_rows)
     state_counts = Counter(str(row["state"]) for row in validation_rows)
-    hpl_ok = sum(1 for row in validation_rows if row["hpl_covers_error"])
-    vpl_ok = sum(1 for row in validation_rows if row["vpl_covers_error"])
-    both_ok = sum(1 for row in validation_rows if row["hpl_covers_error"] and row["vpl_covers_error"])
+    def integrity_truth_summary(hpl_key: str, vpl_key: str, hcov_key: str, vcov_key: str) -> dict[str, Any]:
+        hpl_rows = [row for row in validation_rows if row.get(hpl_key) is not None]
+        vpl_rows = [row for row in validation_rows if row.get(vpl_key) is not None]
+        available_rows = [row for row in validation_rows if row.get(hpl_key) is not None or row.get(vpl_key) is not None]
+        hv_rows = [row for row in validation_rows if row.get(hpl_key) is not None and row.get(vpl_key) is not None]
+        hpl_ok_count = sum(1 for row in hpl_rows if row.get(hcov_key) is True)
+        vpl_ok_count = sum(1 for row in vpl_rows if row.get(vcov_key) is True)
+        hv_ok_count = sum(1 for row in hv_rows if row.get(hcov_key) is True and row.get(vcov_key) is True)
+        h_margins = [float(row[hpl_key]) - float(row["horizontal_error_m"]) for row in hpl_rows]
+        v_margins = [float(row[vpl_key]) - float(row["vertical_error_m"]) for row in vpl_rows]
+        return {
+            "available_count": len(available_rows),
+            "hpl_available_count": len(hpl_rows),
+            "vpl_available_count": len(vpl_rows),
+            "hpl_coverage_ratio": hpl_ok_count / max(len(hpl_rows), 1),
+            "vpl_coverage_ratio": vpl_ok_count / max(len(vpl_rows), 1),
+            "hv_coverage_ratio": hv_ok_count / max(len(hv_rows), 1),
+            "hpl_margin": stats(h_margins),
+            "vpl_margin": stats(v_margins),
+            "HPL": stats([float(row[hpl_key]) for row in hpl_rows]),
+            "VPL": stats([float(row[vpl_key]) for row in vpl_rows]),
+        }
+
+    final_integrity = integrity_truth_summary("HPL", "VPL", "final_hpl_covers_error", "final_vpl_covers_error")
+    gnss_integrity = integrity_truth_summary("gnss_HPL", "gnss_VPL", "gnss_hpl_covers_error", "gnss_vpl_covers_error")
+    lidar_integrity = integrity_truth_summary("lidar_HPL", "lidar_VPL", "lidar_hpl_covers_error", "lidar_vpl_covers_error")
     false_safe = sum(1 for row in validation_rows if row["safe_but_hazard"])
     conservative_unsafe = sum(1 for row in validation_rows if row["unsafe_but_within_alert"])
     he = [float(row["horizontal_error_m"]) for row in validation_rows]
     ve = [float(row["vertical_error_m"]) for row in validation_rows]
     pe = [float(row["position_error_m"]) for row in validation_rows]
-    h_margin = [float(row["HPL"]) - float(row["horizontal_error_m"]) for row in validation_rows]
-    v_margin = [float(row["VPL"]) - float(row["vertical_error_m"]) for row in validation_rows]
+    source_rows: dict[str, list[dict[str, Any]]] = defaultdict(list)
+    for row in validation_rows:
+        source = str(row.get("final_HPL_source") or "UNKNOWN")
+        source_rows[source].append(row)
+    source_stats = {}
+    for source, items in source_rows.items():
+        source_stats[source] = {
+            "count": len(items),
+            "hpl_coverage_ratio": sum(1 for row in items if row["hpl_covers_error"]) / max(len(items), 1),
+            "false_safe_count": sum(1 for row in items if row["safe_but_hazard"]),
+            "conservative_unsafe_count": sum(1 for row in items if row["unsafe_but_within_alert"]),
+            "horizontal_error": stats([float(row["horizontal_error_m"]) for row in items]),
+            "final_HPL": stats([float(row["HPL"]) for row in items]),
+            "gnss_HPL": stats([float(row["gnss_HPL"]) for row in items if row.get("gnss_HPL") is not None]),
+            "lidar_HPL": stats([float(row["lidar_HPL"]) for row in items if row.get("lidar_HPL") is not None]),
+        }
 
     return {
         "available": matched > 0,
@@ -799,9 +918,9 @@ def analyze_sim_truth_integrity(
         "matched_epoch_count": matched,
         "unmatched_epoch_count": unmatched + max(len(epochs) - matched - unmatched, 0),
         "state_counts": dict(state_counts),
-        "hpl_coverage_ratio": hpl_ok / max(matched, 1),
-        "vpl_coverage_ratio": vpl_ok / max(matched, 1),
-        "hv_coverage_ratio": both_ok / max(matched, 1),
+        "hpl_coverage_ratio": final_integrity["hpl_coverage_ratio"],
+        "vpl_coverage_ratio": final_integrity["vpl_coverage_ratio"],
+        "hv_coverage_ratio": final_integrity["hv_coverage_ratio"],
         "false_safe_count": false_safe,
         "false_safe_ratio": false_safe / max(matched, 1),
         "conservative_unsafe_count": conservative_unsafe,
@@ -812,8 +931,12 @@ def analyze_sim_truth_integrity(
         "horizontal_error_rms": rms(he),
         "vertical_error_rms": rms(ve),
         "position_error_rms": rms(pe),
-        "horizontal_pl_margin": stats(h_margin),
-        "vertical_pl_margin": stats(v_margin),
+        "horizontal_pl_margin": final_integrity["hpl_margin"],
+        "vertical_pl_margin": final_integrity["vpl_margin"],
+        "final_integrity": final_integrity,
+        "gnss_integrity": gnss_integrity,
+        "lidar_integrity": lidar_integrity,
+        "source_stats": source_stats,
         "rows": validation_rows,
     }
 
@@ -1280,6 +1403,142 @@ def generate_sim_accuracy_summary_svg(rows: list[dict[str, Any]], summary: dict[
     write_svg(path, width, height, body)
 
 
+def generate_sim_integrity_source_split_svg(rows: list[dict[str, Any]], path: Path) -> None:
+    width, height = 1120, 620
+    body: list[str] = [svg_text(40, 34, "Integrity Source Split Timeline", 18, "#111827")]
+    if not rows:
+        body.append(svg_text(40, 80, "No matched simulation integrity rows.", 14, "#991b1b"))
+        write_svg(path, width, height, body)
+        return
+
+    usable_keys = ["horizontal_error_m", "HPL"]
+    if any(row.get("gnss_HPL") is not None for row in rows):
+        usable_keys.append("gnss_HPL")
+    if any(row.get("lidar_HPL") is not None for row in rows):
+        usable_keys.append("lidar_HPL")
+
+    px, py, pw, ph = 70.0, 80.0, 990.0, 360.0
+    stamps = [float(row["stamp"]) for row in rows]
+    t0, t1 = min(stamps), max(stamps)
+    values: list[float] = []
+    for row in rows:
+        for key in usable_keys:
+            value = row.get(key)
+            if value is not None:
+                values.append(float(value))
+    y0, y1 = float_range(values)
+    y0 = min(0.0, y0)
+    body.extend(svg_axes(px, py, pw, ph, "Horizontal protection level by source", f"relative time from {t0:.3f}s", "meters"))
+
+    def points_for_optional(key: str) -> list[tuple[float, float]]:
+        points = []
+        for row in rows:
+            value = row.get(key)
+            if value is None:
+                continue
+            x = map_linear(float(row["stamp"]), t0, t1, px, px + pw)
+            y = map_linear(float(value), y0, y1, py + ph, py)
+            points.append((x, y))
+        return points
+
+    series = [
+        ("horizontal_error_m", "#111827", "truth HE", 2.0),
+        ("gnss_HPL", "#16a34a", "GNSS-only HPL", 1.7),
+        ("lidar_HPL", "#f97316", "LiDAR-only HPL", 1.7),
+        ("HPL", "#2563eb", "final fused HPL", 2.2),
+    ]
+    for key, color, _label, width_px in series:
+        if key in usable_keys:
+            body.append(svg_polyline(points_for_optional(key), color, width_px, 0.95))
+
+    source_counts = Counter(str(row.get("final_HPL_source") or "UNKNOWN") for row in rows)
+    legend_y = 475
+    for i, (key, color, label, _width_px) in enumerate(series):
+        if key not in usable_keys:
+            continue
+        x = 80 + i * 190
+        body.append(f'<line x1="{x:.2f}" y1="{legend_y:.2f}" x2="{x + 30:.2f}" y2="{legend_y:.2f}" stroke="{color}" stroke-width="2.2" />')
+        body.append(svg_text(x + 38, legend_y + 4, label, 12, "#374151"))
+    body.append(svg_text(80, 525, f"final_HPL_source_counts={dict(source_counts)}", 12, "#111827"))
+    body.append(svg_text(80, 548, "New logs show explicit GNSS/LiDAR/fallback source; old logs may show UNKNOWN in validation rows.", 12, "#4b5563"))
+    write_svg(path, width, height, body)
+
+
+def generate_sim_gnss_truth_comparison_svg(rows: list[dict[str, Any]], path: Path) -> None:
+    width, height = 1120, 700
+    body: list[str] = [svg_text(40, 34, "GNSS-only Integrity vs Simulation Truth", 18, "#111827")]
+    if not rows:
+        body.append(svg_text(40, 80, "No matched simulation integrity rows.", 14, "#991b1b"))
+        write_svg(path, width, height, body)
+        return
+
+    gnss_rows = [row for row in rows if row.get("gnss_HPL") is not None or row.get("gnss_VPL") is not None]
+    if not gnss_rows:
+        body.append(svg_text(40, 80, "GNSS-only PL fields are unavailable in this run.", 14, "#991b1b"))
+        body.append(svg_text(40, 104, "Regenerate logs with gnss_HPL/gnss_VPL columns in iap_araim.csv.", 12, "#4b5563"))
+        write_svg(path, width, height, body)
+        return
+
+    stamps = [float(row["stamp"]) for row in gnss_rows]
+    t0, t1 = min(stamps), max(stamps)
+    rel_label = f"relative time from {t0:.3f}s"
+
+    def optional_timeline_points(
+        selected_rows: list[dict[str, Any]],
+        value_key: str,
+        plot_x: float,
+        plot_y: float,
+        plot_w: float,
+        plot_h: float,
+        y0: float,
+        y1: float,
+    ) -> list[tuple[float, float]]:
+        points = []
+        for row in selected_rows:
+            value = row.get(value_key)
+            if value is None:
+                continue
+            x = map_linear(float(row["stamp"]), t0, t1, plot_x, plot_x + plot_w)
+            y = map_linear(float(value), y0, y1, plot_y + plot_h, plot_y)
+            points.append((x, y))
+        return points
+
+    panels = [
+        (70.0, 70.0, 990.0, 250.0, "GNSS horizontal coverage", "horizontal_error_m", "gnss_HPL", "HE", "GNSS HPL"),
+        (70.0, 390.0, 990.0, 250.0, "GNSS vertical coverage", "vertical_error_m", "gnss_VPL", "VE", "GNSS VPL"),
+    ]
+    for px, py, pw, ph, title, err_key, pl_key, err_label, pl_label in panels:
+        panel_rows = [row for row in gnss_rows if row.get(pl_key) is not None]
+        if not panel_rows:
+            body.extend(svg_axes(px, py, pw, ph, title, rel_label, "meters"))
+            body.append(svg_text(px + 20, py + 42, f"{pl_key} unavailable.", 13, "#991b1b"))
+            continue
+        values = [float(row[err_key]) for row in panel_rows] + [float(row[pl_key]) for row in panel_rows]
+        y0, y1 = float_range(values)
+        y0 = min(0.0, y0)
+        body.extend(svg_axes(px, py, pw, ph, title, rel_label, "meters"))
+        body.append(svg_polyline(optional_timeline_points(panel_rows, err_key, px, py, pw, ph, y0, y1), "#111827", 2.0))
+        body.append(svg_polyline(optional_timeline_points(panel_rows, pl_key, px, py, pw, ph, y0, y1), "#16a34a", 1.9))
+        uncovered = sum(1 for row in panel_rows if float(row[err_key]) > float(row[pl_key]))
+        coverage = 1.0 - uncovered / max(len(panel_rows), 1)
+        for idx, row in enumerate(panel_rows):
+            if float(row[err_key]) <= float(row[pl_key]):
+                continue
+            x = map_linear(float(row["stamp"]), t0, t1, px, px + pw)
+            y = map_linear(float(row[err_key]), y0, y1, py + ph, py)
+            if idx % max(1, len(panel_rows) // 250) == 0:
+                body.append(f'<circle cx="{x:.2f}" cy="{y:.2f}" r="3.2" fill="#dc2626" fill-opacity="0.85" />')
+        legend_y = py + 20
+        for i, (label, color) in enumerate([(err_label, "#111827"), (pl_label, "#16a34a"), ("uncovered", "#dc2626")]):
+            body.append(f'<line x1="{px + pw - 190:.2f}" y1="{legend_y + i * 18:.2f}" x2="{px + pw - 165:.2f}" y2="{legend_y + i * 18:.2f}" stroke="{color}" stroke-width="2" />')
+            body.append(svg_text(px + pw - 158, legend_y + i * 18 + 4, label, 11, "#374151"))
+        body.append(svg_text(px + 12, py + ph - 12, f"coverage={coverage:.3f}, uncovered={uncovered}/{len(panel_rows)}", 12, "#111827"))
+        body.append(svg_text(px - 8, py + ph + 4, f"{y0:.2f}", 10, "#4b5563", "end"))
+        body.append(svg_text(px - 8, py + 4, f"{y1:.2f}", 10, "#4b5563", "end"))
+
+    write_svg(path, width, height, body)
+
+
 def write_sim_integrity_outputs(analysis: dict[str, Any], out_dir: Path, figs_dir: Path, no_plots: bool) -> list[str]:
     if not analysis.get("available"):
         return []
@@ -1291,7 +1550,13 @@ def write_sim_integrity_outputs(analysis: dict[str, Any], out_dir: Path, figs_di
         "truth_x", "truth_y", "truth_z", "est_x", "est_y", "est_z",
         "err_e", "err_n", "err_u", "horizontal_error_m", "vertical_error_m", "position_error_m",
         "HPL", "VPL", "HAL", "VAL", "IM", "state",
-        "hpl_covers_error", "vpl_covers_error", "safe_but_hazard", "unsafe_but_within_alert",
+        "final_HPL_source", "final_VPL_source", "final_PL_source",
+        "gnss_HPL", "gnss_VPL", "lidar_HPL", "lidar_VPL",
+        "hpl_covers_error", "vpl_covers_error",
+        "final_hpl_covers_error", "final_vpl_covers_error",
+        "gnss_hpl_covers_error", "gnss_vpl_covers_error",
+        "lidar_hpl_covers_error", "lidar_vpl_covers_error",
+        "safe_but_hazard", "unsafe_but_within_alert",
         "n_sv", "n_const", "PDOP", "n_hyp", "n_det",
     ]
     with csv_path.open("w", encoding="utf-8", newline="") as f:
@@ -1313,12 +1578,16 @@ def write_sim_integrity_outputs(analysis: dict[str, Any], out_dir: Path, figs_di
         figs_dir / "sim_integrity_3d_envelope.svg",
         figs_dir / "sim_integrity_margin_scatter.svg",
         figs_dir / "sim_accuracy_summary.svg",
+        figs_dir / "sim_integrity_source_split.svg",
+        figs_dir / "sim_gnss_truth_comparison.svg",
     ]
     generate_sim_integrity_timeline_svg(rows, svg_paths[0])
     generate_sim_integrity_trajectory_svg(rows, svg_paths[1])
     generate_sim_integrity_3d_envelope_svg(rows, svg_paths[2])
     generate_sim_integrity_margin_scatter_svg(rows, svg_paths[3])
     generate_sim_accuracy_summary_svg(rows, analysis, svg_paths[4])
+    generate_sim_integrity_source_split_svg(rows, svg_paths[5])
+    generate_sim_gnss_truth_comparison_svg(rows, svg_paths[6])
     generated.extend(str(path) for path in svg_paths)
     return generated
 
@@ -1535,6 +1804,41 @@ def append_araim_section(lines: list[str], analysis: dict[str, Any]) -> None:
         ],
     ))
     lines.append("")
+    append_integrity_source_split_section(lines, analysis.get("source_split", {}))
+
+
+def append_integrity_source_split_section(lines: list[str], source_split: dict[str, Any]) -> None:
+    lines.append("## Integrity Source Split")
+    lines.append("")
+    if not source_split.get("available"):
+        lines.append("Integrity source split is unavailable.")
+        lines.append("")
+        return
+    lines.append(md_table(
+        ["Metric", "Value"],
+        [
+            ["mode", source_split.get("mode", "")],
+            ["final_HPL_source_counts", source_split.get("final_HPL_source_counts", {})],
+            ["final_VPL_source_counts", source_split.get("final_VPL_source_counts", {})],
+            ["final_PL_source_counts", source_split.get("final_PL_source_counts", {})],
+            ["gnss_valid_count", source_split.get("gnss_valid_count", 0)],
+            ["lidar_valid_count", source_split.get("lidar_valid_count", 0)],
+        ],
+    ))
+    lines.append("")
+    rows = []
+    for label, key in [
+        ("final_HPL", "final_HPL"),
+        ("final_VPL", "final_VPL"),
+        ("gnss_HPL", "gnss_HPL"),
+        ("gnss_VPL", "gnss_VPL"),
+        ("lidar_HPL", "lidar_HPL"),
+        ("lidar_VPL", "lidar_VPL"),
+    ]:
+        item = source_split.get(key, {})
+        rows.append([label, item.get("count", 0), f"{item.get('mean', 0.0):.3f}", f"{item.get('p95', 0.0):.3f}", f"{item.get('max', 0.0):.3f}"])
+    lines.append(md_table(["Quantity", "Count", "Mean", "P95", "Max"], rows))
+    lines.append("")
 
 
 def append_sim_integrity_section(lines: list[str], analysis: dict[str, Any]) -> None:
@@ -1554,14 +1858,56 @@ def append_sim_integrity_section(lines: list[str], analysis: dict[str, Any]) -> 
             ["ARAIM epochs", analysis["araim_epoch_count"]],
             ["matched / unmatched epochs", f"{analysis['matched_epoch_count']} / {analysis['unmatched_epoch_count']}"],
             ["state_counts", analysis["state_counts"]],
-            ["HPL coverage ratio", f"{analysis['hpl_coverage_ratio']:.3f}"],
-            ["VPL coverage ratio", f"{analysis['vpl_coverage_ratio']:.3f}"],
-            ["H+V coverage ratio", f"{analysis['hv_coverage_ratio']:.3f}"],
+            ["Final HPL coverage ratio", f"{analysis['hpl_coverage_ratio']:.3f}"],
+            ["Final VPL coverage ratio", f"{analysis['vpl_coverage_ratio']:.3f}"],
+            ["Final H+V coverage ratio", f"{analysis['hv_coverage_ratio']:.3f}"],
             ["false_safe_count", analysis["false_safe_count"]],
             ["conservative_unsafe_count", analysis["conservative_unsafe_count"]],
         ],
     ))
     lines.append("")
+    coverage_rows = []
+    for label, key in [
+        ("final", "final_integrity"),
+        ("GNSS-only", "gnss_integrity"),
+        ("LiDAR-only", "lidar_integrity"),
+    ]:
+        item = analysis.get(key, {})
+        coverage_rows.append([
+            label,
+            item.get("available_count", 0),
+            f"{item.get('hpl_coverage_ratio', 0.0):.3f}",
+            f"{item.get('vpl_coverage_ratio', 0.0):.3f}",
+            f"{item.get('hv_coverage_ratio', 0.0):.3f}",
+            format_triplet(item.get("HPL", {})),
+            format_triplet(item.get("VPL", {})),
+            format_triplet(item.get("hpl_margin", {}), min_instead=True),
+            format_triplet(item.get("vpl_margin", {}), min_instead=True),
+        ])
+    lines.append("### Integrity Truth Coverage By Source")
+    lines.append("")
+    lines.append(md_table(
+        ["Integrity", "Count", "HPL Coverage", "VPL Coverage", "H+V Coverage", "HPL mean/p95/max", "VPL mean/p95/max", "H margin mean/p95/min", "V margin mean/p95/min"],
+        coverage_rows,
+    ))
+    lines.append("")
+    if analysis.get("source_stats"):
+        rows = []
+        for source, item in sorted(analysis["source_stats"].items()):
+            rows.append([
+                source,
+                item["count"],
+                f"{item['hpl_coverage_ratio']:.3f}",
+                item["false_safe_count"],
+                item["conservative_unsafe_count"],
+                format_triplet(item["horizontal_error"]),
+                format_triplet(item["final_HPL"]),
+            ])
+        lines.append(md_table(
+            ["Source", "Count", "HPL Coverage", "False Safe", "Conservative Unsafe", "HE mean/p95/max", "Final HPL mean/p95/max"],
+            rows,
+        ))
+        lines.append("")
     lines.append(md_table(
         ["Metric", "Mean", "P95", "P99", "Max", "RMS"],
         [

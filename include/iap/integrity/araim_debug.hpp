@@ -117,7 +117,11 @@ inline void AraimDebugCSV::write_header() {
         << "hyp_index,sat_id,d_E,d_N,d_U,"
         << "sigma_ss_E,sigma_ss_N,sigma_ss_U,"
         << "sigma_k_E,sigma_k_N,sigma_k_U,"
-        << "hyp_PL_E,hyp_PL_N,hyp_PL_U,fault_detected\n";
+        << "hyp_PL_E,hyp_PL_N,hyp_PL_U,fault_detected,"
+        << "final_HPL_source,final_VPL_source,final_PL_source,"
+        << "gnss_valid,gnss_HPL,gnss_VPL,gnss_PL_E,gnss_PL_N,gnss_PL_U,"
+        << "gnss_pl_ff,gnss_K_ff,gnss_K_fa,gnss_n_hyp,gnss_n_det,"
+        << "lidar_VPL,lidar_PL_E,lidar_PL_N,lidar_PL_U\n";
   header_written_ = true;
 }
 
@@ -138,7 +142,17 @@ inline void AraimDebugCSV::write_epoch_row(const IntegrityReport& report) {
         << report.lidar_valid << "," << report.lidar_n_hyp << ","
         << report.lidar_n_det << "," << report.lidar_HPL << ","
         << report.lidar_worst_mode << ","
-        << ",,,,,,,,,,,,\n";  // hyp columns empty for epoch row
+        << std::string(15, ',')
+        << report.final_HPL_source << ","
+        << report.final_VPL_source << ","
+        << report.final_PL_source << ","
+        << report.gnss_valid << ","
+        << report.gnss_HPL << "," << report.gnss_VPL << ","
+        << report.gnss_PL_E << "," << report.gnss_PL_N << "," << report.gnss_PL_U << ","
+        << report.gnss_pl_ff << "," << report.gnss_K_ff_used << "," << report.gnss_K_fa_used << ","
+        << report.gnss_n_hyp << "," << report.gnss_n_det << ","
+        << report.lidar_VPL << ","
+        << report.lidar_PL_E << "," << report.lidar_PL_N << "," << report.lidar_PL_U << "\n";
 }
 
 inline void AraimDebugCSV::write_worst_hyp_row(const IntegrityReport& report,
@@ -159,7 +173,8 @@ inline void AraimDebugCSV::write_worst_hyp_row(const IntegrityReport& report,
         << ss.sigma_ss_E << "," << ss.sigma_ss_N << "," << ss.sigma_ss_U << ","
         << ss.sigma_k_E  << "," << ss.sigma_k_N  << "," << ss.sigma_k_U  << ","
         << ss.PL_E << "," << ss.PL_N << "," << ss.PL_U << ","
-        << (ss.fault_detected ? 1 : 0) << "\n";
+        << (ss.fault_detected ? 1 : 0)
+        << std::string(18, ',') << "\n";
 }
 
 inline void AraimDebugCSV::write(const IntegrityReport& report) {
