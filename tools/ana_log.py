@@ -24,7 +24,9 @@ logging contract.
 from __future__ import annotations
 
 import argparse
+import bisect
 import csv
+import html
 import json
 import math
 import re
@@ -287,6 +289,8 @@ def artifact_paths(run_dir: Path) -> dict[str, tuple[Path | None, str, list[str]
         "gnss_factor_debug": ["export/iap_gnss_factor_debug.csv", "export/gnss_factor_debug.csv"],
         "araim": ["export/iap_araim.csv", "export/araim.csv"],
         "trajectory": ["export/traj_with_gnss.csv", "export/integrity_trajectory.csv"],
+        "truth_vs_est": ["export/iap_sim_truth_vs_est.csv", "export/sim_truth_vs_est.csv"],
+        "desired_vs_truth": ["export/desired_vs_truth.csv", "export/tracking_error.csv"],
     }
     result = {}
     for name, candidates in aliases.items():
@@ -315,6 +319,8 @@ def config_enabled(configs: dict[str, Any], artifact_name: str) -> bool | None:
         return nested_bool(config_gnss, ["integrity", "enable_araim_csv"])
     if artifact_name == "trajectory":
         return nested_bool(config_gnss, ["integrity", "enable_traj_csv"])
+    if artifact_name == "truth_vs_est":
+        return nested_bool(config_ros, ["glim_ros", "sim", "enable_metrics_csv"])
     if artifact_name == "dump":
         local_mapping = nested_bool(config_ros, ["glim_ros", "enable_local_mapping"])
         global_mapping = nested_bool(config_ros, ["glim_ros", "enable_global_mapping"])
@@ -625,6 +631,219 @@ def analyze_trajectory(rows: list[dict[str, str]]) -> dict[str, Any]:
     }
 
 
+def config_time_tolerance_s(metadata: dict[str, Any]) -> float:
+    configs = metadata.get("configs", {})
+    value = nested_get(configs.get("config_gnss"), ["gnss", "time_tolerance"])
+    number = to_float(value)
+    if number is None or number <= 0.0:
+        return 0.1
+    return number
+
+
+def truth_est_row_to_sample(row: dict[str, str]) -> dict[str, float] | None:
+    values = {
+        "truth_stamp": to_float(row.get("truth_stamp")),
+        "est_stamp": to_float(row.get("est_stamp")),
+        "truth_x": to_float(row.get("truth_x")),
+        "truth_y": to_float(row.get("truth_y")),
+        "truth_z": to_float(row.get("truth_z")),
+        "est_x": to_float(row.get("est_x")),
+        "est_y": to_float(row.get("est_y")),
+        "est_z": to_float(row.get("est_z")),
+    }
+    if any(value is None for value in values.values()):
+        return None
+    return {key: float(value) for key, value in values.items() if value is not None}
+
+
+def nearest_sample_by_stamp(
+    samples: list[dict[str, float]],
+    stamps: list[float],
+    target_stamp: float,
+) -> tuple[dict[str, float] | None, float]:
+    if not samples:
+        return None, math.inf
+    index = bisect.bisect_left(stamps, target_stamp)
+    candidates = []
+    if index < len(samples):
+        candidates.append(samples[index])
+    if index > 0:
+        candidates.append(samples[index - 1])
+    best = min(candidates, key=lambda item: abs(item["est_stamp"] - target_stamp))
+    return best, abs(best["est_stamp"] - target_stamp)
+
+
+def analyze_sim_truth_integrity(
+    truth_rows: list[dict[str, str]],
+    araim_rows: list[dict[str, str]],
+    metadata: dict[str, Any],
+) -> dict[str, Any]:
+    if not truth_rows:
+        return {"available": False, "reason": "missing export/iap_sim_truth_vs_est.csv"}
+    if not araim_rows:
+        return {"available": False, "reason": "missing export/iap_araim.csv"}
+
+    samples = [sample for row in truth_rows if (sample := truth_est_row_to_sample(row)) is not None]
+    samples.sort(key=lambda item: item["est_stamp"])
+    stamps = [item["est_stamp"] for item in samples]
+    epochs = [row for row in araim_rows if row.get("row_type") == "epoch"]
+    match_tolerance_s = config_time_tolerance_s(metadata)
+    validation_rows: list[dict[str, Any]] = []
+    unmatched = 0
+    match_method = "nearest_est_stamp"
+
+    def append_validation_row(epoch: dict[str, str], sample: dict[str, float], stamp: float, match_dt: float | None) -> None:
+        if stamp is None:
+            return
+        err_e = sample["est_x"] - sample["truth_x"]
+        err_n = sample["est_y"] - sample["truth_y"]
+        err_u = sample["est_z"] - sample["truth_z"]
+        horizontal_error = math.hypot(err_e, err_n)
+        vertical_error = abs(err_u)
+        position_error = math.sqrt(err_e * err_e + err_n * err_n + err_u * err_u)
+        hpl = to_float(epoch.get("HPL")) or 0.0
+        vpl = to_float(epoch.get("VPL")) or 0.0
+        hal = to_float(epoch.get("HAL")) or 0.0
+        val = to_float(epoch.get("VAL")) or 0.0
+        state = (epoch.get("state") or "unknown").strip()
+        hpl_covers = horizontal_error <= hpl
+        vpl_covers = vertical_error <= vpl
+        safe_but_hazard = state == "SAFE" and (horizontal_error > hal or vertical_error > val)
+        unsafe_but_within_alert = state == "UNSAFE" and horizontal_error <= hal and vertical_error <= val
+
+        validation_rows.append({
+            "stamp": stamp,
+            "match_dt_s": match_dt,
+            "truth_stamp": sample["truth_stamp"],
+            "est_stamp": sample["est_stamp"],
+            "truth_x": sample["truth_x"],
+            "truth_y": sample["truth_y"],
+            "truth_z": sample["truth_z"],
+            "est_x": sample["est_x"],
+            "est_y": sample["est_y"],
+            "est_z": sample["est_z"],
+            "err_e": err_e,
+            "err_n": err_n,
+            "err_u": err_u,
+            "horizontal_error_m": horizontal_error,
+            "vertical_error_m": vertical_error,
+            "position_error_m": position_error,
+            "HPL": hpl,
+            "VPL": vpl,
+            "HAL": hal,
+            "VAL": val,
+            "IM": to_float(epoch.get("IM")) or 0.0,
+            "state": state,
+            "hpl_covers_error": hpl_covers,
+            "vpl_covers_error": vpl_covers,
+            "safe_but_hazard": safe_but_hazard,
+            "unsafe_but_within_alert": unsafe_but_within_alert,
+            "n_sv": to_float(epoch.get("n_sv")) or 0.0,
+            "n_const": to_float(epoch.get("n_const")) or 0.0,
+            "PDOP": to_float(epoch.get("PDOP")) or 0.0,
+            "n_hyp": to_float(epoch.get("n_hyp")) or 0.0,
+            "n_det": to_float(epoch.get("n_det")) or 0.0,
+        })
+
+    for epoch in epochs:
+        stamp = to_float(epoch.get("stamp"))
+        if stamp is None:
+            unmatched += 1
+            continue
+        sample, match_dt = nearest_sample_by_stamp(samples, stamps, stamp)
+        if sample is None or match_dt > match_tolerance_s:
+            unmatched += 1
+            continue
+        append_validation_row(epoch, sample, stamp, match_dt)
+
+    if not validation_rows and samples and epochs:
+        epoch_stamps = [to_float(row.get("stamp")) for row in epochs]
+        epoch_stamps = [stamp for stamp in epoch_stamps if stamp is not None]
+        if len(epoch_stamps) >= 2:
+            match_method = "relative_index_fallback_low_precision_stamp"
+            validation_rows.clear()
+            unmatched = 0
+            epoch_t0 = min(epoch_stamps)
+            epoch_t1 = max(epoch_stamps)
+            for epoch in epochs:
+                stamp = to_float(epoch.get("stamp"))
+                if stamp is None:
+                    unmatched += 1
+                    continue
+                alpha = (stamp - epoch_t0) / (epoch_t1 - epoch_t0) if not math.isclose(epoch_t0, epoch_t1) else 0.0
+                alpha = min(max(alpha, 0.0), 1.0)
+                index = min(max(int(round(alpha * (len(samples) - 1))), 0), len(samples) - 1)
+                append_validation_row(epoch, samples[index], stamp, None)
+
+    matched = len(validation_rows)
+    state_counts = Counter(str(row["state"]) for row in validation_rows)
+    hpl_ok = sum(1 for row in validation_rows if row["hpl_covers_error"])
+    vpl_ok = sum(1 for row in validation_rows if row["vpl_covers_error"])
+    both_ok = sum(1 for row in validation_rows if row["hpl_covers_error"] and row["vpl_covers_error"])
+    false_safe = sum(1 for row in validation_rows if row["safe_but_hazard"])
+    conservative_unsafe = sum(1 for row in validation_rows if row["unsafe_but_within_alert"])
+    he = [float(row["horizontal_error_m"]) for row in validation_rows]
+    ve = [float(row["vertical_error_m"]) for row in validation_rows]
+    pe = [float(row["position_error_m"]) for row in validation_rows]
+    h_margin = [float(row["HPL"]) - float(row["horizontal_error_m"]) for row in validation_rows]
+    v_margin = [float(row["VPL"]) - float(row["vertical_error_m"]) for row in validation_rows]
+
+    return {
+        "available": matched > 0,
+        "reason": "" if matched > 0 else "no ARAIM epoch matched truth estimate rows within tolerance",
+        "match_tolerance_s": match_tolerance_s,
+        "match_method": match_method,
+        "truth_row_count": len(truth_rows),
+        "valid_truth_row_count": len(samples),
+        "araim_epoch_count": len(epochs),
+        "matched_epoch_count": matched,
+        "unmatched_epoch_count": unmatched + max(len(epochs) - matched - unmatched, 0),
+        "state_counts": dict(state_counts),
+        "hpl_coverage_ratio": hpl_ok / max(matched, 1),
+        "vpl_coverage_ratio": vpl_ok / max(matched, 1),
+        "hv_coverage_ratio": both_ok / max(matched, 1),
+        "false_safe_count": false_safe,
+        "false_safe_ratio": false_safe / max(matched, 1),
+        "conservative_unsafe_count": conservative_unsafe,
+        "conservative_unsafe_ratio": conservative_unsafe / max(matched, 1),
+        "horizontal_error": stats(he),
+        "vertical_error": stats(ve),
+        "position_error": stats(pe),
+        "horizontal_error_rms": rms(he),
+        "vertical_error_rms": rms(ve),
+        "position_error_rms": rms(pe),
+        "horizontal_pl_margin": stats(h_margin),
+        "vertical_pl_margin": stats(v_margin),
+        "rows": validation_rows,
+    }
+
+
+def analyze_desired_tracking(rows: list[dict[str, str]]) -> dict[str, Any]:
+    if not rows:
+        return {
+            "available": False,
+            "reason": "missing export/desired_vs_truth.csv or export/tracking_error.csv",
+        }
+    candidate_columns = [
+        ["tracking_error_m"],
+        ["position_error_m"],
+        ["horizontal_error_m"],
+        ["desired_truth_error_m"],
+    ]
+    error_values: list[float] = []
+    for columns in candidate_columns:
+        error_values = numeric_values_any(rows, columns)
+        if error_values:
+            break
+    return {
+        "available": bool(error_values),
+        "reason": "" if error_values else "tracking CSV found but no known tracking error column was present",
+        "row_count": len(rows),
+        "tracking_error": stats(error_values),
+        "tracking_error_rms": rms(error_values),
+    }
+
+
 def analyze_dump(run_dir: Path) -> dict[str, Any]:
     dump_dir = run_dir / "export" / "dump"
     if not dump_dir.exists():
@@ -679,6 +898,429 @@ def maybe_generate_timing_plot(timing_analysis: dict[str, Any], out_dir: Path, n
     fig.savefig(path, dpi=150)
     plt.close(fig)
     return [str(path)]
+
+
+def float_range(values: list[float], pad_ratio: float = 0.08) -> tuple[float, float]:
+    finite = [value for value in values if math.isfinite(value)]
+    if not finite:
+        return 0.0, 1.0
+    lo = min(finite)
+    hi = max(finite)
+    if math.isclose(lo, hi):
+        delta = max(abs(lo) * 0.1, 1.0)
+        return lo - delta, hi + delta
+    pad = (hi - lo) * pad_ratio
+    return lo - pad, hi + pad
+
+
+def map_linear(value: float, src_lo: float, src_hi: float, dst_lo: float, dst_hi: float) -> float:
+    if math.isclose(src_lo, src_hi):
+        return (dst_lo + dst_hi) * 0.5
+    alpha = (value - src_lo) / (src_hi - src_lo)
+    return dst_lo + alpha * (dst_hi - dst_lo)
+
+
+def svg_polyline(points: list[tuple[float, float]], color: str, width: float = 1.6, opacity: float = 1.0) -> str:
+    if len(points) < 2:
+        return ""
+    point_text = " ".join(f"{x:.2f},{y:.2f}" for x, y in points)
+    return (
+        f'<polyline points="{point_text}" fill="none" stroke="{color}" '
+        f'stroke-width="{width:.2f}" stroke-opacity="{opacity:.3f}" />'
+    )
+
+
+def svg_text(x: float, y: float, text: Any, size: int = 12, color: str = "#1f2937", anchor: str = "start") -> str:
+    return (
+        f'<text x="{x:.2f}" y="{y:.2f}" font-family="monospace" font-size="{size}" '
+        f'fill="{color}" text-anchor="{anchor}">{html.escape(str(text))}</text>'
+    )
+
+
+def svg_axes(
+    x: float,
+    y: float,
+    w: float,
+    h: float,
+    title: str,
+    x_label: str,
+    y_label: str,
+) -> list[str]:
+    return [
+        f'<rect x="{x:.2f}" y="{y:.2f}" width="{w:.2f}" height="{h:.2f}" fill="#ffffff" stroke="#d1d5db" />',
+        f'<line x1="{x:.2f}" y1="{y + h:.2f}" x2="{x + w:.2f}" y2="{y + h:.2f}" stroke="#374151" />',
+        f'<line x1="{x:.2f}" y1="{y:.2f}" x2="{x:.2f}" y2="{y + h:.2f}" stroke="#374151" />',
+        svg_text(x + w * 0.5, y - 8, title, 14, "#111827", "middle"),
+        svg_text(x + w * 0.5, y + h + 32, x_label, 11, "#4b5563", "middle"),
+        svg_text(x - 8, y + 12, y_label, 11, "#4b5563", "end"),
+    ]
+
+
+def state_color(state: Any) -> str:
+    state_text = str(state).upper()
+    if state_text == "SAFE":
+        return "#16a34a"
+    if state_text == "SAFE_EXCLUDED":
+        return "#eab308"
+    if state_text == "UNSAFE":
+        return "#dc2626"
+    return "#6b7280"
+
+
+def write_svg(path: Path, width: int, height: int, body: list[str]) -> None:
+    ensure_dir(path.parent)
+    svg = [
+        f'<svg xmlns="http://www.w3.org/2000/svg" width="{width}" height="{height}" viewBox="0 0 {width} {height}">',
+        '<rect width="100%" height="100%" fill="#f8fafc" />',
+        *body,
+        "</svg>",
+    ]
+    path.write_text("\n".join(svg) + "\n", encoding="utf-8")
+
+
+def timeline_points(
+    rows: list[dict[str, Any]],
+    value_key: str,
+    plot_x: float,
+    plot_y: float,
+    plot_w: float,
+    plot_h: float,
+    t0: float,
+    t1: float,
+    y0: float,
+    y1: float,
+) -> list[tuple[float, float]]:
+    points = []
+    for row in rows:
+        stamp = float(row["stamp"])
+        value = float(row[value_key])
+        x = map_linear(stamp, t0, t1, plot_x, plot_x + plot_w)
+        y = map_linear(value, y0, y1, plot_y + plot_h, plot_y)
+        points.append((x, y))
+    return points
+
+
+def generate_sim_integrity_timeline_svg(rows: list[dict[str, Any]], path: Path) -> None:
+    width, height = 1120, 700
+    body: list[str] = [svg_text(40, 34, "Simulation Integrity vs Truth Timeline", 18, "#111827")]
+    if not rows:
+        body.append(svg_text(40, 80, "No matched simulation integrity rows.", 14, "#991b1b"))
+        write_svg(path, width, height, body)
+        return
+    stamps = [float(row["stamp"]) for row in rows]
+    t0, t1 = min(stamps), max(stamps)
+    rel_label = f"relative time from {t0:.3f}s"
+    panels = [
+        (70.0, 70.0, 990.0, 250.0, "Horizontal integrity", "horizontal_error_m", "HPL", "HAL"),
+        (70.0, 390.0, 990.0, 250.0, "Vertical integrity", "vertical_error_m", "VPL", "VAL"),
+    ]
+    for px, py, pw, ph, title, err_key, pl_key, al_key in panels:
+        values = [float(row[err_key]) for row in rows] + [float(row[pl_key]) for row in rows] + [float(row[al_key]) for row in rows]
+        y0, y1 = float_range(values)
+        y0 = min(0.0, y0)
+        body.extend(svg_axes(px, py, pw, ph, title, rel_label, "meters"))
+        prev_x = px
+        prev_state = rows[0]["state"]
+        for idx, row in enumerate(rows):
+            x = map_linear(float(row["stamp"]), t0, t1, px, px + pw)
+            next_x = map_linear(float(rows[idx + 1]["stamp"]), t0, t1, px, px + pw) if idx + 1 < len(rows) else x
+            if idx == 0:
+                prev_x = x
+            if row["state"] != prev_state or idx == len(rows) - 1:
+                color = state_color(prev_state)
+                body.append(
+                    f'<rect x="{prev_x:.2f}" y="{py:.2f}" width="{max(x - prev_x, 1.0):.2f}" '
+                    f'height="{ph:.2f}" fill="{color}" fill-opacity="0.055" />'
+                )
+                prev_x = x
+                prev_state = row["state"]
+            if idx == len(rows) - 1 and next_x > x:
+                body.append(
+                    f'<rect x="{x:.2f}" y="{py:.2f}" width="{max(next_x - x, 1.0):.2f}" '
+                    f'height="{ph:.2f}" fill="{state_color(row["state"])}" fill-opacity="0.055" />'
+                )
+        for value_key, color, label, stroke in [
+            (err_key, "#111827", "truth error", 2.0),
+            (pl_key, "#2563eb", pl_key, 1.8),
+            (al_key, "#ef4444", al_key, 1.4),
+        ]:
+            body.append(svg_polyline(timeline_points(rows, value_key, px, py, pw, ph, t0, t1, y0, y1), color, stroke))
+            body.append(f'<circle cx="{px + pw - 120:.2f}" cy="{py + 20 + 18 * len(label):.2f}" r="0" />')
+        legend_y = py + 20
+        for i, (label, color) in enumerate([("truth error", "#111827"), (pl_key, "#2563eb"), (al_key, "#ef4444")]):
+            body.append(f'<line x1="{px + pw - 170:.2f}" y1="{legend_y + i * 18:.2f}" x2="{px + pw - 145:.2f}" y2="{legend_y + i * 18:.2f}" stroke="{color}" stroke-width="2" />')
+            body.append(svg_text(px + pw - 138, legend_y + i * 18 + 4, label, 11, "#374151"))
+        body.append(svg_text(px - 8, py + ph + 4, f"{y0:.2f}", 10, "#4b5563", "end"))
+        body.append(svg_text(px - 8, py + 4, f"{y1:.2f}", 10, "#4b5563", "end"))
+    write_svg(path, width, height, body)
+
+
+def generate_sim_integrity_trajectory_svg(rows: list[dict[str, Any]], path: Path) -> None:
+    width, height = 900, 760
+    body: list[str] = [svg_text(40, 34, "Simulation Truth / Estimate Trajectory with Integrity State", 18, "#111827")]
+    if not rows:
+        body.append(svg_text(40, 80, "No matched simulation integrity rows.", 14, "#991b1b"))
+        write_svg(path, width, height, body)
+        return
+    px, py, pw, ph = 70.0, 70.0, 760.0, 600.0
+    xs = [float(row["truth_x"]) for row in rows] + [float(row["est_x"]) for row in rows]
+    ys = [float(row["truth_y"]) for row in rows] + [float(row["est_y"]) for row in rows]
+    x0, x1 = float_range(xs)
+    y0, y1 = float_range(ys)
+    body.extend(svg_axes(px, py, pw, ph, "XY trajectory", "x [m]", "y [m]"))
+    truth_points = [
+        (map_linear(float(row["truth_x"]), x0, x1, px, px + pw), map_linear(float(row["truth_y"]), y0, y1, py + ph, py))
+        for row in rows
+    ]
+    est_points = [
+        (map_linear(float(row["est_x"]), x0, x1, px, px + pw), map_linear(float(row["est_y"]), y0, y1, py + ph, py))
+        for row in rows
+    ]
+    body.append(svg_polyline(truth_points, "#111827", 2.0, 0.9))
+    body.append(svg_polyline(est_points, "#2563eb", 1.6, 0.85))
+    stride = max(1, len(rows) // 350)
+    for row in rows[::stride]:
+        x = map_linear(float(row["est_x"]), x0, x1, px, px + pw)
+        y = map_linear(float(row["est_y"]), y0, y1, py + ph, py)
+        body.append(f'<circle cx="{x:.2f}" cy="{y:.2f}" r="3.0" fill="{state_color(row["state"])}" fill-opacity="0.82" />')
+    for row in sorted(rows, key=lambda item: float(item["HPL"]), reverse=True)[:5]:
+        x = map_linear(float(row["est_x"]), x0, x1, px, px + pw)
+        y = map_linear(float(row["est_y"]), y0, y1, py + ph, py)
+        body.append(f'<circle cx="{x:.2f}" cy="{y:.2f}" r="7.0" fill="none" stroke="#7c3aed" stroke-width="1.4" />')
+    legend = [("truth", "#111827"), ("estimate", "#2563eb"), ("SAFE", "#16a34a"), ("SAFE_EXCLUDED", "#eab308"), ("UNSAFE", "#dc2626"), ("top HPL", "#7c3aed")]
+    for i, (label, color) in enumerate(legend):
+        y = 700 + i // 3 * 24
+        x = 80 + (i % 3) * 230
+        body.append(f'<circle cx="{x:.2f}" cy="{y - 4:.2f}" r="5" fill="{color}" fill-opacity="0.85" />')
+        body.append(svg_text(x + 12, y, label, 12, "#374151"))
+    write_svg(path, width, height, body)
+
+
+def project_iso(point: tuple[float, float, float]) -> tuple[float, float]:
+    x, y, z = point
+    screen_x = 0.8660254038 * (x - y)
+    screen_y = z + 0.5 * (x + y)
+    return screen_x, screen_y
+
+
+def generate_sim_integrity_3d_envelope_svg(rows: list[dict[str, Any]], path: Path) -> None:
+    width, height = 1120, 820
+    body: list[str] = [svg_text(40, 34, "3D Trajectory with Integrity Protection Envelope", 18, "#111827")]
+    if not rows:
+        body.append(svg_text(40, 80, "No matched simulation integrity rows.", 14, "#991b1b"))
+        write_svg(path, width, height, body)
+        return
+
+    envelope_stride = max(1, len(rows) // 18)
+    path_stride = max(1, len(rows) // 900)
+    envelope_rows = rows[::envelope_stride]
+    theta_values = [2.0 * math.pi * i / 48.0 for i in range(49)]
+
+    projected_points: list[tuple[float, float]] = []
+    for row in rows[::path_stride]:
+        projected_points.append(project_iso((float(row["truth_x"]), float(row["truth_y"]), float(row["truth_z"]))))
+        projected_points.append(project_iso((float(row["est_x"]), float(row["est_y"]), float(row["est_z"]))))
+    for row in envelope_rows:
+        hpl = float(row["HPL"])
+        vpl = float(row["VPL"])
+        cx, cy, cz = float(row["est_x"]), float(row["est_y"]), float(row["est_z"])
+        for theta in theta_values:
+            projected_points.append(project_iso((cx + hpl * math.cos(theta), cy + hpl * math.sin(theta), cz)))
+        projected_points.append(project_iso((cx, cy, cz - vpl)))
+        projected_points.append(project_iso((cx, cy, cz + vpl)))
+
+    px, py, pw, ph = 80.0, 75.0, 960.0, 650.0
+    x0, x1 = float_range([point[0] for point in projected_points], 0.12)
+    y0, y1 = float_range([point[1] for point in projected_points], 0.12)
+
+    def map_projected(point: tuple[float, float]) -> tuple[float, float]:
+        return (
+            map_linear(point[0], x0, x1, px, px + pw),
+            map_linear(point[1], y0, y1, py + ph, py),
+        )
+
+    body.extend(svg_axes(px, py, pw, ph, "Isometric projection", "projected ENU horizontal axes", "projected z/up"))
+
+    # Draw protection envelopes first so trajectories stay readable.
+    for row in envelope_rows:
+        hpl = float(row["HPL"])
+        vpl = float(row["VPL"])
+        cx, cy, cz = float(row["est_x"]), float(row["est_y"]), float(row["est_z"])
+        color = state_color(row["state"])
+        ring = [
+            map_projected(project_iso((cx + hpl * math.cos(theta), cy + hpl * math.sin(theta), cz)))
+            for theta in theta_values
+        ]
+        body.append(svg_polyline(ring, color, 1.0, 0.18))
+        lower = map_projected(project_iso((cx, cy, cz - vpl)))
+        upper = map_projected(project_iso((cx, cy, cz + vpl)))
+        center = map_projected(project_iso((cx, cy, cz)))
+        body.append(
+            f'<line x1="{lower[0]:.2f}" y1="{lower[1]:.2f}" x2="{upper[0]:.2f}" y2="{upper[1]:.2f}" '
+            f'stroke="{color}" stroke-width="1.2" stroke-opacity="0.28" />'
+        )
+        body.append(f'<circle cx="{center[0]:.2f}" cy="{center[1]:.2f}" r="2.4" fill="{color}" fill-opacity="0.65" />')
+
+    truth_line = [
+        map_projected(project_iso((float(row["truth_x"]), float(row["truth_y"]), float(row["truth_z"]))))
+        for row in rows[::path_stride]
+    ]
+    estimate_line = [
+        map_projected(project_iso((float(row["est_x"]), float(row["est_y"]), float(row["est_z"]))))
+        for row in rows[::path_stride]
+    ]
+    body.append(svg_polyline(truth_line, "#111827", 2.2, 0.95))
+    body.append(svg_polyline(estimate_line, "#2563eb", 1.8, 0.9))
+
+    worst_rows = sorted(rows, key=lambda item: float(item["HPL"]), reverse=True)[:5]
+    for idx, row in enumerate(worst_rows, start=1):
+        point = map_projected(project_iso((float(row["est_x"]), float(row["est_y"]), float(row["est_z"]))))
+        body.append(f'<circle cx="{point[0]:.2f}" cy="{point[1]:.2f}" r="6.5" fill="none" stroke="#7c3aed" stroke-width="1.4" />')
+        body.append(svg_text(point[0] + 7, point[1] - 7, f"{idx}", 10, "#7c3aed"))
+
+    legend = [
+        ("truth trajectory", "#111827"),
+        ("IAP estimate", "#2563eb"),
+        ("protection envelope: horizontal HPL ring + vertical VPL bar", "#dc2626"),
+        ("top HPL epochs", "#7c3aed"),
+    ]
+    for i, (label, color) in enumerate(legend):
+        y = 760 + i * 17
+        body.append(f'<line x1="80" y1="{y:.2f}" x2="110" y2="{y:.2f}" stroke="{color}" stroke-width="2" stroke-opacity="0.9" />')
+        body.append(svg_text(118, y + 4, label, 12, "#374151"))
+    max_hpl = max(float(row["HPL"]) for row in rows)
+    max_vpl = max(float(row["VPL"]) for row in rows)
+    body.append(svg_text(650, 760, f"Envelope is drawn in real meter scale: max HPL={max_hpl:.2f}m, max VPL={max_vpl:.2f}m", 12, "#111827"))
+    body.append(svg_text(650, 780, "If the trajectory looks tiny inside the rings, the protection level is much larger than the actual error.", 12, "#4b5563"))
+    write_svg(path, width, height, body)
+
+
+def generate_sim_integrity_margin_scatter_svg(rows: list[dict[str, Any]], path: Path) -> None:
+    width, height = 1120, 520
+    body: list[str] = [svg_text(40, 34, "Protection Level Coverage Scatter", 18, "#111827")]
+    if not rows:
+        body.append(svg_text(40, 80, "No matched simulation integrity rows.", 14, "#991b1b"))
+        write_svg(path, width, height, body)
+        return
+    panels = [
+        (70.0, 80.0, 450.0, 340.0, "Horizontal: HE vs HPL", "horizontal_error_m", "HPL"),
+        (610.0, 80.0, 450.0, 340.0, "Vertical: VE vs VPL", "vertical_error_m", "VPL"),
+    ]
+    for px, py, pw, ph, title, err_key, pl_key in panels:
+        values = [float(row[err_key]) for row in rows] + [float(row[pl_key]) for row in rows]
+        lo, hi = float_range(values)
+        lo = min(0.0, lo)
+        body.extend(svg_axes(px, py, pw, ph, title, "truth error [m]", "PL [m]"))
+        x0 = y0 = lo
+        x1 = y1 = hi
+        p0 = (map_linear(lo, x0, x1, px, px + pw), map_linear(lo, y0, y1, py + ph, py))
+        p1 = (map_linear(hi, x0, x1, px, px + pw), map_linear(hi, y0, y1, py + ph, py))
+        body.append(f'<line x1="{p0[0]:.2f}" y1="{p0[1]:.2f}" x2="{p1[0]:.2f}" y2="{p1[1]:.2f}" stroke="#6b7280" stroke-dasharray="5 4" />')
+        stride = max(1, len(rows) // 600)
+        for row in rows[::stride]:
+            x = map_linear(float(row[err_key]), x0, x1, px, px + pw)
+            y = map_linear(float(row[pl_key]), y0, y1, py + ph, py)
+            body.append(f'<circle cx="{x:.2f}" cy="{y:.2f}" r="3.0" fill="{state_color(row["state"])}" fill-opacity="0.72" />')
+        body.append(svg_text(px + pw - 8, py + ph - 8, "above y=x => covered", 11, "#4b5563", "end"))
+        body.append(svg_text(px - 8, py + ph + 4, f"{lo:.2f}", 10, "#4b5563", "end"))
+        body.append(svg_text(px - 8, py + 4, f"{hi:.2f}", 10, "#4b5563", "end"))
+    write_svg(path, width, height, body)
+
+
+def generate_sim_accuracy_summary_svg(rows: list[dict[str, Any]], summary: dict[str, Any], path: Path) -> None:
+    width, height = 1120, 620
+    body: list[str] = [svg_text(40, 34, "IAP Accuracy Summary against Simulation Truth", 18, "#111827")]
+    if not rows:
+        body.append(svg_text(40, 80, "No matched simulation integrity rows.", 14, "#991b1b"))
+        write_svg(path, width, height, body)
+        return
+    px, py, pw, ph = 70.0, 80.0, 990.0, 300.0
+    stamps = [float(row["stamp"]) for row in rows]
+    t0, t1 = min(stamps), max(stamps)
+    values = (
+        [float(row["horizontal_error_m"]) for row in rows]
+        + [float(row["vertical_error_m"]) for row in rows]
+        + [float(row["position_error_m"]) for row in rows]
+    )
+    y0, y1 = float_range(values)
+    y0 = min(0.0, y0)
+    body.extend(svg_axes(px, py, pw, ph, "Truth error over time", f"relative time from {t0:.3f}s", "meters"))
+    for key, color, label in [
+        ("horizontal_error_m", "#2563eb", "HE"),
+        ("vertical_error_m", "#f97316", "VE"),
+        ("position_error_m", "#111827", "3D"),
+    ]:
+        body.append(svg_polyline(timeline_points(rows, key, px, py, pw, ph, t0, t1, y0, y1), color, 1.8))
+    for i, (label, color) in enumerate([("HE", "#2563eb"), ("VE", "#f97316"), ("3D", "#111827")]):
+        body.append(f'<line x1="{px + pw - 120:.2f}" y1="{py + 20 + i * 18:.2f}" x2="{px + pw - 95:.2f}" y2="{py + 20 + i * 18:.2f}" stroke="{color}" stroke-width="2" />')
+        body.append(svg_text(px + pw - 88, py + 24 + i * 18, label, 11, "#374151"))
+
+    table_x, table_y = 100.0, 440.0
+    body.append(svg_text(table_x, table_y - 22, "Error statistics [m]", 15, "#111827"))
+    headers = ["metric", "mean", "p95", "p99", "max", "rms"]
+    for i, header in enumerate(headers):
+        body.append(svg_text(table_x + i * 130, table_y, header, 12, "#111827"))
+    rows_spec = [
+        ("horizontal", summary["horizontal_error"], summary["horizontal_error_rms"]),
+        ("vertical", summary["vertical_error"], summary["vertical_error_rms"]),
+        ("3D", summary["position_error"], summary["position_error_rms"]),
+    ]
+    for r, (label, item, item_rms) in enumerate(rows_spec, start=1):
+        values_text = [
+            label,
+            f"{item['mean']:.3f}",
+            f"{item['p95']:.3f}",
+            f"{item['p99']:.3f}",
+            f"{item['max']:.3f}",
+            f"{item_rms:.3f}",
+        ]
+        for i, value in enumerate(values_text):
+            body.append(svg_text(table_x + i * 130, table_y + r * 28, value, 12, "#374151"))
+    body.append(svg_text(table_x, table_y + 125, f"HPL coverage={summary['hpl_coverage_ratio']:.3f}, VPL coverage={summary['vpl_coverage_ratio']:.3f}, false safe={summary['false_safe_count']}", 13, "#111827"))
+    write_svg(path, width, height, body)
+
+
+def write_sim_integrity_outputs(analysis: dict[str, Any], out_dir: Path, figs_dir: Path, no_plots: bool) -> list[str]:
+    if not analysis.get("available"):
+        return []
+    ensure_dir(out_dir)
+    rows = analysis.get("rows", [])
+    csv_path = out_dir / "sim_integrity_validation.csv"
+    fieldnames = [
+        "stamp", "match_dt_s", "truth_stamp", "est_stamp",
+        "truth_x", "truth_y", "truth_z", "est_x", "est_y", "est_z",
+        "err_e", "err_n", "err_u", "horizontal_error_m", "vertical_error_m", "position_error_m",
+        "HPL", "VPL", "HAL", "VAL", "IM", "state",
+        "hpl_covers_error", "vpl_covers_error", "safe_but_hazard", "unsafe_but_within_alert",
+        "n_sv", "n_const", "PDOP", "n_hyp", "n_det",
+    ]
+    with csv_path.open("w", encoding="utf-8", newline="") as f:
+        writer = csv.DictWriter(f, fieldnames=fieldnames)
+        writer.writeheader()
+        for row in rows:
+            writer.writerow({key: row.get(key, "") for key in fieldnames})
+
+    summary = {key: value for key, value in analysis.items() if key != "rows"}
+    summary_path = out_dir / "sim_integrity_summary.json"
+    summary_path.write_text(json.dumps(summary, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+
+    generated = [str(csv_path), str(summary_path)]
+    if no_plots:
+        return generated
+    svg_paths = [
+        figs_dir / "sim_integrity_timeline.svg",
+        figs_dir / "sim_integrity_trajectory.svg",
+        figs_dir / "sim_integrity_3d_envelope.svg",
+        figs_dir / "sim_integrity_margin_scatter.svg",
+        figs_dir / "sim_accuracy_summary.svg",
+    ]
+    generate_sim_integrity_timeline_svg(rows, svg_paths[0])
+    generate_sim_integrity_trajectory_svg(rows, svg_paths[1])
+    generate_sim_integrity_3d_envelope_svg(rows, svg_paths[2])
+    generate_sim_integrity_margin_scatter_svg(rows, svg_paths[3])
+    generate_sim_accuracy_summary_svg(rows, analysis, svg_paths[4])
+    generated.extend(str(path) for path in svg_paths)
+    return generated
 
 
 def run_external_plot(script: Path, args: list[str]) -> dict[str, Any]:
@@ -780,6 +1422,8 @@ def render_report(
     append_icp_section(lines, analyses.get("icp", {}))
     append_gnss_section(lines, analyses.get("gnss_factor_debug", {}))
     append_araim_section(lines, analyses.get("araim", {}))
+    append_sim_integrity_section(lines, analyses.get("sim_truth_integrity", {}))
+    append_desired_tracking_section(lines, analyses.get("desired_tracking", {}))
     append_trajectory_section(lines, analyses.get("trajectory", {}))
     append_dump_section(lines, analyses.get("dump", {}))
 
@@ -893,6 +1537,98 @@ def append_araim_section(lines: list[str], analysis: dict[str, Any]) -> None:
     lines.append("")
 
 
+def append_sim_integrity_section(lines: list[str], analysis: dict[str, Any]) -> None:
+    lines.append("## Simulation Truth Integrity Validation")
+    lines.append("")
+    if not analysis.get("available"):
+        reason = analysis.get("reason", "simulation truth validation unavailable")
+        lines.append(f"Simulation truth validation unavailable: `{reason}`.")
+        lines.append("")
+        return
+    lines.append(md_table(
+        ["Metric", "Value"],
+        [
+            ["match_method", analysis["match_method"]],
+            ["match_tolerance_s", f"{analysis['match_tolerance_s']:.3f}"],
+            ["truth rows / valid", f"{analysis['truth_row_count']} / {analysis['valid_truth_row_count']}"],
+            ["ARAIM epochs", analysis["araim_epoch_count"]],
+            ["matched / unmatched epochs", f"{analysis['matched_epoch_count']} / {analysis['unmatched_epoch_count']}"],
+            ["state_counts", analysis["state_counts"]],
+            ["HPL coverage ratio", f"{analysis['hpl_coverage_ratio']:.3f}"],
+            ["VPL coverage ratio", f"{analysis['vpl_coverage_ratio']:.3f}"],
+            ["H+V coverage ratio", f"{analysis['hv_coverage_ratio']:.3f}"],
+            ["false_safe_count", analysis["false_safe_count"]],
+            ["conservative_unsafe_count", analysis["conservative_unsafe_count"]],
+        ],
+    ))
+    lines.append("")
+    lines.append(md_table(
+        ["Metric", "Mean", "P95", "P99", "Max", "RMS"],
+        [
+            [
+                "horizontal_error_m",
+                f"{analysis['horizontal_error']['mean']:.3f}",
+                f"{analysis['horizontal_error']['p95']:.3f}",
+                f"{analysis['horizontal_error']['p99']:.3f}",
+                f"{analysis['horizontal_error']['max']:.3f}",
+                f"{analysis['horizontal_error_rms']:.3f}",
+            ],
+            [
+                "vertical_error_m",
+                f"{analysis['vertical_error']['mean']:.3f}",
+                f"{analysis['vertical_error']['p95']:.3f}",
+                f"{analysis['vertical_error']['p99']:.3f}",
+                f"{analysis['vertical_error']['max']:.3f}",
+                f"{analysis['vertical_error_rms']:.3f}",
+            ],
+            [
+                "position_error_m",
+                f"{analysis['position_error']['mean']:.3f}",
+                f"{analysis['position_error']['p95']:.3f}",
+                f"{analysis['position_error']['p99']:.3f}",
+                f"{analysis['position_error']['max']:.3f}",
+                f"{analysis['position_error_rms']:.3f}",
+            ],
+            [
+                "HPL-HE margin",
+                f"{analysis['horizontal_pl_margin']['mean']:.3f}",
+                f"{analysis['horizontal_pl_margin']['p95']:.3f}",
+                f"{analysis['horizontal_pl_margin']['p99']:.3f}",
+                f"{analysis['horizontal_pl_margin']['min']:.3f}",
+                "",
+            ],
+            [
+                "VPL-VE margin",
+                f"{analysis['vertical_pl_margin']['mean']:.3f}",
+                f"{analysis['vertical_pl_margin']['p95']:.3f}",
+                f"{analysis['vertical_pl_margin']['p99']:.3f}",
+                f"{analysis['vertical_pl_margin']['min']:.3f}",
+                "",
+            ],
+        ],
+    ))
+    lines.append("")
+
+
+def append_desired_tracking_section(lines: list[str], analysis: dict[str, Any]) -> None:
+    lines.append("## Desired Tracking Accuracy")
+    lines.append("")
+    if not analysis.get("available"):
+        reason = analysis.get("reason", "tracking accuracy CSV unavailable")
+        lines.append(f"Desired path tracking accuracy unavailable: `{reason}`.")
+        lines.append("")
+        return
+    lines.append(md_table(
+        ["Metric", "Value"],
+        [
+            ["row_count", analysis["row_count"]],
+            ["tracking_error mean/p95/max", format_triplet(analysis["tracking_error"])],
+            ["tracking_error_rms", f"{analysis['tracking_error_rms']:.3f}"],
+        ],
+    ))
+    lines.append("")
+
+
 def append_trajectory_section(lines: list[str], analysis: dict[str, Any]) -> None:
     lines.append("## Trajectory Export Summary")
     lines.append("")
@@ -990,11 +1726,20 @@ def main() -> int:
         "icp": analyze_icp(rows_by_name.get("icp", [])),
         "gnss_factor_debug": analyze_gnss(rows_by_name.get("gnss_factor_debug", [])),
         "araim": analyze_araim(rows_by_name.get("araim", [])),
+        "sim_truth_integrity": analyze_sim_truth_integrity(
+            rows_by_name.get("truth_vs_est", []),
+            rows_by_name.get("araim", []),
+            metadata,
+        ),
+        "desired_tracking": analyze_desired_tracking(rows_by_name.get("desired_vs_truth", [])),
         "trajectory": analyze_trajectory(rows_by_name.get("trajectory", [])),
         "dump": analyze_dump(run_dir),
     }
 
     generated_plots = maybe_generate_timing_plot(analyses["timing"], figs_dir, args.no_plots)
+    generated_plots.extend(
+        write_sim_integrity_outputs(analyses["sim_truth_integrity"], out_dir, figs_dir, args.no_plots)
+    )
     external_results: list[dict[str, Any]] = []
     if not args.skip_external_tools:
         external_results = integrate_external_plots(run_dir, rows_by_name, figs_dir / "external")

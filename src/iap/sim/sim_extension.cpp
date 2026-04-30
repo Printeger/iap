@@ -15,6 +15,7 @@
 #include <deque>
 #include <filesystem>
 #include <fstream>
+#include <iomanip>
 #include <limits>
 #include <mutex>
 #include <optional>
@@ -282,7 +283,8 @@ private:
     const Eigen::Vector3d estimate = position_of(latest_estimate_);
     const double error = (truth - estimate).norm();
 
-    metrics_csv_ << msg_time_to_sec(msg->header.stamp) << ','
+    metrics_csv_ << std::fixed << std::setprecision(9)
+                 << msg_time_to_sec(msg->header.stamp) << ','
                  << msg_time_to_sec(latest_estimate_.header.stamp) << ','
                  << truth.x() << ','
                  << truth.y() << ','
