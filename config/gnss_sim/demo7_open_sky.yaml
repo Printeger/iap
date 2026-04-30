@@ -1,0 +1,11 @@
+anchor:
+  lat_deg: 31.2304
+  lon_deg: 121.4737
+  alt_m: 25.0
+
+skymask:
+  enabled: false
+  default_min_elevation_deg: 10.0
+  az_el_deg: []
+
+faults: []

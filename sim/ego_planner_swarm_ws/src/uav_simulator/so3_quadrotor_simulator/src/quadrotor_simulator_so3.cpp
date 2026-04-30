@@ -1,9 +1,15 @@
 #include <Eigen/Geometry>
+#include <builtin_interfaces/msg/time.hpp>
+#include <cmath>
+#include <ctime>
+#include <iomanip>
 #include <nav_msgs/msg/odometry.hpp>
 #include <quadrotor_msgs/msg/so3_command.hpp>
 #include <quadrotor_msgs/msg/position_command.hpp>
 #include <so3_quadrotor_simulator/Quadrotor.h>
+#include <sstream>
 #include <std_msgs/msg/bool.hpp>
+#include <string>
 #include <rclcpp/rclcpp.hpp>
 #include <rcpputils/asserts.hpp>
 #include <sensor_msgs/msg/imu.hpp>
@@ -34,6 +40,50 @@ typedef struct _Disturbance
 static Command command;
 static Disturbance disturbance;
 static bool command_received = false;
+
+bool parseUtcToUnixSeconds(const std::string &text, int64_t &unix_seconds)
+{
+    std::string value = text;
+    if (!value.empty() && value.back() == 'Z') {
+        value.pop_back();
+    }
+
+    std::tm tm{};
+    std::istringstream ss(value);
+    ss >> std::get_time(&tm, "%Y-%m-%dT%H:%M:%S");
+    if (ss.fail()) {
+        ss.clear();
+        ss.str(value);
+        ss >> std::get_time(&tm, "%Y-%m-%d %H:%M:%S");
+    }
+    if (ss.fail()) {
+        return false;
+    }
+
+    tm.tm_isdst = 0;
+    const std::time_t parsed = timegm(&tm);
+    if (parsed == static_cast<std::time_t>(-1)) {
+        return false;
+    }
+    unix_seconds = static_cast<int64_t>(parsed);
+    return true;
+}
+
+builtin_interfaces::msg::Time makeSimStamp(
+    const rclcpp::Time &wall_now,
+    const rclcpp::Time &wall_start,
+    const int64_t sim_epoch_unix_seconds)
+{
+    const int64_t elapsed_ns =
+        std::max<int64_t>((wall_now - wall_start).nanoseconds(), 0);
+    int64_t sec = sim_epoch_unix_seconds + elapsed_ns / 1000000000LL;
+    int64_t nsec = elapsed_ns % 1000000000LL;
+
+    builtin_interfaces::msg::Time stamp;
+    stamp.sec = static_cast<int32_t>(sec);
+    stamp.nanosec = static_cast<uint32_t>(nsec);
+    return stamp;
+}
 
 void stateToOdomMsg(const QuadrotorSimulator::Quadrotor::State &state,
                     nav_msgs::msg::Odometry &odom);
@@ -309,6 +359,8 @@ int main(int argc, char **argv)
     node->declare_parameter("iap_imu/enable", false);
     node->declare_parameter("iap_imu/topic", std::string("imu_iap"));
     node->declare_parameter("simulator/hold_until_cmd", false);
+    node->declare_parameter("sim_time/enable", false);
+    node->declare_parameter("sim_time/start_utc", std::string(""));
 
     QuadrotorSimulator::Quadrotor quad;
     double _init_x, _init_y, _init_z;
@@ -334,6 +386,24 @@ int main(int argc, char **argv)
     const bool publish_iap_imu = node->get_parameter("iap_imu/enable").as_bool();
     const std::string iap_imu_topic = node->get_parameter("iap_imu/topic").as_string();
     const bool hold_until_cmd = node->get_parameter("simulator/hold_until_cmd").as_bool();
+    bool sim_time_enabled = node->get_parameter("sim_time/enable").as_bool();
+    const std::string sim_start_utc = node->get_parameter("sim_time/start_utc").as_string();
+    int64_t sim_epoch_unix_seconds = 0;
+    if (sim_time_enabled) {
+        if (parseUtcToUnixSeconds(sim_start_utc, sim_epoch_unix_seconds)) {
+            RCLCPP_INFO(
+                node->get_logger(),
+                "simulation epoch enabled: start_utc=%s unix=%ld",
+                sim_start_utc.c_str(),
+                static_cast<long>(sim_epoch_unix_seconds));
+        } else {
+            sim_time_enabled = false;
+            RCLCPP_WARN(
+                node->get_logger(),
+                "invalid sim_time/start_utc='%s'; falling back to wall-clock message stamps",
+                sim_start_utc.c_str());
+        }
+    }
     auto iap_imu_pub_ = publish_iap_imu
         ? node->create_publisher<sensor_msgs::msg::Imu>(iap_imu_topic, 10)
         : nullptr;
@@ -360,7 +430,8 @@ int main(int argc, char **argv)
     sensor_msgs::msg::Imu iap_imu;
     iap_imu.header.frame_id = "imu";
 
-    rclcpp::Time next_odom_pub_time = node->now();
+    const rclcpp::Time wall_start_time = node->now();
+    rclcpp::Time next_odom_pub_time = wall_start_time;
     while (rclcpp::ok())
     {
         rclcpp::spin_some(node);
@@ -389,9 +460,15 @@ int main(int argc, char **argv)
         if (tnow >= next_odom_pub_time)
         {
             next_odom_pub_time += odom_pub_duration;
-            odom_msg.header.stamp = tnow;
-            imu.header.stamp = tnow;
-            iap_imu.header.stamp = tnow;
+            builtin_interfaces::msg::Time stamp;
+            if (sim_time_enabled) {
+                stamp = makeSimStamp(tnow, wall_start_time, sim_epoch_unix_seconds);
+            } else {
+                stamp = tnow;
+            }
+            odom_msg.header.stamp = stamp;
+            imu.header.stamp = stamp;
+            iap_imu.header.stamp = stamp;
             auto state = quad.getState();
             stateToOdomMsg(state, odom_msg);
             quadToImuMsg(quad, imu);

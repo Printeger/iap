@@ -32,6 +32,24 @@
   <arg name="desired_odom_topic" default="/demo7/desired/odom"/>
   <arg name="start_iap" default="true"/>
   <arg name="start_gnss_sim" default="true"/>
+  <arg name="sim_epoch_enabled" default="true"/>
+  <arg name="sim_start_utc" default="2022-07-06T00:00:00Z"/>
+  <arg name="gnss_time_source" default="trigger_topic"/>
+  <arg name="gnss_trigger_topic" default="$(var sim_lidar_topic)"/>
+  <arg name="gnss_scenario_file" default="$(find-pkg-share iap)/config/gnss_sim/demo7_open_sky.yaml"/>
+  <arg name="gnss_num_gps_sats" default="24"/>
+  <arg name="gnss_gps_prn_min" default="1"/>
+  <arg name="gnss_gps_prn_max" default="24"/>
+  <arg name="gnss_ephemeris_source" default="synthetic"/>
+  <arg name="gnss_rinex_nav_file" default=""/>
+  <arg name="gnss_rinex_ephem_max_age_s" default="7200.0"/>
+  <arg name="gnss_enabled_constellations" default="GPS"/>
+  <arg name="gnss_enable_visualization" default="true"/>
+  <arg name="gnss_enable_sky_dome_visualization" default="true"/>
+  <arg name="gnss_sky_dome_show_cardinal_labels" default="true"/>
+  <arg name="gnss_sky_dome_ring_count" default="3"/>
+  <arg name="gnss_sky_dome_meridian_count" default="12"/>
+  <arg name="gnss_enable_map_occlusion" default="true"/>
   <arg name="publish_iap_imu" default="true"/>
   <arg name="iap_config_path" default="$(find-pkg-share iap)/config/sim_demo7"/>
   <arg name="backend_delay" default="3.0"/>
@@ -45,7 +63,7 @@
            value="$(find-pkg-share iap)/config/sim_ego/fastdds_udp_only.xml"/>
 
   <node pkg="rviz2" exec="rviz2" name="demo7_rviz" output="screen" if="$(var start_rviz)"
-        args="-d $(find-pkg-share iap)/config/sim_ego/demo6.rviz"/>
+        args="-d $(find-pkg-share iap)/config/sim_demo7/demo7_gnss.rviz"/>
 
   <timer period="$(var backend_delay)">
     <node pkg="map_generator" exec="random_forest" name="demo7_random_forest" output="screen">
@@ -93,6 +111,8 @@
       <param name="simulator/init_state_y" value="$(var ground_y)"/>
       <param name="simulator/init_state_z" value="$(var ground_z)"/>
       <param name="simulator/hold_until_cmd" value="true"/>
+      <param name="sim_time/enable" value="$(var sim_epoch_enabled)"/>
+      <param name="sim_time/start_utc" value="$(var sim_start_utc)" type="str"/>
       <param name="iap_imu/enable" value="$(var publish_iap_imu)"/>
       <param name="iap_imu/topic" value="$(var iap_imu_topic)"/>
       <remap from="odom" to="$(var truth_odom_topic)"/>
@@ -108,6 +128,28 @@
       <param name="origin_lat_deg" value="31.2304"/>
       <param name="origin_lon_deg" value="121.4737"/>
       <param name="origin_alt_m" value="25.0"/>
+      <param name="time_source" value="$(var gnss_time_source)"/>
+      <param name="trigger_topic" value="$(var gnss_trigger_topic)"/>
+      <param name="scenario_file" value="$(var gnss_scenario_file)"/>
+      <param name="num_gps_sats" value="$(var gnss_num_gps_sats)"/>
+      <param name="gps_prn_min" value="$(var gnss_gps_prn_min)"/>
+      <param name="gps_prn_max" value="$(var gnss_gps_prn_max)"/>
+      <param name="ephemeris_source" value="$(var gnss_ephemeris_source)"/>
+      <param name="rinex_nav_file" value="$(var gnss_rinex_nav_file)"/>
+      <param name="rinex_ephem_max_age_s" value="$(var gnss_rinex_ephem_max_age_s)"/>
+      <param name="enabled_constellations_csv" value="$(var gnss_enabled_constellations)"/>
+      <param name="enable_visualization" value="$(var gnss_enable_visualization)"/>
+      <param name="enable_sky_dome_visualization" value="$(var gnss_enable_sky_dome_visualization)"/>
+      <param name="sky_dome_show_cardinal_labels" value="$(var gnss_sky_dome_show_cardinal_labels)"/>
+      <param name="sky_dome_ring_count" value="$(var gnss_sky_dome_ring_count)"/>
+      <param name="sky_dome_meridian_count" value="$(var gnss_sky_dome_meridian_count)"/>
+      <param name="enable_map_occlusion" value="$(var gnss_enable_map_occlusion)"/>
+      <param name="enable_skymask" value="true"/>
+      <param name="enable_nlos" value="true"/>
+      <param name="enable_multipath" value="true"/>
+      <param name="enable_fault_injection" value="true"/>
+      <param name="map_cloud_topic" value="/map_generator/global_cloud"/>
+      <param name="multipath_amp_m" value="0.5"/>
     </node>
 
     <node pkg="poscmd_2_odom" exec="staged_cmd_publisher" name="demo7_staged_cmd_publisher" output="screen">

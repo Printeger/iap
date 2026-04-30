@@ -1,0 +1,23 @@
+anchor:
+  lat_deg: 31.2304
+  lon_deg: 121.4737
+  alt_m: 25.0
+
+skymask:
+  enabled: true
+  default_min_elevation_deg: 10.0
+  az_el_deg:
+    - {az_deg: 0, min_el_deg: 20}
+    - {az_deg: 90, min_el_deg: 45}
+    - {az_deg: 180, min_el_deg: 15}
+    - {az_deg: 270, min_el_deg: 30}
+
+faults:
+  - sat: 7
+    start_time_s: 20.0
+    duration_s: 15.0
+    pseudorange_bias_m: 30.0
+    bias_rate_mps: 0.0
+    doppler_bias_mps: 0.0
+    drop: false
+    cn0_degrade_dbhz: 10.0
