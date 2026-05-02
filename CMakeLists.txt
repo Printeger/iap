@@ -355,7 +355,7 @@ if(DEFINED ENV{ROS_VERSION})
       $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
     )
     target_link_libraries(integrity_extension iap "${iap_msgs_cpp_ts}")
-    ament_target_dependencies(integrity_extension rclcpp std_msgs)
+    ament_target_dependencies(integrity_extension rclcpp std_msgs visualization_msgs)
     list(APPEND iap_LIBRARIES integrity_extension)
     install(TARGETS integrity_extension DESTINATION lib)
 
@@ -370,6 +370,18 @@ if(DEFINED ENV{ROS_VERSION})
     ament_target_dependencies(sim_extension rclcpp nav_msgs)
     list(APPEND iap_LIBRARIES sim_extension)
     install(TARGETS sim_extension DESTINATION lib)
+
+    ## Demo8 truth ARAIM comparison extension
+    add_library(demo8_truth_araim_extension SHARED
+      src/iap/sim/demo8_truth_araim_extension.cpp
+    )
+    target_include_directories(demo8_truth_araim_extension PUBLIC
+      $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+    )
+    target_link_libraries(demo8_truth_araim_extension iap)
+    ament_target_dependencies(demo8_truth_araim_extension rclcpp nav_msgs visualization_msgs gnss_comm)
+    list(APPEND iap_LIBRARIES demo8_truth_araim_extension)
+    install(TARGETS demo8_truth_araim_extension DESTINATION lib)
 
     ## RViz2 visualization extension module (IAP-RQ-003: standalone operation)
     add_library(rviz_viewer SHARED

@@ -12,6 +12,7 @@
 
 #include <iap/integrity/integrity_extension.hpp>
 
+#include <algorithm>
 #include <chrono>
 #include <cmath>
 #include <cstdio>
@@ -22,6 +23,8 @@
 #include <iap/msg/integrity_report.hpp>
 #include <std_msgs/msg/header.hpp>
 #include <rclcpp/rclcpp.hpp>
+#include <visualization_msgs/msg/marker.hpp>
+#include <visualization_msgs/msg/marker_array.hpp>
 
 #include <iap/integrity/araim_debug.hpp>
 #include <iap/odometry/callbacks.hpp>
@@ -50,6 +53,34 @@ IntegrityExtensionModule::IntegrityExtensionModule()
   enable_dynamic_al_= config.param<bool>("integrity", "enable_dynamic_al", true);
   pub_topic_        = config.param<std::string>("integrity", "publish_topic",
                                                 "/iap/integrity");
+  enable_markers_   = config.param<bool>("integrity", "enable_araim_markers",
+                                         false);
+  marker_topic_     = config.param<std::string>("integrity",
+                                                "araim_marker_topic",
+                                                "/iap/araim_envelopes");
+  marker_history_size_ = config.param<int>("integrity",
+                                           "araim_marker_history_size", 60);
+  marker_publish_period_s_ = config.param<double>(
+      "integrity", "araim_marker_publish_period_s", 0.5);
+  marker_min_pl_m_ = config.param<double>("integrity",
+                                          "araim_marker_min_pl_m", 0.05);
+  marker_max_pl_m_ = config.param<double>("integrity",
+                                          "araim_marker_max_pl_m", 30.0);
+  marker_show_gnss_ = config.param<bool>("integrity",
+                                         "araim_marker_show_gnss", true);
+  marker_show_lidar_ = config.param<bool>("integrity",
+                                          "araim_marker_show_lidar", true);
+  marker_show_final_ = config.param<bool>("integrity",
+                                          "araim_marker_show_final", true);
+  if (marker_history_size_ < 1) {
+    marker_history_size_ = 1;
+  }
+  if (marker_publish_period_s_ < 0.0) {
+    marker_publish_period_s_ = 0.0;
+  }
+  if (marker_max_pl_m_ < marker_min_pl_m_) {
+    marker_max_pl_m_ = marker_min_pl_m_;
+  }
 
   // ── Startup component status banner ──────────────────────────────────────
   logger_->info("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
@@ -62,6 +93,8 @@ IntegrityExtensionModule::IntegrityExtensionModule()
   logger_->info("[IntegrityExt] ■ Dynamic AL:     {}  (trunk HAL + altitude VAL)",
                 enable_dynamic_al_ ? "ENABLED" : "DISABLED");
   logger_->info("[IntegrityExt] ■ Publish topic:  {}", pub_topic_);
+  logger_->info("[IntegrityExt] ■ RViz markers:   {}  topic={}",
+                enable_markers_ ? "ENABLED" : "disabled", marker_topic_);
   logger_->info("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
 
   if (!enable_) {
@@ -165,6 +198,14 @@ IntegrityExtensionModule::create_subscriptions(rclcpp::Node& node) {
   pub_erased_ = pub;  // erase type to avoid heavy header in .hpp
 
   logger_->info("[IntegrityExt] publisher created → {}", pub_topic_);
+  if (enable_markers_) {
+    using MarkerArray = visualization_msgs::msg::MarkerArray;
+    auto marker_pub = node.create_publisher<MarkerArray>(
+        marker_topic_, rclcpp::QoS(1).transient_local());
+    marker_pub_erased_ = marker_pub;
+    logger_->info("[IntegrityExt] ARAIM marker publisher created → {}",
+                  marker_topic_);
+  }
   return {};  // no subscriptions; data comes via callbacks + shared state
 }
 
@@ -337,6 +378,7 @@ void IntegrityExtensionModule::maybe_publish_integrity_() {
   msg.tdop              = report.tdop;
 
   pub.publish(msg);
+  publish_araim_markers_(report, *frame);
 
   if (araim_debug_csv_) {
     araim_debug_csv_->write(report, monitor_.last_araim_result());
@@ -368,6 +410,152 @@ void IntegrityExtensionModule::maybe_publish_integrity_() {
         report.stamp, to_string(report.state),
         report.HPL, report.VPL, report.HAL, report.n_sv_used, report.lidar_n_hyp);
   }
+}
+
+void IntegrityExtensionModule::publish_araim_markers_(
+    const IntegrityReport& report, const glim::EstimationFrame& frame) {
+  if (!enable_markers_ || !marker_pub_erased_) {
+    return;
+  }
+  if (last_marker_publish_stamp_ >= 0.0 &&
+      marker_publish_period_s_ > 0.0 &&
+      report.stamp - last_marker_publish_stamp_ < marker_publish_period_s_) {
+    return;
+  }
+  last_marker_publish_stamp_ = report.stamp;
+
+  auto valid_axis = [this](const double v) {
+    return std::isfinite(v) && v >= marker_min_pl_m_ && v <= marker_max_pl_m_;
+  };
+  auto valid_triplet = [&](const double e, const double n, const double u) {
+    return valid_axis(e) && valid_axis(n) && valid_axis(u);
+  };
+
+  AraimMarkerFrame item;
+  item.stamp = report.stamp;
+  item.position = frame.T_world_imu.translation();
+  item.integrity_state = static_cast<int>(report.state);
+
+  if (marker_show_gnss_ && report.gnss_valid &&
+      valid_triplet(report.gnss_PL_E, report.gnss_PL_N, report.gnss_PL_U)) {
+    item.gnss_valid = true;
+    item.gnss_pl_e = report.gnss_PL_E;
+    item.gnss_pl_n = report.gnss_PL_N;
+    item.gnss_pl_u = report.gnss_PL_U;
+  }
+  if (marker_show_lidar_ && report.lidar_valid &&
+      valid_triplet(report.lidar_PL_E, report.lidar_PL_N, report.lidar_PL_U)) {
+    item.lidar_valid = true;
+    item.lidar_pl_e = report.lidar_PL_E;
+    item.lidar_pl_n = report.lidar_PL_N;
+    item.lidar_pl_u = report.lidar_PL_U;
+  }
+  if (marker_show_final_ &&
+      valid_triplet(report.PL_E, report.PL_N, report.PL_U)) {
+    item.final_valid = true;
+    item.final_pl_e = report.PL_E;
+    item.final_pl_n = report.PL_N;
+    item.final_pl_u = report.PL_U;
+  }
+  if (!item.gnss_valid && !item.lidar_valid && !item.final_valid) {
+    return;
+  }
+
+  marker_history_.push_back(item);
+  while (static_cast<int>(marker_history_.size()) > marker_history_size_) {
+    marker_history_.pop_front();
+  }
+
+  using Marker = visualization_msgs::msg::Marker;
+  using MarkerArray = visualization_msgs::msg::MarkerArray;
+
+  MarkerArray array;
+  Marker clear;
+  clear.header.frame_id = "map";
+  clear.header.stamp.sec = static_cast<int32_t>(report.stamp);
+  clear.header.stamp.nanosec =
+      static_cast<uint32_t>((report.stamp - clear.header.stamp.sec) * 1.0e9);
+  clear.action = Marker::DELETEALL;
+  array.markers.push_back(clear);
+
+  auto make_marker = [&](const AraimMarkerFrame& frame_item,
+                         const std::string& ns,
+                         const int id,
+                         const double pl_e,
+                         const double pl_n,
+                         const double pl_u,
+                         const float r,
+                         const float g,
+                         const float b,
+                         const float a) {
+    Marker m;
+    m.header.frame_id = "map";
+    m.header.stamp = clear.header.stamp;
+    m.ns = ns;
+    m.id = id;
+    m.type = Marker::SPHERE;
+    m.action = Marker::ADD;
+    m.pose.position.x = frame_item.position.x();
+    m.pose.position.y = frame_item.position.y();
+    m.pose.position.z = frame_item.position.z();
+    m.pose.orientation.w = 1.0;
+    m.scale.x = 2.0 * pl_e;
+    m.scale.y = 2.0 * pl_n;
+    m.scale.z = 2.0 * pl_u;
+    m.color.r = r;
+    m.color.g = g;
+    m.color.b = b;
+    m.color.a = a;
+    return m;
+  };
+
+  int id = 0;
+  for (const auto& frame_item : marker_history_) {
+    const double age =
+        marker_history_.empty() ? 0.0 : report.stamp - frame_item.stamp;
+    const float fade = static_cast<float>(
+        std::max(0.35, 1.0 - age /
+                 std::max(marker_publish_period_s_ * marker_history_size_, 1.0)));
+    if (frame_item.gnss_valid) {
+      array.markers.push_back(make_marker(
+          frame_item, "gnss_araim_envelope", id++,
+          frame_item.gnss_pl_e, frame_item.gnss_pl_n, frame_item.gnss_pl_u,
+          0.0f, 0.80f, 1.0f, 0.16f * fade));
+    }
+    if (frame_item.lidar_valid) {
+      array.markers.push_back(make_marker(
+          frame_item, "lidar_araim_envelope", id++,
+          frame_item.lidar_pl_e, frame_item.lidar_pl_n, frame_item.lidar_pl_u,
+          1.0f, 0.45f, 0.0f, 0.18f * fade));
+    }
+    if (frame_item.final_valid) {
+      float r = 0.25f;
+      float g = 0.55f;
+      float b = 1.0f;
+      if (frame_item.integrity_state == 0) {
+        r = 0.0f;
+        g = 0.90f;
+        b = 0.25f;
+      } else if (frame_item.integrity_state == 1) {
+        r = 1.0f;
+        g = 0.85f;
+        b = 0.0f;
+      } else if (frame_item.integrity_state == 2) {
+        r = 1.0f;
+        g = 0.05f;
+        b = 0.05f;
+      }
+      array.markers.push_back(make_marker(
+          frame_item, "final_araim_envelope", id++,
+          frame_item.final_pl_e, frame_item.final_pl_n, frame_item.final_pl_u,
+          r, g, b, 0.10f * fade));
+    }
+  }
+
+  auto& pub = *std::static_pointer_cast<
+      rclcpp::Publisher<visualization_msgs::msg::MarkerArray>>(
+          marker_pub_erased_);
+  pub.publish(array);
 }
 
 }  // namespace iap

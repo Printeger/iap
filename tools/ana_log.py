@@ -288,6 +288,7 @@ def artifact_paths(run_dir: Path) -> dict[str, tuple[Path | None, str, list[str]
         "icp": ["export/iap_icp.csv", "export/icp_quality.csv"],
         "gnss_factor_debug": ["export/iap_gnss_factor_debug.csv", "export/gnss_factor_debug.csv"],
         "araim": ["export/iap_araim.csv", "export/araim.csv"],
+        "demo8_araim_truth_compare": ["export/demo8_araim_truth_compare.csv"],
         "trajectory": ["export/traj_with_gnss.csv", "export/integrity_trajectory.csv"],
         "truth_vs_est": ["export/iap_sim_truth_vs_est.csv", "export/sim_truth_vs_est.csv"],
         "desired_vs_truth": ["export/desired_vs_truth.csv", "export/tracking_error.csv"],
@@ -317,6 +318,8 @@ def config_enabled(configs: dict[str, Any], artifact_name: str) -> bool | None:
         return nested_bool(config_gnss, ["gnss", "enable_debug_csv"])
     if artifact_name == "araim":
         return nested_bool(config_gnss, ["integrity", "enable_araim_csv"])
+    if artifact_name == "demo8_araim_truth_compare":
+        return nested_bool(config_ros, ["glim_ros", "sim", "demo8_truth_araim", "enable"])
     if artifact_name == "trajectory":
         return nested_bool(config_gnss, ["integrity", "enable_traj_csv"])
     if artifact_name == "truth_vs_est":
@@ -939,6 +942,180 @@ def analyze_sim_truth_integrity(
         "source_stats": source_stats,
         "rows": validation_rows,
     }
+
+
+PL_SENTINEL_ABS = 1.0e8
+ARAIM_COMPARE_FIELDS = ["HPL", "VPL", "PL_E", "PL_N", "PL_U"]
+LEGACY_SIM_INTEGRITY_PLOTS = [
+    "sim_integrity_timeline.svg",
+    "sim_integrity_trajectory.svg",
+    "sim_integrity_3d_envelope.svg",
+    "sim_integrity_margin_scatter.svg",
+    "sim_accuracy_summary.svg",
+    "sim_integrity_source_split.svg",
+    "sim_gnss_truth_comparison.svg",
+]
+
+
+def usable_pl_value(row: dict[str, str], key: str) -> float | None:
+    value = to_float(row.get(key))
+    if value is None or abs(value) >= PL_SENTINEL_ABS:
+        return None
+    return value
+
+
+def pairwise_metric_summary(rows: list[dict[str, Any]], source: str, metric: str) -> dict[str, Any]:
+    truth_valid_key = f"truth_{source}_valid"
+    iap_valid_key = f"iap_{source}_valid"
+    truth_key = f"truth_{source}_{metric}"
+    iap_key = f"iap_{source}_{metric}"
+    delta_key = f"delta_{source}_{metric}"
+    abs_delta_key = f"abs_delta_{source}_{metric}"
+    margin_key = f"iap_minus_truth_{source}_{metric}"
+    underbound_key = f"underbound_{source}_{metric}"
+    paired = [
+        row for row in rows
+        if row.get(truth_valid_key) is True
+        and row.get(iap_valid_key) is True
+        and row.get(truth_key) is not None
+        and row.get(iap_key) is not None
+    ]
+    underbound_count = sum(1 for row in paired if row.get(underbound_key) is True)
+    return {
+        "count": len(paired),
+        "truth": stats([float(row[truth_key]) for row in paired]),
+        "iap": stats([float(row[iap_key]) for row in paired]),
+        "delta_truth_minus_iap": stats([float(row[delta_key]) for row in paired]),
+        "abs_delta": stats([float(row[abs_delta_key]) for row in paired]),
+        "iap_minus_truth": stats([float(row[margin_key]) for row in paired]),
+        "underbound_count": underbound_count,
+        "underbound_ratio": underbound_count / max(len(paired), 1),
+        "iap_ge_truth_ratio": 1.0 - underbound_count / max(len(paired), 1),
+    }
+
+
+def source_compare_summary(rows: list[dict[str, Any]], raw_rows: list[dict[str, str]], source: str) -> dict[str, Any]:
+    truth_valid_key = f"truth_{source}_valid"
+    iap_valid_key = f"iap_{source}_valid"
+    paired_rows = [
+        row for row in rows
+        if row.get(truth_valid_key) is True
+        and row.get(iap_valid_key) is True
+        and any(row.get(f"truth_{source}_{metric}") is not None and row.get(f"iap_{source}_{metric}") is not None for metric in ARAIM_COMPARE_FIELDS)
+    ]
+    summary: dict[str, Any] = {
+        "truth_valid_count": sum(1 for row in rows if row.get(truth_valid_key) is True),
+        "iap_valid_count": sum(1 for row in rows if row.get(iap_valid_key) is True),
+        "paired_count": len(paired_rows),
+        "both_valid_but_no_usable_pl_count": sum(
+            1 for row in rows
+            if row.get(truth_valid_key) is True
+            and row.get(iap_valid_key) is True
+            and not any(row.get(f"truth_{source}_{metric}") is not None and row.get(f"iap_{source}_{metric}") is not None for metric in ARAIM_COMPARE_FIELDS)
+        ),
+        "metrics": {metric: pairwise_metric_summary(rows, source, metric) for metric in ARAIM_COMPARE_FIELDS},
+    }
+    if source == "gnss":
+        summary.update({
+            "n_sv": stats(numeric_values(raw_rows, "gnss_n_sv")),
+            "truth_n_hyp": stats(numeric_values(raw_rows, "truth_gnss_n_hyp")),
+            "truth_n_det": stats(numeric_values(raw_rows, "truth_gnss_n_det")),
+        })
+    if source == "lidar":
+        summary.update({
+            "truth_n_hyp": stats(numeric_values(raw_rows, "truth_lidar_n_hyp")),
+            "iap_n_hyp": stats(numeric_values(raw_rows, "iap_lidar_n_hyp")),
+            "truth_mode_counts": dict(Counter(row.get("truth_lidar_mode", "") or "UNKNOWN" for row in raw_rows)),
+            "iap_mode_counts": dict(Counter(row.get("iap_lidar_mode", "") or "UNKNOWN" for row in raw_rows)),
+        })
+    return summary
+
+
+def analyze_demo8_araim_truth_compare(rows: list[dict[str, str]]) -> dict[str, Any]:
+    if not rows:
+        return {
+            "available": False,
+            "reason": "missing export/demo8_araim_truth_compare.csv",
+        }
+
+    validation_rows: list[dict[str, Any]] = []
+    skip_reasons = Counter((row.get("skip_reason", "") or "OK").strip() or "OK" for row in rows)
+    sentinel_count = 0
+
+    for row in rows:
+        item: dict[str, Any] = {
+            "stamp": to_float(row.get("stamp")),
+            "frame_id": row.get("frame_id", ""),
+            "skip_reason": (row.get("skip_reason", "") or "").strip(),
+            "truth_x": to_float(row.get("truth_x")),
+            "truth_y": to_float(row.get("truth_y")),
+            "truth_z": to_float(row.get("truth_z")),
+            "est_x": to_float(row.get("est_x")),
+            "est_y": to_float(row.get("est_y")),
+            "est_z": to_float(row.get("est_z")),
+            "pose_error_m": to_float(row.get("pose_error_m")),
+            "gnss_n_sv": to_float(row.get("gnss_n_sv")),
+            "truth_gnss_valid": boolish(row.get("truth_gnss_valid")) is True,
+            "iap_gnss_valid": boolish(row.get("iap_gnss_valid")) is True,
+            "truth_lidar_valid": boolish(row.get("truth_lidar_valid")) is True,
+            "iap_lidar_valid": boolish(row.get("iap_lidar_valid")) is True,
+            "truth_gnss_n_hyp": to_float(row.get("truth_gnss_n_hyp")),
+            "truth_gnss_n_det": to_float(row.get("truth_gnss_n_det")),
+            "truth_lidar_n_hyp": to_float(row.get("truth_lidar_n_hyp")),
+            "iap_lidar_n_hyp": to_float(row.get("iap_lidar_n_hyp")),
+            "truth_lidar_mode": row.get("truth_lidar_mode", ""),
+            "iap_lidar_mode": row.get("iap_lidar_mode", ""),
+            "truth_gnss_clock_bias_m": to_float(row.get("truth_gnss_clock_bias_m")),
+            "truth_gnss_clock_n_used": to_float(row.get("truth_gnss_clock_n_used")),
+            "truth_gnss_clock_rms_before_m": to_float(row.get("truth_gnss_clock_rms_before_m")),
+            "truth_gnss_clock_rms_after_m": to_float(row.get("truth_gnss_clock_rms_after_m")),
+        }
+        for source in ["gnss", "lidar"]:
+            for metric in ARAIM_COMPARE_FIELDS:
+                truth_key = f"truth_{source}_{metric}"
+                iap_key = f"iap_{source}_{metric}"
+                truth_value = usable_pl_value(row, truth_key)
+                iap_value = usable_pl_value(row, iap_key)
+                if to_float(row.get(truth_key)) is not None and truth_value is None:
+                    sentinel_count += 1
+                if to_float(row.get(iap_key)) is not None and iap_value is None:
+                    sentinel_count += 1
+                item[truth_key] = truth_value
+                item[iap_key] = iap_value
+                if truth_value is not None and iap_value is not None:
+                    delta = truth_value - iap_value
+                    margin = iap_value - truth_value
+                    item[f"delta_{source}_{metric}"] = delta
+                    item[f"abs_delta_{source}_{metric}"] = abs(delta)
+                    item[f"iap_minus_truth_{source}_{metric}"] = margin
+                    item[f"underbound_{source}_{metric}"] = iap_value < truth_value
+                else:
+                    item[f"delta_{source}_{metric}"] = None
+                    item[f"abs_delta_{source}_{metric}"] = None
+                    item[f"iap_minus_truth_{source}_{metric}"] = None
+                    item[f"underbound_{source}_{metric}"] = None
+        validation_rows.append(item)
+
+    analysis = {
+        "available": True,
+        "row_count": len(rows),
+        "usable_row_count": sum(1 for row in validation_rows if row.get("stamp") is not None),
+        "skip_reason_counts": dict(skip_reasons),
+        "pl_sentinel_abs_threshold": PL_SENTINEL_ABS,
+        "pl_sentinel_or_nonusable_count": sentinel_count,
+        "delta_convention": "delta = truth_pose_baseline - iap; positive delta means IAP is smaller than baseline",
+        "baseline_definition": "same noisy/faulted simulated observations + simulation truth pose + IAP ARAIM code; not ideal noiseless observations",
+        "gnss": source_compare_summary(validation_rows, rows, "gnss"),
+        "lidar": source_compare_summary(validation_rows, rows, "lidar"),
+        "clock_fit": {
+            "bias_m": stats(numeric_values(rows, "truth_gnss_clock_bias_m")),
+            "n_used": stats(numeric_values(rows, "truth_gnss_clock_n_used")),
+            "rms_before_m": stats(numeric_values(rows, "truth_gnss_clock_rms_before_m")),
+            "rms_after_m": stats(numeric_values(rows, "truth_gnss_clock_rms_after_m")),
+        },
+        "rows": validation_rows,
+    }
+    return analysis
 
 
 def analyze_desired_tracking(rows: list[dict[str, str]]) -> dict[str, Any]:
@@ -1569,25 +1746,208 @@ def write_sim_integrity_outputs(analysis: dict[str, Any], out_dir: Path, figs_di
     summary_path = out_dir / "sim_integrity_summary.json"
     summary_path.write_text(json.dumps(summary, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
 
+    # Demo8 ARAIM correctness should be judged from the truth-pose baseline
+    # outputs, not the legacy trajectory-error coverage plots. Remove stale
+    # legacy SVGs so old analysis directories do not keep showing them.
+    for filename in LEGACY_SIM_INTEGRITY_PLOTS:
+        path = figs_dir / filename
+        if path.exists():
+            path.unlink()
+    return []
+
+
+def optional_timeline_points(
+    rows: list[dict[str, Any]],
+    value_key: str,
+    plot_x: float,
+    plot_y: float,
+    plot_w: float,
+    plot_h: float,
+    t0: float,
+    t1: float,
+    y0: float,
+    y1: float,
+) -> list[tuple[float, float]]:
+    points = []
+    for row in rows:
+        value = row.get(value_key)
+        stamp = row.get("stamp")
+        if value is None or stamp is None:
+            continue
+        x = map_linear(float(stamp), t0, t1, plot_x, plot_x + plot_w)
+        y = map_linear(float(value), y0, y1, plot_y + plot_h, plot_y)
+        points.append((x, y))
+    return points
+
+
+def generate_demo8_araim_truth_iap_svg(rows: list[dict[str, Any]], source: str, path: Path) -> None:
+    width, height = 1120, 700
+    label = "GNSS" if source == "gnss" else "LiDAR"
+    truth_color = "#0891b2" if source == "gnss" else "#f97316"
+    iap_color = "#2563eb" if source == "gnss" else "#7c3aed"
+    body: list[str] = [svg_text(40, 34, f"Demo8 {label} Truth-Pose ARAIM Baseline vs IAP", 18, "#111827")]
+    body.append(svg_text(40, 56, "Baseline uses the same noisy/faulted simulated observations with simulation truth pose; it is not noiseless truth.", 12, "#4b5563"))
+    source_rows = [
+        row for row in rows
+        if row.get("stamp") is not None
+        and row.get(f"truth_{source}_valid") is True
+        and row.get(f"iap_{source}_valid") is True
+        and (
+            row.get(f"truth_{source}_HPL") is not None
+            or row.get(f"iap_{source}_HPL") is not None
+            or row.get(f"truth_{source}_VPL") is not None
+            or row.get(f"iap_{source}_VPL") is not None
+        )
+    ]
+    if not source_rows:
+        body.append(svg_text(40, 100, f"No usable {label} truth/IAP ARAIM rows.", 14, "#991b1b"))
+        write_svg(path, width, height, body)
+        return
+
+    stamps = [float(row["stamp"]) for row in source_rows]
+    t0, t1 = min(stamps), max(stamps)
+    rel_label = f"relative time from {t0:.3f}s"
+    panels = [
+        (70.0, 90.0, 990.0, 235.0, f"{label} horizontal PL", "HPL"),
+        (70.0, 400.0, 990.0, 235.0, f"{label} vertical PL", "VPL"),
+    ]
+    for px, py, pw, ph, title, metric in panels:
+        truth_key = f"truth_{source}_{metric}"
+        iap_key = f"iap_{source}_{metric}"
+        underbound_key = f"underbound_{source}_{metric}"
+        panel_rows = [row for row in source_rows if row.get(truth_key) is not None or row.get(iap_key) is not None]
+        values: list[float] = []
+        for row in panel_rows:
+            for key in [truth_key, iap_key]:
+                value = row.get(key)
+                if value is not None:
+                    values.append(float(value))
+        if not values:
+            body.extend(svg_axes(px, py, pw, ph, title, rel_label, "meters"))
+            body.append(svg_text(px + 20, py + 42, f"{metric} unavailable.", 13, "#991b1b"))
+            continue
+        y0, y1 = float_range(values)
+        y0 = min(0.0, y0)
+        body.extend(svg_axes(px, py, pw, ph, title, rel_label, "meters"))
+        body.append(svg_polyline(optional_timeline_points(panel_rows, truth_key, px, py, pw, ph, t0, t1, y0, y1), truth_color, 2.1))
+        body.append(svg_polyline(optional_timeline_points(panel_rows, iap_key, px, py, pw, ph, t0, t1, y0, y1), iap_color, 1.8))
+        underbound_rows = [row for row in panel_rows if row.get(underbound_key) is True and row.get(iap_key) is not None]
+        stride = max(1, len(underbound_rows) // 250)
+        for row in underbound_rows[::stride]:
+            x = map_linear(float(row["stamp"]), t0, t1, px, px + pw)
+            y = map_linear(float(row[iap_key]), y0, y1, py + ph, py)
+            body.append(f'<circle cx="{x:.2f}" cy="{y:.2f}" r="3.0" fill="#dc2626" fill-opacity="0.82" />')
+        underbound_ratio = len(underbound_rows) / max(sum(1 for row in panel_rows if row.get(truth_key) is not None and row.get(iap_key) is not None), 1)
+        legend_y = py + 20
+        legend = [
+            ("truth-pose baseline", truth_color),
+            ("IAP", iap_color),
+            ("IAP < baseline", "#dc2626"),
+        ]
+        for i, (legend_label, color) in enumerate(legend):
+            body.append(f'<line x1="{px + pw - 190:.2f}" y1="{legend_y + i * 18:.2f}" x2="{px + pw - 165:.2f}" y2="{legend_y + i * 18:.2f}" stroke="{color}" stroke-width="2" />')
+            body.append(svg_text(px + pw - 158, legend_y + i * 18 + 4, legend_label, 11, "#374151"))
+        body.append(svg_text(px + 12, py + ph - 12, f"underbound={len(underbound_rows)}, ratio={underbound_ratio:.3f}", 12, "#111827"))
+        body.append(svg_text(px - 8, py + ph + 4, f"{y0:.2f}", 10, "#4b5563", "end"))
+        body.append(svg_text(px - 8, py + 4, f"{y1:.2f}", 10, "#4b5563", "end"))
+    write_svg(path, width, height, body)
+
+
+def generate_demo8_araim_delta_summary_svg(rows: list[dict[str, Any]], path: Path) -> None:
+    width, height = 1120, 820
+    body: list[str] = [svg_text(40, 34, "Demo8 ARAIM Truth-Pose Baseline vs IAP Scatter", 18, "#111827")]
+    body.append(svg_text(40, 56, "Points below y=x mean IAP PL is smaller than the truth-pose baseline PL.", 12, "#4b5563"))
+    panels = [
+        (70.0, 90.0, 450.0, 270.0, "GNSS HPL", "gnss", "HPL", "#0891b2"),
+        (610.0, 90.0, 450.0, 270.0, "GNSS VPL", "gnss", "VPL", "#0891b2"),
+        (70.0, 465.0, 450.0, 270.0, "LiDAR HPL", "lidar", "HPL", "#f97316"),
+        (610.0, 465.0, 450.0, 270.0, "LiDAR VPL", "lidar", "VPL", "#f97316"),
+    ]
+    for px, py, pw, ph, title, source, metric, color in panels:
+        truth_key = f"truth_{source}_{metric}"
+        iap_key = f"iap_{source}_{metric}"
+        underbound_key = f"underbound_{source}_{metric}"
+        panel_rows = [
+            row for row in rows
+            if row.get(f"truth_{source}_valid") is True
+            and row.get(f"iap_{source}_valid") is True
+            and row.get(truth_key) is not None
+            and row.get(iap_key) is not None
+        ]
+        body.extend(svg_axes(px, py, pw, ph, title, "truth-pose baseline [m]", "IAP [m]"))
+        if not panel_rows:
+            body.append(svg_text(px + 20, py + 42, "No paired rows.", 13, "#991b1b"))
+            continue
+        values = [float(row[truth_key]) for row in panel_rows] + [float(row[iap_key]) for row in panel_rows]
+        lo, hi = float_range(values)
+        lo = min(0.0, lo)
+        p0 = (map_linear(lo, lo, hi, px, px + pw), map_linear(lo, lo, hi, py + ph, py))
+        p1 = (map_linear(hi, lo, hi, px, px + pw), map_linear(hi, lo, hi, py + ph, py))
+        body.append(f'<line x1="{p0[0]:.2f}" y1="{p0[1]:.2f}" x2="{p1[0]:.2f}" y2="{p1[1]:.2f}" stroke="#6b7280" stroke-dasharray="5 4" />')
+        stride = max(1, len(panel_rows) // 700)
+        for row in panel_rows[::stride]:
+            x = map_linear(float(row[truth_key]), lo, hi, px, px + pw)
+            y = map_linear(float(row[iap_key]), lo, hi, py + ph, py)
+            point_color = "#dc2626" if row.get(underbound_key) is True else color
+            body.append(f'<circle cx="{x:.2f}" cy="{y:.2f}" r="3.0" fill="{point_color}" fill-opacity="0.72" />')
+        underbound_count = sum(1 for row in panel_rows if row.get(underbound_key) is True)
+        body.append(svg_text(px + 12, py + ph - 12, f"paired={len(panel_rows)}, IAP<baseline={underbound_count}", 12, "#111827"))
+        body.append(svg_text(px - 8, py + ph + 4, f"{lo:.2f}", 10, "#4b5563", "end"))
+        body.append(svg_text(px - 8, py + 4, f"{hi:.2f}", 10, "#4b5563", "end"))
+    write_svg(path, width, height, body)
+
+
+def write_demo8_araim_truth_compare_outputs(
+    analysis: dict[str, Any],
+    out_dir: Path,
+    figs_dir: Path,
+    no_plots: bool,
+) -> list[str]:
+    if not analysis.get("available"):
+        return []
+    ensure_dir(out_dir)
+    rows = analysis.get("rows", [])
+    csv_path = out_dir / "demo8_araim_truth_compare_validation.csv"
+    fieldnames = [
+        "stamp", "frame_id", "skip_reason",
+        "truth_x", "truth_y", "truth_z", "est_x", "est_y", "est_z", "pose_error_m",
+        "gnss_n_sv", "truth_gnss_valid", "iap_gnss_valid",
+        "truth_gnss_HPL", "iap_gnss_HPL", "delta_gnss_HPL", "abs_delta_gnss_HPL", "iap_minus_truth_gnss_HPL", "underbound_gnss_HPL",
+        "truth_gnss_VPL", "iap_gnss_VPL", "delta_gnss_VPL", "abs_delta_gnss_VPL", "iap_minus_truth_gnss_VPL", "underbound_gnss_VPL",
+        "truth_gnss_PL_E", "iap_gnss_PL_E", "delta_gnss_PL_E", "abs_delta_gnss_PL_E", "iap_minus_truth_gnss_PL_E", "underbound_gnss_PL_E",
+        "truth_gnss_PL_N", "iap_gnss_PL_N", "delta_gnss_PL_N", "abs_delta_gnss_PL_N", "iap_minus_truth_gnss_PL_N", "underbound_gnss_PL_N",
+        "truth_gnss_PL_U", "iap_gnss_PL_U", "delta_gnss_PL_U", "abs_delta_gnss_PL_U", "iap_minus_truth_gnss_PL_U", "underbound_gnss_PL_U",
+        "truth_gnss_n_hyp", "truth_gnss_n_det",
+        "truth_lidar_valid", "iap_lidar_valid",
+        "truth_lidar_HPL", "iap_lidar_HPL", "delta_lidar_HPL", "abs_delta_lidar_HPL", "iap_minus_truth_lidar_HPL", "underbound_lidar_HPL",
+        "truth_lidar_VPL", "iap_lidar_VPL", "delta_lidar_VPL", "abs_delta_lidar_VPL", "iap_minus_truth_lidar_VPL", "underbound_lidar_VPL",
+        "truth_lidar_PL_E", "iap_lidar_PL_E", "delta_lidar_PL_E", "abs_delta_lidar_PL_E", "iap_minus_truth_lidar_PL_E", "underbound_lidar_PL_E",
+        "truth_lidar_PL_N", "iap_lidar_PL_N", "delta_lidar_PL_N", "abs_delta_lidar_PL_N", "iap_minus_truth_lidar_PL_N", "underbound_lidar_PL_N",
+        "truth_lidar_PL_U", "iap_lidar_PL_U", "delta_lidar_PL_U", "abs_delta_lidar_PL_U", "iap_minus_truth_lidar_PL_U", "underbound_lidar_PL_U",
+        "truth_lidar_n_hyp", "iap_lidar_n_hyp", "truth_lidar_mode", "iap_lidar_mode",
+        "truth_gnss_clock_bias_m", "truth_gnss_clock_n_used", "truth_gnss_clock_rms_before_m", "truth_gnss_clock_rms_after_m",
+    ]
+    with csv_path.open("w", encoding="utf-8", newline="") as f:
+        writer = csv.DictWriter(f, fieldnames=fieldnames)
+        writer.writeheader()
+        for row in rows:
+            writer.writerow({key: row.get(key, "") for key in fieldnames})
+
+    summary = {key: value for key, value in analysis.items() if key != "rows"}
+    summary_path = out_dir / "demo8_araim_truth_compare_summary.json"
+    summary_path.write_text(json.dumps(summary, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+
     generated = [str(csv_path), str(summary_path)]
     if no_plots:
         return generated
     svg_paths = [
-        figs_dir / "sim_integrity_timeline.svg",
-        figs_dir / "sim_integrity_trajectory.svg",
-        figs_dir / "sim_integrity_3d_envelope.svg",
-        figs_dir / "sim_integrity_margin_scatter.svg",
-        figs_dir / "sim_accuracy_summary.svg",
-        figs_dir / "sim_integrity_source_split.svg",
-        figs_dir / "sim_gnss_truth_comparison.svg",
+        figs_dir / "demo8_gnss_araim_truth_vs_iap.svg",
+        figs_dir / "demo8_lidar_araim_truth_vs_iap.svg",
+        figs_dir / "demo8_araim_delta_summary.svg",
     ]
-    generate_sim_integrity_timeline_svg(rows, svg_paths[0])
-    generate_sim_integrity_trajectory_svg(rows, svg_paths[1])
-    generate_sim_integrity_3d_envelope_svg(rows, svg_paths[2])
-    generate_sim_integrity_margin_scatter_svg(rows, svg_paths[3])
-    generate_sim_accuracy_summary_svg(rows, analysis, svg_paths[4])
-    generate_sim_integrity_source_split_svg(rows, svg_paths[5])
-    generate_sim_gnss_truth_comparison_svg(rows, svg_paths[6])
+    generate_demo8_araim_truth_iap_svg(rows, "gnss", svg_paths[0])
+    generate_demo8_araim_truth_iap_svg(rows, "lidar", svg_paths[1])
+    generate_demo8_araim_delta_summary_svg(rows, svg_paths[2])
     generated.extend(str(path) for path in svg_paths)
     return generated
 
@@ -1691,7 +2051,7 @@ def render_report(
     append_icp_section(lines, analyses.get("icp", {}))
     append_gnss_section(lines, analyses.get("gnss_factor_debug", {}))
     append_araim_section(lines, analyses.get("araim", {}))
-    append_sim_integrity_section(lines, analyses.get("sim_truth_integrity", {}))
+    append_demo8_araim_truth_compare_section(lines, analyses.get("demo8_araim_truth_compare", {}))
     append_desired_tracking_section(lines, analyses.get("desired_tracking", {}))
     append_trajectory_section(lines, analyses.get("trajectory", {}))
     append_dump_section(lines, analyses.get("dump", {}))
@@ -1841,14 +2201,103 @@ def append_integrity_source_split_section(lines: list[str], source_split: dict[s
     lines.append("")
 
 
+def append_demo8_araim_truth_compare_section(lines: list[str], analysis: dict[str, Any]) -> None:
+    lines.append("## Demo8 Truth-Pose ARAIM Baseline")
+    lines.append("")
+    if not analysis.get("available"):
+        reason = analysis.get("reason", "demo8 truth-pose ARAIM comparison unavailable")
+        lines.append(f"Demo8 truth-pose ARAIM baseline comparison unavailable: `{reason}`.")
+        lines.append("")
+        return
+    lines.append(
+        "This section compares IAP ARAIM against the demo8 truth-pose baseline. "
+        "The baseline uses the same noisy/faulted simulated observations with the simulation truth pose and the same IAP ARAIM code; it is not an ideal noiseless observation result."
+    )
+    lines.append("")
+    lines.append(md_table(
+        ["Metric", "Value"],
+        [
+            ["row_count", analysis.get("row_count", 0)],
+            ["usable_row_count", analysis.get("usable_row_count", 0)],
+            ["delta convention", analysis.get("delta_convention", "")],
+            ["skip_reason_counts", analysis.get("skip_reason_counts", {})],
+            ["PL sentinel/nonusable count", analysis.get("pl_sentinel_or_nonusable_count", 0)],
+            ["GNSS paired_count", analysis.get("gnss", {}).get("paired_count", 0)],
+            ["LiDAR paired_count", analysis.get("lidar", {}).get("paired_count", 0)],
+        ],
+    ))
+    lines.append("")
+
+    def source_rows(label: str, source: str) -> list[list[Any]]:
+        source_analysis = analysis.get(source, {})
+        metrics = source_analysis.get("metrics", {})
+        rows = []
+        for metric in ["HPL", "VPL", "PL_E", "PL_N", "PL_U"]:
+            item = metrics.get(metric, {})
+            rows.append([
+                metric,
+                item.get("count", 0),
+                format_triplet(item.get("truth", {})),
+                format_triplet(item.get("iap", {})),
+                format_triplet(item.get("delta_truth_minus_iap", {})),
+                format_triplet(item.get("abs_delta", {})),
+                item.get("underbound_count", 0),
+                f"{item.get('iap_ge_truth_ratio', 0.0):.3f}",
+            ])
+        lines.append(f"### {label}")
+        lines.append("")
+        lines.append(md_table(
+            ["PL", "Pairs", "Truth mean/p95/max", "IAP mean/p95/max", "Delta mean/p95/max", "Abs delta mean/p95/max", "IAP<truth", "IAP>=truth ratio"],
+            rows,
+        ))
+        lines.append("")
+        return rows
+
+    source_rows("GNSS ARAIM Truth Baseline vs IAP", "gnss")
+    gnss = analysis.get("gnss", {})
+    clock = analysis.get("clock_fit", {})
+    lines.append(md_table(
+        ["GNSS diagnostic", "Value"],
+        [
+            ["truth_valid / iap_valid", f"{gnss.get('truth_valid_count', 0)} / {gnss.get('iap_valid_count', 0)}"],
+            ["n_sv mean/p95/max", format_triplet(gnss.get("n_sv", {}))],
+            ["truth_n_hyp mean/p95/max", format_triplet(gnss.get("truth_n_hyp", {}))],
+            ["truth_n_det mean/p95/max", format_triplet(gnss.get("truth_n_det", {}))],
+            ["clock bias mean/p95/max [m]", format_triplet(clock.get("bias_m", {}))],
+            ["clock RMS before mean/p95/max [m]", format_triplet(clock.get("rms_before_m", {}))],
+            ["clock RMS after mean/p95/max [m]", format_triplet(clock.get("rms_after_m", {}))],
+        ],
+    ))
+    lines.append("")
+
+    source_rows("LiDAR ARAIM Truth Baseline vs IAP", "lidar")
+    lidar = analysis.get("lidar", {})
+    lines.append(md_table(
+        ["LiDAR diagnostic", "Value"],
+        [
+            ["truth_valid / iap_valid", f"{lidar.get('truth_valid_count', 0)} / {lidar.get('iap_valid_count', 0)}"],
+            ["truth_n_hyp mean/p95/max", format_triplet(lidar.get("truth_n_hyp", {}))],
+            ["iap_n_hyp mean/p95/max", format_triplet(lidar.get("iap_n_hyp", {}))],
+            ["truth_mode_counts", lidar.get("truth_mode_counts", {})],
+            ["iap_mode_counts", lidar.get("iap_mode_counts", {})],
+        ],
+    ))
+    lines.append("")
+
+
 def append_sim_integrity_section(lines: list[str], analysis: dict[str, Any]) -> None:
-    lines.append("## Simulation Truth Integrity Validation")
+    lines.append("## Trajectory-Error Integrity Coverage")
     lines.append("")
     if not analysis.get("available"):
         reason = analysis.get("reason", "simulation truth validation unavailable")
-        lines.append(f"Simulation truth validation unavailable: `{reason}`.")
+        lines.append(f"Trajectory-error integrity coverage unavailable: `{reason}`.")
         lines.append("")
         return
+    lines.append(
+        "This legacy validation compares estimated trajectory error against protection levels. "
+        "It is useful for coverage checks, but it is not the demo8 truth-pose ARAIM baseline comparison."
+    )
+    lines.append("")
     lines.append(md_table(
         ["Metric", "Value"],
         [
@@ -2072,6 +2521,9 @@ def main() -> int:
         "icp": analyze_icp(rows_by_name.get("icp", [])),
         "gnss_factor_debug": analyze_gnss(rows_by_name.get("gnss_factor_debug", [])),
         "araim": analyze_araim(rows_by_name.get("araim", [])),
+        "demo8_araim_truth_compare": analyze_demo8_araim_truth_compare(
+            rows_by_name.get("demo8_araim_truth_compare", [])
+        ),
         "sim_truth_integrity": analyze_sim_truth_integrity(
             rows_by_name.get("truth_vs_est", []),
             rows_by_name.get("araim", []),
@@ -2083,6 +2535,14 @@ def main() -> int:
     }
 
     generated_plots = maybe_generate_timing_plot(analyses["timing"], figs_dir, args.no_plots)
+    generated_plots.extend(
+        write_demo8_araim_truth_compare_outputs(
+            analyses["demo8_araim_truth_compare"],
+            out_dir,
+            figs_dir,
+            args.no_plots,
+        )
+    )
     generated_plots.extend(
         write_sim_integrity_outputs(analyses["sim_truth_integrity"], out_dir, figs_dir, args.no_plots)
     )

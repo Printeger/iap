@@ -24,10 +24,12 @@
 
 #include <atomic>
 #include <cstdio>
+#include <deque>
 #include <memory>
 #include <mutex>
 #include <string>
 
+#include <Eigen/Core>
 #include <spdlog/spdlog.h>
 #include <rclcpp/rclcpp.hpp>
 
@@ -59,6 +61,8 @@ class IntegrityExtensionModule : public glim::ExtensionModuleROS2 {
   void on_smoother_update_finish_(
       gtsam_points::IncrementalFixedLagSmootherExtWithFallback& smoother);
   void maybe_publish_integrity_();
+  void publish_araim_markers_(const IntegrityReport& report,
+                              const glim::EstimationFrame& frame);
 
   // ── Config ────────────────────────────────────────────────────────────
   bool        enable_;           ///< master enable
@@ -66,6 +70,16 @@ class IntegrityExtensionModule : public glim::ExtensionModuleROS2 {
   bool        enable_fgo_info_;  ///< extract sigma_p from smoother
   bool        enable_dynamic_al_;///< trunk HAL + altitude VAL
   std::string pub_topic_;        ///< ROS2 topic name
+
+  bool        enable_markers_ = false;
+  std::string marker_topic_ = "/iap/araim_envelopes";
+  int         marker_history_size_ = 60;
+  double      marker_publish_period_s_ = 0.5;
+  double      marker_min_pl_m_ = 0.05;
+  double      marker_max_pl_m_ = 30.0;
+  bool        marker_show_gnss_ = true;
+  bool        marker_show_lidar_ = true;
+  bool        marker_show_final_ = true;
 
   // ── Components ────────────────────────────────────────────────────────
   IntegrityMonitor       monitor_;
@@ -82,6 +96,27 @@ class IntegrityExtensionModule : public glim::ExtensionModuleROS2 {
   // Using void* to avoid including the generated msg header in this header.
   // Cast in the .cpp where the full type is known.
   std::shared_ptr<void> pub_erased_;
+  std::shared_ptr<void> marker_pub_erased_;
+
+  struct AraimMarkerFrame {
+    double stamp = 0.0;
+    Eigen::Vector3d position = Eigen::Vector3d::Zero();
+    int integrity_state = 2;
+    bool gnss_valid = false;
+    double gnss_pl_e = 0.0;
+    double gnss_pl_n = 0.0;
+    double gnss_pl_u = 0.0;
+    bool lidar_valid = false;
+    double lidar_pl_e = 0.0;
+    double lidar_pl_n = 0.0;
+    double lidar_pl_u = 0.0;
+    bool final_valid = false;
+    double final_pl_e = 0.0;
+    double final_pl_n = 0.0;
+    double final_pl_u = 0.0;
+  };
+  std::deque<AraimMarkerFrame> marker_history_;
+  double last_marker_publish_stamp_ = -1.0;
 
   // ── ARAIM CSV + Trajectory CSV ────────────────────────────────────────
   std::unique_ptr<AraimDebugCSV> araim_debug_csv_;
