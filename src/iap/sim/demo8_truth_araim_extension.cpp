@@ -455,6 +455,7 @@ class Demo8TruthAraimExtensionModule : public glim::ExtensionModuleROS2 {
   void on_new_frame_(const glim::EstimationFrame::ConstPtr& frame) {
     if (!frame) return;
     std::lock_guard<std::mutex> lock(mutex_);
+    latest_raw_frame_ = frame;
     latest_raw_frame_id_ = frame->id;
     latest_raw_frame_stamp_ = frame->stamp;
     frame_stamp_by_id_[frame->id] = frame->stamp;
@@ -464,12 +465,22 @@ class Demo8TruthAraimExtensionModule : public glim::ExtensionModuleROS2 {
                            const gtsam::Values& new_values) {
     long frame_id = -1;
     double frame_stamp = 0.0;
+    glim::EstimationFrame::ConstPtr raw_frame;
     {
       std::lock_guard<std::mutex> lock(mutex_);
       frame_id = latest_raw_frame_id_;
       frame_stamp = latest_raw_frame_stamp_;
+      raw_frame = latest_raw_frame_;
     }
     if (frame_id < 0 || new_factors.empty()) return;
+
+    std::vector<LidarAraimBlock> iap_block_templates;
+    if (raw_frame) {
+      if (const auto* iap_snapshot =
+              raw_frame->get_custom_data<LidarAraimSnapshot>("lidar_araim_snapshot")) {
+        iap_block_templates = iap_snapshot->blocks;
+      }
+    }
 
     std::string reason;
     std::optional<nav_msgs::msg::Odometry> current_truth;
@@ -529,7 +540,7 @@ class Demo8TruthAraimExtensionModule : public glim::ExtensionModuleROS2 {
     truth_values.insert(X(frame_id), gtsam::Pose3(snapshot.T_world_imu.matrix()));
 
     std::string aggregate_reason;
-    int factor_index = 0;
+    std::size_t block_template_index = 0;
     for (const auto& factor : new_factors) {
       if (!factor) continue;
 
@@ -554,6 +565,14 @@ class Demo8TruthAraimExtensionModule : public glim::ExtensionModuleROS2 {
         if (id == frame_id) has_current_key = true;
       }
       if (!has_current_key) continue;
+
+      if (block_template_index >= iap_block_templates.size()) {
+        aggregate_reason = append_reason(aggregate_reason,
+                                         "iap_lidar_metadata_missing");
+        ++block_template_index;
+        continue;
+      }
+      LidarAraimBlock block = iap_block_templates[block_template_index++];
 
       bool have_all_truth = true;
       for (const long id : pose_ids) {
@@ -596,43 +615,8 @@ class Demo8TruthAraimExtensionModule : public glim::ExtensionModuleROS2 {
         continue;
       }
 
-      LidarAraimBlock block;
-      block.source_frame_id = frame_id;
-      block.target_frame_id = -1;
-      block.target_is_fixed = pose_ids.size() <= 1;
-      for (const long id : pose_ids) {
-        if (id != frame_id) {
-          block.target_frame_id = id;
-          block.target_is_fixed = false;
-          break;
-        }
-      }
-      block.level_id = factor_index++;
-      block.backend = cpu_factor ? LidarAraimBlock::Backend::CPU
-                                 : LidarAraimBlock::Backend::GPU;
-      if (block.target_frame_id >= 0) {
-        const auto it = frame_stamp_by_id_.find(block.target_frame_id);
-        if (it != frame_stamp_by_id_.end()) {
-          block.age_sec = std::max(0.0, frame_stamp - it->second);
-        }
-      }
       block.Lambda_B = hit->second;
       block.eta_B = hessian.linearTerm(key_it);
-      block.cond_proxy = condition_number_6x6(block.Lambda_B);
-      if (cpu_factor) {
-        block.num_inliers = cpu_factor->num_inliers();
-        block.inlier_fraction = cpu_factor->inlier_fraction();
-        block.rmse_proxy = std::sqrt(cpu_factor->error(truth_values) /
-                                     std::max(block.num_inliers, 1));
-      }
-#ifdef IAP_DEMO8_HAS_VGICP_GPU
-      if (gpu_factor) {
-        block.num_inliers = gpu_factor->num_inliers();
-        block.inlier_fraction = gpu_factor->inlier_fraction();
-        block.rmse_proxy = std::sqrt(gpu_factor->error(truth_values) /
-                                     std::max(block.num_inliers, 1));
-      }
-#endif
       snapshot.blocks.push_back(std::move(block));
     }
 
@@ -1172,6 +1156,7 @@ class Demo8TruthAraimExtensionModule : public glim::ExtensionModuleROS2 {
 	  std::deque<nav_msgs::msg::Odometry> truth_cache_;
 	  std::deque<TruthMarkerFrame> marker_history_;
 	  std::map<long, double> frame_stamp_by_id_;
+	  glim::EstimationFrame::ConstPtr latest_raw_frame_;
 	  long latest_raw_frame_id_ = -1;
 	  double latest_raw_frame_stamp_ = 0.0;
 	  double last_marker_publish_stamp_ = -1.0;

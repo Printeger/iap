@@ -50,8 +50,10 @@
 #include <iap/util/shared_state.hpp>
 #include <iap/util/timing_csv.hpp>
 
+#include <algorithm>
 #include <iomanip>
 #include <filesystem>
+#include <limits>
 
 namespace iap {
 
@@ -528,7 +530,6 @@ void GnssExtensionModule::on_range_meas_(
 
   if (!epoch.sats.empty()) {
     gnss_handler_->insert_epoch(epoch);
-    IapSharedState::instance().set_gnss_epoch(epoch);  // share with integrity_extension
     const uint64_t n = ++epoch_count_;
     // Log first epoch, then every 100 (≈ ~10 s at 10 Hz)
     if (n == 1 || n % 100 == 0) {
@@ -698,6 +699,22 @@ void GnssExtensionModule::on_smoother_update_(
       last_pr_factors_.clear();
       last_dop_factors_.clear();
       last_injected_frame_id_ = frame_id;
+      last_injected_epoch_.reset();
+      if (consumed.size() == 1U) {
+        last_injected_epoch_ = consumed.front();
+      } else if (!consumed.empty()) {
+        auto best_epoch = std::min_element(
+            consumed.begin(), consumed.end(),
+            [frame_stamp](const GnssEpoch& a, const GnssEpoch& b) {
+              return std::abs(a.stamp - frame_stamp) <
+                     std::abs(b.stamp - frame_stamp);
+            });
+        if (best_epoch != consumed.end()) {
+          last_injected_epoch_ = *best_epoch;
+        }
+        logger_->debug("[gnss_ext] {} GNSS epochs matched frame {}; using nearest stamp for post-opt ARAIM residual sharing",
+                       consumed.size(), frame_id);
+      }
       for (const auto& f : gnss_factors) {
         bool has_vel = false;
         for (const auto k : f->keys()) {
@@ -764,6 +781,7 @@ void GnssExtensionModule::reset_clock_chain_state_(const char* reason, double st
     std::lock_guard<std::mutex> lk(factors_mutex_);
     last_pr_factors_.clear();
     last_dop_factors_.clear();
+    last_injected_epoch_.reset();
     last_injected_frame_id_ = -1;
   }
 
@@ -788,15 +806,18 @@ void iap::GnssExtensionModule::on_smoother_update_finish_(
   const auto t0_gnss = std::chrono::high_resolution_clock::now();
 
   std::vector<gtsam::NonlinearFactor::shared_ptr> pr_factors, dop_factors;
+  std::optional<GnssEpoch> postopt_epoch;
   long frame_id;
   {
     std::lock_guard<std::mutex> lk(factors_mutex_);
     if (last_pr_factors_.empty() && last_dop_factors_.empty()) return;
     pr_factors  = last_pr_factors_;
     dop_factors = last_dop_factors_;
+    postopt_epoch = last_injected_epoch_;
     frame_id    = last_injected_frame_id_;
     last_pr_factors_.clear();
     last_dop_factors_.clear();
+    last_injected_epoch_.reset();
   }
 
   // ── 1. Clock state ────────────────────────────────────────────────────────────
@@ -829,6 +850,12 @@ void iap::GnssExtensionModule::on_smoother_update_finish_(
   // ── 2. Factor residuals ──────────────────────────────────────────────────────
   double pr_rms  = 0.0, dop_rms  = 0.0;
   int    n_pr_ok = 0,   n_dop_ok = 0;
+  if (postopt_epoch) {
+    for (auto& sat : postopt_epoch->sats) {
+      sat.pr_residual = std::numeric_limits<double>::quiet_NaN();
+      sat.nis_pr = 0.0;
+    }
+  }
 
   // Per-factor detail vectors (only populated when debug CSV is enabled)
   struct FactorDetail {
@@ -856,18 +883,35 @@ void iap::GnssExtensionModule::on_smoother_update_finish_(
         pr_rms += res * res;
         ++n_pr_ok;
 
-        if (do_csv) {
-          const auto pf = std::dynamic_pointer_cast<PseudorangeFactor>(f);
-          double sigma = 5.0, meas = 0.0;
-          int sid = 0; char con = '?'; double elev = 0.0;
-          if (pf) {
-            sid = pf->sat_id(); con = pf->constellation();
-            elev = pf->elevation() * 180.0 / M_PI;
-            meas = pf->pr_meas();
-            // Extract sigma from noise model
-            const auto diag = std::dynamic_pointer_cast<gtsam::noiseModel::Diagonal>(nf->noiseModel());
-            if (diag) sigma = diag->sigma(0);
+        const auto pf = std::dynamic_pointer_cast<PseudorangeFactor>(f);
+        double sigma = 5.0, meas = 0.0;
+        int sid = 0; char con = '?'; double elev = 0.0;
+        if (pf) {
+          sid = pf->sat_id(); con = pf->constellation();
+          elev = pf->elevation() * 180.0 / M_PI;
+          meas = pf->pr_meas();
+        }
+        const auto diag = std::dynamic_pointer_cast<gtsam::noiseModel::Diagonal>(nf->noiseModel());
+        if (diag) sigma = diag->sigma(0);
+        if (postopt_epoch && pf && std::isfinite(res) && sigma > 0.0) {
+          bool matched_sat = false;
+          for (auto& sat : postopt_epoch->sats) {
+            if (sat.sat_id == sid && sat.constellation == con) {
+              sat.pr_residual = res;
+              sat.pr_sigma = sigma;
+              sat.nis_pr = (res / sigma) * (res / sigma);
+              sat.elevation = pf->elevation();
+              matched_sat = true;
+              break;
+            }
           }
+          if (!matched_sat) {
+            logger_->debug("[gnss_ext] post-opt residual for sat {}{} did not match injected epoch",
+                           con, sid);
+          }
+        }
+
+        if (do_csv) {
           details.push_back({"PR", sid, con, elev, meas, res, sigma, (sigma > 0 ? res / sigma : 0.0)});
         }
       } catch (...) {}
@@ -900,6 +944,23 @@ void iap::GnssExtensionModule::on_smoother_update_finish_(
 
   if (n_pr_ok > 0)  pr_rms  = std::sqrt(pr_rms  / n_pr_ok);
   if (n_dop_ok > 0) dop_rms = std::sqrt(dop_rms / n_dop_ok);
+
+  if (postopt_epoch) {
+    int active_with_residual = 0;
+    for (auto& sat : postopt_epoch->sats) {
+      if (sat.excluded) {
+        continue;
+      }
+      if (std::isfinite(sat.pr_residual)) {
+        ++active_with_residual;
+      } else {
+        sat.excluded = true;
+      }
+    }
+    if (active_with_residual > 0) {
+      IapSharedState::instance().set_gnss_epoch(*postopt_epoch);
+    }
+  }
 
   // ── 3. Write debug CSV ────────────────────────────────────────────────────────
   const uint64_t diag_n = ++factor_count_diag_;

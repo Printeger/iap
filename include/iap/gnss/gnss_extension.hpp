@@ -19,6 +19,7 @@
 #include <map>
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <unordered_map>
 #include <vector>
 
@@ -136,6 +137,7 @@ class GnssExtensionModule : public glim::ExtensionModuleROS2 {
   std::mutex                                         factors_mutex_;
   std::vector<gtsam::NonlinearFactor::shared_ptr>    last_pr_factors_;
   std::vector<gtsam::NonlinearFactor::shared_ptr>    last_dop_factors_;
+  std::optional<GnssEpoch>                           last_injected_epoch_;
   long                                               last_injected_frame_id_{-1};
 
   // Clock between-epoch factor: tracks the previous GNSS-injected frame so
