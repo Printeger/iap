@@ -13,7 +13,8 @@ skymask:
     - {az_deg: 270, min_el_deg: 30}
 
 faults:
-  - sat: 7
+  - constellation: GPS
+    sat: 7
     start_time_s: 20.0
     duration_s: 15.0
     pseudorange_bias_m: 30.0

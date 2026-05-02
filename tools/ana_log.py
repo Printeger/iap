@@ -1826,8 +1826,9 @@ def generate_demo8_araim_truth_iap_svg(rows: list[dict[str, Any]], source: str, 
             body.extend(svg_axes(px, py, pw, ph, title, rel_label, "meters"))
             body.append(svg_text(px + 20, py + 42, f"{metric} unavailable.", 13, "#991b1b"))
             continue
+        # Keep the PL timeline zoomed to the observed range. Starting at zero
+        # makes GNSS fault responses hard to see when PL sits tens of meters up.
         y0, y1 = float_range(values)
-        y0 = min(0.0, y0)
         body.extend(svg_axes(px, py, pw, ph, title, rel_label, "meters"))
         body.append(svg_polyline(optional_timeline_points(panel_rows, truth_key, px, py, pw, ph, t0, t1, y0, y1), truth_color, 2.1))
         body.append(svg_polyline(optional_timeline_points(panel_rows, iap_key, px, py, pw, ph, t0, t1, y0, y1), iap_color, 1.8))
@@ -1850,6 +1851,190 @@ def generate_demo8_araim_truth_iap_svg(rows: list[dict[str, Any]], source: str, 
         body.append(svg_text(px + 12, py + ph - 12, f"underbound={len(underbound_rows)}, ratio={underbound_ratio:.3f}", 12, "#111827"))
         body.append(svg_text(px - 8, py + ph + 4, f"{y0:.2f}", 10, "#4b5563", "end"))
         body.append(svg_text(px - 8, py + 4, f"{y1:.2f}", 10, "#4b5563", "end"))
+    write_svg(path, width, height, body)
+
+
+def generate_demo8_gnss_fault_detection_svg(
+    compare_rows: list[dict[str, Any]],
+    gnss_debug_rows: list[dict[str, str]],
+    araim_rows: list[dict[str, str]],
+    path: Path,
+) -> None:
+    width, height = 1120, 900
+    body: list[str] = [svg_text(40, 34, "Demo8 GNSS Fault Injection Detection", 18, "#111827")]
+    body.append(svg_text(40, 56, "Detection view: truth/IAP n_det plus post-opt pseudorange residuals from the same noisy/faulted observations.", 12, "#4b5563"))
+
+    usable_compare = [
+        row for row in compare_rows
+        if row.get("stamp") is not None
+        and row.get("truth_gnss_valid") is True
+        and row.get("iap_gnss_valid") is True
+    ]
+    if not usable_compare:
+        body.append(svg_text(40, 100, "No usable GNSS truth/IAP rows.", 14, "#991b1b"))
+        write_svg(path, width, height, body)
+        return
+
+    stamps = [float(row["stamp"]) for row in usable_compare]
+    t0, t1 = min(stamps), max(stamps)
+    rel_label = f"relative time from {t0:.3f}s"
+
+    def in_time(stamp: float) -> bool:
+        return t0 <= stamp <= t1
+
+    iap_det_rows: list[dict[str, Any]] = []
+    for row in araim_rows:
+        if row.get("row_type") != "epoch":
+            continue
+        stamp = to_float(row.get("stamp"))
+        n_det = to_float(row.get("gnss_n_det"))
+        valid = boolish(row.get("gnss_valid")) is True
+        if stamp is None or n_det is None or not valid or not in_time(stamp):
+            continue
+        iap_det_rows.append({"stamp": stamp, "iap_gnss_n_det": n_det})
+
+    truth_det_rows = [
+        {"stamp": float(row["stamp"]), "truth_gnss_n_det": float(row.get("truth_gnss_n_det") or 0.0)}
+        for row in usable_compare
+        if row.get("truth_gnss_n_det") is not None
+    ]
+    detected_stamps = [
+        float(row["stamp"]) for row in usable_compare
+        if (row.get("truth_gnss_n_det") or 0.0) > 0.0
+    ]
+
+    debug_pr_rows: list[dict[str, Any]] = []
+    for row in gnss_debug_rows:
+        if row.get("factor_type") != "PR":
+            continue
+        stamp = to_float(row.get("stamp"))
+        residual = to_float(row.get("residual"))
+        normalized = to_float(row.get("normalized_residual"))
+        if stamp is None or residual is None or normalized is None or not in_time(stamp):
+            continue
+        sat_key = f"{row.get('constellation', '').strip()}{row.get('sat_id', '').strip()}"
+        debug_pr_rows.append({
+            "stamp": stamp,
+            "sat_key": sat_key or row.get("sat_id", "sat"),
+            "residual": residual,
+            "abs_residual": abs(residual),
+            "abs_normalized_residual": abs(normalized),
+        })
+
+    # Pick the satellites most responsible during detected epochs. If no
+    # detection exists, fall back to the largest residuals over the whole run.
+    detected_tol_s = 0.35
+    detected_stamps_sorted = sorted(detected_stamps)
+
+    def near_detection(stamp: float) -> bool:
+        if not detected_stamps_sorted:
+            return False
+        index = bisect.bisect_left(detected_stamps_sorted, stamp)
+        neighbors = []
+        if index < len(detected_stamps_sorted):
+            neighbors.append(detected_stamps_sorted[index])
+        if index > 0:
+            neighbors.append(detected_stamps_sorted[index - 1])
+        return any(abs(stamp - value) <= detected_tol_s for value in neighbors)
+
+    suspect_groups: dict[str, list[dict[str, Any]]] = defaultdict(list)
+    for row in debug_pr_rows:
+        if detected_stamps_sorted and not near_detection(float(row["stamp"])):
+            continue
+        suspect_groups[row["sat_key"]].append(row)
+    if not suspect_groups:
+        for row in debug_pr_rows:
+            suspect_groups[row["sat_key"]].append(row)
+
+    def suspect_score(items: list[dict[str, Any]]) -> float:
+        if not items:
+            return 0.0
+        return rms([float(item["abs_normalized_residual"]) for item in items])
+
+    suspect_sats = [
+        sat for sat, _items in sorted(
+            suspect_groups.items(),
+            key=lambda pair: suspect_score(pair[1]),
+            reverse=True,
+        )[:4]
+    ]
+    colors = ["#dc2626", "#2563eb", "#f97316", "#7c3aed"]
+
+    def add_detection_bands(px: float, py: float, pw: float, ph: float) -> None:
+        if not detected_stamps_sorted:
+            return
+        # Collapse nearby detected samples into translucent bands.
+        bands: list[tuple[float, float]] = []
+        start = detected_stamps_sorted[0]
+        last = start
+        for stamp in detected_stamps_sorted[1:]:
+            if stamp - last > 0.6:
+                bands.append((start, last))
+                start = stamp
+            last = stamp
+        bands.append((start, last))
+        for start, end in bands:
+            x0 = map_linear(start, t0, t1, px, px + pw)
+            x1 = map_linear(end, t0, t1, px, px + pw)
+            body.append(f'<rect x="{x0:.2f}" y="{py:.2f}" width="{max(2.0, x1 - x0):.2f}" height="{ph:.2f}" fill="#fee2e2" fill-opacity="0.55" />')
+
+    def add_points(rows: list[dict[str, Any]], value_key: str, px: float, py: float, pw: float, ph: float, y0: float, y1: float, color: str, radius: float = 2.7) -> None:
+        stride = max(1, len(rows) // 700)
+        for row in rows[::stride]:
+            stamp = row.get("stamp")
+            value = row.get(value_key)
+            if stamp is None or value is None:
+                continue
+            x = map_linear(float(stamp), t0, t1, px, px + pw)
+            y = map_linear(float(value), y0, y1, py + ph, py)
+            body.append(f'<circle cx="{x:.2f}" cy="{y:.2f}" r="{radius:.2f}" fill="{color}" fill-opacity="0.78" />')
+
+    panels = [
+        (70.0, 95.0, 990.0, 175.0, "GNSS detected fault count", "count"),
+        (70.0, 345.0, 990.0, 175.0, "Top suspect PR normalized residual magnitude", "|residual / sigma|"),
+        (70.0, 600.0, 990.0, 175.0, "Top suspect pseudorange residual magnitude", "|residual| [m]"),
+    ]
+
+    # Panel 1: truth and IAP n_det.
+    px, py, pw, ph, title, ylabel = panels[0]
+    det_values = [float(row["truth_gnss_n_det"]) for row in truth_det_rows] + [float(row["iap_gnss_n_det"]) for row in iap_det_rows]
+    y0, y1 = 0.0, max(2.0, max(det_values) + 0.5 if det_values else 2.0)
+    body.extend(svg_axes(px, py, pw, ph, title, rel_label, ylabel))
+    add_detection_bands(px, py, pw, ph)
+    body.append(svg_polyline(optional_timeline_points(truth_det_rows, "truth_gnss_n_det", px, py, pw, ph, t0, t1, y0, y1), "#0891b2", 2.2))
+    body.append(svg_polyline(optional_timeline_points(iap_det_rows, "iap_gnss_n_det", px, py, pw, ph, t0, t1, y0, y1), "#2563eb", 1.9))
+    add_points([row for row in truth_det_rows if row.get("truth_gnss_n_det", 0.0) > 0.0], "truth_gnss_n_det", px, py, pw, ph, y0, y1, "#dc2626", 3.2)
+    body.append(svg_text(px + 12, py + ph - 12, f"truth detections={sum(1 for row in truth_det_rows if row.get('truth_gnss_n_det', 0.0) > 0.0)}, IAP detections={sum(1 for row in iap_det_rows if row.get('iap_gnss_n_det', 0.0) > 0.0)}", 12, "#111827"))
+    body.append(svg_text(px - 8, py + ph + 4, f"{y0:.1f}", 10, "#4b5563", "end"))
+    body.append(svg_text(px - 8, py + 4, f"{y1:.1f}", 10, "#4b5563", "end"))
+
+    # Panel 2/3: residual magnitude for top suspect satellites.
+    for panel_index, value_key in [(1, "abs_normalized_residual"), (2, "abs_residual")]:
+        px, py, pw, ph, title, ylabel = panels[panel_index]
+        panel_rows = [row for row in debug_pr_rows if row["sat_key"] in suspect_sats]
+        values = [float(row[value_key]) for row in panel_rows]
+        y0, y1 = float_range(values)
+        y0 = min(0.0, y0)
+        if value_key == "abs_normalized_residual":
+            y1 = max(y1, math.sqrt(6.63) * 1.15)
+        body.extend(svg_axes(px, py, pw, ph, title, rel_label, ylabel))
+        add_detection_bands(px, py, pw, ph)
+        if value_key == "abs_normalized_residual":
+            threshold = math.sqrt(6.63)
+            y = map_linear(threshold, y0, y1, py + ph, py)
+            body.append(f'<line x1="{px:.2f}" y1="{y:.2f}" x2="{px + pw:.2f}" y2="{y:.2f}" stroke="#991b1b" stroke-dasharray="6 4" />')
+            body.append(svg_text(px + pw - 210, y - 6, "NIS gate sqrt(6.63)", 11, "#991b1b"))
+        for idx, sat in enumerate(suspect_sats):
+            sat_rows = [row for row in debug_pr_rows if row["sat_key"] == sat]
+            color = colors[idx % len(colors)]
+            body.append(svg_polyline(optional_timeline_points(sat_rows, value_key, px, py, pw, ph, t0, t1, y0, y1), color, 1.7, 0.9))
+            add_points([row for row in sat_rows if near_detection(float(row["stamp"]))], value_key, px, py, pw, ph, y0, y1, color, 2.4)
+            body.append(f'<line x1="{px + pw - 165:.2f}" y1="{py + 18 + idx * 18:.2f}" x2="{px + pw - 140:.2f}" y2="{py + 18 + idx * 18:.2f}" stroke="{color}" stroke-width="2" />')
+            body.append(svg_text(px + pw - 132, py + 22 + idx * 18, sat, 11, "#374151"))
+        body.append(svg_text(px + 12, py + ph - 12, f"red bands: truth baseline n_det > 0; suspect sats={', '.join(suspect_sats) if suspect_sats else 'none'}", 12, "#111827"))
+        body.append(svg_text(px - 8, py + ph + 4, f"{y0:.2f}", 10, "#4b5563", "end"))
+        body.append(svg_text(px - 8, py + 4, f"{y1:.2f}", 10, "#4b5563", "end"))
+
     write_svg(path, width, height, body)
 
 
@@ -1902,6 +2087,8 @@ def write_demo8_araim_truth_compare_outputs(
     out_dir: Path,
     figs_dir: Path,
     no_plots: bool,
+    gnss_debug_rows: list[dict[str, str]] | None = None,
+    araim_rows: list[dict[str, str]] | None = None,
 ) -> list[str]:
     if not analysis.get("available"):
         return []
@@ -1944,10 +2131,17 @@ def write_demo8_araim_truth_compare_outputs(
         figs_dir / "demo8_gnss_araim_truth_vs_iap.svg",
         figs_dir / "demo8_lidar_araim_truth_vs_iap.svg",
         figs_dir / "demo8_araim_delta_summary.svg",
+        figs_dir / "demo8_gnss_fault_detection.svg",
     ]
     generate_demo8_araim_truth_iap_svg(rows, "gnss", svg_paths[0])
     generate_demo8_araim_truth_iap_svg(rows, "lidar", svg_paths[1])
     generate_demo8_araim_delta_summary_svg(rows, svg_paths[2])
+    generate_demo8_gnss_fault_detection_svg(
+        rows,
+        gnss_debug_rows or [],
+        araim_rows or [],
+        svg_paths[3],
+    )
     generated.extend(str(path) for path in svg_paths)
     return generated
 
@@ -2541,6 +2735,8 @@ def main() -> int:
             out_dir,
             figs_dir,
             args.no_plots,
+            rows_by_name.get("gnss_factor_debug", []),
+            rows_by_name.get("araim", []),
         )
     )
     generated_plots.extend(

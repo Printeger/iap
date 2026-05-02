@@ -456,7 +456,7 @@ ros2 launch iap demo7.launch \
 |---|---|
 | `config/gnss_sim/demo7_open_sky.yaml` | 默认开阔天空，无 SkyMask，无故障 |
 | `config/gnss_sim/demo7_skymask_nlos.yaml` | 启用 SkyMask 和 NLOS 退化 |
-| `config/gnss_sim/demo7_fault_injection.yaml` | 启用 SkyMask，并对 PRN 7 注入伪距偏差和 C/N0 退化 |
+| `config/gnss_sim/demo7_fault_injection.yaml` | 启用 SkyMask，并对 GPS PRN 7 注入伪距偏差和 C/N0 退化 |
 
 GNSS 相关常用参数：
 

@@ -227,6 +227,7 @@
 ### v2.4 Fault Injection
 
 - Add scheduled fault injection from YAML:
+  - `constellation`: optional constellation filter (`GPS`, `BDS`, `GAL`, `GLO` or short `G`, `C`, `E`, `R`); omitted keeps legacy PRN-only matching.
   - `fault_sat`: target satellite id or PRN.
   - `start_time_s` and `duration_s`.
   - `bias_m`: constant pseudorange bias.

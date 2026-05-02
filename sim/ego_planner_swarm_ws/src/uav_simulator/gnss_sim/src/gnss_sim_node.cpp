@@ -324,6 +324,7 @@ struct SkyMaskEntry
 
 struct FaultConfig
 {
+  uint32_t sys = SYS_NONE;  // Optional constellation filter; SYS_NONE keeps legacy PRN-only matching.
   uint32_t prn = 0;
   double start_time_s = 0.0;
   double duration_s = 0.0;
@@ -387,6 +388,16 @@ public:
       if (root["faults"]) {
         for (const auto& item : root["faults"]) {
           FaultConfig fault;
+          if (item["constellation"]) {
+            fault.sys = constellation_name_to_sys(item["constellation"].as<std::string>());
+            if (fault.sys == SYS_NONE) {
+              RCLCPP_WARN(
+                logger,
+                "Ignoring GNSS fault with unknown constellation '%s'",
+                item["constellation"].as<std::string>().c_str());
+              continue;
+            }
+          }
           fault.prn = item["sat"].as<uint32_t>();
           fault.start_time_s = item["start_time_s"].as<double>();
           fault.duration_s = item["duration_s"].as<double>();
@@ -1071,6 +1082,9 @@ public:
 
     if (enable_fault_injection) {
       for (const auto& fault : faults) {
+        if (fault.sys != SYS_NONE && fault.sys != sat.sys) {
+          continue;
+        }
         if (fault.prn != sat.prn) {
           continue;
         }
