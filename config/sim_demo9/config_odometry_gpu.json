@@ -1,0 +1,44 @@
+{
+  "odometry_estimation": {
+    "so_name": "libodometry_estimation_gpu.so",
+    "initialization_mode": "LOOSE",
+    "initialization_window_size": 1.0,
+    "init_pose_damping_scale": 1e10,
+
+    "smoother_lag": 5.0,
+    "use_isam2_dogleg": false,
+    "isam2_relinearize_skip": 5,
+    "isam2_relinearize_thresh": 0.1,
+    "clock_owner_mode": "odometry",
+    "fix_imu_bias": true,
+    "clk_bias_noise": 100,
+    "clk_drift_noise": 1,
+    "clk_bias_relin_thresh": 500.0,
+    "clk_drift_relin_thresh": 5.0,
+
+    "voxel_resolution": 0.25,
+    "voxel_resolution_max": 0.5,
+    "voxel_resolution_dmin": 5.0,
+    "voxel_resolution_dmax": 20.0,
+    "voxelmap_levels": 2,
+    "voxelmap_scaling_factor": 2.0,
+    "full_connection_window_size": 2,
+
+    "keyframe_update_strategy": "OVERLAP",
+    "max_num_keyframes": 15,
+    "keyframe_min_overlap": 0.01,
+    "keyframe_max_overlap": 0.7,
+    "keyframe_delta_trans": 2.0,
+    "keyframe_delta_rot": 0.5,
+    "keyframe_entropy_thresh": 0.99,
+
+    "icp_cond_threshold": 10000.0,
+    "gamma_lidar_max": 10.0,
+    "enable_icp_csv": true,
+    "icp_csv_path": "/tmp/demo9_iap_icp.csv",
+
+    "validate_imu": true,
+    "save_imu_rate_trajectory": true,
+    "num_threads": 2
+  }
+}

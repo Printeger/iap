@@ -1,0 +1,52 @@
+{
+  "gnss": {
+    "pr_noise_base": 5.0,
+    "dop_noise_base": 0.5,
+    "elev_noise_exp": 2.0,
+    "canopy_sigma_0": 1.0,
+    "canopy_sigma_mp": 0.5,
+    "canopy_sigma_c": 5.0,
+    "canopy_alpha": 2.0,
+    "min_elevation_deg": 10.0,
+    "time_tolerance": 0.1,
+    "max_epoch_queue": 100,
+    "lever_arm": [
+      0.0,
+      0.0,
+      0.0
+    ],
+    "clock_q_bias": 1.0,
+    "clock_q_drift": 0.1,
+    "sigma_ecef_origin": 5.0,
+    "sigma_ecef_rot": 0.087,
+    "enable_debug_csv": true,
+    "debug_csv_path": "/tmp/demo9_iap_gnss_factor_debug.csv"
+  },
+  "integrity": {
+    "enable": true,
+    "enable_araim": true,
+    "enable_fgo_info": true,
+    "enable_dynamic_al": true,
+    "publish_topic": "/iap/integrity",
+    "K_pl": 3.0,
+    "gamma_H": 0.5,
+    "r_drone": 0.35,
+    "HAL_trunk_default": 10.0,
+    "gamma_V": 0.8,
+    "h_min": 2.0,
+    "VAL_default": 20.0,
+    "enable_araim_csv": true,
+    "araim_csv_path": "/tmp/demo9_iap_araim.csv",
+    "enable_traj_csv": true,
+    "traj_csv_path": "/tmp/demo9_traj_with_gnss.csv",
+    "enable_araim_markers": false,
+    "araim_marker_topic": "/iap/araim_envelopes",
+    "araim_marker_history_size": 60,
+    "araim_marker_publish_period_s": 0.5,
+    "araim_marker_min_pl_m": 0.05,
+    "araim_marker_max_pl_m": 30.0,
+    "araim_marker_show_gnss": true,
+    "araim_marker_show_lidar": false,
+    "araim_marker_show_final": false
+  }
+}

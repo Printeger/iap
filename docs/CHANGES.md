@@ -3,6 +3,17 @@
 > 规则：任何代码改动必须在这里记录，并包含 IAP-RQ-XXX。
 
 ## Unreleased
+- feat(phase1-ego-closed-loop): IAP-RQ-081 — add the ordinary EGO planner closed-loop baseline on IAP odometry.
+  - `launch/demo9_ego_planner_closed_loop.launch.py`: explicitly composes map generation, SO3 plant/controller, local_sensing, LiDAR body bridge, GNSS sim, IAP, EGO planner, EGO `traj_server`, optional RViz, and a run-duration shutdown.
+  - `config/sim_demo9`: baseline IAP config for demo9; launch copies it to `/tmp` and applies `use_gnss`, `use_araim`, and `allow_truth_alignment` without mutating repo config.
+  - `sim/ego_planner_swarm_ws/src/iap_phase1_tools`: new `ament_python` package containing `phase1_closed_loop_logger`, which writes `desired_vs_truth.csv`, `tracking_error.csv`, `planner_traj.csv`, `planner_cmd.csv`, `topic_contract.json`, and `phase1_summary.json`.
+  - `docs/phase1_ego_planner_integration/topic_contract.md`: documents the Phase 1 topic/type/frame/remap contract and the truth-vs-IAP odometry boundary.
+  - `tools/build_phase1_ego_planner_closed_loop.sh`, `tools/phase1/check_topic_contract.py`, `tools/phase1/validate_phase1_closed_loop.py`: build, topic smoke-check, and run validation helpers.
+  - Default behavior keeps EGO planner `odom_world`, EGO `grid_map/odom`, and SO3 controller `odom` on `/drone_0_visual_slam/odom`; `/sim/drone_0/truth_odom` remains plant/sensor/logging only.
+  - Demo9 GNSS defaults to RINEX multi-constellation `GPS,BDS,GAL,GLO`, including `/ublox_driver/glo_ephem` for GLONASS, while retaining launch args to override the ephemeris source, RINEX file, and constellation list.
+  - Demo9 now starts RViz by default with `config/sim_demo9/demo9_gnss.rviz` and publishes demo8-style three-trajectory visualization topics: `/demo9/drone/path`, `/demo9/truth/path`, and `/demo9/desired/path`.
+  - Demo9 exposes EGO multi-waypoint launch args `point_num` and `point1_*` through `point4_*`; the default single target remains `goal_x/y/z` mapped to EGO `point0`.
+  - Demo9 GNSS satellite signal rays and NLOS path markers are thinner and semi-transparent by default; `gnss_sim_node` now exposes `signal_ray_width_m`, `signal_ray_alpha`, `nlos_path_width_m`, and `nlos_path_alpha`.
 - feat(demo4-dynamics): IAP-RQ-002 / IAP-RQ-003 — add a complete real quadrotor dynamics control chain on top of `launch/demo1.launch`.
   - `launch/demo4.launch`: keeps demo1's map, local sensing, and RViz flow, but replaces fake truth odometry with `hover PositionCommand -> SO3ControlComponent -> SO3Command -> so3_quadrotor_simulator -> truth odom/IMU`.
   - `poscmd_2_odom`: adds `hover_cmd_publisher`, a steady `quadrotor_msgs/PositionCommand` source for controller input and visualization.

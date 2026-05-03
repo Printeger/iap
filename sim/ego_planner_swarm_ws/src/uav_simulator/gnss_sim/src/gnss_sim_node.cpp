@@ -1298,6 +1298,14 @@ private:
     visualization_frame_ = declare_parameter<std::string>("visualization_frame", "map");
     satellite_display_radius_m_ =
       declare_parameter<double>("satellite_display_radius_m", 80.0);
+    signal_ray_width_m_ =
+      std::max(0.001, declare_parameter<double>("signal_ray_width_m", 0.08));
+    signal_ray_alpha_ =
+      std::clamp(declare_parameter<double>("signal_ray_alpha", 0.95), 0.0, 1.0);
+    nlos_path_width_m_ =
+      std::max(0.001, declare_parameter<double>("nlos_path_width_m", 0.16));
+    nlos_path_alpha_ =
+      std::clamp(declare_parameter<double>("nlos_path_alpha", 0.95), 0.0, 1.0);
     skyplot_origin_enu_ = read_vector3_parameter("skyplot_origin_enu", {-20.0, -20.0, 8.0});
     skyplot_radius_m_ = declare_parameter<double>("skyplot_radius_m", 8.0);
     enable_sky_dome_visualization_ =
@@ -2099,8 +2107,9 @@ private:
         continue;
       }
       auto ray = base_marker(stamp, "signal_rays", id++, visualization_msgs::msg::Marker::LINE_STRIP);
-      ray.scale.x = 0.08;
+      ray.scale.x = signal_ray_width_m_;
       ray.color = color_for_visibility(sat.visibility);
+      ray.color.a = static_cast<float>(signal_ray_alpha_);
       ray.points.push_back(point_msg(receiver.pos_enu));
       ray.points.push_back(point_msg(sat.display_pos_enu));
       array.markers.push_back(ray);
@@ -2122,8 +2131,9 @@ private:
         continue;
       }
       auto path = base_marker(receiver.stamp, "nlos_paths", id++, visualization_msgs::msg::Marker::LINE_STRIP);
-      path.scale.x = 0.16;
+      path.scale.x = nlos_path_width_m_;
       path.color = color_for_visibility(sat.visibility);
+      path.color.a = static_cast<float>(nlos_path_alpha_);
       path.points.push_back(point_msg(receiver.pos_enu));
       path.points.push_back(point_msg(sat.raycast_hit_enu));
       path.points.push_back(point_msg(sat.display_pos_enu));
@@ -2388,6 +2398,10 @@ private:
   double multipath_amp_m_ = 0.0;
   double multipath_period_s_ = 8.0;
   double satellite_display_radius_m_ = 80.0;
+  double signal_ray_width_m_ = 0.08;
+  double signal_ray_alpha_ = 0.95;
+  double nlos_path_width_m_ = 0.16;
+  double nlos_path_alpha_ = 0.95;
   double skyplot_radius_m_ = 8.0;
   int sky_dome_ring_count_ = 3;
   int sky_dome_meridian_count_ = 12;

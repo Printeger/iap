@@ -214,6 +214,19 @@ Acceptance:
 Acceptance:
 - 可复现“退化→SEARCH→恢复→继续”的闭环行为。
 
+### IAP-RQ-081: Ordinary EGO planner closed-loop baseline
+- [x] 以 `/drone_0_visual_slam/odom` 作为 EGO planner、EGO grid map、SO3 controller 的默认反馈里程计。
+- [x] 保留 truth odom 仅用于 plant state、sensor simulation、GNSS simulation、visualization 和 logging。
+- [x] 使用 EGO 原生 `traj_server -> PositionCommand -> SO3ControlComponent -> so3_quadrotor_simulator` 命令链。
+- [x] 默认 GNSS 仿真使用 RINEX 多星座 `GPS,BDS,GAL,GLO`，并保留 launch args 支持切换回 synthetic/GPS-only 或替换 RINEX 文件。
+- [x] 默认启动 RViz，并像 demo8 一样可视化 IAP 估计、truth、desired 三条轨迹。
+- [x] 暴露 `point_num` 和 `point1_*` 到 `point4_*` launch args；默认单目标仍由 `goal_x/y/z` 控制。
+- [x] 输出 Phase 1 topic contract、闭环 tracking logs、topic summary 和 validation script。
+
+Acceptance:
+- `ros2 launch iap demo9_ego_planner_closed_loop.launch.py start_rviz:=false run_duration_s:=30`
+  后 `tools/phase1/validate_phase1_closed_loop.py` 返回 0。
+
 ---
 
 ## 7. Experiments & Metrics

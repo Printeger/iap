@@ -36,6 +36,7 @@
 #include <Eigen/Geometry>
 
 #include <algorithm>
+#include <cctype>
 #include <cmath>
 #include <cstdint>
 #include <deque>
@@ -178,10 +179,12 @@ struct TruthMarkerFrame {
   double gnss_pl_e = 0.0;
   double gnss_pl_n = 0.0;
   double gnss_pl_u = 0.0;
+  int gnss_n_det = 0;
   bool lidar_valid = false;
   double lidar_pl_e = 0.0;
   double lidar_pl_n = 0.0;
   double lidar_pl_u = 0.0;
+  int lidar_n_det = 0;
   bool final_valid = false;
   double final_pl_e = 0.0;
   double final_pl_n = 0.0;
@@ -189,6 +192,13 @@ struct TruthMarkerFrame {
   bool any_fault_detected = false;
   int final_state = 2;
 };
+
+std::string lower_copy(std::string s) {
+  std::transform(s.begin(), s.end(), s.begin(), [](unsigned char c) {
+    return static_cast<char>(std::tolower(c));
+  });
+  return s;
+}
 
 struct TruthGnssClockFit {
   bool valid = false;
@@ -252,6 +262,27 @@ class Demo8TruthAraimExtensionModule : public glim::ExtensionModuleROS2 {
     marker_show_final_ = ros_config.param_nested<bool>(
         {"glim_ros", "sim", "demo8_truth_araim"},
         "truth_araim_marker_show_final", false);
+    marker_mode_ = lower_copy(ros_config.param_nested<std::string>(
+        {"glim_ros", "sim", "demo8_truth_araim"},
+        "truth_araim_marker_mode", "fault_only"));
+    if (marker_mode_ != "fault_only" && marker_mode_ != "envelope") {
+      logger_->warn(
+          "[demo8_truth_araim] unknown truth_araim_marker_mode='{}'; using fault_only",
+          marker_mode_);
+      marker_mode_ = "fault_only";
+    }
+    marker_fault_history_size_ = ros_config.param_nested<int>(
+        {"glim_ros", "sim", "demo8_truth_araim"},
+        "truth_araim_marker_fault_history_size", 20);
+    marker_fault_lifetime_s_ = ros_config.param_nested<double>(
+        {"glim_ros", "sim", "demo8_truth_araim"},
+        "truth_araim_marker_fault_lifetime_s", 8.0);
+    marker_show_fault_envelope_ = ros_config.param_nested<bool>(
+        {"glim_ros", "sim", "demo8_truth_araim"},
+        "truth_araim_marker_show_fault_envelope", false);
+    marker_fault_radius_m_ = ros_config.param_nested<double>(
+        {"glim_ros", "sim", "demo8_truth_araim"},
+        "truth_araim_marker_fault_radius_m", 0.8);
     marker_final_hal_m_ = ros_config.param_nested<double>(
         {"glim_ros", "sim", "demo8_truth_araim"},
         "truth_araim_marker_final_hal_m", 10.0);
@@ -259,6 +290,9 @@ class Demo8TruthAraimExtensionModule : public glim::ExtensionModuleROS2 {
         {"glim_ros", "sim", "demo8_truth_araim"},
         "truth_araim_marker_final_val_m", 20.0);
     marker_history_size_ = std::max(1, marker_history_size_);
+    marker_fault_history_size_ = std::max(1, marker_fault_history_size_);
+    marker_fault_lifetime_s_ = std::max(0.1, marker_fault_lifetime_s_);
+    marker_fault_radius_m_ = std::max(0.05, marker_fault_radius_m_);
     marker_publish_period_s_ = std::max(0.0, marker_publish_period_s_);
     marker_max_pl_m_ = std::max(marker_min_pl_m_, marker_max_pl_m_);
 
@@ -302,8 +336,11 @@ class Demo8TruthAraimExtensionModule : public glim::ExtensionModuleROS2 {
         origin_lat_deg_, origin_lon_deg_, origin_alt_m_);
     logger_->info(
         "[demo8_truth_araim] truth-pose baseline uses the same noisy/faulted simulated observations, not ideal noiseless observations");
-    logger_->info("[demo8_truth_araim] truth-pose baseline markers {} topic={}",
-                  enable_markers_ ? "ENABLED" : "disabled", marker_topic_);
+    logger_->info(
+        "[demo8_truth_araim] truth-pose baseline markers {} topic={} mode={} fault_history={} fault_lifetime={:.1f}s show_fault_envelope={}",
+        enable_markers_ ? "ENABLED" : "disabled", marker_topic_, marker_mode_,
+        marker_fault_history_size_, marker_fault_lifetime_s_,
+        marker_show_fault_envelope_ ? "true" : "false");
   }
 
   std::vector<glim::GenericTopicSubscription::Ptr>
@@ -897,25 +934,29 @@ class Demo8TruthAraimExtensionModule : public glim::ExtensionModuleROS2 {
     item.stamp = stamp;
     item.position = position_of(truth_odom);
 
-    if (marker_show_gnss_ && truth_gnss.valid &&
-        valid_triplet(truth_gnss.PL_E, truth_gnss.PL_N, truth_gnss.PL_U)) {
-      item.gnss_valid = true;
-      item.gnss_pl_e = truth_gnss.PL_E;
-      item.gnss_pl_n = truth_gnss.PL_N;
-      item.gnss_pl_u = truth_gnss.PL_U;
-      item.any_fault_detected = item.any_fault_detected ||
-                                truth_gnss.n_detected > 0;
+    if (marker_show_gnss_ && truth_gnss.valid) {
+      item.gnss_n_det = truth_gnss.n_detected;
+      item.any_fault_detected =
+          item.any_fault_detected || truth_gnss.n_detected > 0;
+      if (valid_triplet(truth_gnss.PL_E, truth_gnss.PL_N, truth_gnss.PL_U)) {
+        item.gnss_valid = true;
+        item.gnss_pl_e = truth_gnss.PL_E;
+        item.gnss_pl_n = truth_gnss.PL_N;
+        item.gnss_pl_u = truth_gnss.PL_U;
+      }
     }
 
-    if (marker_show_lidar_ && truth_lidar.valid &&
-        valid_triplet(truth_lidar.PL_E, truth_lidar.PL_N,
-                      truth_lidar.PL_U)) {
-      item.lidar_valid = true;
-      item.lidar_pl_e = truth_lidar.PL_E;
-      item.lidar_pl_n = truth_lidar.PL_N;
-      item.lidar_pl_u = truth_lidar.PL_U;
-      item.any_fault_detected = item.any_fault_detected ||
-                                truth_lidar.n_detected > 0;
+    if (marker_show_lidar_ && truth_lidar.valid) {
+      item.lidar_n_det = truth_lidar.n_detected;
+      item.any_fault_detected =
+          item.any_fault_detected || truth_lidar.n_detected > 0;
+      if (valid_triplet(truth_lidar.PL_E, truth_lidar.PL_N,
+                        truth_lidar.PL_U)) {
+        item.lidar_valid = true;
+        item.lidar_pl_e = truth_lidar.PL_E;
+        item.lidar_pl_n = truth_lidar.PL_N;
+        item.lidar_pl_u = truth_lidar.PL_U;
+      }
     }
 
     if (marker_show_final_) {
@@ -956,13 +997,6 @@ class Demo8TruthAraimExtensionModule : public glim::ExtensionModuleROS2 {
       }
     }
 
-    if (!item.gnss_valid && !item.lidar_valid && !item.final_valid) return;
-
-    marker_history_.push_back(item);
-    while (static_cast<int>(marker_history_.size()) > marker_history_size_) {
-      marker_history_.pop_front();
-    }
-
     using Marker = visualization_msgs::msg::Marker;
     using MarkerArray = visualization_msgs::msg::MarkerArray;
 
@@ -978,6 +1012,27 @@ class Demo8TruthAraimExtensionModule : public glim::ExtensionModuleROS2 {
     }
     clear.action = Marker::DELETEALL;
     array.markers.push_back(clear);
+
+    const bool fault_only_mode = marker_mode_ == "fault_only";
+    if (fault_only_mode) {
+      if (item.any_fault_detected) {
+        marker_history_.push_back(item);
+      }
+      while (!marker_history_.empty() &&
+             stamp - marker_history_.front().stamp > marker_fault_lifetime_s_) {
+        marker_history_.pop_front();
+      }
+      while (static_cast<int>(marker_history_.size()) >
+             marker_fault_history_size_) {
+        marker_history_.pop_front();
+      }
+    } else {
+      if (!item.gnss_valid && !item.lidar_valid && !item.final_valid) return;
+      marker_history_.push_back(item);
+      while (static_cast<int>(marker_history_.size()) > marker_history_size_) {
+        marker_history_.pop_front();
+      }
+    }
 
     auto make_marker = [&](const TruthMarkerFrame& frame_item,
                            const std::string& ns,
@@ -1010,13 +1065,138 @@ class Demo8TruthAraimExtensionModule : public glim::ExtensionModuleROS2 {
       return marker;
     };
 
+    auto apply_lifetime = [&](Marker& marker, const double lifetime_s) {
+      const double lifetime = std::max(0.1, lifetime_s);
+      marker.lifetime.sec = static_cast<int32_t>(std::floor(lifetime));
+      marker.lifetime.nanosec = static_cast<uint32_t>(
+          std::llround((lifetime - marker.lifetime.sec) * 1.0e9));
+      if (marker.lifetime.nanosec >= 1000000000U) {
+        ++marker.lifetime.sec;
+        marker.lifetime.nanosec -= 1000000000U;
+      }
+    };
+
+    auto make_fault_marker = [&](const TruthMarkerFrame& frame_item,
+                                 const std::string& ns,
+                                 const int id,
+                                 const double radius,
+                                 const float r,
+                                 const float g,
+                                 const float b,
+                                 const float a,
+                                 const bool glow) {
+      Marker marker;
+      marker.header.frame_id = "map";
+      marker.header.stamp = clear.header.stamp;
+      marker.ns = ns;
+      marker.id = id;
+      marker.type = Marker::SPHERE;
+      marker.action = Marker::ADD;
+      marker.pose.position.x = frame_item.position.x();
+      marker.pose.position.y = frame_item.position.y();
+      marker.pose.position.z = frame_item.position.z();
+      marker.pose.orientation.w = 1.0;
+      const double scale = 2.0 * radius * (glow ? 2.2 : 1.0);
+      marker.scale.x = scale;
+      marker.scale.y = scale;
+      marker.scale.z = scale;
+      marker.color.r = r;
+      marker.color.g = g;
+      marker.color.b = b;
+      marker.color.a = a;
+      apply_lifetime(marker, marker_fault_lifetime_s_);
+      return marker;
+    };
+
+    auto make_text_marker = [&](const TruthMarkerFrame& frame_item,
+                                const std::string& ns,
+                                const int id,
+                                const std::string& text,
+                                const float r,
+                                const float g,
+                                const float b,
+                                const float a) {
+      Marker marker;
+      marker.header.frame_id = "map";
+      marker.header.stamp = clear.header.stamp;
+      marker.ns = ns;
+      marker.id = id;
+      marker.type = Marker::TEXT_VIEW_FACING;
+      marker.action = Marker::ADD;
+      marker.pose.position.x = frame_item.position.x();
+      marker.pose.position.y = frame_item.position.y();
+      marker.pose.position.z =
+          frame_item.position.z() + std::max(0.6, marker_fault_radius_m_ * 1.8);
+      marker.pose.orientation.w = 1.0;
+      marker.scale.z = std::max(0.35, marker_fault_radius_m_ * 0.55);
+      marker.color.r = r;
+      marker.color.g = g;
+      marker.color.b = b;
+      marker.color.a = a;
+      marker.text = text;
+      apply_lifetime(marker, marker_fault_lifetime_s_);
+      return marker;
+    };
+
     int id = 0;
     for (const auto& frame_item : marker_history_) {
-      const double history_duration =
-          std::max(marker_publish_period_s_ * marker_history_size_, 1.0);
+      const double history_duration = fault_only_mode
+                                          ? marker_fault_lifetime_s_
+                                          : std::max(marker_publish_period_s_ *
+                                                         marker_history_size_,
+                                                     1.0);
       const double age = std::max(0.0, stamp - frame_item.stamp);
       const float fade = static_cast<float>(
           std::max(0.35, 1.0 - age / history_duration));
+
+      if (fault_only_mode) {
+        if (frame_item.gnss_n_det > 0) {
+          array.markers.push_back(make_fault_marker(
+              frame_item, "truth_pose_gnss_fault_detected", id++,
+              marker_fault_radius_m_, 1.0f, 0.05f, 0.45f, 0.32f * fade,
+              true));
+          array.markers.push_back(make_fault_marker(
+              frame_item, "truth_pose_gnss_fault_detected", id++,
+              marker_fault_radius_m_, 1.0f, 0.0f, 0.35f, 0.88f * fade,
+              false));
+          array.markers.push_back(make_text_marker(
+              frame_item, "truth_pose_gnss_fault_detected_text", id++,
+              "GNSS fault n_det=" + std::to_string(frame_item.gnss_n_det),
+              1.0f, 0.95f, 0.98f, 0.95f * fade));
+          if (marker_show_fault_envelope_ && frame_item.gnss_valid) {
+            array.markers.push_back(make_marker(
+                frame_item, "truth_pose_gnss_fault_envelope", id++,
+                frame_item.gnss_pl_e, frame_item.gnss_pl_n,
+                frame_item.gnss_pl_u, 1.0f, 0.05f, 0.45f, 0.10f * fade));
+          }
+        }
+        if (frame_item.lidar_n_det > 0) {
+          array.markers.push_back(make_fault_marker(
+              frame_item, "truth_pose_lidar_fault_detected", id++,
+              marker_fault_radius_m_, 1.0f, 0.55f, 0.05f, 0.30f * fade,
+              true));
+          array.markers.push_back(make_fault_marker(
+              frame_item, "truth_pose_lidar_fault_detected", id++,
+              marker_fault_radius_m_, 1.0f, 0.42f, 0.0f, 0.88f * fade,
+              false));
+          array.markers.push_back(make_text_marker(
+              frame_item, "truth_pose_lidar_fault_detected_text", id++,
+              "LiDAR fault n_det=" + std::to_string(frame_item.lidar_n_det),
+              1.0f, 0.92f, 0.78f, 0.95f * fade));
+          if (marker_show_fault_envelope_ && frame_item.lidar_valid) {
+            array.markers.push_back(make_marker(
+                frame_item, "truth_pose_lidar_fault_envelope", id++,
+                frame_item.lidar_pl_e, frame_item.lidar_pl_n,
+                frame_item.lidar_pl_u, 1.0f, 0.55f, 0.05f, 0.10f * fade));
+          }
+        }
+        if (marker_show_final_ && frame_item.any_fault_detected) {
+          array.markers.push_back(make_text_marker(
+              frame_item, "truth_pose_final_fault_detected", id++,
+              "ARAIM fault detected", 1.0f, 1.0f, 1.0f, 0.85f * fade));
+        }
+        continue;
+      }
 
       if (frame_item.gnss_valid) {
         array.markers.push_back(make_marker(
@@ -1136,6 +1316,11 @@ class Demo8TruthAraimExtensionModule : public glim::ExtensionModuleROS2 {
 	  bool marker_show_gnss_ = true;
 	  bool marker_show_lidar_ = true;
 	  bool marker_show_final_ = false;
+	  std::string marker_mode_ = "fault_only";
+	  int marker_fault_history_size_ = 20;
+	  double marker_fault_lifetime_s_ = 8.0;
+	  bool marker_show_fault_envelope_ = false;
+	  double marker_fault_radius_m_ = 0.8;
 	  double marker_final_hal_m_ = 10.0;
 	  double marker_final_val_m_ = 20.0;
 	  double origin_lat_deg_ = 31.2304;

@@ -40,6 +40,9 @@ def generate_launch_description():
     point4_x = LaunchConfiguration('point4_x', default=30.0)
     point4_y = LaunchConfiguration('point4_y', default=30.0)
     point4_z = LaunchConfiguration('point4_z', default=1.0)
+    point5_x = LaunchConfiguration('point5_x', default=0.0)
+    point5_y = LaunchConfiguration('point5_y', default=0.0)
+    point5_z = LaunchConfiguration('point5_z', default=1.0)
 
     flight_type = LaunchConfiguration('flight_type', default=2)
     use_distinctive_trajs = LaunchConfiguration('use_distinctive_trajs', default=True)
@@ -80,6 +83,9 @@ def generate_launch_description():
     point4_x_arg = DeclareLaunchArgument('point4_x', default_value=point4_x, description='Waypoint 4 X coordinate')
     point4_y_arg = DeclareLaunchArgument('point4_y', default_value=point4_y, description='Waypoint 4 Y coordinate')
     point4_z_arg = DeclareLaunchArgument('point4_z', default_value=point4_z, description='Waypoint 4 Z coordinate')
+    point5_x_arg = DeclareLaunchArgument('point5_x', default_value=point5_x, description='Waypoint 5 X coordinate')
+    point5_y_arg = DeclareLaunchArgument('point5_y', default_value=point5_y, description='Waypoint 5 Y coordinate')
+    point5_z_arg = DeclareLaunchArgument('point5_z', default_value=point5_z, description='Waypoint 5 Z coordinate')
     
     flight_type_arg = DeclareLaunchArgument('flight_type', default_value=flight_type, description='flight_type')
     use_distinctive_trajs_arg = DeclareLaunchArgument('use_distinctive_trajs', default_value=use_distinctive_trajs, description='Use distinctive trajectories')
@@ -137,6 +143,9 @@ def generate_launch_description():
             {'fsm/waypoint4_x': point4_x},
             {'fsm/waypoint4_y': point4_y},
             {'fsm/waypoint4_z': point4_z},
+            {'fsm/waypoint5_x': point5_x},
+            {'fsm/waypoint5_y': point5_y},
+            {'fsm/waypoint5_z': point5_z},
             
             {'grid_map/resolution': 0.1},
             {'grid_map/map_size_x': map_size_x},
@@ -241,6 +250,9 @@ def generate_launch_description():
     ld.add_action(point4_x_arg)
     ld.add_action(point4_y_arg)
     ld.add_action(point4_z_arg)
+    ld.add_action(point5_x_arg)
+    ld.add_action(point5_y_arg)
+    ld.add_action(point5_z_arg)
     
     ld.add_action(flight_type_arg)
     ld.add_action(use_distinctive_trajs_arg)

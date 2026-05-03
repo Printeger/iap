@@ -46,6 +46,8 @@ double _z_limit, _sensing_range, _resolution, _sense_rate, _init_x, _init_y;
 double _target_x, _target_y, _clear_radius;
 double _min_dist;
 int _seed;
+bool _grow_from_ground;
+double _ground_z;
 
 bool _map_ok = false;
 bool _has_odom = false;
@@ -76,6 +78,12 @@ bool isInClearZone(double x, double y) {
   const Eigen::Vector2d init(_init_x, _init_y);
   const Eigen::Vector2d target(_target_x, _target_y);
   return (p - init).norm() < _clear_radius || (p - target).norm() < _clear_radius;
+}
+
+inline double pillarLayerZ(int layer) {
+  return _grow_from_ground
+             ? _ground_z + static_cast<double>(layer) * _resolution
+             : (static_cast<double>(layer) + 0.5) * _resolution + 1e-2;
 }
 
 void addZAnchorFeatures(pcl::PointCloud<pcl::PointXYZ>& cloud) {
@@ -282,10 +290,12 @@ void RandomMapGenerate() {
       for (int s = -widNum / 2.0; s < widNum / 2.0; s++) {
         h = rand_h(eng);
         int heiNum = ceil(h / _resolution);
-        for (int t = -20; t < heiNum; t++) {
+        const int t_start = _grow_from_ground ? 0 : -20;
+        const int t_end = _grow_from_ground ? heiNum : heiNum - 1;
+        for (int t = t_start; t <= t_end; t++) {
           pt_random.x = x + (r + 0.5) * _resolution + 1e-2;
           pt_random.y = y + (s + 0.5) * _resolution + 1e-2;
-          pt_random.z = (t + 0.5) * _resolution + 1e-2;
+          pt_random.z = pillarLayerZ(t);
           cloudMap.points.push_back(pt_random);
         }
       }
@@ -305,9 +315,7 @@ void RandomMapGenerate() {
 
     x = floor(x / _resolution) * _resolution + _resolution / 2.0;
     y = floor(y / _resolution) * _resolution + _resolution / 2.0;
-    z = floor(z / _resolution) * _resolution + _resolution / 2.0;
-
-    Eigen::Vector3d translate(x, y, z);
+    const double z_grid = floor(z / _resolution) * _resolution + _resolution / 2.0;
 
     double theta = rand_theta_(eng);
     Eigen::Matrix3d rotate;
@@ -316,6 +324,9 @@ void RandomMapGenerate() {
 
     double radius1 = rand_radius_(eng);
     double radius2 = rand_radius2_(eng);
+    z = _grow_from_ground ? _ground_z + radius2 : z_grid;
+
+    Eigen::Vector3d translate(x, y, z);
 
     // draw a circle centered at (x,y,z)
     Eigen::Vector3d cpt;
@@ -409,10 +420,12 @@ void RandomMapGenerateCylinder() {
       for (int s = -widNum / 2.0; s < widNum / 2.0; s++) {
         h = rand_h(eng);
         int heiNum = ceil(h / _resolution);
-        for (int t = -20; t < heiNum; t++) {
+        const int t_start = _grow_from_ground ? 0 : -20;
+        const int t_end = _grow_from_ground ? heiNum : heiNum - 1;
+        for (int t = t_start; t <= t_end; t++) {
           double temp_x = x + (r + 0.5) * _resolution + 1e-2;
           double temp_y = y + (s + 0.5) * _resolution + 1e-2;
-          double temp_z = (t + 0.5) * _resolution + 1e-2;
+          double temp_z = pillarLayerZ(t);
           if ( (Eigen::Vector2d(temp_x,temp_y) - Eigen::Vector2d(x,y)).norm() <= radius )
           {
             pt_random.x = temp_x;
@@ -439,9 +452,7 @@ void RandomMapGenerateCylinder() {
 
     x = floor(x / _resolution) * _resolution + _resolution / 2.0;
     y = floor(y / _resolution) * _resolution + _resolution / 2.0;
-    z = floor(z / _resolution) * _resolution + _resolution / 2.0;
-
-    Eigen::Vector3d translate(x, y, z);
+    const double z_grid = floor(z / _resolution) * _resolution + _resolution / 2.0;
 
     double theta = rand_theta_(eng);
     Eigen::Matrix3d rotate;
@@ -450,6 +461,9 @@ void RandomMapGenerateCylinder() {
 
     double radius1 = rand_radius_(eng);
     double radius2 = rand_radius2_(eng);
+    z = _grow_from_ground ? _ground_z + radius2 : z_grid;
+
+    Eigen::Vector3d translate(x, y, z);
 
     // draw a circle centered at (x,y,z)
     Eigen::Vector3d cpt;
@@ -574,10 +588,12 @@ void clickCallback(const geometry_msgs::msg::PoseStamped &msg) {
         for (int s = -widNum / 2.0; s < widNum / 2.0; s++) {
             h = rand_h(eng);
             int heiNum = std::ceil(h / _resolution);
-            for (int t = -1; t < heiNum; t++) {
+            const int t_start = _grow_from_ground ? 0 : -1;
+            const int t_end = _grow_from_ground ? heiNum : heiNum - 1;
+            for (int t = t_start; t <= t_end; t++) {
                 pt_random.x = x + (r + 0.5) * _resolution + 1e-2;
                 pt_random.y = y + (s + 0.5) * _resolution + 1e-2;
-                pt_random.z = (t + 0.5) * _resolution + 1e-2;
+                pt_random.z = pillarLayerZ(t);
                 clicked_cloud_.points.push_back(pt_random);
                 cloudMap.points.push_back(pt_random);
             }
@@ -638,6 +654,8 @@ int main(int argc, char **argv)
     node->declare_parameter("ObstacleShape/z_h", 7.0);
     node->declare_parameter("ObstacleShape/theta", 7.0);
     node->declare_parameter("ObstacleShape/seed", 0);
+    node->declare_parameter("ObstacleShape/grow_from_ground", false);
+    node->declare_parameter("ObstacleShape/ground_z", 0.0);
 
     node->declare_parameter("ZAnchor/enable", false);
     node->declare_parameter("ZAnchor/center_x", 0.0);
@@ -675,6 +693,8 @@ int main(int argc, char **argv)
     node->get_parameter("ObstacleShape/z_h", z_h_);
     node->get_parameter("ObstacleShape/theta", theta_);
     node->get_parameter("ObstacleShape/seed", _seed);
+    node->get_parameter("ObstacleShape/grow_from_ground", _grow_from_ground);
+    node->get_parameter("ObstacleShape/ground_z", _ground_z);
 
     node->get_parameter("ZAnchor/enable", z_anchor_enable_);
     node->get_parameter("ZAnchor/center_x", z_anchor_center_x_);
