@@ -60,9 +60,14 @@ class Phase1ClosedLoopLogger(Node):
         self.declare_parameter("use_gnss", True)
         self.declare_parameter("use_araim", True)
         self.declare_parameter("allow_truth_alignment", True)
+        self.declare_parameter("use_so3_dynamics", True)
+        self.declare_parameter("use_iap_odom_for_planner", True)
+        self.declare_parameter("planner_odom_topic", "/drone_0_visual_slam/odom")
+        self.declare_parameter("controller_odom_topic", "/drone_0_visual_slam/odom")
+        self.declare_parameter("plant_mode", "so3_quadrotor_simulator")
         self.declare_parameter("map_source", "local_sensing_cloud")
-        self.declare_parameter("gnss_ephemeris_source", "rinex")
-        self.declare_parameter("gnss_enabled_constellations", "GPS,BDS,GAL,GLO")
+        self.declare_parameter("gnss_ephemeris_source", "synthetic")
+        self.declare_parameter("gnss_enabled_constellations", "GPS")
         self.declare_parameter("gnss_rinex_nav_file", "")
         self.declare_parameter("truth_odom_topic", "/sim/drone_0/truth_odom")
         self.declare_parameter("iap_odom_topic", "/drone_0_visual_slam/odom")
@@ -81,6 +86,11 @@ class Phase1ClosedLoopLogger(Node):
         self.use_gnss = bool(self.get_parameter("use_gnss").value)
         self.use_araim = bool(self.get_parameter("use_araim").value)
         self.allow_truth_alignment = bool(self.get_parameter("allow_truth_alignment").value)
+        self.use_so3_dynamics = bool(self.get_parameter("use_so3_dynamics").value)
+        self.use_iap_odom_for_planner = bool(self.get_parameter("use_iap_odom_for_planner").value)
+        self.planner_odom_topic = str(self.get_parameter("planner_odom_topic").value)
+        self.controller_odom_topic = str(self.get_parameter("controller_odom_topic").value)
+        self.plant_mode = str(self.get_parameter("plant_mode").value)
         self.map_source = str(self.get_parameter("map_source").value)
         self.gnss_ephemeris_source = str(self.get_parameter("gnss_ephemeris_source").value)
         self.gnss_enabled_constellations = str(self.get_parameter("gnss_enabled_constellations").value)
@@ -519,6 +529,11 @@ class Phase1ClosedLoopLogger(Node):
             "use_gnss": self.use_gnss,
             "use_araim": self.use_araim,
             "allow_truth_alignment": self.allow_truth_alignment,
+            "use_so3_dynamics": self.use_so3_dynamics,
+            "use_iap_odom_for_planner": self.use_iap_odom_for_planner,
+            "planner_odom_topic": self.planner_odom_topic,
+            "controller_odom_topic": self.controller_odom_topic,
+            "plant_mode": self.plant_mode,
             "map_source": self.map_source,
             "gnss_ephemeris_source": self.gnss_ephemeris_source,
             "gnss_enabled_constellations": self.gnss_enabled_constellations,
@@ -555,7 +570,17 @@ class Phase1ClosedLoopLogger(Node):
                 "iap_odom": {
                     "name": self.topics["iap_odom"],
                     "type": "nav_msgs/msg/Odometry",
-                    "role": "planner and SO3 controller feedback",
+                    "role": "IAP estimated odometry",
+                },
+                "planner_odom": {
+                    "name": self.planner_odom_topic,
+                    "type": "nav_msgs/msg/Odometry",
+                    "role": "EGO planner and grid-map odometry feedback",
+                },
+                "controller_odom": {
+                    "name": self.controller_odom_topic,
+                    "type": "nav_msgs/msg/Odometry",
+                    "role": "SO3 controller odometry feedback",
                 },
                 "planner_bspline": {
                     "name": self.topics["bspline"],
@@ -577,6 +602,11 @@ class Phase1ClosedLoopLogger(Node):
                 "use_gnss": self.use_gnss,
                 "use_araim": self.use_araim,
                 "allow_truth_alignment": self.allow_truth_alignment,
+                "use_so3_dynamics": self.use_so3_dynamics,
+                "use_iap_odom_for_planner": self.use_iap_odom_for_planner,
+                "planner_odom_topic": self.planner_odom_topic,
+                "controller_odom_topic": self.controller_odom_topic,
+                "plant_mode": self.plant_mode,
                 "map_source": self.map_source,
                 "gnss_ephemeris_source": self.gnss_ephemeris_source,
                 "gnss_enabled_constellations": self.gnss_enabled_constellations,

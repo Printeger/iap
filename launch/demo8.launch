@@ -40,10 +40,11 @@
   <arg name="gnss_num_gps_sats" default="24"/>
   <arg name="gnss_gps_prn_min" default="1"/>
   <arg name="gnss_gps_prn_max" default="24"/>
-  <arg name="gnss_ephemeris_source" default="synthetic"/>
-  <arg name="gnss_rinex_nav_file" default=""/>
+  <arg name="gnss_ephemeris_source" default="rinex"/>
+  <arg name="gnss_rinex_nav_file" default="/home/dev/ws_iap/src/LIGO./Data/BRDM00DLR_S_20221870000_01D_MN.rnx"/>
   <arg name="gnss_rinex_ephem_max_age_s" default="7200.0"/>
-  <arg name="gnss_enabled_constellations" default="GPS"/>
+  <arg name="gnss_fallback_to_synthetic_on_rinex_error" default="false"/>
+  <arg name="gnss_enabled_constellations" default="GPS,BDS,GAL,GLO"/>
   <arg name="gnss_enable_visualization" default="true"/>
   <arg name="gnss_enable_sky_dome_visualization" default="true"/>
   <arg name="gnss_sky_dome_show_cardinal_labels" default="true"/>
@@ -137,6 +138,7 @@
       <param name="ephemeris_source" value="$(var gnss_ephemeris_source)"/>
       <param name="rinex_nav_file" value="$(var gnss_rinex_nav_file)"/>
       <param name="rinex_ephem_max_age_s" value="$(var gnss_rinex_ephem_max_age_s)"/>
+      <param name="fallback_to_synthetic_on_rinex_error" value="$(var gnss_fallback_to_synthetic_on_rinex_error)"/>
       <param name="enabled_constellations_csv" value="$(var gnss_enabled_constellations)"/>
       <param name="enable_visualization" value="$(var gnss_enable_visualization)"/>
       <param name="enable_sky_dome_visualization" value="$(var gnss_enable_sky_dome_visualization)"/>

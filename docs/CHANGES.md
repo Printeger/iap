@@ -3,6 +3,11 @@
 > 规则：任何代码改动必须在这里记录，并包含 IAP-RQ-XXX。
 
 ## Unreleased
+- fix(phase1-demo9-hardening): IAP-RQ-081 — harden demo9 before Phase 2 validation.
+  - `tools/build_phase1_ego_planner_closed_loop.sh`: required demo9 packages now fail fast when missing; `plan_env` remains optional; the script verifies `iap_phase1_tools phase1_closed_loop_logger` after build.
+  - `launch/demo9_ego_planner_closed_loop.launch.py`: decoupled `planner_use_dynamic` from `use_so3_dynamics`, defaulted GNSS smoke tests to synthetic GPS ephemerides, added explicit RINEX file validation, completed the default `point0..point6` closed waypoint route, and dereferences installed config symlinks when creating runtime config copies.
+  - `phase1_closed_loop_logger` and `validate_phase1_closed_loop.py`: record planner/controller odom feedback metadata and add `--official` validation checks for SO3 dynamics, IAP odom feedback, no truth alignment, and required planner command logs.
+  - `README.md` and `docs/phase1_ego_planner_integration/topic_contract.md`: document demo8/demo9 usage, official validation commands, synthetic GNSS defaults, waypoint semantics, and debug-vs-official boundaries.
 - feat(phase1-ego-closed-loop): IAP-RQ-081 — add the ordinary EGO planner closed-loop baseline on IAP odometry.
   - `launch/demo9_ego_planner_closed_loop.launch.py`: explicitly composes map generation, SO3 plant/controller, local_sensing, LiDAR body bridge, GNSS sim, IAP, EGO planner, EGO `traj_server`, optional RViz, and a run-duration shutdown.
   - `config/sim_demo9`: baseline IAP config for demo9; launch copies it to `/tmp` and applies `use_gnss`, `use_araim`, and `allow_truth_alignment` without mutating repo config.

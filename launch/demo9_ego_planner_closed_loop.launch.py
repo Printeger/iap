@@ -26,14 +26,29 @@ def _as_bool(value):
     return str(value).strip().lower() in ("1", "true", "yes", "on")
 
 
-def _runtime_config(context, use_gnss, use_araim, allow_truth_alignment):
+def _runtime_config(
+    context,
+    use_gnss,
+    use_araim,
+    allow_truth_alignment,
+    enable_truth_araim_compare=False,
+    truth_araim_compare_csv_name="demo9_araim_truth_compare.csv",
+):
     iap_share = Path(get_package_share_directory("iap"))
     base_config = iap_share / "config"
     runtime_root = Path("/tmp") / f"iap_demo9_config_{os.getpid()}_{int(time.time() * 1000)}"
     runtime_sim_demo9 = runtime_root / "sim_demo9"
 
-    shutil.copytree(base_config / "sim_demo9", runtime_sim_demo9, symlinks=True)
-    shutil.copytree(base_config / "sim_ego", runtime_root / "sim_ego", symlinks=True)
+    shutil.copytree(
+        base_config / "sim_demo9",
+        runtime_sim_demo9,
+        ignore_dangling_symlinks=True,
+    )
+    shutil.copytree(
+        base_config / "sim_ego",
+        runtime_root / "sim_ego",
+        ignore_dangling_symlinks=True,
+    )
 
     config_ros_path = runtime_sim_demo9 / "config_ros.json"
     config_gnss_path = runtime_sim_demo9 / "config_gnss.json"
@@ -46,8 +61,37 @@ def _runtime_config(context, use_gnss, use_araim, allow_truth_alignment):
     if use_araim:
         insert_at = 1 if use_gnss else 0
         modules.insert(insert_at, "libintegrity_extension.so")
+    if enable_truth_araim_compare:
+        insert_at = len(modules) - 1 if "libsim_extension.so" in modules else len(modules)
+        modules.insert(insert_at, "libdemo8_truth_araim_extension.so")
     config_ros["glim_ros"]["extension_modules"] = modules
     config_ros["glim_ros"]["sim"]["align_planner_odom_to_truth"] = allow_truth_alignment
+    config_ros["glim_ros"]["sim"]["demo8_truth_araim"] = {
+        "enable": bool(enable_truth_araim_compare),
+        "csv_name": str(truth_araim_compare_csv_name),
+        "truth_odom_topic": "/sim/drone_0/truth_odom",
+        "truth_match_tolerance_s": 0.05,
+        "truth_cache_duration_s": 8.0,
+        "origin_lat_deg": 31.2304,
+        "origin_lon_deg": 121.4737,
+        "origin_alt_m": 25.0,
+        "enable_truth_araim_markers": False,
+        "truth_araim_marker_topic": "/iap/araim_truth_envelopes",
+        "truth_araim_marker_history_size": 60,
+        "truth_araim_marker_publish_period_s": 0.5,
+        "truth_araim_marker_min_pl_m": 0.05,
+        "truth_araim_marker_max_pl_m": 130.0,
+        "truth_araim_marker_show_gnss": True,
+        "truth_araim_marker_show_lidar": True,
+        "truth_araim_marker_show_final": False,
+        "truth_araim_marker_mode": "fault_only",
+        "truth_araim_marker_fault_history_size": 20,
+        "truth_araim_marker_fault_lifetime_s": 8.0,
+        "truth_araim_marker_show_fault_envelope": False,
+        "truth_araim_marker_fault_radius_m": 0.8,
+        "truth_araim_marker_final_hal_m": 10.0,
+        "truth_araim_marker_final_val_m": 20.0,
+    }
     with config_ros_path.open("w") as f:
         json.dump(config_ros, f, indent=2)
         f.write("\n")
@@ -106,10 +150,15 @@ def _launch_setup(context):
     use_iap_odom = _as_bool(LaunchConfiguration("use_iap_odom_for_planner").perform(context))
     use_so3_dynamics = _as_bool(LaunchConfiguration("use_so3_dynamics").perform(context))
     planner_use_dynamic = _as_bool(LaunchConfiguration("planner_use_dynamic").perform(context))
-    use_so3_dynamics = use_so3_dynamics and planner_use_dynamic
     use_dynamic_obstacles = _as_bool(LaunchConfiguration("use_dynamic_obstacles").perform(context))
     allow_truth_alignment = _as_bool(LaunchConfiguration("allow_truth_alignment").perform(context))
     log_phase1 = _as_bool(LaunchConfiguration("log_phase1").perform(context))
+    enable_truth_araim_compare = _as_bool(
+        LaunchConfiguration("enable_truth_araim_compare").perform(context)
+    )
+    truth_araim_compare_csv_name = LaunchConfiguration(
+        "truth_araim_compare_csv_name"
+    ).perform(context)
 
     drone_id = LaunchConfiguration("drone_id").perform(context)
     goal_x = LaunchConfiguration("goal_x").perform(context)
@@ -134,6 +183,9 @@ def _launch_setup(context):
             "point5_x",
             "point5_y",
             "point5_z",
+            "point6_x",
+            "point6_y",
+            "point6_z",
         )
     }
     run_duration_s = float(LaunchConfiguration("run_duration_s").perform(context))
@@ -165,6 +217,8 @@ def _launch_setup(context):
     truth_odom_topic = "/sim/drone_0/truth_odom"
     iap_odom_topic = "/drone_0_visual_slam/odom"
     planner_odom_topic = iap_odom_topic if use_iap_odom else truth_odom_topic
+    controller_odom_topic = planner_odom_topic if use_so3_dynamics else ""
+    plant_mode = "so3_quadrotor_simulator" if use_so3_dynamics else "poscmd_2_odom_debug"
     sim_imu_topic = "/sim/drone_0/imu"
     iap_imu_topic = "/sim/drone_0/imu_iap"
     sim_lidar_topic = "/sim/drone_0/lidar"
@@ -184,11 +238,26 @@ def _launch_setup(context):
             "map_source must be 'local_sensing_cloud' or 'global_cloud_direct'"
         )
 
+    if (
+        use_gnss
+        and gnss_ephemeris_source.strip().lower() == "rinex"
+        and not gnss_fallback_to_synthetic
+        and not Path(gnss_rinex_nav_file).expanduser().is_file()
+    ):
+        raise RuntimeError(
+            "gnss_ephemeris_source:=rinex requires an existing "
+            "gnss_rinex_nav_file when "
+            "gnss_fallback_to_synthetic_on_rinex_error:=false; "
+            f"got '{gnss_rinex_nav_file}'"
+        )
+
     runtime_config_path = _runtime_config(
         context,
         use_gnss=use_gnss,
         use_araim=use_araim,
         allow_truth_alignment=allow_truth_alignment,
+        enable_truth_araim_compare=enable_truth_araim_compare,
+        truth_araim_compare_csv_name=truth_araim_compare_csv_name,
     )
 
     camera_file = os.path.join(local_sensing_share, "config", "camera.yaml")
@@ -200,6 +269,12 @@ def _launch_setup(context):
         LogInfo(msg=f"[demo9] planner/controller odom feedback: {planner_odom_topic}"),
     ]
 
+    if not planner_use_dynamic:
+        actions.append(
+            LogInfo(
+                msg="[demo9] WARNING: planner_use_dynamic is deprecated and no longer controls use_so3_dynamics"
+            )
+        )
     if not use_iap_odom:
         actions.append(
             LogInfo(msg="[demo9] DEBUG: use_iap_odom_for_planner=false, planner/controller use truth odom")
@@ -347,6 +422,9 @@ def _launch_setup(context):
                 "point5_x": waypoint_values["point5_x"],
                 "point5_y": waypoint_values["point5_y"],
                 "point5_z": waypoint_values["point5_z"],
+                "point6_x": waypoint_values["point6_x"],
+                "point6_y": waypoint_values["point6_y"],
+                "point6_z": waypoint_values["point6_z"],
             }.items(),
         ),
         Node(
@@ -567,6 +645,11 @@ def _launch_setup(context):
                     {"use_gnss": use_gnss},
                     {"use_araim": use_araim},
                     {"allow_truth_alignment": allow_truth_alignment},
+                    {"use_so3_dynamics": use_so3_dynamics},
+                    {"use_iap_odom_for_planner": use_iap_odom},
+                    {"planner_odom_topic": planner_odom_topic},
+                    {"controller_odom_topic": controller_odom_topic},
+                    {"plant_mode": plant_mode},
                     {"map_source": map_source},
                     {"gnss_ephemeris_source": gnss_ephemeris_source},
                     {"gnss_enabled_constellations": gnss_enabled_constellations},
@@ -636,6 +719,9 @@ def generate_launch_description():
         DeclareLaunchArgument("point5_x", default_value="6.0"),
         DeclareLaunchArgument("point5_y", default_value="6.0"),
         DeclareLaunchArgument("point5_z", default_value="2.0"),
+        DeclareLaunchArgument("point6_x", default_value=LaunchConfiguration("goal_x")),
+        DeclareLaunchArgument("point6_y", default_value=LaunchConfiguration("goal_y")),
+        DeclareLaunchArgument("point6_z", default_value=LaunchConfiguration("goal_z")),
 
         DeclareLaunchArgument("run_duration_s", default_value="120"),
         DeclareLaunchArgument("use_so3_dynamics", default_value="true"),
@@ -644,8 +730,10 @@ def generate_launch_description():
         DeclareLaunchArgument("map_source", default_value="local_sensing_cloud"),
         DeclareLaunchArgument("allow_truth_alignment", default_value="true"),
         DeclareLaunchArgument("log_phase1", default_value="true"),
-        DeclareLaunchArgument("gnss_ephemeris_source", default_value="rinex"),
-        DeclareLaunchArgument("gnss_enabled_constellations", default_value="GPS,BDS,GAL,GLO"),
+        DeclareLaunchArgument("enable_truth_araim_compare", default_value="false"),
+        DeclareLaunchArgument("truth_araim_compare_csv_name", default_value="demo9_araim_truth_compare.csv"),
+        DeclareLaunchArgument("gnss_ephemeris_source", default_value="synthetic"),
+        DeclareLaunchArgument("gnss_enabled_constellations", default_value="GPS"),
         DeclareLaunchArgument(
             "gnss_rinex_nav_file",
             default_value="/home/dev/ws_iap/src/LIGO./Data/BRDM00DLR_S_20221870000_01D_MN.rnx",

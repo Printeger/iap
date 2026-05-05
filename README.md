@@ -1,8 +1,8 @@
 # IAP - Integrity-Aware Positioning
 
-IAP 是一个基于 GLIM 架构的 3D LiDAR-IMU(-GNSS) 定位与建图系统。本仓库同时提供了面向无人机仿真的运行环境，包含随机森林地图、SO3 四旋翼动力学、仿真 LiDAR/IMU、GNSS 仿真、IAP 与仿真之间的桥接节点，以及 `demo1` 到 `demo7` 的分层示例。
+IAP 是一个基于 GLIM 架构的 3D LiDAR-IMU(-GNSS) 定位与建图系统。本仓库同时提供了面向无人机仿真的运行环境，包含随机森林地图、SO3 四旋翼动力学、仿真 LiDAR/IMU、GNSS 仿真、IAP 与仿真之间的桥接节点，以及 `demo1` 到 `demo10` 的分层示例。
 
-这份 README 面向新手：先完成构建，再按 demo 顺序运行。建议先跑不依赖 IAP 的 `demo1`/`demo2`，确认仿真和 RViz 正常；再跑 `demo4` 之后的 IAP 集成示例；最后跑 `demo7` 的 GNSS/ARAIM 场景。
+这份 README 面向新手：先完成构建，再按 demo 顺序运行。建议先跑不依赖 IAP 的 `demo1`/`demo2`，确认仿真和 RViz 正常；再跑 `demo4` 之后的 IAP 集成示例；最后跑 `demo7`/`demo8` 的 GNSS/ARAIM 场景、`demo9` 的 EGO planner 闭环验收，以及 `demo10` 的 PI-lite 只读评估。
 
 ---
 
@@ -201,7 +201,7 @@ start_rviz:=false
 
 ---
 
-## 4. Demo1 到 Demo7
+## 4. Demo1 到 Demo10
 
 每个 demo 都可以这样运行：
 
@@ -228,6 +228,9 @@ ros2 launch iap demo2.launch start_rviz:=false circle_radius:=6.0
 | `demo5` | SO3 圆轨迹 + IAP | 是 | 否 | 运动中的 IAP 跟踪与点云桥接 |
 | `demo6` | 分阶段起飞/悬停/圆轨迹 + IAP 控制反馈 | 是 | 否 | desired/truth/IAP 三路轨迹对照 |
 | `demo7` | Demo6 + GNSS v2 场景、可视化与故障注入 | 是 | 是 | GNSS/ARAIM、遮挡、NLOS、fault 场景 |
+| `demo8` | Demo7 风格的 SO3 + GNSS/ARAIM 真值对照 | 是 | 是 | ARAIM 真值比较、三路轨迹可视化 |
+| `demo9` | EGO planner + IAP odom + SO3 controller 闭环 | 是 | 是 | Phase 1 官方闭环验证 |
+| `demo10` | demo9 + PI-lite 只读轨迹完整性 evaluator | 是 | 是 | Phase 2 AL/PL/IM 预测与离线对齐 |
 
 ### 4.2 Demo1：基础地图与静态 LiDAR
 
@@ -457,6 +460,101 @@ ros2 launch iap demo7.launch \
 | `config/gnss_sim/demo7_open_sky.yaml` | 默认开阔天空，无 SkyMask，无故障 |
 | `config/gnss_sim/demo7_skymask_nlos.yaml` | 启用 SkyMask 和 NLOS 退化 |
 | `config/gnss_sim/demo7_fault_injection.yaml` | 启用 SkyMask，并对 GPS PRN 7 注入伪距偏差和 C/N0 退化 |
+
+### 4.9 Demo8：GNSS/ARAIM 真值对照
+
+目的：在 SO3 动力学、分阶段飞行、GNSS 仿真和 IAP 的基础上，额外输出 ARAIM 与仿真真值的对照结果。它适合检查 GNSS/ARAIM 保护级、故障标记和 desired/truth/IAP 三路轨迹。
+
+运行：
+
+```bash
+ros2 launch iap demo8.launch
+```
+
+无图形界面运行：
+
+```bash
+ros2 launch iap demo8.launch start_rviz:=false
+```
+
+关键输出：
+
+- Desired：`/demo8/desired/odom`、`/demo8/desired/path`
+- Truth：`/sim/drone_0/truth_odom`、`/demo8/truth/path`
+- IAP/control：`/drone_0_visual_slam/odom`、`/demo8/drone/path`
+- GNSS/ARAIM：`/ublox_driver/*`、`/iap/integrity`、`export/iap_araim.csv`
+
+### 4.10 Demo9：EGO Planner + IAP Odom 闭环
+
+目的：把普通 `ego_planner` 闭环接到 IAP 估计 odom 上，验证 EGO planner、traj_server、SO3 controller、SO3 plant、local_sensing、GNSS/ARAIM 和 Phase 1 logger 的端到端链路。它不引入 PI-lite 或 integrity-aware planning。
+
+构建 demo9 依赖：
+
+```bash
+cd /home/dev/ws_iap
+bash src/iap/tools/build_phase1_ego_planner_closed_loop.sh
+source install/setup.bash
+```
+
+官方 Phase 1 运行命令：
+
+```bash
+ros2 launch iap demo9_ego_planner_closed_loop.launch.py \
+  start_rviz:=false \
+  run_duration_s:=60 \
+  allow_truth_alignment:=false \
+  use_so3_dynamics:=true
+```
+
+官方验证命令：
+
+```bash
+python3 src/iap/tools/phase1/validate_phase1_closed_loop.py \
+  --run-dir /home/dev/ws_iap/src/iap/log/latest \
+  --official
+```
+
+关键验收点：
+
+- EGO planner 和 SO3 controller feedback 必须使用 `/drone_0_visual_slam/odom`，不能使用 `/sim/drone_0/truth_odom`。
+- `allow_truth_alignment` 官方模式必须为 `false`。
+- 默认 `point_num:=7` 包含 `point0`；`point0` 来自 `goal_x/y/z`，`point6` 默认回到同一个 goal，形成闭环 waypoint 序列。
+- 默认 GNSS smoke test 使用 `gnss_ephemeris_source:=synthetic` 和 `gnss_enabled_constellations:=GPS`；RINEX 模式需要显式传入有效 `gnss_rinex_nav_file`。
+- logger 会在 `export/` 下写出 `desired_vs_truth.csv`、`planner_traj.csv`、`planner_cmd.csv`、`topic_contract.json` 和 `phase1_summary.json`。
+
+### 4.11 Demo10：PI-lite 只读轨迹完整性评估
+
+目的：在 demo9 闭环栈上增加 `phase2_planner_integrity_evaluator`，沿 EGO planner 的未来 B-spline 采样并导出 `AL_pred`、`PL_pred`、`IM_pred`。demo10 只是评估器，不会把 ARAIM/AL/PL/IM 加入 planner cost，也不会修改 planner、ARAIM、IAP estimator、控制器或仿真动力学。
+
+官方 Phase 2 运行命令：
+
+```bash
+ros2 launch iap demo10_ego_planner_pi_lite_eval.launch.py \
+  start_rviz:=false \
+  run_duration_s:=60 \
+  allow_truth_alignment:=false \
+  use_so3_dynamics:=true \
+  use_gnss:=true \
+  use_araim:=true \
+  phase2_pl_model:=constant_current \
+  phase2_al_model:=cloud_clearance
+```
+
+离线对齐和验证：
+
+```bash
+python3 src/iap/tools/phase2/analyze_phase2_integrity_eval.py \
+  --run-dir /home/dev/ws_iap/src/iap/log/latest
+
+python3 src/iap/tools/phase2/validate_phase2_integrity_eval.py \
+  --run-dir /home/dev/ws_iap/src/iap/log/latest
+```
+
+主要输出：
+
+- `export/integrity_along_planner_traj.csv`
+- `export/phase2_integrity_eval_aligned.csv`
+- `export/phase2_summary.json`
 
 GNSS 相关常用参数：
 
@@ -693,5 +791,8 @@ ros2 topic hz /ublox_driver/range_meas
 5. `demo5`：检查运动中的 IAP。
 6. `demo6`：检查 desired/truth/IAP 控制反馈链路。
 7. `demo7`：检查 GNSS/ARAIM、遮挡、NLOS 和故障注入。
+8. `demo8`：检查 GNSS/ARAIM 真值对照和三路轨迹。
+9. `demo9`：检查 EGO planner 使用 IAP odom 的 Phase 1 闭环验收。
+10. `demo10`：检查 PI-lite 只读完整性预测和离线对齐。
 
 完成配置修改后，请重启对应 launch；IAP 配置在节点启动时读取，运行中修改 JSON/YAML 不会自动生效。

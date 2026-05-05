@@ -4,14 +4,14 @@ Requirement: `IAP-RQ-081`
 
 Phase 1 connects the ordinary `ego_planner` closed loop to IAP estimated odometry. It does not add PL/AL/IM to planner cost, change ARAIM math, or replace EGO's optimizer.
 
-Demo9 GNSS defaults to RINEX-driven multi-constellation simulation with `GPS,BDS,GAL,GLO`. Synthetic GNSS remains available as a debug fallback, but synthetic mode is GPS-only in the current simulator.
+Demo9 GNSS defaults to synthetic GPS ephemerides for repeatable smoke tests. RINEX-driven multi-constellation simulation remains available by passing `gnss_ephemeris_source:=rinex`, `gnss_rinex_nav_file:=...`, and an explicit constellation list such as `GPS,BDS,GAL,GLO`.
 
 ## Frames
 
 - Global frame: `map`.
 - IAP planner odometry: `header.frame_id=map`, `child_frame_id=imu`.
 - Body-frame LiDAR cloud for IAP: `/sim/drone_0/lidar_body`, `header.frame_id=lidar`.
-- Message timestamps are preserved by bridge/logging nodes. `libsim_extension.so` may align the exported IAP planner odometry to truth at startup when `allow_truth_alignment:=true`.
+- Message timestamps are preserved by bridge/logging nodes. `libsim_extension.so` may align the exported IAP planner odometry to truth at startup when `allow_truth_alignment:=true`; this is debug-only and must be false for official Phase 1 validation.
 
 ## Topic Contract
 
@@ -51,12 +51,14 @@ Demo9 GNSS defaults to RINEX-driven multi-constellation simulation with `GPS,BDS
 - RViz trajectory visualization publishes `/demo9/drone/path`, `/demo9/truth/path`, and `/demo9/desired/path`.
 
 Truth odometry must not be used as planner or SO3 controller feedback in the default mode. `use_iap_odom_for_planner:=false` is debug-only.
+`use_so3_dynamics:=true` selects the official SO3 plant. `use_so3_dynamics:=false` selects the debug `poscmd_2_odom` plant. `planner_use_dynamic` is a deprecated compatibility argument and does not control plant selection.
 
 ## RViz And Waypoints
 
 - `start_rviz:=true` by default, using `config/sim_demo9/demo9_gnss.rviz`.
 - The default single target is set with `goal_x`, `goal_y`, and `goal_z`; these are passed to EGO as `point0_x`, `point0_y`, and `point0_z`.
-- Multi-waypoint runs use `point_num` plus `point1_x/y/z` through `point4_x/y/z`. `point0` remains the `goal_*` triple.
+- `point_num` includes `point0`. Demo9 defaults `point_num:=7` and passes `point0..point6` to EGO.
+- The default waypoint sequence is a loop: `point0` is the `goal_*` triple, `point1..point5` visit the square route, and `point6` defaults back to `goal_*`.
 - GNSS satellite signal rays use `signal_ray_width_m:=0.025` and `signal_ray_alpha:=0.3`; NLOS path markers use `nlos_path_width_m:=0.04` and `nlos_path_alpha:=0.3`.
 
 ## Map Modes
@@ -75,9 +77,11 @@ Truth odometry must not be used as planner or SO3 controller feedback in the def
 - `topic_contract.json`
 - `phase1_summary.json`
 
+`phase1_summary.json` and `topic_contract.json` record official-validation metadata including `allow_truth_alignment`, `use_so3_dynamics`, `use_iap_odom_for_planner`, `planner_odom_topic`, `controller_odom_topic`, and `plant_mode`.
+
 Use:
 
 ```bash
 python3 tools/phase1/check_topic_contract.py --duration 5
-python3 tools/phase1/validate_phase1_closed_loop.py --run-dir /home/dev/ws_iap/src/iap/log/latest
+python3 tools/phase1/validate_phase1_closed_loop.py --run-dir /home/dev/ws_iap/src/iap/log/latest --official
 ```
