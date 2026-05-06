@@ -69,6 +69,15 @@ def _launch_setup(context):
             "gnss_rinex_nav_file",
             "gnss_rinex_ephem_max_age_s",
             "gnss_fallback_to_synthetic_on_rinex_error",
+            "gnss_enable_map_occlusion",
+            "gnss_enable_skymask",
+            "gnss_enable_nlos",
+            "gnss_enable_multipath",
+            "gnss_enable_fault_injection",
+            "gnss_sky_dome_follow_receiver",
+            "gnss_sky_dome_center_x",
+            "gnss_sky_dome_center_y",
+            "gnss_sky_dome_center_z",
             "drone_id",
             "init_x",
             "init_y",
@@ -98,8 +107,10 @@ def _launch_setup(context):
                 {"odom_topic": "/drone_0_visual_slam/odom"},
                 {"bspline_topic": "/drone_0_planning/bspline"},
                 {"pos_cmd_topic": "/drone_0_planning/pos_cmd"},
+                {"map_source": LaunchConfiguration("map_source").perform(context)},
                 {"map_topic": phase2_map_topic},
                 {"integrity_topic": "/iap/integrity"},
+                {"gnss_scenario_file": LaunchConfiguration("gnss_scenario_file").perform(context)},
                 {"range_meas_topic": LaunchConfiguration("phase2_range_meas_topic").perform(context)},
                 {"ephem_topic": LaunchConfiguration("phase2_ephem_topic").perform(context)},
                 {"glo_ephem_topic": LaunchConfiguration("phase2_glo_ephem_topic").perform(context)},
@@ -201,6 +212,11 @@ def _launch_setup(context):
                         LaunchConfiguration("phase2_snapshot_anchor_current_integrity").perform(context)
                     )
                 },
+                    {
+                        "planner_use_integrity_cost": _as_bool(
+                            LaunchConfiguration("planner_use_integrity_cost").perform(context)
+                        )
+                    },
                 {
                     "publish_integrity_cost_field": _as_bool(
                         LaunchConfiguration("phase2_publish_integrity_cost_field").perform(context)
@@ -275,6 +291,15 @@ def generate_launch_description():
         ),
         DeclareLaunchArgument("gnss_rinex_ephem_max_age_s", default_value="7200.0"),
         DeclareLaunchArgument("gnss_fallback_to_synthetic_on_rinex_error", default_value="false"),
+        DeclareLaunchArgument("gnss_enable_map_occlusion", default_value="true"),
+        DeclareLaunchArgument("gnss_enable_skymask", default_value="true"),
+        DeclareLaunchArgument("gnss_enable_nlos", default_value="true"),
+        DeclareLaunchArgument("gnss_enable_multipath", default_value="true"),
+        DeclareLaunchArgument("gnss_enable_fault_injection", default_value="true"),
+        DeclareLaunchArgument("gnss_sky_dome_follow_receiver", default_value="false"),
+        DeclareLaunchArgument("gnss_sky_dome_center_x", default_value="0.0"),
+        DeclareLaunchArgument("gnss_sky_dome_center_y", default_value="0.0"),
+        DeclareLaunchArgument("gnss_sky_dome_center_z", default_value="0.0"),
         DeclareLaunchArgument("drone_id", default_value="0"),
         DeclareLaunchArgument("init_x", default_value="0.0"),
         DeclareLaunchArgument("init_y", default_value="0.0"),

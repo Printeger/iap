@@ -274,6 +274,28 @@ def araim_values(row):
 
 
 def summarize_snapshot(snapshot_rows, araim_index, match_tolerance_s, warnings):
+    def consistency_dict(ratios, hpl_errors, vpl_errors, matched_hpl_errors=None, matched_vpl_errors=None, matched_im_errors=None):
+        matched_hpl_errors = matched_hpl_errors or []
+        matched_vpl_errors = matched_vpl_errors or []
+        matched_im_errors = matched_im_errors or []
+        return {
+            "available": bool(ratios),
+            "finite_count": len(ratios),
+            "warning_threshold_ratio": 0.10,
+            "mean_pl_ratio": mean(ratios),
+            "max_pl_ratio": max(ratios) if ratios else None,
+            "mean_hpl_error": mean(hpl_errors),
+            "mean_vpl_error": mean(vpl_errors),
+            "max_abs_hpl_error": max_abs(hpl_errors),
+            "max_abs_vpl_error": max_abs(vpl_errors),
+            "matched_current_araim_count": max(
+                len(matched_hpl_errors), len(matched_vpl_errors), len(matched_im_errors)
+            ),
+            "mean_current_hpl_alignment_error": mean(matched_hpl_errors),
+            "mean_current_vpl_alignment_error": mean(matched_vpl_errors),
+            "mean_current_im_alignment_error": mean(matched_im_errors),
+        }
+
     if not snapshot_rows:
         return (
             {
@@ -285,26 +307,26 @@ def summarize_snapshot(snapshot_rows, araim_index, match_tolerance_s, warnings):
                 "pred_now_finite_count": 0,
                 "pred_now_fallback_count": 0,
             },
-            {
-                "available": False,
-                "finite_count": 0,
-                "warning_threshold_ratio": 0.10,
-                "mean_pl_ratio": None,
-                "max_pl_ratio": None,
-                "mean_hpl_error": None,
-                "mean_vpl_error": None,
-                "max_abs_hpl_error": None,
-                "max_abs_vpl_error": None,
-                "matched_current_araim_count": 0,
-                "mean_current_hpl_alignment_error": None,
-                "mean_current_vpl_alignment_error": None,
-                "mean_current_im_alignment_error": None,
-            },
+            consistency_dict([], [], []),
+            consistency_dict([], [], []),
         )
 
-    ratios = [as_float(r.get("consistency_pl_ratio")) for r in snapshot_rows if finite(r.get("consistency_pl_ratio"))]
-    hpl_errors = [as_float(r.get("consistency_hpl_error")) for r in snapshot_rows if finite(r.get("consistency_hpl_error"))]
-    vpl_errors = [as_float(r.get("consistency_vpl_error")) for r in snapshot_rows if finite(r.get("consistency_vpl_error"))]
+    def finite_values(column, fallback_column=None):
+        values = []
+        for row in snapshot_rows:
+            value = row.get(column)
+            if value is None and fallback_column is not None:
+                value = row.get(fallback_column)
+            if finite(value):
+                values.append(as_float(value))
+        return values
+
+    raw_ratios = finite_values("raw_consistency_pl_ratio", "consistency_pl_ratio")
+    raw_hpl_errors = finite_values("raw_consistency_hpl_error", "consistency_hpl_error")
+    raw_vpl_errors = finite_values("raw_consistency_vpl_error", "consistency_vpl_error")
+    anchored_ratios = finite_values("consistency_pl_ratio")
+    anchored_hpl_errors = finite_values("consistency_hpl_error")
+    anchored_vpl_errors = finite_values("consistency_vpl_error")
     matched_hpl_errors = []
     matched_vpl_errors = []
     matched_im_errors = []
@@ -323,9 +345,19 @@ def summarize_snapshot(snapshot_rows, araim_index, match_tolerance_s, warnings):
         if math.isfinite(im) and math.isfinite(actual_im):
             matched_im_errors.append(im - actual_im)
 
-    max_ratio = max(ratios) if ratios else None
+    max_ratio = max(raw_ratios) if raw_ratios else None
+    max_ratio_row = None
+    if max_ratio is not None:
+        max_ratio_row = max(
+            snapshot_rows,
+            key=lambda r: (
+                as_float(r.get("raw_consistency_pl_ratio"))
+                if finite(r.get("raw_consistency_pl_ratio"))
+                else float("-inf")
+            ),
+        )
     if max_ratio is not None and max_ratio > 0.10:
-        warnings.append(f"current PL consistency max ratio is {max_ratio:.3f}")
+        warnings.append(f"raw current PL consistency max ratio is {max_ratio:.3f}")
 
     integrity_snapshot = {
         "available": True,
@@ -333,28 +365,62 @@ def summarize_snapshot(snapshot_rows, araim_index, match_tolerance_s, warnings):
         "valid_count": sum(1 for r in snapshot_rows if as_bool(r.get("snapshot_valid"))),
         "has_epoch_count": sum(1 for r in snapshot_rows if as_bool(r.get("has_epoch"))),
         "missing_epoch_count": sum(1 for r in snapshot_rows if not as_bool(r.get("has_epoch"))),
-        "pred_now_finite_count": sum(1 for r in snapshot_rows if finite(r.get("pred_now_pl"))),
+        "pred_now_finite_count": sum(
+            1
+            for r in snapshot_rows
+            if finite(r.get("pred_now_raw_pl")) or finite(r.get("pred_now_pl"))
+        ),
         "pred_now_fallback_count": sum(1 for r in snapshot_rows if as_bool(r.get("pred_now_fallback"))),
         "csv": "future_integrity_snapshot.csv",
     }
-    current_consistency = {
-        "available": bool(ratios),
-        "finite_count": len(ratios),
-        "warning_threshold_ratio": 0.10,
-        "mean_pl_ratio": mean(ratios),
-        "max_pl_ratio": max_ratio,
-        "mean_hpl_error": mean(hpl_errors),
-        "mean_vpl_error": mean(vpl_errors),
-        "max_abs_hpl_error": max_abs(hpl_errors),
-        "max_abs_vpl_error": max_abs(vpl_errors),
-        "matched_current_araim_count": max(
-            len(matched_hpl_errors), len(matched_vpl_errors), len(matched_im_errors)
-        ),
-        "mean_current_hpl_alignment_error": mean(matched_hpl_errors),
-        "mean_current_vpl_alignment_error": mean(matched_vpl_errors),
-        "mean_current_im_alignment_error": mean(matched_im_errors),
-    }
-    return integrity_snapshot, current_consistency
+    current_consistency_raw = consistency_dict(
+        raw_ratios,
+        raw_hpl_errors,
+        raw_vpl_errors,
+        matched_hpl_errors,
+        matched_vpl_errors,
+        matched_im_errors,
+    )
+    if max_ratio_row is not None:
+        excluded_prns = max_ratio_row.get("excluded_prns") or ""
+        n_detected = as_float(max_ratio_row.get("n_detected"))
+        likely_reason = "geometry/noise-state mismatch"
+        if as_bool(max_ratio_row.get("pred_now_fallback")):
+            likely_reason = "future predictor fallback at current pose"
+        elif excluded_prns.strip() and excluded_prns.strip().lower() not in ("nan", "none", "null"):
+            likely_reason = "current ARAIM exclusion is not represented in raw future geometry prediction"
+        elif math.isfinite(n_detected) and n_detected > 0:
+            likely_reason = "current ARAIM detection is not represented in raw future geometry prediction"
+        current_consistency_raw["max_ratio_context"] = {
+            "stamp": as_float(max_ratio_row.get("stamp")),
+            "likely_reason": likely_reason,
+            "current_PL": as_float(max_ratio_row.get("current_PL")),
+            "pred_now_raw_pl": as_float(max_ratio_row.get("pred_now_raw_pl")),
+            "current_HPL": as_float(max_ratio_row.get("current_HPL")),
+            "current_VPL": as_float(max_ratio_row.get("current_VPL")),
+            "pred_now_raw_hpl": as_float(max_ratio_row.get("pred_now_raw_hpl")),
+            "pred_now_raw_vpl": as_float(max_ratio_row.get("pred_now_raw_vpl")),
+            "n_sv_used": as_float(max_ratio_row.get("n_sv_used")),
+            "pdop": as_float(max_ratio_row.get("pdop")),
+            "n_hypotheses": as_float(max_ratio_row.get("n_hypotheses")),
+            "n_detected": as_float(max_ratio_row.get("n_detected")),
+            "excluded_prns": excluded_prns,
+            "has_epoch": as_bool(max_ratio_row.get("has_epoch")),
+            "epoch_sat_count": as_float(max_ratio_row.get("epoch_sat_count")),
+            "pred_now_n_vis": as_float(max_ratio_row.get("pred_now_n_vis")),
+            "pred_now_pdop": as_float(max_ratio_row.get("pred_now_pdop")),
+            "pred_now_fallback": as_bool(max_ratio_row.get("pred_now_fallback")),
+            "pred_now_fallback_reason": max_ratio_row.get("pred_now_fallback_reason") or "",
+        }
+    current_consistency_anchored = consistency_dict(
+        anchored_ratios,
+        anchored_hpl_errors,
+        anchored_vpl_errors,
+        matched_hpl_errors,
+        matched_vpl_errors,
+        matched_im_errors,
+    )
+    return integrity_snapshot, current_consistency_raw, current_consistency_anchored
 
 
 def estimate_desired_offset(pred_rows, desired_index, tolerance):
@@ -783,13 +849,20 @@ def analyze(run_dir, match_tolerance_s):
     if not any(finite(r.get("actual_IM")) for r in aligned_rows):
         warnings.append("actual_IM could not be computed for aligned samples")
 
-    integrity_snapshot, current_consistency = summarize_snapshot(
+    integrity_snapshot, current_consistency_raw, current_consistency_anchored = summarize_snapshot(
         snapshot_rows, araim_index, match_tolerance_s, warnings
     )
     plots = generate_h_lite_plots(export_dir, pred_rows, snapshot_rows, online_summary)
     summary = summarize(pred_rows, aligned_rows, online_summary, run_dir, warnings, errors)
     summary["integrity_snapshot"] = integrity_snapshot
-    summary["current_consistency"] = current_consistency
+    summary["current_consistency_raw"] = current_consistency_raw
+    summary["current_consistency_anchored"] = current_consistency_anchored
+    summary["current_consistency"] = current_consistency_raw
+    capabilities = dict(online_summary.get("stage1_capabilities") or {})
+    capabilities.update(summary.get("stage1_capabilities") or {})
+    summary["stage1_capabilities"] = capabilities
+    capabilities["fused_araim_style"] = "deferred_after_rc"
+    capabilities["self_consistency_rc_metric"] = "current_consistency_raw"
     summary["phase_h_lite"] = {
         "plots": plots,
         "grid_update_timing": plots.get("grid_update_timing", "skipped_not_applicable"),

@@ -2,7 +2,9 @@
 #define _BSPLINE_OPTIMIZER_H_
 
 #include <Eigen/Eigen>
+#include <filesystem>
 #include <limits>
+#include <fstream>
 #include <mutex>
 #include <string>
 #include <path_searching/dyn_a_star.h>
@@ -170,6 +172,7 @@ namespace ego_planner
     double integrity_cost_max_{1000.0};
     double integrity_grad_norm_max_{0.1};
     int integrity_min_samples_{3};
+    std::string integrity_debug_csv_path_;
 
     int a;
     //
@@ -200,6 +203,24 @@ namespace ego_planner
     std::vector<IntegrityCostSample> integrity_samples_;
     double integrity_field_stamp_s_{std::numeric_limits<double>::quiet_NaN()};
     double last_integrity_warn_s_{-1.0e9};
+    int integrity_debug_seq_{0};
+    int last_integrity_samples_used_{0};
+    int last_integrity_samples_skipped_{0};
+    double last_integrity_field_age_s_{std::numeric_limits<double>::quiet_NaN()};
+    double last_integrity_nearest_dist_mean_{std::numeric_limits<double>::quiet_NaN()};
+    double last_integrity_nearest_dist_max_{std::numeric_limits<double>::quiet_NaN()};
+    double last_integrity_grad_norm_mean_{std::numeric_limits<double>::quiet_NaN()};
+    double last_integrity_grad_norm_max_{std::numeric_limits<double>::quiet_NaN()};
+    double last_integrity_cost_raw_{std::numeric_limits<double>::quiet_NaN()};
+    bool last_integrity_line_search_fail_{false};
+    bool last_integrity_step_accepted_{false};
+    double last_cost_smooth_{std::numeric_limits<double>::quiet_NaN()};
+    double last_cost_collision_{std::numeric_limits<double>::quiet_NaN()};
+    double last_cost_feasibility_{std::numeric_limits<double>::quiet_NaN()};
+    double last_cost_fitness_{std::numeric_limits<double>::quiet_NaN()};
+    double last_cost_integrity_weighted_{std::numeric_limits<double>::quiet_NaN()};
+    std::ofstream integrity_debug_csv_;
+    bool integrity_debug_csv_header_written_{false};
     rclcpp::Node::WeakPtr node_;
     rclcpp::Subscription<sensor_msgs::msg::PointCloud2>::SharedPtr integrity_cost_sub_;
 
@@ -220,6 +241,14 @@ namespace ego_planner
     void calcIntegrityCost(const Eigen::MatrixXd &q, double &cost, Eigen::MatrixXd &gradient);
     void onIntegrityCostField(const sensor_msgs::msg::PointCloud2::ConstSharedPtr msg);
     void warnIntegrityCostThrottled(const std::string &message);
+    void openIntegrityDebugCsv();
+    void writeIntegrityDebugRow(const std::string &optimizer_stage,
+                  double iteration_time_ms,
+                  double total_time_ms,
+                  double final_cost,
+                  int lbfgs_result,
+                  int restart_num,
+                  int rebound_times);
     bool check_collision_and_rebound(void);
 
     static int earlyExit(void *func_data, const double *x, const double *g, const double fx, const double xnorm, const double gnorm, const double step, int n, int k, int ls);

@@ -115,6 +115,9 @@ SNAPSHOT_REQUIRED_COLUMNS = [
     "pred_now_hpl",
     "pred_now_vpl",
     "pred_now_pl",
+    "pred_now_raw_hpl",
+    "pred_now_raw_vpl",
+    "pred_now_raw_pl",
     "pred_now_n_vis",
     "pred_now_pdop",
     "pred_now_valid",
@@ -123,6 +126,9 @@ SNAPSHOT_REQUIRED_COLUMNS = [
     "consistency_pl_ratio",
     "consistency_hpl_error",
     "consistency_vpl_error",
+    "raw_consistency_pl_ratio",
+    "raw_consistency_hpl_error",
+    "raw_consistency_vpl_error",
 ]
 
 
@@ -314,7 +320,7 @@ def check_snapshot_csv(export_dir, pl_models, failures, warnings):
             if finite_float(row.get(col)) is None:
                 failures.append(f"future_integrity_snapshot.csv row {row_idx}: non-finite {col}")
                 return rows
-        ratio = finite_float(row.get("consistency_pl_ratio"))
+        ratio = finite_float(row.get("raw_consistency_pl_ratio"))
         if ratio is not None:
             finite_consistency += 1
             max_consistency = max(max_consistency, ratio)
@@ -336,9 +342,9 @@ def check_snapshot_csv(export_dir, pl_models, failures, warnings):
                     return rows
 
     if finite_consistency == 0:
-        failures.append("future_integrity_snapshot.csv has no finite current consistency samples")
+        failures.append("future_integrity_snapshot.csv has no finite raw current consistency samples")
     elif max_consistency > 0.10:
-        warnings.append(f"current PL consistency max ratio is {max_consistency:.3f}")
+        warnings.append(f"raw current PL consistency max ratio is {max_consistency:.3f}")
     return rows
 
 
@@ -363,10 +369,22 @@ def check_summary(export_dir, failures):
             failures.append(f"phase2_summary.json missing {field}")
     if "integrity_snapshot" not in summary:
         failures.append("phase2_summary.json missing integrity_snapshot")
+    if "current_consistency_raw" not in summary:
+        failures.append("phase2_summary.json missing current_consistency_raw")
+    if "current_consistency_anchored" not in summary:
+        failures.append("phase2_summary.json missing current_consistency_anchored")
     if "current_consistency" not in summary:
-        failures.append("phase2_summary.json missing current_consistency")
+        failures.append("phase2_summary.json missing current_consistency compatibility block")
     if "phase_h_lite" not in summary:
         failures.append("phase2_summary.json missing phase_h_lite")
+    capabilities = summary.get("stage1_capabilities")
+    if not isinstance(capabilities, dict):
+        failures.append("phase2_summary.json missing stage1_capabilities")
+    elif capabilities.get("fused_araim_style") != "deferred_after_rc":
+        failures.append(
+            "phase2_summary.json stage1_capabilities.fused_araim_style "
+            "must be 'deferred_after_rc'"
+        )
     if "pl_grid" not in summary:
         failures.append("phase2_summary.json missing pl_grid")
     if "lidar_observability" not in summary:
@@ -413,14 +431,17 @@ def check_pl_grid(summary, online_rows, failures, warnings):
 
 
 def check_current_consistency(summary, failures):
-    consistency = summary.get("current_consistency") or {}
+    consistency = summary.get("current_consistency_raw") or summary.get("current_consistency") or {}
     max_ratio = finite_float(consistency.get("max_pl_ratio"))
     threshold = finite_float(consistency.get("warning_threshold_ratio")) or 0.10
     if max_ratio is None:
-        failures.append("phase2_summary.json current_consistency has no finite max_pl_ratio")
+        failures.append("phase2_summary.json current_consistency_raw has no finite max_pl_ratio")
     elif max_ratio > threshold:
+        context = consistency.get("max_ratio_context") or {}
+        reason = context.get("likely_reason") or "no diagnostic context"
         failures.append(
-            f"phase2_summary.json current_consistency max_pl_ratio={max_ratio:.3f} exceeds {threshold:.3f}"
+            f"phase2_summary.json current_consistency_raw max_pl_ratio={max_ratio:.3f} "
+            f"exceeds {threshold:.3f}; likely_reason={reason}"
         )
 
 

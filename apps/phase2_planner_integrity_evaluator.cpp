@@ -6,6 +6,7 @@
 #include <chrono>
 #include <cmath>
 #include <cstdint>
+#include <cstdio>
 #include <filesystem>
 #include <fstream>
 #include <iomanip>
@@ -15,6 +16,7 @@
 #include <mutex>
 #include <numeric>
 #include <optional>
+#include <random>
 #include <sstream>
 #include <string>
 #include <thread>
@@ -170,6 +172,9 @@ const std::vector<std::string> kSnapshotCsvFields = {
     "pred_now_hpl",
     "pred_now_vpl",
     "pred_now_pl",
+    "pred_now_raw_hpl",
+    "pred_now_raw_vpl",
+    "pred_now_raw_pl",
     "pred_now_n_vis",
     "pred_now_pdop",
     "pred_now_valid",
@@ -178,7 +183,50 @@ const std::vector<std::string> kSnapshotCsvFields = {
     "consistency_pl_ratio",
     "consistency_hpl_error",
     "consistency_vpl_error",
+    "raw_consistency_pl_ratio",
+    "raw_consistency_hpl_error",
+    "raw_consistency_vpl_error",
 };
+
+  const std::vector<std::string> kGridConsistencyCsvFields = {
+    "stamp",
+    "grid_generation",
+    "sample_index",
+    "p_x",
+    "p_y",
+    "p_z",
+    "hpl_direct",
+    "hpl_grid",
+    "vpl_direct",
+    "vpl_grid",
+    "abs_err_h",
+    "rel_err_h",
+    "abs_err_v",
+    "rel_err_v",
+    "n_vis_direct",
+    "n_vis_grid",
+    "query_source",
+  };
+
+  const std::vector<std::string> kActualExecCsvFields = {
+    "stamp",
+    "odom_x",
+    "odom_y",
+    "odom_z",
+    "actual_HPL_pred",
+    "actual_VPL_pred",
+    "actual_HAL",
+    "actual_VAL",
+    "actual_IM_H",
+    "actual_IM_V",
+    "actual_IM_min",
+    "current_HPL",
+    "current_VPL",
+    "current_IM",
+    "tracking_error_to_plan",
+    "query_source",
+    "pl_model",
+  };
 
 bool is_finite(const double value) {
   return std::isfinite(value);
@@ -218,6 +266,39 @@ std::string bool_str(const bool value) {
   return value ? "true" : "false";
 }
 
+std::optional<std::string> read_command_output(const std::string& command) {
+  FILE* pipe = popen(command.c_str(), "r");
+  if (!pipe) {
+    return std::nullopt;
+  }
+
+  std::string output;
+  char buffer[256];
+  while (fgets(buffer, sizeof(buffer), pipe) != nullptr) {
+    output += buffer;
+  }
+
+  const int rc = pclose(pipe);
+  if (rc != 0 || output.empty()) {
+    return std::nullopt;
+  }
+
+  while (!output.empty() &&
+         (output.back() == '\n' || output.back() == '\r' || output.back() == ' ')) {
+    output.pop_back();
+  }
+  return output.empty() ? std::nullopt : std::optional<std::string>(output);
+}
+
+std::string git_commit() {
+  if (const auto commit =
+          read_command_output("git -C \"" + std::string(IAP_SOURCE_ROOT) +
+                              "\" rev-parse HEAD 2>/dev/null")) {
+    return *commit;
+  }
+  return "unknown";
+}
+
 std::string join_ints(const std::vector<int>& values) {
   std::ostringstream oss;
   for (std::size_t i = 0; i < values.size(); ++i) {
@@ -240,6 +321,19 @@ std::optional<double> finite_or_none(const std::string& value) {
   } catch (...) {
     return std::nullopt;
   }
+}
+
+double relative_pl_error(const double pred_pl, const double current_pl) {
+  return is_finite(pred_pl) && is_finite(current_pl)
+             ? std::abs(pred_pl - current_pl) /
+                   std::max(std::abs(current_pl), 1.0e-9)
+             : std::numeric_limits<double>::quiet_NaN();
+}
+
+double signed_error(const double pred, const double current) {
+  return is_finite(pred) && is_finite(current)
+             ? pred - current
+             : std::numeric_limits<double>::quiet_NaN();
 }
 
 double quantile(std::vector<double> values, const double q) {
@@ -410,11 +504,13 @@ class Phase2PlannerIntegrityEvaluator : public rclcpp::Node {
         predictor_(predictor_params_) {
     declare_parameter<std::string>("log_root", "/home/dev/ws_iap/src/iap/log");
     declare_parameter<std::string>("run_dir", "");
+    declare_parameter<std::string>("map_source", "unknown");
     declare_parameter<std::string>("odom_topic", "/drone_0_visual_slam/odom");
     declare_parameter<std::string>("bspline_topic", "/drone_0_planning/bspline");
     declare_parameter<std::string>("pos_cmd_topic", "/drone_0_planning/pos_cmd");
     declare_parameter<std::string>("map_topic", "/sim/drone_0/lidar");
     declare_parameter<std::string>("integrity_topic", "/iap/integrity");
+    declare_parameter<std::string>("gnss_scenario_file", "");
     declare_parameter<std::string>("range_meas_topic", "/ublox_driver/range_meas");
     declare_parameter<std::string>("ephem_topic", "/ublox_driver/ephem");
     declare_parameter<std::string>("glo_ephem_topic", "/ublox_driver/glo_ephem");
@@ -461,6 +557,7 @@ class Phase2PlannerIntegrityEvaluator : public rclcpp::Node {
     declare_parameter<double>("pi_cost_gradient_step_m", 0.5);
     declare_parameter<bool>("snapshot_anchor_current_integrity", true);
     declare_parameter<bool>("publish_integrity_cost_field", false);
+    declare_parameter<bool>("planner_use_integrity_cost", false);
     declare_parameter<std::string>("integrity_cost_field_topic",
                                    "/iap/integrity_cost_field");
     declare_parameter<double>("z_min", 0.5);
@@ -470,11 +567,13 @@ class Phase2PlannerIntegrityEvaluator : public rclcpp::Node {
 
     log_root_ = get_parameter("log_root").as_string();
     explicit_run_dir_ = get_parameter("run_dir").as_string();
+    map_source_ = get_parameter("map_source").as_string();
     odom_topic_ = get_parameter("odom_topic").as_string();
     bspline_topic_ = get_parameter("bspline_topic").as_string();
     pos_cmd_topic_ = get_parameter("pos_cmd_topic").as_string();
     map_topic_ = get_parameter("map_topic").as_string();
     integrity_topic_ = get_parameter("integrity_topic").as_string();
+    gnss_scenario_file_ = get_parameter("gnss_scenario_file").as_string();
     range_meas_topic_ = get_parameter("range_meas_topic").as_string();
     ephem_topic_ = get_parameter("ephem_topic").as_string();
     glo_ephem_topic_ = get_parameter("glo_ephem_topic").as_string();
@@ -553,6 +652,8 @@ class Phase2PlannerIntegrityEvaluator : public rclcpp::Node {
         get_parameter("snapshot_anchor_current_integrity").as_bool();
     publish_integrity_cost_field_ =
         get_parameter("publish_integrity_cost_field").as_bool();
+    planner_use_integrity_cost_ =
+      get_parameter("planner_use_integrity_cost").as_bool();
     integrity_cost_field_topic_ =
         get_parameter("integrity_cost_field_topic").as_string();
     z_min_ = get_parameter("z_min").as_double();
@@ -733,6 +834,10 @@ class Phase2PlannerIntegrityEvaluator : public rclcpp::Node {
                    std::ios::out | std::ios::trunc);
     snapshot_csv_file_.open(*export_dir_ / "future_integrity_snapshot.csv",
                             std::ios::out | std::ios::trunc);
+    actual_exec_csv_file_.open(*export_dir_ / "actual_integrity_along_odom.csv",
+                               std::ios::out | std::ios::trunc);
+    grid_consistency_csv_file_.open(*export_dir_ / "pl_grid_consistency.csv",
+                                    std::ios::out | std::ios::trunc);
     if (!csv_file_ || !snapshot_csv_file_) {
       warn_once("failed to open Phase 2 evaluator CSV outputs");
       return;
@@ -751,6 +856,24 @@ class Phase2PlannerIntegrityEvaluator : public rclcpp::Node {
       snapshot_csv_file_ << kSnapshotCsvFields[i];
     }
     snapshot_csv_file_ << '\n';
+    if (actual_exec_csv_file_) {
+      for (std::size_t i = 0; i < kActualExecCsvFields.size(); ++i) {
+        if (i) {
+          actual_exec_csv_file_ << ',';
+        }
+        actual_exec_csv_file_ << kActualExecCsvFields[i];
+      }
+      actual_exec_csv_file_ << '\n';
+    }
+    if (grid_consistency_csv_file_) {
+      for (std::size_t i = 0; i < kGridConsistencyCsvFields.size(); ++i) {
+        if (i) {
+          grid_consistency_csv_file_ << ',';
+        }
+        grid_consistency_csv_file_ << kGridConsistencyCsvFields[i];
+      }
+      grid_consistency_csv_file_ << '\n';
+    }
     outputs_open_ = true;
     write_summary();
     RCLCPP_INFO(get_logger(), "phase2 C++ evaluator writing export files under %s",
@@ -781,7 +904,10 @@ class Phase2PlannerIntegrityEvaluator : public rclcpp::Node {
     pl_grid_worker_ = std::thread([this, rebuild_stamp] {
       try {
         std::lock_guard<std::mutex> occupancy_lock(occupancy_mutex_);
-        field_predictor_.rebuild_grid(rebuild_stamp);
+        const bool rebuilt = field_predictor_.rebuild_grid(rebuild_stamp);
+        if (rebuilt) {
+          write_grid_consistency_samples(rebuild_stamp);
+        }
       } catch (...) {
         // Keep the evaluator alive; the next timer tick can try again.
       }
@@ -862,7 +988,9 @@ class Phase2PlannerIntegrityEvaluator : public rclcpp::Node {
       return;
     }
 
-    write_snapshot(current_from_msg(msg));
+    const auto current = current_from_msg(msg);
+    write_snapshot(current);
+    write_actual_exec_row(current);
     write_summary();
   }
 
@@ -1371,6 +1499,7 @@ class Phase2PlannerIntegrityEvaluator : public rclcpp::Node {
     if (!csv_file_) {
       return;
     }
+    std::lock_guard<std::mutex> lock(csv_mutex_);
     for (std::size_t i = 0; i < kCsvFields.size(); ++i) {
       if (i) {
         csv_file_ << ',';
@@ -1416,6 +1545,7 @@ class Phase2PlannerIntegrityEvaluator : public rclcpp::Node {
     if (!snapshot_csv_file_) {
       return;
     }
+    std::lock_guard<std::mutex> lock(csv_mutex_);
 
     iap::IntegritySnapshotBuilderInput input;
     input.stamp = current.stamp;
@@ -1429,9 +1559,11 @@ class Phase2PlannerIntegrityEvaluator : public rclcpp::Node {
         snapshot_builder_.build_from_latest(input);
     field_predictor_.update_snapshot(snapshot);
 
+    PlFields pred_now_raw;
     PlFields pred_now;
     if (snapshot.has_pose) {
-      pred_now = pl_values(snapshot.p_wb);
+      pred_now_raw = pl_values(snapshot.p_wb);
+      pred_now = pred_now_raw;
       if (snapshot_anchor_current_integrity_ && snapshot.current.valid &&
           is_finite(snapshot.current.hpl) && is_finite(snapshot.current.vpl)) {
         pred_now.hpl = snapshot.current.hpl;
@@ -1444,18 +1576,17 @@ class Phase2PlannerIntegrityEvaluator : public rclcpp::Node {
     }
 
     const double consistency_pl_ratio =
-        is_finite(snapshot.current.pl) && is_finite(pred_now.pl)
-            ? std::abs(pred_now.pl - snapshot.current.pl) /
-                  std::max(std::abs(snapshot.current.pl), 1.0e-9)
-            : std::numeric_limits<double>::quiet_NaN();
+        relative_pl_error(pred_now.pl, snapshot.current.pl);
     const double consistency_hpl_error =
-        is_finite(pred_now.hpl) && is_finite(snapshot.current.hpl)
-            ? pred_now.hpl - snapshot.current.hpl
-            : std::numeric_limits<double>::quiet_NaN();
+        signed_error(pred_now.hpl, snapshot.current.hpl);
     const double consistency_vpl_error =
-        is_finite(pred_now.vpl) && is_finite(snapshot.current.vpl)
-            ? pred_now.vpl - snapshot.current.vpl
-            : std::numeric_limits<double>::quiet_NaN();
+        signed_error(pred_now.vpl, snapshot.current.vpl);
+    const double raw_consistency_pl_ratio =
+        relative_pl_error(pred_now_raw.pl, snapshot.current.pl);
+    const double raw_consistency_hpl_error =
+        signed_error(pred_now_raw.hpl, snapshot.current.hpl);
+    const double raw_consistency_vpl_error =
+        signed_error(pred_now_raw.vpl, snapshot.current.vpl);
 
     Row row;
     row["stamp"] = fmt_num(snapshot.stamp);
@@ -1501,15 +1632,21 @@ class Phase2PlannerIntegrityEvaluator : public rclcpp::Node {
     row["pred_now_hpl"] = fmt_num(pred_now.hpl);
     row["pred_now_vpl"] = fmt_num(pred_now.vpl);
     row["pred_now_pl"] = fmt_num(pred_now.pl);
+    row["pred_now_raw_hpl"] = fmt_num(pred_now_raw.hpl);
+    row["pred_now_raw_vpl"] = fmt_num(pred_now_raw.vpl);
+    row["pred_now_raw_pl"] = fmt_num(pred_now_raw.pl);
     row["pred_now_n_vis"] =
-        pred_now.n_vis >= 0 ? std::to_string(pred_now.n_vis) : "nan";
-    row["pred_now_pdop"] = fmt_num(pred_now.pdop);
-    row["pred_now_valid"] = bool_str(pred_now.valid);
-    row["pred_now_fallback"] = bool_str(pred_now.fallback);
-    row["pred_now_fallback_reason"] = pred_now.fallback_reason;
+        pred_now_raw.n_vis >= 0 ? std::to_string(pred_now_raw.n_vis) : "nan";
+    row["pred_now_pdop"] = fmt_num(pred_now_raw.pdop);
+    row["pred_now_valid"] = bool_str(pred_now_raw.valid);
+    row["pred_now_fallback"] = bool_str(pred_now_raw.fallback);
+    row["pred_now_fallback_reason"] = pred_now_raw.fallback_reason;
     row["consistency_pl_ratio"] = fmt_num(consistency_pl_ratio);
     row["consistency_hpl_error"] = fmt_num(consistency_hpl_error);
     row["consistency_vpl_error"] = fmt_num(consistency_vpl_error);
+    row["raw_consistency_pl_ratio"] = fmt_num(raw_consistency_pl_ratio);
+    row["raw_consistency_hpl_error"] = fmt_num(raw_consistency_hpl_error);
+    row["raw_consistency_vpl_error"] = fmt_num(raw_consistency_vpl_error);
 
     for (std::size_t i = 0; i < kSnapshotCsvFields.size(); ++i) {
       if (i) {
@@ -1528,21 +1665,156 @@ class Phase2PlannerIntegrityEvaluator : public rclcpp::Node {
     if (snapshot.has_epoch) {
       ++snapshot_with_epoch_count_;
     }
-    if (pred_now.valid && is_finite(pred_now.pl)) {
+    if (pred_now_raw.valid && is_finite(pred_now_raw.pl)) {
       ++snapshot_pred_now_finite_count_;
     }
-    if (pred_now.fallback) {
+    if (pred_now_raw.fallback) {
       ++snapshot_pred_now_fallback_count_;
     }
     if (is_finite(consistency_pl_ratio)) {
-      consistency_pl_ratios_.push_back(consistency_pl_ratio);
+      consistency_anchored_pl_ratios_.push_back(consistency_pl_ratio);
     }
     if (is_finite(consistency_hpl_error)) {
-      consistency_hpl_errors_.push_back(consistency_hpl_error);
+      consistency_anchored_hpl_errors_.push_back(consistency_hpl_error);
     }
     if (is_finite(consistency_vpl_error)) {
-      consistency_vpl_errors_.push_back(consistency_vpl_error);
+      consistency_anchored_vpl_errors_.push_back(consistency_vpl_error);
     }
+    if (is_finite(raw_consistency_pl_ratio)) {
+      consistency_raw_pl_ratios_.push_back(raw_consistency_pl_ratio);
+    }
+    if (is_finite(raw_consistency_hpl_error)) {
+      consistency_raw_hpl_errors_.push_back(raw_consistency_hpl_error);
+    }
+    if (is_finite(raw_consistency_vpl_error)) {
+      consistency_raw_vpl_errors_.push_back(raw_consistency_vpl_error);
+    }
+  }
+
+  void write_actual_exec_row(const iap::CurrentIntegrityState& current) {
+    if (!actual_exec_csv_file_ || !latest_odom_pose_valid_) {
+      return;
+    }
+    std::lock_guard<std::mutex> lock(csv_mutex_);
+
+    double dist = std::numeric_limits<double>::quiet_NaN();
+    double lower = std::numeric_limits<double>::quiet_NaN();
+    double upper = std::numeric_limits<double>::quiet_NaN();
+    double al_h = std::numeric_limits<double>::quiet_NaN();
+    double al_v = std::numeric_limits<double>::quiet_NaN();
+    double al = std::numeric_limits<double>::quiet_NaN();
+    al_values(latest_odom_p_, &dist, &lower, &upper, &al_h, &al_v, &al);
+    const PlFields actual_pl = pl_values(latest_odom_p_);
+    const double tracking_error_to_plan =
+        latest_plan_pose_valid_ ? (latest_odom_p_ - latest_plan_pose_).norm()
+                                : std::numeric_limits<double>::quiet_NaN();
+
+    Row row;
+    row["stamp"] = fmt_num(current.stamp);
+    row["odom_x"] = fmt_num(latest_odom_p_.x());
+    row["odom_y"] = fmt_num(latest_odom_p_.y());
+    row["odom_z"] = fmt_num(latest_odom_p_.z());
+    row["actual_HPL_pred"] = fmt_num(actual_pl.hpl);
+    row["actual_VPL_pred"] = fmt_num(actual_pl.vpl);
+    row["actual_HAL"] = fmt_num(al_h);
+    row["actual_VAL"] = fmt_num(al_v);
+    row["actual_IM_H"] = fmt_num(is_finite(al_h) && is_finite(actual_pl.hpl)
+                                      ? al_h - actual_pl.hpl
+                                      : std::numeric_limits<double>::quiet_NaN());
+    row["actual_IM_V"] = fmt_num(is_finite(al_v) && is_finite(actual_pl.vpl)
+                                      ? al_v - actual_pl.vpl
+                                      : std::numeric_limits<double>::quiet_NaN());
+    row["actual_IM_min"] = fmt_num(is_finite(al) && is_finite(actual_pl.pl)
+                                        ? al - actual_pl.pl
+                                        : std::numeric_limits<double>::quiet_NaN());
+    row["current_HPL"] = fmt_num(current.hpl);
+    row["current_VPL"] = fmt_num(current.vpl);
+    row["current_IM"] = fmt_num(current.im);
+    row["tracking_error_to_plan"] = fmt_num(tracking_error_to_plan);
+    row["query_source"] = actual_pl.query_source;
+    row["pl_model"] = pl_model_;
+
+    for (std::size_t i = 0; i < kActualExecCsvFields.size(); ++i) {
+      if (i) {
+        actual_exec_csv_file_ << ',';
+      }
+      const auto it = row.find(kActualExecCsvFields[i]);
+      actual_exec_csv_file_ << csv_escape(it == row.end() ? "" : it->second);
+    }
+    actual_exec_csv_file_ << '\n';
+    actual_exec_csv_file_.flush();
+  }
+
+  void write_grid_consistency_samples(const double stamp_s) {
+    if (!grid_consistency_csv_file_ || !use_pl_grid_) {
+      return;
+    }
+    std::lock_guard<std::mutex> lock(csv_mutex_);
+    if (!latest_odom_pose_valid_ || !latest_odom_p_.allFinite()) {
+      return;
+    }
+
+    const auto grid_stats = field_predictor_.stats();
+    const int generation = grid_stats.generation;
+    const Eigen::Vector3d center = latest_odom_p_;
+    const uint32_t seed = static_cast<uint32_t>(std::llround(stamp_s * 1000.0)) ^
+                          static_cast<uint32_t>(generation < 0 ? 0 : generation);
+    std::mt19937 rng(seed);
+    std::uniform_real_distribution<double> dx(-0.5 * field_predictor_params_.grid_size_x_m,
+                                              0.5 * field_predictor_params_.grid_size_x_m);
+    std::uniform_real_distribution<double> dy(-0.5 * field_predictor_params_.grid_size_y_m,
+                                              0.5 * field_predictor_params_.grid_size_y_m);
+    std::uniform_real_distribution<double> dz(-0.5 * field_predictor_params_.grid_size_z_m,
+                                              0.5 * field_predictor_params_.grid_size_z_m);
+
+    for (int sample_idx = 0; sample_idx < 20; ++sample_idx) {
+      const Eigen::Vector3d p = center + Eigen::Vector3d(dx(rng), dy(rng), dz(rng));
+      const PlFields direct = pl_values(p);
+      const iap::FuturePLQueryResult grid = field_predictor_.query(p, stamp_s);
+      const double abs_err_h = (is_finite(direct.hpl) && is_finite(grid.hpl))
+                                   ? std::abs(direct.hpl - grid.hpl)
+                                   : std::numeric_limits<double>::quiet_NaN();
+      const double rel_err_h = (is_finite(abs_err_h) && is_finite(direct.hpl) &&
+                                std::abs(direct.hpl) > 1.0e-9)
+                                   ? abs_err_h / std::abs(direct.hpl)
+                                   : std::numeric_limits<double>::quiet_NaN();
+      const double abs_err_v = (is_finite(direct.vpl) && is_finite(grid.vpl))
+                                   ? std::abs(direct.vpl - grid.vpl)
+                                   : std::numeric_limits<double>::quiet_NaN();
+      const double rel_err_v = (is_finite(abs_err_v) && is_finite(direct.vpl) &&
+                                std::abs(direct.vpl) > 1.0e-9)
+                                   ? abs_err_v / std::abs(direct.vpl)
+                                   : std::numeric_limits<double>::quiet_NaN();
+
+      Row row;
+      row["stamp"] = fmt_num(stamp_s);
+      row["grid_generation"] = std::to_string(generation);
+      row["sample_index"] = std::to_string(sample_idx);
+      row["p_x"] = fmt_num(p.x());
+      row["p_y"] = fmt_num(p.y());
+      row["p_z"] = fmt_num(p.z());
+      row["hpl_direct"] = fmt_num(direct.hpl);
+      row["hpl_grid"] = fmt_num(grid.hpl);
+      row["vpl_direct"] = fmt_num(direct.vpl);
+      row["vpl_grid"] = fmt_num(grid.vpl);
+      row["abs_err_h"] = fmt_num(abs_err_h);
+      row["rel_err_h"] = fmt_num(rel_err_h);
+      row["abs_err_v"] = fmt_num(abs_err_v);
+      row["rel_err_v"] = fmt_num(rel_err_v);
+      row["n_vis_direct"] = direct.n_vis >= 0 ? std::to_string(direct.n_vis) : "nan";
+      row["n_vis_grid"] = grid.n_vis >= 0 ? std::to_string(grid.n_vis) : "nan";
+      row["query_source"] = grid.query_source;
+
+      for (std::size_t i = 0; i < kGridConsistencyCsvFields.size(); ++i) {
+        if (i) {
+          grid_consistency_csv_file_ << ',';
+        }
+        const auto it = row.find(kGridConsistencyCsvFields[i]);
+        grid_consistency_csv_file_ << csv_escape(it == row.end() ? "" : it->second);
+      }
+      grid_consistency_csv_file_ << '\n';
+    }
+    grid_consistency_csv_file_.flush();
   }
 
   void on_bspline(const traj_utils::msg::Bspline& msg) {
@@ -1597,6 +1869,10 @@ class Phase2PlannerIntegrityEvaluator : public rclcpp::Node {
       Row row = make_sample_row(planner_now, msg.traj_id, idx, sample_t,
                                 latest_odom_stamp_ + sample_t, pos, vel, acc,
                                 std::numeric_limits<double>::quiet_NaN());
+      if (idx == 0 && pos.allFinite()) {
+        latest_plan_pose_ = pos;
+        latest_plan_pose_valid_ = true;
+      }
       write_sample(row);
       rows.push_back(std::move(row));
     }
@@ -1687,13 +1963,41 @@ class Phase2PlannerIntegrityEvaluator : public rclcpp::Node {
     summary["aligned_sample_count"] = 0;
     summary["online_truth_used"] = false;
     summary["odom_source"] = odom_topic_;
-    summary["map_source"] = map_topic_;
+    summary["map_source"] = map_source_;
     summary["pl_model"] = pl_model_;
     summary["al_model"] = al_model_;
     summary["sampling"] = {
         {"horizon_s", horizon_s_},
         {"dt_s", dt_s_},
         {"max_samples_per_traj", max_samples_},
+    };
+    summary["stage1_predictor_config"] = {
+      {"git_commit", git_commit()},
+      {"source_root", IAP_SOURCE_ROOT},
+      {"phase2_pl_model", pl_model_},
+      {"phase2_use_pl_grid", use_pl_grid_},
+      {"phase2_use_lidar_observability", use_lidar_observability_},
+      {"planner_use_integrity_cost", planner_use_integrity_cost_},
+      {"gnss_scenario_file", gnss_scenario_file_},
+      {"map_source", map_source_},
+      {"phase2_al_model", al_model_},
+      {"phase2_publish_integrity_cost_field",
+       publish_integrity_cost_field_},
+      {"phase2_fallback_pl_m", fallback_pl_m_},
+      {"phase2_pl_grid_resolution_m",
+       field_predictor_params_.grid_resolution_m},
+      {"phase2_pl_grid_size_x_m", field_predictor_params_.grid_size_x_m},
+      {"phase2_pl_grid_size_y_m", field_predictor_params_.grid_size_y_m},
+      {"phase2_pl_grid_size_z_m", field_predictor_params_.grid_size_z_m},
+      {"phase2_pl_grid_update_hz", pl_grid_update_hz_},
+      {"phase2_lidar_search_radius_m",
+       field_predictor_params_.lidar_search_radius_m},
+      {"phase2_lidar_min_points", field_predictor_params_.lidar_min_points},
+      {"phase2_lidar_good_points", field_predictor_params_.lidar_good_points},
+      {"phase2_lidar_sigma_m", field_predictor_params_.lidar_sigma_m},
+      {"phase2_lidar_info_scale", field_predictor_params_.lidar_info_scale},
+      {"phase2_lidar_alpha_min", field_predictor_params_.lidar_alpha_min},
+      {"phase2_lidar_alpha_max", field_predictor_params_.lidar_alpha_max},
     };
     summary["fallback_count"] = fallback_count_;
     summary["fallback_rate"] = fallback_rate;
@@ -1709,20 +2013,41 @@ class Phase2PlannerIntegrityEvaluator : public rclcpp::Node {
         {"pred_now_fallback_count", snapshot_pred_now_fallback_count_},
         {"csv", "future_integrity_snapshot.csv"},
     };
-    summary["current_consistency"] = {
-        {"available", !consistency_pl_ratios_.empty()},
-        {"finite_count", static_cast<int>(consistency_pl_ratios_.size())},
-        {"warning_threshold_ratio", 0.10},
-        {"mean_pl_ratio", mean_or_null(consistency_pl_ratios_)},
-        {"max_pl_ratio", consistency_pl_ratios_.empty()
-                             ? nlohmann::json(nullptr)
-                             : nlohmann::json(*std::max_element(
-                                   consistency_pl_ratios_.begin(),
-                                   consistency_pl_ratios_.end()))},
-        {"mean_hpl_error", mean_or_null(consistency_hpl_errors_)},
-        {"mean_vpl_error", mean_or_null(consistency_vpl_errors_)},
-        {"max_abs_hpl_error", max_abs_or_null(consistency_hpl_errors_)},
-        {"max_abs_vpl_error", max_abs_or_null(consistency_vpl_errors_)},
+    const auto consistency_summary =
+        [&](const std::vector<double>& ratios,
+            const std::vector<double>& hpl_errors,
+            const std::vector<double>& vpl_errors) {
+          return nlohmann::json{
+              {"available", !ratios.empty()},
+              {"finite_count", static_cast<int>(ratios.size())},
+              {"warning_threshold_ratio", 0.10},
+              {"mean_pl_ratio", mean_or_null(ratios)},
+              {"max_pl_ratio",
+               ratios.empty()
+                   ? nlohmann::json(nullptr)
+                   : nlohmann::json(
+                         *std::max_element(ratios.begin(), ratios.end()))},
+              {"mean_hpl_error", mean_or_null(hpl_errors)},
+              {"mean_vpl_error", mean_or_null(vpl_errors)},
+              {"max_abs_hpl_error", max_abs_or_null(hpl_errors)},
+              {"max_abs_vpl_error", max_abs_or_null(vpl_errors)},
+          };
+        };
+    summary["current_consistency_raw"] = consistency_summary(
+        consistency_raw_pl_ratios_, consistency_raw_hpl_errors_,
+        consistency_raw_vpl_errors_);
+    summary["current_consistency_anchored"] = consistency_summary(
+        consistency_anchored_pl_ratios_, consistency_anchored_hpl_errors_,
+        consistency_anchored_vpl_errors_);
+    summary["current_consistency"] = summary["current_consistency_raw"];
+    summary["stage1_capabilities"] = {
+        {"fused_araim_style", "deferred_after_rc"},
+        {"self_consistency_rc_metric", "current_consistency_raw"},
+        {"snapshot_anchor_current_integrity",
+         snapshot_anchor_current_integrity_},
+        {"planner_integrity_cost",
+         planner_use_integrity_cost_ ? "enabled_experimental"
+                                     : "disabled_by_default"},
     };
     const auto grid_stats = field_predictor_.stats();
     summary["pl_grid"] = {
@@ -2011,6 +2336,14 @@ class Phase2PlannerIntegrityEvaluator : public rclcpp::Node {
       snapshot_csv_file_.flush();
       snapshot_csv_file_.close();
     }
+    if (actual_exec_csv_file_) {
+      actual_exec_csv_file_.flush();
+      actual_exec_csv_file_.close();
+    }
+    if (grid_consistency_csv_file_) {
+      grid_consistency_csv_file_.flush();
+      grid_consistency_csv_file_.close();
+    }
   }
 
   iap::PredictedAraimComputer::Params predictor_params_{};
@@ -2025,6 +2358,7 @@ class Phase2PlannerIntegrityEvaluator : public rclcpp::Node {
 
   std::string log_root_;
   std::string explicit_run_dir_;
+  std::string map_source_;
   std::string odom_topic_;
   std::string bspline_topic_;
   std::string pos_cmd_topic_;
@@ -2056,7 +2390,9 @@ class Phase2PlannerIntegrityEvaluator : public rclcpp::Node {
   double pi_cost_gradient_step_m_ = 0.5;
   bool snapshot_anchor_current_integrity_ = true;
   bool publish_integrity_cost_field_ = false;
+  bool planner_use_integrity_cost_ = false;
   std::string integrity_cost_field_topic_ = "/iap/integrity_cost_field";
+  std::string gnss_scenario_file_;
 
   std::chrono::system_clock::time_point start_wall_;
   std::optional<std::filesystem::path> initial_latest_target_;
@@ -2064,6 +2400,9 @@ class Phase2PlannerIntegrityEvaluator : public rclcpp::Node {
   std::optional<std::filesystem::path> export_dir_;
   std::ofstream csv_file_;
   std::ofstream snapshot_csv_file_;
+  std::ofstream actual_exec_csv_file_;
+  std::ofstream grid_consistency_csv_file_;
+  mutable std::mutex csv_mutex_;
   bool outputs_open_ = false;
   bool finalized_ = false;
 
@@ -2072,6 +2411,9 @@ class Phase2PlannerIntegrityEvaluator : public rclcpp::Node {
       Eigen::Vector3d::Constant(std::numeric_limits<double>::quiet_NaN());
   Eigen::Quaterniond latest_odom_q_ = Eigen::Quaterniond::Identity();
   bool latest_odom_pose_valid_ = false;
+    Eigen::Vector3d latest_plan_pose_ =
+      Eigen::Vector3d::Constant(std::numeric_limits<double>::quiet_NaN());
+    bool latest_plan_pose_valid_ = false;
   double latest_cloud_stamp_ = std::numeric_limits<double>::quiet_NaN();
   double current_hpl_ = std::numeric_limits<double>::quiet_NaN();
   double current_vpl_ = std::numeric_limits<double>::quiet_NaN();
@@ -2100,9 +2442,12 @@ class Phase2PlannerIntegrityEvaluator : public rclcpp::Node {
   int snapshot_with_epoch_count_ = 0;
   int snapshot_pred_now_finite_count_ = 0;
   int snapshot_pred_now_fallback_count_ = 0;
-  std::vector<double> consistency_pl_ratios_;
-  std::vector<double> consistency_hpl_errors_;
-  std::vector<double> consistency_vpl_errors_;
+  std::vector<double> consistency_raw_pl_ratios_;
+  std::vector<double> consistency_raw_hpl_errors_;
+  std::vector<double> consistency_raw_vpl_errors_;
+  std::vector<double> consistency_anchored_pl_ratios_;
+  std::vector<double> consistency_anchored_hpl_errors_;
+  std::vector<double> consistency_anchored_vpl_errors_;
 
   bool origin_set_ = false;
   Eigen::Vector3d origin_ecef_ = Eigen::Vector3d::Zero();

@@ -199,6 +199,29 @@ def _launch_setup(context):
     gnss_fallback_to_synthetic = _as_bool(
         LaunchConfiguration("gnss_fallback_to_synthetic_on_rinex_error").perform(context)
     )
+    gnss_enable_map_occlusion = _as_bool(
+        LaunchConfiguration("gnss_enable_map_occlusion").perform(context)
+    )
+    gnss_enable_skymask = _as_bool(
+        LaunchConfiguration("gnss_enable_skymask").perform(context)
+    )
+    gnss_enable_nlos = _as_bool(
+        LaunchConfiguration("gnss_enable_nlos").perform(context)
+    )
+    gnss_enable_multipath = _as_bool(
+        LaunchConfiguration("gnss_enable_multipath").perform(context)
+    )
+    gnss_enable_fault_injection = _as_bool(
+        LaunchConfiguration("gnss_enable_fault_injection").perform(context)
+    )
+    gnss_sky_dome_follow_receiver = _as_bool(
+        LaunchConfiguration("gnss_sky_dome_follow_receiver").perform(context)
+    )
+    gnss_sky_dome_center_enu = [
+        float(LaunchConfiguration("gnss_sky_dome_center_x").perform(context)),
+        float(LaunchConfiguration("gnss_sky_dome_center_y").perform(context)),
+        float(LaunchConfiguration("gnss_sky_dome_center_z").perform(context)),
+    ]
 
     map_size_x = LaunchConfiguration("map_size_x").perform(context)
     map_size_y = LaunchConfiguration("map_size_y").perform(context)
@@ -513,11 +536,13 @@ def _launch_setup(context):
                 {"sky_dome_show_cardinal_labels": True},
                 {"sky_dome_ring_count": 3},
                 {"sky_dome_meridian_count": 12},
-                {"enable_map_occlusion": True},
-                {"enable_skymask": True},
-                {"enable_nlos": True},
-                {"enable_multipath": True},
-                {"enable_fault_injection": True},
+                {"sky_dome_follow_receiver": gnss_sky_dome_follow_receiver},
+                {"sky_dome_center_enu": gnss_sky_dome_center_enu},
+                {"enable_map_occlusion": gnss_enable_map_occlusion},
+                {"enable_skymask": gnss_enable_skymask},
+                {"enable_nlos": gnss_enable_nlos},
+                {"enable_multipath": gnss_enable_multipath},
+                {"enable_fault_injection": gnss_enable_fault_injection},
                 {"map_cloud_topic": "/map_generator/global_cloud"},
                 {"multipath_amp_m": 0.5},
             ],
@@ -748,6 +773,15 @@ def generate_launch_description():
         ),
         DeclareLaunchArgument("gnss_rinex_ephem_max_age_s", default_value="7200.0"),
         DeclareLaunchArgument("gnss_fallback_to_synthetic_on_rinex_error", default_value="false"),
+        DeclareLaunchArgument("gnss_enable_map_occlusion", default_value="true"),
+        DeclareLaunchArgument("gnss_enable_skymask", default_value="true"),
+        DeclareLaunchArgument("gnss_enable_nlos", default_value="true"),
+        DeclareLaunchArgument("gnss_enable_multipath", default_value="true"),
+        DeclareLaunchArgument("gnss_enable_fault_injection", default_value="true"),
+        DeclareLaunchArgument("gnss_sky_dome_follow_receiver", default_value="false"),
+        DeclareLaunchArgument("gnss_sky_dome_center_x", default_value="0.0"),
+        DeclareLaunchArgument("gnss_sky_dome_center_y", default_value="0.0"),
+        DeclareLaunchArgument("gnss_sky_dome_center_z", default_value="0.0"),
         DeclareLaunchArgument("drone_id", default_value="0"),
         DeclareLaunchArgument("init_x", default_value="0.0"),
         DeclareLaunchArgument("init_y", default_value="0.0"),

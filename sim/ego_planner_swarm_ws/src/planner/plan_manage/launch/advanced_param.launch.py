@@ -50,6 +50,9 @@ def generate_launch_description():
     flight_type = LaunchConfiguration('flight_type', default=2)
     use_distinctive_trajs = LaunchConfiguration('use_distinctive_trajs', default=True)
     use_integrity_cost = LaunchConfiguration('use_integrity_cost', default=False)
+    integrity_debug_csv_path = LaunchConfiguration(
+        'integrity_debug_csv_path',
+        default='/home/dev/ws_iap/src/iap/log/latest/export/planner_integrity_cost_debug.csv')
     
     obj_num_set = LaunchConfiguration('obj_num_set', default=10)
     
@@ -97,6 +100,7 @@ def generate_launch_description():
     flight_type_arg = DeclareLaunchArgument('flight_type', default_value=flight_type, description='flight_type')
     use_distinctive_trajs_arg = DeclareLaunchArgument('use_distinctive_trajs', default_value=use_distinctive_trajs, description='Use distinctive trajectories')
     use_integrity_cost_arg = DeclareLaunchArgument('use_integrity_cost', default_value=use_integrity_cost, description='Enable optional integrity soft cost')
+    integrity_debug_csv_path_arg = DeclareLaunchArgument('integrity_debug_csv_path', default_value=integrity_debug_csv_path, description='Planner integrity cost debug CSV path')
     obj_num_set_arg = DeclareLaunchArgument('obj_num_set', default_value=obj_num_set, description='Number of objects')
     drone_id_arg = DeclareLaunchArgument('drone_id', default_value=drone_id, description='Drone ID')
 
@@ -216,6 +220,7 @@ def generate_launch_description():
             {'optimization/use_integrity_cost': use_integrity_cost},
             {'optimization/lambda_integrity': 0.00001},
             {'optimization/integrity_cost_topic': '/iap/integrity_cost_field'},
+            {'optimization/integrity_debug_csv_path': integrity_debug_csv_path},
             {'optimization/integrity_field_stale_timeout_s': 0.5},
             {'optimization/integrity_nearest_radius_m': 1.0},
             {'optimization/integrity_cost_max': 1000.0},
@@ -279,6 +284,7 @@ def generate_launch_description():
     ld.add_action(flight_type_arg)
     ld.add_action(use_distinctive_trajs_arg)
     ld.add_action(use_integrity_cost_arg)
+    ld.add_action(integrity_debug_csv_path_arg)
     ld.add_action(obj_num_set_arg)
     ld.add_action(drone_id_arg)
 

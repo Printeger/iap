@@ -905,7 +905,7 @@ struct SatelliteEval
   Eigen::Vector3d sat_pos_ecef = Eigen::Vector3d::Zero();
   Eigen::Vector3d sat_vel_ecef = Eigen::Vector3d::Zero();
   Eigen::Vector3d dir_enu = Eigen::Vector3d::Zero();
-  // RViz-only scaled local display position. This is not the physical satellite altitude.
+  // RViz-only scaled sky-dome display position. This is not the physical satellite altitude.
   Eigen::Vector3d display_pos_enu = Eigen::Vector3d::Zero();
   Eigen::Vector3d raycast_hit_enu = Eigen::Vector3d::Zero();
   bool has_raycast_hit = false;
@@ -1298,6 +1298,10 @@ private:
     visualization_frame_ = declare_parameter<std::string>("visualization_frame", "map");
     satellite_display_radius_m_ =
       declare_parameter<double>("satellite_display_radius_m", 80.0);
+    sky_dome_follow_receiver_ =
+      declare_parameter<bool>("sky_dome_follow_receiver", false);
+    sky_dome_center_enu_ =
+      read_vector3_parameter("sky_dome_center_enu", {0.0, 0.0, 0.0});
     signal_ray_width_m_ =
       std::max(0.001, declare_parameter<double>("signal_ray_width_m", 0.08));
     signal_ray_alpha_ =
@@ -1723,13 +1727,13 @@ private:
     sat.el_rad = azel[1];
     sat.dir_enu = R_ecef_enu_.transpose() * (sat_pos - receiver_ecef).normalized();
     // RViz-only scaled sky-dome position derived explicitly from azimuth and
-    // elevation. satellite_display_radius_m_ is a drawing radius around the
-    // receiver, not the GPS orbit altitude.
+    // elevation. satellite_display_radius_m_ is a drawing radius, not the GPS
+    // orbit altitude.
     const Eigen::Vector3d display_dir_enu(
       std::cos(sat.el_rad) * std::sin(sat.az_rad),
       std::cos(sat.el_rad) * std::cos(sat.az_rad),
       std::sin(sat.el_rad));
-    sat.display_pos_enu = receiver_state.pos_enu +
+    sat.display_pos_enu = sky_dome_center(receiver_state) +
       display_dir_enu.normalized() * satellite_display_radius_m_;
 
     return visibility_model_.classify(
@@ -1793,7 +1797,7 @@ private:
       std::cos(sat.el_rad) * std::sin(sat.az_rad),
       std::cos(sat.el_rad) * std::cos(sat.az_rad),
       std::sin(sat.el_rad));
-    sat.display_pos_enu = receiver_state.pos_enu +
+    sat.display_pos_enu = sky_dome_center(receiver_state) +
       display_dir_enu.normalized() * satellite_display_radius_m_;
 
     return visibility_model_.classify(
@@ -2142,6 +2146,11 @@ private:
     pub_nlos_paths_->publish(array);
   }
 
+  Eigen::Vector3d sky_dome_center(const ReceiverState& receiver) const
+  {
+    return sky_dome_follow_receiver_ ? receiver.pos_enu : sky_dome_center_enu_;
+  }
+
   Eigen::Vector3d sky_dome_point(
     const ReceiverState& receiver,
     const double az_rad,
@@ -2152,7 +2161,7 @@ private:
       std::cos(el_rad) * std::sin(az_rad),
       std::cos(el_rad) * std::cos(az_rad),
       std::sin(el_rad));
-    return receiver.pos_enu + dir.normalized() * radius;
+    return sky_dome_center(receiver) + dir.normalized() * radius;
   }
 
   void publish_sky_dome(const ReceiverState& receiver)
@@ -2227,7 +2236,8 @@ private:
       auto up = base_marker(
         receiver.stamp, "sky_dome_up_label", id++,
         visualization_msgs::msg::Marker::TEXT_VIEW_FACING);
-      up.pose.position = point_msg(receiver.pos_enu + Eigen::Vector3d(0.0, 0.0, radius + 2.5));
+      up.pose.position =
+        point_msg(sky_dome_center(receiver) + Eigen::Vector3d(0.0, 0.0, radius + 2.5));
       up.scale.z = 1.5;
       up.color = color_rgba(0.75F, 0.85F, 1.0F, 0.85F);
       up.text = "UP";
@@ -2374,6 +2384,7 @@ private:
   Eigen::Vector3d origin_lla_ = Eigen::Vector3d::Zero();
   Eigen::Vector3d origin_ecef_ = Eigen::Vector3d::Zero();
   Eigen::Matrix3d R_ecef_enu_ = Eigen::Matrix3d::Identity();
+  Eigen::Vector3d sky_dome_center_enu_ = Eigen::Vector3d::Zero();
   Eigen::Vector3d skyplot_origin_enu_ = Eigen::Vector3d::Zero();
 
   double measurement_rate_hz_ = 10.0;
@@ -2420,6 +2431,7 @@ private:
   bool enable_visualization_ = false;
   bool enable_sky_dome_visualization_ = true;
   bool sky_dome_show_cardinal_labels_ = true;
+  bool sky_dome_follow_receiver_ = false;
   bool enable_csv_log_ = false;
   bool startup_topics_published_ = false;
   bool ephem_published_ = false;
