@@ -150,6 +150,7 @@ def _launch_setup(context):
     use_iap_odom = _as_bool(LaunchConfiguration("use_iap_odom_for_planner").perform(context))
     use_so3_dynamics = _as_bool(LaunchConfiguration("use_so3_dynamics").perform(context))
     planner_use_dynamic = _as_bool(LaunchConfiguration("planner_use_dynamic").perform(context))
+    planner_use_integrity_cost = LaunchConfiguration("planner_use_integrity_cost").perform(context)
     use_dynamic_obstacles = _as_bool(LaunchConfiguration("use_dynamic_obstacles").perform(context))
     allow_truth_alignment = _as_bool(LaunchConfiguration("allow_truth_alignment").perform(context))
     log_phase1 = _as_bool(LaunchConfiguration("log_phase1").perform(context))
@@ -192,6 +193,7 @@ def _launch_setup(context):
     map_source = LaunchConfiguration("map_source").perform(context)
     gnss_ephemeris_source = LaunchConfiguration("gnss_ephemeris_source").perform(context)
     gnss_enabled_constellations = LaunchConfiguration("gnss_enabled_constellations").perform(context)
+    gnss_scenario_file = LaunchConfiguration("gnss_scenario_file").perform(context)
     gnss_rinex_nav_file = LaunchConfiguration("gnss_rinex_nav_file").perform(context)
     gnss_rinex_ephem_max_age_s = LaunchConfiguration("gnss_rinex_ephem_max_age_s").perform(context)
     gnss_fallback_to_synthetic = _as_bool(
@@ -425,6 +427,7 @@ def _launch_setup(context):
                 "point6_x": waypoint_values["point6_x"],
                 "point6_y": waypoint_values["point6_y"],
                 "point6_z": waypoint_values["point6_z"],
+                "use_integrity_cost": planner_use_integrity_cost,
             }.items(),
         ),
         Node(
@@ -491,7 +494,7 @@ def _launch_setup(context):
                 {"origin_alt_m": 25.0},
                 {"time_source": "trigger_topic"},
                 {"trigger_topic": sim_lidar_topic},
-                {"scenario_file": os.path.join(iap_share, "config", "gnss_sim", "demo7_open_sky.yaml")},
+                {"scenario_file": gnss_scenario_file},
                 {"num_gps_sats": 24},
                 {"gps_prn_min": 1},
                 {"gps_prn_max": 24},
@@ -726,6 +729,7 @@ def generate_launch_description():
         DeclareLaunchArgument("run_duration_s", default_value="120"),
         DeclareLaunchArgument("use_so3_dynamics", default_value="true"),
         DeclareLaunchArgument("planner_use_dynamic", default_value="true"),
+        DeclareLaunchArgument("planner_use_integrity_cost", default_value="false"),
         DeclareLaunchArgument("use_dynamic_obstacles", default_value="false"),
         DeclareLaunchArgument("map_source", default_value="local_sensing_cloud"),
         DeclareLaunchArgument("allow_truth_alignment", default_value="true"),
@@ -734,6 +738,10 @@ def generate_launch_description():
         DeclareLaunchArgument("truth_araim_compare_csv_name", default_value="demo9_araim_truth_compare.csv"),
         DeclareLaunchArgument("gnss_ephemeris_source", default_value="synthetic"),
         DeclareLaunchArgument("gnss_enabled_constellations", default_value="GPS"),
+        DeclareLaunchArgument(
+            "gnss_scenario_file",
+            default_value=os.path.join(iap_share, "config", "gnss_sim", "demo7_open_sky.yaml"),
+        ),
         DeclareLaunchArgument(
             "gnss_rinex_nav_file",
             default_value="/home/dev/ws_iap/src/LIGO./Data/BRDM00DLR_S_20221870000_01D_MN.rnx",

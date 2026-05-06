@@ -49,6 +49,7 @@ def generate_launch_description():
 
     flight_type = LaunchConfiguration('flight_type', default=2)
     use_distinctive_trajs = LaunchConfiguration('use_distinctive_trajs', default=True)
+    use_integrity_cost = LaunchConfiguration('use_integrity_cost', default=False)
     
     obj_num_set = LaunchConfiguration('obj_num_set', default=10)
     
@@ -95,6 +96,7 @@ def generate_launch_description():
     
     flight_type_arg = DeclareLaunchArgument('flight_type', default_value=flight_type, description='flight_type')
     use_distinctive_trajs_arg = DeclareLaunchArgument('use_distinctive_trajs', default_value=use_distinctive_trajs, description='Use distinctive trajectories')
+    use_integrity_cost_arg = DeclareLaunchArgument('use_integrity_cost', default_value=use_integrity_cost, description='Enable optional integrity soft cost')
     obj_num_set_arg = DeclareLaunchArgument('obj_num_set', default_value=obj_num_set, description='Number of objects')
     drone_id_arg = DeclareLaunchArgument('drone_id', default_value=drone_id, description='Drone ID')
 
@@ -211,6 +213,14 @@ def generate_launch_description():
             {'optimization/swarm_clearance': 0.5},
             {'optimization/max_vel': max_vel},
             {'optimization/max_acc': max_acc},
+            {'optimization/use_integrity_cost': use_integrity_cost},
+            {'optimization/lambda_integrity': 0.00001},
+            {'optimization/integrity_cost_topic': '/iap/integrity_cost_field'},
+            {'optimization/integrity_field_stale_timeout_s': 0.5},
+            {'optimization/integrity_nearest_radius_m': 1.0},
+            {'optimization/integrity_cost_max': 1000.0},
+            {'optimization/integrity_grad_norm_max': 0.1},
+            {'optimization/integrity_min_samples': 3},
 
             # B-Spline parameters
             {'bspline/limit_vel': max_vel},
@@ -268,6 +278,7 @@ def generate_launch_description():
     
     ld.add_action(flight_type_arg)
     ld.add_action(use_distinctive_trajs_arg)
+    ld.add_action(use_integrity_cost_arg)
     ld.add_action(obj_num_set_arg)
     ld.add_action(drone_id_arg)
 

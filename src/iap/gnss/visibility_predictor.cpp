@@ -20,8 +20,8 @@ void VisibilityPredictor::set_occupancy(const LocalOccupancyGrid* grid) {
 Eigen::Vector3d VisibilityPredictor::enu_dir(double elevation, double azimuth) {
   // ENU: East=X, North=Y, Up=Z
   const double ce = std::cos(elevation);
-  return Eigen::Vector3d(ce * std::cos(azimuth),
-                         ce * std::sin(azimuth),
+  return Eigen::Vector3d(ce * std::sin(azimuth),
+                         ce * std::cos(azimuth),
                          std::sin(elevation));
 }
 
@@ -54,8 +54,12 @@ VisibilityResult VisibilityPredictor::predict(const Eigen::Vector3d& pos_world,
     double kappa = 0.0;
     bool blocked = false;
     if (grid_ != nullptr) {
-      kappa   = grid_->occupancy_ratio(pos_world, dir, params_.occ_L);
-      blocked = grid_->ray_occluded(pos_world, dir, params_.occ_range);
+      const double start_offset = std::max(0.0, params_.ray_start_offset);
+      const Eigen::Vector3d ray_origin = pos_world + start_offset * dir;
+      const double occ_range = std::max(0.0, params_.occ_range - start_offset);
+      kappa = grid_->occupancy_ratio(ray_origin, dir, params_.occ_L);
+      blocked = params_.hard_occlusion &&
+                grid_->ray_occluded(ray_origin, dir, occ_range);
     }
 
     res.kappas[i]    = kappa;

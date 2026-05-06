@@ -16,6 +16,7 @@ find_package(ament_cmake REQUIRED)
 find_package(rclcpp REQUIRED)
 find_package(rclpy REQUIRED)
 find_package(std_msgs REQUIRED)
+find_package(sensor_msgs REQUIRED)
 find_package(visualization_msgs REQUIRED)
 find_package(nav_msgs REQUIRED)
 find_package(cv_bridge REQUIRED)
@@ -56,7 +57,7 @@ add_library( bspline_opt
 
 ament_target_dependencies(bspline_opt 
                           std_msgs visualization_msgs 
-                          nav_msgs cv_bridge 
+                          sensor_msgs nav_msgs cv_bridge 
                           rclcpp Eigen3 
                           PCL pcl_conversions 
                           plan_env traj_utils path_searching)

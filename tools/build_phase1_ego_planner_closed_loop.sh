@@ -90,9 +90,13 @@ if ! ros2 pkg executables iap_phase1_tools | grep -qx "iap_phase1_tools phase1_c
 fi
 
 if ! ros2 pkg executables iap_phase1_tools | grep -qx "iap_phase1_tools phase2_planner_integrity_evaluator"; then
-  echo "[phase1-build] missing executable: iap_phase1_tools phase2_planner_integrity_evaluator" >&2
+  echo "[phase1-build] legacy Python evaluator not installed; expecting C++ evaluator in iap" >&2
+fi
+
+if ! ros2 pkg executables iap | grep -qx "iap phase2_planner_integrity_evaluator"; then
+  echo "[phase1-build] missing executable: iap phase2_planner_integrity_evaluator" >&2
   exit 3
 fi
 
 echo "[phase1-build] verified executable: iap_phase1_tools phase1_closed_loop_logger"
-echo "[phase1-build] verified executable: iap_phase1_tools phase2_planner_integrity_evaluator"
+echo "[phase1-build] verified executable: iap phase2_planner_integrity_evaluator"

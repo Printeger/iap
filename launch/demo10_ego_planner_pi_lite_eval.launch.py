@@ -65,6 +65,7 @@ def _launch_setup(context):
             "truth_araim_compare_csv_name",
             "gnss_ephemeris_source",
             "gnss_enabled_constellations",
+            "gnss_scenario_file",
             "gnss_rinex_nav_file",
             "gnss_rinex_ephem_max_age_s",
             "gnss_fallback_to_synthetic_on_rinex_error",
@@ -75,6 +76,7 @@ def _launch_setup(context):
             "map_size_x",
             "map_size_y",
             "map_size_z",
+            "planner_use_integrity_cost",
         )
     }
 
@@ -87,7 +89,7 @@ def _launch_setup(context):
             launch_arguments=demo9_args.items(),
         ),
         Node(
-            package="iap_phase1_tools",
+            package="iap",
             executable="phase2_planner_integrity_evaluator",
             name="phase2_planner_integrity_evaluator",
             output="screen",
@@ -98,15 +100,118 @@ def _launch_setup(context):
                 {"pos_cmd_topic": "/drone_0_planning/pos_cmd"},
                 {"map_topic": phase2_map_topic},
                 {"integrity_topic": "/iap/integrity"},
+                {"range_meas_topic": LaunchConfiguration("phase2_range_meas_topic").perform(context)},
+                {"ephem_topic": LaunchConfiguration("phase2_ephem_topic").perform(context)},
+                {"glo_ephem_topic": LaunchConfiguration("phase2_glo_ephem_topic").perform(context)},
+                {"receiver_lla_topic": LaunchConfiguration("phase2_receiver_lla_topic").perform(context)},
+                {"iono_topic": LaunchConfiguration("phase2_iono_topic").perform(context)},
                 {"eval_horizon_s": float(LaunchConfiguration("phase2_eval_horizon_s").perform(context))},
                 {"eval_dt_s": float(LaunchConfiguration("phase2_eval_dt_s").perform(context))},
                 {"max_samples_per_traj": int(LaunchConfiguration("phase2_max_samples_per_traj").perform(context))},
                 {"pl_model": LaunchConfiguration("phase2_pl_model").perform(context)},
                 {"al_model": LaunchConfiguration("phase2_al_model").perform(context)},
+                {"fallback_pl_m": float(LaunchConfiguration("phase2_fallback_pl_m").perform(context))},
+                {"use_pl_grid": _as_bool(LaunchConfiguration("phase2_use_pl_grid").perform(context))},
+                {
+                    "pl_grid_resolution_m": float(
+                        LaunchConfiguration("phase2_pl_grid_resolution_m").perform(context)
+                    )
+                },
+                {
+                    "pl_grid_size_x_m": float(
+                        LaunchConfiguration("phase2_pl_grid_size_x_m").perform(context)
+                    )
+                },
+                {
+                    "pl_grid_size_y_m": float(
+                        LaunchConfiguration("phase2_pl_grid_size_y_m").perform(context)
+                    )
+                },
+                {
+                    "pl_grid_size_z_m": float(
+                        LaunchConfiguration("phase2_pl_grid_size_z_m").perform(context)
+                    )
+                },
+                {
+                    "pl_grid_update_hz": float(
+                        LaunchConfiguration("phase2_pl_grid_update_hz").perform(context)
+                    )
+                },
+                {
+                    "use_lidar_observability": _as_bool(
+                        LaunchConfiguration("phase2_use_lidar_observability").perform(context)
+                    )
+                },
+                {
+                    "lidar_search_radius_m": float(
+                        LaunchConfiguration("phase2_lidar_search_radius_m").perform(context)
+                    )
+                },
+                {"lidar_min_points": int(LaunchConfiguration("phase2_lidar_min_points").perform(context))},
+                {"lidar_good_points": int(LaunchConfiguration("phase2_lidar_good_points").perform(context))},
+                {"lidar_sigma_m": float(LaunchConfiguration("phase2_lidar_sigma_m").perform(context))},
+                {"lidar_info_scale": float(LaunchConfiguration("phase2_lidar_info_scale").perform(context))},
+                {"lidar_alpha_min": float(LaunchConfiguration("phase2_lidar_alpha_min").perform(context))},
+                {"lidar_alpha_max": float(LaunchConfiguration("phase2_lidar_alpha_max").perform(context))},
+                {"lidar_condition_ref": float(LaunchConfiguration("phase2_lidar_condition_ref").perform(context))},
+                {"lidar_condition_max": float(LaunchConfiguration("phase2_lidar_condition_max").perform(context))},
+                {"lidar_tdop_ref": float(LaunchConfiguration("phase2_lidar_tdop_ref").perform(context))},
+                {"lidar_tdop_max": float(LaunchConfiguration("phase2_lidar_tdop_max").perform(context))},
+                {"lidar_bias_h_m": float(LaunchConfiguration("phase2_lidar_bias_h_m").perform(context))},
+                {"lidar_bias_v_m": float(LaunchConfiguration("phase2_lidar_bias_v_m").perform(context))},
+                {"lidar_map_max_points": int(LaunchConfiguration("phase2_lidar_map_max_points").perform(context))},
+                {
+                    "visibility_hard_occlusion": _as_bool(
+                        LaunchConfiguration("phase2_visibility_hard_occlusion").perform(context)
+                    )
+                },
+                {
+                    "visibility_occ_range_m": float(
+                        LaunchConfiguration("phase2_visibility_occ_range_m").perform(context)
+                    )
+                },
+                {
+                    "visibility_occ_l_m": float(
+                        LaunchConfiguration("phase2_visibility_occ_l_m").perform(context)
+                    )
+                },
+                {
+                    "visibility_ray_start_offset_m": float(
+                        LaunchConfiguration("phase2_visibility_ray_start_offset_m").perform(context)
+                    )
+                },
                 {"drone_radius": float(LaunchConfiguration("phase2_drone_radius").perform(context))},
                 {"safety_buffer": float(LaunchConfiguration("phase2_safety_buffer").perform(context))},
                 {"gamma_h": float(LaunchConfiguration("phase2_gamma_h").perform(context))},
                 {"gamma_v": float(LaunchConfiguration("phase2_gamma_v").perform(context))},
+                {"pi_cost_weight_h": float(LaunchConfiguration("phase2_pi_cost_weight_h").perform(context))},
+                {"pi_cost_weight_v": float(LaunchConfiguration("phase2_pi_cost_weight_v").perform(context))},
+                {
+                    "pi_cost_marginal_margin_m": float(
+                        LaunchConfiguration("phase2_pi_cost_marginal_margin_m").perform(context)
+                    )
+                },
+                {
+                    "pi_cost_gradient_step_m": float(
+                        LaunchConfiguration("phase2_pi_cost_gradient_step_m").perform(context)
+                    )
+                },
+                {
+                    "snapshot_anchor_current_integrity": _as_bool(
+                        LaunchConfiguration("phase2_snapshot_anchor_current_integrity").perform(context)
+                    )
+                },
+                {
+                    "publish_integrity_cost_field": _as_bool(
+                        LaunchConfiguration("phase2_publish_integrity_cost_field").perform(context)
+                    )
+                    or _as_bool(LaunchConfiguration("planner_use_integrity_cost").perform(context))
+                },
+                {
+                    "integrity_cost_field_topic": LaunchConfiguration(
+                        "phase2_integrity_cost_field_topic"
+                    ).perform(context)
+                },
                 {"z_min": float(LaunchConfiguration("phase2_z_min").perform(context))},
                 {"z_max": float(LaunchConfiguration("phase2_z_max").perform(context))},
                 {"safe_margin": float(LaunchConfiguration("phase2_safe_margin").perform(context))},
@@ -156,6 +261,15 @@ def generate_launch_description():
         DeclareLaunchArgument("gnss_ephemeris_source", default_value="rinex"),
         DeclareLaunchArgument("gnss_enabled_constellations", default_value="GPS,BDS,GAL,GLO"),
         DeclareLaunchArgument(
+            "gnss_scenario_file",
+            default_value=os.path.join(
+                get_package_share_directory("iap"),
+                "config",
+                "gnss_sim",
+                "demo7_open_sky.yaml",
+            ),
+        ),
+        DeclareLaunchArgument(
             "gnss_rinex_nav_file",
             default_value="/home/dev/ws_iap/src/LIGO./Data/BRDM00DLR_S_20221870000_01D_MN.rnx",
         ),
@@ -173,10 +287,51 @@ def generate_launch_description():
         DeclareLaunchArgument("phase2_max_samples_per_traj", default_value="30"),
         DeclareLaunchArgument("phase2_pl_model", default_value="constant_current"),
         DeclareLaunchArgument("phase2_al_model", default_value="cloud_clearance"),
+        DeclareLaunchArgument("phase2_fallback_pl_m", default_value="20.0"),
+        DeclareLaunchArgument("phase2_use_pl_grid", default_value="false"),
+        DeclareLaunchArgument("phase2_pl_grid_resolution_m", default_value="1.0"),
+        DeclareLaunchArgument("phase2_pl_grid_size_x_m", default_value="30.0"),
+        DeclareLaunchArgument("phase2_pl_grid_size_y_m", default_value="30.0"),
+        DeclareLaunchArgument("phase2_pl_grid_size_z_m", default_value="8.0"),
+        DeclareLaunchArgument("phase2_pl_grid_update_hz", default_value="2.0"),
+        DeclareLaunchArgument("phase2_use_lidar_observability", default_value="false"),
+        DeclareLaunchArgument("phase2_lidar_search_radius_m", default_value="8.0"),
+        DeclareLaunchArgument("phase2_lidar_min_points", default_value="12"),
+        DeclareLaunchArgument("phase2_lidar_good_points", default_value="80"),
+        DeclareLaunchArgument("phase2_lidar_sigma_m", default_value="0.5"),
+        DeclareLaunchArgument("phase2_lidar_info_scale", default_value="1.0"),
+        DeclareLaunchArgument("phase2_lidar_alpha_min", default_value="0.02"),
+        DeclareLaunchArgument("phase2_lidar_alpha_max", default_value="1.0"),
+        DeclareLaunchArgument("phase2_lidar_condition_ref", default_value="30.0"),
+        DeclareLaunchArgument("phase2_lidar_condition_max", default_value="1000000.0"),
+        DeclareLaunchArgument("phase2_lidar_tdop_ref", default_value="2.0"),
+        DeclareLaunchArgument("phase2_lidar_tdop_max", default_value="20.0"),
+        DeclareLaunchArgument("phase2_lidar_bias_h_m", default_value="0.0"),
+        DeclareLaunchArgument("phase2_lidar_bias_v_m", default_value="0.0"),
+        DeclareLaunchArgument("phase2_lidar_map_max_points", default_value="2500"),
+        DeclareLaunchArgument("phase2_range_meas_topic", default_value="/ublox_driver/range_meas"),
+        DeclareLaunchArgument("phase2_ephem_topic", default_value="/ublox_driver/ephem"),
+        DeclareLaunchArgument("phase2_glo_ephem_topic", default_value="/ublox_driver/glo_ephem"),
+        DeclareLaunchArgument("phase2_receiver_lla_topic", default_value="/ublox_driver/receiver_lla"),
+        DeclareLaunchArgument("phase2_iono_topic", default_value="/ublox_driver/iono_params"),
+        DeclareLaunchArgument("phase2_visibility_hard_occlusion", default_value="false"),
+        DeclareLaunchArgument("phase2_visibility_occ_range_m", default_value="20.0"),
+        DeclareLaunchArgument("phase2_visibility_occ_l_m", default_value="5.0"),
+        DeclareLaunchArgument("phase2_visibility_ray_start_offset_m", default_value="1.0"),
         DeclareLaunchArgument("phase2_drone_radius", default_value="0.35"),
         DeclareLaunchArgument("phase2_safety_buffer", default_value="0.20"),
         DeclareLaunchArgument("phase2_gamma_h", default_value="0.8"),
         DeclareLaunchArgument("phase2_gamma_v", default_value="0.8"),
+        DeclareLaunchArgument("phase2_pi_cost_weight_h", default_value="1.0"),
+        DeclareLaunchArgument("phase2_pi_cost_weight_v", default_value="1.0"),
+        DeclareLaunchArgument("phase2_pi_cost_marginal_margin_m", default_value="1.0"),
+        DeclareLaunchArgument("phase2_pi_cost_gradient_step_m", default_value="0.5"),
+        DeclareLaunchArgument("phase2_snapshot_anchor_current_integrity", default_value="true"),
+        DeclareLaunchArgument("phase2_publish_integrity_cost_field", default_value="false"),
+        DeclareLaunchArgument(
+            "phase2_integrity_cost_field_topic", default_value="/iap/integrity_cost_field"
+        ),
+        DeclareLaunchArgument("planner_use_integrity_cost", default_value="false"),
         DeclareLaunchArgument("phase2_z_min", default_value="0.5"),
         DeclareLaunchArgument("phase2_z_max", default_value="5.0"),
         DeclareLaunchArgument("phase2_safe_margin", default_value="0.0"),

@@ -103,6 +103,12 @@ add_library(iap SHARED
   # FGO information matrix extraction (IAP-RQ-300)
   src/iap/integrity/fgo_information_manager.cpp
   # predicted ARAIM for planner (IAP-RQ-331)
+  src/iap/planner/integrity_snapshot.cpp
+  src/iap/planner/future_pl_query_result.cpp
+  src/iap/planner/lidar_observability_fim.cpp
+  src/iap/planner/pl_grid.cpp
+  src/iap/planner/future_pl_field_predictor.cpp
+  src/iap/planner/pi_cost_adapter.cpp
   src/iap/planner/predicted_araim.cpp
   # integrity monitoring (IAP-RQ-200/210/220)
   src/iap/integrity/integrity_monitor.cpp
@@ -319,6 +325,8 @@ if(DEFINED ENV{ROS_VERSION})
     find_package(sensor_msgs REQUIRED)
     find_package(visualization_msgs REQUIRED)
     find_package(rclcpp REQUIRED)
+    find_package(traj_utils REQUIRED)
+    find_package(quadrotor_msgs REQUIRED)
 
     add_library(gnss_extension SHARED
       src/iap/gnss/gnss_extension.cpp
@@ -431,7 +439,34 @@ if(DEFINED ENV{ROS_VERSION})
     ament_target_dependencies(demo4_lidar_body_bridge rclcpp nav_msgs sensor_msgs)
     list(APPEND iap_LIBRARIES demo4_lidar_body_bridge)
 
-    install(TARGETS iap_status iap_experiment iap_rosnode demo3_odom_mux demo3_iap_bridge demo4_lidar_body_bridge DESTINATION lib/iap)
+    ## Demo10 Phase 2 planner integrity evaluator (C++ GNSS geometry ARAIM)
+    add_executable(phase2_planner_integrity_evaluator
+      apps/phase2_planner_integrity_evaluator.cpp
+    )
+    target_link_libraries(phase2_planner_integrity_evaluator iap "${iap_msgs_cpp_ts}")
+    target_compile_definitions(phase2_planner_integrity_evaluator PRIVATE GLIM_ROS2)
+    ament_target_dependencies(phase2_planner_integrity_evaluator
+      rclcpp
+      nav_msgs
+      sensor_msgs
+      geometry_msgs
+      visualization_msgs
+      gnss_comm
+      traj_utils
+      quadrotor_msgs
+    )
+    list(APPEND iap_LIBRARIES phase2_planner_integrity_evaluator)
+
+    install(TARGETS
+      iap_status
+      iap_experiment
+      iap_rosnode
+      demo3_odom_mux
+      demo3_iap_bridge
+      demo4_lidar_body_bridge
+      phase2_planner_integrity_evaluator
+      DESTINATION lib/iap
+    )
     install(DIRECTORY launch DESTINATION share/iap)
     install(DIRECTORY config DESTINATION share/iap)
 
@@ -440,6 +475,18 @@ if(DEFINED ENV{ROS_VERSION})
       find_package(ament_cmake_gtest REQUIRED)
       ament_add_gtest(test_araim test/test_araim.cpp)
       target_link_libraries(test_araim iap)
+      ament_add_gtest(test_predicted_araim test/test_predicted_araim.cpp)
+      target_link_libraries(test_predicted_araim iap)
+      ament_add_gtest(test_integrity_snapshot test/test_integrity_snapshot.cpp)
+      target_link_libraries(test_integrity_snapshot iap)
+      ament_add_gtest(test_lidar_observability_fim test/test_lidar_observability_fim.cpp)
+      target_link_libraries(test_lidar_observability_fim iap)
+      ament_add_gtest(test_pl_grid test/test_pl_grid.cpp)
+      target_link_libraries(test_pl_grid iap)
+      ament_add_gtest(test_future_pl_field_predictor test/test_future_pl_field_predictor.cpp)
+      target_link_libraries(test_future_pl_field_predictor iap)
+      ament_add_gtest(test_pi_cost_adapter test/test_pi_cost_adapter.cpp)
+      target_link_libraries(test_pi_cost_adapter iap)
       ament_add_gtest(test_run_log_manager test/test_run_log_manager.cpp)
       target_link_libraries(test_run_log_manager iap)
     endif()

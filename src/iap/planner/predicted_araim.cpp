@@ -2,6 +2,7 @@
 
 #include <iap/planner/predicted_araim.hpp>
 #include <spdlog/spdlog.h>
+#include <algorithm>
 #include <cmath>
 
 namespace iap {
@@ -26,10 +27,34 @@ void PredictedAraimComputer::set_epoch(const GnssEpoch* epoch) {
 // ---------------------------------------------------------------------------
 double PredictedAraimComputer::predict_araim_pl(
     const Eigen::Vector3d& pos_world) const {
+  return predict_araim_result(pos_world).hpl;
+}
 
-  // Fallback: no occupancy or epoch available
-  if (grid_ == nullptr || epoch_ == nullptr) {
-    return params_.fallback_pl;
+PredictedAraimResult PredictedAraimComputer::predict_araim_result(
+    const Eigen::Vector3d& pos_world) const {
+  auto fallback = [&](const char* reason) {
+    PredictedAraimResult out;
+    out.valid = false;
+    out.fallback = true;
+    out.fallback_reason = reason;
+    out.hpl = params_.fallback_pl;
+    out.vpl = params_.fallback_pl;
+    out.pl_scalar = params_.fallback_pl;
+    out.pl_e = params_.fallback_pl;
+    out.pl_n = params_.fallback_pl;
+    out.pl_u = params_.fallback_pl;
+    out.pl_ff_h = params_.fallback_pl;
+    out.pl_ff_v = params_.fallback_pl;
+    out.sigma_h = params_.fallback_pl;
+    out.sigma_v = params_.fallback_pl;
+    out.pdop = 1e9;
+    return out;
+  };
+
+  // Fallback: no GNSS epoch available. A missing occupancy grid is treated as
+  // open sky by VisibilityPredictor.
+  if (epoch_ == nullptr) {
+    return fallback("no_gnss_epoch");
   }
 
   // 1. Predict visible satellites at this waypoint
@@ -37,7 +62,9 @@ double PredictedAraimComputer::predict_araim_pl(
 
   if (vis.n_vis < 4) {
     // Too few sats for ARAIM — return fallback (conservative)
-    return params_.fallback_pl;
+    auto out = fallback("too_few_sats");
+    out.n_vis = vis.n_vis;
+    return out;
   }
 
   // 2. Build SatGeometry for visible satellites
@@ -60,14 +87,19 @@ double PredictedAraimComputer::predict_araim_pl(
   }
 
   if (static_cast<int>(geom.size()) < 4) {
-    return params_.fallback_pl;
+    auto out = fallback("too_few_sats");
+    out.n_vis = static_cast<int>(geom.size());
+    return out;
   }
 
   // 3. Run geometry-only ARAIM (r = 0)
   const AraimResult ar = araim_.predict_geometry(geom);
 
   if (!ar.valid) {
-    return params_.fallback_pl;
+    auto out = fallback("singular_geometry");
+    out.n_vis = static_cast<int>(geom.size());
+    out.n_hypotheses = ar.n_hypotheses;
+    return out;
   }
 
   spdlog::trace("[PredictedAraim] pos=({:.1f},{:.1f},{:.1f}) n_vis={} "
@@ -75,7 +107,27 @@ double PredictedAraimComputer::predict_araim_pl(
                 pos_world.x(), pos_world.y(), pos_world.z(),
                 vis.n_vis, ar.pl_ff, ar.pl_araim);
 
-  return ar.pl_araim;
+  PredictedAraimResult out;
+  out.valid = true;
+  out.fallback = false;
+  out.fallback_reason.clear();
+  out.hpl = ar.HPL;
+  out.vpl = ar.VPL;
+  out.pl_scalar = std::max(out.hpl, out.vpl);
+  out.pl_e = ar.PL_E;
+  out.pl_n = ar.PL_N;
+  out.pl_u = ar.PL_U;
+  out.pl_ff_h = ar.pl_ff;
+  out.pl_ff_v = ar.pl_ff_V;
+  out.sigma_h = std::sqrt(std::max(
+      0.0, ar.sigma_ff_E * ar.sigma_ff_E + ar.sigma_ff_N * ar.sigma_ff_N));
+  out.sigma_v = ar.sigma_ff_U;
+  if (ar.S0(0, 0) > 0.0 && ar.S0(1, 1) > 0.0 && ar.S0(2, 2) > 0.0) {
+    out.pdop = std::sqrt(ar.S0(0, 0) + ar.S0(1, 1) + ar.S0(2, 2));
+  }
+  out.n_vis = static_cast<int>(geom.size());
+  out.n_hypotheses = ar.n_hypotheses;
+  return out;
 }
 
 }  // namespace iap

@@ -7,6 +7,7 @@
 #include <unordered_map>
 #include <cstdint>
 #include <cmath>
+#include <vector>
 
 namespace iap {
 
@@ -69,6 +70,9 @@ class LocalOccupancyGrid {
   /// @param T_world_sensor  Transform from sensor frame to world frame
   void insert(const gtsam_points::PointCloud& cloud,
               const Eigen::Isometry3d& T_world_sensor);
+
+  /// @brief Insert already world-frame points.
+  void insert_points(const std::vector<Eigen::Vector3d>& points_world);
 
   /// @brief Clear all occupied voxels.
   void reset();

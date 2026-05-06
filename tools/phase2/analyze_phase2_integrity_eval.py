@@ -2,6 +2,7 @@
 import argparse
 import bisect
 import csv
+import html
 import json
 import math
 import statistics
@@ -63,6 +64,14 @@ def as_float(value):
 
 def finite(value):
     return math.isfinite(as_float(value))
+
+
+def as_bool(value):
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        return value.strip().lower() in ("1", "true", "yes", "on")
+    return bool(value)
 
 
 def fmt(value):
@@ -145,6 +154,110 @@ def safe_label_agreement(pred_im, actual_im):
     return "true" if pred == actual else "false"
 
 
+def max_abs(values):
+    vals = [as_float(v) for v in values if finite(v)]
+    return max((abs(v) for v in vals), default=None)
+
+
+def write_svg(path, title, body, width=900, height=320):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        "\n".join([
+            f'<svg xmlns="http://www.w3.org/2000/svg" width="{width}" height="{height}" viewBox="0 0 {width} {height}">',
+            '<rect width="100%" height="100%" fill="white"/>',
+            f'<text x="18" y="26" font-family="sans-serif" font-size="16">{html.escape(title)}</text>',
+            body,
+            "</svg>",
+            "",
+        ])
+    )
+
+
+def svg_line_plot(path, title, series):
+    width, height = 900, 320
+    left, right, top, bottom = 56, 18, 44, 34
+    points = []
+    for label, xs, ys, color in series:
+        clean = [(as_float(x), as_float(y)) for x, y in zip(xs, ys)]
+        clean = [(x, y) for x, y in clean if math.isfinite(x) and math.isfinite(y)]
+        if clean:
+            points.extend(clean)
+    if not points:
+        write_svg(path, title, '<text x="56" y="160" font-family="sans-serif" font-size="13">no finite data</text>', width, height)
+        return
+    xs_all = [p[0] for p in points]
+    ys_all = [p[1] for p in points]
+    x0, x1 = min(xs_all), max(xs_all)
+    y0, y1 = min(ys_all), max(ys_all)
+    if x0 == x1:
+        x1 = x0 + 1.0
+    if y0 == y1:
+        y1 = y0 + 1.0
+    def sx(x):
+        return left + (x - x0) / (x1 - x0) * (width - left - right)
+    def sy(y):
+        return height - bottom - (y - y0) / (y1 - y0) * (height - top - bottom)
+    body = [f'<line x1="{left}" y1="{height-bottom}" x2="{width-right}" y2="{height-bottom}" stroke="#888"/>',
+            f'<line x1="{left}" y1="{top}" x2="{left}" y2="{height-bottom}" stroke="#888"/>']
+    legend_x = left
+    for label, xs, ys, color in series:
+        clean = [(as_float(x), as_float(y)) for x, y in zip(xs, ys)]
+        clean = [(x, y) for x, y in clean if math.isfinite(x) and math.isfinite(y)]
+        if not clean:
+            continue
+        path_d = " ".join(f"{sx(x):.1f},{sy(y):.1f}" for x, y in clean)
+        body.append(f'<polyline points="{path_d}" fill="none" stroke="{color}" stroke-width="1.6"/>')
+        body.append(f'<rect x="{legend_x}" y="292" width="10" height="10" fill="{color}"/>')
+        body.append(f'<text x="{legend_x + 14}" y="302" font-family="sans-serif" font-size="11">{html.escape(label)}</text>')
+        legend_x += 110
+    write_svg(path, title, "\n".join(body), width, height)
+
+
+def svg_scatter_plot(path, title, rows, x_key, y_key):
+    width, height = 640, 420
+    left, right, top, bottom = 58, 20, 44, 42
+    pts = [(as_float(r.get(x_key)), as_float(r.get(y_key))) for r in rows]
+    pts = [(x, y) for x, y in pts if math.isfinite(x) and math.isfinite(y)]
+    if not pts:
+        write_svg(path, title, '<text x="58" y="190" font-family="sans-serif" font-size="13">no finite data</text>', width, height)
+        return
+    xs = [p[0] for p in pts]
+    ys = [p[1] for p in pts]
+    x0, x1 = min(xs), max(xs)
+    y0, y1 = min(ys), max(ys)
+    if x0 == x1:
+        x1 = x0 + 1.0
+    if y0 == y1:
+        y1 = y0 + 1.0
+    def sx(x):
+        return left + (x - x0) / (x1 - x0) * (width - left - right)
+    def sy(y):
+        return height - bottom - (y - y0) / (y1 - y0) * (height - top - bottom)
+    body = [f'<line x1="{left}" y1="{height-bottom}" x2="{width-right}" y2="{height-bottom}" stroke="#888"/>',
+            f'<line x1="{left}" y1="{top}" x2="{left}" y2="{height-bottom}" stroke="#888"/>',
+            f'<text x="{left}" y="{height-10}" font-family="sans-serif" font-size="11">{html.escape(x_key)}</text>',
+            f'<text x="8" y="{top+12}" font-family="sans-serif" font-size="11">{html.escape(y_key)}</text>']
+    body.extend(f'<circle cx="{sx(x):.1f}" cy="{sy(y):.1f}" r="2.4" fill="#2b6cb0" opacity="0.55"/>' for x, y in pts)
+    write_svg(path, title, "\n".join(body), width, height)
+
+
+def svg_histogram(path, title, counts):
+    width, height = 640, 360
+    if not counts:
+        write_svg(path, title, '<text x="48" y="170" font-family="sans-serif" font-size="13">no fallback samples</text>', width, height)
+        return
+    items = sorted(counts.items(), key=lambda item: (-item[1], item[0]))
+    max_count = max(count for _, count in items)
+    body = []
+    for idx, (label, count) in enumerate(items[:12]):
+        y = 54 + idx * 24
+        w = 480 * count / max_count if max_count else 0
+        body.append(f'<rect x="130" y="{y}" width="{w:.1f}" height="16" fill="#c05621"/>')
+        body.append(f'<text x="12" y="{y+13}" font-family="sans-serif" font-size="11">{html.escape(label)}</text>')
+        body.append(f'<text x="{136+w:.1f}" y="{y+13}" font-family="sans-serif" font-size="11">{count}</text>')
+    write_svg(path, title, "\n".join(body), width, height)
+
+
 def araim_values(row):
     if row is None:
         return (math.nan,) * 5
@@ -158,6 +271,90 @@ def araim_values(row):
     if not math.isfinite(actual_im) and math.isfinite(actual_al) and math.isfinite(actual_pl):
         actual_im = actual_al - actual_pl
     return hpl, vpl, actual_pl, actual_al, actual_im
+
+
+def summarize_snapshot(snapshot_rows, araim_index, match_tolerance_s, warnings):
+    if not snapshot_rows:
+        return (
+            {
+                "available": False,
+                "sample_count": 0,
+                "valid_count": 0,
+                "has_epoch_count": 0,
+                "missing_epoch_count": 0,
+                "pred_now_finite_count": 0,
+                "pred_now_fallback_count": 0,
+            },
+            {
+                "available": False,
+                "finite_count": 0,
+                "warning_threshold_ratio": 0.10,
+                "mean_pl_ratio": None,
+                "max_pl_ratio": None,
+                "mean_hpl_error": None,
+                "mean_vpl_error": None,
+                "max_abs_hpl_error": None,
+                "max_abs_vpl_error": None,
+                "matched_current_araim_count": 0,
+                "mean_current_hpl_alignment_error": None,
+                "mean_current_vpl_alignment_error": None,
+                "mean_current_im_alignment_error": None,
+            },
+        )
+
+    ratios = [as_float(r.get("consistency_pl_ratio")) for r in snapshot_rows if finite(r.get("consistency_pl_ratio"))]
+    hpl_errors = [as_float(r.get("consistency_hpl_error")) for r in snapshot_rows if finite(r.get("consistency_hpl_error"))]
+    vpl_errors = [as_float(r.get("consistency_vpl_error")) for r in snapshot_rows if finite(r.get("consistency_vpl_error"))]
+    matched_hpl_errors = []
+    matched_vpl_errors = []
+    matched_im_errors = []
+    for row in snapshot_rows:
+        araim_row, _ = nearest(araim_index, row.get("stamp"), match_tolerance_s)
+        if araim_row is None:
+            continue
+        actual_hpl, actual_vpl, _, _, actual_im = araim_values(araim_row)
+        hpl = as_float(row.get("current_HPL"))
+        vpl = as_float(row.get("current_VPL"))
+        im = as_float(row.get("current_IM"))
+        if math.isfinite(hpl) and math.isfinite(actual_hpl):
+            matched_hpl_errors.append(hpl - actual_hpl)
+        if math.isfinite(vpl) and math.isfinite(actual_vpl):
+            matched_vpl_errors.append(vpl - actual_vpl)
+        if math.isfinite(im) and math.isfinite(actual_im):
+            matched_im_errors.append(im - actual_im)
+
+    max_ratio = max(ratios) if ratios else None
+    if max_ratio is not None and max_ratio > 0.10:
+        warnings.append(f"current PL consistency max ratio is {max_ratio:.3f}")
+
+    integrity_snapshot = {
+        "available": True,
+        "sample_count": len(snapshot_rows),
+        "valid_count": sum(1 for r in snapshot_rows if as_bool(r.get("snapshot_valid"))),
+        "has_epoch_count": sum(1 for r in snapshot_rows if as_bool(r.get("has_epoch"))),
+        "missing_epoch_count": sum(1 for r in snapshot_rows if not as_bool(r.get("has_epoch"))),
+        "pred_now_finite_count": sum(1 for r in snapshot_rows if finite(r.get("pred_now_pl"))),
+        "pred_now_fallback_count": sum(1 for r in snapshot_rows if as_bool(r.get("pred_now_fallback"))),
+        "csv": "future_integrity_snapshot.csv",
+    }
+    current_consistency = {
+        "available": bool(ratios),
+        "finite_count": len(ratios),
+        "warning_threshold_ratio": 0.10,
+        "mean_pl_ratio": mean(ratios),
+        "max_pl_ratio": max_ratio,
+        "mean_hpl_error": mean(hpl_errors),
+        "mean_vpl_error": mean(vpl_errors),
+        "max_abs_hpl_error": max_abs(hpl_errors),
+        "max_abs_vpl_error": max_abs(vpl_errors),
+        "matched_current_araim_count": max(
+            len(matched_hpl_errors), len(matched_vpl_errors), len(matched_im_errors)
+        ),
+        "mean_current_hpl_alignment_error": mean(matched_hpl_errors),
+        "mean_current_vpl_alignment_error": mean(matched_vpl_errors),
+        "mean_current_im_alignment_error": mean(matched_im_errors),
+    }
+    return integrity_snapshot, current_consistency
 
 
 def estimate_desired_offset(pred_rows, desired_index, tolerance):
@@ -184,10 +381,34 @@ def estimate_desired_offset(pred_rows, desired_index, tolerance):
 def summarize(pred_rows, aligned_rows, online_summary, run_dir, warnings, errors):
     im_values = [as_float(r.get("IM_pred")) for r in pred_rows if finite(r.get("IM_pred"))]
     pl_values = [as_float(r.get("PL_pred")) for r in pred_rows if finite(r.get("PL_pred"))]
+    pi_cost_values = [
+        as_float(r.get("pi_cost_total"))
+        for r in pred_rows
+        if finite(r.get("pi_cost_total"))
+    ]
     risk_counts = {}
+    pi_risk_counts = {}
+    pi_axis_counts = {}
     for row in pred_rows:
         key = row.get("risk_state_pred") or "UNKNOWN_PL"
         risk_counts[key] = risk_counts.get(key, 0) + 1
+        pi_key = row.get("pi_risk_band") or "UNKNOWN_PI"
+        pi_risk_counts[pi_key] = pi_risk_counts.get(pi_key, 0) + 1
+        axis_key = row.get("pi_dominant_axis") or "unknown"
+        pi_axis_counts[axis_key] = pi_axis_counts.get(axis_key, 0) + 1
+    online_predicted = online_summary.get("predicted_integrity") or {}
+    online_pi = online_summary.get("pi_cost") or {}
+    fallback_count = sum(1 for row in pred_rows if as_bool(row.get("fallback")))
+    fallback_hist = {}
+    for row in pred_rows:
+        if as_bool(row.get("fallback")):
+            reason = row.get("fallback_reason") or "unknown"
+            fallback_hist[reason] = fallback_hist.get(reason, 0) + 1
+    finite_gnss_prediction_count = sum(
+        1
+        for row in pred_rows
+        if as_bool(row.get("valid")) and row.get("query_source") in ("direct", "grid")
+    )
 
     matched_rows = [r for r in aligned_rows if finite(r.get("actual_PL"))]
     agreement_values = [
@@ -210,6 +431,43 @@ def summarize(pred_rows, aligned_rows, online_summary, run_dir, warnings, errors
         "p50_IM": quantile(im_values, 0.50),
         "p95_PL": quantile(pl_values, 0.95),
         "max_PL": max(pl_values) if pl_values else None,
+        "fallback_count": int(online_predicted.get("fallback_count", fallback_count)),
+        "fallback_rate": float(
+            online_predicted.get(
+                "fallback_rate",
+                fallback_count / len(pred_rows) if pred_rows else 0.0,
+            )
+        ),
+        "fallback_reason_histogram": online_predicted.get(
+            "fallback_reason_histogram",
+            fallback_hist,
+        ),
+        "finite_gnss_prediction_count": int(
+            online_predicted.get(
+                "finite_gnss_prediction_count",
+                finite_gnss_prediction_count,
+            )
+        ),
+    }
+    fallback_rate = predicted["fallback_rate"]
+    fallback_reason_histogram = predicted["fallback_reason_histogram"]
+    finite_gnss_prediction_count = predicted["finite_gnss_prediction_count"]
+    pi_cost = {
+        "available": bool(pi_cost_values),
+        "count": len(pi_cost_values),
+        "weight_h": online_pi.get("weight_h", 1.0),
+        "weight_v": online_pi.get("weight_v", 1.0),
+        "marginal_margin_m": online_pi.get("marginal_margin_m", 1.0),
+        "mean": online_pi.get("mean", mean(pi_cost_values)),
+        "max": online_pi.get("max", max(pi_cost_values) if pi_cost_values else None),
+        "p05": online_pi.get("p05", quantile(pi_cost_values, 0.05)),
+        "p50": online_pi.get("p50", quantile(pi_cost_values, 0.50)),
+        "p95": online_pi.get("p95", quantile(pi_cost_values, 0.95)),
+        "risk_band_histogram": online_pi.get("risk_band_histogram", pi_risk_counts),
+        "dominant_axis_histogram": online_pi.get(
+            "dominant_axis_histogram",
+            pi_axis_counts,
+        ),
     }
 
     return {
@@ -227,7 +485,14 @@ def summarize(pred_rows, aligned_rows, online_summary, run_dir, warnings, errors
             "sampling",
             {"horizon_s": 0.0, "dt_s": 0.0, "max_samples_per_traj": 0},
         ),
+        "fallback_count": predicted["fallback_count"],
+        "fallback_rate": fallback_rate,
+        "fallback_reason_histogram": fallback_reason_histogram,
+        "finite_gnss_prediction_count": finite_gnss_prediction_count,
+        "pl_grid": online_summary.get("pl_grid", {"enabled": False}),
+        "lidar_observability": online_summary.get("lidar_observability", {"enabled": False}),
         "predicted_integrity": predicted,
+        "pi_cost": pi_cost,
         "actual_alignment": {
             "matched_count": len(matched_rows),
             "match_ratio": len(matched_rows) / len(pred_rows) if pred_rows else 0.0,
@@ -243,13 +508,162 @@ def summarize(pred_rows, aligned_rows, online_summary, run_dir, warnings, errors
     }
 
 
+def svg_grid_update_timing(path, pl_grid):
+    build = pl_grid.get("build_time_ms") or {}
+    values = [
+        ("last", as_float(build.get("last")), "#2b6cb0"),
+        ("mean", as_float(build.get("mean")), "#2f855a"),
+        ("max", as_float(build.get("max")), "#c05621"),
+    ]
+    finite_values = [v for _, v, _ in values if math.isfinite(v)]
+    width, height = 640, 360
+    if not finite_values:
+        write_svg(
+            path,
+            "PL grid build timing",
+            '<text x="48" y="170" font-family="sans-serif" font-size="13">no finite build timing</text>',
+            width,
+            height,
+        )
+        return
+    max_value = max(finite_values)
+    if max_value <= 0.0:
+        max_value = 1.0
+    body = [
+        f'<text x="48" y="54" font-family="sans-serif" font-size="12">updates: {int(pl_grid.get("update_count") or 0)}  skips: {int(pl_grid.get("skip_count") or 0)}</text>'
+    ]
+    for idx, (label, value, color) in enumerate(values):
+        y = 88 + idx * 42
+        width_px = 450.0 * value / max_value if math.isfinite(value) else 0.0
+        body.append(f'<text x="48" y="{y+14}" font-family="sans-serif" font-size="12">{html.escape(label)}</text>')
+        body.append(f'<rect x="112" y="{y}" width="{width_px:.1f}" height="20" fill="{color}"/>')
+        text = f"{value:.3f} ms" if math.isfinite(value) else "nan"
+        body.append(f'<text x="{118+width_px:.1f}" y="{y+15}" font-family="sans-serif" font-size="12">{html.escape(text)}</text>')
+    counts = pl_grid.get("query_counts") or {}
+    query_text = "queries grid/direct/fallback: {}/{}/{}".format(
+        int(counts.get("grid") or 0),
+        int(counts.get("direct") or 0),
+        int(counts.get("fallback") or 0),
+    )
+    body.append(f'<text x="48" y="248" font-family="sans-serif" font-size="12">{html.escape(query_text)}</text>')
+    ratio = as_float((pl_grid.get("grid_vs_direct_self_check") or {}).get("last_pl_ratio"))
+    ratio_text = f"grid-vs-direct self-check ratio: {ratio:.3f}" if math.isfinite(ratio) else "grid-vs-direct self-check ratio: nan"
+    body.append(f'<text x="48" y="274" font-family="sans-serif" font-size="12">{html.escape(ratio_text)}</text>')
+    write_svg(path, "PL grid build timing", "\n".join(body), width, height)
+
+
+def svg_gnss_vs_fused_pl(path, pred_rows):
+    xs = list(range(len(pred_rows)))
+    svg_line_plot(
+        path,
+        "GNSS vs fused future PL",
+        [
+            ("GNSS HPL", xs, [r.get("gnss_hpl") for r in pred_rows], "#2b6cb0"),
+            ("GNSS VPL", xs, [r.get("gnss_vpl") for r in pred_rows], "#805ad5"),
+            ("Fused HPL", xs, [r.get("fused_hpl") for r in pred_rows], "#2f855a"),
+            ("Fused VPL", xs, [r.get("fused_vpl") for r in pred_rows], "#c05621"),
+        ],
+    )
+
+
+def generate_h_lite_plots(export_dir, pred_rows, snapshot_rows, online_summary):
+    figs = export_dir / "figs"
+    xs = list(range(len(pred_rows)))
+    svg_line_plot(
+        figs / "future_hpl_vpl_al_im_timeline.svg",
+        "Future HPL/VPL/AL/IM timeline",
+        [
+            ("HPL", xs, [r.get("PL_H_pred") for r in pred_rows], "#2b6cb0"),
+            ("VPL", xs, [r.get("PL_V_pred") for r in pred_rows], "#805ad5"),
+            ("AL", xs, [r.get("AL_pred") for r in pred_rows], "#2f855a"),
+            ("IM", xs, [r.get("IM_pred") for r in pred_rows], "#c05621"),
+        ],
+    )
+    svg_scatter_plot(
+        figs / "future_pl_vs_nvis_scatter.svg",
+        "Future PL vs n_vis",
+        pred_rows,
+        "n_vis",
+        "PL_pred",
+    )
+    svg_scatter_plot(
+        figs / "future_pl_vs_pdop_scatter.svg",
+        "Future PL vs PDOP",
+        pred_rows,
+        "pdop",
+        "PL_pred",
+    )
+    svg_line_plot(
+        figs / "future_im_trajectory_xy.svg",
+        "Future trajectory XY",
+        [("XY", [r.get("x") for r in pred_rows], [r.get("y") for r in pred_rows], "#2b6cb0")],
+    )
+    fallback_counts = {}
+    for row in pred_rows:
+        if as_bool(row.get("fallback")):
+            reason = row.get("fallback_reason") or "unknown"
+            fallback_counts[reason] = fallback_counts.get(reason, 0) + 1
+    svg_histogram(
+        figs / "fallback_reason_histogram.svg",
+        "Fallback reason histogram",
+        fallback_counts,
+    )
+    svg_line_plot(
+        figs / "current_consistency_timeline.svg",
+        "Current PL consistency ratio",
+        [
+            (
+                "PL ratio",
+                [r.get("stamp") for r in snapshot_rows],
+                [r.get("consistency_pl_ratio") for r in snapshot_rows],
+                "#c05621",
+            )
+        ],
+    )
+    pl_grid = online_summary.get("pl_grid") or {}
+    grid_update_timing = "skipped_not_applicable"
+    if as_bool(pl_grid.get("enabled", False)):
+        svg_grid_update_timing(figs / "grid_update_timing.svg", pl_grid)
+        grid_update_timing = "figs/grid_update_timing.svg"
+    lidar = online_summary.get("lidar_observability") or {}
+    lidar_observability = "skipped_not_applicable"
+    fused_fim_grid = "skipped_not_applicable"
+    if as_bool(lidar.get("enabled", False)):
+        lidar_xs = list(range(len(pred_rows)))
+        svg_line_plot(
+            figs / "future_lidar_alpha_tdop_timeline.svg",
+            "Future LiDAR alpha and TDOP",
+            [
+                ("alpha", lidar_xs, [r.get("lidar_alpha") for r in pred_rows], "#2f855a"),
+                ("tdop", lidar_xs, [r.get("lidar_tdop") for r in pred_rows], "#c05621"),
+            ],
+        )
+        svg_gnss_vs_fused_pl(figs / "future_gnss_vs_fused_pl.svg", pred_rows)
+        lidar_observability = "figs/future_lidar_alpha_tdop_timeline.svg"
+        if as_bool(lidar.get("fused_fim_grid", False)):
+            fused_fim_grid = "figs/future_gnss_vs_fused_pl.svg"
+    return {
+        "future_hpl_vpl_al_im_timeline": "figs/future_hpl_vpl_al_im_timeline.svg",
+        "future_pl_vs_nvis_scatter": "figs/future_pl_vs_nvis_scatter.svg",
+        "future_pl_vs_pdop_scatter": "figs/future_pl_vs_pdop_scatter.svg",
+        "future_im_trajectory_xy": "figs/future_im_trajectory_xy.svg",
+        "fallback_reason_histogram": "figs/fallback_reason_histogram.svg",
+        "current_consistency_timeline": "figs/current_consistency_timeline.svg",
+        "grid_update_timing": grid_update_timing,
+        "future_lidar_alpha_tdop_timeline": lidar_observability,
+        "future_gnss_vs_fused_pl": fused_fim_grid,
+    }
+
+
 def analyze(run_dir, match_tolerance_s):
     export_dir = run_dir / "export"
     pred_path = export_dir / "integrity_along_planner_traj.csv"
+    snapshot_path = export_dir / "future_integrity_snapshot.csv"
     online_summary_path = export_dir / "phase2_summary.json"
     aligned_path = export_dir / "phase2_integrity_eval_aligned.csv"
 
     pred_rows = load_csv(pred_path)
+    snapshot_rows = load_csv(snapshot_path)
     online_summary = load_json(online_summary_path)
     warnings = []
     errors = []
@@ -369,7 +783,19 @@ def analyze(run_dir, match_tolerance_s):
     if not any(finite(r.get("actual_IM")) for r in aligned_rows):
         warnings.append("actual_IM could not be computed for aligned samples")
 
+    integrity_snapshot, current_consistency = summarize_snapshot(
+        snapshot_rows, araim_index, match_tolerance_s, warnings
+    )
+    plots = generate_h_lite_plots(export_dir, pred_rows, snapshot_rows, online_summary)
     summary = summarize(pred_rows, aligned_rows, online_summary, run_dir, warnings, errors)
+    summary["integrity_snapshot"] = integrity_snapshot
+    summary["current_consistency"] = current_consistency
+    summary["phase_h_lite"] = {
+        "plots": plots,
+        "grid_update_timing": plots.get("grid_update_timing", "skipped_not_applicable"),
+        "lidar_observability": plots.get("future_lidar_alpha_tdop_timeline", "skipped_not_applicable"),
+        "fused_fim_grid": plots.get("future_gnss_vs_fused_pl", "skipped_not_applicable"),
+    }
     (export_dir / "phase2_summary.json").write_text(json.dumps(summary, indent=2) + "\n")
     return summary
 

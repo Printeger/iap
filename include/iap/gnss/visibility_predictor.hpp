@@ -50,6 +50,8 @@ class VisibilityPredictor {
     double min_elevation = 0.1745;  ///< elevation mask [rad] (~10 deg)
     double occ_range     = 20.0;   ///< max ray length for occlusion check [m]
     double occ_L         = 5.0;    ///< survey length for κ computation [m]
+    double ray_start_offset = 1.0; ///< ignore near-field voxels around query point [m]
+    bool hard_occlusion = false;   ///< false keeps satellites usable and inflates σ via κ
     CanopyNoiseParams canopy;      ///< σ_eff model params (σ_0, σ_mp, σ_c, α)
   };
 

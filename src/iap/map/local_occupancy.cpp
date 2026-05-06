@@ -37,6 +37,15 @@ void LocalOccupancyGrid::insert(const gtsam_points::PointCloud& cloud,
   }
 }
 
+void LocalOccupancyGrid::insert_points(
+    const std::vector<Eigen::Vector3d>& points_world) {
+  for (const auto& pw : points_world) {
+    if (!pw.allFinite()) continue;
+    if (static_cast<int>(voxels_.size()) >= params_.max_voxels) break;
+    voxels_[to_key(pw)] = 1u;
+  }
+}
+
 // ---------------------------------------------------------------------------
 void LocalOccupancyGrid::reset() {
   voxels_.clear();
