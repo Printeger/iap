@@ -176,6 +176,36 @@ def _launch_setup(context):
     planner_integrity_grad_norm_max = LaunchConfiguration(
         "planner_integrity_grad_norm_max"
     ).perform(context)
+    planner_use_integrity_front_search = LaunchConfiguration(
+        "planner_use_integrity_front_search"
+    ).perform(context)
+    planner_use_integrity_global_search = LaunchConfiguration(
+        "planner_use_integrity_global_search"
+    ).perform(context)
+    planner_lambda_integrity_front = LaunchConfiguration(
+        "planner_lambda_integrity_front"
+    ).perform(context)
+    planner_integrity_front_cost_topic = LaunchConfiguration(
+        "planner_integrity_front_cost_topic"
+    ).perform(context)
+    planner_integrity_front_nearest_radius_m = LaunchConfiguration(
+        "planner_integrity_front_nearest_radius_m"
+    ).perform(context)
+    planner_integrity_front_stale_timeout_s = LaunchConfiguration(
+        "planner_integrity_front_stale_timeout_s"
+    ).perform(context)
+    planner_integrity_front_cost_max = LaunchConfiguration(
+        "planner_integrity_front_cost_max"
+    ).perform(context)
+    planner_integrity_global_astar_step_m = LaunchConfiguration(
+        "planner_integrity_global_astar_step_m"
+    ).perform(context)
+    planner_integrity_global_max_waypoints = LaunchConfiguration(
+        "planner_integrity_global_max_waypoints"
+    ).perform(context)
+    planner_start_delay_s = max(
+        0.0, float(LaunchConfiguration("planner_start_delay_s").perform(context))
+    )
     use_dynamic_obstacles = _as_bool(LaunchConfiguration("use_dynamic_obstacles").perform(context))
     allow_truth_alignment = _as_bool(LaunchConfiguration("allow_truth_alignment").perform(context))
     log_phase1 = _as_bool(LaunchConfiguration("log_phase1").perform(context))
@@ -328,6 +358,92 @@ def _launch_setup(context):
     gains_file = os.path.join(so3_control_share, "config", "gains_hummingbird.yaml")
     corrections_file = os.path.join(so3_control_share, "config", "corrections_hummingbird.yaml")
 
+    ego_planner_launch = IncludeLaunchDescription(
+        PythonLaunchDescriptionSource(
+            os.path.join(ego_share, "launch", "advanced_param.launch.py")
+        ),
+        launch_arguments={
+            "drone_id": drone_id,
+            "map_size_x_": map_size_x,
+            "map_size_y_": map_size_y,
+            "map_size_z_": map_size_z,
+            "odometry_topic": planner_odom_topic,
+            "obj_num_set": "10" if use_dynamic_obstacles else "0",
+            "camera_pose_topic": "/drone_0_pcl_render_node/camera_pose",
+            "depth_topic": sim_depth_topic,
+            "cloud_topic": ego_cloud_topic,
+            "cx": "321.04638671875",
+            "cy": "243.44969177246094",
+            "fx": "387.229248046875",
+            "fy": "387.229248046875",
+            "max_vel": "2.0",
+            "max_acc": "3.0",
+            "planning_horizon": "7.5",
+            "use_distinctive_trajs": "True",
+            "flight_type": "2",
+            "point_num": point_num,
+            "point0_x": goal_x,
+            "point0_y": goal_y,
+            "point0_z": goal_z,
+            "point1_x": waypoint_values["point1_x"],
+            "point1_y": waypoint_values["point1_y"],
+            "point1_z": waypoint_values["point1_z"],
+            "point2_x": waypoint_values["point2_x"],
+            "point2_y": waypoint_values["point2_y"],
+            "point2_z": waypoint_values["point2_z"],
+            "point3_x": waypoint_values["point3_x"],
+            "point3_y": waypoint_values["point3_y"],
+            "point3_z": waypoint_values["point3_z"],
+            "point4_x": waypoint_values["point4_x"],
+            "point4_y": waypoint_values["point4_y"],
+            "point4_z": waypoint_values["point4_z"],
+            "point5_x": waypoint_values["point5_x"],
+            "point5_y": waypoint_values["point5_y"],
+            "point5_z": waypoint_values["point5_z"],
+            "point6_x": waypoint_values["point6_x"],
+            "point6_y": waypoint_values["point6_y"],
+            "point6_z": waypoint_values["point6_z"],
+            "use_integrity_cost": planner_use_integrity_cost,
+            "lambda_integrity": planner_lambda_integrity,
+            "integrity_field_stale_timeout_s": planner_integrity_field_stale_timeout_s,
+            "integrity_nearest_radius_m": planner_integrity_nearest_radius_m,
+            "integrity_cost_max": planner_integrity_cost_max,
+            "integrity_grad_norm_max": planner_integrity_grad_norm_max,
+            "use_integrity_front_search": planner_use_integrity_front_search,
+            "use_integrity_global_search": planner_use_integrity_global_search,
+            "lambda_integrity_front": planner_lambda_integrity_front,
+            "integrity_front_cost_topic": planner_integrity_front_cost_topic,
+            "integrity_front_nearest_radius_m": planner_integrity_front_nearest_radius_m,
+            "integrity_front_stale_timeout_s": planner_integrity_front_stale_timeout_s,
+            "integrity_front_cost_max": planner_integrity_front_cost_max,
+            "integrity_global_astar_step_m": planner_integrity_global_astar_step_m,
+            "integrity_global_max_waypoints": planner_integrity_global_max_waypoints,
+        }.items(),
+    )
+    traj_server_node = Node(
+        package="ego_planner",
+        executable="traj_server",
+        name=f"drone_{drone_id}_traj_server",
+        output="screen",
+        remappings=[
+            ("planning/bspline", bspline_topic),
+            ("position_cmd", pos_cmd_topic),
+            ("/position_cmd", pos_cmd_topic),
+        ],
+        parameters=[{"traj_server/time_forward": 1.0}],
+    )
+    planner_launch_actions = [ego_planner_launch, traj_server_node]
+    if planner_start_delay_s > 0.0:
+        planner_launch_actions = [
+            LogInfo(
+                msg=(
+                    f"[demo9] delaying EGO planner start by "
+                    f"{planner_start_delay_s:.2f}s"
+                )
+            ),
+            TimerAction(period=planner_start_delay_s, actions=planner_launch_actions),
+        ]
+
     actions = [
         LogInfo(msg=f"[demo9] runtime IAP config: {runtime_config_path}"),
         LogInfo(msg=f"[demo9] planner/controller odom feedback: {planner_odom_topic}"),
@@ -455,71 +571,7 @@ def _launch_setup(context):
                 {"points_topic": iap_lidar_topic},
             ],
         ),
-        IncludeLaunchDescription(
-            PythonLaunchDescriptionSource(
-                os.path.join(ego_share, "launch", "advanced_param.launch.py")
-            ),
-            launch_arguments={
-                "drone_id": drone_id,
-                "map_size_x_": map_size_x,
-                "map_size_y_": map_size_y,
-                "map_size_z_": map_size_z,
-                "odometry_topic": planner_odom_topic,
-                "obj_num_set": "10" if use_dynamic_obstacles else "0",
-                "camera_pose_topic": "/drone_0_pcl_render_node/camera_pose",
-                "depth_topic": sim_depth_topic,
-                "cloud_topic": ego_cloud_topic,
-                "cx": "321.04638671875",
-                "cy": "243.44969177246094",
-                "fx": "387.229248046875",
-                "fy": "387.229248046875",
-                "max_vel": "2.0",
-                "max_acc": "3.0",
-                "planning_horizon": "7.5",
-                "use_distinctive_trajs": "True",
-                "flight_type": "2",
-                "point_num": point_num,
-                "point0_x": goal_x,
-                "point0_y": goal_y,
-                "point0_z": goal_z,
-                "point1_x": waypoint_values["point1_x"],
-                "point1_y": waypoint_values["point1_y"],
-                "point1_z": waypoint_values["point1_z"],
-                "point2_x": waypoint_values["point2_x"],
-                "point2_y": waypoint_values["point2_y"],
-                "point2_z": waypoint_values["point2_z"],
-                "point3_x": waypoint_values["point3_x"],
-                "point3_y": waypoint_values["point3_y"],
-                "point3_z": waypoint_values["point3_z"],
-                "point4_x": waypoint_values["point4_x"],
-                "point4_y": waypoint_values["point4_y"],
-                "point4_z": waypoint_values["point4_z"],
-                "point5_x": waypoint_values["point5_x"],
-                "point5_y": waypoint_values["point5_y"],
-                "point5_z": waypoint_values["point5_z"],
-                "point6_x": waypoint_values["point6_x"],
-                "point6_y": waypoint_values["point6_y"],
-                "point6_z": waypoint_values["point6_z"],
-                "use_integrity_cost": planner_use_integrity_cost,
-                "lambda_integrity": planner_lambda_integrity,
-                "integrity_field_stale_timeout_s": planner_integrity_field_stale_timeout_s,
-                "integrity_nearest_radius_m": planner_integrity_nearest_radius_m,
-                "integrity_cost_max": planner_integrity_cost_max,
-                "integrity_grad_norm_max": planner_integrity_grad_norm_max,
-            }.items(),
-        ),
-        Node(
-            package="ego_planner",
-            executable="traj_server",
-            name=f"drone_{drone_id}_traj_server",
-            output="screen",
-            remappings=[
-                ("planning/bspline", bspline_topic),
-                ("position_cmd", pos_cmd_topic),
-                ("/position_cmd", pos_cmd_topic),
-            ],
-            parameters=[{"traj_server/time_forward": 1.0}],
-        ),
+        *planner_launch_actions,
         Node(
             package="poscmd_2_odom",
             executable="poscmd_2_odom",
@@ -820,6 +872,16 @@ def generate_launch_description():
         DeclareLaunchArgument("planner_integrity_nearest_radius_m", default_value="1.0"),
         DeclareLaunchArgument("planner_integrity_cost_max", default_value="1000.0"),
         DeclareLaunchArgument("planner_integrity_grad_norm_max", default_value="0.1"),
+        DeclareLaunchArgument("planner_use_integrity_front_search", default_value="false"),
+        DeclareLaunchArgument("planner_use_integrity_global_search", default_value="false"),
+        DeclareLaunchArgument("planner_lambda_integrity_front", default_value="2.0"),
+        DeclareLaunchArgument("planner_integrity_front_cost_topic", default_value="/iap/integrity_front_cost_field"),
+        DeclareLaunchArgument("planner_integrity_front_nearest_radius_m", default_value="1.5"),
+        DeclareLaunchArgument("planner_integrity_front_stale_timeout_s", default_value="1.0"),
+        DeclareLaunchArgument("planner_integrity_front_cost_max", default_value="10.0"),
+        DeclareLaunchArgument("planner_integrity_global_astar_step_m", default_value="0.5"),
+        DeclareLaunchArgument("planner_integrity_global_max_waypoints", default_value="80"),
+        DeclareLaunchArgument("planner_start_delay_s", default_value="0.0"),
         DeclareLaunchArgument("use_dynamic_obstacles", default_value="false"),
         DeclareLaunchArgument("map_source", default_value="local_sensing_cloud"),
         DeclareLaunchArgument("map_generator_mode", default_value="random_forest"),

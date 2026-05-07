@@ -54,24 +54,31 @@ namespace ego_planner
     fast_planner::ObjPredictor::Ptr obj_predictor_;    
     SwarmTrajData swarm_trajs_buf_;
 
-  private:
-    /* main planning algorithms & modules */
-    PlanningVisualization::Ptr visualization_;
+	  private:
+	    /* main planning algorithms & modules */
+	    PlanningVisualization::Ptr visualization_;
 
-    // ros::Publisher obj_pub_; //zx-todo 
+	    // ros::Publisher obj_pub_; //zx-todo 
 
-    BsplineOptimizer::Ptr bspline_optimizer_;
+	    BsplineOptimizer::Ptr bspline_optimizer_;
+	    bool use_integrity_global_search_{false};
+	    double integrity_global_astar_step_m_{0.5};
+	    int integrity_global_max_waypoints_{80};
+	    double integrity_global_astar_timeout_s_{1.0};
 
-    int continous_failures_count_{0};
+	    int continous_failures_count_{0};
 
     void updateTrajInfo(const UniformBspline &position_traj, const rclcpp::Time time_now);
 
     void reparamBspline(UniformBspline &bspline, vector<Eigen::Vector3d> &start_end_derivative, double ratio, Eigen::MatrixXd &ctrl_pts, double &dt,
                         double &time_inc);
 
-    bool refineTrajAlgo(UniformBspline &traj, vector<Eigen::Vector3d> &start_end_derivative, double ratio, double &ts, Eigen::MatrixXd &optimal_control_points);
+	    bool refineTrajAlgo(UniformBspline &traj, vector<Eigen::Vector3d> &start_end_derivative, double ratio, double &ts, Eigen::MatrixXd &optimal_control_points);
+	    bool buildIntegrityAwareGlobalWaypoints(const std::vector<Eigen::Vector3d> &anchors,
+	                                            std::vector<Eigen::Vector3d> &inter_points);
+	    void downsampleGlobalWaypoints(std::vector<Eigen::Vector3d> &points, int max_points) const;
 
-    // !SECTION stable
+	    // !SECTION stable
 
     // SECTION developing
 

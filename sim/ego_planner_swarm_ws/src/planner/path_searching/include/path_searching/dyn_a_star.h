@@ -5,6 +5,7 @@
 #include <rclcpp/rclcpp.hpp>
 #include <Eigen/Eigen>
 #include <plan_env/grid_map.h>
+#include <functional>
 #include <queue>
 
 constexpr double inf = 1 >> 20;
@@ -68,25 +69,50 @@ private:
 	Eigen::Vector3i CENTER_IDX_, POOL_SIZE_;
 	const double tie_breaker_ = 1.0 + 1.0 / 10000;
 
-	std::vector<GridNodePtr> gridPath_;
+		std::vector<GridNodePtr> gridPath_;
 
-	GridNodePtr ***GridNodeMap_;
-	std::priority_queue<GridNodePtr, std::vector<GridNodePtr>, NodeComparator> openSet_;
+		GridNodePtr ***GridNodeMap_;
+		std::priority_queue<GridNodePtr, std::vector<GridNodePtr>, NodeComparator> openSet_;
 
-	int rounds_{0};
+		int rounds_{0};
+		bool use_integrity_cost_{false};
+		double lambda_integrity_cost_{0.0};
+		double integrity_cost_max_{10.0};
+		double search_time_limit_s_{0.2};
+		std::function<bool(const Eigen::Vector3d &, double *)> integrity_cost_query_;
+		int last_integrity_samples_used_{0};
+		int last_integrity_samples_skipped_{0};
+		double last_integrity_cost_sum_{0.0};
+		double last_integrity_cost_max_{0.0};
 
-public:
-	typedef std::shared_ptr<AStar> Ptr;
+		bool AstarSearchImpl(const double step_size, Eigen::Vector3d start_pt, Eigen::Vector3d end_pt,
+		                     bool use_integrity_cost, double search_time_limit_s);
+
+	public:
+		typedef std::shared_ptr<AStar> Ptr;
 
 	AStar(){};
 	~AStar();
 
 	void initGridMap(GridMap::Ptr occ_map, const Eigen::Vector3i pool_size);
 
-	bool AstarSearch(const double step_size, Eigen::Vector3d start_pt, Eigen::Vector3d end_pt);
+		bool AstarSearch(const double step_size, Eigen::Vector3d start_pt, Eigen::Vector3d end_pt);
+		bool AstarSearch(const double step_size, Eigen::Vector3d start_pt, Eigen::Vector3d end_pt,
+		                 bool use_integrity_cost, double search_time_limit_s);
 
-	std::vector<Eigen::Vector3d> getPath();
-};
+		void setIntegrityCostCallback(std::function<bool(const Eigen::Vector3d &, double *)> query);
+		void setIntegrityCostParams(bool enabled, double lambda, double cost_max);
+		bool integrityCostEnabled() const { return use_integrity_cost_; }
+		int getLastIntegritySamplesUsed() const { return last_integrity_samples_used_; }
+		int getLastIntegritySamplesSkipped() const { return last_integrity_samples_skipped_; }
+		double getLastIntegrityCostMean() const
+		{
+			return last_integrity_samples_used_ > 0 ? last_integrity_cost_sum_ / last_integrity_samples_used_ : 0.0;
+		}
+		double getLastIntegrityCostMax() const { return last_integrity_cost_max_; }
+
+		std::vector<Eigen::Vector3d> getPath();
+	};
 
 inline double AStar::getHeu(GridNodePtr node1, GridNodePtr node2)
 {

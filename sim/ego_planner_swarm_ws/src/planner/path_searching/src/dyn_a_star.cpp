@@ -1,5 +1,8 @@
 #include "path_searching/dyn_a_star.h"
 
+#include <algorithm>
+#include <cmath>
+
 using namespace std;
 using namespace Eigen;
 
@@ -31,6 +34,18 @@ void AStar::initGridMap(GridMap::Ptr occ_map, const Eigen::Vector3i pool_size)
     }
 
     grid_map_ = occ_map;
+}
+
+void AStar::setIntegrityCostCallback(std::function<bool(const Eigen::Vector3d &, double *)> query)
+{
+    integrity_cost_query_ = std::move(query);
+}
+
+void AStar::setIntegrityCostParams(bool enabled, double lambda, double cost_max)
+{
+    use_integrity_cost_ = enabled;
+    lambda_integrity_cost_ = std::max(0.0, lambda);
+    integrity_cost_max_ = std::max(0.0, cost_max);
 }
 
 double AStar::getDiagHeu(GridNodePtr node1, GridNodePtr node2)
@@ -120,12 +135,31 @@ bool AStar::ConvertToIndexAndAdjustStartEndPoints(Vector3d start_pt, Vector3d en
 
 bool AStar::AstarSearch(const double step_size, Vector3d start_pt, Vector3d end_pt)
 {
+    return AstarSearchImpl(step_size, start_pt, end_pt, use_integrity_cost_, search_time_limit_s_);
+}
+
+bool AStar::AstarSearch(const double step_size, Vector3d start_pt, Vector3d end_pt,
+                        bool use_integrity_cost, double search_time_limit_s)
+{
+    return AstarSearchImpl(step_size, start_pt, end_pt, use_integrity_cost, search_time_limit_s);
+}
+
+bool AStar::AstarSearchImpl(const double step_size, Vector3d start_pt, Vector3d end_pt,
+                            bool use_integrity_cost, double search_time_limit_s)
+{
     rclcpp::Time time_1 = rclcpp::Clock().now();
     ++rounds_;
+    last_integrity_samples_used_ = 0;
+    last_integrity_samples_skipped_ = 0;
+    last_integrity_cost_sum_ = 0.0;
+    last_integrity_cost_max_ = 0.0;
 
     step_size_ = step_size;
     inv_step_size_ = 1 / step_size;
     center_ = (start_pt + end_pt) / 2;
+    const double effective_time_limit_s = search_time_limit_s > 0.0 ? search_time_limit_s : search_time_limit_s_;
+    const bool use_integrity_this_search =
+        use_integrity_cost && lambda_integrity_cost_ > 0.0 && integrity_cost_query_;
 
     Vector3i start_idx, end_idx;
     if (!ConvertToIndexAndAdjustStartEndPoints(start_pt, end_pt, start_idx, end_idx))
@@ -214,7 +248,25 @@ bool AStar::AstarSearch(const double step_size, Vector3d start_pt, Vector3d end_
                     }
 
                     double static_cost = sqrt(dx * dx + dy * dy + dz * dz);
-                    tentative_gScore = current->gScore + static_cost;
+                    double integrity_cost = 0.0;
+                    if (use_integrity_this_search)
+                    {
+                        const Eigen::Vector3d neighbor_pos = Index2Coord(neighborPtr->index);
+                        if (integrity_cost_query_(neighbor_pos, &integrity_cost) && std::isfinite(integrity_cost))
+                        {
+                            integrity_cost = std::clamp(integrity_cost, 0.0, integrity_cost_max_);
+                            ++last_integrity_samples_used_;
+                            last_integrity_cost_sum_ += integrity_cost;
+                            last_integrity_cost_max_ = std::max(last_integrity_cost_max_, integrity_cost);
+                        }
+                        else
+                        {
+                            integrity_cost = 0.0;
+                            ++last_integrity_samples_skipped_;
+                        }
+                    }
+                    const double edge_cost = static_cost * (1.0 + lambda_integrity_cost_ * integrity_cost);
+                    tentative_gScore = current->gScore + edge_cost;
 
                     if (!flag_explored)
                     {
@@ -233,9 +285,9 @@ bool AStar::AstarSearch(const double step_size, Vector3d start_pt, Vector3d end_
                     }
                 }
         rclcpp::Time time_2 = rclcpp::Clock().now();
-        if ((time_2 - time_1).seconds() > 0.2)
+        if ((time_2 - time_1).seconds() > effective_time_limit_s)
         {
-            RCLCPP_WARN(rclcpp::get_logger("AstarSearch"), "Failed in A star path searching !!! 0.2 seconds time limit exceeded.");
+            RCLCPP_WARN(rclcpp::get_logger("AstarSearch"), "Failed in A star path searching !!! %.3f seconds time limit exceeded.", effective_time_limit_s);
             return false;
         }
     }

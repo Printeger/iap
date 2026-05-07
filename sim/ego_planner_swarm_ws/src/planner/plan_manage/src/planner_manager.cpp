@@ -1,5 +1,7 @@
 // #include <fstream>
 #include <ego_planner/planner_manager.h>
+#include <algorithm>
+#include <cmath>
 #include <thread>
 #include "visualization_msgs/msg/marker.hpp" // zx-todo
 
@@ -17,9 +19,12 @@ namespace ego_planner
     node->declare_parameter("manager/max_jerk", -1.0);
     node->declare_parameter("manager/feasibility_tolerance", 0.0);
     node->declare_parameter("manager/control_points_distance", -1.0);
-    node->declare_parameter("manager/planning_horizon", 5.0);
-    node->declare_parameter("manager/use_distinctive_trajs", false);
-    node->declare_parameter("manager/drone_id", -1);
+	    node->declare_parameter("manager/planning_horizon", 5.0);
+	    node->declare_parameter("manager/use_distinctive_trajs", false);
+	    node->declare_parameter("manager/drone_id", -1);
+	    node->declare_parameter("manager/use_integrity_global_search", false);
+	    node->declare_parameter("manager/integrity_global_astar_step_m", 0.5);
+	    node->declare_parameter("manager/integrity_global_max_waypoints", 80);
 
     node->get_parameter("manager/max_vel", pp_.max_vel_);
     node->get_parameter("manager/max_acc", pp_.max_acc_);
@@ -27,8 +32,13 @@ namespace ego_planner
     node->get_parameter("manager/feasibility_tolerance", pp_.feasibility_tolerance_);
     node->get_parameter("manager/control_points_distance", pp_.ctrl_pt_dist);
     node->get_parameter("manager/planning_horizon", pp_.planning_horizen_);
-    node->get_parameter("manager/use_distinctive_trajs", pp_.use_distinctive_trajs);
-    node->get_parameter("manager/drone_id", pp_.drone_id);
+	    node->get_parameter("manager/use_distinctive_trajs", pp_.use_distinctive_trajs);
+	    node->get_parameter("manager/drone_id", pp_.drone_id);
+	    node->get_parameter("manager/use_integrity_global_search", use_integrity_global_search_);
+	    node->get_parameter("manager/integrity_global_astar_step_m", integrity_global_astar_step_m_);
+	    node->get_parameter("manager/integrity_global_max_waypoints", integrity_global_max_waypoints_);
+	    integrity_global_astar_step_m_ = std::max(0.1, integrity_global_astar_step_m_);
+	    integrity_global_max_waypoints_ = std::max(2, integrity_global_max_waypoints_);
 
     local_data_.traj_id_ = 0;
     grid_map_.reset(new GridMap);
@@ -39,8 +49,9 @@ namespace ego_planner
     // bspline_optimizer_->setParam(nh);
     bspline_optimizer_->setParam(node);
     bspline_optimizer_->setEnvironment(grid_map_, obj_predictor_);
-    bspline_optimizer_->a_star_.reset(new AStar);
-    bspline_optimizer_->a_star_->initGridMap(grid_map_, Eigen::Vector3i(100, 100, 100));
+	    bspline_optimizer_->a_star_.reset(new AStar);
+	    bspline_optimizer_->a_star_->initGridMap(grid_map_, Eigen::Vector3i(100, 100, 100));
+	    bspline_optimizer_->attachAStarIntegrityCost();
 
     visualization_ = vis;
   }
@@ -360,8 +371,8 @@ namespace ego_planner
     return true;
   }
 
-  bool EGOPlannerManager::checkCollision(int drone_id)
-  {
+	  bool EGOPlannerManager::checkCollision(int drone_id)
+	  {
     // if (local_data_.start_time_.toSec() < 1e9) // It means my first planning has not started
     if (local_data_.start_time_.seconds() < 1e9)
       return false;
@@ -382,53 +393,150 @@ namespace ego_planner
       }
     }
 
-    return false;
-  }
+	    return false;
+	  }
 
-  bool EGOPlannerManager::planGlobalTrajWaypoints(const Eigen::Vector3d &start_pos, const Eigen::Vector3d &start_vel, const Eigen::Vector3d &start_acc,
-                                                  const std::vector<Eigen::Vector3d> &waypoints, const Eigen::Vector3d &end_vel, const Eigen::Vector3d &end_acc)
-  {
+	  void EGOPlannerManager::downsampleGlobalWaypoints(std::vector<Eigen::Vector3d> &points, int max_points) const
+	  {
+	    if (max_points < 2 || static_cast<int>(points.size()) <= max_points)
+	    {
+	      return;
+	    }
+
+	    std::vector<Eigen::Vector3d> reduced;
+	    reduced.reserve(max_points);
+	    const int last = static_cast<int>(points.size()) - 1;
+	    int prev_idx = -1;
+	    for (int i = 0; i < max_points; ++i)
+	    {
+	      int idx = static_cast<int>(std::llround(static_cast<double>(i) * last / static_cast<double>(max_points - 1)));
+	      idx = std::clamp(idx, 0, last);
+	      if (idx == prev_idx)
+	      {
+	        continue;
+	      }
+	      reduced.push_back(points[idx]);
+	      prev_idx = idx;
+	    }
+	    if ((reduced.back() - points.back()).norm() > 1.0e-6)
+	    {
+	      reduced.back() = points.back();
+	    }
+	    points = std::move(reduced);
+	  }
+
+	  bool EGOPlannerManager::buildIntegrityAwareGlobalWaypoints(const std::vector<Eigen::Vector3d> &anchors,
+	                                                            std::vector<Eigen::Vector3d> &inter_points)
+	  {
+	    inter_points.clear();
+	    if (!use_integrity_global_search_ || anchors.size() < 2 || !bspline_optimizer_ ||
+	        !bspline_optimizer_->a_star_)
+	    {
+	      return false;
+	    }
+
+	    for (size_t seg = 0; seg + 1 < anchors.size(); ++seg)
+	    {
+	      const Eigen::Vector3d start = anchors[seg];
+	      const Eigen::Vector3d goal = anchors[seg + 1];
+	      if (!start.allFinite() || !goal.allFinite())
+	      {
+	        return false;
+	      }
+	      if ((goal - start).norm() < 1.0e-3)
+	      {
+	        if (inter_points.empty())
+	        {
+	          inter_points.push_back(start);
+	        }
+	        inter_points.push_back(goal);
+	        continue;
+	      }
+
+	      if (!bspline_optimizer_->a_star_->AstarSearch(integrity_global_astar_step_m_, start, goal,
+	                                                   true, integrity_global_astar_timeout_s_))
+	      {
+	        RCLCPP_WARN(rclcpp::get_logger("ego_planner"),
+	                    "integrity-aware global A* failed on segment %zu; falling back to straight global reference",
+	                    seg);
+	        inter_points.clear();
+	        return false;
+	      }
+
+	      std::vector<Eigen::Vector3d> path = bspline_optimizer_->a_star_->getPath();
+	      if (path.size() < 2)
+	      {
+	        inter_points.clear();
+	        return false;
+	      }
+	      if (!inter_points.empty())
+	      {
+	        path.erase(path.begin());
+	      }
+	      inter_points.insert(inter_points.end(), path.begin(), path.end());
+	    }
+
+	    downsampleGlobalWaypoints(inter_points, integrity_global_max_waypoints_);
+	    RCLCPP_INFO(rclcpp::get_logger("ego_planner"),
+	                "integrity-aware global A* produced %zu waypoints; integrity_samples_used=%d mean_cost=%.3f max_cost=%.3f",
+	                inter_points.size(),
+	                bspline_optimizer_->a_star_->getLastIntegritySamplesUsed(),
+	                bspline_optimizer_->a_star_->getLastIntegrityCostMean(),
+	                bspline_optimizer_->a_star_->getLastIntegrityCostMax());
+	    return inter_points.size() >= 2;
+	  }
+
+	  bool EGOPlannerManager::planGlobalTrajWaypoints(const Eigen::Vector3d &start_pos, const Eigen::Vector3d &start_vel, const Eigen::Vector3d &start_acc,
+	                                                  const std::vector<Eigen::Vector3d> &waypoints, const Eigen::Vector3d &end_vel, const Eigen::Vector3d &end_acc)
+	  {
 
     // generate global reference trajectory
 
-    vector<Eigen::Vector3d> points;
-    points.push_back(start_pos);
+	    vector<Eigen::Vector3d> points;
+	    points.push_back(start_pos);
 
-    for (size_t wp_i = 0; wp_i < waypoints.size(); wp_i++)
-    {
-      points.push_back(waypoints[wp_i]);
-    }
+	    for (size_t wp_i = 0; wp_i < waypoints.size(); wp_i++)
+	    {
+	      points.push_back(waypoints[wp_i]);
+	    }
 
-    double total_len = 0;
-    total_len += (start_pos - waypoints[0]).norm();
-    for (size_t i = 0; i < waypoints.size() - 1; i++)
-    {
-      total_len += (waypoints[i + 1] - waypoints[i]).norm();
-    }
+	    if (points.size() < 2)
+	    {
+	      return false;
+	    }
 
-    // insert intermediate points if too far
-    vector<Eigen::Vector3d> inter_points;
-    double dist_thresh = max(total_len / 8, 4.0);
+	    double total_len = 0;
+	    for (size_t i = 0; i + 1 < points.size(); i++)
+	    {
+	      total_len += (points[i + 1] - points[i]).norm();
+	    }
 
-    for (size_t i = 0; i < points.size() - 1; ++i)
-    {
-      inter_points.push_back(points.at(i));
-      double dist = (points.at(i + 1) - points.at(i)).norm();
+	    // insert intermediate points if too far
+	    vector<Eigen::Vector3d> inter_points;
+	    if (!buildIntegrityAwareGlobalWaypoints(points, inter_points))
+	    {
+	      double dist_thresh = max(total_len / 8, 4.0);
 
-      if (dist > dist_thresh)
-      {
-        int id_num = floor(dist / dist_thresh) + 1;
+	      for (size_t i = 0; i < points.size() - 1; ++i)
+	      {
+	        inter_points.push_back(points.at(i));
+	        double dist = (points.at(i + 1) - points.at(i)).norm();
 
-        for (int j = 1; j < id_num; ++j)
-        {
-          Eigen::Vector3d inter_pt =
-              points.at(i) * (1.0 - double(j) / id_num) + points.at(i + 1) * double(j) / id_num;
-          inter_points.push_back(inter_pt);
-        }
-      }
-    }
+	        if (dist > dist_thresh)
+	        {
+	          int id_num = floor(dist / dist_thresh) + 1;
 
-    inter_points.push_back(points.back());
+	          for (int j = 1; j < id_num; ++j)
+	          {
+	            Eigen::Vector3d inter_pt =
+	                points.at(i) * (1.0 - double(j) / id_num) + points.at(i + 1) * double(j) / id_num;
+	            inter_points.push_back(inter_pt);
+	          }
+	        }
+	      }
+
+	      inter_points.push_back(points.back());
+	    }
 
     int pt_num = inter_points.size();
     Eigen::MatrixXd pos(3, pt_num);
@@ -470,31 +578,33 @@ namespace ego_planner
     points.push_back(start_pos);
     points.push_back(end_pos);
 
-    // insert intermediate points if too far
-    vector<Eigen::Vector3d> inter_points;
-    const double dist_thresh = 4.0;
+	    // insert intermediate points if too far
+	    vector<Eigen::Vector3d> inter_points;
+	    const double dist_thresh = 4.0;
+	    if (!buildIntegrityAwareGlobalWaypoints(points, inter_points))
+	    {
+	      for (size_t i = 0; i < points.size() - 1; ++i)
+	      /*挨个读取点并计算点距判断是否需要插点，随后计算插点并写入矩阵，最后根据插点数量生成全局轨迹
+	        最终返回值为是否规划成功的布尔值 */
+	      {
+	        inter_points.push_back(points.at(i));
+	        double dist = (points.at(i + 1) - points.at(i)).norm();
 
-    for (size_t i = 0; i < points.size() - 1; ++i)
-    /*挨个读取点并计算点距判断是否需要插点，随后计算插点并写入矩阵，最后根据插点数量生成全局轨迹
-      最终返回值为是否规划成功的布尔值 */
-    {
-      inter_points.push_back(points.at(i));
-      double dist = (points.at(i + 1) - points.at(i)).norm();
+	        if (dist > dist_thresh)
+	        {
+	          int id_num = floor(dist / dist_thresh) + 1;
 
-      if (dist > dist_thresh)
-      {
-        int id_num = floor(dist / dist_thresh) + 1;
+	          for (int j = 1; j < id_num; ++j)
+	          {
+	            Eigen::Vector3d inter_pt =
+	                points.at(i) * (1.0 - double(j) / id_num) + points.at(i + 1) * double(j) / id_num;
+	            inter_points.push_back(inter_pt);
+	          }
+	        }
+	      }
 
-        for (int j = 1; j < id_num; ++j)
-        {
-          Eigen::Vector3d inter_pt =
-              points.at(i) * (1.0 - double(j) / id_num) + points.at(i + 1) * double(j) / id_num;
-          inter_points.push_back(inter_pt);
-        }
-      }
-    }
-
-    inter_points.push_back(points.back());
+	      inter_points.push_back(points.back());
+	    }
 
     // write position matrix
     int pt_num = inter_points.size();

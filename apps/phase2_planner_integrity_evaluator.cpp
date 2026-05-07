@@ -499,6 +499,63 @@ struct PlFields {
 
 using Row = std::map<std::string, std::string>;
 
+struct FrontIntegrityCostSample {
+  Eigen::Vector3d position = Eigen::Vector3d::Zero();
+  double hpl = std::numeric_limits<double>::quiet_NaN();
+  double vpl = std::numeric_limits<double>::quiet_NaN();
+  double hal = std::numeric_limits<double>::quiet_NaN();
+  double val = std::numeric_limits<double>::quiet_NaN();
+  double im_h = std::numeric_limits<double>::quiet_NaN();
+  double im_v = std::numeric_limits<double>::quiet_NaN();
+  double im_min = std::numeric_limits<double>::quiet_NaN();
+  double cost = 0.0;
+  int risk_band_code = 0;
+};
+
+double front_integrity_risk_ratio(const double hpl,
+                                  const double vpl,
+                                  const double hal,
+                                  const double val) {
+  if (!is_finite(hpl) || !is_finite(vpl) || !is_finite(hal) ||
+      !is_finite(val) || hal <= 1.0e-6 || val <= 1.0e-6) {
+    return std::numeric_limits<double>::quiet_NaN();
+  }
+  return std::max(hpl / hal, vpl / val);
+}
+
+double normalized_front_integrity_cost(const double hpl,
+                                       const double vpl,
+                                       const double hal,
+                                       const double val) {
+  const double risk_ratio = front_integrity_risk_ratio(hpl, vpl, hal, val);
+  if (!is_finite(risk_ratio) || risk_ratio <= 0.7) {
+    return 0.0;
+  }
+  if (risk_ratio <= 1.0) {
+    const double t = (risk_ratio - 0.7) / 0.3;
+    return std::clamp(t * t, 0.0, 10.0);
+  }
+  const double over = risk_ratio - 1.0;
+  return std::clamp(1.0 + over * over, 0.0, 10.0);
+}
+
+int front_integrity_risk_band_code(const double hpl,
+                                   const double vpl,
+                                   const double hal,
+                                   const double val) {
+  const double risk_ratio = front_integrity_risk_ratio(hpl, vpl, hal, val);
+  if (!is_finite(risk_ratio)) {
+    return 0;
+  }
+  if (risk_ratio <= 0.7) {
+    return 1;
+  }
+  if (risk_ratio <= 1.0) {
+    return 2;
+  }
+  return 3;
+}
+
 }  // namespace
 
 class Phase2PlannerIntegrityEvaluator : public rclcpp::Node {
@@ -562,12 +619,19 @@ class Phase2PlannerIntegrityEvaluator : public rclcpp::Node {
     declare_parameter<double>("pi_cost_marginal_margin_m", 1.0);
     declare_parameter<double>("pi_cost_gradient_step_m", 0.5);
     declare_parameter<bool>("snapshot_anchor_current_integrity", true);
-    declare_parameter<bool>("publish_integrity_cost_field", false);
-    declare_parameter<bool>("publish_integrity_cost_grid", false);
-    declare_parameter<bool>("planner_use_integrity_cost", false);
-    declare_parameter<std::string>("integrity_cost_field_topic",
-                                   "/iap/integrity_cost_field");
-    declare_parameter<bool>("integrity_viz_use_fixed_anchor", false);
+	    declare_parameter<bool>("publish_integrity_cost_field", false);
+	    declare_parameter<bool>("publish_integrity_cost_grid", false);
+	    declare_parameter<bool>("planner_use_integrity_cost", false);
+	    declare_parameter<std::string>("integrity_cost_field_topic",
+	                                   "/iap/integrity_cost_field");
+	    declare_parameter<bool>("publish_integrity_front_cost_field", false);
+	    declare_parameter<std::string>("integrity_front_cost_field_topic",
+	                                   "/iap/integrity_front_cost_field");
+	    declare_parameter<double>("integrity_front_cost_field_publish_hz", 2.0);
+	    declare_parameter<double>("integrity_front_cost_field_resolution_m", 1.0);
+	    declare_parameter<double>("integrity_front_cost_field_size_x_m", 50.0);
+	    declare_parameter<double>("integrity_front_cost_field_size_y_m", 50.0);
+	    declare_parameter<bool>("integrity_viz_use_fixed_anchor", false);
     declare_parameter<double>("integrity_viz_anchor_x", 0.0);
     declare_parameter<double>("integrity_viz_anchor_y", 12.0);
     declare_parameter<double>("integrity_viz_anchor_z", 8.0);
@@ -669,10 +733,22 @@ class Phase2PlannerIntegrityEvaluator : public rclcpp::Node {
         get_parameter("publish_integrity_cost_grid").as_bool();
     planner_use_integrity_cost_ =
       get_parameter("planner_use_integrity_cost").as_bool();
-    integrity_cost_field_topic_ =
-        get_parameter("integrity_cost_field_topic").as_string();
-    integrity_viz_use_fixed_anchor_ =
-        get_parameter("integrity_viz_use_fixed_anchor").as_bool();
+	    integrity_cost_field_topic_ =
+	        get_parameter("integrity_cost_field_topic").as_string();
+	    publish_integrity_front_cost_field_ =
+	        get_parameter("publish_integrity_front_cost_field").as_bool();
+	    integrity_front_cost_field_topic_ =
+	        get_parameter("integrity_front_cost_field_topic").as_string();
+	    integrity_front_cost_field_publish_hz_ =
+	        get_parameter("integrity_front_cost_field_publish_hz").as_double();
+	    integrity_front_cost_field_resolution_m_ =
+	        get_parameter("integrity_front_cost_field_resolution_m").as_double();
+	    integrity_front_cost_field_size_x_m_ =
+	        get_parameter("integrity_front_cost_field_size_x_m").as_double();
+	    integrity_front_cost_field_size_y_m_ =
+	        get_parameter("integrity_front_cost_field_size_y_m").as_double();
+	    integrity_viz_use_fixed_anchor_ =
+	        get_parameter("integrity_viz_use_fixed_anchor").as_bool();
     integrity_viz_anchor_ = Eigen::Vector3d(
         get_parameter("integrity_viz_anchor_x").as_double(),
         get_parameter("integrity_viz_anchor_y").as_double(),
@@ -768,10 +844,10 @@ class Phase2PlannerIntegrityEvaluator : public rclcpp::Node {
       marker_pub_ = create_publisher<visualization_msgs::msg::MarkerArray>(
           "/iap/planner_integrity_markers", 10);
     }
-    if (publish_integrity_cost_field_) {
-      integrity_cost_field_pub_ =
-          create_publisher<sensor_msgs::msg::PointCloud2>(
-              integrity_cost_field_topic_, rclcpp::QoS(1).best_effort());
+	    if (publish_integrity_cost_field_) {
+	      integrity_cost_field_pub_ =
+	          create_publisher<sensor_msgs::msg::PointCloud2>(
+	              integrity_cost_field_topic_, rclcpp::QoS(1).best_effort());
       integrity_viz_cost_pub_ =
           create_publisher<sensor_msgs::msg::PointCloud2>(
               "/iap/integrity_viz/cost_grid_rgb", rclcpp::QoS(1).best_effort());
@@ -790,10 +866,15 @@ class Phase2PlannerIntegrityEvaluator : public rclcpp::Node {
       integrity_viz_grad_pub_ =
           create_publisher<visualization_msgs::msg::MarkerArray>(
               "/iap/integrity_viz/grad_arrows", 10);
-      integrity_viz_label_pub_ =
-          create_publisher<visualization_msgs::msg::MarkerArray>(
-              "/iap/integrity_viz/sample_labels", 10);
-    }
+	      integrity_viz_label_pub_ =
+	          create_publisher<visualization_msgs::msg::MarkerArray>(
+	              "/iap/integrity_viz/sample_labels", 10);
+	    }
+	    if (publish_integrity_front_cost_field_) {
+	      integrity_front_cost_field_pub_ =
+	          create_publisher<sensor_msgs::msg::PointCloud2>(
+	              integrity_front_cost_field_topic_, rclcpp::QoS(1).best_effort());
+	    }
 
     open_timer_ = create_wall_timer(std::chrono::milliseconds(500), [this] {
       open_outputs_if_ready();
@@ -801,13 +882,20 @@ class Phase2PlannerIntegrityEvaluator : public rclcpp::Node {
     summary_timer_ = create_wall_timer(std::chrono::seconds(2), [this] {
       write_summary();
     });
-    if (use_pl_grid_) {
-      const auto period = std::chrono::duration<double>(
-          1.0 / std::max(0.1, pl_grid_update_hz_));
-      pl_grid_timer_ = create_wall_timer(
-          std::chrono::duration_cast<std::chrono::nanoseconds>(period),
-          [this] { schedule_pl_grid_rebuild(); });
-    }
+	    if (use_pl_grid_) {
+	      const auto period = std::chrono::duration<double>(
+	          1.0 / std::max(0.1, pl_grid_update_hz_));
+	      pl_grid_timer_ = create_wall_timer(
+	          std::chrono::duration_cast<std::chrono::nanoseconds>(period),
+	          [this] { schedule_pl_grid_rebuild(); });
+	    }
+	    if (publish_integrity_front_cost_field_) {
+	      const auto period = std::chrono::duration<double>(
+	          1.0 / std::max(0.1, integrity_front_cost_field_publish_hz_));
+	      integrity_front_cost_field_timer_ = create_wall_timer(
+	          std::chrono::duration_cast<std::chrono::nanoseconds>(period),
+	          [this] { publish_integrity_front_cost_field_periodic(); });
+	    }
 
     RCLCPP_INFO(get_logger(),
                 "phase2 C++ evaluator started; odom=%s bspline=%s map=%s pl_model=%s pl_grid=%s lidar_obs=%s",
@@ -2016,10 +2104,22 @@ class Phase2PlannerIntegrityEvaluator : public rclcpp::Node {
       {"phase2_al_model", al_model_},
       {"phase2_hal_m", hal_m_},
       {"phase2_val_m", val_m_},
-      {"phase2_publish_integrity_cost_field",
-       publish_integrity_cost_field_},
-      {"phase2_publish_integrity_cost_grid", publish_integrity_cost_grid_},
-      {"phase2_fallback_pl_m", fallback_pl_m_},
+	      {"phase2_publish_integrity_cost_field",
+	       publish_integrity_cost_field_},
+	      {"phase2_publish_integrity_cost_grid", publish_integrity_cost_grid_},
+	      {"phase2_publish_integrity_front_cost_field",
+	       publish_integrity_front_cost_field_},
+	      {"phase2_integrity_front_cost_field_topic",
+	       integrity_front_cost_field_topic_},
+	      {"phase2_integrity_front_cost_field_publish_hz",
+	       integrity_front_cost_field_publish_hz_},
+	      {"phase2_integrity_front_cost_field_resolution_m",
+	       integrity_front_cost_field_resolution_m_},
+	      {"phase2_integrity_front_cost_field_size_x_m",
+	       integrity_front_cost_field_size_x_m_},
+	      {"phase2_integrity_front_cost_field_size_y_m",
+	       integrity_front_cost_field_size_y_m_},
+	      {"phase2_fallback_pl_m", fallback_pl_m_},
       {"phase2_pl_grid_resolution_m",
        field_predictor_params_.grid_resolution_m},
       {"phase2_pl_grid_size_x_m", field_predictor_params_.grid_size_x_m},
@@ -2271,9 +2371,9 @@ class Phase2PlannerIntegrityEvaluator : public rclcpp::Node {
     marker_pub_->publish(arr);
   }
 
-  std::vector<Row> build_integrity_cost_field_rows(const std::vector<Row>& traj_rows,
-                                                   const double stamp,
-                                                   const int64_t traj_id) {
+	  std::vector<Row> build_integrity_cost_field_rows(const std::vector<Row>& traj_rows,
+	                                                   const double stamp,
+	                                                   const int64_t traj_id) {
     if (!publish_integrity_cost_grid_) {
       return traj_rows;
     }
@@ -2318,11 +2418,163 @@ class Phase2PlannerIntegrityEvaluator : public rclcpp::Node {
             std::numeric_limits<double>::quiet_NaN()));
       }
     }
-    rows.insert(rows.end(), traj_rows.begin(), traj_rows.end());
-    return rows;
-  }
+	    rows.insert(rows.end(), traj_rows.begin(), traj_rows.end());
+	    return rows;
+	  }
 
-  void publish_integrity_cost_field(const std::vector<Row>& rows) {
+	  FrontIntegrityCostSample make_front_integrity_cost_sample(
+	      const Eigen::Vector3d& pos) {
+	    FrontIntegrityCostSample sample;
+	    sample.position = pos;
+	    const iap::AlertLimitSample al = al_values(pos);
+	    const PlFields pl = pl_values(pos);
+	    sample.hpl = pl.hpl;
+	    sample.vpl = pl.vpl;
+	    sample.hal = al.hal_m;
+	    sample.val = al.val_m;
+	    sample.im_h = is_finite(sample.hal) && is_finite(sample.hpl)
+	                      ? sample.hal - sample.hpl
+	                      : std::numeric_limits<double>::quiet_NaN();
+	    sample.im_v = is_finite(sample.val) && is_finite(sample.vpl)
+	                      ? sample.val - sample.vpl
+	                      : std::numeric_limits<double>::quiet_NaN();
+	    if (is_finite(sample.im_h) && is_finite(sample.im_v)) {
+	      sample.im_min = std::min(sample.im_h, sample.im_v);
+	    } else if (is_finite(sample.im_h)) {
+	      sample.im_min = sample.im_h;
+	    } else if (is_finite(sample.im_v)) {
+	      sample.im_min = sample.im_v;
+	    }
+	    sample.cost = normalized_front_integrity_cost(sample.hpl, sample.vpl,
+	                                                  sample.hal, sample.val);
+	    sample.risk_band_code = front_integrity_risk_band_code(
+	        sample.hpl, sample.vpl, sample.hal, sample.val);
+	    return sample;
+	  }
+
+	  std::vector<FrontIntegrityCostSample> build_integrity_front_cost_samples() {
+	    std::vector<FrontIntegrityCostSample> samples;
+	    if (!publish_integrity_front_cost_field_ || !latest_odom_pose_valid_ ||
+	        !latest_odom_p_.allFinite()) {
+	      return samples;
+	    }
+
+	    const double res = std::max(0.1, integrity_front_cost_field_resolution_m_);
+	    const double sx = std::max(res, integrity_front_cost_field_size_x_m_);
+	    const double sy = std::max(res, integrity_front_cost_field_size_y_m_);
+	    const int nx = std::max(1, static_cast<int>(std::floor(sx / res)) + 1);
+	    const int ny = std::max(1, static_cast<int>(std::floor(sy / res)) + 1);
+	    samples.reserve(static_cast<std::size_t>(nx * ny));
+
+	    const Eigen::Vector3d center = latest_odom_p_;
+	    const double z = std::clamp(center.z(), z_min_, z_max_);
+	    for (int ix = 0; ix < nx; ++ix) {
+	      const double x = center.x() - 0.5 * sx + std::min(ix * res, sx);
+	      for (int iy = 0; iy < ny; ++iy) {
+	        const double y = center.y() - 0.5 * sy + std::min(iy * res, sy);
+	        samples.push_back(make_front_integrity_cost_sample(
+	            Eigen::Vector3d(x, y, z)));
+	      }
+	    }
+	    return samples;
+	  }
+
+	  void publish_integrity_front_cost_field_periodic() {
+	    if (!integrity_front_cost_field_pub_) {
+	      return;
+	    }
+	    const std::vector<FrontIntegrityCostSample> samples =
+	        build_integrity_front_cost_samples();
+	    publish_integrity_front_cost_field(samples);
+	  }
+
+	  void publish_integrity_front_cost_field(
+	      const std::vector<FrontIntegrityCostSample>& samples) {
+	    if (!integrity_front_cost_field_pub_ || samples.empty()) {
+	      return;
+	    }
+	    sensor_msgs::msg::PointCloud2 cloud;
+	    cloud.header.frame_id = "map";
+	    cloud.header.stamp = now();
+	    sensor_msgs::PointCloud2Modifier modifier(cloud);
+	    modifier.setPointCloud2Fields(
+	        16,
+	        "x", 1, sensor_msgs::msg::PointField::FLOAT32,
+	        "y", 1, sensor_msgs::msg::PointField::FLOAT32,
+	        "z", 1, sensor_msgs::msg::PointField::FLOAT32,
+	        "hpl", 1, sensor_msgs::msg::PointField::FLOAT32,
+	        "vpl", 1, sensor_msgs::msg::PointField::FLOAT32,
+	        "hal", 1, sensor_msgs::msg::PointField::FLOAT32,
+	        "val", 1, sensor_msgs::msg::PointField::FLOAT32,
+	        "im_h", 1, sensor_msgs::msg::PointField::FLOAT32,
+	        "im_v", 1, sensor_msgs::msg::PointField::FLOAT32,
+	        "im_min", 1, sensor_msgs::msg::PointField::FLOAT32,
+	        "cost", 1, sensor_msgs::msg::PointField::FLOAT32,
+	        "grad_x", 1, sensor_msgs::msg::PointField::FLOAT32,
+	        "grad_y", 1, sensor_msgs::msg::PointField::FLOAT32,
+	        "grad_z", 1, sensor_msgs::msg::PointField::FLOAT32,
+	        "risk_band", 1, sensor_msgs::msg::PointField::FLOAT32,
+	        "risk_band_code", 1, sensor_msgs::msg::PointField::FLOAT32);
+	    modifier.resize(samples.size());
+
+	    sensor_msgs::PointCloud2Iterator<float> x(cloud, "x");
+	    sensor_msgs::PointCloud2Iterator<float> y(cloud, "y");
+	    sensor_msgs::PointCloud2Iterator<float> z(cloud, "z");
+	    sensor_msgs::PointCloud2Iterator<float> hpl(cloud, "hpl");
+	    sensor_msgs::PointCloud2Iterator<float> vpl(cloud, "vpl");
+	    sensor_msgs::PointCloud2Iterator<float> hal(cloud, "hal");
+	    sensor_msgs::PointCloud2Iterator<float> val(cloud, "val");
+	    sensor_msgs::PointCloud2Iterator<float> im_h(cloud, "im_h");
+	    sensor_msgs::PointCloud2Iterator<float> im_v(cloud, "im_v");
+	    sensor_msgs::PointCloud2Iterator<float> im_min(cloud, "im_min");
+	    sensor_msgs::PointCloud2Iterator<float> cost(cloud, "cost");
+	    sensor_msgs::PointCloud2Iterator<float> grad_x(cloud, "grad_x");
+	    sensor_msgs::PointCloud2Iterator<float> grad_y(cloud, "grad_y");
+	    sensor_msgs::PointCloud2Iterator<float> grad_z(cloud, "grad_z");
+	    sensor_msgs::PointCloud2Iterator<float> risk_band(cloud, "risk_band");
+	    sensor_msgs::PointCloud2Iterator<float> risk_band_code(cloud, "risk_band_code");
+
+	    const auto finite_float = [](const double value) {
+	      return static_cast<float>(std::isfinite(value) ? value : 0.0);
+	    };
+	    for (const auto& sample : samples) {
+	      *x = finite_float(sample.position.x());
+	      *y = finite_float(sample.position.y());
+	      *z = finite_float(sample.position.z());
+	      *hpl = finite_float(sample.hpl);
+	      *vpl = finite_float(sample.vpl);
+	      *hal = finite_float(sample.hal);
+	      *val = finite_float(sample.val);
+	      *im_h = finite_float(sample.im_h);
+	      *im_v = finite_float(sample.im_v);
+	      *im_min = finite_float(sample.im_min);
+	      *cost = finite_float(sample.cost);
+	      *grad_x = 0.0f;
+	      *grad_y = 0.0f;
+	      *grad_z = 0.0f;
+	      *risk_band = static_cast<float>(sample.risk_band_code);
+	      *risk_band_code = static_cast<float>(sample.risk_band_code);
+	      ++x;
+	      ++y;
+	      ++z;
+	      ++hpl;
+	      ++vpl;
+	      ++hal;
+	      ++val;
+	      ++im_h;
+	      ++im_v;
+	      ++im_min;
+	      ++cost;
+	      ++grad_x;
+	      ++grad_y;
+	      ++grad_z;
+	      ++risk_band;
+	      ++risk_band_code;
+	    }
+	    integrity_front_cost_field_pub_->publish(cloud);
+	  }
+
+	  void publish_integrity_cost_field(const std::vector<Row>& rows) {
     if (!integrity_cost_field_pub_ || rows.empty()) {
       return;
     }
@@ -2785,11 +3037,17 @@ class Phase2PlannerIntegrityEvaluator : public rclcpp::Node {
   bool publish_markers_ = true;
   double pi_cost_gradient_step_m_ = 0.5;
   bool snapshot_anchor_current_integrity_ = true;
-  bool publish_integrity_cost_field_ = false;
-  bool publish_integrity_cost_grid_ = false;
-  bool planner_use_integrity_cost_ = false;
-  std::string integrity_cost_field_topic_ = "/iap/integrity_cost_field";
-  bool integrity_viz_use_fixed_anchor_ = false;
+	  bool publish_integrity_cost_field_ = false;
+	  bool publish_integrity_cost_grid_ = false;
+	  bool planner_use_integrity_cost_ = false;
+	  std::string integrity_cost_field_topic_ = "/iap/integrity_cost_field";
+	  bool publish_integrity_front_cost_field_ = false;
+	  std::string integrity_front_cost_field_topic_ = "/iap/integrity_front_cost_field";
+	  double integrity_front_cost_field_publish_hz_ = 2.0;
+	  double integrity_front_cost_field_resolution_m_ = 1.0;
+	  double integrity_front_cost_field_size_x_m_ = 50.0;
+	  double integrity_front_cost_field_size_y_m_ = 50.0;
+	  bool integrity_viz_use_fixed_anchor_ = false;
   Eigen::Vector3d integrity_viz_anchor_ = Eigen::Vector3d(0.0, 12.0, 8.0);
   std::string gnss_scenario_file_;
 
@@ -2866,8 +3124,10 @@ class Phase2PlannerIntegrityEvaluator : public rclcpp::Node {
   rclcpp::Subscription<sensor_msgs::msg::NavSatFix>::SharedPtr receiver_lla_sub_;
   rclcpp::Subscription<gnss_comm::msg::GnssIonosphereParameter>::SharedPtr iono_sub_;
   rclcpp::Publisher<visualization_msgs::msg::MarkerArray>::SharedPtr marker_pub_;
-  rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr
-      integrity_cost_field_pub_;
+	  rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr
+	      integrity_cost_field_pub_;
+	  rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr
+	      integrity_front_cost_field_pub_;
   rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr
       integrity_viz_cost_pub_;
   rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr
@@ -2883,8 +3143,9 @@ class Phase2PlannerIntegrityEvaluator : public rclcpp::Node {
   rclcpp::Publisher<visualization_msgs::msg::MarkerArray>::SharedPtr
       integrity_viz_label_pub_;
   rclcpp::TimerBase::SharedPtr open_timer_;
-  rclcpp::TimerBase::SharedPtr summary_timer_;
-  rclcpp::TimerBase::SharedPtr pl_grid_timer_;
+	  rclcpp::TimerBase::SharedPtr summary_timer_;
+	  rclcpp::TimerBase::SharedPtr pl_grid_timer_;
+	  rclcpp::TimerBase::SharedPtr integrity_front_cost_field_timer_;
   std::atomic_bool pl_grid_building_{false};
   std::mutex pl_grid_worker_mutex_;
   std::thread pl_grid_worker_;

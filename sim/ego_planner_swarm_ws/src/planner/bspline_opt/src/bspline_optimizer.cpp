@@ -26,11 +26,18 @@ namespace ego_planner
     node->declare_parameter("optimization/max_acc", -1.0);
 
     node->declare_parameter("optimization/order", 3);
-    node->declare_parameter("optimization/use_integrity_cost", false);
-    node->declare_parameter("optimization/lambda_integrity", 1.0e-5);
-    node->declare_parameter("optimization/integrity_cost_topic", std::string("/iap/integrity_cost_field"));
-    node->declare_parameter("optimization/integrity_debug_csv_path",
-                std::string("/home/dev/ws_iap/src/iap/log/latest/export/planner_integrity_cost_debug.csv"));
+	    node->declare_parameter("optimization/use_integrity_cost", false);
+	    node->declare_parameter("optimization/lambda_integrity", 1.0e-5);
+	    node->declare_parameter("optimization/integrity_cost_topic", std::string("/iap/integrity_cost_field"));
+	    node->declare_parameter("optimization/use_integrity_front_search", false);
+	    node->declare_parameter("optimization/use_integrity_global_search", false);
+	    node->declare_parameter("optimization/lambda_integrity_front", 2.0);
+	    node->declare_parameter("optimization/integrity_front_cost_topic", std::string("/iap/integrity_front_cost_field"));
+	    node->declare_parameter("optimization/integrity_front_nearest_radius_m", 1.5);
+	    node->declare_parameter("optimization/integrity_front_stale_timeout_s", 1.0);
+	    node->declare_parameter("optimization/integrity_front_cost_max", 10.0);
+	    node->declare_parameter("optimization/integrity_debug_csv_path",
+	                std::string("/home/dev/ws_iap/src/iap/log/latest/export/planner_integrity_cost_debug.csv"));
     node->declare_parameter("optimization/integrity_field_stale_timeout_s", 0.5);
     node->declare_parameter("optimization/integrity_nearest_radius_m", 1.0);
     node->declare_parameter("optimization/integrity_cost_max", 1000.0);
@@ -48,19 +55,30 @@ namespace ego_planner
     node->get_parameter("optimization/max_acc", max_acc_);
 
     node->get_parameter("optimization/order", order_);
-    node->get_parameter("optimization/use_integrity_cost", use_integrity_cost_);
-    node->get_parameter("optimization/lambda_integrity", lambda_integrity_);
-    node->get_parameter("optimization/integrity_field_stale_timeout_s", integrity_field_stale_timeout_s_);
-    node->get_parameter("optimization/integrity_nearest_radius_m", integrity_nearest_radius_m_);
-    node->get_parameter("optimization/integrity_cost_max", integrity_cost_max_);
+	    node->get_parameter("optimization/use_integrity_cost", use_integrity_cost_);
+	    node->get_parameter("optimization/lambda_integrity", lambda_integrity_);
+	    node->get_parameter("optimization/use_integrity_front_search", use_integrity_front_search_);
+	    node->get_parameter("optimization/use_integrity_global_search", use_integrity_global_search_);
+	    node->get_parameter("optimization/lambda_integrity_front", lambda_integrity_front_);
+	    node->get_parameter("optimization/integrity_front_cost_topic", integrity_front_cost_topic_);
+	    node->get_parameter("optimization/integrity_front_nearest_radius_m", integrity_front_nearest_radius_m_);
+	    node->get_parameter("optimization/integrity_front_stale_timeout_s", integrity_front_stale_timeout_s_);
+	    node->get_parameter("optimization/integrity_front_cost_max", integrity_front_cost_max_);
+	    node->get_parameter("optimization/integrity_field_stale_timeout_s", integrity_field_stale_timeout_s_);
+	    node->get_parameter("optimization/integrity_nearest_radius_m", integrity_nearest_radius_m_);
+	    node->get_parameter("optimization/integrity_cost_max", integrity_cost_max_);
     node->get_parameter("optimization/integrity_grad_norm_max", integrity_grad_norm_max_);
     node->get_parameter("optimization/integrity_min_samples", integrity_min_samples_);
     lambda_integrity_ = std::max(0.0, lambda_integrity_);
     integrity_field_stale_timeout_s_ = std::max(0.0, integrity_field_stale_timeout_s_);
-    integrity_nearest_radius_m_ = std::max(0.0, integrity_nearest_radius_m_);
-    integrity_cost_max_ = std::max(0.0, integrity_cost_max_);
-    integrity_grad_norm_max_ = std::max(0.0, integrity_grad_norm_max_);
-    integrity_min_samples_ = std::max(1, integrity_min_samples_);
+	    integrity_nearest_radius_m_ = std::max(0.0, integrity_nearest_radius_m_);
+	    integrity_cost_max_ = std::max(0.0, integrity_cost_max_);
+	    integrity_grad_norm_max_ = std::max(0.0, integrity_grad_norm_max_);
+	    integrity_min_samples_ = std::max(1, integrity_min_samples_);
+	    lambda_integrity_front_ = std::max(0.0, lambda_integrity_front_);
+	    integrity_front_nearest_radius_m_ = std::max(0.0, integrity_front_nearest_radius_m_);
+	    integrity_front_stale_timeout_s_ = std::max(0.0, integrity_front_stale_timeout_s_);
+	    integrity_front_cost_max_ = std::max(0.0, integrity_front_cost_max_);
 
     std::string integrity_cost_topic;
     node->get_parameter("optimization/integrity_cost_topic", integrity_cost_topic);
@@ -74,14 +92,28 @@ namespace ego_planner
           {
             onIntegrityCostField(msg);
           });
-      RCLCPP_INFO(node->get_logger(), "EGO integrity cost enabled; topic=%s lambda=%.6g",
-                  integrity_cost_topic.c_str(), lambda_integrity_);
-    }
-    openIntegrityDebugCsv();
-  }
+	      RCLCPP_INFO(node->get_logger(), "EGO integrity cost enabled; topic=%s lambda=%.6g",
+	                  integrity_cost_topic.c_str(), lambda_integrity_);
+	    }
+	    if (use_integrity_front_search_ || use_integrity_global_search_)
+	    {
+	      front_integrity_cost_sub_ = node->create_subscription<sensor_msgs::msg::PointCloud2>(
+	          integrity_front_cost_topic_,
+	          rclcpp::QoS(1).best_effort(),
+	          [this](const sensor_msgs::msg::PointCloud2::ConstSharedPtr msg)
+	          {
+	            onFrontIntegrityCostField(msg);
+	          });
+	      RCLCPP_INFO(node->get_logger(),
+	                  "EGO front integrity search enabled; topic=%s lambda=%.6g radius=%.3f stale=%.3f",
+	                  integrity_front_cost_topic_.c_str(), lambda_integrity_front_,
+	                  integrity_front_nearest_radius_m_, integrity_front_stale_timeout_s_);
+	    }
+	    openIntegrityDebugCsv();
+	  }
 
-  void BsplineOptimizer::onIntegrityCostField(const sensor_msgs::msg::PointCloud2::ConstSharedPtr msg)
-  {
+	  void BsplineOptimizer::onIntegrityCostField(const sensor_msgs::msg::PointCloud2::ConstSharedPtr msg)
+	  {
     std::vector<IntegrityCostSample> samples;
     try
     {
@@ -116,11 +148,174 @@ namespace ego_planner
 
     std::lock_guard<std::mutex> lock(integrity_mutex_);
     integrity_samples_ = std::move(samples);
-    integrity_field_stamp_s_ = rclcpp::Time(msg->header.stamp).seconds();
-  }
+	    integrity_field_stamp_s_ = rclcpp::Time(msg->header.stamp).seconds();
+	  }
 
-  void BsplineOptimizer::warnIntegrityCostThrottled(const std::string &message)
-  {
+	  double BsplineOptimizer::normalizedFrontIntegrityCost(double hpl, double vpl, double hal, double val)
+	  {
+	    if (!std::isfinite(hpl) || !std::isfinite(vpl) || !std::isfinite(hal) ||
+	        !std::isfinite(val) || hal <= 1.0e-6 || val <= 1.0e-6)
+	    {
+	      return 0.0;
+	    }
+
+	    const double risk_ratio = std::max(hpl / hal, vpl / val);
+	    if (!std::isfinite(risk_ratio) || risk_ratio <= 0.7)
+	    {
+	      return 0.0;
+	    }
+	    if (risk_ratio <= 1.0)
+	    {
+	      const double t = (risk_ratio - 0.7) / 0.3;
+	      return std::clamp(t * t, 0.0, 10.0);
+	    }
+	    const double over = risk_ratio - 1.0;
+	    return std::clamp(1.0 + over * over, 0.0, 10.0);
+	  }
+
+	  long long BsplineOptimizer::frontIntegrityBinKey(int ix, int iy, int iz)
+	  {
+	    return static_cast<long long>(ix) * 73856093LL ^
+	           static_cast<long long>(iy) * 19349663LL ^
+	           static_cast<long long>(iz) * 83492791LL;
+	  }
+
+	  void BsplineOptimizer::onFrontIntegrityCostField(const sensor_msgs::msg::PointCloud2::ConstSharedPtr msg)
+	  {
+	    std::vector<FrontIntegrityCostSample> samples;
+	    try
+	    {
+	      sensor_msgs::PointCloud2ConstIterator<float> x(*msg, "x");
+	      sensor_msgs::PointCloud2ConstIterator<float> y(*msg, "y");
+	      sensor_msgs::PointCloud2ConstIterator<float> z(*msg, "z");
+	      sensor_msgs::PointCloud2ConstIterator<float> hpl(*msg, "hpl");
+	      sensor_msgs::PointCloud2ConstIterator<float> vpl(*msg, "vpl");
+	      sensor_msgs::PointCloud2ConstIterator<float> hal(*msg, "hal");
+	      sensor_msgs::PointCloud2ConstIterator<float> val(*msg, "val");
+	      for (; x != x.end(); ++x, ++y, ++z, ++hpl, ++vpl, ++hal, ++val)
+	      {
+	        FrontIntegrityCostSample sample;
+	        sample.position = Eigen::Vector3d(*x, *y, *z);
+	        sample.hpl = *hpl;
+	        sample.vpl = *vpl;
+	        sample.hal = *hal;
+	        sample.val = *val;
+	        if (!sample.position.allFinite() || !std::isfinite(sample.hpl) ||
+	            !std::isfinite(sample.vpl) || !std::isfinite(sample.hal) ||
+	            !std::isfinite(sample.val) || sample.hal <= 1.0e-6 || sample.val <= 1.0e-6)
+	        {
+	          continue;
+	        }
+	        samples.push_back(sample);
+	      }
+	    }
+	    catch (const std::exception &e)
+	    {
+	      warnIntegrityCostThrottled(std::string("invalid front integrity cost field: ") + e.what());
+	      return;
+	    }
+
+	    const double bin_size = std::max(0.1, integrity_front_nearest_radius_m_);
+	    std::unordered_map<long long, std::vector<int>> bins;
+	    bins.reserve(samples.size());
+	    for (int i = 0; i < static_cast<int>(samples.size()); ++i)
+	    {
+	      const Eigen::Vector3i bin = (samples[i].position / bin_size).array().floor().cast<int>();
+	      bins[frontIntegrityBinKey(bin.x(), bin.y(), bin.z())].push_back(i);
+	    }
+
+	    std::lock_guard<std::mutex> lock(front_integrity_mutex_);
+	    front_integrity_samples_ = std::move(samples);
+	    front_integrity_bins_ = std::move(bins);
+	    front_integrity_bin_size_ = bin_size;
+	    front_integrity_field_stamp_s_ = rclcpp::Time(msg->header.stamp).seconds();
+	  }
+
+	  bool BsplineOptimizer::queryFrontIntegrityCost(const Eigen::Vector3d &pos, double *cost) const
+	  {
+	    if (cost)
+	    {
+	      *cost = 0.0;
+	    }
+	    if (!cost || (!use_integrity_front_search_ && !use_integrity_global_search_) || !pos.allFinite())
+	    {
+	      return false;
+	    }
+
+	    const auto node = node_.lock();
+	    const double now_s = node ? node->now().seconds() : std::numeric_limits<double>::quiet_NaN();
+
+	    const double max_dist2 = integrity_front_nearest_radius_m_ * integrity_front_nearest_radius_m_;
+	    int best_idx = -1;
+	    double best_dist2 = max_dist2;
+	    {
+	      std::lock_guard<std::mutex> lock(front_integrity_mutex_);
+	      if (front_integrity_samples_.empty() || !std::isfinite(front_integrity_field_stamp_s_) ||
+	          !std::isfinite(now_s) || now_s - front_integrity_field_stamp_s_ > integrity_front_stale_timeout_s_)
+	      {
+	        return false;
+	      }
+	      const double bin_size = std::max(0.1, front_integrity_bin_size_);
+	      const int bin_radius = std::max(1, static_cast<int>(std::ceil(integrity_front_nearest_radius_m_ / bin_size)));
+	      const Eigen::Vector3i center_bin = (pos / bin_size).array().floor().cast<int>();
+	      for (int dx = -bin_radius; dx <= bin_radius; ++dx)
+	      {
+	        for (int dy = -bin_radius; dy <= bin_radius; ++dy)
+	        {
+	          for (int dz = -bin_radius; dz <= bin_radius; ++dz)
+	          {
+	            const auto it = front_integrity_bins_.find(frontIntegrityBinKey(center_bin.x() + dx,
+	                                                                            center_bin.y() + dy,
+	                                                                            center_bin.z() + dz));
+	            if (it == front_integrity_bins_.end())
+	            {
+	              continue;
+	            }
+	            for (const int i : it->second)
+	            {
+	              if (i < 0 || i >= static_cast<int>(front_integrity_samples_.size()))
+	              {
+	                continue;
+	              }
+	              const double dist2 = (front_integrity_samples_[i].position - pos).squaredNorm();
+	              if (std::isfinite(dist2) && dist2 <= best_dist2)
+	              {
+	                best_dist2 = dist2;
+	                best_idx = i;
+	              }
+	            }
+	          }
+	        }
+	      }
+	      if (best_idx < 0)
+	      {
+	        return false;
+	      }
+
+	      const auto &sample = front_integrity_samples_[best_idx];
+	      *cost = std::min(normalizedFrontIntegrityCost(sample.hpl, sample.vpl, sample.hal, sample.val),
+	                       integrity_front_cost_max_);
+	    }
+	    return std::isfinite(*cost);
+	  }
+
+	  void BsplineOptimizer::attachAStarIntegrityCost()
+	  {
+	    if (!a_star_)
+	    {
+	      return;
+	    }
+	    a_star_->setIntegrityCostCallback(
+	        [this](const Eigen::Vector3d &pos, double *cost)
+	        {
+	          return this->queryFrontIntegrityCost(pos, cost);
+	        });
+	    a_star_->setIntegrityCostParams(use_integrity_front_search_, lambda_integrity_front_,
+	                                    integrity_front_cost_max_);
+	  }
+
+	  void BsplineOptimizer::warnIntegrityCostThrottled(const std::string &message)
+	  {
     const auto node = node_.lock();
     if (!node)
     {
