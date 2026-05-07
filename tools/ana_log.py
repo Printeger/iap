@@ -4548,6 +4548,7 @@ def load_phase2_compare_bundle(run_dir: Path, match_tolerance_s: float) -> dict[
         "summary": phase2_summary,
         "analysis": phase2_analysis,
         "planner_debug_rows": rows_by_name.get("planner_integrity_cost_debug", []),
+        "phase2_rows": rows_by_name.get("phase2_planner_integrity", []),
     }
 
 
@@ -4652,6 +4653,211 @@ def generate_phase2_planner_gated_compare_svg(
         for col_idx, value in enumerate(row):
             body.append(svg_text(table_x + col_idx * 150, table_y + row_idx * 28, value, 12, "#374151"))
     body.append(svg_text(700, 620, "The paired charts are driven by explicit compare-run inputs and do not change the default single-run report path.", 12, "#4b5563"))
+    write_svg(path, width, height, body)
+
+
+def demo11_crossing_y(
+    points: list[tuple[float, float]],
+    crossing_x: float = 8.0,
+    x_window: float = 0.75,
+) -> float | None:
+    if not points:
+        return None
+    near = [y for x, y in points if abs(x - crossing_x) <= x_window]
+    if near:
+        return float(median(near))
+    closest = min(points, key=lambda item: abs(item[0] - crossing_x))
+    return float(closest[1])
+
+
+def demo11_mean_phase2_value(rows: list[dict[str, str]], keys: list[str]) -> float | None:
+    values: list[float] = []
+    for row in rows:
+        value = phase2_first_numeric(row, keys, True)
+        if value is not None:
+            values.append(value)
+    return phase2_mean(values)
+
+
+def demo11_risk_histogram(rows: list[dict[str, str]]) -> dict[str, int]:
+    counts: Counter[str] = Counter()
+    for row in rows:
+        counts[row.get("pi_risk_band") or row.get("risk_state_pred") or "UNKNOWN"] += 1
+    return dict(counts)
+
+
+def analyze_demo11_integrity_corridor_compare(
+    base_bundle: dict[str, Any],
+    compare_bundle: dict[str, Any],
+) -> dict[str, Any]:
+    base_xy = phase2_xy_path_points(base_bundle.get("analysis", {}))
+    compare_xy = phase2_xy_path_points(compare_bundle.get("analysis", {}))
+    base_crossing_y = demo11_crossing_y(base_xy)
+    compare_crossing_y = demo11_crossing_y(compare_xy)
+    separation = (
+        abs(compare_crossing_y - base_crossing_y)
+        if base_crossing_y is not None and compare_crossing_y is not None
+        else None
+    )
+    base_rows = base_bundle.get("phase2_rows", [])
+    compare_rows = compare_bundle.get("phase2_rows", [])
+    compare_debug = compare_bundle.get("planner_debug_rows", [])
+    used_rows = sum(
+        1
+        for row in compare_debug
+        if (to_float(row.get("n_integrity_samples_used")) or 0.0) > 0.0
+    )
+    debug_ratio = used_rows / len(compare_debug) if compare_debug else 0.0
+    base_mean_cost = demo11_mean_phase2_value(base_rows, ["pi_cost_total"])
+    compare_mean_cost = demo11_mean_phase2_value(compare_rows, ["pi_cost_total"])
+    checks = {
+        "off_uses_door_a_y_between_minus_1_and_1": (
+            base_crossing_y is not None and -1.0 <= base_crossing_y <= 1.0
+        ),
+        "on_uses_door_b_y_between_2_and_4": (
+            compare_crossing_y is not None and 2.0 <= compare_crossing_y <= 4.0
+        ),
+        "lateral_separation_ge_1_5m": separation is not None and separation >= 1.5,
+        "on_mean_pi_cost_lt_off": (
+            base_mean_cost is not None
+            and compare_mean_cost is not None
+            and compare_mean_cost < base_mean_cost
+        ),
+        "on_integrity_samples_used_ratio_ge_0_5": debug_ratio >= 0.5,
+    }
+    return {
+        "available": bool(base_xy and compare_xy),
+        "off_crossing_y": base_crossing_y,
+        "on_crossing_y": compare_crossing_y,
+        "crossing_lateral_separation_m": separation,
+        "off_path_length_m": phase2_path_length(base_xy),
+        "on_path_length_m": phase2_path_length(compare_xy),
+        "off_mean_pi_cost": base_mean_cost,
+        "on_mean_pi_cost": compare_mean_cost,
+        "off_max_pi_cost": max(numeric_values(base_rows, "pi_cost_total"), default=None),
+        "on_max_pi_cost": max(numeric_values(compare_rows, "pi_cost_total"), default=None),
+        "off_mean_im_margin": demo11_mean_phase2_value(base_rows, ["IM_H_pred", "IM_pred"]),
+        "on_mean_im_margin": demo11_mean_phase2_value(compare_rows, ["IM_H_pred", "IM_pred"]),
+        "off_risk_histogram": demo11_risk_histogram(base_rows),
+        "on_risk_histogram": demo11_risk_histogram(compare_rows),
+        "on_planner_debug_rows": len(compare_debug),
+        "on_integrity_samples_used_rows": used_rows,
+        "on_integrity_samples_used_ratio": debug_ratio,
+        "checks": checks,
+        "passed": bool(checks) and all(checks.values()),
+    }
+
+
+def generate_demo11_integrity_corridor_compare_svg(
+    base_bundle: dict[str, Any],
+    compare_bundle: dict[str, Any],
+    analysis: dict[str, Any],
+    path: Path,
+) -> None:
+    width, height = 1280, 980
+    body: list[str] = [svg_text(40, 34, "Demo11 Integrity-Corridor Comparison", 18, "#111827")]
+    base_xy = phase2_xy_path_points(base_bundle.get("analysis", {}))
+    compare_xy = phase2_xy_path_points(compare_bundle.get("analysis", {}))
+    base_rows = base_bundle.get("phase2_rows", [])
+    compare_rows = compare_bundle.get("phase2_rows", [])
+    if not base_xy or not compare_xy:
+        body.append(svg_text(40, 80, "One or both runs do not contain enough path samples.", 14, "#991b1b"))
+        write_svg(path, width, height, body)
+        return
+
+    xy_samples = []
+    for row in compare_rows[::max(1, len(compare_rows) // 1200)]:
+        x = to_float(row.get("x"))
+        y = to_float(row.get("y"))
+        cost = to_float(row.get("pi_cost_total"))
+        if x is not None and y is not None and cost is not None:
+            xy_samples.append((x, y, cost))
+
+    xs = [x for x, _y in base_xy + compare_xy] + [x for x, _y, _c in xy_samples]
+    ys = [y for _x, y in base_xy + compare_xy] + [y for _x, y, _c in xy_samples]
+    x0, x1 = float_range(xs)
+    y0, y1 = float_range(ys)
+    px, py, pw, ph = 70.0, 80.0, 560.0, 330.0
+    body.extend(svg_axes(px, py, pw, ph, "XY path and ON PI cost samples", "x [m]", "y [m]"))
+    wall_segments = [
+        (7.75, 8.25, -5.0, -1.0),
+        (7.75, 8.25, 1.0, 2.0),
+        (7.75, 8.25, 4.0, 5.0),
+    ]
+    for xa, xb, ya, yb in wall_segments:
+        x_left = map_linear(xa, x0, x1, px, px + pw)
+        x_right = map_linear(xb, x0, x1, px, px + pw)
+        y_top = map_linear(yb, y0, y1, py + ph, py)
+        y_bottom = map_linear(ya, y0, y1, py + ph, py)
+        body.append(
+            f'<rect x="{min(x_left, x_right):.2f}" y="{min(y_top, y_bottom):.2f}" '
+            f'width="{abs(x_right - x_left):.2f}" height="{abs(y_bottom - y_top):.2f}" '
+            f'fill="#111827" fill-opacity="0.32" />'
+        )
+    body.append(svg_text(map_linear(8.0, x0, x1, px, px + pw) + 8, map_linear(0.0, y0, y1, py + ph, py), "door A high cost", 10, "#991b1b"))
+    body.append(svg_text(map_linear(8.0, x0, x1, px, px + pw) + 8, map_linear(3.0, y0, y1, py + ph, py), "door B low cost", 10, "#166534"))
+    costs = [c for _x, _y, c in xy_samples]
+    c0, c1 = float_range(costs)
+    for x, y, cost in xy_samples:
+        alpha = 0.15 + 0.65 * ((cost - c0) / max(c1 - c0, 1.0e-9))
+        color = "#dc2626" if alpha > 0.55 else "#f59e0b"
+        body.append(
+            f'<circle cx="{map_linear(x, x0, x1, px, px + pw):.2f}" '
+            f'cy="{map_linear(y, y0, y1, py + ph, py):.2f}" r="2.4" '
+            f'fill="{color}" fill-opacity="{alpha:.3f}" />'
+        )
+    body.append(svg_polyline([(map_linear(x, x0, x1, px, px + pw), map_linear(y, y0, y1, py + ph, py)) for x, y in base_xy[::max(1, len(base_xy) // 900)]], "#6b7280", 2.2, 0.78))
+    body.append(svg_polyline([(map_linear(x, x0, x1, px, px + pw), map_linear(y, y0, y1, py + ph, py)) for x, y in compare_xy[::max(1, len(compare_xy) // 900)]], "#2563eb", 2.4, 0.90))
+    body.extend(svg_legend_group(px + pw - 170, py + 20, [
+        ("OFF path", "#6b7280"),
+        ("ON path", "#2563eb"),
+        ("ON PI cost", "#dc2626"),
+    ]))
+
+    yx_py = 460.0
+    body.extend(svg_axes(70.0, yx_py, 560.0, 180.0, "Channel choice y(x)", "x [m]", "y [m]"))
+    body.append(svg_polyline([(map_linear(x, x0, x1, 70.0, 630.0), map_linear(y, y0, y1, yx_py + 180.0, yx_py)) for x, y in base_xy], "#6b7280", 2.0, 0.78))
+    body.append(svg_polyline([(map_linear(x, x0, x1, 70.0, 630.0), map_linear(y, y0, y1, yx_py + 180.0, yx_py)) for x, y in compare_xy], "#2563eb", 2.0, 0.90))
+    body.append(svg_text(82, yx_py + 168, f"x=8 crossing y: OFF={phase2_display_number(analysis.get('off_crossing_y'))}, ON={phase2_display_number(analysis.get('on_crossing_y'))}", 12, "#111827"))
+
+    def add_debug_timeline(panel_x: float, panel_y: float, panel_w: float, panel_h: float, key: str, title: str) -> None:
+        base_points = phase2_debug_timeline_points(base_bundle.get("planner_debug_rows", []), key)
+        compare_points = phase2_debug_timeline_points(compare_bundle.get("planner_debug_rows", []), key)
+        values = [v for _t, v in base_points + compare_points]
+        y_min, y_max = float_range(values)
+        body.extend(svg_axes(panel_x, panel_y, panel_w, panel_h, title, "run time", key))
+        if base_points:
+            t0, t1 = phase2_time_bounds(base_bundle.get("planner_debug_rows", []), "stamp")
+            body.append(svg_polyline([(map_linear(t, t0, t1, panel_x, panel_x + panel_w), map_linear(v, y_min, y_max, panel_y + panel_h, panel_y)) for t, v in base_points], "#6b7280", 1.8, 0.76))
+        if compare_points:
+            t0, t1 = phase2_time_bounds(compare_bundle.get("planner_debug_rows", []), "stamp")
+            body.append(svg_polyline([(map_linear(t, t0, t1, panel_x, panel_x + panel_w), map_linear(v, y_min, y_max, panel_y + panel_h, panel_y)) for t, v in compare_points], "#2563eb", 1.8, 0.88))
+
+    add_debug_timeline(690.0, 80.0, 520.0, 160.0, "cost_integrity_weighted", "Weighted integrity cost")
+    add_debug_timeline(690.0, 280.0, 520.0, 150.0, "n_integrity_samples_used", "Integrity samples used")
+    add_debug_timeline(690.0, 470.0, 520.0, 150.0, "field_age_s", "Integrity field age")
+
+    rows = [
+        ["passed", str(bool(analysis.get("passed"))).lower()],
+        ["path_length_m OFF/ON", f"{phase2_display_number(analysis.get('off_path_length_m'))} / {phase2_display_number(analysis.get('on_path_length_m'))}"],
+        ["crossing_y OFF/ON", f"{phase2_display_number(analysis.get('off_crossing_y'))} / {phase2_display_number(analysis.get('on_crossing_y'))}"],
+        ["lateral_separation_m", phase2_display_number(analysis.get("crossing_lateral_separation_m"))],
+        ["mean_pi_cost OFF/ON", f"{phase2_display_number(analysis.get('off_mean_pi_cost'))} / {phase2_display_number(analysis.get('on_mean_pi_cost'))}"],
+        ["max_pi_cost OFF/ON", f"{phase2_display_number(analysis.get('off_max_pi_cost'))} / {phase2_display_number(analysis.get('on_max_pi_cost'))}"],
+        ["mean_IM_margin OFF/ON", f"{phase2_display_number(analysis.get('off_mean_im_margin'))} / {phase2_display_number(analysis.get('on_mean_im_margin'))}"],
+        ["ON sample-use ratio", phase2_display_number(analysis.get("on_integrity_samples_used_ratio"))],
+        ["OFF risk histogram", analysis.get("off_risk_histogram", {})],
+        ["ON risk histogram", analysis.get("on_risk_histogram", {})],
+    ]
+    table_x, table_y = 70.0, 700.0
+    body.append(svg_text(table_x, table_y - 24, "Demo11 Success Criteria Summary", 15, "#111827"))
+    for idx, row in enumerate(rows):
+        body.append(svg_text(table_x, table_y + idx * 24, row[0], 12, "#111827"))
+        body.append(svg_text(table_x + 270, table_y + idx * 24, row[1], 12, "#374151"))
+    checks = analysis.get("checks", {})
+    body.append(svg_text(690.0, 700.0, "Checks", 15, "#111827"))
+    for idx, (name, passed) in enumerate(checks.items()):
+        body.append(svg_text(690.0, 730.0 + idx * 24, f"{name}: {str(bool(passed)).lower()}", 12, "#166534" if passed else "#991b1b"))
     write_svg(path, width, height, body)
 
 
@@ -5306,23 +5512,33 @@ def render_report(
     if not an.get("available"):
         lines.append("*PL grid consistency data not available for this run.*")
     else:
-        ratio_str = f"{an['consistent_ratio']:.4f}" if an["consistent_ratio"] is not None else "n/a"
+        def stat_value(block_name: str, field: str) -> str:
+            block = an.get(block_name, {})
+            if not isinstance(block, dict):
+                return "n/a"
+            return phase2_display_number(block.get(field), 4)
+
+        ratio = an.get("consistent_ratio")
+        if ratio is None:
+            exact_count = to_float(an.get("exact_match_count"))
+            row_count = to_float(an.get("row_count"))
+            ratio = exact_count / row_count if exact_count is not None and row_count else None
+        ratio_str = phase2_display_number(ratio, 4)
         lines.append(md_table(
             ["Metric", "Value"],
             [
-                ["rows", an["row_count"]],
-                ["span_s", f"{an['span_s']:.1f}"],
-                ["consistent", an["consistent_count"]],
-                ["inconsistent", an["inconsistent_count"]],
+                ["rows", an.get("row_count", "n/a")],
+                ["span_s", phase2_display_number(an.get("span_s"), 1)],
+                ["exact match", an.get("exact_match_count", "n/a")],
                 ["consistency ratio", ratio_str],
-                ["delta_HPL mean (m)", f"{an['delta_hpl']['mean']:.4f}"],
-                ["delta_HPL max (m)", f"{an['delta_hpl']['max']:.4f}"],
-                ["delta_VPL mean (m)", f"{an['delta_vpl']['mean']:.4f}"],
-                ["delta_VPL max (m)", f"{an['delta_vpl']['max']:.4f}"],
-                ["HPL mean (m)", f"{an['hpl']['mean']:.4f}"],
-                ["HPL max (m)", f"{an['hpl']['max']:.4f}"],
-                ["VPL mean (m)", f"{an['vpl']['mean']:.4f}"],
-                ["VPL max (m)", f"{an['vpl']['max']:.4f}"],
+                ["abs_err_HPL mean (m)", stat_value("abs_err_h", "mean")],
+                ["abs_err_HPL max (m)", stat_value("abs_err_h", "max")],
+                ["abs_err_VPL mean (m)", stat_value("abs_err_v", "mean")],
+                ["abs_err_VPL max (m)", stat_value("abs_err_v", "max")],
+                ["HPL direct/grid mean (m)", f"{stat_value('hpl_direct', 'mean')} / {stat_value('hpl_grid', 'mean')}"],
+                ["HPL direct/grid max (m)", f"{stat_value('hpl_direct', 'max')} / {stat_value('hpl_grid', 'max')}"],
+                ["VPL direct/grid mean (m)", f"{stat_value('vpl_direct', 'mean')} / {stat_value('vpl_grid', 'mean')}"],
+                ["VPL direct/grid max (m)", f"{stat_value('vpl_direct', 'max')} / {stat_value('vpl_grid', 'max')}"],
             ],
         ))
     lines.append("")
@@ -5927,11 +6143,24 @@ def main() -> int:
             "analysis": analyses["phase2_integrity"],
             "summary": phase2_online_summary,
             "planner_debug_rows": rows_by_name.get("planner_integrity_cost_debug", []),
+            "phase2_rows": rows_by_name.get("phase2_planner_integrity", []),
         }
+        demo11_compare_analysis = analyze_demo11_integrity_corridor_compare(
+            base_bundle, compare_bundle
+        )
+        analyses["demo11_integrity_corridor_compare"] = demo11_compare_analysis
         if not args.no_plots:
             compare_compare_path = figs_dir / "phase2_planner_gated_compare.svg"
             generate_phase2_planner_gated_compare_svg(base_bundle, compare_bundle, compare_compare_path)
             generated_plots.append(str(compare_compare_path))
+            demo11_compare_path = figs_dir / "demo11_integrity_corridor_compare.svg"
+            generate_demo11_integrity_corridor_compare_svg(
+                base_bundle,
+                compare_bundle,
+                demo11_compare_analysis,
+                demo11_compare_path,
+            )
+            generated_plots.append(str(demo11_compare_path))
     generated_plots.extend(
         write_phase2_truth_pi_compare_outputs(
             analyses["phase2_integrity"],

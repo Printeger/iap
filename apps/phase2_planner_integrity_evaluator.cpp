@@ -36,6 +36,7 @@
 #include <gnss_comm/msg/gnss_meas_msg.hpp>
 #include <iap/map/local_occupancy.hpp>
 #include <iap/msg/integrity_report.hpp>
+#include <iap/planner/alert_limit_model.hpp>
 #include <iap/planner/future_pl_field_predictor.hpp>
 #include <iap/planner/integrity_snapshot.hpp>
 #include <iap/planner/pi_cost_adapter.hpp>
@@ -72,9 +73,12 @@ const std::vector<std::string> kCsvFields = {
     "dist_to_obstacle",
     "dist_to_vertical_lower",
     "dist_to_vertical_upper",
+    "collision_clearance_h_m",
+    "collision_clearance_v_m",
     "AL_H_pred",
     "AL_V_pred",
     "AL_pred",
+    "AL_source",
     "current_HPL",
     "current_VPL",
     "current_PL",
@@ -521,6 +525,8 @@ class Phase2PlannerIntegrityEvaluator : public rclcpp::Node {
     declare_parameter<int>("max_samples_per_traj", 30);
     declare_parameter<std::string>("pl_model", "constant_current");
     declare_parameter<std::string>("al_model", "cloud_clearance");
+    declare_parameter<double>("hal_m", 30.0);
+    declare_parameter<double>("val_m", 60.0);
     declare_parameter<double>("fallback_pl_m", 20.0);
     declare_parameter<bool>("use_pl_grid", false);
     declare_parameter<double>("pl_grid_resolution_m", 1.0);
@@ -557,6 +563,7 @@ class Phase2PlannerIntegrityEvaluator : public rclcpp::Node {
     declare_parameter<double>("pi_cost_gradient_step_m", 0.5);
     declare_parameter<bool>("snapshot_anchor_current_integrity", true);
     declare_parameter<bool>("publish_integrity_cost_field", false);
+    declare_parameter<bool>("publish_integrity_cost_grid", false);
     declare_parameter<bool>("planner_use_integrity_cost", false);
     declare_parameter<std::string>("integrity_cost_field_topic",
                                    "/iap/integrity_cost_field");
@@ -584,6 +591,8 @@ class Phase2PlannerIntegrityEvaluator : public rclcpp::Node {
     max_samples_ = get_parameter("max_samples_per_traj").as_int();
     pl_model_ = get_parameter("pl_model").as_string();
     al_model_ = get_parameter("al_model").as_string();
+    hal_m_ = get_parameter("hal_m").as_double();
+    val_m_ = get_parameter("val_m").as_double();
     fallback_pl_m_ = get_parameter("fallback_pl_m").as_double();
     use_pl_grid_ = get_parameter("use_pl_grid").as_bool();
     pl_grid_update_hz_ = get_parameter("pl_grid_update_hz").as_double();
@@ -652,6 +661,8 @@ class Phase2PlannerIntegrityEvaluator : public rclcpp::Node {
         get_parameter("snapshot_anchor_current_integrity").as_bool();
     publish_integrity_cost_field_ =
         get_parameter("publish_integrity_cost_field").as_bool();
+    publish_integrity_cost_grid_ =
+        get_parameter("publish_integrity_cost_grid").as_bool();
     planner_use_integrity_cost_ =
       get_parameter("planner_use_integrity_cost").as_bool();
     integrity_cost_field_topic_ =
@@ -751,6 +762,27 @@ class Phase2PlannerIntegrityEvaluator : public rclcpp::Node {
       integrity_cost_field_pub_ =
           create_publisher<sensor_msgs::msg::PointCloud2>(
               integrity_cost_field_topic_, rclcpp::QoS(1).best_effort());
+      integrity_viz_cost_pub_ =
+          create_publisher<sensor_msgs::msg::PointCloud2>(
+              "/iap/integrity_viz/cost_grid_rgb", rclcpp::QoS(1).best_effort());
+      integrity_viz_risk_pub_ =
+          create_publisher<sensor_msgs::msg::PointCloud2>(
+              "/iap/integrity_viz/risk_grid_rgb", rclcpp::QoS(1).best_effort());
+      integrity_viz_pl_pub_ =
+          create_publisher<sensor_msgs::msg::PointCloud2>(
+              "/iap/integrity_viz/pl_grid_rgb", rclcpp::QoS(1).best_effort());
+      integrity_viz_im_pub_ =
+          create_publisher<sensor_msgs::msg::PointCloud2>(
+              "/iap/integrity_viz/im_grid_rgb", rclcpp::QoS(1).best_effort());
+      integrity_viz_nvis_pub_ =
+          create_publisher<sensor_msgs::msg::PointCloud2>(
+              "/iap/integrity_viz/nvis_grid_rgb", rclcpp::QoS(1).best_effort());
+      integrity_viz_grad_pub_ =
+          create_publisher<visualization_msgs::msg::MarkerArray>(
+              "/iap/integrity_viz/grad_arrows", 10);
+      integrity_viz_label_pub_ =
+          create_publisher<visualization_msgs::msg::MarkerArray>(
+              "/iap/integrity_viz/sample_labels", 10);
     }
 
     open_timer_ = create_wall_timer(std::chrono::milliseconds(500), [this] {
@@ -1150,11 +1182,8 @@ class Phase2PlannerIntegrityEvaluator : public rclcpp::Node {
   }
 
   double nearest_obstacle_distance(const Eigen::Vector3d& pos) {
-    if (al_model_ != "cloud_clearance") {
-      return std::numeric_limits<double>::quiet_NaN();
-    }
     if (latest_cloud_points_.empty()) {
-      warn_once("map/cloud not available yet; AL_H_pred is NaN");
+      warn_once("map/cloud not available yet; clearance diagnostics are NaN");
       return std::numeric_limits<double>::quiet_NaN();
     }
     if (!pos.allFinite()) {
@@ -1167,31 +1196,24 @@ class Phase2PlannerIntegrityEvaluator : public rclcpp::Node {
     return std::sqrt(best);
   }
 
-  void al_values(const Eigen::Vector3d& pos,
-                 double* dist,
-                 double* lower,
-                 double* upper,
-                 double* al_h,
-                 double* al_v,
-                 double* al) {
-    *dist = nearest_obstacle_distance(pos);
-    if (is_finite(*dist)) {
-      const double clearance_h = *dist - drone_radius_ - safety_buffer_;
-      *al_h = gamma_h_ * std::max(clearance_h, 0.0);
-    } else {
-      *al_h = std::numeric_limits<double>::quiet_NaN();
-    }
+  iap::AlertLimitSample al_values(const Eigen::Vector3d& pos) {
+    const double dist = nearest_obstacle_distance(pos);
+    const double lower =
+        is_finite(pos.z()) ? pos.z() - z_min_
+                           : std::numeric_limits<double>::quiet_NaN();
+    const double upper =
+        is_finite(pos.z()) ? z_max_ - pos.z()
+                           : std::numeric_limits<double>::quiet_NaN();
 
-    *lower = is_finite(pos.z()) ? pos.z() - z_min_ : std::numeric_limits<double>::quiet_NaN();
-    *upper = is_finite(pos.z()) ? z_max_ - pos.z() : std::numeric_limits<double>::quiet_NaN();
-    if (is_finite(*lower) && is_finite(*upper)) {
-      *al_v = gamma_v_ * std::max(std::min(*lower, *upper), 0.0);
-    } else {
-      *al_v = std::numeric_limits<double>::quiet_NaN();
-    }
-    *al = is_finite(*al_h) && is_finite(*al_v)
-              ? std::min(*al_h, *al_v)
-              : std::numeric_limits<double>::quiet_NaN();
+    iap::AlertLimitModelParams params;
+    params.model = al_model_;
+    params.hal_m = hal_m_;
+    params.val_m = val_m_;
+    params.drone_radius_m = drone_radius_;
+    params.safety_buffer_m = safety_buffer_;
+    params.gamma_h = gamma_h_;
+    params.gamma_v = gamma_v_;
+    return iap::evaluate_alert_limit(params, dist, lower, upper);
   }
 
   PlFields pl_values(const Eigen::Vector3d& pos) {
@@ -1360,10 +1382,9 @@ class Phase2PlannerIntegrityEvaluator : public rclcpp::Node {
   }
 
   iap::PICostResult pi_cost_at(const Eigen::Vector3d& pos) {
-    double dist, lower, upper, al_h, al_v, al;
-    al_values(pos, &dist, &lower, &upper, &al_h, &al_v, &al);
+    const iap::AlertLimitSample al = al_values(pos);
     const PlFields pl = pl_values(pos);
-    return pi_cost_adapter_.evaluate(al_h, al_v, pl.hpl, pl.vpl);
+    return pi_cost_adapter_.evaluate(al.hal_m, al.val_m, pl.hpl, pl.vpl);
   }
 
   Eigen::Vector3d pi_cost_gradient_at(const Eigen::Vector3d& pos) {
@@ -1396,19 +1417,19 @@ class Phase2PlannerIntegrityEvaluator : public rclcpp::Node {
                       const Eigen::Vector3d& vel,
                       const Eigen::Vector3d& acc,
                       const double yaw) {
-    double dist, lower, upper, al_h, al_v, al;
-    al_values(pos, &dist, &lower, &upper, &al_h, &al_v, &al);
+    const iap::AlertLimitSample al = al_values(pos);
     const PlFields pl = pl_values(pos);
     const double current_pl = is_finite(current_hpl_) && is_finite(current_vpl_)
                                   ? std::max(current_hpl_, current_vpl_)
                                   : std::numeric_limits<double>::quiet_NaN();
     double im_h, im_v, im_axis_min, im_scalar, im;
     std::string state;
-    im_values(al_h, al_v, al, pl.hpl, pl.vpl, pl.pl, &im_h, &im_v,
+    im_values(al.hal_m, al.val_m, al.al_m, pl.hpl, pl.vpl, pl.pl, &im_h, &im_v,
               &im_axis_min, &im_scalar, &im, &state);
     const Eigen::Vector3d pi_grad = pi_cost_gradient_at(pos);
     const iap::PICostResult pi = pi_cost_adapter_.evaluate_with_gradient(
-        al_h, al_v, pl.hpl, pl.vpl, pi_grad.x(), pi_grad.y(), pi_grad.z());
+        al.hal_m, al.val_m, pl.hpl, pl.vpl, pi_grad.x(), pi_grad.y(),
+        pi_grad.z());
 
     Row row;
     row["stamp"] = fmt_num(stamp);
@@ -1426,12 +1447,15 @@ class Phase2PlannerIntegrityEvaluator : public rclcpp::Node {
     row["ay"] = fmt_num(acc.y());
     row["az"] = fmt_num(acc.z());
     row["yaw"] = fmt_num(yaw);
-    row["dist_to_obstacle"] = fmt_num(dist);
-    row["dist_to_vertical_lower"] = fmt_num(lower);
-    row["dist_to_vertical_upper"] = fmt_num(upper);
-    row["AL_H_pred"] = fmt_num(al_h);
-    row["AL_V_pred"] = fmt_num(al_v);
-    row["AL_pred"] = fmt_num(al);
+    row["dist_to_obstacle"] = fmt_num(al.dist_to_obstacle_m);
+    row["dist_to_vertical_lower"] = fmt_num(al.dist_to_vertical_lower_m);
+    row["dist_to_vertical_upper"] = fmt_num(al.dist_to_vertical_upper_m);
+    row["collision_clearance_h_m"] = fmt_num(al.collision_clearance_h_m);
+    row["collision_clearance_v_m"] = fmt_num(al.collision_clearance_v_m);
+    row["AL_H_pred"] = fmt_num(al.hal_m);
+    row["AL_V_pred"] = fmt_num(al.val_m);
+    row["AL_pred"] = fmt_num(al.al_m);
+    row["AL_source"] = al.source;
     row["current_HPL"] = fmt_num(current_hpl_);
     row["current_VPL"] = fmt_num(current_vpl_);
     row["current_PL"] = fmt_num(current_pl);
@@ -1697,13 +1721,7 @@ class Phase2PlannerIntegrityEvaluator : public rclcpp::Node {
     }
     std::lock_guard<std::mutex> lock(csv_mutex_);
 
-    double dist = std::numeric_limits<double>::quiet_NaN();
-    double lower = std::numeric_limits<double>::quiet_NaN();
-    double upper = std::numeric_limits<double>::quiet_NaN();
-    double al_h = std::numeric_limits<double>::quiet_NaN();
-    double al_v = std::numeric_limits<double>::quiet_NaN();
-    double al = std::numeric_limits<double>::quiet_NaN();
-    al_values(latest_odom_p_, &dist, &lower, &upper, &al_h, &al_v, &al);
+    const iap::AlertLimitSample al = al_values(latest_odom_p_);
     const PlFields actual_pl = pl_values(latest_odom_p_);
     const double tracking_error_to_plan =
         latest_plan_pose_valid_ ? (latest_odom_p_ - latest_plan_pose_).norm()
@@ -1716,16 +1734,16 @@ class Phase2PlannerIntegrityEvaluator : public rclcpp::Node {
     row["odom_z"] = fmt_num(latest_odom_p_.z());
     row["actual_HPL_pred"] = fmt_num(actual_pl.hpl);
     row["actual_VPL_pred"] = fmt_num(actual_pl.vpl);
-    row["actual_HAL"] = fmt_num(al_h);
-    row["actual_VAL"] = fmt_num(al_v);
-    row["actual_IM_H"] = fmt_num(is_finite(al_h) && is_finite(actual_pl.hpl)
-                                      ? al_h - actual_pl.hpl
+    row["actual_HAL"] = fmt_num(al.hal_m);
+    row["actual_VAL"] = fmt_num(al.val_m);
+    row["actual_IM_H"] = fmt_num(is_finite(al.hal_m) && is_finite(actual_pl.hpl)
+                                      ? al.hal_m - actual_pl.hpl
                                       : std::numeric_limits<double>::quiet_NaN());
-    row["actual_IM_V"] = fmt_num(is_finite(al_v) && is_finite(actual_pl.vpl)
-                                      ? al_v - actual_pl.vpl
+    row["actual_IM_V"] = fmt_num(is_finite(al.val_m) && is_finite(actual_pl.vpl)
+                                      ? al.val_m - actual_pl.vpl
                                       : std::numeric_limits<double>::quiet_NaN());
-    row["actual_IM_min"] = fmt_num(is_finite(al) && is_finite(actual_pl.pl)
-                                        ? al - actual_pl.pl
+    row["actual_IM_min"] = fmt_num(is_finite(al.al_m) && is_finite(actual_pl.pl)
+                                        ? al.al_m - actual_pl.pl
                                         : std::numeric_limits<double>::quiet_NaN());
     row["current_HPL"] = fmt_num(current.hpl);
     row["current_VPL"] = fmt_num(current.vpl);
@@ -1878,7 +1896,10 @@ class Phase2PlannerIntegrityEvaluator : public rclcpp::Node {
     }
     ++traj_count_;
     publish_markers(rows);
-    publish_integrity_cost_field(rows);
+    const std::vector<Row> field_rows =
+        build_integrity_cost_field_rows(rows, planner_now, msg.traj_id);
+    publish_integrity_cost_field(field_rows);
+    publish_integrity_viz(field_rows);
     write_summary();
   }
 
@@ -1966,6 +1987,8 @@ class Phase2PlannerIntegrityEvaluator : public rclcpp::Node {
     summary["map_source"] = map_source_;
     summary["pl_model"] = pl_model_;
     summary["al_model"] = al_model_;
+    summary["hal_m"] = hal_m_;
+    summary["val_m"] = val_m_;
     summary["sampling"] = {
         {"horizon_s", horizon_s_},
         {"dt_s", dt_s_},
@@ -1981,8 +2004,11 @@ class Phase2PlannerIntegrityEvaluator : public rclcpp::Node {
       {"gnss_scenario_file", gnss_scenario_file_},
       {"map_source", map_source_},
       {"phase2_al_model", al_model_},
+      {"phase2_hal_m", hal_m_},
+      {"phase2_val_m", val_m_},
       {"phase2_publish_integrity_cost_field",
        publish_integrity_cost_field_},
+      {"phase2_publish_integrity_cost_grid", publish_integrity_cost_grid_},
       {"phase2_fallback_pl_m", fallback_pl_m_},
       {"phase2_pl_grid_resolution_m",
        field_predictor_params_.grid_resolution_m},
@@ -2235,6 +2261,57 @@ class Phase2PlannerIntegrityEvaluator : public rclcpp::Node {
     marker_pub_->publish(arr);
   }
 
+  std::vector<Row> build_integrity_cost_field_rows(const std::vector<Row>& traj_rows,
+                                                   const double stamp,
+                                                   const int64_t traj_id) {
+    if (!publish_integrity_cost_grid_) {
+      return traj_rows;
+    }
+    Eigen::Vector3d center = Eigen::Vector3d::Zero();
+    int center_count = 0;
+    for (const auto& row : traj_rows) {
+      const auto x = finite_or_none(row.at("x"));
+      const auto y = finite_or_none(row.at("y"));
+      const auto z = finite_or_none(row.at("z"));
+      if (x && y && z) {
+        center += Eigen::Vector3d(*x, *y, *z);
+        ++center_count;
+      }
+    }
+    if (center_count > 0) {
+      center /= static_cast<double>(center_count);
+    } else {
+      center = latest_plan_pose_valid_ ? latest_plan_pose_ : latest_odom_p_;
+    }
+    if (!center.allFinite()) {
+      return traj_rows;
+    }
+
+    std::vector<Row> rows;
+    rows.reserve(traj_rows.size() + 2048);
+    const double res = std::max(0.1, field_predictor_params_.grid_resolution_m);
+    const double sx = std::max(res, field_predictor_params_.grid_size_x_m);
+    const double sy = std::max(res, field_predictor_params_.grid_size_y_m);
+    const int nx = std::max(1, static_cast<int>(std::floor(sx / res)) + 1);
+    const int ny = std::max(1, static_cast<int>(std::floor(sy / res)) + 1);
+    int field_idx = 0;
+    const Eigen::Vector3d nan =
+        Eigen::Vector3d::Constant(std::numeric_limits<double>::quiet_NaN());
+    const double z = std::clamp(center.z(), z_min_, z_max_);
+    for (int ix = 0; ix < nx; ++ix) {
+      const double x = center.x() - 0.5 * sx + std::min(ix * res, sx);
+      for (int iy = 0; iy < ny; ++iy) {
+        const double y = center.y() - 0.5 * sy + std::min(iy * res, sy);
+        rows.push_back(make_sample_row(
+            stamp, traj_id, -1 - field_idx++, 0.0, latest_odom_stamp_,
+            Eigen::Vector3d(x, y, z), nan, nan,
+            std::numeric_limits<double>::quiet_NaN()));
+      }
+    }
+    rows.insert(rows.end(), traj_rows.begin(), traj_rows.end());
+    return rows;
+  }
+
   void publish_integrity_cost_field(const std::vector<Row>& rows) {
     if (!integrity_cost_field_pub_ || rows.empty()) {
       return;
@@ -2319,6 +2396,235 @@ class Phase2PlannerIntegrityEvaluator : public rclcpp::Node {
     integrity_cost_field_pub_->publish(cloud);
   }
 
+  struct RgbColor {
+    uint8_t r = 0;
+    uint8_t g = 0;
+    uint8_t b = 0;
+  };
+
+  static RgbColor lerp_color(const RgbColor a, const RgbColor b, double t) {
+    t = std::clamp(t, 0.0, 1.0);
+    return RgbColor{
+        static_cast<uint8_t>(std::round(a.r + t * (b.r - a.r))),
+        static_cast<uint8_t>(std::round(a.g + t * (b.g - a.g))),
+        static_cast<uint8_t>(std::round(a.b + t * (b.b - a.b)))};
+  }
+
+  static RgbColor blue_yellow_red(double t) {
+    t = std::clamp(t, 0.0, 1.0);
+    if (t < 0.5) {
+      return lerp_color(RgbColor{0, 140, 255}, RgbColor{255, 220, 40}, t * 2.0);
+    }
+    return lerp_color(RgbColor{255, 220, 40}, RgbColor{255, 40, 40}, (t - 0.5) * 2.0);
+  }
+
+  RgbColor color_for_viz(const Row& row, const std::string& mode) const {
+    const auto value = [&](const std::string& key) {
+      return finite_or_none(row.at(key));
+    };
+    if (mode == "risk") {
+      const int risk = static_cast<int>(std::llround(value("pi_risk_band_code").value_or(0.0)));
+      if (risk == 1) return RgbColor{40, 210, 80};
+      if (risk == 2) return RgbColor{255, 210, 40};
+      if (risk == 3) return RgbColor{255, 50, 50};
+      return RgbColor{140, 140, 150};
+    }
+    if (mode == "cost") {
+      const double cost = std::max(0.0, value("pi_cost_total").value_or(0.0));
+      const double t = std::log10(1.0 + std::min(cost, 1.0e6)) / 6.0;
+      return blue_yellow_red(t);
+    }
+    if (mode == "pl") {
+      const double hpl = value("PL_H_pred").value_or(1.0e9);
+      if (hpl >= 1.0e6) return RgbColor{190, 40, 230};
+      return blue_yellow_red((hpl - 10.0) / 35.0);
+    }
+    if (mode == "im") {
+      const double im = value("IM_pred_axis_min").value_or(-1.0e9);
+      if (im <= -1.0e6) return RgbColor{190, 40, 230};
+      if (im < 0.0) {
+        return lerp_color(RgbColor{255, 45, 45}, RgbColor{255, 215, 40},
+                          (im + 20.0) / 20.0);
+      }
+      return lerp_color(RgbColor{255, 215, 40}, RgbColor{40, 210, 80}, im / 10.0);
+    }
+    if (mode == "nvis") {
+      const double nvis = value("n_vis").value_or(0.0);
+      if (nvis < 1.0) return RgbColor{140, 140, 150};
+      if (nvis < 6.0) return lerp_color(RgbColor{255, 45, 45}, RgbColor{255, 215, 40}, nvis / 6.0);
+      return lerp_color(RgbColor{255, 215, 40}, RgbColor{40, 210, 80}, (nvis - 6.0) / 12.0);
+    }
+    return RgbColor{180, 180, 180};
+  }
+
+  sensor_msgs::msg::PointCloud2 make_rgb_viz_cloud(const std::vector<Row>& rows,
+                                                    const std::string& mode,
+                                                    const double z_offset) const {
+    constexpr double kIntegrityVizBaseZ = 8.0;
+    sensor_msgs::msg::PointCloud2 cloud;
+    cloud.header.frame_id = "map";
+    cloud.header.stamp = now();
+    sensor_msgs::PointCloud2Modifier modifier(cloud);
+    modifier.setPointCloud2FieldsByString(2, "xyz", "rgb");
+    modifier.resize(rows.size());
+
+    sensor_msgs::PointCloud2Iterator<float> x(cloud, "x");
+    sensor_msgs::PointCloud2Iterator<float> y(cloud, "y");
+    sensor_msgs::PointCloud2Iterator<float> z(cloud, "z");
+    sensor_msgs::PointCloud2Iterator<uint8_t> r(cloud, "r");
+    sensor_msgs::PointCloud2Iterator<uint8_t> g(cloud, "g");
+    sensor_msgs::PointCloud2Iterator<uint8_t> b(cloud, "b");
+    for (const auto& row : rows) {
+      *x = static_cast<float>(finite_or_none(row.at("x")).value_or(0.0));
+      *y = static_cast<float>(finite_or_none(row.at("y")).value_or(0.0));
+      *z = static_cast<float>(kIntegrityVizBaseZ + z_offset);
+      const RgbColor c = color_for_viz(row, mode);
+      *r = c.r;
+      *g = c.g;
+      *b = c.b;
+      ++x;
+      ++y;
+      ++z;
+      ++r;
+      ++g;
+      ++b;
+    }
+    return cloud;
+  }
+
+  void publish_integrity_viz_arrows(const std::vector<Row>& rows) {
+    constexpr double kIntegrityVizBaseZ = 8.0;
+    if (!integrity_viz_grad_pub_) {
+      return;
+    }
+    visualization_msgs::msg::MarkerArray arr;
+    visualization_msgs::msg::Marker clear;
+    clear.action = visualization_msgs::msg::Marker::DELETEALL;
+    arr.markers.push_back(clear);
+
+    int marker_id = 0;
+    int grid_seen = 0;
+    for (const auto& row : rows) {
+      const auto sample_idx = finite_or_none(row.at("sample_index")).value_or(0.0);
+      if (sample_idx >= 0.0) {
+        continue;
+      }
+      if ((grid_seen++ % 3) != 0) {
+        continue;
+      }
+      const double gx = finite_or_none(row.at("pi_grad_x")).value_or(0.0);
+      const double gy = finite_or_none(row.at("pi_grad_y")).value_or(0.0);
+      Eigen::Vector2d descent(-gx, -gy);
+      const double norm = descent.norm();
+      if (!std::isfinite(norm) || norm < 1.0e-6) {
+        continue;
+      }
+      descent /= norm;
+
+      visualization_msgs::msg::Marker marker;
+      marker.header.frame_id = "map";
+      marker.header.stamp = now();
+      marker.ns = "integrity_descent";
+      marker.id = marker_id++;
+      marker.type = visualization_msgs::msg::Marker::ARROW;
+      marker.action = visualization_msgs::msg::Marker::ADD;
+      geometry_msgs::msg::Point p0;
+      p0.x = finite_or_none(row.at("x")).value_or(0.0);
+      p0.y = finite_or_none(row.at("y")).value_or(0.0);
+      p0.z = kIntegrityVizBaseZ + 0.35;
+      geometry_msgs::msg::Point p1 = p0;
+      p1.x += 0.6 * descent.x();
+      p1.y += 0.6 * descent.y();
+      marker.points.push_back(p0);
+      marker.points.push_back(p1);
+      marker.scale.x = 0.035;
+      marker.scale.y = 0.09;
+      marker.scale.z = 0.12;
+      marker.color.r = 0.1f;
+      marker.color.g = 0.7f;
+      marker.color.b = 1.0f;
+      marker.color.a = 0.75f;
+      arr.markers.push_back(marker);
+      if (marker_id >= 80) {
+        break;
+      }
+    }
+    integrity_viz_grad_pub_->publish(arr);
+  }
+
+  void publish_integrity_viz_labels(const std::vector<Row>& rows) {
+    constexpr double kIntegrityVizBaseZ = 8.0;
+    if (!integrity_viz_label_pub_) {
+      return;
+    }
+    visualization_msgs::msg::MarkerArray arr;
+    visualization_msgs::msg::Marker clear;
+    clear.action = visualization_msgs::msg::Marker::DELETEALL;
+    arr.markers.push_back(clear);
+
+    int marker_id = 0;
+    int grid_seen = 0;
+    for (const auto& row : rows) {
+      const auto sample_idx = finite_or_none(row.at("sample_index")).value_or(0.0);
+      if (sample_idx >= 0.0 || (grid_seen++ % 12) != 0) {
+        continue;
+      }
+      visualization_msgs::msg::Marker marker;
+      marker.header.frame_id = "map";
+      marker.header.stamp = now();
+      marker.ns = "integrity_labels";
+      marker.id = marker_id++;
+      marker.type = visualization_msgs::msg::Marker::TEXT_VIEW_FACING;
+      marker.action = visualization_msgs::msg::Marker::ADD;
+      marker.pose.position.x = finite_or_none(row.at("x")).value_or(0.0);
+      marker.pose.position.y = finite_or_none(row.at("y")).value_or(0.0);
+      marker.pose.position.z = kIntegrityVizBaseZ + 0.65;
+      marker.scale.z = 0.28;
+      marker.color.r = 0.95f;
+      marker.color.g = 0.95f;
+      marker.color.b = 0.95f;
+      marker.color.a = 0.85f;
+      std::ostringstream ss;
+      ss << "HPL " << std::fixed << std::setprecision(1)
+         << finite_or_none(row.at("PL_H_pred")).value_or(0.0)
+         << "\nIM " << finite_or_none(row.at("IM_pred_axis_min")).value_or(0.0)
+         << " n " << finite_or_none(row.at("n_vis")).value_or(0.0);
+      const auto& reason = row.at("fallback_reason");
+      if (!reason.empty()) {
+        ss << "\n" << reason;
+      }
+      marker.text = ss.str();
+      arr.markers.push_back(marker);
+      if (marker_id >= 24) {
+        break;
+      }
+    }
+    integrity_viz_label_pub_->publish(arr);
+  }
+
+  void publish_integrity_viz(const std::vector<Row>& rows) {
+    if (rows.empty()) {
+      return;
+    }
+    if (integrity_viz_cost_pub_) {
+      integrity_viz_cost_pub_->publish(make_rgb_viz_cloud(rows, "cost", 0.02));
+    }
+    if (integrity_viz_risk_pub_) {
+      integrity_viz_risk_pub_->publish(make_rgb_viz_cloud(rows, "risk", 0.08));
+    }
+    if (integrity_viz_pl_pub_) {
+      integrity_viz_pl_pub_->publish(make_rgb_viz_cloud(rows, "pl", 0.14));
+    }
+    if (integrity_viz_im_pub_) {
+      integrity_viz_im_pub_->publish(make_rgb_viz_cloud(rows, "im", 0.20));
+    }
+    if (integrity_viz_nvis_pub_) {
+      integrity_viz_nvis_pub_->publish(make_rgb_viz_cloud(rows, "nvis", 0.26));
+    }
+    publish_integrity_viz_arrows(rows);
+    publish_integrity_viz_labels(rows);
+  }
+
   void finalize() {
     if (finalized_) {
       return;
@@ -2374,6 +2680,8 @@ class Phase2PlannerIntegrityEvaluator : public rclcpp::Node {
   int max_samples_ = 30;
   std::string pl_model_ = "constant_current";
   std::string al_model_ = "cloud_clearance";
+  double hal_m_ = 30.0;
+  double val_m_ = 60.0;
   double fallback_pl_m_ = 20.0;
   bool use_pl_grid_ = false;
   bool use_lidar_observability_ = false;
@@ -2390,6 +2698,7 @@ class Phase2PlannerIntegrityEvaluator : public rclcpp::Node {
   double pi_cost_gradient_step_m_ = 0.5;
   bool snapshot_anchor_current_integrity_ = true;
   bool publish_integrity_cost_field_ = false;
+  bool publish_integrity_cost_grid_ = false;
   bool planner_use_integrity_cost_ = false;
   std::string integrity_cost_field_topic_ = "/iap/integrity_cost_field";
   std::string gnss_scenario_file_;
@@ -2469,6 +2778,20 @@ class Phase2PlannerIntegrityEvaluator : public rclcpp::Node {
   rclcpp::Publisher<visualization_msgs::msg::MarkerArray>::SharedPtr marker_pub_;
   rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr
       integrity_cost_field_pub_;
+  rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr
+      integrity_viz_cost_pub_;
+  rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr
+      integrity_viz_risk_pub_;
+  rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr
+      integrity_viz_pl_pub_;
+  rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr
+      integrity_viz_im_pub_;
+  rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr
+      integrity_viz_nvis_pub_;
+  rclcpp::Publisher<visualization_msgs::msg::MarkerArray>::SharedPtr
+      integrity_viz_grad_pub_;
+  rclcpp::Publisher<visualization_msgs::msg::MarkerArray>::SharedPtr
+      integrity_viz_label_pub_;
   rclcpp::TimerBase::SharedPtr open_timer_;
   rclcpp::TimerBase::SharedPtr summary_timer_;
   rclcpp::TimerBase::SharedPtr pl_grid_timer_;

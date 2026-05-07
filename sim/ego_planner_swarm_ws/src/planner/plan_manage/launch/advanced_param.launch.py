@@ -53,6 +53,11 @@ def generate_launch_description():
     integrity_debug_csv_path = LaunchConfiguration(
         'integrity_debug_csv_path',
         default='/home/dev/ws_iap/src/iap/log/latest/export/planner_integrity_cost_debug.csv')
+    lambda_integrity = LaunchConfiguration('lambda_integrity', default=0.00001)
+    integrity_field_stale_timeout_s = LaunchConfiguration('integrity_field_stale_timeout_s', default=0.5)
+    integrity_nearest_radius_m = LaunchConfiguration('integrity_nearest_radius_m', default=1.0)
+    integrity_cost_max = LaunchConfiguration('integrity_cost_max', default=1000.0)
+    integrity_grad_norm_max = LaunchConfiguration('integrity_grad_norm_max', default=0.1)
     
     obj_num_set = LaunchConfiguration('obj_num_set', default=10)
     
@@ -101,6 +106,11 @@ def generate_launch_description():
     use_distinctive_trajs_arg = DeclareLaunchArgument('use_distinctive_trajs', default_value=use_distinctive_trajs, description='Use distinctive trajectories')
     use_integrity_cost_arg = DeclareLaunchArgument('use_integrity_cost', default_value=use_integrity_cost, description='Enable optional integrity soft cost')
     integrity_debug_csv_path_arg = DeclareLaunchArgument('integrity_debug_csv_path', default_value=integrity_debug_csv_path, description='Planner integrity cost debug CSV path')
+    lambda_integrity_arg = DeclareLaunchArgument('lambda_integrity', default_value=lambda_integrity, description='Planner integrity cost weight')
+    integrity_field_stale_timeout_s_arg = DeclareLaunchArgument('integrity_field_stale_timeout_s', default_value=integrity_field_stale_timeout_s, description='Planner integrity field stale timeout in seconds')
+    integrity_nearest_radius_m_arg = DeclareLaunchArgument('integrity_nearest_radius_m', default_value=integrity_nearest_radius_m, description='Planner integrity nearest sample search radius')
+    integrity_cost_max_arg = DeclareLaunchArgument('integrity_cost_max', default_value=integrity_cost_max, description='Planner integrity sample cost clamp')
+    integrity_grad_norm_max_arg = DeclareLaunchArgument('integrity_grad_norm_max', default_value=integrity_grad_norm_max, description='Planner integrity gradient norm clamp')
     obj_num_set_arg = DeclareLaunchArgument('obj_num_set', default_value=obj_num_set, description='Number of objects')
     drone_id_arg = DeclareLaunchArgument('drone_id', default_value=drone_id, description='Drone ID')
 
@@ -218,13 +228,13 @@ def generate_launch_description():
             {'optimization/max_vel': max_vel},
             {'optimization/max_acc': max_acc},
             {'optimization/use_integrity_cost': use_integrity_cost},
-            {'optimization/lambda_integrity': 0.00001},
+            {'optimization/lambda_integrity': lambda_integrity},
             {'optimization/integrity_cost_topic': '/iap/integrity_cost_field'},
             {'optimization/integrity_debug_csv_path': integrity_debug_csv_path},
-            {'optimization/integrity_field_stale_timeout_s': 0.5},
-            {'optimization/integrity_nearest_radius_m': 1.0},
-            {'optimization/integrity_cost_max': 1000.0},
-            {'optimization/integrity_grad_norm_max': 0.1},
+            {'optimization/integrity_field_stale_timeout_s': integrity_field_stale_timeout_s},
+            {'optimization/integrity_nearest_radius_m': integrity_nearest_radius_m},
+            {'optimization/integrity_cost_max': integrity_cost_max},
+            {'optimization/integrity_grad_norm_max': integrity_grad_norm_max},
             {'optimization/integrity_min_samples': 3},
 
             # B-Spline parameters
@@ -285,6 +295,11 @@ def generate_launch_description():
     ld.add_action(use_distinctive_trajs_arg)
     ld.add_action(use_integrity_cost_arg)
     ld.add_action(integrity_debug_csv_path_arg)
+    ld.add_action(lambda_integrity_arg)
+    ld.add_action(integrity_field_stale_timeout_s_arg)
+    ld.add_action(integrity_nearest_radius_m_arg)
+    ld.add_action(integrity_cost_max_arg)
+    ld.add_action(integrity_grad_norm_max_arg)
     ld.add_action(obj_num_set_arg)
     ld.add_action(drone_id_arg)
 

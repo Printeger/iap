@@ -24,6 +24,9 @@ TEST(PICostAdapterTest, MarginalBandUsesMinimumMargin) {
 
   ASSERT_TRUE(result.valid);
   EXPECT_DOUBLE_EQ(result.margin_h, 0.75);
+  EXPECT_DOUBLE_EQ(result.cost_h, 0.0625);
+  EXPECT_DOUBLE_EQ(result.cost_v, 0.0);
+  EXPECT_DOUBLE_EQ(result.cost_total, 0.0625);
   EXPECT_EQ(result.risk_band, "MARGINAL_PI");
   EXPECT_EQ(result.dominant_axis, "horizontal");
 }
@@ -39,9 +42,9 @@ TEST(PICostAdapterTest, UnsafeBandUsesAxisCostBreakdown) {
   ASSERT_TRUE(result.valid);
   EXPECT_DOUBLE_EQ(result.margin_h, -2.0);
   EXPECT_DOUBLE_EQ(result.margin_v, -3.0);
-  EXPECT_DOUBLE_EQ(result.cost_h, 8.0);
-  EXPECT_DOUBLE_EQ(result.cost_v, 27.0);
-  EXPECT_DOUBLE_EQ(result.cost_total, 35.0);
+  EXPECT_DOUBLE_EQ(result.cost_h, 18.0);
+  EXPECT_DOUBLE_EQ(result.cost_v, 48.0);
+  EXPECT_DOUBLE_EQ(result.cost_total, 66.0);
   EXPECT_EQ(result.risk_band, "UNSAFE_PI");
   EXPECT_EQ(result.risk_band_code, 3);
   EXPECT_EQ(result.dominant_axis, "vertical");

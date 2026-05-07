@@ -457,6 +457,26 @@ if(DEFINED ENV{ROS_VERSION})
     )
     list(APPEND iap_LIBRARIES phase2_planner_integrity_evaluator)
 
+    ## Demo11 forest scenario helpers
+    add_executable(demo11_corridor_map_publisher
+      apps/demo11_corridor_map_publisher.cpp
+    )
+    target_link_libraries(demo11_corridor_map_publisher iap)
+    ament_target_dependencies(demo11_corridor_map_publisher rclcpp sensor_msgs)
+    list(APPEND iap_LIBRARIES demo11_corridor_map_publisher)
+
+    add_executable(demo11_compare_paths_visualizer
+      apps/demo11_compare_paths_visualizer.cpp
+    )
+    target_link_libraries(demo11_compare_paths_visualizer iap)
+    ament_target_dependencies(demo11_compare_paths_visualizer
+      rclcpp
+      nav_msgs
+      geometry_msgs
+      sensor_msgs
+    )
+    list(APPEND iap_LIBRARIES demo11_compare_paths_visualizer)
+
     install(TARGETS
       iap_status
       iap_experiment
@@ -465,6 +485,8 @@ if(DEFINED ENV{ROS_VERSION})
       demo3_iap_bridge
       demo4_lidar_body_bridge
       phase2_planner_integrity_evaluator
+      demo11_corridor_map_publisher
+      demo11_compare_paths_visualizer
       DESTINATION lib/iap
     )
     install(DIRECTORY launch DESTINATION share/iap)
@@ -487,6 +509,8 @@ if(DEFINED ENV{ROS_VERSION})
       target_link_libraries(test_future_pl_field_predictor iap)
       ament_add_gtest(test_pi_cost_adapter test/test_pi_cost_adapter.cpp)
       target_link_libraries(test_pi_cost_adapter iap)
+      ament_add_gtest(test_alert_limit_model test/test_alert_limit_model.cpp)
+      target_link_libraries(test_alert_limit_model iap)
       ament_add_gtest(test_run_log_manager test/test_run_log_manager.cpp)
       target_link_libraries(test_run_log_manager iap)
     endif()

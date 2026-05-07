@@ -36,8 +36,12 @@ PICostResult PICostAdapter::evaluate(const double hal,
   out.margin_h = hal - hpl;
   out.margin_v = val - vpl;
 
-  const double exceed_h = std::max(0.0, hpl - hal);
-  const double exceed_v = std::max(0.0, vpl - val);
+  const double marginal =
+      std::isfinite(params_.marginal_margin_m)
+          ? std::max(0.0, params_.marginal_margin_m)
+          : 1.0;
+  const double exceed_h = std::max(0.0, hpl + marginal - hal);
+  const double exceed_v = std::max(0.0, vpl + marginal - val);
   const double w_h = std::isfinite(params_.weight_h) ? params_.weight_h : 1.0;
   const double w_v = std::isfinite(params_.weight_v) ? params_.weight_v : 1.0;
   out.cost_h = std::max(0.0, w_h) * exceed_h * exceed_h;
@@ -45,10 +49,6 @@ PICostResult PICostAdapter::evaluate(const double hal,
   out.cost_total = out.cost_h + out.cost_v;
 
   const double min_margin = std::min(out.margin_h, out.margin_v);
-  const double marginal =
-      std::isfinite(params_.marginal_margin_m)
-          ? std::max(0.0, params_.marginal_margin_m)
-          : 1.0;
   if (out.margin_h < 0.0 || out.margin_v < 0.0) {
     out.risk_band = "UNSAFE_PI";
   } else if (min_margin < marginal) {

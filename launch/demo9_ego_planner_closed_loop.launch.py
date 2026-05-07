@@ -151,6 +151,17 @@ def _launch_setup(context):
     use_so3_dynamics = _as_bool(LaunchConfiguration("use_so3_dynamics").perform(context))
     planner_use_dynamic = _as_bool(LaunchConfiguration("planner_use_dynamic").perform(context))
     planner_use_integrity_cost = LaunchConfiguration("planner_use_integrity_cost").perform(context)
+    planner_lambda_integrity = LaunchConfiguration("planner_lambda_integrity").perform(context)
+    planner_integrity_field_stale_timeout_s = LaunchConfiguration(
+        "planner_integrity_field_stale_timeout_s"
+    ).perform(context)
+    planner_integrity_nearest_radius_m = LaunchConfiguration(
+        "planner_integrity_nearest_radius_m"
+    ).perform(context)
+    planner_integrity_cost_max = LaunchConfiguration("planner_integrity_cost_max").perform(context)
+    planner_integrity_grad_norm_max = LaunchConfiguration(
+        "planner_integrity_grad_norm_max"
+    ).perform(context)
     use_dynamic_obstacles = _as_bool(LaunchConfiguration("use_dynamic_obstacles").perform(context))
     allow_truth_alignment = _as_bool(LaunchConfiguration("allow_truth_alignment").perform(context))
     log_phase1 = _as_bool(LaunchConfiguration("log_phase1").perform(context))
@@ -226,6 +237,7 @@ def _launch_setup(context):
     map_size_x = LaunchConfiguration("map_size_x").perform(context)
     map_size_y = LaunchConfiguration("map_size_y").perform(context)
     map_size_z = LaunchConfiguration("map_size_z").perform(context)
+    map_generator_mode = LaunchConfiguration("map_generator_mode").perform(context).strip().lower()
     init_x = LaunchConfiguration("init_x").perform(context)
     init_y = LaunchConfiguration("init_y").perform(context)
     init_z = LaunchConfiguration("init_z").perform(context)
@@ -292,7 +304,17 @@ def _launch_setup(context):
     actions = [
         LogInfo(msg=f"[demo9] runtime IAP config: {runtime_config_path}"),
         LogInfo(msg=f"[demo9] planner/controller odom feedback: {planner_odom_topic}"),
+        LogInfo(
+            msg=(
+                f"[demo9] preset waypoint0 from goal argument: "
+                f"({goal_x}, {goal_y}, {goal_z}), point_num={point_num}"
+            )
+        ),
     ]
+    if map_generator_mode not in ("random_forest", "off"):
+        raise RuntimeError("map_generator_mode must be 'random_forest' or 'off'")
+    if map_generator_mode == "off":
+        actions.append(LogInfo(msg="[demo9] map_generator random_forest disabled by launch arg"))
 
     if not planner_use_dynamic:
         actions.append(
@@ -319,6 +341,7 @@ def _launch_setup(context):
             executable="random_forest",
             name="demo9_random_forest",
             output="screen",
+            condition=IfCondition("true" if map_generator_mode == "random_forest" else "false"),
             remappings=[("odometry", truth_odom_topic)],
             parameters=[
                 {"init_state_x": init_x_f},
@@ -451,6 +474,11 @@ def _launch_setup(context):
                 "point6_y": waypoint_values["point6_y"],
                 "point6_z": waypoint_values["point6_z"],
                 "use_integrity_cost": planner_use_integrity_cost,
+                "lambda_integrity": planner_lambda_integrity,
+                "integrity_field_stale_timeout_s": planner_integrity_field_stale_timeout_s,
+                "integrity_nearest_radius_m": planner_integrity_nearest_radius_m,
+                "integrity_cost_max": planner_integrity_cost_max,
+                "integrity_grad_norm_max": planner_integrity_grad_norm_max,
             }.items(),
         ),
         Node(
@@ -755,8 +783,14 @@ def generate_launch_description():
         DeclareLaunchArgument("use_so3_dynamics", default_value="true"),
         DeclareLaunchArgument("planner_use_dynamic", default_value="true"),
         DeclareLaunchArgument("planner_use_integrity_cost", default_value="false"),
+        DeclareLaunchArgument("planner_lambda_integrity", default_value="0.00001"),
+        DeclareLaunchArgument("planner_integrity_field_stale_timeout_s", default_value="0.5"),
+        DeclareLaunchArgument("planner_integrity_nearest_radius_m", default_value="1.0"),
+        DeclareLaunchArgument("planner_integrity_cost_max", default_value="1000.0"),
+        DeclareLaunchArgument("planner_integrity_grad_norm_max", default_value="0.1"),
         DeclareLaunchArgument("use_dynamic_obstacles", default_value="false"),
         DeclareLaunchArgument("map_source", default_value="local_sensing_cloud"),
+        DeclareLaunchArgument("map_generator_mode", default_value="random_forest"),
         DeclareLaunchArgument("allow_truth_alignment", default_value="true"),
         DeclareLaunchArgument("log_phase1", default_value="true"),
         DeclareLaunchArgument("enable_truth_araim_compare", default_value="false"),
