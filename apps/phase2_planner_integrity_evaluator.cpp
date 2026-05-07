@@ -567,6 +567,10 @@ class Phase2PlannerIntegrityEvaluator : public rclcpp::Node {
     declare_parameter<bool>("planner_use_integrity_cost", false);
     declare_parameter<std::string>("integrity_cost_field_topic",
                                    "/iap/integrity_cost_field");
+    declare_parameter<bool>("integrity_viz_use_fixed_anchor", false);
+    declare_parameter<double>("integrity_viz_anchor_x", 0.0);
+    declare_parameter<double>("integrity_viz_anchor_y", 12.0);
+    declare_parameter<double>("integrity_viz_anchor_z", 8.0);
     declare_parameter<double>("z_min", 0.5);
     declare_parameter<double>("z_max", 5.0);
     declare_parameter<double>("safe_margin", 0.0);
@@ -667,6 +671,12 @@ class Phase2PlannerIntegrityEvaluator : public rclcpp::Node {
       get_parameter("planner_use_integrity_cost").as_bool();
     integrity_cost_field_topic_ =
         get_parameter("integrity_cost_field_topic").as_string();
+    integrity_viz_use_fixed_anchor_ =
+        get_parameter("integrity_viz_use_fixed_anchor").as_bool();
+    integrity_viz_anchor_ = Eigen::Vector3d(
+        get_parameter("integrity_viz_anchor_x").as_double(),
+        get_parameter("integrity_viz_anchor_y").as_double(),
+        get_parameter("integrity_viz_anchor_z").as_double());
     z_min_ = get_parameter("z_min").as_double();
     z_max_ = get_parameter("z_max").as_double();
     safe_margin_ = get_parameter("safe_margin").as_double();
@@ -2457,16 +2467,77 @@ class Phase2PlannerIntegrityEvaluator : public rclcpp::Node {
     return RgbColor{180, 180, 180};
   }
 
+  bool is_integrity_grid_row(const Row& row) const {
+    const auto it = row.find("sample_index");
+    if (it == row.end()) {
+      return false;
+    }
+    return finite_or_none(it->second).value_or(0.0) < 0.0;
+  }
+
+  std::optional<Eigen::Vector2d> integrity_grid_center(
+      const std::vector<const Row*>& rows) const {
+    bool has_grid = false;
+    double min_x = std::numeric_limits<double>::infinity();
+    double max_x = -std::numeric_limits<double>::infinity();
+    double min_y = std::numeric_limits<double>::infinity();
+    double max_y = -std::numeric_limits<double>::infinity();
+
+    for (const Row* row : rows) {
+      if (!row || !is_integrity_grid_row(*row)) {
+        continue;
+      }
+      const auto x = finite_or_none(row->at("x"));
+      const auto y = finite_or_none(row->at("y"));
+      if (!x || !y) {
+        continue;
+      }
+      has_grid = true;
+      min_x = std::min(min_x, *x);
+      max_x = std::max(max_x, *x);
+      min_y = std::min(min_y, *y);
+      max_y = std::max(max_y, *y);
+    }
+
+    if (!has_grid) {
+      return std::nullopt;
+    }
+    return Eigen::Vector2d(0.5 * (min_x + max_x), 0.5 * (min_y + max_y));
+  }
+
+  Eigen::Vector3d integrity_viz_position(
+      const Row& row,
+      const double z_offset,
+      const std::optional<Eigen::Vector2d>& grid_center) const {
+    const double raw_x = finite_or_none(row.at("x")).value_or(0.0);
+    const double raw_y = finite_or_none(row.at("y")).value_or(0.0);
+    if (integrity_viz_use_fixed_anchor_ && grid_center.has_value()) {
+      return Eigen::Vector3d(
+          integrity_viz_anchor_.x() + raw_x - grid_center->x(),
+          integrity_viz_anchor_.y() + raw_y - grid_center->y(),
+          integrity_viz_anchor_.z() + z_offset);
+    }
+    return Eigen::Vector3d(raw_x, raw_y, integrity_viz_anchor_.z() + z_offset);
+  }
+
   sensor_msgs::msg::PointCloud2 make_rgb_viz_cloud(const std::vector<Row>& rows,
                                                     const std::string& mode,
                                                     const double z_offset) const {
-    constexpr double kIntegrityVizBaseZ = 8.0;
+    std::vector<const Row*> viz_rows;
+    viz_rows.reserve(rows.size());
+    for (const auto& row : rows) {
+      if (!integrity_viz_use_fixed_anchor_ || is_integrity_grid_row(row)) {
+        viz_rows.push_back(&row);
+      }
+    }
+    const auto grid_center = integrity_grid_center(viz_rows);
+
     sensor_msgs::msg::PointCloud2 cloud;
     cloud.header.frame_id = "map";
     cloud.header.stamp = now();
     sensor_msgs::PointCloud2Modifier modifier(cloud);
     modifier.setPointCloud2FieldsByString(2, "xyz", "rgb");
-    modifier.resize(rows.size());
+    modifier.resize(viz_rows.size());
 
     sensor_msgs::PointCloud2Iterator<float> x(cloud, "x");
     sensor_msgs::PointCloud2Iterator<float> y(cloud, "y");
@@ -2474,11 +2545,12 @@ class Phase2PlannerIntegrityEvaluator : public rclcpp::Node {
     sensor_msgs::PointCloud2Iterator<uint8_t> r(cloud, "r");
     sensor_msgs::PointCloud2Iterator<uint8_t> g(cloud, "g");
     sensor_msgs::PointCloud2Iterator<uint8_t> b(cloud, "b");
-    for (const auto& row : rows) {
-      *x = static_cast<float>(finite_or_none(row.at("x")).value_or(0.0));
-      *y = static_cast<float>(finite_or_none(row.at("y")).value_or(0.0));
-      *z = static_cast<float>(kIntegrityVizBaseZ + z_offset);
-      const RgbColor c = color_for_viz(row, mode);
+    for (const Row* row : viz_rows) {
+      const Eigen::Vector3d p = integrity_viz_position(*row, z_offset, grid_center);
+      *x = static_cast<float>(p.x());
+      *y = static_cast<float>(p.y());
+      *z = static_cast<float>(p.z());
+      const RgbColor c = color_for_viz(*row, mode);
       *r = c.r;
       *g = c.g;
       *b = c.b;
@@ -2493,20 +2565,27 @@ class Phase2PlannerIntegrityEvaluator : public rclcpp::Node {
   }
 
   void publish_integrity_viz_arrows(const std::vector<Row>& rows) {
-    constexpr double kIntegrityVizBaseZ = 8.0;
     if (!integrity_viz_grad_pub_) {
       return;
     }
     visualization_msgs::msg::MarkerArray arr;
     visualization_msgs::msg::Marker clear;
-    clear.action = visualization_msgs::msg::Marker::DELETEALL;
+      clear.action = visualization_msgs::msg::Marker::DELETEALL;
     arr.markers.push_back(clear);
+
+    std::vector<const Row*> grid_rows;
+    grid_rows.reserve(rows.size());
+    for (const auto& row : rows) {
+      if (is_integrity_grid_row(row)) {
+        grid_rows.push_back(&row);
+      }
+    }
+    const auto grid_center = integrity_grid_center(grid_rows);
 
     int marker_id = 0;
     int grid_seen = 0;
     for (const auto& row : rows) {
-      const auto sample_idx = finite_or_none(row.at("sample_index")).value_or(0.0);
-      if (sample_idx >= 0.0) {
+      if (!is_integrity_grid_row(row)) {
         continue;
       }
       if ((grid_seen++ % 3) != 0) {
@@ -2528,10 +2607,11 @@ class Phase2PlannerIntegrityEvaluator : public rclcpp::Node {
       marker.id = marker_id++;
       marker.type = visualization_msgs::msg::Marker::ARROW;
       marker.action = visualization_msgs::msg::Marker::ADD;
+      const Eigen::Vector3d p = integrity_viz_position(row, 0.35, grid_center);
       geometry_msgs::msg::Point p0;
-      p0.x = finite_or_none(row.at("x")).value_or(0.0);
-      p0.y = finite_or_none(row.at("y")).value_or(0.0);
-      p0.z = kIntegrityVizBaseZ + 0.35;
+      p0.x = p.x();
+      p0.y = p.y();
+      p0.z = p.z();
       geometry_msgs::msg::Point p1 = p0;
       p1.x += 0.6 * descent.x();
       p1.y += 0.6 * descent.y();
@@ -2553,22 +2633,30 @@ class Phase2PlannerIntegrityEvaluator : public rclcpp::Node {
   }
 
   void publish_integrity_viz_labels(const std::vector<Row>& rows) {
-    constexpr double kIntegrityVizBaseZ = 8.0;
     if (!integrity_viz_label_pub_) {
       return;
     }
     visualization_msgs::msg::MarkerArray arr;
     visualization_msgs::msg::Marker clear;
-    clear.action = visualization_msgs::msg::Marker::DELETEALL;
+      clear.action = visualization_msgs::msg::Marker::DELETEALL;
     arr.markers.push_back(clear);
+
+    std::vector<const Row*> grid_rows;
+    grid_rows.reserve(rows.size());
+    for (const auto& row : rows) {
+      if (is_integrity_grid_row(row)) {
+        grid_rows.push_back(&row);
+      }
+    }
+    const auto grid_center = integrity_grid_center(grid_rows);
 
     int marker_id = 0;
     int grid_seen = 0;
     for (const auto& row : rows) {
-      const auto sample_idx = finite_or_none(row.at("sample_index")).value_or(0.0);
-      if (sample_idx >= 0.0 || (grid_seen++ % 12) != 0) {
+      if (!is_integrity_grid_row(row) || (grid_seen++ % 12) != 0) {
         continue;
       }
+      const Eigen::Vector3d p = integrity_viz_position(row, 0.65, grid_center);
       visualization_msgs::msg::Marker marker;
       marker.header.frame_id = "map";
       marker.header.stamp = now();
@@ -2576,9 +2664,9 @@ class Phase2PlannerIntegrityEvaluator : public rclcpp::Node {
       marker.id = marker_id++;
       marker.type = visualization_msgs::msg::Marker::TEXT_VIEW_FACING;
       marker.action = visualization_msgs::msg::Marker::ADD;
-      marker.pose.position.x = finite_or_none(row.at("x")).value_or(0.0);
-      marker.pose.position.y = finite_or_none(row.at("y")).value_or(0.0);
-      marker.pose.position.z = kIntegrityVizBaseZ + 0.65;
+      marker.pose.position.x = p.x();
+      marker.pose.position.y = p.y();
+      marker.pose.position.z = p.z();
       marker.scale.z = 0.28;
       marker.color.r = 0.95f;
       marker.color.g = 0.95f;
@@ -2701,6 +2789,8 @@ class Phase2PlannerIntegrityEvaluator : public rclcpp::Node {
   bool publish_integrity_cost_grid_ = false;
   bool planner_use_integrity_cost_ = false;
   std::string integrity_cost_field_topic_ = "/iap/integrity_cost_field";
+  bool integrity_viz_use_fixed_anchor_ = false;
+  Eigen::Vector3d integrity_viz_anchor_ = Eigen::Vector3d(0.0, 12.0, 8.0);
   std::string gnss_scenario_file_;
 
   std::chrono::system_clock::time_point start_wall_;

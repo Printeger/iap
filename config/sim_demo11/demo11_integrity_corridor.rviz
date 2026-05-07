@@ -5,7 +5,7 @@ Panels:
     Property Tree Widget:
       Expanded: ~
       Splitter Ratio: 0.5
-    Tree Height: 152
+    Tree Height: 373
   - Class: rviz_common/Selection
     Name: Selection
   - Class: rviz_common/Tool Properties
@@ -653,7 +653,7 @@ Visualization Manager:
       Enabled: true
       Name: Integrity Gradient Arrows
       Namespaces:
-        {}
+        integrity_descent: true
       Topic:
         Depth: 5
         Durability Policy: Volatile
@@ -714,25 +714,25 @@ Visualization Manager:
   Views:
     Current:
       Class: rviz_default_plugins/Orbit
-      Distance: 28
+      Distance: 48.734439849853516
       Enable Stereo Rendering:
         Stereo Eye Separation: 0.05999999865889549
         Stereo Focal Distance: 1
         Swap Stereo Eyes: false
         Value: false
       Focal Point:
-        X: 0
-        Y: -1
-        Z: 1
+        X: 0.14795173704624176
+        Y: -0.05205841735005379
+        Z: 4.000148773193359
       Focal Shape Fixed Size: true
       Focal Shape Size: 0.05000000074505806
       Invert Z Axis: false
       Name: Current View
       Near Clip Distance: 0.009999999776482582
-      Pitch: 1
+      Pitch: 1.5697963237762451
       Target Frame: <Fixed Frame>
       Value: Orbit (rviz)
-      Yaw: 0
+      Yaw: 3.140012264251709
     Saved: ~
 Window Geometry:
   Displays:

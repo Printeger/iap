@@ -28,7 +28,11 @@ bool cov_vel = false;
 bool cov_color = false;
 bool origin = false;
 bool isOriginSet = false;
+bool sensor_text_use_fixed_position = false;
 colvec poseOrigin(6);
+double sensor_text_fixed_x = 0.0;
+double sensor_text_fixed_y = 0.0;
+double sensor_text_fixed_z = 14.0;
 
 rclcpp::Publisher<geometry_msgs::msg::PoseStamped>::SharedPtr posePub;
 rclcpp::Publisher<nav_msgs::msg::Path>::SharedPtr pathPub;
@@ -311,13 +315,26 @@ void odom_callback(const nav_msgs::msg::Odometry::SharedPtr msg)
     sensorROS.ns = string("sensor");
     sensorROS.type = visualization_msgs::msg::Marker::TEXT_VIEW_FACING;
     sensorROS.action = visualization_msgs::msg::Marker::ADD;
-    sensorROS.pose.position.x = pose(0);
-    sensorROS.pose.position.y = pose(1);
-    sensorROS.pose.position.z = pose(2) + 1.0;
-    sensorROS.pose.orientation.w = q(0);
-    sensorROS.pose.orientation.x = q(1);
-    sensorROS.pose.orientation.y = q(2);
-    sensorROS.pose.orientation.z = q(3);
+    if (sensor_text_use_fixed_position)
+    {
+        sensorROS.pose.position.x = sensor_text_fixed_x;
+        sensorROS.pose.position.y = sensor_text_fixed_y;
+        sensorROS.pose.position.z = sensor_text_fixed_z;
+        sensorROS.pose.orientation.w = 1.0;
+        sensorROS.pose.orientation.x = 0.0;
+        sensorROS.pose.orientation.y = 0.0;
+        sensorROS.pose.orientation.z = 0.0;
+    }
+    else
+    {
+        sensorROS.pose.position.x = pose(0);
+        sensorROS.pose.position.y = pose(1);
+        sensorROS.pose.position.z = pose(2) + 1.0;
+        sensorROS.pose.orientation.w = q(0);
+        sensorROS.pose.orientation.x = q(1);
+        sensorROS.pose.orientation.y = q(2);
+        sensorROS.pose.orientation.z = q(3);
+    }
     string strG = G ? string(" GPS ") : string("");
     string strV = V ? string(" Vision ") : string("");
     string strL = L ? string(" Laser ") : string("");
@@ -523,6 +540,10 @@ int main(int argc, char **argv)
     node->declare_parameter("covariance_velocity", false);
     node->declare_parameter("covariance_color", false);
     node->declare_parameter("drone_id", -1);
+    node->declare_parameter("sensor_text_use_fixed_position", false);
+    node->declare_parameter("sensor_text_fixed_x", 0.0);
+    node->declare_parameter("sensor_text_fixed_y", 0.0);
+    node->declare_parameter("sensor_text_fixed_z", 14.0);
 
     node->get_parameter("mesh_resource", mesh_resource);
     node->get_parameter("color/r", color_r);
@@ -540,6 +561,10 @@ int main(int argc, char **argv)
     node->get_parameter("covariance_velocity", cov_vel);
     node->get_parameter("covariance_color", cov_color);
     node->get_parameter("drone_id", _drone_id);
+    node->get_parameter("sensor_text_use_fixed_position", sensor_text_use_fixed_position);
+    node->get_parameter("sensor_text_fixed_x", sensor_text_fixed_x);
+    node->get_parameter("sensor_text_fixed_y", sensor_text_fixed_y);
+    node->get_parameter("sensor_text_fixed_z", sensor_text_fixed_z);
 
 
     // 发布者和订阅者

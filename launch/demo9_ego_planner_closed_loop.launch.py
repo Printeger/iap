@@ -108,8 +108,18 @@ def _runtime_config(
     return str(runtime_sim_demo9)
 
 
-def _odom_visualization_node(name, odom_topic, cmd_topic, topic_prefix, color, drone_id):
+def _odom_visualization_node(
+    name,
+    odom_topic,
+    cmd_topic,
+    topic_prefix,
+    color,
+    drone_id,
+    sensor_text_use_fixed_position=False,
+    sensor_text_fixed_position=(0.0, 0.0, 14.0),
+):
     r, g, b = color
+    text_x, text_y, text_z = sensor_text_fixed_position
     return Node(
         package="odom_visualization",
         executable="odom_visualization",
@@ -134,6 +144,10 @@ def _odom_visualization_node(name, odom_topic, cmd_topic, topic_prefix, color, d
             {"color/a": 1.0},
             {"tf45": False},
             {"drone_id": drone_id},
+            {"sensor_text_use_fixed_position": bool(sensor_text_use_fixed_position)},
+            {"sensor_text_fixed_x": float(text_x)},
+            {"sensor_text_fixed_y": float(text_y)},
+            {"sensor_text_fixed_z": float(text_z)},
         ],
     )
 
@@ -233,6 +247,19 @@ def _launch_setup(context):
         float(LaunchConfiguration("gnss_sky_dome_center_y").perform(context)),
         float(LaunchConfiguration("gnss_sky_dome_center_z").perform(context)),
     ]
+    gnss_skyplot_origin_enu = [
+        float(LaunchConfiguration("gnss_skyplot_origin_x").perform(context)),
+        float(LaunchConfiguration("gnss_skyplot_origin_y").perform(context)),
+        float(LaunchConfiguration("gnss_skyplot_origin_z").perform(context)),
+    ]
+    fixed_status_text = _as_bool(
+        LaunchConfiguration("viz_status_text_use_fixed_position").perform(context)
+    )
+    status_text_position = (
+        float(LaunchConfiguration("viz_status_text_x").perform(context)),
+        float(LaunchConfiguration("viz_status_text_y").perform(context)),
+        float(LaunchConfiguration("viz_status_text_z").perform(context)),
+    )
 
     map_size_x = LaunchConfiguration("map_size_x").perform(context)
     map_size_y = LaunchConfiguration("map_size_y").perform(context)
@@ -515,6 +542,8 @@ def _launch_setup(context):
             "/demo9/drone",
             (0.2, 1.0, 0.4),
             int(drone_id),
+            fixed_status_text,
+            status_text_position,
         ),
         _odom_visualization_node(
             "demo9_truth_odom_visualization",
@@ -566,6 +595,9 @@ def _launch_setup(context):
                 {"sky_dome_meridian_count": 12},
                 {"sky_dome_follow_receiver": gnss_sky_dome_follow_receiver},
                 {"sky_dome_center_enu": gnss_sky_dome_center_enu},
+                {"skyplot_origin_enu": gnss_skyplot_origin_enu},
+                {"status_text_use_fixed_position": fixed_status_text},
+                {"status_text_position_enu": list(status_text_position)},
                 {"enable_map_occlusion": gnss_enable_map_occlusion},
                 {"enable_skymask": gnss_enable_skymask},
                 {"enable_nlos": gnss_enable_nlos},
@@ -816,6 +848,13 @@ def generate_launch_description():
         DeclareLaunchArgument("gnss_sky_dome_center_x", default_value="0.0"),
         DeclareLaunchArgument("gnss_sky_dome_center_y", default_value="0.0"),
         DeclareLaunchArgument("gnss_sky_dome_center_z", default_value="0.0"),
+        DeclareLaunchArgument("gnss_skyplot_origin_x", default_value="0.0"),
+        DeclareLaunchArgument("gnss_skyplot_origin_y", default_value="12.0"),
+        DeclareLaunchArgument("gnss_skyplot_origin_z", default_value="8.0"),
+        DeclareLaunchArgument("viz_status_text_use_fixed_position", default_value="false"),
+        DeclareLaunchArgument("viz_status_text_x", default_value="0.0"),
+        DeclareLaunchArgument("viz_status_text_y", default_value="0.0"),
+        DeclareLaunchArgument("viz_status_text_z", default_value="14.0"),
         DeclareLaunchArgument("drone_id", default_value="0"),
         DeclareLaunchArgument("init_x", default_value="0.0"),
         DeclareLaunchArgument("init_y", default_value="0.0"),

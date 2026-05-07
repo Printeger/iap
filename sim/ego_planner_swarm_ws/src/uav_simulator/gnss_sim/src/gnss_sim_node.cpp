@@ -1312,6 +1312,10 @@ private:
       std::clamp(declare_parameter<double>("nlos_path_alpha", 0.95), 0.0, 1.0);
     skyplot_origin_enu_ = read_vector3_parameter("skyplot_origin_enu", {-20.0, -20.0, 8.0});
     skyplot_radius_m_ = declare_parameter<double>("skyplot_radius_m", 8.0);
+    status_text_use_fixed_position_ =
+      declare_parameter<bool>("status_text_use_fixed_position", false);
+    status_text_position_ =
+      read_vector3_parameter("status_text_position_enu", {0.0, 0.0, 14.0});
     enable_sky_dome_visualization_ =
       declare_parameter<bool>("enable_sky_dome_visualization", true);
     sky_dome_show_cardinal_labels_ =
@@ -2294,7 +2298,10 @@ private:
     const auto counts = count_visibility(evals);
     visualization_msgs::msg::MarkerArray array;
     auto text = base_marker(receiver.stamp, "status_text", 1, visualization_msgs::msg::Marker::TEXT_VIEW_FACING);
-    text.pose.position = point_msg(receiver.pos_enu + Eigen::Vector3d(0.0, 0.0, 5.0));
+    const Eigen::Vector3d text_position = status_text_use_fixed_position_
+      ? status_text_position_
+      : receiver.pos_enu + Eigen::Vector3d(0.0, 0.0, 5.0);
+    text.pose.position = point_msg(text_position);
     text.scale.z = 0.9;
     text.color = color_rgba(1.0F, 1.0F, 1.0F, 0.95F);
     std::ostringstream ss;
@@ -2386,6 +2393,7 @@ private:
   Eigen::Matrix3d R_ecef_enu_ = Eigen::Matrix3d::Identity();
   Eigen::Vector3d sky_dome_center_enu_ = Eigen::Vector3d::Zero();
   Eigen::Vector3d skyplot_origin_enu_ = Eigen::Vector3d::Zero();
+  Eigen::Vector3d status_text_position_ = Eigen::Vector3d::Zero();
 
   double measurement_rate_hz_ = 10.0;
   double ephem_rate_hz_ = 1.0;
@@ -2432,6 +2440,7 @@ private:
   bool enable_sky_dome_visualization_ = true;
   bool sky_dome_show_cardinal_labels_ = true;
   bool sky_dome_follow_receiver_ = false;
+  bool status_text_use_fixed_position_ = false;
   bool enable_csv_log_ = false;
   bool startup_topics_published_ = false;
   bool ephem_published_ = false;
