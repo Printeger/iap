@@ -1,8 +1,8 @@
 # IAP - Integrity-Aware Positioning
 
-IAP 是一个基于 GLIM 架构的 3D LiDAR-IMU(-GNSS) 定位与建图系统。本仓库同时提供了面向无人机仿真的运行环境，包含随机森林地图、SO3 四旋翼动力学、仿真 LiDAR/IMU、GNSS 仿真、IAP 与仿真之间的桥接节点，以及 `demo1` 到 `demo10` 的分层示例。
+IAP 是一个基于 GLIM 架构的 3D LiDAR-IMU(-GNSS) 定位与建图系统。本仓库同时提供了面向无人机仿真的运行环境，包含随机森林地图、SO3 四旋翼动力学、仿真 LiDAR/IMU、GNSS 仿真、IAP 与仿真之间的桥接节点，以及 `demo1` 到 `demo11` 的分层示例。
 
-这份 README 面向新手：先完成构建，再按 demo 顺序运行。建议先跑不依赖 IAP 的 `demo1`/`demo2`，确认仿真和 RViz 正常；再跑 `demo4` 之后的 IAP 集成示例；最后跑 `demo7`/`demo8` 的 GNSS/ARAIM 场景、`demo9` 的 EGO planner 闭环验收，以及 `demo10` 的 PI-lite 只读评估。
+这份 README 面向新手：先完成构建，再按 demo 顺序运行。建议先跑不依赖 IAP 的 `demo1`/`demo2`，确认仿真和 RViz 正常；再跑 `demo4` 之后的 IAP 集成示例；最后跑 `demo7`/`demo8` 的 GNSS/ARAIM 场景、`demo9` 的 EGO planner 闭环验收、`demo10` 的 PI-lite 只读评估，以及最新的 `demo11` IAP 系统闭环验证。
 
 ---
 
@@ -201,9 +201,9 @@ start_rviz:=false
 
 ---
 
-## 4. Demo1 到 Demo10
+## 4. Demo1 到 Demo11
 
-每个 demo 都可以这样运行：
+`demo1` 到 `demo8` 都可以这样运行：
 
 ```bash
 cd /home/dev/ws_iap
@@ -211,7 +211,7 @@ source install/setup.bash
 ros2 launch iap demoN.launch
 ```
 
-其中 `N` 为 1 到 7。XML launch 的参数都可以用 `arg:=value` 覆盖，例如：
+其中 `N` 为 1 到 8。XML/Python launch 的参数都可以用 `arg:=value` 覆盖，例如：
 
 ```bash
 ros2 launch iap demo2.launch start_rviz:=false circle_radius:=6.0
@@ -231,6 +231,7 @@ ros2 launch iap demo2.launch start_rviz:=false circle_radius:=6.0
 | `demo8` | Demo7 风格的 SO3 + GNSS/ARAIM 真值对照 | 是 | 是 | ARAIM 真值比较、三路轨迹可视化 |
 | `demo9` | EGO planner + IAP odom + SO3 controller 闭环 | 是 | 是 | Phase 1 官方闭环验证 |
 | `demo10` | demo9 + PI-lite 只读轨迹完整性 evaluator | 是 | 是 | Phase 2 AL/PL/IM 预测与离线对齐 |
+| `demo11` | 森林走廊 + IAP + GNSS/ARAIM + integrity-aware EGO planner | 是 | 是 | 最新 IAP 系统闭环验证 |
 
 ### 4.2 Demo1：基础地图与静态 LiDAR
 
@@ -589,6 +590,119 @@ GNSS 可视化/诊断 topic：
 - `/gnss_sim/visualization/status_text`
 - `/gnss_sim/visualization/occlusion_points`
 
+### 4.12 Demo11：IAP 系统闭环验证
+
+目的：`demo11` 是当前最新的 IAP 系统闭环验证。它在 `demo9` 的 EGO planner + SO3 controller + IAP odom 闭环和 `demo10` 的未来 PL/AL/IM 预测基础上，加入森林走廊地图、GNSS SkyMask/NLOS/多路径/故障注入、PL grid，以及回灌到 EGO 前端 A* 的 integrity cost field。和 `demo10` 不同，`demo11` 不只是记录评估结果，而是让 planner 在搜索阶段主动避开预测低完整性区域。
+
+构建 demo11 依赖：
+
+```bash
+cd /home/dev/ws_iap
+bash src/iap/tools/build_phase1_ego_planner_closed_loop.sh
+source install/setup.bash
+```
+
+推荐的 Full 闭环运行命令：
+
+```bash
+ros2 launch iap demo11_ego_planner_integrity_corridor.launch.py \
+  start_rviz:=false \
+  run_duration_s:=90 \
+  allow_truth_alignment:=false \
+  use_so3_dynamics:=true \
+  use_iap_odom_for_planner:=true \
+  use_gnss:=true \
+  use_araim:=true \
+  planner_use_integrity_cost:=true \
+  planner_use_integrity_front_search:=true \
+  planner_use_integrity_global_search:=true
+```
+
+关键链路：
+
+```text
+demo11_corridor_map_publisher -> /map_generator/global_cloud
+GNSS sim + IAP -> /iap/integrity
+phase2_planner_integrity_evaluator -> /iap/integrity_front_cost_field
+EGO planner front-end A* -> integrity-aware global/front search
+traj_server -> SO3 controller -> SO3 plant -> IAP odom feedback
+```
+
+关键输出：
+
+- 地图：`/map_generator/global_cloud`、`/demo11/trunk_cloud`、`/demo11/canopy_cloud`
+- 完整性场：`/iap/integrity_cost_field`、`/iap/integrity_front_cost_field`
+- 闭环轨迹：`/drone_0_visual_slam/odom`、`/drone_0_planning/bspline`、`/drone_0_planning/pos_cmd`
+- GNSS/ARAIM：`/ublox_driver/*`、`/iap/integrity`、`export/demo11_araim_truth_compare.csv`
+- 日志：`export/integrity_along_planner_traj.csv`、`export/planner_traj.csv`、`export/phase1_summary.json`、`export/phase2_summary.json`
+
+常用对比实验：
+
+```bash
+# Baseline：关闭完整性搜索，等价于普通 EGO 前端
+ros2 launch iap demo11_ego_planner_integrity_corridor.launch.py \
+  start_rviz:=false run_duration_s:=90 use_iap_odom_for_planner:=true \
+  planner_use_integrity_cost:=false \
+  planner_use_integrity_front_search:=false \
+  planner_use_integrity_global_search:=false
+
+# Front-Only：只启用局部/front integrity-aware A*
+ros2 launch iap demo11_ego_planner_integrity_corridor.launch.py \
+  start_rviz:=false run_duration_s:=90 use_iap_odom_for_planner:=true \
+  planner_use_integrity_cost:=true \
+  planner_use_integrity_front_search:=true \
+  planner_use_integrity_global_search:=false
+
+# Full：启用 front + global integrity-aware search
+ros2 launch iap demo11_ego_planner_integrity_corridor.launch.py \
+  start_rviz:=false run_duration_s:=90 use_iap_odom_for_planner:=true \
+  planner_use_integrity_cost:=true \
+  planner_use_integrity_front_search:=true \
+  planner_use_integrity_global_search:=true
+```
+
+运行后可以用统一日志分析入口做单次或成对对比：
+
+```bash
+python3 src/iap/tools/ana_log.py \
+  --run /home/dev/ws_iap/src/iap/log/latest
+
+python3 src/iap/tools/ana_log.py \
+  --run /path/to/baseline_run \
+  --compare-run /path/to/full_run
+```
+
+也可以把两次运行的轨迹和完整性 cost field 发布到 RViz 做直观对比：
+
+```bash
+ros2 launch iap demo11_compare_paths.launch.py \
+  off_run_dir:=/path/to/baseline_run \
+  on_run_dir:=/path/to/full_run
+```
+
+关键参数：
+
+| 参数 | 默认值 | 作用 |
+|---|---|---|
+| `use_iap_odom_for_planner` | `false` | 是否让 planner/controller 使用 `/drone_0_visual_slam/odom`；IAP 闭环验证建议显式设为 `true` |
+| `planner_use_integrity_cost` | `true` | 是否在 planner 侧启用完整性代价入口 |
+| `planner_use_integrity_front_search` | `true` | 是否把 `/iap/integrity_front_cost_field` 注入前端 A* |
+| `planner_use_integrity_global_search` | `true` | 是否对全局 waypoint 段使用 integrity-aware A* |
+| `planner_lambda_integrity_front` | `2.0` | 前端完整性代价权重 |
+| `phase2_pl_model` | `gnss_geometry_araim` | 未来 PL 预测模型 |
+| `phase2_use_pl_grid` | `true` | 是否启用 PL grid cache |
+| `phase2_publish_integrity_front_cost_field` | `true` | 是否发布 planner 前端使用的完整性 cost field |
+| `gnss_ephemeris_source` | `rinex` | 默认使用 RINEX 星历；需要文件存在 |
+| `gnss_scenario_file` | `config/gnss_sim/demo7_skymask_nlos.yaml` | 默认 GNSS 退化/故障场景 |
+
+如果当前环境没有默认 RINEX NAV 文件，可以临时切到合成星历做 smoke test：
+
+```bash
+ros2 launch iap demo11_ego_planner_integrity_corridor.launch.py \
+  gnss_ephemeris_source:=synthetic \
+  gnss_enabled_constellations:=GPS
+```
+
 ---
 
 ## 5. 记录与分析
@@ -794,5 +908,6 @@ ros2 topic hz /ublox_driver/range_meas
 8. `demo8`：检查 GNSS/ARAIM 真值对照和三路轨迹。
 9. `demo9`：检查 EGO planner 使用 IAP odom 的 Phase 1 闭环验收。
 10. `demo10`：检查 PI-lite 只读完整性预测和离线对齐。
+11. `demo11`：检查完整 IAP 系统闭环、integrity-aware EGO planner 和 baseline/full 对比。
 
 完成配置修改后，请重启对应 launch；IAP 配置在节点启动时读取，运行中修改 JSON/YAML 不会自动生效。
