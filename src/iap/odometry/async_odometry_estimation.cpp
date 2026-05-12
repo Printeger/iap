@@ -2,6 +2,7 @@
 
 #include <spdlog/spdlog.h>
 #include <iap/util/logging.hpp>
+#include <iap/util/timing_csv.hpp>
 
 namespace glim {
 
@@ -114,7 +115,10 @@ void AsyncOdometryEstimation::run() {
     while (!raw_frames.empty()) {
       if (!end_of_sequence && raw_frames.front()->scan_end_time > last_imu_time) {
         logger->debug("waiting for IMU data (scan_end_time={:.6f}, last_imu_time={:.6f} |frames|={})", raw_frames.front()->scan_end_time, last_imu_time, raw_frames.size());
-        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+        {
+          iap::timing_csv::ScopedTimer timer(raw_frames.front()->stamp, "async_odom_queue_wait");
+          std::this_thread::sleep_for(std::chrono::milliseconds(10));
+        }
 
         if (raw_frames.size() > 10) {
           logger->warn("waiting for IMU data (scan_end_time={:.6f}, last_imu_time={:.6f} |frames|={})", raw_frames.front()->scan_end_time, last_imu_time, raw_frames.size());

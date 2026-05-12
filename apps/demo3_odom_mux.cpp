@@ -19,6 +19,9 @@ public:
         declare_parameter<std::string>("control_odom_topic", "/demo3/control_odom");
     iap_lock_sample_count_ = declare_parameter<int>("iap_lock_sample_count", 3);
     iap_freshness_sec_ = declare_parameter<double>("iap_freshness_sec", 0.3);
+    truth_bootstrap_min_duration_sec_ =
+        declare_parameter<double>("truth_bootstrap_min_duration_sec", 0.0);
+    start_time_ = now();
 
     control_odom_pub_ = create_publisher<Odom>(control_odom_topic_, rclcpp::QoS(20));
 
@@ -38,10 +41,11 @@ public:
 
     RCLCPP_INFO(
         get_logger(),
-        "mode=truth_bootstrap truth_odom_topic=%s iap_odom_topic=%s control_odom_topic=%s",
+        "mode=truth_bootstrap truth_odom_topic=%s iap_odom_topic=%s control_odom_topic=%s min_truth_duration=%.3fs",
         truth_odom_topic_.c_str(),
         iap_odom_topic_.c_str(),
-        control_odom_topic_.c_str());
+        control_odom_topic_.c_str(),
+        truth_bootstrap_min_duration_sec_);
   }
 
 private:
@@ -108,15 +112,21 @@ private:
     last_iap_stamp_ = stamp;
     have_last_iap_stamp_ = true;
 
+    const double truth_bootstrap_age_sec = (now() - start_time_).seconds();
+    const bool min_truth_duration_elapsed =
+        truth_bootstrap_age_sec >= truth_bootstrap_min_duration_sec_;
+
     if (mode_ == Mode::kTruthBootstrap &&
+        min_truth_duration_elapsed &&
         consecutive_valid_iap_samples_ >= iap_lock_sample_count_) {
       mode_ = Mode::kIapLocked;
       RCLCPP_INFO(
           get_logger(),
-          "mode=iap_locked valid_samples=%d stamp=%.6f age=%.3f",
+          "mode=iap_locked valid_samples=%d stamp=%.6f age=%.3f truth_bootstrap_age=%.3f",
           consecutive_valid_iap_samples_,
           stamp.seconds(),
-          age_sec);
+          age_sec,
+          truth_bootstrap_age_sec);
     }
 
     if (mode_ == Mode::kIapLocked) {
@@ -163,6 +173,7 @@ private:
   std::string control_odom_topic_;
   int iap_lock_sample_count_ = 3;
   double iap_freshness_sec_ = 0.3;
+  double truth_bootstrap_min_duration_sec_ = 0.0;
   int consecutive_valid_iap_samples_ = 0;
   std::size_t truth_odom_count_ = 0;
   std::size_t iap_odom_count_ = 0;
@@ -173,6 +184,7 @@ private:
   bool have_last_iap_stamp_ = false;
   rclcpp::Time last_truth_stamp_{0, 0, RCL_SYSTEM_TIME};
   rclcpp::Time last_iap_stamp_{0, 0, RCL_SYSTEM_TIME};
+  rclcpp::Time start_time_{0, 0, RCL_SYSTEM_TIME};
 
   rclcpp::Publisher<Odom>::SharedPtr control_odom_pub_;
   rclcpp::Subscription<Odom>::SharedPtr truth_odom_sub_;

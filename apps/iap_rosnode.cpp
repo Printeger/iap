@@ -32,6 +32,7 @@
 #include <iap/util/logging.hpp>
 #include <iap/util/run_log_manager.hpp>
 #include <iap/util/ros_cloud_converter.hpp>
+#include <iap/util/timing_csv.hpp>
 #include <iap/util/time_keeper.hpp>
 
 namespace glim {
@@ -337,6 +338,8 @@ private:
       points_qos,
       [this](const sensor_msgs::msg::PointCloud2::ConstSharedPtr msg) {
         ++points_msg_count_;
+        const double point_stamp = to_sec(msg->header.stamp) + points_time_offset_;
+        iap::timing_csv::ScopedTimer callback_timer(point_stamp, "ros_pointcloud_callback_total");
         if (!logged_first_points_) {
           logged_first_points_ = true;
           RCLCPP_INFO(
@@ -351,19 +354,27 @@ private:
 
         sync_frame_metadata_from_lidar(msg->header.frame_id);
 
-        auto raw_points = extract_raw_points(*msg, intensity_field_, ring_field_);
+        RawPoints::Ptr raw_points;
+        {
+          iap::timing_csv::ScopedTimer timer(point_stamp, "pointcloud_extract_raw");
+          raw_points = extract_raw_points(*msg, intensity_field_, ring_field_);
+        }
         if (!raw_points) {
           ++dropped_points_count_;
           return;
         }
 
-        raw_points->stamp = to_sec(msg->header.stamp) + points_time_offset_;
+        raw_points->stamp = point_stamp;
         if (!time_keeper_->process(raw_points)) {
           ++dropped_points_count_;
           return;
         }
 
-        auto preprocessed = preprocessor_->preprocess(raw_points);
+        PreprocessedFrame::Ptr preprocessed;
+        {
+          iap::timing_csv::ScopedTimer timer(raw_points->stamp, "cloud_preprocess_total");
+          preprocessed = preprocessor_->preprocess(raw_points);
+        }
         if (!preprocessed || preprocessed->size() == 0) {
           ++dropped_points_count_;
           return;

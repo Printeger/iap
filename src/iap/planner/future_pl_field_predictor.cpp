@@ -1,4 +1,5 @@
 #include <iap/planner/future_pl_field_predictor.hpp>
+#include <iap/util/timing_csv.hpp>
 
 #include <Eigen/Eigenvalues>
 
@@ -162,6 +163,7 @@ bool FuturePLFieldPredictor::rebuild_grid(const double now_s) {
     return false;
   }
 
+  iap::timing_csv::ScopedTimer timing_scope(now_s, "pl_grid_build");
   const auto t0 = std::chrono::steady_clock::now();
   auto grid = std::make_shared<PLGrid>();
   if (!grid->reset(snapshot.p_wb,
@@ -234,6 +236,11 @@ bool FuturePLFieldPredictor::rebuild_grid(const double now_s) {
 FuturePLFieldPredictor::GridStats FuturePLFieldPredictor::stats() const {
   std::lock_guard<std::mutex> lock(stats_mutex_);
   return stats_;
+}
+
+std::shared_ptr<const PLGrid> FuturePLFieldPredictor::active_grid() const {
+  std::lock_guard<std::mutex> lock(grid_mutex_);
+  return active_grid_;
 }
 
 FuturePLQueryResult FuturePLFieldPredictor::evaluate_point(

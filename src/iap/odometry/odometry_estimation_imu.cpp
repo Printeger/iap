@@ -16,6 +16,7 @@
 #include <iap/util/key_lifecycle_monitor.hpp>
 #include <iap/util/relinearization_policy.hpp>
 #include <iap/util/shared_state.hpp>
+#include <iap/util/timing_csv.hpp>
 #include <iap/common/imu_integration.hpp>
 #include <iap/common/imu_validation.hpp>
 #include <iap/common/cloud_deskewing.hpp>
@@ -166,6 +167,7 @@ void OdometryEstimationIMU::insert_imu(const double stamp, const Eigen::Vector3d
 }
 
 EstimationFrame::ConstPtr OdometryEstimationIMU::insert_frame(const PreprocessedFrame::Ptr& raw_frame, std::vector<EstimationFrame::ConstPtr>& marginalized_frames) {
+  iap::timing_csv::ScopedTimer frame_timer(raw_frame->stamp, "odom_insert_frame_total");
   if (raw_frame->size()) {
     logger->trace("insert_frame points={} times={} ~ {}", raw_frame->size(), raw_frame->times.front(), raw_frame->times.back());
   } else {
@@ -225,7 +227,10 @@ EstimationFrame::ConstPtr OdometryEstimationIMU::insert_frame(const Preprocessed
 
     std::vector<Eigen::Vector4d> normals;
     std::vector<Eigen::Matrix4d> covs;
-    covariance_estimation->estimate(points_imu, raw_frame->neighbors, normals, covs);
+    {
+      iap::timing_csv::ScopedTimer timer(raw_frame->stamp, "odom_covariance_estimation");
+      covariance_estimation->estimate(points_imu, raw_frame->neighbors, normals, covs);
+    }
 
     auto frame = std::make_shared<gtsam_points::PointCloudCPU>(points_imu);
     if (raw_frame->intensities.size()) {
@@ -278,10 +283,19 @@ EstimationFrame::ConstPtr OdometryEstimationIMU::insert_frame(const Preprocessed
         C(0), gtsam::Vector2(0.0, 0.0),
         gtsam::noiseModel::Diagonal::Sigmas(clk_noise_sigmas));
     }
-    new_factors.add(create_factors(current, nullptr, new_values));
+    {
+      iap::timing_csv::ScopedTimer timer(raw_frame->stamp, "odom_create_factors");
+      new_factors.add(create_factors(current, nullptr, new_values));
+    }
 
-    update_smoother(new_factors, new_values, new_stamps);
-    update_frames(current, new_factors);
+    {
+      iap::timing_csv::ScopedTimer timer(raw_frame->stamp, "odom_smoother_update");
+      update_smoother(new_factors, new_values, new_stamps);
+    }
+    {
+      iap::timing_csv::ScopedTimer timer(raw_frame->stamp, "odom_update_frames");
+      update_frames(current, new_factors);
+    }
     KeyLifecycleMonitor::instance().maybe_log(logger, raw_frame->stamp, 400, 5.0);
 
     return frames.back();
@@ -300,7 +314,11 @@ EstimationFrame::ConstPtr OdometryEstimationIMU::insert_frame(const Preprocessed
 
   // IMU integration between LiDAR scans (inter-scan)
   int num_imu_integrated = 0;
-  const int imu_read_cursor = imu_integration->integrate_imu(last_stamp, raw_frame->stamp, last_imu_bias, &num_imu_integrated);
+  int imu_read_cursor = 0;
+  {
+    iap::timing_csv::ScopedTimer timer(raw_frame->stamp, "odom_imu_integration");
+    imu_read_cursor = imu_integration->integrate_imu(last_stamp, raw_frame->stamp, last_imu_bias, &num_imu_integrated);
+  }
   imu_integration->erase_imu_data(imu_read_cursor);
   logger->trace("num_imu_integrated={}", num_imu_integrated);
 
@@ -400,14 +418,21 @@ EstimationFrame::ConstPtr OdometryEstimationIMU::insert_frame(const Preprocessed
   }
 
   // Deskew and tranform points into IMU frame
-  auto deskewed = deskewing->deskew(T_imu_lidar, pred_imu_times, pred_imu_poses, raw_frame->stamp, raw_frame->times, raw_frame->points);
-  for (auto& pt : deskewed) {
-    pt = T_imu_lidar * pt;
+  std::vector<Eigen::Vector4d> deskewed;
+  {
+    iap::timing_csv::ScopedTimer timer(raw_frame->stamp, "odom_deskew");
+    deskewed = deskewing->deskew(T_imu_lidar, pred_imu_times, pred_imu_poses, raw_frame->stamp, raw_frame->times, raw_frame->points);
+    for (auto& pt : deskewed) {
+      pt = T_imu_lidar * pt;
+    }
   }
 
   std::vector<Eigen::Vector4d> deskewed_normals;
   std::vector<Eigen::Matrix4d> deskewed_covs;
-  covariance_estimation->estimate(deskewed, raw_frame->neighbors, deskewed_normals, deskewed_covs);
+  {
+    iap::timing_csv::ScopedTimer timer(raw_frame->stamp, "odom_covariance_estimation");
+    covariance_estimation->estimate(deskewed, raw_frame->neighbors, deskewed_normals, deskewed_covs);
+  }
 
   auto frame = std::make_shared<gtsam_points::PointCloudCPU>(deskewed);
   if (raw_frame->intensities.size()) {
@@ -422,11 +447,17 @@ EstimationFrame::ConstPtr OdometryEstimationIMU::insert_frame(const Preprocessed
   Callbacks::on_new_frame(new_frame);
   frames.push_back(new_frame);
 
-  new_factors.add(create_factors(current, imu_factor, new_values));
+  {
+    iap::timing_csv::ScopedTimer timer(raw_frame->stamp, "odom_create_factors");
+    new_factors.add(create_factors(current, imu_factor, new_values));
+  }
 
   // Update smoother
   Callbacks::on_smoother_update(*smoother, new_factors, new_values, new_stamps);
-  update_smoother(new_factors, new_values, new_stamps, 1);
+  {
+    iap::timing_csv::ScopedTimer timer(raw_frame->stamp, "odom_smoother_update");
+    update_smoother(new_factors, new_values, new_stamps, 1);
+  }
   Callbacks::on_smoother_update_finish(*smoother);
 
   // Find out marginalized frames
@@ -444,7 +475,10 @@ EstimationFrame::ConstPtr OdometryEstimationIMU::insert_frame(const Preprocessed
   Callbacks::on_marginalized_frames(marginalized_frames);
 
   // Update frames
-  update_frames(current, new_factors);
+  {
+    iap::timing_csv::ScopedTimer timer(raw_frame->stamp, "odom_update_frames");
+    update_frames(current, new_factors);
+  }
 
   // Check if IMU prediction is good or not
   imu_validation->validate(

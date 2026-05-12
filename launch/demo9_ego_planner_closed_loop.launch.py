@@ -33,15 +33,17 @@ def _runtime_config(
     allow_truth_alignment,
     enable_truth_araim_compare=False,
     truth_araim_compare_csv_name="demo9_araim_truth_compare.csv",
+    config_subdir="sim_demo9",
 ):
     iap_share = Path(get_package_share_directory("iap"))
     base_config = iap_share / "config"
-    runtime_root = Path("/tmp") / f"iap_demo9_config_{os.getpid()}_{int(time.time() * 1000)}"
-    runtime_sim_demo9 = runtime_root / "sim_demo9"
+    config_name = config_subdir.replace("/", "_").replace("\\", "_")
+    runtime_root = Path("/tmp") / f"iap_{config_name}_config_{os.getpid()}_{int(time.time() * 1000)}"
+    runtime_config_dir = runtime_root / config_subdir
 
     shutil.copytree(
-        base_config / "sim_demo9",
-        runtime_sim_demo9,
+        base_config / config_subdir,
+        runtime_config_dir,
         ignore_dangling_symlinks=True,
     )
     shutil.copytree(
@@ -50,8 +52,8 @@ def _runtime_config(
         ignore_dangling_symlinks=True,
     )
 
-    config_ros_path = runtime_sim_demo9 / "config_ros.json"
-    config_gnss_path = runtime_sim_demo9 / "config_gnss.json"
+    config_ros_path = runtime_config_dir / "config_ros.json"
+    config_gnss_path = runtime_config_dir / "config_gnss.json"
 
     with config_ros_path.open() as f:
         config_ros = json.load(f)
@@ -105,7 +107,7 @@ def _runtime_config(
         json.dump(config_gnss, f, indent=2)
         f.write("\n")
 
-    return str(runtime_sim_demo9)
+    return str(runtime_config_dir)
 
 
 def _odom_visualization_node(
@@ -206,6 +208,22 @@ def _launch_setup(context):
     planner_start_delay_s = max(
         0.0, float(LaunchConfiguration("planner_start_delay_s").perform(context))
     )
+    enable_preflight_takeoff = _as_bool(
+        LaunchConfiguration("enable_preflight_takeoff").perform(context)
+    )
+    preflight_ground_z = float(LaunchConfiguration("preflight_ground_z").perform(context))
+    preflight_ground_hold_s = max(
+        0.0, float(LaunchConfiguration("preflight_ground_hold_s").perform(context))
+    )
+    preflight_takeoff_duration_s = max(
+        0.1, float(LaunchConfiguration("preflight_takeoff_duration_s").perform(context))
+    )
+    preflight_hover_s = max(
+        0.0, float(LaunchConfiguration("preflight_hover_s").perform(context))
+    )
+    preflight_cmd_rate_hz = max(
+        1.0, float(LaunchConfiguration("preflight_cmd_rate_hz").perform(context))
+    )
     use_dynamic_obstacles = _as_bool(LaunchConfiguration("use_dynamic_obstacles").perform(context))
     allow_truth_alignment = _as_bool(LaunchConfiguration("allow_truth_alignment").perform(context))
     log_phase1 = _as_bool(LaunchConfiguration("log_phase1").perform(context))
@@ -304,14 +322,28 @@ def _launch_setup(context):
     init_x_f = float(init_x)
     init_y_f = float(init_y)
     init_z_f = float(init_z)
+    plant_init_z_f = preflight_ground_z if enable_preflight_takeoff else init_z_f
+    effective_planner_start_delay_s = planner_start_delay_s
+    if enable_preflight_takeoff:
+        effective_planner_start_delay_s += (
+            preflight_ground_hold_s + preflight_takeoff_duration_s + preflight_hover_s
+        )
     map_size_x_f = float(map_size_x)
     map_size_y_f = float(map_size_y)
     map_size_z_f = float(map_size_z)
 
     truth_odom_topic = "/sim/drone_0/truth_odom"
     iap_odom_topic = "/drone_0_visual_slam/odom"
+    preflight_control_odom_topic = "/demo9/preflight_control_odom"
     planner_odom_topic = iap_odom_topic if use_iap_odom else truth_odom_topic
-    controller_odom_topic = planner_odom_topic if use_so3_dynamics else ""
+    use_preflight_control_odom_mux = bool(
+        enable_preflight_takeoff and use_iap_odom and use_so3_dynamics
+    )
+    controller_odom_topic = (
+        preflight_control_odom_topic
+        if use_preflight_control_odom_mux
+        else (planner_odom_topic if use_so3_dynamics else "")
+    )
     plant_mode = "so3_quadrotor_simulator" if use_so3_dynamics else "poscmd_2_odom_debug"
     sim_imu_topic = "/sim/drone_0/imu"
     iap_imu_topic = "/sim/drone_0/imu_iap"
@@ -345,6 +377,7 @@ def _launch_setup(context):
             f"got '{gnss_rinex_nav_file}'"
         )
 
+    config_subdir = LaunchConfiguration("config_subdir").perform(context)
     runtime_config_path = _runtime_config(
         context,
         use_gnss=use_gnss,
@@ -352,6 +385,7 @@ def _launch_setup(context):
         allow_truth_alignment=allow_truth_alignment,
         enable_truth_araim_compare=enable_truth_araim_compare,
         truth_araim_compare_csv_name=truth_araim_compare_csv_name,
+        config_subdir=config_subdir,
     )
 
     camera_file = os.path.join(local_sensing_share, "config", "camera.yaml")
@@ -433,15 +467,15 @@ def _launch_setup(context):
         parameters=[{"traj_server/time_forward": 1.0}],
     )
     planner_launch_actions = [ego_planner_launch, traj_server_node]
-    if planner_start_delay_s > 0.0:
+    if effective_planner_start_delay_s > 0.0:
         planner_launch_actions = [
             LogInfo(
                 msg=(
                     f"[demo9] delaying EGO planner start by "
-                    f"{planner_start_delay_s:.2f}s"
+                    f"{effective_planner_start_delay_s:.2f}s"
                 )
             ),
-            TimerAction(period=planner_start_delay_s, actions=planner_launch_actions),
+            TimerAction(period=effective_planner_start_delay_s, actions=planner_launch_actions),
         ]
 
     actions = [
@@ -454,6 +488,26 @@ def _launch_setup(context):
             )
         ),
     ]
+    if enable_preflight_takeoff:
+        actions.append(
+            LogInfo(
+                msg=(
+                    f"[demo9] preflight enabled: ground hold {preflight_ground_hold_s:.2f}s "
+                    f"at z={preflight_ground_z:.2f}, takeoff {preflight_takeoff_duration_s:.2f}s "
+                    f"to ({init_x_f:.2f}, {init_y_f:.2f}, {init_z_f:.2f}), hover "
+                    f"{preflight_hover_s:.2f}s before planner"
+                )
+            )
+        )
+    if use_preflight_control_odom_mux:
+        actions.append(
+            LogInfo(
+                msg=(
+                    f"[demo9] SO3 controller uses truth odom during preflight, then "
+                    f"switches to IAP odom on {controller_odom_topic}"
+                )
+            )
+        )
     if map_generator_mode not in ("random_forest", "off"):
         raise RuntimeError("map_generator_mode must be 'random_forest' or 'off'")
     if map_generator_mode == "off":
@@ -571,6 +625,44 @@ def _launch_setup(context):
                 {"points_topic": iap_lidar_topic},
             ],
         ),
+        Node(
+            package="iap",
+            executable="demo_takeoff_cmd_publisher",
+            name="demo9_preflight_takeoff_cmd_publisher",
+            output="screen",
+            condition=IfCondition("true" if enable_preflight_takeoff else "false"),
+            remappings=[("position_cmd", pos_cmd_topic)],
+            parameters=[
+                {"ground_x": init_x_f},
+                {"ground_y": init_y_f},
+                {"ground_z": preflight_ground_z},
+                {"hover_x": init_x_f},
+                {"hover_y": init_y_f},
+                {"hover_z": init_z_f},
+                {"ground_hold_duration_s": preflight_ground_hold_s},
+                {"takeoff_duration_s": preflight_takeoff_duration_s},
+                {"hover_duration_s": preflight_hover_s},
+                {"publish_rate_hz": preflight_cmd_rate_hz},
+                {"trajectory_id": 9001},
+                {"frame_id": "map"},
+                {"stop_after_sequence": True},
+            ],
+        ),
+        Node(
+            package="iap",
+            executable="demo3_odom_mux",
+            name="demo9_preflight_control_odom_mux",
+            output="screen",
+            condition=IfCondition("true" if use_preflight_control_odom_mux else "false"),
+            parameters=[
+                {"truth_odom_topic": truth_odom_topic},
+                {"iap_odom_topic": iap_odom_topic},
+                {"control_odom_topic": controller_odom_topic},
+                {"iap_lock_sample_count": 3},
+                {"iap_freshness_sec": 0.3},
+                {"truth_bootstrap_min_duration_sec": effective_planner_start_delay_s},
+            ],
+        ),
         *planner_launch_actions,
         Node(
             package="poscmd_2_odom",
@@ -584,7 +676,7 @@ def _launch_setup(context):
             parameters=[
                 {"init_x": init_x_f},
                 {"init_y": init_y_f},
-                {"init_z": init_z_f},
+                {"init_z": plant_init_z_f},
             ],
         ),
         _odom_visualization_node(
@@ -681,7 +773,7 @@ def _launch_setup(context):
                     {"rate/odom": 100.0},
                     {"simulator/init_state_x": init_x_f},
                     {"simulator/init_state_y": init_y_f},
-                    {"simulator/init_state_z": init_z_f},
+                    {"simulator/init_state_z": plant_init_z_f},
                     {"simulator/hold_until_cmd": True},
                     {"sim_time/enable": True},
                     {"sim_time/start_utc": "2022-07-06T00:00:00Z"},
@@ -704,7 +796,7 @@ def _launch_setup(context):
                             {"quadrotor_name": f"drone_{drone_id}"},
                             {"so3_control/init_state_x": init_x_f},
                             {"so3_control/init_state_y": init_y_f},
-                            {"so3_control/init_state_z": init_z_f},
+                            {"so3_control/init_state_z": plant_init_z_f},
                             {"mass": 0.98},
                             {"use_angle_corrections": False},
                             {"use_external_yaw": False},
@@ -714,7 +806,7 @@ def _launch_setup(context):
                             corrections_file,
                         ],
                         remappings=[
-                            ("odom", planner_odom_topic),
+                            ("odom", controller_odom_topic),
                             ("position_cmd", pos_cmd_topic),
                             ("motors", "/demo9/motors"),
                             ("corrections", "/demo9/corrections"),
@@ -739,7 +831,7 @@ def _launch_setup(context):
                 parameters=[
                     {"init_x": init_x_f},
                     {"init_y": init_y_f},
-                    {"init_z": init_z_f},
+                    {"init_z": plant_init_z_f},
                 ],
             )
         )
@@ -832,6 +924,7 @@ def generate_launch_description():
 
     return LaunchDescription([
         DeclareLaunchArgument("start_rviz", default_value="true"),
+        DeclareLaunchArgument("config_subdir", default_value="sim_demo9"),
         DeclareLaunchArgument("use_gnss", default_value="true"),
         DeclareLaunchArgument("use_araim", default_value="true"),
         DeclareLaunchArgument("use_iap_odom_for_planner", default_value="true"),
@@ -882,6 +975,12 @@ def generate_launch_description():
         DeclareLaunchArgument("planner_integrity_global_astar_step_m", default_value="0.5"),
         DeclareLaunchArgument("planner_integrity_global_max_waypoints", default_value="80"),
         DeclareLaunchArgument("planner_start_delay_s", default_value="0.0"),
+        DeclareLaunchArgument("enable_preflight_takeoff", default_value="false"),
+        DeclareLaunchArgument("preflight_ground_z", default_value="0.0"),
+        DeclareLaunchArgument("preflight_ground_hold_s", default_value="10.0"),
+        DeclareLaunchArgument("preflight_takeoff_duration_s", default_value="5.0"),
+        DeclareLaunchArgument("preflight_hover_s", default_value="2.0"),
+        DeclareLaunchArgument("preflight_cmd_rate_hz", default_value="50.0"),
         DeclareLaunchArgument("use_dynamic_obstacles", default_value="false"),
         DeclareLaunchArgument("map_source", default_value="local_sensing_cloud"),
         DeclareLaunchArgument("map_generator_mode", default_value="random_forest"),
@@ -889,8 +988,8 @@ def generate_launch_description():
         DeclareLaunchArgument("log_phase1", default_value="true"),
         DeclareLaunchArgument("enable_truth_araim_compare", default_value="false"),
         DeclareLaunchArgument("truth_araim_compare_csv_name", default_value="demo9_araim_truth_compare.csv"),
-        DeclareLaunchArgument("gnss_ephemeris_source", default_value="synthetic"),
-        DeclareLaunchArgument("gnss_enabled_constellations", default_value="GPS"),
+        DeclareLaunchArgument("gnss_ephemeris_source", default_value="rinex"),
+        DeclareLaunchArgument("gnss_enabled_constellations", default_value="GPS,BDS,GAL,GLO"),
         DeclareLaunchArgument(
             "gnss_scenario_file",
             default_value=os.path.join(iap_share, "config", "gnss_sim", "demo7_open_sky.yaml"),

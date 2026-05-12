@@ -458,6 +458,13 @@ if(DEFINED ENV{ROS_VERSION})
     list(APPEND iap_LIBRARIES phase2_planner_integrity_evaluator)
 
     ## Demo11 forest scenario helpers
+    add_executable(demo_takeoff_cmd_publisher
+      apps/demo_takeoff_cmd_publisher.cpp
+    )
+    target_link_libraries(demo_takeoff_cmd_publisher iap)
+    ament_target_dependencies(demo_takeoff_cmd_publisher rclcpp quadrotor_msgs)
+    list(APPEND iap_LIBRARIES demo_takeoff_cmd_publisher)
+
     add_executable(demo11_corridor_map_publisher
       apps/demo11_corridor_map_publisher.cpp
     )
@@ -485,6 +492,7 @@ if(DEFINED ENV{ROS_VERSION})
       demo3_iap_bridge
       demo4_lidar_body_bridge
       phase2_planner_integrity_evaluator
+      demo_takeoff_cmd_publisher
       demo11_corridor_map_publisher
       demo11_compare_paths_visualizer
       DESTINATION lib/iap

@@ -95,6 +95,7 @@ class FuturePLFieldPredictor {
   bool rebuild_grid(double now_s);
 
   const Params& params() const { return params_; }
+  std::shared_ptr<const PLGrid> active_grid() const;
   GridStats stats() const;
 
  private:

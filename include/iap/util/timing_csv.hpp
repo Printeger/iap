@@ -3,6 +3,7 @@
 #include <iap/util/config.hpp>
 #include <iap/util/run_log_manager.hpp>
 
+#include <chrono>
 #include <cstdio>
 #include <filesystem>
 #include <mutex>
@@ -62,5 +63,35 @@ inline void append(double stamp, const char* module, double elapsed_ms) {
   std::fprintf(f, "%.6f,%s,%.3f\n", stamp, module, elapsed_ms);
   std::fclose(f);
 }
+
+class ScopedTimer {
+public:
+  using Clock = std::chrono::steady_clock;
+
+  ScopedTimer(double stamp, const char* module)
+  : enabled_(enabled()),
+    stamp_(stamp),
+    module_(module) {
+    if (enabled_) {
+      start_ = Clock::now();
+    }
+  }
+
+  ~ScopedTimer() {
+    if (!enabled_) return;
+    const double elapsed_ms =
+        std::chrono::duration<double, std::milli>(Clock::now() - start_).count();
+    append(stamp_, module_, elapsed_ms);
+  }
+
+  ScopedTimer(const ScopedTimer&) = delete;
+  ScopedTimer& operator=(const ScopedTimer&) = delete;
+
+private:
+  bool enabled_ = false;
+  double stamp_ = 0.0;
+  const char* module_ = "";
+  Clock::time_point start_{};
+};
 
 }  // namespace iap::timing_csv

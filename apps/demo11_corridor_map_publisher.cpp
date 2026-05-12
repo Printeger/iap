@@ -23,6 +23,7 @@ struct ForestGroups {
   std::vector<Point> all;
   std::vector<Point> trunks;
   std::vector<Point> canopy;
+  std::vector<Point> terminal_wall;
 };
 
 struct TrunkInstance {
@@ -104,6 +105,115 @@ void add_sphere_clipped_to_hemisphere(std::vector<Point>& group,
   }
 }
 
+void add_box(std::vector<Point>& group,
+             std::vector<Point>& all,
+             const double x_min,
+             const double x_max,
+             const double y_min,
+             const double y_max,
+             const double z_min,
+             const double z_max,
+             const double resolution) {
+  const double res = std::max(0.05, resolution);
+  const double xmin = std::min(x_min, x_max);
+  const double xmax = std::max(x_min, x_max);
+  const double ymin = std::min(y_min, y_max);
+  const double ymax = std::max(y_min, y_max);
+  const double zmin = std::min(z_min, z_max);
+  const double zmax = std::max(z_min, z_max);
+  for (double x = xmin; x <= xmax + 1.0e-9; x += res) {
+    for (double y = ymin; y <= ymax + 1.0e-9; y += res) {
+      for (double z = zmin; z <= zmax + 1.0e-9; z += res) {
+        append_point(group, x, y, z);
+        append_point(all, x, y, z);
+      }
+    }
+  }
+}
+
+void add_terminal_wall(std::vector<Point>& group,
+                       std::vector<Point>& all,
+                       const double center_x,
+                       const double center_y,
+                       const double width_y,
+                       const double z_min,
+                       const double z_max,
+                       const double thickness_x,
+                       const double resolution,
+                       const double feature_depth_x,
+                       const int feature_count,
+                       const int feature_seed) {
+  const double res = std::max(0.05, resolution);
+  const double half_width = 0.5 * std::max(res, width_y);
+  const double half_thickness = 0.5 * std::max(res, thickness_x);
+  const double wall_height = std::max(res, z_max - z_min);
+  const double max_depth = std::max(0.0, feature_depth_x);
+  const double front_x = center_x - half_thickness;
+  const double back_x = center_x + half_thickness;
+  const double y_min = center_y - half_width;
+  const double y_max = center_y + half_width;
+
+  add_box(group, all, front_x, back_x, y_min, y_max, z_min, z_max, res);
+
+  if (max_depth <= 1.0e-9) {
+    return;
+  }
+
+  std::mt19937 rng(static_cast<std::uint32_t>(feature_seed));
+  std::uniform_real_distribution<double> unit(0.0, 1.0);
+
+  const auto add_feature = [&](const double y_center,
+                               const double z_center,
+                               const double size_y,
+                               const double size_z,
+                               const double depth,
+                               const bool on_front) {
+    const double sy = std::clamp(size_y, res, 0.95 * width_y);
+    const double sz = std::clamp(size_z, res, 0.95 * wall_height);
+    const double y0 = std::clamp(y_center - 0.5 * sy, y_min, y_max);
+    const double y1 = std::clamp(y_center + 0.5 * sy, y_min, y_max);
+    const double z0 = std::clamp(z_center - 0.5 * sz, z_min, z_max);
+    const double z1 = std::clamp(z_center + 0.5 * sz, z_min, z_max);
+    const double d = std::max(res, std::min(max_depth, depth));
+    if (on_front) {
+      add_box(group, all, front_x - d, front_x, y0, y1, z0, z1, res);
+    } else {
+      add_box(group, all, back_x, back_x + d, y0, y1, z0, z1, res);
+    }
+  };
+
+  const double y_span = std::max(res, width_y);
+  const double z_span = wall_height;
+
+  for (int i = 0; i < 4; ++i) {
+    const bool on_front = (i % 2) == 0;
+    const double y = y_min + (0.18 + 0.21 * static_cast<double>(i)) * y_span;
+    const double z = z_min + 0.5 * z_span;
+    const double depth = max_depth * (0.40 + 0.12 * static_cast<double>(i));
+    add_feature(y, z, 0.18 + 0.04 * static_cast<double>(i), z_span, depth,
+                on_front);
+  }
+
+  for (int i = 0; i < 3; ++i) {
+    const bool on_front = (i % 2) != 0;
+    const double y = center_y;
+    const double z = z_min + (0.28 + 0.22 * static_cast<double>(i)) * z_span;
+    const double depth = max_depth * (0.55 + 0.10 * static_cast<double>(i));
+    add_feature(y, z, y_span, 0.16 + 0.05 * static_cast<double>(i), depth,
+                on_front);
+  }
+
+  for (int i = 0; i < feature_count; ++i) {
+    const bool on_front = unit(rng) < 0.55;
+    const double y = y_min + unit(rng) * y_span;
+    const double z = z_min + unit(rng) * z_span;
+    const double size_y = 0.35 + unit(rng) * 1.10;
+    const double size_z = 0.25 + unit(rng) * 0.85;
+    const double depth = max_depth * (0.25 + unit(rng) * 0.75);
+    add_feature(y, z, size_y, size_z, depth, on_front);
+  }
+}
+
 }  // namespace
 
 class Demo11CorridorMapPublisher : public rclcpp::Node {
@@ -146,11 +256,32 @@ class Demo11CorridorMapPublisher : public rclcpp::Node {
     trunk_radius_m_ = declare_parameter<double>("trunk_radius_m", 0.14);
     trunk_min_height_m_ = declare_parameter<double>("trunk_min_height_m", 1.5);
     trunk_max_height_m_ = declare_parameter<double>("trunk_max_height_m", 3.0);
+    terminal_wall_enabled_ =
+        declare_parameter<bool>("terminal_wall_enabled", true);
+    terminal_wall_x_m_ = declare_parameter<double>("terminal_wall_x_m", 13.5);
+    terminal_wall_y_m_ = declare_parameter<double>("terminal_wall_y_m", 0.0);
+    terminal_wall_width_y_m_ =
+        declare_parameter<double>("terminal_wall_width_y_m", 10.0);
+    terminal_wall_z_min_m_ =
+        declare_parameter<double>("terminal_wall_z_min_m", 0.0);
+    terminal_wall_z_max_m_ =
+        declare_parameter<double>("terminal_wall_z_max_m", 3.2);
+    terminal_wall_thickness_x_m_ =
+        declare_parameter<double>("terminal_wall_thickness_x_m", 0.20);
+    terminal_wall_resolution_m_ =
+        declare_parameter<double>("terminal_wall_resolution_m", 0.10);
+    terminal_wall_feature_depth_x_m_ =
+        declare_parameter<double>("terminal_wall_feature_depth_x_m", 0.65);
+    terminal_wall_feature_count_ =
+        declare_parameter<int>("terminal_wall_feature_count", 48);
+    terminal_wall_feature_seed_ =
+        declare_parameter<int>("terminal_wall_feature_seed", random_seed_ + 11011);
 
     build_map();
     global_cloud_ = make_cloud(groups_.all);
     trunk_cloud_ = make_cloud(groups_.trunks);
     canopy_cloud_ = make_cloud(groups_.canopy);
+    terminal_wall_cloud_ = make_cloud(groups_.terminal_wall);
 
     const auto qos = rclcpp::QoS(1).transient_local().reliable();
     global_pub_ = create_publisher<sensor_msgs::msg::PointCloud2>(
@@ -161,6 +292,8 @@ class Demo11CorridorMapPublisher : public rclcpp::Node {
         "/demo11/trunk_cloud", qos);
     canopy_pub_ = create_publisher<sensor_msgs::msg::PointCloud2>(
         "/demo11/canopy_cloud", qos);
+    terminal_wall_pub_ = create_publisher<sensor_msgs::msg::PointCloud2>(
+        "/demo11/terminal_wall_cloud", qos);
 
     const auto period = std::chrono::duration<double>(
         1.0 / std::max(0.1, publish_rate_hz_));
@@ -174,7 +307,9 @@ class Demo11CorridorMapPublisher : public rclcpp::Node {
         "LL/LR/UL/UR=%d/%d/%d/%d, density LL/LR/UL/UR=%.2f/%.2f/%.2f/%.2f "
         "trees/m^2, canopy LL/LR/UL/UR=%d/%d/%d/%d, canopy radius %.2f-%.2fm, canopy density "
         "LL/LR/UL/UR=%.2f/%.2f/%.2f/%.2f, height range %.2f-%.2fm, %zu total "
-        "points, resolution %.2fm, seed %d",
+        "points, terminal wall %s at x=%.2fm y=%.2fm width_y=%.2fm z=%.2f-%.2fm "
+        "thickness_x=%.2fm feature_depth_x=%.2fm feature_count=%d feature_seed=%d "
+        "wall_points=%zu, resolution %.2fm, seed %d",
         forest_size_x_m_, forest_size_y_m_, 0.5 * forest_size_x_m_,
         0.5 * forest_size_y_m_, stratified_cell_size_m_, region_tree_counts_[0],
         region_tree_counts_[1], region_tree_counts_[2],
@@ -186,7 +321,14 @@ class Demo11CorridorMapPublisher : public rclcpp::Node {
         canopy_hemisphere_radius_max_m_, canopy_density_lower_left_,
         canopy_density_lower_right_, canopy_density_upper_left_,
         canopy_density_upper_right_, trunk_min_height_m_,
-        trunk_max_height_m_, groups_.all.size(), resolution_, random_seed_);
+        trunk_max_height_m_, groups_.all.size(),
+        terminal_wall_enabled_ ? "enabled" : "disabled",
+        terminal_wall_x_m_, terminal_wall_y_m_, terminal_wall_width_y_m_,
+        terminal_wall_z_min_m_, terminal_wall_z_max_m_,
+        terminal_wall_thickness_x_m_, terminal_wall_feature_depth_x_m_,
+        terminal_wall_feature_count_, terminal_wall_feature_seed_,
+        groups_.terminal_wall.size(),
+        resolution_, random_seed_);
   }
 
  private:
@@ -350,6 +492,18 @@ class Demo11CorridorMapPublisher : public rclcpp::Node {
     canopy_leaf_ball_radius_m_ = std::max(0.03, canopy_leaf_ball_radius_m_);
     canopy_ball_spacing_ratio_ = std::clamp(canopy_ball_spacing_ratio_, 0.5, 2.0);
     canopy_resolution_m_ = std::max(0.05, canopy_resolution_m_);
+    terminal_wall_width_y_m_ = std::max(0.1, terminal_wall_width_y_m_);
+    terminal_wall_thickness_x_m_ = std::max(0.05, terminal_wall_thickness_x_m_);
+    terminal_wall_resolution_m_ = std::max(0.05, terminal_wall_resolution_m_);
+    terminal_wall_feature_depth_x_m_ =
+        std::max(0.0, terminal_wall_feature_depth_x_m_);
+    terminal_wall_feature_count_ = std::max(0, terminal_wall_feature_count_);
+    if (terminal_wall_z_min_m_ > terminal_wall_z_max_m_) {
+      std::swap(terminal_wall_z_min_m_, terminal_wall_z_max_m_);
+    }
+    if (terminal_wall_z_max_m_ - terminal_wall_z_min_m_ < terminal_wall_resolution_m_) {
+      terminal_wall_z_max_m_ = terminal_wall_z_min_m_ + terminal_wall_resolution_m_;
+    }
     if (trunk_min_height_m_ > trunk_max_height_m_) {
       std::swap(trunk_min_height_m_, trunk_max_height_m_);
     }
@@ -382,6 +536,17 @@ class Demo11CorridorMapPublisher : public rclcpp::Node {
         add_canopy(rng, trunk);
       }
     }
+
+    if (terminal_wall_enabled_) {
+      add_terminal_wall(groups_.terminal_wall, groups_.all,
+                        terminal_wall_x_m_, terminal_wall_y_m_,
+                        terminal_wall_width_y_m_, terminal_wall_z_min_m_,
+                        terminal_wall_z_max_m_, terminal_wall_thickness_x_m_,
+                        terminal_wall_resolution_m_,
+                        terminal_wall_feature_depth_x_m_,
+                        terminal_wall_feature_count_,
+                        terminal_wall_feature_seed_);
+    }
   }
 
   sensor_msgs::msg::PointCloud2 make_cloud(const std::vector<Point>& points) const {
@@ -413,10 +578,12 @@ class Demo11CorridorMapPublisher : public rclcpp::Node {
     global_cloud_.header.stamp = stamp;
     trunk_cloud_.header.stamp = stamp;
     canopy_cloud_.header.stamp = stamp;
+    terminal_wall_cloud_.header.stamp = stamp;
     global_pub_->publish(global_cloud_);
     local_pub_->publish(global_cloud_);
     trunk_pub_->publish(trunk_cloud_);
     canopy_pub_->publish(canopy_cloud_);
+    terminal_wall_pub_->publish(terminal_wall_cloud_);
   }
 
   double resolution_ = 0.10;
@@ -442,6 +609,17 @@ class Demo11CorridorMapPublisher : public rclcpp::Node {
   double trunk_radius_m_ = 0.14;
   double trunk_min_height_m_ = 1.5;
   double trunk_max_height_m_ = 3.0;
+  bool terminal_wall_enabled_ = true;
+  double terminal_wall_x_m_ = 13.5;
+  double terminal_wall_y_m_ = 0.0;
+  double terminal_wall_width_y_m_ = 10.0;
+  double terminal_wall_z_min_m_ = 0.0;
+  double terminal_wall_z_max_m_ = 3.2;
+  double terminal_wall_thickness_x_m_ = 0.20;
+  double terminal_wall_resolution_m_ = 0.10;
+  double terminal_wall_feature_depth_x_m_ = 0.65;
+  int terminal_wall_feature_count_ = 48;
+  int terminal_wall_feature_seed_ = 11022;
   std::array<int, 4> region_tree_counts_{};
   std::array<int, 4> region_canopy_counts_{};
   std::vector<TrunkInstance> trunks_;
@@ -449,10 +627,12 @@ class Demo11CorridorMapPublisher : public rclcpp::Node {
   sensor_msgs::msg::PointCloud2 global_cloud_;
   sensor_msgs::msg::PointCloud2 trunk_cloud_;
   sensor_msgs::msg::PointCloud2 canopy_cloud_;
+  sensor_msgs::msg::PointCloud2 terminal_wall_cloud_;
   rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr global_pub_;
   rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr local_pub_;
   rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr trunk_pub_;
   rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr canopy_pub_;
+  rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr terminal_wall_pub_;
   rclcpp::TimerBase::SharedPtr timer_;
 };
 

@@ -267,6 +267,16 @@ private:
 
     const std::size_t input_points =
         static_cast<std::size_t>(input.width) * static_cast<std::size_t>(input.height);
+    if (input_points == 0) {
+      RCLCPP_WARN_THROTTLE(
+          get_logger(),
+          *get_clock(),
+          2000,
+          "dropping empty input cloud stamp=%.6f",
+          rclcpp::Time(input.header.stamp).seconds());
+      return;
+    }
+
     std::vector<Eigen::Vector3f> output_points;
     output_points.reserve(input_points);
 
@@ -285,6 +295,16 @@ private:
 
       const Eigen::Vector3d p_body = T_body_map * Eigen::Vector3d(x, y, z);
       output_points.push_back(p_body.cast<float>());
+    }
+    if (output_points.empty()) {
+      RCLCPP_WARN_THROTTLE(
+          get_logger(),
+          *get_clock(),
+          2000,
+          "dropping cloud with no finite xyz points stamp=%.6f input_points=%zu",
+          rclcpp::Time(input.header.stamp).seconds(),
+          input_points);
+      return;
     }
 
     sensor_msgs::msg::PointCloud2 output;

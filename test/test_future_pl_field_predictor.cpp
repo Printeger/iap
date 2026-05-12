@@ -102,6 +102,14 @@ TEST(FuturePLFieldPredictorTest, QueryUsesGridInsideCoverage) {
   predictor.update_snapshot(make_snapshot(true));
 
   ASSERT_TRUE(predictor.rebuild_grid(100.0));
+  const auto active_grid = predictor.active_grid();
+  ASSERT_TRUE(active_grid);
+  EXPECT_TRUE(active_grid->valid());
+  EXPECT_EQ(active_grid->generation(), 0);
+  EXPECT_EQ(active_grid->nx(), 5);
+  EXPECT_EQ(active_grid->ny(), 5);
+  EXPECT_EQ(active_grid->nz(), 3);
+
   const auto result = predictor.query(Eigen::Vector3d(0.1, 0.1, 0.1), 101.0);
 
   ASSERT_TRUE(result.valid);

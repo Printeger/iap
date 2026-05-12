@@ -12,6 +12,7 @@ Supported layout:
   export/iap_gnss_factor_debug.csv
   export/iap_araim.csv
   export/traj_with_gnss.csv
+  export/pl_grid_voxels.csv
   export/dump/*
   metadata/run_info.json
   metadata/config/*.json
@@ -303,6 +304,7 @@ def artifact_paths(run_dir: Path) -> dict[str, tuple[Path | None, str, list[str]
         "actual_integrity_along_odom": ["export/actual_integrity_along_odom.csv"],
         "exec_trajectory": ["export/exec_trajectory.csv"],
         "pl_grid_consistency": ["export/pl_grid_consistency.csv"],
+        "pl_grid_voxels": ["export/pl_grid_voxels.csv"],
         "planner_integrity_cost_debug": ["export/planner_integrity_cost_debug.csv"],
     }
     result = {}
@@ -535,6 +537,187 @@ def analyze_timing(rows: list[dict[str, str]]) -> dict[str, Any]:
     return {"available": True, "row_count": len(rows), "module_stats": module_stats}
 
 
+RECOMMENDED_TIMING_MODULES = [
+    "integrity",
+    "araim",
+    "gnss_injection",
+    "trunk_detector",
+    "ros_pointcloud_callback_total",
+    "pointcloud_extract_raw",
+    "cloud_preprocess_total",
+    "odom_insert_frame_total",
+    "odom_imu_integration",
+    "odom_deskew",
+    "odom_covariance_estimation",
+    "odom_create_factors",
+    "odom_smoother_update",
+    "odom_update_frames",
+    "async_odom_queue_wait",
+    "pl_grid_build",
+]
+
+
+def timing_enabled_from_metadata(metadata: dict[str, Any]) -> bool | None:
+    configs = metadata.get("configs", {})
+    return config_enabled(configs, "timing")
+
+
+def timing_stat_item(
+    module: str,
+    source: str,
+    values: list[float],
+    data_source: str,
+    unit: str = "ms",
+    status: str = "found",
+) -> dict[str, Any]:
+    return {
+        "module": module,
+        "source": source,
+        "data_source": data_source,
+        "unit": unit,
+        "status": status,
+        **stats(values),
+    }
+
+
+def nullable_timing_stat_item(
+    module: str,
+    source: str,
+    data_source: str,
+    count: int,
+    mean_value: float | None,
+    p50_value: float | None = None,
+    p95_value: float | None = None,
+    p99_value: float | None = None,
+    max_value: float | None = None,
+    min_value: float | None = None,
+    unit: str = "ms",
+    status: str = "found",
+) -> dict[str, Any]:
+    return {
+        "module": module,
+        "source": source,
+        "data_source": data_source,
+        "unit": unit,
+        "status": status,
+        "count": count,
+        "mean": mean_value,
+        "p50": p50_value,
+        "p95": p95_value,
+        "p99": p99_value,
+        "max": max_value,
+        "min": min_value,
+    }
+
+
+def analyze_real_time_timing(
+    timing_rows: list[dict[str, str]],
+    planner_rows: list[dict[str, str]],
+    phase2_summary: dict[str, Any],
+    metadata: dict[str, Any],
+) -> dict[str, Any]:
+    timing_enabled = timing_enabled_from_metadata(metadata)
+    disabled = timing_enabled is False
+    by_module: dict[str, list[float]] = defaultdict(list)
+    for row in timing_rows:
+        module = row.get("module", "").strip()
+        elapsed = first_number(row, ["elapsed_ms", "duration_ms", "time_ms", "ms", "elapsed", "duration"])
+        if module and elapsed is not None:
+            by_module[module].append(elapsed)
+
+    modules: list[dict[str, Any]] = []
+    for module, values in sorted(by_module.items()):
+        modules.append(timing_stat_item(module, "iap_timing", values, "profiling/iap_timing.csv"))
+
+    modules_by_name = {item["module"]: item for item in modules}
+
+    planner_total = numeric_values(planner_rows, "total_time_ms")
+    if planner_total:
+        modules.append(timing_stat_item(
+            "planner_optimization_total",
+            "planner_debug",
+            planner_total,
+            "export/planner_integrity_cost_debug.csv:total_time_ms",
+        ))
+    planner_iteration = numeric_values(planner_rows, "iteration_time_ms")
+    if planner_iteration:
+        modules.append(timing_stat_item(
+            "planner_optimization_iteration",
+            "planner_debug",
+            planner_iteration,
+            "export/planner_integrity_cost_debug.csv:iteration_time_ms",
+        ))
+    field_age_ms = [value * 1000.0 for value in numeric_values(planner_rows, "field_age_s")]
+    if field_age_ms:
+        modules.append(timing_stat_item(
+            "integrity_field_age",
+            "planner_debug",
+            field_age_ms,
+            "export/planner_integrity_cost_debug.csv:field_age_s",
+        ))
+
+    pl_grid = phase2_summary.get("pl_grid") if isinstance(phase2_summary, dict) else {}
+    if isinstance(pl_grid, dict) and "pl_grid_build" not in modules_by_name:
+        build_time = pl_grid.get("build_time_ms")
+        if isinstance(build_time, dict):
+            mean_value = to_float(build_time.get("mean"))
+            max_value = to_float(build_time.get("max"))
+            last_value = to_float(build_time.get("last"))
+            update_count = int(to_float(pl_grid.get("update_count")) or 0)
+            if mean_value is not None or max_value is not None or last_value is not None:
+                modules.append(nullable_timing_stat_item(
+                    "pl_grid_build",
+                    "phase2_summary",
+                    "export/phase2_summary.json:pl_grid.build_time_ms",
+                    update_count,
+                    mean_value,
+                    p50_value=last_value,
+                    p95_value=None,
+                    p99_value=None,
+                    max_value=max_value,
+                    min_value=None,
+                    status="summary_only",
+                ))
+
+    present = {item["module"] for item in modules if item.get("count", 0)}
+    missing_modules = []
+    for module in RECOMMENDED_TIMING_MODULES:
+        if module in present:
+            continue
+        if disabled:
+            status = "disabled_by_config"
+        elif timing_rows and module in {"integrity", "araim", "gnss_injection", "trunk_detector"}:
+            status = "instrumented_no_rows"
+        else:
+            status = "missing"
+        missing_modules.append({"module": module, "status": status})
+
+    bottlenecks = [
+        item for item in modules
+        if item.get("status") in {"found", "summary_only"}
+        and item.get("module") != "integrity_field_age"
+        and to_float(item.get("p95")) is not None
+    ]
+    bottlenecks.sort(key=lambda item: to_float(item.get("p95")) or -1.0, reverse=True)
+
+    return {
+        "available": bool(modules) or disabled,
+        "timing_enabled": timing_enabled,
+        "timing_row_count": len(timing_rows),
+        "planner_debug_row_count": len(planner_rows),
+        "modules": sorted(modules, key=lambda item: (to_float(item.get("p95")) or to_float(item.get("mean")) or -1.0), reverse=True),
+        "missing_modules": missing_modules,
+        "top_bottlenecks": bottlenecks[:5],
+        "planner": {
+            "available": bool(planner_rows),
+            "total_time_ms": stats(planner_total),
+            "iteration_time_ms": stats(planner_iteration),
+            "field_age_ms": stats(field_age_ms),
+        },
+        "pl_grid": pl_grid if isinstance(pl_grid, dict) else {},
+    }
+
+
 def analyze_icp(rows: list[dict[str, str]]) -> dict[str, Any]:
     if not rows:
         return {"available": False}
@@ -757,6 +940,29 @@ def analyze_pl_grid_consistency(rows: list[dict[str, str]]) -> dict[str, Any]:
         "vpl_direct": stats(vpl_directs),
         "hpl_grid": stats(hpl_grids),
         "vpl_grid": stats(vpl_grids),
+        "rows": rows,
+    }
+
+
+def analyze_pl_grid_voxels(rows: list[dict[str, str]]) -> dict[str, Any]:
+    if not rows:
+        return {"available": False}
+    generations = [int(v) for v in numeric_values(rows, "grid_generation")]
+    latest_generation = max(generations) if generations else None
+    latest_generation_size = (
+        sum(1 for row in rows if to_float(row.get("grid_generation")) == latest_generation)
+        if latest_generation is not None
+        else 0
+    )
+    return {
+        "available": True,
+        "row_count": len(rows),
+        "generation_count": len(set(generations)),
+        "latest_generation": latest_generation,
+        "latest_generation_size": latest_generation_size,
+        "hpl": stats(numeric_values(rows, "hpl")),
+        "vpl": stats(numeric_values(rows, "vpl")),
+        "pl": stats(numeric_values(rows, "pl")),
         "rows": rows,
     }
 
@@ -1199,23 +1405,111 @@ def analyze_desired_tracking(rows: list[dict[str, str]]) -> dict[str, Any]:
             "available": False,
             "reason": "missing export/desired_vs_truth.csv or export/tracking_error.csv",
         }
-    candidate_columns = [
-        ["tracking_error_m"],
-        ["position_error_m"],
-        ["horizontal_error_m"],
-        ["desired_truth_error_m"],
-    ]
-    error_values: list[float] = []
-    for columns in candidate_columns:
-        error_values = numeric_values_any(rows, columns)
-        if error_values:
-            break
+
+    def metric_summary(values: list[float]) -> dict[str, float | int]:
+        item = stats(values)
+        item["rmse"] = rms(values)
+        return item
+
+    normalized_rows: list[dict[str, Any]] = []
+    position_values: list[float] = []
+    horizontal_values: list[float] = []
+    vertical_values: list[float] = []
+    estimation_values: list[float] = []
+    trajectory_rows = 0
+
+    for row in rows:
+        stamp = first_number(row, ["stamp", "sample_abs_time", "truth_stamp", "est_stamp"])
+        position_tracking = first_number(
+            row,
+            [
+                "position_tracking_error",
+                "tracking_error_m",
+                "desired_truth_error_m",
+                "position_error_m",
+            ],
+        )
+        horizontal_tracking = first_number(row, ["horizontal_tracking_error", "horizontal_error_m"])
+        vertical_tracking = first_number(row, ["vertical_tracking_error", "vertical_error_m"])
+        estimation_error = first_number(row, ["estimation_position_error", "estimation_error_m"])
+
+        err_truth_des_x = first_number(row, ["err_truth_des_x"])
+        err_truth_des_y = first_number(row, ["err_truth_des_y"])
+        err_truth_des_z = first_number(row, ["err_truth_des_z"])
+        if position_tracking is None and None not in (err_truth_des_x, err_truth_des_y, err_truth_des_z):
+            position_tracking = math.sqrt(
+                err_truth_des_x * err_truth_des_x
+                + err_truth_des_y * err_truth_des_y
+                + err_truth_des_z * err_truth_des_z
+            )
+        if horizontal_tracking is None and None not in (err_truth_des_x, err_truth_des_y):
+            horizontal_tracking = math.hypot(err_truth_des_x, err_truth_des_y)
+        if vertical_tracking is None and err_truth_des_z is not None:
+            vertical_tracking = abs(err_truth_des_z)
+
+        err_iap_truth_x = first_number(row, ["err_iap_truth_x"])
+        err_iap_truth_y = first_number(row, ["err_iap_truth_y"])
+        err_iap_truth_z = first_number(row, ["err_iap_truth_z"])
+        if estimation_error is None and None not in (err_iap_truth_x, err_iap_truth_y, err_iap_truth_z):
+            estimation_error = math.sqrt(
+                err_iap_truth_x * err_iap_truth_x
+                + err_iap_truth_y * err_iap_truth_y
+                + err_iap_truth_z * err_iap_truth_z
+            )
+
+        desired_x = first_number(row, ["desired_x", "pred_x"])
+        desired_y = first_number(row, ["desired_y", "pred_y"])
+        desired_z = first_number(row, ["desired_z", "pred_z"])
+        truth_x = first_number(row, ["truth_x", "executed_truth_x"])
+        truth_y = first_number(row, ["truth_y", "executed_truth_y"])
+        truth_z = first_number(row, ["truth_z", "executed_truth_z"])
+        iap_x = first_number(row, ["iap_x", "executed_iap_x", "est_x"])
+        iap_y = first_number(row, ["iap_y", "executed_iap_y", "est_y"])
+        iap_z = first_number(row, ["iap_z", "executed_iap_z", "est_z"])
+
+        if position_tracking is not None:
+            position_values.append(position_tracking)
+        if horizontal_tracking is not None:
+            horizontal_values.append(horizontal_tracking)
+        if vertical_tracking is not None:
+            vertical_values.append(vertical_tracking)
+        if estimation_error is not None:
+            estimation_values.append(estimation_error)
+        if None not in (desired_x, desired_y, truth_x, truth_y, iap_x, iap_y):
+            trajectory_rows += 1
+
+        normalized_rows.append(
+            {
+                "stamp": stamp,
+                "desired_x": desired_x,
+                "desired_y": desired_y,
+                "desired_z": desired_z,
+                "truth_x": truth_x,
+                "truth_y": truth_y,
+                "truth_z": truth_z,
+                "iap_x": iap_x,
+                "iap_y": iap_y,
+                "iap_z": iap_z,
+                "position_tracking_error": position_tracking,
+                "horizontal_tracking_error": horizontal_tracking,
+                "vertical_tracking_error": vertical_tracking,
+                "estimation_position_error": estimation_error,
+            }
+        )
+
+    available = bool(position_values or horizontal_values or vertical_values or estimation_values)
     return {
-        "available": bool(error_values),
-        "reason": "" if error_values else "tracking CSV found but no known tracking error column was present",
+        "available": available,
+        "reason": "" if available else "tracking CSV found but no known tracking/estimation error column was present",
         "row_count": len(rows),
-        "tracking_error": stats(error_values),
-        "tracking_error_rms": rms(error_values),
+        "trajectory_row_count": trajectory_rows,
+        "tracking_error": metric_summary(position_values),
+        "position_tracking_error": metric_summary(position_values),
+        "horizontal_tracking_error": metric_summary(horizontal_values),
+        "vertical_tracking_error": metric_summary(vertical_values),
+        "estimation_position_error": metric_summary(estimation_values),
+        "tracking_error_rms": rms(position_values),
+        "rows": normalized_rows,
     }
 
 
@@ -1874,6 +2168,42 @@ def import_matplotlib() -> tuple[Any, str]:
         return None, f"matplotlib unavailable: {exc}"
 
 
+def save_matplotlib_figure(plt: Any, fig: Any, path: Path, *, dpi: int = 150) -> None:
+    ensure_dir(path.parent)
+    fig.tight_layout(pad=1.4)
+    fig.savefig(path, dpi=dpi)
+    plt.close(fig)
+
+
+def write_plot_message_svg(path: Path, title: str, message: str) -> None:
+    body = [
+        svg_text(40, 38, title, 18, "#111827"),
+        svg_text(40, 84, message, 14, "#991b1b"),
+    ]
+    write_svg(path, 900, 220, body)
+
+
+def finite_xy_from_rows(rows: list[dict[str, Any]], x_key: str, y_key: str) -> tuple[list[float], list[float]]:
+    xs: list[float] = []
+    ys: list[float] = []
+    for row in rows:
+        x = to_float(row.get(x_key))
+        y = to_float(row.get(y_key))
+        if x is None or y is None:
+            continue
+        xs.append(x)
+        ys.append(y)
+    return xs, ys
+
+
+def finite_series_from_rows(rows: list[dict[str, Any]], x_key: str, y_key: str) -> tuple[list[float], list[float]]:
+    xs, ys = finite_xy_from_rows(rows, x_key, y_key)
+    if not xs:
+        return [], []
+    t0 = xs[0]
+    return [x - t0 for x in xs], ys
+
+
 def maybe_generate_timing_plot(timing_analysis: dict[str, Any], out_dir: Path, no_plots: bool) -> list[str]:
     if no_plots or not timing_analysis.get("available"):
         return []
@@ -1899,6 +2229,195 @@ def maybe_generate_timing_plot(timing_analysis: dict[str, Any], out_dir: Path, n
     fig.savefig(path, dpi=150)
     plt.close(fig)
     return [str(path)]
+
+
+def timing_display(value: Any, digits: int = 3) -> str:
+    number = to_float(value)
+    if number is None:
+        return "n/a"
+    return f"{number:.{digits}f}"
+
+
+def write_real_time_timing_outputs(
+    analysis: dict[str, Any],
+    timing_rows: list[dict[str, str]],
+    planner_rows: list[dict[str, str]],
+    figs_dir: Path,
+    no_plots: bool,
+) -> list[str]:
+    if no_plots or not analysis.get("available"):
+        return []
+    ensure_dir(figs_dir)
+    generated: list[str] = []
+
+    png_path = figs_dir / "timing_summary_combined.png"
+    plot_path = generate_timing_summary_combined_png(analysis, png_path)
+    if plot_path:
+        generated.append(str(plot_path))
+    else:
+        svg_path = figs_dir / "timing_summary_combined.svg"
+        generate_timing_summary_combined_svg(analysis, svg_path)
+        generated.append(str(svg_path))
+
+    timeline_path = figs_dir / "timing_timeline.svg"
+    generate_timing_timeline_svg(analysis, timing_rows, timeline_path)
+    generated.append(str(timeline_path))
+
+    planner_path = figs_dir / "planner_timing_field_age.svg"
+    generate_planner_timing_field_age_svg(planner_rows, planner_path)
+    generated.append(str(planner_path))
+    return generated
+
+
+def generate_timing_summary_combined_png(analysis: dict[str, Any], path: Path) -> Path | None:
+    modules = [
+        item for item in analysis.get("modules", [])
+        if item.get("status") in {"found", "summary_only"} and to_float(item.get("mean")) is not None
+    ][:16]
+    if not modules:
+        return None
+    plt, error = import_matplotlib()
+    if plt is None:
+        return None
+    labels = [item["module"] for item in modules]
+    means = [to_float(item.get("mean")) or 0.0 for item in modules]
+    p95s = [to_float(item.get("p95")) or 0.0 for item in modules]
+    p99s = [to_float(item.get("p99")) or 0.0 for item in modules]
+    xs = range(len(labels))
+    fig, ax = plt.subplots(figsize=(14, 6))
+    ax.bar([x - 0.25 for x in xs], means, width=0.25, label="mean_ms")
+    ax.bar(xs, p95s, width=0.25, label="p95_ms")
+    ax.bar([x + 0.25 for x in xs], p99s, width=0.25, label="p99_ms")
+    ax.set_xticks(list(xs))
+    ax.set_xticklabels(labels, rotation=35, ha="right")
+    ax.set_ylabel("milliseconds")
+    ax.set_title("IAP Timing & Real-Time Summary")
+    ax.grid(True, alpha=0.3, axis="y")
+    ax.legend(loc="upper right", framealpha=0.9)
+    fig.tight_layout(pad=1.5)
+    fig.savefig(path, dpi=150)
+    plt.close(fig)
+    return path
+
+
+def generate_timing_summary_combined_svg(analysis: dict[str, Any], path: Path) -> None:
+    modules = [
+        item for item in analysis.get("modules", [])
+        if item.get("status") in {"found", "summary_only"} and to_float(item.get("mean")) is not None
+    ][:14]
+    if not modules:
+        write_plot_message_svg(path, "IAP Timing & Real-Time Summary", "No finite timing module stats were available.")
+        return
+
+    plt, error = import_matplotlib()
+    if plt is None:
+        write_plot_message_svg(path, "IAP Timing & Real-Time Summary", error)
+        return
+
+    labels = [str(item.get("module", "")) for item in modules]
+    means = [to_float(item.get("mean")) or 0.0 for item in modules]
+    p95s = [to_float(item.get("p95")) or 0.0 for item in modules]
+    p99s = [to_float(item.get("p99")) or 0.0 for item in modules]
+    xs = list(range(len(labels)))
+    fig, ax = plt.subplots(figsize=(12.2, 6.8))
+    ax.bar([x - 0.25 for x in xs], means, width=0.25, label="mean_ms", color="#2563eb", alpha=0.82)
+    ax.bar(xs, p95s, width=0.25, label="p95_ms", color="#dc2626", alpha=0.82)
+    ax.bar([x + 0.25 for x in xs], p99s, width=0.25, label="p99_ms", color="#16a34a", alpha=0.82)
+    ax.set_xticks(xs)
+    ax.set_xticklabels(labels, rotation=35, ha="right", fontsize=8)
+    ax.set_ylabel("milliseconds")
+    ax.set_title("IAP Timing & Real-Time Summary")
+    ax.grid(True, alpha=0.3, axis="y")
+    ax.legend(loc="upper right", framealpha=0.9)
+    save_matplotlib_figure(plt, fig, path)
+
+
+def timing_rows_for_module(rows: list[dict[str, str]], module: str) -> list[tuple[float, float]]:
+    points: list[tuple[float, float]] = []
+    for row in rows:
+        if row.get("module", "").strip() != module:
+            continue
+        stamp = first_number(row, ["stamp", "time", "t"])
+        elapsed = first_number(row, ["elapsed_ms", "duration_ms", "time_ms", "ms", "elapsed", "duration"])
+        if stamp is not None and elapsed is not None:
+            points.append((stamp, elapsed))
+    return points
+
+
+def generate_timing_timeline_svg(analysis: dict[str, Any], timing_rows: list[dict[str, str]], path: Path) -> None:
+    modules = [
+        item["module"] for item in analysis.get("modules", [])
+        if item.get("source") == "iap_timing" and item.get("status") == "found"
+    ][:8]
+    if not timing_rows or not modules:
+        write_plot_message_svg(path, "IAP module timing timeline", "No profiling/iap_timing.csv rows were available.")
+        return
+
+    series = {module: timing_rows_for_module(timing_rows, module) for module in modules}
+    all_points = [point for points in series.values() for point in points]
+    if not all_points:
+        write_plot_message_svg(path, "IAP module timing timeline", "No finite timing samples were available.")
+        return
+
+    plt, error = import_matplotlib()
+    if plt is None:
+        write_plot_message_svg(path, "IAP module timing timeline", error)
+        return
+
+    t0 = min(point[0] for point in all_points)
+    colors = ["#2563eb", "#dc2626", "#16a34a", "#9333ea", "#ea580c", "#0891b2", "#4b5563", "#be123c"]
+    fig, ax = plt.subplots(figsize=(11.8, 7.2))
+    for idx, module in enumerate(modules):
+        points = series.get(module, [])
+        if not points:
+            continue
+        xs = [t - t0 for t, _v in points]
+        ys = [v for _t, v in points]
+        ax.plot(xs, ys, label=module, color=colors[idx % len(colors)], linewidth=1.4, alpha=0.86)
+    ax.set_title("IAP module timing timeline")
+    ax.set_xlabel("relative time [s]")
+    ax.set_ylabel("elapsed [ms]")
+    ax.grid(True, alpha=0.3)
+    ax.legend(loc="upper right", framealpha=0.88, fontsize=8)
+    save_matplotlib_figure(plt, fig, path)
+
+
+def generate_planner_timing_field_age_svg(planner_rows: list[dict[str, str]], path: Path) -> None:
+    if not planner_rows:
+        write_plot_message_svg(path, "Planner optimization timing and integrity field age", "No export/planner_integrity_cost_debug.csv rows were available.")
+        return
+    rows = []
+    for row in planner_rows:
+        stamp = first_number(row, ["stamp", "time", "t"])
+        total_ms = to_float(row.get("total_time_ms"))
+        field_age_s = to_float(row.get("field_age_s"))
+        if stamp is not None:
+            rows.append((stamp, total_ms, field_age_s * 1000.0 if field_age_s is not None else None))
+    if not rows:
+        write_plot_message_svg(path, "Planner optimization timing and integrity field age", "Planner timing rows had no finite timestamps.")
+        return
+
+    plt, error = import_matplotlib()
+    if plt is None:
+        write_plot_message_svg(path, "Planner optimization timing and integrity field age", error)
+        return
+
+    t0 = rows[0][0]
+    fig, ax = plt.subplots(figsize=(10.4, 6.2))
+    total_x = [stamp - t0 for stamp, total, _age in rows if total is not None]
+    total_y = [total for _stamp, total, _age in rows if total is not None]
+    age_x = [stamp - t0 for stamp, _total, age in rows if age is not None]
+    age_y = [age for _stamp, _total, age in rows if age is not None]
+    if total_x:
+        ax.plot(total_x, total_y, color="#2563eb", linewidth=1.7, label="total_time_ms")
+    if age_x:
+        ax.plot(age_x, age_y, color="#dc2626", linewidth=1.4, label="field_age_s * 1000")
+    ax.set_title("Planner optimization timing and integrity field age")
+    ax.set_xlabel("relative time [s]")
+    ax.set_ylabel("milliseconds")
+    ax.grid(True, alpha=0.3)
+    ax.legend(loc="upper right", framealpha=0.88)
+    save_matplotlib_figure(plt, fig, path)
 
 
 def float_range(values: list[float], pad_ratio: float = 0.08) -> tuple[float, float]:
@@ -2664,6 +3183,240 @@ def write_sim_integrity_outputs(analysis: dict[str, Any], out_dir: Path, figs_di
     return [str(csv_path), str(summary_path)]
 
 
+def phase1_finite_rows(
+    rows: list[dict[str, Any]],
+    required_keys: list[str],
+) -> list[dict[str, Any]]:
+    result = []
+    for row in rows:
+        if all(to_float(row.get(key)) is not None for key in required_keys):
+            result.append(row)
+    return result
+
+
+def phase1_downsample(rows: list[dict[str, Any]], max_points: int = 1600) -> list[dict[str, Any]]:
+    if len(rows) <= max_points:
+        return rows
+    step = max(1, math.ceil(len(rows) / max_points))
+    return rows[::step]
+
+
+def phase1_metric_text(item: dict[str, Any]) -> str:
+    if not item or item.get("count", 0) == 0:
+        return "n/a"
+    return (
+        f"rmse={item.get('rmse', 0.0):.3f}, "
+        f"p95={item.get('p95', 0.0):.3f}, "
+        f"max={item.get('max', 0.0):.3f} m"
+    )
+
+
+def phase1_xy_ranges(
+    xs: list[float],
+    ys: list[float],
+    plot_w: float,
+    plot_h: float,
+) -> tuple[float, float, float, float]:
+    x0, x1 = float_range(xs, 0.08)
+    y0, y1 = float_range(ys, 0.08)
+    x_span = max(x1 - x0, 1e-6)
+    y_span = max(y1 - y0, 1e-6)
+    plot_aspect = plot_w / max(plot_h, 1e-6)
+    data_aspect = x_span / y_span
+    if data_aspect > plot_aspect:
+        target_y_span = x_span / plot_aspect
+        center = (y0 + y1) * 0.5
+        y0 = center - target_y_span * 0.5
+        y1 = center + target_y_span * 0.5
+    else:
+        target_x_span = y_span * plot_aspect
+        center = (x0 + x1) * 0.5
+        x0 = center - target_x_span * 0.5
+        x1 = center + target_x_span * 0.5
+    return x0, x1, y0, y1
+
+
+def generate_phase1_tracking_xy_svg(analysis: dict[str, Any], path: Path) -> None:
+    rows = phase1_finite_rows(
+        analysis.get("rows", []),
+        ["desired_x", "desired_y", "truth_x", "truth_y", "iap_x", "iap_y"],
+    )
+    if len(rows) < 2:
+        write_plot_message_svg(path, "Phase 1 Desired / Truth / IAP XY Trajectory", "No desired/truth/IAP XY trajectory rows were available.")
+        return
+    plt, error = import_matplotlib()
+    if plt is None:
+        write_plot_message_svg(path, "Phase 1 Desired / Truth / IAP XY Trajectory", error)
+        return
+
+    plot_rows = phase1_downsample(rows)
+    fig, ax = plt.subplots(figsize=(11.2, 7.2))
+    for x_key, y_key, label, color, width, alpha in [
+        ("desired_x", "desired_y", "desired command", "#f59e0b", 1.8, 0.82),
+        ("truth_x", "truth_y", "truth odom", "#111827", 2.3, 0.90),
+        ("iap_x", "iap_y", "IAP odom", "#2563eb", 1.8, 0.86),
+    ]:
+        xs, ys = finite_xy_from_rows(plot_rows, x_key, y_key)
+        ax.plot(xs, ys, label=label, color=color, linewidth=width, alpha=alpha)
+    first = rows[0]
+    last = rows[-1]
+    for row, label, color in [(first, "start", "#16a34a"), (last, "end", "#dc2626")]:
+        ax.scatter([float(row["truth_x"])], [float(row["truth_y"])], s=36, color=color, edgecolors="white", zorder=5)
+        ax.annotate(label, (float(row["truth_x"]), float(row["truth_y"])), xytext=(6, 6), textcoords="offset points", color=color)
+    metric_rows = [
+        ("estimation", analysis.get("estimation_position_error", {})),
+        ("tracking 3D", analysis.get("position_tracking_error", {})),
+        ("tracking H", analysis.get("horizontal_tracking_error", {})),
+        ("tracking V", analysis.get("vertical_tracking_error", {})),
+    ]
+    metrics_text = "\n".join(f"{label}: {phase1_metric_text(metric)}" for label, metric in metric_rows)
+    metrics_text += f"\nrows={analysis.get('row_count', 0)}, trajectory_rows={analysis.get('trajectory_row_count', 0)}"
+    ax.text(1.02, 0.96, metrics_text, transform=ax.transAxes, va="top", ha="left", fontsize=9)
+    ax.set_title("Phase 1 Desired / Truth / IAP XY Trajectory")
+    ax.set_xlabel("x [m]")
+    ax.set_ylabel("y [m]")
+    ax.set_aspect("equal", adjustable="datalim")
+    ax.grid(True, alpha=0.3)
+    ax.legend(loc="best", framealpha=0.88)
+    save_matplotlib_figure(plt, fig, path)
+
+
+def generate_phase1_tracking_error_timeline_svg(analysis: dict[str, Any], path: Path) -> None:
+    rows = phase1_finite_rows(analysis.get("rows", []), ["stamp"])
+    rows = [
+        row for row in rows
+        if any(
+            to_float(row.get(key)) is not None
+            for key in [
+                "position_tracking_error",
+                "horizontal_tracking_error",
+                "vertical_tracking_error",
+                "estimation_position_error",
+            ]
+        )
+    ]
+    if len(rows) < 2:
+        write_plot_message_svg(path, "Phase 1 Tracking and Estimation Error Timeline", "No tracking/estimation error rows were available.")
+        return
+    plt, error = import_matplotlib()
+    if plt is None:
+        write_plot_message_svg(path, "Phase 1 Tracking and Estimation Error Timeline", error)
+        return
+
+    plot_rows = phase1_downsample(rows)
+    stamps = [float(row["stamp"]) for row in plot_rows]
+    t0 = min(stamps)
+    span = max(max(stamps) - t0, 1e-6)
+    fig, axes = plt.subplots(2, 1, figsize=(11.2, 7.6), sharex=True, gridspec_kw={"height_ratios": [2.0, 1.4]})
+    panels = [
+        (axes[0], "Tracking error: truth vs desired", [
+            ("position_tracking_error", "3D position", "#2563eb"),
+            ("horizontal_tracking_error", "horizontal", "#16a34a"),
+            ("vertical_tracking_error", "vertical", "#f97316"),
+        ]),
+        (axes[1], "Estimation error: IAP vs truth", [
+            ("estimation_position_error", "IAP position", "#7c3aed"),
+        ]),
+    ]
+    for ax, title, series in panels:
+        for key, label, color in series:
+            xs, ys = finite_series_from_rows(plot_rows, "stamp", key)
+            if xs:
+                ax.plot(xs, ys, label=label, color=color, linewidth=1.8, alpha=0.88)
+        ax.set_title(title)
+        ax.set_ylabel("error [m]")
+        ax.grid(True, alpha=0.3)
+        ax.legend(loc="upper right", framealpha=0.88)
+    axes[-1].set_xlabel("relative time [s]")
+    fig.suptitle("Phase 1 Tracking and Estimation Error Timeline")
+    fig.text(
+        0.08,
+        0.02,
+        f"time span={span:.2f}s, plotted_rows={len(plot_rows)}, source_rows={analysis.get('row_count', 0)}; "
+        f"tracking {phase1_metric_text(analysis.get('position_tracking_error', {}))}; "
+        f"estimation {phase1_metric_text(analysis.get('estimation_position_error', {}))}",
+        fontsize=9,
+    )
+    save_matplotlib_figure(plt, fig, path)
+
+
+def generate_phase1_tracking_axis_timeline_svg(analysis: dict[str, Any], axis: str, path: Path) -> None:
+    axis = axis.lower()
+    desired_key = f"desired_{axis}"
+    truth_key = f"truth_{axis}"
+    iap_key = f"iap_{axis}"
+    axis_label = axis.upper()
+    rows = phase1_finite_rows(analysis.get("rows", []), ["stamp", desired_key, truth_key, iap_key])
+    if len(rows) < 2:
+        write_plot_message_svg(path, f"Phase 1 {axis_label}-Axis Desired / Truth / IAP Timeline", f"No desired/truth/IAP {axis_label}-axis rows were available.")
+        return
+    plt, error = import_matplotlib()
+    if plt is None:
+        write_plot_message_svg(path, f"Phase 1 {axis_label}-Axis Desired / Truth / IAP Timeline", error)
+        return
+
+    plot_rows = phase1_downsample(rows)
+    stamps = [float(row["stamp"]) for row in plot_rows]
+    t0 = min(stamps)
+    span = max(max(stamps) - t0, 1e-6)
+    fig, ax = plt.subplots(figsize=(11.2, 6.2))
+    for key, label, color, width in [
+        (desired_key, "desired command", "#f59e0b", 1.8),
+        (truth_key, "truth odom", "#111827", 2.3),
+        (iap_key, "IAP odom", "#2563eb", 1.8),
+    ]:
+        xs, ys = finite_series_from_rows(plot_rows, "stamp", key)
+        if xs:
+            ax.plot(xs, ys, label=label, color=color, linewidth=width, alpha=0.88)
+
+    tracking_axis = [
+        abs(float(row[truth_key]) - float(row[desired_key]))
+        for row in rows
+        if to_float(row.get(truth_key)) is not None and to_float(row.get(desired_key)) is not None
+    ]
+    estimation_axis = [
+        abs(float(row[iap_key]) - float(row[truth_key]))
+        for row in rows
+        if to_float(row.get(iap_key)) is not None and to_float(row.get(truth_key)) is not None
+    ]
+    tracking_stats = {"rmse": rms(tracking_axis), **stats(tracking_axis)}
+    estimation_stats = {"rmse": rms(estimation_axis), **stats(estimation_axis)}
+    ax.set_title(f"Phase 1 {axis_label}-Axis Desired / Truth / IAP Timeline")
+    ax.set_xlabel("relative time [s]")
+    ax.set_ylabel(f"{axis_label} [m]")
+    ax.grid(True, alpha=0.3)
+    ax.legend(loc="best", framealpha=0.88)
+    fig.text(
+        0.08,
+        0.02,
+        f"{axis_label} tracking |truth-desired|: {phase1_metric_text(tracking_stats)}; "
+        f"{axis_label} estimation |IAP-truth|: {phase1_metric_text(estimation_stats)}; "
+        f"time span={span:.2f}s, plotted_rows={len(plot_rows)}, source_rows={analysis.get('row_count', 0)}",
+        fontsize=9,
+    )
+    save_matplotlib_figure(plt, fig, path)
+
+
+def write_desired_tracking_outputs(analysis: dict[str, Any], figs_dir: Path, no_plots: bool) -> list[str]:
+    if no_plots:
+        return []
+    rows = analysis.get("rows", [])
+    if not rows:
+        return []
+    generated = []
+    xy_path = figs_dir / "phase1_tracking_xy.svg"
+    generate_phase1_tracking_xy_svg(analysis, xy_path)
+    generated.append(str(xy_path))
+    timeline_path = figs_dir / "phase1_tracking_error_timeline.svg"
+    generate_phase1_tracking_error_timeline_svg(analysis, timeline_path)
+    generated.append(str(timeline_path))
+    for axis in ["x", "y", "z"]:
+        axis_path = figs_dir / f"phase1_tracking_{axis}_timeline.svg"
+        generate_phase1_tracking_axis_timeline_svg(analysis, axis, axis_path)
+        generated.append(str(axis_path))
+    return generated
+
+
 def generate_exec_trajectory_svg(analysis: dict[str, Any], path: Path) -> None:
     rows = analysis["rows"]
     W, H = 900, 720
@@ -2785,10 +3538,13 @@ def write_exec_trajectory_outputs(
 
 def generate_pl_grid_consistency_svg(analysis: dict[str, Any], path: Path) -> None:
     rows = analysis["rows"]
-    W, H = 900, 720
-    PAD_L, PAD_R, PAD_T, PAD_B = 75, 30, 50, 45
-    pw = W - PAD_L - PAD_R
-    ph = (H - PAD_T - PAD_B - 90) // 4
+    if not rows:
+        write_plot_message_svg(path, "PL grid consistency", "No export/pl_grid_consistency.csv rows were available.")
+        return
+    plt, error = import_matplotlib()
+    if plt is None:
+        write_plot_message_svg(path, "PL grid consistency", error)
+        return
 
     ts = [to_float(r.get("stamp")) for r in rows]
     hpl_directs = [to_float(r.get("hpl_direct")) for r in rows]
@@ -2799,86 +3555,54 @@ def generate_pl_grid_consistency_svg(analysis: dict[str, Any], path: Path) -> No
     abs_err_vs = [to_float(r.get("abs_err_v")) for r in rows]
 
     ts_ok = [v for v in ts if v is not None]
-    t0 = min(ts_ok) if ts_ok else 0.0
-    t1 = max(ts_ok) if ts_ok else 1.0
-    if math.isclose(t0, t1):
-        t1 = t0 + 1.0
+    if not ts_ok:
+        write_plot_message_svg(path, "PL grid consistency", "PL grid consistency rows had no finite timestamps.")
+        return
+    t0 = min(ts_ok)
+    rel_ts = [value - t0 if value is not None else None for value in ts]
 
-    body: list[str] = []
+    fig, axes = plt.subplots(4, 1, figsize=(9.0, 7.2), sharex=False)
 
-    # Panel 1: hpl_direct vs hpl_grid over time
-    y0 = PAD_T
-    h_vals = [v for v in hpl_directs + hpl_grids if v is not None]
-    h_hi = max(h_vals) if h_vals else 1.0
-    if math.isclose(h_hi, 0.0):
-        h_hi = 1.0
-    body += svg_axes(PAD_L, y0, pw, ph, "HPL: direct vs grid", "Time (s)", "HPL (m)")
-    hpl_d_pts = [
-        (map_linear(ts[i], t0, t1, PAD_L, PAD_L + pw), map_linear(hpl_directs[i], 0.0, h_hi * 1.1, y0 + ph, y0))
-        for i in range(len(rows)) if ts[i] is not None and hpl_directs[i] is not None
-    ]
-    hpl_g_pts = [
-        (map_linear(ts[i], t0, t1, PAD_L, PAD_L + pw), map_linear(hpl_grids[i], 0.0, h_hi * 1.1, y0 + ph, y0))
-        for i in range(len(rows)) if ts[i] is not None and hpl_grids[i] is not None
-    ]
-    body.append(svg_polyline(hpl_d_pts, "#1f77b4"))
-    body.append(svg_polyline(hpl_g_pts, "#aec7e8", 1.0))
-    body.append(svg_text(PAD_L + pw - 5, y0 + 14, "direct", 9, "#1f77b4", "end"))
-    body.append(svg_text(PAD_L + pw - 5, y0 + 26, "grid", 9, "#aec7e8", "end"))
+    def plot_time_series(ax: Any, values: list[float | None], label: str, color: str) -> None:
+        xs = [rel_ts[i] for i, value in enumerate(values) if rel_ts[i] is not None and value is not None]
+        ys = [value for i, value in enumerate(values) if rel_ts[i] is not None and value is not None]
+        if xs:
+            ax.plot(xs, ys, label=label, color=color, linewidth=1.4, alpha=0.88)
 
-    # Panel 2: vpl_direct vs vpl_grid over time
-    y1 = y0 + ph + 30
-    v_vals = [v for v in vpl_directs + vpl_grids if v is not None]
-    v_hi = max(v_vals) if v_vals else 1.0
-    if math.isclose(v_hi, 0.0):
-        v_hi = 1.0
-    body += svg_axes(PAD_L, y1, pw, ph, "VPL: direct vs grid", "Time (s)", "VPL (m)")
-    vpl_d_pts = [
-        (map_linear(ts[i], t0, t1, PAD_L, PAD_L + pw), map_linear(vpl_directs[i], 0.0, v_hi * 1.1, y1 + ph, y1))
-        for i in range(len(rows)) if ts[i] is not None and vpl_directs[i] is not None
-    ]
-    vpl_g_pts = [
-        (map_linear(ts[i], t0, t1, PAD_L, PAD_L + pw), map_linear(vpl_grids[i], 0.0, v_hi * 1.1, y1 + ph, y1))
-        for i in range(len(rows)) if ts[i] is not None and vpl_grids[i] is not None
-    ]
-    body.append(svg_polyline(vpl_d_pts, "#ff7f0e"))
-    body.append(svg_polyline(vpl_g_pts, "#ffbb78", 1.0))
-    body.append(svg_text(PAD_L + pw - 5, y1 + 14, "direct", 9, "#ff7f0e", "end"))
-    body.append(svg_text(PAD_L + pw - 5, y1 + 26, "grid", 9, "#ffbb78", "end"))
+    plot_time_series(axes[0], hpl_directs, "direct", "#1f77b4")
+    plot_time_series(axes[0], hpl_grids, "grid", "#aec7e8")
+    axes[0].set_title("HPL: direct vs grid")
+    axes[0].set_ylabel("HPL [m]")
 
-    # Panel 3: abs_err_h over time
-    y2 = y1 + ph + 30
-    eh_vals = [v for v in abs_err_hs if v is not None]
-    eh_hi = max(eh_vals) if eh_vals else 1.0
-    if math.isclose(eh_hi, 0.0):
-        eh_hi = 1.0
-    body += svg_axes(PAD_L, y2, pw, ph, "HPL absolute error (direct - grid)", "Time (s)", "err (m)")
-    err_h_pts = [
-        (map_linear(ts[i], t0, t1, PAD_L, PAD_L + pw), map_linear(abs_err_hs[i], 0.0, eh_hi * 1.1, y2 + ph, y2))
-        for i in range(len(rows)) if ts[i] is not None and abs_err_hs[i] is not None
-    ]
-    body.append(svg_polyline(err_h_pts, "#d62728"))
+    plot_time_series(axes[1], vpl_directs, "direct", "#ff7f0e")
+    plot_time_series(axes[1], vpl_grids, "grid", "#ffbb78")
+    axes[1].set_title("VPL: direct vs grid")
+    axes[1].set_ylabel("VPL [m]")
 
-    # Panel 4: HPL_direct vs VPL_direct scatter
-    y3 = y2 + ph + 30
+    plot_time_series(axes[2], abs_err_hs, "abs_err_h", "#d62728")
+    plot_time_series(axes[2], abs_err_vs, "abs_err_v", "#7c3aed")
+    axes[2].set_title("PL grid absolute error")
+    axes[2].set_xlabel("relative time [s]")
+    axes[2].set_ylabel("error [m]")
+
     hv_pairs = [
         (hpl_directs[i], vpl_directs[i])
         for i in range(len(rows))
         if hpl_directs[i] is not None and vpl_directs[i] is not None
     ]
-    hv_h_max = max(p[0] for p in hv_pairs) if hv_pairs else 1.0
-    hv_v_max = max(p[1] for p in hv_pairs) if hv_pairs else 1.0
-    if math.isclose(hv_h_max, 0.0):
-        hv_h_max = 1.0
-    if math.isclose(hv_v_max, 0.0):
-        hv_v_max = 1.0
-    body += svg_axes(PAD_L, y3, pw, ph, "HPL_direct vs VPL_direct scatter", "HPL (m)", "VPL (m)")
-    for h_val, v_val in hv_pairs:
-        cx = map_linear(h_val, 0.0, hv_h_max * 1.1, PAD_L, PAD_L + pw)
-        cy = map_linear(v_val, 0.0, hv_v_max * 1.1, y3 + ph, y3)
-        body.append(f'<circle cx="{cx:.2f}" cy="{cy:.2f}" r="2" fill="#7c3aed" />')
+    if hv_pairs:
+        axes[3].scatter([p[0] for p in hv_pairs], [p[1] for p in hv_pairs], color="#7c3aed", s=10, alpha=0.74)
+    axes[3].set_title("HPL_direct vs VPL_direct scatter")
+    axes[3].set_xlabel("HPL [m]")
+    axes[3].set_ylabel("VPL [m]")
 
-    write_svg(path, W, H, body)
+    for ax in axes:
+        ax.grid(True, alpha=0.3)
+        handles, _labels = ax.get_legend_handles_labels()
+        if handles:
+            ax.legend(loc="upper right", framealpha=0.88, fontsize=8)
+    fig.suptitle("PL grid consistency")
+    save_matplotlib_figure(plt, fig, path)
 
 
 def write_pl_grid_consistency_outputs(
@@ -3814,9 +4538,9 @@ def generate_phase2_scatter_svg(
     source_name: str = "input rows",
 ) -> None:
     width, height = 720, 560
-    body: list[str] = [svg_text(40, 34, title, 18, "#111827")]
     points = phase2_scatter_points_any(rows, x_keys, y_keys, color_key=color_key, skip_sentinel=True)
     if not points:
+        body: list[str] = [svg_text(40, 34, title, 18, "#111827")]
         diagnostics = phase2_pair_diagnostics(rows, x_keys, y_keys)
         body.append(svg_text(40, 68, "No paired finite values were available for this scatter plot.", 14, "#991b1b"))
         body.append(svg_text(40, 92, f"source={source_name}, rows={diagnostics['rows']}, paired={diagnostics['paired']}, sentinel_abs={PHASE2_SENTINEL_ABS:.1e}", 12, "#374151"))
@@ -3838,27 +4562,38 @@ def generate_phase2_scatter_svg(
         write_svg(path, width, height, body)
         return
 
+    plt, error = import_matplotlib()
+    if plt is None:
+        write_plot_message_svg(path, title, error)
+        return
+
     x_values = [point["x"] for point in points]
     y_values = [point["y"] for point in points]
-    x0, x1 = float_range(x_values)
-    y0, y1 = float_range(y_values)
-    px, py, pw, ph = 70.0, 80.0, 410.0, 320.0
-    body.extend(svg_axes(px, py, pw, ph, title, x_label, y_label))
-    body.append(svg_line(px, py + ph, px + pw, py, "#6b7280", 1.1, 0.7, "5 4"))
     color_values = [to_float(point["row"].get(color_key)) for point in points if to_float(point["row"].get(color_key)) is not None]
-    c0, c1 = phase2_min_max([value for value in color_values if value is not None])
+    c0, _c1 = phase2_min_max([value for value in color_values if value is not None])
     stride = max(1, len(points) // 900)
-    for point in points[::stride]:
-        color_value = to_float(point["row"].get(color_key))
-        color = phase2_value_color(color_value if color_value is not None else math.nan, c0, c1)
-        x = map_linear(point["x"], x0, x1, px, px + pw)
-        y = map_linear(point["y"], y0, y1, py + ph, py)
-        body.append(svg_circle(x, y, 3.0, color, 0.78, stroke="#ffffff", stroke_width=0.15))
-    body.append(svg_text_bg(px + 12, py + ph - 12, f"points={len(points)}", 12, "#111827", "start", 0.82))
-    body.append(svg_text(px - 10, py + ph + 4, f"{x0:.2f}", 10, "#4b5563", "end"))
-    body.append(svg_text(px - 10, py + 4, f"{x1:.2f}", 10, "#4b5563", "end"))
-    body.append(svg_text(px + pw + 8, py + ph - 12, f"y range {y0:.2f}..{y1:.2f}", 12, "#111827", "end"))
-    write_svg(path, width, height, body)
+    plot_points = points[::stride]
+    plot_x = [point["x"] for point in plot_points]
+    plot_y = [point["y"] for point in plot_points]
+    plot_c = [to_float(point["row"].get(color_key)) for point in plot_points]
+    fig, ax = plt.subplots(figsize=(7.2, 5.6))
+    if any(value is not None for value in plot_c):
+        numeric_c = [value if value is not None else c0 for value in plot_c]
+        scatter = ax.scatter(plot_x, plot_y, c=numeric_c, cmap="viridis", s=16, alpha=0.78, edgecolors="none")
+        cbar = fig.colorbar(scatter, ax=ax)
+        cbar.set_label(color_key)
+    else:
+        ax.scatter(plot_x, plot_y, color="#2563eb", s=16, alpha=0.78, edgecolors="none")
+    diag_lo = max(min(x_values), min(y_values))
+    diag_hi = min(max(x_values), max(y_values))
+    if diag_hi > diag_lo:
+        ax.plot([diag_lo, diag_hi], [diag_lo, diag_hi], color="#6b7280", linewidth=1.1, linestyle="--", alpha=0.7)
+    ax.set_title(title)
+    ax.set_xlabel(x_label)
+    ax.set_ylabel(y_label)
+    ax.grid(True, alpha=0.3)
+    ax.text(0.02, 0.02, f"points={len(points)}; plotted={len(plot_points)}; source={source_name}", transform=ax.transAxes, fontsize=8)
+    save_matplotlib_figure(plt, fig, path)
 
 
 def generate_phase2_fallback_histogram_svg(
@@ -4324,6 +5059,465 @@ def generate_phase2_prediction_fan_svg(
     write_svg(path, width, height, body)
 
 
+def phase2_grid_pl_points(rows: list[dict[str, str]]) -> list[dict[str, Any]]:
+    points: list[dict[str, Any]] = []
+    for row in rows:
+        x = to_float(row.get("p_x"))
+        y = to_float(row.get("p_y"))
+        z = to_float(row.get("p_z"))
+        hpl = to_float(row.get("hpl_grid"))
+        vpl = to_float(row.get("vpl_grid"))
+        if hpl is None:
+            hpl = to_float(row.get("hpl_direct"))
+        if vpl is None:
+            vpl = to_float(row.get("vpl_direct"))
+        if x is None or y is None or z is None:
+            continue
+        values = [value for value in (hpl, vpl) if value is not None]
+        if not values:
+            continue
+        points.append({
+            "x": x,
+            "y": y,
+            "z": z,
+            "pl": max(values),
+            "source": "consistency",
+            "row": row,
+        })
+    return points
+
+
+def phase2_voxel_pl_points(rows: list[dict[str, str]]) -> list[dict[str, Any]]:
+    points: list[dict[str, Any]] = []
+    for row in rows:
+        x = to_float(row.get("p_x"))
+        y = to_float(row.get("p_y"))
+        z = to_float(row.get("p_z"))
+        pl = to_float(row.get("pl"))
+        if pl is None:
+            hpl = to_float(row.get("hpl"))
+            vpl = to_float(row.get("vpl"))
+            values = [value for value in (hpl, vpl) if value is not None]
+            pl = max(values) if values else None
+        if x is None or y is None or z is None or pl is None:
+            continue
+        points.append({
+            "x": x,
+            "y": y,
+            "z": z,
+            "pl": pl,
+            "source": "voxel",
+            "grid_generation": to_float(row.get("grid_generation")),
+            "ix": to_float(row.get("ix")),
+            "iy": to_float(row.get("iy")),
+            "iz": to_float(row.get("iz")),
+            "valid": row.get("valid", ""),
+            "fallback": row.get("fallback", ""),
+            "query_source": row.get("query_source", ""),
+            "row": row,
+        })
+    return points
+
+
+def phase2_candidate_pl_points(rows: list[dict[str, str]]) -> list[dict[str, Any]]:
+    points: list[dict[str, Any]] = []
+    for row in rows:
+        x = to_float(row.get("x"))
+        y = to_float(row.get("y"))
+        z = to_float(row.get("z"))
+        pl = to_float(row.get("PL_pred"))
+        if pl is None:
+            pl_h = to_float(row.get("PL_H_pred"))
+            pl_v = to_float(row.get("PL_V_pred"))
+            pl_values = [value for value in (pl_h, pl_v) if value is not None]
+            pl = max(pl_values) if pl_values else None
+        if x is None or y is None or z is None or pl is None:
+            continue
+        points.append({
+            "x": x,
+            "y": y,
+            "z": z,
+            "pl": pl,
+            "traj_id": str(row.get("traj_id") or "UNKNOWN"),
+            "sample_index": to_float(row.get("sample_index")),
+            "sample_t_from_now": to_float(row.get("sample_t_from_now")),
+            "risk_state_pred": row.get("risk_state_pred", ""),
+            "query_source": row.get("query_source", ""),
+            "row": row,
+        })
+    return points
+
+
+def phase2_uav_pose_points(rows: list[dict[str, str]]) -> list[dict[str, Any]]:
+    points: list[dict[str, Any]] = []
+    for row in rows:
+        x = to_float(row.get("p_x"))
+        y = to_float(row.get("p_y"))
+        z = to_float(row.get("p_z"))
+        stamp = to_float(row.get("stamp"))
+        if x is None or y is None or z is None:
+            continue
+        points.append({"x": x, "y": y, "z": z, "stamp": stamp, "row": row})
+    return sorted(points, key=lambda item: float(item.get("stamp") or 0.0))
+
+
+def phase2_positive_pl_values(points: list[dict[str, Any]]) -> list[float]:
+    values = []
+    for point in points:
+        value = to_float(point.get("pl"))
+        if value is not None and value > 0.0:
+            values.append(value)
+    return values
+
+
+def phase2_group_candidate_points(points: list[dict[str, Any]]) -> dict[str, list[dict[str, Any]]]:
+    grouped: dict[str, list[dict[str, Any]]] = defaultdict(list)
+    for point in points:
+        grouped[str(point.get("traj_id") or "UNKNOWN")].append(point)
+    for traj_points in grouped.values():
+        traj_points.sort(
+            key=lambda item: (
+                float(item.get("sample_t_from_now"))
+                if to_float(item.get("sample_t_from_now")) is not None
+                else float(item.get("sample_index") or 0.0)
+            )
+        )
+    return grouped
+
+
+def phase2_voxel_plot_bounds(
+    grid_points: list[dict[str, Any]],
+    interp_points: list[dict[str, Any]],
+    candidate_points: list[dict[str, Any]],
+    uav_points: list[dict[str, Any]],
+) -> tuple[tuple[float, float], tuple[float, float], tuple[float, float]]:
+    all_points = grid_points + interp_points + candidate_points + uav_points
+    xs = [float(point["x"]) for point in all_points]
+    ys = [float(point["y"]) for point in all_points]
+    zs = [float(point["z"]) for point in all_points]
+    return float_range(xs), float_range(ys), float_range(zs)
+
+
+def phase2_pl_log_bounds(points: list[dict[str, Any]]) -> tuple[float, float]:
+    values = phase2_positive_pl_values(points)
+    if not values:
+        return 0.0, 1.0
+    logs = [math.log10(max(value, 1.0e-3)) for value in values]
+    lo, hi = min(logs), max(logs)
+    if math.isclose(lo, hi):
+        return lo - 0.5, hi + 0.5
+    return lo, hi
+
+
+def phase2_pl_heat_color(value: Any, log_lo: float, log_hi: float) -> str:
+    number = to_float(value)
+    if number is None or number <= 0.0:
+        return "#94a3b8"
+    log_value = math.log10(max(number, 1.0e-3))
+    return phase2_value_color(
+        log_value,
+        log_lo,
+        log_hi,
+        ("#2563eb", "#facc15", "#dc2626"),
+    )
+
+
+def phase2_svg_colorbar(
+    body: list[str],
+    x: float,
+    y: float,
+    h: float,
+    log_lo: float,
+    log_hi: float,
+    title: str,
+) -> None:
+    steps = 18
+    step_h = h / steps
+    for idx in range(steps):
+        alpha = idx / max(steps - 1, 1)
+        value = log_hi * (1.0 - alpha) + log_lo * alpha
+        color = phase2_value_color(value, log_lo, log_hi, ("#2563eb", "#facc15", "#dc2626"))
+        body.append(
+            f'<rect x="{x:.2f}" y="{y + idx * step_h:.2f}" width="18.00" '
+            f'height="{step_h + 0.6:.2f}" fill="{color}" />'
+        )
+    body.append(f'<rect x="{x:.2f}" y="{y:.2f}" width="18.00" height="{h:.2f}" fill="none" stroke="#374151" />')
+    body.append(svg_text(x + 28, y + 2, f"{10 ** log_hi:.2g}", 10, "#374151"))
+    body.append(svg_text(x + 28, y + h + 2, f"{10 ** log_lo:.2g}", 10, "#374151"))
+    body.append(svg_text(x, y - 12, title, 11, "#111827"))
+    body.append(svg_text(x + 28, y + h * 0.5, "PL [m], log color", 10, "#4b5563"))
+
+
+def phase2_project_xy(
+    x: float,
+    y: float,
+    x_bounds: tuple[float, float],
+    y_bounds: tuple[float, float],
+    px: float,
+    py: float,
+    pw: float,
+    ph: float,
+) -> tuple[float, float]:
+    return (
+        map_linear(x, x_bounds[0], x_bounds[1], px, px + pw),
+        map_linear(y, y_bounds[0], y_bounds[1], py + ph, py),
+    )
+
+
+def phase2_project_iso_raw(x: float, y: float, z: float) -> tuple[float, float]:
+    return x - 0.62 * y, 0.36 * x + 0.42 * y - 1.45 * z
+
+
+def phase2_project_iso(
+    x: float,
+    y: float,
+    z: float,
+    u_bounds: tuple[float, float],
+    v_bounds: tuple[float, float],
+    px: float,
+    py: float,
+    pw: float,
+    ph: float,
+) -> tuple[float, float]:
+    u, v = phase2_project_iso_raw(x, y, z)
+    return (
+        map_linear(u, u_bounds[0], u_bounds[1], px, px + pw),
+        map_linear(v, v_bounds[0], v_bounds[1], py + ph, py),
+    )
+
+
+def phase2_voxel_iso_bounds(
+    x_bounds: tuple[float, float],
+    y_bounds: tuple[float, float],
+    z_bounds: tuple[float, float],
+    points: list[dict[str, Any]],
+) -> tuple[tuple[float, float], tuple[float, float]]:
+    raw_points = [
+        phase2_project_iso_raw(float(point["x"]), float(point["y"]), float(point["z"]))
+        for point in points
+    ]
+    for x in x_bounds:
+        for y in y_bounds:
+            for z in z_bounds:
+                raw_points.append(phase2_project_iso_raw(x, y, z))
+    us = [item[0] for item in raw_points]
+    vs = [item[1] for item in raw_points]
+    return float_range(us), float_range(vs)
+
+
+def generate_phase2_voxel_pl_heatmap_xy_svg(
+    phase2_summary: dict[str, Any],
+    grid_points: list[dict[str, Any]],
+    interp_points: list[dict[str, Any]],
+    candidate_points: list[dict[str, Any]],
+    uav_points: list[dict[str, Any]],
+    path: Path,
+) -> None:
+    if not grid_points and not interp_points and not candidate_points:
+        write_plot_message_svg(path, "Phase 2 3D voxel PL prediction heatmap - XY projection", "No voxel/interpolation or candidate trajectory PL samples were available.")
+        return
+    plt, error = import_matplotlib()
+    if plt is None:
+        write_plot_message_svg(path, "Phase 2 3D voxel PL prediction heatmap - XY projection", error)
+        return
+
+    log_lo, log_hi = phase2_pl_log_bounds(grid_points + interp_points + candidate_points)
+    grid_summary = phase2_summary.get("pl_grid") or {}
+    resolution = to_float(grid_summary.get("resolution_m")) or 1.0
+    grid_label = "voxel centers" if any(point.get("source") == "voxel" for point in grid_points) else "consistency samples"
+
+    def scatter_pl(ax: Any, points: list[dict[str, Any]], *, marker: str, size: float, alpha: float, label: str) -> Any:
+        sampled = points[::max(1, len(points) // 1400)] if points else []
+        drawable = [point for point in sampled if to_float(point.get("pl")) is not None and (to_float(point.get("pl")) or 0.0) > 0.0]
+        if not drawable:
+            return None
+        xs = [float(point["x"]) for point in drawable]
+        ys = [float(point["y"]) for point in drawable]
+        colors = [math.log10(max(float(to_float(point.get("pl")) or 1.0e-3), 1.0e-3)) for point in drawable]
+        return ax.scatter(
+            xs,
+            ys,
+            c=colors,
+            cmap="plasma",
+            vmin=log_lo,
+            vmax=log_hi,
+            s=size,
+            marker=marker,
+            alpha=alpha,
+            label=label,
+            edgecolors="none",
+        )
+
+    fig, ax = plt.subplots(figsize=(12.2, 9.0))
+    scatter = scatter_pl(ax, grid_points, marker="s", size=22, alpha=0.62, label=grid_label)
+    interp_scatter = scatter_pl(ax, interp_points, marker="o", size=22, alpha=0.80, label="interpolation/self-check points")
+    if scatter is None:
+        scatter = interp_scatter
+    grouped_candidates = phase2_group_candidate_points(candidate_points)
+    for traj_points in grouped_candidates.values():
+        if len(traj_points) >= 2:
+            ax.plot([float(point["x"]) for point in traj_points], [float(point["y"]) for point in traj_points], color="#111827", linewidth=0.85, alpha=0.24)
+    candidate_scatter = scatter_pl(ax, candidate_points, marker="o", size=28, alpha=0.84, label="candidate trajectory samples")
+    if scatter is None:
+        scatter = candidate_scatter
+
+    if uav_points:
+        ax.plot([float(point["x"]) for point in uav_points], [float(point["y"]) for point in uav_points], color="#ef4444", linewidth=2.0, alpha=0.96, label="UAV snapshot path")
+        ax.scatter([float(uav_points[-1]["x"])], [float(uav_points[-1]["y"])], marker="^", color="#ef4444", edgecolors="#111827", s=70, zorder=5)
+    if scatter is not None:
+        cbar = fig.colorbar(scatter, ax=ax, pad=0.015)
+        cbar.set_label("log10(PL [m])")
+    ax.set_title(f"Phase 2 3D voxel PL prediction heatmap - XY projection\n{grid_label} with sampled candidate trajectories")
+    ax.set_xlabel("x [m]")
+    ax.set_ylabel("y [m]")
+    ax.set_aspect("equal", adjustable="datalim")
+    ax.grid(True, alpha=0.25)
+    ax.legend(loc="upper right", framealpha=0.88, fontsize=8)
+    ax.text(
+        1.02,
+        0.02,
+        f"{grid_label}: {len(grid_points)}\nself-check points: {len(interp_points)}\n"
+        f"candidate samples: {len(candidate_points)}\nUAV snapshots: {len(uav_points)}\n"
+        f"grid resolution: {resolution:.2f} m\nsources: pl_grid_voxels/pl_grid_consistency/integrity_along_planner_traj/future_integrity_snapshot",
+        transform=ax.transAxes,
+        va="bottom",
+        ha="left",
+        fontsize=8,
+    )
+    save_matplotlib_figure(plt, fig, path)
+
+
+def generate_phase2_voxel_pl_heatmap_3d_svg(
+    phase2_summary: dict[str, Any],
+    grid_points: list[dict[str, Any]],
+    interp_points: list[dict[str, Any]],
+    candidate_points: list[dict[str, Any]],
+    uav_points: list[dict[str, Any]],
+    path: Path,
+) -> None:
+    if not grid_points and not interp_points and not candidate_points:
+        write_plot_message_svg(path, "Phase 2 3D voxel PL prediction heatmap - 3D view", "No voxel/interpolation or candidate trajectory PL samples were available.")
+        return
+    plt, error = import_matplotlib()
+    if plt is None:
+        write_plot_message_svg(path, "Phase 2 3D voxel PL prediction heatmap - 3D view", error)
+        return
+
+    x_bounds, y_bounds, z_bounds = phase2_voxel_plot_bounds(grid_points, interp_points, candidate_points, uav_points)
+    log_lo, log_hi = phase2_pl_log_bounds(grid_points + interp_points + candidate_points)
+    grid_summary = phase2_summary.get("pl_grid") or {}
+    resolution = to_float(grid_summary.get("resolution_m")) or 1.0
+    grid_label = "voxel centers" if any(point.get("source") == "voxel" for point in grid_points) else "consistency samples"
+
+    fig = plt.figure(figsize=(12.2, 9.0))
+    ax = fig.add_subplot(111, projection="3d")
+
+    def scatter_pl3(points: list[dict[str, Any]], *, marker: str, size: float, alpha: float, label: str) -> Any:
+        sampled = points[::max(1, len(points) // 1400)] if points else []
+        drawable = [point for point in sampled if to_float(point.get("pl")) is not None and (to_float(point.get("pl")) or 0.0) > 0.0]
+        if not drawable:
+            return None
+        xs = [float(point["x"]) for point in drawable]
+        ys = [float(point["y"]) for point in drawable]
+        zs = [float(point["z"]) for point in drawable]
+        colors = [math.log10(max(float(to_float(point.get("pl")) or 1.0e-3), 1.0e-3)) for point in drawable]
+        return ax.scatter(
+            xs,
+            ys,
+            zs,
+            c=colors,
+            cmap="plasma",
+            vmin=log_lo,
+            vmax=log_hi,
+            s=size,
+            marker=marker,
+            alpha=alpha,
+            label=label,
+            depthshade=False,
+        )
+
+    scatter = scatter_pl3(grid_points, marker="s", size=20, alpha=0.55, label=grid_label)
+    interp_scatter = scatter_pl3(interp_points, marker="o", size=22, alpha=0.80, label="interpolation/self-check points")
+    if scatter is None:
+        scatter = interp_scatter
+    grouped_candidates = phase2_group_candidate_points(candidate_points)
+    for traj_points in grouped_candidates.values():
+        if len(traj_points) >= 2:
+            ax.plot(
+                [float(point["x"]) for point in traj_points],
+                [float(point["y"]) for point in traj_points],
+                [float(point["z"]) for point in traj_points],
+                color="#111827",
+                linewidth=0.85,
+                alpha=0.26,
+            )
+    candidate_scatter = scatter_pl3(candidate_points, marker="o", size=26, alpha=0.84, label="candidate trajectory samples")
+    if scatter is None:
+        scatter = candidate_scatter
+
+    if uav_points:
+        ax.plot(
+            [float(point["x"]) for point in uav_points],
+            [float(point["y"]) for point in uav_points],
+            [float(point["z"]) for point in uav_points],
+            color="#ef4444",
+            linewidth=2.0,
+            alpha=0.96,
+            label="UAV snapshot path",
+        )
+        ax.scatter([float(uav_points[-1]["x"])], [float(uav_points[-1]["y"])], [float(uav_points[-1]["z"])], marker="^", color="#ef4444", edgecolors="#111827", s=72)
+    if scatter is not None:
+        cbar = fig.colorbar(scatter, ax=ax, pad=0.10, shrink=0.72)
+        cbar.set_label("log10(PL [m])")
+    ax.set_xlim(x_bounds)
+    ax.set_ylim(y_bounds)
+    ax.set_zlim(z_bounds)
+    ax.set_xlabel("x [m]")
+    ax.set_ylabel("y [m]")
+    ax.set_zlabel("z [m]")
+    ax.view_init(elev=23.0, azim=-58.0)
+    ax.set_title(f"Phase 2 3D voxel PL prediction heatmap - 3D view\nPL-colored {grid_label} plus candidate trajectories")
+    ax.legend(loc="upper left", framealpha=0.88, fontsize=8)
+    fig.text(
+        0.78,
+        0.16,
+        f"{grid_label}: {len(grid_points)}\nself-check points: {len(interp_points)}\n"
+        f"candidate samples: {len(candidate_points)}\nUAV snapshots: {len(uav_points)}\n"
+        f"grid resolution: {resolution:.2f} m\nx [{x_bounds[0]:.2f}, {x_bounds[1]:.2f}]\n"
+        f"y [{y_bounds[0]:.2f}, {y_bounds[1]:.2f}]\nz [{z_bounds[0]:.2f}, {z_bounds[1]:.2f}]",
+        fontsize=8,
+    )
+    save_matplotlib_figure(plt, fig, path)
+
+
+def generate_phase2_voxel_pl_heatmap_plots(
+    phase2_summary: dict[str, Any],
+    pred_rows: list[dict[str, str]],
+    voxel_rows: list[dict[str, str]],
+    grid_rows: list[dict[str, str]],
+    snapshot_rows: list[dict[str, str]],
+    figs_dir: Path,
+) -> list[str]:
+    voxel_points = phase2_voxel_pl_points(voxel_rows)
+    consistency_points = phase2_grid_pl_points(grid_rows)
+    grid_points = voxel_points if voxel_points else consistency_points
+    interp_points = consistency_points if voxel_points else []
+    candidate_points = phase2_candidate_pl_points(pred_rows)
+    uav_points = phase2_uav_pose_points(snapshot_rows)
+    if not grid_points and not interp_points and not candidate_points:
+        return []
+    ensure_dir(figs_dir)
+    xy_path = figs_dir / "phase2_voxel_pl_heatmap_xy.svg"
+    plot3d_path = figs_dir / "phase2_voxel_pl_heatmap_3d.svg"
+    generate_phase2_voxel_pl_heatmap_xy_svg(
+        phase2_summary, grid_points, interp_points, candidate_points, uav_points, xy_path
+    )
+    generate_phase2_voxel_pl_heatmap_3d_svg(
+        phase2_summary, grid_points, interp_points, candidate_points, uav_points, plot3d_path
+    )
+    return [str(xy_path), str(plot3d_path)]
+
+
 def write_phase2_stage1_outputs(
     phase2_analysis: dict[str, Any],
     phase2_summary: dict[str, Any],
@@ -4459,6 +5653,17 @@ def write_phase2_stage1_outputs(
     fan_path = figs_dir / "phase2_stage1_prediction_fan.svg"
     generate_phase2_prediction_fan_svg(phase2_analysis, fan_path)
     generated.append(str(fan_path))
+
+    generated.extend(
+        generate_phase2_voxel_pl_heatmap_plots(
+            phase2_summary,
+            pred_rows,
+            rows_by_name.get("pl_grid_voxels", []),
+            rows_by_name.get("pl_grid_consistency", []),
+            snapshot_rows,
+            figs_dir,
+        )
+    )
 
     return generated
 
@@ -5467,6 +6672,7 @@ def render_report(
     lines.append("")
 
     append_timing_section(lines, analyses.get("timing", {}))
+    append_real_time_timing_section(lines, analyses.get("real_time_timing", {}))
     append_icp_section(lines, analyses.get("icp", {}))
     append_gnss_section(lines, analyses.get("gnss_factor_debug", {}))
     append_araim_section(lines, analyses.get("araim", {}))
@@ -5543,6 +6749,32 @@ def render_report(
         ))
     lines.append("")
 
+    lines.append("## PL Grid Voxels")
+    lines.append("")
+    an = analyses.get("pl_grid_voxels", {})
+    if not an.get("available"):
+        lines.append("*Full PL grid voxel export not available for this run.*")
+    else:
+        def voxel_stat(block_name: str, field: str) -> str:
+            block = an.get(block_name, {})
+            if not isinstance(block, dict):
+                return "n/a"
+            return phase2_display_number(block.get(field), 4)
+
+        lines.append(md_table(
+            ["Metric", "Value"],
+            [
+                ["rows", an.get("row_count", "n/a")],
+                ["generation_count", an.get("generation_count", "n/a")],
+                ["latest_generation", an.get("latest_generation", "n/a")],
+                ["latest_generation_size", an.get("latest_generation_size", "n/a")],
+                ["PL mean/p95/max (m)", f"{voxel_stat('pl', 'mean')} / {voxel_stat('pl', 'p95')} / {voxel_stat('pl', 'max')}"],
+                ["HPL mean/p95/max (m)", f"{voxel_stat('hpl', 'mean')} / {voxel_stat('hpl', 'p95')} / {voxel_stat('hpl', 'max')}"],
+                ["VPL mean/p95/max (m)", f"{voxel_stat('vpl', 'mean')} / {voxel_stat('vpl', 'p95')} / {voxel_stat('vpl', 'max')}"],
+            ],
+        ))
+    lines.append("")
+
     lines.append("## External Plot Integrations")
     lines.append("")
     if external_results:
@@ -5568,6 +6800,78 @@ def append_timing_section(lines: list[str], analysis: dict[str, Any]) -> None:
         [[item["module"], item["count"], f"{item['mean']:.3f}", f"{item['p50']:.3f}", f"{item['p95']:.3f}", f"{item['p99']:.3f}", f"{item['max']:.3f}"] for item in analysis["module_stats"]],
     ))
     lines.append("")
+
+
+def append_real_time_timing_section(lines: list[str], analysis: dict[str, Any]) -> None:
+    lines.append("## Timing & Real-Time Summary")
+    lines.append("")
+    if not analysis.get("available"):
+        lines.append("Timing analysis was not available.")
+        lines.append("")
+        return
+
+    timing_enabled = analysis.get("timing_enabled")
+    enabled_text = "unknown" if timing_enabled is None else str(bool(timing_enabled)).lower()
+    lines.append(md_table(
+        ["Metric", "Value"],
+        [
+            ["global.enable_timing_csv", enabled_text],
+            ["iap_timing rows", analysis.get("timing_row_count", 0)],
+            ["planner debug rows", analysis.get("planner_debug_row_count", 0)],
+        ],
+    ))
+    lines.append("")
+
+    rows = []
+    for item in analysis.get("modules", []):
+        rows.append([
+            item.get("module", ""),
+            item.get("source", ""),
+            item.get("status", ""),
+            item.get("count", 0),
+            item.get("unit", "ms"),
+            timing_display(item.get("mean")),
+            timing_display(item.get("p50")),
+            timing_display(item.get("p95")),
+            timing_display(item.get("p99")),
+            timing_display(item.get("max")),
+            item.get("data_source", ""),
+        ])
+    if rows:
+        lines.append(md_table(
+            ["Module", "Source", "Status", "Count", "Unit", "Mean", "P50", "P95", "P99", "Max", "Data source"],
+            rows,
+        ))
+        lines.append("")
+
+    missing = analysis.get("missing_modules", [])
+    if missing:
+        lines.append("### Missing / No-Row Timing Coverage")
+        lines.append("")
+        lines.append(md_table(
+            ["Module", "Status"],
+            [[item.get("module", ""), item.get("status", "")] for item in missing],
+        ))
+        lines.append("")
+
+    bottlenecks = analysis.get("top_bottlenecks", [])
+    if bottlenecks:
+        lines.append("### Top Bottlenecks by P95")
+        lines.append("")
+        lines.append(md_table(
+            ["Module", "P95 ms", "Mean ms", "Max ms", "Source"],
+            [
+                [
+                    item.get("module", ""),
+                    timing_display(item.get("p95")),
+                    timing_display(item.get("mean")),
+                    timing_display(item.get("max")),
+                    item.get("data_source", ""),
+                ]
+                for item in bottlenecks
+            ],
+        ))
+        lines.append("")
 
 
 def append_icp_section(lines: list[str], analysis: dict[str, Any]) -> None:
@@ -5895,12 +7199,38 @@ def append_desired_tracking_section(lines: list[str], analysis: dict[str, Any]) 
         lines.append(f"Desired path tracking accuracy unavailable: `{reason}`.")
         lines.append("")
         return
+    metric_specs = [
+        ("estimation_position_error", "IAP vs truth", "Localization estimation error"),
+        ("position_tracking_error", "truth vs desired", "3D control tracking error"),
+        ("horizontal_tracking_error", "truth vs desired", "Horizontal control tracking error"),
+        ("vertical_tracking_error", "truth vs desired", "Vertical control tracking error"),
+    ]
     lines.append(md_table(
-        ["Metric", "Value"],
+        ["Metric", "Count", "RMSE m", "Mean m", "P50 m", "P95 m", "Max m", "Meaning"],
         [
-            ["row_count", analysis["row_count"]],
-            ["tracking_error mean/p95/max", format_triplet(analysis["tracking_error"])],
-            ["tracking_error_rms", f"{analysis['tracking_error_rms']:.3f}"],
+            [
+                name,
+                metric.get("count", 0),
+                f"{metric.get('rmse', 0.0):.3f}",
+                f"{metric.get('mean', 0.0):.3f}",
+                f"{metric.get('p50', 0.0):.3f}",
+                f"{metric.get('p95', 0.0):.3f}",
+                f"{metric.get('max', 0.0):.3f}",
+                meaning,
+            ]
+            for name, _source, meaning in metric_specs
+            for metric in [analysis.get(name, {})]
+        ],
+    ))
+    lines.append("")
+    lines.append(md_table(
+        ["Item", "Value"],
+        [
+            ["source rows", analysis.get("row_count", 0)],
+            ["desired/truth/IAP trajectory rows", analysis.get("trajectory_row_count", 0)],
+            ["error convention", "tracking = truth - desired; estimation = IAP - truth"],
+            ["plot files", "analysis/figs/phase1_tracking_xy.svg, analysis/figs/phase1_tracking_error_timeline.svg"],
+            ["axis timeline plots", "analysis/figs/phase1_tracking_x_timeline.svg, analysis/figs/phase1_tracking_y_timeline.svg, analysis/figs/phase1_tracking_z_timeline.svg"],
         ],
     ))
     lines.append("")
@@ -6039,6 +7369,7 @@ def build_json_payload(
             "top_patterns": runtime.get("top_patterns", []),
         },
         "analyses": analyses,
+        "real_time_timing": analyses.get("real_time_timing", {}),
         "generated_plots": generated_plots,
         "external_results": external_results,
     }
@@ -6079,6 +7410,12 @@ def main() -> int:
 
     analyses = {
         "timing": analyze_timing(rows_by_name.get("timing", [])),
+        "real_time_timing": analyze_real_time_timing(
+            rows_by_name.get("timing", []),
+            rows_by_name.get("planner_integrity_cost_debug", []),
+            phase2_online_summary,
+            metadata,
+        ),
         "icp": analyze_icp(rows_by_name.get("icp", [])),
         "gnss_factor_debug": analyze_gnss(rows_by_name.get("gnss_factor_debug", [])),
         "araim": analyze_araim(rows_by_name.get("araim", [])),
@@ -6104,10 +7441,20 @@ def main() -> int:
         "trajectory": analyze_trajectory(rows_by_name.get("trajectory", [])),
         "exec_trajectory": analyze_exec_trajectory(rows_by_name.get("exec_trajectory", [])),
         "pl_grid_consistency": analyze_pl_grid_consistency(rows_by_name.get("pl_grid_consistency", [])),
+        "pl_grid_voxels": analyze_pl_grid_voxels(rows_by_name.get("pl_grid_voxels", [])),
         "dump": analyze_dump(run_dir),
     }
 
     generated_plots = maybe_generate_timing_plot(analyses["timing"], figs_dir, args.no_plots)
+    generated_plots.extend(
+        write_real_time_timing_outputs(
+            analyses["real_time_timing"],
+            rows_by_name.get("timing", []),
+            rows_by_name.get("planner_integrity_cost_debug", []),
+            figs_dir,
+            args.no_plots,
+        )
+    )
     generated_plots.extend(
         write_araim_source_plots(rows_by_name.get("araim", []), figs_dir, args.no_plots)
     )
@@ -6123,6 +7470,9 @@ def main() -> int:
     )
     generated_plots.extend(
         write_sim_integrity_outputs(analyses["sim_truth_integrity"], out_dir, figs_dir, args.no_plots)
+    )
+    generated_plots.extend(
+        write_desired_tracking_outputs(analyses["desired_tracking"], figs_dir, args.no_plots)
     )
     generated_plots.extend(
         write_phase2_integrity_outputs(analyses["phase2_integrity"], out_dir, figs_dir, args.no_plots)

@@ -212,6 +212,36 @@ const std::vector<std::string> kSnapshotCsvFields = {
     "query_source",
   };
 
+const std::vector<std::string> kGridVoxelCsvFields = {
+    "stamp",
+    "grid_generation",
+    "ix",
+    "iy",
+    "iz",
+    "p_x",
+    "p_y",
+    "p_z",
+    "hpl",
+    "vpl",
+    "pl",
+    "gnss_hpl",
+    "gnss_vpl",
+    "fused_hpl",
+    "fused_vpl",
+    "n_vis",
+    "pdop",
+    "valid",
+    "fallback",
+    "fallback_reason",
+    "query_source",
+    "lidar_valid",
+    "lidar_alpha",
+    "lidar_tdop",
+    "lidar_condition",
+    "lidar_n_primitives",
+    "lidar_fallback_reason",
+};
+
   const std::vector<std::string> kActualExecCsvFields = {
     "stamp",
     "odom_x",
@@ -591,6 +621,7 @@ class Phase2PlannerIntegrityEvaluator : public rclcpp::Node {
     declare_parameter<double>("pl_grid_size_y_m", 30.0);
     declare_parameter<double>("pl_grid_size_z_m", 8.0);
     declare_parameter<double>("pl_grid_update_hz", 2.0);
+    declare_parameter<bool>("export_pl_grid_voxels", false);
     declare_parameter<bool>("use_lidar_observability", false);
     declare_parameter<double>("lidar_search_radius_m", 8.0);
     declare_parameter<int>("lidar_min_points", 12);
@@ -673,6 +704,8 @@ class Phase2PlannerIntegrityEvaluator : public rclcpp::Node {
         get_parameter("pl_grid_size_y_m").as_double();
     field_predictor_params_.grid_size_z_m =
         get_parameter("pl_grid_size_z_m").as_double();
+    export_pl_grid_voxels_ =
+        get_parameter("export_pl_grid_voxels").as_bool();
     use_lidar_observability_ =
         get_parameter("use_lidar_observability").as_bool();
     field_predictor_params_.use_fused_fim_grid =
@@ -968,6 +1001,10 @@ class Phase2PlannerIntegrityEvaluator : public rclcpp::Node {
                                std::ios::out | std::ios::trunc);
     grid_consistency_csv_file_.open(*export_dir_ / "pl_grid_consistency.csv",
                                     std::ios::out | std::ios::trunc);
+    if (export_pl_grid_voxels_ && use_pl_grid_) {
+      grid_voxels_csv_file_.open(*export_dir_ / "pl_grid_voxels.csv",
+                                  std::ios::out | std::ios::trunc);
+    }
     if (!csv_file_ || !snapshot_csv_file_) {
       warn_once("failed to open Phase 2 evaluator CSV outputs");
       return;
@@ -1004,6 +1041,15 @@ class Phase2PlannerIntegrityEvaluator : public rclcpp::Node {
       }
       grid_consistency_csv_file_ << '\n';
     }
+    if (grid_voxels_csv_file_) {
+      for (std::size_t i = 0; i < kGridVoxelCsvFields.size(); ++i) {
+        if (i) {
+          grid_voxels_csv_file_ << ',';
+        }
+        grid_voxels_csv_file_ << kGridVoxelCsvFields[i];
+      }
+      grid_voxels_csv_file_ << '\n';
+    }
     outputs_open_ = true;
     write_summary();
     RCLCPP_INFO(get_logger(), "phase2 C++ evaluator writing export files under %s",
@@ -1036,6 +1082,7 @@ class Phase2PlannerIntegrityEvaluator : public rclcpp::Node {
         std::lock_guard<std::mutex> occupancy_lock(occupancy_mutex_);
         const bool rebuilt = field_predictor_.rebuild_grid(rebuild_stamp);
         if (rebuilt) {
+          write_pl_grid_voxel_samples(rebuild_stamp);
           write_grid_consistency_samples(rebuild_stamp);
         }
       } catch (...) {
@@ -1933,6 +1980,68 @@ class Phase2PlannerIntegrityEvaluator : public rclcpp::Node {
     grid_consistency_csv_file_.flush();
   }
 
+  void write_pl_grid_voxel_samples(const double stamp_s) {
+    if (!grid_voxels_csv_file_ || !export_pl_grid_voxels_ || !use_pl_grid_) {
+      return;
+    }
+    const auto grid = field_predictor_.active_grid();
+    if (!grid || !grid->valid()) {
+      return;
+    }
+
+    std::lock_guard<std::mutex> lock(csv_mutex_);
+    for (int iz = 0; iz < grid->nz(); ++iz) {
+      for (int iy = 0; iy < grid->ny(); ++iy) {
+        for (int ix = 0; ix < grid->nx(); ++ix) {
+          const Eigen::Vector3d p = grid->position(ix, iy, iz);
+          const auto& value = grid->at(ix, iy, iz).value;
+          Row row;
+          row["stamp"] = fmt_num(stamp_s);
+          row["grid_generation"] = std::to_string(grid->generation());
+          row["ix"] = std::to_string(ix);
+          row["iy"] = std::to_string(iy);
+          row["iz"] = std::to_string(iz);
+          row["p_x"] = fmt_num(p.x());
+          row["p_y"] = fmt_num(p.y());
+          row["p_z"] = fmt_num(p.z());
+          row["hpl"] = fmt_num(value.hpl);
+          row["vpl"] = fmt_num(value.vpl);
+          row["pl"] = fmt_num(value.pl_scalar);
+          row["gnss_hpl"] = fmt_num(value.gnss_hpl);
+          row["gnss_vpl"] = fmt_num(value.gnss_vpl);
+          row["fused_hpl"] = fmt_num(value.fused_hpl);
+          row["fused_vpl"] = fmt_num(value.fused_vpl);
+          row["n_vis"] = value.n_vis >= 0 ? std::to_string(value.n_vis) : "nan";
+          row["pdop"] = fmt_num(value.pdop);
+          row["valid"] = bool_str(value.valid);
+          row["fallback"] = bool_str(value.fallback);
+          row["fallback_reason"] = value.fallback_reason;
+          row["query_source"] = value.query_source;
+          row["lidar_valid"] = bool_str(value.lidar_valid);
+          row["lidar_alpha"] = fmt_num(value.lidar_alpha);
+          row["lidar_tdop"] = fmt_num(value.lidar_tdop);
+          row["lidar_condition"] = fmt_num(value.lidar_condition);
+          row["lidar_n_primitives"] =
+              value.lidar_n_primitives >= 0
+                  ? std::to_string(value.lidar_n_primitives)
+                  : "nan";
+          row["lidar_fallback_reason"] = value.lidar_fallback_reason;
+
+          for (std::size_t i = 0; i < kGridVoxelCsvFields.size(); ++i) {
+            if (i) {
+              grid_voxels_csv_file_ << ',';
+            }
+            const auto it = row.find(kGridVoxelCsvFields[i]);
+            grid_voxels_csv_file_
+                << csv_escape(it == row.end() ? "" : it->second);
+          }
+          grid_voxels_csv_file_ << '\n';
+        }
+      }
+    }
+    grid_voxels_csv_file_.flush();
+  }
+
   void on_bspline(const traj_utils::msg::Bspline& msg) {
     open_outputs_if_ready();
     seen_bspline_ = true;
@@ -2126,6 +2235,7 @@ class Phase2PlannerIntegrityEvaluator : public rclcpp::Node {
       {"phase2_pl_grid_size_y_m", field_predictor_params_.grid_size_y_m},
       {"phase2_pl_grid_size_z_m", field_predictor_params_.grid_size_z_m},
       {"phase2_pl_grid_update_hz", pl_grid_update_hz_},
+      {"phase2_export_pl_grid_voxels", export_pl_grid_voxels_},
       {"phase2_lidar_search_radius_m",
        field_predictor_params_.lidar_search_radius_m},
       {"phase2_lidar_min_points", field_predictor_params_.lidar_min_points},
@@ -2206,6 +2316,10 @@ class Phase2PlannerIntegrityEvaluator : public rclcpp::Node {
           {"mean", json_or_null(grid_stats.mean_build_time_ms)},
           {"max", json_or_null(grid_stats.max_build_time_ms)}}},
         {"last_grid_age_s", json_or_null(grid_stats.last_grid_age_s)},
+        {"voxel_export_enabled", export_pl_grid_voxels_ && use_pl_grid_},
+        {"voxel_csv", export_pl_grid_voxels_ && use_pl_grid_
+                          ? "pl_grid_voxels.csv"
+                          : ""},
         {"grid_vs_direct_self_check",
          {{"last_pl_ratio",
            json_or_null(grid_stats.last_self_check_pl_ratio)},
@@ -2990,6 +3104,10 @@ class Phase2PlannerIntegrityEvaluator : public rclcpp::Node {
       grid_consistency_csv_file_.flush();
       grid_consistency_csv_file_.close();
     }
+    if (grid_voxels_csv_file_) {
+      grid_voxels_csv_file_.flush();
+      grid_voxels_csv_file_.close();
+    }
   }
 
   iap::PredictedAraimComputer::Params predictor_params_{};
@@ -3024,6 +3142,7 @@ class Phase2PlannerIntegrityEvaluator : public rclcpp::Node {
   double val_m_ = 60.0;
   double fallback_pl_m_ = 20.0;
   bool use_pl_grid_ = false;
+  bool export_pl_grid_voxels_ = false;
   bool use_lidar_observability_ = false;
   double pl_grid_update_hz_ = 2.0;
   int lidar_map_max_points_ = 2500;
@@ -3059,6 +3178,7 @@ class Phase2PlannerIntegrityEvaluator : public rclcpp::Node {
   std::ofstream snapshot_csv_file_;
   std::ofstream actual_exec_csv_file_;
   std::ofstream grid_consistency_csv_file_;
+  std::ofstream grid_voxels_csv_file_;
   mutable std::mutex csv_mutex_;
   bool outputs_open_ = false;
   bool finalized_ = false;
