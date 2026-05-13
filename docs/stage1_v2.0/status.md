@@ -619,3 +619,278 @@ and update the Phase 2 validator to understand the new `fim_add` advisory mode:
   advisory path.
 - The validator still needs the known Phase 2 freshness/schema alignment fixes
   documented above.
+
+## 2026-05-13 Update: Stage 3 PI Cost Adapter Redesign and Demo11 Status
+
+Stage 3 has now been implemented on top of the Stage 2 advisory FIM-add path.
+The change is limited to the planner/evaluator PI advisory cost path and demo
+launch wiring. Certified GNSS ARAIM, certified LiDAR ARAIM, certified monitor
+fusion, `/iap/integrity` current monitor semantics, Stage 2 FIM math, URG, old
+topics, and old message fields were not intentionally changed.
+
+### Answer: Did Stage 2 Pass All Tests?
+
+No. Stage 2 passed `iap` package code-level validation and a demo11 advisory
+FIM-add smoke run, but it has not passed all demo11 validation tests and should
+not be marked as fully demo11 accepted.
+
+Current Stage 2 status remains:
+
+- Code-level `iap` tests passed.
+- demo11 with `phase2_use_advisory_fim_add=true` exercised the new FIM-add path.
+- The old standalone Phase 2/demo11 validator still fails because it contains
+  legacy assumptions that are not valid for advisory `fim_add`, including the
+  check that predicted advisory PL must stay above legacy GNSS PL.
+- The known demo11 odometry freshness/schema/alignment issues are still outside
+  Stage 3 scope and were not fixed here.
+
+### Stage 3 Code Changes
+
+Implemented files:
+
+- `include/iap/planner/pi_cost_adapter.hpp`
+  and `src/iap/planner/pi_cost_adapter.cpp`
+  - Added Stage 3 unified advisory PL mode behind
+    `phase2_pi_use_unified_advisory_pl`.
+  - Preserved legacy PI behavior when the Stage 3 switch is disabled.
+  - Added advisory integrity margin outputs, hinge cost, optional ratio cost,
+    unknown-advisory penalty, input-valid flag, term breakdowns, and max-cost
+    clamping.
+  - Stage 3 formula:
+
+    ```text
+    IM_H = HAL - HPL_adv
+    IM_V = VAL - VPL_adv
+    IM   = min(IM_H, IM_V)
+
+    c_hinge =
+      lambda_pi * (
+        max(0, HPL_adv - HAL + margin_h)^2
+        + max(0, VPL_adv - VAL + margin_v)^2
+      )
+
+    c_ratio =
+      mu_ratio * (
+        (HPL_adv / (HAL + eps_al))^2
+        + (VPL_adv / (VAL + eps_al))^2
+      )
+
+    c_PI = clamp(c_hinge + optional c_ratio + unknown_penalty, 0, max_cost)
+    ```
+
+- `apps/phase2_planner_integrity_evaluator.cpp`
+  - Added a PI advisory PL selection layer in the evaluator:
+    - use valid `hpl_adv/vpl_adv` from `fim_add` first;
+    - otherwise use existing advisory predicted `hpl/vpl`;
+    - use `constant_current` only when explicit compatibility fallback is
+      enabled;
+    - otherwise mark the PI input unknown.
+  - Routed sample rows, PI cost queries, finite-difference gradient evaluation,
+    `/iap/integrity_cost_field`, and `/iap/integrity_front_cost_field` through
+    the unified PI adapter.
+  - Replaced the front-end publisher's standalone ratio cost with the adapter
+    cost when Stage 3 is enabled.
+  - Added CSV/grid fields:
+    `advisory_hpl_used`, `advisory_vpl_used`, `advisory_pl_source`,
+    `im_h_adv`, `im_v_adv`, `im_min_adv`, `pi_hinge_cost`, `pi_ratio_cost`,
+    `pi_total_cost`, `pi_unknown_penalty`, `pi_input_valid`,
+    `pi_fallback_reason`, `pi_cost_clamped`, and `risk_band_adv`.
+  - Added `pi_stage3` summary fields:
+    selected-source histogram, fallback-reason histogram, invalid/unknown
+    counts, clamp count, and enabled policy flags.
+
+- `launch/demo11_ego_planner_integrity_corridor.launch.py`
+  and `launch/demo10_ego_planner_pi_lite_eval.launch.py`
+  - Added Stage 3 `phase2_pi_*` launch arguments.
+  - Defaults keep Stage 3 disabled:
+    `phase2_pi_use_unified_advisory_pl=false`.
+  - demo11 Stage 3 runs can enable it with:
+    `phase2_pi_use_unified_advisory_pl:=true`.
+
+- `test/test_pi_cost_adapter.cpp`
+  - Added unit coverage for:
+    - hinge activation before PL exceeds AL due to margin;
+    - ratio term disabled by default;
+    - unknown/sentinel advisory high-cost handling;
+    - legacy behavior unchanged when Stage 3 is disabled.
+
+### Stage 3 Build and Test Results
+
+Commands run from `/home/dev/ws_iap`:
+
+```bash
+colcon build --packages-select iap
+
+ctest --test-dir build/iap -R test_pi_cost_adapter --output-on-failure
+
+ctest --test-dir build/iap -R test_future_pl_field_predictor --output-on-failure
+
+python3 -m py_compile \
+  launch/demo10_ego_planner_pi_lite_eval.launch.py \
+  launch/demo11_ego_planner_integrity_corridor.launch.py
+
+ctest --test-dir build/iap --output-on-failure
+```
+
+Results:
+
+- Build passed.
+- `test_pi_cost_adapter` passed.
+- `test_future_pl_field_predictor` passed.
+- demo10/demo11 launch-file Python syntax checks passed.
+- Current `iap` package CTest passed:
+
+  ```text
+  9/9 tests passed, 0 tests failed
+  ```
+
+### Demo11 Stage 2 + Stage 3 Smoke
+
+Because demo11 is the IAP closed-loop test demo, a Stage 2 + Stage 3 enabled
+demo11 smoke run was executed.
+
+Command:
+
+```bash
+source install/setup.bash
+timeout 180s ros2 launch iap demo11_ego_planner_integrity_corridor.launch.py \
+  start_rviz:=false \
+  run_duration_s:=30 \
+  allow_truth_alignment:=false \
+  use_so3_dynamics:=true \
+  use_iap_odom_for_planner:=true \
+  use_gnss:=true \
+  use_araim:=true \
+  planner_use_integrity_cost:=true \
+  planner_use_integrity_front_search:=true \
+  planner_use_integrity_global_search:=true \
+  phase2_pl_model:=fused_fim_grid \
+  phase2_use_pl_grid:=true \
+  phase2_export_pl_grid_voxels:=true \
+  phase2_use_advisory_fim_add:=true \
+  phase2_use_lidar_advisory_fim:=true \
+  phase2_use_lidar_observability:=false \
+  phase2_pi_use_unified_advisory_pl:=true
+```
+
+Run directory:
+
+```text
+/home/dev/ws_iap/src/iap/log/20260513T043855Z_156
+```
+
+Runtime outcome:
+
+- `iap_rosnode` finished cleanly.
+- `phase2_planner_integrity_evaluator` finished cleanly.
+- `phase2_summary.json` was produced.
+- `integrity_along_planner_traj.csv` was produced.
+- `pl_grid_voxels.csv` was produced.
+- `planner_integrity_cost_debug.csv` was produced.
+- `future_integrity_eval.csv` was not produced by this demo11 smoke path.
+- Existing shutdown errors still occurred in non-core nodes such as
+  `poscmd_2_odom`, `pcl_render_node`, `traj_server`, and odometry
+  visualization nodes. This matches the earlier demo11 shutdown-risk pattern.
+
+Stage 2 advisory FIM-add was active:
+
+```text
+advisory_fim.enabled: true
+advisory_fim.fusion_mode: fim_add
+advisory_fim.query_count: 29056
+advisory_fim.gnss_fim_valid_count: 27690
+advisory_fim.lidar_fim_valid_count: 13601
+advisory_fim.regularized_count: 29056
+```
+
+Stage 3 PI was active:
+
+```text
+phase2_pi_use_unified_advisory_pl: true
+phase2_pi_use_hinge_term: true
+phase2_pi_use_ratio_term: false
+phase2_pi_penalize_unknown_advisory: true
+pi_stage3.enabled: true
+pi_stage3.selected_source_histogram: {"fim_add": 9}
+pi_stage3.input_invalid_count: 0
+pi_stage3.unknown_count: 0
+pi_stage3.max_clamp_count: 0
+pi_cost.count: 9
+pi_cost.risk_band_histogram: {"SAFE_PI": 9}
+```
+
+Stage 3 CSV/grid fields were present:
+
+- `integrity_along_planner_traj.csv`
+  - 9 data rows.
+  - Contains all new Stage 3 fields:
+    `advisory_hpl_used`, `advisory_vpl_used`, `advisory_pl_source`,
+    `im_h_adv`, `im_v_adv`, `im_min_adv`, `pi_hinge_cost`,
+    `pi_ratio_cost`, `pi_total_cost`, `pi_unknown_penalty`,
+    `pi_input_valid`, `pi_fallback_reason`, and `risk_band_adv`.
+- `pl_grid_voxels.csv`
+  - 22743 data rows.
+  - Contains the same Stage 3 fields plus Stage 2 advisory FIM fields such as
+    `hpl_adv`, `vpl_adv`, and `advisory_fusion_mode`.
+
+### Demo11 Validator Results After Stage 3
+
+The current 30-second demo11 smoke is not a full official demo11 acceptance
+run. The existing validators were run to record the current status.
+
+Phase 1 official validator:
+
+```bash
+python3 src/iap/tools/phase1/validate_phase1_closed_loop.py \
+  --run-dir /home/dev/ws_iap/src/iap/log/20260513T043855Z_156 \
+  --official
+```
+
+Result: failed only because the smoke duration was slightly below the official
+minimum:
+
+```text
+run_duration_s: 29.95
+planner_trajectory_count: 11
+planner_command_count: 1984
+truth_odom_count: 29950
+iap_odom_count: 140
+simulator_movement_m: 23.918
+Failures:
+  - run_duration_s 29.95 < 30.00
+```
+
+Phase 2/demo11 validator:
+
+```bash
+python3 src/iap/tools/phase2/validate_phase2_integrity_eval.py \
+  --run-dir /home/dev/ws_iap/src/iap/log/20260513T043855Z_156
+```
+
+Result: failed. Key warnings/failures:
+
+- `9 pos_cmd fallback sample(s) present`
+- `PL grid rebuild mean time is 649.6 ms (>500 ms initial target)`
+- `raw current PL consistency max ratio is 0.988`
+- `official Phase 2 requires at least one B-spline trajectory sample`
+- `integrity_along_planner_traj.csv row 2: PL_H_pred=1.019764180 is below gnss_hpl=20.000000000`
+- `iap_araim.csv exists but export/phase2_integrity_eval_aligned.csv is missing`
+
+This is consistent with the previously documented Stage 2 validator gap: the
+old Phase 2 validator still assumes legacy conservative advisory PL behavior
+and has not been updated for `fim_add` semantics.
+
+### Current Stage 3 Validation Conclusion
+
+Stage 3 implementation is code-tested and demo11-smoke-tested. The demo11 smoke
+confirmed that Stage 2 FIM-add and Stage 3 unified advisory PI selection are
+active together, that the new PI CSV/grid fields are emitted, and that the PI
+source histogram selects `fim_add`.
+
+Stage 3 should not yet be reported as full demo11 accepted. Full acceptance
+still requires:
+
+- a full-duration demo11 run, not only the 30-second smoke;
+- Phase 2 validator updates for advisory `fim_add` semantics;
+- the previously documented demo11 odometry freshness/schema/alignment fixes;
+- a passing official Phase 1 and Phase 2 validation pair on the same demo11 run.

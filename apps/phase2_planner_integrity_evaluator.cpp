@@ -128,6 +128,20 @@ const std::vector<std::string> kCsvFields = {
     "gnss_fim_valid",
     "fim_regularized",
     "advisory_fusion_mode",
+    "advisory_hpl_used",
+    "advisory_vpl_used",
+    "advisory_pl_source",
+    "im_h_adv",
+    "im_v_adv",
+    "im_min_adv",
+    "pi_hinge_cost",
+    "pi_ratio_cost",
+    "pi_total_cost",
+    "pi_unknown_penalty",
+    "pi_input_valid",
+    "pi_fallback_reason",
+    "pi_cost_clamped",
+    "risk_band_adv",
     "IM_H_pred",
     "IM_V_pred",
     "IM_pred_axis_min",
@@ -265,6 +279,20 @@ const std::vector<std::string> kGridVoxelCsvFields = {
     "gnss_fim_valid",
     "fim_regularized",
     "advisory_fusion_mode",
+    "advisory_hpl_used",
+    "advisory_vpl_used",
+    "advisory_pl_source",
+    "im_h_adv",
+    "im_v_adv",
+    "im_min_adv",
+    "pi_hinge_cost",
+    "pi_ratio_cost",
+    "pi_total_cost",
+    "pi_unknown_penalty",
+    "pi_input_valid",
+    "pi_fallback_reason",
+    "pi_cost_clamped",
+    "risk_band_adv",
 };
 
   const std::vector<std::string> kActualExecCsvFields = {
@@ -667,49 +695,13 @@ struct FrontIntegrityCostSample {
   int risk_band_code = 0;
 };
 
-double front_integrity_risk_ratio(const double hpl,
-                                  const double vpl,
-                                  const double hal,
-                                  const double val) {
-  if (!is_finite(hpl) || !is_finite(vpl) || !is_finite(hal) ||
-      !is_finite(val) || hal <= 1.0e-6 || val <= 1.0e-6) {
-    return std::numeric_limits<double>::quiet_NaN();
-  }
-  return std::max(hpl / hal, vpl / val);
-}
-
-double normalized_front_integrity_cost(const double hpl,
-                                       const double vpl,
-                                       const double hal,
-                                       const double val) {
-  const double risk_ratio = front_integrity_risk_ratio(hpl, vpl, hal, val);
-  if (!is_finite(risk_ratio) || risk_ratio <= 0.7) {
-    return 0.0;
-  }
-  if (risk_ratio <= 1.0) {
-    const double t = (risk_ratio - 0.7) / 0.3;
-    return std::clamp(t * t, 0.0, 10.0);
-  }
-  const double over = risk_ratio - 1.0;
-  return std::clamp(1.0 + over * over, 0.0, 10.0);
-}
-
-int front_integrity_risk_band_code(const double hpl,
-                                   const double vpl,
-                                   const double hal,
-                                   const double val) {
-  const double risk_ratio = front_integrity_risk_ratio(hpl, vpl, hal, val);
-  if (!is_finite(risk_ratio)) {
-    return 0;
-  }
-  if (risk_ratio <= 0.7) {
-    return 1;
-  }
-  if (risk_ratio <= 1.0) {
-    return 2;
-  }
-  return 3;
-}
+struct PiAdvisorySelection {
+  double hpl = std::numeric_limits<double>::quiet_NaN();
+  double vpl = std::numeric_limits<double>::quiet_NaN();
+  std::string source = "unknown";
+  bool valid = false;
+  std::string fallback_reason = "not_selected";
+};
 
 }  // namespace
 
@@ -787,6 +779,18 @@ class Phase2PlannerIntegrityEvaluator : public rclcpp::Node {
     declare_parameter<double>("pi_cost_weight_h", 1.0);
     declare_parameter<double>("pi_cost_weight_v", 1.0);
     declare_parameter<double>("pi_cost_marginal_margin_m", 1.0);
+    declare_parameter<bool>("pi_use_unified_advisory_pl", false);
+    declare_parameter<bool>("pi_use_hinge_term", true);
+    declare_parameter<bool>("pi_use_ratio_term", false);
+    declare_parameter<double>("pi_margin_h_m", 1.0);
+    declare_parameter<double>("pi_margin_v_m", 1.0);
+    declare_parameter<double>("pi_lambda", 1.0);
+    declare_parameter<double>("pi_mu_ratio", 0.0);
+    declare_parameter<double>("pi_eps_al_m", 1.0e-3);
+    declare_parameter<double>("pi_max_cost", 3000.0);
+    declare_parameter<bool>("pi_allow_constant_current_fallback", false);
+    declare_parameter<bool>("pi_require_fim_valid", false);
+    declare_parameter<bool>("pi_penalize_unknown_advisory", true);
     declare_parameter<double>("pi_cost_gradient_step_m", 0.5);
     declare_parameter<bool>("snapshot_anchor_current_integrity", true);
 	    declare_parameter<bool>("publish_integrity_cost_field", false);
@@ -919,6 +923,23 @@ class Phase2PlannerIntegrityEvaluator : public rclcpp::Node {
     pi_cost_params_.weight_v = get_parameter("pi_cost_weight_v").as_double();
     pi_cost_params_.marginal_margin_m =
         get_parameter("pi_cost_marginal_margin_m").as_double();
+    pi_cost_params_.use_unified_advisory_pl =
+        get_parameter("pi_use_unified_advisory_pl").as_bool();
+    pi_cost_params_.use_hinge_term =
+        get_parameter("pi_use_hinge_term").as_bool();
+    pi_cost_params_.use_ratio_term =
+        get_parameter("pi_use_ratio_term").as_bool();
+    pi_cost_params_.margin_h_m = get_parameter("pi_margin_h_m").as_double();
+    pi_cost_params_.margin_v_m = get_parameter("pi_margin_v_m").as_double();
+    pi_cost_params_.lambda_pi = get_parameter("pi_lambda").as_double();
+    pi_cost_params_.mu_ratio = get_parameter("pi_mu_ratio").as_double();
+    pi_cost_params_.eps_al_m = get_parameter("pi_eps_al_m").as_double();
+    pi_cost_params_.max_cost = get_parameter("pi_max_cost").as_double();
+    pi_cost_params_.penalize_unknown_advisory =
+        get_parameter("pi_penalize_unknown_advisory").as_bool();
+    pi_allow_constant_current_fallback_ =
+        get_parameter("pi_allow_constant_current_fallback").as_bool();
+    pi_require_fim_valid_ = get_parameter("pi_require_fim_valid").as_bool();
     pi_cost_adapter_ = iap::PICostAdapter(pi_cost_params_);
     pi_cost_gradient_step_m_ =
         get_parameter("pi_cost_gradient_step_m").as_double();
@@ -1749,12 +1770,95 @@ class Phase2PlannerIntegrityEvaluator : public rclcpp::Node {
     }
   }
 
+  bool pi_pl_value_valid(const double value) const {
+    const double sentinel =
+        std::isfinite(pi_cost_params_.invalid_pl_sentinel_m)
+            ? std::max(0.0, pi_cost_params_.invalid_pl_sentinel_m)
+            : 1.0e9;
+    return is_finite(value) && value >= 0.0 && value < sentinel;
+  }
+
+  bool pi_fim_valid_for_selection(const PlFields& pl) const {
+    if (!pi_require_fim_valid_) {
+      return true;
+    }
+    return pl.gnss_fim_valid && (!use_lidar_advisory_fim_ || pl.lidar_fim_valid);
+  }
+
+  PiAdvisorySelection select_pi_advisory_pl(const PlFields& pl) const {
+    PiAdvisorySelection out;
+    if (!pi_cost_params_.use_unified_advisory_pl) {
+      out.hpl = pl.hpl;
+      out.vpl = pl.vpl;
+      out.valid = is_finite(out.hpl) && is_finite(out.vpl);
+      out.source = pl.query_source.empty() ? "legacy_pl_fields" : pl.query_source;
+      out.fallback_reason = out.valid ? std::string{} : "legacy_pl_invalid";
+      return out;
+    }
+
+    const bool fim_add = pl.advisory_fusion_mode == "fim_add";
+    if (fim_add && pi_fim_valid_for_selection(pl) &&
+        pi_pl_value_valid(pl.hpl_adv) && pi_pl_value_valid(pl.vpl_adv)) {
+      out.hpl = pl.hpl_adv;
+      out.vpl = pl.vpl_adv;
+      out.source = "fim_add";
+      out.valid = true;
+      out.fallback_reason.clear();
+      return out;
+    }
+
+    if (fim_add && !pi_fim_valid_for_selection(pl)) {
+      out.fallback_reason = "fim_invalid";
+    } else if (fim_add) {
+      out.fallback_reason = "fim_advisory_pl_invalid";
+    }
+
+    const bool current_fallback =
+        pl.query_source == "current" ||
+        (pl_model_ == "gnss_geometry_araim_fallback_current" &&
+         pl.query_source == "fallback" && pi_pl_value_valid(current_hpl_) &&
+         pi_pl_value_valid(current_vpl_) &&
+         std::abs(pl.hpl - current_hpl_) < 1.0e-9 &&
+         std::abs(pl.vpl - current_vpl_) < 1.0e-9);
+    if (!current_fallback && pi_pl_value_valid(pl.hpl) &&
+        pi_pl_value_valid(pl.vpl)) {
+      out.hpl = pl.hpl;
+      out.vpl = pl.vpl;
+      out.source = pl.fallback ? "advisory_predicted_fallback"
+                               : "advisory_predicted";
+      out.valid = true;
+      if (out.fallback_reason.empty()) {
+        out.fallback_reason = pl.fallback_reason;
+      }
+      return out;
+    }
+
+    if ((pl_model_ == "constant_current" || current_fallback) &&
+        pi_allow_constant_current_fallback_ && pi_pl_value_valid(current_hpl_) &&
+        pi_pl_value_valid(current_vpl_)) {
+      out.hpl = current_hpl_;
+      out.vpl = current_vpl_;
+      out.source = "constant_current_compat";
+      out.valid = true;
+      out.fallback_reason = current_fallback ? "current_monitor_compat_fallback"
+                                             : "constant_current_compat";
+      return out;
+    }
+
+    out.source = "unknown";
+    if (out.fallback_reason.empty()) {
+      out.fallback_reason =
+          current_fallback ? "current_monitor_future_pl_disallowed"
+                           : "advisory_pl_unavailable";
+    }
+    return out;
+  }
+
   iap::PICostResult pi_cost_at(const Eigen::Vector3d& pos) {
     const iap::AlertLimitSample al = al_values(pos);
     const PlFields pl = pl_values(pos);
-    // PI cost consumes advisory predicted HPL/VPL here. The
-    // constant_current PL model is retained only as a compatibility mode.
-    return pi_cost_adapter_.evaluate(al.hal_m, al.val_m, pl.hpl, pl.vpl);
+    const PiAdvisorySelection pi_pl = select_pi_advisory_pl(pl);
+    return pi_cost_adapter_.evaluate(al.hal_m, al.val_m, pi_pl.hpl, pi_pl.vpl);
   }
 
   Eigen::Vector3d pi_cost_gradient_at(const Eigen::Vector3d& pos) {
@@ -1789,16 +1893,22 @@ class Phase2PlannerIntegrityEvaluator : public rclcpp::Node {
                       const double yaw) {
     const iap::AlertLimitSample al = al_values(pos);
     const PlFields pl = pl_values(pos);
+    const PiAdvisorySelection pi_pl = select_pi_advisory_pl(pl);
     const double current_pl = is_finite(current_hpl_) && is_finite(current_vpl_)
                                   ? std::max(current_hpl_, current_vpl_)
                                   : std::numeric_limits<double>::quiet_NaN();
     double im_h, im_v, im_axis_min, im_scalar, im;
     std::string state;
-    im_values(al.hal_m, al.val_m, al.al_m, pl.hpl, pl.vpl, pl.pl, &im_h, &im_v,
-              &im_axis_min, &im_scalar, &im, &state);
+    const double pi_pl_scalar =
+        pi_cost_params_.use_unified_advisory_pl
+            ? (pi_pl.valid ? std::max(pi_pl.hpl, pi_pl.vpl)
+                           : std::numeric_limits<double>::quiet_NaN())
+            : pl.pl;
+    im_values(al.hal_m, al.val_m, al.al_m, pi_pl.hpl, pi_pl.vpl, pi_pl_scalar,
+              &im_h, &im_v, &im_axis_min, &im_scalar, &im, &state);
     const Eigen::Vector3d pi_grad = pi_cost_gradient_at(pos);
     const iap::PICostResult pi = pi_cost_adapter_.evaluate_with_gradient(
-        al.hal_m, al.val_m, pl.hpl, pl.vpl, pi_grad.x(), pi_grad.y(),
+        al.hal_m, al.val_m, pi_pl.hpl, pi_pl.vpl, pi_grad.x(), pi_grad.y(),
         pi_grad.z());
 
     Row row;
@@ -1879,6 +1989,23 @@ class Phase2PlannerIntegrityEvaluator : public rclcpp::Node {
     row["gnss_fim_valid"] = bool_str(pl.gnss_fim_valid);
     row["fim_regularized"] = bool_str(pl.fim_regularized);
     row["advisory_fusion_mode"] = pl.advisory_fusion_mode;
+    row["advisory_hpl_used"] = fmt_num(pi_pl.hpl);
+    row["advisory_vpl_used"] = fmt_num(pi_pl.vpl);
+    row["advisory_pl_source"] = pi_pl.source;
+    row["im_h_adv"] = fmt_num(im_h);
+    row["im_v_adv"] = fmt_num(im_v);
+    row["im_min_adv"] = fmt_num(im_axis_min);
+    row["pi_hinge_cost"] = fmt_num(pi.hinge_cost);
+    row["pi_ratio_cost"] = fmt_num(pi.ratio_cost);
+    row["pi_total_cost"] = fmt_num(pi.cost_total);
+    row["pi_unknown_penalty"] = fmt_num(pi.unknown_penalty);
+    row["pi_input_valid"] = bool_str(pi.input_valid);
+    row["pi_fallback_reason"] =
+        pi.input_valid ? pi_pl.fallback_reason
+                       : (pi_pl.fallback_reason.empty() ? "pi_input_invalid"
+                                                        : pi_pl.fallback_reason);
+    row["pi_cost_clamped"] = bool_str(pi.cost_clamped);
+    row["risk_band_adv"] = pi.risk_band;
     row["IM_H_pred"] = fmt_num(im_h);
     row["IM_V_pred"] = fmt_num(im_v);
     row["IM_pred_axis_min"] = fmt_num(im_axis_min);
@@ -1929,6 +2056,24 @@ class Phase2PlannerIntegrityEvaluator : public rclcpp::Node {
                                     ? row.at("pi_dominant_axis")
                                     : "unknown";
     ++pi_dominant_axis_counts_[pi_axis];
+    const std::string pi_source = row.count("advisory_pl_source")
+                                      ? row.at("advisory_pl_source")
+                                      : "unknown";
+    ++pi_advisory_source_counts_[pi_source.empty() ? "unknown" : pi_source];
+    const std::string pi_fallback_reason =
+        row.count("pi_fallback_reason") ? row.at("pi_fallback_reason") : "";
+    if (!pi_fallback_reason.empty()) {
+      ++pi_fallback_reason_counts_[pi_fallback_reason];
+    }
+    if (row.count("pi_input_valid") && row.at("pi_input_valid") != "true") {
+      ++pi_input_invalid_count_;
+    }
+    if (row.count("risk_band_adv") && row.at("risk_band_adv") == "UNKNOWN_PI") {
+      ++pi_unknown_count_;
+    }
+    if (row.count("pi_cost_clamped") && row.at("pi_cost_clamped") == "true") {
+      ++pi_cost_clamped_count_;
+    }
     if (const auto pi_cost = finite_or_none(row.at("pi_cost_total"))) {
       pi_cost_values_.push_back(*pi_cost);
     }
@@ -2231,10 +2376,40 @@ class Phase2PlannerIntegrityEvaluator : public rclcpp::Node {
     std::lock_guard<std::mutex> lock(csv_mutex_);
     for (int iz = 0; iz < grid->nz(); ++iz) {
       for (int iy = 0; iy < grid->ny(); ++iy) {
-        for (int ix = 0; ix < grid->nx(); ++ix) {
-          const Eigen::Vector3d p = grid->position(ix, iy, iz);
-          const auto& value = grid->at(ix, iy, iz).value;
-          Row row;
+	        for (int ix = 0; ix < grid->nx(); ++ix) {
+	          const Eigen::Vector3d p = grid->position(ix, iy, iz);
+	          const auto& value = grid->at(ix, iy, iz).value;
+	          PlFields pl_for_pi;
+	          pl_for_pi.hpl = value.hpl;
+	          pl_for_pi.vpl = value.vpl;
+	          pl_for_pi.pl = value.pl_scalar;
+	          pl_for_pi.valid = value.valid;
+	          pl_for_pi.fallback = value.fallback;
+	          pl_for_pi.fallback_reason = value.fallback_reason;
+	          pl_for_pi.query_source = value.query_source;
+	          pl_for_pi.hpl_adv = value.hpl_adv;
+	          pl_for_pi.vpl_adv = value.vpl_adv;
+	          pl_for_pi.gnss_fim_valid = value.gnss_fim_valid;
+	          pl_for_pi.lidar_fim_valid = value.lidar_fim_valid;
+	          pl_for_pi.advisory_fusion_mode = value.advisory_fusion_mode;
+	          const PiAdvisorySelection pi_pl = select_pi_advisory_pl(pl_for_pi);
+	          const iap::AlertLimitSample al = al_values(p);
+	          const iap::PICostResult pi =
+	              pi_cost_adapter_.evaluate(al.hal_m, al.val_m,
+	                                        pi_pl.hpl, pi_pl.vpl);
+	          const double im_h_adv =
+	              is_finite(al.hal_m) && is_finite(pi_pl.hpl)
+	                  ? al.hal_m - pi_pl.hpl
+	                  : std::numeric_limits<double>::quiet_NaN();
+	          const double im_v_adv =
+	              is_finite(al.val_m) && is_finite(pi_pl.vpl)
+	                  ? al.val_m - pi_pl.vpl
+	                  : std::numeric_limits<double>::quiet_NaN();
+	          const double im_min_adv =
+	              is_finite(im_h_adv) && is_finite(im_v_adv)
+	                  ? std::min(im_h_adv, im_v_adv)
+	                  : (is_finite(im_h_adv) ? im_h_adv : im_v_adv);
+	          Row row;
           row["stamp"] = fmt_num(stamp_s);
           row["grid_generation"] = std::to_string(grid->generation());
           row["ix"] = std::to_string(ix);
@@ -2275,10 +2450,28 @@ class Phase2PlannerIntegrityEvaluator : public rclcpp::Node {
           row["vpl_adv"] = fmt_num(value.vpl_adv);
           row["lidar_fim_valid"] = bool_str(value.lidar_fim_valid);
           row["gnss_fim_valid"] = bool_str(value.gnss_fim_valid);
-          row["fim_regularized"] = bool_str(value.fim_regularized);
-          row["advisory_fusion_mode"] = value.advisory_fusion_mode;
+	          row["fim_regularized"] = bool_str(value.fim_regularized);
+	          row["advisory_fusion_mode"] = value.advisory_fusion_mode;
+	          row["advisory_hpl_used"] = fmt_num(pi_pl.hpl);
+	          row["advisory_vpl_used"] = fmt_num(pi_pl.vpl);
+	          row["advisory_pl_source"] = pi_pl.source;
+	          row["im_h_adv"] = fmt_num(im_h_adv);
+	          row["im_v_adv"] = fmt_num(im_v_adv);
+	          row["im_min_adv"] = fmt_num(im_min_adv);
+	          row["pi_hinge_cost"] = fmt_num(pi.hinge_cost);
+	          row["pi_ratio_cost"] = fmt_num(pi.ratio_cost);
+	          row["pi_total_cost"] = fmt_num(pi.cost_total);
+	          row["pi_unknown_penalty"] = fmt_num(pi.unknown_penalty);
+	          row["pi_input_valid"] = bool_str(pi.input_valid);
+	          row["pi_fallback_reason"] =
+	              pi.input_valid ? pi_pl.fallback_reason
+	                             : (pi_pl.fallback_reason.empty()
+	                                    ? "pi_input_invalid"
+	                                    : pi_pl.fallback_reason);
+	          row["pi_cost_clamped"] = bool_str(pi.cost_clamped);
+	          row["risk_band_adv"] = pi.risk_band;
 
-          for (std::size_t i = 0; i < kGridVoxelCsvFields.size(); ++i) {
+	          for (std::size_t i = 0; i < kGridVoxelCsvFields.size(); ++i) {
             if (i) {
               grid_voxels_csv_file_ << ',';
             }
@@ -2509,12 +2702,27 @@ class Phase2PlannerIntegrityEvaluator : public rclcpp::Node {
       {"phase2_lidar_fim_weight_scale",
        field_predictor_params_.lidar_fim_weight_scale},
       {"phase2_K_H_adv", field_predictor_params_.K_H_adv},
-      {"phase2_K_V_adv", field_predictor_params_.K_V_adv},
-      {"phase2_b_H_pred", field_predictor_params_.b_H_pred},
-      {"phase2_b_V_pred", field_predictor_params_.b_V_pred},
-      {"phase2_s_H_pred", field_predictor_params_.s_H_pred},
-      {"phase2_s_V_pred", field_predictor_params_.s_V_pred},
-    };
+	      {"phase2_K_V_adv", field_predictor_params_.K_V_adv},
+	      {"phase2_b_H_pred", field_predictor_params_.b_H_pred},
+	      {"phase2_b_V_pred", field_predictor_params_.b_V_pred},
+	      {"phase2_s_H_pred", field_predictor_params_.s_H_pred},
+	      {"phase2_s_V_pred", field_predictor_params_.s_V_pred},
+	      {"phase2_pi_use_unified_advisory_pl",
+	       pi_cost_params_.use_unified_advisory_pl},
+	      {"phase2_pi_use_hinge_term", pi_cost_params_.use_hinge_term},
+	      {"phase2_pi_use_ratio_term", pi_cost_params_.use_ratio_term},
+	      {"phase2_pi_margin_h_m", pi_cost_params_.margin_h_m},
+	      {"phase2_pi_margin_v_m", pi_cost_params_.margin_v_m},
+	      {"phase2_pi_lambda", pi_cost_params_.lambda_pi},
+	      {"phase2_pi_mu_ratio", pi_cost_params_.mu_ratio},
+	      {"phase2_pi_eps_al_m", pi_cost_params_.eps_al_m},
+	      {"phase2_pi_max_cost", pi_cost_params_.max_cost},
+	      {"phase2_pi_allow_constant_current_fallback",
+	       pi_allow_constant_current_fallback_},
+	      {"phase2_pi_require_fim_valid", pi_require_fim_valid_},
+	      {"phase2_pi_penalize_unknown_advisory",
+	       pi_cost_params_.penalize_unknown_advisory},
+	    };
     summary["fallback_count"] = fallback_count_;
     summary["fallback_rate"] = fallback_rate;
     summary["fallback_reason_histogram"] = reason_hist;
@@ -2676,15 +2884,24 @@ class Phase2PlannerIntegrityEvaluator : public rclcpp::Node {
         {"fallback_reason_histogram", reason_hist},
         {"finite_gnss_prediction_count", finite_gnss_prediction_count_},
     };
-    summary["pi_cost"] = {
-        {"available", !pi_cost_values_.empty()},
-        {"count", static_cast<int>(pi_cost_values_.size())},
-        {"weight_h", pi_cost_params_.weight_h},
-        {"weight_v", pi_cost_params_.weight_v},
-        {"marginal_margin_m", pi_cost_params_.marginal_margin_m},
-        {"mean", pi_cost_values_.empty()
-                     ? nlohmann::json(nullptr)
-                     : nlohmann::json(sum(pi_cost_values_) /
+	    summary["pi_cost"] = {
+	        {"available", !pi_cost_values_.empty()},
+	        {"count", static_cast<int>(pi_cost_values_.size())},
+	        {"weight_h", pi_cost_params_.weight_h},
+	        {"weight_v", pi_cost_params_.weight_v},
+	        {"marginal_margin_m", pi_cost_params_.marginal_margin_m},
+	        {"use_unified_advisory_pl", pi_cost_params_.use_unified_advisory_pl},
+	        {"use_hinge_term", pi_cost_params_.use_hinge_term},
+	        {"use_ratio_term", pi_cost_params_.use_ratio_term},
+	        {"margin_h_m", pi_cost_params_.margin_h_m},
+	        {"margin_v_m", pi_cost_params_.margin_v_m},
+	        {"lambda_pi", pi_cost_params_.lambda_pi},
+	        {"mu_ratio", pi_cost_params_.mu_ratio},
+	        {"eps_al_m", pi_cost_params_.eps_al_m},
+	        {"max_cost", pi_cost_params_.max_cost},
+	        {"mean", pi_cost_values_.empty()
+	                     ? nlohmann::json(nullptr)
+	                     : nlohmann::json(sum(pi_cost_values_) /
                                       static_cast<double>(pi_cost_values_.size()))},
         {"max", pi_cost_values_.empty()
                     ? nlohmann::json(nullptr)
@@ -2692,10 +2909,23 @@ class Phase2PlannerIntegrityEvaluator : public rclcpp::Node {
                                                        pi_cost_values_.end()))},
         {"p05", json_or_null(quantile(pi_cost_values_, 0.05))},
         {"p50", json_or_null(quantile(pi_cost_values_, 0.50))},
-        {"p95", json_or_null(quantile(pi_cost_values_, 0.95))},
-        {"risk_band_histogram", counts_json(pi_risk_band_counts_)},
-        {"dominant_axis_histogram", counts_json(pi_dominant_axis_counts_)},
-    };
+	        {"p95", json_or_null(quantile(pi_cost_values_, 0.95))},
+	        {"risk_band_histogram", counts_json(pi_risk_band_counts_)},
+	        {"dominant_axis_histogram", counts_json(pi_dominant_axis_counts_)},
+	    };
+	    summary["pi_stage3"] = {
+	        {"enabled", pi_cost_params_.use_unified_advisory_pl},
+	        {"allow_constant_current_fallback",
+	         pi_allow_constant_current_fallback_},
+	        {"require_fim_valid", pi_require_fim_valid_},
+	        {"penalize_unknown_advisory",
+	         pi_cost_params_.penalize_unknown_advisory},
+	        {"selected_source_histogram", counts_json(pi_advisory_source_counts_)},
+	        {"fallback_reason_histogram", counts_json(pi_fallback_reason_counts_)},
+	        {"input_invalid_count", pi_input_invalid_count_},
+	        {"unknown_count", pi_unknown_count_},
+	        {"max_clamp_count", pi_cost_clamped_count_},
+	    };
     summary["actual_alignment"] = {
         {"matched_count", 0},
         {"match_ratio", 0.0},
@@ -2824,16 +3054,17 @@ class Phase2PlannerIntegrityEvaluator : public rclcpp::Node {
 	    return rows;
 	  }
 
-	  FrontIntegrityCostSample make_front_integrity_cost_sample(
-	      const Eigen::Vector3d& pos) {
-	    FrontIntegrityCostSample sample;
-	    sample.position = pos;
-	    const iap::AlertLimitSample al = al_values(pos);
-	    const PlFields pl = pl_values(pos);
-	    sample.hpl = pl.hpl;
-	    sample.vpl = pl.vpl;
-	    sample.hal = al.hal_m;
-	    sample.val = al.val_m;
+		  FrontIntegrityCostSample make_front_integrity_cost_sample(
+		      const Eigen::Vector3d& pos) {
+		    FrontIntegrityCostSample sample;
+		    sample.position = pos;
+		    const iap::AlertLimitSample al = al_values(pos);
+		    const PlFields pl = pl_values(pos);
+		    const PiAdvisorySelection pi_pl = select_pi_advisory_pl(pl);
+		    sample.hpl = pi_pl.hpl;
+		    sample.vpl = pi_pl.vpl;
+		    sample.hal = al.hal_m;
+		    sample.val = al.val_m;
 	    sample.im_h = is_finite(sample.hal) && is_finite(sample.hpl)
 	                      ? sample.hal - sample.hpl
 	                      : std::numeric_limits<double>::quiet_NaN();
@@ -2847,12 +3078,13 @@ class Phase2PlannerIntegrityEvaluator : public rclcpp::Node {
 	    } else if (is_finite(sample.im_v)) {
 	      sample.im_min = sample.im_v;
 	    }
-	    sample.cost = normalized_front_integrity_cost(sample.hpl, sample.vpl,
-	                                                  sample.hal, sample.val);
-	    sample.risk_band_code = front_integrity_risk_band_code(
-	        sample.hpl, sample.vpl, sample.hal, sample.val);
-	    return sample;
-	  }
+		    const iap::PICostResult pi =
+		        pi_cost_adapter_.evaluate(sample.hal, sample.val,
+		                                  sample.hpl, sample.vpl);
+		    sample.cost = pi.cost_total;
+		    sample.risk_band_code = pi.risk_band_code;
+		    return sample;
+		  }
 
 	  std::vector<FrontIntegrityCostSample> build_integrity_front_cost_samples() {
 	    std::vector<FrontIntegrityCostSample> samples;
@@ -3031,13 +3263,13 @@ class Phase2PlannerIntegrityEvaluator : public rclcpp::Node {
       *x = f("x");
       *y = f("y");
       *z = f("z");
-      *hpl = f("PL_H_pred");
-      *vpl = f("PL_V_pred");
-      *hal = f("AL_H_pred");
-      *val = f("AL_V_pred");
-      *im_h = f("IM_H_pred");
-      *im_v = f("IM_V_pred");
-      *im_min = f("IM_pred_axis_min");
+	      *hpl = f("advisory_hpl_used");
+	      *vpl = f("advisory_vpl_used");
+	      *hal = f("AL_H_pred");
+	      *val = f("AL_V_pred");
+	      *im_h = f("im_h_adv");
+	      *im_v = f("im_v_adv");
+	      *im_min = f("im_min_adv");
       *cost = f("pi_cost_total");
       *grad_x = f("pi_grad_x");
       *grad_y = f("pi_grad_y");
@@ -3435,10 +3667,12 @@ class Phase2PlannerIntegrityEvaluator : public rclcpp::Node {
   double fallback_pl_m_ = 20.0;
   bool use_pl_grid_ = false;
   bool export_pl_grid_voxels_ = false;
-  bool use_lidar_observability_ = false;
-  bool use_advisory_fim_add_ = false;
-  bool use_lidar_advisory_fim_ = false;
-  double pl_grid_update_hz_ = 2.0;
+	  bool use_lidar_observability_ = false;
+	  bool use_advisory_fim_add_ = false;
+	  bool use_lidar_advisory_fim_ = false;
+	  bool pi_allow_constant_current_fallback_ = false;
+	  bool pi_require_fim_valid_ = false;
+	  double pl_grid_update_hz_ = 2.0;
   int lidar_map_max_points_ = 2500;
   double drone_radius_ = 0.35;
   double safety_buffer_ = 0.20;
@@ -3500,9 +3734,14 @@ class Phase2PlannerIntegrityEvaluator : public rclcpp::Node {
   std::map<std::string, int> risk_counts_;
   std::map<std::string, int> pi_risk_band_counts_;
   std::map<std::string, int> pi_dominant_axis_counts_;
+  std::map<std::string, int> pi_advisory_source_counts_;
+  std::map<std::string, int> pi_fallback_reason_counts_;
   std::vector<double> im_values_;
   std::vector<double> pl_values_;
   std::vector<double> pi_cost_values_;
+  int pi_input_invalid_count_ = 0;
+  int pi_unknown_count_ = 0;
+  int pi_cost_clamped_count_ = 0;
   std::vector<std::string> warnings_;
   std::vector<std::string> errors_;
   int fallback_count_ = 0;

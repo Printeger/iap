@@ -217,6 +217,42 @@ def _launch_setup(context):
                     )
                 },
                 {
+                    "pi_use_unified_advisory_pl": _as_bool(
+                        LaunchConfiguration("phase2_pi_use_unified_advisory_pl").perform(context)
+                    )
+                },
+                {
+                    "pi_use_hinge_term": _as_bool(
+                        LaunchConfiguration("phase2_pi_use_hinge_term").perform(context)
+                    )
+                },
+                {
+                    "pi_use_ratio_term": _as_bool(
+                        LaunchConfiguration("phase2_pi_use_ratio_term").perform(context)
+                    )
+                },
+                {"pi_margin_h_m": float(LaunchConfiguration("phase2_pi_margin_h_m").perform(context))},
+                {"pi_margin_v_m": float(LaunchConfiguration("phase2_pi_margin_v_m").perform(context))},
+                {"pi_lambda": float(LaunchConfiguration("phase2_pi_lambda").perform(context))},
+                {"pi_mu_ratio": float(LaunchConfiguration("phase2_pi_mu_ratio").perform(context))},
+                {"pi_eps_al_m": float(LaunchConfiguration("phase2_pi_eps_al_m").perform(context))},
+                {"pi_max_cost": float(LaunchConfiguration("phase2_pi_max_cost").perform(context))},
+                {
+                    "pi_allow_constant_current_fallback": _as_bool(
+                        LaunchConfiguration("phase2_pi_allow_constant_current_fallback").perform(context)
+                    )
+                },
+                {
+                    "pi_require_fim_valid": _as_bool(
+                        LaunchConfiguration("phase2_pi_require_fim_valid").perform(context)
+                    )
+                },
+                {
+                    "pi_penalize_unknown_advisory": _as_bool(
+                        LaunchConfiguration("phase2_pi_penalize_unknown_advisory").perform(context)
+                    )
+                },
+                {
                     "pi_cost_gradient_step_m": float(
                         LaunchConfiguration("phase2_pi_cost_gradient_step_m").perform(context)
                     )
@@ -378,6 +414,18 @@ def generate_launch_description():
         DeclareLaunchArgument("phase2_pi_cost_weight_h", default_value="1.0"),
         DeclareLaunchArgument("phase2_pi_cost_weight_v", default_value="1.0"),
         DeclareLaunchArgument("phase2_pi_cost_marginal_margin_m", default_value="1.0"),
+        DeclareLaunchArgument("phase2_pi_use_unified_advisory_pl", default_value="false"),
+        DeclareLaunchArgument("phase2_pi_use_hinge_term", default_value="true"),
+        DeclareLaunchArgument("phase2_pi_use_ratio_term", default_value="false"),
+        DeclareLaunchArgument("phase2_pi_margin_h_m", default_value="1.0"),
+        DeclareLaunchArgument("phase2_pi_margin_v_m", default_value="1.0"),
+        DeclareLaunchArgument("phase2_pi_lambda", default_value="1.0"),
+        DeclareLaunchArgument("phase2_pi_mu_ratio", default_value="0.0"),
+        DeclareLaunchArgument("phase2_pi_eps_al_m", default_value="0.001"),
+        DeclareLaunchArgument("phase2_pi_max_cost", default_value="3000.0"),
+        DeclareLaunchArgument("phase2_pi_allow_constant_current_fallback", default_value="false"),
+        DeclareLaunchArgument("phase2_pi_require_fim_valid", default_value="false"),
+        DeclareLaunchArgument("phase2_pi_penalize_unknown_advisory", default_value="true"),
         DeclareLaunchArgument("phase2_pi_cost_gradient_step_m", default_value="0.5"),
         DeclareLaunchArgument("phase2_snapshot_anchor_current_integrity", default_value="true"),
         DeclareLaunchArgument("phase2_publish_integrity_cost_field", default_value="false"),
