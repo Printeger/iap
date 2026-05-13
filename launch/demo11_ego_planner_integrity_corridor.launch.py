@@ -122,6 +122,7 @@ def _launch_setup(context):
         "preflight_takeoff_duration_s": LaunchConfiguration("preflight_takeoff_duration_s"),
         "preflight_hover_s": LaunchConfiguration("preflight_hover_s"),
         "preflight_cmd_rate_hz": LaunchConfiguration("preflight_cmd_rate_hz"),
+        "iap_odom_freshness_sec": LaunchConfiguration("iap_odom_freshness_sec"),
     }
 
     return [
@@ -416,6 +417,7 @@ def generate_launch_description():
         DeclareLaunchArgument("preflight_takeoff_duration_s", default_value="5.0"),
         DeclareLaunchArgument("preflight_hover_s", default_value="2.0"),
         DeclareLaunchArgument("preflight_cmd_rate_hz", default_value="50.0"),
+        DeclareLaunchArgument("iap_odom_freshness_sec", default_value="1.0"),
         DeclareLaunchArgument("corridor_map_resolution_m", default_value="0.1"),
         DeclareLaunchArgument("corridor_map_publish_rate_hz", default_value="2.0"),
         DeclareLaunchArgument("forest_size_x_m", default_value="20.0"),

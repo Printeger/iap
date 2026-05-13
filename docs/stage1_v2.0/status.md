@@ -1416,3 +1416,308 @@ larger than the GNSS-only advisory proxy.
 
 Remaining full-acceptance blockers are run-quality/demo issues already tracked
 before this fix, not the summary schema or `fim_add` validator assumption.
+
+## 2026-05-13 Update: Demo11 IAP Odometry Freshness Fix
+
+The demo11 odometry freshness/alignment issue has been investigated and fixed
+on the preflight odometry mux path only. The earlier Stage 1 risk item about
+`demo9_preflight_control_odom_mux` rejecting IAP odometry with huge stale ages
+is resolved by this update.
+
+### Root Cause
+
+`/drone_0_visual_slam/odom` is stamped in the SO3 simulator epoch
+(`2022-07-06T00:00:00Z`, around `1657065600.x` seconds). The mux previously
+computed IAP freshness against node `now()` in the 2026 wall/ROS clock domain
+(`1778667xxx` seconds), producing ages around `121573785s`. This kept
+`fresh_enough=false` and `valid_iap_streak=0`.
+
+The IAP odom stamp is correct for simulator sensor/GNSS/log alignment and was
+not changed. The mux now evaluates IAP freshness against the latest truth odom
+stamp when truth is available, because truth odom and IAP odom share the same
+simulator-time domain. Before truth arrives, the mux still falls back to node
+`now()` and reports `ref_source=node_now_no_truth`.
+
+### Files Changed
+
+- `apps/demo3_odom_mux.cpp`
+  - Uses simulator-domain truth odom stamp as the IAP freshness reference when
+    available.
+  - Keeps freshness meaningful: IAP is accepted only when the stamp is
+    increasing, non-zero, and within `iap_freshness_sec`.
+  - Preserves fallback behavior: if locked IAP becomes stale relative to truth
+    time, the mux returns to truth bootstrap until fresh IAP samples reacquire
+    lock.
+  - Adds diagnostics for IAP stamp, node now, reference stamp/source, computed
+    age, receive/accept rate, reject reason, stale watchdog count, and
+    accepted/rejected histograms.
+- `include/iap/sim/odom_freshness.hpp`
+  - Adds a small header-only freshness decision helper.
+- `test/test_odom_freshness.cpp`
+  - Tests simulator-domain acceptance, node-now fallback before truth, stale
+    rejection, non-increasing stamp rejection, and zero-stamp rejection.
+- `CMakeLists.txt`
+  - Registers `test_odom_freshness`.
+- `launch/demo9_ego_planner_closed_loop.launch.py`
+  - Exposes mux freshness as `iap_odom_freshness_sec` while preserving the
+    demo9 default of `0.3s`.
+- `launch/demo11_ego_planner_integrity_corridor.launch.py`
+  - Forwards `iap_odom_freshness_sec` into demo9 and sets demo11 default to
+    `1.0s`, matching the existing planner stale-time scale while still keeping
+    stale fallback active.
+
+### Isolation
+
+No certified GNSS ARAIM, certified LiDAR ARAIM, monitor PL fusion, Stage 2 FIM
+math, Stage 3 PI math, Stage 4 URG math, truth alignment behavior, odom
+publisher stamping, planner odom topic, or controller odom topic semantics were
+changed.
+
+Planner/controller odom topics remain:
+
+```text
+planner_odom_topic: /drone_0_visual_slam/odom
+controller_odom_topic: /demo9/preflight_control_odom
+```
+
+### Build and Focused Tests
+
+Commands run from `/home/dev/ws_iap`:
+
+```bash
+colcon build --base-paths src/iap src/gnss_comm --packages-select iap \
+  --cmake-args -DCMAKE_BUILD_TYPE=RelWithDebInfo -DBUILD_TESTING=ON
+
+ctest --test-dir build/iap \
+  -R "test_odom_freshness|test_araim|test_predicted_araim|test_pi_cost_adapter|test_unified_risk_grid" \
+  --output-on-failure
+```
+
+Result:
+
+```text
+Build passed.
+5/5 focused tests passed:
+test_araim
+test_predicted_araim
+test_pi_cost_adapter
+test_unified_risk_grid
+test_odom_freshness
+```
+
+Launch-file syntax check also passed:
+
+```bash
+python3 -m py_compile \
+  src/iap/launch/demo9_ego_planner_closed_loop.launch.py \
+  src/iap/launch/demo11_ego_planner_integrity_corridor.launch.py
+```
+
+### Demo11 30s Smoke
+
+Command:
+
+```bash
+source install/setup.bash
+timeout 120s ros2 launch iap demo11_ego_planner_integrity_corridor.launch.py \
+  start_rviz:=false \
+  run_duration_s:=30 \
+  allow_truth_alignment:=false \
+  use_so3_dynamics:=true \
+  use_iap_odom_for_planner:=true \
+  use_gnss:=true \
+  use_araim:=true \
+  planner_use_integrity_cost:=true \
+  planner_use_integrity_front_search:=true \
+  planner_use_integrity_global_search:=true | tee /tmp/demo11_odom_fix_30s.log
+```
+
+Run directory:
+
+```text
+/home/dev/ws_iap/src/iap/log/20260513T102139Z_704
+```
+
+Key mux diagnostics:
+
+```text
+received first iap odom stamp=1657065603.599084
+node_now=1778667703.388021
+ref_stamp=1657065603.680170
+ref_source=truth_odom_stamp
+age=0.081
+reason=accepted
+
+mode=iap_locked
+valid_samples=68
+age=0.089
+
+status mode=iap_locked
+iap_count=71
+accepted_iap=71
+valid_iap_streak=71
+iap_age=0.232
+hist_accepted=71
+hist_stale=0
+hist_non_increasing=0
+hist_zero_stamp=0
+```
+
+When IAP odometry later stopped advancing, fallback remained active and
+meaningful:
+
+```text
+mode=truth_bootstrap reason=iap_stale_watchdog
+age=1.001
+stale_watchdog_count=1
+```
+
+### Demo11 90s Run
+
+Command:
+
+```bash
+source install/setup.bash
+timeout 180s ros2 launch iap demo11_ego_planner_integrity_corridor.launch.py \
+  start_rviz:=false \
+  run_duration_s:=90 \
+  allow_truth_alignment:=false \
+  use_so3_dynamics:=true \
+  use_iap_odom_for_planner:=true \
+  use_gnss:=true \
+  use_araim:=true \
+  planner_use_integrity_cost:=true \
+  planner_use_integrity_front_search:=true \
+  planner_use_integrity_global_search:=true | tee /tmp/demo11_odom_fix_90s.log
+```
+
+Run directory:
+
+```text
+/home/dev/ws_iap/src/iap/log/20260513T102234Z_265
+```
+
+Key mux diagnostics:
+
+```text
+received first iap odom stamp=1657065602.760078
+node_now=1778667757.117094
+ref_stamp=1657065602.842098
+ref_source=truth_odom_stamp
+age=0.082
+reason=accepted
+
+mode=iap_locked
+valid_samples=74
+age=0.079
+
+status mode=iap_locked
+iap_count=77
+accepted_iap=77
+valid_iap_streak=77
+iap_age=0.237
+iap_rx_rate_hz=4.28
+iap_accept_rate_hz=4.28
+hist_accepted=77
+hist_stale=0
+hist_non_increasing=0
+hist_zero_stamp=0
+```
+
+After the IAP publisher stopped advancing, the mux returned to fallback as
+designed:
+
+```text
+mode=truth_bootstrap reason=iap_stale_watchdog
+age=1.000
+stale_watchdog_count=1
+```
+
+Overall 90s mux summary:
+
+```text
+status_rows: 88
+max_status_streak: 77
+locked_count: 2
+reject_count: 0
+watchdog_count: 1
+final histogram: accepted=78 stale=1 non_increasing=0 zero_stamp=0
+```
+
+### Validator Results
+
+Phase 1 official validator was run on the 90s run:
+
+```bash
+python3 src/iap/tools/phase1/validate_phase1_closed_loop.py \
+  --run-dir /home/dev/ws_iap/src/iap/log/latest \
+  --official
+```
+
+Output:
+
+```text
+Validated run: /home/dev/ws_iap/src/iap/log/20260513T102234Z_265
+run_duration_s: 89.96
+planner_trajectory_count: 0
+planner_command_count: 837
+truth_odom_count: 89958
+iap_odom_count: 78
+simulator_movement_m: 1.200
+official: True
+allow_truth_alignment: False
+use_so3_dynamics: True
+use_iap_odom_for_planner: True
+plant_mode: so3_quadrotor_simulator
+planner_odom_topic: /drone_0_visual_slam/odom
+controller_odom_topic: /demo9/preflight_control_odom
+
+Failures:
+  - planner_trajectory_count 0 < 1
+```
+
+Phase 2 validator was also run:
+
+```bash
+python3 src/iap/tools/phase2/validate_phase2_integrity_eval.py \
+  --run-dir /home/dev/ws_iap/src/iap/log/latest
+```
+
+Output:
+
+```text
+Validated Phase 2 run: /home/dev/ws_iap/src/iap/log/20260513T102234Z_265
+sample_count: 44
+snapshot_count: 43
+traj_count: 44
+aligned_sample_count: 0
+odom_source: /drone_0_visual_slam/odom
+map_source: global_cloud_direct
+
+Warnings:
+  - 44 pos_cmd fallback sample(s) present
+  - PL grid self-check ratio is 49999999.000
+  - raw current PL consistency max ratio is 8.891
+  - predicted and actual IM could not be compared
+
+Failures:
+  - official Phase 2 requires at least one B-spline trajectory sample
+  - phase2_summary.json current_consistency_raw max_pl_ratio=8.891 exceeds 0.100; likely_reason=no diagnostic context
+  - iap_araim.csv exists but export/phase2_integrity_eval_aligned.csv is missing
+  - demo10 did not pass Phase 1 official validation
+```
+
+### Current Validation Conclusion
+
+The original odometry freshness issue is fixed: fresh IAP odometry is accepted,
+`valid_iap_streak` becomes positive, and the mux enters `iap_locked` in both the
+30s smoke and 90s run. The freshness check was not weakened; when IAP odometry
+really becomes stale relative to truth simulation time, the mux switches back to
+truth fallback.
+
+Full demo11 acceptance is still blocked by separate run-quality/planner issues,
+not by the odom freshness fix. The 90s run produced planner commands but no
+B-spline trajectories, and the terminal logs showed repeated EGO planner
+`AstarSearch`, `Coord2Index`, and "drone is in obstacle" errors. Those failures
+explain the Phase 1 and Phase 2 validator failures above and should be tracked
+as the next demo11 validation blocker.

@@ -224,6 +224,9 @@ def _launch_setup(context):
     preflight_cmd_rate_hz = max(
         1.0, float(LaunchConfiguration("preflight_cmd_rate_hz").perform(context))
     )
+    iap_odom_freshness_sec = float(
+        LaunchConfiguration("iap_odom_freshness_sec").perform(context)
+    )
     use_dynamic_obstacles = _as_bool(LaunchConfiguration("use_dynamic_obstacles").perform(context))
     allow_truth_alignment = _as_bool(LaunchConfiguration("allow_truth_alignment").perform(context))
     log_phase1 = _as_bool(LaunchConfiguration("log_phase1").perform(context))
@@ -659,7 +662,7 @@ def _launch_setup(context):
                 {"iap_odom_topic": iap_odom_topic},
                 {"control_odom_topic": controller_odom_topic},
                 {"iap_lock_sample_count": 3},
-                {"iap_freshness_sec": 0.3},
+                {"iap_freshness_sec": iap_odom_freshness_sec},
                 {"truth_bootstrap_min_duration_sec": effective_planner_start_delay_s},
             ],
         ),
@@ -981,6 +984,7 @@ def generate_launch_description():
         DeclareLaunchArgument("preflight_takeoff_duration_s", default_value="5.0"),
         DeclareLaunchArgument("preflight_hover_s", default_value="2.0"),
         DeclareLaunchArgument("preflight_cmd_rate_hz", default_value="50.0"),
+        DeclareLaunchArgument("iap_odom_freshness_sec", default_value="0.3"),
         DeclareLaunchArgument("use_dynamic_obstacles", default_value="false"),
         DeclareLaunchArgument("map_source", default_value="local_sensing_cloud"),
         DeclareLaunchArgument("map_generator_mode", default_value="random_forest"),
