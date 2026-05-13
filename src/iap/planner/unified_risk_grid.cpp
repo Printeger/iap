@@ -51,6 +51,19 @@ float weighted(const std::vector<const UnifiedRiskVoxel*>& cells,
   return static_cast<float>(out);
 }
 
+double oldest_finite_timestamp(const std::vector<const UnifiedRiskVoxel*>& cells) {
+  double oldest = std::numeric_limits<double>::infinity();
+  for (const auto* cell : cells) {
+    const double value = cell->updated_time_s;
+    if (std::isfinite(value)) {
+      oldest = std::min(oldest, value);
+    }
+  }
+  return std::isfinite(oldest)
+             ? oldest
+             : std::numeric_limits<double>::quiet_NaN();
+}
+
 void set_unknown(UnifiedRiskQueryResult* out, const Eigen::Vector3d& p) {
   out->valid = false;
   out->grid_hit = false;
@@ -205,6 +218,7 @@ UnifiedRiskQueryResult UnifiedRiskGrid::interpolate(const Eigen::Vector3d& p) co
   }
   out.voxel.flags = valid_flags | problem_flags;
   out.flags = out.voxel.flags;
+  out.voxel.updated_time_s = oldest_finite_timestamp(cells);
   out.voxel.age_s = weighted(cells, weights, &UnifiedRiskVoxel::age_s);
 
   if (all_have(cells, VALID_ESDF)) {
@@ -251,7 +265,7 @@ UnifiedRiskQueryResult UnifiedRiskGrid::queryRisk(
     const UnifiedRiskQueryOptions& options) {
   ++stats_.query_count;
   auto out = interpolate(p);
-  if (out.grid_hit && out.valid) {
+  if (out.grid_hit) {
     ++stats_.grid_hit_count;
     apply_unified_risk_stale_policy(&out, options, stamp_s_);
   } else {
@@ -293,6 +307,12 @@ UnifiedRiskQueryResult UnifiedRiskGrid::queryRisk(
   }
   if (out.unknown_penalty > 0.0f) {
     ++stats_.unknown_penalty_count;
+  }
+  if (finite(out.voxel.age_s)) {
+    const double age = static_cast<double>(out.voxel.age_s);
+    stats_.max_age_s = std::isfinite(stats_.max_age_s)
+                           ? std::max(stats_.max_age_s, age)
+                           : age;
   }
   ++stats_.flags_histogram[out.flags];
   return out;
@@ -397,32 +417,48 @@ void apply_unified_risk_stale_policy(UnifiedRiskQueryResult* result,
     return;
   }
   double age = std::numeric_limits<double>::quiet_NaN();
-  if (std::isfinite(options.now_s) && std::isfinite(grid_stamp_s)) {
-    age = std::max(0.0, options.now_s - grid_stamp_s);
+  if (std::isfinite(options.now_s) &&
+      std::isfinite(result->voxel.updated_time_s)) {
+    age = std::max(
+        0.0, options.now_s - result->voxel.updated_time_s);
     result->voxel.age_s = static_cast<float>(age);
   } else if (finite(result->voxel.age_s)) {
     age = result->voxel.age_s;
+  } else if (std::isfinite(options.now_s) && std::isfinite(grid_stamp_s)) {
+    age = std::max(0.0, options.now_s - grid_stamp_s);
+    result->voxel.age_s = static_cast<float>(age);
   }
 
   const double fresh =
       std::isfinite(options.fresh_timeout_s) ? std::max(0.0, options.fresh_timeout_s) : 1.0;
   const double stale =
       std::isfinite(options.stale_timeout_s) ? std::max(fresh, options.stale_timeout_s) : 5.0;
-  const bool unknown = (result->voxel.flags & UNKNOWN_RISK) != 0u;
-  const bool stale_risk = !std::isfinite(age) || age > fresh;
-  if (stale_risk) {
+  const bool penalty_enabled =
+      std::isfinite(options.unknown_penalty) && options.unknown_penalty > 0.0;
+  const bool invalid_pi =
+      (result->voxel.flags & VALID_PI) == 0u || !finite(result->voxel.pi_cost);
+  const bool preexisting_unknown =
+      (result->voxel.flags & UNKNOWN_RISK) != 0u;
+  const bool age_unknown = !std::isfinite(age);
+  const bool stale_risk = std::isfinite(age) && age > fresh;
+  const bool timed_out = age_unknown || (std::isfinite(age) && age > stale);
+
+  if (stale_risk || timed_out) {
     result->voxel.flags |= STALE_PL;
   }
-  if (!std::isfinite(age) || age > stale) {
-    result->voxel.flags |= STALE_PL | UNKNOWN_RISK;
+  if (preexisting_unknown || invalid_pi || timed_out) {
+    result->voxel.flags |= UNKNOWN_RISK;
   }
 
-  if (stale_risk || unknown || (result->voxel.flags & UNKNOWN_RISK) != 0u) {
-    const double penalty =
-        (result->voxel.flags & UNKNOWN_RISK) != 0u && (!std::isfinite(age) || age > stale)
-            ? std::max(0.0, options.unknown_penalty)
-            : unified_risk_unknown_penalty(age, options.unknown_penalty,
-                                           options.unknown_tau_s);
+  if (penalty_enabled &&
+      (stale_risk || timed_out || (result->voxel.flags & UNKNOWN_RISK) != 0u)) {
+    const bool full_unknown_penalty =
+        (result->voxel.flags & UNKNOWN_RISK) != 0u;
+    const double penalty = full_unknown_penalty
+                               ? options.unknown_penalty
+                               : unified_risk_unknown_penalty(
+                                     age, options.unknown_penalty,
+                                     options.unknown_tau_s);
     const double base =
         finite(result->voxel.pi_cost) ? static_cast<double>(result->voxel.pi_cost) : 0.0;
     result->voxel.pi_cost = static_cast<float>(base + penalty);

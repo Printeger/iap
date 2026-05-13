@@ -1908,3 +1908,161 @@ IAP odom for sustained periods, `valid_iap_streak` becomes positive, and stale
 fallback still triggers when IAP odom stops advancing. Remaining validator
 failures are planner/run-quality and Phase 2 validation issues, not the odom
 freshness/alignment bug.
+
+## 2026-05-13 - URG per-voxel staleness and unknown-risk fix
+
+Implemented the Stage 4 URG staleness fix so URG age is tracked per voxel
+instead of from the global current integrity stamp.
+
+Changed files:
+
+- `include/iap/planner/unified_risk_grid.hpp`
+- `src/iap/planner/unified_risk_grid.cpp`
+- `apps/phase2_planner_integrity_evaluator.cpp`
+- `test/test_unified_risk_grid.cpp`
+- `docs/stage1_v2.0/status.md`
+
+Implementation notes:
+
+- Added `UnifiedRiskVoxel::updated_time_s` and kept `age_s`.
+- URG query policy now computes `age_s = query_time_s - updated_time_s`.
+- Interpolated URG queries propagate the oldest finite contributing voxel
+  timestamp, making interpolation conservative without using one global stale
+  flag.
+- Removed URG stale marking from `current_integrity_stamp_`.
+- Fresh voxels do not receive `STALE_PL`.
+- Stale voxels receive `STALE_PL` and the configured ramped unknown penalty.
+- Unknown/invalid voxels receive `UNKNOWN_RISK` and the configured full unknown
+  penalty when `phase2_urg_unknown_penalty > 0`.
+- Added additive summary field `urg_max_age_s`.
+- Added additive `updated_time_s` column to `urg_grid_voxels.csv`; no old CSV
+  columns, topics, PointCloud2 field names, message fields, certified monitor
+  code, Stage 2 FIM math, or Stage 3 PI formula were changed.
+
+Build and unit tests:
+
+```bash
+colcon build --base-paths src/iap src/gnss_comm --packages-select iap \
+  --cmake-args -DBUILD_TESTING=ON
+```
+
+Result:
+
+```text
+Summary: 1 package finished
+```
+
+```bash
+ctest --test-dir build/iap \
+  -R "test_pl_grid|test_future_pl_field_predictor|test_pi_cost_adapter|test_unified_risk_grid" \
+  --output-on-failure
+```
+
+Result:
+
+```text
+4/4 tests passed:
+test_pl_grid
+test_future_pl_field_predictor
+test_pi_cost_adapter
+test_unified_risk_grid
+```
+
+Launch syntax check:
+
+```bash
+python3 -m py_compile launch/demo11_ego_planner_integrity_corridor.launch.py
+```
+
+Result: passed.
+
+Demo11 URG-enabled 30s smoke:
+
+```bash
+source install/setup.bash
+timeout 180s ros2 launch iap demo11_ego_planner_integrity_corridor.launch.py \
+  start_rviz:=false run_duration_s:=30 allow_truth_alignment:=false \
+  use_so3_dynamics:=true use_iap_odom_for_planner:=true use_gnss:=true \
+  use_araim:=true planner_use_integrity_cost:=true \
+  planner_use_integrity_front_search:=true \
+  planner_use_integrity_global_search:=true \
+  phase2_use_unified_risk_grid:=true phase2_urg_export_voxels:=true \
+  phase2_urg_keep_legacy_topics:=true phase2_pl_model:=fused_fim_grid \
+  phase2_use_pl_grid:=true phase2_export_pl_grid_voxels:=true \
+  phase2_use_advisory_fim_add:=true phase2_use_lidar_advisory_fim:=true \
+  phase2_use_lidar_observability:=false \
+  phase2_pi_use_unified_advisory_pl:=true
+```
+
+Run directory:
+
+```text
+/home/dev/ws_iap/src/iap/log/20260513T111254Z_870
+```
+
+Key `phase2_summary.json` URG counters:
+
+```text
+urg_enabled=true
+urg_active=true
+urg_update_count=3
+urg_query_count=7807
+urg_grid_hit_count=7806
+urg_grid_miss_count=1
+urg_direct_query_count=1
+urg_stale_count=2601
+urg_unknown_count=0
+urg_unknown_penalty_count=2601
+urg_valid_pi_count=7807
+urg_max_age_s=3.7183640003204346
+urg_front_field_points=2601
+urg_backend_field_points=2602
+urg_voxel_csv=urg_grid_voxels.csv
+```
+
+Conclusion: `urg_stale_count` is no longer automatically equal to
+`urg_query_count`; only the stale query subset was counted stale in this smoke.
+
+Demo11 URG-disabled 30s smoke:
+
+```bash
+source install/setup.bash
+timeout 180s ros2 launch iap demo11_ego_planner_integrity_corridor.launch.py \
+  start_rviz:=false run_duration_s:=30 allow_truth_alignment:=false \
+  use_so3_dynamics:=true use_iap_odom_for_planner:=true use_gnss:=true \
+  use_araim:=true planner_use_integrity_cost:=true \
+  planner_use_integrity_front_search:=true \
+  planner_use_integrity_global_search:=true \
+  phase2_use_unified_risk_grid:=false phase2_pl_model:=fused_fim_grid \
+  phase2_use_pl_grid:=true phase2_use_advisory_fim_add:=true \
+  phase2_use_lidar_advisory_fim:=true \
+  phase2_use_lidar_observability:=false \
+  phase2_pi_use_unified_advisory_pl:=true
+```
+
+Run directory:
+
+```text
+/home/dev/ws_iap/src/iap/log/20260513T111351Z_721
+```
+
+Key `phase2_summary.json` URG counters:
+
+```text
+urg_enabled=false
+urg_active=false
+urg_update_count=0
+urg_query_count=0
+urg_grid_hit_count=0
+urg_grid_miss_count=0
+urg_direct_query_count=0
+urg_stale_count=0
+urg_unknown_count=0
+urg_unknown_penalty_count=0
+urg_valid_pi_count=0
+urg_max_age_s=null
+urg_voxel_csv=
+urg_grid_voxels.csv present=false
+```
+
+Conclusion: disabled URG mode remains inactive and legacy-compatible.

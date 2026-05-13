@@ -49,6 +49,7 @@ struct UnifiedRiskVoxel {
   float pi_grad_y = std::numeric_limits<float>::quiet_NaN();
   float pi_grad_z = std::numeric_limits<float>::quiet_NaN();
 
+  double updated_time_s = std::numeric_limits<double>::quiet_NaN();
   float age_s = std::numeric_limits<float>::quiet_NaN();
   uint32_t flags = 0;
 };
@@ -92,6 +93,7 @@ class UnifiedRiskGrid {
     int unknown_count = 0;
     int valid_pi_count = 0;
     int unknown_penalty_count = 0;
+    double max_age_s = std::numeric_limits<double>::quiet_NaN();
     double mean_update_ms = std::numeric_limits<double>::quiet_NaN();
     double p95_update_ms = std::numeric_limits<double>::quiet_NaN();
     int front_field_points = 0;

@@ -3,6 +3,7 @@
 #include <Eigen/Core>
 
 #include <cmath>
+#include <limits>
 
 #include <iap/planner/unified_risk_grid.hpp>
 
@@ -26,6 +27,7 @@ iap::UnifiedRiskVoxel make_voxel(const Eigen::Vector3d& p) {
   voxel.pi_grad_x = 1.0f;
   voxel.pi_grad_y = 2.0f;
   voxel.pi_grad_z = 0.0f;
+  voxel.updated_time_s = 0.8f;
   voxel.age_s = 0.2f;
   voxel.flags = iap::VALID_ESDF | iap::VALID_OCCUPANCY | iap::VALID_AL |
                 iap::VALID_ADVISORY_PL | iap::VALID_PI |
@@ -80,11 +82,60 @@ TEST(UnifiedRiskGridTest, ConservativeInterpolationPreservesUnknownRisk) {
   EXPECT_FALSE((result.flags & iap::VALID_PI) != 0u);
 }
 
+TEST(UnifiedRiskGridTest, FreshVoxelUsesPerVoxelTimestampNotGridStamp) {
+  iap::UnifiedRiskGrid grid;
+  ASSERT_TRUE(grid.reset(Eigen::Vector3d::Zero(), 1.0, 1.0, 1, 1.0));
+  fill_grid(&grid);
+  grid.set_stamp_s(1.0);
+  grid.at(1, 1, 0).updated_time_s = 11.8f;
+
+  iap::UnifiedRiskQueryOptions options;
+  options.now_s = 12.0;
+  options.fresh_timeout_s = 1.0;
+  options.stale_timeout_s = 5.0;
+  options.unknown_penalty = 100.0;
+  options.unknown_tau_s = 2.0;
+
+  const auto result = grid.queryRisk(Eigen::Vector3d::Zero(), options);
+
+  ASSERT_TRUE(result.valid);
+  EXPECT_FALSE((result.flags & iap::STALE_PL) != 0u);
+  EXPECT_FALSE((result.flags & iap::UNKNOWN_RISK) != 0u);
+  EXPECT_NEAR(result.voxel.age_s, 0.2, 1.0e-5);
+  EXPECT_NEAR(result.unknown_penalty, 0.0, 1.0e-6);
+}
+
+TEST(UnifiedRiskGridTest, OneStaleVoxelDoesNotMakeAllVoxelsStale) {
+  iap::UnifiedRiskGrid grid;
+  ASSERT_TRUE(grid.reset(Eigen::Vector3d::Zero(), 1.0, 1.0, 1, 1.0));
+  fill_grid(&grid);
+  grid.set_stamp_s(1.0);
+  grid.at(1, 1, 0).updated_time_s = 10.0f;
+  grid.at(2, 2, 0).updated_time_s = 11.8f;
+
+  iap::UnifiedRiskQueryOptions options;
+  options.now_s = 12.0;
+  options.fresh_timeout_s = 1.0;
+  options.stale_timeout_s = 5.0;
+  options.unknown_penalty = 100.0;
+  options.unknown_tau_s = 2.0;
+
+  const auto stale_result = grid.queryRisk(Eigen::Vector3d::Zero(), options);
+  const auto fresh_result = grid.queryRisk(Eigen::Vector3d(1.0, 1.0, 0.0), options);
+
+  ASSERT_TRUE(stale_result.valid);
+  ASSERT_TRUE(fresh_result.valid);
+  EXPECT_TRUE((stale_result.flags & iap::STALE_PL) != 0u);
+  EXPECT_FALSE((fresh_result.flags & iap::STALE_PL) != 0u);
+  EXPECT_GT(stale_result.unknown_penalty, 0.0f);
+  EXPECT_NEAR(fresh_result.unknown_penalty, 0.0, 1.0e-6);
+}
+
 TEST(UnifiedRiskGridTest, StaleQueryAddsPenaltyInsteadOfZeroRisk) {
   iap::UnifiedRiskGrid grid;
   ASSERT_TRUE(grid.reset(Eigen::Vector3d::Zero(), 1.0, 1.0, 1, 1.0));
   fill_grid(&grid);
-  grid.set_stamp_s(10.0);
+  grid.at(1, 1, 0).updated_time_s = 10.0f;
 
   iap::UnifiedRiskQueryOptions options;
   options.now_s = 12.0;
@@ -97,16 +148,40 @@ TEST(UnifiedRiskGridTest, StaleQueryAddsPenaltyInsteadOfZeroRisk) {
 
   ASSERT_TRUE(result.valid);
   EXPECT_TRUE((result.flags & iap::STALE_PL) != 0u);
+  EXPECT_FALSE((result.flags & iap::UNKNOWN_RISK) != 0u);
   EXPECT_GT(result.unknown_penalty, 0.0f);
   EXPECT_GT(result.voxel.pi_cost, 0.0f);
+}
+
+TEST(UnifiedRiskGridTest, UnknownRiskUsesConfiguredPenalty) {
+  iap::UnifiedRiskGrid grid;
+  ASSERT_TRUE(grid.reset(Eigen::Vector3d::Zero(), 1.0, 1.0, 1, 1.0));
+  fill_grid(&grid);
+  grid.at(1, 1, 0).flags &= ~iap::VALID_PI;
+  grid.at(1, 1, 0).flags |= iap::UNKNOWN_RISK;
+  grid.at(1, 1, 0).pi_cost = std::numeric_limits<float>::quiet_NaN();
+  grid.at(1, 1, 0).updated_time_s = 11.9f;
+
+  iap::UnifiedRiskQueryOptions options;
+  options.now_s = 12.0;
+  options.fresh_timeout_s = 1.0;
+  options.stale_timeout_s = 5.0;
+  options.unknown_penalty = 42.0;
+  options.unknown_tau_s = 2.0;
+
+  const auto result = grid.queryRisk(Eigen::Vector3d::Zero(), options);
+
+  EXPECT_TRUE((result.flags & iap::UNKNOWN_RISK) != 0u);
+  EXPECT_FALSE((result.flags & iap::STALE_PL) != 0u);
+  EXPECT_NEAR(result.unknown_penalty, 42.0, 1.0e-6);
+  EXPECT_NEAR(result.voxel.pi_cost, 42.0, 1.0e-6);
 }
 
 TEST(UnifiedRiskGridTest, UnknownRiskUsesHighCostAfterStaleTimeout) {
   iap::UnifiedRiskGrid grid;
   ASSERT_TRUE(grid.reset(Eigen::Vector3d::Zero(), 1.0, 1.0, 1, 1.0));
   fill_grid(&grid);
-  grid.at(1, 1, 0).flags |= iap::UNKNOWN_RISK;
-  grid.set_stamp_s(10.0);
+  grid.at(1, 1, 0).updated_time_s = 10.0f;
 
   iap::UnifiedRiskQueryOptions options;
   options.now_s = 20.0;
@@ -118,6 +193,7 @@ TEST(UnifiedRiskGridTest, UnknownRiskUsesHighCostAfterStaleTimeout) {
   const auto result = grid.queryRisk(Eigen::Vector3d::Zero(), options);
 
   EXPECT_TRUE((result.flags & iap::UNKNOWN_RISK) != 0u);
+  EXPECT_TRUE((result.flags & iap::STALE_PL) != 0u);
   EXPECT_NEAR(result.unknown_penalty, 42.0, 1.0e-6);
   EXPECT_GE(result.voxel.pi_cost, 42.0f);
 }
@@ -133,6 +209,7 @@ TEST(UnifiedRiskGridTest, DirectQueryFallbackWorksOnMiss) {
   options.direct_query = [](const Eigen::Vector3d& p, iap::UnifiedRiskVoxel* out) {
     *out = make_voxel(p);
     out->pi_cost = 9.0f;
+    out->updated_time_s = 1.0f;
     return true;
   };
 
@@ -142,4 +219,3 @@ TEST(UnifiedRiskGridTest, DirectQueryFallbackWorksOnMiss) {
   EXPECT_STREQ(result.query_source, "direct");
   EXPECT_NEAR(result.voxel.pi_cost, 9.0, 1.0e-6);
 }
-

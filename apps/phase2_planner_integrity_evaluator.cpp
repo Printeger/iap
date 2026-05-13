@@ -330,6 +330,7 @@ const std::vector<std::string> kUrgGridVoxelCsvFields = {
     "pi_grad_x",
     "pi_grad_y",
     "pi_grad_z",
+    "updated_time_s",
     "age_s",
     "flags",
     "flags_hex",
@@ -2059,12 +2060,13 @@ class Phase2PlannerIntegrityEvaluator : public rclcpp::Node {
     if (pl.lidar_fim_valid) {
       voxel.flags |= iap::LIDAR_FIM_VALID;
     }
-    const double age =
-        std::isfinite(pl.grid_age_s) ? pl.grid_age_s : 0.0;
-    voxel.age_s = static_cast<float>(std::max(0.0, age));
-    if (std::isfinite(stamp_s) && std::isfinite(current_integrity_stamp_) &&
-        stamp_s - current_integrity_stamp_ > urg_fresh_timeout_s_) {
-      voxel.flags |= iap::STALE_PL;
+    if (std::isfinite(stamp_s) && std::isfinite(pl.grid_age_s)) {
+      const double age = std::max(0.0, pl.grid_age_s);
+      voxel.updated_time_s = stamp_s - age;
+      voxel.age_s = static_cast<float>(age);
+    } else if (std::isfinite(stamp_s) && pi_pl.valid) {
+      voxel.updated_time_s = stamp_s;
+      voxel.age_s = 0.0f;
     }
     return voxel;
   }
@@ -2785,6 +2787,7 @@ class Phase2PlannerIntegrityEvaluator : public rclcpp::Node {
           row["pi_grad_x"] = fmt_num(voxel.pi_grad_x);
           row["pi_grad_y"] = fmt_num(voxel.pi_grad_y);
           row["pi_grad_z"] = fmt_num(voxel.pi_grad_z);
+          row["updated_time_s"] = fmt_num(voxel.updated_time_s);
           row["age_s"] = fmt_num(voxel.age_s);
           row["flags"] = std::to_string(voxel.flags);
           row["flags_hex"] = flags_hex(voxel.flags);
@@ -3197,6 +3200,7 @@ class Phase2PlannerIntegrityEvaluator : public rclcpp::Node {
         {"urg_stale_count", urg_stats.stale_count},
         {"urg_unknown_count", urg_stats.unknown_count},
         {"urg_valid_pi_count", urg_stats.valid_pi_count},
+        {"urg_max_age_s", json_or_null(urg_stats.max_age_s)},
         {"urg_mean_update_ms", json_or_null(urg_stats.mean_update_ms)},
         {"urg_p95_update_ms", json_or_null(urg_stats.p95_update_ms)},
         {"urg_front_field_points", urg_stats.front_field_points},
