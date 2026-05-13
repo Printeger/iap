@@ -212,8 +212,8 @@ inline void AraimDebugLogger::log(const IntegrityReport& report) const {
   if (level_ == Level::SILENT) return;
 
   // SUMMARY: one-line key metrics
-  logger_->info("[ARAIM current_monitor] state={} monitor_HPL={:.3f} "
-                "monitor_VPL={:.3f} HAL={:.3f} VAL={:.3f} "
+  logger_->info("[ARAIM current_monitor] state={} monitor_fused_HPL={:.3f} "
+                "monitor_fused_VPL={:.3f} HAL={:.3f} VAL={:.3f} "
                 "monitor_IM={:.3f} n_sv={} n_det={}",
                 to_string(report.state), report.HPL, report.VPL,
                 report.HAL, report.VAL, report.IM,

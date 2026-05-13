@@ -93,10 +93,13 @@ class FuturePLFieldPredictor {
     double mean_lidar_tdop = std::numeric_limits<double>::quiet_NaN();
     double mean_lidar_condition = std::numeric_limits<double>::quiet_NaN();
     int fim_query_count = 0;
+    int fim_epsilon_applied_count = 0;
+    int fim_degeneracy_regularized_count = 0;
     int fim_regularized_count = 0;
     int gnss_fim_valid_count = 0;
     int lidar_fim_valid_count = 0;
     std::map<std::string, int> lidar_fallback_reason_histogram;
+    std::map<std::string, int> fim_fallback_reason_histogram;
   };
 
   FuturePLFieldPredictor();

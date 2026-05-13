@@ -55,8 +55,11 @@ struct FuturePLQueryResult {
   double vpl_adv = 1e9;
   bool lidar_fim_valid = false;
   bool gnss_fim_valid = false;
-  bool fim_regularized = false;
-  std::string advisory_fusion_mode = "legacy";
+  bool fim_epsilon_applied = false;
+  bool fim_degeneracy_regularized = false;
+  std::string fim_fallback_reason = "not_evaluated";
+  bool fim_regularized = false;  ///< compatibility alias for degeneracy regularization
+  AdvisoryFusionMode advisory_fusion_mode = AdvisoryFusionMode::Legacy;
 
   Eigen::Vector3d grad_hpl = Eigen::Vector3d::Zero();
   Eigen::Vector3d grad_vpl = Eigen::Vector3d::Zero();

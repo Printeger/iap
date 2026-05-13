@@ -33,8 +33,11 @@ iap::FuturePLQueryResult make_value(const Eigen::Vector3d& p) {
   value.vpl_adv = value.vpl;
   value.gnss_fim_valid = true;
   value.lidar_fim_valid = true;
+  value.fim_epsilon_applied = true;
+  value.fim_degeneracy_regularized = false;
+  value.fim_fallback_reason.clear();
   value.fim_regularized = false;
-  value.advisory_fusion_mode = "fim_add";
+  value.advisory_fusion_mode = iap::AdvisoryFusionMode::FimAdd;
   return value;
 }
 
@@ -131,6 +134,8 @@ TEST(PLGridTest, InterpolatesFimDiagnostics) {
   ASSERT_TRUE(grid.reset(Eigen::Vector3d::Zero(), 2.0, 2.0, 2.0, 1.0));
   fill_grid(&grid);
   grid.at(1, 1, 1).value.fim_regularized = true;
+  grid.at(1, 1, 1).value.fim_degeneracy_regularized = true;
+  grid.at(1, 1, 1).value.fim_fallback_reason = "singular_advisory_fim";
   grid.at(1, 1, 1).value.lidar_fim_valid = false;
 
   const Eigen::Vector3d p(0.25, 0.0, -0.25);
@@ -142,6 +147,10 @@ TEST(PLGridTest, InterpolatesFimDiagnostics) {
   EXPECT_NEAR(result.lambda_adv_condition, 10.0 + p.z(), 1.0e-9);
   EXPECT_TRUE(result.gnss_fim_valid);
   EXPECT_FALSE(result.lidar_fim_valid);
+  EXPECT_TRUE(result.fim_epsilon_applied);
+  EXPECT_TRUE(result.fim_degeneracy_regularized);
+  EXPECT_EQ(result.fim_fallback_reason, "singular_advisory_fim");
   EXPECT_TRUE(result.fim_regularized);
-  EXPECT_EQ(result.advisory_fusion_mode, "fim_add");
+  EXPECT_EQ(result.advisory_fusion_mode, iap::AdvisoryFusionMode::FimAdd);
+  EXPECT_STREQ(iap::to_string(result.advisory_fusion_mode), "fim_add");
 }

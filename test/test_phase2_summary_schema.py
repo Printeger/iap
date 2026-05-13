@@ -97,6 +97,9 @@ def online_row(**overrides: str) -> dict:
         "lambda_adv_trace": "",
         "hpl_adv": "",
         "vpl_adv": "",
+        "fim_epsilon_applied": "",
+        "fim_degeneracy_regularized": "",
+        "fim_fallback_reason": "",
     }
     row.update(overrides)
     return row
@@ -120,7 +123,10 @@ class Phase2SummarySchemaTest(unittest.TestCase):
             "use_lidar_advisory_fim": True,
             "fusion_mode": "fim_add",
             "query_count": 4,
-            "regularized_count": 4,
+            "epsilon_applied_count": 4,
+            "degeneracy_regularized_count": 1,
+            "regularized_count": 1,
+            "fallback_reason_histogram": {},
             "gnss_fim_valid_count": 2,
             "lidar_fim_valid_count": 4,
         }
@@ -169,6 +175,33 @@ class Phase2SummarySchemaTest(unittest.TestCase):
 
         self.assertEqual([], failures)
 
+    def test_urg_disabled_summary_has_zero_counters_and_no_csv(self) -> None:
+        summary = base_summary()
+        summary["urg"] = {
+            "urg_enabled": False,
+            "urg_active": False,
+            "urg_update_count": 0,
+            "urg_query_count": 0,
+            "urg_direct_query_count": 0,
+            "urg_grid_hit_count": 0,
+            "urg_grid_miss_count": 0,
+            "urg_stale_count": 0,
+            "urg_unknown_count": 0,
+            "urg_valid_pi_count": 0,
+            "urg_unknown_penalty_count": 0,
+            "urg_front_field_points": 0,
+            "urg_backend_field_points": 0,
+            "urg_voxel_csv": "",
+        }
+        failures: list[str] = []
+
+        check_urg(summary, failures)
+
+        self.assertEqual([], failures)
+        self.assertEqual(0, summary["urg"]["urg_update_count"])
+        self.assertEqual(0, summary["urg"]["urg_query_count"])
+        self.assertEqual("", summary["urg"]["urg_voxel_csv"])
+
     def test_ana_log_merge_preserves_online_validator_schema(self) -> None:
         online = base_summary()
         online["advisory_fim"] = {
@@ -176,7 +209,10 @@ class Phase2SummarySchemaTest(unittest.TestCase):
             "use_lidar_advisory_fim": True,
             "fusion_mode": "fim_add",
             "query_count": 4,
-            "regularized_count": 4,
+            "epsilon_applied_count": 4,
+            "degeneracy_regularized_count": 1,
+            "regularized_count": 1,
+            "fallback_reason_histogram": {},
             "gnss_fim_valid_count": 2,
             "lidar_fim_valid_count": 4,
         }

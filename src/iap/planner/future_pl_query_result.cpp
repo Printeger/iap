@@ -31,7 +31,8 @@ FuturePLQueryResult make_future_pl_query_result(
   out.fused_vpl = pred.vpl;
   out.hpl_adv = pred.hpl;
   out.vpl_adv = pred.vpl;
-  out.advisory_fusion_mode = "legacy";
+  out.fim_fallback_reason = "fim_disabled";
+  out.advisory_fusion_mode = AdvisoryFusionMode::Legacy;
   return out;
 }
 

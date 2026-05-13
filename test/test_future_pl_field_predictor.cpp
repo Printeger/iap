@@ -202,6 +202,25 @@ TEST(FuturePLFieldPredictorTest, LidarDisabledKeepsGnssProtectionLevel) {
   EXPECT_EQ(result.lidar_fallback_reason, "lidar_disabled");
 }
 
+TEST(FuturePLFieldPredictorTest, Stage2DisabledUsesLegacyAdvisoryMode) {
+  auto params = make_params();
+  params.use_grid = false;
+  params.use_advisory_fim_add = false;
+  params.use_lidar_advisory_fim = false;
+
+  iap::FuturePLFieldPredictor predictor(params);
+  predictor.update_snapshot(make_snapshot(true));
+  const auto result = predictor.query(Eigen::Vector3d(0.1, 0.1, 0.1), 101.0);
+
+  ASSERT_TRUE(result.valid);
+  EXPECT_EQ(result.advisory_fusion_mode, iap::AdvisoryFusionMode::Legacy);
+  EXPECT_STREQ(iap::to_string(result.advisory_fusion_mode), "legacy");
+  EXPECT_FALSE(result.fim_epsilon_applied);
+  EXPECT_FALSE(result.fim_degeneracy_regularized);
+  EXPECT_FALSE(result.fim_regularized);
+  EXPECT_EQ(result.fim_fallback_reason, "fim_disabled");
+}
+
 TEST(FuturePLFieldPredictorTest, FusedModeNeverBelowGnssAraim) {
   auto params = make_params();
   params.use_grid = false;
@@ -269,11 +288,53 @@ TEST(FuturePLFieldPredictorTest, AdvisoryFimRegularizesMissingSources) {
   const auto result = predictor.query(Eigen::Vector3d::Zero(), 101.0);
 
   ASSERT_TRUE(result.valid);
+  EXPECT_TRUE(result.fim_epsilon_applied);
+  EXPECT_TRUE(result.fim_degeneracy_regularized);
   EXPECT_TRUE(result.fim_regularized);
   EXPECT_FALSE(result.gnss_fim_valid);
-  EXPECT_EQ(result.advisory_fusion_mode, "fim_add");
+  EXPECT_EQ(result.advisory_fusion_mode, iap::AdvisoryFusionMode::FimAdd);
+  EXPECT_STREQ(iap::to_string(result.advisory_fusion_mode), "fim_add");
   EXPECT_TRUE(std::isfinite(result.hpl));
   EXPECT_TRUE(std::isfinite(result.vpl));
+}
+
+TEST(FuturePLFieldPredictorTest, AdvisoryFimSeparatesRoutineEpsilonFromDegeneracy) {
+  auto params = make_params();
+  params.use_grid = false;
+  params.use_advisory_fim_add = true;
+  params.use_lidar_advisory_fim = false;
+  params.fim_epsilon = 1.0e-6;
+
+  auto snapshot = make_snapshot(true);
+  snapshot.has_lambda_base = true;
+  snapshot.lambda_base_pos = Eigen::Matrix3d::Identity() * 10.0;
+
+  iap::FuturePLFieldPredictor predictor(params);
+  predictor.update_snapshot(snapshot);
+
+  const auto result = predictor.query(Eigen::Vector3d::Zero(), 101.0);
+
+  ASSERT_TRUE(result.valid);
+  EXPECT_EQ(result.advisory_fusion_mode, iap::AdvisoryFusionMode::FimAdd);
+  EXPECT_TRUE(result.fim_epsilon_applied);
+  EXPECT_FALSE(result.fim_degeneracy_regularized);
+  EXPECT_FALSE(result.fim_regularized);
+  EXPECT_TRUE(result.fim_fallback_reason.empty());
+  const auto stats = predictor.stats();
+  EXPECT_EQ(stats.fim_epsilon_applied_count, 1);
+  EXPECT_EQ(stats.fim_degeneracy_regularized_count, 0);
+  EXPECT_EQ(stats.fim_regularized_count, 0);
+}
+
+TEST(FuturePLFieldPredictorTest, AdvisoryFusionModeStringCompatibility) {
+  EXPECT_STREQ(iap::to_string(iap::AdvisoryFusionMode::Legacy), "legacy");
+  EXPECT_STREQ(iap::to_string(iap::AdvisoryFusionMode::FimAdd), "fim_add");
+  EXPECT_EQ(iap::advisory_fusion_mode_from_string("legacy"),
+            iap::AdvisoryFusionMode::Legacy);
+  EXPECT_EQ(iap::advisory_fusion_mode_from_string("fim_add"),
+            iap::AdvisoryFusionMode::FimAdd);
+  EXPECT_EQ(iap::advisory_fusion_mode_from_string("unexpected"),
+            iap::AdvisoryFusionMode::Unknown);
 }
 
 TEST(FuturePLFieldPredictorTest, AdvisoryFimLidarAdditionIsMonotonic) {

@@ -125,8 +125,13 @@ void copy_fim_debug(const FusedAdvisoryFimResult& fim,
   out.vpl_adv = fim.vpl_adv;
   out.lidar_fim_valid = fim.lidar.valid;
   out.gnss_fim_valid = fim.gnss.valid;
-  out.fim_regularized = fim.regularized || fim.prior.regularized ||
-                        fim.gnss.regularized || fim.lidar.regularized;
+  out.fim_epsilon_applied = fim.epsilon_applied;
+  out.fim_degeneracy_regularized =
+      fim.degeneracy_regularized || fim.regularized ||
+      fim.prior.regularized || fim.gnss.regularized || fim.lidar.regularized;
+  out.fim_regularized = out.fim_degeneracy_regularized;
+  out.fim_fallback_reason =
+      fim.fallback_reason.empty() ? std::string{} : fim.fallback_reason;
   out.advisory_fusion_mode = fim.fusion_mode;
 }
 
@@ -326,10 +331,12 @@ FuturePLQueryResult FuturePLFieldPredictor::evaluate_point(
   out.lidar_condition = params_.lidar_condition_max;
   out.lidar_fallback_reason =
       params_.use_lidar_observability ? "not_evaluated" : "lidar_disabled";
+  out.fim_fallback_reason =
+      params_.use_advisory_fim_add ? "not_evaluated" : "fim_disabled";
 
   if (params_.use_advisory_fim_add) {
     FusedAdvisoryFimResult fim;
-    fim.fusion_mode = "fim_add";
+    fim.fusion_mode = AdvisoryFusionMode::FimAdd;
     fim.prior = prior_information(snapshot);
     fim.gnss = predictor.predict_advisory_fim(p_w);
     fim.lidar.fallback_reason = params_.use_lidar_advisory_fim
@@ -366,13 +373,18 @@ FuturePLQueryResult FuturePLFieldPredictor::evaluate_point(
         std::isfinite(params_.fim_epsilon) && params_.fim_epsilon > 0.0
             ? params_.fim_epsilon
             : 1.0e-6;
+    fim.epsilon_applied = eps > 0.0;
+    fim.degeneracy_regularized =
+        fim.prior.regularized || fim.gnss.regularized ||
+        fim.lidar.regularized || !std::isfinite(fim.min_eig) ||
+        fim.min_eig <= 0.0;
+    fim.regularized = fim.degeneracy_regularized;
     const Eigen::Matrix3d regularized_lambda =
         fim.lambda + eps * Eigen::Matrix3d::Identity();
     Eigen::LDLT<Eigen::Matrix3d> ldlt(regularized_lambda);
     if (ldlt.info() != Eigen::Success || !ldlt.isPositive()) {
       fim.valid = false;
       fim.fallback_reason = "singular_advisory_fim";
-      fim.fusion_mode = "fim_add_fallback";
       copy_fim_debug(fim, out);
       keep_gnss_only(out);
       return out;
@@ -381,7 +393,6 @@ FuturePLQueryResult FuturePLFieldPredictor::evaluate_point(
     if (!fim.sigma_pos.allFinite()) {
       fim.valid = false;
       fim.fallback_reason = "invalid_advisory_covariance";
-      fim.fusion_mode = "fim_add_fallback";
       copy_fim_debug(fim, out);
       keep_gnss_only(out);
       return out;
@@ -392,13 +403,11 @@ FuturePLQueryResult FuturePLFieldPredictor::evaluate_point(
     if (eig_h.info() != Eigen::Success || fim.sigma_pos(2, 2) < 0.0) {
       fim.valid = false;
       fim.fallback_reason = "invalid_advisory_covariance";
-      fim.fusion_mode = "fim_add_fallback";
       copy_fim_debug(fim, out);
       keep_gnss_only(out);
       return out;
     }
 
-    fim.regularized = true;
     fim.valid = true;
     fim.fallback_reason.clear();
     const double k_h =
@@ -536,8 +545,17 @@ void FuturePLFieldPredictor::record_query(
   }
   if (params_.use_advisory_fim_add) {
     ++stats_.fim_query_count;
+    if (result.fim_epsilon_applied) {
+      ++stats_.fim_epsilon_applied_count;
+    }
+    if (result.fim_degeneracy_regularized) {
+      ++stats_.fim_degeneracy_regularized_count;
+    }
     if (result.fim_regularized) {
       ++stats_.fim_regularized_count;
+    }
+    if (!result.fim_fallback_reason.empty()) {
+      ++stats_.fim_fallback_reason_histogram[result.fim_fallback_reason];
     }
     if (result.gnss_fim_valid) {
       ++stats_.gnss_fim_valid_count;

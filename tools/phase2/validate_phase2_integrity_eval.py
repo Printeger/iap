@@ -396,7 +396,15 @@ def check_advisory_fim(summary, online_rows, failures):
         failures.append("phase2_summary.json advisory_fim.gnss_fim_valid_count <= 0")
 
     fim_rows = 0
-    required_columns = ("advisory_fusion_mode", "lambda_adv_trace", "hpl_adv", "vpl_adv")
+    required_columns = (
+        "advisory_fusion_mode",
+        "lambda_adv_trace",
+        "hpl_adv",
+        "vpl_adv",
+        "fim_epsilon_applied",
+        "fim_degeneracy_regularized",
+        "fim_fallback_reason",
+    )
     for row_idx, row in enumerate(online_rows, start=2):
         missing_columns = [col for col in required_columns if col not in row]
         if missing_columns:

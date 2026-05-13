@@ -9,6 +9,35 @@
 
 namespace iap {
 
+enum class AdvisoryFusionMode {
+  Legacy = 0,
+  FimAdd = 1,
+  Unknown = 2,
+};
+
+inline const char* to_string(const AdvisoryFusionMode mode) {
+  switch (mode) {
+    case AdvisoryFusionMode::Legacy:
+      return "legacy";
+    case AdvisoryFusionMode::FimAdd:
+      return "fim_add";
+    case AdvisoryFusionMode::Unknown:
+    default:
+      return "unknown";
+  }
+}
+
+inline AdvisoryFusionMode advisory_fusion_mode_from_string(
+    const std::string& value) {
+  if (value == "legacy") {
+    return AdvisoryFusionMode::Legacy;
+  }
+  if (value == "fim_add") {
+    return AdvisoryFusionMode::FimAdd;
+  }
+  return AdvisoryFusionMode::Unknown;
+}
+
 struct FimDiagnostic {
   Eigen::Matrix3d lambda = Eigen::Matrix3d::Zero();
   bool valid = false;
@@ -38,7 +67,9 @@ struct FusedAdvisoryFimResult : FimDiagnostic {
   Eigen::Matrix3d sigma_pos = Eigen::Matrix3d::Identity();
   double hpl_adv = 1e9;
   double vpl_adv = 1e9;
-  std::string fusion_mode = "legacy";
+  AdvisoryFusionMode fusion_mode = AdvisoryFusionMode::Legacy;
+  bool epsilon_applied = false;
+  bool degeneracy_regularized = false;
 };
 
 inline void fill_fim_diagnostics(FimDiagnostic& out) {

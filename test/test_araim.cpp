@@ -707,6 +707,67 @@ TEST(IntegrityMonitorTest, LidarOnlyGpuBlocksOverrideFallbackByMax) {
   EXPECT_DOUBLE_EQ(report.PL, report.lidar_HPL);
 }
 
+TEST_F(AraimTest, IntegrityMonitorFusesGnssAndLidarByPerAxisMax) {
+  IntegrityMonitor::Params params;
+  params.K_pl = 1.0;
+  params.HAL_trunk_default = 100.0;
+  params.VAL_default = 100.0;
+  params.araim_params = default_params();
+  params.araim_params.dynamic_budget = false;
+  params.lidar_araim_params.dynamic_budget = false;
+  params.lidar_araim_params.K_ff = 5.0;
+  params.lidar_araim_params.K_fa = 4.0;
+  params.lidar_araim_params.K_md = 3.0;
+  params.lidar_araim_params.alpha_H = 0.0;
+  params.lidar_araim_params.alpha_V = 0.0;
+
+  IntegrityMonitor monitor(params);
+
+  glim::EstimationFrame frame;
+  frame.stamp = 30.0;
+  frame.sigma_p = Eigen::Matrix3d::Identity() * 0.01;
+
+  FGOPositionInfo fgo;
+  fgo.valid = true;
+  fgo.pose_cov_valid = true;
+  fgo.frame_id = 44;
+  fgo.pose_cov_6x6 = Eigen::Matrix<double, 6, 6>::Identity() * 0.1;
+  fgo.sigma_p = fgo.pose_cov_6x6.block<3, 3>(3, 3);
+
+  LidarAraimSnapshot snapshot;
+  snapshot.valid = true;
+  snapshot.frame_id = 44;
+  snapshot.stamp = frame.stamp;
+  snapshot.pose_cov_6x6 = fgo.pose_cov_6x6;
+
+  LidarAraimBlock block;
+  block.source_frame_id = 44;
+  block.target_frame_id = 12;
+  block.level_id = 0;
+  block.num_inliers = 120;
+  block.inlier_fraction = 0.92;
+  block.rmse_proxy = 0.08;
+  block.cond_proxy = 1.5;
+  block.age_sec = 0.05;
+  block.Lambda_B = Eigen::Matrix<double, 6, 6>::Identity();
+  block.eta_B(3) = 0.8;
+  block.eta_B(4) = -0.5;
+  block.eta_B(5) = 0.3;
+  snapshot.blocks.push_back(block);
+
+  GnssEpoch epoch = make_epoch(8);
+  const auto report = monitor.compute(frame, &epoch, nullptr, &fgo, &snapshot);
+
+  ASSERT_EQ(report.gnss_valid, 1);
+  ASSERT_EQ(report.lidar_valid, 1);
+  EXPECT_DOUBLE_EQ(report.PL_E, std::max(report.gnss_PL_E, report.lidar_PL_E));
+  EXPECT_DOUBLE_EQ(report.PL_N, std::max(report.gnss_PL_N, report.lidar_PL_N));
+  EXPECT_DOUBLE_EQ(report.PL_U, std::max(report.gnss_PL_U, report.lidar_PL_U));
+  EXPECT_DOUBLE_EQ(report.HPL, std::max(report.gnss_HPL, report.lidar_HPL));
+  EXPECT_DOUBLE_EQ(report.VPL, std::max(report.gnss_VPL, report.lidar_VPL));
+  EXPECT_DOUBLE_EQ(report.PL, std::max(report.gnss_HPL, report.lidar_HPL));
+}
+
 // ============================================================================
 // §5: TrunkMap + EKF
 // ============================================================================

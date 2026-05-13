@@ -2422,3 +2422,75 @@ git diff --name-only:
   src/iap/planner/lidar_observability_fim.cpp
   test/test_lidar_observability_fim.cpp
 ```
+
+## 2026-05-13 Update: Stage 1 Diagnostic Cleanup and Invariant Tests
+
+范围：仅做诊断、命名、测试和文档维护。未修改 FIM 数值公式、PI
+数值公式或 current certified monitor max fusion。
+
+### 修改内容
+
+- 将内部 advisory fusion mode 从裸字符串改为
+  `AdvisoryFusionMode { Legacy, FimAdd, Unknown }`，并通过
+  `to_string()` / `advisory_fusion_mode_from_string()` 在 CSV、JSON、日志
+  边界保持原有字符串输出：
+  - `legacy`
+  - `fim_add`
+- 拆分 FIM 诊断：
+  - `fim_epsilon_applied`：正常 `Lambda_adv + epsilon I` 应用；
+  - `fim_degeneracy_regularized`：pre-epsilon FIM 非正定/退化或子 FIM
+    触发退化正则；
+  - `fim_fallback_reason`：FIM fallback 原因；
+  - `fim_regularized` 保留为兼容别名，现在表示
+    `fim_degeneracy_regularized`。
+- 将新诊断传递到 `FuturePLQueryResult`、PL grid 插值、Phase 2 CSV 行和
+  `phase2_summary.json`：
+  - summary 新增 `epsilon_applied_count`、
+    `degeneracy_regularized_count` 和 `fallback_reason_histogram`；
+  - 原有 `regularized_count` 保留，语义与退化正则兼容。
+- 规范运行日志标签：
+  - `gnss_certified_HPL/VPL`
+  - `lidar_certified_HPL/VPL`
+  - `monitor_fused_HPL/VPL`
+  - `advisory_fusion_mode`
+- 保留既有 CSV/JSON 字段和字符串输出，新增字段为 additive change。
+
+### 新增/更新测试
+
+- `test_araim` 增加 current monitor fusion 不变量测试：
+  `PL_E/PL_N/PL_U/HPL/VPL` 必须等于 GNSS/LiDAR certified monitor
+  per-axis max。
+- `test_future_pl_field_predictor` 增加：
+  - Stage 2 disabled 使用 legacy advisory mode/path；
+  - enum-to-string 输出保持 `legacy` / `fim_add`；
+  - 正常 epsilon 应用与退化正则诊断分离。
+- `test_pl_grid` 增加新 FIM 诊断插值保持测试。
+- `test_unified_risk_grid` 增加 disabled mode 零计数测试。
+- `test_phase2_summary_schema.py` 增加 URG disabled summary 零计数且无
+  `urg_grid_voxels.csv` 指示的回归测试，并同步 advisory FIM summary schema。
+
+### 构建和测试结果
+
+命令从 `/home/dev/ws_iap` 运行：
+
+```bash
+colcon build --base-paths src/iap src/gnss_comm --packages-select iap \
+  --cmake-args -DBUILD_TESTING=ON -DCMAKE_BUILD_TYPE=RelWithDebInfo
+
+ctest --test-dir build/iap -R \
+  "test_araim|test_future_pl_field_predictor|test_pl_grid|test_pi_cost_adapter|test_unified_risk_grid|test_phase2_summary_schema" \
+  --output-on-failure
+
+ctest --test-dir build/iap --output-on-failure
+
+git diff --check
+```
+
+结果：
+
+```text
+Build passed: 1 package finished.
+Focused CTest: 6/6 passed.
+Full CTest: 13/13 passed.
+git diff --check: passed.
+```

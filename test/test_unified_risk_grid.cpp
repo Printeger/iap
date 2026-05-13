@@ -67,6 +67,26 @@ TEST(UnifiedRiskGridTest, StoresAndInterpolatesRiskLayers) {
   EXPECT_TRUE((result.flags & iap::FIM_ADD_USED) != 0u);
 }
 
+TEST(UnifiedRiskGridTest, DisabledModeKeepsZeroCounters) {
+  iap::UnifiedRiskGrid grid;
+  grid.set_enabled(false);
+
+  const auto stats = grid.stats();
+  EXPECT_FALSE(stats.enabled);
+  EXPECT_FALSE(stats.active);
+  EXPECT_EQ(stats.update_count, 0);
+  EXPECT_EQ(stats.query_count, 0);
+  EXPECT_EQ(stats.direct_query_count, 0);
+  EXPECT_EQ(stats.grid_hit_count, 0);
+  EXPECT_EQ(stats.grid_miss_count, 0);
+  EXPECT_EQ(stats.stale_count, 0);
+  EXPECT_EQ(stats.unknown_count, 0);
+  EXPECT_EQ(stats.valid_pi_count, 0);
+  EXPECT_EQ(stats.unknown_penalty_count, 0);
+  EXPECT_EQ(stats.front_field_points, 0);
+  EXPECT_EQ(stats.backend_field_points, 0);
+}
+
 TEST(UnifiedRiskGridTest, ZeroGradientModeLeavesFinitePiCellsWithZeroGradients) {
   iap::UnifiedRiskGrid grid;
   ASSERT_TRUE(grid.reset(Eigen::Vector3d::Zero(), 1.0, 1.0, 1, 1.0));

@@ -462,14 +462,16 @@ IntegrityReport IntegrityMonitor::compute(const glim::EstimationFrame& frame,
   report.mode = update_mode_legacy(report);
 
   logger_->trace(
-    "integrity: monitor_PL={:.3f}m monitor_HPL={:.3f} monitor_VPL={:.3f} HAL={:.3f} VAL={:.3f} AL={:.3f}m monitor_IM={:.3f}m "
+    "integrity: monitor_fused_PL={:.3f}m monitor_fused_HPL={:.3f} monitor_fused_VPL={:.3f} HAL={:.3f} VAL={:.3f} AL={:.3f}m monitor_IM={:.3f}m "
     "state={} lambda_max={:.4f} icp_degen={} gamma_lidar={:.2f} "
-    "tdop={:.2f} araim_n_hyp={} araim_n_det={} lidar_n_hyp={} lidar_certified_HPL={:.3f} n_sv={}",
+    "tdop={:.2f} araim_n_hyp={} araim_n_det={} gnss_certified_HPL={:.3f} gnss_certified_VPL={:.3f} "
+    "lidar_n_hyp={} lidar_certified_HPL={:.3f} lidar_certified_VPL={:.3f} n_sv={}",
     report.PL, report.HPL, report.VPL, report.HAL, report.VAL,
     report.AL, report.IM, to_string(report.state),
     report.lambda_max_sigma_p, report.icp_degenerate, report.gamma_lidar,
     report.tdop, report.araim_n_hyp, report.araim_n_det,
-    report.lidar_n_hyp, report.lidar_HPL, report.n_sv_used);
+    report.gnss_HPL, report.gnss_VPL, report.lidar_n_hyp,
+    report.lidar_HPL, report.lidar_VPL, report.n_sv_used);
 
   if (report.state == IntegrityState::UNSAFE) {
     if (report.PL >= report.AL) {

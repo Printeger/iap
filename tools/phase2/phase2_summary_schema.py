@@ -34,7 +34,10 @@ ADVISORY_FIM_FIELDS = (
     "use_lidar_advisory_fim",
     "fusion_mode",
     "query_count",
+    "epsilon_applied_count",
+    "degeneracy_regularized_count",
     "regularized_count",
+    "fallback_reason_histogram",
     "gnss_fim_valid_count",
     "lidar_fim_valid_count",
 )

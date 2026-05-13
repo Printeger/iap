@@ -127,6 +127,9 @@ const std::vector<std::string> kCsvFields = {
     "vpl_adv",
     "lidar_fim_valid",
     "gnss_fim_valid",
+    "fim_epsilon_applied",
+    "fim_degeneracy_regularized",
+    "fim_fallback_reason",
     "fim_regularized",
     "advisory_fusion_mode",
     "advisory_hpl_used",
@@ -287,6 +290,9 @@ const std::vector<std::string> kGridVoxelCsvFields = {
     "vpl_adv",
     "lidar_fim_valid",
     "gnss_fim_valid",
+    "fim_epsilon_applied",
+    "fim_degeneracy_regularized",
+    "fim_fallback_reason",
     "fim_regularized",
     "advisory_fusion_mode",
     "advisory_hpl_used",
@@ -635,8 +641,11 @@ struct PlFields {
   double vpl_adv = std::numeric_limits<double>::quiet_NaN();
   bool lidar_fim_valid = false;
   bool gnss_fim_valid = false;
+  bool fim_epsilon_applied = false;
+  bool fim_degeneracy_regularized = false;
+  std::string fim_fallback_reason = "not_evaluated";
   bool fim_regularized = false;
-  std::string advisory_fusion_mode = "legacy";
+  iap::AdvisoryFusionMode advisory_fusion_mode = iap::AdvisoryFusionMode::Legacy;
 };
 
 using Row = std::map<std::string, std::string>;
@@ -1714,7 +1723,8 @@ class Phase2PlannerIntegrityEvaluator : public rclcpp::Node {
       out.fused_vpl = out.vpl;
       out.hpl_adv = out.hpl;
       out.vpl_adv = out.vpl;
-      out.advisory_fusion_mode = "legacy";
+      out.fim_fallback_reason = "fim_disabled";
+      out.advisory_fusion_mode = iap::AdvisoryFusionMode::Legacy;
       return out;
     }
 
@@ -1759,6 +1769,9 @@ class Phase2PlannerIntegrityEvaluator : public rclcpp::Node {
       out.vpl_adv = query.vpl_adv;
       out.lidar_fim_valid = query.lidar_fim_valid;
       out.gnss_fim_valid = query.gnss_fim_valid;
+      out.fim_epsilon_applied = query.fim_epsilon_applied;
+      out.fim_degeneracy_regularized = query.fim_degeneracy_regularized;
+      out.fim_fallback_reason = query.fim_fallback_reason;
       out.fim_regularized = query.fim_regularized;
       out.advisory_fusion_mode = query.advisory_fusion_mode;
       if (query.valid) {
@@ -1786,7 +1799,8 @@ class Phase2PlannerIntegrityEvaluator : public rclcpp::Node {
       out.fused_vpl = pred.vpl;
       out.hpl_adv = pred.hpl;
       out.vpl_adv = pred.vpl;
-      out.advisory_fusion_mode = "legacy";
+      out.fim_fallback_reason = "fim_disabled";
+      out.advisory_fusion_mode = iap::AdvisoryFusionMode::Legacy;
 
       if (pred.valid) {
         out.hpl = pred.hpl;
@@ -1907,7 +1921,8 @@ class Phase2PlannerIntegrityEvaluator : public rclcpp::Node {
       return out;
     }
 
-    const bool fim_add = pl.advisory_fusion_mode == "fim_add";
+    const bool fim_add =
+        pl.advisory_fusion_mode == iap::AdvisoryFusionMode::FimAdd;
     if (fim_add && pi_fim_valid_for_selection(pl) &&
         pi_pl_value_valid(pl.hpl_adv) && pi_pl_value_valid(pl.vpl_adv)) {
       out.hpl = pl.hpl_adv;
@@ -2128,7 +2143,7 @@ class Phase2PlannerIntegrityEvaluator : public rclcpp::Node {
         voxel.pi_cost = static_cast<float>(pi.cost_total);
       }
     }
-    if (pl.advisory_fusion_mode == "fim_add") {
+    if (pl.advisory_fusion_mode == iap::AdvisoryFusionMode::FimAdd) {
       voxel.flags |= iap::FIM_ADD_USED;
     }
     if (pl.gnss_fim_valid) {
@@ -2330,8 +2345,12 @@ class Phase2PlannerIntegrityEvaluator : public rclcpp::Node {
     row["vpl_adv"] = fmt_num(pl.vpl_adv);
     row["lidar_fim_valid"] = bool_str(pl.lidar_fim_valid);
     row["gnss_fim_valid"] = bool_str(pl.gnss_fim_valid);
+    row["fim_epsilon_applied"] = bool_str(pl.fim_epsilon_applied);
+    row["fim_degeneracy_regularized"] =
+        bool_str(pl.fim_degeneracy_regularized);
+    row["fim_fallback_reason"] = pl.fim_fallback_reason;
     row["fim_regularized"] = bool_str(pl.fim_regularized);
-    row["advisory_fusion_mode"] = pl.advisory_fusion_mode;
+    row["advisory_fusion_mode"] = iap::to_string(pl.advisory_fusion_mode);
     row["advisory_hpl_used"] = fmt_num(pi_pl.hpl);
     row["advisory_vpl_used"] = fmt_num(pi_pl.vpl);
     row["advisory_pl_source"] = pi_pl.source;
@@ -2735,6 +2754,11 @@ class Phase2PlannerIntegrityEvaluator : public rclcpp::Node {
 	          pl_for_pi.vpl_adv = value.vpl_adv;
 	          pl_for_pi.gnss_fim_valid = value.gnss_fim_valid;
 	          pl_for_pi.lidar_fim_valid = value.lidar_fim_valid;
+	          pl_for_pi.fim_epsilon_applied = value.fim_epsilon_applied;
+	          pl_for_pi.fim_degeneracy_regularized =
+	              value.fim_degeneracy_regularized;
+	          pl_for_pi.fim_fallback_reason = value.fim_fallback_reason;
+	          pl_for_pi.fim_regularized = value.fim_regularized;
 	          pl_for_pi.advisory_fusion_mode = value.advisory_fusion_mode;
 	          const PiAdvisorySelection pi_pl = select_pi_advisory_pl(pl_for_pi);
 	          const iap::AlertLimitSample al = al_values(p);
@@ -2794,8 +2818,14 @@ class Phase2PlannerIntegrityEvaluator : public rclcpp::Node {
           row["vpl_adv"] = fmt_num(value.vpl_adv);
           row["lidar_fim_valid"] = bool_str(value.lidar_fim_valid);
           row["gnss_fim_valid"] = bool_str(value.gnss_fim_valid);
+	          row["fim_epsilon_applied"] =
+	              bool_str(value.fim_epsilon_applied);
+	          row["fim_degeneracy_regularized"] =
+	              bool_str(value.fim_degeneracy_regularized);
+	          row["fim_fallback_reason"] = value.fim_fallback_reason;
 	          row["fim_regularized"] = bool_str(value.fim_regularized);
-	          row["advisory_fusion_mode"] = value.advisory_fusion_mode;
+	          row["advisory_fusion_mode"] =
+	              iap::to_string(value.advisory_fusion_mode);
 	          row["advisory_hpl_used"] = fmt_num(pi_pl.hpl);
 	          row["advisory_vpl_used"] = fmt_num(pi_pl.vpl);
 	          row["advisory_pl_source"] = pi_pl.source;
@@ -3424,6 +3454,10 @@ class Phase2PlannerIntegrityEvaluator : public rclcpp::Node {
          grid_stats.lidar_fallback_reason_histogram) {
       lidar_hist[reason.empty() ? "unknown" : reason] = count;
     }
+    nlohmann::json fim_hist = nlohmann::json::object();
+    for (const auto& [reason, count] : grid_stats.fim_fallback_reason_histogram) {
+      fim_hist[reason.empty() ? "unknown" : reason] = count;
+    }
     const double lidar_valid_rate =
         grid_stats.lidar_query_count > 0
             ? static_cast<double>(grid_stats.lidar_valid_count) /
@@ -3453,7 +3487,11 @@ class Phase2PlannerIntegrityEvaluator : public rclcpp::Node {
         {"use_lidar_advisory_fim", use_lidar_advisory_fim_},
         {"fusion_mode", use_advisory_fim_add_ ? "fim_add" : "legacy"},
         {"query_count", grid_stats.fim_query_count},
+        {"epsilon_applied_count", grid_stats.fim_epsilon_applied_count},
+        {"degeneracy_regularized_count",
+         grid_stats.fim_degeneracy_regularized_count},
         {"regularized_count", grid_stats.fim_regularized_count},
+        {"fallback_reason_histogram", fim_hist},
         {"gnss_fim_valid_count", grid_stats.gnss_fim_valid_count},
         {"lidar_fim_valid_count", grid_stats.lidar_fim_valid_count},
         {"fim_epsilon", field_predictor_params_.fim_epsilon},
@@ -3692,6 +3730,11 @@ class Phase2PlannerIntegrityEvaluator : public rclcpp::Node {
     row["grid_generation"] = "-1";
     row["grid_age_s"] = fmt_num(voxel.age_s);
     row["grid_build_time_ms"] = "nan";
+    row["fim_epsilon_applied"] =
+        bool_str((voxel.flags & iap::FIM_ADD_USED) != 0u);
+    row["fim_degeneracy_regularized"] = "false";
+    row["fim_fallback_reason"] = "";
+    row["fim_regularized"] = "false";
     row["advisory_fusion_mode"] =
         (voxel.flags & iap::FIM_ADD_USED) != 0u ? "fim_add" : "legacy";
     row["advisory_hpl_used"] = fmt_num(voxel.hpl_adv_m);

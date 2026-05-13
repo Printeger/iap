@@ -27,6 +27,16 @@ std::string first_lidar_fallback_reason(
   return "mixed_lidar_grid_fallback";
 }
 
+std::string first_fim_fallback_reason(
+    const std::array<const FuturePLQueryResult*, 8>& cells) {
+  for (const auto* value : cells) {
+    if (!value->fim_fallback_reason.empty()) {
+      return value->fim_fallback_reason;
+    }
+  }
+  return "";
+}
+
 bool finite_result(const FuturePLQueryResult& value) {
   return value.valid && std::isfinite(value.hpl) &&
          std::isfinite(value.vpl) && std::isfinite(value.pl_scalar);
@@ -210,9 +220,21 @@ FuturePLQueryResult PLGrid::interpolate(const Eigen::Vector3d& p) const {
   out.gnss_fim_valid =
       std::all_of(c.begin(), c.end(),
                   [](const auto* value) { return value->gnss_fim_valid; });
+  out.fim_epsilon_applied =
+      std::any_of(c.begin(), c.end(),
+                  [](const auto* value) { return value->fim_epsilon_applied; });
+  out.fim_degeneracy_regularized =
+      std::any_of(c.begin(), c.end(),
+                  [](const auto* value) {
+                    return value->fim_degeneracy_regularized;
+                  });
+  out.fim_fallback_reason = first_fim_fallback_reason(c);
   out.fim_regularized =
       std::any_of(c.begin(), c.end(),
-                  [](const auto* value) { return value->fim_regularized; });
+                  [](const auto* value) {
+                    return value->fim_regularized ||
+                           value->fim_degeneracy_regularized;
+                  });
   out.advisory_fusion_mode = c[0]->advisory_fusion_mode;
   out.lidar_fallback_reason =
       out.lidar_valid ? std::string{} : first_lidar_fallback_reason(c);

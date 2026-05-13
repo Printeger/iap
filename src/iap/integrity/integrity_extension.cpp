@@ -435,16 +435,18 @@ void IntegrityExtensionModule::maybe_publish_integrity_() {
   const uint64_t n = ++report_count_;
   if (n == 1 || n % 50 == 0) {
     logger_->info(
-        "[IntegrityExt] #{}: stamp={:.3f} state={} monitor_HPL={:.2f}m "
-        "monitor_VPL={:.2f}m HAL={:.2f}m monitor_IM={:.2f}m n_sv={} "
+        "[IntegrityExt] #{}: stamp={:.3f} state={} monitor_fused_HPL={:.2f}m "
+        "monitor_fused_VPL={:.2f}m HAL={:.2f}m monitor_IM={:.2f}m n_sv={} "
         "n_trunks={} fgo_valid={} fgo_factors={} lidar_hyp={} "
-        "lidar_certified_HPL={:.2f} mode={}",
+        "gnss_certified_HPL={:.2f} gnss_certified_VPL={:.2f} "
+        "lidar_certified_HPL={:.2f} lidar_certified_VPL={:.2f} mode={}",
         n, report.stamp, to_string(report.state),
         report.HPL, report.VPL, report.HAL, report.IM,
         report.n_sv_used, report.n_trunks_observed,
         have_fgo_snapshot && fgo_snapshot.valid,
         have_fgo_snapshot ? fgo_snapshot.n_total_factors : 0,
-        report.lidar_n_hyp, report.lidar_HPL, report.lidar_worst_mode);
+        report.lidar_n_hyp, report.gnss_HPL, report.gnss_VPL,
+        report.lidar_HPL, report.lidar_VPL, report.lidar_worst_mode);
     const auto& lr = monitor_.last_lidar_araim_result();
     if (lr.valid && lr.worst_hyp >= 0 &&
         lr.worst_hyp < static_cast<int>(lr.hypotheses.size()) &&
@@ -461,8 +463,8 @@ void IntegrityExtensionModule::maybe_publish_integrity_() {
     }
   } else {
     logger_->debug(
-        "[IntegrityExt] stamp={:.3f} state={} monitor_HPL={:.2f}m "
-        "monitor_VPL={:.2f}m "
+        "[IntegrityExt] stamp={:.3f} state={} monitor_fused_HPL={:.2f}m "
+        "monitor_fused_VPL={:.2f}m "
         "HAL={:.2f}m n_sv={} lidar_hyp={}",
         report.stamp, to_string(report.state),
         report.HPL, report.VPL, report.HAL, report.n_sv_used, report.lidar_n_hyp);
