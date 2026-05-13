@@ -4,6 +4,9 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdint>
+#include <map>
+#include <tuple>
 
 namespace iap {
 
@@ -43,7 +46,209 @@ double current_tdop_score(const CurrentIntegrityState& current,
                  std::max(params.tdop_max - params.tdop_ref, 1.0e-9));
 }
 
+std::vector<std::size_t> uniformly_cap_indices(
+    const std::vector<std::size_t>& indices, const int max_count) {
+  if (max_count <= 0 ||
+      indices.size() <= static_cast<std::size_t>(max_count)) {
+    return indices;
+  }
+  std::vector<std::size_t> out;
+  out.reserve(static_cast<std::size_t>(max_count));
+  if (max_count == 1) {
+    out.push_back(indices.front());
+    return out;
+  }
+  const double last = static_cast<double>(indices.size() - 1);
+  const double denom = static_cast<double>(max_count - 1);
+  for (int i = 0; i < max_count; ++i) {
+    const auto idx = static_cast<std::size_t>(
+        std::llround(last * static_cast<double>(i) / denom));
+    out.push_back(indices[std::min(idx, indices.size() - 1)]);
+  }
+  return out;
+}
+
+std::vector<std::size_t> voxel_sample_indices(
+    const std::vector<Eigen::Vector3d>& points,
+    const std::vector<std::size_t>& indices,
+    const double voxel_m) {
+  if (!std::isfinite(voxel_m) || voxel_m <= 0.0) {
+    return indices;
+  }
+  std::map<std::tuple<std::int64_t, std::int64_t, std::int64_t>, std::size_t>
+      buckets;
+  for (const std::size_t idx : indices) {
+    const Eigen::Vector3d& p = points[idx];
+    const auto key = std::make_tuple(
+        static_cast<std::int64_t>(std::floor(p.x() / voxel_m)),
+        static_cast<std::int64_t>(std::floor(p.y() / voxel_m)),
+        static_cast<std::int64_t>(std::floor(p.z() / voxel_m)));
+    buckets.emplace(key, idx);
+  }
+  std::vector<std::size_t> out;
+  out.reserve(buckets.size());
+  for (const auto& [key, idx] : buckets) {
+    (void)key;
+    out.push_back(idx);
+  }
+  return out;
+}
+
 }  // namespace
+
+std::shared_ptr<std::vector<LidarFimPrimitive>> make_lidar_fim_primitives(
+    const std::vector<Eigen::Vector3d>& points,
+    const std::vector<Eigen::Vector3d>* normals,
+    const LidarFimPrimitiveGenerationParams& params,
+    LidarFimPrimitiveGenerationDiagnostics* diagnostics) {
+  auto primitives = std::make_shared<std::vector<LidarFimPrimitive>>();
+  LidarFimPrimitiveGenerationDiagnostics diag;
+  diag.lidar_pca_radius_m =
+      std::isfinite(params.pca_radius_m) ? params.pca_radius_m
+                                         : LidarFimPrimitiveGenerationParams{}
+                                               .pca_radius_m;
+
+  auto finish = [&]() {
+    diag.lidar_pca_primitives_total =
+        static_cast<int>(primitives->size());
+    diag.lidar_pca_valid_normals = static_cast<int>(primitives->size());
+    diag.valid = !primitives->empty();
+    diag.fallback_reason =
+        diag.valid ? std::string{} : "missing_lidar_normals";
+    if (diagnostics != nullptr) {
+      *diagnostics = diag;
+    }
+    return primitives;
+  };
+
+  if (points.empty()) {
+    return finish();
+  }
+  if (!std::isfinite(params.pca_radius_m) || params.pca_radius_m <= 0.0 ||
+      params.pca_min_support <= 0 || params.pca_max_points < 0 ||
+      params.pca_max_primitives < 0) {
+    diag.fallback_reason = "invalid_lidar_fim_pca_params";
+    if (diagnostics != nullptr) {
+      *diagnostics = diag;
+    }
+    return primitives;
+  }
+
+  const bool normals_available =
+      normals != nullptr && normals->size() == points.size();
+  std::vector<std::size_t> finite_indices;
+  std::vector<std::size_t> pca_source_indices;
+  finite_indices.reserve(points.size());
+  pca_source_indices.reserve(points.size());
+  primitives->reserve(points.size());
+
+  for (std::size_t i = 0; i < points.size(); ++i) {
+    if (!points[i].allFinite()) {
+      continue;
+    }
+    finite_indices.push_back(i);
+    bool used_cloud_normal = false;
+    if (params.use_cloud_normals_first && normals_available) {
+      const Eigen::Vector3d& normal = (*normals)[i];
+      const double norm = normal.norm();
+      if (normal.allFinite() && std::isfinite(norm) && norm > 1.0e-9) {
+        LidarFimPrimitive primitive;
+        primitive.center_w = points[i];
+        primitive.normal_w = normal / norm;
+        primitive.weight = 1.0;
+        primitive.normal_confidence = 1.0;
+        primitive.support_count = 1;
+        primitives->push_back(primitive);
+        used_cloud_normal = true;
+      } else {
+        ++diag.lidar_pca_invalid_normals;
+      }
+    }
+    if (!used_cloud_normal) {
+      pca_source_indices.push_back(i);
+    }
+  }
+
+  if (finite_indices.empty()) {
+    return finish();
+  }
+
+  const std::vector<std::size_t> voxel_indices = voxel_sample_indices(
+      points, pca_source_indices, params.pca_voxel_sample_m);
+  const std::vector<std::size_t> pca_indices =
+      uniformly_cap_indices(voxel_indices, params.pca_max_points);
+  const double radius2 = params.pca_radius_m * params.pca_radius_m;
+  int pca_primitives = 0;
+  int support_sum = 0;
+  int support_min = std::numeric_limits<int>::max();
+
+  for (const std::size_t idx : pca_indices) {
+    if (params.pca_max_primitives > 0 &&
+        pca_primitives >= params.pca_max_primitives) {
+      break;
+    }
+    const Eigen::Vector3d& center = points[idx];
+    Eigen::Vector3d mean = Eigen::Vector3d::Zero();
+    int support = 0;
+    for (const std::size_t q_idx : finite_indices) {
+      const Eigen::Vector3d& q = points[q_idx];
+      const double d2 = (q - center).squaredNorm();
+      if (std::isfinite(d2) && d2 <= radius2) {
+        mean += q;
+        ++support;
+      }
+    }
+    if (support < params.pca_min_support) {
+      ++diag.lidar_pca_invalid_normals;
+      continue;
+    }
+    mean /= static_cast<double>(support);
+    Eigen::Matrix3d cov = Eigen::Matrix3d::Zero();
+    for (const std::size_t q_idx : finite_indices) {
+      const Eigen::Vector3d& q = points[q_idx];
+      const double d2 = (q - center).squaredNorm();
+      if (std::isfinite(d2) && d2 <= radius2) {
+        const Eigen::Vector3d centered = q - mean;
+        cov += centered * centered.transpose();
+      }
+    }
+    cov /= static_cast<double>(support);
+    Eigen::SelfAdjointEigenSolver<Eigen::Matrix3d> eig(cov);
+    if (eig.info() != Eigen::Success) {
+      ++diag.lidar_pca_invalid_normals;
+      continue;
+    }
+    const Eigen::Vector3d evals = eig.eigenvalues();
+    if (!evals.allFinite() || evals(2) <= 1.0e-12) {
+      ++diag.lidar_pca_invalid_normals;
+      continue;
+    }
+    const double confidence = std::clamp(
+        (evals(1) - evals(0)) / std::max(evals(2), 1.0e-12), 0.0, 1.0);
+    if (confidence <= 0.05) {
+      ++diag.lidar_pca_invalid_normals;
+      continue;
+    }
+
+    LidarFimPrimitive primitive;
+    primitive.center_w = center;
+    primitive.normal_w = eig.eigenvectors().col(0).normalized();
+    primitive.weight = 1.0;
+    primitive.normal_confidence = confidence;
+    primitive.support_count = support;
+    primitives->push_back(primitive);
+    ++pca_primitives;
+    support_sum += support;
+    support_min = std::min(support_min, support);
+  }
+
+  if (pca_primitives > 0) {
+    diag.lidar_pca_support_mean =
+        static_cast<double>(support_sum) / static_cast<double>(pca_primitives);
+    diag.lidar_pca_support_min = support_min;
+  }
+  return finish();
+}
 
 LidarObservabilityFim::LidarObservabilityFim()
     : LidarObservabilityFim(Params{}) {}

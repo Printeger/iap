@@ -7,6 +7,7 @@
 #include <Eigen/Core>
 
 #include <limits>
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -36,6 +37,34 @@ struct LidarFimPrimitive {
   double normal_confidence = 1.0;
   int support_count = 0;
 };
+
+struct LidarFimPrimitiveGenerationParams {
+  double pca_radius_m = 1.5;
+  int pca_max_points = 2000;
+  int pca_min_support = 6;
+  double pca_voxel_sample_m = 0.5;
+  int pca_max_primitives = 2000;
+  bool use_cloud_normals_first = true;
+};
+
+struct LidarFimPrimitiveGenerationDiagnostics {
+  bool valid = false;
+  std::string fallback_reason = "not_evaluated";
+  int lidar_pca_primitives_total = 0;
+  int lidar_pca_valid_normals = 0;
+  int lidar_pca_invalid_normals = 0;
+  double lidar_pca_support_mean =
+      std::numeric_limits<double>::quiet_NaN();
+  int lidar_pca_support_min = 0;
+  double lidar_pca_radius_m = 1.5;
+};
+
+std::shared_ptr<std::vector<LidarFimPrimitive>> make_lidar_fim_primitives(
+    const std::vector<Eigen::Vector3d>& points,
+    const std::vector<Eigen::Vector3d>* normals = nullptr,
+    const LidarFimPrimitiveGenerationParams& params =
+        LidarFimPrimitiveGenerationParams{},
+    LidarFimPrimitiveGenerationDiagnostics* diagnostics = nullptr);
 
 class LidarObservabilityFim {
  public:

@@ -360,6 +360,12 @@ bool is_finite(const double value) {
   return std::isfinite(value);
 }
 
+bool has_point_field(const sensor_msgs::msg::PointCloud2& msg,
+                     const std::string& name) {
+  return std::any_of(msg.fields.begin(), msg.fields.end(),
+                     [&](const auto& field) { return field.name == name; });
+}
+
 double stamp_to_sec(const builtin_interfaces::msg::Time& stamp) {
   return static_cast<double>(stamp.sec) +
          static_cast<double>(stamp.nanosec) * 1.0e-9;
@@ -392,94 +398,6 @@ std::string csv_escape(const std::string& value) {
 
 std::string bool_str(const bool value) {
   return value ? "true" : "false";
-}
-
-std::shared_ptr<const std::vector<iap::LidarFimPrimitive>>
-make_lidar_fim_primitives(
-    const std::vector<Eigen::Vector3d>& points,
-    const std::vector<Eigen::Vector3d>* normals = nullptr) {
-  auto primitives = std::make_shared<std::vector<iap::LidarFimPrimitive>>();
-  if (points.empty()) {
-    return primitives;
-  }
-
-  primitives->reserve(points.size());
-  if (normals != nullptr && normals->size() == points.size()) {
-    for (std::size_t i = 0; i < points.size(); ++i) {
-      if (!points[i].allFinite() || !(*normals)[i].allFinite()) {
-        continue;
-      }
-      const double norm = (*normals)[i].norm();
-      if (!std::isfinite(norm) || norm <= 1.0e-9) {
-        continue;
-      }
-      iap::LidarFimPrimitive primitive;
-      primitive.center_w = points[i];
-      primitive.normal_w = (*normals)[i] / norm;
-      primitive.weight = 1.0;
-      primitive.normal_confidence = 1.0;
-      primitive.support_count = 1;
-      primitives->push_back(primitive);
-    }
-    return primitives;
-  }
-
-  constexpr std::size_t kMaxPcaPoints = 2000;
-  constexpr double kRadius = 1.5;
-  constexpr double kRadius2 = kRadius * kRadius;
-  constexpr int kMinSupport = 6;
-  const std::size_t stride =
-      std::max<std::size_t>(1, (points.size() + kMaxPcaPoints - 1) / kMaxPcaPoints);
-  for (std::size_t i = 0; i < points.size(); i += stride) {
-    if (!points[i].allFinite()) {
-      continue;
-    }
-    Eigen::Vector3d mean = Eigen::Vector3d::Zero();
-    int support = 0;
-    for (const auto& q : points) {
-      if (!q.allFinite()) {
-        continue;
-      }
-      const double d2 = (q - points[i]).squaredNorm();
-      if (std::isfinite(d2) && d2 <= kRadius2) {
-        mean += q;
-        ++support;
-      }
-    }
-    if (support < kMinSupport) {
-      continue;
-    }
-    mean /= static_cast<double>(support);
-    Eigen::Matrix3d cov = Eigen::Matrix3d::Zero();
-    for (const auto& q : points) {
-      const double d2 = (q - points[i]).squaredNorm();
-      if (std::isfinite(d2) && d2 <= kRadius2) {
-        const Eigen::Vector3d centered = q - mean;
-        cov += centered * centered.transpose();
-      }
-    }
-    cov /= static_cast<double>(support);
-    Eigen::SelfAdjointEigenSolver<Eigen::Matrix3d> eig(cov);
-    if (eig.info() != Eigen::Success) {
-      continue;
-    }
-    const Eigen::Vector3d evals = eig.eigenvalues();
-    if (!evals.allFinite() || evals(2) <= 1.0e-12) {
-      continue;
-    }
-    iap::LidarFimPrimitive primitive;
-    primitive.center_w = points[i];
-    primitive.normal_w = eig.eigenvectors().col(0).normalized();
-    primitive.weight = 1.0;
-    primitive.normal_confidence =
-        std::clamp((evals(1) - evals(0)) / std::max(evals(2), 1.0e-12),
-                   0.0, 1.0);
-    primitive.support_count = support;
-    if (primitive.normal_confidence > 0.05) {
-      primitives->push_back(primitive);
-    }
-  }
-  return primitives;
 }
 
 std::optional<std::string> read_command_output(const std::string& command) {
@@ -789,6 +707,12 @@ class Phase2PlannerIntegrityEvaluator : public rclcpp::Node {
     declare_parameter<double>("lidar_fim_range_sigma_base", 0.5);
     declare_parameter<double>("lidar_fim_condition_max", 1.0e6);
     declare_parameter<double>("lidar_fim_weight_scale", 1.0);
+    declare_parameter<double>("lidar_fim_pca_radius_m", 1.5);
+    declare_parameter<int>("lidar_fim_pca_max_points", 2000);
+    declare_parameter<int>("lidar_fim_pca_min_support", 6);
+    declare_parameter<double>("lidar_fim_pca_voxel_sample_m", 0.5);
+    declare_parameter<int>("lidar_fim_pca_max_primitives", 2000);
+    declare_parameter<bool>("lidar_fim_use_cloud_normals_first", true);
     declare_parameter<double>("K_H_adv", 5.0);
     declare_parameter<double>("K_V_adv", 5.0);
     declare_parameter<double>("b_H_pred", 0.0);
@@ -935,6 +859,19 @@ class Phase2PlannerIntegrityEvaluator : public rclcpp::Node {
         get_parameter("lidar_fim_condition_max").as_double();
     field_predictor_params_.lidar_fim_weight_scale =
         get_parameter("lidar_fim_weight_scale").as_double();
+    lidar_fim_primitive_params_.pca_radius_m =
+        get_parameter("lidar_fim_pca_radius_m").as_double();
+    lidar_fim_primitive_params_.pca_max_points =
+        static_cast<int>(get_parameter("lidar_fim_pca_max_points").as_int());
+    lidar_fim_primitive_params_.pca_min_support =
+        static_cast<int>(get_parameter("lidar_fim_pca_min_support").as_int());
+    lidar_fim_primitive_params_.pca_voxel_sample_m =
+        get_parameter("lidar_fim_pca_voxel_sample_m").as_double();
+    lidar_fim_primitive_params_.pca_max_primitives =
+        static_cast<int>(
+            get_parameter("lidar_fim_pca_max_primitives").as_int());
+    lidar_fim_primitive_params_.use_cloud_normals_first =
+        get_parameter("lidar_fim_use_cloud_normals_first").as_bool();
     field_predictor_params_.K_H_adv = get_parameter("K_H_adv").as_double();
     field_predictor_params_.K_V_adv = get_parameter("K_V_adv").as_double();
     field_predictor_params_.b_H_pred = get_parameter("b_H_pred").as_double();
@@ -1479,24 +1416,35 @@ class Phase2PlannerIntegrityEvaluator : public rclcpp::Node {
     latest_cloud_stamp_ = stamp_to_sec(msg.header.stamp);
     auto points = std::make_shared<std::vector<Eigen::Vector3d>>();
     auto normals = std::make_shared<std::vector<Eigen::Vector3d>>();
-    bool parsed_normals = false;
+    const bool cloud_has_normals = has_point_field(msg, "normal_x") &&
+                                   has_point_field(msg, "normal_y") &&
+                                   has_point_field(msg, "normal_z");
     try {
       sensor_msgs::PointCloud2ConstIterator<float> iter_x(msg, "x");
       sensor_msgs::PointCloud2ConstIterator<float> iter_y(msg, "y");
       sensor_msgs::PointCloud2ConstIterator<float> iter_z(msg, "z");
-      sensor_msgs::PointCloud2ConstIterator<float> iter_nx(msg, "normal_x");
-      sensor_msgs::PointCloud2ConstIterator<float> iter_ny(msg, "normal_y");
-      sensor_msgs::PointCloud2ConstIterator<float> iter_nz(msg, "normal_z");
-      for (; iter_x != iter_x.end();
-           ++iter_x, ++iter_y, ++iter_z, ++iter_nx, ++iter_ny, ++iter_nz) {
-        const Eigen::Vector3d p(*iter_x, *iter_y, *iter_z);
-        const Eigen::Vector3d n(*iter_nx, *iter_ny, *iter_nz);
-        if (p.allFinite() && n.allFinite()) {
+      if (cloud_has_normals) {
+        sensor_msgs::PointCloud2ConstIterator<float> iter_nx(msg, "normal_x");
+        sensor_msgs::PointCloud2ConstIterator<float> iter_ny(msg, "normal_y");
+        sensor_msgs::PointCloud2ConstIterator<float> iter_nz(msg, "normal_z");
+        for (; iter_x != iter_x.end();
+             ++iter_x, ++iter_y, ++iter_z, ++iter_nx, ++iter_ny, ++iter_nz) {
+          const Eigen::Vector3d p(*iter_x, *iter_y, *iter_z);
+          if (!p.allFinite()) {
+            continue;
+          }
+          const Eigen::Vector3d n(*iter_nx, *iter_ny, *iter_nz);
           points->push_back(p);
           normals->push_back(n);
         }
+      } else {
+        for (; iter_x != iter_x.end(); ++iter_x, ++iter_y, ++iter_z) {
+          const Eigen::Vector3d p(*iter_x, *iter_y, *iter_z);
+          if (p.allFinite()) {
+            points->push_back(p);
+          }
+        }
       }
-      parsed_normals = normals->size() == points->size() && !normals->empty();
     } catch (const std::exception&) {
       points->clear();
       normals->clear();
@@ -1518,6 +1466,10 @@ class Phase2PlannerIntegrityEvaluator : public rclcpp::Node {
         }
         field_predictor_.set_lidar_map_points(nullptr);
         field_predictor_.set_lidar_fim_primitives(nullptr);
+        latest_lidar_pca_diagnostics_ =
+            iap::LidarFimPrimitiveGenerationDiagnostics{};
+        latest_lidar_pca_diagnostics_.fallback_reason =
+            "missing_lidar_normals";
         warn_once(std::string("failed to parse map cloud ") + map_topic_ +
                   ": " + parse_xyz_error.what());
         return;
@@ -1526,12 +1478,13 @@ class Phase2PlannerIntegrityEvaluator : public rclcpp::Node {
     latest_cloud_points_ = *points;
     auto predictor_points = points;
     std::shared_ptr<std::vector<Eigen::Vector3d>> predictor_normals =
-        parsed_normals ? normals : nullptr;
+        cloud_has_normals && normals->size() == points->size() ? normals
+                                                               : nullptr;
     if (lidar_map_max_points_ > 0 &&
         static_cast<int>(points->size()) > lidar_map_max_points_) {
       predictor_points = std::make_shared<std::vector<Eigen::Vector3d>>();
       predictor_points->reserve(lidar_map_max_points_);
-      if (parsed_normals) {
+      if (predictor_normals) {
         predictor_normals = std::make_shared<std::vector<Eigen::Vector3d>>();
         predictor_normals->reserve(lidar_map_max_points_);
       }
@@ -1542,7 +1495,7 @@ class Phase2PlannerIntegrityEvaluator : public rclcpp::Node {
         const std::size_t idx = std::min<std::size_t>(
             points->size() - 1, static_cast<std::size_t>(std::floor(i * stride)));
         predictor_points->push_back((*points)[idx]);
-        if (parsed_normals) {
+        if (predictor_normals) {
           predictor_normals->push_back((*normals)[idx]);
         }
       }
@@ -1553,8 +1506,13 @@ class Phase2PlannerIntegrityEvaluator : public rclcpp::Node {
       occupancy_.insert_points(latest_cloud_points_);
     }
     field_predictor_.set_lidar_map_points(predictor_points);
+    iap::LidarFimPrimitiveGenerationDiagnostics diagnostics;
     field_predictor_.set_lidar_fim_primitives(
-        make_lidar_fim_primitives(*predictor_points, predictor_normals.get()));
+        iap::make_lidar_fim_primitives(*predictor_points,
+                                        predictor_normals.get(),
+                                        lidar_fim_primitive_params_,
+                                        &diagnostics));
+    latest_lidar_pca_diagnostics_ = diagnostics;
   }
 
   void on_range_meas(const gnss_comm::msg::GnssMeasMsg::ConstSharedPtr& msg) {
@@ -3235,6 +3193,18 @@ class Phase2PlannerIntegrityEvaluator : public rclcpp::Node {
        field_predictor_params_.lidar_fim_condition_max},
       {"phase2_lidar_fim_weight_scale",
        field_predictor_params_.lidar_fim_weight_scale},
+      {"phase2_lidar_fim_pca_radius_m",
+       lidar_fim_primitive_params_.pca_radius_m},
+      {"phase2_lidar_fim_pca_max_points",
+       lidar_fim_primitive_params_.pca_max_points},
+      {"phase2_lidar_fim_pca_min_support",
+       lidar_fim_primitive_params_.pca_min_support},
+      {"phase2_lidar_fim_pca_voxel_sample_m",
+       lidar_fim_primitive_params_.pca_voxel_sample_m},
+      {"phase2_lidar_fim_pca_max_primitives",
+       lidar_fim_primitive_params_.pca_max_primitives},
+      {"phase2_lidar_fim_use_cloud_normals_first",
+       lidar_fim_primitive_params_.use_cloud_normals_first},
       {"phase2_K_H_adv", field_predictor_params_.K_H_adv},
 	      {"phase2_K_V_adv", field_predictor_params_.K_V_adv},
 	      {"phase2_b_H_pred", field_predictor_params_.b_H_pred},
@@ -3426,6 +3396,19 @@ class Phase2PlannerIntegrityEvaluator : public rclcpp::Node {
          field_predictor_params_.lidar_fim_condition_max},
         {"lidar_fim_weight_scale",
          field_predictor_params_.lidar_fim_weight_scale},
+        {"lidar_pca_primitives_total",
+         latest_lidar_pca_diagnostics_.lidar_pca_primitives_total},
+        {"lidar_pca_valid_normals",
+         latest_lidar_pca_diagnostics_.lidar_pca_valid_normals},
+        {"lidar_pca_invalid_normals",
+         latest_lidar_pca_diagnostics_.lidar_pca_invalid_normals},
+        {"lidar_pca_support_mean",
+         json_or_null(
+             latest_lidar_pca_diagnostics_.lidar_pca_support_mean)},
+        {"lidar_pca_support_min",
+         latest_lidar_pca_diagnostics_.lidar_pca_support_min},
+        {"lidar_pca_radius_m",
+         latest_lidar_pca_diagnostics_.lidar_pca_radius_m},
     };
     summary["phase_h_lite"] = {
         {"grid_update_timing", grid_stats.enabled ? "available"
@@ -4472,6 +4455,8 @@ class Phase2PlannerIntegrityEvaluator : public rclcpp::Node {
 	  bool pi_require_fim_valid_ = false;
 	  double pl_grid_update_hz_ = 2.0;
   int lidar_map_max_points_ = 2500;
+  iap::LidarFimPrimitiveGenerationParams lidar_fim_primitive_params_{};
+  iap::LidarFimPrimitiveGenerationDiagnostics latest_lidar_pca_diagnostics_{};
   double drone_radius_ = 0.35;
   double safety_buffer_ = 0.20;
   double gamma_h_ = 0.8;

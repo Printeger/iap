@@ -2182,3 +2182,90 @@ The default-grid mean update time was reduced from the audited
 `~8881 ms` to `~1230 ms` in this smoke. The phase2 evaluator exited cleanly in
 both smokes. The known non-core demo11 shutdown errors in visualization/sensing
 nodes still appeared, matching the existing audit notes.
+
+## 2026-05-13 Update: Advisory LiDAR FIM PCA Primitive Generation
+
+Scope: advisory planner-side LiDAR FIM primitive generation only. Certified
+LiDAR ARAIM, Stage 0 LiDAR monitor code, and Stage 2 FIM-add math were not
+modified.
+
+### Changes Applied
+
+- Moved advisory LiDAR FIM primitive generation into
+  `include/iap/planner/lidar_observability_fim.hpp` and
+  `src/iap/planner/lidar_observability_fim.cpp` as a reusable/testable API.
+- Added primitive generation parameters with backward-compatible defaults:
+  - `pca_radius_m = 1.5`
+  - `pca_max_points = 2000`
+  - `pca_min_support = 6`
+  - `pca_voxel_sample_m = 0.5`
+  - `pca_max_primitives = 2000`
+  - `use_cloud_normals_first = true`
+- Replaced PCA fallback index-stride sampling with deterministic voxel-bucket
+  sampling, followed by bounded uniform capping after voxel downsampling.
+- Preserved cloud-provided `normal_x/y/z` first. Valid finite nonzero cloud
+  normals produce primitives directly; PCA fallback is used for points with
+  absent or invalid normals.
+- Added evaluator and demo11 launch wiring for:
+  - `phase2_lidar_fim_pca_radius_m`
+  - `phase2_lidar_fim_pca_max_points`
+  - `phase2_lidar_fim_pca_min_support`
+  - `phase2_lidar_fim_pca_voxel_sample_m`
+  - `phase2_lidar_fim_pca_max_primitives`
+  - `phase2_lidar_fim_use_cloud_normals_first`
+- Added `phase2_summary.json` advisory FIM diagnostics:
+  - `lidar_pca_primitives_total`
+  - `lidar_pca_valid_normals`
+  - `lidar_pca_invalid_normals`
+  - `lidar_pca_support_mean`
+  - `lidar_pca_support_min`
+  - `lidar_pca_radius_m`
+
+### Tests Added
+
+`test/test_lidar_observability_fim.cpp` now covers:
+
+- configurable PCA radius changes primitive count;
+- min support boundary is inclusive at the configured threshold;
+- voxel sampling reduces duplicate dense-cluster primitives;
+- empty cloud primitive generation reports `valid=false` /
+  `missing_lidar_normals`;
+- existing cloud normal path works without requiring PCA support.
+
+### Build and Test Results
+
+Commands run from `/home/dev/ws_iap`:
+
+```bash
+colcon build --base-paths src/iap src/gnss_comm --packages-select iap \
+  --cmake-args -DBUILD_TESTING=ON -DCMAKE_BUILD_TYPE=RelWithDebInfo
+
+ctest --test-dir build/iap -R \
+  "test_lidar_observability_fim|test_future_pl_field_predictor|test_pl_grid" \
+  --output-on-failure
+
+ctest --test-dir build/iap --output-on-failure
+
+python3 -m py_compile \
+  src/iap/launch/demo11_ego_planner_integrity_corridor.launch.py
+
+git diff --check
+git diff --name-only
+```
+
+Results:
+
+```text
+Build passed: 1 package finished.
+Focused CTest: 3/3 passed.
+Full CTest: 12/12 passed.
+Python launch compile: passed.
+git diff --check: passed.
+git diff --name-only:
+  apps/phase2_planner_integrity_evaluator.cpp
+  docs/stage1_v2.0/status.md
+  include/iap/planner/lidar_observability_fim.hpp
+  launch/demo11_ego_planner_integrity_corridor.launch.py
+  src/iap/planner/lidar_observability_fim.cpp
+  test/test_lidar_observability_fim.cpp
+```
