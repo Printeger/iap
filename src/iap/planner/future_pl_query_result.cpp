@@ -29,6 +29,9 @@ FuturePLQueryResult make_future_pl_query_result(
   out.gnss_vpl = pred.vpl;
   out.fused_hpl = pred.hpl;
   out.fused_vpl = pred.vpl;
+  out.hpl_adv = pred.hpl;
+  out.vpl_adv = pred.vpl;
+  out.advisory_fusion_mode = "legacy";
   return out;
 }
 

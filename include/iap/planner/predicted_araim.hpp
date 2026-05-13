@@ -5,6 +5,7 @@
 #include <iap/gnss/gnss_types.hpp>
 #include <iap/gnss/visibility_predictor.hpp>
 #include <iap/map/local_occupancy.hpp>
+#include <iap/planner/advisory_fim_types.hpp>
 #include <Eigen/Core>
 #include <string>
 
@@ -52,6 +53,8 @@ class PredictedAraimComputer {
     Araim::Params             araim_params;   ///< K_fa, K_md, K_ff, etc.
     VisibilityPredictor::Params vis_params;   ///< elevation mask, occ range, canopy
     double fallback_pl = 5.0;  ///< advisory proxy when GNSS epoch unavailable [m]
+    double fim_clock_epsilon = 1.0e-6;  ///< clock Schur regularization [m^-2]
+    double fim_psd_epsilon = 1.0e-9;    ///< PSD tolerance for Lambda_G_pos
   };
 
   PredictedAraimComputer();
@@ -74,6 +77,15 @@ class PredictedAraimComputer {
    * @brief Predict GNSS advisory HPL/VPL proxy and debug fields.
    */
   PredictedAraimResult predict_araim_result(
+      const Eigen::Vector3d& pos_world) const;
+
+  /**
+   * @brief Predict advisory GNSS position-domain FIM at a world-frame point.
+   *
+   * This is for future/planner FIM-add only. It does not alter certified
+   * ARAIM monitor behavior and does not call Araim::compute_core().
+   */
+  GnssAdvisoryFimResult predict_advisory_fim(
       const Eigen::Vector3d& pos_world) const;
 
   const Params& params() const { return params_; }

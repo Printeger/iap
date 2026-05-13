@@ -33,6 +33,11 @@ LidarObservabilityFim::Params lidar_params_from(
   out.tdop_max = params.lidar_tdop_max;
   out.bias_h_m = params.lidar_bias_h_m;
   out.bias_v_m = params.lidar_bias_v_m;
+  out.fim_radius_m = params.lidar_fim_radius_m;
+  out.fim_min_voxels = params.lidar_fim_min_voxels;
+  out.fim_range_sigma_base = params.lidar_fim_range_sigma_base;
+  out.fim_condition_max = params.lidar_fim_condition_max;
+  out.fim_weight_scale = params.lidar_fim_weight_scale;
   return out;
 }
 
@@ -85,6 +90,46 @@ Eigen::Matrix3d gnss_base_information(const FuturePLQueryResult& gnss,
   return lambda;
 }
 
+FimDiagnostic prior_information(const IntegritySnapshot& snapshot) {
+  FimDiagnostic out;
+  if (!snapshot.has_lambda_base || !snapshot.lambda_base_pos.allFinite()) {
+    out.fallback_reason = "missing_prior";
+    fill_fim_diagnostics(out);
+    return out;
+  }
+
+  out.lambda =
+      0.5 * (snapshot.lambda_base_pos + snapshot.lambda_base_pos.transpose());
+  fill_fim_diagnostics(out);
+  if (out.min_eig <= 1.0e-12 || !std::isfinite(out.condition)) {
+    out.lambda.setZero();
+    out.valid = false;
+    out.fallback_reason = "invalid_prior";
+    fill_fim_diagnostics(out);
+    return out;
+  }
+  out.valid = true;
+  out.fallback_reason.clear();
+  return out;
+}
+
+void copy_fim_debug(const FusedAdvisoryFimResult& fim,
+                    FuturePLQueryResult& out) {
+  out.lambda_prior_trace = fim.prior.trace;
+  out.lambda_gnss_trace = fim.gnss.trace;
+  out.lambda_lidar_trace = fim.lidar.trace;
+  out.lambda_adv_trace = fim.trace;
+  out.lambda_adv_min_eig = fim.min_eig;
+  out.lambda_adv_condition = fim.condition;
+  out.hpl_adv = fim.hpl_adv;
+  out.vpl_adv = fim.vpl_adv;
+  out.lidar_fim_valid = fim.lidar.valid;
+  out.gnss_fim_valid = fim.gnss.valid;
+  out.fim_regularized = fim.regularized || fim.prior.regularized ||
+                        fim.gnss.regularized || fim.lidar.regularized;
+  out.advisory_fusion_mode = fim.fusion_mode;
+}
+
 }  // namespace
 
 FuturePLFieldPredictor::FuturePLFieldPredictor()
@@ -105,6 +150,12 @@ void FuturePLFieldPredictor::set_lidar_map_points(
   lidar_map_points_ = std::move(points);
 }
 
+void FuturePLFieldPredictor::set_lidar_fim_primitives(
+    std::shared_ptr<const std::vector<LidarFimPrimitive>> primitives) {
+  std::lock_guard<std::mutex> lock(lidar_map_mutex_);
+  lidar_fim_primitives_ = std::move(primitives);
+}
+
 void FuturePLFieldPredictor::update_snapshot(const IntegritySnapshot& snapshot) {
   std::lock_guard<std::mutex> lock(snapshot_mutex_);
   snapshot_ = snapshot;
@@ -123,11 +174,13 @@ FuturePLQueryResult FuturePLFieldPredictor::evaluate_point_direct(
     snapshot = snapshot_;
   }
   std::shared_ptr<const std::vector<Eigen::Vector3d>> points;
+  std::shared_ptr<const std::vector<LidarFimPrimitive>> primitives;
   {
     std::lock_guard<std::mutex> lock(lidar_map_mutex_);
     points = lidar_map_points_;
+    primitives = lidar_fim_primitives_;
   }
-  auto out = evaluate_point(p_w, snapshot, points, "direct");
+  auto out = evaluate_point(p_w, snapshot, points, primitives, "direct");
   out.grid_generation = -1;
   return out;
 }
@@ -179,16 +232,18 @@ bool FuturePLFieldPredictor::rebuild_grid(const double now_s) {
   }
 
   std::shared_ptr<const std::vector<Eigen::Vector3d>> points;
+  std::shared_ptr<const std::vector<LidarFimPrimitive>> primitives;
   {
     std::lock_guard<std::mutex> lock(lidar_map_mutex_);
     points = lidar_map_points_;
+    primitives = lidar_fim_primitives_;
   }
 
   for (int iz = 0; iz < grid->nz(); ++iz) {
     for (int iy = 0; iy < grid->ny(); ++iy) {
       for (int ix = 0; ix < grid->nx(); ++ix) {
         const Eigen::Vector3d p = grid->position(ix, iy, iz);
-        auto value = evaluate_point(p, snapshot, points, "grid");
+        auto value = evaluate_point(p, snapshot, points, primitives, "grid");
         value.grid_generation = next_generation_;
         grid->at(ix, iy, iz).value = std::move(value);
       }
@@ -204,7 +259,8 @@ bool FuturePLFieldPredictor::rebuild_grid(const double now_s) {
   grid->set_build_time_ms(build_ms);
 
   auto self_grid = grid->interpolate(snapshot.p_wb);
-  auto self_direct = evaluate_point(snapshot.p_wb, snapshot, points, "direct");
+  auto self_direct =
+      evaluate_point(snapshot.p_wb, snapshot, points, primitives, "direct");
   double self_ratio = std::numeric_limits<double>::quiet_NaN();
   if (std::isfinite(self_grid.pl_scalar) &&
       std::isfinite(self_direct.pl_scalar)) {
@@ -249,6 +305,7 @@ FuturePLQueryResult FuturePLFieldPredictor::evaluate_point(
     const Eigen::Vector3d& p_w,
     const IntegritySnapshot& snapshot,
     const std::shared_ptr<const std::vector<Eigen::Vector3d>>& points,
+    const std::shared_ptr<const std::vector<LidarFimPrimitive>>& primitives,
     const std::string& query_source) const {
   PredictedAraimComputer predictor(
       with_fallback(params_.araim_params, params_.araim_params.fallback_pl));
@@ -269,6 +326,108 @@ FuturePLQueryResult FuturePLFieldPredictor::evaluate_point(
   out.lidar_condition = params_.lidar_condition_max;
   out.lidar_fallback_reason =
       params_.use_lidar_observability ? "not_evaluated" : "lidar_disabled";
+
+  if (params_.use_advisory_fim_add) {
+    FusedAdvisoryFimResult fim;
+    fim.fusion_mode = "fim_add";
+    fim.prior = prior_information(snapshot);
+    fim.gnss = predictor.predict_advisory_fim(p_w);
+    fim.lidar.fallback_reason = params_.use_lidar_advisory_fim
+                                     ? "not_evaluated"
+                                     : "lidar_fim_disabled";
+
+    if (params_.use_lidar_advisory_fim) {
+      LidarObservabilityFim estimator(lidar_params_from(params_));
+      fim.lidar =
+          estimator.evaluate_advisory_fim(p_w, primitives.get(), snapshot.current);
+      out.lidar_valid = fim.lidar.valid;
+      out.lidar_fim_valid = fim.lidar.valid;
+      out.lidar_alpha = fim.lidar.valid ? 1.0 : 0.0;
+      out.lidar_n_primitives = fim.lidar.n_primitives;
+      out.lidar_condition = fim.lidar.condition;
+      out.lidar_fallback_reason = fim.lidar.fallback_reason;
+    } else {
+      out.lidar_fallback_reason = "lidar_fim_disabled";
+    }
+
+    if (fim.prior.valid) {
+      fim.lambda += fim.prior.lambda;
+    }
+    if (fim.gnss.valid) {
+      fim.lambda += fim.gnss.lambda;
+    }
+    if (fim.lidar.valid) {
+      fim.lambda += fim.lidar.lambda;
+    }
+    fim.lambda = 0.5 * (fim.lambda + fim.lambda.transpose());
+    fill_fim_diagnostics(fim);
+
+    const double eps =
+        std::isfinite(params_.fim_epsilon) && params_.fim_epsilon > 0.0
+            ? params_.fim_epsilon
+            : 1.0e-6;
+    const Eigen::Matrix3d regularized_lambda =
+        fim.lambda + eps * Eigen::Matrix3d::Identity();
+    Eigen::LDLT<Eigen::Matrix3d> ldlt(regularized_lambda);
+    if (ldlt.info() != Eigen::Success || !ldlt.isPositive()) {
+      fim.valid = false;
+      fim.fallback_reason = "singular_advisory_fim";
+      fim.fusion_mode = "fim_add_fallback";
+      copy_fim_debug(fim, out);
+      keep_gnss_only(out);
+      return out;
+    }
+    fim.sigma_pos = ldlt.solve(Eigen::Matrix3d::Identity());
+    if (!fim.sigma_pos.allFinite()) {
+      fim.valid = false;
+      fim.fallback_reason = "invalid_advisory_covariance";
+      fim.fusion_mode = "fim_add_fallback";
+      copy_fim_debug(fim, out);
+      keep_gnss_only(out);
+      return out;
+    }
+
+    Eigen::SelfAdjointEigenSolver<Eigen::Matrix2d> eig_h(
+        fim.sigma_pos.block<2, 2>(0, 0), Eigen::EigenvaluesOnly);
+    if (eig_h.info() != Eigen::Success || fim.sigma_pos(2, 2) < 0.0) {
+      fim.valid = false;
+      fim.fallback_reason = "invalid_advisory_covariance";
+      fim.fusion_mode = "fim_add_fallback";
+      copy_fim_debug(fim, out);
+      keep_gnss_only(out);
+      return out;
+    }
+
+    fim.regularized = true;
+    fim.valid = true;
+    fim.fallback_reason.clear();
+    const double k_h =
+        std::isfinite(params_.K_H_adv) && params_.K_H_adv > 0.0
+            ? params_.K_H_adv
+            : 5.0;
+    const double k_v =
+        std::isfinite(params_.K_V_adv) && params_.K_V_adv > 0.0
+            ? params_.K_V_adv
+            : 5.0;
+    fim.hpl_adv =
+        k_h * std::sqrt(std::max(0.0, eig_h.eigenvalues().maxCoeff())) +
+        params_.b_H_pred + params_.s_H_pred;
+    fim.vpl_adv = k_v * std::sqrt(std::max(0.0, fim.sigma_pos(2, 2))) +
+                  params_.b_V_pred + params_.s_V_pred;
+
+    out.valid = std::isfinite(fim.hpl_adv) && std::isfinite(fim.vpl_adv);
+    out.fallback = !out.valid;
+    out.fallback_reason = out.valid ? std::string{} : "invalid_advisory_pl";
+    out.hpl = fim.hpl_adv;
+    out.vpl = fim.vpl_adv;
+    out.pl_scalar = std::max(out.hpl, out.vpl);
+    out.fused_hpl = out.hpl;
+    out.fused_vpl = out.vpl;
+    out.sigma_h = std::sqrt(std::max(0.0, eig_h.eigenvalues().maxCoeff()));
+    out.sigma_v = std::sqrt(std::max(0.0, fim.sigma_pos(2, 2)));
+    copy_fim_debug(fim, out);
+    return out;
+  }
 
   if (!params_.use_fused_fim_grid || !out.valid) {
     return out;
@@ -375,6 +534,18 @@ void FuturePLFieldPredictor::record_query(
   } else {
     ++stats_.query_direct_count;
   }
+  if (params_.use_advisory_fim_add) {
+    ++stats_.fim_query_count;
+    if (result.fim_regularized) {
+      ++stats_.fim_regularized_count;
+    }
+    if (result.gnss_fim_valid) {
+      ++stats_.gnss_fim_valid_count;
+    }
+    if (result.lidar_fim_valid) {
+      ++stats_.lidar_fim_valid_count;
+    }
+  }
   if (params_.use_fused_fim_grid || params_.use_lidar_observability) {
     ++stats_.lidar_query_count;
     if (result.lidar_valid) {
@@ -427,7 +598,8 @@ void FuturePLFieldPredictor::refresh_stats_params() {
   stats_.size_y_m = params_.grid_size_y_m;
   stats_.size_z_m = params_.grid_size_z_m;
   stats_.lidar_enabled =
-      params_.use_fused_fim_grid || params_.use_lidar_observability;
+      params_.use_fused_fim_grid || params_.use_lidar_observability ||
+      params_.use_lidar_advisory_fim;
 }
 
 }  // namespace iap

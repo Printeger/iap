@@ -95,6 +95,28 @@ std::shared_ptr<const std::vector<Eigen::Vector3d>> make_lidar_points() {
   return points;
 }
 
+std::shared_ptr<const std::vector<iap::LidarFimPrimitive>>
+make_lidar_primitives() {
+  auto primitives = std::make_shared<std::vector<iap::LidarFimPrimitive>>();
+  for (int i = -4; i <= 4; ++i) {
+    iap::LidarFimPrimitive px;
+    px.center_w = Eigen::Vector3d(0.4 * i, 0.0, 0.0);
+    px.normal_w = Eigen::Vector3d::UnitX();
+    primitives->push_back(px);
+
+    iap::LidarFimPrimitive py;
+    py.center_w = Eigen::Vector3d(0.0, 0.4 * i, 0.0);
+    py.normal_w = Eigen::Vector3d::UnitY();
+    primitives->push_back(py);
+
+    iap::LidarFimPrimitive pz;
+    pz.center_w = Eigen::Vector3d(0.0, 0.0, 0.4 * i);
+    pz.normal_w = Eigen::Vector3d::UnitZ();
+    primitives->push_back(pz);
+  }
+  return primitives;
+}
+
 }  // namespace
 
 TEST(FuturePLFieldPredictorTest, QueryUsesGridInsideCoverage) {
@@ -232,4 +254,53 @@ TEST(FuturePLFieldPredictorTest, MissingLidarMapKeepsOfficialGnssOnlyFinite) {
   const auto stats = predictor.stats();
   EXPECT_EQ(stats.lidar_nonfinite_debug_count, 0);
   EXPECT_EQ(stats.lidar_conservative_violation_count, 0);
+}
+
+TEST(FuturePLFieldPredictorTest, AdvisoryFimRegularizesMissingSources) {
+  auto params = make_params();
+  params.use_grid = false;
+  params.use_advisory_fim_add = true;
+  params.use_lidar_advisory_fim = false;
+  params.fim_epsilon = 1.0e-3;
+
+  iap::FuturePLFieldPredictor predictor(params);
+  predictor.update_snapshot(make_snapshot(false));
+
+  const auto result = predictor.query(Eigen::Vector3d::Zero(), 101.0);
+
+  ASSERT_TRUE(result.valid);
+  EXPECT_TRUE(result.fim_regularized);
+  EXPECT_FALSE(result.gnss_fim_valid);
+  EXPECT_EQ(result.advisory_fusion_mode, "fim_add");
+  EXPECT_TRUE(std::isfinite(result.hpl));
+  EXPECT_TRUE(std::isfinite(result.vpl));
+}
+
+TEST(FuturePLFieldPredictorTest, AdvisoryFimLidarAdditionIsMonotonic) {
+  auto params = make_params();
+  params.use_grid = false;
+  params.use_advisory_fim_add = true;
+  params.use_lidar_advisory_fim = false;
+  params.fim_epsilon = 1.0e-6;
+  params.K_H_adv = 5.0;
+  params.K_V_adv = 5.0;
+
+  iap::FuturePLFieldPredictor gnss_only(params);
+  gnss_only.update_snapshot(make_snapshot(true));
+  const auto without_lidar =
+      gnss_only.query(Eigen::Vector3d::Zero(), 101.0);
+
+  params.use_lidar_advisory_fim = true;
+  params.lidar_fim_min_voxels = 6;
+  iap::FuturePLFieldPredictor fused(params);
+  fused.update_snapshot(make_snapshot(true));
+  fused.set_lidar_fim_primitives(make_lidar_primitives());
+  const auto with_lidar = fused.query(Eigen::Vector3d::Zero(), 101.0);
+
+  ASSERT_TRUE(without_lidar.valid);
+  ASSERT_TRUE(with_lidar.valid);
+  ASSERT_TRUE(with_lidar.lidar_fim_valid);
+  EXPECT_LE(with_lidar.hpl, without_lidar.hpl + 1.0e-9);
+  EXPECT_LE(with_lidar.vpl, without_lidar.vpl + 1.0e-9);
+  EXPECT_GT(with_lidar.lambda_lidar_trace, 0.0);
 }

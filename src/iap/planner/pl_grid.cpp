@@ -187,9 +187,33 @@ FuturePLQueryResult PLGrid::interpolate(const Eigen::Vector3d& p) const {
       interp([](const FuturePLQueryResult& v) { return v.lidar_bias_h; });
   out.lidar_bias_v =
       interp([](const FuturePLQueryResult& v) { return v.lidar_bias_v; });
+  out.lambda_prior_trace =
+      interp([](const FuturePLQueryResult& v) { return v.lambda_prior_trace; });
+  out.lambda_gnss_trace =
+      interp([](const FuturePLQueryResult& v) { return v.lambda_gnss_trace; });
+  out.lambda_lidar_trace =
+      interp([](const FuturePLQueryResult& v) { return v.lambda_lidar_trace; });
+  out.lambda_adv_trace =
+      interp([](const FuturePLQueryResult& v) { return v.lambda_adv_trace; });
+  out.lambda_adv_min_eig =
+      interp([](const FuturePLQueryResult& v) { return v.lambda_adv_min_eig; });
+  out.lambda_adv_condition =
+      interp([](const FuturePLQueryResult& v) { return v.lambda_adv_condition; });
+  out.hpl_adv = interp([](const FuturePLQueryResult& v) { return v.hpl_adv; });
+  out.vpl_adv = interp([](const FuturePLQueryResult& v) { return v.vpl_adv; });
   out.lidar_valid =
       std::all_of(c.begin(), c.end(),
                   [](const auto* value) { return value->lidar_valid; });
+  out.lidar_fim_valid =
+      std::all_of(c.begin(), c.end(),
+                  [](const auto* value) { return value->lidar_fim_valid; });
+  out.gnss_fim_valid =
+      std::all_of(c.begin(), c.end(),
+                  [](const auto* value) { return value->gnss_fim_valid; });
+  out.fim_regularized =
+      std::any_of(c.begin(), c.end(),
+                  [](const auto* value) { return value->fim_regularized; });
+  out.advisory_fusion_mode = c[0]->advisory_fusion_mode;
   out.lidar_fallback_reason =
       out.lidar_valid ? std::string{} : first_lidar_fallback_reason(c);
   out.n_vis = static_cast<int>(std::lround(

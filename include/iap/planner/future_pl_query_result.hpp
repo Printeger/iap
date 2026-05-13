@@ -45,6 +45,19 @@ struct FuturePLQueryResult {
   double lidar_bias_v = 0.0;
   std::string lidar_fallback_reason = "lidar_disabled";
 
+  double lambda_prior_trace = 0.0;
+  double lambda_gnss_trace = 0.0;
+  double lambda_lidar_trace = 0.0;
+  double lambda_adv_trace = 0.0;
+  double lambda_adv_min_eig = 0.0;
+  double lambda_adv_condition = 1.0e12;
+  double hpl_adv = 1e9;
+  double vpl_adv = 1e9;
+  bool lidar_fim_valid = false;
+  bool gnss_fim_valid = false;
+  bool fim_regularized = false;
+  std::string advisory_fusion_mode = "legacy";
+
   Eigen::Vector3d grad_hpl = Eigen::Vector3d::Zero();
   Eigen::Vector3d grad_vpl = Eigen::Vector3d::Zero();
   Eigen::Vector3d grad_pl_scalar = Eigen::Vector3d::Zero();

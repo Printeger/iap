@@ -99,3 +99,27 @@ TEST(PredictedAraimComputerTest, MissingEpochFallbackReason) {
   EXPECT_EQ(result.fallback_reason, "no_gnss_epoch");
   EXPECT_DOUBLE_EQ(result.hpl, 44.0);
 }
+
+TEST(PredictedAraimComputerTest, AdvisoryFimUsesClockSchurComplement) {
+  const auto base = make_predictor();
+  auto params = base.params();
+  params.fim_clock_epsilon = 1.0e-6;
+  iap::PredictedAraimComputer predictor(params);
+  iap::GnssEpoch epoch = make_epoch(8);
+  predictor.set_epoch(&epoch);
+
+  const auto result = predictor.predict_advisory_fim(Eigen::Vector3d::Zero());
+
+  ASSERT_TRUE(result.valid);
+  ASSERT_EQ(result.n_used, 8);
+  const Eigen::Matrix3d h_pp = result.h_full.block<3, 3>(0, 0);
+  const Eigen::Matrix<double, 3, 1> h_pc = result.h_full.block<3, 1>(0, 3);
+  const Eigen::Matrix<double, 1, 3> h_cp = result.h_full.block<1, 3>(3, 0);
+  const double h_cc = result.h_full(3, 3);
+  const Eigen::Matrix3d expected =
+      h_pp - (h_pc * h_cp) / (h_cc + params.fim_clock_epsilon);
+
+  EXPECT_NEAR((result.lambda - expected).norm(), 0.0, 1.0e-10);
+  EXPECT_GT(result.trace, 0.0);
+  EXPECT_GE(result.min_eig, -1.0e-9);
+}

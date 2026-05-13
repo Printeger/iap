@@ -26,6 +26,15 @@ iap::FuturePLQueryResult make_value(const Eigen::Vector3d& p) {
   value.pdop = 3.0 + p.z();
   value.n_vis = 8;
   value.n_hypotheses = 8;
+  value.lambda_adv_trace = 4.0 + p.x();
+  value.lambda_adv_min_eig = 0.5 + p.y();
+  value.lambda_adv_condition = 10.0 + p.z();
+  value.hpl_adv = value.hpl;
+  value.vpl_adv = value.vpl;
+  value.gnss_fim_valid = true;
+  value.lidar_fim_valid = true;
+  value.fim_regularized = false;
+  value.advisory_fusion_mode = "fim_add";
   return value;
 }
 
@@ -115,4 +124,24 @@ TEST(PLGridTest, MixedLidarCornersPreserveExplicitFallbackReason) {
   ASSERT_TRUE(result.valid);
   EXPECT_FALSE(result.lidar_valid);
   EXPECT_EQ(result.lidar_fallback_reason, "too_few_points");
+}
+
+TEST(PLGridTest, InterpolatesFimDiagnostics) {
+  iap::PLGrid grid;
+  ASSERT_TRUE(grid.reset(Eigen::Vector3d::Zero(), 2.0, 2.0, 2.0, 1.0));
+  fill_grid(&grid);
+  grid.at(1, 1, 1).value.fim_regularized = true;
+  grid.at(1, 1, 1).value.lidar_fim_valid = false;
+
+  const Eigen::Vector3d p(0.25, 0.0, -0.25);
+  const auto result = grid.interpolate(p);
+
+  ASSERT_TRUE(result.valid);
+  EXPECT_NEAR(result.lambda_adv_trace, 4.0 + p.x(), 1.0e-9);
+  EXPECT_NEAR(result.lambda_adv_min_eig, 0.5 + p.y(), 1.0e-9);
+  EXPECT_NEAR(result.lambda_adv_condition, 10.0 + p.z(), 1.0e-9);
+  EXPECT_TRUE(result.gnss_fim_valid);
+  EXPECT_FALSE(result.lidar_fim_valid);
+  EXPECT_TRUE(result.fim_regularized);
+  EXPECT_EQ(result.advisory_fusion_mode, "fim_add");
 }

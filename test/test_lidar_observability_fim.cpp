@@ -153,3 +153,52 @@ TEST(LidarObservabilityFimTest, InvalidParamsFallbackIsFinite) {
   EXPECT_TRUE(std::isfinite(result.tdop_proxy));
   EXPECT_TRUE(std::isfinite(result.condition));
 }
+
+TEST(LidarObservabilityFimTest, AdvisoryFimReflectsNormalAnisotropy) {
+  iap::LidarObservabilityFim::Params params;
+  params.fim_radius_m = 10.0;
+  params.fim_min_voxels = 6;
+  params.fim_range_sigma_base = 1.0;
+  params.fim_condition_max = 1.0e8;
+  params.fim_weight_scale = 1.0;
+  iap::LidarObservabilityFim estimator(params);
+
+  std::vector<iap::LidarFimPrimitive> primitives;
+  for (int i = 0; i < 24; ++i) {
+    iap::LidarFimPrimitive p;
+    p.center_w = Eigen::Vector3d(0.1 * i, 0.0, 0.0);
+    p.normal_w = Eigen::Vector3d::UnitX();
+    primitives.push_back(p);
+  }
+  for (int i = 0; i < 8; ++i) {
+    iap::LidarFimPrimitive p;
+    p.center_w = Eigen::Vector3d(0.0, 0.1 * i, 0.0);
+    p.normal_w = Eigen::Vector3d::UnitY();
+    primitives.push_back(p);
+  }
+  for (int i = 0; i < 8; ++i) {
+    iap::LidarFimPrimitive p;
+    p.center_w = Eigen::Vector3d(0.0, 0.0, 0.1 * i);
+    p.normal_w = Eigen::Vector3d::UnitZ();
+    primitives.push_back(p);
+  }
+
+  const auto result = estimator.evaluate_advisory_fim(
+      Eigen::Vector3d::Zero(), &primitives, make_current());
+
+  ASSERT_TRUE(result.valid);
+  EXPECT_GT(result.lambda(0, 0), result.lambda(1, 1));
+  EXPECT_GT(result.lambda(0, 0), result.lambda(2, 2));
+  EXPECT_GT(result.trace, 0.0);
+  EXPECT_EQ(result.n_valid_normals, static_cast<int>(primitives.size()));
+}
+
+TEST(LidarObservabilityFimTest, AdvisoryFimRequiresNormals) {
+  iap::LidarObservabilityFim estimator;
+  const auto result = estimator.evaluate_advisory_fim(
+      Eigen::Vector3d::Zero(), nullptr, make_current());
+
+  EXPECT_FALSE(result.valid);
+  EXPECT_EQ(result.fallback_reason, "missing_lidar_normals");
+  EXPECT_DOUBLE_EQ(result.lambda.trace(), 0.0);
+}

@@ -32,6 +32,20 @@ class FuturePLFieldPredictor {
 
     bool use_fused_fim_grid = false;
     bool use_lidar_observability = false;
+    bool use_advisory_fim_add = false;
+    bool use_lidar_advisory_fim = false;
+    double fim_epsilon = 1.0e-6;
+    double lidar_fim_radius_m = 8.0;
+    int lidar_fim_min_voxels = 6;
+    double lidar_fim_range_sigma_base = 0.5;
+    double lidar_fim_condition_max = 1.0e6;
+    double lidar_fim_weight_scale = 1.0;
+    double K_H_adv = 5.0;
+    double K_V_adv = 5.0;
+    double b_H_pred = 0.0;
+    double b_V_pred = 0.0;
+    double s_H_pred = 0.0;
+    double s_V_pred = 0.0;
     double lidar_search_radius_m = 8.0;
     int lidar_min_points = 12;
     int lidar_good_points = 80;
@@ -78,6 +92,10 @@ class FuturePLFieldPredictor {
     double max_lidar_alpha = std::numeric_limits<double>::quiet_NaN();
     double mean_lidar_tdop = std::numeric_limits<double>::quiet_NaN();
     double mean_lidar_condition = std::numeric_limits<double>::quiet_NaN();
+    int fim_query_count = 0;
+    int fim_regularized_count = 0;
+    int gnss_fim_valid_count = 0;
+    int lidar_fim_valid_count = 0;
     std::map<std::string, int> lidar_fallback_reason_histogram;
   };
 
@@ -87,6 +105,8 @@ class FuturePLFieldPredictor {
   void set_occupancy(const LocalOccupancyGrid* grid);
   void set_lidar_map_points(
       std::shared_ptr<const std::vector<Eigen::Vector3d>> points);
+  void set_lidar_fim_primitives(
+      std::shared_ptr<const std::vector<LidarFimPrimitive>> primitives);
   void update_snapshot(const IntegritySnapshot& snapshot);
   void set_params(const Params& params);
 
@@ -105,6 +125,7 @@ class FuturePLFieldPredictor {
       const Eigen::Vector3d& p_w,
       const IntegritySnapshot& snapshot,
       const std::shared_ptr<const std::vector<Eigen::Vector3d>>& points,
+      const std::shared_ptr<const std::vector<LidarFimPrimitive>>& primitives,
       const std::string& query_source) const;
   void record_query(const FuturePLQueryResult& result) const;
   void refresh_stats_params();
@@ -120,6 +141,7 @@ class FuturePLFieldPredictor {
 
   mutable std::mutex lidar_map_mutex_;
   std::shared_ptr<const std::vector<Eigen::Vector3d>> lidar_map_points_;
+  std::shared_ptr<const std::vector<LidarFimPrimitive>> lidar_fim_primitives_;
 
   mutable std::mutex stats_mutex_;
   mutable GridStats stats_;

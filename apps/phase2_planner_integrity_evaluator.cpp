@@ -1,4 +1,5 @@
 #include <Eigen/Core>
+#include <Eigen/Eigenvalues>
 #include <Eigen/Geometry>
 
 #include <algorithm>
@@ -115,6 +116,18 @@ const std::vector<std::string> kCsvFields = {
     "lidar_bias_h",
     "lidar_bias_v",
     "lidar_fallback_reason",
+    "lambda_prior_trace",
+    "lambda_gnss_trace",
+    "lambda_lidar_trace",
+    "lambda_adv_trace",
+    "lambda_adv_min_eig",
+    "lambda_adv_condition",
+    "hpl_adv",
+    "vpl_adv",
+    "lidar_fim_valid",
+    "gnss_fim_valid",
+    "fim_regularized",
+    "advisory_fusion_mode",
     "IM_H_pred",
     "IM_V_pred",
     "IM_pred_axis_min",
@@ -240,6 +253,18 @@ const std::vector<std::string> kGridVoxelCsvFields = {
     "lidar_condition",
     "lidar_n_primitives",
     "lidar_fallback_reason",
+    "lambda_prior_trace",
+    "lambda_gnss_trace",
+    "lambda_lidar_trace",
+    "lambda_adv_trace",
+    "lambda_adv_min_eig",
+    "lambda_adv_condition",
+    "hpl_adv",
+    "vpl_adv",
+    "lidar_fim_valid",
+    "gnss_fim_valid",
+    "fim_regularized",
+    "advisory_fusion_mode",
 };
 
   const std::vector<std::string> kActualExecCsvFields = {
@@ -298,6 +323,94 @@ std::string csv_escape(const std::string& value) {
 
 std::string bool_str(const bool value) {
   return value ? "true" : "false";
+}
+
+std::shared_ptr<const std::vector<iap::LidarFimPrimitive>>
+make_lidar_fim_primitives(
+    const std::vector<Eigen::Vector3d>& points,
+    const std::vector<Eigen::Vector3d>* normals = nullptr) {
+  auto primitives = std::make_shared<std::vector<iap::LidarFimPrimitive>>();
+  if (points.empty()) {
+    return primitives;
+  }
+
+  primitives->reserve(points.size());
+  if (normals != nullptr && normals->size() == points.size()) {
+    for (std::size_t i = 0; i < points.size(); ++i) {
+      if (!points[i].allFinite() || !(*normals)[i].allFinite()) {
+        continue;
+      }
+      const double norm = (*normals)[i].norm();
+      if (!std::isfinite(norm) || norm <= 1.0e-9) {
+        continue;
+      }
+      iap::LidarFimPrimitive primitive;
+      primitive.center_w = points[i];
+      primitive.normal_w = (*normals)[i] / norm;
+      primitive.weight = 1.0;
+      primitive.normal_confidence = 1.0;
+      primitive.support_count = 1;
+      primitives->push_back(primitive);
+    }
+    return primitives;
+  }
+
+  constexpr std::size_t kMaxPcaPoints = 2000;
+  constexpr double kRadius = 1.5;
+  constexpr double kRadius2 = kRadius * kRadius;
+  constexpr int kMinSupport = 6;
+  const std::size_t stride =
+      std::max<std::size_t>(1, (points.size() + kMaxPcaPoints - 1) / kMaxPcaPoints);
+  for (std::size_t i = 0; i < points.size(); i += stride) {
+    if (!points[i].allFinite()) {
+      continue;
+    }
+    Eigen::Vector3d mean = Eigen::Vector3d::Zero();
+    int support = 0;
+    for (const auto& q : points) {
+      if (!q.allFinite()) {
+        continue;
+      }
+      const double d2 = (q - points[i]).squaredNorm();
+      if (std::isfinite(d2) && d2 <= kRadius2) {
+        mean += q;
+        ++support;
+      }
+    }
+    if (support < kMinSupport) {
+      continue;
+    }
+    mean /= static_cast<double>(support);
+    Eigen::Matrix3d cov = Eigen::Matrix3d::Zero();
+    for (const auto& q : points) {
+      const double d2 = (q - points[i]).squaredNorm();
+      if (std::isfinite(d2) && d2 <= kRadius2) {
+        const Eigen::Vector3d centered = q - mean;
+        cov += centered * centered.transpose();
+      }
+    }
+    cov /= static_cast<double>(support);
+    Eigen::SelfAdjointEigenSolver<Eigen::Matrix3d> eig(cov);
+    if (eig.info() != Eigen::Success) {
+      continue;
+    }
+    const Eigen::Vector3d evals = eig.eigenvalues();
+    if (!evals.allFinite() || evals(2) <= 1.0e-12) {
+      continue;
+    }
+    iap::LidarFimPrimitive primitive;
+    primitive.center_w = points[i];
+    primitive.normal_w = eig.eigenvectors().col(0).normalized();
+    primitive.weight = 1.0;
+    primitive.normal_confidence =
+        std::clamp((evals(1) - evals(0)) / std::max(evals(2), 1.0e-12),
+                   0.0, 1.0);
+    primitive.support_count = support;
+    if (primitive.normal_confidence > 0.05) {
+      primitives->push_back(primitive);
+    }
+  }
+  return primitives;
 }
 
 std::optional<std::string> read_command_output(const std::string& command) {
@@ -525,6 +638,18 @@ struct PlFields {
   double lidar_bias_h = std::numeric_limits<double>::quiet_NaN();
   double lidar_bias_v = std::numeric_limits<double>::quiet_NaN();
   std::string lidar_fallback_reason = "lidar_disabled";
+  double lambda_prior_trace = std::numeric_limits<double>::quiet_NaN();
+  double lambda_gnss_trace = std::numeric_limits<double>::quiet_NaN();
+  double lambda_lidar_trace = std::numeric_limits<double>::quiet_NaN();
+  double lambda_adv_trace = std::numeric_limits<double>::quiet_NaN();
+  double lambda_adv_min_eig = std::numeric_limits<double>::quiet_NaN();
+  double lambda_adv_condition = std::numeric_limits<double>::quiet_NaN();
+  double hpl_adv = std::numeric_limits<double>::quiet_NaN();
+  double vpl_adv = std::numeric_limits<double>::quiet_NaN();
+  bool lidar_fim_valid = false;
+  bool gnss_fim_valid = false;
+  bool fim_regularized = false;
+  std::string advisory_fusion_mode = "legacy";
 };
 
 using Row = std::map<std::string, std::string>;
@@ -623,6 +748,20 @@ class Phase2PlannerIntegrityEvaluator : public rclcpp::Node {
     declare_parameter<double>("pl_grid_update_hz", 2.0);
     declare_parameter<bool>("export_pl_grid_voxels", false);
     declare_parameter<bool>("use_lidar_observability", false);
+    declare_parameter<bool>("use_advisory_fim_add", false);
+    declare_parameter<bool>("use_lidar_advisory_fim", false);
+    declare_parameter<double>("fim_epsilon", 1.0e-6);
+    declare_parameter<double>("lidar_fim_radius_m", 8.0);
+    declare_parameter<int>("lidar_fim_min_voxels", 6);
+    declare_parameter<double>("lidar_fim_range_sigma_base", 0.5);
+    declare_parameter<double>("lidar_fim_condition_max", 1.0e6);
+    declare_parameter<double>("lidar_fim_weight_scale", 1.0);
+    declare_parameter<double>("K_H_adv", 5.0);
+    declare_parameter<double>("K_V_adv", 5.0);
+    declare_parameter<double>("b_H_pred", 0.0);
+    declare_parameter<double>("b_V_pred", 0.0);
+    declare_parameter<double>("s_H_pred", 0.0);
+    declare_parameter<double>("s_V_pred", 0.0);
     declare_parameter<double>("lidar_search_radius_m", 8.0);
     declare_parameter<int>("lidar_min_points", 12);
     declare_parameter<int>("lidar_good_points", 80);
@@ -708,10 +847,35 @@ class Phase2PlannerIntegrityEvaluator : public rclcpp::Node {
         get_parameter("export_pl_grid_voxels").as_bool();
     use_lidar_observability_ =
         get_parameter("use_lidar_observability").as_bool();
+    use_advisory_fim_add_ =
+        get_parameter("use_advisory_fim_add").as_bool();
+    use_lidar_advisory_fim_ =
+        get_parameter("use_lidar_advisory_fim").as_bool();
     field_predictor_params_.use_fused_fim_grid =
         pl_model_ == "fused_fim_grid";
     field_predictor_params_.use_lidar_observability =
         use_lidar_observability_;
+    field_predictor_params_.use_advisory_fim_add = use_advisory_fim_add_;
+    field_predictor_params_.use_lidar_advisory_fim =
+        use_lidar_advisory_fim_;
+    field_predictor_params_.fim_epsilon =
+        get_parameter("fim_epsilon").as_double();
+    field_predictor_params_.lidar_fim_radius_m =
+        get_parameter("lidar_fim_radius_m").as_double();
+    field_predictor_params_.lidar_fim_min_voxels =
+        get_parameter("lidar_fim_min_voxels").as_int();
+    field_predictor_params_.lidar_fim_range_sigma_base =
+        get_parameter("lidar_fim_range_sigma_base").as_double();
+    field_predictor_params_.lidar_fim_condition_max =
+        get_parameter("lidar_fim_condition_max").as_double();
+    field_predictor_params_.lidar_fim_weight_scale =
+        get_parameter("lidar_fim_weight_scale").as_double();
+    field_predictor_params_.K_H_adv = get_parameter("K_H_adv").as_double();
+    field_predictor_params_.K_V_adv = get_parameter("K_V_adv").as_double();
+    field_predictor_params_.b_H_pred = get_parameter("b_H_pred").as_double();
+    field_predictor_params_.b_V_pred = get_parameter("b_V_pred").as_double();
+    field_predictor_params_.s_H_pred = get_parameter("s_H_pred").as_double();
+    field_predictor_params_.s_V_pred = get_parameter("s_V_pred").as_double();
     field_predictor_params_.lidar_search_radius_m =
         get_parameter("lidar_search_radius_m").as_double();
     field_predictor_params_.lidar_min_points =
@@ -1174,32 +1338,63 @@ class Phase2PlannerIntegrityEvaluator : public rclcpp::Node {
   void on_cloud(const sensor_msgs::msg::PointCloud2& msg) {
     latest_cloud_stamp_ = stamp_to_sec(msg.header.stamp);
     auto points = std::make_shared<std::vector<Eigen::Vector3d>>();
+    auto normals = std::make_shared<std::vector<Eigen::Vector3d>>();
+    bool parsed_normals = false;
     try {
       sensor_msgs::PointCloud2ConstIterator<float> iter_x(msg, "x");
       sensor_msgs::PointCloud2ConstIterator<float> iter_y(msg, "y");
       sensor_msgs::PointCloud2ConstIterator<float> iter_z(msg, "z");
-      for (; iter_x != iter_x.end(); ++iter_x, ++iter_y, ++iter_z) {
+      sensor_msgs::PointCloud2ConstIterator<float> iter_nx(msg, "normal_x");
+      sensor_msgs::PointCloud2ConstIterator<float> iter_ny(msg, "normal_y");
+      sensor_msgs::PointCloud2ConstIterator<float> iter_nz(msg, "normal_z");
+      for (; iter_x != iter_x.end();
+           ++iter_x, ++iter_y, ++iter_z, ++iter_nx, ++iter_ny, ++iter_nz) {
         const Eigen::Vector3d p(*iter_x, *iter_y, *iter_z);
-        if (p.allFinite()) {
+        const Eigen::Vector3d n(*iter_nx, *iter_ny, *iter_nz);
+        if (p.allFinite() && n.allFinite()) {
           points->push_back(p);
+          normals->push_back(n);
         }
       }
-    } catch (const std::exception& e) {
-      latest_cloud_points_.clear();
-      {
-        std::lock_guard<std::mutex> lock(occupancy_mutex_);
-        occupancy_.reset();
+      parsed_normals = normals->size() == points->size() && !normals->empty();
+    } catch (const std::exception&) {
+      points->clear();
+      normals->clear();
+      try {
+        sensor_msgs::PointCloud2ConstIterator<float> iter_x(msg, "x");
+        sensor_msgs::PointCloud2ConstIterator<float> iter_y(msg, "y");
+        sensor_msgs::PointCloud2ConstIterator<float> iter_z(msg, "z");
+        for (; iter_x != iter_x.end(); ++iter_x, ++iter_y, ++iter_z) {
+          const Eigen::Vector3d p(*iter_x, *iter_y, *iter_z);
+          if (p.allFinite()) {
+            points->push_back(p);
+          }
+        }
+      } catch (const std::exception& parse_xyz_error) {
+        latest_cloud_points_.clear();
+        {
+          std::lock_guard<std::mutex> lock(occupancy_mutex_);
+          occupancy_.reset();
+        }
+        field_predictor_.set_lidar_map_points(nullptr);
+        field_predictor_.set_lidar_fim_primitives(nullptr);
+        warn_once(std::string("failed to parse map cloud ") + map_topic_ +
+                  ": " + parse_xyz_error.what());
+        return;
       }
-      field_predictor_.set_lidar_map_points(nullptr);
-      warn_once(std::string("failed to parse map cloud ") + map_topic_ + ": " + e.what());
-      return;
     }
     latest_cloud_points_ = *points;
     auto predictor_points = points;
+    std::shared_ptr<std::vector<Eigen::Vector3d>> predictor_normals =
+        parsed_normals ? normals : nullptr;
     if (lidar_map_max_points_ > 0 &&
         static_cast<int>(points->size()) > lidar_map_max_points_) {
       predictor_points = std::make_shared<std::vector<Eigen::Vector3d>>();
       predictor_points->reserve(lidar_map_max_points_);
+      if (parsed_normals) {
+        predictor_normals = std::make_shared<std::vector<Eigen::Vector3d>>();
+        predictor_normals->reserve(lidar_map_max_points_);
+      }
       const double stride =
           static_cast<double>(points->size()) /
           static_cast<double>(lidar_map_max_points_);
@@ -1207,6 +1402,9 @@ class Phase2PlannerIntegrityEvaluator : public rclcpp::Node {
         const std::size_t idx = std::min<std::size_t>(
             points->size() - 1, static_cast<std::size_t>(std::floor(i * stride)));
         predictor_points->push_back((*points)[idx]);
+        if (parsed_normals) {
+          predictor_normals->push_back((*normals)[idx]);
+        }
       }
     }
     {
@@ -1215,6 +1413,8 @@ class Phase2PlannerIntegrityEvaluator : public rclcpp::Node {
       occupancy_.insert_points(latest_cloud_points_);
     }
     field_predictor_.set_lidar_map_points(predictor_points);
+    field_predictor_.set_lidar_fim_primitives(
+        make_lidar_fim_primitives(*predictor_points, predictor_normals.get()));
   }
 
   void on_range_meas(const gnss_comm::msg::GnssMeasMsg::ConstSharedPtr& msg) {
@@ -1380,12 +1580,15 @@ class Phase2PlannerIntegrityEvaluator : public rclcpp::Node {
       out.gnss_vpl = out.vpl;
       out.fused_hpl = out.hpl;
       out.fused_vpl = out.vpl;
+      out.hpl_adv = out.hpl;
+      out.vpl_adv = out.vpl;
+      out.advisory_fusion_mode = "legacy";
       return out;
     }
 
     const bool use_field_predictor =
         use_pl_grid_ || pl_model_ == "fused_fim_grid" ||
-        use_lidar_observability_;
+        use_lidar_observability_ || use_advisory_fim_add_;
     if (use_field_predictor) {
       const iap::FuturePLQueryResult query =
           field_predictor_.query(pos, now().seconds());
@@ -1414,6 +1617,18 @@ class Phase2PlannerIntegrityEvaluator : public rclcpp::Node {
       out.lidar_bias_h = query.lidar_bias_h;
       out.lidar_bias_v = query.lidar_bias_v;
       out.lidar_fallback_reason = query.lidar_fallback_reason;
+      out.lambda_prior_trace = query.lambda_prior_trace;
+      out.lambda_gnss_trace = query.lambda_gnss_trace;
+      out.lambda_lidar_trace = query.lambda_lidar_trace;
+      out.lambda_adv_trace = query.lambda_adv_trace;
+      out.lambda_adv_min_eig = query.lambda_adv_min_eig;
+      out.lambda_adv_condition = query.lambda_adv_condition;
+      out.hpl_adv = query.hpl_adv;
+      out.vpl_adv = query.vpl_adv;
+      out.lidar_fim_valid = query.lidar_fim_valid;
+      out.gnss_fim_valid = query.gnss_fim_valid;
+      out.fim_regularized = query.fim_regularized;
+      out.advisory_fusion_mode = query.advisory_fusion_mode;
       if (query.valid) {
         out.hpl = query.hpl;
         out.vpl = query.vpl;
@@ -1437,6 +1652,9 @@ class Phase2PlannerIntegrityEvaluator : public rclcpp::Node {
       out.gnss_vpl = pred.vpl;
       out.fused_hpl = pred.hpl;
       out.fused_vpl = pred.vpl;
+      out.hpl_adv = pred.hpl;
+      out.vpl_adv = pred.vpl;
+      out.advisory_fusion_mode = "legacy";
 
       if (pred.valid) {
         out.hpl = pred.hpl;
@@ -1649,6 +1867,18 @@ class Phase2PlannerIntegrityEvaluator : public rclcpp::Node {
     row["lidar_bias_h"] = fmt_num(pl.lidar_bias_h);
     row["lidar_bias_v"] = fmt_num(pl.lidar_bias_v);
     row["lidar_fallback_reason"] = pl.lidar_fallback_reason;
+    row["lambda_prior_trace"] = fmt_num(pl.lambda_prior_trace);
+    row["lambda_gnss_trace"] = fmt_num(pl.lambda_gnss_trace);
+    row["lambda_lidar_trace"] = fmt_num(pl.lambda_lidar_trace);
+    row["lambda_adv_trace"] = fmt_num(pl.lambda_adv_trace);
+    row["lambda_adv_min_eig"] = fmt_num(pl.lambda_adv_min_eig);
+    row["lambda_adv_condition"] = fmt_num(pl.lambda_adv_condition);
+    row["hpl_adv"] = fmt_num(pl.hpl_adv);
+    row["vpl_adv"] = fmt_num(pl.vpl_adv);
+    row["lidar_fim_valid"] = bool_str(pl.lidar_fim_valid);
+    row["gnss_fim_valid"] = bool_str(pl.gnss_fim_valid);
+    row["fim_regularized"] = bool_str(pl.fim_regularized);
+    row["advisory_fusion_mode"] = pl.advisory_fusion_mode;
     row["IM_H_pred"] = fmt_num(im_h);
     row["IM_V_pred"] = fmt_num(im_v);
     row["IM_pred_axis_min"] = fmt_num(im_axis_min);
@@ -2035,6 +2265,18 @@ class Phase2PlannerIntegrityEvaluator : public rclcpp::Node {
                   ? std::to_string(value.lidar_n_primitives)
                   : "nan";
           row["lidar_fallback_reason"] = value.lidar_fallback_reason;
+          row["lambda_prior_trace"] = fmt_num(value.lambda_prior_trace);
+          row["lambda_gnss_trace"] = fmt_num(value.lambda_gnss_trace);
+          row["lambda_lidar_trace"] = fmt_num(value.lambda_lidar_trace);
+          row["lambda_adv_trace"] = fmt_num(value.lambda_adv_trace);
+          row["lambda_adv_min_eig"] = fmt_num(value.lambda_adv_min_eig);
+          row["lambda_adv_condition"] = fmt_num(value.lambda_adv_condition);
+          row["hpl_adv"] = fmt_num(value.hpl_adv);
+          row["vpl_adv"] = fmt_num(value.vpl_adv);
+          row["lidar_fim_valid"] = bool_str(value.lidar_fim_valid);
+          row["gnss_fim_valid"] = bool_str(value.gnss_fim_valid);
+          row["fim_regularized"] = bool_str(value.fim_regularized);
+          row["advisory_fusion_mode"] = value.advisory_fusion_mode;
 
           for (std::size_t i = 0; i < kGridVoxelCsvFields.size(); ++i) {
             if (i) {
@@ -2216,6 +2458,8 @@ class Phase2PlannerIntegrityEvaluator : public rclcpp::Node {
       {"phase2_pl_model", pl_model_},
       {"phase2_use_pl_grid", use_pl_grid_},
       {"phase2_use_lidar_observability", use_lidar_observability_},
+      {"phase2_use_advisory_fim_add", use_advisory_fim_add_},
+      {"phase2_use_lidar_advisory_fim", use_lidar_advisory_fim_},
       {"planner_use_integrity_cost", planner_use_integrity_cost_},
       {"gnss_scenario_file", gnss_scenario_file_},
       {"map_source", map_source_},
@@ -2253,6 +2497,23 @@ class Phase2PlannerIntegrityEvaluator : public rclcpp::Node {
       {"phase2_lidar_info_scale", field_predictor_params_.lidar_info_scale},
       {"phase2_lidar_alpha_min", field_predictor_params_.lidar_alpha_min},
       {"phase2_lidar_alpha_max", field_predictor_params_.lidar_alpha_max},
+      {"phase2_fim_epsilon", field_predictor_params_.fim_epsilon},
+      {"phase2_lidar_fim_radius_m",
+       field_predictor_params_.lidar_fim_radius_m},
+      {"phase2_lidar_fim_min_voxels",
+       field_predictor_params_.lidar_fim_min_voxels},
+      {"phase2_lidar_fim_range_sigma_base",
+       field_predictor_params_.lidar_fim_range_sigma_base},
+      {"phase2_lidar_fim_condition_max",
+       field_predictor_params_.lidar_fim_condition_max},
+      {"phase2_lidar_fim_weight_scale",
+       field_predictor_params_.lidar_fim_weight_scale},
+      {"phase2_K_H_adv", field_predictor_params_.K_H_adv},
+      {"phase2_K_V_adv", field_predictor_params_.K_V_adv},
+      {"phase2_b_H_pred", field_predictor_params_.b_H_pred},
+      {"phase2_b_V_pred", field_predictor_params_.b_V_pred},
+      {"phase2_s_H_pred", field_predictor_params_.s_H_pred},
+      {"phase2_s_V_pred", field_predictor_params_.s_V_pred},
     };
     summary["fallback_count"] = fallback_count_;
     summary["fallback_rate"] = fallback_rate;
@@ -2362,6 +2623,24 @@ class Phase2PlannerIntegrityEvaluator : public rclcpp::Node {
         {"conservative_fusion_violation_count",
          grid_stats.lidar_conservative_violation_count},
         {"nonfinite_debug_count", grid_stats.lidar_nonfinite_debug_count},
+    };
+    summary["advisory_fim"] = {
+        {"enabled", use_advisory_fim_add_},
+        {"use_lidar_advisory_fim", use_lidar_advisory_fim_},
+        {"fusion_mode", use_advisory_fim_add_ ? "fim_add" : "legacy"},
+        {"query_count", grid_stats.fim_query_count},
+        {"regularized_count", grid_stats.fim_regularized_count},
+        {"gnss_fim_valid_count", grid_stats.gnss_fim_valid_count},
+        {"lidar_fim_valid_count", grid_stats.lidar_fim_valid_count},
+        {"fim_epsilon", field_predictor_params_.fim_epsilon},
+        {"lidar_fim_radius_m", field_predictor_params_.lidar_fim_radius_m},
+        {"lidar_fim_min_voxels", field_predictor_params_.lidar_fim_min_voxels},
+        {"lidar_fim_range_sigma_base",
+         field_predictor_params_.lidar_fim_range_sigma_base},
+        {"lidar_fim_condition_max",
+         field_predictor_params_.lidar_fim_condition_max},
+        {"lidar_fim_weight_scale",
+         field_predictor_params_.lidar_fim_weight_scale},
     };
     summary["phase_h_lite"] = {
         {"grid_update_timing", grid_stats.enabled ? "available"
@@ -3157,6 +3436,8 @@ class Phase2PlannerIntegrityEvaluator : public rclcpp::Node {
   bool use_pl_grid_ = false;
   bool export_pl_grid_voxels_ = false;
   bool use_lidar_observability_ = false;
+  bool use_advisory_fim_add_ = false;
+  bool use_lidar_advisory_fim_ = false;
   double pl_grid_update_hz_ = 2.0;
   int lidar_map_max_points_ = 2500;
   double drone_radius_ = 0.35;

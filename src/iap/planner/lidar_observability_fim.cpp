@@ -158,4 +158,103 @@ LidarObservabilityResult LidarObservabilityFim::evaluate(
   return out;
 }
 
+LidarAdvisoryFimResult LidarObservabilityFim::evaluate_advisory_fim(
+    const Eigen::Vector3d& p_w,
+    const std::vector<LidarFimPrimitive>* primitives,
+    const CurrentIntegrityState& current) const {
+  (void)current;
+  LidarAdvisoryFimResult out;
+
+  auto fallback = [&](const char* reason) {
+    out.valid = false;
+    out.fallback_reason = reason;
+    out.lambda.setZero();
+    fill_fim_diagnostics(out);
+    return out;
+  };
+
+  if (!p_w.allFinite()) {
+    return fallback("invalid_position");
+  }
+  if (primitives == nullptr || primitives->empty()) {
+    return fallback("missing_lidar_normals");
+  }
+  const double radius =
+      std::isfinite(params_.fim_radius_m) && params_.fim_radius_m > 0.0
+          ? params_.fim_radius_m
+          : params_.search_radius_m;
+  const double sigma =
+      std::isfinite(params_.fim_range_sigma_base) &&
+              params_.fim_range_sigma_base > 0.0
+          ? params_.fim_range_sigma_base
+          : params_.sigma_lidar_m;
+  const double weight_scale =
+      std::isfinite(params_.fim_weight_scale) && params_.fim_weight_scale > 0.0
+          ? params_.fim_weight_scale
+          : 1.0;
+  const int min_voxels = std::max(1, params_.fim_min_voxels);
+  if (radius <= 0.0 || sigma <= 0.0) {
+    return fallback("invalid_lidar_fim_params");
+  }
+
+  const double radius2 = radius * radius;
+  const double inv_sigma2 = 1.0 / (sigma * sigma);
+  int nearby = 0;
+  int valid_normals = 0;
+  for (const auto& primitive : *primitives) {
+    if (!primitive.center_w.allFinite() || !primitive.normal_w.allFinite()) {
+      continue;
+    }
+    const Eigen::Vector3d d = primitive.center_w - p_w;
+    const double dist2 = d.squaredNorm();
+    if (!std::isfinite(dist2) || dist2 > radius2) {
+      continue;
+    }
+    ++nearby;
+    const double normal_norm = primitive.normal_w.norm();
+    if (!std::isfinite(normal_norm) || normal_norm <= 1.0e-9) {
+      continue;
+    }
+    const Eigen::Vector3d n = primitive.normal_w / normal_norm;
+    const double confidence = std::clamp(
+        std::isfinite(primitive.normal_confidence)
+            ? primitive.normal_confidence
+            : 1.0,
+        0.0, 1.0);
+    const double primitive_weight =
+        std::isfinite(primitive.weight) && primitive.weight > 0.0
+            ? primitive.weight
+            : 1.0;
+    if (confidence <= 0.0 || primitive_weight <= 0.0) {
+      continue;
+    }
+    const double pi_range = std::exp(-dist2 / std::max(2.0 * radius2, 1.0e-9));
+    out.lambda +=
+        weight_scale * pi_range * confidence * primitive_weight * inv_sigma2 *
+        (n * n.transpose());
+    ++valid_normals;
+  }
+
+  out.n_primitives = nearby;
+  out.n_valid_normals = valid_normals;
+  if (valid_normals < min_voxels) {
+    return fallback(valid_normals == 0 ? "missing_lidar_normals"
+                                       : "too_few_lidar_normals");
+  }
+  if (!out.lambda.allFinite()) {
+    return fallback("invalid_lidar_fim");
+  }
+
+  fill_fim_diagnostics(out);
+  if (!std::isfinite(out.max_eig) || out.max_eig <= 0.0 ||
+      !std::isfinite(out.condition) ||
+      out.condition > std::max(params_.fim_condition_max, 1.0)) {
+    return fallback("degenerate_lidar_fim");
+  }
+
+  out.valid = true;
+  out.fallback_reason.clear();
+  return out;
+}
+
 }  // namespace iap

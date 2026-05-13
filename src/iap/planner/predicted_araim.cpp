@@ -2,6 +2,7 @@
 
 #include <iap/planner/predicted_araim.hpp>
 #include <spdlog/spdlog.h>
+#include <Eigen/Eigenvalues>
 #include <algorithm>
 #include <cmath>
 
@@ -128,6 +129,105 @@ PredictedAraimResult PredictedAraimComputer::predict_araim_result(
   }
   out.n_vis = static_cast<int>(geom.size());
   out.n_hypotheses = ar.n_hypotheses;
+  return out;
+}
+
+GnssAdvisoryFimResult PredictedAraimComputer::predict_advisory_fim(
+    const Eigen::Vector3d& pos_world) const {
+  GnssAdvisoryFimResult out;
+
+  auto fallback = [&](const char* reason) {
+    out.valid = false;
+    out.fallback_reason = reason;
+    out.lambda.setZero();
+    out.h_full.setZero();
+    fill_fim_diagnostics(out);
+    return out;
+  };
+
+  if (!pos_world.allFinite()) {
+    return fallback("invalid_position");
+  }
+  if (epoch_ == nullptr) {
+    return fallback("no_gnss_epoch");
+  }
+
+  const VisibilityResult vis = vis_.predict(pos_world, *epoch_);
+  out.n_visible = vis.n_vis;
+
+  std::vector<Araim::SatGeometry> geom;
+  geom.reserve(static_cast<std::size_t>(vis.n_vis));
+  for (std::size_t i = 0; i < epoch_->sats.size(); ++i) {
+    if (i >= vis.vis_flags.size() || !vis.vis_flags[i]) {
+      continue;
+    }
+    if (epoch_->sats[i].excluded) {
+      continue;
+    }
+    Araim::SatGeometry sg;
+    sg.elevation = epoch_->sats[i].elevation;
+    sg.azimuth = epoch_->sats[i].azimuth;
+    sg.pr_sigma = (i < vis.sigma_effs.size() && vis.sigma_effs[i] > 0.0)
+                      ? vis.sigma_effs[i]
+                      : epoch_->sats[i].pr_sigma;
+    sg.sat_id = epoch_->sats[i].sat_id;
+    geom.push_back(sg);
+  }
+  out.n_used = static_cast<int>(geom.size());
+  if (out.n_used < 4) {
+    return fallback("too_few_sats");
+  }
+
+  Eigen::Matrix4d h = Eigen::Matrix4d::Zero();
+  for (const auto& sat : geom) {
+    const double el = sat.elevation;
+    const double az = sat.azimuth;
+    Eigen::Vector4d g;
+    g << std::cos(el) * std::sin(az),
+         std::cos(el) * std::cos(az),
+         std::sin(el),
+         1.0;
+    const double sigma = std::max(sat.pr_sigma, 0.01);
+    h += (1.0 / (sigma * sigma)) * (g * g.transpose());
+  }
+  out.h_full = h;
+
+  const double h_cc = h(3, 3);
+  const double clock_eps =
+      std::isfinite(params_.fim_clock_epsilon) && params_.fim_clock_epsilon > 0.0
+          ? params_.fim_clock_epsilon
+          : 1.0e-6;
+  if (!std::isfinite(h_cc) || h_cc + clock_eps <= 0.0) {
+    return fallback("degenerate_clock_information");
+  }
+
+  const Eigen::Matrix3d h_pp = h.block<3, 3>(0, 0);
+  const Eigen::Matrix<double, 3, 1> h_pc = h.block<3, 1>(0, 3);
+  const Eigen::Matrix<double, 1, 3> h_cp = h.block<1, 3>(3, 0);
+  out.lambda = h_pp - (h_pc * h_cp) / (h_cc + clock_eps);
+  out.lambda = 0.5 * (out.lambda + out.lambda.transpose());
+
+  if (!out.lambda.allFinite()) {
+    return fallback("invalid_gnss_fim");
+  }
+
+  fill_fim_diagnostics(out);
+  const double psd_eps =
+      std::isfinite(params_.fim_psd_epsilon) && params_.fim_psd_epsilon > 0.0
+          ? params_.fim_psd_epsilon
+          : 1.0e-9;
+  if (!std::isfinite(out.min_eig) || out.min_eig < -psd_eps ||
+      out.max_eig <= 0.0) {
+    return fallback("gnss_fim_not_psd");
+  }
+  if (out.min_eig < 0.0) {
+    out.lambda += Eigen::Matrix3d::Identity() * (-out.min_eig + psd_eps);
+    out.regularized = true;
+    fill_fim_diagnostics(out);
+  }
+
+  out.valid = true;
+  out.fallback_reason.clear();
   return out;
 }
 
