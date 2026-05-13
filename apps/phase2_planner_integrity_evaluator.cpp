@@ -733,6 +733,12 @@ class Phase2PlannerIntegrityEvaluator : public rclcpp::Node {
     declare_parameter<double>("lidar_bias_h_m", 0.0);
     declare_parameter<double>("lidar_bias_v_m", 0.0);
     declare_parameter<int>("lidar_map_max_points", 2500);
+    declare_parameter<bool>("local_occupancy_enable_eviction", true);
+    declare_parameter<int>("local_occupancy_max_voxels", 200000);
+    declare_parameter<double>("local_occupancy_radius_m", 25.0);
+    declare_parameter<double>("local_occupancy_max_age_s", 5.0);
+    declare_parameter<std::string>("local_occupancy_eviction_policy",
+                                   "distance_then_age");
     declare_parameter<bool>("visibility_hard_occlusion", false);
     declare_parameter<double>("visibility_occ_range_m", 20.0);
     declare_parameter<double>("visibility_occ_l_m", 5.0);
@@ -905,6 +911,24 @@ class Phase2PlannerIntegrityEvaluator : public rclcpp::Node {
     field_predictor_params_.lidar_bias_v_m =
         get_parameter("lidar_bias_v_m").as_double();
     lidar_map_max_points_ = get_parameter("lidar_map_max_points").as_int();
+    local_occupancy_params_.enable_eviction =
+        get_parameter("local_occupancy_enable_eviction").as_bool();
+    local_occupancy_params_.max_voxels =
+        std::max(0, static_cast<int>(
+                        get_parameter("local_occupancy_max_voxels").as_int()));
+    local_occupancy_params_.local_radius_m =
+        get_parameter("local_occupancy_radius_m").as_double();
+    local_occupancy_params_.max_age_s =
+        get_parameter("local_occupancy_max_age_s").as_double();
+    local_occupancy_eviction_policy_ =
+        get_parameter("local_occupancy_eviction_policy").as_string();
+    local_occupancy_params_.eviction_policy =
+        iap::LocalOccupancyGrid::eviction_policy_from_string(
+            local_occupancy_eviction_policy_);
+    local_occupancy_eviction_policy_ =
+        iap::LocalOccupancyGrid::eviction_policy_to_string(
+            local_occupancy_params_.eviction_policy);
+    occupancy_ = iap::LocalOccupancyGrid(local_occupancy_params_);
     predictor_params_.vis_params.hard_occlusion =
         get_parameter("visibility_hard_occlusion").as_bool();
     predictor_params_.vis_params.occ_range =
@@ -1502,8 +1526,18 @@ class Phase2PlannerIntegrityEvaluator : public rclcpp::Node {
     }
     {
       std::lock_guard<std::mutex> lock(occupancy_mutex_);
-      occupancy_.reset();
-      occupancy_.insert_points(latest_cloud_points_);
+      if (local_occupancy_params_.enable_eviction) {
+        const Eigen::Vector3d center =
+            latest_odom_pose_valid_
+                ? latest_odom_p_
+                : Eigen::Vector3d::Constant(
+                      std::numeric_limits<double>::quiet_NaN());
+        occupancy_.insert_points(latest_cloud_points_, center,
+                                 latest_cloud_stamp_);
+      } else {
+        occupancy_.reset();
+        occupancy_.insert_points(latest_cloud_points_);
+      }
     }
     field_predictor_.set_lidar_map_points(predictor_points);
     iap::LidarFimPrimitiveGenerationDiagnostics diagnostics;
@@ -3096,6 +3130,11 @@ class Phase2PlannerIntegrityEvaluator : public rclcpp::Node {
       }
       return out;
     };
+    iap::LocalOccupancyGrid::Diagnostics local_occupancy_diag;
+    {
+      std::lock_guard<std::mutex> lock(occupancy_mutex_);
+      local_occupancy_diag = occupancy_.diagnostics();
+    }
 
     nlohmann::json summary;
     summary["available"] = true;
@@ -3205,6 +3244,16 @@ class Phase2PlannerIntegrityEvaluator : public rclcpp::Node {
        lidar_fim_primitive_params_.pca_max_primitives},
       {"phase2_lidar_fim_use_cloud_normals_first",
        lidar_fim_primitive_params_.use_cloud_normals_first},
+      {"phase2_local_occupancy_enable_eviction",
+       local_occupancy_params_.enable_eviction},
+      {"phase2_local_occupancy_max_voxels",
+       local_occupancy_params_.max_voxels},
+      {"phase2_local_occupancy_radius_m",
+       local_occupancy_params_.local_radius_m},
+      {"phase2_local_occupancy_max_age_s",
+       local_occupancy_params_.max_age_s},
+      {"phase2_local_occupancy_eviction_policy",
+       local_occupancy_eviction_policy_},
       {"phase2_K_H_adv", field_predictor_params_.K_H_adv},
 	      {"phase2_K_V_adv", field_predictor_params_.K_V_adv},
 	      {"phase2_b_H_pred", field_predictor_params_.b_H_pred},
@@ -3276,6 +3325,26 @@ class Phase2PlannerIntegrityEvaluator : public rclcpp::Node {
         {"planner_integrity_cost",
          planner_use_integrity_cost_ ? "enabled_experimental"
                                      : "disabled_by_default"},
+    };
+    summary["local_occupancy"] = {
+        {"local_occupancy_enable_eviction",
+         local_occupancy_params_.enable_eviction},
+        {"local_occupancy_max_voxels",
+         local_occupancy_params_.max_voxels},
+        {"local_occupancy_radius_m",
+         local_occupancy_params_.local_radius_m},
+        {"local_occupancy_max_age_s",
+         local_occupancy_params_.max_age_s},
+        {"local_occupancy_eviction_policy",
+         local_occupancy_eviction_policy_},
+        {"local_occupancy_voxel_count",
+         local_occupancy_diag.voxel_count},
+        {"local_occupancy_evicted_count",
+         local_occupancy_diag.evicted_count},
+        {"local_occupancy_rejected_count",
+         local_occupancy_diag.rejected_count},
+        {"local_occupancy_inserted_count",
+         local_occupancy_diag.inserted_count},
     };
     const auto grid_stats = field_predictor_.stats();
     summary["pl_grid"] = {
@@ -4455,6 +4524,8 @@ class Phase2PlannerIntegrityEvaluator : public rclcpp::Node {
 	  bool pi_require_fim_valid_ = false;
 	  double pl_grid_update_hz_ = 2.0;
   int lidar_map_max_points_ = 2500;
+  iap::LocalOccupancyGrid::Params local_occupancy_params_{};
+  std::string local_occupancy_eviction_policy_ = "distance_then_age";
   iap::LidarFimPrimitiveGenerationParams lidar_fim_primitive_params_{};
   iap::LidarFimPrimitiveGenerationDiagnostics latest_lidar_pca_diagnostics_{};
   double drone_radius_ = 0.35;

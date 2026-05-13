@@ -20,30 +20,228 @@ VoxelKey LocalOccupancyGrid::to_key(const Eigen::Vector3d& p) const {
   };
 }
 
+Eigen::Vector3d LocalOccupancyGrid::key_center(const VoxelKey& k) const {
+  const double vs = params_.voxel_size;
+  return Eigen::Vector3d((static_cast<double>(k.x) + 0.5) * vs,
+                         (static_cast<double>(k.y) + 0.5) * vs,
+                         (static_cast<double>(k.z) + 0.5) * vs);
+}
+
 bool LocalOccupancyGrid::is_occupied(const VoxelKey& k) const {
   return voxels_.count(k) != 0;
+}
+
+LocalOccupancyGrid::EvictionPolicy
+LocalOccupancyGrid::eviction_policy_from_string(const std::string& policy) {
+  if (policy == "distance") {
+    return EvictionPolicy::DISTANCE;
+  }
+  if (policy == "age") {
+    return EvictionPolicy::AGE;
+  }
+  return EvictionPolicy::DISTANCE_THEN_AGE;
+}
+
+std::string LocalOccupancyGrid::eviction_policy_to_string(
+    EvictionPolicy policy) {
+  switch (policy) {
+    case EvictionPolicy::DISTANCE:
+      return "distance";
+    case EvictionPolicy::AGE:
+      return "age";
+    case EvictionPolicy::DISTANCE_THEN_AGE:
+      return "distance_then_age";
+  }
+  return "distance_then_age";
 }
 
 // ---------------------------------------------------------------------------
 void LocalOccupancyGrid::insert(const gtsam_points::PointCloud& cloud,
                                 const Eigen::Isometry3d& T_world_sensor) {
+  insert(cloud, T_world_sensor,
+         Eigen::Vector3d::Constant(std::numeric_limits<double>::quiet_NaN()),
+         std::numeric_limits<double>::quiet_NaN());
+}
+
+void LocalOccupancyGrid::insert(const gtsam_points::PointCloud& cloud,
+                                const Eigen::Isometry3d& T_world_sensor,
+                                const Eigen::Vector3d& center_world,
+                                double stamp_s) {
   if (!cloud.points) return;
   for (int i = 0; i < cloud.size(); ++i) {
     const Eigen::Vector3d pw = T_world_sensor *
         cloud.points[i].head<3>();  // points are Eigen::Vector4d
-    // Evict oldest (simple guard: just stop if full — sufficient for rolling window)
-    if (static_cast<int>(voxels_.size()) >= params_.max_voxels) break;
-    voxels_[to_key(pw)] = 1u;
+    if (!insert_voxel(pw, center_world, stamp_s) &&
+        !params_.enable_eviction) {
+      break;
+    }
   }
 }
 
 void LocalOccupancyGrid::insert_points(
     const std::vector<Eigen::Vector3d>& points_world) {
-  for (const auto& pw : points_world) {
-    if (!pw.allFinite()) continue;
-    if (static_cast<int>(voxels_.size()) >= params_.max_voxels) break;
-    voxels_[to_key(pw)] = 1u;
+  insert_points(points_world,
+                Eigen::Vector3d::Constant(
+                    std::numeric_limits<double>::quiet_NaN()),
+                std::numeric_limits<double>::quiet_NaN());
+}
+
+void LocalOccupancyGrid::insert_points(
+    const std::vector<Eigen::Vector3d>& points_world,
+    const Eigen::Vector3d& center_world,
+    double stamp_s) {
+  if (params_.enable_eviction) {
+    evict_around(center_world, stamp_s);
   }
+  for (const auto& pw : points_world) {
+    if (!insert_voxel(pw, center_world, stamp_s) &&
+        !params_.enable_eviction) {
+      break;
+    }
+  }
+}
+
+bool LocalOccupancyGrid::insert_voxel(const Eigen::Vector3d& p_world,
+                                      const Eigen::Vector3d& center_world,
+                                      double stamp_s) {
+  if (!p_world.allFinite()) {
+    return true;
+  }
+  const VoxelKey key = to_key(p_world);
+  auto existing = voxels_.find(key);
+  if (existing != voxels_.end()) {
+    existing->second.occupied = 1u;
+    if (std::isfinite(stamp_s)) {
+      existing->second.stamp_s = stamp_s;
+    }
+    return true;
+  }
+
+  if (params_.max_voxels <= 0) {
+    ++diagnostics_.rejected_count;
+    return false;
+  }
+
+  const bool has_center = center_world.allFinite();
+  if (params_.enable_eviction && has_center &&
+      std::isfinite(params_.local_radius_m) && params_.local_radius_m > 0.0 &&
+      (p_world - center_world).norm() > params_.local_radius_m) {
+    ++diagnostics_.rejected_count;
+    return false;
+  }
+
+  if (params_.enable_eviction &&
+      static_cast<int>(voxels_.size()) >= params_.max_voxels) {
+    evict_around(center_world, stamp_s);
+    if (static_cast<int>(voxels_.size()) >= params_.max_voxels) {
+      diagnostics_.evicted_count +=
+          evict_to_capacity(center_world,
+                            static_cast<std::size_t>(params_.max_voxels - 1));
+    }
+  }
+
+  if (static_cast<int>(voxels_.size()) >= params_.max_voxels) {
+    ++diagnostics_.rejected_count;
+    return false;
+  }
+
+  VoxelRecord record;
+  record.occupied = 1u;
+  record.stamp_s = stamp_s;
+  record.sequence = next_sequence_++;
+  voxels_.emplace(key, record);
+  ++diagnostics_.inserted_count;
+  return true;
+}
+
+std::size_t LocalOccupancyGrid::evict_around(
+    const Eigen::Vector3d& center_world,
+    double now_s) {
+  if (!params_.enable_eviction) {
+    return 0;
+  }
+
+  std::size_t evicted = 0;
+  const bool has_center = center_world.allFinite();
+  const bool use_radius = has_center && std::isfinite(params_.local_radius_m) &&
+                          params_.local_radius_m > 0.0;
+  const double radius2 = params_.local_radius_m * params_.local_radius_m;
+  const bool use_age = std::isfinite(now_s) && std::isfinite(params_.max_age_s) &&
+                       params_.max_age_s > 0.0;
+
+  for (auto it = voxels_.begin(); it != voxels_.end();) {
+    bool erase = false;
+    if (use_radius) {
+      const Eigen::Vector3d pc = key_center(it->first);
+      erase = (pc - center_world).squaredNorm() > radius2;
+    }
+    if (!erase && use_age && std::isfinite(it->second.stamp_s)) {
+      erase = (now_s - it->second.stamp_s) > params_.max_age_s;
+    }
+    if (erase) {
+      it = voxels_.erase(it);
+      ++evicted;
+    } else {
+      ++it;
+    }
+  }
+
+  if (static_cast<int>(voxels_.size()) > params_.max_voxels) {
+    evicted += evict_to_capacity(
+        center_world, static_cast<std::size_t>(params_.max_voxels));
+  }
+  diagnostics_.evicted_count += evicted;
+  return evicted;
+}
+
+std::size_t LocalOccupancyGrid::evict_to_capacity(
+    const Eigen::Vector3d& center_world,
+    std::size_t target_size) {
+  if (params_.max_voxels <= 0) {
+    const std::size_t removed = voxels_.size();
+    voxels_.clear();
+    return removed;
+  }
+  if (voxels_.size() <= target_size) {
+    return 0;
+  }
+
+  const bool has_center = center_world.allFinite();
+  auto score_distance2 = [&](const VoxelKey& key) {
+    if (!has_center) {
+      return -std::numeric_limits<double>::infinity();
+    }
+    return (key_center(key) - center_world).squaredNorm();
+  };
+
+  auto worse = [&](const auto& a, const auto& b) {
+    const double da = score_distance2(a.first);
+    const double db = score_distance2(b.first);
+    const std::uint64_t sa = a.second.sequence;
+    const std::uint64_t sb = b.second.sequence;
+    switch (params_.eviction_policy) {
+      case EvictionPolicy::DISTANCE:
+        if (da != db) return da < db;
+        return sa > sb;
+      case EvictionPolicy::AGE:
+        return sa > sb;
+      case EvictionPolicy::DISTANCE_THEN_AGE:
+        if (da != db) return da < db;
+        return sa > sb;
+    }
+    return sa > sb;
+  };
+
+  std::size_t evicted = 0;
+  while (voxels_.size() > target_size && !voxels_.empty()) {
+    auto victim = std::max_element(voxels_.begin(), voxels_.end(), worse);
+    if (victim == voxels_.end()) {
+      break;
+    }
+    voxels_.erase(victim);
+    ++evicted;
+  }
+  return evicted;
 }
 
 // ---------------------------------------------------------------------------
@@ -131,6 +329,12 @@ bool LocalOccupancyGrid::occupied_at(const Eigen::Vector3d& p_world) const {
 double LocalOccupancyGrid::occupancy_probability(
     const Eigen::Vector3d& p_world) const {
   return occupied_at(p_world) ? 1.0 : 0.0;
+}
+
+LocalOccupancyGrid::Diagnostics LocalOccupancyGrid::diagnostics() const {
+  Diagnostics out = diagnostics_;
+  out.voxel_count = voxels_.size();
+  return out;
 }
 
 }  // namespace iap

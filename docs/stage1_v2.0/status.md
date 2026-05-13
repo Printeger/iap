@@ -238,6 +238,159 @@ Demo11 generated the expected integrity and planner artifacts, including:
 - `export/iap_lidar_araim_stage0.csv`
 - `export/integrity_along_planner_traj.csv`
 - `export/future_integrity_snapshot.csv`
+
+## 2026-05-13 Update: LocalOccupancy Rolling Eviction
+
+Implemented rolling eviction for `LocalOccupancyGrid` so the local occupancy
+map keeps accepting new voxels after reaching `max_voxels`. The change is
+limited to the local occupancy map and Phase 2 evaluator/demo11 wiring. It does
+not modify certified ARAIM, Stage 2 FIM math, Stage 3 PI math, planner PI math,
+ROS message schemas, or existing LocalOccupancy query APIs.
+
+### Changes Applied
+
+- Extended `LocalOccupancyGrid::Params` with:
+  - `enable_eviction`
+  - `local_radius_m`
+  - `max_age_s`
+  - `eviction_policy`
+- Added rolling voxel metadata and diagnostics:
+  - `local_occupancy_voxel_count`
+  - `local_occupancy_evicted_count`
+  - `local_occupancy_rejected_count`
+  - `local_occupancy_inserted_count`
+- Added centered/timestamped insertion overloads and explicit eviction around a
+  UAV/query center.
+- Preserved legacy behavior when eviction is disabled: the map does not evict
+  and rejects new voxels after capacity is reached.
+- Wired Phase 2 evaluator and demo11 launch parameters:
+  - `phase2_local_occupancy_enable_eviction`
+  - `phase2_local_occupancy_max_voxels`
+  - `phase2_local_occupancy_radius_m`
+  - `phase2_local_occupancy_max_age_s`
+  - `phase2_local_occupancy_eviction_policy`
+- Added `test/test_local_occupancy.cpp` and CTest registration.
+
+Files changed:
+
+- `include/iap/map/local_occupancy.hpp`
+- `src/iap/map/local_occupancy.cpp`
+- `apps/phase2_planner_integrity_evaluator.cpp`
+- `launch/demo11_ego_planner_integrity_corridor.launch.py`
+- `test/test_local_occupancy.cpp`
+- `CMakeLists.txt`
+
+### Test Results
+
+Commands run from `/home/dev/ws_iap`:
+
+```bash
+python3 -m py_compile src/iap/launch/demo11_ego_planner_integrity_corridor.launch.py
+
+colcon build --base-paths src/iap src/gnss_comm --packages-select iap \
+  --cmake-args -DCMAKE_BUILD_TYPE=RelWithDebInfo -DBUILD_TESTING=ON
+
+ctest --test-dir build/iap \
+  -R "test_local_occupancy|test_unified_risk_grid|test_future_pl_field_predictor|test_pi_cost_adapter" \
+  --output-on-failure
+
+colcon test --base-paths src/iap src/gnss_comm --packages-select iap
+colcon test-result --test-result-base build/iap --verbose
+```
+
+Results:
+
+- Launch Python compile passed.
+- Build passed.
+- Focused CTest passed:
+
+  ```text
+  4/4 tests passed
+  ```
+
+- Full `iap` package test suite passed:
+
+  ```text
+  Summary: 121 tests, 0 errors, 0 failures, 0 skipped
+  ```
+
+### Demo11 Rolling-Eviction Smoke
+
+Command run from `/home/dev/ws_iap`:
+
+```bash
+source install/setup.bash
+timeout 180s ros2 launch iap demo11_ego_planner_integrity_corridor.launch.py \
+  start_rviz:=false \
+  run_duration_s:=30 \
+  allow_truth_alignment:=false \
+  use_so3_dynamics:=true \
+  use_iap_odom_for_planner:=true \
+  use_gnss:=true \
+  use_araim:=true \
+  planner_use_integrity_cost:=true \
+  planner_use_integrity_front_search:=true \
+  planner_use_integrity_global_search:=true \
+  phase2_use_unified_risk_grid:=true \
+  phase2_urg_export_voxels:=false \
+  phase2_urg_compute_gradients:=false \
+  phase2_urg_gradient_mode:=none \
+  phase2_use_advisory_fim_add:=true \
+  phase2_use_lidar_advisory_fim:=true \
+  phase2_pi_use_unified_advisory_pl:=true \
+  phase2_local_occupancy_enable_eviction:=true \
+  phase2_local_occupancy_max_voxels:=1000 \
+  phase2_local_occupancy_radius_m:=8.0 \
+  phase2_local_occupancy_max_age_s:=2.0 \
+  phase2_local_occupancy_eviction_policy:=distance_then_age
+```
+
+Run directory:
+
+```text
+/home/dev/ws_iap/src/iap/log/20260513T131600Z_085
+```
+
+`phase2_summary.json` local occupancy diagnostics:
+
+```text
+local_occupancy_enable_eviction=true
+local_occupancy_max_voxels=1000
+local_occupancy_radius_m=8.0
+local_occupancy_max_age_s=2.0
+local_occupancy_eviction_policy=distance_then_age
+local_occupancy_voxel_count=1000
+local_occupancy_inserted_count=379790
+local_occupancy_evicted_count=378790
+local_occupancy_rejected_count=666124
+```
+
+This confirms the map did not freeze at capacity: accepted insertions continued
+well beyond `max_voxels`, while the current voxel count stayed capped.
+
+URG smoke diagnostics from the same run:
+
+```text
+urg_enabled=true
+urg_active=true
+urg_update_count=12
+urg_query_count=15620
+urg_front_field_points=2601
+urg_backend_field_points=2602
+urg_valid_pi_count=15620
+urg_unknown_count=0
+urg_mean_update_ms=1501.6074225
+urg_p95_update_ms=1740.974055
+```
+
+`integrity_along_planner_traj.csv` contained finite `urg_occ_prob` values for
+all 7 sampled rows in this smoke run. The values were all `0.0` on the sampled
+trajectory points, which means the occupancy field was populated and finite but
+the sampled points were not inside occupied voxels.
+
+Known demo note: as in earlier demo11 runs, several non-core simulation and
+visualization nodes reported shutdown errors after SIGINT/SIGTERM. The Phase 2
+evaluator process finished cleanly and wrote the summary and CSV artifacts.
 - `export/phase1_summary.json`
 - `export/phase2_summary.json`
 - `export/planner_traj.csv`

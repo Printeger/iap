@@ -7,6 +7,8 @@
 #include <unordered_map>
 #include <cstdint>
 #include <cmath>
+#include <limits>
+#include <string>
 #include <vector>
 
 namespace iap {
@@ -56,10 +58,27 @@ namespace iap {
  */
 class LocalOccupancyGrid {
  public:
+  enum class EvictionPolicy {
+    DISTANCE,
+    AGE,
+    DISTANCE_THEN_AGE,
+  };
+
   struct Params {
     double voxel_size  = 0.2;        ///< voxel edge length [m]
-    int    max_voxels  = 200'000;    ///< maximum occupied voxels kept (FIFO evict oldest)
+    int    max_voxels  = 200'000;    ///< maximum occupied voxels kept
     int    n_kappa_steps = 20;       ///< samples for occupancy_ratio()
+    bool   enable_eviction = false;  ///< preserve legacy full-map behavior when false
+    double local_radius_m = 25.0;    ///< rolling local radius around UAV/query center [m]
+    double max_age_s = 5.0;          ///< maximum voxel age before stale eviction [s]
+    EvictionPolicy eviction_policy = EvictionPolicy::DISTANCE_THEN_AGE;
+  };
+
+  struct Diagnostics {
+    std::size_t voxel_count = 0;
+    std::size_t evicted_count = 0;
+    std::size_t rejected_count = 0;
+    std::size_t inserted_count = 0;
   };
 
   LocalOccupancyGrid();
@@ -71,8 +90,22 @@ class LocalOccupancyGrid {
   void insert(const gtsam_points::PointCloud& cloud,
               const Eigen::Isometry3d& T_world_sensor);
 
+  /// @brief Insert a LiDAR point cloud with rolling-eviction context.
+  void insert(const gtsam_points::PointCloud& cloud,
+              const Eigen::Isometry3d& T_world_sensor,
+              const Eigen::Vector3d& center_world,
+              double stamp_s);
+
   /// @brief Insert already world-frame points.
   void insert_points(const std::vector<Eigen::Vector3d>& points_world);
+
+  /// @brief Insert already world-frame points with rolling-eviction context.
+  void insert_points(const std::vector<Eigen::Vector3d>& points_world,
+                     const Eigen::Vector3d& center_world,
+                     double stamp_s);
+
+  /// @brief Explicitly evict stale/out-of-radius/capacity-overflow voxels.
+  std::size_t evict_around(const Eigen::Vector3d& center_world, double now_s);
 
   /// @brief Clear all occupied voxels.
   void reset();
@@ -106,14 +139,32 @@ class LocalOccupancyGrid {
   std::size_t size() const { return voxels_.size(); }
 
   const Params& params() const { return params_; }
+  Diagnostics diagnostics() const;
+
+  static EvictionPolicy eviction_policy_from_string(const std::string& policy);
+  static std::string eviction_policy_to_string(EvictionPolicy policy);
 
  private:
+  struct VoxelRecord {
+    uint8_t occupied = 1u;
+    double stamp_s = std::numeric_limits<double>::quiet_NaN();
+    std::uint64_t sequence = 0;
+  };
+
   /// Convert world-frame point to VoxelKey.
   VoxelKey to_key(const Eigen::Vector3d& p) const;
+  Eigen::Vector3d key_center(const VoxelKey& k) const;
   bool is_occupied(const VoxelKey& k) const;
+  bool insert_voxel(const Eigen::Vector3d& p_world,
+                    const Eigen::Vector3d& center_world,
+                    double stamp_s);
+  std::size_t evict_to_capacity(const Eigen::Vector3d& center_world,
+                                std::size_t target_size);
 
   Params params_;
-  std::unordered_map<VoxelKey, uint8_t> voxels_;
+  std::unordered_map<VoxelKey, VoxelRecord> voxels_;
+  Diagnostics diagnostics_;
+  std::uint64_t next_sequence_ = 0;
 };
 
 }  // namespace iap
