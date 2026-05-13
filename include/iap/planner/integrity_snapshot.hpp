@@ -1,5 +1,5 @@
 #pragma once
-// Phase C: frozen per-epoch integrity inputs for future PL prediction.
+// Phase C: frozen current-monitor inputs for advisory future PL prediction.
 
 #include <Eigen/Core>
 #include <Eigen/Geometry>
@@ -21,6 +21,7 @@ struct CurrentIntegrityState {
 
   int integrity_state = -1;
 
+  // Current certified monitor outputs copied from /iap/integrity.
   double hpl = std::numeric_limits<double>::quiet_NaN();
   double vpl = std::numeric_limits<double>::quiet_NaN();
   double pl_e = std::numeric_limits<double>::quiet_NaN();
@@ -30,7 +31,7 @@ struct CurrentIntegrityState {
 
   double hal = std::numeric_limits<double>::quiet_NaN();
   double val = std::numeric_limits<double>::quiet_NaN();
-  double im = std::numeric_limits<double>::quiet_NaN();
+  double im = std::numeric_limits<double>::quiet_NaN();  ///< monitor IM
 
   double pl_ff = std::numeric_limits<double>::quiet_NaN();
   double pl_ff_v = std::numeric_limits<double>::quiet_NaN();
@@ -49,6 +50,14 @@ struct CurrentIntegrityState {
 
   int n_trunks_observed = 0;
   double tdop = std::numeric_limits<double>::quiet_NaN();
+
+  double monitor_fused_hpl() const { return hpl; }
+  double monitor_fused_vpl() const { return vpl; }
+  double monitor_fused_pl() const { return pl; }
+  double monitor_fused_pl_e() const { return pl_e; }
+  double monitor_fused_pl_n() const { return pl_n; }
+  double monitor_fused_pl_u() const { return pl_u; }
+  double monitor_integrity_margin() const { return im; }
 };
 
 struct IntegritySnapshot {
@@ -60,11 +69,12 @@ struct IntegritySnapshot {
       Eigen::Vector3d::Constant(std::numeric_limits<double>::quiet_NaN());
   Eigen::Quaterniond q_wb = Eigen::Quaterniond::Identity();
 
-  CurrentIntegrityState current;
+  CurrentIntegrityState current;  ///< current certified monitor snapshot
 
   bool has_epoch = false;
   GnssEpoch gnss_epoch;
 
+  // Optional prior information for advisory future prediction only.
   bool has_lambda_base = false;
   Eigen::Matrix3d lambda_base_pos = Eigen::Matrix3d::Zero();
 

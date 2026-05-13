@@ -1,5 +1,5 @@
 #pragma once
-// Phase D: common PL field query result for direct and grid prediction.
+// Phase D: common advisory PL field query result for direct and grid prediction.
 
 #include <Eigen/Core>
 
@@ -16,6 +16,8 @@ struct FuturePLQueryResult {
   std::string fallback_reason = "not_evaluated";
   std::string query_source = "direct";
 
+  // Advisory predicted outputs for planner use. These are not certified
+  // monitor PL values.
   double hpl = 1e9;
   double vpl = 1e9;
   double pl_scalar = 1e9;
@@ -30,10 +32,10 @@ struct FuturePLQueryResult {
   int n_vis = 0;
   int n_hypotheses = 0;
 
-  double gnss_hpl = 1e9;
-  double gnss_vpl = 1e9;
-  double fused_hpl = 1e9;
-  double fused_vpl = 1e9;
+  double gnss_hpl = 1e9;   ///< gnss_advisory_hpl_proxy [m]
+  double gnss_vpl = 1e9;   ///< gnss_advisory_vpl_proxy [m]
+  double fused_hpl = 1e9;  ///< advisory_predicted_fused_hpl [m]
+  double fused_vpl = 1e9;  ///< advisory_predicted_fused_vpl [m]
   bool lidar_valid = false;
   double lidar_alpha = 0.0;
   double lidar_tdop = 20.0;
@@ -50,6 +52,16 @@ struct FuturePLQueryResult {
   int grid_generation = -1;
   double grid_age_s = std::numeric_limits<double>::quiet_NaN();
   double grid_build_time_ms = std::numeric_limits<double>::quiet_NaN();
+
+  // Non-breaking Stage 1 semantic aliases. Public storage field names stay
+  // unchanged until downstream planner/log consumers migrate.
+  double advisory_predicted_hpl() const { return hpl; }
+  double advisory_predicted_vpl() const { return vpl; }
+  double advisory_predicted_pl() const { return pl_scalar; }
+  double gnss_advisory_hpl_proxy() const { return gnss_hpl; }
+  double gnss_advisory_vpl_proxy() const { return gnss_vpl; }
+  double advisory_predicted_fused_hpl() const { return fused_hpl; }
+  double advisory_predicted_fused_vpl() const { return fused_vpl; }
 };
 
 FuturePLQueryResult make_future_pl_query_result(

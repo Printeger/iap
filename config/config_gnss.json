@@ -117,6 +117,18 @@
     "enable_araim_csv":   true,
     "araim_csv_path":     "/home/dev/ws_iap/src/iap/log/res/iap_araim.csv",
 
+    // LiDAR ARAIM Stage 0 stability repair
+    "lidar_araim_target_window_K": 10,
+    "lidar_araim_age_model": "exp_saturating",
+    "lidar_araim_age_tau_s": 30.0,
+    "lidar_araim_gamma_age_max": 1.0,
+    "lidar_araim_gamma_rmse_max": 5.0,
+    "lidar_araim_condition_ref": 10000.0,
+    "lidar_araim_gamma_condition_max": 5.0,
+    "lidar_araim_sigma_ss_min_m": 0.02,
+    "enable_lidar_araim_stage0_csv": true,
+    "lidar_araim_stage0_csv_path": "/tmp/iap_lidar_araim_stage0.csv",
+
     // Trajectory CSV (for Fig D1 comparison)
     "enable_traj_csv":    true,
     "traj_csv_path":      "/home/dev/ws_iap/src/iap/log/res/traj_with_gnss.csv"

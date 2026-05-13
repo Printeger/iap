@@ -25,7 +25,7 @@ namespace iap {
  *   - Current IntegrityReport (PL, AL, IM, state)
  *
  * All planners produce:
- *   - A CandidateTrajectory (waypoints with predicted PL/AL)
+ *   - A CandidateTrajectory (waypoints with advisory predicted PL/AL)
  *   - An execution target (short-horizon setpoint)
  *
  * The planner may also receive feedback to update its internal model:

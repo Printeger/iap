@@ -116,6 +116,11 @@ IntegrityExtensionModule::IntegrityExtensionModule()
       value = config.param<double>("integrity", key, value);
     }
   };
+  auto maybe_override_int = [&](const char* key, int& value) {
+    if (config.has_param("integrity", key)) {
+      value = config.param<int>("integrity", key, value);
+    }
+  };
   auto& lp = mp.lidar_araim_params;
   maybe_override_double("lidar_araim_p_hmi_req", lp.P_HMI_req);
   maybe_override_double("lidar_araim_p_fa_req", lp.P_FA_req);
@@ -128,6 +133,22 @@ IntegrityExtensionModule::IntegrityExtensionModule()
   maybe_override_double("lidar_araim_p_level", lp.p_level);
   maybe_override_double("lidar_araim_rmse_ref", lp.rmse_ref);
   maybe_override_double("lidar_araim_age_ref_sec", lp.age_ref_sec);
+  maybe_override_int("lidar_araim_target_window_K", lp.target_window_K);
+  if (config.has_param("integrity", "lidar_araim_age_model")) {
+    const std::string age_model = config.param<std::string>(
+        "integrity", "lidar_araim_age_model", LidarAraim::to_string(lp.age_model));
+    if (age_model == "linear_capped") {
+      lp.age_model = LidarAraim::Params::AgeModel::LINEAR_CAPPED;
+    } else {
+      lp.age_model = LidarAraim::Params::AgeModel::EXP_SATURATING;
+    }
+  }
+  maybe_override_double("lidar_araim_age_tau_s", lp.age_tau_s);
+  maybe_override_double("lidar_araim_gamma_age_max", lp.gamma_age_max);
+  maybe_override_double("lidar_araim_gamma_rmse_max", lp.gamma_rmse_max);
+  maybe_override_double("lidar_araim_condition_ref", lp.condition_ref);
+  maybe_override_double("lidar_araim_gamma_condition_max", lp.gamma_condition_max);
+  maybe_override_double("lidar_araim_sigma_ss_min_m", lp.sigma_ss_min_m);
   maybe_override_double("lidar_araim_w_rmse", lp.w_rmse);
   maybe_override_double("lidar_araim_w_inlier", lp.w_inlier);
   maybe_override_double("lidar_araim_w_cond", lp.w_cond);
@@ -146,6 +167,21 @@ IntegrityExtensionModule::IntegrityExtensionModule()
   araim_debug_csv_ = std::make_unique<AraimDebugCSV>(araim_csv_en, araim_csv_path);
   logger_->info("[IntegrityExt] ARAIM CSV: {} → {}",
                 araim_csv_en ? "ENABLED" : "disabled", araim_csv_path);
+
+  const bool lidar_stage0_csv_en = config.param<bool>(
+      "integrity", "enable_lidar_araim_stage0_csv", false);
+  std::string lidar_stage0_csv_path = config.param<std::string>(
+      "integrity", "lidar_araim_stage0_csv_path",
+      "/tmp/iap_lidar_araim_stage0.csv");
+  if (const auto* run_logs = glim::RunLogManager::get_if_initialized()) {
+    lidar_stage0_csv_path =
+        run_logs->export_path("iap_lidar_araim_stage0.csv").string();
+  }
+  lidar_araim_stage0_csv_ = std::make_unique<LidarAraimDebugCSV>(
+      lidar_stage0_csv_en, lidar_stage0_csv_path);
+  logger_->info("[IntegrityExt] LiDAR ARAIM Stage0 CSV: {} → {}",
+                lidar_stage0_csv_en ? "ENABLED" : "disabled",
+                lidar_stage0_csv_path);
 
   // ── Trajectory CSV ────────────────────────────────────────────────────────
   const bool traj_en = config.param<bool>("integrity", "enable_traj_csv", false);
@@ -342,7 +378,8 @@ void IntegrityExtensionModule::maybe_publish_integrity_() {
       (report.stamp - stamp_sec) * 1.0e9);
   msg.header.frame_id = "map";
 
-  // Primary integrity scalars
+  // Current certified monitor scalars. Keep legacy ROS field names for
+  // compatibility; semantically these are monitor_fused_* and monitor_IM.
   msg.integrity_state  = static_cast<uint8_t>(report.state);
   msg.hpl              = report.HPL;
   msg.vpl              = report.VPL;
@@ -383,6 +420,10 @@ void IntegrityExtensionModule::maybe_publish_integrity_() {
   if (araim_debug_csv_) {
     araim_debug_csv_->write(report, monitor_.last_araim_result());
   }
+  if (lidar_araim_stage0_csv_) {
+    lidar_araim_stage0_csv_->write(
+        report, monitor_.last_lidar_araim_result());
+  }
 
   if (traj_csv_file_) {
     const auto& t = frame->T_world_imu.translation();
@@ -394,18 +435,34 @@ void IntegrityExtensionModule::maybe_publish_integrity_() {
   const uint64_t n = ++report_count_;
   if (n == 1 || n % 50 == 0) {
     logger_->info(
-        "[IntegrityExt] #{}: stamp={:.3f} state={} HPL={:.2f}m VPL={:.2f}m "
-        "HAL={:.2f}m IM={:.2f}m n_sv={} n_trunks={} fgo_valid={} "
-        "fgo_factors={} lidar_hyp={} lidar_HPL={:.2f} mode={}",
+        "[IntegrityExt] #{}: stamp={:.3f} state={} monitor_HPL={:.2f}m "
+        "monitor_VPL={:.2f}m HAL={:.2f}m monitor_IM={:.2f}m n_sv={} "
+        "n_trunks={} fgo_valid={} fgo_factors={} lidar_hyp={} "
+        "lidar_certified_HPL={:.2f} mode={}",
         n, report.stamp, to_string(report.state),
         report.HPL, report.VPL, report.HAL, report.IM,
         report.n_sv_used, report.n_trunks_observed,
         have_fgo_snapshot && fgo_snapshot.valid,
         have_fgo_snapshot ? fgo_snapshot.n_total_factors : 0,
         report.lidar_n_hyp, report.lidar_HPL, report.lidar_worst_mode);
+    const auto& lr = monitor_.last_lidar_araim_result();
+    if (lr.valid && lr.worst_hyp >= 0 &&
+        lr.worst_hyp < static_cast<int>(lr.hypotheses.size()) &&
+        lr.worst_hyp < static_cast<int>(lr.subsets.size())) {
+      const auto& hyp = lr.hypotheses[static_cast<std::size_t>(lr.worst_hyp)];
+      const auto& ss = lr.subsets[static_cast<std::size_t>(lr.worst_hyp)];
+      logger_->info(
+          "[LiDAR ARAIM Stage0] stamp={:.3f} lidar_certified_HPL={:.3f} "
+          "lidar_certified_VPL={:.3f} "
+          "targets={}/{} worst={} gamma_age={:.3f} bias={:.3f}",
+          report.stamp, lr.HPL, lr.VPL, lr.selected_target_count,
+          lr.target_window_K, report.lidar_worst_mode,
+          hyp.selected_risk.gamma_age, std::max(ss.bias_H, ss.bias_V));
+    }
   } else {
     logger_->debug(
-        "[IntegrityExt] stamp={:.3f} state={} HPL={:.2f}m VPL={:.2f}m "
+        "[IntegrityExt] stamp={:.3f} state={} monitor_HPL={:.2f}m "
+        "monitor_VPL={:.2f}m "
         "HAL={:.2f}m n_sv={} lidar_hyp={}",
         report.stamp, to_string(report.state),
         report.HPL, report.VPL, report.HAL, report.n_sv_used, report.lidar_n_hyp);

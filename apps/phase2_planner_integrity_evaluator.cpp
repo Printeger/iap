@@ -1362,6 +1362,9 @@ class Phase2PlannerIntegrityEvaluator : public rclcpp::Node {
   }
 
   PlFields pl_values(const Eigen::Vector3d& pos) {
+    // Returns advisory predicted PL values for planner/evaluator use. The
+    // constant_current mode is a compatibility diagnostic mode that mirrors
+    // the current certified monitor output.
     PlFields out;
     out.grid_enabled = use_pl_grid_;
     if (pl_model_ == "constant_current") {
@@ -1478,6 +1481,8 @@ class Phase2PlannerIntegrityEvaluator : public rclcpp::Node {
                  double* im_scalar,
                  double* im,
                  std::string* state) const {
+    // Advisory integrity margin for sampled future/planner positions:
+    // IM_adv(p) = AL(p) - PL_adv(p). This is distinct from monitor IM.
     if (!is_finite(al)) {
       *im_h = *im_v = *im_axis_min = *im_scalar = *im =
           std::numeric_limits<double>::quiet_NaN();
@@ -1529,6 +1534,8 @@ class Phase2PlannerIntegrityEvaluator : public rclcpp::Node {
   iap::PICostResult pi_cost_at(const Eigen::Vector3d& pos) {
     const iap::AlertLimitSample al = al_values(pos);
     const PlFields pl = pl_values(pos);
+    // PI cost consumes advisory predicted HPL/VPL here. The
+    // constant_current PL model is retained only as a compatibility mode.
     return pi_cost_adapter_.evaluate(al.hal_m, al.val_m, pl.hpl, pl.vpl);
   }
 
@@ -1601,6 +1608,8 @@ class Phase2PlannerIntegrityEvaluator : public rclcpp::Node {
     row["AL_V_pred"] = fmt_num(al.val_m);
     row["AL_pred"] = fmt_num(al.al_m);
     row["AL_source"] = al.source;
+    // Existing CSV columns are preserved for compatibility. current_* are
+    // current certified monitor fields; *_pred are advisory planner fields.
     row["current_HPL"] = fmt_num(current_hpl_);
     row["current_VPL"] = fmt_num(current_vpl_);
     row["current_PL"] = fmt_num(current_pl);
@@ -2607,6 +2616,8 @@ class Phase2PlannerIntegrityEvaluator : public rclcpp::Node {
 	    if (!integrity_front_cost_field_pub_ || samples.empty()) {
 	      return;
 	    }
+	    // Compatibility topic: fields keep legacy names hpl/vpl/im/cost, but
+	    // they carry advisory planner-cost samples, not certified monitor PL.
 	    sensor_msgs::msg::PointCloud2 cloud;
 	    cloud.header.frame_id = "map";
 	    cloud.header.stamp = now();
@@ -2692,6 +2703,8 @@ class Phase2PlannerIntegrityEvaluator : public rclcpp::Node {
     if (!integrity_cost_field_pub_ || rows.empty()) {
       return;
     }
+    // Compatibility topic for planner/back-end consumers. hpl/vpl fields are
+    // advisory predicted PL samples from PL_H_pred/PL_V_pred.
     sensor_msgs::msg::PointCloud2 cloud;
     cloud.header.frame_id = "map";
     cloud.header.stamp = now();

@@ -12,7 +12,8 @@ Inputs:
 - `/drone_0_planning/bspline` (`traj_utils/msg/Bspline`) as the official future trajectory source.
 - `/drone_0_planning/pos_cmd` (`quadrotor_msgs/msg/PositionCommand`) only as a degraded fallback.
 - The same planner cloud source selected by demo10 (`/sim/drone_0/lidar` or `/map_generator/global_cloud`).
-- `/iap/integrity` (`iap/msg/IntegrityReport`) for current HPL/VPL when available.
+- `/iap/integrity` (`iap/msg/IntegrityReport`) for current certified monitor
+  HPL/VPL when available.
 
 The node never subscribes to `/sim/drone_0/truth_odom` and never publishes planner or controller commands.
 
@@ -26,13 +27,19 @@ AL is computed from point-cloud clearance and vertical bounds:
 - `AL_V_pred = gamma_v * max(min(z - z_min, z_max - z), 0)`
 - `AL_pred = min(AL_H_pred, AL_V_pred)`
 
-PL uses `constant_current`:
+PL uses `constant_current` in this compatibility mode:
 
 - `PL_H_pred = current_HPL`
 - `PL_V_pred = current_VPL`
 - `PL_pred = max(PL_H_pred, PL_V_pred)`
 
-IM is the conservative minimum of axis and scalar margins. If AL or PL is unavailable, the row is marked `UNKNOWN_AL` or `UNKNOWN_PL`.
+In advisory predictor modes, `PL_H_pred`, `PL_V_pred`, and `PL_pred` are
+advisory predicted PL proxy values for planner evaluation, not certified
+monitor outputs. Existing CSV column names are preserved for compatibility.
+
+IM is the advisory integrity margin for sampled future positions, computed as
+the conservative minimum of axis and scalar margins. If AL or PL is unavailable,
+the row is marked `UNKNOWN_AL` or `UNKNOWN_PL`.
 
 ## Outputs
 
@@ -41,6 +48,9 @@ Online outputs are written under the active IAP run directory:
 - `export/integrity_along_planner_traj.csv`
 - `export/phase2_summary.json`
 - optional `/iap/planner_integrity_markers`
+- optional compatibility planner-cost fields such as `/iap/integrity_cost_field`
+  and `/iap/integrity_front_cost_field`; their PointCloud2 `hpl/vpl/im/cost`
+  fields are advisory planner samples, not current certified monitor PL.
 
 Offline analysis writes:
 

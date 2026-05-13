@@ -31,7 +31,7 @@ Demo9 GNSS defaults to synthetic GPS ephemerides for repeatable smoke tests. RIN
 | GNSS range | `/ublox_driver/range_meas` | `gnss_comm/msg/GnssMeasMsg` | n/a | trigger-rate | `gnss_sim_node` | `libgnss_extension.so` |
 | GNSS ephemeris | `/ublox_driver/ephem` | `gnss_comm/msg/GnssEphemMsg` | n/a | slow/static | `gnss_sim_node` | `libgnss_extension.so` |
 | GLONASS ephemeris | `/ublox_driver/glo_ephem` | `gnss_comm/msg/GnssGloEphemMsg` | n/a | slow/static | `gnss_sim_node` | `libgnss_extension.so` |
-| IAP integrity | `/iap/integrity` | `iap/msg/IntegrityReport` | message-defined | backend-rate | `libintegrity_extension.so` | logger/visualization |
+| IAP current certified monitor | `/iap/integrity` | `iap/msg/IntegrityReport` | message-defined | backend-rate | `libintegrity_extension.so` | logger/visualization |
 | IAP estimate path | `/demo9/drone/path` | `nav_msgs/msg/Path` | `map` | odom-rate | `odom_visualization` | RViz |
 | Truth path | `/demo9/truth/path` | `nav_msgs/msg/Path` | `map` | odom-rate | `odom_visualization` | RViz |
 | Desired path | `/demo9/desired/path` | `nav_msgs/msg/Path` | `map` | command-rate | `odom_visualization` | RViz |

@@ -1,5 +1,5 @@
 #pragma once
-// Phase D: local 3-D PL grid for fast future integrity queries.
+// Phase D: local 3-D advisory PL grid for fast future integrity queries.
 
 #include <Eigen/Core>
 

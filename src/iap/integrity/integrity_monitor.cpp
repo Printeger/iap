@@ -182,7 +182,8 @@ void IntegrityMonitor::run_gnss_gating(const GnssEpoch& epoch,
 void IntegrityMonitor::run_araim(const GnssEpoch& epoch,
                                   int n_trunk_obs,
                                   IntegrityReport& report) {
-  // IAP-RQ-241–246: run ARAIM and merge per-axis results into report
+  // GNSS certified ARAIM monitor: merge per-axis results into the current
+  // monitor report. This path remains separate from advisory prediction.
   const AraimResult ar = araim_.run(epoch, n_trunk_obs);
 
   report.araim_valid  = ar.valid ? 1 : 0;
@@ -204,7 +205,7 @@ void IntegrityMonitor::run_araim(const GnssEpoch& epoch,
   report.gnss_K_ff_used = ar.K_ff_used;
   report.gnss_K_fa_used = ar.K_fa_used;
 
-  // Forward per-axis ARAIM results (§1.11)
+  // Forward GNSS certified per-axis monitor results (§1.11).
   report.HPL       = ar.HPL;
   report.VPL       = ar.VPL;
   report.PL_E      = ar.PL_E;
@@ -226,7 +227,7 @@ void IntegrityMonitor::run_araim(const GnssEpoch& epoch,
     report.PDOP = std::sqrt(ar.S0(0, 0) + ar.S0(1, 1) + ar.S0(2, 2));
   }
 
-  // Replace the proxy PL with the ARAIM HPL (more principled)
+  // Replace fallback PL with GNSS certified monitor HPL.
   report.PL = ar.HPL;
   report.final_HPL_source = "GNSS";
   report.final_VPL_source = "GNSS";
@@ -267,6 +268,7 @@ void IntegrityMonitor::run_lidar_araim(const LidarAraimSnapshot& snapshot,
 
   if (!lr.valid) return;
 
+  // Certified monitor fusion: PL_mon_q = max(PL_G_q, PL_L_q).
   report.PL_E = std::max(report.PL_E, lr.PL_E);
   report.PL_N = std::max(report.PL_N, lr.PL_N);
   report.PL_U = std::max(report.PL_U, lr.PL_U);
@@ -390,7 +392,7 @@ IntegrityReport IntegrityMonitor::compute(const glim::EstimationFrame& frame,
   IntegrityReport report;
   report.stamp = frame.stamp;
 
-  // --- PL fallback (IAP-RQ-200) ---
+  // --- Current monitor PL fallback (IAP-RQ-200) ---
   report.PL = compute_PL_proxy(frame);
   report.PL_E = report.PL_N = report.PL_U = report.PL;
   report.HPL = report.PL;
@@ -431,7 +433,7 @@ IntegrityReport IntegrityMonitor::compute(const glim::EstimationFrame& frame,
     run_gnss_gating(*epoch, report);
   }
 
-  // --- ARAIM (IAP-RQ-241–246) — replaces PL if valid ---
+  // --- GNSS certified ARAIM monitor (IAP-RQ-241–246) ---
   if (epoch) {
     const int n_trunk_obs = trunk ? static_cast<int>(trunk->trunks.size()) : 0;
     report.n_trunks_observed = n_trunk_obs;
@@ -460,9 +462,9 @@ IntegrityReport IntegrityMonitor::compute(const glim::EstimationFrame& frame,
   report.mode = update_mode_legacy(report);
 
   logger_->trace(
-    "integrity: PL={:.3f}m HPL={:.3f} VPL={:.3f} HAL={:.3f} VAL={:.3f} AL={:.3f}m IM={:.3f}m "
+    "integrity: monitor_PL={:.3f}m monitor_HPL={:.3f} monitor_VPL={:.3f} HAL={:.3f} VAL={:.3f} AL={:.3f}m monitor_IM={:.3f}m "
     "state={} lambda_max={:.4f} icp_degen={} gamma_lidar={:.2f} "
-    "tdop={:.2f} araim_n_hyp={} araim_n_det={} lidar_n_hyp={} lidar_HPL={:.3f} n_sv={}",
+    "tdop={:.2f} araim_n_hyp={} araim_n_det={} lidar_n_hyp={} lidar_certified_HPL={:.3f} n_sv={}",
     report.PL, report.HPL, report.VPL, report.HAL, report.VAL,
     report.AL, report.IM, to_string(report.state),
     report.lambda_max_sigma_p, report.icp_degenerate, report.gamma_lidar,
@@ -471,14 +473,14 @@ IntegrityReport IntegrityMonitor::compute(const glim::EstimationFrame& frame,
 
   if (report.state == IntegrityState::UNSAFE) {
     if (report.PL >= report.AL) {
-      logger_->warn("INTEGRITY UNSAFE: PL={:.3f} >= AL={:.3f}  IM={:.3f}", report.PL, report.AL, report.IM);
+      logger_->warn("INTEGRITY UNSAFE: monitor_PL={:.3f} >= AL={:.3f}  monitor_IM={:.3f}", report.PL, report.AL, report.IM);
     } else {
       // State is UNSAFE due to cold-start recovery (initial state), not because PL>=AL
-      logger_->info("INTEGRITY RECOVERING: PL={:.3f} < AL={:.3f}  IM={:.3f} (need {} more safe frames)",
+      logger_->info("INTEGRITY RECOVERING: monitor_PL={:.3f} < AL={:.3f}  monitor_IM={:.3f} (need {} more safe frames)",
                     report.PL, report.AL, report.IM, params_.recovery_count - recovery_counter_);
     }
   } else if (report.state == IntegrityState::SAFE_EXCLUDED) {
-    logger_->info("INTEGRITY SAFE_EXCLUDED: {} faults excluded, PL={:.3f} < AL={:.3f}",
+    logger_->info("INTEGRITY SAFE_EXCLUDED: {} faults excluded, monitor_PL={:.3f} < AL={:.3f}",
                   report.araim_n_det, report.PL, report.AL);
   }
 

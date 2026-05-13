@@ -20,7 +20,7 @@ namespace iap {
  * @brief Integrity-aware trajectory planner with receding horizon.
  *
  * Implements PlannerInterface. Generates motion-primitive candidates,
- * predicts PL along each, and selects the lowest-cost trajectory.
+ * predicts advisory PL proxies along each, and selects the lowest-cost trajectory.
  *
  * ### Cost function (§5.2, IAP-RQ-400)
  * @code
@@ -54,7 +54,7 @@ class IntegrityPlanner : public PlannerInterface {
     // --- AL fallback ---
     double al_default  = 2.0;   ///< fallback AL when IntegrityReport not given [m]
 
-    // --- Phase-4 (IAP-RQ-331/421/422) ---
+    // --- Advisory prediction path (IAP-RQ-331/421/422) ---
     bool use_araim_pl  = true;
     PredictedAraimComputer::Params araim_pred_params;
   };

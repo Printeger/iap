@@ -1,5 +1,5 @@
 #pragma once
-// Phase G-lite: read-only predicted-integrity cost adapter.
+// Phase G-lite: read-only advisory predicted-integrity cost adapter.
 
 #include <string>
 
@@ -31,6 +31,9 @@ class PICostAdapter {
   PICostAdapter();
   explicit PICostAdapter(const Params& params);
 
+  /// Evaluate PI cost from alert limits and advisory predicted HPL/VPL.
+  /// Do not pass current certified monitor PL here except in explicit
+  /// compatibility/diagnostic modes such as constant_current.
   PICostResult evaluate(double hal,
                         double val,
                         double hpl,

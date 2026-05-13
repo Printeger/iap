@@ -29,6 +29,7 @@ struct LidarAraimBlock {
   double cond_proxy = 1.0;
   double gamma_lidar = 1.0;
   double age_sec = 0.0;
+  double target_distance_m = 1e9;
 
   Eigen::Matrix<double, 6, 6> Lambda_B =
       Eigen::Matrix<double, 6, 6>::Zero();
@@ -49,6 +50,14 @@ struct LidarAraimSnapshot {
   std::vector<LidarAraimBlock> blocks;
 };
 
+struct LidarRiskComponents {
+  double gamma_rmse = 0.0;
+  double gamma_inlier = 0.0;
+  double gamma_condition = 0.0;
+  double gamma_age = 0.0;
+  double gamma_total = 0.0;
+};
+
 struct LidarHypothesis {
   enum class Type {
     H_SOURCE = 0,
@@ -62,6 +71,8 @@ struct LidarHypothesis {
   std::vector<int> block_indices;
   double gamma_mode = 0.0;
   double p_fault = 1e-4;
+  int selected_block_index = -1;
+  LidarRiskComponents selected_risk;
 };
 
 struct LidarSubsetSolution {
@@ -73,6 +84,12 @@ struct LidarSubsetSolution {
   double sigma_ss_E = 0.0;
   double sigma_ss_N = 0.0;
   double sigma_ss_U = 0.0;
+  double sigma_ss_raw_E_m2 = 0.0;
+  double sigma_ss_raw_N_m2 = 0.0;
+  double sigma_ss_raw_U_m2 = 0.0;
+  bool sigma_ss_fallback_E = false;
+  bool sigma_ss_fallback_N = false;
+  bool sigma_ss_fallback_U = false;
 
   double sigma_k_E = 0.0;
   double sigma_k_N = 0.0;
@@ -92,6 +109,8 @@ struct LidarSubsetSolution {
   double PL_U = 0.0;
   double HPL = 0.0;
   double VPL = 0.0;
+  double lambda_min_subset = 0.0;
+  double condition_number_subset = 1.0;
 
   bool valid = false;
   bool fault_detected = false;
@@ -119,6 +138,8 @@ struct LidarAraimResult {
   int n_detected = 0;
   int worst_hyp = -1;
   std::string worst_mode = "NONE";
+  int selected_target_count = 0;
+  int target_window_K = 10;
 
   Eigen::Matrix<double, 6, 6> Sigma0 =
       Eigen::Matrix<double, 6, 6>::Zero();
@@ -129,6 +150,11 @@ struct LidarAraimResult {
 class LidarAraim {
  public:
   struct Params {
+    enum class AgeModel {
+      EXP_SATURATING = 0,
+      LINEAR_CAPPED = 1,
+    };
+
     double P_HMI_req = 1e-6;
     double P_FA_req = 1e-4;
     bool dynamic_budget = true;
@@ -144,6 +170,14 @@ class LidarAraim {
 
     double rmse_ref = 0.2;
     double age_ref_sec = 1.0;
+    int target_window_K = 10;
+    AgeModel age_model = AgeModel::EXP_SATURATING;
+    double age_tau_s = 30.0;
+    double gamma_age_max = 1.0;
+    double gamma_rmse_max = 5.0;
+    double condition_ref = 10000.0;
+    double gamma_condition_max = 5.0;
+    double sigma_ss_min_m = 0.02;
     double w_rmse = 1.0;
     double w_inlier = 1.0;
     double w_cond = 1.0;
@@ -161,6 +195,10 @@ class LidarAraim {
   const Params& params() const { return params_; }
 
   static const char* to_string(LidarHypothesis::Type type);
+  static const char* to_string(Params::AgeModel model);
+  static LidarRiskComponents compute_risk_components(
+      const LidarAraimBlock& block,
+      const Params& params);
 
  private:
   static double Q_inv(double p);
@@ -171,9 +209,6 @@ class LidarAraim {
   static std::vector<LidarHypothesis> enumerate_hypotheses(
       const LidarAraimSnapshot& snapshot,
       const Params& params);
-  static double block_risk_score(const LidarAraimBlock& block,
-                                 const Params& params);
-
   Params params_;
 };
 

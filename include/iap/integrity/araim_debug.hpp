@@ -212,8 +212,9 @@ inline void AraimDebugLogger::log(const IntegrityReport& report) const {
   if (level_ == Level::SILENT) return;
 
   // SUMMARY: one-line key metrics
-  logger_->info("[ARAIM] state={} HPL={:.3f} VPL={:.3f} HAL={:.3f} VAL={:.3f} "
-                "IM={:.3f} n_sv={} n_det={}",
+  logger_->info("[ARAIM current_monitor] state={} monitor_HPL={:.3f} "
+                "monitor_VPL={:.3f} HAL={:.3f} VAL={:.3f} "
+                "monitor_IM={:.3f} n_sv={} n_det={}",
                 to_string(report.state), report.HPL, report.VPL,
                 report.HAL, report.VAL, report.IM,
                 report.n_sv_used, report.araim_n_det);
@@ -221,7 +222,8 @@ inline void AraimDebugLogger::log(const IntegrityReport& report) const {
   if (level_ < Level::DETAILED) return;
 
   // DETAILED: per-axis and quality
-  logger_->info("[ARAIM]   PL_E={:.3f} PL_N={:.3f} PL_U={:.3f} pl_ff={:.3f} "
+  logger_->info("[ARAIM current_monitor]   monitor_PL_E={:.3f} "
+                "monitor_PL_N={:.3f} monitor_PL_U={:.3f} pl_ff={:.3f} "
                 "K_ff={:.3f} PDOP={:.2f} σ_H={:.3f}",
                 report.PL_E, report.PL_N, report.PL_U,
                 report.pl_ff, report.K_ff_used, report.PDOP, report.sigma_H);

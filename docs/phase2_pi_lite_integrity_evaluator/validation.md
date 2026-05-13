@@ -43,3 +43,7 @@ python3 src/iap/tools/phase2/validate_phase2_integrity_eval.py \
 The validator fails when required Phase 2 outputs are missing, online truth usage is reported, the odom source is not `/drone_0_visual_slam/odom`, required finite columns contain NaN/inf, `AL_pred` is entirely unavailable, ARAIM is present but no finite offline IM/PL can be aligned, or Phase 1 official validation fails.
 
 Warnings are expected for conservative PL, mostly unsafe predicted margins, high tracking error, or missing actual AL/IM fields in incomplete runs.
+
+Naming note: `/iap/integrity` is the current certified monitor topic. Phase 2
+`PL_pred` and `IM_pred` columns are advisory planner/evaluator quantities, with
+`constant_current` retained as a compatibility mode.

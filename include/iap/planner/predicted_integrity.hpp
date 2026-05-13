@@ -1,7 +1,7 @@
 #pragma once
 // IAP-RQ-310: Predict visibility / observability along trajectory
-// IAP-RQ-320: Covariance propagation → Σ_pred → PL_pred
-// IAP-RQ-321: Trajectory-dependent PL_pred via visibility predictor
+// IAP-RQ-320: Covariance propagation to advisory PL proxy
+// IAP-RQ-321: Trajectory-dependent advisory PL proxy via visibility predictor
 
 #include <iap/planner/trajectory_types.hpp>
 #include <iap/integrity/integrity_types.hpp>
@@ -12,7 +12,7 @@
 namespace iap {
 
 /**
- * @brief Propagates uncertainty and predicts PL along a candidate trajectory.
+ * @brief Propagates uncertainty and predicts an advisory PL proxy along a trajectory.
  *
  * ### Covariance growth model (IAP-RQ-320, baseline)
  * Simple isotropic random-walk growth:
@@ -30,7 +30,7 @@ namespace iap {
  * Different candidates at different positions in the map yield different
  * n_vis and κ → different sigma_grow_eff → different PL_pred sequences.
  *
- * ### PL_pred proxy (IAP-RQ-320)
+ * ### Advisory PL_pred proxy (IAP-RQ-320)
  * @code
  *   PL_pred(t) = K_pl * sigma_pred(t)
  * @endcode
@@ -71,7 +71,7 @@ class PredictedIntegrityComputer {
   void set_epoch(const GnssEpoch* epoch);
 
   /**
-   * @brief Predict PL along a trajectory and fill CandidateTrajectory::PL_pred.
+   * @brief Predict advisory PL proxy and fill CandidateTrajectory::PL_pred.
    *
    * @param traj       Trajectory to predict (modified in-place)
    * @param sigma0     Initial position sigma [m] = sqrt(lambda_max(Σ_p))

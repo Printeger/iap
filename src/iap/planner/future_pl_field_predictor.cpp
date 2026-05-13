@@ -41,6 +41,8 @@ double k_ff_or_default(const PredictedAraimComputer::Params& params) {
 }
 
 void keep_gnss_only(FuturePLQueryResult& out) {
+  // Advisory compatibility mode: fused advisory output falls back to the GNSS
+  // advisory proxy. This is not certified monitor fusion.
   out.fused_hpl = out.gnss_hpl;
   out.fused_vpl = out.gnss_vpl;
   out.hpl = out.gnss_hpl;
@@ -255,6 +257,8 @@ FuturePLQueryResult FuturePLFieldPredictor::evaluate_point(
   auto out = make_future_pl_query_result(
       predictor.predict_araim_result(p_w), query_source);
 
+  // Legacy field names retained for compatibility. Semantically these are
+  // GNSS advisory PL proxy values and advisory predicted fused values.
   out.gnss_hpl = out.hpl;
   out.gnss_vpl = out.vpl;
   out.fused_hpl = out.hpl;
@@ -270,6 +274,8 @@ FuturePLQueryResult FuturePLFieldPredictor::evaluate_point(
     return out;
   }
 
+  // LiDAR observability is an advisory LOI-style proxy for planning only. It
+  // must not be reported as certified LiDAR ARAIM.
   LidarObservabilityResult lidar;
   if (params_.use_lidar_observability) {
     LidarObservabilityFim estimator(lidar_params_from(params_));
@@ -289,6 +295,8 @@ FuturePLQueryResult FuturePLFieldPredictor::evaluate_point(
     return out;
   }
 
+  // Advisory predicted fused PL proxy. Stage 2 may replace this with the
+  // formal FIM-add predictor, but Stage 1 does not alter the math here.
   const Eigen::Matrix3d lambda =
       gnss_base_information(out, snapshot) +
       params_.lidar_info_scale * lidar.lidar_alpha * lidar.delta_lambda;

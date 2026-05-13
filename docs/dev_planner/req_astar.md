@@ -1,14 +1,14 @@
 # ARAIM Integrity-Aware EGO Front Search
 
 ## Summary
-新增 EGO 侧 `IntegrityCostMap`，复用现有 ARAIM/PL 预测结果，不重新实现 ARAIM。`phase2_planner_integrity_evaluator` 额外周期发布一个面向前端搜索的大范围 integrity cost field；EGO 的 A* 在边代价中查询该 field，使前端路径从“只按距离/碰撞”变为“距离 + GNSS integrity 风险”。同时保留开关，可分别启用/关闭 rebound A* 和 global A*。
+新增 EGO 侧 `IntegrityCostMap`，复用现有 advisory PL proxy 预测结果，不重新实现 current certified ARAIM monitor。`phase2_planner_integrity_evaluator` 额外周期发布一个面向前端搜索的大范围 advisory integrity cost field；EGO 的 A* 在边代价中查询该 field，使前端路径从“只按距离/碰撞”变为“距离 + GNSS advisory integrity 风险”。同时保留开关，可分别启用/关闭 rebound A* 和 global A*。
 
 ## Key Changes
 - **新增 front cost field**
-  - 保留现有 `/iap/integrity_cost_field` 给 B-spline 后端使用。
-  - 新增 `/iap/integrity_front_cost_field`，默认同样使用 PointCloud2 字段：`x,y,z,hpl,vpl,hal,val,cost,risk_band_code`，梯度字段可置 0。
+  - 保留现有 `/iap/integrity_cost_field` 给 B-spline 后端使用；这是兼容 topic，字段为 advisory planner samples。
+  - 新增 `/iap/integrity_front_cost_field`，默认同样使用 PointCloud2 字段：`x,y,z,hpl,vpl,hal,val,cost,risk_band_code`，梯度字段可置 0。这里的 `hpl/vpl` 是 advisory predicted PL proxy，不是 `/iap/integrity` 的 current certified monitor PL。
   - demo11 默认周期发布：`2Hz`，`50m x 50m`，`1.0m` 分辨率，中心为最新 odom，高度为最新 odom z。
-  - ARAIM/PL 仍由 `FuturePLFieldPredictor/PLGrid` 计算；front field 只是发布给 EGO 查询的 planner-side 缓存源。
+  - Advisory PL proxy 仍由 `FuturePLFieldPredictor/PLGrid` 计算；front field 只是发布给 EGO 查询的 planner-side 缓存源。
 
 - **EGO 侧 IntegrityCostMap**
   - 在 `bspline_opt` 内新增轻量缓存，订阅 `/iap/integrity_front_cost_field`。
@@ -83,4 +83,4 @@ phase2_integrity_front_cost_field_size_y_m     default=50.0
 ## Assumptions
 - 不直接让 EGO 访问 `PLGrid` 对象；跨进程只通过 PointCloud2 cost field。
 - 未知 integrity 区域按 0 cost 处理，优先保证 planner 可用性。
-- v1 不改变 ARAIM 算法、不改变 occupancy map 语义、不把 `PL > AL` 设为硬不可通行，只作为可调软代价进入前端搜索。
+- v1 不改变 current certified ARAIM monitor 算法、不改变 occupancy map 语义、不把 `PL > AL` 设为硬不可通行，只作为可调软代价进入前端搜索。

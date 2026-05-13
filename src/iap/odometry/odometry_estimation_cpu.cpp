@@ -203,6 +203,10 @@ gtsam::NonlinearFactorGraph OdometryEstimationCPU::create_factors(const int curr
       block.age_sec = target_frame
           ? std::max(0.0, frames[current]->stamp - target_frame->stamp)
           : 0.0;
+      block.target_distance_m = target_frame
+          ? (frames[current]->T_world_imu.translation() -
+             target_frame->T_world_imu.translation()).norm()
+          : 1e9;
       block.Lambda_B = H_source;
       block.eta_B = b_source;
       lidar_snapshot.blocks.push_back(std::move(block));

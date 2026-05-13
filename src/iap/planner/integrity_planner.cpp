@@ -1,6 +1,6 @@
 // IAP-RQ-400: Integrity-aware planning objective
 // IAP-RQ-410: Receding horizon loop
-// IAP-RQ-331/421/422: ARAIM-predicted PL + per-waypoint AL
+// IAP-RQ-331/421/422: advisory predicted PL proxy + per-waypoint AL
 // §5.2: Cost = HPL/AL ratio hinge + D_turn + dist_to_goal + effort + infeasibility
 
 #include <iap/planner/integrity_planner.hpp>
@@ -140,10 +140,11 @@ CandidateTrajectory IntegrityPlanner::plan(const Eigen::Vector3d& pos0,
     return {};
   }
 
-  // Predict PL_pred for all candidates (IAP-RQ-320)
+  // Predict advisory PL_pred proxies for all candidates (IAP-RQ-320).
   predictor_.predict_all(candidates, sigma0);
 
-  // Phase-4: fill AL_pred per waypoint and optionally replace PL_pred
+  // Fill AL_pred per waypoint and optionally replace PL_pred with the
+  // geometry-only GNSS advisory proxy.
   for (auto& traj : candidates) {
     const int K = static_cast<int>(traj.points.size());
     traj.AL_pred.resize(K, AL);

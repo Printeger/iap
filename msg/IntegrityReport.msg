@@ -1,24 +1,25 @@
-# IAP per-axis ARAIM result (§1.11)
-# Published by integrity monitor at each GNSS epoch
+# IAP current certified monitor result (§1.11)
+# Published by the integrity monitor. The PL fields are monitor-fused
+# certified outputs: PL_mon_q = max(PL_G_q, PL_L_q).
 
 std_msgs/Header header
 
 # Three-state: 0=SAFE, 1=SAFE_EXCLUDED, 2=UNSAFE
 uint8  integrity_state
 
-# Protection Levels [m]
-float64 hpl              # max(pl_e, pl_n) [m]
-float64 vpl              # pl_u [m]
-float64 pl_e             # East protection level [m]
-float64 pl_n             # North protection level [m]
-float64 pl_u             # Up protection level [m]
+# Current certified monitor Protection Levels [m]
+float64 hpl              # monitor_fused_hpl = max(pl_e, pl_n) [m]
+float64 vpl              # monitor_fused_vpl = pl_u [m]
+float64 pl_e             # monitor_fused_pl_e [m]
+float64 pl_n             # monitor_fused_pl_n [m]
+float64 pl_u             # monitor_fused_pl_u [m]
 
 # Alert Limits [m]
 float64 hal              # horizontal alert limit [m]
 float64 val              # vertical alert limit [m]
 
-# Integrity Margin
-float64 im               # AL - PL [m] (positive = safe)
+# Current monitor Integrity Margin
+float64 im               # monitor_integrity_margin = AL - PL [m]
 
 # Fault-free PL
 float64 pl_ff            # fault-free horizontal PL [m]

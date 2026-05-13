@@ -38,6 +38,7 @@
 #include <iap/integrity/araim_debug.hpp>
 #include <iap/integrity/integrity_monitor.hpp>
 #include <iap/integrity/fgo_information_matrix.hpp>
+#include <iap/integrity/lidar_araim_debug.hpp>
 #include <iap/odometry/estimation_frame.hpp>
 #include <iap/util/extension_module_ros2.hpp>
 
@@ -120,6 +121,7 @@ class IntegrityExtensionModule : public glim::ExtensionModuleROS2 {
 
   // ── ARAIM CSV + Trajectory CSV ────────────────────────────────────────
   std::unique_ptr<AraimDebugCSV> araim_debug_csv_;
+  std::unique_ptr<LidarAraimDebugCSV> lidar_araim_stage0_csv_;
   std::FILE* traj_csv_file_ = nullptr;
 
   // ── Diagnostics ───────────────────────────────────────────────────────

@@ -1,5 +1,5 @@
 #pragma once
-// Phase D: direct/grid future PL field predictor.
+// Phase D: direct/grid advisory future PL field predictor.
 
 #include <Eigen/Core>
 

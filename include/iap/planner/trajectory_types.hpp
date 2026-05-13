@@ -1,6 +1,6 @@
 #pragma once
 // IAP-RQ-300: Candidate trajectory generator (motion primitives baseline)
-// IAP-RQ-320: Covariance propagation → Σ_pred → PL_pred
+// IAP-RQ-320: Covariance propagation -> advisory PL_pred proxy
 
 #include <Eigen/Core>
 #include <vector>
@@ -15,14 +15,14 @@ struct TrajectoryPoint {
   double          yaw   = 0.0;   ///< heading [rad]
 };
 
-/// @brief A candidate trajectory (sequence of waypoints + predicted integrity).
+/// @brief A candidate trajectory (sequence of waypoints + advisory integrity).
 struct CandidateTrajectory {
   int id = 0;  ///< candidate index
 
   std::vector<TrajectoryPoint> points;  ///< time-ordered waypoints
 
-  // ---- Predicted integrity (filled by PL predictor, IAP-RQ-320/331) -----
-  /// Predicted PL at each waypoint (same length as points after prediction)
+  // ---- Advisory predicted integrity (filled by planner PL predictor) -----
+  /// Advisory predicted PL at each waypoint; not current certified monitor PL.
   std::vector<double> PL_pred;
   /// Predicted covariance growth proxy sigma at each point
   std::vector<double> sigma_pred;

@@ -47,6 +47,16 @@
     "araim_marker_max_pl_m": 30.0,
     "araim_marker_show_gnss": true,
     "araim_marker_show_lidar": false,
-    "araim_marker_show_final": false
+    "araim_marker_show_final": false,
+    "lidar_araim_target_window_K": 10,
+    "lidar_araim_age_model": "exp_saturating",
+    "lidar_araim_age_tau_s": 30.0,
+    "lidar_araim_gamma_age_max": 1.0,
+    "lidar_araim_gamma_rmse_max": 5.0,
+    "lidar_araim_condition_ref": 10000.0,
+    "lidar_araim_gamma_condition_max": 5.0,
+    "lidar_araim_sigma_ss_min_m": 0.02,
+    "enable_lidar_araim_stage0_csv": true,
+    "lidar_araim_stage0_csv_path": "/tmp/iap_lidar_araim_stage0.csv"
   }
 }

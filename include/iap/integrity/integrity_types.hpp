@@ -93,15 +93,19 @@ struct DynamicALResult {
 // Integrity monitoring report (per frame)
 // ---------------------------------------------------------------------------
 
-/// @brief Integrity monitoring report for one frame.
-/// IAP-RQ-200: PL, AL, IM = AL − PL, state.
+/// @brief Current certified monitor report for one frame.
+///
+/// The primary PL fields are monitor-fused certified outputs:
+/// PL_mon_q = max(PL_G_q, PL_L_q). Future planner/advisory predictors use
+/// separate types in iap/planner and must not claim certification.
+/// IAP-RQ-200: monitor PL, AL, monitor IM = AL - PL, state.
 struct IntegrityReport {
   double stamp = 0.0;  ///< frame timestamp [s]
 
-  // --- Primary integrity scalars (IAP-RQ-200) ----------------------------
-  double PL  = 1e9;  ///< Protection Level [m] (= HPL from ARAIM when available)
+  // --- Current certified monitor scalars (IAP-RQ-200) --------------------
+  double PL  = 1e9;  ///< monitor_fused_pl [m] (= monitor_fused_hpl)
   double AL  = 0.0;  ///< Alert Limit [m] (= min(HAL, VAL), §1.12)
-  double IM  = 0.0;  ///< Integrity Margin  IM = AL − PL  (positive = safe)
+  double IM  = 0.0;  ///< monitor_integrity_margin = AL - PL (positive = safe)
 
   IntegrityState state = IntegrityState::UNSAFE;  ///< §1.13 three-state
   PlannerState   planner_state = PlannerState::CRUISE;
@@ -123,15 +127,15 @@ struct IntegrityReport {
   double gamma_lidar    = 1.0;
   double tdop = 1e9;
 
-  // --- ARAIM per-axis output (§1.11) --------------------------------------
-  double HPL           = 1e9;  ///< max(PL_E, PL_N) [m]
-  double VPL           = 1e9;  ///< PL_U [m]
-  double PL_E          = 1e9;  ///< East protection level [m]
-  double PL_N          = 1e9;  ///< North protection level [m]
-  double PL_U          = 1e9;  ///< Up protection level [m]
-  double pl_araim      = 1e9;  ///< alias for HPL [m]
-  double vpl_araim     = 1e9;  ///< alias for VPL [m]
-  double pl_ff         = 1e9;  ///< fault-free PL [m]
+  // --- Monitor-fused per-axis certified output (§1.11) --------------------
+  double HPL           = 1e9;  ///< monitor_fused_hpl = max(PL_E, PL_N) [m]
+  double VPL           = 1e9;  ///< monitor_fused_vpl = PL_U [m]
+  double PL_E          = 1e9;  ///< monitor_fused_pl_e [m]
+  double PL_N          = 1e9;  ///< monitor_fused_pl_n [m]
+  double PL_U          = 1e9;  ///< monitor_fused_pl_u [m]
+  double pl_araim      = 1e9;  ///< legacy alias for monitor_fused_hpl [m]
+  double vpl_araim     = 1e9;  ///< legacy alias for monitor_fused_vpl [m]
+  double pl_ff         = 1e9;  ///< GNSS fault-free certified PL [m]
   double K_ff_used     = 0.0;  ///< K_ff actually used
   double K_fa_used     = 0.0;  ///< worst-case K_fa actually used (IAP-RQ-200)
   int    araim_valid   = 0;
@@ -139,13 +143,13 @@ struct IntegrityReport {
   int    araim_n_det   = 0;
   std::vector<int> araim_detected_rows;
 
-  // --- GNSS ARAIM source split diagnostics -------------------------------
+  // --- GNSS certified ARAIM source split diagnostics ----------------------
   int    gnss_valid     = 0;
-  double gnss_PL_E      = 1e9;
-  double gnss_PL_N      = 1e9;
-  double gnss_PL_U      = 1e9;
-  double gnss_HPL       = 1e9;
-  double gnss_VPL       = 1e9;
+  double gnss_PL_E      = 1e9;  ///< gnss_certified_pl_e [m]
+  double gnss_PL_N      = 1e9;  ///< gnss_certified_pl_n [m]
+  double gnss_PL_U      = 1e9;  ///< gnss_certified_pl_u [m]
+  double gnss_HPL       = 1e9;  ///< gnss_certified_hpl [m]
+  double gnss_VPL       = 1e9;  ///< gnss_certified_vpl [m]
   double gnss_pl_ff     = 1e9;
   double gnss_K_ff_used = 0.0;
   double gnss_K_fa_used = 0.0;
@@ -158,18 +162,18 @@ struct IntegrityReport {
   double PDOP              = 1e9;
   double sigma_H           = 1e9;  ///< fault-free horizontal σ [m]
 
-  // --- LiDAR ARAIM diagnostics -------------------------------------------
+  // --- LiDAR certified ARAIM diagnostics ---------------------------------
   int    lidar_valid   = 0;
   int    lidar_n_hyp   = 0;
   int    lidar_n_det   = 0;
-  double lidar_PL_E    = 1e9;
-  double lidar_PL_N    = 1e9;
-  double lidar_PL_U    = 1e9;
-  double lidar_HPL     = 1e9;
-  double lidar_VPL     = 1e9;
+  double lidar_PL_E    = 1e9;  ///< lidar_certified_pl_e [m]
+  double lidar_PL_N    = 1e9;  ///< lidar_certified_pl_n [m]
+  double lidar_PL_U    = 1e9;  ///< lidar_certified_pl_u [m]
+  double lidar_HPL     = 1e9;  ///< lidar_certified_hpl [m]
+  double lidar_VPL     = 1e9;  ///< lidar_certified_vpl [m]
   std::string lidar_worst_mode = "NONE";
 
-  // --- Final fused PL source diagnostics ----------------------------------
+  // --- Monitor-fused PL source diagnostics --------------------------------
   std::string final_HPL_source = "UNKNOWN";
   std::string final_VPL_source = "UNKNOWN";
   std::string final_PL_source  = "UNKNOWN";
@@ -183,6 +187,28 @@ struct IntegrityReport {
   // --- Derived flags -------------------------------------------------------
   bool safe() const { return IM > 0.0; }
   bool is_available() const { return PL < AL; }
+
+  // Non-breaking semantic aliases for Stage 1 naming. Storage fields above
+  // remain unchanged for ABI/source compatibility and ROS message mapping.
+  double monitor_fused_pl() const { return PL; }
+  double monitor_fused_hpl() const { return HPL; }
+  double monitor_fused_vpl() const { return VPL; }
+  double monitor_fused_pl_e() const { return PL_E; }
+  double monitor_fused_pl_n() const { return PL_N; }
+  double monitor_fused_pl_u() const { return PL_U; }
+  double monitor_integrity_margin() const { return IM; }
+
+  double gnss_certified_hpl() const { return gnss_HPL; }
+  double gnss_certified_vpl() const { return gnss_VPL; }
+  double gnss_certified_pl_e() const { return gnss_PL_E; }
+  double gnss_certified_pl_n() const { return gnss_PL_N; }
+  double gnss_certified_pl_u() const { return gnss_PL_U; }
+
+  double lidar_certified_hpl() const { return lidar_HPL; }
+  double lidar_certified_vpl() const { return lidar_VPL; }
+  double lidar_certified_pl_e() const { return lidar_PL_E; }
+  double lidar_certified_pl_n() const { return lidar_PL_N; }
+  double lidar_certified_pl_u() const { return lidar_PL_U; }
 };
 
 }  // namespace iap

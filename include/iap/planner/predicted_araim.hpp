@@ -1,5 +1,5 @@
 #pragma once
-// IAP-RQ-331: Predicted ARAIM PL along candidate trajectory (geometry-only mode)
+// IAP-RQ-331: GNSS advisory PL proxy along candidate trajectory.
 
 #include <iap/integrity/araim.hpp>
 #include <iap/gnss/gnss_types.hpp>
@@ -10,6 +10,8 @@
 
 namespace iap {
 
+// Geometry-only GNSS advisory proxy result. Despite the legacy type name, this
+// is not a certified/current monitor ARAIM output.
 struct PredictedAraimResult {
   bool valid = false;
   bool fallback = true;
@@ -31,24 +33,25 @@ struct PredictedAraimResult {
 };
 
 /**
- * @brief Runs geometry-only ARAIM at each candidate waypoint for planning.
+ * @brief Computes a GNSS advisory PL proxy (GII) for planning.
  *
  * Workflow per waypoint (IAP-RQ-331):
  * 1. Call VisibilityPredictor::predict(pos, *epoch) → VisibilityResult
  * 2. Extract visible satellites with their σ_eff values
  * 3. Build SatGeometry list → call Araim::predict_geometry()
- * 4. Return AraimResult::pl_araim
+ * 4. Return non-certified advisory HPL/VPL proxy values.
  *
  * When no epoch is available, returns a conservative fallback value
  * (params.fallback_pl). When no occupancy grid is set, prediction assumes
- * open sky and still evaluates GNSS geometry.
+ * open sky and still evaluates GNSS geometry. These outputs are advisory and
+ * must not be used as certified monitor PL.
  */
 class PredictedAraimComputer {
  public:
   struct Params {
     Araim::Params             araim_params;   ///< K_fa, K_md, K_ff, etc.
     VisibilityPredictor::Params vis_params;   ///< elevation mask, occ range, canopy
-    double fallback_pl = 5.0;  ///< PL returned when the GNSS epoch is unavailable [m]
+    double fallback_pl = 5.0;  ///< advisory proxy when GNSS epoch unavailable [m]
   };
 
   PredictedAraimComputer();
@@ -61,14 +64,14 @@ class PredictedAraimComputer {
   void set_epoch(const GnssEpoch* epoch);
 
   /**
-   * @brief Predict ARAIM PL at a single world-frame position.
+   * @brief Predict GNSS advisory PL proxy at a single world-frame position.
    *
-   * @return pl_araim [m]; returns fallback_pl when prediction is unavailable.
+   * @return advisory HPL proxy [m]; returns fallback_pl when unavailable.
    */
   double predict_araim_pl(const Eigen::Vector3d& pos_world) const;
 
   /**
-   * @brief Predict ARAIM HPL/VPL and debug fields at a single world-frame position.
+   * @brief Predict GNSS advisory HPL/VPL proxy and debug fields.
    */
   PredictedAraimResult predict_araim_result(
       const Eigen::Vector3d& pos_world) const;

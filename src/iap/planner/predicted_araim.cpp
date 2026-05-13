@@ -1,4 +1,4 @@
-// IAP-RQ-331: Predicted ARAIM PL for planning (geometry-only mode)
+// IAP-RQ-331: GNSS advisory PL proxy for planning (geometry-only mode).
 
 #include <iap/planner/predicted_araim.hpp>
 #include <spdlog/spdlog.h>
@@ -52,7 +52,7 @@ PredictedAraimResult PredictedAraimComputer::predict_araim_result(
   };
 
   // Fallback: no GNSS epoch available. A missing occupancy grid is treated as
-  // open sky by VisibilityPredictor.
+  // open sky by VisibilityPredictor. This remains an advisory proxy.
   if (epoch_ == nullptr) {
     return fallback("no_gnss_epoch");
   }
@@ -92,7 +92,8 @@ PredictedAraimResult PredictedAraimComputer::predict_araim_result(
     return out;
   }
 
-  // 3. Run geometry-only ARAIM (r = 0)
+  // 3. Run geometry-only ARAIM machinery (r = 0) to produce a non-certified
+  // GNSS advisory PL proxy for planning.
   const AraimResult ar = araim_.predict_geometry(geom);
 
   if (!ar.valid) {
@@ -102,8 +103,8 @@ PredictedAraimResult PredictedAraimComputer::predict_araim_result(
     return out;
   }
 
-  spdlog::trace("[PredictedAraim] pos=({:.1f},{:.1f},{:.1f}) n_vis={} "
-                "pl_ff={:.3f} pl_araim={:.3f}",
+  spdlog::trace("[GNSS Advisory PL Proxy] pos=({:.1f},{:.1f},{:.1f}) n_vis={} "
+                "pl_ff_proxy={:.3f} gnss_advisory_hpl_proxy={:.3f}",
                 pos_world.x(), pos_world.y(), pos_world.z(),
                 vis.n_vis, ar.pl_ff, ar.pl_araim);
 

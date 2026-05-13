@@ -1,5 +1,8 @@
 #pragma once
-// Phase F: future LiDAR observability/FIM proxy for planner-side PL queries.
+// Phase F: LiDAR advisory observability proxy for planner-side PL queries.
+//
+// This is a future/advisory LOI-style proxy. It is not the certified current
+// LiDAR ARAIM monitor and must not be reported as certified LiDAR PL.
 
 #include <Eigen/Core>
 
@@ -13,7 +16,7 @@ namespace iap {
 
 struct LidarObservabilityResult {
   bool valid = false;
-  Eigen::Matrix3d delta_lambda = Eigen::Matrix3d::Zero();
+  Eigen::Matrix3d delta_lambda = Eigen::Matrix3d::Zero();  ///< advisory LOI
   double tdop_proxy = 20.0;
   double lidar_alpha = 0.0;
   double condition = 1.0e6;

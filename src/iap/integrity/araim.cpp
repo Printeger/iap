@@ -515,7 +515,7 @@ AraimResult Araim::run(const GnssEpoch& epoch, int n_trunk_obs) const {
 }
 
 // ---------------------------------------------------------------------------
-// Public predict_geometry() — geometry-only (r = 0, d_k = 0)
+// Public predict_geometry() - geometry-only GNSS advisory proxy
 // ---------------------------------------------------------------------------
 
 AraimResult Araim::predict_geometry(
@@ -559,7 +559,7 @@ AraimResult Araim::predict_geometry(
   AraimResult result = compute_core(G, W, r, hyps, params_);
   result.n_hypotheses = N;
 
-  spdlog::trace("[ARAIM] predict: N={} HPL={:.3f} VPL={:.3f}",
+  spdlog::trace("[ARAIM advisory_geometry_proxy] N={} HPL={:.3f} VPL={:.3f}",
                 N, result.HPL, result.VPL);
 
   return result;

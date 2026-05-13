@@ -448,6 +448,90 @@ TEST_F(LidarAraimTest, GpuBackendBlocksProduceValidGroupedResult) {
   EXPECT_GT(result.VPL, 0.0);
 }
 
+TEST_F(LidarAraimTest, AgeRiskSaturates) {
+  auto params = default_params();
+  params.w_rmse = 0.0;
+  params.w_inlier = 0.0;
+  params.w_cond = 0.0;
+  params.w_age = 1.0;
+  params.age_model = LidarAraim::Params::AgeModel::EXP_SATURATING;
+  params.age_tau_s = 30.0;
+  params.gamma_age_max = 1.0;
+  params.alpha_H = 1.0;
+  params.alpha_V = 1.0;
+
+  auto block_30 = make_block(10, 0, 1.0, 0.0, 0.1, 0.9, 2.0, 30.0);
+  auto block_300 = block_30;
+  auto block_3000 = block_30;
+  block_300.age_sec = 300.0;
+  block_3000.age_sec = 3000.0;
+
+  const auto risk_30 = LidarAraim::compute_risk_components(block_30, params);
+  const auto risk_300 = LidarAraim::compute_risk_components(block_300, params);
+  const auto risk_3000 = LidarAraim::compute_risk_components(block_3000, params);
+
+  EXPECT_LE(risk_30.gamma_age, params.gamma_age_max);
+  EXPECT_LE(risk_300.gamma_age, params.gamma_age_max);
+  EXPECT_LE(risk_3000.gamma_age, params.gamma_age_max);
+  EXPECT_LT(risk_3000.gamma_age - risk_300.gamma_age, 1e-4);
+
+  LidarAraim araim(params);
+  auto snapshot_300 = make_snapshot();
+  auto snapshot_3000 = make_snapshot();
+  snapshot_300.blocks.push_back(block_300);
+  snapshot_3000.blocks.push_back(block_3000);
+
+  const auto result_300 = araim.run(snapshot_300, make_fgo());
+  const auto result_3000 = araim.run(snapshot_3000, make_fgo());
+  ASSERT_TRUE(result_300.valid);
+  ASSERT_TRUE(result_3000.valid);
+  EXPECT_NEAR(result_3000.HPL, result_300.HPL, 1e-4);
+}
+
+TEST_F(LidarAraimTest, TargetWindowCapsHypotheses) {
+  auto params = default_params();
+  params.target_window_K = 10;
+  params.dynamic_budget = false;
+  params.alpha_H = 0.0;
+  params.alpha_V = 0.0;
+  LidarAraim araim(params);
+
+  auto snapshot = make_snapshot();
+  for (int i = 0; i < 12; ++i) {
+    auto block = make_block(100 + i, 0, 0.1, 0.0);
+    block.target_distance_m = static_cast<double>(12 - i);
+    snapshot.blocks.push_back(block);
+  }
+
+  const auto result = araim.run(snapshot, make_fgo());
+  ASSERT_TRUE(result.valid);
+  EXPECT_EQ(result.selected_target_count, 10);
+  EXPECT_EQ(result.target_window_K, 10);
+  EXPECT_EQ(result.n_hypotheses, 12);  // source + 10 targets + one level
+}
+
+TEST_F(LidarAraimTest, SigmaSsFallbackForNegativeRawVariance) {
+  auto params = default_params();
+  params.dynamic_budget = false;
+  params.alpha_H = 0.0;
+  params.alpha_V = 0.0;
+  params.sigma_ss_min_m = 0.02;
+  LidarAraim araim(params);
+
+  auto snapshot = make_snapshot();
+  auto block = make_block(10, 0, -1.0, 0.0);
+  snapshot.blocks.push_back(block);
+
+  const auto result = araim.run(snapshot, make_fgo());
+  ASSERT_TRUE(result.valid);
+  ASSERT_FALSE(result.subsets.empty());
+  const auto& ss = result.subsets.front();
+  ASSERT_TRUE(ss.valid);
+  EXPECT_LT(ss.sigma_ss_raw_E_m2, 0.0);
+  EXPECT_TRUE(ss.sigma_ss_fallback_E);
+  EXPECT_GE(ss.sigma_ss_E, params.sigma_ss_min_m);
+}
+
 // ============================================================================
 // §2: IntegrityState transitions
 // ============================================================================

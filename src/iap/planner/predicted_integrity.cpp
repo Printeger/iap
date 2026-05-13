@@ -1,5 +1,5 @@
-// IAP-RQ-320: Covariance propagation + PL_pred
-// IAP-RQ-321: Trajectory-dependent PL_pred via visibility predictor
+// IAP-RQ-320: Covariance propagation + advisory PL_pred proxy
+// IAP-RQ-321: Trajectory-dependent advisory PL_pred via visibility predictor
 
 #include <iap/planner/predicted_integrity.hpp>
 #include <algorithm>

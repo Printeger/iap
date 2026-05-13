@@ -23,6 +23,8 @@ FuturePLQueryResult make_future_pl_query_result(
   out.pdop = pred.pdop;
   out.n_vis = pred.n_vis;
   out.n_hypotheses = pred.n_hypotheses;
+  // Legacy storage names retained; semantically these are advisory proxy
+  // outputs, not current certified monitor fields.
   out.gnss_hpl = pred.hpl;
   out.gnss_vpl = pred.vpl;
   out.fused_hpl = pred.hpl;

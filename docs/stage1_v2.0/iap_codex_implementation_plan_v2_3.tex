@@ -1,0 +1,1615 @@
+% !TeX program = xelatex
+\documentclass[11pt,a4paper]{article}
+
+% ============================================================
+% IAP Stage-1 Implementation Plan for Codex
+% This document is designed to be provided directly to Codex.
+% ============================================================
+
+\usepackage[fontset=none]{ctex}
+\setCJKmainfont[AutoFakeSlant=0.2]{Noto Serif CJK SC}
+\setCJKsansfont{Noto Sans CJK SC}
+\setCJKmonofont{Noto Sans Mono CJK SC}
+\usepackage{amsmath,amssymb,amsfonts,mathtools,bm}
+\usepackage{geometry}
+\usepackage{booktabs,longtable,tabularx,array,multirow}
+\usepackage{xcolor}
+\usepackage{enumitem}
+\usepackage{hyperref}
+\usepackage{titlesec}
+\usepackage{caption}
+\usepackage{fancyhdr}
+\usepackage{listings}
+\usepackage{tcolorbox}
+\tcbuselibrary{breakable,skins}
+
+\geometry{margin=2.25cm}
+\hypersetup{colorlinks=true, linkcolor=blue!55!black, urlcolor=blue!60!black, citecolor=blue!55!black}
+\setlist[itemize]{leftmargin=1.5em,itemsep=2pt,topsep=2pt}
+\setlist[enumerate]{leftmargin=1.8em,itemsep=2pt,topsep=2pt}
+\newcolumntype{Y}{>{\raggedright\arraybackslash}X}
+\newcolumntype{P}[1]{>{\raggedright\arraybackslash}p{#1}}
+\renewcommand{\arraystretch}{1.18}
+
+% -------------------- Colors --------------------
+\definecolor{iapblue}{RGB}{0,80,150}
+\definecolor{iapgreen}{RGB}{25,120,70}
+\definecolor{iaporange}{RGB}{190,105,0}
+\definecolor{iapred}{RGB}{180,40,40}
+\definecolor{codebg}{RGB}{248,248,248}
+
+\titleformat{\section}{\Large\bfseries\color{iapblue}}{\thesection}{0.7em}{}
+\titleformat{\subsection}{\large\bfseries\color{iapblue!85!black}}{\thesubsection}{0.7em}{}
+\titleformat{\subsubsection}{\normalsize\bfseries\color{iapblue!75!black}}{\thesubsubsection}{0.7em}{}
+
+\setlength{\headheight}{14pt}
+\pagestyle{fancy}
+\fancyhf{}
+\lhead{IAP Stage-1 v2.3 Implementation Plan}
+\rhead{Codex Spec}
+\cfoot{\thepage}
+
+% -------------------- Commands --------------------
+\newcommand{\PL}{\mathrm{PL}}
+\newcommand{\AL}{\mathrm{AL}}
+\newcommand{\IM}{\mathrm{IM}}
+\newcommand{\HPL}{\mathrm{HPL}}
+\newcommand{\VPL}{\mathrm{VPL}}
+\newcommand{\HAL}{\mathrm{HAL}}
+\newcommand{\VAL}{\mathrm{VAL}}
+\newcommand{\Lam}{\Lambda}
+\newcommand{\Sig}{\Sigma}
+\newcommand{\Gm}{\mathbf{G}}
+\newcommand{\Wm}{\mathbf{W}}
+\newcommand{\Jm}{\mathbf{J}}
+\newcommand{\Rm}{\mathbf{R}}
+\newcommand{\evec}{\mathbf{e}}
+\newcommand{\pvec}{\mathbf{p}}
+\newcommand{\nm}{\mathbf{n}}
+\newcommand{\xm}{\mathbf{x}}
+\newcommand{\ym}{\mathbf{y}}
+\newcommand{\eps}{\varepsilon}
+\newcommand{\pos}{\mathrm{pos}}
+\newcommand{\adv}{\mathrm{adv}}
+\newcommand{\prior}{\mathrm{prior}}
+\newcommand{\mon}{\mathrm{mon}}
+\newcommand{\used}{\mathrm{used}}
+\newcommand{\pred}{\mathrm{pred}}
+\newcommand{\diag}{\mathrm{diag}}
+\newcommand{\tr}{\mathrm{tr}}
+\newcommand{\blkdiag}{\mathrm{blkdiag}}
+\newcommand{\sat}{\mathrm{sat}}
+
+\lstdefinestyle{codestyle}{
+  basicstyle=\ttfamily\small,
+  backgroundcolor=\color{codebg},
+  frame=single,
+  rulecolor=\color{black!20},
+  breaklines=true,
+  columns=fullflexible,
+  keepspaces=true,
+  showstringspaces=false,
+  tabsize=2
+}
+\lstset{style=codestyle}
+
+\newtcolorbox{codexbox}[1]{
+  enhanced,
+  breakable,
+  colback=blue!2,
+  colframe=iapblue!55!black,
+  title=\textbf{#1},
+  fonttitle=\bfseries,
+  left=1mm,right=1mm,top=1mm,bottom=1mm
+}
+
+\newtcolorbox{warningbox}[1]{
+  enhanced,
+  breakable,
+  colback=red!2,
+  colframe=iapred!75!black,
+  title=\textbf{#1},
+  fonttitle=\bfseries,
+  left=1mm,right=1mm,top=1mm,bottom=1mm
+}
+
+\newtcolorbox{acceptbox}[1]{
+  enhanced,
+  breakable,
+  colback=green!2,
+  colframe=iapgreen!65!black,
+  title=\textbf{#1},
+  fonttitle=\bfseries,
+  left=1mm,right=1mm,top=1mm,bottom=1mm
+}
+
+% -------------------- Title --------------------
+\title{\textbf{IAP Stage-1 v2.3 Implementation Plan for Codex}\\[3pt]
+  \large Certified ARAIM Monitor $\parallel$ Advisory FIM-Fused Predictor\\[2pt]
+\normalsize 完整公式、实现逻辑、接口规格、实现护栏、分阶段验收标准}
+\author{Prepared for Codex-assisted implementation}
+\date{May 2026}
+
+\begin{document}
+\maketitle
+\vspace{-1.2em}
+
+\begin{warningbox}{使用边界 / Read This First}
+  本文档是给 Codex 单独执行开发用的 implementation plan，而不是论文方法章。Codex 必须先 inspect 当前 repository，再输出具体文件级 plan；未经确认，不得一次性重构全部系统。
+  \begin{itemize}
+    \item \textbf{必须保留 current certified ARAIM monitor 的 conservative max fusion。}
+    \item \textbf{FIM-add 只允许进入 future/advisory predictor 与 planner path。}
+    \item \textbf{每个 stage 单独 commit；每个 commit 只做一类改动。}
+    \item \textbf{所有新公式必须有 log、config、fallback、unit test 或 launch-level sanity check。}
+    \item \textbf{所有涉及坐标的实现必须显式标注 frame；不得混用 ENU/map/body/ECEF。}
+    \item \textbf{所有旧 topic / message 必须在至少一个 stage 内保留兼容层，禁止一次性删除。}
+  \end{itemize}
+\end{warningbox}
+
+\tableofcontents
+\newpage
+
+
+% ============================================================
+\section{v2.3 增补摘要：本版相对 v2.2 的新增内容}
+% ============================================================
+
+本版在 v2.2 的基础上补齐 Codex 实现时最容易出错的公式边界、退化条件和执行护栏。新增重点如下：
+\begin{enumerate}
+  \item 明确 current LiDAR ARAIM 中 $\sigma_{ss}$ 的保守计算、数值检查和 fallback flag，避免 Codex 直接套用不适用于 LiDAR downdate 的 GNSS separation variance。
+  \item 明确 advisory HPL/VPL 的 horizontal/vertical projection，尤其是 horizontal covariance 必须使用 $\lambda_{\max}(\Sigma_{xy})$，不能只取 $\max(\Sigma_{xx},\Sigma_{yy})$。
+  \item 明确 GNSS FIM 的坐标系、clock bias 单位、Schur complement 退化条件和 PSD 检查。
+  \item 明确 LiDAR $3\times3$ FIM 的最小可实现版本：先做 no-raycast local normal FIM，再逐步加入 raycast、incidence、dynamic 和 $6\times6$ pose FIM。
+  \item 明确 A* front-end 与 B-spline back-end 对同一 $c_{PI}$ 的使用公式，防止两条 planner path 调出不同语义。
+  \item 增加 stage invariants 与 Codex execution gate：Codex 必须先 inspect repo，并逐 stage 输出 file-level plan；未经批准不得直接改 Stage 2--4。
+\end{enumerate}
+
+\begin{acceptbox}{v2.3 的使用方式}
+  这份文档已经可以作为 Codex 的 master implementation spec，但第一轮 Codex 任务仍然必须是 repository inspection，不是直接实现。每个 stage 都必须先输出实际文件、类、函数、topic、message、launch/test 命令和坐标系假设。
+\end{acceptbox}
+
+% ============================================================
+\section{目标、范围与非目标}
+% ============================================================
+
+\subsection{最终目标}
+
+本次整改目标是将当前 IAP Stage-1 系统从“可运行 demo”推进为“概念边界清晰、公式一致、可调试、可验证”的 integrity-aware planning 系统。核心结构为：
+\[
+  \boxed{
+    \underbrace{\text{Certified ARAIM Monitor}}_{\text{current, safety-critical, conservative}}
+    \quad \parallel \quad
+    \underbrace{\text{Advisory FIM-Fused Predictor + Planner}}_{\text{future, optimization-friendly}}
+  }
+\]
+
+\noindent 具体输出包括：
+\begin{enumerate}
+  \item 修复 LiDAR ARAIM PL 的非物理线性增长。
+  \item 区分 current certified PL 与 future advisory PL proxy。
+  \item 将 future GNSS/LiDAR prediction 从 two-channel PL/max logic 改为 position-FIM-level fusion。
+  \item 将 PI function 改为只消费一个统一的 advisory predicted PL / integrity margin。
+  \item 将 ESDF、AL、PL、IM、PI cost 合并为 Unified Risk Grid (URG) 的多层查询结构。
+  \item 建立 stage-by-stage 的 log、test、验收标准和性能 profiling。
+\end{enumerate}
+
+\subsection{非目标}
+
+本次整改\textbf{不做}以下事情：
+\begin{itemize}
+  \item 不将 SLAM/FGO 与 planner 做完全联合优化。
+  \item 不把 FIM-add 用于 certified/current ARAIM monitor。
+  \item 不声称 future predicted PL proxy 是严格 certified ARAIM PL。
+  \item 不一次性切换到完整 $6\times 6$ LiDAR pose-level FIM；第一版只要求 $3\times 3$ translational FIM。
+  \item 不默认开启 balance/fault-robust ablation 项；第一版主线只启用 PI main cost。
+\end{itemize}
+
+\subsection{Codex 执行方式}
+
+\begin{codexbox}{Codex 必须遵守的工作流}
+  \begin{enumerate}
+    \item Inspect repository and identify actual files/classes/topics related to ARAIM, PL predictor, PI cost, EGO planner integration, ESDF/map, coordinate frames, and logging.
+    \item Produce a file-level implementation plan for the current stage only.
+    \item Fill the repository-specific command template: build command, unit test command, launch sanity command, log extraction command, and plotting/debug command.
+    \item Wait for confirmation before modifying code.
+    \item Implement one stage per commit; do not mix Stage 0 with Stage 2/3/4.
+    \item After each stage, run available build/tests/launch sanity checks and summarize exact changed files, configs, logs, coordinate-frame assumptions, and known limitations.
+  \end{enumerate}
+\end{codexbox}
+
+% ============================================================
+\section{系统主架构：双路径分离}
+% ============================================================
+
+\subsection{Current certified monitor path}
+
+Current monitor path 使用真实当前时刻测量、当前 FGO snapshot、真实 residual 或 subset solution separation，输出 current GNSS PL、current LiDAR PL 与 alarm flag。其融合保持保守：
+\[
+  \boxed{
+    \PL^{\mon}_q = \max\left(\PL^G_q,\ \PL^L_q\right),
+    \qquad q\in\{H,V,E,N,U\}.
+  }
+\]
+
+\noindent 该路径的职责是报警与安全监督，不承担 planner cost field 的高频查询。Codex 不得将该路径改为 FIM-add。
+
+\subsection{Future advisory predictor path}
+
+Future predictor path 对候选位置 $\pvec$、未来时间 $t+\tau$、局部地图、卫星几何、当前 covariance prior 进行预测，输出 advisory predicted PL proxy 与 integrity margin field：
+\[
+  \Lam^{\adv}_{\pos}(\pvec,t)
+  =
+  \Lam^{\prior}_{\pos}(t)
+  +
+  \Lam^{G}_{\pos}(\pvec,t)
+  +
+  \Lam^{L}_{\pos}(\pvec,t).
+\]
+\[
+  \Sig^{\adv}_{\pos}(\pvec,t)
+  =
+  \left(\Lam^{\adv}_{\pos}(\pvec,t)+\lambda_{\mathrm{reg}}I\right)^{-1}.
+\]
+\[
+  \PL^{\adv}(\pvec,t)
+  \rightarrow
+  \IM(\pvec,t)=\AL(\pvec,t)-\PL^{\adv}(\pvec,t)
+  \rightarrow
+  c_{PI}(\pvec,t).
+\]
+
+\subsection{命名规则}
+
+\begin{center}
+  \small
+  \begin{tabularx}{\linewidth}{l l Y}
+    \toprule
+    \textbf{旧名称} & \textbf{新名称} & \textbf{说明} \\
+    \midrule
+    GNSS PL & GNSS Certified PL & current monitor 输出，可用于 alarm。\\
+    LiDAR PL & LiDAR Certified PL & current VGICP-block ARAIM 输出，可用于 alarm。\\
+    Predicted GNSS PL & GNSS Advisory PL Proxy / GII & future geometry-driven, non-certified。\\
+    Predicted LiDAR PL & LiDAR Advisory PL Proxy / LOI & future FIM-driven, non-certified。\\
+    Predicted Fused PL & Advisory Predicted PL & future FIM-add 后导出的米级 proxy。\\
+    Integrity Margin & Advisory Integrity Margin & $\IM=\AL-\PL^{\adv}$。\\
+    \bottomrule
+  \end{tabularx}
+\end{center}
+
+
+% ============================================================
+\section{Codex 实现护栏：必须先读}
+% ============================================================
+
+\subsection{Stage-level hard Do / Do-not rules}
+
+\begin{warningbox}{Global hard constraints}
+Codex 必须把本节当作比公式更高优先级的实现约束。若当前代码结构与本 spec 冲突，Codex 先报告冲突并提出最小兼容方案，不得直接大改架构。
+\end{warningbox}
+
+\begin{center}
+\small
+\begin{tabularx}{\linewidth}{P{0.15\linewidth}Y Y}
+  \toprule
+  \textbf{Stage} & \textbf{Allowed} & \textbf{Forbidden} \\
+  \midrule
+  Stage 0 & bounded age, fixed target window, component logs, config defaults & changing planner behavior; changing current monitor fusion; introducing FIM-add; renaming topics unless unavoidable \\
+  Stage 1 & comments, log labels, documentation, non-breaking aliases & numerical behavior changes; deleting old fields/topics; changing alarm logic \\
+  Stage 2 & advisory GNSS/LiDAR FIM, FIM-add in predictor only, old mode kept for A/B & modifying certified/current ARAIM monitor; changing alarm logic; requiring raycast in first implementation; introducing $6\times6$ LiDAR FIM; changing planner cost \\
+  Stage 3 & PI main cost using $\PL^{\adv}$, $\AL$, $\IM$; optional terms behind disabled flags & enabling ratio/balance/fault-robust by default; silently tuning planner weights; changing ESDF/collision cost; consuming current certified PL as planner field \\
+  Stage 4 & URG compatibility layer, new query API, stale unknown-risk handling & deleting old topics before validation; replacing A* and B-spline query paths in one patch; stale-to-zero fallback \\
+  Stage 5 & cache, sparse active voxels, parallel refresh, profiling & algorithmic changes that alter Stage 2/3 semantics without A/B switch \\
+  \bottomrule
+\end{tabularx}
+\end{center}
+
+\subsection{Coordinate-frame conventions}
+
+所有 advisory grid query points 使用 world/map frame $W$：
+\[
+  \pvec_W=[x_W,y_W,z_W]^\top.
+\]
+Codex 必须在代码注释和日志里标注以下 frame 假设：
+\begin{itemize}
+  \item A* and B-spline sample/control points passed to \texttt{queryRisk()} are in $W$.
+  \item ESDF/occupancy distance query is in $W$.
+  \item LiDAR voxel centers $c_m$ and normals $\nm_m$ used by advisory FIM must be in $W$.
+  \item GNSS satellite positions must be converted to the same local navigation frame as $W$ before line-of-sight computation. If the repository currently uses ENU/ECEF conversion elsewhere, reuse that converter; do not invent a new frame transform.
+  \item If any frame transform is unavailable, Codex must stop and report the missing transform instead of implementing a silent approximation.
+\end{itemize}
+
+\subsection{Fallback and compatibility policy}
+
+\begin{itemize}
+  \item Existing topics such as \texttt{/iap/integrity\_cost\_field} and \texttt{/iap/integrity\_front\_cost\_field} must remain available until Stage 4 is validated.
+  \item Before URG is fully integrated, old planner-consumable cost-field topics may be generated from the new $\PL^{\adv}$ and $c_{PI}$ pipeline through a compatibility publisher.
+  \item Missing or degenerate source contributions must set flags and produce a safe fallback; they must never produce NaN/Inf.
+  \item Stale advisory field must be treated as unknown risk, not zero risk.
+\end{itemize}
+
+\subsection{Repository-inspection output template}
+
+Codex 的第一轮回复必须包含以下模板内容，不得直接改代码：
+\begin{lstlisting}
+Stage to inspect: <0/1/2/3/4/5>
+Relevant files/classes/functions:
+- ARAIM monitor:
+- LiDAR block risk score:
+- Target keyframe selection:
+- PL composition/fusion:
+- Predictor/grid field:
+- PI cost adapter:
+- Planner A* integration:
+- B-spline backend integration:
+- ESDF/occupancy map:
+- Message/topic definitions:
+- Config files:
+- Logging utilities:
+
+Coordinate-frame assumptions found in code:
+- Planner frame:
+- ESDF/map frame:
+- LiDAR voxel/map frame:
+- GNSS satellite/local frame:
+- Existing transform utilities:
+
+Available commands discovered:
+- Build:
+- Unit tests:
+- Launch sanity check:
+- Log extraction:
+- Plot/debug visualization:
+
+Minimal patch plan:
+Risks/unknowns:
+Questions before implementation:
+\end{lstlisting}
+
+% ============================================================
+\section{核心数学定义与公式包}
+% ============================================================
+
+\subsection{当前 ARAIM monitor 的 LiDAR PL 公式}
+
+对当前 FGO 线性化点 $\hat{x}_0$，每个 VGICP factor block $F_{j,\ell}$ 贡献：
+\[
+  \Delta \Lam_{j,\ell}=J_{j,\ell}^\top R_{j,\ell}^{-1}J_{j,\ell},
+  \qquad
+  \Delta g_{j,\ell}=J_{j,\ell}^\top R_{j,\ell}^{-1}r_{j,\ell}.
+\]
+
+对 fault hypothesis $H_f$，snapshot downdate 为：
+\[
+  \Lam_f=\Lam_0-\sum_{F_{j,\ell}\in B(H_f)}\Delta \Lam_{j,\ell},
+  \qquad
+  g_f=g_0-\sum_{F_{j,\ell}\in B(H_f)}\Delta g_{j,\ell}.
+\]
+\[
+  \delta x_f=\Lam_f^{-1}g_f,
+  \qquad
+  \Sig_f=\Lam_f^{-1},
+  \qquad
+  d_f=\hat{x}_0\ominus \hat{x}_f.
+\]
+
+LiDAR current PL 保持 solution-separation 形式：
+\[
+  \boxed{
+    \PL^L_{q,f}
+    =
+    |e_q^\top d_f|
+    +K_{\mathrm{fa},f}\sigma_{\mathrm{ss},q,f}
+    +K_{\mathrm{md},f}\sigma_{q,f}
+    +b_{q,f},
+    \qquad
+    \PL^L_q=\max_f\PL^L_{q,f}.
+  }
+\]
+
+
+\subsection{Solution-separation variance 的实现级定义与 fallback}
+
+Current LiDAR ARAIM 使用 snapshot downdate，而不是单历元 WLS subset solver。因此 Codex 不得无条件套用 GNSS ARAIM 中的投影矩阵公式。实现规则如下。
+
+若当前代码已经有严格的 solution-separation covariance routine，例如
+\[
+  \Sigma_{ss,f}=(S_0-S_f)C_y(S_0-S_f)^\top,
+\]
+则保持现有实现，但必须加数值检查和日志。若当前只暴露 full/subset covariance，则使用以下保守近似：
+\[
+  \sigma^2_{ss,q,f,raw}=e_q^\top(\Sigma_f-\Sigma_0)e_q.
+\]
+实现时必须检查：
+\[
+  \mathrm{finite}(\sigma^2_{ss,q,f,raw})\quad\text{and}\quad \sigma^2_{ss,q,f,raw}>\sigma^2_{ss,min}.
+\]
+若检查通过：
+\[
+  \boxed{\sigma_{ss,q,f}=\sqrt{\max(\sigma^2_{ss,q,f,raw},\sigma^2_{ss,min})}.}
+\]
+若检查失败、$\Sigma_f-\Sigma_0$ 非正、或 subset covariance 数值不可信，则 fallback 为：
+\[
+  \boxed{\sigma_{ss,q,f}=\sqrt{\max(e_q^\top\Sigma_f e_q,\sigma^2_{ss,min})}.}
+\]
+并设置：
+\[
+  \texttt{flags}\leftarrow\texttt{SS\_VARIANCE\_FALLBACK}\cup\texttt{FIM\_REGULARIZED}.
+\]
+
+\begin{warningbox}{Why this fallback is required}
+  LiDAR factor-block downdate 不保证与传统 GNSS WLS informative subset 关系完全一致。若 Codex 发现 $\Sigma_f-\Sigma_0$ 的投影为负，不得取绝对值悄悄修复；必须 fallback、打 flag、记录 worst hypothesis 和对应 eigenvalue。
+\end{warningbox}
+
+推荐实现伪代码：
+\begin{lstlisting}[language=C++]
+double computeSigmaSs(const Matrix3d& Sigma0,
+                      const Matrix3d& Sigmaf,
+                      const Vector3d& eq,
+                      double sigma_ss_min,
+                      uint32_t* flags) {
+  const double raw = (eq.transpose() * (Sigmaf - Sigma0) * eq)(0,0);
+  if (std::isfinite(raw) && raw > sigma_ss_min * sigma_ss_min) {
+    return std::sqrt(std::max(raw, sigma_ss_min * sigma_ss_min));
+  }
+  const double fb = (eq.transpose() * Sigmaf * eq)(0,0);
+  *flags |= SS_VARIANCE_FALLBACK | FIM_REGULARIZED;
+  return std::sqrt(std::max(fb, sigma_ss_min * sigma_ss_min));
+}
+\end{lstlisting}
+
+\subsection{LiDAR block risk score 稳定化}
+
+旧式风险分数包含无界 age 项：
+\[
+  \gamma_{j,\ell}^{old}
+  =w_r\gamma_{\mathrm{rmse}}
+  +w_i\gamma_{\mathrm{inlier}}
+  +w_c\gamma_{\kappa}
+  +w_a\frac{\mathrm{Age}_j}{A_{ref}}.
+\]
+
+新式 age 项必须有界：
+\[
+  \boxed{
+    \gamma_{\mathrm{age}}(A)=1-e^{-A/\tau_A}
+    \quad \text{or}\quad
+    \gamma_{\mathrm{age}}(A)=\min(A/A_{ref},\gamma_{\max}).
+  }
+\]
+
+新式 block score：
+\[
+\begin{aligned}
+  \gamma_{j,\ell}
+  ={}&
+  w_r\,\mathrm{clip}\left(\frac{\mathrm{RMSE}_{j,\ell}}{\mathrm{RMSE}_{ref}},0,\gamma_r^{\max}\right)
+  +w_i\,(1-\mathrm{InlierFrac}_{j,\ell}) \\
+  &+w_c\,\mathrm{clip}\left(\frac{\log\kappa_{j,\ell}}{\log\kappa_{ref}},0,\gamma_c^{\max}\right)
+  +w_a\gamma_{\mathrm{age}}(\mathrm{Age}_j).
+\end{aligned}
+\]
+
+Bias overbound 仍保留工程形式，但必须 log 单项：
+\[
+  b_{q,f}=\alpha_q\max_{F_{j,\ell}\in B(H_f)}\gamma_{j,\ell}.
+\]
+
+\subsection{Target keyframe 固定窗口}
+
+为消除 $\max$ over growing set 带来的集合膨胀，当前 LiDAR ARAIM 与 LiDAR predictor 中使用的 target keyframe 集合必须固定上限：
+\[
+  \boxed{|T_t|\le K_T.}
+\]
+
+默认：
+\[
+  K_T=10.
+\]
+Target selection 建议排序优先级：
+\begin{enumerate}
+  \item spatial proximity to current pose；
+  \item temporal freshness；
+  \item overlap / inlier quality；
+  \item avoid duplicate near-identical keyframes。
+\end{enumerate}
+
+\subsection{Prior position FIM from covariance}
+
+当前 advisory predictor 只使用 position-domain FIM。若 estimator 提供 position covariance $\Sig^{prior}_{pos}$：
+\[
+  \boxed{
+    \Lam^{\prior}_{pos}
+    =
+    \left(\eta_\Sigma\Sig^{prior}_{pos}+\sigma_{floor}^2I\right)^{-1}.
+  }
+\]
+
+其中 $\eta_\Sigma\ge 1$ 是 covariance inflation，$\sigma_{floor}$ 防止 iSAM covariance 过小或奇异。默认：
+\[
+  \eta_\Sigma=2.0,
+  \qquad
+  \sigma_{floor}=0.05\ \mathrm{m}.
+\]
+
+若只提供 $6\times6$ pose covariance，取 position block：
+\[
+  \Sig^{prior}_{pos}=\Sig^{pose}_{1:3,1:3}.
+\]
+若 covariance 缺失、含 NaN/Inf 或非正定，则使用配置项 \texttt{default\_prior\_sigma\_xyz\_m} 构造 diagonal fallback covariance，并设置 \texttt{FIM\_REGULARIZED}。
+
+\subsection{GNSS future advisory FIM}
+
+对候选位置 $\pvec$ 与时间 $t$，可见卫星集合为 $\mathcal{S}(\pvec,t)$。第 $s$ 颗卫星的 line-of-sight unit vector：
+\[
+  \ell_s(\pvec,t)=\frac{p_s^{sat}(t)-\pvec}{\|p_s^{sat}(t)-\pvec\|}.
+\]
+
+GNSS geometry matrix 含接收机 clock bias：
+\[
+  G(\pvec,t)=
+  \begin{bmatrix}
+    -\ell_1^\top & 1\\
+    -\ell_2^\top & 1\\
+    \vdots & \vdots\\
+    -\ell_N^\top & 1
+  \end{bmatrix}
+  \in\mathbb{R}^{N\times 4}.
+\]
+
+预测测量方差：
+\[
+  \sigma^2_{eff,s}
+  =
+  \sigma^2_{URE,s}
+  +\sigma^2_{tropo,s}
+  +\sigma^2_{iono,s}
+  +\sigma^2_{mp,s}(\pvec,el_s)
+  +\sigma^2_{NLOS,s}(\pvec)
+  +\sigma^2_{canopy,s}(\pvec).
+\]
+\[
+  W(\pvec,t)=\diag(\sigma^{-2}_{eff,1},\dots,\sigma^{-2}_{eff,N}).
+\]
+
+Full GNSS Hessian：
+\[
+  H_G=G^\top WG=
+  \begin{bmatrix}
+    H_{pp} & H_{pc}\\
+    H_{cp} & H_{cc}
+  \end{bmatrix},
+  \qquad
+  H_{pp}\in\mathbb{R}^{3\times3},\ H_{cc}\in\mathbb{R}^{1\times1}.
+\]
+
+消去 clock bias 后的 position-domain GNSS FIM：
+\[
+  \boxed{
+    \Lam^G_{pos}(\pvec,t)=H_{pp}-H_{pc}(H_{cc}+\lambda_c)^{-1}H_{cp}.
+  }
+\]
+
+若 $N<4$ 或 $H_{cc}$ 退化，则设置：
+\[
+  \Lam^G_{pos}=0,
+  \qquad
+  \texttt{flags} \leftarrow \texttt{GNSS\_DEGENERATE}.
+\]
+若 satellite variance 缺失或非正，使用 \texttt{sigma\_gnss\_default\_m}；若 satellite position 不可用，跳过该卫星并在 refresh log 中记录 skipped count。
+
+
+\subsection{GNSS FIM 的坐标系、clock 单位与 PSD 检查}
+
+Codex 必须在实现 GNSS advisory FIM 前确认当前代码的坐标链。本文公式
+\[
+  G_s=[-\ell_s^\top\quad 1]
+\]
+默认 pseudorange residual 单位为 meter，clock variable 为 meter-equivalent receiver clock bias：
+\[
+  b^{clk}=c\delta t^{clk}\quad [\mathrm{m}].
+\]
+若当前 estimator 内部 clock state 使用 second，则 geometry row 必须改为：
+\[
+  G_s=[-\ell_s^\top\quad c],
+\]
+或者先把 clock state 转为 meter-equivalent。两种写法不得混用。
+
+Satellite position 必须先转换到 planner/advisory grid 使用的 local frame：
+\[
+  p^{sat}_{local}=T_{ECEF\rightarrow local}\,p^{sat}_{ECEF},
+  \qquad
+  \pvec\in\mathrm{same\ local\ frame}.
+\]
+若 transform unavailable 或 frame id 不一致，则该 refresh 不应生成 GNSS FIM：
+\[
+  \Lam^G_{pos}=0,
+  \qquad
+  \texttt{flags}\leftarrow\texttt{FRAME\_MISMATCH}\cup\texttt{GNSS\_DEGENERATE}.
+\]
+
+Schur complement 后必须做对称化与 PSD 检查：
+\[
+  \Lam^G_{pos}\leftarrow\frac{1}{2}\left(\Lam^G_{pos}+(\Lam^G_{pos})^\top\right).
+\]
+若
+\[
+  \lambda_{min}(\Lam^G_{pos})<-\epsilon_{PSD},
+\]
+则设置 \texttt{GNSS\_DEGENERATE}，并将 GNSS contribution 置零或 eigenvalue-clamp 到非负，具体由配置项 \texttt{gnss\_fim\_psd\_policy} 控制。默认第一版使用 \texttt{zero\_with\_flag}，避免用错误几何误导 planner。
+
+\subsection{LiDAR future advisory FIM：第一版 \texorpdfstring{$3\times3$}{3x3} translational approximation}
+
+候选点 $\pvec$ 周围潜在可见 voxel/normal 集合：
+\[
+  V(\pvec)=\{m:\ \|c_m-\pvec\|\le R_L,\ \mathrm{visible}(\pvec,c_m)=1,\ \mathrm{validNormal}(m)=1\}.
+\]
+
+第一版 LiDAR FIM：
+\[
+  \boxed{
+    \Lam^L_{pos}(\pvec)
+    =
+    \sum_{m\in V(\pvec)}
+    \pi_m(\pvec)\,w_m(\pvec)\,\nm_m\nm_m^\top.
+  }
+\]
+
+其中：
+\[
+  w_m(\pvec)=\frac{1}{\sigma_m^2(\pvec)}.
+\]
+
+推荐的 visibility/overlap 权重：
+\[
+  \pi_m(\pvec)=
+  \pi_{ray}(\pvec,c_m)\cdot
+  \pi_{range}(\|c_m-\pvec\|)\cdot
+  \pi_{age}(A_m)\cdot
+  \pi_{dynamic}(m).
+\]
+
+默认各项：
+\[
+  \pi_{ray}=
+  \begin{cases}1,&\text{ray not occupied}\\ 0,&\text{ray blocked}
+  \end{cases}
+\]
+\[
+  \pi_{range}(r)=\exp\left(-\frac{r^2}{2r_0^2}\right),
+  \qquad
+  \pi_{age}(A)=\exp(-A/\tau_{map}),
+  \qquad
+  \pi_{dynamic}=1-P_{dyn}(m).
+\]
+
+测量方差模型：
+\[
+  \sigma_m^2(\pvec)
+  =
+  \sigma_0^2
+  +k_r r_m^2
+  +k_i\frac{1}{\max(|\nm_m^\top v_{ray}|,\eps_i)}
+  +k_n\sigma^2_{normal,m}
+  +k_a A_m
+  +k_d P_{dyn}(m).
+\]
+
+\begin{warningbox}{LiDAR FIM 的实现边界}
+  第一版只要求 position-domain $3\times3$ translational FIM。Codex 不得在第一版把它写成 certified LiDAR ARAIM，也不得替代 current LiDAR ARAIM monitor。论文/注释中必须标注：\textit{lightweight translational approximation for advisory planning only}。
+
+  第一版不要求 raycast、dynamic probability、GMM normals 或完整 $6\times6$ pose FIM。若 voxel normal statistics 不可用，必须使用 \texttt{lidar\_fallback\_mode}，而不是临时重构地图模块。
+\end{warningbox}
+
+
+\subsection{LiDAR FIM 最小实现阶梯}
+
+为了避免 Codex 一次性重构地图系统，LiDAR advisory FIM 必须按以下阶梯实现。
+
+\paragraph{Version A: no-raycast local normal FIM.}
+第一版只使用候选点邻域内已有 voxel normal statistics：
+\[
+  V_A(\pvec)=\{m:\|c_m-\pvec\|<R_L,\ \mathrm{validNormal}(m)=1\},
+  \qquad \pi_{ray}=1.
+\]
+\[
+  \Lam^L_A(\pvec)=\sum_{m\in V_A(\pvec)}
+  \exp\left(-\frac{\|c_m-\pvec\|^2}{2r_0^2}\right)
+  \frac{1}{\sigma_m^2}\,n_m n_m^\top.
+\]
+若 normal histogram 不存在，则 Codex 必须复用当前 scalar advisory predictor 或返回 zero-with-flag，而不是临时实现新的 map extraction pipeline。
+
+\paragraph{Version B: occupancy raycast visibility.}
+在 Version A 稳定后加入 raycast：
+\[
+  \pi_{ray}(\pvec,c_m)=\mathbb{I}\{\mathrm{ray}(\pvec,c_m)\ \mathrm{not\ occupied}\}.
+\]
+该版本必须有单独配置 \texttt{lidar\_raycast\_enabled}，默认保持 false，直到 corridor test 与 latency test 通过。
+
+\paragraph{Version C: incidence, dynamic, map-age weights.}
+加入入射角、dynamic probability、map age：
+\[
+  \sigma_m^2=\sigma_0^2+k_r r_m^2+k_i/\max(|n_m^\top v_{ray}|,\epsilon_i)+k_a A_m+k_dP_{dyn}(m).
+\]
+
+\paragraph{Version D: future work, $6\times6$ pose FIM.}
+完整 scan-matching FIM 应为
+\[
+  \Lam_L^{pose}=\sum_m J_m^\top R_m^{-1}J_m\in\mathbb{R}^{6\times6},
+  \qquad
+  \Sigma_p=[(\Lam_L^{pose})^{-1}]_{p,p}.
+\]
+Stage 2 禁止实现 Version D；只允许在注释和 future-work 中保留接口占位。
+
+\subsection{Advisory FIM-add fusion 与 PL 导出}
+
+统一 position FIM：
+\[
+  \boxed{
+    \Lam^{\adv}_{pos}(\pvec,t)
+    =\Lam^{\prior}_{pos}(t)
+    +\Lam^G_{pos}(\pvec,t)
+    +\Lam^L_{pos}(\pvec,t).
+  }
+\]
+
+正则化逆：
+\[
+  \boxed{
+    \Sig^{\adv}_{pos}(\pvec,t)
+    =\left(\Lam^{\adv}_{pos}(\pvec,t)+\lambda_{reg}I\right)^{-1}.
+  }
+\]
+
+水平 covariance：
+\[
+  \Sig^{\adv}_{xy}=\begin{bmatrix}
+  \Sig^{\adv}_{xx} & \Sig^{\adv}_{xy}\\
+  \Sig^{\adv}_{yx} & \Sig^{\adv}_{yy}
+\end{bmatrix}.
+\]
+
+HPL proxy：
+\[
+\boxed{
+  \HPL^{\adv}(\pvec,t)
+  =
+  K_H\sqrt{\lambda_{\max}(\Sig^{\adv}_{xy})}
+  +b_H^{\pred}(\pvec,t)+s_H^{\pred}(\pvec,t).
+}
+\]
+
+VPL proxy：
+\[
+\boxed{
+  \VPL^{\adv}(\pvec,t)
+  =
+  K_V\sqrt{\Sig^{\adv}_{zz}}
+  +b_V^{\pred}(\pvec,t)+s_V^{\pred}(\pvec,t).
+}
+\]
+
+Unified scalar PL for planner：
+\[
+\boxed{
+  \PL^{\adv}(\pvec,t)=\max\left(\HPL^{\adv}(\pvec,t),\ \VPL^{\adv}(\pvec,t)\right)
+}
+\]
+或者 planner 可分别使用 horizontal/vertical constraints；第一版为了稳定，采用 max scalar。
+
+默认第一版 bias/separation upper bound：
+\[
+b_q^{\pred}=b_{q,0}+b_{q,G}^{\pred}+b_{q,L}^{\pred},
+\qquad
+s_q^{\pred}=n_{ss}\sqrt{e_q^\top\Sig^{\adv}_{pos}e_q}.
+\]
+其中第一版可设置 $b_{q,G}^{\pred}, b_{q,L}^{\pred}$ 为可配置常数或由 quality score 线性映射，但必须 log。
+
+\subsection{Alert Limit field}
+
+水平 alert limit：
+\[
+\HAL(\pvec)=\gamma_H\max\left(d_{obs}(\pvec)-r_{drone}-r_{buffer},\ 0\right).
+\]
+
+垂直 alert limit：
+\[
+\VAL(\pvec)=\gamma_V\max\left(\min(z-z_{min},\ z_{max}-z),\ 0\right).
+\]
+
+统一 alert limit：
+\[
+\boxed{
+  \AL(\pvec)=\min(\HAL(\pvec),\VAL(\pvec)).
+}
+\]
+
+Integrity margin：
+\[
+\boxed{
+  \IM(\pvec,t)=\AL(\pvec)-\PL^{\adv}(\pvec,t).
+}
+\]
+
+\subsection{PI function}
+
+主项默认只依赖统一 PL/AL：
+\[
+\boxed{
+  c^{main}_{PI}(\pvec,t)
+  =
+  \lambda_\pi\left[\PL^{\adv}(\pvec,t)-\AL(\pvec)+m\right]_+^2.
+}
+\]
+
+可选 ratio term：
+\[
+c^{ratio}_{PI}(\pvec,t)
+=\mu_\pi\left(\frac{\PL^{\adv}(\pvec,t)}{\AL(\pvec)+\eps_{AL}}\right)^2.
+\]
+
+总代价第一版：
+\[
+\boxed{
+  c_{PI}^{base}=c_{PI}^{main}+\mathbb{I}_{ratio}\,c_{PI}^{ratio}.
+}
+\]
+
+Ablation 项默认关闭：
+\[
+r_G=\frac{\tr(\Lam_G)}{\tr(\Lam_G+\Lam_L)+\eps},
+\qquad
+c_{balance}=w_b[\max(r_G,1-r_G)-r_{max}]_+^2.
+\]
+\[
+c_{fault}=w_f\left([\PL^{\adv}_{\setminus G}-\AL]_+^2+[\PL^{\adv}_{\setminus L}-\AL]_+^2\right).
+\]
+
+
+\subsection{Planner cost interface：A* 与 B-spline 的精确定义}
+
+Stage 3 后，front-end A* 与 back-end B-spline optimizer 必须查询同一个 $c_{PI}$ 语义。Codex 不得分别写两套 GNSS/LiDAR source-specific cost。
+
+A* edge cost 使用乘性 inflation：
+\[
+  \boxed{
+  c_{edge}(p_i,p_j)
+  =\|p_i-p_j\|
+  \left(1+\lambda_{obs}c_{obs}(p_j)+\lambda_{PI}^{front}c_{PI}^{used}(p_j)\right).
+  }
+\]
+其中 $c_{obs}$ 来自现有 ESDF/occupancy cost，Codex 不得在 Stage 3 自动调它的权重。
+
+B-spline back-end 使用 sample/control-point penalty：
+\[
+  \boxed{
+  J_{back}=J_{smooth}+J_{collision}+J_{dyn}
+  +\lambda_{PI}^{back}\sum_{k} c_{PI}^{used}(Q_k).
+  }
+\]
+其中 $Q_k$ 是当前后端已有的轨迹采样点或控制点查询位置。第一版梯度允许使用 finite difference 或现有 grid gradient：
+\[
+  \nabla c_{PI}(p)\approx
+  \left[
+  \frac{c_{PI}(p+h e_x)-c_{PI}(p-h e_x)}{2h},
+  \frac{c_{PI}(p+h e_y)-c_{PI}(p-h e_y)}{2h},
+  \frac{c_{PI}(p+h e_z)-c_{PI}(p-h e_z)}{2h}
+  \right]^\top.
+\]
+若 finite-difference query 命中 stale/out-of-range voxel，则必须使用 query API 返回的 flags 决定 fallback，不得返回零梯度后继续认为该方向安全。
+
+\begin{acceptbox}{Planner interface acceptance}
+  PI disabled 时，A* 和 B-spline 应退回原始 EGO 行为；PI enabled 且 field fresh 时，front-end 与 back-end 的 $c_{PI}$ 数值应在同一 query point 上一致，允许仅因插值方式产生小误差。
+\end{acceptbox}
+
+\subsection{Unified Risk Grid 与 stale handling}
+
+每个 voxel 存储：
+\[
+\boxed{
+  URG(v)=\{d_{ESDF},\rho_{occ},\AL,\HPL^{\adv},\VPL^{\adv},\PL^{\adv},\IM,c_{PI},age,flags\}.
+}
+\]
+
+Stale field 不允许 fallback 到 zero risk。使用 unknown penalty：
+\[
+\boxed{
+  c_{PI}^{\used}(\pvec,t)=c_{PI}(\pvec,t)+c_{unknown}\left(1-e^{-\Delta t/\tau_{stale}}\right).
+}
+\]
+
+若 $\Delta t>t_{max\_age}$：
+\[
+\texttt{flags}\leftarrow\texttt{STALE\_PL}\cup\texttt{UNKNOWN\_RISK},
+\]
+并触发 refresh / slow-down / advisory PI disable according to config。
+
+% ============================================================
+\section{配置参数默认值}
+% ============================================================
+
+\begin{center}
+\small
+\begin{longtable}{@{}P{0.34\linewidth}P{0.18\linewidth}P{0.42\linewidth}@{}}
+  \toprule
+  \textbf{参数} & \textbf{默认值} & \textbf{说明} \\
+  \midrule
+  \texttt{certified\_monitor\_fusion} & \texttt{max} & 禁止改为 FIM-add。\\
+  \texttt{advisory\_fusion\_mode} & \texttt{fim\_add} & Predictor/planner path 默认。\\
+  \texttt{enable\_advisory\_fim\_fusion} & \texttt{true} & Stage 2 完成后启用。\\
+  \texttt{target\_window\_K} & 10 & LiDAR target keyframe 固定窗口。\\
+  \texttt{age\_model} & \texttt{exp\_saturating} & $1-e^{-A/\tau_A}$。\\
+  \texttt{age\_tau\_s} & 30.0 & LiDAR block age 饱和时间常数。\\
+  \texttt{gamma\_age\_max} & 1.0 & 若使用 cap 模型。\\
+  \texttt{covariance\_inflation\_eta} & 2.0 & prior covariance inflation。\\
+  \texttt{sigma\_floor\_m} & 0.05 & 防止 covariance 过小。\\
+  \texttt{default\_prior\_sigma\_xyz\_m} & 2.0,2.0,1.0 & covariance missing 时的 fallback prior。\\
+  \texttt{fim\_regularization} & $10^{-6}$ & FIM inverse regularization。\\
+  \texttt{sigma\_ss\_min\_m} & 0.02 & solution-separation std floor。\\
+  \texttt{gnss\_fim\_psd\_policy} & \texttt{zero\_with\_flag} & GNSS Schur complement 非 PSD 时的默认策略。\\
+  \texttt{lambda\_clock\_schur} & $10^{-6}$ & GNSS clock Schur complement regularization。\\
+  \texttt{gnss\_clock\_unit} & \texttt{meter} & 若代码使用 seconds，必须显式乘 $c$ 并打日志。\\
+  \texttt{sigma\_gnss\_default\_m} & 5.0 & missing GNSS variance fallback。\\
+  \texttt{lidar\_fim\_radius\_m} & 12.0 & 候选点周围 voxel 搜索半径。\\
+  \texttt{lidar\_range\_r0\_m} & 8.0 & range weight 衰减尺度。\\
+  \texttt{lidar\_raycast\_enabled} & \texttt{false} first & 初版可 false，后续打开。\\
+  \texttt{lidar\_min\_valid\_normals} & 6 & LiDAR FIM 最小有效 normal 数。\\
+  \texttt{lidar\_fim\_min\_eig} & $10^{-5}$ & LiDAR FIM degeneracy threshold。\\
+  \texttt{lidar\_fim\_max\_cond} & $10^6$ & LiDAR FIM condition threshold。\\
+  \texttt{lidar\_fallback\_mode} & \texttt{zero\_with\_flag} & normal 缺失时 fallback；可选 old\_scalar。\\
+  \texttt{normal\_hist\_az\_bins} & 8 & voxel normal histogram azimuth bins。\\
+  \texttt{normal\_hist\_el\_bins} & 8 & voxel normal histogram elevation bins。\\
+  \texttt{K\_H} & 5.0 & advisory HPL multiplier，后续 calibration。\\
+  \texttt{K\_V} & 5.0 & advisory VPL multiplier，后续 calibration。\\
+  \texttt{pi\_margin\_m} & 0.5 & PI hinge safety margin。\\
+  \texttt{pi\_lambda} & 1.0 & PI hinge weight。\\
+  \texttt{pi\_lambda\_front} & 1.0 & A* front-end PI edge inflation weight。\\
+  \texttt{pi\_lambda\_back} & 1.0 & B-spline back-end PI penalty weight。\\
+  \texttt{pi\_use\_ratio} & \texttt{false} first & ratio 项默认关闭。\\
+  \texttt{pi\_mu\_ratio} & 0.1 & ratio 项权重。\\
+  \texttt{pi\_use\_balance} & \texttt{false} & ablation only。\\
+  \texttt{pi\_use\_fault\_robust} & \texttt{false} & ablation only。\\
+  \texttt{pi\_max\_cost} & 100.0 & cost clipping。\\
+  \texttt{unknown\_penalty} & 10.0 & stale field unknown risk penalty。\\
+  \texttt{stale\_tau\_s} & 2.0 & unknown penalty time constant。\\
+  \texttt{max\_field\_age\_s} & 2.0 & 超过后标记 stale。\\
+  \texttt{urg\_resolution\_m} & 1.0 & 初版 grid resolution。\\
+  \texttt{urg\_box\_xyz\_m} & 30,30,8 & rolling local field。\\
+  \bottomrule
+\end{longtable}
+\end{center}
+
+% ============================================================
+\section{数据结构与接口规格}
+% ============================================================
+
+\subsection{Snapshot 输入}
+
+Advisory predictor 输入应包含：
+\begin{itemize}
+\item current pose $\hat{T}_t$；
+\item position covariance $\Sig^p_t$ 或 pose covariance $\Sig^{pose}_{6\times6}$；
+\item visible satellite epoch：satellite position、elevation、azimuth、variance；
+\item local ESDF/occupancy map；
+\item LiDAR map voxel normal statistics；
+\item current LiDAR ARAIM block quality summary only for bias proxy/logging，不用于 certified claim。
+\end{itemize}
+
+
+\subsection{Fallback rules for missing or invalid inputs}
+
+\begin{center}
+\small
+\begin{tabularx}{\linewidth}{P{0.20\linewidth}Y Y}
+  \toprule
+  \textbf{Input/source} & \textbf{Failure mode} & \textbf{Required fallback} \\
+  \midrule
+  Prior covariance & missing, NaN/Inf, non-positive eigenvalue & use configured diagonal prior covariance; clamp eigenvalues; set \texttt{FIM\_REGULARIZED}; log once per refresh \\
+  GNSS satellites & satellite position unavailable & skip satellite; if remaining satellites $<4$, set $\Lam^G_{pos}=0$ and \texttt{GNSS\_DEGENERATE} \\
+  GNSS variance & missing or non-positive variance & use \texttt{sigma\_gnss\_default\_m}; set warning counter in refresh log \\
+  LiDAR normals & voxel normal statistics unavailable & use old advisory scalar predictor if configured, otherwise $\Lam^L_{pos}=0$ and \texttt{LIDAR\_DEGENERATE} \\
+  LiDAR neighbors & fewer than \texttt{lidar\_min\_valid\_normals} valid normals & set \texttt{LIDAR\_DEGENERATE}; do not invert untrusted LiDAR-only FIM \\
+  FIM inverse & condition number too large, NaN/Inf detected & add eigenvalue floor / regularization; set \texttt{FIM\_REGULARIZED}; clip output PL/cost \\
+  ESDF/AL & ESDF query invalid or out of range & set \texttt{OUT\_OF\_RANGE}; use conservative low AL or unknown-risk policy according to config \\
+  Stale field & age $>t_{max\_age}$ & set \texttt{STALE\_PL} and \texttt{UNKNOWN\_RISK}; apply unknown penalty; trigger refresh/slowdown hook \\
+  \bottomrule
+\end{tabularx}
+\end{center}
+
+\subsection{UnifiedRiskVoxel suggested C++ struct}
+
+\begin{lstlisting}[language=C++]
+struct UnifiedRiskVoxel {
+  float esdf_m = std::numeric_limits<float>::quiet_NaN();
+  float occ_prob = 0.5f;
+
+  float al_m = 0.0f;
+  float hpl_adv_m = 0.0f;
+  float vpl_adv_m = 0.0f;
+  float pl_adv_m = 0.0f;
+  float integrity_margin_m = 0.0f;
+  float pi_cost = 0.0f;
+
+  float age_s = 0.0f;
+  uint32_t flags = 0u;
+};
+\end{lstlisting}
+
+\subsection{Flags}
+
+\begin{lstlisting}[language=C++]
+enum UnifiedRiskFlags : uint32_t {
+  VALID_ESDF       = 1u << 0,
+  VALID_OCCUPANCY  = 1u << 1,
+  VALID_PL         = 1u << 2,
+  STALE_PL         = 1u << 3,
+  UNKNOWN_RISK     = 1u << 4,
+  OCCUPIED         = 1u << 5,
+  OUT_OF_RANGE     = 1u << 6,
+  GNSS_DEGENERATE  = 1u << 7,
+  LIDAR_DEGENERATE = 1u << 8,
+  FIM_REGULARIZED      = 1u << 9,
+  SS_VARIANCE_FALLBACK = 1u << 10,
+  FRAME_MISMATCH       = 1u << 11,
+  CLOCK_UNIT_FALLBACK  = 1u << 12
+};
+\end{lstlisting}
+
+\subsection{Query API}
+
+\begin{lstlisting}[language=C++]
+struct RiskQueryResult {
+  bool valid = false;
+  Eigen::Vector3d grad_pi = Eigen::Vector3d::Zero();
+  double esdf_m = 0.0;
+  double al_m = 0.0;
+  double hpl_adv_m = 0.0;
+  double vpl_adv_m = 0.0;
+  double pl_adv_m = 0.0;
+  double integrity_margin_m = 0.0;
+  double pi_cost = 0.0;
+  double age_s = 0.0;
+  uint32_t flags = 0u;
+};
+
+RiskQueryResult queryRisk(const Eigen::Vector3d& p_W,
+                          bool need_gradient) const;
+\end{lstlisting}
+
+\subsection{Topic/message naming guideline}
+
+Codex 应 inspect 当前 message definitions 后复用最小改动。若新增字段，推荐命名：
+\begin{center}
+\small
+\begin{tabularx}{\linewidth}{lY}
+  \toprule
+  \textbf{Name} & \textbf{Meaning} \\
+  \midrule
+  \texttt{/iap/integrity/current\_pl} & current certified monitor PL and alarm。\\
+  \texttt{/iap/advisory/pl\_field} & advisory predicted PL field。\\
+  \texttt{/iap/advisory/risk\_grid} & URG multi-layer risk grid。\\
+  \texttt{/iap/planner/integrity\_cost} & planner-consumable PI cost samples if URG not yet integrated。\\
+  \texttt{hpl\_certified\_m}, \texttt{vpl\_certified\_m} & monitor output。\\
+  \texttt{hpl\_adv\_m}, \texttt{vpl\_adv\_m}, \texttt{pl\_adv\_m} & advisory output。\\
+  \texttt{integrity\_margin\_m} & $\AL-\PL^{adv}$。\\
+  \bottomrule
+\end{tabularx}
+\end{center}
+
+
+% ============================================================
+\section{跨阶段不变项 / Stage Invariants}
+\label{sec:stage-invariants-placeholder}
+% ============================================================
+
+以下不变项优先级高于任何局部实现建议。若 Codex 发现实际代码结构与本 spec 冲突，必须停止并报告，不得自行解释后继续修改。
+
+\begin{center}
+\small
+\begin{tabularx}{\linewidth}{P{0.16\linewidth}Y Y}
+  \toprule
+  \textbf{Stage} & \textbf{Invariant} & \textbf{Reason} \\
+  \midrule
+  All & Current certified monitor fusion remains $\PL^{mon}_q=\max(\PL^G_q,\PL^L_q)$. & Preserves conservative alarm path and avoids unmodeled joint fault tree. \\
+  All & Advisory predictor output must be named/logged as \texttt{adv}, \texttt{proxy}, or \texttt{advisory}; never as certified PL. & Prevents certification overclaim. \\
+  Stage 0 & Planner behavior, PI weights, and cost field topics must remain unchanged. & Stage 0 isolates LiDAR PL stability. \\
+  Stage 1 & Numerical behavior should not change except logging/naming. & Stage 1 is semantic cleanup only. \\
+  Stage 2 & FIM-add is implemented only in advisory predictor; old predictor mode remains available for A/B test. & Enables regression comparison and preserves monitor path. \\
+  Stage 3 & ESDF/collision/dynamic weights must not be tuned automatically. & Prevents PI benefits from being confounded with planner retuning. \\
+  Stage 4 & Old \texttt{/iap/integrity\_front\_cost\_field} and \texttt{/iap/integrity\_cost\_field} remain published until URG migration is validated. & Maintains launch/demo compatibility. \\
+  Stage 5 & Performance optimization cannot change numerical semantics without A/B logs. & Prevents cache/parallel bugs from changing planner behavior silently. \\
+  \bottomrule
+\end{tabularx}
+\end{center}
+
+\begin{warningbox}{Hard stop condition}
+  If any stage requires changing the current monitor fusion rule, deleting compatibility topics, changing frame conventions, or changing collision cost weights, Codex must stop and ask for approval.
+\end{warningbox}
+
+% ============================================================
+\section{阶段化实现计划}
+% ============================================================
+
+\subsection{Stage 0：LiDAR ARAIM PL stability repair}
+
+\subsubsection{Goal}
+消除 LiDAR certified PL 在静止/匀速场景下的非物理线性增长，同时不改变 GNSS ARAIM、不改变 planner 行为。
+
+\subsubsection{Tasks}
+\begin{enumerate}
+\item Locate LiDAR block risk score computation and bias overbound computation.
+\item Replace unbounded age term by bounded model.
+\item Enforce fixed target keyframe sliding window $|T_t|\le K_T$.
+\item Add PL component logging: $|d_f|$, $K_{fa}\sigma_{ss}$, $K_{md}\sigma_f$, $b_f$.
+\item Add gamma component logging: RMSE, inlier, condition, age.
+\item Add config parameters with defaults from Section 4.
+\item Add sanity check script or log command for 10 min static run.
+\end{enumerate}
+
+\subsubsection{Do not}
+\begin{itemize}
+\item Do not change certified monitor fusion.
+\item Do not introduce FIM-add.
+\item Do not change planner cost.
+\item Do not rename topics in this stage unless unavoidable.
+\end{itemize}
+
+\subsubsection{Acceptance}
+\begin{acceptbox}{Stage 0 acceptance}
+\begin{itemize}
+  \item Static 10 min run: LiDAR PL RMS drift $<0.5$ m or configured threshold.
+  \item No monotonic unbounded linear trend in $b_f$ or total PL.
+  \item Logs show PL components and gamma components separately.
+  \item Current alarm behavior remains compatible with pre-change baseline except removal of artificial drift.
+\end{itemize}
+\end{acceptbox}
+
+\subsection{Stage 1：Naming and interface clarification}
+
+\subsubsection{Goal}
+只做语义正名，不改变核心算法行为。区分 current certified outputs 和 future advisory outputs。
+
+\subsubsection{Tasks}
+\begin{enumerate}
+\item Rename comments/log labels from generic ``Predicted PL'' to ``Advisory PL Proxy'' where applicable.
+\item Add documentation comments to current monitor outputs: ``certified/current monitor path''.
+\item Add documentation comments to predictor outputs: ``advisory/future planning path; non-certified''.
+\item Ensure planner consumes advisory fields only, not monitor alarm outputs directly.
+\end{enumerate}
+
+\subsubsection{Acceptance}
+\begin{acceptbox}{Stage 1 acceptance}
+\begin{itemize}
+  \item Code and logs no longer confuse current certified PL and advisory PL proxy.
+  \item Existing launch files still run.
+  \item No numerical behavior change expected except names/logs/comments.
+\end{itemize}
+\end{acceptbox}
+
+\subsection{Stage 2：Advisory FIM predictor and FIM-add fusion}
+
+\subsubsection{Goal}
+将 future predictor 从 two-channel PL proxy/max logic 升级为 position-FIM-level fusion：
+\[
+\Lam^{\adv}_{pos}=\Lam^{\prior}_{pos}+\Lam^G_{pos}+\Lam^L_{pos}.
+\]
+
+\subsubsection{Stage 2.1：GNSS position FIM}
+\begin{enumerate}
+\item Build $G\in\mathbb{R}^{N\times4}$ from visible satellites at candidate position.
+\item Build $W=\diag(\sigma^{-2}_{eff,s})$ using existing variance model.
+\item Compute $H_G=G^\top W G$.
+\item Convert to position FIM using Schur complement:
+  \[
+    \Lam^G_{pos}=H_{pp}-H_{pc}(H_{cc}+\lambda_c)^{-1}H_{cp}.
+  \]
+\item Handle degeneracy with flags and zero contribution.
+\end{enumerate}
+
+\subsubsection{Stage 2.2：LiDAR \texorpdfstring{$3\times3$}{3x3} FIM predictor}
+\begin{enumerate}
+\item Extend map voxel data to store normal histogram/statistics, or build a side cache.
+\item For query point $\pvec$, collect neighboring voxels within $R_L$.
+\item Compute $\pi_m(\pvec)$ and $w_m(\pvec)$.
+\item Accumulate $\Lam^L_{pos}=\sum \pi_m w_m nn^\top$.
+\item Detect degeneracy by eigenvalues and condition number:
+  \[
+    \lambda_{min}(\Lam^L_{pos}) < \lambda_L^{min}
+    \quad \Rightarrow \quad
+    \texttt{LIDAR\_DEGENERATE}.
+  \]
+\end{enumerate}
+
+\subsubsection{Stage 2.3：FIM-add fusion and PL extraction}
+\begin{enumerate}
+\item Build prior FIM from covariance.
+\item Add prior, GNSS, LiDAR FIM.
+\item Invert with regularization.
+\item Compute HPL/VPL/advisory scalar PL.
+\item Preserve old predictor mode under \texttt{fusion\_mode=max} for A/B test.
+\end{enumerate}
+
+\subsubsection{Do not}
+\begin{itemize}
+\item Do not modify certified/current ARAIM monitor fusion or alarm logic.
+\item Do not remove the old predictor mode; keep \texttt{fusion\_mode=max} or equivalent for A/B tests.
+\item Do not require raycast in the first LiDAR FIM implementation.
+\item Do not introduce full $6\times6$ LiDAR pose FIM in Stage 2.
+\item Do not change planner cost or planner topic consumption in Stage 2.
+\end{itemize}
+
+\subsubsection{Acceptance}
+\begin{acceptbox}{Stage 2 acceptance}
+\begin{itemize}
+  \item Corridor scenario: along-corridor PL significantly larger than cross-corridor PL, anisotropy ratio $>3$.
+  \item Open-sky GNSS-rich region: GNSS FIM improves advisory PL.
+  \item LiDAR-feature-rich region: LiDAR FIM improves advisory PL.
+  \item Degenerate cases produce flags, not NaNs.
+  \item A/B switch \texttt{fusion\_mode=max/fim\_add} works.
+\end{itemize}
+\end{acceptbox}
+
+\subsection{Stage 3：PI function redesign}
+
+\subsubsection{Goal}
+PI function 只消费统一 advisory PL/AL/IM，不再直接处理 multi-source GNSS/LiDAR PL channels。
+
+\subsubsection{Tasks}
+\begin{enumerate}
+\item Implement base cost:
+  \[
+    c_{PI}^{main}=\lambda_\pi[\PL^{adv}-\AL+m]^2_+.
+  \]
+\item Add optional ratio term behind config flag.
+\item Add optional balance/fault-robust terms behind config flags; default off.
+\item Clip cost to \texttt{pi\_max\_cost}.
+\item Ensure A* front-end and B-spline back-end query same PI interface.
+\item Add logs: AL, PLadv, IM, cPI, active terms.
+\end{enumerate}
+
+\subsubsection{Do not}
+\begin{itemize}
+\item Do not enable ratio, balance, or fault-robust terms by default.
+\item Do not silently tune planner weights or collision/ESDF weights.
+\item Do not consume current certified monitor PL as the planner field.
+\item Do not change A* and B-spline backend behavior in separate ways; both must use the same PI interface after Stage 3.
+\end{itemize}
+
+\subsubsection{Acceptance}
+\begin{acceptbox}{Stage 3 acceptance}
+\begin{itemize}
+  \item Planner works with $c_{PI}^{main}$ alone.
+  \item In a low-IM region, A* initial path is biased away from risk when feasible.
+  \item Turning off PI returns standard EGO behavior.
+  \item Balance/fault-robust terms do not affect baseline when disabled.
+\end{itemize}
+\end{acceptbox}
+
+\subsection{Stage 4：Unified Risk Grid}
+
+\subsubsection{Goal}
+合并 ESDF/occupancy/integrity field，避免重复查询与 stale fallback 语义错误。Stage 4 必须拆成小 patch，不得一次性重构 planner。
+
+\subsubsection{Stage 4.1：URG data structure and publisher compatibility}
+\begin{enumerate}
+\item Implement \texttt{UnifiedRiskVoxel} or equivalent minimal extension.
+\item Add URG rolling grid bounds/resolution configs.
+\item Fill ESDF, occupancy, AL, PLadv, IM, PI cost, age, flags.
+\item Keep old planner-consumable topics alive through compatibility publishing.
+\end{enumerate}
+
+\subsubsection{Stage 4.2：single query API}
+\begin{enumerate}
+\item Implement a single interpolator / \texttt{queryRisk()} API.
+\item Validate query output against existing ESDF and PI field queries.
+\item Do not switch both A* and B-spline backend in the same patch.
+\end{enumerate}
+
+\subsubsection{Stage 4.3：planner integration}
+\begin{enumerate}
+\item First migrate A* front-end to \texttt{queryRisk()}.
+\item Then migrate B-spline backend to \texttt{queryRisk()}.
+\item Replace stale-to-zero fallback with unknown penalty or refresh/slowdown flag.
+\end{enumerate}
+
+\subsubsection{Do not}
+\begin{itemize}
+\item Do not delete old topics until URG output is validated.
+\item Do not replace A* and B-spline query paths in one patch.
+\item Do not let stale field return zero PI cost silently.
+\end{itemize}
+
+\subsubsection{Acceptance}
+\begin{acceptbox}{Stage 4 acceptance}
+\begin{itemize}
+  \item A* and back-end read from the same query API after staged migration.
+  \item Old topics remain available during migration.
+  \item Stale field never becomes zero risk silently.
+  \item Debug visualization can show PL, AL, IM, PI cost, stale flags.
+  \item Query latency decreases or remains no worse than old two-grid approach.
+\end{itemize}
+\end{acceptbox}
+
+\subsection{Stage 5：Performance optimization and regression}
+
+\subsubsection{Goal}
+在功能稳定后进行性能优化，目标 PL/URG refresh $<100$ ms。
+
+\subsubsection{Allowed optimizations}
+\begin{itemize}
+\item sparse active voxels only；
+\item incremental LiDAR FIM accumulation；
+\item GNSS FIM cache by satellite geometry / local candidate batch；
+\item multi-resolution grid；
+\item parallel grid refresh；
+\item Eigen fixed-size matrix optimization for $3\times3$ and $4\times4$ operations。
+\end{itemize}
+
+\subsubsection{Acceptance}
+\begin{acceptbox}{Stage 5 acceptance}
+\begin{itemize}
+  \item Local URG refresh $<100$ ms for default $30\times30\times8$ m, 1 m resolution.
+  \item Planner loop remains stable at target rate.
+  \item No NaN/Inf in FIM, PL, PI cost over long run.
+  \item Full regression experiments pass.
+\end{itemize}
+\end{acceptbox}
+
+% ============================================================
+\section{Suggested commit plan}
+% ============================================================
+
+\begin{center}
+\small
+\begin{tabularx}{\linewidth}{lY Y}
+  \toprule
+  \textbf{Commit} & \textbf{Scope} & \textbf{Expected output} \\
+  \midrule
+  \texttt{stage0-lidar-pl-stability} & bounded age, fixed target window, PL component logs & static PL drift removed。\\
+  \texttt{stage1-advisory-naming} & comments/topic/log naming cleanup & certified/advisory distinction clear。\\
+  \texttt{stage2a-gnss-pos-fim} & GNSS $4\times4$ FIM + Schur complement & $\Lam^G_{pos}$ query works。\\
+  \texttt{stage2b-lidar-trans-fim} & voxel normal FIM predictor & corridor anisotropy appears。\\
+  \texttt{stage2c-fim-add-pl} & FIM fusion + PLadv extraction & fim\_add mode works。\\
+  \texttt{stage3-pi-main-cost} & unified PI function & planner consumes PLadv only。\\
+  \texttt{stage3-ablation-terms} & optional balance/fault-robust, default off & ablation switches work。\\
+  \texttt{stage4a-urg-compat-grid} & URG struct/fill + old topic compatibility & risk grid available without breaking demo。\\
+  \texttt{stage4b-risk-query-api} & single interpolator/queryRisk API & A/B query consistency checked。\\
+  \texttt{stage4c-planner-query-migration} & migrate A* then B-spline to queryRisk & single query API in planner。\\
+  \texttt{stage5-perf-regression} & profiling/cache/parallelization & refresh $<100$ ms。\\
+  \bottomrule
+\end{tabularx}
+\end{center}
+
+% ============================================================
+\section{Logging and debugging requirements}
+% ============================================================
+
+\subsection{Required logs for Stage 0}
+
+Every current LiDAR ARAIM epoch should optionally log:
+\begin{lstlisting}
+time_s, hpl_lidar, vpl_lidar,
+worst_hypothesis_type, worst_hypothesis_id,
+sep_term_m, sigma_ss_term_m, sigma_subset_term_m, bias_term_m,
+gamma_rmse, gamma_inlier, gamma_condition, gamma_age,
+target_window_size, lambda_min_subset, condition_number_subset,
+sigma_ss_raw_m2, sigma_ss_used_m, ss_variance_fallback_flag
+\end{lstlisting}
+
+\subsection{Required logs for Stage 2/3}
+
+Every advisory field refresh should log:
+\begin{lstlisting}
+time_s, num_grid_points, refresh_ms,
+num_gnss_visible_mean, num_lidar_voxels_mean,
+pl_adv_min, pl_adv_mean, pl_adv_p95, pl_adv_max,
+al_min, al_mean, im_min, im_mean,
+num_gnss_degenerate, num_lidar_degenerate, num_fim_regularized,
+num_sat_skipped, num_missing_variance, num_lidar_fallback,
+frame_map_name, frame_gnss_local_name, frame_ecef_to_local_available, gnss_clock_unit,
+mode_fusion, mode_lidar_fim, use_ratio, use_balance, use_fault_robust
+\end{lstlisting}
+
+\subsection{Required debug visualizations}
+
+\begin{itemize}
+\item PL field heatmap.
+\item AL field heatmap.
+\item IM field heatmap.
+\item PI cost field heatmap.
+\item GNSS-only PL vs LiDAR-only PL vs fused PL.
+\item LiDAR FIM eigenvectors/eigenvalues in corridor scenario.
+\item Stale/unknown risk flags.
+\end{itemize}
+
+% ============================================================
+\section{实验与验收矩阵}
+% ============================================================
+
+\begin{center}
+\scriptsize
+\begin{longtable}{@{}P{0.05\linewidth}P{0.17\linewidth}P{0.22\linewidth}P{0.34\linewidth}P{0.05\linewidth}@{}}
+  \toprule
+  \textbf{ID} & \textbf{Experiment} & \textbf{Purpose} & \textbf{Acceptance} & \textbf{Stage} \\
+  \midrule
+  A1 & Static LiDAR PL stability & Detect artificial PL drift & 10 min static RMS drift $<0.5$ m, no linear trend & 0 \\
+  A2 & Constant-velocity PL stability & Detect motion-related drift & PL bounded, no monotonic age-driven growth & 0 \\
+  A3 & GNSS fault injection & Certified monitor still works & GNSS PL rises, max monitor alarm unchanged & 0/2 \\
+  A4 & LiDAR block fault injection & LiDAR monitor still works & target/source/level hypothesis produces higher PL & 0 \\
+  B1 & Predictor self-consistency at current pose & Advisory field sanity & $\PL^{adv}(p_t)$ close to calibrated monitor PL proxy & 2 \\
+  B2 & Corridor anisotropy & LiDAR FIM geometry & Along-corridor PL $>$ cross-corridor PL, ratio $>3$ & 2 \\
+  B3 & Open sky vs canopy/canyon & GNSS geometry & Better sky view gives lower GNSS advisory PL & 2 \\
+  B4 & FIM-add vs max A/B & Fusion benefit & FIM-add tighter but no NaN/false unsafe collapse & 2 \\
+  C1 & PI main cost only & Planner integration & Avoids low-IM area when feasible; off returns baseline & 3 \\
+  C2 & Ratio term sensitivity & Tune optional term & No instability; ratio term optional & 3 \\
+  C3 & Fault-robust ablation & Source-redundancy value & Helps under forced single-source loss; default off & 3 \\
+  D1 & URG stale field test & Unknown risk semantics & Frozen field triggers unknown penalty/refresh, not zero risk & 4 \\
+  D2 & Query latency & Runtime performance & URG query faster/no worse than old dual lookup & 4 \\
+  E1 & Full regression & End-to-end stability & No crash/NaN; refresh $<100$ ms after optimization & 5 \\
+  \bottomrule
+\end{longtable}
+\end{center}
+
+
+% ============================================================
+\section{Codex execution gate：每个 stage 的强制流程}
+% ============================================================
+
+Codex 不得从本文档直接实现 Stage 2/3/4。每个 stage 都必须先经过以下 gate。
+
+\begin{enumerate}
+  \item \textbf{Inspect only:} 输出实际 repository 中的文件、类、函数、topic、message、config、launch/test/log 命令。
+  \item \textbf{Frame audit:} 明确 planner frame、ESDF/map frame、LiDAR map frame、GNSS local frame、ECEF/ENU/map transform 工具。
+  \item \textbf{Patch boundary:} 说明本 stage 会改哪些文件，不会改哪些文件。
+  \item \textbf{Invariant check:} 逐条确认 Section~\ref{sec:stage-invariants-placeholder} 的不变项未被破坏。若 LaTeX label 不存在，仍需引用 ``Stage Invariants'' section。
+  \item \textbf{Validation plan:} 给出 build/test/launch/log/plot 命令。没有可运行命令时，必须说明缺口。
+  \item \textbf{Approval required:} 未得到人工批准，不得修改代码。
+\end{enumerate}
+
+\begin{codexbox}{Generic stage-gate prompt}
+\begin{lstlisting}
+Before implementing this stage, inspect the repository and produce a file-level sub-plan.
+Do not edit code yet. Your sub-plan must include:
+1. exact files/classes/functions to modify,
+2. existing topics/messages/configs to preserve,
+3. build/test/launch/log commands,
+4. coordinate-frame assumptions and transform utilities,
+5. stage invariants that must remain unchanged,
+6. fallback behavior and debug logs,
+7. risks and unknowns.
+Wait for approval before making any code changes.
+\end{lstlisting}
+\end{codexbox}
+
+% ============================================================
+\section{Initial Codex prompt}
+% ============================================================
+
+\begin{codexbox}{Prompt to provide to Codex}
+\begin{lstlisting}
+You are working on the IAP repository. Read this implementation plan first.
+Your first task is NOT to modify code. First inspect the repository and produce
+an exact file-level implementation plan for Stage 0 only.
+
+Hard constraints:
+1. Do not change the certified/current ARAIM monitor fusion rule:
+   PL_mon = max(PL_G, PL_L).
+2. Do not introduce FIM-add into the certified monitor path.
+3. Stage 0 only: fix LiDAR PL stability by bounded age, fixed target window,
+   and component logging.
+4. Do not modify planner behavior in Stage 0.
+5. Identify the exact files/classes/functions where LiDAR block risk score,
+   target keyframe selection, PL composition, and logging are implemented.
+6. Identify coordinate frames used by planner, ESDF/map, LiDAR map, and GNSS.
+7. Discover the exact build/test/launch/log/plot commands available in this repo.
+8. Propose a minimal patch plan and tests/log commands.
+
+After inspection, output:
+- relevant files/functions,
+- proposed changes,
+- config parameters to add,
+- logs to add,
+- tests or launch commands to run,
+- coordinate-frame assumptions,
+- fallback/compatibility plan,
+- risks/unknowns.
+Do not edit code until I approve the plan.
+\end{lstlisting}
+\end{codexbox}
+
+% ============================================================
+\section{Stage-specific Codex prompts}
+% ============================================================
+
+\subsection{Stage 0 implementation prompt}
+\begin{lstlisting}
+Implement Stage 0 only.
+- Replace unbounded LiDAR age risk with bounded age model.
+- Add fixed target keyframe sliding window K.
+- Add PL component logs and gamma component logs.
+- Add config parameters with safe defaults.
+- Do not change certified GNSS/LiDAR fusion.
+- Do not change planner behavior.
+- Build and run available tests or provide exact commands if runtime simulation is needed.
+Return changed files, summary, and validation result.
+\end{lstlisting}
+
+\subsection{Stage 2 implementation prompt}
+\begin{lstlisting}
+Implement Stage 2 advisory FIM fusion only after Stage 0/1 are merged.
+- Add GNSS position FIM using G^T W G and Schur complement to remove clock.
+- Add LiDAR 3x3 translational FIM from voxel normal statistics.
+- Add FIM-add fusion in advisory predictor only.
+- Derive HPL_adv/VPL_adv/PL_adv from position covariance.
+- Keep old max mode behind fusion_mode=max for A/B tests.
+- Degenerate FIM must set flags and fallback safely; never produce NaN/Inf.
+- If LiDAR normal statistics are unavailable, use configured fallback instead of refactoring the map.
+- Log coordinate-frame assumptions for GNSS, LiDAR, ESDF, and planner queries.
+- Do not change planner cost or certified/current ARAIM monitor fusion.
+\end{lstlisting}
+
+\subsection{Stage 3/4 implementation prompt}
+\begin{lstlisting}
+Implement Stage 3 or one Stage 4 sub-stage only after Stage 2 passes corridor anisotropy test.
+Stage 3:
+- Redesign PI function to consume unified PL_adv and AL only.
+- Base PI cost is hinge margin cost; ratio/balance/fault-robust default off.
+- Do not change ESDF/collision cost or certified monitor outputs.
+Stage 4:
+- First build Unified Risk Grid with ESDF, occupancy, AL, HPL_adv, VPL_adv,
+  PL_adv, IM, PI cost, age, flags, while preserving old topics.
+- Then implement queryRisk API and validate against old query outputs.
+- Migrate A* first, then B-spline backend; do not migrate both in one patch.
+- Replace stale-to-zero behavior with unknown-risk penalty or refresh/slowdown flag.
+\end{lstlisting}
+
+% ============================================================
+\section{Known risks and mitigation}
+% ============================================================
+
+\begin{center}
+\small
+\begin{tabularx}{\linewidth}{lY Y}
+  \toprule
+  \textbf{Risk} & \textbf{Failure mode} & \textbf{Mitigation} \\
+  \midrule
+  GNSS/LiDAR FIM scale mismatch & One source dominates artificially & Use covariance inflation, log source contributions, keep ablation off by default。\\
+  LiDAR FIM degeneracy & Matrix inversion NaN/Inf & Regularize FIM, eigenvalue floor, flags。\\
+  Predicted PL overclaim & Reviewer questions certification & Always call future output advisory PL proxy; certified monitor remains separate。\\
+  PI over-conservatism & Planner refuses feasible routes & Start with hinge main cost only, tune weights, keep ratio/fault terms optional。\\
+  Stale field semantics & Old risk treated as safe & Unknown penalty and stale flags。\\
+  Coordinate-frame mismatch & PL field appears shifted or GNSS/LiDAR FIM wrong & Log frames, reuse existing transforms, stop if transform missing。\\
+  Missing source data & Crash or NaN when satellite/normal/covariance unavailable & Explicit fallback rules and flags。\\
+  Interface breakage & Existing demo topics disappear & Compatibility publisher and old topic retention until Stage 4 validation。\\
+  Codex over-refactor & Breaks running demo & Stage-wise commits, inspect-first workflow, no cross-stage edits。\\
+  \bottomrule
+\end{tabularx}
+\end{center}
+
+% ============================================================
+\section{Final success criteria}
+% ============================================================
+
+本整改完成后，系统应满足：
+\begin{enumerate}
+\item Current certified monitor path 仍保持 conservative max fusion，alarm 行为可解释。
+\item LiDAR certified PL 不再因 age 或 growing target set 出现无界线性增长。
+\item Future predictor 输出清晰标注为 advisory PL proxy，而不是 certified PL。
+\item Advisory predictor 使用 position-domain FIM-add 融合 GNSS、LiDAR、prior。
+\item LiDAR predictor 能在走廊中表现出方向性不确定性。
+\item PI function 只消费统一 $\PL^{adv}$、$\AL$、$\IM$，而不是多源 PL 拼接。
+\item URG 提供单一查询接口给 A* 和 B-spline optimizer。
+\item Stale PL field 不再 fallback 到 zero risk。
+\item 坐标系假设在代码注释、日志和 Codex plan 中明确记录。
+\item 旧 cost-field topics 在 URG 完成前保持兼容。
+\item 默认配置可跑通 demo；ablation 项默认关闭。
+\item PL field / URG refresh 经优化后达到 $<100$ ms 目标。
+\end{enumerate}
+
+\vspace{1em}
+\begin{center}
+\Large
+\fbox{\parbox{0.9\linewidth}{\centering
+\textbf{Core message:}\quad Current monitoring remains conservative; future planning uses fused advisory information.}}
+\end{center}
+
+\end{document}

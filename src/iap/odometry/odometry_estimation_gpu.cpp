@@ -346,6 +346,10 @@ gtsam::NonlinearFactorGraph OdometryEstimationGPU::create_factors(const int curr
         block.age_sec = target
             ? std::max(0.0, frames[current]->stamp - target->stamp)
             : 0.0;
+        block.target_distance_m = target
+            ? (frames[current]->T_world_imu.translation() -
+               target->T_world_imu.translation()).norm()
+            : 1e9;
 
         pending_blocks.push_back({factor, std::move(block)});
       };

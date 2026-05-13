@@ -34,8 +34,8 @@ namespace iap {
  * ### Two operating modes
  * - **run()** — real epoch with residuals r; computes separation vectors d_k
  *   using actual residuals and runs FDE.
- * - **predict_geometry()** — sets r = 0; d_k = 0; PL is purely
- *   geometry-driven (conservative bound for planning).
+ * - **predict_geometry()** — sets r = 0; d_k = 0; returns a geometry-driven
+ *   GNSS advisory PL proxy for planning, not a certified monitor output.
  */
 class Araim {
  public:
@@ -100,10 +100,10 @@ class Araim {
   AraimResult run(const GnssEpoch& epoch, int n_trunk_obs = 0) const;
 
   /**
-   * @brief Geometry-only ARAIM for planning prediction (r = 0).
+   * @brief Geometry-only GNSS advisory PL proxy for planning (r = 0).
    *
    * Uses a list of visible-satellite geometry descriptors.  No residuals →
-   * separation vectors d_k = 0 → PL is a pure geometry upper bound (conservative).
+   * separation vectors d_k = 0, so output is a non-certified geometry proxy.
    *
    * @param visible_sats  Visible satellite geometry (from VisibilityPredictor)
    */
