@@ -2,11 +2,18 @@
 import argparse
 import csv
 import json
-import math
 import subprocess
 import sys
 from pathlib import Path
 
+from phase2_summary_schema import (
+    ADVISORY_FIM_FIELDS,
+    URG_FIELDS,
+    as_bool,
+    derive_advisory_fusion_mode,
+    finite_float,
+    missing_required_online_fields,
+)
 
 REQUIRED_PHASE1_FILES = [
     "desired_vs_truth.csv",
@@ -144,22 +151,6 @@ def load_json(path):
         return {}
     with path.open() as f:
         return json.load(f)
-
-
-def finite_float(value):
-    try:
-        out = float(value)
-    except (TypeError, ValueError):
-        return None
-    return out if math.isfinite(out) else None
-
-
-def as_bool(value):
-    if isinstance(value, bool):
-        return value
-    if isinstance(value, str):
-        return value.strip().lower() in ("1", "true", "yes", "on")
-    return bool(value)
 
 
 def check_online_csv(export_dir, failures, warnings):
@@ -358,25 +349,8 @@ def check_summary(export_dir, failures):
         failures.append("phase2_summary.json sample_count <= 0")
     if as_bool(summary.get("online_truth_used", False)):
         failures.append("phase2_summary.json online_truth_used is true")
-    predicted = summary.get("predicted_integrity") or {}
-    for field in (
-        "fallback_count",
-        "fallback_rate",
-        "fallback_reason_histogram",
-        "finite_gnss_prediction_count",
-    ):
-        if field not in summary and field not in predicted:
-            failures.append(f"phase2_summary.json missing {field}")
-    if "integrity_snapshot" not in summary:
-        failures.append("phase2_summary.json missing integrity_snapshot")
-    if "current_consistency_raw" not in summary:
-        failures.append("phase2_summary.json missing current_consistency_raw")
-    if "current_consistency_anchored" not in summary:
-        failures.append("phase2_summary.json missing current_consistency_anchored")
-    if "current_consistency" not in summary:
-        failures.append("phase2_summary.json missing current_consistency compatibility block")
-    if "phase_h_lite" not in summary:
-        failures.append("phase2_summary.json missing phase_h_lite")
+    for field in missing_required_online_fields(summary):
+        failures.append(f"phase2_summary.json missing {field}")
     capabilities = summary.get("stage1_capabilities")
     if not isinstance(capabilities, dict):
         failures.append("phase2_summary.json missing stage1_capabilities")
@@ -397,6 +371,92 @@ def check_summary(export_dir, failures):
             f"official Phase 2 requires odom_source {OFFICIAL_ODOM_SOURCE}, got {odom_source!r}"
         )
     return summary
+
+
+def check_advisory_fim(summary, online_rows, failures):
+    mode = derive_advisory_fusion_mode(summary, online_rows)
+    if mode != "fim_add":
+        return mode
+
+    advisory = summary.get("advisory_fim") or {}
+    if not isinstance(advisory, dict):
+        failures.append("phase2_summary.json missing advisory_fim for fim_add mode")
+        return mode
+    missing = [field for field in ADVISORY_FIM_FIELDS if field not in advisory]
+    if missing:
+        failures.append(
+            "phase2_summary.json advisory_fim missing field(s): " + ", ".join(missing)
+        )
+        return mode
+    if advisory.get("fusion_mode") != "fim_add":
+        failures.append(
+            "phase2_summary.json advisory_fim.fusion_mode must be 'fim_add' in fim_add mode"
+        )
+    if int(advisory.get("gnss_fim_valid_count") or 0) <= 0:
+        failures.append("phase2_summary.json advisory_fim.gnss_fim_valid_count <= 0")
+
+    fim_rows = 0
+    required_columns = ("advisory_fusion_mode", "lambda_adv_trace", "hpl_adv", "vpl_adv")
+    for row_idx, row in enumerate(online_rows, start=2):
+        missing_columns = [col for col in required_columns if col not in row]
+        if missing_columns:
+            failures.append(
+                "integrity_along_planner_traj.csv missing fim_add diagnostic column(s): "
+                + ", ".join(missing_columns)
+            )
+            return mode
+        row_mode = (row.get("advisory_fusion_mode") or "").strip()
+        if row_mode != "fim_add":
+            failures.append(
+                "integrity_along_planner_traj.csv row "
+                f"{row_idx}: advisory_fusion_mode={row_mode!r} is inconsistent with fim_add summary"
+            )
+            return mode
+        fim_rows += 1
+        for column in ("lambda_adv_trace", "hpl_adv", "vpl_adv"):
+            if finite_float(row.get(column)) is None:
+                failures.append(
+                    f"integrity_along_planner_traj.csv row {row_idx}: non-finite {column} in fim_add mode"
+                )
+                return mode
+    if fim_rows <= 0:
+        failures.append("fim_add mode has no online rows with advisory FIM diagnostics")
+    return mode
+
+
+def check_urg(summary, failures):
+    urg = summary.get("urg") or {}
+    if not isinstance(urg, dict) or not as_bool(urg.get("urg_enabled", False)):
+        return
+
+    missing = [field for field in URG_FIELDS if field not in urg]
+    if missing:
+        failures.append("phase2_summary.json urg missing field(s): " + ", ".join(missing))
+        return
+    if not as_bool(urg.get("urg_active", False)):
+        failures.append("phase2_summary.json urg.urg_enabled=true but urg_active is false")
+    for field in (
+        "urg_query_count",
+        "urg_front_field_points",
+        "urg_backend_field_points",
+        "urg_unknown_count",
+        "urg_stale_count",
+        "urg_mean_update_ms",
+        "urg_p95_update_ms",
+    ):
+        value = finite_float(urg.get(field))
+        if value is None:
+            failures.append(f"phase2_summary.json urg.{field} is not finite")
+            return
+        if value < 0.0:
+            failures.append(f"phase2_summary.json urg.{field} is negative")
+            return
+    if int(urg.get("urg_query_count") or 0) <= 0:
+        failures.append("phase2_summary.json urg.urg_query_count <= 0")
+    if int(urg.get("urg_front_field_points") or 0) <= 0:
+        failures.append("phase2_summary.json urg.urg_front_field_points <= 0")
+    if int(urg.get("urg_backend_field_points") or 0) <= 0:
+        failures.append("phase2_summary.json urg.urg_backend_field_points <= 0")
 
 
 def check_pl_grid(summary, online_rows, failures, warnings):
@@ -450,6 +510,8 @@ def check_lidar_observability(summary, online_rows, failures, warnings):
     enabled = as_bool(lidar.get("enabled", False))
     use_lidar = as_bool(lidar.get("use_lidar_observability", enabled))
     fused_mode = summary.get("pl_model") == "fused_fim_grid"
+    advisory_mode = derive_advisory_fusion_mode(summary, online_rows)
+    fim_add_mode = advisory_mode == "fim_add"
     if not enabled and not fused_mode:
         return
 
@@ -464,7 +526,7 @@ def check_lidar_observability(summary, online_rows, failures, warnings):
         pl_v = finite_float(row.get("PL_V_pred"))
         gnss_h = finite_float(row.get("gnss_hpl"))
         gnss_v = finite_float(row.get("gnss_vpl"))
-        if None not in (pl_h, gnss_h):
+        if not fim_add_mode and None not in (pl_h, gnss_h):
             conservative_checks += 1
             if pl_h + 1.0e-6 < gnss_h:
                 failures.append(
@@ -472,7 +534,7 @@ def check_lidar_observability(summary, online_rows, failures, warnings):
                     f"PL_H_pred={pl_h:.9f} is below gnss_hpl={gnss_h:.9f}"
                 )
                 return
-        if None not in (pl_v, gnss_v) and pl_v + 1.0e-6 < gnss_v:
+        if not fim_add_mode and None not in (pl_v, gnss_v) and pl_v + 1.0e-6 < gnss_v:
             failures.append(
                 f"integrity_along_planner_traj.csv row {row_idx}: "
                 f"PL_V_pred={pl_v:.9f} is below gnss_vpl={gnss_v:.9f}"
@@ -485,13 +547,13 @@ def check_lidar_observability(summary, online_rows, failures, warnings):
         ):
             finite_lidar_debug += 1
 
-    if conservative_checks == 0:
+    if not fim_add_mode and conservative_checks == 0:
         failures.append("fused_fim_grid produced no finite GNSS conservative checks")
     if use_lidar and int(lidar.get("valid_count") or 0) <= 0:
         failures.append("LiDAR observability enabled but summary valid_count <= 0")
     if use_lidar and finite_lidar_debug <= 0:
         failures.append("LiDAR observability enabled but no finite lidar debug samples exist")
-    if int(lidar.get("conservative_fusion_violation_count") or 0) > 0:
+    if not fim_add_mode and int(lidar.get("conservative_fusion_violation_count") or 0) > 0:
         failures.append("phase2_summary.json reports conservative fusion violations")
     if use_lidar and float(lidar.get("valid_rate") or 0.0) < 0.05:
         warnings.append(f"LiDAR observability valid rate is low: {float(lidar.get('valid_rate') or 0.0):.3f}")
@@ -569,6 +631,8 @@ def main():
     summary = check_summary(export_dir, failures)
     check_current_consistency(summary, failures)
     check_pl_grid(summary, online_rows, failures, warnings)
+    check_advisory_fim(summary, online_rows, failures)
+    check_urg(summary, failures)
     check_lidar_observability(summary, online_rows, failures, warnings)
     pl_models = {row.get("pl_model", "") for row in online_rows}
     if not pl_models and summary.get("pl_model"):

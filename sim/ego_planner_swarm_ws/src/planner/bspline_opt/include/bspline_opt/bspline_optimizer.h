@@ -218,6 +218,7 @@ namespace ego_planner
 	      double vpl = std::numeric_limits<double>::quiet_NaN();
 	      double hal = std::numeric_limits<double>::quiet_NaN();
 	      double val = std::numeric_limits<double>::quiet_NaN();
+	      double cost = std::numeric_limits<double>::quiet_NaN();
 	    };
 
 	    mutable std::mutex integrity_mutex_;

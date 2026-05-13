@@ -109,6 +109,7 @@ add_library(iap SHARED
   src/iap/planner/pl_grid.cpp
   src/iap/planner/future_pl_field_predictor.cpp
   src/iap/planner/pi_cost_adapter.cpp
+  src/iap/planner/unified_risk_grid.cpp
   src/iap/planner/predicted_araim.cpp
   # integrity monitoring (IAP-RQ-200/210/220)
   src/iap/integrity/integrity_monitor.cpp
@@ -502,6 +503,7 @@ if(DEFINED ENV{ROS_VERSION})
 
     ## Tests (IAP-RQ-241–246, RQ-200, RQ-131)
     if(BUILD_TESTING)
+      find_package(Python3 REQUIRED COMPONENTS Interpreter)
       find_package(ament_cmake_gtest REQUIRED)
       ament_add_gtest(test_araim test/test_araim.cpp)
       target_link_libraries(test_araim iap)
@@ -517,10 +519,16 @@ if(DEFINED ENV{ROS_VERSION})
       target_link_libraries(test_future_pl_field_predictor iap)
       ament_add_gtest(test_pi_cost_adapter test/test_pi_cost_adapter.cpp)
       target_link_libraries(test_pi_cost_adapter iap)
+      ament_add_gtest(test_unified_risk_grid test/test_unified_risk_grid.cpp)
+      target_link_libraries(test_unified_risk_grid iap)
       ament_add_gtest(test_alert_limit_model test/test_alert_limit_model.cpp)
       target_link_libraries(test_alert_limit_model iap)
       ament_add_gtest(test_run_log_manager test/test_run_log_manager.cpp)
       target_link_libraries(test_run_log_manager iap)
+      add_test(
+        NAME test_phase2_summary_schema
+        COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test/test_phase2_summary_schema.py
+      )
     endif()
     ament_export_include_directories(include ${EIGEN3_INCLUDE_DIR} ${OpenCV_INCLUDE_DIRS})
     ament_export_libraries(${iap_LIBRARIES} ${GTSAM_LIBRARIES} fmt spdlog::spdlog)

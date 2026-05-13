@@ -192,7 +192,8 @@ namespace ego_planner
 	      sensor_msgs::PointCloud2ConstIterator<float> vpl(*msg, "vpl");
 	      sensor_msgs::PointCloud2ConstIterator<float> hal(*msg, "hal");
 	      sensor_msgs::PointCloud2ConstIterator<float> val(*msg, "val");
-	      for (; x != x.end(); ++x, ++y, ++z, ++hpl, ++vpl, ++hal, ++val)
+	      sensor_msgs::PointCloud2ConstIterator<float> cost(*msg, "cost");
+	      for (; x != x.end(); ++x, ++y, ++z, ++hpl, ++vpl, ++hal, ++val, ++cost)
 	      {
 	        FrontIntegrityCostSample sample;
 	        sample.position = Eigen::Vector3d(*x, *y, *z);
@@ -200,9 +201,11 @@ namespace ego_planner
 	        sample.vpl = *vpl;
 	        sample.hal = *hal;
 	        sample.val = *val;
+	        sample.cost = *cost;
 	        if (!sample.position.allFinite() || !std::isfinite(sample.hpl) ||
 	            !std::isfinite(sample.vpl) || !std::isfinite(sample.hal) ||
-	            !std::isfinite(sample.val) || sample.hal <= 1.0e-6 || sample.val <= 1.0e-6)
+	            !std::isfinite(sample.val) || sample.hal <= 1.0e-6 ||
+	            sample.val <= 1.0e-6)
 	        {
 	          continue;
 	        }
@@ -293,8 +296,14 @@ namespace ego_planner
 	      }
 
 	      const auto &sample = front_integrity_samples_[best_idx];
-	      *cost = std::min(normalizedFrontIntegrityCost(sample.hpl, sample.vpl, sample.hal, sample.val),
-	                       integrity_front_cost_max_);
+	      if (std::isfinite(sample.cost)) {
+	        *cost = std::min(std::max(0.0, sample.cost),
+	                         integrity_front_cost_max_);
+	      } else {
+	        *cost = std::min(normalizedFrontIntegrityCost(sample.hpl, sample.vpl,
+	                                                      sample.hal, sample.val),
+	                         integrity_front_cost_max_);
+	      }
 	    }
 	    return std::isfinite(*cost);
 	  }

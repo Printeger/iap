@@ -42,6 +42,7 @@
 #include <iap/planner/integrity_snapshot.hpp>
 #include <iap/planner/pi_cost_adapter.hpp>
 #include <iap/planner/predicted_araim.hpp>
+#include <iap/planner/unified_risk_grid.hpp>
 #include <nav_msgs/msg/odometry.hpp>
 #include <quadrotor_msgs/msg/position_command.hpp>
 #include <sensor_msgs/msg/nav_sat_fix.hpp>
@@ -163,6 +164,15 @@ const std::vector<std::string> kCsvFields = {
     "al_model",
     "odom_source",
     "map_source",
+    "urg_enabled",
+    "urg_generation",
+    "urg_age_s",
+    "urg_flags",
+    "urg_flags_hex",
+    "urg_query_source",
+    "urg_unknown_penalty",
+    "urg_esdf_m",
+    "urg_occ_prob",
 };
 
 const std::vector<std::string> kSnapshotCsvFields = {
@@ -293,6 +303,36 @@ const std::vector<std::string> kGridVoxelCsvFields = {
     "pi_fallback_reason",
     "pi_cost_clamped",
     "risk_band_adv",
+};
+
+const std::vector<std::string> kUrgGridVoxelCsvFields = {
+    "stamp",
+    "urg_generation",
+    "ix",
+    "iy",
+    "iz",
+    "p_x",
+    "p_y",
+    "p_z",
+    "esdf_m",
+    "occ_prob",
+    "al_h_m",
+    "al_v_m",
+    "hal_m",
+    "val_m",
+    "hpl_adv_m",
+    "vpl_adv_m",
+    "pl_adv_m",
+    "im_h_adv_m",
+    "im_v_adv_m",
+    "im_min_adv_m",
+    "pi_cost",
+    "pi_grad_x",
+    "pi_grad_y",
+    "pi_grad_z",
+    "age_s",
+    "flags",
+    "flags_hex",
 };
 
   const std::vector<std::string> kActualExecCsvFields = {
@@ -805,6 +845,20 @@ class Phase2PlannerIntegrityEvaluator : public rclcpp::Node {
 	    declare_parameter<double>("integrity_front_cost_field_resolution_m", 1.0);
 	    declare_parameter<double>("integrity_front_cost_field_size_x_m", 50.0);
 	    declare_parameter<double>("integrity_front_cost_field_size_y_m", 50.0);
+    declare_parameter<bool>("use_unified_risk_grid", false);
+    declare_parameter<double>("urg_resolution_m", 1.0);
+    declare_parameter<double>("urg_half_extent_x_m", 25.0);
+    declare_parameter<double>("urg_half_extent_y_m", 25.0);
+    declare_parameter<int>("urg_z_slices", 1);
+    declare_parameter<double>("urg_fresh_timeout_s", 1.0);
+    declare_parameter<double>("urg_stale_timeout_s", 5.0);
+    declare_parameter<double>("urg_unknown_penalty", 3000.0);
+    declare_parameter<double>("urg_unknown_tau_s", 2.0);
+    declare_parameter<bool>("urg_direct_query_on_miss", true);
+    declare_parameter<bool>("urg_export_voxels", false);
+    declare_parameter<bool>("urg_keep_legacy_topics", true);
+    declare_parameter<bool>("urg_publish_front_cost_field", true);
+    declare_parameter<bool>("urg_publish_backend_cost_field", true);
 	    declare_parameter<bool>("integrity_viz_use_fixed_anchor", false);
     declare_parameter<double>("integrity_viz_anchor_x", 0.0);
     declare_parameter<double>("integrity_viz_anchor_y", 12.0);
@@ -965,6 +1019,25 @@ class Phase2PlannerIntegrityEvaluator : public rclcpp::Node {
 	        get_parameter("integrity_front_cost_field_size_x_m").as_double();
 	    integrity_front_cost_field_size_y_m_ =
 	        get_parameter("integrity_front_cost_field_size_y_m").as_double();
+    use_unified_risk_grid_ =
+        get_parameter("use_unified_risk_grid").as_bool();
+    urg_resolution_m_ = get_parameter("urg_resolution_m").as_double();
+    urg_half_extent_x_m_ = get_parameter("urg_half_extent_x_m").as_double();
+    urg_half_extent_y_m_ = get_parameter("urg_half_extent_y_m").as_double();
+    urg_z_slices_ = get_parameter("urg_z_slices").as_int();
+    urg_fresh_timeout_s_ = get_parameter("urg_fresh_timeout_s").as_double();
+    urg_stale_timeout_s_ = get_parameter("urg_stale_timeout_s").as_double();
+    urg_unknown_penalty_ = get_parameter("urg_unknown_penalty").as_double();
+    urg_unknown_tau_s_ = get_parameter("urg_unknown_tau_s").as_double();
+    urg_direct_query_on_miss_ =
+        get_parameter("urg_direct_query_on_miss").as_bool();
+    urg_export_voxels_ = get_parameter("urg_export_voxels").as_bool();
+    urg_keep_legacy_topics_ = get_parameter("urg_keep_legacy_topics").as_bool();
+    urg_publish_front_cost_field_ =
+        get_parameter("urg_publish_front_cost_field").as_bool();
+    urg_publish_backend_cost_field_ =
+        get_parameter("urg_publish_backend_cost_field").as_bool();
+    urg_grid_.set_enabled(use_unified_risk_grid_);
 	    integrity_viz_use_fixed_anchor_ =
 	        get_parameter("integrity_viz_use_fixed_anchor").as_bool();
     integrity_viz_anchor_ = Eigen::Vector3d(
@@ -1062,7 +1135,9 @@ class Phase2PlannerIntegrityEvaluator : public rclcpp::Node {
       marker_pub_ = create_publisher<visualization_msgs::msg::MarkerArray>(
           "/iap/planner_integrity_markers", 10);
     }
-	    if (publish_integrity_cost_field_) {
+	    if (publish_integrity_cost_field_ ||
+          (use_unified_risk_grid_ && urg_keep_legacy_topics_ &&
+           urg_publish_backend_cost_field_)) {
 	      integrity_cost_field_pub_ =
 	          create_publisher<sensor_msgs::msg::PointCloud2>(
 	              integrity_cost_field_topic_, rclcpp::QoS(1).best_effort());
@@ -1088,7 +1163,9 @@ class Phase2PlannerIntegrityEvaluator : public rclcpp::Node {
 	          create_publisher<visualization_msgs::msg::MarkerArray>(
 	              "/iap/integrity_viz/sample_labels", 10);
 	    }
-	    if (publish_integrity_front_cost_field_) {
+	    if (publish_integrity_front_cost_field_ ||
+          (use_unified_risk_grid_ && urg_keep_legacy_topics_ &&
+           urg_publish_front_cost_field_)) {
 	      integrity_front_cost_field_pub_ =
 	          create_publisher<sensor_msgs::msg::PointCloud2>(
 	              integrity_front_cost_field_topic_, rclcpp::QoS(1).best_effort());
@@ -1107,7 +1184,9 @@ class Phase2PlannerIntegrityEvaluator : public rclcpp::Node {
 	          std::chrono::duration_cast<std::chrono::nanoseconds>(period),
 	          [this] { schedule_pl_grid_rebuild(); });
 	    }
-	    if (publish_integrity_front_cost_field_) {
+	    if (publish_integrity_front_cost_field_ ||
+          (use_unified_risk_grid_ && urg_keep_legacy_topics_ &&
+           urg_publish_front_cost_field_)) {
 	      const auto period = std::chrono::duration<double>(
 	          1.0 / std::max(0.1, integrity_front_cost_field_publish_hz_));
 	      integrity_front_cost_field_timer_ = create_wall_timer(
@@ -1190,6 +1269,10 @@ class Phase2PlannerIntegrityEvaluator : public rclcpp::Node {
       grid_voxels_csv_file_.open(*export_dir_ / "pl_grid_voxels.csv",
                                   std::ios::out | std::ios::trunc);
     }
+    if (urg_export_voxels_ && use_unified_risk_grid_) {
+      urg_grid_voxels_csv_file_.open(*export_dir_ / "urg_grid_voxels.csv",
+                                     std::ios::out | std::ios::trunc);
+    }
     if (!csv_file_ || !snapshot_csv_file_) {
       warn_once("failed to open Phase 2 evaluator CSV outputs");
       return;
@@ -1234,6 +1317,15 @@ class Phase2PlannerIntegrityEvaluator : public rclcpp::Node {
         grid_voxels_csv_file_ << kGridVoxelCsvFields[i];
       }
       grid_voxels_csv_file_ << '\n';
+    }
+    if (urg_grid_voxels_csv_file_) {
+      for (std::size_t i = 0; i < kUrgGridVoxelCsvFields.size(); ++i) {
+        if (i) {
+          urg_grid_voxels_csv_file_ << ',';
+        }
+        urg_grid_voxels_csv_file_ << kUrgGridVoxelCsvFields[i];
+      }
+      urg_grid_voxels_csv_file_ << '\n';
     }
     outputs_open_ = true;
     write_summary();
@@ -1882,6 +1974,176 @@ class Phase2PlannerIntegrityEvaluator : public rclcpp::Node {
     return grad;
   }
 
+  std::string flags_hex(const uint32_t flags) const {
+    std::ostringstream ss;
+    ss << "0x" << std::hex << flags;
+    return ss.str();
+  }
+
+  iap::UnifiedRiskVoxel make_unified_risk_voxel(const Eigen::Vector3d& pos,
+                                                const double stamp_s) {
+    iap::UnifiedRiskVoxel voxel;
+    voxel.flags = 0;
+    const iap::AlertLimitSample al = al_values(pos);
+    const PlFields pl = pl_values(pos);
+    const PiAdvisorySelection pi_pl = select_pi_advisory_pl(pl);
+    const double pi_pl_scalar =
+        pi_pl.valid ? std::max(pi_pl.hpl, pi_pl.vpl)
+                    : std::numeric_limits<double>::quiet_NaN();
+    const double clearance = al.dist_to_obstacle_m;
+    if (is_finite(clearance)) {
+      voxel.esdf_m = static_cast<float>(clearance);
+      voxel.flags |= iap::VALID_ESDF;
+    }
+    {
+      std::lock_guard<std::mutex> lock(occupancy_mutex_);
+      voxel.occ_prob =
+          static_cast<float>(occupancy_.occupancy_probability(pos));
+      voxel.flags |= iap::VALID_OCCUPANCY;
+      if (voxel.occ_prob > 0.5f) {
+        voxel.flags |= iap::OCCUPIED;
+      }
+    }
+    if (is_finite(al.hal_m) && is_finite(al.val_m)) {
+      voxel.al_h_m = static_cast<float>(al.hal_m);
+      voxel.al_v_m = static_cast<float>(al.val_m);
+      voxel.hal_m = static_cast<float>(al.hal_m);
+      voxel.val_m = static_cast<float>(al.val_m);
+      voxel.flags |= iap::VALID_AL;
+    }
+    if (pi_pl.valid && is_finite(pi_pl.hpl) && is_finite(pi_pl.vpl)) {
+      voxel.hpl_adv_m = static_cast<float>(pi_pl.hpl);
+      voxel.vpl_adv_m = static_cast<float>(pi_pl.vpl);
+      voxel.pl_adv_m = static_cast<float>(pi_pl_scalar);
+      voxel.im_h_adv_m = is_finite(al.hal_m)
+                             ? static_cast<float>(al.hal_m - pi_pl.hpl)
+                             : std::numeric_limits<float>::quiet_NaN();
+      voxel.im_v_adv_m = is_finite(al.val_m)
+                             ? static_cast<float>(al.val_m - pi_pl.vpl)
+                             : std::numeric_limits<float>::quiet_NaN();
+      if (std::isfinite(voxel.im_h_adv_m) &&
+          std::isfinite(voxel.im_v_adv_m)) {
+        voxel.im_min_adv_m = std::min(voxel.im_h_adv_m, voxel.im_v_adv_m);
+      } else if (std::isfinite(voxel.im_h_adv_m)) {
+        voxel.im_min_adv_m = voxel.im_h_adv_m;
+      } else {
+        voxel.im_min_adv_m = voxel.im_v_adv_m;
+      }
+      voxel.flags |= iap::VALID_ADVISORY_PL;
+    }
+    const Eigen::Vector3d pi_grad = pi_cost_gradient_at(pos);
+    const iap::PICostResult pi = pi_cost_adapter_.evaluate_with_gradient(
+        al.hal_m, al.val_m, pi_pl.hpl, pi_pl.vpl, pi_grad.x(), pi_grad.y(),
+        pi_grad.z());
+    if (pi.input_valid) {
+      voxel.flags |= iap::PI_INPUT_VALID;
+    }
+    if (pi.valid && is_finite(pi.cost_total)) {
+      voxel.pi_cost = static_cast<float>(pi.cost_total);
+      voxel.pi_grad_x = static_cast<float>(pi.grad_x);
+      voxel.pi_grad_y = static_cast<float>(pi.grad_y);
+      voxel.pi_grad_z = static_cast<float>(pi.grad_z);
+      voxel.flags |= iap::VALID_PI;
+    } else {
+      voxel.flags |= iap::UNKNOWN_RISK;
+      if (is_finite(pi.cost_total)) {
+        voxel.pi_cost = static_cast<float>(pi.cost_total);
+      }
+    }
+    if (pl.advisory_fusion_mode == "fim_add") {
+      voxel.flags |= iap::FIM_ADD_USED;
+    }
+    if (pl.gnss_fim_valid) {
+      voxel.flags |= iap::GNSS_FIM_VALID;
+    }
+    if (pl.lidar_fim_valid) {
+      voxel.flags |= iap::LIDAR_FIM_VALID;
+    }
+    const double age =
+        std::isfinite(pl.grid_age_s) ? pl.grid_age_s : 0.0;
+    voxel.age_s = static_cast<float>(std::max(0.0, age));
+    if (std::isfinite(stamp_s) && std::isfinite(current_integrity_stamp_) &&
+        stamp_s - current_integrity_stamp_ > urg_fresh_timeout_s_) {
+      voxel.flags |= iap::STALE_PL;
+    }
+    return voxel;
+  }
+
+  iap::UnifiedRiskQueryOptions urg_query_options(const double stamp_s) {
+    iap::UnifiedRiskQueryOptions options;
+    options.now_s = stamp_s;
+    options.fresh_timeout_s = urg_fresh_timeout_s_;
+    options.stale_timeout_s = urg_stale_timeout_s_;
+    options.unknown_penalty = urg_unknown_penalty_;
+    options.unknown_tau_s = urg_unknown_tau_s_;
+    options.direct_query_on_miss = urg_direct_query_on_miss_;
+    options.direct_query =
+        [this, stamp_s](const Eigen::Vector3d& p,
+                        iap::UnifiedRiskVoxel* out) {
+          if (!out || !p.allFinite()) {
+            return false;
+          }
+          *out = make_unified_risk_voxel(p, stamp_s);
+          return true;
+        };
+    return options;
+  }
+
+  iap::UnifiedRiskQueryResult query_unified_risk(const Eigen::Vector3d& pos,
+                                                 const double stamp_s) {
+    std::lock_guard<std::mutex> lock(urg_mutex_);
+    return urg_grid_.queryRisk(pos, urg_query_options(stamp_s));
+  }
+
+  void annotate_row_with_urg(Row* row,
+                             const Eigen::Vector3d& pos,
+                             const double stamp_s) {
+    if (!row) {
+      return;
+    }
+    (*row)["urg_enabled"] = bool_str(use_unified_risk_grid_);
+    (*row)["urg_generation"] = "-1";
+    (*row)["urg_age_s"] = "nan";
+    (*row)["urg_flags"] = "0";
+    (*row)["urg_flags_hex"] = "0x0";
+    (*row)["urg_query_source"] = use_unified_risk_grid_ ? "inactive" : "disabled";
+    (*row)["urg_unknown_penalty"] = "0";
+    (*row)["urg_esdf_m"] = "nan";
+    (*row)["urg_occ_prob"] = "nan";
+    if (!use_unified_risk_grid_ || !pos.allFinite()) {
+      return;
+    }
+
+    const auto query = query_unified_risk(pos, stamp_s);
+    (*row)["urg_generation"] = std::to_string(query.grid_generation);
+    (*row)["urg_age_s"] = fmt_num(query.voxel.age_s);
+    (*row)["urg_flags"] = std::to_string(query.flags);
+    (*row)["urg_flags_hex"] = flags_hex(query.flags);
+    (*row)["urg_query_source"] = query.query_source;
+    (*row)["urg_unknown_penalty"] = fmt_num(query.unknown_penalty);
+    (*row)["urg_esdf_m"] = fmt_num(query.voxel.esdf_m);
+    (*row)["urg_occ_prob"] = fmt_num(query.voxel.occ_prob);
+
+    if ((query.flags & iap::VALID_AL) != 0u) {
+      (*row)["AL_H_pred"] = fmt_num(query.voxel.hal_m);
+      (*row)["AL_V_pred"] = fmt_num(query.voxel.val_m);
+    }
+    if ((query.flags & iap::VALID_ADVISORY_PL) != 0u) {
+      (*row)["advisory_hpl_used"] = fmt_num(query.voxel.hpl_adv_m);
+      (*row)["advisory_vpl_used"] = fmt_num(query.voxel.vpl_adv_m);
+      (*row)["im_h_adv"] = fmt_num(query.voxel.im_h_adv_m);
+      (*row)["im_v_adv"] = fmt_num(query.voxel.im_v_adv_m);
+      (*row)["im_min_adv"] = fmt_num(query.voxel.im_min_adv_m);
+    }
+    if (std::isfinite(query.voxel.pi_cost)) {
+      (*row)["pi_total_cost"] = fmt_num(query.voxel.pi_cost);
+      (*row)["pi_cost_total"] = fmt_num(query.voxel.pi_cost);
+      (*row)["pi_grad_x"] = fmt_num(query.voxel.pi_grad_x);
+      (*row)["pi_grad_y"] = fmt_num(query.voxel.pi_grad_y);
+      (*row)["pi_grad_z"] = fmt_num(query.voxel.pi_grad_z);
+    }
+  }
+
   Row make_sample_row(const double stamp,
                       const int64_t traj_id,
                       const int sample_index,
@@ -2027,6 +2289,7 @@ class Phase2PlannerIntegrityEvaluator : public rclcpp::Node {
     row["al_model"] = al_model_;
     row["odom_source"] = odom_topic_;
     row["map_source"] = map_topic_;
+    annotate_row_with_urg(&row, pos, stamp);
     return row;
   }
 
@@ -2486,6 +2749,94 @@ class Phase2PlannerIntegrityEvaluator : public rclcpp::Node {
     grid_voxels_csv_file_.flush();
   }
 
+  void write_urg_grid_voxel_samples_locked(const double stamp_s) {
+    if (!urg_grid_voxels_csv_file_ || !urg_export_voxels_ ||
+        !use_unified_risk_grid_ || !urg_grid_.valid()) {
+      return;
+    }
+    std::lock_guard<std::mutex> csv_lock(csv_mutex_);
+    for (int iz = 0; iz < urg_grid_.nz(); ++iz) {
+      for (int iy = 0; iy < urg_grid_.ny(); ++iy) {
+        for (int ix = 0; ix < urg_grid_.nx(); ++ix) {
+          const Eigen::Vector3d p = urg_grid_.position(ix, iy, iz);
+          const auto& voxel = urg_grid_.at(ix, iy, iz);
+          Row row;
+          row["stamp"] = fmt_num(stamp_s);
+          row["urg_generation"] = std::to_string(urg_grid_.generation());
+          row["ix"] = std::to_string(ix);
+          row["iy"] = std::to_string(iy);
+          row["iz"] = std::to_string(iz);
+          row["p_x"] = fmt_num(p.x());
+          row["p_y"] = fmt_num(p.y());
+          row["p_z"] = fmt_num(p.z());
+          row["esdf_m"] = fmt_num(voxel.esdf_m);
+          row["occ_prob"] = fmt_num(voxel.occ_prob);
+          row["al_h_m"] = fmt_num(voxel.al_h_m);
+          row["al_v_m"] = fmt_num(voxel.al_v_m);
+          row["hal_m"] = fmt_num(voxel.hal_m);
+          row["val_m"] = fmt_num(voxel.val_m);
+          row["hpl_adv_m"] = fmt_num(voxel.hpl_adv_m);
+          row["vpl_adv_m"] = fmt_num(voxel.vpl_adv_m);
+          row["pl_adv_m"] = fmt_num(voxel.pl_adv_m);
+          row["im_h_adv_m"] = fmt_num(voxel.im_h_adv_m);
+          row["im_v_adv_m"] = fmt_num(voxel.im_v_adv_m);
+          row["im_min_adv_m"] = fmt_num(voxel.im_min_adv_m);
+          row["pi_cost"] = fmt_num(voxel.pi_cost);
+          row["pi_grad_x"] = fmt_num(voxel.pi_grad_x);
+          row["pi_grad_y"] = fmt_num(voxel.pi_grad_y);
+          row["pi_grad_z"] = fmt_num(voxel.pi_grad_z);
+          row["age_s"] = fmt_num(voxel.age_s);
+          row["flags"] = std::to_string(voxel.flags);
+          row["flags_hex"] = flags_hex(voxel.flags);
+          for (std::size_t i = 0; i < kUrgGridVoxelCsvFields.size(); ++i) {
+            if (i) {
+              urg_grid_voxels_csv_file_ << ',';
+            }
+            const auto it = row.find(kUrgGridVoxelCsvFields[i]);
+            urg_grid_voxels_csv_file_
+                << csv_escape(it == row.end() ? "" : it->second);
+          }
+          urg_grid_voxels_csv_file_ << '\n';
+        }
+      }
+    }
+    urg_grid_voxels_csv_file_.flush();
+  }
+
+  void rebuild_unified_risk_grid(const Eigen::Vector3d& center,
+                                 const double stamp_s) {
+    if (!use_unified_risk_grid_ || !center.allFinite()) {
+      return;
+    }
+    const auto t0 = std::chrono::steady_clock::now();
+    std::lock_guard<std::mutex> lock(urg_mutex_);
+    if (!urg_grid_.reset(center,
+                         std::max(urg_resolution_m_, urg_half_extent_x_m_),
+                         std::max(urg_resolution_m_, urg_half_extent_y_m_),
+                         std::max(1, urg_z_slices_),
+                         std::max(0.1, urg_resolution_m_))) {
+      return;
+    }
+    urg_grid_.set_enabled(true);
+    urg_grid_.set_generation(urg_next_generation_++);
+    urg_grid_.set_stamp_s(stamp_s);
+    for (int iz = 0; iz < urg_grid_.nz(); ++iz) {
+      for (int iy = 0; iy < urg_grid_.ny(); ++iy) {
+        for (int ix = 0; ix < urg_grid_.nx(); ++ix) {
+          const Eigen::Vector3d p = urg_grid_.position(ix, iy, iz);
+          urg_grid_.at(ix, iy, iz) = make_unified_risk_voxel(p, stamp_s);
+        }
+      }
+    }
+    urg_grid_.compute_gradients();
+    const auto t1 = std::chrono::steady_clock::now();
+    const double build_ms =
+        std::chrono::duration<double, std::milli>(t1 - t0).count();
+    urg_grid_.set_build_time_ms(build_ms);
+    urg_grid_.note_update(build_ms);
+    write_urg_grid_voxel_samples_locked(stamp_s);
+  }
+
   void on_bspline(const traj_utils::msg::Bspline& msg) {
     open_outputs_if_ready();
     seen_bspline_ = true;
@@ -2589,6 +2940,13 @@ class Phase2PlannerIntegrityEvaluator : public rclcpp::Node {
     write_sample(row);
     ++traj_count_;
     publish_markers({row});
+    if (use_unified_risk_grid_ && urg_keep_legacy_topics_ &&
+        urg_publish_backend_cost_field_) {
+      const std::vector<Row> field_rows =
+          build_integrity_cost_field_rows({row}, planner_stamp, -fallback_traj_id_);
+      publish_integrity_cost_field(field_rows);
+      publish_integrity_viz(field_rows);
+    }
     write_summary();
   }
 
@@ -2629,6 +2987,7 @@ class Phase2PlannerIntegrityEvaluator : public rclcpp::Node {
 
     nlohmann::json summary;
     summary["available"] = true;
+    summary["phase2_summary_schema_version"] = 1;
     summary["run_dir"] = run_dir_ ? run_dir_->string() : "";
     summary["traj_count"] = traj_count_;
     summary["sample_count"] = sample_count_;
@@ -2664,6 +3023,20 @@ class Phase2PlannerIntegrityEvaluator : public rclcpp::Node {
 	      {"phase2_publish_integrity_cost_grid", publish_integrity_cost_grid_},
 	      {"phase2_publish_integrity_front_cost_field",
 	       publish_integrity_front_cost_field_},
+      {"phase2_use_unified_risk_grid", use_unified_risk_grid_},
+      {"phase2_urg_resolution_m", urg_resolution_m_},
+      {"phase2_urg_half_extent_x_m", urg_half_extent_x_m_},
+      {"phase2_urg_half_extent_y_m", urg_half_extent_y_m_},
+      {"phase2_urg_z_slices", urg_z_slices_},
+      {"phase2_urg_fresh_timeout_s", urg_fresh_timeout_s_},
+      {"phase2_urg_stale_timeout_s", urg_stale_timeout_s_},
+      {"phase2_urg_unknown_penalty", urg_unknown_penalty_},
+      {"phase2_urg_unknown_tau_s", urg_unknown_tau_s_},
+      {"phase2_urg_direct_query_on_miss", urg_direct_query_on_miss_},
+      {"phase2_urg_export_voxels", urg_export_voxels_},
+      {"phase2_urg_keep_legacy_topics", urg_keep_legacy_topics_},
+      {"phase2_urg_publish_front_cost_field", urg_publish_front_cost_field_},
+      {"phase2_urg_publish_backend_cost_field", urg_publish_backend_cost_field_},
 	      {"phase2_integrity_front_cost_field_topic",
 	       integrity_front_cost_field_topic_},
 	      {"phase2_integrity_front_cost_field_publish_hz",
@@ -2802,6 +3175,37 @@ class Phase2PlannerIntegrityEvaluator : public rclcpp::Node {
          {{"last_pl_ratio",
            json_or_null(grid_stats.last_self_check_pl_ratio)},
           {"warning_threshold_ratio", 0.10}}},
+    };
+    iap::UnifiedRiskGrid::Stats urg_stats;
+    {
+      std::lock_guard<std::mutex> lock(urg_mutex_);
+      urg_stats = urg_grid_.stats();
+    }
+    nlohmann::json urg_flags_hist = nlohmann::json::object();
+    for (const auto& [flags, count] : urg_stats.flags_histogram) {
+      urg_flags_hist[std::to_string(flags)] = count;
+    }
+    summary["urg"] = {
+        {"urg_enabled", use_unified_risk_grid_},
+        {"urg_active", urg_stats.active},
+        {"urg_generation", urg_stats.generation},
+        {"urg_update_count", urg_stats.update_count},
+        {"urg_query_count", urg_stats.query_count},
+        {"urg_direct_query_count", urg_stats.direct_query_count},
+        {"urg_grid_hit_count", urg_stats.grid_hit_count},
+        {"urg_grid_miss_count", urg_stats.grid_miss_count},
+        {"urg_stale_count", urg_stats.stale_count},
+        {"urg_unknown_count", urg_stats.unknown_count},
+        {"urg_valid_pi_count", urg_stats.valid_pi_count},
+        {"urg_mean_update_ms", json_or_null(urg_stats.mean_update_ms)},
+        {"urg_p95_update_ms", json_or_null(urg_stats.p95_update_ms)},
+        {"urg_front_field_points", urg_stats.front_field_points},
+        {"urg_backend_field_points", urg_stats.backend_field_points},
+        {"urg_unknown_penalty_count", urg_stats.unknown_penalty_count},
+        {"urg_flags_histogram", urg_flags_hist},
+        {"urg_voxel_csv", urg_export_voxels_ && use_unified_risk_grid_
+                              ? "urg_grid_voxels.csv"
+                              : ""},
     };
     nlohmann::json lidar_hist = nlohmann::json::object();
     for (const auto& [reason, count] :
@@ -3006,7 +3410,8 @@ class Phase2PlannerIntegrityEvaluator : public rclcpp::Node {
 	  std::vector<Row> build_integrity_cost_field_rows(const std::vector<Row>& traj_rows,
 	                                                   const double stamp,
 	                                                   const int64_t traj_id) {
-    if (!publish_integrity_cost_grid_) {
+    if (!publish_integrity_cost_grid_ &&
+        !(use_unified_risk_grid_ && urg_publish_backend_cost_field_)) {
       return traj_rows;
     }
     Eigen::Vector3d center = Eigen::Vector3d::Zero();
@@ -3028,12 +3433,21 @@ class Phase2PlannerIntegrityEvaluator : public rclcpp::Node {
     if (!center.allFinite()) {
       return traj_rows;
     }
+    if (use_unified_risk_grid_) {
+      rebuild_unified_risk_grid(center, stamp);
+    }
 
     std::vector<Row> rows;
     rows.reserve(traj_rows.size() + 2048);
-    const double res = std::max(0.1, field_predictor_params_.grid_resolution_m);
-    const double sx = std::max(res, field_predictor_params_.grid_size_x_m);
-    const double sy = std::max(res, field_predictor_params_.grid_size_y_m);
+    const double res = use_unified_risk_grid_
+                           ? std::max(0.1, urg_resolution_m_)
+                           : std::max(0.1, field_predictor_params_.grid_resolution_m);
+    const double sx = use_unified_risk_grid_
+                          ? std::max(res, 2.0 * urg_half_extent_x_m_)
+                          : std::max(res, field_predictor_params_.grid_size_x_m);
+    const double sy = use_unified_risk_grid_
+                          ? std::max(res, 2.0 * urg_half_extent_y_m_)
+                          : std::max(res, field_predictor_params_.grid_size_y_m);
     const int nx = std::max(1, static_cast<int>(std::floor(sx / res)) + 1);
     const int ny = std::max(1, static_cast<int>(std::floor(sy / res)) + 1);
     int field_idx = 0;
@@ -3049,8 +3463,16 @@ class Phase2PlannerIntegrityEvaluator : public rclcpp::Node {
             Eigen::Vector3d(x, y, z), nan, nan,
             std::numeric_limits<double>::quiet_NaN()));
       }
+	    }
+    for (auto row : traj_rows) {
+      const auto x = finite_or_none(row["x"]);
+      const auto y = finite_or_none(row["y"]);
+      const auto z_row = finite_or_none(row["z"]);
+      if (x && y && z_row) {
+        annotate_row_with_urg(&row, Eigen::Vector3d(*x, *y, *z_row), stamp);
+      }
+      rows.push_back(std::move(row));
     }
-	    rows.insert(rows.end(), traj_rows.begin(), traj_rows.end());
 	    return rows;
 	  }
 
@@ -3083,24 +3505,51 @@ class Phase2PlannerIntegrityEvaluator : public rclcpp::Node {
 		                                  sample.hpl, sample.vpl);
 		    sample.cost = pi.cost_total;
 		    sample.risk_band_code = pi.risk_band_code;
+    if (use_unified_risk_grid_) {
+      const auto query = query_unified_risk(pos, now().seconds());
+      if ((query.flags & iap::VALID_ADVISORY_PL) != 0u) {
+        sample.hpl = query.voxel.hpl_adv_m;
+        sample.vpl = query.voxel.vpl_adv_m;
+        sample.im_h = query.voxel.im_h_adv_m;
+        sample.im_v = query.voxel.im_v_adv_m;
+        sample.im_min = query.voxel.im_min_adv_m;
+      }
+      if (std::isfinite(query.voxel.pi_cost)) {
+        sample.cost = query.voxel.pi_cost;
+      }
+      if ((query.flags & iap::UNKNOWN_RISK) != 0u) {
+        sample.risk_band_code = 0;
+      }
+    }
 		    return sample;
 		  }
 
 	  std::vector<FrontIntegrityCostSample> build_integrity_front_cost_samples() {
 	    std::vector<FrontIntegrityCostSample> samples;
-	    if (!publish_integrity_front_cost_field_ || !latest_odom_pose_valid_ ||
+	    if (!(publish_integrity_front_cost_field_ ||
+            (use_unified_risk_grid_ && urg_publish_front_cost_field_)) ||
+          !latest_odom_pose_valid_ ||
 	        !latest_odom_p_.allFinite()) {
 	      return samples;
 	    }
 
-	    const double res = std::max(0.1, integrity_front_cost_field_resolution_m_);
-	    const double sx = std::max(res, integrity_front_cost_field_size_x_m_);
-	    const double sy = std::max(res, integrity_front_cost_field_size_y_m_);
+	    const double res = use_unified_risk_grid_
+                           ? std::max(0.1, urg_resolution_m_)
+                           : std::max(0.1, integrity_front_cost_field_resolution_m_);
+	    const double sx = use_unified_risk_grid_
+                           ? std::max(res, 2.0 * urg_half_extent_x_m_)
+                           : std::max(res, integrity_front_cost_field_size_x_m_);
+	    const double sy = use_unified_risk_grid_
+                           ? std::max(res, 2.0 * urg_half_extent_y_m_)
+                           : std::max(res, integrity_front_cost_field_size_y_m_);
 	    const int nx = std::max(1, static_cast<int>(std::floor(sx / res)) + 1);
 	    const int ny = std::max(1, static_cast<int>(std::floor(sy / res)) + 1);
 	    samples.reserve(static_cast<std::size_t>(nx * ny));
 
 	    const Eigen::Vector3d center = latest_odom_p_;
+    if (use_unified_risk_grid_) {
+      rebuild_unified_risk_grid(center, now().seconds());
+    }
 	    const double z = std::clamp(center.z(), z_min_, z_max_);
 	    for (int ix = 0; ix < nx; ++ix) {
 	      const double x = center.x() - 0.5 * sx + std::min(ix * res, sx);
@@ -3110,6 +3559,10 @@ class Phase2PlannerIntegrityEvaluator : public rclcpp::Node {
 	            Eigen::Vector3d(x, y, z)));
 	      }
 	    }
+    if (use_unified_risk_grid_) {
+      std::lock_guard<std::mutex> lock(urg_mutex_);
+      urg_grid_.set_front_field_points(static_cast<int>(samples.size()));
+    }
 	    return samples;
 	  }
 
@@ -3292,6 +3745,10 @@ class Phase2PlannerIntegrityEvaluator : public rclcpp::Node {
       ++grad_z;
       ++risk_band;
       ++risk_band_code;
+    }
+    if (use_unified_risk_grid_) {
+      std::lock_guard<std::mutex> lock(urg_mutex_);
+      urg_grid_.set_backend_field_points(static_cast<int>(rows.size()));
     }
     integrity_cost_field_pub_->publish(cloud);
   }
@@ -3632,6 +4089,10 @@ class Phase2PlannerIntegrityEvaluator : public rclcpp::Node {
       grid_voxels_csv_file_.flush();
       grid_voxels_csv_file_.close();
     }
+    if (urg_grid_voxels_csv_file_) {
+      urg_grid_voxels_csv_file_.flush();
+      urg_grid_voxels_csv_file_.close();
+    }
   }
 
   iap::PredictedAraimComputer::Params predictor_params_{};
@@ -3643,6 +4104,8 @@ class Phase2PlannerIntegrityEvaluator : public rclcpp::Node {
   iap::IntegritySnapshotBuilder snapshot_builder_;
   iap::LocalOccupancyGrid occupancy_;
   mutable std::mutex occupancy_mutex_;
+  iap::UnifiedRiskGrid urg_grid_;
+  mutable std::mutex urg_mutex_;
 
   std::string log_root_;
   std::string explicit_run_dir_;
@@ -3694,6 +4157,21 @@ class Phase2PlannerIntegrityEvaluator : public rclcpp::Node {
 	  double integrity_front_cost_field_resolution_m_ = 1.0;
 	  double integrity_front_cost_field_size_x_m_ = 50.0;
 	  double integrity_front_cost_field_size_y_m_ = 50.0;
+  bool use_unified_risk_grid_ = false;
+  double urg_resolution_m_ = 1.0;
+  double urg_half_extent_x_m_ = 25.0;
+  double urg_half_extent_y_m_ = 25.0;
+  int urg_z_slices_ = 1;
+  double urg_fresh_timeout_s_ = 1.0;
+  double urg_stale_timeout_s_ = 5.0;
+  double urg_unknown_penalty_ = 3000.0;
+  double urg_unknown_tau_s_ = 2.0;
+  bool urg_direct_query_on_miss_ = true;
+  bool urg_export_voxels_ = false;
+  bool urg_keep_legacy_topics_ = true;
+  bool urg_publish_front_cost_field_ = true;
+  bool urg_publish_backend_cost_field_ = true;
+  int urg_next_generation_ = 0;
 	  bool integrity_viz_use_fixed_anchor_ = false;
   Eigen::Vector3d integrity_viz_anchor_ = Eigen::Vector3d(0.0, 12.0, 8.0);
   std::string gnss_scenario_file_;
@@ -3707,6 +4185,7 @@ class Phase2PlannerIntegrityEvaluator : public rclcpp::Node {
   std::ofstream actual_exec_csv_file_;
   std::ofstream grid_consistency_csv_file_;
   std::ofstream grid_voxels_csv_file_;
+  std::ofstream urg_grid_voxels_csv_file_;
   mutable std::mutex csv_mutex_;
   bool outputs_open_ = false;
   bool finalized_ = false;

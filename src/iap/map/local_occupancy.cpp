@@ -119,4 +119,18 @@ double LocalOccupancyGrid::occupancy_ratio(const Eigen::Vector3d& origin,
   return static_cast<double>(occupied) / static_cast<double>(params_.n_kappa_steps);
 }
 
+// ---------------------------------------------------------------------------
+bool LocalOccupancyGrid::occupied_at(const Eigen::Vector3d& p_world) const {
+  if (!p_world.allFinite()) {
+    return false;
+  }
+  return is_occupied(to_key(p_world));
+}
+
+// ---------------------------------------------------------------------------
+double LocalOccupancyGrid::occupancy_probability(
+    const Eigen::Vector3d& p_world) const {
+  return occupied_at(p_world) ? 1.0 : 0.0;
+}
+
 }  // namespace iap

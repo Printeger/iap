@@ -96,6 +96,12 @@ class LocalOccupancyGrid {
                          const Eigen::Vector3d& dir_unit,
                          double L) const;
 
+  /// @brief Return whether a world-frame point falls in an occupied voxel.
+  bool occupied_at(const Eigen::Vector3d& p_world) const;
+
+  /// @brief Occupancy probability proxy for URG export: 1 if occupied, else 0.
+  double occupancy_probability(const Eigen::Vector3d& p_world) const;
+
   /// @brief Number of occupied voxels currently stored.
   std::size_t size() const { return voxels_.size(); }
 

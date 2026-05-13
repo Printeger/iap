@@ -894,3 +894,525 @@ still requires:
 - Phase 2 validator updates for advisory `fim_add` semantics;
 - the previously documented demo11 odometry freshness/schema/alignment fixes;
 - a passing official Phase 1 and Phase 2 validation pair on the same demo11 run.
+
+## Stage 4 URG Implementation Status - 2026-05-13
+
+Stage 4 was implemented as a compatibility-first Unified Risk Grid layer for
+demo11. The default launch behavior remains legacy-compatible because
+`phase2_use_unified_risk_grid` defaults to `false`.
+
+### Stage 4 Code Changes
+
+Added the URG core library and tests:
+
+- `include/iap/planner/unified_risk_grid.hpp`
+- `src/iap/planner/unified_risk_grid.cpp`
+- `test/test_unified_risk_grid.cpp`
+
+The URG model includes the requested `UnifiedRiskVoxel` fields and flags:
+`VALID_ESDF`, `VALID_OCCUPANCY`, `VALID_AL`, `VALID_ADVISORY_PL`,
+`VALID_PI`, `STALE_PL`, `UNKNOWN_RISK`, `OCCUPIED`, `OUT_OF_RANGE`,
+`FIM_ADD_USED`, `LIDAR_FIM_VALID`, `GNSS_FIM_VALID`, and `PI_INPUT_VALID`.
+
+Integrated URG into the Phase 2 planner integrity evaluator:
+
+- `apps/phase2_planner_integrity_evaluator.cpp`
+  - declares and reads the Stage 4 `urg_*` parameters;
+  - builds URG voxels from existing clearance proxy, occupancy, AL,
+    advisory PL, Stage 3 PI, IM, FIM-add diagnostics, and PI gradients;
+  - applies stale/unknown handling using the configured unknown penalty;
+  - publishes URG-derived samples on the existing legacy-compatible topics
+    when URG is enabled:
+    `/iap/integrity_cost_field` and `/iap/integrity_front_cost_field`;
+  - keeps the existing PointCloud2 field names unchanged:
+    `x y z hpl vpl hal val im_h im_v im_min cost grad_x grad_y grad_z
+    risk_band risk_band_code`;
+  - exports `urg_grid_voxels.csv` when `phase2_urg_export_voxels=true`;
+  - writes the requested URG counters into `phase2_summary.json`.
+
+Added read-only occupancy query helpers for URG export:
+
+- `include/iap/map/local_occupancy.hpp`
+- `src/iap/map/local_occupancy.cpp`
+
+Updated demo11 launch arguments:
+
+- `launch/demo11_ego_planner_integrity_corridor.launch.py`
+  - adds all requested `phase2_urg_*` launch arguments;
+  - passes them into `phase2_planner_integrity_evaluator`.
+
+Updated the demo11-integrated EGO front-field consumer:
+
+- `sim/ego_planner_swarm_ws/src/planner/bspline_opt/include/bspline_opt/bspline_optimizer.h`
+- `sim/ego_planner_swarm_ws/src/planner/bspline_opt/src/bspline_optimizer.cpp`
+  - front-field samples now store the existing `cost` field;
+  - A* front search prefers the URG/field-provided `cost`;
+  - legacy HPL/VPL/HAL/VAL ratio recomputation remains as fallback.
+
+No changes were made to certified GNSS ARAIM, certified LiDAR ARAIM, current
+certified monitor fusion, `/iap/integrity` semantics, Stage 2 FIM math, or
+Stage 3 PI math beyond routing Stage 3 results into URG-derived grid samples.
+
+### Stage 4 Test Results
+
+Build and syntax checks:
+
+```bash
+python3 -m py_compile \
+  src/iap/launch/demo11_ego_planner_integrity_corridor.launch.py
+
+source /opt/ros/jazzy/setup.bash
+./src/iap/tools/build_phase1_ego_planner_closed_loop.sh
+```
+
+Result:
+
+```text
+20 packages finished
+verified executable: iap_phase1_tools phase1_closed_loop_logger
+verified executable: iap phase2_planner_integrity_evaluator
+```
+
+Focused code tests:
+
+```bash
+source /opt/ros/jazzy/setup.bash
+source install/setup.bash
+ctest --test-dir build/iap \
+  -R "test_pl_grid|test_future_pl_field_predictor|test_pi_cost_adapter|test_unified_risk_grid" \
+  --output-on-failure
+```
+
+Result:
+
+```text
+100% tests passed, 0 tests failed out of 4
+test_pl_grid: passed
+test_future_pl_field_predictor: passed
+test_pi_cost_adapter: passed
+test_unified_risk_grid: passed
+```
+
+### Demo11 Stage 4 Enabled Smoke
+
+Command:
+
+```bash
+source /opt/ros/jazzy/setup.bash
+source install/setup.bash
+timeout 180s ros2 launch iap demo11_ego_planner_integrity_corridor.launch.py \
+  start_rviz:=false \
+  use_integrity_global_search:=true \
+  phase2_use_unified_risk_grid:=true \
+  phase2_urg_export_voxels:=true \
+  phase2_urg_keep_legacy_topics:=true \
+  phase2_urg_publish_front_cost_field:=true \
+  phase2_urg_publish_backend_cost_field:=true \
+  phase2_pl_model:=fused_fim_grid \
+  phase2_use_pl_grid:=true \
+  phase2_export_pl_grid_voxels:=true \
+  phase2_use_advisory_fim_add:=true \
+  phase2_use_lidar_advisory_fim:=true \
+  phase2_use_lidar_observability:=false \
+  phase2_pi_use_unified_advisory_pl:=true
+```
+
+Run directory:
+
+```text
+/home/dev/ws_iap/src/iap/log/20260513T052517Z_755
+```
+
+Key `phase2_summary.json` results:
+
+```text
+urg_enabled: true
+urg_active: true
+urg_update_count: 6
+urg_query_count: 15612
+urg_grid_hit_count: 15610
+urg_grid_miss_count: 2
+urg_direct_query_count: 2
+urg_valid_pi_count: 15612
+urg_stale_count: 15612
+urg_unknown_count: 5202
+urg_unknown_penalty_count: 7803
+urg_front_field_points: 2601
+urg_backend_field_points: 2602
+urg_mean_update_ms: 8881.4465
+urg_p95_update_ms: 11893.4893
+urg_voxel_csv: urg_grid_voxels.csv
+```
+
+Export files present:
+
+```text
+phase2_summary.json
+pl_grid_voxels.csv
+traj_with_gnss.csv
+urg_grid_voxels.csv
+```
+
+This confirms that demo11 with Stage 2 FIM-add, Stage 3 unified advisory PI,
+and Stage 4 URG enabled produced nonzero URG query statistics and both
+front/backend field sample counts.
+
+Shutdown caveat: with the requested default Stage 4 grid size
+`phase2_urg_half_extent_x_m=25`, `phase2_urg_half_extent_y_m=25`, and
+`phase2_urg_resolution_m=1`, URG rebuilds are heavy in demo11. The enabled run
+wrote valid summaries and CSV exports, but the ROS launch timeout caught the
+evaluator during heavy work and escalated shutdown after the summary had already
+been written. This is a Stage 4 performance/shutdown caveat, not a build or
+data-flow failure.
+
+### Demo11 Stage 4 Disabled Compatibility Smoke
+
+Command:
+
+```bash
+source /opt/ros/jazzy/setup.bash
+source install/setup.bash
+timeout 180s ros2 launch iap demo11_ego_planner_integrity_corridor.launch.py \
+  start_rviz:=false \
+  use_integrity_global_search:=true \
+  phase2_use_unified_risk_grid:=false \
+  phase2_pl_model:=fused_fim_grid \
+  phase2_use_pl_grid:=true \
+  phase2_use_advisory_fim_add:=true \
+  phase2_use_lidar_advisory_fim:=true \
+  phase2_pi_use_unified_advisory_pl:=true
+```
+
+Run directory:
+
+```text
+/home/dev/ws_iap/src/iap/log/20260513T055654Z_017
+```
+
+Key `phase2_summary.json` results:
+
+```text
+phase2_use_unified_risk_grid: false
+urg_enabled: false
+urg_active: false
+urg_update_count: 0
+urg_query_count: 0
+urg_grid_hit_count: 0
+urg_grid_miss_count: 0
+urg_front_field_points: 0
+urg_backend_field_points: 0
+phase2_use_advisory_fim_add: true
+phase2_pi_use_unified_advisory_pl: true
+pl_grid.query_counts.direct: 81289
+pl_grid.query_counts.grid: 656
+pl_grid.query_counts.fallback: 0
+```
+
+Export files present:
+
+```text
+phase2_summary.json
+pl_grid_voxels.csv
+traj_with_gnss.csv
+```
+
+No `urg_grid_voxels.csv` was generated in disabled mode, as expected. The
+Phase 2 evaluator exited cleanly. Some non-evaluator ROS visualization/sensing
+processes still printed shutdown errors after timeout-triggered shutdown; these
+are existing demo11 teardown behaviors and were not introduced by URG.
+
+### Current Stage 4 Validation Conclusion
+
+Stage 4 has passed the implemented code tests, build checks, and demo11 smoke
+checks for both enabled and disabled modes. All testing recorded for this stage
+was performed through demo11 or the demo11 build/test path.
+
+Stage 4 should be reported as demo11 smoke-tested, not full official demo11
+accepted yet. Full acceptance is still blocked by the already documented
+Phase 2 validator limitations around Stage 2 `fim_add`, URG schema/freshness
+semantics, and the existing demo11 odometry freshness/alignment assumptions.
+
+Remaining Stage 4 follow-up:
+
+- reduce URG update cost or make rebuild/shutdown cancellation more responsive
+  for the default 25 m by 25 m demo11 grid;
+- update the old Phase 2 validator to understand FIM-add and URG semantics;
+- run a full-duration official demo11 validation after the validator and
+  known demo11 freshness/schema assumptions are updated.
+
+## 2026-05-13 Update: Phase 2 Summary Schema and Validator Fix
+
+This update fixes the Phase 2 validation/analyzer schema mismatch that blocked
+Stage 2/3/4 evaluation. The change is intentionally limited to summary schema,
+analysis, validation, and focused Python tests.
+
+### Scope and Invariants
+
+No certified runtime math or public ROS interfaces were changed by this fix:
+
+- certified GNSS ARAIM unchanged;
+- certified LiDAR ARAIM unchanged;
+- current monitor fusion unchanged;
+- Stage 2 FIM math unchanged;
+- Stage 3 PI math unchanged;
+- Stage 4 URG math unchanged;
+- ROS topics and message schemas unchanged.
+
+### Files Updated
+
+- Added shared Phase 2 summary schema helper:
+  `tools/phase2/phase2_summary_schema.py`
+- Updated Phase 2 validator:
+  `tools/phase2/validate_phase2_integrity_eval.py`
+- Updated offline analyzer merge behavior:
+  `tools/ana_log.py`
+- Added focused Python schema tests:
+  `test/test_phase2_summary_schema.py`
+- Registered Python CTest:
+  `CMakeLists.txt`
+- Added additive online summary schema version field:
+  `apps/phase2_planner_integrity_evaluator.cpp`
+
+### Stable `phase2_summary.json` Schema
+
+The online evaluator remains the owner of the stable summary schema. Offline
+analysis now augments the online summary instead of replacing it with a smaller
+analysis-only document.
+
+The following validator-required online blocks are preserved:
+
+```text
+fallback_count
+fallback_rate
+fallback_reason_histogram
+finite_gnss_prediction_count
+integrity_snapshot
+current_consistency_raw
+current_consistency_anchored
+current_consistency
+phase_h_lite
+stage1_capabilities
+pi_cost
+```
+
+The stable schema also carries the Stage 2/3/4 sections:
+
+```text
+advisory_fim
+pi_stage3
+urg
+```
+
+The analyzer now deep-merges offline alignment/validation results into the
+online summary, preserving `advisory_fim`, `pi_stage3`, `urg`,
+`stage1_predictor_config`, `stage1_capabilities`, current consistency blocks,
+and all online validator-required fields.
+
+### Validator Behavior
+
+Legacy mode keeps the old conservative advisory PL checks, including requiring
+the fused advisory prediction to remain no lower than the GNSS-only proxy.
+
+For `advisory_fusion_mode=fim_add`, the validator no longer requires
+`PL_H_pred >= gnss_hpl` or `PL_V_pred >= gnss_vpl`, because Stage 2 FIM-add is
+an additive advisory information-fusion path and can intentionally produce a
+tighter advisory PL than the GNSS-only advisory proxy.
+
+In `fim_add` mode the validator instead checks that:
+
+```text
+advisory_fim.fusion_mode == fim_add
+advisory_fim.gnss_fim_valid_count > 0
+online rows consistently report advisory_fusion_mode == fim_add
+lambda_adv_trace is finite
+hpl_adv is finite
+vpl_adv is finite
+```
+
+When URG is enabled, the validator now checks:
+
+```text
+urg_enabled
+urg_active
+urg_query_count
+urg_front_field_points
+urg_backend_field_points
+urg_unknown_count
+urg_stale_count
+urg_mean_update_ms
+urg_p95_update_ms
+```
+
+### Focused Tests Added
+
+New test:
+
+```text
+test_phase2_summary_schema
+```
+
+Coverage:
+
+- legacy summary fixture passes the conservative legacy PL logic;
+- `fim_add` fixture passes even when `PL_H_pred < gnss_hpl`;
+- URG-enabled summary validates required URG fields;
+- `ana_log.py` merge preserves online validator-required fields and Stage 2/3/4
+  sections.
+
+### Commands Run
+
+Python compile check:
+
+```bash
+python3 -m py_compile \
+  src/iap/tools/phase2/phase2_summary_schema.py \
+  src/iap/tools/phase2/validate_phase2_integrity_eval.py \
+  src/iap/tools/ana_log.py \
+  src/iap/test/test_phase2_summary_schema.py
+```
+
+Result:
+
+```text
+exit code 0
+no output
+```
+
+Direct Python unit test:
+
+```bash
+python3 src/iap/test/test_phase2_summary_schema.py
+```
+
+Result:
+
+```text
+....
+----------------------------------------------------------------------
+Ran 4 tests in 0.000s
+
+OK
+```
+
+Build:
+
+```bash
+colcon build --base-paths src/iap src/gnss_comm --packages-select iap \
+  --cmake-args -DCMAKE_BUILD_TYPE=RelWithDebInfo -DBUILD_TESTING=ON
+```
+
+Result:
+
+```text
+Finished <<< iap [43.2s]
+Summary: 1 package finished [43.2s]
+```
+
+Focused CTest:
+
+```bash
+ctest --test-dir build/iap -R test_phase2_summary_schema --output-on-failure
+```
+
+Result:
+
+```text
+100% tests passed, 0 tests failed out of 1
+```
+
+Focused regression CTest:
+
+```bash
+ctest --test-dir build/iap \
+  -R "test_phase2_summary_schema|test_future_pl_field_predictor|test_pi_cost_adapter|test_unified_risk_grid" \
+  --output-on-failure
+```
+
+Result:
+
+```text
+100% tests passed, 0 tests failed out of 4
+test_future_pl_field_predictor: passed
+test_pi_cost_adapter: passed
+test_unified_risk_grid: passed
+test_phase2_summary_schema: passed
+```
+
+Analyzer rewrite preservation check was run on a copied Stage 4 smoke run so
+existing run artifacts were not modified:
+
+```bash
+rm -rf /tmp/iap_phase2_schema_check
+cp -a src/iap/log/20260513T052517Z_755 /tmp/iap_phase2_schema_check
+python3 src/iap/tools/ana_log.py \
+  --run /tmp/iap_phase2_schema_check \
+  --no-plots \
+  --skip-external-tools
+```
+
+Result:
+
+```text
+Analyzed run: /tmp/iap_phase2_schema_check
+Markdown report: /tmp/iap_phase2_schema_check/analysis/report.md
+JSON report    : /tmp/iap_phase2_schema_check/analysis/report.json
+Figures dir     : /tmp/iap_phase2_schema_check/analysis/figs
+```
+
+Post-analysis summary inspection result:
+
+```text
+missing_required_online_fields: []
+advisory_fim: present
+pi_stage3: present
+urg: present
+stage1_predictor_config: present
+stage1_capabilities: present
+current_consistency_raw: present
+phase_h_lite: present
+pi_cost: present
+validation: present
+actual_alignment: present
+advisory_fim.fusion_mode: fim_add
+urg_enabled: true
+```
+
+Full validator was also run on the copied Stage 4 smoke run:
+
+```bash
+python3 src/iap/tools/phase2/validate_phase2_integrity_eval.py \
+  --run-dir /tmp/iap_phase2_schema_check
+```
+
+Result:
+
+```text
+Validated Phase 2 run: /tmp/iap_phase2_schema_check
+sample_count: 4
+snapshot_count: 3
+traj_count: 3
+aligned_sample_count: 4
+odom_source: /drone_0_visual_slam/odom
+map_source: global_cloud_direct
+```
+
+The validator no longer failed on the Stage 2 FIM-add condition
+`PL_H_pred < gnss_hpl`. The copied smoke run still failed on unrelated
+pre-existing run-quality checks:
+
+```text
+official Phase 2 requires at least one B-spline trajectory sample
+phase2_summary.json current_consistency_raw max_pl_ratio=0.986 exceeds 0.100
+demo10 did not pass Phase 1 official validation because the copied run used
+allow_truth_alignment=true
+```
+
+### Current Validation Conclusion
+
+The Phase 2 summary schema mismatch is fixed at the tooling level. `ana_log.py`
+now preserves online validator-required blocks, and the Phase 2 validator now
+accepts advisory `fim_add` semantics without requiring advisory fused PL to be
+larger than the GNSS-only advisory proxy.
+
+Remaining full-acceptance blockers are run-quality/demo issues already tracked
+before this fix, not the summary schema or `fim_add` validator assumption.

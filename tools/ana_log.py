@@ -42,6 +42,11 @@ from typing import Any
 
 PACKAGE_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_RUN = PACKAGE_ROOT / "log" / "latest"
+PHASE2_TOOLS_DIR = PACKAGE_ROOT / "tools" / "phase2"
+if str(PHASE2_TOOLS_DIR) not in sys.path:
+    sys.path.insert(0, str(PHASE2_TOOLS_DIR))
+
+from phase2_summary_schema import merge_online_and_offline_summary
 
 RUNTIME_LOG_RE = re.compile(
     r"^\[(?P<ts>[^\]]+)\]\s+\[(?P<logger>[^\]]+)\]\s+\[(?P<level>[^\]]+)\]\s+(?P<message>.*)$"
@@ -2079,7 +2084,7 @@ def analyze_phase2_integrity(
     if not isinstance(online_warnings, list):
         online_warnings = [str(online_warnings)]
 
-    summary: dict[str, Any] = {
+    offline_summary: dict[str, Any] = {
         "available": True,
         "run_dir": str(run_dir),
         "traj_count": int(online_summary.get("traj_count") or len(set(row.get("traj_id") for row in pred_rows))),
@@ -2128,6 +2133,7 @@ def analyze_phase2_integrity(
         "online_rows": phase2_compact_online_rows(pred_rows),
         "rows": aligned_rows,
     }
+    summary = merge_online_and_offline_summary(online_summary, offline_summary)
     summary["validation"] = phase2_validate_integrity(
         run_dir,
         pred_rows,
