@@ -432,7 +432,7 @@ def check_advisory_fim(summary, online_rows, failures):
     return mode
 
 
-def check_urg(summary, failures):
+def check_urg(summary, failures, mean_update_ms_max=None):
     urg = summary.get("urg") or {}
     if not isinstance(urg, dict) or not as_bool(urg.get("urg_enabled", False)):
         return
@@ -471,6 +471,89 @@ def check_urg(summary, failures):
         failures.append("phase2_summary.json urg.urg_front_field_points <= 0")
     if int(urg.get("urg_backend_field_points") or 0) <= 0:
         failures.append("phase2_summary.json urg.urg_backend_field_points <= 0")
+    mean_update = finite_float(urg.get("urg_mean_update_ms"))
+    if mean_update_ms_max is not None and mean_update is not None and mean_update > mean_update_ms_max:
+        failures.append(
+            "phase2_summary.json urg.urg_mean_update_ms="
+            f"{mean_update:.3f} exceeds {mean_update_ms_max:.3f}"
+        )
+
+
+def check_expected_mode(summary, online_rows, expect_mode, failures):
+    if expect_mode is None:
+        return
+
+    config = summary.get("stage1_predictor_config") or {}
+    advisory = summary.get("advisory_fim") or {}
+    pi_stage3 = summary.get("pi_stage3") or {}
+    urg = summary.get("urg") or {}
+    mode = derive_advisory_fusion_mode(summary, online_rows)
+
+    if expect_mode == "legacy":
+        if mode == "fim_add" or as_bool(advisory.get("enabled", False)):
+            failures.append("legacy mode requires advisory FIM-add disabled")
+        if as_bool(config.get("phase2_use_advisory_fim_add", False)):
+            failures.append("legacy mode requires phase2_use_advisory_fim_add=false")
+        if as_bool(config.get("phase2_use_lidar_advisory_fim", False)):
+            failures.append("legacy mode requires phase2_use_lidar_advisory_fim=false")
+        if as_bool(pi_stage3.get("enabled", False)) or as_bool(
+            config.get("phase2_pi_use_unified_advisory_pl", False)
+        ):
+            failures.append("legacy mode requires Stage 3 unified PI disabled")
+        if as_bool(urg.get("urg_enabled", False)) or as_bool(
+            config.get("phase2_use_unified_risk_grid", False)
+        ):
+            failures.append("legacy mode requires URG disabled")
+        return
+
+    if expect_mode != "fim_add_urg":
+        failures.append(f"unknown expected Phase 2 validation mode {expect_mode!r}")
+        return
+
+    if mode != "fim_add":
+        failures.append(f"fim_add_urg mode requires advisory fusion mode 'fim_add', got {mode!r}")
+    if not as_bool(advisory.get("enabled", False)):
+        failures.append("fim_add_urg mode requires advisory_fim.enabled=true")
+    if advisory.get("fusion_mode") != "fim_add":
+        failures.append("fim_add_urg mode requires advisory_fim.fusion_mode='fim_add'")
+    if int(advisory.get("query_count") or 0) <= 0:
+        failures.append("fim_add_urg mode requires advisory_fim.query_count > 0")
+    if int(advisory.get("gnss_fim_valid_count") or 0) <= 0:
+        failures.append("fim_add_urg mode requires advisory_fim.gnss_fim_valid_count > 0")
+
+    required_fim_columns = (
+        "advisory_fusion_mode",
+        "lambda_adv_trace",
+        "lambda_gnss_trace",
+        "lambda_lidar_trace",
+        "hpl_adv",
+        "vpl_adv",
+        "fim_epsilon_applied",
+        "fim_degeneracy_regularized",
+        "fim_fallback_reason",
+    )
+    if not online_rows:
+        failures.append("fim_add_urg mode has no online CSV rows for FIM diagnostic checks")
+    else:
+        missing = [column for column in required_fim_columns if column not in online_rows[0]]
+        if missing:
+            failures.append(
+                "fim_add_urg mode missing FIM diagnostic CSV column(s): "
+                + ", ".join(missing)
+            )
+
+    if not as_bool(pi_stage3.get("enabled", False)):
+        failures.append("fim_add_urg mode requires pi_stage3.enabled=true")
+    selected_sources = pi_stage3.get("selected_source_histogram") or {}
+    if int(selected_sources.get("fim_add") or 0) <= 0:
+        failures.append("fim_add_urg mode requires pi_stage3.selected_source_histogram.fim_add > 0")
+
+    if not as_bool(urg.get("urg_enabled", False)):
+        failures.append("fim_add_urg mode requires urg.urg_enabled=true")
+    if not as_bool(urg.get("urg_active", False)):
+        failures.append("fim_add_urg mode requires urg.urg_active=true")
+    if int(urg.get("urg_query_count") or 0) <= 0:
+        failures.append("fim_add_urg mode requires urg.urg_query_count > 0")
 
 
 def check_pl_grid(summary, online_rows, failures, warnings):
@@ -627,6 +710,18 @@ def warning_checks(summary, warnings):
 def main():
     parser = argparse.ArgumentParser(description="Validate a Phase 2 PI-lite integrity evaluation run.")
     parser.add_argument("--run-dir", required=True)
+    parser.add_argument(
+        "--expect-mode",
+        choices=("legacy", "fim_add_urg"),
+        default=None,
+        help="Optional acceptance mode gate for final v2.0 validation.",
+    )
+    parser.add_argument(
+        "--urg-mean-update-ms-max",
+        type=float,
+        default=None,
+        help="Maximum allowed URG mean update time when URG is enabled.",
+    )
     args = parser.parse_args()
 
     run_dir = Path(args.run_dir).expanduser().resolve()
@@ -646,7 +741,8 @@ def main():
     check_current_consistency(summary, failures)
     check_pl_grid(summary, online_rows, failures, warnings)
     check_advisory_fim(summary, online_rows, failures)
-    check_urg(summary, failures)
+    check_urg(summary, failures, args.urg_mean_update_ms_max)
+    check_expected_mode(summary, online_rows, args.expect_mode, failures)
     check_lidar_observability(summary, online_rows, failures, warnings)
     pl_models = {row.get("pl_model", "") for row in online_rows}
     if not pl_models and summary.get("pl_model"):

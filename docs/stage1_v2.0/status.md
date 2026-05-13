@@ -2494,3 +2494,237 @@ Focused CTest: 6/6 passed.
 Full CTest: 13/13 passed.
 git diff --check: passed.
 ```
+
+## 2026-05-13 Update: v2.0 Demo11 Acceptance Automation
+
+范围：仅新增/更新 validation automation。未修改 runtime algorithms，未修改
+ARAIM/FIM/PI/URG 数学，未修改 planner 行为或 launch 默认值；legacy/enabled
+差异均由新 acceptance runner 显式传入 launch arguments。
+
+### 修改内容
+
+- 新增 `tools/stage_v2/run_v2_acceptance.py`：
+  - 支持 `--mode legacy|enabled|both`，默认 `both`；
+  - 强制 `--run-duration-s >= 90`；
+  - 支持 `--urg-export-voxels`，默认关闭；
+  - 支持 `--urg-mean-update-ms-max`，默认 `1000` ms；
+  - 支持 `--reuse-run-dir MODE=PATH` 做 report-only revalidation；
+  - 每个 mode 运行 `ana_log.py`、Phase 1 official validator、Phase 2
+    validator；
+  - 输出 `acceptance_report.md` 和 `acceptance_report.json`；
+  - 最终打印：
+    - `v2.0 full demo11 acceptance: PASS`
+    - 或 `v2.0 full demo11 acceptance: FAIL` 加 exact failed checks。
+- 更新 `tools/phase2/validate_phase2_integrity_eval.py`：
+  - 新增 `--expect-mode legacy|fim_add_urg`；
+  - 新增 `--urg-mean-update-ms-max`；
+  - legacy mode 检查 Stage 2 FIM-add、Stage 3 unified PI、Stage 4 URG
+    均关闭；
+  - `fim_add_urg` mode 检查 advisory FIM query、`fusion_mode=fim_add`、
+    FIM CSV diagnostics、`pi_stage3.selected_source_histogram.fim_add`、URG
+    active/query count 和 URG mean update time；
+  - 保持 `fim_add` 模式下不执行 legacy conservative GNSS PL 下界检查。
+
+### 使用方法
+
+Legacy-only acceptance:
+
+```bash
+cd /home/dev/ws_iap/src/iap
+tools/stage_v2/run_v2_acceptance.py \
+  --mode legacy \
+  --run-duration-s 90
+```
+
+v2.0 enabled acceptance:
+
+```bash
+cd /home/dev/ws_iap/src/iap
+tools/stage_v2/run_v2_acceptance.py \
+  --mode enabled \
+  --run-duration-s 90 \
+  --urg-mean-update-ms-max 1000
+```
+
+Full two-mode acceptance:
+
+```bash
+cd /home/dev/ws_iap/src/iap
+tools/stage_v2/run_v2_acceptance.py \
+  --mode both \
+  --run-duration-s 90 \
+  --urg-mean-update-ms-max 1000
+```
+
+Report-only revalidation:
+
+```bash
+tools/stage_v2/run_v2_acceptance.py \
+  --mode both \
+  --reuse-run-dir legacy=/path/to/legacy_run \
+  --reuse-run-dir enabled=/path/to/enabled_run
+```
+
+Failure interpretation:
+
+- `Phase 1 official validator failed` means the closed-loop run did not meet
+  official Phase 1 criteria, for example no B-spline planner trajectory.
+- `Phase 2 validator failed` means the online/offline Phase 2 integrity
+  validation failed. Inspect `<output-dir>/<mode>/phase2_validator.log`.
+- `advisory_fim.query_count <= 0` means Stage 2 FIM-add did not execute in the
+  enabled run.
+- `pi_stage3.selected_source_histogram.fim_add <= 0` means Stage 3 PI did not
+  select FIM-add advisory PL.
+- `urg.urg_query_count <= 0` or `urg_active=false` means Stage 4 URG was not
+  active.
+- `urg.urg_mean_update_ms > threshold` means URG performance exceeded the
+  configured acceptance limit.
+- `IAP odom rejection dominance ratio > 0.50` means stale/non-increasing/zero
+  stamp IAP odometry rejections dominated accepted IAP odometry samples.
+
+### Validation Results
+
+Static Python checks:
+
+```bash
+python3 -m py_compile \
+  tools/stage_v2/run_v2_acceptance.py \
+  tools/phase2/validate_phase2_integrity_eval.py \
+  tools/phase2/phase2_summary_schema.py
+```
+
+Result: passed.
+
+Duration guard smoke:
+
+```bash
+tools/stage_v2/run_v2_acceptance.py --mode legacy --run-duration-s 30
+```
+
+Result: correctly failed with:
+
+```text
+v2.0 full demo11 acceptance: FAIL
+  - run_duration_s 30.00 < 90.00
+```
+
+Report-only smoke using historical runs:
+
+```bash
+tools/stage_v2/run_v2_acceptance.py \
+  --mode both \
+  --reuse-run-dir legacy=log/20260513T022944Z_974 \
+  --reuse-run-dir enabled=log/20260513T052517Z_755 \
+  --output-dir log/v2_acceptance_report_only_test \
+  --urg-mean-update-ms-max 1000
+```
+
+Result: report generation worked and correctly reported FAIL for known-bad
+historical runs:
+
+```text
+v2.0 full demo11 acceptance: FAIL
+  - legacy: Phase 2 validator failed
+  - enabled: Phase 1 official validator failed
+  - enabled: Phase 2 validator failed
+  - enabled: urg.urg_mean_update_ms 8881.447 > 1000.000
+```
+
+Full 90-second official two-mode run:
+
+```bash
+tools/stage_v2/run_v2_acceptance.py \
+  --mode both \
+  --run-duration-s 90 \
+  --urg-mean-update-ms-max 1000 \
+  --output-dir log/v2_acceptance_full_20260513_validation
+```
+
+Result: full acceptance **FAILED**. Reports:
+
+```text
+/home/dev/ws_iap/src/iap/log/v2_acceptance_full_20260513_validation/acceptance_report.md
+/home/dev/ws_iap/src/iap/log/v2_acceptance_full_20260513_validation/acceptance_report.json
+```
+
+Final output:
+
+```text
+v2.0 full demo11 acceptance: FAIL
+  - legacy: Phase 1 official validator failed
+  - legacy: Phase 2 validator failed
+  - legacy: run_duration_s 89.95 < 90.00
+  - enabled: Phase 1 official validator failed
+  - enabled: Phase 2 validator failed
+  - enabled: urg.urg_mean_update_ms 1877.573 > 1000.000
+```
+
+Legacy run:
+
+```text
+run_dir: /home/dev/ws_iap/src/iap/log/20260513T141710Z_126
+run_duration_s: 89.95
+planner_trajectory_count: 0
+planner_command_count: 832
+iap_odom_count: 90
+odom rejection dominance ratio: 0.011
+advisory_fim.enabled: false
+advisory_fim.fusion_mode: legacy
+pi_stage3.enabled: false
+urg.urg_enabled: false
+```
+
+Legacy validator failures:
+
+```text
+Phase 1:
+  - planner_trajectory_count 0 < 1
+
+Phase 2:
+  - official Phase 2 requires at least one B-spline trajectory sample
+  - phase2_summary.json current_consistency_raw max_pl_ratio=20983532.458 exceeds 0.100
+  - demo10 did not pass Phase 1 official validation
+```
+
+Enabled run:
+
+```text
+run_dir: /home/dev/ws_iap/src/iap/log/20260513T141845Z_682
+run_duration_s: 90.01
+planner_trajectory_count: 0
+planner_command_count: 837
+iap_odom_count: 100
+odom rejection dominance ratio: 0.029
+advisory_fim.enabled: true
+advisory_fim.fusion_mode: fim_add
+advisory_fim.query_count: 94877
+advisory_fim.gnss_fim_valid_count: 90856
+advisory_fim.lidar_fim_valid_count: 41587
+pi_stage3.enabled: true
+pi_stage3.selected_source_histogram: {"fim_add": 18}
+urg.urg_enabled: true
+urg.urg_active: true
+urg.urg_query_count: 46854
+urg.urg_mean_update_ms: 1877.573
+urg.urg_p95_update_ms: 2133.587
+```
+
+Enabled validator failures:
+
+```text
+Phase 1:
+  - planner_trajectory_count 0 < 1
+
+Phase 2:
+  - official Phase 2 requires at least one B-spline trajectory sample
+  - phase2_summary.json current_consistency_raw max_pl_ratio=0.990 exceeds 0.100
+  - phase2_summary.json urg.urg_mean_update_ms=1877.573 exceeds 1000.000
+  - demo10 did not pass Phase 1 official validation
+```
+
+Current conclusion: v2.0 acceptance automation is implemented and exercised.
+The full official demo11 acceptance remains **not accepted** because both runs
+produced no B-spline planner trajectories, Phase 2 current-consistency checks
+failed, and enabled URG mean update time exceeded the configured 1000 ms
+threshold. The enabled run did confirm Stage 2 FIM-add, Stage 3 PI selection,
+and Stage 4 URG activity were all exercised.
