@@ -49,6 +49,12 @@ URG_FIELDS = (
     "urg_stale_count",
     "urg_mean_update_ms",
     "urg_p95_update_ms",
+    "urg_time_pl_query_ms",
+    "urg_time_al_esdf_ms",
+    "urg_time_pi_ms",
+    "urg_time_gradient_ms",
+    "urg_time_csv_ms",
+    "urg_time_total_ms",
 )
 
 

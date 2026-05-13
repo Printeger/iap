@@ -156,6 +156,12 @@ class Phase2SummarySchemaTest(unittest.TestCase):
             "urg_stale_count": 2,
             "urg_mean_update_ms": 12.5,
             "urg_p95_update_ms": 18.0,
+            "urg_time_pl_query_ms": 4.0,
+            "urg_time_al_esdf_ms": 2.0,
+            "urg_time_pi_ms": 1.0,
+            "urg_time_gradient_ms": 3.0,
+            "urg_time_csv_ms": 0.5,
+            "urg_time_total_ms": 10.5,
         }
         failures: list[str] = []
 
@@ -185,6 +191,12 @@ class Phase2SummarySchemaTest(unittest.TestCase):
             "urg_stale_count": 0,
             "urg_mean_update_ms": None,
             "urg_p95_update_ms": None,
+            "urg_time_pl_query_ms": None,
+            "urg_time_al_esdf_ms": None,
+            "urg_time_pi_ms": None,
+            "urg_time_gradient_ms": None,
+            "urg_time_csv_ms": None,
+            "urg_time_total_ms": None,
         }
         offline = {
             "aligned_sample_count": 1,

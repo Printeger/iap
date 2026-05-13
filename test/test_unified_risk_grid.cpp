@@ -67,6 +67,32 @@ TEST(UnifiedRiskGridTest, StoresAndInterpolatesRiskLayers) {
   EXPECT_TRUE((result.flags & iap::FIM_ADD_USED) != 0u);
 }
 
+TEST(UnifiedRiskGridTest, ZeroGradientModeLeavesFinitePiCellsWithZeroGradients) {
+  iap::UnifiedRiskGrid grid;
+  ASSERT_TRUE(grid.reset(Eigen::Vector3d::Zero(), 1.0, 1.0, 1, 1.0));
+  fill_grid(&grid);
+
+  grid.zero_gradients();
+
+  const auto result = grid.interpolate(Eigen::Vector3d::Zero());
+  ASSERT_TRUE(result.valid);
+  EXPECT_NEAR(result.voxel.pi_grad_x, 0.0, 1.0e-6);
+  EXPECT_NEAR(result.voxel.pi_grad_y, 0.0, 1.0e-6);
+  EXPECT_NEAR(result.voxel.pi_grad_z, 0.0, 1.0e-6);
+}
+
+TEST(UnifiedRiskGridTest, GridDifferenceGradientMatchesPlanarPiField) {
+  iap::UnifiedRiskGrid grid;
+  ASSERT_TRUE(grid.reset(Eigen::Vector3d::Zero(), 1.0, 1.0, 1, 1.0));
+  fill_grid(&grid);
+
+  const auto result = grid.interpolate(Eigen::Vector3d::Zero());
+  ASSERT_TRUE(result.valid);
+  EXPECT_NEAR(result.voxel.pi_grad_x, 1.0, 1.0e-6);
+  EXPECT_NEAR(result.voxel.pi_grad_y, 2.0, 1.0e-6);
+  EXPECT_NEAR(result.voxel.pi_grad_z, 0.0, 1.0e-6);
+}
+
 TEST(UnifiedRiskGridTest, ConservativeInterpolationPreservesUnknownRisk) {
   iap::UnifiedRiskGrid grid;
   ASSERT_TRUE(grid.reset(Eigen::Vector3d::Zero(), 1.0, 1.0, 3, 1.0));

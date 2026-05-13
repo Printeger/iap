@@ -364,11 +364,26 @@ void UnifiedRiskGrid::compute_gradients() {
   }
 }
 
-void UnifiedRiskGrid::note_update(const double build_time_ms) {
+void UnifiedRiskGrid::zero_gradients() {
+  if (!valid_) {
+    return;
+  }
+  for (auto& voxel : cells_) {
+    if ((voxel.flags & VALID_PI) != 0u) {
+      voxel.pi_grad_x = 0.0f;
+      voxel.pi_grad_y = 0.0f;
+      voxel.pi_grad_z = 0.0f;
+    }
+  }
+}
+
+void UnifiedRiskGrid::note_update(const double build_time_ms,
+                                  const UpdateTiming& timing) {
   build_time_ms_ = build_time_ms;
   ++stats_.update_count;
   stats_.active = valid_;
   stats_.generation = generation_;
+  stats_.last_timing = timing;
   update_times_ms_.push_back(build_time_ms);
   double sum = 0.0;
   for (const double value : update_times_ms_) {

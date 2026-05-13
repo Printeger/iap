@@ -2066,3 +2066,119 @@ urg_grid_voxels.csv present=false
 ```
 
 Conclusion: disabled URG mode remains inactive and legacy-compatible.
+
+## 2026-05-13 Update: Stage 4.1 URG Performance Quick Fixes
+
+Stage 4.1 quick fixes were implemented to reduce URG rebuild cost while
+preserving Stage 2 advisory FIM math, Stage 3 PI math, certified monitor logic,
+legacy topics, and CSV capability.
+
+### Changes Applied
+
+- Added URG evaluator and demo11 launch config:
+  - `phase2_urg_compute_gradients`
+  - `phase2_urg_gradient_mode={none,grid_difference,finite_difference}`
+  - `phase2_urg_export_voxels_on_update`
+  - `phase2_urg_export_voxels_on_shutdown`
+  - `phase2_urg_max_voxels_per_update`
+  - `phase2_urg_rebuild_cancel_check_interval`
+- Kept legacy `phase2_urg_export_voxels`; when true it enables on-update
+  `urg_grid_voxels.csv` export for compatibility.
+- Changed the default URG gradient path from per-voxel finite differences to
+  grid-difference gradients over already-computed PI costs.
+- Added zero-gradient support for `phase2_urg_gradient_mode:=none`.
+- Kept the old finite-difference gradient path available through
+  `phase2_urg_gradient_mode:=finite_difference`.
+- Rebuilt URG into a local grid and swapped it under `urg_mutex_` only after
+  completion, reducing lock hold time.
+- Added rebuild cancellation checks for shutdown and a configurable
+  max-voxel cap.
+- Avoided duplicate full-grid backend row recomputation when URG is enabled by
+  generating backend cost-field rows from URG cells.
+- Changed front cost sample generation to query URG first when URG is enabled.
+- Added summary timing breakdown:
+  - `urg_time_pl_query_ms`
+  - `urg_time_al_esdf_ms`
+  - `urg_time_pi_ms`
+  - `urg_time_gradient_ms`
+  - `urg_time_csv_ms`
+  - `urg_time_total_ms`
+
+### Build and Test Results
+
+Commands run from `/home/dev/ws_iap`:
+
+```bash
+colcon build --base-paths src/iap src/gnss_comm --packages-select iap \
+  --cmake-args -DCMAKE_BUILD_TYPE=RelWithDebInfo -DBUILD_TESTING=ON
+
+ctest --test-dir build/iap -R \
+  "test_unified_risk_grid|test_phase2_summary_schema|test_pi_cost_adapter|test_future_pl_field_predictor" \
+  --output-on-failure
+
+python3 -m py_compile \
+  src/iap/launch/demo11_ego_planner_integrity_corridor.launch.py \
+  src/iap/test/test_phase2_summary_schema.py \
+  src/iap/tools/phase2/validate_phase2_integrity_eval.py \
+  src/iap/tools/phase2/phase2_summary_schema.py
+
+ctest --test-dir build/iap --output-on-failure
+```
+
+Results:
+
+```text
+Build passed.
+Focused CTest: 4/4 passed.
+Full CTest: 12/12 passed.
+Python compile checks passed.
+```
+
+### Demo11 Smoke Results
+
+Small URG grid smoke, export disabled, `grid_difference` gradients:
+
+```text
+run_dir=/home/dev/ws_iap/src/iap/log/20260513T123013Z_121
+urg_enabled=true
+urg_active=true
+urg_update_count=29
+urg_query_count=1726
+urg_front_field_points=121
+urg_backend_field_points=122
+urg_mean_update_ms=39.28024344827587
+urg_p95_update_ms=67.005212
+urg_time_pl_query_ms=0.11580099999999999
+urg_time_al_esdf_ms=20.980222000000023
+urg_time_pi_ms=0.018200000000000015
+urg_time_gradient_ms=0.005106
+urg_time_csv_ms=0.0
+urg_time_total_ms=21.151587
+urg_voxel_csv=
+```
+
+Default 25m x 25m URG smoke, export disabled, `grid_difference` gradients:
+
+```text
+run_dir=/home/dev/ws_iap/src/iap/log/20260513T123045Z_309
+urg_enabled=true
+urg_active=true
+urg_update_count=6
+urg_query_count=7811
+urg_front_field_points=2601
+urg_backend_field_points=2602
+urg_mean_update_ms=1229.6519521666667
+urg_p95_update_ms=1627.073874
+urg_time_pl_query_ms=1133.669751999999
+urg_time_al_esdf_ms=480.3970519999997
+urg_time_pi_ms=1.2053949999999987
+urg_time_gradient_ms=0.054821
+urg_time_csv_ms=0.0
+urg_time_total_ms=1616.332713
+urg_voxel_csv=
+```
+
+The default-grid mean update time was reduced from the audited
+`~8881 ms` to `~1230 ms` in this smoke. The phase2 evaluator exited cleanly in
+both smokes. The known non-core demo11 shutdown errors in visualization/sensing
+nodes still appeared, matching the existing audit notes.

@@ -80,6 +80,15 @@ struct UnifiedRiskQueryOptions {
 
 class UnifiedRiskGrid {
  public:
+  struct UpdateTiming {
+    double pl_query_ms = std::numeric_limits<double>::quiet_NaN();
+    double al_esdf_ms = std::numeric_limits<double>::quiet_NaN();
+    double pi_ms = std::numeric_limits<double>::quiet_NaN();
+    double gradient_ms = std::numeric_limits<double>::quiet_NaN();
+    double csv_ms = std::numeric_limits<double>::quiet_NaN();
+    double total_ms = std::numeric_limits<double>::quiet_NaN();
+  };
+
   struct Stats {
     bool enabled = false;
     bool active = false;
@@ -96,6 +105,7 @@ class UnifiedRiskGrid {
     double max_age_s = std::numeric_limits<double>::quiet_NaN();
     double mean_update_ms = std::numeric_limits<double>::quiet_NaN();
     double p95_update_ms = std::numeric_limits<double>::quiet_NaN();
+    UpdateTiming last_timing;
     int front_field_points = 0;
     int backend_field_points = 0;
     std::map<uint32_t, int> flags_histogram;
@@ -119,6 +129,7 @@ class UnifiedRiskGrid {
   UnifiedRiskQueryResult queryRisk(const Eigen::Vector3d& p,
                                    const UnifiedRiskQueryOptions& options);
   void compute_gradients();
+  void zero_gradients();
 
   const Eigen::Vector3d& center() const { return center_; }
   const Eigen::Vector3d& min_corner() const { return min_corner_; }
@@ -132,7 +143,7 @@ class UnifiedRiskGrid {
   void set_stamp_s(double value) { stamp_s_ = value; }
   double build_time_ms() const { return build_time_ms_; }
   void set_build_time_ms(double value) { build_time_ms_ = value; }
-  void note_update(double build_time_ms);
+  void note_update(double build_time_ms, const UpdateTiming& timing);
   void set_enabled(bool enabled) { stats_.enabled = enabled; }
   void set_front_field_points(int value) { stats_.front_field_points = value; }
   void set_backend_field_points(int value) { stats_.backend_field_points = value; }
