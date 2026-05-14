@@ -75,7 +75,8 @@ class IntegrityPlanner : public PlannerInterface {
                            double yaw0,
                            const Eigen::Vector3d& goal,
                            double sigma0,
-                           const IntegrityReport* report = nullptr) const override;
+                           const IntegrityReport* report = nullptr,
+                           double stamp = 0.0) const override;
 
   TrajectoryPoint execution_target(const CandidateTrajectory& chosen) const override;
 

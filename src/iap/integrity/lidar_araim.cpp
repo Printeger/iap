@@ -2,8 +2,11 @@
 
 #include <iap/integrity/lidar_araim.hpp>
 
+#include <iap/util/timing_csv.hpp>
+
 #include <Eigen/Cholesky>
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <limits>
 #include <map>
@@ -297,6 +300,7 @@ std::vector<LidarHypothesis> LidarAraim::enumerate_hypotheses(
 
 LidarAraimResult LidarAraim::run(const LidarAraimSnapshot& snapshot,
                                  const FGOPositionInfo& fgo_info) const {
+  const auto t0_lidar_araim = std::chrono::high_resolution_clock::now();
   LidarAraimResult result;
   result.target_window_K = std::max(1, params_.target_window_K);
   if (!snapshot.valid || snapshot.blocks.empty()) {
@@ -477,6 +481,12 @@ LidarAraimResult LidarAraim::run(const LidarAraimSnapshot& snapshot,
   result.VPL = result.PL_U;
   if (result.worst_hyp < 0 && !hyps.empty()) {
     result.worst_mode = "FAULT_FREE";
+  }
+
+  {
+    const double elapsed_ms = std::chrono::duration<double, std::milli>(
+        std::chrono::high_resolution_clock::now() - t0_lidar_araim).count();
+    timing_csv::append(snapshot.stamp, "2.2_lidar_araim", elapsed_ms);
   }
 
   return result;

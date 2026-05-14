@@ -53,7 +53,8 @@ class PlannerInterface {
                                    double yaw0,
                                    const Eigen::Vector3d& goal,
                                    double sigma0,
-                                   const IntegrityReport* report = nullptr) const = 0;
+                                   const IntegrityReport* report = nullptr,
+                                   double stamp = 0.0) const = 0;
 
   /**
    * @brief Get the execution target from a chosen trajectory.

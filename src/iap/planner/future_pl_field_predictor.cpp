@@ -223,7 +223,7 @@ bool FuturePLFieldPredictor::rebuild_grid(const double now_s) {
     return false;
   }
 
-  iap::timing_csv::ScopedTimer timing_scope(now_s, "pl_grid_build");
+  iap::timing_csv::ScopedTimer timing_scope(now_s, "3.0_pl_grid_build");
   const auto t0 = std::chrono::steady_clock::now();
   auto grid = std::make_shared<PLGrid>();
   if (!grid->reset(snapshot.p_wb,
@@ -244,16 +244,21 @@ bool FuturePLFieldPredictor::rebuild_grid(const double now_s) {
     primitives = lidar_fim_primitives_;
   }
 
+  iap::timing_csv::CumulativeTimer ct_gnss, ct_lidar, ct_fusion;
   for (int iz = 0; iz < grid->nz(); ++iz) {
     for (int iy = 0; iy < grid->ny(); ++iy) {
       for (int ix = 0; ix < grid->nx(); ++ix) {
         const Eigen::Vector3d p = grid->position(ix, iy, iz);
-        auto value = evaluate_point(p, snapshot, points, primitives, "grid");
+        auto value = evaluate_point(p, snapshot, points, primitives, "grid",
+                                    &ct_gnss, &ct_lidar, &ct_fusion);
         value.grid_generation = next_generation_;
         grid->at(ix, iy, iz).value = std::move(value);
       }
     }
   }
+  ct_gnss.flush(now_s, "3.1_gnss_predict");
+  ct_lidar.flush(now_s, "3.2_lidar_predict");
+  ct_fusion.flush(now_s, "3.3_fusion_predict");
   grid->compute_gradients();
 
   const auto t1 = std::chrono::steady_clock::now();
@@ -311,13 +316,18 @@ FuturePLQueryResult FuturePLFieldPredictor::evaluate_point(
     const IntegritySnapshot& snapshot,
     const std::shared_ptr<const std::vector<Eigen::Vector3d>>& points,
     const std::shared_ptr<const std::vector<LidarFimPrimitive>>& primitives,
-    const std::string& query_source) const {
+    const std::string& query_source,
+    iap::timing_csv::CumulativeTimer* ct_gnss,
+    iap::timing_csv::CumulativeTimer* ct_lidar,
+    iap::timing_csv::CumulativeTimer* ct_fusion) const {
+  if (ct_gnss) ct_gnss->start();
   PredictedAraimComputer predictor(
       with_fallback(params_.araim_params, params_.araim_params.fallback_pl));
   predictor.set_occupancy(occupancy_);
   predictor.set_epoch(snapshot.has_epoch ? &snapshot.gnss_epoch : nullptr);
   auto out = make_future_pl_query_result(
       predictor.predict_araim_result(p_w), query_source);
+  if (ct_gnss) ct_gnss->stop();
 
   // Legacy field names retained for compatibility. Semantically these are
   // GNSS advisory PL proxy values and advisory predicted fused values.
@@ -335,6 +345,11 @@ FuturePLQueryResult FuturePLFieldPredictor::evaluate_point(
       params_.use_advisory_fim_add ? "not_evaluated" : "fim_disabled";
 
   if (params_.use_advisory_fim_add) {
+    struct FusionGuard {
+      iap::timing_csv::CumulativeTimer* ct;
+      explicit FusionGuard(iap::timing_csv::CumulativeTimer* t) : ct(t) { if (ct) ct->start(); }
+      ~FusionGuard() { if (ct) ct->stop(); }
+    } fusion_guard(ct_fusion);
     FusedAdvisoryFimResult fim;
     fim.fusion_mode = AdvisoryFusionMode::FimAdd;
     fim.prior = prior_information(snapshot);
@@ -344,9 +359,11 @@ FuturePLQueryResult FuturePLFieldPredictor::evaluate_point(
                                      : "lidar_fim_disabled";
 
     if (params_.use_lidar_advisory_fim) {
+      if (ct_lidar) ct_lidar->start();
       LidarObservabilityFim estimator(lidar_params_from(params_));
       fim.lidar =
           estimator.evaluate_advisory_fim(p_w, primitives.get(), snapshot.current);
+      if (ct_lidar) ct_lidar->stop();
       out.lidar_valid = fim.lidar.valid;
       out.lidar_fim_valid = fim.lidar.valid;
       out.lidar_alpha = fim.lidar.valid ? 1.0 : 0.0;

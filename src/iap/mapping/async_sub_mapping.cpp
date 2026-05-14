@@ -1,5 +1,9 @@
 #include <iap/mapping/async_sub_mapping.hpp>
 
+#include <iap/util/timing_csv.hpp>
+
+#include <chrono>
+
 namespace glim {
 
 AsyncSubMapping::AsyncSubMapping(const std::shared_ptr<glim::SubMappingBase>& sub_mapping) : sub_mapping(sub_mapping) {
@@ -81,9 +85,15 @@ void AsyncSubMapping::run() {
     }
 #endif
 
+    const auto t0_submap = std::chrono::steady_clock::now();
     for (const auto& frame : odom_frames) {
       std::vector<EstimationFrame::ConstPtr> marginalized;
       sub_mapping->insert_frame(frame);
+    }
+    const double elapsed_submap = std::chrono::duration<double, std::milli>(
+        std::chrono::steady_clock::now() - t0_submap).count();
+    if (!odom_frames.empty()) {
+      iap::timing_csv::append(odom_frames.front()->stamp, "1.4_sub_map_insert", elapsed_submap);
     }
   }
 

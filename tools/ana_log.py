@@ -293,6 +293,8 @@ def artifact_paths(run_dir: Path) -> dict[str, tuple[Path | None, str, list[str]
     aliases = {
         "run_info": ["metadata/run_info.json"],
         "timing": ["profiling/iap_timing.csv", "profiling/pipeline_timing.csv"],
+        "timing_fallback": ["../log/res/iap_timing.csv", "../../log/res/iap_timing.csv"],
+        "ego_timing": ["profiling/ego_planner_timing.csv"],
         "icp": ["export/iap_icp.csv", "export/icp_quality.csv"],
         "gnss_factor_debug": ["export/iap_gnss_factor_debug.csv", "export/gnss_factor_debug.csv"],
         "araim": ["export/iap_araim.csv", "export/araim.csv"],
@@ -542,24 +544,85 @@ def analyze_timing(rows: list[dict[str, str]]) -> dict[str, Any]:
     return {"available": True, "row_count": len(rows), "module_stats": module_stats}
 
 
+LEGACY_NAME_MAP = {
+    "integrity": "2.3_integrity_total",
+    "araim": "2.1_gnss_araim",
+    "gnss_injection": "1.3_gnss_injection",
+    "trunk_detector": "1.3_trunk_detector",
+    "ros_pointcloud_callback_total": "1.1_ros_callback_total",
+    "pointcloud_extract_raw": "1.1_pointcloud_extract",
+    "cloud_preprocess_total": "1.1_cloud_preprocess",
+    "odom_insert_frame_total": "1.2_odom_insert_frame",
+    "odom_imu_integration": "1.2_imu_integration",
+    "odom_deskew": "1.2_pointcloud_deskew",
+    "odom_covariance_estimation": "1.2_covariance_estimation",
+    "odom_create_factors": "1.2_create_factors",
+    "odom_smoother_update": "1.2_smoother_update",
+    "odom_update_frames": "1.2_update_frames",
+    "async_odom_queue_wait": "1.5_odom_queue_wait",
+    "pl_grid_build": "3.0_pl_grid_build",
+}
+
+TIMING_MODULES_V2 = {
+    "1": {
+        "label_cn": "定位 (Localization)",
+        "label_en": "1. Localization",
+        "modules": [
+            "1.1_ros_callback_total", "1.1_pointcloud_extract", "1.1_cloud_preprocess",
+            "1.2_odom_insert_frame", "1.2_imu_integration", "1.2_pointcloud_deskew",
+            "1.2_covariance_estimation", "1.2_create_factors", "1.2_smoother_update",
+            "1.2_update_frames", "1.3_gnss_injection", "1.3_trunk_detector",
+            "1.4_sub_map_insert", "1.4_global_map_optimize", "1.5_odom_queue_wait",
+        ],
+    },
+    "2": {
+        "label_cn": "ARAIM (完整性监控)",
+        "label_en": "2. ARAIM Integrity",
+        "modules": [
+            "2.1_gnss_araim", "2.2_lidar_araim", "2.3_integrity_total",
+            "2.3_gnss_gating", "2.3_dynamic_al", "2.3_state_machine",
+        ],
+    },
+    "3": {
+        "label_cn": "Advisory PL Predict (咨询保护水平预测)",
+        "label_en": "3. Advisory PL Predict",
+        "modules": [
+            "3.0_pl_grid_build", "3.1_gnss_predict", "3.2_lidar_predict", "3.3_fusion_predict",
+        ],
+    },
+    "4": {
+        "label_cn": "IAP Planning (运动基元规划)",
+        "label_en": "4. IAP Planning",
+        "modules": ["4.0_plan_total", "4.1_candidate_generation", "4.2_predict_pl", "4.3_cost_evaluation"],
+    },
+    "5": {
+        "label_cn": "EGO Planner (A*+B-spline规划)",
+        "label_en": "5. EGO Planner",
+        "modules": ["5.0_ego_plan_total", "5.1_astar_search", "5.2_bspline_optimize"],
+    },
+}
+
+# Flat list for quick lookup
 RECOMMENDED_TIMING_MODULES = [
-    "integrity",
-    "araim",
-    "gnss_injection",
-    "trunk_detector",
-    "ros_pointcloud_callback_total",
-    "pointcloud_extract_raw",
-    "cloud_preprocess_total",
-    "odom_insert_frame_total",
-    "odom_imu_integration",
-    "odom_deskew",
-    "odom_covariance_estimation",
-    "odom_create_factors",
-    "odom_smoother_update",
-    "odom_update_frames",
-    "async_odom_queue_wait",
-    "pl_grid_build",
+    m for group in TIMING_MODULES_V2.values() for m in group["modules"]
 ]
+
+def module_group_name(module: str) -> str:
+    """Return the group label for a module name."""
+    for gid, ginfo in TIMING_MODULES_V2.items():
+        if module in ginfo["modules"]:
+            return ginfo.get("label_en", f"Group {gid}")
+    # Try to infer from prefix
+    if module and module[0].isdigit():
+        prefix = module.split("_")[0] if "_" in module else module.split(".")[0]
+        for gid, ginfo in TIMING_MODULES_V2.items():
+            if prefix.startswith(gid + "."):
+                return ginfo.get("label_en", f"Group {gid}")
+    return "Unknown"
+
+def resolve_module_name(module: str) -> str:
+    """Map legacy module names to new hierarchical names."""
+    return LEGACY_NAME_MAP.get(module, module)
 
 
 def timing_enabled_from_metadata(metadata: dict[str, Any]) -> bool | None:
@@ -626,6 +689,7 @@ def analyze_real_time_timing(
     by_module: dict[str, list[float]] = defaultdict(list)
     for row in timing_rows:
         module = row.get("module", "").strip()
+        module = resolve_module_name(module)
         elapsed = first_number(row, ["elapsed_ms", "duration_ms", "time_ms", "ms", "elapsed", "duration"])
         if module and elapsed is not None:
             by_module[module].append(elapsed)
@@ -662,7 +726,7 @@ def analyze_real_time_timing(
         ))
 
     pl_grid = phase2_summary.get("pl_grid") if isinstance(phase2_summary, dict) else {}
-    if isinstance(pl_grid, dict) and "pl_grid_build" not in modules_by_name:
+    if isinstance(pl_grid, dict) and "3.0_pl_grid_build" not in modules_by_name and "pl_grid_build" not in modules_by_name:
         build_time = pl_grid.get("build_time_ms")
         if isinstance(build_time, dict):
             mean_value = to_float(build_time.get("mean"))
@@ -2341,7 +2405,8 @@ def generate_timing_summary_combined_svg(analysis: dict[str, Any], path: Path) -
 def timing_rows_for_module(rows: list[dict[str, str]], module: str) -> list[tuple[float, float]]:
     points: list[tuple[float, float]] = []
     for row in rows:
-        if row.get("module", "").strip() != module:
+        row_module = resolve_module_name(row.get("module", "").strip())
+        if row_module != module:
             continue
         stamp = first_number(row, ["stamp", "time", "t"])
         elapsed = first_number(row, ["elapsed_ms", "duration_ms", "time_ms", "ms", "elapsed", "duration"])
@@ -2424,6 +2489,274 @@ def generate_planner_timing_field_age_svg(planner_rows: list[dict[str, str]], pa
     ax.grid(True, alpha=0.3)
     ax.legend(loc="upper right", framealpha=0.88)
     save_matplotlib_figure(plt, fig, path)
+
+
+# ---------------------------------------------------------------------------
+# Hierarchical module-group timing charts
+# ---------------------------------------------------------------------------
+
+def _group_label(gid: str) -> str:
+    info = TIMING_MODULES_V2.get(gid, {})
+    return info.get("label_en", f"Group {gid}")
+
+
+def _group_flat_modules(gid: str) -> list[str]:
+    info = TIMING_MODULES_V2.get(gid, {})
+    return info.get("modules", [])
+
+
+def _group_timing_stats(
+    analysis: dict[str, Any], gid: str
+) -> list[dict[str, Any]]:
+    """Return timing stat items belonging to *gid*, ordered by mean desc."""
+    group_mods = set(_group_flat_modules(gid))
+    items = [
+        item for item in analysis.get("modules", [])
+        if item.get("module") in group_mods
+        and item.get("status") in {"found", "summary_only"}
+        and to_float(item.get("mean")) is not None
+    ]
+    items.sort(key=lambda item: to_float(item.get("mean")) or 0.0, reverse=True)
+    return items
+
+
+def _group_total_mean(analysis: dict[str, Any], gid: str) -> float:
+    return sum(
+        to_float(item.get("mean")) or 0.0
+        for item in _group_timing_stats(analysis, gid)
+    )
+
+
+def _group_timeline_series(
+    timing_rows: list[dict[str, str]], gid: str
+) -> list[tuple[float, float]]:
+    """Sum elapsed_ms across all modules in *gid* for each unique stamp."""
+    group_mods = set(_group_flat_modules(gid))
+    by_stamp: dict[float, float] = {}
+    for row in timing_rows:
+        module = resolve_module_name(row.get("module", "").strip())
+        if module not in group_mods:
+            continue
+        stamp = first_number(row, ["stamp", "time", "t"])
+        elapsed = first_number(row, ["elapsed_ms", "duration_ms", "time_ms", "ms", "elapsed", "duration"])
+        if stamp is not None and elapsed is not None and stamp > 0:
+            by_stamp[stamp] = by_stamp.get(stamp, 0.0) + elapsed
+    return sorted((s, v) for s, v in by_stamp.items())
+
+
+# -- Major-module pie chart ---------------------------------------------------
+
+def generate_module_group_pie_svg(
+    analysis: dict[str, Any], path: Path, group_ids: list[str] | None = None
+) -> None:
+    if group_ids is None:
+        group_ids = [gid for gid in TIMING_MODULES_V2 if gid != "5"]
+    totals = []
+    labels = []
+    for gid in group_ids:
+        t = _group_total_mean(analysis, gid)
+        if t > 0:
+            totals.append(t)
+            labels.append(_group_label(gid))
+    if not totals:
+        write_plot_message_svg(path, "Module group average time", "No group timing data available.")
+        return
+
+    plt, error = import_matplotlib()
+    if plt is None:
+        write_plot_message_svg(path, "Module group average time", error)
+        return
+
+    colors = ["#2563eb", "#dc2626", "#16a34a", "#9333ea", "#ea580c"]
+    explode = tuple(0.03 if i == totals.index(max(totals)) else 0.0 for i in range(len(totals)))
+    fig, ax = plt.subplots(figsize=(8, 6))
+    wedges, texts, autotexts = ax.pie(
+        totals, labels=labels, autopct="%1.1f%%", startangle=140,
+        colors=colors[:len(totals)], explode=explode, pctdistance=0.78,
+    )
+    for at in autotexts:
+        at.set_fontsize(9)
+    ax.set_title("Average time by module group (mean ms)")
+    fig.tight_layout(pad=1.5)
+    save_matplotlib_figure(plt, fig, path)
+
+
+# -- Major-module timeline line chart -----------------------------------------
+
+def generate_module_group_timeline_svg(
+    timing_rows: list[dict[str, str]], path: Path,
+    group_ids: list[str] | None = None,
+) -> None:
+    if group_ids is None:
+        group_ids = [gid for gid in TIMING_MODULES_V2 if gid != "5"]
+    series = {}
+    for gid in group_ids:
+        pts = _group_timeline_series(timing_rows, gid)
+        if pts:
+            series[gid] = pts
+    if not series:
+        write_plot_message_svg(path, "Module group timeline", "No group timeline data available.")
+        return
+
+    all_stamps = [s for pts in series.values() for s, _v in pts]
+    t0 = min(all_stamps)
+
+    plt, error = import_matplotlib()
+    if plt is None:
+        write_plot_message_svg(path, "Module group timeline", error)
+        return
+
+    colors = {"1": "#2563eb", "2": "#dc2626", "3": "#16a34a", "4": "#9333ea", "5": "#ea580c"}
+    fig, ax = plt.subplots(figsize=(12, 6))
+    for gid, pts in series.items():
+        xs = [s - t0 for s, _v in pts]
+        ys = [v for _s, v in pts]
+        ax.plot(xs, ys, label=_group_label(gid), color=colors.get(gid, "#333333"),
+                linewidth=1.6, alpha=0.85)
+    ax.set_title("Module group total time over run")
+    ax.set_xlabel("relative time [s]")
+    ax.set_ylabel("elapsed [ms]")
+    ax.grid(True, alpha=0.3)
+    ax.legend(loc="upper right", framealpha=0.88, fontsize=9)
+    save_matplotlib_figure(plt, fig, path)
+
+
+# -- Sub-module pie charts (one per group) ------------------------------------
+
+def generate_submodule_pie_svgs(
+    analysis: dict[str, Any], figs_dir: Path,
+    group_ids: list[str] | None = None,
+) -> list[str]:
+    if group_ids is None:
+        group_ids = [gid for gid in TIMING_MODULES_V2 if gid != "5"]
+    generated: list[str] = []
+    for gid in group_ids:
+        items = _group_timing_stats(analysis, gid)
+        if not items:
+            continue
+        labels = [it["module"] for it in items]
+        means = [to_float(it.get("mean")) or 0.0 for it in items]
+        if sum(means) <= 0:
+            continue
+
+        plt, error = import_matplotlib()
+        if plt is None:
+            continue
+
+        # Shorten labels for pie readability
+        short_labels = [lb.replace(f"{gid}.", "", 1) for lb in labels]
+
+        n = len(means)
+        palette = plt.cm.Set2(range(n)) if n <= 8 else plt.cm.tab20(range(n))
+        explode = tuple(0.04 if v == max(means) else 0.0 for v in means)
+        fig, ax = plt.subplots(figsize=(8, 6.5))
+        wedges, texts, autotexts = ax.pie(
+            means, labels=short_labels, autopct="%1.1f%%", startangle=140,
+            colors=palette, explode=explode, pctdistance=0.78,
+        )
+        for at in autotexts:
+            at.set_fontsize(8)
+        ax.set_title(f"{_group_label(gid)} — sub-module average time (mean ms)")
+        fig.tight_layout(pad=1.5)
+        pie_path = figs_dir / f"timing_submodule_pie_group{gid}.svg"
+        save_matplotlib_figure(plt, fig, pie_path)
+        generated.append(str(pie_path))
+    return generated
+
+
+# -- Sub-module timeline line charts (one per group) --------------------------
+
+def _submodule_timeline_series(
+    timing_rows: list[dict[str, str]], module: str
+) -> list[tuple[float, float]]:
+    points: list[tuple[float, float]] = []
+    for row in timing_rows:
+        row_module = resolve_module_name(row.get("module", "").strip())
+        if row_module != module:
+            continue
+        stamp = first_number(row, ["stamp", "time", "t"])
+        elapsed = first_number(row, ["elapsed_ms", "duration_ms", "time_ms", "ms", "elapsed", "duration"])
+        if stamp is not None and elapsed is not None and stamp > 0:
+            points.append((stamp, elapsed))
+    return points
+
+
+def generate_submodule_timeline_svgs(
+    timing_rows: list[dict[str, str]], figs_dir: Path,
+    group_ids: list[str] | None = None, max_modules: int = 8,
+) -> list[str]:
+    if group_ids is None:
+        group_ids = [gid for gid in TIMING_MODULES_V2 if gid != "5"]
+    generated: list[str] = []
+    for gid in group_ids:
+        flat_mods = _group_flat_modules(gid)
+        series = {}
+        for mod_name in flat_mods:
+            pts = _submodule_timeline_series(timing_rows, mod_name)
+            if pts:
+                series[mod_name] = pts
+        if not series:
+            continue
+
+        ranked = sorted(series.items(), key=lambda kv: sum(v for _s, v in kv[1]), reverse=True)
+        top = ranked[:max_modules]
+
+        all_stamps = [s for _mod, pts in top for s, _v in pts]
+        t0 = min(all_stamps)
+
+        plt, error = import_matplotlib()
+        if plt is None:
+            continue
+
+        palette = plt.cm.tab10(range(len(top)))
+        fig, ax = plt.subplots(figsize=(12, 6))
+        for idx, (mod_name, pts) in enumerate(top):
+            xs = [s - t0 for s, _v in pts]
+            ys = [v for _s, v in pts]
+            short = mod_name.replace(f"{gid}.", "", 1)
+            ax.plot(xs, ys, label=short, color=palette[idx % len(palette)],
+                    linewidth=1.2, alpha=0.82)
+        ax.set_title(f"{_group_label(gid)} — sub-module timing timeline")
+        ax.set_xlabel("relative time [s]")
+        ax.set_ylabel("elapsed [ms]")
+        ax.grid(True, alpha=0.3)
+        ax.legend(loc="upper right", framealpha=0.88, fontsize=7.5)
+        tl_path = figs_dir / f"timing_submodule_timeline_group{gid}.svg"
+        save_matplotlib_figure(plt, fig, tl_path)
+        generated.append(str(tl_path))
+    return generated
+
+
+# -- Orchestrator -------------------------------------------------------------
+
+def write_module_group_timing_outputs(
+    analysis: dict[str, Any],
+    timing_rows: list[dict[str, str]],
+    figs_dir: Path,
+    no_plots: bool,
+) -> list[str]:
+    if no_plots or not analysis.get("available"):
+        return []
+    ensure_dir(figs_dir)
+    generated: list[str] = []
+
+    pie_path = figs_dir / "timing_group_pie.svg"
+    generate_module_group_pie_svg(analysis, pie_path)
+    if pie_path.exists():
+        generated.append(str(pie_path))
+
+    tl_path = figs_dir / "timing_group_timeline.svg"
+    generate_module_group_timeline_svg(timing_rows, tl_path)
+    if tl_path.exists():
+        generated.append(str(tl_path))
+
+    generated.extend(
+        generate_submodule_pie_svgs(analysis, figs_dir)
+    )
+    generated.extend(
+        generate_submodule_timeline_svgs(timing_rows, figs_dir)
+    )
+    return generated
 
 
 def float_range(values: list[float], pad_ratio: float = 0.08) -> tuple[float, float]:
@@ -6828,55 +7161,157 @@ def append_real_time_timing_section(lines: list[str], analysis: dict[str, Any]) 
     ))
     lines.append("")
 
-    rows = []
-    for item in analysis.get("modules", []):
-        rows.append([
-            item.get("module", ""),
-            item.get("source", ""),
-            item.get("status", ""),
-            item.get("count", 0),
-            item.get("unit", "ms"),
-            timing_display(item.get("mean")),
-            timing_display(item.get("p50")),
-            timing_display(item.get("p95")),
-            timing_display(item.get("p99")),
-            timing_display(item.get("max")),
-            item.get("data_source", ""),
-        ])
-    if rows:
+    # --- Group summary table (always show all 4 core groups) ---
+    group_ids = [gid for gid in TIMING_MODULES_V2 if gid != "5"]
+    group_rows = []
+    for gid in group_ids:
+        items = _group_timing_stats(analysis, gid)
+        if items:
+            total_mean = sum(to_float(it.get("mean")) or 0.0 for it in items)
+            total_count = sum(it.get("count", 0) for it in items)
+            sum_p95 = sum(to_float(it.get("p95")) or 0.0 for it in items)
+            sum_p99 = sum(to_float(it.get("p99")) or 0.0 for it in items)
+            group_rows.append([
+                f"**{_group_label(gid)}**",
+                f"{len(items)}/{len(_group_flat_modules(gid))}",
+                total_count,
+                timing_display(total_mean),
+                timing_display(sum_p95),
+                timing_display(sum_p99),
+            ])
+        else:
+            group_rows.append([
+                f"**{_group_label(gid)}**",
+                f"0/{len(_group_flat_modules(gid))}",
+                0,
+                "—",
+                "—",
+                "—",
+            ])
+    lines.append("### Module Group Summary")
+    lines.append("")
+    lines.append(md_table(
+        ["Group", "Modules", "Samples", "Total Mean ms", "Sum P95 ms", "Sum P99 ms"],
+        group_rows,
+    ))
+    lines.append("")
+
+    # --- Per-group detail with bottleneck identification ---
+    MODERATE_THRESHOLD_MS = 50.0   # flag as slow
+    HIGH_THRESHOLD_MS = 100.0      # flag as very slow / bottleneck
+
+    for gid in group_ids:
+        lines.append(f"### {_group_label(gid)}")
+        lines.append("")
+        items = _group_timing_stats(analysis, gid)
+        if not items:
+            missing_in_group = [
+                m for m in _group_flat_modules(gid)
+                if not any(
+                    it["module"] == m and it.get("status") in {"found", "summary_only"}
+                    for it in analysis.get("modules", [])
+                )
+            ]
+            lines.append("No timing data available for this group.")
+            if missing_in_group:
+                lines.append(f" Expected modules: {', '.join('`' + m + '`' for m in _group_flat_modules(gid))}")
+            lines.append("")
+            continue
+
+        group_total_mean = sum(to_float(it.get("mean")) or 0.0 for it in items)
+
+        # Per-module detail table
+        detail_rows = []
+        for item in items:
+            mean_val = to_float(item.get("mean"))
+            p95_val = to_float(item.get("p95"))
+            max_val = to_float(item.get("max"))
+            # Identify bottlenecks
+            flags = []
+            if p95_val is not None and p95_val > HIGH_THRESHOLD_MS:
+                flags.append("HIGH")
+            elif p95_val is not None and p95_val > MODERATE_THRESHOLD_MS:
+                flags.append("SLOW")
+            if group_total_mean > 0 and mean_val is not None and mean_val > group_total_mean * 0.5:
+                flags.append("DOMINANT")
+            flag_str = " ".join(flags) if flags else ""
+            detail_rows.append([
+                item.get("module", ""),
+                item.get("count", 0),
+                timing_display(mean_val),
+                timing_display(p95_val),
+                timing_display(max_val),
+                flag_str,
+            ])
+        if detail_rows:
+            lines.append(md_table(
+                ["Module", "Count", "Mean ms", "P95 ms", "Max ms", "Flag"],
+                detail_rows,
+            ))
+            lines.append("")
+
+        # Identify and report bottlenecks for this group
+        bottlenecks_in_group = [
+            it for it in items
+            if (to_float(it.get("p95")) or 0.0) > MODERATE_THRESHOLD_MS
+        ]
+        if bottlenecks_in_group:
+            lines.append("**Bottleneck analysis:** ")
+            notes = []
+            for it in bottlenecks_in_group:
+                p95 = to_float(it.get("p95"))
+                mean_v = to_float(it.get("mean"))
+                pct = ""
+                if group_total_mean > 0 and mean_v is not None:
+                    pct = f" ({mean_v / group_total_mean * 100:.0f}% of group total)"
+                level = "HIGH" if (p95 or 0) > HIGH_THRESHOLD_MS else "SLOW"
+                notes.append(f"`{it['module']}` [{level}] P95={timing_display(p95)}ms mean={timing_display(mean_v)}ms{pct}")
+            lines.append("; ".join(notes))
+            lines.append("")
+        lines.append("")
+
+    # --- Global top bottlenecks (cross-group) ---
+    all_items = [
+        item for item in analysis.get("modules", [])
+        if item.get("status") in {"found", "summary_only"}
+    ]
+    all_items.sort(key=lambda item: to_float(item.get("p95")) or -1.0, reverse=True)
+    top_bottlenecks = all_items[:8]
+    if top_bottlenecks:
+        lines.append("### Top Bottlenecks by P95 (All Groups)")
+        lines.append("")
         lines.append(md_table(
-            ["Module", "Source", "Status", "Count", "Unit", "Mean", "P50", "P95", "P99", "Max", "Data source"],
-            rows,
+            ["Module", "Group", "P95 ms", "Mean ms", "Max ms"],
+            [
+                [
+                    item.get("module", ""),
+                    module_group_name(item.get("module", "")),
+                    timing_display(item.get("p95")),
+                    timing_display(item.get("mean")),
+                    timing_display(item.get("max")),
+                ]
+                for item in top_bottlenecks
+                if to_float(item.get("p95")) is not None
+            ],
         ))
         lines.append("")
 
+    # --- Missing modules ---
     missing = analysis.get("missing_modules", [])
     if missing:
         lines.append("### Missing / No-Row Timing Coverage")
         lines.append("")
-        lines.append(md_table(
-            ["Module", "Status"],
-            [[item.get("module", ""), item.get("status", "")] for item in missing],
-        ))
-        lines.append("")
-
-    bottlenecks = analysis.get("top_bottlenecks", [])
-    if bottlenecks:
-        lines.append("### Top Bottlenecks by P95")
-        lines.append("")
-        lines.append(md_table(
-            ["Module", "P95 ms", "Mean ms", "Max ms", "Source"],
-            [
-                [
-                    item.get("module", ""),
-                    timing_display(item.get("p95")),
-                    timing_display(item.get("mean")),
-                    timing_display(item.get("max")),
-                    item.get("data_source", ""),
-                ]
-                for item in bottlenecks
-            ],
-        ))
+        missing_by_group: dict[str, list[dict]] = {}
+        for item in missing:
+            mod = item.get("module", "")
+            gid = mod.split(".")[0] if "." in mod else "?"
+            missing_by_group.setdefault(gid, []).append(item)
+        for gid in sorted(missing_by_group):
+            gitems = missing_by_group[gid]
+            gname = _group_label(gid) if gid in TIMING_MODULES_V2 else f"Group {gid}"
+            lines.append(f"**{gname}:** " + ", ".join(
+                f"`{it['module']}`({it['status']})" for it in gitems
+            ))
         lines.append("")
 
 
@@ -7414,10 +7849,28 @@ def main() -> int:
     if "online_summary_available" in phase2_online_summary:
         phase2_online_summary_available = bool(phase2_online_summary.get("online_summary_available"))
 
+    timing_rows = rows_by_name.get("timing", [])
+    ego_rows = rows_by_name.get("ego_timing", [])
+    fallback_rows = rows_by_name.get("timing_fallback", [])
+    if ego_rows:
+        timing_rows = timing_rows + ego_rows
+    if fallback_rows:
+        timing_rows = timing_rows + fallback_rows
+    # Also check fallback paths used when RunLogManager is uninitialized.
+    # After a rebuild with IAP_SOURCE_ROOT, writes to <source_root>/log/res/iap_timing.csv.
+    for fb_rel in ("res/iap_timing.csv",):
+        fb_path = run_dir.parent / fb_rel
+        if fb_path.exists():
+            timing_rows = timing_rows + load_csv_rows(fb_path)
+    # Legacy hardcoded path from older builds (different workspace mount).
+    legacy_fb = Path("/home/dev/code/ws_iap/src/iap/log/res/iap_timing.csv")
+    if legacy_fb.exists():
+        timing_rows = timing_rows + load_csv_rows(legacy_fb)
+
     analyses = {
-        "timing": analyze_timing(rows_by_name.get("timing", [])),
+        "timing": analyze_timing(timing_rows),
         "real_time_timing": analyze_real_time_timing(
-            rows_by_name.get("timing", []),
+            timing_rows,
             rows_by_name.get("planner_integrity_cost_debug", []),
             phase2_online_summary,
             metadata,
@@ -7455,8 +7908,16 @@ def main() -> int:
     generated_plots.extend(
         write_real_time_timing_outputs(
             analyses["real_time_timing"],
-            rows_by_name.get("timing", []),
+            timing_rows,
             rows_by_name.get("planner_integrity_cost_debug", []),
+            figs_dir,
+            args.no_plots,
+        )
+    )
+    generated_plots.extend(
+        write_module_group_timing_outputs(
+            analyses["real_time_timing"],
+            timing_rows,
             figs_dir,
             args.no_plots,
         )

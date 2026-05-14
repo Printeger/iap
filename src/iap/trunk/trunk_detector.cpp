@@ -210,7 +210,7 @@ TrunkDetectionResult TrunkDetector::detect(const gtsam_points::PointCloud& frame
   {
     const double elapsed_ms = std::chrono::duration<double, std::milli>(
         std::chrono::high_resolution_clock::now() - t0_trunk).count();
-    timing_csv::append(stamp, "trunk_detector", elapsed_ms);
+    timing_csv::append(stamp, "1.3_trunk_detector", elapsed_ms);
   }
 
   return result;

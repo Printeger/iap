@@ -19,6 +19,11 @@ option(BUILD_WITH_CUDA_MULTIARCH "Build with GPU cross-platform support" OFF)
 option(BUILD_WITH_VIEWER "Build with visualizer" ON)
 option(BUILD_WITH_MARCH_NATIVE "Build with -march=native" OFF)
 option(BUILD_WITH_OPENCV "Build with OpenCV to support camera images" ON)
+option(IAP_ENABLE_DETAILED_TIMING "Enable per-cell cumulative timing in advisory grid rebuild" ON)
+
+if(IAP_ENABLE_DETAILED_TIMING)
+  add_compile_definitions(IAP_ENABLE_DETAILED_TIMING)
+endif()
 
 if(BUILD_WITH_MARCH_NATIVE)
   add_definitions(-march=native)

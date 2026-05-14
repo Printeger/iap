@@ -4,6 +4,7 @@
 // §5.2: Cost = HPL/AL ratio hinge + D_turn + dist_to_goal + effort + infeasibility
 
 #include <iap/planner/integrity_planner.hpp>
+#include <iap/util/timing_csv.hpp>
 #include <spdlog/spdlog.h>
 #include <algorithm>
 #include <cmath>
@@ -119,7 +120,10 @@ CandidateTrajectory IntegrityPlanner::plan(const Eigen::Vector3d& pos0,
                                            double yaw0,
                                            const Eigen::Vector3d& goal,
                                            double sigma0,
-                                           const IntegrityReport* report) const {
+                                           const IntegrityReport* report,
+                                           double stamp) const {
+  iap::timing_csv::ScopedTimer plan_timer(stamp, "4.0_plan_total");
+
   // Determine current AL and effective integrity weight
   double AL = params_.al_default;
   double w_int = params_.w_integrity;
@@ -134,30 +138,36 @@ CandidateTrajectory IntegrityPlanner::plan(const Eigen::Vector3d& pos0,
   }
 
   // Generate candidates (IAP-RQ-300)
-  auto candidates = generator_.generate(pos0, vel0, yaw0);
+  auto candidates = [&] {
+    iap::timing_csv::ScopedTimer t(stamp, "4.1_candidate_generation");
+    return generator_.generate(pos0, vel0, yaw0);
+  }();
   if (candidates.empty()) {
     spdlog::warn("[IntegrityPlanner] No candidates generated.");
     return {};
   }
 
   // Predict advisory PL_pred proxies for all candidates (IAP-RQ-320).
-  predictor_.predict_all(candidates, sigma0);
+  {
+    iap::timing_csv::ScopedTimer t(stamp, "4.2_predict_pl");
+    predictor_.predict_all(candidates, sigma0);
 
-  // Fill AL_pred per waypoint and optionally replace PL_pred with the
-  // geometry-only GNSS advisory proxy.
-  for (auto& traj : candidates) {
-    const int K = static_cast<int>(traj.points.size());
-    traj.AL_pred.resize(K, AL);
+    // Fill AL_pred per waypoint and optionally replace PL_pred with the
+    // geometry-only GNSS advisory proxy.
+    for (auto& traj : candidates) {
+      const int K = static_cast<int>(traj.points.size());
+      traj.AL_pred.resize(K, AL);
 
-    for (int k = 0; k < K; ++k) {
-      const Eigen::Vector3d& wpt_pos = traj.points[k].pos;
+      for (int k = 0; k < K; ++k) {
+        const Eigen::Vector3d& wpt_pos = traj.points[k].pos;
 
-      if (al_fn_) {
-        traj.AL_pred[k] = al_fn_(wpt_pos);
-      }
+        if (al_fn_) {
+          traj.AL_pred[k] = al_fn_(wpt_pos);
+        }
 
-      if (params_.use_araim_pl) {
-        traj.PL_pred[k] = araim_predictor_.predict_araim_pl(wpt_pos);
+        if (params_.use_araim_pl) {
+          traj.PL_pred[k] = araim_predictor_.predict_araim_pl(wpt_pos);
+        }
       }
     }
   }
@@ -166,11 +176,14 @@ CandidateTrajectory IntegrityPlanner::plan(const Eigen::Vector3d& pos0,
   double best_cost = std::numeric_limits<double>::infinity();
   int    best_idx  = 0;
 
-  for (auto& traj : candidates) {
-    evaluate(traj, goal, AL, w_int);
-    if (traj.J_total < best_cost) {
-      best_cost = traj.J_total;
-      best_idx  = traj.id;
+  {
+    iap::timing_csv::ScopedTimer t(stamp, "4.3_cost_evaluation");
+    for (auto& traj : candidates) {
+      evaluate(traj, goal, AL, w_int);
+      if (traj.J_total < best_cost) {
+        best_cost = traj.J_total;
+        best_idx  = traj.id;
+      }
     }
   }
 

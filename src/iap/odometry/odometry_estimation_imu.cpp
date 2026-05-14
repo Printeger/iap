@@ -167,7 +167,7 @@ void OdometryEstimationIMU::insert_imu(const double stamp, const Eigen::Vector3d
 }
 
 EstimationFrame::ConstPtr OdometryEstimationIMU::insert_frame(const PreprocessedFrame::Ptr& raw_frame, std::vector<EstimationFrame::ConstPtr>& marginalized_frames) {
-  iap::timing_csv::ScopedTimer frame_timer(raw_frame->stamp, "odom_insert_frame_total");
+  iap::timing_csv::ScopedTimer frame_timer(raw_frame->stamp, "1.2_odom_insert_frame");
   if (raw_frame->size()) {
     logger->trace("insert_frame points={} times={} ~ {}", raw_frame->size(), raw_frame->times.front(), raw_frame->times.back());
   } else {
@@ -228,7 +228,7 @@ EstimationFrame::ConstPtr OdometryEstimationIMU::insert_frame(const Preprocessed
     std::vector<Eigen::Vector4d> normals;
     std::vector<Eigen::Matrix4d> covs;
     {
-      iap::timing_csv::ScopedTimer timer(raw_frame->stamp, "odom_covariance_estimation");
+      iap::timing_csv::ScopedTimer timer(raw_frame->stamp, "1.2_covariance_estimation");
       covariance_estimation->estimate(points_imu, raw_frame->neighbors, normals, covs);
     }
 
@@ -284,16 +284,16 @@ EstimationFrame::ConstPtr OdometryEstimationIMU::insert_frame(const Preprocessed
         gtsam::noiseModel::Diagonal::Sigmas(clk_noise_sigmas));
     }
     {
-      iap::timing_csv::ScopedTimer timer(raw_frame->stamp, "odom_create_factors");
+      iap::timing_csv::ScopedTimer timer(raw_frame->stamp, "1.2_create_factors");
       new_factors.add(create_factors(current, nullptr, new_values));
     }
 
     {
-      iap::timing_csv::ScopedTimer timer(raw_frame->stamp, "odom_smoother_update");
+      iap::timing_csv::ScopedTimer timer(raw_frame->stamp, "1.2_smoother_update");
       update_smoother(new_factors, new_values, new_stamps);
     }
     {
-      iap::timing_csv::ScopedTimer timer(raw_frame->stamp, "odom_update_frames");
+      iap::timing_csv::ScopedTimer timer(raw_frame->stamp, "1.2_update_frames");
       update_frames(current, new_factors);
     }
     KeyLifecycleMonitor::instance().maybe_log(logger, raw_frame->stamp, 400, 5.0);
@@ -316,7 +316,7 @@ EstimationFrame::ConstPtr OdometryEstimationIMU::insert_frame(const Preprocessed
   int num_imu_integrated = 0;
   int imu_read_cursor = 0;
   {
-    iap::timing_csv::ScopedTimer timer(raw_frame->stamp, "odom_imu_integration");
+    iap::timing_csv::ScopedTimer timer(raw_frame->stamp, "1.2_imu_integration");
     imu_read_cursor = imu_integration->integrate_imu(last_stamp, raw_frame->stamp, last_imu_bias, &num_imu_integrated);
   }
   imu_integration->erase_imu_data(imu_read_cursor);
@@ -420,7 +420,7 @@ EstimationFrame::ConstPtr OdometryEstimationIMU::insert_frame(const Preprocessed
   // Deskew and tranform points into IMU frame
   std::vector<Eigen::Vector4d> deskewed;
   {
-    iap::timing_csv::ScopedTimer timer(raw_frame->stamp, "odom_deskew");
+    iap::timing_csv::ScopedTimer timer(raw_frame->stamp, "1.2_pointcloud_deskew");
     deskewed = deskewing->deskew(T_imu_lidar, pred_imu_times, pred_imu_poses, raw_frame->stamp, raw_frame->times, raw_frame->points);
     for (auto& pt : deskewed) {
       pt = T_imu_lidar * pt;
@@ -430,7 +430,7 @@ EstimationFrame::ConstPtr OdometryEstimationIMU::insert_frame(const Preprocessed
   std::vector<Eigen::Vector4d> deskewed_normals;
   std::vector<Eigen::Matrix4d> deskewed_covs;
   {
-    iap::timing_csv::ScopedTimer timer(raw_frame->stamp, "odom_covariance_estimation");
+    iap::timing_csv::ScopedTimer timer(raw_frame->stamp, "1.2_covariance_estimation");
     covariance_estimation->estimate(deskewed, raw_frame->neighbors, deskewed_normals, deskewed_covs);
   }
 
@@ -448,14 +448,14 @@ EstimationFrame::ConstPtr OdometryEstimationIMU::insert_frame(const Preprocessed
   frames.push_back(new_frame);
 
   {
-    iap::timing_csv::ScopedTimer timer(raw_frame->stamp, "odom_create_factors");
+    iap::timing_csv::ScopedTimer timer(raw_frame->stamp, "1.2_create_factors");
     new_factors.add(create_factors(current, imu_factor, new_values));
   }
 
   // Update smoother
   Callbacks::on_smoother_update(*smoother, new_factors, new_values, new_stamps);
   {
-    iap::timing_csv::ScopedTimer timer(raw_frame->stamp, "odom_smoother_update");
+    iap::timing_csv::ScopedTimer timer(raw_frame->stamp, "1.2_smoother_update");
     update_smoother(new_factors, new_values, new_stamps, 1);
   }
   Callbacks::on_smoother_update_finish(*smoother);
@@ -476,7 +476,7 @@ EstimationFrame::ConstPtr OdometryEstimationIMU::insert_frame(const Preprocessed
 
   // Update frames
   {
-    iap::timing_csv::ScopedTimer timer(raw_frame->stamp, "odom_update_frames");
+    iap::timing_csv::ScopedTimer timer(raw_frame->stamp, "1.2_update_frames");
     update_frames(current, new_factors);
   }
 

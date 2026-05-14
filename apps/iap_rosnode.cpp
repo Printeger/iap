@@ -339,7 +339,7 @@ private:
       [this](const sensor_msgs::msg::PointCloud2::ConstSharedPtr msg) {
         ++points_msg_count_;
         const double point_stamp = to_sec(msg->header.stamp) + points_time_offset_;
-        iap::timing_csv::ScopedTimer callback_timer(point_stamp, "ros_pointcloud_callback_total");
+        iap::timing_csv::ScopedTimer callback_timer(point_stamp, "1.1_ros_callback_total");
         if (!logged_first_points_) {
           logged_first_points_ = true;
           RCLCPP_INFO(
@@ -356,7 +356,7 @@ private:
 
         RawPoints::Ptr raw_points;
         {
-          iap::timing_csv::ScopedTimer timer(point_stamp, "pointcloud_extract_raw");
+          iap::timing_csv::ScopedTimer timer(point_stamp, "1.1_pointcloud_extract");
           raw_points = extract_raw_points(*msg, intensity_field_, ring_field_);
         }
         if (!raw_points) {
@@ -372,7 +372,7 @@ private:
 
         PreprocessedFrame::Ptr preprocessed;
         {
-          iap::timing_csv::ScopedTimer timer(raw_points->stamp, "cloud_preprocess_total");
+          iap::timing_csv::ScopedTimer timer(raw_points->stamp, "1.1_cloud_preprocess");
           preprocessed = preprocessor_->preprocess(raw_points);
         }
         if (!preprocessed || preprocessed->size() == 0) {

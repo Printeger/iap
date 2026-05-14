@@ -408,11 +408,17 @@ IntegrityReport IntegrityMonitor::compute(const glim::EstimationFrame& frame,
   }();
 
   // --- Dynamic AL (§1.12: HAL + VAL) ---
+  const auto t0_al = std::chrono::high_resolution_clock::now();
   report.al_result = compute_dynamic_AL(frame, trunk);
   report.HAL       = report.al_result.HAL;
   report.VAL       = report.al_result.VAL;
   report.AL        = report.al_result.AL;
   report.HAL_trunk = report.al_result.HAL;   // legacy alias
+  {
+    const double elapsed_al = std::chrono::duration<double, std::milli>(
+        std::chrono::high_resolution_clock::now() - t0_al).count();
+    timing_csv::append(report.stamp, "2.3_dynamic_al", elapsed_al);
+  }
 
   // --- Legacy obstacle-based AL integration ---
   if (obstacle_dist_ < 1e8) {
@@ -430,7 +436,11 @@ IntegrityReport IntegrityMonitor::compute(const glim::EstimationFrame& frame,
 
   // --- GNSS NIS gating (IAP-RQ-220) ---
   if (epoch) {
+    const auto t0_gating = std::chrono::high_resolution_clock::now();
     run_gnss_gating(*epoch, report);
+    const double elapsed_gating = std::chrono::duration<double, std::milli>(
+        std::chrono::high_resolution_clock::now() - t0_gating).count();
+    timing_csv::append(report.stamp, "2.3_gnss_gating", elapsed_gating);
   }
 
   // --- GNSS certified ARAIM monitor (IAP-RQ-241–246) ---
@@ -453,10 +463,16 @@ IntegrityReport IntegrityMonitor::compute(const glim::EstimationFrame& frame,
   report.IM = report.AL - report.PL;
 
   // --- Three-state machine (§1.13) ---
+  const auto t0_state = std::chrono::high_resolution_clock::now();
   report.state = update_state(report);
   report.planner_state = (report.state == IntegrityState::UNSAFE)
                            ? PlannerState::HOVER
                            : PlannerState::CRUISE;
+  {
+    const double elapsed_state = std::chrono::duration<double, std::milli>(
+        std::chrono::high_resolution_clock::now() - t0_state).count();
+    timing_csv::append(report.stamp, "2.3_state_machine", elapsed_state);
+  }
 
   // --- Legacy 4-state mode (deprecated) ---
   report.mode = update_mode_legacy(report);
@@ -490,7 +506,7 @@ IntegrityReport IntegrityMonitor::compute(const glim::EstimationFrame& frame,
   {
     const double elapsed_ms = std::chrono::duration<double, std::milli>(
         std::chrono::high_resolution_clock::now() - t0_integrity).count();
-    timing_csv::append(report.stamp, "integrity", elapsed_ms);
+    timing_csv::append(report.stamp, "2.3_integrity_total", elapsed_ms);
   }
 
   return report;

@@ -508,7 +508,7 @@ AraimResult Araim::run(const GnssEpoch& epoch, int n_trunk_obs) const {
   {
     const double elapsed_ms = std::chrono::duration<double, std::milli>(
         std::chrono::high_resolution_clock::now() - t0_araim).count();
-    timing_csv::append(epoch.stamp, "araim", elapsed_ms);
+    timing_csv::append(epoch.stamp, "2.1_gnss_araim", elapsed_ms);
   }
 
   return result;

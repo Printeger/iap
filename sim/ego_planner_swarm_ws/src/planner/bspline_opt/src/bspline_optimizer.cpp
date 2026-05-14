@@ -1,5 +1,6 @@
 #include "bspline_opt/bspline_optimizer.h"
 #include "bspline_opt/gradient_descent_optimizer.h"
+#include "path_searching/ego_timing.hpp"
 #include <algorithm>
 #include <cmath>
 #include <filesystem>
@@ -2007,6 +2008,7 @@ namespace ego_planner
   // 设置时间间隔ts，调用rebound_optimize(final_cost)将轨迹推出障碍物，得到最优的无碰撞轨迹，并将其控制点赋值给optimal_points
   bool BsplineOptimizer::BsplineOptimizeTrajRebound(Eigen::MatrixXd &optimal_points, double ts)
   {
+    ego_timing::ScopedTimer t(0.0, "5.2_bspline_optimize");
     setBsplineInterval(ts);
 
     double final_cost;
@@ -2021,7 +2023,7 @@ namespace ego_planner
   // 得到最优的无碰撞轨迹，并将其控制点赋值给optimal_points
   bool BsplineOptimizer::BsplineOptimizeTrajRebound(Eigen::MatrixXd &optimal_points, double &final_cost, const ControlPoints &control_points, double ts)
   {
-    // 将时间间隔存储到成员变量
+    ego_timing::ScopedTimer t(0.0, "5.2_bspline_optimize");
     setBsplineInterval(ts);
 
     cps_ = control_points;
@@ -2036,6 +2038,7 @@ namespace ego_planner
   // 设置初始控制点init_points、时间间隔ts，调用refine_optimize()重新分配时间，得到最优的动力学可行轨迹，并将其控制点赋值给optimal_points
   bool BsplineOptimizer::BsplineOptimizeTrajRefine(const Eigen::MatrixXd &init_points, const double ts, Eigen::MatrixXd &optimal_points)
   {
+    ego_timing::ScopedTimer t(0.0, "5.2_bspline_optimize");
 
     // 将控制点数据存储到成员变量
     setControlPoints(init_points);

@@ -13,6 +13,7 @@
 #include <iap/map/local_occupancy.hpp>
 #include <iap/planner/integrity_snapshot.hpp>
 #include <iap/planner/lidar_observability_fim.hpp>
+#include <iap/util/timing_csv.hpp>
 #include <iap/planner/pl_grid.hpp>
 #include <iap/planner/predicted_araim.hpp>
 
@@ -129,7 +130,10 @@ class FuturePLFieldPredictor {
       const IntegritySnapshot& snapshot,
       const std::shared_ptr<const std::vector<Eigen::Vector3d>>& points,
       const std::shared_ptr<const std::vector<LidarFimPrimitive>>& primitives,
-      const std::string& query_source) const;
+      const std::string& query_source,
+      iap::timing_csv::CumulativeTimer* ct_gnss = nullptr,
+      iap::timing_csv::CumulativeTimer* ct_lidar = nullptr,
+      iap::timing_csv::CumulativeTimer* ct_fusion = nullptr) const;
   void record_query(const FuturePLQueryResult& result) const;
   void refresh_stats_params();
 

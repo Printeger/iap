@@ -27,13 +27,17 @@ inline bool enabled() {
 }
 
 inline const std::string& path() {
-  static std::string value = "/home/dev/code/ws_iap/src/iap/log/res/iap_timing.csv";
+  static std::string value;
+  if (!value.empty()) return value;
   if (const auto* run_logs = glim::RunLogManager::get_if_initialized()) {
     value = run_logs->profiling_path("iap_timing.csv").string();
-  } else if (value == "/home/dev/code/ws_iap/src/iap/log/res/iap_timing.csv") {
-    value = glim::GlobalConfig::instance()->param<std::string>(
-        "global", "timing_csv_path", "/home/dev/code/ws_iap/src/iap/log/res/iap_timing.csv");
+    return value;
   }
+  // Fallback: use IAP_SOURCE_ROOT to construct a sensible default.
+  // The hardcoded default was previously a machine-specific path
+  // (/home/dev/code/ws_iap/...) that broke when the workspace moved.
+  value = glim::GlobalConfig::instance()->param<std::string>(
+      "global", "timing_csv_path", std::string(IAP_SOURCE_ROOT) + "/log/res/iap_timing.csv");
   return value;
 }
 
@@ -92,6 +96,41 @@ private:
   double stamp_ = 0.0;
   const char* module_ = "";
   Clock::time_point start_{};
+};
+
+class CumulativeTimer {
+public:
+  using Clock = std::chrono::steady_clock;
+
+  CumulativeTimer() : enabled_(enabled()) {}
+
+  void start() {
+    if (enabled_) t0_ = Clock::now();
+  }
+
+  void stop() {
+    if (enabled_) accumulated_ms_ +=
+        std::chrono::duration<double, std::milli>(Clock::now() - t0_).count();
+  }
+
+  void reset() { accumulated_ms_ = 0.0; }
+
+  double accumulated_ms() const { return accumulated_ms_; }
+
+  void flush(double stamp, const char* module) {
+    if (enabled_ && accumulated_ms_ > 0.0) {
+      append(stamp, module, accumulated_ms_);
+      accumulated_ms_ = 0.0;
+    }
+  }
+
+  CumulativeTimer(const CumulativeTimer&) = delete;
+  CumulativeTimer& operator=(const CumulativeTimer&) = delete;
+
+private:
+  bool enabled_ = false;
+  Clock::time_point t0_{};
+  double accumulated_ms_ = 0.0;
 };
 
 }  // namespace iap::timing_csv

@@ -1,5 +1,8 @@
 #include <iap/mapping/async_global_mapping.hpp>
 
+#include <iap/util/timing_csv.hpp>
+
+#include <chrono>
 #include <spdlog/spdlog.h>
 
 #include <iap/util/logging.hpp>
@@ -102,7 +105,11 @@ void AsyncGlobalMapping::run() {
       if (request_to_optimize || std::chrono::high_resolution_clock::now() - last_optimization_time > std::chrono::seconds(optimization_interval)) {
         std::lock_guard<std::mutex> lock(global_mapping_mutex);
         request_to_optimize = false;
+        const auto t0_opt = std::chrono::steady_clock::now();
         global_mapping->optimize();
+        const double elapsed_opt = std::chrono::duration<double, std::milli>(
+            std::chrono::steady_clock::now() - t0_opt).count();
+        iap::timing_csv::append(0.0, "1.4_global_map_optimize", elapsed_opt);
         last_optimization_time = std::chrono::high_resolution_clock::now();
       }
 

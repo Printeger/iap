@@ -1015,7 +1015,7 @@ void iap::GnssExtensionModule::on_smoother_update_finish_(
     const double elapsed_ms = std::chrono::duration<double, std::milli>(
         std::chrono::high_resolution_clock::now() - t0_gnss).count();
     const double stamp = last_frame_stamp_.load();
-    timing_csv::append(stamp, "gnss_injection", elapsed_ms);
+    timing_csv::append(stamp, "1.3_gnss_injection", elapsed_ms);
   }
 }
 

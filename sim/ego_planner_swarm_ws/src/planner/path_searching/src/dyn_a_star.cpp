@@ -1,4 +1,5 @@
 #include "path_searching/dyn_a_star.h"
+#include "path_searching/ego_timing.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -135,12 +136,14 @@ bool AStar::ConvertToIndexAndAdjustStartEndPoints(Vector3d start_pt, Vector3d en
 
 bool AStar::AstarSearch(const double step_size, Vector3d start_pt, Vector3d end_pt)
 {
+    ego_timing::ScopedTimer t(0.0, "5.1_astar_search");
     return AstarSearchImpl(step_size, start_pt, end_pt, use_integrity_cost_, search_time_limit_s_);
 }
 
 bool AStar::AstarSearch(const double step_size, Vector3d start_pt, Vector3d end_pt,
                         bool use_integrity_cost, double search_time_limit_s)
 {
+    ego_timing::ScopedTimer t(0.0, "5.1_astar_search");
     return AstarSearchImpl(step_size, start_pt, end_pt, use_integrity_cost, search_time_limit_s);
 }
 

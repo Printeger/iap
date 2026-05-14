@@ -77,9 +77,12 @@ def plot_C1(icp_df, out_dir):
 # Fig C2: Module timing timeline + statistics table
 # ---------------------------------------------------------------------------
 def plot_C2(timing_df, icp_df, out_dir):
-    modules = ["gnss_injection", "integrity", "araim", "trunk_detector"]
-    colors  = {"gnss_injection": "#1f77b4", "integrity": "#ff7f0e",
-                "araim": "#2ca02c", "trunk_detector": "#9467bd"}
+    modules = ["1.3_gnss_injection", "2.3_integrity_total", "2.1_gnss_araim", "1.3_trunk_detector",
+               "2.2_lidar_araim", "4.0_plan_total", "3.0_pl_grid_build"]
+    colors  = {"1.3_gnss_injection": "#1f77b4", "2.3_integrity_total": "#ff7f0e",
+                "2.1_gnss_araim": "#2ca02c", "1.3_trunk_detector": "#9467bd",
+                "2.2_lidar_araim": "#d62728", "4.0_plan_total": "#8c564b",
+                "3.0_pl_grid_build": "#e377c2"}
 
     # Build per-module time series aligned to frame index
     fig = plt.figure(figsize=(14, 9))

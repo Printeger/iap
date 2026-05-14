@@ -116,7 +116,7 @@ void AsyncOdometryEstimation::run() {
       if (!end_of_sequence && raw_frames.front()->scan_end_time > last_imu_time) {
         logger->debug("waiting for IMU data (scan_end_time={:.6f}, last_imu_time={:.6f} |frames|={})", raw_frames.front()->scan_end_time, last_imu_time, raw_frames.size());
         {
-          iap::timing_csv::ScopedTimer timer(raw_frames.front()->stamp, "async_odom_queue_wait");
+          iap::timing_csv::ScopedTimer timer(raw_frames.front()->stamp, "1.5_odom_queue_wait");
           std::this_thread::sleep_for(std::chrono::milliseconds(10));
         }
 
