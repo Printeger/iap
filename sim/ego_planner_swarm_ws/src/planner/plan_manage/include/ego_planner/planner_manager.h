@@ -62,6 +62,8 @@ namespace ego_planner
 
 	    BsplineOptimizer::Ptr bspline_optimizer_;
 	    bool use_integrity_global_search_{false};
+	    bool risk_overlay_use_for_astar_{false};
+	    bool risk_overlay_use_for_bspline_{false};
 	    double integrity_global_astar_step_m_{0.5};
 	    int integrity_global_max_waypoints_{80};
 	    double integrity_global_astar_timeout_s_{1.0};

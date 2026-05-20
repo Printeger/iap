@@ -30,6 +30,7 @@ find_package(Eigen3 REQUIRED)
 
 if(BUILD_TESTING)
   find_package(ament_lint_auto REQUIRED)
+  find_package(ament_cmake_gtest REQUIRED)
   # the following line skips the linter which checks for copyrights
   # comment the line when a copyright and license is added to all source files
   set(ament_cmake_copyright_FOUND TRUE)
@@ -40,28 +41,35 @@ if(BUILD_TESTING)
   ament_lint_auto_find_test_dependencies()
 endif()
 
-include_directories( 
-    SYSTEM 
-    include 
-    ${Eigen3_INCLUDE_DIRS} 
-    ${PCL_INCLUDE_DIRS}
+include_directories(
+  SYSTEM
+  include
+  ${Eigen3_INCLUDE_DIRS}
+  ${PCL_INCLUDE_DIRS}
 )
 
 ament_export_include_directories(include)
 
-add_library( bspline_opt 
-    src/uniform_bspline.cpp 
-    src/bspline_optimizer.cpp 
-    src/gradient_descent_optimizer.cpp
+add_library(bspline_opt
+  src/uniform_bspline.cpp
+  src/bspline_optimizer.cpp
+  src/gradient_descent_optimizer.cpp
+)
+
+ament_target_dependencies(bspline_opt
+  std_msgs visualization_msgs sensor_msgs nav_msgs cv_bridge rclcpp Eigen3 PCL pcl_conversions
+  plan_env traj_utils path_searching
+)
+
+if(BUILD_TESTING)
+  ament_add_gtest(test_bspline_risk_overlay test/test_bspline_risk_overlay.cpp)
+  if(TARGET test_bspline_risk_overlay)
+    ament_target_dependencies(test_bspline_risk_overlay
+      rclcpp sensor_msgs Eigen3 PCL pcl_conversions cv_bridge plan_env path_searching traj_utils
     )
-
-ament_target_dependencies(bspline_opt 
-                          std_msgs visualization_msgs 
-                          sensor_msgs nav_msgs cv_bridge 
-                          rclcpp Eigen3 
-                          PCL pcl_conversions 
-                          plan_env traj_utils path_searching)
-
+    target_link_libraries(test_bspline_risk_overlay bspline_opt)
+  endif()
+endif()
 
 install(TARGETS bspline_opt
   DESTINATION lib

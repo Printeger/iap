@@ -205,6 +205,32 @@ def _launch_setup(context):
     planner_integrity_global_max_waypoints = LaunchConfiguration(
         "planner_integrity_global_max_waypoints"
     ).perform(context)
+    risk_overlay_enable = LaunchConfiguration("risk_overlay_enable").perform(context)
+    risk_overlay_use_for_astar = LaunchConfiguration("risk_overlay_use_for_astar").perform(context)
+    risk_overlay_use_for_bspline = LaunchConfiguration("risk_overlay_use_for_bspline").perform(context)
+    risk_overlay_topic = LaunchConfiguration("risk_overlay_topic").perform(context)
+    risk_overlay_lambda_unknown = LaunchConfiguration("risk_overlay_lambda_unknown").perform(context)
+    risk_overlay_lambda_stale = LaunchConfiguration("risk_overlay_lambda_stale").perform(context)
+    risk_overlay_stale_timeout_s = LaunchConfiguration("risk_overlay_stale_timeout_s").perform(context)
+    risk_overlay_stale_tau_s = LaunchConfiguration("risk_overlay_stale_tau_s").perform(context)
+    risk_overlay_r_soft = LaunchConfiguration("risk_overlay_r_soft").perform(context)
+    risk_overlay_w_soft = LaunchConfiguration("risk_overlay_w_soft").perform(context)
+    risk_overlay_w_hard = LaunchConfiguration("risk_overlay_w_hard").perform(context)
+    risk_overlay_c_unsafe = LaunchConfiguration("risk_overlay_c_unsafe").perform(context)
+    risk_overlay_eps_al_m = LaunchConfiguration("risk_overlay_eps_al_m").perform(context)
+    risk_overlay_gamma_h = LaunchConfiguration("risk_overlay_gamma_h").perform(context)
+    risk_overlay_gamma_v = LaunchConfiguration("risk_overlay_gamma_v").perform(context)
+    risk_overlay_drone_radius_m = LaunchConfiguration("risk_overlay_drone_radius_m").perform(context)
+    risk_overlay_safety_buffer_m = LaunchConfiguration("risk_overlay_safety_buffer_m").perform(context)
+    risk_overlay_clearance_max_m = LaunchConfiguration("risk_overlay_clearance_max_m").perform(context)
+    risk_overlay_clearance_unknown_m = LaunchConfiguration("risk_overlay_clearance_unknown_m").perform(context)
+    risk_overlay_edge_sample_alpha = LaunchConfiguration("risk_overlay_edge_sample_alpha").perform(context)
+    risk_overlay_bspline_samples_per_segment = LaunchConfiguration("risk_overlay_bspline_samples_per_segment").perform(context)
+    risk_overlay_debug_publish = LaunchConfiguration("risk_overlay_debug_publish").perform(context)
+    risk_overlay_debug_topic = LaunchConfiguration("risk_overlay_debug_topic").perform(context)
+    risk_overlay_debug_publish_hz = LaunchConfiguration("risk_overlay_debug_publish_hz").perform(context)
+    risk_overlay_debug_color_mode = LaunchConfiguration("risk_overlay_debug_color_mode").perform(context)
+    risk_overlay_debug_cost_max = LaunchConfiguration("risk_overlay_debug_cost_max").perform(context)
     planner_start_delay_s = max(
         0.0, float(LaunchConfiguration("planner_start_delay_s").perform(context))
     )
@@ -455,6 +481,32 @@ def _launch_setup(context):
             "integrity_front_cost_max": planner_integrity_front_cost_max,
             "integrity_global_astar_step_m": planner_integrity_global_astar_step_m,
             "integrity_global_max_waypoints": planner_integrity_global_max_waypoints,
+            "risk_overlay_enable": risk_overlay_enable,
+            "risk_overlay_use_for_astar": risk_overlay_use_for_astar,
+            "risk_overlay_use_for_bspline": risk_overlay_use_for_bspline,
+            "risk_overlay_topic": risk_overlay_topic,
+            "risk_overlay_lambda_unknown": risk_overlay_lambda_unknown,
+            "risk_overlay_lambda_stale": risk_overlay_lambda_stale,
+            "risk_overlay_stale_timeout_s": risk_overlay_stale_timeout_s,
+            "risk_overlay_stale_tau_s": risk_overlay_stale_tau_s,
+            "risk_overlay_r_soft": risk_overlay_r_soft,
+            "risk_overlay_w_soft": risk_overlay_w_soft,
+            "risk_overlay_w_hard": risk_overlay_w_hard,
+            "risk_overlay_c_unsafe": risk_overlay_c_unsafe,
+            "risk_overlay_eps_al_m": risk_overlay_eps_al_m,
+            "risk_overlay_gamma_h": risk_overlay_gamma_h,
+            "risk_overlay_gamma_v": risk_overlay_gamma_v,
+            "risk_overlay_drone_radius_m": risk_overlay_drone_radius_m,
+            "risk_overlay_safety_buffer_m": risk_overlay_safety_buffer_m,
+            "risk_overlay_clearance_max_m": risk_overlay_clearance_max_m,
+            "risk_overlay_clearance_unknown_m": risk_overlay_clearance_unknown_m,
+            "risk_overlay_edge_sample_alpha": risk_overlay_edge_sample_alpha,
+            "risk_overlay_bspline_samples_per_segment": risk_overlay_bspline_samples_per_segment,
+            "risk_overlay_debug_publish": risk_overlay_debug_publish,
+            "risk_overlay_debug_topic": risk_overlay_debug_topic,
+            "risk_overlay_debug_publish_hz": risk_overlay_debug_publish_hz,
+            "risk_overlay_debug_color_mode": risk_overlay_debug_color_mode,
+            "risk_overlay_debug_cost_max": risk_overlay_debug_cost_max,
         }.items(),
     )
     traj_server_node = Node(
@@ -977,6 +1029,32 @@ def generate_launch_description():
         DeclareLaunchArgument("planner_integrity_front_cost_max", default_value="10.0"),
         DeclareLaunchArgument("planner_integrity_global_astar_step_m", default_value="0.5"),
         DeclareLaunchArgument("planner_integrity_global_max_waypoints", default_value="80"),
+        DeclareLaunchArgument("risk_overlay_enable", default_value="true"),
+        DeclareLaunchArgument("risk_overlay_use_for_astar", default_value="false"),
+        DeclareLaunchArgument("risk_overlay_use_for_bspline", default_value="false"),
+        DeclareLaunchArgument("risk_overlay_topic", default_value="/iap/integrity_front_cost_field"),
+        DeclareLaunchArgument("risk_overlay_lambda_unknown", default_value="10.0"),
+        DeclareLaunchArgument("risk_overlay_lambda_stale", default_value="1.0"),
+        DeclareLaunchArgument("risk_overlay_stale_timeout_s", default_value="1.0"),
+        DeclareLaunchArgument("risk_overlay_stale_tau_s", default_value="1.0"),
+        DeclareLaunchArgument("risk_overlay_r_soft", default_value="0.75"),
+        DeclareLaunchArgument("risk_overlay_w_soft", default_value="1.0"),
+        DeclareLaunchArgument("risk_overlay_w_hard", default_value="10.0"),
+        DeclareLaunchArgument("risk_overlay_c_unsafe", default_value="10.0"),
+        DeclareLaunchArgument("risk_overlay_eps_al_m", default_value="0.001"),
+        DeclareLaunchArgument("risk_overlay_gamma_h", default_value="0.8"),
+        DeclareLaunchArgument("risk_overlay_gamma_v", default_value="0.8"),
+        DeclareLaunchArgument("risk_overlay_drone_radius_m", default_value="0.35"),
+        DeclareLaunchArgument("risk_overlay_safety_buffer_m", default_value="0.20"),
+        DeclareLaunchArgument("risk_overlay_clearance_max_m", default_value="5.0"),
+        DeclareLaunchArgument("risk_overlay_clearance_unknown_m", default_value="1.0"),
+        DeclareLaunchArgument("risk_overlay_edge_sample_alpha", default_value="0.75"),
+        DeclareLaunchArgument("risk_overlay_bspline_samples_per_segment", default_value="3"),
+        DeclareLaunchArgument("risk_overlay_debug_publish", default_value="true"),
+        DeclareLaunchArgument("risk_overlay_debug_topic", default_value="/grid_map/risk_overlay_debug"),
+        DeclareLaunchArgument("risk_overlay_debug_publish_hz", default_value="2.0"),
+        DeclareLaunchArgument("risk_overlay_debug_color_mode", default_value="cost"),
+        DeclareLaunchArgument("risk_overlay_debug_cost_max", default_value="50.0"),
         DeclareLaunchArgument("planner_start_delay_s", default_value="0.0"),
         DeclareLaunchArgument("enable_preflight_takeoff", default_value="false"),
         DeclareLaunchArgument("preflight_ground_z", default_value="0.0"),

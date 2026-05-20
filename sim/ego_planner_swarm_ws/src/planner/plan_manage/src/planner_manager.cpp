@@ -23,6 +23,8 @@ namespace ego_planner
 	    node->declare_parameter("manager/use_distinctive_trajs", false);
 	    node->declare_parameter("manager/drone_id", -1);
 	    node->declare_parameter("manager/use_integrity_global_search", false);
+	    node->declare_parameter("risk_overlay/use_for_astar", false);
+	    node->declare_parameter("risk_overlay/use_for_bspline", false);
 	    node->declare_parameter("manager/integrity_global_astar_step_m", 0.5);
 	    node->declare_parameter("manager/integrity_global_max_waypoints", 80);
 
@@ -35,6 +37,8 @@ namespace ego_planner
 	    node->get_parameter("manager/use_distinctive_trajs", pp_.use_distinctive_trajs);
 	    node->get_parameter("manager/drone_id", pp_.drone_id);
 	    node->get_parameter("manager/use_integrity_global_search", use_integrity_global_search_);
+	    node->get_parameter("risk_overlay/use_for_astar", risk_overlay_use_for_astar_);
+	    node->get_parameter("risk_overlay/use_for_bspline", risk_overlay_use_for_bspline_);
 	    node->get_parameter("manager/integrity_global_astar_step_m", integrity_global_astar_step_m_);
 	    node->get_parameter("manager/integrity_global_max_waypoints", integrity_global_max_waypoints_);
 	    integrity_global_astar_step_m_ = std::max(0.1, integrity_global_astar_step_m_);
@@ -231,6 +235,17 @@ namespace ego_planner
     Eigen::MatrixXd ctrl_pts, ctrl_pts_temp;
     UniformBspline::parameterizeToBspline(ts, point_set, start_end_derivatives, ctrl_pts);
 
+    const bool pin_risk_overlay_snapshot =
+        (risk_overlay_use_for_astar_ || risk_overlay_use_for_bspline_) &&
+        grid_map_ && grid_map_->riskOverlayEnabled() &&
+        bspline_optimizer_ && bspline_optimizer_->a_star_;
+    if (pin_risk_overlay_snapshot)
+    {
+      auto risk_snapshot = grid_map_->riskOverlaySnapshot();
+      bspline_optimizer_->a_star_->pinRiskOverlaySnapshot(risk_snapshot);
+      bspline_optimizer_->pinRiskOverlaySnapshot(risk_snapshot);
+    }
+
     vector<std::pair<int, int>> segments;
     segments = bspline_optimizer_->initControlPoints(ctrl_pts, true);
     // 计算时间差并更新时间
@@ -295,6 +310,11 @@ namespace ego_planner
     {
       visualization_->displayOptimalList(ctrl_pts, 0);
       continous_failures_count_++;
+      if (pin_risk_overlay_snapshot)
+      {
+        bspline_optimizer_->a_star_->clearPinnedRiskOverlaySnapshot();
+        bspline_optimizer_->clearPinnedRiskOverlaySnapshot();
+      }
       return false;
     }
 
@@ -324,6 +344,11 @@ namespace ego_planner
       {
         printf("\033[34mThis refined trajectory hits obstacles. It doesn't matter if appeares occasionally. But if continously appearing, Increase parameter \"lambda_fitness\".\n\033[0m");
         continous_failures_count_++;
+        if (pin_risk_overlay_snapshot)
+        {
+          bspline_optimizer_->a_star_->clearPinnedRiskOverlaySnapshot();
+          bspline_optimizer_->clearPinnedRiskOverlaySnapshot();
+        }
         return false;
       }
     }
@@ -355,6 +380,11 @@ namespace ego_planner
 
     // success. YoY
     continous_failures_count_ = 0;
+    if (pin_risk_overlay_snapshot)
+    {
+      bspline_optimizer_->a_star_->clearPinnedRiskOverlaySnapshot();
+      bspline_optimizer_->clearPinnedRiskOverlaySnapshot();
+    }
     return true;
   }
 
@@ -429,7 +459,8 @@ namespace ego_planner
 	                                                            std::vector<Eigen::Vector3d> &inter_points)
 	  {
 	    inter_points.clear();
-	    if (!use_integrity_global_search_ || anchors.size() < 2 || !bspline_optimizer_ ||
+	    if ((!use_integrity_global_search_ && !risk_overlay_use_for_astar_) ||
+	        anchors.size() < 2 || !bspline_optimizer_ ||
 	        !bspline_optimizer_->a_star_)
 	    {
 	      return false;
@@ -437,10 +468,15 @@ namespace ego_planner
 
 	    for (size_t seg = 0; seg + 1 < anchors.size(); ++seg)
 	    {
+	      if (seg == 0 && risk_overlay_use_for_astar_ && grid_map_ && grid_map_->riskOverlayEnabled())
+	      {
+	        bspline_optimizer_->a_star_->pinRiskOverlaySnapshot(grid_map_->riskOverlaySnapshot());
+	      }
 	      const Eigen::Vector3d start = anchors[seg];
 	      const Eigen::Vector3d goal = anchors[seg + 1];
 	      if (!start.allFinite() || !goal.allFinite())
 	      {
+	        bspline_optimizer_->a_star_->clearPinnedRiskOverlaySnapshot();
 	        return false;
 	      }
 	      if ((goal - start).norm() < 1.0e-3)
@@ -460,6 +496,7 @@ namespace ego_planner
 	                    "integrity-aware global A* failed on segment %zu; falling back to straight global reference",
 	                    seg);
 	        inter_points.clear();
+	        bspline_optimizer_->a_star_->clearPinnedRiskOverlaySnapshot();
 	        return false;
 	      }
 
@@ -467,6 +504,7 @@ namespace ego_planner
 	      if (path.size() < 2)
 	      {
 	        inter_points.clear();
+	        bspline_optimizer_->a_star_->clearPinnedRiskOverlaySnapshot();
 	        return false;
 	      }
 	      if (!inter_points.empty())
@@ -478,11 +516,17 @@ namespace ego_planner
 
 	    downsampleGlobalWaypoints(inter_points, integrity_global_max_waypoints_);
 	    RCLCPP_INFO(rclcpp::get_logger("ego_planner"),
-	                "integrity-aware global A* produced %zu waypoints; integrity_samples_used=%d mean_cost=%.3f max_cost=%.3f",
+	                "integrity-aware global A* produced %zu waypoints; risk_source=%s overlay_generation=%d integrity_samples_used=%d hit=%d unknown=%d stale=%d mean_cost=%.3f max_cost=%.3f",
 	                inter_points.size(),
+	                bspline_optimizer_->a_star_->getLastRiskSource().c_str(),
+	                bspline_optimizer_->a_star_->getLastRiskOverlayGeneration(),
 	                bspline_optimizer_->a_star_->getLastIntegritySamplesUsed(),
+	                bspline_optimizer_->a_star_->getLastIntegrityQueryHitCount(),
+	                bspline_optimizer_->a_star_->getLastIntegrityQueryUnknownCount(),
+	                bspline_optimizer_->a_star_->getLastIntegrityQueryStaleCount(),
 	                bspline_optimizer_->a_star_->getLastIntegrityCostMean(),
 	                bspline_optimizer_->a_star_->getLastIntegrityCostMax());
+	    bspline_optimizer_->a_star_->clearPinnedRiskOverlaySnapshot();
 	    return inter_points.size() >= 2;
 	  }
 

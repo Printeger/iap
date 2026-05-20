@@ -120,6 +120,12 @@ namespace ego_planner
 	    bool queryFrontIntegrityCost(const Eigen::Vector3d &pos, double *cost) const;
 	    bool useIntegrityFrontSearch() const { return use_integrity_front_search_; }
 	    bool useIntegrityGlobalSearch() const { return use_integrity_global_search_; }
+	    void pinRiskOverlaySnapshot(std::shared_ptr<const RiskOverlaySnapshot> snapshot);
+	    void clearPinnedRiskOverlaySnapshot();
+	    void evaluateIntegrityCostForTest(const Eigen::MatrixXd &q, double &cost, Eigen::MatrixXd &gradient)
+	    {
+	      calcIntegrityCost(q, cost, gradient);
+	    }
 
 	    void optimize();
 
@@ -184,6 +190,9 @@ namespace ego_planner
 	    double integrity_cost_max_{1000.0};
     double integrity_grad_norm_max_{0.1};
     int integrity_min_samples_{3};
+    bool risk_overlay_use_for_astar_{false};
+    bool risk_overlay_use_for_bspline_{false};
+    int risk_overlay_bspline_samples_per_segment_{3};
     std::string integrity_debug_csv_path_;
 
     int a;
@@ -230,6 +239,7 @@ namespace ego_planner
 	    double front_integrity_bin_size_{1.5};
 	    double front_integrity_field_stamp_s_{std::numeric_limits<double>::quiet_NaN()};
 	    double last_integrity_warn_s_{-1.0e9};
+	    std::shared_ptr<const RiskOverlaySnapshot> pinned_risk_overlay_snapshot_;
     int integrity_debug_seq_{0};
     int last_integrity_samples_used_{0};
     int last_integrity_samples_skipped_{0};
@@ -239,6 +249,14 @@ namespace ego_planner
     double last_integrity_grad_norm_mean_{std::numeric_limits<double>::quiet_NaN()};
     double last_integrity_grad_norm_max_{std::numeric_limits<double>::quiet_NaN()};
     double last_integrity_cost_raw_{std::numeric_limits<double>::quiet_NaN()};
+    std::string last_integrity_risk_source_{"off"};
+    int last_integrity_overlay_generation_{-1};
+    double last_integrity_planner_now_s_{std::numeric_limits<double>::quiet_NaN()};
+    double last_integrity_sample_stamp_s_{std::numeric_limits<double>::quiet_NaN()};
+    double last_integrity_clock_delta_s_{std::numeric_limits<double>::quiet_NaN()};
+    int last_integrity_query_hit_count_{0};
+    int last_integrity_query_unknown_count_{0};
+    int last_integrity_query_stale_count_{0};
     bool last_integrity_line_search_fail_{false};
     bool last_integrity_step_accepted_{false};
     double last_cost_smooth_{std::numeric_limits<double>::quiet_NaN()};

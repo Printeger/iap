@@ -781,6 +781,7 @@ class Phase2PlannerIntegrityEvaluator : public rclcpp::Node {
 	    declare_parameter<bool>("publish_integrity_front_cost_field", false);
 	    declare_parameter<std::string>("integrity_front_cost_field_topic",
 	                                   "/iap/integrity_front_cost_field");
+	    declare_parameter<std::string>("integrity_front_cost_field_frame_id", "map");
 	    declare_parameter<double>("integrity_front_cost_field_publish_hz", 2.0);
 	    declare_parameter<double>("integrity_front_cost_field_resolution_m", 1.0);
 	    declare_parameter<double>("integrity_front_cost_field_size_x_m", 50.0);
@@ -988,6 +989,8 @@ class Phase2PlannerIntegrityEvaluator : public rclcpp::Node {
 	        get_parameter("publish_integrity_front_cost_field").as_bool();
 	    integrity_front_cost_field_topic_ =
 	        get_parameter("integrity_front_cost_field_topic").as_string();
+	    integrity_front_cost_field_frame_id_ =
+	        get_parameter("integrity_front_cost_field_frame_id").as_string();
 	    integrity_front_cost_field_publish_hz_ =
 	        get_parameter("integrity_front_cost_field_publish_hz").as_double();
 	    integrity_front_cost_field_resolution_m_ =
@@ -3227,6 +3230,8 @@ class Phase2PlannerIntegrityEvaluator : public rclcpp::Node {
       {"phase2_urg_publish_backend_cost_field", urg_publish_backend_cost_field_},
 	      {"phase2_integrity_front_cost_field_topic",
 	       integrity_front_cost_field_topic_},
+	      {"phase2_integrity_front_cost_field_frame_id",
+	       integrity_front_cost_field_frame_id_},
 	      {"phase2_integrity_front_cost_field_publish_hz",
 	       integrity_front_cost_field_publish_hz_},
 	      {"phase2_integrity_front_cost_field_resolution_m",
@@ -4000,20 +4005,26 @@ class Phase2PlannerIntegrityEvaluator : public rclcpp::Node {
 	    if (!integrity_front_cost_field_pub_ || samples.empty()) {
 	      return;
 	    }
-	    // Compatibility topic: fields keep legacy names hpl/vpl/im/cost, but
-	    // they carry advisory planner-cost samples, not certified monitor PL.
+		    // Compatibility topic: legacy hpl/vpl/im/cost fields are retained.
+        // The EGO GridMap risk overlay consumes hpl_adv/vpl_adv/stamp_s/flags
+        // and computes AL/IM/PI locally.
 	    sensor_msgs::msg::PointCloud2 cloud;
-	    cloud.header.frame_id = "map";
+	    cloud.header.frame_id = integrity_front_cost_field_frame_id_;
 	    cloud.header.stamp = now();
 	    sensor_msgs::PointCloud2Modifier modifier(cloud);
 	    modifier.setPointCloud2Fields(
-	        16,
-	        "x", 1, sensor_msgs::msg::PointField::FLOAT32,
-	        "y", 1, sensor_msgs::msg::PointField::FLOAT32,
-	        "z", 1, sensor_msgs::msg::PointField::FLOAT32,
-	        "hpl", 1, sensor_msgs::msg::PointField::FLOAT32,
-	        "vpl", 1, sensor_msgs::msg::PointField::FLOAT32,
-	        "hal", 1, sensor_msgs::msg::PointField::FLOAT32,
+		        21,
+		        "x", 1, sensor_msgs::msg::PointField::FLOAT32,
+		        "y", 1, sensor_msgs::msg::PointField::FLOAT32,
+		        "z", 1, sensor_msgs::msg::PointField::FLOAT32,
+		        "hpl", 1, sensor_msgs::msg::PointField::FLOAT32,
+		        "vpl", 1, sensor_msgs::msg::PointField::FLOAT32,
+		        "hpl_adv", 1, sensor_msgs::msg::PointField::FLOAT32,
+		        "vpl_adv", 1, sensor_msgs::msg::PointField::FLOAT32,
+		        "stamp_s", 1, sensor_msgs::msg::PointField::FLOAT64,
+		        "source_age_s", 1, sensor_msgs::msg::PointField::FLOAT64,
+		        "flags", 1, sensor_msgs::msg::PointField::FLOAT32,
+		        "hal", 1, sensor_msgs::msg::PointField::FLOAT32,
 	        "val", 1, sensor_msgs::msg::PointField::FLOAT32,
 	        "im_h", 1, sensor_msgs::msg::PointField::FLOAT32,
 	        "im_v", 1, sensor_msgs::msg::PointField::FLOAT32,
@@ -4029,8 +4040,13 @@ class Phase2PlannerIntegrityEvaluator : public rclcpp::Node {
 	    sensor_msgs::PointCloud2Iterator<float> x(cloud, "x");
 	    sensor_msgs::PointCloud2Iterator<float> y(cloud, "y");
 	    sensor_msgs::PointCloud2Iterator<float> z(cloud, "z");
-	    sensor_msgs::PointCloud2Iterator<float> hpl(cloud, "hpl");
-	    sensor_msgs::PointCloud2Iterator<float> vpl(cloud, "vpl");
+		    sensor_msgs::PointCloud2Iterator<float> hpl(cloud, "hpl");
+		    sensor_msgs::PointCloud2Iterator<float> vpl(cloud, "vpl");
+		    sensor_msgs::PointCloud2Iterator<float> hpl_adv(cloud, "hpl_adv");
+		    sensor_msgs::PointCloud2Iterator<float> vpl_adv(cloud, "vpl_adv");
+		    sensor_msgs::PointCloud2Iterator<double> stamp_s(cloud, "stamp_s");
+		    sensor_msgs::PointCloud2Iterator<double> source_age_s(cloud, "source_age_s");
+		    sensor_msgs::PointCloud2Iterator<float> flags(cloud, "flags");
 	    sensor_msgs::PointCloud2Iterator<float> hal(cloud, "hal");
 	    sensor_msgs::PointCloud2Iterator<float> val(cloud, "val");
 	    sensor_msgs::PointCloud2Iterator<float> im_h(cloud, "im_h");
@@ -4046,12 +4062,18 @@ class Phase2PlannerIntegrityEvaluator : public rclcpp::Node {
 	    const auto finite_float = [](const double value) {
 	      return static_cast<float>(std::isfinite(value) ? value : 0.0);
 	    };
-	    for (const auto& sample : samples) {
+		    const double field_stamp_s = rclcpp::Time(cloud.header.stamp).seconds();
+		    for (const auto& sample : samples) {
 	      *x = finite_float(sample.position.x());
 	      *y = finite_float(sample.position.y());
 	      *z = finite_float(sample.position.z());
-	      *hpl = finite_float(sample.hpl);
-	      *vpl = finite_float(sample.vpl);
+		      *hpl = finite_float(sample.hpl);
+		      *vpl = finite_float(sample.vpl);
+		      *hpl_adv = finite_float(sample.hpl);
+		      *vpl_adv = finite_float(sample.vpl);
+		      *stamp_s = field_stamp_s;
+		      *source_age_s = 0.0;
+		      *flags = static_cast<float>(sample.risk_band_code);
 	      *hal = finite_float(sample.hal);
 	      *val = finite_float(sample.val);
 	      *im_h = finite_float(sample.im_h);
@@ -4066,8 +4088,13 @@ class Phase2PlannerIntegrityEvaluator : public rclcpp::Node {
 	      ++x;
 	      ++y;
 	      ++z;
-	      ++hpl;
-	      ++vpl;
+		      ++hpl;
+		      ++vpl;
+		      ++hpl_adv;
+		      ++vpl_adv;
+		      ++stamp_s;
+		      ++source_age_s;
+		      ++flags;
 	      ++hal;
 	      ++val;
 	      ++im_h;
@@ -4587,6 +4614,7 @@ class Phase2PlannerIntegrityEvaluator : public rclcpp::Node {
 	  std::string integrity_cost_field_topic_ = "/iap/integrity_cost_field";
 	  bool publish_integrity_front_cost_field_ = false;
 	  std::string integrity_front_cost_field_topic_ = "/iap/integrity_front_cost_field";
+	  std::string integrity_front_cost_field_frame_id_ = "map";
 	  double integrity_front_cost_field_publish_hz_ = 2.0;
 	  double integrity_front_cost_field_resolution_m_ = 1.0;
 	  double integrity_front_cost_field_size_x_m_ = 50.0;
