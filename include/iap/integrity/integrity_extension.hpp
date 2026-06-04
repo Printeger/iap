@@ -121,6 +121,7 @@ class IntegrityExtensionModule : public glim::ExtensionModuleROS2 {
 
   // ── ARAIM CSV + Trajectory CSV ────────────────────────────────────────
   std::unique_ptr<AraimDebugCSV> araim_debug_csv_;
+  std::unique_ptr<AraimPLDecompCSV> araim_pl_decomp_csv_;
   std::unique_ptr<LidarAraimDebugCSV> lidar_araim_stage0_csv_;
   std::FILE* traj_csv_file_ = nullptr;
 

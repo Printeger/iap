@@ -131,6 +131,21 @@
 
     // Trajectory CSV (for Fig D1 comparison)
     "enable_traj_csv":    true,
-    "traj_csv_path":      "/home/dev/ws_iap/src/iap/log/res/traj_with_gnss.csv"
+    "traj_csv_path":      "/home/dev/ws_iap/src/iap/log/res/traj_with_gnss.csv",
+
+    // Step 4: Explicit fusion policy
+    "enable_gnss_integrity":          true,
+    "enable_gnss_araim":              true,
+    "enable_lidar_integrity":         true,
+    "integrity_fusion_mode":          "max_pl",
+    "integrity_require_valid_gnss":   false,
+    "integrity_require_valid_lidar":  false,
+    "integrity_conservative_hpl_m":   999.0,
+    "integrity_conservative_vpl_m":   999.0,
+
+    // Step 5: GNSS ARAIM hypothesis semantics
+    "enable_gnss_trunk_hypotheses":          false,
+    "enable_gnss_constellation_faults":       true,
+    "gnss_degrade_on_degenerate_hypothesis":  true
   }
 }

@@ -64,6 +64,38 @@ if(BUILD_WITH_CUDA)
   endif()
 endif()
 
+# ===========================================================================
+# Step 10: Narrow integrity interface targets (for test linking & documentation)
+# ===========================================================================
+# These are header/link-only targets. All sources remain compiled into iap.
+# Tests link these to declare their narrow dependency scope.
+
+# --- iap_integrity_common ---
+add_library(iap_integrity_common INTERFACE)
+target_include_directories(iap_integrity_common INTERFACE
+  $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+)
+target_link_libraries(iap_integrity_common INTERFACE Eigen3::Eigen spdlog::spdlog)
+
+# --- iap_current_integrity ---
+add_library(iap_current_integrity INTERFACE)
+target_include_directories(iap_current_integrity INTERFACE
+  $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+  $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/thirdparty/json/include>
+)
+target_link_libraries(iap_current_integrity INTERFACE
+  iap_integrity_common Eigen3::Eigen gtsam gtsam_points::gtsam_points spdlog::spdlog
+)
+
+# --- iap_prediction_integrity ---
+add_library(iap_prediction_integrity INTERFACE)
+target_include_directories(iap_prediction_integrity INTERFACE
+  $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+)
+target_link_libraries(iap_prediction_integrity INTERFACE
+  iap_current_integrity Eigen3::Eigen gtsam gtsam_points::gtsam_points spdlog::spdlog
+)
+
 add_library(iap SHARED
   # util
   src/iap/util/config.cpp
@@ -102,6 +134,11 @@ add_library(iap SHARED
   src/iap/trunk/trunk_map.cpp
   src/iap/trunk/trunk_factor.cpp
   # trunk_extension.cpp is compiled into a separate ROS2 plugin (libtrunk_extension.so)
+  # planner (IAP-RQ-300/310/320)
+  src/iap/planner/trajectory_generator.cpp
+  src/iap/planner/predicted_integrity.cpp
+  # planner integrity-aware (IAP-RQ-400/410)
+  src/iap/planner/integrity_planner.cpp
   # ARAIM engine (IAP-RQ-241–246)
   src/iap/integrity/araim.cpp
   src/iap/integrity/lidar_araim.cpp
@@ -116,13 +153,10 @@ add_library(iap SHARED
   src/iap/planner/pi_cost_adapter.cpp
   src/iap/planner/unified_risk_grid.cpp
   src/iap/planner/predicted_araim.cpp
+  src/iap/planner/gnss_geometry_pl_predictor.cpp
   # integrity monitoring (IAP-RQ-200/210/220)
   src/iap/integrity/integrity_monitor.cpp
-  # planner (IAP-RQ-300/310/320)
-  src/iap/planner/trajectory_generator.cpp
-  src/iap/planner/predicted_integrity.cpp
-  # planner integrity-aware (IAP-RQ-400/410)
-  src/iap/planner/integrity_planner.cpp
+  src/iap/integrity/integrity_fusion_policy.cpp
   # odometry
   src/iap/odometry/callbacks.cpp
   src/iap/odometry/estimation_frame.cpp
@@ -503,6 +537,10 @@ if(DEFINED ENV{ROS_VERSION})
       demo11_compare_paths_visualizer
       DESTINATION lib/iap
     )
+    install(PROGRAMS
+      scripts/test_araim_validator.py
+      DESTINATION lib/iap
+    )
     install(DIRECTORY launch DESTINATION share/iap)
     install(DIRECTORY config DESTINATION share/iap)
 
@@ -510,12 +548,19 @@ if(DEFINED ENV{ROS_VERSION})
     if(BUILD_TESTING)
       find_package(Python3 REQUIRED COMPONENTS Interpreter)
       find_package(ament_cmake_gtest REQUIRED)
+      # Step 10: tests declare narrow deps via interface targets (impl still in iap)
       ament_add_gtest(test_araim test/test_araim.cpp)
-      target_link_libraries(test_araim iap)
+      target_link_libraries(test_araim iap iap_current_integrity)
+      if(DEFINED iap_msgs_cpp_ts)
+        target_link_libraries(test_araim "${iap_msgs_cpp_ts}")
+      endif()
+
+      ament_add_gtest(test_integrity_fusion_policy test/test_integrity_fusion_policy.cpp)
+      target_link_libraries(test_integrity_fusion_policy iap iap_integrity_common)
       ament_add_gtest(test_predicted_araim test/test_predicted_araim.cpp)
-      target_link_libraries(test_predicted_araim iap)
+      target_link_libraries(test_predicted_araim iap iap_prediction_integrity)
       ament_add_gtest(test_integrity_snapshot test/test_integrity_snapshot.cpp)
-      target_link_libraries(test_integrity_snapshot iap)
+      target_link_libraries(test_integrity_snapshot iap iap_prediction_integrity)
       ament_add_gtest(test_lidar_observability_fim test/test_lidar_observability_fim.cpp)
       target_link_libraries(test_lidar_observability_fim iap)
       ament_add_gtest(test_pl_grid test/test_pl_grid.cpp)
@@ -523,7 +568,7 @@ if(DEFINED ENV{ROS_VERSION})
       ament_add_gtest(test_local_occupancy test/test_local_occupancy.cpp)
       target_link_libraries(test_local_occupancy iap)
       ament_add_gtest(test_future_pl_field_predictor test/test_future_pl_field_predictor.cpp)
-      target_link_libraries(test_future_pl_field_predictor iap)
+      target_link_libraries(test_future_pl_field_predictor iap iap_prediction_integrity)
       ament_add_gtest(test_pi_cost_adapter test/test_pi_cost_adapter.cpp)
       target_link_libraries(test_pi_cost_adapter iap)
       ament_add_gtest(test_unified_risk_grid test/test_unified_risk_grid.cpp)

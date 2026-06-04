@@ -42,7 +42,7 @@ LidarObservabilityFim::Params lidar_params_from(
 }
 
 double k_ff_or_default(const PredictedAraimComputer::Params& params) {
-  return params.araim_params.K_ff > 0.0 ? params.araim_params.K_ff : 5.42;
+  return params.geometry_params.K_ff > 0.0 ? params.geometry_params.K_ff : 5.42;
 }
 
 void keep_gnss_only(FuturePLQueryResult& out) {

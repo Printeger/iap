@@ -128,6 +128,8 @@ GnssExtensionModule::GnssExtensionModule()
   hp.pr_noise_base   = config.param<double>("gnss", "pr_noise_base", 5.0);
   hp.dop_noise_base  = config.param<double>("gnss", "dop_noise_base", 0.5);
   hp.elev_noise_exp  = config.param<double>("gnss", "elev_noise_exp", 2.0);
+  pr_noise_base_     = hp.pr_noise_base;
+  dop_noise_base_    = hp.dop_noise_base;
   hp.time_tolerance  = config.param<double>("gnss", "time_tolerance", 0.1);
   hp.max_epoch_queue = config.param<int>("gnss", "max_epoch_queue", 100);
 
@@ -515,8 +517,8 @@ void GnssExtensionModule::on_range_meas_(
     sat.pr_meas       = pr + svdt * CLIGHT;
     // Doppler: same ADD sign — removes satellite clock frequency bias
     sat.dop_meas      = dop_meas + svddt * CLIGHT;
-    sat.pr_sigma      = (pr_sigma_override > 0.05) ? pr_sigma_override  : 5.0;
-    sat.dop_sigma     = (dop_sigma_override > 0.01) ? dop_sigma_override : 0.5;
+    sat.pr_sigma      = (pr_sigma_override > 0.05) ? pr_sigma_override  : pr_noise_base_;
+    sat.dop_sigma     = (dop_sigma_override > 0.01) ? dop_sigma_override : dop_noise_base_;
     // Satellite state in ECEF — factors work directly in ECEF
     sat.sat_pos       = sat_ecef_pos;
     sat.sat_vel       = sat_ecef_vel;

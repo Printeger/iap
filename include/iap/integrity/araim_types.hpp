@@ -6,6 +6,7 @@
 // IAP-RQ-246: FDE detection flag
 
 #include <Eigen/Core>
+#include <string>
 #include <vector>
 
 namespace iap {
@@ -62,6 +63,22 @@ struct SubsetSolution {
   double sigma_k_N       = 0.0;  ///< [m]
   double sigma_k_U       = 0.0;  ///< [m]
 
+  // --- Hypothesis removal and weighted-covariance geometry diagnostics ----
+  int n_removed_by_hyp = 0;
+  int n_remaining_after_hyp = 0;
+  std::vector<int> removed_prn_list;
+  std::vector<int> remaining_prn_list;
+  double HDOP_full = 0.0;    ///< sqrt(S0_EE + S0_NN), weighted covariance-derived [m]
+  double VDOP_full = 0.0;    ///< sqrt(S0_UU), weighted covariance-derived [m]
+  double PDOP_full = 0.0;    ///< sqrt(S0_EE + S0_NN + S0_UU), weighted covariance-derived [m]
+  double HDOP_subset = 0.0;  ///< sqrt(Sk_EE + Sk_NN), weighted covariance-derived [m]
+  double VDOP_subset = 0.0;  ///< sqrt(Sk_UU), weighted covariance-derived [m]
+  double PDOP_subset = 0.0;  ///< sqrt(Sk_EE + Sk_NN + Sk_UU), weighted covariance-derived [m]
+  double sigma_H_full = 0.0;
+  double sigma_V_full = 0.0;
+  double sigma_H_subset = 0.0;
+  double sigma_V_subset = 0.0;
+
   // --- Detection thresholds T_{q,k} = K_{fa,k} · σ_{ss,q,k} (§1.10) ---
   double T_E             = 0.0;  ///< East threshold [m]
   double T_N             = 0.0;  ///< North threshold [m]
@@ -87,11 +104,16 @@ struct SubsetSolution {
   bool   fault_detected_N = false;
   bool   fault_detected_U = false;
   bool   fault_detected   = false;  ///< any axis detected
+
+  // --- Step 5: Degeneracy diagnostics ---
+  bool   valid          = true;   ///< false when subset normal eqn failed
+  bool   degenerate     = false;  ///< true when factorization failed
+  std::string failure_reason;     ///< e.g. "degenerate_subset_geometry"
 };
 
 // ---------------------------------------------------------------------------
-/// @brief Output of one ARAIM epoch (IAP-RQ-241–RQ-246, §1.8–§1.11).
-struct AraimResult {
+/// @brief GNSS ARAIM evaluator result (Step 7: renamed from AraimResult).
+struct GnssAraimResult {
   bool valid         = false;  ///< false when geometry is too degenerate to compute PL
 
   // --- Fault-free (all-healthy) position std (§1.11 无故障) ----------------
@@ -123,6 +145,13 @@ struct AraimResult {
 
   // --- Full-solution covariance (4×4: E, N, U, clock) --------------------
   Eigen::Matrix4d S0 = Eigen::Matrix4d::Identity();
+  double HDOP_full = 0.0;  ///< sqrt(S0_EE + S0_NN), weighted covariance-derived [m]
+  double VDOP_full = 0.0;  ///< sqrt(S0_UU), weighted covariance-derived [m]
+  double PDOP_full = 0.0;  ///< sqrt(S0_EE + S0_NN + S0_UU), weighted covariance-derived [m]
+  double sigma_H_full = 0.0;
+  double sigma_V_full = 0.0;
+  int n_used_total = 0;
+  std::vector<int> used_prns;
 
   // --- Per-hypothesis details (IAP-RQ-241–RQ-244) -------------------------
   std::vector<FaultHypothesis> hypotheses;
@@ -134,6 +163,31 @@ struct AraimResult {
   std::vector<int> detected_rows;  ///< design-matrix row indices flagged as faulty
   std::vector<int> excluded_prns;       ///< excluded satellite PRNs after FDE
   std::vector<int> excluded_trunk_ids;  ///< excluded trunk IDs after FDE
+
+  // --- Step 5: Hypothesis semantics diagnostics ---
+  int    n_degenerate_hypotheses    = 0;
+  int    n_trunk_placeholders       = 0;
+  bool   has_degenerate_hypothesis  = false;
+  bool   trunk_hypotheses_enabled   = false;
+  bool   constellation_faults_enabled = true;
+};
+
+/// @deprecated Use GnssAraimResult instead.
+using AraimResult [[deprecated("Use GnssAraimResult")]] = GnssAraimResult;
+
+// ---------------------------------------------------------------------------
+// Step 8: Linearized input for testable core ARAIM
+// ---------------------------------------------------------------------------
+
+struct GnssAraimLinearizedInput {
+  Eigen::MatrixXd G;               ///< N x 4 design matrix (E,N,U,clock)
+  Eigen::VectorXd W;               ///< N weights = 1/sigma^2
+  Eigen::VectorXd r;               ///< N pseudorange residuals [m]
+  std::vector<int> prns;           ///< satellite PRNs, size N
+  std::vector<int> constellation_ids; ///< constellation IDs, size N
+  std::vector<double> elevations_rad;
+  std::vector<double> sigmas_m;
+  double stamp = 0.0;
 };
 
 }  // namespace iap

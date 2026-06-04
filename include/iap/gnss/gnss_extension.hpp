@@ -153,6 +153,8 @@ class GnssExtensionModule : public glim::ExtensionModuleROS2 {
   // ECEF anchor prior sigmas (loaded from config_gnss.json)
   double sigma_ecef_origin_{5.0};   ///< σ for E(0) prior [m]
   double sigma_ecef_rot_{0.087};    ///< σ for R(0) prior [rad] (~5°)
+  double pr_noise_base_{5.0};       ///< fallback pseudorange σ [m]
+  double dop_noise_base_{0.5};      ///< fallback Doppler σ [m/s]
 
   // Ephemeris caches (GPS/GAL/BDS and GLONASS)
   mutable std::mutex                                            ephem_mutex_;

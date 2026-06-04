@@ -235,6 +235,16 @@ class Demo11CorridorMapPublisher : public rclcpp::Node {
         declare_parameter<double>("tree_density_upper_right_per_m2", 0.25);
     stratified_cell_size_m_ =
         declare_parameter<double>("stratified_cell_size_m", 2.0);
+    clear_corridor_enabled_ =
+        declare_parameter<bool>("clear_corridor_enabled", false);
+    clear_corridor_center_y_m_ =
+        declare_parameter<double>("clear_corridor_center_y_m", 0.0);
+    clear_corridor_half_width_y_m_ =
+        declare_parameter<double>("clear_corridor_half_width_y_m", 0.0);
+    clear_corridor_x_min_m_ =
+        declare_parameter<double>("clear_corridor_x_min_m", -1.0e9);
+    clear_corridor_x_max_m_ =
+        declare_parameter<double>("clear_corridor_x_max_m", 1.0e9);
     canopy_density_lower_left_ =
         declare_parameter<double>("canopy_density_lower_left", 0.5);
     canopy_density_lower_right_ =
@@ -448,12 +458,37 @@ class Demo11CorridorMapPublisher : public rclcpp::Node {
         std::uniform_real_distribution<double> x_dist(sample_x_min, sample_x_max);
         std::uniform_real_distribution<double> y_dist(sample_y_min, sample_y_max);
         for (int i = 0; i < trees_per_cell; ++i) {
-          add_trunk(x_dist(rng), y_dist(rng), height_dist(rng), region_index);
-          ++tree_count;
+          bool added = false;
+          for (int attempt = 0; attempt < 16; ++attempt) {
+            const double x = x_dist(rng);
+            const double y = y_dist(rng);
+            if (inside_clear_corridor(x, y)) {
+              continue;
+            }
+            add_trunk(x, y, height_dist(rng), region_index);
+            ++tree_count;
+            added = true;
+            break;
+          }
+          if (!added && !clear_corridor_enabled_) {
+            add_trunk(x_dist(rng), y_dist(rng), height_dist(rng), region_index);
+            ++tree_count;
+          }
         }
       }
     }
     region_tree_counts_[region_index] = tree_count;
+  }
+
+  bool inside_clear_corridor(const double x, const double y) const {
+    if (!clear_corridor_enabled_) {
+      return false;
+    }
+    if (x < clear_corridor_x_min_m_ || x > clear_corridor_x_max_m_) {
+      return false;
+    }
+    return std::abs(y - clear_corridor_center_y_m_) <=
+           clear_corridor_half_width_y_m_ + trunk_radius_m_;
   }
 
   void build_map() {
@@ -466,6 +501,11 @@ class Demo11CorridorMapPublisher : public rclcpp::Node {
     forest_size_y_m_ = std::max(0.1, forest_size_y_m_);
     trunk_radius_m_ = std::max(0.02, trunk_radius_m_);
     stratified_cell_size_m_ = std::max(0.1, stratified_cell_size_m_);
+    clear_corridor_half_width_y_m_ =
+        std::max(0.0, clear_corridor_half_width_y_m_);
+    if (clear_corridor_x_min_m_ > clear_corridor_x_max_m_) {
+      std::swap(clear_corridor_x_min_m_, clear_corridor_x_max_m_);
+    }
     tree_density_lower_left_per_m2_ =
         std::max(0.0, tree_density_lower_left_per_m2_);
     tree_density_lower_right_per_m2_ =
@@ -596,6 +636,11 @@ class Demo11CorridorMapPublisher : public rclcpp::Node {
   double tree_density_upper_left_per_m2_ = 0.25;
   double tree_density_upper_right_per_m2_ = 0.25;
   double stratified_cell_size_m_ = 2.0;
+  bool clear_corridor_enabled_ = false;
+  double clear_corridor_center_y_m_ = 0.0;
+  double clear_corridor_half_width_y_m_ = 0.0;
+  double clear_corridor_x_min_m_ = -1.0e9;
+  double clear_corridor_x_max_m_ = 1.0e9;
   double canopy_density_lower_left_ = 0.5;
   double canopy_density_lower_right_ = 0.5;
   double canopy_density_upper_left_ = 0.5;

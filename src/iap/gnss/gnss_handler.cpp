@@ -31,11 +31,17 @@ std::size_t GnssHandler::queue_size() const {
 }
 
 double GnssHandler::pr_sigma(double elevation, double kappa) const {
-  // Full canopy noise model: σ²_eff = σ²_0 + σ²_mp/sin²θ + σ²_c·exp(α·κ/sinθ)
-  // When κ > 0, use the three-term canopy model (IAP-RQ-314).
-  // When κ ≈ 0, the canopy term degenerates to σ²_c and the model still
-  // provides correct elevation-dependent noise.
-  return sigma_eff_canopy(params_.canopy, kappa, elevation);
+  const double s = std::sin(std::max(elevation, params_.min_elevation));
+  const double base_sigma = params_.pr_noise_base / std::pow(s, params_.elev_noise_exp);
+
+  // Open-sky epochs should be controlled by the experiment's receiver noise
+  // setting. The full canopy model intentionally inflates obstructed LOS, but
+  // its canopy floor is too conservative for nominal open-sky validation.
+  if (kappa <= 1.0e-6) {
+    return std::max(base_sigma, 0.05);
+  }
+
+  return std::max(base_sigma, sigma_eff_canopy(params_.canopy, kappa, elevation));
 }
 
 double GnssHandler::dop_sigma(double elevation) const {

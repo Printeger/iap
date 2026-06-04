@@ -1,7 +1,9 @@
 #pragma once
 // IAP-RQ-331: GNSS advisory PL proxy along candidate trajectory.
+// Step 6: Planner prediction now uses GnssGeometryPlPredictor instead
+// of current Araim solver.
 
-#include <iap/integrity/araim.hpp>
+#include <iap/planner/gnss_geometry_pl_predictor.hpp>
 #include <iap/gnss/gnss_types.hpp>
 #include <iap/gnss/visibility_predictor.hpp>
 #include <iap/map/local_occupancy.hpp>
@@ -50,11 +52,11 @@ struct PredictedAraimResult {
 class PredictedAraimComputer {
  public:
   struct Params {
-    Araim::Params             araim_params;   ///< K_fa, K_md, K_ff, etc.
-    VisibilityPredictor::Params vis_params;   ///< elevation mask, occ range, canopy
+    GnssGeometryPlPredictorParams geometry_params;  ///< advisory geometry-only params
+    VisibilityPredictor::Params   vis_params;
     double fallback_pl = 5.0;  ///< advisory proxy when GNSS epoch unavailable [m]
-    double fim_clock_epsilon = 1.0e-6;  ///< clock Schur regularization [m^-2]
-    double fim_psd_epsilon = 1.0e-9;    ///< PSD tolerance for Lambda_G_pos
+    double fim_clock_epsilon = 1.0e-6;
+    double fim_psd_epsilon = 1.0e-9;
   };
 
   PredictedAraimComputer();
@@ -91,9 +93,9 @@ class PredictedAraimComputer {
   const Params& params() const { return params_; }
 
  private:
-  Params              params_;
-  Araim               araim_;
-  VisibilityPredictor vis_;
+  Params                    params_;
+  GnssGeometryPlPredictor   geom_predictor_;
+  VisibilityPredictor       vis_;
   const LocalOccupancyGrid* grid_  = nullptr;
   const GnssEpoch*          epoch_ = nullptr;
 };

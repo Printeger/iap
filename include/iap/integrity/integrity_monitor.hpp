@@ -6,6 +6,8 @@
 // §1.13: Three-state integrity state machine (SAFE / SAFE_EXCLUDED / UNSAFE)
 
 #include <iap/integrity/integrity_types.hpp>
+#include <iap/integrity/integrity_source_result.hpp>
+#include <iap/integrity/integrity_fusion_policy.hpp>
 #include <iap/integrity/araim.hpp>
 #include <iap/integrity/fgo_information_matrix.hpp>
 #include <iap/integrity/lidar_araim.hpp>
@@ -38,6 +40,8 @@ namespace iap {
  *   UNSAFE        — PL ≥ AL
  */
 class IntegrityMonitor {
+  friend class IntegrityMonitorTestAccess;
+
  public:
   struct Params {
     // --- PL proxy scale factor (fallback when ARAIM unavailable) ---
@@ -71,8 +75,18 @@ class IntegrityMonitor {
     int    recovery_count    = 5;      ///< consecutive safe frames to clear SAFE_EXCLUDED
     double nominal_fraction  = 0.6;    ///< PL < nominal_fraction * AL → fully SAFE
 
+    // --- Step 4: Explicit fusion policy ---
+    IntegrityFusionMode  fusion_mode          = IntegrityFusionMode::MAX_PL;
+    bool enable_gnss_integrity   = true;
+    bool enable_gnss_araim       = true;
+    bool enable_lidar_integrity  = true;
+    bool require_valid_gnss      = false;
+    bool require_valid_lidar     = false;
+    double conservative_hpl_m    = 999.0;
+    double conservative_vpl_m    = 999.0;
+
     // --- ARAIM (IAP-RQ-241–246) ---
-    Araim::Params araim_params;        ///< K_fa, K_md, K_ff, min_sats, etc.
+    GnssAraimParams gnss_araim_params;  ///< GNSS ARAIM evaluator params
     LidarAraim::Params lidar_araim_params;  ///< LiDAR ARAIM parameters
   };
 
@@ -104,7 +118,7 @@ class IntegrityMonitor {
 
   IntegrityState current_state() const { return current_state_; }
   const Params& params() const { return params_; }
-  const AraimResult& last_araim_result() const { return last_araim_result_; }
+  const GnssAraimResult& last_araim_result() const { return last_gnss_araim_result_; }
   const LidarAraimResult& last_lidar_araim_result() const {
     return last_lidar_araim_result_;
   }
@@ -114,14 +128,32 @@ class IntegrityMonitor {
   DynamicALResult compute_dynamic_AL(const glim::EstimationFrame& frame,
                                       const TrunkDetectionResult* trunk) const;
   void   run_gnss_gating(const GnssEpoch& epoch, IntegrityReport& report) const;
-  void   run_araim(const GnssEpoch& epoch,
-                   int n_trunk_obs,
-                   IntegrityReport& report);
-  void   run_lidar_araim(const LidarAraimSnapshot& snapshot,
-                         const FGOPositionInfo* fgo_info,
-                         IntegrityReport& report);
+  IntegritySourceResult run_araim(const GnssEpoch& epoch,
+                                   int n_trunk_obs);
+  IntegritySourceResult run_lidar_araim(const LidarAraimSnapshot& snapshot,
+                                         const FGOPositionInfo* fgo_info);
   IntegrityState update_state(const IntegrityReport& report);
   IntegrityMode  update_mode_legacy(const IntegrityReport& report);
+
+  // --- Step 9: decomposed compute() helpers ---
+  IntegritySourceResult buildFallbackSource(const glim::EstimationFrame& frame,
+                                             IntegrityReport& report) const;
+  IntegritySourceResult evaluateGnssSource(const GnssEpoch* epoch,
+                                            const TrunkDetectionResult* trunk,
+                                            IntegrityReport& report);
+  IntegritySourceResult evaluateLidarSource(
+      const LidarAraimSnapshot* lidar_snapshot,
+      const FGOPositionInfo* fgo_info,
+      IntegrityReport& report);
+  void fuseIntegritySources(const IntegritySourceResult& fallback_src,
+                             const IntegritySourceResult& gnss_src,
+                             const IntegritySourceResult& lidar_src,
+                             IntegrityReport& report);
+  void computeAlertLimits(const glim::EstimationFrame& frame,
+                           const TrunkDetectionResult* trunk,
+                           IntegrityReport& report);
+  void computeIntegrityMargins(IntegrityReport& report) const;
+  void updateStateAndPlannerMode(IntegrityReport& report);
 
   Params params_;
   double obstacle_dist_     = 1e9;    ///< latest obstacle distance [m]
@@ -131,9 +163,10 @@ class IntegrityMonitor {
   IntegrityState current_state_ = IntegrityState::UNSAFE;
   IntegrityMode  current_mode_  = IntegrityMode::NOMINAL;  ///< legacy
   int    recovery_counter_      = 0;
-  Araim  araim_;
+  GnssAraimEvaluator gnss_araim_;
   LidarAraim lidar_araim_;
-  AraimResult last_araim_result_;
+  IntegrityFusionPolicy fusion_policy_;
+  GnssAraimResult last_gnss_araim_result_;
   LidarAraimResult last_lidar_araim_result_;
 
   std::shared_ptr<spdlog::logger> logger_;

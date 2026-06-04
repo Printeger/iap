@@ -21,6 +21,7 @@
 #include <gtsam_points/optimizers/incremental_fixed_lag_smoother_with_fallback.hpp>
 
 #include <iap/msg/integrity_report.hpp>
+#include <iap/integrity/integrity_report_mapping.hpp>
 #include <std_msgs/msg/header.hpp>
 #include <rclcpp/rclcpp.hpp>
 #include <visualization_msgs/msg/marker.hpp>
@@ -111,6 +112,24 @@ IntegrityExtensionModule::IntegrityExtensionModule()
   mp.gamma_V            = config.param<double>("integrity", "gamma_V",            mp.gamma_V);
   mp.h_min              = config.param<double>("integrity", "h_min",              mp.h_min);
   mp.VAL_default        = config.param<double>("integrity", "VAL_default",        mp.VAL_default);
+  mp.nominal_fraction   = config.param<double>("integrity", "nominal_fraction",   mp.nominal_fraction);
+  mp.recovery_count     = config.param<int>("integrity", "recovery_count",        mp.recovery_count);
+  mp.enable_gnss_integrity = config.param<bool>(
+      "integrity", "enable_gnss_integrity", mp.enable_gnss_integrity);
+  mp.enable_gnss_araim = config.param<bool>(
+      "integrity", "enable_gnss_araim", mp.enable_gnss_araim);
+  mp.enable_lidar_integrity = config.param<bool>(
+      "integrity", "enable_lidar_integrity", mp.enable_lidar_integrity);
+  mp.require_valid_gnss = config.param<bool>(
+      "integrity", "integrity_require_valid_gnss", mp.require_valid_gnss);
+  mp.require_valid_lidar = config.param<bool>(
+      "integrity", "integrity_require_valid_lidar", mp.require_valid_lidar);
+  mp.conservative_hpl_m = config.param<double>(
+      "integrity", "integrity_conservative_hpl_m", mp.conservative_hpl_m);
+  mp.conservative_vpl_m = config.param<double>(
+      "integrity", "integrity_conservative_vpl_m", mp.conservative_vpl_m);
+  mp.fusion_mode = fusion_mode_from_string(config.param<std::string>(
+      "integrity", "integrity_fusion_mode", to_string(mp.fusion_mode)));
   auto maybe_override_double = [&](const char* key, double& value) {
     if (config.has_param("integrity", key)) {
       value = config.param<double>("integrity", key, value);
@@ -121,6 +140,19 @@ IntegrityExtensionModule::IntegrityExtensionModule()
       value = config.param<int>("integrity", key, value);
     }
   };
+  auto maybe_override_bool = [&](const char* key, bool& value) {
+    if (config.has_param("integrity", key)) {
+      value = config.param<bool>("integrity", key, value);
+    }
+  };
+  auto& gp = mp.gnss_araim_params;
+  maybe_override_bool(
+      "enable_gnss_constellation_faults", gp.enable_constellation_faults);
+  maybe_override_bool(
+      "gnss_araim_enable_constellation_hypotheses", gp.enable_constellation_faults);
+  logger_->info("[IntegrityExt] GNSS ARAIM constellation hypotheses: {}",
+                gp.enable_constellation_faults ? "ENABLED" : "disabled");
+
   auto& lp = mp.lidar_araim_params;
   maybe_override_double("lidar_araim_p_hmi_req", lp.P_HMI_req);
   maybe_override_double("lidar_araim_p_fa_req", lp.P_FA_req);
@@ -167,6 +199,20 @@ IntegrityExtensionModule::IntegrityExtensionModule()
   araim_debug_csv_ = std::make_unique<AraimDebugCSV>(araim_csv_en, araim_csv_path);
   logger_->info("[IntegrityExt] ARAIM CSV: {} → {}",
                 araim_csv_en ? "ENABLED" : "disabled", araim_csv_path);
+
+  const bool araim_pl_decomp_csv_en = config.param<bool>(
+      "integrity", "enable_araim_pl_decomp_csv", false);
+  std::string araim_pl_decomp_csv_path = config.param<std::string>(
+      "integrity", "araim_pl_decomp_csv_path", "/tmp/iap_araim_pl_decomp.csv");
+  if (const auto* run_logs = glim::RunLogManager::get_if_initialized()) {
+    araim_pl_decomp_csv_path =
+        run_logs->export_path("iap_araim_pl_decomp.csv").string();
+  }
+  araim_pl_decomp_csv_ = std::make_unique<AraimPLDecompCSV>(
+      araim_pl_decomp_csv_en, araim_pl_decomp_csv_path);
+  logger_->info("[IntegrityExt] ARAIM PL decomposition CSV: {} → {}",
+                araim_pl_decomp_csv_en ? "ENABLED" : "disabled",
+                araim_pl_decomp_csv_path);
 
   const bool lidar_stage0_csv_en = config.param<bool>(
       "integrity", "enable_lidar_araim_stage0_csv", false);
@@ -414,11 +460,16 @@ void IntegrityExtensionModule::maybe_publish_integrity_() {
   msg.n_trunks_observed = static_cast<int32_t>(report.n_trunks_observed);
   msg.tdop              = report.tdop;
 
+  fill_integrity_report_msg(report, msg);
+
   pub.publish(msg);
   publish_araim_markers_(report, *frame);
 
   if (araim_debug_csv_) {
     araim_debug_csv_->write(report, monitor_.last_araim_result());
+  }
+  if (araim_pl_decomp_csv_) {
+    araim_pl_decomp_csv_->write(report, monitor_.last_araim_result());
   }
   if (lidar_araim_stage0_csv_) {
     lidar_araim_stage0_csv_->write(

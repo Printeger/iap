@@ -71,11 +71,11 @@ iap::FuturePLFieldPredictor::Params make_params() {
   params.grid_size_z_m = 2.0;
   params.grid_max_age_s = 5.0;
   params.araim_params.fallback_pl = 33.0;
-  params.araim_params.araim_params.dynamic_budget = false;
-  params.araim_params.araim_params.K_ff = 5.0;
-  params.araim_params.araim_params.K_fa = 4.0;
-  params.araim_params.araim_params.K_md = 3.0;
-  params.araim_params.araim_params.min_sats = 4;
+  params.araim_params.geometry_params.dynamic_budget = false;
+  params.araim_params.geometry_params.K_ff = 5.0;
+  params.araim_params.geometry_params.K_fa = 4.0;
+  params.araim_params.geometry_params.K_md = 3.0;
+  params.araim_params.geometry_params.min_sats = 4;
   params.araim_params.vis_params.min_elevation = 0.1;
   return params;
 }

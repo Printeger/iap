@@ -72,6 +72,38 @@ inline const char* to_string(IntegrityMode m) {
 }
 #pragma GCC diagnostic pop
 
+// =========================================================================
+// Step 4: Explicit fusion policy — IntegrityFusionMode
+// =========================================================================
+
+enum class IntegrityFusionMode {
+  GNSS_ONLY           = 0,
+  LIDAR_ONLY          = 1,
+  FALLBACK_ONLY       = 2,
+  MAX_PL              = 3,
+  WEIGHTED_DEBUG_ONLY = 4
+};
+
+inline const char* to_string(IntegrityFusionMode m) {
+  switch (m) {
+    case IntegrityFusionMode::GNSS_ONLY:           return "gnss_only";
+    case IntegrityFusionMode::LIDAR_ONLY:          return "lidar_only";
+    case IntegrityFusionMode::FALLBACK_ONLY:       return "fallback_only";
+    case IntegrityFusionMode::MAX_PL:              return "max_pl";
+    case IntegrityFusionMode::WEIGHTED_DEBUG_ONLY: return "weighted_debug_only";
+    default:                                       return "UNKNOWN";
+  }
+}
+
+inline IntegrityFusionMode fusion_mode_from_string(const std::string& s) {
+  if (s == "gnss_only")           return IntegrityFusionMode::GNSS_ONLY;
+  if (s == "lidar_only")          return IntegrityFusionMode::LIDAR_ONLY;
+  if (s == "fallback_only")       return IntegrityFusionMode::FALLBACK_ONLY;
+  if (s == "max_pl")              return IntegrityFusionMode::MAX_PL;
+  if (s == "weighted_debug_only") return IntegrityFusionMode::WEIGHTED_DEBUG_ONLY;
+  return IntegrityFusionMode::MAX_PL;
+}
+
 // ---------------------------------------------------------------------------
 // Dynamic Alert Limit result (§1.12)
 // ---------------------------------------------------------------------------
@@ -105,7 +137,11 @@ struct IntegrityReport {
   // --- Current certified monitor scalars (IAP-RQ-200) --------------------
   double PL  = 1e9;  ///< monitor_fused_pl [m] (= monitor_fused_hpl)
   double AL  = 0.0;  ///< Alert Limit [m] (= min(HAL, VAL), §1.12)
-  double IM  = 0.0;  ///< monitor_integrity_margin = AL - PL (positive = safe)
+  double IM  = 0.0;  ///< monitor_integrity_margin = min(im_h, im_v) (positive = safe)
+
+  // --- H/V safety margins (Step 1 refactor) ---
+  double im_h = 0.0;  ///< horizontal margin = HAL - HPL [m]
+  double im_v = 0.0;  ///< vertical margin = VAL - VPL [m]
 
   IntegrityState state = IntegrityState::UNSAFE;  ///< §1.13 three-state
   PlannerState   planner_state = PlannerState::CRUISE;
@@ -177,6 +213,7 @@ struct IntegrityReport {
   std::string final_HPL_source = "UNKNOWN";
   std::string final_VPL_source = "UNKNOWN";
   std::string final_PL_source  = "UNKNOWN";
+  std::string fusion_mode_str  = "max_pl";  ///< Step 4: active fusion mode
 
   // --- Trunk geometry summary ---------------------------------------------
   int    n_trunks_observed = 0;
@@ -184,9 +221,37 @@ struct IntegrityReport {
   // --- Legacy single-scalar fields (mapping to new struct) ----------------
   double HAL_trunk     = 1e9;  ///< alias for HAL
 
-  // --- Derived flags -------------------------------------------------------
-  bool safe() const { return IM > 0.0; }
-  bool is_available() const { return PL < AL; }
+  // --- Numerical failure flags (Step 2 refactor) ---
+  struct NumericalFailureFlags {
+    bool fallback_pl_invalid      = false;  ///< fallback covariance gave NaN/Inf PL
+    bool gnss_araim_invalid       = false;  ///< GNSS ARAIM produced NaN/Inf/sentinel
+    bool lidar_integrity_invalid  = false;  ///< LiDAR integrity produced NaN/Inf/sentinel
+    bool hal_invalid              = false;  ///< HAL produced NaN/Inf
+    bool val_invalid              = false;  ///< VAL produced NaN/Inf
+    bool im_invalid               = false;  ///< IM produced NaN/Inf
+    bool any_nan_rejected         = false;  ///< Any NaN was detected and replaced
+    bool any_inf_rejected         = false;  ///< Any Inf was detected and replaced
+    bool negative_variance_rejected = false; ///< Negative variance detected
+    bool degenerate_geometry      = false;  ///< Singular/degenerate matrix detected
+    std::string failure_reason;             ///< Human-readable summary
+  };
+  NumericalFailureFlags numerical_failure;
+
+  bool has_numerical_failure() const {
+    return numerical_failure.fallback_pl_invalid ||
+           numerical_failure.gnss_araim_invalid ||
+           numerical_failure.lidar_integrity_invalid ||
+           numerical_failure.hal_invalid ||
+           numerical_failure.val_invalid ||
+           numerical_failure.any_nan_rejected ||
+           numerical_failure.any_inf_rejected;
+  }
+
+  // --- Derived flags (Step 1: H/V aware) ---
+  bool safe() const { return im_h > 0.0 && im_v > 0.0; }
+  bool safe_horizontal() const { return im_h > 0.0; }
+  bool safe_vertical() const { return im_v > 0.0; }
+  bool is_available() const { return HPL < HAL && VPL < VAL; }
 
   // Non-breaking semantic aliases for Stage 1 naming. Storage fields above
   // remain unchanged for ABI/source compatibility and ROS message mapping.
@@ -209,6 +274,10 @@ struct IntegrityReport {
   double lidar_certified_pl_e() const { return lidar_PL_E; }
   double lidar_certified_pl_n() const { return lidar_PL_N; }
   double lidar_certified_pl_u() const { return lidar_PL_U; }
+
+  // --- Fallback source capture (Step 4: populated from explicit fusion source) ---
+  double fallback_HPL     = 1e9;  ///< fallback HPL [m]
+  double fallback_VPL     = 1e9;  ///< fallback VPL [m]
 };
 
 }  // namespace iap

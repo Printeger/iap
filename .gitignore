@@ -4,7 +4,9 @@ build/
 bin/
 lib/
 data/
+results/
 install/
+test/araim_validation/real_time_test/
 compile_commands.json
 imgui.ini
 *.iml

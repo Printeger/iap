@@ -30,11 +30,11 @@ iap::GnssEpoch make_epoch(const int n_sats) {
 iap::PredictedAraimComputer make_predictor(const double fallback_pl = 20.0) {
   iap::PredictedAraimComputer::Params params;
   params.fallback_pl = fallback_pl;
-  params.araim_params.dynamic_budget = false;
-  params.araim_params.K_ff = 5.0;
-  params.araim_params.K_fa = 4.0;
-  params.araim_params.K_md = 3.0;
-  params.araim_params.min_sats = 4;
+  params.geometry_params.dynamic_budget = false;
+  params.geometry_params.K_ff = 5.0;
+  params.geometry_params.K_fa = 4.0;
+  params.geometry_params.K_md = 3.0;
+  params.geometry_params.min_sats = 4;
   params.vis_params.min_elevation = 0.1;
   return iap::PredictedAraimComputer(params);
 }

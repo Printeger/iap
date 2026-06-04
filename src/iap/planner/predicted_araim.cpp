@@ -10,10 +10,10 @@ namespace iap {
 
 // ---------------------------------------------------------------------------
 PredictedAraimComputer::PredictedAraimComputer()
-: params_{}, araim_(params_.araim_params), vis_(params_.vis_params) {}
+: params_{}, geom_predictor_(params_.geometry_params), vis_(params_.vis_params) {}
 
 PredictedAraimComputer::PredictedAraimComputer(const Params& p)
-: params_(p), araim_(p.araim_params), vis_(p.vis_params) {}
+: params_(p), geom_predictor_(p.geometry_params), vis_(p.vis_params) {}
 
 // ---------------------------------------------------------------------------
 void PredictedAraimComputer::set_occupancy(const LocalOccupancyGrid* grid) {
@@ -69,17 +69,16 @@ PredictedAraimResult PredictedAraimComputer::predict_araim_result(
   }
 
   // 2. Build SatGeometry for visible satellites
-  std::vector<Araim::SatGeometry> geom;
+  std::vector<GnssGeometrySat> geom;
   geom.reserve(static_cast<std::size_t>(vis.n_vis));
 
   for (std::size_t i = 0; i < epoch_->sats.size(); ++i) {
     if (i >= vis.vis_flags.size() || !vis.vis_flags[i]) continue;
     if (epoch_->sats[i].excluded) continue;
 
-    Araim::SatGeometry sg;
+    GnssGeometrySat sg;
     sg.elevation = epoch_->sats[i].elevation;
     sg.azimuth   = epoch_->sats[i].azimuth;
-    // Use canopy-aware sigma if available; otherwise default pr_sigma
     sg.pr_sigma  = (i < vis.sigma_effs.size() && vis.sigma_effs[i] > 0.0)
                     ? vis.sigma_effs[i]
                     : epoch_->sats[i].pr_sigma;
@@ -95,40 +94,40 @@ PredictedAraimResult PredictedAraimComputer::predict_araim_result(
 
   // 3. Run geometry-only ARAIM machinery (r = 0) to produce a non-certified
   // GNSS advisory PL proxy for planning.
-  const AraimResult ar = araim_.predict_geometry(geom);
+  const GnssGeometryPlResult result = geom_predictor_.predict(geom);
 
-  if (!ar.valid) {
+  if (!result.valid) {
     auto out = fallback("singular_geometry");
     out.n_vis = static_cast<int>(geom.size());
-    out.n_hypotheses = ar.n_hypotheses;
+    out.n_hypotheses = result.n_hypotheses;
     return out;
   }
 
   spdlog::trace("[GNSS Advisory PL Proxy] pos=({:.1f},{:.1f},{:.1f}) n_vis={} "
                 "pl_ff_proxy={:.3f} gnss_advisory_hpl_proxy={:.3f}",
                 pos_world.x(), pos_world.y(), pos_world.z(),
-                vis.n_vis, ar.pl_ff, ar.pl_araim);
+                vis.n_vis, result.pl_ff, result.HPL);
 
   PredictedAraimResult out;
   out.valid = true;
   out.fallback = false;
   out.fallback_reason.clear();
-  out.hpl = ar.HPL;
-  out.vpl = ar.VPL;
+  out.hpl = result.HPL;
+  out.vpl = result.VPL;
   out.pl_scalar = std::max(out.hpl, out.vpl);
-  out.pl_e = ar.PL_E;
-  out.pl_n = ar.PL_N;
-  out.pl_u = ar.PL_U;
-  out.pl_ff_h = ar.pl_ff;
-  out.pl_ff_v = ar.pl_ff_V;
+  out.pl_e = result.PL_E;
+  out.pl_n = result.PL_N;
+  out.pl_u = result.PL_U;
+  out.pl_ff_h = result.pl_ff;
+  out.pl_ff_v = result.pl_ff_V;
   out.sigma_h = std::sqrt(std::max(
-      0.0, ar.sigma_ff_E * ar.sigma_ff_E + ar.sigma_ff_N * ar.sigma_ff_N));
-  out.sigma_v = ar.sigma_ff_U;
-  if (ar.S0(0, 0) > 0.0 && ar.S0(1, 1) > 0.0 && ar.S0(2, 2) > 0.0) {
-    out.pdop = std::sqrt(ar.S0(0, 0) + ar.S0(1, 1) + ar.S0(2, 2));
+      0.0, result.sigma_ff_E * result.sigma_ff_E + result.sigma_ff_N * result.sigma_ff_N));
+  out.sigma_v = result.sigma_ff_U;
+  if (result.S0(0, 0) > 0.0 && result.S0(1, 1) > 0.0 && result.S0(2, 2) > 0.0) {
+    out.pdop = std::sqrt(result.S0(0, 0) + result.S0(1, 1) + result.S0(2, 2));
   }
   out.n_vis = static_cast<int>(geom.size());
-  out.n_hypotheses = ar.n_hypotheses;
+  out.n_hypotheses = result.n_hypotheses;
   return out;
 }
 
@@ -155,16 +154,12 @@ GnssAdvisoryFimResult PredictedAraimComputer::predict_advisory_fim(
   const VisibilityResult vis = vis_.predict(pos_world, *epoch_);
   out.n_visible = vis.n_vis;
 
-  std::vector<Araim::SatGeometry> geom;
+  std::vector<GnssGeometrySat> geom;
   geom.reserve(static_cast<std::size_t>(vis.n_vis));
   for (std::size_t i = 0; i < epoch_->sats.size(); ++i) {
-    if (i >= vis.vis_flags.size() || !vis.vis_flags[i]) {
-      continue;
-    }
-    if (epoch_->sats[i].excluded) {
-      continue;
-    }
-    Araim::SatGeometry sg;
+    if (i >= vis.vis_flags.size() || !vis.vis_flags[i]) continue;
+    if (epoch_->sats[i].excluded) continue;
+    GnssGeometrySat sg;
     sg.elevation = epoch_->sats[i].elevation;
     sg.azimuth = epoch_->sats[i].azimuth;
     sg.pr_sigma = (i < vis.sigma_effs.size() && vis.sigma_effs[i] > 0.0)
