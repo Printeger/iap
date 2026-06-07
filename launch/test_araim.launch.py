@@ -59,6 +59,13 @@ FEATURE_RICH_MAP_PRESET = {
     "canopy_density_upper_right": "0.25",
     "terminal_wall_enabled": "true",
     "terminal_wall_feature_count": "64",
+    "corridor_walls_enabled": "false",
+    "corridor_floor_enabled": "true",
+    "corridor_x_min_m": "-14.0",
+    "corridor_x_max_m": "14.0",
+    "corridor_half_width_y_m": "2.0",
+    "corridor_floor_thickness_z_m": "0.05",
+    "corridor_surface_resolution_m": "0.10",
 }
 
 
@@ -72,6 +79,31 @@ SPARSE_CORRIDOR_MAP_PRESET = {
     "canopy_density_upper_left": "0.02",
     "canopy_density_upper_right": "0.02",
     "terminal_wall_enabled": "false",
+}
+
+
+CORRIDOR_DEGENERATE_MAP_PRESET = {
+    "forest_size_x_m": "30.0",
+    "forest_size_y_m": "6.0",
+    "tree_density_lower_left_per_m2": "0.0",
+    "tree_density_lower_right_per_m2": "0.0",
+    "tree_density_upper_left_per_m2": "0.0",
+    "tree_density_upper_right_per_m2": "0.0",
+    "canopy_density_lower_left": "0.0",
+    "canopy_density_lower_right": "0.0",
+    "canopy_density_upper_left": "0.0",
+    "canopy_density_upper_right": "0.0",
+    "terminal_wall_enabled": "false",
+    "corridor_walls_enabled": "true",
+    "corridor_floor_enabled": "true",
+    "corridor_x_min_m": "-14.0",
+    "corridor_x_max_m": "14.0",
+    "corridor_half_width_y_m": "2.0",
+    "corridor_wall_z_min_m": "0.0",
+    "corridor_wall_z_max_m": "3.0",
+    "corridor_wall_thickness_y_m": "0.10",
+    "corridor_floor_thickness_z_m": "0.05",
+    "corridor_surface_resolution_m": "0.10",
 }
 
 
@@ -193,13 +225,15 @@ EXPERIMENT_PRESETS = {
     },
     "lidar_corridor_degenerate": {
         **DEFAULT_ROUTE_PRESET,
-        **SPARSE_CORRIDOR_MAP_PRESET,
+        **CORRIDOR_DEGENERATE_MAP_PRESET,
         "use_gnss": "false",
         "use_araim": "true",
         "enable_gnss_integrity": "false",
         "enable_gnss_araim": "false",
         "enable_lidar_integrity": "true",
         "integrity_fusion_mode": "lidar_only",
+        "integrity_require_valid_gnss": "false",
+        "integrity_require_valid_lidar": "true",
         "validator_require_gnss_valid": "false",
         "validator_require_lidar_valid": "true",
         "validator_require_fallback_valid": "true",
@@ -483,6 +517,9 @@ def _runtime_config(context, use_gnss, use_araim, allow_truth_alignment):
     enable_lidar_integrity = _as_bool(
         LaunchConfiguration("enable_lidar_integrity").perform(context)
     )
+    enable_pl_decomp_csv = _as_bool(
+        LaunchConfiguration("enable_araim_pl_decomp_csv").perform(context)
+    )
     fusion_mode = LaunchConfiguration("integrity_fusion_mode").perform(context)
     integrity["enable"] = bool(use_araim)
     integrity["enable_araim"] = bool(use_araim and use_gnss and enable_gnss_araim)
@@ -491,13 +528,15 @@ def _runtime_config(context, use_gnss, use_araim, allow_truth_alignment):
         use_araim
         and use_gnss
         and enable_gnss_araim
-        and _as_bool(LaunchConfiguration("enable_araim_pl_decomp_csv").perform(context))
+        and enable_pl_decomp_csv
     )
     integrity["publish_topic"] = "/iap/integrity"
     integrity["araim_csv_path"] = str(export_dir / "iap_araim.csv")
     integrity["araim_pl_decomp_csv_path"] = str(export_dir / "iap_araim_pl_decomp.csv")
     integrity["traj_csv_path"] = str(export_dir / "traj_with_gnss.csv")
-    integrity["enable_lidar_araim_stage0_csv"] = True
+    integrity["enable_lidar_araim_stage0_csv"] = bool(
+        use_araim and enable_lidar_integrity and enable_pl_decomp_csv
+    )
     integrity["lidar_araim_stage0_csv_path"] = str(
         export_dir / "iap_lidar_araim_stage0.csv"
     )
@@ -978,6 +1017,16 @@ def _launch_setup(context):
                 {"terminal_wall_feature_depth_x_m": float(LaunchConfiguration("terminal_wall_feature_depth_x_m").perform(context))},
                 {"terminal_wall_feature_count": int(LaunchConfiguration("terminal_wall_feature_count").perform(context))},
                 {"terminal_wall_feature_seed": int(LaunchConfiguration("terminal_wall_feature_seed").perform(context))},
+                {"corridor_walls_enabled": _as_bool(LaunchConfiguration("corridor_walls_enabled").perform(context))},
+                {"corridor_floor_enabled": _as_bool(LaunchConfiguration("corridor_floor_enabled").perform(context))},
+                {"corridor_x_min_m": float(LaunchConfiguration("corridor_x_min_m").perform(context))},
+                {"corridor_x_max_m": float(LaunchConfiguration("corridor_x_max_m").perform(context))},
+                {"corridor_half_width_y_m": float(LaunchConfiguration("corridor_half_width_y_m").perform(context))},
+                {"corridor_wall_z_min_m": float(LaunchConfiguration("corridor_wall_z_min_m").perform(context))},
+                {"corridor_wall_z_max_m": float(LaunchConfiguration("corridor_wall_z_max_m").perform(context))},
+                {"corridor_wall_thickness_y_m": float(LaunchConfiguration("corridor_wall_thickness_y_m").perform(context))},
+                {"corridor_floor_thickness_z_m": float(LaunchConfiguration("corridor_floor_thickness_z_m").perform(context))},
+                {"corridor_surface_resolution_m": float(LaunchConfiguration("corridor_surface_resolution_m").perform(context))},
             ],
         ),
         Node(
@@ -1276,7 +1325,7 @@ def generate_launch_description():
         DeclareLaunchArgument("start_rviz", default_value="true"),
         DeclareLaunchArgument("record_bag", default_value="false"),
         DeclareLaunchArgument("run_validator", default_value="true"),
-        DeclareLaunchArgument("bag_output_dir", default_value="/home/dev/ws_iap/src/iap/test/araim_validation/real_time_test"),
+        DeclareLaunchArgument("bag_output_dir", default_value="/home/dev/ws_iap/src/iap/results/araim_validation/real_time_test"),
         DeclareLaunchArgument("experiment", default_value="manual"),
         DeclareLaunchArgument("config_subdir", default_value="sim_demo11"),
         DeclareLaunchArgument("use_gnss", default_value="true"),
@@ -1406,6 +1455,16 @@ def generate_launch_description():
         DeclareLaunchArgument("terminal_wall_feature_depth_x_m", default_value="0.65"),
         DeclareLaunchArgument("terminal_wall_feature_count", default_value="48"),
         DeclareLaunchArgument("terminal_wall_feature_seed", default_value="11022"),
+        DeclareLaunchArgument("corridor_walls_enabled", default_value="false"),
+        DeclareLaunchArgument("corridor_floor_enabled", default_value="false"),
+        DeclareLaunchArgument("corridor_x_min_m", default_value="-14.0"),
+        DeclareLaunchArgument("corridor_x_max_m", default_value="14.0"),
+        DeclareLaunchArgument("corridor_half_width_y_m", default_value="2.0"),
+        DeclareLaunchArgument("corridor_wall_z_min_m", default_value="0.0"),
+        DeclareLaunchArgument("corridor_wall_z_max_m", default_value="3.0"),
+        DeclareLaunchArgument("corridor_wall_thickness_y_m", default_value="0.10"),
+        DeclareLaunchArgument("corridor_floor_thickness_z_m", default_value="0.05"),
+        DeclareLaunchArgument("corridor_surface_resolution_m", default_value="0.10"),
         SetEnvironmentVariable("QT_X11_NO_MITSHM", "1"),
         SetEnvironmentVariable("XDG_RUNTIME_DIR", "/tmp/runtime-root"),
         SetEnvironmentVariable("FASTRTPS_DEFAULT_PROFILES_FILE", fastdds_profile),

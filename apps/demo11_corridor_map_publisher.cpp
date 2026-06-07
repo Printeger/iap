@@ -3,6 +3,7 @@
 #include <chrono>
 #include <cmath>
 #include <cstdint>
+#include <cstddef>
 #include <random>
 #include <string>
 #include <vector>
@@ -286,6 +287,24 @@ class Demo11CorridorMapPublisher : public rclcpp::Node {
         declare_parameter<int>("terminal_wall_feature_count", 48);
     terminal_wall_feature_seed_ =
         declare_parameter<int>("terminal_wall_feature_seed", random_seed_ + 11011);
+    corridor_walls_enabled_ =
+        declare_parameter<bool>("corridor_walls_enabled", false);
+    corridor_floor_enabled_ =
+        declare_parameter<bool>("corridor_floor_enabled", false);
+    corridor_x_min_m_ = declare_parameter<double>("corridor_x_min_m", -14.0);
+    corridor_x_max_m_ = declare_parameter<double>("corridor_x_max_m", 14.0);
+    corridor_half_width_y_m_ =
+        declare_parameter<double>("corridor_half_width_y_m", 2.0);
+    corridor_wall_z_min_m_ =
+        declare_parameter<double>("corridor_wall_z_min_m", 0.0);
+    corridor_wall_z_max_m_ =
+        declare_parameter<double>("corridor_wall_z_max_m", 3.0);
+    corridor_wall_thickness_y_m_ =
+        declare_parameter<double>("corridor_wall_thickness_y_m", 0.10);
+    corridor_floor_thickness_z_m_ =
+        declare_parameter<double>("corridor_floor_thickness_z_m", 0.05);
+    corridor_surface_resolution_m_ =
+        declare_parameter<double>("corridor_surface_resolution_m", 0.10);
 
     build_map();
     global_cloud_ = make_cloud(groups_.all);
@@ -319,7 +338,8 @@ class Demo11CorridorMapPublisher : public rclcpp::Node {
         "LL/LR/UL/UR=%.2f/%.2f/%.2f/%.2f, height range %.2f-%.2fm, %zu total "
         "points, terminal wall %s at x=%.2fm y=%.2fm width_y=%.2fm z=%.2f-%.2fm "
         "thickness_x=%.2fm feature_depth_x=%.2fm feature_count=%d feature_seed=%d "
-        "wall_points=%zu, resolution %.2fm, seed %d",
+        "wall_points=%zu, corridor walls=%s floor=%s x=%.2f..%.2fm half_width_y=%.2fm "
+        "z=%.2f..%.2fm corridor_points=%zu, resolution %.2fm, seed %d",
         forest_size_x_m_, forest_size_y_m_, 0.5 * forest_size_x_m_,
         0.5 * forest_size_y_m_, stratified_cell_size_m_, region_tree_counts_[0],
         region_tree_counts_[1], region_tree_counts_[2],
@@ -338,6 +358,11 @@ class Demo11CorridorMapPublisher : public rclcpp::Node {
         terminal_wall_thickness_x_m_, terminal_wall_feature_depth_x_m_,
         terminal_wall_feature_count_, terminal_wall_feature_seed_,
         groups_.terminal_wall.size(),
+        corridor_walls_enabled_ ? "enabled" : "disabled",
+        corridor_floor_enabled_ ? "enabled" : "disabled",
+        corridor_x_min_m_, corridor_x_max_m_, corridor_half_width_y_m_,
+        corridor_wall_z_min_m_, corridor_wall_z_max_m_,
+        corridor_structure_point_count_,
         resolution_, random_seed_);
   }
 
@@ -491,6 +516,37 @@ class Demo11CorridorMapPublisher : public rclcpp::Node {
            clear_corridor_half_width_y_m_ + trunk_radius_m_;
   }
 
+  void add_corridor_degenerate_geometry() {
+    corridor_structure_point_count_ = 0;
+    const auto before = groups_.terminal_wall.size();
+    const double half_thickness = 0.5 * corridor_wall_thickness_y_m_;
+
+    if (corridor_walls_enabled_) {
+      add_box(groups_.terminal_wall, groups_.all,
+              corridor_x_min_m_, corridor_x_max_m_,
+              -corridor_half_width_y_m_ - half_thickness,
+              -corridor_half_width_y_m_ + half_thickness,
+              corridor_wall_z_min_m_, corridor_wall_z_max_m_,
+              corridor_surface_resolution_m_);
+      add_box(groups_.terminal_wall, groups_.all,
+              corridor_x_min_m_, corridor_x_max_m_,
+              corridor_half_width_y_m_ - half_thickness,
+              corridor_half_width_y_m_ + half_thickness,
+              corridor_wall_z_min_m_, corridor_wall_z_max_m_,
+              corridor_surface_resolution_m_);
+    }
+
+    if (corridor_floor_enabled_) {
+      add_box(groups_.terminal_wall, groups_.all,
+              corridor_x_min_m_, corridor_x_max_m_,
+              -corridor_half_width_y_m_, corridor_half_width_y_m_,
+              0.0, corridor_floor_thickness_z_m_,
+              corridor_surface_resolution_m_);
+    }
+
+    corridor_structure_point_count_ = groups_.terminal_wall.size() - before;
+  }
+
   void build_map() {
     groups_ = ForestGroups{};
     trunks_.clear();
@@ -544,6 +600,19 @@ class Demo11CorridorMapPublisher : public rclcpp::Node {
     if (terminal_wall_z_max_m_ - terminal_wall_z_min_m_ < terminal_wall_resolution_m_) {
       terminal_wall_z_max_m_ = terminal_wall_z_min_m_ + terminal_wall_resolution_m_;
     }
+    if (corridor_x_min_m_ > corridor_x_max_m_) {
+      std::swap(corridor_x_min_m_, corridor_x_max_m_);
+    }
+    corridor_half_width_y_m_ = std::max(0.1, corridor_half_width_y_m_);
+    corridor_wall_thickness_y_m_ = std::max(0.05, corridor_wall_thickness_y_m_);
+    corridor_floor_thickness_z_m_ = std::max(0.0, corridor_floor_thickness_z_m_);
+    corridor_surface_resolution_m_ = std::max(0.05, corridor_surface_resolution_m_);
+    if (corridor_wall_z_min_m_ > corridor_wall_z_max_m_) {
+      std::swap(corridor_wall_z_min_m_, corridor_wall_z_max_m_);
+    }
+    if (corridor_wall_z_max_m_ - corridor_wall_z_min_m_ < corridor_surface_resolution_m_) {
+      corridor_wall_z_max_m_ = corridor_wall_z_min_m_ + corridor_surface_resolution_m_;
+    }
     if (trunk_min_height_m_ > trunk_max_height_m_) {
       std::swap(trunk_min_height_m_, trunk_max_height_m_);
     }
@@ -587,6 +656,8 @@ class Demo11CorridorMapPublisher : public rclcpp::Node {
                         terminal_wall_feature_count_,
                         terminal_wall_feature_seed_);
     }
+
+    add_corridor_degenerate_geometry();
   }
 
   sensor_msgs::msg::PointCloud2 make_cloud(const std::vector<Point>& points) const {
@@ -665,6 +736,17 @@ class Demo11CorridorMapPublisher : public rclcpp::Node {
   double terminal_wall_feature_depth_x_m_ = 0.65;
   int terminal_wall_feature_count_ = 48;
   int terminal_wall_feature_seed_ = 11022;
+  bool corridor_walls_enabled_ = false;
+  bool corridor_floor_enabled_ = false;
+  double corridor_x_min_m_ = -14.0;
+  double corridor_x_max_m_ = 14.0;
+  double corridor_half_width_y_m_ = 2.0;
+  double corridor_wall_z_min_m_ = 0.0;
+  double corridor_wall_z_max_m_ = 3.0;
+  double corridor_wall_thickness_y_m_ = 0.10;
+  double corridor_floor_thickness_z_m_ = 0.05;
+  double corridor_surface_resolution_m_ = 0.10;
+  std::size_t corridor_structure_point_count_ = 0;
   std::array<int, 4> region_tree_counts_{};
   std::array<int, 4> region_canopy_counts_{};
   std::vector<TrunkInstance> trunks_;

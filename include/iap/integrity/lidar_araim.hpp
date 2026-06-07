@@ -110,6 +110,7 @@ struct LidarSubsetSolution {
   double HPL = 0.0;
   double VPL = 0.0;
   double lambda_min_subset = 0.0;
+  double lambda_max_subset = 0.0;
   double condition_number_subset = 1.0;
 
   bool valid = false;
@@ -140,6 +141,9 @@ struct LidarAraimResult {
   std::string worst_mode = "NONE";
   int selected_target_count = 0;
   int target_window_K = 10;
+  double lambda_min_full = 0.0;
+  double lambda_max_full = 0.0;
+  double condition_number_full = 1.0;
 
   Eigen::Matrix<double, 6, 6> Sigma0 =
       Eigen::Matrix<double, 6, 6>::Zero();

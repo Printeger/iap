@@ -2081,9 +2081,9 @@ disabled: n_hypotheses = 41 = satellite hypotheses only
 
 Relevant plots:
 
-![With constellation hypotheses: PL/AL/IM timeline](../../test/araim_validation/real_time_test/test_araim_gnss_open_sky_20260604T074459Z_with_constellation_hypo/araim_analysis/figures/fig01_pl_al_im_timeline.png)
+![With constellation hypotheses: PL/AL/IM timeline](../../results/araim_validation/real_time_test/test_araim_gnss_open_sky_20260604T074459Z_with_constellation_hypo/araim_analysis/figures/fig01_pl_al_im_timeline.png)
 
-![Without constellation hypotheses: PL/AL/IM timeline](../../test/araim_validation/real_time_test/test_araim_gnss_open_sky_20260604T135219Z_without_constellation_hypo/araim_analysis/figures/fig01_pl_al_im_timeline.png)
+![Without constellation hypotheses: PL/AL/IM timeline](../../results/araim_validation/real_time_test/test_araim_gnss_open_sky_20260604T135219Z_without_constellation_hypo/araim_analysis/figures/fig01_pl_al_im_timeline.png)
 
 The important conclusion is that disabling constellation-wide hypotheses makes
 the open-sky PL/AL margins positive:
@@ -2210,11 +2210,11 @@ V axis: 0.858 + 4.753 + 8.943 + 0 = 14.554 m
 
 Relevant no-constellation diagnostic plots:
 
-![No constellation hypotheses: PL decomposition terms](../../test/araim_validation/real_time_test/test_araim_gnss_open_sky_20260604T135219Z_without_constellation_hypo/araim_analysis/figures/fig12_pl_decomposition_terms_timeline.png)
+![No constellation hypotheses: PL decomposition terms](../../results/araim_validation/real_time_test/test_araim_gnss_open_sky_20260604T135219Z_without_constellation_hypo/araim_analysis/figures/fig12_pl_decomposition_terms_timeline.png)
 
-![No constellation hypotheses: dominant hypothesis timeline](../../test/araim_validation/real_time_test/test_araim_gnss_open_sky_20260604T135219Z_without_constellation_hypo/araim_analysis/figures/fig13_pl_decomposition_dominant_hypothesis.png)
+![No constellation hypotheses: dominant hypothesis timeline](../../results/araim_validation/real_time_test/test_araim_gnss_open_sky_20260604T135219Z_without_constellation_hypo/araim_analysis/figures/fig13_pl_decomposition_dominant_hypothesis.png)
 
-![No constellation hypotheses: removal geometry timeline](../../test/araim_validation/real_time_test/test_araim_gnss_open_sky_20260604T135219Z_without_constellation_hypo/araim_analysis/figures/fig14_constellation_removal_geometry_timeline.png)
+![No constellation hypotheses: removal geometry timeline](../../results/araim_validation/real_time_test/test_araim_gnss_open_sky_20260604T135219Z_without_constellation_hypo/araim_analysis/figures/fig14_constellation_removal_geometry_timeline.png)
 
 ### 18.4 Experiment Policy
 
@@ -2239,3 +2239,163 @@ Constellation-wide hypotheses remain useful, but they are a separate
 availability/threat-model stress test. They should be re-enabled in later
 experiments specifically designed to evaluate conservative constellation-fault
 availability, not in the nominal open-sky smoke test.
+
+## 19. Experiment 2: LiDAR-Only Feature-Rich Runtime Validation
+
+记录日期：2026-06-06
+
+### 19.1 Purpose
+
+This experiment validates that the LiDAR integrity runtime works in a
+feature-rich point-cloud environment. The run uses the `lidar_feature_rich`
+preset, disables GNSS integrity, enables LiDAR integrity, and requires the final
+runtime integrity source to be LiDAR.
+
+Completion is evaluated according to the `lidar_feature_rich` validator preset
+in `test_araim.launch.py`: LiDAR must become valid, fallback must become valid,
+the fusion mode must remain `lidar_only`, and the final H/V PL source must be
+`LIDAR`. The validator does not require every frame to be `SAFE`; transient
+negative margins are recorded as availability/margin events rather than runtime
+source failures.
+
+### 19.2 Commands
+
+Runtime command:
+
+```bash
+ros2 launch iap test_araim.launch.py experiment:=lidar_feature_rich enable_araim_pl_decomp_csv:=true record_bag:=true
+```
+
+Recorded rosbag:
+
+```text
+src/iap/results/araim_validation/real_time_test/test_araim_lidar_feature_rich_20260606T124316Z
+```
+
+Analysis command:
+
+```bash
+source install/setup.bash
+python3 src/iap/test/araim_validation/analyze_araim_rosbag.py src/iap/results/araim_validation/real_time_test/test_araim_lidar_feature_rich_20260606T124316Z --no-show
+```
+
+Analyzer result:
+
+```text
+Wrote analysis to: /home/dev/ws_iap/src/iap/results/araim_validation/real_time_test/test_araim_lidar_feature_rich_20260606T124316Z/araim_analysis
+Integrity rows: 317
+PL decomposition rows: 0
+Figures: 13
+```
+
+The LiDAR-only run did not produce GNSS PL decomposition rows. This is expected
+for this experiment and does not affect the LiDAR runtime completion check.
+
+### 19.3 Runtime Evidence
+
+The rosbag analysis produced 317 `/iap/integrity` samples over about 67 s. The
+recorded environment topics were present, including global cloud, trunk cloud,
+canopy cloud, terminal wall cloud, desired trajectory, IAP odometry, and truth
+odometry.
+
+Point-cloud evidence:
+
+| Cloud | Sampled points in analysis |
+| --- | ---: |
+| global | 131705 |
+| trunks | 36928 |
+| canopy | 60988 |
+| terminal wall | 33789 |
+
+Integrity-source summary:
+
+| Check | Observed result | Status |
+| --- | --- | --- |
+| `/iap/integrity` message count | 317 | PASS |
+| `fusion_mode=lidar_only` | 317/317 | PASS |
+| `lidar_valid=true` | 317/317 | PASS |
+| `fallback_valid=true` | 317/317 | PASS |
+| final H/V/PL source = `LIDAR` | 317/317 | PASS |
+| `gnss_valid=false` | 317/317 | PASS, expected for LiDAR-only |
+| invalid flags | all false | PASS |
+| numeric NaN / Inf | none | PASS |
+
+Protection-level summary:
+
+| Field | Min | Mean | Max |
+| --- | ---: | ---: | ---: |
+| HPL | 2.079 m | 3.127 m | 15.378 m |
+| VPL | 2.116 m | 3.208 m | 31.576 m |
+| IM_min | -11.576 m | 6.826 m | 7.921 m |
+| fallback HPL | 0.019 m | 0.029 m | 0.046 m |
+| fallback VPL | 0.019 m | 0.029 m | 0.046 m |
+
+Integrity state counts:
+
+| State | Count |
+| --- | ---: |
+| SAFE | 315 |
+| UNSAFE | 2 |
+
+The two UNSAFE frames were:
+
+| t [s] | Cause | Values |
+| ---: | --- | --- |
+| 0.0000 | horizontal margin negative | HPL `15.378 m` > HAL `10.000 m`; VPL `7.585 m` < VAL `20.000 m` |
+| 12.9999 | vertical margin negative | HPL `6.494 m` < HAL `10.000 m`; VPL `31.576 m` > VAL `20.000 m` |
+
+Both UNSAFE frames still had `lidar_valid=true`, `fallback_valid=true`,
+`fusion_mode=lidar_only`, and final source `LIDAR`. They therefore indicate
+temporary LiDAR PL/AL margin exceedance, not LiDAR integrity runtime failure.
+
+Runtime log evidence is consistent with the rosbag:
+
+```text
+enable_gnss_integrity = false
+enable_lidar_integrity = true
+integrity_fusion_mode = lidar_only
+LiDAR ARAIM Stage0 CSV: ENABLED
+```
+
+Timing data also shows the LiDAR integrity path executed for every integrity
+sample:
+
+| Module | Count | Min | Mean | Max |
+| --- | ---: | ---: | ---: | ---: |
+| `2.2_lidar_araim` | 317 | 0.013 ms | 0.020 ms | 0.039 ms |
+| `2.3_integrity_total` | 317 | 0.029 ms | 0.043 ms | 0.096 ms |
+
+### 19.4 Diagnostic Plots
+
+Feature-rich environment and trajectory:
+
+![LiDAR feature-rich environment top-down](../../results/araim_validation/real_time_test/test_araim_lidar_feature_rich_20260606T124316Z/araim_analysis/figures/environment_topdown.png)
+
+PL/AL/IM timeline:
+
+![LiDAR feature-rich PL/AL/IM timeline](../../results/araim_validation/real_time_test/test_araim_lidar_feature_rich_20260606T124316Z/araim_analysis/figures/fig01_pl_al_im_timeline.png)
+
+Final source timeline:
+
+![LiDAR feature-rich final source timeline](../../results/araim_validation/real_time_test/test_araim_lidar_feature_rich_20260606T124316Z/araim_analysis/figures/fig04_final_source_timeline.png)
+
+Validity flags:
+
+![LiDAR feature-rich validity flags](../../results/araim_validation/real_time_test/test_araim_lidar_feature_rich_20260606T124316Z/araim_analysis/figures/fig05_validity_flags_timeline.png)
+
+LiDAR geometry timeline:
+
+![LiDAR feature-rich geometry timeline](../../results/araim_validation/real_time_test/test_araim_lidar_feature_rich_20260606T124316Z/araim_analysis/figures/fig10_lidar_geometry_timeline.png)
+
+Integrity state timeline:
+
+![LiDAR feature-rich integrity state timeline](../../results/araim_validation/real_time_test/test_araim_lidar_feature_rich_20260606T124316Z/araim_analysis/figures/fig11_integrity_state_timeline.png)
+
+### 19.5 Conclusion
+
+Experiment 2 satisfies the LiDAR-only feature-rich runtime completion
+conditions. The runtime published finite `/iap/integrity` messages, selected
+LiDAR as the final source for every frame, kept LiDAR and fallback validity true
+for every frame, and reported no invalid numerical flags. The two UNSAFE frames
+are documented PL/AL exceedances and do not invalidate the runtime-source
+completion criterion.

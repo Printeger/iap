@@ -337,6 +337,15 @@ LidarAraimResult LidarAraim::run(const LidarAraimSnapshot& snapshot,
   if (!Lambda0.allFinite()) {
     return result;
   }
+  const auto d_full = sigma_ldlt.vectorD();
+  result.lambda_min_full = d_full.minCoeff();
+  result.lambda_max_full = d_full.maxCoeff();
+  result.condition_number_full =
+      (result.lambda_min_full > 0.0 &&
+       std::isfinite(result.lambda_min_full) &&
+       std::isfinite(result.lambda_max_full))
+          ? result.lambda_max_full / result.lambda_min_full
+          : 1e9;
 
   result.valid = true;
   result.Sigma0 = Sigma0;
@@ -413,6 +422,7 @@ LidarAraimResult LidarAraim::run(const LidarAraimSnapshot& snapshot,
     ss.d_N = delta_f(4);
     ss.d_U = delta_f(5);
     ss.lambda_min_subset = d_min;
+    ss.lambda_max_subset = d_max;
     ss.condition_number_subset =
         (d_min > 0.0 && std::isfinite(d_min) && std::isfinite(d_max))
             ? d_max / d_min

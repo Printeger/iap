@@ -59,7 +59,7 @@
     "lidar_araim_condition_ref": 10000.0,
     "lidar_araim_gamma_condition_max": 5.0,
     "lidar_araim_sigma_ss_min_m": 0.02,
-    "enable_lidar_araim_stage0_csv": true,
+    "enable_lidar_araim_stage0_csv": false,
     "lidar_araim_stage0_csv_path": "/tmp/iap_lidar_araim_stage0.csv"
   }
 }

@@ -58,7 +58,19 @@ class LidarAraimDebugCSV {
           << "gamma_rmse,gamma_inlier,gamma_condition,gamma_age,"
           << "selected_target_count,target_window_size,"
           << "lambda_min_subset,condition_number_subset,"
-          << "sigma_ss_raw_m2,sigma_ss_used_m,ss_variance_fallback_flag\n";
+          << "sigma_ss_raw_m2,sigma_ss_used_m,ss_variance_fallback_flag,"
+          << "pl_e,pl_n,pl_u,"
+          << "k_fa,k_md,"
+          << "sigma_k_e,sigma_k_n,sigma_k_u,"
+          << "t_e,t_n,t_u,"
+          << "d_e,d_n,d_u,"
+          << "bias_h,bias_v,gamma_total,"
+          << "condition_number_full,"
+          << "lambda_min_full,lambda_max_full,"
+          << "lambda_max_subset,"
+          << "sigma_ss_raw_e_m2,sigma_ss_raw_n_m2,sigma_ss_raw_u_m2,"
+          << "sigma_ss_used_e_m,sigma_ss_used_n_m,sigma_ss_used_u_m,"
+          << "ss_fallback_e,ss_fallback_n,ss_fallback_u\n";
     header_written_ = true;
   }
 
@@ -133,7 +145,7 @@ class LidarAraimDebugCSV {
       sigma_ss_fallback = ss.sigma_ss_fallback_U;
     }
 
-    file_ << std::fixed << std::setprecision(6)
+    file_ << std::scientific << std::setprecision(12)
           << report.stamp << ","
           << axis << ","
           << result.HPL << ","
@@ -154,7 +166,37 @@ class LidarAraimDebugCSV {
           << ss.condition_number_subset << ","
           << sigma_ss_raw_m2 << ","
           << sigma_ss_used_m << ","
-          << (sigma_ss_fallback ? 1 : 0) << "\n";
+          << (sigma_ss_fallback ? 1 : 0) << ","
+          << ss.PL_E << ","
+          << ss.PL_N << ","
+          << ss.PL_U << ","
+          << ss.K_fa << ","
+          << ss.K_md << ","
+          << ss.sigma_k_E << ","
+          << ss.sigma_k_N << ","
+          << ss.sigma_k_U << ","
+          << ss.T_E << ","
+          << ss.T_N << ","
+          << ss.T_U << ","
+          << ss.d_E << ","
+          << ss.d_N << ","
+          << ss.d_U << ","
+          << ss.bias_H << ","
+          << ss.bias_V << ","
+          << hyp.selected_risk.gamma_total << ","
+          << result.condition_number_full << ","
+          << result.lambda_min_full << ","
+          << result.lambda_max_full << ","
+          << ss.lambda_max_subset << ","
+          << ss.sigma_ss_raw_E_m2 << ","
+          << ss.sigma_ss_raw_N_m2 << ","
+          << ss.sigma_ss_raw_U_m2 << ","
+          << ss.sigma_ss_E << ","
+          << ss.sigma_ss_N << ","
+          << ss.sigma_ss_U << ","
+          << (ss.sigma_ss_fallback_E ? 1 : 0) << ","
+          << (ss.sigma_ss_fallback_N ? 1 : 0) << ","
+          << (ss.sigma_ss_fallback_U ? 1 : 0) << "\n";
   }
 
   bool enabled_ = false;

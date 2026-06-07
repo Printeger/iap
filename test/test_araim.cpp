@@ -142,6 +142,13 @@ struct LidarBlockFaultRun {
   LidarAraimSnapshot snapshot;
 };
 
+struct RuntimeBlockBridgeRun {
+  std::string name;
+  LidarAraimResult result;
+  LidarAraimSnapshot snapshot;
+  double condition_number = 1.0e12;
+};
+
 struct SingleBlockHypothesisObservation {
   int block_id = -1;
   int block_index = -1;
@@ -339,6 +346,70 @@ LidarBlockFaultRun run_lidar_block_fault_injection(
   LidarBlockFaultRun run;
   const FGOPositionInfo fgo = make_lidar_block_fault_fgo();
   run.snapshot = make_lidar_block_fault_snapshot(fgo, residuals_e);
+  run.result = evaluator.run(run.snapshot, fgo);
+  return run;
+}
+
+LidarAraimBlock make_runtime_bridge_block(
+    const long target_frame_id,
+    const int level_id,
+    const Eigen::Vector3d& lambda_position_diag,
+    const double cond_proxy) {
+  LidarAraimBlock block;
+  block.source_frame_id = 440;
+  block.target_frame_id = target_frame_id;
+  block.level_id = level_id;
+  block.voxel_resolution = 0.2 * std::pow(2.0, level_id);
+  block.num_inliers = 100;
+  block.inlier_fraction = 0.95;
+  block.rmse_proxy = 0.05;
+  block.cond_proxy = cond_proxy;
+  block.gamma_lidar = 1.0;
+  block.age_sec = 0.1;
+  block.target_distance_m = static_cast<double>(target_frame_id);
+  block.Lambda_B.setZero();
+  block.Lambda_B.block<3, 3>(3, 3) = lambda_position_diag.asDiagonal();
+  block.eta_B.setZero();
+  return block;
+}
+
+RuntimeBlockBridgeRun run_runtime_block_bridge_case(
+    const std::string& name,
+    const Eigen::Vector3d& position_fim_diag) {
+  RuntimeBlockBridgeRun run;
+  run.name = name;
+  const double min_fim = position_fim_diag.minCoeff();
+  const double max_fim = position_fim_diag.maxCoeff();
+  run.condition_number =
+      (min_fim > 0.0 && std::isfinite(min_fim) && std::isfinite(max_fim))
+          ? max_fim / min_fim
+          : 1.0e12;
+
+  const Eigen::Matrix3d fim = position_fim_diag.asDiagonal();
+  FGOPositionInfo fgo = make_fgo_from_position_fim(fim, 440);
+
+  run.snapshot.valid = true;
+  run.snapshot.frame_id = fgo.frame_id;
+  run.snapshot.stamp = 60.0;
+  run.snapshot.pose_cov_6x6 = fgo.pose_cov_6x6;
+  run.snapshot.current_icp_quality.gamma_lidar = 1.0;
+
+  // Keep every subset positive definite: the three blocks together contribute
+  // 80% of the current-frame position information.
+  const Eigen::Vector3d per_block = (0.8 / 3.0) * position_fim_diag;
+  for (int i = 0; i < 3; ++i) {
+    run.snapshot.blocks.push_back(make_runtime_bridge_block(
+        i + 1, i, per_block, run.condition_number));
+  }
+
+  LidarAraim::Params params;
+  params.dynamic_budget = false;
+  params.K_ff = 5.0;
+  params.K_fa = 4.0;
+  params.K_md = 3.0;
+  params.alpha_H = 0.0;
+  params.alpha_V = 0.0;
+  LidarAraim evaluator(params);
   run.result = evaluator.run(run.snapshot, fgo);
   return run;
 }
@@ -1836,6 +1907,85 @@ TEST(LidarIntegrityValidationTest, GeometryObservabilityTrend) {
   EXPECT_GT(corridor.result.PL_E, feature.result.PL_E);
   EXPECT_GT(corridor.condition_number, feature.condition_number);
   EXPECT_FALSE(corridor.result.worst_mode.empty());
+}
+
+TEST(LidarIntegrityValidationTest, RuntimeBlockBridgeGeometryTrend) {
+  const auto feature = run_runtime_block_bridge_case(
+      "feature", Eigen::Vector3d(100.0, 100.0, 80.0));
+  const auto corridor = run_runtime_block_bridge_case(
+      "corridor", Eigen::Vector3d(1.0, 100.0, 60.0));
+  const auto sparse = run_runtime_block_bridge_case(
+      "sparse", Eigen::Vector3d(0.001, 1.0, 0.001));
+
+  auto record = [](const char* prefix, const RuntimeBlockBridgeRun& run) {
+    ::testing::Test::RecordProperty(
+        (std::string(prefix) + "_lidar_valid").c_str(),
+        run.result.valid ? 1 : 0);
+    ::testing::Test::RecordProperty(
+        (std::string(prefix) + "_lidar_hpl").c_str(), run.result.HPL);
+    ::testing::Test::RecordProperty(
+        (std::string(prefix) + "_lidar_vpl").c_str(), run.result.VPL);
+    ::testing::Test::RecordProperty(
+        (std::string(prefix) + "_lidar_pl_e").c_str(), run.result.PL_E);
+    ::testing::Test::RecordProperty(
+        (std::string(prefix) + "_lidar_pl_n").c_str(), run.result.PL_N);
+    ::testing::Test::RecordProperty(
+        (std::string(prefix) + "_lidar_pl_u").c_str(), run.result.PL_U);
+    ::testing::Test::RecordProperty(
+        (std::string(prefix) + "_condition_number").c_str(),
+        run.condition_number);
+    ::testing::Test::RecordProperty(
+        (std::string(prefix) + "_condition_number_full").c_str(),
+        run.result.condition_number_full);
+    ::testing::Test::RecordProperty(
+        (std::string(prefix) + "_worst_mode").c_str(),
+        run.result.worst_mode.c_str());
+    if (run.result.worst_hyp >= 0 &&
+        run.result.worst_hyp < static_cast<int>(run.result.subsets.size())) {
+      const auto& ss =
+          run.result.subsets[static_cast<std::size_t>(run.result.worst_hyp)];
+      ::testing::Test::RecordProperty(
+          (std::string(prefix) + "_worst_subset_condition").c_str(),
+          ss.condition_number_subset);
+      ::testing::Test::RecordProperty(
+          (std::string(prefix) + "_worst_ss_fallback_e").c_str(),
+          ss.sigma_ss_fallback_E ? 1 : 0);
+      ::testing::Test::RecordProperty(
+          (std::string(prefix) + "_worst_ss_fallback_n").c_str(),
+          ss.sigma_ss_fallback_N ? 1 : 0);
+      ::testing::Test::RecordProperty(
+          (std::string(prefix) + "_worst_ss_fallback_u").c_str(),
+          ss.sigma_ss_fallback_U ? 1 : 0);
+    }
+  };
+  record("bridge_feature", feature);
+  record("bridge_corridor", corridor);
+  record("bridge_sparse", sparse);
+
+  ASSERT_TRUE(feature.result.valid);
+  ASSERT_TRUE(corridor.result.valid);
+  ASSERT_TRUE(sparse.result.valid);
+  EXPECT_TRUE(is_finite_lidar_pl(feature.result));
+  EXPECT_TRUE(is_finite_lidar_pl(corridor.result));
+  EXPECT_TRUE(is_finite_lidar_pl(sparse.result));
+  EXPECT_FALSE(feature.result.worst_mode.empty());
+  EXPECT_FALSE(corridor.result.worst_mode.empty());
+  EXPECT_FALSE(sparse.result.worst_mode.empty());
+  EXPECT_GT(corridor.condition_number, feature.condition_number);
+  EXPECT_GT(sparse.condition_number, corridor.condition_number);
+
+  const bool sensitivity_pass =
+      corridor.result.HPL > feature.result.HPL &&
+      sparse.result.HPL > corridor.result.HPL &&
+      corridor.result.PL_E > feature.result.PL_E;
+  const bool sensitivity_suppressed =
+      corridor.condition_number > feature.condition_number &&
+      corridor.result.HPL <= 1.2 * feature.result.HPL;
+  ::testing::Test::RecordProperty(
+      "runtime_block_bridge_sensitivity",
+      sensitivity_pass ? "pass" : "suppressed_or_weak");
+
+  EXPECT_TRUE(sensitivity_pass || sensitivity_suppressed);
 }
 
 TEST(LidarIntegrityValidationTest, BlockFaultInjectionBadBlockDetected) {
