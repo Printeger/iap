@@ -96,6 +96,15 @@ target_link_libraries(iap_prediction_integrity INTERFACE
   iap_current_integrity Eigen3::Eigen gtsam gtsam_points::gtsam_points spdlog::spdlog
 )
 
+# --- iap_predictor ---
+add_library(iap_predictor INTERFACE)
+target_include_directories(iap_predictor INTERFACE
+  $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+)
+target_link_libraries(iap_predictor INTERFACE
+  iap_prediction_integrity Eigen3::Eigen spdlog::spdlog
+)
+
 add_library(iap SHARED
   # util
   src/iap/util/config.cpp
@@ -154,6 +163,11 @@ add_library(iap SHARED
   src/iap/planner/unified_risk_grid.cpp
   src/iap/planner/predicted_araim.cpp
   src/iap/planner/gnss_geometry_pl_predictor.cpp
+  # independent advisory predictor query module
+  src/iap/predictor/gnss_advisory_predictor.cpp
+  src/iap/predictor/lidar_advisory_predictor.cpp
+  src/iap/predictor/fusion_advisory_predictor.cpp
+  src/iap/predictor/predictor_module.cpp
   # integrity monitoring (IAP-RQ-200/210/220)
   src/iap/integrity/integrity_monitor.cpp
   src/iap/integrity/integrity_fusion_policy.cpp
@@ -569,6 +583,8 @@ if(DEFINED ENV{ROS_VERSION})
       target_link_libraries(test_local_occupancy iap)
       ament_add_gtest(test_future_pl_field_predictor test/test_future_pl_field_predictor.cpp)
       target_link_libraries(test_future_pl_field_predictor iap iap_prediction_integrity)
+      ament_add_gtest(test_predictor_module test/test_predictor_module.cpp)
+      target_link_libraries(test_predictor_module iap iap_predictor)
       ament_add_gtest(test_pi_cost_adapter test/test_pi_cost_adapter.cpp)
       target_link_libraries(test_pi_cost_adapter iap)
       ament_add_gtest(test_unified_risk_grid test/test_unified_risk_grid.cpp)
