@@ -1,0 +1,42 @@
+{
+  "targets": {
+    "test_predictor_module": {
+      "tests": 19,
+      "failures": 0,
+      "errors": 0,
+      "time": "0s"
+    },
+    "test_lidar_observability_fim": {
+      "tests": 15,
+      "failures": 0,
+      "errors": 0,
+      "time": "0s"
+    },
+    "test_predicted_araim": {
+      "tests": 5,
+      "failures": 0,
+      "errors": 0,
+      "time": "0s"
+    }
+  },
+  "ctest": [
+    {
+      "target": "test_predicted_araim",
+      "result": "Passed",
+      "duration_sec": 0.05,
+      "tests": 5
+    },
+    {
+      "target": "test_lidar_observability_fim",
+      "result": "Passed",
+      "duration_sec": 0.05,
+      "tests": 15
+    },
+    {
+      "target": "test_predictor_module",
+      "result": "Passed",
+      "duration_sec": 0.05,
+      "tests": 19
+    }
+  ]
+}

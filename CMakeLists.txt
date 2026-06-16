@@ -153,16 +153,16 @@ add_library(iap SHARED
   src/iap/integrity/lidar_araim.cpp
   # FGO information matrix extraction (IAP-RQ-300)
   src/iap/integrity/fgo_information_manager.cpp
-  # predicted ARAIM for planner (IAP-RQ-331)
+  # predictor-side advisory integrity support (IAP-RQ-331)
   src/iap/planner/integrity_snapshot.cpp
   src/iap/planner/future_pl_query_result.cpp
-  src/iap/planner/lidar_observability_fim.cpp
+  src/iap/predictor/lidar_observability_fim.cpp
   src/iap/planner/pl_grid.cpp
   src/iap/planner/future_pl_field_predictor.cpp
   src/iap/planner/pi_cost_adapter.cpp
   src/iap/planner/unified_risk_grid.cpp
   src/iap/planner/predicted_araim.cpp
-  src/iap/planner/gnss_geometry_pl_predictor.cpp
+  src/iap/predictor/gnss_geometry_pl_predictor.cpp
   # independent advisory predictor query module
   src/iap/predictor/gnss_advisory_predictor.cpp
   src/iap/predictor/lidar_advisory_predictor.cpp
@@ -538,6 +538,19 @@ if(DEFINED ENV{ROS_VERSION})
     )
     list(APPEND iap_LIBRARIES demo11_compare_paths_visualizer)
 
+    ## Predictor module system-test probe
+    add_executable(test_predictor_query_probe
+      apps/test_predictor_query_probe.cpp
+    )
+    target_link_libraries(test_predictor_query_probe iap "${iap_msgs_cpp_ts}")
+    ament_target_dependencies(test_predictor_query_probe
+      rclcpp
+      nav_msgs
+      sensor_msgs
+      gnss_comm
+    )
+    list(APPEND iap_LIBRARIES test_predictor_query_probe)
+
     install(TARGETS
       iap_status
       iap_experiment
@@ -549,10 +562,24 @@ if(DEFINED ENV{ROS_VERSION})
       demo_takeoff_cmd_publisher
       demo11_corridor_map_publisher
       demo11_compare_paths_visualizer
+      test_predictor_query_probe
       DESTINATION lib/iap
     )
     install(PROGRAMS
       scripts/test_araim_validator.py
+      scripts/test_predictor_validator.py
+      scripts/dev_predictor/analyze_predictor_system_e1.py
+      scripts/dev_predictor/analyze_predictor_system_e2.py
+      scripts/dev_predictor/analyze_predictor_system_e3.py
+      scripts/dev_predictor/analyze_predictor_system_e4.py
+      scripts/dev_predictor/analyze_predictor_system_e5.py
+      scripts/dev_predictor/analyze_predictor_system_e6.py
+      scripts/dev_predictor/analyze_predictor_system_e7.py
+      scripts/dev_predictor/analyze_predictor_system_e8.py
+      scripts/dev_predictor/analyze_predictor_system_e9.py
+      scripts/dev_predictor/analyze_predictor_system_e10.py
+      scripts/dev_predictor/analyze_predictor_system_e11.py
+      scripts/dev_predictor/analyze_predictor_system_e12.py
       DESTINATION lib/iap
     )
     install(DIRECTORY launch DESTINATION share/iap)

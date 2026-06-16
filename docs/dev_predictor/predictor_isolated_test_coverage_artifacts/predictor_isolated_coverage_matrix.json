@@ -1,0 +1,173 @@
+{
+  "coverage": [
+    {
+      "area": "GNSS predictor",
+      "required_behavior": "Open-sky multi-satellite input returns finite HPL/VPL and valid 3x3 position FIM",
+      "status": "covered",
+      "evidence": "PredictorModuleTest.GnssOpenSkyProducesFinitePlAndFim"
+    },
+    {
+      "area": "GNSS predictor",
+      "required_behavior": "Missing epoch returns explicit fallback reason",
+      "status": "covered",
+      "evidence": "PredictorModuleTest.GnssMissingEpochIsExplicitFallback; PredictedAraimComputerTest.MissingEpochFallbackReason"
+    },
+    {
+      "area": "GNSS predictor",
+      "required_behavior": "Too few satellites returns explicit fallback reason",
+      "status": "covered",
+      "evidence": "PredictorModuleTest.GnssTooFewSatsDoesNotReturnFiniteFallbackPl; PredictedAraimComputerTest.TooFewSatellitesFallsBack"
+    },
+    {
+      "area": "GNSS predictor",
+      "required_behavior": "Excluded satellites reduce used count and return explicit fallback when below min_sats",
+      "status": "covered",
+      "evidence": "PredictorModuleTest.GnssExcludedSatellitesReduceUsedCountAndFallbackExplicitly"
+    },
+    {
+      "area": "GNSS predictor",
+      "required_behavior": "Map occlusion/skymask changes visible satellite count and degrades PDOP/HPL/VPL",
+      "status": "covered",
+      "evidence": "PredictorModuleTest.GnssMapOcclusionReducesVisibleCountAndDegradesProtectionLevels"
+    },
+    {
+      "area": "GNSS predictor",
+      "required_behavior": "Clock Schur complement output is symmetric, finite, and PSD or explicitly rejected",
+      "status": "covered",
+      "evidence": "PredictedAraimComputerTest.AdvisoryFimUsesClockSchurComplement; PredictorModuleTest.GnssOpenSkyProducesFinitePlAndFim"
+    },
+    {
+      "area": "LiDAR predictor",
+      "required_behavior": "Feature-rich 3D primitives return valid FIM with nonzero primitive count",
+      "status": "covered",
+      "evidence": "PredictorModuleTest.LidarRichPrimitivesProducesValidFim; LidarObservabilityFimTest.RichCloudProducesValidInformation"
+    },
+    {
+      "area": "LiDAR predictor",
+      "required_behavior": "Sparse/corridor/planar-degenerate geometry returns fallback or regularization diagnostics",
+      "status": "covered",
+      "evidence": "LidarObservabilityFimTest.TooFewPointsFallbackIsExplicit; LidarObservabilityFimTest.DegenerateGeometryLowersAlpha; LidarObservabilityFimTest.AdvisoryFimReflectsNormalAnisotropy"
+    },
+    {
+      "area": "LiDAR predictor",
+      "required_behavior": "Missing normals/primitives returns explicit fallback reason",
+      "status": "covered",
+      "evidence": "PredictorModuleTest.LidarMissingPrimitivesIsExplicitFallback; LidarObservabilityFimTest.AdvisoryFimRequiresNormals; LidarObservabilityFimTest.EmptyPrimitiveGenerationReportsMissingNormals"
+    },
+    {
+      "area": "LiDAR predictor",
+      "required_behavior": "lidar_enable_legacy_observability=false prevents legacy observability from masking FIM failure",
+      "status": "covered",
+      "evidence": "PredictorModuleTest.LidarMissingPrimitivesIsExplicitFallback uses make_params().lidar.enable_legacy_observability=false"
+    },
+    {
+      "area": "Fusion predictor",
+      "required_behavior": "GNSS-only, LiDAR-only, and fused outputs are separately explainable",
+      "status": "covered",
+      "evidence": "PredictorModuleTest.GnssOpenSkyProducesFinitePlAndFim; PredictorModuleTest.LidarRichPrimitivesProducesValidFim; PredictorModuleTest.ModuleFusesGnssAndLidarWithoutGridFields"
+    },
+    {
+      "area": "Fusion predictor",
+      "required_behavior": "lambda_pred = lambda_prior + lambda_gnss + lambda_lidar",
+      "status": "covered",
+      "evidence": "PredictorModuleTest.ModuleFusesGnssAndLidarWithoutGridFields"
+    },
+    {
+      "area": "Fusion predictor",
+      "required_behavior": "Missing/invalid prior does not block valid GNSS or LiDAR advisory sources",
+      "status": "covered",
+      "evidence": "PredictorModuleTest.FusionGnssOnlyProducesFiniteAdvisoryPl; PredictorModuleTest.FusionRejectsIndefinitePriorButKeepsGnssOnly"
+    },
+    {
+      "area": "Fusion predictor",
+      "required_behavior": "No advisory source returns unavailable with combined fallback reason",
+      "status": "covered",
+      "evidence": "PredictorModuleTest.ModuleNoGnssNoLidarIsUnavailableWithNanPl"
+    }
+  ],
+  "targets": {
+    "test_predictor_module": {
+      "tests": 15,
+      "failures": 0,
+      "disabled": 0,
+      "errors": 0,
+      "time": "0s",
+      "listed_tests": [
+        "PredictorModuleTest.GnssOpenSkyProducesFinitePlAndFim",
+        "PredictorModuleTest.GnssMissingEpochIsExplicitFallback",
+        "PredictorModuleTest.GnssTooFewSatsDoesNotReturnFiniteFallbackPl",
+        "PredictorModuleTest.GnssExcludedSatellitesReduceUsedCountAndFallbackExplicitly",
+        "PredictorModuleTest.GnssMapOcclusionReducesVisibleCountAndDegradesProtectionLevels",
+        "PredictorModuleTest.LidarRichPrimitivesProducesValidFim",
+        "PredictorModuleTest.LidarMissingPrimitivesIsExplicitFallback",
+        "PredictorModuleTest.FusionGnssOnlyProducesFiniteAdvisoryPl",
+        "PredictorModuleTest.ModuleFusesGnssAndLidarWithoutGridFields",
+        "PredictorModuleTest.InvalidPositionKeepsQueryMetadataAndFallsBack",
+        "PredictorModuleTest.InvalidQueryTimeFallsBackBeforePrediction",
+        "PredictorModuleTest.InvalidHorizonFallsBackBeforePrediction",
+        "PredictorModuleTest.UnsupportedFrameFallsBackBeforePrediction",
+        "PredictorModuleTest.FusionRejectsIndefinitePriorButKeepsGnssOnly",
+        "PredictorModuleTest.ModuleNoGnssNoLidarIsUnavailableWithNanPl"
+      ]
+    },
+    "test_lidar_observability_fim": {
+      "tests": 13,
+      "failures": 0,
+      "disabled": 0,
+      "errors": 0,
+      "time": "0s",
+      "listed_tests": [
+        "LidarObservabilityFimTest.RichCloudProducesValidInformation",
+        "LidarObservabilityFimTest.TooFewPointsFallbackIsExplicit",
+        "LidarObservabilityFimTest.DegenerateGeometryLowersAlpha",
+        "LidarObservabilityFimTest.PoorCurrentTdopAndExclusionsDownweightAlpha",
+        "LidarObservabilityFimTest.MissingCloudFallbackIsFinite",
+        "LidarObservabilityFimTest.InvalidParamsFallbackIsFinite",
+        "LidarObservabilityFimTest.AdvisoryFimReflectsNormalAnisotropy",
+        "LidarObservabilityFimTest.AdvisoryFimRequiresNormals",
+        "LidarObservabilityFimTest.PcaRadiusChangesPrimitiveCount",
+        "LidarObservabilityFimTest.PcaMinSupportBoundaryIsInclusive",
+        "LidarObservabilityFimTest.VoxelSamplingReducesDenseClusterDuplicates",
+        "LidarObservabilityFimTest.EmptyPrimitiveGenerationReportsMissingNormals",
+        "LidarObservabilityFimTest.CloudProvidedNormalsAreUsedBeforePca"
+      ]
+    },
+    "test_predicted_araim": {
+      "tests": 5,
+      "failures": 0,
+      "disabled": 0,
+      "errors": 0,
+      "time": "0s",
+      "listed_tests": [
+        "PredictedAraimComputerTest.OpenSkyWithoutOccupancyProducesResult",
+        "PredictedAraimComputerTest.TooFewSatellitesFallsBack",
+        "PredictedAraimComputerTest.LegacyWrapperReturnsHpl",
+        "PredictedAraimComputerTest.MissingEpochFallbackReason",
+        "PredictedAraimComputerTest.AdvisoryFimUsesClockSchurComplement"
+      ]
+    }
+  },
+  "ctest": [
+    {
+      "target": "test_predicted_araim",
+      "result": "Passed",
+      "duration_sec": 0.05,
+      "tests": 5,
+      "failures": 0
+    },
+    {
+      "target": "test_lidar_observability_fim",
+      "result": "Passed",
+      "duration_sec": 0.05,
+      "tests": 13,
+      "failures": 0
+    },
+    {
+      "target": "test_predictor_module",
+      "result": "Passed",
+      "duration_sec": 0.05,
+      "tests": 15,
+      "failures": 0
+    }
+  ]
+}

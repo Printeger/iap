@@ -755,6 +755,7 @@ def _launch_setup(context):
     start_rviz = _as_bool(LaunchConfiguration("start_rviz").perform(context))
     record_bag = _as_bool(LaunchConfiguration("record_bag").perform(context))
     run_validator = _as_bool(LaunchConfiguration("run_validator").perform(context))
+    start_planner = _as_bool(LaunchConfiguration("start_planner").perform(context))
     use_gnss = _as_bool(LaunchConfiguration("use_gnss").perform(context))
     use_araim = _as_bool(LaunchConfiguration("use_araim").perform(context))
     allow_truth_alignment = _as_bool(
@@ -899,7 +900,11 @@ def _launch_setup(context):
             parameters=[{"traj_server/time_forward": 1.0}],
         ),
     ]
-    if planner_start_delay_s > 0.0:
+    if not start_planner:
+        planner_actions = [
+            LogInfo(msg="[test_araim] EGO planner/traj_server disabled by start_planner:=false")
+        ]
+    elif planner_start_delay_s > 0.0:
         planner_actions = [
             LogInfo(
                 msg=(
@@ -1325,6 +1330,7 @@ def generate_launch_description():
         DeclareLaunchArgument("start_rviz", default_value="true"),
         DeclareLaunchArgument("record_bag", default_value="false"),
         DeclareLaunchArgument("run_validator", default_value="true"),
+        DeclareLaunchArgument("start_planner", default_value="true"),
         DeclareLaunchArgument("bag_output_dir", default_value="/home/dev/ws_iap/src/iap/results/araim_validation/real_time_test"),
         DeclareLaunchArgument("experiment", default_value="manual"),
         DeclareLaunchArgument("config_subdir", default_value="sim_demo11"),

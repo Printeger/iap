@@ -1,0 +1,17 @@
+Running main() from /opt/ros/jazzy/src/gtest_vendor/src/gtest_main.cc
+LidarObservabilityFimTest.
+  RichCloudProducesValidInformation
+  TooFewPointsFallbackIsExplicit
+  DegenerateGeometryLowersAlpha
+  PoorCurrentTdopAndExclusionsDownweightAlpha
+  MissingCloudFallbackIsFinite
+  InvalidParamsFallbackIsFinite
+  AdvisoryFimReflectsNormalAnisotropy
+  AdvisoryFimRequiresNormals
+  CorridorGeometryWeakensAlongCorridorInformation
+  PcaRadiusChangesPrimitiveCount
+  PcaMinSupportBoundaryIsInclusive
+  VoxelSamplingReducesDenseClusterDuplicates
+  EmptyPrimitiveGenerationReportsMissingNormals
+  CloudProvidedNormalsAreUsedBeforePca
+  PrimitiveGenerationParameterCurvesExport

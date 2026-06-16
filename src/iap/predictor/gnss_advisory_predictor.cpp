@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <limits>
 
 namespace iap {
 namespace {
@@ -19,16 +20,31 @@ void copy_fim_diagnostics(const FimDiagnostic& diag,
   out.fim_fallback_reason = diag.fallback_reason;
 }
 
-std::vector<GnssGeometrySat> visible_geometry(
+struct VisibleGeometrySet {
+  std::vector<GnssGeometrySat> geom;
+  std::vector<int> visible_sat_ids;
+  std::vector<int> used_sat_ids;
+  std::vector<int> excluded_sat_ids;
+  double effective_sigma_sum = 0.0;
+  double effective_sigma_max = std::numeric_limits<double>::quiet_NaN();
+};
+
+VisibleGeometrySet visible_geometry(
     const GnssEpoch& epoch,
     const VisibilityResult& visibility) {
-  std::vector<GnssGeometrySat> geom;
-  geom.reserve(static_cast<std::size_t>(visibility.n_vis));
+  VisibleGeometrySet out;
+  out.geom.reserve(static_cast<std::size_t>(visibility.n_vis));
   for (std::size_t i = 0; i < epoch.sats.size(); ++i) {
+    const bool excluded = epoch.sats[i].excluded;
     if (i >= visibility.vis_flags.size() || !visibility.vis_flags[i]) {
+      if (excluded) {
+        out.excluded_sat_ids.push_back(epoch.sats[i].sat_id);
+      }
       continue;
     }
-    if (epoch.sats[i].excluded) {
+    out.visible_sat_ids.push_back(epoch.sats[i].sat_id);
+    if (excluded) {
+      out.excluded_sat_ids.push_back(epoch.sats[i].sat_id);
       continue;
     }
     GnssGeometrySat sat;
@@ -39,9 +55,28 @@ std::vector<GnssGeometrySat> visible_geometry(
             ? visibility.sigma_effs[i]
             : epoch.sats[i].pr_sigma;
     sat.sat_id = epoch.sats[i].sat_id;
-    geom.push_back(sat);
+    out.geom.push_back(sat);
+    out.used_sat_ids.push_back(sat.sat_id);
+    out.effective_sigma_sum += sat.pr_sigma;
+    out.effective_sigma_max =
+        std::isfinite(out.effective_sigma_max)
+            ? std::max(out.effective_sigma_max, sat.pr_sigma)
+            : sat.pr_sigma;
   }
-  return geom;
+  return out;
+}
+
+void copy_geometry_set_diagnostics(const VisibleGeometrySet& set,
+                                   GnssAdvisoryResult& out) {
+  out.n_used = static_cast<int>(set.geom.size());
+  out.n_excluded = static_cast<int>(set.excluded_sat_ids.size());
+  out.visible_sat_ids = set.visible_sat_ids;
+  out.used_sat_ids = set.used_sat_ids;
+  out.excluded_sat_ids = set.excluded_sat_ids;
+  out.effective_sigma_mean =
+      out.n_used > 0 ? set.effective_sigma_sum / static_cast<double>(out.n_used)
+                     : std::numeric_limits<double>::quiet_NaN();
+  out.effective_sigma_max = set.effective_sigma_max;
 }
 
 bool eliminate_clock_by_schur_complement(const Eigen::Matrix4d& lambda_gnss_4d,
@@ -111,8 +146,9 @@ GnssAdvisoryResult GnssAdvisoryPredictor::compute_advisory_fim(
     const GnssAdvisoryResult& base) const {
   (void)query_position;
   GnssAdvisoryResult out = base;
-  const auto geom = visible_geometry(epoch, visibility);
-  out.n_used = static_cast<int>(geom.size());
+  const auto visible_set = visible_geometry(epoch, visibility);
+  copy_geometry_set_diagnostics(visible_set, out);
+  const auto& geom = visible_set.geom;
   if (out.n_used < params_.geometry_params.min_sats) {
     out.fim_valid = false;
     out.fim_fallback_reason = "too_few_sats";
@@ -180,11 +216,12 @@ GnssAdvisoryResult GnssAdvisoryPredictor::query(
 
   const VisibilityResult visibility =
       visibility_predictor_.predict(query_position, snapshot.gnss_epoch);
-  auto geom = visible_geometry(snapshot.gnss_epoch, visibility);
+  const auto visible_set = visible_geometry(snapshot.gnss_epoch, visibility);
+  const auto& geom = visible_set.geom;
   if (static_cast<int>(geom.size()) < params_.geometry_params.min_sats) {
     auto out = fallback("too_few_sats");
     out.n_visible = visibility.n_vis;
-    out.n_used = static_cast<int>(geom.size());
+    copy_geometry_set_diagnostics(visible_set, out);
     return out;
   }
 
@@ -192,7 +229,7 @@ GnssAdvisoryResult GnssAdvisoryPredictor::query(
   if (!pl.valid) {
     auto out = fallback("singular_geometry");
     out.n_visible = visibility.n_vis;
-    out.n_used = static_cast<int>(geom.size());
+    copy_geometry_set_diagnostics(visible_set, out);
     out.n_hypotheses = pl.n_hypotheses;
     return out;
   }
@@ -215,9 +252,11 @@ GnssAdvisoryResult GnssAdvisoryPredictor::query(
   out.sigma_v = pl.sigma_ff_U;
   if (pl.S0(0, 0) > 0.0 && pl.S0(1, 1) > 0.0 && pl.S0(2, 2) > 0.0) {
     out.pdop = std::sqrt(pl.S0(0, 0) + pl.S0(1, 1) + pl.S0(2, 2));
+    out.hdop = std::sqrt(pl.S0(0, 0) + pl.S0(1, 1));
+    out.vdop = std::sqrt(pl.S0(2, 2));
   }
   out.n_visible = visibility.n_vis;
-  out.n_used = static_cast<int>(geom.size());
+  copy_geometry_set_diagnostics(visible_set, out);
   out.n_hypotheses = pl.n_hypotheses;
   return compute_advisory_fim(query_position, snapshot.gnss_epoch, visibility,
                               out);

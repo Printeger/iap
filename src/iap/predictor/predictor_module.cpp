@@ -45,6 +45,49 @@ uint32_t make_source_flags(const PredictorQueryResult& result) {
   return flags;
 }
 
+bool age_exceeds(const double query_time_s,
+                 const double stamp_s,
+                 const double max_age_s) {
+  if (max_age_s < 0.0) {
+    return false;
+  }
+  if (!std::isfinite(query_time_s) || !std::isfinite(stamp_s)) {
+    return true;
+  }
+  return query_time_s - stamp_s > max_age_s;
+}
+
+std::string stale_reason(const PredictorQueryInput& input,
+                         const PredictorFreshnessGuardParams& params) {
+  if (!params.enabled) {
+    return "";
+  }
+  if (!input.snapshot.has_pose ||
+      age_exceeds(input.query_time_s,
+                  input.snapshot.pose_stamp,
+                  params.max_odom_age_s)) {
+    return "stale_odom";
+  }
+  if (!input.snapshot.current.valid ||
+      age_exceeds(input.query_time_s,
+                  input.snapshot.current.stamp,
+                  params.max_integrity_age_s)) {
+    return "stale_integrity";
+  }
+  if (!input.snapshot.has_epoch ||
+      age_exceeds(input.query_time_s,
+                  input.snapshot.gnss_epoch.stamp,
+                  params.max_gnss_age_s)) {
+    return "stale_gnss_epoch";
+  }
+  if (age_exceeds(input.query_time_s,
+                  input.snapshot.stamp,
+                  params.max_snapshot_age_s)) {
+    return "stale_snapshot";
+  }
+  return "";
+}
+
 }  // namespace
 
 PredictorModule::PredictorModule() : PredictorModule(PredictorParams{}) {}
@@ -109,6 +152,15 @@ PredictorQueryResult PredictorModule::query(
     out.valid = false;
     out.fallback = true;
     out.fallback_reason = "unsupported_query_frame";
+    out.source_flags = make_source_flags(out);
+    return out;
+  }
+  const std::string freshness_reason = stale_reason(input, params_.freshness);
+  if (!freshness_reason.empty()) {
+    out.valid = false;
+    out.available = false;
+    out.fallback = true;
+    out.fallback_reason = freshness_reason;
     out.source_flags = make_source_flags(out);
     return out;
   }

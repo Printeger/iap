@@ -1,5 +1,5 @@
 #pragma once
-// IAP Step 6: Planner-side GNSS geometry-only advisory PL predictor.
+// Predictor-side GNSS geometry-only advisory PL component.
 // This class does NOT include current ARAIM solver headers.
 
 #include <Eigen/Core>

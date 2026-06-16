@@ -22,7 +22,7 @@
 #include <iap/integrity/integrity_report_mapping.hpp>
 #include <iap/integrity/numerical_guard.hpp>
 #include <iap/odometry/estimation_frame.hpp>
-#include <iap/planner/lidar_observability_fim.hpp>
+#include <iap/predictor/lidar_observability_fim.hpp>
 #include <iap/trunk/trunk_map.hpp>
 #include <iap/trunk/trunk_types.hpp>
 

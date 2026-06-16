@@ -1,5 +1,5 @@
 #pragma once
-// Advisory/future FIM diagnostics for planner-side prediction only.
+// Advisory/future FIM diagnostics for Predictor-side queries only.
 
 #include <Eigen/Core>
 #include <Eigen/Eigenvalues>

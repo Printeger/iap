@@ -65,6 +65,7 @@ struct IntegritySnapshot {
   bool valid = false;
 
   bool has_pose = false;
+  double pose_stamp = std::numeric_limits<double>::quiet_NaN();
   Eigen::Vector3d p_wb =
       Eigen::Vector3d::Constant(std::numeric_limits<double>::quiet_NaN());
   Eigen::Quaterniond q_wb = Eigen::Quaterniond::Identity();
@@ -93,6 +94,7 @@ struct IntegritySnapshotBuilderInput {
   double stamp = std::numeric_limits<double>::quiet_NaN();
 
   bool has_pose = false;
+  double pose_stamp = std::numeric_limits<double>::quiet_NaN();
   Eigen::Vector3d p_wb =
       Eigen::Vector3d::Constant(std::numeric_limits<double>::quiet_NaN());
   Eigen::Quaterniond q_wb = Eigen::Quaterniond::Identity();

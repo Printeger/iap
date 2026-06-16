@@ -1,0 +1,4 @@
+case_id,n_primitives,lambda_xx,lambda_yy,lambda_zz,min_eig,mid_eig,max_eig,condition,tdop,normal_diversity_score,along_corridor_sigma,degeneracy_score,allowed_for_fusion,fallback_reason
+rich,48,15.5102,15.5102,15.5102,15.5102,15.5102,15.5102,1,46.5306,1,0.253917,0,1,none
+corridor,102,0,94.1096,0,0,0,94.1096,1e+12,94.1096,0,31622.8,1,0,none
+one_sided,51,0,47.0548,0,0,0,47.0548,1e+12,47.0548,0,31622.8,1,0,none

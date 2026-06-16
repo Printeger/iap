@@ -1,0 +1,8 @@
+experiment,param_value,primitive_count,valid,fallback_reason
+pca_radius,0.45,25,1,
+pca_radius,0.75,45,1,
+pca_min_support,6,1,1,
+pca_min_support,7,0,0,missing_lidar_normals
+pca_voxel_sample,0,169,1,
+pca_voxel_sample,0.5,4,1,
+cloud_normals_first,1,5,1,

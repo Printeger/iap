@@ -939,6 +939,26 @@ struct ObservationCounts
   size_t glo = 0;
 };
 
+bool fault_matches_satellite(const FaultConfig& fault, const SatelliteEval& sat)
+{
+  if (fault.sys != SYS_NONE && fault.sys != sat.sys) {
+    return false;
+  }
+
+  if (fault.prn == sat.prn || fault.prn == sat.sat_id) {
+    return true;
+  }
+
+  if (fault.sys != SYS_NONE) {
+    const uint32_t fault_sat_id = gnss_comm::sat_no(fault.sys, fault.prn);
+    if (fault_sat_id != 0 && fault_sat_id == sat.sat_id) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
 struct VoxelKey
 {
   int x = 0;
@@ -1082,10 +1102,7 @@ public:
 
     if (enable_fault_injection) {
       for (const auto& fault : faults) {
-        if (fault.sys != SYS_NONE && fault.sys != sat.sys) {
-          continue;
-        }
-        if (fault.prn != sat.prn) {
+        if (!fault_matches_satellite(fault, sat)) {
           continue;
         }
         const double fault_t = scenario_time_s - fault.start_time_s;
@@ -1344,6 +1361,28 @@ private:
     visibility_model_.configure(
       scenario_, min_elevation_rad_, enable_skymask_, enable_map_occlusion_,
       enable_nlos_, occlusion_voxel_size_m_, raycast_max_range_m_, raycast_step_m_);
+
+    RCLCPP_INFO(
+      get_logger(),
+      "GNSS sim config: scenario_file=%s ephemeris_source=%s enabled_constellations=%s "
+      "enable_fault_injection=%s fault_count=%zu",
+      scenario_file_.c_str(), constellation_.ephemeris_source().c_str(),
+      enabled_constellations_csv_.c_str(),
+      enable_fault_injection_ ? "true" : "false", scenario_.faults.size());
+    if (enable_fault_injection_ && !scenario_.faults.empty()) {
+      const auto& first_fault = scenario_.faults.front();
+      const auto& last_fault = scenario_.faults.back();
+      RCLCPP_INFO(
+        get_logger(),
+        "GNSS fault window preview: first=[sys=%s sat=%u start=%.3f duration=%.3f drop=%s] "
+        "last=[sys=%s sat=%u start=%.3f duration=%.3f drop=%s]",
+        sys_to_constellation_name(first_fault.sys).c_str(), first_fault.prn,
+        first_fault.start_time_s, first_fault.duration_s,
+        first_fault.drop ? "true" : "false",
+        sys_to_constellation_name(last_fault.sys).c_str(), last_fault.prn,
+        last_fault.start_time_s, last_fault.duration_s,
+        last_fault.drop ? "true" : "false");
+    }
 
     if (enable_csv_log_ && !csv_log_path_.empty()) {
       csv_.open(csv_log_path_, std::ios::out | std::ios::trunc);

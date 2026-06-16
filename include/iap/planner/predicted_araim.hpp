@@ -3,11 +3,11 @@
 // Step 6: Planner prediction now uses GnssGeometryPlPredictor instead
 // of current Araim solver.
 
-#include <iap/planner/gnss_geometry_pl_predictor.hpp>
+#include <iap/predictor/gnss_geometry_pl_predictor.hpp>
 #include <iap/gnss/gnss_types.hpp>
 #include <iap/gnss/visibility_predictor.hpp>
 #include <iap/map/local_occupancy.hpp>
-#include <iap/planner/advisory_fim_types.hpp>
+#include <iap/predictor/advisory_fim_types.hpp>
 #include <Eigen/Core>
 #include <string>
 

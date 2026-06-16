@@ -1,0 +1,4 @@
+case_id,current_hpl,current_vpl,current_state,current_valid,gnss_hpl,gnss_vpl,selected_hpl,selected_vpl,copied_current_flag
+current_tiny,0.1,0.1,0,1,15.8195,122.144,15.9913,122.097,0
+current_huge,1000,1000,0,1,15.8195,122.144,15.9913,122.097,0
+current_invalid,500,600,-1,0,15.8195,122.144,15.9913,122.097,0

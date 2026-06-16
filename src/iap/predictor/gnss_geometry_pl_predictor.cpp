@@ -1,7 +1,7 @@
 // IAP Step 6: Geometry-only GNSS advisory PL predictor for planning.
 // This class does NOT include current ARAIM solver headers.
 
-#include <iap/planner/gnss_geometry_pl_predictor.hpp>
+#include <iap/predictor/gnss_geometry_pl_predictor.hpp>
 #include <Eigen/Dense>
 #include <Eigen/Eigenvalues>
 #include <algorithm>

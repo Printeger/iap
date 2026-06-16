@@ -1,0 +1,212 @@
+{
+  "tests": 19,
+  "failures": 0,
+  "disabled": 0,
+  "errors": 0,
+  "timestamp": "2026-06-11T05:18:14Z",
+  "time": "0s",
+  "name": "AllTests",
+  "testsuites": [
+    {
+      "name": "PredictorModuleTest",
+      "tests": 19,
+      "failures": 0,
+      "disabled": 0,
+      "errors": 0,
+      "timestamp": "2026-06-11T05:18:14Z",
+      "time": "0s",
+      "testsuite": [
+        {
+          "name": "GnssOpenSkyProducesFinitePlAndFim",
+          "file": "\/home\/dev\/ws_iap\/src\/iap\/test\/test_predictor_module.cpp",
+          "line": 280,
+          "status": "RUN",
+          "result": "COMPLETED",
+          "timestamp": "2026-06-11T05:18:14Z",
+          "time": "0s",
+          "classname": "PredictorModuleTest"
+        },
+        {
+          "name": "GnssMissingEpochIsExplicitFallback",
+          "file": "\/home\/dev\/ws_iap\/src\/iap\/test\/test_predictor_module.cpp",
+          "line": 300,
+          "status": "RUN",
+          "result": "COMPLETED",
+          "timestamp": "2026-06-11T05:18:14Z",
+          "time": "0s",
+          "classname": "PredictorModuleTest"
+        },
+        {
+          "name": "GnssTooFewSatsDoesNotReturnFiniteFallbackPl",
+          "file": "\/home\/dev\/ws_iap\/src\/iap\/test\/test_predictor_module.cpp",
+          "line": 314,
+          "status": "RUN",
+          "result": "COMPLETED",
+          "timestamp": "2026-06-11T05:18:14Z",
+          "time": "0s",
+          "classname": "PredictorModuleTest"
+        },
+        {
+          "name": "GnssExcludedSatellitesReduceUsedCountAndFallbackExplicitly",
+          "file": "\/home\/dev\/ws_iap\/src\/iap\/test\/test_predictor_module.cpp",
+          "line": 329,
+          "status": "RUN",
+          "result": "COMPLETED",
+          "timestamp": "2026-06-11T05:18:14Z",
+          "time": "0s",
+          "classname": "PredictorModuleTest"
+        },
+        {
+          "name": "GnssMapOcclusionReducesVisibleCountAndDegradesProtectionLevels",
+          "file": "\/home\/dev\/ws_iap\/src\/iap\/test\/test_predictor_module.cpp",
+          "line": 349,
+          "status": "RUN",
+          "result": "COMPLETED",
+          "timestamp": "2026-06-11T05:18:14Z",
+          "time": "0s",
+          "classname": "PredictorModuleTest"
+        },
+        {
+          "name": "GnssGeometryDegradationSweepIncreasesPl",
+          "file": "\/home\/dev\/ws_iap\/src\/iap\/test\/test_predictor_module.cpp",
+          "line": 390,
+          "status": "RUN",
+          "result": "COMPLETED",
+          "timestamp": "2026-06-11T05:18:14Z",
+          "time": "0s",
+          "classname": "PredictorModuleTest"
+        },
+        {
+          "name": "GnssSigmaInflationIncreasesPl",
+          "file": "\/home\/dev\/ws_iap\/src\/iap\/test\/test_predictor_module.cpp",
+          "line": 487,
+          "status": "RUN",
+          "result": "COMPLETED",
+          "timestamp": "2026-06-11T05:18:14Z",
+          "time": "0s",
+          "classname": "PredictorModuleTest"
+        },
+        {
+          "name": "CurrentIntegrityDoesNotOverrideAdvisoryPrediction",
+          "file": "\/home\/dev\/ws_iap\/src\/iap\/test\/test_predictor_module.cpp",
+          "line": 535,
+          "status": "RUN",
+          "result": "COMPLETED",
+          "timestamp": "2026-06-11T05:18:14Z",
+          "time": "0s",
+          "classname": "PredictorModuleTest"
+        },
+        {
+          "name": "LidarRichPrimitivesProducesValidFim",
+          "file": "\/home\/dev\/ws_iap\/src\/iap\/test\/test_predictor_module.cpp",
+          "line": 593,
+          "status": "RUN",
+          "result": "COMPLETED",
+          "timestamp": "2026-06-11T05:18:14Z",
+          "time": "0s",
+          "classname": "PredictorModuleTest"
+        },
+        {
+          "name": "LidarMissingPrimitivesIsExplicitFallback",
+          "file": "\/home\/dev\/ws_iap\/src\/iap\/test\/test_predictor_module.cpp",
+          "line": 612,
+          "status": "RUN",
+          "result": "COMPLETED",
+          "timestamp": "2026-06-11T05:18:14Z",
+          "time": "0s",
+          "classname": "PredictorModuleTest"
+        },
+        {
+          "name": "FusionGnssOnlyProducesFiniteAdvisoryPl",
+          "file": "\/home\/dev\/ws_iap\/src\/iap\/test\/test_predictor_module.cpp",
+          "line": 623,
+          "status": "RUN",
+          "result": "COMPLETED",
+          "timestamp": "2026-06-11T05:18:14Z",
+          "time": "0s",
+          "classname": "PredictorModuleTest"
+        },
+        {
+          "name": "ModuleFusesGnssAndLidarWithoutGridFields",
+          "file": "\/home\/dev\/ws_iap\/src\/iap\/test\/test_predictor_module.cpp",
+          "line": 645,
+          "status": "RUN",
+          "result": "COMPLETED",
+          "timestamp": "2026-06-11T05:18:14Z",
+          "time": "0s",
+          "classname": "PredictorModuleTest"
+        },
+        {
+          "name": "DegenerateLidarDoesNotReduceSelectedPl",
+          "file": "\/home\/dev\/ws_iap\/src\/iap\/test\/test_predictor_module.cpp",
+          "line": 697,
+          "status": "RUN",
+          "result": "COMPLETED",
+          "timestamp": "2026-06-11T05:18:14Z",
+          "time": "0s",
+          "classname": "PredictorModuleTest"
+        },
+        {
+          "name": "InvalidPositionKeepsQueryMetadataAndFallsBack",
+          "file": "\/home\/dev\/ws_iap\/src\/iap\/test\/test_predictor_module.cpp",
+          "line": 778,
+          "status": "RUN",
+          "result": "COMPLETED",
+          "timestamp": "2026-06-11T05:18:14Z",
+          "time": "0s",
+          "classname": "PredictorModuleTest"
+        },
+        {
+          "name": "InvalidQueryTimeFallsBackBeforePrediction",
+          "file": "\/home\/dev\/ws_iap\/src\/iap\/test\/test_predictor_module.cpp",
+          "line": 808,
+          "status": "RUN",
+          "result": "COMPLETED",
+          "timestamp": "2026-06-11T05:18:14Z",
+          "time": "0s",
+          "classname": "PredictorModuleTest"
+        },
+        {
+          "name": "InvalidHorizonFallsBackBeforePrediction",
+          "file": "\/home\/dev\/ws_iap\/src\/iap\/test\/test_predictor_module.cpp",
+          "line": 835,
+          "status": "RUN",
+          "result": "COMPLETED",
+          "timestamp": "2026-06-11T05:18:14Z",
+          "time": "0s",
+          "classname": "PredictorModuleTest"
+        },
+        {
+          "name": "UnsupportedFrameFallsBackBeforePrediction",
+          "file": "\/home\/dev\/ws_iap\/src\/iap\/test\/test_predictor_module.cpp",
+          "line": 856,
+          "status": "RUN",
+          "result": "COMPLETED",
+          "timestamp": "2026-06-11T05:18:14Z",
+          "time": "0s",
+          "classname": "PredictorModuleTest"
+        },
+        {
+          "name": "FusionRejectsIndefinitePriorButKeepsGnssOnly",
+          "file": "\/home\/dev\/ws_iap\/src\/iap\/test\/test_predictor_module.cpp",
+          "line": 877,
+          "status": "RUN",
+          "result": "COMPLETED",
+          "timestamp": "2026-06-11T05:18:14Z",
+          "time": "0s",
+          "classname": "PredictorModuleTest"
+        },
+        {
+          "name": "ModuleNoGnssNoLidarIsUnavailableWithNanPl",
+          "file": "\/home\/dev\/ws_iap\/src\/iap\/test\/test_predictor_module.cpp",
+          "line": 903,
+          "status": "RUN",
+          "result": "COMPLETED",
+          "timestamp": "2026-06-11T05:18:14Z",
+          "time": "0s",
+          "classname": "PredictorModuleTest"
+        }
+      ]
+    }
+  ]
+}

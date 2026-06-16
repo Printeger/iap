@@ -11,12 +11,13 @@
 #include <limits>
 #include <string>
 #include <utility>
+#include <vector>
 
 #include <iap/gnss/visibility_predictor.hpp>
-#include <iap/planner/advisory_fim_types.hpp>
-#include <iap/planner/gnss_geometry_pl_predictor.hpp>
+#include <iap/predictor/advisory_fim_types.hpp>
+#include <iap/predictor/gnss_geometry_pl_predictor.hpp>
 #include <iap/planner/integrity_snapshot.hpp>
-#include <iap/planner/lidar_observability_fim.hpp>
+#include <iap/predictor/lidar_observability_fim.hpp>
 
 namespace iap {
 
@@ -44,10 +45,19 @@ struct FusionAdvisoryPredictorParams {
   bool conservative_max_with_gnss = false;
 };
 
+struct PredictorFreshnessGuardParams {
+  bool enabled = false;
+  double max_odom_age_s = 0.5;
+  double max_integrity_age_s = 0.5;
+  double max_gnss_age_s = 0.5;
+  double max_snapshot_age_s = 0.5;
+};
+
 struct PredictorParams {
   GnssAdvisoryPredictorParams gnss;
   LidarAdvisoryPredictorParams lidar;
   FusionAdvisoryPredictorParams fusion;
+  PredictorFreshnessGuardParams freshness;
 };
 
 enum class PredictorInformationState {
@@ -76,10 +86,18 @@ struct GnssAdvisoryResult {
   double sigma_h = std::numeric_limits<double>::quiet_NaN();
   double sigma_v = std::numeric_limits<double>::quiet_NaN();
   double pdop = std::numeric_limits<double>::quiet_NaN();
+  double hdop = std::numeric_limits<double>::quiet_NaN();
+  double vdop = std::numeric_limits<double>::quiet_NaN();
+  double effective_sigma_mean = std::numeric_limits<double>::quiet_NaN();
+  double effective_sigma_max = std::numeric_limits<double>::quiet_NaN();
 
   int n_visible = 0;
   int n_used = 0;
   int n_hypotheses = 0;
+  int n_excluded = 0;
+  std::vector<int> visible_sat_ids;
+  std::vector<int> used_sat_ids;
+  std::vector<int> excluded_sat_ids;
 
   // R^{3x3} position-only map/ENU information after eliminating receiver
   // clock from the 4D GNSS normal matrix.

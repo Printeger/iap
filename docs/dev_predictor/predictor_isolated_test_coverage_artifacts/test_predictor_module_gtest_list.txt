@@ -1,0 +1,21 @@
+Running main() from /opt/ros/jazzy/src/gtest_vendor/src/gtest_main.cc
+PredictorModuleTest.
+  GnssOpenSkyProducesFinitePlAndFim
+  GnssMissingEpochIsExplicitFallback
+  GnssTooFewSatsDoesNotReturnFiniteFallbackPl
+  GnssExcludedSatellitesReduceUsedCountAndFallbackExplicitly
+  GnssMapOcclusionReducesVisibleCountAndDegradesProtectionLevels
+  GnssGeometryDegradationSweepIncreasesPl
+  GnssSigmaInflationIncreasesPl
+  CurrentIntegrityDoesNotOverrideAdvisoryPrediction
+  LidarRichPrimitivesProducesValidFim
+  LidarMissingPrimitivesIsExplicitFallback
+  FusionGnssOnlyProducesFiniteAdvisoryPl
+  ModuleFusesGnssAndLidarWithoutGridFields
+  DegenerateLidarDoesNotReduceSelectedPl
+  InvalidPositionKeepsQueryMetadataAndFallsBack
+  InvalidQueryTimeFallsBackBeforePrediction
+  InvalidHorizonFallsBackBeforePrediction
+  UnsupportedFrameFallsBackBeforePrediction
+  FusionRejectsIndefinitePriorButKeepsGnssOnly
+  ModuleNoGnssNoLidarIsUnavailableWithNanPl

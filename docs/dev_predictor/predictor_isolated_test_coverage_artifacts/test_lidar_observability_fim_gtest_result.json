@@ -1,0 +1,172 @@
+{
+  "tests": 15,
+  "failures": 0,
+  "disabled": 0,
+  "errors": 0,
+  "timestamp": "2026-06-11T05:18:14Z",
+  "time": "0s",
+  "name": "AllTests",
+  "testsuites": [
+    {
+      "name": "LidarObservabilityFimTest",
+      "tests": 15,
+      "failures": 0,
+      "disabled": 0,
+      "errors": 0,
+      "timestamp": "2026-06-11T05:18:14Z",
+      "time": "0s",
+      "testsuite": [
+        {
+          "name": "RichCloudProducesValidInformation",
+          "file": "\/home\/dev\/ws_iap\/src\/iap\/test\/test_lidar_observability_fim.cpp",
+          "line": 188,
+          "status": "RUN",
+          "result": "COMPLETED",
+          "timestamp": "2026-06-11T05:18:14Z",
+          "time": "0s",
+          "classname": "LidarObservabilityFimTest"
+        },
+        {
+          "name": "TooFewPointsFallbackIsExplicit",
+          "file": "\/home\/dev\/ws_iap\/src\/iap\/test\/test_lidar_observability_fim.cpp",
+          "line": 201,
+          "status": "RUN",
+          "result": "COMPLETED",
+          "timestamp": "2026-06-11T05:18:14Z",
+          "time": "0s",
+          "classname": "LidarObservabilityFimTest"
+        },
+        {
+          "name": "DegenerateGeometryLowersAlpha",
+          "file": "\/home\/dev\/ws_iap\/src\/iap\/test\/test_lidar_observability_fim.cpp",
+          "line": 217,
+          "status": "RUN",
+          "result": "COMPLETED",
+          "timestamp": "2026-06-11T05:18:14Z",
+          "time": "0s",
+          "classname": "LidarObservabilityFimTest"
+        },
+        {
+          "name": "PoorCurrentTdopAndExclusionsDownweightAlpha",
+          "file": "\/home\/dev\/ws_iap\/src\/iap\/test\/test_lidar_observability_fim.cpp",
+          "line": 233,
+          "status": "RUN",
+          "result": "COMPLETED",
+          "timestamp": "2026-06-11T05:18:14Z",
+          "time": "0s",
+          "classname": "LidarObservabilityFimTest"
+        },
+        {
+          "name": "MissingCloudFallbackIsFinite",
+          "file": "\/home\/dev\/ws_iap\/src\/iap\/test\/test_lidar_observability_fim.cpp",
+          "line": 245,
+          "status": "RUN",
+          "result": "COMPLETED",
+          "timestamp": "2026-06-11T05:18:14Z",
+          "time": "0s",
+          "classname": "LidarObservabilityFimTest"
+        },
+        {
+          "name": "InvalidParamsFallbackIsFinite",
+          "file": "\/home\/dev\/ws_iap\/src\/iap\/test\/test_lidar_observability_fim.cpp",
+          "line": 256,
+          "status": "RUN",
+          "result": "COMPLETED",
+          "timestamp": "2026-06-11T05:18:14Z",
+          "time": "0s",
+          "classname": "LidarObservabilityFimTest"
+        },
+        {
+          "name": "AdvisoryFimReflectsNormalAnisotropy",
+          "file": "\/home\/dev\/ws_iap\/src\/iap\/test\/test_lidar_observability_fim.cpp",
+          "line": 274,
+          "status": "RUN",
+          "result": "COMPLETED",
+          "timestamp": "2026-06-11T05:18:14Z",
+          "time": "0s",
+          "classname": "LidarObservabilityFimTest"
+        },
+        {
+          "name": "AdvisoryFimRequiresNormals",
+          "file": "\/home\/dev\/ws_iap\/src\/iap\/test\/test_lidar_observability_fim.cpp",
+          "line": 313,
+          "status": "RUN",
+          "result": "COMPLETED",
+          "timestamp": "2026-06-11T05:18:14Z",
+          "time": "0s",
+          "classname": "LidarObservabilityFimTest"
+        },
+        {
+          "name": "CorridorGeometryWeakensAlongCorridorInformation",
+          "file": "\/home\/dev\/ws_iap\/src\/iap\/test\/test_lidar_observability_fim.cpp",
+          "line": 323,
+          "status": "RUN",
+          "result": "COMPLETED",
+          "timestamp": "2026-06-11T05:18:14Z",
+          "time": "0s",
+          "classname": "LidarObservabilityFimTest"
+        },
+        {
+          "name": "PcaRadiusChangesPrimitiveCount",
+          "file": "\/home\/dev\/ws_iap\/src\/iap\/test\/test_lidar_observability_fim.cpp",
+          "line": 407,
+          "status": "RUN",
+          "result": "COMPLETED",
+          "timestamp": "2026-06-11T05:18:14Z",
+          "time": "0s",
+          "classname": "LidarObservabilityFimTest"
+        },
+        {
+          "name": "PcaMinSupportBoundaryIsInclusive",
+          "file": "\/home\/dev\/ws_iap\/src\/iap\/test\/test_lidar_observability_fim.cpp",
+          "line": 432,
+          "status": "RUN",
+          "result": "COMPLETED",
+          "timestamp": "2026-06-11T05:18:14Z",
+          "time": "0s",
+          "classname": "LidarObservabilityFimTest"
+        },
+        {
+          "name": "VoxelSamplingReducesDenseClusterDuplicates",
+          "file": "\/home\/dev\/ws_iap\/src\/iap\/test\/test_lidar_observability_fim.cpp",
+          "line": 463,
+          "status": "RUN",
+          "result": "COMPLETED",
+          "timestamp": "2026-06-11T05:18:14Z",
+          "time": "0s",
+          "classname": "LidarObservabilityFimTest"
+        },
+        {
+          "name": "EmptyPrimitiveGenerationReportsMissingNormals",
+          "file": "\/home\/dev\/ws_iap\/src\/iap\/test\/test_lidar_observability_fim.cpp",
+          "line": 492,
+          "status": "RUN",
+          "result": "COMPLETED",
+          "timestamp": "2026-06-11T05:18:14Z",
+          "time": "0s",
+          "classname": "LidarObservabilityFimTest"
+        },
+        {
+          "name": "CloudProvidedNormalsAreUsedBeforePca",
+          "file": "\/home\/dev\/ws_iap\/src\/iap\/test\/test_lidar_observability_fim.cpp",
+          "line": 510,
+          "status": "RUN",
+          "result": "COMPLETED",
+          "timestamp": "2026-06-11T05:18:14Z",
+          "time": "0s",
+          "classname": "LidarObservabilityFimTest"
+        },
+        {
+          "name": "PrimitiveGenerationParameterCurvesExport",
+          "file": "\/home\/dev\/ws_iap\/src\/iap\/test\/test_lidar_observability_fim.cpp",
+          "line": 541,
+          "status": "RUN",
+          "result": "COMPLETED",
+          "timestamp": "2026-06-11T05:18:14Z",
+          "time": "0s",
+          "classname": "LidarObservabilityFimTest"
+        }
+      ]
+    }
+  ]
+}

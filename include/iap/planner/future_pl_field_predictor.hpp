@@ -12,7 +12,7 @@
 
 #include <iap/map/local_occupancy.hpp>
 #include <iap/planner/integrity_snapshot.hpp>
-#include <iap/planner/lidar_observability_fim.hpp>
+#include <iap/predictor/lidar_observability_fim.hpp>
 #include <iap/util/timing_csv.hpp>
 #include <iap/planner/pl_grid.hpp>
 #include <iap/planner/predicted_araim.hpp>

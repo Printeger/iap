@@ -27,6 +27,8 @@ IntegritySnapshot IntegritySnapshotBuilder::build_from_latest(
 
   out.has_pose = input.has_pose && finite_pose(input.p_wb, input.q_wb);
   if (out.has_pose) {
+    out.pose_stamp =
+        std::isfinite(input.pose_stamp) ? input.pose_stamp : out.stamp;
     out.p_wb = input.p_wb;
     out.q_wb = input.q_wb.normalized();
   }

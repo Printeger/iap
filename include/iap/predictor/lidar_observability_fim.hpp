@@ -1,5 +1,5 @@
 #pragma once
-// Phase F: LiDAR advisory observability proxy for planner-side PL queries.
+// Predictor-side LiDAR advisory observability/FIM component.
 //
 // This is a future/advisory LOI-style proxy. It is not the certified current
 // LiDAR ARAIM monitor and must not be reported as certified LiDAR PL.
@@ -11,7 +11,7 @@
 #include <string>
 #include <vector>
 
-#include <iap/planner/advisory_fim_types.hpp>
+#include <iap/predictor/advisory_fim_types.hpp>
 #include <iap/planner/integrity_snapshot.hpp>
 
 namespace iap {

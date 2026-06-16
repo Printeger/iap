@@ -1,4 +1,4 @@
-#include <iap/planner/lidar_observability_fim.hpp>
+#include <iap/predictor/lidar_observability_fim.hpp>
 
 #include <Eigen/Eigenvalues>
 
