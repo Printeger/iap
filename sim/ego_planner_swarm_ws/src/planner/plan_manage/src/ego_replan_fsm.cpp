@@ -1,6 +1,5 @@
 
 #include <ego_planner/ego_replan_fsm.h>
-#include "path_searching/ego_timing.hpp"
 
 namespace ego_planner
 {
@@ -641,7 +640,6 @@ namespace ego_planner
 
   bool EGOReplanFSM::planFromGlobalTraj(const int trial_times /*=1*/) // zx-todo
   {
-    ego_timing::ScopedTimer t(0.0, "5.0_ego_plan_total");
     start_pt_ = odom_pos_;
     start_vel_ = odom_vel_;
     start_acc_.setZero();

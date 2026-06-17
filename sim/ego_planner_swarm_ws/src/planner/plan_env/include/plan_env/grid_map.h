@@ -6,14 +6,10 @@
 #include <cv_bridge/cv_bridge.hpp>
 #include <geometry_msgs/msg/pose_stamped.hpp>
 #include <iostream>
-#include <limits>
-#include <memory>
-#include <mutex>
 #include <random>
 #include <nav_msgs/msg/odometry.hpp>
 #include <queue>
 #include <rclcpp/rclcpp.hpp>
-#include <sensor_msgs/msg/point_cloud2.hpp>
 #include <tuple>
 #include <visualization_msgs/msg/marker.hpp>
 
@@ -148,71 +144,6 @@ struct MappingData
   EIGEN_MAKE_ALIGNED_OPERATOR_NEW
 };
 
-struct RiskOverlayVoxel
-{
-  float hpl_adv = std::numeric_limits<float>::quiet_NaN();
-  float vpl_adv = std::numeric_limits<float>::quiet_NaN();
-  double stamp_s = std::numeric_limits<double>::quiet_NaN();
-  float age_s = std::numeric_limits<float>::quiet_NaN();
-  uint32_t flags = 0u;
-  float pi_cost = std::numeric_limits<float>::quiet_NaN();
-};
-
-struct RiskOverlayQuery
-{
-  bool valid = false;
-  bool unknown = true;
-  bool stale = false;
-  Eigen::Vector3d position = Eigen::Vector3d::Constant(std::numeric_limits<double>::quiet_NaN());
-  double hpl_adv = std::numeric_limits<double>::quiet_NaN();
-  double vpl_adv = std::numeric_limits<double>::quiet_NaN();
-  double hal = std::numeric_limits<double>::quiet_NaN();
-  double val = std::numeric_limits<double>::quiet_NaN();
-  double age_s = std::numeric_limits<double>::quiet_NaN();
-  double sample_stamp_s = std::numeric_limits<double>::quiet_NaN();
-  double clock_delta_s = std::numeric_limits<double>::quiet_NaN();
-  double cost = 0.0;
-  uint32_t flags = 0u;
-  int generation = -1;
-};
-
-struct RiskOverlayStats
-{
-  bool enabled = false;
-  int generation = 0;
-  int samples_received = 0;
-  int written_voxels = 0;
-  int rejected_frames = 0;
-  int query_count = 0;
-  int query_hit_count = 0;
-  int query_unknown_count = 0;
-  int query_stale_count = 0;
-  double last_clock_delta_s = std::numeric_limits<double>::quiet_NaN();
-};
-
-struct RiskOverlayEdgeStats
-{
-  int samples = 0;
-  int hit_count = 0;
-  int unknown_count = 0;
-  int stale_count = 0;
-};
-
-struct RiskOverlaySnapshot
-{
-  bool enabled = false;
-  Eigen::Vector3d map_origin = Eigen::Vector3d::Zero();
-  Eigen::Vector3d map_min_boundary = Eigen::Vector3d::Zero();
-  Eigen::Vector3d map_max_boundary = Eigen::Vector3d::Zero();
-  Eigen::Vector3i map_voxel_num = Eigen::Vector3i::Zero();
-  double resolution = 1.0;
-  double resolution_inv = 1.0;
-  double stamp_now_s = std::numeric_limits<double>::quiet_NaN();
-  double clock_delta_s = std::numeric_limits<double>::quiet_NaN();
-  int generation = 0;
-  std::vector<RiskOverlayVoxel> voxels;
-};
-
 class GridMap
 {
 public:
@@ -253,7 +184,6 @@ public:
 
   void publishMap();
   void publishMapInflate(bool all_info = false);
-  void publishRiskOverlayDebug();
 
   void publishDepth();
 
@@ -265,25 +195,6 @@ public:
   int getVoxelNum();
   bool getOdomDepthTimeout() { return md_.flag_depth_odom_timeout_; }
 
-  bool riskOverlayEnabled() const { return risk_overlay_enabled_; }
-  bool riskOverlayUseForAStar() const { return risk_overlay_use_for_astar_; }
-  bool riskOverlayUseForBspline() const { return risk_overlay_use_for_bspline_; }
-  RiskOverlayStats riskOverlayStats() const;
-  std::shared_ptr<const RiskOverlaySnapshot> riskOverlaySnapshot();
-  bool ingestRiskOverlayCloud(const sensor_msgs::msg::PointCloud2 &msg);
-  RiskOverlayQuery queryRiskInterpolated(const Eigen::Vector3d &pos);
-  RiskOverlayQuery queryRiskInterpolated(const std::shared_ptr<const RiskOverlaySnapshot> &snapshot,
-                                         const Eigen::Vector3d &pos);
-  Eigen::Vector3d queryRiskGradient(const Eigen::Vector3d &pos);
-  Eigen::Vector3d queryRiskGradient(const std::shared_ptr<const RiskOverlaySnapshot> &snapshot,
-                                    const Eigen::Vector3d &pos);
-  bool integrateRiskOnEdge(const Eigen::Vector3d &p0, const Eigen::Vector3d &p1, double *mean_cost);
-  bool integrateRiskOnEdge(const std::shared_ptr<const RiskOverlaySnapshot> &snapshot,
-                           const Eigen::Vector3d &p0, const Eigen::Vector3d &p1, double *mean_cost);
-  bool integrateRiskOnEdge(const std::shared_ptr<const RiskOverlaySnapshot> &snapshot,
-                           const Eigen::Vector3d &p0, const Eigen::Vector3d &p1, double *mean_cost,
-                           RiskOverlayEdgeStats *edge_stats);
-
   typedef std::shared_ptr<GridMap> Ptr;
 
   EIGEN_MAKE_ALIGNED_OPERATOR_NEW
@@ -291,37 +202,6 @@ public:
 private:
   MappingParameters mp_;
   MappingData md_;
-  mutable std::mutex risk_overlay_mutex_;
-  std::vector<RiskOverlayVoxel> risk_overlay_buffer_;
-  RiskOverlayStats risk_overlay_stats_;
-  bool risk_overlay_enabled_ = false;
-  bool risk_overlay_use_for_astar_ = false;
-  bool risk_overlay_use_for_bspline_ = false;
-  std::string risk_overlay_topic_ = "/iap/integrity_front_cost_field";
-  double risk_overlay_stale_timeout_s_ = 1.0;
-  double risk_overlay_lambda_stale_ = 1.0;
-  double risk_overlay_stale_tau_s_ = 1.0;
-  double risk_overlay_lambda_unknown_ = 10.0;
-  double risk_overlay_r_soft_ = 0.75;
-  double risk_overlay_w_soft_ = 1.0;
-  double risk_overlay_w_hard_ = 10.0;
-  double risk_overlay_c_unsafe_ = 10.0;
-  double risk_overlay_eps_al_m_ = 1.0e-3;
-  double risk_overlay_gamma_h_ = 0.8;
-  double risk_overlay_gamma_v_ = 0.8;
-  double risk_overlay_drone_radius_m_ = 0.35;
-  double risk_overlay_safety_buffer_m_ = 0.20;
-  double risk_overlay_clearance_max_m_ = 5.0;
-  double risk_overlay_clearance_unknown_m_ = 1.0;
-  double risk_overlay_edge_sample_alpha_ = 0.75;
-  std::string risk_overlay_clearance_unknown_policy_ = "conservative_default";
-  bool risk_overlay_debug_publish_ = true;
-  std::string risk_overlay_debug_topic_ = "/grid_map/risk_overlay_debug";
-  double risk_overlay_debug_publish_hz_ = 2.0;
-  std::string risk_overlay_debug_color_mode_ = "cost";
-  double risk_overlay_debug_cost_max_ = 50.0;
-  rclcpp::Subscription<sensor_msgs::msg::PointCloud2>::SharedPtr risk_overlay_sub_;
-  rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr risk_overlay_debug_pub_;
 
   // get depth image and camera pose
   void depthPoseCallback(const sensor_msgs::msg::Image::ConstPtr &img,
@@ -339,24 +219,6 @@ private:
   void projectDepthImage();
   void raycastProcess();
   void clearAndInflateLocalMap();
-  void resetRiskOverlayBuffer();
-  void resetRiskOverlayBuffer(const Eigen::Vector3d &min_pos, const Eigen::Vector3d &max_pos);
-  void resetRiskOverlayIndexBox(Eigen::Vector3i min_id, Eigen::Vector3i max_id);
-  double rawOccupancyClearance(const Eigen::Vector3d &pos);
-  double riskOverlayHal(const Eigen::Vector3d &pos);
-  double riskOverlayVal(const Eigen::Vector3d &pos);
-  double riskOverlayPiCost(const Eigen::Vector3d &pos,
-                           double hpl_adv,
-                           double vpl_adv,
-                           double age_s,
-                           bool unknown,
-                           bool *stale);
-  RiskOverlayQuery queryRiskInterpolatedLocked(const Eigen::Vector3d &pos,
-                                               const std::vector<RiskOverlayVoxel> &buffer,
-                                               double now_s,
-                                               int generation);
-  RiskOverlayQuery queryRiskInterpolatedFromSnapshot(const RiskOverlaySnapshot &snapshot,
-                                                     const Eigen::Vector3d &pos);
 
   inline void inflatePoint(const Eigen::Vector3i &pt, int step, vector<Eigen::Vector3i> &pts);
   int setCacheOccupancy(Eigen::Vector3d pos, int occ);
@@ -389,7 +251,6 @@ private:
 
   rclcpp::TimerBase::SharedPtr occ_timer_;
   rclcpp::TimerBase::SharedPtr vis_timer_;
-  rclcpp::TimerBase::SharedPtr risk_overlay_debug_timer_;
 
   //
   uniform_real_distribution<double> rand_noise_;
@@ -479,7 +340,7 @@ inline void GridMap::setOccupancy(Eigen::Vector3d pos, double occ)
   Eigen::Vector3i id;
   posToIndex(pos, id);
 
-  md_.occupancy_buffer_[toAddress(id)] = occ == 1 ? mp_.clamp_max_log_ : mp_.clamp_min_log_;
+  md_.occupancy_buffer_[toAddress(id)] = occ;
 }
 
 inline int GridMap::getOccupancy(Eigen::Vector3d pos)

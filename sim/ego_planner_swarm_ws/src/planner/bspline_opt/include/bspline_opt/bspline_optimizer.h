@@ -2,18 +2,11 @@
 #define _BSPLINE_OPTIMIZER_H_
 
 #include <Eigen/Eigen>
-#include <filesystem>
-#include <limits>
-#include <fstream>
-#include <mutex>
-#include <string>
-#include <unordered_map>
 #include <path_searching/dyn_a_star.h>
 #include <bspline_opt/uniform_bspline.h>
 #include <plan_env/grid_map.h>
 #include <plan_env/obj_predictor.h>
 #include <rclcpp/rclcpp.hpp>
-#include <sensor_msgs/msg/point_cloud2.hpp>
 #include "bspline_opt/lbfgs.hpp"
 #include <traj_utils/plan_container.hpp>
 
@@ -112,22 +105,12 @@ namespace ego_planner
     void setDroneId(const int drone_id);
 
     // optional inputs
-	    void setGuidePath(const vector<Eigen::Vector3d> &guide_pt);
-	    void setWaypoints(const vector<Eigen::Vector3d> &waypts,
-	                      const vector<int> &waypt_idx); // N-2 constraints at most
-	    void setLocalTargetPt(const Eigen::Vector3d local_target_pt) { local_target_pt_ = local_target_pt; };
-	    void attachAStarIntegrityCost();
-	    bool queryFrontIntegrityCost(const Eigen::Vector3d &pos, double *cost) const;
-	    bool useIntegrityFrontSearch() const { return use_integrity_front_search_; }
-	    bool useIntegrityGlobalSearch() const { return use_integrity_global_search_; }
-	    void pinRiskOverlaySnapshot(std::shared_ptr<const RiskOverlaySnapshot> snapshot);
-	    void clearPinnedRiskOverlaySnapshot();
-	    void evaluateIntegrityCostForTest(const Eigen::MatrixXd &q, double &cost, Eigen::MatrixXd &gradient)
-	    {
-	      calcIntegrityCost(q, cost, gradient);
-	    }
+    void setGuidePath(const vector<Eigen::Vector3d> &guide_pt);
+    void setWaypoints(const vector<Eigen::Vector3d> &waypts,
+                      const vector<int> &waypt_idx); // N-2 constraints at most
+    void setLocalTargetPt(const Eigen::Vector3d local_target_pt) { local_target_pt_ = local_target_pt; };
 
-	    void optimize();
+    void optimize();
 
     ControlPoints getControlPoints() { return cps_; };
 
@@ -176,24 +159,6 @@ namespace ego_planner
     double lambda2_, new_lambda2_; // distance weight
     double lambda3_;               // feasibility weight
     double lambda4_;               // curve fitting
-	    bool use_integrity_cost_{false};
-	    double lambda_integrity_{1.0e-5};
-	    bool use_integrity_front_search_{false};
-	    bool use_integrity_global_search_{false};
-	    double lambda_integrity_front_{2.0};
-	    double integrity_front_nearest_radius_m_{1.5};
-	    double integrity_front_stale_timeout_s_{1.0};
-	    double integrity_front_cost_max_{10.0};
-	    std::string integrity_front_cost_topic_{"/iap/integrity_front_cost_field"};
-	    double integrity_field_stale_timeout_s_{0.5};
-	    double integrity_nearest_radius_m_{1.0};
-	    double integrity_cost_max_{1000.0};
-    double integrity_grad_norm_max_{0.1};
-    int integrity_min_samples_{3};
-    bool risk_overlay_use_for_astar_{false};
-    bool risk_overlay_use_for_bspline_{false};
-    int risk_overlay_bspline_samples_per_segment_{3};
-    std::string integrity_debug_csv_path_;
 
     int a;
     //
@@ -212,64 +177,6 @@ namespace ego_planner
 
     ControlPoints cps_;
 
-	    struct IntegrityCostSample
-	    {
-	      Eigen::Vector3d position = Eigen::Vector3d::Zero();
-	      double cost = 0.0;
-	      Eigen::Vector3d gradient = Eigen::Vector3d::Zero();
-	      int risk_band = 0;
-	    };
-
-	    struct FrontIntegrityCostSample
-	    {
-	      Eigen::Vector3d position = Eigen::Vector3d::Zero();
-	      double hpl = std::numeric_limits<double>::quiet_NaN();
-	      double vpl = std::numeric_limits<double>::quiet_NaN();
-	      double hal = std::numeric_limits<double>::quiet_NaN();
-	      double val = std::numeric_limits<double>::quiet_NaN();
-	      double cost = std::numeric_limits<double>::quiet_NaN();
-	    };
-
-	    mutable std::mutex integrity_mutex_;
-	    std::vector<IntegrityCostSample> integrity_samples_;
-	    double integrity_field_stamp_s_{std::numeric_limits<double>::quiet_NaN()};
-	    mutable std::mutex front_integrity_mutex_;
-	    std::vector<FrontIntegrityCostSample> front_integrity_samples_;
-	    std::unordered_map<long long, std::vector<int>> front_integrity_bins_;
-	    double front_integrity_bin_size_{1.5};
-	    double front_integrity_field_stamp_s_{std::numeric_limits<double>::quiet_NaN()};
-	    double last_integrity_warn_s_{-1.0e9};
-	    std::shared_ptr<const RiskOverlaySnapshot> pinned_risk_overlay_snapshot_;
-    int integrity_debug_seq_{0};
-    int last_integrity_samples_used_{0};
-    int last_integrity_samples_skipped_{0};
-    double last_integrity_field_age_s_{std::numeric_limits<double>::quiet_NaN()};
-    double last_integrity_nearest_dist_mean_{std::numeric_limits<double>::quiet_NaN()};
-    double last_integrity_nearest_dist_max_{std::numeric_limits<double>::quiet_NaN()};
-    double last_integrity_grad_norm_mean_{std::numeric_limits<double>::quiet_NaN()};
-    double last_integrity_grad_norm_max_{std::numeric_limits<double>::quiet_NaN()};
-    double last_integrity_cost_raw_{std::numeric_limits<double>::quiet_NaN()};
-    std::string last_integrity_risk_source_{"off"};
-    int last_integrity_overlay_generation_{-1};
-    double last_integrity_planner_now_s_{std::numeric_limits<double>::quiet_NaN()};
-    double last_integrity_sample_stamp_s_{std::numeric_limits<double>::quiet_NaN()};
-    double last_integrity_clock_delta_s_{std::numeric_limits<double>::quiet_NaN()};
-    int last_integrity_query_hit_count_{0};
-    int last_integrity_query_unknown_count_{0};
-    int last_integrity_query_stale_count_{0};
-    bool last_integrity_line_search_fail_{false};
-    bool last_integrity_step_accepted_{false};
-    double last_cost_smooth_{std::numeric_limits<double>::quiet_NaN()};
-    double last_cost_collision_{std::numeric_limits<double>::quiet_NaN()};
-    double last_cost_feasibility_{std::numeric_limits<double>::quiet_NaN()};
-    double last_cost_fitness_{std::numeric_limits<double>::quiet_NaN()};
-    double last_cost_integrity_weighted_{std::numeric_limits<double>::quiet_NaN()};
-    std::ofstream integrity_debug_csv_;
-    bool integrity_debug_csv_header_written_{false};
-	    rclcpp::Node::WeakPtr node_;
-	    rclcpp::Subscription<sensor_msgs::msg::PointCloud2>::SharedPtr integrity_cost_sub_;
-	    rclcpp::Subscription<sensor_msgs::msg::PointCloud2>::SharedPtr front_integrity_cost_sub_;
-
     /* cost function */
     /* calculate each part of cost function with control points q as input */
 
@@ -284,20 +191,6 @@ namespace ego_planner
     void calcMovingObjCost(const Eigen::MatrixXd &q, double &cost, Eigen::MatrixXd &gradient);
     void calcSwarmCost(const Eigen::MatrixXd &q, double &cost, Eigen::MatrixXd &gradient);
     void calcFitnessCost(const Eigen::MatrixXd &q, double &cost, Eigen::MatrixXd &gradient);
-	    void calcIntegrityCost(const Eigen::MatrixXd &q, double &cost, Eigen::MatrixXd &gradient);
-	    void onIntegrityCostField(const sensor_msgs::msg::PointCloud2::ConstSharedPtr msg);
-	    void onFrontIntegrityCostField(const sensor_msgs::msg::PointCloud2::ConstSharedPtr msg);
-	    void warnIntegrityCostThrottled(const std::string &message);
-	    static double normalizedFrontIntegrityCost(double hpl, double vpl, double hal, double val);
-	    static long long frontIntegrityBinKey(int ix, int iy, int iz);
-    void openIntegrityDebugCsv();
-    void writeIntegrityDebugRow(const std::string &optimizer_stage,
-                  double iteration_time_ms,
-                  double total_time_ms,
-                  double final_cost,
-                  int lbfgs_result,
-                  int restart_num,
-                  int rebound_times);
     bool check_collision_and_rebound(void);
 
     static int earlyExit(void *func_data, const double *x, const double *g, const double fx, const double xnorm, const double gnorm, const double step, int n, int k, int ls);

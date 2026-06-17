@@ -1,12 +1,5 @@
 #include "bspline_opt/bspline_optimizer.h"
 #include "bspline_opt/gradient_descent_optimizer.h"
-#include "path_searching/ego_timing.hpp"
-#include <algorithm>
-#include <cmath>
-#include <filesystem>
-#include <fstream>
-#include <iomanip>
-#include <sensor_msgs/point_cloud2_iterator.hpp>
 // using namespace std;
 
 namespace ego_planner
@@ -14,7 +7,6 @@ namespace ego_planner
 
   void BsplineOptimizer::setParam(rclcpp::Node::SharedPtr node)
   {
-    node_ = node;
 
     node->declare_parameter("optimization/lambda_smooth", -1.0);
     node->declare_parameter("optimization/lambda_collision", -1.0);
@@ -27,35 +19,6 @@ namespace ego_planner
     node->declare_parameter("optimization/max_acc", -1.0);
 
     node->declare_parameter("optimization/order", 3);
-	    node->declare_parameter("optimization/use_integrity_cost", false);
-	    node->declare_parameter("optimization/lambda_integrity", 1.0e-5);
-	    node->declare_parameter("optimization/integrity_cost_topic", std::string("/iap/integrity_cost_field"));
-	    node->declare_parameter("optimization/use_integrity_front_search", false);
-	    node->declare_parameter("optimization/use_integrity_global_search", false);
-	    node->declare_parameter("optimization/lambda_integrity_front", 2.0);
-	    node->declare_parameter("optimization/integrity_front_cost_topic", std::string("/iap/integrity_front_cost_field"));
-	    node->declare_parameter("optimization/integrity_front_nearest_radius_m", 1.5);
-	    node->declare_parameter("optimization/integrity_front_stale_timeout_s", 1.0);
-	    node->declare_parameter("optimization/integrity_front_cost_max", 10.0);
-	    node->declare_parameter("optimization/integrity_debug_csv_path",
-	                std::string("/home/dev/ws_iap/src/iap/log/latest/export/planner_integrity_cost_debug.csv"));
-    node->declare_parameter("optimization/integrity_field_stale_timeout_s", 0.5);
-    node->declare_parameter("optimization/integrity_nearest_radius_m", 1.0);
-    node->declare_parameter("optimization/integrity_cost_max", 1000.0);
-    node->declare_parameter("optimization/integrity_grad_norm_max", 0.1);
-    node->declare_parameter("optimization/integrity_min_samples", 3);
-    if (!node->has_parameter("risk_overlay/use_for_astar"))
-    {
-      node->declare_parameter("risk_overlay/use_for_astar", false);
-    }
-    if (!node->has_parameter("risk_overlay/use_for_bspline"))
-    {
-      node->declare_parameter("risk_overlay/use_for_bspline", false);
-    }
-    if (!node->has_parameter("risk_overlay/bspline_samples_per_segment"))
-    {
-      node->declare_parameter("risk_overlay/bspline_samples_per_segment", 3);
-    }
 
     node->get_parameter("optimization/lambda_smooth", lambda1_);
     node->get_parameter("optimization/lambda_collision", lambda2_);
@@ -68,420 +31,6 @@ namespace ego_planner
     node->get_parameter("optimization/max_acc", max_acc_);
 
     node->get_parameter("optimization/order", order_);
-	    node->get_parameter("optimization/use_integrity_cost", use_integrity_cost_);
-	    node->get_parameter("optimization/lambda_integrity", lambda_integrity_);
-	    node->get_parameter("optimization/use_integrity_front_search", use_integrity_front_search_);
-	    node->get_parameter("optimization/use_integrity_global_search", use_integrity_global_search_);
-	    node->get_parameter("optimization/lambda_integrity_front", lambda_integrity_front_);
-	    node->get_parameter("optimization/integrity_front_cost_topic", integrity_front_cost_topic_);
-	    node->get_parameter("optimization/integrity_front_nearest_radius_m", integrity_front_nearest_radius_m_);
-	    node->get_parameter("optimization/integrity_front_stale_timeout_s", integrity_front_stale_timeout_s_);
-	    node->get_parameter("optimization/integrity_front_cost_max", integrity_front_cost_max_);
-	    node->get_parameter("optimization/integrity_field_stale_timeout_s", integrity_field_stale_timeout_s_);
-	    node->get_parameter("optimization/integrity_nearest_radius_m", integrity_nearest_radius_m_);
-	    node->get_parameter("optimization/integrity_cost_max", integrity_cost_max_);
-    node->get_parameter("optimization/integrity_grad_norm_max", integrity_grad_norm_max_);
-    node->get_parameter("optimization/integrity_min_samples", integrity_min_samples_);
-    node->get_parameter("risk_overlay/use_for_astar", risk_overlay_use_for_astar_);
-    node->get_parameter("risk_overlay/use_for_bspline", risk_overlay_use_for_bspline_);
-    node->get_parameter("risk_overlay/bspline_samples_per_segment", risk_overlay_bspline_samples_per_segment_);
-    lambda_integrity_ = std::max(0.0, lambda_integrity_);
-    integrity_field_stale_timeout_s_ = std::max(0.0, integrity_field_stale_timeout_s_);
-	    integrity_nearest_radius_m_ = std::max(0.0, integrity_nearest_radius_m_);
-	    integrity_cost_max_ = std::max(0.0, integrity_cost_max_);
-	    integrity_grad_norm_max_ = std::max(0.0, integrity_grad_norm_max_);
-	    integrity_min_samples_ = std::max(1, integrity_min_samples_);
-	    lambda_integrity_front_ = std::max(0.0, lambda_integrity_front_);
-	    integrity_front_nearest_radius_m_ = std::max(0.0, integrity_front_nearest_radius_m_);
-	    integrity_front_stale_timeout_s_ = std::max(0.0, integrity_front_stale_timeout_s_);
-	    integrity_front_cost_max_ = std::max(0.0, integrity_front_cost_max_);
-    risk_overlay_bspline_samples_per_segment_ = std::max(1, risk_overlay_bspline_samples_per_segment_);
-
-    std::string integrity_cost_topic;
-    node->get_parameter("optimization/integrity_cost_topic", integrity_cost_topic);
-    node->get_parameter("optimization/integrity_debug_csv_path", integrity_debug_csv_path_);
-    if (use_integrity_cost_)
-    {
-      integrity_cost_sub_ = node->create_subscription<sensor_msgs::msg::PointCloud2>(
-          integrity_cost_topic,
-          rclcpp::QoS(1).best_effort(),
-          [this](const sensor_msgs::msg::PointCloud2::ConstSharedPtr msg)
-          {
-            onIntegrityCostField(msg);
-          });
-	      RCLCPP_INFO(node->get_logger(), "EGO integrity cost enabled; topic=%s lambda=%.6g",
-	                  integrity_cost_topic.c_str(), lambda_integrity_);
-	    }
-	    if (use_integrity_front_search_ || use_integrity_global_search_)
-	    {
-	      front_integrity_cost_sub_ = node->create_subscription<sensor_msgs::msg::PointCloud2>(
-	          integrity_front_cost_topic_,
-	          rclcpp::QoS(1).best_effort(),
-	          [this](const sensor_msgs::msg::PointCloud2::ConstSharedPtr msg)
-	          {
-	            onFrontIntegrityCostField(msg);
-	          });
-	      RCLCPP_INFO(node->get_logger(),
-	                  "EGO front integrity search enabled; topic=%s lambda=%.6g radius=%.3f stale=%.3f",
-	                  integrity_front_cost_topic_.c_str(), lambda_integrity_front_,
-	                  integrity_front_nearest_radius_m_, integrity_front_stale_timeout_s_);
-	    }
-	    openIntegrityDebugCsv();
-	  }
-
-	  void BsplineOptimizer::onIntegrityCostField(const sensor_msgs::msg::PointCloud2::ConstSharedPtr msg)
-	  {
-    std::vector<IntegrityCostSample> samples;
-    try
-    {
-      sensor_msgs::PointCloud2ConstIterator<float> x(*msg, "x");
-      sensor_msgs::PointCloud2ConstIterator<float> y(*msg, "y");
-      sensor_msgs::PointCloud2ConstIterator<float> z(*msg, "z");
-      sensor_msgs::PointCloud2ConstIterator<float> cost(*msg, "cost");
-      sensor_msgs::PointCloud2ConstIterator<float> grad_x(*msg, "grad_x");
-      sensor_msgs::PointCloud2ConstIterator<float> grad_y(*msg, "grad_y");
-      sensor_msgs::PointCloud2ConstIterator<float> grad_z(*msg, "grad_z");
-      sensor_msgs::PointCloud2ConstIterator<float> risk_band(*msg, "risk_band");
-      for (; x != x.end(); ++x, ++y, ++z, ++cost, ++grad_x, ++grad_y, ++grad_z, ++risk_band)
-      {
-        IntegrityCostSample sample;
-        sample.position = Eigen::Vector3d(*x, *y, *z);
-        sample.cost = *cost;
-        sample.gradient = Eigen::Vector3d(*grad_x, *grad_y, *grad_z);
-        sample.risk_band = static_cast<int>(std::lround(*risk_band));
-        if (!sample.position.allFinite() || !std::isfinite(sample.cost) ||
-            !sample.gradient.allFinite() || sample.risk_band < 0 || sample.risk_band > 3)
-        {
-          continue;
-        }
-        samples.push_back(sample);
-      }
-    }
-    catch (const std::exception &e)
-    {
-      warnIntegrityCostThrottled(std::string("invalid integrity cost field: ") + e.what());
-      return;
-    }
-
-    std::lock_guard<std::mutex> lock(integrity_mutex_);
-    integrity_samples_ = std::move(samples);
-	    integrity_field_stamp_s_ = rclcpp::Time(msg->header.stamp).seconds();
-	  }
-
-	  double BsplineOptimizer::normalizedFrontIntegrityCost(double hpl, double vpl, double hal, double val)
-	  {
-	    if (!std::isfinite(hpl) || !std::isfinite(vpl) || !std::isfinite(hal) ||
-	        !std::isfinite(val) || hal <= 1.0e-6 || val <= 1.0e-6)
-	    {
-	      return 0.0;
-	    }
-
-	    const double risk_ratio = std::max(hpl / hal, vpl / val);
-	    if (!std::isfinite(risk_ratio) || risk_ratio <= 0.7)
-	    {
-	      return 0.0;
-	    }
-	    if (risk_ratio <= 1.0)
-	    {
-	      const double t = (risk_ratio - 0.7) / 0.3;
-	      return std::clamp(t * t, 0.0, 10.0);
-	    }
-	    const double over = risk_ratio - 1.0;
-	    return std::clamp(1.0 + over * over, 0.0, 10.0);
-	  }
-
-	  long long BsplineOptimizer::frontIntegrityBinKey(int ix, int iy, int iz)
-	  {
-	    return static_cast<long long>(ix) * 73856093LL ^
-	           static_cast<long long>(iy) * 19349663LL ^
-	           static_cast<long long>(iz) * 83492791LL;
-	  }
-
-	  void BsplineOptimizer::onFrontIntegrityCostField(const sensor_msgs::msg::PointCloud2::ConstSharedPtr msg)
-	  {
-	    std::vector<FrontIntegrityCostSample> samples;
-	    try
-	    {
-	      sensor_msgs::PointCloud2ConstIterator<float> x(*msg, "x");
-	      sensor_msgs::PointCloud2ConstIterator<float> y(*msg, "y");
-	      sensor_msgs::PointCloud2ConstIterator<float> z(*msg, "z");
-	      sensor_msgs::PointCloud2ConstIterator<float> hpl(*msg, "hpl");
-	      sensor_msgs::PointCloud2ConstIterator<float> vpl(*msg, "vpl");
-	      sensor_msgs::PointCloud2ConstIterator<float> hal(*msg, "hal");
-	      sensor_msgs::PointCloud2ConstIterator<float> val(*msg, "val");
-	      sensor_msgs::PointCloud2ConstIterator<float> cost(*msg, "cost");
-	      for (; x != x.end(); ++x, ++y, ++z, ++hpl, ++vpl, ++hal, ++val, ++cost)
-	      {
-	        FrontIntegrityCostSample sample;
-	        sample.position = Eigen::Vector3d(*x, *y, *z);
-	        sample.hpl = *hpl;
-	        sample.vpl = *vpl;
-	        sample.hal = *hal;
-	        sample.val = *val;
-	        sample.cost = *cost;
-	        if (!sample.position.allFinite() || !std::isfinite(sample.hpl) ||
-	            !std::isfinite(sample.vpl) || !std::isfinite(sample.hal) ||
-	            !std::isfinite(sample.val) || sample.hal <= 1.0e-6 ||
-	            sample.val <= 1.0e-6)
-	        {
-	          continue;
-	        }
-	        samples.push_back(sample);
-	      }
-	    }
-	    catch (const std::exception &e)
-	    {
-	      warnIntegrityCostThrottled(std::string("invalid front integrity cost field: ") + e.what());
-	      return;
-	    }
-
-	    const double bin_size = std::max(0.1, integrity_front_nearest_radius_m_);
-	    std::unordered_map<long long, std::vector<int>> bins;
-	    bins.reserve(samples.size());
-	    for (int i = 0; i < static_cast<int>(samples.size()); ++i)
-	    {
-	      const Eigen::Vector3i bin = (samples[i].position / bin_size).array().floor().cast<int>();
-	      bins[frontIntegrityBinKey(bin.x(), bin.y(), bin.z())].push_back(i);
-	    }
-
-	    std::lock_guard<std::mutex> lock(front_integrity_mutex_);
-	    front_integrity_samples_ = std::move(samples);
-	    front_integrity_bins_ = std::move(bins);
-	    front_integrity_bin_size_ = bin_size;
-	    front_integrity_field_stamp_s_ = rclcpp::Time(msg->header.stamp).seconds();
-	  }
-
-	  bool BsplineOptimizer::queryFrontIntegrityCost(const Eigen::Vector3d &pos, double *cost) const
-	  {
-	    if (cost)
-	    {
-	      *cost = 0.0;
-	    }
-	    if (!cost || (!use_integrity_front_search_ && !use_integrity_global_search_) || !pos.allFinite())
-	    {
-	      return false;
-	    }
-
-	    const auto node = node_.lock();
-	    const double now_s = node ? node->now().seconds() : std::numeric_limits<double>::quiet_NaN();
-
-	    const double max_dist2 = integrity_front_nearest_radius_m_ * integrity_front_nearest_radius_m_;
-	    int best_idx = -1;
-	    double best_dist2 = max_dist2;
-	    {
-	      std::lock_guard<std::mutex> lock(front_integrity_mutex_);
-	      if (front_integrity_samples_.empty() || !std::isfinite(front_integrity_field_stamp_s_) ||
-	          !std::isfinite(now_s) || now_s - front_integrity_field_stamp_s_ > integrity_front_stale_timeout_s_)
-	      {
-	        return false;
-	      }
-	      const double bin_size = std::max(0.1, front_integrity_bin_size_);
-	      const int bin_radius = std::max(1, static_cast<int>(std::ceil(integrity_front_nearest_radius_m_ / bin_size)));
-	      const Eigen::Vector3i center_bin = (pos / bin_size).array().floor().cast<int>();
-	      for (int dx = -bin_radius; dx <= bin_radius; ++dx)
-	      {
-	        for (int dy = -bin_radius; dy <= bin_radius; ++dy)
-	        {
-	          for (int dz = -bin_radius; dz <= bin_radius; ++dz)
-	          {
-	            const auto it = front_integrity_bins_.find(frontIntegrityBinKey(center_bin.x() + dx,
-	                                                                            center_bin.y() + dy,
-	                                                                            center_bin.z() + dz));
-	            if (it == front_integrity_bins_.end())
-	            {
-	              continue;
-	            }
-	            for (const int i : it->second)
-	            {
-	              if (i < 0 || i >= static_cast<int>(front_integrity_samples_.size()))
-	              {
-	                continue;
-	              }
-	              const double dist2 = (front_integrity_samples_[i].position - pos).squaredNorm();
-	              if (std::isfinite(dist2) && dist2 <= best_dist2)
-	              {
-	                best_dist2 = dist2;
-	                best_idx = i;
-	              }
-	            }
-	          }
-	        }
-	      }
-	      if (best_idx < 0)
-	      {
-	        return false;
-	      }
-
-	      const auto &sample = front_integrity_samples_[best_idx];
-	      if (std::isfinite(sample.cost)) {
-	        *cost = std::min(std::max(0.0, sample.cost),
-	                         integrity_front_cost_max_);
-	      } else {
-	        *cost = std::min(normalizedFrontIntegrityCost(sample.hpl, sample.vpl,
-	                                                      sample.hal, sample.val),
-	                         integrity_front_cost_max_);
-	      }
-	    }
-	    return std::isfinite(*cost);
-	  }
-
-	  void BsplineOptimizer::attachAStarIntegrityCost()
-	  {
-	    if (!a_star_)
-	    {
-	      return;
-	    }
-      if (risk_overlay_use_for_astar_ && grid_map_ && grid_map_->riskOverlayEnabled())
-      {
-        a_star_->setGridMapRiskOverlayEnabled(true);
-        a_star_->setIntegrityCostParams(true, lambda_integrity_front_, integrity_front_cost_max_);
-        RCLCPP_INFO(rclcpp::get_logger("bspline_optimizer"),
-                    "A* using EGO GridMap risk overlay; lambda=%.3f", lambda_integrity_front_);
-        return;
-      }
-      a_star_->setGridMapRiskOverlayEnabled(false);
-	    a_star_->setIntegrityCostCallback(
-	        [this](const Eigen::Vector3d &pos, double *cost)
-	        {
-	          return this->queryFrontIntegrityCost(pos, cost);
-	        });
-	    a_star_->setIntegrityCostParams(use_integrity_front_search_, lambda_integrity_front_,
-	                                    integrity_front_cost_max_);
-	  }
-
-	  void BsplineOptimizer::pinRiskOverlaySnapshot(std::shared_ptr<const RiskOverlaySnapshot> snapshot)
-	  {
-	    pinned_risk_overlay_snapshot_ = std::move(snapshot);
-	  }
-
-	  void BsplineOptimizer::clearPinnedRiskOverlaySnapshot()
-	  {
-	    pinned_risk_overlay_snapshot_.reset();
-	  }
-
-	  void BsplineOptimizer::warnIntegrityCostThrottled(const std::string &message)
-	  {
-    const auto node = node_.lock();
-    if (!node)
-    {
-      return;
-    }
-    const double now_s = node->now().seconds();
-    if (now_s - last_integrity_warn_s_ < 2.0)
-    {
-      return;
-    }
-    last_integrity_warn_s_ = now_s;
-    RCLCPP_WARN(node->get_logger(), "%s", message.c_str());
-  }
-
-  void BsplineOptimizer::openIntegrityDebugCsv()
-  {
-    if ((!use_integrity_cost_ && !risk_overlay_use_for_bspline_) ||
-        integrity_debug_csv_path_.empty() || integrity_debug_csv_.is_open())
-    {
-      return;
-    }
-
-    try
-    {
-      const std::filesystem::path path(integrity_debug_csv_path_);
-      if (!path.parent_path().empty())
-      {
-        std::filesystem::create_directories(path.parent_path());
-      }
-      integrity_debug_csv_.open(path, std::ios::out | std::ios::trunc);
-      if (!integrity_debug_csv_)
-      {
-        return;
-      }
-      integrity_debug_csv_
-          << "stamp,traj_id,optimizer_stage,risk_source,overlay_generation,planner_now,sample_stamp,"
-             "age_s,clock_delta_s,query_hit_count,query_unknown_count,query_stale_count,"
-             "cost_smooth,cost_collision,cost_feasibility,cost_fitness,cost_integrity_raw,"
-             "cost_integrity_weighted,cost_total,lambda_integrity,n_integrity_samples_used,"
-             "n_integrity_samples_skipped,field_age_s,nearest_sample_dist_mean,nearest_sample_dist_max,"
-             "integrity_grad_norm_mean,integrity_grad_norm_max,step_accepted,line_search_fail,"
-             "iteration_time_ms,total_time_ms,restart_num,rebound_times,lbfgs_result\n";
-      integrity_debug_csv_header_written_ = true;
-      const auto node = node_.lock();
-      if (node)
-      {
-        RCLCPP_INFO(node->get_logger(), "EGO integrity debug CSV enabled; path=%s", path.string().c_str());
-      }
-    }
-    catch (const std::exception &e)
-    {
-      const auto node = node_.lock();
-      if (node)
-      {
-        RCLCPP_WARN(node->get_logger(), "failed to open EGO integrity debug CSV: %s", e.what());
-      }
-    }
-  }
-
-  void BsplineOptimizer::writeIntegrityDebugRow(const std::string &optimizer_stage,
-                                                double iteration_time_ms,
-                                                double total_time_ms,
-                                                double final_cost,
-                                                int lbfgs_result,
-                                                int restart_num,
-                                                int rebound_times)
-  {
-    if (!integrity_debug_csv_.is_open())
-    {
-      return;
-    }
-
-    const auto node = node_.lock();
-    const double stamp_s = node ? node->now().seconds()
-                                : std::numeric_limits<double>::quiet_NaN();
-
-    const double weighted_integrity = std::isfinite(last_integrity_cost_raw_)
-                                          ? lambda_integrity_ * last_integrity_cost_raw_
-                                          : std::numeric_limits<double>::quiet_NaN();
-    const bool line_search_fail = lbfgs_result < 0;
-    const bool step_accepted = lbfgs_result >= 0;
-    last_integrity_line_search_fail_ = line_search_fail;
-    last_integrity_step_accepted_ = step_accepted;
-
-    integrity_debug_csv_
-        << std::fixed << std::setprecision(9)
-        << stamp_s << ','
-        << integrity_debug_seq_++ << ','
-        << optimizer_stage << ','
-        << last_integrity_risk_source_ << ','
-        << last_integrity_overlay_generation_ << ','
-        << last_integrity_planner_now_s_ << ','
-        << last_integrity_sample_stamp_s_ << ','
-        << last_integrity_field_age_s_ << ','
-        << last_integrity_clock_delta_s_ << ','
-        << last_integrity_query_hit_count_ << ','
-        << last_integrity_query_unknown_count_ << ','
-        << last_integrity_query_stale_count_ << ','
-        << (std::isfinite(last_cost_smooth_) ? last_cost_smooth_ : std::numeric_limits<double>::quiet_NaN()) << ','
-        << (std::isfinite(last_cost_collision_) ? last_cost_collision_ : std::numeric_limits<double>::quiet_NaN()) << ','
-        << (std::isfinite(last_cost_feasibility_) ? last_cost_feasibility_ : std::numeric_limits<double>::quiet_NaN()) << ','
-        << (std::isfinite(last_cost_fitness_) ? last_cost_fitness_ : std::numeric_limits<double>::quiet_NaN()) << ','
-        << (std::isfinite(last_integrity_cost_raw_) ? last_integrity_cost_raw_ : std::numeric_limits<double>::quiet_NaN()) << ','
-        << weighted_integrity << ','
-        << final_cost << ','
-        << lambda_integrity_ << ','
-        << last_integrity_samples_used_ << ','
-        << last_integrity_samples_skipped_ << ','
-        << last_integrity_field_age_s_ << ','
-        << last_integrity_nearest_dist_mean_ << ','
-        << last_integrity_nearest_dist_max_ << ','
-        << last_integrity_grad_norm_mean_ << ','
-        << last_integrity_grad_norm_max_ << ','
-        << (step_accepted ? "true" : "false") << ','
-        << (line_search_fail ? "true" : "false") << ','
-        << iteration_time_ms << ','
-        << total_time_ms << ','
-        << restart_num << ','
-        << rebound_times << ','
-        << lbfgs_result << '\n';
-    integrity_debug_csv_.flush();
   }
 
   void BsplineOptimizer::setEnvironment(const GridMap::Ptr &map)
@@ -1481,219 +1030,6 @@ namespace ego_planner
     }
   }
 
-  void BsplineOptimizer::calcIntegrityCost(const Eigen::MatrixXd &q, double &cost, Eigen::MatrixXd &gradient)
-  {
-    cost = 0.0;
-    gradient.setZero();
-    last_integrity_cost_raw_ = std::numeric_limits<double>::quiet_NaN();
-    last_integrity_samples_used_ = 0;
-    last_integrity_samples_skipped_ = 0;
-    last_integrity_nearest_dist_mean_ = std::numeric_limits<double>::quiet_NaN();
-    last_integrity_nearest_dist_max_ = std::numeric_limits<double>::quiet_NaN();
-    last_integrity_grad_norm_mean_ = std::numeric_limits<double>::quiet_NaN();
-    last_integrity_grad_norm_max_ = std::numeric_limits<double>::quiet_NaN();
-    last_integrity_field_age_s_ = std::numeric_limits<double>::quiet_NaN();
-    last_integrity_risk_source_ = "off";
-    last_integrity_overlay_generation_ = -1;
-    last_integrity_planner_now_s_ = std::numeric_limits<double>::quiet_NaN();
-    last_integrity_sample_stamp_s_ = std::numeric_limits<double>::quiet_NaN();
-    last_integrity_clock_delta_s_ = std::numeric_limits<double>::quiet_NaN();
-    last_integrity_query_hit_count_ = 0;
-    last_integrity_query_unknown_count_ = 0;
-    last_integrity_query_stale_count_ = 0;
-	    if (!use_integrity_cost_ && !risk_overlay_use_for_bspline_)
-	    {
-	      return;
-	    }
-      if (risk_overlay_use_for_bspline_ && grid_map_ && grid_map_->riskOverlayEnabled())
-      {
-        if (q.cols() < 4)
-        {
-          return;
-        }
-        const int samples_per_segment = std::max(1, risk_overlay_bspline_samples_per_segment_);
-        const auto snapshot = (pinned_risk_overlay_snapshot_ && pinned_risk_overlay_snapshot_->enabled)
-                                  ? pinned_risk_overlay_snapshot_
-                                  : grid_map_->riskOverlaySnapshot();
-        if (!snapshot || !snapshot->enabled)
-        {
-          return;
-        }
-        last_integrity_risk_source_ = "overlay";
-        last_integrity_overlay_generation_ = snapshot->generation;
-        last_integrity_planner_now_s_ = snapshot->stamp_now_s;
-        last_integrity_clock_delta_s_ = snapshot->clock_delta_s;
-        double grad_norm_sum = 0.0;
-        double grad_norm_max = 0.0;
-        for (int seg = 0; seg + 3 < q.cols(); ++seg)
-        {
-          for (int s = 0; s < samples_per_segment; ++s)
-          {
-            const double u = (static_cast<double>(s) + 0.5) / static_cast<double>(samples_per_segment);
-            const double u2 = u * u;
-            const double u3 = u2 * u;
-            const double b0 = (1.0 - 3.0 * u + 3.0 * u2 - u3) / 6.0;
-            const double b1 = (4.0 - 6.0 * u2 + 3.0 * u3) / 6.0;
-            const double b2 = (1.0 + 3.0 * u + 3.0 * u2 - 3.0 * u3) / 6.0;
-            const double b3 = u3 / 6.0;
-            const Eigen::Vector3d p = b0 * q.col(seg) + b1 * q.col(seg + 1) +
-                                      b2 * q.col(seg + 2) + b3 * q.col(seg + 3);
-            const auto risk = grid_map_->queryRiskInterpolated(snapshot, p);
-            if (!std::isfinite(risk.cost))
-            {
-              ++last_integrity_samples_skipped_;
-              continue;
-            }
-            const double sample_cost = std::min(risk.cost, integrity_cost_max_);
-            Eigen::Vector3d sample_gradient = grid_map_->queryRiskGradient(snapshot, p);
-            double grad_norm = sample_gradient.norm();
-            if (integrity_grad_norm_max_ > 0.0 && std::isfinite(grad_norm) && grad_norm > integrity_grad_norm_max_)
-            {
-              sample_gradient *= integrity_grad_norm_max_ / grad_norm;
-              grad_norm = integrity_grad_norm_max_;
-            }
-            const double weight = bspline_interval_ / static_cast<double>(samples_per_segment);
-            cost += sample_cost * weight;
-            gradient.col(seg) += b0 * sample_gradient * weight;
-            gradient.col(seg + 1) += b1 * sample_gradient * weight;
-            gradient.col(seg + 2) += b2 * sample_gradient * weight;
-            gradient.col(seg + 3) += b3 * sample_gradient * weight;
-            ++last_integrity_samples_used_;
-            if (risk.valid)
-            {
-              ++last_integrity_query_hit_count_;
-            }
-            if (risk.unknown)
-            {
-              ++last_integrity_query_unknown_count_;
-            }
-            if (risk.stale)
-            {
-              ++last_integrity_query_stale_count_;
-            }
-            if (std::isfinite(risk.sample_stamp_s))
-            {
-              if (!std::isfinite(last_integrity_sample_stamp_s_))
-              {
-                last_integrity_sample_stamp_s_ = risk.sample_stamp_s;
-              }
-              else
-              {
-                last_integrity_sample_stamp_s_ = std::min(last_integrity_sample_stamp_s_, risk.sample_stamp_s);
-              }
-            }
-            if (std::isfinite(grad_norm))
-            {
-              grad_norm_sum += grad_norm;
-              grad_norm_max = std::max(grad_norm_max, grad_norm);
-            }
-          }
-        }
-        if (last_integrity_samples_used_ > 0)
-        {
-          last_integrity_grad_norm_mean_ = grad_norm_sum / static_cast<double>(last_integrity_samples_used_);
-          last_integrity_grad_norm_max_ = grad_norm_max;
-          last_integrity_field_age_s_ =
-              std::isfinite(last_integrity_planner_now_s_) && std::isfinite(last_integrity_sample_stamp_s_)
-                  ? std::max(0.0, last_integrity_planner_now_s_ - last_integrity_sample_stamp_s_)
-                  : std::numeric_limits<double>::quiet_NaN();
-        }
-        last_integrity_cost_raw_ = cost;
-        return;
-      }
-
-    last_integrity_risk_source_ = use_integrity_cost_ ? "legacy" : "off";
-	    std::vector<IntegrityCostSample> samples;
-    double field_stamp_s = std::numeric_limits<double>::quiet_NaN();
-    {
-      std::lock_guard<std::mutex> lock(integrity_mutex_);
-      samples = integrity_samples_;
-      field_stamp_s = integrity_field_stamp_s_;
-    }
-    if (samples.size() < static_cast<size_t>(integrity_min_samples_))
-    {
-      warnIntegrityCostThrottled("integrity cost enabled but insufficient valid field samples");
-      return;
-    }
-
-    const auto node = node_.lock();
-    const double now_s = node ? node->now().seconds() : std::numeric_limits<double>::quiet_NaN();
-    if (std::isfinite(now_s) && std::isfinite(field_stamp_s))
-    {
-      last_integrity_field_age_s_ = now_s - field_stamp_s;
-    }
-    if (!std::isfinite(field_stamp_s) || !std::isfinite(now_s) ||
-        now_s - field_stamp_s > integrity_field_stale_timeout_s_)
-    {
-      warnIntegrityCostThrottled("integrity cost field is stale; falling back to zero integrity cost");
-      return;
-    }
-
-    const double max_dist2 = integrity_nearest_radius_m_ * integrity_nearest_radius_m_;
-    const int begin = std::max(0, order_);
-    const int end = std::max(begin, static_cast<int>(q.cols()) - order_);
-    double nearest_dist_sum = 0.0;
-    double nearest_dist_max = 0.0;
-    double grad_norm_sum = 0.0;
-    double grad_norm_max = 0.0;
-    for (int i = begin; i < end; ++i)
-    {
-      int best_idx = -1;
-      double best_dist2 = max_dist2;
-      for (int j = 0; j < static_cast<int>(samples.size()); ++j)
-      {
-        const double dist2 = (samples[j].position - q.col(i)).squaredNorm();
-        if (std::isfinite(dist2) && dist2 <= best_dist2)
-        {
-          best_dist2 = dist2;
-          best_idx = j;
-        }
-      }
-      if (best_idx < 0)
-      {
-        ++last_integrity_samples_skipped_;
-        continue;
-      }
-      const auto &sample = samples[best_idx];
-      if (sample.risk_band == 0)
-      {
-        ++last_integrity_samples_skipped_;
-        continue;
-      }
-
-      const double sample_cost = std::min(sample.cost, integrity_cost_max_);
-      Eigen::Vector3d sample_gradient = sample.gradient;
-      const double grad_norm = sample_gradient.norm();
-      const double nearest_dist = std::sqrt(best_dist2);
-      if (integrity_grad_norm_max_ > 0.0 && std::isfinite(grad_norm) && grad_norm > integrity_grad_norm_max_)
-      {
-        sample_gradient *= integrity_grad_norm_max_ / grad_norm;
-      }
-      cost += sample_cost;
-      gradient.col(i) += sample_gradient;
-      ++last_integrity_samples_used_;
-      if (std::isfinite(nearest_dist))
-      {
-        nearest_dist_sum += nearest_dist;
-        nearest_dist_max = std::max(nearest_dist_max, nearest_dist);
-      }
-      if (std::isfinite(grad_norm))
-      {
-        grad_norm_sum += grad_norm;
-        grad_norm_max = std::max(grad_norm_max, grad_norm);
-      }
-    }
-
-    if (last_integrity_samples_used_ > 0)
-    {
-      last_integrity_nearest_dist_mean_ = nearest_dist_sum / static_cast<double>(last_integrity_samples_used_);
-      last_integrity_nearest_dist_max_ = nearest_dist_max;
-      last_integrity_grad_norm_mean_ = grad_norm_sum / static_cast<double>(last_integrity_samples_used_);
-      last_integrity_grad_norm_max_ = grad_norm_max;
-    }
-    last_integrity_cost_raw_ = cost;
-  }
-
   void BsplineOptimizer::calcSmoothnessCost(const Eigen::MatrixXd &q, double &cost,
                                             Eigen::MatrixXd &gradient, bool falg_use_jerk /* = true*/)
   {
@@ -2160,7 +1496,6 @@ namespace ego_planner
   // 设置时间间隔ts，调用rebound_optimize(final_cost)将轨迹推出障碍物，得到最优的无碰撞轨迹，并将其控制点赋值给optimal_points
   bool BsplineOptimizer::BsplineOptimizeTrajRebound(Eigen::MatrixXd &optimal_points, double ts)
   {
-    ego_timing::ScopedTimer t(0.0, "5.2_bspline_optimize");
     setBsplineInterval(ts);
 
     double final_cost;
@@ -2175,7 +1510,7 @@ namespace ego_planner
   // 得到最优的无碰撞轨迹，并将其控制点赋值给optimal_points
   bool BsplineOptimizer::BsplineOptimizeTrajRebound(Eigen::MatrixXd &optimal_points, double &final_cost, const ControlPoints &control_points, double ts)
   {
-    ego_timing::ScopedTimer t(0.0, "5.2_bspline_optimize");
+    // 将时间间隔存储到成员变量
     setBsplineInterval(ts);
 
     cps_ = control_points;
@@ -2190,7 +1525,6 @@ namespace ego_planner
   // 设置初始控制点init_points、时间间隔ts，调用refine_optimize()重新分配时间，得到最优的动力学可行轨迹，并将其控制点赋值给optimal_points
   bool BsplineOptimizer::BsplineOptimizeTrajRefine(const Eigen::MatrixXd &init_points, const double ts, Eigen::MatrixXd &optimal_points)
   {
-    ego_timing::ScopedTimer t(0.0, "5.2_bspline_optimize");
 
     // 将控制点数据存储到成员变量
     setControlPoints(init_points);
@@ -2247,8 +1581,6 @@ namespace ego_planner
       t2 = rclcpp::Clock().now();
       double time_ms = (t2 - t1).seconds() * 1000;
       double total_time_ms = (t2 - t0).seconds() * 1000;
-      writeIntegrityDebugRow("rebound", time_ms, total_time_ms, final_cost,
-                 result, restart_nums, rebound_times);
 
       /* ---------- success temporary, check collision again ---------- */
       // 收敛、达到最大迭代次数、已达到最小值或被停止，则进入碰撞检测阶段
@@ -2413,12 +1745,7 @@ namespace ego_planner
       lbfgs_params.max_iterations = 200;
       lbfgs_params.g_epsilon = 0.001;
 
-      rclcpp::Time t1 = rclcpp::Clock().now();
       int result = lbfgs::lbfgs_optimize(variable_num_, q, &final_cost, BsplineOptimizer::costFunctionRefine, NULL, NULL, this, &lbfgs_params);
-      rclcpp::Time t2 = rclcpp::Clock().now();
-      const double time_ms = (t2 - t1).seconds() * 1000;
-      writeIntegrityDebugRow("refine", time_ms, time_ms, final_cost,
-                   result, iter_count, 0);
       if (result == lbfgs::LBFGS_CONVERGENCE ||
           result == lbfgs::LBFGSERR_MAXIMUMITERATION ||
           result == lbfgs::LBFGS_ALREADY_MINIMIZED ||
@@ -2480,7 +1807,7 @@ namespace ego_planner
     memcpy(cps_.points.data() + 3 * order_, x, n * sizeof(x[0]));
 
     /* ---------- evaluate cost and gradient ---------- */
-    double f_smoothness, f_distance, f_feasibility /*, f_mov_objs*/, f_swarm, f_terminal, f_integrity;
+    double f_smoothness, f_distance, f_feasibility /*, f_mov_objs*/, f_swarm, f_terminal;
 
     Eigen::MatrixXd g_smoothness = Eigen::MatrixXd::Zero(3, cps_.size);
     Eigen::MatrixXd g_distance = Eigen::MatrixXd::Zero(3, cps_.size);
@@ -2488,7 +1815,6 @@ namespace ego_planner
     // Eigen::MatrixXd g_mov_objs = Eigen::MatrixXd::Zero(3, cps_.size);
     Eigen::MatrixXd g_swarm = Eigen::MatrixXd::Zero(3, cps_.size);
     Eigen::MatrixXd g_terminal = Eigen::MatrixXd::Zero(3, cps_.size);
-    Eigen::MatrixXd g_integrity = Eigen::MatrixXd::Zero(3, cps_.size);
 
     calcSmoothnessCost(cps_.points, f_smoothness, g_smoothness);
     calcDistanceCostRebound(cps_.points, f_distance, g_distance, iter_num_, f_smoothness);
@@ -2496,19 +1822,12 @@ namespace ego_planner
     // calcMovingObjCost(cps_.points, f_mov_objs, g_mov_objs);
     calcSwarmCost(cps_.points, f_swarm, g_swarm);
     calcTerminalCost(cps_.points, f_terminal, g_terminal);
-    calcIntegrityCost(cps_.points, f_integrity, g_integrity);
 
-    last_cost_smooth_ = lambda1_ * f_smoothness;
-    last_cost_collision_ = new_lambda2_ * (f_distance + f_swarm);
-    last_cost_feasibility_ = lambda3_ * f_feasibility;
-    last_cost_fitness_ = 0.0;
-    last_cost_integrity_weighted_ = lambda_integrity_ * f_integrity;
-
-    f_combine = last_cost_smooth_ + new_lambda2_ * f_distance + lambda3_ * f_feasibility + new_lambda2_ * f_swarm + lambda2_ * f_terminal + last_cost_integrity_weighted_;
+    f_combine = lambda1_ * f_smoothness + new_lambda2_ * f_distance + lambda3_ * f_feasibility + new_lambda2_ * f_swarm + lambda2_ * f_terminal;
     // f_combine = lambda1_ * f_smoothness + new_lambda2_ * f_distance + lambda3_ * f_feasibility + new_lambda2_ * f_mov_objs;
     // printf("origin %f %f %f %f\n", f_smoothness, f_distance, f_feasibility, f_combine);
 
-    Eigen::MatrixXd grad_3D = lambda1_ * g_smoothness + new_lambda2_ * g_distance + lambda3_ * g_feasibility + new_lambda2_ * g_swarm + lambda2_ * g_terminal + lambda_integrity_ * g_integrity;
+    Eigen::MatrixXd grad_3D = lambda1_ * g_smoothness + new_lambda2_ * g_distance + lambda3_ * g_feasibility + new_lambda2_ * g_swarm + lambda2_ * g_terminal;
     // Eigen::MatrixXd grad_3D = lambda1_ * g_smoothness + new_lambda2_ * g_distance + lambda3_ * g_feasibility + new_lambda2_ * g_mov_objs;
     memcpy(grad, grad_3D.data() + 3 * order_, n * sizeof(grad[0]));
   }
@@ -2520,31 +1839,23 @@ namespace ego_planner
     memcpy(cps_.points.data() + 3 * order_, x, n * sizeof(x[0]));
 
     /* ---------- evaluate cost and gradient ---------- */
-    double f_smoothness, f_fitness, f_feasibility, f_integrity;
+    double f_smoothness, f_fitness, f_feasibility;
 
     Eigen::MatrixXd g_smoothness = Eigen::MatrixXd::Zero(3, cps_.points.cols());
     Eigen::MatrixXd g_fitness = Eigen::MatrixXd::Zero(3, cps_.points.cols());
     Eigen::MatrixXd g_feasibility = Eigen::MatrixXd::Zero(3, cps_.points.cols());
-    Eigen::MatrixXd g_integrity = Eigen::MatrixXd::Zero(3, cps_.points.cols());
 
     // time_satrt = rclcpp::Clock().now();
 
     calcSmoothnessCost(cps_.points, f_smoothness, g_smoothness);
     calcFitnessCost(cps_.points, f_fitness, g_fitness);
     calcFeasibilityCost(cps_.points, f_feasibility, g_feasibility);
-    calcIntegrityCost(cps_.points, f_integrity, g_integrity);
-
-    last_cost_smooth_ = lambda1_ * f_smoothness;
-    last_cost_collision_ = 0.0;
-    last_cost_feasibility_ = lambda3_ * f_feasibility;
-    last_cost_fitness_ = lambda4_ * f_fitness;
-    last_cost_integrity_weighted_ = lambda_integrity_ * f_integrity;
 
     /* ---------- convert to solver format...---------- */
-    f_combine = last_cost_smooth_ + last_cost_fitness_ + last_cost_feasibility_ + last_cost_integrity_weighted_;
+    f_combine = lambda1_ * f_smoothness + lambda4_ * f_fitness + lambda3_ * f_feasibility;
     // printf("origin %f %f %f %f\n", f_smoothness, f_fitness, f_feasibility, f_combine);
 
-    Eigen::MatrixXd grad_3D = lambda1_ * g_smoothness + lambda4_ * g_fitness + lambda3_ * g_feasibility + lambda_integrity_ * g_integrity;
+    Eigen::MatrixXd grad_3D = lambda1_ * g_smoothness + lambda4_ * g_fitness + lambda3_ * g_feasibility;
     memcpy(grad, grad_3D.data() + 3 * order_, n * sizeof(grad[0]));
   }
 

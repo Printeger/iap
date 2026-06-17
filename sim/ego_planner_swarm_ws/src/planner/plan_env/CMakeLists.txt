@@ -30,7 +30,6 @@ find_package(pcl_conversions REQUIRED)
 
 if(BUILD_TESTING)
   find_package(ament_lint_auto REQUIRED)
-  find_package(ament_cmake_gtest REQUIRED)
   # the following line skips the linter which checks for copyrights
   # comment the line when a copyright and license is added to all source files
   set(ament_cmake_copyright_FOUND TRUE)
@@ -41,47 +40,35 @@ if(BUILD_TESTING)
   ament_lint_auto_find_test_dependencies()
 endif()
 
-include_directories(
-  SYSTEM
-  include
-  ${Eigen3_INCLUDE_DIRS}
-  ${PCL_INCLUDE_DIRS}
-  ${OpenCV_INCLUDE_DIRS}
+include_directories( 
+    SYSTEM 
+    include 
+    ${Eigen3_INCLUDE_DIRS} 
+    ${PCL_INCLUDE_DIRS}
+    ${OpenCV_INCLUDE_DIRS}
 )
 
 link_directories(${PCL_LIBRARY_DIRS})
 
 ament_export_include_directories(include)
 
-add_library(plan_env SHARED
-  src/grid_map.cpp
-  src/raycast.cpp
-  src/obj_predictor.cpp
-)
+add_library( plan_env SHARED
+    src/grid_map.cpp 
+    src/raycast.cpp
+    src/obj_predictor.cpp 
+    )
 
-ament_target_dependencies(plan_env
-  std_msgs visualization_msgs geometry_msgs nav_msgs rclcpp Eigen3 PCL cv_bridge message_filters pcl_conversions
-)
+ament_target_dependencies(plan_env std_msgs visualization_msgs geometry_msgs nav_msgs rclcpp Eigen3 PCL cv_bridge message_filters pcl_conversions)
 
-target_link_libraries(plan_env
+target_link_libraries( plan_env 
   ${PCL_LIBRARIES}
   ${OpenCV_LIBS}
-)
-
-if(BUILD_TESTING)
-  ament_add_gtest(test_risk_overlay test/test_risk_overlay.cpp)
-  if(TARGET test_risk_overlay)
-    ament_target_dependencies(test_risk_overlay rclcpp sensor_msgs Eigen3 PCL cv_bridge message_filters pcl_conversions)
-    target_link_libraries(test_risk_overlay plan_env)
-  endif()
-endif()
+)  
 
 add_executable(obj_generator
-  src/obj_generator.cpp
+    src/obj_generator.cpp 
 )
-ament_target_dependencies(obj_generator
-  std_msgs visualization_msgs geometry_msgs nav_msgs rclcpp Eigen3 PCL cv_bridge message_filters pcl_conversions
-)
+ament_target_dependencies(obj_generator std_msgs visualization_msgs geometry_msgs nav_msgs rclcpp Eigen3 PCL cv_bridge message_filters pcl_conversions)
 
 install(TARGETS plan_env
         DESTINATION lib

@@ -1,8 +1,4 @@
 #include "path_searching/dyn_a_star.h"
-#include "path_searching/ego_timing.hpp"
-
-#include <algorithm>
-#include <cmath>
 
 using namespace std;
 using namespace Eigen;
@@ -35,29 +31,6 @@ void AStar::initGridMap(GridMap::Ptr occ_map, const Eigen::Vector3i pool_size)
     }
 
     grid_map_ = occ_map;
-}
-
-void AStar::setIntegrityCostCallback(std::function<bool(const Eigen::Vector3d &, double *)> query)
-{
-    integrity_cost_query_ = std::move(query);
-}
-
-void AStar::setIntegrityCostParams(bool enabled, double lambda, double cost_max)
-{
-    use_integrity_cost_ = enabled;
-    lambda_integrity_cost_ = std::max(0.0, lambda);
-    integrity_cost_max_ = std::max(0.0, cost_max);
-}
-
-void AStar::pinRiskOverlaySnapshot(std::shared_ptr<const RiskOverlaySnapshot> snapshot)
-{
-    pinned_risk_overlay_snapshot_ = std::move(snapshot);
-}
-
-void AStar::clearPinnedRiskOverlaySnapshot()
-{
-    pinned_risk_overlay_snapshot_.reset();
-    active_risk_overlay_snapshot_.reset();
 }
 
 double AStar::getDiagHeu(GridNodePtr node1, GridNodePtr node2)
@@ -147,65 +120,17 @@ bool AStar::ConvertToIndexAndAdjustStartEndPoints(Vector3d start_pt, Vector3d en
 
 bool AStar::AstarSearch(const double step_size, Vector3d start_pt, Vector3d end_pt)
 {
-    ego_timing::ScopedTimer t(0.0, "5.1_astar_search");
-    return AstarSearchImpl(step_size, start_pt, end_pt, use_integrity_cost_, search_time_limit_s_);
-}
-
-bool AStar::AstarSearch(const double step_size, Vector3d start_pt, Vector3d end_pt,
-                        bool use_integrity_cost, double search_time_limit_s)
-{
-    ego_timing::ScopedTimer t(0.0, "5.1_astar_search");
-    return AstarSearchImpl(step_size, start_pt, end_pt, use_integrity_cost, search_time_limit_s);
-}
-
-bool AStar::AstarSearchImpl(const double step_size, Vector3d start_pt, Vector3d end_pt,
-                            bool use_integrity_cost, double search_time_limit_s)
-{
     rclcpp::Time time_1 = rclcpp::Clock().now();
     ++rounds_;
-    last_integrity_samples_used_ = 0;
-    last_integrity_samples_skipped_ = 0;
-    last_integrity_query_hit_count_ = 0;
-    last_integrity_query_unknown_count_ = 0;
-    last_integrity_query_stale_count_ = 0;
-    last_integrity_cost_sum_ = 0.0;
-    last_integrity_cost_max_ = 0.0;
-    last_risk_source_ = "off";
-    last_risk_overlay_generation_ = -1;
 
     step_size_ = step_size;
     inv_step_size_ = 1 / step_size;
     center_ = (start_pt + end_pt) / 2;
-    const double effective_time_limit_s = search_time_limit_s > 0.0 ? search_time_limit_s : search_time_limit_s_;
-    const bool use_integrity_this_search =
-        use_integrity_cost && lambda_integrity_cost_ > 0.0 && integrity_cost_query_;
-    const bool use_overlay_this_search =
-        use_integrity_cost && use_grid_map_risk_overlay_ && grid_map_ &&
-        grid_map_->riskOverlayEnabled() && lambda_integrity_cost_ > 0.0;
-    const bool use_pinned_overlay_snapshot =
-        use_overlay_this_search && pinned_risk_overlay_snapshot_ && pinned_risk_overlay_snapshot_->enabled;
-    active_risk_overlay_snapshot_ = use_overlay_this_search
-                                        ? (use_pinned_overlay_snapshot ? pinned_risk_overlay_snapshot_
-                                                                       : grid_map_->riskOverlaySnapshot())
-                                        : nullptr;
-    if (use_overlay_this_search && active_risk_overlay_snapshot_)
-    {
-        last_risk_source_ = "overlay";
-        last_risk_overlay_generation_ = active_risk_overlay_snapshot_->generation;
-    }
-    else if (use_integrity_this_search)
-    {
-        last_risk_source_ = "legacy";
-    }
 
     Vector3i start_idx, end_idx;
     if (!ConvertToIndexAndAdjustStartEndPoints(start_pt, end_pt, start_idx, end_idx))
     {
         RCLCPP_ERROR(rclcpp::get_logger("AstarSearch"), "Unable to handle the initial or end point, force return!");
-        if (!use_pinned_overlay_snapshot)
-        {
-            active_risk_overlay_snapshot_.reset();
-        }
         return false;
     }
 
@@ -250,16 +175,6 @@ bool AStar::AstarSearchImpl(const double step_size, Vector3d start_pt, Vector3d 
             // if((time_2 - time_1).toSec() > 0.1)
             //     ROS_WARN("Time consume in A star path finding is %f", (time_2 - time_1).toSec() );
             gridPath_ = retrievePath(current);
-            RCLCPP_INFO(rclcpp::get_logger("AstarSearch"),
-                        "A* completed risk_source=%s samples_used=%d samples_skipped=%d hit=%d unknown=%d stale=%d mean_cost=%.3f max_cost=%.3f overlay_generation=%d",
-                        last_risk_source_.c_str(), last_integrity_samples_used_, last_integrity_samples_skipped_,
-                        last_integrity_query_hit_count_, last_integrity_query_unknown_count_,
-                        last_integrity_query_stale_count_,
-                        getLastIntegrityCostMean(), last_integrity_cost_max_, last_risk_overlay_generation_);
-            if (!use_pinned_overlay_snapshot)
-            {
-                active_risk_overlay_snapshot_.reset();
-            }
             return true;
         }
         current->state = GridNode::CLOSEDSET; //move current node from open set to closed set.
@@ -299,51 +214,7 @@ bool AStar::AstarSearchImpl(const double step_size, Vector3d start_pt, Vector3d 
                     }
 
                     double static_cost = sqrt(dx * dx + dy * dy + dz * dz);
-                    double integrity_cost = 0.0;
-                    if (use_overlay_this_search)
-                    {
-                        const Eigen::Vector3d current_pos = Index2Coord(current->index);
-                        const Eigen::Vector3d neighbor_pos = Index2Coord(neighborPtr->index);
-                        RiskOverlayEdgeStats edge_stats;
-                        if (grid_map_->integrateRiskOnEdge(active_risk_overlay_snapshot_, current_pos, neighbor_pos,
-                                                           &integrity_cost, &edge_stats) &&
-                            std::isfinite(integrity_cost))
-                        {
-                            integrity_cost = std::clamp(integrity_cost, 0.0, integrity_cost_max_);
-                            ++last_integrity_samples_used_;
-                            last_integrity_cost_sum_ += integrity_cost;
-                            last_integrity_cost_max_ = std::max(last_integrity_cost_max_, integrity_cost);
-                        }
-                        else
-                        {
-                            integrity_cost = 0.0;
-                            ++last_integrity_samples_skipped_;
-                        }
-                        last_integrity_query_hit_count_ += edge_stats.hit_count;
-                        last_integrity_query_unknown_count_ += edge_stats.unknown_count;
-                        last_integrity_query_stale_count_ += edge_stats.stale_count;
-                    }
-                    else if (use_integrity_this_search)
-                    {
-                        const Eigen::Vector3d neighbor_pos = Index2Coord(neighborPtr->index);
-                        if (integrity_cost_query_(neighbor_pos, &integrity_cost) && std::isfinite(integrity_cost))
-                        {
-                            integrity_cost = std::clamp(integrity_cost, 0.0, integrity_cost_max_);
-                            ++last_integrity_samples_used_;
-                            last_integrity_cost_sum_ += integrity_cost;
-                            last_integrity_cost_max_ = std::max(last_integrity_cost_max_, integrity_cost);
-                        }
-                        else
-                        {
-                            integrity_cost = 0.0;
-                            ++last_integrity_samples_skipped_;
-                        }
-                    }
-                    const double metric_edge_length = static_cost * step_size_;
-                    const double edge_cost = use_overlay_this_search
-                                                 ? static_cost + lambda_integrity_cost_ * metric_edge_length * integrity_cost
-                                                 : static_cost * (1.0 + lambda_integrity_cost_ * integrity_cost);
-                    tentative_gScore = current->gScore + edge_cost;
+                    tentative_gScore = current->gScore + static_cost;
 
                     if (!flag_explored)
                     {
@@ -362,13 +233,9 @@ bool AStar::AstarSearchImpl(const double step_size, Vector3d start_pt, Vector3d 
                     }
                 }
         rclcpp::Time time_2 = rclcpp::Clock().now();
-        if ((time_2 - time_1).seconds() > effective_time_limit_s)
+        if ((time_2 - time_1).seconds() > 0.2)
         {
-            RCLCPP_WARN(rclcpp::get_logger("AstarSearch"), "Failed in A star path searching !!! %.3f seconds time limit exceeded.", effective_time_limit_s);
-            if (!use_pinned_overlay_snapshot)
-            {
-                active_risk_overlay_snapshot_.reset();
-            }
+            RCLCPP_WARN(rclcpp::get_logger("AstarSearch"), "Failed in A star path searching !!! 0.2 seconds time limit exceeded.");
             return false;
         }
     }
@@ -379,10 +246,6 @@ bool AStar::AstarSearchImpl(const double step_size, Vector3d start_pt, Vector3d 
         RCLCPP_WARN(rclcpp::get_logger("AstarSearch"), 
                     "Time consume in A star path finding is %.3fs, iter=%d", (time_2 - time_1).seconds(), num_iter);
 
-    if (!use_pinned_overlay_snapshot)
-    {
-        active_risk_overlay_snapshot_.reset();
-    }
     return false;
 }
 

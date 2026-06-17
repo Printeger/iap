@@ -5,9 +5,7 @@
 #include <rclcpp/rclcpp.hpp>
 #include <Eigen/Eigen>
 #include <plan_env/grid_map.h>
-#include <functional>
 #include <queue>
-#include <string>
 
 constexpr double inf = 1 >> 20;
 struct GridNode;
@@ -70,66 +68,25 @@ private:
 	Eigen::Vector3i CENTER_IDX_, POOL_SIZE_;
 	const double tie_breaker_ = 1.0 + 1.0 / 10000;
 
-		std::vector<GridNodePtr> gridPath_;
+	std::vector<GridNodePtr> gridPath_;
 
-		GridNodePtr ***GridNodeMap_;
-		std::priority_queue<GridNodePtr, std::vector<GridNodePtr>, NodeComparator> openSet_;
+	GridNodePtr ***GridNodeMap_;
+	std::priority_queue<GridNodePtr, std::vector<GridNodePtr>, NodeComparator> openSet_;
 
-			int rounds_{0};
-			bool use_integrity_cost_{false};
-			bool use_grid_map_risk_overlay_{false};
-			double lambda_integrity_cost_{0.0};
-			double integrity_cost_max_{10.0};
-			double search_time_limit_s_{0.2};
-			std::function<bool(const Eigen::Vector3d &, double *)> integrity_cost_query_;
-			std::shared_ptr<const RiskOverlaySnapshot> active_risk_overlay_snapshot_;
-			std::shared_ptr<const RiskOverlaySnapshot> pinned_risk_overlay_snapshot_;
-		int last_integrity_samples_used_{0};
-		int last_integrity_samples_skipped_{0};
-		int last_integrity_query_hit_count_{0};
-		int last_integrity_query_unknown_count_{0};
-		int last_integrity_query_stale_count_{0};
-		double last_integrity_cost_sum_{0.0};
-		double last_integrity_cost_max_{0.0};
-		std::string last_risk_source_{"off"};
-		int last_risk_overlay_generation_{-1};
+	int rounds_{0};
 
-		bool AstarSearchImpl(const double step_size, Eigen::Vector3d start_pt, Eigen::Vector3d end_pt,
-		                     bool use_integrity_cost, double search_time_limit_s);
-
-	public:
-		typedef std::shared_ptr<AStar> Ptr;
+public:
+	typedef std::shared_ptr<AStar> Ptr;
 
 	AStar(){};
 	~AStar();
 
 	void initGridMap(GridMap::Ptr occ_map, const Eigen::Vector3i pool_size);
 
-		bool AstarSearch(const double step_size, Eigen::Vector3d start_pt, Eigen::Vector3d end_pt);
-		bool AstarSearch(const double step_size, Eigen::Vector3d start_pt, Eigen::Vector3d end_pt,
-		                 bool use_integrity_cost, double search_time_limit_s);
+	bool AstarSearch(const double step_size, Eigen::Vector3d start_pt, Eigen::Vector3d end_pt);
 
-			void setIntegrityCostCallback(std::function<bool(const Eigen::Vector3d &, double *)> query);
-			void setIntegrityCostParams(bool enabled, double lambda, double cost_max);
-			void setGridMapRiskOverlayEnabled(bool enabled) { use_grid_map_risk_overlay_ = enabled; }
-			void pinRiskOverlaySnapshot(std::shared_ptr<const RiskOverlaySnapshot> snapshot);
-			void clearPinnedRiskOverlaySnapshot();
-			bool integrityCostEnabled() const { return use_integrity_cost_; }
-		int getLastIntegritySamplesUsed() const { return last_integrity_samples_used_; }
-		int getLastIntegritySamplesSkipped() const { return last_integrity_samples_skipped_; }
-		int getLastIntegrityQueryHitCount() const { return last_integrity_query_hit_count_; }
-		int getLastIntegrityQueryUnknownCount() const { return last_integrity_query_unknown_count_; }
-		int getLastIntegrityQueryStaleCount() const { return last_integrity_query_stale_count_; }
-		double getLastIntegrityCostMean() const
-		{
-			return last_integrity_samples_used_ > 0 ? last_integrity_cost_sum_ / last_integrity_samples_used_ : 0.0;
-		}
-		double getLastIntegrityCostMax() const { return last_integrity_cost_max_; }
-		const std::string &getLastRiskSource() const { return last_risk_source_; }
-		int getLastRiskOverlayGeneration() const { return last_risk_overlay_generation_; }
-
-		std::vector<Eigen::Vector3d> getPath();
-	};
+	std::vector<Eigen::Vector3d> getPath();
+};
 
 inline double AStar::getHeu(GridNodePtr node1, GridNodePtr node2)
 {
