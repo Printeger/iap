@@ -11,7 +11,7 @@
 的完整方案。核心原则：**安全陈述 $PL_{pred}<AL$ 是硬判定，只能由运行时
 监督器（P5）裁决**；后端代价 P1--P4 仅提供*偏好*，用于把轨迹引向定位条件更好的区域。
 为保持 EGO 的无-ESDF 优势，含 $AL$ 的违例项不放入后端，而归 P5。本版相对前稿的主要变更：
-新增并**前置 P5**、后端代价拆分修正（margin 项移出）、SafetyGrid 改为
+新增并**前置 P5**、后端代价拆分修正（margin 项移出）、RiskGrid 改为
 raw/derived 分层、后端代价正式采用沿轨迹采样、时间维度与非光滑处理独立成节。
 
 ---
@@ -24,7 +24,7 @@ raw/derived 分层、后端代价正式采用沿轨迹采样、时间维度与�
   - [1. 总体架构与原则](#1-总体架构与原则)
     - [1.1 两类语义的严格区分](#11-两类语义的严格区分)
     - [1.2 注入点总览与实现优先级](#12-注入点总览与实现优先级)
-  - [2. P0 —— 风险栅格 SafetyGrid（raw/derived 分层）](#2-p0--风险栅格-safetygridrawderived-分层)
+  - [2. P0 —— 风险栅格 RiskGrid（raw/derived 分层）](#2-p0--风险栅格-riskgridrawderived-分层)
     - [2.1 设计动机](#21-设计动机)
     - [2.2 查询结果的类型拆分](#22-查询结果的类型拆分)
   - [3. P5 —— Runtime Integrity Supervisor（硬安全闭环，唯一裁决者）](#3-p5--runtime-integrity-supervisor硬安全闭环唯一裁决者)
@@ -77,11 +77,11 @@ raw/derived 分层、后端代价正式采用沿轨迹采样、时间维度与�
 
 ---
 
-## 2. P0 —— 风险栅格 SafetyGrid（raw/derived 分层）
+## 2. P0 —— 风险栅格 RiskGrid（raw/derived 分层）
 
 ### 2.1 设计动机
 
-SafetyGrid 是所有完整性注入点的数据底座。它把 predictor 的输出空间化为可被
+RiskGrid 是所有完整性注入点的数据底座。它把 predictor 的输出空间化为可被
 planner 高速查询的栅格场。
 
 **分层存储（不要只存 $c_{PI}$）。**
@@ -234,7 +234,7 @@ previous-trajectory 续接、global-reference 采样、random-polynomial fallbac
 
 ## 7. P3 —— 全局参考偏置（任务级走廊）
 
-在全局参考路径采样阶段，按 SafetyGrid 的 $risk\_band$ 对参考点施加偏置，
+在全局参考路径采样阶段，按 RiskGrid 的 $risk\_band$ 对参考点施加偏置，
 使局部规划在任务级别就倾向高完整性走廊。该项近乎免费（复用既有全局参考管线），
 仅改变参考采样分布，不引入新优化变量。
 
@@ -260,13 +260,13 @@ $c_{PI}$ 项，使搜索能*生成*穿越高完整性区域的新初值，从而
 
 **实现分级。**
 
-| Stage 1 | quasi-static SafetyGrid，$query\_time=$ snapshot.stamp，$horizon=0$ |
+| Stage 1 | quasi-static RiskGrid，$query\_time=$ snapshot.stamp，$horizon=0$ |
 | Stage 2 | multi-horizon 层 $\tau=0,1,2,3$ s，optimizer 按采样时刻在层间插值 |
 | Stage 3 | 仅对*最终选定*轨迹做 exact time-aware 校验（在 P5 内执行） |
 
 > **⚠️ 硬约定**  
 > $query\_time\_s$ 与 $horizon\_s$ **必须是 finite**，*不得用 NaN 表示
-> "当前时间"*。该约定从 predictor 继承到 SafetyGrid 与 PlannerAdapter。
+> "当前时间"*。该约定从 predictor 继承到 RiskGrid 与 PlannerAdapter。
 
 ---
 
@@ -275,7 +275,7 @@ $c_{PI}$ 项，使搜索能*生成*穿越高完整性区域的新初值，从而
 | 模块 | 持有 | 不持有 |
 |---|---|---|
 | Predictor | $hpl,vpl,source\_flags$（raw 预测） | planner 策略 / cost |
-| SafetyGrid | raw layers + 缓存的 derived layers | 安全裁决权 |
+| RiskGrid | raw layers + 缓存的 derived layers | 安全裁决权 |
 | PlannerAdapter | $AL,IM,c_{PI},\nabla c_{PI}$（derived） | 原始预测语义 |
 | 后端优化器 (P1--P4) | 偏好代价 $J_I$（无 $AL$ 项） | $PL<AL$ 硬判定 |
 | **P5 Supervisor** | **$PL<AL$ 唯一硬判定权** | 形状级优化 |

@@ -143,11 +143,6 @@ add_library(iap SHARED
   src/iap/trunk/trunk_map.cpp
   src/iap/trunk/trunk_factor.cpp
   # trunk_extension.cpp is compiled into a separate ROS2 plugin (libtrunk_extension.so)
-  # planner (IAP-RQ-300/310/320)
-  src/iap/planner/trajectory_generator.cpp
-  src/iap/planner/predicted_integrity.cpp
-  # planner integrity-aware (IAP-RQ-400/410)
-  src/iap/planner/integrity_planner.cpp
   # ARAIM engine (IAP-RQ-241–246)
   src/iap/integrity/araim.cpp
   src/iap/integrity/lidar_araim.cpp

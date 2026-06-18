@@ -16,7 +16,6 @@
 #include <iap/experiments/metrics.hpp>
 #include <iap/integrity/integrity_types.hpp>
 #include <iap/integrity/integrity_monitor.hpp>
-#include <iap/planner/integrity_planner.hpp>
 
 #include <cmath>
 #include <string>
