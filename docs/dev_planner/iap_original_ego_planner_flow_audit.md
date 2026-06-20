@@ -1661,3 +1661,451 @@ path_mean_cost, path_max_cost, elapsed_ms, fallback_reason
 - `RiskGridMap` not ready 时 original A* 等价。
 - risk-aware path 超过 `max_extra_path_ratio` 时回退 original path。
 - 0.2s timeout 和 occupancy hard rejection 不变。
+
+## 16. AI 开发执行顺序与 Prompt 模板
+
+本章给出后续让 AI 按模块实现 Safety Planner 的推荐顺序和可复制 prompt。模块边界按 P0/P1/P2/P3/P4/P5 保持完整；实现风险通过每个 prompt 内部的 Phase A / Phase B / Phase C 控制。这样既避免“一个模块拆成多个独立 step”造成接口歧义，又能保持小步验证。
+
+推荐顺序:
+
+```text
+Prompt 0: baseline lock
+Prompt 1: P0 full module - RiskGridMap / RiskGridSnapshot / refresh / tests
+Prompt 2: P5 full module
+Prompt 3: P1 full module - metrics-only -> soft cost
+Prompt 4: P2 full module - metrics-only -> ranking
+Prompt 5: P3 full module - local first, global gated
+Prompt 6: P4 full module
+```
+
+### 16.1 Prompt 0: baseline lock
+
+```text
+Implementation guardrails:
+
+1. All new modules must be disabled by default.
+2. With all flags disabled, original EGO behavior must be unchanged.
+3. P0 must be implemented and unit-tested before P5/P1/P2.
+4. P1/P2/P3/P4 must use RiskGridSnapshot::queryCost().
+5. P5 must use RiskGridSnapshot::queryPredictedPL() and never use c_pi.
+6. P1 optimization must hold one fixed RiskGridSnapshot per optimize attempt.
+7. P2 ranking must use OptimizerCostBreakdown.original_cost, not total_cost.
+8. P3-global must not run unless corridor coverage is sufficient.
+9. P4 must not run unless a collision segment invokes original A*.
+10. Every stage must publish/debug enough metrics to prove fallback and baseline equivalence.
+
+Please inspect the current src/iap planner code and create a baseline implementation checklist before adding planner functionality. Do not implement P0-P5 yet.
+
+Tasks:
+- Identify the exact build command for the current iap planner packages.
+- Identify current launch/config parameters controlling EGO planner behavior.
+- Add or document a minimal baseline regression command that verifies original demo behavior with all future integrity flags disabled.
+- If adding tests, add only non-invasive tests or documentation-level test commands; do not change runtime planner behavior.
+- Confirm the current code paths for EGOReplanFSM, EGOPlannerManager, BsplineOptimizer, GridMap, AStar, and traj_server.
+
+Acceptance:
+- The repo builds with existing behavior unchanged.
+- There is a clear baseline command/checklist for later modules.
+- No P0/P1/P2/P3/P4/P5 behavior is enabled or partially wired into runtime.
+- Report any dirty/untracked files before editing and avoid reverting user changes.
+```
+
+### 16.2 Prompt 1: P0 full module - RiskGridMap / RiskGridSnapshot / refresh / tests
+
+```text
+Implementation guardrails:
+
+1. All new modules must be disabled by default.
+2. With all flags disabled, original EGO behavior must be unchanged.
+3. P0 must be implemented and unit-tested before P5/P1/P2.
+4. P1/P2/P3/P4 must use RiskGridSnapshot::queryCost().
+5. P5 must use RiskGridSnapshot::queryPredictedPL() and never use c_pi.
+6. P1 optimization must hold one fixed RiskGridSnapshot per optimize attempt.
+7. P2 ranking must use OptimizerCostBreakdown.original_cost, not total_cost.
+8. P3-global must not run unless corridor coverage is sufficient.
+9. P4 must not run unless a collision segment invokes original A*.
+10. Every stage must publish/debug enough metrics to prove fallback and baseline equivalence.
+
+Implement the full P0 module according to Chapter 10. Keep it disabled by default and do not allow it to affect trajectory selection, optimization, publishing, FSM transitions, or A*.
+
+Design source:
+- Follow Chapter 10 of src/iap/docs/dev_planner/iap_original_ego_planner_flow_audit.md.
+- Do not reuse FuturePLFieldPredictor, PLGrid, UnifiedRiskGrid, PICostAdapter, PredictedAraim, or alert_limit_model.
+
+Phase A - core data structures and unit tests:
+- Add RiskGridMapParams with horizons_s, resolution, map size, stale/unknown params.
+- Add RiskGridHealth, RiskVoxel, RiskCostSample, PredictedPLSample.
+- Add RiskGridSnapshot as an immutable/read-only active generation.
+- Add RiskGridMap with double-buffer semantics and acquireSnapshot().
+- Implement same-world-frame indexing helpers: posToIndex(), indexToPos(), toAddress(), isInMap().
+- Implement multi-horizon query semantics:
+  - query_time_s -> tau relative to snapshot stamp
+  - bracketing horizon lookup
+  - 3D trilinear interpolation inside each horizon layer
+  - temporal interpolation between horizon layers
+  - analytic spatial gradient for queryCost()
+- Unknown/stale/out-of-range must return explicit reason and must never be treated as zero risk.
+
+Phase B - refresh integration in read-only mode:
+- Add disabled-by-default planner parameters:
+  - p0.enable_risk_grid
+  - p0.resolution_m
+  - p0.size_x/y/z_m
+  - p0.horizons_s
+  - p0.refresh_period_s
+  - p0.stale_timeout_s
+  - p0.debug_metrics_enable
+- Add RiskGridMap lifecycle ownership at the planner integration layer, preferably near EGOPlannerManager initialization or a thin IAP planner adapter.
+- Add read-only refresh using the new PredictorModule query API or a clearly isolated adapter. If the current Predictor API is not ready, implement a mock/test provider and keep runtime disabled by default.
+- Optional: use EGO GridMap read-only occupancy only to skip occupied voxels or mark unknown; never modify EGO GridMap.
+- Publish/log RiskGridHealth metrics: ready, stale, age_s, valid_ratio, unknown_ratio, generation_id.
+
+Tests:
+- Unit-test indexing round trip and boundary behavior.
+- Unit-test trilinear cost interpolation and analytic gradient.
+- Unit-test temporal interpolation across horizons_s.
+- Unit-test snapshot generation_id stability.
+- Unit-test queryCost() and queryPredictedPL() semantic separation.
+- Unit-test refresh success updates generation_id once and publishes complete snapshot.
+- Unit-test refresh failure keeps previous active snapshot.
+- Unit-test disabled P0 does not allocate timers/subscribers that change planner behavior.
+- Run baseline build/test command from Prompt 0 with p0 disabled.
+
+Acceptance:
+- P0 compiles and unit tests pass.
+- P0 read-only refresh is available behind an explicit flag.
+- With p0 disabled, original planner behavior and parameters are unchanged.
+- P0 core has no dependency on Predictor internals or EGO optimizer internals.
+- Debug metrics prove snapshot age/generation/validity without affecting planning.
+```
+
+### 16.3 Prompt 2: P5 full module
+
+```text
+Implementation guardrails:
+
+1. All new modules must be disabled by default.
+2. With all flags disabled, original EGO behavior must be unchanged.
+3. P0 must be implemented and unit-tested before P5/P1/P2.
+4. P1/P2/P3/P4 must use RiskGridSnapshot::queryCost().
+5. P5 must use RiskGridSnapshot::queryPredictedPL() and never use c_pi.
+6. P1 optimization must hold one fixed RiskGridSnapshot per optimize attempt.
+7. P2 ranking must use OptimizerCostBreakdown.original_cost, not total_cost.
+8. P3-global must not run unless corridor coverage is sufficient.
+9. P4 must not run unless a collision segment invokes original A*.
+10. Every stage must publish/debug enough metrics to prove fallback and baseline equivalence.
+
+Implement the full P5 Runtime Integrity Gate according to Chapter 11. P5 must not be a recovery planner and must not generate targets.
+
+Required implementation:
+- Add disabled-by-default P5 params:
+  - p5.enable_runtime_gate
+  - p5.enable_final_gate
+  - p5.horizon_s
+  - p5.sample_dt_s
+  - p5.current_stale_to_replan_s
+  - p5.current_stale_to_emergency_s
+  - p5.future_unknown_to_emergency_s
+  - p5.current_replan_margin_m
+  - p5.current_emergency_margin_m
+  - p5.future_replan_margin_m
+  - p5.future_emergency_margin_m
+  - p5.max_bad_ratio
+  - p5.max_unknown_ratio
+  - p5.bad_tick_to_replan
+  - p5.good_tick_to_clear
+- Subscribe/read current integrity from /iap/integrity using the existing message type.
+- Use one RiskGridSnapshot per P5 runtime check and final gate check.
+- Future trajectory samples must call RiskGridSnapshot::queryPredictedPL().
+- P5 must compute AL through a P5-specific policy/config, not old alert_limit_model.
+
+Phase A - evaluator logic and tests:
+- Implement current gate: current IM, invalid/stale handling, stale escalation.
+- Implement future trajectory gate: B-spline sampling, PL query, AL query, GOOD/BAD/UNKNOWN classification.
+- Implement future unknown escalation.
+- Implement debouncing and action merge logic.
+
+Phase B - FSM hooks:
+- Runtime hook: integrate beside EGOReplanFSM::checkCollisionCallback(), preserving original depth/occupancy/swarm checks.
+- Final gate hook: after updateTrajInfo() and before publishing planning/bspline.
+- Final gate fail semantics:
+  - GEN_NEW_TRAJ: do not publish, planning attempt fails, retry state continues.
+  - REPLAN_TRAJ: do not publish, replan attempt fails, retry until budget/time limit then emergency candidate.
+
+Metrics/status:
+- Status/debug must include action, raw_action, reason, current_im_min, future_min_im, first_bad_tau, bad_ratio, unknown_ratio, current_integrity_age_s, field_generation_id, field_age_s, current_stale_duration_s, future_unknown_duration_s.
+
+Tests:
+- Unit-test current stale escalation.
+- Unit-test future unknown escalation.
+- Unit-test future BAD sample near emergency_time produces REQUEST_EMERGENCY_STOP_CANDIDATE.
+- Unit-test P5 disabled returns OK and does not affect FSM.
+- Integration-test final gate fail does not publish trajectory and reports planning failure semantics.
+- Run baseline command with p5 disabled.
+
+Acceptance:
+- P5 never uses RiskCostSample.cost or c_pi.
+- P5 never creates recovery targets.
+- P5 status makes it clear whether action came from current_invalid, current_stale, future_bad, future_unknown, or al_invalid.
+- With p5 disabled, original EGO safety callback behavior is unchanged.
+```
+
+### 16.4 Prompt 3: P1 full module - metrics-only -> soft cost
+
+```text
+Implementation guardrails:
+
+1. All new modules must be disabled by default.
+2. With all flags disabled, original EGO behavior must be unchanged.
+3. P0 must be implemented and unit-tested before P5/P1/P2.
+4. P1/P2/P3/P4 must use RiskGridSnapshot::queryCost().
+5. P5 must use RiskGridSnapshot::queryPredictedPL() and never use c_pi.
+6. P1 optimization must hold one fixed RiskGridSnapshot per optimize attempt.
+7. P2 ranking must use OptimizerCostBreakdown.original_cost, not total_cost.
+8. P3-global must not run unless corridor coverage is sufficient.
+9. P4 must not run unless a collision segment invokes original A*.
+10. Every stage must publish/debug enough metrics to prove fallback and baseline equivalence.
+
+Implement the full P1 module according to Chapter 13. Keep the module disabled by default. Implement metrics-only first inside this same module, then enable soft cost behind a separate flag.
+
+Phase A - metrics-only snapshot plumbing:
+- Add P1 params:
+  - p1.use_integrity_cost=false
+  - p1.metrics_only=true
+  - p1.sample_dt_min_s=0.1
+  - p1.sample_dt_scale=1.0
+  - p1.max_samples_per_eval=30
+  - p1.integrity_cost_max
+  - p1.integrity_grad_norm_max
+  - p1.unknown_policy=skip
+  - p1.debug_csv_enable
+- Add BsplineOptimizer::setRiskSnapshot(shared_ptr<const RiskGridSnapshot>, query_base_time_s).
+- Acquire one RiskGridSnapshot per BsplineOptimizeTrajRebound() attempt and hold it fixed during all cost evaluations.
+- Implement calcIntegrityTrajectoryCost() in metrics-only mode:
+  - sample along B-spline trajectory
+  - call RiskGridSnapshot::queryCost()
+  - compute f_integrity and g_integrity but do not add them to f_combine/grad_3D
+  - record sample_count, hit_count, miss_count, stale_count, snapshot_generation_id
+- Ensure disabled or metrics-only P1 is mathematically identical to original optimizer.
+
+Phase B - enabled soft cost:
+- Add lambda_integrity but document it as tune_by_gradient_ratio, not fixed.
+- Add target gradient ratio debug:
+  - weighted_grad_integrity_norm / grad_original_norm
+  - target range approximately 5%-20%
+- In combineCostRebound(), add:
+  - f_combine += lambda_integrity * f_integrity
+  - grad_3D += lambda_integrity * g_integrity
+- Preserve original gradient memcpy semantics.
+- Clip sample cost and gradient according to P1 params.
+- unknown_policy default remains skip; add optional small_penalty debug mode.
+- Emit debug CSV or logger metrics for f_integrity, weighted_f_integrity, grad norms, gradient ratio, miss/stale ratios, clipped_grad_count.
+
+Tests:
+- Unit-test sample count cap.
+- Unit-test snapshot generation remains fixed within one optimize attempt.
+- Unit-test metrics-only produces no change in f_combine/gradient.
+- Unit-test P1 disabled gives original-equivalent objective and gradient.
+- Unit-test P1 enabled adds expected cost/gradient on a synthetic RiskGridSnapshot.
+- Unit-test gradient clipping.
+- Unit-test unknown skip and small_penalty debug policy.
+- Integration-test small lambda run does not break collision/feasibility checks.
+- Run baseline command with p1 disabled and p1 metrics-only.
+
+Acceptance:
+- P1 uses only RiskGridSnapshot::queryCost().
+- One fixed RiskGridSnapshot is held per optimize attempt.
+- P1 cannot override obstacle collision hard safety.
+- Metrics show whether lambda_integrity is too weak or too strong.
+- No raw PL or Predictor calls occur inside optimizer.
+```
+
+### 16.5 Prompt 4: P2 full module - metrics-only -> ranking
+
+```text
+Implementation guardrails:
+
+1. All new modules must be disabled by default.
+2. With all flags disabled, original EGO behavior must be unchanged.
+3. P0 must be implemented and unit-tested before P5/P1/P2.
+4. P1/P2/P3/P4 must use RiskGridSnapshot::queryCost().
+5. P5 must use RiskGridSnapshot::queryPredictedPL() and never use c_pi.
+6. P1 optimization must hold one fixed RiskGridSnapshot per optimize attempt.
+7. P2 ranking must use OptimizerCostBreakdown.original_cost, not total_cost.
+8. P3-global must not run unless corridor coverage is sufficient.
+9. P4 must not run unless a collision segment invokes original A*.
+10. Every stage must publish/debug enough metrics to prove fallback and baseline equivalence.
+
+Implement the full P2 candidate ranking module according to Chapter 12. Keep it disabled by default and implement metrics-only first.
+
+Required implementation:
+- Add OptimizerCostBreakdown:
+  - total_cost
+  - original_cost
+  - integrity_cost
+- Modify optimizer reporting so P2 can access original_cost separately from P1 integrity_cost.
+- P2 must only run in manager/use_distinctive_trajs branch and only on optimized-success candidates.
+- Acquire one RiskGridSnapshot per candidate ranking batch.
+- Sample each candidate trajectory using RiskGridSnapshot::queryCost().
+- Compute mean_cost, max_cost, valid_ratio, unknown_ratio, stale_ratio.
+- Compute optimizer_score with candidate-set min-max normalization over original_cost:
+  - (original_cost - min_original_cost) / (max_original_cost - min_original_cost + eps)
+- Compute candidate_score = optimizer_score + lambda_candidate_integrity * integrity_score.
+
+Phase A - metrics-only:
+- metrics_only=true default.
+- Record score and all debug fields but choose original winner by original_cost.
+- If only one candidate succeeds, keep original behavior and record metrics.
+
+Phase B - ranking enabled:
+- enable_candidate_ranking=true and metrics_only=false: choose min candidate_score.
+- If RiskGridSnapshot not ready or all candidates below min_valid_ratio, fallback to original original_cost ranking.
+- The selected candidate must still pass P5 final gate when P5 is enabled.
+
+Tests:
+- Unit-test min-max normalization.
+- Unit-test P2 uses original_cost, not total_cost.
+- Unit-test metrics-only does not change winner.
+- Unit-test fallback when snapshot unavailable or valid_ratio too low.
+- Integration-test selected trajectory still passes P5 final gate.
+
+Acceptance:
+- P2 does not generate candidates.
+- P2 does not use raw PL or AL.
+- P2 cannot double count P1 integrity cost.
+- Debug metrics can explain every selected/fallback winner.
+```
+
+### 16.6 Prompt 5: P3 full module - local first, global gated
+
+```text
+Implementation guardrails:
+
+1. All new modules must be disabled by default.
+2. With all flags disabled, original EGO behavior must be unchanged.
+3. P0 must be implemented and unit-tested before P5/P1/P2.
+4. P1/P2/P3/P4 must use RiskGridSnapshot::queryCost().
+5. P5 must use RiskGridSnapshot::queryPredictedPL() and never use c_pi.
+6. P1 optimization must hold one fixed RiskGridSnapshot per optimize attempt.
+7. P2 ranking must use OptimizerCostBreakdown.original_cost, not total_cost.
+8. P3-global must not run unless corridor coverage is sufficient.
+9. P4 must not run unless a collision segment invokes original A*.
+10. Every stage must publish/debug enough metrics to prove fallback and baseline equivalence.
+
+Implement the full P3 reference bias module according to Chapter 14. Keep all P3 features disabled by default. Implement P3-local first, then P3-global only behind a strict coverage gate.
+
+Phase A - P3-local reference/local target bias:
+- Add params:
+  - p3.enable_local_reference_bias=false
+  - p3.local_bias_radius_m
+  - p3.min_improvement_ratio
+  - p3.w_risk
+  - p3.w_detour
+  - p3.w_unknown
+  - p3.debug_csv_enable
+- Hook after EGOReplanFSM::getLocalTarget() computes nominal local_target.
+- Acquire one RiskGridSnapshot for the local bias operation.
+- Sample a small local neighborhood around nominal target.
+- Filter candidates using EGO GridMap occupancy/out-of-map checks.
+- Reject candidates outside RiskGridSnapshot local coverage.
+- Score only with RiskGridSnapshot::queryCost().
+- Use biased target only if:
+  - improvement is above threshold
+  - target shift <= local_bias_radius_m
+  - target does not move task progress backwards
+  - occupancy is safe
+- Otherwise fallback to nominal local target.
+
+Phase B - P3-global coverage-gated reference bias:
+- Add params:
+  - p3.enable_global_reference_bias=false
+  - p3.min_corridor_valid_ratio
+  - p3.station_spacing_m
+  - p3.lateral_sample_step_m
+  - p3.lateral_sample_count_each_side
+  - p3.beam_width
+  - p3.max_detour_ratio
+  - p3.min_improvement_ratio
+- Before generating biased waypoints, evaluate corridor coverage:
+  - sample nominal start-goal corridor stations
+  - query RiskGridSnapshot coverage/validity at candidates
+  - require valid_ratio >= min_corridor_valid_ratio
+- If coverage is insufficient, fallback to original planGlobalTraj().
+- If coverage is sufficient:
+  - generate station/lateral candidates
+  - filter by EGO GridMap occupancy/out-of-map checks
+  - score with RiskGridSnapshot::queryCost()
+  - run lightweight beam search/DP
+  - reject path if detour > max_detour_ratio or improvement too small
+  - call planGlobalTrajWaypoints() with biased waypoints
+- Document and log that this is not a general obstacle-aware global planner.
+
+Tests:
+- Unit-test no snapshot -> nominal target.
+- Unit-test all local candidates occupied/out-of-map -> nominal target.
+- Unit-test lower-risk local candidate selected.
+- Unit-test max shift and no-backtracking constraints.
+- Unit-test insufficient corridor coverage prevents P3-global from running.
+- Unit-test enough coverage allows biased waypoint generation.
+- Unit-test detour ratio fallback.
+- Unit-test planGlobalTrajWaypoints() failure falls back to original planGlobalTraj().
+- Baseline test with p3 disabled.
+
+Acceptance:
+- P3-local uses only queryCost() and never claims global corridor selection.
+- P3-global never runs without sufficient corridor coverage.
+- P3-global uses only RiskGridSnapshot::queryCost().
+- Complex obstacle global planning is not claimed or implemented.
+- Fallback metrics prove original reference/target is preserved when conditions are not met.
+```
+
+### 16.7 Prompt 6: P4 full module
+
+```text
+Implementation guardrails:
+
+1. All new modules must be disabled by default.
+2. With all flags disabled, original EGO behavior must be unchanged.
+3. P0 must be implemented and unit-tested before P5/P1/P2.
+4. P1/P2/P3/P4 must use RiskGridSnapshot::queryCost().
+5. P5 must use RiskGridSnapshot::queryPredictedPL() and never use c_pi.
+6. P1 optimization must hold one fixed RiskGridSnapshot per optimize attempt.
+7. P2 ranking must use OptimizerCostBreakdown.original_cost, not total_cost.
+8. P3-global must not run unless corridor coverage is sufficient.
+9. P4 must not run unless a collision segment invokes original A*.
+10. Every stage must publish/debug enough metrics to prove fallback and baseline equivalence.
+
+Implement the full P4 collision-segment-only A* guide fallback according to Chapter 15. Keep P4 disabled by default.
+
+Required implementation:
+- Add params:
+  - p4.enable_risk_aware_astar=false
+  - p4.lambda_p4_risk=0.05
+  - p4.risk_cost_max
+  - p4.unknown_edge_penalty
+  - p4.max_extra_path_ratio=1.3
+  - p4.fallback_to_original_when_risk_not_ready=true
+  - p4.debug_csv_enable
+- Wire RiskGridSnapshot into AStar only for the duration of AStar::AstarSearch() calls triggered by BsplineOptimizer::initControlPoints().
+- If no collision segment exists, P4 must not run and must produce no trajectory effect.
+- Preserve checkOccupancy() hard rejection and original 0.2s timeout.
+- Implement edgeCostWithRisk() using RiskGridSnapshot::queryCost().
+- Implement original path length fallback:
+  - compare risk-aware path length to original A* path length when available
+  - if risk-aware length > max_extra_path_ratio * original length, use original path
+- If snapshot unavailable, use original A*.
+
+Tests:
+- Unit-test P4 disabled equals original edge cost.
+- Unit-test no collision segment means P4 not called.
+- Unit-test risk-aware edge cost uses queryCost().
+- Unit-test path length ratio fallback.
+- Unit-test occupancy rejection remains hard.
+- Integration-test A* timeout behavior is unchanged.
+
+Acceptance:
+- P4 only affects collision segment guide generation.
+- P4 cannot affect high-risk but collision-free trajectories.
+- Risk-aware A* path never replaces original if it violates max_extra_path_ratio.
+- Debug metrics include original_path_length, risk_path_length, path_length_ratio, risk_query_count, fallback_reason.
+```
