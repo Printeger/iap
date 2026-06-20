@@ -284,3 +284,64 @@ $c_{PI}$ 项，使搜索能*生成*穿越高完整性区域的新初值，从而
 > 后端管"往定位好的一侧贴"（preference，无 ESDF 依赖）；  
 > P5 管"是否真的满足 $PL_{pred}<AL$"（safety，唯一裁决）。  
 > 两者职责不交叉，是整套设计正确性的基石。
+
+---
+
+## 附录 A —— 当前 IAP 仓库中的 P5 接口落地补充
+
+本附录把上文 P5 概念落到当前 IAP 仓库接口上，避免将 ARAIM、Predictor、
+AL 与 planner cost field 混成同一个模块。
+
+### A.1 P5 同时接 ARAIM 与 Predictor
+
+P5 不是“接 ARAIM 还是接 Predictor”的二选一模块，而是双通道监督器：
+
+| 输入 | 当前接口 | P5 中的作用 |
+|---|---|---|
+| 当前 certified monitor | `/iap/integrity` (`iap/msg/IntegrityReport`) | 当前点硬安全检查 |
+| 未来 advisory prediction | `PredictorModule::query(PredictorQueryInput)` | 未来轨迹采样点 predicted HPL/VPL |
+| 未来 AL policy | `AlertLimitProvider` / `evaluate_alert_limit()` | 未来轨迹采样点 HAL/VAL |
+
+ARAIM 给当前 certified monitor PL/AL/IM；Predictor 给未来位置/时刻的
+advisory predicted PL；P5 才把二者和 AL policy 组合成 safety decision。
+
+### A.2 AL 的来源
+
+- 当前点 AL：直接使用 `/iap/integrity.hal` 与 `/iap/integrity.val`。
+- 未来轨迹点 AL：由 P5 内部的 `AlertLimitProvider` 计算，不由 Predictor 给出。
+- 推荐官方模式：`cloud_clearance`，基于局部地图/点云 clearance、飞行高度边界、
+  `drone_radius`、`safety_buffer`、`gamma_h/gamma_v` 计算。
+- 调试模式：`fixed_alert_limit`，只用于 bring-up，不应声称为 obstacle-aware safety。
+
+若未来点 AL 不可用，P5 必须走 conservative branch，不得把该点判为 safe。
+
+### A.3 checkTrajIntegrity 的检查对象
+
+`checkTrajIntegrity()` 应同时做两类检查：
+
+1. 当前 monitor 检查：每个 safety tick 检查 `/iap/integrity`。若
+   `integrity_state == UNSAFE` 或 `im_min < 0`，直接进入 emergency。
+2. 未来轨迹检查：从当前执行 B-spline 的 `t_cur` 开始，沿
+   `[t_cur, min(duration, t_cur+horizon)]` 采样；每个采样点查询 Predictor 的
+   `HPL_pred/VPL_pred` 和 P5 的 `HAL/VAL`，计算
+   `im_h=HAL-HPL_pred`、`im_v=VAL-VPL_pred`、`im_min=min(im_h, im_v)`。
+
+若未来 `im_min < 0` 且违例发生在 `emergency_time` 内，进入 emergency；
+若违例较远，触发 replan。Predictor unavailable/stale 或 future AL unavailable
+时走 conservative replan，连续失败或临近风险再 emergency。
+
+### A.4 `/iap/integrity_cost_field` 不是 P5 核心依赖
+
+当前仓库中的 `/iap/integrity_cost_field` 是 Phase 2 evaluator 面向 planner
+后端 soft cost 的兼容 PointCloud2 输出，包含 `hpl/vpl/hal/val/im/cost/grad`
+等字段。它适合后续 P1 后端 preference cost 使用，但不应作为 P5 的核心输入。
+
+P5 的硬安全陈述必须基于明确的 `PL_pred`、`AL`、`IM` 语义：
+
+```text
+P5: /iap/integrity + Predictor + AlertLimitProvider
+P1: 可选使用 /iap/integrity_cost_field 的 cost/grad
+```
+
+因此，不要用 `cost` 替代 `PL_pred < AL` 的硬判定，也不要把
+`/iap/integrity_cost_field` 写成 P5 的必需基础设施。
