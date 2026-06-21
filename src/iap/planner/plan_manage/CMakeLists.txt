@@ -23,13 +23,24 @@ find_package(path_searching REQUIRED)
 find_package(bspline_opt REQUIRED)
 find_package(traj_utils REQUIRED COMPONENTS traj_utils_lib)
 find_package(cv_bridge REQUIRED)
+find_package(iap REQUIRED)
+find_package(std_msgs REQUIRED)
+find_package(sensor_msgs REQUIRED)
+find_package(glog REQUIRED)
+find_package(gnss_comm REQUIRED)
 
 find_package(Eigen3 REQUIRED)
 find_package(PCL REQUIRED)
 find_package(pcl_conversions REQUIRED)
 
+find_library(IAP_MSGS_TYPESUPPORT_CPP
+  NAMES iap__rosidl_typesupport_cpp
+  REQUIRED
+)
+
 if(BUILD_TESTING)
   find_package(ament_lint_auto REQUIRED)
+  find_package(ament_cmake_gtest REQUIRED)
   # the following line skips the linter which checks for copyrights
   # comment the line when a copyright and license is added to all source files
   set(ament_cmake_copyright_FOUND TRUE)
@@ -51,6 +62,7 @@ add_executable(ego_planner_node
   src/ego_planner_node.cpp 
   src/ego_replan_fsm.cpp
   src/planner_manager.cpp
+  src/p0_risk_grid_runtime.cpp
 )
 
 # target_link_libraries(ego_planner_node
@@ -62,12 +74,15 @@ ament_target_dependencies(ego_planner_node
                           geometry_msgs quadrotor_msgs 
                           plan_env path_searching 
                           bspline_opt traj_utils 
-                          cv_bridge pcl_conversions )
+                          cv_bridge pcl_conversions
+                          std_msgs sensor_msgs gnss_comm )
 
 find_library(TRAJ_UTILS_LIB traj_utils_lib PATHS ${traj_utils_LIBRARY_DIRS})
 
 target_link_libraries(ego_planner_node
     ${TRAJ_UTILS_LIB}
+    iap::iap
+    ${IAP_MSGS_TYPESUPPORT_CPP}
 )
 
 add_executable(traj_server src/traj_server.cpp)
@@ -78,6 +93,20 @@ ament_target_dependencies(traj_server
                           quadrotor_msgs plan_env 
                           path_searching bspline_opt 
                           traj_utils cv_bridge pcl_conversions)
+
+if(BUILD_TESTING)
+  ament_add_gtest(test_p0_risk_grid_runtime
+    test/test_p0_risk_grid_runtime.cpp
+    src/p0_risk_grid_runtime.cpp
+  )
+  ament_target_dependencies(test_p0_risk_grid_runtime
+    rclcpp nav_msgs geometry_msgs std_msgs sensor_msgs gnss_comm iap
+  )
+  target_link_libraries(test_p0_risk_grid_runtime
+    iap::iap
+    ${IAP_MSGS_TYPESUPPORT_CPP}
+  )
+endif()
 
 # Install targets
 install(

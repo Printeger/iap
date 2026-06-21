@@ -1,5 +1,6 @@
 // #include <fstream>
 #include <ego_planner/planner_manager.h>
+#include <ego_planner/p0_risk_grid_runtime.h>
 #include <thread>
 #include "visualization_msgs/msg/marker.hpp" // zx-todo
 
@@ -41,6 +42,7 @@ namespace ego_planner
     bspline_optimizer_->setEnvironment(grid_map_, obj_predictor_);
     bspline_optimizer_->a_star_.reset(new AStar);
     bspline_optimizer_->a_star_->initGridMap(grid_map_, Eigen::Vector3i(100, 100, 100));
+    p0_risk_grid_runtime_ = P0RiskGridRuntime::createIfEnabled(node);
 
     visualization_ = vis;
   }

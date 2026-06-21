@@ -3,6 +3,8 @@
 
 #include <stdlib.h>
 
+#include <memory>
+
 #include <bspline_opt/bspline_optimizer.h>
 #include <bspline_opt/uniform_bspline.h>
 #include <traj_utils/msg/data_disp.hpp>
@@ -14,6 +16,7 @@
 
 namespace ego_planner
 {
+  class P0RiskGridRuntime;
 
   // Fast Planner Manager
   // Key algorithms of mapping and planning are called
@@ -53,6 +56,7 @@ namespace ego_planner
     GridMap::Ptr grid_map_;
     fast_planner::ObjPredictor::Ptr obj_predictor_;    
     SwarmTrajData swarm_trajs_buf_;
+    std::unique_ptr<P0RiskGridRuntime> p0_risk_grid_runtime_;
 
   private:
     /* main planning algorithms & modules */

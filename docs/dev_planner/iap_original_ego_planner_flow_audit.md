@@ -1680,6 +1680,15 @@ Prompt 6: P4 full module
 
 ### 16.1 Prompt 0: baseline lock
 
+Prompt 0 has been materialized as a repository-specific baseline checklist:
+
+```text
+docs/dev_planner/ego_planner_baseline_before_p0_p5.md
+```
+
+Use that checklist as the canonical build, launch, disabled-flag, and code-path
+baseline before implementing any P0-P5 planner functionality.
+
 ```text
 Implementation guardrails:
 
