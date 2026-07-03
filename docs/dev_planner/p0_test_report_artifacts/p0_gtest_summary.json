@@ -1,0 +1,30 @@
+[
+  {
+    "target": "RiskGridMap",
+    "tests": 11,
+    "failures": 0,
+    "disabled": 0,
+    "time_s": 0.0
+  },
+  {
+    "target": "P0Runtime",
+    "tests": 2,
+    "failures": 0,
+    "disabled": 0,
+    "time_s": 0.028
+  },
+  {
+    "target": "IntegritySnapshot",
+    "tests": 4,
+    "failures": 0,
+    "disabled": 0,
+    "time_s": 0.0
+  },
+  {
+    "target": "FuturePLPredictor",
+    "tests": 11,
+    "failures": 0,
+    "disabled": 0,
+    "time_s": 0.0
+  }
+]

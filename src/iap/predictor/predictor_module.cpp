@@ -62,25 +62,29 @@ std::string stale_reason(const PredictorQueryInput& input,
   if (!params.enabled) {
     return "";
   }
+  const double freshness_time_s =
+      std::isfinite(input.freshness_reference_time_s)
+          ? input.freshness_reference_time_s
+          : input.query_time_s;
   if (!input.snapshot.has_pose ||
-      age_exceeds(input.query_time_s,
+      age_exceeds(freshness_time_s,
                   input.snapshot.pose_stamp,
                   params.max_odom_age_s)) {
     return "stale_odom";
   }
   if (!input.snapshot.current.valid ||
-      age_exceeds(input.query_time_s,
+      age_exceeds(freshness_time_s,
                   input.snapshot.current.stamp,
                   params.max_integrity_age_s)) {
     return "stale_integrity";
   }
   if (!input.snapshot.has_epoch ||
-      age_exceeds(input.query_time_s,
+      age_exceeds(freshness_time_s,
                   input.snapshot.gnss_epoch.stamp,
                   params.max_gnss_age_s)) {
     return "stale_gnss_epoch";
   }
-  if (age_exceeds(input.query_time_s,
+  if (age_exceeds(freshness_time_s,
                   input.snapshot.stamp,
                   params.max_snapshot_age_s)) {
     return "stale_snapshot";

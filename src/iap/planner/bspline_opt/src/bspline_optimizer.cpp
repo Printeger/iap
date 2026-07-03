@@ -1,9 +1,66 @@
 #include "bspline_opt/bspline_optimizer.h"
 #include "bspline_opt/gradient_descent_optimizer.h"
+#include <iap/planner/risk_grid_map.hpp>
+
+#include <algorithm>
+#include <cmath>
+#include <fstream>
+#include <limits>
+#include <utility>
 // using namespace std;
 
 namespace ego_planner
 {
+  namespace
+  {
+    double pathLength(const std::vector<Eigen::Vector3d> &path)
+    {
+      double length = 0.0;
+      for (size_t i = 1; i < path.size(); ++i)
+        length += (path[i] - path[i - 1]).norm();
+      return length;
+    }
+
+    void writeP4Csv(const P4RiskAStarConfig &config,
+                    const P4AStarMetrics &metrics,
+                    double stamp,
+                    uint64_t astar_call_id,
+                    int segment_id)
+    {
+      if (!config.enable_risk_aware_astar || !config.debug_csv_enable || config.debug_csv_path.empty())
+        return;
+      std::ifstream existing(config.debug_csv_path);
+      const bool write_header =
+          !existing.good() || existing.peek() == std::ifstream::traits_type::eof();
+      existing.close();
+
+      std::ofstream csv(config.debug_csv_path, std::ios::app);
+      if (!csv.good())
+        return;
+      if (write_header)
+      {
+        csv << "stamp,astar_call_id,segment_id,risk_enabled,snapshot_generation_id,"
+               "expanded_nodes,risk_query_count,unknown_count,occupied_reject_count,"
+               "original_path_length,risk_path_length,path_length_ratio,path_mean_cost,"
+               "path_max_cost,elapsed_ms,fallback_reason\n";
+      }
+      csv << stamp << ',' << astar_call_id << ',' << segment_id << ','
+          << (metrics.risk_enabled ? 1 : 0) << ','
+          << metrics.snapshot_generation_id << ','
+          << metrics.expanded_nodes << ','
+          << metrics.risk_query_count << ','
+          << metrics.unknown_count << ','
+          << metrics.occupied_reject_count << ','
+          << metrics.original_path_length << ','
+          << metrics.risk_path_length << ','
+          << metrics.path_length_ratio << ','
+          << metrics.path_mean_cost << ','
+          << metrics.path_max_cost << ','
+          << metrics.elapsed_ms << ','
+          << metrics.fallback_reason << '\n';
+    }
+  } // namespace
+
 
   void BsplineOptimizer::setParam(rclcpp::Node::SharedPtr node)
   {
@@ -19,6 +76,26 @@ namespace ego_planner
     node->declare_parameter("optimization/max_acc", -1.0);
 
     node->declare_parameter("optimization/order", 3);
+    node->declare_parameter("p1.use_integrity_cost", false);
+    node->declare_parameter("p1.metrics_only", true);
+    node->declare_parameter("p1.lambda_integrity", 0.0);
+    node->declare_parameter("p1.sample_dt_min_s", 0.1);
+    node->declare_parameter("p1.sample_dt_scale", 1.0);
+    node->declare_parameter("p1.max_samples_per_eval", 30);
+    node->declare_parameter("p1.integrity_cost_max", 100.0);
+    node->declare_parameter("p1.integrity_grad_norm_max", 0.1);
+    node->declare_parameter("p1.unknown_policy", std::string("skip"));
+    node->declare_parameter("p1.unknown_soft_penalty", 1.0);
+    node->declare_parameter("p1.debug_csv_enable", false);
+    node->declare_parameter("p1.debug_csv_path", std::string(""));
+    node->declare_parameter("p4.enable_risk_aware_astar", false);
+    node->declare_parameter("p4.lambda_p4_risk", 0.05);
+    node->declare_parameter("p4.risk_cost_max", 100.0);
+    node->declare_parameter("p4.unknown_edge_penalty", 1.0);
+    node->declare_parameter("p4.max_extra_path_ratio", 1.3);
+    node->declare_parameter("p4.fallback_to_original_when_risk_not_ready", true);
+    node->declare_parameter("p4.debug_csv_enable", false);
+    node->declare_parameter("p4.debug_csv_path", std::string(""));
 
     node->get_parameter("optimization/lambda_smooth", lambda1_);
     node->get_parameter("optimization/lambda_collision", lambda2_);
@@ -31,6 +108,27 @@ namespace ego_planner
     node->get_parameter("optimization/max_acc", max_acc_);
 
     node->get_parameter("optimization/order", order_);
+    node->get_parameter("p1.use_integrity_cost", p1_config_.use_integrity_cost);
+    node->get_parameter("p1.metrics_only", p1_config_.metrics_only);
+    node->get_parameter("p1.lambda_integrity", p1_config_.lambda_integrity);
+    node->get_parameter("p1.sample_dt_min_s", p1_config_.sample_dt_min_s);
+    node->get_parameter("p1.sample_dt_scale", p1_config_.sample_dt_scale);
+    node->get_parameter("p1.max_samples_per_eval", p1_config_.max_samples_per_eval);
+    node->get_parameter("p1.integrity_cost_max", p1_config_.integrity_cost_max);
+    node->get_parameter("p1.integrity_grad_norm_max", p1_config_.integrity_grad_norm_max);
+    node->get_parameter("p1.unknown_policy", p1_config_.unknown_policy);
+    node->get_parameter("p1.unknown_soft_penalty", p1_config_.unknown_soft_penalty);
+    node->get_parameter("p1.debug_csv_enable", p1_config_.debug_csv_enable);
+    node->get_parameter("p1.debug_csv_path", p1_config_.debug_csv_path);
+    node->get_parameter("p4.enable_risk_aware_astar", p4_config_.enable_risk_aware_astar);
+    node->get_parameter("p4.lambda_p4_risk", p4_config_.lambda_p4_risk);
+    node->get_parameter("p4.risk_cost_max", p4_config_.risk_cost_max);
+    node->get_parameter("p4.unknown_edge_penalty", p4_config_.unknown_edge_penalty);
+    node->get_parameter("p4.max_extra_path_ratio", p4_config_.max_extra_path_ratio);
+    node->get_parameter("p4.fallback_to_original_when_risk_not_ready", p4_config_.fallback_to_original_when_risk_not_ready);
+    node->get_parameter("p4.debug_csv_enable", p4_config_.debug_csv_enable);
+    node->get_parameter("p4.debug_csv_path", p4_config_.debug_csv_path);
+    p4_config_.query_speed_mps = std::isfinite(max_vel_) && max_vel_ > 1.0e-3 ? max_vel_ : 1.0;
   }
 
   void BsplineOptimizer::setEnvironment(const GridMap::Ptr &map)
@@ -54,6 +152,36 @@ namespace ego_planner
   void BsplineOptimizer::setSwarmTrajs(SwarmTrajData *swarm_trajs_ptr) { swarm_trajs_ = swarm_trajs_ptr; }
 
   void BsplineOptimizer::setDroneId(const int drone_id) { drone_id_ = drone_id; }
+
+  void BsplineOptimizer::setRiskSnapshot(std::shared_ptr<const iap::RiskGridSnapshot> snapshot,
+                                         double query_base_time_s)
+  {
+    risk_snapshot_ = std::move(snapshot);
+    risk_query_base_time_s_ = query_base_time_s;
+  }
+
+  void BsplineOptimizer::clearRiskSnapshot()
+  {
+    risk_snapshot_.reset();
+    risk_query_base_time_s_ = 0.0;
+  }
+
+  void BsplineOptimizer::setP4RiskSnapshot(std::shared_ptr<const iap::RiskGridSnapshot> snapshot,
+                                           double query_base_time_s)
+  {
+    if (!a_star_)
+      return;
+    p4_config_.query_speed_mps = std::isfinite(max_vel_) && max_vel_ > 1.0e-3 ? max_vel_ : 1.0;
+    a_star_->setP4Config(p4_config_);
+    a_star_->setRiskSnapshot(std::move(snapshot), query_base_time_s);
+  }
+
+  void BsplineOptimizer::clearP4RiskSnapshot()
+  {
+    if (!a_star_)
+      return;
+    a_star_->clearRiskSnapshot();
+  }
 
   // 返回多个安全的控制点集
   std::vector<ControlPoints> BsplineOptimizer::distinctiveTrajs(vector<std::pair<int, int>> segments)
@@ -482,6 +610,7 @@ namespace ego_planner
   // 初始化控制点
   std::vector<std::pair<int, int>> BsplineOptimizer::initControlPoints(Eigen::MatrixXd &init_points, bool flag_first_init /*= true*/)
   {
+    last_p4_guides_.clear();
 
     if (flag_first_init)
     {
@@ -1371,14 +1500,81 @@ namespace ego_planner
 
     if (flag_new_obs_valid)
     {
+      static uint64_t p4_astar_call_id = 0;
       vector<vector<Eigen::Vector3d>> a_star_pathes;
       for (size_t i = 0; i < segment_ids.size(); ++i)
       {
         /*** a star search ***/
         Eigen::Vector3d in(cps_.points.col(segment_ids[i].first)), out(cps_.points.col(segment_ids[i].second));
-        if (a_star_->AstarSearch(/*(in-out).norm()/10+0.05*/ 0.1, in, out))
+        const uint64_t astar_call_id = ++p4_astar_call_id;
+        const bool original_success = a_star_->AstarSearchOriginal(/*(in-out).norm()/10+0.05*/ 0.1, in, out);
+        if (original_success)
         {
-          a_star_pathes.push_back(a_star_->getPath());
+          const std::vector<Eigen::Vector3d> original_path = a_star_->getPath();
+          std::vector<Eigen::Vector3d> risk_path;
+          std::vector<Eigen::Vector3d> selected_path = original_path;
+          bool selected_risk_path = false;
+          P4AStarMetrics metrics = a_star_->getLastP4Metrics();
+          metrics.original_path_length = pathLength(original_path);
+          metrics.risk_path_length = 0.0;
+          metrics.path_length_ratio = 1.0;
+          metrics.risk_enabled = false;
+
+          if (!p4_config_.enable_risk_aware_astar)
+          {
+            metrics.fallback_reason = "p4_disabled";
+          }
+          else if (!a_star_->hasRiskSnapshot())
+          {
+            metrics.fallback_reason = p4_config_.fallback_to_original_when_risk_not_ready
+                                          ? "snapshot_unavailable"
+                                          : "snapshot_unavailable";
+          }
+          else
+          {
+            const bool risk_success = a_star_->AstarSearchRiskAware(0.1, in, out);
+            P4AStarMetrics risk_metrics = a_star_->getLastP4Metrics();
+            risk_metrics.original_path_length = metrics.original_path_length;
+            risk_metrics.risk_enabled = true;
+            if (risk_success)
+            {
+              risk_path = a_star_->getPath();
+              risk_metrics.risk_path_length = pathLength(risk_path);
+              risk_metrics.path_length_ratio =
+                  metrics.original_path_length > 1.0e-9
+                      ? risk_metrics.risk_path_length / metrics.original_path_length
+                      : 1.0;
+              if (risk_metrics.path_length_ratio > p4_config_.max_extra_path_ratio)
+              {
+                risk_metrics.fallback_reason = "path_length_ratio_exceeded";
+              }
+              else
+              {
+                selected_path = risk_path;
+                selected_risk_path = true;
+                risk_metrics.fallback_reason = "risk_path_selected";
+              }
+            }
+            else
+            {
+              risk_metrics.risk_path_length = 0.0;
+              risk_metrics.path_length_ratio = 0.0;
+              risk_metrics.fallback_reason = "risk_search_failed";
+            }
+            metrics = risk_metrics;
+          }
+          a_star_->recordP4GuideMetrics(metrics);
+          P4GuideViz guide;
+          guide.original_path = original_path;
+          guide.risk_path = risk_path;
+          guide.selected_path = selected_path;
+          guide.segment_start = in;
+          guide.segment_end = out;
+          guide.metrics = metrics;
+          guide.risk_selected = selected_risk_path;
+          last_p4_guides_.push_back(guide);
+          writeP4Csv(p4_config_, metrics, rclcpp::Clock().now().seconds(), astar_call_id, static_cast<int>(i));
+          a_star_pathes.push_back(selected_path);
         }
         else
         {
@@ -1796,6 +1992,277 @@ namespace ego_planner
     return flag_safe;
   }
 
+  bool BsplineOptimizer::cubicBasisForTime(double t, int control_point_count,
+                                           int &first_control_point,
+                                           double weights[4]) const
+  {
+    if (order_ != 3 || control_point_count < 4 || bspline_interval_ <= 0.0 ||
+        !std::isfinite(t))
+    {
+      return false;
+    }
+
+    const double duration = static_cast<double>(control_point_count - order_) * bspline_interval_;
+    if (duration <= 0.0)
+    {
+      return false;
+    }
+
+    const double clamped_t = std::min(std::max(0.0, t), duration);
+    int k = order_;
+    double s = 0.0;
+    if (clamped_t >= duration)
+    {
+      k = control_point_count - 1;
+      s = 1.0;
+    }
+    else
+    {
+      const double span = std::floor(clamped_t / bspline_interval_);
+      k = order_ + static_cast<int>(span);
+      k = std::min(std::max(order_, k), control_point_count - 1);
+      s = (clamped_t - static_cast<double>(k - order_) * bspline_interval_) / bspline_interval_;
+      s = std::min(std::max(0.0, s), 1.0);
+    }
+
+    first_control_point = k - order_;
+    if (first_control_point < 0 || first_control_point + 3 >= control_point_count)
+    {
+      return false;
+    }
+
+    const double s2 = s * s;
+    const double s3 = s2 * s;
+    weights[0] = (1.0 - 3.0 * s + 3.0 * s2 - s3) / 6.0;
+    weights[1] = (4.0 - 6.0 * s2 + 3.0 * s3) / 6.0;
+    weights[2] = (1.0 + 3.0 * s + 3.0 * s2 - 3.0 * s3) / 6.0;
+    weights[3] = s3 / 6.0;
+    return true;
+  }
+
+  void BsplineOptimizer::calcIntegrityTrajectoryCost(const Eigen::MatrixXd &q, double &cost,
+                                                     Eigen::MatrixXd &gradient,
+                                                     P1IntegrityMetrics &metrics)
+  {
+    cost = 0.0;
+    gradient.setZero();
+    metrics = P1IntegrityMetrics{};
+    last_p1_viz_samples_.clear();
+
+    if (!risk_snapshot_)
+    {
+      metrics.fallback_reason = "snapshot_unavailable";
+      return;
+    }
+
+    metrics.snapshot_generation_id = risk_snapshot_->generation_id();
+
+    if (order_ != 3)
+    {
+      metrics.fallback_reason = "unsupported_order";
+      return;
+    }
+
+    if (q.cols() < order_ + 1 || bspline_interval_ <= 0.0)
+    {
+      metrics.fallback_reason = "invalid_trajectory";
+      return;
+    }
+
+    const double duration = static_cast<double>(q.cols() - order_) * bspline_interval_;
+    if (duration <= 0.0 || !std::isfinite(duration))
+    {
+      metrics.fallback_reason = "invalid_duration";
+      return;
+    }
+
+    const double raw_dt = std::max(p1_config_.sample_dt_min_s,
+                                   bspline_interval_ * std::max(0.0, p1_config_.sample_dt_scale));
+    if (!(raw_dt > 0.0) || !std::isfinite(raw_dt))
+    {
+      metrics.fallback_reason = "invalid_sample_dt";
+      return;
+    }
+
+    int sample_count = static_cast<int>(std::ceil(duration / raw_dt));
+    sample_count = std::max(1, sample_count);
+    if (p1_config_.max_samples_per_eval > 0)
+    {
+      sample_count = std::min(sample_count, p1_config_.max_samples_per_eval);
+    }
+    metrics.sample_count = sample_count;
+
+    UniformBspline traj(q, order_, bspline_interval_);
+    const double denom = sample_count > 1 ? static_cast<double>(sample_count - 1) : 1.0;
+    const bool small_penalty = p1_config_.unknown_policy == "small_penalty";
+    const double cost_max = std::max(0.0, p1_config_.integrity_cost_max);
+    const double grad_max = std::max(0.0, p1_config_.integrity_grad_norm_max);
+
+    for (int sample_id = 0; sample_id < sample_count; ++sample_id)
+    {
+      const double t = sample_count > 1 ? duration * static_cast<double>(sample_id) / denom : 0.0;
+      const Eigen::Vector3d p = traj.evaluateDeBoorT(t);
+      P1IntegrityVizSample viz;
+      viz.position = p;
+      viz.t_s = t;
+
+      iap::RiskCostSample sample;
+      const bool hit = risk_snapshot_->queryCost(p, risk_query_base_time_s_ + t, &sample);
+      if (!hit || !sample.valid || !std::isfinite(sample.cost))
+      {
+        metrics.miss_count++;
+        if (sample.stale)
+        {
+          metrics.stale_count++;
+        }
+        viz.hit = false;
+        viz.stale = sample.stale;
+        viz.unknown = true;
+        viz.reason = hit ? sample.reason : "query_miss";
+        if (small_penalty)
+        {
+          viz.cost = std::max(0.0, p1_config_.unknown_soft_penalty);
+        }
+        last_p1_viz_samples_.push_back(viz);
+        if (small_penalty)
+        {
+          cost += std::max(0.0, p1_config_.unknown_soft_penalty);
+        }
+        continue;
+      }
+
+      metrics.hit_count++;
+      if (sample.stale)
+      {
+        metrics.stale_count++;
+      }
+
+      double sample_cost = std::min(std::max(0.0, sample.cost), cost_max);
+      Eigen::Vector3d sample_grad = sample.grad;
+      if (!sample_grad.allFinite())
+      {
+        sample_grad.setZero();
+      }
+      const double grad_norm = sample_grad.norm();
+      if (grad_max > 0.0 && grad_norm > grad_max)
+      {
+        sample_grad *= grad_max / grad_norm;
+        metrics.clipped_grad_count++;
+      }
+
+      cost += sample_cost;
+      viz.hit = true;
+      viz.stale = sample.stale;
+      viz.unknown = false;
+      viz.cost = sample_cost;
+      viz.grad = sample_grad;
+      viz.push = -p1_config_.lambda_integrity * sample_grad;
+      viz.reason = sample.reason;
+      last_p1_viz_samples_.push_back(viz);
+
+      int first_control_point = 0;
+      double weights[4] = {0.0, 0.0, 0.0, 0.0};
+      if (cubicBasisForTime(t, static_cast<int>(q.cols()), first_control_point, weights))
+      {
+        for (int i = 0; i < 4; ++i)
+        {
+          gradient.col(first_control_point + i) += weights[i] * sample_grad;
+        }
+      }
+      else
+      {
+        metrics.miss_count++;
+      }
+    }
+
+    if (sample_count > 0)
+    {
+      const double inv_count = 1.0 / static_cast<double>(sample_count);
+      cost *= inv_count;
+      gradient *= inv_count;
+      metrics.miss_ratio = static_cast<double>(metrics.miss_count) / static_cast<double>(sample_count);
+      metrics.stale_ratio = static_cast<double>(metrics.stale_count) / static_cast<double>(sample_count);
+    }
+
+    metrics.f_integrity = cost;
+    metrics.weighted_f_integrity = p1_config_.lambda_integrity * cost;
+    metrics.grad_norm_integrity = gradient.norm();
+    metrics.weighted_grad_integrity_norm = std::abs(p1_config_.lambda_integrity) * metrics.grad_norm_integrity;
+    metrics.fallback_reason = metrics.hit_count > 0 || small_penalty ? "ok" : "no_valid_samples";
+  }
+
+  void BsplineOptimizer::writeP1DebugCsv(const P1IntegrityMetrics &metrics) const
+  {
+    if (!p1_config_.debug_csv_enable || p1_config_.debug_csv_path.empty())
+    {
+      return;
+    }
+
+    std::ifstream existing(p1_config_.debug_csv_path);
+    const bool write_header = !existing.good() || existing.peek() == std::ifstream::traits_type::eof();
+    existing.close();
+
+    std::ofstream out(p1_config_.debug_csv_path, std::ios::app);
+    if (!out.good())
+    {
+      return;
+    }
+    if (write_header)
+    {
+      out << "stamp,lbfgs_iter,snapshot_generation_id,query_base_time_s,"
+             "sample_count,hit_count,miss_count,stale_count,miss_ratio,stale_ratio,"
+             "f_integrity,weighted_f_integrity,grad_norm_integrity,grad_norm_original,"
+             "grad_ratio,clipped_grad_count,fallback_reason,applied_to_objective\n";
+    }
+
+    out << rclcpp::Clock().now().seconds() << ','
+        << iter_num_ << ','
+        << metrics.snapshot_generation_id << ','
+        << risk_query_base_time_s_ << ','
+        << metrics.sample_count << ','
+        << metrics.hit_count << ','
+        << metrics.miss_count << ','
+        << metrics.stale_count << ','
+        << metrics.miss_ratio << ','
+        << metrics.stale_ratio << ','
+        << metrics.f_integrity << ','
+        << metrics.weighted_f_integrity << ','
+        << metrics.grad_norm_integrity << ','
+        << metrics.grad_norm_original << ','
+        << metrics.grad_ratio << ','
+        << metrics.clipped_grad_count << ','
+        << metrics.fallback_reason << ','
+        << (metrics.applied_to_objective ? 1 : 0) << '\n';
+  }
+
+  bool BsplineOptimizer::evaluateReboundCostForTest(const Eigen::MatrixXd &control_points,
+                                                    double ts, double &cost,
+                                                    Eigen::MatrixXd &gradient)
+  {
+    if (control_points.rows() != 3 || control_points.cols() <= order_)
+    {
+      return false;
+    }
+
+    setBsplineInterval(ts);
+    cps_.resize(static_cast<int>(control_points.cols()));
+    cps_.points = control_points;
+    cps_.clearance = dist0_;
+    min_ellip_dist_ = INIT_min_ellip_dist_;
+    iter_num_ = 0;
+    new_lambda2_ = lambda2_;
+    variable_num_ = 3 * (cps_.size - order_);
+
+    std::vector<double> x(variable_num_, 0.0);
+    std::vector<double> grad(variable_num_, 0.0);
+    memcpy(x.data(), cps_.points.data() + 3 * order_, variable_num_ * sizeof(double));
+    combineCostRebound(x.data(), grad.data(), cost, variable_num_);
+
+    gradient = Eigen::MatrixXd::Zero(3, cps_.size);
+    memcpy(gradient.data() + 3 * order_, grad.data(), variable_num_ * sizeof(double));
+    return true;
+  }
+
   // 计算损失
   void BsplineOptimizer::combineCostRebound(const double *x, double *grad, double &f_combine, const int n)
   {
@@ -1824,11 +2291,47 @@ namespace ego_planner
     calcTerminalCost(cps_.points, f_terminal, g_terminal);
 
     f_combine = lambda1_ * f_smoothness + new_lambda2_ * f_distance + lambda3_ * f_feasibility + new_lambda2_ * f_swarm + lambda2_ * f_terminal;
+    const double f_original = f_combine;
     // f_combine = lambda1_ * f_smoothness + new_lambda2_ * f_distance + lambda3_ * f_feasibility + new_lambda2_ * f_mov_objs;
     // printf("origin %f %f %f %f\n", f_smoothness, f_distance, f_feasibility, f_combine);
 
     Eigen::MatrixXd grad_3D = lambda1_ * g_smoothness + new_lambda2_ * g_distance + lambda3_ * g_feasibility + new_lambda2_ * g_swarm + lambda2_ * g_terminal;
     // Eigen::MatrixXd grad_3D = lambda1_ * g_smoothness + new_lambda2_ * g_distance + lambda3_ * g_feasibility + new_lambda2_ * g_mov_objs;
+
+    last_p1_metrics_ = P1IntegrityMetrics{};
+    last_p1_viz_samples_.clear();
+    last_optimizer_cost_breakdown_ = OptimizerCostBreakdown{};
+    last_optimizer_cost_breakdown_.original_cost = f_original;
+    last_optimizer_cost_breakdown_.total_cost = f_original;
+    const bool p1_should_evaluate =
+        risk_snapshot_ && (p1_config_.metrics_only || p1_config_.use_integrity_cost || p1_config_.debug_csv_enable);
+    if (p1_should_evaluate)
+    {
+      double f_integrity = 0.0;
+      Eigen::MatrixXd g_integrity = Eigen::MatrixXd::Zero(3, cps_.size);
+      P1IntegrityMetrics metrics;
+      calcIntegrityTrajectoryCost(cps_.points, f_integrity, g_integrity, metrics);
+      metrics.grad_norm_original = grad_3D.norm();
+      metrics.weighted_f_integrity = p1_config_.lambda_integrity * f_integrity;
+      metrics.weighted_grad_integrity_norm = std::abs(p1_config_.lambda_integrity) * g_integrity.norm();
+      if (metrics.grad_norm_original > 1.0e-12)
+      {
+        metrics.grad_ratio = metrics.weighted_grad_integrity_norm / metrics.grad_norm_original;
+      }
+      metrics.applied_to_objective =
+          p1_config_.use_integrity_cost && !p1_config_.metrics_only && p1_config_.lambda_integrity != 0.0;
+
+      if (metrics.applied_to_objective)
+      {
+        f_combine += p1_config_.lambda_integrity * f_integrity;
+        grad_3D += p1_config_.lambda_integrity * g_integrity;
+        last_optimizer_cost_breakdown_.integrity_cost = metrics.weighted_f_integrity;
+      }
+
+      last_p1_metrics_ = metrics;
+      writeP1DebugCsv(last_p1_metrics_);
+    }
+    last_optimizer_cost_breakdown_.total_cost = f_combine;
     memcpy(grad, grad_3D.data() + 3 * order_, n * sizeof(grad[0]));
   }
 

@@ -585,6 +585,7 @@ if(DEFINED ENV{ROS_VERSION})
       scripts/dev_predictor/analyze_predictor_system_e10.py
       scripts/dev_predictor/analyze_predictor_system_e11.py
       scripts/dev_predictor/analyze_predictor_system_e12.py
+      scripts/dev_planner/analyze_planner_p0_phase1.py
       DESTINATION lib/iap
     )
     install(DIRECTORY launch DESTINATION share/iap)

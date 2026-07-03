@@ -1,5 +1,7 @@
 
 #include <ego_planner/ego_replan_fsm.h>
+#include <ego_planner/p5_runtime_integrity_gate.h>
+#include <iap/planner/risk_grid_map.hpp>
 
 namespace ego_planner
 {
@@ -186,7 +188,9 @@ namespace ego_planner
   void EGOReplanFSM::planNextWaypoint(const Eigen::Vector3d next_wp)
   {
     bool success = false;
-    success = planner_manager_->planGlobalTraj(odom_pos_, odom_vel_, Eigen::Vector3d::Zero(), next_wp, Eigen::Vector3d::Zero(), Eigen::Vector3d::Zero());
+    success = planner_manager_->planGlobalTrajWithP3ReferenceBias(
+        odom_pos_, odom_vel_, Eigen::Vector3d::Zero(), next_wp,
+        Eigen::Vector3d::Zero(), Eigen::Vector3d::Zero());
 
     if (success)
     {
@@ -540,7 +544,16 @@ namespace ego_planner
       }
       else
       {
-        changeFSMExecState(GEN_NEW_TRAJ, "FSM");
+        if (p5_final_gate_emergency_candidate_)
+        {
+          p5_final_gate_emergency_candidate_ = false;
+          flag_escape_emergency_ = true;
+          changeFSMExecState(EMERGENCY_STOP, "P5_FINAL");
+        }
+        else
+        {
+          changeFSMExecState(GEN_NEW_TRAJ, "FSM");
+        }
       }
       break;
     }
@@ -555,7 +568,16 @@ namespace ego_planner
       }
       else
       {
-        changeFSMExecState(REPLAN_TRAJ, "FSM");
+        if (p5_final_gate_emergency_candidate_)
+        {
+          p5_final_gate_emergency_candidate_ = false;
+          flag_escape_emergency_ = true;
+          changeFSMExecState(EMERGENCY_STOP, "P5_FINAL");
+        }
+        else
+        {
+          changeFSMExecState(REPLAN_TRAJ, "FSM");
+        }
       }
 
       break;
@@ -656,6 +678,10 @@ namespace ego_planner
       {
         return true;
       }
+      if (p5_final_gate_emergency_candidate_)
+      {
+        return false;
+      }
     }
     return false;
   }
@@ -677,14 +703,26 @@ namespace ego_planner
 
     if (!success)
     {
+      if (p5_final_gate_emergency_candidate_)
+      {
+        return false;
+      }
       success = callReboundReplan(true, false);
       if (!success)
       {
+        if (p5_final_gate_emergency_candidate_)
+        {
+          return false;
+        }
         for (int i = 0; i < trial_times; i++)
         {
           success = callReboundReplan(true, true);
           if (success)
             break;
+          if (p5_final_gate_emergency_candidate_)
+          {
+            return false;
+          }
         }
         if (!success)
         {
@@ -778,10 +816,60 @@ namespace ego_planner
         break;
       }
     }
+
+    if (exec_state_ == EXEC_TRAJ && planner_manager_->p5_integrity_gate_ &&
+        planner_manager_->p5_integrity_gate_->runtimeEnabled())
+    {
+      const double now_s = rclcpp::Clock().now().seconds();
+      auto snapshot = planner_manager_->acquireRiskGridSnapshot();
+      const P5GateStatus p5_status =
+          planner_manager_->p5_integrity_gate_->evaluateRuntime(
+              *info, snapshot, now_s, emergency_time_);
+      if (p5_status.action == P5GateAction::REQUEST_EMERGENCY_STOP_CANDIDATE)
+      {
+        RCLCPP_WARN(node_->get_logger(),
+                    "P5 requested emergency candidate: reason=%s",
+                    P5RuntimeIntegrityGate::reasonName(p5_status.reason));
+        if (planFromCurrentTraj())
+        {
+          changeFSMExecState(EXEC_TRAJ, "P5_SAFETY");
+          publishSwarmTrajs(false);
+        }
+        else
+        {
+          changeFSMExecState(EMERGENCY_STOP, "P5_SAFETY");
+        }
+        return;
+      }
+      if (p5_status.action == P5GateAction::REQUEST_REPLAN)
+      {
+        RCLCPP_WARN(node_->get_logger(),
+                    "P5 requested replan: reason=%s",
+                    P5RuntimeIntegrityGate::reasonName(p5_status.reason));
+        changeFSMExecState(REPLAN_TRAJ, "P5_REPLAN");
+        return;
+      }
+    }
   }
 
   bool EGOReplanFSM::callReboundReplan(bool flag_use_poly_init, bool flag_randomPolyTraj)
   {
+
+    p5_final_gate_emergency_candidate_ = false;
+    const LocalTrajData previous_local_data = planner_manager_->local_data_;
+
+    planner_manager_->beginPlanningRiskContext(rclcpp::Clock().now().seconds());
+    struct PlanningRiskContextGuard
+    {
+      EGOPlannerManager *manager = nullptr;
+      ~PlanningRiskContextGuard()
+      {
+        if (manager)
+        {
+          manager->clearPlanningRiskContext();
+        }
+      }
+    } planning_risk_context_guard{planner_manager_.get()};
 
     getLocalTarget();
 
@@ -818,6 +906,43 @@ namespace ego_planner
       for (int i = 0; i < knots.rows(); ++i)
       {
         bspline.knots.push_back(knots(i));
+      }
+
+      if (planner_manager_->p5_integrity_gate_ &&
+          planner_manager_->p5_integrity_gate_->finalGateEnabled())
+      {
+        const double now_s = rclcpp::Clock().now().seconds();
+        auto snapshot = planner_manager_->acquireRiskGridSnapshot();
+        const uint64_t planning_generation_id =
+            planner_manager_->currentPlanningGenerationId();
+        const uint64_t final_gate_generation_id =
+            snapshot ? snapshot->generation_id() : 0;
+        if (planning_generation_id != final_gate_generation_id)
+        {
+          RCLCPP_WARN(node_->get_logger(),
+                      "P5 final gate using latest risk snapshot: planning_generation_id=%lu final_gate_generation_id=%lu",
+                      static_cast<unsigned long>(planning_generation_id),
+                      static_cast<unsigned long>(final_gate_generation_id));
+        }
+        const P5GateStatus p5_status =
+            planner_manager_->p5_integrity_gate_->evaluateFinal(
+                *info, snapshot, now_s, emergency_time_);
+        if (p5_status.action != P5GateAction::OK)
+        {
+          if (p5_status.action ==
+              P5GateAction::REQUEST_EMERGENCY_STOP_CANDIDATE)
+          {
+            p5_final_gate_emergency_candidate_ = true;
+          }
+          RCLCPP_WARN(node_->get_logger(),
+                      "P5 final gate blocked trajectory: action=%s reason=%s planning_generation_id=%lu final_gate_generation_id=%lu",
+                      P5RuntimeIntegrityGate::actionName(p5_status.action),
+                      P5RuntimeIntegrityGate::reasonName(p5_status.reason),
+                      static_cast<unsigned long>(planning_generation_id),
+                      static_cast<unsigned long>(final_gate_generation_id));
+          planner_manager_->local_data_ = previous_local_data;
+          return false;
+        }
       }
 
       /* 1. publish traj to traj_server */
@@ -975,6 +1100,9 @@ namespace ego_planner
     {
       local_target_vel_ = planner_manager_->global_data_.getVelocity(t);
     }
+
+    planner_manager_->applyLocalTargetP3ReferenceBias(
+        start_pt_, end_pt_, local_target_pt_, local_target_vel_);
   }
 
 } // namespace ego_planner

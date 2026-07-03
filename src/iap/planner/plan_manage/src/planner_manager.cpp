@@ -1,11 +1,92 @@
 // #include <fstream>
 #include <ego_planner/planner_manager.h>
 #include <ego_planner/p0_risk_grid_runtime.h>
+#include <ego_planner/p5_runtime_integrity_gate.h>
+#include <ego_planner/safety_rviz_publisher.h>
+#include <limits>
 #include <thread>
+#include <utility>
 #include "visualization_msgs/msg/marker.hpp" // zx-todo
 
 namespace ego_planner
 {
+  namespace
+  {
+    std::vector<Eigen::Vector3d> matrixColumnsToPoints(const Eigen::MatrixXd &points)
+    {
+      std::vector<Eigen::Vector3d> out;
+      if (points.rows() != 3)
+      {
+        return out;
+      }
+      out.reserve(static_cast<std::size_t>(points.cols()));
+      for (int i = 0; i < points.cols(); ++i)
+      {
+        out.push_back(points.col(i));
+      }
+      return out;
+    }
+
+    SafetyVizP1Metrics toSafetyVizP1Metrics(
+        const BsplineOptimizer::P1IntegrityMetrics &metrics)
+    {
+      SafetyVizP1Metrics out;
+      out.sample_count = metrics.sample_count;
+      out.hit_count = metrics.hit_count;
+      out.miss_count = metrics.miss_count;
+      out.stale_count = metrics.stale_count;
+      out.f_integrity = metrics.f_integrity;
+      out.weighted_f_integrity = metrics.weighted_f_integrity;
+      out.grad_ratio = metrics.grad_ratio;
+      out.snapshot_generation_id = metrics.snapshot_generation_id;
+      out.applied_to_objective = metrics.applied_to_objective;
+      out.fallback_reason = metrics.fallback_reason;
+      return out;
+    }
+
+    std::vector<SafetyVizP1Sample> toSafetyVizP1Samples(
+        const std::vector<BsplineOptimizer::P1IntegrityVizSample> &samples)
+    {
+      std::vector<SafetyVizP1Sample> out;
+      out.reserve(samples.size());
+      for (const auto &sample : samples)
+      {
+        SafetyVizP1Sample viz;
+        viz.position = sample.position;
+        viz.grad = sample.grad;
+        viz.push = sample.push;
+        viz.cost = sample.cost;
+        viz.t_s = sample.t_s;
+        viz.hit = sample.hit;
+        viz.stale = sample.stale;
+        viz.unknown = sample.unknown;
+        viz.reason = sample.reason;
+        out.push_back(viz);
+      }
+      return out;
+    }
+
+    std::vector<SafetyVizP4Guide> toSafetyVizP4Guides(
+        const std::vector<BsplineOptimizer::P4GuideViz> &guides)
+    {
+      std::vector<SafetyVizP4Guide> out;
+      out.reserve(guides.size());
+      for (const auto &guide : guides)
+      {
+        SafetyVizP4Guide viz;
+        viz.original_path = guide.original_path;
+        viz.risk_path = guide.risk_path;
+        viz.selected_path = guide.selected_path;
+        viz.segment_start = guide.segment_start;
+        viz.segment_end = guide.segment_end;
+        viz.path_length_ratio = guide.metrics.path_length_ratio;
+        viz.risk_selected = guide.risk_selected;
+        viz.reason = guide.metrics.fallback_reason;
+        out.push_back(viz);
+      }
+      return out;
+    }
+  } // namespace
 
   EGOPlannerManager::EGOPlannerManager() {}
 
@@ -21,6 +102,31 @@ namespace ego_planner
     node->declare_parameter("manager/planning_horizon", 5.0);
     node->declare_parameter("manager/use_distinctive_trajs", false);
     node->declare_parameter("manager/drone_id", -1);
+    node->declare_parameter("p2.enable_candidate_ranking", false);
+    node->declare_parameter("p2.metrics_only", true);
+    node->declare_parameter("p2.sample_dt_s", 0.2);
+    node->declare_parameter("p2.lambda_candidate_integrity", 1.0);
+    node->declare_parameter("p2.w_max_cost", 0.25);
+    node->declare_parameter("p2.w_unknown", 5.0);
+    node->declare_parameter("p2.w_stale", 2.0);
+    node->declare_parameter("p2.min_valid_ratio", 0.3);
+    node->declare_parameter("p2.debug_csv_enable", false);
+    node->declare_parameter("p2.debug_csv_path", "");
+    node->declare_parameter("p3.enable_local_reference_bias", false);
+    node->declare_parameter("p3.enable_global_reference_bias", false);
+    node->declare_parameter("p3.local_bias_radius_m", 1.5);
+    node->declare_parameter("p3.min_improvement_ratio", 0.05);
+    node->declare_parameter("p3.w_risk", 1.0);
+    node->declare_parameter("p3.w_detour", 0.25);
+    node->declare_parameter("p3.w_unknown", 5.0);
+    node->declare_parameter("p3.min_corridor_valid_ratio", 0.8);
+    node->declare_parameter("p3.station_spacing_m", 2.0);
+    node->declare_parameter("p3.lateral_sample_step_m", 1.0);
+    node->declare_parameter("p3.lateral_sample_count_each_side", 3);
+    node->declare_parameter("p3.beam_width", 5);
+    node->declare_parameter("p3.max_detour_ratio", 1.5);
+    node->declare_parameter("p3.debug_csv_enable", false);
+    node->declare_parameter("p3.debug_csv_path", "");
 
     node->get_parameter("manager/max_vel", pp_.max_vel_);
     node->get_parameter("manager/max_acc", pp_.max_acc_);
@@ -30,6 +136,33 @@ namespace ego_planner
     node->get_parameter("manager/planning_horizon", pp_.planning_horizen_);
     node->get_parameter("manager/use_distinctive_trajs", pp_.use_distinctive_trajs);
     node->get_parameter("manager/drone_id", pp_.drone_id);
+    node->get_parameter("p2.enable_candidate_ranking", p2_config_.enable_candidate_ranking);
+    node->get_parameter("p2.metrics_only", p2_config_.metrics_only);
+    node->get_parameter("p2.sample_dt_s", p2_config_.sample_dt_s);
+    node->get_parameter("p2.lambda_candidate_integrity", p2_config_.lambda_candidate_integrity);
+    node->get_parameter("p2.w_max_cost", p2_config_.w_max_cost);
+    node->get_parameter("p2.w_unknown", p2_config_.w_unknown);
+    node->get_parameter("p2.w_stale", p2_config_.w_stale);
+    node->get_parameter("p2.min_valid_ratio", p2_config_.min_valid_ratio);
+    node->get_parameter("p2.debug_csv_enable", p2_config_.debug_csv_enable);
+    node->get_parameter("p2.debug_csv_path", p2_config_.debug_csv_path);
+    node->get_parameter("p3.enable_local_reference_bias", p3_config_.enable_local_reference_bias);
+    node->get_parameter("p3.enable_global_reference_bias", p3_config_.enable_global_reference_bias);
+    node->get_parameter("p3.local_bias_radius_m", p3_config_.local_bias_radius_m);
+    node->get_parameter("p3.min_improvement_ratio", p3_config_.min_improvement_ratio);
+    node->get_parameter("p3.w_risk", p3_config_.w_risk);
+    node->get_parameter("p3.w_detour", p3_config_.w_detour);
+    node->get_parameter("p3.w_unknown", p3_config_.w_unknown);
+    node->get_parameter("p3.min_corridor_valid_ratio", p3_config_.min_corridor_valid_ratio);
+    node->get_parameter("p3.station_spacing_m", p3_config_.station_spacing_m);
+    node->get_parameter("p3.lateral_sample_step_m", p3_config_.lateral_sample_step_m);
+    node->get_parameter("p3.lateral_sample_count_each_side", p3_config_.lateral_sample_count_each_side);
+    node->get_parameter("p3.beam_width", p3_config_.beam_width);
+    node->get_parameter("p3.max_detour_ratio", p3_config_.max_detour_ratio);
+    node->get_parameter("p3.debug_csv_enable", p3_config_.debug_csv_enable);
+    node->get_parameter("p3.debug_csv_path", p3_config_.debug_csv_path);
+    safety_viz_ = std::make_shared<SafetyRvizPublisher>(
+        node, SafetyRvizPublisher::declareAndReadConfig(node));
 
     local_data_.traj_id_ = 0;
     grid_map_.reset(new GridMap);
@@ -43,8 +176,145 @@ namespace ego_planner
     bspline_optimizer_->a_star_.reset(new AStar);
     bspline_optimizer_->a_star_->initGridMap(grid_map_, Eigen::Vector3i(100, 100, 100));
     p0_risk_grid_runtime_ = P0RiskGridRuntime::createIfEnabled(node);
+    if (p0_risk_grid_runtime_)
+    {
+      p0_risk_grid_runtime_->setOccupancyPredicate(
+          [this](const Eigen::Vector3d &pos)
+          {
+            return grid_map_ && grid_map_->getInflateOccupancy(pos) > 0;
+          });
+    }
+    p5_integrity_gate_ = P5RuntimeIntegrityGate::createIfEnabled(node);
+    if (p5_integrity_gate_)
+    {
+      p5_integrity_gate_->setPredAlertLimitEnvironment(
+          [this](const Eigen::Vector3d &pos)
+          {
+            return grid_map_ && grid_map_->getInflateOccupancy(pos) > 0;
+          },
+          [this](Eigen::Vector3d *origin, Eigen::Vector3d *size)
+          {
+            if (!grid_map_ || !origin || !size)
+            {
+              return false;
+            }
+            grid_map_->getRegion(*origin, *size);
+            return origin->allFinite() && size->allFinite();
+          },
+          [this]()
+          {
+            return grid_map_ ? grid_map_->getResolution()
+                             : std::numeric_limits<double>::quiet_NaN();
+          });
+    }
 
     visualization_ = vis;
+  }
+
+  std::shared_ptr<const iap::RiskGridSnapshot> EGOPlannerManager::acquireRiskGridSnapshot() const
+  {
+    if (!p0_risk_grid_runtime_)
+    {
+      return nullptr;
+    }
+    return p0_risk_grid_runtime_->acquireSnapshot();
+  }
+
+  const EGOPlannerManager::PlanningRiskContext &
+  EGOPlannerManager::beginPlanningRiskContext(const double now_s)
+  {
+    planning_risk_context_ = PlanningRiskContext{};
+    planning_risk_context_.active = true;
+    planning_risk_context_.query_base_time_s = now_s;
+    planning_risk_context_.snapshot = acquireRiskGridSnapshot();
+    if (planning_risk_context_.snapshot)
+    {
+      planning_risk_context_.generation_id =
+          planning_risk_context_.snapshot->generation_id();
+    }
+
+    cout << "[RiskContext] planning_generation_id="
+         << planning_risk_context_.generation_id
+         << ", query_base_time_s="
+         << planning_risk_context_.query_base_time_s
+         << ", snapshot_available="
+         << static_cast<int>(static_cast<bool>(planning_risk_context_.snapshot))
+         << endl;
+    return planning_risk_context_;
+  }
+
+  void EGOPlannerManager::clearPlanningRiskContext()
+  {
+    planning_risk_context_ = PlanningRiskContext{};
+  }
+
+  void EGOPlannerManager::setPlanningRiskContextForTest(
+      std::shared_ptr<const iap::RiskGridSnapshot> snapshot,
+      const double query_base_time_s)
+  {
+    planning_risk_context_ = PlanningRiskContext{};
+    planning_risk_context_.active = true;
+    planning_risk_context_.query_base_time_s = query_base_time_s;
+    planning_risk_context_.snapshot = std::move(snapshot);
+    if (planning_risk_context_.snapshot)
+    {
+      planning_risk_context_.generation_id =
+          planning_risk_context_.snapshot->generation_id();
+    }
+  }
+
+  bool EGOPlannerManager::applyLocalTargetP3ReferenceBias(
+      const Eigen::Vector3d &start_pt, const Eigen::Vector3d &end_pt,
+      Eigen::Vector3d &local_target_pt, Eigen::Vector3d &local_target_vel)
+  {
+    (void)local_target_vel;
+    if (!p3_config_.enable_local_reference_bias)
+    {
+      return false;
+    }
+    const auto now = rclcpp::Clock().now();
+    P3LocalBiasInput input;
+    input.start_pt = start_pt;
+    input.end_pt = end_pt;
+    input.nominal_target = local_target_pt;
+    input.max_vel = pp_.max_vel_;
+    const auto snapshot = planning_risk_context_.active
+                              ? currentPlanningRiskSnapshot()
+                              : acquireRiskGridSnapshot();
+    const auto result = applyP3LocalReferenceBias(
+        input, p3_config_, snapshot,
+        [this](const Eigen::Vector3d &pos)
+        {
+          return grid_map_ && grid_map_->getInflateOccupancy(pos) == 0;
+        },
+        planning_risk_context_.active ? currentPlanningQueryBaseTime()
+                                      : now.seconds(),
+        ++p3_batch_id_);
+    if (p3_config_.enable_local_reference_bias)
+    {
+      cout << "[P3-local] reason=" << result.reason
+           << ", used=" << result.used_bias
+           << ", improvement=" << result.improvement_ratio << endl;
+    }
+    if (safety_viz_)
+    {
+      SafetyVizP3ReferenceBias viz;
+      viz.local = true;
+      viz.used_bias = result.used_bias;
+      viz.start = result.start_pt;
+      viz.end = result.end_pt;
+      viz.nominal_target = result.nominal_target;
+      viz.biased_target = result.target;
+      viz.improvement_ratio = result.improvement_ratio;
+      viz.reason = result.reason;
+      safety_viz_->publishP3ReferenceBias(viz, now.seconds());
+    }
+    if (result.used_bias)
+    {
+      local_target_pt = result.target;
+      return true;
+    }
+    return false;
   }
 
   bool EGOPlannerManager::reboundReplan(Eigen::Vector3d start_pt, Eigen::Vector3d start_vel,
@@ -62,6 +332,27 @@ namespace ego_planner
     }
 
     bspline_optimizer_->setLocalTargetPt(local_target_pt);
+
+    const bool created_local_risk_context = !planning_risk_context_.active;
+    if (created_local_risk_context)
+    {
+      beginPlanningRiskContext(rclcpp::Clock().now().seconds());
+    }
+    struct LocalRiskContextGuard
+    {
+      EGOPlannerManager *manager = nullptr;
+      bool enabled = false;
+      ~LocalRiskContextGuard()
+      {
+        if (enabled && manager)
+        {
+          manager->clearPlanningRiskContext();
+        }
+      }
+    } local_risk_context_guard{this, created_local_risk_context};
+
+    const auto planning_snapshot = currentPlanningRiskSnapshot();
+    const double planning_query_base_time_s = currentPlanningQueryBaseTime();
 
     rclcpp::Time t_start = rclcpp::Clock().now();
     rclcpp::Duration t_init(0, 0), t_opt(0, 0), t_refine(0, 0);
@@ -223,7 +514,18 @@ namespace ego_planner
     UniformBspline::parameterizeToBspline(ts, point_set, start_end_derivatives, ctrl_pts);
 
     vector<std::pair<int, int>> segments;
+    if (bspline_optimizer_->getP4RiskAStarConfig().enable_risk_aware_astar)
+    {
+      bspline_optimizer_->setP4RiskSnapshot(planning_snapshot, planning_query_base_time_s);
+    }
     segments = bspline_optimizer_->initControlPoints(ctrl_pts, true);
+    if (safety_viz_)
+    {
+      safety_viz_->publishP4Guides(
+          toSafetyVizP4Guides(bspline_optimizer_->getLastP4GuideViz()),
+          rclcpp::Clock().now().seconds());
+    }
+    bspline_optimizer_->clearP4RiskSnapshot();
     // 计算时间差并更新时间
     auto now = rclcpp::Clock().now();
     t_init = now - t_start;
@@ -240,20 +542,33 @@ namespace ego_planner
       cout << "\033[1;33m"
            << "multi-trajs=" << trajs.size() << "\033[1;0m" << endl;
 
-      double final_cost, min_cost = 999999.0;
+      double final_cost;
+      std::vector<P2CandidateInput> p2_candidates;
       for (int i = trajs.size() - 1; i >= 0; i--)
       {
-        if (bspline_optimizer_->BsplineOptimizeTrajRebound(ctrl_pts_temp, final_cost, trajs[i], ts))
+        bspline_optimizer_->setRiskSnapshot(planning_snapshot, planning_query_base_time_s);
+        const bool p1_candidate_success =
+            bspline_optimizer_->BsplineOptimizeTrajRebound(ctrl_pts_temp, final_cost, trajs[i], ts);
+        bspline_optimizer_->clearRiskSnapshot();
+        if (safety_viz_)
+        {
+          safety_viz_->publishP1IntegrityViz(
+              toSafetyVizP1Samples(bspline_optimizer_->getLastP1IntegrityVizSamples()),
+              toSafetyVizP1Metrics(bspline_optimizer_->getLastP1IntegrityMetrics()),
+              rclcpp::Clock().now().seconds());
+        }
+        if (p1_candidate_success)
         {
 
           cout << "traj " << trajs.size() - i << " success." << endl;
 
           flag_step_1_success = true;
-          if (final_cost < min_cost)
-          {
-            min_cost = final_cost;
-            ctrl_pts = ctrl_pts_temp;
-          }
+          P2CandidateInput p2_candidate;
+          p2_candidate.candidate_id = static_cast<int>(trajs.size() - i);
+          p2_candidate.control_points = ctrl_pts_temp;
+          p2_candidate.final_cost = final_cost;
+          p2_candidate.cost_breakdown = bspline_optimizer_->getLastOptimizerCostBreakdown();
+          p2_candidates.push_back(p2_candidate);
 
           // visualization
           point_set.clear();
@@ -269,13 +584,77 @@ namespace ego_planner
         }
       }
 
+      if (!p2_candidates.empty())
+      {
+        std::shared_ptr<const iap::RiskGridSnapshot> p2_snapshot;
+        if (p2_config_.enable_candidate_ranking)
+        {
+          p2_snapshot = planning_snapshot;
+        }
+        const auto p2_result = rankP2Candidates(
+            p2_candidates, p2_config_, p2_snapshot, planning_query_base_time_s, ts,
+            rclcpp::Clock().now().seconds(), ++p2_batch_id_);
+        if (safety_viz_)
+        {
+          std::vector<SafetyVizP2Candidate> viz_candidates;
+          viz_candidates.reserve(p2_candidates.size());
+          for (std::size_t candidate_idx = 0; candidate_idx < p2_candidates.size();
+               ++candidate_idx)
+          {
+            SafetyVizP2Candidate viz;
+            viz.candidate_id = p2_candidates[candidate_idx].candidate_id;
+            viz.selected =
+                static_cast<int>(candidate_idx) == p2_result.selected_index;
+            viz.fallback = p2_result.fallback;
+            viz.reason = p2_result.fallback_reason;
+            viz.control_points =
+                matrixColumnsToPoints(p2_candidates[candidate_idx].control_points);
+            for (const auto &metrics : p2_result.metrics)
+            {
+              if (metrics.candidate_id == viz.candidate_id)
+              {
+                viz.selected = metrics.selected;
+                viz.score = metrics.candidate_score;
+                viz.valid_ratio = metrics.valid_ratio;
+                viz.reason = metrics.fallback_reason;
+                break;
+              }
+            }
+            viz_candidates.push_back(viz);
+          }
+          safety_viz_->publishP2Candidates(viz_candidates,
+                                           rclcpp::Clock().now().seconds());
+        }
+        if (p2_result.selected_index >= 0 &&
+            p2_result.selected_index < static_cast<int>(p2_candidates.size()))
+        {
+          ctrl_pts = p2_candidates[p2_result.selected_index].control_points;
+          if (p2_config_.enable_candidate_ranking)
+          {
+            cout << "[P2] selected_candidate="
+                 << p2_candidates[p2_result.selected_index].candidate_id
+                 << ", fallback=" << p2_result.fallback_reason
+                 << ", metrics_only=" << p2_config_.metrics_only << endl;
+          }
+        }
+      }
+
       t_opt = rclcpp::Clock().now() - t_start;
 
       visualization_->displayMultiInitPathList(vis_trajs, 0.2);
     }
     else
     {
+      bspline_optimizer_->setRiskSnapshot(planning_snapshot, planning_query_base_time_s);
       flag_step_1_success = bspline_optimizer_->BsplineOptimizeTrajRebound(ctrl_pts, ts);
+      bspline_optimizer_->clearRiskSnapshot();
+      if (safety_viz_)
+      {
+        safety_viz_->publishP1IntegrityViz(
+            toSafetyVizP1Samples(bspline_optimizer_->getLastP1IntegrityVizSamples()),
+            toSafetyVizP1Metrics(bspline_optimizer_->getLastP1IntegrityMetrics()),
+            rclcpp::Clock().now().seconds());
+      }
       t_opt = rclcpp::Clock().now() - t_start;
       // static int vis_id = 0;
       visualization_->displayInitPathList(point_set, 0.2, 0);
@@ -460,6 +839,63 @@ namespace ego_planner
     global_data_.setGlobalTraj(gl_traj, time_now);
 
     return true;
+  }
+
+  bool EGOPlannerManager::planGlobalTrajWithP3ReferenceBias(
+      const Eigen::Vector3d &start_pos, const Eigen::Vector3d &start_vel,
+      const Eigen::Vector3d &start_acc, const Eigen::Vector3d &end_pos,
+      const Eigen::Vector3d &end_vel, const Eigen::Vector3d &end_acc)
+  {
+    if (!p3_config_.enable_global_reference_bias)
+    {
+      return planGlobalTraj(start_pos, start_vel, start_acc, end_pos, end_vel, end_acc);
+    }
+
+    const auto now = rclcpp::Clock().now();
+    P3GlobalBiasInput input;
+    input.start_pos = start_pos;
+    input.end_pos = end_pos;
+    input.max_vel = pp_.max_vel_;
+    const auto result = computeP3GlobalReferenceBias(
+        input, p3_config_, acquireRiskGridSnapshot(),
+        [this](const Eigen::Vector3d &pos)
+        {
+          return grid_map_ && grid_map_->getInflateOccupancy(pos) == 0;
+        },
+        now.seconds(), ++p3_batch_id_);
+
+    cout << "[P3-global] reason=" << result.reason
+         << ", used=" << result.used_bias
+         << ", corridor_valid=" << result.corridor_valid_ratio
+         << ", detour=" << result.detour_ratio << endl;
+    if (safety_viz_)
+    {
+      SafetyVizP3ReferenceBias viz;
+      viz.local = false;
+      viz.used_bias = result.used_bias;
+      viz.start = result.start_pos;
+      viz.end = result.end_pos;
+      viz.nominal_target = result.end_pos;
+      viz.biased_target =
+          result.biased_waypoints.empty() ? result.end_pos
+                                          : result.biased_waypoints.back();
+      viz.biased_waypoints = result.biased_waypoints;
+      viz.improvement_ratio = result.improvement_ratio;
+      viz.reason = result.reason;
+      safety_viz_->publishP3ReferenceBias(viz, now.seconds());
+    }
+
+    if (result.used_bias && !result.biased_waypoints.empty())
+    {
+      if (planGlobalTrajWaypoints(start_pos, start_vel, start_acc,
+                                  result.biased_waypoints, end_vel, end_acc))
+      {
+        return true;
+      }
+      cout << "[P3-global] planGlobalTrajWaypoints failed; falling back to original global trajectory" << endl;
+    }
+
+    return planGlobalTraj(start_pos, start_vel, start_acc, end_pos, end_vel, end_acc);
   }
 
   bool EGOPlannerManager::planGlobalTraj(const Eigen::Vector3d &start_pos, const Eigen::Vector3d &start_vel, const Eigen::Vector3d &start_acc,

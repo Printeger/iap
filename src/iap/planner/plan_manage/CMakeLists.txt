@@ -63,6 +63,10 @@ add_executable(ego_planner_node
   src/ego_replan_fsm.cpp
   src/planner_manager.cpp
   src/p0_risk_grid_runtime.cpp
+  src/p2_candidate_ranking.cpp
+  src/p3_reference_bias.cpp
+  src/p5_runtime_integrity_gate.cpp
+  src/safety_rviz_publisher.cpp
 )
 
 # target_link_libraries(ego_planner_node
@@ -98,11 +102,71 @@ if(BUILD_TESTING)
   ament_add_gtest(test_p0_risk_grid_runtime
     test/test_p0_risk_grid_runtime.cpp
     src/p0_risk_grid_runtime.cpp
+    src/safety_rviz_publisher.cpp
   )
   ament_target_dependencies(test_p0_risk_grid_runtime
-    rclcpp nav_msgs geometry_msgs std_msgs sensor_msgs gnss_comm iap
+    rclcpp nav_msgs geometry_msgs std_msgs sensor_msgs visualization_msgs
+    gnss_comm iap
   )
   target_link_libraries(test_p0_risk_grid_runtime
+    iap::iap
+    ${IAP_MSGS_TYPESUPPORT_CPP}
+  )
+
+  ament_add_gtest(test_p5_runtime_integrity_gate
+    test/test_p5_runtime_integrity_gate.cpp
+    src/p5_runtime_integrity_gate.cpp
+    src/safety_rviz_publisher.cpp
+  )
+  ament_target_dependencies(test_p5_runtime_integrity_gate
+    rclcpp nav_msgs geometry_msgs std_msgs sensor_msgs visualization_msgs
+    traj_utils bspline_opt iap
+  )
+  target_link_libraries(test_p5_runtime_integrity_gate
+    ${TRAJ_UTILS_LIB}
+    iap::iap
+    ${IAP_MSGS_TYPESUPPORT_CPP}
+  )
+
+  ament_add_gtest(test_p2_candidate_ranking
+    test/test_p2_candidate_ranking.cpp
+    src/p2_candidate_ranking.cpp
+  )
+  ament_target_dependencies(test_p2_candidate_ranking
+    rclcpp Eigen3 nav_msgs visualization_msgs plan_env path_searching
+    bspline_opt traj_utils cv_bridge pcl_conversions iap gnss_comm
+  )
+  target_link_libraries(test_p2_candidate_ranking
+    iap::iap
+  )
+
+  ament_add_gtest(test_p3_reference_bias
+    test/test_p3_reference_bias.cpp
+    src/p3_reference_bias.cpp
+  )
+  ament_target_dependencies(test_p3_reference_bias
+    rclcpp Eigen3 iap gnss_comm
+  )
+  target_link_libraries(test_p3_reference_bias
+    iap::iap
+  )
+
+  ament_add_gtest(test_planning_risk_context
+    test/test_planning_risk_context.cpp
+    src/planner_manager.cpp
+    src/p0_risk_grid_runtime.cpp
+    src/p2_candidate_ranking.cpp
+    src/p3_reference_bias.cpp
+    src/p5_runtime_integrity_gate.cpp
+    src/safety_rviz_publisher.cpp
+  )
+  ament_target_dependencies(test_planning_risk_context
+    rclcpp nav_msgs visualization_msgs geometry_msgs quadrotor_msgs
+    plan_env path_searching bspline_opt traj_utils cv_bridge pcl_conversions
+    std_msgs sensor_msgs gnss_comm iap
+  )
+  target_link_libraries(test_planning_risk_context
+    ${TRAJ_UTILS_LIB}
     iap::iap
     ${IAP_MSGS_TYPESUPPORT_CPP}
   )

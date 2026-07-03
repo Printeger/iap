@@ -54,6 +54,51 @@ def generate_launch_description():
         'integrity_debug_csv_path',
         default='/home/dev/ws_iap/src/iap/log/latest/export/planner_integrity_cost_debug.csv')
     lambda_integrity = LaunchConfiguration('lambda_integrity', default=0.00001)
+    p1_use_integrity_cost = LaunchConfiguration('p1_use_integrity_cost', default=False)
+    p1_metrics_only = LaunchConfiguration('p1_metrics_only', default=True)
+    p1_lambda_integrity = LaunchConfiguration('p1_lambda_integrity', default=0.0)
+    p1_sample_dt_min_s = LaunchConfiguration('p1_sample_dt_min_s', default=0.1)
+    p1_sample_dt_scale = LaunchConfiguration('p1_sample_dt_scale', default=1.0)
+    p1_max_samples_per_eval = LaunchConfiguration('p1_max_samples_per_eval', default=30)
+    p1_integrity_cost_max = LaunchConfiguration('p1_integrity_cost_max', default=100.0)
+    p1_integrity_grad_norm_max = LaunchConfiguration('p1_integrity_grad_norm_max', default=0.1)
+    p1_unknown_policy = LaunchConfiguration('p1_unknown_policy', default='skip')
+    p1_unknown_soft_penalty = LaunchConfiguration('p1_unknown_soft_penalty', default=1.0)
+    p1_debug_csv_enable = LaunchConfiguration('p1_debug_csv_enable', default=False)
+    p1_debug_csv_path = LaunchConfiguration('p1_debug_csv_path', default='')
+    p2_enable_candidate_ranking = LaunchConfiguration('p2_enable_candidate_ranking', default=False)
+    p2_metrics_only = LaunchConfiguration('p2_metrics_only', default=True)
+    p2_sample_dt_s = LaunchConfiguration('p2_sample_dt_s', default=0.2)
+    p2_lambda_candidate_integrity = LaunchConfiguration('p2_lambda_candidate_integrity', default=1.0)
+    p2_w_max_cost = LaunchConfiguration('p2_w_max_cost', default=0.25)
+    p2_w_unknown = LaunchConfiguration('p2_w_unknown', default=5.0)
+    p2_w_stale = LaunchConfiguration('p2_w_stale', default=2.0)
+    p2_min_valid_ratio = LaunchConfiguration('p2_min_valid_ratio', default=0.3)
+    p2_debug_csv_enable = LaunchConfiguration('p2_debug_csv_enable', default=False)
+    p2_debug_csv_path = LaunchConfiguration('p2_debug_csv_path', default='')
+    p3_enable_local_reference_bias = LaunchConfiguration('p3_enable_local_reference_bias', default=False)
+    p3_enable_global_reference_bias = LaunchConfiguration('p3_enable_global_reference_bias', default=False)
+    p3_local_bias_radius_m = LaunchConfiguration('p3_local_bias_radius_m', default=1.5)
+    p3_min_improvement_ratio = LaunchConfiguration('p3_min_improvement_ratio', default=0.05)
+    p3_w_risk = LaunchConfiguration('p3_w_risk', default=1.0)
+    p3_w_detour = LaunchConfiguration('p3_w_detour', default=0.25)
+    p3_w_unknown = LaunchConfiguration('p3_w_unknown', default=5.0)
+    p3_min_corridor_valid_ratio = LaunchConfiguration('p3_min_corridor_valid_ratio', default=0.8)
+    p3_station_spacing_m = LaunchConfiguration('p3_station_spacing_m', default=2.0)
+    p3_lateral_sample_step_m = LaunchConfiguration('p3_lateral_sample_step_m', default=1.0)
+    p3_lateral_sample_count_each_side = LaunchConfiguration('p3_lateral_sample_count_each_side', default=3)
+    p3_beam_width = LaunchConfiguration('p3_beam_width', default=5)
+    p3_max_detour_ratio = LaunchConfiguration('p3_max_detour_ratio', default=1.5)
+    p3_debug_csv_enable = LaunchConfiguration('p3_debug_csv_enable', default=False)
+    p3_debug_csv_path = LaunchConfiguration('p3_debug_csv_path', default='')
+    p4_enable_risk_aware_astar = LaunchConfiguration('p4_enable_risk_aware_astar', default=False)
+    p4_lambda_p4_risk = LaunchConfiguration('p4_lambda_p4_risk', default=0.05)
+    p4_risk_cost_max = LaunchConfiguration('p4_risk_cost_max', default=100.0)
+    p4_unknown_edge_penalty = LaunchConfiguration('p4_unknown_edge_penalty', default=1.0)
+    p4_max_extra_path_ratio = LaunchConfiguration('p4_max_extra_path_ratio', default=1.3)
+    p4_fallback_to_original_when_risk_not_ready = LaunchConfiguration('p4_fallback_to_original_when_risk_not_ready', default=True)
+    p4_debug_csv_enable = LaunchConfiguration('p4_debug_csv_enable', default=False)
+    p4_debug_csv_path = LaunchConfiguration('p4_debug_csv_path', default='')
     integrity_field_stale_timeout_s = LaunchConfiguration('integrity_field_stale_timeout_s', default=0.5)
     integrity_nearest_radius_m = LaunchConfiguration('integrity_nearest_radius_m', default=1.0)
     integrity_cost_max = LaunchConfiguration('integrity_cost_max', default=1000.0)
@@ -100,8 +145,40 @@ def generate_launch_description():
     p0_size_z_m = LaunchConfiguration('p0_size_z_m', default=6.0)
     p0_refresh_period_s = LaunchConfiguration('p0_refresh_period_s', default=0.5)
     p0_stale_timeout_s = LaunchConfiguration('p0_stale_timeout_s', default=1.0)
+    p0_skip_occupied_voxels = LaunchConfiguration('p0_skip_occupied_voxels', default=True)
     p0_debug_metrics_enable = LaunchConfiguration('p0_debug_metrics_enable', default=False)
     p0_health_topic = LaunchConfiguration('p0_health_topic', default='planning/risk_grid_health')
+    p5_enable_runtime_gate = LaunchConfiguration('p5_enable_runtime_gate', default=False)
+    p5_enable_final_gate = LaunchConfiguration('p5_enable_final_gate', default=False)
+    p5_horizon_s = LaunchConfiguration('p5_horizon_s', default=2.0)
+    p5_sample_dt_s = LaunchConfiguration('p5_sample_dt_s', default=0.2)
+    p5_current_stale_to_replan_s = LaunchConfiguration('p5_current_stale_to_replan_s', default=0.5)
+    p5_current_stale_to_emergency_s = LaunchConfiguration('p5_current_stale_to_emergency_s', default=2.0)
+    p5_future_unknown_to_emergency_s = LaunchConfiguration('p5_future_unknown_to_emergency_s', default=2.0)
+    p5_final_gate_max_consecutive_failures = LaunchConfiguration('p5_final_gate_max_consecutive_failures', default=3)
+    p5_final_gate_max_failure_duration_s = LaunchConfiguration('p5_final_gate_max_failure_duration_s', default=1.0)
+    p5_current_replan_margin_m = LaunchConfiguration('p5_current_replan_margin_m', default=0.3)
+    p5_current_emergency_margin_m = LaunchConfiguration('p5_current_emergency_margin_m', default=-0.2)
+    p5_future_replan_margin_m = LaunchConfiguration('p5_future_replan_margin_m', default=0.3)
+    p5_future_emergency_margin_m = LaunchConfiguration('p5_future_emergency_margin_m', default=-0.5)
+    p5_max_bad_ratio = LaunchConfiguration('p5_max_bad_ratio', default=0.25)
+    p5_max_unknown_ratio = LaunchConfiguration('p5_max_unknown_ratio', default=0.30)
+    p5_bad_tick_to_replan = LaunchConfiguration('p5_bad_tick_to_replan', default=2)
+    p5_good_tick_to_clear = LaunchConfiguration('p5_good_tick_to_clear', default=2)
+    p5_pred_alert_limit_mode = LaunchConfiguration('p5_pred_alert_limit_mode', default='current_msg_constant')
+    p5_pred_alert_limit_constant_hal_m = LaunchConfiguration('p5_pred_alert_limit_constant_hal_m', default=10.0)
+    p5_pred_alert_limit_constant_val_m = LaunchConfiguration('p5_pred_alert_limit_constant_val_m', default=10.0)
+    p5_pred_alert_limit_min_hal_m = LaunchConfiguration('p5_pred_alert_limit_min_hal_m', default=0.1)
+    p5_pred_alert_limit_max_hal_m = LaunchConfiguration('p5_pred_alert_limit_max_hal_m', default=50.0)
+    p5_pred_alert_limit_min_val_m = LaunchConfiguration('p5_pred_alert_limit_min_val_m', default=0.1)
+    p5_pred_alert_limit_max_val_m = LaunchConfiguration('p5_pred_alert_limit_max_val_m', default=50.0)
+    p5_pred_alert_limit_clearance_search_radius_m = LaunchConfiguration('p5_pred_alert_limit_clearance_search_radius_m', default=5.0)
+    p5_pred_alert_limit_clearance_step_m = LaunchConfiguration('p5_pred_alert_limit_clearance_step_m', default=0.25)
+    p5_pred_alert_limit_drone_radius_m = LaunchConfiguration('p5_pred_alert_limit_drone_radius_m', default=0.35)
+    p5_pred_alert_limit_clearance_scale = LaunchConfiguration('p5_pred_alert_limit_clearance_scale', default=1.0)
+    p5_pred_alert_limit_vertical_scale = LaunchConfiguration('p5_pred_alert_limit_vertical_scale', default=1.0)
+    p5_debug_metrics_enable = LaunchConfiguration('p5_debug_metrics_enable', default=False)
+    p5_status_topic = LaunchConfiguration('p5_status_topic', default='planning/integrity_gate_status')
     
     obj_num_set = LaunchConfiguration('obj_num_set', default=10)
     
@@ -151,6 +228,51 @@ def generate_launch_description():
     use_integrity_cost_arg = DeclareLaunchArgument('use_integrity_cost', default_value=use_integrity_cost, description='Enable optional integrity soft cost')
     integrity_debug_csv_path_arg = DeclareLaunchArgument('integrity_debug_csv_path', default_value=integrity_debug_csv_path, description='Planner integrity cost debug CSV path')
     lambda_integrity_arg = DeclareLaunchArgument('lambda_integrity', default_value=lambda_integrity, description='Planner integrity cost weight')
+    p1_use_integrity_cost_arg = DeclareLaunchArgument('p1_use_integrity_cost', default_value=p1_use_integrity_cost, description='Enable P1 backend integrity soft cost')
+    p1_metrics_only_arg = DeclareLaunchArgument('p1_metrics_only', default_value=p1_metrics_only, description='Compute P1 metrics without adding objective cost')
+    p1_lambda_integrity_arg = DeclareLaunchArgument('p1_lambda_integrity', default_value=p1_lambda_integrity, description='P1 integrity weight tuned by gradient ratio')
+    p1_sample_dt_min_s_arg = DeclareLaunchArgument('p1_sample_dt_min_s', default_value=p1_sample_dt_min_s, description='P1 minimum trajectory sample dt')
+    p1_sample_dt_scale_arg = DeclareLaunchArgument('p1_sample_dt_scale', default_value=p1_sample_dt_scale, description='P1 sample dt scale relative to B-spline interval')
+    p1_max_samples_per_eval_arg = DeclareLaunchArgument('p1_max_samples_per_eval', default_value=p1_max_samples_per_eval, description='P1 sample cap per L-BFGS evaluation')
+    p1_integrity_cost_max_arg = DeclareLaunchArgument('p1_integrity_cost_max', default_value=p1_integrity_cost_max, description='P1 per-sample integrity cost clip')
+    p1_integrity_grad_norm_max_arg = DeclareLaunchArgument('p1_integrity_grad_norm_max', default_value=p1_integrity_grad_norm_max, description='P1 per-sample gradient norm clip')
+    p1_unknown_policy_arg = DeclareLaunchArgument('p1_unknown_policy', default_value=p1_unknown_policy, description='P1 unknown policy: skip or small_penalty')
+    p1_unknown_soft_penalty_arg = DeclareLaunchArgument('p1_unknown_soft_penalty', default_value=p1_unknown_soft_penalty, description='P1 debug penalty for unknown samples')
+    p1_debug_csv_enable_arg = DeclareLaunchArgument('p1_debug_csv_enable', default_value=p1_debug_csv_enable, description='Enable P1 debug CSV output')
+    p1_debug_csv_path_arg = DeclareLaunchArgument('p1_debug_csv_path', default_value=p1_debug_csv_path, description='P1 debug CSV path')
+    p2_enable_candidate_ranking_arg = DeclareLaunchArgument('p2_enable_candidate_ranking', default_value=p2_enable_candidate_ranking, description='Enable P2 candidate ranking or metrics')
+    p2_metrics_only_arg = DeclareLaunchArgument('p2_metrics_only', default_value=p2_metrics_only, description='Compute P2 candidate ranking metrics without changing winner')
+    p2_sample_dt_s_arg = DeclareLaunchArgument('p2_sample_dt_s', default_value=p2_sample_dt_s, description='P2 trajectory sample dt')
+    p2_lambda_candidate_integrity_arg = DeclareLaunchArgument('p2_lambda_candidate_integrity', default_value=p2_lambda_candidate_integrity, description='P2 integrity score weight')
+    p2_w_max_cost_arg = DeclareLaunchArgument('p2_w_max_cost', default_value=p2_w_max_cost, description='P2 max cost score weight')
+    p2_w_unknown_arg = DeclareLaunchArgument('p2_w_unknown', default_value=p2_w_unknown, description='P2 unknown ratio score weight')
+    p2_w_stale_arg = DeclareLaunchArgument('p2_w_stale', default_value=p2_w_stale, description='P2 stale ratio score weight')
+    p2_min_valid_ratio_arg = DeclareLaunchArgument('p2_min_valid_ratio', default_value=p2_min_valid_ratio, description='P2 minimum valid sample ratio before ranking')
+    p2_debug_csv_enable_arg = DeclareLaunchArgument('p2_debug_csv_enable', default_value=p2_debug_csv_enable, description='Enable P2 debug CSV output')
+    p2_debug_csv_path_arg = DeclareLaunchArgument('p2_debug_csv_path', default_value=p2_debug_csv_path, description='P2 debug CSV path')
+    p3_enable_local_reference_bias_arg = DeclareLaunchArgument('p3_enable_local_reference_bias', default_value=p3_enable_local_reference_bias, description='Enable P3 local reference bias')
+    p3_enable_global_reference_bias_arg = DeclareLaunchArgument('p3_enable_global_reference_bias', default_value=p3_enable_global_reference_bias, description='Enable P3 global reference bias')
+    p3_local_bias_radius_m_arg = DeclareLaunchArgument('p3_local_bias_radius_m', default_value=p3_local_bias_radius_m, description='P3 local target search radius')
+    p3_min_improvement_ratio_arg = DeclareLaunchArgument('p3_min_improvement_ratio', default_value=p3_min_improvement_ratio, description='P3 minimum improvement ratio before applying bias')
+    p3_w_risk_arg = DeclareLaunchArgument('p3_w_risk', default_value=p3_w_risk, description='P3 risk score weight')
+    p3_w_detour_arg = DeclareLaunchArgument('p3_w_detour', default_value=p3_w_detour, description='P3 detour score weight')
+    p3_w_unknown_arg = DeclareLaunchArgument('p3_w_unknown', default_value=p3_w_unknown, description='P3 unknown sample penalty weight')
+    p3_min_corridor_valid_ratio_arg = DeclareLaunchArgument('p3_min_corridor_valid_ratio', default_value=p3_min_corridor_valid_ratio, description='P3 minimum corridor coverage before global bias')
+    p3_station_spacing_m_arg = DeclareLaunchArgument('p3_station_spacing_m', default_value=p3_station_spacing_m, description='P3 global corridor station spacing')
+    p3_lateral_sample_step_m_arg = DeclareLaunchArgument('p3_lateral_sample_step_m', default_value=p3_lateral_sample_step_m, description='P3 lateral sample spacing')
+    p3_lateral_sample_count_each_side_arg = DeclareLaunchArgument('p3_lateral_sample_count_each_side', default_value=p3_lateral_sample_count_each_side, description='P3 lateral samples on each side of corridor')
+    p3_beam_width_arg = DeclareLaunchArgument('p3_beam_width', default_value=p3_beam_width, description='P3 global beam width')
+    p3_max_detour_ratio_arg = DeclareLaunchArgument('p3_max_detour_ratio', default_value=p3_max_detour_ratio, description='P3 maximum biased path detour ratio')
+    p3_debug_csv_enable_arg = DeclareLaunchArgument('p3_debug_csv_enable', default_value=p3_debug_csv_enable, description='Enable P3 debug CSV output')
+    p3_debug_csv_path_arg = DeclareLaunchArgument('p3_debug_csv_path', default_value=p3_debug_csv_path, description='P3 debug CSV path')
+    p4_enable_risk_aware_astar_arg = DeclareLaunchArgument('p4_enable_risk_aware_astar', default_value=p4_enable_risk_aware_astar, description='Enable P4 collision-segment risk-aware A* guide fallback')
+    p4_lambda_p4_risk_arg = DeclareLaunchArgument('p4_lambda_p4_risk', default_value=p4_lambda_p4_risk, description='P4 risk edge cost weight')
+    p4_risk_cost_max_arg = DeclareLaunchArgument('p4_risk_cost_max', default_value=p4_risk_cost_max, description='P4 per-edge risk cost clamp')
+    p4_unknown_edge_penalty_arg = DeclareLaunchArgument('p4_unknown_edge_penalty', default_value=p4_unknown_edge_penalty, description='P4 unknown risk edge penalty')
+    p4_max_extra_path_ratio_arg = DeclareLaunchArgument('p4_max_extra_path_ratio', default_value=p4_max_extra_path_ratio, description='P4 maximum risk-aware path length ratio before fallback')
+    p4_fallback_to_original_when_risk_not_ready_arg = DeclareLaunchArgument('p4_fallback_to_original_when_risk_not_ready', default_value=p4_fallback_to_original_when_risk_not_ready, description='Fallback to original A* when P4 risk snapshot is unavailable')
+    p4_debug_csv_enable_arg = DeclareLaunchArgument('p4_debug_csv_enable', default_value=p4_debug_csv_enable, description='Enable P4 debug CSV output')
+    p4_debug_csv_path_arg = DeclareLaunchArgument('p4_debug_csv_path', default_value=p4_debug_csv_path, description='P4 debug CSV path')
     integrity_field_stale_timeout_s_arg = DeclareLaunchArgument('integrity_field_stale_timeout_s', default_value=integrity_field_stale_timeout_s, description='Planner integrity field stale timeout in seconds')
     integrity_nearest_radius_m_arg = DeclareLaunchArgument('integrity_nearest_radius_m', default_value=integrity_nearest_radius_m, description='Planner integrity nearest sample search radius')
     integrity_cost_max_arg = DeclareLaunchArgument('integrity_cost_max', default_value=integrity_cost_max, description='Planner integrity sample cost clamp')
@@ -197,8 +319,40 @@ def generate_launch_description():
     p0_size_z_m_arg = DeclareLaunchArgument('p0_size_z_m', default_value=p0_size_z_m)
     p0_refresh_period_s_arg = DeclareLaunchArgument('p0_refresh_period_s', default_value=p0_refresh_period_s)
     p0_stale_timeout_s_arg = DeclareLaunchArgument('p0_stale_timeout_s', default_value=p0_stale_timeout_s)
+    p0_skip_occupied_voxels_arg = DeclareLaunchArgument('p0_skip_occupied_voxels', default_value=p0_skip_occupied_voxels)
     p0_debug_metrics_enable_arg = DeclareLaunchArgument('p0_debug_metrics_enable', default_value=p0_debug_metrics_enable)
     p0_health_topic_arg = DeclareLaunchArgument('p0_health_topic', default_value=p0_health_topic)
+    p5_enable_runtime_gate_arg = DeclareLaunchArgument('p5_enable_runtime_gate', default_value=p5_enable_runtime_gate)
+    p5_enable_final_gate_arg = DeclareLaunchArgument('p5_enable_final_gate', default_value=p5_enable_final_gate)
+    p5_horizon_s_arg = DeclareLaunchArgument('p5_horizon_s', default_value=p5_horizon_s)
+    p5_sample_dt_s_arg = DeclareLaunchArgument('p5_sample_dt_s', default_value=p5_sample_dt_s)
+    p5_current_stale_to_replan_s_arg = DeclareLaunchArgument('p5_current_stale_to_replan_s', default_value=p5_current_stale_to_replan_s)
+    p5_current_stale_to_emergency_s_arg = DeclareLaunchArgument('p5_current_stale_to_emergency_s', default_value=p5_current_stale_to_emergency_s)
+    p5_future_unknown_to_emergency_s_arg = DeclareLaunchArgument('p5_future_unknown_to_emergency_s', default_value=p5_future_unknown_to_emergency_s)
+    p5_final_gate_max_consecutive_failures_arg = DeclareLaunchArgument('p5_final_gate_max_consecutive_failures', default_value=p5_final_gate_max_consecutive_failures)
+    p5_final_gate_max_failure_duration_s_arg = DeclareLaunchArgument('p5_final_gate_max_failure_duration_s', default_value=p5_final_gate_max_failure_duration_s)
+    p5_current_replan_margin_m_arg = DeclareLaunchArgument('p5_current_replan_margin_m', default_value=p5_current_replan_margin_m)
+    p5_current_emergency_margin_m_arg = DeclareLaunchArgument('p5_current_emergency_margin_m', default_value=p5_current_emergency_margin_m)
+    p5_future_replan_margin_m_arg = DeclareLaunchArgument('p5_future_replan_margin_m', default_value=p5_future_replan_margin_m)
+    p5_future_emergency_margin_m_arg = DeclareLaunchArgument('p5_future_emergency_margin_m', default_value=p5_future_emergency_margin_m)
+    p5_max_bad_ratio_arg = DeclareLaunchArgument('p5_max_bad_ratio', default_value=p5_max_bad_ratio)
+    p5_max_unknown_ratio_arg = DeclareLaunchArgument('p5_max_unknown_ratio', default_value=p5_max_unknown_ratio)
+    p5_bad_tick_to_replan_arg = DeclareLaunchArgument('p5_bad_tick_to_replan', default_value=p5_bad_tick_to_replan)
+    p5_good_tick_to_clear_arg = DeclareLaunchArgument('p5_good_tick_to_clear', default_value=p5_good_tick_to_clear)
+    p5_pred_alert_limit_mode_arg = DeclareLaunchArgument('p5_pred_alert_limit_mode', default_value=p5_pred_alert_limit_mode)
+    p5_pred_alert_limit_constant_hal_m_arg = DeclareLaunchArgument('p5_pred_alert_limit_constant_hal_m', default_value=p5_pred_alert_limit_constant_hal_m)
+    p5_pred_alert_limit_constant_val_m_arg = DeclareLaunchArgument('p5_pred_alert_limit_constant_val_m', default_value=p5_pred_alert_limit_constant_val_m)
+    p5_pred_alert_limit_min_hal_m_arg = DeclareLaunchArgument('p5_pred_alert_limit_min_hal_m', default_value=p5_pred_alert_limit_min_hal_m)
+    p5_pred_alert_limit_max_hal_m_arg = DeclareLaunchArgument('p5_pred_alert_limit_max_hal_m', default_value=p5_pred_alert_limit_max_hal_m)
+    p5_pred_alert_limit_min_val_m_arg = DeclareLaunchArgument('p5_pred_alert_limit_min_val_m', default_value=p5_pred_alert_limit_min_val_m)
+    p5_pred_alert_limit_max_val_m_arg = DeclareLaunchArgument('p5_pred_alert_limit_max_val_m', default_value=p5_pred_alert_limit_max_val_m)
+    p5_pred_alert_limit_clearance_search_radius_m_arg = DeclareLaunchArgument('p5_pred_alert_limit_clearance_search_radius_m', default_value=p5_pred_alert_limit_clearance_search_radius_m)
+    p5_pred_alert_limit_clearance_step_m_arg = DeclareLaunchArgument('p5_pred_alert_limit_clearance_step_m', default_value=p5_pred_alert_limit_clearance_step_m)
+    p5_pred_alert_limit_drone_radius_m_arg = DeclareLaunchArgument('p5_pred_alert_limit_drone_radius_m', default_value=p5_pred_alert_limit_drone_radius_m)
+    p5_pred_alert_limit_clearance_scale_arg = DeclareLaunchArgument('p5_pred_alert_limit_clearance_scale', default_value=p5_pred_alert_limit_clearance_scale)
+    p5_pred_alert_limit_vertical_scale_arg = DeclareLaunchArgument('p5_pred_alert_limit_vertical_scale', default_value=p5_pred_alert_limit_vertical_scale)
+    p5_debug_metrics_enable_arg = DeclareLaunchArgument('p5_debug_metrics_enable', default_value=p5_debug_metrics_enable)
+    p5_status_topic_arg = DeclareLaunchArgument('p5_status_topic', default_value=p5_status_topic)
     obj_num_set_arg = DeclareLaunchArgument('obj_num_set', default_value=obj_num_set, description='Number of objects')
     drone_id_arg = DeclareLaunchArgument('drone_id', default_value=drone_id, description='Drone ID')
 
@@ -305,6 +459,7 @@ def generate_launch_description():
             {'p0.horizons_s': [0.0, 0.5, 1.0, 1.5, 2.0]},
             {'p0.refresh_period_s': p0_refresh_period_s},
             {'p0.stale_timeout_s': p0_stale_timeout_s},
+            {'p0.skip_occupied_voxels': p0_skip_occupied_voxels},
             {'p0.debug_metrics_enable': p0_debug_metrics_enable},
             {'p0.odom_topic': odometry_topic},
             {'p0.integrity_topic': '/iap/integrity'},
@@ -315,6 +470,83 @@ def generate_launch_description():
             {'p0.iono_topic': '/ublox_driver/iono_params'},
             {'p0.map_topic': '/map_generator/global_cloud'},
             {'p0.health_topic': p0_health_topic},
+            {'p5.enable_runtime_gate': p5_enable_runtime_gate},
+            {'p5.enable_final_gate': p5_enable_final_gate},
+            {'p5.horizon_s': p5_horizon_s},
+            {'p5.sample_dt_s': p5_sample_dt_s},
+            {'p5.current_stale_to_replan_s': p5_current_stale_to_replan_s},
+            {'p5.current_stale_to_emergency_s': p5_current_stale_to_emergency_s},
+            {'p5.future_unknown_to_emergency_s': p5_future_unknown_to_emergency_s},
+            {'p5.final_gate_max_consecutive_failures': p5_final_gate_max_consecutive_failures},
+            {'p5.final_gate_max_failure_duration_s': p5_final_gate_max_failure_duration_s},
+            {'p5.current_replan_margin_m': p5_current_replan_margin_m},
+            {'p5.current_emergency_margin_m': p5_current_emergency_margin_m},
+            {'p5.future_replan_margin_m': p5_future_replan_margin_m},
+            {'p5.future_emergency_margin_m': p5_future_emergency_margin_m},
+            {'p5.max_bad_ratio': p5_max_bad_ratio},
+            {'p5.max_unknown_ratio': p5_max_unknown_ratio},
+            {'p5.bad_tick_to_replan': p5_bad_tick_to_replan},
+            {'p5.good_tick_to_clear': p5_good_tick_to_clear},
+            {'p5.pred_alert_limit_mode': p5_pred_alert_limit_mode},
+            {'p5.pred_alert_limit_constant_hal_m': p5_pred_alert_limit_constant_hal_m},
+            {'p5.pred_alert_limit_constant_val_m': p5_pred_alert_limit_constant_val_m},
+            {'p5.pred_alert_limit_min_hal_m': p5_pred_alert_limit_min_hal_m},
+            {'p5.pred_alert_limit_max_hal_m': p5_pred_alert_limit_max_hal_m},
+            {'p5.pred_alert_limit_min_val_m': p5_pred_alert_limit_min_val_m},
+            {'p5.pred_alert_limit_max_val_m': p5_pred_alert_limit_max_val_m},
+            {'p5.pred_alert_limit_clearance_search_radius_m': p5_pred_alert_limit_clearance_search_radius_m},
+            {'p5.pred_alert_limit_clearance_step_m': p5_pred_alert_limit_clearance_step_m},
+            {'p5.pred_alert_limit_drone_radius_m': p5_pred_alert_limit_drone_radius_m},
+            {'p5.pred_alert_limit_clearance_scale': p5_pred_alert_limit_clearance_scale},
+            {'p5.pred_alert_limit_vertical_scale': p5_pred_alert_limit_vertical_scale},
+            {'p5.integrity_topic': '/iap/integrity'},
+            {'p5.status_topic': p5_status_topic},
+            {'p5.debug_metrics_enable': p5_debug_metrics_enable},
+            {'p1.use_integrity_cost': p1_use_integrity_cost},
+            {'p1.metrics_only': p1_metrics_only},
+            {'p1.lambda_integrity': p1_lambda_integrity},
+            {'p1.sample_dt_min_s': p1_sample_dt_min_s},
+            {'p1.sample_dt_scale': p1_sample_dt_scale},
+            {'p1.max_samples_per_eval': p1_max_samples_per_eval},
+            {'p1.integrity_cost_max': p1_integrity_cost_max},
+            {'p1.integrity_grad_norm_max': p1_integrity_grad_norm_max},
+            {'p1.unknown_policy': p1_unknown_policy},
+            {'p1.unknown_soft_penalty': p1_unknown_soft_penalty},
+            {'p1.debug_csv_enable': p1_debug_csv_enable},
+            {'p1.debug_csv_path': p1_debug_csv_path},
+            {'p2.enable_candidate_ranking': p2_enable_candidate_ranking},
+            {'p2.metrics_only': p2_metrics_only},
+            {'p2.sample_dt_s': p2_sample_dt_s},
+            {'p2.lambda_candidate_integrity': p2_lambda_candidate_integrity},
+            {'p2.w_max_cost': p2_w_max_cost},
+            {'p2.w_unknown': p2_w_unknown},
+            {'p2.w_stale': p2_w_stale},
+            {'p2.min_valid_ratio': p2_min_valid_ratio},
+            {'p2.debug_csv_enable': p2_debug_csv_enable},
+            {'p2.debug_csv_path': p2_debug_csv_path},
+            {'p3.enable_local_reference_bias': p3_enable_local_reference_bias},
+            {'p3.enable_global_reference_bias': p3_enable_global_reference_bias},
+            {'p3.local_bias_radius_m': p3_local_bias_radius_m},
+            {'p3.min_improvement_ratio': p3_min_improvement_ratio},
+            {'p3.w_risk': p3_w_risk},
+            {'p3.w_detour': p3_w_detour},
+            {'p3.w_unknown': p3_w_unknown},
+            {'p3.min_corridor_valid_ratio': p3_min_corridor_valid_ratio},
+            {'p3.station_spacing_m': p3_station_spacing_m},
+            {'p3.lateral_sample_step_m': p3_lateral_sample_step_m},
+            {'p3.lateral_sample_count_each_side': p3_lateral_sample_count_each_side},
+            {'p3.beam_width': p3_beam_width},
+            {'p3.max_detour_ratio': p3_max_detour_ratio},
+            {'p3.debug_csv_enable': p3_debug_csv_enable},
+            {'p3.debug_csv_path': p3_debug_csv_path},
+            {'p4.enable_risk_aware_astar': p4_enable_risk_aware_astar},
+            {'p4.lambda_p4_risk': p4_lambda_p4_risk},
+            {'p4.risk_cost_max': p4_risk_cost_max},
+            {'p4.unknown_edge_penalty': p4_unknown_edge_penalty},
+            {'p4.max_extra_path_ratio': p4_max_extra_path_ratio},
+            {'p4.fallback_to_original_when_risk_not_ready': p4_fallback_to_original_when_risk_not_ready},
+            {'p4.debug_csv_enable': p4_debug_csv_enable},
+            {'p4.debug_csv_path': p4_debug_csv_path},
             {'risk_overlay/enable': risk_overlay_enable},
             {'risk_overlay/use_for_astar': risk_overlay_use_for_astar},
             {'risk_overlay/use_for_bspline': risk_overlay_use_for_bspline},
@@ -438,6 +670,51 @@ def generate_launch_description():
     ld.add_action(use_integrity_cost_arg)
     ld.add_action(integrity_debug_csv_path_arg)
     ld.add_action(lambda_integrity_arg)
+    ld.add_action(p1_use_integrity_cost_arg)
+    ld.add_action(p1_metrics_only_arg)
+    ld.add_action(p1_lambda_integrity_arg)
+    ld.add_action(p1_sample_dt_min_s_arg)
+    ld.add_action(p1_sample_dt_scale_arg)
+    ld.add_action(p1_max_samples_per_eval_arg)
+    ld.add_action(p1_integrity_cost_max_arg)
+    ld.add_action(p1_integrity_grad_norm_max_arg)
+    ld.add_action(p1_unknown_policy_arg)
+    ld.add_action(p1_unknown_soft_penalty_arg)
+    ld.add_action(p1_debug_csv_enable_arg)
+    ld.add_action(p1_debug_csv_path_arg)
+    ld.add_action(p2_enable_candidate_ranking_arg)
+    ld.add_action(p2_metrics_only_arg)
+    ld.add_action(p2_sample_dt_s_arg)
+    ld.add_action(p2_lambda_candidate_integrity_arg)
+    ld.add_action(p2_w_max_cost_arg)
+    ld.add_action(p2_w_unknown_arg)
+    ld.add_action(p2_w_stale_arg)
+    ld.add_action(p2_min_valid_ratio_arg)
+    ld.add_action(p2_debug_csv_enable_arg)
+    ld.add_action(p2_debug_csv_path_arg)
+    ld.add_action(p3_enable_local_reference_bias_arg)
+    ld.add_action(p3_enable_global_reference_bias_arg)
+    ld.add_action(p3_local_bias_radius_m_arg)
+    ld.add_action(p3_min_improvement_ratio_arg)
+    ld.add_action(p3_w_risk_arg)
+    ld.add_action(p3_w_detour_arg)
+    ld.add_action(p3_w_unknown_arg)
+    ld.add_action(p3_min_corridor_valid_ratio_arg)
+    ld.add_action(p3_station_spacing_m_arg)
+    ld.add_action(p3_lateral_sample_step_m_arg)
+    ld.add_action(p3_lateral_sample_count_each_side_arg)
+    ld.add_action(p3_beam_width_arg)
+    ld.add_action(p3_max_detour_ratio_arg)
+    ld.add_action(p3_debug_csv_enable_arg)
+    ld.add_action(p3_debug_csv_path_arg)
+    ld.add_action(p4_enable_risk_aware_astar_arg)
+    ld.add_action(p4_lambda_p4_risk_arg)
+    ld.add_action(p4_risk_cost_max_arg)
+    ld.add_action(p4_unknown_edge_penalty_arg)
+    ld.add_action(p4_max_extra_path_ratio_arg)
+    ld.add_action(p4_fallback_to_original_when_risk_not_ready_arg)
+    ld.add_action(p4_debug_csv_enable_arg)
+    ld.add_action(p4_debug_csv_path_arg)
     ld.add_action(integrity_field_stale_timeout_s_arg)
     ld.add_action(integrity_nearest_radius_m_arg)
     ld.add_action(integrity_cost_max_arg)
@@ -484,8 +761,40 @@ def generate_launch_description():
     ld.add_action(p0_size_z_m_arg)
     ld.add_action(p0_refresh_period_s_arg)
     ld.add_action(p0_stale_timeout_s_arg)
+    ld.add_action(p0_skip_occupied_voxels_arg)
     ld.add_action(p0_debug_metrics_enable_arg)
     ld.add_action(p0_health_topic_arg)
+    ld.add_action(p5_enable_runtime_gate_arg)
+    ld.add_action(p5_enable_final_gate_arg)
+    ld.add_action(p5_horizon_s_arg)
+    ld.add_action(p5_sample_dt_s_arg)
+    ld.add_action(p5_current_stale_to_replan_s_arg)
+    ld.add_action(p5_current_stale_to_emergency_s_arg)
+    ld.add_action(p5_future_unknown_to_emergency_s_arg)
+    ld.add_action(p5_final_gate_max_consecutive_failures_arg)
+    ld.add_action(p5_final_gate_max_failure_duration_s_arg)
+    ld.add_action(p5_current_replan_margin_m_arg)
+    ld.add_action(p5_current_emergency_margin_m_arg)
+    ld.add_action(p5_future_replan_margin_m_arg)
+    ld.add_action(p5_future_emergency_margin_m_arg)
+    ld.add_action(p5_max_bad_ratio_arg)
+    ld.add_action(p5_max_unknown_ratio_arg)
+    ld.add_action(p5_bad_tick_to_replan_arg)
+    ld.add_action(p5_good_tick_to_clear_arg)
+    ld.add_action(p5_pred_alert_limit_mode_arg)
+    ld.add_action(p5_pred_alert_limit_constant_hal_m_arg)
+    ld.add_action(p5_pred_alert_limit_constant_val_m_arg)
+    ld.add_action(p5_pred_alert_limit_min_hal_m_arg)
+    ld.add_action(p5_pred_alert_limit_max_hal_m_arg)
+    ld.add_action(p5_pred_alert_limit_min_val_m_arg)
+    ld.add_action(p5_pred_alert_limit_max_val_m_arg)
+    ld.add_action(p5_pred_alert_limit_clearance_search_radius_m_arg)
+    ld.add_action(p5_pred_alert_limit_clearance_step_m_arg)
+    ld.add_action(p5_pred_alert_limit_drone_radius_m_arg)
+    ld.add_action(p5_pred_alert_limit_clearance_scale_arg)
+    ld.add_action(p5_pred_alert_limit_vertical_scale_arg)
+    ld.add_action(p5_debug_metrics_enable_arg)
+    ld.add_action(p5_status_topic_arg)
     ld.add_action(obj_num_set_arg)
     ld.add_action(drone_id_arg)
 

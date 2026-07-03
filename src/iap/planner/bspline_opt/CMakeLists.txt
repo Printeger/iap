@@ -22,13 +22,17 @@ find_package(cv_bridge REQUIRED)
 find_package(plan_env REQUIRED)
 find_package(traj_utils REQUIRED)
 find_package(path_searching REQUIRED)
+find_package(gnss_comm REQUIRED)
+find_package(iap REQUIRED)
 
 find_package(PCL REQUIRED)
 find_package(pcl_conversions REQUIRED)
 find_package(Eigen3 REQUIRED)
+find_package(glog REQUIRED)
 
 if(BUILD_TESTING)
   find_package(ament_lint_auto REQUIRED)
+  find_package(ament_cmake_gtest REQUIRED)
   # the following line skips the linter which checks for copyrights
   # comment the line when a copyright and license is added to all source files
   set(ament_cmake_copyright_FOUND TRUE)
@@ -59,7 +63,24 @@ ament_target_dependencies(bspline_opt
                           nav_msgs cv_bridge 
                           rclcpp Eigen3 
                           PCL pcl_conversions 
-                          plan_env traj_utils path_searching)
+                          plan_env traj_utils path_searching gnss_comm iap)
+
+target_link_libraries(bspline_opt
+  iap::iap
+)
+
+if(BUILD_TESTING)
+  ament_add_gtest(test_p1_integrity_cost
+    test/test_p1_integrity_cost.cpp
+  )
+  ament_target_dependencies(test_p1_integrity_cost
+    rclcpp Eigen3 gnss_comm iap
+  )
+  target_link_libraries(test_p1_integrity_cost
+    bspline_opt
+    iap::iap
+  )
+endif()
 
 
 install(TARGETS bspline_opt
@@ -71,5 +92,7 @@ install(DIRECTORY include/${PROJECT_NAME}/
 )
 
 ament_export_libraries(bspline_opt)
+ament_export_dependencies(gnss_comm)
+ament_export_dependencies(iap)
 
 ament_package()

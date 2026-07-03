@@ -26,12 +26,14 @@ class AffineProvider final : public iap::RiskPredictionProvider {
  public:
   bool fail = false;
   bool mark_unknown = false;
+  int query_count = 0;
 
   bool batchQuery(const std::vector<iap::RiskPredictionQuery>& queries,
                   std::vector<iap::RiskPredictionResult>* results) override {
     if (fail || results == nullptr) {
       return false;
     }
+    query_count += static_cast<int>(queries.size());
     results->clear();
     results->reserve(queries.size());
     for (const auto& query : queries) {
@@ -137,6 +139,139 @@ TEST(RiskGridMapTest, QueryCostAndPredictedPLAreSemanticallySeparate) {
   EXPECT_TRUE(pl.valid);
 }
 
+TEST(RiskGridMapTest, SnapshotVoxelAccessorExposesReadOnlyLayerData) {
+  iap::RiskGridMap grid(base_params());
+  auto snapshot = make_snapshot(&grid, 10.0);
+
+  EXPECT_EQ(snapshot->horizonCount(), 2);
+  EXPECT_EQ(snapshot->layerVoxelCount(), 27);
+
+  const Eigen::Vector3i id(1, 1, 1);
+  const Eigen::Vector3d p = snapshot->indexToPos(id);
+  iap::RiskVoxel voxel;
+  ASSERT_TRUE(snapshot->voxelAt(1, id, &voxel));
+  EXPECT_TRUE(voxel.valid);
+  EXPECT_FALSE(voxel.unknown);
+  EXPECT_FALSE(voxel.stale);
+  EXPECT_NEAR(voxel.hpl_pred, AffineProvider::affine(p, 1.0), 1.0e-9);
+  EXPECT_NEAR(voxel.vpl_pred, 0.25 * voxel.hpl_pred, 1.0e-9);
+
+  EXPECT_FALSE(snapshot->voxelAt(-1, id, &voxel));
+  EXPECT_FALSE(snapshot->voxelAt(2, id, &voxel));
+  EXPECT_FALSE(snapshot->voxelAt(0, Eigen::Vector3i(3, 0, 0), &voxel));
+  EXPECT_FALSE(snapshot->voxelAt(0, id, nullptr));
+
+  const iap::RiskGridSnapshot empty;
+  EXPECT_EQ(empty.horizonCount(), 0);
+  EXPECT_EQ(empty.layerVoxelCount(), 0);
+  EXPECT_FALSE(empty.voxelAt(0, id, &voxel));
+}
+
+TEST(RiskGridMapTest, SkipOccupiedVoxelsCanBeDisabled) {
+  iap::RiskGridMapParams params = base_params();
+  params.skip_occupied_voxels = false;
+  iap::RiskGridMap grid(params);
+  AffineProvider provider;
+  std::string reason;
+
+  ASSERT_TRUE(grid.refreshFromProvider(
+      Eigen::Vector3d::Zero(), 10.0, provider,
+      [](const Eigen::Vector3d&) { return true; }, &reason))
+      << reason;
+
+  EXPECT_EQ(provider.query_count, 54);
+  auto snapshot = grid.acquireSnapshot();
+  ASSERT_NE(snapshot, nullptr);
+  EXPECT_DOUBLE_EQ(snapshot->health().valid_ratio, 1.0);
+  EXPECT_DOUBLE_EQ(snapshot->health().unknown_ratio, 0.0);
+
+  iap::RiskCostSample cost;
+  EXPECT_TRUE(snapshot->queryCost(Eigen::Vector3d::Zero(), 10.0, &cost))
+      << cost.reason;
+  EXPECT_EQ(cost.reason, "ok");
+}
+
+TEST(RiskGridMapTest, SkipOccupiedVoxelsMarksOccupiedAsUnknown) {
+  iap::RiskGridMapParams params = base_params();
+  params.skip_occupied_voxels = true;
+  iap::RiskGridMap grid(params);
+  AffineProvider provider;
+  std::string reason;
+
+  ASSERT_TRUE(grid.refreshFromProvider(
+      Eigen::Vector3d::Zero(), 10.0, provider,
+      [](const Eigen::Vector3d&) { return true; }, &reason))
+      << reason;
+
+  EXPECT_EQ(provider.query_count, 0);
+  auto snapshot = grid.acquireSnapshot();
+  ASSERT_NE(snapshot, nullptr);
+  EXPECT_DOUBLE_EQ(snapshot->health().valid_ratio, 0.0);
+  EXPECT_DOUBLE_EQ(snapshot->health().unknown_ratio, 1.0);
+
+  iap::RiskCostSample cost;
+  EXPECT_FALSE(snapshot->queryCost(Eigen::Vector3d::Zero(), 10.0, &cost));
+  EXPECT_EQ(cost.reason, "occupied");
+  EXPECT_DOUBLE_EQ(cost.cost, params.unknown_cost);
+
+  iap::PredictedPLSample pl;
+  EXPECT_FALSE(
+      snapshot->queryPredictedPL(Eigen::Vector3d::Zero(), 10.0, &pl));
+  EXPECT_EQ(pl.reason, "occupied");
+  EXPECT_FALSE(pl.available);
+  EXPECT_FALSE(pl.valid);
+}
+
+TEST(RiskGridMapTest, SkipOccupiedVoxelsKeepsFreePredicateBehavior) {
+  iap::RiskGridMapParams params = base_params();
+  params.skip_occupied_voxels = true;
+  iap::RiskGridMap grid(params);
+  AffineProvider provider;
+  std::string reason;
+
+  ASSERT_TRUE(grid.refreshFromProvider(
+      Eigen::Vector3d::Zero(), 10.0, provider,
+      [](const Eigen::Vector3d&) { return false; }, &reason))
+      << reason;
+
+  EXPECT_EQ(provider.query_count, 54);
+  auto snapshot = grid.acquireSnapshot();
+  ASSERT_NE(snapshot, nullptr);
+  EXPECT_DOUBLE_EQ(snapshot->health().valid_ratio, 1.0);
+  EXPECT_DOUBLE_EQ(snapshot->health().unknown_ratio, 0.0);
+
+  iap::PredictedPLSample pl;
+  EXPECT_TRUE(
+      snapshot->queryPredictedPL(Eigen::Vector3d::Zero(), 10.0, &pl))
+      << pl.reason;
+  EXPECT_EQ(pl.reason, "ok");
+}
+
+TEST(RiskGridMapTest, HealthRatiosUseTotalVoxelCountWithPartialOccupiedSkip) {
+  iap::RiskGridMapParams params = base_params();
+  params.skip_occupied_voxels = true;
+  iap::RiskGridMap grid(params);
+  AffineProvider provider;
+  std::string reason;
+
+  ASSERT_TRUE(grid.refreshFromProvider(
+      Eigen::Vector3d::Zero(), 10.0, provider,
+      [](const Eigen::Vector3d& p) { return p.x() < -0.5; }, &reason))
+      << reason;
+
+  EXPECT_EQ(provider.query_count, 36);
+  auto snapshot = grid.acquireSnapshot();
+  ASSERT_NE(snapshot, nullptr);
+  const auto health = snapshot->health();
+  EXPECT_NEAR(health.valid_ratio, 36.0 / 54.0, 1.0e-12);
+  EXPECT_NEAR(health.unknown_ratio, 18.0 / 54.0, 1.0e-12);
+  EXPECT_NEAR(health.valid_ratio + health.unknown_ratio, 1.0, 1.0e-12);
+  EXPECT_GE(health.valid_ratio, 0.0);
+  EXPECT_LE(health.valid_ratio, 1.0);
+  EXPECT_GE(health.unknown_ratio, 0.0);
+  EXPECT_LE(health.unknown_ratio, 1.0);
+}
+
 TEST(RiskGridMapTest, UnknownStaleInvalidAndOutOfRangeAreExplicit) {
   iap::RiskGridMapParams params = base_params();
   params.stale_timeout_s = 0.1;
@@ -206,4 +341,3 @@ TEST(RiskGridMapTest, RefreshFailureKeepsPreviousActiveSnapshot) {
   EXPECT_EQ(grid.health().generation_id, first_id);
   EXPECT_EQ(grid.health().reason, "provider_refresh_failed");
 }
-

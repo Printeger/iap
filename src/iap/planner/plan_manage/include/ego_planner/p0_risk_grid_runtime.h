@@ -1,6 +1,7 @@
 #ifndef _P0_RISK_GRID_RUNTIME_H_
 #define _P0_RISK_GRID_RUNTIME_H_
 
+#include <functional>
 #include <memory>
 #include <optional>
 #include <string>
@@ -9,6 +10,7 @@
 
 #include <Eigen/Core>
 #include <Eigen/Geometry>
+#include <ego_planner/safety_rviz_publisher.h>
 #include <geometry_msgs/msg/pose_stamped.hpp>
 #include <gnss_comm/msg/gnss_ephem_msg.hpp>
 #include <gnss_comm/msg/gnss_glo_ephem_msg.hpp>
@@ -56,13 +58,19 @@ class P0RiskGridRuntime {
   bool enabled() const { return config_.enable_risk_grid; }
   const iap::RiskGridMap& riskGrid() const { return risk_grid_; }
   iap::RiskGridMap& riskGrid() { return risk_grid_; }
+  std::shared_ptr<const iap::RiskGridSnapshot> acquireSnapshot() const {
+    return risk_grid_.acquireSnapshot();
+  }
   iap::RiskGridHealth health() const;
   bool refreshOnceForTest();
+  void setOccupancyPredicate(iap::RiskGridMap::OccupancyPredicate predicate);
 
  private:
+  friend class P0RiskGridRuntimeStampTest;
+
   void createRosInterfaces();
   void refreshTimerCallback();
-  void publishHealth(const iap::RiskGridHealth& health);
+  void publishHealth(const iap::RiskGridHealth& health, double now_s);
 
   void odomCallback(const nav_msgs::msg::Odometry::ConstSharedPtr msg);
   void integrityCallback(const iap::msg::IntegrityReport::ConstSharedPtr msg);
@@ -82,14 +90,17 @@ class P0RiskGridRuntime {
   Eigen::Matrix3d currentPriorInformation(
       const iap::CurrentIntegrityState& current) const;
   bool buildSnapshot(double now_s, iap::IntegritySnapshot* snapshot) const;
+  double currentRefreshStamp() const;
 
   rclcpp::Node::SharedPtr node_;
   Config config_;
   iap::RiskGridMap risk_grid_;
   std::unique_ptr<iap::RiskPredictionProvider> provider_;
+  iap::RiskGridMap::OccupancyPredicate occupancy_predicate_;
   iap::IntegritySnapshotBuilder snapshot_builder_;
 
   rclcpp::TimerBase::SharedPtr refresh_timer_;
+  std::shared_ptr<SafetyRvizPublisher> safety_viz_;
   rclcpp::Publisher<std_msgs::msg::String>::SharedPtr health_pub_;
   rclcpp::Subscription<nav_msgs::msg::Odometry>::SharedPtr odom_sub_;
   rclcpp::Subscription<iap::msg::IntegrityReport>::SharedPtr integrity_sub_;

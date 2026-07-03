@@ -185,18 +185,23 @@ struct PredictorQueryInput {
                       IntegritySnapshot snapshot_in,
                       const double query_time_s_in,
                       const double horizon_s_in = 0.0,
-                      std::string frame_id_in = "map")
+                      std::string frame_id_in = "map",
+                      const double freshness_reference_time_s_in =
+                          std::numeric_limits<double>::quiet_NaN())
       : query_position_map(std::move(query_position_map_in)),
         snapshot(std::move(snapshot_in)),
         query_time_s(query_time_s_in),
         horizon_s(horizon_s_in),
-        frame_id(std::move(frame_id_in)) {}
+        frame_id(std::move(frame_id_in)),
+        freshness_reference_time_s(freshness_reference_time_s_in) {}
 
   Eigen::Vector3d query_position_map;
   IntegritySnapshot snapshot;
   double query_time_s;
   double horizon_s;
   std::string frame_id = "map";
+  double freshness_reference_time_s =
+      std::numeric_limits<double>::quiet_NaN();
 };
 
 enum PredictorResultFlags : uint32_t {

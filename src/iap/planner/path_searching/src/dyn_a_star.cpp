@@ -1,14 +1,30 @@
 #include "path_searching/dyn_a_star.h"
 
+#include <algorithm>
+#include <cmath>
+#include <limits>
+#include <utility>
+
+#include <iap/planner/risk_grid_map.hpp>
+
 using namespace std;
 using namespace Eigen;
 
 AStar::~AStar()
 {
+    if (!GridNodeMap_)
+        return;
     for (int i = 0; i < POOL_SIZE_(0); i++)
+    {
         for (int j = 0; j < POOL_SIZE_(1); j++)
+        {
             for (int k = 0; k < POOL_SIZE_(2); k++)
                 delete GridNodeMap_[i][j][k];
+            delete[] GridNodeMap_[i][j];
+        }
+        delete[] GridNodeMap_[i];
+    }
+    delete[] GridNodeMap_;
 }
 
 void AStar::initGridMap(GridMap::Ptr occ_map, const Eigen::Vector3i pool_size)
@@ -31,6 +47,18 @@ void AStar::initGridMap(GridMap::Ptr occ_map, const Eigen::Vector3i pool_size)
     }
 
     grid_map_ = occ_map;
+}
+
+void AStar::setRiskSnapshot(std::shared_ptr<const iap::RiskGridSnapshot> snapshot, double query_base_time_s)
+{
+    risk_snapshot_ = std::move(snapshot);
+    risk_query_base_time_s_ = query_base_time_s;
+}
+
+void AStar::clearRiskSnapshot()
+{
+    risk_snapshot_.reset();
+    risk_query_base_time_s_ = 0.0;
 }
 
 double AStar::getDiagHeu(GridNodePtr node1, GridNodePtr node2)
@@ -120,17 +148,76 @@ bool AStar::ConvertToIndexAndAdjustStartEndPoints(Vector3d start_pt, Vector3d en
 
 bool AStar::AstarSearch(const double step_size, Vector3d start_pt, Vector3d end_pt)
 {
+    if (p4_config_.enable_risk_aware_astar && risk_snapshot_)
+        return AstarSearchRiskAware(step_size, start_pt, end_pt);
+    return AstarSearchOriginal(step_size, start_pt, end_pt);
+}
+
+bool AStar::AstarSearchOriginal(const double step_size, Vector3d start_pt, Vector3d end_pt)
+{
+    return astarSearchImpl(step_size, start_pt, end_pt, false);
+}
+
+bool AStar::AstarSearchRiskAware(const double step_size, Vector3d start_pt, Vector3d end_pt)
+{
+    return astarSearchImpl(step_size, start_pt, end_pt, p4_config_.enable_risk_aware_astar && risk_snapshot_);
+}
+
+double AStar::queryTimeForEdge(const GridNodePtr current, double geometric_cost) const
+{
+    const double speed = std::isfinite(p4_config_.query_speed_mps) && p4_config_.query_speed_mps > 1.0e-3
+                             ? p4_config_.query_speed_mps
+                             : 1.0;
+    const double distance_m = current ? (Index2Coord(current->index) - search_start_pt_).norm() +
+                                            geometric_cost * step_size_
+                                      : geometric_cost * step_size_;
+    return risk_query_base_time_s_ + distance_m / speed;
+}
+
+double AStar::edgeCostWithRisk(const Vector3d &current_pos, const Vector3d &neighbor_pos,
+                               double geometric_cost, double query_time_s)
+{
+    if (!p4_config_.enable_risk_aware_astar || !risk_snapshot_)
+        return geometric_cost;
+
+    ++last_p4_metrics_.risk_query_count;
+    iap::RiskCostSample sample;
+    const Vector3d query_pos = 0.5 * (current_pos + neighbor_pos);
+    if (!risk_snapshot_->queryCost(query_pos, query_time_s, &sample) ||
+        !sample.valid || sample.stale || !std::isfinite(sample.cost))
+    {
+        ++last_p4_metrics_.unknown_count;
+        return geometric_cost + p4_config_.unknown_edge_penalty;
+    }
+
+    const double risk_cost = std::clamp(sample.cost, 0.0, p4_config_.risk_cost_max);
+    p4_valid_cost_sum_ += risk_cost;
+    ++p4_valid_cost_count_;
+    last_p4_metrics_.path_max_cost = std::max(last_p4_metrics_.path_max_cost, risk_cost);
+    return geometric_cost + p4_config_.lambda_p4_risk * geometric_cost * risk_cost;
+}
+
+bool AStar::astarSearchImpl(const double step_size, Vector3d start_pt, Vector3d end_pt, bool use_risk)
+{
     rclcpp::Time time_1 = rclcpp::Clock().now();
     ++rounds_;
+    last_p4_metrics_ = P4AStarMetrics{};
+    last_p4_metrics_.risk_enabled = use_risk;
+    last_p4_metrics_.snapshot_generation_id = (use_risk && risk_snapshot_) ? risk_snapshot_->generation_id() : 0;
+    last_p4_metrics_.fallback_reason = use_risk ? "risk_search" : "original_search";
+    p4_valid_cost_sum_ = 0.0;
+    p4_valid_cost_count_ = 0;
 
     step_size_ = step_size;
     inv_step_size_ = 1 / step_size;
     center_ = (start_pt + end_pt) / 2;
+    search_start_pt_ = start_pt;
 
     Vector3i start_idx, end_idx;
     if (!ConvertToIndexAndAdjustStartEndPoints(start_pt, end_pt, start_idx, end_idx))
     {
         RCLCPP_ERROR(rclcpp::get_logger("AstarSearch"), "Unable to handle the initial or end point, force return!");
+        last_p4_metrics_.fallback_reason = "invalid_start_or_end";
         return false;
     }
 
@@ -162,6 +249,7 @@ bool AStar::AstarSearch(const double step_size, Vector3d start_pt, Vector3d end_
     while (!openSet_.empty())
     {
         num_iter++;
+        last_p4_metrics_.expanded_nodes = num_iter;
         current = openSet_.top();
         openSet_.pop();
 
@@ -175,6 +263,10 @@ bool AStar::AstarSearch(const double step_size, Vector3d start_pt, Vector3d end_
             // if((time_2 - time_1).toSec() > 0.1)
             //     ROS_WARN("Time consume in A star path finding is %f", (time_2 - time_1).toSec() );
             gridPath_ = retrievePath(current);
+            rclcpp::Time time_2 = rclcpp::Clock().now();
+            last_p4_metrics_.elapsed_ms = (time_2 - time_1).seconds() * 1000.0;
+            if (p4_valid_cost_count_ > 0)
+                last_p4_metrics_.path_mean_cost = p4_valid_cost_sum_ / static_cast<double>(p4_valid_cost_count_);
             return true;
         }
         current->state = GridNode::CLOSEDSET; //move current node from open set to closed set.
@@ -210,11 +302,18 @@ bool AStar::AstarSearch(const double step_size, Vector3d start_pt, Vector3d end_
 
                     if (checkOccupancy(Index2Coord(neighborPtr->index)))
                     {
+                        ++last_p4_metrics_.occupied_reject_count;
                         continue;
                     }
 
                     double static_cost = sqrt(dx * dx + dy * dy + dz * dz);
-                    tentative_gScore = current->gScore + static_cost;
+                    const double edge_cost = use_risk
+                                                 ? edgeCostWithRisk(Index2Coord(current->index),
+                                                                    Index2Coord(neighborPtr->index),
+                                                                    static_cost,
+                                                                    queryTimeForEdge(current, static_cost))
+                                                 : static_cost;
+                    tentative_gScore = current->gScore + edge_cost;
 
                     if (!flag_explored)
                     {
@@ -236,6 +335,8 @@ bool AStar::AstarSearch(const double step_size, Vector3d start_pt, Vector3d end_
         if ((time_2 - time_1).seconds() > 0.2)
         {
             RCLCPP_WARN(rclcpp::get_logger("AstarSearch"), "Failed in A star path searching !!! 0.2 seconds time limit exceeded.");
+            last_p4_metrics_.elapsed_ms = (time_2 - time_1).seconds() * 1000.0;
+            last_p4_metrics_.fallback_reason = "timeout";
             return false;
         }
     }
@@ -243,9 +344,11 @@ bool AStar::AstarSearch(const double step_size, Vector3d start_pt, Vector3d end_
     rclcpp::Time time_2 = rclcpp::Clock().now();
 
     if ((time_2 - time_1).seconds() > 0.1)
-        RCLCPP_WARN(rclcpp::get_logger("AstarSearch"), 
+        RCLCPP_WARN(rclcpp::get_logger("AstarSearch"),
                     "Time consume in A star path finding is %.3fs, iter=%d", (time_2 - time_1).seconds(), num_iter);
 
+    last_p4_metrics_.elapsed_ms = (time_2 - time_1).seconds() * 1000.0;
+    last_p4_metrics_.fallback_reason = "no_path";
     return false;
 }
 

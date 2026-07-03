@@ -31,7 +31,7 @@ P3: coverage-gated reference bias
 P4: collision-segment-only risk-aware A* fallback
 ```
 
-默认开关关闭时，应保持 demo9 / original planner 行为不变。
+默认开关关闭时，应保持 @src/iap/launch/test_planner.launch.py / original planner 行为不变。
 
 ## 2. 当前代码入口与模块边界
 
@@ -383,7 +383,7 @@ Safety Planner 不应一开始重写该闭环。建议按以下顺序开发:
 开发验收应始终保留一条 baseline:
 
 ```text
-所有 integrity planner 开关关闭时，demo9 / original planner 行为保持不变。
+所有 integrity planner @src/iap/launch/test_planner.launch.py / original planner 行为保持不变。
 ```
 
 ### 6.1 Planner Review 修正意见采纳结论
@@ -2118,3 +2118,241 @@ Acceptance:
 - Risk-aware A* path never replaces original if it violates max_extra_path_ratio.
 - Debug metrics include original_path_length, risk_path_length, path_length_ratio, risk_query_count, fallback_reason.
 ```
+
+## 16. 当前 Safety Planner 实现 Audit
+
+本节基于当前 `src/iap` 源码做静态审计，并用已有针对性单测做验证。总体结论是：当前代码已经基本实现本文 P0-P5 Safety Planner 架构，模块级链路和默认关闭原则大体达成；但设计目标只能判定为“部分达成”，因为常用 demo9 launch 入口还没有完整转发新的 P0-P5 开关，且 P5 AL policy、P0 occupancy skip、跨阶段 snapshot 生命周期等语义仍未完全对齐最终设计。
+
+### 16.1 当前接入现状
+
+- P0/P5 runtime 对象已在 `EGOPlannerManager::initPlanModules()` 中创建：`P0RiskGridRuntime::createIfEnabled()` 和 `P5RuntimeIntegrityGate::createIfEnabled()`。
+- P3-global 已从 `EGOReplanFSM::planNextWaypoint()` 进入 `EGOPlannerManager::planGlobalTrajWithP3ReferenceBias()`；P3-local 已从 `EGOReplanFSM::getLocalTarget()` 进入 `applyLocalTargetP3ReferenceBias()`。
+- P4 只在 `EGOPlannerManager::reboundReplan()` 中围绕 `BsplineOptimizer::initControlPoints()` 注入 risk snapshot，因此只作用于 collision segment A* guide。
+- P1/P2 已接入 `reboundReplan()` 的后端优化和 `use_distinctive_trajs` 多候选分支：P1 在每条 candidate 的 `BsplineOptimizeTrajRebound()` 内计算 soft cost，P2 在成功 candidate 集合上做二次排序。
+- P5 runtime gate 已接入 `EGOReplanFSM::checkCollisionCallback()`；P5 final gate 已接入 `callReboundReplan()` 中 `planning/bspline` 发布之前，失败时恢复旧 `local_data_` 并返回规划失败。
+
+### 16.2 与设计一致的部分
+
+- P0 使用独立的 multi-horizon `RiskGridMap` / `RiskGridSnapshot`，没有复用 EGO `GridMap` 的 occupancy buffer；查询接口同时提供 `queryCost()` 和 `queryPredictedPL()`。
+- P5 作为 hard safety gate 使用 raw predicted PL 与 HAL/VAL 计算 future IM，没有用 `c_pi` 或 `RiskCostSample.cost` 替代 `PL_pred < AL` 判定。
+- P1 在 `combineCostRebound()` 中通过 `RiskGridSnapshot::queryCost()` 增加 trajectory-sampled soft cost，并在单次 optimizer 调用期间通过 `setRiskSnapshot()` 固定 snapshot。
+- P2 只重排已经优化成功的 distinctive candidates，并使用 `OptimizerCostBreakdown::original_cost` 做 optimizer score，避免和 P1 的 integrity cost double count。
+- P3 实现了 local target bias 和 coverage-gated global reference bias；global bias 在 corridor valid ratio 不足时回退 original global trajectory。
+- P4 保持 collision-segment-only，先生成 original A* path，再尝试 risk-aware path，并在 risk-aware path length ratio 超限时回退 original path。
+- `advanced_param.launch.py` 中 P0/P1/P2/P3/P4/P5 相关新功能默认关闭，符合 baseline 行为不变的设计原则。
+
+### 16.3 与设计不一致或未完全达成的部分
+
+- P5 future AL 当前直接复用当前 `/iap/integrity` 中的 HAL/VAL，没有实现独立 `AlertLimitProvider`、cloud-clearance AL 或随未来轨迹位置变化的 AL policy。
+- P0 的 `c_pi` 当前实现为 `clamp(max(hpl_pred, vpl_pred), cost_max)`；这能提供 risk preference，但还不是文档中更完整的 PI/risk cost policy。`RiskGridMapParams::skip_occupied_voxels` 虽存在，实际 refresh 时没有读取 EGO occupancy view 来跳过 occupied voxel。
+- 一次完整 `reboundReplan()` 没有共享同一个固定 `RiskGridSnapshot`：P4、每条 P1 candidate、P2 ranking 都会分别 `acquireRiskGridSnapshot()`。单次 P1 optimizer 内部是固定的，但整个 planning attempt 可能跨 generation。
+- P5 final gate 已经做到“不发布失败轨迹并返回 false”，但没有实现独立 retry budget / time budget / final-gate-fail escalation；后续处理仍主要依赖 original FSM 的现有 retry 与 emergency 语义。
+- `demo9_ego_planner_closed_loop.launch.py` 仍暴露并转发旧的 `planner_use_integrity_*` 与 `risk_overlay_*` 参数，未向外层声明和转发新的 `p0_*`、`p1_*`、`p2_*`、`p3_*`、`p4_*`、`p5_*` 开关。因此常用 demo9 入口无法直接启用完整 P0-P5 链路，除非改用/直连 `advanced_param.launch.py` 的新参数。
+- `p4.fallback_to_original_when_risk_not_ready` 当前没有形成有意义的分支差异：实现总是先跑 original A*，snapshot 不可用时自然选择 original path，该参数无论 true/false 都不会改变 selected path。
+
+### 16.4 设计目标达成判断
+
+| 目标 | 当前达成情况 |
+|---|---|
+| P0-P5 模块级实现 | 基本达成 |
+| 默认关闭时 original EGO 行为不变 | 基本达成 |
+| P5 作为唯一 hard integrity gate | 基本达成 |
+| P1/P2/P3/P4 只做 preference，不替代 P5 | 基本达成 |
+| multi-horizon predicted PL 查询 | 基本达成 |
+| 完整 AL policy / AlertLimitProvider | 未完全达成 |
+| 单次 planning attempt 固定同一 risk snapshot | 未完全达成 |
+| demo9 常用入口可配置完整 P0-P5 | 未达成 |
+
+因此，当前 Safety Planner 已经达成“代码结构和模块行为接近设计”的目标，但还没有完全达成“通过常用 launch 可完整启用并严格按最终语义运行”的目标。后续优先修正项应是：补齐 demo9 参数转发、抽象 P5 AL provider、让一次 `reboundReplan()` 共享同一 snapshot，并决定是否删除或实装 `p4.fallback_to_original_when_risk_not_ready` 的差异语义。
+
+### 16.5 验证记录
+
+已运行以下针对性测试，全部通过：
+
+```text
+build/ego_planner/test_p0_risk_grid_runtime        PASS: 2 tests
+build/bspline_opt/test_p1_integrity_cost           PASS: 9 tests
+build/ego_planner/test_p2_candidate_ranking        PASS: 6 tests
+build/ego_planner/test_p3_reference_bias           PASS: 9 tests
+build/path_searching/test_p4_risk_astar            PASS: 4 tests
+build/ego_planner/test_p5_runtime_integrity_gate   PASS: 6 tests
+```
+
+本次 audit 未运行完整 ROS launch / bag / closed-loop demo，因此不声称已验证 demo9 运行期端到端效果。
+
+## 17. `test_planner.launch.py` 使用方法
+
+`src/iap/launch/test_planner.launch.py` 是 planner 专用的 self-contained closed-loop demo 入口。它直接启动仿真闭环、IAP integrity pipeline、EGO planner、traj server、控制器、地图/感知节点、可选 validator、rosbag 和 RViz；不依赖也不转发 `demo9_ego_planner_closed_loop.launch.py`。
+
+### 17.1 基线启动
+
+默认配置使用 `scenario:=fused_nominal`，启动 planner，关闭 P0-P5 safety planner 功能，保留原 EGO planner 行为：
+
+```bash
+ros2 launch iap test_planner.launch.py
+```
+
+推荐短时 smoke test：
+
+```bash
+ros2 launch iap test_planner.launch.py \
+  run_duration_s:=10 \
+  start_rviz:=false \
+  run_validator:=false
+```
+
+常用通用参数：
+
+```bash
+ros2 launch iap test_planner.launch.py \
+  scenario:=fused_nominal \
+  run_duration_s:=90 \
+  start_rviz:=false \
+  run_validator:=true \
+  record_bag:=false
+```
+
+默认 `enable_preflight_takeoff:=false`，因此短时测试会立即启动 planner。若需要先执行地面保持、起飞和悬停序列，可显式打开：
+
+```bash
+ros2 launch iap test_planner.launch.py \
+  enable_preflight_takeoff:=true \
+  run_duration_s:=120
+```
+
+### 17.2 场景选择
+
+`scenario` 只配置闭环环境、地图、GNSS/ARAIM/integrity 输入，不代表 predictor preset。当前可选值：
+
+```text
+manual
+fused_nominal
+gnss_open_sky
+gnss_degraded_lidar_good
+lidar_feature_rich
+lidar_corridor_degenerate
+fallback_only
+```
+
+示例：
+
+```bash
+ros2 launch iap test_planner.launch.py \
+  scenario:=gnss_degraded_lidar_good \
+  run_duration_s:=90 \
+  start_rviz:=false
+```
+
+### 17.3 Safety Planner 开关
+
+默认：
+
+```text
+planner_safety_profile:=off
+planner_enable_all_safety:=false
+p0.enable_risk_grid:=false
+planner_enable_p1:=false
+planner_enable_p2:=false
+planner_enable_p3_local:=false
+planner_enable_p3_global:=false
+planner_enable_p4:=false
+planner_enable_p5_runtime:=false
+planner_enable_p5_final:=false
+```
+
+一键组合测试：
+
+```bash
+ros2 launch iap test_planner.launch.py \
+  planner_safety_profile:=all \
+  run_duration_s:=60 \
+  start_rviz:=false
+```
+
+`planner_safety_profile` 可选：
+
+```text
+off
+p1
+p2
+p3
+p4
+p5
+all
+```
+
+也可以只打开单个模块：
+
+```bash
+ros2 launch iap test_planner.launch.py planner_enable_p1:=true
+ros2 launch iap test_planner.launch.py planner_enable_p2:=true
+ros2 launch iap test_planner.launch.py planner_enable_p3_local:=true planner_enable_p3_global:=true
+ros2 launch iap test_planner.launch.py planner_enable_p4:=true
+ros2 launch iap test_planner.launch.py planner_enable_p5_runtime:=true planner_enable_p5_final:=true
+```
+
+当任一 P1-P5 功能打开时，launch 默认会自动设置 `p0.enable_risk_grid:=true`。如果用户显式传入：
+
+```bash
+p0.enable_risk_grid:=false
+```
+
+则 launch 会保留该显式选择，并打印 warning，让 fallback 路径可以被单独测试。
+
+### 17.4 细粒度 P0-P5 参数
+
+高层 `planner_enable_*` 只负责常用开关；所有底层 P0-P5 参数仍可直接覆盖。常用示例：
+
+```bash
+ros2 launch iap test_planner.launch.py \
+  planner_enable_p1:=true \
+  p1.lambda_integrity:=0.00001 \
+  p1.metrics_only:=false
+```
+
+```bash
+ros2 launch iap test_planner.launch.py \
+  planner_enable_p5_runtime:=true \
+  planner_enable_p5_final:=true \
+  p5.pred_alert_limit_mode:=current_msg_constant \
+  p5.final_gate_max_consecutive_failures:=3 \
+  p5.final_gate_max_failure_duration_s:=1.0
+```
+
+可用于 P5 predicted AL 的模式：
+
+```text
+current_msg_constant
+config_constant
+occupancy_clearance
+vertical_bound_only
+```
+
+### 17.5 推荐验证命令
+
+检查 launch 参数：
+
+```bash
+ros2 launch iap test_planner.launch.py --show-args
+```
+
+确认 baseline 行为：
+
+```bash
+ros2 launch iap test_planner.launch.py \
+  run_duration_s:=10 \
+  start_rviz:=false \
+  run_validator:=false
+```
+
+确认全部 safety planner 参数可接入：
+
+```bash
+ros2 launch iap test_planner.launch.py \
+  planner_safety_profile:=all \
+  run_duration_s:=10 \
+  start_rviz:=false \
+  run_validator:=false
+```
+
+短时全开时，如果 `/iap/integrity` 或 P0 risk snapshot 尚未 ready，P5 final gate 可能打印 `snapshot_unavailable` 并阻塞发布。这是 hard gate 的预期行为，不代表 launch 参数接入失败。

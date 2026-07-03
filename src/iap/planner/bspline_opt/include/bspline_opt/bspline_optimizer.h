@@ -1,6 +1,8 @@
 #ifndef _BSPLINE_OPTIMIZER_H_
 #define _BSPLINE_OPTIMIZER_H_
 
+#include <cstdint>
+#include <limits>
 #include <Eigen/Eigen>
 #include <path_searching/dyn_a_star.h>
 #include <bspline_opt/uniform_bspline.h>
@@ -9,6 +11,13 @@
 #include <rclcpp/rclcpp.hpp>
 #include "bspline_opt/lbfgs.hpp"
 #include <traj_utils/plan_container.hpp>
+#include <memory>
+#include <string>
+
+namespace iap
+{
+  class RiskGridSnapshot;
+}
 
 // Gradient and elasitc band optimization
 
@@ -86,6 +95,73 @@ namespace ego_planner
   {
 
   public:
+    struct P1IntegrityConfig
+    {
+      bool use_integrity_cost = false;
+      bool metrics_only = true;
+      double lambda_integrity = 0.0;
+      double sample_dt_min_s = 0.1;
+      double sample_dt_scale = 1.0;
+      int max_samples_per_eval = 30;
+      double integrity_cost_max = 100.0;
+      double integrity_grad_norm_max = 0.1;
+      std::string unknown_policy = "skip";
+      double unknown_soft_penalty = 1.0;
+      bool debug_csv_enable = false;
+      std::string debug_csv_path;
+    };
+
+    struct P1IntegrityMetrics
+    {
+      int sample_count = 0;
+      int hit_count = 0;
+      int miss_count = 0;
+      int stale_count = 0;
+      uint64_t snapshot_generation_id = 0;
+      double f_integrity = 0.0;
+      double weighted_f_integrity = 0.0;
+      double grad_norm_integrity = 0.0;
+      double weighted_grad_integrity_norm = 0.0;
+      double grad_norm_original = 0.0;
+      double grad_ratio = 0.0;
+      double miss_ratio = 0.0;
+      double stale_ratio = 0.0;
+      int clipped_grad_count = 0;
+      std::string fallback_reason = "not_evaluated";
+      bool applied_to_objective = false;
+    };
+
+    struct OptimizerCostBreakdown
+    {
+      double total_cost = 0.0;
+      double original_cost = 0.0;
+      double integrity_cost = 0.0;
+    };
+
+    struct P1IntegrityVizSample
+    {
+      Eigen::Vector3d position = Eigen::Vector3d::Zero();
+      Eigen::Vector3d grad = Eigen::Vector3d::Zero();
+      Eigen::Vector3d push = Eigen::Vector3d::Zero();
+      double cost = std::numeric_limits<double>::quiet_NaN();
+      double t_s = 0.0;
+      bool hit = false;
+      bool stale = false;
+      bool unknown = false;
+      std::string reason = "not_evaluated";
+    };
+
+    struct P4GuideViz
+    {
+      std::vector<Eigen::Vector3d> original_path;
+      std::vector<Eigen::Vector3d> risk_path;
+      std::vector<Eigen::Vector3d> selected_path;
+      Eigen::Vector3d segment_start = Eigen::Vector3d::Zero();
+      Eigen::Vector3d segment_end = Eigen::Vector3d::Zero();
+      P4AStarMetrics metrics;
+      bool risk_selected = false;
+    };
+
     BsplineOptimizer() {}
     ~BsplineOptimizer() {}
 
@@ -103,6 +179,12 @@ namespace ego_planner
     void setBsplineInterval(const double &ts);
     void setSwarmTrajs(SwarmTrajData *swarm_trajs_ptr);
     void setDroneId(const int drone_id);
+    void setRiskSnapshot(std::shared_ptr<const iap::RiskGridSnapshot> snapshot,
+                         double query_base_time_s);
+    void clearRiskSnapshot();
+    void setP4RiskSnapshot(std::shared_ptr<const iap::RiskGridSnapshot> snapshot,
+                           double query_base_time_s);
+    void clearP4RiskSnapshot();
 
     // optional inputs
     void setGuidePath(const vector<Eigen::Vector3d> &guide_pt);
@@ -125,6 +207,16 @@ namespace ego_planner
 
     inline int getOrder(void) { return order_; }
     inline double getSwarmClearance(void) { return swarm_clearance_; }
+    const P1IntegrityMetrics &getLastP1IntegrityMetrics() const { return last_p1_metrics_; }
+    const std::vector<P1IntegrityVizSample> &getLastP1IntegrityVizSamples() const { return last_p1_viz_samples_; }
+    const P1IntegrityConfig &getP1IntegrityConfig() const { return p1_config_; }
+    const P4RiskAStarConfig &getP4RiskAStarConfig() const { return p4_config_; }
+    const std::vector<P4GuideViz> &getLastP4GuideViz() const { return last_p4_guides_; }
+    const OptimizerCostBreakdown &getLastOptimizerCostBreakdown() const { return last_optimizer_cost_breakdown_; }
+    void setP1IntegrityConfigForTest(const P1IntegrityConfig &config) { p1_config_ = config; }
+    void setP4RiskAStarConfigForTest(const P4RiskAStarConfig &config) { p4_config_ = config; }
+    bool evaluateReboundCostForTest(const Eigen::MatrixXd &control_points, double ts,
+                                    double &cost, Eigen::MatrixXd &gradient);
 
   private:
     GridMap::Ptr grid_map_;
@@ -165,6 +257,16 @@ namespace ego_planner
     double dist0_, swarm_clearance_; // safe distance
     double max_vel_, max_acc_;       // dynamic limits
 
+    P1IntegrityConfig p1_config_;
+    P4RiskAStarConfig p4_config_;
+    P1IntegrityMetrics last_p1_metrics_;
+    std::vector<P1IntegrityVizSample> last_p1_viz_samples_;
+    std::vector<P4GuideViz> last_p4_guides_;
+    OptimizerCostBreakdown last_optimizer_cost_breakdown_;
+    std::shared_ptr<const iap::RiskGridSnapshot> risk_snapshot_;
+    double risk_query_base_time_s_{0.0};
+    bool p1_debug_csv_header_written_{false};
+
     int variable_num_;              // optimization variables
     int iter_num_;                  // iteration of the solver
     Eigen::VectorXd best_variable_; //
@@ -191,6 +293,13 @@ namespace ego_planner
     void calcMovingObjCost(const Eigen::MatrixXd &q, double &cost, Eigen::MatrixXd &gradient);
     void calcSwarmCost(const Eigen::MatrixXd &q, double &cost, Eigen::MatrixXd &gradient);
     void calcFitnessCost(const Eigen::MatrixXd &q, double &cost, Eigen::MatrixXd &gradient);
+    void calcIntegrityTrajectoryCost(const Eigen::MatrixXd &q, double &cost,
+                                     Eigen::MatrixXd &gradient,
+                                     P1IntegrityMetrics &metrics);
+    bool cubicBasisForTime(double t, int control_point_count,
+                           int &first_control_point,
+                           double weights[4]) const;
+    void writeP1DebugCsv(const P1IntegrityMetrics &metrics) const;
     bool check_collision_and_rebound(void);
 
     static int earlyExit(void *func_data, const double *x, const double *g, const double fx, const double xnorm, const double gnorm, const double step, int n, int k, int ls);

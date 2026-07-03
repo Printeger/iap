@@ -1,0 +1,549 @@
+#include <ego_planner/p5_runtime_integrity_gate.h>
+#include <ego_planner/safety_rviz_publisher.h>
+
+#include <cmath>
+#include <limits>
+#include <memory>
+#include <vector>
+
+#include <gtest/gtest.h>
+
+namespace {
+
+void ensure_rclcpp() {
+  if (!rclcpp::ok()) {
+    int argc = 0;
+    char** argv = nullptr;
+    rclcpp::init(argc, argv);
+  }
+}
+
+iap::msg::IntegrityReport integrityMsg(double stamp_s,
+                                       double hpl,
+                                       double vpl,
+                                       double hal,
+                                       double val) {
+  iap::msg::IntegrityReport msg;
+  msg.header.stamp.sec = static_cast<int32_t>(std::floor(stamp_s));
+  msg.header.stamp.nanosec =
+      static_cast<uint32_t>((stamp_s - std::floor(stamp_s)) * 1.0e9);
+  msg.hpl = hpl;
+  msg.vpl = vpl;
+  msg.hal = hal;
+  msg.val = val;
+  msg.im = std::min(hal - hpl, val - vpl);
+  msg.hal_invalid = false;
+  msg.val_invalid = false;
+  msg.im_invalid = false;
+  return msg;
+}
+
+ego_planner::LocalTrajData makeTrajectory(double duration_s = 3.0) {
+  ego_planner::LocalTrajData data;
+  Eigen::MatrixXd pts(3, 7);
+  for (int i = 0; i < pts.cols(); ++i) {
+    pts.col(i) = Eigen::Vector3d(0.2 * i, 0.0, 0.0);
+  }
+  data.position_traj_ = ego_planner::UniformBspline(pts, 3, 0.5);
+  data.velocity_traj_ = data.position_traj_.getDerivative();
+  data.acceleration_traj_ = data.velocity_traj_.getDerivative();
+  data.start_time_ = rclcpp::Time(0, 0, RCL_SYSTEM_TIME);
+  data.duration_ = duration_s;
+  data.traj_id_ = 1;
+  return data;
+}
+
+ego_planner::LocalTrajData makeZTrajectory(double z,
+                                           double duration_s = 3.0) {
+  ego_planner::LocalTrajData data = makeTrajectory(duration_s);
+  Eigen::MatrixXd pts = data.position_traj_.getControlPoint();
+  for (int i = 0; i < pts.cols(); ++i) {
+    pts(2, i) = z;
+  }
+  data.position_traj_ = ego_planner::UniformBspline(pts, 3, 0.5);
+  data.velocity_traj_ = data.position_traj_.getDerivative();
+  data.acceleration_traj_ = data.velocity_traj_.getDerivative();
+  return data;
+}
+
+class ConstantProvider final : public iap::RiskPredictionProvider {
+ public:
+  double hpl = 1.0;
+  double vpl = 1.0;
+  bool available = true;
+  bool valid = true;
+
+  bool batchQuery(const std::vector<iap::RiskPredictionQuery>& queries,
+                  std::vector<iap::RiskPredictionResult>* results) override {
+    if (results == nullptr) {
+      return false;
+    }
+    results->clear();
+    results->reserve(queries.size());
+    for (size_t i = 0; i < queries.size(); ++i) {
+      iap::RiskPredictionResult result;
+      result.available = available;
+      result.valid = valid;
+      result.stale = false;
+      result.hpl_pred = hpl;
+      result.vpl_pred = vpl;
+      result.reason = valid ? "ok" : "forced_unknown";
+      results->push_back(result);
+    }
+    return true;
+  }
+};
+
+std::shared_ptr<const iap::RiskGridSnapshot> makeSnapshot(double hpl,
+                                                          double vpl) {
+  iap::RiskGridMapParams params;
+  params.resolution_m = 1.0;
+  params.size_x_m = 6.0;
+  params.size_y_m = 6.0;
+  params.size_z_m = 4.0;
+  params.horizons_s = {0.0, 2.5, 5.0};
+  params.stale_timeout_s = 100.0;
+  iap::RiskGridMap grid(params);
+  ConstantProvider provider;
+  provider.hpl = hpl;
+  provider.vpl = vpl;
+  EXPECT_TRUE(grid.refreshFromProvider(Eigen::Vector3d::Zero(), 0.0,
+                                       provider));
+  return grid.acquireSnapshot();
+}
+
+ego_planner::P5RuntimeIntegrityGate::Config baseConfig() {
+  ego_planner::P5RuntimeIntegrityGate::Config config;
+  config.enable_runtime_gate = true;
+  config.enable_final_gate = true;
+  config.debug_metrics_enable = false;
+  config.horizon_s = 1.0;
+  config.sample_dt_s = 0.25;
+  config.current_stale_to_replan_s = 0.5;
+  config.current_stale_to_emergency_s = 2.0;
+  config.future_unknown_to_emergency_s = 1.0;
+  config.final_gate_max_consecutive_failures = 3;
+  config.final_gate_max_failure_duration_s = 1.0;
+  config.bad_tick_to_replan = 1;
+  config.good_tick_to_clear = 1;
+  return config;
+}
+
+}  // namespace
+
+TEST(PredAlertLimitProviderTest, OccupancyClearanceUsesNearestInflatedObstacle) {
+  ego_planner::PredAlertLimitProvider::Config config;
+  config.mode = ego_planner::PredAlertLimitMode::OCCUPANCY_CLEARANCE;
+  config.max_hal_m = 20.0;
+  config.clearance_search_radius_m = 2.0;
+  config.clearance_step_m = 0.5;
+  config.drone_radius_m = 0.1;
+  ego_planner::PredAlertLimitProvider provider(config);
+  provider.setEnvironment(
+      [](const Eigen::Vector3d& p) { return p.x() >= 1.0; },
+      [](Eigen::Vector3d* origin, Eigen::Vector3d* size) {
+        *origin = Eigen::Vector3d(-5.0, -5.0, -1.0);
+        *size = Eigen::Vector3d(10.0, 10.0, 4.0);
+        return true;
+      },
+      []() { return 0.5; });
+
+  const auto sample =
+      provider.evaluate(Eigen::Vector3d::Zero(), 0.0, 10.0, 10.0);
+  EXPECT_TRUE(sample.valid) << sample.reason;
+  EXPECT_NEAR(sample.hal, 0.9, 1.0e-9);
+  EXPECT_NEAR(sample.val, 1.0, 1.0e-9);
+  EXPECT_EQ(sample.reason, "ok");
+}
+
+TEST(PredAlertLimitProviderTest, OccupancyClearanceUsesMaxWhenNoObstacleFound) {
+  ego_planner::PredAlertLimitProvider::Config config;
+  config.mode = ego_planner::PredAlertLimitMode::OCCUPANCY_CLEARANCE;
+  config.max_hal_m = 20.0;
+  config.clearance_search_radius_m = 2.0;
+  config.clearance_step_m = 0.5;
+  ego_planner::PredAlertLimitProvider provider(config);
+  provider.setEnvironment(
+      [](const Eigen::Vector3d&) { return false; },
+      [](Eigen::Vector3d* origin, Eigen::Vector3d* size) {
+        *origin = Eigen::Vector3d(-5.0, -5.0, -1.0);
+        *size = Eigen::Vector3d(10.0, 10.0, 4.0);
+        return true;
+      },
+      []() { return 0.5; });
+
+  const auto sample =
+      provider.evaluate(Eigen::Vector3d::Zero(), 0.0, 10.0, 10.0);
+  EXPECT_TRUE(sample.valid) << sample.reason;
+  EXPECT_NEAR(sample.hal, 20.0, 1.0e-9);
+}
+
+TEST(PredAlertLimitProviderTest, PositionDependentModesFailWithoutMap) {
+  ego_planner::PredAlertLimitProvider::Config config;
+  config.mode = ego_planner::PredAlertLimitMode::VERTICAL_BOUND_ONLY;
+  ego_planner::PredAlertLimitProvider provider(config);
+
+  const auto sample =
+      provider.evaluate(Eigen::Vector3d::Zero(), 0.0, 10.0, 10.0);
+  EXPECT_FALSE(sample.valid);
+  EXPECT_EQ(sample.reason, "map_region_unavailable");
+}
+
+TEST(PredAlertLimitProviderTest, VerticalBoundOnlyUsesHeightMargin) {
+  ego_planner::PredAlertLimitProvider::Config config;
+  config.mode = ego_planner::PredAlertLimitMode::VERTICAL_BOUND_ONLY;
+  config.constant_hal_m = 7.0;
+  ego_planner::PredAlertLimitProvider provider(config);
+  provider.setEnvironment(
+      nullptr,
+      [](Eigen::Vector3d* origin, Eigen::Vector3d* size) {
+        *origin = Eigen::Vector3d(-5.0, -5.0, -1.0);
+        *size = Eigen::Vector3d(10.0, 10.0, 4.0);
+        return true;
+      },
+      nullptr);
+
+  const auto near_boundary =
+      provider.evaluate(Eigen::Vector3d(0.0, 0.0, -0.8), 0.0, 10.0, 10.0);
+  EXPECT_TRUE(near_boundary.valid) << near_boundary.reason;
+  EXPECT_NEAR(near_boundary.hal, 7.0, 1.0e-9);
+  EXPECT_NEAR(near_boundary.val, 0.2, 1.0e-9);
+
+  const auto middle =
+      provider.evaluate(Eigen::Vector3d(0.0, 0.0, 1.0), 0.0, 10.0, 10.0);
+  EXPECT_TRUE(middle.valid) << middle.reason;
+  EXPECT_NEAR(middle.val, 2.0, 1.0e-9);
+}
+
+TEST(PredAlertLimitProviderTest, PositionDependentModesRejectMapOutsidePosition) {
+  ego_planner::PredAlertLimitProvider::Config config;
+  config.mode = ego_planner::PredAlertLimitMode::VERTICAL_BOUND_ONLY;
+  ego_planner::PredAlertLimitProvider provider(config);
+  auto map_region = [](Eigen::Vector3d* origin, Eigen::Vector3d* size) {
+    *origin = Eigen::Vector3d(-1.0, -1.0, -1.0);
+    *size = Eigen::Vector3d(2.0, 2.0, 2.0);
+    return true;
+  };
+  provider.setEnvironment(nullptr, map_region, nullptr);
+
+  auto sample =
+      provider.evaluate(Eigen::Vector3d(2.0, 0.0, 0.0), 0.0, 10.0, 10.0);
+  EXPECT_FALSE(sample.valid);
+  EXPECT_EQ(sample.reason, "position_out_of_map");
+
+  config.mode = ego_planner::PredAlertLimitMode::OCCUPANCY_CLEARANCE;
+  provider.setConfig(config);
+  provider.setEnvironment([](const Eigen::Vector3d&) { return false; },
+                          map_region, []() { return 0.5; });
+  sample = provider.evaluate(Eigen::Vector3d(0.0, 2.0, 0.0), 0.0, 10.0,
+                             10.0);
+  EXPECT_FALSE(sample.valid);
+  EXPECT_EQ(sample.reason, "position_out_of_map");
+}
+
+TEST(P5RuntimeIntegrityGateTest, DisabledConfigCreatesNoRuntimeObject) {
+  ensure_rclcpp();
+  auto node = std::make_shared<rclcpp::Node>(
+      "p5_disabled_runtime_test",
+      rclcpp::NodeOptions().allow_undeclared_parameters(false));
+  auto gate = ego_planner::P5RuntimeIntegrityGate::createIfEnabled(node);
+  EXPECT_EQ(gate, nullptr);
+  EXPECT_TRUE(node->has_parameter("p5.enable_runtime_gate"));
+  EXPECT_TRUE(node->has_parameter("p5.enable_final_gate"));
+}
+
+TEST(P5RuntimeIntegrityGateTest, CurrentStaleEscalates) {
+  auto config = baseConfig();
+  ego_planner::P5RuntimeIntegrityGate gate(nullptr, config, false);
+  gate.setCurrentIntegrityForTest(integrityMsg(0.0, 1.0, 1.0, 10.0, 10.0));
+  auto traj = makeTrajectory();
+  auto snapshot = makeSnapshot(1.0, 1.0);
+
+  auto early = gate.evaluateRuntime(traj, snapshot, 0.1, 1.0);
+  EXPECT_EQ(early.action, ego_planner::P5GateAction::OK);
+
+  auto replan = gate.evaluateRuntime(traj, snapshot, 0.6, 1.0);
+  EXPECT_EQ(replan.action, ego_planner::P5GateAction::REQUEST_REPLAN);
+  EXPECT_EQ(replan.reason, ego_planner::P5GateReason::CURRENT_STALE);
+
+  auto emergency = gate.evaluateRuntime(traj, snapshot, 2.1, 1.0);
+  EXPECT_EQ(emergency.action,
+            ego_planner::P5GateAction::REQUEST_EMERGENCY_STOP_CANDIDATE);
+  EXPECT_EQ(emergency.reason, ego_planner::P5GateReason::CURRENT_STALE);
+}
+
+TEST(P5RuntimeIntegrityGateTest, CurrentInvalidIsExplicit) {
+  auto config = baseConfig();
+  config.current_stale_to_emergency_s = 10.0;
+  ego_planner::P5RuntimeIntegrityGate gate(nullptr, config, false);
+  gate.setCurrentIntegrityForTest(integrityMsg(
+      0.0, std::numeric_limits<double>::quiet_NaN(), 1.0, 10.0, 10.0));
+  auto traj = makeTrajectory();
+  auto snapshot = makeSnapshot(1.0, 1.0);
+
+  auto status = gate.evaluateRuntime(traj, snapshot, 0.0, 1.0);
+  EXPECT_EQ(status.action, ego_planner::P5GateAction::REQUEST_REPLAN);
+  EXPECT_EQ(status.reason, ego_planner::P5GateReason::CURRENT_INVALID);
+}
+
+TEST(P5RuntimeIntegrityGateTest, FutureUnknownEscalates) {
+  auto config = baseConfig();
+  config.current_stale_to_replan_s = 100.0;
+  config.current_stale_to_emergency_s = 100.0;
+  config.max_unknown_ratio = 0.1;
+  config.future_unknown_to_emergency_s = 1.0;
+  ego_planner::P5RuntimeIntegrityGate gate(nullptr, config, false);
+  gate.setCurrentIntegrityForTest(integrityMsg(0.0, 1.0, 1.0, 10.0, 10.0));
+  auto traj = makeTrajectory();
+
+  auto replan = gate.evaluateRuntime(traj, nullptr, 0.0, 1.0);
+  EXPECT_EQ(replan.action, ego_planner::P5GateAction::REQUEST_REPLAN);
+  EXPECT_EQ(replan.reason, ego_planner::P5GateReason::SNAPSHOT_UNAVAILABLE);
+
+  auto emergency = gate.evaluateRuntime(traj, nullptr, 1.2, 1.0);
+  EXPECT_EQ(emergency.action,
+            ego_planner::P5GateAction::REQUEST_EMERGENCY_STOP_CANDIDATE);
+  EXPECT_EQ(emergency.reason, ego_planner::P5GateReason::SNAPSHOT_UNAVAILABLE);
+}
+
+TEST(P5RuntimeIntegrityGateTest, FutureBadInsideEmergencyTimeRequestsCandidate) {
+  auto config = baseConfig();
+  config.current_stale_to_replan_s = 100.0;
+  config.current_stale_to_emergency_s = 100.0;
+  ego_planner::P5RuntimeIntegrityGate gate(nullptr, config, false);
+  gate.setCurrentIntegrityForTest(integrityMsg(0.0, 1.0, 1.0, 10.0, 10.0));
+  auto traj = makeTrajectory();
+  auto snapshot = makeSnapshot(20.0, 20.0);
+
+  auto status = gate.evaluateRuntime(traj, snapshot, 0.0, 1.0);
+  EXPECT_EQ(status.action,
+            ego_planner::P5GateAction::REQUEST_EMERGENCY_STOP_CANDIDATE);
+  EXPECT_EQ(status.reason, ego_planner::P5GateReason::FUTURE_BAD);
+  EXPECT_NEAR(status.first_bad_tau, 0.0, 1.0e-9);
+}
+
+TEST(P5RuntimeIntegrityGateTest, CurrentMsgConstantModeMatchesLegacyFutureAL) {
+  auto config = baseConfig();
+  config.current_stale_to_replan_s = 100.0;
+  config.current_stale_to_emergency_s = 100.0;
+  config.pred_alert_limit.mode =
+      ego_planner::PredAlertLimitMode::CURRENT_MSG_CONSTANT;
+  ego_planner::P5RuntimeIntegrityGate gate(nullptr, config, false);
+  gate.setCurrentIntegrityForTest(integrityMsg(0.0, 1.0, 1.0, 10.0, 8.0));
+  auto traj = makeTrajectory();
+  auto snapshot = makeSnapshot(4.0, 2.0);
+
+  auto status = gate.evaluateRuntime(traj, snapshot, 0.0, 1.0);
+  EXPECT_EQ(status.action, ego_planner::P5GateAction::OK);
+  EXPECT_NEAR(status.future_min_im, 6.0, 1.0e-9);
+  EXPECT_STREQ(status.pred_al_mode.c_str(), "current_msg_constant");
+  EXPECT_NEAR(status.pred_hal_min, 10.0, 1.0e-9);
+  EXPECT_NEAR(status.pred_val_min, 8.0, 1.0e-9);
+  EXPECT_EQ(status.pred_al_invalid_count, 0);
+}
+
+TEST(P5RuntimeIntegrityGateTest, ConfigConstantModeCanTriggerFutureBad) {
+  auto config = baseConfig();
+  config.current_stale_to_replan_s = 100.0;
+  config.current_stale_to_emergency_s = 100.0;
+  config.pred_alert_limit.mode = ego_planner::PredAlertLimitMode::CONFIG_CONSTANT;
+  config.pred_alert_limit.constant_hal_m = 2.0;
+  config.pred_alert_limit.constant_val_m = 10.0;
+  ego_planner::P5RuntimeIntegrityGate gate(nullptr, config, false);
+  gate.setCurrentIntegrityForTest(integrityMsg(0.0, 1.0, 1.0, 100.0, 100.0));
+  auto traj = makeTrajectory();
+  auto snapshot = makeSnapshot(3.0, 1.0);
+
+  auto status = gate.evaluateRuntime(traj, snapshot, 0.0, 1.0);
+  EXPECT_EQ(status.action,
+            ego_planner::P5GateAction::REQUEST_EMERGENCY_STOP_CANDIDATE);
+  EXPECT_EQ(status.reason, ego_planner::P5GateReason::FUTURE_BAD);
+  EXPECT_STREQ(status.pred_al_mode.c_str(), "config_constant");
+  EXPECT_NEAR(status.pred_hal_min, 2.0, 1.0e-9);
+}
+
+TEST(P5RuntimeIntegrityGateTest, VerticalBoundOnlyModeCanTriggerFutureBad) {
+  auto config = baseConfig();
+  config.current_stale_to_replan_s = 100.0;
+  config.current_stale_to_emergency_s = 100.0;
+  config.pred_alert_limit.mode =
+      ego_planner::PredAlertLimitMode::VERTICAL_BOUND_ONLY;
+  config.pred_alert_limit.constant_hal_m = 10.0;
+  config.pred_alert_limit.min_val_m = 0.01;
+  ego_planner::P5RuntimeIntegrityGate gate(nullptr, config, false);
+  gate.setPredAlertLimitEnvironment(
+      nullptr,
+      [](Eigen::Vector3d* origin, Eigen::Vector3d* size) {
+        *origin = Eigen::Vector3d(-3.0, -3.0, -0.1);
+        *size = Eigen::Vector3d(6.0, 6.0, 0.3);
+        return true;
+      },
+      nullptr);
+  gate.setCurrentIntegrityForTest(integrityMsg(0.0, 1.0, 1.0, 100.0, 100.0));
+  auto traj = makeZTrajectory(0.0);
+  auto snapshot = makeSnapshot(1.0, 1.0);
+
+  auto status = gate.evaluateRuntime(traj, snapshot, 0.0, 1.0);
+  EXPECT_EQ(status.action,
+            ego_planner::P5GateAction::REQUEST_EMERGENCY_STOP_CANDIDATE);
+  EXPECT_EQ(status.reason, ego_planner::P5GateReason::FUTURE_BAD);
+  EXPECT_STREQ(status.pred_al_mode.c_str(), "vertical_bound_only");
+  EXPECT_NEAR(status.pred_val_min, 0.1, 1.0e-9);
+}
+
+TEST(P5RuntimeIntegrityGateTest, InvalidPredictedALCountsAsUnknown) {
+  auto config = baseConfig();
+  config.current_stale_to_replan_s = 100.0;
+  config.current_stale_to_emergency_s = 100.0;
+  config.max_unknown_ratio = 0.1;
+  config.pred_alert_limit.mode =
+      ego_planner::PredAlertLimitMode::OCCUPANCY_CLEARANCE;
+  ego_planner::P5RuntimeIntegrityGate gate(nullptr, config, false);
+  gate.setCurrentIntegrityForTest(integrityMsg(0.0, 1.0, 1.0, 100.0, 100.0));
+  auto traj = makeTrajectory();
+  auto snapshot = makeSnapshot(1.0, 1.0);
+
+  auto status = gate.evaluateRuntime(traj, snapshot, 0.0, 1.0);
+  EXPECT_EQ(status.action, ego_planner::P5GateAction::REQUEST_REPLAN);
+  EXPECT_EQ(status.reason, ego_planner::P5GateReason::AL_INVALID);
+  EXPECT_GT(status.pred_al_invalid_count, 0);
+  EXPECT_STREQ(status.pred_al_last_reason.c_str(), "map_region_unavailable");
+}
+
+TEST(P5RuntimeIntegrityGateTest, FinalGateFailureIsReturnedBeforePublishPath) {
+  auto config = baseConfig();
+  config.current_stale_to_replan_s = 100.0;
+  config.current_stale_to_emergency_s = 100.0;
+  ego_planner::P5RuntimeIntegrityGate gate(nullptr, config, false);
+  gate.setCurrentIntegrityForTest(integrityMsg(0.0, 1.0, 1.0, 10.0, 10.0));
+  auto traj = makeTrajectory();
+
+  auto status = gate.evaluateFinal(traj, nullptr, 0.0, 1.0);
+  EXPECT_EQ(status.action, ego_planner::P5GateAction::REQUEST_REPLAN);
+  EXPECT_EQ(status.reason, ego_planner::P5GateReason::SNAPSHOT_UNAVAILABLE);
+  EXPECT_EQ(status.final_gate_fail_count, 1);
+  EXPECT_NEAR(status.final_gate_fail_duration_s, 0.0, 1.0e-9);
+  EXPECT_STREQ(status.final_gate_last_reason.c_str(), "snapshot_unavailable");
+}
+
+TEST(P5RuntimeIntegrityGateTest, FinalGateFailureCountEscalates) {
+  auto config = baseConfig();
+  config.current_stale_to_replan_s = 100.0;
+  config.current_stale_to_emergency_s = 100.0;
+  config.final_gate_max_consecutive_failures = 2;
+  config.final_gate_max_failure_duration_s = 100.0;
+  ego_planner::P5RuntimeIntegrityGate gate(nullptr, config, false);
+  gate.setCurrentIntegrityForTest(integrityMsg(0.0, 1.0, 1.0, 10.0, 10.0));
+  auto traj = makeTrajectory();
+
+  auto first = gate.evaluateFinal(traj, nullptr, 0.0, 1.0);
+  EXPECT_EQ(first.action, ego_planner::P5GateAction::REQUEST_REPLAN);
+  EXPECT_EQ(first.reason, ego_planner::P5GateReason::SNAPSHOT_UNAVAILABLE);
+  EXPECT_EQ(first.raw_action, ego_planner::P5GateAction::REQUEST_REPLAN);
+  EXPECT_EQ(first.final_gate_fail_count, 1);
+  EXPECT_NEAR(first.final_gate_fail_duration_s, 0.0, 1.0e-9);
+  EXPECT_STREQ(first.final_gate_last_reason.c_str(), "snapshot_unavailable");
+
+  auto second = gate.evaluateFinal(traj, nullptr, 0.1, 1.0);
+  EXPECT_EQ(second.action,
+            ego_planner::P5GateAction::REQUEST_EMERGENCY_STOP_CANDIDATE);
+  EXPECT_EQ(second.raw_action, ego_planner::P5GateAction::REQUEST_REPLAN);
+  EXPECT_EQ(second.reason, ego_planner::P5GateReason::FINAL_GATE_FAILED);
+  EXPECT_EQ(second.final_gate_fail_count, 2);
+  EXPECT_NEAR(second.final_gate_fail_duration_s, 0.1, 1.0e-9);
+  EXPECT_STREQ(second.final_gate_last_reason.c_str(), "snapshot_unavailable");
+}
+
+TEST(P5RuntimeIntegrityGateTest, FinalGateFailureDurationEscalates) {
+  auto config = baseConfig();
+  config.current_stale_to_replan_s = 100.0;
+  config.current_stale_to_emergency_s = 100.0;
+  config.final_gate_max_consecutive_failures = 10;
+  config.final_gate_max_failure_duration_s = 0.5;
+  ego_planner::P5RuntimeIntegrityGate gate(nullptr, config, false);
+  gate.setCurrentIntegrityForTest(integrityMsg(0.0, 1.0, 1.0, 10.0, 10.0));
+  auto traj = makeTrajectory();
+
+  auto first = gate.evaluateFinal(traj, nullptr, 0.0, 1.0);
+  EXPECT_EQ(first.action, ego_planner::P5GateAction::REQUEST_REPLAN);
+  EXPECT_EQ(first.final_gate_fail_count, 1);
+
+  auto second = gate.evaluateFinal(traj, nullptr, 0.6, 1.0);
+  EXPECT_EQ(second.action,
+            ego_planner::P5GateAction::REQUEST_EMERGENCY_STOP_CANDIDATE);
+  EXPECT_EQ(second.raw_action, ego_planner::P5GateAction::REQUEST_REPLAN);
+  EXPECT_EQ(second.reason, ego_planner::P5GateReason::FINAL_GATE_FAILED);
+  EXPECT_EQ(second.final_gate_fail_count, 2);
+  EXPECT_NEAR(second.final_gate_fail_duration_s, 0.6, 1.0e-9);
+  EXPECT_STREQ(second.final_gate_last_reason.c_str(), "snapshot_unavailable");
+}
+
+TEST(P5RuntimeIntegrityGateTest, FinalGatePassResetsFailureBudget) {
+  auto config = baseConfig();
+  config.current_stale_to_replan_s = 100.0;
+  config.current_stale_to_emergency_s = 100.0;
+  config.final_gate_max_consecutive_failures = 3;
+  config.final_gate_max_failure_duration_s = 100.0;
+  ego_planner::P5RuntimeIntegrityGate gate(nullptr, config, false);
+  gate.setCurrentIntegrityForTest(integrityMsg(0.0, 1.0, 1.0, 10.0, 10.0));
+  auto traj = makeTrajectory();
+
+  auto failed = gate.evaluateFinal(traj, nullptr, 0.0, 1.0);
+  EXPECT_EQ(failed.action, ego_planner::P5GateAction::REQUEST_REPLAN);
+  EXPECT_EQ(failed.final_gate_fail_count, 1);
+
+  auto passed = gate.evaluateFinal(traj, makeSnapshot(1.0, 1.0), 0.1, 1.0);
+  EXPECT_EQ(passed.action, ego_planner::P5GateAction::OK);
+  EXPECT_EQ(passed.reason, ego_planner::P5GateReason::OK);
+  EXPECT_EQ(passed.final_gate_fail_count, 0);
+  EXPECT_NEAR(passed.final_gate_fail_duration_s, 0.0, 1.0e-9);
+  EXPECT_TRUE(passed.final_gate_last_reason.empty());
+
+  auto failed_again = gate.evaluateFinal(traj, nullptr, 0.2, 1.0);
+  EXPECT_EQ(failed_again.action, ego_planner::P5GateAction::REQUEST_REPLAN);
+  EXPECT_EQ(failed_again.final_gate_fail_count, 1);
+  EXPECT_NEAR(failed_again.final_gate_fail_duration_s, 0.0, 1.0e-9);
+}
+
+TEST(P5RuntimeIntegrityGateTest, StatusCarriesVizSamplesAndMarkers) {
+  auto config = baseConfig();
+  config.current_stale_to_replan_s = 100.0;
+  config.current_stale_to_emergency_s = 100.0;
+  ego_planner::P5RuntimeIntegrityGate gate(nullptr, config, false);
+  gate.setCurrentIntegrityForTest(integrityMsg(0.0, 1.0, 1.0, 2.0, 2.0));
+  auto traj = makeTrajectory();
+
+  const auto status = gate.evaluateRuntime(traj, makeSnapshot(5.0, 5.0),
+                                           0.0, 1.0);
+  EXPECT_FALSE(status.viz_samples.empty());
+  EXPECT_GT(status.bad_count, 0);
+  EXPECT_EQ(status.viz_samples.size(),
+            static_cast<std::size_t>(status.sample_count));
+  EXPECT_TRUE(status.viz_samples.front().bad);
+  EXPECT_TRUE(std::isfinite(status.viz_samples.front().im_min));
+
+  ego_planner::SafetyVizGateStatus viz_status;
+  viz_status.phase = "runtime";
+  viz_status.action = ego_planner::P5RuntimeIntegrityGate::actionName(
+      status.action);
+  viz_status.reason = ego_planner::P5RuntimeIntegrityGate::reasonName(
+      status.reason);
+  viz_status.future_min_im = status.future_min_im;
+  viz_status.first_bad_tau = status.first_bad_tau;
+  viz_status.bad_ratio = status.bad_ratio;
+  viz_status.unknown_ratio = status.unknown_ratio;
+  viz_status.samples = status.viz_samples;
+
+  ego_planner::SafetyRvizPublisher::Config viz_config;
+  const auto samples = ego_planner::SafetyRvizPublisher::
+      buildTrajectorySampleMarkers(viz_status, viz_config,
+                                   rclcpp::Time(0, 0, RCL_SYSTEM_TIME));
+  EXPECT_GE(samples.markers.size(), 2u);
+
+  const auto status_markers = ego_planner::SafetyRvizPublisher::
+      buildP5GateStatusMarkers(viz_status, viz_config,
+                               rclcpp::Time(0, 0, RCL_SYSTEM_TIME));
+  ASSERT_EQ(status_markers.markers.size(), 1u);
+  EXPECT_NE(status_markers.markers.front().text.find("P5(runtime)"),
+            std::string::npos);
+}

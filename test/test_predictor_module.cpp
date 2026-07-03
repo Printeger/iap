@@ -885,6 +885,59 @@ TEST(PredictorModuleTest, FreshnessGuardRejectsStaleSnapshot) {
   expect_stale_fallback("stale_snapshot", snapshot);
 }
 
+TEST(PredictorModuleTest, FreshnessGuardUsesExplicitReferenceForFutureQuery) {
+  auto params = make_params();
+  params.freshness.enabled = true;
+  params.freshness.max_odom_age_s = 0.5;
+  params.freshness.max_integrity_age_s = 0.5;
+  params.freshness.max_gnss_age_s = 0.5;
+  params.freshness.max_snapshot_age_s = 0.5;
+  iap::PredictorModule module(params);
+  module.set_lidar_fim_primitives(make_lidar_primitives());
+
+  iap::PredictorQueryInput input(Eigen::Vector3d::Zero(),
+                                 make_snapshot(true, true),
+                                 102.0,
+                                 2.0,
+                                 "map",
+                                 100.0);
+  const auto result = module.query(input);
+
+  EXPECT_TRUE(result.valid) << result.fallback_reason;
+  EXPECT_TRUE(result.available);
+  EXPECT_FALSE(result.fallback);
+  EXPECT_DOUBLE_EQ(result.query_time_s, 102.0);
+  EXPECT_DOUBLE_EQ(result.horizon_s, 2.0);
+  EXPECT_TRUE(std::isfinite(result.fused.hpl));
+  EXPECT_TRUE(std::isfinite(result.fused.vpl));
+}
+
+TEST(PredictorModuleTest, FreshnessGuardStillRejectsStaleReferenceInputs) {
+  auto params = make_params();
+  params.freshness.enabled = true;
+  params.freshness.max_odom_age_s = 0.5;
+  params.freshness.max_integrity_age_s = 0.5;
+  params.freshness.max_gnss_age_s = 0.5;
+  params.freshness.max_snapshot_age_s = 0.5;
+  iap::PredictorModule module(params);
+  module.set_lidar_fim_primitives(make_lidar_primitives());
+
+  auto snapshot = make_snapshot(true, true);
+  snapshot.pose_stamp = 99.0;
+  iap::PredictorQueryInput input(Eigen::Vector3d::Zero(),
+                                 snapshot,
+                                 102.0,
+                                 2.0,
+                                 "map",
+                                 100.0);
+  const auto result = module.query(input);
+
+  EXPECT_FALSE(result.valid);
+  EXPECT_FALSE(result.available);
+  EXPECT_TRUE(result.fallback);
+  EXPECT_EQ(result.fallback_reason, "stale_odom");
+}
+
 TEST(PredictorModuleTest, InvalidHorizonFallsBackBeforePrediction) {
   iap::PredictorModule module(make_params());
 

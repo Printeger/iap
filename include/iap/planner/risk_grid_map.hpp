@@ -3,6 +3,7 @@
 #include <Eigen/Core>
 
 #include <cstdint>
+#include <functional>
 #include <limits>
 #include <memory>
 #include <mutex>
@@ -10,6 +11,8 @@
 #include <vector>
 
 namespace iap {
+
+constexpr uint32_t RISK_GRID_SOURCE_OCCUPIED_SKIP = 1u << 31;
 
 struct RiskGridMapParams {
   std::string frame_id = "map";
@@ -99,6 +102,8 @@ class RiskGridSnapshot {
   RiskGridHealth health() const;
   double stamp_s() const;
   uint64_t generation_id() const;
+  int horizonCount() const;
+  int layerVoxelCount() const;
 
   const RiskGridMapParams& params() const;
   const Eigen::Vector3d& origin() const;
@@ -118,6 +123,10 @@ class RiskGridSnapshot {
                         double query_time_s,
                         PredictedPLSample* out) const;
 
+  bool voxelAt(int horizon_id,
+               const Eigen::Vector3i& id,
+               RiskVoxel* out) const;
+
  private:
   explicit RiskGridSnapshot(std::shared_ptr<const Generation> generation);
 
@@ -128,6 +137,8 @@ class RiskGridSnapshot {
 
 class RiskGridMap {
  public:
+  using OccupancyPredicate = std::function<bool(const Eigen::Vector3d&)>;
+
   RiskGridMap();
   explicit RiskGridMap(RiskGridMapParams params);
 
@@ -150,6 +161,11 @@ class RiskGridMap {
   bool refreshFromProvider(const Eigen::Vector3d& uav_position_w,
                            double now_s,
                            RiskPredictionProvider& provider,
+                           std::string* reason = nullptr);
+  bool refreshFromProvider(const Eigen::Vector3d& uav_position_w,
+                           double now_s,
+                           RiskPredictionProvider& provider,
+                           const OccupancyPredicate& is_occupied,
                            std::string* reason = nullptr);
 
   void markRefreshFailure(double now_s, const std::string& reason);

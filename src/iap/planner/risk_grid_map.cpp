@@ -68,6 +68,15 @@ uint64_t RiskGridSnapshot::generation_id() const {
   return generation_ ? generation_->generation_id : 0;
 }
 
+int RiskGridSnapshot::horizonCount() const {
+  return generation_ ? static_cast<int>(generation_->params.horizons_s.size())
+                     : 0;
+}
+
+int RiskGridSnapshot::layerVoxelCount() const {
+  return generation_ ? generation_->layerVoxelCount() : 0;
+}
+
 const RiskGridMapParams& RiskGridSnapshot::params() const {
   static const RiskGridMapParams kDefaultParams;
   return generation_ ? generation_->params : kDefaultParams;
@@ -200,7 +209,10 @@ bool validate_corner(const RiskVoxel& voxel,
                      std::string* reason) {
   if (voxel.unknown) {
     if (reason) {
-      *reason = "unknown_voxel";
+      *reason =
+          (voxel.source_flags & RISK_GRID_SOURCE_OCCUPIED_SKIP) != 0u
+              ? "occupied"
+              : "unknown_voxel";
     }
     return false;
   }
@@ -501,6 +513,29 @@ bool RiskGridSnapshot::queryPredictedPL(const Eigen::Vector3d& p_w,
   return true;
 }
 
+bool RiskGridSnapshot::voxelAt(const int horizon_id,
+                               const Eigen::Vector3i& id,
+                               RiskVoxel* out) const {
+  if (out == nullptr) {
+    return false;
+  }
+  *out = RiskVoxel{};
+  if (!generation_ || horizon_id < 0 ||
+      horizon_id >= static_cast<int>(generation_->params.horizons_s.size()) ||
+      !isInMap(id)) {
+    return false;
+  }
+  const int address = toAddress(id);
+  const int layer_size = generation_->layerVoxelCount();
+  const std::size_t index =
+      static_cast<std::size_t>(horizon_id * layer_size + address);
+  if (index >= generation_->voxels.size()) {
+    return false;
+  }
+  *out = generation_->voxels[index];
+  return true;
+}
+
 RiskGridMap::RiskGridMap() {
   std::string ignored;
   configure(params_, &ignored);
@@ -623,6 +658,15 @@ bool RiskGridMap::refreshFromProvider(const Eigen::Vector3d& uav_position_w,
                                       const double now_s,
                                       RiskPredictionProvider& provider,
                                       std::string* reason) {
+  return refreshFromProvider(uav_position_w, now_s, provider,
+                             OccupancyPredicate{}, reason);
+}
+
+bool RiskGridMap::refreshFromProvider(const Eigen::Vector3d& uav_position_w,
+                                      const double now_s,
+                                      RiskPredictionProvider& provider,
+                                      const OccupancyPredicate& is_occupied,
+                                      std::string* reason) {
   if (!uav_position_w.allFinite() || !std::isfinite(now_s)) {
     if (reason) {
       *reason = "invalid_refresh_input";
@@ -647,13 +691,25 @@ bool RiskGridMap::refreshFromProvider(const Eigen::Vector3d& uav_position_w,
   const int layer_size =
       voxel_num_copy.x() * voxel_num_copy.y() * voxel_num_copy.z();
   const int horizon_count = static_cast<int>(params_copy.horizons_s.size());
+  const int total_voxel_count = layer_size * horizon_count;
   std::vector<RiskPredictionQuery> queries;
-  queries.reserve(static_cast<std::size_t>(layer_size * horizon_count));
+  std::vector<std::size_t> query_voxel_indices;
+  std::vector<RiskPredictionQuery> voxel_queries(
+      static_cast<std::size_t>(total_voxel_count));
+  std::vector<bool> occupied_skip(static_cast<std::size_t>(total_voxel_count),
+                                  false);
+  queries.reserve(static_cast<std::size_t>(total_voxel_count));
+  query_voxel_indices.reserve(static_cast<std::size_t>(total_voxel_count));
   for (int h = 0; h < horizon_count; ++h) {
     for (int x = 0; x < voxel_num_copy.x(); ++x) {
       for (int y = 0; y < voxel_num_copy.y(); ++y) {
         for (int z = 0; z < voxel_num_copy.z(); ++z) {
           const Eigen::Vector3i id(x, y, z);
+          const int address =
+              x * voxel_num_copy.y() * voxel_num_copy.z() +
+              y * voxel_num_copy.z() + z;
+          const std::size_t voxel_index =
+              static_cast<std::size_t>(h * layer_size + address);
           RiskPredictionQuery query;
           query.position_w =
               (id.cast<double>() + Eigen::Vector3d::Constant(0.5)) *
@@ -661,21 +717,30 @@ bool RiskGridMap::refreshFromProvider(const Eigen::Vector3d& uav_position_w,
               origin_copy;
           query.horizon_s = params_copy.horizons_s[static_cast<std::size_t>(h)];
           query.query_time_s = now_s + query.horizon_s;
+          voxel_queries[voxel_index] = query;
+          if (params_copy.skip_occupied_voxels && is_occupied &&
+              is_occupied(query.position_w)) {
+            occupied_skip[voxel_index] = true;
+            continue;
+          }
           queries.push_back(query);
+          query_voxel_indices.push_back(voxel_index);
         }
       }
     }
   }
 
   std::vector<RiskPredictionResult> results;
-  if (!provider.batchQuery(queries, &results) ||
-      results.size() != queries.size()) {
-    const std::string failure = "provider_refresh_failed";
-    if (reason) {
-      *reason = failure;
+  if (!queries.empty()) {
+    if (!provider.batchQuery(queries, &results) ||
+        results.size() != queries.size()) {
+      const std::string failure = "provider_refresh_failed";
+      if (reason) {
+        *reason = failure;
+      }
+      markRefreshFailure(now_s, failure);
+      return false;
     }
-    markRefreshFailure(now_s, failure);
-    return false;
   }
 
   auto next = std::make_shared<RiskGridSnapshot::Generation>();
@@ -684,16 +749,37 @@ bool RiskGridMap::refreshFromProvider(const Eigen::Vector3d& uav_position_w,
   next->origin = origin_copy;
   next->stamp_s = now_s;
   next->generation_id = generation_id;
-  next->voxels.resize(results.size());
+  next->voxels.resize(static_cast<std::size_t>(total_voxel_count));
+
+  std::vector<RiskPredictionResult> indexed_results(
+      static_cast<std::size_t>(total_voxel_count));
+  std::vector<bool> has_provider_result(
+      static_cast<std::size_t>(total_voxel_count), false);
+  for (std::size_t i = 0; i < results.size(); ++i) {
+    const std::size_t voxel_index = query_voxel_indices[i];
+    indexed_results[voxel_index] = results[i];
+    has_provider_result[voxel_index] = true;
+  }
 
   int valid_count = 0;
   int unknown_count = 0;
-  for (std::size_t i = 0; i < results.size(); ++i) {
-    const RiskPredictionResult& result = results[i];
+  for (std::size_t i = 0; i < next->voxels.size(); ++i) {
     RiskVoxel voxel;
-    voxel.stamp_s = queries[i].query_time_s;
+    voxel.stamp_s = voxel_queries[i].query_time_s;
+    if (occupied_skip[i]) {
+      voxel.source_flags = RISK_GRID_SOURCE_OCCUPIED_SKIP;
+      voxel.valid = false;
+      voxel.stale = false;
+      voxel.unknown = true;
+      voxel.c_pi = params_copy.unknown_cost;
+      ++unknown_count;
+      next->voxels[i] = voxel;
+      continue;
+    }
+
+    const RiskPredictionResult& result = indexed_results[i];
     voxel.source_flags = result.source_flags;
-    voxel.valid =
+    voxel.valid = has_provider_result[i] &&
         result.available && result.valid && !result.stale && finite_pl(result);
     voxel.stale = result.stale;
     voxel.unknown = !voxel.valid;
@@ -714,12 +800,13 @@ bool RiskGridMap::refreshFromProvider(const Eigen::Vector3d& uav_position_w,
   new_health.ready = true;
   new_health.stale = false;
   new_health.age_s = 0.0;
+  const double health_denominator = total_voxel_count > 0
+      ? static_cast<double>(total_voxel_count)
+      : 1.0;
   new_health.valid_ratio =
-      results.empty() ? 0.0 : static_cast<double>(valid_count) /
-                               static_cast<double>(results.size());
+      static_cast<double>(valid_count) / health_denominator;
   new_health.unknown_ratio =
-      results.empty() ? 1.0 : static_cast<double>(unknown_count) /
-                               static_cast<double>(results.size());
+      static_cast<double>(unknown_count) / health_denominator;
   new_health.generation_id = generation_id;
   new_health.reason = "ok";
   next->health = new_health;

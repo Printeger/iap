@@ -52,7 +52,7 @@ class PredictorModuleRiskProvider final : public iap::RiskPredictionProvider {
     for (const auto& query : queries) {
       iap::PredictorQueryInput input(query.position_w, snapshot_,
                                      query.query_time_s, query.horizon_s,
-                                     "map");
+                                     "map", snapshot_.stamp);
       const iap::PredictorQueryResult prediction = module_.query(input);
       iap::RiskPredictionResult out;
       out.available = prediction.available;
@@ -96,6 +96,9 @@ P0RiskGridRuntime::Config P0RiskGridRuntime::declareAndReadConfig(
       node->declare_parameter<double>("p0.refresh_period_s", 0.5);
   config.grid.stale_timeout_s =
       node->declare_parameter<double>("p0.stale_timeout_s", 1.0);
+  config.grid.skip_occupied_voxels =
+      node->declare_parameter<bool>("p0.skip_occupied_voxels",
+                                    config.grid.skip_occupied_voxels);
   config.debug_metrics_enable =
       node->declare_parameter<bool>("p0.debug_metrics_enable", false);
   config.odom_topic = node->declare_parameter<std::string>(
@@ -148,14 +151,18 @@ P0RiskGridRuntime::P0RiskGridRuntime(
 }
 
 iap::RiskGridHealth P0RiskGridRuntime::health() const {
-  const double now_s = node_ ? node_->now().seconds()
-                             : std::numeric_limits<double>::quiet_NaN();
+  const double now_s = currentRefreshStamp();
   return risk_grid_.health(now_s);
 }
 
 bool P0RiskGridRuntime::refreshOnceForTest() {
   refreshTimerCallback();
   return risk_grid_.health().ready;
+}
+
+void P0RiskGridRuntime::setOccupancyPredicate(
+    iap::RiskGridMap::OccupancyPredicate predicate) {
+  occupancy_predicate_ = std::move(predicate);
 }
 
 void P0RiskGridRuntime::createRosInterfaces() {
@@ -211,6 +218,8 @@ void P0RiskGridRuntime::createRosInterfaces() {
     health_pub_ =
         node_->create_publisher<std_msgs::msg::String>(config_.health_topic, 10);
   }
+  safety_viz_ = std::make_shared<SafetyRvizPublisher>(
+      node_, SafetyRvizPublisher::declareAndReadConfig(node_));
   const double period_s =
       std::max(0.001, config_.grid.refresh_period_s);
   refresh_timer_ = node_->create_wall_timer(
@@ -222,12 +231,11 @@ void P0RiskGridRuntime::refreshTimerCallback() {
   if (!config_.enable_risk_grid) {
     return;
   }
-  const double now_s = node_ ? node_->now().seconds()
-                             : std::numeric_limits<double>::quiet_NaN();
+  const double now_s = currentRefreshStamp();
   iap::IntegritySnapshot snapshot;
   if (!buildSnapshot(now_s, &snapshot)) {
     risk_grid_.markRefreshFailure(now_s, "snapshot_unavailable");
-    publishHealth(risk_grid_.health(now_s));
+    publishHealth(risk_grid_.health(now_s), now_s);
     return;
   }
 
@@ -250,11 +258,24 @@ void P0RiskGridRuntime::refreshTimerCallback() {
   }
 
   std::string reason;
-  risk_grid_.refreshFromProvider(latest_odom_p_, now_s, *provider, &reason);
-  publishHealth(risk_grid_.health(now_s));
+  risk_grid_.refreshFromProvider(latest_odom_p_, now_s, *provider,
+                                 occupancy_predicate_, &reason);
+  const iap::RiskGridHealth health = risk_grid_.health(now_s);
+  publishHealth(health, now_s);
+  if (safety_viz_) {
+    const auto viz_snapshot = risk_grid_.acquireSnapshot();
+    safety_viz_->publishPredictedPLCloud(viz_snapshot, latest_odom_p_.z(),
+                                         now_s);
+    safety_viz_->publishRiskValidityCloud(viz_snapshot, latest_odom_p_.z(),
+                                          now_s);
+  }
 }
 
-void P0RiskGridRuntime::publishHealth(const iap::RiskGridHealth& health) {
+void P0RiskGridRuntime::publishHealth(const iap::RiskGridHealth& health,
+                                      const double now_s) {
+  if (safety_viz_) {
+    safety_viz_->publishRiskGridHealth(health, now_s);
+  }
   if (!config_.debug_metrics_enable || !node_) {
     return;
   }
@@ -543,6 +564,17 @@ bool P0RiskGridRuntime::buildSnapshot(
   }
   *snapshot = snapshot_builder_.build_from_latest(input);
   return snapshot->valid;
+}
+
+double P0RiskGridRuntime::currentRefreshStamp() const {
+  if (std::isfinite(latest_odom_stamp_) && latest_odom_stamp_ > 0.0) {
+    return latest_odom_stamp_;
+  }
+  if (std::isfinite(latest_current_.stamp) && latest_current_.stamp > 0.0) {
+    return latest_current_.stamp;
+  }
+  return node_ ? node_->now().seconds()
+               : std::numeric_limits<double>::quiet_NaN();
 }
 
 }  // namespace ego_planner
