@@ -427,3 +427,161 @@ The decisive failure is that `iap_rosnode` died early with exit code `-6`, after
 1. Do not proceed to `B0-4 fallback baseline`, P0, P5, or `all`.
 2. Debug the corridor baseline first, focusing on the `iap_rosnode` crash, no-GPU point/cov allocation path, `/drone_0_visual_slam/odom`, and `/iap/integrity` publication.
 3. Rerun only B0-3 after the corridor/IAP failure is fixed.
+
+## B0-3 Corridor Baseline Validation Rerun
+
+This rerun supersedes the previous B0-3 failure attempt as the accepted B0-3 evidence. The earlier attempt is retained above because it documents the Docker/GPU outage failure mode; this run was executed after GPU access was restored.
+
+### Repo State And Environment
+
+| Field | Value |
+|---|---|
+| Date | `2026-07-07` UTC |
+| Operator / Agent | Codex |
+| Machine / container | `mint-X` |
+| Workspace | `/home/dev/ws_iap` |
+| Package repo | `/home/dev/ws_iap/src/iap` |
+| Branch | `dev/iap` |
+| Repo protection action | B0-2 amend/push was already complete; no additional amend was needed |
+| Commit under test before rerun | `52f4c8f0718c7f11273ac7b32ff33636a7f4f199` |
+| Clean/dirty status before rerun | `clean`; `git status -sb` reported `## dev/iap...origin/dev/iap` |
+| Recent commits before rerun | `52f4c8f docs: record safety planner B0-3 corridor baseline validation`; `72d31ed docs: record safety planner B0-2 baseline validation`; `1592da2 docs: record safety planner B0-1 baseline validation` |
+| GPU check | `nvidia-smi` detected `NVIDIA GeForce RTX 4070` before launch |
+| Source command | `source /opt/ros/jazzy/setup.bash && source install/setup.bash` |
+| Build command | Not rerun for this evidence-only rerun; reused current installed workspace |
+
+### Launch And Artifacts
+
+```bash
+source /opt/ros/jazzy/setup.bash
+source install/setup.bash
+ros2 launch iap test_planner.launch.py \
+  experiment:=baseline_corridor_off \
+  scenario:=lidar_corridor_degenerate \
+  run_duration_s:=90 \
+  validation_duration_s:=90 \
+  start_rviz:=false \
+  run_validator:=true \
+  record_bag:=true
+```
+
+| Field | Value |
+|---|---|
+| Experiment ID | `B0-3` |
+| Experiment preset | `baseline_corridor_off` |
+| Scenario | `lidar_corridor_degenerate` |
+| Launch result | `PASS`: command exited `0` |
+| Export dir | `/home/dev/ws_iap/src/iap/results/planner_validation/exports/test_planner_baseline_corridor_off_lidar_corridor_degenerate_1783437493275` |
+| Bag dir | `/home/dev/ws_iap/src/iap/results/planner_validation/bags/test_planner_baseline_corridor_off_lidar_corridor_degenerate_20260707T151813Z` |
+| Rosbag summary | Storage `mcap`; size `581.7 MiB`; duration `90.002003329s`; messages `509091` |
+
+### Parameter And Manifest Evidence
+
+| Parameter | Manifest value | Result |
+|---|---:|---|
+| `planner_safety_profile` | `off` | `PASS` |
+| `p0.enable_risk_grid` | `false` | `PASS` |
+| `planner_enable_p1` | `false` | `PASS` |
+| `planner_enable_p2` | `false` | `PASS` |
+| `planner_enable_p3_local` | `false` | `PASS` |
+| `planner_enable_p3_global` | `false` | `PASS` |
+| `planner_enable_p4` | `false` | `PASS` |
+| `planner_enable_p5_runtime` | `false` | `PASS` |
+| `planner_enable_p5_final` | `false` | `PASS` |
+
+### Validator And Analyzer
+
+| Check | Result | Evidence |
+|---|---|---|
+| Validator summary | `PASS` | `passed=true`, `failures=[]`, `message_count=883` |
+| Required fusion mode | `PASS` | `required_fusion_mode=lidar_only` |
+| Required final source | `PASS` | `required_final_source=LIDAR` |
+| LiDAR/fallback validity | `PASS` | `lidar_valid_seen=true`, `fallback_valid_seen=true`, `gnss_valid_seen=false` |
+| Analyzer status | `PASS` | `status=PASS`, `passed=true`, command exited `0` with `--fail-on-threshold` |
+| Analyzer summary | `PASS` | `/home/dev/ws_iap/src/iap/results/planner_validation/exports/test_planner_baseline_corridor_off_lidar_corridor_degenerate_1783437493275/metadata/safety_planner_analysis_summary.json` |
+| Failures / inconclusive / warnings | `PASS` | `[]` / `[]` / `[]` |
+| Integrity CSV rows | `PASS` | `883` data rows; CSV file has `884` lines including header |
+| Integrity HPL | `PASS` | min `2.045466m`; mean `2.639436m`; max `2.842882m` |
+| Integrity VPL | `PASS` | min `2.013485m`; mean `2.619819m`; max `2.823732m` |
+| P5 summary | `PASS` | `status_rows=0`, `bad_action_count=0`, `action_counts={}` |
+| Analyzer limitation | `WARN` | Generated artifact filenames and `next_debug_branch` still contain older B0 naming; artifact contents and thresholds are valid |
+
+Analyzer command:
+
+```bash
+python3 src/iap/scripts/dev_planner/analyze_safety_planner_run.py \
+  --experiment-id B0-3 \
+  --export-dir /home/dev/ws_iap/src/iap/results/planner_validation/exports/test_planner_baseline_corridor_off_lidar_corridor_degenerate_1783437493275 \
+  --bag-dir /home/dev/ws_iap/src/iap/results/planner_validation/bags/test_planner_baseline_corridor_off_lidar_corridor_degenerate_20260707T151813Z \
+  --fail-on-threshold
+```
+
+### Topic Health
+
+| Topic | Expected | Count | Hz | Span | Coverage | Max gap | Status |
+|---|---|---:|---:|---:|---:|---:|---|
+| `/iap/integrity` | continuous | `885` | `9.833114` | `88.389331s` | `0.982082` | `0.111065s` | `PASS` |
+| `/sim/drone_0/lidar_body` | continuous | `897` | `9.966445` | `89.599423s` | `0.995527` | `0.100615s` | `PASS` |
+| `/drone_0_planning/bspline` | planner-dependent | `18` | `0.199996` | `17.252677s` | `0.191692` | `1.020679s` | `PASS` |
+| `/planning/integrity_gate_status` | absent-or-zero when P5 disabled | `0` | `0.000000` | n/a | n/a | n/a | `PASS` |
+| `/drone_0_visual_slam/odom` | IAP odometry available | `885` | bag metadata | bag metadata | bag metadata | bag metadata | `PASS` |
+| `/iap/rviz/risk_grid_health` | P0 disabled | `0` | `0.000000` | n/a | n/a | n/a | `PASS` |
+| `/iap/rviz/predicted_pl_cloud` | P0 disabled | `0` | `0.000000` | n/a | n/a | n/a | `PASS` |
+| `/iap/rviz/risk_validity_cloud` | P0 disabled | `0` | `0.000000` | n/a | n/a | n/a | `PASS` |
+| `/iap/rviz/p5_gate_status` | P5 disabled | `0` | `0.000000` | n/a | n/a | n/a | `PASS` |
+
+### Result Row
+
+| Experiment ID | Status | Validator | Analyzer | Key evidence | Failure / warning | Next branch |
+|---|---|---|---|---|---|---|
+| B0-3 rerun | `PASS` | `passed=true`, failures `[]`, message_count `883` | `PASS`, failures `[]`, warnings `[]`, inconclusive `[]` | Manifest safety switches all false; `/iap/integrity` and `/sim/drone_0/lidar_body` continuous; `/drone_0_planning/bspline` present; P5 status rows `0` | Non-blocking SIGINT teardown exceptions after validator/analyzer pass; analyzer filename/next-branch naming limitation | `B0-4 fallback baseline` |
+
+### B0-3 Acceptance Matrix
+
+| Criterion | Result | Evidence |
+|---|---|---|
+| Launch exits `0` | `PASS` | `ros2 launch` command returned exit code `0` |
+| Validator summary `passed=true` | `PASS` | `test_planner_validation_summary.json` reports `passed: true` |
+| Analyzer status `PASS` or only non-blocking warning | `PASS` | Analyzer status `PASS`; command exited `0` |
+| `planner_safety_profile=off` | `PASS` | Manifest |
+| `p0.enable_risk_grid=false` | `PASS` | Manifest |
+| P1-P5 planner switches all false | `PASS` | Manifest records all `planner_enable_*` fields as `false` |
+| `/iap/integrity` continuous | `PASS` | Analyzer count `885`, coverage `0.982082`, max gap `0.111065s` |
+| `/sim/drone_0/lidar_body` continuous and nonempty | `PASS` | Analyzer count `897`, coverage `0.995527`, max gap `0.100615s` |
+| `/drone_0_planning/bspline` exists | `PASS` | Bag/analyzer count `18` |
+| `/planning/integrity_gate_status` has `0` rows or no P5 action | `PASS` | Analyzer `status_rows=0`, `bad_action_count=0` |
+| No P0 risk-grid behavior appears | `PASS` | P0 disabled in manifest; P0/RViz risk topics recorded `0` messages |
+| P2 behavior disabled | `PASS` | `planner_enable_p2=false`; no P2 evidence required for this baseline |
+| P1 behavior disabled | `PASS` | `planner_enable_p1=false`; no P1 evidence required for this baseline |
+
+### Key Artifacts
+
+| Artifact | Path | Conclusion |
+|---|---|---|
+| Manifest JSON | `/home/dev/ws_iap/src/iap/results/planner_validation/exports/test_planner_baseline_corridor_off_lidar_corridor_degenerate_1783437493275/test_planner_manifest.json` | Safety Planner fully off |
+| Validator summary JSON | `/home/dev/ws_iap/src/iap/results/planner_validation/exports/test_planner_baseline_corridor_off_lidar_corridor_degenerate_1783437493275/test_planner_validation_summary.json` | Validator passed with `883` messages |
+| Integrity validation CSV | `/home/dev/ws_iap/src/iap/results/planner_validation/exports/test_planner_baseline_corridor_off_lidar_corridor_degenerate_1783437493275/test_planner_integrity_validation.csv` | `883` data rows |
+| Analyzer summary JSON | `/home/dev/ws_iap/src/iap/results/planner_validation/exports/test_planner_baseline_corridor_off_lidar_corridor_degenerate_1783437493275/metadata/safety_planner_analysis_summary.json` | Analyzer status `PASS` |
+| Integrity HPL/VPL timeline | `/home/dev/ws_iap/src/iap/results/planner_validation/exports/test_planner_baseline_corridor_off_lidar_corridor_degenerate_1783437493275/figures/b0_1_integrity_hpl_vpl_timeline.png` | 883 integrity samples plotted; filename still uses `b0_1` due analyzer limitation |
+| Topic counts CSV | `/home/dev/ws_iap/src/iap/results/planner_validation/exports/test_planner_baseline_corridor_off_lidar_corridor_degenerate_1783437493275/csv/b0_1_topic_counts.csv` | Continuity evidence for B0-3 acceptance; filename still uses `b0_1` due analyzer limitation |
+| Rosbag | `/home/dev/ws_iap/src/iap/results/planner_validation/bags/test_planner_baseline_corridor_off_lidar_corridor_degenerate_20260707T151813Z` | Core topics recorded across the run |
+
+### Failure Analysis
+
+No failure observed in the accepted B0-3 rerun. The previous B0-3 failure was caused by the Docker/GPU outage path: `iap_rosnode` exited before publishing integrity or IAP odometry. With GPU access restored, `iap_rosnode` stayed alive through the validation window, produced `/drone_0_visual_slam/odom`, and published continuous `/iap/integrity`.
+
+Non-blocking teardown note: after the validator passed and the launch command began SIGINT shutdown, several helper nodes reported `RCLError`, `std::system_error`, or signal-based exit codes. Per the test plan, this is not a B0-3 hard fail because the launch command exited `0`, validator passed, and analyzer passed.
+
+### Remaining Issues
+
+| Issue | Severity | Owner | Blocking experiment | Next action |
+|---|---|---|---|---|
+| SIGINT teardown exceptions in helper nodes | Low | Planner/sim runtime | None for B0-3 | Track separately if teardown stability becomes a CI requirement |
+| Analyzer artifact filenames still contain `b0_1` | Low | dev_planner | None for B0-3 | Rename artifacts when generalizing the analyzer beyond B0-1 naming |
+| Analyzer `next_debug_branch` still returns `continue_to_B0-2_open_sky_baseline` on B0-3 pass | Low | dev_planner | None for B0-3 | Treat manual next branch as `B0-4 fallback baseline` |
+
+### Next Actions
+
+1. B0-3 satisfies Phase 0 corridor baseline criteria.
+2. Manual next branch is `B0-4 fallback baseline`.
+3. Do not run P0, P5, or `all` until B0-4 is explicitly requested and completed.
