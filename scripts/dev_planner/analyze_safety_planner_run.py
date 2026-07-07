@@ -23,6 +23,8 @@ CORE_TOPIC_EXPECTATIONS = {
 }
 P5_STATUS_TOPIC = "/planning/integrity_gate_status"
 P5_BAD_ACTIONS = {"REQUEST_REPLAN", "REQUEST_EMERGENCY_STOP_CANDIDATE"}
+CONTINUOUS_MIN_COVERAGE_RATIO = 0.8
+CONTINUOUS_MAX_GAP_S = 2.0
 SAFETY_OFF_BOOL_KEYS = (
     "p0.enable_risk_grid",
     "planner_enable_p1",
@@ -111,6 +113,63 @@ def read_bag_metadata(bag_dir: Path) -> dict[str, Any]:
     }
 
 
+def read_topic_timings(
+    bag_dir: Path,
+    metadata: dict[str, Any],
+    topics: list[str],
+) -> tuple[dict[str, dict[str, Any]], str]:
+    if metadata.get("missing") or not bag_dir:
+        return {}, ""
+
+    stats = {
+        topic: {
+            "count": 0,
+            "first_bag_time_s": None,
+            "last_bag_time_s": None,
+            "span_s": None,
+            "max_gap_s": None,
+        }
+        for topic in topics
+    }
+    try:
+        import rosbag2_py
+
+        storage_id = str(metadata.get("storage_identifier", "")) or ""
+        reader = rosbag2_py.SequentialReader()
+        reader.open(
+            rosbag2_py.StorageOptions(uri=str(bag_dir), storage_id=storage_id),
+            rosbag2_py.ConverterOptions(
+                input_serialization_format="cdr",
+                output_serialization_format="cdr",
+            ),
+        )
+        target_topics = set(topics)
+        previous: dict[str, float] = {}
+        while reader.has_next():
+            topic, _, timestamp = reader.read_next()
+            if topic not in target_topics:
+                continue
+            bag_time_s = float(timestamp) * 1.0e-9
+            item = stats[topic]
+            item["count"] = int(item["count"]) + 1
+            if item["first_bag_time_s"] is None:
+                item["first_bag_time_s"] = bag_time_s
+            if topic in previous:
+                gap = bag_time_s - previous[topic]
+                item["max_gap_s"] = max(float(item["max_gap_s"] or 0.0), gap)
+            previous[topic] = bag_time_s
+            item["last_bag_time_s"] = bag_time_s
+        for item in stats.values():
+            first = item["first_bag_time_s"]
+            last = item["last_bag_time_s"]
+            if first is not None and last is not None:
+                item["span_s"] = float(last) - float(first)
+                item["max_gap_s"] = float(item["max_gap_s"] or 0.0)
+        return stats, ""
+    except Exception as exc:  # pragma: no cover - depends on local ROS Python env
+        return stats, str(exc)
+
+
 def validate_manifest(manifest: dict[str, Any], failures: list[str], inconclusive: list[str]) -> None:
     if not manifest:
         inconclusive.append("missing test_planner_manifest.json")
@@ -189,24 +248,47 @@ def plot_integrity_timeline(rows: list[dict[str, Any]], path: Path) -> bool:
     return True
 
 
-def topic_health_from_metadata(metadata: dict[str, Any]) -> dict[str, dict[str, Any]]:
+def topic_health_from_metadata(
+    metadata: dict[str, Any],
+    timings: dict[str, dict[str, Any]] | None = None,
+) -> dict[str, dict[str, Any]]:
     topic_counts = metadata.get("topic_counts", {}) or {}
     duration_s = float(metadata.get("duration_ns", 0) or 0) * 1.0e-9
     topic_health: dict[str, dict[str, Any]] = {}
+    timings = timings or {}
     for topic, expected in CORE_TOPIC_EXPECTATIONS.items():
         count = int(topic_counts.get(topic, 0) or 0)
         hz = count / duration_s if duration_s > 0.0 else None
+        timing = timings.get(topic, {}) or {}
+        span_s = finite_float(timing.get("span_s"))
+        max_gap_s = finite_float(timing.get("max_gap_s"))
+        coverage_ratio = (span_s / duration_s) if span_s is not None and duration_s > 0.0 else None
+        status = "PASS" if count > 0 else "FAIL"
+        if expected == "continuous" and count > 0:
+            if coverage_ratio is None or max_gap_s is None:
+                status = "CHECK"
+            elif (
+                coverage_ratio < CONTINUOUS_MIN_COVERAGE_RATIO
+                or max_gap_s > CONTINUOUS_MAX_GAP_S
+            ):
+                status = "FAIL"
         topic_health[topic] = {
             "expected": expected,
             "count": count,
             "hz": hz,
-            "status": "PASS" if count > 0 else "FAIL",
+            "span_s": span_s,
+            "coverage_ratio": coverage_ratio,
+            "max_gap_s": max_gap_s,
+            "status": status,
         }
     p5_count = int(topic_counts.get(P5_STATUS_TOPIC, 0) or 0)
     topic_health[P5_STATUS_TOPIC] = {
         "expected": "absent-or-zero when P5 disabled",
         "count": p5_count,
         "hz": (p5_count / duration_s) if duration_s > 0.0 else None,
+        "span_s": None,
+        "coverage_ratio": None,
+        "max_gap_s": None,
         "status": "PASS" if p5_count == 0 else "CHECK",
     }
     return topic_health
@@ -214,19 +296,25 @@ def topic_health_from_metadata(metadata: dict[str, Any]) -> dict[str, dict[str, 
 
 def validate_topic_health(
     metadata: dict[str, Any],
+    timings: dict[str, dict[str, Any]],
+    timing_error: str,
     failures: list[str],
     inconclusive: list[str],
 ) -> dict[str, dict[str, Any]]:
     if metadata.get("missing"):
         inconclusive.append(f"missing rosbag metadata: {metadata.get('path', '')}")
-        return topic_health_from_metadata(metadata)
+        return topic_health_from_metadata(metadata, timings)
     if metadata.get("parse_error"):
         inconclusive.append(f"could not parse rosbag metadata: {metadata['parse_error']}")
-        return topic_health_from_metadata(metadata)
-    topic_health = topic_health_from_metadata(metadata)
+        return topic_health_from_metadata(metadata, timings)
+    if timing_error:
+        inconclusive.append(f"could not inspect core topic timing: {timing_error}")
+    topic_health = topic_health_from_metadata(metadata, timings)
     for topic in CORE_TOPIC_EXPECTATIONS:
-        if int(topic_health[topic]["count"]) <= 0:
-            failures.append(f"required topic {topic} has no messages in bag")
+        if topic_health[topic]["status"] == "FAIL":
+            failures.append(f"required topic {topic} is missing or not continuous")
+        elif topic_health[topic]["status"] == "CHECK":
+            inconclusive.append(f"required topic {topic} continuity could not be measured")
     return topic_health
 
 
@@ -339,11 +427,22 @@ def analyze(args: argparse.Namespace) -> dict[str, Any]:
     manifest = read_json_if_exists(export_dir / "test_planner_manifest.json")
     validator_summary = read_json_if_exists(export_dir / "test_planner_validation_summary.json")
     metadata = read_bag_metadata(bag_dir) if bag_dir is not None else {"missing": True, "topic_counts": {}}
+    topic_timings, topic_timing_error = (
+        read_topic_timings(bag_dir, metadata, list(CORE_TOPIC_EXPECTATIONS.keys()))
+        if bag_dir is not None
+        else ({}, "")
+    )
     integrity_rows, integrity_summary = read_integrity_csv(export_dir / "test_planner_integrity_validation.csv")
 
     validate_manifest(manifest, failures, inconclusive)
     validate_validator(validator_summary, failures, inconclusive)
-    topic_health = validate_topic_health(metadata, failures, inconclusive)
+    topic_health = validate_topic_health(
+        metadata,
+        topic_timings,
+        topic_timing_error,
+        failures,
+        inconclusive,
+    )
 
     if integrity_summary.get("missing"):
         inconclusive.append("missing test_planner_integrity_validation.csv")
@@ -356,12 +455,23 @@ def analyze(args: argparse.Namespace) -> dict[str, Any]:
             "expected": data["expected"],
             "count": data["count"],
             "hz": "" if data["hz"] is None else f"{float(data['hz']):.6f}",
+            "span_s": "" if data.get("span_s") is None else f"{float(data['span_s']):.6f}",
+            "coverage_ratio": ""
+            if data.get("coverage_ratio") is None
+            else f"{float(data['coverage_ratio']):.6f}",
+            "max_gap_s": ""
+            if data.get("max_gap_s") is None
+            else f"{float(data['max_gap_s']):.6f}",
             "status": data["status"],
         }
         for topic, data in topic_health.items()
     ]
     topic_counts_path = csv_dir / "b0_1_topic_counts.csv"
-    write_csv(topic_counts_path, ["topic", "expected", "count", "hz", "status"], topic_count_rows)
+    write_csv(
+        topic_counts_path,
+        ["topic", "expected", "count", "hz", "span_s", "coverage_ratio", "max_gap_s", "status"],
+        topic_count_rows,
+    )
 
     figures: list[str] = []
     integrity_figure_path = figures_dir / "b0_1_integrity_hpl_vpl_timeline.png"
@@ -410,6 +520,7 @@ def analyze(args: argparse.Namespace) -> dict[str, Any]:
         "manifest": manifest,
         "validator_summary": validator_summary,
         "topic_health": topic_health,
+        "topic_timing_error": topic_timing_error,
         "integrity_summary": integrity_summary,
         "p0_summary": {},
         "p5_summary": p5_summary,

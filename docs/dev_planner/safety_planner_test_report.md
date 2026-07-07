@@ -1,6 +1,6 @@
 # Safety Planner P0-P5 Integration Test Report
 
-> 本报告记录 Safety Planner 自主验证第一步：L0 预检查 + Phase 0 `B0-1` fused nominal baseline lock。
+> 本报告记录 Safety Planner 自主验证第一步：L0 预检查 + Phase 0 `B0-1` fused nominal baseline lock；追加记录 `B0-2` open-sky baseline lock。
 
 ## 1. 测试环境
 
@@ -130,3 +130,145 @@ Non-blocking teardown note: after the validator passed and the launch command be
 1. B0-1 satisfies Phase 0 baseline lock criteria.
 2. Proceed to B0-2 open-sky baseline when ready.
 3. Do not run later phases until B0-2/B0-3/B0-4 complete in order.
+
+## 11. B0-2 Open-Sky Baseline Validation
+
+### 11.1 Repo State
+
+| Field | Value |
+|---|---|
+| Initial status before B0-2 | `## dev/iap...origin/dev/iap [ahead 1]` |
+| Initial HEAD | `1592da25a6a2cd066978481d8fbcf12a3fa421df` |
+| Recent commits | `1592da2 docs: record safety planner B0-1 baseline validation`; `9ba8406 chore: save iap workspace state`; `e244904 docs: make safety planner validation autonomous` |
+| Accepted rerun code-under-test | Initial HEAD plus local working tree changes in `apps/demo4_lidar_body_bridge.cpp`, `launch/test_planner.launch.py`, and `scripts/dev_planner/analyze_safety_planner_run.py` |
+| Build after runtime/analyzer/map updates | `PASS`: `source /opt/ros/jazzy/setup.bash && source install/setup.bash && colcon build --packages-select iap --event-handlers console_direct+` |
+
+### 11.2 Launch And Artifacts
+
+```bash
+source /opt/ros/jazzy/setup.bash
+source install/setup.bash
+ros2 launch iap test_planner.launch.py \
+  experiment:=baseline_fused_nominal_off \
+  scenario:=gnss_open_sky \
+  run_duration_s:=90 \
+  validation_duration_s:=90 \
+  start_rviz:=false \
+  run_validator:=true \
+  record_bag:=true
+```
+
+| Field | Value |
+|---|---|
+| Experiment ID | `B0-2` |
+| Experiment preset | `baseline_fused_nominal_off` |
+| Scenario | `gnss_open_sky` |
+| Launch result | `PASS`: command exited `0` |
+| Export dir | `/home/dev/ws_iap/src/iap/results/planner_validation/exports/test_planner_baseline_fused_nominal_off_gnss_open_sky_1783432749389` |
+| Bag dir | `/home/dev/ws_iap/src/iap/results/planner_validation/bags/test_planner_baseline_fused_nominal_off_gnss_open_sky_20260707T135909Z` |
+| Rosbag summary | Storage `mcap`; size `339.2 MiB`; duration `89.924103482s`; messages `521522` |
+
+### 11.3 Validator And Analyzer
+
+| Check | Result | Evidence |
+|---|---|---|
+| Validator summary | `PASS` | `passed=true`, `failures=[]`, `message_count=883` |
+| Required fusion mode | `PASS` | `required_fusion_mode=gnss_only` |
+| Required final source | `PASS` | `required_final_source=GNSS` |
+| GNSS/fallback validity | `PASS` | `gnss_valid_seen=true`, `fallback_valid_seen=true`, `lidar_valid_seen=false` |
+| Safety profile | `PASS` | `planner_safety_profile=off` |
+| P0/P1/P2/P3/P4/P5 switches | `PASS` | `p0.enable_risk_grid=false`; all `planner_enable_*` fields false |
+
+Analyzer command:
+
+```bash
+python3 src/iap/scripts/dev_planner/analyze_safety_planner_run.py \
+  --experiment-id B0-2 \
+  --export-dir src/iap/results/planner_validation/exports/test_planner_baseline_fused_nominal_off_gnss_open_sky_1783432749389 \
+  --bag-dir src/iap/results/planner_validation/bags/test_planner_baseline_fused_nominal_off_gnss_open_sky_20260707T135909Z \
+  --fail-on-threshold
+```
+
+| Field | Value |
+|---|---|
+| Analyzer status | `PASS` |
+| Analyzer summary | `/home/dev/ws_iap/src/iap/results/planner_validation/exports/test_planner_baseline_fused_nominal_off_gnss_open_sky_1783432749389/metadata/safety_planner_analysis_summary.json` |
+| Failures / inconclusive / warnings | `[]` / `[]` / `[]` |
+| Integrity CSV rows | `883` |
+| Integrity HPL | min `4.876m`; mean `5.081m`; max `5.647m` |
+| Integrity VPL | min `13.753m`; mean `14.518m`; max `17.265m` |
+| P5 summary | `status_rows=0`, `bad_action_count=0`, `action_counts={}` |
+| Analyzer limitation | Generated artifact filenames still contain `b0_1`; `next_debug_branch` still returns `continue_to_B0-2_open_sky_baseline` on pass |
+| Manual next branch | `B0-3 corridor baseline` |
+
+### 11.4 Topic Health
+
+| Topic | Expected | Count | Hz | Span | Coverage | Max gap | Status |
+|---|---|---:|---:|---:|---:|---:|---|
+| `/iap/integrity` | continuous | `885` | `9.841633` | `88.410846s` | `0.983172` | `0.161068s` | `PASS` |
+| `/sim/drone_0/lidar_body` | continuous | `897` | `9.975079` | `89.599674s` | `0.996392` | `0.101106s` | `PASS` |
+| `/drone_0_planning/bspline` | planner-dependent | `18` | `0.200169` | `17.308410s` | `0.192478` | `1.019219s` | `PASS` |
+| `/planning/integrity_gate_status` | absent-or-zero when P5 disabled | `0` | `0.000000` | n/a | n/a | n/a | `PASS` |
+
+### 11.5 Result Row
+
+| Experiment ID | Status | Validator | Analyzer | Key evidence | Failure / warning | Next branch |
+|---|---|---|---|---|---|---|
+| B0-2 | `PASS` | `passed=true`, failures `[]`, message_count `883` | `PASS`, failures `[]`, warnings `[]`, inconclusive `[]` | Manifest safety switches all false; `/iap/integrity` and `/sim/drone_0/lidar_body` continuous; `/drone_0_planning/bspline` present; P5 status rows `0` | Pre-fix attempts exposed continuity failures; accepted rerun shows no remaining B0-2 failure | `B0-3 corridor baseline` |
+
+### 11.6 B0-2 / Phase 0 Baseline Lock Acceptance
+
+| Criterion | Result | Evidence |
+|---|---|---|
+| Launch exits `0` | `PASS` | 90s B0-2 launch completed with exit code `0` |
+| Validator summary `passed=true` | `PASS` | `test_planner_validation_summary.json` reports `passed: true` |
+| `planner_safety_profile=off` | `PASS` | Manifest |
+| `p0.enable_risk_grid=false` | `PASS` | Manifest |
+| P1-P5 planner switches all false | `PASS` | Manifest records all `planner_enable_*` fields as `false` |
+| `/iap/integrity` continuous | `PASS` | Analyzer coverage `0.983172`, max gap `0.161068s` |
+| `/sim/drone_0/lidar_body` continuous | `PASS` | Analyzer coverage `0.996392`, max gap `0.101106s` |
+| `/drone_0_planning/bspline` present after planner run | `PASS` | Bag count `18` |
+| No P5 replan/emergency/final gate behavior | `PASS` | `/planning/integrity_gate_status` count `0`, analyzer `bad_action_count=0` |
+| Shutdown SIGINT teardown noise is not hard fail | `PASS` | Launch command exited `0`; validator and analyzer passed; teardown exceptions occurred after SIGINT |
+
+### 11.7 Key Artifacts
+
+| Artifact | Path | Conclusion |
+|---|---|---|
+| Validator summary JSON | `/home/dev/ws_iap/src/iap/results/planner_validation/exports/test_planner_baseline_fused_nominal_off_gnss_open_sky_1783432749389/test_planner_validation_summary.json` | Validator passed with `883` messages |
+| Analyzer summary JSON | `/home/dev/ws_iap/src/iap/results/planner_validation/exports/test_planner_baseline_fused_nominal_off_gnss_open_sky_1783432749389/metadata/safety_planner_analysis_summary.json` | Analyzer status `PASS` |
+| Integrity HPL/VPL timeline | `/home/dev/ws_iap/src/iap/results/planner_validation/exports/test_planner_baseline_fused_nominal_off_gnss_open_sky_1783432749389/figures/b0_1_integrity_hpl_vpl_timeline.png` | 883 integrity samples plotted; filename still uses `b0_1` due analyzer limitation |
+| Topic counts CSV | `/home/dev/ws_iap/src/iap/results/planner_validation/exports/test_planner_baseline_fused_nominal_off_gnss_open_sky_1783432749389/csv/b0_1_topic_counts.csv` | Continuity timing evidence for B0-2 acceptance; filename still uses `b0_1` due analyzer limitation |
+| Rosbag | `/home/dev/ws_iap/src/iap/results/planner_validation/bags/test_planner_baseline_fused_nominal_off_gnss_open_sky_20260707T135909Z` | Core topics recorded across the run |
+
+### 11.8 Failure Analysis
+
+Two earlier B0-2 attempts were not accepted:
+
+| Attempt | Export / bag | Observed result | Analysis |
+|---|---|---|---|
+| Pre-fix open-sky run | Export `..._1783432121137`; bag `..._20260707T134841Z` | Launch `0` and validator passed, but post-fix analyzer marks `FAIL` | `/iap/integrity` coverage `0.170`; `/sim/drone_0/lidar_body` coverage `0.182`; stream continuity was not sufficient for B0-2 |
+| Bridge-only hardening rerun | Export `..._1783432572282`; bag `..._20260707T135612Z` | Launch `0` and validator passed, but analyzer marks `FAIL` | Raw LiDAR had `897` scans but only the first `165` were nonempty; the open-sky map allowed the vehicle to leave all LiDAR-visible structure |
+
+Fixes applied before the accepted rerun:
+
+1. Added pending-cloud buffering in `demo4_lidar_body_bridge` so clouds slightly newer than the latest odometry are converted when matching odometry arrives.
+2. Added analyzer continuity gates for required continuous topics using bag timestamp span, coverage ratio, and max gap.
+3. Added a low corridor floor to the `gnss_open_sky` map preset so the scenario remains open-sky for planner safety but keeps LiDAR odometry fed for the full run.
+
+No failure observed in the accepted B0-2 rerun.
+
+### 11.9 Remaining Issues
+
+| Issue | Severity | Owner | Blocking experiment | Next action |
+|---|---|---|---|---|
+| SIGINT teardown exceptions in helper nodes | Low | Planner/sim runtime | None for B0-2 | Track separately if teardown stability becomes a CI requirement |
+| Analyzer artifact filenames still contain `b0_1` | Low | dev_planner | None for B0-2 | Rename artifacts when generalizing the analyzer beyond B0-1/B0-2 |
+| Analyzer `next_debug_branch` still returns `continue_to_B0-2_open_sky_baseline` on B0-2 pass | Low | dev_planner | None for B0-2 | Treat manual next branch as `B0-3 corridor baseline` |
+| LiDAR bridge race hardening has no standalone unit test | Medium | dev_planner/runtime | None for B0-2 after accepted rerun | Add a focused bridge timing test if this bridge becomes CI-critical |
+
+### 11.10 Next Actions
+
+1. B0-2 satisfies Phase 0 open-sky baseline lock criteria.
+2. Manual next branch is `B0-3 corridor baseline`.
+3. Do not run B0-3, P0, P5, or `all` until explicitly requested.

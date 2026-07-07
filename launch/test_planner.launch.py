@@ -68,6 +68,12 @@ OPEN_MAP_PRESET = {
     "canopy_density_upper_left": "0.0",
     "canopy_density_upper_right": "0.0",
     "terminal_wall_enabled": "false",
+    "corridor_floor_enabled": "true",
+    "corridor_x_min_m": "-14.0",
+    "corridor_x_max_m": "14.0",
+    "corridor_half_width_y_m": "2.0",
+    "corridor_floor_thickness_z_m": "0.05",
+    "corridor_surface_resolution_m": "0.10",
 }
 
 
