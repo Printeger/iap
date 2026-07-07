@@ -585,3 +585,200 @@ Non-blocking teardown note: after the validator passed and the launch command be
 1. B0-3 satisfies Phase 0 corridor baseline criteria.
 2. Manual next branch is `B0-4 fallback baseline`.
 3. Do not run P0, P5, or `all` until B0-4 is explicitly requested and completed.
+
+## B0-4 Fallback Baseline Validation
+
+### Repo State And Environment
+
+| Field | Value |
+|---|---|
+| Date | `2026-07-07` UTC |
+| Operator / Agent | Codex |
+| Machine / container | `mint-X` |
+| Workspace | `/home/dev/ws_iap` |
+| Package repo | `/home/dev/ws_iap/src/iap` |
+| Branch | `dev/iap` |
+| Commit under test | `9bbbd84e685c5544ce2588ad573bb1df3dc8ebe4` |
+| Clean/dirty status before B0-4 | `clean`; `git status -sb` reported `## dev/iap...origin/dev/iap` |
+| Recent commits before B0-4 | `9bbbd84 docs: require default safety planner validation figures`; `80888ef docs: record safety planner B0-3 corridor baseline validation`; `52f4c8f docs: record safety planner B0-3 corridor baseline validation` |
+| GPU check | `nvidia-smi` detected `NVIDIA GeForce RTX 4070`, driver `580.126.09`, CUDA `13.0` |
+| Source command | `source /opt/ros/jazzy/setup.bash && source install/setup.bash` |
+| Analyzer precheck | `python3 -m py_compile src/iap/scripts/dev_planner/analyze_safety_planner_run.py` passed; B0-3 compatibility smoke returned `PASS` with `b0_3_*` artifacts |
+
+### Launch And Artifacts
+
+```bash
+source /opt/ros/jazzy/setup.bash
+source install/setup.bash
+ros2 launch iap test_planner.launch.py \
+  experiment:=baseline_fused_nominal_off \
+  scenario:=fallback_only \
+  run_duration_s:=90 \
+  validation_duration_s:=90 \
+  start_rviz:=false \
+  run_validator:=true \
+  record_bag:=true \
+  validator_require_gnss_valid:=false \
+  validator_require_lidar_valid:=false \
+  validator_require_fallback_valid:=true \
+  validator_required_final_source:=FALLBACK
+```
+
+| Field | Value |
+|---|---|
+| Experiment ID | `B0-4` |
+| Experiment preset | `baseline_fused_nominal_off` |
+| Scenario | `fallback_only` |
+| Launch result | `PASS`: command exited `0` |
+| Export dir | `/home/dev/ws_iap/src/iap/results/planner_validation/exports/test_planner_baseline_fused_nominal_off_fallback_only_1783440868703` |
+| Bag dir | `/home/dev/ws_iap/src/iap/results/planner_validation/bags/test_planner_baseline_fused_nominal_off_fallback_only_20260707T161428Z` |
+| Rosbag summary | Storage `mcap`; size `328.7 MiB`; duration `90.022062487s`; messages `509729` |
+
+### Parameter And Manifest Evidence
+
+| Parameter | Value | Result |
+|---|---:|---|
+| `planner_safety_profile` | `off` | `PASS` |
+| `p0.enable_risk_grid` | `false` | `PASS` |
+| `planner_enable_p1` | `false` | `PASS` |
+| `planner_enable_p2` | `false` | `PASS` |
+| `planner_enable_p3_local` | `false` | `PASS` |
+| `planner_enable_p3_global` | `false` | `PASS` |
+| `planner_enable_p4` | `false` | `PASS` |
+| `planner_enable_p5_runtime` | `false` | `PASS` |
+| `planner_enable_p5_final` | `false` | `PASS` |
+| `integrity_fusion_mode` | `fallback_only` | `PASS`; validator required this fusion mode |
+| `validator_require_gnss_valid` | `false` | `PASS` |
+| `validator_require_lidar_valid` | `false` | `PASS` |
+| `validator_require_fallback_valid` | `true` | `PASS` |
+| `validator_required_final_source` | `FALLBACK` | `PASS` |
+
+### Validator And Analyzer
+
+| Check | Result | Evidence |
+|---|---|---|
+| Validator summary | `PASS` | `passed=true`, `failures=[]`, `message_count=884` |
+| Required fusion mode | `PASS` | `required_fusion_mode=fallback_only` |
+| Required final source | `PASS` | `required_final_source=FALLBACK` |
+| Source validity | `PASS` | `gnss_valid_seen=false`, `lidar_valid_seen=false`, `fallback_valid_seen=true` |
+| Analyzer status | `PASS` | `status=PASS`, `passed=true`, command exited `0` with `--fail-on-threshold` |
+| Analyzer summary | `PASS` | `/home/dev/ws_iap/src/iap/results/planner_validation/exports/test_planner_baseline_fused_nominal_off_fallback_only_1783440868703/metadata/safety_planner_analysis_summary.json` |
+| Failures / inconclusive / warnings | `PASS` | `[]` / `[]` / `[]` |
+| Integrity CSV rows | `PASS` | `884` data rows |
+| Fusion mode counts | `PASS` | `fallback_only: 884` |
+| Final HPL/VPL source counts | `PASS` | `FALLBACK: 884` for both HPL and VPL |
+| Fallback validity | `PASS` | `fallback_valid_count=884`, `fallback_valid_seen=true` |
+| Integrity HPL/VPL range | `PASS` | HPL min/mean/max `0.299468m` / `1646.596795m` / `4785.288600m`; VPL min/mean/max same |
+| P5 summary | `PASS` | `status_rows=0`, `bad_action_count=0`, `action_counts={}` |
+| Analyzer next branch | `PASS` | `continue_to_P0-1_open_sky_data_only_validation` |
+
+Analyzer command:
+
+```bash
+python3 src/iap/scripts/dev_planner/analyze_safety_planner_run.py \
+  --experiment-id B0-4 \
+  --export-dir src/iap/results/planner_validation/exports/test_planner_baseline_fused_nominal_off_fallback_only_1783440868703 \
+  --bag-dir src/iap/results/planner_validation/bags/test_planner_baseline_fused_nominal_off_fallback_only_20260707T161428Z \
+  --fail-on-threshold
+```
+
+### Topic Health
+
+| Topic | Expected | Count | Hz | Span | Coverage | Max gap | Status |
+|---|---|---:|---:|---:|---:|---:|---|
+| `/iap/integrity` | continuous | `886` | `9.842032` | `88.494722s` | `0.983034` | `0.118564s` | `PASS` |
+| `/sim/drone_0/lidar_body` | continuous | `897` | `9.964224` | `89.599916s` | `0.995311` | `0.100427s` | `PASS` |
+| `/drone_0_visual_slam/odom` | IAP odometry available | `886` | bag metadata | bag metadata | bag metadata | bag metadata | `PASS` |
+| `/drone_0_planning/bspline` | planner-dependent | `18` | `0.199951` | `17.307547s` | `0.192259` | `1.019319s` | `PASS` |
+| `/planning/integrity_gate_status` | absent-or-zero when P5 disabled | `0` | `0.000000` | n/a | n/a | n/a | `PASS` |
+| `/planning/risk_grid_health` | P0 disabled | `0` | n/a | n/a | n/a | n/a | `PASS` |
+| `/iap/rviz/risk_grid_health` | P0 disabled | `0` | n/a | n/a | n/a | n/a | `PASS` |
+| `/iap/rviz/predicted_pl_cloud` | P0 disabled | `0` | n/a | n/a | n/a | n/a | `PASS` |
+| `/iap/rviz/risk_validity_cloud` | P0 disabled | `0` | n/a | n/a | n/a | n/a | `PASS` |
+| `/iap/rviz/trajectory_integrity_samples` | P0/P5 disabled | `0` | n/a | n/a | n/a | n/a | `PASS` |
+| `/iap/rviz/current_traj_integrity_colored` | P5 disabled | `0` | n/a | n/a | n/a | n/a | `PASS` |
+| `/iap/rviz/p5_gate_status` | P5 disabled | `0` | n/a | n/a | n/a | n/a | `PASS` |
+| `/iap/rviz/p5_current_im_bars` | P5 disabled | `0` | n/a | n/a | n/a | n/a | `PASS` |
+
+### Result Row
+
+| Experiment ID | Status | Validator | Analyzer | Key evidence | Failure / warning | Next branch |
+|---|---|---|---|---|---|---|
+| B0-4 | `PASS` | `passed=true`, failures `[]`, message_count `884` | `PASS`, failures `[]`, warnings `[]`, inconclusive `[]` | Manifest safety switches all false; `/iap/integrity` continuous; fallback valid and final source `FALLBACK`; P5 status rows `0`; P0/P5 topics `0` | Non-blocking SIGINT teardown exceptions after validator/analyzer pass; high fallback PL is expected evidence of fallback-only integrity, not a safety-action failure while Safety Planner is off | `P0-1 open-sky data-only validation` |
+
+### B0-4 Acceptance Matrix
+
+| Criterion | Result | Evidence |
+|---|---|---|
+| Launch exits `0` | `PASS` | `ros2 launch` command returned exit code `0` |
+| Validator summary `passed=true` | `PASS` | `test_planner_validation_summary.json` reports `passed: true` |
+| Analyzer status `PASS` | `PASS` | Analyzer command exited `0` with `--fail-on-threshold` |
+| `planner_safety_profile=off` | `PASS` | Manifest |
+| `p0.enable_risk_grid=false` | `PASS` | Manifest |
+| P1-P5 planner switches all false | `PASS` | Manifest records all `planner_enable_*` fields as `false` |
+| `/iap/integrity` continuous | `PASS` | Analyzer count `886`, coverage `0.983034`, max gap `0.118564s` |
+| `fallback_valid_seen=true` | `PASS` | Validator and analyzer integrity summary |
+| Final HPL/VPL source is `FALLBACK` | `PASS` | `final_hpl_source_counts={"FALLBACK":884}`, `final_vpl_source_counts={"FALLBACK":884}` |
+| `/planning/integrity_gate_status` has zero rows or no P5 action | `PASS` | Bag count `0`; analyzer `status_rows=0`, `bad_action_count=0` |
+| P0/P5 risk/RViz topics absent or count `0` | `PASS` | Analyzer `safety_off_topic_counts` reports `0` for all checked P0/P5 topics |
+| Required figures are present and non-empty | `PASS` | `test -s` passed for scenario top-down, topic activity, integrity source, and HPL/VPL timelines |
+
+### Key Artifacts
+
+| Artifact | Path | Conclusion |
+|---|---|---|
+| Manifest JSON | `/home/dev/ws_iap/src/iap/results/planner_validation/exports/test_planner_baseline_fused_nominal_off_fallback_only_1783440868703/test_planner_manifest.json` | Safety Planner fully off |
+| Validator summary JSON | `/home/dev/ws_iap/src/iap/results/planner_validation/exports/test_planner_baseline_fused_nominal_off_fallback_only_1783440868703/test_planner_validation_summary.json` | Validator passed with `884` messages |
+| Integrity validation CSV | `/home/dev/ws_iap/src/iap/results/planner_validation/exports/test_planner_baseline_fused_nominal_off_fallback_only_1783440868703/test_planner_integrity_validation.csv` | `884` data rows; final source always `FALLBACK` |
+| Analyzer summary JSON | `/home/dev/ws_iap/src/iap/results/planner_validation/exports/test_planner_baseline_fused_nominal_off_fallback_only_1783440868703/metadata/safety_planner_analysis_summary.json` | Analyzer status `PASS` |
+| Topic counts CSV | `/home/dev/ws_iap/src/iap/results/planner_validation/exports/test_planner_baseline_fused_nominal_off_fallback_only_1783440868703/csv/b0_4_topic_counts.csv` | Continuity evidence for B0-4 acceptance |
+| Scenario top-down | `/home/dev/ws_iap/src/iap/results/planner_validation/exports/test_planner_baseline_fused_nominal_off_fallback_only_1783440868703/figures/b0_4_scenario_topdown.png` | Bag-derived map, truth odom, visual-slam odom, and bspline overlay |
+| Topic activity timeline | `/home/dev/ws_iap/src/iap/results/planner_validation/exports/test_planner_baseline_fused_nominal_off_fallback_only_1783440868703/figures/b0_4_topic_activity_timeline.png` | Core topic activity/gap visualization |
+| Integrity source timeline | `/home/dev/ws_iap/src/iap/results/planner_validation/exports/test_planner_baseline_fused_nominal_off_fallback_only_1783440868703/figures/b0_4_integrity_source_timeline.png` | `fallback_only`, final source `FALLBACK`, fallback valid throughout |
+| Integrity HPL/VPL timeline | `/home/dev/ws_iap/src/iap/results/planner_validation/exports/test_planner_baseline_fused_nominal_off_fallback_only_1783440868703/figures/b0_4_integrity_hpl_vpl_timeline.png` | Fallback PL timeline plotted; high values expected under fallback-only source |
+| Rosbag | `/home/dev/ws_iap/src/iap/results/planner_validation/bags/test_planner_baseline_fused_nominal_off_fallback_only_20260707T161428Z` | Core topics recorded across the run |
+
+![B0-4 scenario top-down](../../results/planner_validation/exports/test_planner_baseline_fused_nominal_off_fallback_only_1783440868703/figures/b0_4_scenario_topdown.png)
+
+![B0-4 topic activity timeline](../../results/planner_validation/exports/test_planner_baseline_fused_nominal_off_fallback_only_1783440868703/figures/b0_4_topic_activity_timeline.png)
+
+![B0-4 integrity source timeline](../../results/planner_validation/exports/test_planner_baseline_fused_nominal_off_fallback_only_1783440868703/figures/b0_4_integrity_source_timeline.png)
+
+![B0-4 integrity HPL/VPL timeline](../../results/planner_validation/exports/test_planner_baseline_fused_nominal_off_fallback_only_1783440868703/figures/b0_4_integrity_hpl_vpl_timeline.png)
+
+### Failure Analysis
+
+No B0-4 failure observed. The run emitted repeated `INTEGRITY UNSAFE` warnings because fallback-only HPL/VPL rose above the alert limits, with maximum HPL/VPL `4785.288600m`. This is expected fallback-only baseline evidence and is not a Safety Planner action because all P0-P5 switches were off. `/planning/integrity_gate_status` remained at `0` messages and P0/P5 risk/RViz topics remained at `0`.
+
+Shutdown note: after the validator passed and the launch command began SIGINT shutdown, several helper nodes reported `RCLError`, signal-based exit codes, or delayed SIGTERM. This matches prior B0 runs and is not a B0-4 hard fail because the launch command exited `0`, validator passed, analyzer passed, and the evidence chain is complete.
+
+### Remaining Issues
+
+| Issue | Severity | Owner | Blocking experiment | Next action |
+|---|---|---|---|---|
+| SIGINT teardown exceptions in helper nodes | Low | Planner/sim runtime | None for B0-4 | Track separately if teardown stability becomes a CI requirement |
+| Fallback-only PL can greatly exceed alert limits | Informational | Integrity/runtime | None for B0-4 | Use as baseline evidence for later P0/P5 fallback semantics rather than as a B0 failure |
+
+### Verification Commands
+
+| Command | Result |
+|---|---|
+| `git -C src/iap status -sb` | `PASS`; clean before B0-4 |
+| `git -C src/iap log --oneline -5` | `PASS`; latest pre-run commit `9bbbd84` |
+| `git -C src/iap rev-parse HEAD` | `PASS`; `9bbbd84e685c5544ce2588ad573bb1df3dc8ebe4` |
+| `nvidia-smi` | `PASS`; RTX 4070 visible |
+| `python3 -m py_compile src/iap/scripts/dev_planner/analyze_safety_planner_run.py` | `PASS` |
+| B0-4 launch command above | `PASS`; exit code `0` |
+| Artifact inspection commands | `PASS`; manifest, validator summary, and rosbag metadata readable |
+| Analyzer command above | `PASS`; status `PASS` |
+| `test -s .../figures/b0_4_scenario_topdown.png` | `PASS` |
+| `test -s .../figures/b0_4_topic_activity_timeline.png` | `PASS` |
+| `test -s .../figures/b0_4_integrity_source_timeline.png` | `PASS` |
+| `test -s .../figures/b0_4_integrity_hpl_vpl_timeline.png` | `PASS` |
+| `git -C src/iap diff --check` | `PASS` |
+
+### Next Actions
+
+1. B0-4 satisfies Phase 0 fallback baseline criteria.
+2. Phase 0 `B0-1` through `B0-4` baseline lock is complete.
+3. Next planned experiment is `P0-1 open-sky data-only validation`, but it was not run in this B0-4 execution.
