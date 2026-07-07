@@ -92,6 +92,20 @@ namespace ego_planner
 
   EGOPlannerManager::~EGOPlannerManager() {}
 
+  void EGOPlannerManager::setTimeProvider(TimeProvider provider)
+  {
+    time_provider_ = std::move(provider);
+  }
+
+  rclcpp::Time EGOPlannerManager::plannerNow() const
+  {
+    if (time_provider_)
+    {
+      return time_provider_();
+    }
+    return rclcpp::Clock(RCL_ROS_TIME).now();
+  }
+
   void EGOPlannerManager::initPlanModules(rclcpp::Node::SharedPtr &node, PlanningVisualization::Ptr vis)
   {
     node->declare_parameter("manager/max_vel", -1.0);
@@ -272,7 +286,7 @@ namespace ego_planner
     {
       return false;
     }
-    const auto now = rclcpp::Clock().now();
+    const auto now = plannerNow();
     P3LocalBiasInput input;
     input.start_pt = start_pt;
     input.end_pt = end_pt;
@@ -336,7 +350,7 @@ namespace ego_planner
     const bool created_local_risk_context = !planning_risk_context_.active;
     if (created_local_risk_context)
     {
-      beginPlanningRiskContext(rclcpp::Clock().now().seconds());
+      beginPlanningRiskContext(plannerNow().seconds());
     }
     struct LocalRiskContextGuard
     {
@@ -434,7 +448,7 @@ namespace ego_planner
       {
 
         double t;
-        double t_cur = (rclcpp::Clock().now() - local_data_.start_time_).seconds();
+        double t_cur = (plannerNow() - local_data_.start_time_).seconds();
 
         vector<double> pseudo_arc_length;
         vector<Eigen::Vector3d> segment_point;
@@ -523,7 +537,7 @@ namespace ego_planner
     {
       safety_viz_->publishP4Guides(
           toSafetyVizP4Guides(bspline_optimizer_->getLastP4GuideViz()),
-          rclcpp::Clock().now().seconds());
+          plannerNow().seconds());
     }
     bspline_optimizer_->clearP4RiskSnapshot();
     // 计算时间差并更新时间
@@ -555,7 +569,7 @@ namespace ego_planner
           safety_viz_->publishP1IntegrityViz(
               toSafetyVizP1Samples(bspline_optimizer_->getLastP1IntegrityVizSamples()),
               toSafetyVizP1Metrics(bspline_optimizer_->getLastP1IntegrityMetrics()),
-              rclcpp::Clock().now().seconds());
+              plannerNow().seconds());
         }
         if (p1_candidate_success)
         {
@@ -593,7 +607,7 @@ namespace ego_planner
         }
         const auto p2_result = rankP2Candidates(
             p2_candidates, p2_config_, p2_snapshot, planning_query_base_time_s, ts,
-            rclcpp::Clock().now().seconds(), ++p2_batch_id_);
+            plannerNow().seconds(), ++p2_batch_id_);
         if (safety_viz_)
         {
           std::vector<SafetyVizP2Candidate> viz_candidates;
@@ -623,7 +637,7 @@ namespace ego_planner
             viz_candidates.push_back(viz);
           }
           safety_viz_->publishP2Candidates(viz_candidates,
-                                           rclcpp::Clock().now().seconds());
+                                           plannerNow().seconds());
         }
         if (p2_result.selected_index >= 0 &&
             p2_result.selected_index < static_cast<int>(p2_candidates.size()))
@@ -653,7 +667,7 @@ namespace ego_planner
         safety_viz_->publishP1IntegrityViz(
             toSafetyVizP1Samples(bspline_optimizer_->getLastP1IntegrityVizSamples()),
             toSafetyVizP1Metrics(bspline_optimizer_->getLastP1IntegrityMetrics()),
-            rclcpp::Clock().now().seconds());
+            plannerNow().seconds());
       }
       t_opt = rclcpp::Clock().now() - t_start;
       // static int vis_id = 0;
@@ -711,7 +725,7 @@ namespace ego_planner
     t_refine = rclcpp::Clock().now() - t_start;
 
     // save planned results
-    updateTrajInfo(pos, rclcpp::Clock().now());
+    updateTrajInfo(pos, plannerNow());
 
     static double sum_time = 0;
     static int count_success = 0;
@@ -736,7 +750,7 @@ namespace ego_planner
       control_points.col(i) = stop_pos;
     }
 
-    updateTrajInfo(UniformBspline(control_points, 3, 1.0), rclcpp::Clock().now());
+    updateTrajInfo(UniformBspline(control_points, 3, 1.0), plannerNow());
 
     return true;
   }
@@ -834,7 +848,7 @@ namespace ego_planner
     else
       return false;
 
-    auto time_now = rclcpp::Clock().now();
+    auto time_now = plannerNow();
 
     global_data_.setGlobalTraj(gl_traj, time_now);
 
@@ -851,7 +865,7 @@ namespace ego_planner
       return planGlobalTraj(start_pos, start_vel, start_acc, end_pos, end_vel, end_acc);
     }
 
-    const auto now = rclcpp::Clock().now();
+    const auto now = plannerNow();
     P3GlobalBiasInput input;
     input.start_pos = start_pos;
     input.end_pos = end_pos;
@@ -958,7 +972,7 @@ namespace ego_planner
     else
       return false;
 
-    auto time_now = rclcpp::Clock().now();
+    auto time_now = plannerNow();
 
     global_data_.setGlobalTraj(gl_traj, time_now);
 

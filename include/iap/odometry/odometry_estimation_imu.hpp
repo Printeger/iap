@@ -3,6 +3,7 @@
 #include <map>
 #include <memory>
 #include <random>
+#include <string>
 
 #include <iap/odometry/odometry_estimation_base.hpp>
 #include <gtsam_points/util/gtsam_migration.hpp>
@@ -39,6 +40,8 @@ public:
   virtual ~OdometryEstimationIMUParams();
 
 public:
+  enum class SigmaPUpdateScope { CURRENT, ALL_ACTIVE };
+
   // Sensor params;
   bool fix_imu_bias;
   double imu_bias_noise;
@@ -71,6 +74,7 @@ public:
   // Logging params
   bool validate_imu;
   bool save_imu_rate_trajectory;
+  SigmaPUpdateScope sigma_p_update_scope;
 
   int num_threads;                  // Number of threads for preprocessing and per-factor parallelism
   int num_smoother_update_threads;  // Number of threads for TBB parallelism in smoother update (should be kept 1)

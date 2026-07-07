@@ -1,6 +1,7 @@
 #ifndef _P0_RISK_GRID_RUNTIME_H_
 #define _P0_RISK_GRID_RUNTIME_H_
 
+#include <cstddef>
 #include <functional>
 #include <memory>
 #include <optional>
@@ -90,6 +91,7 @@ class P0RiskGridRuntime {
   Eigen::Matrix3d currentPriorInformation(
       const iap::CurrentIntegrityState& current) const;
   bool buildSnapshot(double now_s, iap::IntegritySnapshot* snapshot) const;
+  double currentMessageStamp() const;
   double currentRefreshStamp() const;
 
   rclcpp::Node::SharedPtr node_;
@@ -122,6 +124,11 @@ class P0RiskGridRuntime {
   double latest_map_stamp_ = std::numeric_limits<double>::quiet_NaN();
   iap::CurrentIntegrityState latest_current_;
   bool latest_current_valid_ = false;
+  double last_refresh_stamp_s_ = std::numeric_limits<double>::quiet_NaN();
+  double last_grid_stamp_s_ = std::numeric_limits<double>::quiet_NaN();
+  double last_refresh_elapsed_ms_ = std::numeric_limits<double>::quiet_NaN();
+  bool last_snapshot_available_ = false;
+  std::size_t last_refresh_query_count_ = 0;
   bool origin_set_ = false;
   Eigen::Vector3d origin_ecef_ = Eigen::Vector3d::Zero();
   std::unordered_map<uint32_t, gnss_comm::EphemPtr> ephem_cache_;

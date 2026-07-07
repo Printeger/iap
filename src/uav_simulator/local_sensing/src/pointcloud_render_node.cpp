@@ -231,7 +231,7 @@ int main(int argc, char** argv) {
       _resolution);
 
   // 定时器：控制渲染频率
-  double sensing_duration = 1.0 / sensing_rate * 2.5;
+  double sensing_duration = 1.0 / sensing_rate;
   local_sensing_timer = node->create_wall_timer(
       std::chrono::duration<double>(sensing_duration), std::bind(&renderSensedPoints));
 

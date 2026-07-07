@@ -28,6 +28,7 @@
 
 #include <iap/util/config.hpp>
 #include <iap/util/run_log_manager.hpp>
+#include <iap/util/timing_csv.hpp>
 #include <iap/common/imu_integration.hpp>
 #include <iap/common/cloud_deskewing.hpp>
 #include <iap/common/cloud_covariance_estimation.hpp>
@@ -91,6 +92,7 @@ OdometryEstimationGPUParams::OdometryEstimationGPUParams() : OdometryEstimationI
   // IAP-RQ-040: ICP quality / health
   icp_cond_threshold = config.param<double>("odometry_estimation", "icp_cond_threshold", 500.0);
   gamma_lidar_max    = config.param<double>("odometry_estimation", "gamma_lidar_max",    10.0);
+  icp_quality_stride = std::max(1, config.param<int>("odometry_estimation", "icp_quality_stride", 1));
   enable_icp_csv     = config.param<bool>("odometry_estimation", "enable_icp_csv", false);
   icp_csv_path       = config.param<std::string>("odometry_estimation", "icp_csv_path",
                                                   "/tmp/iap_icp.csv");
@@ -98,7 +100,8 @@ OdometryEstimationGPUParams::OdometryEstimationGPUParams() : OdometryEstimationI
     icp_csv_path = run_logs->export_path("iap_icp.csv").string();
   }
 
-  spdlog::info("[odometry_gpu] enable_icp_csv={} icp_csv_path={}", enable_icp_csv, icp_csv_path);
+  spdlog::info("[odometry_gpu] icp_quality_stride={} enable_icp_csv={} icp_csv_path={}",
+               icp_quality_stride, enable_icp_csv, icp_csv_path);
 }
 
 OdometryEstimationGPUParams::~OdometryEstimationGPUParams() {}
@@ -159,19 +162,44 @@ void OdometryEstimationGPU::update_frames(const int current, const gtsam::Nonlin
   Callbacks::on_update_keyframes(keyframes);
 
   // --- IAP-RQ-040: ICP quality assessment (post-smoother, at optimized pose) ----
-  if (!frames[current] || !frames[current]->frame->size()) {
-    if (frames[current]) {
-      if (auto* lidar_snapshot =
-              frames[current]->get_custom_data<iap::LidarAraimSnapshot>(
-                  "lidar_araim_snapshot")) {
-        lidar_snapshot->valid = false;
-      }
+  if (!frames[current]) {
+    return;
+  }
+
+  iap::timing_csv::ScopedTimer icp_quality_timer(frames[current]->stamp, "1.2_update_frames_icp_quality");
+  if (!frames[current]->frame->size()) {
+    if (auto* lidar_snapshot =
+            frames[current]->get_custom_data<iap::LidarAraimSnapshot>(
+                "lidar_araim_snapshot")) {
+      lidar_snapshot->valid = false;
     }
     static bool logged_empty_frame = false;
     if (!logged_empty_frame) {
       logger->info("[icp_csv] skip write: empty frame at current={}", current);
       logged_empty_frame = true;
     }
+    return;
+  }
+
+  const auto apply_icp_quality_to_snapshot = [&](const EstimationFrame::IcpQuality& q) {
+    if (auto* lidar_snapshot =
+            frames[current]->get_custom_data<iap::LidarAraimSnapshot>(
+                "lidar_araim_snapshot")) {
+      lidar_snapshot->current_icp_quality = q;
+      lidar_snapshot->valid = !lidar_snapshot->blocks.empty();
+      for (auto& block : lidar_snapshot->blocks) {
+        block.gamma_lidar = q.gamma_lidar;
+      }
+    }
+  };
+
+  const bool should_run_icp_quality =
+    params->icp_quality_stride <= 1 || !has_last_icp_quality_ || (current % params->icp_quality_stride) == 0;
+  if (!should_run_icp_quality) {
+    frames[current]->icp_quality = last_icp_quality_;
+    apply_icp_quality_to_snapshot(frames[current]->icp_quality);
+    logger->trace("icp_quality[{}]: reused latest quality gamma={:.2f} stride={}",
+                  current, frames[current]->icp_quality.gamma_lidar, params->icp_quality_stride);
     return;
   }
 
@@ -256,15 +284,9 @@ void OdometryEstimationGPU::update_frames(const int current, const gtsam::Nonlin
   q.degeneracy_flag= degeneracy_flag;
   q.gamma_lidar    = gamma_lidar;
 
-  if (auto* lidar_snapshot =
-          frames[current]->get_custom_data<iap::LidarAraimSnapshot>(
-              "lidar_araim_snapshot")) {
-    lidar_snapshot->current_icp_quality = q;
-    lidar_snapshot->valid = !lidar_snapshot->blocks.empty();
-    for (auto& block : lidar_snapshot->blocks) {
-      block.gamma_lidar = gamma_lidar;
-    }
-  }
+  last_icp_quality_ = q;
+  has_last_icp_quality_ = true;
+  apply_icp_quality_to_snapshot(q);
 
   logger->trace(
     "icp_quality[{}]: inliers={} ({:.1f}%) rmse={:.4f} cond={:.1f} degenerate={} gamma={:.2f}",

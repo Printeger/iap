@@ -38,6 +38,22 @@ using gtsam::symbol_shorthand::C;  // clock state [δt(m), δṫ(m/s)] (IAP-RQ-0
 using gtsam::symbol_shorthand::V;  // IMU velocity   (v_world_imu)
 using gtsam::symbol_shorthand::X;  // IMU pose       (T_world_imu)
 
+namespace {
+
+OdometryEstimationIMUParams::SigmaPUpdateScope parse_sigma_p_update_scope(const std::string& scope) {
+  if (scope == "current" || scope == "CURRENT") {
+    return OdometryEstimationIMUParams::SigmaPUpdateScope::CURRENT;
+  }
+  if (scope == "all_active" || scope == "ALL_ACTIVE") {
+    return OdometryEstimationIMUParams::SigmaPUpdateScope::ALL_ACTIVE;
+  }
+
+  spdlog::warn("unknown odometry_estimation.sigma_p_update_scope='{}'; falling back to 'current'", scope);
+  return OdometryEstimationIMUParams::SigmaPUpdateScope::CURRENT;
+}
+
+}  // namespace
+
 OdometryEstimationIMUParams::OdometryEstimationIMUParams() {
   // sensor config
   Config sensor_config(GlobalConfig::get_config_path("config_sensors"));
@@ -77,6 +93,8 @@ OdometryEstimationIMUParams::OdometryEstimationIMUParams() {
 
   validate_imu = config.param<bool>("odometry_estimation", "validate_imu", true);
   save_imu_rate_trajectory = config.param<bool>("odometry_estimation", "save_imu_rate_trajectory", false);
+  sigma_p_update_scope = parse_sigma_p_update_scope(
+    config.param<std::string>("odometry_estimation", "sigma_p_update_scope", "current"));
 
   num_threads = config.param<int>("odometry_estimation", "num_threads", 4);
   num_smoother_update_threads = 1;
@@ -531,6 +549,7 @@ void OdometryEstimationIMU::update_frames(int current, const gtsam::NonlinearFac
 
   gtsam::Values all_values;
   try {
+    iap::timing_csv::ScopedTimer timer(frames[current]->stamp, "1.2_update_frames_calculate_estimate");
     all_values = smoother->calculateEstimate();
   } catch (const std::exception& e) {
     logger->error("update_frames: calculateEstimate() failed: {}", e.what());
@@ -541,93 +560,116 @@ void OdometryEstimationIMU::update_frames(int current, const gtsam::NonlinearFac
     return;
   }
 
-  for (int i = marginalized_cursor; i < frames.size(); i++) {
-    try {
-      const bool has_x = all_values.exists(X(i));
-      const bool has_v = all_values.exists(V(i));
-      const bool has_b = all_values.exists(B(i));
-      if (!has_x || !has_v || !has_b) {
-        logger->warn("update_frames: missing core key at frame {} (X={} V={} B={}), skipping",
-          i, has_x, has_v, has_b);
+  {
+    iap::timing_csv::ScopedTimer timer(frames[current]->stamp, "1.2_update_frames_state_copy");
+    for (int i = marginalized_cursor; i < frames.size(); i++) {
+      try {
+        const bool has_x = all_values.exists(X(i));
+        const bool has_v = all_values.exists(V(i));
+        const bool has_b = all_values.exists(B(i));
+        if (!has_x || !has_v || !has_b) {
+          logger->warn("update_frames: missing core key at frame {} (X={} V={} B={}), skipping",
+            i, has_x, has_v, has_b);
+          continue;
+        }
+
+        Eigen::Isometry3d T_world_imu = Eigen::Isometry3d(all_values.at<gtsam::Pose3>(X(i)).matrix());
+        Eigen::Vector3d v_world_imu = all_values.at<gtsam::Vector3>(V(i));
+        Eigen::Matrix<double, 6, 1> imu_bias = all_values.at<gtsam::imuBias::ConstantBias>(B(i)).vector();
+
+        frames[i]->T_world_imu = T_world_imu;
+        frames[i]->T_world_lidar = T_world_imu * T_imu_lidar;
+        frames[i]->v_world_imu = v_world_imu;
+        frames[i]->imu_bias = imu_bias;
+
+        // IAP-RQ-010: read back clock states [δt(m), δṫ(m/s)]
+        // In GNSS clock-owner mode, only read the current frame's clock state to avoid
+        // high-volume historical missing-key telemetry noise.
+        bool should_read_clock = true;
+        if (!odometry_owns_clock_ && i != current) {
+          should_read_clock = false;
+        }
+
+        if (!odometry_owns_clock_ && i == current) {
+          const bool clock_ready = iap::IapSharedState::instance().is_clock_ready(i);
+          if (!clock_ready) {
+            should_read_clock = false;
+            ++clock_not_ready_count;
+            if (clock_not_ready_count == 1 || clock_not_ready_count % 200 == 0) {
+              logger->info("update_frames: clock not ready for current frame {}, skip read [count={}]", i, clock_not_ready_count);
+            }
+          }
+        }
+
+        if (should_read_clock) {
+          if (all_values.exists(C(i))) {
+            const auto clk = all_values.at<gtsam::Vector2>(C(i));
+            frames[i]->clk_bias  = clk(0);
+            frames[i]->clk_drift = clk(1);
+          } else {
+            if (odometry_owns_clock_) {
+              KeyLifecycleMonitor::instance().record_missing('c', "odometry.update_frames.current_only");
+              ++missing_clock_count;
+              if (missing_clock_count == 1 || missing_clock_count % 200 == 0) {
+                logger->warn("update_frames: missing current clock key C({}), keep previous clock state [count={}]", i, missing_clock_count);
+              }
+            } else {
+              ++missing_clock_count;
+              if (missing_clock_count == 1 || missing_clock_count % 1000 == 0) {
+                logger->debug("update_frames: current clock key C({}) unavailable in gnss owner mode [count={}]", i, missing_clock_count);
+              }
+            }
+          }
+        } else {
+          ++skipped_clock_read_count;
+          if (skipped_clock_read_count == 1 || skipped_clock_read_count % 2000 == 0) {
+            logger->debug("update_frames: skip historical clock read in gnss owner mode [count={}]", skipped_clock_read_count);
+          }
+        }
+
+        logger->trace("state[{}]: p=({:.3f},{:.3f},{:.3f}) v=({:.3f},{:.3f},{:.3f}) clk_bias={:.4f}m clk_drift={:.4f}m/s",
+          i,
+          T_world_imu.translation().x(), T_world_imu.translation().y(), T_world_imu.translation().z(),
+          v_world_imu.x(), v_world_imu.y(), v_world_imu.z(),
+          frames[i]->clk_bias, frames[i]->clk_drift);
+      } catch (const std::exception& e) {
+        logger->error("update_frames: frame {} extraction failed: {}", i, e.what());
         continue;
       }
+    }
+  }
 
-      Eigen::Isometry3d T_world_imu = Eigen::Isometry3d(all_values.at<gtsam::Pose3>(X(i)).matrix());
-      Eigen::Vector3d v_world_imu = all_values.at<gtsam::Vector3>(V(i));
-      Eigen::Matrix<double, 6, 1> imu_bias = all_values.at<gtsam::imuBias::ConstantBias>(B(i)).vector();
+  const auto update_sigma_p = [&](int i) {
+    if (i < marginalized_cursor || i >= frames.size() || !frames[i]) {
+      return;
+    }
+    if (!all_values.exists(X(i))) {
+      logger->warn("update_frames: missing X({}) for sigma_p update", i);
+      return;
+    }
 
-      frames[i]->T_world_imu = T_world_imu;
-      frames[i]->T_world_lidar = T_world_imu * T_imu_lidar;
-      frames[i]->v_world_imu = v_world_imu;
-      frames[i]->imu_bias = imu_bias;
-
-      // IAP-RQ-010: read back clock states [δt(m), δṫ(m/s)]
-      // In GNSS clock-owner mode, only read the current frame's clock state to avoid
-      // high-volume historical missing-key telemetry noise.
-      bool should_read_clock = true;
-      if (!odometry_owns_clock_ && i != current) {
-        should_read_clock = false;
-      }
-
-      if (!odometry_owns_clock_ && i == current) {
-        const bool clock_ready = iap::IapSharedState::instance().is_clock_ready(i);
-        if (!clock_ready) {
-          should_read_clock = false;
-          ++clock_not_ready_count;
-          if (clock_not_ready_count == 1 || clock_not_ready_count % 200 == 0) {
-            logger->info("update_frames: clock not ready for current frame {}, skip read [count={}]", i, clock_not_ready_count);
-          }
-        }
-      }
-
-      if (should_read_clock) {
-        if (all_values.exists(C(i))) {
-          const auto clk = all_values.at<gtsam::Vector2>(C(i));
-          frames[i]->clk_bias  = clk(0);
-          frames[i]->clk_drift = clk(1);
-        } else {
-          if (odometry_owns_clock_) {
-            KeyLifecycleMonitor::instance().record_missing('c', "odometry.update_frames.current_only");
-            ++missing_clock_count;
-            if (missing_clock_count == 1 || missing_clock_count % 200 == 0) {
-              logger->warn("update_frames: missing current clock key C({}), keep previous clock state [count={}]", i, missing_clock_count);
-            }
-          } else {
-            ++missing_clock_count;
-            if (missing_clock_count == 1 || missing_clock_count % 1000 == 0) {
-              logger->debug("update_frames: current clock key C({}) unavailable in gnss owner mode [count={}]", i, missing_clock_count);
-            }
-          }
-        }
-      } else {
-        ++skipped_clock_read_count;
-        if (skipped_clock_read_count == 1 || skipped_clock_read_count % 2000 == 0) {
-          logger->debug("update_frames: skip historical clock read in gnss owner mode [count={}]", skipped_clock_read_count);
-        }
-      }
-
-      // IAP-RQ-015: extract position covariance Σ_p from smoother marginal
-      try {
-        const gtsam::Matrix pose_cov = smoother->marginalCovariance(X(i));  // 6×6 [rot|trans]
-        frames[i]->sigma_p = pose_cov.block<3, 3>(3, 3);  // translation block
-        const double trace_sigma_p = frames[i]->sigma_p.trace();
-        // Largest eigenvalue via SelfAdjointEigenSolver (cheapest for 3×3)
-        Eigen::SelfAdjointEigenSolver<Eigen::Matrix3d> eig(frames[i]->sigma_p, Eigen::EigenvaluesOnly);
-        const double lambda_max = eig.eigenvalues().maxCoeff();
-        logger->trace("sigma_p [{}]: trace={:.6f} lambda_max={:.6f} (PL_proxy={:.4f}m)",
-          i, trace_sigma_p, lambda_max, std::sqrt(std::max(0.0, lambda_max)));
-      } catch (const std::exception& e) {
-        logger->warn("marginalCovariance(X({})) failed: {}", i, e.what());
-      }
-
-      logger->trace("state[{}]: p=({:.3f},{:.3f},{:.3f}) v=({:.3f},{:.3f},{:.3f}) clk_bias={:.4f}m clk_drift={:.4f}m/s",
-        i,
-        T_world_imu.translation().x(), T_world_imu.translation().y(), T_world_imu.translation().z(),
-        v_world_imu.x(), v_world_imu.y(), v_world_imu.z(),
-        frames[i]->clk_bias, frames[i]->clk_drift);
+    // IAP-RQ-015: extract position covariance Sigma_p from smoother marginal.
+    try {
+      const gtsam::Matrix pose_cov = smoother->marginalCovariance(X(i));  // 6x6 [rot|trans]
+      frames[i]->sigma_p = pose_cov.block<3, 3>(3, 3);  // translation block
+      const double trace_sigma_p = frames[i]->sigma_p.trace();
+      Eigen::SelfAdjointEigenSolver<Eigen::Matrix3d> eig(frames[i]->sigma_p, Eigen::EigenvaluesOnly);
+      const double lambda_max = eig.eigenvalues().maxCoeff();
+      logger->trace("sigma_p [{}]: trace={:.6f} lambda_max={:.6f} (PL_proxy={:.4f}m)",
+        i, trace_sigma_p, lambda_max, std::sqrt(std::max(0.0, lambda_max)));
     } catch (const std::exception& e) {
-      logger->error("update_frames: frame {} extraction failed: {}", i, e.what());
-      continue;
+      logger->warn("marginalCovariance(X({})) failed: {}", i, e.what());
+    }
+  };
+
+  {
+    iap::timing_csv::ScopedTimer timer(frames[current]->stamp, "1.2_update_frames_sigma_p");
+    if (params->sigma_p_update_scope == OdometryEstimationIMUParams::SigmaPUpdateScope::ALL_ACTIVE) {
+      for (int i = marginalized_cursor; i < frames.size(); i++) {
+        update_sigma_p(i);
+      }
+    } else {
+      update_sigma_p(current);
     }
   }
 }

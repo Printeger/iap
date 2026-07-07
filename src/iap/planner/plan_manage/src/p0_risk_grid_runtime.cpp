@@ -151,8 +151,9 @@ P0RiskGridRuntime::P0RiskGridRuntime(
 }
 
 iap::RiskGridHealth P0RiskGridRuntime::health() const {
-  const double now_s = currentRefreshStamp();
-  return risk_grid_.health(now_s);
+  const double now_s = currentMessageStamp();
+  return std::isfinite(now_s) ? risk_grid_.health(now_s)
+                              : risk_grid_.health();
 }
 
 bool P0RiskGridRuntime::refreshOnceForTest() {
@@ -236,14 +237,30 @@ void P0RiskGridRuntime::refreshTimerCallback() {
       refresh_timer_->reset();
     }
   };
-  const double now_s = currentRefreshStamp();
+  const auto refresh_start = std::chrono::steady_clock::now();
+  const double now_s = currentMessageStamp();
+  last_refresh_stamp_s_ = now_s;
+  last_snapshot_available_ = false;
+  last_refresh_query_count_ = 0;
+  if (!std::isfinite(now_s) || now_s <= 0.0) {
+    risk_grid_.markRefreshFailure(now_s, "message_stamp_unavailable");
+    last_refresh_elapsed_ms_ =
+        std::chrono::duration<double, std::milli>(
+            std::chrono::steady_clock::now() - refresh_start).count();
+    reset_refresh_timer();
+    return;
+  }
   iap::IntegritySnapshot snapshot;
   if (!buildSnapshot(now_s, &snapshot)) {
     risk_grid_.markRefreshFailure(now_s, "snapshot_unavailable");
+    last_refresh_elapsed_ms_ =
+        std::chrono::duration<double, std::milli>(
+            std::chrono::steady_clock::now() - refresh_start).count();
     publishHealth(risk_grid_.health(now_s), now_s);
     reset_refresh_timer();
     return;
   }
+  last_snapshot_available_ = true;
 
   std::unique_ptr<iap::RiskPredictionProvider> local_provider;
   iap::RiskPredictionProvider* provider = provider_.get();
@@ -264,12 +281,24 @@ void P0RiskGridRuntime::refreshTimerCallback() {
   }
 
   std::string reason;
+  const Eigen::Vector3i voxel_num = risk_grid_.voxelNum();
+  const auto layer_voxel_count =
+      static_cast<std::size_t>(std::max(0, voxel_num.x())) *
+      static_cast<std::size_t>(std::max(0, voxel_num.y())) *
+      static_cast<std::size_t>(std::max(0, voxel_num.z()));
+  last_refresh_query_count_ =
+      layer_voxel_count * config_.grid.horizons_s.size();
   risk_grid_.refreshFromProvider(latest_odom_p_, now_s, *provider,
                                  occupancy_predicate_, &reason);
   const iap::RiskGridHealth health = risk_grid_.health(now_s);
+  const auto viz_snapshot = risk_grid_.acquireSnapshot();
+  last_grid_stamp_s_ = viz_snapshot ? viz_snapshot->stamp_s()
+                                    : std::numeric_limits<double>::quiet_NaN();
+  last_refresh_elapsed_ms_ =
+      std::chrono::duration<double, std::milli>(
+          std::chrono::steady_clock::now() - refresh_start).count();
   publishHealth(health, now_s);
   if (safety_viz_) {
-    const auto viz_snapshot = risk_grid_.acquireSnapshot();
     safety_viz_->publishPredictedPLCloud(viz_snapshot, latest_odom_p_.z(),
                                          now_s);
     safety_viz_->publishRiskValidityCloud(viz_snapshot, latest_odom_p_.z(),
@@ -298,6 +327,12 @@ void P0RiskGridRuntime::publishHealth(const iap::RiskGridHealth& health,
       << "\"occupied_skip_count\":" << health.occupied_skip_count << ","
       << "\"provider_stale_count\":" << health.provider_stale_count << ","
       << "\"provider_invalid_count\":" << health.provider_invalid_count << ","
+      << "\"refresh_stamp_s\":" << jsonNumber(last_refresh_stamp_s_) << ","
+      << "\"last_grid_stamp_s\":" << jsonNumber(last_grid_stamp_s_) << ","
+      << "\"refresh_elapsed_ms\":" << jsonNumber(last_refresh_elapsed_ms_) << ","
+      << "\"snapshot_available\":"
+      << (last_snapshot_available_ ? "true" : "false") << ","
+      << "\"refresh_query_count\":" << last_refresh_query_count_ << ","
       << "\"reason\":\"" << health.reason << "\""
       << "}";
   if (health_pub_) {
@@ -309,7 +344,9 @@ void P0RiskGridRuntime::publishHealth(const iap::RiskGridHealth& health,
                        "[p0] risk grid ready=%d stale=%d age=%.3f "
                        "valid=%.3f unknown=%.3f gen=%lu "
                        "provider_queries=%lu occupied_skip=%lu "
-                       "provider_stale=%lu provider_invalid=%lu reason=%s",
+                       "provider_stale=%lu provider_invalid=%lu "
+                       "refresh_stamp=%.6f grid_stamp=%.6f elapsed_ms=%.3f "
+                       "queries=%zu reason=%s",
                        health.ready, health.stale, health.age_s,
                        health.valid_ratio, health.unknown_ratio,
                        static_cast<unsigned long>(health.generation_id),
@@ -318,6 +355,8 @@ void P0RiskGridRuntime::publishHealth(const iap::RiskGridHealth& health,
                        static_cast<unsigned long>(health.provider_stale_count),
                        static_cast<unsigned long>(
                            health.provider_invalid_count),
+                       last_refresh_stamp_s_, last_grid_stamp_s_,
+                       last_refresh_elapsed_ms_, last_refresh_query_count_,
                        health.reason.c_str());
 }
 
@@ -585,15 +624,18 @@ bool P0RiskGridRuntime::buildSnapshot(
   return snapshot->valid;
 }
 
-double P0RiskGridRuntime::currentRefreshStamp() const {
+double P0RiskGridRuntime::currentMessageStamp() const {
   if (std::isfinite(latest_odom_stamp_) && latest_odom_stamp_ > 0.0) {
     return latest_odom_stamp_;
   }
   if (std::isfinite(latest_current_.stamp) && latest_current_.stamp > 0.0) {
     return latest_current_.stamp;
   }
-  return node_ ? node_->now().seconds()
-               : std::numeric_limits<double>::quiet_NaN();
+  return std::numeric_limits<double>::quiet_NaN();
+}
+
+double P0RiskGridRuntime::currentRefreshStamp() const {
+  return currentMessageStamp();
 }
 
 }  // namespace ego_planner

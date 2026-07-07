@@ -56,6 +56,7 @@ namespace ego_planner
     planner_manager_.reset(new EGOPlannerManager);
 
     planner_manager_->initPlanModules(node_, visualization_);
+    planner_manager_->setTimeProvider([this]() { return this->plannerNow(); });
 
     planner_manager_->deliverTrajToOptimizer(); // store trajectories
     planner_manager_->setDroneIdtoOpt();
@@ -252,6 +253,8 @@ namespace ego_planner
 
   void EGOReplanFSM::odometryCallback(const std::shared_ptr<const nav_msgs::msg::Odometry> &msg)
   {
+    latest_odom_stamp_ = rclcpp::Time(msg->header.stamp, RCL_ROS_TIME);
+
     odom_pos_(0) = msg->pose.pose.position.x;
     odom_pos_(1) = msg->pose.pose.position.y;
     odom_pos_(2) = msg->pose.pose.position.z;
@@ -270,6 +273,19 @@ namespace ego_planner
     have_odom_ = true;
   }
 
+  rclcpp::Time EGOReplanFSM::plannerNow() const
+  {
+    if (latest_odom_stamp_.nanoseconds() > 0)
+    {
+      return latest_odom_stamp_;
+    }
+    if (node_)
+    {
+      return node_->now();
+    }
+    return rclcpp::Clock(RCL_ROS_TIME).now();
+  }
+
   void EGOReplanFSM::BroadcastBsplineCallback(const std::shared_ptr<const traj_utils::msg::Bspline> &msg)
   {
     size_t id = msg->drone_id;
@@ -277,16 +293,16 @@ namespace ego_planner
       return;
 
     // if (abs((ros::Time::now() - msg->start_time).toSec()) > 0.25)
-    rclcpp::Clock clock(RCL_SYSTEM_TIME);  // 确保使用当前节点的时间源
-    auto msg_time = rclcpp::Time(msg->start_time, clock.get_clock_type());
+    auto msg_time = rclcpp::Time(msg->start_time, RCL_ROS_TIME);
+    auto now = plannerNow();
     // RCLCPP_INFO(node_->get_logger(), "Clock type: %d", rclcpp::Clock().now().get_clock_type());
     // RCLCPP_INFO(node_->get_logger(), "Start time clock type: %d", rclcpp::Time(msg->start_time).get_clock_type());
     // RCLCPP_INFO(node_->get_logger(), "msg_time: %d", msg_time.get_clock_type());
-    if (abs((rclcpp::Clock().now() - msg_time).seconds()) > 0.25)
+    if (abs((now - msg_time).seconds()) > 0.25)
     {
       // ROS_ERROR("Time difference is too large! Local - Remote Agent %d = %fs", msg->drone_id, (ros::Time::now() - msg->start_time).toSec());
       RCLCPP_ERROR(node_->get_logger(), "Time difference is too large! Local - Remote Agent %d = %fs",
-                   msg->drone_id, (rclcpp::Clock().now() - msg_time).seconds());
+                   msg->drone_id, (now - msg_time).seconds());
       return;
     }
 
@@ -587,7 +603,7 @@ namespace ego_planner
     {
       /* determine if need to replan */
       LocalTrajData *info = &planner_manager_->local_data_;
-      rclcpp::Time time_now = rclcpp::Clock().now();
+      rclcpp::Time time_now = plannerNow();
       double t_cur = (time_now - info->start_time_).seconds();
       t_cur = std::min(info->duration_, t_cur);
 
@@ -648,7 +664,7 @@ namespace ego_planner
     }
     }
 
-    data_disp_.header.stamp = rclcpp::Clock().now();
+    data_disp_.header.stamp = plannerNow();
     data_disp_pub_->publish(data_disp_);
 
   force_return:;
@@ -691,7 +707,7 @@ namespace ego_planner
 
     LocalTrajData *info = &planner_manager_->local_data_;
     // ros::Time time_now = ros::Time::now();
-    auto time_now = rclcpp::Clock().now();
+    auto time_now = plannerNow();
     // double t_cur = (time_now - info->start_time_).toSec();
     double t_cur = (time_now - info->start_time_).seconds();
 
@@ -755,12 +771,12 @@ namespace ego_planner
     /* ---------- check trajectory ---------- */
     constexpr double time_step = 0.01;
     // double t_cur = (ros::Time::now() - info->start_time_).toSec();
-    double t_cur = (rclcpp::Clock().now() - info->start_time_).seconds();
+    double t_cur = (plannerNow() - info->start_time_).seconds();
 
     Eigen::Vector3d p_cur = info->position_traj_.evaluateDeBoorT(t_cur);
     const double CLEARANCE = 1.0 * planner_manager_->getSwarmClearance();
     // double t_cur_global = ros::Time::now().toSec();
-    double t_cur_global = rclcpp::Clock().now().seconds();
+    double t_cur_global = plannerNow().seconds();
 
     double t_2_3 = info->duration_ * 2 / 3;
     for (double t = t_cur; t < info->duration_; t += time_step)
@@ -820,7 +836,7 @@ namespace ego_planner
     if (exec_state_ == EXEC_TRAJ && planner_manager_->p5_integrity_gate_ &&
         planner_manager_->p5_integrity_gate_->runtimeEnabled())
     {
-      const double now_s = rclcpp::Clock().now().seconds();
+      const double now_s = plannerNow().seconds();
       auto snapshot = planner_manager_->acquireRiskGridSnapshot();
       const P5GateStatus p5_status =
           planner_manager_->p5_integrity_gate_->evaluateRuntime(
@@ -858,7 +874,7 @@ namespace ego_planner
     p5_final_gate_emergency_candidate_ = false;
     const LocalTrajData previous_local_data = planner_manager_->local_data_;
 
-    planner_manager_->beginPlanningRiskContext(rclcpp::Clock().now().seconds());
+    planner_manager_->beginPlanningRiskContext(plannerNow().seconds());
     struct PlanningRiskContextGuard
     {
       EGOPlannerManager *manager = nullptr;
@@ -911,7 +927,7 @@ namespace ego_planner
       if (planner_manager_->p5_integrity_gate_ &&
           planner_manager_->p5_integrity_gate_->finalGateEnabled())
       {
-        const double now_s = rclcpp::Clock().now().seconds();
+        const double now_s = plannerNow().seconds();
         auto snapshot = planner_manager_->acquireRiskGridSnapshot();
         const uint64_t planning_generation_id =
             planner_manager_->currentPlanningGenerationId();

@@ -100,3 +100,13 @@ TEST(PlanningRiskContextTest, BeginWithoutP0RuntimeCreatesDeterministicNullConte
   manager.clearPlanningRiskContext();
   EXPECT_FALSE(manager.planningRiskContext().active);
 }
+
+TEST(PlanningTimeProviderTest, EmergencyStopUsesProvidedSimStamp) {
+  ego_planner::EGOPlannerManager manager;
+  const rclcpp::Time sim_stamp(1657065601, 234000000, RCL_ROS_TIME);
+  manager.setTimeProvider([sim_stamp]() { return sim_stamp; });
+
+  ASSERT_TRUE(manager.EmergencyStop(Eigen::Vector3d::Zero()));
+
+  EXPECT_EQ(manager.local_data_.start_time_.nanoseconds(), sim_stamp.nanoseconds());
+}

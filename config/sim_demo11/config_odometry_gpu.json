@@ -6,6 +6,7 @@
     "init_pose_damping_scale": 1e10,
 
     "smoother_lag": 5.0,
+    "sigma_p_update_scope": "current", // all_active / current
     "use_isam2_dogleg": false,
     "isam2_relinearize_skip": 5,
     "isam2_relinearize_thresh": 0.1,
@@ -34,6 +35,7 @@
 
     "icp_cond_threshold": 10000.0,
     "gamma_lidar_max": 10.0,
+    "icp_quality_stride": 1,
     "enable_icp_csv": true,
     "icp_csv_path": "/tmp/demo11_iap_icp.csv",
 

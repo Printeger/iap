@@ -47,6 +47,7 @@ public:
   // ---- IAP: ICP quality / health (IAP-RQ-040) ---------------------------
   double icp_cond_threshold;  ///< Hessian condition number threshold for degeneracy (default 500)
   double gamma_lidar_max;     ///< Maximum noise inflation factor for degenerate LiDAR (default 10.0)
+  int         icp_quality_stride = 1;             ///< Compute ICP quality every N frames; skipped frames reuse latest quality
   bool        enable_icp_csv  = false;           ///< Write per-frame ICP quality CSV
   std::string icp_csv_path    = "/tmp/iap_icp.csv";
   // -----------------------------------------------------------------------
@@ -81,6 +82,9 @@ private:
   // CUDA-related
   std::unique_ptr<gtsam_points::CUDAStream> stream;
   std::unique_ptr<gtsam_points::StreamTempBufferRoundRobin> stream_buffer_roundrobin;
+
+  EstimationFrame::IcpQuality last_icp_quality_;
+  bool has_last_icp_quality_ = false;
 };
 
 }  // namespace glim

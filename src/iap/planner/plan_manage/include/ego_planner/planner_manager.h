@@ -4,6 +4,7 @@
 #include <stdlib.h>
 
 #include <cstdint>
+#include <functional>
 #include <memory>
 
 #include <bspline_opt/bspline_optimizer.h>
@@ -66,6 +67,9 @@ namespace ego_planner
                                          Eigen::Vector3d &local_target_pt, Eigen::Vector3d &local_target_vel);
 
     void initPlanModules(rclcpp::Node::SharedPtr &node, PlanningVisualization::Ptr vis = NULL);
+    using TimeProvider = std::function<rclcpp::Time()>;
+    void setTimeProvider(TimeProvider provider);
+    rclcpp::Time plannerNow() const;
 
     void deliverTrajToOptimizer(void) { bspline_optimizer_->setSwarmTrajs(&swarm_trajs_buf_); };
 
@@ -108,6 +112,7 @@ namespace ego_planner
     uint64_t p2_batch_id_{0};
     uint64_t p3_batch_id_{0};
     PlanningRiskContext planning_risk_context_;
+    TimeProvider time_provider_;
 
     void updateTrajInfo(const UniformBspline &position_traj, const rclcpp::Time time_now);
 

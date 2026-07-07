@@ -30,9 +30,14 @@ bool finite(double value) {
   return std::isfinite(value);
 }
 
+bool valid_stamp_s(double value) {
+  return finite(value) && value >= 0.0;
+}
+
 rclcpp::Time stamp_from_seconds(const rclcpp::Node::SharedPtr& node,
                                 const double stamp_s) {
-  if (finite(stamp_s) && stamp_s >= 0.0) {
+  (void)node;
+  if (valid_stamp_s(stamp_s)) {
     auto sec = static_cast<int32_t>(std::floor(stamp_s));
     auto nsec = static_cast<uint32_t>(
         std::llround((stamp_s - static_cast<double>(sec)) * 1.0e9));
@@ -42,7 +47,7 @@ rclcpp::Time stamp_from_seconds(const rclcpp::Node::SharedPtr& node,
     }
     return rclcpp::Time(sec, nsec, RCL_ROS_TIME);
   }
-  return node ? node->now() : rclcpp::Time(0, 0, RCL_SYSTEM_TIME);
+  return rclcpp::Time(0, 0, RCL_ROS_TIME);
 }
 
 std::string fmt_num(double value, int precision = 2) {
@@ -352,7 +357,7 @@ SafetyRvizPublisher::SafetyRvizPublisher(rclcpp::Node::SharedPtr node,
 
 bool SafetyRvizPublisher::shouldPublish(double now_s,
                                         double* last_publish_s) const {
-  if (!config_.enabled || last_publish_s == nullptr || !finite(now_s)) {
+  if (!config_.enabled || last_publish_s == nullptr || !valid_stamp_s(now_s)) {
     return false;
   }
   if (!finite(*last_publish_s) ||
@@ -366,7 +371,7 @@ bool SafetyRvizPublisher::shouldPublish(double now_s,
 void SafetyRvizPublisher::publishRiskGridHealth(
     const iap::RiskGridHealth& health,
     double now_s) {
-  if (!risk_grid_health_pub_) {
+  if (!risk_grid_health_pub_ || !valid_stamp_s(now_s)) {
     return;
   }
   const rclcpp::Time stamp = stamp_from_seconds(node_, now_s);
@@ -405,8 +410,7 @@ void SafetyRvizPublisher::publishP5GateStatus(
   if (!shouldPublish(now_s, &last_p5_publish_s_)) {
     return;
   }
-  const rclcpp::Time stamp =
-      node_ ? node_->now() : rclcpp::Time(0, 0, RCL_SYSTEM_TIME);
+  const rclcpp::Time stamp = stamp_from_seconds(node_, now_s);
   if (trajectory_samples_pub_) {
     trajectory_samples_pub_->publish(
         buildTrajectorySampleMarkers(status, config_, stamp));
@@ -432,8 +436,7 @@ void SafetyRvizPublisher::publishP1IntegrityViz(
       !shouldPublish(now_s, &last_p1_publish_s_)) {
     return;
   }
-  const rclcpp::Time stamp =
-      node_ ? node_->now() : rclcpp::Time(0, 0, RCL_SYSTEM_TIME);
+  const rclcpp::Time stamp = stamp_from_seconds(node_, now_s);
   if (p1_integrity_samples_pub_) {
     p1_integrity_samples_pub_->publish(
         buildP1IntegritySampleMarkers(samples, config_, stamp));
@@ -455,8 +458,7 @@ void SafetyRvizPublisher::publishP2Candidates(
       !shouldPublish(now_s, &last_p2_publish_s_)) {
     return;
   }
-  const rclcpp::Time stamp =
-      node_ ? node_->now() : rclcpp::Time(0, 0, RCL_SYSTEM_TIME);
+  const rclcpp::Time stamp = stamp_from_seconds(node_, now_s);
   p2_candidate_trajectories_pub_->publish(
       buildP2CandidateMarkers(candidates, config_, stamp));
 }
@@ -467,8 +469,7 @@ void SafetyRvizPublisher::publishP3ReferenceBias(
   if (!p3_reference_bias_pub_ || !shouldPublish(now_s, &last_p3_publish_s_)) {
     return;
   }
-  const rclcpp::Time stamp =
-      node_ ? node_->now() : rclcpp::Time(0, 0, RCL_SYSTEM_TIME);
+  const rclcpp::Time stamp = stamp_from_seconds(node_, now_s);
   p3_reference_bias_pub_->publish(
       buildP3ReferenceBiasMarkers(bias, config_, stamp));
 }
@@ -479,8 +480,7 @@ void SafetyRvizPublisher::publishP4Guides(
   if (!p4_astar_guides_pub_ || !shouldPublish(now_s, &last_p4_publish_s_)) {
     return;
   }
-  const rclcpp::Time stamp =
-      node_ ? node_->now() : rclcpp::Time(0, 0, RCL_SYSTEM_TIME);
+  const rclcpp::Time stamp = stamp_from_seconds(node_, now_s);
   p4_astar_guides_pub_->publish(buildP4GuideMarkers(guides, config_, stamp));
 }
 

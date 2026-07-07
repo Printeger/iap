@@ -71,6 +71,7 @@ namespace ego_planner
 
     Eigen::Vector3d odom_pos_, odom_vel_, odom_acc_; // odometry state
     Eigen::Quaterniond odom_orient_;
+    rclcpp::Time latest_odom_stamp_{0, 0, RCL_ROS_TIME};
 
     Eigen::Vector3d init_pt_, start_pt_, start_vel_, start_acc_, start_yaw_; // start state
     Eigen::Vector3d end_pt_, end_vel_;                                       // goal state
@@ -112,6 +113,7 @@ namespace ego_planner
     void readGivenWps();
     void planNextWaypoint(const Eigen::Vector3d next_wp);
     void getLocalTarget();
+    rclcpp::Time plannerNow() const;
 
     /* ROS functions */
     void execFSMCallback();

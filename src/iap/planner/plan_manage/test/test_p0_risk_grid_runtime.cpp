@@ -57,6 +57,10 @@ namespace ego_planner {
 
 class P0RiskGridRuntimeStampTest : public ::testing::Test {
  protected:
+  static double currentMessageStamp(const P0RiskGridRuntime& runtime) {
+    return runtime.currentMessageStamp();
+  }
+
   static double currentRefreshStamp(const P0RiskGridRuntime& runtime) {
     return runtime.currentRefreshStamp();
   }
@@ -139,7 +143,26 @@ TEST(P0RiskGridRuntimeTest, EnabledRuntimeConstructsWithInjectedProvider) {
   EXPECT_FALSE(runtime.health().ready);
 
   EXPECT_FALSE(runtime.refreshOnceForTest());
-  EXPECT_EQ(runtime.health().reason, "snapshot_unavailable");
+  const auto health = runtime.health();
+  EXPECT_EQ(health.reason, "message_stamp_unavailable");
+}
+
+TEST(SafetyRvizPublisherTest, RiskGridHealthMarkerUsesProvidedStamp) {
+  ego_planner::SafetyRvizPublisher::Config config;
+  config.frame_id = "map";
+  iap::RiskGridHealth health;
+  health.ready = true;
+  health.stale = false;
+  health.reason = "ok";
+
+  const rclcpp::Time stamp(1657065614, 123000000, RCL_ROS_TIME);
+  const auto markers =
+      ego_planner::SafetyRvizPublisher::buildRiskGridHealthMarkers(
+          health, config, stamp);
+
+  ASSERT_FALSE(markers.markers.empty());
+  EXPECT_EQ(markers.markers.front().header.stamp.sec, 1657065614);
+  EXPECT_EQ(markers.markers.front().header.stamp.nanosec, 123000000u);
 }
 
 namespace ego_planner {
@@ -155,6 +178,7 @@ TEST_F(P0RiskGridRuntimeStampTest, OdomStampIsPreferredForRefreshTime) {
   setOdomStamp(&runtime, 123.5);
   setCurrentStamp(&runtime, 456.5);
 
+  EXPECT_DOUBLE_EQ(currentMessageStamp(runtime), 123.5);
   EXPECT_DOUBLE_EQ(currentRefreshStamp(runtime), 123.5);
 }
 
@@ -169,13 +193,14 @@ TEST_F(P0RiskGridRuntimeStampTest, CurrentStampIsFallbackWhenOdomInvalid) {
   setOdomStamp(&runtime, std::numeric_limits<double>::quiet_NaN());
   setCurrentStamp(&runtime, 456.5);
 
+  EXPECT_DOUBLE_EQ(currentMessageStamp(runtime), 456.5);
   EXPECT_DOUBLE_EQ(currentRefreshStamp(runtime), 456.5);
 }
 
-TEST_F(P0RiskGridRuntimeStampTest, NodeTimeIsFallbackWhenMessageStampsInvalid) {
+TEST_F(P0RiskGridRuntimeStampTest, MessageStampIsNaNWhenMessageStampsInvalid) {
   ensure_rclcpp();
   auto node = std::make_shared<rclcpp::Node>(
-      "p0_stamp_node_fallback_test",
+      "p0_stamp_no_message_stamp_test",
       rclcpp::NodeOptions().allow_undeclared_parameters(false));
   P0RiskGridRuntime runtime(node, enabledConfig(),
                             std::make_unique<FakeProvider>());
@@ -183,12 +208,10 @@ TEST_F(P0RiskGridRuntimeStampTest, NodeTimeIsFallbackWhenMessageStampsInvalid) {
   setOdomStamp(&runtime, std::numeric_limits<double>::quiet_NaN());
   setCurrentStamp(&runtime, std::numeric_limits<double>::quiet_NaN());
 
-  const double before_s = node->now().seconds();
+  const double message_stamp_s = currentMessageStamp(runtime);
   const double stamp_s = currentRefreshStamp(runtime);
-  const double after_s = node->now().seconds();
-  EXPECT_TRUE(std::isfinite(stamp_s));
-  EXPECT_GE(stamp_s, before_s);
-  EXPECT_LE(stamp_s, after_s);
+  EXPECT_TRUE(std::isnan(message_stamp_s));
+  EXPECT_TRUE(std::isnan(stamp_s));
 }
 
 TEST_F(P0RiskGridRuntimeStampTest, RefreshSnapshotUsesMessageStamp) {

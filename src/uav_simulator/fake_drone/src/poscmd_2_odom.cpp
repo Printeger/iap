@@ -27,7 +27,14 @@ void rcvPosCmdCallBack(const quadrotor_msgs::msg::PositionCommand cmd)
 void pubOdom()
 {
     auto odom = nav_msgs::msg::Odometry();
-    odom.header.stamp = rclcpp::Clock().now();
+    if (rcv_cmd)
+    {
+        odom.header.stamp = _cmd.header.stamp;
+    }
+    else
+    {
+        odom.header.stamp = rclcpp::Clock(RCL_ROS_TIME).now();
+    }
     odom.header.frame_id = "map";
 
     if (rcv_cmd)

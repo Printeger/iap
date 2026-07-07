@@ -4,9 +4,11 @@
 #include "quadrotor_msgs/msg/position_command.hpp"
 #include "std_msgs/msg/empty.hpp"
 #include "visualization_msgs/msg/marker.hpp"
+#include <algorithm>
 #include <rclcpp/rclcpp.hpp>
 
 rclcpp::Publisher<quadrotor_msgs::msg::PositionCommand>::SharedPtr pos_cmd_pub;
+rclcpp::Subscription<nav_msgs::msg::Odometry>::SharedPtr odom_sub;
 
 quadrotor_msgs::msg::PositionCommand cmd;
 double pos_gain[3] = {0, 0, 0};
@@ -19,6 +21,8 @@ vector<UniformBspline> traj_;
 double traj_duration_;
 rclcpp::Time start_time_;
 int traj_id_;
+rclcpp::Time latest_odom_stamp_(0, 0, RCL_ROS_TIME);
+bool have_odom_stamp_ = false;
 
 // yaw control
 double last_yaw_, last_yaw_dot_;
@@ -68,6 +72,21 @@ void bsplineCallback(traj_utils::msg::Bspline::ConstPtr msg)
   receive_traj_ = true;
 }
 
+void odometryCallback(nav_msgs::msg::Odometry::ConstSharedPtr msg)
+{
+  latest_odom_stamp_ = rclcpp::Time(msg->header.stamp, RCL_ROS_TIME);
+  have_odom_stamp_ = latest_odom_stamp_.nanoseconds() > 0;
+}
+
+rclcpp::Time trajServerNow()
+{
+  if (have_odom_stamp_)
+  {
+    return latest_odom_stamp_;
+  }
+  return rclcpp::Clock(RCL_ROS_TIME).now();
+}
+
 std::pair<double, double> calculate_yaw(double t_cur, Eigen::Vector3d &pos, rclcpp::Time &time_now, rclcpp::Time &time_last)
 {
   constexpr double PI = 3.1415926;
@@ -76,10 +95,11 @@ std::pair<double, double> calculate_yaw(double t_cur, Eigen::Vector3d &pos, rclc
   std::pair<double, double> yaw_yawdot(0, 0);
   double yaw = 0;
   double yawdot = 0;
+  const double dt = std::max(1e-3, (time_now - time_last).seconds());
 
   Eigen::Vector3d dir = t_cur + time_forward_ <= traj_duration_ ? traj_[0].evaluateDeBoorT(t_cur + time_forward_) - pos : traj_[0].evaluateDeBoorT(traj_duration_) - pos;
   double yaw_temp = dir.norm() > 0.1 ? atan2(dir(1), dir(0)) : last_yaw_;
-  double max_yaw_change = YAW_DOT_MAX_PER_SEC * (time_now - time_last).seconds();
+  double max_yaw_change = YAW_DOT_MAX_PER_SEC * dt;
   if (yaw_temp - last_yaw_ > PI)
   {
     if (yaw_temp - last_yaw_ - 2 * PI < -max_yaw_change)
@@ -96,7 +116,7 @@ std::pair<double, double> calculate_yaw(double t_cur, Eigen::Vector3d &pos, rclc
       if (yaw - last_yaw_ > PI)
         yawdot = -YAW_DOT_MAX_PER_SEC;
       else
-        yawdot = (yaw_temp - last_yaw_) / (time_now - time_last).seconds();
+        yawdot = (yaw_temp - last_yaw_) / dt;
     }
   }
   else if (yaw_temp - last_yaw_ < -PI)
@@ -115,7 +135,7 @@ std::pair<double, double> calculate_yaw(double t_cur, Eigen::Vector3d &pos, rclc
       if (yaw - last_yaw_ < -PI)
         yawdot = YAW_DOT_MAX_PER_SEC;
       else
-        yawdot = (yaw_temp - last_yaw_) / (time_now - time_last).seconds();
+        yawdot = (yaw_temp - last_yaw_) / dt;
     }
   }
   else
@@ -144,7 +164,7 @@ std::pair<double, double> calculate_yaw(double t_cur, Eigen::Vector3d &pos, rclc
       else if (yaw - last_yaw_ < -PI)
         yawdot = YAW_DOT_MAX_PER_SEC;
       else
-        yawdot = (yaw_temp - last_yaw_) / (time_now - time_last).seconds();
+        yawdot = (yaw_temp - last_yaw_) / dt;
     }
   }
 
@@ -166,15 +186,13 @@ void cmdCallback()
   if (!receive_traj_)
     return;
 
-  // 统一时间源
-  rclcpp::Clock clock(RCL_ROS_TIME);  
-  rclcpp::Time time_now = clock.now();
+  rclcpp::Time time_now = trajServerNow();
   double t_cur = (time_now - start_time_).seconds();
 
   Eigen::Vector3d pos(Eigen::Vector3d::Zero()), vel(Eigen::Vector3d::Zero()), acc(Eigen::Vector3d::Zero()), pos_f;
   std::pair<double, double> yaw_yawdot(0, 0);
 
-  static rclcpp::Time time_last = clock.now();
+  static rclcpp::Time time_last = time_now;
   if (t_cur < traj_duration_ && t_cur >= 0.0)
   {
     pos = traj_[0].evaluateDeBoorT(t_cur);
@@ -240,6 +258,10 @@ int main(int argc, char **argv)
       "planning/bspline",
       10,
       bsplineCallback);
+  odom_sub = node->create_subscription<nav_msgs::msg::Odometry>(
+      "odometry",
+      10,
+      odometryCallback);
 
   pos_cmd_pub = node->create_publisher<quadrotor_msgs::msg::PositionCommand>(
       "/position_cmd",
