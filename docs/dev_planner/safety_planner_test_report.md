@@ -272,3 +272,158 @@ No failure observed in the accepted B0-2 rerun.
 1. B0-2 satisfies Phase 0 open-sky baseline lock criteria.
 2. Manual next branch is `B0-3 corridor baseline`.
 3. Do not run B0-3, P0, P5, or `all` until explicitly requested.
+
+## B0-3 Corridor Baseline Validation
+
+### Repo State And Environment
+
+| Field | Value |
+|---|---|
+| Date | `2026-07-07` UTC |
+| Operator / Agent | Codex |
+| Machine / container | `mint-X` |
+| Workspace | `/home/dev/ws_iap` |
+| Package repo | `/home/dev/ws_iap/src/iap` |
+| Branch | `dev/iap` |
+| Repo protection action | Amended unpushed B0-2 commit message to `docs: record safety planner B0-2 baseline validation`, then pushed `dev/iap` to `origin/dev/iap` before running B0-3 |
+| Commit after repo protection | `72d31edb1cafb1db5e3a4c7cdd5fe6a5f50449f2` |
+| Clean/dirty status after repo protection | `clean`; `git status -sb` reported `## dev/iap...origin/dev/iap` |
+| Recent commits after repo protection | `72d31ed docs: record safety planner B0-2 baseline validation`; `1592da2 docs: record safety planner B0-1 baseline validation`; `9ba8406 chore: save iap workspace state` |
+| Source command | `source /opt/ros/jazzy/setup.bash && source install/setup.bash` |
+| Build command | Not rerun for B0-3; reused existing install from the pushed B0-2 baseline state |
+
+### Launch And Artifacts
+
+```bash
+source /opt/ros/jazzy/setup.bash
+source install/setup.bash
+ros2 launch iap test_planner.launch.py \
+  experiment:=baseline_corridor_off \
+  scenario:=lidar_corridor_degenerate \
+  run_duration_s:=90 \
+  validation_duration_s:=90 \
+  start_rviz:=false \
+  run_validator:=true \
+  record_bag:=true
+```
+
+| Field | Value |
+|---|---|
+| Experiment ID | `B0-3` |
+| Experiment preset | `baseline_corridor_off` |
+| Scenario | `lidar_corridor_degenerate` |
+| Launch result | `FAIL` for B0-3 criteria: launch process exited `0`, but validator exited `2` and failed |
+| Export dir | `/home/dev/ws_iap/src/iap/results/planner_validation/exports/test_planner_baseline_corridor_off_lidar_corridor_degenerate_1783435708588` |
+| Bag dir | `/home/dev/ws_iap/src/iap/results/planner_validation/bags/test_planner_baseline_corridor_off_lidar_corridor_degenerate_20260707T144828Z` |
+| Rosbag summary | Storage `mcap`; size `569.3 MiB`; duration `90.020732042s`; messages `506647` |
+| Runtime note | `iap_rosnode` died early with exit code `-6` after `cudaErrorNoDevice`, `frame doesn't have points on GPU`, and `GPU points/covs not allocated!!` messages |
+
+### Parameter And Manifest Evidence
+
+| Parameter | Manifest value | Result |
+|---|---:|---|
+| `planner_safety_profile` | `off` | `PASS` |
+| `p0.enable_risk_grid` | `false` | `PASS` |
+| `planner_enable_p1` | `false` | `PASS` |
+| `planner_enable_p2` | `false` | `PASS` |
+| `planner_enable_p3_local` | `false` | `PASS` |
+| `planner_enable_p3_global` | `false` | `PASS` |
+| `planner_enable_p4` | `false` | `PASS` |
+| `planner_enable_p5_runtime` | `false` | `PASS` |
+| `planner_enable_p5_final` | `false` | `PASS` |
+
+### Validator And Analyzer
+
+| Check | Result | Evidence |
+|---|---|---|
+| Validator summary | `FAIL` | `passed=false`, `message_count=0` |
+| Validator failures | `FAIL` | `received 0 integrity messages, expected >= 10`; `lidar_valid was never true`; `fallback_valid was never true` |
+| Required fusion mode | `PASS` configuration only | `required_fusion_mode=lidar_only` |
+| Required final source | `PASS` configuration only | `required_final_source=LIDAR` |
+| Analyzer status | `FAIL` | `status=FAIL`, `passed=false`, command exited `2` with `--fail-on-threshold` |
+| Analyzer summary | `FAIL` | `/home/dev/ws_iap/src/iap/results/planner_validation/exports/test_planner_baseline_corridor_off_lidar_corridor_degenerate_1783435708588/metadata/safety_planner_analysis_summary.json` |
+| Analyzer failures | `FAIL` | `validator summary passed is not true`; `required topic /iap/integrity is missing or not continuous`; `test_planner_integrity_validation.csv has no data rows` |
+| Analyzer warnings | `WARN` | `integrity HPL/VPL timeline was not generated because no plottable rows were available` |
+| P5 summary | `PASS` | `status_rows=0`, `bad_action_count=0`, `action_counts={}` |
+| Analyzer artifact naming | `WARN` | Topic-count artifact still named `csv/b0_1_topic_counts.csv`; recorded as tool naming limitation, not the hard failure |
+
+Analyzer command:
+
+```bash
+python3 src/iap/scripts/dev_planner/analyze_safety_planner_run.py \
+  --experiment-id B0-3 \
+  --export-dir /home/dev/ws_iap/src/iap/results/planner_validation/exports/test_planner_baseline_corridor_off_lidar_corridor_degenerate_1783435708588 \
+  --bag-dir /home/dev/ws_iap/src/iap/results/planner_validation/bags/test_planner_baseline_corridor_off_lidar_corridor_degenerate_20260707T144828Z \
+  --fail-on-threshold
+```
+
+### Topic Health
+
+| Topic | Expected | Count | Hz | Span | Coverage | Max gap | Status |
+|---|---|---:|---:|---:|---:|---:|---|
+| `/iap/integrity` | continuous | `0` | `0.000000` | n/a | n/a | n/a | `FAIL` |
+| `/sim/drone_0/lidar_body` | continuous | `897` | `9.964371` | `89.599606s` | `0.995322` | `0.100579s` | `PASS` |
+| `/drone_0_planning/bspline` | planner-dependent | `18` | `0.199954` | `17.264801s` | `0.191787` | `1.020563s` | `PASS` |
+| `/planning/integrity_gate_status` | absent-or-zero when P5 disabled | `0` | `0.000000` | n/a | n/a | n/a | `PASS` |
+| `/drone_0_visual_slam/odom` | IAP odometry available | `0` | `0.000000` | n/a | n/a | n/a | `FAIL` |
+| `/iap/rviz/risk_grid_health` | P0 disabled | `0` | `0.000000` | n/a | n/a | n/a | `PASS` |
+| `/iap/rviz/predicted_pl_cloud` | P0 disabled | `0` | `0.000000` | n/a | n/a | n/a | `PASS` |
+| `/iap/rviz/risk_validity_cloud` | P0 disabled | `0` | `0.000000` | n/a | n/a | n/a | `PASS` |
+| `/iap/rviz/p5_gate_status` | P5 disabled | `0` | `0.000000` | n/a | n/a | n/a | `PASS` |
+
+### Result Row
+
+| Experiment ID | Status | Validator | Analyzer | Key evidence | Failure / warning | Next branch |
+|---|---|---|---|---|---|---|
+| B0-3 | `FAIL` | `passed=false`, failures include zero integrity messages, message_count `0` | `FAIL`, failures include missing/non-continuous `/iap/integrity` and empty integrity CSV | Manifest safety switches all false; `/sim/drone_0/lidar_body` continuous; `/drone_0_planning/bspline` present; P5 status rows `0` | `iap_rosnode` died early; `/iap/integrity` and `/drone_0_visual_slam/odom` recorded `0` messages | Debug corridor baseline / LiDAR / odom / planner / analyzer first |
+
+### B0-3 Acceptance Matrix
+
+| Criterion | Result | Evidence |
+|---|---|---|
+| Launch exits `0` | `PASS` | `ros2 launch` command returned exit code `0` |
+| Validator summary `passed=true` | `FAIL` | `test_planner_validation_summary.json` reports `passed: false` |
+| Analyzer status `PASS` or only non-blocking warning | `FAIL` | Analyzer status `FAIL`; command exited `2` |
+| `planner_safety_profile=off` | `PASS` | Manifest |
+| `p0.enable_risk_grid=false` | `PASS` | Manifest |
+| P1-P5 planner switches all false | `PASS` | Manifest records all `planner_enable_*` fields as `false` |
+| `/iap/integrity` continuous | `FAIL` | Bag count `0`; analyzer topic health `FAIL` |
+| `/sim/drone_0/lidar_body` continuous and nonempty | `PASS` | Analyzer count `897`, coverage `0.995322`, max gap `0.100579s` |
+| `/drone_0_planning/bspline` exists | `PASS` | Bag count `18` |
+| `/planning/integrity_gate_status` has `0` rows or no P5 action | `PASS` | Analyzer `status_rows=0`, `bad_action_count=0` |
+| No P0 risk-grid behavior appears | `PASS` | P0 disabled in manifest; P0/RViz risk topics recorded `0` messages |
+| P2 behavior disabled | `PASS` | `planner_enable_p2=false`; no P2 evidence required for this baseline |
+| P1 behavior disabled | `PASS` | `planner_enable_p1=false`; no P1 evidence required for this baseline |
+
+### Key Artifacts
+
+| Artifact | Path | Conclusion |
+|---|---|---|
+| Manifest JSON | `/home/dev/ws_iap/src/iap/results/planner_validation/exports/test_planner_baseline_corridor_off_lidar_corridor_degenerate_1783435708588/test_planner_manifest.json` | Safety Planner fully off |
+| Validator summary JSON | `/home/dev/ws_iap/src/iap/results/planner_validation/exports/test_planner_baseline_corridor_off_lidar_corridor_degenerate_1783435708588/test_planner_validation_summary.json` | Validator failed with `0` integrity messages |
+| Integrity validation CSV | `/home/dev/ws_iap/src/iap/results/planner_validation/exports/test_planner_baseline_corridor_off_lidar_corridor_degenerate_1783435708588/test_planner_integrity_validation.csv` | Header only; `0` data rows |
+| Analyzer summary JSON | `/home/dev/ws_iap/src/iap/results/planner_validation/exports/test_planner_baseline_corridor_off_lidar_corridor_degenerate_1783435708588/metadata/safety_planner_analysis_summary.json` | Analyzer status `FAIL` |
+| Topic counts CSV | `/home/dev/ws_iap/src/iap/results/planner_validation/exports/test_planner_baseline_corridor_off_lidar_corridor_degenerate_1783435708588/csv/b0_1_topic_counts.csv` | Continuity evidence; filename still uses `b0_1` due analyzer limitation |
+| Rosbag | `/home/dev/ws_iap/src/iap/results/planner_validation/bags/test_planner_baseline_corridor_off_lidar_corridor_degenerate_20260707T144828Z` | LiDAR body and planner bspline present; integrity and IAP odom absent |
+
+### Failure Analysis
+
+B0-3 is a hard `FAIL`, not `INCONCLUSIVE`, because the export, bag, validator summary, and analyzer summary were all present and readable. The launch emitted the expected off-profile manifest, and `/sim/drone_0/lidar_body` remained continuous, so the failure is not a Safety Planner activation issue or a missing LiDAR input issue.
+
+The decisive failure is that `iap_rosnode` died early with exit code `-6`, after no-GPU/GPU-allocation messages, leaving `/iap/integrity` and `/drone_0_visual_slam/odom` with `0` recorded messages. The validator therefore received no integrity reports and failed all lidar/fallback validity requirements. Since validator and analyzer failed, teardown SIGINT exceptions are not used as a non-blocking pass rationale for this run.
+
+### Remaining Issues
+
+| Issue | Severity | Owner | Blocking experiment | Next action |
+|---|---|---|---|---|
+| `iap_rosnode` crashes in `lidar_corridor_degenerate` without GPU-backed points/covs | High | IAP odometry/runtime | Blocks B0-3 and B0-4 | Debug CPU/no-GPU handling or corridor LiDAR preprocessing path before rerunning B0-3 |
+| `/iap/integrity` absent for entire B0-3 run | High | Integrity/runtime | Blocks B0-3 | Restore IAP odometry/integrity publication in corridor scenario |
+| `/drone_0_visual_slam/odom` absent for entire B0-3 run | High | IAP odometry/runtime | Blocks B0-3 | Investigate IAP node crash root cause and odometry publication path |
+| Analyzer artifact filenames still contain `b0_1` | Low | dev_planner | None for interpreting B0-3 failure | Rename artifacts when generalizing the analyzer beyond B0-1 naming |
+| SIGINT teardown exceptions in helper nodes | Low | Planner/sim runtime | Not the B0-3 root cause | Track separately after validator/analyzer failures are resolved |
+
+### Next Actions
+
+1. Do not proceed to `B0-4 fallback baseline`, P0, P5, or `all`.
+2. Debug the corridor baseline first, focusing on the `iap_rosnode` crash, no-GPU point/cov allocation path, `/drone_0_visual_slam/odom`, and `/iap/integrity` publication.
+3. Rerun only B0-3 after the corridor/IAP failure is fixed.
