@@ -101,6 +101,32 @@ TEST(P0RiskGridRuntimeTest, DisabledConfigCreatesNoRuntimeObject) {
   EXPECT_TRUE(node->has_parameter("p0.skip_occupied_voxels"));
 }
 
+TEST(P0RiskGridRuntimeTest, GnssEpochFreshnessDefaultIsTwoSeconds) {
+  ensure_rclcpp();
+  auto node = std::make_shared<rclcpp::Node>(
+      "p0_gnss_freshness_default_test",
+      rclcpp::NodeOptions().allow_undeclared_parameters(false));
+
+  const auto config = ego_planner::P0RiskGridRuntime::declareAndReadConfig(node);
+
+  EXPECT_DOUBLE_EQ(config.gnss_epoch_max_age_s, 2.0);
+}
+
+TEST(P0RiskGridRuntimeTest, GnssEpochFreshnessCanBeOverridden) {
+  ensure_rclcpp();
+  rclcpp::NodeOptions options;
+  options.allow_undeclared_parameters(false);
+  options.parameter_overrides({
+      rclcpp::Parameter("p0.gnss_epoch_max_age_s", 0.25),
+  });
+  auto node = std::make_shared<rclcpp::Node>(
+      "p0_gnss_freshness_override_test", options);
+
+  const auto config = ego_planner::P0RiskGridRuntime::declareAndReadConfig(node);
+
+  EXPECT_DOUBLE_EQ(config.gnss_epoch_max_age_s, 0.25);
+}
+
 TEST(P0RiskGridRuntimeTest, EnabledRuntimeConstructsWithInjectedProvider) {
   ensure_rclcpp();
   auto node = std::make_shared<rclcpp::Node>(

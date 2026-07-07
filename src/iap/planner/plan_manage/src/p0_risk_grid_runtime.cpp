@@ -126,7 +126,7 @@ P0RiskGridRuntime::Config P0RiskGridRuntime::declareAndReadConfig(
   config.health_topic = node->declare_parameter<std::string>(
       "p0.health_topic", "planning/risk_grid_health");
   config.gnss_epoch_max_age_s =
-      node->declare_parameter<double>("p0.gnss_epoch_max_age_s", 0.5);
+      node->declare_parameter<double>("p0.gnss_epoch_max_age_s", 2.0);
   return config;
 }
 
@@ -231,11 +231,17 @@ void P0RiskGridRuntime::refreshTimerCallback() {
   if (!config_.enable_risk_grid) {
     return;
   }
+  const auto reset_refresh_timer = [this]() {
+    if (refresh_timer_) {
+      refresh_timer_->reset();
+    }
+  };
   const double now_s = currentRefreshStamp();
   iap::IntegritySnapshot snapshot;
   if (!buildSnapshot(now_s, &snapshot)) {
     risk_grid_.markRefreshFailure(now_s, "snapshot_unavailable");
     publishHealth(risk_grid_.health(now_s), now_s);
+    reset_refresh_timer();
     return;
   }
 
@@ -269,6 +275,7 @@ void P0RiskGridRuntime::refreshTimerCallback() {
     safety_viz_->publishRiskValidityCloud(viz_snapshot, latest_odom_p_.z(),
                                           now_s);
   }
+  reset_refresh_timer();
 }
 
 void P0RiskGridRuntime::publishHealth(const iap::RiskGridHealth& health,
@@ -287,6 +294,10 @@ void P0RiskGridRuntime::publishHealth(const iap::RiskGridHealth& health,
       << "\"valid_ratio\":" << jsonNumber(health.valid_ratio) << ","
       << "\"unknown_ratio\":" << jsonNumber(health.unknown_ratio) << ","
       << "\"generation_id\":" << health.generation_id << ","
+      << "\"provider_query_count\":" << health.provider_query_count << ","
+      << "\"occupied_skip_count\":" << health.occupied_skip_count << ","
+      << "\"provider_stale_count\":" << health.provider_stale_count << ","
+      << "\"provider_invalid_count\":" << health.provider_invalid_count << ","
       << "\"reason\":\"" << health.reason << "\""
       << "}";
   if (health_pub_) {
@@ -295,10 +306,18 @@ void P0RiskGridRuntime::publishHealth(const iap::RiskGridHealth& health,
     health_pub_->publish(msg);
   }
   RCLCPP_INFO_THROTTLE(node_->get_logger(), *node_->get_clock(), 2000,
-                       "[p0] risk grid ready=%d stale=%d age=%.3f valid=%.3f unknown=%.3f gen=%lu reason=%s",
+                       "[p0] risk grid ready=%d stale=%d age=%.3f "
+                       "valid=%.3f unknown=%.3f gen=%lu "
+                       "provider_queries=%lu occupied_skip=%lu "
+                       "provider_stale=%lu provider_invalid=%lu reason=%s",
                        health.ready, health.stale, health.age_s,
                        health.valid_ratio, health.unknown_ratio,
                        static_cast<unsigned long>(health.generation_id),
+                       static_cast<unsigned long>(health.provider_query_count),
+                       static_cast<unsigned long>(health.occupied_skip_count),
+                       static_cast<unsigned long>(health.provider_stale_count),
+                       static_cast<unsigned long>(
+                           health.provider_invalid_count),
                        health.reason.c_str());
 }
 

@@ -536,7 +536,7 @@ ARG_DEFAULTS = [
     ("p0.skip_occupied_voxels", "true"),
     ("p0.debug_metrics_enable", "false"),
     ("p0.health_topic", "planning/risk_grid_health"),
-    ("p0.gnss_epoch_max_age_s", "0.5"),
+    ("p0.gnss_epoch_max_age_s", "2.0"),
     ("p1.use_integrity_cost", "false"),
     ("p1.metrics_only", "true"),
     ("p1.lambda_integrity", "0.0"),

@@ -36,6 +36,10 @@ struct RiskGridHealth {
   double valid_ratio = 0.0;
   double unknown_ratio = 1.0;
   uint64_t generation_id = 0;
+  uint64_t provider_query_count = 0;
+  uint64_t occupied_skip_count = 0;
+  uint64_t provider_stale_count = 0;
+  uint64_t provider_invalid_count = 0;
   std::string reason = "not_ready";
 };
 

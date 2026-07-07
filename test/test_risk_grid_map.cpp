@@ -55,6 +55,34 @@ class AffineProvider final : public iap::RiskPredictionProvider {
   }
 };
 
+class AlternatingStaleProvider final : public iap::RiskPredictionProvider {
+ public:
+  bool all_stale = false;
+  int query_count = 0;
+
+  bool batchQuery(const std::vector<iap::RiskPredictionQuery>& queries,
+                  std::vector<iap::RiskPredictionResult>* results) override {
+    if (results == nullptr) {
+      return false;
+    }
+    query_count += static_cast<int>(queries.size());
+    results->clear();
+    results->reserve(queries.size());
+    for (std::size_t i = 0; i < queries.size(); ++i) {
+      iap::RiskPredictionResult result;
+      const bool stale = all_stale || i % 2 == 0;
+      result.available = !stale;
+      result.valid = !stale;
+      result.stale = stale;
+      result.hpl_pred = 10.0;
+      result.vpl_pred = 5.0;
+      result.reason = stale ? "stale_gnss_epoch" : "ok";
+      results->push_back(result);
+    }
+    return true;
+  }
+};
+
 std::shared_ptr<const iap::RiskGridSnapshot> make_snapshot(
     iap::RiskGridMap* grid,
     const double now_s = 10.0) {
@@ -266,10 +294,96 @@ TEST(RiskGridMapTest, HealthRatiosUseTotalVoxelCountWithPartialOccupiedSkip) {
   EXPECT_NEAR(health.valid_ratio, 36.0 / 54.0, 1.0e-12);
   EXPECT_NEAR(health.unknown_ratio, 18.0 / 54.0, 1.0e-12);
   EXPECT_NEAR(health.valid_ratio + health.unknown_ratio, 1.0, 1.0e-12);
+  EXPECT_EQ(health.provider_query_count, 36u);
+  EXPECT_EQ(health.occupied_skip_count, 18u);
+  EXPECT_EQ(health.provider_stale_count, 0u);
+  EXPECT_EQ(health.provider_invalid_count, 0u);
+  EXPECT_EQ(health.reason, "ok");
   EXPECT_GE(health.valid_ratio, 0.0);
   EXPECT_LE(health.valid_ratio, 1.0);
   EXPECT_GE(health.unknown_ratio, 0.0);
   EXPECT_LE(health.unknown_ratio, 1.0);
+}
+
+TEST(RiskGridMapTest, AllProviderStaleHealthReportsDominantReason) {
+  iap::RiskGridMap grid(base_params());
+  AlternatingStaleProvider provider;
+  provider.all_stale = true;
+  std::string reason;
+
+  ASSERT_TRUE(grid.refreshFromProvider(Eigen::Vector3d::Zero(), 10.0,
+                                       provider, &reason))
+      << reason;
+
+  const auto health = grid.health();
+  EXPECT_TRUE(health.ready);
+  EXPECT_FALSE(health.stale);
+  EXPECT_DOUBLE_EQ(health.valid_ratio, 0.0);
+  EXPECT_DOUBLE_EQ(health.unknown_ratio, 1.0);
+  EXPECT_EQ(health.provider_query_count, 54u);
+  EXPECT_EQ(health.occupied_skip_count, 0u);
+  EXPECT_EQ(health.provider_stale_count, 54u);
+  EXPECT_EQ(health.provider_invalid_count, 0u);
+  EXPECT_EQ(health.reason, "stale_gnss_epoch");
+}
+
+TEST(RiskGridMapTest, PartialProviderStaleKeepsOkHealthReasonWithCounters) {
+  iap::RiskGridMap grid(base_params());
+  AlternatingStaleProvider provider;
+  std::string reason;
+
+  ASSERT_TRUE(grid.refreshFromProvider(Eigen::Vector3d::Zero(), 10.0,
+                                       provider, &reason))
+      << reason;
+
+  const auto health = grid.health();
+  EXPECT_NEAR(health.valid_ratio, 27.0 / 54.0, 1.0e-12);
+  EXPECT_NEAR(health.unknown_ratio, 27.0 / 54.0, 1.0e-12);
+  EXPECT_EQ(health.provider_query_count, 54u);
+  EXPECT_EQ(health.occupied_skip_count, 0u);
+  EXPECT_EQ(health.provider_stale_count, 27u);
+  EXPECT_EQ(health.provider_invalid_count, 0u);
+  EXPECT_EQ(health.reason, "ok");
+}
+
+TEST(RiskGridMapTest, AllOccupiedSkipHealthReportsDominantReason) {
+  iap::RiskGridMapParams params = base_params();
+  params.skip_occupied_voxels = true;
+  iap::RiskGridMap grid(params);
+  AffineProvider provider;
+  std::string reason;
+
+  ASSERT_TRUE(grid.refreshFromProvider(
+      Eigen::Vector3d::Zero(), 10.0, provider,
+      [](const Eigen::Vector3d&) { return true; }, &reason))
+      << reason;
+
+  const auto health = grid.health();
+  EXPECT_DOUBLE_EQ(health.valid_ratio, 0.0);
+  EXPECT_DOUBLE_EQ(health.unknown_ratio, 1.0);
+  EXPECT_EQ(health.provider_query_count, 0u);
+  EXPECT_EQ(health.occupied_skip_count, 54u);
+  EXPECT_EQ(health.provider_stale_count, 0u);
+  EXPECT_EQ(health.provider_invalid_count, 0u);
+  EXPECT_EQ(health.reason, "occupied_skip");
+}
+
+TEST(RiskGridMapTest, AllProviderInvalidHealthReportsDominantReason) {
+  iap::RiskGridMap grid(base_params());
+  AffineProvider provider;
+  provider.mark_unknown = true;
+
+  ASSERT_TRUE(grid.refreshFromProvider(Eigen::Vector3d::Zero(), 10.0,
+                                       provider));
+
+  const auto health = grid.health();
+  EXPECT_DOUBLE_EQ(health.valid_ratio, 0.0);
+  EXPECT_DOUBLE_EQ(health.unknown_ratio, 1.0);
+  EXPECT_EQ(health.provider_query_count, 54u);
+  EXPECT_EQ(health.occupied_skip_count, 0u);
+  EXPECT_EQ(health.provider_stale_count, 0u);
+  EXPECT_EQ(health.provider_invalid_count, 54u);
+  EXPECT_EQ(health.reason, "provider_invalid");
 }
 
 TEST(RiskGridMapTest, UnknownStaleInvalidAndOutOfRangeAreExplicit) {

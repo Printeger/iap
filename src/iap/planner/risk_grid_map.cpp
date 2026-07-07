@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <unordered_map>
 #include <utility>
 
 namespace iap {
@@ -698,6 +699,7 @@ bool RiskGridMap::refreshFromProvider(const Eigen::Vector3d& uav_position_w,
       static_cast<std::size_t>(total_voxel_count));
   std::vector<bool> occupied_skip(static_cast<std::size_t>(total_voxel_count),
                                   false);
+  uint64_t occupied_skip_count = 0;
   queries.reserve(static_cast<std::size_t>(total_voxel_count));
   query_voxel_indices.reserve(static_cast<std::size_t>(total_voxel_count));
   for (int h = 0; h < horizon_count; ++h) {
@@ -721,6 +723,7 @@ bool RiskGridMap::refreshFromProvider(const Eigen::Vector3d& uav_position_w,
           if (params_copy.skip_occupied_voxels && is_occupied &&
               is_occupied(query.position_w)) {
             occupied_skip[voxel_index] = true;
+            ++occupied_skip_count;
             continue;
           }
           queries.push_back(query);
@@ -761,8 +764,15 @@ bool RiskGridMap::refreshFromProvider(const Eigen::Vector3d& uav_position_w,
     has_provider_result[voxel_index] = true;
   }
 
-  int valid_count = 0;
-  int unknown_count = 0;
+  uint64_t valid_count = 0;
+  uint64_t unknown_count = 0;
+  uint64_t provider_stale_count = 0;
+  uint64_t provider_invalid_count = 0;
+  std::unordered_map<std::string, uint64_t> unknown_reason_counts;
+  const auto record_unknown_reason = [&unknown_reason_counts](
+                                         const std::string& reason) {
+    ++unknown_reason_counts[reason.empty() ? "provider_invalid" : reason];
+  };
   for (std::size_t i = 0; i < next->voxels.size(); ++i) {
     RiskVoxel voxel;
     voxel.stamp_s = voxel_queries[i].query_time_s;
@@ -773,6 +783,7 @@ bool RiskGridMap::refreshFromProvider(const Eigen::Vector3d& uav_position_w,
       voxel.unknown = true;
       voxel.c_pi = params_copy.unknown_cost;
       ++unknown_count;
+      record_unknown_reason("occupied_skip");
       next->voxels[i] = voxel;
       continue;
     }
@@ -790,6 +801,14 @@ bool RiskGridMap::refreshFromProvider(const Eigen::Vector3d& uav_position_w,
                               params_copy.cost_max);
       ++valid_count;
     } else {
+      if (has_provider_result[i] && result.stale) {
+        ++provider_stale_count;
+        record_unknown_reason(result.reason.empty() ? "provider_stale"
+                                                    : result.reason);
+      } else {
+        ++provider_invalid_count;
+        record_unknown_reason("provider_invalid");
+      }
       voxel.c_pi = params_copy.unknown_cost;
       ++unknown_count;
     }
@@ -808,7 +827,23 @@ bool RiskGridMap::refreshFromProvider(const Eigen::Vector3d& uav_position_w,
   new_health.unknown_ratio =
       static_cast<double>(unknown_count) / health_denominator;
   new_health.generation_id = generation_id;
+  new_health.provider_query_count = static_cast<uint64_t>(queries.size());
+  new_health.occupied_skip_count = occupied_skip_count;
+  new_health.provider_stale_count = provider_stale_count;
+  new_health.provider_invalid_count = provider_invalid_count;
   new_health.reason = "ok";
+  if (valid_count == 0u &&
+      unknown_count == static_cast<uint64_t>(total_voxel_count)) {
+    uint64_t dominant_count = 0;
+    std::string dominant_reason = "provider_invalid";
+    for (const auto& entry : unknown_reason_counts) {
+      if (entry.second > dominant_count) {
+        dominant_reason = entry.first;
+        dominant_count = entry.second;
+      }
+    }
+    new_health.reason = dominant_reason;
+  }
   next->health = new_health;
 
   {

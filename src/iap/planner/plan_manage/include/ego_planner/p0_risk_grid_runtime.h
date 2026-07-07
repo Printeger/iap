@@ -43,7 +43,7 @@ class P0RiskGridRuntime {
     std::string iono_topic = "/ublox_driver/iono_params";
     std::string map_topic = "/map_generator/global_cloud";
     std::string health_topic = "planning/risk_grid_health";
-    double gnss_epoch_max_age_s = 0.5;
+    double gnss_epoch_max_age_s = 2.0;
   };
 
   static Config declareAndReadConfig(const rclcpp::Node::SharedPtr& node);
