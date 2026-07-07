@@ -4,9 +4,11 @@
 from __future__ import annotations
 
 import argparse
+from collections import Counter
 import csv
 import json
 import math
+import re
 from pathlib import Path
 from typing import Any
 
@@ -21,10 +23,29 @@ CORE_TOPIC_EXPECTATIONS = {
     "/sim/drone_0/lidar_body": "continuous",
     "/drone_0_planning/bspline": "planner-dependent",
 }
+TOPIC_ACTIVITY_TOPICS = [
+    "/iap/integrity",
+    "/sim/drone_0/lidar_body",
+    "/drone_0_visual_slam/odom",
+    "/drone_0_planning/bspline",
+]
+SCENARIO_MAP_TOPICS = ["/map_generator/global_cloud", "/map_generator/local_cloud"]
+SAFETY_OFF_ZERO_TOPICS = [
+    "/planning/risk_grid_health",
+    "/iap/rviz/risk_grid_health",
+    "/iap/rviz/predicted_pl_cloud",
+    "/iap/rviz/risk_validity_cloud",
+    "/iap/rviz/trajectory_integrity_samples",
+    "/iap/rviz/current_traj_integrity_colored",
+    "/iap/rviz/p5_gate_status",
+    "/iap/rviz/p5_current_im_bars",
+]
 P5_STATUS_TOPIC = "/planning/integrity_gate_status"
 P5_BAD_ACTIONS = {"REQUEST_REPLAN", "REQUEST_EMERGENCY_STOP_CANDIDATE"}
 CONTINUOUS_MIN_COVERAGE_RATIO = 0.8
 CONTINUOUS_MAX_GAP_S = 2.0
+DEFAULT_START_XY = (-12.0, 0.0)
+DEFAULT_GOAL_XY = (12.0, 0.0)
 SAFETY_OFF_BOOL_KEYS = (
     "p0.enable_risk_grid",
     "planner_enable_p1",
@@ -45,6 +66,15 @@ def ensure_dirs(export_dir: Path) -> tuple[Path, Path, Path]:
     figures_dir.mkdir(parents=True, exist_ok=True)
     metadata_dir.mkdir(parents=True, exist_ok=True)
     return csv_dir, figures_dir, metadata_dir
+
+
+def artifact_prefix(experiment_id: str) -> str:
+    prefix = re.sub(r"[^a-z0-9]+", "_", str(experiment_id).strip().lower()).strip("_")
+    return prefix or "run"
+
+
+def is_experiment(args: argparse.Namespace, experiment_id: str) -> bool:
+    return str(args.experiment_id).strip().upper() == experiment_id.upper()
 
 
 def read_json_if_exists(path: Path) -> dict[str, Any]:
@@ -170,6 +200,157 @@ def read_topic_timings(
         return stats, str(exc)
 
 
+def open_bag_reader(bag_dir: Path, metadata: dict[str, Any]) -> Any:
+    import rosbag2_py
+
+    storage_id = str(metadata.get("storage_identifier", "")) or ""
+    reader = rosbag2_py.SequentialReader()
+    reader.open(
+        rosbag2_py.StorageOptions(uri=str(bag_dir), storage_id=storage_id),
+        rosbag2_py.ConverterOptions(
+            input_serialization_format="cdr",
+            output_serialization_format="cdr",
+        ),
+    )
+    return reader
+
+
+def pointcloud_xyz(msg: Any, max_points: int = 120_000) -> list[tuple[float, float, float]]:
+    try:
+        import numpy as np
+        from sensor_msgs_py import point_cloud2
+
+        arr = point_cloud2.read_points_numpy(
+            msg,
+            field_names=("x", "y", "z"),
+            skip_nans=True,
+        )
+        xyz = np.asarray(arr, dtype=float).reshape(-1, 3)
+        if xyz.shape[0] > max_points:
+            stride = int(math.ceil(xyz.shape[0] / float(max_points)))
+            xyz = xyz[::stride]
+        return [(float(row[0]), float(row[1]), float(row[2])) for row in xyz]
+    except Exception:
+        try:
+            from sensor_msgs_py import point_cloud2
+
+            points: list[tuple[float, float, float]] = []
+            for idx, point in enumerate(
+                point_cloud2.read_points(
+                    msg,
+                    field_names=("x", "y", "z"),
+                    skip_nans=True,
+                )
+            ):
+                if len(points) >= max_points:
+                    break
+                if idx == len(points):
+                    points.append((float(point[0]), float(point[1]), float(point[2])))
+            return points
+        except Exception:
+            return []
+
+
+def sample_every(metadata: dict[str, Any], topic: str, max_points: int) -> int:
+    count = int((metadata.get("topic_counts", {}) or {}).get(topic, 0) or 0)
+    if count <= max_points:
+        return 1
+    return int(math.ceil(count / float(max_points)))
+
+
+def read_scenario_plot_data(
+    bag_dir: Path,
+    metadata: dict[str, Any],
+) -> tuple[dict[str, Any], str]:
+    if metadata.get("missing") or not bag_dir:
+        return {}, "missing rosbag metadata"
+    topic_counts = metadata.get("topic_counts", {}) or {}
+    map_topic = next(
+        (topic for topic in SCENARIO_MAP_TOPICS if int(topic_counts.get(topic, 0) or 0) > 0),
+        "",
+    )
+    topics = {
+        "/sim/drone_0/truth_odom",
+        "/drone_0_visual_slam/odom",
+        "/drone_0_planning/bspline",
+    }
+    if map_topic:
+        topics.add(map_topic)
+    try:
+        from rclpy.serialization import deserialize_message
+        from rosidl_runtime_py.utilities import get_message
+
+        reader = open_bag_reader(bag_dir, metadata)
+        type_map = {topic.name: topic.type for topic in reader.get_all_topics_and_types()}
+        msg_types = {
+            topic: get_message(type_map[topic])
+            for topic in topics
+            if topic in type_map
+        }
+        truth_stride = sample_every(metadata, "/sim/drone_0/truth_odom", 2_000)
+        slam_stride = sample_every(metadata, "/drone_0_visual_slam/odom", 1_500)
+        truth_seen = 0
+        slam_seen = 0
+        data: dict[str, Any] = {
+            "map_topic": map_topic,
+            "map_points": [],
+            "truth_xy": [],
+            "slam_xy": [],
+            "bspline_paths": [],
+        }
+        while reader.has_next():
+            topic, raw, _ = reader.read_next()
+            if topic not in msg_types:
+                continue
+            if topic == map_topic and not data["map_points"]:
+                msg = deserialize_message(raw, msg_types[topic])
+                data["map_points"] = pointcloud_xyz(msg)
+            elif topic == "/sim/drone_0/truth_odom":
+                truth_seen += 1
+                if (truth_seen - 1) % truth_stride == 0:
+                    msg = deserialize_message(raw, msg_types[topic])
+                    pos = msg.pose.pose.position
+                    data["truth_xy"].append((float(pos.x), float(pos.y)))
+            elif topic == "/drone_0_visual_slam/odom":
+                slam_seen += 1
+                if (slam_seen - 1) % slam_stride == 0:
+                    msg = deserialize_message(raw, msg_types[topic])
+                    pos = msg.pose.pose.position
+                    data["slam_xy"].append((float(pos.x), float(pos.y)))
+            elif topic == "/drone_0_planning/bspline":
+                msg = deserialize_message(raw, msg_types[topic])
+                path = [
+                    (float(point.x), float(point.y))
+                    for point in getattr(msg, "pos_pts", [])
+                    if math.isfinite(float(point.x)) and math.isfinite(float(point.y))
+                ]
+                if path:
+                    data["bspline_paths"].append(path)
+        return data, ""
+    except Exception as exc:  # pragma: no cover - depends on local ROS Python env
+        return {}, str(exc)
+
+
+def read_topic_timestamps(
+    bag_dir: Path,
+    metadata: dict[str, Any],
+    topics: list[str],
+) -> tuple[dict[str, list[float]], str]:
+    if metadata.get("missing") or not bag_dir:
+        return {}, "missing rosbag metadata"
+    timestamps = {topic: [] for topic in topics}
+    target_topics = set(topics)
+    try:
+        reader = open_bag_reader(bag_dir, metadata)
+        while reader.has_next():
+            topic, _, timestamp = reader.read_next()
+            if topic in target_topics:
+                timestamps[topic].append(float(timestamp) * 1.0e-9)
+        return timestamps, ""
+    except Exception as exc:  # pragma: no cover - depends on local ROS Python env
+        return timestamps, str(exc)
+
+
 def validate_manifest(manifest: dict[str, Any], failures: list[str], inconclusive: list[str]) -> None:
     if not manifest:
         inconclusive.append("missing test_planner_manifest.json")
@@ -187,6 +368,85 @@ def validate_validator(summary: dict[str, Any], failures: list[str], inconclusiv
         return
     if summary.get("passed") is not True:
         failures.append("validator summary passed is not true")
+
+
+def summarize_integrity_source_fields(rows: list[dict[str, Any]]) -> dict[str, Any]:
+    fusion_modes = Counter(source_category(row.get("fusion_mode")) for row in rows)
+    hpl_sources = Counter(source_category(row.get("final_hpl_source")) for row in rows)
+    vpl_sources = Counter(source_category(row.get("final_vpl_source")) for row in rows)
+    fallback_valid_count = sum(1 for row in rows if csv_bool(row.get("fallback_valid")))
+    return {
+        "fusion_mode_counts": dict(sorted(fusion_modes.items())),
+        "final_hpl_source_counts": dict(sorted(hpl_sources.items())),
+        "final_vpl_source_counts": dict(sorted(vpl_sources.items())),
+        "fallback_valid_seen": fallback_valid_count > 0,
+        "fallback_valid_count": fallback_valid_count,
+    }
+
+
+def validate_b0_4_fallback_requirements(
+    rows: list[dict[str, Any]],
+    validator_summary: dict[str, Any],
+    failures: list[str],
+    inconclusive: list[str],
+) -> None:
+    if not validator_summary:
+        inconclusive.append("B0-4 fallback checks require validator summary")
+    else:
+        if validator_summary.get("fallback_valid_seen") is not True:
+            failures.append("B0-4 validator summary did not see fallback_valid=true")
+        required_final_source = str(validator_summary.get("required_final_source", "")).strip()
+        if required_final_source != "FALLBACK":
+            failures.append("B0-4 validator was not configured with required_final_source=FALLBACK")
+        if validator_summary.get("require_fallback_valid") is not True:
+            failures.append("B0-4 validator was not configured to require fallback validity")
+
+    if not rows:
+        inconclusive.append("B0-4 fallback checks require integrity CSV rows")
+        return
+
+    fallback_valid_seen = any(csv_bool(row.get("fallback_valid")) for row in rows)
+    if not fallback_valid_seen:
+        failures.append("B0-4 integrity CSV never reports fallback_valid=true")
+
+    hpl_sources = {
+        source_category(row.get("final_hpl_source"))
+        for row in rows
+        if source_category(row.get("final_hpl_source")) != "UNKNOWN"
+    }
+    vpl_sources = {
+        source_category(row.get("final_vpl_source"))
+        for row in rows
+        if source_category(row.get("final_vpl_source")) != "UNKNOWN"
+    }
+    if not hpl_sources or hpl_sources != {"FALLBACK"}:
+        failures.append(
+            "B0-4 integrity CSV final_hpl_source is not exclusively FALLBACK: "
+            + ",".join(sorted(hpl_sources or {"<none>"}))
+        )
+    if not vpl_sources or vpl_sources != {"FALLBACK"}:
+        failures.append(
+            "B0-4 integrity CSV final_vpl_source is not exclusively FALLBACK: "
+            + ",".join(sorted(vpl_sources or {"<none>"}))
+        )
+
+
+def validate_safety_off_topic_leakage(
+    metadata: dict[str, Any],
+    failures: list[str],
+) -> dict[str, int]:
+    topic_counts = metadata.get("topic_counts", {}) or {}
+    safety_counts = {
+        topic: int(topic_counts.get(topic, 0) or 0)
+        for topic in SAFETY_OFF_ZERO_TOPICS
+    }
+    leaked = {topic: count for topic, count in safety_counts.items() if count > 0}
+    if leaked:
+        failures.append(
+            "safety-off run recorded nonzero P0/P5 risk/RViz topics: "
+            + ", ".join(f"{topic}={count}" for topic, count in sorted(leaked.items()))
+        )
+    return safety_counts
 
 
 def read_integrity_csv(path: Path) -> tuple[list[dict[str, Any]], dict[str, Any]]:
@@ -242,6 +502,200 @@ def plot_integrity_timeline(rows: list[dict[str, Any]], path: Path) -> bool:
     ax.set_ylabel("protection level [m]")
     ax.grid(True, alpha=0.3)
     ax.legend(loc="best")
+    fig.tight_layout()
+    fig.savefig(path, dpi=160)
+    plt.close(fig)
+    return True
+
+
+def xy_columns(points: list[tuple[float, float]] | list[tuple[float, float, float]]) -> tuple[list[float], list[float]]:
+    x: list[float] = []
+    y: list[float] = []
+    for point in points:
+        if len(point) < 2:
+            continue
+        px = finite_float(point[0])
+        py = finite_float(point[1])
+        if px is None or py is None:
+            continue
+        x.append(px)
+        y.append(py)
+    return x, y
+
+
+def choose_start_goal(data: dict[str, Any]) -> tuple[tuple[float, float], tuple[float, float]]:
+    for key in ("truth_xy", "slam_xy"):
+        points = data.get(key) or []
+        if len(points) >= 2:
+            return tuple(points[0]), tuple(points[-1])
+    for path in data.get("bspline_paths", []) or []:
+        if len(path) >= 2:
+            return tuple(path[0]), tuple(path[-1])
+    return DEFAULT_START_XY, DEFAULT_GOAL_XY
+
+
+def plot_scenario_topdown(data: dict[str, Any], path: Path) -> bool:
+    if not data:
+        return False
+    has_any = any(
+        data.get(key)
+        for key in ("map_points", "truth_xy", "slam_xy", "bspline_paths")
+    )
+    if not has_any:
+        return False
+
+    fig, ax = plt.subplots(figsize=(8, 7))
+    map_points = data.get("map_points") or []
+    if map_points:
+        mx, my = xy_columns(map_points)
+        ax.scatter(mx, my, s=1.0, c="#9ca3af", alpha=0.25, linewidths=0, label=data.get("map_topic") or "map")
+
+    truth_points = data.get("truth_xy") or []
+    if truth_points:
+        tx, ty = xy_columns(truth_points)
+        ax.plot(tx, ty, color="#2563eb", lw=1.8, label="truth odom")
+
+    slam_points = data.get("slam_xy") or []
+    if slam_points:
+        sx, sy = xy_columns(slam_points)
+        ax.plot(sx, sy, color="#16a34a", lw=1.4, ls="--", label="visual slam odom")
+
+    bspline_paths = data.get("bspline_paths") or []
+    for idx, bspline_path in enumerate(bspline_paths):
+        bx, by = xy_columns(bspline_path)
+        if not bx:
+            continue
+        ax.plot(
+            bx,
+            by,
+            color="#f97316",
+            lw=1.0,
+            alpha=0.45,
+            label="bspline pos_pts" if idx == 0 else None,
+        )
+
+    start, goal = choose_start_goal(data)
+    ax.scatter([start[0]], [start[1]], marker="o", s=80, c="#111827", label="start", zorder=5)
+    ax.scatter([goal[0]], [goal[1]], marker="*", s=140, c="#dc2626", label="goal", zorder=5)
+    ax.set_xlabel("x [m]")
+    ax.set_ylabel("y [m]")
+    ax.set_title("Scenario top-down")
+    ax.set_aspect("equal", adjustable="datalim")
+    ax.grid(True, alpha=0.25)
+    ax.legend(loc="best", fontsize=8)
+    fig.tight_layout()
+    fig.savefig(path, dpi=160)
+    plt.close(fig)
+    return True
+
+
+def plot_topic_activity_timeline(
+    timestamps: dict[str, list[float]],
+    path: Path,
+) -> bool:
+    all_stamps = [stamp for values in timestamps.values() for stamp in values]
+    if not all_stamps:
+        return False
+    t0 = min(all_stamps)
+    fig, ax = plt.subplots(figsize=(11, 4.8))
+    y_positions = list(range(len(TOPIC_ACTIVITY_TOPICS)))
+    rel_events: list[list[float]] = []
+    labels: list[str] = []
+    for topic in TOPIC_ACTIVITY_TOPICS:
+        values = sorted(timestamps.get(topic, []))
+        rel = [stamp - t0 for stamp in values]
+        rel_events.append(rel)
+        labels.append(topic)
+    ax.eventplot(
+        rel_events,
+        lineoffsets=y_positions,
+        linelengths=0.65,
+        linewidths=0.8,
+        colors=["#2563eb", "#16a34a", "#9333ea", "#f97316"],
+    )
+    gap_label_added = False
+    for y_pos, values in zip(y_positions, rel_events):
+        for prev, curr in zip(values, values[1:]):
+            if curr - prev > CONTINUOUS_MAX_GAP_S:
+                ax.hlines(
+                    y_pos,
+                    prev,
+                    curr,
+                    color="#dc2626",
+                    lw=4,
+                    alpha=0.45,
+                    label=f"gap > {CONTINUOUS_MAX_GAP_S:.1f}s" if not gap_label_added else None,
+                )
+                gap_label_added = True
+    ax.set_yticks(y_positions, labels)
+    ax.set_xlabel("run-relative bag time [s]")
+    ax.set_title("Topic activity timeline")
+    ax.grid(True, axis="x", alpha=0.25)
+    if gap_label_added:
+        ax.legend(loc="upper right", fontsize=8)
+    fig.tight_layout()
+    fig.savefig(path, dpi=160)
+    plt.close(fig)
+    return True
+
+
+def csv_bool(value: Any) -> bool:
+    text = str(value).strip().lower()
+    if text in {"1", "true", "yes", "y"}:
+        return True
+    number = finite_float(value)
+    return bool(number) if number is not None else False
+
+
+def source_category(value: Any) -> str:
+    text = str(value).strip()
+    return text if text else "UNKNOWN"
+
+
+def plot_integrity_source_timeline(rows: list[dict[str, Any]], path: Path) -> bool:
+    points: list[dict[str, Any]] = []
+    for row in rows:
+        stamp = finite_float(row.get("stamp"))
+        if stamp is None:
+            continue
+        points.append(
+            {
+                "stamp": stamp,
+                "fusion_mode": source_category(row.get("fusion_mode")),
+                "final_hpl_source": source_category(row.get("final_hpl_source")),
+                "final_vpl_source": source_category(row.get("final_vpl_source")),
+                "fallback_valid": "true" if csv_bool(row.get("fallback_valid")) else "false",
+            }
+        )
+    if not points:
+        return False
+    t0 = points[0]["stamp"]
+    t = [float(row["stamp"]) - float(t0) for row in points]
+    lanes = [
+        ("fusion_mode", "fusion mode"),
+        ("final_hpl_source", "final HPL source"),
+        ("final_vpl_source", "final VPL source"),
+        ("fallback_valid", "fallback valid"),
+    ]
+    fig, axes = plt.subplots(len(lanes), 1, figsize=(11, 7), sharex=True)
+    for ax, (field, label) in zip(axes, lanes):
+        values = [str(row[field]) for row in points]
+        categories = sorted(set(values))
+        if field == "fallback_valid":
+            categories = ["false", "true"]
+        elif field.startswith("final_"):
+            preferred = ["UNKNOWN", "GNSS", "LIDAR", "FALLBACK", "CONSERVATIVE"]
+            categories = [item for item in preferred if item in categories] + [
+                item for item in categories if item not in preferred
+            ]
+        code_by_value = {value: idx for idx, value in enumerate(categories)}
+        codes = [code_by_value[value] for value in values]
+        ax.step(t, codes, where="post", lw=1.5)
+        ax.set_yticks(range(len(categories)), categories)
+        ax.set_ylabel(label)
+        ax.grid(True, axis="x", alpha=0.25)
+    axes[-1].set_xlabel("time since first validator sample [s]")
+    fig.suptitle("Integrity source timeline")
     fig.tight_layout()
     fig.savefig(path, dpi=160)
     plt.close(fig)
@@ -401,10 +855,24 @@ def validate_p5_status(
     }
 
 
-def next_debug_branch(status: str, failures: list[str], inconclusive: list[str]) -> str:
+def next_debug_branch(
+    status: str,
+    failures: list[str],
+    inconclusive: list[str],
+    experiment_id: str,
+) -> str:
     text = " ".join(failures + inconclusive).lower()
     if status == "PASS":
-        return "continue_to_B0-2_open_sky_baseline"
+        pass_branches = {
+            "B0-1": "continue_to_B0-2_open_sky_baseline",
+            "B0-2": "continue_to_B0-3_corridor_baseline",
+            "B0-3": "continue_to_B0-4_fallback_baseline",
+            "B0-4": "continue_to_P0-1_open_sky_data_only_validation",
+        }
+        return pass_branches.get(
+            str(experiment_id).strip().upper(),
+            "continue_to_next_planned_experiment",
+        )
     if "manifest" in text:
         return "debug_baseline_launch_manifest_switch_isolation"
     if "validator" in text:
@@ -420,6 +888,7 @@ def analyze(args: argparse.Namespace) -> dict[str, Any]:
     export_dir = Path(args.export_dir).expanduser().resolve()
     bag_dir = Path(args.bag_dir).expanduser().resolve() if args.bag_dir else None
     csv_dir, figures_dir, metadata_dir = ensure_dirs(export_dir)
+    prefix = artifact_prefix(args.experiment_id)
 
     failures: list[str] = []
     warnings: list[str] = []
@@ -448,6 +917,17 @@ def analyze(args: argparse.Namespace) -> dict[str, Any]:
         inconclusive.append("missing test_planner_integrity_validation.csv")
     elif int(integrity_summary.get("row_count", 0) or 0) <= 0:
         failures.append("test_planner_integrity_validation.csv has no data rows")
+    integrity_summary.update(summarize_integrity_source_fields(integrity_rows))
+
+    safety_off_topic_counts = {}
+    if is_experiment(args, "B0-4"):
+        validate_b0_4_fallback_requirements(
+            integrity_rows,
+            validator_summary,
+            failures,
+            inconclusive,
+        )
+        safety_off_topic_counts = validate_safety_off_topic_leakage(metadata, failures)
 
     topic_count_rows = [
         {
@@ -466,7 +946,7 @@ def analyze(args: argparse.Namespace) -> dict[str, Any]:
         }
         for topic, data in topic_health.items()
     ]
-    topic_counts_path = csv_dir / "b0_1_topic_counts.csv"
+    topic_counts_path = csv_dir / f"{prefix}_topic_counts.csv"
     write_csv(
         topic_counts_path,
         ["topic", "expected", "count", "hz", "span_s", "coverage_ratio", "max_gap_s", "status"],
@@ -474,7 +954,39 @@ def analyze(args: argparse.Namespace) -> dict[str, Any]:
     )
 
     figures: list[str] = []
-    integrity_figure_path = figures_dir / "b0_1_integrity_hpl_vpl_timeline.png"
+    scenario_figure_path = figures_dir / f"{prefix}_scenario_topdown.png"
+    topic_activity_figure_path = figures_dir / f"{prefix}_topic_activity_timeline.png"
+    source_figure_path = figures_dir / f"{prefix}_integrity_source_timeline.png"
+    integrity_figure_path = figures_dir / f"{prefix}_integrity_hpl_vpl_timeline.png"
+
+    if bag_dir is not None:
+        scenario_data, scenario_error = read_scenario_plot_data(bag_dir, metadata)
+        if scenario_error:
+            warnings.append(f"scenario top-down plot data could not be read: {scenario_error}")
+        if plot_scenario_topdown(scenario_data, scenario_figure_path):
+            figures.append(str(scenario_figure_path))
+        else:
+            warnings.append("scenario top-down plot was not generated because no plottable bag data was available")
+
+        topic_timestamps, topic_timestamp_error = read_topic_timestamps(
+            bag_dir,
+            metadata,
+            TOPIC_ACTIVITY_TOPICS,
+        )
+        if topic_timestamp_error:
+            warnings.append(f"topic activity timeline data could not be read: {topic_timestamp_error}")
+        if plot_topic_activity_timeline(topic_timestamps, topic_activity_figure_path):
+            figures.append(str(topic_activity_figure_path))
+        else:
+            warnings.append("topic activity timeline was not generated because no plottable bag timestamps were available")
+    else:
+        warnings.append("scenario and topic activity figures were not generated because no bag dir was provided")
+
+    if plot_integrity_source_timeline(integrity_rows, source_figure_path):
+        figures.append(str(source_figure_path))
+    else:
+        warnings.append("integrity source timeline was not generated because no plottable rows were available")
+
     if plot_integrity_timeline(integrity_rows, integrity_figure_path):
         figures.append(str(integrity_figure_path))
     else:
@@ -484,7 +996,7 @@ def analyze(args: argparse.Namespace) -> dict[str, Any]:
     p5_summary = validate_p5_status(p5_rows, p5_error, failures, inconclusive)
     csv_artifacts = [str(topic_counts_path)]
     if p5_rows:
-        p5_status_path = csv_dir / "b0_1_p5_status.csv"
+        p5_status_path = csv_dir / f"{prefix}_p5_status.csv"
         write_csv(
             p5_status_path,
             [
@@ -501,6 +1013,18 @@ def analyze(args: argparse.Namespace) -> dict[str, Any]:
         )
         csv_artifacts.append(str(p5_status_path))
 
+    if is_experiment(args, "B0-4"):
+        required_figures = [
+            scenario_figure_path,
+            topic_activity_figure_path,
+            source_figure_path,
+        ]
+        for figure_path in required_figures:
+            if not figure_path.is_file() or figure_path.stat().st_size <= 0:
+                inconclusive.append(
+                    f"B0-4 required figure was not generated or is empty: {figure_path}"
+                )
+
     status = "PASS"
     if failures:
         status = "FAIL"
@@ -514,7 +1038,12 @@ def analyze(args: argparse.Namespace) -> dict[str, Any]:
         "failures": failures,
         "warnings": warnings,
         "inconclusive": inconclusive,
-        "next_debug_branch": next_debug_branch(status, failures, inconclusive),
+        "next_debug_branch": next_debug_branch(
+            status,
+            failures,
+            inconclusive,
+            args.experiment_id,
+        ),
         "export_dir": str(export_dir),
         "bag_dir": str(bag_dir) if bag_dir is not None else "",
         "manifest": manifest,
@@ -524,6 +1053,7 @@ def analyze(args: argparse.Namespace) -> dict[str, Any]:
         "integrity_summary": integrity_summary,
         "p0_summary": {},
         "p5_summary": p5_summary,
+        "safety_off_topic_counts": safety_off_topic_counts,
         "module_metrics": {},
         "artifacts": {
             "csv": csv_artifacts,

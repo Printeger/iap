@@ -103,6 +103,14 @@ src/iap/results/planner_validation/bags/test_planner_<experiment>_<scenario>_<st
   *.db3 / rosbag storage
 ```
 
+从 `B0-4` 开始，每个正式 run 在 bag/CSV 数据存在时还必须生成并在报告中引用以下默认验证图：
+
+```text
+<export_dir>/figures/<experiment>_scenario_topdown.png
+<export_dir>/figures/<experiment>_topic_activity_timeline.png
+<export_dir>/figures/<experiment>_integrity_source_timeline.png
+```
+
 每个 run 的 bag 必须包含以下核心 topic：
 
 ```text

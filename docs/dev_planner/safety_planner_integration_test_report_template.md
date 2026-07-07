@@ -184,6 +184,10 @@
 
 | 图表 | 路径 | 结论 |
 |---|---|---|
+| Scenario top-down | `figures/<experiment>_scenario_topdown.png` |  |
+| Topic activity timeline | `figures/<experiment>_topic_activity_timeline.png` |  |
+| Integrity source timeline | `figures/<experiment>_integrity_source_timeline.png` |  |
+| Integrity HPL/VPL timeline | `figures/<experiment>_integrity_hpl_vpl_timeline.png` |  |
 | P0 health timeline |  |  |
 | P0 PL/cost distribution |  |  |
 | P0 reason histogram |  |  |
