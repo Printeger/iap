@@ -60,9 +60,19 @@ SAFETY_OFF_ZERO_TOPICS = [
 ]
 P5_STATUS_TOPIC = "/planning/integrity_gate_status"
 P5_BAD_ACTIONS = {"REQUEST_REPLAN", "REQUEST_EMERGENCY_STOP_CANDIDATE"}
+ODOM_TRUTH_TOPIC = "/sim/drone_0/truth_odom"
+ODOM_EST_TOPIC = "/drone_0_visual_slam/odom"
 CONTINUOUS_MIN_COVERAGE_RATIO = 0.8
 CONTINUOUS_MAX_GAP_S = 2.0
 P0_HEALTH_ACTIVE_MAX_GAP_S = 3.0
+ODOM_DRIFT_RMS_ERROR_M = 1.5
+ODOM_DRIFT_MAX_ERROR_M = 4.0
+ODOM_DRIFT_FINAL_ERROR_M = 2.5
+ODOM_DRIFT_Z_ERROR_M = 1.5
+ODOM_DRIFT_YAW_ERROR_DEG = 45.0
+ODOM_DRIFT_POINT_ERROR_M = 2.5
+ODOM_JUMP_STEP_M = 1.0
+ODOM_JUMP_SPEED_MPS = 5.0
 DEFAULT_START_XY = (-12.0, 0.0)
 DEFAULT_GOAL_XY = (12.0, 0.0)
 SAFETY_OFF_BOOL_KEYS = (
@@ -525,6 +535,49 @@ def extract_xyz(msg: Any) -> tuple[float, float, float] | None:
     return None
 
 
+def yaw_from_quaternion(orientation: Any) -> float | None:
+    if orientation is None:
+        return None
+    x = finite_float(getattr(orientation, "x", None))
+    y = finite_float(getattr(orientation, "y", None))
+    z = finite_float(getattr(orientation, "z", None))
+    w = finite_float(getattr(orientation, "w", None))
+    if x is None or y is None or z is None or w is None:
+        return None
+    siny_cosp = 2.0 * (w * z + x * y)
+    cosy_cosp = 1.0 - 2.0 * (y * y + z * z)
+    return math.atan2(siny_cosp, cosy_cosp)
+
+
+def angular_error_rad(a: float | None, b: float | None) -> float | None:
+    if a is None or b is None:
+        return None
+    return math.atan2(math.sin(a - b), math.cos(a - b))
+
+
+def extract_pose_row(msg: Any, timestamp_ns: int, topic: str) -> dict[str, Any] | None:
+    pose = getattr(msg, "pose", None)
+    pose_pose = getattr(pose, "pose", None) if pose is not None else None
+    pose_source = pose_pose or pose or msg
+    position = getattr(pose_source, "position", None)
+    if position is None:
+        return None
+    x = finite_float(getattr(position, "x", None))
+    y = finite_float(getattr(position, "y", None))
+    z = finite_float(getattr(position, "z", None))
+    if x is None or y is None or z is None:
+        return None
+    return {
+        "topic": topic,
+        "stamp": msg_stamp_or_bag_time(msg, timestamp_ns),
+        "bag_time_s": float(timestamp_ns) * 1.0e-9,
+        "x": x,
+        "y": y,
+        "z": z,
+        "yaw": yaw_from_quaternion(getattr(pose_source, "orientation", None)),
+    }
+
+
 def read_p0_bag_artifacts(
     bag_dir: Path,
     metadata: dict[str, Any],
@@ -544,6 +597,8 @@ def read_p0_bag_artifacts(
         "validity_cloud_rows": [],
         "cloud_summary_rows": [],
         "trajectory_rows": [],
+        "odom_truth_rows": [],
+        "odom_rows": [],
         "topics_seen": set(),
     }
     latest_pl_rows: list[dict[str, Any]] = []
@@ -582,32 +637,34 @@ def read_p0_bag_artifacts(
                     latest_validity_rows = rows
             elif topic == "/sim/drone_0/truth_odom":
                 truth_seen += 1
-                if (truth_seen - 1) % truth_stride == 0:
-                    xyz = extract_xyz(msg)
-                    if xyz is not None:
+                pose_row = extract_pose_row(msg, timestamp, topic)
+                if pose_row is not None:
+                    artifacts["odom_truth_rows"].append(pose_row)
+                    if (truth_seen - 1) % truth_stride == 0:
                         artifacts["trajectory_rows"].append(
                             {
                                 "run_label": "p0",
                                 "topic": topic,
-                                "stamp": msg_stamp_or_bag_time(msg, timestamp),
-                                "x": xyz[0],
-                                "y": xyz[1],
-                                "z": xyz[2],
+                                "stamp": pose_row["stamp"],
+                                "x": pose_row["x"],
+                                "y": pose_row["y"],
+                                "z": pose_row["z"],
                             }
                         )
             elif topic == "/drone_0_visual_slam/odom":
                 slam_seen += 1
-                if (slam_seen - 1) % slam_stride == 0:
-                    xyz = extract_xyz(msg)
-                    if xyz is not None:
+                pose_row = extract_pose_row(msg, timestamp, topic)
+                if pose_row is not None:
+                    artifacts["odom_rows"].append(pose_row)
+                    if (slam_seen - 1) % slam_stride == 0:
                         artifacts["trajectory_rows"].append(
                             {
                                 "run_label": "p0",
                                 "topic": topic,
-                                "stamp": msg_stamp_or_bag_time(msg, timestamp),
-                                "x": xyz[0],
-                                "y": xyz[1],
-                                "z": xyz[2],
+                                "stamp": pose_row["stamp"],
+                                "x": pose_row["x"],
+                                "y": pose_row["y"],
+                                "z": pose_row["z"],
                             }
                         )
         artifacts["pl_cloud_rows"] = latest_pl_rows
@@ -1387,8 +1444,8 @@ def trajectory_comparison(
     p0_rows: list[dict[str, Any]],
     baseline_rows: list[dict[str, Any]],
 ) -> dict[str, Any]:
-    p0_truth = rows_for_topic(p0_rows, "/sim/drone_0/truth_odom")
-    baseline_truth = rows_for_topic(baseline_rows, "/sim/drone_0/truth_odom")
+    p0_truth = rows_for_topic(p0_rows, ODOM_TRUTH_TOPIC)
+    baseline_truth = rows_for_topic(baseline_rows, ODOM_TRUTH_TOPIC)
     rms = resampled_path_distance(p0_truth, baseline_truth)
     return {
         "p0_truth_count": len(p0_truth),
@@ -1397,6 +1454,346 @@ def trajectory_comparison(
         "baseline_truth_path_length_m": path_length(baseline_truth),
         "truth_resampled_rms_distance_m": rms,
     }
+
+
+def sorted_pose_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    return sorted(
+        [row for row in rows if finite_float(row.get("stamp")) is not None],
+        key=lambda row: float(row["stamp"]),
+    )
+
+
+def align_odom_to_truth(
+    odom_rows: list[dict[str, Any]],
+    truth_rows: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    odom = sorted_pose_rows(odom_rows)
+    truth = sorted_pose_rows(truth_rows)
+    if len(odom) < 1 or len(truth) < 2:
+        return []
+
+    truth_stamps = np.array([float(row["stamp"]) for row in truth], dtype=float)
+    if not np.all(np.diff(truth_stamps) >= 0.0):
+        order = np.argsort(truth_stamps)
+        truth_stamps = truth_stamps[order]
+        truth = [truth[int(idx)] for idx in order]
+    truth_x = np.array([float(row["x"]) for row in truth], dtype=float)
+    truth_y = np.array([float(row["y"]) for row in truth], dtype=float)
+    truth_z = np.array([float(row["z"]) for row in truth], dtype=float)
+    truth_yaw_values = [finite_float(row.get("yaw")) for row in truth]
+    has_truth_yaw = all(value is not None for value in truth_yaw_values)
+    truth_yaw = (
+        np.unwrap(np.array([float(value) for value in truth_yaw_values], dtype=float))
+        if has_truth_yaw
+        else None
+    )
+
+    aligned: list[dict[str, Any]] = []
+    for row in odom:
+        stamp = float(row["stamp"])
+        if stamp < truth_stamps[0] or stamp > truth_stamps[-1]:
+            continue
+        odom_x = float(row["x"])
+        odom_y = float(row["y"])
+        odom_z = float(row["z"])
+        tx = float(np.interp(stamp, truth_stamps, truth_x))
+        ty = float(np.interp(stamp, truth_stamps, truth_y))
+        tz = float(np.interp(stamp, truth_stamps, truth_z))
+        position_error = math.sqrt((odom_x - tx) ** 2 + (odom_y - ty) ** 2 + (odom_z - tz) ** 2)
+        z_error = odom_z - tz
+        odom_yaw = finite_float(row.get("yaw"))
+        yaw_error = None
+        truth_yaw_interp = None
+        if truth_yaw is not None and odom_yaw is not None:
+            truth_yaw_interp = float(np.interp(stamp, truth_stamps, truth_yaw))
+            yaw_error = angular_error_rad(odom_yaw, truth_yaw_interp)
+        aligned.append(
+            {
+                "stamp": stamp,
+                "bag_time_s": row.get("bag_time_s", stamp),
+                "odom_x": odom_x,
+                "odom_y": odom_y,
+                "odom_z": odom_z,
+                "truth_x": tx,
+                "truth_y": ty,
+                "truth_z": tz,
+                "odom_yaw": odom_yaw,
+                "truth_yaw": truth_yaw_interp,
+                "position_error_m": position_error,
+                "z_error_m": z_error,
+                "z_error_abs_m": abs(z_error),
+                "yaw_error_deg": None if yaw_error is None else abs(math.degrees(yaw_error)),
+            }
+        )
+    return aligned
+
+
+def odom_jump_summary(odom_rows: list[dict[str, Any]]) -> dict[str, Any]:
+    rows = sorted_pose_rows(odom_rows)
+    if len(rows) < 2:
+        return {
+            "jump_count": 0,
+            "max_step_m": None,
+            "max_speed_mps": None,
+            "odom_gap_count": 0,
+            "odom_max_gap_s": None,
+        }
+    jump_count = 0
+    gap_count = 0
+    max_step = 0.0
+    max_speed = 0.0
+    max_gap = 0.0
+    for prev, curr in zip(rows, rows[1:]):
+        dt = float(curr["stamp"]) - float(prev["stamp"])
+        if dt <= 0.0:
+            continue
+        step = math.sqrt(
+            (float(curr["x"]) - float(prev["x"])) ** 2
+            + (float(curr["y"]) - float(prev["y"])) ** 2
+            + (float(curr["z"]) - float(prev["z"])) ** 2
+        )
+        speed = step / dt
+        max_step = max(max_step, step)
+        max_speed = max(max_speed, speed)
+        max_gap = max(max_gap, dt)
+        if step > ODOM_JUMP_STEP_M or speed > ODOM_JUMP_SPEED_MPS:
+            jump_count += 1
+        if dt > CONTINUOUS_MAX_GAP_S:
+            gap_count += 1
+    return {
+        "jump_count": jump_count,
+        "max_step_m": max_step,
+        "max_speed_mps": max_speed,
+        "odom_gap_count": gap_count,
+        "odom_max_gap_s": max_gap,
+    }
+
+
+def summarize_odom_health(
+    odom_rows: list[dict[str, Any]],
+    truth_rows: list[dict[str, Any]],
+    aligned_rows: list[dict[str, Any]],
+) -> dict[str, Any]:
+    odom = sorted_pose_rows(odom_rows)
+    truth = sorted_pose_rows(truth_rows)
+    jump_summary = odom_jump_summary(odom)
+    thresholds = {
+        "rms_position_error_m": ODOM_DRIFT_RMS_ERROR_M,
+        "max_position_error_m": ODOM_DRIFT_MAX_ERROR_M,
+        "final_position_error_m": ODOM_DRIFT_FINAL_ERROR_M,
+        "z_error_abs_max_m": ODOM_DRIFT_Z_ERROR_M,
+        "yaw_error_abs_max_deg": ODOM_DRIFT_YAW_ERROR_DEG,
+        "point_position_error_m": ODOM_DRIFT_POINT_ERROR_M,
+        "jump_step_m": ODOM_JUMP_STEP_M,
+        "jump_speed_mps": ODOM_JUMP_SPEED_MPS,
+    }
+    summary: dict[str, Any] = {
+        "status": "INCONCLUSIVE",
+        "is_drift": False,
+        "drift_reasons": [],
+        "thresholds": thresholds,
+        "odom_sample_count": len(odom),
+        "truth_sample_count": len(truth),
+        "aligned_sample_count": len(aligned_rows),
+        "odom_first_stamp": float(odom[0]["stamp"]) if odom else None,
+        "odom_last_stamp": float(odom[-1]["stamp"]) if odom else None,
+        "truth_first_stamp": float(truth[0]["stamp"]) if truth else None,
+        "truth_last_stamp": float(truth[-1]["stamp"]) if truth else None,
+        "odom_first_bag_time_s": float(odom[0].get("bag_time_s", odom[0]["stamp"])) if odom else None,
+        "odom_last_bag_time_s": float(odom[-1].get("bag_time_s", odom[-1]["stamp"])) if odom else None,
+        "truth_first_bag_time_s": float(truth[0].get("bag_time_s", truth[0]["stamp"])) if truth else None,
+        "truth_last_bag_time_s": float(truth[-1].get("bag_time_s", truth[-1]["stamp"])) if truth else None,
+        **jump_summary,
+    }
+    if not odom or not truth:
+        summary["drift_reasons"].append("missing odom or truth rows")
+        return summary
+    if not aligned_rows:
+        summary["drift_reasons"].append("no overlapping odom/truth samples")
+        return summary
+
+    position_errors = [float(row["position_error_m"]) for row in aligned_rows]
+    z_errors = [float(row["z_error_abs_m"]) for row in aligned_rows]
+    yaw_errors = [
+        float(row["yaw_error_deg"])
+        for row in aligned_rows
+        if finite_float(row.get("yaw_error_deg")) is not None
+    ]
+    summary.update(
+        {
+            "status": "PASS",
+            "rms_position_error_m": float(np.sqrt(np.mean(np.square(position_errors)))),
+            "max_position_error_m": max(position_errors),
+            "final_position_error_m": position_errors[-1],
+            "z_error_abs_mean_m": float(np.mean(z_errors)),
+            "z_error_abs_max_m": max(z_errors),
+            "yaw_error_abs_mean_deg": float(np.mean(yaw_errors)) if yaw_errors else None,
+            "yaw_error_abs_max_deg": max(yaw_errors) if yaw_errors else None,
+            "first_drift_stamp": None,
+            "first_drift_bag_time_s": None,
+        }
+    )
+
+    drift_reasons: list[str] = []
+    if float(summary["rms_position_error_m"]) > ODOM_DRIFT_RMS_ERROR_M:
+        drift_reasons.append("rms_position_error")
+    if float(summary["max_position_error_m"]) > ODOM_DRIFT_MAX_ERROR_M:
+        drift_reasons.append("max_position_error")
+    if float(summary["final_position_error_m"]) > ODOM_DRIFT_FINAL_ERROR_M:
+        drift_reasons.append("final_position_error")
+    if float(summary["z_error_abs_max_m"]) > ODOM_DRIFT_Z_ERROR_M:
+        drift_reasons.append("z_error")
+    yaw_max = finite_float(summary.get("yaw_error_abs_max_deg"))
+    if yaw_max is not None and yaw_max > ODOM_DRIFT_YAW_ERROR_DEG:
+        drift_reasons.append("yaw_error")
+    if int(summary.get("jump_count", 0) or 0) > 0:
+        drift_reasons.append("odom_jump")
+
+    for row in aligned_rows:
+        yaw_error = finite_float(row.get("yaw_error_deg"))
+        if (
+            float(row["position_error_m"]) > ODOM_DRIFT_POINT_ERROR_M
+            or float(row["z_error_abs_m"]) > ODOM_DRIFT_Z_ERROR_M
+            or (yaw_error is not None and yaw_error > ODOM_DRIFT_YAW_ERROR_DEG)
+        ):
+            summary["first_drift_stamp"] = row["stamp"]
+            summary["first_drift_bag_time_s"] = row["bag_time_s"]
+            break
+    summary["drift_reasons"] = drift_reasons
+    summary["is_drift"] = bool(drift_reasons)
+    if drift_reasons:
+        summary["status"] = "FAIL"
+    return summary
+
+
+def p0_health_startup_correlation(
+    health_rows: list[dict[str, Any]],
+    odom_summary: dict[str, Any],
+) -> dict[str, Any]:
+    p0_problem_row: dict[str, Any] | None = None
+    first_full_unknown_row: dict[str, Any] | None = None
+    for row in health_rows:
+        full_unknown = (
+            (finite_float(row.get("valid_ratio")) or 0.0) <= 1.0e-9
+            and (finite_float(row.get("unknown_ratio")) or 0.0) >= 0.999
+        )
+        if first_full_unknown_row is None and full_unknown:
+            first_full_unknown_row = row
+        reason = str(row.get("reason", "")).strip()
+        non_ok = reason not in {"", "ok"}
+        if p0_problem_row is None and (not bool(row.get("ready")) or bool(row.get("stale")) or full_unknown or non_ok):
+            p0_problem_row = row
+    p0_stamp = finite_float((p0_problem_row or {}).get("stamp"))
+    drift_stamp = finite_float(odom_summary.get("first_drift_bag_time_s"))
+    if p0_stamp is None:
+        relation = "no_p0_startup_failure"
+    elif drift_stamp is None:
+        relation = "p0_failure_without_odom_drift"
+    elif abs(p0_stamp - drift_stamp) <= 1.0:
+        relation = "simultaneous"
+    elif p0_stamp < drift_stamp:
+        relation = "p0_failure_before_odom_drift"
+    else:
+        relation = "p0_failure_after_odom_drift"
+    return {
+        "relation": relation,
+        "first_p0_problem_stamp": p0_stamp,
+        "first_p0_problem_reason": str((p0_problem_row or {}).get("reason", "")),
+        "first_full_unknown_stamp": finite_float((first_full_unknown_row or {}).get("stamp")),
+        "first_odom_drift_bag_time_s": drift_stamp,
+        "odom_drift": bool(odom_summary.get("is_drift")),
+    }
+
+
+def plot_odom_truth_topdown(
+    truth_rows: list[dict[str, Any]],
+    odom_rows: list[dict[str, Any]],
+    path: Path,
+) -> bool:
+    truth = sorted_pose_rows(truth_rows)
+    odom = sorted_pose_rows(odom_rows)
+    if not truth or not odom:
+        return False
+    fig, ax = plt.subplots(figsize=(8, 7))
+    ax.plot([row["x"] for row in truth], [row["y"] for row in truth], color="#2563eb", lw=1.4, label="truth odom")
+    ax.plot([row["x"] for row in odom], [row["y"] for row in odom], color="#dc2626", lw=1.2, label="IAP odom")
+    ax.scatter([truth[0]["x"]], [truth[0]["y"]], marker="o", s=70, c="#111827", label="truth start")
+    ax.scatter([truth[-1]["x"]], [truth[-1]["y"]], marker="*", s=130, c="#16a34a", label="truth end")
+    ax.set_xlabel("x [m]")
+    ax.set_ylabel("y [m]")
+    ax.set_title("Odom vs truth top-down")
+    ax.set_aspect("equal", adjustable="datalim")
+    ax.grid(True, alpha=0.25)
+    ax.legend(loc="best", fontsize=8)
+    fig.tight_layout()
+    fig.savefig(path, dpi=160)
+    plt.close(fig)
+    return True
+
+
+def plot_odom_error_timeline(aligned_rows: list[dict[str, Any]], path: Path) -> bool:
+    if not aligned_rows:
+        return False
+    t0 = float(aligned_rows[0]["bag_time_s"])
+    t = [float(row["bag_time_s"]) - t0 for row in aligned_rows]
+    pos = [float(row["position_error_m"]) for row in aligned_rows]
+    z_abs = [float(row["z_error_abs_m"]) for row in aligned_rows]
+    yaw = [math.nan if finite_float(row.get("yaw_error_deg")) is None else float(row["yaw_error_deg"]) for row in aligned_rows]
+    fig, axes = plt.subplots(3, 1, figsize=(11, 7), sharex=True)
+    axes[0].plot(t, pos, color="#2563eb", label="position error")
+    axes[0].axhline(ODOM_DRIFT_POINT_ERROR_M, color="#dc2626", ls="--", lw=1.0, label="point drift gate")
+    axes[0].set_ylabel("pos error [m]")
+    axes[0].legend(loc="best")
+    axes[1].plot(t, z_abs, color="#16a34a", label="abs z error")
+    axes[1].axhline(ODOM_DRIFT_Z_ERROR_M, color="#dc2626", ls="--", lw=1.0, label="z drift gate")
+    axes[1].set_ylabel("z error [m]")
+    axes[1].legend(loc="best")
+    axes[2].plot(t, yaw, color="#9333ea", label="abs yaw error")
+    axes[2].axhline(ODOM_DRIFT_YAW_ERROR_DEG, color="#dc2626", ls="--", lw=1.0, label="yaw drift gate")
+    axes[2].set_ylabel("yaw error [deg]")
+    axes[2].set_xlabel("run-relative bag time [s]")
+    axes[2].legend(loc="best")
+    for ax in axes:
+        ax.grid(True, alpha=0.25)
+    fig.suptitle("Odom error timeline")
+    fig.tight_layout()
+    fig.savefig(path, dpi=160)
+    plt.close(fig)
+    return True
+
+
+def plot_p0_health_vs_odom_error(
+    health_rows: list[dict[str, Any]],
+    aligned_rows: list[dict[str, Any]],
+    path: Path,
+) -> bool:
+    if not health_rows or not aligned_rows:
+        return False
+    t0_values = [float(row["stamp"]) for row in health_rows]
+    t0_values.extend(float(row["bag_time_s"]) for row in aligned_rows)
+    t0 = min(t0_values)
+    odom_t = [float(row["bag_time_s"]) - t0 for row in aligned_rows]
+    health_t = [float(row["stamp"]) - t0 for row in health_rows]
+    fig, axes = plt.subplots(2, 1, figsize=(11, 6.5), sharex=True)
+    axes[0].plot(odom_t, [float(row["position_error_m"]) for row in aligned_rows], color="#2563eb", label="odom position error")
+    axes[0].axhline(ODOM_DRIFT_POINT_ERROR_M, color="#dc2626", ls="--", lw=1.0, label="drift gate")
+    axes[0].set_ylabel("pos error [m]")
+    axes[0].legend(loc="best")
+    axes[1].plot(health_t, finite_or_nan(health_rows, "valid_ratio"), color="#16a34a", label="valid_ratio")
+    axes[1].plot(health_t, finite_or_nan(health_rows, "unknown_ratio"), color="#f97316", label="unknown_ratio")
+    axes[1].step(health_t, [1.0 if row.get("ready") else 0.0 for row in health_rows], where="post", color="#111827", alpha=0.65, label="ready")
+    axes[1].step(health_t, [1.0 if row.get("stale") else 0.0 for row in health_rows], where="post", color="#dc2626", alpha=0.65, label="stale")
+    axes[1].set_ylim(-0.05, 1.05)
+    axes[1].set_ylabel("P0 health")
+    axes[1].set_xlabel("run-relative bag time [s]")
+    axes[1].legend(loc="best", ncols=2)
+    for ax in axes:
+        ax.grid(True, alpha=0.25)
+    fig.suptitle("P0 health vs odom error")
+    fig.tight_layout()
+    fig.savefig(path, dpi=160)
+    plt.close(fig)
+    return True
 
 
 def validate_p0_requirements(
@@ -1663,6 +2060,8 @@ def next_debug_branch(
         return "debug_baseline_launch_manifest_switch_isolation"
     if "validator" in text:
         return "debug_validator_summary_and_integrity_csv"
+    if "odom" in text or "odometry" in text:
+        return "debug_IAP_odometry_drift"
     if "topic" in text or "bag" in text or "metadata" in text:
         return "debug_bag_recording_and_launch_node_health"
     if "p5" in text:
@@ -1741,6 +2140,8 @@ def analyze(args: argparse.Namespace) -> dict[str, Any]:
         validity_cloud_rows = list(p0_artifacts.get("validity_cloud_rows", []) or [])
         cloud_summary_rows = list(p0_artifacts.get("cloud_summary_rows", []) or [])
         trajectory_rows = list(p0_artifacts.get("trajectory_rows", []) or [])
+        odom_truth_rows = list(p0_artifacts.get("odom_truth_rows", []) or [])
+        odom_rows = list(p0_artifacts.get("odom_rows", []) or [])
 
         baseline_trajectory_rows: list[dict[str, Any]] = []
         baseline_artifacts: dict[str, Any] = {}
@@ -1765,6 +2166,9 @@ def analyze(args: argparse.Namespace) -> dict[str, Any]:
         p0_health_summary = summarize_p0_health(health_rows)
         p0_cloud_summary = summarize_p0_cloud_rows(pl_cloud_rows)
         p0_validity_cloud_summary = summarize_p0_cloud_rows(validity_cloud_rows)
+        odom_aligned_rows = align_odom_to_truth(odom_rows, odom_truth_rows)
+        odom_health_summary = summarize_odom_health(odom_rows, odom_truth_rows, odom_aligned_rows)
+        startup_correlation = p0_health_startup_correlation(health_rows, odom_health_summary)
         baseline_comparison = trajectory_comparison(trajectory_rows, baseline_trajectory_rows)
         baseline_cloud_rows, baseline_cloud_source = read_baseline_p0_cloud_rows(
             baseline_export_dir,
@@ -1792,12 +2196,23 @@ def analyze(args: argparse.Namespace) -> dict[str, Any]:
                 failures,
                 inconclusive,
             )
+            if odom_health_summary.get("status") == "INCONCLUSIVE":
+                inconclusive.append(
+                    "P0-2 odom health could not be evaluated: "
+                    + ", ".join(str(item) for item in odom_health_summary.get("drift_reasons", []))
+                )
+            elif odom_health_summary.get("is_drift") is True:
+                failures.append(
+                    "P0-2 odom health classified drift: "
+                    + ", ".join(str(item) for item in odom_health_summary.get("drift_reasons", []))
+                )
 
         health_path = csv_dir / f"{prefix}_p0_risk_grid_health.csv"
         cloud_path = csv_dir / f"{prefix}_pl_cloud.csv"
         validity_path = csv_dir / f"{prefix}_risk_validity_cloud.csv"
         cloud_summary_path = csv_dir / f"{prefix}_pl_cost_distribution.csv"
         trajectory_path = csv_dir / f"{prefix}_baseline_vs_p0_trajectory.csv"
+        odom_alignment_path = csv_dir / f"{prefix}_odom_alignment.csv"
         write_csv(
             health_path,
             [
@@ -1851,6 +2266,26 @@ def analyze(args: argparse.Namespace) -> dict[str, Any]:
             ["run_label", "topic", "stamp", "x", "y", "z"],
             combined_trajectory_rows,
         )
+        write_csv(
+            odom_alignment_path,
+            [
+                "stamp",
+                "bag_time_s",
+                "odom_x",
+                "odom_y",
+                "odom_z",
+                "truth_x",
+                "truth_y",
+                "truth_z",
+                "odom_yaw",
+                "truth_yaw",
+                "position_error_m",
+                "z_error_m",
+                "z_error_abs_m",
+                "yaw_error_deg",
+            ],
+            odom_aligned_rows,
+        )
         p0_csv_artifacts.extend(
             [
                 str(health_path),
@@ -1858,6 +2293,7 @@ def analyze(args: argparse.Namespace) -> dict[str, Any]:
                 str(validity_path),
                 str(cloud_summary_path),
                 str(trajectory_path),
+                str(odom_alignment_path),
             ]
         )
 
@@ -1866,6 +2302,9 @@ def analyze(args: argparse.Namespace) -> dict[str, Any]:
         distribution_figure_path = figures_dir / f"{prefix}_pl_cost_distribution.png"
         snapshot_figure_path = figures_dir / f"{prefix}_risk_grid_snapshot_overview.png"
         baseline_delta_figure_path = figures_dir / f"{prefix}_vs_p0_1_delta.png"
+        odom_topdown_figure_path = figures_dir / f"{prefix}_odom_truth_topdown.png"
+        odom_error_figure_path = figures_dir / f"{prefix}_odom_error_timeline.png"
+        health_vs_odom_figure_path = figures_dir / f"{prefix}_p0_health_vs_odom_error.png"
         if plot_p0_health_timeline(health_rows, health_figure_path):
             p0_figure_artifacts.append(str(health_figure_path))
         if plot_p0_reason_histogram(health_rows, reason_figure_path):
@@ -1876,6 +2315,18 @@ def analyze(args: argparse.Namespace) -> dict[str, Any]:
             p0_figure_artifacts.append(str(snapshot_figure_path))
         else:
             warnings.append("P0 risk grid snapshot overview was not generated because no plottable cloud rows were available")
+        if plot_odom_truth_topdown(odom_truth_rows, odom_rows, odom_topdown_figure_path):
+            p0_figure_artifacts.append(str(odom_topdown_figure_path))
+        else:
+            warnings.append("odom truth top-down plot was not generated because odom/truth rows were unavailable")
+        if plot_odom_error_timeline(odom_aligned_rows, odom_error_figure_path):
+            p0_figure_artifacts.append(str(odom_error_figure_path))
+        else:
+            warnings.append("odom error timeline was not generated because aligned odom/truth rows were unavailable")
+        if plot_p0_health_vs_odom_error(health_rows, odom_aligned_rows, health_vs_odom_figure_path):
+            p0_figure_artifacts.append(str(health_vs_odom_figure_path))
+        else:
+            warnings.append("P0 health vs odom error plot was not generated because aligned rows were unavailable")
         if p0_2:
             if plot_p0_baseline_distribution_delta(
                 pl_cloud_rows,
@@ -1896,11 +2347,21 @@ def analyze(args: argparse.Namespace) -> dict[str, Any]:
         )
         if p0_2:
             p0_required_figures.append(baseline_delta_figure_path)
+            p0_required_figures.extend(
+                [
+                    odom_topdown_figure_path,
+                    odom_error_figure_path,
+                    health_vs_odom_figure_path,
+                ]
+            )
 
         p0_summary = {
             "health": p0_health_summary,
+            "first_health_rows": health_rows[:8],
             "pl_cloud": p0_cloud_summary,
             "validity_cloud": p0_validity_cloud_summary,
+            "odom_health": odom_health_summary,
+            "startup_correlation": startup_correlation,
             "cloud_summary_rows": len(cloud_summary_rows),
             "topics_seen": p0_artifacts.get("topics_seen", []),
             "baseline_comparison": baseline_comparison,
