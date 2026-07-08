@@ -1289,3 +1289,154 @@ The launch log contains shutdown-time ROS exceptions and signal-based exits for 
 2. Debug branch: `debug_P0_risk_grid_health`.
 3. Start with the first six P0 health samples: five `snapshot_unavailable` rows followed by one `stale_gnss_epoch`, all contributing to full-frame unknown.
 4. Re-run only P0-2 after the fix; do not run P0-3, P5, P1, P2, or aggregate experiments as part of this evidence chain.
+
+## P0-2 Odom Drift / Startup Health Flake Characterization
+
+### Scope
+
+This section does not advance to `P0-3`. It adds odom health gates to the analyzer, re-analyzes the original failed P0-2 artifact, then runs five more `P0-2` trials with the same launch parameters:
+
+```bash
+ros2 launch iap test_planner.launch.py \
+  experiment:=p0_open_sky \
+  scenario:=gnss_degraded_lidar_good \
+  run_duration_s:=60 \
+  validation_duration_s:=60 \
+  start_rviz:=false \
+  run_validator:=true \
+  record_bag:=true
+```
+
+| Field | Value |
+|---|---|
+| Analyzer odom gate commit | `ff63cb0 docs: add P0-2 odom health analyzer gates` |
+| Refined jump gate commit | `fabc262 docs: refine P0-2 odom jump drift gate` |
+| Original failed export | `/home/dev/ws_iap/src/iap/results/planner_validation/exports/test_planner_p0_open_sky_gnss_degraded_lidar_good_1783483641186` |
+| Original failed bag | `/home/dev/ws_iap/src/iap/results/planner_validation/bags/test_planner_p0_open_sky_gnss_degraded_lidar_good_20260708T040721Z` |
+| Campaign dir | `/home/dev/ws_iap/src/iap/results/planner_validation/flake_campaigns/p0_2_odom_startup_20260708T054540Z` |
+| Campaign summary CSV | `/home/dev/ws_iap/src/iap/results/planner_validation/flake_campaigns/p0_2_odom_startup_20260708T054540Z/trial_summary.csv` |
+| Campaign summary JSON | `/home/dev/ws_iap/src/iap/results/planner_validation/flake_campaigns/p0_2_odom_startup_20260708T054540Z/trial_summary.json` |
+
+### Odom Gate Added
+
+The analyzer now reads `/sim/drone_0/truth_odom` and `/drone_0_visual_slam/odom`, aligns odom to truth by message stamp, and reports:
+
+| Metric | Gate / output |
+|---|---|
+| Sample counts and timestamps | odom count, truth count, aligned count, first/last message stamp, first/last bag time |
+| Position error | RMS, max, final |
+| Z error | absolute mean and max |
+| Yaw error | absolute mean and max when quaternion orientation is available |
+| Jump/gap health | jump count, max step, max speed, max odom topic gap |
+| Drift verdict | `is_drift`, `drift_reasons`, first drift stamp/bag time |
+| Correlation | first P0 problem stamp, first full-unknown stamp, first odom drift bag time, relation |
+
+New analyzer artifacts per P0-2 run:
+
+| Artifact | Conclusion |
+|---|---|
+| `p0_2_odom_truth_topdown.png` | Shows whether odom trajectory overlays truth or diverges spatially |
+| `p0_2_odom_error_timeline.png` | Shows when position/z/yaw error crosses odom drift gates |
+| `p0_2_p0_health_vs_odom_error.png` | Shows whether P0 health degradation occurs before, after, or independent of odom error |
+| `p0_2_odom_alignment.csv` | Stores aligned odom/truth samples and per-sample errors |
+
+### Original Failed Artifact Reanalysis
+
+| Check | Value | Conclusion |
+|---|---:|---|
+| Analyzer status | `FAIL` | Fails both P0 startup health gates and odom drift gate |
+| Odom drift | `true` | Severe odom drift is present |
+| Odom RMS / max / final position error | `98.973968m` / `168.804117m` / `89.848024m` | `FAIL`; far beyond drift thresholds |
+| Z abs mean / max | `40.974471m` / `102.337368m` | `FAIL` |
+| Yaw abs mean / max | `86.562126deg` / `179.022932deg` | `FAIL` |
+| Odom jump count | `536` | `FAIL`; odom is unstable throughout the run |
+| First odom drift bag time | `1783483643.905449` | Drift starts before P0 health failure |
+| First P0 problem bag time | `1783483651.932156` | P0 failure starts about `8.03s` after drift |
+| Startup relation | `p0_failure_after_odom_drift` | Supports odom as upstream failure in this artifact |
+| P0 ready/stale/full-unknown max consecutive | `5` / `5` / `6` | `FAIL` |
+| PL/cost higher than P0-1 | `true`; delta `+8.414698` | Degraded GNSS is still distinguishable from P0-1 |
+
+First eight P0 health rows from the original failed artifact:
+
+| Row | Ready | Stale | Valid | Unknown | Reason |
+|---:|---|---|---:|---:|---|
+| 1 | `false` | `true` | `0.000000` | `1.000000` | `snapshot_unavailable` |
+| 2 | `false` | `true` | `0.000000` | `1.000000` | `snapshot_unavailable` |
+| 3 | `false` | `true` | `0.000000` | `1.000000` | `snapshot_unavailable` |
+| 4 | `false` | `true` | `0.000000` | `1.000000` | `snapshot_unavailable` |
+| 5 | `false` | `true` | `0.000000` | `1.000000` | `snapshot_unavailable` |
+| 6 | `true` | `false` | `0.000000` | `1.000000` | `stale_gnss_epoch` |
+| 7 | `true` | `false` | `0.987188` | `0.012813` | `ok` |
+| 8 | `true` | `false` | `0.985469` | `0.014531` | `ok` |
+
+Original failed artifact figure conclusions:
+
+| Figure | Conclusion |
+|---|---|
+| ![Original P0-2 odom truth top-down](../../results/planner_validation/exports/test_planner_p0_open_sky_gnss_degraded_lidar_good_1783483641186/figures/p0_2_odom_truth_topdown.png) | Odom diverges sharply from truth, confirming the user-observed odom drift in this failed run. |
+| ![Original P0-2 odom error timeline](../../results/planner_validation/exports/test_planner_p0_open_sky_gnss_degraded_lidar_good_1783483641186/figures/p0_2_odom_error_timeline.png) | Odom error crosses drift gates before the P0 health failure window begins. |
+| ![Original P0-2 P0 health timeline](../../results/planner_validation/exports/test_planner_p0_open_sky_gnss_degraded_lidar_good_1783483641186/figures/p0_2_p0_health_timeline.png) | P0 health has six consecutive full-frame unknown samples at startup, causing the original hard failure. |
+| ![Original P0-2 health vs odom error](../../results/planner_validation/exports/test_planner_p0_open_sky_gnss_degraded_lidar_good_1783483641186/figures/p0_2_p0_health_vs_odom_error.png) | The combined timeline shows odom drift first, then P0 startup full-frame unknown. |
+| ![Original P0-2 vs P0-1 delta](../../results/planner_validation/exports/test_planner_p0_open_sky_gnss_degraded_lidar_good_1783483641186/figures/p0_2_vs_p0_1_delta.png) | PL/cost is still materially higher than P0-1, so the degraded-GNSS signal is present despite the startup failure. |
+
+### Five-Trial P0-2 Campaign
+
+All five campaign launches used P0-2 only. No `P0-3`, P5, P1, P2, or aggregate experiment was run.
+
+| Trial | Launch | Validator | Analyzer | Odom drift | Odom RMS / max / final error | P0 ready/stale/full-unknown max consecutive | First non-ok P0 reason | PL/cost > P0-1 | Branch |
+|---:|---|---|---|---|---|---|---|---|---|
+| 1 | `PASS` | `PASS` | `PASS` | `false` | `0.656621m` / `1.071850m` / `1.031854m` | `0` / `0` / `0` | empty | `true` | `continue_to_P0-3_corridor_degeneracy_field` |
+| 2 | `PASS` | `PASS` | `PASS` | `false` | `0.768600m` / `1.570811m` / `1.553322m` | `0` / `0` / `1` | `stale_gnss_epoch` | `true` | `continue_to_P0-3_corridor_degeneracy_field` |
+| 3 | `PASS` | `PASS` | `PASS` | `false` | `0.688549m` / `1.619065m` / `1.193253m` | `0` / `0` / `1` | `stale_gnss_epoch` | `true` | `continue_to_P0-3_corridor_degeneracy_field` |
+| 4 | `PASS` | `PASS` | `PASS` | `false` | `0.808893m` / `1.784724m` / `0.600505m` | `0` / `0` / `1` | `stale_gnss_epoch` | `true` | `continue_to_P0-3_corridor_degeneracy_field` |
+| 5 | `PASS` | `PASS` | `PASS` | `false` | `0.132657m` / `0.212988m` / `0.176779m` | `0` / `0` / `0` | empty | `true` | `continue_to_P0-3_corridor_degeneracy_field` |
+
+Campaign aggregate:
+
+| Metric | Value | Conclusion |
+|---|---:|---|
+| Trials | `5` | Required minimum campaign completed |
+| Launch pass count | `5/5` | Launch is stable in this sample |
+| Validator pass count | `5/5` | Integrity validator is stable in this sample |
+| Analyzer pass count | `5/5` | No hard P0-2 failure reproduced after odom gate refinement |
+| Odom drift count | `0/5` | Odom drift did not reproduce in the five new trials |
+| P0 startup hard fail count | `0/5` | Consecutive `ready=false`, `stale=true`, or full-frame unknown did not reach hard-fail threshold |
+| Any non-ok P0 startup count | `3/5` | Single-sample `stale_gnss_epoch` still appears, but only with max consecutive `1` |
+| PL/cost higher than P0-1 | `5/5` | Degraded GNSS remains distinguishable from P0-1 |
+
+Representative healthy campaign figure conclusions from trial 5:
+
+| Figure | Conclusion |
+|---|---|
+| ![Trial 5 odom truth top-down](../../results/planner_validation/exports/test_planner_p0_open_sky_gnss_degraded_lidar_good_1783489818760/figures/p0_2_odom_truth_topdown.png) | Odom closely overlays truth; this is a healthy non-drift run. |
+| ![Trial 5 odom error timeline](../../results/planner_validation/exports/test_planner_p0_open_sky_gnss_degraded_lidar_good_1783489818760/figures/p0_2_odom_error_timeline.png) | Odom position error stays below drift gates for the whole run. |
+| ![Trial 5 P0 health timeline](../../results/planner_validation/exports/test_planner_p0_open_sky_gnss_degraded_lidar_good_1783489818760/figures/p0_2_p0_health_timeline.png) | P0 health remains ready/non-stale with no full-frame unknown sequence. |
+| ![Trial 5 P0 health vs odom error](../../results/planner_validation/exports/test_planner_p0_open_sky_gnss_degraded_lidar_good_1783489818760/figures/p0_2_p0_health_vs_odom_error.png) | With odom healthy, P0 startup health does not hard-fail. |
+| ![Trial 5 P0-2 vs P0-1 delta](../../results/planner_validation/exports/test_planner_p0_open_sky_gnss_degraded_lidar_good_1783489818760/figures/p0_2_vs_p0_1_delta.png) | P0-2 PL/cost remains above P0-1, preserving degraded-GNSS separation. |
+
+Representative single-sample startup blip conclusion from trial 2:
+
+| Figure | Conclusion |
+|---|---|
+| ![Trial 2 P0 health vs odom error](../../results/planner_validation/exports/test_planner_p0_open_sky_gnss_degraded_lidar_good_1783489609916/figures/p0_2_p0_health_vs_odom_error.png) | Trial 2 has one `stale_gnss_epoch/full_unknown` sample while odom remains healthy; this is not the original hard failure because the sequence length is `1`, not `6`. |
+
+### Classification Answers
+
+| Question | Answer |
+|---|---|
+| 1. Did odom drift reproduce? | The original failed artifact has severe odom drift. The five new P0-2 trials did not reproduce odom drift. |
+| 2. When odom drift appears, does P0 health necessarily fail? | We have one observed drift case, and it has P0 hard startup failure after drift starts. That supports odom as upstream in the failed artifact, but one drift case is not enough to prove necessity. |
+| 3. When odom is normal, does P0 startup full-frame unknown still fail? | No hard failure reproduced in five healthy-odom trials. Three trials had a single `stale_gnss_epoch/full_unknown` sample, but max consecutive was `1`, below the hard-fail threshold. |
+| 4. Is the current P0-2 blocker odometry or P0 startup gate? | Current evidence points to an upstream odom drift flake/environmental failure as the original blocker. P0 startup lifecycle remains worth monitoring because single-sample `stale_gnss_epoch` still appears, but it did not hard-fail with healthy odom. |
+| 5. Can we continue to P0-3? | Not in this task. The branch rule would allow marking the original failure as flaky/environmental after 5 clean odom-gated P0-2 trials, but P0-3 should not be run until the odom health gate is retained and the user explicitly approves moving on. |
+
+### Decision
+
+Classification: **odom drift upstream failure / flaky environmental failure observed in the original artifact; no deterministic P0 startup lifecycle hard failure reproduced under healthy odom**.
+
+Operational branch:
+
+1. Keep the odom health gate in the analyzer for all future P0-2 evidence.
+2. Do not spend the next debugging slice on P0 startup lifecycle unless a healthy-odom run reproduces consecutive P0 full-frame unknown.
+3. If the odom drift appears again, debug IAP odometry first.
+4. Do not enter `P0-3` from this task.
