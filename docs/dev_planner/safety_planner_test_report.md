@@ -1624,3 +1624,84 @@ Reason histogram: `stale_gnss_epoch=97`. P0-3 cannot demonstrate corridor degene
 2. Enter `debug_IAP_odometry_drift` because P0-3 reproduced a severe odom drift gate failure.
 3. Keep the P0 full-frame unknown evidence attached to this run, but do not classify it as the P0-3 root cause until a healthy-odom P0-3 run reproduces it.
 4. After odometry is stabilized, re-run only P0-3 with the same odom gate and the same P0-1/P0-2 comparison references.
+
+### P0-3 Rerun At User Request
+
+The user requested one additional P0-3 run because odom drift is known to be intermittent. The rerun used the same command, odom gate, P0-1 reference, and healthy P0-2 reference.
+
+Result: **FAIL / ODOM BLOCKER reproduced**.
+
+| Field | Value |
+|---|---|
+| Rerun time | `2026-07-08T09:09:03Z` |
+| Export | `/home/dev/ws_iap/src/iap/results/planner_validation/exports/test_planner_p0_open_sky_lidar_corridor_degenerate_1783501743069` |
+| Bag | `/home/dev/ws_iap/src/iap/results/planner_validation/bags/test_planner_p0_open_sky_lidar_corridor_degenerate_20260708T090903Z` |
+| Analyzer summary | `/home/dev/ws_iap/src/iap/results/planner_validation/exports/test_planner_p0_open_sky_lidar_corridor_degenerate_1783501743069/metadata/safety_planner_analysis_summary.json` |
+| Launch | `PASS`; exit code `0` |
+| Validator | `PASS`; `580` messages |
+| Analyzer | `FAIL`; branch `debug_IAP_odometry_drift` |
+| P0 RViz clouds | `PASS`; PL and validity cloud topics each have `92` messages |
+
+Rerun odom health:
+
+| Metric | Value | Conclusion |
+|---|---:|---|
+| Odom drift | `true` | Drift reproduced |
+| RMS position error | `42.289291m` | `FAIL`; gate is `1.5m` |
+| Max position error | `115.814782m` | `FAIL`; gate is `4.0m` |
+| Final position error | `53.228774m` | `FAIL`; gate is `2.5m` |
+| Odom jump count | `221` | `FAIL`; jump gate triggered |
+| First odom drift bag time | `1783501759.792523` | Drift appears during active P0 window |
+
+Rerun P0 health:
+
+| Metric | Value | Conclusion |
+|---|---:|---|
+| Health rows | `92` | Complete P0 health evidence |
+| Full unknown count / max consecutive | `92` / `92` | `FAIL`; every P0 health row is full-frame unknown |
+| Valid ratio mean / max | `0.000000` / `0.000000` | `FAIL`; no valid risk-grid cells |
+| Unknown ratio mean / max | `1.000000` / `1.000000` | `FAIL`; fully unknown grid |
+| Dominant reason | `stale_gnss_epoch` | Same reason as previous P0-3 run |
+| Provider stale max | `63230` | Provider stale counter remains the explanation |
+
+Rerun correlation:
+
+| Signal | Bag time | Conclusion |
+|---|---:|---|
+| First P0 problem | `1783501756.330293` | P0 is full-frame unknown as soon as health rows begin |
+| First full-frame unknown | `1783501756.330293` | Full unknown starts before analyzer-detected drift |
+| First odom drift | `1783501759.792523` | Odom drift is still present and blocks P0-3 acceptance |
+| Relation | `p0_failure_before_odom_drift` | P0 symptom may be independent, but odom blocker is reproduced |
+
+Rerun PL/cost comparison:
+
+| Metric | P0-1 | Healthy P0-2 | P0-3 rerun | Conclusion |
+|---|---:|---:|---:|---|
+| Valid ratio | `0.993750` | `0.972188` | `0.000000` | Rerun has no valid PL/cost cells |
+| Unknown ratio | `0.006250` | `0.027813` | `1.000000` | Rerun is fully unknown |
+| Stale ratio | `0.000000` | `0.000000` | `0.969688` | Rerun cloud is mostly stale |
+| PL mean | `11.181885` | `19.146271` | unavailable | No valid PL mean can be computed |
+| c_pi mean | `11.181885` | `19.146271` | unavailable | No valid cost mean can be computed |
+
+Rerun figure conclusions:
+
+| Figure | Conclusion |
+|---|---|
+| ![P0-3 rerun scenario top-down](../../results/planner_validation/exports/test_planner_p0_open_sky_lidar_corridor_degenerate_1783501743069/figures/p0_3_scenario_topdown.png) | Corridor scenario and trajectory evidence rendered for the rerun. |
+| ![P0-3 rerun odom truth top-down](../../results/planner_validation/exports/test_planner_p0_open_sky_lidar_corridor_degenerate_1783501743069/figures/p0_3_odom_truth_topdown.png) | Odom again diverges from truth, confirming repeat odom drift. |
+| ![P0-3 rerun odom error timeline](../../results/planner_validation/exports/test_planner_p0_open_sky_lidar_corridor_degenerate_1783501743069/figures/p0_3_odom_error_timeline.png) | Position, z, and yaw errors cross drift gates in the rerun. |
+| ![P0-3 rerun topic activity timeline](../../results/planner_validation/exports/test_planner_p0_open_sky_lidar_corridor_degenerate_1783501743069/figures/p0_3_topic_activity_timeline.png) | Required P0 topics are present, so the failure is not missing-topic evidence. |
+| ![P0-3 rerun P0 health timeline](../../results/planner_validation/exports/test_planner_p0_open_sky_lidar_corridor_degenerate_1783501743069/figures/p0_3_p0_health_timeline.png) | P0 health remains full-frame unknown across all observed health rows. |
+| ![P0-3 rerun P0 reason histogram](../../results/planner_validation/exports/test_planner_p0_open_sky_lidar_corridor_degenerate_1783501743069/figures/p0_3_p0_reason_histogram.png) | All rerun P0 health rows report `stale_gnss_epoch`. |
+| ![P0-3 rerun PL/cost distribution](../../results/planner_validation/exports/test_planner_p0_open_sky_lidar_corridor_degenerate_1783501743069/figures/p0_3_pl_cost_distribution.png) | No valid PL/cost cells exist in the rerun; the plot records all-unknown cell counts. |
+| ![P0-3 rerun risk grid snapshot overview](../../results/planner_validation/exports/test_planner_p0_open_sky_lidar_corridor_degenerate_1783501743069/figures/p0_3_risk_grid_snapshot_overview.png) | The latest P0 cloud renders but remains an all-unknown risk grid. |
+| ![P0-3 rerun P0 health vs odom error](../../results/planner_validation/exports/test_planner_p0_open_sky_lidar_corridor_degenerate_1783501743069/figures/p0_3_p0_health_vs_odom_error.png) | P0 full unknown starts before the analyzer-detected odom drift point, while odom still fails the gate. |
+| ![P0-3 rerun vs P0-1 delta](../../results/planner_validation/exports/test_planner_p0_open_sky_lidar_corridor_degenerate_1783501743069/figures/p0_3_vs_p0_1_delta.png) | Rerun loses all valid cells compared with P0-1. |
+| ![P0-3 rerun vs P0-2 delta](../../results/planner_validation/exports/test_planner_p0_open_sky_lidar_corridor_degenerate_1783501743069/figures/p0_3_vs_p0_2_delta.png) | Rerun loses all valid cells compared with healthy P0-2. |
+
+Updated conclusion after rerun:
+
+1. Odom drift reproduced in two consecutive P0-3 runs.
+2. P0 full-frame unknown also reproduced in both P0-3 runs and begins before the analyzer's first drift timestamp.
+3. P0-3 remains blocked; do not enter `P0-4`.
+4. The immediate branch remains `debug_IAP_odometry_drift`, with a follow-up healthy-odom P0-3 rerun required before deciding whether the persistent full-frame unknown is an independent P0 corridor lifecycle bug.
