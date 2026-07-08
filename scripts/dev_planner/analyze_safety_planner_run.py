@@ -39,7 +39,7 @@ P0_TOPIC_EXPECTATIONS = {
     "/sim/drone_0/lidar_body": "continuous",
     "/drone_0_visual_slam/odom": "continuous",
     "/drone_0_planning/bspline": "planner-dependent",
-    P0_HEALTH_TOPIC: "continuous",
+    P0_HEALTH_TOPIC: "active-periodic",
     P0_PL_CLOUD_TOPIC: "present",
     P0_VALIDITY_CLOUD_TOPIC: "present",
 }
@@ -58,6 +58,7 @@ P5_STATUS_TOPIC = "/planning/integrity_gate_status"
 P5_BAD_ACTIONS = {"REQUEST_REPLAN", "REQUEST_EMERGENCY_STOP_CANDIDATE"}
 CONTINUOUS_MIN_COVERAGE_RATIO = 0.8
 CONTINUOUS_MAX_GAP_S = 2.0
+P0_HEALTH_ACTIVE_MAX_GAP_S = 3.0
 DEFAULT_START_XY = (-12.0, 0.0)
 DEFAULT_GOAL_XY = (12.0, 0.0)
 SAFETY_OFF_BOOL_KEYS = (
@@ -1254,13 +1255,15 @@ def validate_p0_1_requirements(
     reason_counts = health_summary.get("reason_counts", {}) or {}
     if reason_counts.get("<empty>", 0) or reason_counts.get("", 0):
         failures.append("P0-1 risk_grid_health contains empty reason")
-    explain_counters = (
-        int(health_summary.get("provider_stale_count_max", 0) or 0)
-        + int(health_summary.get("provider_invalid_count_max", 0) or 0)
-        + int(health_summary.get("occupied_skip_count_max", 0) or 0)
-    )
-    if explain_counters > 0 and set(reason_counts) <= {"ok"}:
-        failures.append("P0-1 health reason is always ok while provider counters report stale/invalid/occupied cells")
+    provider_stale = int(health_summary.get("provider_stale_count_max", 0) or 0)
+    provider_invalid = int(health_summary.get("provider_invalid_count_max", 0) or 0)
+    occupied_skip = int(health_summary.get("occupied_skip_count_max", 0) or 0)
+    unknown_ratio_max = float(health_summary.get("unknown_ratio_max", 0.0) or 0.0)
+    reasons_only_ok = set(reason_counts) <= {"ok"}
+    if reasons_only_ok and (provider_stale > 0 or provider_invalid > 0):
+        failures.append("P0-1 health reason is always ok while provider counters report stale/invalid cells")
+    if reasons_only_ok and occupied_skip > 0 and unknown_ratio_max >= 0.10:
+        failures.append("P0-1 health reason is always ok while occupied skip creates material unknown area")
     if int(cloud_summary.get("row_count", 0) or 0) <= 0:
         failures.append("P0-1 predicted PL cloud has no plottable rows")
 
@@ -1290,6 +1293,11 @@ def topic_health_from_metadata(
                 coverage_ratio < CONTINUOUS_MIN_COVERAGE_RATIO
                 or max_gap_s > CONTINUOUS_MAX_GAP_S
             ):
+                status = "FAIL"
+        elif expected == "active-periodic" and count > 0:
+            if max_gap_s is None:
+                status = "CHECK"
+            elif max_gap_s > P0_HEALTH_ACTIVE_MAX_GAP_S:
                 status = "FAIL"
         elif expected in {"planner-dependent", "present"}:
             status = "PASS" if count > 0 else "FAIL"
@@ -1337,6 +1345,8 @@ def validate_topic_health(
         if topic_health[topic]["status"] == "FAIL":
             if expected == "continuous":
                 failures.append(f"required topic {topic} is missing or not continuous")
+            elif expected == "active-periodic":
+                failures.append(f"required topic {topic} is missing or not periodic after planner activation")
             else:
                 failures.append(f"required topic {topic} is missing")
         elif topic_health[topic]["status"] == "CHECK":
