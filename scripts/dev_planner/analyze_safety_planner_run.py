@@ -71,7 +71,7 @@ ODOM_DRIFT_FINAL_ERROR_M = 2.5
 ODOM_DRIFT_Z_ERROR_M = 1.5
 ODOM_DRIFT_YAW_ERROR_DEG = 45.0
 ODOM_DRIFT_POINT_ERROR_M = 2.5
-ODOM_JUMP_STEP_M = 1.0
+ODOM_JUMP_STEP_M = 1.5
 ODOM_JUMP_SPEED_MPS = 5.0
 DEFAULT_START_XY = (-12.0, 0.0)
 DEFAULT_GOAL_XY = (12.0, 0.0)
@@ -1535,6 +1535,8 @@ def odom_jump_summary(odom_rows: list[dict[str, Any]]) -> dict[str, Any]:
             "jump_count": 0,
             "max_step_m": None,
             "max_speed_mps": None,
+            "first_jump_stamp": None,
+            "first_jump_bag_time_s": None,
             "odom_gap_count": 0,
             "odom_max_gap_s": None,
         }
@@ -1543,6 +1545,8 @@ def odom_jump_summary(odom_rows: list[dict[str, Any]]) -> dict[str, Any]:
     max_step = 0.0
     max_speed = 0.0
     max_gap = 0.0
+    first_jump_stamp = None
+    first_jump_bag_time_s = None
     for prev, curr in zip(rows, rows[1:]):
         dt = float(curr["stamp"]) - float(prev["stamp"])
         if dt <= 0.0:
@@ -1558,12 +1562,17 @@ def odom_jump_summary(odom_rows: list[dict[str, Any]]) -> dict[str, Any]:
         max_gap = max(max_gap, dt)
         if step > ODOM_JUMP_STEP_M or speed > ODOM_JUMP_SPEED_MPS:
             jump_count += 1
+            if first_jump_stamp is None:
+                first_jump_stamp = float(curr["stamp"])
+                first_jump_bag_time_s = finite_float(curr.get("bag_time_s"))
         if dt > CONTINUOUS_MAX_GAP_S:
             gap_count += 1
     return {
         "jump_count": jump_count,
         "max_step_m": max_step,
         "max_speed_mps": max_speed,
+        "first_jump_stamp": first_jump_stamp,
+        "first_jump_bag_time_s": first_jump_bag_time_s,
         "odom_gap_count": gap_count,
         "odom_max_gap_s": max_gap,
     }
@@ -1659,6 +1668,9 @@ def summarize_odom_health(
             summary["first_drift_stamp"] = row["stamp"]
             summary["first_drift_bag_time_s"] = row["bag_time_s"]
             break
+    if summary["first_drift_stamp"] is None and int(summary.get("jump_count", 0) or 0) > 0:
+        summary["first_drift_stamp"] = summary.get("first_jump_stamp")
+        summary["first_drift_bag_time_s"] = summary.get("first_jump_bag_time_s")
     summary["drift_reasons"] = drift_reasons
     summary["is_drift"] = bool(drift_reasons)
     if drift_reasons:
