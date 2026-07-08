@@ -33,7 +33,11 @@ TOPIC_ACTIVITY_TOPICS = [
 P0_HEALTH_TOPIC = "/planning/risk_grid_health"
 P0_PL_CLOUD_TOPIC = "/iap/rviz/predicted_pl_cloud"
 P0_VALIDITY_CLOUD_TOPIC = "/iap/rviz/risk_validity_cloud"
-P0_TOPIC_ACTIVITY_TOPICS = TOPIC_ACTIVITY_TOPICS + [P0_HEALTH_TOPIC]
+P0_TOPIC_ACTIVITY_TOPICS = TOPIC_ACTIVITY_TOPICS + [
+    P0_HEALTH_TOPIC,
+    P0_PL_CLOUD_TOPIC,
+    P0_VALIDITY_CLOUD_TOPIC,
+]
 P0_TOPIC_EXPECTATIONS = {
     "/iap/integrity": "continuous",
     "/sim/drone_0/lidar_body": "continuous",
@@ -92,6 +96,10 @@ def is_experiment(args: argparse.Namespace, experiment_id: str) -> bool:
     return str(args.experiment_id).strip().upper() == experiment_id.upper()
 
 
+def is_p0_experiment(args: argparse.Namespace) -> bool:
+    return re.fullmatch(r"P0-\d+", str(args.experiment_id).strip().upper()) is not None
+
+
 def read_json_if_exists(path: Path) -> dict[str, Any]:
     if not path.is_file():
         return {}
@@ -111,6 +119,13 @@ def write_csv(path: Path, fieldnames: list[str], rows: list[dict[str, Any]]) -> 
         writer.writeheader()
         for row in rows:
             writer.writerow(row)
+
+
+def read_csv_rows(path: Path) -> list[dict[str, Any]]:
+    if not path.is_file():
+        return []
+    with path.open(newline="") as f:
+        return list(csv.DictReader(f))
 
 
 def finite_float(value: Any) -> float | None:
@@ -1208,6 +1223,166 @@ def summarize_p0_cloud_rows(rows: list[dict[str, Any]]) -> dict[str, Any]:
     }
 
 
+def metric_delta(current: dict[str, Any], baseline: dict[str, Any], key: str) -> float | None:
+    current_value = finite_float(current.get(key))
+    baseline_value = finite_float(baseline.get(key))
+    if current_value is None or baseline_value is None:
+        return None
+    return current_value - baseline_value
+
+
+def meaningful_increase_threshold(baseline_value: Any) -> float | None:
+    value = finite_float(baseline_value)
+    if value is None:
+        return None
+    return min(0.5, abs(value) * 0.05)
+
+
+def baseline_distribution_comparison(
+    current_rows: list[dict[str, Any]],
+    baseline_rows: list[dict[str, Any]],
+    baseline_source: str,
+) -> dict[str, Any]:
+    current = summarize_p0_cloud_rows(current_rows)
+    baseline = summarize_p0_cloud_rows(baseline_rows)
+    comparison: dict[str, Any] = {
+        "current": current,
+        "baseline": baseline,
+        "baseline_source": baseline_source,
+        "deltas": {},
+        "thresholds": {},
+        "meaningfully_higher": False,
+        "higher_metrics": [],
+    }
+    for key in ("pl_min", "pl_mean", "pl_max", "c_pi_min", "c_pi_mean", "c_pi_max"):
+        comparison["deltas"][key] = metric_delta(current, baseline, key)
+    for key in ("valid_ratio", "unknown_ratio", "stale_ratio"):
+        comparison["deltas"][key] = metric_delta(current, baseline, key)
+
+    for key in ("pl_mean", "c_pi_mean"):
+        threshold = meaningful_increase_threshold(baseline.get(key))
+        comparison["thresholds"][key] = threshold
+        delta = finite_float(comparison["deltas"].get(key))
+        if delta is not None and threshold is not None and delta >= threshold:
+            comparison["meaningfully_higher"] = True
+            comparison["higher_metrics"].append(key)
+    return comparison
+
+
+def read_baseline_p0_cloud_rows(
+    baseline_export_dir: Path | None,
+    baseline_artifacts: dict[str, Any],
+) -> tuple[list[dict[str, Any]], str]:
+    if baseline_export_dir is not None:
+        csv_dir = baseline_export_dir / "csv"
+        candidates = [csv_dir / "p0_1_pl_cloud.csv"]
+        candidates.extend(sorted(csv_dir.glob("*_pl_cloud.csv")))
+        seen: set[Path] = set()
+        for candidate in candidates:
+            if candidate in seen:
+                continue
+            seen.add(candidate)
+            rows = read_csv_rows(candidate)
+            if rows:
+                return rows, str(candidate)
+    rows = list(baseline_artifacts.get("pl_cloud_rows", []) or [])
+    if rows:
+        return rows, "baseline bag latest predicted PL cloud"
+    return [], ""
+
+
+def p0_difference_explanation(health_summary: dict[str, Any], cloud_summary: dict[str, Any]) -> dict[str, Any]:
+    reason_counts = health_summary.get("reason_counts", {}) or {}
+    non_ok_reasons = {
+        reason: count
+        for reason, count in reason_counts.items()
+        if str(reason).strip() not in {"", "<empty>", "ok"}
+    }
+    counter_max = {
+        "provider_stale_count_max": int(health_summary.get("provider_stale_count_max", 0) or 0),
+        "provider_invalid_count_max": int(health_summary.get("provider_invalid_count_max", 0) or 0),
+        "occupied_skip_count_max": int(health_summary.get("occupied_skip_count_max", 0) or 0),
+    }
+    material_unknown = (
+        float(health_summary.get("unknown_ratio_max", 0.0) or 0.0) >= 0.10
+        or float(cloud_summary.get("unknown_ratio", 0.0) or 0.0) >= 0.10
+    )
+    stale_cells = float(cloud_summary.get("stale_ratio", 0.0) or 0.0) > 0.0
+    provider_fault_counters = (
+        counter_max["provider_stale_count_max"] > 0
+        or counter_max["provider_invalid_count_max"] > 0
+    )
+    return {
+        "has_explanation": bool(non_ok_reasons or provider_fault_counters or material_unknown or stale_cells),
+        "non_ok_reasons": non_ok_reasons,
+        "counter_max": counter_max,
+        "material_unknown": material_unknown,
+        "stale_cells": stale_cells,
+    }
+
+
+def plot_p0_baseline_distribution_delta(
+    current_rows: list[dict[str, Any]],
+    baseline_rows: list[dict[str, Any]],
+    comparison: dict[str, Any],
+    path: Path,
+) -> bool:
+    current_pl = valid_metric_values(current_rows, "pl")
+    baseline_pl = valid_metric_values(baseline_rows, "pl")
+    current_cost = valid_metric_values(current_rows, "c_pi")
+    baseline_cost = valid_metric_values(baseline_rows, "c_pi")
+    if not (current_pl or baseline_pl or current_cost or baseline_cost):
+        return False
+
+    fig, axes = plt.subplots(2, 2, figsize=(12, 8))
+    if baseline_pl:
+        axes[0][0].hist(baseline_pl, bins=40, color="#94a3b8", alpha=0.7, label="P0-1")
+    if current_pl:
+        axes[0][0].hist(current_pl, bins=40, color="#2563eb", alpha=0.65, label="P0-2")
+    axes[0][0].set_title("PL distribution")
+    axes[0][0].set_xlabel("PL [m]")
+    axes[0][0].set_ylabel("valid cells")
+    axes[0][0].legend(loc="best")
+
+    if baseline_cost:
+        axes[0][1].hist(baseline_cost, bins=40, color="#94a3b8", alpha=0.7, label="P0-1")
+    if current_cost:
+        axes[0][1].hist(current_cost, bins=40, color="#16a34a", alpha=0.65, label="P0-2")
+    axes[0][1].set_title("Risk cost distribution")
+    axes[0][1].set_xlabel("c_pi")
+    axes[0][1].legend(loc="best")
+
+    deltas = comparison.get("deltas", {}) or {}
+    delta_labels = ["pl_mean", "c_pi_mean"]
+    delta_values = [finite_float(deltas.get(label)) or 0.0 for label in delta_labels]
+    colors = ["#2563eb" if value >= 0.0 else "#dc2626" for value in delta_values]
+    axes[1][0].bar(delta_labels, delta_values, color=colors)
+    axes[1][0].axhline(0.0, color="#111827", lw=0.8)
+    axes[1][0].set_title("P0-2 minus P0-1 mean delta")
+    axes[1][0].set_ylabel("delta")
+
+    current = comparison.get("current", {}) or {}
+    baseline = comparison.get("baseline", {}) or {}
+    ratio_labels = ["valid_ratio", "unknown_ratio", "stale_ratio"]
+    x = np.arange(len(ratio_labels))
+    width = 0.36
+    baseline_ratios = [finite_float(baseline.get(label)) or 0.0 for label in ratio_labels]
+    current_ratios = [finite_float(current.get(label)) or 0.0 for label in ratio_labels]
+    axes[1][1].bar(x - width / 2.0, baseline_ratios, width, color="#94a3b8", label="P0-1")
+    axes[1][1].bar(x + width / 2.0, current_ratios, width, color="#0f766e", label="P0-2")
+    axes[1][1].set_xticks(x, ratio_labels, rotation=15)
+    axes[1][1].set_ylim(0.0, 1.05)
+    axes[1][1].set_title("Validity ratios")
+    axes[1][1].legend(loc="best")
+
+    for ax in axes.flat:
+        ax.grid(True, axis="y", alpha=0.25)
+    fig.tight_layout()
+    fig.savefig(path, dpi=160)
+    plt.close(fig)
+    return True
+
+
 def trajectory_comparison(
     p0_rows: list[dict[str, Any]],
     baseline_rows: list[dict[str, Any]],
@@ -1224,7 +1399,8 @@ def trajectory_comparison(
     }
 
 
-def validate_p0_1_requirements(
+def validate_p0_requirements(
+    experiment_label: str,
     manifest: dict[str, Any],
     health_summary: dict[str, Any],
     cloud_summary: dict[str, Any],
@@ -1232,40 +1408,66 @@ def validate_p0_1_requirements(
     inconclusive: list[str],
 ) -> None:
     if not manifest:
-        inconclusive.append("P0-1 checks require manifest")
+        inconclusive.append(f"{experiment_label} checks require manifest")
     elif manifest.get("p0.enable_risk_grid") is not True:
-        failures.append("P0-1 manifest p0.enable_risk_grid is not true")
+        failures.append(f"{experiment_label} manifest p0.enable_risk_grid is not true")
 
     row_count = int(health_summary.get("row_count", 0) or 0)
     if row_count <= 0:
-        failures.append("P0-1 risk_grid_health has no rows")
+        failures.append(f"{experiment_label} risk_grid_health has no rows")
         return
     if int(health_summary.get("ready_false_max_consecutive", 0) or 0) >= 3:
-        failures.append("P0-1 risk_grid_health stayed ready=false for at least 3 consecutive samples")
+        failures.append(f"{experiment_label} risk_grid_health stayed ready=false for at least 3 consecutive samples")
     if float(health_summary.get("ready_false_ratio", 0.0) or 0.0) > 0.10:
-        failures.append("P0-1 risk_grid_health ready=false ratio exceeded 10%")
+        failures.append(f"{experiment_label} risk_grid_health ready=false ratio exceeded 10%")
     if int(health_summary.get("stale_true_max_consecutive", 0) or 0) >= 3:
-        failures.append("P0-1 risk_grid_health stayed stale=true for at least 3 consecutive samples")
+        failures.append(f"{experiment_label} risk_grid_health stayed stale=true for at least 3 consecutive samples")
     if float(health_summary.get("stale_true_ratio", 0.0) or 0.0) > 0.10:
-        failures.append("P0-1 risk_grid_health stale=true ratio exceeded 10%")
+        failures.append(f"{experiment_label} risk_grid_health stale=true ratio exceeded 10%")
+    valid_ratio_mean = finite_float(health_summary.get("valid_ratio_mean"))
+    if valid_ratio_mean is None:
+        inconclusive.append(f"{experiment_label} risk_grid_health valid_ratio_mean is unavailable")
+    elif valid_ratio_mean <= 0.60:
+        failures.append(f"{experiment_label} risk_grid_health valid_ratio_mean is not above 0.60")
     if int(health_summary.get("full_unknown_max_consecutive", 0) or 0) >= 3:
-        failures.append("P0-1 risk_grid_health shows periodic/full-frame unknown for at least 3 consecutive samples")
+        failures.append(f"{experiment_label} risk_grid_health shows periodic/full-frame unknown for at least 3 consecutive samples")
     if float(health_summary.get("full_unknown_ratio", 0.0) or 0.0) > 0.25:
-        failures.append("P0-1 risk_grid_health full-frame unknown ratio exceeded 25%")
+        failures.append(f"{experiment_label} risk_grid_health full-frame unknown ratio exceeded 25%")
     reason_counts = health_summary.get("reason_counts", {}) or {}
     if reason_counts.get("<empty>", 0) or reason_counts.get("", 0):
-        failures.append("P0-1 risk_grid_health contains empty reason")
+        failures.append(f"{experiment_label} risk_grid_health contains empty reason")
     provider_stale = int(health_summary.get("provider_stale_count_max", 0) or 0)
     provider_invalid = int(health_summary.get("provider_invalid_count_max", 0) or 0)
     occupied_skip = int(health_summary.get("occupied_skip_count_max", 0) or 0)
     unknown_ratio_max = float(health_summary.get("unknown_ratio_max", 0.0) or 0.0)
     reasons_only_ok = set(reason_counts) <= {"ok"}
     if reasons_only_ok and (provider_stale > 0 or provider_invalid > 0):
-        failures.append("P0-1 health reason is always ok while provider counters report stale/invalid cells")
+        failures.append(f"{experiment_label} health reason is always ok while provider counters report stale/invalid cells")
     if reasons_only_ok and occupied_skip > 0 and unknown_ratio_max >= 0.10:
-        failures.append("P0-1 health reason is always ok while occupied skip creates material unknown area")
+        failures.append(f"{experiment_label} health reason is always ok while occupied skip creates material unknown area")
     if int(cloud_summary.get("row_count", 0) or 0) <= 0:
-        failures.append("P0-1 predicted PL cloud has no plottable rows")
+        failures.append(f"{experiment_label} predicted PL cloud has no plottable rows")
+
+
+def validate_p0_2_distribution(
+    comparison: dict[str, Any],
+    explanation: dict[str, Any],
+    failures: list[str],
+    inconclusive: list[str],
+) -> None:
+    baseline_row_count = int(((comparison.get("baseline") or {}).get("row_count", 0)) or 0)
+    current_row_count = int(((comparison.get("current") or {}).get("row_count", 0)) or 0)
+    if baseline_row_count <= 0:
+        inconclusive.append("P0-2 baseline distribution comparison has no P0-1 PL/cost rows")
+        return
+    if current_row_count <= 0:
+        failures.append("P0-2 distribution comparison has no current PL/cost rows")
+        return
+    if comparison.get("meaningfully_higher") is not True and explanation.get("has_explanation") is not True:
+        failures.append(
+            "P0-2 PL/cost distribution is not meaningfully higher than P0-1 "
+            "and the analyzer found no health/counter explanation"
+        )
 
 
 def topic_health_from_metadata(
@@ -1451,6 +1653,7 @@ def next_debug_branch(
             "B0-3": "continue_to_B0-4_fallback_baseline",
             "B0-4": "continue_to_P0-1_open_sky_data_only_validation",
             "P0-1": "continue_to_P0-2_degraded_gnss_lidar_good_validation",
+            "P0-2": "continue_to_P0-3_corridor_degeneracy_field",
         }
         return pass_branches.get(
             str(experiment_id).strip().upper(),
@@ -1465,7 +1668,7 @@ def next_debug_branch(
     if "p5" in text:
         return "debug_p5_switch_leakage"
     if "risk_grid_health" in text or "unknown" in text or "stale" in text:
-        return "debug_P0-1_risk_grid_health"
+        return "debug_P0_risk_grid_health"
     return "debug_B0-1_baseline"
 
 
@@ -1474,9 +1677,11 @@ def analyze(args: argparse.Namespace) -> dict[str, Any]:
     bag_dir = Path(args.bag_dir).expanduser().resolve() if args.bag_dir else None
     csv_dir, figures_dir, metadata_dir = ensure_dirs(export_dir)
     prefix = artifact_prefix(args.experiment_id)
-    p0_1 = is_experiment(args, "P0-1")
-    topic_expectations = P0_TOPIC_EXPECTATIONS if p0_1 else CORE_TOPIC_EXPECTATIONS
-    topic_activity_topics = P0_TOPIC_ACTIVITY_TOPICS if p0_1 else TOPIC_ACTIVITY_TOPICS
+    p0_phase = is_p0_experiment(args)
+    p0_2 = is_experiment(args, "P0-2")
+    experiment_label = str(args.experiment_id).strip().upper()
+    topic_expectations = P0_TOPIC_EXPECTATIONS if p0_phase else CORE_TOPIC_EXPECTATIONS
+    topic_activity_topics = P0_TOPIC_ACTIVITY_TOPICS if p0_phase else TOPIC_ACTIVITY_TOPICS
 
     failures: list[str] = []
     warnings: list[str] = []
@@ -1491,7 +1696,7 @@ def analyze(args: argparse.Namespace) -> dict[str, Any]:
     )
     integrity_rows, integrity_summary = read_integrity_csv(export_dir / "test_planner_integrity_validation.csv")
 
-    validate_manifest(manifest, failures, inconclusive, require_p0_enabled=p0_1)
+    validate_manifest(manifest, failures, inconclusive, require_p0_enabled=p0_phase)
     validate_validator(validator_summary, failures, inconclusive)
     topic_health = validate_topic_health(
         metadata,
@@ -1522,7 +1727,8 @@ def analyze(args: argparse.Namespace) -> dict[str, Any]:
     p0_csv_artifacts: list[str] = []
     p0_figure_artifacts: list[str] = []
     p0_required_figures: list[Path] = []
-    if p0_1:
+    baseline_scenario_data: dict[str, Any] = {}
+    if p0_phase:
         p0_artifacts, p0_error = (
             read_p0_bag_artifacts(bag_dir, metadata)
             if bag_dir is not None
@@ -1537,7 +1743,8 @@ def analyze(args: argparse.Namespace) -> dict[str, Any]:
         trajectory_rows = list(p0_artifacts.get("trajectory_rows", []) or [])
 
         baseline_trajectory_rows: list[dict[str, Any]] = []
-        baseline_scenario_data: dict[str, Any] = {}
+        baseline_artifacts: dict[str, Any] = {}
+        baseline_export_dir = Path(args.baseline_export_dir).expanduser().resolve() if args.baseline_export_dir else None
         baseline_bag_dir = Path(args.baseline_bag_dir).expanduser().resolve() if args.baseline_bag_dir else None
         if baseline_bag_dir is not None:
             baseline_metadata = read_bag_metadata(baseline_bag_dir)
@@ -1557,15 +1764,34 @@ def analyze(args: argparse.Namespace) -> dict[str, Any]:
 
         p0_health_summary = summarize_p0_health(health_rows)
         p0_cloud_summary = summarize_p0_cloud_rows(pl_cloud_rows)
+        p0_validity_cloud_summary = summarize_p0_cloud_rows(validity_cloud_rows)
         baseline_comparison = trajectory_comparison(trajectory_rows, baseline_trajectory_rows)
+        baseline_cloud_rows, baseline_cloud_source = read_baseline_p0_cloud_rows(
+            baseline_export_dir,
+            baseline_artifacts,
+        )
+        baseline_distribution = baseline_distribution_comparison(
+            pl_cloud_rows,
+            baseline_cloud_rows,
+            baseline_cloud_source,
+        )
+        p0_distribution_explanation = p0_difference_explanation(p0_health_summary, p0_cloud_summary)
 
-        validate_p0_1_requirements(
+        validate_p0_requirements(
+            experiment_label,
             manifest,
             p0_health_summary,
             p0_cloud_summary,
             failures,
             inconclusive,
         )
+        if p0_2:
+            validate_p0_2_distribution(
+                baseline_distribution,
+                p0_distribution_explanation,
+                failures,
+                inconclusive,
+            )
 
         health_path = csv_dir / f"{prefix}_p0_risk_grid_health.csv"
         cloud_path = csv_dir / f"{prefix}_pl_cloud.csv"
@@ -1639,6 +1865,7 @@ def analyze(args: argparse.Namespace) -> dict[str, Any]:
         reason_figure_path = figures_dir / f"{prefix}_p0_reason_histogram.png"
         distribution_figure_path = figures_dir / f"{prefix}_pl_cost_distribution.png"
         snapshot_figure_path = figures_dir / f"{prefix}_risk_grid_snapshot_overview.png"
+        baseline_delta_figure_path = figures_dir / f"{prefix}_vs_p0_1_delta.png"
         if plot_p0_health_timeline(health_rows, health_figure_path):
             p0_figure_artifacts.append(str(health_figure_path))
         if plot_p0_reason_histogram(health_rows, reason_figure_path):
@@ -1649,24 +1876,37 @@ def analyze(args: argparse.Namespace) -> dict[str, Any]:
             p0_figure_artifacts.append(str(snapshot_figure_path))
         else:
             warnings.append("P0 risk grid snapshot overview was not generated because no plottable cloud rows were available")
+        if p0_2:
+            if plot_p0_baseline_distribution_delta(
+                pl_cloud_rows,
+                baseline_cloud_rows,
+                baseline_distribution,
+                baseline_delta_figure_path,
+            ):
+                p0_figure_artifacts.append(str(baseline_delta_figure_path))
+            else:
+                warnings.append("P0-2 vs P0-1 delta figure was not generated because PL/cost rows were unavailable")
         p0_required_figures.extend(
             [
                 health_figure_path,
                 reason_figure_path,
                 distribution_figure_path,
+                snapshot_figure_path,
             ]
         )
+        if p0_2:
+            p0_required_figures.append(baseline_delta_figure_path)
 
         p0_summary = {
             "health": p0_health_summary,
             "pl_cloud": p0_cloud_summary,
-            "validity_cloud": summarize_p0_cloud_rows(validity_cloud_rows),
+            "validity_cloud": p0_validity_cloud_summary,
             "cloud_summary_rows": len(cloud_summary_rows),
             "topics_seen": p0_artifacts.get("topics_seen", []),
             "baseline_comparison": baseline_comparison,
-            "baseline_export_dir": str(Path(args.baseline_export_dir).expanduser().resolve())
-            if args.baseline_export_dir
-            else "",
+            "baseline_distribution_comparison": baseline_distribution if p0_2 else {},
+            "baseline_distribution_explanation": p0_distribution_explanation if p0_2 else {},
+            "baseline_export_dir": str(baseline_export_dir) if baseline_export_dir is not None else "",
             "baseline_bag_dir": str(baseline_bag_dir) if baseline_bag_dir is not None else "",
         }
 
@@ -1704,7 +1944,7 @@ def analyze(args: argparse.Namespace) -> dict[str, Any]:
         scenario_data, scenario_error = read_scenario_plot_data(bag_dir, metadata)
         if scenario_error:
             warnings.append(f"scenario top-down plot data could not be read: {scenario_error}")
-        if p0_1 and baseline_scenario_data.get("truth_xy"):
+        if p0_phase and baseline_scenario_data.get("truth_xy"):
             scenario_data["baseline_truth_xy"] = baseline_scenario_data.get("truth_xy", [])
         if plot_scenario_topdown(scenario_data, scenario_figure_path):
             figures.append(str(scenario_figure_path))
@@ -1737,6 +1977,8 @@ def analyze(args: argparse.Namespace) -> dict[str, Any]:
 
     p5_rows, p5_error = read_p5_status_messages(bag_dir, metadata) if bag_dir is not None else ([], "")
     p5_summary = validate_p5_status(p5_rows, p5_error, failures, inconclusive)
+    if p0_2 and p5_summary.get("action_counts"):
+        failures.append("P0-2 P5 status reported actions while P5 is disabled")
     csv_artifacts = [str(topic_counts_path)]
     csv_artifacts.extend(p0_csv_artifacts)
     if p5_rows:
@@ -1768,7 +2010,7 @@ def analyze(args: argparse.Namespace) -> dict[str, Any]:
                 inconclusive.append(
                     f"B0-4 required figure was not generated or is empty: {figure_path}"
                 )
-    if p0_1:
+    if p0_phase:
         figures.extend(p0_figure_artifacts)
         required_figures = [
             scenario_figure_path,
@@ -1778,7 +2020,7 @@ def analyze(args: argparse.Namespace) -> dict[str, Any]:
         for figure_path in required_figures:
             if not figure_path.is_file() or figure_path.stat().st_size <= 0:
                 inconclusive.append(
-                    f"P0-1 required figure was not generated or is empty: {figure_path}"
+                    f"{experiment_label} required figure was not generated or is empty: {figure_path}"
                 )
 
     status = "PASS"
