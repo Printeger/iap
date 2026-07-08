@@ -1162,7 +1162,40 @@ def plot_p0_pl_cost_distribution(rows: list[dict[str, Any]], path: Path) -> bool
     pl = valid_metric_values(rows, "pl")
     cost = valid_metric_values(rows, "c_pi")
     if not pl and not cost:
-        return False
+        valid_count = sum(1 for row in rows if int(row.get("valid", 0) or 0) == 1)
+        unknown_count = sum(1 for row in rows if int(row.get("unknown", 0) or 0) == 1)
+        stale_count = sum(1 for row in rows if int(row.get("stale", 0) or 0) == 1)
+        invalid_count = max(0, len(rows) - valid_count)
+        fig, axes = plt.subplots(1, 2, figsize=(11, 4.5))
+        axes[0].axis("off")
+        axes[0].text(
+            0.02,
+            0.78,
+            "No valid PL/cost cells",
+            fontsize=14,
+            fontweight="bold",
+            transform=axes[0].transAxes,
+        )
+        axes[0].text(
+            0.02,
+            0.48,
+            f"total={len(rows)}\nvalid={valid_count}\nunknown={unknown_count}\nstale={stale_count}",
+            fontsize=11,
+            transform=axes[0].transAxes,
+        )
+        axes[0].set_title("Predicted PL distribution")
+        axes[1].bar(
+            ["valid", "invalid", "unknown", "stale"],
+            [valid_count, invalid_count, unknown_count, stale_count],
+            color=["#16a34a", "#dc2626", "#f97316", "#7c3aed"],
+        )
+        axes[1].set_ylabel("cells")
+        axes[1].set_title("Validity counts")
+        axes[1].grid(True, axis="y", alpha=0.25)
+        fig.tight_layout()
+        fig.savefig(path, dpi=160)
+        plt.close(fig)
+        return True
     fig, axes = plt.subplots(1, 2, figsize=(11, 4.5))
     if pl:
         axes[0].hist(pl, bins=40, color="#2563eb", alpha=0.8)
