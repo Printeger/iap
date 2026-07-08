@@ -110,6 +110,16 @@ def is_p0_experiment(args: argparse.Namespace) -> bool:
     return re.fullmatch(r"P0-\d+", str(args.experiment_id).strip().upper()) is not None
 
 
+def p0_phase_number(experiment_id: Any) -> int | None:
+    match = re.fullmatch(r"P0-(\d+)", str(experiment_id).strip().upper())
+    return int(match.group(1)) if match else None
+
+
+def p0_odom_gate_required(experiment_id: Any) -> bool:
+    phase = p0_phase_number(experiment_id)
+    return phase is not None and phase >= 2
+
+
 def read_json_if_exists(path: Path) -> dict[str, Any]:
     if not path.is_file():
         return {}
@@ -1326,13 +1336,15 @@ def baseline_distribution_comparison(
     return comparison
 
 
-def read_baseline_p0_cloud_rows(
-    baseline_export_dir: Path | None,
-    baseline_artifacts: dict[str, Any],
+def read_reference_p0_cloud_rows(
+    reference_export_dir: Path | None,
+    reference_artifacts: dict[str, Any],
+    preferred_prefix: str,
+    fallback_source: str,
 ) -> tuple[list[dict[str, Any]], str]:
-    if baseline_export_dir is not None:
-        csv_dir = baseline_export_dir / "csv"
-        candidates = [csv_dir / "p0_1_pl_cloud.csv"]
+    if reference_export_dir is not None:
+        csv_dir = reference_export_dir / "csv"
+        candidates = [csv_dir / f"{preferred_prefix}_pl_cloud.csv"]
         candidates.extend(sorted(csv_dir.glob("*_pl_cloud.csv")))
         seen: set[Path] = set()
         for candidate in candidates:
@@ -1342,9 +1354,9 @@ def read_baseline_p0_cloud_rows(
             rows = read_csv_rows(candidate)
             if rows:
                 return rows, str(candidate)
-    rows = list(baseline_artifacts.get("pl_cloud_rows", []) or [])
+    rows = list(reference_artifacts.get("pl_cloud_rows", []) or [])
     if rows:
-        return rows, "baseline bag latest predicted PL cloud"
+        return rows, fallback_source
     return [], ""
 
 
@@ -1383,6 +1395,9 @@ def plot_p0_baseline_distribution_delta(
     baseline_rows: list[dict[str, Any]],
     comparison: dict[str, Any],
     path: Path,
+    *,
+    current_label: str = "current",
+    baseline_label: str = "baseline",
 ) -> bool:
     current_pl = valid_metric_values(current_rows, "pl")
     baseline_pl = valid_metric_values(baseline_rows, "pl")
@@ -1393,18 +1408,18 @@ def plot_p0_baseline_distribution_delta(
 
     fig, axes = plt.subplots(2, 2, figsize=(12, 8))
     if baseline_pl:
-        axes[0][0].hist(baseline_pl, bins=40, color="#94a3b8", alpha=0.7, label="P0-1")
+        axes[0][0].hist(baseline_pl, bins=40, color="#94a3b8", alpha=0.7, label=baseline_label)
     if current_pl:
-        axes[0][0].hist(current_pl, bins=40, color="#2563eb", alpha=0.65, label="P0-2")
+        axes[0][0].hist(current_pl, bins=40, color="#2563eb", alpha=0.65, label=current_label)
     axes[0][0].set_title("PL distribution")
     axes[0][0].set_xlabel("PL [m]")
     axes[0][0].set_ylabel("valid cells")
     axes[0][0].legend(loc="best")
 
     if baseline_cost:
-        axes[0][1].hist(baseline_cost, bins=40, color="#94a3b8", alpha=0.7, label="P0-1")
+        axes[0][1].hist(baseline_cost, bins=40, color="#94a3b8", alpha=0.7, label=baseline_label)
     if current_cost:
-        axes[0][1].hist(current_cost, bins=40, color="#16a34a", alpha=0.65, label="P0-2")
+        axes[0][1].hist(current_cost, bins=40, color="#16a34a", alpha=0.65, label=current_label)
     axes[0][1].set_title("Risk cost distribution")
     axes[0][1].set_xlabel("c_pi")
     axes[0][1].legend(loc="best")
@@ -1415,7 +1430,7 @@ def plot_p0_baseline_distribution_delta(
     colors = ["#2563eb" if value >= 0.0 else "#dc2626" for value in delta_values]
     axes[1][0].bar(delta_labels, delta_values, color=colors)
     axes[1][0].axhline(0.0, color="#111827", lw=0.8)
-    axes[1][0].set_title("P0-2 minus P0-1 mean delta")
+    axes[1][0].set_title(f"{current_label} minus {baseline_label} mean delta")
     axes[1][0].set_ylabel("delta")
 
     current = comparison.get("current", {}) or {}
@@ -1425,8 +1440,8 @@ def plot_p0_baseline_distribution_delta(
     width = 0.36
     baseline_ratios = [finite_float(baseline.get(label)) or 0.0 for label in ratio_labels]
     current_ratios = [finite_float(current.get(label)) or 0.0 for label in ratio_labels]
-    axes[1][1].bar(x - width / 2.0, baseline_ratios, width, color="#94a3b8", label="P0-1")
-    axes[1][1].bar(x + width / 2.0, current_ratios, width, color="#0f766e", label="P0-2")
+    axes[1][1].bar(x - width / 2.0, baseline_ratios, width, color="#94a3b8", label=baseline_label)
+    axes[1][1].bar(x + width / 2.0, current_ratios, width, color="#0f766e", label=current_label)
     axes[1][1].set_xticks(x, ratio_labels, rotation=15)
     axes[1][1].set_ylim(0.0, 1.05)
     axes[1][1].set_title("Validity ratios")
@@ -1858,23 +1873,31 @@ def validate_p0_requirements(
         failures.append(f"{experiment_label} predicted PL cloud has no plottable rows")
 
 
-def validate_p0_2_distribution(
+def validate_p0_distribution_comparison(
     comparison: dict[str, Any],
     explanation: dict[str, Any],
     failures: list[str],
     inconclusive: list[str],
+    *,
+    experiment_label: str,
+    reference_label: str,
+    require_meaningfully_higher: bool,
 ) -> None:
     baseline_row_count = int(((comparison.get("baseline") or {}).get("row_count", 0)) or 0)
     current_row_count = int(((comparison.get("current") or {}).get("row_count", 0)) or 0)
     if baseline_row_count <= 0:
-        inconclusive.append("P0-2 baseline distribution comparison has no P0-1 PL/cost rows")
+        inconclusive.append(f"{experiment_label} distribution comparison has no {reference_label} PL/cost rows")
         return
     if current_row_count <= 0:
-        failures.append("P0-2 distribution comparison has no current PL/cost rows")
+        failures.append(f"{experiment_label} distribution comparison has no current PL/cost rows")
         return
-    if comparison.get("meaningfully_higher") is not True and explanation.get("has_explanation") is not True:
+    if (
+        require_meaningfully_higher
+        and comparison.get("meaningfully_higher") is not True
+        and explanation.get("has_explanation") is not True
+    ):
         failures.append(
-            "P0-2 PL/cost distribution is not meaningfully higher than P0-1 "
+            f"{experiment_label} PL/cost distribution is not meaningfully higher than {reference_label} "
             "and the analyzer found no health/counter explanation"
         )
 
@@ -2063,6 +2086,7 @@ def next_debug_branch(
             "B0-4": "continue_to_P0-1_open_sky_data_only_validation",
             "P0-1": "continue_to_P0-2_degraded_gnss_lidar_good_validation",
             "P0-2": "continue_to_P0-3_corridor_degeneracy_field",
+            "P0-3": "continue_to_P0-4_next_phase_validation",
         }
         return pass_branches.get(
             str(experiment_id).strip().upper(),
@@ -2089,7 +2113,8 @@ def analyze(args: argparse.Namespace) -> dict[str, Any]:
     csv_dir, figures_dir, metadata_dir = ensure_dirs(export_dir)
     prefix = artifact_prefix(args.experiment_id)
     p0_phase = is_p0_experiment(args)
-    p0_2 = is_experiment(args, "P0-2")
+    p0_phase_index = p0_phase_number(args.experiment_id)
+    p0_requires_odom_gate = p0_odom_gate_required(args.experiment_id)
     experiment_label = str(args.experiment_id).strip().upper()
     topic_expectations = P0_TOPIC_EXPECTATIONS if p0_phase else CORE_TOPIC_EXPECTATIONS
     topic_activity_topics = P0_TOPIC_ACTIVITY_TOPICS if p0_phase else TOPIC_ACTIVITY_TOPICS
@@ -2175,6 +2200,18 @@ def analyze(args: argparse.Namespace) -> dict[str, Any]:
             if baseline_scenario_error:
                 warnings.append(f"baseline top-down plot data could not be read: {baseline_scenario_error}")
 
+        p0_2_artifacts: dict[str, Any] = {}
+        p0_2_export_dir = Path(args.p0_2_export_dir).expanduser().resolve() if args.p0_2_export_dir else None
+        p0_2_bag_dir = Path(args.p0_2_bag_dir).expanduser().resolve() if args.p0_2_bag_dir else None
+        if p0_phase_index is not None and p0_phase_index >= 3:
+            if p0_2_export_dir is None and p0_2_bag_dir is None:
+                inconclusive.append(f"{experiment_label} comparison requires a healthy P0-2 export or bag reference")
+            if p0_2_bag_dir is not None:
+                p0_2_metadata = read_bag_metadata(p0_2_bag_dir)
+                p0_2_artifacts, p0_2_error = read_p0_bag_artifacts(p0_2_bag_dir, p0_2_metadata)
+                if p0_2_error:
+                    warnings.append(f"P0-2 reference artifacts could not be read: {p0_2_error}")
+
         p0_health_summary = summarize_p0_health(health_rows)
         p0_cloud_summary = summarize_p0_cloud_rows(pl_cloud_rows)
         p0_validity_cloud_summary = summarize_p0_cloud_rows(validity_cloud_rows)
@@ -2182,15 +2219,33 @@ def analyze(args: argparse.Namespace) -> dict[str, Any]:
         odom_health_summary = summarize_odom_health(odom_rows, odom_truth_rows, odom_aligned_rows)
         startup_correlation = p0_health_startup_correlation(health_rows, odom_health_summary)
         baseline_comparison = trajectory_comparison(trajectory_rows, baseline_trajectory_rows)
-        baseline_cloud_rows, baseline_cloud_source = read_baseline_p0_cloud_rows(
+        baseline_cloud_rows, baseline_cloud_source = read_reference_p0_cloud_rows(
             baseline_export_dir,
             baseline_artifacts,
+            "p0_1",
+            "P0-1 bag latest predicted PL cloud",
         )
         baseline_distribution = baseline_distribution_comparison(
             pl_cloud_rows,
             baseline_cloud_rows,
             baseline_cloud_source,
         )
+        p0_2_reference_cloud_rows, p0_2_reference_cloud_source = read_reference_p0_cloud_rows(
+            p0_2_export_dir,
+            p0_2_artifacts,
+            "p0_2",
+            "P0-2 bag latest predicted PL cloud",
+        )
+        p0_2_reference_distribution = baseline_distribution_comparison(
+            pl_cloud_rows,
+            p0_2_reference_cloud_rows,
+            p0_2_reference_cloud_source,
+        )
+        p0_distribution_comparisons: dict[str, Any] = {
+            "p0_1": baseline_distribution,
+        }
+        if p0_phase_index is not None and p0_phase_index >= 3:
+            p0_distribution_comparisons["p0_2"] = p0_2_reference_distribution
         p0_distribution_explanation = p0_difference_explanation(p0_health_summary, p0_cloud_summary)
 
         validate_p0_requirements(
@@ -2201,21 +2256,34 @@ def analyze(args: argparse.Namespace) -> dict[str, Any]:
             failures,
             inconclusive,
         )
-        if p0_2:
-            validate_p0_2_distribution(
+        if p0_requires_odom_gate:
+            validate_p0_distribution_comparison(
                 baseline_distribution,
                 p0_distribution_explanation,
                 failures,
                 inconclusive,
+                experiment_label=experiment_label,
+                reference_label="P0-1",
+                require_meaningfully_higher=True,
             )
+            if p0_phase_index is not None and p0_phase_index >= 3:
+                validate_p0_distribution_comparison(
+                    p0_2_reference_distribution,
+                    p0_distribution_explanation,
+                    failures,
+                    inconclusive,
+                    experiment_label=experiment_label,
+                    reference_label="P0-2",
+                    require_meaningfully_higher=False,
+                )
             if odom_health_summary.get("status") == "INCONCLUSIVE":
                 inconclusive.append(
-                    "P0-2 odom health could not be evaluated: "
+                    f"{experiment_label} odom health could not be evaluated: "
                     + ", ".join(str(item) for item in odom_health_summary.get("drift_reasons", []))
                 )
             elif odom_health_summary.get("is_drift") is True:
                 failures.append(
-                    "P0-2 odom health classified drift: "
+                    f"{experiment_label} odom health classified drift: "
                     + ", ".join(str(item) for item in odom_health_summary.get("drift_reasons", []))
                 )
 
@@ -2313,7 +2381,8 @@ def analyze(args: argparse.Namespace) -> dict[str, Any]:
         reason_figure_path = figures_dir / f"{prefix}_p0_reason_histogram.png"
         distribution_figure_path = figures_dir / f"{prefix}_pl_cost_distribution.png"
         snapshot_figure_path = figures_dir / f"{prefix}_risk_grid_snapshot_overview.png"
-        baseline_delta_figure_path = figures_dir / f"{prefix}_vs_p0_1_delta.png"
+        p0_1_delta_figure_path = figures_dir / f"{prefix}_vs_p0_1_delta.png"
+        p0_2_delta_figure_path = figures_dir / f"{prefix}_vs_p0_2_delta.png"
         odom_topdown_figure_path = figures_dir / f"{prefix}_odom_truth_topdown.png"
         odom_error_figure_path = figures_dir / f"{prefix}_odom_error_timeline.png"
         health_vs_odom_figure_path = figures_dir / f"{prefix}_p0_health_vs_odom_error.png"
@@ -2339,16 +2408,30 @@ def analyze(args: argparse.Namespace) -> dict[str, Any]:
             p0_figure_artifacts.append(str(health_vs_odom_figure_path))
         else:
             warnings.append("P0 health vs odom error plot was not generated because aligned rows were unavailable")
-        if p0_2:
+        if p0_requires_odom_gate:
             if plot_p0_baseline_distribution_delta(
                 pl_cloud_rows,
                 baseline_cloud_rows,
                 baseline_distribution,
-                baseline_delta_figure_path,
+                p0_1_delta_figure_path,
+                current_label=experiment_label,
+                baseline_label="P0-1",
             ):
-                p0_figure_artifacts.append(str(baseline_delta_figure_path))
+                p0_figure_artifacts.append(str(p0_1_delta_figure_path))
             else:
-                warnings.append("P0-2 vs P0-1 delta figure was not generated because PL/cost rows were unavailable")
+                warnings.append(f"{experiment_label} vs P0-1 delta figure was not generated because PL/cost rows were unavailable")
+        if p0_phase_index is not None and p0_phase_index >= 3:
+            if plot_p0_baseline_distribution_delta(
+                pl_cloud_rows,
+                p0_2_reference_cloud_rows,
+                p0_2_reference_distribution,
+                p0_2_delta_figure_path,
+                current_label=experiment_label,
+                baseline_label="P0-2",
+            ):
+                p0_figure_artifacts.append(str(p0_2_delta_figure_path))
+            else:
+                warnings.append(f"{experiment_label} vs P0-2 delta figure was not generated because PL/cost rows were unavailable")
         p0_required_figures.extend(
             [
                 health_figure_path,
@@ -2357,8 +2440,8 @@ def analyze(args: argparse.Namespace) -> dict[str, Any]:
                 snapshot_figure_path,
             ]
         )
-        if p0_2:
-            p0_required_figures.append(baseline_delta_figure_path)
+        if p0_requires_odom_gate:
+            p0_required_figures.append(p0_1_delta_figure_path)
             p0_required_figures.extend(
                 [
                     odom_topdown_figure_path,
@@ -2366,6 +2449,8 @@ def analyze(args: argparse.Namespace) -> dict[str, Any]:
                     health_vs_odom_figure_path,
                 ]
             )
+        if p0_phase_index is not None and p0_phase_index >= 3:
+            p0_required_figures.append(p0_2_delta_figure_path)
 
         p0_summary = {
             "health": p0_health_summary,
@@ -2377,10 +2462,13 @@ def analyze(args: argparse.Namespace) -> dict[str, Any]:
             "cloud_summary_rows": len(cloud_summary_rows),
             "topics_seen": p0_artifacts.get("topics_seen", []),
             "baseline_comparison": baseline_comparison,
-            "baseline_distribution_comparison": baseline_distribution if p0_2 else {},
-            "baseline_distribution_explanation": p0_distribution_explanation if p0_2 else {},
+            "baseline_distribution_comparison": baseline_distribution if p0_requires_odom_gate else {},
+            "baseline_distribution_explanation": p0_distribution_explanation if p0_requires_odom_gate else {},
+            "comparison_runs": p0_distribution_comparisons if p0_requires_odom_gate else {},
             "baseline_export_dir": str(baseline_export_dir) if baseline_export_dir is not None else "",
             "baseline_bag_dir": str(baseline_bag_dir) if baseline_bag_dir is not None else "",
+            "p0_2_reference_export_dir": str(p0_2_export_dir) if p0_2_export_dir is not None else "",
+            "p0_2_reference_bag_dir": str(p0_2_bag_dir) if p0_2_bag_dir is not None else "",
         }
 
     topic_count_rows = [
@@ -2450,8 +2538,8 @@ def analyze(args: argparse.Namespace) -> dict[str, Any]:
 
     p5_rows, p5_error = read_p5_status_messages(bag_dir, metadata) if bag_dir is not None else ([], "")
     p5_summary = validate_p5_status(p5_rows, p5_error, failures, inconclusive)
-    if p0_2 and p5_summary.get("action_counts"):
-        failures.append("P0-2 P5 status reported actions while P5 is disabled")
+    if p0_requires_odom_gate and p5_summary.get("action_counts"):
+        failures.append(f"{experiment_label} P5 status reported actions while P5 is disabled")
     csv_artifacts = [str(topic_counts_path)]
     csv_artifacts.extend(p0_csv_artifacts)
     if p5_rows:
@@ -2545,6 +2633,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--bag-dir", default="", help="test_planner rosbag directory")
     parser.add_argument("--baseline-export-dir", default="", help="baseline export directory, recorded for compatibility")
     parser.add_argument("--baseline-bag-dir", default="", help="baseline rosbag directory, recorded for compatibility")
+    parser.add_argument("--p0-2-export-dir", default="", help="healthy P0-2 export directory for P0-3+ comparisons")
+    parser.add_argument("--p0-2-bag-dir", default="", help="healthy P0-2 rosbag directory for P0-3+ comparisons")
     parser.add_argument("--fail-on-threshold", action="store_true", help="exit non-zero unless analysis status is PASS")
     return parser.parse_args()
 
