@@ -1440,3 +1440,187 @@ Operational branch:
 2. Do not spend the next debugging slice on P0 startup lifecycle unless a healthy-odom run reproduces consecutive P0 full-frame unknown.
 3. If the odom drift appears again, debug IAP odometry first.
 4. Do not enter `P0-3` from this task.
+
+## P0-3 Corridor Degeneracy Field Validation
+
+### Outcome
+
+Result: **FAIL / ODOM BLOCKER**.
+
+The P0-3 launch completed and the validator passed, but the analyzer odom gate failed hard. By the P0-3 rule, this run is classified as an upstream IAP odometry blocker and must not be attributed as a P0 acceptance failure. Do not enter `P0-4`.
+
+The run also shows a severe P0 risk-grid symptom: all 97 P0 health rows are full-frame unknown with `reason=stale_gnss_epoch`. The first P0 full-unknown row appears before the first analyzer-detected odom drift point, so this P0 symptom should remain on the watch list. However, because odom drift is present in the same run, the next branch is still odometry debug.
+
+| Field | Value |
+|---|---|
+| Analyzer support commit | `9d2de88 docs: support P0-3 safety planner odom comparisons` |
+| Analyzer evidence fix commit | `00e84ea docs: keep P0 PL cost figure for unknown grids` |
+| Launch experiment | `p0_open_sky` |
+| Launch scenario | `lidar_corridor_degenerate` |
+| Export | `/home/dev/ws_iap/src/iap/results/planner_validation/exports/test_planner_p0_open_sky_lidar_corridor_degenerate_1783501058441` |
+| Bag | `/home/dev/ws_iap/src/iap/results/planner_validation/bags/test_planner_p0_open_sky_lidar_corridor_degenerate_20260708T085738Z` |
+| Analyzer summary | `/home/dev/ws_iap/src/iap/results/planner_validation/exports/test_planner_p0_open_sky_lidar_corridor_degenerate_1783501058441/metadata/safety_planner_analysis_summary.json` |
+| P0-1 reference | `/home/dev/ws_iap/src/iap/results/planner_validation/exports/test_planner_p0_open_sky_gnss_open_sky_1783481479509` |
+| Healthy P0-2 reference | `/home/dev/ws_iap/src/iap/results/planner_validation/exports/test_planner_p0_open_sky_gnss_degraded_lidar_good_1783489818760` |
+
+### Launch Command
+
+```bash
+ros2 launch iap test_planner.launch.py \
+  experiment:=p0_open_sky \
+  scenario:=lidar_corridor_degenerate \
+  run_duration_s:=60 \
+  validation_duration_s:=60 \
+  start_rviz:=false \
+  run_validator:=true \
+  record_bag:=true
+```
+
+### Manifest And Validator
+
+| Check | Result | Conclusion |
+|---|---|---|
+| Launch command | `PASS`; exit code `0` | Simulation ran to the requested validation window |
+| Validator | `PASS`; `583` messages | `lidar_valid_seen=true`, `fallback_valid_seen=true`, `required_final_source=LIDAR` |
+| Safety profile | `off` | Matches Phase 1 P0 isolation |
+| P0 switch | `p0.enable_risk_grid=true` | P0 risk grid was enabled |
+| P1-P5 switches | all `false` | Higher safety planner layers were disabled |
+| P5 status topic | `0` rows, no actions | No P5 action leakage |
+| Shutdown helper-node errors | present after validator pass | Recorded as non-blocking teardown noise because launch exit was `0` and evidence is complete |
+
+### Topic Health
+
+| Topic | Count | Status | Conclusion |
+|---|---:|---|---|
+| `/iap/integrity` | `585` | `PASS` | Integrity stream was continuous |
+| `/sim/drone_0/lidar_body` | `596` | `PASS` | LiDAR body cloud was continuous |
+| `/drone_0_visual_slam/odom` | `585` | `PASS` | Topic timing was continuous, but content failed odom drift gates |
+| `/drone_0_planning/bspline` | `18` | `PASS` | Planner trajectory output was present |
+| `/planning/risk_grid_health` | `97` | `PASS` | Health topic was periodic, but reported full-frame unknown |
+| `/iap/rviz/predicted_pl_cloud` | `97` | `PASS` | P0 RViz PL cloud was recorded |
+| `/iap/rviz/risk_validity_cloud` | `97` | `PASS` | P0 RViz validity cloud was recorded |
+| `/planning/integrity_gate_status` | `0` | `PASS` | P5 status absent while P5 disabled |
+
+### Odom Health
+
+| Metric | Value | Gate / conclusion |
+|---|---:|---|
+| Odom samples / truth samples / aligned samples | `585` / `60047` / `585` | Sufficient data for odom gate |
+| RMS position error | `54.681130m` | `FAIL`; gate is `1.5m` |
+| Max position error | `397.758477m` | `FAIL`; gate is `4.0m` |
+| Final position error | `37.192928m` | `FAIL`; gate is `2.5m` |
+| Z abs mean / max | `6.258707m` / `177.245008m` | `FAIL`; max gate is `1.5m` |
+| Yaw abs mean / max | `36.476182deg` / `178.390116deg` | `FAIL`; max gate is `45deg` |
+| Jump count | `174` | `FAIL`; odom jump gate triggered |
+| Odom topic max gap | `0.100211s` | Topic timing is healthy, content is not |
+| First odom drift bag time | `1783501074.966786` | Drift appears during the active P0 window |
+
+### P0 Health
+
+| Metric | Value | Conclusion |
+|---|---:|---|
+| Health rows | `97` | Analyzer had complete P0 health evidence |
+| Ready false max consecutive | `0` | P0 reports ready despite invalid grid contents |
+| Stale true max consecutive | `0` | P0 reports non-stale despite stale provider counters |
+| Valid ratio mean / max | `0.000000` / `0.000000` | `FAIL`; no valid cells appear |
+| Unknown ratio mean / max | `1.000000` / `1.000000` | `FAIL`; every health row is full-frame unknown |
+| Full unknown count / max consecutive | `97` / `97` | `FAIL`; full run is full-frame unknown |
+| Dominant reason | `stale_gnss_epoch` | All rows have the same non-ok reason |
+| Provider stale max | `63300` | Provider stale counter explains the unknown field |
+| Occupied skip max | `1995` | Occupied skip is present but not the dominant explanation |
+
+First eight P0 health rows:
+
+| Row | Ready | Stale | Valid | Unknown | Provider stale | Occupied skip | Reason |
+|---:|---|---|---:|---:|---:|---:|---|
+| 1 | `true` | `false` | `0.000000` | `1.000000` | `63300` | `700` | `stale_gnss_epoch` |
+| 2 | `true` | `false` | `0.000000` | `1.000000` | `63300` | `700` | `stale_gnss_epoch` |
+| 3 | `true` | `false` | `0.000000` | `1.000000` | `63300` | `700` | `stale_gnss_epoch` |
+| 4 | `true` | `false` | `0.000000` | `1.000000` | `63300` | `700` | `stale_gnss_epoch` |
+| 5 | `true` | `false` | `0.000000` | `1.000000` | `63230` | `770` | `stale_gnss_epoch` |
+| 6 | `true` | `false` | `0.000000` | `1.000000` | `63160` | `840` | `stale_gnss_epoch` |
+| 7 | `true` | `false` | `0.000000` | `1.000000` | `63090` | `910` | `stale_gnss_epoch` |
+| 8 | `true` | `false` | `0.000000` | `1.000000` | `63020` | `980` | `stale_gnss_epoch` |
+
+Startup correlation:
+
+| Signal | Bag time | Conclusion |
+|---|---:|---|
+| First P0 problem | `1783501069.206697` | First health row is already full-frame unknown |
+| First full-frame unknown | `1783501069.206697` | P0 full unknown starts immediately when P0 health appears |
+| First odom drift | `1783501074.966786` | Analyzer-detected drift starts after the first P0 full-unknown row |
+| Relation | `p0_failure_before_odom_drift` | P0 symptom may not be caused by the detected drift point, but odom gate still blocks classification |
+
+### PL/Cost And Baseline Comparison
+
+| Metric | P0-1 | Healthy P0-2 | P0-3 | Conclusion |
+|---|---:|---:|---:|---|
+| Valid cells | `3180` | `3111` | `0` | P0-3 has no valid PL/cost cells |
+| Valid ratio | `0.993750` | `0.972188` | `0.000000` | P0-3 fails validity separation |
+| Unknown ratio | `0.006250` | `0.027813` | `1.000000` | P0-3 is fully unknown |
+| Stale ratio | `0.000000` | `0.000000` | `0.969688` | P0-3 cloud is mostly stale |
+| PL mean | `11.181885` | `19.146271` | unavailable | No current valid PL samples exist |
+| c_pi mean | `11.181885` | `19.146271` | unavailable | No current valid cost samples exist |
+
+Reason histogram: `stale_gnss_epoch=97`. P0-3 cannot demonstrate corridor degeneracy PL/cost behavior because the current risk grid never produces valid cells.
+
+### Analyzer Verdict
+
+| Analyzer field | Value |
+|---|---|
+| Status | `FAIL` |
+| Next debug branch | `debug_IAP_odometry_drift` |
+| Failures | `P0-3 risk_grid_health valid_ratio_mean is not above 0.60`; `P0-3 risk_grid_health shows periodic/full-frame unknown for at least 3 consecutive samples`; `P0-3 risk_grid_health full-frame unknown ratio exceeded 25%`; `P0-3 odom health classified drift: rms_position_error, max_position_error, final_position_error, z_error, yaw_error, odom_jump` |
+| Inconclusive | none |
+| Warnings | none |
+
+### Acceptance Matrix
+
+| Gate | Result | Evidence |
+|---|---|---|
+| Launch exits `0` | `PASS` | Launch command returned `0` |
+| Validator passes | `PASS` | `test_planner_validation_summary.json` has `passed=true` |
+| Manifest enables P0 and disables P1-P5 | `PASS` | Manifest switches match expected isolation |
+| Odom health gate | `FAIL` | `is_drift=true`, RMS `54.681130m`, max `397.758477m` |
+| P0 health stable | `FAIL` | `full_unknown_max_consecutive=97`, `valid_ratio_mean=0.0` |
+| P0 RViz clouds present | `PASS` | PL and validity cloud topics both have `97` messages |
+| P5 action absent | `PASS` | `/planning/integrity_gate_status` absent, no action rows |
+| P0-3 vs P0-1/P0-2 comparison | `FAIL` | P0-3 has `0` valid PL/cost cells |
+| Enter P0-4 | `NO` | Odom drift blocker reproduced |
+
+### Figure Conclusions
+
+| Figure | Conclusion |
+|---|---|
+| ![P0-3 scenario top-down](../../results/planner_validation/exports/test_planner_p0_open_sky_lidar_corridor_degenerate_1783501058441/figures/p0_3_scenario_topdown.png) | Corridor scenario rendered with truth, visual-slam odom, planner trajectory, and P0-1 baseline truth overlay; the scenario artifact is readable. |
+| ![P0-3 odom truth top-down](../../results/planner_validation/exports/test_planner_p0_open_sky_lidar_corridor_degenerate_1783501058441/figures/p0_3_odom_truth_topdown.png) | IAP odom diverges strongly from truth, confirming odom drift in this P0-3 run. |
+| ![P0-3 odom error timeline](../../results/planner_validation/exports/test_planner_p0_open_sky_lidar_corridor_degenerate_1783501058441/figures/p0_3_odom_error_timeline.png) | Position, z, and yaw errors cross drift gates; odom health fails before P0-4 can be considered. |
+| ![P0-3 topic activity timeline](../../results/planner_validation/exports/test_planner_p0_open_sky_lidar_corridor_degenerate_1783501058441/figures/p0_3_topic_activity_timeline.png) | Required P0 topics are present and periodic, including PL and validity cloud topics. |
+| ![P0-3 P0 health timeline](../../results/planner_validation/exports/test_planner_p0_open_sky_lidar_corridor_degenerate_1783501058441/figures/p0_3_p0_health_timeline.png) | P0 health stays full-frame unknown for the entire observed P0 window. |
+| ![P0-3 P0 reason histogram](../../results/planner_validation/exports/test_planner_p0_open_sky_lidar_corridor_degenerate_1783501058441/figures/p0_3_p0_reason_histogram.png) | Every P0 health row reports `stale_gnss_epoch`, with provider stale counters dominating. |
+| ![P0-3 PL/cost distribution](../../results/planner_validation/exports/test_planner_p0_open_sky_lidar_corridor_degenerate_1783501058441/figures/p0_3_pl_cost_distribution.png) | No valid PL/cost cells exist; the figure records total, valid, unknown, and stale cell counts for the all-unknown grid. |
+| ![P0-3 risk grid snapshot overview](../../results/planner_validation/exports/test_planner_p0_open_sky_lidar_corridor_degenerate_1783501058441/figures/p0_3_risk_grid_snapshot_overview.png) | The latest P0 cloud renders, but validity state is fully unknown rather than a usable corridor risk field. |
+| ![P0-3 P0 health vs odom error](../../results/planner_validation/exports/test_planner_p0_open_sky_lidar_corridor_degenerate_1783501058441/figures/p0_3_p0_health_vs_odom_error.png) | P0 full-frame unknown is visible before the first analyzer-detected odom drift point, but odom drift still invalidates the run. |
+| ![P0-3 vs P0-1 delta](../../results/planner_validation/exports/test_planner_p0_open_sky_lidar_corridor_degenerate_1783501058441/figures/p0_3_vs_p0_1_delta.png) | Compared with P0-1, P0-3 loses all valid cells and cannot provide meaningful PL/cost mean deltas. |
+| ![P0-3 vs P0-2 delta](../../results/planner_validation/exports/test_planner_p0_open_sky_lidar_corridor_degenerate_1783501058441/figures/p0_3_vs_p0_2_delta.png) | Compared with healthy P0-2, P0-3 also loses all valid cells, so corridor degeneracy behavior is not yet validated. |
+
+### Verification Commands
+
+| Command | Result |
+|---|---|
+| `git -C src/iap status -sb` | Clean before analyzer edits; later report-only changes pending |
+| `nvidia-smi` | `PASS`; RTX 4070 Ti SUPER visible |
+| `python3 -m py_compile src/iap/scripts/dev_planner/analyze_safety_planner_run.py` | `PASS` |
+| P0-2 known-fail analyzer regression | `PASS`; still fails as `debug_IAP_odometry_drift` |
+| P0-2 healthy Trial 5 analyzer regression | `PASS`; status remains `PASS` |
+| P0-3 launch command | `PASS`; exit code `0` |
+| `ros2 bag info` on P0-3 bag | `PASS`; duration `60.046063159s`, messages `336188` |
+| P0-3 analyzer command | `FAIL`; exit code `2`, status `FAIL`, branch `debug_IAP_odometry_drift` |
+| Required `p0_3_*` figures | `PASS`; all required figures are non-empty |
+
+### Next Actions
+
+1. Do not enter `P0-4`.
+2. Enter `debug_IAP_odometry_drift` because P0-3 reproduced a severe odom drift gate failure.
+3. Keep the P0 full-frame unknown evidence attached to this run, but do not classify it as the P0-3 root cause until a healthy-odom P0-3 run reproduces it.
+4. After odometry is stabilized, re-run only P0-3 with the same odom gate and the same P0-1/P0-2 comparison references.
