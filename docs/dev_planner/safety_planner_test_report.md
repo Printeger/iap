@@ -782,3 +782,252 @@ Shutdown note: after the validator passed and the launch command began SIGINT sh
 1. B0-4 satisfies Phase 0 fallback baseline criteria.
 2. Phase 0 `B0-1` through `B0-4` baseline lock is complete.
 3. Next planned experiment is `P0-1 open-sky data-only validation`, but it was not run in this B0-4 execution.
+
+## P0-1 Open-Sky Data-Only Validation
+
+### Repo State And Environment
+
+| Field | Value |
+|---|---|
+| Date | `2026-07-08` UTC |
+| Operator / Agent | Codex |
+| Machine / container | `mint-X` |
+| Workspace | `/home/dev/ws_iap` |
+| Package repo | `/home/dev/ws_iap/src/iap` |
+| Branch | `dev/iap` |
+| Launch precheck commit | `64bfe5d docs: support P0-1 safety planner validation figures` |
+| Final analyzer commit before report | `ac238e6e61040ced02b1a4ec59c60fa3810cff92` |
+| Clean/dirty status before P0-1 | `clean`; `git status -sb` reported `## dev/iap...origin/dev/iap` |
+| Recent commits before launch | `64bfe5d`, `17a3195`, `9bbbd84`, `80888ef`, `52f4c8f` |
+| GPU check | `nvidia-smi` detected `NVIDIA GeForce RTX 4070`, driver `580.126.09`, CUDA `13.0` |
+| Source command | `source /opt/ros/jazzy/setup.bash && source install/setup.bash` |
+| Analyzer precheck | `python3 -m py_compile src/iap/scripts/dev_planner/analyze_safety_planner_run.py` passed |
+
+Analyzer note: the launch artifact was produced from clean `64bfe5d`. The final analyzer pass was rerun from `ac238e6`, which only refines P0-1 post-processing thresholds for planner-start-delay and partial occupied-skip semantics.
+
+### Launch And Artifacts
+
+```bash
+source /opt/ros/jazzy/setup.bash
+source install/setup.bash
+ros2 launch iap test_planner.launch.py \
+  experiment:=p0_open_sky \
+  scenario:=gnss_open_sky \
+  run_duration_s:=60 \
+  validation_duration_s:=60 \
+  start_rviz:=false \
+  run_validator:=true \
+  record_bag:=true
+```
+
+| Field | Value |
+|---|---|
+| Experiment ID | `P0-1` |
+| Experiment preset | `p0_open_sky` |
+| Scenario | `gnss_open_sky` |
+| Launch result | `PASS`: command exited `0` |
+| Export dir | `/home/dev/ws_iap/src/iap/results/planner_validation/exports/test_planner_p0_open_sky_gnss_open_sky_1783481479509` |
+| Bag dir | `/home/dev/ws_iap/src/iap/results/planner_validation/bags/test_planner_p0_open_sky_gnss_open_sky_20260708T033119Z` |
+| Rosbag summary | Storage `mcap`; size `324.7 MiB`; duration `60.050683803s`; messages `343715` |
+| Analyzer summary | `/home/dev/ws_iap/src/iap/results/planner_validation/exports/test_planner_p0_open_sky_gnss_open_sky_1783481479509/metadata/safety_planner_analysis_summary.json` |
+
+Analyzer command:
+
+```bash
+python3 src/iap/scripts/dev_planner/analyze_safety_planner_run.py \
+  --experiment-id P0-1 \
+  --export-dir src/iap/results/planner_validation/exports/test_planner_p0_open_sky_gnss_open_sky_1783481479509 \
+  --bag-dir src/iap/results/planner_validation/bags/test_planner_p0_open_sky_gnss_open_sky_20260708T033119Z \
+  --baseline-export-dir src/iap/results/planner_validation/exports/test_planner_baseline_fused_nominal_off_gnss_open_sky_1783432749389 \
+  --baseline-bag-dir src/iap/results/planner_validation/bags/test_planner_baseline_fused_nominal_off_gnss_open_sky_20260707T135909Z \
+  --fail-on-threshold
+```
+
+### Parameter And Manifest Evidence
+
+| Parameter | Value | Result |
+|---|---:|---|
+| `planner_safety_profile` | `off` | `PASS`; baseline safety profile unchanged |
+| `p0.enable_risk_grid` | `true` | `PASS` |
+| `p0.debug_metrics_enable` | `true` | `PASS`; preset enables P0 debug metrics |
+| `planner_enable_p1` | `false` | `PASS` |
+| `planner_enable_p2` | `false` | `PASS` |
+| `planner_enable_p3_local` | `false` | `PASS` |
+| `planner_enable_p3_global` | `false` | `PASS` |
+| `planner_enable_p4` | `false` | `PASS` |
+| `planner_enable_p5_runtime` | `false` | `PASS` |
+| `planner_enable_p5_final` | `false` | `PASS` |
+| `validator_require_gnss_valid` | `true` | `PASS` |
+| `validator_require_lidar_valid` | `false` | `PASS` |
+| `validator_require_fallback_valid` | `true` | `PASS` |
+| `validator_required_final_source` | `GNSS` | `PASS` |
+
+### Validator And Analyzer
+
+| Check | Result | Evidence |
+|---|---|---|
+| Validator summary | `PASS` | `passed=true`, `failures=[]`, `message_count=584` |
+| Required fusion mode | `PASS` | `required_fusion_mode=gnss_only` |
+| Required final source | `PASS` | `required_final_source=GNSS` |
+| Source validity | `PASS` | `gnss_valid_seen=true`, `lidar_valid_seen=false`, `fallback_valid_seen=true` |
+| Analyzer status | `PASS` | `status=PASS`, `passed=true`, command exited `0` with `--fail-on-threshold` |
+| Failures / inconclusive / warnings | `PASS` | `[]` / `[]` / `[]` |
+| Integrity CSV rows | `PASS` | `584` data rows |
+| Fusion mode counts | `PASS` | `gnss_only: 584` |
+| Final HPL/VPL source counts | `PASS` | `GNSS: 584` for both HPL and VPL |
+| Integrity HPL range | `PASS` | min/mean/max `4.875940m` / `5.077726m` / `5.530642m` |
+| Integrity VPL range | `PASS` | min/mean/max `13.752337m` / `14.510498m` / `17.265101m` |
+| P5 summary | `PASS` | `status_rows=0`, `bad_action_count=0`, `action_counts={}` |
+| Analyzer next branch | `PASS` | `continue_to_P0-2_degraded_gnss_lidar_good_validation` |
+
+### Topic Health
+
+| Topic | Expected | Count | Hz | Span | Coverage | Max gap | Status |
+|---|---|---:|---:|---:|---:|---:|---|
+| `/iap/integrity` | continuous | `586` | `9.758423` | `58.525784s` | `0.974606` | `0.129738s` | `PASS` |
+| `/sim/drone_0/lidar_body` | continuous | `597` | `9.941602` | `59.600263s` | `0.992499` | `0.100458s` | `PASS` |
+| `/drone_0_visual_slam/odom` | continuous | `586` | `9.758423` | `58.525669s` | `0.974605` | `0.129718s` | `PASS` |
+| `/drone_0_planning/bspline` | planner-dependent | `16` | `0.266442` | `16.136956s` | `0.268722` | `1.088360s` | `PASS` |
+| `/planning/risk_grid_health` | active-periodic after planner start | `44` | `0.732714` | `46.172395s` | `0.768890` | `1.083265s` | `PASS` |
+| `/iap/rviz/predicted_pl_cloud` | present | `44` | `0.732714` | `46.171567s` | `0.768877` | `1.083238s` | `PASS` |
+| `/iap/rviz/risk_validity_cloud` | present | `44` | `0.732714` | `46.171628s` | `0.768878` | `1.083061s` | `PASS` |
+| `/planning/integrity_gate_status` | absent-or-zero when P5 disabled | `0` | `0.000000` | n/a | n/a | n/a | `PASS` |
+
+### P0 Health Summary
+
+| Metric | Value | Result |
+|---|---:|---|
+| Health rows | `44` | `PASS` |
+| `ready_false_count` / max consecutive | `0` / `0` | `PASS` |
+| `stale_true_count` / max consecutive | `0` / `0` | `PASS` |
+| `valid_ratio` min/mean/max | `0.996484` / `0.997615` / `1.000000` | `PASS` |
+| `unknown_ratio` min/mean/max | `0.000000` / `0.002385` / `0.003516` | `PASS` |
+| Full-frame unknown count / max consecutive | `0` / `0` | `PASS` |
+| Refresh elapsed mean | `573.557ms` | `PASS` |
+| Provider query count max | `64000` | `PASS` |
+| Provider stale count max | `0` | `PASS` |
+| Provider invalid count max | `0` | `PASS` |
+| Occupied skip count max | `225` of `64000` cells (`0.3516%`) | `PASS`; low occupied overlap explains the small unknown ratio |
+
+### Reason Histogram
+
+| Reason / counter | Count or max | Conclusion |
+|---|---:|---|
+| `ok` health rows | `44` | Dominant and only health reason; expected for open-sky P0-1 |
+| Empty reason rows | `0` | `PASS` |
+| `provider_stale_count_max` | `0` | No stale provider evidence |
+| `provider_invalid_count_max` | `0` | No invalid provider evidence |
+| `occupied_skip_count_max` | `225` | Low partial occupied skip; not a full-frame or material unknown failure |
+
+### PL / Cost Distribution
+
+| Metric | Value | Conclusion |
+|---|---:|---|
+| PL min/mean/max | `11.181885m` / `11.181885m` / `11.181885m` | Compact open-sky distribution; no high/unknown tail |
+| Cost min/mean/max | `11.181885` / `11.181885` / `11.181885` | Bounded low-cost field relative to fallback/unknown behavior |
+| Valid cells | `3180` of `3200` (`99.375%`) | `PASS` |
+| Unknown cells | `20` of `3200` (`0.625%`) | `PASS`; small localized unknown area |
+| Stale cells | `0` | `PASS` |
+
+### Baseline Vs P0-1 Comparison
+
+| Metric | B0-2 open-sky baseline | P0-1 | Conclusion |
+|---|---:|---:|---|
+| Truth sample count | `1998` | `1937` | Both bags have dense truth odom |
+| Truth path length | `24.943657m` | `24.389676m` | Similar path length; P0-1 is `2.2%` shorter |
+| Resampled truth RMS distance | n/a | `9.551728m` | Numeric metric is retained but not used as a hard gate because the baseline artifact is a longer `90s` run while P0-1 is `60s` |
+| Top-down trajectory overlay | Straight open-sky traversal | Straight open-sky traversal | No visible trajectory abnormality or P5 action; P0 stayed data-only/debug |
+
+### Result Row
+
+| Experiment ID | Status | Validator | Analyzer | Key evidence | Failure / warning | Next branch |
+|---|---|---|---|---|---|---|
+| P0-1 | `PASS` | `passed=true`, failures `[]`, message_count `584` | `PASS`, failures `[]`, warnings `[]`, inconclusive `[]` | Manifest has `p0.enable_risk_grid=true`; P1-P5 disabled; risk health ready and non-stale; PL cloud and validity cloud present; P5 status rows `0` | Non-blocking SIGINT teardown exceptions after validator/analyzer pass; baseline RMS comparison is informational due duration mismatch | `P0-2 degraded GNSS + LiDAR good validation` |
+
+### P0-1 Acceptance Matrix
+
+| Criterion | Result | Evidence |
+|---|---|---|
+| Launch exits `0` | `PASS` | `ros2 launch` command returned exit code `0` |
+| Validator summary `passed=true` | `PASS` | `test_planner_validation_summary.json` reports `passed: true` |
+| Analyzer status `PASS` | `PASS` | Analyzer command exited `0` with `--fail-on-threshold` |
+| Manifest has `p0.enable_risk_grid=true` | `PASS` | Manifest |
+| P1-P5 planner switches all disabled | `PASS` | Manifest records all `planner_enable_*` fields as `false` |
+| Baseline safety profile unchanged | `PASS` | `planner_safety_profile=off` |
+| `/planning/risk_grid_health` continuous/data present | `PASS` | `44` active-periodic messages, max gap `1.083265s` after planner activation |
+| P0 health `ready=true` | `PASS` | `ready_false_count=0` |
+| P0 health `stale=false` | `PASS` | `stale_true_count=0` |
+| Dominant reason `ok` or explainable | `PASS` | `ok: 44`; no stale/invalid counters; low occupied skip explains small unknown ratio |
+| No periodic full-frame unknown | `PASS` | `full_unknown_count=0`, max consecutive `0` |
+| Unknown ratio low and explained | `PASS` | mean `0.002385`, max `0.003516`; occupied skip max `225/64000` |
+| `/iap/rviz/predicted_pl_cloud` has messages | `PASS` | Bag/analyzer count `44` |
+| `/iap/rviz/risk_validity_cloud` has messages | `PASS` | Bag/analyzer count `44` |
+| `/planning/integrity_gate_status` has zero rows or no P5 action | `PASS` | Bag count `0`; analyzer `status_rows=0`, `bad_action_count=0` |
+| Required figures are present and non-empty | `PASS` | `test -s` passed for all six P0-1 required figures |
+| P0-2/P5/P1/P2 not run | `PASS` | Only `experiment:=p0_open_sky scenario:=gnss_open_sky` was launched |
+
+### Key Artifacts
+
+| Artifact | Path | Conclusion |
+|---|---|---|
+| Manifest JSON | `/home/dev/ws_iap/src/iap/results/planner_validation/exports/test_planner_p0_open_sky_gnss_open_sky_1783481479509/test_planner_manifest.json` | P0 enabled, baseline safety profile `off`, P1-P5 disabled |
+| Validator summary JSON | `/home/dev/ws_iap/src/iap/results/planner_validation/exports/test_planner_p0_open_sky_gnss_open_sky_1783481479509/test_planner_validation_summary.json` | Validator passed with `584` messages |
+| Analyzer summary JSON | `/home/dev/ws_iap/src/iap/results/planner_validation/exports/test_planner_p0_open_sky_gnss_open_sky_1783481479509/metadata/safety_planner_analysis_summary.json` | Analyzer status `PASS` |
+| Scenario top-down | `/home/dev/ws_iap/src/iap/results/planner_validation/exports/test_planner_p0_open_sky_gnss_open_sky_1783481479509/figures/p0_1_scenario_topdown.png` | Map, truth odom, visual-slam odom, bspline, and baseline truth overlay show a normal straight traversal with no visible baseline deviation |
+| Topic activity timeline | `/home/dev/ws_iap/src/iap/results/planner_validation/exports/test_planner_p0_open_sky_gnss_open_sky_1783481479509/figures/p0_1_topic_activity_timeline.png` | Integrity, LiDAR, odom, bspline, and risk-grid health have the expected activity; P0 health starts after planner activation |
+| P0 health timeline | `/home/dev/ws_iap/src/iap/results/planner_validation/exports/test_planner_p0_open_sky_gnss_open_sky_1783481479509/figures/p0_1_p0_health_timeline.png` | Ready stays true, stale stays false, and there is no full-frame unknown or stale cycle |
+| P0 reason histogram | `/home/dev/ws_iap/src/iap/results/planner_validation/exports/test_planner_p0_open_sky_gnss_open_sky_1783481479509/figures/p0_1_p0_reason_histogram.png` | Dominant reason is `ok`; stale/invalid provider counters are zero, with only low occupied-skip counts |
+| PL/cost distribution | `/home/dev/ws_iap/src/iap/results/planner_validation/exports/test_planner_p0_open_sky_gnss_open_sky_1783481479509/figures/p0_1_pl_cost_distribution.png` | Distribution is compact at PL/cost `11.181885` with `99.375%` valid cells and no stale tail |
+| Risk grid snapshot overview | `/home/dev/ws_iap/src/iap/results/planner_validation/exports/test_planner_p0_open_sky_gnss_open_sky_1783481479509/figures/p0_1_risk_grid_snapshot_overview.png` | Latest predicted PL and validity clouds render; field is mostly valid with a small localized invalid/unknown patch |
+| Rosbag | `/home/dev/ws_iap/src/iap/results/planner_validation/bags/test_planner_p0_open_sky_gnss_open_sky_20260708T033119Z` | Required P0-1 topics recorded |
+
+![P0-1 scenario top-down](../../results/planner_validation/exports/test_planner_p0_open_sky_gnss_open_sky_1783481479509/figures/p0_1_scenario_topdown.png)
+
+![P0-1 topic activity timeline](../../results/planner_validation/exports/test_planner_p0_open_sky_gnss_open_sky_1783481479509/figures/p0_1_topic_activity_timeline.png)
+
+![P0-1 P0 health timeline](../../results/planner_validation/exports/test_planner_p0_open_sky_gnss_open_sky_1783481479509/figures/p0_1_p0_health_timeline.png)
+
+![P0-1 P0 reason histogram](../../results/planner_validation/exports/test_planner_p0_open_sky_gnss_open_sky_1783481479509/figures/p0_1_p0_reason_histogram.png)
+
+![P0-1 PL/cost distribution](../../results/planner_validation/exports/test_planner_p0_open_sky_gnss_open_sky_1783481479509/figures/p0_1_pl_cost_distribution.png)
+
+![P0-1 risk grid snapshot overview](../../results/planner_validation/exports/test_planner_p0_open_sky_gnss_open_sky_1783481479509/figures/p0_1_risk_grid_snapshot_overview.png)
+
+### Failure Analysis
+
+No P0-1 hard failure observed. P0 RiskGridMap/RiskGridSnapshot produced health and RViz cloud evidence, stayed `ready=true`, stayed `stale=false`, avoided full-frame unknown cycles, and did not produce a P5 action. `/planning/integrity_gate_status` remained at `0` messages with P5 disabled.
+
+The launch log contains shutdown-time `RCLError`, `std::system_error`, and signal-based exits for helper visualization/bridge nodes after the validator had passed and rosbag recording stopped. This matches prior baseline runs and is not a P0-1 hard failure because the launch command exited `0`, validator passed, analyzer passed, and the evidence chain is complete.
+
+### Remaining Issues
+
+| Issue | Severity | Owner | Blocking experiment | Next action |
+|---|---|---|---|---|
+| SIGINT teardown exceptions in helper nodes | Low | Planner/sim runtime | None for P0-1 | Track separately if teardown stability becomes a CI requirement |
+| Baseline trajectory RMS metric is duration-sensitive | Low | dev_planner analyzer | None for P0-1 | Prefer top-down overlay and path-length comparison until analyzer normalizes different run durations |
+| Validity cloud scalar CSV summary has `row_count=0` although topic messages and overview plot exist | Low | dev_planner analyzer | None for P0-1 | Extend validity-cloud scalar extraction if future reports need numeric validity-cloud statistics |
+
+### Verification Commands
+
+| Command | Result |
+|---|---|
+| `git -C src/iap status -sb` | `PASS`; clean before P0-1 launch and before report editing |
+| `git -C src/iap log --oneline -5` | `PASS`; latest pre-launch commit `64bfe5d` |
+| `nvidia-smi` | `PASS`; RTX 4070 visible |
+| `python3 -m py_compile src/iap/scripts/dev_planner/analyze_safety_planner_run.py` | `PASS` |
+| P0-1 launch command above | `PASS`; exit code `0` |
+| Artifact inspection commands | `PASS`; manifest, validator summary, and rosbag metadata readable |
+| Analyzer command above | `PASS`; status `PASS` |
+| `test -s .../figures/p0_1_scenario_topdown.png` | `PASS` |
+| `test -s .../figures/p0_1_topic_activity_timeline.png` | `PASS` |
+| `test -s .../figures/p0_1_p0_health_timeline.png` | `PASS` |
+| `test -s .../figures/p0_1_p0_reason_histogram.png` | `PASS` |
+| `test -s .../figures/p0_1_pl_cost_distribution.png` | `PASS` |
+| `test -s .../figures/p0_1_risk_grid_snapshot_overview.png` | `PASS` |
+| `git -C src/iap diff --check` | `PASS` |
+
+### Next Actions
+
+1. P0-1 satisfies Phase 1 open-sky data-only validation criteria.
+2. Next planned experiment is `P0-2 degraded GNSS + LiDAR good validation`.
+3. Do not run P0-2, P5, P1, or P2 until explicitly requested.
