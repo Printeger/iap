@@ -1031,3 +1031,261 @@ The launch log contains shutdown-time `RCLError`, `std::system_error`, and signa
 1. P0-1 satisfies Phase 1 open-sky data-only validation criteria.
 2. Next planned experiment is `P0-2 degraded GNSS + LiDAR good validation`.
 3. Do not run P0-2, P5, P1, or P2 until explicitly requested.
+
+## P0-2 Degraded GNSS + LiDAR Good Validation
+
+### Repo And Environment
+
+| Field | Value |
+|---|---|
+| Date | `2026-07-08` |
+| Machine / container | `mint-X` |
+| Workspace | `/home/dev/ws_iap` |
+| Package repo | `/home/dev/ws_iap/src/iap` |
+| Branch | `dev/iap` |
+| Analyzer support commit | `13f9a5e docs: support P0-2 safety planner validation figures` |
+| Repo state before launch | `clean`; `git status -sb` reported `## dev/iap...origin/dev/iap` |
+| Recent commits before launch | `13f9a5e`, `2c464e2`, `ac238e6`, `64bfe5d`, `17a3195` |
+| GPU check | `NVIDIA GeForce RTX 4070 Ti SUPER`, driver `580.126.09`, memory `16376 MiB` |
+| Analyzer compile check | `python3 -m py_compile scripts/dev_planner/analyze_safety_planner_run.py` passed |
+
+### Launch And Artifacts
+
+```bash
+source /opt/ros/jazzy/setup.bash
+source install/setup.bash
+ros2 launch iap test_planner.launch.py \
+  experiment:=p0_open_sky \
+  scenario:=gnss_degraded_lidar_good \
+  run_duration_s:=60 \
+  validation_duration_s:=60 \
+  start_rviz:=false \
+  run_validator:=true \
+  record_bag:=true
+```
+
+| Field | Value |
+|---|---|
+| Experiment ID | `P0-2` |
+| Experiment preset | `p0_open_sky` |
+| Scenario | `gnss_degraded_lidar_good` |
+| Launch result | `PASS`: command exited `0` |
+| Overall validation result | `FAIL`: analyzer hard-failed P0 health thresholds |
+| Export dir | `/home/dev/ws_iap/src/iap/results/planner_validation/exports/test_planner_p0_open_sky_gnss_degraded_lidar_good_1783483641186` |
+| Bag dir | `/home/dev/ws_iap/src/iap/results/planner_validation/bags/test_planner_p0_open_sky_gnss_degraded_lidar_good_20260708T040721Z` |
+| Rosbag summary | Storage `mcap`; size `810.9 MiB`; duration `59.939377915s`; messages `342584` |
+| Analyzer summary | `/home/dev/ws_iap/src/iap/results/planner_validation/exports/test_planner_p0_open_sky_gnss_degraded_lidar_good_1783483641186/metadata/safety_planner_analysis_summary.json` |
+
+Analyzer command:
+
+```bash
+python3 src/iap/scripts/dev_planner/analyze_safety_planner_run.py \
+  --experiment-id P0-2 \
+  --export-dir src/iap/results/planner_validation/exports/test_planner_p0_open_sky_gnss_degraded_lidar_good_1783483641186 \
+  --bag-dir src/iap/results/planner_validation/bags/test_planner_p0_open_sky_gnss_degraded_lidar_good_20260708T040721Z \
+  --baseline-export-dir src/iap/results/planner_validation/exports/test_planner_p0_open_sky_gnss_open_sky_1783481479509 \
+  --baseline-bag-dir src/iap/results/planner_validation/bags/test_planner_p0_open_sky_gnss_open_sky_20260708T033119Z \
+  --fail-on-threshold
+```
+
+### Parameter And Manifest Evidence
+
+| Parameter | Value | Result |
+|---|---:|---|
+| `planner_safety_profile` | `off` | `PASS` |
+| `p0.enable_risk_grid` | `true` | `PASS` |
+| `planner_enable_p1` | `false` | `PASS` |
+| `planner_enable_p2` | `false` | `PASS` |
+| `planner_enable_p3_local` | `false` | `PASS` |
+| `planner_enable_p3_global` | `false` | `PASS` |
+| `planner_enable_p4` | `false` | `PASS` |
+| `planner_enable_p5_runtime` | `false` | `PASS` |
+| `planner_enable_p5_final` | `false` | `PASS` |
+| Validator required fusion mode | `max_pl` | `PASS` |
+| Validator required final source | empty | `PASS`; no final-source restriction for this fused scenario |
+| Validator source validity | GNSS, LiDAR, fallback all seen | `PASS` |
+
+### Validator And Analyzer
+
+| Check | Result | Evidence |
+|---|---|---|
+| Validator summary | `PASS` | `passed=true`, `failures=[]`, `message_count=537` |
+| Launch command | `PASS` | exit code `0` |
+| Analyzer status | `FAIL` | command exited `2` with `--fail-on-threshold` |
+| Analyzer failures | `FAIL` | sustained `ready=false`, sustained `stale=true`, and sustained full-frame unknown |
+| Analyzer inconclusive / warnings | `PASS` | `[]` / `[]`; evidence is complete |
+| Integrity CSV rows | `PASS` | `537` data rows |
+| Fusion mode counts | `PASS` | `max_pl: 537` |
+| Final HPL/VPL source counts | `PASS` | `GNSS: 537` for both HPL and VPL |
+| Integrity HPL range | `PASS` | min/mean/max `24.381667m` / `28.219650m` / `37.281610m` |
+| Integrity VPL range | `PASS` | min/mean/max `68.775856m` / `81.351300m` / `118.712729m` |
+| P5 summary | `PASS` | `status_rows=0`, `bad_action_count=0`, `action_counts={}` |
+| Analyzer next branch | `FAIL` | `debug_P0_risk_grid_health` |
+
+### Topic Health
+
+| Topic | Expected | Count | Hz | Span | Coverage | Max gap | Status |
+|---|---|---:|---:|---:|---:|---:|---|
+| `/iap/integrity` | continuous | `539` | `8.992419` | `57.691131s` | `0.962491` | `0.390889s` | `PASS` |
+| `/sim/drone_0/lidar_body` | continuous | `541` | `9.025786` | `59.399587s` | `0.990994` | `0.500899s` | `PASS` |
+| `/drone_0_visual_slam/odom` | continuous | `539` | `8.992419` | `57.690988s` | `0.962489` | `0.390895s` | `PASS` |
+| `/drone_0_planning/bspline` | planner-dependent | `26` | `0.433772` | `17.432501s` | `0.290836` | `1.515381s` | `PASS` |
+| `/planning/risk_grid_health` | active-periodic | `50` | `0.834176` | `49.000540s` | `0.817502` | `1.071119s` | `PASS` |
+| `/iap/rviz/predicted_pl_cloud` | present | `45` | `0.750759` | `46.481041s` | `0.775468` | `1.070947s` | `PASS` |
+| `/iap/rviz/risk_validity_cloud` | present | `45` | `0.750759` | `46.481000s` | `0.775467` | `1.070974s` | `PASS` |
+| `/planning/integrity_gate_status` | absent-or-zero when P5 disabled | `0` | `0.000000` | n/a | n/a | n/a | `PASS` |
+
+### P0 Health Summary
+
+| Metric | Value | Result |
+|---|---:|---|
+| Health rows | `50` | `PASS` |
+| `ready_false_count` / ratio / max consecutive | `5` / `0.100000` / `5` | `FAIL`; max consecutive is above the 2-sample limit |
+| `stale_true_count` / ratio / max consecutive | `5` / `0.100000` / `5` | `FAIL`; max consecutive is above the 2-sample limit |
+| `valid_ratio` min/mean/max | `0.000000` / `0.851816` / `0.987188` | `PASS` for mean `>0.6`; startup rows still include full-frame unknown |
+| `unknown_ratio` min/mean/max | `0.012813` / `0.148184` / `1.000000` | `FAIL`; max reaches full-frame unknown |
+| Full-frame unknown count / ratio / max consecutive | `6` / `0.120000` / `6` | `FAIL`; max consecutive is above the 2-sample limit |
+| Refresh elapsed mean | `489.632ms` | `PASS` |
+| Provider query count max | `63290` | `PASS` |
+| Provider stale count max | `63290` | `FAIL` evidence for stale provider coverage during the failed interval |
+| Provider invalid count max | `0` | `PASS` |
+| Occupied skip count max | `2975` | `PASS` as partial unknown evidence after startup; not the hard failure source |
+
+### Reason Histogram
+
+| Reason / counter | Count or max | Conclusion |
+|---|---:|---|
+| `ok` health rows | `44` | Dominant steady-state reason |
+| `snapshot_unavailable` health rows | `5` | `FAIL`; first five health rows are not ready/stale with `valid_ratio=0`, `unknown_ratio=1` |
+| `stale_gnss_epoch` health rows | `1` | `FAIL`; extends the full-frame unknown sequence to six samples |
+| Empty reason rows | `0` | `PASS` |
+| `provider_stale_count_max` | `63290` | `FAIL` evidence during the stale/unknown interval |
+| `provider_invalid_count_max` | `0` | `PASS` |
+| `occupied_skip_count_max` | `2975` | Steady-state unknown area remains partial, but startup full-frame unknown already fails |
+
+### PL / Cost Distribution
+
+| Metric | Value | Conclusion |
+|---|---:|---|
+| PL min/mean/max | `19.596582m` / `19.596582m` / `19.596582m` | Higher than P0-1 as expected |
+| Cost min/mean/max | `19.596582` / `19.596582` / `19.596582` | Higher than P0-1 as expected |
+| Valid cells | `3091` of `3200` (`96.593750%`) | `PASS` for latest PL cloud |
+| Unknown cells | `109` of `3200` (`3.406250%`) | `PASS` for latest PL cloud |
+| Stale cells | `0` | `PASS` for latest PL cloud |
+| Cloud summary rows | `45` | `PASS`; one early row was full unknown before valid PL/cost values appeared |
+
+### P0-1 Vs P0-2 Comparison
+
+| Metric | P0-1 open-sky baseline | P0-2 degraded GNSS + LiDAR good | Delta | Result |
+|---|---:|---:|---:|---|
+| PL mean | `11.181885m` | `19.596582m` | `+8.414698m` | `PASS`; exceeds `0.5m` threshold |
+| Cost mean | `11.181885` | `19.596582` | `+8.414698` | `PASS`; exceeds `0.5` threshold |
+| Valid ratio | `0.993750` | `0.965938` | `-0.027813` | `PASS`; still high in latest cloud |
+| Unknown ratio | `0.006250` | `0.034063` | `+0.027813` | Informational; latest cloud is not full-frame unknown |
+| Stale ratio | `0.000000` | `0.000000` | `0.000000` | `PASS` for latest cloud |
+| Truth sample count | `1937` | `1995` | `+58` | Informational |
+| Truth path length | `24.389676m` | `26.756694m` | `+2.367018m` | Informational |
+| Resampled truth RMS distance | n/a | `0.651968m` | n/a | Informational |
+
+Baseline source for the PL/cost comparison: `/home/dev/ws_iap/src/iap/results/planner_validation/exports/test_planner_p0_open_sky_gnss_open_sky_1783481479509/csv/p0_1_pl_cloud.csv`.
+
+### Acceptance Matrix
+
+| Criterion | Result | Evidence |
+|---|---|---|
+| Launch exits `0` | `PASS` | `ros2 launch` returned exit code `0` |
+| Validator summary `passed=true` | `PASS` | `test_planner_validation_summary.json` reports `passed: true` |
+| Analyzer status `PASS` | `FAIL` | Analyzer exited `2`; status `FAIL` |
+| Manifest has `p0.enable_risk_grid=true` | `PASS` | Manifest |
+| P1-P5 planner switches all disabled | `PASS` | Manifest records all `planner_enable_*` fields as `false` |
+| Safety profile `off` | `PASS` | Manifest |
+| Risk-grid health rows present | `PASS` | `50` rows |
+| `ready_false_ratio <= 0.10` | `PASS` | ratio is exactly `0.10` |
+| No 3-sample consecutive `ready=false` | `FAIL` | max consecutive `5` |
+| `stale_true_ratio <= 0.10` | `PASS` | ratio is exactly `0.10` |
+| No 3-sample consecutive `stale=true` | `FAIL` | max consecutive `5` |
+| `valid_ratio_mean > 0.6` | `PASS` | mean `0.851816` |
+| No periodic/full-frame unknown cycle | `FAIL` | full-frame unknown max consecutive `6` |
+| Full-frame unknown ratio <= 25% | `PASS` | ratio `0.12` |
+| Non-empty health reasons | `PASS` | no empty reason rows |
+| Counters explain non-ok health | `PASS` | `snapshot_unavailable`, `stale_gnss_epoch`, provider stale count max `63290` |
+| P0 RViz predicted PL cloud has messages | `PASS` | bag/analyzer count `45` |
+| P0 RViz risk validity cloud has messages | `PASS` | bag/analyzer count `45` |
+| `/planning/integrity_gate_status` absent or no P5 action | `PASS` | count `0`; p5 summary has no actions |
+| PL/cost higher than P0-1 | `PASS` | PL/cost mean delta `+8.414698`, threshold `0.5` |
+| Required figures are present and non-empty | `PASS` | `test -s` passed for all seven requested P0-2 figures |
+| No P0-3/P5/P1/P2 or aggregate run | `PASS` | Only the P0-2 launch command above was run after analyzer support |
+
+### Failure Analysis
+
+P0-2 fails because risk-grid health is not continuously ready after planner activation. The first five health rows are `snapshot_unavailable` with `ready=false`, `stale=true`, `valid_ratio=0`, and `unknown_ratio=1`. The next non-ok row is `stale_gnss_epoch`, which extends the full-frame unknown sequence to six samples. This violates the P0-2 hard gates for consecutive readiness, consecutive staleness, and consecutive full-frame unknown frames.
+
+The steady-state behavior after that startup interval is healthier: the final rows are `ok`, `ready=true`, `stale=false`, with `valid_ratio=0.967266` and `unknown_ratio=0.032734`. The latest PL/cost cloud is materially higher than P0-1, so the degraded-GNSS cost response appears visible. The failure is specifically the sustained startup health gap, not missing artifacts, missing clouds, absent PL/cost differentiation, or P5 leakage.
+
+The launch log contains shutdown-time ROS exceptions and signal-based exits for helper nodes after the validator passed and rosbag recording stopped. They are recorded as non-blocking for this run because the launch command returned `0`, the validator passed, the bag/export evidence is complete, and the analyzer failure is already explained by P0 health data.
+
+### Remaining Issues
+
+| Issue | Severity | Owner | Blocking experiment | Next action |
+|---|---|---|---|---|
+| P0 risk-grid health has a sustained startup gap | High | P0 risk-grid / planner integration | Blocks P0-2 acceptance | Debug why planner-visible health publishes `snapshot_unavailable` for five samples and then `stale_gnss_epoch` before settling |
+| Full-frame unknown sequence during startup | High | P0 risk-grid provider lifecycle | Blocks P0-2 acceptance | Gate publication until first valid snapshot or mark startup separately if that is intended semantics |
+| Provider stale counter spikes to `63290` | Medium | P0 provider/fusion health accounting | Related to P0-2 failure | Trace GNSS epoch freshness and provider timestamp alignment for the first valid risk-grid cycles |
+| Validity cloud scalar CSV summary has `row_count=0` | Low | dev_planner analyzer | Not blocking P0-2 evidence because topic messages and overview figure exist | Extend scalar extraction for validity-only cloud fields if future reports need numeric validity-cloud statistics |
+| SIGINT teardown exceptions in helper nodes | Low | Planner/sim runtime | Not blocking this evidence | Track separately if teardown stability becomes a CI requirement |
+
+### Key Artifacts
+
+| Artifact | Path | Conclusion |
+|---|---|---|
+| Manifest JSON | `/home/dev/ws_iap/src/iap/results/planner_validation/exports/test_planner_p0_open_sky_gnss_degraded_lidar_good_1783483641186/test_planner_manifest.json` | P0 enabled, safety profile `off`, P1-P5 disabled |
+| Validator summary JSON | `/home/dev/ws_iap/src/iap/results/planner_validation/exports/test_planner_p0_open_sky_gnss_degraded_lidar_good_1783483641186/test_planner_validation_summary.json` | Validator passed with `537` messages |
+| Analyzer summary JSON | `/home/dev/ws_iap/src/iap/results/planner_validation/exports/test_planner_p0_open_sky_gnss_degraded_lidar_good_1783483641186/metadata/safety_planner_analysis_summary.json` | Analyzer status `FAIL` |
+| Scenario top-down | `/home/dev/ws_iap/src/iap/results/planner_validation/exports/test_planner_p0_open_sky_gnss_degraded_lidar_good_1783483641186/figures/p0_2_scenario_topdown.png` | Includes P0-1 baseline truth overlay |
+| Topic activity timeline | `/home/dev/ws_iap/src/iap/results/planner_validation/exports/test_planner_p0_open_sky_gnss_degraded_lidar_good_1783483641186/figures/p0_2_topic_activity_timeline.png` | Includes P0 health plus predicted PL and risk-validity cloud topics |
+| P0 health timeline | `/home/dev/ws_iap/src/iap/results/planner_validation/exports/test_planner_p0_open_sky_gnss_degraded_lidar_good_1783483641186/figures/p0_2_p0_health_timeline.png` | Shows startup full-frame unknown and later recovery |
+| P0 reason histogram | `/home/dev/ws_iap/src/iap/results/planner_validation/exports/test_planner_p0_open_sky_gnss_degraded_lidar_good_1783483641186/figures/p0_2_p0_reason_histogram.png` | Shows `snapshot_unavailable`, `stale_gnss_epoch`, and dominant `ok` |
+| PL/cost distribution | `/home/dev/ws_iap/src/iap/results/planner_validation/exports/test_planner_p0_open_sky_gnss_degraded_lidar_good_1783483641186/figures/p0_2_pl_cost_distribution.png` | Latest PL/cost distribution centered at `19.596582` |
+| Risk grid snapshot overview | `/home/dev/ws_iap/src/iap/results/planner_validation/exports/test_planner_p0_open_sky_gnss_degraded_lidar_good_1783483641186/figures/p0_2_risk_grid_snapshot_overview.png` | Latest predicted PL and validity clouds render |
+| P0-2 vs P0-1 delta | `/home/dev/ws_iap/src/iap/results/planner_validation/exports/test_planner_p0_open_sky_gnss_degraded_lidar_good_1783483641186/figures/p0_2_vs_p0_1_delta.png` | PL/cost mean increases by `8.414698` |
+| Rosbag | `/home/dev/ws_iap/src/iap/results/planner_validation/bags/test_planner_p0_open_sky_gnss_degraded_lidar_good_20260708T040721Z` | Required P0-2 topics recorded |
+
+![P0-2 scenario top-down](../../results/planner_validation/exports/test_planner_p0_open_sky_gnss_degraded_lidar_good_1783483641186/figures/p0_2_scenario_topdown.png)
+
+![P0-2 topic activity timeline](../../results/planner_validation/exports/test_planner_p0_open_sky_gnss_degraded_lidar_good_1783483641186/figures/p0_2_topic_activity_timeline.png)
+
+![P0-2 P0 health timeline](../../results/planner_validation/exports/test_planner_p0_open_sky_gnss_degraded_lidar_good_1783483641186/figures/p0_2_p0_health_timeline.png)
+
+![P0-2 P0 reason histogram](../../results/planner_validation/exports/test_planner_p0_open_sky_gnss_degraded_lidar_good_1783483641186/figures/p0_2_p0_reason_histogram.png)
+
+![P0-2 PL/cost distribution](../../results/planner_validation/exports/test_planner_p0_open_sky_gnss_degraded_lidar_good_1783483641186/figures/p0_2_pl_cost_distribution.png)
+
+![P0-2 risk grid snapshot overview](../../results/planner_validation/exports/test_planner_p0_open_sky_gnss_degraded_lidar_good_1783483641186/figures/p0_2_risk_grid_snapshot_overview.png)
+
+![P0-2 vs P0-1 delta](../../results/planner_validation/exports/test_planner_p0_open_sky_gnss_degraded_lidar_good_1783483641186/figures/p0_2_vs_p0_1_delta.png)
+
+### Verification Commands
+
+| Command | Result |
+|---|---|
+| `git -C src/iap status -sb` | `PASS`; clean before P0-2 launch |
+| `git -C src/iap log --oneline -5` | `PASS`; latest pre-launch commit `13f9a5e` |
+| `nvidia-smi` | `PASS`; RTX 4070 Ti SUPER visible |
+| `python3 -m py_compile src/iap/scripts/dev_planner/analyze_safety_planner_run.py` | `PASS` |
+| P0-2 launch command above | `PASS`; exit code `0` |
+| Artifact inspection commands | `PASS`; manifest, validator summary, and rosbag metadata readable |
+| Analyzer command above | `FAIL`; status `FAIL`, exit code `2` |
+| `test -s .../figures/p0_2_scenario_topdown.png` | `PASS` |
+| `test -s .../figures/p0_2_topic_activity_timeline.png` | `PASS` |
+| `test -s .../figures/p0_2_p0_health_timeline.png` | `PASS` |
+| `test -s .../figures/p0_2_p0_reason_histogram.png` | `PASS` |
+| `test -s .../figures/p0_2_pl_cost_distribution.png` | `PASS` |
+| `test -s .../figures/p0_2_risk_grid_snapshot_overview.png` | `PASS` |
+| `test -s .../figures/p0_2_vs_p0_1_delta.png` | `PASS` |
+
+### Next Actions
+
+1. Do not proceed to `P0-3` until P0-2 risk-grid startup health is fixed or the acceptance criteria are explicitly revised.
+2. Debug branch: `debug_P0_risk_grid_health`.
+3. Start with the first six P0 health samples: five `snapshot_unavailable` rows followed by one `stale_gnss_epoch`, all contributing to full-frame unknown.
+4. Re-run only P0-2 after the fix; do not run P0-3, P5, P1, P2, or aggregate experiments as part of this evidence chain.
