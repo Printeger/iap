@@ -85,6 +85,19 @@ SAFETY_OFF_BOOL_KEYS = (
     "planner_enable_p5_runtime",
     "planner_enable_p5_final",
 )
+PREDICTOR_SOURCE_COUNTER_FIELDS = [
+    "predictor_gnss_used_count",
+    "predictor_lidar_used_count",
+    "predictor_prior_used_count",
+    "predictor_regularized_count",
+    "predictor_conservative_max_count",
+]
+PREDICTOR_LIDAR_INPUT_FIELDS = [
+    "predictor_lidar_map_point_count",
+    "predictor_lidar_fim_primitive_count",
+    "predictor_lidar_fim_valid_normal_count",
+    "predictor_lidar_fim_fallback_reason",
+]
 
 
 def ensure_dirs(export_dir: Path) -> tuple[Path, Path, Path]:
@@ -445,7 +458,7 @@ def parse_p0_health(msg: Any, timestamp_ns: int) -> dict[str, Any]:
         data = json.loads(raw)
     except json.JSONDecodeError:
         data = {"reason": f"invalid_json:{raw[:80]}"}
-    return {
+    row = {
         "stamp": float(timestamp_ns) * 1.0e-9,
         "ready": bool(data.get("ready", False)),
         "stale": bool(data.get("stale", False)),
@@ -461,6 +474,11 @@ def parse_p0_health(msg: Any, timestamp_ns: int) -> dict[str, Any]:
         "snapshot_available": bool(data.get("snapshot_available", False)),
         "reason": str(data.get("reason", "")),
     }
+    for field in PREDICTOR_SOURCE_COUNTER_FIELDS:
+        row[field] = data.get(field, 0)
+    for field in PREDICTOR_LIDAR_INPUT_FIELDS:
+        row[field] = data.get(field, "" if field.endswith("_reason") else 0)
+    return row
 
 
 def pointcloud_metric_rows(msg: Any, timestamp_ns: int) -> list[dict[str, Any]]:
@@ -1271,7 +1289,7 @@ def summarize_p0_health(rows: list[dict[str, Any]]) -> dict[str, Any]:
     valid_values = [value for value in (finite_float(row.get("valid_ratio")) for row in rows) if value is not None]
     unknown_values = [value for value in (finite_float(row.get("unknown_ratio")) for row in rows) if value is not None]
     refresh_values = [value for value in (finite_float(row.get("refresh_elapsed_ms")) for row in rows) if value is not None]
-    return {
+    summary = {
         "row_count": len(rows),
         "ready_false_count": sum(ready_false),
         "ready_false_ratio": ratio(sum(ready_false), len(rows)),
@@ -1296,6 +1314,19 @@ def summarize_p0_health(rows: list[dict[str, Any]]) -> dict[str, Any]:
         "provider_invalid_count_max": max(int(finite_float(row.get("provider_invalid_count")) or 0) for row in rows),
         "occupied_skip_count_max": max(int(finite_float(row.get("occupied_skip_count")) or 0) for row in rows),
     }
+    for field in PREDICTOR_SOURCE_COUNTER_FIELDS:
+        values = [int(finite_float(row.get(field)) or 0) for row in rows]
+        summary[f"{field}_max"] = max(values) if values else 0
+        summary[f"{field}_latest"] = values[-1] if values else 0
+    for field in PREDICTOR_LIDAR_INPUT_FIELDS:
+        if field.endswith("_reason"):
+            values = [str(row.get(field, "")) for row in rows]
+            summary[f"{field}_latest"] = values[-1] if values else ""
+            continue
+        values = [int(finite_float(row.get(field)) or 0) for row in rows]
+        summary[f"{field}_max"] = max(values) if values else 0
+        summary[f"{field}_latest"] = values[-1] if values else 0
+    return summary
 
 
 def summarize_p0_cloud_rows(rows: list[dict[str, Any]]) -> dict[str, Any]:
@@ -2109,6 +2140,7 @@ def next_debug_branch(
     failures: list[str],
     inconclusive: list[str],
     experiment_id: str,
+    p0_health_summary: dict[str, Any] | None = None,
 ) -> str:
     text = " ".join(failures + inconclusive).lower()
     if status == "PASS":
@@ -2135,6 +2167,18 @@ def next_debug_branch(
         return "debug_bag_recording_and_launch_node_health"
     if "p5" in text:
         return "debug_p5_switch_leakage"
+    if p0_health_summary:
+        valid_ratio_mean = finite_float(p0_health_summary.get("valid_ratio_mean"))
+        reason_counts = p0_health_summary.get("reason_counts", {}) or {}
+        if (
+            valid_ratio_mean is not None
+            and valid_ratio_mean <= 0.60
+            and int(p0_health_summary.get("predictor_lidar_fim_primitive_count_max", 0) or 0) > 0
+            and int(p0_health_summary.get("predictor_lidar_used_count_max", 0) or 0) > 0
+            and int(p0_health_summary.get("predictor_gnss_used_count_max", 0) or 0) == 0
+            and int(reason_counts.get("stale_gnss_epoch", 0) or 0) == 0
+        ):
+            return "debug_lidar_fim_quality_or_corridor_geometry"
     if "risk_grid_health" in text or "unknown" in text or "stale" in text:
         return "debug_P0_risk_grid_health"
     return "debug_B0-1_baseline"
@@ -2196,6 +2240,7 @@ def analyze(args: argparse.Namespace) -> dict[str, Any]:
     p0_csv_artifacts: list[str] = []
     p0_figure_artifacts: list[str] = []
     p0_required_figures: list[Path] = []
+    p0_health_summary: dict[str, Any] = {}
     baseline_scenario_data: dict[str, Any] = {}
     if p0_phase:
         p0_artifacts, p0_error = (
@@ -2340,6 +2385,8 @@ def analyze(args: argparse.Namespace) -> dict[str, Any]:
                 "occupied_skip_count",
                 "provider_stale_count",
                 "provider_invalid_count",
+                *PREDICTOR_SOURCE_COUNTER_FIELDS,
+                *PREDICTOR_LIDAR_INPUT_FIELDS,
                 "refresh_elapsed_ms",
                 "snapshot_available",
                 "reason",
@@ -2635,6 +2682,7 @@ def analyze(args: argparse.Namespace) -> dict[str, Any]:
             failures,
             inconclusive,
             args.experiment_id,
+            p0_health_summary if p0_phase else None,
         ),
         "export_dir": str(export_dir),
         "bag_dir": str(bag_dir) if bag_dir is not None else "",

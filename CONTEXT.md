@@ -20,6 +20,10 @@ _Avoid_: GNSS enable switch, odom policy
 Optional position information derived from the current integrity report and inserted into a Predictor snapshot as a prior for future advisory prediction.
 _Avoid_: GNSS advisory, LiDAR advisory
 
+**P0 LiDAR advisory input**:
+Map-frame point cloud data from `p0.map_topic` and derived LiDAR FIM primitives used by the P0 Predictor for future advisory risk queries.
+_Avoid_: certified current LiDAR ARAIM, odometry source, raw obstacle map
+
 **Source counter**:
 A P0 health metric that counts grid-cell predictions whose source flags show GNSS, LiDAR, prior, regularization, or conservative max participation.
 _Avoid_: provider query count, valid ratio

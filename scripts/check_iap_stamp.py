@@ -42,6 +42,12 @@ PREDICTOR_SOURCE_COUNTER_FIELDS = [
     "predictor_regularized_count",
     "predictor_conservative_max_count",
 ]
+PREDICTOR_LIDAR_INPUT_FIELDS = [
+    "predictor_lidar_map_point_count",
+    "predictor_lidar_fim_primitive_count",
+    "predictor_lidar_fim_valid_normal_count",
+    "predictor_lidar_fim_fallback_reason",
+]
 
 
 def header_stamp(msg: Any) -> Any:
@@ -356,6 +362,14 @@ def summarize_p0_health(stats: TopicStats) -> dict[str, Any]:
         "reason_counts": reasons,
     }
     for field in PREDICTOR_SOURCE_COUNTER_FIELDS:
+        values = [int(r.get(field, 0) or 0) for r in records]
+        summary[f"max_{field}"] = max(values) if values else None
+        summary[f"last_{field}"] = values[-1] if values else None
+    for field in PREDICTOR_LIDAR_INPUT_FIELDS:
+        if field.endswith("_reason"):
+            values = [str(r.get(field, "")) for r in records]
+            summary[f"last_{field}"] = values[-1] if values else ""
+            continue
         values = [int(r.get(field, 0) or 0) for r in records]
         summary[f"max_{field}"] = max(values) if values else None
         summary[f"last_{field}"] = values[-1] if values else None
@@ -697,6 +711,19 @@ class StampMonitor(Node):
                 f"| `{field}` | `{fmt_float(summary.get(f'last_{field}'), 0)}` | "
                 f"`{fmt_float(summary.get(f'max_{field}'), 0)}` |"
             )
+        lines.append("")
+        lines.append("| Predictor LiDAR Input | Latest | Max |")
+        lines.append("|---|---:|---:|")
+        for field in PREDICTOR_LIDAR_INPUT_FIELDS:
+            if field.endswith("_reason"):
+                lines.append(
+                    f"| `{field}` | `{md_escape(summary.get(f'last_{field}', ''))}` |  |"
+                )
+            else:
+                lines.append(
+                    f"| `{field}` | `{fmt_float(summary.get(f'last_{field}'), 0)}` | "
+                    f"`{fmt_float(summary.get(f'max_{field}'), 0)}` |"
+                )
         reasons = summary.get("reason_counts", Counter())
         lines.append("")
         lines.append("| Reason | Count |")

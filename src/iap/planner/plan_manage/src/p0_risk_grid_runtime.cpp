@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <chrono>
 #include <cmath>
+#include <exception>
 #include <iomanip>
 #include <memory>
 #include <sstream>
@@ -13,6 +14,7 @@
 #include <gnss_comm/gnss_ros.hpp>
 #include <gnss_comm/gnss_utility.hpp>
 #include <iap/predictor/predictor_module.hpp>
+#include <sensor_msgs/point_cloud2_iterator.hpp>
 
 namespace ego_planner {
 namespace {
@@ -35,6 +37,43 @@ std::string jsonNumber(double value) {
   std::ostringstream oss;
   oss << std::setprecision(12) << value;
   return oss.str();
+}
+
+std::string jsonString(const std::string& value) {
+  std::ostringstream oss;
+  oss << '"';
+  for (const char c : value) {
+    switch (c) {
+      case '\\':
+        oss << "\\\\";
+        break;
+      case '"':
+        oss << "\\\"";
+        break;
+      case '\n':
+        oss << "\\n";
+        break;
+      case '\r':
+        oss << "\\r";
+        break;
+      case '\t':
+        oss << "\\t";
+        break;
+      default:
+        oss << c;
+        break;
+    }
+  }
+  oss << '"';
+  return oss.str();
+}
+
+bool hasPointField(const sensor_msgs::msg::PointCloud2& msg,
+                   const std::string& name) {
+  return std::any_of(msg.fields.begin(), msg.fields.end(),
+                     [&](const auto& field) {
+                       return field.name == name;
+                     });
 }
 
 iap::PredictorSourceMode parsePredictorSourceMode(
@@ -203,8 +242,9 @@ P0RiskGridRuntime::P0RiskGridRuntime(
 
 iap::RiskGridHealth P0RiskGridRuntime::health() const {
   const double now_s = currentMessageStamp();
-  return std::isfinite(now_s) ? risk_grid_.health(now_s)
-                              : risk_grid_.health();
+  return addLidarPredictorInputHealth(
+      std::isfinite(now_s) ? risk_grid_.health(now_s)
+                           : risk_grid_.health());
 }
 
 bool P0RiskGridRuntime::refreshOnceForTest() {
@@ -333,8 +373,19 @@ void P0RiskGridRuntime::refreshTimerCallback() {
         config_.predictor_conservative_max_with_gnss;
     predictor_params.lidar.enable_legacy_observability =
         config_.predictor_lidar_legacy_observability;
+    std::shared_ptr<const std::vector<Eigen::Vector3d>> lidar_map_points;
+    std::shared_ptr<const std::vector<iap::LidarFimPrimitive>>
+        lidar_fim_primitives;
+    {
+      std::lock_guard<std::mutex> lock(lidar_predictor_input_mutex_);
+      lidar_map_points = latest_lidar_map_points_;
+      lidar_fim_primitives = latest_lidar_fim_primitives_;
+    }
+    iap::PredictorModule module(predictor_params);
+    module.set_lidar_map_points(std::move(lidar_map_points));
+    module.set_lidar_fim_primitives(std::move(lidar_fim_primitives));
     local_provider = std::make_unique<PredictorModuleRiskProvider>(
-        iap::PredictorModule(predictor_params), snapshot);
+        std::move(module), snapshot);
     provider = local_provider.get();
   }
 
@@ -367,41 +418,52 @@ void P0RiskGridRuntime::refreshTimerCallback() {
 
 void P0RiskGridRuntime::publishHealth(const iap::RiskGridHealth& health,
                                       const double now_s) {
+  const iap::RiskGridHealth enriched_health =
+      addLidarPredictorInputHealth(health);
   if (safety_viz_) {
-    safety_viz_->publishRiskGridHealth(health, now_s);
+    safety_viz_->publishRiskGridHealth(enriched_health, now_s);
   }
   if (!config_.debug_metrics_enable || !node_) {
     return;
   }
+  const auto& out_health = enriched_health;
   std::ostringstream oss;
   oss << "{"
-      << "\"ready\":" << (health.ready ? "true" : "false") << ","
-      << "\"stale\":" << (health.stale ? "true" : "false") << ","
-      << "\"age_s\":" << jsonNumber(health.age_s) << ","
-      << "\"valid_ratio\":" << jsonNumber(health.valid_ratio) << ","
-      << "\"unknown_ratio\":" << jsonNumber(health.unknown_ratio) << ","
-      << "\"generation_id\":" << health.generation_id << ","
-      << "\"provider_query_count\":" << health.provider_query_count << ","
-      << "\"occupied_skip_count\":" << health.occupied_skip_count << ","
-      << "\"provider_stale_count\":" << health.provider_stale_count << ","
-      << "\"provider_invalid_count\":" << health.provider_invalid_count << ","
+      << "\"ready\":" << (out_health.ready ? "true" : "false") << ","
+      << "\"stale\":" << (out_health.stale ? "true" : "false") << ","
+      << "\"age_s\":" << jsonNumber(out_health.age_s) << ","
+      << "\"valid_ratio\":" << jsonNumber(out_health.valid_ratio) << ","
+      << "\"unknown_ratio\":" << jsonNumber(out_health.unknown_ratio) << ","
+      << "\"generation_id\":" << out_health.generation_id << ","
+      << "\"provider_query_count\":" << out_health.provider_query_count << ","
+      << "\"occupied_skip_count\":" << out_health.occupied_skip_count << ","
+      << "\"provider_stale_count\":" << out_health.provider_stale_count << ","
+      << "\"provider_invalid_count\":" << out_health.provider_invalid_count << ","
       << "\"predictor_gnss_used_count\":"
-      << health.predictor_gnss_used_count << ","
+      << out_health.predictor_gnss_used_count << ","
       << "\"predictor_lidar_used_count\":"
-      << health.predictor_lidar_used_count << ","
+      << out_health.predictor_lidar_used_count << ","
       << "\"predictor_prior_used_count\":"
-      << health.predictor_prior_used_count << ","
+      << out_health.predictor_prior_used_count << ","
       << "\"predictor_regularized_count\":"
-      << health.predictor_regularized_count << ","
+      << out_health.predictor_regularized_count << ","
       << "\"predictor_conservative_max_count\":"
-      << health.predictor_conservative_max_count << ","
+      << out_health.predictor_conservative_max_count << ","
+      << "\"predictor_lidar_map_point_count\":"
+      << out_health.predictor_lidar_map_point_count << ","
+      << "\"predictor_lidar_fim_primitive_count\":"
+      << out_health.predictor_lidar_fim_primitive_count << ","
+      << "\"predictor_lidar_fim_valid_normal_count\":"
+      << out_health.predictor_lidar_fim_valid_normal_count << ","
+      << "\"predictor_lidar_fim_fallback_reason\":"
+      << jsonString(out_health.predictor_lidar_fim_fallback_reason) << ","
       << "\"refresh_stamp_s\":" << jsonNumber(last_refresh_stamp_s_) << ","
       << "\"last_grid_stamp_s\":" << jsonNumber(last_grid_stamp_s_) << ","
       << "\"refresh_elapsed_ms\":" << jsonNumber(last_refresh_elapsed_ms_) << ","
       << "\"snapshot_available\":"
       << (last_snapshot_available_ ? "true" : "false") << ","
       << "\"refresh_query_count\":" << last_refresh_query_count_ << ","
-      << "\"reason\":\"" << health.reason << "\""
+      << "\"reason\":" << jsonString(out_health.reason)
       << "}";
   if (health_pub_) {
     std_msgs::msg::String msg;
@@ -415,29 +477,41 @@ void P0RiskGridRuntime::publishHealth(const iap::RiskGridHealth& health,
                        "provider_stale=%lu provider_invalid=%lu "
                        "gnss_used=%lu lidar_used=%lu prior_used=%lu "
                        "regularized=%lu conservative_max=%lu "
+                       "lidar_points=%lu lidar_fim_primitives=%lu "
+                       "lidar_fim_valid_normals=%lu lidar_fim_fallback=%s "
                        "refresh_stamp=%.6f grid_stamp=%.6f elapsed_ms=%.3f "
                        "queries=%zu reason=%s",
-                       health.ready, health.stale, health.age_s,
-                       health.valid_ratio, health.unknown_ratio,
-                       static_cast<unsigned long>(health.generation_id),
-                       static_cast<unsigned long>(health.provider_query_count),
-                       static_cast<unsigned long>(health.occupied_skip_count),
-                       static_cast<unsigned long>(health.provider_stale_count),
+                       out_health.ready, out_health.stale, out_health.age_s,
+                       out_health.valid_ratio, out_health.unknown_ratio,
+                       static_cast<unsigned long>(out_health.generation_id),
                        static_cast<unsigned long>(
-                           health.provider_invalid_count),
+                           out_health.provider_query_count),
                        static_cast<unsigned long>(
-                           health.predictor_gnss_used_count),
+                           out_health.occupied_skip_count),
                        static_cast<unsigned long>(
-                           health.predictor_lidar_used_count),
+                           out_health.provider_stale_count),
                        static_cast<unsigned long>(
-                           health.predictor_prior_used_count),
+                           out_health.provider_invalid_count),
                        static_cast<unsigned long>(
-                           health.predictor_regularized_count),
+                           out_health.predictor_gnss_used_count),
                        static_cast<unsigned long>(
-                           health.predictor_conservative_max_count),
+                           out_health.predictor_lidar_used_count),
+                       static_cast<unsigned long>(
+                           out_health.predictor_prior_used_count),
+                       static_cast<unsigned long>(
+                           out_health.predictor_regularized_count),
+                       static_cast<unsigned long>(
+                           out_health.predictor_conservative_max_count),
+                       static_cast<unsigned long>(
+                           out_health.predictor_lidar_map_point_count),
+                       static_cast<unsigned long>(
+                           out_health.predictor_lidar_fim_primitive_count),
+                       static_cast<unsigned long>(
+                           out_health.predictor_lidar_fim_valid_normal_count),
+                       out_health.predictor_lidar_fim_fallback_reason.c_str(),
                        last_refresh_stamp_s_, last_grid_stamp_s_,
                        last_refresh_elapsed_ms_, last_refresh_query_count_,
-                       health.reason.c_str());
+                       out_health.reason.c_str());
 }
 
 void P0RiskGridRuntime::odomCallback(
@@ -600,8 +674,94 @@ void P0RiskGridRuntime::ionoCallback(
 
 void P0RiskGridRuntime::cloudCallback(
     const sensor_msgs::msg::PointCloud2::ConstSharedPtr msg) {
-  if (msg) {
-    latest_map_stamp_ = stampToSec(msg->header.stamp);
+  auto clear_lidar_inputs = [this](const std::string& reason) {
+    iap::LidarFimPrimitiveGenerationDiagnostics diagnostics;
+    diagnostics.valid = false;
+    diagnostics.fallback_reason = reason;
+    std::lock_guard<std::mutex> lock(lidar_predictor_input_mutex_);
+    latest_lidar_map_points_.reset();
+    latest_lidar_fim_primitives_.reset();
+    latest_lidar_fim_diagnostics_ = diagnostics;
+    latest_lidar_map_point_count_ = 0;
+    latest_lidar_fim_primitive_count_ = 0;
+    latest_lidar_fim_valid_normal_count_ = 0;
+    latest_lidar_fim_fallback_reason_ = reason;
+  };
+
+  if (!msg) {
+    clear_lidar_inputs("null_lidar_pointcloud");
+    return;
+  }
+
+  latest_map_stamp_ = stampToSec(msg->header.stamp);
+
+  auto points = std::make_shared<std::vector<Eigen::Vector3d>>();
+  auto normals = std::make_shared<std::vector<Eigen::Vector3d>>();
+  const bool cloud_has_normals =
+      hasPointField(*msg, "normal_x") &&
+      hasPointField(*msg, "normal_y") &&
+      hasPointField(*msg, "normal_z");
+  try {
+    sensor_msgs::PointCloud2ConstIterator<float> iter_x(*msg, "x");
+    sensor_msgs::PointCloud2ConstIterator<float> iter_y(*msg, "y");
+    sensor_msgs::PointCloud2ConstIterator<float> iter_z(*msg, "z");
+    if (cloud_has_normals) {
+      sensor_msgs::PointCloud2ConstIterator<float> iter_nx(*msg, "normal_x");
+      sensor_msgs::PointCloud2ConstIterator<float> iter_ny(*msg, "normal_y");
+      sensor_msgs::PointCloud2ConstIterator<float> iter_nz(*msg, "normal_z");
+      for (; iter_x != iter_x.end();
+           ++iter_x, ++iter_y, ++iter_z, ++iter_nx, ++iter_ny, ++iter_nz) {
+        const Eigen::Vector3d point(*iter_x, *iter_y, *iter_z);
+        if (!point.allFinite()) {
+          continue;
+        }
+        const Eigen::Vector3d normal(*iter_nx, *iter_ny, *iter_nz);
+        points->push_back(point);
+        normals->push_back(normal.allFinite() ? normal
+                                              : Eigen::Vector3d::Zero());
+      }
+    } else {
+      for (; iter_x != iter_x.end(); ++iter_x, ++iter_y, ++iter_z) {
+        const Eigen::Vector3d point(*iter_x, *iter_y, *iter_z);
+        if (point.allFinite()) {
+          points->push_back(point);
+        }
+      }
+    }
+  } catch (const std::exception& e) {
+    clear_lidar_inputs(std::string("invalid_lidar_pointcloud:") + e.what());
+    return;
+  }
+
+  if (points->empty()) {
+    clear_lidar_inputs("empty_lidar_pointcloud");
+    return;
+  }
+
+  const std::shared_ptr<std::vector<Eigen::Vector3d>> predictor_normals =
+      cloud_has_normals && normals->size() == points->size() ? normals
+                                                             : nullptr;
+  iap::LidarFimPrimitiveGenerationDiagnostics diagnostics;
+  auto primitives =
+      iap::make_lidar_fim_primitives(*points, predictor_normals.get(),
+                                     iap::LidarFimPrimitiveGenerationParams{},
+                                     &diagnostics);
+  const std::size_t primitive_count =
+      primitives ? primitives->size() : static_cast<std::size_t>(0);
+  const std::size_t valid_normal_count =
+      std::max(0, diagnostics.lidar_pca_valid_normals);
+  const std::string fallback_reason =
+      diagnostics.fallback_reason.empty() ? std::string()
+                                          : diagnostics.fallback_reason;
+  {
+    std::lock_guard<std::mutex> lock(lidar_predictor_input_mutex_);
+    latest_lidar_map_points_ = points;
+    latest_lidar_fim_primitives_ = primitives;
+    latest_lidar_fim_diagnostics_ = diagnostics;
+    latest_lidar_map_point_count_ = points->size();
+    latest_lidar_fim_primitive_count_ = primitive_count;
+    latest_lidar_fim_valid_normal_count_ = valid_normal_count;
+    latest_lidar_fim_fallback_reason_ = fallback_reason;
   }
 }
 
@@ -705,6 +865,20 @@ bool P0RiskGridRuntime::buildSnapshot(
   }
   *snapshot = snapshot_builder_.build_from_latest(input);
   return snapshot->valid;
+}
+
+iap::RiskGridHealth P0RiskGridRuntime::addLidarPredictorInputHealth(
+    iap::RiskGridHealth health) const {
+  std::lock_guard<std::mutex> lock(lidar_predictor_input_mutex_);
+  health.predictor_lidar_map_point_count =
+      static_cast<uint64_t>(latest_lidar_map_point_count_);
+  health.predictor_lidar_fim_primitive_count =
+      static_cast<uint64_t>(latest_lidar_fim_primitive_count_);
+  health.predictor_lidar_fim_valid_normal_count =
+      static_cast<uint64_t>(latest_lidar_fim_valid_normal_count_);
+  health.predictor_lidar_fim_fallback_reason =
+      latest_lidar_fim_fallback_reason_;
+  return health;
 }
 
 double P0RiskGridRuntime::currentMessageStamp() const {

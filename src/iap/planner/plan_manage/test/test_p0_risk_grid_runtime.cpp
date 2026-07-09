@@ -3,10 +3,13 @@
 #include <cmath>
 #include <limits>
 #include <memory>
+#include <mutex>
 #include <stdexcept>
+#include <string>
 #include <vector>
 
 #include <gtest/gtest.h>
+#include <sensor_msgs/point_cloud2_iterator.hpp>
 
 namespace {
 
@@ -52,6 +55,108 @@ ego_planner::P0RiskGridRuntime::Config enabledConfig() {
   return config;
 }
 
+sensor_msgs::msg::PointCloud2::SharedPtr makePointCloud(
+    const std::vector<Eigen::Vector3d>& points,
+    const std::vector<Eigen::Vector3d>* normals = nullptr) {
+  auto msg = std::make_shared<sensor_msgs::msg::PointCloud2>();
+  msg->header.frame_id = "map";
+  msg->header.stamp.sec = 123;
+  msg->header.stamp.nanosec = 500000000u;
+  sensor_msgs::PointCloud2Modifier modifier(*msg);
+  if (normals != nullptr) {
+    modifier.setPointCloud2Fields(
+        6,
+        "x", 1, sensor_msgs::msg::PointField::FLOAT32,
+        "y", 1, sensor_msgs::msg::PointField::FLOAT32,
+        "z", 1, sensor_msgs::msg::PointField::FLOAT32,
+        "normal_x", 1, sensor_msgs::msg::PointField::FLOAT32,
+        "normal_y", 1, sensor_msgs::msg::PointField::FLOAT32,
+        "normal_z", 1, sensor_msgs::msg::PointField::FLOAT32);
+  } else {
+    modifier.setPointCloud2Fields(
+        3,
+        "x", 1, sensor_msgs::msg::PointField::FLOAT32,
+        "y", 1, sensor_msgs::msg::PointField::FLOAT32,
+        "z", 1, sensor_msgs::msg::PointField::FLOAT32);
+  }
+  modifier.resize(points.size());
+
+  sensor_msgs::PointCloud2Iterator<float> iter_x(*msg, "x");
+  sensor_msgs::PointCloud2Iterator<float> iter_y(*msg, "y");
+  sensor_msgs::PointCloud2Iterator<float> iter_z(*msg, "z");
+  if (normals != nullptr) {
+    sensor_msgs::PointCloud2Iterator<float> iter_nx(*msg, "normal_x");
+    sensor_msgs::PointCloud2Iterator<float> iter_ny(*msg, "normal_y");
+    sensor_msgs::PointCloud2Iterator<float> iter_nz(*msg, "normal_z");
+    for (std::size_t i = 0; i < points.size();
+         ++i, ++iter_x, ++iter_y, ++iter_z, ++iter_nx, ++iter_ny, ++iter_nz) {
+      *iter_x = static_cast<float>(points[i].x());
+      *iter_y = static_cast<float>(points[i].y());
+      *iter_z = static_cast<float>(points[i].z());
+      const Eigen::Vector3d normal =
+          i < normals->size() ? (*normals)[i] : Eigen::Vector3d::Zero();
+      *iter_nx = static_cast<float>(normal.x());
+      *iter_ny = static_cast<float>(normal.y());
+      *iter_nz = static_cast<float>(normal.z());
+    }
+  } else {
+    for (std::size_t i = 0; i < points.size();
+         ++i, ++iter_x, ++iter_y, ++iter_z) {
+      *iter_x = static_cast<float>(points[i].x());
+      *iter_y = static_cast<float>(points[i].y());
+      *iter_z = static_cast<float>(points[i].z());
+    }
+  }
+  return msg;
+}
+
+sensor_msgs::msg::PointCloud2::SharedPtr makeInvalidPointCloud() {
+  auto msg = std::make_shared<sensor_msgs::msg::PointCloud2>();
+  msg->header.frame_id = "map";
+  msg->header.stamp.sec = 123;
+  sensor_msgs::PointCloud2Modifier modifier(*msg);
+  modifier.setPointCloud2Fields(
+      2,
+      "x", 1, sensor_msgs::msg::PointField::FLOAT32,
+      "y", 1, sensor_msgs::msg::PointField::FLOAT32);
+  modifier.resize(1);
+  return msg;
+}
+
+std::vector<Eigen::Vector3d> sixAxisPrimitivePoints() {
+  return {
+      Eigen::Vector3d(1.0, 0.0, 0.0),
+      Eigen::Vector3d(-1.0, 0.0, 0.0),
+      Eigen::Vector3d(0.0, 1.0, 0.0),
+      Eigen::Vector3d(0.0, -1.0, 0.0),
+      Eigen::Vector3d(0.0, 0.0, 1.0),
+      Eigen::Vector3d(0.0, 0.0, -1.0),
+  };
+}
+
+std::vector<Eigen::Vector3d> sixAxisPrimitiveNormals() {
+  return {
+      Eigen::Vector3d::UnitX(),
+      Eigen::Vector3d(-1.0, 0.0, 0.0),
+      Eigen::Vector3d::UnitY(),
+      Eigen::Vector3d(0.0, -1.0, 0.0),
+      Eigen::Vector3d::UnitZ(),
+      Eigen::Vector3d(0.0, 0.0, -1.0),
+  };
+}
+
+std::vector<Eigen::Vector3d> planePcaPoints() {
+  std::vector<Eigen::Vector3d> points;
+  for (int ix = -3; ix <= 3; ++ix) {
+    for (int iy = -3; iy <= 3; ++iy) {
+      points.emplace_back(0.35 * static_cast<double>(ix),
+                          0.35 * static_cast<double>(iy),
+                          0.0);
+    }
+  }
+  return points;
+}
+
 }  // namespace
 
 namespace ego_planner {
@@ -95,6 +200,30 @@ class P0RiskGridRuntimeStampTest : public ::testing::Test {
                             const double now_s,
                             iap::IntegritySnapshot* snapshot) {
     return runtime->buildSnapshot(now_s, snapshot);
+  }
+
+  static void sendCloud(
+      P0RiskGridRuntime* runtime,
+      const sensor_msgs::msg::PointCloud2::SharedPtr& msg) {
+    runtime->cloudCallback(msg);
+  }
+
+  static std::shared_ptr<const std::vector<Eigen::Vector3d>> lidarMapPoints(
+      const P0RiskGridRuntime& runtime) {
+    std::lock_guard<std::mutex> lock(runtime.lidar_predictor_input_mutex_);
+    return runtime.latest_lidar_map_points_;
+  }
+
+  static std::shared_ptr<const std::vector<iap::LidarFimPrimitive>>
+  lidarFimPrimitives(const P0RiskGridRuntime& runtime) {
+    std::lock_guard<std::mutex> lock(runtime.lidar_predictor_input_mutex_);
+    return runtime.latest_lidar_fim_primitives_;
+  }
+
+  static std::string lidarFimFallbackReason(
+      const P0RiskGridRuntime& runtime) {
+    std::lock_guard<std::mutex> lock(runtime.lidar_predictor_input_mutex_);
+    return runtime.latest_lidar_fim_fallback_reason_;
   }
 };
 
@@ -313,6 +442,93 @@ TEST_F(P0RiskGridRuntimeStampTest,
   EXPECT_FALSE(snapshot.has_lambda_base);
 }
 
+TEST_F(P0RiskGridRuntimeStampTest, PointCloudXyzParsingStoresFiniteMapPoints) {
+  ensure_rclcpp();
+  auto node = std::make_shared<rclcpp::Node>(
+      "p0_lidar_cloud_xyz_parse_test",
+      rclcpp::NodeOptions().allow_undeclared_parameters(false));
+  P0RiskGridRuntime runtime(node, enabledConfig(),
+                            std::make_unique<FakeProvider>());
+  const auto cloud = makePointCloud({
+      Eigen::Vector3d(1.0, 2.0, 3.0),
+      Eigen::Vector3d(std::numeric_limits<double>::quiet_NaN(), 0.0, 0.0),
+      Eigen::Vector3d(4.0, 5.0, 6.0),
+  });
+
+  sendCloud(&runtime, cloud);
+
+  const auto points = lidarMapPoints(runtime);
+  ASSERT_NE(points, nullptr);
+  ASSERT_EQ(points->size(), 2u);
+  EXPECT_TRUE((*points)[0].isApprox(Eigen::Vector3d(1.0, 2.0, 3.0)));
+  EXPECT_TRUE((*points)[1].isApprox(Eigen::Vector3d(4.0, 5.0, 6.0)));
+  const auto health = runtime.health();
+  EXPECT_EQ(health.predictor_lidar_map_point_count, 2u);
+}
+
+TEST_F(P0RiskGridRuntimeStampTest,
+       PointCloudNormalFieldsGenerateFimPrimitives) {
+  ensure_rclcpp();
+  auto node = std::make_shared<rclcpp::Node>(
+      "p0_lidar_cloud_normals_parse_test",
+      rclcpp::NodeOptions().allow_undeclared_parameters(false));
+  P0RiskGridRuntime runtime(node, enabledConfig(),
+                            std::make_unique<FakeProvider>());
+  const auto points = sixAxisPrimitivePoints();
+  const auto normals = sixAxisPrimitiveNormals();
+
+  sendCloud(&runtime, makePointCloud(points, &normals));
+
+  const auto primitives = lidarFimPrimitives(runtime);
+  ASSERT_NE(primitives, nullptr);
+  ASSERT_EQ(primitives->size(), normals.size());
+  EXPECT_GT(runtime.health().predictor_lidar_fim_valid_normal_count, 0u);
+  EXPECT_EQ(runtime.health().predictor_lidar_fim_fallback_reason, "");
+}
+
+TEST_F(P0RiskGridRuntimeStampTest,
+       PointCloudWithoutNormalsGeneratesPcaFimPrimitives) {
+  ensure_rclcpp();
+  auto node = std::make_shared<rclcpp::Node>(
+      "p0_lidar_cloud_pca_primitives_test",
+      rclcpp::NodeOptions().allow_undeclared_parameters(false));
+  P0RiskGridRuntime runtime(node, enabledConfig(),
+                            std::make_unique<FakeProvider>());
+
+  sendCloud(&runtime, makePointCloud(planePcaPoints()));
+
+  const auto health = runtime.health();
+  EXPECT_GT(health.predictor_lidar_map_point_count, 0u);
+  EXPECT_GT(health.predictor_lidar_fim_primitive_count, 0u);
+  EXPECT_GT(health.predictor_lidar_fim_valid_normal_count, 0u);
+  EXPECT_EQ(health.predictor_lidar_fim_fallback_reason, "");
+}
+
+TEST_F(P0RiskGridRuntimeStampTest,
+       InvalidOrEmptyPointCloudClearsLidarPredictorInputs) {
+  ensure_rclcpp();
+  auto node = std::make_shared<rclcpp::Node>(
+      "p0_lidar_cloud_clear_test",
+      rclcpp::NodeOptions().allow_undeclared_parameters(false));
+  P0RiskGridRuntime runtime(node, enabledConfig(),
+                            std::make_unique<FakeProvider>());
+  const auto points = sixAxisPrimitivePoints();
+  const auto normals = sixAxisPrimitiveNormals();
+  sendCloud(&runtime, makePointCloud(points, &normals));
+  ASSERT_NE(lidarMapPoints(runtime), nullptr);
+
+  sendCloud(&runtime, makeInvalidPointCloud());
+  EXPECT_EQ(lidarMapPoints(runtime), nullptr);
+  EXPECT_EQ(lidarFimPrimitives(runtime), nullptr);
+  EXPECT_NE(lidarFimFallbackReason(runtime).find("invalid_lidar_pointcloud"),
+            std::string::npos);
+
+  sendCloud(&runtime, makePointCloud({}));
+  EXPECT_EQ(lidarMapPoints(runtime), nullptr);
+  EXPECT_EQ(lidarFimPrimitives(runtime), nullptr);
+  EXPECT_EQ(lidarFimFallbackReason(runtime), "empty_lidar_pointcloud");
+}
+
 TEST_F(P0RiskGridRuntimeStampTest,
        LidarOnlyAutoMissingGnssEpochDoesNotMakeFrameStale) {
   ensure_rclcpp();
@@ -332,6 +548,36 @@ TEST_F(P0RiskGridRuntimeStampTest,
   EXPECT_EQ(health.provider_stale_count, 0u);
   EXPECT_GT(health.provider_invalid_count, 0u);
   EXPECT_EQ(health.predictor_gnss_used_count, 0u);
+  EXPECT_NE(health.reason, "stale_gnss_epoch");
+}
+
+TEST_F(P0RiskGridRuntimeStampTest,
+       LidarOnlyDisabledWithFimPrimitivesUsesLidarAndNotGnss) {
+  ensure_rclcpp();
+  auto node = std::make_shared<rclcpp::Node>(
+      "p0_lidar_only_fim_source_count_test",
+      rclcpp::NodeOptions().allow_undeclared_parameters(false));
+  auto config = enabledConfig();
+  config.predictor_source_mode = iap::PredictorSourceMode::LidarOnly;
+  config.predictor_gnss_epoch_policy =
+      iap::PredictorGnssEpochPolicy::Disabled;
+  config.predictor_use_current_integrity_prior = false;
+  config.predictor_lidar_legacy_observability = false;
+  P0RiskGridRuntime runtime(node, config);
+  const auto points = sixAxisPrimitivePoints();
+  const auto normals = sixAxisPrimitiveNormals();
+
+  sendCloud(&runtime, makePointCloud(points, &normals));
+  seedValidInputs(&runtime, 123.5, 123.5);
+
+  EXPECT_TRUE(runtime.refreshOnceForTest());
+  const auto health = runtime.health();
+  EXPECT_TRUE(health.ready);
+  EXPECT_GT(health.valid_ratio, 0.0);
+  EXPECT_EQ(health.predictor_gnss_used_count, 0u);
+  EXPECT_GT(health.predictor_lidar_used_count, 0u);
+  EXPECT_GT(health.predictor_lidar_fim_primitive_count, 0u);
+  EXPECT_GT(health.predictor_lidar_fim_valid_normal_count, 0u);
   EXPECT_NE(health.reason, "stale_gnss_epoch");
 }
 

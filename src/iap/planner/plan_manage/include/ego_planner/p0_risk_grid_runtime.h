@@ -4,6 +4,7 @@
 #include <cstddef>
 #include <functional>
 #include <memory>
+#include <mutex>
 #include <optional>
 #include <string>
 #include <unordered_map>
@@ -99,6 +100,8 @@ class P0RiskGridRuntime {
   Eigen::Matrix3d currentPriorInformation(
       const iap::CurrentIntegrityState& current) const;
   bool buildSnapshot(double now_s, iap::IntegritySnapshot* snapshot) const;
+  iap::RiskGridHealth addLidarPredictorInputHealth(
+      iap::RiskGridHealth health) const;
   double currentMessageStamp() const;
   double currentRefreshStamp() const;
 
@@ -143,6 +146,18 @@ class P0RiskGridRuntime {
   std::unordered_map<uint32_t, gnss_comm::GloEphemPtr> glo_ephem_cache_;
   std::vector<double> iono_params_;
   std::optional<iap::GnssEpoch> latest_epoch_;
+
+  mutable std::mutex lidar_predictor_input_mutex_;
+  std::shared_ptr<const std::vector<Eigen::Vector3d>>
+      latest_lidar_map_points_;
+  std::shared_ptr<const std::vector<iap::LidarFimPrimitive>>
+      latest_lidar_fim_primitives_;
+  iap::LidarFimPrimitiveGenerationDiagnostics
+      latest_lidar_fim_diagnostics_;
+  std::size_t latest_lidar_map_point_count_ = 0;
+  std::size_t latest_lidar_fim_primitive_count_ = 0;
+  std::size_t latest_lidar_fim_valid_normal_count_ = 0;
+  std::string latest_lidar_fim_fallback_reason_ = "not_evaluated";
 };
 
 }  // namespace ego_planner

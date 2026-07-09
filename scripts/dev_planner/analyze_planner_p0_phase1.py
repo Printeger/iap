@@ -32,6 +32,12 @@ PREDICTOR_SOURCE_COUNTER_FIELDS = [
     "predictor_regularized_count",
     "predictor_conservative_max_count",
 ]
+PREDICTOR_LIDAR_INPUT_FIELDS = [
+    "predictor_lidar_map_point_count",
+    "predictor_lidar_fim_primitive_count",
+    "predictor_lidar_fim_valid_normal_count",
+    "predictor_lidar_fim_fallback_reason",
+]
 
 
 def stamp_to_sec(stamp: Any) -> float:
@@ -165,6 +171,8 @@ def parse_health(msg: Any, timestamp_ns: int) -> dict[str, Any] | None:
         }
         for field in PREDICTOR_SOURCE_COUNTER_FIELDS:
             row[field] = 0
+        for field in PREDICTOR_LIDAR_INPUT_FIELDS:
+            row[field] = "" if field.endswith("_reason") else 0
         return row
     row = {
         "stamp": float(timestamp_ns) * 1.0e-9,
@@ -178,6 +186,8 @@ def parse_health(msg: Any, timestamp_ns: int) -> dict[str, Any] | None:
     }
     for field in PREDICTOR_SOURCE_COUNTER_FIELDS:
         row[field] = data.get(field, 0)
+    for field in PREDICTOR_LIDAR_INPUT_FIELDS:
+        row[field] = data.get(field, "" if field.endswith("_reason") else 0)
     return row
 
 
@@ -720,6 +730,7 @@ def analyze(args: argparse.Namespace) -> dict[str, Any]:
             "generation_id",
             "reason",
             *PREDICTOR_SOURCE_COUNTER_FIELDS,
+            *PREDICTOR_LIDAR_INPUT_FIELDS,
         ]
         write_csv(
             health_path,
@@ -775,12 +786,24 @@ def analyze(args: argparse.Namespace) -> dict[str, Any]:
                 field: latest_health.get(field, 0)
                 for field in PREDICTOR_SOURCE_COUNTER_FIELDS
             }
+            summary["latest_predictor_lidar_inputs"] = {
+                field: latest_health.get(field, "" if field.endswith("_reason") else 0)
+                for field in PREDICTOR_LIDAR_INPUT_FIELDS
+            }
             summary["max_predictor_source_counters"] = {
                 field: max(
                     int(row.get(field, 0) or 0)
                     for row in health_rows
                 )
                 for field in PREDICTOR_SOURCE_COUNTER_FIELDS
+            }
+            summary["max_predictor_lidar_inputs"] = {
+                field: (
+                    max(int(row.get(field, 0) or 0) for row in health_rows)
+                    if not field.endswith("_reason")
+                    else latest_health.get(field, "")
+                )
+                for field in PREDICTOR_LIDAR_INPUT_FIELDS
             }
         validate_health(health_rows, manifest, failures)
         validate_cloud(pl_cloud_rows, failures)
