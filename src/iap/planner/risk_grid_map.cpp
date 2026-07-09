@@ -1,4 +1,5 @@
 #include <iap/planner/risk_grid_map.hpp>
+#include <iap/predictor/predictor_types.hpp>
 
 #include <algorithm>
 #include <cmath>
@@ -768,6 +769,11 @@ bool RiskGridMap::refreshFromProvider(const Eigen::Vector3d& uav_position_w,
   uint64_t unknown_count = 0;
   uint64_t provider_stale_count = 0;
   uint64_t provider_invalid_count = 0;
+  uint64_t predictor_gnss_used_count = 0;
+  uint64_t predictor_lidar_used_count = 0;
+  uint64_t predictor_prior_used_count = 0;
+  uint64_t predictor_regularized_count = 0;
+  uint64_t predictor_conservative_max_count = 0;
   std::unordered_map<std::string, uint64_t> unknown_reason_counts;
   const auto record_unknown_reason = [&unknown_reason_counts](
                                          const std::string& reason) {
@@ -790,6 +796,21 @@ bool RiskGridMap::refreshFromProvider(const Eigen::Vector3d& uav_position_w,
 
     const RiskPredictionResult& result = indexed_results[i];
     voxel.source_flags = result.source_flags;
+    if ((voxel.source_flags & PREDICTOR_RESULT_GNSS_USED) != 0u) {
+      ++predictor_gnss_used_count;
+    }
+    if ((voxel.source_flags & PREDICTOR_RESULT_LIDAR_USED) != 0u) {
+      ++predictor_lidar_used_count;
+    }
+    if ((voxel.source_flags & PREDICTOR_RESULT_PRIOR_VALID) != 0u) {
+      ++predictor_prior_used_count;
+    }
+    if ((voxel.source_flags & PREDICTOR_RESULT_REGULARIZED) != 0u) {
+      ++predictor_regularized_count;
+    }
+    if ((voxel.source_flags & PREDICTOR_RESULT_CONSERVATIVE_MAX) != 0u) {
+      ++predictor_conservative_max_count;
+    }
     voxel.valid = has_provider_result[i] &&
         result.available && result.valid && !result.stale && finite_pl(result);
     voxel.stale = result.stale;
@@ -831,6 +852,12 @@ bool RiskGridMap::refreshFromProvider(const Eigen::Vector3d& uav_position_w,
   new_health.occupied_skip_count = occupied_skip_count;
   new_health.provider_stale_count = provider_stale_count;
   new_health.provider_invalid_count = provider_invalid_count;
+  new_health.predictor_gnss_used_count = predictor_gnss_used_count;
+  new_health.predictor_lidar_used_count = predictor_lidar_used_count;
+  new_health.predictor_prior_used_count = predictor_prior_used_count;
+  new_health.predictor_regularized_count = predictor_regularized_count;
+  new_health.predictor_conservative_max_count =
+      predictor_conservative_max_count;
   new_health.reason = "ok";
   if (valid_count == 0u &&
       unknown_count == static_cast<uint64_t>(total_voxel_count)) {

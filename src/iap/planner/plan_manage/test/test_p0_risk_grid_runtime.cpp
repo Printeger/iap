@@ -3,6 +3,7 @@
 #include <cmath>
 #include <limits>
 #include <memory>
+#include <stdexcept>
 #include <vector>
 
 #include <gtest/gtest.h>
@@ -89,6 +90,12 @@ class P0RiskGridRuntimeStampTest : public ::testing::Test {
     runtime->latest_current_.im = 9.0;
     runtime->latest_current_valid_ = true;
   }
+
+  static bool buildSnapshot(P0RiskGridRuntime* runtime,
+                            const double now_s,
+                            iap::IntegritySnapshot* snapshot) {
+    return runtime->buildSnapshot(now_s, snapshot);
+  }
 };
 
 }  // namespace ego_planner
@@ -114,6 +121,12 @@ TEST(P0RiskGridRuntimeTest, GnssEpochFreshnessDefaultIsTwoSeconds) {
   const auto config = ego_planner::P0RiskGridRuntime::declareAndReadConfig(node);
 
   EXPECT_DOUBLE_EQ(config.gnss_epoch_max_age_s, 2.0);
+  EXPECT_EQ(config.predictor_source_mode, iap::PredictorSourceMode::Fusion);
+  EXPECT_EQ(config.predictor_gnss_epoch_policy,
+            iap::PredictorGnssEpochPolicy::Auto);
+  EXPECT_TRUE(config.predictor_use_current_integrity_prior);
+  EXPECT_FALSE(config.predictor_conservative_max_with_gnss);
+  EXPECT_TRUE(config.predictor_lidar_legacy_observability);
 }
 
 TEST(P0RiskGridRuntimeTest, GnssEpochFreshnessCanBeOverridden) {
@@ -129,6 +142,59 @@ TEST(P0RiskGridRuntimeTest, GnssEpochFreshnessCanBeOverridden) {
   const auto config = ego_planner::P0RiskGridRuntime::declareAndReadConfig(node);
 
   EXPECT_DOUBLE_EQ(config.gnss_epoch_max_age_s, 0.25);
+}
+
+TEST(P0RiskGridRuntimeTest, PredictorParamsCanBeOverridden) {
+  ensure_rclcpp();
+  rclcpp::NodeOptions options;
+  options.allow_undeclared_parameters(false);
+  options.parameter_overrides({
+      rclcpp::Parameter("p0.predictor.source_mode", "lidar_only"),
+      rclcpp::Parameter("p0.predictor.gnss_epoch_policy", "disabled"),
+      rclcpp::Parameter("p0.predictor.use_current_integrity_prior", false),
+      rclcpp::Parameter("p0.predictor.conservative_max_with_gnss", true),
+      rclcpp::Parameter("p0.predictor.lidar_legacy_observability", false),
+  });
+  auto node = std::make_shared<rclcpp::Node>(
+      "p0_predictor_params_override_test", options);
+
+  const auto config = ego_planner::P0RiskGridRuntime::declareAndReadConfig(node);
+
+  EXPECT_EQ(config.predictor_source_mode,
+            iap::PredictorSourceMode::LidarOnly);
+  EXPECT_EQ(config.predictor_gnss_epoch_policy,
+            iap::PredictorGnssEpochPolicy::Disabled);
+  EXPECT_FALSE(config.predictor_use_current_integrity_prior);
+  EXPECT_TRUE(config.predictor_conservative_max_with_gnss);
+  EXPECT_FALSE(config.predictor_lidar_legacy_observability);
+}
+
+TEST(P0RiskGridRuntimeTest, InvalidPredictorSourceModeThrows) {
+  ensure_rclcpp();
+  rclcpp::NodeOptions options;
+  options.allow_undeclared_parameters(false);
+  options.parameter_overrides({
+      rclcpp::Parameter("p0.predictor.source_mode", "camera_only"),
+  });
+  auto node = std::make_shared<rclcpp::Node>(
+      "p0_predictor_invalid_source_mode_test", options);
+
+  EXPECT_THROW(ego_planner::P0RiskGridRuntime::declareAndReadConfig(node),
+               std::invalid_argument);
+}
+
+TEST(P0RiskGridRuntimeTest, InvalidPredictorGnssEpochPolicyThrows) {
+  ensure_rclcpp();
+  rclcpp::NodeOptions options;
+  options.allow_undeclared_parameters(false);
+  options.parameter_overrides({
+      rclcpp::Parameter("p0.predictor.gnss_epoch_policy", "sometimes"),
+  });
+  auto node = std::make_shared<rclcpp::Node>(
+      "p0_predictor_invalid_gnss_policy_test", options);
+
+  EXPECT_THROW(ego_planner::P0RiskGridRuntime::declareAndReadConfig(node),
+               std::invalid_argument);
 }
 
 TEST(P0RiskGridRuntimeTest, EnabledRuntimeConstructsWithInjectedProvider) {
@@ -228,6 +294,68 @@ TEST_F(P0RiskGridRuntimeStampTest, RefreshSnapshotUsesMessageStamp) {
   const auto snapshot = runtime.acquireSnapshot();
   ASSERT_NE(snapshot, nullptr);
   EXPECT_DOUBLE_EQ(snapshot->stamp_s(), 123.5);
+}
+
+TEST_F(P0RiskGridRuntimeStampTest,
+       UseCurrentIntegrityPriorFalseOmitsLambdaBase) {
+  ensure_rclcpp();
+  auto node = std::make_shared<rclcpp::Node>(
+      "p0_no_current_prior_snapshot_test",
+      rclcpp::NodeOptions().allow_undeclared_parameters(false));
+  auto config = enabledConfig();
+  config.predictor_use_current_integrity_prior = false;
+  P0RiskGridRuntime runtime(node, config, std::make_unique<FakeProvider>());
+
+  seedValidInputs(&runtime, 123.5, 123.5);
+  iap::IntegritySnapshot snapshot;
+  ASSERT_TRUE(buildSnapshot(&runtime, 123.5, &snapshot));
+
+  EXPECT_FALSE(snapshot.has_lambda_base);
+}
+
+TEST_F(P0RiskGridRuntimeStampTest,
+       LidarOnlyAutoMissingGnssEpochDoesNotMakeFrameStale) {
+  ensure_rclcpp();
+  auto node = std::make_shared<rclcpp::Node>(
+      "p0_lidar_only_auto_missing_gnss_test",
+      rclcpp::NodeOptions().allow_undeclared_parameters(false));
+  auto config = enabledConfig();
+  config.predictor_source_mode = iap::PredictorSourceMode::LidarOnly;
+  config.predictor_gnss_epoch_policy = iap::PredictorGnssEpochPolicy::Auto;
+  P0RiskGridRuntime runtime(node, config);
+
+  seedValidInputs(&runtime, 123.5, 123.5);
+  EXPECT_TRUE(runtime.refreshOnceForTest());
+  const auto health = runtime.health();
+
+  EXPECT_TRUE(health.ready);
+  EXPECT_EQ(health.provider_stale_count, 0u);
+  EXPECT_GT(health.provider_invalid_count, 0u);
+  EXPECT_EQ(health.predictor_gnss_used_count, 0u);
+  EXPECT_NE(health.reason, "stale_gnss_epoch");
+}
+
+TEST_F(P0RiskGridRuntimeStampTest,
+       LidarOnlyDisabledMissingGnssEpochDoesNotMakeFrameStale) {
+  ensure_rclcpp();
+  auto node = std::make_shared<rclcpp::Node>(
+      "p0_lidar_only_disabled_missing_gnss_test",
+      rclcpp::NodeOptions().allow_undeclared_parameters(false));
+  auto config = enabledConfig();
+  config.predictor_source_mode = iap::PredictorSourceMode::LidarOnly;
+  config.predictor_gnss_epoch_policy =
+      iap::PredictorGnssEpochPolicy::Disabled;
+  P0RiskGridRuntime runtime(node, config);
+
+  seedValidInputs(&runtime, 123.5, 123.5);
+  EXPECT_TRUE(runtime.refreshOnceForTest());
+  const auto health = runtime.health();
+
+  EXPECT_TRUE(health.ready);
+  EXPECT_EQ(health.provider_stale_count, 0u);
+  EXPECT_GT(health.provider_invalid_count, 0u);
+  EXPECT_EQ(health.predictor_gnss_used_count, 0u);
+  EXPECT_NE(health.reason, "stale_gnss_epoch");
 }
 
 }  // namespace ego_planner

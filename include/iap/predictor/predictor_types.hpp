@@ -53,11 +53,27 @@ struct PredictorFreshnessGuardParams {
   double max_snapshot_age_s = 0.5;
 };
 
+enum class PredictorSourceMode {
+  Fusion = 0,
+  GnssOnly = 1,
+  LidarOnly = 2,
+};
+
+enum class PredictorGnssEpochPolicy {
+  Auto = 0,
+  Required = 1,
+  Optional = 2,
+  Disabled = 3,
+};
+
 struct PredictorParams {
   GnssAdvisoryPredictorParams gnss;
   LidarAdvisoryPredictorParams lidar;
   FusionAdvisoryPredictorParams fusion;
   PredictorFreshnessGuardParams freshness;
+  PredictorSourceMode source_mode = PredictorSourceMode::Fusion;
+  PredictorGnssEpochPolicy gnss_epoch_policy =
+      PredictorGnssEpochPolicy::Auto;
 };
 
 enum class PredictorInformationState {

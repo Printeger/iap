@@ -1705,3 +1705,45 @@ Updated conclusion after rerun:
 2. P0 full-frame unknown also reproduced in both P0-3 runs and begins before the analyzer's first drift timestamp.
 3. P0-3 remains blocked; do not enter `P0-4`.
 4. The immediate branch remains `debug_IAP_odometry_drift`, with a follow-up healthy-odom P0-3 rerun required before deciding whether the persistent full-frame unknown is an independent P0 corridor lifecycle bug.
+
+### P0-3-control Predictor Source-Control Smoke
+
+Result: **PARTIAL / CONTROL GATING VERIFIED, NOT FORMAL P0-3 PASS**.
+
+This run used the new P0 predictor controls to keep GNSS available for odometry while forcing P0 risk prediction into `lidar_only` with `gnss_epoch_policy=disabled`. It verifies that P0 no longer fails the whole frame with `stale_gnss_epoch` in lidar-only mode. It does not satisfy the formal P0-3-control source-counter goal because this runtime path does not yet provide LiDAR FIM primitives or LiDAR map points to `PredictorModuleRiskProvider`, so the LiDAR advisory is queried but contributes no usable P0 source flags.
+
+| Field | Value |
+|---|---|
+| Run time | `2026-07-09T07:23:54Z` |
+| Export | `/home/dev/ws_iap/src/iap/results/planner_validation/exports/test_planner_p0_open_sky_lidar_corridor_degenerate_1783581834487` |
+| Bag | `/home/dev/ws_iap/src/iap/results/planner_validation/bags/test_planner_p0_open_sky_lidar_corridor_degenerate_20260709T072354Z` |
+| Launch | `PASS`; launch command returned `0` |
+| Validator | `PASS`; `passed=true`, `message_count=583`, `lidar_valid_seen=true`, `fallback_valid_seen=true`, `gnss_valid_seen=false` |
+| Analyzer | `FAIL`; `mean valid_ratio 0.000 <= 0.6` |
+| P0 health rows | `86` |
+| P0 reason histogram | `provider_invalid=86`; no `stale_gnss_epoch` rows |
+| Latest source counters | `gnss=0`, `lidar=0`, `prior=62370`, `regularized=0`, `conservative_max=0` |
+| Max source counters | `gnss=0`, `lidar=0`, `prior=63300`, `regularized=0`, `conservative_max=0` |
+
+Control configuration recorded in the manifest:
+
+```text
+p0.predictor.source_mode=lidar_only
+p0.predictor.gnss_epoch_policy=disabled
+p0.predictor.use_current_integrity_prior=true
+p0.predictor.conservative_max_with_gnss=false
+p0.predictor.lidar_legacy_observability=true
+use_gnss=true
+enable_gnss_integrity=false
+enable_gnss_araim=false
+enable_lidar_integrity=true
+integrity_fusion_mode=lidar_only
+```
+
+Observed source-control conclusions:
+
+1. `gnss_used_count=0` throughout the run, so P0 risk prediction did not use the GNSS advisory.
+2. `stale=false` throughout the P0 health stream and `reason=stale_gnss_epoch` never appears, so lidar-only mode is no longer dominated by missing or stale GNSS epoch handling.
+3. `lidar_used_count=0`, so this smoke cannot prove the requested `lidar_used_count>0` runtime condition. The current limitation is missing full P0 LiDAR advisory wiring/fixture, not GNSS freshness gating.
+4. `use_gnss:=true` with GNSS integrity disabled was sufficient for this smoke to keep the odometry/planner stack running; GNSS factors were still inserted into odometry while `/iap/integrity` stayed LiDAR/fallback-valid.
+5. Do not mark P0-3-control as formal PASS until odom health, P0 health validity, `lidar_used_count>0`, PL/cost corridor distinction, and source-counter gates all pass in the same run.

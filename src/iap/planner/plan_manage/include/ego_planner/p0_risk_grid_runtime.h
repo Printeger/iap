@@ -21,6 +21,7 @@
 #include <iap/msg/integrity_report.hpp>
 #include <iap/planner/integrity_snapshot.hpp>
 #include <iap/planner/risk_grid_map.hpp>
+#include <iap/predictor/predictor_types.hpp>
 #include <nav_msgs/msg/odometry.hpp>
 #include <rclcpp/rclcpp.hpp>
 #include <sensor_msgs/msg/nav_sat_fix.hpp>
@@ -45,6 +46,13 @@ class P0RiskGridRuntime {
     std::string map_topic = "/map_generator/global_cloud";
     std::string health_topic = "planning/risk_grid_health";
     double gnss_epoch_max_age_s = 2.0;
+    iap::PredictorSourceMode predictor_source_mode =
+        iap::PredictorSourceMode::Fusion;
+    iap::PredictorGnssEpochPolicy predictor_gnss_epoch_policy =
+        iap::PredictorGnssEpochPolicy::Auto;
+    bool predictor_use_current_integrity_prior = true;
+    bool predictor_conservative_max_with_gnss = false;
+    bool predictor_lidar_legacy_observability = true;
   };
 
   static Config declareAndReadConfig(const rclcpp::Node::SharedPtr& node);

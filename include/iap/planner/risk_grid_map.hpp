@@ -40,6 +40,11 @@ struct RiskGridHealth {
   uint64_t occupied_skip_count = 0;
   uint64_t provider_stale_count = 0;
   uint64_t provider_invalid_count = 0;
+  uint64_t predictor_gnss_used_count = 0;
+  uint64_t predictor_lidar_used_count = 0;
+  uint64_t predictor_prior_used_count = 0;
+  uint64_t predictor_regularized_count = 0;
+  uint64_t predictor_conservative_max_count = 0;
   std::string reason = "not_ready";
 };
 

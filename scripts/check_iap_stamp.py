@@ -35,6 +35,13 @@ SIM_2022_MIN_S = 1650000000.0
 SIM_2022_MAX_S = 1665000000.0
 SIM_DOMAIN = "sim-2022"
 LIDAR_BODY_FRESHNESS_LIMIT_S = 1.0
+PREDICTOR_SOURCE_COUNTER_FIELDS = [
+    "predictor_gnss_used_count",
+    "predictor_lidar_used_count",
+    "predictor_prior_used_count",
+    "predictor_regularized_count",
+    "predictor_conservative_max_count",
+]
 
 
 def header_stamp(msg: Any) -> Any:
@@ -336,7 +343,7 @@ def summarize_p0_health(stats: TopicStats) -> dict[str, Any]:
     elapsed_values = [float(r["refresh_elapsed_ms"]) for r in records if isinstance(r.get("refresh_elapsed_ms"), (int, float))]
     refresh_stamps = [float(r["refresh_stamp_s"]) for r in records if isinstance(r.get("refresh_stamp_s"), (int, float))]
     grid_stamps = [float(r["last_grid_stamp_s"]) for r in records if isinstance(r.get("last_grid_stamp_s"), (int, float))]
-    return {
+    summary = {
         "count": len(records),
         "ready_ratio": ready_count / len(records),
         "stale_ratio": stale_count / len(records),
@@ -348,6 +355,11 @@ def summarize_p0_health(stats: TopicStats) -> dict[str, Any]:
         "last_grid_stamp_s": grid_stamps[-1] if grid_stamps else None,
         "reason_counts": reasons,
     }
+    for field in PREDICTOR_SOURCE_COUNTER_FIELDS:
+        values = [int(r.get(field, 0) or 0) for r in records]
+        summary[f"max_{field}"] = max(values) if values else None
+        summary[f"last_{field}"] = values[-1] if values else None
+    return summary
 
 
 class StampMonitor(Node):
@@ -677,6 +689,14 @@ class StampMonitor(Node):
             "last_grid_stamp_s",
         ):
             lines.append(f"| `{key}` | `{fmt_float(summary.get(key), 6)}` |")
+        lines.append("")
+        lines.append("| Predictor Source Counter | Latest | Max |")
+        lines.append("|---|---:|---:|")
+        for field in PREDICTOR_SOURCE_COUNTER_FIELDS:
+            lines.append(
+                f"| `{field}` | `{fmt_float(summary.get(f'last_{field}'), 0)}` | "
+                f"`{fmt_float(summary.get(f'max_{field}'), 0)}` |"
+            )
         reasons = summary.get("reason_counts", Counter())
         lines.append("")
         lines.append("| Reason | Count |")

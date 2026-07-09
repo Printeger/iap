@@ -25,6 +25,14 @@ TRUTH_ODOM_TOPIC = "/sim/drone_0/truth_odom"
 IAP_ODOM_TOPIC = "/drone_0_visual_slam/odom"
 POS_CMD_TOPIC = "/drone_0_planning/pos_cmd"
 
+PREDICTOR_SOURCE_COUNTER_FIELDS = [
+    "predictor_gnss_used_count",
+    "predictor_lidar_used_count",
+    "predictor_prior_used_count",
+    "predictor_regularized_count",
+    "predictor_conservative_max_count",
+]
+
 
 def stamp_to_sec(stamp: Any) -> float:
     if stamp is None:
@@ -79,12 +87,27 @@ def read_json_if_exists(path: Path) -> dict[str, Any]:
         return json.load(f)
 
 
+def bag_storage_id(bag_dir: Path) -> str:
+    metadata_path = bag_dir / "metadata.yaml"
+    if not metadata_path.is_file():
+        return "sqlite3"
+    for line in metadata_path.read_text().splitlines():
+        stripped = line.strip()
+        if stripped.startswith("storage_identifier:"):
+            value = stripped.split(":", 1)[1].strip().strip("'\"")
+            return value or "sqlite3"
+    return "sqlite3"
+
+
 def deserialize_bag_messages(bag_dir: Path, topics: set[str]):
     import rosbag2_py
     from rclpy.serialization import deserialize_message
     from rosidl_runtime_py.utilities import get_message
 
-    storage_options = rosbag2_py.StorageOptions(uri=str(bag_dir), storage_id="sqlite3")
+    storage_options = rosbag2_py.StorageOptions(
+        uri=str(bag_dir),
+        storage_id=bag_storage_id(bag_dir),
+    )
     converter_options = rosbag2_py.ConverterOptions(
         input_serialization_format="cdr",
         output_serialization_format="cdr",
@@ -130,7 +153,7 @@ def parse_health(msg: Any, timestamp_ns: int) -> dict[str, Any] | None:
     try:
         data = json.loads(raw)
     except json.JSONDecodeError:
-        return {
+        row = {
             "stamp": float(timestamp_ns) * 1.0e-9,
             "ready": "",
             "stale": "",
@@ -140,7 +163,10 @@ def parse_health(msg: Any, timestamp_ns: int) -> dict[str, Any] | None:
             "generation_id": "",
             "reason": f"invalid_json:{raw[:80]}",
         }
-    return {
+        for field in PREDICTOR_SOURCE_COUNTER_FIELDS:
+            row[field] = 0
+        return row
+    row = {
         "stamp": float(timestamp_ns) * 1.0e-9,
         "ready": bool(data.get("ready", False)),
         "stale": bool(data.get("stale", False)),
@@ -150,6 +176,9 @@ def parse_health(msg: Any, timestamp_ns: int) -> dict[str, Any] | None:
         "generation_id": data.get("generation_id", ""),
         "reason": data.get("reason", ""),
     }
+    for field in PREDICTOR_SOURCE_COUNTER_FIELDS:
+        row[field] = data.get(field, 0)
+    return row
 
 
 def pointcloud_rows(msg: Any, timestamp_ns: int) -> list[dict[str, Any]]:
@@ -681,9 +710,20 @@ def analyze(args: argparse.Namespace) -> dict[str, Any]:
         cloud_path = csv_dir / f"p0_pl_cloud_h{horizon_label}.csv"
         cloud_summary_path = csv_dir / "p0_cloud_summary.csv"
         traj_path = csv_dir / "trajectory_eval.csv"
+        health_fields = [
+            "stamp",
+            "ready",
+            "stale",
+            "age_s",
+            "valid_ratio",
+            "unknown_ratio",
+            "generation_id",
+            "reason",
+            *PREDICTOR_SOURCE_COUNTER_FIELDS,
+        ]
         write_csv(
             health_path,
-            ["stamp", "ready", "stale", "age_s", "valid_ratio", "unknown_ratio", "generation_id", "reason"],
+            health_fields,
             health_rows,
         )
         write_csv(
@@ -729,6 +769,19 @@ def analyze(args: argparse.Namespace) -> dict[str, Any]:
                 "trajectory_metrics": trajectory_metrics,
             }
         )
+        if health_rows:
+            latest_health = health_rows[-1]
+            summary["latest_predictor_source_counters"] = {
+                field: latest_health.get(field, 0)
+                for field in PREDICTOR_SOURCE_COUNTER_FIELDS
+            }
+            summary["max_predictor_source_counters"] = {
+                field: max(
+                    int(row.get(field, 0) or 0)
+                    for row in health_rows
+                )
+                for field in PREDICTOR_SOURCE_COUNTER_FIELDS
+            }
         validate_health(health_rows, manifest, failures)
         validate_cloud(pl_cloud_rows, failures)
 

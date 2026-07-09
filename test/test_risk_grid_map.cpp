@@ -1,4 +1,5 @@
 #include <iap/planner/risk_grid_map.hpp>
+#include <iap/predictor/predictor_types.hpp>
 
 #include <cmath>
 #include <limits>
@@ -26,6 +27,7 @@ class AffineProvider final : public iap::RiskPredictionProvider {
  public:
   bool fail = false;
   bool mark_unknown = false;
+  uint32_t source_flags = 0u;
   int query_count = 0;
 
   bool batchQuery(const std::vector<iap::RiskPredictionQuery>& queries,
@@ -43,6 +45,7 @@ class AffineProvider final : public iap::RiskPredictionProvider {
       result.stale = false;
       result.hpl_pred = affine(query.position_w, query.horizon_s);
       result.vpl_pred = 0.25 * result.hpl_pred;
+      result.source_flags = source_flags;
       result.reason = result.valid ? "ok" : "forced_unknown";
       results->push_back(result);
     }
@@ -344,6 +347,34 @@ TEST(RiskGridMapTest, PartialProviderStaleKeepsOkHealthReasonWithCounters) {
   EXPECT_EQ(health.provider_stale_count, 27u);
   EXPECT_EQ(health.provider_invalid_count, 0u);
   EXPECT_EQ(health.reason, "ok");
+}
+
+TEST(RiskGridMapTest, HealthCountsPredictorSourceFlags) {
+  iap::RiskGridMapParams params = base_params();
+  params.skip_occupied_voxels = true;
+  iap::RiskGridMap grid(params);
+  AffineProvider provider;
+  provider.source_flags =
+      iap::PREDICTOR_RESULT_GNSS_USED |
+      iap::PREDICTOR_RESULT_LIDAR_USED |
+      iap::PREDICTOR_RESULT_PRIOR_VALID |
+      iap::PREDICTOR_RESULT_REGULARIZED |
+      iap::PREDICTOR_RESULT_CONSERVATIVE_MAX;
+  std::string reason;
+
+  ASSERT_TRUE(grid.refreshFromProvider(
+      Eigen::Vector3d::Zero(), 10.0, provider,
+      [](const Eigen::Vector3d& p) { return p.x() < -0.5; }, &reason))
+      << reason;
+
+  const auto health = grid.health();
+  EXPECT_EQ(health.provider_query_count, 36u);
+  EXPECT_EQ(health.occupied_skip_count, 18u);
+  EXPECT_EQ(health.predictor_gnss_used_count, 36u);
+  EXPECT_EQ(health.predictor_lidar_used_count, 36u);
+  EXPECT_EQ(health.predictor_prior_used_count, 36u);
+  EXPECT_EQ(health.predictor_regularized_count, 36u);
+  EXPECT_EQ(health.predictor_conservative_max_count, 36u);
 }
 
 TEST(RiskGridMapTest, AllOccupiedSkipHealthReportsDominantReason) {

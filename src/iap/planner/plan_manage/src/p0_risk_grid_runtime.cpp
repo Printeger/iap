@@ -6,6 +6,7 @@
 #include <iomanip>
 #include <memory>
 #include <sstream>
+#include <stdexcept>
 #include <utility>
 
 #include <gnss_comm/gnss_constant.hpp>
@@ -34,6 +35,41 @@ std::string jsonNumber(double value) {
   std::ostringstream oss;
   oss << std::setprecision(12) << value;
   return oss.str();
+}
+
+iap::PredictorSourceMode parsePredictorSourceMode(
+    const std::string& value) {
+  if (value == "fusion") {
+    return iap::PredictorSourceMode::Fusion;
+  }
+  if (value == "gnss_only") {
+    return iap::PredictorSourceMode::GnssOnly;
+  }
+  if (value == "lidar_only") {
+    return iap::PredictorSourceMode::LidarOnly;
+  }
+  throw std::invalid_argument(
+      "invalid p0.predictor.source_mode '" + value +
+      "'; expected one of: fusion, gnss_only, lidar_only");
+}
+
+iap::PredictorGnssEpochPolicy parsePredictorGnssEpochPolicy(
+    const std::string& value) {
+  if (value == "auto") {
+    return iap::PredictorGnssEpochPolicy::Auto;
+  }
+  if (value == "required") {
+    return iap::PredictorGnssEpochPolicy::Required;
+  }
+  if (value == "optional") {
+    return iap::PredictorGnssEpochPolicy::Optional;
+  }
+  if (value == "disabled") {
+    return iap::PredictorGnssEpochPolicy::Disabled;
+  }
+  throw std::invalid_argument(
+      "invalid p0.predictor.gnss_epoch_policy '" + value +
+      "'; expected one of: auto, required, optional, disabled");
 }
 
 class PredictorModuleRiskProvider final : public iap::RiskPredictionProvider {
@@ -127,6 +163,21 @@ P0RiskGridRuntime::Config P0RiskGridRuntime::declareAndReadConfig(
       "p0.health_topic", "planning/risk_grid_health");
   config.gnss_epoch_max_age_s =
       node->declare_parameter<double>("p0.gnss_epoch_max_age_s", 2.0);
+  config.predictor_source_mode = parsePredictorSourceMode(
+      node->declare_parameter<std::string>("p0.predictor.source_mode",
+                                           "fusion"));
+  config.predictor_gnss_epoch_policy = parsePredictorGnssEpochPolicy(
+      node->declare_parameter<std::string>(
+          "p0.predictor.gnss_epoch_policy", "auto"));
+  config.predictor_use_current_integrity_prior =
+      node->declare_parameter<bool>(
+          "p0.predictor.use_current_integrity_prior", true);
+  config.predictor_conservative_max_with_gnss =
+      node->declare_parameter<bool>(
+          "p0.predictor.conservative_max_with_gnss", false);
+  config.predictor_lidar_legacy_observability =
+      node->declare_parameter<bool>(
+          "p0.predictor.lidar_legacy_observability", true);
   return config;
 }
 
@@ -275,6 +326,13 @@ void P0RiskGridRuntime::refreshTimerCallback() {
         config_.gnss_epoch_max_age_s;
     predictor_params.freshness.max_snapshot_age_s =
         config_.grid.stale_timeout_s;
+    predictor_params.source_mode = config_.predictor_source_mode;
+    predictor_params.gnss_epoch_policy =
+        config_.predictor_gnss_epoch_policy;
+    predictor_params.fusion.conservative_max_with_gnss =
+        config_.predictor_conservative_max_with_gnss;
+    predictor_params.lidar.enable_legacy_observability =
+        config_.predictor_lidar_legacy_observability;
     local_provider = std::make_unique<PredictorModuleRiskProvider>(
         iap::PredictorModule(predictor_params), snapshot);
     provider = local_provider.get();
@@ -327,6 +385,16 @@ void P0RiskGridRuntime::publishHealth(const iap::RiskGridHealth& health,
       << "\"occupied_skip_count\":" << health.occupied_skip_count << ","
       << "\"provider_stale_count\":" << health.provider_stale_count << ","
       << "\"provider_invalid_count\":" << health.provider_invalid_count << ","
+      << "\"predictor_gnss_used_count\":"
+      << health.predictor_gnss_used_count << ","
+      << "\"predictor_lidar_used_count\":"
+      << health.predictor_lidar_used_count << ","
+      << "\"predictor_prior_used_count\":"
+      << health.predictor_prior_used_count << ","
+      << "\"predictor_regularized_count\":"
+      << health.predictor_regularized_count << ","
+      << "\"predictor_conservative_max_count\":"
+      << health.predictor_conservative_max_count << ","
       << "\"refresh_stamp_s\":" << jsonNumber(last_refresh_stamp_s_) << ","
       << "\"last_grid_stamp_s\":" << jsonNumber(last_grid_stamp_s_) << ","
       << "\"refresh_elapsed_ms\":" << jsonNumber(last_refresh_elapsed_ms_) << ","
@@ -345,6 +413,8 @@ void P0RiskGridRuntime::publishHealth(const iap::RiskGridHealth& health,
                        "valid=%.3f unknown=%.3f gen=%lu "
                        "provider_queries=%lu occupied_skip=%lu "
                        "provider_stale=%lu provider_invalid=%lu "
+                       "gnss_used=%lu lidar_used=%lu prior_used=%lu "
+                       "regularized=%lu conservative_max=%lu "
                        "refresh_stamp=%.6f grid_stamp=%.6f elapsed_ms=%.3f "
                        "queries=%zu reason=%s",
                        health.ready, health.stale, health.age_s,
@@ -355,6 +425,16 @@ void P0RiskGridRuntime::publishHealth(const iap::RiskGridHealth& health,
                        static_cast<unsigned long>(health.provider_stale_count),
                        static_cast<unsigned long>(
                            health.provider_invalid_count),
+                       static_cast<unsigned long>(
+                           health.predictor_gnss_used_count),
+                       static_cast<unsigned long>(
+                           health.predictor_lidar_used_count),
+                       static_cast<unsigned long>(
+                           health.predictor_prior_used_count),
+                       static_cast<unsigned long>(
+                           health.predictor_regularized_count),
+                       static_cast<unsigned long>(
+                           health.predictor_conservative_max_count),
                        last_refresh_stamp_s_, last_grid_stamp_s_,
                        last_refresh_elapsed_ms_, last_refresh_query_count_,
                        health.reason.c_str());
@@ -616,8 +696,11 @@ bool P0RiskGridRuntime::buildSnapshot(
   const iap::GnssEpoch* epoch = activeGnssEpoch(now_s);
   input.gnss_epoch = epoch;
   const Eigen::Matrix3d lambda_prior =
-      currentPriorInformation(latest_current_);
-  if (lambda_prior.trace() > 0.0 && lambda_prior.allFinite()) {
+      config_.predictor_use_current_integrity_prior
+          ? currentPriorInformation(latest_current_)
+          : Eigen::Matrix3d::Zero();
+  if (config_.predictor_use_current_integrity_prior &&
+      lambda_prior.trace() > 0.0 && lambda_prior.allFinite()) {
     input.lambda_base_pos = &lambda_prior;
   }
   *snapshot = snapshot_builder_.build_from_latest(input);

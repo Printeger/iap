@@ -259,9 +259,31 @@ Codex 每次新问题先跑这 5 步；任一步 fail 就进入对应分支。
 | P0-1 | open-sky 低 PL field | `ros2 launch iap test_planner.launch.py experiment:=p0_open_sky run_duration_s:=60 validation_duration_s:=60 start_rviz:=false run_validator:=true record_bag:=true` | P0 on；P1-P5 off；`p0.debug_metrics_enable=true` | `T_BASE`, `T_LIDAR`, `T_P0_HEALTH`, `T_P0_RVIZ` | P0 health CSV, PL cloud, validity cloud, analyzer summary | health `ready=true`, `stale=false`, `reason=ok`；无周期性整帧 unknown | `valid_ratio=0 && unknown_ratio=1` 周期性出现；`reason` 空；validator fail | validator pass；unknown_ratio 小；reason ok 为主 | PASS -> P0-2；FAIL stale -> 查 GNSS/integrity age；FAIL unknown -> 查 provider counters。 |
 | P0-2 | degraded GNSS + LiDAR good field | `ros2 launch iap test_planner.launch.py experiment:=p0_open_sky scenario:=gnss_degraded_lidar_good run_duration_s:=60 validation_duration_s:=60 start_rviz:=false run_validator:=true record_bag:=true` | P0 on；场景覆盖 degraded GNSS | `T_BASE`, `T_P0_HEALTH`, `T_P0_RVIZ` | 同 P0-1 | PL/cost 分布高于 P0-1；health 仍稳定 | health stale；valid_ratio 低于 0.6；PL/cost 与 open-sky 无差异且无解释 | health pass；分布可区分 degraded/open-sky | PASS -> P0-3；FAIL -> debug predictor source/fusion。 |
 | P0-3 | corridor degeneracy field | `ros2 launch iap test_planner.launch.py experiment:=p0_open_sky scenario:=lidar_corridor_degenerate run_duration_s:=60 validation_duration_s:=60 start_rviz:=false run_validator:=true record_bag:=true` | P0 on；corridor scenario | `T_BASE`, `T_LIDAR`, `T_P0_HEALTH`, `T_P0_RVIZ` | 同 P0-1 | corridor 方向出现更高 PL/cost；occupied skip 可解释 | 整片 unknown；`occupied_skip_count` 高但 reason 不可解释；topic 断流 | health pass；PL/cost 与场景一致 | PASS -> P0-4；FAIL -> debug map/occupied skip。 |
+| P0-3-control | GNSS-assisted odom with LiDAR-only P0 risk | See command below | P0 predictor `source_mode=lidar_only`；GNSS epoch policy disabled；GNSS integrity off；LiDAR integrity on | `T_BASE`, `T_LIDAR`, `T_P0_HEALTH`, `T_P0_RVIZ` | P0 health JSON, source counters, PL/cost distribution | odom remains stable while P0 source counters show `gnss_used=0` and `lidar_used>0`; no full-frame `stale_gnss_epoch` dominance | odom drifts; `predictor_gnss_used_count>0`; `predictor_lidar_used_count=0`; health dominated by `stale_gnss_epoch` | Control evidence only; do not mark formal P0-3 PASS unless odom health, P0 health, source counters, and PL/cost corridor distinction all pass | PASS evidence -> rerun formal P0-3 or proceed per reviewer decision；FAIL -> debug P0 source/fusion wiring。 |
 | P0-4 | fallback/unknown 语义 | `ros2 launch iap test_planner.launch.py experiment:=p5_fallback_unknown planner_enable_p5_runtime:=false planner_enable_p5_final:=false run_duration_s:=60 validation_duration_s:=60 start_rviz:=false run_validator:=true record_bag:=true validator_require_gnss_valid:=false validator_require_lidar_valid:=false` | P0 on；P5 forced off；fallback inputs | `T_BASE`, `T_P0_HEALTH`, `T_P0_RVIZ` | P0 reason histogram | unknown_ratio 可升高；reason 必须指向 stale/invalid/no source | unknown 高但 reason 一直 `ok`；unknown 被低 cost 表示 | reason histogram 可解释；无 zero-risk fallback | PASS -> P0-5；FAIL -> debug reason propagation。 |
 | P0-5 | synthetic affine field 插值 | `python3 src/iap/scripts/dev_planner/analyze_safety_planner_run.py --experiment-id P0-5 --export-dir <export_dir> --synthetic-only --fail-on-threshold` | 需要 synthetic risk field/analyzer 支持 | 无 ROS topic；检查 analyzer 输出 | synthetic query CSV/PNG | query value 与解析 affine field 一致；gradient 指向低 risk | `abs_error > 1e-9`；gradient 方向错误 | synthetic pass | 若脚本缺失 -> `BLOCKED_SCENARIO_MISSING`；否则 P0-6。 |
 | P0-6 | occupied overlap / skip | `ros2 launch iap test_planner.launch.py experiment:=p0_open_sky scenario:=manual p0.skip_occupied_voxels:=true run_duration_s:=60 validation_duration_s:=60 start_rviz:=false run_validator:=true record_bag:=true` | 需要 occupied overlap fixture | `T_P0_HEALTH`, `T_P0_RVIZ` | occupied overlap CSV/PNG | occupied voxel 即使 raw PL 低也被 unknown/occupied_skip 标记 | occupied cell 被 valid low-risk；`occupied_skip_count` 不匹配 | occupied skip reason/counter 可解释 | 缺 fixture -> `BLOCKED_SCENARIO_MISSING`；PASS -> Phase 2。 |
+
+Recommended P0-3-control command:
+
+```bash
+ros2 launch iap test_planner.launch.py \
+  experiment:=p0_open_sky \
+  scenario:=lidar_corridor_degenerate \
+  use_gnss:=true \
+  enable_gnss_integrity:=false \
+  enable_gnss_araim:=false \
+  enable_lidar_integrity:=true \
+  integrity_fusion_mode:=lidar_only \
+  p0.predictor.source_mode:=lidar_only \
+  p0.predictor.gnss_epoch_policy:=disabled \
+  p0.predictor.use_current_integrity_prior:=true \
+  run_duration_s:=60 \
+  validation_duration_s:=60 \
+  start_rviz:=false \
+  run_validator:=true \
+  record_bag:=true
+```
 
 ---
 

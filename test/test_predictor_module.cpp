@@ -723,6 +723,138 @@ TEST(PredictorModuleTest, ModuleFusesGnssAndLidarWithoutGridFields) {
   write_fusion_lambda_artifact(result.fused);
 }
 
+TEST(PredictorModuleTest,
+     LidarOnlyAutoPolicyDoesNotRequireGnssEpochFreshness) {
+  auto params = make_params();
+  params.source_mode = iap::PredictorSourceMode::LidarOnly;
+  params.gnss_epoch_policy = iap::PredictorGnssEpochPolicy::Auto;
+  params.freshness.enabled = true;
+  params.freshness.max_odom_age_s = 0.5;
+  params.freshness.max_integrity_age_s = 0.5;
+  params.freshness.max_gnss_age_s = 0.5;
+  params.freshness.max_snapshot_age_s = 0.5;
+  iap::PredictorModule module(params);
+  module.set_lidar_fim_primitives(make_lidar_primitives());
+
+  auto snapshot = make_snapshot(false, true);
+  iap::PredictorQueryInput input(Eigen::Vector3d::Zero(),
+                                 snapshot,
+                                 100.0,
+                                 0.0,
+                                 "map");
+  const auto result = module.query(input);
+
+  EXPECT_TRUE(result.valid) << result.fallback_reason;
+  EXPECT_TRUE(result.available);
+  EXPECT_FALSE(result.fallback);
+  EXPECT_FALSE(result.gnss.valid);
+  EXPECT_TRUE(result.lidar.valid);
+  EXPECT_FALSE(result.fused.gnss_used);
+  EXPECT_TRUE(result.fused.lidar_used);
+  EXPECT_TRUE(flag_set(result.source_flags, iap::PREDICTOR_RESULT_LIDAR_USED));
+  EXPECT_FALSE(flag_set(result.source_flags, iap::PREDICTOR_RESULT_GNSS_USED));
+  EXPECT_NE(result.fallback_reason.find("gnss_disabled"),
+            std::string::npos);
+  EXPECT_EQ(result.fallback_reason.find("stale_gnss_epoch"),
+            std::string::npos);
+}
+
+TEST(PredictorModuleTest,
+     OptionalGnssEpochPolicyKeepsLidarFusionWhenGnssMissing) {
+  auto params = make_params();
+  params.source_mode = iap::PredictorSourceMode::Fusion;
+  params.gnss_epoch_policy = iap::PredictorGnssEpochPolicy::Optional;
+  params.freshness.enabled = true;
+  params.freshness.max_odom_age_s = 0.5;
+  params.freshness.max_integrity_age_s = 0.5;
+  params.freshness.max_gnss_age_s = 0.5;
+  params.freshness.max_snapshot_age_s = 0.5;
+  iap::PredictorModule module(params);
+  module.set_lidar_fim_primitives(make_lidar_primitives());
+
+  iap::PredictorQueryInput input(Eigen::Vector3d::Zero(),
+                                 make_snapshot(false, true),
+                                 100.0,
+                                 0.0,
+                                 "map");
+  const auto result = module.query(input);
+
+  EXPECT_TRUE(result.valid) << result.fallback_reason;
+  EXPECT_FALSE(result.fallback);
+  EXPECT_FALSE(result.fused.gnss_used);
+  EXPECT_TRUE(result.fused.lidar_used);
+  EXPECT_NE(result.fallback_reason.find("gnss:no_gnss_epoch"),
+            std::string::npos);
+  EXPECT_EQ(result.fallback_reason.find("stale_gnss_epoch"),
+            std::string::npos);
+}
+
+TEST(PredictorModuleTest, GnssOnlySourceModeDoesNotUseLidarFlag) {
+  auto params = make_params();
+  params.source_mode = iap::PredictorSourceMode::GnssOnly;
+  iap::PredictorModule module(params);
+  module.set_lidar_fim_primitives(make_lidar_primitives());
+
+  iap::PredictorQueryInput input(Eigen::Vector3d::Zero(),
+                                 make_snapshot(true, true),
+                                 100.0,
+                                 0.0,
+                                 "map");
+  const auto result = module.query(input);
+
+  EXPECT_TRUE(result.valid) << result.fallback_reason;
+  EXPECT_TRUE(result.fused.gnss_used);
+  EXPECT_FALSE(result.lidar.valid);
+  EXPECT_FALSE(result.fused.lidar_used);
+  EXPECT_TRUE(flag_set(result.source_flags, iap::PREDICTOR_RESULT_GNSS_USED));
+  EXPECT_FALSE(flag_set(result.source_flags, iap::PREDICTOR_RESULT_LIDAR_USED));
+}
+
+TEST(PredictorModuleTest, LidarOnlySourceModeDoesNotUseGnssFlag) {
+  auto params = make_params();
+  params.source_mode = iap::PredictorSourceMode::LidarOnly;
+  iap::PredictorModule module(params);
+  module.set_lidar_fim_primitives(make_lidar_primitives());
+
+  iap::PredictorQueryInput input(Eigen::Vector3d::Zero(),
+                                 make_snapshot(true, true),
+                                 100.0,
+                                 0.0,
+                                 "map");
+  const auto result = module.query(input);
+
+  EXPECT_TRUE(result.valid) << result.fallback_reason;
+  EXPECT_FALSE(result.gnss.valid);
+  EXPECT_FALSE(result.fused.gnss_used);
+  EXPECT_TRUE(result.lidar.valid);
+  EXPECT_TRUE(result.fused.lidar_used);
+  EXPECT_FALSE(flag_set(result.source_flags, iap::PREDICTOR_RESULT_GNSS_USED));
+  EXPECT_TRUE(flag_set(result.source_flags, iap::PREDICTOR_RESULT_LIDAR_USED));
+}
+
+TEST(PredictorModuleTest, DisabledGnssEpochPolicyDoesNotUseGnssAdvisory) {
+  auto params = make_params();
+  params.source_mode = iap::PredictorSourceMode::Fusion;
+  params.gnss_epoch_policy = iap::PredictorGnssEpochPolicy::Disabled;
+  iap::PredictorModule module(params);
+  module.set_lidar_fim_primitives(make_lidar_primitives());
+
+  iap::PredictorQueryInput input(Eigen::Vector3d::Zero(),
+                                 make_snapshot(true, true),
+                                 100.0,
+                                 0.0,
+                                 "map");
+  const auto result = module.query(input);
+
+  EXPECT_TRUE(result.valid) << result.fallback_reason;
+  EXPECT_FALSE(result.gnss.valid);
+  EXPECT_TRUE(result.lidar.valid);
+  EXPECT_FALSE(result.fused.gnss_used);
+  EXPECT_TRUE(result.fused.lidar_used);
+  EXPECT_FALSE(flag_set(result.source_flags, iap::PREDICTOR_RESULT_GNSS_USED));
+  EXPECT_TRUE(flag_set(result.source_flags, iap::PREDICTOR_RESULT_LIDAR_USED));
+}
+
 TEST(PredictorModuleTest, DegenerateLidarDoesNotReduceSelectedPl) {
   auto params = make_params();
   iap::GnssAdvisoryPredictor gnss_predictor(params.gnss);
