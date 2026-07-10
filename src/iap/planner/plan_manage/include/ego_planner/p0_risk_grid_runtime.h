@@ -54,6 +54,8 @@ class P0RiskGridRuntime {
     bool predictor_use_current_integrity_prior = true;
     bool predictor_conservative_max_with_gnss = false;
     bool predictor_lidar_legacy_observability = true;
+    double predictor_lidar_fim_radius_m =
+        iap::LidarObservabilityFim::Params{}.fim_radius_m;
   };
 
   static Config declareAndReadConfig(const rclcpp::Node::SharedPtr& node);

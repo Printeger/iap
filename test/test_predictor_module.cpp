@@ -188,6 +188,21 @@ make_lidar_primitives() {
   return primitives;
 }
 
+std::shared_ptr<const std::vector<Eigen::Vector3d>>
+make_lidar_map_points_for_legacy() {
+  auto points = std::make_shared<std::vector<Eigen::Vector3d>>();
+  for (int i = 1; i <= 4; ++i) {
+    const double d = 0.5 * static_cast<double>(i);
+    points->push_back(Eigen::Vector3d(d, 0.0, 0.0));
+    points->push_back(Eigen::Vector3d(-d, 0.0, 0.0));
+    points->push_back(Eigen::Vector3d(0.0, d, 0.0));
+    points->push_back(Eigen::Vector3d(0.0, -d, 0.0));
+    points->push_back(Eigen::Vector3d(0.0, 0.0, d));
+    points->push_back(Eigen::Vector3d(0.0, 0.0, -d));
+  }
+  return points;
+}
+
 bool flag_set(const uint32_t flags, const iap::PredictorResultFlags flag) {
   return (flags & static_cast<uint32_t>(flag)) != 0u;
 }
@@ -638,6 +653,21 @@ TEST(PredictorModuleTest, LidarRichPrimitivesProducesValidFim) {
   EXPECT_GT(result.n_primitives, 0);
 }
 
+TEST(PredictorModuleTest, LidarValidFimSkipsLegacyMapScan) {
+  auto params = make_params();
+  params.lidar.enable_legacy_observability = true;
+  iap::LidarAdvisoryPredictor predictor(params.lidar);
+  predictor.set_lidar_fim_primitives(make_lidar_primitives());
+  predictor.set_lidar_map_points(make_lidar_map_points_for_legacy());
+
+  const auto result =
+      predictor.query(Eigen::Vector3d::Zero(), make_snapshot(true, false));
+
+  ASSERT_TRUE(result.valid);
+  EXPECT_TRUE(result.fim_valid);
+  EXPECT_FALSE(result.legacy_valid);
+}
+
 TEST(PredictorModuleTest, LidarMissingPrimitivesIsExplicitFallback) {
   iap::LidarAdvisoryPredictor predictor(make_params().lidar);
   const auto result =
@@ -855,6 +885,42 @@ TEST(PredictorModuleTest, DisabledGnssEpochPolicyDoesNotUseGnssAdvisory) {
   EXPECT_TRUE(flag_set(result.source_flags, iap::PREDICTOR_RESULT_LIDAR_USED));
 }
 
+TEST(PredictorModuleTest, LidarOnlyDegenerateFimStaysValidAndRegularized) {
+  auto params = make_params();
+  params.source_mode = iap::PredictorSourceMode::LidarOnly;
+  params.gnss_epoch_policy = iap::PredictorGnssEpochPolicy::Disabled;
+  params.lidar.fim_params.fim_condition_max = 10.0;
+  iap::PredictorModule module(params);
+  auto degenerate_primitives =
+      std::make_shared<std::vector<iap::LidarFimPrimitive>>();
+  for (int i = -8; i <= 8; ++i) {
+    iap::LidarFimPrimitive p;
+    p.center_w = Eigen::Vector3d(0.3 * i, 2.0, 0.0);
+    p.normal_w = Eigen::Vector3d::UnitY();
+    degenerate_primitives->push_back(p);
+  }
+  module.set_lidar_fim_primitives(degenerate_primitives);
+
+  iap::PredictorQueryInput input(Eigen::Vector3d::Zero(),
+                                 make_snapshot(true, true),
+                                 100.0,
+                                 0.0,
+                                 "map");
+  const auto result = module.query(input);
+
+  EXPECT_TRUE(result.valid) << result.fallback_reason;
+  EXPECT_TRUE(result.lidar.valid);
+  EXPECT_TRUE(result.lidar.fim_valid);
+  EXPECT_TRUE(result.lidar.fim_regularized);
+  EXPECT_TRUE(result.fused.lidar_used);
+  EXPECT_TRUE(result.fused.degeneracy_regularized);
+  EXPECT_FALSE(result.fused.gnss_used);
+  EXPECT_TRUE(flag_set(result.source_flags, iap::PREDICTOR_RESULT_LIDAR_USED));
+  EXPECT_TRUE(flag_set(result.source_flags,
+                       iap::PREDICTOR_RESULT_REGULARIZED));
+  EXPECT_FALSE(flag_set(result.source_flags, iap::PREDICTOR_RESULT_GNSS_USED));
+}
+
 TEST(PredictorModuleTest, DegenerateLidarDoesNotReduceSelectedPl) {
   auto params = make_params();
   iap::GnssAdvisoryPredictor gnss_predictor(params.gnss);
@@ -880,8 +946,9 @@ TEST(PredictorModuleTest, DegenerateLidarDoesNotReduceSelectedPl) {
   degenerate_lidar.set_lidar_fim_primitives(degenerate_primitives);
   const auto degenerate =
       degenerate_lidar.query(Eigen::Vector3d::Zero(), snapshot);
-  EXPECT_FALSE(degenerate.valid);
-  EXPECT_FALSE(degenerate.fallback_reason.empty());
+  EXPECT_TRUE(degenerate.valid);
+  EXPECT_TRUE(degenerate.fim_regularized);
+  EXPECT_TRUE(degenerate.fallback_reason.empty());
 
   const std::vector<std::pair<std::string, iap::LidarAdvisoryResult>> cases = {
       {"rich_lidar", rich},
@@ -908,6 +975,10 @@ TEST(PredictorModuleTest, DegenerateLidarDoesNotReduceSelectedPl) {
     if (case_id == "rich_lidar") {
       EXPECT_TRUE(raw.lidar_used);
       EXPECT_TRUE(selected.lidar_used);
+    } else if (case_id == "degenerate_lidar") {
+      EXPECT_TRUE(raw.lidar_used);
+      EXPECT_TRUE(selected.lidar_used);
+      EXPECT_TRUE(selected.degeneracy_regularized);
     } else {
       EXPECT_FALSE(raw.lidar_used);
       EXPECT_FALSE(selected.lidar_used);

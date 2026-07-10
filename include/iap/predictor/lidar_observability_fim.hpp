@@ -6,9 +6,12 @@
 
 #include <Eigen/Core>
 
+#include <cstddef>
+#include <cstdint>
 #include <limits>
 #include <memory>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 #include <iap/predictor/advisory_fim_types.hpp>
@@ -66,6 +69,57 @@ std::shared_ptr<std::vector<LidarFimPrimitive>> make_lidar_fim_primitives(
         LidarFimPrimitiveGenerationParams{},
     LidarFimPrimitiveGenerationDiagnostics* diagnostics = nullptr);
 
+class LidarFimPrimitiveIndex {
+ public:
+  struct Stats {
+    std::size_t primitive_count = 0;
+    std::size_t finite_primitive_count = 0;
+    std::size_t bucket_count = 0;
+    double cell_size_m = 1.0;
+  };
+
+  LidarFimPrimitiveIndex();
+  LidarFimPrimitiveIndex(
+      std::shared_ptr<const std::vector<LidarFimPrimitive>> primitives,
+      double cell_size_m);
+
+  static std::shared_ptr<const LidarFimPrimitiveIndex> build(
+      std::shared_ptr<const std::vector<LidarFimPrimitive>> primitives,
+      double cell_size_m);
+
+  bool empty() const;
+  const std::vector<LidarFimPrimitive>* primitives() const {
+    return primitives_.get();
+  }
+  const Stats& stats() const { return stats_; }
+
+  void queryRadius(const Eigen::Vector3d& center,
+                   double radius_m,
+                   std::vector<std::size_t>* indices) const;
+
+ private:
+  struct Key {
+    std::int64_t x = 0;
+    std::int64_t y = 0;
+    std::int64_t z = 0;
+
+    bool operator==(const Key& other) const {
+      return x == other.x && y == other.y && z == other.z;
+    }
+  };
+
+  struct KeyHash {
+    std::size_t operator()(const Key& key) const;
+  };
+
+  Key keyFor(const Eigen::Vector3d& point) const;
+
+  std::shared_ptr<const std::vector<LidarFimPrimitive>> primitives_;
+  double cell_size_m_ = 1.0;
+  std::unordered_map<Key, std::vector<std::size_t>, KeyHash> buckets_;
+  Stats stats_;
+};
+
 class LidarObservabilityFim {
  public:
   struct Params {
@@ -100,6 +154,20 @@ class LidarObservabilityFim {
       const Eigen::Vector3d& p_w,
       const std::vector<LidarFimPrimitive>* primitives,
       const CurrentIntegrityState& current) const;
+
+  LidarAdvisoryFimResult evaluate_advisory_fim(
+      const Eigen::Vector3d& p_w,
+      const LidarFimPrimitiveIndex* index,
+      const CurrentIntegrityState& current) const;
+
+  LidarAdvisoryFimResult evaluate_advisory_fim(
+      const Eigen::Vector3d& p_w,
+      std::nullptr_t,
+      const CurrentIntegrityState& current) const {
+    return evaluate_advisory_fim(
+        p_w, static_cast<const std::vector<LidarFimPrimitive>*>(nullptr),
+        current);
+  }
 
   const Params& params() const { return params_; }
 

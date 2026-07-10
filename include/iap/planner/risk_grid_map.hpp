@@ -49,6 +49,8 @@ struct RiskGridHealth {
   uint64_t predictor_lidar_fim_primitive_count = 0;
   uint64_t predictor_lidar_fim_valid_normal_count = 0;
   std::string predictor_lidar_fim_fallback_reason = "not_evaluated";
+  std::string dominant_unknown_reason = "";
+  uint64_t dominant_unknown_count = 0;
   std::string reason = "not_ready";
 };
 

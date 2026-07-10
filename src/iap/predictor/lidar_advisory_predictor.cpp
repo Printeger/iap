@@ -27,16 +27,27 @@ LidarAdvisoryPredictor::LidarAdvisoryPredictor(
 void LidarAdvisoryPredictor::set_params(
     const LidarAdvisoryPredictorParams& params) {
   params_ = params;
+  rebuild_lidar_fim_index();
 }
 
 void LidarAdvisoryPredictor::set_lidar_fim_primitives(
     std::shared_ptr<const std::vector<LidarFimPrimitive>> primitives) {
   primitives_ = std::move(primitives);
+  rebuild_lidar_fim_index();
 }
 
 void LidarAdvisoryPredictor::set_lidar_map_points(
     std::shared_ptr<const std::vector<Eigen::Vector3d>> points) {
   map_points_ = std::move(points);
+}
+
+void LidarAdvisoryPredictor::rebuild_lidar_fim_index() {
+  if (primitives_ == nullptr || primitives_->empty()) {
+    primitive_index_.reset();
+    return;
+  }
+  primitive_index_ = LidarFimPrimitiveIndex::build(
+      primitives_, params_.fim_params.fim_radius_m);
 }
 
 LidarAdvisoryResult LidarAdvisoryPredictor::query(
@@ -49,8 +60,13 @@ LidarAdvisoryResult LidarAdvisoryPredictor::query(
   }
 
   LidarObservabilityFim estimator(params_.fim_params);
-  const LidarAdvisoryFimResult fim = estimator.evaluate_advisory_fim(
-      query_position, primitives_.get(), snapshot.current);
+  const LidarAdvisoryFimResult fim =
+      primitive_index_ != nullptr
+          ? estimator.evaluate_advisory_fim(query_position,
+                                            primitive_index_.get(),
+                                            snapshot.current)
+          : estimator.evaluate_advisory_fim(query_position, primitives_.get(),
+                                            snapshot.current);
   out.fim_valid = fim.valid;
   out.lambda_lidar = fim.lambda;
   out.n_primitives = fim.n_primitives;
@@ -68,7 +84,7 @@ LidarAdvisoryResult LidarAdvisoryPredictor::query(
                               : fim.fallback_reason;
   }
 
-  if (params_.enable_legacy_observability) {
+  if (params_.enable_legacy_observability && !fim.valid) {
     const LidarObservabilityResult legacy =
         estimator.evaluate(query_position, map_points_.get(), snapshot.current);
     out.legacy_valid = legacy.valid;

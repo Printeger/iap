@@ -1706,6 +1706,148 @@ Updated conclusion after rerun:
 3. P0-3 remains blocked; do not enter `P0-4`.
 4. The immediate branch remains `debug_IAP_odometry_drift`, with a follow-up healthy-odom P0-3 rerun required before deciding whether the persistent full-frame unknown is an independent P0 corridor lifecycle bug.
 
+### P0-3A GNSS-Assisted Corridor Check
+
+The user proposed enabling GNSS in the corridor degeneracy field to avoid the LiDAR-only odometry drift. This run kept `experiment:=p0_open_sky` and `scenario:=lidar_corridor_degenerate`, but overrode the scenario to enable GNSS, GNSS ARAIM, LiDAR integrity, and `integrity_fusion_mode:=max_pl`.
+
+Result: **FAIL / P0 STARTUP HEALTH GATE**, with odom health passing.
+
+This is not the same failure as the LiDAR-only P0-3 runs. GNSS-assisted P0-3A produced healthy odometry and valid integrity reports, but the analyzer still rejected the run because the first five P0 health rows were full-frame unknown with `reason=stale_gnss_epoch`.
+
+| Field | Value |
+|---|---|
+| Run time | `2026-07-09T05:11:35Z` |
+| Commit | `3252739` |
+| Export | `/home/dev/ws_iap/src/iap/results/planner_validation/exports/test_planner_p0_open_sky_lidar_corridor_degenerate_1783573895730` |
+| Bag | `/home/dev/ws_iap/src/iap/results/planner_validation/bags/test_planner_p0_open_sky_lidar_corridor_degenerate_20260709T051135Z` |
+| Analyzer summary | `/home/dev/ws_iap/src/iap/results/planner_validation/exports/test_planner_p0_open_sky_lidar_corridor_degenerate_1783573895730/metadata/safety_planner_analysis_summary.json` |
+| Launch | `PASS`; exit code `0` |
+| Validator | `PASS`; `577` integrity messages |
+| Analyzer | `FAIL`; branch `debug_P0_risk_grid_health` |
+| P0 RViz clouds | `PASS`; PL and validity cloud topics each have `49` messages |
+| GNSS scenario file | `PASS`; absolute open-sky scenario file loaded |
+
+Command:
+
+```bash
+ros2 launch iap test_planner.launch.py \
+  experiment:=p0_open_sky \
+  scenario:=lidar_corridor_degenerate \
+  use_gnss:=true \
+  enable_gnss_integrity:=true \
+  enable_gnss_araim:=true \
+  enable_lidar_integrity:=true \
+  integrity_fusion_mode:=max_pl \
+  validator_require_gnss_valid:=true \
+  validator_require_lidar_valid:=true \
+  validator_require_fallback_valid:=false \
+  "validator_required_final_source:= " \
+  validator_allowed_final_sources:=GNSS,LIDAR,FALLBACK,CONSERVATIVE \
+  gnss_scenario_file:=/home/dev/ws_iap/install/iap/share/iap/config/gnss_sim/demo7_open_sky.yaml \
+  gnss_pr_noise_base:=1.0 \
+  gnss_dop_noise_base:=0.03 \
+  gnss_enable_map_occlusion:=false \
+  gnss_enable_skymask:=false \
+  gnss_enable_nlos:=false \
+  gnss_enable_multipath:=false \
+  gnss_enable_fault_injection:=false \
+  gnss_time_source:=odom_stamp \
+  run_duration_s:=60 \
+  validation_duration_s:=60 \
+  start_rviz:=false \
+  run_validator:=true \
+  record_bag:=true
+```
+
+Acceptance matrix:
+
+| Gate | Result | Evidence |
+|---|---|---|
+| Launch exits `0` | `PASS` | Launch command returned `0`; shutdown-only helper node errors remain non-blocking |
+| Validator passes | `PASS` | `test_planner_validation_summary.json` has `passed=true`, GNSS and LiDAR both seen |
+| Manifest enables P0 and disables P1-P5 | `PASS` | Manifest switches match expected P0 isolation |
+| Odom health gate | `PASS` | `is_drift=false`, RMS `1.253385m`, max/final `1.737991m`, jump count `0` |
+| P0 health stable | `FAIL` | `full_unknown_max_consecutive=5` from startup rows |
+| P0 valid ratio | `PASS` after startup, `PASS` aggregate | Mean `0.875301`; rows 6-49 are `ok` with valid ratio about `0.97-0.988` |
+| P0 RViz clouds present | `PASS` | `/iap/rviz/predicted_pl_cloud=49`, `/iap/rviz/risk_validity_cloud=49` |
+| P5 action absent | `PASS` | `/planning/integrity_gate_status` absent |
+| P0-3A vs P0-1/P0-2 PL/cost distinction | `FAIL` | PL/cost mean `11.100745`, lower than P0-1 `11.181885` and healthy P0-2 `19.146271` |
+| Enter P0-4 | `NO` | P0 startup health gate still fails |
+
+Odom health:
+
+| Metric | Value | Conclusion |
+|---|---:|---|
+| Odom drift | `false` | GNSS-assisted run avoids the LiDAR-only odom blocker |
+| Aligned odom samples | `579` | Odom evidence is present and continuous |
+| RMS position error | `1.253385m` | `PASS`; below `1.5m` gate |
+| Max position error | `1.737991m` | `PASS`; below `4.0m` gate |
+| Final position error | `1.737991m` | `PASS`; below `2.5m` gate |
+| z error mean / max | `0.121259m` / `0.386756m` | `PASS` |
+| yaw error mean / max | `1.746834deg` / `4.373407deg` | `PASS` |
+| Odom max gap | `0.300022s` | `PASS`; no odom gap failure |
+| Jump count | `0` | `PASS`; no odom jumps detected |
+
+P0 startup health:
+
+| Metric | Value | Conclusion |
+|---|---:|---|
+| Health rows | `49` | Complete P0 health evidence |
+| Ready false max consecutive | `0` | Snapshot exists from the first P0 health row |
+| Stale true max consecutive | `0` | P0 `stale` flag is not the failure |
+| Full unknown count / max consecutive | `5` / `5` | `FAIL`; startup full-frame unknown triggers analyzer hard gate |
+| Valid ratio mean / max | `0.875301` / `0.987969` | Aggregate validity is high after startup |
+| Unknown ratio mean / max | `0.124699` / `1.000000` | Startup rows dominate the unknown spike |
+| Reason histogram | `ok=44`, `stale_gnss_epoch=5` | Failure is a startup GNSS epoch freshness window |
+| Provider stale max | `63300` | Stale provider counter explains the first five full-unknown rows |
+
+First eight P0 health rows:
+
+| Row | Generation | Reason | Valid ratio | Unknown ratio | Provider stale | Conclusion |
+|---:|---:|---|---:|---:|---:|---|
+| 1 | `1` | `stale_gnss_epoch` | `0.000000` | `1.000000` | `63300` | Startup full-frame unknown |
+| 2 | `2` | `stale_gnss_epoch` | `0.000000` | `1.000000` | `63300` | Startup full-frame unknown |
+| 3 | `3` | `stale_gnss_epoch` | `0.000000` | `1.000000` | `63300` | Startup full-frame unknown |
+| 4 | `4` | `stale_gnss_epoch` | `0.000000` | `1.000000` | `63300` | Startup full-frame unknown |
+| 5 | `5` | `stale_gnss_epoch` | `0.000000` | `1.000000` | `63300` | Startup full-frame unknown |
+| 6 | `6` | `ok` | `0.987969` | `0.012031` | `0` | P0 recovers |
+| 7 | `7` | `ok` | `0.984688` | `0.015313` | `0` | P0 remains healthy |
+| 8 | `8` | `ok` | `0.982500` | `0.017500` | `0` | P0 remains healthy |
+
+PL/cost comparison:
+
+| Metric | P0-1 | Healthy P0-2 | P0-3A | Conclusion |
+|---|---:|---:|---:|---|
+| Valid ratio | `0.993750` | `0.972188` | `0.969688` | P0-3A has a usable grid after startup |
+| Unknown ratio | `0.006250` | `0.027813` | `0.030313` | P0-3A has slightly more unknown cells |
+| Stale ratio | `0.000000` | `0.000000` | `0.000000` | Final PL cloud is not stale |
+| PL mean | `11.181885` | `19.146271` | `11.100745` | Open-sky GNSS-assisted P0-3A does not raise PL above P0-1/P0-2 |
+| c_pi mean | `11.181885` | `19.146271` | `11.100745` | Cost distribution also does not show corridor-degeneracy risk elevation |
+
+Figure conclusions:
+
+| Figure | Conclusion |
+|---|---|
+| ![P0-3A scenario top-down](../../results/planner_validation/exports/test_planner_p0_open_sky_lidar_corridor_degenerate_1783573895730/figures/p0_3_scenario_topdown.png) | GNSS-assisted corridor run rendered with truth, IAP odom, planner trajectory, and P0-1 baseline overlay. |
+| ![P0-3A odom truth top-down](../../results/planner_validation/exports/test_planner_p0_open_sky_lidar_corridor_degenerate_1783573895730/figures/p0_3_odom_truth_topdown.png) | IAP odom stays close enough to truth for the analyzer odom gate; the LiDAR-only drift blocker is absent. |
+| ![P0-3A odom error timeline](../../results/planner_validation/exports/test_planner_p0_open_sky_lidar_corridor_degenerate_1783573895730/figures/p0_3_odom_error_timeline.png) | Odom error remains below drift thresholds for RMS, max/final position, z, yaw, and jumps. |
+| ![P0-3A topic activity timeline](../../results/planner_validation/exports/test_planner_p0_open_sky_lidar_corridor_degenerate_1783573895730/figures/p0_3_topic_activity_timeline.png) | Required P0 topics are active, including odom, integrity, risk health, PL cloud, and validity cloud. |
+| ![P0-3A P0 health timeline](../../results/planner_validation/exports/test_planner_p0_open_sky_lidar_corridor_degenerate_1783573895730/figures/p0_3_p0_health_timeline.png) | P0 health has a five-sample startup full-frame unknown window, then remains healthy. |
+| ![P0-3A P0 reason histogram](../../results/planner_validation/exports/test_planner_p0_open_sky_lidar_corridor_degenerate_1783573895730/figures/p0_3_p0_reason_histogram.png) | The only non-ok reason is `stale_gnss_epoch`, limited to the first five rows. |
+| ![P0-3A PL/cost distribution](../../results/planner_validation/exports/test_planner_p0_open_sky_lidar_corridor_degenerate_1783573895730/figures/p0_3_pl_cost_distribution.png) | Final PL/cost cloud is valid for most cells, but the distribution is not higher than P0-1 or healthy P0-2. |
+| ![P0-3A risk grid snapshot overview](../../results/planner_validation/exports/test_planner_p0_open_sky_lidar_corridor_degenerate_1783573895730/figures/p0_3_risk_grid_snapshot_overview.png) | Latest risk-grid snapshot is usable after startup, with valid ratio about `0.969688`. |
+| ![P0-3A P0 health vs odom error](../../results/planner_validation/exports/test_planner_p0_open_sky_lidar_corridor_degenerate_1783573895730/figures/p0_3_p0_health_vs_odom_error.png) | P0 startup full-frame unknown occurs without odom drift, separating the startup health issue from odometry. |
+| ![P0-3A vs P0-1 delta](../../results/planner_validation/exports/test_planner_p0_open_sky_lidar_corridor_degenerate_1783573895730/figures/p0_3_vs_p0_1_delta.png) | P0-3A has slightly more unknown cells than P0-1, but PL/cost mean is not higher. |
+| ![P0-3A vs P0-2 delta](../../results/planner_validation/exports/test_planner_p0_open_sky_lidar_corridor_degenerate_1783573895730/figures/p0_3_vs_p0_2_delta.png) | P0-3A PL/cost is far below healthy P0-2, so this GNSS-assisted setup does not validate degraded-corridor PL elevation. |
+
+Updated conclusion after P0-3A:
+
+1. Enabling GNSS avoided odom drift in this run.
+2. P0-3A still fails current acceptance because startup has five consecutive full-frame unknown rows caused by `stale_gnss_epoch`.
+3. The current blocker for GNSS-assisted P0-3A is `debug_P0_risk_grid_health`, specifically startup GNSS epoch freshness/lifecycle handling.
+4. The current GNSS-assisted setup does not prove corridor degeneracy PL/cost elevation because open-sky GNSS dominates the fused integrity result.
+5. Do not enter `P0-4` until either the startup gate is fixed or the acceptance criteria explicitly define and justify a startup warm-up grace period, then P0-3A is rerun.
+
 ### P0-3-control Predictor Source-Control Smoke
 
 Result: **PARTIAL / CONTROL GATING VERIFIED, NOT FORMAL P0-3 PASS**.
@@ -1747,3 +1889,92 @@ Observed source-control conclusions:
 3. `lidar_used_count=0`, so this smoke cannot prove the requested `lidar_used_count>0` runtime condition. The current limitation is missing full P0 LiDAR advisory wiring/fixture, not GNSS freshness gating.
 4. `use_gnss:=true` with GNSS integrity disabled was sufficient for this smoke to keep the odometry/planner stack running; GNSS factors were still inserted into odometry while `/iap/integrity` stayed LiDAR/fallback-valid.
 5. Do not mark P0-3-control as formal PASS until odom health, P0 health validity, `lidar_used_count>0`, PL/cost corridor distinction, and source-counter gates all pass in the same run.
+
+### P0-3-control LiDAR Predictor Input Wiring Smoke
+
+Result: **PARTIAL / SOURCE WIRING VERIFIED, NOT FORMAL P0-3 PASS**.
+
+This rerun used the new `p0.map_topic` to `PredictorModule` wiring while keeping GNSS available for odometry and forcing P0 risk prediction into `lidar_only` with `gnss_epoch_policy=disabled`. It verifies the source-control evidence that was missing in the prior P0-3-control smoke: LiDAR predictor inputs are populated, LiDAR advisory FIM is queried, GNSS advisory FIM is not queried, and `stale_gnss_epoch` no longer dominates the P0 health stream. It still does not satisfy the formal P0-3-control gate because odom drift, final PL-cloud freshness, health periodicity, and PL/cost corridor distinction do not all pass in this run.
+
+| Field | Value |
+|---|---|
+| Run time | `2026-07-09T08:11:09Z` |
+| Export | `/home/dev/ws_iap/src/iap/results/planner_validation/exports/test_planner_p0_open_sky_lidar_corridor_degenerate_1783584669577` |
+| Bag | `/home/dev/ws_iap/src/iap/results/planner_validation/bags/test_planner_p0_open_sky_lidar_corridor_degenerate_20260709T081109Z` |
+| Launch | `PASS`; launch command returned `0` |
+| Validator | `PASS`; `passed=true`, `message_count=572`, `lidar_valid_seen=true`, `fallback_valid_seen=true`, `gnss_valid_seen=false`, final source `LIDAR` |
+| Analyzer | `FAIL`; P0 health periodicity, mean valid ratio, full-frame unknown ratio, odom health, and final PL cloud freshness did not pass together |
+| P0 health rows | `12` |
+| P0 reason histogram | `ok=7`, `stale_integrity=5`; no `stale_gnss_epoch` rows |
+| Valid ratio | max `0.623984`, mean `0.306126`; non-stale rows prove `valid_ratio>0` |
+| Predictor source counters | max `gnss=0`, max `lidar=39935` |
+| Predictor LiDAR inputs | map points `55917`, FIM primitives `1969`, valid normals `1969`, fallback reason empty |
+
+Observed source-control conclusions:
+
+1. `predictor_gnss_used_count=0` throughout the run, so P0 risk prediction did not use GNSS advisory FIM.
+2. `predictor_lidar_used_count>0` in non-stale rows, with a max of `39935`, so the LiDAR advisory FIM path is now active.
+3. `predictor_lidar_fim_primitive_count=1969` and `predictor_lidar_fim_valid_normal_count=1969`, so `p0.map_topic` data produced usable LiDAR predictor primitives without a fallback reason.
+4. `reason=stale_gnss_epoch` never appears, so `lidar_only` with disabled GNSS epoch policy is no longer blocked by GNSS freshness.
+5. Do not mark P0-3-control as formal PASS. The analyzer selected `debug_IAP_odometry_drift` because odom health failed; after odom health and P0 health periodicity are fixed, if primitives and LiDAR source counters remain positive but valid ratio stays low, use `debug_lidar_fim_quality_or_corridor_geometry` as the next branch.
+
+### P0-3-control FIM-First Legacy-Fallback Smoke
+
+Result: **PARTIAL / ODOM HEALTH RESTORED, P0 REFRESH STILL TOO SLOW**.
+
+This rerun applied the `LidarAdvisoryPredictor` change that only runs legacy map-point observability when LiDAR FIM is invalid. It used the known GNSS-assisted odom configuration while keeping P0 predictor risk source forced to `lidar_only` with `gnss_epoch_policy=disabled`.
+
+| Field | Value |
+|---|---|
+| Run time | `2026-07-09T08:50:34Z` |
+| Export | `/home/dev/ws_iap/src/iap/results/planner_validation/exports/test_planner_p0_open_sky_lidar_corridor_degenerate_1783587034716` |
+| Bag | `/home/dev/ws_iap/src/iap/results/planner_validation/bags/test_planner_p0_open_sky_lidar_corridor_degenerate_20260709T085034Z` |
+| Launch | `PASS`; launch command returned `0` |
+| Validator | `PASS`; `passed=true`, `message_count=582`, GNSS/LiDAR/fallback all seen |
+| Analyzer | `FAIL`; P0 health topic not periodic and valid ratio mean is below `0.60` |
+| Odom health | `PASS`; RMS `1.097m`, max `1.434m`, final `1.363m`, jumps `0` |
+| P0 health rows | `14`; `/planning/risk_grid_health` about `0.234Hz` |
+| Refresh elapsed | mean `2801.532ms`; individual rows around `2.7-3.3s` |
+| P0 reason histogram | `ok=14`; no `stale_gnss_epoch` and no provider stale cells |
+| Valid ratio | mean `0.521044`, max `0.628750`, min `0.479688` |
+| Final PL cloud | stale ratio `0.0`, valid ratio `0.477813`, unknown ratio `0.522188`, PL mean `1.416570` |
+| Predictor source counters | max `gnss=0`, max `lidar=40240`, max `prior=64000`, max `regularized=40240` |
+| Predictor LiDAR inputs | map points `55917`, FIM primitives `1969`, valid normals `1969`, fallback reason empty |
+
+Updated conclusion:
+
+1. The previous odom drift is launch/config dependent, not an inherent odom pipeline failure. GNSS-assisted odom is healthy in this configuration.
+2. The FIM-first fallback change removed the avoidable legacy scan on valid FIM queries, but full-grid P0 refresh is still too slow for the active-periodic gate.
+3. Final PL cloud freshness improved from stale to non-stale, so the remaining P0 blocker is not final cloud staleness.
+4. The next branch is P0 runtime performance and validity: add spatial indexing or neighborhood preselection for LiDAR primitives, then address the partial-invalid/occupied-skip unknown area if valid ratio remains below `0.60`.
+
+### P0-3-control Indexed LiDAR FIM Radius Smoke
+
+Result: **SMOKE METRICS PASS / FORMAL P0-3 COMPARISON STILL INCONCLUSIVE**.
+
+This rerun used the LiDAR FIM spatial index, batch-local position caching in the P0 `PredictorModuleRiskProvider`, regularized-but-valid degenerate LiDAR FIM handling, dominant unknown reason health fields, and `p0.predictor.lidar_fim_radius_m=12.0` for the 30m P0 risk grid. GNSS stayed available for odometry, while P0 predictor risk source remained forced to `lidar_only` with `gnss_epoch_policy=disabled`.
+
+| Field | Value |
+|---|---|
+| Run time | `2026-07-10T10:55:55Z` |
+| Export | `/home/dev/ws_iap/src/iap/results/planner_validation/exports/test_planner_p0_open_sky_lidar_corridor_degenerate_1783680955170` |
+| Bag | `/home/dev/ws_iap/src/iap/results/planner_validation/bags/test_planner_p0_open_sky_lidar_corridor_degenerate_20260710T105555Z` |
+| Launch | `PASS`; launch command returned `0` |
+| Validator | `PASS`; `passed=true`, `message_count=579`, GNSS/LiDAR/fallback all seen |
+| Analyzer | `INCONCLUSIVE`; no failures, only missing P0-1/P0-2 comparison references |
+| Odom health | `PASS`; RMS `1.124m`, max `1.562m`, final `1.404m`, jumps `0` |
+| P0 health rows | `63`; `/planning/risk_grid_health` about `1.051Hz` |
+| Refresh elapsed | mean `203.742ms` |
+| P0 reason histogram | `ok=63`; no `stale_gnss_epoch` and no provider stale cells |
+| Valid ratio | mean `0.837578`, max `0.922500`, min `0.792344` |
+| Provider invalid | max `11630`, dominant unknown `gnss:gnss_disabled;lidar:missing_lidar_normals` |
+| Final PL cloud | stale ratio `0.0`, valid ratio `0.798438`, unknown ratio `0.201563`, PL mean `2.030898` |
+| Predictor source counters | max `gnss=0`, max `lidar=59040`, max `prior=63230`, max `regularized=59040` |
+| Predictor LiDAR inputs | map points `55917`, FIM primitives `1969`, valid normals `1969`, fallback reason empty |
+
+Updated conclusion:
+
+1. The original P0 refresh bottleneck was repeated full-grid LiDAR FIM evaluation across horizons. Spatial indexing plus batch-local position caching reduces mean refresh from `2801.532ms` to `203.742ms`.
+2. The low valid-ratio blocker was primarily LiDAR FIM coverage relative to a 30m risk grid in a finite corridor map, not GNSS/odom freshness. The 12m P0 predictor FIM radius raises mean valid ratio from about `0.52` to `0.838`.
+3. Source-control evidence now holds in the same run: `predictor_gnss_used_count=0`, `predictor_lidar_used_count>0`, no `stale_gnss_epoch`, and positive LiDAR primitive diagnostics.
+4. Do not mark formal P0-3 PASS solely from this run because analyzer comparison against healthy P0-1/P0-2 references remains inconclusive.

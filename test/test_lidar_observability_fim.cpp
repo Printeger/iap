@@ -310,6 +310,56 @@ TEST(LidarObservabilityFimTest, AdvisoryFimReflectsNormalAnisotropy) {
   EXPECT_EQ(result.n_valid_normals, static_cast<int>(primitives.size()));
 }
 
+TEST(LidarObservabilityFimTest, AdvisoryFimIndexMatchesVectorScan) {
+  iap::LidarObservabilityFim::Params params;
+  params.fim_radius_m = 6.0;
+  params.fim_min_voxels = 6;
+  params.fim_range_sigma_base = 1.0;
+  params.fim_condition_max = 1.0e8;
+  params.fim_weight_scale = 1.0;
+  iap::LidarObservabilityFim estimator(params);
+  auto primitives =
+      std::make_shared<std::vector<iap::LidarFimPrimitive>>(
+          axis_primitives({Eigen::Vector3d::UnitX(),
+                           Eigen::Vector3d::UnitY(),
+                           Eigen::Vector3d::UnitZ()},
+                          24));
+  const auto index =
+      iap::LidarFimPrimitiveIndex::build(primitives, params.fim_radius_m);
+  const Eigen::Vector3d query(0.25, -0.2, 0.1);
+
+  const auto vector_result = estimator.evaluate_advisory_fim(
+      query, primitives.get(), make_current());
+  const auto indexed_result = estimator.evaluate_advisory_fim(
+      query, index.get(), make_current());
+
+  ASSERT_TRUE(vector_result.valid);
+  ASSERT_TRUE(indexed_result.valid);
+  EXPECT_EQ(indexed_result.n_primitives, vector_result.n_primitives);
+  EXPECT_EQ(indexed_result.n_valid_normals, vector_result.n_valid_normals);
+  EXPECT_TRUE(indexed_result.lambda.isApprox(vector_result.lambda, 1.0e-12));
+  EXPECT_NEAR(indexed_result.condition, vector_result.condition, 1.0e-9);
+}
+
+TEST(LidarObservabilityFimTest, DegenerateAdvisoryFimIsRegularizedValid) {
+  iap::LidarObservabilityFim::Params params;
+  params.fim_radius_m = 8.0;
+  params.fim_min_voxels = 6;
+  params.fim_range_sigma_base = 1.0;
+  params.fim_condition_max = 10.0;
+  iap::LidarObservabilityFim estimator(params);
+  const auto corridor = corridor_primitives(false);
+
+  const auto result = estimator.evaluate_advisory_fim(
+      Eigen::Vector3d::Zero(), &corridor, make_current());
+
+  ASSERT_TRUE(result.valid);
+  EXPECT_TRUE(result.regularized);
+  EXPECT_EQ(result.fallback_reason, "");
+  EXPECT_GT(result.n_valid_normals, params.fim_min_voxels);
+  EXPECT_GT(result.condition, params.fim_condition_max);
+}
+
 TEST(LidarObservabilityFimTest, AdvisoryFimRequiresNormals) {
   iap::LidarObservabilityFim estimator;
   const auto result = estimator.evaluate_advisory_fim(

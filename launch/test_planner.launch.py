@@ -563,6 +563,7 @@ ARG_DEFAULTS = [
     ("p0.predictor.use_current_integrity_prior", "true"),
     ("p0.predictor.conservative_max_with_gnss", "false"),
     ("p0.predictor.lidar_legacy_observability", "true"),
+    ("p0.predictor.lidar_fim_radius_m", "12.0"),
     ("p1.use_integrity_cost", "false"),
     ("p1.metrics_only", "true"),
     ("p1.lambda_integrity", "0.0"),
@@ -1059,6 +1060,7 @@ def _ego_planner_node(context, drone_id, planner_odom_topic, cloud_topic, camera
             {"p0.predictor.use_current_integrity_prior": _param_bool(context, "p0.predictor.use_current_integrity_prior")},
             {"p0.predictor.conservative_max_with_gnss": _param_bool(context, "p0.predictor.conservative_max_with_gnss")},
             {"p0.predictor.lidar_legacy_observability": _param_bool(context, "p0.predictor.lidar_legacy_observability")},
+            {"p0.predictor.lidar_fim_radius_m": _param_float(context, "p0.predictor.lidar_fim_radius_m")},
             {"p1.use_integrity_cost": p1_use},
             {"p1.metrics_only": p1_metrics_only},
             {"p1.lambda_integrity": _param_float(context, "p1.lambda_integrity")},
@@ -1344,6 +1346,7 @@ def _launch_setup(context):
         "p0.predictor.use_current_integrity_prior": _param_bool(context, "p0.predictor.use_current_integrity_prior"),
         "p0.predictor.conservative_max_with_gnss": _param_bool(context, "p0.predictor.conservative_max_with_gnss"),
         "p0.predictor.lidar_legacy_observability": _param_bool(context, "p0.predictor.lidar_legacy_observability"),
+        "p0.predictor.lidar_fim_radius_m": _param_float(context, "p0.predictor.lidar_fim_radius_m"),
         **{f"planner_enable_{key}": value for key, value in safety_enabled.items()},
     }
     manifest_path = Path(export_dir) / "test_planner_manifest.json"

@@ -828,7 +828,9 @@ bool RiskGridMap::refreshFromProvider(const Eigen::Vector3d& uav_position_w,
                                                     : result.reason);
       } else {
         ++provider_invalid_count;
-        record_unknown_reason("provider_invalid");
+        record_unknown_reason(has_provider_result[i] && !result.reason.empty()
+                                  ? result.reason
+                                  : "provider_invalid");
       }
       voxel.c_pi = params_copy.unknown_cost;
       ++unknown_count;
@@ -858,18 +860,18 @@ bool RiskGridMap::refreshFromProvider(const Eigen::Vector3d& uav_position_w,
   new_health.predictor_regularized_count = predictor_regularized_count;
   new_health.predictor_conservative_max_count =
       predictor_conservative_max_count;
+  for (const auto& entry : unknown_reason_counts) {
+    if (entry.second > new_health.dominant_unknown_count) {
+      new_health.dominant_unknown_reason = entry.first;
+      new_health.dominant_unknown_count = entry.second;
+    }
+  }
   new_health.reason = "ok";
   if (valid_count == 0u &&
       unknown_count == static_cast<uint64_t>(total_voxel_count)) {
-    uint64_t dominant_count = 0;
-    std::string dominant_reason = "provider_invalid";
-    for (const auto& entry : unknown_reason_counts) {
-      if (entry.second > dominant_count) {
-        dominant_reason = entry.first;
-        dominant_count = entry.second;
-      }
-    }
-    new_health.reason = dominant_reason;
+    new_health.reason = new_health.dominant_unknown_reason.empty()
+                            ? "provider_invalid"
+                            : new_health.dominant_unknown_reason;
   }
   next->health = new_health;
 

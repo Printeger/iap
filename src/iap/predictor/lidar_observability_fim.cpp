@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
+#include <functional>
 #include <map>
 #include <tuple>
 
@@ -250,6 +251,110 @@ std::shared_ptr<std::vector<LidarFimPrimitive>> make_lidar_fim_primitives(
   return finish();
 }
 
+LidarFimPrimitiveIndex::LidarFimPrimitiveIndex() = default;
+
+LidarFimPrimitiveIndex::LidarFimPrimitiveIndex(
+    std::shared_ptr<const std::vector<LidarFimPrimitive>> primitives,
+    const double cell_size_m)
+    : primitives_(std::move(primitives)) {
+  cell_size_m_ = std::isfinite(cell_size_m) && cell_size_m > 0.0
+                     ? cell_size_m
+                     : 1.0;
+  stats_.cell_size_m = cell_size_m_;
+  if (primitives_ == nullptr) {
+    return;
+  }
+
+  stats_.primitive_count = primitives_->size();
+  for (std::size_t i = 0; i < primitives_->size(); ++i) {
+    const auto& primitive = (*primitives_)[i];
+    if (!primitive.center_w.allFinite()) {
+      continue;
+    }
+    buckets_[keyFor(primitive.center_w)].push_back(i);
+    ++stats_.finite_primitive_count;
+  }
+  stats_.bucket_count = buckets_.size();
+}
+
+std::shared_ptr<const LidarFimPrimitiveIndex> LidarFimPrimitiveIndex::build(
+    std::shared_ptr<const std::vector<LidarFimPrimitive>> primitives,
+    const double cell_size_m) {
+  return std::make_shared<LidarFimPrimitiveIndex>(std::move(primitives),
+                                                 cell_size_m);
+}
+
+bool LidarFimPrimitiveIndex::empty() const {
+  return primitives_ == nullptr || stats_.finite_primitive_count == 0u ||
+         buckets_.empty();
+}
+
+std::size_t LidarFimPrimitiveIndex::KeyHash::operator()(
+    const Key& key) const {
+  const auto mix = [](const std::int64_t value) {
+    std::uint64_t x = static_cast<std::uint64_t>(value);
+    x ^= x >> 30;
+    x *= 0xbf58476d1ce4e5b9ULL;
+    x ^= x >> 27;
+    x *= 0x94d049bb133111ebULL;
+    x ^= x >> 31;
+    return x;
+  };
+  const std::uint64_t h =
+      mix(key.x) ^ (mix(key.y) + 0x9e3779b97f4a7c15ULL + (mix(key.x) << 6) +
+                    (mix(key.x) >> 2)) ^
+      (mix(key.z) + 0x9e3779b97f4a7c15ULL + (mix(key.y) << 6) +
+       (mix(key.y) >> 2));
+  return static_cast<std::size_t>(h);
+}
+
+LidarFimPrimitiveIndex::Key LidarFimPrimitiveIndex::keyFor(
+    const Eigen::Vector3d& point) const {
+  return Key{
+      static_cast<std::int64_t>(std::floor(point.x() / cell_size_m_)),
+      static_cast<std::int64_t>(std::floor(point.y() / cell_size_m_)),
+      static_cast<std::int64_t>(std::floor(point.z() / cell_size_m_))};
+}
+
+void LidarFimPrimitiveIndex::queryRadius(
+    const Eigen::Vector3d& center,
+    const double radius_m,
+    std::vector<std::size_t>* indices) const {
+  if (indices == nullptr) {
+    return;
+  }
+  indices->clear();
+  if (empty() || !center.allFinite() || !std::isfinite(radius_m) ||
+      radius_m <= 0.0) {
+    return;
+  }
+
+  const Eigen::Vector3d min_corner =
+      center - Eigen::Vector3d::Constant(radius_m);
+  const Eigen::Vector3d max_corner =
+      center + Eigen::Vector3d::Constant(radius_m);
+  const Key min_key = keyFor(min_corner);
+  const Key max_key = keyFor(max_corner);
+  const double radius2 = radius_m * radius_m;
+  for (std::int64_t x = min_key.x; x <= max_key.x; ++x) {
+    for (std::int64_t y = min_key.y; y <= max_key.y; ++y) {
+      for (std::int64_t z = min_key.z; z <= max_key.z; ++z) {
+        const auto it = buckets_.find(Key{x, y, z});
+        if (it == buckets_.end()) {
+          continue;
+        }
+        for (const std::size_t primitive_idx : it->second) {
+          const auto& primitive = (*primitives_)[primitive_idx];
+          const double dist2 = (primitive.center_w - center).squaredNorm();
+          if (std::isfinite(dist2) && dist2 <= radius2) {
+            indices->push_back(primitive_idx);
+          }
+        }
+      }
+    }
+  }
+}
+
 LidarObservabilityFim::LidarObservabilityFim()
     : LidarObservabilityFim(Params{}) {}
 
@@ -363,11 +468,13 @@ LidarObservabilityResult LidarObservabilityFim::evaluate(
   return out;
 }
 
-LidarAdvisoryFimResult LidarObservabilityFim::evaluate_advisory_fim(
+namespace {
+
+LidarAdvisoryFimResult evaluate_lidar_advisory_fim_candidates(
     const Eigen::Vector3d& p_w,
     const std::vector<LidarFimPrimitive>* primitives,
-    const CurrentIntegrityState& current) const {
-  (void)current;
+    const std::vector<std::size_t>* candidate_indices,
+    const LidarObservabilityFim::Params& params) {
   LidarAdvisoryFimResult out;
 
   auto fallback = [&](const char* reason) {
@@ -385,19 +492,19 @@ LidarAdvisoryFimResult LidarObservabilityFim::evaluate_advisory_fim(
     return fallback("missing_lidar_normals");
   }
   const double radius =
-      std::isfinite(params_.fim_radius_m) && params_.fim_radius_m > 0.0
-          ? params_.fim_radius_m
-          : params_.search_radius_m;
+      std::isfinite(params.fim_radius_m) && params.fim_radius_m > 0.0
+          ? params.fim_radius_m
+          : params.search_radius_m;
   const double sigma =
-      std::isfinite(params_.fim_range_sigma_base) &&
-              params_.fim_range_sigma_base > 0.0
-          ? params_.fim_range_sigma_base
-          : params_.sigma_lidar_m;
+      std::isfinite(params.fim_range_sigma_base) &&
+              params.fim_range_sigma_base > 0.0
+          ? params.fim_range_sigma_base
+          : params.sigma_lidar_m;
   const double weight_scale =
-      std::isfinite(params_.fim_weight_scale) && params_.fim_weight_scale > 0.0
-          ? params_.fim_weight_scale
+      std::isfinite(params.fim_weight_scale) && params.fim_weight_scale > 0.0
+          ? params.fim_weight_scale
           : 1.0;
-  const int min_voxels = std::max(1, params_.fim_min_voxels);
+  const int min_voxels = std::max(1, params.fim_min_voxels);
   if (radius <= 0.0 || sigma <= 0.0) {
     return fallback("invalid_lidar_fim_params");
   }
@@ -406,19 +513,19 @@ LidarAdvisoryFimResult LidarObservabilityFim::evaluate_advisory_fim(
   const double inv_sigma2 = 1.0 / (sigma * sigma);
   int nearby = 0;
   int valid_normals = 0;
-  for (const auto& primitive : *primitives) {
+  const auto accumulate = [&](const LidarFimPrimitive& primitive) {
     if (!primitive.center_w.allFinite() || !primitive.normal_w.allFinite()) {
-      continue;
+      return;
     }
     const Eigen::Vector3d d = primitive.center_w - p_w;
     const double dist2 = d.squaredNorm();
     if (!std::isfinite(dist2) || dist2 > radius2) {
-      continue;
+      return;
     }
     ++nearby;
     const double normal_norm = primitive.normal_w.norm();
     if (!std::isfinite(normal_norm) || normal_norm <= 1.0e-9) {
-      continue;
+      return;
     }
     const Eigen::Vector3d n = primitive.normal_w / normal_norm;
     const double confidence = std::clamp(
@@ -431,13 +538,25 @@ LidarAdvisoryFimResult LidarObservabilityFim::evaluate_advisory_fim(
             ? primitive.weight
             : 1.0;
     if (confidence <= 0.0 || primitive_weight <= 0.0) {
-      continue;
+      return;
     }
     const double pi_range = std::exp(-dist2 / std::max(2.0 * radius2, 1.0e-9));
     out.lambda +=
         weight_scale * pi_range * confidence * primitive_weight * inv_sigma2 *
         (n * n.transpose());
     ++valid_normals;
+  };
+
+  if (candidate_indices != nullptr) {
+    for (const std::size_t idx : *candidate_indices) {
+      if (idx < primitives->size()) {
+        accumulate((*primitives)[idx]);
+      }
+    }
+  } else {
+    for (const auto& primitive : *primitives) {
+      accumulate(primitive);
+    }
   }
 
   out.n_primitives = nearby;
@@ -451,15 +570,51 @@ LidarAdvisoryFimResult LidarObservabilityFim::evaluate_advisory_fim(
   }
 
   fill_fim_diagnostics(out);
-  if (!std::isfinite(out.max_eig) || out.max_eig <= 0.0 ||
-      !std::isfinite(out.condition) ||
-      out.condition > std::max(params_.fim_condition_max, 1.0)) {
+  if (!std::isfinite(out.max_eig) || out.max_eig <= 0.0) {
     return fallback("degenerate_lidar_fim");
+  }
+  if (!std::isfinite(out.condition) ||
+      out.condition > std::max(params.fim_condition_max, 1.0)) {
+    out.valid = true;
+    out.regularized = true;
+    out.fallback_reason.clear();
+    return out;
   }
 
   out.valid = true;
   out.fallback_reason.clear();
   return out;
+}
+
+}  // namespace
+
+LidarAdvisoryFimResult LidarObservabilityFim::evaluate_advisory_fim(
+    const Eigen::Vector3d& p_w,
+    const std::vector<LidarFimPrimitive>* primitives,
+    const CurrentIntegrityState& current) const {
+  (void)current;
+  return evaluate_lidar_advisory_fim_candidates(p_w, primitives, nullptr,
+                                               params_);
+}
+
+LidarAdvisoryFimResult LidarObservabilityFim::evaluate_advisory_fim(
+    const Eigen::Vector3d& p_w,
+    const LidarFimPrimitiveIndex* index,
+    const CurrentIntegrityState& current) const {
+  (void)current;
+  if (index == nullptr || index->empty()) {
+    return evaluate_lidar_advisory_fim_candidates(p_w, nullptr, nullptr,
+                                                 params_);
+  }
+
+  const double radius =
+      std::isfinite(params_.fim_radius_m) && params_.fim_radius_m > 0.0
+          ? params_.fim_radius_m
+          : params_.search_radius_m;
+  std::vector<std::size_t> candidates;
+  index->queryRadius(p_w, radius, &candidates);
+  return evaluate_lidar_advisory_fim_candidates(p_w, index->primitives(),
+                                               &candidates, params_);
 }
 
 }  // namespace iap

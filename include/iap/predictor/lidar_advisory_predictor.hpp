@@ -27,8 +27,11 @@ class LidarAdvisoryPredictor {
   const LidarAdvisoryPredictorParams& params() const { return params_; }
 
  private:
+  void rebuild_lidar_fim_index();
+
   LidarAdvisoryPredictorParams params_;
   std::shared_ptr<const std::vector<LidarFimPrimitive>> primitives_;
+  std::shared_ptr<const LidarFimPrimitiveIndex> primitive_index_;
   std::shared_ptr<const std::vector<Eigen::Vector3d>> map_points_;
 };
 

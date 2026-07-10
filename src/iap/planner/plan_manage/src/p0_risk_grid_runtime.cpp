@@ -8,6 +8,7 @@
 #include <memory>
 #include <sstream>
 #include <stdexcept>
+#include <unordered_map>
 #include <utility>
 
 #include <gnss_comm/gnss_constant.hpp>
@@ -76,6 +77,60 @@ bool hasPointField(const sensor_msgs::msg::PointCloud2& msg,
                      });
 }
 
+struct PredictorPositionCacheKey {
+  double x = 0.0;
+  double y = 0.0;
+  double z = 0.0;
+
+  bool operator==(const PredictorPositionCacheKey& other) const {
+    return x == other.x && y == other.y && z == other.z;
+  }
+};
+
+struct PredictorPositionCacheHash {
+  std::size_t operator()(const PredictorPositionCacheKey& key) const {
+    std::size_t seed = std::hash<double>{}(key.x);
+    seed ^= std::hash<double>{}(key.y) + 0x9e3779b9u + (seed << 6) +
+            (seed >> 2);
+    seed ^= std::hash<double>{}(key.z) + 0x9e3779b9u + (seed << 6) +
+            (seed >> 2);
+    return seed;
+  }
+};
+
+PredictorPositionCacheKey makePredictorPositionCacheKey(
+    const Eigen::Vector3d& position) {
+  return PredictorPositionCacheKey{position.x(), position.y(), position.z()};
+}
+
+bool predictorQueryCanUsePositionCache(
+    const iap::RiskPredictionQuery& query) {
+  return query.position_w.allFinite() && std::isfinite(query.query_time_s) &&
+         std::isfinite(query.horizon_s) && query.horizon_s >= 0.0;
+}
+
+bool predictorBatchCanCacheByPositionOnly(
+    const iap::PredictorParams& params) {
+  return params.source_mode == iap::PredictorSourceMode::LidarOnly &&
+         params.gnss_epoch_policy == iap::PredictorGnssEpochPolicy::Disabled;
+}
+
+iap::RiskPredictionResult makeRiskPredictionResult(
+    const iap::PredictorQueryResult& prediction) {
+  iap::RiskPredictionResult out;
+  out.available = prediction.available;
+  out.valid = prediction.valid;
+  out.stale = prediction.fallback &&
+              (prediction.fallback_reason.find("stale") !=
+               std::string::npos);
+  out.hpl_pred = prediction.fused.hpl;
+  out.vpl_pred = prediction.fused.vpl;
+  out.source_flags = prediction.source_flags;
+  out.reason = prediction.fallback_reason.empty() ? "ok"
+                                                  : prediction.fallback_reason;
+  return out;
+}
+
 iap::PredictorSourceMode parsePredictorSourceMode(
     const std::string& value) {
   if (value == "fusion") {
@@ -124,22 +179,37 @@ class PredictorModuleRiskProvider final : public iap::RiskPredictionProvider {
     }
     results->clear();
     results->reserve(queries.size());
+    const bool use_position_cache =
+        predictorBatchCanCacheByPositionOnly(module_.params());
+    std::unordered_map<PredictorPositionCacheKey,
+                       iap::RiskPredictionResult,
+                       PredictorPositionCacheHash>
+        position_cache;
+    if (use_position_cache) {
+      position_cache.reserve(queries.size());
+    }
     for (const auto& query : queries) {
+      const bool cacheable =
+          use_position_cache && predictorQueryCanUsePositionCache(query);
+      if (cacheable) {
+        const PredictorPositionCacheKey key =
+            makePredictorPositionCacheKey(query.position_w);
+        const auto cached = position_cache.find(key);
+        if (cached != position_cache.end()) {
+          results->push_back(cached->second);
+          continue;
+        }
+      }
+
       iap::PredictorQueryInput input(query.position_w, snapshot_,
                                      query.query_time_s, query.horizon_s,
                                      "map", snapshot_.stamp);
       const iap::PredictorQueryResult prediction = module_.query(input);
-      iap::RiskPredictionResult out;
-      out.available = prediction.available;
-      out.valid = prediction.valid;
-      out.stale = prediction.fallback &&
-                  (prediction.fallback_reason.find("stale") !=
-                   std::string::npos);
-      out.hpl_pred = prediction.fused.hpl;
-      out.vpl_pred = prediction.fused.vpl;
-      out.source_flags = prediction.source_flags;
-      out.reason = prediction.fallback_reason.empty() ? "ok"
-                                                      : prediction.fallback_reason;
+      iap::RiskPredictionResult out = makeRiskPredictionResult(prediction);
+      if (cacheable) {
+        position_cache.emplace(makePredictorPositionCacheKey(query.position_w),
+                               out);
+      }
       results->push_back(out);
     }
     return true;
@@ -217,6 +287,10 @@ P0RiskGridRuntime::Config P0RiskGridRuntime::declareAndReadConfig(
   config.predictor_lidar_legacy_observability =
       node->declare_parameter<bool>(
           "p0.predictor.lidar_legacy_observability", true);
+  config.predictor_lidar_fim_radius_m =
+      node->declare_parameter<double>(
+          "p0.predictor.lidar_fim_radius_m",
+          config.predictor_lidar_fim_radius_m);
   return config;
 }
 
@@ -373,6 +447,13 @@ void P0RiskGridRuntime::refreshTimerCallback() {
         config_.predictor_conservative_max_with_gnss;
     predictor_params.lidar.enable_legacy_observability =
         config_.predictor_lidar_legacy_observability;
+    if (std::isfinite(config_.predictor_lidar_fim_radius_m) &&
+        config_.predictor_lidar_fim_radius_m > 0.0) {
+      predictor_params.lidar.fim_params.fim_radius_m =
+          config_.predictor_lidar_fim_radius_m;
+      predictor_params.lidar.fim_params.search_radius_m =
+          config_.predictor_lidar_fim_radius_m;
+    }
     std::shared_ptr<const std::vector<Eigen::Vector3d>> lidar_map_points;
     std::shared_ptr<const std::vector<iap::LidarFimPrimitive>>
         lidar_fim_primitives;
@@ -457,6 +538,10 @@ void P0RiskGridRuntime::publishHealth(const iap::RiskGridHealth& health,
       << out_health.predictor_lidar_fim_valid_normal_count << ","
       << "\"predictor_lidar_fim_fallback_reason\":"
       << jsonString(out_health.predictor_lidar_fim_fallback_reason) << ","
+      << "\"dominant_unknown_reason\":"
+      << jsonString(out_health.dominant_unknown_reason) << ","
+      << "\"dominant_unknown_count\":"
+      << out_health.dominant_unknown_count << ","
       << "\"refresh_stamp_s\":" << jsonNumber(last_refresh_stamp_s_) << ","
       << "\"last_grid_stamp_s\":" << jsonNumber(last_grid_stamp_s_) << ","
       << "\"refresh_elapsed_ms\":" << jsonNumber(last_refresh_elapsed_ms_) << ","
@@ -479,6 +564,7 @@ void P0RiskGridRuntime::publishHealth(const iap::RiskGridHealth& health,
                        "regularized=%lu conservative_max=%lu "
                        "lidar_points=%lu lidar_fim_primitives=%lu "
                        "lidar_fim_valid_normals=%lu lidar_fim_fallback=%s "
+                       "dominant_unknown=%s:%lu "
                        "refresh_stamp=%.6f grid_stamp=%.6f elapsed_ms=%.3f "
                        "queries=%zu reason=%s",
                        out_health.ready, out_health.stale, out_health.age_s,
@@ -509,6 +595,9 @@ void P0RiskGridRuntime::publishHealth(const iap::RiskGridHealth& health,
                        static_cast<unsigned long>(
                            out_health.predictor_lidar_fim_valid_normal_count),
                        out_health.predictor_lidar_fim_fallback_reason.c_str(),
+                       out_health.dominant_unknown_reason.c_str(),
+                       static_cast<unsigned long>(
+                           out_health.dominant_unknown_count),
                        last_refresh_stamp_s_, last_grid_stamp_s_,
                        last_refresh_elapsed_ms_, last_refresh_query_count_,
                        out_health.reason.c_str());

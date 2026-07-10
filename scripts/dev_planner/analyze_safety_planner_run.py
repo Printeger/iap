@@ -98,6 +98,10 @@ PREDICTOR_LIDAR_INPUT_FIELDS = [
     "predictor_lidar_fim_valid_normal_count",
     "predictor_lidar_fim_fallback_reason",
 ]
+P0_UNKNOWN_REASON_FIELDS = [
+    "dominant_unknown_reason",
+    "dominant_unknown_count",
+]
 
 
 def ensure_dirs(export_dir: Path) -> tuple[Path, Path, Path]:
@@ -470,6 +474,8 @@ def parse_p0_health(msg: Any, timestamp_ns: int) -> dict[str, Any]:
         "occupied_skip_count": data.get("occupied_skip_count", 0),
         "provider_stale_count": data.get("provider_stale_count", 0),
         "provider_invalid_count": data.get("provider_invalid_count", 0),
+        "dominant_unknown_reason": str(data.get("dominant_unknown_reason", "")),
+        "dominant_unknown_count": data.get("dominant_unknown_count", 0),
         "refresh_elapsed_ms": data.get("refresh_elapsed_ms", math.nan),
         "snapshot_available": bool(data.get("snapshot_available", False)),
         "reason": str(data.get("reason", "")),
@@ -1326,6 +1332,27 @@ def summarize_p0_health(rows: list[dict[str, Any]]) -> dict[str, Any]:
         values = [int(finite_float(row.get(field)) or 0) for row in rows]
         summary[f"{field}_max"] = max(values) if values else 0
         summary[f"{field}_latest"] = values[-1] if values else 0
+    dominant_unknown_reasons = [
+        str(row.get("dominant_unknown_reason", "")).strip()
+        for row in rows
+        if str(row.get("dominant_unknown_reason", "")).strip()
+    ]
+    dominant_unknown_counts = [
+        int(finite_float(row.get("dominant_unknown_count")) or 0)
+        for row in rows
+    ]
+    summary["dominant_unknown_reason_counts"] = dict(
+        sorted(Counter(dominant_unknown_reasons).items())
+    )
+    summary["dominant_unknown_reason_latest"] = (
+        dominant_unknown_reasons[-1] if dominant_unknown_reasons else ""
+    )
+    summary["dominant_unknown_count_max"] = (
+        max(dominant_unknown_counts) if dominant_unknown_counts else 0
+    )
+    summary["dominant_unknown_count_latest"] = (
+        dominant_unknown_counts[-1] if dominant_unknown_counts else 0
+    )
     return summary
 
 
@@ -1445,9 +1472,26 @@ def p0_difference_explanation(health_summary: dict[str, Any], cloud_summary: dic
         counter_max["provider_stale_count_max"] > 0
         or counter_max["provider_invalid_count_max"] > 0
     )
+    dominant_unknown_count = int(
+        health_summary.get("dominant_unknown_count_max", 0) or 0
+    )
+    dominant_unknown_reason = str(
+        health_summary.get("dominant_unknown_reason_latest", "")
+    ).strip()
+    dominant_unknown_explanation = bool(
+        dominant_unknown_reason and dominant_unknown_count > 0
+    )
     return {
-        "has_explanation": bool(non_ok_reasons or provider_fault_counters or material_unknown or stale_cells),
+        "has_explanation": bool(
+            non_ok_reasons
+            or dominant_unknown_explanation
+            or provider_fault_counters
+            or material_unknown
+            or stale_cells
+        ),
         "non_ok_reasons": non_ok_reasons,
+        "dominant_unknown_reason": dominant_unknown_reason,
+        "dominant_unknown_count": dominant_unknown_count,
         "counter_max": counter_max,
         "material_unknown": material_unknown,
         "stale_cells": stale_cells,
@@ -1929,9 +1973,27 @@ def validate_p0_requirements(
     occupied_skip = int(health_summary.get("occupied_skip_count_max", 0) or 0)
     unknown_ratio_max = float(health_summary.get("unknown_ratio_max", 0.0) or 0.0)
     reasons_only_ok = set(reason_counts) <= {"ok"}
-    if reasons_only_ok and (provider_stale > 0 or provider_invalid > 0):
+    dominant_unknown_reason = str(
+        health_summary.get("dominant_unknown_reason_latest", "")
+    ).strip()
+    dominant_unknown_count = int(
+        health_summary.get("dominant_unknown_count_max", 0) or 0
+    )
+    has_partial_unknown_explanation = bool(
+        dominant_unknown_reason and dominant_unknown_count > 0
+    )
+    if (
+        reasons_only_ok
+        and (provider_stale > 0 or provider_invalid > 0)
+        and not has_partial_unknown_explanation
+    ):
         failures.append(f"{experiment_label} health reason is always ok while provider counters report stale/invalid cells")
-    if reasons_only_ok and occupied_skip > 0 and unknown_ratio_max >= 0.10:
+    if (
+        reasons_only_ok
+        and occupied_skip > 0
+        and unknown_ratio_max >= 0.10
+        and not has_partial_unknown_explanation
+    ):
         failures.append(f"{experiment_label} health reason is always ok while occupied skip creates material unknown area")
     if int(cloud_summary.get("row_count", 0) or 0) <= 0:
         failures.append(f"{experiment_label} predicted PL cloud has no plottable rows")
@@ -2387,6 +2449,7 @@ def analyze(args: argparse.Namespace) -> dict[str, Any]:
                 "provider_invalid_count",
                 *PREDICTOR_SOURCE_COUNTER_FIELDS,
                 *PREDICTOR_LIDAR_INPUT_FIELDS,
+                *P0_UNKNOWN_REASON_FIELDS,
                 "refresh_elapsed_ms",
                 "snapshot_available",
                 "reason",

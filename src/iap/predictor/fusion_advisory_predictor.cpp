@@ -123,6 +123,7 @@ FusionAdvisoryResult FusionAdvisoryPredictor::query(
   diag.lambda = out.lambda_pred;
   fill_fim_diagnostics(diag);
   out.degeneracy_regularized =
+      gnss.fim_regularized || lidar.fim_regularized ||
       !std::isfinite(diag.min_eig) || diag.min_eig <= 0.0;
 
   const double eps =

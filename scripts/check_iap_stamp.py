@@ -48,6 +48,10 @@ PREDICTOR_LIDAR_INPUT_FIELDS = [
     "predictor_lidar_fim_valid_normal_count",
     "predictor_lidar_fim_fallback_reason",
 ]
+P0_UNKNOWN_REASON_FIELDS = [
+    "dominant_unknown_reason",
+    "dominant_unknown_count",
+]
 
 
 def header_stamp(msg: Any) -> Any:
@@ -373,6 +377,24 @@ def summarize_p0_health(stats: TopicStats) -> dict[str, Any]:
         values = [int(r.get(field, 0) or 0) for r in records]
         summary[f"max_{field}"] = max(values) if values else None
         summary[f"last_{field}"] = values[-1] if values else None
+    dominant_reasons = [
+        str(r.get("dominant_unknown_reason", "")).strip()
+        for r in records
+        if str(r.get("dominant_unknown_reason", "")).strip()
+    ]
+    dominant_counts = [
+        int(r.get("dominant_unknown_count", 0) or 0) for r in records
+    ]
+    summary["dominant_unknown_reason_counts"] = Counter(dominant_reasons)
+    summary["last_dominant_unknown_reason"] = (
+        dominant_reasons[-1] if dominant_reasons else ""
+    )
+    summary["max_dominant_unknown_count"] = (
+        max(dominant_counts) if dominant_counts else None
+    )
+    summary["last_dominant_unknown_count"] = (
+        dominant_counts[-1] if dominant_counts else None
+    )
     return summary
 
 
@@ -722,6 +744,21 @@ class StampMonitor(Node):
             else:
                 lines.append(
                     f"| `{field}` | `{fmt_float(summary.get(f'last_{field}'), 0)}` | "
+                    f"`{fmt_float(summary.get(f'max_{field}'), 0)}` |"
+                )
+        lines.append("")
+        lines.append("| Dominant Unknown | Latest | Max |")
+        lines.append("|---|---:|---:|")
+        for field in P0_UNKNOWN_REASON_FIELDS:
+            if field.endswith("_reason"):
+                lines.append(
+                    f"| `{field}` | "
+                    f"`{md_escape(summary.get(f'last_{field}', ''))}` |  |"
+                )
+            else:
+                lines.append(
+                    f"| `{field}` | "
+                    f"`{fmt_float(summary.get(f'last_{field}'), 0)}` | "
                     f"`{fmt_float(summary.get(f'max_{field}'), 0)}` |"
                 )
         reasons = summary.get("reason_counts", Counter())

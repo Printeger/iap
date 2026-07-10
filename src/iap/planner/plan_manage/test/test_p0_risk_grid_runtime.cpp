@@ -256,6 +256,8 @@ TEST(P0RiskGridRuntimeTest, GnssEpochFreshnessDefaultIsTwoSeconds) {
   EXPECT_TRUE(config.predictor_use_current_integrity_prior);
   EXPECT_FALSE(config.predictor_conservative_max_with_gnss);
   EXPECT_TRUE(config.predictor_lidar_legacy_observability);
+  EXPECT_DOUBLE_EQ(config.predictor_lidar_fim_radius_m,
+                   iap::LidarObservabilityFim::Params{}.fim_radius_m);
 }
 
 TEST(P0RiskGridRuntimeTest, GnssEpochFreshnessCanBeOverridden) {
@@ -283,6 +285,7 @@ TEST(P0RiskGridRuntimeTest, PredictorParamsCanBeOverridden) {
       rclcpp::Parameter("p0.predictor.use_current_integrity_prior", false),
       rclcpp::Parameter("p0.predictor.conservative_max_with_gnss", true),
       rclcpp::Parameter("p0.predictor.lidar_legacy_observability", false),
+      rclcpp::Parameter("p0.predictor.lidar_fim_radius_m", 12.0),
   });
   auto node = std::make_shared<rclcpp::Node>(
       "p0_predictor_params_override_test", options);
@@ -296,6 +299,7 @@ TEST(P0RiskGridRuntimeTest, PredictorParamsCanBeOverridden) {
   EXPECT_FALSE(config.predictor_use_current_integrity_prior);
   EXPECT_TRUE(config.predictor_conservative_max_with_gnss);
   EXPECT_FALSE(config.predictor_lidar_legacy_observability);
+  EXPECT_DOUBLE_EQ(config.predictor_lidar_fim_radius_m, 12.0);
 }
 
 TEST(P0RiskGridRuntimeTest, InvalidPredictorSourceModeThrows) {

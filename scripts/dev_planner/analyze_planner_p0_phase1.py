@@ -38,6 +38,10 @@ PREDICTOR_LIDAR_INPUT_FIELDS = [
     "predictor_lidar_fim_valid_normal_count",
     "predictor_lidar_fim_fallback_reason",
 ]
+P0_UNKNOWN_REASON_FIELDS = [
+    "dominant_unknown_reason",
+    "dominant_unknown_count",
+]
 
 
 def stamp_to_sec(stamp: Any) -> float:
@@ -173,6 +177,8 @@ def parse_health(msg: Any, timestamp_ns: int) -> dict[str, Any] | None:
             row[field] = 0
         for field in PREDICTOR_LIDAR_INPUT_FIELDS:
             row[field] = "" if field.endswith("_reason") else 0
+        for field in P0_UNKNOWN_REASON_FIELDS:
+            row[field] = "" if field.endswith("_reason") else 0
         return row
     row = {
         "stamp": float(timestamp_ns) * 1.0e-9,
@@ -182,6 +188,8 @@ def parse_health(msg: Any, timestamp_ns: int) -> dict[str, Any] | None:
         "valid_ratio": data.get("valid_ratio", math.nan),
         "unknown_ratio": data.get("unknown_ratio", math.nan),
         "generation_id": data.get("generation_id", ""),
+        "dominant_unknown_reason": str(data.get("dominant_unknown_reason", "")),
+        "dominant_unknown_count": data.get("dominant_unknown_count", 0),
         "reason": data.get("reason", ""),
     }
     for field in PREDICTOR_SOURCE_COUNTER_FIELDS:
@@ -731,6 +739,7 @@ def analyze(args: argparse.Namespace) -> dict[str, Any]:
             "reason",
             *PREDICTOR_SOURCE_COUNTER_FIELDS,
             *PREDICTOR_LIDAR_INPUT_FIELDS,
+            *P0_UNKNOWN_REASON_FIELDS,
         ]
         write_csv(
             health_path,
