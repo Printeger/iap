@@ -140,6 +140,9 @@ P0_6_MISSING_CAPABILITIES = [
     "occupied-low-risk injection",
     "reproducible occupied validity overlay",
 ]
+P0_6_FIXTURE_NAME = "occupied_overlap_box_v1"
+# Mirrors iap::RISK_GRID_SOURCE_OCCUPIED_SKIP in include/iap/planner/risk_grid_map.hpp.
+P0_OCCUPIED_SKIP_SOURCE_FLAG = 1 << 31
 
 
 def ensure_dirs(export_dir: Path) -> tuple[Path, Path, Path]:
@@ -172,7 +175,7 @@ def p0_phase_number(experiment_id: Any) -> int | None:
 
 def p0_odom_gate_required(experiment_id: Any) -> bool:
     phase = p0_phase_number(experiment_id)
-    if phase == 4:
+    if phase in {4, 6}:
         return False
     return phase is not None and phase >= 2
 
@@ -1326,6 +1329,140 @@ def plot_p0_risk_grid_snapshot_overview(
     return True
 
 
+def plot_p0_6_occupied_overlap_map(rows: list[dict[str, Any]], path: Path) -> bool:
+    if not rows:
+        return False
+    x = np.array([float(row["x"]) for row in rows])
+    y = np.array([float(row["y"]) for row in rows])
+    occupied_skip = np.array([int(row.get("occupied_skip", 0) or 0) == 1 for row in rows])
+    final_valid = np.array([int(row.get("final_valid", 0) or 0) == 1 for row in rows])
+    fig, ax = plt.subplots(figsize=(7, 6))
+    if np.any(occupied_skip):
+        ax.scatter(
+            x[occupied_skip],
+            y[occupied_skip],
+            s=24,
+            c="#7c3aed",
+            label="occupied -> unknown/skip",
+            alpha=0.85,
+        )
+    bad = final_valid
+    if np.any(bad):
+        ax.scatter(
+            x[bad],
+            y[bad],
+            s=38,
+            c="#dc2626",
+            marker="x",
+            label="occupied valid",
+        )
+    if not np.any(occupied_skip) and not np.any(bad):
+        ax.scatter(x, y, s=20, c="#6b7280", label="occupied overlap")
+    ax.set_xlabel("x [m]")
+    ax.set_ylabel("y [m]")
+    ax.set_title("P0-6 occupied overlap map")
+    ax.set_aspect("equal", adjustable="datalim")
+    ax.grid(True, alpha=0.25)
+    ax.legend(loc="best")
+    fig.tight_layout()
+    fig.savefig(path, dpi=160)
+    plt.close(fig)
+    return True
+
+
+def plot_p0_6_raw_pl_vs_final_validity(rows: list[dict[str, Any]], path: Path) -> bool:
+    if not rows:
+        return False
+    raw_cost = np.array([float(row["raw_c_pi"]) for row in rows])
+    final_state = np.array(
+        [
+            2 if int(row.get("final_valid", 0) or 0) == 1
+            else 1 if int(row.get("occupied_skip", 0) or 0) == 1
+            else 0
+            for row in rows
+        ]
+    )
+    labels = ["invalid/no-skip", "unknown/occupied-skip", "valid"]
+    counts = [int(np.sum(final_state == code)) for code in range(3)]
+    fig, axes = plt.subplots(1, 2, figsize=(11, 4.5))
+    axes[0].hist(raw_cost, bins=min(20, max(1, len(rows))), color="#2563eb", alpha=0.85)
+    axes[0].set_xlabel("fixture raw c_pi")
+    axes[0].set_ylabel("occupied cells")
+    axes[0].set_title("Fixture-declared raw low cost")
+    axes[1].bar(labels, counts, color=["#dc2626", "#7c3aed", "#16a34a"])
+    axes[1].set_ylabel("occupied cells")
+    axes[1].set_title("Final grid validity")
+    axes[1].tick_params(axis="x", rotation=15)
+    for ax in axes:
+        ax.grid(True, axis="y", alpha=0.25)
+    fig.tight_layout()
+    fig.savefig(path, dpi=160)
+    plt.close(fig)
+    return True
+
+
+def plot_p0_6_occupied_skip_count_timeline(
+    health_rows: list[dict[str, Any]],
+    path: Path,
+) -> bool:
+    if not health_rows:
+        return False
+    points = [
+        (
+            finite_float(row.get("stamp")),
+            int(finite_float(row.get("occupied_skip_count")) or 0),
+        )
+        for row in health_rows
+    ]
+    points = [(stamp, count) for stamp, count in points if stamp is not None]
+    if not points:
+        return False
+    t0 = points[0][0]
+    fig, ax = plt.subplots(figsize=(10, 4.5))
+    ax.step([stamp - t0 for stamp, _ in points], [count for _, count in points], where="post", color="#7c3aed")
+    ax.set_xlabel("time since first P0 health sample [s]")
+    ax.set_ylabel("occupied_skip_count")
+    ax.set_title("P0-6 occupied skip count timeline")
+    ax.grid(True, alpha=0.25)
+    fig.tight_layout()
+    fig.savefig(path, dpi=160)
+    plt.close(fig)
+    return True
+
+
+def plot_p0_6_occupied_cells_table_heatmap(rows: list[dict[str, Any]], path: Path) -> bool:
+    if not rows:
+        return False
+    xs = sorted({round(float(row["x"]), 3) for row in rows})
+    ys = sorted({round(float(row["y"]), 3) for row in rows})
+    if not xs or not ys or len(xs) * len(ys) > 2500:
+        return False
+    grid = np.full((len(ys), len(xs)), np.nan)
+    x_index = {value: idx for idx, value in enumerate(xs)}
+    y_index = {value: idx for idx, value in enumerate(ys)}
+    for row in rows:
+        x = round(float(row["x"]), 3)
+        y = round(float(row["y"]), 3)
+        code = (
+            2.0 if int(row.get("occupied_skip", 0) or 0) == 1
+            else 1.0 if int(row.get("final_unknown", 0) or 0) == 1
+            else 0.0
+        )
+        grid[y_index[y], x_index[x]] = max(code, grid[y_index[y], x_index[x]] if math.isfinite(grid[y_index[y], x_index[x]]) else code)
+    fig, ax = plt.subplots(figsize=(8, 5.5))
+    image = ax.imshow(grid, origin="lower", aspect="auto", cmap="viridis", vmin=0.0, vmax=2.0)
+    fig.colorbar(image, ax=ax, label="0 valid/invalid, 1 unknown, 2 occupied-skip")
+    ax.set_xticks(range(len(xs)), [f"{value:.2f}" for value in xs], rotation=45, ha="right")
+    ax.set_yticks(range(len(ys)), [f"{value:.2f}" for value in ys])
+    ax.set_xlabel("x [m]")
+    ax.set_ylabel("y [m]")
+    ax.set_title("P0-6 occupied cells table heatmap")
+    fig.tight_layout()
+    fig.savefig(path, dpi=160)
+    plt.close(fig)
+    return True
+
+
 def summarize_p0_health(rows: list[dict[str, Any]]) -> dict[str, Any]:
     if not rows:
         return {"row_count": 0}
@@ -1545,6 +1682,305 @@ def p0_difference_explanation(health_summary: dict[str, Any], cloud_summary: dic
 
 def row_flag(row: dict[str, Any], key: str) -> bool:
     return int(finite_float(row.get(key)) or 0) == 1
+
+
+def manifest_bool(value: Any) -> bool:
+    if isinstance(value, bool):
+        return value
+    return str(value).strip().lower() in {"1", "true", "yes", "on"}
+
+
+def nested_get(data: dict[str, Any], keys: list[str], default: Any = None) -> Any:
+    cursor: Any = data
+    for key in keys:
+        if not isinstance(cursor, dict) or key not in cursor:
+            return default
+        cursor = cursor[key]
+    return cursor
+
+
+def p0_6_fixture_from_manifest(manifest: dict[str, Any]) -> dict[str, Any]:
+    nested_fixture = nested_get(manifest, ["p0_6", "fixture"], {}) or {}
+    bounds = nested_fixture.get("bounds", {}) if isinstance(nested_fixture, dict) else {}
+    expected_raw = (
+        nested_fixture.get("expected_raw", {})
+        if isinstance(nested_fixture, dict)
+        else {}
+    )
+    if not isinstance(expected_raw, dict):
+        expected_raw = {}
+
+    def manifest_value(flat_key: str, nested_value: Any, default: Any) -> Any:
+        return manifest.get(flat_key, nested_value if nested_value is not None else default)
+
+    x_bounds = bounds.get("x", [None, None]) if isinstance(bounds, dict) else [None, None]
+    y_bounds = bounds.get("y", [None, None]) if isinstance(bounds, dict) else [None, None]
+    z_bounds = bounds.get("z", [None, None]) if isinstance(bounds, dict) else [None, None]
+    if len(x_bounds) < 2:
+        x_bounds = [None, None]
+    if len(y_bounds) < 2:
+        y_bounds = [None, None]
+    if len(z_bounds) < 2:
+        z_bounds = [None, None]
+
+    fixture = {
+        "enabled": manifest_bool(
+            manifest_value(
+                "p0_6.fixture.enabled",
+                nested_fixture.get("enabled") if isinstance(nested_fixture, dict) else None,
+                False,
+            )
+        ),
+        "name": str(
+            manifest_value(
+                "p0_6.fixture.name",
+                nested_fixture.get("name") if isinstance(nested_fixture, dict) else None,
+                "",
+            )
+        ),
+        "x_min": finite_float(manifest_value("p0_6.fixture.x_min", x_bounds[0], None)),
+        "x_max": finite_float(manifest_value("p0_6.fixture.x_max", x_bounds[1], None)),
+        "y_min": finite_float(manifest_value("p0_6.fixture.y_min", y_bounds[0], None)),
+        "y_max": finite_float(manifest_value("p0_6.fixture.y_max", y_bounds[1], None)),
+        "z_min": finite_float(manifest_value("p0_6.fixture.z_min", z_bounds[0], None)),
+        "z_max": finite_float(manifest_value("p0_6.fixture.z_max", z_bounds[1], None)),
+        "raw_hpl_m": finite_float(
+            manifest_value("p0_6.fixture.raw_hpl_m", expected_raw.get("raw_hpl_m"), None)
+        ),
+        "raw_vpl_m": finite_float(
+            manifest_value("p0_6.fixture.raw_vpl_m", expected_raw.get("raw_vpl_m"), None)
+        ),
+        "raw_c_pi": finite_float(
+            manifest_value("p0_6.fixture.raw_c_pi", expected_raw.get("raw_c_pi"), None)
+        ),
+        "low_raw_cost_threshold": finite_float(
+            manifest_value(
+                "p0_6.fixture.low_raw_cost_threshold",
+                expected_raw.get("low_raw_cost_threshold"),
+                None,
+            )
+        ),
+    }
+    for low_key, high_key in (("x_min", "x_max"), ("y_min", "y_max"), ("z_min", "z_max")):
+        low = fixture[low_key]
+        high = fixture[high_key]
+        if low is not None and high is not None and low > high:
+            fixture[low_key], fixture[high_key] = high, low
+    return fixture
+
+
+def p0_6_fixture_complete(fixture: dict[str, Any]) -> bool:
+    required = [
+        "x_min",
+        "x_max",
+        "y_min",
+        "y_max",
+        "z_min",
+        "z_max",
+        "raw_hpl_m",
+        "raw_vpl_m",
+        "raw_c_pi",
+        "low_raw_cost_threshold",
+    ]
+    return (
+        bool(fixture.get("enabled"))
+        and str(fixture.get("name")) == P0_6_FIXTURE_NAME
+        and all(fixture.get(key) is not None for key in required)
+    )
+
+
+def row_xyz_key(row: dict[str, Any]) -> tuple[float, float, float] | None:
+    x = finite_float(row.get("x"))
+    y = finite_float(row.get("y"))
+    z = finite_float(row.get("z"))
+    if x is None or y is None or z is None:
+        return None
+    return (round(x, 5), round(y, 5), round(z, 5))
+
+
+def merged_final_p0_rows(
+    pl_cloud_rows: list[dict[str, Any]],
+    validity_cloud_rows: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    by_key: dict[tuple[float, float, float], dict[str, Any]] = {}
+    for row in pl_cloud_rows:
+        key = row_xyz_key(row)
+        if key is not None:
+            by_key[key] = dict(row)
+    for row in validity_cloud_rows:
+        key = row_xyz_key(row)
+        if key is None:
+            continue
+        merged = by_key.setdefault(key, dict(row))
+        for field in ("valid", "unknown", "stale", "source_flags", "stamp", "x", "y", "z"):
+            if field in row:
+                merged[field] = row[field]
+    return list(by_key.values())
+
+
+def row_inside_p0_6_fixture(row: dict[str, Any], fixture: dict[str, Any]) -> bool:
+    x = finite_float(row.get("x"))
+    y = finite_float(row.get("y"))
+    z = finite_float(row.get("z"))
+    if x is None or y is None or z is None:
+        return False
+    return (
+        float(fixture["x_min"]) <= x <= float(fixture["x_max"])
+        and float(fixture["y_min"]) <= y <= float(fixture["y_max"])
+        and float(fixture["z_min"]) <= z <= float(fixture["z_max"])
+    )
+
+
+def p0_6_final_low_risk(row: dict[str, Any], threshold: float) -> bool:
+    for key in ("c_pi", "pl", "hpl", "vpl"):
+        value = finite_float(row.get(key))
+        if value is not None and value <= threshold:
+            return True
+    return False
+
+
+def p0_6_overlap_rows(
+    manifest: dict[str, Any],
+    pl_cloud_rows: list[dict[str, Any]],
+    validity_cloud_rows: list[dict[str, Any]],
+) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    fixture = p0_6_fixture_from_manifest(manifest)
+    if not p0_6_fixture_complete(fixture):
+        return [], fixture
+    threshold = float(fixture["low_raw_cost_threshold"])
+    rows: list[dict[str, Any]] = []
+    for row in merged_final_p0_rows(pl_cloud_rows, validity_cloud_rows):
+        if not row_inside_p0_6_fixture(row, fixture):
+            continue
+        raw_c_pi = float(fixture["raw_c_pi"])
+        source_flags = int(finite_float(row.get("source_flags")) or 0)
+        occupied_skip = (source_flags & P0_OCCUPIED_SKIP_SOURCE_FLAG) != 0
+        final_valid = row_flag(row, "valid")
+        final_unknown = row_flag(row, "unknown")
+        final_low_risk = final_valid and p0_6_final_low_risk(row, threshold)
+        if occupied_skip:
+            final_reason = "occupied_skip"
+        elif final_valid:
+            final_reason = "valid"
+        elif final_unknown:
+            final_reason = "unknown_without_occupied_skip"
+        else:
+            final_reason = "invalid_without_occupied_skip"
+        rows.append(
+            {
+                "stamp": row.get("stamp", ""),
+                "x": row.get("x", ""),
+                "y": row.get("y", ""),
+                "z": row.get("z", ""),
+                "occupied": 1,
+                "raw_source": "fixture_manifest",
+                "raw_hpl_m": fixture["raw_hpl_m"],
+                "raw_vpl_m": fixture["raw_vpl_m"],
+                "raw_c_pi": raw_c_pi,
+                "low_raw_cost_threshold": threshold,
+                "raw_low_cost": 1 if raw_c_pi <= threshold else 0,
+                "final_pl": row.get("pl", ""),
+                "final_hpl": row.get("hpl", ""),
+                "final_vpl": row.get("vpl", ""),
+                "final_c_pi": row.get("c_pi", ""),
+                "final_valid": 1 if final_valid else 0,
+                "final_unknown": 1 if final_unknown else 0,
+                "final_stale": 1 if row_flag(row, "stale") else 0,
+                "source_flags": source_flags,
+                "occupied_skip": 1 if occupied_skip else 0,
+                "final_low_risk": 1 if final_low_risk else 0,
+                "final_reason": final_reason,
+            }
+        )
+    return rows, fixture
+
+
+def summarize_p0_6_overlap(
+    rows: list[dict[str, Any]],
+    health_summary: dict[str, Any],
+) -> dict[str, Any]:
+    occupied_low_raw_cost_count = sum(
+        1 for row in rows if int(row.get("raw_low_cost", 0) or 0) == 1
+    )
+    occupied_skip_count = sum(
+        1 for row in rows if int(row.get("occupied_skip", 0) or 0) == 1
+    )
+    occupied_valid_low_risk_rows = [
+        row
+        for row in rows
+        if int(row.get("raw_low_cost", 0) or 0) == 1
+        and int(row.get("final_valid", 0) or 0) == 1
+        and int(row.get("final_low_risk", 0) or 0) == 1
+    ]
+    bad_final_rows = [
+        row
+        for row in rows
+        if int(row.get("raw_low_cost", 0) or 0) == 1
+        and (
+            int(row.get("final_valid", 0) or 0) != 0
+            or int(row.get("final_unknown", 0) or 0) != 1
+            or int(row.get("occupied_skip", 0) or 0) != 1
+        )
+    ]
+    reason_counts = health_summary.get("reason_counts", {}) or {}
+    dominant_unknown_reason_counts = (
+        health_summary.get("dominant_unknown_reason_counts", {}) or {}
+    )
+    health_mentions_occupied_skip = (
+        "occupied_skip" in {str(key) for key in reason_counts.keys()}
+        or "occupied_skip" in {str(key) for key in dominant_unknown_reason_counts.keys()}
+        or str(health_summary.get("dominant_unknown_reason_latest", "")) == "occupied_skip"
+    )
+    return {
+        "occupied_overlap_count": len(rows),
+        "occupied_low_raw_cost_count": occupied_low_raw_cost_count,
+        "occupied_skip_count": occupied_skip_count,
+        "occupied_valid_low_risk_count": len(occupied_valid_low_risk_rows),
+        "bad_final_state_count": len(bad_final_rows),
+        "health_occupied_skip_count_max": int(
+            health_summary.get("occupied_skip_count_max", 0) or 0
+        ),
+        "health_mentions_occupied_skip": health_mentions_occupied_skip,
+        "first_occupied_valid_low_risk_row": (
+            occupied_valid_low_risk_rows[0] if occupied_valid_low_risk_rows else None
+        ),
+        "first_bad_final_state_row": bad_final_rows[0] if bad_final_rows else None,
+    }
+
+
+def validate_p0_6_formal_semantics(
+    manifest: dict[str, Any],
+    fixture: dict[str, Any],
+    overlap_summary: dict[str, Any],
+    failures: list[str],
+    inconclusive: list[str],
+) -> None:
+    if not manifest:
+        failures.append("P0-6 fixture-backed run requires test_planner_manifest.json")
+        return
+    if not p0_6_fixture_complete(fixture):
+        failures.append("P0-6 fixture missing or incomplete in manifest")
+    if not manifest_bool(manifest.get("p0.skip_occupied_voxels")):
+        failures.append("P0-6 manifest p0.skip_occupied_voxels is not true")
+    if int(overlap_summary.get("occupied_overlap_count", 0) or 0) <= 0:
+        failures.append("P0-6 occupied fixture has no overlap with final risk grid cloud")
+    if int(overlap_summary.get("occupied_low_raw_cost_count", 0) or 0) <= 0:
+        failures.append("P0-6 occupied fixture has no low raw PL/cost cells")
+    if int(overlap_summary.get("occupied_skip_count", 0) or 0) <= 0:
+        failures.append("P0-6 overlap rows have no occupied_skip source flag")
+    if int(overlap_summary.get("health_occupied_skip_count_max", 0) or 0) <= 0:
+        failures.append("P0-6 risk_grid_health never reported occupied_skip_count > 0")
+    if int(overlap_summary.get("occupied_valid_low_risk_count", 0) or 0) > 0:
+        failures.append("P0-6 occupied low raw cell remained final valid low-risk")
+    if int(overlap_summary.get("bad_final_state_count", 0) or 0) > 0:
+        failures.append("P0-6 occupied low raw cells were not all final valid=0 unknown=1 occupied_skip=1")
+    if not bool(overlap_summary.get("health_mentions_occupied_skip")):
+        failures.append("P0-6 health reason/dominant_unknown_reason never included occupied_skip")
+    if (
+        int(overlap_summary.get("occupied_overlap_count", 0) or 0) <= 0
+        and not failures
+    ):
+        inconclusive.append("P0-6 overlap could not be evaluated")
 
 
 def zero_risk_fallback_check(
@@ -2958,11 +3394,14 @@ def next_debug_branch(
             "P0-3": "continue_to_P0-4_next_phase_validation",
             "P0-4": "continue_to_P0-5",
             "P0-5": "continue_to_P0-6",
+            "P0-6": "PASS -> Phase 2 / P5-1",
         }
         return pass_branches.get(
             normalized_experiment_id,
             "continue_to_next_planned_experiment",
         )
+    if normalized_experiment_id == "P0-6":
+        return "debug_occupied_overlap_fixture_or_skip_semantics"
     if normalized_experiment_id == "P0-5":
         if status == "BLOCKED_SCENARIO_MISSING":
             return "BLOCKED_SCENARIO_MISSING"
@@ -3206,6 +3645,30 @@ def analyze(args: argparse.Namespace) -> dict[str, Any]:
                 failures,
                 inconclusive,
             )
+        p0_6_semantics: dict[str, Any] = {}
+        p0_6_overlap: list[dict[str, Any]] = []
+        p0_6_fixture: dict[str, Any] = {}
+        if experiment_label == "P0-6":
+            p0_6_overlap, p0_6_fixture = p0_6_overlap_rows(
+                manifest,
+                pl_cloud_rows,
+                validity_cloud_rows,
+            )
+            p0_6_overlap_summary = summarize_p0_6_overlap(
+                p0_6_overlap,
+                p0_health_summary,
+            )
+            validate_p0_6_formal_semantics(
+                manifest,
+                p0_6_fixture,
+                p0_6_overlap_summary,
+                failures,
+                inconclusive,
+            )
+            p0_6_semantics = {
+                "fixture": p0_6_fixture,
+                **p0_6_overlap_summary,
+            }
         if p0_requires_odom_gate:
             validate_p0_distribution_comparison(
                 baseline_distribution,
@@ -3243,6 +3706,8 @@ def analyze(args: argparse.Namespace) -> dict[str, Any]:
         cloud_summary_path = csv_dir / f"{prefix}_pl_cost_distribution.csv"
         trajectory_path = csv_dir / f"{prefix}_baseline_vs_p0_trajectory.csv"
         odom_alignment_path = csv_dir / f"{prefix}_odom_alignment.csv"
+        p0_6_overlap_path = csv_dir / f"{prefix}_occupied_overlap.csv"
+        p0_6_overlay_path = csv_dir / f"{prefix}_raw_pl_vs_final_validity.csv"
         write_csv(
             health_path,
             [
@@ -3329,6 +3794,34 @@ def analyze(args: argparse.Namespace) -> dict[str, Any]:
                 str(odom_alignment_path),
             ]
         )
+        if experiment_label == "P0-6":
+            p0_6_fields = [
+                "stamp",
+                "x",
+                "y",
+                "z",
+                "occupied",
+                "raw_source",
+                "raw_hpl_m",
+                "raw_vpl_m",
+                "raw_c_pi",
+                "low_raw_cost_threshold",
+                "raw_low_cost",
+                "final_pl",
+                "final_hpl",
+                "final_vpl",
+                "final_c_pi",
+                "final_valid",
+                "final_unknown",
+                "final_stale",
+                "source_flags",
+                "occupied_skip",
+                "final_low_risk",
+                "final_reason",
+            ]
+            write_csv(p0_6_overlap_path, p0_6_fields, p0_6_overlap)
+            write_csv(p0_6_overlay_path, p0_6_fields, p0_6_overlap)
+            p0_csv_artifacts.extend([str(p0_6_overlap_path), str(p0_6_overlay_path)])
 
         health_figure_path = figures_dir / f"{prefix}_p0_health_timeline.png"
         reason_figure_path = figures_dir / f"{prefix}_p0_reason_histogram.png"
@@ -3339,6 +3832,10 @@ def analyze(args: argparse.Namespace) -> dict[str, Any]:
         odom_topdown_figure_path = figures_dir / f"{prefix}_odom_truth_topdown.png"
         odom_error_figure_path = figures_dir / f"{prefix}_odom_error_timeline.png"
         health_vs_odom_figure_path = figures_dir / f"{prefix}_p0_health_vs_odom_error.png"
+        p0_6_overlap_figure_path = figures_dir / f"{prefix}_occupied_overlap_map.png"
+        p0_6_raw_validity_figure_path = figures_dir / f"{prefix}_raw_pl_vs_final_validity.png"
+        p0_6_skip_timeline_figure_path = figures_dir / f"{prefix}_occupied_skip_count_timeline.png"
+        p0_6_cells_heatmap_figure_path = figures_dir / f"{prefix}_occupied_cells_table_heatmap.png"
         if plot_p0_health_timeline(health_rows, health_figure_path):
             p0_figure_artifacts.append(str(health_figure_path))
         if plot_p0_reason_histogram(health_rows, reason_figure_path):
@@ -3361,6 +3858,21 @@ def analyze(args: argparse.Namespace) -> dict[str, Any]:
             p0_figure_artifacts.append(str(health_vs_odom_figure_path))
         else:
             warnings.append("P0 health vs odom error plot was not generated because aligned rows were unavailable")
+        if experiment_label == "P0-6":
+            if plot_p0_6_occupied_overlap_map(p0_6_overlap, p0_6_overlap_figure_path):
+                p0_figure_artifacts.append(str(p0_6_overlap_figure_path))
+            else:
+                warnings.append("P0-6 occupied overlap map was not generated because no overlap rows were available")
+            if plot_p0_6_raw_pl_vs_final_validity(p0_6_overlap, p0_6_raw_validity_figure_path):
+                p0_figure_artifacts.append(str(p0_6_raw_validity_figure_path))
+            else:
+                warnings.append("P0-6 raw PL vs final validity plot was not generated because no overlap rows were available")
+            if plot_p0_6_occupied_skip_count_timeline(health_rows, p0_6_skip_timeline_figure_path):
+                p0_figure_artifacts.append(str(p0_6_skip_timeline_figure_path))
+            else:
+                warnings.append("P0-6 occupied skip timeline was not generated because health rows were unavailable")
+            if plot_p0_6_occupied_cells_table_heatmap(p0_6_overlap, p0_6_cells_heatmap_figure_path):
+                p0_figure_artifacts.append(str(p0_6_cells_heatmap_figure_path))
         if p0_requires_odom_gate:
             if plot_p0_baseline_distribution_delta(
                 pl_cloud_rows,
@@ -3404,6 +3916,16 @@ def analyze(args: argparse.Namespace) -> dict[str, Any]:
             )
         if p0_requires_odom_gate and p0_phase_index is not None and p0_phase_index >= 3:
             p0_required_figures.append(p0_2_delta_figure_path)
+        if experiment_label == "P0-6":
+            p0_required_figures.extend(
+                [
+                    p0_6_overlap_figure_path,
+                    p0_6_raw_validity_figure_path,
+                    p0_6_skip_timeline_figure_path,
+                ]
+            )
+            if p0_6_overlap:
+                p0_required_figures.append(p0_6_cells_heatmap_figure_path)
 
         p0_summary = {
             "health": p0_health_summary,
@@ -3419,6 +3941,7 @@ def analyze(args: argparse.Namespace) -> dict[str, Any]:
             "baseline_distribution_explanation": p0_distribution_explanation if p0_requires_odom_gate else {},
             "comparison_runs": p0_distribution_comparisons if p0_requires_odom_gate else {},
             "p0_4_fallback_unknown_semantics": p0_4_semantics,
+            "p0_6_occupied_overlap_semantics": p0_6_semantics,
             "zero_risk_fallback_check": p0_4_semantics.get("zero_risk_fallback_check", {}),
             "fallback_unknown_reason_ok": (p0_4_semantics.get("reason_semantics", {}) or {}).get("fallback_unknown_reason_ok"),
             "baseline_export_dir": str(baseline_export_dir) if baseline_export_dir is not None else "",

@@ -291,6 +291,53 @@ P0RiskGridRuntime::Config P0RiskGridRuntime::declareAndReadConfig(
       node->declare_parameter<double>(
           "p0.predictor.lidar_fim_radius_m",
           config.predictor_lidar_fim_radius_m);
+  config.p0_6_fixture.enabled =
+      node->declare_parameter<bool>("p0_6.fixture.enabled", false);
+  config.p0_6_fixture.name =
+      node->declare_parameter<std::string>("p0_6.fixture.name", "");
+  config.p0_6_fixture.x_min_m =
+      node->declare_parameter<double>("p0_6.fixture.x_min",
+                                      config.p0_6_fixture.x_min_m);
+  config.p0_6_fixture.x_max_m =
+      node->declare_parameter<double>("p0_6.fixture.x_max",
+                                      config.p0_6_fixture.x_max_m);
+  config.p0_6_fixture.y_min_m =
+      node->declare_parameter<double>("p0_6.fixture.y_min",
+                                      config.p0_6_fixture.y_min_m);
+  config.p0_6_fixture.y_max_m =
+      node->declare_parameter<double>("p0_6.fixture.y_max",
+                                      config.p0_6_fixture.y_max_m);
+  config.p0_6_fixture.z_min_m =
+      node->declare_parameter<double>("p0_6.fixture.z_min",
+                                      config.p0_6_fixture.z_min_m);
+  config.p0_6_fixture.z_max_m =
+      node->declare_parameter<double>("p0_6.fixture.z_max",
+                                      config.p0_6_fixture.z_max_m);
+  config.p0_6_fixture.raw_hpl_m =
+      node->declare_parameter<double>("p0_6.fixture.raw_hpl_m",
+                                      config.p0_6_fixture.raw_hpl_m);
+  config.p0_6_fixture.raw_vpl_m =
+      node->declare_parameter<double>("p0_6.fixture.raw_vpl_m",
+                                      config.p0_6_fixture.raw_vpl_m);
+  config.p0_6_fixture.raw_c_pi =
+      node->declare_parameter<double>("p0_6.fixture.raw_c_pi",
+                                      config.p0_6_fixture.raw_c_pi);
+  config.p0_6_fixture.low_raw_cost_threshold =
+      node->declare_parameter<double>(
+          "p0_6.fixture.low_raw_cost_threshold",
+          config.p0_6_fixture.low_raw_cost_threshold);
+  if (config.p0_6_fixture.x_min_m > config.p0_6_fixture.x_max_m) {
+    std::swap(config.p0_6_fixture.x_min_m,
+              config.p0_6_fixture.x_max_m);
+  }
+  if (config.p0_6_fixture.y_min_m > config.p0_6_fixture.y_max_m) {
+    std::swap(config.p0_6_fixture.y_min_m,
+              config.p0_6_fixture.y_max_m);
+  }
+  if (config.p0_6_fixture.z_min_m > config.p0_6_fixture.z_max_m) {
+    std::swap(config.p0_6_fixture.z_min_m,
+              config.p0_6_fixture.z_max_m);
+  }
   return config;
 }
 
@@ -329,6 +376,34 @@ bool P0RiskGridRuntime::refreshOnceForTest() {
 void P0RiskGridRuntime::setOccupancyPredicate(
     iap::RiskGridMap::OccupancyPredicate predicate) {
   occupancy_predicate_ = std::move(predicate);
+}
+
+bool P0RiskGridRuntime::p0_6_fixture_occupied(
+    const Eigen::Vector3d& pos) const {
+  const auto& fixture = config_.p0_6_fixture;
+  if (!fixture.enabled || fixture.name != "occupied_overlap_box_v1" ||
+      !pos.allFinite()) {
+    return false;
+  }
+  return pos.x() >= fixture.x_min_m && pos.x() <= fixture.x_max_m &&
+         pos.y() >= fixture.y_min_m && pos.y() <= fixture.y_max_m &&
+         pos.z() >= fixture.z_min_m && pos.z() <= fixture.z_max_m;
+}
+
+iap::RiskGridMap::OccupancyPredicate
+P0RiskGridRuntime::combinedOccupancyPredicate() const {
+  const bool fixture_enabled =
+      config_.p0_6_fixture.enabled &&
+      config_.p0_6_fixture.name == "occupied_overlap_box_v1";
+  if (!fixture_enabled) {
+    return occupancy_predicate_;
+  }
+  return [this](const Eigen::Vector3d& pos) {
+    if (occupancy_predicate_ && occupancy_predicate_(pos)) {
+      return true;
+    }
+    return p0_6_fixture_occupied(pos);
+  };
 }
 
 void P0RiskGridRuntime::createRosInterfaces() {
@@ -478,8 +553,9 @@ void P0RiskGridRuntime::refreshTimerCallback() {
       static_cast<std::size_t>(std::max(0, voxel_num.z()));
   last_refresh_query_count_ =
       layer_voxel_count * config_.grid.horizons_s.size();
+  const auto occupancy_predicate = combinedOccupancyPredicate();
   risk_grid_.refreshFromProvider(latest_odom_p_, now_s, *provider,
-                                 occupancy_predicate_, &reason);
+                                 occupancy_predicate, &reason);
   const iap::RiskGridHealth health = risk_grid_.health(now_s);
   const auto viz_snapshot = risk_grid_.acquireSnapshot();
   last_grid_stamp_s_ = viz_snapshot ? viz_snapshot->stamp_s()

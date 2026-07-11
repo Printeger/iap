@@ -33,6 +33,21 @@ namespace ego_planner {
 
 class P0RiskGridRuntime {
  public:
+  struct P0_6FixtureConfig {
+    bool enabled = false;
+    std::string name;
+    double x_min_m = -1.5;
+    double x_max_m = 1.5;
+    double y_min_m = -0.75;
+    double y_max_m = 0.75;
+    double z_min_m = 1.0;
+    double z_max_m = 2.0;
+    double raw_hpl_m = 1.0;
+    double raw_vpl_m = 1.2;
+    double raw_c_pi = 1.2;
+    double low_raw_cost_threshold = 2.0;
+  };
+
   struct Config {
     bool enable_risk_grid = false;
     bool debug_metrics_enable = false;
@@ -56,6 +71,7 @@ class P0RiskGridRuntime {
     bool predictor_lidar_legacy_observability = true;
     double predictor_lidar_fim_radius_m =
         iap::LidarObservabilityFim::Params{}.fim_radius_m;
+    P0_6FixtureConfig p0_6_fixture;
   };
 
   static Config declareAndReadConfig(const rclcpp::Node::SharedPtr& node);
@@ -104,6 +120,8 @@ class P0RiskGridRuntime {
   bool buildSnapshot(double now_s, iap::IntegritySnapshot* snapshot) const;
   iap::RiskGridHealth addLidarPredictorInputHealth(
       iap::RiskGridHealth health) const;
+  bool p0_6_fixture_occupied(const Eigen::Vector3d& pos) const;
+  iap::RiskGridMap::OccupancyPredicate combinedOccupancyPredicate() const;
   double currentMessageStamp() const;
   double currentRefreshStamp() const;
 

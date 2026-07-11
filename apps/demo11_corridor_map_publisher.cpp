@@ -25,6 +25,7 @@ struct ForestGroups {
   std::vector<Point> trunks;
   std::vector<Point> canopy;
   std::vector<Point> terminal_wall;
+  std::vector<Point> p0_6_fixture;
 };
 
 struct TrunkInstance {
@@ -305,12 +306,29 @@ class Demo11CorridorMapPublisher : public rclcpp::Node {
         declare_parameter<double>("corridor_floor_thickness_z_m", 0.05);
     corridor_surface_resolution_m_ =
         declare_parameter<double>("corridor_surface_resolution_m", 0.10);
+    p0_6_fixture_enabled_ =
+        declare_parameter<bool>("p0_6.fixture.enabled", false);
+    p0_6_fixture_name_ =
+        declare_parameter<std::string>("p0_6.fixture.name", "");
+    p0_6_fixture_x_min_m_ =
+        declare_parameter<double>("p0_6.fixture.x_min", -1.5);
+    p0_6_fixture_x_max_m_ =
+        declare_parameter<double>("p0_6.fixture.x_max", 1.5);
+    p0_6_fixture_y_min_m_ =
+        declare_parameter<double>("p0_6.fixture.y_min", -0.75);
+    p0_6_fixture_y_max_m_ =
+        declare_parameter<double>("p0_6.fixture.y_max", 0.75);
+    p0_6_fixture_z_min_m_ =
+        declare_parameter<double>("p0_6.fixture.z_min", 1.0);
+    p0_6_fixture_z_max_m_ =
+        declare_parameter<double>("p0_6.fixture.z_max", 2.0);
 
     build_map();
     global_cloud_ = make_cloud(groups_.all);
     trunk_cloud_ = make_cloud(groups_.trunks);
     canopy_cloud_ = make_cloud(groups_.canopy);
     terminal_wall_cloud_ = make_cloud(groups_.terminal_wall);
+    p0_6_fixture_cloud_ = make_cloud(groups_.p0_6_fixture);
 
     const auto qos = rclcpp::QoS(1).transient_local().reliable();
     global_pub_ = create_publisher<sensor_msgs::msg::PointCloud2>(
@@ -323,6 +341,8 @@ class Demo11CorridorMapPublisher : public rclcpp::Node {
         "/demo11/canopy_cloud", qos);
     terminal_wall_pub_ = create_publisher<sensor_msgs::msg::PointCloud2>(
         "/demo11/terminal_wall_cloud", qos);
+    p0_6_fixture_pub_ = create_publisher<sensor_msgs::msg::PointCloud2>(
+        "/demo11/p0_6_fixture_cloud", qos);
 
     const auto period = std::chrono::duration<double>(
         1.0 / std::max(0.1, publish_rate_hz_));
@@ -339,7 +359,9 @@ class Demo11CorridorMapPublisher : public rclcpp::Node {
         "points, terminal wall %s at x=%.2fm y=%.2fm width_y=%.2fm z=%.2f-%.2fm "
         "thickness_x=%.2fm feature_depth_x=%.2fm feature_count=%d feature_seed=%d "
         "wall_points=%zu, corridor walls=%s floor=%s x=%.2f..%.2fm half_width_y=%.2fm "
-        "z=%.2f..%.2fm corridor_points=%zu, resolution %.2fm, seed %d",
+        "z=%.2f..%.2fm corridor_points=%zu, p0_6_fixture=%s name=%s "
+        "x=%.2f..%.2f y=%.2f..%.2f z=%.2f..%.2f fixture_points=%zu, "
+        "resolution %.2fm, seed %d",
         forest_size_x_m_, forest_size_y_m_, 0.5 * forest_size_x_m_,
         0.5 * forest_size_y_m_, stratified_cell_size_m_, region_tree_counts_[0],
         region_tree_counts_[1], region_tree_counts_[2],
@@ -363,6 +385,12 @@ class Demo11CorridorMapPublisher : public rclcpp::Node {
         corridor_x_min_m_, corridor_x_max_m_, corridor_half_width_y_m_,
         corridor_wall_z_min_m_, corridor_wall_z_max_m_,
         corridor_structure_point_count_,
+        p0_6_fixture_enabled_ ? "enabled" : "disabled",
+        p0_6_fixture_name_.c_str(),
+        p0_6_fixture_x_min_m_, p0_6_fixture_x_max_m_,
+        p0_6_fixture_y_min_m_, p0_6_fixture_y_max_m_,
+        p0_6_fixture_z_min_m_, p0_6_fixture_z_max_m_,
+        groups_.p0_6_fixture.size(),
         resolution_, random_seed_);
   }
 
@@ -547,6 +575,18 @@ class Demo11CorridorMapPublisher : public rclcpp::Node {
     corridor_structure_point_count_ = groups_.terminal_wall.size() - before;
   }
 
+  void add_p0_6_fixture_geometry() {
+    if (!p0_6_fixture_enabled_ ||
+        p0_6_fixture_name_ != "occupied_overlap_box_v1") {
+      return;
+    }
+    add_box(groups_.p0_6_fixture, groups_.all,
+            p0_6_fixture_x_min_m_, p0_6_fixture_x_max_m_,
+            p0_6_fixture_y_min_m_, p0_6_fixture_y_max_m_,
+            p0_6_fixture_z_min_m_, p0_6_fixture_z_max_m_,
+            resolution_);
+  }
+
   void build_map() {
     groups_ = ForestGroups{};
     trunks_.clear();
@@ -613,6 +653,15 @@ class Demo11CorridorMapPublisher : public rclcpp::Node {
     if (corridor_wall_z_max_m_ - corridor_wall_z_min_m_ < corridor_surface_resolution_m_) {
       corridor_wall_z_max_m_ = corridor_wall_z_min_m_ + corridor_surface_resolution_m_;
     }
+    if (p0_6_fixture_x_min_m_ > p0_6_fixture_x_max_m_) {
+      std::swap(p0_6_fixture_x_min_m_, p0_6_fixture_x_max_m_);
+    }
+    if (p0_6_fixture_y_min_m_ > p0_6_fixture_y_max_m_) {
+      std::swap(p0_6_fixture_y_min_m_, p0_6_fixture_y_max_m_);
+    }
+    if (p0_6_fixture_z_min_m_ > p0_6_fixture_z_max_m_) {
+      std::swap(p0_6_fixture_z_min_m_, p0_6_fixture_z_max_m_);
+    }
     if (trunk_min_height_m_ > trunk_max_height_m_) {
       std::swap(trunk_min_height_m_, trunk_max_height_m_);
     }
@@ -658,6 +707,7 @@ class Demo11CorridorMapPublisher : public rclcpp::Node {
     }
 
     add_corridor_degenerate_geometry();
+    add_p0_6_fixture_geometry();
   }
 
   sensor_msgs::msg::PointCloud2 make_cloud(const std::vector<Point>& points) const {
@@ -690,11 +740,13 @@ class Demo11CorridorMapPublisher : public rclcpp::Node {
     trunk_cloud_.header.stamp = stamp;
     canopy_cloud_.header.stamp = stamp;
     terminal_wall_cloud_.header.stamp = stamp;
+    p0_6_fixture_cloud_.header.stamp = stamp;
     global_pub_->publish(global_cloud_);
     local_pub_->publish(global_cloud_);
     trunk_pub_->publish(trunk_cloud_);
     canopy_pub_->publish(canopy_cloud_);
     terminal_wall_pub_->publish(terminal_wall_cloud_);
+    p0_6_fixture_pub_->publish(p0_6_fixture_cloud_);
   }
 
   double resolution_ = 0.10;
@@ -747,6 +799,14 @@ class Demo11CorridorMapPublisher : public rclcpp::Node {
   double corridor_floor_thickness_z_m_ = 0.05;
   double corridor_surface_resolution_m_ = 0.10;
   std::size_t corridor_structure_point_count_ = 0;
+  bool p0_6_fixture_enabled_ = false;
+  std::string p0_6_fixture_name_;
+  double p0_6_fixture_x_min_m_ = -1.5;
+  double p0_6_fixture_x_max_m_ = 1.5;
+  double p0_6_fixture_y_min_m_ = -0.75;
+  double p0_6_fixture_y_max_m_ = 0.75;
+  double p0_6_fixture_z_min_m_ = 1.0;
+  double p0_6_fixture_z_max_m_ = 2.0;
   std::array<int, 4> region_tree_counts_{};
   std::array<int, 4> region_canopy_counts_{};
   std::vector<TrunkInstance> trunks_;
@@ -755,11 +815,13 @@ class Demo11CorridorMapPublisher : public rclcpp::Node {
   sensor_msgs::msg::PointCloud2 trunk_cloud_;
   sensor_msgs::msg::PointCloud2 canopy_cloud_;
   sensor_msgs::msg::PointCloud2 terminal_wall_cloud_;
+  sensor_msgs::msg::PointCloud2 p0_6_fixture_cloud_;
   rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr global_pub_;
   rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr local_pub_;
   rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr trunk_pub_;
   rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr canopy_pub_;
   rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr terminal_wall_pub_;
+  rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr p0_6_fixture_pub_;
   rclcpp::TimerBase::SharedPtr timer_;
 };
 

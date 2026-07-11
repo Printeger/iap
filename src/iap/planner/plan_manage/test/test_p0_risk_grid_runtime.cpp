@@ -302,6 +302,43 @@ TEST(P0RiskGridRuntimeTest, PredictorParamsCanBeOverridden) {
   EXPECT_DOUBLE_EQ(config.predictor_lidar_fim_radius_m, 12.0);
 }
 
+TEST(P0RiskGridRuntimeTest, P0_6FixtureParamsCanBeOverridden) {
+  ensure_rclcpp();
+  rclcpp::NodeOptions options;
+  options.allow_undeclared_parameters(false);
+  options.parameter_overrides({
+      rclcpp::Parameter("p0_6.fixture.enabled", true),
+      rclcpp::Parameter("p0_6.fixture.name", "occupied_overlap_box_v1"),
+      rclcpp::Parameter("p0_6.fixture.x_min", -1.5),
+      rclcpp::Parameter("p0_6.fixture.x_max", 1.5),
+      rclcpp::Parameter("p0_6.fixture.y_min", -0.75),
+      rclcpp::Parameter("p0_6.fixture.y_max", 0.75),
+      rclcpp::Parameter("p0_6.fixture.z_min", 1.0),
+      rclcpp::Parameter("p0_6.fixture.z_max", 2.0),
+      rclcpp::Parameter("p0_6.fixture.raw_hpl_m", 1.0),
+      rclcpp::Parameter("p0_6.fixture.raw_vpl_m", 1.2),
+      rclcpp::Parameter("p0_6.fixture.raw_c_pi", 1.2),
+      rclcpp::Parameter("p0_6.fixture.low_raw_cost_threshold", 2.0),
+  });
+  auto node = std::make_shared<rclcpp::Node>(
+      "p0_6_fixture_params_override_test", options);
+
+  const auto config = ego_planner::P0RiskGridRuntime::declareAndReadConfig(node);
+
+  EXPECT_TRUE(config.p0_6_fixture.enabled);
+  EXPECT_EQ(config.p0_6_fixture.name, "occupied_overlap_box_v1");
+  EXPECT_DOUBLE_EQ(config.p0_6_fixture.x_min_m, -1.5);
+  EXPECT_DOUBLE_EQ(config.p0_6_fixture.x_max_m, 1.5);
+  EXPECT_DOUBLE_EQ(config.p0_6_fixture.y_min_m, -0.75);
+  EXPECT_DOUBLE_EQ(config.p0_6_fixture.y_max_m, 0.75);
+  EXPECT_DOUBLE_EQ(config.p0_6_fixture.z_min_m, 1.0);
+  EXPECT_DOUBLE_EQ(config.p0_6_fixture.z_max_m, 2.0);
+  EXPECT_DOUBLE_EQ(config.p0_6_fixture.raw_hpl_m, 1.0);
+  EXPECT_DOUBLE_EQ(config.p0_6_fixture.raw_vpl_m, 1.2);
+  EXPECT_DOUBLE_EQ(config.p0_6_fixture.raw_c_pi, 1.2);
+  EXPECT_DOUBLE_EQ(config.p0_6_fixture.low_raw_cost_threshold, 2.0);
+}
+
 TEST(P0RiskGridRuntimeTest, InvalidPredictorSourceModeThrows) {
   ensure_rclcpp();
   rclcpp::NodeOptions options;
@@ -365,6 +402,54 @@ TEST(SafetyRvizPublisherTest, RiskGridHealthMarkerUsesProvidedStamp) {
 }
 
 namespace ego_planner {
+
+TEST_F(P0RiskGridRuntimeStampTest, P0_6FixtureProducesOccupiedSkipHealth) {
+  ensure_rclcpp();
+  auto node = std::make_shared<rclcpp::Node>(
+      "p0_6_fixture_occupied_skip_runtime_test",
+      rclcpp::NodeOptions().allow_undeclared_parameters(false));
+  auto config = enabledConfig();
+  config.grid.skip_occupied_voxels = true;
+  config.p0_6_fixture.enabled = true;
+  config.p0_6_fixture.name = "occupied_overlap_box_v1";
+  config.p0_6_fixture.x_min_m = -1.5;
+  config.p0_6_fixture.x_max_m = 1.5;
+  config.p0_6_fixture.y_min_m = -0.75;
+  config.p0_6_fixture.y_max_m = 0.75;
+  config.p0_6_fixture.z_min_m = 1.0;
+  config.p0_6_fixture.z_max_m = 2.0;
+  P0RiskGridRuntime runtime(node, config, std::make_unique<FakeProvider>());
+
+  seedValidInputs(&runtime, 10.0, 10.0);
+
+  ASSERT_TRUE(runtime.refreshOnceForTest());
+  const auto health = runtime.health();
+  EXPECT_GT(health.occupied_skip_count, 0u);
+  EXPECT_EQ(health.dominant_unknown_reason, "occupied_skip");
+
+  const auto snapshot = runtime.acquireSnapshot();
+  ASSERT_NE(snapshot, nullptr);
+  std::size_t occupied_skip_voxel_count = 0;
+  const Eigen::Vector3i dims = snapshot->voxelNum();
+  for (int h = 0; h < snapshot->horizonCount(); ++h) {
+    for (int x = 0; x < dims.x(); ++x) {
+      for (int y = 0; y < dims.y(); ++y) {
+        for (int z = 0; z < dims.z(); ++z) {
+          iap::RiskVoxel voxel;
+          ASSERT_TRUE(snapshot->voxelAt(h, Eigen::Vector3i(x, y, z), &voxel));
+          if ((voxel.source_flags & iap::RISK_GRID_SOURCE_OCCUPIED_SKIP) == 0u) {
+            continue;
+          }
+          ++occupied_skip_voxel_count;
+          EXPECT_FALSE(voxel.valid);
+          EXPECT_TRUE(voxel.unknown);
+          EXPECT_FALSE(voxel.stale);
+        }
+      }
+    }
+  }
+  EXPECT_EQ(occupied_skip_voxel_count, health.occupied_skip_count);
+}
 
 TEST_F(P0RiskGridRuntimeStampTest, OdomStampIsPreferredForRefreshTime) {
   ensure_rclcpp();

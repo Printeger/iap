@@ -162,6 +162,43 @@ GNSS_DEGRADED_PRESET = {
 }
 
 
+P0_6_OCCUPIED_OVERLAP_FIXTURE_PRESET = {
+    **DEFAULT_ROUTE_PRESET,
+    **OPEN_MAP_PRESET,
+    **GNSS_OPEN_SKY_PRESET,
+    "init_z": "1.5",
+    "goal_z": "1.5",
+    "use_gnss": "true",
+    "use_araim": "true",
+    "gnss_time_source": "odom_stamp",
+    "enable_gnss_integrity": "true",
+    "enable_gnss_araim": "true",
+    "enable_lidar_integrity": "false",
+    "integrity_fusion_mode": "gnss_only",
+    "validator_require_gnss_valid": "true",
+    "validator_require_lidar_valid": "false",
+    "validator_required_final_source": "GNSS",
+    "p0.skip_occupied_voxels": "true",
+    "p0_6.fixture.enabled": "true",
+    "p0_6.fixture.name": "occupied_overlap_box_v1",
+    "p0_6.fixture.x_min": "-1.5",
+    "p0_6.fixture.x_max": "1.5",
+    "p0_6.fixture.y_min": "-0.75",
+    "p0_6.fixture.y_max": "0.75",
+    "p0_6.fixture.z_min": "1.0",
+    "p0_6.fixture.z_max": "2.0",
+    "p0_6.fixture.raw_hpl_m": "1.0",
+    "p0_6.fixture.raw_vpl_m": "1.2",
+    "p0_6.fixture.raw_c_pi": "1.2",
+    "p0_6.fixture.low_raw_cost_threshold": "2.0",
+}
+
+
+COMBO_PRESETS = {
+    ("p0_open_sky", "manual"): P0_6_OCCUPIED_OVERLAP_FIXTURE_PRESET,
+}
+
+
 SCENARIO_PRESETS = {
     "manual": {},
     "gnss_open_sky": {
@@ -565,6 +602,18 @@ ARG_DEFAULTS = [
     ("p0.predictor.conservative_max_with_gnss", "false"),
     ("p0.predictor.lidar_legacy_observability", "true"),
     ("p0.predictor.lidar_fim_radius_m", "12.0"),
+    ("p0_6.fixture.enabled", "false"),
+    ("p0_6.fixture.name", ""),
+    ("p0_6.fixture.x_min", "-1.5"),
+    ("p0_6.fixture.x_max", "1.5"),
+    ("p0_6.fixture.y_min", "-0.75"),
+    ("p0_6.fixture.y_max", "0.75"),
+    ("p0_6.fixture.z_min", "1.0"),
+    ("p0_6.fixture.z_max", "2.0"),
+    ("p0_6.fixture.raw_hpl_m", "1.0"),
+    ("p0_6.fixture.raw_vpl_m", "1.2"),
+    ("p0_6.fixture.raw_c_pi", "1.2"),
+    ("p0_6.fixture.low_raw_cost_threshold", "2.0"),
     ("p1.use_integrity_cost", "false"),
     ("p1.metrics_only", "true"),
     ("p1.lambda_integrity", "0.0"),
@@ -711,6 +760,9 @@ def _apply_presets(context, iap_share):
         context, SCENARIO_PRESETS[scenario], user_overrides, iap_share, applied_keys
     )
     _apply_preset_values(context, experiment_preset, user_overrides, iap_share, applied_keys)
+    combo_preset = COMBO_PRESETS.get((experiment, scenario))
+    if combo_preset:
+        _apply_preset_values(context, combo_preset, user_overrides, iap_share, applied_keys)
     context.launch_configurations["experiment"] = experiment
     context.launch_configurations["scenario"] = scenario
     return scenario, experiment, applied_keys
@@ -1062,6 +1114,18 @@ def _ego_planner_node(context, drone_id, planner_odom_topic, cloud_topic, camera
             {"p0.predictor.conservative_max_with_gnss": _param_bool(context, "p0.predictor.conservative_max_with_gnss")},
             {"p0.predictor.lidar_legacy_observability": _param_bool(context, "p0.predictor.lidar_legacy_observability")},
             {"p0.predictor.lidar_fim_radius_m": _param_float(context, "p0.predictor.lidar_fim_radius_m")},
+            {"p0_6.fixture.enabled": _param_bool(context, "p0_6.fixture.enabled")},
+            {"p0_6.fixture.name": LaunchConfiguration("p0_6.fixture.name").perform(context)},
+            {"p0_6.fixture.x_min": _param_float(context, "p0_6.fixture.x_min")},
+            {"p0_6.fixture.x_max": _param_float(context, "p0_6.fixture.x_max")},
+            {"p0_6.fixture.y_min": _param_float(context, "p0_6.fixture.y_min")},
+            {"p0_6.fixture.y_max": _param_float(context, "p0_6.fixture.y_max")},
+            {"p0_6.fixture.z_min": _param_float(context, "p0_6.fixture.z_min")},
+            {"p0_6.fixture.z_max": _param_float(context, "p0_6.fixture.z_max")},
+            {"p0_6.fixture.raw_hpl_m": _param_float(context, "p0_6.fixture.raw_hpl_m")},
+            {"p0_6.fixture.raw_vpl_m": _param_float(context, "p0_6.fixture.raw_vpl_m")},
+            {"p0_6.fixture.raw_c_pi": _param_float(context, "p0_6.fixture.raw_c_pi")},
+            {"p0_6.fixture.low_raw_cost_threshold": _param_float(context, "p0_6.fixture.low_raw_cost_threshold")},
             {"p1.use_integrity_cost": p1_use},
             {"p1.metrics_only": p1_metrics_only},
             {"p1.lambda_integrity": _param_float(context, "p1.lambda_integrity")},
@@ -1342,12 +1406,51 @@ def _launch_setup(context):
         "export_dir": export_dir,
         "planner_safety_profile": safety_profile,
         "p0.enable_risk_grid": p0_enabled,
+        "p0.skip_occupied_voxels": _param_bool(context, "p0.skip_occupied_voxels"),
         "p0.predictor.source_mode": LaunchConfiguration("p0.predictor.source_mode").perform(context),
         "p0.predictor.gnss_epoch_policy": LaunchConfiguration("p0.predictor.gnss_epoch_policy").perform(context),
         "p0.predictor.use_current_integrity_prior": _param_bool(context, "p0.predictor.use_current_integrity_prior"),
         "p0.predictor.conservative_max_with_gnss": _param_bool(context, "p0.predictor.conservative_max_with_gnss"),
         "p0.predictor.lidar_legacy_observability": _param_bool(context, "p0.predictor.lidar_legacy_observability"),
         "p0.predictor.lidar_fim_radius_m": _param_float(context, "p0.predictor.lidar_fim_radius_m"),
+        "p0_6.fixture.enabled": _param_bool(context, "p0_6.fixture.enabled"),
+        "p0_6.fixture.name": LaunchConfiguration("p0_6.fixture.name").perform(context),
+        "p0_6.fixture.x_min": _param_float(context, "p0_6.fixture.x_min"),
+        "p0_6.fixture.x_max": _param_float(context, "p0_6.fixture.x_max"),
+        "p0_6.fixture.y_min": _param_float(context, "p0_6.fixture.y_min"),
+        "p0_6.fixture.y_max": _param_float(context, "p0_6.fixture.y_max"),
+        "p0_6.fixture.z_min": _param_float(context, "p0_6.fixture.z_min"),
+        "p0_6.fixture.z_max": _param_float(context, "p0_6.fixture.z_max"),
+        "p0_6.fixture.raw_hpl_m": _param_float(context, "p0_6.fixture.raw_hpl_m"),
+        "p0_6.fixture.raw_vpl_m": _param_float(context, "p0_6.fixture.raw_vpl_m"),
+        "p0_6.fixture.raw_c_pi": _param_float(context, "p0_6.fixture.raw_c_pi"),
+        "p0_6.fixture.low_raw_cost_threshold": _param_float(context, "p0_6.fixture.low_raw_cost_threshold"),
+        "p0_6": {
+            "fixture": {
+                "enabled": _param_bool(context, "p0_6.fixture.enabled"),
+                "name": LaunchConfiguration("p0_6.fixture.name").perform(context),
+                "bounds": {
+                    "x": [
+                        _param_float(context, "p0_6.fixture.x_min"),
+                        _param_float(context, "p0_6.fixture.x_max"),
+                    ],
+                    "y": [
+                        _param_float(context, "p0_6.fixture.y_min"),
+                        _param_float(context, "p0_6.fixture.y_max"),
+                    ],
+                    "z": [
+                        _param_float(context, "p0_6.fixture.z_min"),
+                        _param_float(context, "p0_6.fixture.z_max"),
+                    ],
+                },
+                "expected_raw": {
+                    "raw_hpl_m": _param_float(context, "p0_6.fixture.raw_hpl_m"),
+                    "raw_vpl_m": _param_float(context, "p0_6.fixture.raw_vpl_m"),
+                    "raw_c_pi": _param_float(context, "p0_6.fixture.raw_c_pi"),
+                    "low_raw_cost_threshold": _param_float(context, "p0_6.fixture.low_raw_cost_threshold"),
+                },
+            },
+        },
         **{f"planner_enable_{key}": value for key, value in safety_enabled.items()},
     }
     manifest_path = Path(export_dir) / "test_planner_manifest.json"
@@ -1423,6 +1526,14 @@ def _launch_setup(context):
                 {"corridor_wall_thickness_y_m": _param_float(context, "corridor_wall_thickness_y_m")},
                 {"corridor_floor_thickness_z_m": _param_float(context, "corridor_floor_thickness_z_m")},
                 {"corridor_surface_resolution_m": _param_float(context, "corridor_surface_resolution_m")},
+                {"p0_6.fixture.enabled": _param_bool(context, "p0_6.fixture.enabled")},
+                {"p0_6.fixture.name": LaunchConfiguration("p0_6.fixture.name").perform(context)},
+                {"p0_6.fixture.x_min": _param_float(context, "p0_6.fixture.x_min")},
+                {"p0_6.fixture.x_max": _param_float(context, "p0_6.fixture.x_max")},
+                {"p0_6.fixture.y_min": _param_float(context, "p0_6.fixture.y_min")},
+                {"p0_6.fixture.y_max": _param_float(context, "p0_6.fixture.y_max")},
+                {"p0_6.fixture.z_min": _param_float(context, "p0_6.fixture.z_min")},
+                {"p0_6.fixture.z_max": _param_float(context, "p0_6.fixture.z_max")},
             ],
         ),
         Node(
