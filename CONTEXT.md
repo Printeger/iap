@@ -39,3 +39,15 @@ _Avoid_: grid cell, trajectory waypoint
 **Gradient direction**:
 The spatial direction in which `c_pi` increases for a risk field; for the P0-5 synthetic affine field it is `(2, 3, 4)`, so `-grad(c_pi)` must point toward lower risk.
 _Avoid_: vehicle heading, odom direction
+
+**Occupied overlap fixture**:
+A deterministic validation setup where occupied map cells intentionally overlap risk-grid query cells so occupied-cell skip behavior can be judged against known expectations.
+_Avoid_: incidental map collision, arbitrary manual run
+
+**Occupied-low-risk injection**:
+A controlled test condition that places low advisory risk on cells that are also occupied, so the planner can prove occupied cells are skipped instead of being treated as attractive low-risk candidates.
+_Avoid_: general obstacle generation, high-risk inflation
+
+**Occupied validity overlay**:
+A comparison view that relates raw predicted PL/cost values to final validity flags for the same occupied-overlap cells.
+_Avoid_: topic health summary, aggregate PL histogram

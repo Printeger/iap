@@ -135,6 +135,11 @@ P0_5_SYNTHETIC_QUERY_FIELDS = [
     "grad_z",
     "neg_grad_points_lower_risk",
 ]
+P0_6_MISSING_CAPABILITIES = [
+    "occupied overlap fixture",
+    "occupied-low-risk injection",
+    "reproducible occupied validity overlay",
+]
 
 
 def ensure_dirs(export_dir: Path) -> tuple[Path, Path, Path]:
@@ -2857,6 +2862,82 @@ def analyze_p0_5_synthetic_only(
     return summary
 
 
+def analyze_p0_6_blocked_fixture_audit(
+    args: argparse.Namespace,
+    export_dir: Path,
+    metadata_dir: Path,
+) -> dict[str, Any]:
+    launch_command = (
+        "ros2 launch iap test_planner.launch.py "
+        "experiment:=p0_open_sky "
+        "scenario:=manual "
+        "run_duration_s:=90 "
+        "validation_duration_s:=90 "
+        "start_rviz:=false "
+        "run_validator:=true "
+        "record_bag:=true"
+    )
+    analyzer_command = (
+        "python3 src/iap/scripts/dev_planner/analyze_safety_planner_run.py "
+        "--experiment-id P0-6 "
+        "--export-dir <formal-p0-6-export-dir> "
+        "--bag-dir <formal-p0-6-bag-dir> "
+        "--fail-on-threshold"
+    )
+    summary = {
+        "experiment_id": args.experiment_id,
+        "status": "BLOCKED_SCENARIO_MISSING",
+        "passed": False,
+        "failures": [],
+        "warnings": [],
+        "inconclusive": [
+            "P0-6 formal launch and validator were not run because the repository has no stable occupied-overlap fixture.",
+        ],
+        "missing_capabilities": P0_6_MISSING_CAPABILITIES,
+        "next_debug_branch": (
+            "BLOCKED_SCENARIO_MISSING -> "
+            "occupied overlap fixture / occupied-low-risk injection / reproducible occupied validity overlay"
+        ),
+        "export_dir": str(export_dir),
+        "bag_dir": "",
+        "fixture_audit": {
+            "status": "BLOCKED_SCENARIO_MISSING",
+            "manual_scenario_preset": "empty preset; ordinary manual runs do not define map geometry, route, occupied-low-risk injection, or overlap oracle",
+            "p0_open_sky_preset": "enables P0 runtime evidence but does not create a deterministic occupied-low-risk overlap fixture",
+            "formal_run_executed": False,
+            "ordinary_manual_run_is_pass_evidence": False,
+            "formal_run_required_manifest": {
+                "p0.skip_occupied_voxels": True,
+            },
+            "blocked_artifact_has_formal_run_manifest": False,
+        },
+        "should_run_commands": {
+            "launch": launch_command,
+            "analyzer": analyzer_command,
+        },
+        "validator_summary": {
+            "status": "not_run",
+            "reason": "blocked before launch; stable occupied-overlap fixture is missing",
+        },
+        "analyzer_status": "blocked_fixture_audit_only",
+        "unavailable_evidence": {
+            "topic_health": "unavailable because fixture missing",
+            "occupied_overlap_statistics": "unavailable because fixture missing",
+            "raw_pl_cost_vs_final_validity_overlay": "unavailable because fixture missing",
+            "runtime_figures": "unavailable because fixture missing",
+        },
+        "artifacts": {
+            "csv": [],
+            "figures": [],
+        },
+    }
+    out_path = metadata_dir / "safety_planner_analysis_summary.json"
+    write_json(out_path, summary)
+    summary["summary_path"] = str(out_path)
+    print(json.dumps(summary, indent=2, sort_keys=True))
+    return summary
+
+
 def next_debug_branch(
     status: str,
     failures: list[str],
@@ -2923,6 +3004,10 @@ def analyze(args: argparse.Namespace) -> dict[str, Any]:
     p0_phase_index = p0_phase_number(args.experiment_id)
     p0_requires_odom_gate = p0_odom_gate_required(args.experiment_id)
     experiment_label = str(args.experiment_id).strip().upper()
+    if bool(getattr(args, "blocked_fixture_audit", False)):
+        if experiment_label != "P0-6":
+            raise ValueError("--blocked-fixture-audit is only defined for P0-6")
+        return analyze_p0_6_blocked_fixture_audit(args, export_dir, metadata_dir)
     if bool(getattr(args, "synthetic_only", False)):
         if experiment_label == "P0-5":
             return analyze_p0_5_synthetic_only(
@@ -3510,6 +3595,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--p0-2-export-dir", default="", help="healthy P0-2 export directory for P0-3+ comparisons")
     parser.add_argument("--p0-2-bag-dir", default="", help="healthy P0-2 rosbag directory for P0-3+ comparisons")
     parser.add_argument("--synthetic-only", action="store_true", help="run analyzer-only synthetic experiment without ROS artifacts")
+    parser.add_argument("--blocked-fixture-audit", action="store_true", help="write a blocked fixture-audit summary without ROS artifacts")
     parser.add_argument("--fail-on-threshold", action="store_true", help="exit non-zero unless analysis status is PASS")
     return parser.parse_args()
 

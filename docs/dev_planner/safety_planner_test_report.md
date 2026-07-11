@@ -2287,3 +2287,80 @@ Figure conclusions:
 Final conclusion:
 
 PASS -> P0-6
+
+### P0-6 Occupied Overlap / Skip
+
+Result: **BLOCKED_SCENARIO_MISSING**.
+
+P0-6 was not run as a formal ROS runtime validation. The P0-5 entry precondition was checked against `/home/dev/ws_iap/src/iap/results/planner_validation/exports/test_planner_p0_5_synthetic_affine_20260711T075702Z/metadata/safety_planner_analysis_summary.json`; it still reports `experiment_id=P0-5`, `status=PASS`, `passed=true`, `failures=[]`, `inconclusive=[]`, and `next_debug_branch=continue_to_P0-6`.
+
+Fixture support audit:
+
+| Check | Result | Evidence |
+|---|---|---|
+| `SCENARIO_PRESETS["manual"]` fixture support | `BLOCKED_SCENARIO_MISSING` | `manual` is an empty preset. Ordinary manual runs do not define deterministic map geometry, route, occupied-low-risk injection, or an overlap oracle. |
+| `EXPERIMENT_PRESETS["p0_open_sky"]` fixture support | `BLOCKED_SCENARIO_MISSING` | The preset enables P0 runtime evidence but does not create a deterministic occupied-low-risk overlap fixture. |
+| Analyzer occupied overlay evidence | `BLOCKED_SCENARIO_MISSING` | No formal P0-6 raw PL/cost versus final validity overlay exists for occupied-overlap cells. |
+| Ordinary `scenario:=manual` as PASS evidence | `false` | A normal manual run would not prove occupied overlap / skip behavior. |
+
+Future fixture-ready command plan:
+
+```bash
+cd /home/dev/ws_iap
+
+ros2 launch iap test_planner.launch.py \
+  experiment:=p0_open_sky \
+  scenario:=manual \
+  run_duration_s:=90 \
+  validation_duration_s:=90 \
+  start_rviz:=false \
+  run_validator:=true \
+  record_bag:=true
+```
+
+```bash
+cd /home/dev/ws_iap
+
+python3 src/iap/scripts/dev_planner/analyze_safety_planner_run.py \
+  --experiment-id P0-6 \
+  --export-dir <formal-p0-6-export-dir> \
+  --bag-dir <formal-p0-6-bag-dir> \
+  --fail-on-threshold
+```
+
+These commands were recorded as the required shape of the future fixture-backed run. They were not executed for P0-6 because the stable occupied-overlap fixture is missing.
+
+Blocked artifact:
+
+| Field | Value |
+|---|---|
+| Blocked export dir | `/home/dev/ws_iap/src/iap/results/planner_validation/exports/test_planner_p0_6_occupied_overlap_blocked_20260711T081923Z` |
+| Blocked summary | `/home/dev/ws_iap/src/iap/results/planner_validation/exports/test_planner_p0_6_occupied_overlap_blocked_20260711T081923Z/metadata/safety_planner_analysis_summary.json` |
+| Summary `status` | `BLOCKED_SCENARIO_MISSING` |
+| Summary `passed` | `false` |
+| Summary `experiment_id` | `P0-6` |
+| Summary `missing_capabilities` | `["occupied overlap fixture", "occupied-low-risk injection", "reproducible occupied validity overlay"]` |
+| Validator status | `not_run` |
+| Analyzer status | `blocked_fixture_audit_only` |
+
+Manifest and evidence expectations:
+
+| Requirement | Current P0-6 state |
+|---|---|
+| Formal manifest must prove `p0.skip_occupied_voxels=true` | Required for a future fixture-backed run. The blocked artifact has no formal run manifest. |
+| Topic health | Unavailable because fixture missing. |
+| Occupied overlap statistics | Unavailable because fixture missing. |
+| Raw PL/cost versus final validity overlay | Unavailable because fixture missing. |
+| Runtime figures | Unavailable because fixture missing; no P0-6 runtime image paths are referenced in this section. |
+
+Missing capabilities:
+
+| Capability | Required next step |
+|---|---|
+| `occupied overlap fixture` | Add a deterministic fixture whose occupied map cells overlap known risk-grid query cells. |
+| `occupied-low-risk injection` | Add a controlled case where occupied cells would otherwise look low risk. |
+| `reproducible occupied validity overlay` | Add analyzer evidence comparing raw PL/cost and final validity for the occupied-overlap cells. |
+
+Final conclusion:
+
+`BLOCKED_SCENARIO_MISSING -> occupied overlap fixture / occupied-low-risk injection / reproducible occupied validity overlay`
