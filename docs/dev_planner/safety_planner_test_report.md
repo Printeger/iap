@@ -2073,3 +2073,137 @@ Final conclusion:
 3. P0-3-control evidence is satisfied in the same run: GNSS remains available for odometry but P0 predictor source counters prove `gnss_used=0` and `lidar_used>0`.
 4. The remaining caveat is interpretation, not acceptance: P0-3 does not show a higher aggregate PL/cost mean than P0-1/P0-2. The accepted corridor evidence is localized PL/cost and explainable LiDAR coverage/unknown structure. If a reviewer requires mean PL elevation as a separate scientific claim, that should be a new fixture/model-tuning task rather than a P0-3 hard-gate blocker.
 5. Next step per analyzer and test plan: proceed to `P0-4`; do not reopen P0-3 unless the acceptance definition is changed to require aggregate mean PL/cost elevation.
+
+### P0-4 Fallback/Unknown Semantic Validation
+
+Result: **PASS / CONTINUE TO P0-5**.
+
+This run validates P0 fallback/unknown semantics using the `p5_fallback_unknown` preset with P5 runtime and final gates forced off. P0-4 intentionally allows high unknown ratio and full-frame unknown when the reason path is explicit and unknown/invalid cells are not encoded as zero risk. The analyzer reports `status=PASS`, `passed=true`, `failures=[]`, `inconclusive=[]`, and `next_debug_branch=continue_to_P0-5`.
+
+Launch command:
+
+```bash
+source /opt/ros/jazzy/setup.bash
+source install/setup.bash
+
+ros2 launch iap test_planner.launch.py \
+  experiment:=p5_fallback_unknown \
+  planner_enable_p5_runtime:=false \
+  planner_enable_p5_final:=false \
+  run_duration_s:=60 \
+  validation_duration_s:=60 \
+  start_rviz:=false \
+  run_validator:=true \
+  record_bag:=true \
+  validator_require_gnss_valid:=false \
+  validator_require_lidar_valid:=false
+```
+
+Analyzer command:
+
+```bash
+source /opt/ros/jazzy/setup.bash
+source install/setup.bash
+
+python3 src/iap/scripts/dev_planner/analyze_safety_planner_run.py \
+  --experiment-id P0-4 \
+  --export-dir /home/dev/ws_iap/src/iap/results/planner_validation/exports/test_planner_p5_fallback_unknown_fallback_only_1783753993006 \
+  --bag-dir /home/dev/ws_iap/src/iap/results/planner_validation/bags/test_planner_p5_fallback_unknown_fallback_only_20260711T071313Z \
+  --fail-on-threshold
+```
+
+Artifact paths:
+
+| Field | Value |
+|---|---|
+| Run time | `2026-07-11T07:13:13Z` |
+| Launch log | `/tmp/p0_4_launch_20260711T071312Z.log` |
+| Export dir | `/home/dev/ws_iap/src/iap/results/planner_validation/exports/test_planner_p5_fallback_unknown_fallback_only_1783753993006` |
+| Bag dir | `/home/dev/ws_iap/src/iap/results/planner_validation/bags/test_planner_p5_fallback_unknown_fallback_only_20260711T071313Z` |
+| Manifest | `/home/dev/ws_iap/src/iap/results/planner_validation/exports/test_planner_p5_fallback_unknown_fallback_only_1783753993006/test_planner_manifest.json` |
+| Validator summary | `/home/dev/ws_iap/src/iap/results/planner_validation/exports/test_planner_p5_fallback_unknown_fallback_only_1783753993006/test_planner_validation_summary.json` |
+| Bag metadata | `/home/dev/ws_iap/src/iap/results/planner_validation/bags/test_planner_p5_fallback_unknown_fallback_only_20260711T071313Z/metadata.yaml` |
+| Analyzer summary | `/home/dev/ws_iap/src/iap/results/planner_validation/exports/test_planner_p5_fallback_unknown_fallback_only_1783753993006/metadata/safety_planner_analysis_summary.json` |
+
+Status matrix:
+
+| Gate | Result | Evidence |
+|---|---|---|
+| Validator | `PASS` | `passed=true`, `message_count=584`, `fallback_valid_seen=true`, `gnss_valid_seen=false`, `lidar_valid_seen=false` |
+| Analyzer | `PASS` | `status=PASS`, `passed=true`, `failures=[]`, `inconclusive=[]` |
+| Manifest P0/P5 switches | `PASS` | `p0.enable_risk_grid=true`, `planner_enable_p5_runtime=false`, `planner_enable_p5_final=false` |
+| P5 status leakage | `PASS` | `/planning/integrity_gate_status` count `0`, `bad_action_count=0`, `action_counts={}` |
+| Fallback source | `PASS` | `fusion_mode_counts={fallback_only:584}`, final HPL/VPL source counts `{FALLBACK:584}` |
+| Reason explainability | `PASS` | `fallback_unknown_reason_ok=true`; high unknown is explained by `snapshot_unavailable` startup and `stale_gnss_epoch` dominant unknown reason |
+| Zero-risk fallback | `PASS` | `invalid_zero_risk_count=0`, `unknown_invalid_zero_risk_count=0` across `3200` checked cloud rows |
+
+Topic health:
+
+| Topic | Expected | Count | Hz | Max gap | Status |
+|---|---|---:|---:|---:|---|
+| `/iap/integrity` | continuous | `586` | `9.780` | `0.140s` | `PASS` |
+| `/planning/risk_grid_health` | active-periodic | `116` | `1.936` | `0.525s` | `PASS` |
+| `/iap/rviz/predicted_pl_cloud` | present | `113` | `1.886` | `0.525s` | `PASS` |
+| `/iap/rviz/risk_validity_cloud` | present | `113` | `1.886` | `0.525s` | `PASS` |
+| `/planning/integrity_gate_status` | absent-or-zero when P5 disabled | `0` | `0.000` | n/a | `PASS` |
+
+P0 health metrics:
+
+| Metric | Value | Judgment |
+|---|---:|---|
+| Health rows | `116` | Active health stream present |
+| `ready_false_count` / ratio | `3` / `0.025862` | Startup-only `snapshot_unavailable`, accepted by P0-4 semantic gate |
+| `stale_true_count` / ratio | `3` / `0.025862` | Startup-only `snapshot_unavailable`, then `stale=false` |
+| `valid_ratio` min / mean / max | `0.000000` / `0.000000` / `0.000000` | Allowed for P0-4 because fallback/unknown dominates |
+| `unknown_ratio` min / mean / max | `1.000000` / `1.000000` / `1.000000` | Expected fallback/unknown field |
+| Full-frame unknown count / ratio | `116` / `1.000000` | Allowed for P0-4 only |
+| Mean refresh elapsed | `13.788ms` | Refresh is active and fast |
+| Provider query max | `64000` | Full grid queried |
+| Provider stale max | `64000` | Explains full unknown field |
+| Provider invalid max | `0` | No invalid-provider spike |
+| Occupied skip max | `860` | Present but not the dominant reason |
+| Predictor GNSS/LiDAR/prior used max | `0` / `0` / `0` | No usable risk source was consumed |
+| LiDAR map points / FIM primitives / valid normals max | `12517` / `560` / `560` | LiDAR inputs exist, but stale GNSS epoch dominates P0 source validity |
+
+Reason histogram:
+
+| Reason field | Histogram | Judgment |
+|---|---|---|
+| Health `reason_counts` | `snapshot_unavailable:3`, `stale_gnss_epoch:113` | Non-empty, explicit, and points to startup no-snapshot plus stale GNSS epoch |
+| `dominant_unknown_reason_counts` | `stale_gnss_epoch:113` | Material unknown has a dominant reason |
+| Dominant unknown count max | `64000` | Full-grid unknown is explained, not silently marked `ok` |
+| `high_unknown_only_ok_without_dominant` | `false` | No hidden `reason=ok` masking |
+
+Unknown/valid/stale/cost semantic judgment:
+
+| Check | Value | Judgment |
+|---|---|---|
+| Final PL cloud rows | `3200` | Latest PL cloud was decoded and exported |
+| Valid / unknown / stale rows | `0` / `3200` / `3199` | Field is intentionally unknown-dominant |
+| Valid cost count | `0` | No near-zero valid-cost distribution exists |
+| Unknown-invalid checked rows | `3200` | All final cells are unknown invalid rather than low-risk valid |
+| Invalid zero-risk count | `0` | Unknown/invalid cells are not encoded with finite zero cost |
+| Unknown-invalid zero-risk count | `0` | Hard zero-risk fallback gate passes |
+| Cost distribution semantics | `passed=true`, `fallback_unknown_dominates=true`, `only_near_zero_valid_costs=false` | Unknown dominance is explicit and not converted into near-zero valid cost |
+
+Figure conclusions:
+
+| Figure | Conclusion |
+|---|---|
+| ![P0-4 scenario top-down](../../results/planner_validation/exports/test_planner_p5_fallback_unknown_fallback_only_1783753993006/figures/p0_4_scenario_topdown.png) | Scenario, truth trajectory, IAP odom, and planner trajectory were captured for the fallback-only run. |
+| ![P0-4 topic activity timeline](../../results/planner_validation/exports/test_planner_p5_fallback_unknown_fallback_only_1783753993006/figures/p0_4_topic_activity_timeline.png) | Required P0-4 topics are active through the validation window. |
+| ![P0-4 integrity source timeline](../../results/planner_validation/exports/test_planner_p5_fallback_unknown_fallback_only_1783753993006/figures/p0_4_integrity_source_timeline.png) | Integrity source remains fallback-only, matching the validator and manifest. |
+| ![P0-4 P0 health timeline](../../results/planner_validation/exports/test_planner_p5_fallback_unknown_fallback_only_1783753993006/figures/p0_4_p0_health_timeline.png) | P0 health is intentionally full unknown, with startup `snapshot_unavailable` followed by `stale_gnss_epoch`. |
+| ![P0-4 P0 reason histogram](../../results/planner_validation/exports/test_planner_p5_fallback_unknown_fallback_only_1783753993006/figures/p0_4_p0_reason_histogram.png) | Reason histogram is non-empty and dominated by `stale_gnss_epoch`, so unknown behavior is explainable. |
+| ![P0-4 PL cost distribution](../../results/planner_validation/exports/test_planner_p5_fallback_unknown_fallback_only_1783753993006/figures/p0_4_pl_cost_distribution.png) | Final PL/cost distribution has no valid low-cost cells while fallback/unknown dominates. |
+| ![P0-4 risk-grid snapshot overview](../../results/planner_validation/exports/test_planner_p5_fallback_unknown_fallback_only_1783753993006/figures/p0_4_risk_grid_snapshot_overview.png) | Snapshot overview shows the final unknown/invalid field rather than a zero-risk field. |
+| ![P0-4 integrity HPL/VPL timeline](../../results/planner_validation/exports/test_planner_p5_fallback_unknown_fallback_only_1783753993006/figures/p0_4_integrity_hpl_vpl_timeline.png) | Fallback HPL/VPL remain finite and are recorded for the full validator run. |
+| ![P0-4 odom top-down](../../results/planner_validation/exports/test_planner_p5_fallback_unknown_fallback_only_1783753993006/figures/p0_4_odom_truth_topdown.png) | Odom drift occurs later, but P0-4 does not use odom health as an acceptance gate. |
+| ![P0-4 odom error](../../results/planner_validation/exports/test_planner_p5_fallback_unknown_fallback_only_1783753993006/figures/p0_4_odom_error_timeline.png) | Odom error is documented as non-gating context for this fallback/unknown semantic test. |
+| ![P0-4 health vs odom](../../results/planner_validation/exports/test_planner_p5_fallback_unknown_fallback_only_1783753993006/figures/p0_4_p0_health_vs_odom_error.png) | P0 full unknown starts before odom drift, so the semantic result is not caused by later odom divergence. |
+
+Final conclusion:
+
+1. P0-4 passes the fallback/unknown semantic gate: required topics are active, validator passes, P5 runtime/final remain disabled, high unknown is explicitly reasoned, and zero-risk fallback encoding is absent.
+2. The three startup `snapshot_unavailable` rows are accepted only for P0-4 because they are explicit, short-lived, and below the 10% ready/stale ratio bound; this does not change P0-1 through P0-3 healthy-field gates.
+3. Proceed to `P0-5`.

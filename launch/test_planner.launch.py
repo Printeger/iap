@@ -340,6 +340,7 @@ EXPERIMENT_PRESETS = {
     "p5_fallback_unknown": {
         "scenario": "fallback_only",
         "planner_safety_profile": "p5",
+        "p0.enable_risk_grid": "true",
         "p0.debug_metrics_enable": "true",
         "p5.debug_metrics_enable": "true",
     },

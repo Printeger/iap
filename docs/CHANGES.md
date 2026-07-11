@@ -3,6 +3,10 @@
 > 规则：任何代码改动必须在这里记录，并包含 IAP-RQ-XXX。
 
 ## Unreleased
+- test(planner-p0-4): IAP-RQ-320 — accept P0 fallback/unknown semantics with P5 forced off.
+  - `launch/test_planner.launch.py`: make the `p5_fallback_unknown` preset explicitly enable the P0 risk grid so the P0-4 command keeps P0 active even when P5 runtime/final are overridden off.
+  - `scripts/dev_planner/analyze_safety_planner_run.py`: add P0-4 topic expectations, P5-off manifest allowance, fallback/unknown reason semantics, zero-risk fallback checks, and the `continue_to_P0-5` pass branch.
+  - `docs/dev_planner/safety_planner_test_report.md`: archive the P0-4 launch, analyzer result, topic health, reason histogram, zero-risk fallback evidence, and figure conclusions.
 - fix(phase1-demo9-hardening): IAP-RQ-081 — harden demo9 before Phase 2 validation.
   - `tools/build_phase1_ego_planner_closed_loop.sh`: required demo9 packages now fail fast when missing; `plan_env` remains optional; the script verifies `iap_phase1_tools phase1_closed_loop_logger` after build.
   - `launch/demo9_ego_planner_closed_loop.launch.py`: decoupled `planner_use_dynamic` from `use_so3_dynamics`, defaulted GNSS smoke tests to synthetic GPS ephemerides, added explicit RINEX file validation, completed the default `point0..point6` closed waypoint route, and dereferences installed config symlinks when creating runtime config copies.

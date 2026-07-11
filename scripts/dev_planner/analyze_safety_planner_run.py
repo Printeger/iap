@@ -47,6 +47,12 @@ P0_TOPIC_EXPECTATIONS = {
     P0_PL_CLOUD_TOPIC: "present",
     P0_VALIDITY_CLOUD_TOPIC: "present",
 }
+P0_4_TOPIC_EXPECTATIONS = {
+    "/iap/integrity": "continuous",
+    P0_HEALTH_TOPIC: "active-periodic",
+    P0_PL_CLOUD_TOPIC: "present",
+    P0_VALIDITY_CLOUD_TOPIC: "present",
+}
 SCENARIO_MAP_TOPICS = ["/map_generator/global_cloud", "/map_generator/local_cloud"]
 SAFETY_OFF_ZERO_TOPICS = [
     "/planning/risk_grid_health",
@@ -134,6 +140,8 @@ def p0_phase_number(experiment_id: Any) -> int | None:
 
 def p0_odom_gate_required(experiment_id: Any) -> bool:
     phase = p0_phase_number(experiment_id)
+    if phase == 4:
+        return False
     return phase is not None and phase >= 2
 
 
@@ -747,12 +755,17 @@ def validate_manifest(
     inconclusive: list[str],
     *,
     require_p0_enabled: bool = False,
+    allowed_safety_profiles: tuple[str, ...] = ("off",),
 ) -> None:
     if not manifest:
         inconclusive.append("missing test_planner_manifest.json")
         return
-    if str(manifest.get("planner_safety_profile", "")).lower() != "off":
-        failures.append("manifest planner_safety_profile is not off")
+    safety_profile = str(manifest.get("planner_safety_profile", "")).lower()
+    if safety_profile not in allowed_safety_profiles:
+        failures.append(
+            "manifest planner_safety_profile is not one of "
+            + ",".join(allowed_safety_profiles)
+        )
     if require_p0_enabled:
         if manifest.get("p0.enable_risk_grid") is not True:
             failures.append("manifest p0.enable_risk_grid is not true")
@@ -1498,6 +1511,229 @@ def p0_difference_explanation(health_summary: dict[str, Any], cloud_summary: dic
     }
 
 
+def row_flag(row: dict[str, Any], key: str) -> bool:
+    return int(finite_float(row.get(key)) or 0) == 1
+
+
+def zero_risk_fallback_check(
+    pl_cloud_rows: list[dict[str, Any]],
+    validity_cloud_rows: list[dict[str, Any]],
+) -> dict[str, Any]:
+    checked_sources = [
+        ("predicted_pl_cloud", pl_cloud_rows),
+        ("risk_validity_cloud", validity_cloud_rows),
+    ]
+    unknown_invalid_zero_rows: list[dict[str, Any]] = []
+    invalid_zero_rows: list[dict[str, Any]] = []
+    checked_row_count = 0
+    unknown_invalid_count = 0
+    invalid_count = 0
+    for source, rows in checked_sources:
+        for row in rows:
+            checked_row_count += 1
+            valid = row_flag(row, "valid")
+            unknown = row_flag(row, "unknown")
+            if not valid:
+                invalid_count += 1
+            if unknown and not valid:
+                unknown_invalid_count += 1
+            c_pi = finite_float(row.get("c_pi"))
+            if c_pi is None or c_pi > 1.0e-9 or valid:
+                continue
+            sample = {
+                "source": source,
+                "stamp": row.get("stamp", ""),
+                "x": row.get("x", ""),
+                "y": row.get("y", ""),
+                "z": row.get("z", ""),
+                "c_pi": row.get("c_pi", ""),
+                "valid": row.get("valid", ""),
+                "unknown": row.get("unknown", ""),
+                "stale": row.get("stale", ""),
+                "source_flags": row.get("source_flags", ""),
+            }
+            invalid_zero_rows.append(sample)
+            if unknown:
+                unknown_invalid_zero_rows.append(sample)
+    return {
+        "passed": not invalid_zero_rows,
+        "checked_row_count": checked_row_count,
+        "invalid_count": invalid_count,
+        "unknown_invalid_count": unknown_invalid_count,
+        "invalid_zero_risk_count": len(invalid_zero_rows),
+        "unknown_invalid_zero_risk_count": len(unknown_invalid_zero_rows),
+        "first_invalid_zero_risk_row": invalid_zero_rows[0] if invalid_zero_rows else None,
+        "first_unknown_invalid_zero_risk_row": unknown_invalid_zero_rows[0] if unknown_invalid_zero_rows else None,
+    }
+
+
+def p0_4_reason_semantics(
+    health_summary: dict[str, Any],
+    cloud_summary: dict[str, Any],
+) -> dict[str, Any]:
+    reason_counts = health_summary.get("reason_counts", {}) or {}
+    non_ok_reasons = {
+        str(reason): int(count)
+        for reason, count in reason_counts.items()
+        if str(reason).strip() not in {"", "<empty>", "ok"}
+    }
+    dominant_unknown_reason_counts = health_summary.get("dominant_unknown_reason_counts", {}) or {}
+    dominant_unknown_count = int(health_summary.get("dominant_unknown_count_max", 0) or 0)
+    dominant_unknown_reason_latest = str(
+        health_summary.get("dominant_unknown_reason_latest", "")
+    ).strip()
+    material_unknown = (
+        float(health_summary.get("unknown_ratio_max", 0.0) or 0.0) >= 0.10
+        or float(cloud_summary.get("unknown_ratio", 0.0) or 0.0) >= 0.10
+        or int(health_summary.get("full_unknown_count", 0) or 0) > 0
+    )
+    reason_keys = {str(reason).strip() for reason in reason_counts}
+    reasons_only_ok = bool(reason_keys) and reason_keys <= {"ok"}
+    has_dominant_unknown_reason = bool(
+        dominant_unknown_reason_latest and dominant_unknown_count > 0
+    )
+    explanation_tokens = (
+        "stale",
+        "invalid",
+        "missing",
+        "no_",
+        "no-",
+        "disabled",
+        "fallback",
+        "snapshot",
+        "unavailable",
+        "source",
+        "lidar",
+        "gnss",
+        "prior",
+        "regularized",
+        "normal",
+        "epoch",
+    )
+    reason_text = " ".join(non_ok_reasons.keys()).lower()
+    dominant_reason_text = " ".join(
+        [dominant_unknown_reason_latest, *[str(key) for key in dominant_unknown_reason_counts.keys()]]
+    ).lower()
+    top_level_reason_explains = any(token in reason_text for token in explanation_tokens)
+    dominant_unknown_reason_explains = any(
+        token in dominant_reason_text for token in explanation_tokens
+    ) and has_dominant_unknown_reason
+    provider_counters_explain = (
+        int(health_summary.get("provider_stale_count_max", 0) or 0) > 0
+        or int(health_summary.get("provider_invalid_count_max", 0) or 0) > 0
+        or int(health_summary.get("occupied_skip_count_max", 0) or 0) > 0
+    ) and has_dominant_unknown_reason
+    fallback_unknown_reason_ok = (
+        not material_unknown
+        or top_level_reason_explains
+        or dominant_unknown_reason_explains
+        or provider_counters_explain
+    )
+    high_unknown_only_ok_without_dominant = (
+        material_unknown and reasons_only_ok and not has_dominant_unknown_reason
+    )
+    return {
+        "passed": fallback_unknown_reason_ok and not high_unknown_only_ok_without_dominant,
+        "material_unknown": material_unknown,
+        "reasons_only_ok": reasons_only_ok,
+        "non_ok_reasons": non_ok_reasons,
+        "dominant_unknown_reason_latest": dominant_unknown_reason_latest,
+        "dominant_unknown_reason_counts": dominant_unknown_reason_counts,
+        "dominant_unknown_count_max": dominant_unknown_count,
+        "has_dominant_unknown_reason": has_dominant_unknown_reason,
+        "top_level_reason_explains": top_level_reason_explains,
+        "dominant_unknown_reason_explains": dominant_unknown_reason_explains,
+        "provider_counters_explain": provider_counters_explain,
+        "high_unknown_only_ok_without_dominant": high_unknown_only_ok_without_dominant,
+        "fallback_unknown_reason_ok": fallback_unknown_reason_ok,
+    }
+
+
+def p0_4_cost_distribution_semantics(
+    health_summary: dict[str, Any],
+    cloud_summary: dict[str, Any],
+    pl_cloud_rows: list[dict[str, Any]],
+) -> dict[str, Any]:
+    valid_costs = valid_metric_values(pl_cloud_rows, "c_pi")
+    near_zero_valid_cost_count = sum(1 for value in valid_costs if value <= 1.0e-9)
+    fallback_unknown_dominates = (
+        float(health_summary.get("unknown_ratio_mean", 0.0) or 0.0) >= 0.50
+        or float(health_summary.get("unknown_ratio_max", 0.0) or 0.0) >= 0.50
+        or float(cloud_summary.get("unknown_ratio", 0.0) or 0.0) >= 0.50
+    )
+    only_near_zero_valid_costs = bool(valid_costs) and near_zero_valid_cost_count == len(valid_costs)
+    return {
+        "passed": not (fallback_unknown_dominates and only_near_zero_valid_costs),
+        "fallback_unknown_dominates": fallback_unknown_dominates,
+        "valid_cost_count": len(valid_costs),
+        "near_zero_valid_cost_count": near_zero_valid_cost_count,
+        "only_near_zero_valid_costs": only_near_zero_valid_costs,
+        "valid_cost_min": min(valid_costs) if valid_costs else None,
+        "valid_cost_mean": float(np.mean(valid_costs)) if valid_costs else None,
+        "valid_cost_max": max(valid_costs) if valid_costs else None,
+    }
+
+
+def validate_p0_4_fallback_unknown_semantics(
+    manifest: dict[str, Any],
+    health_summary: dict[str, Any],
+    cloud_summary: dict[str, Any],
+    pl_cloud_rows: list[dict[str, Any]],
+    validity_cloud_rows: list[dict[str, Any]],
+    failures: list[str],
+    inconclusive: list[str],
+) -> dict[str, Any]:
+    manifest_checks = {
+        "p0_enable_risk_grid": manifest.get("p0.enable_risk_grid") if manifest else None,
+        "planner_enable_p5_runtime": manifest.get("planner_enable_p5_runtime") if manifest else None,
+        "planner_enable_p5_final": manifest.get("planner_enable_p5_final") if manifest else None,
+    }
+    if not manifest:
+        inconclusive.append("P0-4 fallback/unknown checks require manifest")
+    else:
+        if manifest.get("p0.enable_risk_grid") is not True:
+            failures.append("P0-4 manifest p0.enable_risk_grid is not true")
+        if manifest.get("planner_enable_p5_runtime") is not False:
+            failures.append("P0-4 manifest planner_enable_p5_runtime is not false")
+        if manifest.get("planner_enable_p5_final") is not False:
+            failures.append("P0-4 manifest planner_enable_p5_final is not false")
+
+    reason_counts = health_summary.get("reason_counts", {}) or {}
+    empty_reason_count = int(reason_counts.get("<empty>", 0) or 0) + int(reason_counts.get("", 0) or 0)
+    if empty_reason_count > 0:
+        failures.append("P0-4 risk_grid_health contains empty reason")
+
+    reason_semantics = p0_4_reason_semantics(health_summary, cloud_summary)
+    if reason_semantics.get("high_unknown_only_ok_without_dominant"):
+        failures.append("P0-4 high unknown ratio is reported only as reason=ok with no dominant_unknown_reason")
+    if not reason_semantics.get("fallback_unknown_reason_ok", False):
+        failures.append("P0-4 reason histogram does not explain fallback/unknown behavior")
+
+    zero_risk_check = zero_risk_fallback_check(pl_cloud_rows, validity_cloud_rows)
+    if not zero_risk_check.get("passed", False):
+        failures.append(
+            "P0-4 unknown/invalid fallback cells are encoded as zero risk: "
+            f"invalid_zero_risk_count={zero_risk_check.get('invalid_zero_risk_count', 0)}, "
+            f"unknown_invalid_zero_risk_count={zero_risk_check.get('unknown_invalid_zero_risk_count', 0)}"
+        )
+
+    cost_semantics = p0_4_cost_distribution_semantics(health_summary, cloud_summary, pl_cloud_rows)
+    if not cost_semantics.get("passed", False):
+        failures.append("P0-4 fallback/unknown dominates while all valid final costs are near zero")
+
+    passed = (
+        not any(message.startswith("P0-4") for message in failures)
+        and not any(message.startswith("P0-4") for message in inconclusive)
+    )
+    return {
+        "passed": passed,
+        "manifest_checks": manifest_checks,
+        "reason_semantics": reason_semantics,
+        "zero_risk_fallback_check": zero_risk_check,
+        "cost_distribution_semantics": cost_semantics,
+    }
+
+
 def plot_p0_baseline_distribution_delta(
     current_rows: list[dict[str, Any]],
     baseline_rows: list[dict[str, Any]],
@@ -1938,6 +2174,9 @@ def validate_p0_requirements(
     cloud_summary: dict[str, Any],
     failures: list[str],
     inconclusive: list[str],
+    *,
+    allow_high_unknown: bool = False,
+    allow_explainable_startup_unavailable: bool = False,
 ) -> None:
     if not manifest:
         inconclusive.append(f"{experiment_label} checks require manifest")
@@ -1948,24 +2187,45 @@ def validate_p0_requirements(
     if row_count <= 0:
         failures.append(f"{experiment_label} risk_grid_health has no rows")
         return
-    if int(health_summary.get("ready_false_max_consecutive", 0) or 0) >= 3:
+    reason_counts = health_summary.get("reason_counts", {}) or {}
+    ready_false_count = int(health_summary.get("ready_false_count", 0) or 0)
+    stale_true_count = int(health_summary.get("stale_true_count", 0) or 0)
+    snapshot_unavailable_count = int(reason_counts.get("snapshot_unavailable", 0) or 0)
+    startup_unavailable_explains_ready_stale = (
+        allow_explainable_startup_unavailable
+        and snapshot_unavailable_count >= max(ready_false_count, stale_true_count)
+        and float(health_summary.get("ready_false_ratio", 0.0) or 0.0) <= 0.10
+        and float(health_summary.get("stale_true_ratio", 0.0) or 0.0) <= 0.10
+    )
+    if (
+        not startup_unavailable_explains_ready_stale
+        and int(health_summary.get("ready_false_max_consecutive", 0) or 0) >= 3
+    ):
         failures.append(f"{experiment_label} risk_grid_health stayed ready=false for at least 3 consecutive samples")
-    if float(health_summary.get("ready_false_ratio", 0.0) or 0.0) > 0.10:
+    if (
+        not startup_unavailable_explains_ready_stale
+        and float(health_summary.get("ready_false_ratio", 0.0) or 0.0) > 0.10
+    ):
         failures.append(f"{experiment_label} risk_grid_health ready=false ratio exceeded 10%")
-    if int(health_summary.get("stale_true_max_consecutive", 0) or 0) >= 3:
+    if (
+        not startup_unavailable_explains_ready_stale
+        and int(health_summary.get("stale_true_max_consecutive", 0) or 0) >= 3
+    ):
         failures.append(f"{experiment_label} risk_grid_health stayed stale=true for at least 3 consecutive samples")
-    if float(health_summary.get("stale_true_ratio", 0.0) or 0.0) > 0.10:
+    if (
+        not startup_unavailable_explains_ready_stale
+        and float(health_summary.get("stale_true_ratio", 0.0) or 0.0) > 0.10
+    ):
         failures.append(f"{experiment_label} risk_grid_health stale=true ratio exceeded 10%")
     valid_ratio_mean = finite_float(health_summary.get("valid_ratio_mean"))
     if valid_ratio_mean is None:
         inconclusive.append(f"{experiment_label} risk_grid_health valid_ratio_mean is unavailable")
-    elif valid_ratio_mean <= 0.60:
+    elif not allow_high_unknown and valid_ratio_mean <= 0.60:
         failures.append(f"{experiment_label} risk_grid_health valid_ratio_mean is not above 0.60")
-    if int(health_summary.get("full_unknown_max_consecutive", 0) or 0) >= 3:
+    if not allow_high_unknown and int(health_summary.get("full_unknown_max_consecutive", 0) or 0) >= 3:
         failures.append(f"{experiment_label} risk_grid_health shows periodic/full-frame unknown for at least 3 consecutive samples")
-    if float(health_summary.get("full_unknown_ratio", 0.0) or 0.0) > 0.25:
+    if not allow_high_unknown and float(health_summary.get("full_unknown_ratio", 0.0) or 0.0) > 0.25:
         failures.append(f"{experiment_label} risk_grid_health full-frame unknown ratio exceeded 25%")
-    reason_counts = health_summary.get("reason_counts", {}) or {}
     if reason_counts.get("<empty>", 0) or reason_counts.get("", 0):
         failures.append(f"{experiment_label} risk_grid_health contains empty reason")
     provider_stale = int(health_summary.get("provider_stale_count_max", 0) or 0)
@@ -2214,6 +2474,7 @@ def next_debug_branch(
             "P0-1": "continue_to_P0-2_degraded_gnss_lidar_good_validation",
             "P0-2": "continue_to_P0-3_corridor_degeneracy_field",
             "P0-3": "continue_to_P0-4_next_phase_validation",
+            "P0-4": "continue_to_P0-5",
         }
         return pass_branches.get(
             str(experiment_id).strip().upper(),
@@ -2252,10 +2513,15 @@ def analyze(args: argparse.Namespace) -> dict[str, Any]:
     csv_dir, figures_dir, metadata_dir = ensure_dirs(export_dir)
     prefix = artifact_prefix(args.experiment_id)
     p0_phase = is_p0_experiment(args)
+    p0_4_phase = is_experiment(args, "P0-4")
     p0_phase_index = p0_phase_number(args.experiment_id)
     p0_requires_odom_gate = p0_odom_gate_required(args.experiment_id)
     experiment_label = str(args.experiment_id).strip().upper()
-    topic_expectations = P0_TOPIC_EXPECTATIONS if p0_phase else CORE_TOPIC_EXPECTATIONS
+    topic_expectations = (
+        P0_4_TOPIC_EXPECTATIONS
+        if p0_4_phase
+        else (P0_TOPIC_EXPECTATIONS if p0_phase else CORE_TOPIC_EXPECTATIONS)
+    )
     topic_activity_topics = P0_TOPIC_ACTIVITY_TOPICS if p0_phase else TOPIC_ACTIVITY_TOPICS
 
     failures: list[str] = []
@@ -2271,7 +2537,13 @@ def analyze(args: argparse.Namespace) -> dict[str, Any]:
     )
     integrity_rows, integrity_summary = read_integrity_csv(export_dir / "test_planner_integrity_validation.csv")
 
-    validate_manifest(manifest, failures, inconclusive, require_p0_enabled=p0_phase)
+    validate_manifest(
+        manifest,
+        failures,
+        inconclusive,
+        require_p0_enabled=p0_phase,
+        allowed_safety_profiles=("off", "p5") if p0_4_phase else ("off",),
+    )
     validate_validator(validator_summary, failures, inconclusive)
     topic_health = validate_topic_health(
         metadata,
@@ -2343,7 +2615,7 @@ def analyze(args: argparse.Namespace) -> dict[str, Any]:
         p0_2_artifacts: dict[str, Any] = {}
         p0_2_export_dir = Path(args.p0_2_export_dir).expanduser().resolve() if args.p0_2_export_dir else None
         p0_2_bag_dir = Path(args.p0_2_bag_dir).expanduser().resolve() if args.p0_2_bag_dir else None
-        if p0_phase_index is not None and p0_phase_index >= 3:
+        if p0_requires_odom_gate and p0_phase_index is not None and p0_phase_index >= 3:
             if p0_2_export_dir is None and p0_2_bag_dir is None:
                 inconclusive.append(f"{experiment_label} comparison requires a healthy P0-2 export or bag reference")
             if p0_2_bag_dir is not None:
@@ -2384,7 +2656,7 @@ def analyze(args: argparse.Namespace) -> dict[str, Any]:
         p0_distribution_comparisons: dict[str, Any] = {
             "p0_1": baseline_distribution,
         }
-        if p0_phase_index is not None and p0_phase_index >= 3:
+        if p0_requires_odom_gate and p0_phase_index is not None and p0_phase_index >= 3:
             p0_distribution_comparisons["p0_2"] = p0_2_reference_distribution
         p0_distribution_explanation = p0_difference_explanation(p0_health_summary, p0_cloud_summary)
 
@@ -2395,7 +2667,20 @@ def analyze(args: argparse.Namespace) -> dict[str, Any]:
             p0_cloud_summary,
             failures,
             inconclusive,
+            allow_high_unknown=p0_4_phase,
+            allow_explainable_startup_unavailable=p0_4_phase,
         )
+        p0_4_semantics: dict[str, Any] = {}
+        if p0_4_phase:
+            p0_4_semantics = validate_p0_4_fallback_unknown_semantics(
+                manifest,
+                p0_health_summary,
+                p0_cloud_summary,
+                pl_cloud_rows,
+                validity_cloud_rows,
+                failures,
+                inconclusive,
+            )
         if p0_requires_odom_gate:
             validate_p0_distribution_comparison(
                 baseline_distribution,
@@ -2563,7 +2848,7 @@ def analyze(args: argparse.Namespace) -> dict[str, Any]:
                 p0_figure_artifacts.append(str(p0_1_delta_figure_path))
             else:
                 warnings.append(f"{experiment_label} vs P0-1 delta figure was not generated because PL/cost rows were unavailable")
-        if p0_phase_index is not None and p0_phase_index >= 3:
+        if p0_requires_odom_gate and p0_phase_index is not None and p0_phase_index >= 3:
             if plot_p0_baseline_distribution_delta(
                 pl_cloud_rows,
                 p0_2_reference_cloud_rows,
@@ -2592,7 +2877,7 @@ def analyze(args: argparse.Namespace) -> dict[str, Any]:
                     health_vs_odom_figure_path,
                 ]
             )
-        if p0_phase_index is not None and p0_phase_index >= 3:
+        if p0_requires_odom_gate and p0_phase_index is not None and p0_phase_index >= 3:
             p0_required_figures.append(p0_2_delta_figure_path)
 
         p0_summary = {
@@ -2608,6 +2893,9 @@ def analyze(args: argparse.Namespace) -> dict[str, Any]:
             "baseline_distribution_comparison": baseline_distribution if p0_requires_odom_gate else {},
             "baseline_distribution_explanation": p0_distribution_explanation if p0_requires_odom_gate else {},
             "comparison_runs": p0_distribution_comparisons if p0_requires_odom_gate else {},
+            "p0_4_fallback_unknown_semantics": p0_4_semantics,
+            "zero_risk_fallback_check": p0_4_semantics.get("zero_risk_fallback_check", {}),
+            "fallback_unknown_reason_ok": (p0_4_semantics.get("reason_semantics", {}) or {}).get("fallback_unknown_reason_ok"),
             "baseline_export_dir": str(baseline_export_dir) if baseline_export_dir is not None else "",
             "baseline_bag_dir": str(baseline_bag_dir) if baseline_bag_dir is not None else "",
             "p0_2_reference_export_dir": str(p0_2_export_dir) if p0_2_export_dir is not None else "",
@@ -2721,6 +3009,8 @@ def analyze(args: argparse.Namespace) -> dict[str, Any]:
             topic_activity_figure_path,
             *p0_required_figures,
         ]
+        if p0_4_phase:
+            required_figures.append(source_figure_path)
         for figure_path in required_figures:
             if not figure_path.is_file() or figure_path.stat().st_size <= 0:
                 inconclusive.append(
