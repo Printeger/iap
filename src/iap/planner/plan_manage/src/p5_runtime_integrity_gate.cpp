@@ -24,6 +24,44 @@ P5GateAction maxSeverity(P5GateAction a, P5GateAction b) {
   return static_cast<int>(a) >= static_cast<int>(b) ? a : b;
 }
 
+bool isFutureCoverageLimit(const iap::PredictedPLSample& sample) {
+  return sample.reason == "time_out_of_horizon";
+}
+
+bool isUnknownOnlyFinalGateBlock(const P5GateStatus& status) {
+  if (status.action != P5GateAction::REQUEST_REPLAN) {
+    return false;
+  }
+  if (status.reason != P5GateReason::SNAPSHOT_UNAVAILABLE &&
+      status.reason != P5GateReason::FUTURE_UNKNOWN &&
+      status.reason != P5GateReason::AL_INVALID) {
+    return false;
+  }
+  if (status.bad_count > 0 || status.bad_ratio > 0.0) {
+    return false;
+  }
+  return !std::isfinite(status.future_min_im) ||
+         status.future_min_im >= 0.0;
+}
+
+bool isTransientCurrentStaleFinalGateBlock(const P5GateStatus& status,
+                                           double emergency_duration_s) {
+  if (status.action != P5GateAction::REQUEST_REPLAN ||
+      status.reason != P5GateReason::CURRENT_STALE) {
+    return false;
+  }
+  if (status.bad_count > 0 || status.bad_ratio > 0.0) {
+    return false;
+  }
+  if (std::isfinite(status.current_im_min) && status.current_im_min < 0.0) {
+    return false;
+  }
+  if (std::isfinite(status.future_min_im) && status.future_min_im < 0.0) {
+    return false;
+  }
+  return status.current_stale_duration_s < emergency_duration_s;
+}
+
 bool pointInsideRegion(const Eigen::Vector3d& p,
                        const Eigen::Vector3d& origin,
                        const Eigen::Vector3d& size) {
@@ -526,8 +564,9 @@ P5GateStatus P5RuntimeIntegrityGate::evaluateCurrentGate(double now_s,
     status.current_im_min = std::min(status.current_im_h, status.current_im_v);
   }
 
-  const bool stale_or_invalid = !current_valid ||
-                                age_s >= config_.current_stale_to_replan_s;
+  const bool current_stale =
+      current_valid && age_s >= config_.current_stale_to_replan_s;
+  const bool stale_or_invalid = !current_valid || current_stale;
   if (stale_or_invalid) {
     if (update_state && !finite(current_problem_started_s_)) {
       current_problem_started_s_ = now_s;
@@ -536,14 +575,9 @@ P5GateStatus P5RuntimeIntegrityGate::evaluateCurrentGate(double now_s,
         finite(current_problem_started_s_)
             ? std::max(0.0, now_s - current_problem_started_s_)
             : 0.0;
-  } else if (update_state) {
+  } else {
     current_problem_started_s_ = std::numeric_limits<double>::quiet_NaN();
     status.current_stale_duration_s = 0.0;
-  } else {
-    status.current_stale_duration_s =
-        finite(current_problem_started_s_)
-            ? std::max(0.0, now_s - current_problem_started_s_)
-            : 0.0;
   }
 
   if (!current_valid) {
@@ -563,10 +597,14 @@ P5GateStatus P5RuntimeIntegrityGate::evaluateCurrentGate(double now_s,
   } else if (status.current_im_min < config_.current_replan_margin_m) {
     status.reason = P5GateReason::CURRENT_LOW_MARGIN;
     status.action = P5GateAction::REQUEST_REPLAN;
-  } else if (age_s >= config_.current_stale_to_emergency_s) {
+  } else if (current_stale &&
+             status.current_stale_duration_s >=
+                 config_.current_stale_to_emergency_s) {
     status.reason = P5GateReason::CURRENT_STALE;
     status.action = P5GateAction::REQUEST_EMERGENCY_STOP_CANDIDATE;
-  } else if (age_s >= config_.current_stale_to_replan_s) {
+  } else if (current_stale &&
+             status.current_stale_duration_s >=
+                 config_.current_stale_to_replan_s) {
     status.reason = P5GateReason::CURRENT_STALE;
     status.action = P5GateAction::REQUEST_REPLAN;
   }
@@ -578,8 +616,8 @@ P5GateStatus P5RuntimeIntegrityGate::evaluateCurrentGate(double now_s,
 P5GateStatus P5RuntimeIntegrityGate::evaluateFutureGate(
     LocalTrajData& local_data,
     const std::shared_ptr<const iap::RiskGridSnapshot>& snapshot,
-      const CurrentIntegrity& current,
-      const EvalContext& context) {
+    const CurrentIntegrity& current,
+    const EvalContext& context) {
   P5GateStatus status;
   status.reason = P5GateReason::OK;
   status.pred_al_mode =
@@ -598,10 +636,6 @@ P5GateStatus P5RuntimeIntegrityGate::evaluateFutureGate(
         finite(future_unknown_started_s_)
             ? std::max(0.0, context.now_s - future_unknown_started_s_)
             : 0.0;
-    if (status.future_unknown_duration_s >=
-        config_.future_unknown_to_emergency_s) {
-      status.action = P5GateAction::REQUEST_EMERGENCY_STOP_CANDIDATE;
-    }
     status.raw_action = status.action;
     return status;
   }
@@ -618,7 +652,6 @@ P5GateStatus P5RuntimeIntegrityGate::evaluateFutureGate(
   const double dt = std::max(0.01, config_.sample_dt_s);
 
   for (double t = t_cur; t <= t_end + 1.0e-9; t += dt) {
-    status.sample_count++;
     const double tau = std::max(0.0, t - t_cur);
     const Eigen::Vector3d p = local_data.position_traj_.evaluateDeBoorT(t);
     SafetyVizTrajectorySample viz_sample;
@@ -629,6 +662,10 @@ P5GateStatus P5RuntimeIntegrityGate::evaluateFutureGate(
         snapshot->queryPredictedPL(p, context.now_s + tau, &pl);
     const PredAlertLimitSample al = pred_alert_limit_provider_.evaluate(
         p, context.now_s + tau, current.hal, current.val);
+    if (!pl_ok && isFutureCoverageLimit(pl)) {
+      continue;
+    }
+    status.sample_count++;
     viz_sample.hpl = pl.hpl_pred;
     viz_sample.vpl = pl.vpl_pred;
     viz_sample.hal = al.hal;
@@ -689,14 +726,9 @@ P5GateStatus P5RuntimeIntegrityGate::evaluateFutureGate(
         finite(future_unknown_started_s_)
             ? std::max(0.0, context.now_s - future_unknown_started_s_)
             : 0.0;
-  } else if (!context.final_gate) {
+  } else {
     future_unknown_started_s_ = std::numeric_limits<double>::quiet_NaN();
     status.future_unknown_duration_s = 0.0;
-  } else {
-    status.future_unknown_duration_s =
-        finite(future_unknown_started_s_)
-            ? std::max(0.0, context.now_s - future_unknown_started_s_)
-            : 0.0;
   }
 
   if (finite(status.first_bad_tau) &&
@@ -714,10 +746,6 @@ P5GateStatus P5RuntimeIntegrityGate::evaluateFutureGate(
     status.reason = status.pred_al_invalid_count > 0 ? P5GateReason::AL_INVALID
                                                      : P5GateReason::FUTURE_UNKNOWN;
     status.action = P5GateAction::REQUEST_REPLAN;
-    if (status.future_unknown_duration_s >=
-        config_.future_unknown_to_emergency_s) {
-      status.action = P5GateAction::REQUEST_EMERGENCY_STOP_CANDIDATE;
-    }
   }
 
   status.raw_action = status.action;
@@ -784,10 +812,15 @@ P5GateStatus P5RuntimeIntegrityGate::applyDebounce(const P5GateStatus& raw,
   }
 
   good_ticks_++;
+  const bool current_stale_candidate =
+      finite(raw.current_integrity_age_s) &&
+      raw.current_integrity_age_s >= config_.current_stale_to_replan_s;
   if (good_ticks_ >= config_.good_tick_to_clear) {
     bad_ticks_ = 0;
     future_unknown_started_s_ = std::numeric_limits<double>::quiet_NaN();
-    current_problem_started_s_ = std::numeric_limits<double>::quiet_NaN();
+    if (!current_stale_candidate) {
+      current_problem_started_s_ = std::numeric_limits<double>::quiet_NaN();
+    }
   }
   status.current_stale_duration_s =
       finite(current_problem_started_s_)
@@ -807,6 +840,23 @@ P5GateStatus P5RuntimeIntegrityGate::applyFinalGateBudget(
   status.raw_action = raw.action;
 
   if (raw.action == P5GateAction::OK) {
+    resetFinalGateFailureState();
+    status.final_gate_fail_count = 0;
+    status.final_gate_fail_duration_s = 0.0;
+    status.final_gate_last_reason.clear();
+    return status;
+  }
+
+  if (isUnknownOnlyFinalGateBlock(raw)) {
+    resetFinalGateFailureState();
+    status.final_gate_fail_count = 0;
+    status.final_gate_fail_duration_s = 0.0;
+    status.final_gate_last_reason.clear();
+    return status;
+  }
+
+  if (isTransientCurrentStaleFinalGateBlock(
+          raw, config_.current_stale_to_emergency_s)) {
     resetFinalGateFailureState();
     status.final_gate_fail_count = 0;
     status.final_gate_fail_duration_s = 0.0;

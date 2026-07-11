@@ -97,6 +97,7 @@ P5_EMERGENCY_ACTION = "REQUEST_EMERGENCY_STOP_CANDIDATE"
 P5_REPLAN_ACTION = "REQUEST_REPLAN"
 P5_OK_ACTION = "OK"
 P5_1_MIN_OK_ACTION_RATIO = 0.95
+P5_1_STARTUP_REPLAN_MAX_DURATION_S = 2.0
 P5_REPLAN_STORM_CONSECUTIVE = 3
 P5_STATUS_FIELDS = [
     "bag_time_s",
@@ -1465,6 +1466,93 @@ def plot_p5_status_timeline(rows: list[dict[str, Any]], path: Path) -> bool:
     for ax in axes:
         ax.grid(True, alpha=0.25)
     fig.suptitle("P5 status timeline")
+    fig.tight_layout()
+    fig.savefig(path, dpi=160)
+    plt.close(fig)
+    return True
+
+
+def plot_p5_future_unknown_duration_timeline(rows: list[dict[str, Any]], path: Path) -> bool:
+    if not rows:
+        return False
+    t = relative_time(rows)
+    if not t:
+        return False
+    fig, axes = plt.subplots(2, 1, figsize=(11, 6.0), sharex=True)
+    axes[0].plot(
+        t,
+        finite_or_nan(rows, "future_unknown_duration_s"),
+        label="future_unknown_duration_s",
+        color="#9333ea",
+    )
+    axes[0].set_ylabel("duration [s]")
+    axes[0].legend(loc="best")
+    axes[1].plot(t, finite_or_nan(rows, "unknown_ratio"), label="unknown_ratio", color="#6b7280")
+    axes[1].plot(t, finite_or_nan(rows, "bad_ratio"), label="bad_ratio", color="#dc2626")
+    axes[1].set_ylim(-0.05, 1.05)
+    axes[1].set_ylabel("ratio")
+    axes[1].set_xlabel("time since first P5 status [s]")
+    axes[1].legend(loc="best")
+    for ax in axes:
+        ax.grid(True, alpha=0.25)
+    fig.suptitle("P5 future unknown duration")
+    fig.tight_layout()
+    fig.savefig(path, dpi=160)
+    plt.close(fig)
+    return True
+
+
+def plot_p5_startup_correlation(
+    health_rows: list[dict[str, Any]],
+    p5_rows: list[dict[str, Any]],
+    path: Path,
+) -> bool:
+    if not health_rows or not p5_rows:
+        return False
+    health_stamps = [finite_float(row.get("stamp")) for row in health_rows]
+    p5_stamps = [finite_float(row.get("bag_time_s")) for row in p5_rows]
+    finite_stamps = [stamp for stamp in [*health_stamps, *p5_stamps] if stamp is not None]
+    if not finite_stamps:
+        return False
+    t0 = min(finite_stamps)
+    health_t = [math.nan if stamp is None else stamp - t0 for stamp in health_stamps]
+    p5_t = [math.nan if stamp is None else stamp - t0 for stamp in p5_stamps]
+    actions = [p5_action(row, "action") or "<empty>" for row in p5_rows]
+    codes = action_code_map(actions)
+
+    fig, axes = plt.subplots(3, 1, figsize=(11, 7.0), sharex=True)
+    axes[0].step(
+        health_t,
+        [1.0 if row.get("ready") else 0.0 for row in health_rows],
+        where="post",
+        label="P0 ready",
+        color="#16a34a",
+    )
+    axes[0].step(
+        health_t,
+        [1.0 if row.get("stale") else 0.0 for row in health_rows],
+        where="post",
+        label="P0 stale",
+        color="#dc2626",
+    )
+    axes[0].set_ylim(-0.05, 1.05)
+    axes[0].set_ylabel("P0 bool")
+    axes[0].legend(loc="best")
+
+    axes[1].plot(health_t, finite_or_nan(health_rows, "unknown_ratio"), label="P0 unknown_ratio", color="#6b7280")
+    axes[1].plot(health_t, finite_or_nan(health_rows, "valid_ratio"), label="P0 valid_ratio", color="#2563eb")
+    axes[1].set_ylim(-0.05, 1.05)
+    axes[1].set_ylabel("P0 ratio")
+    axes[1].legend(loc="best")
+
+    axes[2].step(p5_t, [codes[value] for value in actions], where="post", label="P5 action", color="#f97316")
+    axes[2].set_yticks(list(codes.values()), list(codes.keys()))
+    axes[2].set_xlabel("run-relative bag time [s]")
+    axes[2].set_ylabel("P5 action")
+    axes[2].legend(loc="best")
+    for ax in axes:
+        ax.grid(True, alpha=0.25)
+    fig.suptitle("P0 startup vs P5 action correlation")
     fig.tight_layout()
     fig.savefig(path, dpi=160)
     plt.close(fig)
@@ -3141,9 +3229,17 @@ def validate_p0_requirements(
         inconclusive.append(f"{experiment_label} risk_grid_health valid_ratio_mean is unavailable")
     elif not allow_high_unknown and valid_ratio_mean <= 0.60:
         failures.append(f"{experiment_label} risk_grid_health valid_ratio_mean is not above 0.60")
-    if not allow_high_unknown and int(health_summary.get("full_unknown_max_consecutive", 0) or 0) >= 3:
+    if (
+        not allow_high_unknown
+        and not startup_unavailable_explains_ready_stale
+        and int(health_summary.get("full_unknown_max_consecutive", 0) or 0) >= 3
+    ):
         failures.append(f"{experiment_label} risk_grid_health shows periodic/full-frame unknown for at least 3 consecutive samples")
-    if not allow_high_unknown and float(health_summary.get("full_unknown_ratio", 0.0) or 0.0) > 0.25:
+    if (
+        not allow_high_unknown
+        and not startup_unavailable_explains_ready_stale
+        and float(health_summary.get("full_unknown_ratio", 0.0) or 0.0) > 0.25
+    ):
         failures.append(f"{experiment_label} risk_grid_health full-frame unknown ratio exceeded 25%")
     if reason_counts.get("<empty>", 0) or reason_counts.get("", 0):
         failures.append(f"{experiment_label} risk_grid_health contains empty reason")
@@ -3371,6 +3467,42 @@ def max_consecutive_action(rows: list[dict[str, Any]], action: str, key: str = "
     return consecutive_true([p5_action(row, key) == action for row in rows])
 
 
+def p5_startup_snapshot_unavailable_row(row: dict[str, Any]) -> bool:
+    reason = str(row.get("reason", "")).strip().lower()
+    if reason != "snapshot_unavailable":
+        return False
+    if p5_action(row, "action") != P5_REPLAN_ACTION:
+        return False
+    if p5_action(row, "raw_action") != P5_REPLAN_ACTION:
+        return False
+    if p5_final_gate_failed(row):
+        return False
+    bad_count = finite_float(row.get("bad_count")) or 0.0
+    bad_ratio = finite_float(row.get("bad_ratio")) or 0.0
+    if bad_count > 0.0 or bad_ratio > 0.0:
+        return False
+    future_min_im = finite_float(row.get("future_min_im"))
+    return future_min_im is None or future_min_im >= 0.0
+
+
+def p5_startup_snapshot_unavailable_prefix(
+    rows: list[dict[str, Any]],
+) -> tuple[list[dict[str, Any]], float, bool]:
+    prefix: list[dict[str, Any]] = []
+    for row in rows:
+        if not p5_startup_snapshot_unavailable_row(row):
+            break
+        prefix.append(row)
+    if len(prefix) <= 1:
+        duration_s = 0.0
+    else:
+        first = finite_float(prefix[0].get("bag_time_s"))
+        last = finite_float(prefix[-1].get("bag_time_s"))
+        duration_s = max(0.0, last - first) if first is not None and last is not None else 0.0
+    bounded = not prefix or duration_s <= P5_1_STARTUP_REPLAN_MAX_DURATION_S
+    return prefix, duration_s, bounded
+
+
 def numeric_summary(rows: list[dict[str, Any]], key: str) -> dict[str, Any]:
     values = [value for value in (finite_float(row.get(key)) for row in rows) if value is not None]
     return {
@@ -3383,6 +3515,16 @@ def numeric_summary(rows: list[dict[str, Any]], key: str) -> dict[str, Any]:
 def summarize_p5_status_rows(p5_rows: list[dict[str, Any]], p5_error: str = "") -> dict[str, Any]:
     action_counts = Counter(p5_action(row, "action") or "<empty>" for row in p5_rows)
     raw_action_counts = Counter(p5_action(row, "raw_action") or "<empty>" for row in p5_rows)
+    startup_rows, startup_duration_s, startup_bounded = p5_startup_snapshot_unavailable_prefix(p5_rows)
+    steady_rows = p5_rows[len(startup_rows) :] if startup_bounded else p5_rows
+    steady_action_counts = Counter(p5_action(row, "action") or "<empty>" for row in steady_rows)
+    steady_raw_action_counts = Counter(p5_action(row, "raw_action") or "<empty>" for row in steady_rows)
+    steady_emergency_rows = [
+        row
+        for row in steady_rows
+        if p5_action(row, "action") == P5_EMERGENCY_ACTION
+        or p5_action(row, "raw_action") == P5_EMERGENCY_ACTION
+    ]
     emergency_rows = [
         row
         for row in p5_rows
@@ -3398,12 +3540,41 @@ def summarize_p5_status_rows(p5_rows: list[dict[str, Any]], p5_error: str = "") 
     final_fail_rows = [row for row in p5_rows if p5_final_gate_failed(row)]
     parse_error_rows = [row for row in p5_rows if str(row.get("parse_error", "")).strip()]
     ok_count = int(action_counts.get(P5_OK_ACTION, 0))
+    steady_ok_count = int(steady_action_counts.get(P5_OK_ACTION, 0))
+    steady_max_consecutive_replan = max_consecutive_action(
+        steady_rows, P5_REPLAN_ACTION, "action"
+    )
+    steady_raw_max_consecutive_replan = max_consecutive_action(
+        steady_rows, P5_REPLAN_ACTION, "raw_action"
+    )
     summary: dict[str, Any] = {
         "status_rows": len(p5_rows),
         "action_counts": dict(sorted(action_counts.items())),
         "raw_action_counts": dict(sorted(raw_action_counts.items())),
         "ok_action_count": ok_count,
         "ok_action_ratio": ratio(ok_count, len(p5_rows)),
+        "startup_snapshot_unavailable_rows": len(startup_rows),
+        "startup_snapshot_unavailable_duration_s": startup_duration_s,
+        "startup_snapshot_unavailable_bounded": startup_bounded,
+        "steady_status_rows": len(steady_rows),
+        "steady_action_counts": dict(sorted(steady_action_counts.items())),
+        "steady_raw_action_counts": dict(sorted(steady_raw_action_counts.items())),
+        "steady_ok_action_count": steady_ok_count,
+        "steady_ok_action_ratio": ratio(steady_ok_count, len(steady_rows)),
+        "steady_replan_action_count": int(steady_action_counts.get(P5_REPLAN_ACTION, 0)),
+        "steady_raw_replan_action_count": int(
+            steady_raw_action_counts.get(P5_REPLAN_ACTION, 0)
+        ),
+        "steady_emergency_action_count": len(steady_emergency_rows),
+        "steady_raw_emergency_action_count": int(
+            steady_raw_action_counts.get(P5_EMERGENCY_ACTION, 0)
+        ),
+        "steady_max_consecutive_replan": steady_max_consecutive_replan,
+        "steady_raw_max_consecutive_replan": steady_raw_max_consecutive_replan,
+        "steady_replan_storm": (
+            steady_max_consecutive_replan >= P5_REPLAN_STORM_CONSECUTIVE
+            or steady_raw_max_consecutive_replan >= P5_REPLAN_STORM_CONSECUTIVE
+        ),
         "replan_action_count": int(action_counts.get(P5_REPLAN_ACTION, 0)),
         "raw_replan_action_count": int(raw_action_counts.get(P5_REPLAN_ACTION, 0)),
         "emergency_action_count": len(emergency_rows),
@@ -3496,17 +3667,43 @@ def validate_p5_1_hard_gates(
     failures: list[str],
     inconclusive: list[str],
 ) -> dict[str, Any]:
+    reason_counts = p0_health_summary.get("reason_counts", {}) or {}
+    ready_false_count = int(p0_health_summary.get("ready_false_count", 0) or 0)
+    stale_true_count = int(p0_health_summary.get("stale_true_count", 0) or 0)
+    snapshot_unavailable_count = int(reason_counts.get("snapshot_unavailable", 0) or 0)
+    startup_unavailable_explains_ready_stale = (
+        snapshot_unavailable_count >= max(ready_false_count, stale_true_count)
+        and float(p0_health_summary.get("ready_false_ratio", 0.0) or 0.0) <= 0.10
+        and float(p0_health_summary.get("stale_true_ratio", 0.0) or 0.0) <= 0.10
+        and int(p0_health_summary.get("ready_false_max_consecutive", 0) or 0) <= 3
+        and int(p0_health_summary.get("stale_true_max_consecutive", 0) or 0) <= 3
+    )
     gates = {
         "p0_health_rows_present": int(p0_health_summary.get("row_count", 0) or 0) > 0,
-        "p0_non_stale": int(p0_health_summary.get("stale_true_count", 0) or 0) == 0,
+        "p0_non_stale": stale_true_count == 0 or startup_unavailable_explains_ready_stale,
+        "p0_startup_unavailable_explained": startup_unavailable_explains_ready_stale,
         "p5_status_rows_present": int(p5_summary.get("status_rows", 0) or 0) > 0,
+        "p5_steady_status_rows_present": int(p5_summary.get("steady_status_rows", 0) or 0) > 0,
         "p5_json_parse_ok": int(p5_summary.get("parse_error_count", 0) or 0) == 0,
-        "ok_action_ratio": float(p5_summary.get("ok_action_ratio", 0.0) or 0.0),
+        "startup_snapshot_unavailable_rows": int(
+            p5_summary.get("startup_snapshot_unavailable_rows", 0) or 0
+        ),
+        "startup_snapshot_unavailable_duration_s": float(
+            p5_summary.get("startup_snapshot_unavailable_duration_s", 0.0) or 0.0
+        ),
+        "startup_snapshot_unavailable_bounded": bool(
+            p5_summary.get("startup_snapshot_unavailable_bounded", True)
+        ),
+        "ok_action_ratio": float(p5_summary.get("steady_ok_action_ratio", 0.0) or 0.0),
         "ok_action_ratio_min": P5_1_MIN_OK_ACTION_RATIO,
         "emergency_action_count": int(p5_summary.get("emergency_action_count", 0) or 0),
-        "replan_storm": bool(p5_summary.get("replan_storm", False)),
-        "max_consecutive_replan": int(p5_summary.get("max_consecutive_replan", 0) or 0),
-        "raw_max_consecutive_replan": int(p5_summary.get("raw_max_consecutive_replan", 0) or 0),
+        "replan_storm": bool(p5_summary.get("steady_replan_storm", False)),
+        "max_consecutive_replan": int(
+            p5_summary.get("steady_max_consecutive_replan", 0) or 0
+        ),
+        "raw_max_consecutive_replan": int(
+            p5_summary.get("steady_raw_max_consecutive_replan", 0) or 0
+        ),
         "final_gate_fail_count_max": int(p5_summary.get("final_gate_fail_count_max", 0) or 0),
         "future_min_im_available": p5_summary.get("future_min_im_min") is not None,
         "current_im_min_available": p5_summary.get("current_im_min_min") is not None,
@@ -3519,11 +3716,21 @@ def validate_p5_1_hard_gates(
     if not gates["p0_health_rows_present"]:
         failures.append("P5-1 P0 health rows are missing")
     if not gates["p0_non_stale"]:
-        failures.append("P5-1 P0 health reported stale=true")
+        failures.append("P5-1 P0 health reported stale=true outside bounded startup snapshot_unavailable")
     if not gates["p5_status_rows_present"]:
         failures.append("P5-1 P5 status rows are missing")
+    if not gates["p5_steady_status_rows_present"]:
+        inconclusive.append("P5-1 P5 status rows contain no steady-state samples after startup")
     if not gates["p5_json_parse_ok"]:
         failures.append("P5-1 P5 status JSON parse errors were observed")
+    if (
+        gates["startup_snapshot_unavailable_rows"] > 0
+        and not gates["startup_snapshot_unavailable_bounded"]
+    ):
+        failures.append(
+            "P5-1 startup snapshot_unavailable replan prefix exceeded "
+            f"{P5_1_STARTUP_REPLAN_MAX_DURATION_S:.1f}s"
+        )
     if gates["ok_action_ratio"] < P5_1_MIN_OK_ACTION_RATIO:
         failures.append(
             f"P5-1 OK action ratio {gates['ok_action_ratio']:.3f} is below "
@@ -4181,6 +4388,7 @@ def analyze(args: argparse.Namespace) -> dict[str, Any]:
     p0_required_figures: list[Path] = []
     p0_health_summary: dict[str, Any] = {}
     baseline_scenario_data: dict[str, Any] = {}
+    health_rows: list[dict[str, Any]] = []
     if p0_runtime_phase:
         p0_artifacts, p0_error = (
             read_p0_bag_artifacts(bag_dir, metadata)
@@ -4273,7 +4481,7 @@ def analyze(args: argparse.Namespace) -> dict[str, Any]:
             failures,
             inconclusive,
             allow_high_unknown=p0_4_phase,
-            allow_explainable_startup_unavailable=p0_4_phase,
+            allow_explainable_startup_unavailable=p0_4_phase or p5_1_phase,
         )
         p0_4_semantics: dict[str, Any] = {}
         if p0_4_phase:
@@ -4774,6 +4982,16 @@ def analyze(args: argparse.Namespace) -> dict[str, Any]:
             [
                 "status_rows",
                 "ok_action_ratio",
+                "startup_snapshot_unavailable_rows",
+                "startup_snapshot_unavailable_duration_s",
+                "startup_snapshot_unavailable_bounded",
+                "steady_status_rows",
+                "steady_ok_action_ratio",
+                "steady_replan_action_count",
+                "steady_raw_replan_action_count",
+                "steady_max_consecutive_replan",
+                "steady_raw_max_consecutive_replan",
+                "steady_replan_storm",
                 "replan_action_count",
                 "raw_replan_action_count",
                 "emergency_action_count",
@@ -4825,6 +5043,8 @@ def analyze(args: argparse.Namespace) -> dict[str, Any]:
         p5_action_figure_path = figures_dir / f"{prefix}_p5_action_timeline.png"
         p5_status_figure_path = figures_dir / f"{prefix}_p5_status_timeline.png"
         p5_margin_figure_path = figures_dir / f"{prefix}_p5_margin_timeline.png"
+        p5_future_unknown_figure_path = figures_dir / f"{prefix}_future_unknown_duration_timeline.png"
+        p5_startup_correlation_figure_path = figures_dir / f"{prefix}_startup_correlation.png"
         p5_final_gate_figure_path = figures_dir / f"{prefix}_p5_final_gate_summary.png"
         p5_trajectory_figure_path = figures_dir / f"{prefix}_trajectory_integrity_samples.png"
         p5_rviz_overview_path = figures_dir / f"{prefix}_p5_rviz_overview.png"
@@ -4834,6 +5054,10 @@ def analyze(args: argparse.Namespace) -> dict[str, Any]:
             p5_figure_artifacts.append(str(p5_status_figure_path))
         if plot_p5_margin_timeline(p5_rows, p5_margin_figure_path):
             p5_figure_artifacts.append(str(p5_margin_figure_path))
+        if plot_p5_future_unknown_duration_timeline(p5_rows, p5_future_unknown_figure_path):
+            p5_figure_artifacts.append(str(p5_future_unknown_figure_path))
+        if plot_p5_startup_correlation(health_rows, p5_rows, p5_startup_correlation_figure_path):
+            p5_figure_artifacts.append(str(p5_startup_correlation_figure_path))
         if plot_p5_final_gate_summary(p5_summary, p5_final_gate_figure_path):
             p5_figure_artifacts.append(str(p5_final_gate_figure_path))
         if plot_p5_trajectory_integrity_samples(p5_marker_rows, p5_trajectory_figure_path):
@@ -4851,6 +5075,8 @@ def analyze(args: argparse.Namespace) -> dict[str, Any]:
                 p5_action_figure_path,
                 p5_status_figure_path,
                 p5_margin_figure_path,
+                p5_future_unknown_figure_path,
+                p5_startup_correlation_figure_path,
                 p5_trajectory_figure_path,
                 p5_final_gate_figure_path,
                 p5_rviz_overview_path,

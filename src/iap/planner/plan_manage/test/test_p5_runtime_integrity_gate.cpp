@@ -4,6 +4,7 @@
 #include <cmath>
 #include <limits>
 #include <memory>
+#include <utility>
 #include <vector>
 
 #include <gtest/gtest.h>
@@ -95,18 +96,23 @@ class ConstantProvider final : public iap::RiskPredictionProvider {
 };
 
 std::shared_ptr<const iap::RiskGridSnapshot> makeSnapshot(double hpl,
-                                                          double vpl) {
+                                                          double vpl,
+                                                          std::vector<double> horizons = {0.0, 2.5, 5.0},
+                                                          bool available = true,
+                                                          bool valid = true) {
   iap::RiskGridMapParams params;
   params.resolution_m = 1.0;
   params.size_x_m = 6.0;
   params.size_y_m = 6.0;
   params.size_z_m = 4.0;
-  params.horizons_s = {0.0, 2.5, 5.0};
+  params.horizons_s = std::move(horizons);
   params.stale_timeout_s = 100.0;
   iap::RiskGridMap grid(params);
   ConstantProvider provider;
   provider.hpl = hpl;
   provider.vpl = vpl;
+  provider.available = available;
+  provider.valid = valid;
   EXPECT_TRUE(grid.refreshFromProvider(Eigen::Vector3d::Zero(), 0.0,
                                        provider));
   return grid.acquireSnapshot();
@@ -262,14 +268,22 @@ TEST(P5RuntimeIntegrityGateTest, CurrentStaleEscalates) {
   auto early = gate.evaluateRuntime(traj, snapshot, 0.1, 1.0);
   EXPECT_EQ(early.action, ego_planner::P5GateAction::OK);
 
-  auto replan = gate.evaluateRuntime(traj, snapshot, 0.6, 1.0);
+  auto stale_started = gate.evaluateRuntime(traj, snapshot, 0.6, 1.0);
+  EXPECT_EQ(stale_started.action, ego_planner::P5GateAction::OK);
+  EXPECT_NEAR(stale_started.current_stale_duration_s, 0.0, 1.0e-9);
+
+  auto replan = gate.evaluateRuntime(traj, snapshot, 1.2, 1.0);
   EXPECT_EQ(replan.action, ego_planner::P5GateAction::REQUEST_REPLAN);
   EXPECT_EQ(replan.reason, ego_planner::P5GateReason::CURRENT_STALE);
+  EXPECT_GE(replan.current_stale_duration_s,
+            config.current_stale_to_replan_s);
 
-  auto emergency = gate.evaluateRuntime(traj, snapshot, 2.1, 1.0);
+  auto emergency = gate.evaluateRuntime(traj, snapshot, 2.7, 1.0);
   EXPECT_EQ(emergency.action,
             ego_planner::P5GateAction::REQUEST_EMERGENCY_STOP_CANDIDATE);
   EXPECT_EQ(emergency.reason, ego_planner::P5GateReason::CURRENT_STALE);
+  EXPECT_GE(emergency.current_stale_duration_s,
+            config.current_stale_to_emergency_s);
 }
 
 TEST(P5RuntimeIntegrityGateTest, CurrentInvalidIsExplicit) {
@@ -286,7 +300,7 @@ TEST(P5RuntimeIntegrityGateTest, CurrentInvalidIsExplicit) {
   EXPECT_EQ(status.reason, ego_planner::P5GateReason::CURRENT_INVALID);
 }
 
-TEST(P5RuntimeIntegrityGateTest, FutureUnknownEscalates) {
+TEST(P5RuntimeIntegrityGateTest, FutureUnknownOnlyRequestsReplanWithoutEmergency) {
   auto config = baseConfig();
   config.current_stale_to_replan_s = 100.0;
   config.current_stale_to_emergency_s = 100.0;
@@ -300,10 +314,14 @@ TEST(P5RuntimeIntegrityGateTest, FutureUnknownEscalates) {
   EXPECT_EQ(replan.action, ego_planner::P5GateAction::REQUEST_REPLAN);
   EXPECT_EQ(replan.reason, ego_planner::P5GateReason::SNAPSHOT_UNAVAILABLE);
 
-  auto emergency = gate.evaluateRuntime(traj, nullptr, 1.2, 1.0);
-  EXPECT_EQ(emergency.action,
-            ego_planner::P5GateAction::REQUEST_EMERGENCY_STOP_CANDIDATE);
-  EXPECT_EQ(emergency.reason, ego_planner::P5GateReason::SNAPSHOT_UNAVAILABLE);
+  auto sustained = gate.evaluateRuntime(traj, nullptr, 1.2, 1.0);
+  EXPECT_EQ(sustained.action, ego_planner::P5GateAction::REQUEST_REPLAN);
+  EXPECT_EQ(sustained.raw_action, ego_planner::P5GateAction::REQUEST_REPLAN);
+  EXPECT_EQ(sustained.reason, ego_planner::P5GateReason::SNAPSHOT_UNAVAILABLE);
+  EXPECT_GT(sustained.future_unknown_duration_s,
+            config.future_unknown_to_emergency_s);
+  EXPECT_EQ(sustained.bad_count, 0);
+  EXPECT_DOUBLE_EQ(sustained.bad_ratio, 0.0);
 }
 
 TEST(P5RuntimeIntegrityGateTest, FutureBadInsideEmergencyTimeRequestsCandidate) {
@@ -340,6 +358,31 @@ TEST(P5RuntimeIntegrityGateTest, CurrentMsgConstantModeMatchesLegacyFutureAL) {
   EXPECT_NEAR(status.pred_hal_min, 10.0, 1.0e-9);
   EXPECT_NEAR(status.pred_val_min, 8.0, 1.0e-9);
   EXPECT_EQ(status.pred_al_invalid_count, 0);
+}
+
+TEST(P5RuntimeIntegrityGateTest, PredictionHorizonTailUsesCoveredSafeSamples) {
+  auto config = baseConfig();
+  config.current_stale_to_replan_s = 100.0;
+  config.current_stale_to_emergency_s = 100.0;
+  config.horizon_s = 2.0;
+  config.sample_dt_s = 0.25;
+  config.max_unknown_ratio = 0.1;
+  ego_planner::P5RuntimeIntegrityGate gate(nullptr, config, false);
+  gate.setCurrentIntegrityForTest(integrityMsg(0.0, 1.0, 1.0, 10.0, 10.0));
+  auto traj = makeTrajectory();
+  auto snapshot = makeSnapshot(1.0, 1.0, {0.0, 0.5, 1.0});
+
+  auto status = gate.evaluateRuntime(traj, snapshot, 0.0, 1.0);
+
+  EXPECT_EQ(status.action, ego_planner::P5GateAction::OK);
+  EXPECT_EQ(status.raw_action, ego_planner::P5GateAction::OK);
+  EXPECT_EQ(status.reason, ego_planner::P5GateReason::OK);
+  EXPECT_EQ(status.sample_count, 5);
+  EXPECT_EQ(status.unknown_count, 0);
+  EXPECT_DOUBLE_EQ(status.unknown_ratio, 0.0);
+  EXPECT_DOUBLE_EQ(status.bad_ratio, 0.0);
+  EXPECT_NEAR(status.future_min_im, 9.0, 1.0e-9);
+  EXPECT_NEAR(status.future_unknown_duration_s, 0.0, 1.0e-9);
 }
 
 TEST(P5RuntimeIntegrityGateTest, ConfigConstantModeCanTriggerFutureBad) {
@@ -421,61 +464,133 @@ TEST(P5RuntimeIntegrityGateTest, FinalGateFailureIsReturnedBeforePublishPath) {
   auto status = gate.evaluateFinal(traj, nullptr, 0.0, 1.0);
   EXPECT_EQ(status.action, ego_planner::P5GateAction::REQUEST_REPLAN);
   EXPECT_EQ(status.reason, ego_planner::P5GateReason::SNAPSHOT_UNAVAILABLE);
-  EXPECT_EQ(status.final_gate_fail_count, 1);
+  EXPECT_EQ(status.final_gate_fail_count, 0);
   EXPECT_NEAR(status.final_gate_fail_duration_s, 0.0, 1.0e-9);
-  EXPECT_STREQ(status.final_gate_last_reason.c_str(), "snapshot_unavailable");
+  EXPECT_TRUE(status.final_gate_last_reason.empty());
 }
 
-TEST(P5RuntimeIntegrityGateTest, FinalGateFailureCountEscalates) {
+TEST(P5RuntimeIntegrityGateTest, StartupSnapshotUnavailableDoesNotEscalateFinalGateFailure) {
+  auto config = baseConfig();
+  config.current_stale_to_replan_s = 100.0;
+  config.current_stale_to_emergency_s = 100.0;
+  config.final_gate_max_consecutive_failures = 2;
+  config.final_gate_max_failure_duration_s = 0.1;
+  ego_planner::P5RuntimeIntegrityGate gate(nullptr, config, false);
+  gate.setCurrentIntegrityForTest(integrityMsg(0.0, 1.0, 1.0, 10.0, 10.0));
+  auto traj = makeTrajectory();
+
+  for (int i = 0; i < 5; ++i) {
+    auto status = gate.evaluateFinal(traj, nullptr, 0.1 * i, 1.0);
+    EXPECT_EQ(status.action, ego_planner::P5GateAction::REQUEST_REPLAN);
+    EXPECT_EQ(status.raw_action, ego_planner::P5GateAction::REQUEST_REPLAN);
+    EXPECT_EQ(status.reason, ego_planner::P5GateReason::SNAPSHOT_UNAVAILABLE);
+    EXPECT_EQ(status.final_gate_fail_count, 0);
+    EXPECT_NEAR(status.final_gate_fail_duration_s, 0.0, 1.0e-9);
+    EXPECT_TRUE(status.final_gate_last_reason.empty());
+  }
+}
+
+TEST(P5RuntimeIntegrityGateTest, TransientCurrentStaleDoesNotEscalateFinalGateFailure) {
+  auto config = baseConfig();
+  config.final_gate_max_consecutive_failures = 2;
+  config.final_gate_max_failure_duration_s = 0.1;
+  ego_planner::P5RuntimeIntegrityGate gate(nullptr, config, false);
+  gate.setCurrentIntegrityForTest(integrityMsg(0.0, 1.0, 1.0, 10.0, 10.0));
+  auto traj = makeTrajectory();
+  auto snapshot = makeSnapshot(1.0, 1.0);
+
+  auto stale_started = gate.evaluateRuntime(traj, snapshot, 0.6, 1.0);
+  EXPECT_EQ(stale_started.action, ego_planner::P5GateAction::OK);
+  EXPECT_NEAR(stale_started.current_stale_duration_s, 0.0, 1.0e-9);
+
+  for (int i = 0; i < 4; ++i) {
+    auto status = gate.evaluateFinal(traj, snapshot, 1.2 + 0.1 * i, 1.0);
+    EXPECT_EQ(status.action, ego_planner::P5GateAction::REQUEST_REPLAN);
+    EXPECT_EQ(status.raw_action, ego_planner::P5GateAction::REQUEST_REPLAN);
+    EXPECT_EQ(status.reason, ego_planner::P5GateReason::CURRENT_STALE);
+    EXPECT_EQ(status.final_gate_fail_count, 0);
+    EXPECT_NEAR(status.final_gate_fail_duration_s, 0.0, 1.0e-9);
+    EXPECT_TRUE(status.final_gate_last_reason.empty());
+    EXPECT_EQ(status.bad_count, 0);
+    EXPECT_DOUBLE_EQ(status.bad_ratio, 0.0);
+  }
+}
+
+TEST(P5RuntimeIntegrityGateTest, FutureUnknownDurationClearsAfterFieldRecovery) {
+  auto config = baseConfig();
+  config.current_stale_to_replan_s = 100.0;
+  config.current_stale_to_emergency_s = 100.0;
+  config.max_unknown_ratio = 0.1;
+  config.future_unknown_to_emergency_s = 1.0;
+  ego_planner::P5RuntimeIntegrityGate gate(nullptr, config, false);
+  gate.setCurrentIntegrityForTest(integrityMsg(0.0, 1.0, 1.0, 10.0, 10.0));
+  auto traj = makeTrajectory();
+
+  auto first_unknown = gate.evaluateRuntime(traj, nullptr, 0.0, 1.0);
+  EXPECT_EQ(first_unknown.action, ego_planner::P5GateAction::REQUEST_REPLAN);
+  auto unknown = gate.evaluateRuntime(traj, nullptr, 1.2, 1.0);
+  EXPECT_EQ(unknown.action, ego_planner::P5GateAction::REQUEST_REPLAN);
+  EXPECT_GT(unknown.future_unknown_duration_s, 0.0);
+
+  auto recovered = gate.evaluateRuntime(traj, makeSnapshot(1.0, 1.0), 1.3, 1.0);
+  EXPECT_EQ(recovered.action, ego_planner::P5GateAction::OK);
+  EXPECT_EQ(recovered.raw_action, ego_planner::P5GateAction::OK);
+  EXPECT_NEAR(recovered.future_unknown_duration_s, 0.0, 1.0e-9);
+  EXPECT_EQ(recovered.unknown_count, 0);
+}
+
+TEST(P5RuntimeIntegrityGateTest, FinalGateFailureCountEscalatesForHardLowMargin) {
   auto config = baseConfig();
   config.current_stale_to_replan_s = 100.0;
   config.current_stale_to_emergency_s = 100.0;
   config.final_gate_max_consecutive_failures = 2;
   config.final_gate_max_failure_duration_s = 100.0;
   ego_planner::P5RuntimeIntegrityGate gate(nullptr, config, false);
-  gate.setCurrentIntegrityForTest(integrityMsg(0.0, 1.0, 1.0, 10.0, 10.0));
+  gate.setCurrentIntegrityForTest(integrityMsg(0.0, 9.8, 9.8, 10.0, 10.0));
   auto traj = makeTrajectory();
+  auto snapshot = makeSnapshot(1.0, 1.0);
 
-  auto first = gate.evaluateFinal(traj, nullptr, 0.0, 1.0);
+  auto first = gate.evaluateFinal(traj, snapshot, 0.0, 1.0);
   EXPECT_EQ(first.action, ego_planner::P5GateAction::REQUEST_REPLAN);
-  EXPECT_EQ(first.reason, ego_planner::P5GateReason::SNAPSHOT_UNAVAILABLE);
+  EXPECT_EQ(first.reason, ego_planner::P5GateReason::CURRENT_LOW_MARGIN);
   EXPECT_EQ(first.raw_action, ego_planner::P5GateAction::REQUEST_REPLAN);
   EXPECT_EQ(first.final_gate_fail_count, 1);
   EXPECT_NEAR(first.final_gate_fail_duration_s, 0.0, 1.0e-9);
-  EXPECT_STREQ(first.final_gate_last_reason.c_str(), "snapshot_unavailable");
+  EXPECT_STREQ(first.final_gate_last_reason.c_str(), "current_low_margin");
 
-  auto second = gate.evaluateFinal(traj, nullptr, 0.1, 1.0);
+  auto second = gate.evaluateFinal(traj, snapshot, 0.1, 1.0);
   EXPECT_EQ(second.action,
             ego_planner::P5GateAction::REQUEST_EMERGENCY_STOP_CANDIDATE);
   EXPECT_EQ(second.raw_action, ego_planner::P5GateAction::REQUEST_REPLAN);
   EXPECT_EQ(second.reason, ego_planner::P5GateReason::FINAL_GATE_FAILED);
   EXPECT_EQ(second.final_gate_fail_count, 2);
   EXPECT_NEAR(second.final_gate_fail_duration_s, 0.1, 1.0e-9);
-  EXPECT_STREQ(second.final_gate_last_reason.c_str(), "snapshot_unavailable");
+  EXPECT_STREQ(second.final_gate_last_reason.c_str(), "current_low_margin");
 }
 
-TEST(P5RuntimeIntegrityGateTest, FinalGateFailureDurationEscalates) {
+TEST(P5RuntimeIntegrityGateTest, FinalGateFailureDurationEscalatesForHardLowMargin) {
   auto config = baseConfig();
   config.current_stale_to_replan_s = 100.0;
   config.current_stale_to_emergency_s = 100.0;
   config.final_gate_max_consecutive_failures = 10;
   config.final_gate_max_failure_duration_s = 0.5;
   ego_planner::P5RuntimeIntegrityGate gate(nullptr, config, false);
-  gate.setCurrentIntegrityForTest(integrityMsg(0.0, 1.0, 1.0, 10.0, 10.0));
+  gate.setCurrentIntegrityForTest(integrityMsg(0.0, 9.8, 9.8, 10.0, 10.0));
   auto traj = makeTrajectory();
+  auto snapshot = makeSnapshot(1.0, 1.0);
 
-  auto first = gate.evaluateFinal(traj, nullptr, 0.0, 1.0);
+  auto first = gate.evaluateFinal(traj, snapshot, 0.0, 1.0);
   EXPECT_EQ(first.action, ego_planner::P5GateAction::REQUEST_REPLAN);
   EXPECT_EQ(first.final_gate_fail_count, 1);
 
-  auto second = gate.evaluateFinal(traj, nullptr, 0.6, 1.0);
+  auto second = gate.evaluateFinal(traj, snapshot, 0.6, 1.0);
   EXPECT_EQ(second.action,
             ego_planner::P5GateAction::REQUEST_EMERGENCY_STOP_CANDIDATE);
   EXPECT_EQ(second.raw_action, ego_planner::P5GateAction::REQUEST_REPLAN);
   EXPECT_EQ(second.reason, ego_planner::P5GateReason::FINAL_GATE_FAILED);
   EXPECT_EQ(second.final_gate_fail_count, 2);
   EXPECT_NEAR(second.final_gate_fail_duration_s, 0.6, 1.0e-9);
-  EXPECT_STREQ(second.final_gate_last_reason.c_str(), "snapshot_unavailable");
+  EXPECT_STREQ(second.final_gate_last_reason.c_str(), "current_low_margin");
 }
 
 TEST(P5RuntimeIntegrityGateTest, FinalGatePassResetsFailureBudget) {
@@ -488,10 +603,12 @@ TEST(P5RuntimeIntegrityGateTest, FinalGatePassResetsFailureBudget) {
   gate.setCurrentIntegrityForTest(integrityMsg(0.0, 1.0, 1.0, 10.0, 10.0));
   auto traj = makeTrajectory();
 
-  auto failed = gate.evaluateFinal(traj, nullptr, 0.0, 1.0);
+  gate.setCurrentIntegrityForTest(integrityMsg(0.0, 9.8, 9.8, 10.0, 10.0));
+  auto failed = gate.evaluateFinal(traj, makeSnapshot(1.0, 1.0), 0.0, 1.0);
   EXPECT_EQ(failed.action, ego_planner::P5GateAction::REQUEST_REPLAN);
   EXPECT_EQ(failed.final_gate_fail_count, 1);
 
+  gate.setCurrentIntegrityForTest(integrityMsg(0.1, 1.0, 1.0, 10.0, 10.0));
   auto passed = gate.evaluateFinal(traj, makeSnapshot(1.0, 1.0), 0.1, 1.0);
   EXPECT_EQ(passed.action, ego_planner::P5GateAction::OK);
   EXPECT_EQ(passed.reason, ego_planner::P5GateReason::OK);
@@ -499,10 +616,34 @@ TEST(P5RuntimeIntegrityGateTest, FinalGatePassResetsFailureBudget) {
   EXPECT_NEAR(passed.final_gate_fail_duration_s, 0.0, 1.0e-9);
   EXPECT_TRUE(passed.final_gate_last_reason.empty());
 
-  auto failed_again = gate.evaluateFinal(traj, nullptr, 0.2, 1.0);
+  gate.setCurrentIntegrityForTest(integrityMsg(0.2, 9.8, 9.8, 10.0, 10.0));
+  auto failed_again = gate.evaluateFinal(traj, makeSnapshot(1.0, 1.0), 0.2, 1.0);
   EXPECT_EQ(failed_again.action, ego_planner::P5GateAction::REQUEST_REPLAN);
   EXPECT_EQ(failed_again.final_gate_fail_count, 1);
   EXPECT_NEAR(failed_again.final_gate_fail_duration_s, 0.0, 1.0e-9);
+}
+
+TEST(P5RuntimeIntegrityGateTest, NominalFinalGateKeepsFailureCountZero) {
+  auto config = baseConfig();
+  config.current_stale_to_replan_s = 100.0;
+  config.current_stale_to_emergency_s = 100.0;
+  config.horizon_s = 2.0;
+  config.sample_dt_s = 0.25;
+  ego_planner::P5RuntimeIntegrityGate gate(nullptr, config, false);
+  gate.setCurrentIntegrityForTest(integrityMsg(0.0, 1.0, 1.0, 10.0, 10.0));
+  auto traj = makeTrajectory();
+  auto startup = gate.evaluateFinal(traj, nullptr, 0.0, 1.0);
+  EXPECT_EQ(startup.action, ego_planner::P5GateAction::REQUEST_REPLAN);
+  EXPECT_EQ(startup.final_gate_fail_count, 0);
+
+  for (int i = 0; i < 3; ++i) {
+    auto status = gate.evaluateFinal(
+        traj, makeSnapshot(1.0, 1.0, {0.0, 0.5, 1.0}), 0.1 * (i + 1), 1.0);
+    EXPECT_EQ(status.action, ego_planner::P5GateAction::OK);
+    EXPECT_EQ(status.reason, ego_planner::P5GateReason::OK);
+    EXPECT_EQ(status.final_gate_fail_count, 0);
+    EXPECT_NEAR(status.final_gate_fail_duration_s, 0.0, 1.0e-9);
+  }
 }
 
 TEST(P5RuntimeIntegrityGateTest, StatusCarriesVizSamplesAndMarkers) {

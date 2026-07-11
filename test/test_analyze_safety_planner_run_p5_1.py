@@ -57,7 +57,28 @@ def healthy_p0():
     return {
         "row_count": 10,
         "stale_true_count": 0,
+        "ready_false_count": 0,
+        "reason_counts": {"ok": 10},
     }
+
+
+def startup_snapshot_unavailable_row(**overrides):
+    row = p5_row(
+        bag_time_s=0.0,
+        phase="final",
+        action="REQUEST_REPLAN",
+        raw_action="REQUEST_REPLAN",
+        reason="snapshot_unavailable",
+        current_im_h="",
+        current_im_v="",
+        current_im_min="",
+        future_min_im="",
+        unknown_ratio=1.0,
+        sample_count=1,
+        unknown_count=1,
+    )
+    row.update(overrides)
+    return row
 
 
 class P5_1AnalyzerTest(unittest.TestCase):
@@ -105,6 +126,41 @@ class P5_1AnalyzerTest(unittest.TestCase):
         self.assertTrue(summary["replan_storm"])
         self.assertTrue(any("replan storm" in failure for failure in failures), failures)
 
+    def test_p5_1_allows_bounded_startup_snapshot_unavailable_replan_prefix(self):
+        rows = [
+            startup_snapshot_unavailable_row(bag_time_s=0.001 * idx)
+            for idx in range(analyzer.P5_REPLAN_STORM_CONSECUTIVE + 2)
+        ]
+        rows.extend(p5_row(bag_time_s=1.0 + idx) for idx in range(20))
+
+        summary, gates, failures, inconclusive = self.validate_rows(rows)
+
+        self.assertEqual([], failures)
+        self.assertEqual([], inconclusive)
+        self.assertTrue(gates["passed"])
+        self.assertEqual(
+            summary["startup_snapshot_unavailable_rows"],
+            analyzer.P5_REPLAN_STORM_CONSECUTIVE + 2,
+        )
+        self.assertTrue(summary["startup_snapshot_unavailable_bounded"])
+        self.assertEqual(summary["steady_action_counts"], {"OK": 20})
+        self.assertEqual(gates["ok_action_ratio"], 1.0)
+
+    def test_p5_1_fails_on_long_startup_snapshot_unavailable_prefix(self):
+        rows = [
+            startup_snapshot_unavailable_row(bag_time_s=idx)
+            for idx in range(analyzer.P5_REPLAN_STORM_CONSECUTIVE + 1)
+        ]
+        rows.extend(p5_row(bag_time_s=10.0 + idx) for idx in range(20))
+
+        summary, _, failures, _ = self.validate_rows(rows)
+
+        self.assertFalse(summary["startup_snapshot_unavailable_bounded"])
+        self.assertTrue(
+            any("startup snapshot_unavailable replan prefix" in failure for failure in failures),
+            failures,
+        )
+
     def test_p5_1_fails_on_nonzero_final_gate_fail_count(self):
         rows = [p5_row(final_gate_fail_count=1, final_gate_fail_duration_s=0.1)]
 
@@ -122,6 +178,28 @@ class P5_1AnalyzerTest(unittest.TestCase):
         )
 
         self.assertTrue(any("P0 health reported stale=true" in failure for failure in failures), failures)
+
+    def test_p5_1_allows_bounded_startup_snapshot_unavailable(self):
+        rows = [p5_row(bag_time_s=1.0 + idx) for idx in range(20)]
+
+        _, gates, failures, inconclusive = self.validate_rows(
+            rows,
+            {
+                "row_count": 46,
+                "ready_false_count": 3,
+                "ready_false_ratio": 3 / 46,
+                "ready_false_max_consecutive": 3,
+                "stale_true_count": 3,
+                "stale_true_ratio": 3 / 46,
+                "stale_true_max_consecutive": 3,
+                "reason_counts": {"snapshot_unavailable": 3, "ok": 43},
+            },
+        )
+
+        self.assertEqual([], failures)
+        self.assertEqual([], inconclusive)
+        self.assertTrue(gates["p0_non_stale"])
+        self.assertTrue(gates["p0_startup_unavailable_explained"])
 
     def test_p5_1_fails_on_missing_p5_required_topic(self):
         topic_counts = {topic: 1 for topic in analyzer.P5_TOPIC_EXPECTATIONS}
