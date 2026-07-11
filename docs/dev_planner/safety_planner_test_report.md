@@ -1978,3 +1978,98 @@ Updated conclusion:
 2. The low valid-ratio blocker was primarily LiDAR FIM coverage relative to a 30m risk grid in a finite corridor map, not GNSS/odom freshness. The 12m P0 predictor FIM radius raises mean valid ratio from about `0.52` to `0.838`.
 3. Source-control evidence now holds in the same run: `predictor_gnss_used_count=0`, `predictor_lidar_used_count>0`, no `stale_gnss_epoch`, and positive LiDAR primitive diagnostics.
 4. Do not mark formal P0-3 PASS solely from this run because analyzer comparison against healthy P0-1/P0-2 references remains inconclusive.
+
+### P0-3 Re-Acceptance Against P0-P5 Test Plan
+
+Result: **PASS / CONTINUE TO P0-4**.
+
+This is a re-acceptance of the latest P0-3 artifact against `docs/dev_planner/safety_planner_p0_p5_test_plan.md`. No new launch was required; the previous P0-3 run was re-analyzed with the required P0-1 open-sky and healthy P0-2 degraded-GNSS references. With those references supplied, the analyzer reports `status=PASS`, `passed=true`, and `next_debug_branch=continue_to_P0-4_next_phase_validation`.
+
+The P0-3 test-plan row requires a corridor-degeneracy P0-only run with `T_BASE`, `T_LIDAR`, `T_P0_HEALTH`, and `T_P0_RVIZ` evidence; hard fails include topic loss, full-frame unknown, unexplained occupied/provider invalid counters, stale health, and valid ratio below the P0 threshold. The latest run satisfies those hard gates. It also satisfies the P0-3-control source evidence in the same artifact: P0 predictor uses LiDAR advisory FIM and does not use GNSS advisory FIM.
+
+Acceptance command:
+
+```bash
+source /opt/ros/jazzy/setup.bash
+source install/setup.bash
+
+python3 scripts/dev_planner/analyze_safety_planner_run.py \
+  --experiment-id P0-3 \
+  --export-dir /home/dev/ws_iap/src/iap/results/planner_validation/exports/test_planner_p0_open_sky_lidar_corridor_degenerate_1783680955170 \
+  --bag-dir /home/dev/ws_iap/src/iap/results/planner_validation/bags/test_planner_p0_open_sky_lidar_corridor_degenerate_20260710T105555Z \
+  --baseline-export-dir /home/dev/ws_iap/src/iap/results/planner_validation/exports/test_planner_p0_open_sky_gnss_open_sky_1783481479509 \
+  --baseline-bag-dir /home/dev/ws_iap/src/iap/results/planner_validation/bags/test_planner_p0_open_sky_gnss_open_sky_20260708T033119Z \
+  --p0-2-export-dir /home/dev/ws_iap/src/iap/results/planner_validation/exports/test_planner_p0_open_sky_gnss_degraded_lidar_good_1783489818760 \
+  --p0-2-bag-dir /home/dev/ws_iap/src/iap/results/planner_validation/bags/test_planner_p0_open_sky_gnss_degraded_lidar_good_20260708T055018Z \
+  --fail-on-threshold
+```
+
+| Field | Value |
+|---|---|
+| Run time | `2026-07-10T10:55:55Z` |
+| Current P0-3 export | `/home/dev/ws_iap/src/iap/results/planner_validation/exports/test_planner_p0_open_sky_lidar_corridor_degenerate_1783680955170` |
+| Current P0-3 bag | `/home/dev/ws_iap/src/iap/results/planner_validation/bags/test_planner_p0_open_sky_lidar_corridor_degenerate_20260710T105555Z` |
+| P0-1 reference export | `/home/dev/ws_iap/src/iap/results/planner_validation/exports/test_planner_p0_open_sky_gnss_open_sky_1783481479509` |
+| P0-1 reference bag | `/home/dev/ws_iap/src/iap/results/planner_validation/bags/test_planner_p0_open_sky_gnss_open_sky_20260708T033119Z` |
+| Healthy P0-2 reference export | `/home/dev/ws_iap/src/iap/results/planner_validation/exports/test_planner_p0_open_sky_gnss_degraded_lidar_good_1783489818760` |
+| Healthy P0-2 reference bag | `/home/dev/ws_iap/src/iap/results/planner_validation/bags/test_planner_p0_open_sky_gnss_degraded_lidar_good_20260708T055018Z` |
+| Analyzer summary | `/home/dev/ws_iap/src/iap/results/planner_validation/exports/test_planner_p0_open_sky_lidar_corridor_degenerate_1783680955170/metadata/safety_planner_analysis_summary.json` |
+| Analyzer status | `PASS`; `failures=[]`, `inconclusive=[]`, `passed=true` |
+| Next branch | `continue_to_P0-4_next_phase_validation` |
+
+Acceptance matrix:
+
+| Gate from test plan | Result | Evidence |
+|---|---|---|
+| Launch artifact and validator exist | `PASS` | Current run export, bag, manifest, validator CSV/summary are present; validator `passed=true`, `message_count=579` |
+| `T_BASE` integrity topic healthy | `PASS` | `/iap/integrity` count `580`, rate `9.677Hz`, status `PASS` |
+| `T_LIDAR` LiDAR topic healthy | `PASS` | `/sim/drone_0/lidar_body` count `592`, rate `9.878Hz`, status `PASS` |
+| `T_P0_HEALTH` risk health active | `PASS` | `/planning/risk_grid_health` count `63`, rate `1.051Hz`, status `PASS` |
+| `T_P0_RVIZ` P0 RViz clouds active | `PASS` | `/iap/rviz/predicted_pl_cloud=63`, `/iap/rviz/risk_validity_cloud=63`, both status `PASS` |
+| P0 health stable | `PASS` | `ready_false_count=0`, `stale_true_count=0`, `full_unknown_count=0`, `reason_counts={ok:63}` |
+| Valid ratio above threshold | `PASS` | `valid_ratio_mean=0.837578`, min `0.792344`, max `0.922500` |
+| Refresh cadence acceptable | `PASS` | Mean refresh `203.742ms`; health topic `1.051Hz` |
+| Provider invalid/occupied skip explained | `PASS` | `provider_invalid_count_max=11630`, `provider_stale_count_max=0`, dominant unknown reason `gnss:gnss_disabled;lidar:missing_lidar_normals` |
+| P0 predictor source control | `PASS` | `predictor_gnss_used_count_max=0`, `predictor_lidar_used_count_max=59040` |
+| LiDAR predictor inputs populated | `PASS` | map points `55917`, FIM primitives `1969`, valid normals `1969`, fallback reason empty |
+| Odom health gate | `PASS` | RMS `1.124m`, max `1.562m`, final `1.404m`, jumps `0`, status `PASS` |
+| P5 remains absent while P0-only | `PASS` | `/planning/integrity_gate_status` count `0`, status `PASS` |
+| Analyzer final status | `PASS` | `passed=true`, no failures, no inconclusive conditions |
+
+PL/cost comparison:
+
+| Metric | P0-1 open-sky | Healthy P0-2 degraded GNSS | P0-3 corridor | Conclusion |
+|---|---:|---:|---:|---|
+| Valid ratio | `0.993750` | `0.972188` | `0.798438` | P0-3 remains usable and above the P0 health threshold, with more unknown cells expected from corridor geometry |
+| Unknown ratio | `0.006250` | `0.027813` | `0.201563` | Higher unknown fraction is explained by occupied skip and `lidar:missing_lidar_normals`, not stale provider data |
+| Stale ratio | `0.000000` | `0.000000` | `0.000000` | Final PL cloud is fresh |
+| PL mean | `11.181885` | `19.146271` | `2.030898` | P0-3 LiDAR-only advisory is not a mean-PL elevation case; do not use mean PL as the corridor-risk proof |
+| PL max | `11.181885` | `19.146271` | `14.112707` | P0-3 has localized high PL above P0-1, visible in the snapshot and delta figures |
+| c_pi mean | `11.181885` | `19.146271` | `2.030898` | Cost mean is lower because many valid LiDAR-only cells are low-cost and unknown cells are excluded from the PL-cloud mean |
+| c_pi max | `11.181885` | `19.146271` | `14.112707` | Local corridor risk exists, but the aggregate mean remains lower than P0-1/P0-2 |
+
+Figure conclusions:
+
+| Figure | Conclusion |
+|---|---|
+| ![P0-3 accepted scenario top-down](../../results/planner_validation/exports/test_planner_p0_open_sky_lidar_corridor_degenerate_1783680955170/figures/p0_3_scenario_topdown.png) | Corridor scenario, truth trajectory, IAP odom, planner trajectory, and P0-1 reference overlay are present. |
+| ![P0-3 accepted topic activity](../../results/planner_validation/exports/test_planner_p0_open_sky_lidar_corridor_degenerate_1783680955170/figures/p0_3_topic_activity_timeline.png) | Required P0-3 topics are present through the active window, including risk health and P0 RViz clouds. |
+| ![P0-3 accepted integrity source timeline](../../results/planner_validation/exports/test_planner_p0_open_sky_lidar_corridor_degenerate_1783680955170/figures/p0_3_integrity_source_timeline.png) | Integrity validator sees GNSS/LiDAR/fallback as configured for the GNSS-assisted odom run. |
+| ![P0-3 accepted HPL/VPL timeline](../../results/planner_validation/exports/test_planner_p0_open_sky_lidar_corridor_degenerate_1783680955170/figures/p0_3_integrity_hpl_vpl_timeline.png) | Current monitor PL remains finite and continuous for the P0 predictor prior. |
+| ![P0-3 accepted P0 health](../../results/planner_validation/exports/test_planner_p0_open_sky_lidar_corridor_degenerate_1783680955170/figures/p0_3_p0_health_timeline.png) | P0 health stays ready, non-stale, and above the valid-ratio threshold; no startup full-frame unknown window remains. |
+| ![P0-3 accepted reason histogram](../../results/planner_validation/exports/test_planner_p0_open_sky_lidar_corridor_degenerate_1783680955170/figures/p0_3_p0_reason_histogram.png) | Health reason is `ok`; partial unknown cells are explained through dominant unknown fields rather than top-level failure reasons. |
+| ![P0-3 accepted PL cost distribution](../../results/planner_validation/exports/test_planner_p0_open_sky_lidar_corridor_degenerate_1783680955170/figures/p0_3_pl_cost_distribution.png) | Final PL/cost distribution is fresh and mostly valid, with local high-cost tail rather than a high mean. |
+| ![P0-3 accepted risk-grid snapshot](../../results/planner_validation/exports/test_planner_p0_open_sky_lidar_corridor_degenerate_1783680955170/figures/p0_3_risk_grid_snapshot_overview.png) | Latest snapshot shows the usable P0 risk field and residual unknown regions from LiDAR FIM coverage. |
+| ![P0-3 accepted odom top-down](../../results/planner_validation/exports/test_planner_p0_open_sky_lidar_corridor_degenerate_1783680955170/figures/p0_3_odom_truth_topdown.png) | IAP odom stays close enough to truth for the P0-3 odom gate. |
+| ![P0-3 accepted odom error](../../results/planner_validation/exports/test_planner_p0_open_sky_lidar_corridor_degenerate_1783680955170/figures/p0_3_odom_error_timeline.png) | Odom error remains inside the analyzer thresholds; no odom drift branch is active. |
+| ![P0-3 accepted health vs odom](../../results/planner_validation/exports/test_planner_p0_open_sky_lidar_corridor_degenerate_1783680955170/figures/p0_3_p0_health_vs_odom_error.png) | P0 health remains stable while odom error stays below drift thresholds, separating this accepted run from earlier odom failures. |
+| ![P0-3 accepted vs P0-1 delta](../../results/planner_validation/exports/test_planner_p0_open_sky_lidar_corridor_degenerate_1783680955170/figures/p0_3_vs_p0_1_delta.png) | P0-3 differs from open-sky P0-1 through lower mean PL, higher unknown fraction, and localized higher PL/cost cells. |
+| ![P0-3 accepted vs P0-2 delta](../../results/planner_validation/exports/test_planner_p0_open_sky_lidar_corridor_degenerate_1783680955170/figures/p0_3_vs_p0_2_delta.png) | P0-3 is not a higher-mean-PL case than healthy P0-2; this is expected because P0 predictor is forced to LiDAR-only while P0-2 is degraded-GNSS driven. |
+
+Final conclusion:
+
+1. P0-3 is now accepted under the P0-P5 test-plan hard gates: artifacts exist, validator passes, required topics are active, P0 health is stable, invalid cells are explainable, odom is healthy, and analyzer status is `PASS`.
+2. The specific historical blockers are closed for this artifact: no `stale_gnss_epoch` dominance, no all-unknown grid, no slow refresh, no LiDAR source-counter gap, and no odom drift.
+3. P0-3-control evidence is satisfied in the same run: GNSS remains available for odometry but P0 predictor source counters prove `gnss_used=0` and `lidar_used>0`.
+4. The remaining caveat is interpretation, not acceptance: P0-3 does not show a higher aggregate PL/cost mean than P0-1/P0-2. The accepted corridor evidence is localized PL/cost and explainable LiDAR coverage/unknown structure. If a reviewer requires mean PL elevation as a separate scientific claim, that should be a new fixture/model-tuning task rather than a P0-3 hard-gate blocker.
+5. Next step per analyzer and test plan: proceed to `P0-4`; do not reopen P0-3 unless the acceptance definition is changed to require aggregate mean PL/cost elevation.
