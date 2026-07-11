@@ -27,3 +27,15 @@ _Avoid_: certified current LiDAR ARAIM, odometry source, raw obstacle map
 **Source counter**:
 A P0 health metric that counts grid-cell predictions whose source flags show GNSS, LiDAR, prior, regularization, or conservative max participation.
 _Avoid_: provider query count, valid ratio
+
+**Synthetic affine field**:
+A deterministic analyzer-only risk field used for interpolation acceptance, defined as `c_pi = hpl_pred = 20 + 2*x + 3*y + 4*z + 5*tau`.
+_Avoid_: live GNSS source, live LiDAR source, ROS bag scenario
+
+**Query sample**:
+A fixed point `(x, y, z, tau)` evaluated against a synthetic or recorded risk field to compare expected and actual `c_pi`/`hpl_pred` values.
+_Avoid_: grid cell, trajectory waypoint
+
+**Gradient direction**:
+The spatial direction in which `c_pi` increases for a risk field; for the P0-5 synthetic affine field it is `(2, 3, 4)`, so `-grad(c_pi)` must point toward lower risk.
+_Avoid_: vehicle heading, odom direction

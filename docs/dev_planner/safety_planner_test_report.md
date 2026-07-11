@@ -2207,3 +2207,83 @@ Final conclusion:
 1. P0-4 passes the fallback/unknown semantic gate: required topics are active, validator passes, P5 runtime/final remain disabled, high unknown is explicitly reasoned, and zero-risk fallback encoding is absent.
 2. The three startup `snapshot_unavailable` rows are accepted only for P0-4 because they are explicit, short-lived, and below the 10% ready/stale ratio bound; this does not change P0-1 through P0-3 healthy-field gates.
 3. Proceed to `P0-5`.
+
+### P0-5 Synthetic Affine Field Interpolation
+
+Result: **PASS / CONTINUE TO P0-6**.
+
+P0-5 is an analyzer-only synthetic interpolation acceptance. It does not require a ROS launch, bag, manifest, validator summary, or topic activity artifact. The existing P0-4 summary was checked as the entry precondition and still reports `experiment_id=P0-4`, `status=PASS`, `passed=true`, `failures=[]`, `inconclusive=[]`, and `next_debug_branch=continue_to_P0-5`.
+
+Analyzer command:
+
+```bash
+cd /home/dev/ws_iap
+
+python3 src/iap/scripts/dev_planner/analyze_safety_planner_run.py \
+  --experiment-id P0-5 \
+  --export-dir /home/dev/ws_iap/src/iap/results/planner_validation/exports/test_planner_p0_5_synthetic_affine_20260711T075702Z \
+  --synthetic-only \
+  --fail-on-threshold
+```
+
+Artifact paths:
+
+| Field | Value |
+|---|---|
+| Export dir | `/home/dev/ws_iap/src/iap/results/planner_validation/exports/test_planner_p0_5_synthetic_affine_20260711T075702Z` |
+| Analyzer summary | `/home/dev/ws_iap/src/iap/results/planner_validation/exports/test_planner_p0_5_synthetic_affine_20260711T075702Z/metadata/safety_planner_analysis_summary.json` |
+| Query CSV | `/home/dev/ws_iap/src/iap/results/planner_validation/exports/test_planner_p0_5_synthetic_affine_20260711T075702Z/csv/p0_5_synthetic_query_samples.csv` |
+| Figures dir | `/home/dev/ws_iap/src/iap/results/planner_validation/exports/test_planner_p0_5_synthetic_affine_20260711T075702Z/figures` |
+
+Analyzer status:
+
+| Gate | Result | Evidence |
+|---|---|---|
+| Analyzer status | `PASS` | `status=PASS`, `passed=true`, command exited `0` with `--fail-on-threshold` |
+| Synthetic-only isolation | `PASS` | No bag, manifest, validator, or ROS topic artifacts are required for P0-5 |
+| Missing capabilities | `PASS` | `missing_capabilities=[]` |
+| Next branch | `PASS` | `next_debug_branch=continue_to_P0-6` |
+
+Synthetic field:
+
+| Field | Value |
+|---|---|
+| Formula | `c_pi = hpl_pred = 20 + 2*x + 3*y + 4*z + 5*tau` |
+| Gradient | `(2.0, 3.0, 4.0)` |
+| Negative gradient judgment | `-grad(c_pi)` points toward lower risk for every query sample |
+
+Query samples:
+
+| Sample | x | y | z | tau | expected `c_pi` | actual `c_pi` | `hpl_pred` | `abs_error` | valid | unknown | stale | reason | `-grad` lower risk |
+|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---|---:|
+| 0 | `-0.75` | `-0.25` | `0.0` | `0.0` | `17.75` | `17.75` | `17.75` | `0.0` | `1` | `0` | `0` | `ok` | `1` |
+| 1 | `-0.25` | `0.1` | `0.2` | `0.25` | `21.85` | `21.85` | `21.85` | `0.0` | `1` | `0` | `0` | `ok` | `1` |
+| 2 | `0.25` | `0.5` | `-0.2` | `0.5` | `23.7` | `23.7` | `23.7` | `0.0` | `1` | `0` | `0` | `ok` | `1` |
+| 3 | `0.6` | `-0.4` | `0.3` | `1.0` | `26.2` | `26.2` | `26.2` | `0.0` | `1` | `0` | `0` | `ok` | `1` |
+| 4 | `0.9` | `0.75` | `0.1` | `1.5` | `31.95` | `31.95` | `31.95` | `0.0` | `1` | `0` | `0` | `ok` | `1` |
+
+Hard gates:
+
+| Check | Value | Judgment |
+|---|---:|---|
+| Query count | `5` | Fixed P0-5 query set was evaluated |
+| `actual_c_pi == expected_c_pi` | `true` | All query values match the analytic affine field |
+| `hpl_pred == expected_c_pi` | `true` | HPL prediction matches the analytic affine field |
+| Max `abs_error` | `0.0` | Below the `1e-9` hard gate |
+| Health flags | `true` | All rows are `valid=1`, `unknown=0`, `stale=0`, `reason=ok` |
+| Gradient direction | `true` | `-grad(c_pi)` lowers risk for every query |
+
+Figure conclusions:
+
+| Figure | Conclusion |
+|---|---|
+| ![P0-5 synthetic affine field](../../results/planner_validation/exports/test_planner_p0_5_synthetic_affine_20260711T075702Z/figures/p0_5_synthetic_affine_field_topdown.png) | The analytic affine field is smooth and monotonic in the expected XY direction at `z=0`, `tau=0.5`. |
+| ![P0-5 query sample map](../../results/planner_validation/exports/test_planner_p0_5_synthetic_affine_20260711T075702Z/figures/p0_5_query_sample_map.png) | The fixed query samples cover distinct XY locations and each sample is marked with the lower-risk `-grad_xy` direction. |
+| ![P0-5 expected vs actual scatter](../../results/planner_validation/exports/test_planner_p0_5_synthetic_affine_20260711T075702Z/figures/p0_5_expected_vs_actual_scatter.png) | Every query lies on the identity line, so actual `c_pi` and `hpl_pred` match the analytic expected value. |
+| ![P0-5 abs error histogram](../../results/planner_validation/exports/test_planner_p0_5_synthetic_affine_20260711T075702Z/figures/p0_5_abs_error_histogram.png) | All interpolation errors are zero and below the `1e-9` hard gate. |
+| ![P0-5 gradient vector field](../../results/planner_validation/exports/test_planner_p0_5_synthetic_affine_20260711T075702Z/figures/p0_5_gradient_vector_field.png) | The plotted `-grad(c_pi)` vectors point from higher synthetic cost toward lower synthetic cost. |
+| ![P0-5 query table heatmap](../../results/planner_validation/exports/test_planner_p0_5_synthetic_affine_20260711T075702Z/figures/p0_5_query_table_heatmap.png) | The tabular heatmap summarizes matched expected/actual values, zero error, and passing gradient direction flags. |
+
+Final conclusion:
+
+PASS -> P0-6

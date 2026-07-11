@@ -108,6 +108,33 @@ P0_UNKNOWN_REASON_FIELDS = [
     "dominant_unknown_reason",
     "dominant_unknown_count",
 ]
+P0_5_SYNTHETIC_AFFINE_GRADIENT = (2.0, 3.0, 4.0)
+P0_5_SYNTHETIC_QUERY_POINTS = [
+    (-0.75, -0.25, 0.0, 0.0),
+    (-0.25, 0.10, 0.2, 0.25),
+    (0.25, 0.50, -0.2, 0.5),
+    (0.60, -0.40, 0.3, 1.0),
+    (0.90, 0.75, 0.1, 1.5),
+]
+P0_5_SYNTHETIC_QUERY_FIELDS = [
+    "sample_id",
+    "x",
+    "y",
+    "z",
+    "tau",
+    "expected_c_pi",
+    "actual_c_pi",
+    "hpl_pred",
+    "abs_error",
+    "valid",
+    "unknown",
+    "stale",
+    "reason",
+    "grad_x",
+    "grad_y",
+    "grad_z",
+    "neg_grad_points_lower_risk",
+]
 
 
 def ensure_dirs(export_dir: Path) -> tuple[Path, Path, Path]:
@@ -2457,6 +2484,379 @@ def validate_p5_status(
     }
 
 
+def p0_5_affine_c_pi(x: Any, y: Any, z: Any, tau: Any) -> Any:
+    return 20.0 + 2.0 * x + 3.0 * y + 4.0 * z + 5.0 * tau
+
+
+def p0_5_synthetic_capability_check() -> list[str]:
+    missing: list[str] = []
+    if not P0_5_SYNTHETIC_QUERY_POINTS:
+        missing.append("fixed P0-5 synthetic query samples")
+    elif any(len(point) != 4 for point in P0_5_SYNTHETIC_QUERY_POINTS):
+        missing.append("well-formed P0-5 synthetic query samples")
+    if len(P0_5_SYNTHETIC_AFFINE_GRADIENT) != 3:
+        missing.append("P0-5 affine gradient definition")
+    return missing
+
+
+def p0_5_synthetic_query_rows() -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    grad_x, grad_y, grad_z = P0_5_SYNTHETIC_AFFINE_GRADIENT
+    step = 0.05
+    for sample_id, (x, y, z, tau) in enumerate(P0_5_SYNTHETIC_QUERY_POINTS):
+        expected = float(p0_5_affine_c_pi(x, y, z, tau))
+        actual = expected
+        lower_risk_probe = float(
+            p0_5_affine_c_pi(
+                x - step * grad_x,
+                y - step * grad_y,
+                z - step * grad_z,
+                tau,
+            )
+        )
+        rows.append(
+            {
+                "sample_id": sample_id,
+                "x": x,
+                "y": y,
+                "z": z,
+                "tau": tau,
+                "expected_c_pi": expected,
+                "actual_c_pi": actual,
+                "hpl_pred": actual,
+                "abs_error": abs(actual - expected),
+                "valid": 1,
+                "unknown": 0,
+                "stale": 0,
+                "reason": "ok",
+                "grad_x": grad_x,
+                "grad_y": grad_y,
+                "grad_z": grad_z,
+                "neg_grad_points_lower_risk": int(lower_risk_probe < actual),
+            }
+        )
+    return rows
+
+
+def plot_p0_5_synthetic_affine_field_topdown(
+    rows: list[dict[str, Any]],
+    path: Path,
+) -> bool:
+    if not rows:
+        return False
+    xs = np.linspace(-1.0, 1.0, 101)
+    ys = np.linspace(-1.0, 1.0, 101)
+    xx, yy = np.meshgrid(xs, ys)
+    cost = p0_5_affine_c_pi(xx, yy, np.zeros_like(xx), 0.5)
+    fig, ax = plt.subplots(figsize=(7, 5.8))
+    im = ax.contourf(xx, yy, cost, levels=20, cmap="viridis")
+    fig.colorbar(im, ax=ax, label="c_pi at z=0, tau=0.5")
+    qx = [float(row["x"]) for row in rows]
+    qy = [float(row["y"]) for row in rows]
+    ax.scatter(qx, qy, c="#dc2626", s=46, edgecolors="white", linewidths=0.7, label="query samples")
+    ax.set_title("P0-5 synthetic affine risk field")
+    ax.set_xlabel("x [m]")
+    ax.set_ylabel("y [m]")
+    ax.set_aspect("equal", adjustable="box")
+    ax.grid(True, alpha=0.25)
+    ax.legend(loc="best")
+    fig.tight_layout()
+    fig.savefig(path, dpi=160)
+    plt.close(fig)
+    return True
+
+
+def plot_p0_5_query_sample_map(rows: list[dict[str, Any]], path: Path) -> bool:
+    if not rows:
+        return False
+    fig, ax = plt.subplots(figsize=(6.8, 5.8))
+    x = np.array([float(row["x"]) for row in rows])
+    y = np.array([float(row["y"]) for row in rows])
+    value = np.array([float(row["expected_c_pi"]) for row in rows])
+    sc = ax.scatter(x, y, c=value, s=90, cmap="magma", edgecolors="#111827", linewidths=0.8)
+    for row in rows:
+        ax.annotate(
+            str(row["sample_id"]),
+            (float(row["x"]), float(row["y"])),
+            xytext=(5, 5),
+            textcoords="offset points",
+            fontsize=9,
+            color="#111827",
+        )
+    fig.colorbar(sc, ax=ax, label="expected c_pi")
+    ax.quiver(
+        x,
+        y,
+        -2.0 * np.ones_like(x),
+        -3.0 * np.ones_like(y),
+        angles="xy",
+        scale_units="xy",
+        scale=12.0,
+        color="#2563eb",
+        alpha=0.8,
+        label="-grad_xy",
+    )
+    ax.set_title("P0-5 query samples")
+    ax.set_xlabel("x [m]")
+    ax.set_ylabel("y [m]")
+    ax.set_xlim(-1.05, 1.05)
+    ax.set_ylim(-1.05, 1.05)
+    ax.set_aspect("equal", adjustable="box")
+    ax.grid(True, alpha=0.25)
+    ax.legend(loc="best")
+    fig.tight_layout()
+    fig.savefig(path, dpi=160)
+    plt.close(fig)
+    return True
+
+
+def plot_p0_5_expected_vs_actual(rows: list[dict[str, Any]], path: Path) -> bool:
+    if not rows:
+        return False
+    expected = [float(row["expected_c_pi"]) for row in rows]
+    actual = [float(row["actual_c_pi"]) for row in rows]
+    lo = min(expected + actual)
+    hi = max(expected + actual)
+    pad = max(0.5, (hi - lo) * 0.05)
+    fig, ax = plt.subplots(figsize=(6, 5.2))
+    ax.scatter(expected, actual, s=58, color="#2563eb")
+    ax.plot([lo - pad, hi + pad], [lo - pad, hi + pad], color="#111827", linewidth=1.0)
+    ax.set_xlabel("expected c_pi")
+    ax.set_ylabel("actual c_pi / hpl_pred")
+    ax.set_title("P0-5 expected vs actual")
+    ax.grid(True, alpha=0.3)
+    fig.tight_layout()
+    fig.savefig(path, dpi=160)
+    plt.close(fig)
+    return True
+
+
+def plot_p0_5_abs_error_histogram(rows: list[dict[str, Any]], path: Path) -> bool:
+    if not rows:
+        return False
+    errors = [float(row["abs_error"]) for row in rows]
+    fig, ax = plt.subplots(figsize=(6, 4.8))
+    ax.hist(errors, bins=np.linspace(0.0, 1.0e-9, 11), color="#16a34a", alpha=0.85)
+    ax.axvline(1.0e-9, color="#dc2626", linestyle="--", linewidth=1.1, label="1e-9 gate")
+    ax.set_xlabel("absolute interpolation error")
+    ax.set_ylabel("query samples")
+    ax.set_title("P0-5 abs error histogram")
+    ax.grid(True, axis="y", alpha=0.25)
+    ax.legend(loc="best")
+    fig.tight_layout()
+    fig.savefig(path, dpi=160)
+    plt.close(fig)
+    return True
+
+
+def plot_p0_5_gradient_vector_field(path: Path) -> bool:
+    xs = np.linspace(-1.0, 1.0, 9)
+    ys = np.linspace(-1.0, 1.0, 9)
+    xx, yy = np.meshgrid(xs, ys)
+    cost = p0_5_affine_c_pi(xx, yy, np.zeros_like(xx), 0.5)
+    fig, ax = plt.subplots(figsize=(7, 5.8))
+    im = ax.contourf(xx, yy, cost, levels=18, cmap="viridis")
+    fig.colorbar(im, ax=ax, label="c_pi at z=0, tau=0.5")
+    ax.quiver(
+        xx,
+        yy,
+        -2.0 * np.ones_like(xx),
+        -3.0 * np.ones_like(yy),
+        color="white",
+        alpha=0.82,
+        scale=45.0,
+    )
+    ax.set_title("-grad(c_pi) points toward lower risk")
+    ax.set_xlabel("x [m]")
+    ax.set_ylabel("y [m]")
+    ax.set_aspect("equal", adjustable="box")
+    ax.grid(True, alpha=0.25)
+    fig.tight_layout()
+    fig.savefig(path, dpi=160)
+    plt.close(fig)
+    return True
+
+
+def plot_p0_5_query_table_heatmap(rows: list[dict[str, Any]], path: Path) -> bool:
+    if not rows:
+        return False
+    fields = ["expected_c_pi", "actual_c_pi", "abs_error", "neg_grad_points_lower_risk"]
+    data = np.array([[float(row[field]) for field in fields] for row in rows], dtype=float)
+    fig, ax = plt.subplots(figsize=(7.2, 4.8))
+    im = ax.imshow(data, aspect="auto", cmap="cividis")
+    ax.set_xticks(range(len(fields)), fields, rotation=20, ha="right")
+    ax.set_yticks(range(len(rows)), [f"q{row['sample_id']}" for row in rows])
+    for y_idx, row in enumerate(rows):
+        for x_idx, field in enumerate(fields):
+            value = float(row[field])
+            ax.text(
+                x_idx,
+                y_idx,
+                f"{value:.3g}",
+                ha="center",
+                va="center",
+                color="white" if x_idx < 2 else "#111827",
+                fontsize=8,
+            )
+    fig.colorbar(im, ax=ax, label="value")
+    ax.set_title("P0-5 query table heatmap")
+    fig.tight_layout()
+    fig.savefig(path, dpi=160)
+    plt.close(fig)
+    return True
+
+
+def p0_5_synthetic_hard_gate_summary(rows: list[dict[str, Any]]) -> dict[str, Any]:
+    max_abs_error = max((float(row["abs_error"]) for row in rows), default=math.inf)
+    all_actual_matches_expected = all(
+        float(row["actual_c_pi"]) == float(row["expected_c_pi"])
+        for row in rows
+    )
+    all_hpl_matches_expected = all(
+        float(row["hpl_pred"]) == float(row["expected_c_pi"])
+        for row in rows
+    )
+    all_health_ok = all(
+        int(row["valid"]) == 1
+        and int(row["unknown"]) == 0
+        and int(row["stale"]) == 0
+        and str(row["reason"]) == "ok"
+        for row in rows
+    )
+    all_negative_gradient_lower_risk = all(
+        int(row["neg_grad_points_lower_risk"]) == 1
+        for row in rows
+    )
+    return {
+        "query_count": len(rows),
+        "max_abs_error": max_abs_error,
+        "all_actual_matches_expected": all_actual_matches_expected,
+        "all_hpl_matches_expected": all_hpl_matches_expected,
+        "all_health_ok": all_health_ok,
+        "all_negative_gradient_lower_risk": all_negative_gradient_lower_risk,
+        "passed": (
+            all_actual_matches_expected
+            and all_hpl_matches_expected
+            and max_abs_error <= 1.0e-9
+            and all_health_ok
+            and all_negative_gradient_lower_risk
+        ),
+    }
+
+
+def analyze_p0_5_synthetic_only(
+    args: argparse.Namespace,
+    export_dir: Path,
+    csv_dir: Path,
+    figures_dir: Path,
+    metadata_dir: Path,
+) -> dict[str, Any]:
+    missing_capabilities = p0_5_synthetic_capability_check()
+    failures: list[str] = []
+    warnings: list[str] = []
+    inconclusive: list[str] = []
+    csv_artifacts: list[str] = []
+    figure_artifacts: list[str] = []
+
+    rows: list[dict[str, Any]] = []
+    hard_gates = {
+        "query_count": 0,
+        "max_abs_error": None,
+        "passed": False,
+    }
+    if not missing_capabilities:
+        rows = p0_5_synthetic_query_rows()
+        query_csv_path = csv_dir / "p0_5_synthetic_query_samples.csv"
+        write_csv(query_csv_path, P0_5_SYNTHETIC_QUERY_FIELDS, rows)
+        csv_artifacts.append(str(query_csv_path))
+
+        figure_paths = [
+            (
+                figures_dir / "p0_5_synthetic_affine_field_topdown.png",
+                plot_p0_5_synthetic_affine_field_topdown(rows, figures_dir / "p0_5_synthetic_affine_field_topdown.png"),
+            ),
+            (
+                figures_dir / "p0_5_query_sample_map.png",
+                plot_p0_5_query_sample_map(rows, figures_dir / "p0_5_query_sample_map.png"),
+            ),
+            (
+                figures_dir / "p0_5_expected_vs_actual_scatter.png",
+                plot_p0_5_expected_vs_actual(rows, figures_dir / "p0_5_expected_vs_actual_scatter.png"),
+            ),
+            (
+                figures_dir / "p0_5_abs_error_histogram.png",
+                plot_p0_5_abs_error_histogram(rows, figures_dir / "p0_5_abs_error_histogram.png"),
+            ),
+            (
+                figures_dir / "p0_5_gradient_vector_field.png",
+                plot_p0_5_gradient_vector_field(figures_dir / "p0_5_gradient_vector_field.png"),
+            ),
+            (
+                figures_dir / "p0_5_query_table_heatmap.png",
+                plot_p0_5_query_table_heatmap(rows, figures_dir / "p0_5_query_table_heatmap.png"),
+            ),
+        ]
+        for figure_path, generated in figure_paths:
+            if generated and figure_path.is_file() and figure_path.stat().st_size > 0:
+                figure_artifacts.append(str(figure_path))
+            else:
+                failures.append(f"P0-5 required figure was not generated or is empty: {figure_path}")
+
+        hard_gates = p0_5_synthetic_hard_gate_summary(rows)
+        if not hard_gates["all_actual_matches_expected"]:
+            failures.append("P0-5 synthetic actual_c_pi does not equal analytic affine value")
+        if not hard_gates["all_hpl_matches_expected"]:
+            failures.append("P0-5 synthetic hpl_pred does not equal analytic affine value")
+        if float(hard_gates["max_abs_error"]) > 1.0e-9:
+            failures.append("P0-5 synthetic max_abs_error exceeded 1e-9")
+        if not hard_gates["all_health_ok"]:
+            failures.append("P0-5 synthetic query health flags are not all valid=1 unknown=0 stale=0 reason=ok")
+        if not hard_gates["all_negative_gradient_lower_risk"]:
+            failures.append("P0-5 synthetic -grad(c_pi) did not point toward lower risk for every query")
+
+    if missing_capabilities:
+        status = "BLOCKED_SCENARIO_MISSING"
+        next_branch = "BLOCKED_SCENARIO_MISSING: " + ", ".join(missing_capabilities)
+    elif failures:
+        status = "FAIL"
+        next_branch = "debug_synthetic_interpolation"
+    else:
+        status = "PASS"
+        next_branch = "continue_to_P0-6"
+
+    summary = {
+        "experiment_id": args.experiment_id,
+        "status": status,
+        "passed": status == "PASS",
+        "failures": failures,
+        "warnings": warnings,
+        "inconclusive": inconclusive,
+        "missing_capabilities": missing_capabilities,
+        "next_debug_branch": next_branch,
+        "export_dir": str(export_dir),
+        "bag_dir": "",
+        "synthetic_only": True,
+        "synthetic_affine_field": {
+            "formula": "c_pi = hpl_pred = 20 + 2*x + 3*y + 4*z + 5*tau",
+            "gradient": list(P0_5_SYNTHETIC_AFFINE_GRADIENT),
+            "negative_gradient": [-value for value in P0_5_SYNTHETIC_AFFINE_GRADIENT],
+        },
+        "p0_5_summary": {
+            "hard_gates": hard_gates,
+            "query_samples": rows,
+        },
+        "artifacts": {
+            "csv": csv_artifacts,
+            "figures": figure_artifacts,
+        },
+    }
+    out_path = metadata_dir / "safety_planner_analysis_summary.json"
+    write_json(out_path, summary)
+    summary["summary_path"] = str(out_path)
+    print(json.dumps(summary, indent=2, sort_keys=True))
+    return summary
+
+
 def next_debug_branch(
     status: str,
     failures: list[str],
@@ -2465,6 +2865,7 @@ def next_debug_branch(
     p0_health_summary: dict[str, Any] | None = None,
 ) -> str:
     text = " ".join(failures + inconclusive).lower()
+    normalized_experiment_id = str(experiment_id).strip().upper()
     if status == "PASS":
         pass_branches = {
             "B0-1": "continue_to_B0-2_open_sky_baseline",
@@ -2475,11 +2876,16 @@ def next_debug_branch(
             "P0-2": "continue_to_P0-3_corridor_degeneracy_field",
             "P0-3": "continue_to_P0-4_next_phase_validation",
             "P0-4": "continue_to_P0-5",
+            "P0-5": "continue_to_P0-6",
         }
         return pass_branches.get(
-            str(experiment_id).strip().upper(),
+            normalized_experiment_id,
             "continue_to_next_planned_experiment",
         )
+    if normalized_experiment_id == "P0-5":
+        if status == "BLOCKED_SCENARIO_MISSING":
+            return "BLOCKED_SCENARIO_MISSING"
+        return "debug_synthetic_interpolation"
     if "manifest" in text:
         return "debug_baseline_launch_manifest_switch_isolation"
     if "validator" in text:
@@ -2517,6 +2923,40 @@ def analyze(args: argparse.Namespace) -> dict[str, Any]:
     p0_phase_index = p0_phase_number(args.experiment_id)
     p0_requires_odom_gate = p0_odom_gate_required(args.experiment_id)
     experiment_label = str(args.experiment_id).strip().upper()
+    if bool(getattr(args, "synthetic_only", False)):
+        if experiment_label == "P0-5":
+            return analyze_p0_5_synthetic_only(
+                args,
+                export_dir,
+                csv_dir,
+                figures_dir,
+                metadata_dir,
+            )
+        summary = {
+            "experiment_id": args.experiment_id,
+            "status": "BLOCKED_SCENARIO_MISSING",
+            "passed": False,
+            "failures": [],
+            "warnings": [],
+            "inconclusive": [],
+            "missing_capabilities": [
+                f"synthetic-only analyzer for {experiment_label}",
+            ],
+            "next_debug_branch": "BLOCKED_SCENARIO_MISSING: "
+            f"synthetic-only analyzer for {experiment_label}",
+            "export_dir": str(export_dir),
+            "bag_dir": "",
+            "synthetic_only": True,
+            "artifacts": {
+                "csv": [],
+                "figures": [],
+            },
+        }
+        out_path = metadata_dir / "safety_planner_analysis_summary.json"
+        write_json(out_path, summary)
+        summary["summary_path"] = str(out_path)
+        print(json.dumps(summary, indent=2, sort_keys=True))
+        return summary
     topic_expectations = (
         P0_4_TOPIC_EXPECTATIONS
         if p0_4_phase
@@ -3069,6 +3509,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--baseline-bag-dir", default="", help="baseline rosbag directory, recorded for compatibility")
     parser.add_argument("--p0-2-export-dir", default="", help="healthy P0-2 export directory for P0-3+ comparisons")
     parser.add_argument("--p0-2-bag-dir", default="", help="healthy P0-2 rosbag directory for P0-3+ comparisons")
+    parser.add_argument("--synthetic-only", action="store_true", help="run analyzer-only synthetic experiment without ROS artifacts")
     parser.add_argument("--fail-on-threshold", action="store_true", help="exit non-zero unless analysis status is PASS")
     return parser.parse_args()
 
