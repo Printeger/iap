@@ -62,6 +62,60 @@ def healthy_p0():
     }
 
 
+def p5_manifest():
+    return {
+        "planner_safety_profile": "p5",
+        "p0.enable_risk_grid": True,
+        "planner_enable_p5_runtime": True,
+        "planner_enable_p5_final": True,
+        "planner_enable_p1": False,
+        "planner_enable_p2": False,
+        "planner_enable_p3_local": False,
+        "planner_enable_p3_global": False,
+        "planner_enable_p4": False,
+    }
+
+
+def p5_topic_health():
+    return {
+        topic: {"status": "PASS", "count": 1}
+        for topic in analyzer.P5_TOPIC_EXPECTATIONS
+    }
+
+
+def p0_health_row(idx, **overrides):
+    row = {
+        "stamp": float(idx),
+        "ready": True,
+        "stale": False,
+        "valid_ratio": 1.0,
+        "unknown_ratio": 0.0,
+        "reason": "ok",
+    }
+    row.update(overrides)
+    return row
+
+
+def healthy_p0_rows():
+    return [p0_health_row(idx) for idx in range(20)]
+
+
+def bounded_startup_p0_rows():
+    rows = [
+        p0_health_row(
+            idx,
+            ready=False,
+            stale=True,
+            valid_ratio=0.0,
+            unknown_ratio=1.0,
+            reason="snapshot_unavailable",
+        )
+        for idx in range(2)
+    ]
+    rows.extend(p0_health_row(idx + 2) for idx in range(20))
+    return rows
+
+
 def startup_snapshot_unavailable_row(**overrides):
     row = p5_row(
         bag_time_s=0.0,
@@ -224,6 +278,117 @@ class P5_1AnalyzerTest(unittest.TestCase):
         self.assertTrue(
             any(analyzer.P5_STATUS_TOPIC in failure for failure in failures),
             failures,
+        )
+
+
+class P5_2AnalyzerTest(unittest.TestCase):
+    def validate_rows(self, rows, p0_rows=None):
+        p0_rows = p0_rows or bounded_startup_p0_rows()
+        p5_summary = analyzer.summarize_p5_status_rows(rows)
+        failures = []
+        inconclusive = []
+        gates = analyzer.validate_p5_2_hard_gates(
+            p5_manifest(),
+            {"passed": True},
+            p5_topic_health(),
+            analyzer.summarize_p0_health(p0_rows),
+            p0_rows,
+            p5_summary,
+            failures,
+            inconclusive,
+        )
+        return p5_summary, gates, failures, inconclusive
+
+    def test_p5_2_passes_with_replan_rows_and_finite_margins(self):
+        rows = [p5_row(bag_time_s=1.0 + idx) for idx in range(5)]
+        rows.extend(
+            [
+                p5_row(
+                    bag_time_s=10.0,
+                    action="REQUEST_REPLAN",
+                    raw_action="REQUEST_REPLAN",
+                    reason="future_unknown",
+                    unknown_ratio=0.2,
+                    future_unknown_duration_s=0.3,
+                ),
+                p5_row(
+                    bag_time_s=10.1,
+                    action="REQUEST_REPLAN",
+                    raw_action="REQUEST_REPLAN",
+                    reason="future_unknown",
+                    unknown_ratio=0.2,
+                    future_unknown_duration_s=0.4,
+                ),
+            ]
+        )
+        rows.extend(p5_row(bag_time_s=12.0 + idx) for idx in range(5))
+
+        summary, gates, failures, inconclusive = self.validate_rows(rows)
+
+        self.assertEqual([], failures)
+        self.assertEqual([], inconclusive)
+        self.assertTrue(gates["passed"])
+        self.assertEqual(summary["max_consecutive_replan"], 2)
+        self.assertEqual(summary["final_gate_fail_count_max"], 0)
+
+    def test_p5_2_fails_on_sustained_emergency_storm(self):
+        rows = [
+            p5_row(action="REQUEST_EMERGENCY_STOP_CANDIDATE", bag_time_s=idx)
+            for idx in range(analyzer.P5_2_EMERGENCY_STORM_CONSECUTIVE)
+        ]
+
+        summary, gates, failures, _ = self.validate_rows(rows)
+
+        self.assertEqual(
+            analyzer.P5_2_EMERGENCY_STORM_CONSECUTIVE,
+            summary["max_consecutive_emergency"],
+        )
+        self.assertFalse(gates["passed"])
+        self.assertTrue(any("emergency storm" in failure for failure in failures), failures)
+
+    def test_p5_2_fails_on_unexplained_unknown(self):
+        rows = [p5_row(unknown_ratio=0.25, reason="ok")]
+
+        _, gates, failures, _ = self.validate_rows(rows)
+
+        self.assertFalse(gates["passed"])
+        self.assertTrue(any("unknown_ratio was nonzero" in failure for failure in failures), failures)
+
+    def test_p5_2_fails_on_p0_post_startup_stale_or_full_unknown(self):
+        p0_rows = bounded_startup_p0_rows()
+        p0_rows.append(
+            p0_health_row(
+                30,
+                stale=True,
+                valid_ratio=0.0,
+                unknown_ratio=1.0,
+                reason="ok",
+            )
+        )
+
+        _, gates, failures, _ = self.validate_rows([p5_row()], p0_rows=p0_rows)
+
+        self.assertFalse(gates["passed"])
+        self.assertTrue(any("stale=true after startup" in failure for failure in failures), failures)
+        self.assertTrue(any("full unknown after startup" in failure for failure in failures), failures)
+
+    def test_p5_2_fails_on_final_gate_fail_count_accumulation(self):
+        rows = [p5_row(final_gate_fail_count=3, final_gate_fail_duration_s=0.2)]
+
+        summary, gates, failures, _ = self.validate_rows(rows)
+
+        self.assertEqual(3, summary["final_gate_fail_count_max"])
+        self.assertFalse(gates["passed"])
+        self.assertTrue(any("final_gate_fail_count" in failure for failure in failures), failures)
+
+    def test_p5_2_next_branch(self):
+        self.assertEqual(
+            "PASS -> P5-3",
+            analyzer.next_debug_branch("PASS", [], [], "P5-2"),
+        )
+        self.assertEqual(
+            "debug PL/AL margin",
+            analyzer.next_debug_branch("FAIL", ["P5-2 failed"], [], "P5-2"),
         )
 
 

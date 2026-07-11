@@ -2670,3 +2670,170 @@ Verification notes:
 Final conclusion:
 
 PASS -> P5-2
+
+### P5-2 Degraded Light-Risk Debounce
+
+Result: **FAIL -> debug PL/AL margin**.
+
+Executed launch:
+
+```bash
+cd /home/dev/ws_iap
+source /opt/ros/jazzy/setup.bash
+source install/setup.bash
+
+ros2 launch iap test_planner.launch.py \
+  experiment:=p5_corridor \
+  scenario:=gnss_degraded_lidar_good \
+  run_duration_s:=90 \
+  validation_duration_s:=90 \
+  start_rviz:=false \
+  run_validator:=true \
+  record_bag:=true
+```
+
+Executed analyzer:
+
+```bash
+cd /home/dev/ws_iap/src/iap
+source /opt/ros/jazzy/setup.bash
+source /home/dev/ws_iap/install/setup.bash
+
+python3 scripts/dev_planner/analyze_safety_planner_run.py \
+  --experiment-id P5-2 \
+  --export-dir /home/dev/ws_iap/src/iap/results/planner_validation/exports/test_planner_p5_corridor_gnss_degraded_lidar_good_1783789011136 \
+  --bag-dir /home/dev/ws_iap/src/iap/results/planner_validation/bags/test_planner_p5_corridor_gnss_degraded_lidar_good_20260711T165651Z \
+  --fail-on-threshold
+```
+
+Run artifacts:
+
+| Field | Value |
+|---|---|
+| Launch log | `/tmp/p5_2_launch_20260711T165650Z.log` |
+| Export dir | `/home/dev/ws_iap/src/iap/results/planner_validation/exports/test_planner_p5_corridor_gnss_degraded_lidar_good_1783789011136` |
+| Bag dir | `/home/dev/ws_iap/src/iap/results/planner_validation/bags/test_planner_p5_corridor_gnss_degraded_lidar_good_20260711T165651Z` |
+| Analyzer summary | `/home/dev/ws_iap/src/iap/results/planner_validation/exports/test_planner_p5_corridor_gnss_degraded_lidar_good_1783789011136/metadata/safety_planner_analysis_summary.json` |
+| Validator status | `PASS`, `passed=true`, `message_count=696`, `required_fusion_mode=max_pl` |
+| Analyzer status | `FAIL`, `passed=false`, `next_debug_branch=debug PL/AL margin` |
+| Analyzer exit with `--fail-on-threshold` | `2` |
+
+P5-2 hard-gate failures:
+
+| Gate | Result | Evidence |
+|---|---|---|
+| Validator and topic health | `PASS` | Validator passed and all required P0/P5 topics passed. |
+| Manifest profile/switches | `PASS` | `planner_safety_profile=p5`, P0 and P5 runtime/final enabled, P1-P4 disabled. |
+| P0 post-startup health | `FAIL` | `valid_ratio_mean=0.146534`; post-startup full-unknown rows `67` of `79`. |
+| Emergency debounce | `FAIL` | Consecutive emergency action/raw-action streak `28` against the P5-2 limit `<3`. |
+| Final-gate accumulation | `FAIL` | `final_gate_fail_count_max=28`, fail rows `28`, emergency escalations `28`. |
+| Unknown explanation | `PASS` | Unknown was not unexplained: all P5 status rows also had finite negative current IM evidence. |
+
+Topic health:
+
+| Topic | Count | Hz | Max gap | Status |
+|---|---:|---:|---:|---|
+| `/iap/integrity` | `697` | `7.751` | `0.499s` | `PASS` |
+| `/sim/drone_0/lidar_body` | `715` | `7.952` | `0.600s` | `PASS` |
+| `/drone_0_visual_slam/odom` | `697` | `7.751` | `0.499s` | `PASS` |
+| `/drone_0_planning/bspline` | `27` | `0.300` | `2.634s` | `PASS` |
+| `/planning/risk_grid_health` | `81` | `0.901` | `2.678s` | `PASS` |
+| `/planning/integrity_gate_status` | `28` | `0.311` | `2.609s` | `PASS` |
+| `/iap/rviz/trajectory_integrity_samples` | `23` | `0.256` | `3.101s` | `PASS` |
+| `/iap/rviz/current_traj_integrity_colored` | `23` | `0.256` | `3.101s` | `PASS` |
+| `/iap/rviz/p5_gate_status` | `23` | `0.256` | `3.101s` | `PASS` |
+| `/iap/rviz/p5_current_im_bars` | `23` | `0.256` | `3.101s` | `PASS` |
+| `/iap/rviz/predicted_pl_cloud` | `79` | `0.879` | `2.678s` | `PASS` |
+| `/iap/rviz/risk_validity_cloud` | `79` | `0.879` | `2.678s` | `PASS` |
+
+P0 health:
+
+| Metric | Value | Judgment |
+|---|---:|---|
+| Health rows | `81` | Stream present |
+| `ready_false_count` / ratio | `2` / `0.024691` | Bounded startup only |
+| `stale_true_count` / ratio | `2` / `0.024691` | Bounded startup only |
+| Full unknown count / ratio | `69` / `0.851852` | Fails P5-2 post-startup no-full-unknown gate |
+| Full unknown max consecutive | `7` | Repeated post-startup unknown bursts |
+| Reason counts | `ok:12`, `snapshot_unavailable:2`, `stale_integrity:67` | Dominated by post-startup stale-integrity evidence |
+| `valid_ratio` min / mean / max | `0.000000` / `0.146534` / `0.989531` | Mean is below the `0.60` health threshold |
+| `unknown_ratio` min / mean / max | `0.010469` / `0.853466` / `1.000000` | Unknown dominates the validation window |
+| `provider_stale_count_max` | `63300` | P0 field source was often stale even while topics were active |
+
+P5 action and debounce:
+
+| Metric | Value | Judgment |
+|---|---:|---|
+| Status rows | `28` | Stream present |
+| Action counts | `REQUEST_EMERGENCY_STOP_CANDIDATE:28` | Fails P5-2 sustained-emergency gate |
+| Raw action counts | `REQUEST_EMERGENCY_STOP_CANDIDATE:28` | Debounce did not reduce the emergency stream |
+| Steady-state action counts | `REQUEST_EMERGENCY_STOP_CANDIDATE:28` | No steady OK/replan-only period was observed |
+| Max consecutive replan / raw replan | `0` / `0` | Replan debounce was not the observed limiting behavior |
+| Max consecutive emergency / raw emergency | `28` / `28` | Fails limit `<3` |
+| Emergency action count | `28` | Sustained emergency storm |
+| Final-gate fail count max | `28` | Fails abnormal accumulation gate |
+| Final-gate fail rows / emergency rows | `28` / `28` | Every final-gate failure escalated to emergency |
+| Final-gate fail duration max | `33.326995s` | Emergency accumulation persisted through the final segment |
+
+PL/AL/IM:
+
+| Metric | Value | Judgment |
+|---|---:|---|
+| `future_min_im` min / mean / max | `9.466250m` / `9.466250m` / `9.466250m` | Finite future margin evidence exists when available |
+| `current_im_min` min / mean / max | `-64.083807m` / `-54.073838m` / `-49.362083m` | Current IM is strongly negative |
+| `bad_ratio` max | `0.000000` | Future sample bad ratio did not explain the stop |
+| `unknown_ratio` min / mean / max | `0.100000` / `0.967857` / `1.000000` | P5 trajectory samples were mostly unknown |
+| `current_stale_duration_s` max | `0.000000s` | No current-stale debounce duration explains the stop |
+| `future_unknown_duration_s` max | `0.000000s` | Unknown duration did not accumulate |
+| `pred_hal_min` / `pred_val_min` | `10.000000m` / `20.000000m` | Predicted AL minima were finite |
+| `pred_al_invalid_count` max | `0` | AL provider did not report invalid predicted AL |
+| `sample_count` min / max | `1` / `10` | Finite sample-count evidence present |
+| Trajectory marker evidence rows | `472` (`ok:26`, `stale_or_warning:446`) | Visual evidence is dominated by warning/stale samples |
+
+Interpretation:
+
+The degraded run did not produce the intended light-risk debounce behavior. Validator, manifest, topic health, and predicted AL evidence passed, but P0 health was dominated by post-startup full-unknown `stale_integrity` rows. P5 then reported negative current IM margins with `unknown_ratio` near `1.0` and escalated every final-gate failure to `REQUEST_EMERGENCY_STOP_CANDIDATE`. This is not acceptable warning/replan debounce; it is sustained emergency and abnormal final-gate accumulation, so the correct branch is PL/AL margin debugging.
+
+P5-2 CSV artifacts:
+
+| CSV | Conclusion |
+|---|---|
+| `csv/p5_2_p5_status.csv` | P5 status rows contain the emergency and margin evidence used by the hard gates. |
+| `csv/p5_2_p5_action_timeline.csv` | Action timeline confirms all status actions were emergency candidates. |
+| `csv/p5_2_p5_margin_timeline.csv` | Margin timeline records negative current IM and finite AL minima. |
+| `csv/p5_2_p5_final_gate_summary.csv` | Final-gate summary records max fail count `28`. |
+| `csv/p5_2_p5_debounce_timeline.csv` | Debounce timeline records consecutive emergency counters reaching `28`. |
+| `csv/p5_2_trajectory_integrity_evidence.csv` | Marker evidence records mostly stale/warning trajectory samples. |
+
+Figure conclusions:
+
+| Figure | Conclusion |
+|---|---|
+| ![P5-2 scenario topdown](../../results/planner_validation/exports/test_planner_p5_corridor_gnss_degraded_lidar_good_1783789011136/figures/p5_2_scenario_topdown.png) | Scenario context was recorded for the degraded corridor run. |
+| ![P5-2 topic activity timeline](../../results/planner_validation/exports/test_planner_p5_corridor_gnss_degraded_lidar_good_1783789011136/figures/p5_2_topic_activity_timeline.png) | Required P0/P5 topics were active and pass topic-health gates. |
+| ![P5-2 integrity source timeline](../../results/planner_validation/exports/test_planner_p5_corridor_gnss_degraded_lidar_good_1783789011136/figures/p5_2_integrity_source_timeline.png) | Integrity source evidence includes `max_pl` with GNSS/LiDAR/fallback validity, so validation inputs were present. |
+| ![P5-2 P0 health timeline](../../results/planner_validation/exports/test_planner_p5_corridor_gnss_degraded_lidar_good_1783789011136/figures/p5_2_p0_health_timeline.png) | P0 health repeatedly returns to full unknown after startup, matching the hard-gate failure. |
+| ![P5-2 P5 action timeline](../../results/planner_validation/exports/test_planner_p5_corridor_gnss_degraded_lidar_good_1783789011136/figures/p5_2_p5_action_timeline.png) | P5 action remains emergency candidate rather than bounded warning/replan, so the debounce gate fails. |
+| ![P5-2 P5 status timeline](../../results/planner_validation/exports/test_planner_p5_corridor_gnss_degraded_lidar_good_1783789011136/figures/p5_2_p5_status_timeline.png) | Unknown ratio stays high while bad ratio is zero, consistent with unknown/current-margin driven stops. |
+| ![P5-2 P5 margin timeline](../../results/planner_validation/exports/test_planner_p5_corridor_gnss_degraded_lidar_good_1783789011136/figures/p5_2_p5_margin_timeline.png) | Current IM is negative despite finite AL minima, pointing to PL/AL margin debugging. |
+| ![P5-2 P5 debounce timeline](../../results/planner_validation/exports/test_planner_p5_corridor_gnss_degraded_lidar_good_1783789011136/figures/p5_2_p5_debounce_timeline.png) | Emergency streak and final-gate counters climb together, proving abnormal debounce/final-gate behavior. |
+| ![P5-2 final gate summary](../../results/planner_validation/exports/test_planner_p5_corridor_gnss_degraded_lidar_good_1783789011136/figures/p5_2_p5_final_gate_summary.png) | Final-gate fail count and emergency rows are nonzero and above threshold, matching analyzer FAIL. |
+| ![P5-2 trajectory integrity samples](../../results/planner_validation/exports/test_planner_p5_corridor_gnss_degraded_lidar_good_1783789011136/figures/p5_2_trajectory_integrity_samples.png) | Marker samples are dominated by stale/warning states, not a clean light-risk trajectory. |
+
+Verification notes:
+
+| Check | Result |
+|---|---|
+| P5-1 PASS artifact/report consistency | `PASS`: report final P5-1 conclusion is `PASS -> P5-2`, analyzer summary has `next_debug_branch=PASS -> P5-2` |
+| Python compile check | `PASS`: `python3 -m py_compile launch/test_planner.launch.py scripts/dev_planner/analyze_safety_planner_run.py` |
+| Focused P5 analyzer tests | `PASS`: `python3 test/test_analyze_safety_planner_run_p5_1.py` |
+| Focused P5 runtime gate test | `PASS`: `ctest --test-dir build/ego_planner -R "test_p5_runtime_integrity_gate" --output-on-failure` |
+| P5-2 launch | `PASS`: completed and wrote export/bag artifacts; shutdown produced known ROS teardown process-death logs after recording stopped |
+| P5-2 analyzer with `--fail-on-threshold` | `FAIL as expected`: exit `2`, `next_debug_branch=debug PL/AL margin` |
+| `git diff --check` | `PASS` |
+| Report image references | `PASS`: all `131` image links exist |
+| P5-2 report/analyzer branch consistency | `PASS`: report conclusion is `FAIL -> debug PL/AL margin` |
+
+Final conclusion:
+
+FAIL -> debug PL/AL margin

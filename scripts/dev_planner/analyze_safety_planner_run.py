@@ -99,6 +99,7 @@ P5_OK_ACTION = "OK"
 P5_1_MIN_OK_ACTION_RATIO = 0.95
 P5_1_STARTUP_REPLAN_MAX_DURATION_S = 2.0
 P5_REPLAN_STORM_CONSECUTIVE = 3
+P5_2_EMERGENCY_STORM_CONSECUTIVE = 3
 P5_STATUS_FIELDS = [
     "bag_time_s",
     "phase",
@@ -231,6 +232,10 @@ def is_experiment(args: argparse.Namespace, experiment_id: str) -> bool:
 
 def is_p0_experiment(args: argparse.Namespace) -> bool:
     return re.fullmatch(r"P0-\d+", str(args.experiment_id).strip().upper()) is not None
+
+
+def is_p5_runtime_experiment(args: argparse.Namespace) -> bool:
+    return str(args.experiment_id).strip().upper() in {"P5-1", "P5-2"}
 
 
 def p0_phase_number(experiment_id: Any) -> int | None:
@@ -877,16 +882,44 @@ def validate_manifest(
             failures.append(f"manifest {key} is not false")
 
 
-def validate_p5_1_manifest(
+def p5_manifest_gate_values(manifest: dict[str, Any]) -> dict[str, bool]:
+    expected_true = (
+        "p0.enable_risk_grid",
+        "planner_enable_p5_runtime",
+        "planner_enable_p5_final",
+    )
+    expected_false = (
+        "planner_enable_p1",
+        "planner_enable_p2",
+        "planner_enable_p3_local",
+        "planner_enable_p3_global",
+        "planner_enable_p4",
+    )
+    return {
+        "manifest_present": bool(manifest),
+        "manifest_safety_profile_p5": str(manifest.get("planner_safety_profile", "")).lower()
+        == "p5",
+        "manifest_p0_enabled": manifest.get("p0.enable_risk_grid") is True,
+        "manifest_p5_runtime_enabled": manifest.get("planner_enable_p5_runtime") is True,
+        "manifest_p5_final_enabled": manifest.get("planner_enable_p5_final") is True,
+        "manifest_p1_p4_disabled": all(manifest.get(key) is False for key in expected_false),
+        "manifest_expected_true_ok": all(manifest.get(key) is True for key in expected_true),
+        "manifest_expected_false_ok": all(manifest.get(key) is False for key in expected_false),
+    }
+
+
+def validate_p5_manifest(
     manifest: dict[str, Any],
     failures: list[str],
     inconclusive: list[str],
+    *,
+    experiment_label: str = "P5-1",
 ) -> None:
     if not manifest:
-        inconclusive.append("P5-1 checks require test_planner_manifest.json")
+        inconclusive.append(f"{experiment_label} checks require test_planner_manifest.json")
         return
     if str(manifest.get("planner_safety_profile", "")).lower() != "p5":
-        failures.append("P5-1 manifest planner_safety_profile is not p5")
+        failures.append(f"{experiment_label} manifest planner_safety_profile is not p5")
     expected_true = (
         "p0.enable_risk_grid",
         "planner_enable_p5_runtime",
@@ -901,10 +934,23 @@ def validate_p5_1_manifest(
     )
     for key in expected_true:
         if manifest.get(key) is not True:
-            failures.append(f"P5-1 manifest {key} is not true")
+            failures.append(f"{experiment_label} manifest {key} is not true")
     for key in expected_false:
         if manifest.get(key) is not False:
-            failures.append(f"P5-1 manifest {key} is not false")
+            failures.append(f"{experiment_label} manifest {key} is not false")
+
+
+def validate_p5_1_manifest(
+    manifest: dict[str, Any],
+    failures: list[str],
+    inconclusive: list[str],
+) -> None:
+    validate_p5_manifest(
+        manifest,
+        failures,
+        inconclusive,
+        experiment_label="P5-1",
+    )
 
 
 def validate_validator(summary: dict[str, Any], failures: list[str], inconclusive: list[str]) -> None:
@@ -1608,6 +1654,91 @@ def plot_p5_final_gate_summary(p5_summary: dict[str, Any], path: Path) -> bool:
     ax.set_title("P5 final gate and storm summary")
     ax.tick_params(axis="x", rotation=18)
     ax.grid(True, axis="y", alpha=0.25)
+    fig.tight_layout()
+    fig.savefig(path, dpi=160)
+    plt.close(fig)
+    return True
+
+
+def plot_p5_debounce_timeline(rows: list[dict[str, Any]], path: Path) -> bool:
+    debounce_rows = build_p5_debounce_timeline_rows(rows)
+    if not debounce_rows:
+        return False
+    t = [finite_float(row.get("t_rel_s")) for row in debounce_rows]
+    if not any(value is not None for value in t):
+        return False
+    t_plot = [math.nan if value is None else value for value in t]
+    fig, axes = plt.subplots(3, 1, figsize=(11, 7.0), sharex=True)
+    axes[0].step(
+        t_plot,
+        [int(row.get("consecutive_replan", 0) or 0) for row in debounce_rows],
+        where="post",
+        label="action replan streak",
+        color="#f97316",
+    )
+    axes[0].step(
+        t_plot,
+        [int(row.get("raw_consecutive_replan", 0) or 0) for row in debounce_rows],
+        where="post",
+        label="raw replan streak",
+        color="#f59e0b",
+        linestyle="--",
+    )
+    axes[0].set_ylabel("replan streak")
+    axes[0].legend(loc="best")
+
+    axes[1].step(
+        t_plot,
+        [int(row.get("consecutive_emergency", 0) or 0) for row in debounce_rows],
+        where="post",
+        label="action emergency streak",
+        color="#dc2626",
+    )
+    axes[1].step(
+        t_plot,
+        [int(row.get("raw_consecutive_emergency", 0) or 0) for row in debounce_rows],
+        where="post",
+        label="raw emergency streak",
+        color="#991b1b",
+        linestyle="--",
+    )
+    axes[1].axhline(
+        P5_2_EMERGENCY_STORM_CONSECUTIVE,
+        color="#111827",
+        lw=0.9,
+        label="P5-2 emergency limit",
+    )
+    axes[1].set_ylabel("emergency streak")
+    axes[1].legend(loc="best")
+
+    axes[2].step(
+        t_plot,
+        [
+            int(finite_float(row.get("final_gate_fail_count")) or 0)
+            for row in debounce_rows
+        ],
+        where="post",
+        label="final_gate_fail_count",
+        color="#7c3aed",
+    )
+    axes[2].step(
+        t_plot,
+        [
+            int(row.get("final_gate_escalated_to_emergency", 0) or 0)
+            for row in debounce_rows
+        ],
+        where="post",
+        label="final gate escalated",
+        color="#dc2626",
+        linestyle="--",
+    )
+    axes[2].axhline(3, color="#111827", lw=0.9, label="P5-2 final-gate limit")
+    axes[2].set_ylabel("final gate")
+    axes[2].set_xlabel("time since first P5 status [s]")
+    axes[2].legend(loc="best")
+    for ax in axes:
+        ax.grid(True, alpha=0.25)
+    fig.suptitle("P5 debounce and final-gate timeline")
     fig.tight_layout()
     fig.savefig(path, dpi=160)
     plt.close(fig)
@@ -3467,6 +3598,78 @@ def max_consecutive_action(rows: list[dict[str, Any]], action: str, key: str = "
     return consecutive_true([p5_action(row, key) == action for row in rows])
 
 
+def p5_reason(row: dict[str, Any], key: str = "reason") -> str:
+    return str(row.get(key, "")).strip().lower()
+
+
+def p5_final_gate_emergency(row: dict[str, Any]) -> bool:
+    return p5_final_gate_failed(row) and (
+        p5_action(row, "action") == P5_EMERGENCY_ACTION
+        or p5_action(row, "raw_action") == P5_EMERGENCY_ACTION
+    )
+
+
+def p5_has_explainable_unknown_reason(row: dict[str, Any]) -> bool:
+    explainable = {"al_invalid", "future_unknown", "snapshot_unavailable"}
+    return any(
+        p5_reason(row, key) in explainable
+        for key in ("reason", "final_gate_last_reason", "pred_al_last_reason")
+    )
+
+
+def p5_has_finite_margin_degradation(row: dict[str, Any]) -> bool:
+    return any(
+        value is not None and value <= 0.0
+        for value in (
+            finite_float(row.get("future_min_im")),
+            finite_float(row.get("current_im_min")),
+            finite_float(row.get("current_im_h")),
+            finite_float(row.get("current_im_v")),
+        )
+    )
+
+
+def build_p5_debounce_timeline_rows(p5_rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    t_rel = relative_time(p5_rows)
+    action_replan_streak = 0
+    raw_replan_streak = 0
+    action_emergency_streak = 0
+    raw_emergency_streak = 0
+    for idx, row in enumerate(p5_rows):
+        action = p5_action(row, "action")
+        raw_action = p5_action(row, "raw_action")
+        action_replan_streak = action_replan_streak + 1 if action == P5_REPLAN_ACTION else 0
+        raw_replan_streak = raw_replan_streak + 1 if raw_action == P5_REPLAN_ACTION else 0
+        action_emergency_streak = (
+            action_emergency_streak + 1 if action == P5_EMERGENCY_ACTION else 0
+        )
+        raw_emergency_streak = (
+            raw_emergency_streak + 1 if raw_action == P5_EMERGENCY_ACTION else 0
+        )
+        rows.append(
+            {
+                "bag_time_s": row.get("bag_time_s", ""),
+                "t_rel_s": t_rel[idx] if idx < len(t_rel) else "",
+                "phase": row.get("phase", ""),
+                "action": action,
+                "raw_action": raw_action,
+                "reason": row.get("reason", ""),
+                "consecutive_replan": action_replan_streak,
+                "raw_consecutive_replan": raw_replan_streak,
+                "consecutive_emergency": action_emergency_streak,
+                "raw_consecutive_emergency": raw_emergency_streak,
+                "final_gate_fail_count": row.get("final_gate_fail_count", ""),
+                "final_gate_fail_duration_s": row.get("final_gate_fail_duration_s", ""),
+                "final_gate_last_reason": row.get("final_gate_last_reason", ""),
+                "final_gate_escalated_to_emergency": 1
+                if p5_final_gate_emergency(row)
+                else 0,
+            }
+        )
+    return rows
+
+
 def p5_startup_snapshot_unavailable_row(row: dict[str, Any]) -> bool:
     reason = str(row.get("reason", "")).strip().lower()
     if reason != "snapshot_unavailable":
@@ -3538,6 +3741,7 @@ def summarize_p5_status_rows(p5_rows: list[dict[str, Any]], p5_error: str = "") 
         or p5_action(row, "raw_action") == P5_REPLAN_ACTION
     ]
     final_fail_rows = [row for row in p5_rows if p5_final_gate_failed(row)]
+    final_gate_emergency_rows = [row for row in p5_rows if p5_final_gate_emergency(row)]
     parse_error_rows = [row for row in p5_rows if str(row.get("parse_error", "")).strip()]
     ok_count = int(action_counts.get(P5_OK_ACTION, 0))
     steady_ok_count = int(steady_action_counts.get(P5_OK_ACTION, 0))
@@ -3547,6 +3751,25 @@ def summarize_p5_status_rows(p5_rows: list[dict[str, Any]], p5_error: str = "") 
     steady_raw_max_consecutive_replan = max_consecutive_action(
         steady_rows, P5_REPLAN_ACTION, "raw_action"
     )
+    max_consecutive_replan = max_consecutive_action(p5_rows, P5_REPLAN_ACTION, "action")
+    raw_max_consecutive_replan = max_consecutive_action(
+        p5_rows, P5_REPLAN_ACTION, "raw_action"
+    )
+    max_consecutive_emergency = max_consecutive_action(
+        p5_rows, P5_EMERGENCY_ACTION, "action"
+    )
+    raw_max_consecutive_emergency = max_consecutive_action(
+        p5_rows, P5_EMERGENCY_ACTION, "raw_action"
+    )
+    explainable_unknown_rows = [
+        row
+        for row in p5_rows
+        if (finite_float(row.get("unknown_ratio")) or 0.0) > 0.0
+        and p5_has_explainable_unknown_reason(row)
+    ]
+    finite_margin_degradation_rows = [
+        row for row in p5_rows if p5_has_finite_margin_degradation(row)
+    ]
     summary: dict[str, Any] = {
         "status_rows": len(p5_rows),
         "action_counts": dict(sorted(action_counts.items())),
@@ -3579,13 +3802,16 @@ def summarize_p5_status_rows(p5_rows: list[dict[str, Any]], p5_error: str = "") 
         "raw_replan_action_count": int(raw_action_counts.get(P5_REPLAN_ACTION, 0)),
         "emergency_action_count": len(emergency_rows),
         "raw_emergency_action_count": int(raw_action_counts.get(P5_EMERGENCY_ACTION, 0)),
-        "max_consecutive_replan": max_consecutive_action(p5_rows, P5_REPLAN_ACTION, "action"),
-        "raw_max_consecutive_replan": max_consecutive_action(p5_rows, P5_REPLAN_ACTION, "raw_action"),
+        "max_consecutive_replan": max_consecutive_replan,
+        "raw_max_consecutive_replan": raw_max_consecutive_replan,
+        "max_consecutive_emergency": max_consecutive_emergency,
+        "raw_max_consecutive_emergency": raw_max_consecutive_emergency,
         "replan_storm": (
-            max_consecutive_action(p5_rows, P5_REPLAN_ACTION, "action") >= P5_REPLAN_STORM_CONSECUTIVE
-            or max_consecutive_action(p5_rows, P5_REPLAN_ACTION, "raw_action") >= P5_REPLAN_STORM_CONSECUTIVE
+            max_consecutive_replan >= P5_REPLAN_STORM_CONSECUTIVE
+            or raw_max_consecutive_replan >= P5_REPLAN_STORM_CONSECUTIVE
         ),
         "final_gate_fail_rows": len(final_fail_rows),
+        "final_gate_emergency_rows": len(final_gate_emergency_rows),
         "final_gate_fail_count_max": max(
             (int(finite_float(row.get("final_gate_fail_count")) or 0) for row in p5_rows),
             default=0,
@@ -3599,7 +3825,18 @@ def summarize_p5_status_rows(p5_rows: list[dict[str, Any]], p5_error: str = "") 
         "first_replan_row": replan_rows[0] if replan_rows else None,
         "first_emergency_row": emergency_rows[0] if emergency_rows else None,
         "first_final_gate_fail_row": final_fail_rows[0] if final_fail_rows else None,
+        "first_final_gate_emergency_row": final_gate_emergency_rows[0]
+        if final_gate_emergency_rows
+        else None,
         "first_parse_error_row": parse_error_rows[0] if parse_error_rows else None,
+        "explainable_unknown_rows": len(explainable_unknown_rows),
+        "finite_margin_degradation_rows": len(finite_margin_degradation_rows),
+        "first_explainable_unknown_row": explainable_unknown_rows[0]
+        if explainable_unknown_rows
+        else None,
+        "first_finite_margin_degradation_row": finite_margin_degradation_rows[0]
+        if finite_margin_degradation_rows
+        else None,
     }
     for key in (
         "future_min_im",
@@ -3628,6 +3865,8 @@ def validate_p5_status(
     inconclusive: list[str],
     *,
     allow_replan: bool = False,
+    allow_emergency: bool = False,
+    allow_final_gate_failure: bool = False,
 ) -> dict[str, Any]:
     summary = summarize_p5_status_rows(p5_rows, p5_error)
     if p5_error:
@@ -3640,7 +3879,11 @@ def validate_p5_status(
     )
     has_emergency = int(summary.get("emergency_action_count", 0) or 0) > 0
     has_final_fail = int(summary.get("final_gate_fail_rows", 0) or 0) > 0
-    if has_emergency or has_final_fail or (has_replan and not allow_replan):
+    if (
+        (has_emergency and not allow_emergency)
+        or (has_final_fail and not allow_final_gate_failure)
+        or (has_replan and not allow_replan)
+    ):
         failures.append("P5 status contains replan, emergency, or final gate failure behavior")
     bad_rows = []
     for row in p5_rows:
@@ -3649,9 +3892,14 @@ def validate_p5_status(
             or p5_action(row, "raw_action") == P5_REPLAN_ACTION
         )
         row_is_bad = (
-            p5_action(row, "action") == P5_EMERGENCY_ACTION
-            or p5_action(row, "raw_action") == P5_EMERGENCY_ACTION
-            or p5_final_gate_failed(row)
+            (
+                not allow_emergency
+                and (
+                    p5_action(row, "action") == P5_EMERGENCY_ACTION
+                    or p5_action(row, "raw_action") == P5_EMERGENCY_ACTION
+                )
+            )
+            or (p5_final_gate_failed(row) and not allow_final_gate_failure)
             or (row_has_replan and not allow_replan)
         )
         if row_is_bad:
@@ -3755,6 +4003,241 @@ def validate_p5_1_hard_gates(
     if not gates["predicted_al_available"]:
         inconclusive.append("P5-1 predicted alert-limit minima had no finite samples")
     gates["passed"] = not any(message.startswith("P5-1") for message in failures + inconclusive)
+    return gates
+
+
+def p0_health_row_full_unknown(row: dict[str, Any]) -> bool:
+    return (
+        (finite_float(row.get("valid_ratio")) or 0.0) <= 1.0e-9
+        and (finite_float(row.get("unknown_ratio")) or 0.0) >= 0.999
+    )
+
+
+def summarize_p0_startup_snapshot_unavailable(
+    rows: list[dict[str, Any]],
+) -> dict[str, Any]:
+    prefix: list[dict[str, Any]] = []
+    for row in rows:
+        if str(row.get("reason", "")).strip().lower() != "snapshot_unavailable":
+            break
+        prefix.append(row)
+    post_startup_rows = rows[len(prefix) :]
+    prefix_stamps = [value for value in (finite_float(row.get("stamp")) for row in prefix) if value is not None]
+    duration_s = max(prefix_stamps) - min(prefix_stamps) if len(prefix_stamps) > 1 else 0.0
+    row_count = len(rows)
+    ready_false_prefix = sum(1 for row in prefix if not bool(row.get("ready")))
+    stale_prefix = sum(1 for row in prefix if bool(row.get("stale")))
+    full_unknown_prefix = sum(1 for row in prefix if p0_health_row_full_unknown(row))
+    bounded = (
+        not prefix
+        or (
+            len(prefix) <= 3
+            and ratio(len(prefix), row_count) <= 0.10
+            and max(ready_false_prefix, stale_prefix, full_unknown_prefix) <= 3
+        )
+    )
+    post_ready_false = sum(1 for row in post_startup_rows if not bool(row.get("ready")))
+    post_stale = sum(1 for row in post_startup_rows if bool(row.get("stale")))
+    post_full_unknown = sum(1 for row in post_startup_rows if p0_health_row_full_unknown(row))
+    return {
+        "startup_snapshot_unavailable_rows": len(prefix),
+        "startup_snapshot_unavailable_duration_s": duration_s,
+        "startup_snapshot_unavailable_bounded": bounded,
+        "post_startup_rows": len(post_startup_rows),
+        "post_startup_ready_false_count": post_ready_false,
+        "post_startup_stale_true_count": post_stale,
+        "post_startup_full_unknown_count": post_full_unknown,
+    }
+
+
+def validate_p5_2_hard_gates(
+    manifest: dict[str, Any],
+    validator_summary: dict[str, Any],
+    topic_health: dict[str, dict[str, Any]],
+    p0_health_summary: dict[str, Any],
+    p0_health_rows: list[dict[str, Any]],
+    p5_summary: dict[str, Any],
+    failures: list[str],
+    inconclusive: list[str],
+) -> dict[str, Any]:
+    manifest_gates = p5_manifest_gate_values(manifest)
+    topic_statuses = {
+        topic: (topic_health.get(topic) or {}).get("status", "MISSING")
+        for topic in P5_TOPIC_EXPECTATIONS
+    }
+    p0_startup = summarize_p0_startup_snapshot_unavailable(p0_health_rows)
+    unknown_ratio_max = finite_float(p5_summary.get("unknown_ratio_max")) or 0.0
+    bad_ratio_max = finite_float(p5_summary.get("bad_ratio_max")) or 0.0
+    current_stale_duration_max = (
+        finite_float(p5_summary.get("current_stale_duration_s_max")) or 0.0
+    )
+    future_unknown_duration_max = (
+        finite_float(p5_summary.get("future_unknown_duration_s_max")) or 0.0
+    )
+    has_stale_or_unknown_duration = (
+        current_stale_duration_max > 0.0 or future_unknown_duration_max > 0.0
+    )
+    has_explainable_unknown_reason = int(
+        p5_summary.get("explainable_unknown_rows", 0) or 0
+    ) > 0
+    has_finite_margin_degradation = int(
+        p5_summary.get("finite_margin_degradation_rows", 0) or 0
+    ) > 0
+    unexplained_unknown = (
+        unknown_ratio_max > 0.0
+        and bad_ratio_max == 0.0
+        and not has_stale_or_unknown_duration
+        and not has_explainable_unknown_reason
+        and not has_finite_margin_degradation
+    )
+    max_consecutive_emergency = int(p5_summary.get("max_consecutive_emergency", 0) or 0)
+    raw_max_consecutive_emergency = int(
+        p5_summary.get("raw_max_consecutive_emergency", 0) or 0
+    )
+    final_gate_fail_count_max = int(p5_summary.get("final_gate_fail_count_max", 0) or 0)
+    gates = {
+        **manifest_gates,
+        "validator_summary_present": bool(validator_summary),
+        "validator_passed": validator_summary.get("passed") is True,
+        "required_p5_topics_stable": all(
+            status == "PASS" for status in topic_statuses.values()
+        ),
+        "topic_statuses": topic_statuses,
+        "p0_health_rows_present": int(p0_health_summary.get("row_count", 0) or 0) > 0,
+        **p0_startup,
+        "p0_post_startup_ready": p0_startup["post_startup_ready_false_count"] == 0,
+        "p0_post_startup_non_stale": p0_startup["post_startup_stale_true_count"] == 0,
+        "p0_post_startup_not_full_unknown": (
+            p0_startup["post_startup_full_unknown_count"] == 0
+        ),
+        "p5_status_rows_present": int(p5_summary.get("status_rows", 0) or 0) > 0,
+        "p5_steady_status_rows_present": int(p5_summary.get("steady_status_rows", 0) or 0)
+        > 0,
+        "p5_json_parse_ok": int(p5_summary.get("parse_error_count", 0) or 0) == 0,
+        "p5_inspection_ok": not bool(p5_summary.get("inspection_error")),
+        "p5_startup_snapshot_unavailable_bounded": bool(
+            p5_summary.get("startup_snapshot_unavailable_bounded", True)
+        ),
+        "max_consecutive_emergency": max_consecutive_emergency,
+        "raw_max_consecutive_emergency": raw_max_consecutive_emergency,
+        "emergency_storm_absent": (
+            max_consecutive_emergency < P5_2_EMERGENCY_STORM_CONSECUTIVE
+            and raw_max_consecutive_emergency < P5_2_EMERGENCY_STORM_CONSECUTIVE
+        ),
+        "final_gate_fail_count_max": final_gate_fail_count_max,
+        "final_gate_accumulation_bounded": final_gate_fail_count_max < 3,
+        "final_gate_emergency_rows": int(
+            p5_summary.get("final_gate_emergency_rows", 0) or 0
+        ),
+        "final_gate_emergency_absent": int(
+            p5_summary.get("final_gate_emergency_rows", 0) or 0
+        )
+        == 0,
+        "unknown_ratio_max": unknown_ratio_max,
+        "bad_ratio_max": bad_ratio_max,
+        "has_stale_or_unknown_duration": has_stale_or_unknown_duration,
+        "has_explainable_unknown_reason": has_explainable_unknown_reason,
+        "has_finite_margin_degradation": has_finite_margin_degradation,
+        "unexplained_unknown_absent": not unexplained_unknown,
+        "future_min_im_available": p5_summary.get("future_min_im_min") is not None,
+        "current_im_min_available": p5_summary.get("current_im_min_min") is not None,
+        "sample_count_available": (
+            p5_summary.get("sample_count_max") is not None
+            and (finite_float(p5_summary.get("sample_count_max")) or 0.0) > 0.0
+        ),
+        "pred_hal_min_available": p5_summary.get("pred_hal_min_min") is not None,
+        "pred_val_min_available": p5_summary.get("pred_val_min_min") is not None,
+    }
+    gates["predicted_al_available"] = (
+        gates["pred_hal_min_available"] and gates["pred_val_min_available"]
+    )
+
+    if not gates["manifest_present"]:
+        inconclusive.append("P5-2 checks require test_planner_manifest.json")
+    elif not (
+        gates["manifest_safety_profile_p5"]
+        and gates["manifest_expected_true_ok"]
+        and gates["manifest_expected_false_ok"]
+    ):
+        failures.append("P5-2 manifest does not enable P0/P5 with P1-P4 disabled")
+    if not gates["validator_summary_present"]:
+        inconclusive.append("P5-2 validator summary is missing")
+    elif not gates["validator_passed"]:
+        failures.append("P5-2 validator summary did not pass")
+    if not gates["required_p5_topics_stable"]:
+        failures.append("P5-2 required P0/P5 topics are not all stable")
+    if not gates["p0_health_rows_present"]:
+        failures.append("P5-2 P0 health rows are missing")
+    if not gates["startup_snapshot_unavailable_bounded"]:
+        failures.append("P5-2 P0 startup snapshot_unavailable prefix is not bounded")
+    if not gates["p0_post_startup_ready"]:
+        failures.append("P5-2 P0 health reported ready=false after startup")
+    if not gates["p0_post_startup_non_stale"]:
+        failures.append("P5-2 P0 health reported stale=true after startup")
+    if not gates["p0_post_startup_not_full_unknown"]:
+        failures.append("P5-2 P0 health reported full unknown after startup")
+    if not gates["p5_status_rows_present"]:
+        failures.append("P5-2 P5 status rows are missing")
+    if not gates["p5_steady_status_rows_present"]:
+        inconclusive.append("P5-2 P5 status rows contain no steady-state samples after startup")
+    if not gates["p5_json_parse_ok"]:
+        failures.append("P5-2 P5 status JSON parse errors were observed")
+    if not gates["p5_inspection_ok"]:
+        inconclusive.append("P5-2 P5 status inspection did not complete cleanly")
+    if not gates["p5_startup_snapshot_unavailable_bounded"]:
+        failures.append(
+            "P5-2 startup snapshot_unavailable replan prefix exceeded "
+            f"{P5_1_STARTUP_REPLAN_MAX_DURATION_S:.1f}s"
+        )
+    if not gates["emergency_storm_absent"]:
+        failures.append(
+            "P5-2 observed sustained emergency storm: "
+            f"action_consecutive={max_consecutive_emergency}, "
+            f"raw_action_consecutive={raw_max_consecutive_emergency}"
+        )
+    if not gates["final_gate_accumulation_bounded"]:
+        failures.append("P5-2 final_gate_fail_count reached abnormal accumulation")
+    if not gates["final_gate_emergency_absent"]:
+        failures.append("P5-2 final-gate failure escalated to emergency")
+    if not gates["unexplained_unknown_absent"]:
+        failures.append("P5-2 unknown_ratio was nonzero without explanatory evidence")
+    if not gates["future_min_im_available"]:
+        inconclusive.append("P5-2 future_min_im had no finite samples")
+    if not gates["current_im_min_available"]:
+        inconclusive.append("P5-2 current_im_min had no finite samples")
+    if not gates["sample_count_available"]:
+        inconclusive.append("P5-2 sample_count had no positive finite samples")
+    if not gates["predicted_al_available"]:
+        inconclusive.append("P5-2 predicted alert-limit minima had no finite samples")
+
+    required = (
+        "manifest_present",
+        "manifest_safety_profile_p5",
+        "manifest_expected_true_ok",
+        "manifest_expected_false_ok",
+        "validator_summary_present",
+        "validator_passed",
+        "required_p5_topics_stable",
+        "p0_health_rows_present",
+        "startup_snapshot_unavailable_bounded",
+        "p0_post_startup_ready",
+        "p0_post_startup_non_stale",
+        "p0_post_startup_not_full_unknown",
+        "p5_status_rows_present",
+        "p5_steady_status_rows_present",
+        "p5_json_parse_ok",
+        "p5_inspection_ok",
+        "p5_startup_snapshot_unavailable_bounded",
+        "emergency_storm_absent",
+        "final_gate_accumulation_bounded",
+        "final_gate_emergency_absent",
+        "unexplained_unknown_absent",
+        "future_min_im_available",
+        "current_im_min_available",
+        "sample_count_available",
+        "predicted_al_available",
+    )
+    gates["passed"] = all(bool(gates.get(key)) for key in required)
     return gates
 
 
@@ -4218,6 +4701,8 @@ def next_debug_branch(
     normalized_experiment_id = str(experiment_id).strip().upper()
     if normalized_experiment_id == "P5-1":
         return "PASS -> P5-2" if status == "PASS" else "debug P5 thresholds/AL provider"
+    if normalized_experiment_id == "P5-2":
+        return "PASS -> P5-3" if status == "PASS" else "debug PL/AL margin"
     if status == "PASS":
         pass_branches = {
             "B0-1": "continue_to_B0-2_open_sky_baseline",
@@ -4279,7 +4764,9 @@ def analyze(args: argparse.Namespace) -> dict[str, Any]:
     p0_requires_odom_gate = p0_odom_gate_required(args.experiment_id)
     experiment_label = str(args.experiment_id).strip().upper()
     p5_1_phase = is_experiment(args, "P5-1")
-    p0_runtime_phase = p0_phase or p5_1_phase
+    p5_2_phase = is_experiment(args, "P5-2")
+    p5_runtime_phase = is_p5_runtime_experiment(args)
+    p0_runtime_phase = p0_phase or p5_runtime_phase
     if bool(getattr(args, "blocked_fixture_audit", False)):
         if experiment_label != "P0-6":
             raise ValueError("--blocked-fixture-audit is only defined for P0-6")
@@ -4320,7 +4807,7 @@ def analyze(args: argparse.Namespace) -> dict[str, Any]:
         return summary
     topic_expectations = (
         P5_TOPIC_EXPECTATIONS
-        if p5_1_phase
+        if p5_runtime_phase
         else (
             P0_4_TOPIC_EXPECTATIONS
             if p0_4_phase
@@ -4329,7 +4816,7 @@ def analyze(args: argparse.Namespace) -> dict[str, Any]:
     )
     topic_activity_topics = (
         P5_TOPIC_ACTIVITY_TOPICS
-        if p5_1_phase
+        if p5_runtime_phase
         else (P0_TOPIC_ACTIVITY_TOPICS if p0_phase else TOPIC_ACTIVITY_TOPICS)
     )
 
@@ -4346,8 +4833,13 @@ def analyze(args: argparse.Namespace) -> dict[str, Any]:
     )
     integrity_rows, integrity_summary = read_integrity_csv(export_dir / "test_planner_integrity_validation.csv")
 
-    if p5_1_phase:
-        validate_p5_1_manifest(manifest, failures, inconclusive)
+    if p5_runtime_phase:
+        validate_p5_manifest(
+            manifest,
+            failures,
+            inconclusive,
+            experiment_label=experiment_label,
+        )
     else:
         validate_manifest(
             manifest,
@@ -4481,7 +4973,7 @@ def analyze(args: argparse.Namespace) -> dict[str, Any]:
             failures,
             inconclusive,
             allow_high_unknown=p0_4_phase,
-            allow_explainable_startup_unavailable=p0_4_phase or p5_1_phase,
+            allow_explainable_startup_unavailable=p0_4_phase or p5_runtime_phase,
         )
         p0_4_semantics: dict[str, Any] = {}
         if p0_4_phase:
@@ -4870,7 +5362,9 @@ def analyze(args: argparse.Namespace) -> dict[str, Any]:
         p5_error,
         failures,
         inconclusive,
-        allow_replan=p5_1_phase,
+        allow_replan=p5_runtime_phase,
+        allow_emergency=p5_2_phase,
+        allow_final_gate_failure=p5_2_phase,
     )
     if p0_requires_odom_gate and p5_summary.get("action_counts"):
         failures.append(f"{experiment_label} P5 status reported actions while P5 is disabled")
@@ -4878,10 +5372,11 @@ def analyze(args: argparse.Namespace) -> dict[str, Any]:
     p5_marker_summary: dict[str, Any] = {"row_count": 0}
     p5_marker_error = ""
     p5_1_gates: dict[str, Any] = {}
+    p5_2_gates: dict[str, Any] = {}
     p5_csv_artifacts: list[str] = []
     p5_figure_artifacts: list[str] = []
     p5_required_figures: list[Path] = []
-    if p5_1_phase:
+    if p5_runtime_phase:
         p5_marker_rows, p5_marker_error = (
             read_p5_marker_evidence(bag_dir, metadata)
             if bag_dir is not None
@@ -4890,8 +5385,20 @@ def analyze(args: argparse.Namespace) -> dict[str, Any]:
         p5_marker_summary = summarize_p5_marker_evidence(p5_marker_rows, p5_marker_error)
         if p5_marker_error:
             inconclusive.append(f"could not inspect P5 RViz marker evidence: {p5_marker_error}")
+    if p5_1_phase:
         p5_1_gates = validate_p5_1_hard_gates(
             p0_health_summary,
+            p5_summary,
+            failures,
+            inconclusive,
+        )
+    if p5_2_phase:
+        p5_2_gates = validate_p5_2_hard_gates(
+            manifest,
+            validator_summary,
+            topic_health,
+            p0_health_summary,
+            health_rows,
             p5_summary,
             failures,
             inconclusive,
@@ -4904,11 +5411,12 @@ def analyze(args: argparse.Namespace) -> dict[str, Any]:
         write_csv(p5_status_path, P5_STATUS_FIELDS, p5_rows)
         csv_artifacts.append(str(p5_status_path))
         p5_csv_artifacts.append(str(p5_status_path))
-    if p5_1_phase:
+    if p5_runtime_phase:
         p5_action_path = csv_dir / f"{prefix}_p5_action_timeline.csv"
         p5_margin_path = csv_dir / f"{prefix}_p5_margin_timeline.csv"
         p5_final_gate_path = csv_dir / f"{prefix}_p5_final_gate_summary.csv"
         p5_marker_path = csv_dir / f"{prefix}_trajectory_integrity_evidence.csv"
+        p5_debounce_path = csv_dir / f"{prefix}_p5_debounce_timeline.csv"
         action_rows = []
         t_rel = relative_time(p5_rows)
         for idx, row in enumerate(p5_rows):
@@ -4995,14 +5503,38 @@ def analyze(args: argparse.Namespace) -> dict[str, Any]:
                 "replan_action_count",
                 "raw_replan_action_count",
                 "emergency_action_count",
+                "raw_emergency_action_count",
+                "max_consecutive_emergency",
+                "raw_max_consecutive_emergency",
                 "max_consecutive_replan",
                 "raw_max_consecutive_replan",
                 "final_gate_fail_rows",
+                "final_gate_emergency_rows",
                 "final_gate_fail_count_max",
                 "final_gate_fail_duration_s_max",
                 "replan_storm",
             ],
             [p5_summary],
+        )
+        write_csv(
+            p5_debounce_path,
+            [
+                "bag_time_s",
+                "t_rel_s",
+                "phase",
+                "action",
+                "raw_action",
+                "reason",
+                "consecutive_replan",
+                "raw_consecutive_replan",
+                "consecutive_emergency",
+                "raw_consecutive_emergency",
+                "final_gate_fail_count",
+                "final_gate_fail_duration_s",
+                "final_gate_last_reason",
+                "final_gate_escalated_to_emergency",
+            ],
+            build_p5_debounce_timeline_rows(p5_rows),
         )
         write_csv(
             p5_marker_path,
@@ -5031,6 +5563,7 @@ def analyze(args: argparse.Namespace) -> dict[str, Any]:
                 str(p5_action_path),
                 str(p5_margin_path),
                 str(p5_final_gate_path),
+                str(p5_debounce_path),
                 str(p5_marker_path),
             ]
         )
@@ -5043,6 +5576,7 @@ def analyze(args: argparse.Namespace) -> dict[str, Any]:
         p5_action_figure_path = figures_dir / f"{prefix}_p5_action_timeline.png"
         p5_status_figure_path = figures_dir / f"{prefix}_p5_status_timeline.png"
         p5_margin_figure_path = figures_dir / f"{prefix}_p5_margin_timeline.png"
+        p5_debounce_figure_path = figures_dir / f"{prefix}_p5_debounce_timeline.png"
         p5_future_unknown_figure_path = figures_dir / f"{prefix}_future_unknown_duration_timeline.png"
         p5_startup_correlation_figure_path = figures_dir / f"{prefix}_startup_correlation.png"
         p5_final_gate_figure_path = figures_dir / f"{prefix}_p5_final_gate_summary.png"
@@ -5054,6 +5588,8 @@ def analyze(args: argparse.Namespace) -> dict[str, Any]:
             p5_figure_artifacts.append(str(p5_status_figure_path))
         if plot_p5_margin_timeline(p5_rows, p5_margin_figure_path):
             p5_figure_artifacts.append(str(p5_margin_figure_path))
+        if plot_p5_debounce_timeline(p5_rows, p5_debounce_figure_path):
+            p5_figure_artifacts.append(str(p5_debounce_figure_path))
         if plot_p5_future_unknown_duration_timeline(p5_rows, p5_future_unknown_figure_path):
             p5_figure_artifacts.append(str(p5_future_unknown_figure_path))
         if plot_p5_startup_correlation(health_rows, p5_rows, p5_startup_correlation_figure_path):
@@ -5075,6 +5611,7 @@ def analyze(args: argparse.Namespace) -> dict[str, Any]:
                 p5_action_figure_path,
                 p5_status_figure_path,
                 p5_margin_figure_path,
+                p5_debounce_figure_path,
                 p5_future_unknown_figure_path,
                 p5_startup_correlation_figure_path,
                 p5_trajectory_figure_path,
@@ -5108,12 +5645,12 @@ def analyze(args: argparse.Namespace) -> dict[str, Any]:
                 inconclusive.append(
                     f"{experiment_label} required figure was not generated or is empty: {figure_path}"
                 )
-    if p5_1_phase:
+    if p5_runtime_phase:
         figures.extend(p5_figure_artifacts)
         for figure_path in p5_required_figures:
             if not figure_path.is_file() or figure_path.stat().st_size <= 0:
                 inconclusive.append(
-                    f"P5-1 required figure was not generated or is empty: {figure_path}"
+                    f"{experiment_label} required figure was not generated or is empty: {figure_path}"
                 )
 
     status = "PASS"
@@ -5134,7 +5671,7 @@ def analyze(args: argparse.Namespace) -> dict[str, Any]:
             failures,
             inconclusive,
             args.experiment_id,
-            p0_health_summary if p0_phase else None,
+            p0_health_summary if p0_runtime_phase else None,
         ),
         "export_dir": str(export_dir),
         "bag_dir": str(bag_dir) if bag_dir is not None else "",
@@ -5147,6 +5684,7 @@ def analyze(args: argparse.Namespace) -> dict[str, Any]:
         "p5_summary": {
             **p5_summary,
             "p5_1_hard_gates": p5_1_gates,
+            "p5_2_hard_gates": p5_2_gates,
             "marker_evidence": p5_marker_summary,
         },
         "safety_off_topic_counts": safety_off_topic_counts,
