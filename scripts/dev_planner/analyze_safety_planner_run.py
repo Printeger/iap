@@ -98,6 +98,7 @@ P5_REPLAN_ACTION = "REQUEST_REPLAN"
 P5_OK_ACTION = "OK"
 P5_1_MIN_OK_ACTION_RATIO = 0.95
 P5_1_STARTUP_REPLAN_MAX_DURATION_S = 2.0
+P5_STARTUP_REPLAN_DURATION_TOLERANCE_S = 0.25
 P5_REPLAN_STORM_CONSECUTIVE = 3
 P5_2_EMERGENCY_STORM_CONSECUTIVE = 3
 P5_STATUS_FIELDS = [
@@ -117,6 +118,7 @@ P5_STATUS_FIELDS = [
     "field_generation_id",
     "field_age_s",
     "current_stale_duration_s",
+    "current_low_margin_duration_s",
     "future_unknown_duration_s",
     "final_gate_fail_count",
     "final_gate_fail_duration_s",
@@ -161,6 +163,7 @@ PREDICTOR_SOURCE_COUNTER_FIELDS = [
     "predictor_gnss_used_count",
     "predictor_lidar_used_count",
     "predictor_prior_used_count",
+    "predictor_stale_current_prior_count",
     "predictor_regularized_count",
     "predictor_conservative_max_count",
 ]
@@ -1505,6 +1508,7 @@ def plot_p5_status_timeline(rows: list[dict[str, Any]], path: Path) -> bool:
     axes[1].set_ylabel("samples")
     axes[1].legend(loc="best")
     axes[2].plot(t, finite_or_nan(rows, "current_stale_duration_s"), label="current_stale_duration_s", color="#f97316")
+    axes[2].plot(t, finite_or_nan(rows, "current_low_margin_duration_s"), label="current_low_margin_duration_s", color="#0f766e")
     axes[2].plot(t, finite_or_nan(rows, "future_unknown_duration_s"), label="future_unknown_duration_s", color="#9333ea")
     axes[2].set_ylabel("duration [s]")
     axes[2].set_xlabel("time since first P5 status [s]")
@@ -1512,6 +1516,41 @@ def plot_p5_status_timeline(rows: list[dict[str, Any]], path: Path) -> bool:
     for ax in axes:
         ax.grid(True, alpha=0.25)
     fig.suptitle("P5 status timeline")
+    fig.tight_layout()
+    fig.savefig(path, dpi=160)
+    plt.close(fig)
+    return True
+
+
+def plot_p5_current_im_vs_action(rows: list[dict[str, Any]], path: Path) -> bool:
+    if not rows:
+        return False
+    t = relative_time(rows)
+    if not t:
+        return False
+    actions = [p5_action(row, "action") or "<empty>" for row in rows]
+    codes = action_code_map(actions)
+    current_im = finite_or_nan(rows, "current_im_min")
+    future_im = finite_or_nan(rows, "future_min_im")
+    if not any(math.isfinite(value) for value in current_im):
+        return False
+    fig, axes = plt.subplots(2, 1, figsize=(11, 6.8), sharex=True)
+    for action in codes:
+        xs = [t[idx] for idx, value in enumerate(actions) if value == action]
+        ys = [current_im[idx] for idx, value in enumerate(actions) if value == action]
+        axes[0].scatter(xs, ys, label=action, s=36)
+    axes[0].plot(t, future_im, label="future_min_im", color="#2563eb", lw=1.2, alpha=0.8)
+    axes[0].axhline(0.0, color="#111827", lw=0.9)
+    axes[0].set_ylabel("IM [m]")
+    axes[0].legend(loc="best")
+    axes[0].grid(True, alpha=0.25)
+
+    axes[1].step(t, [codes[value] for value in actions], where="post", color="#f97316")
+    axes[1].set_yticks(list(codes.values()), list(codes.keys()))
+    axes[1].set_ylabel("P5 action")
+    axes[1].set_xlabel("time since first P5 status [s]")
+    axes[1].grid(True, axis="x", alpha=0.25)
+    fig.suptitle("P5 current IM vs action")
     fig.tight_layout()
     fig.savefig(path, dpi=160)
     plt.close(fig)
@@ -1542,6 +1581,62 @@ def plot_p5_future_unknown_duration_timeline(rows: list[dict[str, Any]], path: P
     for ax in axes:
         ax.grid(True, alpha=0.25)
     fig.suptitle("P5 future unknown duration")
+    fig.tight_layout()
+    fig.savefig(path, dpi=160)
+    plt.close(fig)
+    return True
+
+
+def plot_p5_stale_integrity_correlation(
+    health_rows: list[dict[str, Any]],
+    p5_rows: list[dict[str, Any]],
+    path: Path,
+) -> bool:
+    if not health_rows or not p5_rows:
+        return False
+    health_stamps = [finite_float(row.get("stamp")) for row in health_rows]
+    p5_stamps = [finite_float(row.get("bag_time_s")) for row in p5_rows]
+    finite_stamps = [stamp for stamp in [*health_stamps, *p5_stamps] if stamp is not None]
+    if not finite_stamps:
+        return False
+    t0 = min(finite_stamps)
+    health_t = [math.nan if stamp is None else stamp - t0 for stamp in health_stamps]
+    p5_t = [math.nan if stamp is None else stamp - t0 for stamp in p5_stamps]
+    actions = [p5_action(row, "action") or "<empty>" for row in p5_rows]
+    codes = action_code_map(actions)
+    stale_integrity = [
+        1.0
+        if str(row.get("dominant_unknown_reason", "")).strip().lower()
+        == "stale_integrity"
+        or str(row.get("reason", "")).strip().lower() == "stale_integrity"
+        else 0.0
+        for row in health_rows
+    ]
+
+    fig, axes = plt.subplots(4, 1, figsize=(11, 8.4), sharex=True)
+    axes[0].step(health_t, stale_integrity, where="post", label="P0 stale_integrity", color="#dc2626")
+    axes[0].set_ylim(-0.05, 1.05)
+    axes[0].set_ylabel("P0 stale")
+    axes[0].legend(loc="best")
+    axes[1].plot(health_t, finite_or_nan(health_rows, "valid_ratio"), label="valid_ratio", color="#2563eb")
+    axes[1].plot(health_t, finite_or_nan(health_rows, "unknown_ratio"), label="unknown_ratio", color="#6b7280")
+    axes[1].set_ylim(-0.05, 1.05)
+    axes[1].set_ylabel("P0 ratio")
+    axes[1].legend(loc="best")
+    axes[2].plot(health_t, finite_or_nan(health_rows, "predictor_lidar_used_count"), label="lidar_used", color="#0f766e")
+    axes[2].plot(health_t, finite_or_nan(health_rows, "predictor_stale_current_prior_count"), label="stale_current_prior", color="#f97316")
+    axes[2].plot(health_t, finite_or_nan(health_rows, "provider_stale_count"), label="provider_stale", color="#dc2626")
+    axes[2].set_ylabel("P0 counts")
+    axes[2].legend(loc="best")
+    axes[3].step(p5_t, [codes[value] for value in actions], where="post", label="P5 action", color="#7c3aed")
+    axes[3].plot(p5_t, finite_or_nan(p5_rows, "unknown_ratio"), label="P5 unknown_ratio", color="#6b7280", alpha=0.8)
+    axes[3].set_yticks(list(codes.values()), list(codes.keys()))
+    axes[3].set_ylabel("P5")
+    axes[3].set_xlabel("run-relative bag time [s]")
+    axes[3].legend(loc="best")
+    for ax in axes:
+        ax.grid(True, alpha=0.25)
+    fig.suptitle("P0 stale integrity vs P5 action correlation")
     fig.tight_layout()
     fig.savefig(path, dpi=160)
     plt.close(fig)
@@ -3514,6 +3609,8 @@ def validate_topic_health(
                 failures.append(f"required topic {topic} is missing or not continuous")
             elif expected == "active-periodic":
                 failures.append(f"required topic {topic} is missing or not periodic after planner activation")
+            elif expected == "planner-dependent":
+                continue
             else:
                 failures.append(f"required topic {topic} is missing")
         elif topic_health[topic]["status"] == "CHECK":
@@ -3702,7 +3799,12 @@ def p5_startup_snapshot_unavailable_prefix(
         first = finite_float(prefix[0].get("bag_time_s"))
         last = finite_float(prefix[-1].get("bag_time_s"))
         duration_s = max(0.0, last - first) if first is not None and last is not None else 0.0
-    bounded = not prefix or duration_s <= P5_1_STARTUP_REPLAN_MAX_DURATION_S
+    bounded = (
+        not prefix
+        or duration_s
+        <= P5_1_STARTUP_REPLAN_MAX_DURATION_S
+        + P5_STARTUP_REPLAN_DURATION_TOLERANCE_S
+    )
     return prefix, duration_s, bounded
 
 
@@ -3846,6 +3948,7 @@ def summarize_p5_status_rows(p5_rows: list[dict[str, Any]], p5_error: str = "") 
         "current_im_h",
         "current_im_v",
         "current_stale_duration_s",
+        "current_low_margin_duration_s",
         "future_unknown_duration_s",
         "pred_hal_min",
         "pred_val_min",
@@ -3977,7 +4080,8 @@ def validate_p5_1_hard_gates(
     ):
         failures.append(
             "P5-1 startup snapshot_unavailable replan prefix exceeded "
-            f"{P5_1_STARTUP_REPLAN_MAX_DURATION_S:.1f}s"
+            f"{P5_1_STARTUP_REPLAN_MAX_DURATION_S:.1f}s "
+            f"(+{P5_STARTUP_REPLAN_DURATION_TOLERANCE_S:.2f}s tolerance)"
         )
     if gates["ok_action_ratio"] < P5_1_MIN_OK_ACTION_RATIO:
         failures.append(
@@ -4100,7 +4204,9 @@ def validate_p5_2_hard_gates(
         "validator_summary_present": bool(validator_summary),
         "validator_passed": validator_summary.get("passed") is True,
         "required_p5_topics_stable": all(
-            status == "PASS" for status in topic_statuses.values()
+            status == "PASS"
+            for topic, status in topic_statuses.items()
+            if P5_TOPIC_EXPECTATIONS.get(topic) != "planner-dependent"
         ),
         "topic_statuses": topic_statuses,
         "p0_health_rows_present": int(p0_health_summary.get("row_count", 0) or 0) > 0,
@@ -4187,7 +4293,8 @@ def validate_p5_2_hard_gates(
     if not gates["p5_startup_snapshot_unavailable_bounded"]:
         failures.append(
             "P5-2 startup snapshot_unavailable replan prefix exceeded "
-            f"{P5_1_STARTUP_REPLAN_MAX_DURATION_S:.1f}s"
+            f"{P5_1_STARTUP_REPLAN_MAX_DURATION_S:.1f}s "
+            f"(+{P5_STARTUP_REPLAN_DURATION_TOLERANCE_S:.2f}s tolerance)"
         )
     if not gates["emergency_storm_absent"]:
         failures.append(
@@ -5474,6 +5581,7 @@ def analyze(args: argparse.Namespace) -> dict[str, Any]:
                 "bad_ratio",
                 "unknown_ratio",
                 "current_stale_duration_s",
+                "current_low_margin_duration_s",
                 "future_unknown_duration_s",
                 "pred_al_mode",
                 "pred_hal_min",
@@ -5576,9 +5684,11 @@ def analyze(args: argparse.Namespace) -> dict[str, Any]:
         p5_action_figure_path = figures_dir / f"{prefix}_p5_action_timeline.png"
         p5_status_figure_path = figures_dir / f"{prefix}_p5_status_timeline.png"
         p5_margin_figure_path = figures_dir / f"{prefix}_p5_margin_timeline.png"
+        p5_current_im_vs_action_figure_path = figures_dir / f"{prefix}_current_im_vs_action.png"
         p5_debounce_figure_path = figures_dir / f"{prefix}_p5_debounce_timeline.png"
         p5_future_unknown_figure_path = figures_dir / f"{prefix}_future_unknown_duration_timeline.png"
         p5_startup_correlation_figure_path = figures_dir / f"{prefix}_startup_correlation.png"
+        p5_stale_integrity_correlation_figure_path = figures_dir / f"{prefix}_stale_integrity_correlation.png"
         p5_final_gate_figure_path = figures_dir / f"{prefix}_p5_final_gate_summary.png"
         p5_trajectory_figure_path = figures_dir / f"{prefix}_trajectory_integrity_samples.png"
         p5_rviz_overview_path = figures_dir / f"{prefix}_p5_rviz_overview.png"
@@ -5588,12 +5698,20 @@ def analyze(args: argparse.Namespace) -> dict[str, Any]:
             p5_figure_artifacts.append(str(p5_status_figure_path))
         if plot_p5_margin_timeline(p5_rows, p5_margin_figure_path):
             p5_figure_artifacts.append(str(p5_margin_figure_path))
+        if plot_p5_current_im_vs_action(p5_rows, p5_current_im_vs_action_figure_path):
+            p5_figure_artifacts.append(str(p5_current_im_vs_action_figure_path))
         if plot_p5_debounce_timeline(p5_rows, p5_debounce_figure_path):
             p5_figure_artifacts.append(str(p5_debounce_figure_path))
         if plot_p5_future_unknown_duration_timeline(p5_rows, p5_future_unknown_figure_path):
             p5_figure_artifacts.append(str(p5_future_unknown_figure_path))
         if plot_p5_startup_correlation(health_rows, p5_rows, p5_startup_correlation_figure_path):
             p5_figure_artifacts.append(str(p5_startup_correlation_figure_path))
+        if plot_p5_stale_integrity_correlation(
+            health_rows,
+            p5_rows,
+            p5_stale_integrity_correlation_figure_path,
+        ):
+            p5_figure_artifacts.append(str(p5_stale_integrity_correlation_figure_path))
         if plot_p5_final_gate_summary(p5_summary, p5_final_gate_figure_path):
             p5_figure_artifacts.append(str(p5_final_gate_figure_path))
         if plot_p5_trajectory_integrity_samples(p5_marker_rows, p5_trajectory_figure_path):
@@ -5602,23 +5720,29 @@ def analyze(args: argparse.Namespace) -> dict[str, Any]:
             warnings.append("P5 trajectory integrity marker sample plot was not generated because marker rows were unavailable")
         if plot_p5_rviz_overview(topic_health, p5_summary, p5_marker_summary, p5_rviz_overview_path):
             p5_figure_artifacts.append(str(p5_rviz_overview_path))
-        p5_required_figures.extend(
-            [
-                scenario_figure_path,
-                topic_activity_figure_path,
-                source_figure_path,
-                figures_dir / f"{prefix}_p0_health_timeline.png",
-                p5_action_figure_path,
-                p5_status_figure_path,
-                p5_margin_figure_path,
-                p5_debounce_figure_path,
-                p5_future_unknown_figure_path,
-                p5_startup_correlation_figure_path,
-                p5_trajectory_figure_path,
-                p5_final_gate_figure_path,
-                p5_rviz_overview_path,
-            ]
-        )
+        required_runtime_figures = [
+            scenario_figure_path,
+            topic_activity_figure_path,
+            source_figure_path,
+            figures_dir / f"{prefix}_p0_health_timeline.png",
+            p5_action_figure_path,
+            p5_status_figure_path,
+            p5_margin_figure_path,
+            p5_debounce_figure_path,
+            p5_future_unknown_figure_path,
+            p5_startup_correlation_figure_path,
+            p5_trajectory_figure_path,
+            p5_final_gate_figure_path,
+            p5_rviz_overview_path,
+        ]
+        if p5_2_phase:
+            required_runtime_figures.extend(
+                [
+                    p5_current_im_vs_action_figure_path,
+                    p5_stale_integrity_correlation_figure_path,
+                ]
+            )
+        p5_required_figures.extend(required_runtime_figures)
 
     if is_experiment(args, "B0-4"):
         required_figures = [

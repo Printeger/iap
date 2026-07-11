@@ -62,6 +62,28 @@ bool isTransientCurrentStaleFinalGateBlock(const P5GateStatus& status,
   return status.current_stale_duration_s < emergency_duration_s;
 }
 
+bool isLightRiskCurrentLowMarginFinalGateBlock(
+    const P5GateStatus& status,
+    double current_low_margin_to_emergency_s) {
+  if (status.action != P5GateAction::REQUEST_REPLAN ||
+      status.reason != P5GateReason::CURRENT_LOW_MARGIN) {
+    return false;
+  }
+  if (status.bad_count > 0 || status.bad_ratio > 0.0) {
+    return false;
+  }
+  if (!std::isfinite(status.future_min_im) || status.future_min_im < 0.0) {
+    return false;
+  }
+  if (status.pred_al_invalid_count > 0 ||
+      !std::isfinite(status.pred_hal_min) ||
+      !std::isfinite(status.pred_val_min)) {
+    return false;
+  }
+  return status.current_low_margin_duration_s <
+         current_low_margin_to_emergency_s;
+}
+
 bool pointInsideRegion(const Eigen::Vector3d& p,
                        const Eigen::Vector3d& origin,
                        const Eigen::Vector3d& size) {
@@ -319,6 +341,9 @@ P5RuntimeIntegrityGate::Config P5RuntimeIntegrityGate::declareAndReadConfig(
       node->declare_parameter<double>("p5.current_stale_to_replan_s", 0.5);
   config.current_stale_to_emergency_s =
       node->declare_parameter<double>("p5.current_stale_to_emergency_s", 2.0);
+  config.current_low_margin_to_emergency_s =
+      node->declare_parameter<double>("p5.current_low_margin_to_emergency_s",
+                                      2.0);
   config.future_unknown_to_emergency_s =
       node->declare_parameter<double>("p5.future_unknown_to_emergency_s", 2.0);
   config.final_gate_max_consecutive_failures =
@@ -401,6 +426,8 @@ P5RuntimeIntegrityGate::P5RuntimeIntegrityGate(rclcpp::Node::SharedPtr node,
   config_.current_stale_to_emergency_s =
       std::max(config_.current_stale_to_replan_s,
                config_.current_stale_to_emergency_s);
+  config_.current_low_margin_to_emergency_s =
+      std::max(0.0, config_.current_low_margin_to_emergency_s);
   config_.future_unknown_to_emergency_s =
       std::max(0.0, config_.future_unknown_to_emergency_s);
   config_.final_gate_max_consecutive_failures =
@@ -581,6 +608,8 @@ P5GateStatus P5RuntimeIntegrityGate::evaluateCurrentGate(double now_s,
   }
 
   if (!current_valid) {
+    current_low_margin_started_s_ =
+        std::numeric_limits<double>::quiet_NaN();
     status.reason = P5GateReason::CURRENT_INVALID;
     status.action = P5GateAction::REQUEST_REPLAN;
     if (status.current_stale_duration_s >=
@@ -591,7 +620,25 @@ P5GateStatus P5RuntimeIntegrityGate::evaluateCurrentGate(double now_s,
     return status;
   }
 
-  if (status.current_im_min < config_.current_emergency_margin_m) {
+  const bool current_low_margin =
+      status.current_im_min < config_.current_replan_margin_m;
+  if (current_low_margin) {
+    if (update_state && !finite(current_low_margin_started_s_)) {
+      current_low_margin_started_s_ = now_s;
+    }
+    status.current_low_margin_duration_s =
+        finite(current_low_margin_started_s_)
+            ? std::max(0.0, now_s - current_low_margin_started_s_)
+            : 0.0;
+  } else {
+    current_low_margin_started_s_ =
+        std::numeric_limits<double>::quiet_NaN();
+    status.current_low_margin_duration_s = 0.0;
+  }
+
+  if (status.current_im_min < config_.current_emergency_margin_m &&
+      status.current_low_margin_duration_s >=
+          config_.current_low_margin_to_emergency_s) {
     status.reason = P5GateReason::CURRENT_LOW_MARGIN;
     status.action = P5GateAction::REQUEST_EMERGENCY_STOP_CANDIDATE;
   } else if (status.current_im_min < config_.current_replan_margin_m) {
@@ -766,6 +813,7 @@ P5GateStatus P5RuntimeIntegrityGate::merge(const P5GateStatus& a,
   out.field_generation_id = b.field_generation_id;
   out.field_age_s = b.field_age_s;
   out.current_stale_duration_s = a.current_stale_duration_s;
+  out.current_low_margin_duration_s = a.current_low_margin_duration_s;
   out.future_unknown_duration_s = b.future_unknown_duration_s;
   out.pred_al_mode = b.pred_al_mode;
   out.pred_hal_min = b.pred_hal_min;
@@ -821,6 +869,8 @@ P5GateStatus P5RuntimeIntegrityGate::applyDebounce(const P5GateStatus& raw,
     if (!current_stale_candidate) {
       current_problem_started_s_ = std::numeric_limits<double>::quiet_NaN();
     }
+    current_low_margin_started_s_ =
+        std::numeric_limits<double>::quiet_NaN();
   }
   status.current_stale_duration_s =
       finite(current_problem_started_s_)
@@ -857,6 +907,15 @@ P5GateStatus P5RuntimeIntegrityGate::applyFinalGateBudget(
 
   if (isTransientCurrentStaleFinalGateBlock(
           raw, config_.current_stale_to_emergency_s)) {
+    resetFinalGateFailureState();
+    status.final_gate_fail_count = 0;
+    status.final_gate_fail_duration_s = 0.0;
+    status.final_gate_last_reason.clear();
+    return status;
+  }
+
+  if (isLightRiskCurrentLowMarginFinalGateBlock(
+          raw, config_.current_low_margin_to_emergency_s)) {
     resetFinalGateFailureState();
     status.final_gate_fail_count = 0;
     status.final_gate_fail_duration_s = 0.0;
@@ -941,6 +1000,8 @@ std::string P5RuntimeIntegrityGate::toJson(
       << ",\"field_age_s\":" << jsonNumber(status.field_age_s)
       << ",\"current_stale_duration_s\":"
       << jsonNumber(status.current_stale_duration_s)
+      << ",\"current_low_margin_duration_s\":"
+      << jsonNumber(status.current_low_margin_duration_s)
       << ",\"future_unknown_duration_s\":"
       << jsonNumber(status.future_unknown_duration_s)
       << ",\"final_gate_fail_count\":" << status.final_gate_fail_count

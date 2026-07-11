@@ -29,6 +29,7 @@ PREDICTOR_SOURCE_COUNTER_FIELDS = [
     "predictor_gnss_used_count",
     "predictor_lidar_used_count",
     "predictor_prior_used_count",
+    "predictor_stale_current_prior_count",
     "predictor_regularized_count",
     "predictor_conservative_max_count",
 ]

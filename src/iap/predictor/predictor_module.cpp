@@ -42,6 +42,12 @@ uint32_t make_source_flags(const PredictorQueryResult& result) {
   if (result.fused.conservative_max_applied) {
     flags |= PREDICTOR_RESULT_CONSERVATIVE_MAX;
   }
+  if (result.fused.fallback_reason.find("stale_current_prior") !=
+          std::string::npos ||
+      result.fallback_reason.find("stale_current_prior") !=
+          std::string::npos) {
+    flags |= PREDICTOR_RESULT_STALE_CURRENT_PRIOR;
+  }
   return flags;
 }
 
@@ -85,8 +91,7 @@ bool effective_gnss_epoch_required(const PredictorParams& params) {
     case PredictorGnssEpochPolicy::Disabled:
       return false;
     case PredictorGnssEpochPolicy::Auto:
-      return params.source_mode == PredictorSourceMode::Fusion ||
-             params.source_mode == PredictorSourceMode::GnssOnly;
+      return params.source_mode == PredictorSourceMode::GnssOnly;
   }
   return true;
 }
@@ -138,6 +143,66 @@ std::string stale_reason(const PredictorQueryInput& input,
     return "stale_snapshot";
   }
   return "";
+}
+
+std::string current_integrity_freshness_reason(
+    const PredictorQueryInput& input,
+    const PredictorFreshnessGuardParams& params) {
+  if (!params.enabled) {
+    return "";
+  }
+  const double reference_time_s = freshness_time_s(input);
+  if (!input.snapshot.current.valid) {
+    return "invalid_integrity";
+  }
+  if (age_exceeds(reference_time_s,
+                  input.snapshot.current.stamp,
+                  params.max_integrity_age_s)) {
+    return "stale_integrity";
+  }
+  return "";
+}
+
+std::string stale_reason_without_current_integrity(
+    const PredictorQueryInput& input,
+    const PredictorFreshnessGuardParams& params,
+    const bool require_gnss_epoch) {
+  if (!params.enabled) {
+    return "";
+  }
+  const double reference_time_s = freshness_time_s(input);
+  if (!input.snapshot.has_pose ||
+      age_exceeds(reference_time_s,
+                  input.snapshot.pose_stamp,
+                  params.max_odom_age_s)) {
+    return "stale_odom";
+  }
+  if (require_gnss_epoch) {
+    const std::string gnss_reason =
+        gnss_epoch_unavailable_reason(input, params, "stale_gnss_epoch");
+    if (!gnss_reason.empty()) {
+      return gnss_reason;
+    }
+  }
+  if (age_exceeds(reference_time_s,
+                  input.snapshot.stamp,
+                  params.max_snapshot_age_s)) {
+    return "stale_snapshot";
+  }
+  return "";
+}
+
+void append_reason(std::string* reason, const std::string& extra) {
+  if (reason == nullptr || extra.empty()) {
+    return;
+  }
+  if (reason->empty()) {
+    *reason = extra;
+    return;
+  }
+  if (reason->find(extra) == std::string::npos) {
+    *reason += ";" + extra;
+  }
 }
 
 GnssAdvisoryResult disabled_gnss_result(const std::string& reason) {
@@ -226,8 +291,18 @@ PredictorQueryResult PredictorModule::query(
     return out;
   }
   const bool require_gnss_epoch = effective_gnss_epoch_required(params_);
-  const std::string freshness_reason =
-      stale_reason(input, params_.freshness, require_gnss_epoch);
+  const std::string current_freshness_reason =
+      current_integrity_freshness_reason(input, params_.freshness);
+  std::string freshness_reason;
+  if (current_freshness_reason == "invalid_integrity") {
+    freshness_reason = "stale_integrity";
+  } else if (current_freshness_reason.empty()) {
+    freshness_reason = stale_reason(input, params_.freshness,
+                                    require_gnss_epoch);
+  } else {
+    freshness_reason = stale_reason_without_current_integrity(
+        input, params_.freshness, require_gnss_epoch);
+  }
   if (!freshness_reason.empty()) {
     out.valid = false;
     out.available = false;
@@ -235,6 +310,13 @@ PredictorQueryResult PredictorModule::query(
     out.fallback_reason = freshness_reason;
     out.source_flags = make_source_flags(out);
     return out;
+  }
+  const bool stale_current_prior =
+      current_freshness_reason == "stale_integrity";
+  PredictorQueryInput working_input = input;
+  if (stale_current_prior) {
+    working_input.snapshot.has_lambda_base = false;
+    working_input.snapshot.lambda_base_pos.setZero();
   }
 
   const bool gnss_allowed =
@@ -250,7 +332,8 @@ PredictorQueryResult PredictorModule::query(
       gnss_unavailable_reason = "no_gnss_epoch";
     }
     if (gnss_unavailable_reason.empty()) {
-      out.gnss = gnss_.query(input.query_position_map, input.snapshot);
+      out.gnss = gnss_.query(working_input.query_position_map,
+                             working_input.snapshot);
     } else {
       out.gnss = disabled_gnss_result(gnss_unavailable_reason);
     }
@@ -259,15 +342,28 @@ PredictorQueryResult PredictorModule::query(
   }
 
   if (source_allows_lidar(params_.source_mode)) {
-    out.lidar = lidar_.query(input.query_position_map, input.snapshot);
+    out.lidar = lidar_.query(working_input.query_position_map,
+                             working_input.snapshot);
   } else {
     out.lidar = disabled_lidar_result("lidar_disabled");
   }
-  out.fused = fusion_.query(input.snapshot, out.gnss, out.lidar);
+  out.fused = fusion_.query(working_input.snapshot, out.gnss, out.lidar);
   out.available = out.fused.available;
   out.valid = out.fused.valid;
   out.fallback = out.fused.fallback;
   out.fallback_reason = out.fused.fallback_reason;
+  if (stale_current_prior) {
+    if (!out.valid || (!out.fused.gnss_used && !out.fused.lidar_used)) {
+      out.available = false;
+      out.valid = false;
+      out.fallback = true;
+      out.fallback_reason = "stale_integrity";
+      out.source_flags = make_source_flags(out);
+      return out;
+    }
+    append_reason(&out.fused.fallback_reason, "stale_current_prior");
+    out.fallback_reason = out.fused.fallback_reason;
+  }
   if (!out.valid && out.fallback_reason.empty()) {
     out.fallback_reason = "prediction_failed";
   }

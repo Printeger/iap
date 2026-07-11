@@ -772,6 +772,7 @@ bool RiskGridMap::refreshFromProvider(const Eigen::Vector3d& uav_position_w,
   uint64_t predictor_gnss_used_count = 0;
   uint64_t predictor_lidar_used_count = 0;
   uint64_t predictor_prior_used_count = 0;
+  uint64_t predictor_stale_current_prior_count = 0;
   uint64_t predictor_regularized_count = 0;
   uint64_t predictor_conservative_max_count = 0;
   std::unordered_map<std::string, uint64_t> unknown_reason_counts;
@@ -804,6 +805,9 @@ bool RiskGridMap::refreshFromProvider(const Eigen::Vector3d& uav_position_w,
     }
     if ((voxel.source_flags & PREDICTOR_RESULT_PRIOR_VALID) != 0u) {
       ++predictor_prior_used_count;
+    }
+    if ((voxel.source_flags & PREDICTOR_RESULT_STALE_CURRENT_PRIOR) != 0u) {
+      ++predictor_stale_current_prior_count;
     }
     if ((voxel.source_flags & PREDICTOR_RESULT_REGULARIZED) != 0u) {
       ++predictor_regularized_count;
@@ -857,6 +861,8 @@ bool RiskGridMap::refreshFromProvider(const Eigen::Vector3d& uav_position_w,
   new_health.predictor_gnss_used_count = predictor_gnss_used_count;
   new_health.predictor_lidar_used_count = predictor_lidar_used_count;
   new_health.predictor_prior_used_count = predictor_prior_used_count;
+  new_health.predictor_stale_current_prior_count =
+      predictor_stale_current_prior_count;
   new_health.predictor_regularized_count = predictor_regularized_count;
   new_health.predictor_conservative_max_count =
       predictor_conservative_max_count;

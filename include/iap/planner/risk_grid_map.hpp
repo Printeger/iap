@@ -43,6 +43,7 @@ struct RiskGridHealth {
   uint64_t predictor_gnss_used_count = 0;
   uint64_t predictor_lidar_used_count = 0;
   uint64_t predictor_prior_used_count = 0;
+  uint64_t predictor_stale_current_prior_count = 0;
   uint64_t predictor_regularized_count = 0;
   uint64_t predictor_conservative_max_count = 0;
   uint64_t predictor_lidar_map_point_count = 0;

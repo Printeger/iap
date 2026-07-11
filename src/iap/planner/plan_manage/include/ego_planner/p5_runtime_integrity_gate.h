@@ -126,6 +126,7 @@ struct P5GateStatus {
   uint64_t field_generation_id = 0;
   double field_age_s = std::numeric_limits<double>::quiet_NaN();
   double current_stale_duration_s = 0.0;
+  double current_low_margin_duration_s = 0.0;
   double future_unknown_duration_s = 0.0;
   int final_gate_fail_count = 0;
   double final_gate_fail_duration_s = 0.0;
@@ -151,6 +152,7 @@ class P5RuntimeIntegrityGate {
     double sample_dt_s = 0.2;
     double current_stale_to_replan_s = 0.5;
     double current_stale_to_emergency_s = 2.0;
+    double current_low_margin_to_emergency_s = 2.0;
     double future_unknown_to_emergency_s = 2.0;
     int final_gate_max_consecutive_failures = 3;
     double final_gate_max_failure_duration_s = 1.0;
@@ -252,6 +254,8 @@ class P5RuntimeIntegrityGate {
   mutable std::mutex mutex_;
   CurrentIntegrity current_;
   double current_problem_started_s_ = std::numeric_limits<double>::quiet_NaN();
+  double current_low_margin_started_s_ =
+      std::numeric_limits<double>::quiet_NaN();
   double future_unknown_started_s_ = std::numeric_limits<double>::quiet_NaN();
   int bad_ticks_ = 0;
   int good_ticks_ = 0;

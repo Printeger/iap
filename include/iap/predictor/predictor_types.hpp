@@ -232,6 +232,7 @@ enum PredictorResultFlags : uint32_t {
   PREDICTOR_RESULT_REGULARIZED = 1u << 8,
   PREDICTOR_RESULT_CONSERVATIVE_MAX = 1u << 9,
   PREDICTOR_RESULT_AVAILABLE = 1u << 10,
+  PREDICTOR_RESULT_STALE_CURRENT_PRIOR = 1u << 11,
 };
 
 struct PredictorQueryResult {

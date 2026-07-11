@@ -200,6 +200,22 @@ class P5_1AnalyzerTest(unittest.TestCase):
         self.assertEqual(summary["steady_action_counts"], {"OK": 20})
         self.assertEqual(gates["ok_action_ratio"], 1.0)
 
+    def test_p5_1_allows_startup_snapshot_unavailable_timing_jitter(self):
+        rows = [
+            startup_snapshot_unavailable_row(bag_time_s=0.0),
+            startup_snapshot_unavailable_row(
+                bag_time_s=analyzer.P5_1_STARTUP_REPLAN_MAX_DURATION_S + 0.01
+            ),
+        ]
+        rows.extend(p5_row(bag_time_s=3.0 + idx) for idx in range(20))
+
+        summary, gates, failures, inconclusive = self.validate_rows(rows)
+
+        self.assertEqual([], failures)
+        self.assertEqual([], inconclusive)
+        self.assertTrue(gates["passed"])
+        self.assertTrue(summary["startup_snapshot_unavailable_bounded"])
+
     def test_p5_1_fails_on_long_startup_snapshot_unavailable_prefix(self):
         rows = [
             startup_snapshot_unavailable_row(bag_time_s=idx)
@@ -282,7 +298,7 @@ class P5_1AnalyzerTest(unittest.TestCase):
 
 
 class P5_2AnalyzerTest(unittest.TestCase):
-    def validate_rows(self, rows, p0_rows=None):
+    def validate_rows(self, rows, p0_rows=None, topic_health=None):
         p0_rows = p0_rows or bounded_startup_p0_rows()
         p5_summary = analyzer.summarize_p5_status_rows(rows)
         failures = []
@@ -290,7 +306,7 @@ class P5_2AnalyzerTest(unittest.TestCase):
         gates = analyzer.validate_p5_2_hard_gates(
             p5_manifest(),
             {"passed": True},
-            p5_topic_health(),
+            topic_health or p5_topic_health(),
             analyzer.summarize_p0_health(p0_rows),
             p0_rows,
             p5_summary,
@@ -330,6 +346,50 @@ class P5_2AnalyzerTest(unittest.TestCase):
         self.assertTrue(gates["passed"])
         self.assertEqual(summary["max_consecutive_replan"], 2)
         self.assertEqual(summary["final_gate_fail_count_max"], 0)
+
+    def test_p5_2_allows_missing_planner_dependent_bspline_topic(self):
+        topic_health = p5_topic_health()
+        topic_health["/drone_0_planning/bspline"] = {"status": "FAIL", "count": 0}
+
+        _, gates, failures, inconclusive = self.validate_rows(
+            [p5_row(bag_time_s=1.0 + idx) for idx in range(5)],
+            topic_health=topic_health,
+        )
+
+        self.assertEqual([], failures)
+        self.assertEqual([], inconclusive)
+        self.assertTrue(gates["required_p5_topics_stable"])
+        self.assertTrue(gates["passed"])
+
+    def test_planner_dependent_bspline_missing_is_not_a_topic_failure(self):
+        topic_counts = {topic: 1 for topic in analyzer.P5_TOPIC_EXPECTATIONS}
+        topic_counts["/drone_0_planning/bspline"] = 0
+        metadata = {
+            "missing": False,
+            "duration_ns": int(60.0 * 1.0e9),
+            "topic_counts": topic_counts,
+        }
+        failures = []
+        inconclusive = []
+        timings = {
+            "/iap/integrity": {"span_s": 59.0, "max_gap_s": 0.1},
+            "/sim/drone_0/lidar_body": {"span_s": 59.0, "max_gap_s": 0.1},
+            "/drone_0_visual_slam/odom": {"span_s": 59.0, "max_gap_s": 0.1},
+            "/planning/risk_grid_health": {"span_s": 59.0, "max_gap_s": 0.5},
+        }
+
+        topic_health = analyzer.validate_topic_health(
+            metadata,
+            timings,
+            "",
+            failures,
+            inconclusive,
+            analyzer.P5_TOPIC_EXPECTATIONS,
+        )
+
+        self.assertEqual([], failures)
+        self.assertEqual([], inconclusive)
+        self.assertEqual("FAIL", topic_health["/drone_0_planning/bspline"]["status"])
 
     def test_p5_2_fails_on_sustained_emergency_storm(self):
         rows = [

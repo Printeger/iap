@@ -602,6 +602,8 @@ void P0RiskGridRuntime::publishHealth(const iap::RiskGridHealth& health,
       << out_health.predictor_lidar_used_count << ","
       << "\"predictor_prior_used_count\":"
       << out_health.predictor_prior_used_count << ","
+      << "\"predictor_stale_current_prior_count\":"
+      << out_health.predictor_stale_current_prior_count << ","
       << "\"predictor_regularized_count\":"
       << out_health.predictor_regularized_count << ","
       << "\"predictor_conservative_max_count\":"
@@ -637,6 +639,7 @@ void P0RiskGridRuntime::publishHealth(const iap::RiskGridHealth& health,
                        "provider_queries=%lu occupied_skip=%lu "
                        "provider_stale=%lu provider_invalid=%lu "
                        "gnss_used=%lu lidar_used=%lu prior_used=%lu "
+                       "stale_current_prior=%lu "
                        "regularized=%lu conservative_max=%lu "
                        "lidar_points=%lu lidar_fim_primitives=%lu "
                        "lidar_fim_valid_normals=%lu lidar_fim_fallback=%s "
@@ -660,6 +663,8 @@ void P0RiskGridRuntime::publishHealth(const iap::RiskGridHealth& health,
                            out_health.predictor_lidar_used_count),
                        static_cast<unsigned long>(
                            out_health.predictor_prior_used_count),
+                       static_cast<unsigned long>(
+                           out_health.predictor_stale_current_prior_count),
                        static_cast<unsigned long>(
                            out_health.predictor_regularized_count),
                        static_cast<unsigned long>(

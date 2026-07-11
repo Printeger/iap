@@ -671,6 +671,100 @@ TEST_F(P0RiskGridRuntimeStampTest,
 }
 
 TEST_F(P0RiskGridRuntimeStampTest,
+       FusionAutoMissingGnssEpochUsesLidarAndNotStaleField) {
+  ensure_rclcpp();
+  auto node = std::make_shared<rclcpp::Node>(
+      "p0_fusion_auto_missing_gnss_lidar_good_test",
+      rclcpp::NodeOptions().allow_undeclared_parameters(false));
+  auto config = enabledConfig();
+  config.predictor_source_mode = iap::PredictorSourceMode::Fusion;
+  config.predictor_gnss_epoch_policy = iap::PredictorGnssEpochPolicy::Auto;
+  config.predictor_lidar_legacy_observability = false;
+  P0RiskGridRuntime runtime(node, config);
+  const auto points = sixAxisPrimitivePoints();
+  const auto normals = sixAxisPrimitiveNormals();
+
+  sendCloud(&runtime, makePointCloud(points, &normals));
+  seedValidInputs(&runtime, 123.5, 123.5);
+
+  EXPECT_TRUE(runtime.refreshOnceForTest());
+  const auto health = runtime.health();
+  EXPECT_TRUE(health.ready);
+  EXPECT_FALSE(health.stale);
+  EXPECT_GT(health.valid_ratio, 0.0);
+  EXPECT_LT(health.unknown_ratio, 1.0);
+  EXPECT_EQ(health.provider_stale_count, 0u);
+  EXPECT_GT(health.predictor_lidar_used_count, 0u);
+  EXPECT_EQ(health.predictor_gnss_used_count, 0u);
+  EXPECT_NE(health.reason, "stale_gnss_epoch");
+  EXPECT_NE(health.dominant_unknown_reason, "stale_gnss_epoch");
+}
+
+TEST_F(P0RiskGridRuntimeStampTest,
+       StaleCurrentPriorWithLidarGoodDoesNotMakeFieldStale) {
+  ensure_rclcpp();
+  auto node = std::make_shared<rclcpp::Node>(
+      "p0_stale_current_prior_lidar_good_test",
+      rclcpp::NodeOptions().allow_undeclared_parameters(false));
+  auto config = enabledConfig();
+  config.grid.stale_timeout_s = 0.5;
+  config.predictor_source_mode = iap::PredictorSourceMode::LidarOnly;
+  config.predictor_gnss_epoch_policy =
+      iap::PredictorGnssEpochPolicy::Disabled;
+  config.predictor_use_current_integrity_prior = true;
+  config.predictor_lidar_legacy_observability = false;
+  P0RiskGridRuntime runtime(node, config);
+  const auto points = sixAxisPrimitivePoints();
+  const auto normals = sixAxisPrimitiveNormals();
+
+  sendCloud(&runtime, makePointCloud(points, &normals));
+  seedValidInputs(&runtime, 100.0, 99.0);
+
+  EXPECT_TRUE(runtime.refreshOnceForTest());
+  const auto health = runtime.health();
+  EXPECT_TRUE(health.ready);
+  EXPECT_FALSE(health.stale);
+  EXPECT_GT(health.valid_ratio, 0.0);
+  EXPECT_LT(health.unknown_ratio, 1.0);
+  EXPECT_EQ(health.provider_stale_count, 0u);
+  EXPECT_GT(health.predictor_lidar_used_count, 0u);
+  EXPECT_EQ(health.predictor_gnss_used_count, 0u);
+  EXPECT_EQ(health.predictor_prior_used_count, 0u);
+  EXPECT_GT(health.predictor_stale_current_prior_count, 0u);
+  EXPECT_NE(health.reason, "stale_integrity");
+  EXPECT_NE(health.dominant_unknown_reason, "stale_integrity");
+}
+
+TEST_F(P0RiskGridRuntimeStampTest,
+       StaleCurrentWithNoUsablePredictorSourceStaysFullUnknown) {
+  ensure_rclcpp();
+  auto node = std::make_shared<rclcpp::Node>(
+      "p0_stale_current_no_predictor_source_test",
+      rclcpp::NodeOptions().allow_undeclared_parameters(false));
+  auto config = enabledConfig();
+  config.grid.stale_timeout_s = 0.5;
+  config.predictor_source_mode = iap::PredictorSourceMode::LidarOnly;
+  config.predictor_gnss_epoch_policy =
+      iap::PredictorGnssEpochPolicy::Disabled;
+  config.predictor_lidar_legacy_observability = false;
+  P0RiskGridRuntime runtime(node, config);
+
+  seedValidInputs(&runtime, 100.0, 99.0);
+
+  EXPECT_TRUE(runtime.refreshOnceForTest());
+  const auto health = runtime.health();
+  EXPECT_TRUE(health.ready);
+  EXPECT_DOUBLE_EQ(health.valid_ratio, 0.0);
+  EXPECT_DOUBLE_EQ(health.unknown_ratio, 1.0);
+  EXPECT_GT(health.provider_stale_count, 0u);
+  EXPECT_EQ(health.provider_invalid_count, 0u);
+  EXPECT_EQ(health.predictor_lidar_used_count, 0u);
+  EXPECT_EQ(health.predictor_stale_current_prior_count, 0u);
+  EXPECT_EQ(health.reason, "stale_integrity");
+  EXPECT_EQ(health.dominant_unknown_reason, "stale_integrity");
+}
+
+TEST_F(P0RiskGridRuntimeStampTest,
        LidarOnlyDisabledMissingGnssEpochDoesNotMakeFrameStale) {
   ensure_rclcpp();
   auto node = std::make_shared<rclcpp::Node>(

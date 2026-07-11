@@ -154,6 +154,7 @@ def generate_launch_description():
     p5_sample_dt_s = LaunchConfiguration('p5_sample_dt_s', default=0.2)
     p5_current_stale_to_replan_s = LaunchConfiguration('p5_current_stale_to_replan_s', default=0.5)
     p5_current_stale_to_emergency_s = LaunchConfiguration('p5_current_stale_to_emergency_s', default=2.0)
+    p5_current_low_margin_to_emergency_s = LaunchConfiguration('p5_current_low_margin_to_emergency_s', default=2.0)
     p5_future_unknown_to_emergency_s = LaunchConfiguration('p5_future_unknown_to_emergency_s', default=2.0)
     p5_final_gate_max_consecutive_failures = LaunchConfiguration('p5_final_gate_max_consecutive_failures', default=3)
     p5_final_gate_max_failure_duration_s = LaunchConfiguration('p5_final_gate_max_failure_duration_s', default=1.0)
@@ -328,6 +329,7 @@ def generate_launch_description():
     p5_sample_dt_s_arg = DeclareLaunchArgument('p5_sample_dt_s', default_value=p5_sample_dt_s)
     p5_current_stale_to_replan_s_arg = DeclareLaunchArgument('p5_current_stale_to_replan_s', default_value=p5_current_stale_to_replan_s)
     p5_current_stale_to_emergency_s_arg = DeclareLaunchArgument('p5_current_stale_to_emergency_s', default_value=p5_current_stale_to_emergency_s)
+    p5_current_low_margin_to_emergency_s_arg = DeclareLaunchArgument('p5_current_low_margin_to_emergency_s', default_value=p5_current_low_margin_to_emergency_s)
     p5_future_unknown_to_emergency_s_arg = DeclareLaunchArgument('p5_future_unknown_to_emergency_s', default_value=p5_future_unknown_to_emergency_s)
     p5_final_gate_max_consecutive_failures_arg = DeclareLaunchArgument('p5_final_gate_max_consecutive_failures', default_value=p5_final_gate_max_consecutive_failures)
     p5_final_gate_max_failure_duration_s_arg = DeclareLaunchArgument('p5_final_gate_max_failure_duration_s', default_value=p5_final_gate_max_failure_duration_s)
@@ -476,6 +478,7 @@ def generate_launch_description():
             {'p5.sample_dt_s': p5_sample_dt_s},
             {'p5.current_stale_to_replan_s': p5_current_stale_to_replan_s},
             {'p5.current_stale_to_emergency_s': p5_current_stale_to_emergency_s},
+            {'p5.current_low_margin_to_emergency_s': p5_current_low_margin_to_emergency_s},
             {'p5.future_unknown_to_emergency_s': p5_future_unknown_to_emergency_s},
             {'p5.final_gate_max_consecutive_failures': p5_final_gate_max_consecutive_failures},
             {'p5.final_gate_max_failure_duration_s': p5_final_gate_max_failure_duration_s},
@@ -770,6 +773,7 @@ def generate_launch_description():
     ld.add_action(p5_sample_dt_s_arg)
     ld.add_action(p5_current_stale_to_replan_s_arg)
     ld.add_action(p5_current_stale_to_emergency_s_arg)
+    ld.add_action(p5_current_low_margin_to_emergency_s_arg)
     ld.add_action(p5_future_unknown_to_emergency_s_arg)
     ld.add_action(p5_final_gate_max_consecutive_failures_arg)
     ld.add_action(p5_final_gate_max_failure_duration_s_arg)

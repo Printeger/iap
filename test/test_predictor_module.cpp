@@ -1070,16 +1070,132 @@ TEST(PredictorModuleTest, FreshnessGuardRejectsStaleOdom) {
   expect_stale_fallback("stale_odom", snapshot);
 }
 
-TEST(PredictorModuleTest, FreshnessGuardRejectsStaleIntegrity) {
+TEST(PredictorModuleTest,
+     FreshnessGuardDropsStaleCurrentPriorWhenAdvisorySourceIsValid) {
+  auto params = make_params();
+  params.freshness.enabled = true;
+  params.freshness.max_odom_age_s = 0.5;
+  params.freshness.max_integrity_age_s = 0.5;
+  params.freshness.max_gnss_age_s = 0.5;
+  params.freshness.max_snapshot_age_s = 0.5;
+  iap::PredictorModule module(params);
+  module.set_lidar_fim_primitives(make_lidar_primitives());
+
   auto snapshot = make_snapshot(true, true);
   snapshot.current.stamp = 99.0;
-  expect_stale_fallback("stale_integrity", snapshot);
+  iap::PredictorQueryInput input(Eigen::Vector3d::Zero(),
+                                 snapshot,
+                                 100.0,
+                                 0.0,
+                                 "map");
+
+  const auto result = module.query(input);
+
+  EXPECT_TRUE(result.valid) << result.fallback_reason;
+  EXPECT_TRUE(result.available);
+  EXPECT_FALSE(result.fallback);
+  EXPECT_TRUE(result.fused.gnss_used);
+  EXPECT_TRUE(result.fused.lidar_used);
+  EXPECT_FALSE(result.fused.prior_valid);
+  EXPECT_NE(result.fallback_reason.find("stale_current_prior"),
+            std::string::npos);
+  EXPECT_TRUE(flag_set(result.source_flags,
+                       iap::PREDICTOR_RESULT_STALE_CURRENT_PRIOR));
+  EXPECT_FALSE(flag_set(result.source_flags,
+                        iap::PREDICTOR_RESULT_PRIOR_VALID));
 }
 
-TEST(PredictorModuleTest, FreshnessGuardRejectsStaleGnssEpoch) {
+TEST(PredictorModuleTest,
+     FreshnessGuardRejectsStaleIntegrityWhenNoAdvisorySourceIsUsable) {
+  auto params = make_params();
+  params.source_mode = iap::PredictorSourceMode::LidarOnly;
+  params.gnss_epoch_policy = iap::PredictorGnssEpochPolicy::Disabled;
+  params.freshness.enabled = true;
+  params.freshness.max_odom_age_s = 0.5;
+  params.freshness.max_integrity_age_s = 0.5;
+  params.freshness.max_gnss_age_s = 0.5;
+  params.freshness.max_snapshot_age_s = 0.5;
+  iap::PredictorModule module(params);
+  auto snapshot = make_snapshot(true, true);
+  snapshot.current.stamp = 99.0;
+  iap::PredictorQueryInput input(Eigen::Vector3d::Zero(),
+                                 snapshot,
+                                 100.0,
+                                 0.0,
+                                 "map");
+
+  const auto result = module.query(input);
+
+  EXPECT_FALSE(result.valid);
+  EXPECT_FALSE(result.available);
+  EXPECT_TRUE(result.fallback);
+  EXPECT_EQ(result.fallback_reason, "stale_integrity");
+  EXPECT_TRUE(flag_set(result.source_flags, iap::PREDICTOR_RESULT_FALLBACK));
+  EXPECT_FALSE(flag_set(result.source_flags,
+                        iap::PREDICTOR_RESULT_STALE_CURRENT_PRIOR));
+}
+
+TEST(PredictorModuleTest,
+     FusionAutoPolicyUsesLidarWhenGnssEpochIsStale) {
+  auto params = make_params();
+  params.source_mode = iap::PredictorSourceMode::Fusion;
+  params.gnss_epoch_policy = iap::PredictorGnssEpochPolicy::Auto;
+  params.freshness.enabled = true;
+  params.freshness.max_odom_age_s = 0.5;
+  params.freshness.max_integrity_age_s = 0.5;
+  params.freshness.max_gnss_age_s = 0.5;
+  params.freshness.max_snapshot_age_s = 0.5;
+  iap::PredictorModule module(params);
+  module.set_lidar_fim_primitives(make_lidar_primitives());
+
   auto snapshot = make_snapshot(true, true);
   snapshot.gnss_epoch.stamp = 99.0;
-  expect_stale_fallback("stale_gnss_epoch", snapshot);
+  iap::PredictorQueryInput input(Eigen::Vector3d::Zero(),
+                                 snapshot,
+                                 100.0,
+                                 0.0,
+                                 "map");
+  const auto result = module.query(input);
+
+  EXPECT_TRUE(result.valid) << result.fallback_reason;
+  EXPECT_TRUE(result.available);
+  EXPECT_FALSE(result.fallback);
+  EXPECT_FALSE(result.gnss.valid);
+  EXPECT_TRUE(result.lidar.valid);
+  EXPECT_FALSE(result.fused.gnss_used);
+  EXPECT_TRUE(result.fused.lidar_used);
+  EXPECT_NE(result.fallback_reason.find("gnss:stale_gnss_epoch"),
+            std::string::npos);
+  EXPECT_TRUE(flag_set(result.source_flags, iap::PREDICTOR_RESULT_LIDAR_USED));
+  EXPECT_FALSE(flag_set(result.source_flags, iap::PREDICTOR_RESULT_GNSS_USED));
+}
+
+TEST(PredictorModuleTest, FreshnessGuardRejectsRequiredStaleGnssEpoch) {
+  auto params = make_params();
+  params.gnss_epoch_policy = iap::PredictorGnssEpochPolicy::Required;
+  params.freshness.enabled = true;
+  params.freshness.max_odom_age_s = 0.5;
+  params.freshness.max_integrity_age_s = 0.5;
+  params.freshness.max_gnss_age_s = 0.5;
+  params.freshness.max_snapshot_age_s = 0.5;
+  iap::PredictorModule module(params);
+  module.set_lidar_fim_primitives(make_lidar_primitives());
+
+  auto snapshot = make_snapshot(true, true);
+  snapshot.gnss_epoch.stamp = 99.0;
+  iap::PredictorQueryInput input(Eigen::Vector3d::Zero(),
+                                 snapshot,
+                                 100.0,
+                                 0.0,
+                                 "map");
+  const auto result = module.query(input);
+
+  EXPECT_FALSE(result.valid);
+  EXPECT_FALSE(result.available);
+  EXPECT_TRUE(result.fallback);
+  EXPECT_EQ(result.fallback_reason, "stale_gnss_epoch");
+  EXPECT_TRUE(flag_set(result.source_flags, iap::PREDICTOR_RESULT_FALLBACK));
+  EXPECT_FALSE(flag_set(result.source_flags, iap::PREDICTOR_RESULT_VALID));
 }
 
 TEST(PredictorModuleTest, FreshnessGuardRejectsStaleSnapshot) {

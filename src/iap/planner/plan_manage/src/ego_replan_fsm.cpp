@@ -140,6 +140,10 @@ namespace ego_planner
       while (rclcpp::ok() && count++ < 1000)
       {
         rclcpp::spin_some(node_);
+        if (have_odom_ && have_trigger_)
+        {
+          break;
+        }
         std::this_thread::sleep_for(std::chrono::milliseconds(1));
       }
 

@@ -410,6 +410,7 @@ TEST(RiskGridMapTest, HealthCountsPredictorSourceFlags) {
       iap::PREDICTOR_RESULT_GNSS_USED |
       iap::PREDICTOR_RESULT_LIDAR_USED |
       iap::PREDICTOR_RESULT_PRIOR_VALID |
+      iap::PREDICTOR_RESULT_STALE_CURRENT_PRIOR |
       iap::PREDICTOR_RESULT_REGULARIZED |
       iap::PREDICTOR_RESULT_CONSERVATIVE_MAX;
   std::string reason;
@@ -425,6 +426,7 @@ TEST(RiskGridMapTest, HealthCountsPredictorSourceFlags) {
   EXPECT_EQ(health.predictor_gnss_used_count, 36u);
   EXPECT_EQ(health.predictor_lidar_used_count, 36u);
   EXPECT_EQ(health.predictor_prior_used_count, 36u);
+  EXPECT_EQ(health.predictor_stale_current_prior_count, 36u);
   EXPECT_EQ(health.predictor_regularized_count, 36u);
   EXPECT_EQ(health.predictor_conservative_max_count, 36u);
   EXPECT_EQ(health.dominant_unknown_reason, "occupied_skip");

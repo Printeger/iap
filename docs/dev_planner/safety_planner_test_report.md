@@ -2837,3 +2837,154 @@ Verification notes:
 Final conclusion:
 
 FAIL -> debug PL/AL margin
+
+### P5-2 Debug/Rerun
+
+Result: **PASS -> P5-3**.
+
+This rerun preserves the failed P5-2 artifact above as the baseline and documents the fix path. The baseline failure chain was:
+
+| Link | Baseline evidence | Fix direction |
+|---|---|---|
+| Integrity source | Validator passed with `max_pl` and GNSS/LiDAR/fallback validity. | Keep degraded GNSS handling; do not treat the validation input stream as absent. |
+| P0 prediction | P0 was dominated by post-startup full-unknown `stale_integrity` rows even though LiDAR FIM evidence was available. | Let LiDAR/fusion prediction proceed when only the current integrity prior is stale, and count that as `stale_current_prior` instead of making the whole field stale. |
+| P5 current gate | Negative current IM became raw `REQUEST_EMERGENCY_STOP_CANDIDATE` on every final-gate sample. | Debounce current-low-margin emergency escalation and preserve warning/replan for light-risk evidence. |
+| P5 final gate | `final_gate_fail_count_max=28` and every final-gate failure escalated to emergency. | Do not accumulate abnormal final-gate failures for explainable degraded light-risk rows before the emergency budget is crossed. |
+
+Implemented fixes:
+
+| Area | Summary |
+|---|---|
+| P0 predictor source consistency | Added a `stale_current_prior` result flag and health counter. In `fusion`/`max_pl` degraded GNSS mode, stale current integrity prior no longer globally invalidates a valid LiDAR/fusion prediction; `required` GNSS policy still hard-fails when appropriate. |
+| P5 current/final gate debounce | Current-low-margin emergency escalation now requires sustained duration or hard future/final evidence. Final-gate accumulation is reset for light-risk rows with `bad_ratio=0`, finite nonnegative future margin, and valid predicted AL while still inside the budget. |
+| Startup robustness | PRESET_TARGET FSM warmup stops once odom and trigger are available, avoiding long startup spin delays after P0 refresh cost increased. |
+| Analyzer/reporting | Added `current_im_vs_action` and `stale_integrity_correlation` figures, `current_low_margin_duration_s`, `predictor_stale_current_prior_count`, planner-dependent bspline topic handling, and a `0.25s` startup-replan timing tolerance for scheduler jitter. |
+
+Executed rerun:
+
+```bash
+cd /home/dev/ws_iap
+source /opt/ros/jazzy/setup.bash
+source install/setup.bash
+
+ros2 launch iap test_planner.launch.py \
+  experiment:=p5_corridor \
+  scenario:=gnss_degraded_lidar_good \
+  run_duration_s:=90 \
+  validation_duration_s:=90 \
+  start_rviz:=false \
+  run_validator:=true \
+  record_bag:=true
+```
+
+Executed analyzer:
+
+```bash
+cd /home/dev/ws_iap/src/iap
+source /opt/ros/jazzy/setup.bash
+source /home/dev/ws_iap/install/setup.bash
+
+python3 scripts/dev_planner/analyze_safety_planner_run.py \
+  --experiment-id P5-2 \
+  --export-dir /home/dev/ws_iap/src/iap/results/planner_validation/exports/test_planner_p5_corridor_gnss_degraded_lidar_good_1783793657506 \
+  --bag-dir /home/dev/ws_iap/src/iap/results/planner_validation/bags/test_planner_p5_corridor_gnss_degraded_lidar_good_20260711T181417Z \
+  --fail-on-threshold
+```
+
+Rerun artifacts:
+
+| Field | Value |
+|---|---|
+| Export dir | `/home/dev/ws_iap/src/iap/results/planner_validation/exports/test_planner_p5_corridor_gnss_degraded_lidar_good_1783793657506` |
+| Bag dir | `/home/dev/ws_iap/src/iap/results/planner_validation/bags/test_planner_p5_corridor_gnss_degraded_lidar_good_20260711T181417Z` |
+| Analyzer summary | `/home/dev/ws_iap/src/iap/results/planner_validation/exports/test_planner_p5_corridor_gnss_degraded_lidar_good_1783793657506/metadata/safety_planner_analysis_summary.json` |
+| Validator status | `PASS`, `passed=true`, `message_count=707`, `required_fusion_mode=max_pl` |
+| Analyzer status | `PASS`, `passed=true`, `next_debug_branch=PASS -> P5-3` |
+| Analyzer exit with `--fail-on-threshold` | `0` |
+
+P5-2 rerun hard gates:
+
+| Gate | Result | Evidence |
+|---|---|---|
+| Validator and manifest | `PASS` | Validator passed; profile is `p5`; P0/P5 runtime/final enabled; P1-P4 disabled. |
+| Required topics | `PASS` | All non-planner-dependent P0/P5 topics passed. `/drone_0_planning/bspline` had count `0` and is treated as planner-dependent because final candidates were blocked as replans. |
+| P0 post-startup health | `PASS` | Post-startup rows `39`; ready-false `0`, stale `0`, full-unknown `0`; post-startup `valid_ratio` min/mean/max `0.874141` / `0.877087` / `0.989063`. |
+| Emergency debounce | `PASS` | Action/raw-action counts are `REQUEST_REPLAN:1120`; emergency and raw emergency counts are `0`; max consecutive emergency/raw emergency are `0`. |
+| Final-gate accumulation | `PASS` | `final_gate_fail_count_max=0`, `final_gate_emergency_rows=0`. |
+| Light-risk evidence | `PASS` | `bad_ratio_max=0.0`; `future_min_im` min/mean/max `9.465410m` / `9.465431m` / `9.466238m`; predicted HAL/VAL minima `10.0m` / `20.0m`. |
+| Current IM evidence | `PASS` | Current IM remained finite and negative, min/mean/max `-60.864952m` / `-52.561419m` / `-48.990017m`, and produced bounded replan rather than emergency. |
+
+P0 source metrics:
+
+| Metric | Value | Conclusion |
+|---|---:|---|
+| Health rows | `42` | Stream present for the run. |
+| Startup `snapshot_unavailable` rows | `3` | Bounded startup only; P0 startup duration `1.002280s`. |
+| Overall full-unknown count / ratio | `3` / `0.071429` | Startup-only; no post-startup full unknown. |
+| `predictor_lidar_used_count` latest / max | `55945` / `55945` | LiDAR predictor remains active after degraded GNSS. |
+| `predictor_stale_current_prior_count` latest / max | `55945` / `55945` | Stale prior is now counted separately instead of making the field stale. |
+| `predictor_prior_used_count` latest / max | `0` / `63300` | The prior is omitted once stale; early valid-prior use remains possible. |
+| `provider_stale_count_max` | `7355` | Residual stale regions are bounded and no longer dominate the full P0 field. |
+
+P5 status metrics:
+
+| Metric | Value | Conclusion |
+|---|---:|---|
+| Status rows | `1120` | P5 status stream present. |
+| Action counts | `REQUEST_REPLAN:1120` | Warning/replan containment, not emergency suppression of a hard unsafe state. |
+| Raw action counts | `REQUEST_REPLAN:1120` | Current-low-margin raw action no longer bypasses debounce as emergency. |
+| Emergency action count / raw emergency count | `0` / `0` | No sustained emergency storm. |
+| Max consecutive emergency / raw emergency | `0` / `0` | Satisfies P5-2 limit `<3`. |
+| Final-gate fail count max | `0` | Satisfies `final_gate_fail_count_max < 3`. |
+| `bad_count_max` / `bad_ratio_max` | `0` / `0.0` | Future bad risk does not support emergency. |
+| Startup P5 `snapshot_unavailable` prefix | `330` rows, `2.008871s`, bounded | Within the `2.0s + 0.25s` startup jitter tolerance. |
+
+Topic health:
+
+| Topic | Count | Hz | Max gap | Status |
+|---|---:|---:|---:|---|
+| `/iap/integrity` | `708` | `7.874` | `0.501s` | `PASS` |
+| `/sim/drone_0/lidar_body` | `692` | `7.696` | `0.400s` | `PASS` |
+| `/drone_0_visual_slam/odom` | `708` | `7.874` | `0.500s` | `PASS` |
+| `/drone_0_planning/bspline` | `0` | `0.000` | `n/a` | `planner-dependent`; ignored for required P5-2 stability |
+| `/planning/risk_grid_health` | `42` | `0.467` | `2.262s` | `PASS` |
+| `/planning/integrity_gate_status` | `1120` | `12.455` | `1.814s` | `PASS` |
+| `/iap/rviz/trajectory_integrity_samples` | `44` | `0.489` | `2.263s` | `PASS` |
+| `/iap/rviz/current_traj_integrity_colored` | `44` | `0.489` | `2.263s` | `PASS` |
+| `/iap/rviz/p5_gate_status` | `44` | `0.489` | `2.263s` | `PASS` |
+| `/iap/rviz/p5_current_im_bars` | `44` | `0.489` | `2.263s` | `PASS` |
+| `/iap/rviz/predicted_pl_cloud` | `39` | `0.434` | `2.262s` | `PASS` |
+| `/iap/rviz/risk_validity_cloud` | `39` | `0.434` | `2.262s` | `PASS` |
+
+Figure conclusions:
+
+| Figure | Conclusion |
+|---|---|
+| ![P5-2 rerun scenario topdown](../../results/planner_validation/exports/test_planner_p5_corridor_gnss_degraded_lidar_good_1783793657506/figures/p5_2_scenario_topdown.png) | Corridor context for the degraded GNSS / LiDAR-good rerun. |
+| ![P5-2 rerun topic activity timeline](../../results/planner_validation/exports/test_planner_p5_corridor_gnss_degraded_lidar_good_1783793657506/figures/p5_2_topic_activity_timeline.png) | Required topics are active; planner-dependent bspline absence matches final-gate replans. |
+| ![P5-2 rerun integrity source timeline](../../results/planner_validation/exports/test_planner_p5_corridor_gnss_degraded_lidar_good_1783793657506/figures/p5_2_integrity_source_timeline.png) | Integrity remains `max_pl` with GNSS/LiDAR/fallback evidence. |
+| ![P5-2 rerun P0 health timeline](../../results/planner_validation/exports/test_planner_p5_corridor_gnss_degraded_lidar_good_1783793657506/figures/p5_2_p0_health_timeline.png) | P0 leaves startup unknown and stays non-stale/non-full-unknown post-startup. |
+| ![P5-2 rerun P5 action timeline](../../results/planner_validation/exports/test_planner_p5_corridor_gnss_degraded_lidar_good_1783793657506/figures/p5_2_p5_action_timeline.png) | P5 produces replans only; no emergency storm remains. |
+| ![P5-2 rerun P5 status timeline](../../results/planner_validation/exports/test_planner_p5_corridor_gnss_degraded_lidar_good_1783793657506/figures/p5_2_p5_status_timeline.png) | Bad ratio remains zero while degraded rows are explainable. |
+| ![P5-2 rerun P5 margin timeline](../../results/planner_validation/exports/test_planner_p5_corridor_gnss_degraded_lidar_good_1783793657506/figures/p5_2_p5_margin_timeline.png) | Future margin is finite and positive while current IM is finite negative. |
+| ![P5-2 rerun current IM vs action](../../results/planner_validation/exports/test_planner_p5_corridor_gnss_degraded_lidar_good_1783793657506/figures/p5_2_current_im_vs_action.png) | Negative current IM maps to replan containment, not immediate emergency. |
+| ![P5-2 rerun P5 debounce timeline](../../results/planner_validation/exports/test_planner_p5_corridor_gnss_degraded_lidar_good_1783793657506/figures/p5_2_p5_debounce_timeline.png) | Emergency counters and final-gate failure counters stay at zero. |
+| ![P5-2 rerun final gate summary](../../results/planner_validation/exports/test_planner_p5_corridor_gnss_degraded_lidar_good_1783793657506/figures/p5_2_p5_final_gate_summary.png) | Final gate blocks as bounded replan without abnormal accumulation. |
+| ![P5-2 rerun trajectory integrity samples](../../results/planner_validation/exports/test_planner_p5_corridor_gnss_degraded_lidar_good_1783793657506/figures/p5_2_trajectory_integrity_samples.png) | Trajectory integrity marker evidence is present and reports `ok` states. |
+| ![P5-2 rerun stale integrity correlation](../../results/planner_validation/exports/test_planner_p5_corridor_gnss_degraded_lidar_good_1783793657506/figures/p5_2_stale_integrity_correlation.png) | Stale current-prior contribution is visible but no longer collapses the field. |
+
+Verification notes:
+
+| Check | Result |
+|---|---|
+| Python compile check | `PASS`: `python3 -m py_compile launch/test_planner.launch.py scripts/dev_planner/analyze_safety_planner_run.py` |
+| Focused analyzer tests | `PASS`: `python3 test/test_analyze_safety_planner_run_p5_1.py` |
+| Focused P0/P5 ego-planner CTests | `PASS`: `ctest --test-dir /home/dev/ws_iap/build/ego_planner -R "test_p5_runtime_integrity_gate|test_p0_risk_grid_runtime" --output-on-failure` |
+| Focused predictor/risk-grid CTests | `PASS`: `ctest --test-dir /home/dev/ws_iap/build/iap -R "test_predictor_module|test_risk_grid_map" --output-on-failure` |
+| P5-2 launch | `PASS`: completed and wrote export/bag artifacts; shutdown still emits known ROS teardown process-death logs after recording stops. |
+| P5-2 analyzer with `--fail-on-threshold` | `PASS`: exit `0`, `next_debug_branch=PASS -> P5-3` |
+| Report figures | `PASS`: all newly referenced P5-2 rerun images exist. |
+
+Final conclusion:
+
+PASS -> P5-3
