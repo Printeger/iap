@@ -2397,3 +2397,139 @@ Resolved blocked history:
 Final conclusion:
 
 PASS -> Phase 2 / P5-1
+
+### P5-1 Open-Sky Normal No False Trigger
+
+Result: **FAIL -> debug P5 thresholds/AL provider**.
+
+Executed launch:
+
+```bash
+cd /home/dev/ws_iap
+source /opt/ros/jazzy/setup.bash
+source install/setup.bash
+
+ros2 launch iap test_planner.launch.py \
+  experiment:=p5_corridor \
+  scenario:=gnss_open_sky \
+  run_duration_s:=60 \
+  validation_duration_s:=60 \
+  start_rviz:=false \
+  run_validator:=true \
+  record_bag:=true
+```
+
+Executed analyzer:
+
+```bash
+cd /home/dev/ws_iap/src/iap
+source /opt/ros/jazzy/setup.bash
+source /home/dev/ws_iap/install/setup.bash
+
+python3 scripts/dev_planner/analyze_safety_planner_run.py \
+  --experiment-id P5-1 \
+  --export-dir /home/dev/ws_iap/src/iap/results/planner_validation/exports/test_planner_p5_corridor_gnss_open_sky_1783762197841 \
+  --bag-dir /home/dev/ws_iap/src/iap/results/planner_validation/bags/test_planner_p5_corridor_gnss_open_sky_20260711T092957Z \
+  --fail-on-threshold
+```
+
+Run artifacts:
+
+| Field | Value |
+|---|---|
+| Launch log | `/tmp/p5_1_launch_20260711T092957Z.log` |
+| Export dir | `/home/dev/ws_iap/src/iap/results/planner_validation/exports/test_planner_p5_corridor_gnss_open_sky_1783762197841` |
+| Bag dir | `/home/dev/ws_iap/src/iap/results/planner_validation/bags/test_planner_p5_corridor_gnss_open_sky_20260711T092957Z` |
+| Analyzer summary | `/home/dev/ws_iap/src/iap/results/planner_validation/exports/test_planner_p5_corridor_gnss_open_sky_1783762197841/metadata/safety_planner_analysis_summary.json` |
+| Validator status | `PASS`, `passed=true`, `message_count=583`, `required_fusion_mode=gnss_only`, `required_final_source=GNSS` |
+| Analyzer status | `FAIL`, `passed=false`, `next_debug_branch=debug P5 thresholds/AL provider` |
+| Analyzer exit with `--fail-on-threshold` | `2` |
+
+Status matrix:
+
+| Gate | Result | Evidence |
+|---|---|---|
+| Required topics stable | `PASS` | P0/P5 required topics were present; `/planning/integrity_gate_status` had `641` rows at `10.699 Hz` |
+| Validator pass | `PASS` | Validator summary passed with `583` integrity samples |
+| P0 health non-stale | `FAIL` | First `3` health rows were `snapshot_unavailable`, `ready=false`, `stale=true`, and full unknown |
+| P5 action overwhelmingly `OK` | `FAIL` | `OK` ratio `0.020281`; action counts `OK:13`, `REQUEST_REPLAN:5`, `REQUEST_EMERGENCY_STOP_CANDIDATE:623` |
+| Emergency absent | `FAIL` | `REQUEST_EMERGENCY_STOP_CANDIDATE=623` |
+| Replan storm absent | `FAIL` | Consecutive action replan `3`; consecutive raw replan `47` |
+| Final gate fail absent | `FAIL` | `final_gate_fail_count_max=152`, fail rows `616` |
+
+Topic health:
+
+| Topic | Count | Hz | Max gap | Status |
+|---|---:|---:|---:|---|
+| `/iap/integrity` | `584` | `9.747` | `0.214s` | `PASS` |
+| `/sim/drone_0/lidar_body` | `597` | `9.964` | `0.108s` | `PASS` |
+| `/drone_0_visual_slam/odom` | `584` | `9.747` | `0.215s` | `PASS` |
+| `/drone_0_planning/bspline` | `624` | `10.415` | `2.430s` | `PASS` |
+| `/planning/risk_grid_health` | `46` | `0.768` | `1.471s` | `PASS` |
+| `/planning/integrity_gate_status` | `641` | `10.699` | `1.395s` | `PASS` |
+| `/iap/rviz/trajectory_integrity_samples` | `45` | `0.751` | `4.226s` | `PASS` |
+| `/iap/rviz/current_traj_integrity_colored` | `45` | `0.751` | `4.226s` | `PASS` |
+| `/iap/rviz/p5_gate_status` | `45` | `0.751` | `3.058s` | `PASS` |
+| `/iap/rviz/p5_current_im_bars` | `45` | `0.751` | `4.226s` | `PASS` |
+
+P0 health:
+
+| Metric | Value | Judgment |
+|---|---:|---|
+| Health rows | `46` | Stream present |
+| `ready_false_count` / ratio | `3` / `0.065217` | Fails strict P5-1 no-stale gate |
+| `stale_true_count` / ratio | `3` / `0.065217` | Fails strict P5-1 no-stale gate |
+| Full unknown count / ratio | `3` / `0.065217` | Startup `snapshot_unavailable` rows coincide with early final-gate failures |
+| `valid_ratio` min / mean / max | `0.000000` / `0.934127` / `1.000000` | Healthy after startup |
+| `unknown_ratio` min / mean / max | `0.000000` / `0.065873` / `1.000000` | Startup dominates unknown mean |
+| PL cloud valid / unknown rows | `3199` / `1` | Latest PL cloud is effectively valid after startup |
+
+P5 action and margin metrics:
+
+| Metric | Value |
+|---|---:|
+| Status rows | `641` |
+| Action counts | `OK:13`, `REQUEST_REPLAN:5`, `REQUEST_EMERGENCY_STOP_CANDIDATE:623` |
+| Raw action counts | `OK:12`, `REQUEST_REPLAN:68`, `REQUEST_EMERGENCY_STOP_CANDIDATE:561` |
+| `future_min_im` min / mean | `6.914705m` / `6.973850m` |
+| `current_im_min` min | `3.597489m` |
+| `bad_ratio` max | `0.000000` |
+| `unknown_ratio` mean / max | `0.544745` / `1.000000` |
+| `current_stale_duration_s` max | `3.149688s` |
+| `future_unknown_duration_s` max | `54.265489s` |
+| `pred_hal_min` / `pred_val_min` | `10.000000m` / `20.000000m` |
+| `pred_al_invalid_count` max | `0` |
+| Trajectory marker evidence rows | `1333` (`ok:891`, `stale_or_warning:442`) |
+
+Failure interpretation:
+
+The open-sky validator and topic health passed, and finite positive IM margins were present when the future field was evaluable. The hard failure is P5 behavior: the final gate repeatedly treated the future trajectory as unknown, escalated to emergency candidates, and accumulated nonzero final-gate failures despite `bad_ratio=0`. The earliest final-gate failure reason was `snapshot_unavailable`, followed by long `future_unknown_duration_s`, so the next debug branch is P5 thresholding / alert-limit provider / final-gate startup handling.
+
+Figure conclusions:
+
+| Figure | Conclusion |
+|---|---|
+| ![P5-1 scenario topdown](../../results/planner_validation/exports/test_planner_p5_corridor_gnss_open_sky_1783762197841/figures/p5_1_scenario_topdown.png) | Open-sky run captured map, odometry, and planner trajectory context. |
+| ![P5-1 topic activity timeline](../../results/planner_validation/exports/test_planner_p5_corridor_gnss_open_sky_1783762197841/figures/p5_1_topic_activity_timeline.png) | Required P0/P5 topics were active over the validation window. |
+| ![P5-1 integrity source timeline](../../results/planner_validation/exports/test_planner_p5_corridor_gnss_open_sky_1783762197841/figures/p5_1_integrity_source_timeline.png) | Integrity source remains `gnss_only` with GNSS final HPL/VPL. |
+| ![P5-1 P0 health timeline](../../results/planner_validation/exports/test_planner_p5_corridor_gnss_open_sky_1783762197841/figures/p5_1_p0_health_timeline.png) | P0 starts with three stale/full-unknown rows, then becomes healthy. |
+| ![P5-1 P5 action timeline](../../results/planner_validation/exports/test_planner_p5_corridor_gnss_open_sky_1783762197841/figures/p5_1_p5_action_timeline.png) | P5 actions are dominated by emergency candidates rather than `OK`. |
+| ![P5-1 P5 status timeline](../../results/planner_validation/exports/test_planner_p5_corridor_gnss_open_sky_1783762197841/figures/p5_1_p5_status_timeline.png) | Unknown ratio persists high while bad ratio remains zero. |
+| ![P5-1 P5 margin timeline](../../results/planner_validation/exports/test_planner_p5_corridor_gnss_open_sky_1783762197841/figures/p5_1_p5_margin_timeline.png) | Finite IM and AL values are positive when available; failures are unknown/final-gate driven. |
+| ![P5-1 trajectory integrity samples](../../results/planner_validation/exports/test_planner_p5_corridor_gnss_open_sky_1783762197841/figures/p5_1_trajectory_integrity_samples.png) | RViz marker evidence contains ok and warning/stale trajectory integrity samples. |
+| ![P5-1 final gate summary](../../results/planner_validation/exports/test_planner_p5_corridor_gnss_open_sky_1783762197841/figures/p5_1_p5_final_gate_summary.png) | Final-gate fail count and emergency rows are nonzero, matching analyzer FAIL. |
+| ![P5-1 RViz overview](../../results/planner_validation/exports/test_planner_p5_corridor_gnss_open_sky_1783762197841/figures/p5_1_p5_rviz_overview.png) | P5 RViz topics and status-derived action/margin summaries were captured. |
+
+Verification notes:
+
+| Check | Result |
+|---|---|
+| `python3 -m py_compile launch/test_planner.launch.py scripts/dev_planner/analyze_safety_planner_run.py` | `PASS` |
+| Focused analyzer unit tests | `PASS`: `test_analyze_safety_planner_run_p5_1.py`, `test_analyze_safety_planner_run_p0_6.py` |
+| `ctest --test-dir build/iap -R "test_(risk_grid_map|predictor_module|unified_risk_grid|future_pl_field_predictor)" --output-on-failure` | `PASS`: 4/4 |
+| `ctest --test-dir build/ego_planner -R "test_(p0_risk_grid_runtime|p5_runtime_integrity_gate|p2_candidate_ranking|p3_reference_bias|planning_risk_context)" --output-on-failure` | `FAIL`: `test_p5_runtime_integrity_gate`, `test_p2_candidate_ranking`, `test_p3_reference_bias`, and `test_planning_risk_context` abort with `*** stack smashing detected ***`; `test_p0_risk_grid_runtime` passes |
+| `git diff --check` | `PASS` |
+
+Final conclusion:
+
+FAIL -> debug P5 thresholds/AL provider

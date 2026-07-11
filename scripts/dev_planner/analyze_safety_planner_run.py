@@ -65,7 +65,71 @@ SAFETY_OFF_ZERO_TOPICS = [
     "/iap/rviz/p5_current_im_bars",
 ]
 P5_STATUS_TOPIC = "/planning/integrity_gate_status"
-P5_BAD_ACTIONS = {"REQUEST_REPLAN", "REQUEST_EMERGENCY_STOP_CANDIDATE"}
+P5_TRAJECTORY_SAMPLES_TOPIC = "/iap/rviz/trajectory_integrity_samples"
+P5_CURRENT_TRAJ_TOPIC = "/iap/rviz/current_traj_integrity_colored"
+P5_GATE_STATUS_TOPIC = "/iap/rviz/p5_gate_status"
+P5_CURRENT_IM_BARS_TOPIC = "/iap/rviz/p5_current_im_bars"
+P5_RVIZ_TOPICS = [
+    P5_TRAJECTORY_SAMPLES_TOPIC,
+    P5_CURRENT_TRAJ_TOPIC,
+    P5_GATE_STATUS_TOPIC,
+    P5_CURRENT_IM_BARS_TOPIC,
+]
+P5_TOPIC_ACTIVITY_TOPICS = P0_TOPIC_ACTIVITY_TOPICS + [
+    P5_STATUS_TOPIC,
+    *P5_RVIZ_TOPICS,
+]
+P5_TOPIC_EXPECTATIONS = {
+    "/iap/integrity": "continuous",
+    "/sim/drone_0/lidar_body": "continuous",
+    "/drone_0_visual_slam/odom": "continuous",
+    "/drone_0_planning/bspline": "planner-dependent",
+    P0_HEALTH_TOPIC: "active-periodic",
+    P0_PL_CLOUD_TOPIC: "present",
+    P0_VALIDITY_CLOUD_TOPIC: "present",
+    P5_STATUS_TOPIC: "present",
+    P5_TRAJECTORY_SAMPLES_TOPIC: "present",
+    P5_CURRENT_TRAJ_TOPIC: "present",
+    P5_GATE_STATUS_TOPIC: "present",
+    P5_CURRENT_IM_BARS_TOPIC: "present",
+}
+P5_EMERGENCY_ACTION = "REQUEST_EMERGENCY_STOP_CANDIDATE"
+P5_REPLAN_ACTION = "REQUEST_REPLAN"
+P5_OK_ACTION = "OK"
+P5_1_MIN_OK_ACTION_RATIO = 0.95
+P5_REPLAN_STORM_CONSECUTIVE = 3
+P5_STATUS_FIELDS = [
+    "bag_time_s",
+    "phase",
+    "action",
+    "raw_action",
+    "reason",
+    "current_im_h",
+    "current_im_v",
+    "current_im_min",
+    "future_min_im",
+    "first_bad_tau",
+    "bad_ratio",
+    "unknown_ratio",
+    "current_integrity_age_s",
+    "field_generation_id",
+    "field_age_s",
+    "current_stale_duration_s",
+    "future_unknown_duration_s",
+    "final_gate_fail_count",
+    "final_gate_fail_duration_s",
+    "final_gate_last_reason",
+    "pred_al_mode",
+    "pred_hal_min",
+    "pred_val_min",
+    "pred_al_invalid_count",
+    "pred_al_last_reason",
+    "sample_count",
+    "bad_count",
+    "unknown_count",
+    "parse_error",
+    "raw",
+]
 ODOM_TRUTH_TOPIC = "/sim/drone_0/truth_odom"
 ODOM_EST_TOPIC = "/drone_0_visual_slam/odom"
 CONTINUOUS_MIN_COVERAGE_RATIO = 0.8
@@ -812,6 +876,36 @@ def validate_manifest(
             failures.append(f"manifest {key} is not false")
 
 
+def validate_p5_1_manifest(
+    manifest: dict[str, Any],
+    failures: list[str],
+    inconclusive: list[str],
+) -> None:
+    if not manifest:
+        inconclusive.append("P5-1 checks require test_planner_manifest.json")
+        return
+    if str(manifest.get("planner_safety_profile", "")).lower() != "p5":
+        failures.append("P5-1 manifest planner_safety_profile is not p5")
+    expected_true = (
+        "p0.enable_risk_grid",
+        "planner_enable_p5_runtime",
+        "planner_enable_p5_final",
+    )
+    expected_false = (
+        "planner_enable_p1",
+        "planner_enable_p2",
+        "planner_enable_p3_local",
+        "planner_enable_p3_global",
+        "planner_enable_p4",
+    )
+    for key in expected_true:
+        if manifest.get(key) is not True:
+            failures.append(f"P5-1 manifest {key} is not true")
+    for key in expected_false:
+        if manifest.get(key) is not False:
+            failures.append(f"P5-1 manifest {key} is not false")
+
+
 def validate_validator(summary: dict[str, Any], failures: list[str], inconclusive: list[str]) -> None:
     if not summary:
         inconclusive.append("missing test_planner_validation_summary.json")
@@ -1154,6 +1248,363 @@ def plot_integrity_source_timeline(rows: list[dict[str, Any]], path: Path) -> bo
         ax.grid(True, axis="x", alpha=0.25)
     axes[-1].set_xlabel("time since first validator sample [s]")
     fig.suptitle("Integrity source timeline")
+    fig.tight_layout()
+    fig.savefig(path, dpi=160)
+    plt.close(fig)
+    return True
+
+
+def marker_color_state(r: Any, g: Any, b: Any, a: Any = 1.0) -> str:
+    red = finite_float(r)
+    green = finite_float(g)
+    blue = finite_float(b)
+    alpha = finite_float(a)
+    if alpha is not None and alpha <= 0.0:
+        return "transparent"
+    if red is None or green is None or blue is None:
+        return "unknown"
+    if red >= 0.8 and green <= 0.25:
+        return "bad"
+    if red >= 0.8 and green >= 0.45 and blue <= 0.25:
+        return "stale_or_warning"
+    if green >= 0.6 and red <= 0.35:
+        return "ok"
+    if abs(red - green) <= 0.15 and abs(green - blue) <= 0.15:
+        return "unknown"
+    return "other"
+
+
+def marker_point_row(
+    *,
+    topic: str,
+    timestamp_ns: int,
+    marker: Any,
+    point_index: int,
+    point: Any,
+    color_value: Any,
+) -> dict[str, Any]:
+    return {
+        "bag_time_s": float(timestamp_ns) * 1.0e-9,
+        "topic": topic,
+        "marker_ns": str(getattr(marker, "ns", "")),
+        "marker_id": getattr(marker, "id", ""),
+        "marker_type": getattr(marker, "type", ""),
+        "marker_action": getattr(marker, "action", ""),
+        "point_index": point_index,
+        "x": getattr(point, "x", ""),
+        "y": getattr(point, "y", ""),
+        "z": getattr(point, "z", ""),
+        "color_r": getattr(color_value, "r", ""),
+        "color_g": getattr(color_value, "g", ""),
+        "color_b": getattr(color_value, "b", ""),
+        "color_a": getattr(color_value, "a", ""),
+        "state": marker_color_state(
+            getattr(color_value, "r", None),
+            getattr(color_value, "g", None),
+            getattr(color_value, "b", None),
+            getattr(color_value, "a", None),
+        ),
+        "text": str(getattr(marker, "text", "")),
+    }
+
+
+def read_p5_marker_evidence(
+    bag_dir: Path,
+    metadata: dict[str, Any],
+    limit: int = 20_000,
+) -> tuple[list[dict[str, Any]], str]:
+    if metadata.get("missing") or not bag_dir:
+        return [], "missing rosbag metadata"
+    topic_counts = metadata.get("topic_counts", {}) or {}
+    target_topics = {
+        topic
+        for topic in (P5_TRAJECTORY_SAMPLES_TOPIC, P5_CURRENT_TRAJ_TOPIC)
+        if int(topic_counts.get(topic, 0) or 0) > 0
+    }
+    if not target_topics:
+        return [], ""
+    rows: list[dict[str, Any]] = []
+    try:
+        from rclpy.serialization import deserialize_message
+        from rosidl_runtime_py.utilities import get_message
+
+        reader = open_bag_reader(bag_dir, metadata)
+        type_map = {topic.name: topic.type for topic in reader.get_all_topics_and_types()}
+        msg_types = {
+            topic: get_message(type_map[topic])
+            for topic in target_topics
+            if topic in type_map
+        }
+        while reader.has_next() and len(rows) < limit:
+            topic, raw, timestamp = reader.read_next()
+            if topic not in msg_types:
+                continue
+            msg = deserialize_message(raw, msg_types[topic])
+            for marker in getattr(msg, "markers", []):
+                action = int(getattr(marker, "action", -1))
+                if action in {2, 3}:  # DELETE / DELETEALL
+                    continue
+                points = list(getattr(marker, "points", []) or [])
+                colors = list(getattr(marker, "colors", []) or [])
+                if points:
+                    for point_index, point in enumerate(points):
+                        color_value = (
+                            colors[point_index]
+                            if point_index < len(colors)
+                            else getattr(marker, "color", None)
+                        )
+                        rows.append(
+                            marker_point_row(
+                                topic=topic,
+                                timestamp_ns=timestamp,
+                                marker=marker,
+                                point_index=point_index,
+                                point=point,
+                                color_value=color_value,
+                            )
+                        )
+                        if len(rows) >= limit:
+                            break
+                else:
+                    pose = getattr(marker, "pose", None)
+                    point = getattr(pose, "position", None)
+                    if point is None:
+                        continue
+                    rows.append(
+                        marker_point_row(
+                            topic=topic,
+                            timestamp_ns=timestamp,
+                            marker=marker,
+                            point_index=0,
+                            point=point,
+                            color_value=getattr(marker, "color", None),
+                        )
+                    )
+                if len(rows) >= limit:
+                    break
+        return rows, ""
+    except Exception as exc:  # pragma: no cover - depends on local ROS Python env
+        return rows, str(exc)
+
+
+def summarize_p5_marker_evidence(rows: list[dict[str, Any]], marker_error: str = "") -> dict[str, Any]:
+    topics = Counter(str(row.get("topic", "")) for row in rows)
+    states = Counter(str(row.get("state", "")) for row in rows)
+    stamps = [value for value in (finite_float(row.get("bag_time_s")) for row in rows) if value is not None]
+    return {
+        "row_count": len(rows),
+        "topic_counts": dict(sorted(topics.items())),
+        "state_counts": dict(sorted(states.items())),
+        "first_bag_time_s": min(stamps) if stamps else None,
+        "last_bag_time_s": max(stamps) if stamps else None,
+        "inspection_error": marker_error,
+    }
+
+
+def relative_time(rows: list[dict[str, Any]], key: str = "bag_time_s") -> list[float]:
+    stamps = [finite_float(row.get(key)) for row in rows]
+    finite_stamps = [stamp for stamp in stamps if stamp is not None]
+    if not finite_stamps:
+        return []
+    t0 = min(finite_stamps)
+    return [math.nan if stamp is None else stamp - t0 for stamp in stamps]
+
+
+def action_code_map(actions: list[str]) -> dict[str, int]:
+    preferred = [P5_OK_ACTION, P5_REPLAN_ACTION, P5_EMERGENCY_ACTION, "<empty>"]
+    ordered = [value for value in preferred if value in actions]
+    ordered.extend(sorted(value for value in set(actions) if value not in ordered))
+    return {value: idx for idx, value in enumerate(ordered)}
+
+
+def plot_p5_action_timeline(rows: list[dict[str, Any]], path: Path) -> bool:
+    if not rows:
+        return False
+    t = relative_time(rows)
+    if not t:
+        return False
+    actions = [p5_action(row, "action") or "<empty>" for row in rows]
+    raw_actions = [p5_action(row, "raw_action") or "<empty>" for row in rows]
+    codes = action_code_map(actions + raw_actions)
+    fig, ax = plt.subplots(figsize=(11, 4.8))
+    ax.step(t, [codes[value] for value in actions], where="post", label="action", lw=1.8)
+    ax.step(t, [codes[value] for value in raw_actions], where="post", label="raw_action", lw=1.2, ls="--")
+    ax.set_yticks(list(codes.values()), list(codes.keys()))
+    ax.set_xlabel("time since first P5 status [s]")
+    ax.set_title("P5 action timeline")
+    ax.grid(True, axis="x", alpha=0.25)
+    ax.legend(loc="best")
+    fig.tight_layout()
+    fig.savefig(path, dpi=160)
+    plt.close(fig)
+    return True
+
+
+def plot_p5_status_timeline(rows: list[dict[str, Any]], path: Path) -> bool:
+    if not rows:
+        return False
+    t = relative_time(rows)
+    if not t:
+        return False
+    fig, axes = plt.subplots(3, 1, figsize=(11, 7), sharex=True)
+    axes[0].plot(t, finite_or_nan(rows, "bad_ratio"), label="bad_ratio", color="#dc2626")
+    axes[0].plot(t, finite_or_nan(rows, "unknown_ratio"), label="unknown_ratio", color="#6b7280")
+    axes[0].set_ylim(-0.05, 1.05)
+    axes[0].set_ylabel("ratio")
+    axes[0].legend(loc="best")
+    axes[1].plot(t, finite_or_nan(rows, "sample_count"), label="sample_count", color="#2563eb")
+    axes[1].plot(t, finite_or_nan(rows, "bad_count"), label="bad_count", color="#dc2626")
+    axes[1].plot(t, finite_or_nan(rows, "unknown_count"), label="unknown_count", color="#6b7280")
+    axes[1].set_ylabel("samples")
+    axes[1].legend(loc="best")
+    axes[2].plot(t, finite_or_nan(rows, "current_stale_duration_s"), label="current_stale_duration_s", color="#f97316")
+    axes[2].plot(t, finite_or_nan(rows, "future_unknown_duration_s"), label="future_unknown_duration_s", color="#9333ea")
+    axes[2].set_ylabel("duration [s]")
+    axes[2].set_xlabel("time since first P5 status [s]")
+    axes[2].legend(loc="best")
+    for ax in axes:
+        ax.grid(True, alpha=0.25)
+    fig.suptitle("P5 status timeline")
+    fig.tight_layout()
+    fig.savefig(path, dpi=160)
+    plt.close(fig)
+    return True
+
+
+def plot_p5_margin_timeline(rows: list[dict[str, Any]], path: Path) -> bool:
+    if not rows:
+        return False
+    t = relative_time(rows)
+    if not t:
+        return False
+    fig, axes = plt.subplots(2, 1, figsize=(11, 6.5), sharex=True)
+    axes[0].plot(t, finite_or_nan(rows, "current_im_min"), label="current_im_min", color="#16a34a")
+    axes[0].plot(t, finite_or_nan(rows, "future_min_im"), label="future_min_im", color="#2563eb")
+    axes[0].axhline(0.0, color="#111827", lw=0.9)
+    axes[0].set_ylabel("IM [m]")
+    axes[0].legend(loc="best")
+    axes[1].plot(t, finite_or_nan(rows, "pred_hal_min"), label="pred_hal_min", color="#0f766e")
+    axes[1].plot(t, finite_or_nan(rows, "pred_val_min"), label="pred_val_min", color="#7c3aed")
+    axes[1].plot(t, finite_or_nan(rows, "pred_al_invalid_count"), label="pred_al_invalid_count", color="#dc2626")
+    axes[1].set_ylabel("AL / invalid")
+    axes[1].set_xlabel("time since first P5 status [s]")
+    axes[1].legend(loc="best")
+    for ax in axes:
+        ax.grid(True, alpha=0.25)
+    fig.suptitle("P5 margin timeline")
+    fig.tight_layout()
+    fig.savefig(path, dpi=160)
+    plt.close(fig)
+    return True
+
+
+def plot_p5_final_gate_summary(p5_summary: dict[str, Any], path: Path) -> bool:
+    labels = [
+        "max fail count",
+        "fail rows",
+        "emergency rows",
+        "max replan streak",
+        "raw replan streak",
+    ]
+    values = [
+        int(p5_summary.get("final_gate_fail_count_max", 0) or 0),
+        int(p5_summary.get("final_gate_fail_rows", 0) or 0),
+        int(p5_summary.get("emergency_action_count", 0) or 0),
+        int(p5_summary.get("max_consecutive_replan", 0) or 0),
+        int(p5_summary.get("raw_max_consecutive_replan", 0) or 0),
+    ]
+    fig, ax = plt.subplots(figsize=(9, 4.8))
+    colors = ["#16a34a" if value == 0 else "#dc2626" for value in values]
+    ax.bar(labels, values, color=colors)
+    ax.set_ylabel("count")
+    ax.set_title("P5 final gate and storm summary")
+    ax.tick_params(axis="x", rotation=18)
+    ax.grid(True, axis="y", alpha=0.25)
+    fig.tight_layout()
+    fig.savefig(path, dpi=160)
+    plt.close(fig)
+    return True
+
+
+def plot_p5_trajectory_integrity_samples(rows: list[dict[str, Any]], path: Path) -> bool:
+    if not rows:
+        return False
+    state_colors = {
+        "ok": "#16a34a",
+        "bad": "#dc2626",
+        "unknown": "#6b7280",
+        "stale_or_warning": "#f97316",
+        "other": "#2563eb",
+        "transparent": "#d1d5db",
+    }
+    fig, ax = plt.subplots(figsize=(8, 6.5))
+    plotted = False
+    for state, color_value in state_colors.items():
+        state_rows = [row for row in rows if str(row.get("state", "")) == state]
+        if not state_rows:
+            continue
+        xs = [finite_float(row.get("x")) for row in state_rows]
+        ys = [finite_float(row.get("y")) for row in state_rows]
+        xy = [(x, y) for x, y in zip(xs, ys) if x is not None and y is not None]
+        if not xy:
+            continue
+        ax.scatter(
+            [point[0] for point in xy],
+            [point[1] for point in xy],
+            s=18 if state != "bad" else 36,
+            color=color_value,
+            alpha=0.78,
+            label=state,
+            linewidths=0,
+        )
+        plotted = True
+    if not plotted:
+        plt.close(fig)
+        return False
+    ax.set_xlabel("x [m]")
+    ax.set_ylabel("y [m]")
+    ax.set_title("P5 trajectory integrity marker samples")
+    ax.set_aspect("equal", adjustable="datalim")
+    ax.grid(True, alpha=0.25)
+    ax.legend(loc="best", fontsize=8)
+    fig.tight_layout()
+    fig.savefig(path, dpi=160)
+    plt.close(fig)
+    return True
+
+
+def plot_p5_rviz_overview(
+    topic_health: dict[str, dict[str, Any]],
+    p5_summary: dict[str, Any],
+    marker_summary: dict[str, Any],
+    path: Path,
+) -> bool:
+    fig, axes = plt.subplots(1, 2, figsize=(12, 5.2))
+    topics = [P5_STATUS_TOPIC, *P5_RVIZ_TOPICS]
+    counts = [int((topic_health.get(topic) or {}).get("count", 0) or 0) for topic in topics]
+    colors = ["#16a34a" if count > 0 else "#dc2626" for count in counts]
+    axes[0].barh(topics, counts, color=colors)
+    axes[0].invert_yaxis()
+    axes[0].set_xlabel("bag messages")
+    axes[0].set_title("P5 topic evidence")
+    axes[0].grid(True, axis="x", alpha=0.25)
+
+    axes[1].axis("off")
+    text = "\n".join(
+        [
+            f"status_rows: {p5_summary.get('status_rows', 0)}",
+            f"OK ratio: {float(p5_summary.get('ok_action_ratio', 0.0) or 0.0):.3f}",
+            f"actions: {p5_summary.get('action_counts', {})}",
+            f"raw_actions: {p5_summary.get('raw_action_counts', {})}",
+            f"future_min_im_min: {p5_summary.get('future_min_im_min')}",
+            f"current_im_min_min: {p5_summary.get('current_im_min_min')}",
+            f"final_gate_fail_count_max: {p5_summary.get('final_gate_fail_count_max', 0)}",
+            f"marker_rows: {marker_summary.get('row_count', 0)}",
+            f"marker_states: {marker_summary.get('state_counts', {})}",
+        ]
+    )
+    axes[1].text(0.02, 0.95, text, va="top", ha="left", family="monospace", fontsize=9)
+    axes[1].set_title("P5 run summary")
     fig.tight_layout()
     fig.savefig(path, dpi=160)
     plt.close(fig)
@@ -2798,16 +3249,17 @@ def topic_health_from_metadata(
             "max_gap_s": max_gap_s,
             "status": status,
         }
-    p5_count = int(topic_counts.get(P5_STATUS_TOPIC, 0) or 0)
-    topic_health[P5_STATUS_TOPIC] = {
-        "expected": "absent-or-zero when P5 disabled",
-        "count": p5_count,
-        "hz": (p5_count / duration_s) if duration_s > 0.0 else None,
-        "span_s": None,
-        "coverage_ratio": None,
-        "max_gap_s": None,
-        "status": "PASS" if p5_count == 0 else "CHECK",
-    }
+    if P5_STATUS_TOPIC not in expectations:
+        p5_count = int(topic_counts.get(P5_STATUS_TOPIC, 0) or 0)
+        topic_health[P5_STATUS_TOPIC] = {
+            "expected": "absent-or-zero when P5 disabled",
+            "count": p5_count,
+            "hz": (p5_count / duration_s) if duration_s > 0.0 else None,
+            "span_s": None,
+            "coverage_ratio": None,
+            "max_gap_s": None,
+            "status": "PASS" if p5_count == 0 else "CHECK",
+        }
     return topic_health
 
 
@@ -2842,6 +3294,33 @@ def validate_topic_health(
     return topic_health
 
 
+def p5_row_from_payload(payload: Any, timestamp_ns: int) -> dict[str, Any]:
+    parsed: dict[str, Any] = {}
+    parse_error = ""
+    if isinstance(payload, str) and payload.strip():
+        try:
+            loaded = json.loads(payload)
+            if isinstance(loaded, dict):
+                parsed = loaded
+            else:
+                parse_error = "status JSON payload is not an object"
+        except json.JSONDecodeError as exc:
+            parse_error = f"invalid_json:{exc.msg}"
+    elif payload:
+        parse_error = f"non_string_payload:{type(payload).__name__}"
+    else:
+        parse_error = "empty_payload"
+
+    row: dict[str, Any] = {"bag_time_s": float(timestamp_ns) * 1.0e-9}
+    for field in P5_STATUS_FIELDS:
+        if field in {"bag_time_s", "parse_error", "raw"}:
+            continue
+        row[field] = parsed.get(field, "")
+    row["parse_error"] = parse_error
+    row["raw"] = payload
+    return row
+
+
 def read_p5_status_messages(bag_dir: Path, metadata: dict[str, Any], limit: int = 2000) -> tuple[list[dict[str, Any]], str]:
     topic_counts = metadata.get("topic_counts", {}) or {}
     if int(topic_counts.get(P5_STATUS_TOPIC, 0) or 0) <= 0:
@@ -2870,29 +3349,105 @@ def read_p5_status_messages(bag_dir: Path, metadata: dict[str, Any], limit: int 
                 continue
             msg = deserialize_message(data, msg_type)
             payload = getattr(msg, "data", "")
-            parsed: dict[str, Any] = {}
-            if isinstance(payload, str) and payload.strip():
-                try:
-                    loaded = json.loads(payload)
-                    if isinstance(loaded, dict):
-                        parsed = loaded
-                except json.JSONDecodeError:
-                    parsed = {"parse_error": payload[:120]}
-            rows.append(
-                {
-                    "bag_time_s": float(timestamp) * 1.0e-9,
-                    "phase": parsed.get("phase", ""),
-                    "action": parsed.get("action", ""),
-                    "raw_action": parsed.get("raw_action", ""),
-                    "reason": parsed.get("reason", ""),
-                    "final_gate_fail_count": parsed.get("final_gate_fail_count", ""),
-                    "final_gate_last_reason": parsed.get("final_gate_last_reason", ""),
-                    "raw": payload,
-                }
-            )
+            rows.append(p5_row_from_payload(payload, timestamp))
         return rows, ""
     except Exception as exc:  # pragma: no cover - depends on local ROS Python env
         return [], str(exc)
+
+
+def p5_action(row: dict[str, Any], key: str = "action") -> str:
+    return str(row.get(key, "")).strip()
+
+
+def p5_final_gate_failed(row: dict[str, Any]) -> bool:
+    fail_count = finite_float(row.get("final_gate_fail_count"))
+    fail_duration = finite_float(row.get("final_gate_fail_duration_s"))
+    return (fail_count is not None and fail_count > 0) or (
+        fail_duration is not None and fail_duration > 0.0
+    )
+
+
+def max_consecutive_action(rows: list[dict[str, Any]], action: str, key: str = "action") -> int:
+    return consecutive_true([p5_action(row, key) == action for row in rows])
+
+
+def numeric_summary(rows: list[dict[str, Any]], key: str) -> dict[str, Any]:
+    values = [value for value in (finite_float(row.get(key)) for row in rows) if value is not None]
+    return {
+        f"{key}_min": min(values) if values else None,
+        f"{key}_mean": float(np.mean(values)) if values else None,
+        f"{key}_max": max(values) if values else None,
+    }
+
+
+def summarize_p5_status_rows(p5_rows: list[dict[str, Any]], p5_error: str = "") -> dict[str, Any]:
+    action_counts = Counter(p5_action(row, "action") or "<empty>" for row in p5_rows)
+    raw_action_counts = Counter(p5_action(row, "raw_action") or "<empty>" for row in p5_rows)
+    emergency_rows = [
+        row
+        for row in p5_rows
+        if p5_action(row, "action") == P5_EMERGENCY_ACTION
+        or p5_action(row, "raw_action") == P5_EMERGENCY_ACTION
+    ]
+    replan_rows = [
+        row
+        for row in p5_rows
+        if p5_action(row, "action") == P5_REPLAN_ACTION
+        or p5_action(row, "raw_action") == P5_REPLAN_ACTION
+    ]
+    final_fail_rows = [row for row in p5_rows if p5_final_gate_failed(row)]
+    parse_error_rows = [row for row in p5_rows if str(row.get("parse_error", "")).strip()]
+    ok_count = int(action_counts.get(P5_OK_ACTION, 0))
+    summary: dict[str, Any] = {
+        "status_rows": len(p5_rows),
+        "action_counts": dict(sorted(action_counts.items())),
+        "raw_action_counts": dict(sorted(raw_action_counts.items())),
+        "ok_action_count": ok_count,
+        "ok_action_ratio": ratio(ok_count, len(p5_rows)),
+        "replan_action_count": int(action_counts.get(P5_REPLAN_ACTION, 0)),
+        "raw_replan_action_count": int(raw_action_counts.get(P5_REPLAN_ACTION, 0)),
+        "emergency_action_count": len(emergency_rows),
+        "raw_emergency_action_count": int(raw_action_counts.get(P5_EMERGENCY_ACTION, 0)),
+        "max_consecutive_replan": max_consecutive_action(p5_rows, P5_REPLAN_ACTION, "action"),
+        "raw_max_consecutive_replan": max_consecutive_action(p5_rows, P5_REPLAN_ACTION, "raw_action"),
+        "replan_storm": (
+            max_consecutive_action(p5_rows, P5_REPLAN_ACTION, "action") >= P5_REPLAN_STORM_CONSECUTIVE
+            or max_consecutive_action(p5_rows, P5_REPLAN_ACTION, "raw_action") >= P5_REPLAN_STORM_CONSECUTIVE
+        ),
+        "final_gate_fail_rows": len(final_fail_rows),
+        "final_gate_fail_count_max": max(
+            (int(finite_float(row.get("final_gate_fail_count")) or 0) for row in p5_rows),
+            default=0,
+        ),
+        "final_gate_fail_duration_s_max": max(
+            (finite_float(row.get("final_gate_fail_duration_s")) or 0.0 for row in p5_rows),
+            default=0.0,
+        ),
+        "parse_error_count": len(parse_error_rows),
+        "inspection_error": p5_error,
+        "first_replan_row": replan_rows[0] if replan_rows else None,
+        "first_emergency_row": emergency_rows[0] if emergency_rows else None,
+        "first_final_gate_fail_row": final_fail_rows[0] if final_fail_rows else None,
+        "first_parse_error_row": parse_error_rows[0] if parse_error_rows else None,
+    }
+    for key in (
+        "future_min_im",
+        "bad_ratio",
+        "unknown_ratio",
+        "current_im_min",
+        "current_im_h",
+        "current_im_v",
+        "current_stale_duration_s",
+        "future_unknown_duration_s",
+        "pred_hal_min",
+        "pred_val_min",
+        "pred_al_invalid_count",
+        "sample_count",
+        "bad_count",
+        "unknown_count",
+    ):
+        summary.update(numeric_summary(p5_rows, key))
+    return summary
 
 
 def validate_p5_status(
@@ -2900,29 +3455,100 @@ def validate_p5_status(
     p5_error: str,
     failures: list[str],
     inconclusive: list[str],
+    *,
+    allow_replan: bool = False,
 ) -> dict[str, Any]:
-    actions: dict[str, int] = {}
-    bad_rows: list[dict[str, Any]] = []
-    for row in p5_rows:
-        action = str(row.get("action", "")).strip()
-        raw_action = str(row.get("raw_action", "")).strip()
-        for value in (action, raw_action):
-            if value:
-                actions[value] = actions.get(value, 0) + 1
-        fail_count = finite_float(row.get("final_gate_fail_count"))
-        if action in P5_BAD_ACTIONS or raw_action in P5_BAD_ACTIONS or (fail_count is not None and fail_count > 0):
-            bad_rows.append(row)
+    summary = summarize_p5_status_rows(p5_rows, p5_error)
     if p5_error:
         inconclusive.append(f"could not inspect P5 status messages: {p5_error}")
-    if bad_rows:
+    if int(summary.get("parse_error_count", 0) or 0) > 0:
+        failures.append("P5 status contains invalid or empty JSON payloads")
+    has_replan = (
+        int(summary.get("replan_action_count", 0) or 0) > 0
+        or int(summary.get("raw_replan_action_count", 0) or 0) > 0
+    )
+    has_emergency = int(summary.get("emergency_action_count", 0) or 0) > 0
+    has_final_fail = int(summary.get("final_gate_fail_rows", 0) or 0) > 0
+    if has_emergency or has_final_fail or (has_replan and not allow_replan):
         failures.append("P5 status contains replan, emergency, or final gate failure behavior")
-    return {
-        "status_rows": len(p5_rows),
-        "action_counts": actions,
-        "bad_action_count": len(bad_rows),
-        "inspection_error": p5_error,
-        "first_bad_action": bad_rows[0] if bad_rows else None,
+    bad_rows = []
+    for row in p5_rows:
+        row_has_replan = (
+            p5_action(row, "action") == P5_REPLAN_ACTION
+            or p5_action(row, "raw_action") == P5_REPLAN_ACTION
+        )
+        row_is_bad = (
+            p5_action(row, "action") == P5_EMERGENCY_ACTION
+            or p5_action(row, "raw_action") == P5_EMERGENCY_ACTION
+            or p5_final_gate_failed(row)
+            or (row_has_replan and not allow_replan)
+        )
+        if row_is_bad:
+            bad_rows.append(row)
+    summary["bad_action_count"] = len(bad_rows)
+    summary["first_bad_action"] = bad_rows[0] if bad_rows else None
+    return summary
+
+
+def validate_p5_1_hard_gates(
+    p0_health_summary: dict[str, Any],
+    p5_summary: dict[str, Any],
+    failures: list[str],
+    inconclusive: list[str],
+) -> dict[str, Any]:
+    gates = {
+        "p0_health_rows_present": int(p0_health_summary.get("row_count", 0) or 0) > 0,
+        "p0_non_stale": int(p0_health_summary.get("stale_true_count", 0) or 0) == 0,
+        "p5_status_rows_present": int(p5_summary.get("status_rows", 0) or 0) > 0,
+        "p5_json_parse_ok": int(p5_summary.get("parse_error_count", 0) or 0) == 0,
+        "ok_action_ratio": float(p5_summary.get("ok_action_ratio", 0.0) or 0.0),
+        "ok_action_ratio_min": P5_1_MIN_OK_ACTION_RATIO,
+        "emergency_action_count": int(p5_summary.get("emergency_action_count", 0) or 0),
+        "replan_storm": bool(p5_summary.get("replan_storm", False)),
+        "max_consecutive_replan": int(p5_summary.get("max_consecutive_replan", 0) or 0),
+        "raw_max_consecutive_replan": int(p5_summary.get("raw_max_consecutive_replan", 0) or 0),
+        "final_gate_fail_count_max": int(p5_summary.get("final_gate_fail_count_max", 0) or 0),
+        "future_min_im_available": p5_summary.get("future_min_im_min") is not None,
+        "current_im_min_available": p5_summary.get("current_im_min_min") is not None,
+        "sample_count_available": p5_summary.get("sample_count_max") is not None,
+        "predicted_al_available": (
+            p5_summary.get("pred_hal_min_min") is not None
+            or p5_summary.get("pred_val_min_min") is not None
+        ),
     }
+    if not gates["p0_health_rows_present"]:
+        failures.append("P5-1 P0 health rows are missing")
+    if not gates["p0_non_stale"]:
+        failures.append("P5-1 P0 health reported stale=true")
+    if not gates["p5_status_rows_present"]:
+        failures.append("P5-1 P5 status rows are missing")
+    if not gates["p5_json_parse_ok"]:
+        failures.append("P5-1 P5 status JSON parse errors were observed")
+    if gates["ok_action_ratio"] < P5_1_MIN_OK_ACTION_RATIO:
+        failures.append(
+            f"P5-1 OK action ratio {gates['ok_action_ratio']:.3f} is below "
+            f"{P5_1_MIN_OK_ACTION_RATIO:.3f}"
+        )
+    if gates["emergency_action_count"] > 0:
+        failures.append("P5-1 observed REQUEST_EMERGENCY_STOP_CANDIDATE")
+    if gates["replan_storm"]:
+        failures.append(
+            "P5-1 observed a replan storm: "
+            f"action_consecutive={gates['max_consecutive_replan']}, "
+            f"raw_action_consecutive={gates['raw_max_consecutive_replan']}"
+        )
+    if gates["final_gate_fail_count_max"] > 0:
+        failures.append("P5-1 final_gate_fail_count was nonzero")
+    if not gates["future_min_im_available"]:
+        inconclusive.append("P5-1 future_min_im had no finite samples")
+    if not gates["current_im_min_available"]:
+        inconclusive.append("P5-1 current_im_min had no finite samples")
+    if not gates["sample_count_available"]:
+        inconclusive.append("P5-1 sample_count had no finite samples")
+    if not gates["predicted_al_available"]:
+        inconclusive.append("P5-1 predicted alert-limit minima had no finite samples")
+    gates["passed"] = not any(message.startswith("P5-1") for message in failures + inconclusive)
+    return gates
 
 
 def p0_5_affine_c_pi(x: Any, y: Any, z: Any, tau: Any) -> Any:
@@ -3383,6 +4009,8 @@ def next_debug_branch(
 ) -> str:
     text = " ".join(failures + inconclusive).lower()
     normalized_experiment_id = str(experiment_id).strip().upper()
+    if normalized_experiment_id == "P5-1":
+        return "PASS -> P5-2" if status == "PASS" else "debug P5 thresholds/AL provider"
     if status == "PASS":
         pass_branches = {
             "B0-1": "continue_to_B0-2_open_sky_baseline",
@@ -3443,6 +4071,8 @@ def analyze(args: argparse.Namespace) -> dict[str, Any]:
     p0_phase_index = p0_phase_number(args.experiment_id)
     p0_requires_odom_gate = p0_odom_gate_required(args.experiment_id)
     experiment_label = str(args.experiment_id).strip().upper()
+    p5_1_phase = is_experiment(args, "P5-1")
+    p0_runtime_phase = p0_phase or p5_1_phase
     if bool(getattr(args, "blocked_fixture_audit", False)):
         if experiment_label != "P0-6":
             raise ValueError("--blocked-fixture-audit is only defined for P0-6")
@@ -3482,11 +4112,19 @@ def analyze(args: argparse.Namespace) -> dict[str, Any]:
         print(json.dumps(summary, indent=2, sort_keys=True))
         return summary
     topic_expectations = (
-        P0_4_TOPIC_EXPECTATIONS
-        if p0_4_phase
-        else (P0_TOPIC_EXPECTATIONS if p0_phase else CORE_TOPIC_EXPECTATIONS)
+        P5_TOPIC_EXPECTATIONS
+        if p5_1_phase
+        else (
+            P0_4_TOPIC_EXPECTATIONS
+            if p0_4_phase
+            else (P0_TOPIC_EXPECTATIONS if p0_phase else CORE_TOPIC_EXPECTATIONS)
+        )
     )
-    topic_activity_topics = P0_TOPIC_ACTIVITY_TOPICS if p0_phase else TOPIC_ACTIVITY_TOPICS
+    topic_activity_topics = (
+        P5_TOPIC_ACTIVITY_TOPICS
+        if p5_1_phase
+        else (P0_TOPIC_ACTIVITY_TOPICS if p0_phase else TOPIC_ACTIVITY_TOPICS)
+    )
 
     failures: list[str] = []
     warnings: list[str] = []
@@ -3501,13 +4139,16 @@ def analyze(args: argparse.Namespace) -> dict[str, Any]:
     )
     integrity_rows, integrity_summary = read_integrity_csv(export_dir / "test_planner_integrity_validation.csv")
 
-    validate_manifest(
-        manifest,
-        failures,
-        inconclusive,
-        require_p0_enabled=p0_phase,
-        allowed_safety_profiles=("off", "p5") if p0_4_phase else ("off",),
-    )
+    if p5_1_phase:
+        validate_p5_1_manifest(manifest, failures, inconclusive)
+    else:
+        validate_manifest(
+            manifest,
+            failures,
+            inconclusive,
+            require_p0_enabled=p0_phase,
+            allowed_safety_profiles=("off", "p5") if p0_4_phase else ("off",),
+        )
     validate_validator(validator_summary, failures, inconclusive)
     topic_health = validate_topic_health(
         metadata,
@@ -3540,7 +4181,7 @@ def analyze(args: argparse.Namespace) -> dict[str, Any]:
     p0_required_figures: list[Path] = []
     p0_health_summary: dict[str, Any] = {}
     baseline_scenario_data: dict[str, Any] = {}
-    if p0_phase:
+    if p0_runtime_phase:
         p0_artifacts, p0_error = (
             read_p0_bag_artifacts(bag_dir, metadata)
             if bag_dir is not None
@@ -4016,28 +4657,205 @@ def analyze(args: argparse.Namespace) -> dict[str, Any]:
         warnings.append("integrity HPL/VPL timeline was not generated because no plottable rows were available")
 
     p5_rows, p5_error = read_p5_status_messages(bag_dir, metadata) if bag_dir is not None else ([], "")
-    p5_summary = validate_p5_status(p5_rows, p5_error, failures, inconclusive)
+    p5_summary = validate_p5_status(
+        p5_rows,
+        p5_error,
+        failures,
+        inconclusive,
+        allow_replan=p5_1_phase,
+    )
     if p0_requires_odom_gate and p5_summary.get("action_counts"):
         failures.append(f"{experiment_label} P5 status reported actions while P5 is disabled")
+    p5_marker_rows: list[dict[str, Any]] = []
+    p5_marker_summary: dict[str, Any] = {"row_count": 0}
+    p5_marker_error = ""
+    p5_1_gates: dict[str, Any] = {}
+    p5_csv_artifacts: list[str] = []
+    p5_figure_artifacts: list[str] = []
+    p5_required_figures: list[Path] = []
+    if p5_1_phase:
+        p5_marker_rows, p5_marker_error = (
+            read_p5_marker_evidence(bag_dir, metadata)
+            if bag_dir is not None
+            else ([], "missing bag dir")
+        )
+        p5_marker_summary = summarize_p5_marker_evidence(p5_marker_rows, p5_marker_error)
+        if p5_marker_error:
+            inconclusive.append(f"could not inspect P5 RViz marker evidence: {p5_marker_error}")
+        p5_1_gates = validate_p5_1_hard_gates(
+            p0_health_summary,
+            p5_summary,
+            failures,
+            inconclusive,
+        )
+
     csv_artifacts = [str(topic_counts_path)]
     csv_artifacts.extend(p0_csv_artifacts)
     if p5_rows:
         p5_status_path = csv_dir / f"{prefix}_p5_status.csv"
+        write_csv(p5_status_path, P5_STATUS_FIELDS, p5_rows)
+        csv_artifacts.append(str(p5_status_path))
+        p5_csv_artifacts.append(str(p5_status_path))
+    if p5_1_phase:
+        p5_action_path = csv_dir / f"{prefix}_p5_action_timeline.csv"
+        p5_margin_path = csv_dir / f"{prefix}_p5_margin_timeline.csv"
+        p5_final_gate_path = csv_dir / f"{prefix}_p5_final_gate_summary.csv"
+        p5_marker_path = csv_dir / f"{prefix}_trajectory_integrity_evidence.csv"
+        action_rows = []
+        t_rel = relative_time(p5_rows)
+        for idx, row in enumerate(p5_rows):
+            fail_count = int(finite_float(row.get("final_gate_fail_count")) or 0)
+            action_rows.append(
+                {
+                    "bag_time_s": row.get("bag_time_s", ""),
+                    "t_rel_s": t_rel[idx] if idx < len(t_rel) else "",
+                    "phase": row.get("phase", ""),
+                    "action": row.get("action", ""),
+                    "raw_action": row.get("raw_action", ""),
+                    "reason": row.get("reason", ""),
+                    "action_ok": 1 if p5_action(row, "action") == P5_OK_ACTION else 0,
+                    "raw_action_ok": 1 if p5_action(row, "raw_action") == P5_OK_ACTION else 0,
+                    "request_replan": 1
+                    if p5_action(row, "action") == P5_REPLAN_ACTION
+                    or p5_action(row, "raw_action") == P5_REPLAN_ACTION
+                    else 0,
+                    "request_emergency_stop_candidate": 1
+                    if p5_action(row, "action") == P5_EMERGENCY_ACTION
+                    or p5_action(row, "raw_action") == P5_EMERGENCY_ACTION
+                    else 0,
+                    "final_gate_fail_count": fail_count,
+                    "final_gate_last_reason": row.get("final_gate_last_reason", ""),
+                }
+            )
         write_csv(
-            p5_status_path,
+            p5_action_path,
             [
                 "bag_time_s",
+                "t_rel_s",
                 "phase",
                 "action",
                 "raw_action",
                 "reason",
+                "action_ok",
+                "raw_action_ok",
+                "request_replan",
+                "request_emergency_stop_candidate",
                 "final_gate_fail_count",
                 "final_gate_last_reason",
-                "raw",
+            ],
+            action_rows,
+        )
+        write_csv(
+            p5_margin_path,
+            [
+                "bag_time_s",
+                "phase",
+                "current_im_h",
+                "current_im_v",
+                "current_im_min",
+                "future_min_im",
+                "first_bad_tau",
+                "bad_ratio",
+                "unknown_ratio",
+                "current_stale_duration_s",
+                "future_unknown_duration_s",
+                "pred_al_mode",
+                "pred_hal_min",
+                "pred_val_min",
+                "pred_al_invalid_count",
+                "sample_count",
+                "bad_count",
+                "unknown_count",
             ],
             p5_rows,
         )
-        csv_artifacts.append(str(p5_status_path))
+        write_csv(
+            p5_final_gate_path,
+            [
+                "status_rows",
+                "ok_action_ratio",
+                "replan_action_count",
+                "raw_replan_action_count",
+                "emergency_action_count",
+                "max_consecutive_replan",
+                "raw_max_consecutive_replan",
+                "final_gate_fail_rows",
+                "final_gate_fail_count_max",
+                "final_gate_fail_duration_s_max",
+                "replan_storm",
+            ],
+            [p5_summary],
+        )
+        write_csv(
+            p5_marker_path,
+            [
+                "bag_time_s",
+                "topic",
+                "marker_ns",
+                "marker_id",
+                "marker_type",
+                "marker_action",
+                "point_index",
+                "x",
+                "y",
+                "z",
+                "color_r",
+                "color_g",
+                "color_b",
+                "color_a",
+                "state",
+                "text",
+            ],
+            p5_marker_rows,
+        )
+        p5_csv_artifacts.extend(
+            [
+                str(p5_action_path),
+                str(p5_margin_path),
+                str(p5_final_gate_path),
+                str(p5_marker_path),
+            ]
+        )
+        csv_artifacts.extend(
+            artifact
+            for artifact in p5_csv_artifacts
+            if artifact not in csv_artifacts
+        )
+
+        p5_action_figure_path = figures_dir / f"{prefix}_p5_action_timeline.png"
+        p5_status_figure_path = figures_dir / f"{prefix}_p5_status_timeline.png"
+        p5_margin_figure_path = figures_dir / f"{prefix}_p5_margin_timeline.png"
+        p5_final_gate_figure_path = figures_dir / f"{prefix}_p5_final_gate_summary.png"
+        p5_trajectory_figure_path = figures_dir / f"{prefix}_trajectory_integrity_samples.png"
+        p5_rviz_overview_path = figures_dir / f"{prefix}_p5_rviz_overview.png"
+        if plot_p5_action_timeline(p5_rows, p5_action_figure_path):
+            p5_figure_artifacts.append(str(p5_action_figure_path))
+        if plot_p5_status_timeline(p5_rows, p5_status_figure_path):
+            p5_figure_artifacts.append(str(p5_status_figure_path))
+        if plot_p5_margin_timeline(p5_rows, p5_margin_figure_path):
+            p5_figure_artifacts.append(str(p5_margin_figure_path))
+        if plot_p5_final_gate_summary(p5_summary, p5_final_gate_figure_path):
+            p5_figure_artifacts.append(str(p5_final_gate_figure_path))
+        if plot_p5_trajectory_integrity_samples(p5_marker_rows, p5_trajectory_figure_path):
+            p5_figure_artifacts.append(str(p5_trajectory_figure_path))
+        else:
+            warnings.append("P5 trajectory integrity marker sample plot was not generated because marker rows were unavailable")
+        if plot_p5_rviz_overview(topic_health, p5_summary, p5_marker_summary, p5_rviz_overview_path):
+            p5_figure_artifacts.append(str(p5_rviz_overview_path))
+        p5_required_figures.extend(
+            [
+                scenario_figure_path,
+                topic_activity_figure_path,
+                source_figure_path,
+                figures_dir / f"{prefix}_p0_health_timeline.png",
+                p5_action_figure_path,
+                p5_status_figure_path,
+                p5_margin_figure_path,
+                p5_trajectory_figure_path,
+                p5_final_gate_figure_path,
+                p5_rviz_overview_path,
+            ]
+        )
 
     if is_experiment(args, "B0-4"):
         required_figures = [
@@ -4050,7 +4868,7 @@ def analyze(args: argparse.Namespace) -> dict[str, Any]:
                 inconclusive.append(
                     f"B0-4 required figure was not generated or is empty: {figure_path}"
                 )
-    if p0_phase:
+    if p0_runtime_phase:
         figures.extend(p0_figure_artifacts)
         required_figures = [
             scenario_figure_path,
@@ -4063,6 +4881,13 @@ def analyze(args: argparse.Namespace) -> dict[str, Any]:
             if not figure_path.is_file() or figure_path.stat().st_size <= 0:
                 inconclusive.append(
                     f"{experiment_label} required figure was not generated or is empty: {figure_path}"
+                )
+    if p5_1_phase:
+        figures.extend(p5_figure_artifacts)
+        for figure_path in p5_required_figures:
+            if not figure_path.is_file() or figure_path.stat().st_size <= 0:
+                inconclusive.append(
+                    f"P5-1 required figure was not generated or is empty: {figure_path}"
                 )
 
     status = "PASS"
@@ -4093,7 +4918,11 @@ def analyze(args: argparse.Namespace) -> dict[str, Any]:
         "topic_timing_error": topic_timing_error,
         "integrity_summary": integrity_summary,
         "p0_summary": p0_summary,
-        "p5_summary": p5_summary,
+        "p5_summary": {
+            **p5_summary,
+            "p5_1_hard_gates": p5_1_gates,
+            "marker_evidence": p5_marker_summary,
+        },
         "safety_off_topic_counts": safety_off_topic_counts,
         "module_metrics": {},
         "artifacts": {

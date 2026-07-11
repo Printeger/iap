@@ -3,6 +3,10 @@
 > 规则：任何代码改动必须在这里记录，并包含 IAP-RQ-XXX。
 
 ## Unreleased
+- test(planner-p5-1): IAP-RQ-320 — validate open-sky P5 no-false-trigger behavior.
+  - `scripts/dev_planner/analyze_safety_planner_run.py`: add P5-1 topic/manifest gates, full P5 status JSON parsing, action/margin/final-gate CSV exports, RViz marker evidence extraction, P5 figures, and `PASS -> P5-2` / `debug P5 thresholds/AL provider` branching.
+  - `test/test_analyze_safety_planner_run_p5_1.py`: add focused analyzer tests for OK status rows, emergency action, replan storm, final-gate fail, stale P0 health, and missing P5 status topic.
+  - `docs/dev_planner/safety_planner_test_report.md`: archive the P5-1 launch/analyzer result, generated artifact paths, hard-gate failure metrics, and required figure conclusions.
 - test(planner-p0-4): IAP-RQ-320 — accept P0 fallback/unknown semantics with P5 forced off.
   - `launch/test_planner.launch.py`: make the `p5_fallback_unknown` preset explicitly enable the P0 risk grid so the P0-4 command keeps P0 active even when P5 runtime/final are overridden off.
   - `scripts/dev_planner/analyze_safety_planner_run.py`: add P0-4 topic expectations, P5-off manifest allowance, fallback/unknown reason semantics, zero-risk fallback checks, and the `continue_to_P0-5` pass branch.
