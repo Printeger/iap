@@ -20,6 +20,35 @@ std::string jsonNumber(double value) {
   return oss.str();
 }
 
+std::string jsonString(const std::string& value) {
+  std::ostringstream oss;
+  oss << "\"";
+  for (const char c : value) {
+    switch (c) {
+      case '\\':
+        oss << "\\\\";
+        break;
+      case '"':
+        oss << "\\\"";
+        break;
+      case '\n':
+        oss << "\\n";
+        break;
+      case '\r':
+        oss << "\\r";
+        break;
+      case '\t':
+        oss << "\\t";
+        break;
+      default:
+        oss << c;
+        break;
+    }
+  }
+  oss << "\"";
+  return oss.str();
+}
+
 std::string jsonStringArray(const std::vector<std::string>& values) {
   std::ostringstream oss;
   oss << "[";
@@ -27,7 +56,36 @@ std::string jsonStringArray(const std::vector<std::string>& values) {
     if (i > 0) {
       oss << ",";
     }
-    oss << "\"" << values[i] << "\"";
+    oss << jsonString(values[i]);
+  }
+  oss << "]";
+  return oss.str();
+}
+
+std::string jsonTrajectorySamples(
+    const std::vector<SafetyVizTrajectorySample>& samples) {
+  std::ostringstream oss;
+  oss << "[";
+  for (std::size_t i = 0; i < samples.size(); ++i) {
+    if (i > 0) {
+      oss << ",";
+    }
+    const auto& sample = samples[i];
+    oss << "{"
+        << "\"tau_s\":" << jsonNumber(sample.tau_s)
+        << ",\"x\":" << jsonNumber(sample.position.x())
+        << ",\"y\":" << jsonNumber(sample.position.y())
+        << ",\"z\":" << jsonNumber(sample.position.z())
+        << ",\"hpl\":" << jsonNumber(sample.hpl)
+        << ",\"vpl\":" << jsonNumber(sample.vpl)
+        << ",\"hal\":" << jsonNumber(sample.hal)
+        << ",\"val\":" << jsonNumber(sample.val)
+        << ",\"im_min\":" << jsonNumber(sample.im_min)
+        << ",\"bad\":" << (sample.bad ? "true" : "false")
+        << ",\"unknown\":" << (sample.unknown ? "true" : "false")
+        << ",\"stale\":" << (sample.stale ? "true" : "false")
+        << ",\"reason\":" << jsonString(sample.reason)
+        << "}";
   }
   oss << "]";
   return oss.str();
@@ -767,7 +825,12 @@ P5GateStatus P5RuntimeIntegrityGate::evaluateFutureGate(
     viz_sample.im_min = im;
     viz_sample.bad = im < config_.future_replan_margin_m;
     viz_sample.good = !viz_sample.bad;
-    viz_sample.reason = viz_sample.bad ? "future_low_margin" : "ok";
+    const std::string pl_reason =
+        pl.reason.empty() ? std::string("ok") : pl.reason;
+    viz_sample.reason =
+        viz_sample.bad && pl_reason != "ok"
+            ? "future_low_margin:" + pl_reason
+            : (viz_sample.bad ? "future_low_margin" : pl_reason);
     status.viz_samples.push_back(viz_sample);
     if (!finite(status.future_min_im) || im < status.future_min_im) {
       status.future_min_im = im;
@@ -1015,12 +1078,12 @@ std::string P5RuntimeIntegrityGate::toJson(
     const P5GateStatus& status,
     const std::string& phase) const {
   std::ostringstream oss;
-  oss << "{\"phase\":\"" << phase << "\""
-      << ",\"action\":\"" << actionName(status.action) << "\""
-      << ",\"raw_action\":\"" << actionName(status.raw_action) << "\""
-      << ",\"reason\":\"" << reasonName(status.reason) << "\""
-      << ",\"current_reason\":\"" << status.current_reason << "\""
-      << ",\"future_reason\":\"" << status.future_reason << "\""
+  oss << "{\"phase\":" << jsonString(phase)
+      << ",\"action\":" << jsonString(actionName(status.action))
+      << ",\"raw_action\":" << jsonString(actionName(status.raw_action))
+      << ",\"reason\":" << jsonString(reasonName(status.reason))
+      << ",\"current_reason\":" << jsonString(status.current_reason)
+      << ",\"future_reason\":" << jsonString(status.future_reason)
       << ",\"active_reasons\":" << jsonStringArray(status.active_reasons)
       << ",\"current_im_h\":" << jsonNumber(status.current_im_h)
       << ",\"current_im_v\":" << jsonNumber(status.current_im_v)
@@ -1042,16 +1105,18 @@ std::string P5RuntimeIntegrityGate::toJson(
       << ",\"final_gate_fail_count\":" << status.final_gate_fail_count
       << ",\"final_gate_fail_duration_s\":"
       << jsonNumber(status.final_gate_fail_duration_s)
-      << ",\"final_gate_last_reason\":\"" << status.final_gate_last_reason
-      << "\""
-      << ",\"pred_al_mode\":\"" << status.pred_al_mode << "\""
+      << ",\"final_gate_last_reason\":"
+      << jsonString(status.final_gate_last_reason)
+      << ",\"pred_al_mode\":" << jsonString(status.pred_al_mode)
       << ",\"pred_hal_min\":" << jsonNumber(status.pred_hal_min)
       << ",\"pred_val_min\":" << jsonNumber(status.pred_val_min)
       << ",\"pred_al_invalid_count\":" << status.pred_al_invalid_count
-      << ",\"pred_al_last_reason\":\"" << status.pred_al_last_reason << "\""
+      << ",\"pred_al_last_reason\":"
+      << jsonString(status.pred_al_last_reason)
       << ",\"sample_count\":" << status.sample_count
       << ",\"bad_count\":" << status.bad_count
-      << ",\"unknown_count\":" << status.unknown_count << "}";
+      << ",\"unknown_count\":" << status.unknown_count
+      << ",\"samples\":" << jsonTrajectorySamples(status.viz_samples) << "}";
   return oss.str();
 }
 

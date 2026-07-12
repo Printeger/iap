@@ -110,8 +110,18 @@ P5_3_SCENARIO_ISOLATION_BRANCH = (
     "FAIL -> debug P5-3 scenario isolation / future bad-ratio coverage"
 )
 P5_3_REASON_ATTRIBUTION_BRANCH = "FAIL -> debug P5-3 reason attribution"
-P5_3_PL_AL_MARGIN_BRANCH = "FAIL -> debug P5-3 PL/AL margin"
+P5_3_PL_AL_MARGIN_BRANCH = "FAIL -> 继续 debug P5-3 PL/AL margin"
 P5_3_FAIL_BRANCH = P5_3_PL_AL_MARGIN_BRANCH
+P5_3_PLAL_FIGURE_FILENAMES = [
+    "p5_3_plal_scenario_topdown.png",
+    "p5_3_plal_high_risk_overlay.png",
+    "p5_3_plal_tau_window.png",
+    "p5_3_plal_margin_timeline.png",
+    "p5_3_plal_action_reason_timeline.png",
+    "p5_3_plal_replan_vs_emergency.png",
+    "p5_3_plal_sample_heatmap.png",
+    "p5_3_plal_p0_health_timeline.png",
+]
 P5_STATUS_FIELDS = [
     "bag_time_s",
     "phase",
@@ -145,8 +155,37 @@ P5_STATUS_FIELDS = [
     "sample_count",
     "bad_count",
     "unknown_count",
+    "samples",
     "parse_error",
     "raw",
+]
+P5_SAMPLE_FIELDS = [
+    "bag_time_s",
+    "status_row_index",
+    "sample_index",
+    "phase",
+    "action",
+    "raw_action",
+    "status_reason",
+    "current_reason",
+    "future_reason",
+    "active_reasons",
+    "tau_s",
+    "x",
+    "y",
+    "z",
+    "hpl",
+    "vpl",
+    "hal",
+    "val",
+    "im_min",
+    "bad",
+    "unknown",
+    "stale",
+    "reason",
+    "inside_high_risk_zone",
+    "inside_tau_window",
+    "fixture_bad_sample",
 ]
 ODOM_TRUTH_TOPIC = "/sim/drone_0/truth_odom"
 ODOM_EST_TOPIC = "/drone_0_visual_slam/odom"
@@ -2072,6 +2111,320 @@ def plot_p5_3_reason_timeline(rows: list[dict[str, Any]], path: Path) -> bool:
     axes[1].legend(loc="best")
     axes[1].grid(True, axis="x", alpha=0.25)
     fig.suptitle("P5-3 reason attribution timeline")
+    fig.tight_layout()
+    fig.savefig(path, dpi=160)
+    plt.close(fig)
+    return True
+
+
+def plot_p5_3_sample_high_risk_overlay(
+    sample_rows: list[dict[str, Any]],
+    fixture: dict[str, Any],
+    path: Path,
+) -> bool:
+    if not sample_rows or not fixture.get("valid_geometry"):
+        return False
+    xy_rows = [
+        row
+        for row in sample_rows
+        if finite_float(row.get("x")) is not None and finite_float(row.get("y")) is not None
+    ]
+    if not xy_rows:
+        return False
+
+    fig, ax = plt.subplots(figsize=(8.5, 6.5))
+    groups = [
+        (
+            [row for row in xy_rows if int(row.get("inside_high_risk_zone", 0) or 0) == 0],
+            "#cbd5e1",
+            "outside fixture",
+            18,
+        ),
+        (
+            [
+                row
+                for row in xy_rows
+                if int(row.get("inside_high_risk_zone", 0) or 0)
+                and int(row.get("bad", 0) or 0) == 0
+            ],
+            "#2563eb",
+            "inside fixture",
+            28,
+        ),
+        (
+            [
+                row
+                for row in xy_rows
+                if int(row.get("inside_high_risk_zone", 0) or 0)
+                and int(row.get("bad", 0) or 0)
+            ],
+            "#dc2626",
+            "bad inside fixture",
+            44,
+        ),
+    ]
+    for group, color, label, size in groups:
+        if not group:
+            continue
+        ax.scatter(
+            [float(finite_float(row.get("x")) or 0.0) for row in group],
+            [float(finite_float(row.get("y")) or 0.0) for row in group],
+            s=size,
+            color=color,
+            alpha=0.78,
+            linewidths=0,
+            label=label,
+        )
+
+    current_rows = [
+        row
+        for row in xy_rows
+        if finite_float(row.get("tau_s")) is not None
+        and abs(float(finite_float(row.get("tau_s")) or 0.0)) <= 1.0e-6
+    ]
+    if current_rows:
+        ax.scatter(
+            [float(finite_float(row.get("x")) or 0.0) for row in current_rows],
+            [float(finite_float(row.get("y")) or 0.0) for row in current_rows],
+            s=68,
+            facecolors="none",
+            edgecolors="#111827",
+            linewidths=1.3,
+            label="tau=0 sample",
+        )
+
+    x_min = float(fixture["x_min"])
+    x_max = float(fixture["x_max"])
+    y_min = float(fixture["y_min"])
+    y_max = float(fixture["y_max"])
+    ax.add_patch(
+        plt.Rectangle(
+            (min(x_min, x_max), min(y_min, y_max)),
+            abs(x_max - x_min),
+            abs(y_max - y_min),
+            fill=False,
+            edgecolor="#111827",
+            linewidth=1.6,
+            linestyle="--",
+            label="fixture x/y bounds",
+        )
+    )
+    ax.set_xlabel("x [m]")
+    ax.set_ylabel("y [m]")
+    ax.set_title("P5-3 PL/AL high-risk sample overlay")
+    ax.set_aspect("equal", adjustable="datalim")
+    ax.grid(True, alpha=0.25)
+    ax.legend(loc="best", fontsize=8)
+    fig.tight_layout()
+    fig.savefig(path, dpi=160)
+    plt.close(fig)
+    return True
+
+
+def plot_p5_3_sample_tau_window(
+    sample_rows: list[dict[str, Any]],
+    p5_rows: list[dict[str, Any]],
+    fixture: dict[str, Any],
+    path: Path,
+) -> bool:
+    if not sample_rows or not fixture.get("valid_geometry"):
+        return False
+    stamps = [finite_float(row.get("bag_time_s")) for row in sample_rows]
+    finite_stamps = [value for value in stamps if value is not None]
+    if not finite_stamps:
+        return False
+    t0 = min(finite_stamps)
+    groups = [
+        (
+            [row for row in sample_rows if int(row.get("fixture_bad_sample", 0) or 0)],
+            "#dc2626",
+            "bad in fixture window",
+            42,
+        ),
+        (
+            [
+                row
+                for row in sample_rows
+                if int(row.get("inside_high_risk_zone", 0) or 0)
+                and int(row.get("inside_tau_window", 0) or 0)
+                and int(row.get("fixture_bad_sample", 0) or 0) == 0
+            ],
+            "#2563eb",
+            "inside fixture window",
+            30,
+        ),
+        (
+            [
+                row
+                for row in sample_rows
+                if int(row.get("inside_high_risk_zone", 0) or 0) == 0
+                or int(row.get("inside_tau_window", 0) or 0) == 0
+            ],
+            "#cbd5e1",
+            "outside fixture window",
+            18,
+        ),
+    ]
+    fig, ax = plt.subplots(figsize=(11, 5.2))
+    plotted = False
+    for group, color, label, size in groups:
+        points = [
+            (finite_float(row.get("bag_time_s")), finite_float(row.get("tau_s")))
+            for row in group
+        ]
+        points = [(x, y) for x, y in points if x is not None and y is not None]
+        if not points:
+            continue
+        ax.scatter(
+            [x - t0 for x, _ in points],
+            [y for _, y in points],
+            s=size,
+            color=color,
+            alpha=0.78,
+            linewidths=0,
+            label=label,
+        )
+        plotted = True
+    if not plotted:
+        plt.close(fig)
+        return False
+    ax.axhspan(
+        min(float(fixture["tau_min"]), float(fixture["tau_max"])),
+        max(float(fixture["tau_min"]), float(fixture["tau_max"])),
+        color="#fecaca",
+        alpha=0.28,
+        label="fixture tau window",
+    )
+    first_bad = [
+        (finite_float(row.get("bag_time_s")), finite_float(row.get("first_bad_tau")))
+        for row in p5_rows
+    ]
+    first_bad = [(x, y) for x, y in first_bad if x is not None and y is not None]
+    if first_bad:
+        ax.plot(
+            [x - t0 for x, _ in first_bad],
+            [y for _, y in first_bad],
+            color="#111827",
+            lw=1.1,
+            label="first_bad_tau",
+        )
+    ax.set_xlabel("time since first sample [s]")
+    ax.set_ylabel("tau [s]")
+    ax.set_title("P5-3 PL/AL tau-window evidence")
+    ax.grid(True, alpha=0.25)
+    ax.legend(loc="best", fontsize=8)
+    fig.tight_layout()
+    fig.savefig(path, dpi=160)
+    plt.close(fig)
+    return True
+
+
+def plot_p5_3_replan_vs_emergency(rows: list[dict[str, Any]], path: Path) -> bool:
+    if not rows:
+        return False
+    t = relative_time(rows)
+    if not t:
+        return False
+    actions = [p5_action(row, "action") or "<empty>" for row in rows]
+    raw_actions = [p5_action(row, "raw_action") or "<empty>" for row in rows]
+    codes = action_code_map(actions + raw_actions)
+    replan_cumulative: list[int] = []
+    emergency_cumulative: list[int] = []
+    replan_count = 0
+    emergency_count = 0
+    for row in rows:
+        if (
+            p5_action(row, "action") == P5_REPLAN_ACTION
+            or p5_action(row, "raw_action") == P5_REPLAN_ACTION
+        ):
+            replan_count += 1
+        if (
+            p5_action(row, "action") == P5_EMERGENCY_ACTION
+            or p5_action(row, "raw_action") == P5_EMERGENCY_ACTION
+        ):
+            emergency_count += 1
+        replan_cumulative.append(replan_count)
+        emergency_cumulative.append(emergency_count)
+
+    fig, axes = plt.subplots(2, 1, figsize=(11, 6.4), sharex=True)
+    axes[0].step(t, [codes[value] for value in actions], where="post", label="action", color="#f97316")
+    axes[0].step(t, [codes[value] for value in raw_actions], where="post", label="raw_action", color="#f59e0b", linestyle="--")
+    axes[0].set_yticks(list(codes.values()), list(codes.keys()))
+    axes[0].set_ylabel("P5 action")
+    axes[0].legend(loc="best")
+    axes[1].plot(t, replan_cumulative, label="REQUEST_REPLAN rows", color="#2563eb")
+    axes[1].plot(t, emergency_cumulative, label="emergency candidate rows", color="#dc2626")
+    axes[1].set_ylabel("cumulative rows")
+    axes[1].set_xlabel("time since first P5 status [s]")
+    axes[1].legend(loc="best")
+    for ax in axes:
+        ax.grid(True, alpha=0.25)
+    fig.suptitle("P5-3 replan vs emergency")
+    fig.tight_layout()
+    fig.savefig(path, dpi=160)
+    plt.close(fig)
+    return True
+
+
+def plot_p5_3_sample_heatmap(sample_rows: list[dict[str, Any]], path: Path) -> bool:
+    if not sample_rows:
+        return False
+    stamps = [finite_float(row.get("bag_time_s")) for row in sample_rows]
+    finite_stamps = [value for value in stamps if value is not None]
+    points = []
+    for row in sample_rows:
+        stamp = finite_float(row.get("bag_time_s"))
+        tau = finite_float(row.get("tau_s"))
+        im = finite_float(row.get("im_min"))
+        if stamp is None or tau is None:
+            continue
+        if im is None:
+            im = -1.0 if int(row.get("bad", 0) or 0) else math.nan
+        points.append((stamp, tau, im, int(row.get("bad", 0) or 0)))
+    if not points or not finite_stamps:
+        return False
+    t0 = min(finite_stamps)
+    fig, ax = plt.subplots(figsize=(11, 5.4))
+    finite_im = [im for _, _, im, _ in points if math.isfinite(im)]
+    if finite_im:
+        scatter = ax.scatter(
+            [stamp - t0 for stamp, _, _, _ in points],
+            [tau for _, tau, _, _ in points],
+            c=[im for _, _, im, _ in points],
+            s=[42 if bad else 26 for _, _, _, bad in points],
+            cmap="RdYlGn",
+            vmin=min(min(finite_im), -0.5),
+            vmax=max(max(finite_im), 0.5),
+            marker="s",
+            alpha=0.82,
+            linewidths=0,
+        )
+        cbar = fig.colorbar(scatter, ax=ax)
+        cbar.set_label("IM min [m]")
+    else:
+        bad_points = [point for point in points if point[3]]
+        ok_points = [point for point in points if not point[3]]
+        if ok_points:
+            ax.scatter(
+                [stamp - t0 for stamp, _, _, _ in ok_points],
+                [tau for _, tau, _, _ in ok_points],
+                color="#16a34a",
+                marker="s",
+                label="not bad",
+            )
+        if bad_points:
+            ax.scatter(
+                [stamp - t0 for stamp, _, _, _ in bad_points],
+                [tau for _, tau, _, _ in bad_points],
+                color="#dc2626",
+                marker="s",
+                label="bad",
+            )
+            ax.legend(loc="best")
+    ax.set_xlabel("time since first sample [s]")
+    ax.set_ylabel("tau [s]")
+    ax.set_title("P5-3 PL/AL sample heatmap")
+    ax.grid(True, alpha=0.25)
     fig.tight_layout()
     fig.savefig(path, dpi=160)
     plt.close(fig)
@@ -4680,6 +5033,136 @@ def p5_3_point_in_fixture(row: dict[str, Any], fixture: dict[str, Any]) -> bool:
     )
 
 
+def p5_3_sample_list(row: dict[str, Any]) -> list[dict[str, Any]]:
+    value = row.get("samples", [])
+    if isinstance(value, list):
+        return [item for item in value if isinstance(item, dict)]
+    if isinstance(value, str):
+        stripped = value.strip()
+        if not stripped:
+            return []
+        try:
+            loaded = json.loads(stripped)
+        except json.JSONDecodeError:
+            return []
+        if isinstance(loaded, list):
+            return [item for item in loaded if isinstance(item, dict)]
+    return []
+
+
+def p5_3_sample_rows(
+    p5_rows: list[dict[str, Any]],
+    fixture: dict[str, Any],
+) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    for status_idx, status_row in enumerate(p5_rows):
+        for sample_idx, sample in enumerate(p5_3_sample_list(status_row)):
+            row: dict[str, Any] = {
+                "bag_time_s": status_row.get("bag_time_s", ""),
+                "status_row_index": status_idx,
+                "sample_index": sample_idx,
+                "phase": status_row.get("phase", ""),
+                "action": status_row.get("action", ""),
+                "raw_action": status_row.get("raw_action", ""),
+                "status_reason": status_row.get("reason", ""),
+                "current_reason": status_row.get("current_reason", ""),
+                "future_reason": status_row.get("future_reason", ""),
+                "active_reasons": status_row.get("active_reasons", ""),
+                "tau_s": sample.get("tau_s", ""),
+                "x": sample.get("x", ""),
+                "y": sample.get("y", ""),
+                "z": sample.get("z", ""),
+                "hpl": sample.get("hpl", ""),
+                "vpl": sample.get("vpl", ""),
+                "hal": sample.get("hal", ""),
+                "val": sample.get("val", ""),
+                "im_min": sample.get("im_min", ""),
+                "bad": 1 if manifest_bool(sample.get("bad")) else 0,
+                "unknown": 1 if manifest_bool(sample.get("unknown")) else 0,
+                "stale": 1 if manifest_bool(sample.get("stale")) else 0,
+                "reason": str(sample.get("reason", "")),
+            }
+            inside_space = p5_3_point_in_fixture(row, fixture)
+            inside_tau = p5_3_value_in_window(
+                finite_float(row.get("tau_s")),
+                fixture.get("tau_min"),
+                fixture.get("tau_max"),
+            )
+            row["inside_high_risk_zone"] = 1 if inside_space else 0
+            row["inside_tau_window"] = 1 if inside_tau else 0
+            row["fixture_bad_sample"] = (
+                1 if inside_space and inside_tau and int(row["bad"]) else 0
+            )
+            rows.append(row)
+    return rows
+
+
+def p5_3_sample_reason_is_fixture_linked(row: dict[str, Any]) -> bool:
+    reason = str(row.get("reason", "")).strip().lower()
+    if not reason:
+        return False
+    return (
+        P5_3_FIXTURE_REASON in reason
+        or "future_low_margin" in reason
+        or "future_bad" in reason
+    )
+
+
+def summarize_p5_3_samples(rows: list[dict[str, Any]]) -> dict[str, Any]:
+    current_rows = [
+        row
+        for row in rows
+        if finite_float(row.get("tau_s")) is not None
+        and abs(float(finite_float(row.get("tau_s")) or 0.0)) <= 1.0e-6
+    ]
+    future_fixture_rows = [
+        row
+        for row in rows
+        if int(row.get("inside_high_risk_zone", 0) or 0)
+        and int(row.get("inside_tau_window", 0) or 0)
+    ]
+    future_bad_fixture_rows = [
+        row for row in future_fixture_rows if int(row.get("bad", 0) or 0)
+    ]
+    linked_rows = [
+        row for row in future_bad_fixture_rows if p5_3_sample_reason_is_fixture_linked(row)
+    ]
+    current_inside_rows = [
+        row for row in current_rows if int(row.get("inside_high_risk_zone", 0) or 0)
+    ]
+    current_fixture_bad_rows = [
+        row
+        for row in current_rows
+        if int(row.get("bad", 0) or 0)
+        and (
+            int(row.get("inside_high_risk_zone", 0) or 0)
+            or P5_3_FIXTURE_REASON in str(row.get("reason", "")).lower()
+        )
+    ]
+    return {
+        "row_count": len(rows),
+        "current_sample_count": len(current_rows),
+        "current_inside_fixture_count": len(current_inside_rows),
+        "current_fixture_bad_count": len(current_fixture_bad_rows),
+        "future_fixture_sample_count": len(future_fixture_rows),
+        "future_bad_fixture_sample_count": len(future_bad_fixture_rows),
+        "future_bad_fixture_linked_count": len(linked_rows),
+        "first_current_sample": current_rows[0] if current_rows else None,
+        "first_current_inside_fixture_sample": current_inside_rows[0]
+        if current_inside_rows
+        else None,
+        "first_current_fixture_bad_sample": current_fixture_bad_rows[0]
+        if current_fixture_bad_rows
+        else None,
+        "first_future_fixture_sample": future_fixture_rows[0]
+        if future_fixture_rows
+        else None,
+        "first_future_bad_fixture_sample": future_bad_fixture_rows[0]
+        if future_bad_fixture_rows
+        else None,
+    }
+
+
 def p5_3_overlap_rows(
     marker_rows: list[dict[str, Any]],
     fixture: dict[str, Any],
@@ -4738,6 +5221,26 @@ def p5_3_future_replan_rows(p5_rows: list[dict[str, Any]]) -> list[dict[str, Any
     return rows
 
 
+def p5_3_replan_rows_with_sample_link(
+    sample_rows: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    linked_status_rows = {
+        int(row.get("status_row_index", -1))
+        for row in sample_rows
+        if int(row.get("fixture_bad_sample", 0) or 0)
+        and p5_3_sample_reason_is_fixture_linked(row)
+        and (
+            p5_action(row, "action") == P5_REPLAN_ACTION
+            or p5_action(row, "raw_action") == P5_REPLAN_ACTION
+        )
+    }
+    return [
+        row
+        for row in sample_rows
+        if int(row.get("status_row_index", -2)) in linked_status_rows
+    ]
+
+
 def p5_3_row_has_future_reason(row: dict[str, Any]) -> bool:
     accepted_reasons = {"future_bad", "future_low_margin", P5_3_FIXTURE_REASON}
     reasons = p5_all_reason_values(
@@ -4785,11 +5288,16 @@ def validate_p5_3_hard_gates(
     }
     first_bad_tau_values = p5_3_first_bad_tau_values(p5_rows)
     first_bad_tau_min = min(first_bad_tau_values) if first_bad_tau_values else None
-    first_bad_tau_in_window = any(
-        p5_3_value_in_window(value, fixture.get("tau_min"), fixture.get("tau_max"))
-        for value in first_bad_tau_values
+    first_bad_tau_in_window = (
+        first_bad_tau_min is not None
+        and p5_3_value_in_window(
+            first_bad_tau_min, fixture.get("tau_min"), fixture.get("tau_max")
+        )
     )
     future_replan_rows = p5_3_future_replan_rows(p5_rows)
+    sample_rows = p5_3_sample_rows(p5_rows, fixture)
+    sample_summary = summarize_p5_3_samples(sample_rows)
+    replan_sample_link_rows = p5_3_replan_rows_with_sample_link(sample_rows)
     future_min_im_min = finite_float(p5_summary.get("future_min_im_min"))
     future_replan_margin_m = finite_float(manifest.get("p5.future_replan_margin_m")) or 0.3
     max_bad_ratio = finite_float(manifest.get("p5.max_bad_ratio")) or 0.25
@@ -4808,6 +5316,7 @@ def validate_p5_3_hard_gates(
     )
     overlap_margin_evidence = (
         int(overlap_summary.get("overlap_bad_state_count", 0) or 0) > 0
+        or int(sample_summary.get("future_bad_fixture_sample_count", 0) or 0) > 0
         or (
             future_min_im_min is not None
             and future_min_im_min < future_replan_margin_m
@@ -4851,6 +5360,26 @@ def validate_p5_3_hard_gates(
         "p5_json_parse_ok": int(p5_summary.get("parse_error_count", 0) or 0) == 0,
         "p5_inspection_ok": not bool(p5_summary.get("inspection_error")),
         "marker_rows_present": len(p5_marker_rows) > 0,
+        "sample_rows_present": len(sample_rows) > 0,
+        "sample_summary": sample_summary,
+        "current_sample_present": (
+            int(sample_summary.get("current_sample_count", 0) or 0) > 0
+        ),
+        "current_sample_outside_fixture": (
+            int(sample_summary.get("current_inside_fixture_count", 0) or 0) == 0
+        ),
+        "current_sample_not_fixture_bad": (
+            int(sample_summary.get("current_fixture_bad_count", 0) or 0) == 0
+        ),
+        "future_sample_inside_fixture": (
+            int(sample_summary.get("future_fixture_sample_count", 0) or 0) > 0
+        ),
+        "future_bad_sample_inside_fixture": (
+            int(sample_summary.get("future_bad_fixture_sample_count", 0) or 0) > 0
+        ),
+        "future_bad_sample_linked": (
+            int(sample_summary.get("future_bad_fixture_linked_count", 0) or 0) > 0
+        ),
         "overlap": overlap_summary,
         "trajectory_overlap_present": int(overlap_summary.get("overlap_count", 0) or 0) > 0,
         "overlap_margin_evidence": overlap_margin_evidence,
@@ -4868,7 +5397,11 @@ def validate_p5_3_hard_gates(
         "future_reason_attribution_count": len(future_reason_rows),
         "future_reason_attribution_ok": len(future_reason_rows) > 0,
         "future_replan_reason_count": len(future_replan_rows),
-        "future_replan_reason_ok": len(future_replan_rows) > 0,
+        "future_replan_sample_link_count": len(replan_sample_link_rows),
+        "future_replan_sample_link_ok": len(replan_sample_link_rows) > 0,
+        "future_replan_reason_ok": (
+            len(future_replan_rows) > 0 or len(replan_sample_link_rows) > 0
+        ),
         "first_bad_tau_values": first_bad_tau_values[:20],
         "first_bad_tau_min": first_bad_tau_min,
         "first_bad_tau_in_fixture_window": first_bad_tau_in_window,
@@ -4919,6 +5452,27 @@ def validate_p5_3_hard_gates(
         inconclusive.append("P5-3 P5 status inspection did not complete cleanly")
     if not gates["marker_rows_present"]:
         inconclusive.append("P5-3 trajectory marker evidence is missing")
+    if not gates["sample_rows_present"]:
+        failures.append("P5-3 PL/AL margin: per-sample status diagnostics are missing")
+    if not gates["current_sample_present"]:
+        failures.append("P5-3 PL/AL margin: current/tau=0 sample evidence is missing")
+    if not gates["current_sample_outside_fixture"]:
+        failures.append(
+            "P5-3 PL/AL margin: current/tau=0 sample is inside the high-risk fixture"
+        )
+    if not gates["current_sample_not_fixture_bad"]:
+        failures.append(
+            "P5-3 PL/AL margin: current/tau=0 sample is bad due to high-risk fixture evidence"
+        )
+    if not gates["future_sample_inside_fixture"]:
+        failures.append(
+            "P5-3 scenario isolation / future-only fixture evidence: "
+            "no future trajectory sample entered the fixture tau/spatial window"
+        )
+    if not gates["future_bad_sample_inside_fixture"]:
+        failures.append(
+            "P5-3 PL/AL margin: future samples entered the fixture but did not become bad"
+        )
     if not gates["trajectory_overlap_present"]:
         failures.append("P5-3 trajectory samples do not overlap the high-risk zone fixture")
     if not gates["overlap_margin_evidence"]:
@@ -4970,6 +5524,13 @@ def validate_p5_3_hard_gates(
         "p5_json_parse_ok",
         "p5_inspection_ok",
         "marker_rows_present",
+        "sample_rows_present",
+        "current_sample_present",
+        "current_sample_outside_fixture",
+        "current_sample_not_fixture_bad",
+        "future_sample_inside_fixture",
+        "future_bad_sample_inside_fixture",
+        "future_bad_sample_linked",
         "trajectory_overlap_present",
         "overlap_margin_evidence",
         "request_replan_present",
@@ -5450,10 +6011,6 @@ def next_debug_branch(
             return "PASS -> P5-4"
         if status == "BLOCKED_SCENARIO_MISSING":
             return P5_3_BLOCKED_BRANCH
-        if "scenario isolation" in text or "bad-ratio coverage" in text:
-            return P5_3_SCENARIO_ISOLATION_BRANCH
-        if "reason attribution" in text:
-            return P5_3_REASON_ATTRIBUTION_BRANCH
         return P5_3_PL_AL_MARGIN_BRANCH
     if status == "PASS":
         pass_branches = {
@@ -5510,6 +6067,9 @@ def analyze(args: argparse.Namespace) -> dict[str, Any]:
     bag_dir = Path(args.bag_dir).expanduser().resolve() if args.bag_dir else None
     csv_dir, figures_dir, metadata_dir = ensure_dirs(export_dir)
     prefix = artifact_prefix(args.experiment_id)
+    p5_3_plal_figure_paths = {
+        name: figures_dir / name for name in P5_3_PLAL_FIGURE_FILENAMES
+    }
     p0_phase = is_p0_experiment(args)
     p0_4_phase = is_experiment(args, "P0-4")
     p0_phase_index = p0_phase_number(args.experiment_id)
@@ -5936,6 +6496,13 @@ def analyze(args: argparse.Namespace) -> dict[str, Any]:
         p0_6_cells_heatmap_figure_path = figures_dir / f"{prefix}_occupied_cells_table_heatmap.png"
         if plot_p0_health_timeline(health_rows, health_figure_path):
             p0_figure_artifacts.append(str(health_figure_path))
+        if p5_3_phase and plot_p0_health_timeline(
+            health_rows,
+            p5_3_plal_figure_paths["p5_3_plal_p0_health_timeline.png"],
+        ):
+            p0_figure_artifacts.append(
+                str(p5_3_plal_figure_paths["p5_3_plal_p0_health_timeline.png"])
+            )
         if plot_p0_reason_histogram(health_rows, reason_figure_path):
             p0_figure_artifacts.append(str(reason_figure_path))
         if plot_p0_pl_cost_distribution(pl_cloud_rows, distribution_figure_path):
@@ -6096,6 +6663,11 @@ def analyze(args: argparse.Namespace) -> dict[str, Any]:
             figures.append(str(scenario_figure_path))
         else:
             warnings.append("scenario top-down plot was not generated because no plottable bag data was available")
+        if p5_3_phase and plot_scenario_topdown(
+            scenario_data,
+            p5_3_plal_figure_paths["p5_3_plal_scenario_topdown.png"],
+        ):
+            figures.append(str(p5_3_plal_figure_paths["p5_3_plal_scenario_topdown.png"]))
 
         topic_timestamps, topic_timestamp_error = read_topic_timestamps(
             bag_dir,
@@ -6140,6 +6712,7 @@ def analyze(args: argparse.Namespace) -> dict[str, Any]:
     p5_2_gates: dict[str, Any] = {}
     p5_3_gates: dict[str, Any] = {}
     p5_3_overlap: list[dict[str, Any]] = []
+    p5_3_samples: list[dict[str, Any]] = []
     p5_csv_artifacts: list[str] = []
     p5_figure_artifacts: list[str] = []
     p5_required_figures: list[Path] = []
@@ -6187,6 +6760,10 @@ def analyze(args: argparse.Namespace) -> dict[str, Any]:
             p5_marker_rows,
             p5_3_gates.get("fixture", {}),
         )
+        p5_3_samples = p5_3_sample_rows(
+            p5_rows,
+            p5_3_gates.get("fixture", {}),
+        )
 
     csv_artifacts = [str(topic_counts_path)]
     csv_artifacts.extend(p0_csv_artifacts)
@@ -6202,6 +6779,7 @@ def analyze(args: argparse.Namespace) -> dict[str, Any]:
         p5_marker_path = csv_dir / f"{prefix}_trajectory_integrity_evidence.csv"
         p5_debounce_path = csv_dir / f"{prefix}_p5_debounce_timeline.csv"
         p5_3_overlap_path = csv_dir / f"{prefix}_high_risk_zone_overlap.csv"
+        p5_3_samples_path = csv_dir / f"{prefix}_p5_sample_diagnostics.csv"
         action_rows = []
         t_rel = relative_time(p5_rows)
         for idx, row in enumerate(p5_rows):
@@ -6378,6 +6956,7 @@ def analyze(args: argparse.Namespace) -> dict[str, Any]:
                 ],
                 p5_3_overlap,
             )
+            write_csv(p5_3_samples_path, P5_SAMPLE_FIELDS, p5_3_samples)
         p5_csv_artifacts.extend(
             [
                 str(p5_action_path),
@@ -6389,6 +6968,7 @@ def analyze(args: argparse.Namespace) -> dict[str, Any]:
         )
         if p5_3_phase:
             p5_csv_artifacts.append(str(p5_3_overlap_path))
+            p5_csv_artifacts.append(str(p5_3_samples_path))
         csv_artifacts.extend(
             artifact
             for artifact in p5_csv_artifacts
@@ -6421,12 +7001,24 @@ def analyze(args: argparse.Namespace) -> dict[str, Any]:
         p5_3_overlay_figure_path = figures_dir / "p5_3_debug_high_risk_zone_overlay.png"
         p5_3_first_bad_tau_figure_path = figures_dir / "p5_3_debug_first_bad_tau_timeline.png"
         p5_3_reason_figure_path = figures_dir / "p5_3_debug_reason_timeline.png"
+        p5_3_plal_overlay_path = p5_3_plal_figure_paths["p5_3_plal_high_risk_overlay.png"]
+        p5_3_plal_tau_window_path = p5_3_plal_figure_paths["p5_3_plal_tau_window.png"]
+        p5_3_plal_margin_path = p5_3_plal_figure_paths["p5_3_plal_margin_timeline.png"]
+        p5_3_plal_action_reason_path = p5_3_plal_figure_paths[
+            "p5_3_plal_action_reason_timeline.png"
+        ]
+        p5_3_plal_replan_emergency_path = p5_3_plal_figure_paths[
+            "p5_3_plal_replan_vs_emergency.png"
+        ]
+        p5_3_plal_heatmap_path = p5_3_plal_figure_paths["p5_3_plal_sample_heatmap.png"]
         if plot_p5_action_timeline(p5_rows, p5_action_figure_path):
             p5_figure_artifacts.append(str(p5_action_figure_path))
         if plot_p5_status_timeline(p5_rows, p5_status_figure_path):
             p5_figure_artifacts.append(str(p5_status_figure_path))
         if plot_p5_margin_timeline(p5_rows, p5_margin_figure_path):
             p5_figure_artifacts.append(str(p5_margin_figure_path))
+        if p5_3_phase and plot_p5_margin_timeline(p5_rows, p5_3_plal_margin_path):
+            p5_figure_artifacts.append(str(p5_3_plal_margin_path))
         if plot_p5_current_im_vs_action(p5_rows, p5_current_im_vs_action_figure_path):
             p5_figure_artifacts.append(str(p5_current_im_vs_action_figure_path))
         if plot_p5_debounce_timeline(p5_rows, p5_debounce_figure_path):
@@ -6458,6 +7050,12 @@ def analyze(args: argparse.Namespace) -> dict[str, Any]:
                 p5_figure_artifacts.append(str(p5_3_overlay_figure_path))
             else:
                 warnings.append("P5-3 high-risk zone overlay was not generated because overlap rows were unavailable")
+            if plot_p5_3_sample_high_risk_overlay(
+                p5_3_samples,
+                p5_3_gates.get("fixture", {}),
+                p5_3_plal_overlay_path,
+            ):
+                p5_figure_artifacts.append(str(p5_3_plal_overlay_path))
             if plot_p5_3_first_bad_tau_timeline(
                 p5_rows,
                 p5_3_gates.get("fixture", {}),
@@ -6466,10 +7064,26 @@ def analyze(args: argparse.Namespace) -> dict[str, Any]:
                 p5_figure_artifacts.append(str(p5_3_first_bad_tau_figure_path))
             else:
                 warnings.append("P5-3 first_bad_tau timeline was not generated because status rows were unavailable")
+            if plot_p5_3_sample_tau_window(
+                p5_3_samples,
+                p5_rows,
+                p5_3_gates.get("fixture", {}),
+                p5_3_plal_tau_window_path,
+            ):
+                p5_figure_artifacts.append(str(p5_3_plal_tau_window_path))
             if plot_p5_3_reason_timeline(p5_rows, p5_3_reason_figure_path):
                 p5_figure_artifacts.append(str(p5_3_reason_figure_path))
             else:
                 warnings.append("P5-3 reason timeline was not generated because status rows were unavailable")
+            if plot_p5_3_reason_timeline(p5_rows, p5_3_plal_action_reason_path):
+                p5_figure_artifacts.append(str(p5_3_plal_action_reason_path))
+            if plot_p5_3_replan_vs_emergency(
+                p5_rows,
+                p5_3_plal_replan_emergency_path,
+            ):
+                p5_figure_artifacts.append(str(p5_3_plal_replan_emergency_path))
+            if plot_p5_3_sample_heatmap(p5_3_samples, p5_3_plal_heatmap_path):
+                p5_figure_artifacts.append(str(p5_3_plal_heatmap_path))
         required_runtime_figures = [
             scenario_figure_path,
             topic_activity_figure_path,
@@ -6498,6 +7112,10 @@ def analyze(args: argparse.Namespace) -> dict[str, Any]:
                     p5_3_overlay_figure_path,
                     p5_3_reason_figure_path,
                     p5_3_first_bad_tau_figure_path,
+                    *[
+                        p5_3_plal_figure_paths[name]
+                        for name in P5_3_PLAL_FIGURE_FILENAMES
+                    ],
                 ]
             )
         p5_required_figures.extend(required_runtime_figures)

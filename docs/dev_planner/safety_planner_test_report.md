@@ -3272,3 +3272,59 @@ Verification notes:
 Final conclusion:
 
 FAIL -> debug P5-3 PL/AL margin
+
+### P5-3 PL/AL Margin Debug/Rerun
+
+This update narrows the P5-3 high-risk fixture to a future-only corridor window and adds non-decision P5 status `samples` diagnostics so the analyzer can prove that `tau=0` remains outside the fixture while later trajectory samples enter it within `[1.2s,2.0s]`. P5 emergency thresholds, debounce, final-gate behavior, and `p5.max_bad_ratio` are unchanged.
+
+Fixture/analyzer acceptance gates:
+
+| Gate | Required evidence |
+|---|---|
+| Current sample isolation | The P5 status `samples` array contains a finite `tau_s=0` sample outside the high-risk spatial fixture and not bad due to fixture evidence. |
+| Future fixture entry | At least one later sample is inside the fixture spatial bounds and the configured tau window. |
+| First bad tau | The minimum reported `first_bad_tau` is inside `[1.2s,2.0s]`; `first_bad_tau=0.0` fails P5-3. |
+| Replan attribution | Future-risk evidence must coincide with `REQUEST_REPLAN` through `future_reason` / `active_reasons` or same-row linked sample evidence. |
+| Emergency storm | Sustained emergency-candidate storms remain a hard P5-3 failure. |
+
+PL/AL debug figure conclusions:
+
+| Figure filename | Conclusion |
+|---|---|
+| `p5_3_plal_scenario_topdown.png` | Confirms the rerun used the manual corridor scenario with the narrowed future-only fixture enabled. |
+| `p5_3_plal_high_risk_overlay.png` | Confirms `182` tau-zero samples stayed outside the fixture while `268` future samples entered the fixture bounds. |
+| `p5_3_plal_tau_window.png` | Confirms the future samples entered `[1.2s,2.0s]`, but no future fixture sample became bad and `first_bad_tau` remained absent. |
+| `p5_3_plal_margin_timeline.png` | Confirms sampled future IM stayed positive (`future_min_im_min=9.500533m`) instead of receiving the injected `10.2m` PL over AL. |
+| `p5_3_plal_action_reason_timeline.png` | Confirms `REQUEST_REPLAN` rows were present, but no future-risk reason or same-row linked sample evidence coincided with them. |
+| `p5_3_plal_replan_vs_emergency.png` | Confirms no sustained emergency-candidate storm was present (`max_consecutive_emergency=0`). |
+| `p5_3_plal_sample_heatmap.png` | Confirms fixture-window samples were recorded, but their PL/AL margins remained non-bad. |
+| `p5_3_plal_p0_health_timeline.png` | Confirms P0 risk-grid health became ready and non-stale after startup during the PL/AL evidence window. |
+
+Actual rerun evidence:
+
+| Gate | Result |
+|---|---|
+| Current sample isolation | `PASS`: `current_sample_count=182`, `current_inside_fixture_count=0`, `current_fixture_bad_count=0`. |
+| Future fixture entry | `PASS`: `future_fixture_sample_count=268`. |
+| Future bad fixture evidence | `FAIL`: `future_bad_fixture_sample_count=0`, `future_bad_fixture_linked_count=0`. |
+| First bad tau | `FAIL`: `first_bad_tau_min=null`, so no bad tau landed in `[1.2s,2.0s]`. |
+| Bad-ratio coverage | `FAIL`: `bad_ratio_max=0.0`, below `p5.max_bad_ratio=0.25`. |
+| Future margin | `FAIL`: `future_min_im_min=9.500533m`, above the `0.3m` future replan margin. |
+| Emergency storm | `PASS`: `max_consecutive_emergency=0`, `raw_max_consecutive_emergency=0`. |
+| Required topics | `FAIL`: `/drone_0_visual_slam/odom` had `max_gap_s=2.709895`, so the analyzer marked P5 topic stability false. |
+| PL/AL figures | `PASS`: all eight required `p5_3_plal_*.png` files were generated and non-empty. |
+
+Verification notes:
+
+| Check | Result |
+|---|---|
+| Python compile check | `PASS`: `python3 -m py_compile launch/test_planner.launch.py scripts/dev_planner/analyze_safety_planner_run.py`. |
+| Focused analyzer tests | `PASS`: `python3 test/test_analyze_safety_planner_run_p5_1.py`. |
+| Focused P0/P5 ego-planner CTests | `PASS`: `ctest --test-dir build/ego_planner -R "test_p5_runtime_integrity_gate\|test_p0_risk_grid_runtime" --output-on-failure`. |
+| Focused predictor/risk-grid CTests | `PASS`: `ctest --test-dir build/iap -R "test_predictor_module\|test_risk_grid_map" --output-on-failure`. |
+| P5-3 launch | `PASS`: completed and wrote export `results/planner_validation/exports/test_planner_p5_corridor_manual_1783868667430` and bag `results/planner_validation/bags/test_planner_p5_corridor_manual_20260712T150427Z`. |
+| P5-3 analyzer with `--fail-on-threshold` | `FAIL as expected`: exit `2`, `next_debug_branch=FAIL -> 继续 debug P5-3 PL/AL margin`; the fixture/analyzer capability is present, but future samples did not receive bad PL/AL evidence. |
+
+Final conclusion:
+
+FAIL -> 继续 debug P5-3 PL/AL margin

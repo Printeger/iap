@@ -3,6 +3,11 @@
 > 规则：任何代码改动必须在这里记录，并包含 IAP-RQ-XXX。
 
 ## Unreleased
+- fix(planner-p5-3-plal-margin): IAP-RQ-320 — make P5-3 fixture evidence future-only without weakening P5 safety semantics.
+  - `risk_grid_map.hpp`, `test_planner.launch.py`, and focused risk-grid/P0 runtime tests: narrow the default P5-3 fixture to the downstream corridor window `x=[-10.8,-8.7]`, `y=[-0.75,0.75]`, `z=[1.0,1.35]` while keeping `tau=[1.2,2.0]`, injected PL, `p5.max_bad_ratio`, and emergency thresholds unchanged.
+  - `p5_runtime_integrity_gate`: add non-decision `samples` diagnostics to P5 status JSON with per-sample tau, position, PL/AL, IM, state flags, and source reason.
+  - `analyze_safety_planner_run.py`: add future-only PL/AL gates, same-row sample-link attribution, flattened sample CSV export, and required `p5_3_plal_*.png` debug figures.
+  - Tests cover tau-zero fixture exclusion, future sample inclusion, first-bad-tau `0.0` failure, sample-link attribution, emergency-storm rejection, and the exact PL/AL figure filename set.
 - fix(planner-p5-3-debug-rerun): IAP-RQ-320 — preserve causal future-risk evidence for P5-3 without changing P5 safety-action semantics.
   - `p5_runtime_integrity_gate`: add non-decision diagnostic fields `current_reason`, `future_reason`, and `active_reasons` to status JSON so concurrent current and future gate reasons remain visible.
   - `risk_grid_map.hpp` and `test_planner.launch.py`: widen the disabled-by-default P5-3 high-risk-zone fixture bounds and include `p5.max_bad_ratio` in the manifest while keeping existing P5 thresholds unchanged.

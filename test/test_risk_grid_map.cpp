@@ -512,6 +512,51 @@ TEST(RiskGridMapTest, P5_3FixtureOnlyAltersCellsInsideBoundsAndTauWindow) {
   EXPECT_EQ(outside_space.reason, "ok");
 }
 
+TEST(RiskGridMapTest,
+     P5_3DefaultFixtureExcludesCurrentPointAndIncludesFutureCorridor) {
+  iap::RiskGridMapParams params;
+  params.resolution_m = 0.2;
+  params.size_x_m = 5.0;
+  params.size_y_m = 2.5;
+  params.size_z_m = 2.0;
+  params.horizons_s = {0.0, 1.2, 1.5, 2.0};
+  params.stale_timeout_s = 10.0;
+  params.p5_3_fixture.enabled = true;
+  ASSERT_EQ(params.p5_3_fixture.name, "future_high_risk_zone_v1");
+  ASSERT_DOUBLE_EQ(params.p5_3_fixture.x_min_m, -10.8);
+  ASSERT_DOUBLE_EQ(params.p5_3_fixture.x_max_m, -8.7);
+
+  iap::RiskGridMap grid(params);
+  AffineProvider provider;
+  std::string reason;
+  ASSERT_TRUE(grid.refreshFromProvider(Eigen::Vector3d(-10.4, 0.0, 1.2),
+                                       10.0, provider, &reason))
+      << reason;
+
+  auto snapshot = grid.acquireSnapshot();
+  ASSERT_NE(snapshot, nullptr);
+
+  const Eigen::Vector3d current_point(-12.0, 0.0, 1.2);
+  iap::PredictedPLSample current_sample;
+  ASSERT_TRUE(snapshot->queryPredictedPL(current_point, 11.5,
+                                        &current_sample))
+      << current_sample.reason;
+  EXPECT_TRUE(current_sample.valid);
+  EXPECT_EQ(current_sample.reason, "ok");
+  EXPECT_NEAR(current_sample.hpl_pred,
+              AffineProvider::affine(current_point, 1.5), 1.0e-9);
+
+  const Eigen::Vector3d future_point(-10.2, 0.0, 1.2);
+  iap::PredictedPLSample future_sample;
+  ASSERT_TRUE(snapshot->queryPredictedPL(future_point, 11.5,
+                                        &future_sample))
+      << future_sample.reason;
+  EXPECT_TRUE(future_sample.valid);
+  EXPECT_EQ(future_sample.reason, "p5_3_high_risk_zone");
+  EXPECT_DOUBLE_EQ(future_sample.hpl_pred, 10.2);
+  EXPECT_DOUBLE_EQ(future_sample.vpl_pred, 10.2);
+}
+
 TEST(RiskGridMapTest, AllOccupiedSkipHealthReportsDominantReason) {
   iap::RiskGridMapParams params = base_params();
   params.skip_occupied_voxels = true;

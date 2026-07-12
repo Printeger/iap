@@ -2,15 +2,20 @@
 #include <ego_planner/safety_rviz_publisher.h>
 
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <limits>
 #include <memory>
+#include <string>
+#include <thread>
 #include <utility>
 #include <vector>
 
 #include <gtest/gtest.h>
 
 namespace {
+
+using namespace std::chrono_literals;
 
 void ensure_rclcpp() {
   if (!rclcpp::ok()) {
@@ -727,6 +732,55 @@ TEST(P5RuntimeIntegrityGateTest, NominalFinalGateKeepsFailureCountZero) {
     EXPECT_EQ(status.final_gate_fail_count, 0);
     EXPECT_NEAR(status.final_gate_fail_duration_s, 0.0, 1.0e-9);
   }
+}
+
+TEST(P5RuntimeIntegrityGateTest, PublishedStatusJsonIncludesSampleDiagnostics) {
+  ensure_rclcpp();
+  auto node = std::make_shared<rclcpp::Node>(
+      "p5_status_json_samples_test",
+      rclcpp::NodeOptions().allow_undeclared_parameters(false));
+  auto config = baseConfig();
+  config.debug_metrics_enable = true;
+  config.current_stale_to_replan_s = 100.0;
+  config.current_stale_to_emergency_s = 100.0;
+  config.status_topic = "/p5_status_json_samples_test";
+
+  std::string payload;
+  auto sub = node->create_subscription<std_msgs::msg::String>(
+      config.status_topic, 10,
+      [&payload](const std_msgs::msg::String::SharedPtr msg) {
+        payload = msg->data;
+      });
+
+  ego_planner::P5RuntimeIntegrityGate gate(node, config, true);
+  gate.setCurrentIntegrityForTest(integrityMsg(0.0, 1.0, 1.0, 2.0, 2.0));
+  auto traj = makeTrajectory();
+  const auto status = gate.evaluateRuntime(traj, makeSnapshot(5.0, 5.0),
+                                           0.0, 1.0);
+  ASSERT_FALSE(status.viz_samples.empty());
+
+  gate.publishStatus(status, "runtime");
+  for (int i = 0; i < 20 && payload.empty(); ++i) {
+    rclcpp::spin_some(node);
+    std::this_thread::sleep_for(5ms);
+  }
+
+  ASSERT_FALSE(payload.empty());
+  EXPECT_NE(payload.find("\"samples\":["), std::string::npos);
+  EXPECT_NE(payload.find("\"tau_s\":"), std::string::npos);
+  EXPECT_NE(payload.find("\"x\":"), std::string::npos);
+  EXPECT_NE(payload.find("\"y\":"), std::string::npos);
+  EXPECT_NE(payload.find("\"z\":"), std::string::npos);
+  EXPECT_NE(payload.find("\"hpl\":"), std::string::npos);
+  EXPECT_NE(payload.find("\"vpl\":"), std::string::npos);
+  EXPECT_NE(payload.find("\"hal\":"), std::string::npos);
+  EXPECT_NE(payload.find("\"val\":"), std::string::npos);
+  EXPECT_NE(payload.find("\"im_min\":"), std::string::npos);
+  EXPECT_NE(payload.find("\"bad\":true"), std::string::npos);
+  EXPECT_NE(payload.find("\"unknown\":false"), std::string::npos);
+  EXPECT_NE(payload.find("\"stale\":false"), std::string::npos);
+  EXPECT_NE(payload.find("\"reason\":\"future_low_margin\""),
+            std::string::npos);
 }
 
 TEST(P5RuntimeIntegrityGateTest, StatusCarriesVizSamplesAndMarkers) {

@@ -260,12 +260,12 @@ TEST(P0RiskGridRuntimeTest, GnssEpochFreshnessDefaultIsTwoSeconds) {
                    iap::LidarObservabilityFim::Params{}.fim_radius_m);
   EXPECT_FALSE(config.grid.p5_3_fixture.enabled);
   EXPECT_EQ(config.grid.p5_3_fixture.name, "future_high_risk_zone_v1");
-  EXPECT_DOUBLE_EQ(config.grid.p5_3_fixture.x_min_m, -20.0);
-  EXPECT_DOUBLE_EQ(config.grid.p5_3_fixture.x_max_m, 20.0);
-  EXPECT_DOUBLE_EQ(config.grid.p5_3_fixture.y_min_m, -3.0);
-  EXPECT_DOUBLE_EQ(config.grid.p5_3_fixture.y_max_m, 3.0);
-  EXPECT_DOUBLE_EQ(config.grid.p5_3_fixture.z_min_m, 0.0);
-  EXPECT_DOUBLE_EQ(config.grid.p5_3_fixture.z_max_m, 3.0);
+  EXPECT_DOUBLE_EQ(config.grid.p5_3_fixture.x_min_m, -10.8);
+  EXPECT_DOUBLE_EQ(config.grid.p5_3_fixture.x_max_m, -8.7);
+  EXPECT_DOUBLE_EQ(config.grid.p5_3_fixture.y_min_m, -0.75);
+  EXPECT_DOUBLE_EQ(config.grid.p5_3_fixture.y_max_m, 0.75);
+  EXPECT_DOUBLE_EQ(config.grid.p5_3_fixture.z_min_m, 1.0);
+  EXPECT_DOUBLE_EQ(config.grid.p5_3_fixture.z_max_m, 1.35);
   EXPECT_DOUBLE_EQ(config.grid.p5_3_fixture.tau_min_s, 1.2);
   EXPECT_DOUBLE_EQ(config.grid.p5_3_fixture.tau_max_s, 2.0);
 }
