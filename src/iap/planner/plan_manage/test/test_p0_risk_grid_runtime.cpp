@@ -258,6 +258,8 @@ TEST(P0RiskGridRuntimeTest, GnssEpochFreshnessDefaultIsTwoSeconds) {
   EXPECT_TRUE(config.predictor_lidar_legacy_observability);
   EXPECT_DOUBLE_EQ(config.predictor_lidar_fim_radius_m,
                    iap::LidarObservabilityFim::Params{}.fim_radius_m);
+  EXPECT_FALSE(config.grid.p5_3_fixture.enabled);
+  EXPECT_EQ(config.grid.p5_3_fixture.name, "future_high_risk_zone_v1");
 }
 
 TEST(P0RiskGridRuntimeTest, GnssEpochFreshnessCanBeOverridden) {
@@ -337,6 +339,44 @@ TEST(P0RiskGridRuntimeTest, P0_6FixtureParamsCanBeOverridden) {
   EXPECT_DOUBLE_EQ(config.p0_6_fixture.raw_vpl_m, 1.2);
   EXPECT_DOUBLE_EQ(config.p0_6_fixture.raw_c_pi, 1.2);
   EXPECT_DOUBLE_EQ(config.p0_6_fixture.low_raw_cost_threshold, 2.0);
+}
+
+TEST(P0RiskGridRuntimeTest, P5_3FixtureParamsCanBeOverridden) {
+  ensure_rclcpp();
+  rclcpp::NodeOptions options;
+  options.allow_undeclared_parameters(false);
+  options.parameter_overrides({
+      rclcpp::Parameter("p5_3.fixture.enabled", true),
+      rclcpp::Parameter("p5_3.fixture.name", "future_high_risk_zone_v1"),
+      rclcpp::Parameter("p5_3.fixture.x_min", -14.0),
+      rclcpp::Parameter("p5_3.fixture.x_max", 14.0),
+      rclcpp::Parameter("p5_3.fixture.y_min", -1.5),
+      rclcpp::Parameter("p5_3.fixture.y_max", 1.5),
+      rclcpp::Parameter("p5_3.fixture.z_min", 0.5),
+      rclcpp::Parameter("p5_3.fixture.z_max", 2.5),
+      rclcpp::Parameter("p5_3.fixture.tau_min", 1.2),
+      rclcpp::Parameter("p5_3.fixture.tau_max", 2.0),
+      rclcpp::Parameter("p5_3.fixture.hpl_pred_m", 10.2),
+      rclcpp::Parameter("p5_3.fixture.vpl_pred_m", 10.2),
+  });
+  auto node = std::make_shared<rclcpp::Node>(
+      "p5_3_fixture_params_override_test", options);
+
+  const auto config = ego_planner::P0RiskGridRuntime::declareAndReadConfig(node);
+  const auto& fixture = config.grid.p5_3_fixture;
+
+  EXPECT_TRUE(fixture.enabled);
+  EXPECT_EQ(fixture.name, "future_high_risk_zone_v1");
+  EXPECT_DOUBLE_EQ(fixture.x_min_m, -14.0);
+  EXPECT_DOUBLE_EQ(fixture.x_max_m, 14.0);
+  EXPECT_DOUBLE_EQ(fixture.y_min_m, -1.5);
+  EXPECT_DOUBLE_EQ(fixture.y_max_m, 1.5);
+  EXPECT_DOUBLE_EQ(fixture.z_min_m, 0.5);
+  EXPECT_DOUBLE_EQ(fixture.z_max_m, 2.5);
+  EXPECT_DOUBLE_EQ(fixture.tau_min_s, 1.2);
+  EXPECT_DOUBLE_EQ(fixture.tau_max_s, 2.0);
+  EXPECT_DOUBLE_EQ(fixture.hpl_pred_m, 10.2);
+  EXPECT_DOUBLE_EQ(fixture.vpl_pred_m, 10.2);
 }
 
 TEST(P0RiskGridRuntimeTest, InvalidPredictorSourceModeThrows) {

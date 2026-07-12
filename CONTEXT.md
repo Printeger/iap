@@ -51,3 +51,11 @@ _Avoid_: general obstacle generation, high-risk inflation
 **Occupied validity overlay**:
 A comparison view that relates raw predicted PL/cost values to final validity flags for the same occupied-overlap cells.
 _Avoid_: topic health summary, aggregate PL histogram
+
+**High-risk zone fixture**:
+A deterministic validation input that overrides future risk-grid predictions inside explicit `(x, y, z, tau)` bounds so a planned trajectory encounters `PL > AL` at a known future horizon.
+_Avoid_: incidental degraded GNSS, arbitrary manual run
+
+**Future trajectory overlap evidence**:
+Analyzer evidence that P5 trajectory samples geometrically intersect a declared high-risk zone fixture and that the corresponding P5 status stream reports future-risk margin or `future_bad` replan behavior.
+_Avoid_: aggregate P5 action count alone, unrelated map overlap

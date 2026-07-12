@@ -101,6 +101,14 @@ P5_1_STARTUP_REPLAN_MAX_DURATION_S = 2.0
 P5_STARTUP_REPLAN_DURATION_TOLERANCE_S = 0.25
 P5_REPLAN_STORM_CONSECUTIVE = 3
 P5_2_EMERGENCY_STORM_CONSECUTIVE = 3
+P5_3_FIXTURE_NAME = "future_high_risk_zone_v1"
+P5_3_FIXTURE_REASON = "p5_3_high_risk_zone"
+P5_3_BLOCKED_BRANCH = (
+    "BLOCKED_SCENARIO_MISSING -> implement high-risk zone injection first"
+)
+P5_3_FAIL_BRANCH = (
+    "FAIL -> debug high-risk injection / P5 future_bad reason / PL-AL margin"
+)
 P5_STATUS_FIELDS = [
     "bag_time_s",
     "phase",
@@ -238,7 +246,7 @@ def is_p0_experiment(args: argparse.Namespace) -> bool:
 
 
 def is_p5_runtime_experiment(args: argparse.Namespace) -> bool:
-    return str(args.experiment_id).strip().upper() in {"P5-1", "P5-2"}
+    return str(args.experiment_id).strip().upper() in {"P5-1", "P5-2", "P5-3"}
 
 
 def p0_phase_number(experiment_id: Any) -> int | None:
@@ -1881,6 +1889,114 @@ def plot_p5_trajectory_integrity_samples(rows: list[dict[str, Any]], path: Path)
     ax.set_aspect("equal", adjustable="datalim")
     ax.grid(True, alpha=0.25)
     ax.legend(loc="best", fontsize=8)
+    fig.tight_layout()
+    fig.savefig(path, dpi=160)
+    plt.close(fig)
+    return True
+
+
+def plot_p5_3_high_risk_zone_overlay(
+    rows: list[dict[str, Any]],
+    fixture: dict[str, Any],
+    path: Path,
+) -> bool:
+    if not rows or not fixture.get("valid_geometry"):
+        return False
+    xy_rows = [
+        row
+        for row in rows
+        if finite_float(row.get("x")) is not None and finite_float(row.get("y")) is not None
+    ]
+    if not xy_rows:
+        return False
+    fig, ax = plt.subplots(figsize=(8.5, 6.5))
+    outside = [row for row in xy_rows if not int(row.get("inside_high_risk_zone", 0) or 0)]
+    overlap = [row for row in xy_rows if int(row.get("inside_high_risk_zone", 0) or 0)]
+    bad = [row for row in overlap if int(row.get("overlap_bad_state", 0) or 0)]
+
+    def scatter(group: list[dict[str, Any]], color: str, label: str, size: int) -> None:
+        if not group:
+            return
+        ax.scatter(
+            [float(finite_float(row.get("x")) or 0.0) for row in group],
+            [float(finite_float(row.get("y")) or 0.0) for row in group],
+            s=size,
+            color=color,
+            alpha=0.72,
+            linewidths=0,
+            label=label,
+        )
+
+    scatter(outside, "#cbd5e1", "trajectory samples", 14)
+    scatter(overlap, "#2563eb", "zone overlap", 22)
+    scatter(bad, "#dc2626", "bad overlap", 36)
+
+    x_min = float(fixture["x_min"])
+    x_max = float(fixture["x_max"])
+    y_min = float(fixture["y_min"])
+    y_max = float(fixture["y_max"])
+    rect = plt.Rectangle(
+        (min(x_min, x_max), min(y_min, y_max)),
+        abs(x_max - x_min),
+        abs(y_max - y_min),
+        fill=False,
+        edgecolor="#111827",
+        linewidth=1.6,
+        linestyle="--",
+        label="fixture x/y bounds",
+    )
+    ax.add_patch(rect)
+    ax.set_xlabel("x [m]")
+    ax.set_ylabel("y [m]")
+    ax.set_title("P5-3 high-risk zone trajectory overlap")
+    ax.set_aspect("equal", adjustable="datalim")
+    ax.grid(True, alpha=0.25)
+    ax.legend(loc="best", fontsize=8)
+    fig.tight_layout()
+    fig.savefig(path, dpi=160)
+    plt.close(fig)
+    return True
+
+
+def plot_p5_3_first_bad_tau_timeline(
+    rows: list[dict[str, Any]],
+    fixture: dict[str, Any],
+    path: Path,
+) -> bool:
+    if not rows or not fixture.get("valid_geometry"):
+        return False
+    t = relative_time(rows)
+    if not t:
+        return False
+    first_bad_tau = finite_or_nan(rows, "first_bad_tau")
+    future_min_im = finite_or_nan(rows, "future_min_im")
+    if not any(math.isfinite(value) for value in first_bad_tau + future_min_im):
+        return False
+    actions = [p5_action(row, "action") or "<empty>" for row in rows]
+    codes = action_code_map(actions)
+    fig, axes = plt.subplots(3, 1, figsize=(11, 7.2), sharex=True)
+    axes[0].plot(t, first_bad_tau, label="first_bad_tau", color="#dc2626")
+    axes[0].axhspan(
+        min(float(fixture["tau_min"]), float(fixture["tau_max"])),
+        max(float(fixture["tau_min"]), float(fixture["tau_max"])),
+        color="#fecaca",
+        alpha=0.35,
+        label="fixture tau window",
+    )
+    axes[0].set_ylabel("tau [s]")
+    axes[0].legend(loc="best")
+    axes[1].plot(t, future_min_im, label="future_min_im", color="#2563eb")
+    axes[1].axhline(0.3, color="#111827", lw=0.9, linestyle="--", label="future replan margin")
+    axes[1].axhline(0.0, color="#111827", lw=0.8)
+    axes[1].set_ylabel("IM [m]")
+    axes[1].legend(loc="best")
+    axes[2].step(t, [codes[value] for value in actions], where="post", color="#f97316")
+    axes[2].set_yticks(list(codes.values()), list(codes.keys()))
+    axes[2].set_ylabel("P5 action")
+    axes[2].set_xlabel("time since first P5 status [s]")
+    for ax in axes:
+        ax.grid(True, alpha=0.25)
+    fig.suptitle("P5-3 first bad tau and future margin")
     fig.tight_layout()
     fig.savefig(path, dpi=160)
     plt.close(fig)
@@ -4348,6 +4464,357 @@ def validate_p5_2_hard_gates(
     return gates
 
 
+def manifest_bool(value: Any) -> bool:
+    if isinstance(value, bool):
+        return value
+    return str(value).strip().lower() in {"1", "true", "yes", "on"}
+
+
+def p5_3_fixture_from_manifest(manifest: dict[str, Any]) -> dict[str, Any]:
+    nested = ((manifest.get("p5_3") or {}).get("fixture") or {}) if manifest else {}
+
+    def flat(key: str) -> Any:
+        return manifest.get(f"p5_3.fixture.{key}") if manifest else None
+
+    bounds = nested.get("bounds") or {}
+    tau_window = nested.get("tau_window_s") or [flat("tau_min"), flat("tau_max")]
+    injected = nested.get("injected_pl_m") or {}
+    expected_al = nested.get("expected_alert_limit_m") or {}
+
+    def pair(values: Any, fallback_min: Any, fallback_max: Any) -> tuple[float | None, float | None]:
+        if isinstance(values, (list, tuple)) and len(values) >= 2:
+            return finite_float(values[0]), finite_float(values[1])
+        return finite_float(fallback_min), finite_float(fallback_max)
+
+    x_min, x_max = pair(bounds.get("x"), flat("x_min"), flat("x_max"))
+    y_min, y_max = pair(bounds.get("y"), flat("y_min"), flat("y_max"))
+    z_min, z_max = pair(bounds.get("z"), flat("z_min"), flat("z_max"))
+    tau_min, tau_max = pair(tau_window, flat("tau_min"), flat("tau_max"))
+    hpl_pred = finite_float(injected.get("hpl_pred", flat("hpl_pred_m")))
+    vpl_pred = finite_float(injected.get("vpl_pred", flat("vpl_pred_m")))
+    expected_hal = finite_float(expected_al.get("hal", flat("expected_hal_m")))
+    expected_val = finite_float(expected_al.get("val", flat("expected_val_m")))
+    fixture = {
+        "present": bool(manifest) and (
+            "p5_3" in manifest or any(str(key).startswith("p5_3.fixture.") for key in manifest)
+        ),
+        "enabled": manifest_bool(nested.get("enabled", flat("enabled"))),
+        "name": str(nested.get("name", flat("name")) or ""),
+        "x_min": x_min,
+        "x_max": x_max,
+        "y_min": y_min,
+        "y_max": y_max,
+        "z_min": z_min,
+        "z_max": z_max,
+        "tau_min": tau_min,
+        "tau_max": tau_max,
+        "hpl_pred": hpl_pred,
+        "vpl_pred": vpl_pred,
+        "expected_hal": expected_hal,
+        "expected_val": expected_val,
+        "expected_im": finite_float(nested.get("expected_im_m", flat("expected_im_m"))),
+        "expected_reason": str(nested.get("expected_reason", P5_3_FIXTURE_REASON) or ""),
+    }
+    finite_required = (
+        "x_min",
+        "x_max",
+        "y_min",
+        "y_max",
+        "z_min",
+        "z_max",
+        "tau_min",
+        "tau_max",
+        "hpl_pred",
+        "vpl_pred",
+    )
+    fixture["valid_geometry"] = all(fixture.get(key) is not None for key in finite_required)
+    return fixture
+
+
+def p5_3_value_in_window(value: float | None, lo: float | None, hi: float | None) -> bool:
+    if value is None or lo is None or hi is None:
+        return False
+    lower = min(lo, hi)
+    upper = max(lo, hi)
+    return lower <= value <= upper
+
+
+def p5_3_point_in_fixture(row: dict[str, Any], fixture: dict[str, Any]) -> bool:
+    x = finite_float(row.get("x"))
+    y = finite_float(row.get("y"))
+    z = finite_float(row.get("z"))
+    return (
+        p5_3_value_in_window(x, fixture.get("x_min"), fixture.get("x_max"))
+        and p5_3_value_in_window(y, fixture.get("y_min"), fixture.get("y_max"))
+        and p5_3_value_in_window(z, fixture.get("z_min"), fixture.get("z_max"))
+    )
+
+
+def p5_3_overlap_rows(
+    marker_rows: list[dict[str, Any]],
+    fixture: dict[str, Any],
+) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    if not fixture.get("valid_geometry"):
+        return rows
+    for row in marker_rows:
+        x = finite_float(row.get("x"))
+        y = finite_float(row.get("y"))
+        z = finite_float(row.get("z"))
+        if x is None or y is None or z is None:
+            continue
+        state = str(row.get("state", ""))
+        inside = p5_3_point_in_fixture(row, fixture)
+        rows.append(
+            {
+                **row,
+                "inside_high_risk_zone": 1 if inside else 0,
+                "overlap_bad_state": 1 if inside and state == "bad" else 0,
+                "fixture_x_min": fixture.get("x_min"),
+                "fixture_x_max": fixture.get("x_max"),
+                "fixture_y_min": fixture.get("y_min"),
+                "fixture_y_max": fixture.get("y_max"),
+                "fixture_z_min": fixture.get("z_min"),
+                "fixture_z_max": fixture.get("z_max"),
+            }
+        )
+    return rows
+
+
+def summarize_p5_3_overlap(rows: list[dict[str, Any]]) -> dict[str, Any]:
+    overlap_rows = [row for row in rows if int(row.get("inside_high_risk_zone", 0) or 0)]
+    bad_rows = [row for row in overlap_rows if int(row.get("overlap_bad_state", 0) or 0)]
+    states = Counter(str(row.get("state", "")) for row in overlap_rows)
+    return {
+        "row_count": len(rows),
+        "overlap_count": len(overlap_rows),
+        "overlap_bad_state_count": len(bad_rows),
+        "overlap_state_counts": dict(sorted(states.items())),
+        "first_overlap_row": overlap_rows[0] if overlap_rows else None,
+        "first_bad_overlap_row": bad_rows[0] if bad_rows else None,
+    }
+
+
+def p5_3_future_replan_rows(p5_rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    accepted_reasons = {"future_bad", "future_low_margin", P5_3_FIXTURE_REASON}
+    rows: list[dict[str, Any]] = []
+    for row in p5_rows:
+        if (
+            p5_action(row, "action") != P5_REPLAN_ACTION
+            and p5_action(row, "raw_action") != P5_REPLAN_ACTION
+        ):
+            continue
+        reasons = {
+            p5_reason(row, "reason"),
+            p5_reason(row, "final_gate_last_reason"),
+            p5_reason(row, "pred_al_last_reason"),
+        }
+        if reasons & accepted_reasons:
+            rows.append(row)
+    return rows
+
+
+def p5_3_first_bad_tau_values(p5_rows: list[dict[str, Any]]) -> list[float]:
+    values = [finite_float(row.get("first_bad_tau")) for row in p5_rows]
+    return [value for value in values if value is not None]
+
+
+def validate_p5_3_hard_gates(
+    manifest: dict[str, Any],
+    validator_summary: dict[str, Any],
+    topic_health: dict[str, dict[str, Any]],
+    p0_health_summary: dict[str, Any],
+    p0_health_rows: list[dict[str, Any]],
+    p5_rows: list[dict[str, Any]],
+    p5_summary: dict[str, Any],
+    p5_marker_rows: list[dict[str, Any]],
+    failures: list[str],
+    inconclusive: list[str],
+) -> dict[str, Any]:
+    manifest_gates = p5_manifest_gate_values(manifest)
+    fixture = p5_3_fixture_from_manifest(manifest)
+    fixture_ready = (
+        fixture.get("present")
+        and fixture.get("enabled")
+        and fixture.get("name") == P5_3_FIXTURE_NAME
+        and fixture.get("valid_geometry")
+    )
+    overlap_rows = p5_3_overlap_rows(p5_marker_rows, fixture)
+    overlap_summary = summarize_p5_3_overlap(overlap_rows)
+    p0_startup = summarize_p0_startup_snapshot_unavailable(p0_health_rows)
+    topic_statuses = {
+        topic: (topic_health.get(topic) or {}).get("status", "MISSING")
+        for topic in P5_TOPIC_EXPECTATIONS
+    }
+    first_bad_tau_values = p5_3_first_bad_tau_values(p5_rows)
+    first_bad_tau_min = min(first_bad_tau_values) if first_bad_tau_values else None
+    first_bad_tau_in_window = any(
+        p5_3_value_in_window(value, fixture.get("tau_min"), fixture.get("tau_max"))
+        for value in first_bad_tau_values
+    )
+    future_replan_rows = p5_3_future_replan_rows(p5_rows)
+    future_min_im_min = finite_float(p5_summary.get("future_min_im_min"))
+    future_replan_margin_m = finite_float(manifest.get("p5.future_replan_margin_m")) or 0.3
+    expected_im = finite_float(fixture.get("expected_im"))
+    injected_pl_over_expected_al = (
+        fixture.get("expected_hal") is not None
+        and fixture.get("expected_val") is not None
+        and fixture.get("hpl_pred") is not None
+        and fixture.get("vpl_pred") is not None
+        and (
+            float(fixture["hpl_pred"]) > float(fixture["expected_hal"])
+            or float(fixture["vpl_pred"]) > float(fixture["expected_val"])
+        )
+    )
+    overlap_margin_evidence = (
+        int(overlap_summary.get("overlap_bad_state_count", 0) or 0) > 0
+        or (
+            future_min_im_min is not None
+            and future_min_im_min < future_replan_margin_m
+        )
+        or (
+            expected_im is not None
+            and expected_im < future_replan_margin_m
+            and injected_pl_over_expected_al
+        )
+    )
+    max_consecutive_emergency = int(p5_summary.get("max_consecutive_emergency", 0) or 0)
+    raw_max_consecutive_emergency = int(
+        p5_summary.get("raw_max_consecutive_emergency", 0) or 0
+    )
+    gates = {
+        **manifest_gates,
+        "fixture": fixture,
+        "fixture_present": bool(fixture.get("present")),
+        "fixture_enabled": bool(fixture.get("enabled")),
+        "fixture_name_ok": fixture.get("name") == P5_3_FIXTURE_NAME,
+        "fixture_geometry_valid": bool(fixture.get("valid_geometry")),
+        "fixture_ready": bool(fixture_ready),
+        "blocked_scenario_missing": not bool(fixture_ready),
+        "validator_summary_present": bool(validator_summary),
+        "validator_passed": validator_summary.get("passed") is True,
+        "required_p5_topics_stable": all(
+            status == "PASS"
+            for topic, status in topic_statuses.items()
+            if P5_TOPIC_EXPECTATIONS.get(topic) != "planner-dependent"
+        ),
+        "topic_statuses": topic_statuses,
+        "p0_health_rows_present": int(p0_health_summary.get("row_count", 0) or 0) > 0,
+        **p0_startup,
+        "p0_post_startup_ready": p0_startup["post_startup_ready_false_count"] == 0,
+        "p0_post_startup_non_stale": p0_startup["post_startup_stale_true_count"] == 0,
+        "p0_post_startup_not_full_unknown": (
+            p0_startup["post_startup_full_unknown_count"] == 0
+        ),
+        "p5_status_rows_present": int(p5_summary.get("status_rows", 0) or 0) > 0,
+        "p5_json_parse_ok": int(p5_summary.get("parse_error_count", 0) or 0) == 0,
+        "p5_inspection_ok": not bool(p5_summary.get("inspection_error")),
+        "marker_rows_present": len(p5_marker_rows) > 0,
+        "overlap": overlap_summary,
+        "trajectory_overlap_present": int(overlap_summary.get("overlap_count", 0) or 0) > 0,
+        "overlap_margin_evidence": overlap_margin_evidence,
+        "future_min_im_min": future_min_im_min,
+        "future_replan_margin_m": future_replan_margin_m,
+        "request_replan_count": int(p5_summary.get("replan_action_count", 0) or 0),
+        "raw_request_replan_count": int(p5_summary.get("raw_replan_action_count", 0) or 0),
+        "future_replan_reason_count": len(future_replan_rows),
+        "future_replan_reason_ok": len(future_replan_rows) > 0,
+        "first_bad_tau_values": first_bad_tau_values[:20],
+        "first_bad_tau_min": first_bad_tau_min,
+        "first_bad_tau_in_fixture_window": first_bad_tau_in_window,
+        "first_bad_tau_target_s": fixture.get("tau_min"),
+        "emergency_storm_absent": (
+            max_consecutive_emergency < P5_2_EMERGENCY_STORM_CONSECUTIVE
+            and raw_max_consecutive_emergency < P5_2_EMERGENCY_STORM_CONSECUTIVE
+        ),
+        "max_consecutive_emergency": max_consecutive_emergency,
+        "raw_max_consecutive_emergency": raw_max_consecutive_emergency,
+        "predicted_al_available": (
+            p5_summary.get("pred_hal_min_min") is not None
+            and p5_summary.get("pred_val_min_min") is not None
+        ),
+    }
+
+    if gates["blocked_scenario_missing"]:
+        gates["passed"] = False
+        return gates
+
+    if not (
+        gates["manifest_safety_profile_p5"]
+        and gates["manifest_expected_true_ok"]
+        and gates["manifest_expected_false_ok"]
+    ):
+        failures.append("P5-3 manifest does not enable P0/P5 with P1-P4 disabled")
+    if not gates["validator_summary_present"]:
+        inconclusive.append("P5-3 validator summary is missing")
+    elif not gates["validator_passed"]:
+        failures.append("P5-3 validator summary did not pass")
+    if not gates["required_p5_topics_stable"]:
+        failures.append("P5-3 required P0/P5 topics are not all stable")
+    if not gates["p0_health_rows_present"]:
+        failures.append("P5-3 P0 health rows are missing")
+    if not gates["startup_snapshot_unavailable_bounded"]:
+        failures.append("P5-3 P0 startup snapshot_unavailable prefix is not bounded")
+    if not gates["p0_post_startup_ready"]:
+        failures.append("P5-3 P0 health reported ready=false after startup")
+    if not gates["p0_post_startup_non_stale"]:
+        failures.append("P5-3 P0 health reported stale=true after startup")
+    if not gates["p0_post_startup_not_full_unknown"]:
+        failures.append("P5-3 P0 health reported full unknown after startup")
+    if not gates["p5_status_rows_present"]:
+        failures.append("P5-3 P5 status rows are missing")
+    if not gates["p5_json_parse_ok"]:
+        failures.append("P5-3 P5 status JSON parse errors were observed")
+    if not gates["p5_inspection_ok"]:
+        inconclusive.append("P5-3 P5 status inspection did not complete cleanly")
+    if not gates["marker_rows_present"]:
+        inconclusive.append("P5-3 trajectory marker evidence is missing")
+    if not gates["trajectory_overlap_present"]:
+        failures.append("P5-3 trajectory samples do not overlap the high-risk zone fixture")
+    if not gates["overlap_margin_evidence"]:
+        failures.append("P5-3 overlap did not show PL>AL or IM below future replan margin")
+    if gates["request_replan_count"] <= 0 and gates["raw_request_replan_count"] <= 0:
+        failures.append("P5-3 did not observe REQUEST_REPLAN")
+    if not gates["future_replan_reason_ok"]:
+        failures.append("P5-3 REQUEST_REPLAN reason was not future_bad or an equivalent future high-risk reason")
+    if not gates["first_bad_tau_in_fixture_window"]:
+        failures.append("P5-3 first_bad_tau was absent or outside the fixture tau window")
+    if not gates["emergency_storm_absent"]:
+        failures.append(
+            "P5-3 observed sustained emergency storm: "
+            f"action_consecutive={max_consecutive_emergency}, "
+            f"raw_action_consecutive={raw_max_consecutive_emergency}"
+        )
+    if not gates["predicted_al_available"]:
+        inconclusive.append("P5-3 predicted alert-limit minima had no finite samples")
+
+    required = (
+        "manifest_safety_profile_p5",
+        "manifest_expected_true_ok",
+        "manifest_expected_false_ok",
+        "validator_summary_present",
+        "validator_passed",
+        "required_p5_topics_stable",
+        "p0_health_rows_present",
+        "startup_snapshot_unavailable_bounded",
+        "p0_post_startup_ready",
+        "p0_post_startup_non_stale",
+        "p0_post_startup_not_full_unknown",
+        "p5_status_rows_present",
+        "p5_json_parse_ok",
+        "p5_inspection_ok",
+        "marker_rows_present",
+        "trajectory_overlap_present",
+        "overlap_margin_evidence",
+        "future_replan_reason_ok",
+        "first_bad_tau_in_fixture_window",
+        "emergency_storm_absent",
+        "predicted_al_available",
+    )
+    gates["passed"] = all(bool(gates.get(key)) for key in required)
+    return gates
+
+
 def p0_5_affine_c_pi(x: Any, y: Any, z: Any, tau: Any) -> Any:
     return 20.0 + 2.0 * x + 3.0 * y + 4.0 * z + 5.0 * tau
 
@@ -4810,6 +5277,12 @@ def next_debug_branch(
         return "PASS -> P5-2" if status == "PASS" else "debug P5 thresholds/AL provider"
     if normalized_experiment_id == "P5-2":
         return "PASS -> P5-3" if status == "PASS" else "debug PL/AL margin"
+    if normalized_experiment_id == "P5-3":
+        if status == "PASS":
+            return "PASS -> P5-4"
+        if status == "BLOCKED_SCENARIO_MISSING":
+            return P5_3_BLOCKED_BRANCH
+        return P5_3_FAIL_BRANCH
     if status == "PASS":
         pass_branches = {
             "B0-1": "continue_to_B0-2_open_sky_baseline",
@@ -4872,6 +5345,7 @@ def analyze(args: argparse.Namespace) -> dict[str, Any]:
     experiment_label = str(args.experiment_id).strip().upper()
     p5_1_phase = is_experiment(args, "P5-1")
     p5_2_phase = is_experiment(args, "P5-2")
+    p5_3_phase = is_experiment(args, "P5-3")
     p5_runtime_phase = is_p5_runtime_experiment(args)
     p0_runtime_phase = p0_phase or p5_runtime_phase
     if bool(getattr(args, "blocked_fixture_audit", False)):
@@ -5470,8 +5944,8 @@ def analyze(args: argparse.Namespace) -> dict[str, Any]:
         failures,
         inconclusive,
         allow_replan=p5_runtime_phase,
-        allow_emergency=p5_2_phase,
-        allow_final_gate_failure=p5_2_phase,
+        allow_emergency=p5_2_phase or p5_3_phase,
+        allow_final_gate_failure=p5_2_phase or p5_3_phase,
     )
     if p0_requires_odom_gate and p5_summary.get("action_counts"):
         failures.append(f"{experiment_label} P5 status reported actions while P5 is disabled")
@@ -5480,6 +5954,8 @@ def analyze(args: argparse.Namespace) -> dict[str, Any]:
     p5_marker_error = ""
     p5_1_gates: dict[str, Any] = {}
     p5_2_gates: dict[str, Any] = {}
+    p5_3_gates: dict[str, Any] = {}
+    p5_3_overlap: list[dict[str, Any]] = []
     p5_csv_artifacts: list[str] = []
     p5_figure_artifacts: list[str] = []
     p5_required_figures: list[Path] = []
@@ -5510,6 +5986,23 @@ def analyze(args: argparse.Namespace) -> dict[str, Any]:
             failures,
             inconclusive,
         )
+    if p5_3_phase:
+        p5_3_gates = validate_p5_3_hard_gates(
+            manifest,
+            validator_summary,
+            topic_health,
+            p0_health_summary,
+            health_rows,
+            p5_rows,
+            p5_summary,
+            p5_marker_rows,
+            failures,
+            inconclusive,
+        )
+        p5_3_overlap = p5_3_overlap_rows(
+            p5_marker_rows,
+            p5_3_gates.get("fixture", {}),
+        )
 
     csv_artifacts = [str(topic_counts_path)]
     csv_artifacts.extend(p0_csv_artifacts)
@@ -5524,6 +6017,7 @@ def analyze(args: argparse.Namespace) -> dict[str, Any]:
         p5_final_gate_path = csv_dir / f"{prefix}_p5_final_gate_summary.csv"
         p5_marker_path = csv_dir / f"{prefix}_trajectory_integrity_evidence.csv"
         p5_debounce_path = csv_dir / f"{prefix}_p5_debounce_timeline.csv"
+        p5_3_overlap_path = csv_dir / f"{prefix}_high_risk_zone_overlap.csv"
         action_rows = []
         t_rel = relative_time(p5_rows)
         for idx, row in enumerate(p5_rows):
@@ -5666,6 +6160,30 @@ def analyze(args: argparse.Namespace) -> dict[str, Any]:
             ],
             p5_marker_rows,
         )
+        if p5_3_phase:
+            write_csv(
+                p5_3_overlap_path,
+                [
+                    "bag_time_s",
+                    "topic",
+                    "marker_ns",
+                    "marker_id",
+                    "point_index",
+                    "x",
+                    "y",
+                    "z",
+                    "state",
+                    "inside_high_risk_zone",
+                    "overlap_bad_state",
+                    "fixture_x_min",
+                    "fixture_x_max",
+                    "fixture_y_min",
+                    "fixture_y_max",
+                    "fixture_z_min",
+                    "fixture_z_max",
+                ],
+                p5_3_overlap,
+            )
         p5_csv_artifacts.extend(
             [
                 str(p5_action_path),
@@ -5675,6 +6193,8 @@ def analyze(args: argparse.Namespace) -> dict[str, Any]:
                 str(p5_marker_path),
             ]
         )
+        if p5_3_phase:
+            p5_csv_artifacts.append(str(p5_3_overlap_path))
         csv_artifacts.extend(
             artifact
             for artifact in p5_csv_artifacts
@@ -5692,6 +6212,8 @@ def analyze(args: argparse.Namespace) -> dict[str, Any]:
         p5_final_gate_figure_path = figures_dir / f"{prefix}_p5_final_gate_summary.png"
         p5_trajectory_figure_path = figures_dir / f"{prefix}_trajectory_integrity_samples.png"
         p5_rviz_overview_path = figures_dir / f"{prefix}_p5_rviz_overview.png"
+        p5_3_overlay_figure_path = figures_dir / f"{prefix}_high_risk_zone_overlay.png"
+        p5_3_first_bad_tau_figure_path = figures_dir / f"{prefix}_first_bad_tau_timeline.png"
         if plot_p5_action_timeline(p5_rows, p5_action_figure_path):
             p5_figure_artifacts.append(str(p5_action_figure_path))
         if plot_p5_status_timeline(p5_rows, p5_status_figure_path):
@@ -5720,6 +6242,23 @@ def analyze(args: argparse.Namespace) -> dict[str, Any]:
             warnings.append("P5 trajectory integrity marker sample plot was not generated because marker rows were unavailable")
         if plot_p5_rviz_overview(topic_health, p5_summary, p5_marker_summary, p5_rviz_overview_path):
             p5_figure_artifacts.append(str(p5_rviz_overview_path))
+        if p5_3_phase:
+            if plot_p5_3_high_risk_zone_overlay(
+                p5_3_overlap,
+                p5_3_gates.get("fixture", {}),
+                p5_3_overlay_figure_path,
+            ):
+                p5_figure_artifacts.append(str(p5_3_overlay_figure_path))
+            else:
+                warnings.append("P5-3 high-risk zone overlay was not generated because overlap rows were unavailable")
+            if plot_p5_3_first_bad_tau_timeline(
+                p5_rows,
+                p5_3_gates.get("fixture", {}),
+                p5_3_first_bad_tau_figure_path,
+            ):
+                p5_figure_artifacts.append(str(p5_3_first_bad_tau_figure_path))
+            else:
+                warnings.append("P5-3 first_bad_tau timeline was not generated because status rows were unavailable")
         required_runtime_figures = [
             scenario_figure_path,
             topic_activity_figure_path,
@@ -5740,6 +6279,13 @@ def analyze(args: argparse.Namespace) -> dict[str, Any]:
                 [
                     p5_current_im_vs_action_figure_path,
                     p5_stale_integrity_correlation_figure_path,
+                ]
+            )
+        if p5_3_phase:
+            required_runtime_figures.extend(
+                [
+                    p5_3_overlay_figure_path,
+                    p5_3_first_bad_tau_figure_path,
                 ]
             )
         p5_required_figures.extend(required_runtime_figures)
@@ -5778,7 +6324,9 @@ def analyze(args: argparse.Namespace) -> dict[str, Any]:
                 )
 
     status = "PASS"
-    if failures:
+    if p5_3_phase and p5_3_gates.get("blocked_scenario_missing"):
+        status = "BLOCKED_SCENARIO_MISSING"
+    elif failures:
         status = "FAIL"
     elif inconclusive:
         status = "INCONCLUSIVE"
@@ -5809,6 +6357,7 @@ def analyze(args: argparse.Namespace) -> dict[str, Any]:
             **p5_summary,
             "p5_1_hard_gates": p5_1_gates,
             "p5_2_hard_gates": p5_2_gates,
+            "p5_3_hard_gates": p5_3_gates,
             "marker_evidence": p5_marker_summary,
         },
         "safety_off_topic_counts": safety_off_topic_counts,

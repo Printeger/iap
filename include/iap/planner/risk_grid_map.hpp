@@ -14,6 +14,21 @@ namespace iap {
 
 constexpr uint32_t RISK_GRID_SOURCE_OCCUPIED_SKIP = 1u << 31;
 
+struct P5_3HighRiskZoneFixtureConfig {
+  bool enabled = false;
+  std::string name = "future_high_risk_zone_v1";
+  double x_min_m = -14.0;
+  double x_max_m = 14.0;
+  double y_min_m = -1.5;
+  double y_max_m = 1.5;
+  double z_min_m = 0.5;
+  double z_max_m = 2.5;
+  double tau_min_s = 1.2;
+  double tau_max_s = 2.0;
+  double hpl_pred_m = 10.2;
+  double vpl_pred_m = 10.2;
+};
+
 struct RiskGridMapParams {
   std::string frame_id = "map";
   double resolution_m = 0.75;
@@ -27,6 +42,7 @@ struct RiskGridMapParams {
   double cost_max = 100.0;
   bool skip_occupied_voxels = true;
   bool use_predictor_batch_query = true;
+  P5_3HighRiskZoneFixtureConfig p5_3_fixture;
 };
 
 struct RiskGridHealth {
@@ -64,6 +80,7 @@ struct RiskVoxel {
   bool stale = true;
   bool unknown = true;
   uint32_t source_flags = 0u;
+  std::string reason = "not_evaluated";
 };
 
 struct RiskCostSample {

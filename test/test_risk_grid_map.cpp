@@ -433,6 +433,83 @@ TEST(RiskGridMapTest, HealthCountsPredictorSourceFlags) {
   EXPECT_EQ(health.dominant_unknown_count, 18u);
 }
 
+TEST(RiskGridMapTest, P5_3FixtureDisabledByDefaultDoesNotAlterProviderOutput) {
+  iap::RiskGridMapParams params = base_params();
+  params.horizons_s = {0.0, 1.0, 1.5, 2.0};
+  iap::RiskGridMap grid(params);
+  AffineProvider provider;
+  std::string reason;
+
+  ASSERT_TRUE(grid.refreshFromProvider(Eigen::Vector3d::Zero(), 10.0,
+                                       provider, &reason))
+      << reason;
+
+  auto snapshot = grid.acquireSnapshot();
+  ASSERT_NE(snapshot, nullptr);
+  const Eigen::Vector3i id(1, 1, 1);
+  const Eigen::Vector3d p = snapshot->indexToPos(id);
+  iap::RiskVoxel voxel;
+  ASSERT_TRUE(snapshot->voxelAt(2, id, &voxel));
+  EXPECT_TRUE(voxel.valid);
+  EXPECT_FALSE(voxel.stale);
+  EXPECT_EQ(voxel.reason, "ok");
+  EXPECT_NEAR(voxel.hpl_pred, AffineProvider::affine(p, 1.5), 1.0e-9);
+}
+
+TEST(RiskGridMapTest, P5_3FixtureOnlyAltersCellsInsideBoundsAndTauWindow) {
+  iap::RiskGridMapParams params = base_params();
+  params.horizons_s = {0.0, 1.0, 1.5, 2.0};
+  params.p5_3_fixture.enabled = true;
+  params.p5_3_fixture.name = "future_high_risk_zone_v1";
+  params.p5_3_fixture.x_min_m = -0.6;
+  params.p5_3_fixture.x_max_m = 0.6;
+  params.p5_3_fixture.y_min_m = -0.6;
+  params.p5_3_fixture.y_max_m = 0.6;
+  params.p5_3_fixture.z_min_m = -0.6;
+  params.p5_3_fixture.z_max_m = 0.6;
+  params.p5_3_fixture.tau_min_s = 1.2;
+  params.p5_3_fixture.tau_max_s = 2.0;
+  params.p5_3_fixture.hpl_pred_m = 10.2;
+  params.p5_3_fixture.vpl_pred_m = 10.2;
+  iap::RiskGridMap grid(params);
+  AffineProvider provider;
+  std::string reason;
+
+  ASSERT_TRUE(grid.refreshFromProvider(Eigen::Vector3d::Zero(), 10.0,
+                                       provider, &reason))
+      << reason;
+
+  auto snapshot = grid.acquireSnapshot();
+  ASSERT_NE(snapshot, nullptr);
+  iap::RiskVoxel center_tau_1_5;
+  ASSERT_TRUE(snapshot->voxelAt(2, Eigen::Vector3i(1, 1, 1),
+                               &center_tau_1_5));
+  EXPECT_TRUE(center_tau_1_5.valid);
+  EXPECT_FALSE(center_tau_1_5.stale);
+  EXPECT_FALSE(center_tau_1_5.unknown);
+  EXPECT_DOUBLE_EQ(center_tau_1_5.hpl_pred, 10.2);
+  EXPECT_DOUBLE_EQ(center_tau_1_5.vpl_pred, 10.2);
+  EXPECT_EQ(center_tau_1_5.reason, "p5_3_high_risk_zone");
+
+  iap::RiskVoxel center_tau_1_0;
+  ASSERT_TRUE(snapshot->voxelAt(1, Eigen::Vector3i(1, 1, 1),
+                               &center_tau_1_0));
+  const Eigen::Vector3d center_p =
+      snapshot->indexToPos(Eigen::Vector3i(1, 1, 1));
+  EXPECT_NEAR(center_tau_1_0.hpl_pred,
+              AffineProvider::affine(center_p, 1.0), 1.0e-9);
+  EXPECT_EQ(center_tau_1_0.reason, "ok");
+
+  iap::RiskVoxel outside_space;
+  ASSERT_TRUE(snapshot->voxelAt(2, Eigen::Vector3i(2, 1, 1),
+                               &outside_space));
+  const Eigen::Vector3d outside_p =
+      snapshot->indexToPos(Eigen::Vector3i(2, 1, 1));
+  EXPECT_NEAR(outside_space.hpl_pred,
+              AffineProvider::affine(outside_p, 1.5), 1.0e-9);
+  EXPECT_EQ(outside_space.reason, "ok");
+}
+
 TEST(RiskGridMapTest, AllOccupiedSkipHealthReportsDominantReason) {
   iap::RiskGridMapParams params = base_params();
   params.skip_occupied_voxels = true;

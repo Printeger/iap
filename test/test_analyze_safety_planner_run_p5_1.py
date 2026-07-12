@@ -76,6 +76,51 @@ def p5_manifest():
     }
 
 
+def p5_3_manifest(enabled=True):
+    manifest = p5_manifest()
+    manifest.update(
+        {
+            "p5.future_replan_margin_m": 0.3,
+            "p5_3.fixture.enabled": enabled,
+            "p5_3.fixture.name": "future_high_risk_zone_v1",
+            "p5_3.fixture.x_min": -14.0,
+            "p5_3.fixture.x_max": 14.0,
+            "p5_3.fixture.y_min": -1.5,
+            "p5_3.fixture.y_max": 1.5,
+            "p5_3.fixture.z_min": 0.5,
+            "p5_3.fixture.z_max": 2.5,
+            "p5_3.fixture.tau_min": 1.2,
+            "p5_3.fixture.tau_max": 2.0,
+            "p5_3.fixture.hpl_pred_m": 10.2,
+            "p5_3.fixture.vpl_pred_m": 10.2,
+            "p5_3.fixture.expected_hal_m": 10.0,
+            "p5_3.fixture.expected_val_m": 10.0,
+            "p5_3.fixture.expected_im_m": -0.2,
+            "p5_3": {
+                "fixture": {
+                    "enabled": enabled,
+                    "name": "future_high_risk_zone_v1",
+                    "bounds": {
+                        "x": [-14.0, 14.0],
+                        "y": [-1.5, 1.5],
+                        "z": [0.5, 2.5],
+                    },
+                    "tau_window_s": [1.2, 2.0],
+                    "injected_pl_m": {"hpl_pred": 10.2, "vpl_pred": 10.2},
+                    "expected_alert_limit_m": {
+                        "mode": "current_msg_constant",
+                        "hal": 10.0,
+                        "val": 10.0,
+                    },
+                    "expected_im_m": -0.2,
+                    "expected_reason": "p5_3_high_risk_zone",
+                }
+            },
+        }
+    )
+    return manifest
+
+
 def p5_topic_health():
     return {
         topic: {"status": "PASS", "count": 1}
@@ -130,6 +175,49 @@ def startup_snapshot_unavailable_row(**overrides):
         unknown_ratio=1.0,
         sample_count=1,
         unknown_count=1,
+    )
+    row.update(overrides)
+    return row
+
+
+def p5_3_marker_row(**overrides):
+    row = {
+        "bag_time_s": 10.0,
+        "topic": analyzer.P5_TRAJECTORY_SAMPLES_TOPIC,
+        "marker_ns": "trajectory_integrity_samples",
+        "marker_id": 1,
+        "marker_type": 4,
+        "marker_action": 0,
+        "point_index": 0,
+        "x": 0.0,
+        "y": 0.0,
+        "z": 1.2,
+        "color_r": 1.0,
+        "color_g": 0.0,
+        "color_b": 0.0,
+        "color_a": 1.0,
+        "state": "bad",
+        "text": "",
+    }
+    row.update(overrides)
+    return row
+
+
+def p5_3_replan_row(**overrides):
+    row = p5_row(
+        bag_time_s=10.0,
+        action="REQUEST_REPLAN",
+        raw_action="REQUEST_REPLAN",
+        reason="future_bad",
+        future_min_im=-0.2,
+        first_bad_tau=1.2,
+        bad_ratio=0.3,
+        unknown_ratio=0.0,
+        pred_hal_min=10.0,
+        pred_val_min=10.0,
+        sample_count=10,
+        bad_count=3,
+        unknown_count=0,
     )
     row.update(overrides)
     return row
@@ -449,6 +537,110 @@ class P5_2AnalyzerTest(unittest.TestCase):
         self.assertEqual(
             "debug PL/AL margin",
             analyzer.next_debug_branch("FAIL", ["P5-2 failed"], [], "P5-2"),
+        )
+
+
+class P5_3AnalyzerTest(unittest.TestCase):
+    def validate_rows(self, rows, manifest=None, marker_rows=None):
+        p5_summary = analyzer.summarize_p5_status_rows(rows)
+        failures = []
+        inconclusive = []
+        gates = analyzer.validate_p5_3_hard_gates(
+            manifest if manifest is not None else p5_3_manifest(),
+            {"passed": True},
+            p5_topic_health(),
+            analyzer.summarize_p0_health(bounded_startup_p0_rows()),
+            bounded_startup_p0_rows(),
+            rows,
+            p5_summary,
+            marker_rows if marker_rows is not None else [p5_3_marker_row()],
+            failures,
+            inconclusive,
+        )
+        return p5_summary, gates, failures, inconclusive
+
+    def test_p5_3_passes_with_fixture_overlap_and_future_bad_replan(self):
+        rows = [p5_row(bag_time_s=idx) for idx in range(3)]
+        rows.append(p5_3_replan_row())
+
+        _, gates, failures, inconclusive = self.validate_rows(rows)
+
+        self.assertEqual([], failures)
+        self.assertEqual([], inconclusive)
+        self.assertTrue(gates["passed"])
+        self.assertTrue(gates["trajectory_overlap_present"])
+        self.assertTrue(gates["overlap_margin_evidence"])
+        self.assertTrue(gates["future_replan_reason_ok"])
+
+    def test_p5_3_blocks_when_fixture_manifest_is_missing_or_disabled(self):
+        _, gates, failures, inconclusive = self.validate_rows(
+            [p5_3_replan_row()],
+            manifest=p5_manifest(),
+        )
+
+        self.assertEqual([], failures)
+        self.assertEqual([], inconclusive)
+        self.assertFalse(gates["passed"])
+        self.assertTrue(gates["blocked_scenario_missing"])
+
+        _, disabled_gates, _, _ = self.validate_rows(
+            [p5_3_replan_row()],
+            manifest=p5_3_manifest(enabled=False),
+        )
+        self.assertTrue(disabled_gates["blocked_scenario_missing"])
+
+    def test_p5_3_fails_when_overlap_has_no_replan(self):
+        _, gates, failures, _ = self.validate_rows(
+            [p5_3_replan_row(action="OK", raw_action="OK")]
+        )
+
+        self.assertFalse(gates["passed"])
+        self.assertTrue(any("did not observe REQUEST_REPLAN" in failure for failure in failures), failures)
+
+    def test_p5_3_fails_when_replan_reason_is_not_future_bad(self):
+        _, gates, failures, _ = self.validate_rows(
+            [p5_3_replan_row(reason="current_low_margin")]
+        )
+
+        self.assertFalse(gates["passed"])
+        self.assertTrue(any("reason was not future_bad" in failure for failure in failures), failures)
+
+    def test_p5_3_fails_when_first_bad_tau_is_outside_fixture_window(self):
+        _, gates, failures, _ = self.validate_rows(
+            [p5_3_replan_row(first_bad_tau=0.5)]
+        )
+
+        self.assertFalse(gates["passed"])
+        self.assertTrue(any("first_bad_tau" in failure for failure in failures), failures)
+
+    def test_p5_3_fails_on_emergency_storm(self):
+        rows = [p5_3_replan_row()]
+        rows.extend(
+            p5_3_replan_row(
+                bag_time_s=11.0 + idx,
+                action="REQUEST_EMERGENCY_STOP_CANDIDATE",
+                raw_action="REQUEST_EMERGENCY_STOP_CANDIDATE",
+            )
+            for idx in range(analyzer.P5_2_EMERGENCY_STORM_CONSECUTIVE)
+        )
+
+        _, gates, failures, _ = self.validate_rows(rows)
+
+        self.assertFalse(gates["passed"])
+        self.assertTrue(any("emergency storm" in failure for failure in failures), failures)
+
+    def test_p5_3_next_branch(self):
+        self.assertEqual(
+            "PASS -> P5-4",
+            analyzer.next_debug_branch("PASS", [], [], "P5-3"),
+        )
+        self.assertEqual(
+            analyzer.P5_3_FAIL_BRANCH,
+            analyzer.next_debug_branch("FAIL", ["P5-3 failed"], [], "P5-3"),
+        )
+        self.assertEqual(
+            analyzer.P5_3_BLOCKED_BRANCH,
+            analyzer.next_debug_branch("BLOCKED_SCENARIO_MISSING", [], [], "P5-3"),
         )
 
 

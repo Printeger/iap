@@ -2988,3 +2988,145 @@ Verification notes:
 Final conclusion:
 
 PASS -> P5-3
+
+### P5-3 Future High-Risk Zone
+
+Result: **FAIL -> debug high-risk injection / P5 future_bad reason / PL-AL margin**.
+
+This run adds a deterministic P5-3 high-risk-zone fixture at the P0 risk-grid boundary and runs the manual corridor validation with `p5.pred_alert_limit_mode:=current_msg_constant`. The fixture evidence is present and overlaps the P5 trajectory, with `future_min_im=-0.2m` and `first_bad_tau=1.6s` inside the configured `1.2s..2.0s` window. The acceptance failure is narrower: P5 requested replans, but the reported reason remained `current_low_margin` instead of `future_bad` or an equivalent future high-risk reason.
+
+Executed launch:
+
+```bash
+cd /home/dev/ws_iap
+source /opt/ros/jazzy/setup.bash
+source install/setup.bash
+
+ros2 launch iap test_planner.launch.py \
+  experiment:=p5_corridor \
+  scenario:=manual \
+  run_duration_s:=90 \
+  validation_duration_s:=90 \
+  start_rviz:=false \
+  run_validator:=true \
+  record_bag:=true \
+  p5.pred_alert_limit_mode:=current_msg_constant \
+  p5_3.fixture.enabled:=true
+```
+
+Executed analyzer:
+
+```bash
+cd /home/dev/ws_iap/src/iap
+source /opt/ros/jazzy/setup.bash
+source /home/dev/ws_iap/install/setup.bash
+
+python3 scripts/dev_planner/analyze_safety_planner_run.py \
+  --experiment-id P5-3 \
+  --export-dir /home/dev/ws_iap/src/iap/results/planner_validation/exports/test_planner_p5_corridor_manual_1783862488425 \
+  --bag-dir /home/dev/ws_iap/src/iap/results/planner_validation/bags/test_planner_p5_corridor_manual_20260712T132128Z \
+  --fail-on-threshold
+```
+
+Run artifacts:
+
+| Field | Value |
+|---|---|
+| Export dir | `/home/dev/ws_iap/src/iap/results/planner_validation/exports/test_planner_p5_corridor_manual_1783862488425` |
+| Bag dir | `/home/dev/ws_iap/src/iap/results/planner_validation/bags/test_planner_p5_corridor_manual_20260712T132128Z` |
+| Analyzer summary | `/home/dev/ws_iap/src/iap/results/planner_validation/exports/test_planner_p5_corridor_manual_1783862488425/metadata/safety_planner_analysis_summary.json` |
+| Validator status | `PASS`, `passed=true`, `message_count=639`, `required_fusion_mode=max_pl` |
+| Analyzer status | `FAIL`, `passed=false`, `next_debug_branch=FAIL -> debug high-risk injection / P5 future_bad reason / PL-AL margin` |
+| Analyzer exit with `--fail-on-threshold` | `2`, expected for this failed acceptance branch |
+
+P5-3 fixture manifest:
+
+| Field | Value |
+|---|---|
+| Fixture | `enabled=true`, `name=future_high_risk_zone_v1` |
+| Bounds | `x=[-14.0,14.0]`, `y=[-1.5,1.5]`, `z=[0.5,2.5]` |
+| Tau window | `[1.2s,2.0s]` |
+| Injected PL | `hpl_pred=10.2m`, `vpl_pred=10.2m` |
+| Expected AL / IM | `HAL=10.0m`, `VAL=10.0m`, `IM=-0.2m` |
+| Expected reason | `p5_3_high_risk_zone` |
+
+P5-3 hard gates:
+
+| Gate | Result | Evidence |
+|---|---|---|
+| Fixture and manifest | `PASS` | Fixture present, enabled, named correctly, and geometry is valid. Manifest has `planner_safety_profile=p5`, P0 enabled, P5 runtime/final enabled, and P1-P4 disabled. |
+| Validator and required topics | `PASS` | Validator passed; all non-planner-dependent P0/P5 topics passed. `/drone_0_planning/bspline` is planner-dependent and absent while replans block final candidates. |
+| P0 post-startup health | `PASS` | Post-startup rows `35`; ready-false `0`, stale `0`, full-unknown `0`. |
+| Trajectory overlap | `PASS` | `56` P5 trajectory marker samples overlap the high-risk zone; state counts `ok:40`, `stale_or_warning:16`. |
+| Margin evidence | `PASS` | `future_min_im_min=-0.2m`; first bad tau values are `[1.6, 1.6, 1.6, 1.6]`, inside the fixture window. |
+| Replan action present | `PASS` | P5 status stream has `390` `REQUEST_REPLAN` actions and `390` raw replans. |
+| Future replan reason | `FAIL` | `future_replan_reason_count=0`; the first final-gate failure reports `reason=current_low_margin`, `final_gate_last_reason=current_low_margin`. |
+| Emergency storm absent | `PASS` | Emergency count `0`, final-gate emergency rows `0`, max consecutive emergency `0`. |
+
+P5 status metrics:
+
+| Metric | Value | Conclusion |
+|---|---:|---|
+| Status rows | `390` | P5 status stream present. |
+| Action counts | `REQUEST_REPLAN:390` | Replan containment is present. |
+| `future_min_im` min / mean / max | `-0.200000m` / `2.153668m` / `4.689677m` | Future high-risk evidence appears. |
+| Current IM min / mean / max | `-57.829106m` / `-44.062357m` / `7.881580m` | Current low margin dominates the reported reason. |
+| `bad_ratio_max` | `0.2` | Future bad samples were detected. |
+| Predicted HAL / VAL minima | `10.0m` / `20.0m` | P5 status carried finite predicted AL evidence. |
+| Final-gate fail count max | `2` | No abnormal final-gate accumulation. |
+
+Topic health:
+
+| Topic | Count | Hz | Max gap | Status |
+|---|---:|---:|---:|---|
+| `/iap/integrity` | `642` | `7.124` | `0.803s` | `PASS` |
+| `/sim/drone_0/lidar_body` | `640` | `7.102` | `0.900s` | `PASS` |
+| `/drone_0_visual_slam/odom` | `642` | `7.124` | `0.803s` | `PASS` |
+| `/drone_0_planning/bspline` | `0` | `0.000` | `n/a` | `planner-dependent`; ignored for required P5-3 stability |
+| `/planning/risk_grid_health` | `38` | `0.422` | `2.892s` | `PASS` |
+| `/planning/integrity_gate_status` | `390` | `4.328` | `2.887s` | `PASS` |
+| `/iap/rviz/trajectory_integrity_samples` | `38` | `0.422` | `2.893s` | `PASS` |
+| `/iap/rviz/current_traj_integrity_colored` | `38` | `0.422` | `2.893s` | `PASS` |
+| `/iap/rviz/p5_gate_status` | `38` | `0.422` | `2.893s` | `PASS` |
+| `/iap/rviz/p5_current_im_bars` | `38` | `0.422` | `2.893s` | `PASS` |
+| `/iap/rviz/predicted_pl_cloud` | `33` | `0.366` | `7.853s` | `PASS` |
+| `/iap/rviz/risk_validity_cloud` | `33` | `0.366` | `7.853s` | `PASS` |
+
+P5-3 CSV artifacts:
+
+| CSV | Evidence |
+|---|---|
+| `csv/p5_3_high_risk_zone_overlap.csv` | Overlap samples between P5 trajectory markers and the high-risk-zone fixture. |
+| `csv/p5_3_p5_status.csv` | P5 action, reason, margin, and `first_bad_tau` evidence. |
+| `csv/p5_3_trajectory_integrity_evidence.csv` | RViz marker-derived trajectory sample evidence. |
+| `csv/p5_3_p0_risk_grid_health.csv` | P0 readiness, stale, and unknown-ratio evidence. |
+
+Figure conclusions:
+
+| Figure | Conclusion |
+|---|---|
+| ![P5-3 scenario topdown](../../results/planner_validation/exports/test_planner_p5_corridor_manual_1783862488425/figures/p5_3_scenario_topdown.png) | Corridor context for the manual fixture run. |
+| ![P5-3 topic activity timeline](../../results/planner_validation/exports/test_planner_p5_corridor_manual_1783862488425/figures/p5_3_topic_activity_timeline.png) | Required P0/P5 topics are active; planner-dependent bspline absence matches continuous replans. |
+| ![P5-3 P0 health timeline](../../results/planner_validation/exports/test_planner_p5_corridor_manual_1783862488425/figures/p5_3_p0_health_timeline.png) | P0 leaves startup unknown and stays non-stale/non-full-unknown post-startup. |
+| ![P5-3 P5 action timeline](../../results/planner_validation/exports/test_planner_p5_corridor_manual_1783862488425/figures/p5_3_p5_action_timeline.png) | P5 requests replans throughout the status stream. |
+| ![P5-3 P5 margin timeline](../../results/planner_validation/exports/test_planner_p5_corridor_manual_1783862488425/figures/p5_3_p5_margin_timeline.png) | Future margin reaches the injected `-0.2m` minimum while current margin is also negative. |
+| ![P5-3 high-risk zone overlay](../../results/planner_validation/exports/test_planner_p5_corridor_manual_1783862488425/figures/p5_3_high_risk_zone_overlay.png) | P5 trajectory samples overlap the configured fixture bounds. |
+| ![P5-3 first bad tau timeline](../../results/planner_validation/exports/test_planner_p5_corridor_manual_1783862488425/figures/p5_3_first_bad_tau_timeline.png) | `first_bad_tau` appears at `1.6s`, within the fixture tau window. |
+| ![P5-3 final gate summary](../../results/planner_validation/exports/test_planner_p5_corridor_manual_1783862488425/figures/p5_3_p5_final_gate_summary.png) | Final-gate failures are bounded and do not escalate to emergency. |
+| ![P5-3 trajectory integrity samples](../../results/planner_validation/exports/test_planner_p5_corridor_manual_1783862488425/figures/p5_3_trajectory_integrity_samples.png) | Marker evidence is present for overlap analysis. |
+
+Verification notes:
+
+| Check | Result |
+|---|---|
+| Python compile check | `PASS`: `python3 -m py_compile launch/test_planner.launch.py scripts/dev_planner/analyze_safety_planner_run.py` |
+| Focused analyzer tests | `PASS`: `python3 test/test_analyze_safety_planner_run_p5_1.py` |
+| Focused P0/P5 ego-planner CTests | `PASS`: `ctest --test-dir /home/dev/ws_iap/build/ego_planner -R "test_p5_runtime_integrity_gate|test_p0_risk_grid_runtime" --output-on-failure` |
+| Focused predictor/risk-grid CTests | `PASS`: `ctest --test-dir /home/dev/ws_iap/build/iap -R "test_predictor_module|test_risk_grid_map" --output-on-failure` |
+| P5-3 launch | `PASS`: completed and wrote export/bag artifacts; shutdown still emits known ROS teardown process-death logs after recording stops. |
+| P5-3 analyzer with `--fail-on-threshold` | `FAIL as expected`: exit `2`, `next_debug_branch=FAIL -> debug high-risk injection / P5 future_bad reason / PL-AL margin` |
+| Report figures | `PASS`: all newly referenced P5-3 images exist and are non-empty. |
+
+Final conclusion:
+
+FAIL -> debug high-risk injection / P5 future_bad reason / PL-AL margin

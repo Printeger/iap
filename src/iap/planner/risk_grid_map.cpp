@@ -10,6 +10,8 @@ namespace iap {
 namespace {
 
 constexpr double kBoundaryEps = 1.0e-4;
+constexpr const char* kP5_3FixtureName = "future_high_risk_zone_v1";
+constexpr const char* kP5_3FixtureReason = "p5_3_high_risk_zone";
 
 bool finite_positive(const double v) {
   return std::isfinite(v) && v > 0.0;
@@ -35,6 +37,45 @@ std::string join_reason(const std::string& prefix, const std::string& reason) {
     return prefix;
   }
   return prefix + ":" + reason;
+}
+
+bool in_closed_interval(const double value,
+                        const double a,
+                        const double b) {
+  if (!std::isfinite(value) || !std::isfinite(a) || !std::isfinite(b)) {
+    return false;
+  }
+  const double lo = std::min(a, b);
+  const double hi = std::max(a, b);
+  return value >= lo && value <= hi;
+}
+
+bool p5_3_fixture_applies(const P5_3HighRiskZoneFixtureConfig& fixture,
+                          const RiskPredictionQuery& query) {
+  return fixture.enabled && fixture.name == kP5_3FixtureName &&
+         query.position_w.allFinite() &&
+         in_closed_interval(query.position_w.x(), fixture.x_min_m,
+                            fixture.x_max_m) &&
+         in_closed_interval(query.position_w.y(), fixture.y_min_m,
+                            fixture.y_max_m) &&
+         in_closed_interval(query.position_w.z(), fixture.z_min_m,
+                            fixture.z_max_m) &&
+         in_closed_interval(query.horizon_s, fixture.tau_min_s,
+                            fixture.tau_max_s);
+}
+
+void apply_p5_3_fixture(const P5_3HighRiskZoneFixtureConfig& fixture,
+                        const RiskPredictionQuery& query,
+                        RiskPredictionResult* result) {
+  if (result == nullptr || !p5_3_fixture_applies(fixture, query)) {
+    return;
+  }
+  result->available = true;
+  result->valid = true;
+  result->stale = false;
+  result->hpl_pred = fixture.hpl_pred_m;
+  result->vpl_pred = fixture.vpl_pred_m;
+  result->reason = kP5_3FixtureReason;
 }
 
 }  // namespace
@@ -326,6 +367,7 @@ bool interpolate_cost_layer(const RiskGridSnapshot::Generation& generation,
 struct SpatialPLInterp {
   double hpl = std::numeric_limits<double>::quiet_NaN();
   double vpl = std::numeric_limits<double>::quiet_NaN();
+  std::string reason = "not_evaluated";
 };
 
 bool interpolate_pl_layer(const RiskGridSnapshot::Generation& generation,
@@ -337,6 +379,8 @@ bool interpolate_pl_layer(const RiskGridSnapshot::Generation& generation,
                           std::string* reason) {
   double h[2][2][2]{};
   double v[2][2][2]{};
+  std::string first_reason;
+  bool all_reasons_match = true;
   for (int dx = 0; dx <= 1; ++dx) {
     for (int dy = 0; dy <= 1; ++dy) {
       for (int dz = 0; dz <= 1; ++dz) {
@@ -349,6 +393,13 @@ bool interpolate_pl_layer(const RiskGridSnapshot::Generation& generation,
         }
         h[dx][dy][dz] = voxel.hpl_pred;
         v[dx][dy][dz] = voxel.vpl_pred;
+        const std::string corner_reason =
+            voxel.reason.empty() ? "ok" : voxel.reason;
+        if (first_reason.empty()) {
+          first_reason = corner_reason;
+        } else if (corner_reason != first_reason) {
+          all_reasons_match = false;
+        }
       }
     }
   }
@@ -369,6 +420,9 @@ bool interpolate_pl_layer(const RiskGridSnapshot::Generation& generation,
   }
   out->hpl = hpl;
   out->vpl = vpl;
+  out->reason =
+      all_reasons_match ? (first_reason.empty() ? "ok" : first_reason)
+                        : "mixed";
   return true;
 }
 
@@ -511,7 +565,7 @@ bool RiskGridSnapshot::queryPredictedPL(const Eigen::Vector3d& p_w,
   out->available = true;
   out->valid = true;
   out->stale = false;
-  out->reason = "ok";
+  out->reason = lower.reason == upper.reason ? lower.reason : "mixed";
   return true;
 }
 
@@ -761,7 +815,9 @@ bool RiskGridMap::refreshFromProvider(const Eigen::Vector3d& uav_position_w,
       static_cast<std::size_t>(total_voxel_count), false);
   for (std::size_t i = 0; i < results.size(); ++i) {
     const std::size_t voxel_index = query_voxel_indices[i];
-    indexed_results[voxel_index] = results[i];
+    RiskPredictionResult result = results[i];
+    apply_p5_3_fixture(params_copy.p5_3_fixture, queries[i], &result);
+    indexed_results[voxel_index] = result;
     has_provider_result[voxel_index] = true;
   }
 
@@ -789,6 +845,7 @@ bool RiskGridMap::refreshFromProvider(const Eigen::Vector3d& uav_position_w,
       voxel.stale = false;
       voxel.unknown = true;
       voxel.c_pi = params_copy.unknown_cost;
+      voxel.reason = "occupied_skip";
       ++unknown_count;
       record_unknown_reason("occupied_skip");
       next->voxels[i] = voxel;
@@ -824,8 +881,13 @@ bool RiskGridMap::refreshFromProvider(const Eigen::Vector3d& uav_position_w,
       voxel.vpl_pred = result.vpl_pred;
       voxel.c_pi = clamp_cost(std::max(result.hpl_pred, result.vpl_pred),
                               params_copy.cost_max);
+      voxel.reason = result.reason.empty() ? "ok" : result.reason;
       ++valid_count;
     } else {
+      voxel.reason =
+          has_provider_result[i] && !result.reason.empty()
+              ? result.reason
+              : "provider_invalid";
       if (has_provider_result[i] && result.stale) {
         ++provider_stale_count;
         record_unknown_reason(result.reason.empty() ? "provider_stale"
