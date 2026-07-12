@@ -768,6 +768,7 @@ TEST(P5RuntimeIntegrityGateTest, PublishedStatusJsonIncludesSampleDiagnostics) {
   ASSERT_FALSE(payload.empty());
   EXPECT_NE(payload.find("\"samples\":["), std::string::npos);
   EXPECT_NE(payload.find("\"tau_s\":"), std::string::npos);
+  EXPECT_NE(payload.find("\"query_tau_s\":"), std::string::npos);
   EXPECT_NE(payload.find("\"x\":"), std::string::npos);
   EXPECT_NE(payload.find("\"y\":"), std::string::npos);
   EXPECT_NE(payload.find("\"z\":"), std::string::npos);

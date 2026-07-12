@@ -18,6 +18,7 @@ namespace ego_planner {
 struct SafetyVizTrajectorySample {
   Eigen::Vector3d position = Eigen::Vector3d::Zero();
   double tau_s = 0.0;
+  double query_tau_s = std::numeric_limits<double>::quiet_NaN();
   double hpl = std::numeric_limits<double>::quiet_NaN();
   double vpl = std::numeric_limits<double>::quiet_NaN();
   double hal = std::numeric_limits<double>::quiet_NaN();

@@ -211,6 +211,7 @@ def p5_3_marker_row(**overrides):
 def p5_3_sample(**overrides):
     row = {
         "tau_s": 0.0,
+        "query_tau_s": 0.0,
         "x": -12.0,
         "y": 0.0,
         "z": 1.2,
@@ -225,6 +226,8 @@ def p5_3_sample(**overrides):
         "reason": "ok",
     }
     row.update(overrides)
+    if "query_tau_s" not in overrides:
+        row["query_tau_s"] = row["tau_s"]
     return row
 
 
@@ -605,7 +608,7 @@ class P5_2AnalyzerTest(unittest.TestCase):
 
 
 class P5_3AnalyzerTest(unittest.TestCase):
-    def validate_rows(self, rows, manifest=None, marker_rows=None):
+    def validate_rows(self, rows, manifest=None, marker_rows=None, topic_timestamps=None):
         p5_summary = analyzer.summarize_p5_status_rows(rows)
         failures = []
         inconclusive = []
@@ -620,6 +623,7 @@ class P5_3AnalyzerTest(unittest.TestCase):
             marker_rows if marker_rows is not None else [p5_3_marker_row()],
             failures,
             inconclusive,
+            topic_timestamps,
         )
         return p5_summary, gates, failures, inconclusive
 
@@ -639,6 +643,43 @@ class P5_3AnalyzerTest(unittest.TestCase):
         self.assertTrue(gates["current_sample_not_fixture_bad"])
         self.assertTrue(gates["future_sample_inside_fixture"])
         self.assertTrue(gates["future_bad_sample_inside_fixture"])
+        self.assertTrue(gates["future_fixture_query_aligned"])
+
+    def test_p5_3_query_alignment_uses_snapshot_relative_tau(self):
+        samples = [
+            p5_3_sample(),
+            p5_3_sample(
+                tau_s=1.2,
+                query_tau_s=0.6,
+                x=-10.5,
+                hpl=1.0,
+                vpl=1.0,
+                im_min=9.0,
+                bad=False,
+                reason="ok",
+            ),
+            p5_3_sample(
+                tau_s=1.8,
+                query_tau_s=1.2,
+                x=-9.3,
+                hpl=10.2,
+                vpl=10.2,
+                im_min=-0.2,
+                bad=True,
+                reason="future_low_margin:p5_3_high_risk_zone",
+            ),
+        ]
+
+        _, gates, failures, inconclusive = self.validate_rows(
+            [p5_3_replan_row(samples=samples)]
+        )
+
+        self.assertEqual([], failures)
+        self.assertEqual([], inconclusive)
+        self.assertTrue(gates["passed"])
+        self.assertEqual(1, gates["sample_summary"]["future_fixture_sample_count"])
+        self.assertEqual(0, gates["sample_summary"]["future_query_mismatch_sample_count"])
+        self.assertTrue(gates["future_fixture_query_aligned"])
 
     def test_p5_3_accepts_future_reason_for_replan_evidence(self):
         rows = [
@@ -706,6 +747,25 @@ class P5_3AnalyzerTest(unittest.TestCase):
             manifest=p5_3_manifest(enabled=False),
         )
         self.assertTrue(disabled_gates["blocked_scenario_missing"])
+
+    def test_p5_3_blocks_when_query_alignment_evidence_is_missing(self):
+        row = p5_3_replan_row(samples=[])
+
+        _, gates, failures, inconclusive = self.validate_rows(
+            [row],
+            marker_rows=[],
+        )
+
+        self.assertFalse(gates["passed"])
+        self.assertTrue(gates["blocked_scenario_missing"])
+        self.assertTrue(
+            any("per-sample status diagnostics are missing" in failure for failure in failures),
+            failures,
+        )
+        self.assertTrue(
+            any("trajectory marker evidence is missing" in item for item in inconclusive),
+            inconclusive,
+        )
 
     def test_p5_3_fails_when_overlap_has_no_replan(self):
         _, gates, failures, _ = self.validate_rows(
@@ -801,6 +861,56 @@ class P5_3AnalyzerTest(unittest.TestCase):
         self.assertFalse(gates["current_sample_not_fixture_bad"])
         self.assertTrue(any("current/tau=0" in failure for failure in failures), failures)
 
+    def test_p5_3_fails_when_future_fixture_sample_query_pl_does_not_align(self):
+        samples = p5_3_future_only_samples()
+        samples[1] = p5_3_sample(
+            tau_s=1.2,
+            x=-10.5,
+            hpl=1.0,
+            vpl=1.0,
+            im_min=9.0,
+            bad=False,
+            reason="ok",
+        )
+
+        _, gates, failures, _ = self.validate_rows(
+            [p5_3_replan_row(samples=samples)]
+        )
+
+        self.assertFalse(gates["passed"])
+        self.assertFalse(gates["future_fixture_query_aligned"])
+        self.assertEqual(
+            1,
+            gates["sample_summary"]["future_query_mismatch_sample_count"],
+        )
+        self.assertTrue(any("query alignment" in failure for failure in failures), failures)
+
+    def test_p5_3_active_window_topic_gap_fails_on_odom_gap(self):
+        rows = [
+            p5_3_replan_row(bag_time_s=10.0),
+            p5_3_replan_row(bag_time_s=13.0),
+        ]
+        topic_timestamps = {
+            "/iap/integrity": [10.0, 11.0, 12.0, 13.0],
+            "/sim/drone_0/lidar_body": [10.0, 11.0, 12.0, 13.0],
+            "/drone_0_visual_slam/odom": [10.0, 13.0],
+        }
+
+        _, gates, failures, _ = self.validate_rows(
+            rows,
+            topic_timestamps=topic_timestamps,
+        )
+
+        self.assertFalse(gates["passed"])
+        self.assertFalse(gates["active_required_p5_topics_stable"])
+        self.assertEqual(
+            "FAIL",
+            gates["active_topic_gap"]["topic_statuses"][
+                "/drone_0_visual_slam/odom"
+            ]["status"],
+        )
+        self.assertTrue(any("active evidence-window topic gap" in failure for failure in failures), failures)
+
     def test_p5_3_fails_on_emergency_storm(self):
         rows = [p5_3_replan_row()]
         rows.extend(
@@ -862,6 +972,22 @@ class P5_3AnalyzerTest(unittest.TestCase):
                 "p5_3_plal_p0_health_timeline.png",
             ],
             analyzer.P5_3_PLAL_FIGURE_FILENAMES,
+        )
+
+    def test_p5_3_query_alignment_required_figure_filenames_are_exact(self):
+        self.assertEqual(
+            [
+                "p5_3_query_alignment_scenario_topdown.png",
+                "p5_3_query_alignment_fixture_overlay.png",
+                "p5_3_query_alignment_pl_probe.png",
+                "p5_3_query_alignment_tau_window.png",
+                "p5_3_query_alignment_margin_timeline.png",
+                "p5_3_query_alignment_action_reason.png",
+                "p5_3_query_alignment_sample_heatmap.png",
+                "p5_3_query_alignment_topic_gap.png",
+                "p5_3_query_alignment_p0_health.png",
+            ],
+            analyzer.P5_3_QUERY_ALIGNMENT_FIGURE_FILENAMES,
         )
 
 

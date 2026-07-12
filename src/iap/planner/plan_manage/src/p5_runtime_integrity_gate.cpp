@@ -73,6 +73,7 @@ std::string jsonTrajectorySamples(
     const auto& sample = samples[i];
     oss << "{"
         << "\"tau_s\":" << jsonNumber(sample.tau_s)
+        << ",\"query_tau_s\":" << jsonNumber(sample.query_tau_s)
         << ",\"x\":" << jsonNumber(sample.position.x())
         << ",\"y\":" << jsonNumber(sample.position.y())
         << ",\"z\":" << jsonNumber(sample.position.z())
@@ -796,6 +797,7 @@ P5GateStatus P5RuntimeIntegrityGate::evaluateFutureGate(
       continue;
     }
     status.sample_count++;
+    viz_sample.query_tau_s = pl.query_tau_s;
     viz_sample.hpl = pl.hpl_pred;
     viz_sample.vpl = pl.vpl_pred;
     viz_sample.hal = al.hal;

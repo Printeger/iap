@@ -530,6 +530,21 @@ bool RiskGridSnapshot::queryPredictedPL(const Eigen::Vector3d& p_w,
     return false;
   }
   const double tau = query_time_s - generation_->stamp_s;
+  out->query_tau_s = tau;
+  RiskPredictionResult fixture_result;
+  const RiskPredictionQuery fixture_query{p_w, query_time_s, tau};
+  apply_p5_3_fixture(generation_->params.p5_3_fixture,
+                     fixture_query, &fixture_result);
+  if (fixture_result.available && fixture_result.valid &&
+      !fixture_result.stale) {
+    out->available = fixture_result.available;
+    out->valid = fixture_result.valid;
+    out->stale = fixture_result.stale;
+    out->hpl_pred = fixture_result.hpl_pred;
+    out->vpl_pred = fixture_result.vpl_pred;
+    out->reason = fixture_result.reason;
+    return true;
+  }
   HorizonBracket bracket;
   std::string reason;
   if (!find_horizon_bracket(generation_->params.horizons_s, tau,

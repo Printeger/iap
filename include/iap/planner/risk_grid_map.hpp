@@ -99,6 +99,7 @@ struct PredictedPLSample {
   double hpl_pred = std::numeric_limits<double>::quiet_NaN();
   double vpl_pred = std::numeric_limits<double>::quiet_NaN();
   double query_time_s = std::numeric_limits<double>::quiet_NaN();
+  double query_tau_s = std::numeric_limits<double>::quiet_NaN();
   uint64_t generation_id = 0;
   std::string reason = "not_evaluated";
 };

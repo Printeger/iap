@@ -3328,3 +3328,58 @@ Verification notes:
 Final conclusion:
 
 FAIL -> 继续 debug P5-3 PL/AL margin
+
+### P5-3 PL/AL Query Alignment Debug/Rerun
+
+This update adds a query-time P5-3 fixture override in `RiskGridSnapshot::queryPredictedPL()` and carries `query_tau_s` through P5 status samples so the analyzer can compare expected injected PL against the actual decision query. P5 thresholds, debounce, emergency semantics, final-gate semantics, and `p5.max_bad_ratio` are unchanged.
+
+Rerun artifacts:
+
+| Artifact | Path |
+|---|---|
+| Export | `results/planner_validation/exports/test_planner_p5_corridor_manual_1783872918341` |
+| Bag | `results/planner_validation/bags/test_planner_p5_corridor_manual_20260712T161518Z` |
+| Analyzer summary | `results/planner_validation/exports/test_planner_p5_corridor_manual_1783872918341/metadata/safety_planner_analysis_summary.json` |
+
+Query-alignment gates:
+
+| Gate | Result |
+|---|---|
+| Fixture manifest | `PASS`: `p5_3.fixture.enabled=true`, name `future_high_risk_zone_v1`, PL `10.2/10.2`, tau window `[1.2s,2.0s]`. |
+| P5 status stream | `PASS`: `status_rows=450`, `REQUEST_REPLAN=450`, JSON parse and inspection passed. |
+| Query sample evidence | `BLOCKED`: `sample_rows_present=false`, `sample_summary.row_count=0`, and every status row carried `samples=[]`. |
+| Trajectory marker evidence | `BLOCKED`: `/iap/rviz/trajectory_integrity_samples` topic had messages, but marker extraction produced `marker_rows_present=false` and `row_count=0`. |
+| Future fixture query alignment | `BLOCKED`: `future_fixture_sample_count=0`, `future_query_aligned_sample_count=0`, `future_query_mismatch_sample_count=0`; no actual query samples were available to prove or disprove injected PL. |
+| Active-window topic gap | `BLOCKED`: active evidence window unavailable because `sample_count=0`; full-run continuous topics passed (`/drone_0_visual_slam/odom max_gap_s=0.704184s`). |
+| Bad-ratio / first bad tau | `BLOCKED`: `bad_ratio_max=0.0`, `first_bad_tau_min=null`, `future_min_im_min=null`, and predicted AL minima were absent because query samples were missing. |
+| Emergency behavior | `PASS`: `max_consecutive_emergency=0`, `raw_max_consecutive_emergency=0`; no threshold or emergency storm regression was observed. |
+| Analyzer status | `BLOCKED_SCENARIO_MISSING`: the fixture/query-alignment instrumentation could not be produced after implementation, so P5-3 did not advance to P5-4. |
+
+Query-alignment figure conclusions:
+
+| Figure filename | Conclusion |
+|---|---|
+| `p5_3_query_alignment_scenario_topdown.png` | Confirms the manual corridor scenario reran with the P5-3 fixture manifest present and enabled. |
+| `p5_3_query_alignment_fixture_overlay.png` | Was not generated because marker/sample overlap rows were unavailable, so fixture spatial overlap could not be visualized for this rerun. |
+| `p5_3_query_alignment_pl_probe.png` | Was not generated because no future fixture-window query samples existed to compare actual PL against injected `10.2/10.2` PL. |
+| `p5_3_query_alignment_tau_window.png` | Was not generated because the P5 status `samples` arrays were empty, leaving no snapshot-relative `query_tau_s` evidence. |
+| `p5_3_query_alignment_margin_timeline.png` | Shows the status timeline remained replanning, but future PL/AL margins stayed unavailable because sample diagnostics were empty. |
+| `p5_3_query_alignment_action_reason.png` | Shows all P5 status rows were `REQUEST_REPLAN`, but reasons remained startup/current/future-unknown rather than query-aligned high-risk-zone evidence. |
+| `p5_3_query_alignment_sample_heatmap.png` | Was not generated because there were no P5 sample rows to place in the fixture/tau heatmap. |
+| `p5_3_query_alignment_topic_gap.png` | Was not generated because the active evidence window is derived from P5 sample rows and was unavailable. |
+| `p5_3_query_alignment_p0_health.png` | Confirms P0 became ready, non-stale, and not full-unknown after startup, so the rerun blockage is missing P5 sample/marker evidence rather than post-startup P0 health. |
+
+Verification notes:
+
+| Check | Result |
+|---|---|
+| Python compile check | `PASS`: `python3 -m py_compile launch/test_planner.launch.py scripts/dev_planner/analyze_safety_planner_run.py`. |
+| Focused analyzer tests | `PASS`: `python3 test/test_analyze_safety_planner_run_p5_1.py`. |
+| Focused P0/P5 ego-planner CTests | `PASS`: `ctest --test-dir build/ego_planner -R "test_p5_runtime_integrity_gate\|test_p0_risk_grid_runtime" --output-on-failure`. |
+| Focused predictor/risk-grid CTests | `PASS`: `ctest --test-dir build/iap -R "test_predictor_module\|test_risk_grid_map" --output-on-failure`. |
+| P5-3 launch | `PASS`: completed and wrote the export/bag artifacts above. |
+| P5-3 analyzer with `--fail-on-threshold` | `BLOCKED as expected`: exit `2`, `status=BLOCKED_SCENARIO_MISSING`, `next_debug_branch=BLOCKED_SCENARIO_MISSING -> restore P5-3 query-alignment sample evidence`. |
+
+Final conclusion:
+
+BLOCKED_SCENARIO_MISSING
