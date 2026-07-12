@@ -59,3 +59,7 @@ _Avoid_: incidental degraded GNSS, arbitrary manual run
 **Future trajectory overlap evidence**:
 Analyzer evidence that P5 trajectory samples geometrically intersect a declared high-risk zone fixture and that the corresponding P5 status stream reports future-risk margin or `future_bad` replan behavior.
 _Avoid_: aggregate P5 action count alone, unrelated map overlap
+
+**Causal replan evidence**:
+Analyzer/status evidence that a `REQUEST_REPLAN` action and the future-risk gate/reason that caused it are both traceable in the same P5 run, including concurrent current and future reasons when both gates are active.
+_Avoid_: action count without gate reason, margin evidence with no replan attribution

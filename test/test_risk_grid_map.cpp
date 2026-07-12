@@ -436,6 +436,7 @@ TEST(RiskGridMapTest, HealthCountsPredictorSourceFlags) {
 TEST(RiskGridMapTest, P5_3FixtureDisabledByDefaultDoesNotAlterProviderOutput) {
   iap::RiskGridMapParams params = base_params();
   params.horizons_s = {0.0, 1.0, 1.5, 2.0};
+  ASSERT_FALSE(params.p5_3_fixture.enabled);
   iap::RiskGridMap grid(params);
   AffineProvider provider;
   std::string reason;
@@ -454,6 +455,7 @@ TEST(RiskGridMapTest, P5_3FixtureDisabledByDefaultDoesNotAlterProviderOutput) {
   EXPECT_FALSE(voxel.stale);
   EXPECT_EQ(voxel.reason, "ok");
   EXPECT_NEAR(voxel.hpl_pred, AffineProvider::affine(p, 1.5), 1.0e-9);
+  EXPECT_NEAR(voxel.vpl_pred, 0.25 * AffineProvider::affine(p, 1.5), 1.0e-9);
 }
 
 TEST(RiskGridMapTest, P5_3FixtureOnlyAltersCellsInsideBoundsAndTauWindow) {

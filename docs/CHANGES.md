@@ -3,6 +3,12 @@
 > 规则：任何代码改动必须在这里记录，并包含 IAP-RQ-XXX。
 
 ## Unreleased
+- fix(planner-p5-3-debug-rerun): IAP-RQ-320 — preserve causal future-risk evidence for P5-3 without changing P5 safety-action semantics.
+  - `p5_runtime_integrity_gate`: add non-decision diagnostic fields `current_reason`, `future_reason`, and `active_reasons` to status JSON so concurrent current and future gate reasons remain visible.
+  - `risk_grid_map.hpp` and `test_planner.launch.py`: widen the disabled-by-default P5-3 high-risk-zone fixture bounds and include `p5.max_bad_ratio` in the manifest while keeping existing P5 thresholds unchanged.
+  - `analyze_safety_planner_run.py`: classify P5-3 failures into scenario-isolation, reason-attribution, or PL/AL-margin branches; add debug figures with fixed `p5_3_debug_*.png` filenames; and retain `REQUEST_REPLAN` as a required acceptance gate.
+  - Tests cover concurrent current/future P5 reasons, fixture defaults, analyzer recognition of `future_reason`/`active_reasons`, bad-ratio coverage, and visible future attribution that does not coincide with replan rows.
+  - `safety_planner_test_report.md`: append the P5-3 Debug/Rerun section; the rerun remains `FAIL -> debug P5-3 PL/AL margin` and does not proceed to P5-4.
 - test(planner-p5-1): IAP-RQ-320 — validate open-sky P5 no-false-trigger behavior.
   - `scripts/dev_planner/analyze_safety_planner_run.py`: add P5-1 topic/manifest gates, full P5 status JSON parsing, action/margin/final-gate CSV exports, RViz marker evidence extraction, P5 figures, and `PASS -> P5-2` / `debug P5 thresholds/AL provider` branching.
   - `test/test_analyze_safety_planner_run_p5_1.py`: add focused analyzer tests for OK status rows, emergency action, replan storm, final-gate fail, stale P0 health, and missing P5 status topic.

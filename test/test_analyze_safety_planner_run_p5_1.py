@@ -24,6 +24,9 @@ def p5_row(**overrides):
         "action": "OK",
         "raw_action": "OK",
         "reason": "OK",
+        "current_reason": "",
+        "future_reason": "",
+        "active_reasons": [],
         "current_im_h": 5.0,
         "current_im_v": 5.5,
         "current_im_min": 5.0,
@@ -35,6 +38,7 @@ def p5_row(**overrides):
         "field_generation_id": 3,
         "field_age_s": 0.1,
         "current_stale_duration_s": 0.0,
+        "current_low_margin_duration_s": 0.0,
         "future_unknown_duration_s": 0.0,
         "final_gate_fail_count": 0,
         "final_gate_fail_duration_s": 0.0,
@@ -81,14 +85,15 @@ def p5_3_manifest(enabled=True):
     manifest.update(
         {
             "p5.future_replan_margin_m": 0.3,
+            "p5.max_bad_ratio": 0.25,
             "p5_3.fixture.enabled": enabled,
             "p5_3.fixture.name": "future_high_risk_zone_v1",
-            "p5_3.fixture.x_min": -14.0,
-            "p5_3.fixture.x_max": 14.0,
-            "p5_3.fixture.y_min": -1.5,
-            "p5_3.fixture.y_max": 1.5,
-            "p5_3.fixture.z_min": 0.5,
-            "p5_3.fixture.z_max": 2.5,
+            "p5_3.fixture.x_min": -20.0,
+            "p5_3.fixture.x_max": 20.0,
+            "p5_3.fixture.y_min": -3.0,
+            "p5_3.fixture.y_max": 3.0,
+            "p5_3.fixture.z_min": 0.0,
+            "p5_3.fixture.z_max": 3.0,
             "p5_3.fixture.tau_min": 1.2,
             "p5_3.fixture.tau_max": 2.0,
             "p5_3.fixture.hpl_pred_m": 10.2,
@@ -101,9 +106,9 @@ def p5_3_manifest(enabled=True):
                     "enabled": enabled,
                     "name": "future_high_risk_zone_v1",
                     "bounds": {
-                        "x": [-14.0, 14.0],
-                        "y": [-1.5, 1.5],
-                        "z": [0.5, 2.5],
+                        "x": [-20.0, 20.0],
+                        "y": [-3.0, 3.0],
+                        "z": [0.0, 3.0],
                     },
                     "tau_window_s": [1.2, 2.0],
                     "injected_pl_m": {"hpl_pred": 10.2, "vpl_pred": 10.2},
@@ -572,6 +577,38 @@ class P5_3AnalyzerTest(unittest.TestCase):
         self.assertTrue(gates["overlap_margin_evidence"])
         self.assertTrue(gates["future_replan_reason_ok"])
 
+    def test_p5_3_accepts_future_reason_for_replan_evidence(self):
+        rows = [
+            p5_3_replan_row(
+                reason="current_low_margin",
+                current_reason="current_low_margin",
+                future_reason="future_bad",
+            )
+        ]
+
+        _, gates, failures, inconclusive = self.validate_rows(rows)
+
+        self.assertEqual([], failures)
+        self.assertEqual([], inconclusive)
+        self.assertTrue(gates["passed"])
+        self.assertTrue(gates["future_replan_reason_ok"])
+
+    def test_p5_3_accepts_active_reasons_for_replan_evidence(self):
+        rows = [
+            p5_3_replan_row(
+                reason="current_low_margin",
+                current_reason="current_low_margin",
+                active_reasons=["current_low_margin", "future_bad"],
+            )
+        ]
+
+        _, gates, failures, inconclusive = self.validate_rows(rows)
+
+        self.assertEqual([], failures)
+        self.assertEqual([], inconclusive)
+        self.assertTrue(gates["passed"])
+        self.assertTrue(gates["future_replan_reason_ok"])
+
     def test_p5_3_blocks_when_fixture_manifest_is_missing_or_disabled(self):
         _, gates, failures, inconclusive = self.validate_rows(
             [p5_3_replan_row()],
@@ -603,7 +640,49 @@ class P5_3AnalyzerTest(unittest.TestCase):
         )
 
         self.assertFalse(gates["passed"])
-        self.assertTrue(any("reason was not future_bad" in failure for failure in failures), failures)
+        self.assertTrue(any("reason attribution" in failure for failure in failures), failures)
+
+    def test_p5_3_visible_future_reason_without_replan_coincidence_is_not_attribution(self):
+        _, gates, failures, _ = self.validate_rows(
+            [
+                p5_3_replan_row(
+                    reason="current_low_margin",
+                    current_reason="current_low_margin",
+                    future_reason="",
+                    active_reasons=["current_low_margin"],
+                ),
+                p5_3_replan_row(
+                    bag_time_s=10.2,
+                    action="REQUEST_EMERGENCY_STOP_CANDIDATE",
+                    raw_action="REQUEST_EMERGENCY_STOP_CANDIDATE",
+                    reason="future_bad",
+                    future_reason="future_bad",
+                    active_reasons=["future_bad"],
+                ),
+            ]
+        )
+
+        self.assertFalse(gates["passed"])
+        self.assertTrue(gates["request_replan_present"])
+        self.assertTrue(gates["future_reason_attribution_ok"])
+        self.assertFalse(gates["future_replan_reason_ok"])
+        self.assertFalse(any("reason attribution" in failure for failure in failures), failures)
+        self.assertTrue(any("PL/AL margin" in failure for failure in failures), failures)
+
+    def test_p5_3_fails_scenario_isolation_when_bad_ratio_below_threshold(self):
+        _, gates, failures, _ = self.validate_rows(
+            [
+                p5_3_replan_row(
+                    bad_ratio=0.2,
+                    bad_count=2,
+                    active_reasons=["future_bad"],
+                )
+            ]
+        )
+
+        self.assertFalse(gates["passed"])
+        self.assertFalse(gates["future_bad_ratio_coverage"])
+        self.assertTrue(any("future bad-ratio coverage" in failure for failure in failures), failures)
 
     def test_p5_3_fails_when_first_bad_tau_is_outside_fixture_window(self):
         _, gates, failures, _ = self.validate_rows(
@@ -637,6 +716,24 @@ class P5_3AnalyzerTest(unittest.TestCase):
         self.assertEqual(
             analyzer.P5_3_FAIL_BRANCH,
             analyzer.next_debug_branch("FAIL", ["P5-3 failed"], [], "P5-3"),
+        )
+        self.assertEqual(
+            analyzer.P5_3_SCENARIO_ISOLATION_BRANCH,
+            analyzer.next_debug_branch(
+                "FAIL",
+                ["P5-3 scenario isolation / future bad-ratio coverage"],
+                [],
+                "P5-3",
+            ),
+        )
+        self.assertEqual(
+            analyzer.P5_3_REASON_ATTRIBUTION_BRANCH,
+            analyzer.next_debug_branch(
+                "FAIL",
+                ["P5-3 reason attribution"],
+                [],
+                "P5-3",
+            ),
         )
         self.assertEqual(
             analyzer.P5_3_BLOCKED_BRANCH,

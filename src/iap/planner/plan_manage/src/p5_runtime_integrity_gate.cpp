@@ -20,6 +20,19 @@ std::string jsonNumber(double value) {
   return oss.str();
 }
 
+std::string jsonStringArray(const std::vector<std::string>& values) {
+  std::ostringstream oss;
+  oss << "[";
+  for (std::size_t i = 0; i < values.size(); ++i) {
+    if (i > 0) {
+      oss << ",";
+    }
+    oss << "\"" << values[i] << "\"";
+  }
+  oss << "]";
+  return oss.str();
+}
+
 P5GateAction maxSeverity(P5GateAction a, P5GateAction b) {
   return static_cast<int>(a) >= static_cast<int>(b) ? a : b;
 }
@@ -91,6 +104,18 @@ bool pointInsideRegion(const Eigen::Vector3d& p,
          p.x() >= origin.x() && p.x() <= origin.x() + size.x() &&
          p.y() >= origin.y() && p.y() <= origin.y() + size.y() &&
          p.z() >= origin.z() && p.z() <= origin.z() + size.z();
+}
+
+void appendActiveReason(std::vector<std::string>* reasons,
+                        const std::string& reason) {
+  if (!reasons || reason.empty() || reason == "ok" ||
+      reason == "disabled") {
+    return;
+  }
+  if (std::find(reasons->begin(), reasons->end(), reason) ==
+      reasons->end()) {
+    reasons->push_back(reason);
+  }
 }
 
 }  // namespace
@@ -824,6 +849,13 @@ P5GateStatus P5RuntimeIntegrityGate::merge(const P5GateStatus& a,
   out.bad_count = b.bad_count;
   out.unknown_count = b.unknown_count;
   out.viz_samples = b.viz_samples;
+  out.current_reason =
+      a.action != P5GateAction::OK ? reasonName(a.reason) : "";
+  out.future_reason =
+      b.action != P5GateAction::OK ? reasonName(b.reason) : "";
+  out.active_reasons.clear();
+  appendActiveReason(&out.active_reasons, out.current_reason);
+  appendActiveReason(&out.active_reasons, out.future_reason);
 
   out.action = maxSeverity(a.action, b.action);
   if (out.action == b.action && b.action != P5GateAction::OK) {
@@ -987,6 +1019,9 @@ std::string P5RuntimeIntegrityGate::toJson(
       << ",\"action\":\"" << actionName(status.action) << "\""
       << ",\"raw_action\":\"" << actionName(status.raw_action) << "\""
       << ",\"reason\":\"" << reasonName(status.reason) << "\""
+      << ",\"current_reason\":\"" << status.current_reason << "\""
+      << ",\"future_reason\":\"" << status.future_reason << "\""
+      << ",\"active_reasons\":" << jsonStringArray(status.active_reasons)
       << ",\"current_im_h\":" << jsonNumber(status.current_im_h)
       << ",\"current_im_v\":" << jsonNumber(status.current_im_v)
       << ",\"current_im_min\":" << jsonNumber(status.current_im_min)

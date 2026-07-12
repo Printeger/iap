@@ -106,15 +106,21 @@ P5_3_FIXTURE_REASON = "p5_3_high_risk_zone"
 P5_3_BLOCKED_BRANCH = (
     "BLOCKED_SCENARIO_MISSING -> implement high-risk zone injection first"
 )
-P5_3_FAIL_BRANCH = (
-    "FAIL -> debug high-risk injection / P5 future_bad reason / PL-AL margin"
+P5_3_SCENARIO_ISOLATION_BRANCH = (
+    "FAIL -> debug P5-3 scenario isolation / future bad-ratio coverage"
 )
+P5_3_REASON_ATTRIBUTION_BRANCH = "FAIL -> debug P5-3 reason attribution"
+P5_3_PL_AL_MARGIN_BRANCH = "FAIL -> debug P5-3 PL/AL margin"
+P5_3_FAIL_BRANCH = P5_3_PL_AL_MARGIN_BRANCH
 P5_STATUS_FIELDS = [
     "bag_time_s",
     "phase",
     "action",
     "raw_action",
     "reason",
+    "current_reason",
+    "future_reason",
+    "active_reasons",
     "current_im_h",
     "current_im_v",
     "current_im_min",
@@ -2003,6 +2009,75 @@ def plot_p5_3_first_bad_tau_timeline(
     return True
 
 
+def plot_p5_3_reason_timeline(rows: list[dict[str, Any]], path: Path) -> bool:
+    if not rows:
+        return False
+    t = relative_time(rows)
+    if not t:
+        return False
+    reason_keys = (
+        "reason",
+        "current_reason",
+        "future_reason",
+        "active_reasons",
+        "final_gate_last_reason",
+    )
+    reason_points: list[tuple[float, str, str]] = []
+    for idx, row in enumerate(rows):
+        x = t[idx] if idx < len(t) else math.nan
+        if not math.isfinite(x):
+            continue
+        for key in reason_keys:
+            for reason in sorted(p5_reason_values(row, key)):
+                if reason and reason != "ok":
+                    reason_points.append((x, key, reason))
+    if not reason_points:
+        return False
+    reasons = sorted({reason for _, _, reason in reason_points})
+    reason_codes = {reason: idx for idx, reason in enumerate(reasons)}
+    key_colors = {
+        "reason": "#111827",
+        "current_reason": "#16a34a",
+        "future_reason": "#dc2626",
+        "active_reasons": "#2563eb",
+        "final_gate_last_reason": "#7c3aed",
+    }
+    actions = [p5_action(row, "action") or "<empty>" for row in rows]
+    raw_actions = [p5_action(row, "raw_action") or "<empty>" for row in rows]
+    action_codes = action_code_map(actions + raw_actions)
+
+    fig, axes = plt.subplots(2, 1, figsize=(11, 6.8), sharex=True)
+    for key in reason_keys:
+        group = [point for point in reason_points if point[1] == key]
+        if not group:
+            continue
+        axes[0].scatter(
+            [point[0] for point in group],
+            [reason_codes[point[2]] for point in group],
+            s=26,
+            alpha=0.78,
+            color=key_colors.get(key, "#6b7280"),
+            label=key,
+        )
+    axes[0].set_yticks(list(reason_codes.values()), list(reason_codes.keys()))
+    axes[0].set_ylabel("reason")
+    axes[0].legend(loc="best", fontsize=8)
+    axes[0].grid(True, alpha=0.25)
+
+    axes[1].step(t, [action_codes[value] for value in actions], where="post", label="action", color="#f97316")
+    axes[1].step(t, [action_codes[value] for value in raw_actions], where="post", label="raw_action", color="#f59e0b", linestyle="--")
+    axes[1].set_yticks(list(action_codes.values()), list(action_codes.keys()))
+    axes[1].set_ylabel("P5 action")
+    axes[1].set_xlabel("time since first P5 status [s]")
+    axes[1].legend(loc="best")
+    axes[1].grid(True, axis="x", alpha=0.25)
+    fig.suptitle("P5-3 reason attribution timeline")
+    fig.tight_layout()
+    fig.savefig(path, dpi=160)
+    plt.close(fig)
+    return True
+
+
 def plot_p5_rviz_overview(
     topic_health: dict[str, dict[str, Any]],
     p5_summary: dict[str, Any],
@@ -3811,8 +3886,54 @@ def max_consecutive_action(rows: list[dict[str, Any]], action: str, key: str = "
     return consecutive_true([p5_action(row, key) == action for row in rows])
 
 
+def normalize_p5_reason(value: Any) -> str:
+    return str(value).strip().lower()
+
+
 def p5_reason(row: dict[str, Any], key: str = "reason") -> str:
-    return str(row.get(key, "")).strip().lower()
+    return normalize_p5_reason(row.get(key, ""))
+
+
+def p5_reason_values(row: dict[str, Any], key: str) -> set[str]:
+    value = row.get(key, "")
+    values: list[Any]
+    if isinstance(value, (list, tuple, set)):
+        values = list(value)
+    elif isinstance(value, str):
+        stripped = value.strip()
+        values = []
+        if stripped:
+            if stripped.startswith("["):
+                try:
+                    loaded = json.loads(stripped)
+                    if isinstance(loaded, list):
+                        values = loaded
+                except json.JSONDecodeError:
+                    values = []
+            if not values:
+                if "," in stripped:
+                    values = [
+                        item.strip().strip("'\"[] ")
+                        for item in stripped.split(",")
+                    ]
+                else:
+                    values = [stripped]
+    elif value is None:
+        values = []
+    else:
+        values = [value]
+    return {
+        normalized
+        for normalized in (normalize_p5_reason(item) for item in values)
+        if normalized
+    }
+
+
+def p5_all_reason_values(row: dict[str, Any], keys: tuple[str, ...]) -> set[str]:
+    reasons: set[str] = set()
+    for key in keys:
+        reasons.update(p5_reason_values(row, key))
+    return reasons
 
 
 def p5_final_gate_emergency(row: dict[str, Any]) -> bool:
@@ -3824,9 +3945,18 @@ def p5_final_gate_emergency(row: dict[str, Any]) -> bool:
 
 def p5_has_explainable_unknown_reason(row: dict[str, Any]) -> bool:
     explainable = {"al_invalid", "future_unknown", "snapshot_unavailable"}
-    return any(
-        p5_reason(row, key) in explainable
-        for key in ("reason", "final_gate_last_reason", "pred_al_last_reason")
+    return bool(
+        p5_all_reason_values(
+            row,
+            (
+                "reason",
+                "final_gate_last_reason",
+                "future_reason",
+                "active_reasons",
+                "pred_al_last_reason",
+            ),
+        )
+        & explainable
     )
 
 
@@ -4596,7 +4726,6 @@ def summarize_p5_3_overlap(rows: list[dict[str, Any]]) -> dict[str, Any]:
 
 
 def p5_3_future_replan_rows(p5_rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    accepted_reasons = {"future_bad", "future_low_margin", P5_3_FIXTURE_REASON}
     rows: list[dict[str, Any]] = []
     for row in p5_rows:
         if (
@@ -4604,14 +4733,22 @@ def p5_3_future_replan_rows(p5_rows: list[dict[str, Any]]) -> list[dict[str, Any
             and p5_action(row, "raw_action") != P5_REPLAN_ACTION
         ):
             continue
-        reasons = {
-            p5_reason(row, "reason"),
-            p5_reason(row, "final_gate_last_reason"),
-            p5_reason(row, "pred_al_last_reason"),
-        }
-        if reasons & accepted_reasons:
+        if p5_3_row_has_future_reason(row):
             rows.append(row)
     return rows
+
+
+def p5_3_row_has_future_reason(row: dict[str, Any]) -> bool:
+    accepted_reasons = {"future_bad", "future_low_margin", P5_3_FIXTURE_REASON}
+    reasons = p5_all_reason_values(
+        row,
+        ("reason", "final_gate_last_reason", "future_reason", "active_reasons"),
+    )
+    return bool(reasons & accepted_reasons)
+
+
+def p5_3_future_reason_rows(p5_rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    return [row for row in p5_rows if p5_3_row_has_future_reason(row)]
 
 
 def p5_3_first_bad_tau_values(p5_rows: list[dict[str, Any]]) -> list[float]:
@@ -4655,6 +4792,9 @@ def validate_p5_3_hard_gates(
     future_replan_rows = p5_3_future_replan_rows(p5_rows)
     future_min_im_min = finite_float(p5_summary.get("future_min_im_min"))
     future_replan_margin_m = finite_float(manifest.get("p5.future_replan_margin_m")) or 0.3
+    max_bad_ratio = finite_float(manifest.get("p5.max_bad_ratio")) or 0.25
+    bad_ratio_max = finite_float(p5_summary.get("bad_ratio_max")) or 0.0
+    future_reason_rows = p5_3_future_reason_rows(p5_rows)
     expected_im = finite_float(fixture.get("expected_im"))
     injected_pl_over_expected_al = (
         fixture.get("expected_hal") is not None
@@ -4678,6 +4818,7 @@ def validate_p5_3_hard_gates(
             and injected_pl_over_expected_al
         )
     )
+    future_bad_ratio_coverage = bad_ratio_max >= max_bad_ratio
     max_consecutive_emergency = int(p5_summary.get("max_consecutive_emergency", 0) or 0)
     raw_max_consecutive_emergency = int(
         p5_summary.get("raw_max_consecutive_emergency", 0) or 0
@@ -4715,8 +4856,17 @@ def validate_p5_3_hard_gates(
         "overlap_margin_evidence": overlap_margin_evidence,
         "future_min_im_min": future_min_im_min,
         "future_replan_margin_m": future_replan_margin_m,
+        "bad_ratio_max": bad_ratio_max,
+        "max_bad_ratio": max_bad_ratio,
+        "future_bad_ratio_coverage": future_bad_ratio_coverage,
         "request_replan_count": int(p5_summary.get("replan_action_count", 0) or 0),
         "raw_request_replan_count": int(p5_summary.get("raw_replan_action_count", 0) or 0),
+        "request_replan_present": (
+            int(p5_summary.get("replan_action_count", 0) or 0) > 0
+            or int(p5_summary.get("raw_replan_action_count", 0) or 0) > 0
+        ),
+        "future_reason_attribution_count": len(future_reason_rows),
+        "future_reason_attribution_ok": len(future_reason_rows) > 0,
         "future_replan_reason_count": len(future_replan_rows),
         "future_replan_reason_ok": len(future_replan_rows) > 0,
         "first_bad_tau_values": first_bad_tau_values[:20],
@@ -4773,10 +4923,26 @@ def validate_p5_3_hard_gates(
         failures.append("P5-3 trajectory samples do not overlap the high-risk zone fixture")
     if not gates["overlap_margin_evidence"]:
         failures.append("P5-3 overlap did not show PL>AL or IM below future replan margin")
-    if gates["request_replan_count"] <= 0 and gates["raw_request_replan_count"] <= 0:
+    if not gates["request_replan_present"]:
         failures.append("P5-3 did not observe REQUEST_REPLAN")
-    if not gates["future_replan_reason_ok"]:
-        failures.append("P5-3 REQUEST_REPLAN reason was not future_bad or an equivalent future high-risk reason")
+    if gates["overlap_margin_evidence"] and not gates["future_bad_ratio_coverage"]:
+        failures.append(
+            "P5-3 scenario isolation / future bad-ratio coverage: "
+            f"future risk exists but bad_ratio_max={bad_ratio_max:.6g} "
+            f"is below max_bad_ratio={max_bad_ratio:.6g}"
+        )
+    elif not gates["future_replan_reason_ok"]:
+        if gates["future_bad_ratio_coverage"] and not gates["future_reason_attribution_ok"]:
+            failures.append(
+                "P5-3 reason attribution: future gate reached bad-ratio "
+                "threshold but status reason fields did not expose future_bad "
+                "or an equivalent future high-risk reason"
+            )
+        else:
+            failures.append(
+                "P5-3 PL/AL margin: future-risk reason evidence did not coincide "
+                "with a REQUEST_REPLAN row"
+            )
     if not gates["first_bad_tau_in_fixture_window"]:
         failures.append("P5-3 first_bad_tau was absent or outside the fixture tau window")
     if not gates["emergency_storm_absent"]:
@@ -4806,6 +4972,8 @@ def validate_p5_3_hard_gates(
         "marker_rows_present",
         "trajectory_overlap_present",
         "overlap_margin_evidence",
+        "request_replan_present",
+        "future_bad_ratio_coverage",
         "future_replan_reason_ok",
         "first_bad_tau_in_fixture_window",
         "emergency_storm_absent",
@@ -5282,7 +5450,11 @@ def next_debug_branch(
             return "PASS -> P5-4"
         if status == "BLOCKED_SCENARIO_MISSING":
             return P5_3_BLOCKED_BRANCH
-        return P5_3_FAIL_BRANCH
+        if "scenario isolation" in text or "bad-ratio coverage" in text:
+            return P5_3_SCENARIO_ISOLATION_BRANCH
+        if "reason attribution" in text:
+            return P5_3_REASON_ATTRIBUTION_BRANCH
+        return P5_3_PL_AL_MARGIN_BRANCH
     if status == "PASS":
         pass_branches = {
             "B0-1": "continue_to_B0-2_open_sky_baseline",
@@ -5745,7 +5917,11 @@ def analyze(args: argparse.Namespace) -> dict[str, Any]:
             write_csv(p0_6_overlay_path, p0_6_fields, p0_6_overlap)
             p0_csv_artifacts.extend([str(p0_6_overlap_path), str(p0_6_overlay_path)])
 
-        health_figure_path = figures_dir / f"{prefix}_p0_health_timeline.png"
+        health_figure_path = (
+            figures_dir / "p5_3_debug_p0_health_timeline.png"
+            if p5_3_phase
+            else figures_dir / f"{prefix}_p0_health_timeline.png"
+        )
         reason_figure_path = figures_dir / f"{prefix}_p0_reason_histogram.png"
         distribution_figure_path = figures_dir / f"{prefix}_pl_cost_distribution.png"
         snapshot_figure_path = figures_dir / f"{prefix}_risk_grid_snapshot_overview.png"
@@ -5897,8 +6073,16 @@ def analyze(args: argparse.Namespace) -> dict[str, Any]:
     )
 
     figures: list[str] = []
-    scenario_figure_path = figures_dir / f"{prefix}_scenario_topdown.png"
-    topic_activity_figure_path = figures_dir / f"{prefix}_topic_activity_timeline.png"
+    scenario_figure_path = (
+        figures_dir / "p5_3_debug_scenario_topdown.png"
+        if p5_3_phase
+        else figures_dir / f"{prefix}_scenario_topdown.png"
+    )
+    topic_activity_figure_path = (
+        figures_dir / "p5_3_debug_topic_activity_timeline.png"
+        if p5_3_phase
+        else figures_dir / f"{prefix}_topic_activity_timeline.png"
+    )
     source_figure_path = figures_dir / f"{prefix}_integrity_source_timeline.png"
     integrity_figure_path = figures_dir / f"{prefix}_integrity_hpl_vpl_timeline.png"
 
@@ -6030,6 +6214,9 @@ def analyze(args: argparse.Namespace) -> dict[str, Any]:
                     "action": row.get("action", ""),
                     "raw_action": row.get("raw_action", ""),
                     "reason": row.get("reason", ""),
+                    "current_reason": row.get("current_reason", ""),
+                    "future_reason": row.get("future_reason", ""),
+                    "active_reasons": row.get("active_reasons", ""),
                     "action_ok": 1 if p5_action(row, "action") == P5_OK_ACTION else 0,
                     "raw_action_ok": 1 if p5_action(row, "raw_action") == P5_OK_ACTION else 0,
                     "request_replan": 1
@@ -6053,6 +6240,9 @@ def analyze(args: argparse.Namespace) -> dict[str, Any]:
                 "action",
                 "raw_action",
                 "reason",
+                "current_reason",
+                "future_reason",
+                "active_reasons",
                 "action_ok",
                 "raw_action_ok",
                 "request_replan",
@@ -6074,6 +6264,10 @@ def analyze(args: argparse.Namespace) -> dict[str, Any]:
                 "first_bad_tau",
                 "bad_ratio",
                 "unknown_ratio",
+                "reason",
+                "current_reason",
+                "future_reason",
+                "active_reasons",
                 "current_stale_duration_s",
                 "current_low_margin_duration_s",
                 "future_unknown_duration_s",
@@ -6201,19 +6395,32 @@ def analyze(args: argparse.Namespace) -> dict[str, Any]:
             if artifact not in csv_artifacts
         )
 
-        p5_action_figure_path = figures_dir / f"{prefix}_p5_action_timeline.png"
+        p5_action_figure_path = (
+            figures_dir / "p5_3_debug_action_timeline.png"
+            if p5_3_phase
+            else figures_dir / f"{prefix}_p5_action_timeline.png"
+        )
         p5_status_figure_path = figures_dir / f"{prefix}_p5_status_timeline.png"
-        p5_margin_figure_path = figures_dir / f"{prefix}_p5_margin_timeline.png"
+        p5_margin_figure_path = (
+            figures_dir / "p5_3_debug_margin_timeline.png"
+            if p5_3_phase
+            else figures_dir / f"{prefix}_p5_margin_timeline.png"
+        )
         p5_current_im_vs_action_figure_path = figures_dir / f"{prefix}_current_im_vs_action.png"
         p5_debounce_figure_path = figures_dir / f"{prefix}_p5_debounce_timeline.png"
         p5_future_unknown_figure_path = figures_dir / f"{prefix}_future_unknown_duration_timeline.png"
         p5_startup_correlation_figure_path = figures_dir / f"{prefix}_startup_correlation.png"
         p5_stale_integrity_correlation_figure_path = figures_dir / f"{prefix}_stale_integrity_correlation.png"
         p5_final_gate_figure_path = figures_dir / f"{prefix}_p5_final_gate_summary.png"
-        p5_trajectory_figure_path = figures_dir / f"{prefix}_trajectory_integrity_samples.png"
+        p5_trajectory_figure_path = (
+            figures_dir / "p5_3_debug_trajectory_integrity_samples.png"
+            if p5_3_phase
+            else figures_dir / f"{prefix}_trajectory_integrity_samples.png"
+        )
         p5_rviz_overview_path = figures_dir / f"{prefix}_p5_rviz_overview.png"
-        p5_3_overlay_figure_path = figures_dir / f"{prefix}_high_risk_zone_overlay.png"
-        p5_3_first_bad_tau_figure_path = figures_dir / f"{prefix}_first_bad_tau_timeline.png"
+        p5_3_overlay_figure_path = figures_dir / "p5_3_debug_high_risk_zone_overlay.png"
+        p5_3_first_bad_tau_figure_path = figures_dir / "p5_3_debug_first_bad_tau_timeline.png"
+        p5_3_reason_figure_path = figures_dir / "p5_3_debug_reason_timeline.png"
         if plot_p5_action_timeline(p5_rows, p5_action_figure_path):
             p5_figure_artifacts.append(str(p5_action_figure_path))
         if plot_p5_status_timeline(p5_rows, p5_status_figure_path):
@@ -6259,11 +6466,15 @@ def analyze(args: argparse.Namespace) -> dict[str, Any]:
                 p5_figure_artifacts.append(str(p5_3_first_bad_tau_figure_path))
             else:
                 warnings.append("P5-3 first_bad_tau timeline was not generated because status rows were unavailable")
+            if plot_p5_3_reason_timeline(p5_rows, p5_3_reason_figure_path):
+                p5_figure_artifacts.append(str(p5_3_reason_figure_path))
+            else:
+                warnings.append("P5-3 reason timeline was not generated because status rows were unavailable")
         required_runtime_figures = [
             scenario_figure_path,
             topic_activity_figure_path,
             source_figure_path,
-            figures_dir / f"{prefix}_p0_health_timeline.png",
+            health_figure_path,
             p5_action_figure_path,
             p5_status_figure_path,
             p5_margin_figure_path,
@@ -6285,6 +6496,7 @@ def analyze(args: argparse.Namespace) -> dict[str, Any]:
             required_runtime_figures.extend(
                 [
                     p5_3_overlay_figure_path,
+                    p5_3_reason_figure_path,
                     p5_3_first_bad_tau_figure_path,
                 ]
             )

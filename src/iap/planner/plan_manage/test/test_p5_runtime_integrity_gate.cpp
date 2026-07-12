@@ -1,6 +1,7 @@
 #include <ego_planner/p5_runtime_integrity_gate.h>
 #include <ego_planner/safety_rviz_publisher.h>
 
+#include <algorithm>
 #include <cmath>
 #include <limits>
 #include <memory>
@@ -339,6 +340,48 @@ TEST(P5RuntimeIntegrityGateTest, FutureBadInsideEmergencyTimeRequestsCandidate) 
             ego_planner::P5GateAction::REQUEST_EMERGENCY_STOP_CANDIDATE);
   EXPECT_EQ(status.reason, ego_planner::P5GateReason::FUTURE_BAD);
   EXPECT_NEAR(status.first_bad_tau, 0.0, 1.0e-9);
+}
+
+TEST(P5RuntimeIntegrityGateTest,
+     ConcurrentCurrentLowMarginAndFutureBadCarryBothReasons) {
+  auto config = baseConfig();
+  config.current_stale_to_replan_s = 100.0;
+  config.current_stale_to_emergency_s = 100.0;
+  ego_planner::P5RuntimeIntegrityGate gate(nullptr, config, false);
+  gate.setCurrentIntegrityForTest(integrityMsg(0.0, 10.1, 10.1, 10.0, 10.0));
+  auto traj = makeTrajectory();
+  auto snapshot = makeSnapshot(9.8, 9.8);
+
+  auto status = gate.evaluateRuntime(traj, snapshot, 0.0, -1.0);
+
+  EXPECT_EQ(status.action, ego_planner::P5GateAction::REQUEST_REPLAN);
+  EXPECT_EQ(status.raw_action, ego_planner::P5GateAction::REQUEST_REPLAN);
+  EXPECT_STREQ(status.current_reason.c_str(), "current_low_margin");
+  EXPECT_STREQ(status.future_reason.c_str(), "future_bad");
+  EXPECT_NE(std::find(status.active_reasons.begin(), status.active_reasons.end(),
+                      "current_low_margin"),
+            status.active_reasons.end());
+  EXPECT_NE(std::find(status.active_reasons.begin(), status.active_reasons.end(),
+                      "future_bad"),
+            status.active_reasons.end());
+}
+
+TEST(P5RuntimeIntegrityGateTest, CurrentLowMarginDoesNotForgeFutureReason) {
+  auto config = baseConfig();
+  config.current_stale_to_replan_s = 100.0;
+  config.current_stale_to_emergency_s = 100.0;
+  ego_planner::P5RuntimeIntegrityGate gate(nullptr, config, false);
+  gate.setCurrentIntegrityForTest(integrityMsg(0.0, 10.1, 10.1, 10.0, 10.0));
+  auto traj = makeTrajectory();
+  auto snapshot = makeSnapshot(1.0, 1.0);
+
+  auto status = gate.evaluateRuntime(traj, snapshot, 0.0, -1.0);
+
+  EXPECT_EQ(status.action, ego_planner::P5GateAction::REQUEST_REPLAN);
+  EXPECT_STREQ(status.current_reason.c_str(), "current_low_margin");
+  EXPECT_TRUE(status.future_reason.empty());
+  ASSERT_EQ(status.active_reasons.size(), 1u);
+  EXPECT_EQ(status.active_reasons.front(), "current_low_margin");
 }
 
 TEST(P5RuntimeIntegrityGateTest, CurrentMsgConstantModeMatchesLegacyFutureAL) {
