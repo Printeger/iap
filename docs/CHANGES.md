@@ -3,6 +3,11 @@
 > 规则：任何代码改动必须在这里记录，并包含 IAP-RQ-XXX。
 
 ## Unreleased
+- fix(planner-p5-3-query-alignment-proof): IAP-RQ-320 — make P5-3 query-alignment evidence authoritative and fail-closed.
+  - `risk_grid_map.cpp`: `queryPredictedPL()` now emits P5-3 fixture diagnostics (`fixture_match`, expected PL, expected reason) from the same snapshot-relative query-time fixture decision that injects `10.2/10.2` PL; fixture interval checks use the existing boundary epsilon so tau-boundary queries cannot fall through to interpolation-only evidence.
+  - `p5_runtime_integrity_gate`: carries the runtime fixture diagnostics into non-decision P5 status `samples` JSON alongside `query_tau_s`.
+  - `analyze_safety_planner_run.py`: P5-3 query alignment now prefers runtime-emitted fixture fields over analyzer-reconstructed geometry, treats missing sample/marker/figure evidence as `FAIL`, keeps the active-window topic-gap gate, and routes all non-pass P5-3 outcomes to `FAIL -> 继续 debug P5-3 query alignment / PL-AL margin`.
+  - Tests cover provider-backed tau-zero queries, future fixture queries with authoritative diagnostics, occupied-skip bypass, P5 status JSON fields, runtime `fixture_match=false` mismatches, and active-window odom gap failure.
 - fix(planner-p5-3-query-alignment): IAP-RQ-320 — align P5-3 fixture evidence with the actual `queryPredictedPL()` decision path.
   - `risk_grid_map.cpp`: add a query-time P5-3 fixture override so future samples inside the configured spatial window and snapshot-relative `tau=[1.2,2.0]` return injected `10.2/10.2` PL with reason `p5_3_high_risk_zone`; tau-zero/current queries remain provider-backed.
   - `p5_runtime_integrity_gate`: expose `query_tau_s` in non-decision status sample diagnostics so analyzer geometry is aligned with the actual snapshot-relative query.

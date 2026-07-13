@@ -769,6 +769,10 @@ TEST(P5RuntimeIntegrityGateTest, PublishedStatusJsonIncludesSampleDiagnostics) {
   EXPECT_NE(payload.find("\"samples\":["), std::string::npos);
   EXPECT_NE(payload.find("\"tau_s\":"), std::string::npos);
   EXPECT_NE(payload.find("\"query_tau_s\":"), std::string::npos);
+  EXPECT_NE(payload.find("\"fixture_match\":"), std::string::npos);
+  EXPECT_NE(payload.find("\"fixture_expected_hpl\":"), std::string::npos);
+  EXPECT_NE(payload.find("\"fixture_expected_vpl\":"), std::string::npos);
+  EXPECT_NE(payload.find("\"fixture_expected_reason\":"), std::string::npos);
   EXPECT_NE(payload.find("\"x\":"), std::string::npos);
   EXPECT_NE(payload.find("\"y\":"), std::string::npos);
   EXPECT_NE(payload.find("\"z\":"), std::string::npos);

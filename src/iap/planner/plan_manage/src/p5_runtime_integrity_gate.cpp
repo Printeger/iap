@@ -82,6 +82,14 @@ std::string jsonTrajectorySamples(
         << ",\"hal\":" << jsonNumber(sample.hal)
         << ",\"val\":" << jsonNumber(sample.val)
         << ",\"im_min\":" << jsonNumber(sample.im_min)
+        << ",\"fixture_match\":"
+        << (sample.fixture_match ? "true" : "false")
+        << ",\"fixture_expected_hpl\":"
+        << jsonNumber(sample.fixture_expected_hpl)
+        << ",\"fixture_expected_vpl\":"
+        << jsonNumber(sample.fixture_expected_vpl)
+        << ",\"fixture_expected_reason\":"
+        << jsonString(sample.fixture_expected_reason)
         << ",\"bad\":" << (sample.bad ? "true" : "false")
         << ",\"unknown\":" << (sample.unknown ? "true" : "false")
         << ",\"stale\":" << (sample.stale ? "true" : "false")
@@ -802,6 +810,10 @@ P5GateStatus P5RuntimeIntegrityGate::evaluateFutureGate(
     viz_sample.vpl = pl.vpl_pred;
     viz_sample.hal = al.hal;
     viz_sample.val = al.val;
+    viz_sample.fixture_match = pl.fixture_match;
+    viz_sample.fixture_expected_hpl = pl.fixture_expected_hpl;
+    viz_sample.fixture_expected_vpl = pl.fixture_expected_vpl;
+    viz_sample.fixture_expected_reason = pl.fixture_expected_reason;
     if (!al.valid) {
       status.pred_al_invalid_count++;
       status.pred_al_last_reason = al.reason;

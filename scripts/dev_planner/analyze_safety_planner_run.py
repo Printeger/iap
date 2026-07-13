@@ -103,14 +103,11 @@ P5_REPLAN_STORM_CONSECUTIVE = 3
 P5_2_EMERGENCY_STORM_CONSECUTIVE = 3
 P5_3_FIXTURE_NAME = "future_high_risk_zone_v1"
 P5_3_FIXTURE_REASON = "p5_3_high_risk_zone"
-P5_3_BLOCKED_BRANCH = (
-    "BLOCKED_SCENARIO_MISSING -> restore P5-3 query-alignment sample evidence"
-)
 P5_3_SCENARIO_ISOLATION_BRANCH = (
     "FAIL -> debug P5-3 scenario isolation / future bad-ratio coverage"
 )
 P5_3_REASON_ATTRIBUTION_BRANCH = "FAIL -> debug P5-3 reason attribution"
-P5_3_PL_AL_MARGIN_BRANCH = "FAIL -> 继续 debug P5-3 PL/AL margin"
+P5_3_PL_AL_MARGIN_BRANCH = "FAIL -> 继续 debug P5-3 query alignment / PL-AL margin"
 P5_3_FAIL_BRANCH = P5_3_PL_AL_MARGIN_BRANCH
 P5_3_PLAL_FIGURE_FILENAMES = [
     "p5_3_plal_scenario_topdown.png",
@@ -183,6 +180,10 @@ P5_SAMPLE_FIELDS = [
     "active_reasons",
     "tau_s",
     "query_tau_s",
+    "fixture_match",
+    "fixture_expected_hpl",
+    "fixture_expected_vpl",
+    "fixture_expected_reason",
     "x",
     "y",
     "z",
@@ -222,6 +223,10 @@ P5_3_QUERY_ALIGNMENT_FIELDS = [
     "active_reasons",
     "tau_s",
     "query_tau_s",
+    "fixture_match",
+    "fixture_expected_hpl",
+    "fixture_expected_vpl",
+    "fixture_expected_reason",
     "x",
     "y",
     "z",
@@ -5326,6 +5331,12 @@ def p5_3_sample_rows(
                 "active_reasons": status_row.get("active_reasons", ""),
                 "tau_s": sample.get("tau_s", ""),
                 "query_tau_s": sample.get("query_tau_s", ""),
+                "fixture_match": 1 if manifest_bool(sample.get("fixture_match")) else 0,
+                "fixture_expected_hpl": sample.get("fixture_expected_hpl", ""),
+                "fixture_expected_vpl": sample.get("fixture_expected_vpl", ""),
+                "fixture_expected_reason": str(
+                    sample.get("fixture_expected_reason", "")
+                ),
                 "x": sample.get("x", ""),
                 "y": sample.get("y", ""),
                 "z": sample.get("z", ""),
@@ -5353,11 +5364,37 @@ def p5_3_sample_rows(
             row["inside_tau_window"] = 1 if inside_tau else 0
             actual_hpl = finite_float(row.get("hpl"))
             actual_vpl = finite_float(row.get("vpl"))
-            expected_hpl = finite_float(fixture.get("hpl_pred")) if inside_space and inside_tau else None
-            expected_vpl = finite_float(fixture.get("vpl_pred")) if inside_space and inside_tau else None
+            runtime_expected_hpl = finite_float(row.get("fixture_expected_hpl"))
+            runtime_expected_vpl = finite_float(row.get("fixture_expected_vpl"))
+            runtime_expected_reason = str(row.get("fixture_expected_reason", ""))
+            geometry_expected_hpl = (
+                finite_float(fixture.get("hpl_pred"))
+                if inside_space and inside_tau
+                else None
+            )
+            geometry_expected_vpl = (
+                finite_float(fixture.get("vpl_pred"))
+                if inside_space and inside_tau
+                else None
+            )
+            expected_hpl = (
+                runtime_expected_hpl
+                if runtime_expected_hpl is not None
+                else geometry_expected_hpl
+            )
+            expected_vpl = (
+                runtime_expected_vpl
+                if runtime_expected_vpl is not None
+                else geometry_expected_vpl
+            )
+            expected_reason = (
+                runtime_expected_reason
+                if runtime_expected_reason
+                else (P5_3_FIXTURE_REASON if inside_space and inside_tau else "")
+            )
             row["expected_hpl"] = "" if expected_hpl is None else expected_hpl
             row["expected_vpl"] = "" if expected_vpl is None else expected_vpl
-            row["expected_reason"] = P5_3_FIXTURE_REASON if inside_space and inside_tau else ""
+            row["expected_reason"] = expected_reason
             row["actual_hpl"] = "" if actual_hpl is None else actual_hpl
             row["actual_vpl"] = "" if actual_vpl is None else actual_vpl
             row["hpl_error"] = (
@@ -5373,14 +5410,22 @@ def p5_3_sample_rows(
             pl_aligned = p5_3_float_close(actual_hpl, expected_hpl) and p5_3_float_close(
                 actual_vpl, expected_vpl
             )
-            reason_aligned = P5_3_FIXTURE_REASON in str(row.get("reason", "")).lower()
+            reason_aligned = bool(expected_reason) and expected_reason.lower() in str(
+                row.get("reason", "")
+            ).lower()
             row["query_pl_aligned"] = 1 if inside_space and inside_tau and pl_aligned else 0
             row["query_reason_aligned"] = (
                 1 if inside_space and inside_tau and reason_aligned else 0
             )
             row["query_alignment_ok"] = (
                 1
-                if inside_space and inside_tau and pl_aligned and reason_aligned
+                if inside_space
+                and inside_tau
+                and int(row.get("fixture_match", 0) or 0)
+                and runtime_expected_hpl is not None
+                and runtime_expected_vpl is not None
+                and pl_aligned
+                and reason_aligned
                 else 0
             )
             row["fixture_bad_sample"] = (
@@ -5841,16 +5886,23 @@ def validate_p5_3_hard_gates(
         ),
     }
 
-    if gates["blocked_scenario_missing"]:
-        gates["passed"] = False
-        return gates
-
     if not (
         gates["manifest_safety_profile_p5"]
         and gates["manifest_expected_true_ok"]
         and gates["manifest_expected_false_ok"]
     ):
         failures.append("P5-3 manifest does not enable P0/P5 with P1-P4 disabled")
+    if not gates["fixture_present"]:
+        failures.append("P5-3 fixture manifest is missing")
+    elif not gates["fixture_enabled"]:
+        failures.append("P5-3 fixture manifest is disabled")
+    elif not gates["fixture_name_ok"]:
+        failures.append(
+            f"P5-3 fixture name is not {P5_3_FIXTURE_NAME}: "
+            f"{fixture.get('name')}"
+        )
+    elif not gates["fixture_geometry_valid"]:
+        failures.append("P5-3 fixture geometry or tau/PL values are invalid")
     if not gates["validator_summary_present"]:
         inconclusive.append("P5-3 validator summary is missing")
     elif not gates["validator_passed"]:
@@ -5882,11 +5934,9 @@ def validate_p5_3_hard_gates(
     if not gates["p5_inspection_ok"]:
         inconclusive.append("P5-3 P5 status inspection did not complete cleanly")
     if not gates["marker_rows_present"]:
-        inconclusive.append("P5-3 trajectory marker evidence is missing")
+        failures.append("P5-3 trajectory marker evidence is missing")
     if not gates["sample_rows_present"]:
         failures.append("P5-3 PL/AL margin: per-sample status diagnostics are missing")
-    if fixture_ready and (not gates["marker_rows_present"] or not gates["sample_rows_present"]):
-        gates["blocked_scenario_missing"] = True
     if not gates["current_sample_present"]:
         failures.append("P5-3 PL/AL margin: current/tau=0 sample evidence is missing")
     if not gates["current_sample_outside_fixture"]:
@@ -5911,7 +5961,9 @@ def validate_p5_3_hard_gates(
         failures.append(
             "P5-3 query alignment: future samples entered the fixture tau/spatial "
             "window but actual queried PL/reason did not match injected fixture PL "
-            f"(first mismatch hpl={mismatch.get('hpl')}, "
+            f"(first mismatch runtime_fixture_match="
+            f"{bool(int(mismatch.get('fixture_match', 0) or 0))}, "
+            f"hpl={mismatch.get('hpl')}, "
             f"vpl={mismatch.get('vpl')}, reason={mismatch.get('reason')})"
         )
     if not gates["trajectory_overlap_present"]:
@@ -6451,9 +6503,7 @@ def next_debug_branch(
     if normalized_experiment_id == "P5-3":
         if status == "PASS":
             return "PASS -> P5-4"
-        if status == "BLOCKED_SCENARIO_MISSING":
-            return P5_3_BLOCKED_BRANCH
-        return P5_3_PL_AL_MARGIN_BRANCH
+        return P5_3_FAIL_BRANCH
     if status == "PASS":
         pass_branches = {
             "B0-1": "continue_to_B0-2_open_sky_baseline",
@@ -7706,16 +7756,24 @@ def analyze(args: argparse.Namespace) -> dict[str, Any]:
                 )
     if p5_runtime_phase:
         figures.extend(p5_figure_artifacts)
+        p5_3_query_alignment_required = set(
+            p5_3_query_alignment_figure_paths.values()
+        )
         for figure_path in p5_required_figures:
             if not figure_path.is_file() or figure_path.stat().st_size <= 0:
-                inconclusive.append(
-                    f"{experiment_label} required figure was not generated or is empty: {figure_path}"
-                )
+                if p5_3_phase and figure_path in p5_3_query_alignment_required:
+                    failures.append(
+                        "P5-3 query alignment figure missing: "
+                        f"{figure_path.name}; missing figure evidence prevents "
+                        "runtime query-alignment acceptance"
+                    )
+                else:
+                    inconclusive.append(
+                        f"{experiment_label} required figure was not generated or is empty: {figure_path}"
+                    )
 
     status = "PASS"
-    if p5_3_phase and p5_3_gates.get("blocked_scenario_missing"):
-        status = "BLOCKED_SCENARIO_MISSING"
-    elif failures:
+    if failures:
         status = "FAIL"
     elif inconclusive:
         status = "INCONCLUSIVE"

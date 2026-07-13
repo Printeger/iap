@@ -224,6 +224,10 @@ def p5_3_sample(**overrides):
         "unknown": False,
         "stale": False,
         "reason": "ok",
+        "fixture_match": False,
+        "fixture_expected_hpl": "",
+        "fixture_expected_vpl": "",
+        "fixture_expected_reason": "",
     }
     row.update(overrides)
     if "query_tau_s" not in overrides:
@@ -247,6 +251,10 @@ def p5_3_future_only_samples(linked=True):
             im_min=-0.2,
             bad=True,
             reason=reason,
+            fixture_match=True,
+            fixture_expected_hpl=10.2,
+            fixture_expected_vpl=10.2,
+            fixture_expected_reason="p5_3_high_risk_zone",
         ),
         p5_3_sample(
             tau_s=1.4,
@@ -256,6 +264,10 @@ def p5_3_future_only_samples(linked=True):
             im_min=-0.2,
             bad=True,
             reason=reason,
+            fixture_match=True,
+            fixture_expected_hpl=10.2,
+            fixture_expected_vpl=10.2,
+            fixture_expected_reason="p5_3_high_risk_zone",
         ),
         p5_3_sample(
             tau_s=1.6,
@@ -265,6 +277,10 @@ def p5_3_future_only_samples(linked=True):
             im_min=-0.2,
             bad=True,
             reason=reason,
+            fixture_match=True,
+            fixture_expected_hpl=10.2,
+            fixture_expected_vpl=10.2,
+            fixture_expected_reason="p5_3_high_risk_zone",
         ),
     ]
 
@@ -667,6 +683,10 @@ class P5_3AnalyzerTest(unittest.TestCase):
                 im_min=-0.2,
                 bad=True,
                 reason="future_low_margin:p5_3_high_risk_zone",
+                fixture_match=True,
+                fixture_expected_hpl=10.2,
+                fixture_expected_vpl=10.2,
+                fixture_expected_reason="p5_3_high_risk_zone",
             ),
         ]
 
@@ -731,13 +751,13 @@ class P5_3AnalyzerTest(unittest.TestCase):
         self.assertTrue(gates["future_replan_sample_link_ok"])
         self.assertTrue(gates["future_replan_reason_ok"])
 
-    def test_p5_3_blocks_when_fixture_manifest_is_missing_or_disabled(self):
+    def test_p5_3_fails_when_fixture_manifest_is_missing_or_disabled(self):
         _, gates, failures, inconclusive = self.validate_rows(
             [p5_3_replan_row()],
             manifest=p5_manifest(),
         )
 
-        self.assertEqual([], failures)
+        self.assertTrue(failures)
         self.assertEqual([], inconclusive)
         self.assertFalse(gates["passed"])
         self.assertTrue(gates["blocked_scenario_missing"])
@@ -748,7 +768,7 @@ class P5_3AnalyzerTest(unittest.TestCase):
         )
         self.assertTrue(disabled_gates["blocked_scenario_missing"])
 
-    def test_p5_3_blocks_when_query_alignment_evidence_is_missing(self):
+    def test_p5_3_fails_when_query_alignment_evidence_is_missing(self):
         row = p5_3_replan_row(samples=[])
 
         _, gates, failures, inconclusive = self.validate_rows(
@@ -757,14 +777,14 @@ class P5_3AnalyzerTest(unittest.TestCase):
         )
 
         self.assertFalse(gates["passed"])
-        self.assertTrue(gates["blocked_scenario_missing"])
+        self.assertFalse(gates["blocked_scenario_missing"])
         self.assertTrue(
             any("per-sample status diagnostics are missing" in failure for failure in failures),
             failures,
         )
         self.assertTrue(
-            any("trajectory marker evidence is missing" in item for item in inconclusive),
-            inconclusive,
+            any("trajectory marker evidence is missing" in failure for failure in failures),
+            failures,
         )
 
     def test_p5_3_fails_when_overlap_has_no_replan(self):
@@ -850,6 +870,10 @@ class P5_3AnalyzerTest(unittest.TestCase):
             im_min=-0.2,
             bad=True,
             reason="future_low_margin:p5_3_high_risk_zone",
+            fixture_match=True,
+            fixture_expected_hpl=10.2,
+            fixture_expected_vpl=10.2,
+            fixture_expected_reason="p5_3_high_risk_zone",
         )
 
         _, gates, failures, _ = self.validate_rows(
@@ -871,6 +895,10 @@ class P5_3AnalyzerTest(unittest.TestCase):
             im_min=9.0,
             bad=False,
             reason="ok",
+            fixture_match=True,
+            fixture_expected_hpl=10.2,
+            fixture_expected_vpl=10.2,
+            fixture_expected_reason="p5_3_high_risk_zone",
         )
 
         _, gates, failures, _ = self.validate_rows(
@@ -884,6 +912,34 @@ class P5_3AnalyzerTest(unittest.TestCase):
             gates["sample_summary"]["future_query_mismatch_sample_count"],
         )
         self.assertTrue(any("query alignment" in failure for failure in failures), failures)
+
+    def test_p5_3_fails_when_runtime_fixture_match_is_false_in_fixture_window(self):
+        samples = p5_3_future_only_samples()
+        samples[1] = p5_3_sample(
+            tau_s=1.2,
+            x=-10.5,
+            hpl=10.2,
+            vpl=10.2,
+            im_min=-0.2,
+            bad=True,
+            reason="future_low_margin:p5_3_high_risk_zone",
+            fixture_match=False,
+            fixture_expected_hpl=10.2,
+            fixture_expected_vpl=10.2,
+            fixture_expected_reason="p5_3_high_risk_zone",
+        )
+
+        _, gates, failures, _ = self.validate_rows(
+            [p5_3_replan_row(samples=samples)]
+        )
+
+        self.assertFalse(gates["passed"])
+        self.assertFalse(gates["future_fixture_query_aligned"])
+        self.assertEqual(
+            1,
+            gates["sample_summary"]["future_query_mismatch_sample_count"],
+        )
+        self.assertTrue(any("runtime_fixture_match=False" in failure for failure in failures), failures)
 
     def test_p5_3_active_window_topic_gap_fails_on_odom_gap(self):
         rows = [
@@ -955,7 +1011,7 @@ class P5_3AnalyzerTest(unittest.TestCase):
             ),
         )
         self.assertEqual(
-            analyzer.P5_3_BLOCKED_BRANCH,
+            analyzer.P5_3_FAIL_BRANCH,
             analyzer.next_debug_branch("BLOCKED_SCENARIO_MISSING", [], [], "P5-3"),
         )
 

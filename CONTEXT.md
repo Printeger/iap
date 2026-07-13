@@ -64,6 +64,10 @@ _Avoid_: aggregate P5 action count alone, unrelated map overlap
 Evidence that the current `tau=0` P5 sample is outside the high-risk fixture while later trajectory samples enter it within the configured fixture tau window.
 _Avoid_: broad fixture overlap that includes the current position, future-risk action without sample-level support
 
+**Query-aligned fixture evidence**:
+Proof from the actual `queryPredictedPL()` result, not analyzer-only geometry, that future samples inside the P5-3 spatial and snapshot-relative tau fixture return injected PL.
+_Avoid_: reconstructed overlap evidence, marker-only geometry, sample positions without runtime PL diagnostics
+
 **Causal replan evidence**:
 Analyzer/status evidence that a `REQUEST_REPLAN` action and the future-risk gate/reason that caused it are both traceable in the same P5 run, including concurrent current and future reasons when both gates are active.
 _Avoid_: action count without gate reason, margin evidence with no replan attribution

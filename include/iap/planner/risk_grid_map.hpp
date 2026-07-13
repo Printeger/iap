@@ -100,6 +100,10 @@ struct PredictedPLSample {
   double vpl_pred = std::numeric_limits<double>::quiet_NaN();
   double query_time_s = std::numeric_limits<double>::quiet_NaN();
   double query_tau_s = std::numeric_limits<double>::quiet_NaN();
+  bool fixture_match = false;
+  double fixture_expected_hpl = std::numeric_limits<double>::quiet_NaN();
+  double fixture_expected_vpl = std::numeric_limits<double>::quiet_NaN();
+  std::string fixture_expected_reason;
   uint64_t generation_id = 0;
   std::string reason = "not_evaluated";
 };

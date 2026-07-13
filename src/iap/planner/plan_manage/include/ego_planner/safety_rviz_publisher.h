@@ -24,6 +24,10 @@ struct SafetyVizTrajectorySample {
   double hal = std::numeric_limits<double>::quiet_NaN();
   double val = std::numeric_limits<double>::quiet_NaN();
   double im_min = std::numeric_limits<double>::quiet_NaN();
+  bool fixture_match = false;
+  double fixture_expected_hpl = std::numeric_limits<double>::quiet_NaN();
+  double fixture_expected_vpl = std::numeric_limits<double>::quiet_NaN();
+  std::string fixture_expected_reason;
   bool good = false;
   bool bad = false;
   bool unknown = false;

@@ -47,7 +47,7 @@ bool in_closed_interval(const double value,
   }
   const double lo = std::min(a, b);
   const double hi = std::max(a, b);
-  return value >= lo && value <= hi;
+  return value >= lo - kBoundaryEps && value <= hi + kBoundaryEps;
 }
 
 bool p5_3_fixture_applies(const P5_3HighRiskZoneFixtureConfig& fixture,
@@ -64,11 +64,11 @@ bool p5_3_fixture_applies(const P5_3HighRiskZoneFixtureConfig& fixture,
                             fixture.tau_max_s);
 }
 
-void apply_p5_3_fixture(const P5_3HighRiskZoneFixtureConfig& fixture,
+bool apply_p5_3_fixture(const P5_3HighRiskZoneFixtureConfig& fixture,
                         const RiskPredictionQuery& query,
                         RiskPredictionResult* result) {
   if (result == nullptr || !p5_3_fixture_applies(fixture, query)) {
-    return;
+    return false;
   }
   result->available = true;
   result->valid = true;
@@ -76,6 +76,7 @@ void apply_p5_3_fixture(const P5_3HighRiskZoneFixtureConfig& fixture,
   result->hpl_pred = fixture.hpl_pred_m;
   result->vpl_pred = fixture.vpl_pred_m;
   result->reason = kP5_3FixtureReason;
+  return true;
 }
 
 }  // namespace
@@ -533,9 +534,15 @@ bool RiskGridSnapshot::queryPredictedPL(const Eigen::Vector3d& p_w,
   out->query_tau_s = tau;
   RiskPredictionResult fixture_result;
   const RiskPredictionQuery fixture_query{p_w, query_time_s, tau};
-  apply_p5_3_fixture(generation_->params.p5_3_fixture,
-                     fixture_query, &fixture_result);
-  if (fixture_result.available && fixture_result.valid &&
+  const bool fixture_match = apply_p5_3_fixture(
+      generation_->params.p5_3_fixture, fixture_query, &fixture_result);
+  if (fixture_match) {
+    out->fixture_match = true;
+    out->fixture_expected_hpl = fixture_result.hpl_pred;
+    out->fixture_expected_vpl = fixture_result.vpl_pred;
+    out->fixture_expected_reason = fixture_result.reason;
+  }
+  if (fixture_match && fixture_result.available && fixture_result.valid &&
       !fixture_result.stale) {
     out->available = fixture_result.available;
     out->valid = fixture_result.valid;
