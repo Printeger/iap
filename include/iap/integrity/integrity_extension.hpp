@@ -25,6 +25,7 @@
 #include <atomic>
 #include <cstdio>
 #include <deque>
+#include <limits>
 #include <memory>
 #include <mutex>
 #include <string>
@@ -64,6 +65,7 @@ class IntegrityExtensionModule : public glim::ExtensionModuleROS2 {
   void maybe_publish_integrity_();
   void publish_araim_markers_(const IntegrityReport& report,
                               const glim::EstimationFrame& frame);
+  double integrity_header_stamp_s_(double report_stamp_s);
 
   // ── Config ────────────────────────────────────────────────────────────
   bool        enable_;           ///< master enable
@@ -71,6 +73,16 @@ class IntegrityExtensionModule : public glim::ExtensionModuleROS2 {
   bool        enable_fgo_info_;  ///< extract sigma_p from smoother
   bool        enable_dynamic_al_;///< trunk HAL + altitude VAL
   std::string pub_topic_;        ///< ROS2 topic name
+
+  bool        p5_5_fixture_enabled_ = false;
+  std::string p5_5_fixture_name_ = "current_integrity_stamp_freeze_v1";
+  double      p5_5_fixture_start_s_ = 30.0;
+  double      p5_5_fixture_duration_s_ = 12.0;
+  double      p5_5_run_start_stamp_s_ =
+      std::numeric_limits<double>::quiet_NaN();
+  double      p5_5_frozen_stamp_s_ =
+      std::numeric_limits<double>::quiet_NaN();
+  bool        p5_5_fixture_was_active_ = false;
 
   bool        enable_markers_ = false;
   std::string marker_topic_ = "/iap/araim_envelopes";

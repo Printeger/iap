@@ -77,6 +77,14 @@ OPEN_MAP_PRESET = {
 }
 
 
+P5_5_FIXTURE_ROUTE_WAYPOINTS = [
+    (12.0, 0.0, 1.2),
+    (-12.0, 0.0, 1.2),
+    (12.0, 0.0, 1.2),
+    (-12.0, 0.0, 1.2),
+]
+
+
 FEATURE_RICH_MAP_PRESET = {
     "tree_density_lower_left_per_m2": "0.75",
     "tree_density_lower_right_per_m2": "0.75",
@@ -662,6 +670,10 @@ ARG_DEFAULTS = [
     ("p5_4.fixture.tau_max", "0.95"),
     ("p5_4.fixture.hpl_pred_m", "10.2"),
     ("p5_4.fixture.vpl_pred_m", "10.2"),
+    ("p5_5.fixture.enabled", "false"),
+    ("p5_5.fixture.name", "current_integrity_stamp_freeze_v1"),
+    ("p5_5.fixture.start_s", "30.0"),
+    ("p5_5.fixture.duration_s", "12.0"),
     ("p1.use_integrity_cost", "false"),
     ("p1.metrics_only", "true"),
     ("p1.lambda_integrity", "0.0"),
@@ -927,6 +939,10 @@ def _runtime_config(context, use_gnss, use_araim, allow_truth_alignment):
     integrity["integrity_require_valid_lidar"] = _as_bool(LaunchConfiguration("integrity_require_valid_lidar").perform(context))
     integrity["integrity_conservative_hpl_m"] = float(LaunchConfiguration("integrity_conservative_hpl_m").perform(context))
     integrity["integrity_conservative_vpl_m"] = float(LaunchConfiguration("integrity_conservative_vpl_m").perform(context))
+    integrity["p5_5.fixture.enabled"] = _as_bool(LaunchConfiguration("p5_5.fixture.enabled").perform(context))
+    integrity["p5_5.fixture.name"] = LaunchConfiguration("p5_5.fixture.name").perform(context)
+    integrity["p5_5.fixture.start_s"] = float(LaunchConfiguration("p5_5.fixture.start_s").perform(context))
+    integrity["p5_5.fixture.duration_s"] = float(LaunchConfiguration("p5_5.fixture.duration_s").perform(context))
     with config_gnss_path.open("w") as f:
         json.dump(config_gnss, f, indent=2)
         f.write("\n")
@@ -1064,6 +1080,18 @@ def _ego_planner_node(context, drone_id, planner_odom_topic, cloud_topic, camera
 
     map_size_x, map_size_y, map_size_z = map_size
     goal_x, goal_y, goal_z = goal
+    waypoint_values = [(float(goal_x), float(goal_y), float(goal_z))]
+    for i in range(1, max(1, min(int(point_num), 7))):
+        waypoint_values.append(
+            (
+                float(LaunchConfiguration(f"point{i}_x").perform(context)),
+                float(LaunchConfiguration(f"point{i}_y").perform(context)),
+                float(LaunchConfiguration(f"point{i}_z").perform(context)),
+            )
+        )
+    if _param_bool(context, "p5_5.fixture.enabled"):
+        waypoint_values = list(P5_5_FIXTURE_ROUTE_WAYPOINTS)
+
     return Node(
         package="ego_planner",
         executable="ego_planner_node",
@@ -1095,14 +1123,11 @@ def _ego_planner_node(context, drone_id, planner_odom_topic, cloud_topic, camera
             {"fsm/emergency_time": 1.0},
             {"fsm/realworld_experiment": False},
             {"fsm/fail_safe": True},
-            {"fsm/waypoint_num": int(point_num)},
-            {"fsm/waypoint0_x": float(goal_x)},
-            {"fsm/waypoint0_y": float(goal_y)},
-            {"fsm/waypoint0_z": float(goal_z)},
+            {"fsm/waypoint_num": len(waypoint_values)},
             *[
-                {f"fsm/waypoint{i}_{axis}": float(LaunchConfiguration(f"point{i}_{axis}").perform(context))}
-                for i in range(1, 7)
-                for axis in ("x", "y", "z")
+                {f"fsm/waypoint{i}_{axis}": value}
+                for i, waypoint in enumerate(waypoint_values)
+                for axis, value in zip(("x", "y", "z"), waypoint)
             ],
             {"grid_map/resolution": 0.1},
             {"grid_map/map_size_x": map_size_x},
@@ -1558,6 +1583,12 @@ def _launch_setup(context):
         "p5_4.fixture.expected_hal_m": p5_4_expected_hal,
         "p5_4.fixture.expected_val_m": p5_4_expected_val,
         "p5_4.fixture.expected_im_m": p5_4_expected_im,
+        "p5_5.fixture.enabled": _param_bool(context, "p5_5.fixture.enabled"),
+        "p5_5.fixture.name": LaunchConfiguration("p5_5.fixture.name").perform(context),
+        "p5_5.fixture.start_s": _param_float(context, "p5_5.fixture.start_s"),
+        "p5_5.fixture.duration_s": _param_float(context, "p5_5.fixture.duration_s"),
+        "p5.current_stale_to_replan_s": _param_float(context, "p5.current_stale_to_replan_s"),
+        "p5.current_stale_to_emergency_s": _param_float(context, "p5.current_stale_to_emergency_s"),
         "p5.pred_alert_limit_mode": p5_pred_al_mode,
         "p5.future_replan_margin_m": _param_float(context, "p5.future_replan_margin_m"),
         "p5.future_emergency_margin_m": _param_float(context, "p5.future_emergency_margin_m"),
@@ -1658,6 +1689,29 @@ def _launch_setup(context):
                 "expected_reason": "p5_4_near_risk_zone",
                 "expected_first_bad_tau_s": _param_float(context, "p5_4.fixture.tau_min"),
                 "expected_emergency_time_s": 1.0,
+            },
+        },
+        "p5_5": {
+            "fixture": {
+                "enabled": _param_bool(context, "p5_5.fixture.enabled"),
+                "name": LaunchConfiguration("p5_5.fixture.name").perform(context),
+                "window_s": [
+                    _param_float(context, "p5_5.fixture.start_s"),
+                    _param_float(context, "p5_5.fixture.start_s")
+                    + _param_float(context, "p5_5.fixture.duration_s"),
+                ],
+                "start_s": _param_float(context, "p5_5.fixture.start_s"),
+                "duration_s": _param_float(context, "p5_5.fixture.duration_s"),
+                "expected_thresholds_s": {
+                    "replan": _param_float(context, "p5.current_stale_to_replan_s"),
+                    "emergency": _param_float(context, "p5.current_stale_to_emergency_s"),
+                },
+                "expected_reason": "current_stale",
+                "route": {
+                    "enabled": _param_bool(context, "p5_5.fixture.enabled"),
+                    "waypoints": [list(waypoint) for waypoint in P5_5_FIXTURE_ROUTE_WAYPOINTS],
+                    "reason": "keep P5 runtime gate active through the stale fixture window",
+                },
             },
         },
         **{f"planner_enable_{key}": value for key, value in safety_enabled.items()},

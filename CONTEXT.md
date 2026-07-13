@@ -76,6 +76,10 @@ _Avoid_: full-run current contamination outside the causal event, later emergenc
 The P5-only deterministic future-risk fixture whose first bad trajectory sample is inside the emergency time horizon.
 _Avoid_: hidden emergency-margin enablement, current-position contamination, P5-3 replan fixture
 
+**P5-5 current-stale fixture**:
+The P5-only deterministic integrity stamp-freeze fixture that makes current integrity age grow while keeping reports valid.
+_Avoid_: natural fallback-only stale behavior, topic outage, invalid PL/AL report
+
 **Causal replan evidence**:
 Analyzer/status evidence that a `REQUEST_REPLAN` action and the future-risk gate/reason that caused it are both traceable in the same P5 run, including concurrent current and future reasons when both gates are active.
 _Avoid_: action count without gate reason, margin evidence with no replan attribution

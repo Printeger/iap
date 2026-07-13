@@ -669,6 +669,7 @@ P5GateStatus P5RuntimeIntegrityGate::evaluate(
       evaluateFutureGate(local_data, snapshot, current, context);
   P5GateStatus merged = merge(current_status, future_status);
   merged.raw_action = merged.action;
+  merged.raw_reason = merged.reason;
   return merged;
 }
 
@@ -723,6 +724,7 @@ P5GateStatus P5RuntimeIntegrityGate::evaluateCurrentGate(double now_s,
       status.action = P5GateAction::REQUEST_EMERGENCY_STOP_CANDIDATE;
     }
     status.raw_action = status.action;
+    status.raw_reason = status.reason;
     return status;
   }
 
@@ -763,6 +765,7 @@ P5GateStatus P5RuntimeIntegrityGate::evaluateCurrentGate(double now_s,
   }
 
   status.raw_action = status.action;
+  status.raw_reason = status.reason;
   return status;
 }
 
@@ -952,6 +955,7 @@ P5GateStatus P5RuntimeIntegrityGate::evaluateFutureGate(
   }
 
   status.raw_action = status.action;
+  status.raw_reason = status.reason;
   return status;
 }
 
@@ -999,6 +1003,7 @@ P5GateStatus P5RuntimeIntegrityGate::merge(const P5GateStatus& a,
     out.reason = P5GateReason::OK;
   }
   out.raw_action = out.action;
+  out.raw_reason = out.reason;
   return out;
 }
 
@@ -1006,6 +1011,7 @@ P5GateStatus P5RuntimeIntegrityGate::applyDebounce(const P5GateStatus& raw,
                                                    double now_s) {
   P5GateStatus status = raw;
   status.raw_action = raw.action;
+  status.raw_reason = raw.reason;
 
   if (raw.action == P5GateAction::REQUEST_EMERGENCY_STOP_CANDIDATE) {
     bad_ticks_ = 0;
@@ -1051,6 +1057,7 @@ P5GateStatus P5RuntimeIntegrityGate::applyFinalGateBudget(
     double now_s) {
   P5GateStatus status = raw;
   status.raw_action = raw.action;
+  status.raw_reason = raw.reason;
 
   if (raw.action == P5GateAction::OK) {
     resetFinalGateFailureState();
@@ -1150,6 +1157,7 @@ std::string P5RuntimeIntegrityGate::toJson(
       << ",\"action\":" << jsonString(actionName(status.action))
       << ",\"raw_action\":" << jsonString(actionName(status.raw_action))
       << ",\"reason\":" << jsonString(reasonName(status.reason))
+      << ",\"raw_reason\":" << jsonString(reasonName(status.raw_reason))
       << ",\"current_reason\":" << jsonString(status.current_reason)
       << ",\"future_reason\":" << jsonString(status.future_reason)
       << ",\"active_reasons\":" << jsonStringArray(status.active_reasons)

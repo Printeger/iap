@@ -282,6 +282,7 @@ TEST(P5RuntimeIntegrityGateTest, CurrentStaleEscalates) {
   auto replan = gate.evaluateRuntime(traj, snapshot, 1.2, 1.0);
   EXPECT_EQ(replan.action, ego_planner::P5GateAction::REQUEST_REPLAN);
   EXPECT_EQ(replan.reason, ego_planner::P5GateReason::CURRENT_STALE);
+  EXPECT_EQ(replan.raw_reason, ego_planner::P5GateReason::CURRENT_STALE);
   EXPECT_GE(replan.current_stale_duration_s,
             config.current_stale_to_replan_s);
 
@@ -289,6 +290,7 @@ TEST(P5RuntimeIntegrityGateTest, CurrentStaleEscalates) {
   EXPECT_EQ(emergency.action,
             ego_planner::P5GateAction::REQUEST_EMERGENCY_STOP_CANDIDATE);
   EXPECT_EQ(emergency.reason, ego_planner::P5GateReason::CURRENT_STALE);
+  EXPECT_EQ(emergency.raw_reason, ego_planner::P5GateReason::CURRENT_STALE);
   EXPECT_GE(emergency.current_stale_duration_s,
             config.current_stale_to_emergency_s);
 }

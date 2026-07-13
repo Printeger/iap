@@ -3699,3 +3699,109 @@ Verification notes:
 Final conclusion:
 
 PASS -> P5-5
+
+### P5-5 Current Integrity Stale
+
+Capability audit:
+
+| Capability | Result |
+|---|---|
+| Deterministic P5-5 current-stale injection | `PASS`: added explicit `p5_5.fixture.enabled:=true` fixture `current_integrity_stamp_freeze_v1`. |
+| Default-disabled policy | `PASS`: the fixture is disabled unless the launch arg is set explicitly, so the shared `p5_fallback_unknown` experiment remains reusable for P5-6. |
+| Valid-report stale mechanism | `PASS`: `/iap/integrity` continues publishing full reports while `header.stamp` is frozen; PL/AL values remain finite. |
+| Manifest coverage | `PASS`: flat and nested `p5_5.fixture.*` keys plus expected stale debounce thresholds are recorded. |
+| Analyzer support | `PASS`: `--experiment-id P5-5` enforces fixture evidence, stale debounce, cause attribution, topic continuity, P0 health, and required figures. |
+
+Formal launch:
+
+```bash
+ros2 launch iap test_planner.launch.py \
+  experiment:=p5_fallback_unknown \
+  run_duration_s:=90 \
+  validation_duration_s:=90 \
+  start_rviz:=false \
+  run_validator:=true \
+  record_bag:=true \
+  p5_5.fixture.enabled:=true
+```
+
+Analyzer:
+
+```bash
+python3 scripts/dev_planner/analyze_safety_planner_run.py \
+  --experiment-id P5-5 \
+  --export-dir results/planner_validation/exports/test_planner_p5_fallback_unknown_fallback_only_1783960661801 \
+  --bag-dir results/planner_validation/bags/test_planner_p5_fallback_unknown_fallback_only_20260713T163741Z \
+  --fail-on-threshold
+```
+
+Latest artifacts:
+
+| Artifact | Path |
+|---|---|
+| Export | `results/planner_validation/exports/test_planner_p5_fallback_unknown_fallback_only_1783960661801` |
+| Bag | `results/planner_validation/bags/test_planner_p5_fallback_unknown_fallback_only_20260713T163741Z` |
+| Analyzer summary | `results/planner_validation/exports/test_planner_p5_fallback_unknown_fallback_only_1783960661801/metadata/safety_planner_analysis_summary.json` |
+| Analyzer status | `PASS`: `passed=true`, `failures=[]`, `inconclusive=[]`, `next_debug_branch=PASS -> P5-6` |
+
+P5-5 fixture manifest:
+
+| Field | Value |
+|---|---|
+| Name / reason | `current_integrity_stamp_freeze_v1` / `current_stale` |
+| Window | `start_s=30.0`, `duration_s=12.0`, window `[30.0,42.0]s` |
+| Debounce thresholds | `replan=0.5s`, `emergency=2.0s` |
+| Route fixture | Enabled only with `p5_5.fixture.enabled`; waypoints keep P5 runtime active through the stale window. |
+
+P5-5 gate table:
+
+| Gate | Result |
+|---|---|
+| Validator | `PASS`: validator summary `passed=true`, `message_count=885`. |
+| Required P5 topics | `PASS`: all required non-planner-dependent P0/P5 topics stable; `/planning/integrity_gate_status` count `2400`, max gap `0.710216s`. |
+| Active stale-window topic gap | `PASS`: continuous topics stayed under the active-window gap threshold. |
+| P0 health after startup | `PASS`: post-startup `ready=false`, `stale=true`, and full-unknown counts are all `0`. |
+| Fixture ready | `PASS`: manifest present, enabled, name matched, window and thresholds valid. |
+| Integrity stamp freeze | `PASS`: `119` frozen rows, header span `0.0s`, bag/header age growth `11.798291s`. |
+| Integrity publish continuity | `PASS`: max freeze-window publish gap `0.124250s`; PL/AL finite on all frozen rows. |
+| Current integrity age | `PASS`: `current_integrity_age_s_max=11.828162`, above the replan threshold. |
+| Stale debounce duration | `PASS`: `current_stale_duration_s_max=11.236182`, above the emergency threshold. |
+| Early debounce interval | `PASS`: `10` early non-emergency current-stale rows observed before replan escalation. |
+| Replan attribution | `PASS`: `219` `REQUEST_REPLAN` rows attributed to `current_stale`. |
+| Emergency attribution | `PASS`: `167` `REQUEST_EMERGENCY_STOP_CANDIDATE` rows attributed to `current_stale`. |
+| Replan before emergency | `PASS`: current-stale replan occurred before emergency candidate; no immediate emergency. |
+| Cause exclusions | `PASS`: startup/snapshot, future_bad, unknown-only, and non-current-stale action causes were excluded. |
+
+Required P5-5 figure conclusions:
+
+| Figure filename | Conclusion |
+|---|---|
+| `p5_5_scenario_topdown.png` | Generated; shows the formal fallback-only fixture route and trajectory context. |
+| `p5_5_topic_activity_timeline.png` | Generated; shows required topics stayed active through the stale window. |
+| `p5_5_integrity_pause_timeline.png` | Generated; shows `/iap/integrity` header stamp frozen while bag time advances. |
+| `p5_5_current_stale_duration_timeline.png` | Generated; shows current age and stale duration crossing replan/emergency thresholds. |
+| `p5_5_action_reason_timeline.png` | Generated; ties P5 actions to `current_stale` attribution. |
+| `p5_5_replan_vs_emergency.png` | Generated; shows the expected replan phase before emergency candidates. |
+| `p5_5_debounce_timeline.png` | Generated; shows debounce behavior rather than immediate emergency. |
+| `p5_5_margin_timeline.png` | Generated; shows current/future margins remain finite while stale state drives the gate. |
+| `p5_5_p0_health.png` | Generated; shows P0/risk-grid health remains ready, non-stale, and not full-unknown after startup. |
+| `p5_5_cause_exclusion_summary.png` | Generated; shows excluded startup/future/unknown-only causes count as zero in the stale scope. |
+| `p5_5_trajectory_integrity_samples.png` | Generated; provides marker-level trajectory integrity sample evidence. |
+
+Verification notes:
+
+| Check | Result |
+|---|---|
+| Rebuild before final verification | `PASS`: `colcon build --packages-select iap --event-handlers console_direct+`. |
+| Ego planner target build | `PASS`: `cmake --build build/ego_planner --target ego_planner_node test_p5_runtime_integrity_gate -- -j$(nproc)`. |
+| Python compile check | `PASS`: `python3 -m py_compile launch/test_planner.launch.py scripts/dev_planner/analyze_safety_planner_run.py`. |
+| Focused analyzer tests | `PASS`: `python3 test/test_analyze_safety_planner_run_p5_1.py` ran `71` tests. |
+| Focused P0/P5 ego-planner CTests | `PASS`: `ctest --test-dir build/ego_planner -R "test_p5_runtime_integrity_gate|test_p0_risk_grid_runtime" --output-on-failure`. |
+| Focused predictor/risk-grid CTests | `PASS`: `ctest --test-dir build/iap -R "test_predictor_module|test_risk_grid_map" --output-on-failure`. |
+| Formal launch | `PASS`: completed and wrote the export/bag artifacts above; shutdown emitted known ROS SIGINT teardown process-death logs after recording stopped. |
+| P5-5 analyzer with `--fail-on-threshold` | `PASS`: exit `0`, `status=PASS`, `next_debug_branch=PASS -> P5-6`. |
+| Diff whitespace check | `PASS`: `git diff --check`. |
+
+Final conclusion:
+
+PASS -> P5-6

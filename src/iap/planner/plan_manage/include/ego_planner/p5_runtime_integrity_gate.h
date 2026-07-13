@@ -115,6 +115,7 @@ struct P5GateStatus {
   P5GateAction action = P5GateAction::OK;
   P5GateAction raw_action = P5GateAction::OK;
   P5GateReason reason = P5GateReason::DISABLED;
+  P5GateReason raw_reason = P5GateReason::DISABLED;
   std::string current_reason;
   std::string future_reason;
   std::vector<std::string> active_reasons;

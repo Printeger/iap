@@ -16,6 +16,7 @@
 #include <chrono>
 #include <cmath>
 #include <cstdio>
+#include <cstdint>
 
 #include <spdlog/spdlog.h>
 #include <gtsam_points/optimizers/incremental_fixed_lag_smoother_with_fallback.hpp>
@@ -40,6 +41,25 @@
 namespace iap {
 
 using Callbacks = glim::OdometryEstimationCallbacks;
+
+namespace {
+
+void assign_header_stamp(std_msgs::msg::Header& header, double stamp_s) {
+  const double clamped_stamp =
+      std::isfinite(stamp_s) ? std::max(0.0, stamp_s) : 0.0;
+  double whole = 0.0;
+  double frac = std::modf(clamped_stamp, &whole);
+  uint32_t nanosec = static_cast<uint32_t>(std::round(frac * 1.0e9));
+  int32_t sec = static_cast<int32_t>(whole);
+  if (nanosec >= 1000000000U) {
+    nanosec -= 1000000000U;
+    ++sec;
+  }
+  header.stamp.sec = sec;
+  header.stamp.nanosec = nanosec;
+}
+
+}  // namespace
 
 // ─────────────────────────────────────────────────────────────────────────────
 IntegrityExtensionModule::IntegrityExtensionModule()
@@ -82,6 +102,20 @@ IntegrityExtensionModule::IntegrityExtensionModule()
   if (marker_max_pl_m_ < marker_min_pl_m_) {
     marker_max_pl_m_ = marker_min_pl_m_;
   }
+  p5_5_fixture_enabled_ = config.param<bool>(
+      "integrity", "p5_5.fixture.enabled", false);
+  p5_5_fixture_name_ = config.param<std::string>(
+      "integrity", "p5_5.fixture.name",
+      "current_integrity_stamp_freeze_v1");
+  p5_5_fixture_start_s_ = config.param<double>(
+      "integrity", "p5_5.fixture.start_s", 30.0);
+  p5_5_fixture_duration_s_ = config.param<double>(
+      "integrity", "p5_5.fixture.duration_s", 12.0);
+  if (p5_5_fixture_name_.empty()) {
+    p5_5_fixture_name_ = "current_integrity_stamp_freeze_v1";
+  }
+  p5_5_fixture_start_s_ = std::max(0.0, p5_5_fixture_start_s_);
+  p5_5_fixture_duration_s_ = std::max(0.0, p5_5_fixture_duration_s_);
 
   // ── Startup component status banner ──────────────────────────────────────
   logger_->info("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
@@ -96,6 +130,10 @@ IntegrityExtensionModule::IntegrityExtensionModule()
   logger_->info("[IntegrityExt] ■ Publish topic:  {}", pub_topic_);
   logger_->info("[IntegrityExt] ■ RViz markers:   {}  topic={}",
                 enable_markers_ ? "ENABLED" : "disabled", marker_topic_);
+  logger_->info("[IntegrityExt] ■ P5-5 fixture:   {}  name={} start={:.3f}s duration={:.3f}s",
+                p5_5_fixture_enabled_ ? "ENABLED" : "disabled",
+                p5_5_fixture_name_, p5_5_fixture_start_s_,
+                p5_5_fixture_duration_s_);
   logger_->info("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
 
   if (!enable_) {
@@ -335,6 +373,45 @@ void IntegrityExtensionModule::on_smoother_update_finish_(
   maybe_publish_integrity_();
 }
 
+double IntegrityExtensionModule::integrity_header_stamp_s_(
+    double report_stamp_s) {
+  if (!p5_5_fixture_enabled_) {
+    return report_stamp_s;
+  }
+  if (!std::isfinite(p5_5_run_start_stamp_s_)) {
+    p5_5_run_start_stamp_s_ = report_stamp_s;
+  }
+  const double elapsed_s =
+      std::max(0.0, report_stamp_s - p5_5_run_start_stamp_s_);
+  const bool active =
+      p5_5_fixture_duration_s_ > 0.0 &&
+      elapsed_s >= p5_5_fixture_start_s_ &&
+      elapsed_s < p5_5_fixture_start_s_ + p5_5_fixture_duration_s_;
+
+  if (!active) {
+    if (p5_5_fixture_was_active_) {
+      logger_->info(
+          "[IntegrityExt] P5-5 fixture {} released at report_stamp={:.3f}",
+          p5_5_fixture_name_, report_stamp_s);
+    }
+    p5_5_fixture_was_active_ = false;
+    return report_stamp_s;
+  }
+
+  if (!p5_5_fixture_was_active_ ||
+      !std::isfinite(p5_5_frozen_stamp_s_)) {
+    p5_5_frozen_stamp_s_ =
+        p5_5_run_start_stamp_s_ + p5_5_fixture_start_s_;
+    logger_->info(
+        "[IntegrityExt] P5-5 fixture {} freezing /iap/integrity header.stamp "
+        "at {:.3f}s for {:.3f}s",
+        p5_5_fixture_name_, p5_5_frozen_stamp_s_,
+        p5_5_fixture_duration_s_);
+  }
+  p5_5_fixture_was_active_ = true;
+  return p5_5_frozen_stamp_s_;
+}
+
 void IntegrityExtensionModule::maybe_publish_integrity_() {
   glim::EstimationFrame::ConstPtr frame;
   FGOPositionInfo fgo_snapshot;
@@ -418,10 +495,7 @@ void IntegrityExtensionModule::maybe_publish_integrity_() {
 
   iap::msg::IntegrityReport msg;
   // Header
-  const auto stamp_sec = static_cast<int32_t>(report.stamp);
-  msg.header.stamp.sec     = stamp_sec;
-  msg.header.stamp.nanosec = static_cast<uint32_t>(
-      (report.stamp - stamp_sec) * 1.0e9);
+  assign_header_stamp(msg.header, integrity_header_stamp_s_(report.stamp));
   msg.header.frame_id = "map";
 
   // Current certified monitor scalars. Keep legacy ROS field names for
