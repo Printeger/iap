@@ -3512,3 +3512,70 @@ Verification notes:
 Final conclusion:
 
 FAIL -> 继续 debug P5-3 future sampling / query alignment / PL-AL margin
+
+### P5-3 Event-Window Current-Isolation Debug/Rerun
+
+This update adopts event-window acceptance for P5-3: the analyzer judges current isolation, query-aligned future fixture evidence, first bad tau, replan attribution, and emergency storm absence on the first causal future-risk `REQUEST_REPLAN` window. Later full-run current overlap and emergency behavior remain diagnostic only.
+
+Rerun artifacts:
+
+| Artifact | Path |
+|---|---|
+| Export | `results/planner_validation/exports/test_planner_p5_corridor_manual_1783940685125` |
+| Bag | `results/planner_validation/bags/test_planner_p5_corridor_manual_20260713T110445Z` |
+| Analyzer summary | `results/planner_validation/exports/test_planner_p5_corridor_manual_1783940685125/metadata/safety_planner_analysis_summary.json` |
+
+Event-window gates:
+
+| Gate | Result |
+|---|---|
+| Event window available | `PASS`: anchor status row `140`, window `1783940699.2926164s` to `1783940699.4229517s`, duration `0.130335s`. |
+| Current sample outside fixture | `PASS`: event-window `current_sample_count=4`, `current_inside_fixture_count=0`. |
+| Current sample not fixture-bad | `PASS`: event-window `current_fixture_bad_count=0`. |
+| Future fixture entry | `PASS`: event-window `future_fixture_sample_count=16`. |
+| Future bad fixture evidence | `PASS`: event-window `future_bad_fixture_sample_count=16`. |
+| Query-aligned injected PL | `PASS`: event-window `future_query_aligned_sample_count=16`, mismatch count `0`, with injected `hpl/vpl=10.2/10.2`. |
+| First bad tau | `PASS`: event-window `first_bad_tau=1.2s`, inside `[1.2s,2.0s]`. |
+| Replan attribution | `PASS`: event-window rows carry future-risk `REQUEST_REPLAN` attribution. |
+| Emergency storm | `PASS`: event-window emergency streaks are absent. |
+| Analyzer status | `PASS`: `next_debug_branch=PASS -> P5-4`. |
+
+Full-run contamination diagnostics:
+
+| Diagnostic | Value |
+|---|---|
+| Full-run current fixture contamination | `current_inside_fixture_count=2`, `current_fixture_bad_count=2`; diagnostic only because both are outside the acceptance window. |
+| Full-run first bad tau minimum | `first_bad_tau_min=0.0`; diagnostic only because event-window `first_bad_tau=1.2`. |
+| Full-run emergency streak | `max_consecutive_emergency=3`, `raw_max_consecutive_emergency=3`; diagnostic only because the event-window emergency storm gate passed. |
+| Full-run future fixture evidence | `future_fixture_sample_count=22`, `future_bad_fixture_sample_count=22`, `future_query_aligned_sample_count=22`. |
+
+Event-window figure conclusions:
+
+| Figure filename | Conclusion |
+|---|---|
+| `p5_3_event_window_scenario_topdown.png` | Generated; confirms the P5 corridor/manual rerun used the fixed fixture route and produced analyzable bag geometry. |
+| `p5_3_event_window_fixture_overlay.png` | Generated; shows event-window current samples outside the fixture while future samples enter it. |
+| `p5_3_event_window_tau_window.png` | Generated; shows event-window fixture samples inside the configured query tau window. |
+| `p5_3_event_window_pl_probe.png` | Generated; confirms event-window fixture samples received the injected `10.2/10.2` PL values. |
+| `p5_3_event_window_margin_timeline.png` | Generated; shows negative future margin in the accepted replan window. |
+| `p5_3_event_window_action_reason.png` | Generated; ties the accepted window to future-risk replan reasons. |
+| `p5_3_event_window_replan_vs_emergency.png` | Generated; shows the accepted window is replan-only, with no in-window emergency storm. |
+| `p5_3_event_window_sample_heatmap.png` | Generated; places the accepted samples in the fixture/tau evidence band. |
+| `p5_3_event_window_topic_gap.png` | Generated; shows required continuous topics stayed within the event-window gap threshold. |
+| `p5_3_event_window_p0_health.png` | Generated; shows P0/risk-grid health was available for the event-window rerun. |
+
+Verification notes:
+
+| Check | Result |
+|---|---|
+| Python compile check | `PASS`: `python3 -m py_compile launch/test_planner.launch.py scripts/dev_planner/analyze_safety_planner_run.py`. |
+| Focused analyzer tests | `PASS`: `python3 test/test_analyze_safety_planner_run_p5_1.py`. |
+| Focused P0/P5 ego-planner CTests | `PASS`: `ctest --test-dir build/ego_planner -R "test_p5_runtime_integrity_gate\|test_p0_risk_grid_runtime" --output-on-failure`. |
+| Focused predictor/risk-grid CTests | `PASS`: `ctest --test-dir build/iap -R "test_predictor_module\|test_risk_grid_map" --output-on-failure`. |
+| Rebuild | `PASS`: `colcon build --base-paths src/iap src/iap/src/iap/planner/plan_manage --packages-select iap ego_planner --cmake-args -DCMAKE_BUILD_TYPE=RelWithDebInfo`. |
+| P5-3 launch | `PASS`: completed with `experiment:=p5_corridor`, `scenario:=manual`, `p5.pred_alert_limit_mode:=current_msg_constant`, and `p5_3.fixture.enabled:=true`; shutdown still emitted known ROS teardown process-death logs after recording stopped. |
+| P5-3 analyzer with `--fail-on-threshold` | `PASS`: exit `0`, `status=PASS`, `next_debug_branch=PASS -> P5-4`. |
+
+Final conclusion:
+
+PASS -> P5-4

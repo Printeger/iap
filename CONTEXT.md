@@ -68,6 +68,10 @@ _Avoid_: broad fixture overlap that includes the current position, future-risk a
 Proof from the actual `queryPredictedPL()` result, not analyzer-only geometry, that future samples inside the P5-3 spatial and snapshot-relative tau fixture return injected PL.
 _Avoid_: reconstructed overlap evidence, marker-only geometry, sample positions without runtime PL diagnostics
 
+**P5-3 acceptance window**:
+The first causal future-risk `REQUEST_REPLAN` evidence window used to judge P5-3 current isolation and query-aligned future fixture evidence.
+_Avoid_: full-run current contamination outside the causal event, later emergency storms unrelated to the first accepted replan
+
 **Causal replan evidence**:
 Analyzer/status evidence that a `REQUEST_REPLAN` action and the future-risk gate/reason that caused it are both traceable in the same P5 run, including concurrent current and future reasons when both gates are active.
 _Avoid_: action count without gate reason, margin evidence with no replan attribution

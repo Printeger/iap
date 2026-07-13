@@ -141,6 +141,18 @@ P5_3_FUTURE_SAMPLING_FIGURE_FILENAMES = [
     "p5_3_future_sampling_topic_gap.png",
     "p5_3_future_sampling_p0_health.png",
 ]
+P5_3_EVENT_WINDOW_FIGURE_FILENAMES = [
+    "p5_3_event_window_scenario_topdown.png",
+    "p5_3_event_window_fixture_overlay.png",
+    "p5_3_event_window_tau_window.png",
+    "p5_3_event_window_pl_probe.png",
+    "p5_3_event_window_margin_timeline.png",
+    "p5_3_event_window_action_reason.png",
+    "p5_3_event_window_replan_vs_emergency.png",
+    "p5_3_event_window_sample_heatmap.png",
+    "p5_3_event_window_topic_gap.png",
+    "p5_3_event_window_p0_health.png",
+]
 P5_STATUS_FIELDS = [
     "bag_time_s",
     "phase",
@@ -5459,6 +5471,13 @@ def p5_3_sample_rows(
             pl_aligned = p5_3_float_close(actual_hpl, expected_hpl) and p5_3_float_close(
                 actual_vpl, expected_vpl
             )
+            injected_pl_aligned = p5_3_float_close(
+                expected_hpl,
+                finite_float(fixture.get("hpl_pred")),
+            ) and p5_3_float_close(
+                expected_vpl,
+                finite_float(fixture.get("vpl_pred")),
+            )
             reason_aligned = bool(expected_reason) and expected_reason.lower() in str(
                 row.get("reason", "")
             ).lower()
@@ -5474,6 +5493,7 @@ def p5_3_sample_rows(
                 and runtime_expected_hpl is not None
                 and runtime_expected_vpl is not None
                 and pl_aligned
+                and injected_pl_aligned
                 and reason_aligned
                 else 0
             )
@@ -5802,6 +5822,273 @@ def p5_3_replan_rows_with_sample_link(
     ]
 
 
+def p5_3_row_has_strict_replan(row: dict[str, Any]) -> bool:
+    return (
+        p5_action(row, "action") == P5_REPLAN_ACTION
+        and p5_action(row, "raw_action") == P5_REPLAN_ACTION
+    )
+
+
+def p5_3_row_has_effective_replan(row: dict[str, Any]) -> bool:
+    return (
+        p5_action(row, "action") == P5_REPLAN_ACTION
+        or p5_action(row, "raw_action") == P5_REPLAN_ACTION
+    )
+
+
+def p5_3_row_has_emergency(row: dict[str, Any]) -> bool:
+    return (
+        p5_action(row, "action") == P5_EMERGENCY_ACTION
+        or p5_action(row, "raw_action") == P5_EMERGENCY_ACTION
+    )
+
+
+def p5_3_sample_is_query_aligned_future_fixture(row: dict[str, Any]) -> bool:
+    return (
+        int(row.get("inside_high_risk_zone", 0) or 0) == 1
+        and int(row.get("inside_tau_window", 0) or 0) == 1
+        and int(row.get("query_alignment_ok", 0) or 0) == 1
+    )
+
+
+def p5_3_samples_by_status_index(
+    sample_rows: list[dict[str, Any]],
+) -> dict[int, list[dict[str, Any]]]:
+    rows_by_status: dict[int, list[dict[str, Any]]] = {}
+    for row in sample_rows:
+        try:
+            status_index = int(row.get("status_row_index", -1))
+        except (TypeError, ValueError):
+            continue
+        rows_by_status.setdefault(status_index, []).append(row)
+    return rows_by_status
+
+
+def p5_3_status_row_has_query_aligned_future_fixture(
+    status_index: int,
+    samples_by_status: dict[int, list[dict[str, Any]]],
+) -> bool:
+    return any(
+        p5_3_sample_is_query_aligned_future_fixture(row)
+        for row in samples_by_status.get(status_index, [])
+    )
+
+
+def p5_3_event_window_candidate_row(
+    status_row: dict[str, Any],
+    status_index: int,
+    samples_by_status: dict[int, list[dict[str, Any]]],
+    *,
+    strict_replan: bool,
+) -> bool:
+    has_replan = (
+        p5_3_row_has_strict_replan(status_row)
+        if strict_replan
+        else p5_3_row_has_effective_replan(status_row)
+    )
+    return (
+        has_replan
+        and p5_3_row_has_future_reason(status_row)
+        and p5_3_status_row_has_query_aligned_future_fixture(
+            status_index,
+            samples_by_status,
+        )
+    )
+
+
+def p5_3_ordered_status_indices(p5_rows: list[dict[str, Any]]) -> list[int]:
+    def key(index: int) -> tuple[float, int]:
+        stamp = finite_float(p5_rows[index].get("bag_time_s"))
+        return (stamp if stamp is not None else math.inf, index)
+
+    return sorted(range(len(p5_rows)), key=key)
+
+
+def p5_3_window_stamps(rows: list[dict[str, Any]]) -> tuple[float | None, float | None]:
+    stamps = [
+        stamp
+        for stamp in (finite_float(row.get("bag_time_s")) for row in rows)
+        if stamp is not None
+    ]
+    if not stamps:
+        return None, None
+    return min(stamps), max(stamps)
+
+
+def p5_3_filter_sample_rows_by_status_indices(
+    sample_rows: list[dict[str, Any]],
+    row_indices: list[int] | set[int],
+) -> list[dict[str, Any]]:
+    row_index_set = set(row_indices)
+    filtered: list[dict[str, Any]] = []
+    for row in sample_rows:
+        try:
+            status_index = int(row.get("status_row_index", -1))
+        except (TypeError, ValueError):
+            continue
+        if status_index in row_index_set:
+            filtered.append(row)
+    return filtered
+
+
+def p5_3_event_window_empty() -> dict[str, Any]:
+    sample_summary = summarize_p5_3_samples([])
+    return {
+        "available": False,
+        "row_indices": [],
+        "status_row_count": 0,
+        "sample_row_count": 0,
+        "start_s": None,
+        "end_s": None,
+        "duration_s": None,
+        "anchor_status_row_index": None,
+        "current_sample_present": False,
+        "current_outside_fixture": False,
+        "current_not_fixture_bad": False,
+        "future_fixture_sample_count": 0,
+        "future_bad_fixture_sample_count": 0,
+        "future_bad_fixture_linked_count": 0,
+        "future_query_aligned_sample_count": 0,
+        "future_query_mismatch_sample_count": 0,
+        "first_bad_tau": None,
+        "first_bad_tau_in_fixture_window": False,
+        "future_replan_reason_ok": False,
+        "max_consecutive_emergency": 0,
+        "raw_max_consecutive_emergency": 0,
+        "emergency_storm_absent": True,
+        "bad_ratio_max": 0.0,
+        "future_bad_ratio_coverage": False,
+        "sample_summary": sample_summary,
+    }
+
+
+def p5_3_event_window_summary(
+    p5_rows: list[dict[str, Any]],
+    sample_rows: list[dict[str, Any]],
+    fixture: dict[str, Any],
+    max_bad_ratio: float,
+) -> dict[str, Any]:
+    if not p5_rows or not sample_rows or not fixture.get("valid_geometry"):
+        return p5_3_event_window_empty()
+
+    samples_by_status = p5_3_samples_by_status_index(sample_rows)
+    ordered_indices = p5_3_ordered_status_indices(p5_rows)
+    anchor_order_index: int | None = None
+    anchor_status_index: int | None = None
+    for order_index, status_index in enumerate(ordered_indices):
+        if p5_3_event_window_candidate_row(
+            p5_rows[status_index],
+            status_index,
+            samples_by_status,
+            strict_replan=True,
+        ):
+            anchor_order_index = order_index
+            anchor_status_index = status_index
+            break
+    if anchor_order_index is None or anchor_status_index is None:
+        return p5_3_event_window_empty()
+
+    row_indices: list[int] = []
+    for status_index in ordered_indices[anchor_order_index:]:
+        row = p5_rows[status_index]
+        if p5_3_row_has_emergency(row) and not p5_3_row_has_effective_replan(row):
+            break
+        if not p5_3_event_window_candidate_row(
+            row,
+            status_index,
+            samples_by_status,
+            strict_replan=False,
+        ):
+            break
+        row_indices.append(status_index)
+
+    if not row_indices:
+        return p5_3_event_window_empty()
+
+    row_index_set = set(row_indices)
+    window_status_rows = [p5_rows[index] for index in row_indices]
+    window_sample_rows = p5_3_filter_sample_rows_by_status_indices(
+        sample_rows,
+        row_index_set,
+    )
+    sample_summary = summarize_p5_3_samples(window_sample_rows)
+    start_s, end_s = p5_3_window_stamps(window_status_rows)
+    first_bad_tau_values = p5_3_first_bad_tau_values(window_status_rows)
+    first_bad_tau = min(first_bad_tau_values) if first_bad_tau_values else None
+    max_consecutive_emergency = max_consecutive_action(
+        window_status_rows,
+        P5_EMERGENCY_ACTION,
+        "action",
+    )
+    raw_max_consecutive_emergency = max_consecutive_action(
+        window_status_rows,
+        P5_EMERGENCY_ACTION,
+        "raw_action",
+    )
+    bad_ratio_values = [
+        value
+        for value in (finite_float(row.get("bad_ratio")) for row in window_status_rows)
+        if value is not None
+    ]
+    bad_ratio_max = max(bad_ratio_values) if bad_ratio_values else 0.0
+    return {
+        "available": True,
+        "row_indices": row_indices,
+        "status_row_count": len(window_status_rows),
+        "sample_row_count": len(window_sample_rows),
+        "start_s": start_s,
+        "end_s": end_s,
+        "duration_s": (
+            max(0.0, float(end_s) - float(start_s))
+            if start_s is not None and end_s is not None
+            else None
+        ),
+        "anchor_status_row_index": anchor_status_index,
+        "current_sample_present": int(sample_summary.get("current_sample_count", 0) or 0)
+        > 0,
+        "current_outside_fixture": (
+            int(sample_summary.get("current_inside_fixture_count", 0) or 0) == 0
+        ),
+        "current_not_fixture_bad": (
+            int(sample_summary.get("current_fixture_bad_count", 0) or 0) == 0
+        ),
+        "future_fixture_sample_count": int(
+            sample_summary.get("future_fixture_sample_count", 0) or 0
+        ),
+        "future_bad_fixture_sample_count": int(
+            sample_summary.get("future_bad_fixture_sample_count", 0) or 0
+        ),
+        "future_bad_fixture_linked_count": int(
+            sample_summary.get("future_bad_fixture_linked_count", 0) or 0
+        ),
+        "future_query_aligned_sample_count": int(
+            sample_summary.get("future_query_aligned_sample_count", 0) or 0
+        ),
+        "future_query_mismatch_sample_count": int(
+            sample_summary.get("future_query_mismatch_sample_count", 0) or 0
+        ),
+        "first_bad_tau": first_bad_tau,
+        "first_bad_tau_in_fixture_window": p5_3_value_in_window(
+            first_bad_tau,
+            fixture.get("tau_min"),
+            fixture.get("tau_max"),
+        ),
+        "future_replan_reason_ok": any(
+            p5_3_row_has_effective_replan(row) and p5_3_row_has_future_reason(row)
+            for row in window_status_rows
+        ),
+        "max_consecutive_emergency": max_consecutive_emergency,
+        "raw_max_consecutive_emergency": raw_max_consecutive_emergency,
+        "emergency_storm_absent": (
+            max_consecutive_emergency < P5_2_EMERGENCY_STORM_CONSECUTIVE
+            and raw_max_consecutive_emergency < P5_2_EMERGENCY_STORM_CONSECUTIVE
+        ),
+        "bad_ratio_max": bad_ratio_max,
+        "future_bad_ratio_coverage": bad_ratio_max >= max_bad_ratio,
+        "sample_summary": sample_summary,
+    }
+
+
 def p5_3_row_has_future_reason(row: dict[str, Any]) -> bool:
     accepted_reasons = {"future_bad", "future_low_margin", P5_3_FIXTURE_REASON}
     reasons = p5_all_reason_values(
@@ -5859,7 +6146,7 @@ def validate_p5_3_hard_gates(
     future_replan_rows = p5_3_future_replan_rows(p5_rows)
     sample_rows = p5_3_sample_rows(p5_rows, fixture)
     sample_summary = summarize_p5_3_samples(sample_rows)
-    active_topic_gap = p5_3_active_topic_gap_summary(
+    full_run_active_topic_gap = p5_3_active_topic_gap_summary(
         sample_rows,
         topic_timestamps,
     )
@@ -5871,6 +6158,26 @@ def validate_p5_3_hard_gates(
     future_replan_margin_m = finite_float(manifest.get("p5.future_replan_margin_m")) or 0.3
     max_bad_ratio = finite_float(manifest.get("p5.max_bad_ratio")) or 0.25
     bad_ratio_max = finite_float(p5_summary.get("bad_ratio_max")) or 0.0
+    event_window = p5_3_event_window_summary(
+        p5_rows,
+        sample_rows,
+        fixture,
+        max_bad_ratio,
+    )
+    event_window_status_indices = list(event_window.get("row_indices", []) or [])
+    event_window_sample_rows = p5_3_filter_sample_rows_by_status_indices(
+        sample_rows,
+        event_window_status_indices,
+    )
+    event_window_active_topic_gap = p5_3_active_topic_gap_summary(
+        event_window_sample_rows,
+        topic_timestamps,
+    )
+    active_topic_gap = (
+        event_window_active_topic_gap
+        if bool(event_window.get("available"))
+        else full_run_active_topic_gap
+    )
     future_reason_rows = p5_3_future_reason_rows(p5_rows)
     bspline_topic_health = topic_health.get("/drone_0_planning/bspline") or {}
     bspline_count = int(bspline_topic_health.get("count", 0) or 0)
@@ -5922,7 +6229,10 @@ def validate_p5_3_hard_gates(
     )
     bspline_zero_acceptable = (
         bspline_count > 0
-        or (final_candidate_fixed_fixture_evidence and future_replan_reason_ok)
+        or (
+            final_candidate_fixed_fixture_evidence
+            and bool(event_window.get("future_replan_reason_ok"))
+        )
     )
     expected_im = finite_float(fixture.get("expected_im"))
     injected_pl_over_expected_al = (
@@ -5971,6 +6281,8 @@ def validate_p5_3_hard_gates(
         ),
         "topic_statuses": topic_statuses,
         "active_topic_gap": active_topic_gap,
+        "full_run_active_topic_gap": full_run_active_topic_gap,
+        "event_window_active_topic_gap": event_window_active_topic_gap,
         "active_required_p5_topics_stable": bool(
             active_topic_gap.get("required_continuous_topics_stable", True)
         ),
@@ -5987,6 +6299,40 @@ def validate_p5_3_hard_gates(
         "marker_rows_present": len(p5_marker_rows) > 0,
         "sample_rows_present": len(sample_rows) > 0,
         "sample_summary": sample_summary,
+        "full_run_sample_summary": sample_summary,
+        "event_window": event_window,
+        "event_window_available": bool(event_window.get("available")),
+        "event_window_start_s": event_window.get("start_s"),
+        "event_window_end_s": event_window.get("end_s"),
+        "event_window_duration_s": event_window.get("duration_s"),
+        "event_window_anchor_status_row_index": event_window.get(
+            "anchor_status_row_index"
+        ),
+        "event_window_current_outside_fixture": bool(
+            event_window.get("current_outside_fixture")
+        ),
+        "event_window_current_not_fixture_bad": bool(
+            event_window.get("current_not_fixture_bad")
+        ),
+        "event_window_future_fixture_sample_count": int(
+            event_window.get("future_fixture_sample_count", 0) or 0
+        ),
+        "event_window_future_bad_fixture_sample_count": int(
+            event_window.get("future_bad_fixture_sample_count", 0) or 0
+        ),
+        "event_window_future_query_aligned_sample_count": int(
+            event_window.get("future_query_aligned_sample_count", 0) or 0
+        ),
+        "event_window_first_bad_tau": event_window.get("first_bad_tau"),
+        "event_window_first_bad_tau_in_fixture_window": bool(
+            event_window.get("first_bad_tau_in_fixture_window")
+        ),
+        "event_window_future_replan_reason_ok": bool(
+            event_window.get("future_replan_reason_ok")
+        ),
+        "event_window_emergency_storm_absent": bool(
+            event_window.get("emergency_storm_absent")
+        ),
         "bspline_count": bspline_count,
         "bspline_zero_acceptable": bool(bspline_zero_acceptable),
         "final_candidate_fixed_fixture_evidence": bool(
@@ -5996,26 +6342,29 @@ def validate_p5_3_hard_gates(
             runtime_committed_fixed_fixture_evidence
         ),
         "current_sample_present": (
-            int(sample_summary.get("current_sample_count", 0) or 0) > 0
+            bool(event_window.get("available"))
+            and bool(event_window.get("current_sample_present"))
         ),
         "current_sample_outside_fixture": (
-            int(sample_summary.get("current_inside_fixture_count", 0) or 0) == 0
+            bool(event_window.get("available"))
+            and bool(event_window.get("current_outside_fixture"))
         ),
         "current_sample_not_fixture_bad": (
-            int(sample_summary.get("current_fixture_bad_count", 0) or 0) == 0
+            bool(event_window.get("available"))
+            and bool(event_window.get("current_not_fixture_bad"))
         ),
         "future_sample_inside_fixture": (
-            int(sample_summary.get("future_fixture_sample_count", 0) or 0) > 0
+            int(event_window.get("future_fixture_sample_count", 0) or 0) > 0
         ),
         "future_bad_sample_inside_fixture": (
-            int(sample_summary.get("future_bad_fixture_sample_count", 0) or 0) > 0
+            int(event_window.get("future_bad_fixture_sample_count", 0) or 0) > 0
         ),
         "future_bad_sample_linked": (
-            int(sample_summary.get("future_bad_fixture_linked_count", 0) or 0) > 0
+            int(event_window.get("future_bad_fixture_linked_count", 0) or 0) > 0
         ),
         "future_fixture_query_aligned": (
-            int(sample_summary.get("future_fixture_sample_count", 0) or 0) > 0
-            and int(sample_summary.get("future_query_mismatch_sample_count", 0) or 0)
+            int(event_window.get("future_fixture_sample_count", 0) or 0) > 0
+            and int(event_window.get("future_query_mismatch_sample_count", 0) or 0)
             == 0
         ),
         "overlap": overlap_summary,
@@ -6023,9 +6372,13 @@ def validate_p5_3_hard_gates(
         "overlap_margin_evidence": overlap_margin_evidence,
         "future_min_im_min": future_min_im_min,
         "future_replan_margin_m": future_replan_margin_m,
-        "bad_ratio_max": bad_ratio_max,
+        "bad_ratio_max": float(event_window.get("bad_ratio_max", 0.0) or 0.0),
+        "full_run_bad_ratio_max": bad_ratio_max,
         "max_bad_ratio": max_bad_ratio,
-        "future_bad_ratio_coverage": future_bad_ratio_coverage,
+        "future_bad_ratio_coverage": bool(
+            event_window.get("future_bad_ratio_coverage")
+        ),
+        "full_run_future_bad_ratio_coverage": future_bad_ratio_coverage,
         "request_replan_count": int(p5_summary.get("replan_action_count", 0) or 0),
         "raw_request_replan_count": int(p5_summary.get("raw_replan_action_count", 0) or 0),
         "request_replan_present": (
@@ -6037,17 +6390,24 @@ def validate_p5_3_hard_gates(
         "future_replan_reason_count": len(future_replan_rows),
         "future_replan_sample_link_count": len(replan_sample_link_rows),
         "future_replan_sample_link_ok": len(replan_sample_link_rows) > 0,
-        "future_replan_reason_ok": future_replan_reason_ok,
+        "future_replan_reason_ok": bool(event_window.get("future_replan_reason_ok")),
+        "full_run_future_replan_reason_ok": future_replan_reason_ok,
         "first_bad_tau_values": first_bad_tau_values[:20],
         "first_bad_tau_min": first_bad_tau_min,
-        "first_bad_tau_in_fixture_window": first_bad_tau_in_window,
-        "first_bad_tau_target_s": fixture.get("tau_min"),
-        "emergency_storm_absent": (
-            max_consecutive_emergency < P5_2_EMERGENCY_STORM_CONSECUTIVE
-            and raw_max_consecutive_emergency < P5_2_EMERGENCY_STORM_CONSECUTIVE
+        "first_bad_tau_in_fixture_window": bool(
+            event_window.get("first_bad_tau_in_fixture_window")
         ),
+        "full_run_first_bad_tau_in_fixture_window": first_bad_tau_in_window,
+        "first_bad_tau_target_s": fixture.get("tau_min"),
+        "emergency_storm_absent": bool(event_window.get("emergency_storm_absent")),
         "max_consecutive_emergency": max_consecutive_emergency,
         "raw_max_consecutive_emergency": raw_max_consecutive_emergency,
+        "event_window_max_consecutive_emergency": int(
+            event_window.get("max_consecutive_emergency", 0) or 0
+        ),
+        "event_window_raw_max_consecutive_emergency": int(
+            event_window.get("raw_max_consecutive_emergency", 0) or 0
+        ),
         "predicted_al_available": (
             p5_summary.get("pred_hal_min_min") is not None
             and p5_summary.get("pred_val_min_min") is not None
@@ -6105,19 +6465,26 @@ def validate_p5_3_hard_gates(
         failures.append("P5-3 trajectory marker evidence is missing")
     if not gates["sample_rows_present"]:
         failures.append("P5-3 PL/AL margin: per-sample status diagnostics are missing")
+    if not gates["event_window_available"]:
+        failures.append(
+            "P5-3 event-window acceptance: no first causal future-risk "
+            "REQUEST_REPLAN row with query-aligned injected fixture evidence"
+        )
     if not gates["current_sample_present"]:
-        failures.append("P5-3 PL/AL margin: current/tau=0 sample evidence is missing")
+        failures.append(
+            "P5-3 event-window PL/AL margin: current/tau=0 sample evidence is missing"
+        )
     if not gates["current_sample_outside_fixture"]:
         failures.append(
-            "P5-3 PL/AL margin: current/tau=0 sample is inside the high-risk fixture"
+            "P5-3 event-window PL/AL margin: current/tau=0 sample is inside the high-risk fixture"
         )
     if not gates["current_sample_not_fixture_bad"]:
         failures.append(
-            "P5-3 PL/AL margin: current/tau=0 sample is bad due to high-risk fixture evidence"
+            "P5-3 event-window PL/AL margin: current/tau=0 sample is bad due to high-risk fixture evidence"
         )
     if not gates["future_sample_inside_fixture"]:
         failures.append(
-            "P5-3 scenario isolation / future-only fixture evidence: "
+            "P5-3 event-window scenario isolation / future-only fixture evidence: "
             "no final-candidate or committed-runtime future trajectory sample "
             "entered the fixture tau/spatial window"
         )
@@ -6131,17 +6498,28 @@ def validate_p5_3_hard_gates(
         )
     if not gates["future_bad_sample_inside_fixture"]:
         failures.append(
-            "P5-3 PL/AL margin: future samples entered the fixture but did not become bad"
+            "P5-3 event-window PL/AL margin: future samples entered the fixture but did not become bad"
         )
     if not gates["bspline_zero_acceptable"]:
         failures.append(
             "P5-3 /drone_0_planning/bspline=0 without final-gate candidate "
             "fixed-fixture future evidence and REQUEST_REPLAN attribution"
         )
-    if gates["future_sample_inside_fixture"] and not gates["future_fixture_query_aligned"]:
-        mismatch = sample_summary.get("first_future_query_mismatch_sample") or {}
+    event_sample_summary = (event_window.get("sample_summary") or {})
+    full_run_query_mismatch = (
+        int(sample_summary.get("future_fixture_sample_count", 0) or 0) > 0
+        and int(sample_summary.get("future_query_mismatch_sample_count", 0) or 0) > 0
+    )
+    if (
+        gates["future_sample_inside_fixture"] and not gates["future_fixture_query_aligned"]
+    ) or (not gates["event_window_available"] and full_run_query_mismatch):
+        mismatch = (
+            event_sample_summary.get("first_future_query_mismatch_sample")
+            or sample_summary.get("first_future_query_mismatch_sample")
+            or {}
+        )
         failures.append(
-            "P5-3 query alignment: future samples entered the fixture tau/spatial "
+            "P5-3 event-window query alignment: future samples entered the fixture tau/spatial "
             "window but actual queried PL/reason did not match injected fixture PL "
             f"(first mismatch runtime_fixture_match="
             f"{bool(int(mismatch.get('fixture_match', 0) or 0))}, "
@@ -6156,29 +6534,32 @@ def validate_p5_3_hard_gates(
         failures.append("P5-3 did not observe REQUEST_REPLAN")
     if gates["overlap_margin_evidence"] and not gates["future_bad_ratio_coverage"]:
         failures.append(
-            "P5-3 scenario isolation / future bad-ratio coverage: "
-            f"future risk exists but bad_ratio_max={bad_ratio_max:.6g} "
+            "P5-3 event-window scenario isolation / future bad-ratio coverage: "
+            f"future risk exists but event_window_bad_ratio_max="
+            f"{float(event_window.get('bad_ratio_max', 0.0) or 0.0):.6g} "
             f"is below max_bad_ratio={max_bad_ratio:.6g}"
         )
     elif not gates["future_replan_reason_ok"]:
         if gates["future_bad_ratio_coverage"] and not gates["future_reason_attribution_ok"]:
             failures.append(
-                "P5-3 reason attribution: future gate reached bad-ratio "
+                "P5-3 event-window reason attribution: future gate reached bad-ratio "
                 "threshold but status reason fields did not expose future_bad "
                 "or an equivalent future high-risk reason"
             )
         else:
             failures.append(
-                "P5-3 PL/AL margin: future-risk reason evidence did not coincide "
+                "P5-3 event-window PL/AL margin: future-risk reason evidence did not coincide "
                 "with a REQUEST_REPLAN row"
             )
     if not gates["first_bad_tau_in_fixture_window"]:
-        failures.append("P5-3 first_bad_tau was absent or outside the fixture tau window")
+        failures.append(
+            "P5-3 event-window first_bad_tau was absent or outside the fixture tau window"
+        )
     if not gates["emergency_storm_absent"]:
         failures.append(
-            "P5-3 observed sustained emergency storm: "
-            f"action_consecutive={max_consecutive_emergency}, "
-            f"raw_action_consecutive={raw_max_consecutive_emergency}"
+            "P5-3 event-window observed sustained emergency storm: "
+            f"action_consecutive={gates['event_window_max_consecutive_emergency']}, "
+            f"raw_action_consecutive={gates['event_window_raw_max_consecutive_emergency']}"
         )
     if not gates["predicted_al_available"]:
         inconclusive.append("P5-3 predicted alert-limit minima had no finite samples")
@@ -6200,6 +6581,7 @@ def validate_p5_3_hard_gates(
         "p5_inspection_ok",
         "marker_rows_present",
         "sample_rows_present",
+        "event_window_available",
         "current_sample_present",
         "current_sample_outside_fixture",
         "current_sample_not_fixture_bad",
@@ -6751,6 +7133,9 @@ def analyze(args: argparse.Namespace) -> dict[str, Any]:
     p5_3_future_sampling_figure_paths = {
         name: figures_dir / name for name in P5_3_FUTURE_SAMPLING_FIGURE_FILENAMES
     }
+    p5_3_event_window_figure_paths = {
+        name: figures_dir / name for name in P5_3_EVENT_WINDOW_FIGURE_FILENAMES
+    }
     p0_phase = is_p0_experiment(args)
     p0_4_phase = is_experiment(args, "P0-4")
     p0_phase_index = p0_phase_number(args.experiment_id)
@@ -7226,6 +7611,13 @@ def analyze(args: argparse.Namespace) -> dict[str, Any]:
                     ]
                 )
             )
+        if p5_3_phase and plot_p0_health_timeline(
+            health_rows,
+            p5_3_event_window_figure_paths["p5_3_event_window_p0_health.png"],
+        ):
+            p0_figure_artifacts.append(
+                str(p5_3_event_window_figure_paths["p5_3_event_window_p0_health.png"])
+            )
         if plot_p0_reason_histogram(health_rows, reason_figure_path):
             p0_figure_artifacts.append(str(reason_figure_path))
         if plot_p0_pl_cost_distribution(pl_cloud_rows, distribution_figure_path):
@@ -7417,6 +7809,19 @@ def analyze(args: argparse.Namespace) -> dict[str, Any]:
                     ]
                 )
             )
+        if p5_3_phase and plot_scenario_topdown(
+            scenario_data,
+            p5_3_event_window_figure_paths[
+                "p5_3_event_window_scenario_topdown.png"
+            ],
+        ):
+            figures.append(
+                str(
+                    p5_3_event_window_figure_paths[
+                        "p5_3_event_window_scenario_topdown.png"
+                    ]
+                )
+            )
 
         topic_timestamps, topic_timestamp_error = read_topic_timestamps(
             bag_dir,
@@ -7463,6 +7868,8 @@ def analyze(args: argparse.Namespace) -> dict[str, Any]:
     p5_3_gates: dict[str, Any] = {}
     p5_3_overlap: list[dict[str, Any]] = []
     p5_3_samples: list[dict[str, Any]] = []
+    p5_3_event_window_rows: list[dict[str, Any]] = []
+    p5_3_event_window_samples: list[dict[str, Any]] = []
     p5_csv_artifacts: list[str] = []
     p5_figure_artifacts: list[str] = []
     p5_required_figures: list[Path] = []
@@ -7514,6 +7921,18 @@ def analyze(args: argparse.Namespace) -> dict[str, Any]:
         p5_3_samples = p5_3_sample_rows(
             p5_rows,
             p5_3_gates.get("fixture", {}),
+        )
+        p5_3_event_window_indices = list(
+            ((p5_3_gates.get("event_window") or {}).get("row_indices") or [])
+        )
+        p5_3_event_window_rows = [
+            p5_rows[index]
+            for index in p5_3_event_window_indices
+            if isinstance(index, int) and 0 <= index < len(p5_rows)
+        ]
+        p5_3_event_window_samples = p5_3_filter_sample_rows_by_status_indices(
+            p5_3_samples,
+            p5_3_event_window_indices,
         )
 
     csv_artifacts = [str(topic_counts_path)]
@@ -7811,6 +8230,30 @@ def analyze(args: argparse.Namespace) -> dict[str, Any]:
         p5_3_future_topic_gap_path = p5_3_future_sampling_figure_paths[
             "p5_3_future_sampling_topic_gap.png"
         ]
+        p5_3_event_fixture_overlay_path = p5_3_event_window_figure_paths[
+            "p5_3_event_window_fixture_overlay.png"
+        ]
+        p5_3_event_tau_window_path = p5_3_event_window_figure_paths[
+            "p5_3_event_window_tau_window.png"
+        ]
+        p5_3_event_pl_probe_path = p5_3_event_window_figure_paths[
+            "p5_3_event_window_pl_probe.png"
+        ]
+        p5_3_event_margin_path = p5_3_event_window_figure_paths[
+            "p5_3_event_window_margin_timeline.png"
+        ]
+        p5_3_event_action_reason_path = p5_3_event_window_figure_paths[
+            "p5_3_event_window_action_reason.png"
+        ]
+        p5_3_event_replan_emergency_path = p5_3_event_window_figure_paths[
+            "p5_3_event_window_replan_vs_emergency.png"
+        ]
+        p5_3_event_heatmap_path = p5_3_event_window_figure_paths[
+            "p5_3_event_window_sample_heatmap.png"
+        ]
+        p5_3_event_topic_gap_path = p5_3_event_window_figure_paths[
+            "p5_3_event_window_topic_gap.png"
+        ]
         if plot_p5_action_timeline(p5_rows, p5_action_figure_path):
             p5_figure_artifacts.append(str(p5_action_figure_path))
         if plot_p5_status_timeline(p5_rows, p5_status_figure_path):
@@ -7823,6 +8266,11 @@ def analyze(args: argparse.Namespace) -> dict[str, Any]:
             p5_figure_artifacts.append(str(p5_3_query_margin_path))
         if p5_3_phase and plot_p5_margin_timeline(p5_rows, p5_3_future_margin_path):
             p5_figure_artifacts.append(str(p5_3_future_margin_path))
+        if p5_3_phase and plot_p5_margin_timeline(
+            p5_3_event_window_rows,
+            p5_3_event_margin_path,
+        ):
+            p5_figure_artifacts.append(str(p5_3_event_margin_path))
         if plot_p5_current_im_vs_action(p5_rows, p5_current_im_vs_action_figure_path):
             p5_figure_artifacts.append(str(p5_current_im_vs_action_figure_path))
         if plot_p5_debounce_timeline(p5_rows, p5_debounce_figure_path):
@@ -7872,6 +8320,12 @@ def analyze(args: argparse.Namespace) -> dict[str, Any]:
                 p5_3_future_fixture_overlay_path,
             ):
                 p5_figure_artifacts.append(str(p5_3_future_fixture_overlay_path))
+            if plot_p5_3_sample_high_risk_overlay(
+                p5_3_event_window_samples,
+                p5_3_gates.get("fixture", {}),
+                p5_3_event_fixture_overlay_path,
+            ):
+                p5_figure_artifacts.append(str(p5_3_event_fixture_overlay_path))
             if plot_p5_3_query_alignment_pl_probe(
                 p5_3_samples,
                 p5_3_gates.get("fixture", {}),
@@ -7884,6 +8338,12 @@ def analyze(args: argparse.Namespace) -> dict[str, Any]:
                 p5_3_future_pl_probe_path,
             ):
                 p5_figure_artifacts.append(str(p5_3_future_pl_probe_path))
+            if plot_p5_3_query_alignment_pl_probe(
+                p5_3_event_window_samples,
+                p5_3_gates.get("fixture", {}),
+                p5_3_event_pl_probe_path,
+            ):
+                p5_figure_artifacts.append(str(p5_3_event_pl_probe_path))
             if plot_p5_3_first_bad_tau_timeline(
                 p5_rows,
                 p5_3_gates.get("fixture", {}),
@@ -7917,6 +8377,15 @@ def analyze(args: argparse.Namespace) -> dict[str, Any]:
                 title="P5-3 future-sampling query tau-window evidence",
             ):
                 p5_figure_artifacts.append(str(p5_3_future_tau_window_path))
+            if plot_p5_3_sample_tau_window(
+                p5_3_event_window_samples,
+                p5_3_event_window_rows,
+                p5_3_gates.get("fixture", {}),
+                p5_3_event_tau_window_path,
+                tau_field="query_tau_s",
+                title="P5-3 event-window query tau-window evidence",
+            ):
+                p5_figure_artifacts.append(str(p5_3_event_tau_window_path))
             if plot_p5_3_reason_timeline(p5_rows, p5_3_reason_figure_path):
                 p5_figure_artifacts.append(str(p5_3_reason_figure_path))
             else:
@@ -7927,11 +8396,21 @@ def analyze(args: argparse.Namespace) -> dict[str, Any]:
                 p5_figure_artifacts.append(str(p5_3_query_action_reason_path))
             if plot_p5_3_reason_timeline(p5_rows, p5_3_future_action_reason_path):
                 p5_figure_artifacts.append(str(p5_3_future_action_reason_path))
+            if plot_p5_3_reason_timeline(
+                p5_3_event_window_rows,
+                p5_3_event_action_reason_path,
+            ):
+                p5_figure_artifacts.append(str(p5_3_event_action_reason_path))
             if plot_p5_3_replan_vs_emergency(
                 p5_rows,
                 p5_3_plal_replan_emergency_path,
             ):
                 p5_figure_artifacts.append(str(p5_3_plal_replan_emergency_path))
+            if plot_p5_3_replan_vs_emergency(
+                p5_3_event_window_rows,
+                p5_3_event_replan_emergency_path,
+            ):
+                p5_figure_artifacts.append(str(p5_3_event_replan_emergency_path))
             if plot_p5_3_sample_heatmap(p5_3_samples, p5_3_plal_heatmap_path):
                 p5_figure_artifacts.append(str(p5_3_plal_heatmap_path))
             if plot_p5_3_sample_heatmap(
@@ -7948,6 +8427,13 @@ def analyze(args: argparse.Namespace) -> dict[str, Any]:
                 title="P5-3 future-sampling sample heatmap",
             ):
                 p5_figure_artifacts.append(str(p5_3_future_heatmap_path))
+            if plot_p5_3_sample_heatmap(
+                p5_3_event_window_samples,
+                p5_3_event_heatmap_path,
+                tau_field="query_tau_s",
+                title="P5-3 event-window sample heatmap",
+            ):
+                p5_figure_artifacts.append(str(p5_3_event_heatmap_path))
             if plot_p5_3_topic_gap(
                 topic_timestamps,
                 p5_3_gates.get("active_topic_gap", {}),
@@ -7960,6 +8446,12 @@ def analyze(args: argparse.Namespace) -> dict[str, Any]:
                 p5_3_future_topic_gap_path,
             ):
                 p5_figure_artifacts.append(str(p5_3_future_topic_gap_path))
+            if plot_p5_3_topic_gap(
+                topic_timestamps,
+                p5_3_gates.get("event_window_active_topic_gap", {}),
+                p5_3_event_topic_gap_path,
+            ):
+                p5_figure_artifacts.append(str(p5_3_event_topic_gap_path))
         required_runtime_figures = [
             scenario_figure_path,
             topic_activity_figure_path,
@@ -8000,6 +8492,10 @@ def analyze(args: argparse.Namespace) -> dict[str, Any]:
                         p5_3_future_sampling_figure_paths[name]
                         for name in P5_3_FUTURE_SAMPLING_FIGURE_FILENAMES
                     ],
+                    *[
+                        p5_3_event_window_figure_paths[name]
+                        for name in P5_3_EVENT_WINDOW_FIGURE_FILENAMES
+                    ],
                 ]
             )
         p5_required_figures.extend(required_runtime_figures)
@@ -8037,9 +8533,18 @@ def analyze(args: argparse.Namespace) -> dict[str, Any]:
         p5_3_future_sampling_required = set(
             p5_3_future_sampling_figure_paths.values()
         )
+        p5_3_event_window_required = set(
+            p5_3_event_window_figure_paths.values()
+        )
         for figure_path in p5_required_figures:
             if not figure_path.is_file() or figure_path.stat().st_size <= 0:
-                if p5_3_phase and figure_path in p5_3_future_sampling_required:
+                if p5_3_phase and figure_path in p5_3_event_window_required:
+                    failures.append(
+                        "P5-3 event-window figure missing: "
+                        f"{figure_path.name}; missing figure evidence prevents "
+                        "event-window current-isolation acceptance"
+                    )
+                elif p5_3_phase and figure_path in p5_3_future_sampling_required:
                     failures.append(
                         "P5-3 future sampling figure missing: "
                         f"{figure_path.name}; missing figure evidence prevents "

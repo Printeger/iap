@@ -659,6 +659,9 @@ class P5_3AnalyzerTest(unittest.TestCase):
         self.assertEqual([], failures)
         self.assertEqual([], inconclusive)
         self.assertTrue(gates["passed"])
+        self.assertTrue(gates["event_window_available"])
+        self.assertEqual(3, gates["event_window_future_query_aligned_sample_count"])
+        self.assertEqual(1.2, gates["event_window_first_bad_tau"])
         self.assertTrue(gates["trajectory_overlap_present"])
         self.assertTrue(gates["overlap_margin_evidence"])
         self.assertTrue(gates["future_replan_reason_ok"])
@@ -740,7 +743,7 @@ class P5_3AnalyzerTest(unittest.TestCase):
         self.assertTrue(gates["passed"])
         self.assertTrue(gates["future_replan_reason_ok"])
 
-    def test_p5_3_accepts_same_row_sample_link_for_replan_evidence(self):
+    def test_p5_3_requires_future_reason_on_event_window_anchor(self):
         rows = [
             p5_3_replan_row(
                 reason="current_low_margin",
@@ -752,11 +755,12 @@ class P5_3AnalyzerTest(unittest.TestCase):
 
         _, gates, failures, inconclusive = self.validate_rows(rows)
 
-        self.assertEqual([], failures)
         self.assertEqual([], inconclusive)
-        self.assertTrue(gates["passed"])
+        self.assertFalse(gates["passed"])
+        self.assertFalse(gates["event_window_available"])
         self.assertTrue(gates["future_replan_sample_link_ok"])
-        self.assertTrue(gates["future_replan_reason_ok"])
+        self.assertFalse(gates["future_replan_reason_ok"])
+        self.assertTrue(any("event-window acceptance" in failure for failure in failures), failures)
 
     def test_p5_3_accepts_final_candidate_fixture_evidence_when_bspline_missing(self):
         topic_health = p5_topic_health()
@@ -850,7 +854,7 @@ class P5_3AnalyzerTest(unittest.TestCase):
 
         self.assertFalse(gates["passed"])
         self.assertFalse(gates["future_replan_reason_ok"])
-        self.assertTrue(any("reason attribution" in failure for failure in failures), failures)
+        self.assertTrue(any("event-window acceptance" in failure for failure in failures), failures)
 
     def test_p5_3_visible_future_reason_without_replan_coincidence_is_not_attribution(self):
         _, gates, failures, _ = self.validate_rows(
@@ -903,6 +907,16 @@ class P5_3AnalyzerTest(unittest.TestCase):
         self.assertFalse(gates["passed"])
         self.assertTrue(any("first_bad_tau" in failure for failure in failures), failures)
 
+    def test_p5_3_fails_when_first_bad_tau_is_absent(self):
+        _, gates, failures, _ = self.validate_rows(
+            [p5_3_replan_row(first_bad_tau="nan")]
+        )
+
+        self.assertFalse(gates["passed"])
+        self.assertIsNone(gates["event_window_first_bad_tau"])
+        self.assertFalse(gates["event_window_first_bad_tau_in_fixture_window"])
+        self.assertTrue(any("first_bad_tau" in failure for failure in failures), failures)
+
     def test_p5_3_fails_when_current_sample_is_inside_fixture(self):
         samples = p5_3_future_only_samples()
         samples[0] = p5_3_sample(
@@ -927,6 +941,75 @@ class P5_3AnalyzerTest(unittest.TestCase):
         self.assertFalse(gates["current_sample_outside_fixture"])
         self.assertFalse(gates["current_sample_not_fixture_bad"])
         self.assertTrue(any("current/tau=0" in failure for failure in failures), failures)
+
+    def test_p5_3_passes_when_later_full_run_current_contamination_is_outside_event_window(self):
+        contaminated_samples = p5_3_future_only_samples()
+        contaminated_samples[0] = p5_3_sample(
+            tau_s=0.0,
+            x=-10.2,
+            hpl=10.2,
+            vpl=10.2,
+            im_min=-0.2,
+            bad=True,
+            reason="future_low_margin:p5_3_high_risk_zone",
+            fixture_match=True,
+            fixture_expected_hpl=10.2,
+            fixture_expected_vpl=10.2,
+            fixture_expected_reason="p5_3_high_risk_zone",
+        )
+        rows = [
+            p5_3_replan_row(bag_time_s=10.0),
+            p5_row(bag_time_s=10.1),
+        ]
+        rows.extend(
+            p5_3_replan_row(
+                bag_time_s=11.0 + idx,
+                action="REQUEST_EMERGENCY_STOP_CANDIDATE",
+                raw_action="REQUEST_EMERGENCY_STOP_CANDIDATE",
+                first_bad_tau=0.0,
+                samples=contaminated_samples,
+            )
+            for idx in range(analyzer.P5_2_EMERGENCY_STORM_CONSECUTIVE)
+        )
+
+        _, gates, failures, inconclusive = self.validate_rows(rows)
+
+        self.assertEqual([], failures)
+        self.assertEqual([], inconclusive)
+        self.assertTrue(gates["passed"])
+        self.assertTrue(gates["event_window_available"])
+        self.assertTrue(gates["event_window_current_outside_fixture"])
+        self.assertEqual(3, gates["full_run_sample_summary"]["current_inside_fixture_count"])
+        self.assertEqual(analyzer.P5_2_EMERGENCY_STORM_CONSECUTIVE, gates["max_consecutive_emergency"])
+        self.assertEqual(0, gates["event_window_max_consecutive_emergency"])
+
+    def test_p5_3_fails_when_event_window_future_samples_do_not_enter_fixture_tau_window(self):
+        samples = [
+            p5_3_sample(),
+            p5_3_sample(
+                tau_s=0.8,
+                query_tau_s=0.8,
+                x=-10.5,
+                hpl=10.2,
+                vpl=10.2,
+                im_min=-0.2,
+                bad=True,
+                reason="future_low_margin:p5_3_high_risk_zone",
+                fixture_match=True,
+                fixture_expected_hpl=10.2,
+                fixture_expected_vpl=10.2,
+                fixture_expected_reason="p5_3_high_risk_zone",
+            ),
+        ]
+
+        _, gates, failures, _ = self.validate_rows(
+            [p5_3_replan_row(samples=samples)]
+        )
+
+        self.assertFalse(gates["passed"])
+        self.assertFalse(gates["event_window_available"])
+        self.assertEqual(0, gates["event_window_future_fixture_sample_count"])
+        self.assertTrue(any("future-only fixture evidence" in failure for failure in failures), failures)
 
     def test_p5_3_fails_when_future_fixture_sample_query_pl_does_not_align(self):
         samples = p5_3_future_only_samples()
@@ -1010,12 +1093,12 @@ class P5_3AnalyzerTest(unittest.TestCase):
         )
         self.assertTrue(any("active evidence-window topic gap" in failure for failure in failures), failures)
 
-    def test_p5_3_fails_on_emergency_storm(self):
-        rows = [p5_3_replan_row()]
+    def test_p5_3_fails_on_event_window_emergency_storm(self):
+        rows = [p5_3_replan_row(bag_time_s=10.0)]
         rows.extend(
             p5_3_replan_row(
                 bag_time_s=11.0 + idx,
-                action="REQUEST_EMERGENCY_STOP_CANDIDATE",
+                action="REQUEST_REPLAN",
                 raw_action="REQUEST_EMERGENCY_STOP_CANDIDATE",
             )
             for idx in range(analyzer.P5_2_EMERGENCY_STORM_CONSECUTIVE)
@@ -1024,6 +1107,10 @@ class P5_3AnalyzerTest(unittest.TestCase):
         _, gates, failures, _ = self.validate_rows(rows)
 
         self.assertFalse(gates["passed"])
+        self.assertEqual(
+            analyzer.P5_2_EMERGENCY_STORM_CONSECUTIVE,
+            gates["event_window_raw_max_consecutive_emergency"],
+        )
         self.assertTrue(any("emergency storm" in failure for failure in failures), failures)
 
     def test_p5_3_next_branch(self):
@@ -1103,6 +1190,23 @@ class P5_3AnalyzerTest(unittest.TestCase):
                 "p5_3_future_sampling_p0_health.png",
             ],
             analyzer.P5_3_FUTURE_SAMPLING_FIGURE_FILENAMES,
+        )
+
+    def test_p5_3_event_window_required_figure_filenames_are_exact(self):
+        self.assertEqual(
+            [
+                "p5_3_event_window_scenario_topdown.png",
+                "p5_3_event_window_fixture_overlay.png",
+                "p5_3_event_window_tau_window.png",
+                "p5_3_event_window_pl_probe.png",
+                "p5_3_event_window_margin_timeline.png",
+                "p5_3_event_window_action_reason.png",
+                "p5_3_event_window_replan_vs_emergency.png",
+                "p5_3_event_window_sample_heatmap.png",
+                "p5_3_event_window_topic_gap.png",
+                "p5_3_event_window_p0_health.png",
+            ],
+            analyzer.P5_3_EVENT_WINDOW_FIGURE_FILENAMES,
         )
 
 
