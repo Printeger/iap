@@ -2,6 +2,7 @@
 
 import importlib.util
 from pathlib import Path
+import tempfile
 import unittest
 
 
@@ -301,6 +302,144 @@ def p5_3_replan_row(**overrides):
         bad_count=3,
         unknown_count=0,
         samples=p5_3_future_only_samples(),
+    )
+    row.update(overrides)
+    return row
+
+
+def p5_4_manifest(enabled=True):
+    manifest = p5_manifest()
+    manifest.update(
+        {
+            "p5.future_emergency_margin_m": 0.0,
+            "p5_4.fixture.enabled": enabled,
+            "p5_4.fixture.name": "near_risk_zone_v1",
+            "p5_4.fixture.x_min": -11.7,
+            "p5_4.fixture.x_max": -11.1,
+            "p5_4.fixture.y_min": -0.75,
+            "p5_4.fixture.y_max": 0.75,
+            "p5_4.fixture.z_min": 1.0,
+            "p5_4.fixture.z_max": 1.35,
+            "p5_4.fixture.tau_min": 0.6,
+            "p5_4.fixture.tau_max": 0.95,
+            "p5_4.fixture.hpl_pred_m": 10.2,
+            "p5_4.fixture.vpl_pred_m": 10.2,
+            "p5_4.fixture.expected_hal_m": 10.0,
+            "p5_4.fixture.expected_val_m": 10.0,
+            "p5_4.fixture.expected_im_m": -0.2,
+            "p5_4": {
+                "fixture": {
+                    "enabled": enabled,
+                    "name": "near_risk_zone_v1",
+                    "bounds": {
+                        "x": [-11.7, -11.1],
+                        "y": [-0.75, 0.75],
+                        "z": [1.0, 1.35],
+                    },
+                    "tau_window_s": [0.6, 0.95],
+                    "injected_pl_m": {"hpl_pred": 10.2, "vpl_pred": 10.2},
+                    "expected_alert_limit_m": {
+                        "mode": "current_msg_constant",
+                        "hal": 10.0,
+                        "val": 10.0,
+                    },
+                    "expected_im_m": -0.2,
+                    "expected_reason": "p5_4_near_risk_zone",
+                    "expected_first_bad_tau_s": 0.6,
+                    "expected_emergency_time_s": 1.0,
+                }
+            },
+        }
+    )
+    return manifest
+
+
+def p5_4_marker_row(**overrides):
+    row = {
+        "bag_time_s": 10.0,
+        "topic": analyzer.P5_TRAJECTORY_SAMPLES_TOPIC,
+        "marker_ns": "trajectory_integrity_samples",
+        "marker_id": 1,
+        "marker_type": 4,
+        "marker_action": 0,
+        "point_index": 0,
+        "x": -11.4,
+        "y": 0.0,
+        "z": 1.2,
+        "color_r": 1.0,
+        "color_g": 0.0,
+        "color_b": 0.0,
+        "color_a": 1.0,
+        "state": "bad",
+        "text": "",
+    }
+    row.update(overrides)
+    return row
+
+
+def p5_4_sample(**overrides):
+    row = p5_3_sample()
+    row.update(overrides)
+    if "query_tau_s" not in overrides:
+        row["query_tau_s"] = row["tau_s"]
+    return row
+
+
+def p5_4_future_only_samples(linked=True):
+    reason = (
+        "future_bad:p5_4_near_risk_zone"
+        if linked
+        else "low_margin_without_fixture_source"
+    )
+    return [
+        p5_4_sample(),
+        p5_4_sample(
+            tau_s=0.6,
+            x=-11.4,
+            hpl=10.2,
+            vpl=10.2,
+            im_min=-0.2,
+            bad=True,
+            reason=reason,
+            fixture_match=True,
+            fixture_expected_hpl=10.2,
+            fixture_expected_vpl=10.2,
+            fixture_expected_reason="p5_4_near_risk_zone",
+        ),
+        p5_4_sample(
+            tau_s=0.8,
+            x=-11.3,
+            hpl=10.2,
+            vpl=10.2,
+            im_min=-0.2,
+            bad=True,
+            reason=reason,
+            fixture_match=True,
+            fixture_expected_hpl=10.2,
+            fixture_expected_vpl=10.2,
+            fixture_expected_reason="p5_4_near_risk_zone",
+        ),
+    ]
+
+
+def p5_4_emergency_row(**overrides):
+    row = p5_row(
+        bag_time_s=10.0,
+        action="REQUEST_EMERGENCY_STOP_CANDIDATE",
+        raw_action="REQUEST_EMERGENCY_STOP_CANDIDATE",
+        reason="future_bad",
+        future_reason="future_bad",
+        active_reasons=["future_bad", "p5_4_near_risk_zone"],
+        future_min_im=-0.2,
+        first_bad_tau=0.6,
+        bad_ratio=0.3,
+        unknown_ratio=0.0,
+        pred_hal_min=10.0,
+        pred_val_min=10.0,
+        sample_count=10,
+        bad_count=2,
+        unknown_count=0,
+        samples=p5_4_future_only_samples(),
     )
     row.update(overrides)
     return row
@@ -1207,6 +1346,265 @@ class P5_3AnalyzerTest(unittest.TestCase):
                 "p5_3_event_window_p0_health.png",
             ],
             analyzer.P5_3_EVENT_WINDOW_FIGURE_FILENAMES,
+        )
+
+
+class P5_4AnalyzerTest(unittest.TestCase):
+    def validate_rows(
+        self,
+        rows,
+        manifest=None,
+        marker_rows=None,
+        topic_timestamps=None,
+        topic_health=None,
+    ):
+        p5_summary = analyzer.summarize_p5_status_rows(rows)
+        failures = []
+        inconclusive = []
+        p0_rows = bounded_startup_p0_rows()
+        gates = analyzer.validate_p5_4_hard_gates(
+            manifest if manifest is not None else p5_4_manifest(),
+            {"passed": True},
+            topic_health if topic_health is not None else p5_topic_health(),
+            analyzer.summarize_p0_health(p0_rows),
+            p0_rows,
+            rows,
+            p5_summary,
+            marker_rows if marker_rows is not None else [p5_4_marker_row()],
+            failures,
+            inconclusive,
+            topic_timestamps,
+        )
+        return p5_summary, gates, failures, inconclusive
+
+    def test_p5_4_passes_with_near_risk_emergency_candidate(self):
+        rows = [p5_row(bag_time_s=idx) for idx in range(3)]
+        rows.append(p5_4_emergency_row())
+
+        _, gates, failures, inconclusive = self.validate_rows(rows)
+
+        self.assertEqual([], failures)
+        self.assertEqual([], inconclusive)
+        self.assertTrue(gates["passed"])
+        self.assertTrue(gates["event_window_available"])
+        self.assertTrue(gates["anchor_strict_emergency"])
+        self.assertTrue(gates["anchor_same_row_fixture_samples"])
+        self.assertEqual(0.6, gates["anchor_first_bad_tau"])
+        self.assertTrue(gates["anchor_first_bad_tau_within_emergency_time"])
+        self.assertTrue(gates["fixture_query_aligned"])
+
+    def test_p5_4_allows_final_candidate_future_bad_bookkeeping(self):
+        _, gates, failures, inconclusive = self.validate_rows(
+            [
+                p5_4_emergency_row(
+                    phase="final",
+                    final_gate_fail_count=1,
+                    final_gate_fail_duration_s=0.1,
+                    final_gate_last_reason="future_bad",
+                )
+            ]
+        )
+
+        self.assertEqual([], failures)
+        self.assertEqual([], inconclusive)
+        self.assertTrue(gates["passed"])
+        self.assertTrue(gates["event_window_available"])
+        self.assertEqual([], gates["anchor_exclusion_causes"])
+
+    def test_p5_4_reports_blocked_when_fixture_manifest_is_missing_or_disabled(self):
+        _, gates, failures, _ = self.validate_rows(
+            [p5_4_emergency_row()],
+            manifest=p5_manifest(),
+        )
+
+        self.assertFalse(gates["passed"])
+        self.assertTrue(gates["blocked_scenario_missing"])
+        self.assertTrue(
+            any("P5-4 fixture manifest is missing" in failure for failure in failures),
+            failures,
+        )
+
+        _, disabled_gates, _, _ = self.validate_rows(
+            [p5_4_emergency_row()],
+            manifest=p5_4_manifest(enabled=False),
+        )
+        self.assertTrue(disabled_gates["blocked_scenario_missing"])
+
+    def test_p5_4_fails_when_fixture_is_not_entered(self):
+        _, gates, failures, _ = self.validate_rows(
+            [p5_4_emergency_row(samples=[p5_4_sample()])]
+        )
+
+        self.assertFalse(gates["passed"])
+        self.assertFalse(gates["fixture_entered"])
+        self.assertTrue(any("fixture not entered" in failure for failure in failures), failures)
+
+    def test_p5_4_fails_when_injected_pl_does_not_align(self):
+        samples = p5_4_future_only_samples()
+        samples[1] = p5_4_sample(
+            tau_s=0.6,
+            x=-11.4,
+            hpl=9.9,
+            vpl=10.2,
+            im_min=-0.2,
+            bad=True,
+            reason="future_bad:p5_4_near_risk_zone",
+            fixture_match=True,
+            fixture_expected_hpl=10.2,
+            fixture_expected_vpl=10.2,
+            fixture_expected_reason="p5_4_near_risk_zone",
+        )
+
+        _, gates, failures, _ = self.validate_rows(
+            [p5_4_emergency_row(samples=samples)]
+        )
+
+        self.assertFalse(gates["passed"])
+        self.assertTrue(gates["fixture_entered"])
+        self.assertTrue(gates["fixture_query_aligned"])
+        self.assertFalse(gates["fixture_query_mismatch_absent"])
+        self.assertTrue(any("injected PL mismatch" in failure for failure in failures), failures)
+
+    def test_p5_4_fails_when_first_bad_tau_exceeds_emergency_horizon(self):
+        _, gates, failures, _ = self.validate_rows(
+            [p5_4_emergency_row(first_bad_tau=1.2)]
+        )
+
+        self.assertFalse(gates["passed"])
+        self.assertFalse(gates["event_window_available"])
+        self.assertFalse(gates["anchor_first_bad_tau_within_emergency_time"])
+        self.assertTrue(any("first_bad_tau" in failure for failure in failures), failures)
+
+    def test_p5_4_rejects_current_only_emergency_cause(self):
+        _, gates, failures, _ = self.validate_rows(
+            [
+                p5_4_emergency_row(
+                    reason="current_low_margin",
+                    current_reason="current_low_margin",
+                    future_reason="",
+                    active_reasons=["current_low_margin"],
+                )
+            ]
+        )
+
+        self.assertFalse(gates["passed"])
+        self.assertTrue(
+            any("current-only low margin" in failure for failure in failures),
+            failures,
+        )
+
+    def test_p5_4_rejects_startup_and_unknown_only_emergency_cause(self):
+        _, gates, failures, _ = self.validate_rows(
+            [
+                p5_4_emergency_row(
+                    phase="startup",
+                    reason="snapshot_unavailable",
+                    future_reason="",
+                    active_reasons=["snapshot_unavailable", "future_unknown"],
+                    unknown_ratio=1.0,
+                    bad_ratio=0.0,
+                )
+            ]
+        )
+
+        self.assertFalse(gates["passed"])
+        self.assertTrue(
+            any("startup/snapshot_unavailable" in failure for failure in failures),
+            failures,
+        )
+        self.assertTrue(any("unknown-only" in failure for failure in failures), failures)
+
+    def test_p5_4_rejects_final_gate_failed_emergency_cause(self):
+        _, gates, failures, _ = self.validate_rows(
+            [
+                p5_4_emergency_row(
+                    reason="final_gate_failed",
+                    final_gate_last_reason="final_gate_failed",
+                    active_reasons=["final_gate_failed"],
+                    final_gate_fail_count=1,
+                    final_gate_fail_duration_s=0.1,
+                )
+            ]
+        )
+
+        self.assertFalse(gates["passed"])
+        self.assertFalse(gates["event_window_available"])
+        self.assertTrue(
+            any("final-gate emergency cause" in failure for failure in failures),
+            failures,
+        )
+
+    def test_p5_4_fails_on_unexplained_emergency_storm(self):
+        rows = [
+            p5_4_emergency_row(
+                bag_time_s=10.0 + idx,
+                reason="current_low_margin",
+                current_reason="current_low_margin",
+                future_reason="",
+                active_reasons=["current_low_margin"],
+            )
+            for idx in range(analyzer.P5_2_EMERGENCY_STORM_CONSECUTIVE)
+        ]
+
+        _, gates, failures, _ = self.validate_rows(rows)
+
+        self.assertFalse(gates["passed"])
+        self.assertEqual(
+            analyzer.P5_2_EMERGENCY_STORM_CONSECUTIVE,
+            gates["max_consecutive_unexplained_emergency"],
+        )
+        self.assertTrue(
+            any("unexplained emergency storm" in failure for failure in failures),
+            failures,
+        )
+
+    def test_p5_4_required_figures_are_fail_closed(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            failures = []
+            analyzer.validate_p5_4_required_figures(
+                [Path(tmpdir) / "p5_4_missing.png"],
+                failures,
+            )
+
+        self.assertEqual(1, len(failures))
+        self.assertIn("P5-4 required figure missing", failures[0])
+
+    def test_p5_4_next_branch_is_exact(self):
+        self.assertEqual(
+            "PASS -> P5-5",
+            analyzer.next_debug_branch("PASS", [], [], "P5-4"),
+        )
+        self.assertEqual(
+            "BLOCKED_SCENARIO_MISSING",
+            analyzer.next_debug_branch(
+                "BLOCKED_SCENARIO_MISSING",
+                ["P5-4 fixture manifest is missing"],
+                [],
+                "P5-4",
+            ),
+        )
+        self.assertEqual(
+            analyzer.P5_4_FAIL_BRANCH,
+            analyzer.next_debug_branch("FAIL", ["P5-4 evidence failed"], [], "P5-4"),
+        )
+
+    def test_p5_4_required_figure_filenames_are_exact(self):
+        self.assertEqual(
+            [
+                "p5_4_scenario_topdown.png",
+                "p5_4_near_risk_overlay.png",
+                "p5_4_tau_emergency_window.png",
+                "p5_4_pl_probe.png",
+                "p5_4_margin_timeline.png",
+                "p5_4_action_reason_timeline.png",
+                "p5_4_replan_vs_emergency.png",
+                "p5_4_sample_heatmap.png",
+                "p5_4_topic_gap.png",
+                "p5_4_p0_health.png",
+                "p5_4_final_gate_summary.png",
+                "p5_4_trajectory_integrity_samples.png",
+            ],
+            analyzer.P5_4_FIGURE_FILENAMES,
         )
 
 

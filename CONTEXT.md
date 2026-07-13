@@ -72,6 +72,10 @@ _Avoid_: reconstructed overlap evidence, marker-only geometry, sample positions 
 The first causal future-risk `REQUEST_REPLAN` evidence window used to judge P5-3 current isolation and query-aligned future fixture evidence.
 _Avoid_: full-run current contamination outside the causal event, later emergency storms unrelated to the first accepted replan
 
+**P5-4 near-risk fixture**:
+The P5-only deterministic future-risk fixture whose first bad trajectory sample is inside the emergency time horizon.
+_Avoid_: hidden emergency-margin enablement, current-position contamination, P5-3 replan fixture
+
 **Causal replan evidence**:
 Analyzer/status evidence that a `REQUEST_REPLAN` action and the future-risk gate/reason that caused it are both traceable in the same P5 run, including concurrent current and future reasons when both gates are active.
 _Avoid_: action count without gate reason, margin evidence with no replan attribution

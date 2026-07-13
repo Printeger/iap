@@ -29,6 +29,21 @@ struct P5_3HighRiskZoneFixtureConfig {
   double vpl_pred_m = 10.2;
 };
 
+struct P5_4NearRiskZoneFixtureConfig {
+  bool enabled = false;
+  std::string name = "near_risk_zone_v1";
+  double x_min_m = -11.7;
+  double x_max_m = -11.1;
+  double y_min_m = -0.75;
+  double y_max_m = 0.75;
+  double z_min_m = 1.0;
+  double z_max_m = 1.35;
+  double tau_min_s = 0.6;
+  double tau_max_s = 0.95;
+  double hpl_pred_m = 10.2;
+  double vpl_pred_m = 10.2;
+};
+
 struct RiskGridMapParams {
   std::string frame_id = "map";
   double resolution_m = 0.75;
@@ -43,6 +58,7 @@ struct RiskGridMapParams {
   bool skip_occupied_voxels = true;
   bool use_predictor_batch_query = true;
   P5_3HighRiskZoneFixtureConfig p5_3_fixture;
+  P5_4NearRiskZoneFixtureConfig p5_4_fixture;
 };
 
 struct RiskGridHealth {
@@ -159,7 +175,9 @@ class RiskGridSnapshot {
 
   bool queryPredictedPL(const Eigen::Vector3d& p_w,
                         double query_time_s,
-                        PredictedPLSample* out) const;
+                        PredictedPLSample* out,
+                        double p5_4_fixture_horizon_s =
+                            std::numeric_limits<double>::quiet_NaN()) const;
 
   bool voxelAt(int horizon_id,
                const Eigen::Vector3i& id,

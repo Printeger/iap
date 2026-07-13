@@ -650,6 +650,18 @@ ARG_DEFAULTS = [
     ("p5_3.fixture.tau_max", "2.0"),
     ("p5_3.fixture.hpl_pred_m", "10.2"),
     ("p5_3.fixture.vpl_pred_m", "10.2"),
+    ("p5_4.fixture.enabled", "false"),
+    ("p5_4.fixture.name", "near_risk_zone_v1"),
+    ("p5_4.fixture.x_min", "-11.7"),
+    ("p5_4.fixture.x_max", "-11.1"),
+    ("p5_4.fixture.y_min", "-0.75"),
+    ("p5_4.fixture.y_max", "0.75"),
+    ("p5_4.fixture.z_min", "1.0"),
+    ("p5_4.fixture.z_max", "1.35"),
+    ("p5_4.fixture.tau_min", "0.6"),
+    ("p5_4.fixture.tau_max", "0.95"),
+    ("p5_4.fixture.hpl_pred_m", "10.2"),
+    ("p5_4.fixture.vpl_pred_m", "10.2"),
     ("p1.use_integrity_cost", "false"),
     ("p1.metrics_only", "true"),
     ("p1.lambda_integrity", "0.0"),
@@ -1175,6 +1187,18 @@ def _ego_planner_node(context, drone_id, planner_odom_topic, cloud_topic, camera
             {"p5_3.fixture.tau_max": _param_float(context, "p5_3.fixture.tau_max")},
             {"p5_3.fixture.hpl_pred_m": _param_float(context, "p5_3.fixture.hpl_pred_m")},
             {"p5_3.fixture.vpl_pred_m": _param_float(context, "p5_3.fixture.vpl_pred_m")},
+            {"p5_4.fixture.enabled": _param_bool(context, "p5_4.fixture.enabled")},
+            {"p5_4.fixture.name": LaunchConfiguration("p5_4.fixture.name").perform(context)},
+            {"p5_4.fixture.x_min": _param_float(context, "p5_4.fixture.x_min")},
+            {"p5_4.fixture.x_max": _param_float(context, "p5_4.fixture.x_max")},
+            {"p5_4.fixture.y_min": _param_float(context, "p5_4.fixture.y_min")},
+            {"p5_4.fixture.y_max": _param_float(context, "p5_4.fixture.y_max")},
+            {"p5_4.fixture.z_min": _param_float(context, "p5_4.fixture.z_min")},
+            {"p5_4.fixture.z_max": _param_float(context, "p5_4.fixture.z_max")},
+            {"p5_4.fixture.tau_min": _param_float(context, "p5_4.fixture.tau_min")},
+            {"p5_4.fixture.tau_max": _param_float(context, "p5_4.fixture.tau_max")},
+            {"p5_4.fixture.hpl_pred_m": _param_float(context, "p5_4.fixture.hpl_pred_m")},
+            {"p5_4.fixture.vpl_pred_m": _param_float(context, "p5_4.fixture.vpl_pred_m")},
             {"p1.use_integrity_cost": p1_use},
             {"p1.metrics_only": p1_metrics_only},
             {"p1.lambda_integrity": _param_float(context, "p1.lambda_integrity")},
@@ -1451,19 +1475,30 @@ def _launch_setup(context):
 
     p5_3_fixture_hpl = _param_float(context, "p5_3.fixture.hpl_pred_m")
     p5_3_fixture_vpl = _param_float(context, "p5_3.fixture.vpl_pred_m")
+    p5_4_fixture_hpl = _param_float(context, "p5_4.fixture.hpl_pred_m")
+    p5_4_fixture_vpl = _param_float(context, "p5_4.fixture.vpl_pred_m")
     p5_pred_al_mode = LaunchConfiguration("p5.pred_alert_limit_mode").perform(context)
     if p5_pred_al_mode == "config_constant":
-        p5_3_expected_hal = _param_float(context, "p5.pred_alert_limit_constant_hal_m")
-        p5_3_expected_val = _param_float(context, "p5.pred_alert_limit_constant_val_m")
+        p5_expected_hal = _param_float(context, "p5.pred_alert_limit_constant_hal_m")
+        p5_expected_val = _param_float(context, "p5.pred_alert_limit_constant_val_m")
     elif p5_pred_al_mode == "current_msg_constant":
-        p5_3_expected_hal = 10.0
-        p5_3_expected_val = 10.0
+        p5_expected_hal = 10.0
+        p5_expected_val = 10.0
     else:
-        p5_3_expected_hal = None
-        p5_3_expected_val = None
+        p5_expected_hal = None
+        p5_expected_val = None
+    p5_3_expected_hal = p5_expected_hal
+    p5_3_expected_val = p5_expected_val
     p5_3_expected_im = (
         min(p5_3_expected_hal - p5_3_fixture_hpl, p5_3_expected_val - p5_3_fixture_vpl)
         if p5_3_expected_hal is not None and p5_3_expected_val is not None
+        else None
+    )
+    p5_4_expected_hal = p5_expected_hal
+    p5_4_expected_val = p5_expected_val
+    p5_4_expected_im = (
+        min(p5_4_expected_hal - p5_4_fixture_hpl, p5_4_expected_val - p5_4_fixture_vpl)
+        if p5_4_expected_hal is not None and p5_4_expected_val is not None
         else None
     )
 
@@ -1508,6 +1543,21 @@ def _launch_setup(context):
         "p5_3.fixture.expected_hal_m": p5_3_expected_hal,
         "p5_3.fixture.expected_val_m": p5_3_expected_val,
         "p5_3.fixture.expected_im_m": p5_3_expected_im,
+        "p5_4.fixture.enabled": _param_bool(context, "p5_4.fixture.enabled"),
+        "p5_4.fixture.name": LaunchConfiguration("p5_4.fixture.name").perform(context),
+        "p5_4.fixture.x_min": _param_float(context, "p5_4.fixture.x_min"),
+        "p5_4.fixture.x_max": _param_float(context, "p5_4.fixture.x_max"),
+        "p5_4.fixture.y_min": _param_float(context, "p5_4.fixture.y_min"),
+        "p5_4.fixture.y_max": _param_float(context, "p5_4.fixture.y_max"),
+        "p5_4.fixture.z_min": _param_float(context, "p5_4.fixture.z_min"),
+        "p5_4.fixture.z_max": _param_float(context, "p5_4.fixture.z_max"),
+        "p5_4.fixture.tau_min": _param_float(context, "p5_4.fixture.tau_min"),
+        "p5_4.fixture.tau_max": _param_float(context, "p5_4.fixture.tau_max"),
+        "p5_4.fixture.hpl_pred_m": p5_4_fixture_hpl,
+        "p5_4.fixture.vpl_pred_m": p5_4_fixture_vpl,
+        "p5_4.fixture.expected_hal_m": p5_4_expected_hal,
+        "p5_4.fixture.expected_val_m": p5_4_expected_val,
+        "p5_4.fixture.expected_im_m": p5_4_expected_im,
         "p5.pred_alert_limit_mode": p5_pred_al_mode,
         "p5.future_replan_margin_m": _param_float(context, "p5.future_replan_margin_m"),
         "p5.future_emergency_margin_m": _param_float(context, "p5.future_emergency_margin_m"),
@@ -1571,6 +1621,43 @@ def _launch_setup(context):
                 },
                 "expected_im_m": p5_3_expected_im,
                 "expected_reason": "p5_3_high_risk_zone",
+            },
+        },
+        "p5_4": {
+            "fixture": {
+                "enabled": _param_bool(context, "p5_4.fixture.enabled"),
+                "name": LaunchConfiguration("p5_4.fixture.name").perform(context),
+                "bounds": {
+                    "x": [
+                        _param_float(context, "p5_4.fixture.x_min"),
+                        _param_float(context, "p5_4.fixture.x_max"),
+                    ],
+                    "y": [
+                        _param_float(context, "p5_4.fixture.y_min"),
+                        _param_float(context, "p5_4.fixture.y_max"),
+                    ],
+                    "z": [
+                        _param_float(context, "p5_4.fixture.z_min"),
+                        _param_float(context, "p5_4.fixture.z_max"),
+                    ],
+                },
+                "tau_window_s": [
+                    _param_float(context, "p5_4.fixture.tau_min"),
+                    _param_float(context, "p5_4.fixture.tau_max"),
+                ],
+                "injected_pl_m": {
+                    "hpl_pred": p5_4_fixture_hpl,
+                    "vpl_pred": p5_4_fixture_vpl,
+                },
+                "expected_alert_limit_m": {
+                    "mode": p5_pred_al_mode,
+                    "hal": p5_4_expected_hal,
+                    "val": p5_4_expected_val,
+                },
+                "expected_im_m": p5_4_expected_im,
+                "expected_reason": "p5_4_near_risk_zone",
+                "expected_first_bad_tau_s": _param_float(context, "p5_4.fixture.tau_min"),
+                "expected_emergency_time_s": 1.0,
             },
         },
         **{f"planner_enable_{key}": value for key, value in safety_enabled.items()},

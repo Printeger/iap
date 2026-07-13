@@ -852,7 +852,7 @@ P5GateStatus P5RuntimeIntegrityGate::evaluateFutureGate(
     viz_sample.tau_s = tau;
     iap::PredictedPLSample pl;
     const bool pl_ok =
-        snapshot->queryPredictedPL(p, context.now_s + tau, &pl);
+        snapshot->queryPredictedPL(p, context.now_s + tau, &pl, tau);
     const PredAlertLimitSample al = pred_alert_limit_provider_.evaluate(
         p, context.now_s + tau, current.hal, current.val);
     if (!pl_ok && isFutureCoverageLimit(pl)) {

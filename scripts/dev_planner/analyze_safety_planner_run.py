@@ -109,6 +109,24 @@ P5_3_SCENARIO_ISOLATION_BRANCH = (
 P5_3_REASON_ATTRIBUTION_BRANCH = "FAIL -> debug P5-3 reason attribution"
 P5_3_PL_AL_MARGIN_BRANCH = "FAIL -> 继续 debug P5-3 query alignment / PL-AL margin"
 P5_3_FAIL_BRANCH = P5_3_PL_AL_MARGIN_BRANCH
+P5_4_FIXTURE_NAME = "near_risk_zone_v1"
+P5_4_FIXTURE_REASON = "p5_4_near_risk_zone"
+P5_4_EMERGENCY_TIME_S = 1.0
+P5_4_FAIL_BRANCH = "FAIL -> 继续 debug P5-4 near-risk / emergency-candidate / PL-AL margin"
+P5_4_FIGURE_FILENAMES = [
+    "p5_4_scenario_topdown.png",
+    "p5_4_near_risk_overlay.png",
+    "p5_4_tau_emergency_window.png",
+    "p5_4_pl_probe.png",
+    "p5_4_margin_timeline.png",
+    "p5_4_action_reason_timeline.png",
+    "p5_4_replan_vs_emergency.png",
+    "p5_4_sample_heatmap.png",
+    "p5_4_topic_gap.png",
+    "p5_4_p0_health.png",
+    "p5_4_final_gate_summary.png",
+    "p5_4_trajectory_integrity_samples.png",
+]
 P5_3_PLAL_FIGURE_FILENAMES = [
     "p5_3_plal_scenario_topdown.png",
     "p5_3_plal_high_risk_overlay.png",
@@ -391,7 +409,7 @@ def is_p0_experiment(args: argparse.Namespace) -> bool:
 
 
 def is_p5_runtime_experiment(args: argparse.Namespace) -> bool:
-    return str(args.experiment_id).strip().upper() in {"P5-1", "P5-2", "P5-3"}
+    return str(args.experiment_id).strip().upper() in {"P5-1", "P5-2", "P5-3", "P5-4"}
 
 
 def p0_phase_number(experiment_id: Any) -> int | None:
@@ -2542,6 +2560,9 @@ def plot_p5_3_query_alignment_pl_probe(
     sample_rows: list[dict[str, Any]],
     fixture: dict[str, Any],
     path: Path,
+    *,
+    tau_field: str = "query_tau_s",
+    title: str = "P5-3 query-aligned PL probe",
 ) -> bool:
     if not sample_rows or not fixture.get("valid_geometry"):
         return False
@@ -2561,7 +2582,7 @@ def plot_p5_3_query_alignment_pl_probe(
     points = []
     for row in rows:
         stamp = finite_float(row.get("bag_time_s"))
-        tau = finite_float(row.get("query_tau_s"))
+        tau = finite_float(row.get(tau_field))
         actual_hpl = finite_float(row.get("actual_hpl"))
         actual_vpl = finite_float(row.get("actual_vpl"))
         expected_hpl = finite_float(row.get("expected_hpl"))
@@ -2642,7 +2663,7 @@ def plot_p5_3_query_alignment_pl_probe(
     axes[2].legend(loc="best")
     for ax in axes:
         ax.grid(True, alpha=0.25)
-    fig.suptitle("P5-3 query-aligned PL probe")
+    fig.suptitle(title)
     fig.tight_layout()
     fig.savefig(path, dpi=160)
     plt.close(fig)
@@ -5247,11 +5268,15 @@ def manifest_bool(value: Any) -> bool:
     return str(value).strip().lower() in {"1", "true", "yes", "on"}
 
 
-def p5_3_fixture_from_manifest(manifest: dict[str, Any]) -> dict[str, Any]:
-    nested = ((manifest.get("p5_3") or {}).get("fixture") or {}) if manifest else {}
+def p5_fixture_from_manifest(
+    manifest: dict[str, Any],
+    phase_key: str,
+    default_reason: str,
+) -> dict[str, Any]:
+    nested = ((manifest.get(phase_key) or {}).get("fixture") or {}) if manifest else {}
 
     def flat(key: str) -> Any:
-        return manifest.get(f"p5_3.fixture.{key}") if manifest else None
+        return manifest.get(f"{phase_key}.fixture.{key}") if manifest else None
 
     bounds = nested.get("bounds") or {}
     tau_window = nested.get("tau_window_s") or [flat("tau_min"), flat("tau_max")]
@@ -5273,7 +5298,8 @@ def p5_3_fixture_from_manifest(manifest: dict[str, Any]) -> dict[str, Any]:
     expected_val = finite_float(expected_al.get("val", flat("expected_val_m")))
     fixture = {
         "present": bool(manifest) and (
-            "p5_3" in manifest or any(str(key).startswith("p5_3.fixture.") for key in manifest)
+            phase_key in manifest
+            or any(str(key).startswith(f"{phase_key}.fixture.") for key in manifest)
         ),
         "enabled": manifest_bool(nested.get("enabled", flat("enabled"))),
         "name": str(nested.get("name", flat("name")) or ""),
@@ -5290,7 +5316,13 @@ def p5_3_fixture_from_manifest(manifest: dict[str, Any]) -> dict[str, Any]:
         "expected_hal": expected_hal,
         "expected_val": expected_val,
         "expected_im": finite_float(nested.get("expected_im_m", flat("expected_im_m"))),
-        "expected_reason": str(nested.get("expected_reason", P5_3_FIXTURE_REASON) or ""),
+        "expected_reason": str(nested.get("expected_reason", default_reason) or ""),
+        "expected_first_bad_tau": finite_float(
+            nested.get("expected_first_bad_tau_s", flat("expected_first_bad_tau_s"))
+        ),
+        "expected_emergency_time_s": finite_float(
+            nested.get("expected_emergency_time_s", flat("expected_emergency_time_s"))
+        ),
     }
     finite_required = (
         "x_min",
@@ -5306,6 +5338,14 @@ def p5_3_fixture_from_manifest(manifest: dict[str, Any]) -> dict[str, Any]:
     )
     fixture["valid_geometry"] = all(fixture.get(key) is not None for key in finite_required)
     return fixture
+
+
+def p5_3_fixture_from_manifest(manifest: dict[str, Any]) -> dict[str, Any]:
+    return p5_fixture_from_manifest(manifest, "p5_3", P5_3_FIXTURE_REASON)
+
+
+def p5_4_fixture_from_manifest(manifest: dict[str, Any]) -> dict[str, Any]:
+    return p5_fixture_from_manifest(manifest, "p5_4", P5_4_FIXTURE_REASON)
 
 
 def p5_3_value_in_window(value: float | None, lo: float | None, hi: float | None) -> bool:
@@ -5365,6 +5405,8 @@ def p5_3_sample_source(sample: dict[str, Any], status_row: dict[str, Any]) -> st
 def p5_3_sample_rows(
     p5_rows: list[dict[str, Any]],
     fixture: dict[str, Any],
+    *,
+    tau_window_field: str = "query_tau_s",
 ) -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
     for status_idx, status_row in enumerate(p5_rows):
@@ -5416,8 +5458,11 @@ def p5_3_sample_rows(
             if query_tau is None:
                 query_tau = finite_float(row.get("tau_s"))
                 row["query_tau_s"] = "" if query_tau is None else query_tau
+            fixture_tau = finite_float(row.get(tau_window_field))
+            if fixture_tau is None:
+                fixture_tau = query_tau
             inside_tau = p5_3_value_in_window(
-                query_tau,
+                fixture_tau,
                 fixture.get("tau_min"),
                 fixture.get("tau_max"),
             )
@@ -5451,7 +5496,11 @@ def p5_3_sample_rows(
             expected_reason = (
                 runtime_expected_reason
                 if runtime_expected_reason
-                else (P5_3_FIXTURE_REASON if inside_space and inside_tau else "")
+                else (
+                    str(fixture.get("expected_reason", "") or "")
+                    if inside_space and inside_tau
+                    else ""
+                )
             )
             row["expected_hpl"] = "" if expected_hpl is None else expected_hpl
             row["expected_vpl"] = "" if expected_vpl is None else expected_vpl
@@ -5508,8 +5557,11 @@ def p5_3_sample_reason_is_fixture_linked(row: dict[str, Any]) -> bool:
     reason = str(row.get("reason", "")).strip().lower()
     if not reason:
         return False
+    expected_reason = str(row.get("expected_reason", "")).strip().lower()
     return (
         P5_3_FIXTURE_REASON in reason
+        or P5_4_FIXTURE_REASON in reason
+        or (bool(expected_reason) and expected_reason in reason)
         or "future_low_margin" in reason
         or "future_bad" in reason
     )
@@ -5590,6 +5642,7 @@ def summarize_p5_3_samples(rows: list[dict[str, Any]]) -> dict[str, Any]:
         and (
             int(row.get("inside_high_risk_zone", 0) or 0)
             or P5_3_FIXTURE_REASON in str(row.get("reason", "")).lower()
+            or P5_4_FIXTURE_REASON in str(row.get("reason", "")).lower()
         )
     ]
     return {
@@ -6603,6 +6656,602 @@ def validate_p5_3_hard_gates(
     return gates
 
 
+def p5_4_expected_emergency_time_s(fixture: dict[str, Any]) -> float:
+    return (
+        finite_float(fixture.get("expected_emergency_time_s"))
+        or P5_4_EMERGENCY_TIME_S
+    )
+
+
+def p5_4_reason_text(row: dict[str, Any]) -> str:
+    reasons = p5_all_reason_values(
+        row,
+        (
+            "reason",
+            "current_reason",
+            "future_reason",
+            "active_reasons",
+            "final_gate_last_reason",
+            "pred_al_last_reason",
+        ),
+    )
+    return " ".join(sorted(reasons))
+
+
+def p5_4_row_has_future_reason(row: dict[str, Any]) -> bool:
+    reason_text = p5_4_reason_text(row)
+    return "future_bad" in reason_text or P5_4_FIXTURE_REASON in reason_text
+
+
+def p5_4_row_has_strict_emergency(row: dict[str, Any]) -> bool:
+    return (
+        p5_action(row, "action") == P5_EMERGENCY_ACTION
+        and p5_action(row, "raw_action") == P5_EMERGENCY_ACTION
+    )
+
+
+def p5_4_row_has_effective_emergency(row: dict[str, Any]) -> bool:
+    return (
+        p5_action(row, "action") == P5_EMERGENCY_ACTION
+        or p5_action(row, "raw_action") == P5_EMERGENCY_ACTION
+    )
+
+
+def p5_4_row_has_startup_or_snapshot_cause(row: dict[str, Any]) -> bool:
+    phase = str(row.get("phase", "")).strip().lower()
+    reason_text = p5_4_reason_text(row)
+    return phase == "startup" or "snapshot_unavailable" in reason_text
+
+
+def p5_4_row_has_current_only_low_margin(row: dict[str, Any]) -> bool:
+    reason_text = p5_4_reason_text(row)
+    return "current_low_margin" in reason_text and not p5_4_row_has_future_reason(row)
+
+
+def p5_4_row_has_unknown_only_cause(row: dict[str, Any]) -> bool:
+    if p5_4_row_has_future_reason(row):
+        return False
+    reason_text = p5_4_reason_text(row)
+    unknown_reasons = (
+        "future_unknown",
+        "unknown_only",
+        "al_invalid",
+        "pred_al_invalid",
+    )
+    if any(reason in reason_text for reason in unknown_reasons):
+        return True
+    unknown_ratio = finite_float(row.get("unknown_ratio"))
+    bad_ratio = finite_float(row.get("bad_ratio"))
+    return (
+        unknown_ratio is not None
+        and unknown_ratio > 0.0
+        and (bad_ratio is None or bad_ratio <= 0.0)
+    )
+
+
+def p5_4_row_has_final_gate_failed_cause(row: dict[str, Any]) -> bool:
+    reason_text = p5_4_reason_text(row)
+    return "final_gate_failed" in reason_text
+
+
+def p5_4_row_exclusion_causes(row: dict[str, Any]) -> list[str]:
+    causes: list[str] = []
+    if p5_4_row_has_startup_or_snapshot_cause(row):
+        causes.append("startup_or_snapshot_unavailable")
+    if p5_4_row_has_current_only_low_margin(row):
+        causes.append("current-only low margin")
+    if p5_4_row_has_unknown_only_cause(row):
+        causes.append("unknown-only")
+    if p5_4_row_has_final_gate_failed_cause(row):
+        causes.append("final_gate_failed")
+    return causes
+
+
+def p5_4_same_row_query_aligned_samples(
+    status_index: int,
+    samples_by_status: dict[int, list[dict[str, Any]]],
+) -> list[dict[str, Any]]:
+    return [
+        row
+        for row in samples_by_status.get(status_index, [])
+        if p5_3_sample_is_query_aligned_future_fixture(row)
+    ]
+
+
+def p5_4_anchor_candidate_row(
+    status_row: dict[str, Any],
+    status_index: int,
+    samples_by_status: dict[int, list[dict[str, Any]]],
+    emergency_time_s: float,
+) -> bool:
+    first_bad_tau = finite_float(status_row.get("first_bad_tau"))
+    return (
+        p5_4_row_has_strict_emergency(status_row)
+        and p5_4_row_has_future_reason(status_row)
+        and not p5_4_row_exclusion_causes(status_row)
+        and len(p5_4_same_row_query_aligned_samples(status_index, samples_by_status))
+        > 0
+        and first_bad_tau is not None
+        and first_bad_tau <= emergency_time_s
+    )
+
+
+def p5_4_row_explains_emergency(
+    status_row: dict[str, Any],
+    status_index: int,
+    samples_by_status: dict[int, list[dict[str, Any]]],
+    emergency_time_s: float,
+) -> bool:
+    first_bad_tau = finite_float(status_row.get("first_bad_tau"))
+    return (
+        p5_4_row_has_effective_emergency(status_row)
+        and p5_4_row_has_future_reason(status_row)
+        and not p5_4_row_exclusion_causes(status_row)
+        and len(p5_4_same_row_query_aligned_samples(status_index, samples_by_status))
+        > 0
+        and first_bad_tau is not None
+        and first_bad_tau <= emergency_time_s
+    )
+
+
+def p5_4_unexplained_emergency_storm_summary(
+    p5_rows: list[dict[str, Any]],
+    samples_by_status: dict[int, list[dict[str, Any]]],
+    emergency_time_s: float,
+) -> dict[str, Any]:
+    ordered_indices = p5_3_ordered_status_indices(p5_rows)
+    unexplained_flags: list[bool] = []
+    unexplained_rows: list[dict[str, Any]] = []
+    for status_index in ordered_indices:
+        row = p5_rows[status_index]
+        unexplained = p5_4_row_has_effective_emergency(row) and not p5_4_row_explains_emergency(
+            row,
+            status_index,
+            samples_by_status,
+            emergency_time_s,
+        )
+        unexplained_flags.append(unexplained)
+        if unexplained:
+            unexplained_rows.append(
+                {
+                    "status_row_index": status_index,
+                    "bag_time_s": row.get("bag_time_s", ""),
+                    "action": row.get("action", ""),
+                    "raw_action": row.get("raw_action", ""),
+                    "reason": row.get("reason", ""),
+                    "current_reason": row.get("current_reason", ""),
+                    "future_reason": row.get("future_reason", ""),
+                    "active_reasons": row.get("active_reasons", ""),
+                    "first_bad_tau": row.get("first_bad_tau", ""),
+                    "exclusion_causes": p5_4_row_exclusion_causes(row),
+                }
+            )
+    max_consecutive = consecutive_true(unexplained_flags)
+    return {
+        "max_consecutive_unexplained_emergency": max_consecutive,
+        "unexplained_emergency_rows": unexplained_rows[:20],
+        "unexplained_emergency_storm_absent": (
+            max_consecutive < P5_2_EMERGENCY_STORM_CONSECUTIVE
+        ),
+    }
+
+
+def p5_4_emergency_window_empty() -> dict[str, Any]:
+    sample_summary = summarize_p5_3_samples([])
+    return {
+        "available": False,
+        "row_indices": [],
+        "status_row_count": 0,
+        "sample_row_count": 0,
+        "start_s": None,
+        "end_s": None,
+        "duration_s": None,
+        "anchor_status_row_index": None,
+        "anchor_strict_emergency": False,
+        "anchor_future_reason_ok": False,
+        "anchor_same_row_query_aligned_sample_count": 0,
+        "anchor_first_bad_tau": None,
+        "anchor_first_bad_tau_within_emergency_time": False,
+        "anchor_exclusion_causes": [],
+        "sample_summary": sample_summary,
+    }
+
+
+def p5_4_emergency_window_summary(
+    p5_rows: list[dict[str, Any]],
+    sample_rows: list[dict[str, Any]],
+    fixture: dict[str, Any],
+) -> dict[str, Any]:
+    if not p5_rows or not sample_rows or not fixture.get("valid_geometry"):
+        return p5_4_emergency_window_empty()
+    samples_by_status = p5_3_samples_by_status_index(sample_rows)
+    emergency_time_s = p5_4_expected_emergency_time_s(fixture)
+    ordered_indices = p5_3_ordered_status_indices(p5_rows)
+    anchor_order_index: int | None = None
+    anchor_status_index: int | None = None
+    for order_index, status_index in enumerate(ordered_indices):
+        if p5_4_anchor_candidate_row(
+            p5_rows[status_index],
+            status_index,
+            samples_by_status,
+            emergency_time_s,
+        ):
+            anchor_order_index = order_index
+            anchor_status_index = status_index
+            break
+    if anchor_order_index is None or anchor_status_index is None:
+        return p5_4_emergency_window_empty()
+
+    row_indices: list[int] = []
+    for status_index in ordered_indices[anchor_order_index:]:
+        row = p5_rows[status_index]
+        if not p5_4_row_explains_emergency(
+            row,
+            status_index,
+            samples_by_status,
+            emergency_time_s,
+        ):
+            break
+        row_indices.append(status_index)
+
+    window_status_rows = [p5_rows[index] for index in row_indices]
+    window_sample_rows = p5_3_filter_sample_rows_by_status_indices(
+        sample_rows,
+        row_indices,
+    )
+    sample_summary = summarize_p5_3_samples(window_sample_rows)
+    start_s, end_s = p5_3_window_stamps(window_status_rows)
+    anchor_row = p5_rows[anchor_status_index]
+    anchor_first_bad_tau = finite_float(anchor_row.get("first_bad_tau"))
+    anchor_samples = p5_4_same_row_query_aligned_samples(
+        anchor_status_index,
+        samples_by_status,
+    )
+    return {
+        "available": True,
+        "row_indices": row_indices,
+        "status_row_count": len(window_status_rows),
+        "sample_row_count": len(window_sample_rows),
+        "start_s": start_s,
+        "end_s": end_s,
+        "duration_s": (
+            max(0.0, float(end_s) - float(start_s))
+            if start_s is not None and end_s is not None
+            else None
+        ),
+        "anchor_status_row_index": anchor_status_index,
+        "anchor_strict_emergency": p5_4_row_has_strict_emergency(anchor_row),
+        "anchor_future_reason_ok": p5_4_row_has_future_reason(anchor_row),
+        "anchor_same_row_query_aligned_sample_count": len(anchor_samples),
+        "anchor_first_bad_tau": anchor_first_bad_tau,
+        "anchor_first_bad_tau_within_emergency_time": (
+            anchor_first_bad_tau is not None
+            and anchor_first_bad_tau <= emergency_time_s
+        ),
+        "anchor_exclusion_causes": p5_4_row_exclusion_causes(anchor_row),
+        "emergency_time_s": emergency_time_s,
+        "sample_summary": sample_summary,
+    }
+
+
+def validate_p5_4_required_figures(
+    figure_paths: list[Path],
+    failures: list[str],
+) -> None:
+    for figure_path in figure_paths:
+        if not figure_path.is_file() or figure_path.stat().st_size <= 0:
+            failures.append(
+                "P5-4 required figure missing: "
+                f"{figure_path.name}; missing figure evidence prevents P5-4 acceptance"
+            )
+
+
+def validate_p5_4_hard_gates(
+    manifest: dict[str, Any],
+    validator_summary: dict[str, Any],
+    topic_health: dict[str, dict[str, Any]],
+    p0_health_summary: dict[str, Any],
+    p0_health_rows: list[dict[str, Any]],
+    p5_rows: list[dict[str, Any]],
+    p5_summary: dict[str, Any],
+    p5_marker_rows: list[dict[str, Any]],
+    failures: list[str],
+    inconclusive: list[str],
+    topic_timestamps: dict[str, list[float]] | None = None,
+) -> dict[str, Any]:
+    manifest_gates = p5_manifest_gate_values(manifest)
+    fixture = p5_4_fixture_from_manifest(manifest)
+    fixture_ready = (
+        fixture.get("present")
+        and fixture.get("enabled")
+        and fixture.get("name") == P5_4_FIXTURE_NAME
+        and fixture.get("valid_geometry")
+    )
+    topic_statuses = {
+        topic: (topic_health.get(topic) or {}).get("status", "MISSING")
+        for topic in P5_TOPIC_EXPECTATIONS
+    }
+    p0_startup = summarize_p0_startup_snapshot_unavailable(p0_health_rows)
+    overlap_rows = p5_3_overlap_rows(p5_marker_rows, fixture)
+    overlap_summary = summarize_p5_3_overlap(overlap_rows)
+    sample_rows = p5_3_sample_rows(p5_rows, fixture, tau_window_field="tau_s")
+    sample_summary = summarize_p5_3_samples(sample_rows)
+    samples_by_status = p5_3_samples_by_status_index(sample_rows)
+    emergency_time_s = p5_4_expected_emergency_time_s(fixture)
+    event_window = p5_4_emergency_window_summary(p5_rows, sample_rows, fixture)
+    event_window_status_indices = list(event_window.get("row_indices", []) or [])
+    event_window_sample_rows = p5_3_filter_sample_rows_by_status_indices(
+        sample_rows,
+        event_window_status_indices,
+    )
+    full_run_active_topic_gap = p5_3_active_topic_gap_summary(
+        sample_rows,
+        topic_timestamps,
+    )
+    event_window_active_topic_gap = p5_3_active_topic_gap_summary(
+        event_window_sample_rows,
+        topic_timestamps,
+    )
+    active_topic_gap = (
+        event_window_active_topic_gap
+        if bool(event_window.get("available"))
+        else full_run_active_topic_gap
+    )
+    storm_summary = p5_4_unexplained_emergency_storm_summary(
+        p5_rows,
+        samples_by_status,
+        emergency_time_s,
+    )
+    future_reason_rows = [row for row in p5_rows if p5_4_row_has_future_reason(row)]
+    emergency_rows = [row for row in p5_rows if p5_4_row_has_effective_emergency(row)]
+    excluded_emergency_rows = [
+        {
+            "bag_time_s": row.get("bag_time_s", ""),
+            "action": row.get("action", ""),
+            "raw_action": row.get("raw_action", ""),
+            "reason": row.get("reason", ""),
+            "current_reason": row.get("current_reason", ""),
+            "future_reason": row.get("future_reason", ""),
+            "active_reasons": row.get("active_reasons", ""),
+            "causes": p5_4_row_exclusion_causes(row),
+        }
+        for row in emergency_rows
+        if p5_4_row_exclusion_causes(row)
+    ]
+    first_bad_tau_values = p5_3_first_bad_tau_values(p5_rows)
+    first_bad_tau_min = min(first_bad_tau_values) if first_bad_tau_values else None
+    predicted_al_available = (
+        p5_summary.get("pred_hal_min_min") is not None
+        and p5_summary.get("pred_val_min_min") is not None
+    )
+    gates = {
+        **manifest_gates,
+        "fixture": fixture,
+        "fixture_present": bool(fixture.get("present")),
+        "fixture_enabled": bool(fixture.get("enabled")),
+        "fixture_name_ok": fixture.get("name") == P5_4_FIXTURE_NAME,
+        "fixture_geometry_valid": bool(fixture.get("valid_geometry")),
+        "fixture_ready": bool(fixture_ready),
+        "blocked_scenario_missing": not bool(fixture_ready),
+        "validator_summary_present": bool(validator_summary),
+        "validator_passed": validator_summary.get("passed") is True,
+        "required_p5_topics_stable": all(
+            status == "PASS"
+            for topic, status in topic_statuses.items()
+            if P5_TOPIC_EXPECTATIONS.get(topic) != "planner-dependent"
+        ),
+        "topic_statuses": topic_statuses,
+        "active_topic_gap": active_topic_gap,
+        "full_run_active_topic_gap": full_run_active_topic_gap,
+        "event_window_active_topic_gap": event_window_active_topic_gap,
+        "active_required_p5_topics_stable": bool(
+            active_topic_gap.get("required_continuous_topics_stable", True)
+        ),
+        "p0_health_rows_present": int(p0_health_summary.get("row_count", 0) or 0) > 0,
+        **p0_startup,
+        "p0_post_startup_ready": p0_startup["post_startup_ready_false_count"] == 0,
+        "p0_post_startup_non_stale": p0_startup["post_startup_stale_true_count"] == 0,
+        "p0_post_startup_not_full_unknown": (
+            p0_startup["post_startup_full_unknown_count"] == 0
+        ),
+        "p5_status_rows_present": int(p5_summary.get("status_rows", 0) or 0) > 0,
+        "p5_json_parse_ok": int(p5_summary.get("parse_error_count", 0) or 0) == 0,
+        "p5_inspection_ok": not bool(p5_summary.get("inspection_error")),
+        "marker_rows_present": len(p5_marker_rows) > 0,
+        "sample_rows_present": len(sample_rows) > 0,
+        "sample_summary": sample_summary,
+        "overlap": overlap_summary,
+        "trajectory_overlap_present": int(overlap_summary.get("overlap_count", 0) or 0) > 0,
+        "fixture_entered": int(sample_summary.get("future_fixture_sample_count", 0) or 0) > 0,
+        "future_bad_sample_inside_fixture": int(
+            sample_summary.get("future_bad_fixture_sample_count", 0) or 0
+        )
+        > 0,
+        "future_bad_sample_linked": int(
+            sample_summary.get("future_bad_fixture_linked_count", 0) or 0
+        )
+        > 0,
+        "fixture_query_aligned": int(
+            sample_summary.get("future_query_aligned_sample_count", 0) or 0
+        )
+        > 0,
+        "fixture_query_mismatch_absent": int(
+            sample_summary.get("future_query_mismatch_sample_count", 0) or 0
+        )
+        == 0,
+        "event_window": event_window,
+        "event_window_available": bool(event_window.get("available")),
+        "anchor_status_row_index": event_window.get("anchor_status_row_index"),
+        "anchor_strict_emergency": bool(event_window.get("anchor_strict_emergency")),
+        "anchor_future_reason_ok": bool(event_window.get("anchor_future_reason_ok")),
+        "anchor_same_row_query_aligned_sample_count": int(
+            event_window.get("anchor_same_row_query_aligned_sample_count", 0) or 0
+        ),
+        "anchor_same_row_fixture_samples": int(
+            event_window.get("anchor_same_row_query_aligned_sample_count", 0) or 0
+        )
+        > 0,
+        "anchor_first_bad_tau": event_window.get("anchor_first_bad_tau"),
+        "anchor_first_bad_tau_within_emergency_time": bool(
+            event_window.get("anchor_first_bad_tau_within_emergency_time")
+        ),
+        "anchor_exclusion_causes": event_window.get("anchor_exclusion_causes", []),
+        "emergency_time_s": emergency_time_s,
+        "first_bad_tau_values": first_bad_tau_values[:20],
+        "first_bad_tau_min": first_bad_tau_min,
+        "future_reason_attribution_count": len(future_reason_rows),
+        "future_reason_attribution_ok": len(future_reason_rows) > 0,
+        "emergency_action_count": int(p5_summary.get("emergency_action_count", 0) or 0),
+        "raw_emergency_action_count": int(
+            p5_summary.get("raw_emergency_action_count", 0) or 0
+        ),
+        "excluded_emergency_rows": excluded_emergency_rows[:20],
+        **storm_summary,
+        "predicted_al_available": predicted_al_available,
+    }
+
+    if not (
+        gates["manifest_safety_profile_p5"]
+        and gates["manifest_expected_true_ok"]
+        and gates["manifest_expected_false_ok"]
+    ):
+        failures.append("P5-4 manifest does not enable P0/P5 with P1-P4 disabled")
+    if not gates["fixture_present"]:
+        failures.append("P5-4 fixture manifest is missing")
+    elif not gates["fixture_enabled"]:
+        failures.append("P5-4 fixture manifest is disabled")
+    elif not gates["fixture_name_ok"]:
+        failures.append(
+            f"P5-4 fixture name is not {P5_4_FIXTURE_NAME}: "
+            f"{fixture.get('name')}"
+        )
+    elif not gates["fixture_geometry_valid"]:
+        failures.append("P5-4 fixture geometry or tau/PL values are invalid")
+    if not gates["validator_summary_present"]:
+        failures.append("P5-4 validator summary is missing")
+    elif not gates["validator_passed"]:
+        failures.append("P5-4 validator summary did not pass")
+    if not gates["required_p5_topics_stable"]:
+        failures.append("P5-4 required P0/P5 topics are not all stable")
+    if not gates["active_required_p5_topics_stable"]:
+        failures.append("P5-4 active evidence-window topic-gap exceeded threshold")
+    if not gates["p0_health_rows_present"]:
+        failures.append("P5-4 P0 health rows are missing")
+    if not gates["startup_snapshot_unavailable_bounded"]:
+        failures.append("P5-4 P0 startup snapshot_unavailable prefix is not bounded")
+    if not gates["p0_post_startup_ready"]:
+        failures.append("P5-4 P0 health reported ready=false after startup")
+    if not gates["p0_post_startup_non_stale"]:
+        failures.append("P5-4 P0 health reported stale=true after startup")
+    if not gates["p0_post_startup_not_full_unknown"]:
+        failures.append("P5-4 P0 health reported full unknown after startup")
+    if not gates["p5_status_rows_present"]:
+        failures.append("P5-4 P5 status rows are missing")
+    if not gates["p5_json_parse_ok"]:
+        failures.append("P5-4 P5 status JSON parse errors were observed")
+    if not gates["p5_inspection_ok"]:
+        failures.append("P5-4 P5 status inspection did not complete cleanly")
+    if not gates["marker_rows_present"]:
+        failures.append("P5-4 trajectory marker evidence is missing")
+    if not gates["sample_rows_present"]:
+        failures.append("P5-4 per-sample PL/AL diagnostics are missing")
+    if not gates["fixture_entered"]:
+        failures.append(
+            "P5-4 fixture not entered: no trajectory sample entered the near-risk "
+            "fixture tau/spatial window"
+        )
+    if gates["fixture_entered"] and not gates["future_bad_sample_inside_fixture"]:
+        failures.append("P5-4 near-risk fixture samples did not become bad")
+    if gates["fixture_entered"] and not gates["future_bad_sample_linked"]:
+        failures.append("P5-4 near-risk fixture samples were not linked to future_bad or fixture attribution")
+    if gates["fixture_entered"] and not gates["fixture_query_aligned"]:
+        failures.append(
+            "P5-4 query alignment: future samples entered the fixture tau/spatial "
+            "window but actual queried PL/reason did not match injected fixture PL"
+        )
+    if gates["fixture_entered"] and not gates["fixture_query_mismatch_absent"]:
+        mismatch = sample_summary.get("first_future_query_mismatch_sample") or {}
+        failures.append(
+            "P5-4 injected PL mismatch: at least one fixture-window sample did "
+            "not match injected PL/reason "
+            f"(hpl={mismatch.get('hpl')}, vpl={mismatch.get('vpl')}, "
+            f"reason={mismatch.get('reason')})"
+        )
+    if not gates["event_window_available"]:
+        failures.append(
+            "P5-4 emergency candidate acceptance: no first causal "
+            "REQUEST_EMERGENCY_STOP_CANDIDATE row with same-row query-aligned "
+            "near-risk fixture evidence"
+        )
+    if gates["event_window_available"] and not gates["anchor_strict_emergency"]:
+        failures.append("P5-4 anchor row was not both raw and effective emergency")
+    if gates["event_window_available"] and not gates["anchor_future_reason_ok"]:
+        failures.append("P5-4 anchor row lacked future_bad or p5_4_near_risk_zone attribution")
+    if gates["event_window_available"] and not gates["anchor_same_row_fixture_samples"]:
+        failures.append("P5-4 anchor row lacked same-row query-aligned fixture samples")
+    if not gates["anchor_first_bad_tau_within_emergency_time"]:
+        failures.append(
+            "P5-4 first_bad_tau was absent or greater than "
+            f"emergency_time_s={emergency_time_s:.6g}"
+        )
+    excluded_causes_text = " ".join(
+        str(cause)
+        for row in gates.get("excluded_emergency_rows", [])
+        for cause in (row.get("causes", []) or [])
+    )
+    if "startup_or_snapshot_unavailable" in excluded_causes_text:
+        failures.append("P5-4 startup/snapshot_unavailable emergency cause was observed")
+    if "current-only low margin" in excluded_causes_text:
+        failures.append("P5-4 current-only low margin emergency cause was observed")
+    if "unknown-only" in excluded_causes_text:
+        failures.append("P5-4 unknown-only emergency cause was observed")
+    if "final_gate_failed" in excluded_causes_text:
+        failures.append("P5-4 final-gate emergency cause was observed")
+    if not gates["unexplained_emergency_storm_absent"]:
+        failures.append(
+            "P5-4 unexplained emergency storm observed: "
+            f"max_consecutive_unexplained_emergency="
+            f"{gates['max_consecutive_unexplained_emergency']}"
+        )
+    if not gates["predicted_al_available"]:
+        failures.append("P5-4 predicted alert-limit minima had no finite samples")
+
+    required = (
+        "manifest_safety_profile_p5",
+        "manifest_expected_true_ok",
+        "manifest_expected_false_ok",
+        "fixture_ready",
+        "validator_summary_present",
+        "validator_passed",
+        "required_p5_topics_stable",
+        "active_required_p5_topics_stable",
+        "p0_health_rows_present",
+        "startup_snapshot_unavailable_bounded",
+        "p0_post_startup_ready",
+        "p0_post_startup_non_stale",
+        "p0_post_startup_not_full_unknown",
+        "p5_status_rows_present",
+        "p5_json_parse_ok",
+        "p5_inspection_ok",
+        "marker_rows_present",
+        "sample_rows_present",
+        "fixture_entered",
+        "future_bad_sample_inside_fixture",
+        "future_bad_sample_linked",
+        "fixture_query_aligned",
+        "fixture_query_mismatch_absent",
+        "event_window_available",
+        "anchor_strict_emergency",
+        "anchor_future_reason_ok",
+        "anchor_same_row_fixture_samples",
+        "anchor_first_bad_tau_within_emergency_time",
+        "unexplained_emergency_storm_absent",
+        "predicted_al_available",
+    )
+    gates["passed"] = all(bool(gates.get(key)) for key in required)
+    return gates
+
+
 def p0_5_affine_c_pi(x: Any, y: Any, z: Any, tau: Any) -> Any:
     return 20.0 + 2.0 * x + 3.0 * y + 4.0 * z + 5.0 * tau
 
@@ -7069,6 +7718,12 @@ def next_debug_branch(
         if status == "PASS":
             return "PASS -> P5-4"
         return P5_3_FAIL_BRANCH
+    if normalized_experiment_id == "P5-4":
+        if status == "PASS":
+            return "PASS -> P5-5"
+        if status == "BLOCKED_SCENARIO_MISSING" or "p5-4 fixture manifest" in text:
+            return "BLOCKED_SCENARIO_MISSING"
+        return P5_4_FAIL_BRANCH
     if status == "PASS":
         pass_branches = {
             "B0-1": "continue_to_B0-2_open_sky_baseline",
@@ -7136,6 +7791,9 @@ def analyze(args: argparse.Namespace) -> dict[str, Any]:
     p5_3_event_window_figure_paths = {
         name: figures_dir / name for name in P5_3_EVENT_WINDOW_FIGURE_FILENAMES
     }
+    p5_4_figure_paths = {
+        name: figures_dir / name for name in P5_4_FIGURE_FILENAMES
+    }
     p0_phase = is_p0_experiment(args)
     p0_4_phase = is_experiment(args, "P0-4")
     p0_phase_index = p0_phase_number(args.experiment_id)
@@ -7144,6 +7802,7 @@ def analyze(args: argparse.Namespace) -> dict[str, Any]:
     p5_1_phase = is_experiment(args, "P5-1")
     p5_2_phase = is_experiment(args, "P5-2")
     p5_3_phase = is_experiment(args, "P5-3")
+    p5_4_phase = is_experiment(args, "P5-4")
     p5_runtime_phase = is_p5_runtime_experiment(args)
     p0_runtime_phase = p0_phase or p5_runtime_phase
     if bool(getattr(args, "blocked_fixture_audit", False)):
@@ -7562,7 +8221,11 @@ def analyze(args: argparse.Namespace) -> dict[str, Any]:
         health_figure_path = (
             figures_dir / "p5_3_debug_p0_health_timeline.png"
             if p5_3_phase
-            else figures_dir / f"{prefix}_p0_health_timeline.png"
+            else (
+                p5_4_figure_paths["p5_4_p0_health.png"]
+                if p5_4_phase
+                else figures_dir / f"{prefix}_p0_health_timeline.png"
+            )
         )
         reason_figure_path = figures_dir / f"{prefix}_p0_reason_histogram.png"
         distribution_figure_path = figures_dir / f"{prefix}_pl_cost_distribution.png"
@@ -7758,7 +8421,11 @@ def analyze(args: argparse.Namespace) -> dict[str, Any]:
     scenario_figure_path = (
         figures_dir / "p5_3_debug_scenario_topdown.png"
         if p5_3_phase
-        else figures_dir / f"{prefix}_scenario_topdown.png"
+        else (
+            p5_4_figure_paths["p5_4_scenario_topdown.png"]
+            if p5_4_phase
+            else figures_dir / f"{prefix}_scenario_topdown.png"
+        )
     )
     topic_activity_figure_path = (
         figures_dir / "p5_3_debug_topic_activity_timeline.png"
@@ -7855,8 +8522,8 @@ def analyze(args: argparse.Namespace) -> dict[str, Any]:
         failures,
         inconclusive,
         allow_replan=p5_runtime_phase,
-        allow_emergency=p5_2_phase or p5_3_phase,
-        allow_final_gate_failure=p5_2_phase or p5_3_phase,
+        allow_emergency=p5_2_phase or p5_3_phase or p5_4_phase,
+        allow_final_gate_failure=p5_2_phase or p5_3_phase or p5_4_phase,
     )
     if p0_requires_odom_gate and p5_summary.get("action_counts"):
         failures.append(f"{experiment_label} P5 status reported actions while P5 is disabled")
@@ -7866,10 +8533,15 @@ def analyze(args: argparse.Namespace) -> dict[str, Any]:
     p5_1_gates: dict[str, Any] = {}
     p5_2_gates: dict[str, Any] = {}
     p5_3_gates: dict[str, Any] = {}
+    p5_4_gates: dict[str, Any] = {}
     p5_3_overlap: list[dict[str, Any]] = []
     p5_3_samples: list[dict[str, Any]] = []
     p5_3_event_window_rows: list[dict[str, Any]] = []
     p5_3_event_window_samples: list[dict[str, Any]] = []
+    p5_4_overlap: list[dict[str, Any]] = []
+    p5_4_samples: list[dict[str, Any]] = []
+    p5_4_event_window_rows: list[dict[str, Any]] = []
+    p5_4_event_window_samples: list[dict[str, Any]] = []
     p5_csv_artifacts: list[str] = []
     p5_figure_artifacts: list[str] = []
     p5_required_figures: list[Path] = []
@@ -7934,6 +8606,41 @@ def analyze(args: argparse.Namespace) -> dict[str, Any]:
             p5_3_samples,
             p5_3_event_window_indices,
         )
+    if p5_4_phase:
+        p5_4_gates = validate_p5_4_hard_gates(
+            manifest,
+            validator_summary,
+            topic_health,
+            p0_health_summary,
+            health_rows,
+            p5_rows,
+            p5_summary,
+            p5_marker_rows,
+            failures,
+            inconclusive,
+            topic_timestamps,
+        )
+        p5_4_overlap = p5_3_overlap_rows(
+            p5_marker_rows,
+            p5_4_gates.get("fixture", {}),
+        )
+        p5_4_samples = p5_3_sample_rows(
+            p5_rows,
+            p5_4_gates.get("fixture", {}),
+            tau_window_field="tau_s",
+        )
+        p5_4_event_window_indices = list(
+            ((p5_4_gates.get("event_window") or {}).get("row_indices") or [])
+        )
+        p5_4_event_window_rows = [
+            p5_rows[index]
+            for index in p5_4_event_window_indices
+            if isinstance(index, int) and 0 <= index < len(p5_rows)
+        ]
+        p5_4_event_window_samples = p5_3_filter_sample_rows_by_status_indices(
+            p5_4_samples,
+            p5_4_event_window_indices,
+        )
 
     csv_artifacts = [str(topic_counts_path)]
     csv_artifacts.extend(p0_csv_artifacts)
@@ -7951,6 +8658,9 @@ def analyze(args: argparse.Namespace) -> dict[str, Any]:
         p5_3_overlap_path = csv_dir / f"{prefix}_high_risk_zone_overlap.csv"
         p5_3_samples_path = csv_dir / f"{prefix}_p5_sample_diagnostics.csv"
         p5_3_query_alignment_path = csv_dir / f"{prefix}_query_alignment_evidence.csv"
+        p5_4_overlap_path = csv_dir / f"{prefix}_near_risk_zone_overlap.csv"
+        p5_4_samples_path = csv_dir / f"{prefix}_p5_sample_diagnostics.csv"
+        p5_4_query_alignment_path = csv_dir / f"{prefix}_query_alignment_evidence.csv"
         action_rows = []
         t_rel = relative_time(p5_rows)
         for idx, row in enumerate(p5_rows):
@@ -8133,6 +8843,36 @@ def analyze(args: argparse.Namespace) -> dict[str, Any]:
                 P5_3_QUERY_ALIGNMENT_FIELDS,
                 p5_3_samples,
             )
+        if p5_4_phase:
+            write_csv(
+                p5_4_overlap_path,
+                [
+                    "bag_time_s",
+                    "topic",
+                    "marker_ns",
+                    "marker_id",
+                    "point_index",
+                    "x",
+                    "y",
+                    "z",
+                    "state",
+                    "inside_high_risk_zone",
+                    "overlap_bad_state",
+                    "fixture_x_min",
+                    "fixture_x_max",
+                    "fixture_y_min",
+                    "fixture_y_max",
+                    "fixture_z_min",
+                    "fixture_z_max",
+                ],
+                p5_4_overlap,
+            )
+            write_csv(p5_4_samples_path, P5_SAMPLE_FIELDS, p5_4_samples)
+            write_csv(
+                p5_4_query_alignment_path,
+                P5_3_QUERY_ALIGNMENT_FIELDS,
+                p5_4_samples,
+            )
         p5_csv_artifacts.extend(
             [
                 str(p5_action_path),
@@ -8146,6 +8886,10 @@ def analyze(args: argparse.Namespace) -> dict[str, Any]:
             p5_csv_artifacts.append(str(p5_3_overlap_path))
             p5_csv_artifacts.append(str(p5_3_samples_path))
             p5_csv_artifacts.append(str(p5_3_query_alignment_path))
+        if p5_4_phase:
+            p5_csv_artifacts.append(str(p5_4_overlap_path))
+            p5_csv_artifacts.append(str(p5_4_samples_path))
+            p5_csv_artifacts.append(str(p5_4_query_alignment_path))
         csv_artifacts.extend(
             artifact
             for artifact in p5_csv_artifacts
@@ -8161,18 +8905,30 @@ def analyze(args: argparse.Namespace) -> dict[str, Any]:
         p5_margin_figure_path = (
             figures_dir / "p5_3_debug_margin_timeline.png"
             if p5_3_phase
-            else figures_dir / f"{prefix}_p5_margin_timeline.png"
+            else (
+                p5_4_figure_paths["p5_4_margin_timeline.png"]
+                if p5_4_phase
+                else figures_dir / f"{prefix}_p5_margin_timeline.png"
+            )
         )
         p5_current_im_vs_action_figure_path = figures_dir / f"{prefix}_current_im_vs_action.png"
         p5_debounce_figure_path = figures_dir / f"{prefix}_p5_debounce_timeline.png"
         p5_future_unknown_figure_path = figures_dir / f"{prefix}_future_unknown_duration_timeline.png"
         p5_startup_correlation_figure_path = figures_dir / f"{prefix}_startup_correlation.png"
         p5_stale_integrity_correlation_figure_path = figures_dir / f"{prefix}_stale_integrity_correlation.png"
-        p5_final_gate_figure_path = figures_dir / f"{prefix}_p5_final_gate_summary.png"
+        p5_final_gate_figure_path = (
+            p5_4_figure_paths["p5_4_final_gate_summary.png"]
+            if p5_4_phase
+            else figures_dir / f"{prefix}_p5_final_gate_summary.png"
+        )
         p5_trajectory_figure_path = (
             figures_dir / "p5_3_debug_trajectory_integrity_samples.png"
             if p5_3_phase
-            else figures_dir / f"{prefix}_trajectory_integrity_samples.png"
+            else (
+                p5_4_figure_paths["p5_4_trajectory_integrity_samples.png"]
+                if p5_4_phase
+                else figures_dir / f"{prefix}_trajectory_integrity_samples.png"
+            )
         )
         p5_rviz_overview_path = figures_dir / f"{prefix}_p5_rviz_overview.png"
         p5_3_overlay_figure_path = figures_dir / "p5_3_debug_high_risk_zone_overlay.png"
@@ -8254,6 +9010,19 @@ def analyze(args: argparse.Namespace) -> dict[str, Any]:
         p5_3_event_topic_gap_path = p5_3_event_window_figure_paths[
             "p5_3_event_window_topic_gap.png"
         ]
+        p5_4_overlay_path = p5_4_figure_paths["p5_4_near_risk_overlay.png"]
+        p5_4_tau_window_path = p5_4_figure_paths[
+            "p5_4_tau_emergency_window.png"
+        ]
+        p5_4_pl_probe_path = p5_4_figure_paths["p5_4_pl_probe.png"]
+        p5_4_action_reason_path = p5_4_figure_paths[
+            "p5_4_action_reason_timeline.png"
+        ]
+        p5_4_replan_emergency_path = p5_4_figure_paths[
+            "p5_4_replan_vs_emergency.png"
+        ]
+        p5_4_heatmap_path = p5_4_figure_paths["p5_4_sample_heatmap.png"]
+        p5_4_topic_gap_path = p5_4_figure_paths["p5_4_topic_gap.png"]
         if plot_p5_action_timeline(p5_rows, p5_action_figure_path):
             p5_figure_artifacts.append(str(p5_action_figure_path))
         if plot_p5_status_timeline(p5_rows, p5_status_figure_path):
@@ -8452,6 +9221,52 @@ def analyze(args: argparse.Namespace) -> dict[str, Any]:
                 p5_3_event_topic_gap_path,
             ):
                 p5_figure_artifacts.append(str(p5_3_event_topic_gap_path))
+        if p5_4_phase:
+            p5_4_plot_rows = p5_4_event_window_rows or p5_rows
+            p5_4_plot_samples = p5_4_event_window_samples or p5_4_samples
+            if plot_p5_3_sample_high_risk_overlay(
+                p5_4_samples,
+                p5_4_gates.get("fixture", {}),
+                p5_4_overlay_path,
+            ):
+                p5_figure_artifacts.append(str(p5_4_overlay_path))
+            if plot_p5_3_sample_tau_window(
+                p5_4_plot_samples,
+                p5_4_plot_rows,
+                p5_4_gates.get("fixture", {}),
+                p5_4_tau_window_path,
+                tau_field="tau_s",
+                title="P5-4 near-risk emergency tau-window evidence",
+            ):
+                p5_figure_artifacts.append(str(p5_4_tau_window_path))
+            if plot_p5_3_query_alignment_pl_probe(
+                p5_4_samples,
+                p5_4_gates.get("fixture", {}),
+                p5_4_pl_probe_path,
+                tau_field="tau_s",
+                title="P5-4 near-risk query-aligned PL probe",
+            ):
+                p5_figure_artifacts.append(str(p5_4_pl_probe_path))
+            if plot_p5_3_reason_timeline(p5_4_plot_rows, p5_4_action_reason_path):
+                p5_figure_artifacts.append(str(p5_4_action_reason_path))
+            if plot_p5_3_replan_vs_emergency(
+                p5_4_plot_rows,
+                p5_4_replan_emergency_path,
+            ):
+                p5_figure_artifacts.append(str(p5_4_replan_emergency_path))
+            if plot_p5_3_sample_heatmap(
+                p5_4_plot_samples,
+                p5_4_heatmap_path,
+                tau_field="tau_s",
+                title="P5-4 near-risk sample heatmap",
+            ):
+                p5_figure_artifacts.append(str(p5_4_heatmap_path))
+            if plot_p5_3_topic_gap(
+                topic_timestamps,
+                p5_4_gates.get("active_topic_gap", {}),
+                p5_4_topic_gap_path,
+            ):
+                p5_figure_artifacts.append(str(p5_4_topic_gap_path))
         required_runtime_figures = [
             scenario_figure_path,
             topic_activity_figure_path,
@@ -8498,6 +9313,11 @@ def analyze(args: argparse.Namespace) -> dict[str, Any]:
                     ],
                 ]
             )
+        if p5_4_phase:
+            required_runtime_figures.extend(
+                [p5_4_figure_paths[name] for name in P5_4_FIGURE_FILENAMES]
+            )
+        required_runtime_figures = list(dict.fromkeys(required_runtime_figures))
         p5_required_figures.extend(required_runtime_figures)
 
     if is_experiment(args, "B0-4"):
@@ -8536,6 +9356,7 @@ def analyze(args: argparse.Namespace) -> dict[str, Any]:
         p5_3_event_window_required = set(
             p5_3_event_window_figure_paths.values()
         )
+        p5_4_required = set(p5_4_figure_paths.values())
         for figure_path in p5_required_figures:
             if not figure_path.is_file() or figure_path.stat().st_size <= 0:
                 if p5_3_phase and figure_path in p5_3_event_window_required:
@@ -8556,13 +9377,17 @@ def analyze(args: argparse.Namespace) -> dict[str, Any]:
                         f"{figure_path.name}; missing figure evidence prevents "
                         "runtime query-alignment acceptance"
                     )
+                elif p5_4_phase and figure_path in p5_4_required:
+                    validate_p5_4_required_figures([figure_path], failures)
                 else:
                     inconclusive.append(
                         f"{experiment_label} required figure was not generated or is empty: {figure_path}"
                     )
 
     status = "PASS"
-    if failures:
+    if p5_4_phase and bool(p5_4_gates.get("blocked_scenario_missing")):
+        status = "BLOCKED_SCENARIO_MISSING"
+    elif failures:
         status = "FAIL"
     elif inconclusive:
         status = "INCONCLUSIVE"
@@ -8594,6 +9419,7 @@ def analyze(args: argparse.Namespace) -> dict[str, Any]:
             "p5_1_hard_gates": p5_1_gates,
             "p5_2_hard_gates": p5_2_gates,
             "p5_3_hard_gates": p5_3_gates,
+            "p5_4_hard_gates": p5_4_gates,
             "marker_evidence": p5_marker_summary,
         },
         "safety_off_topic_counts": safety_off_topic_counts,

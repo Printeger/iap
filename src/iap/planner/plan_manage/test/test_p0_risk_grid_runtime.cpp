@@ -268,6 +268,18 @@ TEST(P0RiskGridRuntimeTest, GnssEpochFreshnessDefaultIsTwoSeconds) {
   EXPECT_DOUBLE_EQ(config.grid.p5_3_fixture.z_max_m, 1.35);
   EXPECT_DOUBLE_EQ(config.grid.p5_3_fixture.tau_min_s, 1.2);
   EXPECT_DOUBLE_EQ(config.grid.p5_3_fixture.tau_max_s, 2.0);
+  EXPECT_FALSE(config.grid.p5_4_fixture.enabled);
+  EXPECT_EQ(config.grid.p5_4_fixture.name, "near_risk_zone_v1");
+  EXPECT_DOUBLE_EQ(config.grid.p5_4_fixture.x_min_m, -11.7);
+  EXPECT_DOUBLE_EQ(config.grid.p5_4_fixture.x_max_m, -11.1);
+  EXPECT_DOUBLE_EQ(config.grid.p5_4_fixture.y_min_m, -0.75);
+  EXPECT_DOUBLE_EQ(config.grid.p5_4_fixture.y_max_m, 0.75);
+  EXPECT_DOUBLE_EQ(config.grid.p5_4_fixture.z_min_m, 1.0);
+  EXPECT_DOUBLE_EQ(config.grid.p5_4_fixture.z_max_m, 1.35);
+  EXPECT_DOUBLE_EQ(config.grid.p5_4_fixture.tau_min_s, 0.6);
+  EXPECT_DOUBLE_EQ(config.grid.p5_4_fixture.tau_max_s, 0.95);
+  EXPECT_DOUBLE_EQ(config.grid.p5_4_fixture.hpl_pred_m, 10.2);
+  EXPECT_DOUBLE_EQ(config.grid.p5_4_fixture.vpl_pred_m, 10.2);
 }
 
 TEST(P0RiskGridRuntimeTest, GnssEpochFreshnessCanBeOverridden) {
@@ -385,6 +397,44 @@ TEST(P0RiskGridRuntimeTest, P5_3FixtureParamsCanBeOverridden) {
   EXPECT_DOUBLE_EQ(fixture.tau_max_s, 2.0);
   EXPECT_DOUBLE_EQ(fixture.hpl_pred_m, 10.2);
   EXPECT_DOUBLE_EQ(fixture.vpl_pred_m, 10.2);
+}
+
+TEST(P0RiskGridRuntimeTest, P5_4FixtureParamsCanBeOverridden) {
+  ensure_rclcpp();
+  rclcpp::NodeOptions options;
+  options.allow_undeclared_parameters(false);
+  options.parameter_overrides({
+      rclcpp::Parameter("p5_4.fixture.enabled", true),
+      rclcpp::Parameter("p5_4.fixture.name", "near_risk_zone_v1"),
+      rclcpp::Parameter("p5_4.fixture.x_min", -12.0),
+      rclcpp::Parameter("p5_4.fixture.x_max", -11.0),
+      rclcpp::Parameter("p5_4.fixture.y_min", -1.0),
+      rclcpp::Parameter("p5_4.fixture.y_max", 1.0),
+      rclcpp::Parameter("p5_4.fixture.z_min", 0.8),
+      rclcpp::Parameter("p5_4.fixture.z_max", 1.6),
+      rclcpp::Parameter("p5_4.fixture.tau_min", 0.55),
+      rclcpp::Parameter("p5_4.fixture.tau_max", 0.98),
+      rclcpp::Parameter("p5_4.fixture.hpl_pred_m", 10.3),
+      rclcpp::Parameter("p5_4.fixture.vpl_pred_m", 10.4),
+  });
+  auto node = std::make_shared<rclcpp::Node>(
+      "p5_4_fixture_params_override_test", options);
+
+  const auto config = ego_planner::P0RiskGridRuntime::declareAndReadConfig(node);
+  const auto& fixture = config.grid.p5_4_fixture;
+
+  EXPECT_TRUE(fixture.enabled);
+  EXPECT_EQ(fixture.name, "near_risk_zone_v1");
+  EXPECT_DOUBLE_EQ(fixture.x_min_m, -12.0);
+  EXPECT_DOUBLE_EQ(fixture.x_max_m, -11.0);
+  EXPECT_DOUBLE_EQ(fixture.y_min_m, -1.0);
+  EXPECT_DOUBLE_EQ(fixture.y_max_m, 1.0);
+  EXPECT_DOUBLE_EQ(fixture.z_min_m, 0.8);
+  EXPECT_DOUBLE_EQ(fixture.z_max_m, 1.6);
+  EXPECT_DOUBLE_EQ(fixture.tau_min_s, 0.55);
+  EXPECT_DOUBLE_EQ(fixture.tau_max_s, 0.98);
+  EXPECT_DOUBLE_EQ(fixture.hpl_pred_m, 10.3);
+  EXPECT_DOUBLE_EQ(fixture.vpl_pred_m, 10.4);
 }
 
 TEST(P0RiskGridRuntimeTest, InvalidPredictorSourceModeThrows) {

@@ -3579,3 +3579,123 @@ Verification notes:
 Final conclusion:
 
 PASS -> P5-4
+
+### P5-4 Near-Risk Emergency Candidate
+
+Capability audit:
+
+| Capability | Result |
+|---|---|
+| Deterministic P5-4 near-risk injection | `PASS`: added explicit `p5_4.fixture.enabled:=true` fixture `near_risk_zone_v1` with reason `p5_4_near_risk_zone`. |
+| Default-disabled policy | `PASS`: P5-4 fixture is disabled unless the launch arg is set explicitly. |
+| P5-3 isolation | `PASS`: existing P5-3 fixture, acceptance, and `PASS -> P5-4` report section remain unchanged. |
+| Manifest coverage | `PASS`: flat and nested `p5_4.fixture.*` keys are recorded. |
+| Analyzer support | `PASS`: `--experiment-id P5-4` enforces fixture, topic, P0 health, query alignment, emergency-candidate, cause-exclusion, and required-figure gates. |
+
+Formal launch:
+
+```bash
+ros2 launch iap test_planner.launch.py \
+  experiment:=p5_corridor \
+  scenario:=manual \
+  run_duration_s:=90 \
+  validation_duration_s:=90 \
+  start_rviz:=false \
+  run_validator:=true \
+  record_bag:=true \
+  p5.future_emergency_margin_m:=0.0 \
+  p5_4.fixture.enabled:=true
+```
+
+Analyzer:
+
+```bash
+python3 scripts/dev_planner/analyze_safety_planner_run.py \
+  --experiment-id P5-4 \
+  --export-dir results/planner_validation/exports/test_planner_p5_corridor_manual_1783944969336 \
+  --bag-dir results/planner_validation/bags/test_planner_p5_corridor_manual_20260713T121609Z \
+  --fail-on-threshold
+```
+
+Latest artifacts:
+
+| Artifact | Path |
+|---|---|
+| Export | `results/planner_validation/exports/test_planner_p5_corridor_manual_1783944969336` |
+| Bag | `results/planner_validation/bags/test_planner_p5_corridor_manual_20260713T121609Z` |
+| Analyzer summary | `results/planner_validation/exports/test_planner_p5_corridor_manual_1783944969336/metadata/safety_planner_analysis_summary.json` |
+| Analyzer status | `PASS`: `passed=true`, `failures=[]`, `inconclusive=[]`, `next_debug_branch=PASS -> P5-5` |
+
+P5-4 fixture manifest:
+
+| Field | Value |
+|---|---|
+| Name / reason | `near_risk_zone_v1` / `p5_4_near_risk_zone` |
+| Bounds | `x=[-11.7,-11.1]`, `y=[-0.75,0.75]`, `z=[1.0,1.35]` |
+| Tau window | `[0.6,0.95]s` |
+| Injected PL | `hpl/vpl=10.2/10.2m` |
+| Expected AL / IM | `hal=10.0m`, `val=10.0m`, `expected_im=-0.2m` |
+| Emergency horizon | `expected_first_bad_tau=0.6s <= expected_emergency_time_s=1.0s` |
+
+P5-4 gate table:
+
+| Gate | Result |
+|---|---|
+| Validator | `PASS`: validator summary `passed=true`, `message_count=883`. |
+| Required P5 topics | `PASS`: all required non-planner-dependent P0/P5 topics stable; `/drone_0_planning/bspline` is `planner-dependent` and absent under emergency stop. |
+| P0 health after startup | `PASS`: `ready=false`, `stale=true`, and full-unknown post-startup counts are all `0`. |
+| Fixture ready | `PASS`: manifest present, enabled, name matched, geometry valid. |
+| Fixture entered | `PASS`: `future_fixture_sample_count=1246`. |
+| Query-aligned injected PL | `PASS`: `future_query_aligned_sample_count=1246`, mismatch count `0`. |
+| Future bad linkage | `PASS`: `future_bad_fixture_sample_count=1246`, `future_bad_fixture_linked_count=1246`. |
+| Emergency candidate anchor | `PASS`: anchor status row `130` is raw and effective `REQUEST_EMERGENCY_STOP_CANDIDATE`. |
+| Same-row fixture evidence | `PASS`: anchor row has `2` same-row query-aligned fixture samples. |
+| Emergency time | `PASS`: anchor `first_bad_tau=0.6s <= emergency_time_s=1.0s`. |
+| Event window | `PASS`: `623` status rows, `2700` sample rows, duration `74.996607s`. |
+| Predicted AL availability | `PASS`: finite predicted AL minima were present. |
+
+Contamination and cause-exclusion diagnostics:
+
+| Diagnostic | Result |
+|---|---|
+| Startup/snapshot emergency cause | `PASS`: no excluded emergency rows with startup or `snapshot_unavailable` cause. |
+| Current-only low-margin emergency cause | `PASS`: no excluded emergency rows with current-only low-margin cause. |
+| Unknown-only emergency cause | `PASS`: no excluded emergency rows with unknown-only cause. |
+| Final-gate-failed emergency cause | `PASS`: no excluded emergency rows with explicit `final_gate_failed` cause. Final-phase future-bad bookkeeping is present and accepted only when the cause remains future-risk. |
+| Unexplained emergency storm | `PASS`: `max_consecutive_unexplained_emergency=0`. |
+| Active topic gap | `PASS`: active fixture window continuous topics stable; max gaps `/iap/integrity=0.118018s`, `/drone_0_visual_slam/odom=0.118019s`, `/sim/drone_0/lidar_body=0.199989s`. |
+| Trajectory timing | `PASS`: `trajectory_timing_failure_count=0`. |
+
+Required P5-4 figure conclusions:
+
+| Figure filename | Conclusion |
+|---|---|
+| `p5_4_scenario_topdown.png` | Generated; confirms the formal corridor/manual scenario and route context. |
+| `p5_4_near_risk_overlay.png` | Generated; shows trajectory samples overlapping the P5-4 near-risk fixture bounds. |
+| `p5_4_tau_emergency_window.png` | Generated; shows accepted fixture samples inside the `[0.6,0.95]s` tau window. |
+| `p5_4_pl_probe.png` | Generated; confirms fixture-window samples received injected `hpl/vpl=10.2/10.2`. |
+| `p5_4_margin_timeline.png` | Generated; shows the near-risk future margin reaches the expected `-0.2m`. |
+| `p5_4_action_reason_timeline.png` | Generated; ties emergency-candidate rows to future-risk attribution. |
+| `p5_4_replan_vs_emergency.png` | Generated; shows startup replans followed by the accepted emergency-candidate window. |
+| `p5_4_sample_heatmap.png` | Generated; localizes the accepted sample evidence in the spatial/tau fixture band. |
+| `p5_4_topic_gap.png` | Generated; shows required continuous topics stay within active-window gap limits. |
+| `p5_4_p0_health.png` | Generated; shows P0/risk-grid health remains ready, non-stale, and not full-unknown after startup. |
+| `p5_4_final_gate_summary.png` | Generated; distinguishes final-candidate future-risk bookkeeping from explicit `final_gate_failed` cause. |
+| `p5_4_trajectory_integrity_samples.png` | Generated; provides marker-level trajectory integrity sample evidence. |
+
+Verification notes:
+
+| Check | Result |
+|---|---|
+| Python compile check | `PASS`: `python3 -m py_compile launch/test_planner.launch.py scripts/dev_planner/analyze_safety_planner_run.py`. |
+| Focused analyzer tests | `PASS`: `python3 test/test_analyze_safety_planner_run_p5_1.py` ran `58` tests. |
+| Focused P0/P5 ego-planner CTests | `PASS`: `ctest --test-dir build/ego_planner -R "test_p5_runtime_integrity_gate|test_p0_risk_grid_runtime" --output-on-failure`. |
+| Focused predictor/risk-grid CTests | `PASS`: `ctest --test-dir build/iap -R "test_predictor_module|test_risk_grid_map" --output-on-failure`. |
+| Rebuild before formal run | `PASS`: `colcon build --packages-select iap` and `cmake --build build/ego_planner --target ego_planner_node test_p0_risk_grid_runtime test_p5_runtime_integrity_gate`. |
+| Formal launch | `PASS`: completed and wrote the export/bag artifacts above; shutdown emitted known ROS SIGINT teardown process-death logs after recording stopped. |
+| P5-4 analyzer with `--fail-on-threshold` | `PASS`: exit `0`, `status=PASS`, `next_debug_branch=PASS -> P5-5`. |
+| Diff whitespace check | `PASS`: `git diff --check`. |
+
+Final conclusion:
+
+PASS -> P5-5
