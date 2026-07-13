@@ -734,6 +734,76 @@ TEST(P5RuntimeIntegrityGateTest, NominalFinalGateKeepsFailureCountZero) {
   }
 }
 
+TEST(P5RuntimeIntegrityGateTest, FutureSamplesCarryTrajectoryTiming) {
+  auto config = baseConfig();
+  config.horizon_s = 1.0;
+  config.sample_dt_s = 0.25;
+  config.current_stale_to_replan_s = 100.0;
+  config.current_stale_to_emergency_s = 100.0;
+  ego_planner::P5RuntimeIntegrityGate gate(nullptr, config, false);
+  gate.setCurrentIntegrityForTest(integrityMsg(0.0, 1.0, 1.0, 10.0, 10.0));
+
+  auto traj = makeTrajectory(3.0);
+  const auto status = gate.evaluateRuntime(traj, makeSnapshot(1.0, 1.0),
+                                           0.0, 1.0);
+
+  ASSERT_GE(status.viz_samples.size(), 5u);
+  EXPECT_NEAR(status.viz_samples.front().trajectory_start_time_s, 0.0,
+              1.0e-9);
+  EXPECT_NEAR(status.viz_samples.front().trajectory_duration_s, 3.0,
+              1.0e-9);
+  EXPECT_NEAR(status.viz_samples.front().trajectory_t_cur_s, 0.0,
+              1.0e-9);
+  EXPECT_NEAR(status.viz_samples.front().trajectory_t_end_s, 1.0,
+              1.0e-9);
+  EXPECT_NEAR(status.viz_samples.front().trajectory_time_remaining_s, 3.0,
+              1.0e-9);
+  EXPECT_NEAR(status.viz_samples.front().sample_dt_s, 0.25, 1.0e-9);
+  EXPECT_NEAR(status.viz_samples.front().horizon_s, 1.0, 1.0e-9);
+  EXPECT_EQ(status.viz_samples.front().trajectory_sample_source,
+            "runtime_committed");
+
+  const auto final_status = gate.evaluateFinal(traj, makeSnapshot(1.0, 1.0),
+                                               0.0, 1.0);
+  ASSERT_FALSE(final_status.viz_samples.empty());
+  EXPECT_EQ(final_status.viz_samples.front().trajectory_sample_source,
+            "final_candidate");
+}
+
+TEST(P5RuntimeIntegrityGateTest, NoFutureTrajectoryWindowIsDiagnosticUnknown) {
+  auto config = baseConfig();
+  config.current_stale_to_replan_s = 100.0;
+  config.current_stale_to_emergency_s = 100.0;
+  ego_planner::P5RuntimeIntegrityGate gate(nullptr, config, false);
+
+  gate.setCurrentIntegrityForTest(integrityMsg(0.0, 1.0, 1.0, 10.0, 10.0));
+  auto zero_duration = makeTrajectory(0.0);
+  const auto zero_status = gate.evaluateRuntime(
+      zero_duration, makeSnapshot(1.0, 1.0), 0.0, 1.0);
+  ASSERT_EQ(zero_status.viz_samples.size(), 1u);
+  EXPECT_EQ(zero_status.action, ego_planner::P5GateAction::REQUEST_REPLAN);
+  EXPECT_EQ(zero_status.reason, ego_planner::P5GateReason::FUTURE_UNKNOWN);
+  EXPECT_TRUE(zero_status.viz_samples.front().unknown);
+  EXPECT_EQ(zero_status.viz_samples.front().reason,
+            "trajectory_zero_duration");
+  EXPECT_NEAR(zero_status.viz_samples.front().trajectory_time_remaining_s,
+              0.0, 1.0e-9);
+
+  gate.setCurrentIntegrityForTest(integrityMsg(2.0, 1.0, 1.0, 10.0, 10.0));
+  auto expired = makeTrajectory(1.0);
+  const auto expired_status = gate.evaluateRuntime(
+      expired, makeSnapshot(1.0, 1.0), 2.0, 1.0);
+  ASSERT_EQ(expired_status.viz_samples.size(), 1u);
+  EXPECT_EQ(expired_status.action, ego_planner::P5GateAction::REQUEST_REPLAN);
+  EXPECT_TRUE(expired_status.viz_samples.front().unknown);
+  EXPECT_EQ(expired_status.viz_samples.front().reason,
+            "trajectory_expired");
+  EXPECT_NEAR(expired_status.viz_samples.front().trajectory_t_cur_s, 1.0,
+              1.0e-9);
+  EXPECT_NEAR(expired_status.viz_samples.front().trajectory_t_end_s, 1.0,
+              1.0e-9);
+}
+
 TEST(P5RuntimeIntegrityGateTest, PublishedStatusJsonIncludesSampleDiagnostics) {
   ensure_rclcpp();
   auto node = std::make_shared<rclcpp::Node>(
@@ -769,6 +839,16 @@ TEST(P5RuntimeIntegrityGateTest, PublishedStatusJsonIncludesSampleDiagnostics) {
   EXPECT_NE(payload.find("\"samples\":["), std::string::npos);
   EXPECT_NE(payload.find("\"tau_s\":"), std::string::npos);
   EXPECT_NE(payload.find("\"query_tau_s\":"), std::string::npos);
+  EXPECT_NE(payload.find("\"trajectory_start_time_s\":"), std::string::npos);
+  EXPECT_NE(payload.find("\"trajectory_duration_s\":"), std::string::npos);
+  EXPECT_NE(payload.find("\"trajectory_t_cur_s\":"), std::string::npos);
+  EXPECT_NE(payload.find("\"trajectory_t_end_s\":"), std::string::npos);
+  EXPECT_NE(payload.find("\"trajectory_time_remaining_s\":"),
+            std::string::npos);
+  EXPECT_NE(payload.find("\"sample_dt_s\":"), std::string::npos);
+  EXPECT_NE(payload.find("\"horizon_s\":"), std::string::npos);
+  EXPECT_NE(payload.find("\"trajectory_sample_source\":\"runtime_committed\""),
+            std::string::npos);
   EXPECT_NE(payload.find("\"fixture_match\":"), std::string::npos);
   EXPECT_NE(payload.find("\"fixture_expected_hpl\":"), std::string::npos);
   EXPECT_NE(payload.find("\"fixture_expected_vpl\":"), std::string::npos);

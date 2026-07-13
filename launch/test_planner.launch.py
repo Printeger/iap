@@ -196,6 +196,30 @@ P0_6_OCCUPIED_OVERLAP_FIXTURE_PRESET = {
 
 COMBO_PRESETS = {
     ("p0_open_sky", "manual"): P0_6_OCCUPIED_OVERLAP_FIXTURE_PRESET,
+    ("p5_corridor", "manual"): {
+        **DEFAULT_ROUTE_PRESET,
+        **CORRIDOR_DEGENERATE_MAP_PRESET,
+        **GNSS_OPEN_SKY_PRESET,
+        "planner_start_delay_s": "10.0",
+        "use_gnss": "true",
+        "use_araim": "true",
+        "gnss_time_source": "odom_stamp",
+        "enable_gnss_integrity": "true",
+        "enable_gnss_araim": "true",
+        "enable_lidar_integrity": "false",
+        "integrity_fusion_mode": "gnss_only",
+        "validator_require_gnss_valid": "true",
+        "validator_require_lidar_valid": "false",
+        "validator_required_final_source": "GNSS",
+        "p0.enable_risk_grid": "true",
+        "p0.debug_metrics_enable": "true",
+        "p0.predictor.source_mode": "fusion",
+        "p0.predictor.gnss_epoch_policy": "auto",
+        "p0.predictor.use_current_integrity_prior": "true",
+        "p0.predictor.conservative_max_with_gnss": "false",
+        "p5.debug_metrics_enable": "true",
+        "p5.pred_alert_limit_mode": "current_msg_constant",
+    },
 }
 
 

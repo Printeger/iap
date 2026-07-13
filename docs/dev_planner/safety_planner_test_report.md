@@ -3440,3 +3440,75 @@ Verification notes:
 Final conclusion:
 
 FAIL -> 继续 debug P5-3 query alignment / PL-AL margin
+
+### P5-3 Future Sampling Query Alignment Debug/Rerun
+
+This rerun keeps the P5-3 fixture fixed at `x=[-10.8,-8.7]`, `y=[-0.75,0.75]`, `z=[1.0,1.35]`, and `query_tau_s=[1.2,2.0]`. The launch path now has a P5-3-specific `p5_corridor/manual` preset that follows the default `(-12,0,1.2)` to `(12,0,1.2)` route through the fixed fixture, uses corridor-degenerate geometry with stable open-sky/current-integrity inputs, and delays planner start long enough for P0/risk-grid readiness. P5 status samples now include trajectory timing/source diagnostics so final-gate candidate evidence can be distinguished from committed runtime trajectory evidence.
+
+Rerun artifacts:
+
+| Artifact | Path |
+|---|---|
+| Export | `results/planner_validation/exports/test_planner_p5_corridor_manual_1783915672492` |
+| Bag | `results/planner_validation/bags/test_planner_p5_corridor_manual_20260713T040752Z` |
+| Analyzer summary | `results/planner_validation/exports/test_planner_p5_corridor_manual_1783915672492/metadata/safety_planner_analysis_summary.json` |
+
+Future-sampling gates:
+
+| Gate | Result |
+|---|---|
+| Fixture manifest | `PASS`: fixed `future_high_risk_zone_v1` fixture remained enabled with injected `hpl/vpl=10.2/10.2`. |
+| Validator | `PASS`: validator summary passed for the rerun. |
+| Required active topics | `PASS`: required P5 topics were stable during the active evidence window. |
+| Current sample outside fixture | `FAIL`: `current_sample_outside_fixture=false`, with `current_inside_fixture_count=2`. |
+| Current sample not fixture-bad | `FAIL`: `current_fixture_bad_count=2`, so current/tau=0 samples still entered high-risk fixture evidence. |
+| Future fixture entry | `PASS`: `future_fixture_sample_count=24`, `future_bad_fixture_sample_count=24`. |
+| Future query alignment | `PASS`: `future_query_aligned_sample_count=24`, `future_query_mismatch_sample_count=0`, and fixture samples carried `hpl/vpl=10.2`. |
+| Sample source proof | `PASS`: `final_candidate_future_query_aligned_sample_count=20`, `runtime_committed_future_query_aligned_sample_count=4`; both sources produced fixed-fixture future evidence. |
+| Zero-bspline exception | `N/A`: `/drone_0_planning/bspline` count was `10`, so the final-gate-only zero-bspline exception was not needed. |
+| PL/AL margin | `PASS`: `future_min_im_min=-0.2`, so future fixture evidence crossed the PL-AL margin. |
+| First bad tau | `FAIL`: `first_bad_tau_min=0.0`, outside the required fixture tau window `[1.2s,2.0s]`. |
+| Replan attribution | `PASS`: future fixture evidence was linked to `future_bad/p5_3_high_risk_zone` replans. |
+| Emergency storm | `FAIL`: `max_consecutive_emergency=3`, `raw_max_consecutive_emergency=3`. |
+| Trajectory timing diagnostics | `WARN`: `trajectory_timing_failure_count=1`, while valid future samples still existed from final-gate and runtime sources. |
+| Analyzer status | `FAIL`: `next_debug_branch=FAIL -> 继续 debug P5-3 query alignment / PL-AL margin`. |
+
+Timing/source diagnostics added to P5 sample CSVs and summary evidence:
+
+| Field family | Purpose |
+|---|---|
+| `trajectory_start_time_s`, `trajectory_duration_s` | Identify the trajectory time base and detect zero-duration candidates. |
+| `trajectory_t_cur_s`, `trajectory_t_end_s`, `trajectory_time_remaining_s` | Prove the sampled future window was available and bounded by the horizon. |
+| `sample_dt_s`, `horizon_s` | Show the sample cadence and configured future horizon used by the gate. |
+| `trajectory_sample_source` | Separates `final_candidate` samples from `runtime_committed` samples for zero-bspline and final-gate analysis. |
+
+Future-sampling figure conclusions:
+
+| Figure filename | Conclusion |
+|---|---|
+| `p5_3_future_sampling_scenario_topdown.png` | Generated; confirms the P5-3 corridor/manual rerun crossed the fixed fixture geometry. |
+| `p5_3_future_sampling_fixture_overlay.png` | Generated; shows sampled trajectory evidence entering the high-risk fixture. |
+| `p5_3_future_sampling_pl_probe.png` | Generated; confirms fixture-window future samples received injected `10.2/10.2` PL. |
+| `p5_3_future_sampling_tau_window.png` | Generated; shows future fixture samples in the configured tau window, even though earliest bad tau remained `0.0`. |
+| `p5_3_future_sampling_margin_timeline.png` | Generated; shows negative future PL-AL margin evidence. |
+| `p5_3_future_sampling_action_reason.png` | Generated; links replan actions to future high-risk-zone evidence. |
+| `p5_3_future_sampling_sample_heatmap.png` | Generated; places final-candidate and runtime samples in the fixture/tau heatmap. |
+| `p5_3_future_sampling_topic_gap.png` | Generated; active evidence-window topic health stayed stable. |
+| `p5_3_future_sampling_p0_health.png` | Generated; P0/risk-grid readiness was not the limiting failure for this rerun. |
+
+Verification notes:
+
+| Check | Result |
+|---|---|
+| Python compile check | `PASS`: `python3 -m py_compile launch/test_planner.launch.py scripts/dev_planner/analyze_safety_planner_run.py`. |
+| Focused analyzer tests | `PASS`: `python3 test/test_analyze_safety_planner_run_p5_1.py`. |
+| Focused P0/P5 ego-planner CTests | `PASS`: `ctest --test-dir build/ego_planner -R "test_p5_runtime_integrity_gate\|test_p0_risk_grid_runtime" --output-on-failure`. |
+| Focused predictor/risk-grid CTests | `PASS`: `ctest --test-dir build/iap -R "test_predictor_module\|test_risk_grid_map" --output-on-failure`. |
+| Rebuild | `PASS`: `colcon build --base-paths src/iap src/iap/src/iap/planner/plan_manage --packages-select iap ego_planner --cmake-args -DCMAKE_BUILD_TYPE=RelWithDebInfo`; `ego_planner` emitted existing third-party/deprecation warnings only. |
+| P5-3 launch | `PASS`: completed with `experiment:=p5_corridor`, `scenario:=manual`, `p5.pred_alert_limit_mode:=current_msg_constant`, and `p5_3.fixture.enabled:=true`; shutdown still emitted known ROS teardown process-death logs after recording stopped. |
+| P5-3 analyzer with `--fail-on-threshold` | `FAIL`: exit `2`, `status=FAIL`, with the four remaining failures listed above. |
+| Diff whitespace check | `PASS`: `git diff --check`. |
+
+Final conclusion:
+
+FAIL -> 继续 debug P5-3 future sampling / query alignment / PL-AL margin

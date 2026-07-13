@@ -74,6 +74,20 @@ std::string jsonTrajectorySamples(
     oss << "{"
         << "\"tau_s\":" << jsonNumber(sample.tau_s)
         << ",\"query_tau_s\":" << jsonNumber(sample.query_tau_s)
+        << ",\"trajectory_start_time_s\":"
+        << jsonNumber(sample.trajectory_start_time_s)
+        << ",\"trajectory_duration_s\":"
+        << jsonNumber(sample.trajectory_duration_s)
+        << ",\"trajectory_t_cur_s\":"
+        << jsonNumber(sample.trajectory_t_cur_s)
+        << ",\"trajectory_t_end_s\":"
+        << jsonNumber(sample.trajectory_t_end_s)
+        << ",\"trajectory_time_remaining_s\":"
+        << jsonNumber(sample.trajectory_time_remaining_s)
+        << ",\"sample_dt_s\":" << jsonNumber(sample.sample_dt_s)
+        << ",\"horizon_s\":" << jsonNumber(sample.horizon_s)
+        << ",\"trajectory_sample_source\":"
+        << jsonString(sample.trajectory_sample_source)
         << ",\"x\":" << jsonNumber(sample.position.x())
         << ",\"y\":" << jsonNumber(sample.position.y())
         << ",\"z\":" << jsonNumber(sample.position.z())
@@ -784,16 +798,56 @@ P5GateStatus P5RuntimeIntegrityGate::evaluateFutureGate(
   status.field_age_s = finite(health.age_s) ? health.age_s
                                             : context.now_s - snapshot->stamp_s();
 
+  const double trajectory_start_time_s = local_data.start_time_.seconds();
   const double duration = std::max(0.0, local_data.duration_);
-  double t_cur = context.now_s - local_data.start_time_.seconds();
+  double t_cur = context.now_s - trajectory_start_time_s;
   t_cur = std::clamp(t_cur, 0.0, duration);
   const double t_end = std::min(duration, t_cur + config_.horizon_s);
   const double dt = std::max(0.01, config_.sample_dt_s);
+  const double time_remaining = std::max(0.0, duration - t_cur);
+  const std::string sample_source =
+      context.final_gate ? "final_candidate" : "runtime_committed";
 
-  for (double t = t_cur; t <= t_end + 1.0e-9; t += dt) {
+  auto fill_timing = [&](SafetyVizTrajectorySample* sample) {
+    if (!sample) {
+      return;
+    }
+    sample->trajectory_start_time_s = trajectory_start_time_s;
+    sample->trajectory_duration_s = duration;
+    sample->trajectory_t_cur_s = t_cur;
+    sample->trajectory_t_end_s = t_end;
+    sample->trajectory_time_remaining_s = time_remaining;
+    sample->sample_dt_s = dt;
+    sample->horizon_s = config_.horizon_s;
+    sample->trajectory_sample_source = sample_source;
+  };
+
+  bool emitted_trajectory_timing_failure = false;
+  if (duration <= 1.0e-9 || time_remaining <= 1.0e-9 ||
+      t_end <= t_cur + 1.0e-9) {
+    SafetyVizTrajectorySample viz_sample;
+    fill_timing(&viz_sample);
+    viz_sample.tau_s = 0.0;
+    viz_sample.query_tau_s = 0.0;
+    viz_sample.position = local_data.position_traj_.evaluateDeBoorT(t_cur);
+    viz_sample.unknown = true;
+    viz_sample.reason =
+        duration <= 1.0e-9 ? "trajectory_zero_duration"
+                           : "trajectory_expired";
+    status.sample_count = 1;
+    status.unknown_count = 1;
+    status.unknown_ratio = 1.0;
+    status.viz_samples.push_back(viz_sample);
+    emitted_trajectory_timing_failure = true;
+  }
+
+  for (double t = t_cur;
+       !emitted_trajectory_timing_failure && t <= t_end + 1.0e-9;
+       t += dt) {
     const double tau = std::max(0.0, t - t_cur);
     const Eigen::Vector3d p = local_data.position_traj_.evaluateDeBoorT(t);
     SafetyVizTrajectorySample viz_sample;
+    fill_timing(&viz_sample);
     viz_sample.position = p;
     viz_sample.tau_s = tau;
     iap::PredictedPLSample pl;

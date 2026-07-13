@@ -19,6 +19,15 @@ struct SafetyVizTrajectorySample {
   Eigen::Vector3d position = Eigen::Vector3d::Zero();
   double tau_s = 0.0;
   double query_tau_s = std::numeric_limits<double>::quiet_NaN();
+  double trajectory_start_time_s = std::numeric_limits<double>::quiet_NaN();
+  double trajectory_duration_s = std::numeric_limits<double>::quiet_NaN();
+  double trajectory_t_cur_s = std::numeric_limits<double>::quiet_NaN();
+  double trajectory_t_end_s = std::numeric_limits<double>::quiet_NaN();
+  double trajectory_time_remaining_s =
+      std::numeric_limits<double>::quiet_NaN();
+  double sample_dt_s = std::numeric_limits<double>::quiet_NaN();
+  double horizon_s = std::numeric_limits<double>::quiet_NaN();
+  std::string trajectory_sample_source = "runtime_committed";
   double hpl = std::numeric_limits<double>::quiet_NaN();
   double vpl = std::numeric_limits<double>::quiet_NaN();
   double hal = std::numeric_limits<double>::quiet_NaN();

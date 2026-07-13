@@ -130,6 +130,17 @@ P5_3_QUERY_ALIGNMENT_FIGURE_FILENAMES = [
     "p5_3_query_alignment_topic_gap.png",
     "p5_3_query_alignment_p0_health.png",
 ]
+P5_3_FUTURE_SAMPLING_FIGURE_FILENAMES = [
+    "p5_3_future_sampling_scenario_topdown.png",
+    "p5_3_future_sampling_fixture_overlay.png",
+    "p5_3_future_sampling_pl_probe.png",
+    "p5_3_future_sampling_tau_window.png",
+    "p5_3_future_sampling_margin_timeline.png",
+    "p5_3_future_sampling_action_reason.png",
+    "p5_3_future_sampling_sample_heatmap.png",
+    "p5_3_future_sampling_topic_gap.png",
+    "p5_3_future_sampling_p0_health.png",
+]
 P5_STATUS_FIELDS = [
     "bag_time_s",
     "phase",
@@ -180,6 +191,14 @@ P5_SAMPLE_FIELDS = [
     "active_reasons",
     "tau_s",
     "query_tau_s",
+    "trajectory_start_time_s",
+    "trajectory_duration_s",
+    "trajectory_t_cur_s",
+    "trajectory_t_end_s",
+    "trajectory_time_remaining_s",
+    "sample_dt_s",
+    "horizon_s",
+    "trajectory_sample_source",
     "fixture_match",
     "fixture_expected_hpl",
     "fixture_expected_vpl",
@@ -223,6 +242,14 @@ P5_3_QUERY_ALIGNMENT_FIELDS = [
     "active_reasons",
     "tau_s",
     "query_tau_s",
+    "trajectory_start_time_s",
+    "trajectory_duration_s",
+    "trajectory_t_cur_s",
+    "trajectory_t_end_s",
+    "trajectory_time_remaining_s",
+    "sample_dt_s",
+    "horizon_s",
+    "trajectory_sample_source",
     "fixture_match",
     "fixture_expected_hpl",
     "fixture_expected_vpl",
@@ -5311,6 +5338,18 @@ def p5_3_sample_list(row: dict[str, Any]) -> list[dict[str, Any]]:
     return []
 
 
+def p5_3_sample_source(sample: dict[str, Any], status_row: dict[str, Any]) -> str:
+    source = str(sample.get("trajectory_sample_source", "")).strip()
+    if source:
+        return source
+    phase = str(status_row.get("phase", "")).strip().lower()
+    if phase == "final":
+        return "final_candidate"
+    if phase == "runtime":
+        return "runtime_committed"
+    return ""
+
+
 def p5_3_sample_rows(
     p5_rows: list[dict[str, Any]],
     fixture: dict[str, Any],
@@ -5331,6 +5370,16 @@ def p5_3_sample_rows(
                 "active_reasons": status_row.get("active_reasons", ""),
                 "tau_s": sample.get("tau_s", ""),
                 "query_tau_s": sample.get("query_tau_s", ""),
+                "trajectory_start_time_s": sample.get("trajectory_start_time_s", ""),
+                "trajectory_duration_s": sample.get("trajectory_duration_s", ""),
+                "trajectory_t_cur_s": sample.get("trajectory_t_cur_s", ""),
+                "trajectory_t_end_s": sample.get("trajectory_t_end_s", ""),
+                "trajectory_time_remaining_s": sample.get(
+                    "trajectory_time_remaining_s", ""
+                ),
+                "sample_dt_s": sample.get("sample_dt_s", ""),
+                "horizon_s": sample.get("horizon_s", ""),
+                "trajectory_sample_source": p5_3_sample_source(sample, status_row),
                 "fixture_match": 1 if manifest_bool(sample.get("fixture_match")) else 0,
                 "fixture_expected_hpl": sample.get("fixture_expected_hpl", ""),
                 "fixture_expected_vpl": sample.get("fixture_expected_vpl", ""),
@@ -5475,6 +5524,42 @@ def summarize_p5_3_samples(rows: list[dict[str, Any]]) -> dict[str, Any]:
     linked_rows = [
         row for row in future_bad_fixture_rows if p5_3_sample_reason_is_fixture_linked(row)
     ]
+    final_candidate_future_fixture_rows = [
+        row
+        for row in future_fixture_rows
+        if str(row.get("trajectory_sample_source", "")) == "final_candidate"
+    ]
+    runtime_committed_future_fixture_rows = [
+        row
+        for row in future_fixture_rows
+        if str(row.get("trajectory_sample_source", "")) == "runtime_committed"
+    ]
+    final_candidate_query_aligned_rows = [
+        row
+        for row in final_candidate_future_fixture_rows
+        if int(row.get("query_alignment_ok", 0) or 0)
+    ]
+    runtime_committed_query_aligned_rows = [
+        row
+        for row in runtime_committed_future_fixture_rows
+        if int(row.get("query_alignment_ok", 0) or 0)
+    ]
+    final_candidate_bad_linked_rows = [
+        row
+        for row in final_candidate_future_fixture_rows
+        if int(row.get("bad", 0) or 0) and p5_3_sample_reason_is_fixture_linked(row)
+    ]
+    runtime_committed_bad_linked_rows = [
+        row
+        for row in runtime_committed_future_fixture_rows
+        if int(row.get("bad", 0) or 0) and p5_3_sample_reason_is_fixture_linked(row)
+    ]
+    trajectory_timing_failure_rows = [
+        row
+        for row in rows
+        if str(row.get("reason", "")).strip()
+        in {"trajectory_zero_duration", "trajectory_expired"}
+    ]
     current_inside_rows = [
         row for row in current_rows if int(row.get("inside_high_risk_zone", 0) or 0)
     ]
@@ -5497,6 +5582,25 @@ def summarize_p5_3_samples(rows: list[dict[str, Any]]) -> dict[str, Any]:
         "future_bad_fixture_linked_count": len(linked_rows),
         "future_query_aligned_sample_count": len(future_query_aligned_rows),
         "future_query_mismatch_sample_count": len(future_query_mismatch_rows),
+        "final_candidate_future_fixture_sample_count": len(
+            final_candidate_future_fixture_rows
+        ),
+        "runtime_committed_future_fixture_sample_count": len(
+            runtime_committed_future_fixture_rows
+        ),
+        "final_candidate_future_query_aligned_sample_count": len(
+            final_candidate_query_aligned_rows
+        ),
+        "runtime_committed_future_query_aligned_sample_count": len(
+            runtime_committed_query_aligned_rows
+        ),
+        "final_candidate_future_bad_fixture_linked_count": len(
+            final_candidate_bad_linked_rows
+        ),
+        "runtime_committed_future_bad_fixture_linked_count": len(
+            runtime_committed_bad_linked_rows
+        ),
+        "trajectory_timing_failure_count": len(trajectory_timing_failure_rows),
         "first_current_sample": current_rows[0] if current_rows else None,
         "first_current_inside_fixture_sample": current_inside_rows[0]
         if current_inside_rows
@@ -5512,6 +5616,9 @@ def summarize_p5_3_samples(rows: list[dict[str, Any]]) -> dict[str, Any]:
         else None,
         "first_future_query_mismatch_sample": future_query_mismatch_rows[0]
         if future_query_mismatch_rows
+        else None,
+        "first_trajectory_timing_failure_sample": trajectory_timing_failure_rows[0]
+        if trajectory_timing_failure_rows
         else None,
     }
 
@@ -5757,11 +5864,66 @@ def validate_p5_3_hard_gates(
         topic_timestamps,
     )
     replan_sample_link_rows = p5_3_replan_rows_with_sample_link(sample_rows)
+    future_replan_reason_ok = len(future_replan_rows) > 0 or len(
+        replan_sample_link_rows
+    ) > 0
     future_min_im_min = finite_float(p5_summary.get("future_min_im_min"))
     future_replan_margin_m = finite_float(manifest.get("p5.future_replan_margin_m")) or 0.3
     max_bad_ratio = finite_float(manifest.get("p5.max_bad_ratio")) or 0.25
     bad_ratio_max = finite_float(p5_summary.get("bad_ratio_max")) or 0.0
     future_reason_rows = p5_3_future_reason_rows(p5_rows)
+    bspline_topic_health = topic_health.get("/drone_0_planning/bspline") or {}
+    bspline_count = int(bspline_topic_health.get("count", 0) or 0)
+    final_candidate_fixed_fixture_evidence = (
+        int(
+            sample_summary.get(
+                "final_candidate_future_fixture_sample_count", 0
+            )
+            or 0
+        )
+        > 0
+        and int(
+            sample_summary.get(
+                "final_candidate_future_query_aligned_sample_count", 0
+            )
+            or 0
+        )
+        > 0
+        and int(
+            sample_summary.get(
+                "final_candidate_future_bad_fixture_linked_count", 0
+            )
+            or 0
+        )
+        > 0
+    )
+    runtime_committed_fixed_fixture_evidence = (
+        int(
+            sample_summary.get(
+                "runtime_committed_future_fixture_sample_count", 0
+            )
+            or 0
+        )
+        > 0
+        and int(
+            sample_summary.get(
+                "runtime_committed_future_query_aligned_sample_count", 0
+            )
+            or 0
+        )
+        > 0
+        and int(
+            sample_summary.get(
+                "runtime_committed_future_bad_fixture_linked_count", 0
+            )
+            or 0
+        )
+        > 0
+    )
+    bspline_zero_acceptable = (
+        bspline_count > 0
+        or (final_candidate_fixed_fixture_evidence and future_replan_reason_ok)
+    )
     expected_im = finite_float(fixture.get("expected_im"))
     injected_pl_over_expected_al = (
         fixture.get("expected_hal") is not None
@@ -5825,6 +5987,14 @@ def validate_p5_3_hard_gates(
         "marker_rows_present": len(p5_marker_rows) > 0,
         "sample_rows_present": len(sample_rows) > 0,
         "sample_summary": sample_summary,
+        "bspline_count": bspline_count,
+        "bspline_zero_acceptable": bool(bspline_zero_acceptable),
+        "final_candidate_fixed_fixture_evidence": bool(
+            final_candidate_fixed_fixture_evidence
+        ),
+        "runtime_committed_fixed_fixture_evidence": bool(
+            runtime_committed_fixed_fixture_evidence
+        ),
         "current_sample_present": (
             int(sample_summary.get("current_sample_count", 0) or 0) > 0
         ),
@@ -5867,9 +6037,7 @@ def validate_p5_3_hard_gates(
         "future_replan_reason_count": len(future_replan_rows),
         "future_replan_sample_link_count": len(replan_sample_link_rows),
         "future_replan_sample_link_ok": len(replan_sample_link_rows) > 0,
-        "future_replan_reason_ok": (
-            len(future_replan_rows) > 0 or len(replan_sample_link_rows) > 0
-        ),
+        "future_replan_reason_ok": future_replan_reason_ok,
         "first_bad_tau_values": first_bad_tau_values[:20],
         "first_bad_tau_min": first_bad_tau_min,
         "first_bad_tau_in_fixture_window": first_bad_tau_in_window,
@@ -5950,11 +6118,25 @@ def validate_p5_3_hard_gates(
     if not gates["future_sample_inside_fixture"]:
         failures.append(
             "P5-3 scenario isolation / future-only fixture evidence: "
-            "no future trajectory sample entered the fixture tau/spatial window"
+            "no final-candidate or committed-runtime future trajectory sample "
+            "entered the fixture tau/spatial window"
+        )
+    if (
+        int(sample_summary.get("trajectory_timing_failure_count", 0) or 0) > 0
+        and not gates["future_sample_inside_fixture"]
+    ):
+        failures.append(
+            "P5-3 future sampling: trajectory timing diagnostics reported no "
+            "available future sampling window"
         )
     if not gates["future_bad_sample_inside_fixture"]:
         failures.append(
             "P5-3 PL/AL margin: future samples entered the fixture but did not become bad"
+        )
+    if not gates["bspline_zero_acceptable"]:
+        failures.append(
+            "P5-3 /drone_0_planning/bspline=0 without final-gate candidate "
+            "fixed-fixture future evidence and REQUEST_REPLAN attribution"
         )
     if gates["future_sample_inside_fixture"] and not gates["future_fixture_query_aligned"]:
         mismatch = sample_summary.get("first_future_query_mismatch_sample") or {}
@@ -6025,6 +6207,7 @@ def validate_p5_3_hard_gates(
         "future_bad_sample_inside_fixture",
         "future_bad_sample_linked",
         "future_fixture_query_aligned",
+        "bspline_zero_acceptable",
         "trajectory_overlap_present",
         "overlap_margin_evidence",
         "request_replan_present",
@@ -6565,6 +6748,9 @@ def analyze(args: argparse.Namespace) -> dict[str, Any]:
     p5_3_query_alignment_figure_paths = {
         name: figures_dir / name for name in P5_3_QUERY_ALIGNMENT_FIGURE_FILENAMES
     }
+    p5_3_future_sampling_figure_paths = {
+        name: figures_dir / name for name in P5_3_FUTURE_SAMPLING_FIGURE_FILENAMES
+    }
     p0_phase = is_p0_experiment(args)
     p0_4_phase = is_experiment(args, "P0-4")
     p0_phase_index = p0_phase_number(args.experiment_id)
@@ -7027,6 +7213,19 @@ def analyze(args: argparse.Namespace) -> dict[str, Any]:
                     ]
                 )
             )
+        if p5_3_phase and plot_p0_health_timeline(
+            health_rows,
+            p5_3_future_sampling_figure_paths[
+                "p5_3_future_sampling_p0_health.png"
+            ],
+        ):
+            p0_figure_artifacts.append(
+                str(
+                    p5_3_future_sampling_figure_paths[
+                        "p5_3_future_sampling_p0_health.png"
+                    ]
+                )
+            )
         if plot_p0_reason_histogram(health_rows, reason_figure_path):
             p0_figure_artifacts.append(str(reason_figure_path))
         if plot_p0_pl_cost_distribution(pl_cloud_rows, distribution_figure_path):
@@ -7202,6 +7401,19 @@ def analyze(args: argparse.Namespace) -> dict[str, Any]:
                 str(
                     p5_3_query_alignment_figure_paths[
                         "p5_3_query_alignment_scenario_topdown.png"
+                    ]
+                )
+            )
+        if p5_3_phase and plot_scenario_topdown(
+            scenario_data,
+            p5_3_future_sampling_figure_paths[
+                "p5_3_future_sampling_scenario_topdown.png"
+            ],
+        ):
+            figures.append(
+                str(
+                    p5_3_future_sampling_figure_paths[
+                        "p5_3_future_sampling_scenario_topdown.png"
                     ]
                 )
             )
@@ -7578,6 +7790,27 @@ def analyze(args: argparse.Namespace) -> dict[str, Any]:
         p5_3_query_topic_gap_path = p5_3_query_alignment_figure_paths[
             "p5_3_query_alignment_topic_gap.png"
         ]
+        p5_3_future_fixture_overlay_path = p5_3_future_sampling_figure_paths[
+            "p5_3_future_sampling_fixture_overlay.png"
+        ]
+        p5_3_future_pl_probe_path = p5_3_future_sampling_figure_paths[
+            "p5_3_future_sampling_pl_probe.png"
+        ]
+        p5_3_future_tau_window_path = p5_3_future_sampling_figure_paths[
+            "p5_3_future_sampling_tau_window.png"
+        ]
+        p5_3_future_margin_path = p5_3_future_sampling_figure_paths[
+            "p5_3_future_sampling_margin_timeline.png"
+        ]
+        p5_3_future_action_reason_path = p5_3_future_sampling_figure_paths[
+            "p5_3_future_sampling_action_reason.png"
+        ]
+        p5_3_future_heatmap_path = p5_3_future_sampling_figure_paths[
+            "p5_3_future_sampling_sample_heatmap.png"
+        ]
+        p5_3_future_topic_gap_path = p5_3_future_sampling_figure_paths[
+            "p5_3_future_sampling_topic_gap.png"
+        ]
         if plot_p5_action_timeline(p5_rows, p5_action_figure_path):
             p5_figure_artifacts.append(str(p5_action_figure_path))
         if plot_p5_status_timeline(p5_rows, p5_status_figure_path):
@@ -7588,6 +7821,8 @@ def analyze(args: argparse.Namespace) -> dict[str, Any]:
             p5_figure_artifacts.append(str(p5_3_plal_margin_path))
         if p5_3_phase and plot_p5_margin_timeline(p5_rows, p5_3_query_margin_path):
             p5_figure_artifacts.append(str(p5_3_query_margin_path))
+        if p5_3_phase and plot_p5_margin_timeline(p5_rows, p5_3_future_margin_path):
+            p5_figure_artifacts.append(str(p5_3_future_margin_path))
         if plot_p5_current_im_vs_action(p5_rows, p5_current_im_vs_action_figure_path):
             p5_figure_artifacts.append(str(p5_current_im_vs_action_figure_path))
         if plot_p5_debounce_timeline(p5_rows, p5_debounce_figure_path):
@@ -7631,12 +7866,24 @@ def analyze(args: argparse.Namespace) -> dict[str, Any]:
                 p5_3_query_fixture_overlay_path,
             ):
                 p5_figure_artifacts.append(str(p5_3_query_fixture_overlay_path))
+            if plot_p5_3_sample_high_risk_overlay(
+                p5_3_samples,
+                p5_3_gates.get("fixture", {}),
+                p5_3_future_fixture_overlay_path,
+            ):
+                p5_figure_artifacts.append(str(p5_3_future_fixture_overlay_path))
             if plot_p5_3_query_alignment_pl_probe(
                 p5_3_samples,
                 p5_3_gates.get("fixture", {}),
                 p5_3_query_pl_probe_path,
             ):
                 p5_figure_artifacts.append(str(p5_3_query_pl_probe_path))
+            if plot_p5_3_query_alignment_pl_probe(
+                p5_3_samples,
+                p5_3_gates.get("fixture", {}),
+                p5_3_future_pl_probe_path,
+            ):
+                p5_figure_artifacts.append(str(p5_3_future_pl_probe_path))
             if plot_p5_3_first_bad_tau_timeline(
                 p5_rows,
                 p5_3_gates.get("fixture", {}),
@@ -7661,6 +7908,15 @@ def analyze(args: argparse.Namespace) -> dict[str, Any]:
                 title="P5-3 query-alignment tau-window evidence",
             ):
                 p5_figure_artifacts.append(str(p5_3_query_tau_window_path))
+            if plot_p5_3_sample_tau_window(
+                p5_3_samples,
+                p5_rows,
+                p5_3_gates.get("fixture", {}),
+                p5_3_future_tau_window_path,
+                tau_field="query_tau_s",
+                title="P5-3 future-sampling query tau-window evidence",
+            ):
+                p5_figure_artifacts.append(str(p5_3_future_tau_window_path))
             if plot_p5_3_reason_timeline(p5_rows, p5_3_reason_figure_path):
                 p5_figure_artifacts.append(str(p5_3_reason_figure_path))
             else:
@@ -7669,6 +7925,8 @@ def analyze(args: argparse.Namespace) -> dict[str, Any]:
                 p5_figure_artifacts.append(str(p5_3_plal_action_reason_path))
             if plot_p5_3_reason_timeline(p5_rows, p5_3_query_action_reason_path):
                 p5_figure_artifacts.append(str(p5_3_query_action_reason_path))
+            if plot_p5_3_reason_timeline(p5_rows, p5_3_future_action_reason_path):
+                p5_figure_artifacts.append(str(p5_3_future_action_reason_path))
             if plot_p5_3_replan_vs_emergency(
                 p5_rows,
                 p5_3_plal_replan_emergency_path,
@@ -7683,12 +7941,25 @@ def analyze(args: argparse.Namespace) -> dict[str, Any]:
                 title="P5-3 query-alignment sample heatmap",
             ):
                 p5_figure_artifacts.append(str(p5_3_query_heatmap_path))
+            if plot_p5_3_sample_heatmap(
+                p5_3_samples,
+                p5_3_future_heatmap_path,
+                tau_field="query_tau_s",
+                title="P5-3 future-sampling sample heatmap",
+            ):
+                p5_figure_artifacts.append(str(p5_3_future_heatmap_path))
             if plot_p5_3_topic_gap(
                 topic_timestamps,
                 p5_3_gates.get("active_topic_gap", {}),
                 p5_3_query_topic_gap_path,
             ):
                 p5_figure_artifacts.append(str(p5_3_query_topic_gap_path))
+            if plot_p5_3_topic_gap(
+                topic_timestamps,
+                p5_3_gates.get("active_topic_gap", {}),
+                p5_3_future_topic_gap_path,
+            ):
+                p5_figure_artifacts.append(str(p5_3_future_topic_gap_path))
         required_runtime_figures = [
             scenario_figure_path,
             topic_activity_figure_path,
@@ -7725,6 +7996,10 @@ def analyze(args: argparse.Namespace) -> dict[str, Any]:
                         p5_3_query_alignment_figure_paths[name]
                         for name in P5_3_QUERY_ALIGNMENT_FIGURE_FILENAMES
                     ],
+                    *[
+                        p5_3_future_sampling_figure_paths[name]
+                        for name in P5_3_FUTURE_SAMPLING_FIGURE_FILENAMES
+                    ],
                 ]
             )
         p5_required_figures.extend(required_runtime_figures)
@@ -7759,9 +8034,18 @@ def analyze(args: argparse.Namespace) -> dict[str, Any]:
         p5_3_query_alignment_required = set(
             p5_3_query_alignment_figure_paths.values()
         )
+        p5_3_future_sampling_required = set(
+            p5_3_future_sampling_figure_paths.values()
+        )
         for figure_path in p5_required_figures:
             if not figure_path.is_file() or figure_path.stat().st_size <= 0:
-                if p5_3_phase and figure_path in p5_3_query_alignment_required:
+                if p5_3_phase and figure_path in p5_3_future_sampling_required:
+                    failures.append(
+                        "P5-3 future sampling figure missing: "
+                        f"{figure_path.name}; missing figure evidence prevents "
+                        "future-sampling acceptance"
+                    )
+                elif p5_3_phase and figure_path in p5_3_query_alignment_required:
                     failures.append(
                         "P5-3 query alignment figure missing: "
                         f"{figure_path.name}; missing figure evidence prevents "

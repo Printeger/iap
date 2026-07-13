@@ -624,14 +624,21 @@ class P5_2AnalyzerTest(unittest.TestCase):
 
 
 class P5_3AnalyzerTest(unittest.TestCase):
-    def validate_rows(self, rows, manifest=None, marker_rows=None, topic_timestamps=None):
+    def validate_rows(
+        self,
+        rows,
+        manifest=None,
+        marker_rows=None,
+        topic_timestamps=None,
+        topic_health=None,
+    ):
         p5_summary = analyzer.summarize_p5_status_rows(rows)
         failures = []
         inconclusive = []
         gates = analyzer.validate_p5_3_hard_gates(
             manifest if manifest is not None else p5_3_manifest(),
             {"passed": True},
-            p5_topic_health(),
+            topic_health if topic_health is not None else p5_topic_health(),
             analyzer.summarize_p0_health(bounded_startup_p0_rows()),
             bounded_startup_p0_rows(),
             rows,
@@ -750,6 +757,42 @@ class P5_3AnalyzerTest(unittest.TestCase):
         self.assertTrue(gates["passed"])
         self.assertTrue(gates["future_replan_sample_link_ok"])
         self.assertTrue(gates["future_replan_reason_ok"])
+
+    def test_p5_3_accepts_final_candidate_fixture_evidence_when_bspline_missing(self):
+        topic_health = p5_topic_health()
+        topic_health["/drone_0_planning/bspline"] = {
+            "status": "FAIL",
+            "count": 0,
+        }
+
+        _, gates, failures, inconclusive = self.validate_rows(
+            [p5_3_replan_row(phase="final")],
+            topic_health=topic_health,
+        )
+
+        self.assertEqual([], failures)
+        self.assertEqual([], inconclusive)
+        self.assertTrue(gates["passed"])
+        self.assertEqual(0, gates["bspline_count"])
+        self.assertTrue(gates["final_candidate_fixed_fixture_evidence"])
+        self.assertTrue(gates["bspline_zero_acceptable"])
+
+    def test_p5_3_rejects_bspline_missing_without_final_candidate_evidence(self):
+        topic_health = p5_topic_health()
+        topic_health["/drone_0_planning/bspline"] = {
+            "status": "FAIL",
+            "count": 0,
+        }
+
+        _, gates, failures, _ = self.validate_rows(
+            [p5_3_replan_row(phase="runtime")],
+            topic_health=topic_health,
+        )
+
+        self.assertFalse(gates["passed"])
+        self.assertFalse(gates["bspline_zero_acceptable"])
+        self.assertFalse(gates["final_candidate_fixed_fixture_evidence"])
+        self.assertTrue(any("bspline=0" in failure for failure in failures), failures)
 
     def test_p5_3_fails_when_fixture_manifest_is_missing_or_disabled(self):
         _, gates, failures, inconclusive = self.validate_rows(
@@ -1044,6 +1087,22 @@ class P5_3AnalyzerTest(unittest.TestCase):
                 "p5_3_query_alignment_p0_health.png",
             ],
             analyzer.P5_3_QUERY_ALIGNMENT_FIGURE_FILENAMES,
+        )
+
+    def test_p5_3_future_sampling_required_figure_filenames_are_exact(self):
+        self.assertEqual(
+            [
+                "p5_3_future_sampling_scenario_topdown.png",
+                "p5_3_future_sampling_fixture_overlay.png",
+                "p5_3_future_sampling_pl_probe.png",
+                "p5_3_future_sampling_tau_window.png",
+                "p5_3_future_sampling_margin_timeline.png",
+                "p5_3_future_sampling_action_reason.png",
+                "p5_3_future_sampling_sample_heatmap.png",
+                "p5_3_future_sampling_topic_gap.png",
+                "p5_3_future_sampling_p0_health.png",
+            ],
+            analyzer.P5_3_FUTURE_SAMPLING_FIGURE_FILENAMES,
         )
 
 
