@@ -80,6 +80,10 @@ _Avoid_: hidden emergency-margin enablement, current-position contamination, P5-
 The P5-only deterministic integrity stamp-freeze fixture that makes current integrity age grow while keeping reports valid.
 _Avoid_: natural fallback-only stale behavior, topic outage, invalid PL/AL report
 
+**P5-6 future-unknown policy**:
+P5 acceptance behavior where elevated future unknown coverage drives replan and emergency actions through explicit unknown attribution without P5-5 fixture, stale, future-bad, startup, snapshot, topic-gap, or low-margin-only contamination.
+_Avoid_: P5-5 stale fixture evidence, high-risk future-bad fixture evidence, topic outage diagnosis
+
 **Causal replan evidence**:
 Analyzer/status evidence that a `REQUEST_REPLAN` action and the future-risk gate/reason that caused it are both traceable in the same P5 run, including concurrent current and future reasons when both gates are active.
 _Avoid_: action count without gate reason, margin evidence with no replan attribution

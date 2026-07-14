@@ -548,6 +548,85 @@ def p5_5_status_rows():
     ]
 
 
+def p5_6_manifest(p5_5_enabled=False, nested_enabled=None):
+    nested = p5_5_enabled if nested_enabled is None else nested_enabled
+    manifest = p5_manifest()
+    manifest.update(
+        {
+            "p5.future_unknown_to_emergency_s": 2.0,
+            "p5_5.fixture.enabled": p5_5_enabled,
+            "p5_5.fixture.name": "current_integrity_stamp_freeze_v1",
+            "p5_5": {
+                "fixture": {
+                    "enabled": nested,
+                    "name": "current_integrity_stamp_freeze_v1",
+                }
+            },
+        }
+    )
+    return manifest
+
+
+def p5_6_p0_rows():
+    return [
+        p0_health_row(0, unknown_ratio=0.0, valid_ratio=1.0),
+        p0_health_row(1, unknown_ratio=0.05, valid_ratio=0.95),
+        p0_health_row(2, unknown_ratio=0.35, valid_ratio=0.65),
+        p0_health_row(3, unknown_ratio=0.45, valid_ratio=0.55),
+    ]
+
+
+def p5_6_status_rows():
+    return [
+        p5_row(bag_time_s=9.0, unknown_ratio=0.0, future_unknown_duration_s=0.0),
+        p5_row(
+            bag_time_s=10.0,
+            action="OK",
+            raw_action="OK",
+            reason="future_unknown",
+            raw_reason="future_unknown",
+            future_reason="future_unknown",
+            active_reasons=["future_unknown"],
+            unknown_ratio=0.35,
+            bad_ratio=0.0,
+            future_unknown_duration_s=0.2,
+            unknown_count=4,
+            bad_count=0,
+        ),
+        p5_row(
+            bag_time_s=10.8,
+            action="REQUEST_REPLAN",
+            raw_action="REQUEST_REPLAN",
+            reason="future_unknown",
+            raw_reason="future_unknown",
+            future_reason="future_unknown",
+            active_reasons=["future_unknown"],
+            unknown_ratio=0.45,
+            bad_ratio=0.0,
+            future_unknown_duration_s=0.8,
+            unknown_count=5,
+            bad_count=0,
+        ),
+        p5_row(
+            bag_time_s=12.4,
+            action="REQUEST_EMERGENCY_STOP_CANDIDATE",
+            raw_action="REQUEST_EMERGENCY_STOP_CANDIDATE",
+            reason="final_gate_failed",
+            raw_reason="future_unknown",
+            future_reason="future_unknown",
+            active_reasons=["future_unknown"],
+            final_gate_fail_count=2,
+            final_gate_fail_duration_s=2.0,
+            final_gate_last_reason="future_unknown",
+            unknown_ratio=0.50,
+            bad_ratio=0.0,
+            future_unknown_duration_s=2.4,
+            unknown_count=5,
+            bad_count=0,
+        ),
+    ]
+
+
 class P5_1AnalyzerTest(unittest.TestCase):
     def validate_rows(self, rows, p0_summary=None):
         p5_summary = analyzer.summarize_p5_status_rows(rows)
@@ -2002,6 +2081,312 @@ class P5_5AnalyzerTest(unittest.TestCase):
                 "p5_5_trajectory_integrity_samples.png",
             ],
             analyzer.P5_5_FIGURE_FILENAMES,
+        )
+
+
+class P5_6AnalyzerTest(unittest.TestCase):
+    def validate_rows(
+        self,
+        rows=None,
+        manifest=None,
+        p0_rows=None,
+        topic_timestamps=None,
+        topic_health=None,
+    ):
+        status_rows = rows if rows is not None else p5_6_status_rows()
+        p0_health_rows = p0_rows if p0_rows is not None else p5_6_p0_rows()
+        p5_summary = analyzer.summarize_p5_status_rows(status_rows)
+        failures = []
+        inconclusive = []
+        gates = analyzer.validate_p5_6_hard_gates(
+            manifest if manifest is not None else p5_6_manifest(),
+            {"passed": True},
+            topic_health if topic_health is not None else p5_topic_health(),
+            analyzer.summarize_p0_health(p0_health_rows),
+            p0_health_rows,
+            status_rows,
+            p5_summary,
+            failures,
+            inconclusive,
+            topic_timestamps,
+        )
+        return p5_summary, gates, failures, inconclusive
+
+    def test_p5_6_passes_with_future_unknown_replan_then_emergency(self):
+        _, gates, failures, inconclusive = self.validate_rows()
+
+        self.assertEqual([], failures)
+        self.assertEqual([], inconclusive)
+        self.assertTrue(gates["passed"])
+        self.assertTrue(gates["p5_5_fixture_disabled"])
+        self.assertTrue(gates["p0_unknown_ratio_grew"])
+        self.assertTrue(gates["p5_unknown_ratio_grew"])
+        self.assertTrue(gates["p5_future_unknown_duration_crossed_threshold"])
+        self.assertTrue(gates["early_non_emergency_unknown_present"])
+        self.assertTrue(gates["unknown_replan_present"])
+        self.assertTrue(gates["unknown_emergency_present"])
+        self.assertTrue(gates["replan_before_emergency"])
+
+    def test_p5_6_accepts_al_invalid_as_unknown_when_bad_ratio_is_zero(self):
+        rows = p5_6_status_rows()
+        for row in rows[1:]:
+            row["reason"] = "al_invalid"
+            row["raw_reason"] = "al_invalid"
+            row["future_reason"] = "al_invalid"
+            row["active_reasons"] = ["al_invalid"]
+            row["pred_al_last_reason"] = "pred_al_invalid"
+        rows[-1]["reason"] = "final_gate_failed"
+        rows[-1]["final_gate_last_reason"] = "al_invalid"
+
+        _, gates, failures, _ = self.validate_rows(rows)
+
+        self.assertEqual([], failures)
+        self.assertTrue(gates["passed"])
+
+    def test_p5_6_fails_when_p5_5_fixture_is_enabled(self):
+        _, gates, failures, _ = self.validate_rows(
+            manifest=p5_6_manifest(p5_5_enabled=True)
+        )
+
+        self.assertFalse(gates["passed"])
+        self.assertFalse(gates["p5_5_fixture_disabled"])
+        self.assertFalse(gates["p5_5_fixture_excluded"])
+        self.assertTrue(any("P5-5 fixture" in failure for failure in failures), failures)
+
+    def test_p5_6_fails_on_missing_p0_health_or_p5_status(self):
+        _, p0_gates, p0_failures, _ = self.validate_rows(p0_rows=[])
+        self.assertFalse(p0_gates["p0_health_rows_present"])
+        self.assertTrue(any("P0 health rows are missing" in failure for failure in p0_failures), p0_failures)
+
+        _, p5_gates, p5_failures, _ = self.validate_rows(rows=[])
+        self.assertFalse(p5_gates["p5_status_rows_present"])
+        self.assertTrue(any("P5 status rows are missing" in failure for failure in p5_failures), p5_failures)
+
+    def test_p5_6_fails_when_future_unknown_duration_does_not_grow_or_cross(self):
+        rows = p5_6_status_rows()
+        for row in rows:
+            row["future_unknown_duration_s"] = min(
+                float(row.get("future_unknown_duration_s") or 0.0),
+                0.4,
+            )
+
+        _, gates, failures, _ = self.validate_rows(rows)
+
+        self.assertFalse(gates["passed"])
+        self.assertFalse(gates["p5_future_unknown_duration_grew"])
+        self.assertFalse(gates["p5_future_unknown_duration_crossed_threshold"])
+        self.assertTrue(any("future_unknown_duration_s did not grow" in failure for failure in failures), failures)
+
+    def test_p5_6_fails_when_unknown_ratio_is_not_elevated(self):
+        rows = p5_6_status_rows()
+        for row in rows:
+            row["unknown_ratio"] = min(float(row.get("unknown_ratio") or 0.0), 0.1)
+
+        _, gates, failures, _ = self.validate_rows(rows)
+
+        self.assertFalse(gates["p5_unknown_ratio_elevated"])
+        self.assertTrue(any("P5 unknown_ratio did not clearly rise" in failure for failure in failures), failures)
+
+    def test_p5_6_fails_when_unknown_rows_are_all_ok(self):
+        rows = [
+            p5_row(
+                bag_time_s=10.0 + idx,
+                reason="future_unknown",
+                raw_reason="future_unknown",
+                future_reason="future_unknown",
+                active_reasons=["future_unknown"],
+                unknown_ratio=0.35 + 0.05 * idx,
+                bad_ratio=0.0,
+                future_unknown_duration_s=0.2 + idx,
+                unknown_count=4,
+                bad_count=0,
+            )
+            for idx in range(3)
+        ]
+
+        _, gates, failures, _ = self.validate_rows(rows)
+
+        self.assertFalse(gates["unknown_actions_not_all_ok"])
+        self.assertTrue(any("all treated as OK" in failure for failure in failures), failures)
+
+    def test_p5_6_fails_without_replan_or_emergency(self):
+        no_replan = [
+            row
+            for row in p5_6_status_rows()
+            if row.get("action") != "REQUEST_REPLAN"
+            and row.get("raw_action") != "REQUEST_REPLAN"
+        ]
+        _, replan_gates, replan_failures, _ = self.validate_rows(no_replan)
+        self.assertFalse(replan_gates["unknown_replan_present"])
+        self.assertTrue(any("did not observe REQUEST_REPLAN" in failure for failure in replan_failures), replan_failures)
+
+        no_emergency = [
+            row
+            for row in p5_6_status_rows()
+            if row.get("action") != "REQUEST_EMERGENCY_STOP_CANDIDATE"
+            and row.get("raw_action") != "REQUEST_EMERGENCY_STOP_CANDIDATE"
+        ]
+        _, emergency_gates, emergency_failures, _ = self.validate_rows(no_emergency)
+        self.assertFalse(emergency_gates["unknown_emergency_present"])
+        self.assertTrue(any("REQUEST_EMERGENCY_STOP_CANDIDATE" in failure for failure in emergency_failures), emergency_failures)
+
+    def test_p5_6_fails_on_immediate_emergency(self):
+        rows = [
+            p5_row(bag_time_s=9.0, unknown_ratio=0.0, future_unknown_duration_s=0.0),
+            p5_row(
+                bag_time_s=10.0,
+                action="REQUEST_EMERGENCY_STOP_CANDIDATE",
+                raw_action="REQUEST_EMERGENCY_STOP_CANDIDATE",
+                reason="future_unknown",
+                raw_reason="future_unknown",
+                future_reason="future_unknown",
+                active_reasons=["future_unknown"],
+                unknown_ratio=0.4,
+                bad_ratio=0.0,
+                future_unknown_duration_s=2.1,
+                unknown_count=4,
+                bad_count=0,
+            ),
+        ]
+
+        _, gates, failures, _ = self.validate_rows(rows)
+
+        self.assertFalse(gates["early_non_emergency_unknown_present"])
+        self.assertFalse(gates["no_immediate_emergency"])
+        self.assertTrue(any("immediate emergency" in failure for failure in failures), failures)
+
+    def test_p5_6_fails_wrong_attribution(self):
+        rows = p5_6_status_rows()
+        for row in rows[1:]:
+            row["reason"] = "mystery_unknown"
+            row["raw_reason"] = "mystery_unknown"
+            row["future_reason"] = "mystery_unknown"
+            row["active_reasons"] = ["mystery_unknown"]
+        rows[-1]["reason"] = "final_gate_failed"
+        rows[-1]["final_gate_last_reason"] = "mystery_unknown"
+
+        _, gates, failures, _ = self.validate_rows(rows)
+
+        self.assertFalse(gates["unknown_replan_present"])
+        self.assertFalse(gates["unknown_emergency_present"])
+        self.assertTrue(any("attributed to future unknown" in failure for failure in failures), failures)
+
+    def test_p5_6_rejects_excluded_causes(self):
+        cases = [
+            (
+                {
+                    "current_reason": "current_stale",
+                    "active_reasons": ["future_unknown", "current_stale"],
+                    "current_stale_duration_s": 0.8,
+                },
+                "current_stale",
+                "current_stale_excluded",
+            ),
+            (
+                {
+                    "reason": "future_bad",
+                    "raw_reason": "future_bad",
+                    "future_reason": "future_bad",
+                    "active_reasons": ["future_bad"],
+                    "bad_ratio": 0.3,
+                },
+                "future_bad",
+                "future_bad_excluded",
+            ),
+            (
+                {
+                    "phase": "startup",
+                    "reason": "snapshot_unavailable",
+                    "raw_reason": "snapshot_unavailable",
+                    "future_reason": "",
+                    "active_reasons": ["snapshot_unavailable"],
+                },
+                "snapshot_unavailable",
+                "startup_snapshot_excluded",
+            ),
+            (
+                {
+                    "reason": "topic_gap",
+                    "raw_reason": "topic_gap",
+                    "future_reason": "",
+                    "active_reasons": ["topic_gap"],
+                },
+                "topic gap",
+                "topic_gap_excluded",
+            ),
+            (
+                {
+                    "reason": "future_low_margin",
+                    "raw_reason": "future_low_margin",
+                    "future_reason": "future_low_margin",
+                    "active_reasons": ["future_low_margin"],
+                    "bad_ratio": 0.3,
+                },
+                "low-margin-only",
+                "low_margin_only_excluded",
+            ),
+        ]
+        for overrides, failure_text, gate_key in cases:
+            rows = p5_6_status_rows()
+            rows[2].update(overrides)
+            if "future_unknown" not in rows[2].get("active_reasons", []):
+                rows[2]["unknown_ratio"] = 0.5
+                rows[2]["future_unknown_duration_s"] = 0.8
+
+            _, gates, failures, _ = self.validate_rows(rows)
+
+            self.assertFalse(gates[gate_key], gate_key)
+            self.assertTrue(any(failure_text in failure for failure in failures), (failure_text, failures))
+
+    def test_p5_6_fails_on_active_unknown_window_topic_gap(self):
+        bad_timestamps = {
+            topic: [10.0, 20.0]
+            for topic, expected in analyzer.P5_TOPIC_EXPECTATIONS.items()
+            if expected == "continuous"
+        }
+
+        _, gates, failures, _ = self.validate_rows(topic_timestamps=bad_timestamps)
+
+        self.assertFalse(gates["active_required_p5_topics_stable"])
+        self.assertTrue(any("topic gap" in failure for failure in failures), failures)
+
+    def test_p5_6_required_figures_are_fail_closed(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            failures = []
+            analyzer.validate_p5_6_required_figures(
+                [Path(tmpdir) / "p5_6_missing.png"],
+                failures,
+            )
+
+        self.assertEqual(1, len(failures))
+        self.assertIn("P5-6 required figure missing", failures[0])
+
+    def test_p5_6_next_branch_is_exact(self):
+        self.assertEqual(
+            "PASS -> P5-7",
+            analyzer.next_debug_branch("PASS", [], [], "P5-6"),
+        )
+        self.assertEqual(
+            analyzer.P5_6_FAIL_BRANCH,
+            analyzer.next_debug_branch("FAIL", ["P5-6 evidence failed"], [], "P5-6"),
+        )
+
+    def test_p5_6_required_figure_filenames_are_exact(self):
+        self.assertEqual(
+            [
+                "p5_6_scenario_topdown.png",
+                "p5_6_topic_activity_timeline.png",
+                "p5_6_p0_health_unknown_timeline.png",
+                "p5_6_future_unknown_duration_timeline.png",
+                "p5_6_action_reason_timeline.png",
+                "p5_6_unknown_ratio_vs_action.png",
+                "p5_6_margin_timeline.png",
+                "p5_6_debounce_timeline.png",
+                "p5_6_reason_histogram.png",
+                "p5_6_cause_exclusion_summary.png",
+                "p5_6_trajectory_integrity_samples.png",
+            ],
+            analyzer.P5_6_FIGURE_FILENAMES,
         )
 
 

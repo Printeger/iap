@@ -121,6 +121,22 @@ P5_5_FAIL_BRANCH = (
 P5_5_BLOCKED_BRANCH = (
     "BLOCKED_SCENARIO_MISSING -> implement integrity pause/delay fixture first"
 )
+P5_6_FAIL_BRANCH = (
+    "FAIL -> debug P5-6 future unknown policy / reason attribution / debounce"
+)
+P5_6_FIGURE_FILENAMES = [
+    "p5_6_scenario_topdown.png",
+    "p5_6_topic_activity_timeline.png",
+    "p5_6_p0_health_unknown_timeline.png",
+    "p5_6_future_unknown_duration_timeline.png",
+    "p5_6_action_reason_timeline.png",
+    "p5_6_unknown_ratio_vs_action.png",
+    "p5_6_margin_timeline.png",
+    "p5_6_debounce_timeline.png",
+    "p5_6_reason_histogram.png",
+    "p5_6_cause_exclusion_summary.png",
+    "p5_6_trajectory_integrity_samples.png",
+]
 P5_5_FIGURE_FILENAMES = [
     "p5_5_scenario_topdown.png",
     "p5_5_topic_activity_timeline.png",
@@ -344,6 +360,35 @@ P5_3_QUERY_ALIGNMENT_FIELDS = [
     "query_reason_aligned",
     "query_alignment_ok",
 ]
+P5_6_UNKNOWN_ACTION_FIELDS = [
+    "bag_time_s",
+    "t_rel_s",
+    "phase",
+    "action",
+    "raw_action",
+    "reason",
+    "raw_reason",
+    "current_reason",
+    "future_reason",
+    "active_reasons",
+    "unknown_ratio",
+    "bad_ratio",
+    "future_unknown_duration_s",
+    "unknown_bucket",
+    "unknown_scope",
+    "unknown_attributed",
+    "request_replan",
+    "request_emergency_stop_candidate",
+    "excluded_causes",
+]
+P5_6_CAUSE_EXCLUSION_FIELDS = [
+    "cause",
+    "count",
+    "first_bag_time_s",
+    "first_action",
+    "first_raw_action",
+    "first_reason",
+]
 ODOM_TRUTH_TOPIC = "/sim/drone_0/truth_odom"
 ODOM_EST_TOPIC = "/drone_0_visual_slam/odom"
 CONTINUOUS_MIN_COVERAGE_RATIO = 0.8
@@ -454,6 +499,7 @@ def is_p5_runtime_experiment(args: argparse.Namespace) -> bool:
         "P5-3",
         "P5-4",
         "P5-5",
+        "P5-6",
     }
 
 
@@ -2181,6 +2227,115 @@ def plot_p5_5_cause_exclusion_summary(
     ax.set_ylabel("action rows")
     ax.set_title("P5-5 cause exclusion summary")
     ax.tick_params(axis="x", rotation=15)
+    ax.grid(True, axis="y", alpha=0.25)
+    fig.tight_layout()
+    fig.savefig(path, dpi=160)
+    plt.close(fig)
+    return True
+
+
+def plot_p5_6_unknown_ratio_vs_action(
+    rows: list[dict[str, Any]],
+    path: Path,
+) -> bool:
+    if not rows:
+        return False
+    t = relative_time(rows)
+    if not t:
+        return False
+    actions = [p5_action(row, "action") or "<empty>" for row in rows]
+    raw_actions = [p5_action(row, "raw_action") or "<empty>" for row in rows]
+    codes = action_code_map(actions + raw_actions)
+    unknown_ratio = finite_or_nan(rows, "unknown_ratio")
+    future_unknown_duration = finite_or_nan(rows, "future_unknown_duration_s")
+    if not any(math.isfinite(value) for value in unknown_ratio + future_unknown_duration):
+        return False
+
+    fig, axes = plt.subplots(3, 1, figsize=(11, 7.2), sharex=True)
+    axes[0].plot(t, unknown_ratio, color="#6b7280", label="unknown_ratio")
+    axes[0].plot(t, finite_or_nan(rows, "bad_ratio"), color="#dc2626", label="bad_ratio")
+    axes[0].set_ylim(-0.05, 1.05)
+    axes[0].set_ylabel("ratio")
+    axes[0].legend(loc="best")
+    axes[1].plot(
+        t,
+        future_unknown_duration,
+        color="#9333ea",
+        label="future_unknown_duration_s",
+    )
+    axes[1].set_ylabel("duration [s]")
+    axes[1].legend(loc="best")
+    axes[2].step(t, [codes[value] for value in actions], where="post", label="action", color="#f97316")
+    axes[2].step(t, [codes[value] for value in raw_actions], where="post", label="raw_action", color="#f59e0b", linestyle="--")
+    axes[2].set_yticks(list(codes.values()), list(codes.keys()))
+    axes[2].set_ylabel("P5 action")
+    axes[2].set_xlabel("time since first P5 status [s]")
+    axes[2].legend(loc="best")
+    for ax in axes:
+        ax.grid(True, alpha=0.25)
+    fig.suptitle("P5-6 unknown ratio vs action")
+    fig.tight_layout()
+    fig.savefig(path, dpi=160)
+    plt.close(fig)
+    return True
+
+
+def plot_p5_6_reason_histogram(rows: list[dict[str, Any]], path: Path) -> bool:
+    if not rows:
+        return False
+    reasons: Counter[str] = Counter()
+    for row in rows:
+        for reason in p5_all_reason_values(
+            row,
+            (
+                "reason",
+                "raw_reason",
+                "current_reason",
+                "future_reason",
+                "active_reasons",
+                "final_gate_last_reason",
+                "pred_al_last_reason",
+            ),
+        ):
+            if reason and reason != "ok":
+                reasons[reason] += 1
+    if not reasons:
+        return False
+    items = reasons.most_common()
+    fig, ax = plt.subplots(figsize=(9, max(4.5, 0.36 * len(items) + 1.6)))
+    ax.barh([item[0] for item in items], [item[1] for item in items], color="#2563eb")
+    ax.invert_yaxis()
+    ax.set_xlabel("status rows")
+    ax.set_title("P5-6 status reason histogram")
+    ax.grid(True, axis="x", alpha=0.25)
+    fig.tight_layout()
+    fig.savefig(path, dpi=160)
+    plt.close(fig)
+    return True
+
+
+def plot_p5_6_cause_exclusion_summary(
+    gates: dict[str, Any],
+    path: Path,
+) -> bool:
+    summary = gates.get("cause_exclusion", {}) or {}
+    causes = [
+        ("current_stale", int(summary.get("current_stale_action_count", 0) or 0)),
+        ("p5_5_fixture", int(summary.get("p5_5_fixture_evidence_count", 0) or 0)),
+        ("future_bad", int(summary.get("future_bad_action_count", 0) or 0)),
+        ("startup_snapshot", int(summary.get("startup_snapshot_action_count", 0) or 0)),
+        ("topic_gap", int(summary.get("topic_gap_action_count", 0) or 0)),
+        ("low_margin_only", int(summary.get("low_margin_only_action_count", 0) or 0)),
+    ]
+    fig, ax = plt.subplots(figsize=(9, 4.8))
+    ax.bar(
+        [item[0] for item in causes],
+        [item[1] for item in causes],
+        color=["#16a34a" if item[1] == 0 else "#dc2626" for item in causes],
+    )
+    ax.set_ylabel("action rows")
+    ax.set_title("P5-6 excluded cause summary")
+    ax.tick_params(axis="x", rotation=20)
     ax.grid(True, axis="y", alpha=0.25)
     fig.tight_layout()
     fig.savefig(path, dpi=160)
@@ -8151,6 +8306,614 @@ def validate_p5_5_hard_gates(
     return gates
 
 
+def p5_6_future_unknown_threshold_s(manifest: dict[str, Any]) -> float:
+    return finite_float(manifest.get("p5.future_unknown_to_emergency_s")) or 2.0
+
+
+def p5_6_p5_5_fixture_state(manifest: dict[str, Any]) -> dict[str, Any]:
+    flat_value = manifest.get("p5_5.fixture.enabled") if manifest else None
+    nested_value = nested_get(manifest, ["p5_5", "fixture", "enabled"], None) if manifest else None
+    flat_enabled = manifest_bool(flat_value)
+    nested_enabled = manifest_bool(nested_value)
+    return {
+        "flat_value": flat_value,
+        "nested_value": nested_value,
+        "flat_enabled": flat_enabled,
+        "nested_enabled": nested_enabled,
+        "disabled": not flat_enabled and not nested_enabled,
+    }
+
+
+def p5_6_post_startup_p0_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    prefix_len = 0
+    for row in rows:
+        if str(row.get("reason", "")).strip().lower() != "snapshot_unavailable":
+            break
+        prefix_len += 1
+    return rows[prefix_len:]
+
+
+def p5_6_ratio_growth_summary(
+    rows: list[dict[str, Any]],
+    key: str,
+    *,
+    min_peak: float = 0.20,
+    min_delta: float = 0.20,
+) -> dict[str, Any]:
+    values = [
+        value
+        for value in (finite_float(row.get(key)) for row in rows)
+        if value is not None
+    ]
+    if not values:
+        return {
+            "available": False,
+            "min": None,
+            "max": None,
+            "delta": None,
+            "min_peak": min_peak,
+            "min_delta": min_delta,
+            "elevated": False,
+            "grew": False,
+        }
+    min_value = min(values)
+    max_value = max(values)
+    delta = max_value - min_value
+    return {
+        "available": True,
+        "min": min_value,
+        "max": max_value,
+        "delta": delta,
+        "min_peak": min_peak,
+        "min_delta": min_delta,
+        "elevated": max_value >= min_peak,
+        "grew": delta >= min_delta,
+    }
+
+
+def p5_6_value_growth_summary(
+    rows: list[dict[str, Any]],
+    key: str,
+    *,
+    min_peak: float,
+    min_delta: float,
+) -> dict[str, Any]:
+    values = [
+        value
+        for value in (finite_float(row.get(key)) for row in rows)
+        if value is not None
+    ]
+    if not values:
+        return {
+            "available": False,
+            "min": None,
+            "max": None,
+            "delta": None,
+            "min_peak": min_peak,
+            "min_delta": min_delta,
+            "elevated": False,
+            "grew": False,
+        }
+    min_value = min(values)
+    max_value = max(values)
+    delta = max_value - min_value
+    return {
+        "available": True,
+        "min": min_value,
+        "max": max_value,
+        "delta": delta,
+        "min_peak": min_peak,
+        "min_delta": min_delta,
+        "elevated": max_value >= min_peak,
+        "grew": delta >= min_delta,
+    }
+
+
+def p5_6_reason_values(row: dict[str, Any]) -> set[str]:
+    return p5_all_reason_values(
+        row,
+        (
+            "reason",
+            "raw_reason",
+            "current_reason",
+            "future_reason",
+            "active_reasons",
+            "final_gate_last_reason",
+            "pred_al_last_reason",
+        ),
+    )
+
+
+def p5_6_actionable(row: dict[str, Any]) -> bool:
+    return p5_action(row, "action") in {P5_REPLAN_ACTION, P5_EMERGENCY_ACTION} or (
+        p5_action(row, "raw_action") in {P5_REPLAN_ACTION, P5_EMERGENCY_ACTION}
+    )
+
+
+def p5_6_reason_has_topic_gap(reasons: set[str]) -> bool:
+    return any(
+        "topic_gap" in reason
+        or "topic-gap" in reason
+        or ("topic" in reason and "gap" in reason)
+        for reason in reasons
+    )
+
+
+def p5_6_reason_has_low_margin(reasons: set[str]) -> bool:
+    return any("low_margin" in reason or "low-margin" in reason for reason in reasons)
+
+
+def p5_6_reason_has_future_bad(reasons: set[str]) -> bool:
+    high_risk_reasons = {
+        "future_bad",
+        P5_3_FIXTURE_REASON,
+        P5_4_FIXTURE_REASON,
+    }
+    return bool(reasons & high_risk_reasons) or any(
+        reason.startswith("future_bad")
+        or P5_3_FIXTURE_REASON in reason
+        or P5_4_FIXTURE_REASON in reason
+        for reason in reasons
+    )
+
+
+def p5_6_reason_has_unknown(reasons: set[str]) -> bool:
+    return bool(reasons & {"future_unknown", "unknown_only", "al_invalid", "pred_al_invalid"})
+
+
+def p5_6_row_exclusion_causes(row: dict[str, Any]) -> list[str]:
+    reasons = p5_6_reason_values(row)
+    causes: list[str] = []
+    if "current_stale" in reasons or (
+        p5_6_actionable(row)
+        and (finite_float(row.get("current_stale_duration_s")) or 0.0) > 0.0
+    ):
+        causes.append("current_stale")
+    if p5_6_reason_has_future_bad(reasons):
+        causes.append("future_bad")
+    if str(row.get("phase", "")).strip().lower() == "startup" or "snapshot_unavailable" in reasons:
+        causes.append("startup_snapshot_unavailable")
+    if p5_6_reason_has_topic_gap(reasons):
+        causes.append("topic_gap")
+    if p5_6_reason_has_low_margin(reasons) and not p5_6_reason_has_unknown(reasons):
+        causes.append("low_margin_only")
+    return causes
+
+
+def p5_6_unknown_bucket(row: dict[str, Any]) -> str:
+    reasons = p5_6_reason_values(row)
+    if "future_unknown" in reasons:
+        return "future_unknown"
+    if "unknown_only" in reasons:
+        return "unknown_only"
+    if reasons & {"al_invalid", "pred_al_invalid"}:
+        unknown_ratio = finite_float(row.get("unknown_ratio")) or 0.0
+        bad_ratio = finite_float(row.get("bad_ratio")) or 0.0
+        if unknown_ratio > 0.0 and bad_ratio <= 1.0e-9 and not p5_6_row_exclusion_causes(row):
+            return "al_invalid_equivalent"
+    return ""
+
+
+def p5_6_unknown_scope(row: dict[str, Any]) -> bool:
+    return (
+        (finite_float(row.get("unknown_ratio")) or 0.0) > 0.0
+        or (finite_float(row.get("future_unknown_duration_s")) or 0.0) > 0.0
+        or bool(p5_6_unknown_bucket(row))
+    )
+
+
+def p5_6_unknown_window_rows(p5_rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    return [
+        {
+            "bag_time_s": row.get("bag_time_s", ""),
+            "inside_high_risk_zone": 0,
+            "inside_tau_window": 0,
+        }
+        for row in p5_rows
+        if p5_6_unknown_scope(row)
+    ]
+
+
+def p5_6_cause_exclusion_summary(
+    p5_rows: list[dict[str, Any]],
+    manifest: dict[str, Any],
+) -> dict[str, Any]:
+    actionable_unknown_rows = [
+        row for row in p5_rows if p5_6_unknown_scope(row) and p5_6_actionable(row)
+    ]
+    by_cause: dict[str, list[dict[str, Any]]] = {
+        "current_stale": [],
+        "future_bad": [],
+        "startup_snapshot_unavailable": [],
+        "topic_gap": [],
+        "low_margin_only": [],
+    }
+    for row in actionable_unknown_rows:
+        for cause in p5_6_row_exclusion_causes(row):
+            by_cause.setdefault(cause, []).append(row)
+    fixture_state = p5_6_p5_5_fixture_state(manifest)
+    p5_5_fixture_evidence_count = (
+        int(bool(fixture_state.get("flat_enabled")))
+        + int(bool(fixture_state.get("nested_enabled")))
+        + len(by_cause.get("current_stale", []))
+    )
+    return {
+        "actionable_unknown_count": len(actionable_unknown_rows),
+        "current_stale_action_count": len(by_cause.get("current_stale", [])),
+        "future_bad_action_count": len(by_cause.get("future_bad", [])),
+        "startup_snapshot_action_count": len(
+            by_cause.get("startup_snapshot_unavailable", [])
+        ),
+        "topic_gap_action_count": len(by_cause.get("topic_gap", [])),
+        "low_margin_only_action_count": len(by_cause.get("low_margin_only", [])),
+        "p5_5_fixture_evidence_count": p5_5_fixture_evidence_count,
+        "first_current_stale_action": (by_cause.get("current_stale") or [None])[0],
+        "first_future_bad_action": (by_cause.get("future_bad") or [None])[0],
+        "first_startup_snapshot_action": (
+            by_cause.get("startup_snapshot_unavailable") or [None]
+        )[0],
+        "first_topic_gap_action": (by_cause.get("topic_gap") or [None])[0],
+        "first_low_margin_only_action": (by_cause.get("low_margin_only") or [None])[0],
+    }
+
+
+def p5_6_cause_exclusion_rows(gates: dict[str, Any]) -> list[dict[str, Any]]:
+    summary = gates.get("cause_exclusion", {}) or {}
+    cause_specs = [
+        ("current_stale", "current_stale_action_count", "first_current_stale_action"),
+        ("p5_5_fixture", "p5_5_fixture_evidence_count", "first_current_stale_action"),
+        ("future_bad", "future_bad_action_count", "first_future_bad_action"),
+        ("startup_snapshot", "startup_snapshot_action_count", "first_startup_snapshot_action"),
+        ("topic_gap", "topic_gap_action_count", "first_topic_gap_action"),
+        ("low_margin_only", "low_margin_only_action_count", "first_low_margin_only_action"),
+    ]
+    rows: list[dict[str, Any]] = []
+    for cause, count_key, first_key in cause_specs:
+        first = summary.get(first_key) or {}
+        rows.append(
+            {
+                "cause": cause,
+                "count": int(summary.get(count_key, 0) or 0),
+                "first_bag_time_s": first.get("bag_time_s", "") if isinstance(first, dict) else "",
+                "first_action": first.get("action", "") if isinstance(first, dict) else "",
+                "first_raw_action": first.get("raw_action", "") if isinstance(first, dict) else "",
+                "first_reason": first.get("reason", "") if isinstance(first, dict) else "",
+            }
+        )
+    return rows
+
+
+def build_p5_6_unknown_action_timeline_rows(
+    p5_rows: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    t_rel = relative_time(p5_rows)
+    rows: list[dict[str, Any]] = []
+    for idx, row in enumerate(p5_rows):
+        bucket = p5_6_unknown_bucket(row)
+        excluded = p5_6_row_exclusion_causes(row)
+        action = p5_action(row, "action")
+        raw_action = p5_action(row, "raw_action")
+        rows.append(
+            {
+                "bag_time_s": row.get("bag_time_s", ""),
+                "t_rel_s": t_rel[idx] if idx < len(t_rel) else "",
+                "phase": row.get("phase", ""),
+                "action": action,
+                "raw_action": raw_action,
+                "reason": row.get("reason", ""),
+                "raw_reason": row.get("raw_reason", ""),
+                "current_reason": row.get("current_reason", ""),
+                "future_reason": row.get("future_reason", ""),
+                "active_reasons": row.get("active_reasons", ""),
+                "unknown_ratio": row.get("unknown_ratio", ""),
+                "bad_ratio": row.get("bad_ratio", ""),
+                "future_unknown_duration_s": row.get("future_unknown_duration_s", ""),
+                "unknown_bucket": bucket,
+                "unknown_scope": 1 if p5_6_unknown_scope(row) else 0,
+                "unknown_attributed": 1 if bucket else 0,
+                "request_replan": 1
+                if action == P5_REPLAN_ACTION or raw_action == P5_REPLAN_ACTION
+                else 0,
+                "request_emergency_stop_candidate": 1
+                if action == P5_EMERGENCY_ACTION or raw_action == P5_EMERGENCY_ACTION
+                else 0,
+                "excluded_causes": ",".join(excluded),
+            }
+        )
+    return rows
+
+
+def validate_p5_6_required_figures(
+    figure_paths: list[Path],
+    failures: list[str],
+) -> None:
+    for figure_path in figure_paths:
+        if not figure_path.is_file() or figure_path.stat().st_size <= 0:
+            failures.append(
+                "P5-6 required figure missing: "
+                f"{figure_path.name}; missing future-unknown figure evidence "
+                "prevents P5-6 acceptance"
+            )
+
+
+def validate_p5_6_hard_gates(
+    manifest: dict[str, Any],
+    validator_summary: dict[str, Any],
+    topic_health: dict[str, dict[str, Any]],
+    p0_health_summary: dict[str, Any],
+    p0_health_rows: list[dict[str, Any]],
+    p5_rows: list[dict[str, Any]],
+    p5_summary: dict[str, Any],
+    failures: list[str],
+    inconclusive: list[str],
+    topic_timestamps: dict[str, list[float]] | None = None,
+) -> dict[str, Any]:
+    manifest_gates = p5_manifest_gate_values(manifest)
+    p5_5_fixture_state = p5_6_p5_5_fixture_state(manifest)
+    threshold_s = p5_6_future_unknown_threshold_s(manifest)
+    topic_statuses = {
+        topic: (topic_health.get(topic) or {}).get("status", "MISSING")
+        for topic in P5_TOPIC_EXPECTATIONS
+    }
+    p0_startup = summarize_p0_startup_snapshot_unavailable(p0_health_rows)
+    post_startup_p0_rows = p5_6_post_startup_p0_rows(p0_health_rows)
+    p0_unknown_growth = p5_6_ratio_growth_summary(post_startup_p0_rows, "unknown_ratio")
+    p5_unknown_growth = p5_6_ratio_growth_summary(p5_rows, "unknown_ratio")
+    min_duration_growth = min(0.5, max(0.1, threshold_s * 0.25))
+    p5_future_unknown_duration = p5_6_value_growth_summary(
+        p5_rows,
+        "future_unknown_duration_s",
+        min_peak=threshold_s,
+        min_delta=min_duration_growth,
+    )
+    unknown_scope_rows = [row for row in p5_rows if p5_6_unknown_scope(row)]
+    active_topic_gap = p5_3_active_topic_gap_summary(
+        p5_6_unknown_window_rows(p5_rows),
+        topic_timestamps,
+    )
+    early_non_emergency_rows = [
+        row
+        for row in unknown_scope_rows
+        if (finite_float(row.get("future_unknown_duration_s")) or 0.0) < threshold_s
+        and p5_action(row, "action") != P5_EMERGENCY_ACTION
+        and p5_action(row, "raw_action") != P5_EMERGENCY_ACTION
+    ]
+    replan_rows = [
+        row
+        for row in unknown_scope_rows
+        if (
+            p5_action(row, "action") == P5_REPLAN_ACTION
+            or p5_action(row, "raw_action") == P5_REPLAN_ACTION
+        )
+        and p5_6_unknown_bucket(row)
+    ]
+    emergency_rows = [
+        row
+        for row in unknown_scope_rows
+        if (
+            p5_action(row, "action") == P5_EMERGENCY_ACTION
+            or p5_action(row, "raw_action") == P5_EMERGENCY_ACTION
+        )
+        and p5_6_unknown_bucket(row)
+        and (finite_float(row.get("future_unknown_duration_s")) or 0.0) >= threshold_s
+    ]
+    first_unknown_time = (
+        finite_float(unknown_scope_rows[0].get("bag_time_s")) if unknown_scope_rows else None
+    )
+    first_replan_time = finite_float(replan_rows[0].get("bag_time_s")) if replan_rows else None
+    first_emergency_time = (
+        finite_float(emergency_rows[0].get("bag_time_s")) if emergency_rows else None
+    )
+    cause_exclusion = p5_6_cause_exclusion_summary(p5_rows, manifest)
+    unknown_actions_not_all_ok = bool(unknown_scope_rows) and any(
+        p5_action(row, "action") != P5_OK_ACTION
+        or p5_action(row, "raw_action") != P5_OK_ACTION
+        for row in unknown_scope_rows
+    )
+    gates = {
+        **manifest_gates,
+        "validator_summary_present": bool(validator_summary),
+        "validator_passed": validator_summary.get("passed") is True,
+        "p5_5_fixture_state": p5_5_fixture_state,
+        "p5_5_fixture_disabled": bool(p5_5_fixture_state.get("disabled")),
+        "required_p5_topics_stable": all(
+            status == "PASS"
+            for topic, status in topic_statuses.items()
+            if P5_TOPIC_EXPECTATIONS.get(topic) != "planner-dependent"
+        ),
+        "topic_statuses": topic_statuses,
+        "active_topic_gap": active_topic_gap,
+        "active_required_p5_topics_stable": bool(
+            active_topic_gap.get("required_continuous_topics_stable", True)
+        ),
+        "p0_health_rows_present": int(p0_health_summary.get("row_count", 0) or 0) > 0,
+        **p0_startup,
+        "p0_post_startup_ready": p0_startup["post_startup_ready_false_count"] == 0,
+        "p0_post_startup_non_stale": p0_startup["post_startup_stale_true_count"] == 0,
+        "p5_status_rows_present": int(p5_summary.get("status_rows", 0) or 0) > 0,
+        "p5_steady_status_rows_present": int(p5_summary.get("steady_status_rows", 0) or 0) > 0,
+        "p5_json_parse_ok": int(p5_summary.get("parse_error_count", 0) or 0) == 0,
+        "p5_inspection_ok": not bool(p5_summary.get("inspection_error")),
+        "p5_startup_snapshot_unavailable_bounded": bool(
+            p5_summary.get("startup_snapshot_unavailable_bounded", True)
+        ),
+        "future_unknown_to_emergency_s": threshold_s,
+        "p0_unknown_growth": p0_unknown_growth,
+        "p0_unknown_ratio_elevated": bool(p0_unknown_growth.get("elevated")),
+        "p0_unknown_ratio_grew": bool(p0_unknown_growth.get("grew")),
+        "p5_unknown_growth": p5_unknown_growth,
+        "p5_unknown_ratio_elevated": bool(p5_unknown_growth.get("elevated")),
+        "p5_unknown_ratio_grew": bool(p5_unknown_growth.get("grew")),
+        "p5_future_unknown_duration": p5_future_unknown_duration,
+        "p5_future_unknown_duration_grew": bool(
+            p5_future_unknown_duration.get("grew")
+        ),
+        "p5_future_unknown_duration_crossed_threshold": bool(
+            p5_future_unknown_duration.get("elevated")
+        ),
+        "unknown_scope_count": len(unknown_scope_rows),
+        "early_non_emergency_unknown_count": len(early_non_emergency_rows),
+        "early_non_emergency_unknown_present": len(early_non_emergency_rows) > 0,
+        "unknown_replan_count": len(replan_rows),
+        "unknown_replan_present": len(replan_rows) > 0,
+        "unknown_emergency_count": len(emergency_rows),
+        "unknown_emergency_present": len(emergency_rows) > 0,
+        "first_unknown_time_s": first_unknown_time,
+        "first_unknown_replan_time_s": first_replan_time,
+        "first_unknown_emergency_time_s": first_emergency_time,
+        "replan_before_emergency": (
+            first_replan_time is not None
+            and first_emergency_time is not None
+            and first_replan_time <= first_emergency_time
+        ),
+        "no_immediate_emergency": (
+            first_unknown_time is None
+            or first_emergency_time is None
+            or first_unknown_time < first_emergency_time
+        )
+        and len(early_non_emergency_rows) > 0,
+        "unknown_actions_not_all_ok": unknown_actions_not_all_ok,
+        "cause_exclusion": cause_exclusion,
+        "current_stale_excluded": int(
+            cause_exclusion.get("current_stale_action_count", 0) or 0
+        )
+        == 0,
+        "p5_5_fixture_excluded": int(
+            cause_exclusion.get("p5_5_fixture_evidence_count", 0) or 0
+        )
+        == 0,
+        "future_bad_excluded": int(
+            cause_exclusion.get("future_bad_action_count", 0) or 0
+        )
+        == 0,
+        "startup_snapshot_excluded": int(
+            cause_exclusion.get("startup_snapshot_action_count", 0) or 0
+        )
+        == 0,
+        "topic_gap_excluded": int(
+            cause_exclusion.get("topic_gap_action_count", 0) or 0
+        )
+        == 0,
+        "low_margin_only_excluded": int(
+            cause_exclusion.get("low_margin_only_action_count", 0) or 0
+        )
+        == 0,
+        "first_unknown_replan_row": replan_rows[0] if replan_rows else None,
+        "first_unknown_emergency_row": emergency_rows[0] if emergency_rows else None,
+        "first_early_non_emergency_unknown_row": early_non_emergency_rows[0]
+        if early_non_emergency_rows
+        else None,
+    }
+
+    if not (
+        gates["manifest_safety_profile_p5"]
+        and gates["manifest_expected_true_ok"]
+        and gates["manifest_expected_false_ok"]
+    ):
+        failures.append("P5-6 manifest does not enable P0/P5 with P1-P4 disabled")
+    if not gates["p5_5_fixture_disabled"]:
+        failures.append("P5-6 P5-5 fixture must remain disabled in flat and nested manifest fields")
+    if not gates["validator_summary_present"]:
+        failures.append("P5-6 validator summary is missing")
+    elif not gates["validator_passed"]:
+        failures.append("P5-6 validator summary did not pass")
+    if not gates["required_p5_topics_stable"]:
+        failures.append("P5-6 required P0/P5 topics are not all stable")
+    if not gates["active_required_p5_topics_stable"]:
+        failures.append("P5-6 active unknown-window topic gap exceeded threshold")
+    if not gates["p0_health_rows_present"]:
+        failures.append("P5-6 P0 health rows are missing")
+    if not gates["startup_snapshot_unavailable_bounded"]:
+        failures.append("P5-6 P0 startup snapshot_unavailable prefix is not bounded")
+    if not gates["p0_post_startup_ready"]:
+        failures.append("P5-6 P0 health reported ready=false after startup")
+    if not gates["p0_post_startup_non_stale"]:
+        failures.append("P5-6 P0 health reported stale=true after startup")
+    if not gates["p5_status_rows_present"]:
+        failures.append("P5-6 P5 status rows are missing")
+    if not gates["p5_steady_status_rows_present"]:
+        failures.append("P5-6 P5 status rows contain no steady-state samples after startup")
+    if not gates["p5_json_parse_ok"]:
+        failures.append("P5-6 P5 status JSON parse errors were observed")
+    if not gates["p5_inspection_ok"]:
+        failures.append("P5-6 P5 status inspection did not complete cleanly")
+    if not gates["p0_unknown_ratio_elevated"] or not gates["p0_unknown_ratio_grew"]:
+        failures.append("P5-6 P0 unknown_ratio did not clearly rise")
+    if not gates["p5_unknown_ratio_elevated"] or not gates["p5_unknown_ratio_grew"]:
+        failures.append("P5-6 P5 unknown_ratio did not clearly rise")
+    if not gates["p5_future_unknown_duration_grew"]:
+        failures.append("P5-6 future_unknown_duration_s did not grow")
+    if not gates["p5_future_unknown_duration_crossed_threshold"]:
+        failures.append(
+            "P5-6 future_unknown_duration_s did not cross "
+            f"p5.future_unknown_to_emergency_s={threshold_s:.6g}"
+        )
+    if not gates["early_non_emergency_unknown_present"]:
+        failures.append("P5-6 future-unknown debounce skipped the early non-emergency interval")
+    if not gates["unknown_replan_present"]:
+        failures.append("P5-6 did not observe REQUEST_REPLAN attributed to future unknown")
+    if not gates["unknown_emergency_present"]:
+        failures.append("P5-6 did not observe REQUEST_EMERGENCY_STOP_CANDIDATE attributed to sustained future unknown")
+    if not gates["no_immediate_emergency"]:
+        failures.append("P5-6 observed immediate emergency before future-unknown debounce evidence")
+    if not gates["replan_before_emergency"]:
+        failures.append("P5-6 did not observe future-unknown replan before emergency candidate")
+    if not gates["unknown_actions_not_all_ok"]:
+        failures.append("P5-6 unknown-scope rows were all treated as OK")
+    if not gates["current_stale_excluded"]:
+        failures.append("P5-6 current_stale action cause contaminated future-unknown evidence")
+    if not gates["p5_5_fixture_excluded"]:
+        failures.append("P5-6 P5-5 fixture evidence contaminated future-unknown evidence")
+    if not gates["future_bad_excluded"]:
+        failures.append("P5-6 future_bad high-risk cause contaminated future-unknown evidence")
+    if not gates["startup_snapshot_excluded"]:
+        failures.append("P5-6 startup/snapshot_unavailable cause contaminated future-unknown evidence")
+    if not gates["topic_gap_excluded"]:
+        failures.append("P5-6 topic gap cause contaminated future-unknown evidence")
+    if not gates["low_margin_only_excluded"]:
+        failures.append("P5-6 low-margin-only cause contaminated future-unknown evidence")
+
+    required = (
+        "manifest_safety_profile_p5",
+        "manifest_expected_true_ok",
+        "manifest_expected_false_ok",
+        "p5_5_fixture_disabled",
+        "validator_summary_present",
+        "validator_passed",
+        "required_p5_topics_stable",
+        "active_required_p5_topics_stable",
+        "p0_health_rows_present",
+        "startup_snapshot_unavailable_bounded",
+        "p0_post_startup_ready",
+        "p0_post_startup_non_stale",
+        "p5_status_rows_present",
+        "p5_steady_status_rows_present",
+        "p5_json_parse_ok",
+        "p5_inspection_ok",
+        "p5_startup_snapshot_unavailable_bounded",
+        "p0_unknown_ratio_elevated",
+        "p0_unknown_ratio_grew",
+        "p5_unknown_ratio_elevated",
+        "p5_unknown_ratio_grew",
+        "p5_future_unknown_duration_grew",
+        "p5_future_unknown_duration_crossed_threshold",
+        "early_non_emergency_unknown_present",
+        "unknown_replan_present",
+        "unknown_emergency_present",
+        "no_immediate_emergency",
+        "replan_before_emergency",
+        "unknown_actions_not_all_ok",
+        "current_stale_excluded",
+        "p5_5_fixture_excluded",
+        "future_bad_excluded",
+        "startup_snapshot_excluded",
+        "topic_gap_excluded",
+        "low_margin_only_excluded",
+    )
+    gates["passed"] = all(bool(gates.get(key)) for key in required)
+    return gates
+
+
 def p0_5_affine_c_pi(x: Any, y: Any, z: Any, tau: Any) -> Any:
     return 20.0 + 2.0 * x + 3.0 * y + 4.0 * z + 5.0 * tau
 
@@ -8629,6 +9392,10 @@ def next_debug_branch(
         if status == "BLOCKED_SCENARIO_MISSING" or "p5-5 fixture manifest" in text:
             return P5_5_BLOCKED_BRANCH
         return P5_5_FAIL_BRANCH
+    if normalized_experiment_id == "P5-6":
+        if status == "PASS":
+            return "PASS -> P5-7"
+        return P5_6_FAIL_BRANCH
     if status == "PASS":
         pass_branches = {
             "B0-1": "continue_to_B0-2_open_sky_baseline",
@@ -8702,6 +9469,9 @@ def analyze(args: argparse.Namespace) -> dict[str, Any]:
     p5_5_figure_paths = {
         name: figures_dir / name for name in P5_5_FIGURE_FILENAMES
     }
+    p5_6_figure_paths = {
+        name: figures_dir / name for name in P5_6_FIGURE_FILENAMES
+    }
     p0_phase = is_p0_experiment(args)
     p0_4_phase = is_experiment(args, "P0-4")
     p0_phase_index = p0_phase_number(args.experiment_id)
@@ -8712,6 +9482,7 @@ def analyze(args: argparse.Namespace) -> dict[str, Any]:
     p5_3_phase = is_experiment(args, "P5-3")
     p5_4_phase = is_experiment(args, "P5-4")
     p5_5_phase = is_experiment(args, "P5-5")
+    p5_6_phase = is_experiment(args, "P5-6")
     p5_runtime_phase = is_p5_runtime_experiment(args)
     p0_runtime_phase = p0_phase or p5_runtime_phase
     if bool(getattr(args, "blocked_fixture_audit", False)):
@@ -9136,7 +9907,11 @@ def analyze(args: argparse.Namespace) -> dict[str, Any]:
                 else (
                     p5_5_figure_paths["p5_5_p0_health.png"]
                     if p5_5_phase
-                    else figures_dir / f"{prefix}_p0_health_timeline.png"
+                    else (
+                        p5_6_figure_paths["p5_6_p0_health_unknown_timeline.png"]
+                        if p5_6_phase
+                        else figures_dir / f"{prefix}_p0_health_timeline.png"
+                    )
                 )
             )
         )
@@ -9340,7 +10115,11 @@ def analyze(args: argparse.Namespace) -> dict[str, Any]:
             else (
                 p5_5_figure_paths["p5_5_scenario_topdown.png"]
                 if p5_5_phase
-                else figures_dir / f"{prefix}_scenario_topdown.png"
+                else (
+                    p5_6_figure_paths["p5_6_scenario_topdown.png"]
+                    if p5_6_phase
+                    else figures_dir / f"{prefix}_scenario_topdown.png"
+                )
             )
         )
     )
@@ -9350,7 +10129,11 @@ def analyze(args: argparse.Namespace) -> dict[str, Any]:
         else (
             p5_5_figure_paths["p5_5_topic_activity_timeline.png"]
             if p5_5_phase
-            else figures_dir / f"{prefix}_topic_activity_timeline.png"
+            else (
+                p5_6_figure_paths["p5_6_topic_activity_timeline.png"]
+                if p5_6_phase
+                else figures_dir / f"{prefix}_topic_activity_timeline.png"
+            )
         )
     )
     source_figure_path = figures_dir / f"{prefix}_integrity_source_timeline.png"
@@ -9443,8 +10226,8 @@ def analyze(args: argparse.Namespace) -> dict[str, Any]:
         failures,
         inconclusive,
         allow_replan=p5_runtime_phase,
-        allow_emergency=p5_2_phase or p5_3_phase or p5_4_phase or p5_5_phase,
-        allow_final_gate_failure=p5_2_phase or p5_3_phase or p5_4_phase or p5_5_phase,
+        allow_emergency=p5_2_phase or p5_3_phase or p5_4_phase or p5_5_phase or p5_6_phase,
+        allow_final_gate_failure=p5_2_phase or p5_3_phase or p5_4_phase or p5_5_phase or p5_6_phase,
     )
     if p0_requires_odom_gate and p5_summary.get("action_counts"):
         failures.append(f"{experiment_label} P5 status reported actions while P5 is disabled")
@@ -9456,6 +10239,7 @@ def analyze(args: argparse.Namespace) -> dict[str, Any]:
     p5_3_gates: dict[str, Any] = {}
     p5_4_gates: dict[str, Any] = {}
     p5_5_gates: dict[str, Any] = {}
+    p5_6_gates: dict[str, Any] = {}
     p5_3_overlap: list[dict[str, Any]] = []
     p5_3_samples: list[dict[str, Any]] = []
     p5_3_event_window_rows: list[dict[str, Any]] = []
@@ -9593,6 +10377,19 @@ def analyze(args: argparse.Namespace) -> dict[str, Any]:
             p5_5_integrity_rows,
             p5_5_gates.get("fixture", {}),
         )
+    if p5_6_phase:
+        p5_6_gates = validate_p5_6_hard_gates(
+            manifest,
+            validator_summary,
+            topic_health,
+            p0_health_summary,
+            health_rows,
+            p5_rows,
+            p5_summary,
+            failures,
+            inconclusive,
+            topic_timestamps,
+        )
 
     csv_artifacts = [str(topic_counts_path)]
     csv_artifacts.extend(p0_csv_artifacts)
@@ -9614,6 +10411,8 @@ def analyze(args: argparse.Namespace) -> dict[str, Any]:
         p5_4_samples_path = csv_dir / f"{prefix}_p5_sample_diagnostics.csv"
         p5_4_query_alignment_path = csv_dir / f"{prefix}_query_alignment_evidence.csv"
         p5_5_integrity_stamp_path = csv_dir / f"{prefix}_integrity_stamp_freeze_evidence.csv"
+        p5_6_unknown_action_path = csv_dir / "p5_6_unknown_action_timeline.csv"
+        p5_6_cause_exclusion_path = csv_dir / "p5_6_cause_exclusion_summary.csv"
         action_rows = []
         t_rel = relative_time(p5_rows)
         for idx, row in enumerate(p5_rows):
@@ -9835,6 +10634,17 @@ def analyze(args: argparse.Namespace) -> dict[str, Any]:
                 P5_5_INTEGRITY_STAMP_FIELDS,
                 p5_5_integrity_rows,
             )
+        if p5_6_phase:
+            write_csv(
+                p5_6_unknown_action_path,
+                P5_6_UNKNOWN_ACTION_FIELDS,
+                build_p5_6_unknown_action_timeline_rows(p5_rows),
+            )
+            write_csv(
+                p5_6_cause_exclusion_path,
+                P5_6_CAUSE_EXCLUSION_FIELDS,
+                p5_6_cause_exclusion_rows(p5_6_gates),
+            )
         p5_csv_artifacts.extend(
             [
                 str(p5_action_path),
@@ -9854,6 +10664,9 @@ def analyze(args: argparse.Namespace) -> dict[str, Any]:
             p5_csv_artifacts.append(str(p5_4_query_alignment_path))
         if p5_5_phase:
             p5_csv_artifacts.append(str(p5_5_integrity_stamp_path))
+        if p5_6_phase:
+            p5_csv_artifacts.append(str(p5_6_unknown_action_path))
+            p5_csv_artifacts.append(str(p5_6_cause_exclusion_path))
         csv_artifacts.extend(
             artifact
             for artifact in p5_csv_artifacts
@@ -9875,7 +10688,11 @@ def analyze(args: argparse.Namespace) -> dict[str, Any]:
                 else (
                     p5_5_figure_paths["p5_5_margin_timeline.png"]
                     if p5_5_phase
-                    else figures_dir / f"{prefix}_p5_margin_timeline.png"
+                    else (
+                        p5_6_figure_paths["p5_6_margin_timeline.png"]
+                        if p5_6_phase
+                        else figures_dir / f"{prefix}_p5_margin_timeline.png"
+                    )
                 )
             )
         )
@@ -9883,9 +10700,17 @@ def analyze(args: argparse.Namespace) -> dict[str, Any]:
         p5_debounce_figure_path = (
             p5_5_figure_paths["p5_5_debounce_timeline.png"]
             if p5_5_phase
-            else figures_dir / f"{prefix}_p5_debounce_timeline.png"
+            else (
+                p5_6_figure_paths["p5_6_debounce_timeline.png"]
+                if p5_6_phase
+                else figures_dir / f"{prefix}_p5_debounce_timeline.png"
+            )
         )
-        p5_future_unknown_figure_path = figures_dir / f"{prefix}_future_unknown_duration_timeline.png"
+        p5_future_unknown_figure_path = (
+            p5_6_figure_paths["p5_6_future_unknown_duration_timeline.png"]
+            if p5_6_phase
+            else figures_dir / f"{prefix}_future_unknown_duration_timeline.png"
+        )
         p5_startup_correlation_figure_path = figures_dir / f"{prefix}_startup_correlation.png"
         p5_stale_integrity_correlation_figure_path = figures_dir / f"{prefix}_stale_integrity_correlation.png"
         p5_final_gate_figure_path = (
@@ -9902,7 +10727,11 @@ def analyze(args: argparse.Namespace) -> dict[str, Any]:
                 else (
                     p5_5_figure_paths["p5_5_trajectory_integrity_samples.png"]
                     if p5_5_phase
-                    else figures_dir / f"{prefix}_trajectory_integrity_samples.png"
+                    else (
+                        p5_6_figure_paths["p5_6_trajectory_integrity_samples.png"]
+                        if p5_6_phase
+                        else figures_dir / f"{prefix}_trajectory_integrity_samples.png"
+                    )
                 )
             )
         )
@@ -10013,6 +10842,18 @@ def analyze(args: argparse.Namespace) -> dict[str, Any]:
         ]
         p5_5_cause_exclusion_path = p5_5_figure_paths[
             "p5_5_cause_exclusion_summary.png"
+        ]
+        p5_6_action_reason_path = p5_6_figure_paths[
+            "p5_6_action_reason_timeline.png"
+        ]
+        p5_6_unknown_ratio_action_path = p5_6_figure_paths[
+            "p5_6_unknown_ratio_vs_action.png"
+        ]
+        p5_6_reason_histogram_path = p5_6_figure_paths[
+            "p5_6_reason_histogram.png"
+        ]
+        p5_6_cause_exclusion_figure_path = p5_6_figure_paths[
+            "p5_6_cause_exclusion_summary.png"
         ]
         if plot_p5_action_timeline(p5_rows, p5_action_figure_path):
             p5_figure_artifacts.append(str(p5_action_figure_path))
@@ -10280,6 +11121,21 @@ def analyze(args: argparse.Namespace) -> dict[str, Any]:
                 p5_5_cause_exclusion_path,
             ):
                 p5_figure_artifacts.append(str(p5_5_cause_exclusion_path))
+        if p5_6_phase:
+            if plot_p5_3_reason_timeline(p5_rows, p5_6_action_reason_path):
+                p5_figure_artifacts.append(str(p5_6_action_reason_path))
+            if plot_p5_6_unknown_ratio_vs_action(
+                p5_rows,
+                p5_6_unknown_ratio_action_path,
+            ):
+                p5_figure_artifacts.append(str(p5_6_unknown_ratio_action_path))
+            if plot_p5_6_reason_histogram(p5_rows, p5_6_reason_histogram_path):
+                p5_figure_artifacts.append(str(p5_6_reason_histogram_path))
+            if plot_p5_6_cause_exclusion_summary(
+                p5_6_gates,
+                p5_6_cause_exclusion_figure_path,
+            ):
+                p5_figure_artifacts.append(str(p5_6_cause_exclusion_figure_path))
         required_runtime_figures = [
             scenario_figure_path,
             topic_activity_figure_path,
@@ -10346,6 +11202,17 @@ def analyze(args: argparse.Namespace) -> dict[str, Any]:
                     path for path in required_runtime_figures
                     if path != p5_trajectory_figure_path
                 ]
+        if p5_6_phase:
+            p5_6_required_names = [
+                name
+                for name in P5_6_FIGURE_FILENAMES
+                if name != "p5_6_trajectory_integrity_samples.png"
+            ]
+            if p5_marker_rows:
+                p5_6_required_names.append("p5_6_trajectory_integrity_samples.png")
+            required_runtime_figures = [
+                p5_6_figure_paths[name] for name in p5_6_required_names
+            ]
         required_runtime_figures = list(dict.fromkeys(required_runtime_figures))
         p5_required_figures.extend(required_runtime_figures)
 
@@ -10387,6 +11254,7 @@ def analyze(args: argparse.Namespace) -> dict[str, Any]:
         )
         p5_4_required = set(p5_4_figure_paths.values())
         p5_5_required = set(p5_5_figure_paths.values())
+        p5_6_required = set(p5_6_figure_paths.values())
         for figure_path in p5_required_figures:
             if not figure_path.is_file() or figure_path.stat().st_size <= 0:
                 if p5_3_phase and figure_path in p5_3_event_window_required:
@@ -10411,6 +11279,8 @@ def analyze(args: argparse.Namespace) -> dict[str, Any]:
                     validate_p5_4_required_figures([figure_path], failures)
                 elif p5_5_phase and figure_path in p5_5_required:
                     validate_p5_5_required_figures([figure_path], failures)
+                elif p5_6_phase and figure_path in p5_6_required:
+                    validate_p5_6_required_figures([figure_path], failures)
                 else:
                     inconclusive.append(
                         f"{experiment_label} required figure was not generated or is empty: {figure_path}"
@@ -10455,6 +11325,7 @@ def analyze(args: argparse.Namespace) -> dict[str, Any]:
             "p5_3_hard_gates": p5_3_gates,
             "p5_4_hard_gates": p5_4_gates,
             "p5_5_hard_gates": p5_5_gates,
+            "p5_6_hard_gates": p5_6_gates,
             "marker_evidence": p5_marker_summary,
             "p5_5_integrity_stamp_error": p5_5_integrity_error,
         },

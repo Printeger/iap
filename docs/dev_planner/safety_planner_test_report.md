@@ -3805,3 +3805,96 @@ Verification notes:
 Final conclusion:
 
 PASS -> P5-6
+
+### P5-6 Future Unknown Field
+
+Fixture audit:
+
+| Check | Result |
+|---|---|
+| P5-5 default-off policy | `PASS`: `p5_5.fixture.enabled` remains default-disabled. |
+| P5-6 manifest fixture state | `PASS`: the formal P5-6 manifest records both flat and nested P5-5 fixture enabled fields as `false`. |
+| P5-6 launch isolation | `PASS`: the formal launch intentionally omitted `p5_5.fixture.enabled`, so no P5-5 stamp-freeze route or fixture was enabled. |
+
+Formal launch:
+
+```bash
+ros2 launch iap test_planner.launch.py \
+  experiment:=p5_fallback_unknown \
+  run_duration_s:=90 \
+  validation_duration_s:=90 \
+  start_rviz:=false \
+  run_validator:=true \
+  record_bag:=true \
+  validator_require_gnss_valid:=false \
+  validator_require_lidar_valid:=false
+```
+
+Analyzer:
+
+```bash
+python3 scripts/dev_planner/analyze_safety_planner_run.py \
+  --experiment-id P5-6 \
+  --export-dir results/planner_validation/exports/test_planner_p5_fallback_unknown_fallback_only_1784010850303 \
+  --bag-dir results/planner_validation/bags/test_planner_p5_fallback_unknown_fallback_only_20260714T063410Z \
+  --fail-on-threshold
+```
+
+Latest artifacts:
+
+| Artifact | Path |
+|---|---|
+| Export | `results/planner_validation/exports/test_planner_p5_fallback_unknown_fallback_only_1784010850303` |
+| Bag | `results/planner_validation/bags/test_planner_p5_fallback_unknown_fallback_only_20260714T063410Z` |
+| Analyzer summary | `results/planner_validation/exports/test_planner_p5_fallback_unknown_fallback_only_1784010850303/metadata/safety_planner_analysis_summary.json` |
+| Analyzer status | `FAIL`: `passed=false`, `status=FAIL`, `next_debug_branch=FAIL -> debug P5-6 future unknown policy / reason attribution / debounce`. |
+
+P5-6 gate table:
+
+| Gate | Result |
+|---|---|
+| Validator | `PASS`: validator summary `passed=true`, `message_count=884`, fallback-only evidence observed. |
+| P0/P5 topic completeness | `PASS`: required P0/P5 topics were stable; active unknown-window continuous topics were also stable. |
+| P5-5 fixture exclusion | `PASS`: P5-5 fixture disabled, with `p5_5.fixture.enabled=false` in flat and nested manifest fields. |
+| P0 unknown ratio | `FAIL`: post-startup P0 unknown ratio ranged `0.010078` to `0.146172`, below the `0.20` peak and delta acceptance thresholds. |
+| P5 unknown ratio | `PASS`: P5 unknown ratio rose from `0.0` to `1.0`. |
+| Future unknown duration | `FAIL`: `future_unknown_duration_s` stayed at `0.0` and never crossed `p5.future_unknown_to_emergency_s=2.0`. |
+| Replan | `FAIL`: `0` `REQUEST_REPLAN` rows were attributed to future unknown; observed replans were startup/snapshot unavailable. |
+| Emergency | `FAIL`: `0` future-unknown `REQUEST_EMERGENCY_STOP_CANDIDATE` rows were observed. |
+| Debounce order | `FAIL`: no future-unknown replan-before-emergency sequence was available; immediate emergency was not observed. |
+| Reason attribution | `FAIL`: the actionable unknown rows were attributed to `snapshot_unavailable`/`current_invalid`, not `future_unknown` or equivalent unknown-only policy. |
+| Cause exclusions | `FAIL`: startup/snapshot unavailable contamination count was `1477`; current-stale, P5-5 fixture, future-bad, topic-gap, and low-margin-only exclusions were zero. |
+
+Required P5-6 figure conclusions:
+
+| Figure filename | Conclusion |
+|---|---|
+| `p5_6_scenario_topdown.png` | Generated; shows the fallback-only scenario trajectory context for the formal P5-6 run. |
+| `p5_6_topic_activity_timeline.png` | Generated; shows required topics remained available, so the failure is not a topic-completeness issue. |
+| `p5_6_p0_health_unknown_timeline.png` | Generated; shows P0 unknown coverage did not rise enough after startup to satisfy P5-6. |
+| `p5_6_future_unknown_duration_timeline.png` | Generated; shows `future_unknown_duration_s` remained at `0.0` and never crossed the emergency threshold. |
+| `p5_6_action_reason_timeline.png` | Generated; shows replans attributed to startup/snapshot unavailable rather than future unknown. |
+| `p5_6_unknown_ratio_vs_action.png` | Generated; shows high P5 unknown ratio rows did not become accepted future-unknown actions. |
+| `p5_6_margin_timeline.png` | Generated; shows margins stayed finite and did not provide a future-bad explanation for the failure. |
+| `p5_6_debounce_timeline.png` | Generated; shows the future-unknown debounce path never progressed to emergency. |
+| `p5_6_reason_histogram.png` | Generated; shows `snapshot_unavailable` dominated the non-OK action reasons. |
+| `p5_6_cause_exclusion_summary.png` | Generated; shows startup/snapshot contamination present and other excluded causes absent. |
+| `p5_6_trajectory_integrity_samples.png` | Generated; marker rows were present, so marker-level trajectory integrity evidence was included. |
+
+Verification notes:
+
+| Check | Result |
+|---|---|
+| Rebuild before formal run | `PASS`: `colcon build --packages-select iap --event-handlers console_direct+`. |
+| Ego planner target build | `PASS`: `cmake --build build/ego_planner --target ego_planner_node test_p5_runtime_integrity_gate -- -j$(nproc)`. |
+| Python compile check | `PASS`: `python3 -m py_compile launch/test_planner.launch.py scripts/dev_planner/analyze_safety_planner_run.py`. |
+| Focused analyzer tests | `PASS`: `python3 test/test_analyze_safety_planner_run_p5_1.py` ran `86` tests. |
+| Focused P0/P5 ego-planner CTests | `PASS`: `ctest --test-dir build/ego_planner -R "test_p5_runtime_integrity_gate|test_p0_risk_grid_runtime" --output-on-failure`. |
+| Focused predictor/risk-grid CTests | `PASS`: `ctest --test-dir build/iap -R "test_predictor_module|test_risk_grid_map" --output-on-failure`. |
+| Formal launch | `PASS`: completed and wrote export/bag artifacts; validator passed, while ROS shutdown emitted teardown process-death logs after recording stopped. |
+| P5-6 analyzer with `--fail-on-threshold` | `FAIL`: exit `2`, `status=FAIL`, and the failure is classified as evidence not meeting P5-6 hard gates. |
+| Diff whitespace check | `PASS`: `git diff --check`. |
+
+Final conclusion:
+
+FAIL -> debug P5-6 future unknown policy / reason attribution / debounce
