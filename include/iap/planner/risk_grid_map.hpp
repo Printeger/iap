@@ -44,6 +44,19 @@ struct P5_4NearRiskZoneFixtureConfig {
   double vpl_pred_m = 10.2;
 };
 
+struct P5_6FutureUnknownZoneFixtureConfig {
+  bool enabled = false;
+  std::string name = "future_unknown_zone_v1";
+  double x_min_m = -1.0;
+  double x_max_m = 12.5;
+  double y_min_m = -15.0;
+  double y_max_m = 15.0;
+  double z_min_m = -3.0;
+  double z_max_m = 3.0;
+  double tau_min_s = 0.2;
+  double tau_max_s = 2.0;
+};
+
 struct RiskGridMapParams {
   std::string frame_id = "map";
   double resolution_m = 0.75;
@@ -59,6 +72,7 @@ struct RiskGridMapParams {
   bool use_predictor_batch_query = true;
   P5_3HighRiskZoneFixtureConfig p5_3_fixture;
   P5_4NearRiskZoneFixtureConfig p5_4_fixture;
+  P5_6FutureUnknownZoneFixtureConfig p5_6_fixture;
 };
 
 struct RiskGridHealth {

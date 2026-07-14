@@ -84,6 +84,10 @@ _Avoid_: natural fallback-only stale behavior, topic outage, invalid PL/AL repor
 P5 acceptance behavior where elevated future unknown coverage drives replan and emergency actions through explicit unknown attribution without P5-5 fixture, stale, future-bad, startup, snapshot, topic-gap, or low-margin-only contamination.
 _Avoid_: P5-5 stale fixture evidence, high-risk future-bad fixture evidence, topic outage diagnosis
 
+**P5-6 future-unknown fixture**:
+The P5-only deterministic fixture `future_unknown_zone_v1` that makes in-bounds future samples return available, invalid, non-stale PL evidence with reason `future_unknown` and no finite PL.
+_Avoid_: natural fallback unknowns, P5-3/P5-4 high-risk PL fixtures, P5-5 current-stale fixture evidence
+
 **Causal replan evidence**:
 Analyzer/status evidence that a `REQUEST_REPLAN` action and the future-risk gate/reason that caused it are both traceable in the same P5 run, including concurrent current and future reasons when both gates are active.
 _Avoid_: action count without gate reason, margin evidence with no replan attribution

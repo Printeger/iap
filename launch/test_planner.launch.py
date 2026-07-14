@@ -412,6 +412,18 @@ EXPERIMENT_PRESETS = {
         "p0.enable_risk_grid": "true",
         "p0.debug_metrics_enable": "true",
         "p5.debug_metrics_enable": "true",
+        "p5_3.fixture.enabled": "false",
+        "p5_4.fixture.enabled": "false",
+        "p5_6.fixture.enabled": "true",
+        "p5_6.fixture.name": "future_unknown_zone_v1",
+        "p5_6.fixture.x_min": "-1.0",
+        "p5_6.fixture.x_max": "12.5",
+        "p5_6.fixture.y_min": "-15.0",
+        "p5_6.fixture.y_max": "15.0",
+        "p5_6.fixture.z_min": "-3.0",
+        "p5_6.fixture.z_max": "3.0",
+        "p5_6.fixture.tau_min": "0.2",
+        "p5_6.fixture.tau_max": "2.0",
     },
     "p1_degraded_lidar_good": {
         "scenario": "gnss_degraded_lidar_good",
@@ -674,6 +686,16 @@ ARG_DEFAULTS = [
     ("p5_5.fixture.name", "current_integrity_stamp_freeze_v1"),
     ("p5_5.fixture.start_s", "30.0"),
     ("p5_5.fixture.duration_s", "12.0"),
+    ("p5_6.fixture.enabled", "false"),
+    ("p5_6.fixture.name", "future_unknown_zone_v1"),
+    ("p5_6.fixture.x_min", "-1.0"),
+    ("p5_6.fixture.x_max", "12.5"),
+    ("p5_6.fixture.y_min", "-15.0"),
+    ("p5_6.fixture.y_max", "15.0"),
+    ("p5_6.fixture.z_min", "-3.0"),
+    ("p5_6.fixture.z_max", "3.0"),
+    ("p5_6.fixture.tau_min", "0.2"),
+    ("p5_6.fixture.tau_max", "2.0"),
     ("p1.use_integrity_cost", "false"),
     ("p1.metrics_only", "true"),
     ("p1.lambda_integrity", "0.0"),
@@ -1010,6 +1032,10 @@ def _param_int(context, name):
     return int(LaunchConfiguration(name).perform(context))
 
 
+def _p5_6_fixture_effective_enabled(context):
+    return _param_bool(context, "p5_6.fixture.enabled") and not _param_bool(context, "p5_5.fixture.enabled")
+
+
 def _odom_visualization_node(name, odom_topic, cmd_topic, topic_prefix, color, drone_id, fixed_text=False, fixed_position=(0.0, 0.0, 14.0)):
     r, g, b = color
     text_x, text_y, text_z = fixed_position
@@ -1064,6 +1090,7 @@ def _ego_planner_node(context, drone_id, planner_odom_topic, cloud_topic, camera
     p4_use = _param_bool(context, "p4.enable_risk_aware_astar") if "p4.enable_risk_aware_astar" in overrides else p4_enabled
     p5_runtime = _param_bool(context, "p5.enable_runtime_gate") if "p5.enable_runtime_gate" in overrides else p5_runtime_enabled
     p5_final = _param_bool(context, "p5.enable_final_gate") if "p5.enable_final_gate" in overrides else p5_final_enabled
+    p5_6_fixture_effective_enabled = _p5_6_fixture_effective_enabled(context)
 
     p1_debug_path = LaunchConfiguration("p1.debug_csv_path").perform(context)
     if not p1_debug_path:
@@ -1224,6 +1251,16 @@ def _ego_planner_node(context, drone_id, planner_odom_topic, cloud_topic, camera
             {"p5_4.fixture.tau_max": _param_float(context, "p5_4.fixture.tau_max")},
             {"p5_4.fixture.hpl_pred_m": _param_float(context, "p5_4.fixture.hpl_pred_m")},
             {"p5_4.fixture.vpl_pred_m": _param_float(context, "p5_4.fixture.vpl_pred_m")},
+            {"p5_6.fixture.enabled": p5_6_fixture_effective_enabled},
+            {"p5_6.fixture.name": LaunchConfiguration("p5_6.fixture.name").perform(context)},
+            {"p5_6.fixture.x_min": _param_float(context, "p5_6.fixture.x_min")},
+            {"p5_6.fixture.x_max": _param_float(context, "p5_6.fixture.x_max")},
+            {"p5_6.fixture.y_min": _param_float(context, "p5_6.fixture.y_min")},
+            {"p5_6.fixture.y_max": _param_float(context, "p5_6.fixture.y_max")},
+            {"p5_6.fixture.z_min": _param_float(context, "p5_6.fixture.z_min")},
+            {"p5_6.fixture.z_max": _param_float(context, "p5_6.fixture.z_max")},
+            {"p5_6.fixture.tau_min": _param_float(context, "p5_6.fixture.tau_min")},
+            {"p5_6.fixture.tau_max": _param_float(context, "p5_6.fixture.tau_max")},
             {"p1.use_integrity_cost": p1_use},
             {"p1.metrics_only": p1_metrics_only},
             {"p1.lambda_integrity": _param_float(context, "p1.lambda_integrity")},
@@ -1526,6 +1563,8 @@ def _launch_setup(context):
         if p5_4_expected_hal is not None and p5_4_expected_val is not None
         else None
     )
+    p5_6_fixture_requested = _param_bool(context, "p5_6.fixture.enabled")
+    p5_6_fixture_effective = _p5_6_fixture_effective_enabled(context)
 
     manifest = {
         "experiment": experiment,
@@ -1587,8 +1626,20 @@ def _launch_setup(context):
         "p5_5.fixture.name": LaunchConfiguration("p5_5.fixture.name").perform(context),
         "p5_5.fixture.start_s": _param_float(context, "p5_5.fixture.start_s"),
         "p5_5.fixture.duration_s": _param_float(context, "p5_5.fixture.duration_s"),
+        "p5_6.fixture.enabled": p5_6_fixture_requested,
+        "p5_6.fixture.effective_enabled": p5_6_fixture_effective,
+        "p5_6.fixture.name": LaunchConfiguration("p5_6.fixture.name").perform(context),
+        "p5_6.fixture.x_min": _param_float(context, "p5_6.fixture.x_min"),
+        "p5_6.fixture.x_max": _param_float(context, "p5_6.fixture.x_max"),
+        "p5_6.fixture.y_min": _param_float(context, "p5_6.fixture.y_min"),
+        "p5_6.fixture.y_max": _param_float(context, "p5_6.fixture.y_max"),
+        "p5_6.fixture.z_min": _param_float(context, "p5_6.fixture.z_min"),
+        "p5_6.fixture.z_max": _param_float(context, "p5_6.fixture.z_max"),
+        "p5_6.fixture.tau_min": _param_float(context, "p5_6.fixture.tau_min"),
+        "p5_6.fixture.tau_max": _param_float(context, "p5_6.fixture.tau_max"),
         "p5.current_stale_to_replan_s": _param_float(context, "p5.current_stale_to_replan_s"),
         "p5.current_stale_to_emergency_s": _param_float(context, "p5.current_stale_to_emergency_s"),
+        "p5.future_unknown_to_emergency_s": _param_float(context, "p5.future_unknown_to_emergency_s"),
         "p5.pred_alert_limit_mode": p5_pred_al_mode,
         "p5.future_replan_margin_m": _param_float(context, "p5.future_replan_margin_m"),
         "p5.future_emergency_margin_m": _param_float(context, "p5.future_emergency_margin_m"),
@@ -1711,6 +1762,38 @@ def _launch_setup(context):
                     "enabled": _param_bool(context, "p5_5.fixture.enabled"),
                     "waypoints": [list(waypoint) for waypoint in P5_5_FIXTURE_ROUTE_WAYPOINTS],
                     "reason": "keep P5 runtime gate active through the stale fixture window",
+                },
+            },
+        },
+        "p5_6": {
+            "fixture": {
+                "enabled": p5_6_fixture_requested,
+                "effective_enabled": p5_6_fixture_effective,
+                "name": LaunchConfiguration("p5_6.fixture.name").perform(context),
+                "bounds": {
+                    "x": [
+                        _param_float(context, "p5_6.fixture.x_min"),
+                        _param_float(context, "p5_6.fixture.x_max"),
+                    ],
+                    "y": [
+                        _param_float(context, "p5_6.fixture.y_min"),
+                        _param_float(context, "p5_6.fixture.y_max"),
+                    ],
+                    "z": [
+                        _param_float(context, "p5_6.fixture.z_min"),
+                        _param_float(context, "p5_6.fixture.z_max"),
+                    ],
+                },
+                "tau_window_s": [
+                    _param_float(context, "p5_6.fixture.tau_min"),
+                    _param_float(context, "p5_6.fixture.tau_max"),
+                ],
+                "expected_reason": "future_unknown",
+                "expected_unknown": {
+                    "available": True,
+                    "valid": False,
+                    "stale": False,
+                    "finite_pl": False,
                 },
             },
         },

@@ -3898,3 +3898,95 @@ Verification notes:
 Final conclusion:
 
 FAIL -> debug P5-6 future unknown policy / reason attribution / debounce
+
+### P5-6 Future Unknown Field Rerun
+
+Dedicated fixture audit:
+
+| Check | Result |
+|---|---|
+| P5-6 fixture enabled/effective | `PASS`: flat and nested manifest fields record `p5_6.fixture.enabled=true`, `effective_enabled=true`, and `name=future_unknown_zone_v1`. |
+| Fixture bounds and tau | `PASS`: manifest bounds are `x=[-1.0,12.5]`, `y=[-15.0,15.0]`, `z=[-3.0,3.0]`, `tau=[0.2,2.0]`. |
+| P5-5/P5-3/P5-4 isolation | `PASS`: P5-5, P5-3, and P5-4 fixtures are all disabled in flat and nested manifest evidence. |
+| Runtime unknown semantics | `PASS`: fixture samples report `available=true`, `valid=false`, `stale=false`, no finite PL, and reason `future_unknown`. |
+
+Formal launch:
+
+```bash
+ros2 launch iap test_planner.launch.py \
+  experiment:=p5_fallback_unknown \
+  run_duration_s:=90 \
+  validation_duration_s:=90 \
+  start_rviz:=false \
+  run_validator:=true \
+  record_bag:=true \
+  validator_require_gnss_valid:=false \
+  validator_require_lidar_valid:=false
+```
+
+Analyzer:
+
+```bash
+python3 scripts/dev_planner/analyze_safety_planner_run.py \
+  --experiment-id P5-6 \
+  --export-dir results/planner_validation/exports/test_planner_p5_fallback_unknown_fallback_only_1784027417425 \
+  --bag-dir results/planner_validation/bags/test_planner_p5_fallback_unknown_fallback_only_20260714T111017Z \
+  --fail-on-threshold
+```
+
+Latest artifacts:
+
+| Artifact | Path |
+|---|---|
+| Export | `results/planner_validation/exports/test_planner_p5_fallback_unknown_fallback_only_1784027417425` |
+| Bag | `results/planner_validation/bags/test_planner_p5_fallback_unknown_fallback_only_20260714T111017Z` |
+| Analyzer summary | `results/planner_validation/exports/test_planner_p5_fallback_unknown_fallback_only_1784027417425/metadata/safety_planner_analysis_summary.json` |
+| Analyzer status | `PASS`: `passed=true`, `status=PASS`, `failures=[]`, `inconclusive=[]`, `next_debug_branch=PASS -> P5-7`. |
+
+P5-6 gate table:
+
+| Gate | Result |
+|---|---|
+| Validator | `PASS`: validator summary `passed=true`, `message_count=883`, fallback-only evidence observed. |
+| P0/P5 topic completeness | `PASS`: required P0/P5 topics were stable and active-window topic-gap exclusion was clean. |
+| P0 health after startup | `PASS`: post-startup `ready=false` and `stale=true` counts are `0`; P0 unknown coverage was elevated with max `0.333656`. |
+| Accepted future-unknown window | `PASS`: accepted post-startup window spans `18.223210s`, starting at bag time `1784027427.4017603`. |
+| Fixture sample evidence | `PASS`: `4539` trajectory samples were evaluated in the accepted window, including `3851` fixture-attributed unknown samples. |
+| P5 unknown ratio | `PASS`: P5 unknown ratio rose from `0.0` to `1.0`. |
+| Future unknown duration | `PASS`: `future_unknown_duration_s` rose from `0.0` to `18.536001s`, crossing `p5.future_unknown_to_emergency_s=2.0s`. |
+| Replan attribution | `PASS`: `272` `REQUEST_REPLAN` rows were attributed to future unknown before emergency. |
+| Emergency attribution | `PASS`: `313` `REQUEST_EMERGENCY_STOP_CANDIDATE` rows were attributed to sustained future unknown. |
+| Debounce order | `PASS`: replan occurred before emergency and no immediate emergency was accepted. |
+| Cause exclusions | `PASS`: current-stale, current-invalid, P5-5 fixture, future-bad, startup/snapshot, topic-gap, and low-margin-only contamination counts are all `0`. |
+
+Required P5-6 figure conclusions:
+
+| Figure filename | Conclusion |
+|---|---|
+| `p5_6_scenario_topdown.png` | Generated; shows the fallback-only trajectory context for the accepted P5-6 run. |
+| `p5_6_unknown_field_overlay.png` | Generated; overlays risk-validity cloud, trajectory integrity samples, and fixture bounds, showing future samples entering the future-unknown fixture. |
+| `p5_6_p0_health_unknown_timeline.png` | Generated; shows post-startup P0 health ready/non-stale with elevated unknown coverage. |
+| `p5_6_future_unknown_duration_timeline.png` | Generated; shows the future-unknown duration crossing the `2.0s` emergency threshold. |
+| `p5_6_unknown_ratio_vs_action.png` | Generated; shows high P5 unknown ratio rows transitioning from replan to emergency candidate. |
+| `p5_6_action_reason_timeline.png` | Generated; ties P5 actions to `future_unknown` attribution rather than startup/snapshot causes. |
+| `p5_6_debounce_timeline.png` | Generated; shows early replan evidence before sustained unknown emergency candidates. |
+| `p5_6_cause_exclusion_summary.png` | Generated; shows zero accepted-window contamination from excluded causes. |
+| `p5_6_trajectory_integrity_samples.png` | Generated; shows marker-level trajectory samples, including fixture-attributed unknown samples. |
+
+Verification notes:
+
+| Check | Result |
+|---|---|
+| Rebuild before formal run | `PASS`: `colcon build --packages-select iap --event-handlers console_direct+`. |
+| Ego planner target build | `PASS`: `cmake --build build/ego_planner --target ego_planner_node test_p5_runtime_integrity_gate test_p0_risk_grid_runtime -- -j$(nproc)`. |
+| Python compile check | `PASS`: `python3 -m py_compile launch/test_planner.launch.py scripts/dev_planner/analyze_safety_planner_run.py`. |
+| Focused analyzer tests | `PASS`: `python3 test/test_analyze_safety_planner_run_p5_1.py` ran `91` tests. |
+| Focused P0/P5 ego-planner CTests | `PASS`: `ctest --test-dir build/ego_planner -R "test_p5_runtime_integrity_gate|test_p0_risk_grid_runtime" --output-on-failure`. |
+| Focused predictor/risk-grid CTests | `PASS`: `ctest --test-dir build/iap -R "test_predictor_module|test_risk_grid_map" --output-on-failure`. |
+| Formal launch | `PASS`: completed and wrote export/bag artifacts; validator passed, recorder stopped cleanly, and later ROS SIGINT teardown process-death logs were shutdown-only. |
+| P5-6 analyzer with `--fail-on-threshold` | `PASS`: exit `0`, `status=PASS`, `next_debug_branch=PASS -> P5-7`. |
+| Diff whitespace check | `PASS`: `git diff --check`. |
+
+Final conclusion:
+
+PASS -> P5-7

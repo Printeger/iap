@@ -554,12 +554,39 @@ def p5_6_manifest(p5_5_enabled=False, nested_enabled=None):
     manifest.update(
         {
             "p5.future_unknown_to_emergency_s": 2.0,
+            "p5_3.fixture.enabled": False,
+            "p5_4.fixture.enabled": False,
             "p5_5.fixture.enabled": p5_5_enabled,
             "p5_5.fixture.name": "current_integrity_stamp_freeze_v1",
+            "p5_6.fixture.enabled": True,
+            "p5_6.fixture.effective_enabled": not p5_5_enabled,
+            "p5_6.fixture.name": "future_unknown_zone_v1",
+            "p5_6.fixture.x_min": -1.0,
+            "p5_6.fixture.x_max": 12.5,
+            "p5_6.fixture.y_min": -15.0,
+            "p5_6.fixture.y_max": 15.0,
+            "p5_6.fixture.z_min": -3.0,
+            "p5_6.fixture.z_max": 3.0,
+            "p5_6.fixture.tau_min": 0.2,
+            "p5_6.fixture.tau_max": 2.0,
             "p5_5": {
                 "fixture": {
                     "enabled": nested,
                     "name": "current_integrity_stamp_freeze_v1",
+                }
+            },
+            "p5_6": {
+                "fixture": {
+                    "enabled": True,
+                    "effective_enabled": not p5_5_enabled,
+                    "name": "future_unknown_zone_v1",
+                    "bounds": {
+                        "x": [-1.0, 12.5],
+                        "y": [-15.0, 15.0],
+                        "z": [-3.0, 3.0],
+                    },
+                    "tau_window_s": [0.2, 2.0],
+                    "expected_reason": "future_unknown",
                 }
             },
         }
@@ -577,6 +604,39 @@ def p5_6_p0_rows():
 
 
 def p5_6_status_rows():
+    unknown_samples = [
+        p5_3_sample(tau_s=0.0, x=-12.0, y=0.0, z=1.2),
+        p5_3_sample(
+            tau_s=0.2,
+            x=0.0,
+            y=0.0,
+            z=1.2,
+            hpl="",
+            vpl="",
+            im_min="",
+            unknown=True,
+            reason="future_unknown",
+            fixture_match=True,
+            fixture_expected_hpl="",
+            fixture_expected_vpl="",
+            fixture_expected_reason="future_unknown",
+        ),
+        p5_3_sample(
+            tau_s=0.8,
+            x=1.0,
+            y=0.0,
+            z=1.2,
+            hpl="",
+            vpl="",
+            im_min="",
+            unknown=True,
+            reason="future_unknown",
+            fixture_match=True,
+            fixture_expected_hpl="",
+            fixture_expected_vpl="",
+            fixture_expected_reason="future_unknown",
+        ),
+    ]
     return [
         p5_row(bag_time_s=9.0, unknown_ratio=0.0, future_unknown_duration_s=0.0),
         p5_row(
@@ -592,6 +652,7 @@ def p5_6_status_rows():
             future_unknown_duration_s=0.2,
             unknown_count=4,
             bad_count=0,
+            samples=unknown_samples,
         ),
         p5_row(
             bag_time_s=10.8,
@@ -606,6 +667,7 @@ def p5_6_status_rows():
             future_unknown_duration_s=0.8,
             unknown_count=5,
             bad_count=0,
+            samples=unknown_samples,
         ),
         p5_row(
             bag_time_s=12.4,
@@ -623,6 +685,7 @@ def p5_6_status_rows():
             future_unknown_duration_s=2.4,
             unknown_count=5,
             bad_count=0,
+            samples=unknown_samples,
         ),
     ]
 
@@ -2119,6 +2182,8 @@ class P5_6AnalyzerTest(unittest.TestCase):
         self.assertEqual([], inconclusive)
         self.assertTrue(gates["passed"])
         self.assertTrue(gates["p5_5_fixture_disabled"])
+        self.assertTrue(gates["fixture_ready"])
+        self.assertTrue(gates["fixture_unknown_samples_present"])
         self.assertTrue(gates["p0_unknown_ratio_grew"])
         self.assertTrue(gates["p5_unknown_ratio_grew"])
         self.assertTrue(gates["p5_future_unknown_duration_crossed_threshold"])
@@ -2126,6 +2191,60 @@ class P5_6AnalyzerTest(unittest.TestCase):
         self.assertTrue(gates["unknown_replan_present"])
         self.assertTrue(gates["unknown_emergency_present"])
         self.assertTrue(gates["replan_before_emergency"])
+
+    def test_p5_6_accepts_elevated_p0_unknown_without_large_delta(self):
+        p0_rows = [
+            p0_health_row(0, unknown_ratio=0.25, valid_ratio=0.75),
+            p0_health_row(1, unknown_ratio=0.31, valid_ratio=0.69),
+            p0_health_row(2, unknown_ratio=0.33, valid_ratio=0.67),
+        ]
+
+        _, gates, failures, inconclusive = self.validate_rows(p0_rows=p0_rows)
+
+        self.assertEqual([], failures)
+        self.assertEqual([], inconclusive)
+        self.assertTrue(gates["p0_unknown_ratio_elevated"])
+        self.assertFalse(gates["p0_unknown_ratio_grew"])
+        self.assertTrue(gates["passed"])
+
+    def test_p5_6_fails_when_future_unknown_fixture_is_missing(self):
+        manifest = p5_6_manifest()
+        for key in list(manifest):
+            if str(key).startswith("p5_6.fixture."):
+                manifest.pop(key)
+        manifest.pop("p5_6", None)
+
+        _, gates, failures, _ = self.validate_rows(manifest=manifest)
+
+        self.assertFalse(gates["passed"])
+        self.assertFalse(gates["fixture_present"])
+        self.assertTrue(any("fixture manifest is missing" in failure for failure in failures), failures)
+
+    def test_p5_6_fails_when_future_unknown_fixture_is_not_effective(self):
+        manifest = p5_6_manifest()
+        manifest["p5_6.fixture.effective_enabled"] = False
+        manifest["p5_6"]["fixture"]["effective_enabled"] = False
+
+        _, gates, failures, _ = self.validate_rows(manifest=manifest)
+
+        self.assertFalse(gates["passed"])
+        self.assertTrue(gates["fixture_enabled"])
+        self.assertFalse(gates["fixture_effective_enabled"])
+        self.assertTrue(any("not effectively enabled" in failure for failure in failures), failures)
+
+    def test_p5_6_fails_when_p5_3_or_p5_4_fixture_is_enabled(self):
+        for key, gate_key, text in (
+            ("p5_3.fixture.enabled", "p5_3_fixture_disabled", "P5-3"),
+            ("p5_4.fixture.enabled", "p5_4_fixture_disabled", "P5-4"),
+        ):
+            manifest = p5_6_manifest()
+            manifest[key] = True
+
+            _, gates, failures, _ = self.validate_rows(manifest=manifest)
+
+            self.assertFalse(gates["passed"])
+            self.assertFalse(gates[gate_key])
+            self.assertTrue(any(text in failure for failure in failures), failures)
 
     def test_p5_6_accepts_al_invalid_as_unknown_when_bad_ratio_is_zero(self):
         rows = p5_6_status_rows()
@@ -2284,6 +2403,16 @@ class P5_6AnalyzerTest(unittest.TestCase):
             ),
             (
                 {
+                    "reason": "current_invalid",
+                    "raw_reason": "current_invalid",
+                    "current_reason": "current_invalid",
+                    "active_reasons": ["current_invalid"],
+                },
+                "current_invalid",
+                "current_invalid_excluded",
+            ),
+            (
+                {
                     "reason": "future_bad",
                     "raw_reason": "future_bad",
                     "future_reason": "future_bad",
@@ -2350,6 +2479,37 @@ class P5_6AnalyzerTest(unittest.TestCase):
         self.assertFalse(gates["active_required_p5_topics_stable"])
         self.assertTrue(any("topic gap" in failure for failure in failures), failures)
 
+    def test_p5_6_ignores_snapshot_and_current_invalid_outside_unknown_window(self):
+        rows = [
+            p5_row(
+                bag_time_s=1.0,
+                phase="startup",
+                action="REQUEST_REPLAN",
+                raw_action="REQUEST_REPLAN",
+                reason="snapshot_unavailable",
+                raw_reason="snapshot_unavailable",
+                unknown_ratio=1.0,
+            ),
+            *p5_6_status_rows(),
+            p5_row(
+                bag_time_s=30.0,
+                action="REQUEST_REPLAN",
+                raw_action="REQUEST_REPLAN",
+                reason="current_invalid",
+                raw_reason="current_invalid",
+                current_reason="current_invalid",
+                active_reasons=["current_invalid"],
+                unknown_ratio=0.0,
+                future_unknown_duration_s=0.0,
+            ),
+        ]
+
+        _, gates, failures, _ = self.validate_rows(rows)
+
+        self.assertTrue(gates["passed"], failures)
+        self.assertTrue(gates["startup_snapshot_excluded"])
+        self.assertTrue(gates["current_invalid_excluded"])
+
     def test_p5_6_required_figures_are_fail_closed(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             failures = []
@@ -2375,14 +2535,12 @@ class P5_6AnalyzerTest(unittest.TestCase):
         self.assertEqual(
             [
                 "p5_6_scenario_topdown.png",
-                "p5_6_topic_activity_timeline.png",
+                "p5_6_unknown_field_overlay.png",
                 "p5_6_p0_health_unknown_timeline.png",
                 "p5_6_future_unknown_duration_timeline.png",
-                "p5_6_action_reason_timeline.png",
                 "p5_6_unknown_ratio_vs_action.png",
-                "p5_6_margin_timeline.png",
+                "p5_6_action_reason_timeline.png",
                 "p5_6_debounce_timeline.png",
-                "p5_6_reason_histogram.png",
                 "p5_6_cause_exclusion_summary.png",
                 "p5_6_trajectory_integrity_samples.png",
             ],

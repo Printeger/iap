@@ -854,6 +854,162 @@ TEST(RiskGridMapTest, P5_4QueryTimeFixtureBypassesOccupiedSkip) {
   EXPECT_DOUBLE_EQ(future_sample.vpl_pred, 10.2);
 }
 
+TEST(RiskGridMapTest, P5_6FixtureDisabledByDefaultDoesNotAlterProviderOutput) {
+  iap::RiskGridMapParams params = base_params();
+  params.horizons_s = {0.0, 0.5, 1.0, 1.5, 2.0};
+  ASSERT_FALSE(params.p5_6_fixture.enabled);
+  iap::RiskGridMap grid(params);
+  AffineProvider provider;
+  std::string reason;
+
+  ASSERT_TRUE(grid.refreshFromProvider(Eigen::Vector3d::Zero(), 10.0,
+                                       provider, &reason))
+      << reason;
+
+  auto snapshot = grid.acquireSnapshot();
+  ASSERT_NE(snapshot, nullptr);
+  const Eigen::Vector3d query(0.0, 0.0, 0.0);
+  iap::PredictedPLSample pl;
+  ASSERT_TRUE(snapshot->queryPredictedPL(query, 10.5, &pl)) << pl.reason;
+  EXPECT_TRUE(pl.available);
+  EXPECT_TRUE(pl.valid);
+  EXPECT_FALSE(pl.stale);
+  EXPECT_FALSE(pl.fixture_match);
+  EXPECT_EQ(pl.reason, "ok");
+  EXPECT_NEAR(pl.hpl_pred, AffineProvider::affine(query, 0.5), 1.0e-9);
+}
+
+TEST(RiskGridMapTest, P5_6FixtureMarksOnlyInBoundsTauSamplesUnknown) {
+  iap::RiskGridMapParams params = base_params();
+  params.horizons_s = {0.0, 0.5, 1.0, 1.5, 2.0};
+  params.p5_6_fixture.enabled = true;
+  params.p5_6_fixture.name = "future_unknown_zone_v1";
+  params.p5_6_fixture.x_min_m = -0.6;
+  params.p5_6_fixture.x_max_m = 0.6;
+  params.p5_6_fixture.y_min_m = -0.6;
+  params.p5_6_fixture.y_max_m = 0.6;
+  params.p5_6_fixture.z_min_m = -0.6;
+  params.p5_6_fixture.z_max_m = 0.6;
+  params.p5_6_fixture.tau_min_s = 0.4;
+  params.p5_6_fixture.tau_max_s = 1.1;
+  iap::RiskGridMap grid(params);
+  AffineProvider provider;
+  std::string reason;
+
+  ASSERT_TRUE(grid.refreshFromProvider(Eigen::Vector3d::Zero(), 10.0,
+                                       provider, &reason))
+      << reason;
+
+  auto snapshot = grid.acquireSnapshot();
+  ASSERT_NE(snapshot, nullptr);
+  iap::RiskVoxel center_tau_0_5;
+  ASSERT_TRUE(snapshot->voxelAt(1, Eigen::Vector3i(1, 1, 1),
+                               &center_tau_0_5));
+  EXPECT_FALSE(center_tau_0_5.valid);
+  EXPECT_FALSE(center_tau_0_5.stale);
+  EXPECT_TRUE(center_tau_0_5.unknown);
+  EXPECT_EQ(center_tau_0_5.reason, "future_unknown");
+  EXPECT_FALSE(std::isfinite(center_tau_0_5.hpl_pred));
+  EXPECT_FALSE(std::isfinite(center_tau_0_5.vpl_pred));
+
+  iap::PredictedPLSample in_fixture;
+  EXPECT_FALSE(snapshot->queryPredictedPL(Eigen::Vector3d::Zero(), 10.5,
+                                          &in_fixture));
+  EXPECT_TRUE(in_fixture.available);
+  EXPECT_FALSE(in_fixture.valid);
+  EXPECT_FALSE(in_fixture.stale);
+  EXPECT_TRUE(in_fixture.fixture_match);
+  EXPECT_EQ(in_fixture.reason, "future_unknown");
+  EXPECT_EQ(in_fixture.fixture_expected_reason, "future_unknown");
+  EXPECT_FALSE(std::isfinite(in_fixture.hpl_pred));
+  EXPECT_FALSE(std::isfinite(in_fixture.vpl_pred));
+  EXPECT_FALSE(std::isfinite(in_fixture.fixture_expected_hpl));
+  EXPECT_FALSE(std::isfinite(in_fixture.fixture_expected_vpl));
+
+  iap::PredictedPLSample current_tau;
+  ASSERT_TRUE(snapshot->queryPredictedPL(Eigen::Vector3d::Zero(), 10.0,
+                                        &current_tau))
+      << current_tau.reason;
+  EXPECT_TRUE(current_tau.valid);
+  EXPECT_EQ(current_tau.reason, "ok");
+  EXPECT_FALSE(current_tau.fixture_match);
+
+  iap::RiskVoxel outside_space;
+  ASSERT_TRUE(snapshot->voxelAt(1, Eigen::Vector3i(2, 1, 1),
+                               &outside_space));
+  EXPECT_TRUE(outside_space.valid);
+  EXPECT_EQ(outside_space.reason, "ok");
+  EXPECT_NEAR(outside_space.hpl_pred,
+              AffineProvider::affine(Eigen::Vector3d(1.0, 0.0, 0.0), 0.5),
+              1.0e-9);
+}
+
+TEST(RiskGridMapTest, P5_6FixtureDoesNotOverrideP5_3OrP5_4Fixtures) {
+  iap::RiskGridMapParams params = base_params();
+  params.horizons_s = {0.0, 0.6, 1.0, 1.5, 2.0};
+  params.p5_3_fixture.enabled = true;
+  params.p5_3_fixture.name = "future_high_risk_zone_v1";
+  params.p5_3_fixture.x_min_m = -0.6;
+  params.p5_3_fixture.x_max_m = 0.6;
+  params.p5_3_fixture.y_min_m = -0.6;
+  params.p5_3_fixture.y_max_m = 0.6;
+  params.p5_3_fixture.z_min_m = -0.6;
+  params.p5_3_fixture.z_max_m = 0.6;
+  params.p5_3_fixture.tau_min_s = 1.4;
+  params.p5_3_fixture.tau_max_s = 1.6;
+  params.p5_3_fixture.hpl_pred_m = 12.3;
+  params.p5_3_fixture.vpl_pred_m = 12.4;
+  params.p5_4_fixture.enabled = true;
+  params.p5_4_fixture.name = "near_risk_zone_v1";
+  params.p5_4_fixture.x_min_m = -0.6;
+  params.p5_4_fixture.x_max_m = 0.6;
+  params.p5_4_fixture.y_min_m = -0.6;
+  params.p5_4_fixture.y_max_m = 0.6;
+  params.p5_4_fixture.z_min_m = -0.6;
+  params.p5_4_fixture.z_max_m = 0.6;
+  params.p5_4_fixture.tau_min_s = 0.5;
+  params.p5_4_fixture.tau_max_s = 0.7;
+  params.p5_4_fixture.hpl_pred_m = 10.3;
+  params.p5_4_fixture.vpl_pred_m = 10.4;
+  params.p5_6_fixture.enabled = true;
+  params.p5_6_fixture.name = "future_unknown_zone_v1";
+  params.p5_6_fixture.x_min_m = -0.6;
+  params.p5_6_fixture.x_max_m = 0.6;
+  params.p5_6_fixture.y_min_m = -0.6;
+  params.p5_6_fixture.y_max_m = 0.6;
+  params.p5_6_fixture.z_min_m = -0.6;
+  params.p5_6_fixture.z_max_m = 0.6;
+  params.p5_6_fixture.tau_min_s = 0.5;
+  params.p5_6_fixture.tau_max_s = 1.6;
+
+  iap::RiskGridMap grid(params);
+  AffineProvider provider;
+  std::string reason;
+  ASSERT_TRUE(grid.refreshFromProvider(Eigen::Vector3d::Zero(), 10.0,
+                                       provider, &reason))
+      << reason;
+  auto snapshot = grid.acquireSnapshot();
+  ASSERT_NE(snapshot, nullptr);
+
+  iap::PredictedPLSample p5_4_sample;
+  ASSERT_TRUE(snapshot->queryPredictedPL(Eigen::Vector3d::Zero(), 10.6,
+                                        &p5_4_sample))
+      << p5_4_sample.reason;
+  EXPECT_TRUE(p5_4_sample.valid);
+  EXPECT_EQ(p5_4_sample.reason, "p5_4_near_risk_zone");
+  EXPECT_DOUBLE_EQ(p5_4_sample.hpl_pred, 10.3);
+  EXPECT_DOUBLE_EQ(p5_4_sample.vpl_pred, 10.4);
+
+  iap::PredictedPLSample p5_3_sample;
+  ASSERT_TRUE(snapshot->queryPredictedPL(Eigen::Vector3d::Zero(), 11.5,
+                                        &p5_3_sample))
+      << p5_3_sample.reason;
+  EXPECT_TRUE(p5_3_sample.valid);
+  EXPECT_EQ(p5_3_sample.reason, "p5_3_high_risk_zone");
+  EXPECT_DOUBLE_EQ(p5_3_sample.hpl_pred, 12.3);
+  EXPECT_DOUBLE_EQ(p5_3_sample.vpl_pred, 12.4);
+}
+
 TEST(RiskGridMapTest, AllOccupiedSkipHealthReportsDominantReason) {
   iap::RiskGridMapParams params = base_params();
   params.skip_occupied_voxels = true;

@@ -14,6 +14,8 @@ constexpr const char* kP5_3FixtureName = "future_high_risk_zone_v1";
 constexpr const char* kP5_3FixtureReason = "p5_3_high_risk_zone";
 constexpr const char* kP5_4FixtureName = "near_risk_zone_v1";
 constexpr const char* kP5_4FixtureReason = "p5_4_near_risk_zone";
+constexpr const char* kP5_6FixtureName = "future_unknown_zone_v1";
+constexpr const char* kP5_6FixtureReason = "future_unknown";
 
 bool finite_positive(const double v) {
   return std::isfinite(v) && v > 0.0;
@@ -86,6 +88,23 @@ bool apply_fixture(const FixtureConfig& fixture,
   return true;
 }
 
+bool apply_future_unknown_fixture(
+    const P5_6FutureUnknownZoneFixtureConfig& fixture,
+    const RiskPredictionQuery& query,
+    RiskPredictionResult* result) {
+  if (result == nullptr ||
+      !fixture_applies(fixture, query, kP5_6FixtureName)) {
+    return false;
+  }
+  result->available = true;
+  result->valid = false;
+  result->stale = false;
+  result->hpl_pred = std::numeric_limits<double>::quiet_NaN();
+  result->vpl_pred = std::numeric_limits<double>::quiet_NaN();
+  result->reason = kP5_6FixtureReason;
+  return true;
+}
+
 bool apply_any_p5_fixture(const RiskGridMapParams& params,
                           const RiskPredictionQuery& query,
                           const double p5_4_horizon_s,
@@ -98,8 +117,11 @@ bool apply_any_p5_fixture(const RiskGridMapParams& params,
                     kP5_4FixtureReason, result)) {
     return true;
   }
-  return apply_fixture(params.p5_3_fixture, query, kP5_3FixtureName,
-                       kP5_3FixtureReason, result);
+  if (apply_fixture(params.p5_3_fixture, query, kP5_3FixtureName,
+                    kP5_3FixtureReason, result)) {
+    return true;
+  }
+  return apply_future_unknown_fixture(params.p5_6_fixture, query, result);
 }
 
 bool apply_any_p5_fixture(const RiskGridMapParams& params,
@@ -574,15 +596,14 @@ bool RiskGridSnapshot::queryPredictedPL(const Eigen::Vector3d& p_w,
     out->fixture_expected_vpl = fixture_result.vpl_pred;
     out->fixture_expected_reason = fixture_result.reason;
   }
-  if (fixture_match && fixture_result.available && fixture_result.valid &&
-      !fixture_result.stale) {
+  if (fixture_match && fixture_result.available && !fixture_result.stale) {
     out->available = fixture_result.available;
     out->valid = fixture_result.valid;
     out->stale = fixture_result.stale;
     out->hpl_pred = fixture_result.hpl_pred;
     out->vpl_pred = fixture_result.vpl_pred;
     out->reason = fixture_result.reason;
-    return true;
+    return fixture_result.valid && finite_pl(fixture_result);
   }
   HorizonBracket bracket;
   std::string reason;

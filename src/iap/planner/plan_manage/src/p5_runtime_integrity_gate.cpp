@@ -785,13 +785,11 @@ P5GateStatus P5RuntimeIntegrityGate::evaluateFutureGate(
     status.unknown_count = 1;
     status.unknown_ratio = 1.0;
     status.action = P5GateAction::REQUEST_REPLAN;
-    if (!context.final_gate && !finite(future_unknown_started_s_)) {
-      future_unknown_started_s_ = context.now_s;
+    if (!context.final_gate) {
+      future_unknown_started_s_ =
+          std::numeric_limits<double>::quiet_NaN();
     }
-    status.future_unknown_duration_s =
-        finite(future_unknown_started_s_)
-            ? std::max(0.0, context.now_s - future_unknown_started_s_)
-            : 0.0;
+    status.future_unknown_duration_s = 0.0;
     status.raw_action = status.action;
     return status;
   }
@@ -924,7 +922,9 @@ P5GateStatus P5RuntimeIntegrityGate::evaluateFutureGate(
       static_cast<double>(status.unknown_count) / status.sample_count;
 
   const bool unknown_high = status.unknown_ratio >= config_.max_unknown_ratio;
-  if (unknown_high) {
+  const bool debounce_eligible_unknown =
+      unknown_high && !emitted_trajectory_timing_failure;
+  if (debounce_eligible_unknown) {
     if (!context.final_gate && !finite(future_unknown_started_s_)) {
       future_unknown_started_s_ = context.now_s;
     }
@@ -951,7 +951,11 @@ P5GateStatus P5RuntimeIntegrityGate::evaluateFutureGate(
   } else if (unknown_high) {
     status.reason = status.pred_al_invalid_count > 0 ? P5GateReason::AL_INVALID
                                                      : P5GateReason::FUTURE_UNKNOWN;
-    status.action = P5GateAction::REQUEST_REPLAN;
+    status.action = debounce_eligible_unknown &&
+                            status.future_unknown_duration_s >=
+                                config_.future_unknown_to_emergency_s
+                        ? P5GateAction::REQUEST_EMERGENCY_STOP_CANDIDATE
+                        : P5GateAction::REQUEST_REPLAN;
   }
 
   status.raw_action = status.action;
