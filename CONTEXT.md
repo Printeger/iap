@@ -88,6 +88,14 @@ _Avoid_: P5-5 stale fixture evidence, high-risk future-bad fixture evidence, top
 The P5-only deterministic fixture `future_unknown_zone_v1` that makes in-bounds future samples return available, invalid, non-stale PL evidence with reason `future_unknown` and no finite PL.
 _Avoid_: natural fallback unknowns, P5-3/P5-4 high-risk PL fixtures, P5-5 current-stale fixture evidence
 
+**P5-7 rejected trajectory fixture**:
+The P5-only deterministic final-candidate fixture `rejected_trajectory_zone_v1` that injects high PL only while evaluating a proposed final trajectory, so the final gate must reject it without publishing the same candidate on `/drone_0_planning/bspline`.
+_Avoid_: runtime-committed trajectory contamination, P5-3/P5-4/P5-5/P5-6 fixture evidence, synthetic publish suppression with no candidate identity
+
+**Final candidate rejection evidence**:
+Status, sample, and bspline evidence tying a rejected final candidate to `traj_id`/`start_time`, final-gate failure counters, final-candidate sample diagnostics inside the fixture, and absence of a matching committed bspline publish.
+_Avoid_: action count alone, rejected sample with no candidate identity, missing publish topic inspection
+
 **Causal replan evidence**:
 Analyzer/status evidence that a `REQUEST_REPLAN` action and the future-risk gate/reason that caused it are both traceable in the same P5 run, including concurrent current and future reasons when both gates are active.
 _Avoid_: action count without gate reason, margin evidence with no replan attribution

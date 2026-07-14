@@ -16,6 +16,8 @@ constexpr const char* kP5_4FixtureName = "near_risk_zone_v1";
 constexpr const char* kP5_4FixtureReason = "p5_4_near_risk_zone";
 constexpr const char* kP5_6FixtureName = "future_unknown_zone_v1";
 constexpr const char* kP5_6FixtureReason = "future_unknown";
+constexpr const char* kP5_7FixtureName = "rejected_trajectory_zone_v1";
+constexpr const char* kP5_7FixtureReason = "p5_7_rejected_trajectory";
 
 bool finite_positive(const double v) {
   return std::isfinite(v) && v > 0.0;
@@ -105,9 +107,22 @@ bool apply_future_unknown_fixture(
   return true;
 }
 
+bool apply_rejected_trajectory_fixture(
+    const P5_7RejectedTrajectoryFixtureConfig& fixture,
+    const RiskPredictionQuery& query,
+    const bool final_candidate,
+    RiskPredictionResult* result) {
+  if (!final_candidate || !fixture.effective_enabled) {
+    return false;
+  }
+  return apply_fixture(fixture, query, kP5_7FixtureName,
+                       kP5_7FixtureReason, result);
+}
+
 bool apply_any_p5_fixture(const RiskGridMapParams& params,
                           const RiskPredictionQuery& query,
                           const double p5_4_horizon_s,
+                          const bool p5_7_final_candidate,
                           RiskPredictionResult* result) {
   RiskPredictionQuery p5_4_query = query;
   if (std::isfinite(p5_4_horizon_s)) {
@@ -121,14 +136,18 @@ bool apply_any_p5_fixture(const RiskGridMapParams& params,
                     kP5_3FixtureReason, result)) {
     return true;
   }
-  return apply_future_unknown_fixture(params.p5_6_fixture, query, result);
+  if (apply_future_unknown_fixture(params.p5_6_fixture, query, result)) {
+    return true;
+  }
+  return apply_rejected_trajectory_fixture(
+      params.p5_7_fixture, query, p5_7_final_candidate, result);
 }
 
 bool apply_any_p5_fixture(const RiskGridMapParams& params,
                           const RiskPredictionQuery& query,
                           RiskPredictionResult* result) {
   return apply_any_p5_fixture(
-      params, query, std::numeric_limits<double>::quiet_NaN(), result);
+      params, query, std::numeric_limits<double>::quiet_NaN(), false, result);
 }
 
 }  // namespace
@@ -568,7 +587,8 @@ bool RiskGridSnapshot::queryCost(const Eigen::Vector3d& p_w,
 bool RiskGridSnapshot::queryPredictedPL(const Eigen::Vector3d& p_w,
                                         const double query_time_s,
                                         PredictedPLSample* out,
-                                        const double p5_4_fixture_horizon_s) const {
+                                        const double p5_4_fixture_horizon_s,
+                                        const bool p5_7_final_candidate) const {
   if (out == nullptr) {
     return false;
   }
@@ -589,7 +609,7 @@ bool RiskGridSnapshot::queryPredictedPL(const Eigen::Vector3d& p_w,
   const RiskPredictionQuery fixture_query{p_w, query_time_s, tau};
   const bool fixture_match = apply_any_p5_fixture(
       generation_->params, fixture_query, p5_4_fixture_horizon_s,
-      &fixture_result);
+      p5_7_final_candidate, &fixture_result);
   if (fixture_match) {
     out->fixture_match = true;
     out->fixture_expected_hpl = fixture_result.hpl_pred;

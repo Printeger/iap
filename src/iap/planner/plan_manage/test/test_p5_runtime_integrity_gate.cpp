@@ -73,6 +73,20 @@ ego_planner::LocalTrajData makeZTrajectory(double z,
   return data;
 }
 
+ego_planner::LocalTrajData makeRejectedZoneTrajectory(
+    double duration_s = 3.0) {
+  ego_planner::LocalTrajData data = makeTrajectory(duration_s);
+  Eigen::MatrixXd pts = data.position_traj_.getControlPoint();
+  for (int i = 0; i < pts.cols(); ++i) {
+    pts.col(i) = Eigen::Vector3d(-10.2, 0.0, 1.2);
+  }
+  data.position_traj_ = ego_planner::UniformBspline(pts, 3, 0.5);
+  data.velocity_traj_ = data.position_traj_.getDerivative();
+  data.acceleration_traj_ = data.velocity_traj_.getDerivative();
+  data.traj_id_ = 77;
+  return data;
+}
+
 class ConstantProvider final : public iap::RiskPredictionProvider {
  public:
   double hpl = 1.0;
@@ -122,6 +136,36 @@ std::shared_ptr<const iap::RiskGridSnapshot> makeSnapshot(double hpl,
   EXPECT_TRUE(grid.refreshFromProvider(Eigen::Vector3d::Zero(), 0.0,
                                        provider));
   return grid.acquireSnapshot();
+}
+
+std::shared_ptr<const iap::RiskGridSnapshot> makeSnapshotWithParams(
+    iap::RiskGridMapParams params,
+    double hpl,
+    double vpl,
+    const Eigen::Vector3d& center = Eigen::Vector3d::Zero(),
+    bool available = true,
+    bool valid = true) {
+  params.stale_timeout_s = 100.0;
+  iap::RiskGridMap grid(std::move(params));
+  ConstantProvider provider;
+  provider.hpl = hpl;
+  provider.vpl = vpl;
+  provider.available = available;
+  provider.valid = valid;
+  EXPECT_TRUE(grid.refreshFromProvider(center, 0.0, provider));
+  return grid.acquireSnapshot();
+}
+
+iap::RiskGridMapParams p5_7FixtureParams(bool effective_enabled = true) {
+  iap::RiskGridMapParams params;
+  params.resolution_m = 0.5;
+  params.size_x_m = 6.0;
+  params.size_y_m = 4.0;
+  params.size_z_m = 3.0;
+  params.horizons_s = {0.0, 0.5, 1.0, 1.5, 2.0};
+  params.p5_7_fixture.enabled = true;
+  params.p5_7_fixture.effective_enabled = effective_enabled;
+  return params;
 }
 
 ego_planner::P5RuntimeIntegrityGate::Config baseConfig() {
@@ -807,6 +851,96 @@ TEST(P5RuntimeIntegrityGateTest, FutureSamplesCarryTrajectoryTiming) {
             "final_candidate");
 }
 
+TEST(P5RuntimeIntegrityGateTest,
+     P5_7FixtureRejectsFinalCandidateWithoutRuntimeContamination) {
+  auto config = baseConfig();
+  config.horizon_s = 1.0;
+  config.sample_dt_s = 0.25;
+  config.current_stale_to_replan_s = 100.0;
+  config.current_stale_to_emergency_s = 100.0;
+  config.final_gate_max_consecutive_failures = 1;
+  config.final_gate_max_failure_duration_s = 100.0;
+  ego_planner::P5RuntimeIntegrityGate gate(nullptr, config, false);
+  gate.setCurrentIntegrityForTest(integrityMsg(0.0, 1.0, 1.0, 10.0, 10.0));
+
+  auto traj = makeRejectedZoneTrajectory();
+  const auto snapshot = makeSnapshotWithParams(
+      p5_7FixtureParams(), 1.0, 1.0, Eigen::Vector3d(-10.2, 0.0, 1.2));
+
+  const auto runtime_status =
+      gate.evaluateRuntime(traj, snapshot, 0.0, -1.0);
+  EXPECT_EQ(runtime_status.action, ego_planner::P5GateAction::OK);
+  EXPECT_EQ(runtime_status.reason, ego_planner::P5GateReason::OK);
+  ASSERT_FALSE(runtime_status.viz_samples.empty());
+  EXPECT_TRUE(std::none_of(
+      runtime_status.viz_samples.begin(), runtime_status.viz_samples.end(),
+      [](const ego_planner::SafetyVizTrajectorySample& sample) {
+        return sample.fixture_match ||
+               sample.fixture_expected_reason == "p5_7_rejected_trajectory";
+      }));
+  EXPECT_TRUE(std::all_of(
+      runtime_status.viz_samples.begin(), runtime_status.viz_samples.end(),
+      [](const ego_planner::SafetyVizTrajectorySample& sample) {
+        return sample.trajectory_sample_source == "runtime_committed";
+      }));
+
+  const auto final_status = gate.evaluateFinal(traj, snapshot, 0.0, -1.0);
+  EXPECT_EQ(final_status.raw_action, ego_planner::P5GateAction::REQUEST_REPLAN);
+  EXPECT_EQ(final_status.raw_reason, ego_planner::P5GateReason::FUTURE_BAD);
+  EXPECT_EQ(final_status.action,
+            ego_planner::P5GateAction::REQUEST_EMERGENCY_STOP_CANDIDATE);
+  EXPECT_EQ(final_status.reason, ego_planner::P5GateReason::FINAL_GATE_FAILED);
+  EXPECT_EQ(final_status.final_gate_fail_count, 1);
+  EXPECT_STREQ(final_status.final_gate_last_reason.c_str(), "future_bad");
+  EXPECT_TRUE(final_status.final_candidate_rejected);
+  EXPECT_EQ(final_status.final_candidate_traj_id, 77);
+  EXPECT_NEAR(final_status.final_candidate_start_time_s, 0.0, 1.0e-9);
+  EXPECT_NEAR(final_status.final_candidate_duration_s, 3.0, 1.0e-9);
+
+  const auto fixture_sample = std::find_if(
+      final_status.viz_samples.begin(), final_status.viz_samples.end(),
+      [](const ego_planner::SafetyVizTrajectorySample& sample) {
+        return sample.fixture_match &&
+               sample.fixture_expected_reason == "p5_7_rejected_trajectory";
+      });
+  ASSERT_NE(fixture_sample, final_status.viz_samples.end());
+  EXPECT_EQ(fixture_sample->trajectory_sample_source, "final_candidate");
+  EXPECT_TRUE(fixture_sample->bad);
+  EXPECT_EQ(fixture_sample->reason,
+            "future_low_margin:p5_7_rejected_trajectory");
+  EXPECT_NEAR(fixture_sample->hpl, 10.2, 1.0e-9);
+  EXPECT_NEAR(fixture_sample->vpl, 10.2, 1.0e-9);
+}
+
+TEST(P5RuntimeIntegrityGateTest,
+     P5_7FixtureEnabledButIneffectiveDoesNotRejectFinalCandidate) {
+  auto config = baseConfig();
+  config.horizon_s = 1.0;
+  config.sample_dt_s = 0.25;
+  config.current_stale_to_replan_s = 100.0;
+  config.current_stale_to_emergency_s = 100.0;
+  ego_planner::P5RuntimeIntegrityGate gate(nullptr, config, false);
+  gate.setCurrentIntegrityForTest(integrityMsg(0.0, 1.0, 1.0, 10.0, 10.0));
+
+  auto traj = makeRejectedZoneTrajectory();
+  const auto snapshot = makeSnapshotWithParams(
+      p5_7FixtureParams(false), 1.0, 1.0,
+      Eigen::Vector3d(-10.2, 0.0, 1.2));
+
+  const auto final_status = gate.evaluateFinal(traj, snapshot, 0.0, -1.0);
+  EXPECT_EQ(final_status.action, ego_planner::P5GateAction::OK);
+  EXPECT_EQ(final_status.reason, ego_planner::P5GateReason::OK);
+  EXPECT_FALSE(final_status.final_candidate_rejected);
+  EXPECT_EQ(final_status.final_candidate_traj_id, 77);
+  ASSERT_FALSE(final_status.viz_samples.empty());
+  EXPECT_TRUE(std::none_of(
+      final_status.viz_samples.begin(), final_status.viz_samples.end(),
+      [](const ego_planner::SafetyVizTrajectorySample& sample) {
+        return sample.fixture_match ||
+               sample.fixture_expected_reason == "p5_7_rejected_trajectory";
+      }));
+}
+
 TEST(P5RuntimeIntegrityGateTest, NoFutureTrajectoryWindowIsDiagnosticUnknown) {
   auto config = baseConfig();
   config.current_stale_to_replan_s = 100.0;
@@ -890,6 +1024,14 @@ TEST(P5RuntimeIntegrityGateTest, PublishedStatusJsonIncludesSampleDiagnostics) {
   EXPECT_NE(payload.find("\"fixture_expected_hpl\":"), std::string::npos);
   EXPECT_NE(payload.find("\"fixture_expected_vpl\":"), std::string::npos);
   EXPECT_NE(payload.find("\"fixture_expected_reason\":"), std::string::npos);
+  EXPECT_NE(payload.find("\"final_candidate_traj_id\":"),
+            std::string::npos);
+  EXPECT_NE(payload.find("\"final_candidate_start_time_s\":"),
+            std::string::npos);
+  EXPECT_NE(payload.find("\"final_candidate_duration_s\":"),
+            std::string::npos);
+  EXPECT_NE(payload.find("\"final_candidate_rejected\":"),
+            std::string::npos);
   EXPECT_NE(payload.find("\"x\":"), std::string::npos);
   EXPECT_NE(payload.find("\"y\":"), std::string::npos);
   EXPECT_NE(payload.find("\"z\":"), std::string::npos);

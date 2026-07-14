@@ -126,6 +126,26 @@ P5_6_FIXTURE_REASON = "future_unknown"
 P5_6_FAIL_BRANCH = (
     "FAIL -> debug P5-6 future unknown policy / reason attribution / debounce"
 )
+P5_7_FIXTURE_NAME = "rejected_trajectory_zone_v1"
+P5_7_FIXTURE_REASON = "p5_7_rejected_trajectory"
+P5_7_FAIL_BRANCH = (
+    "FAIL -> debug P5-7 final gate reject / unsafe publish blocking"
+)
+P5_7_BLOCKED_BRANCH = (
+    "BLOCKED_SCENARIO_MISSING -> implement rejected trajectory fixture first"
+)
+P5_7_FIGURE_FILENAMES = [
+    "p5_7_scenario_topdown.png",
+    "p5_7_rejected_trajectory_overlay.png",
+    "p5_7_final_gate_fail_timeline.png",
+    "p5_7_bspline_publish_timeline.png",
+    "p5_7_action_reason_timeline.png",
+    "p5_7_candidate_vs_committed_trajectory.png",
+    "p5_7_topic_activity_timeline.png",
+    "p5_7_cause_exclusion_summary.png",
+    "p5_7_p0_health.png",
+    "p5_7_trajectory_integrity_samples.png",
+]
 P5_6_FIGURE_FILENAMES = [
     "p5_6_scenario_topdown.png",
     "p5_6_unknown_field_overlay.png",
@@ -234,6 +254,10 @@ P5_STATUS_FIELDS = [
     "final_gate_fail_count",
     "final_gate_fail_duration_s",
     "final_gate_last_reason",
+    "final_candidate_traj_id",
+    "final_candidate_start_time_s",
+    "final_candidate_duration_s",
+    "final_candidate_rejected",
     "pred_al_mode",
     "pred_hal_min",
     "pred_val_min",
@@ -274,6 +298,10 @@ P5_SAMPLE_FIELDS = [
     "current_reason",
     "future_reason",
     "active_reasons",
+    "final_candidate_traj_id",
+    "final_candidate_start_time_s",
+    "final_candidate_duration_s",
+    "final_candidate_rejected",
     "tau_s",
     "query_tau_s",
     "trajectory_start_time_s",
@@ -500,6 +528,7 @@ def is_p5_runtime_experiment(args: argparse.Namespace) -> bool:
         "P5-4",
         "P5-5",
         "P5-6",
+        "P5-7",
     }
 
 
@@ -5015,6 +5044,49 @@ def read_p5_status_messages(bag_dir: Path, metadata: dict[str, Any], limit: int 
         return [], str(exc)
 
 
+def read_bspline_messages(
+    bag_dir: Path,
+    metadata: dict[str, Any],
+    limit: int = 5000,
+) -> tuple[list[dict[str, Any]], str]:
+    topic = "/drone_0_planning/bspline"
+    topic_counts = metadata.get("topic_counts", {}) or {}
+    if int(topic_counts.get(topic, 0) or 0) <= 0:
+        return [], ""
+    try:
+        from rclpy.serialization import deserialize_message
+        from rosidl_runtime_py.utilities import get_message
+
+        reader = open_bag_reader(bag_dir, metadata)
+        type_map = {item.name: item.type for item in reader.get_all_topics_and_types()}
+        if topic not in type_map:
+            return [], "bspline topic count was nonzero but topic type is absent"
+        msg_type = get_message(type_map[topic])
+        rows: list[dict[str, Any]] = []
+        while reader.has_next() and len(rows) < limit:
+            msg_topic, raw, timestamp = reader.read_next()
+            if msg_topic != topic:
+                continue
+            msg = deserialize_message(raw, msg_type)
+            knots = [finite_float(value) for value in getattr(msg, "knots", [])]
+            finite_knots = [value for value in knots if value is not None]
+            duration = max(finite_knots) if finite_knots else None
+            rows.append(
+                {
+                    "bag_time_s": float(timestamp) * 1.0e-9,
+                    "traj_id": getattr(msg, "traj_id", ""),
+                    "start_time_s": stamp_to_sec(getattr(msg, "start_time", None)),
+                    "duration_s": "" if duration is None else duration,
+                    "order": getattr(msg, "order", ""),
+                    "pos_pts_count": len(getattr(msg, "pos_pts", []) or []),
+                    "knots_count": len(getattr(msg, "knots", []) or []),
+                }
+            )
+        return rows, ""
+    except Exception as exc:  # pragma: no cover - depends on local ROS Python env
+        return [], str(exc)
+
+
 def read_p5_5_integrity_stamp_evidence(
     bag_dir: Path,
     metadata: dict[str, Any],
@@ -5983,6 +6055,18 @@ def p5_3_sample_rows(
                 "current_reason": status_row.get("current_reason", ""),
                 "future_reason": status_row.get("future_reason", ""),
                 "active_reasons": status_row.get("active_reasons", ""),
+                "final_candidate_traj_id": status_row.get(
+                    "final_candidate_traj_id", ""
+                ),
+                "final_candidate_start_time_s": status_row.get(
+                    "final_candidate_start_time_s", ""
+                ),
+                "final_candidate_duration_s": status_row.get(
+                    "final_candidate_duration_s", ""
+                ),
+                "final_candidate_rejected": 1
+                if manifest_bool(status_row.get("final_candidate_rejected"))
+                else 0,
                 "tau_s": sample.get("tau_s", ""),
                 "query_tau_s": sample.get("query_tau_s", ""),
                 "trajectory_start_time_s": sample.get("trajectory_start_time_s", ""),
@@ -9279,6 +9363,649 @@ def validate_p5_6_hard_gates(
     return gates
 
 
+def p5_7_fixture_from_manifest(manifest: dict[str, Any]) -> dict[str, Any]:
+    fixture = p5_fixture_from_manifest(manifest, "p5_7", P5_7_FIXTURE_REASON)
+    nested = ((manifest.get("p5_7") or {}).get("fixture") or {}) if manifest else {}
+    flat_effective = manifest.get("p5_7.fixture.effective_enabled") if manifest else None
+    effective_value = nested.get("effective_enabled", flat_effective)
+    fixture["effective_present"] = effective_value is not None
+    fixture["effective_enabled"] = (
+        manifest_bool(effective_value)
+        if effective_value is not None
+        else manifest_bool(fixture.get("enabled"))
+    )
+    fixture["sample_source"] = str(nested.get("sample_source", "final_candidate") or "")
+    return fixture
+
+
+def p5_7_other_fixture_disabled(manifest: dict[str, Any], phase_key: str) -> bool:
+    nested = ((manifest.get(phase_key) or {}).get("fixture") or {}) if manifest else {}
+    flat_enabled = manifest_bool(manifest.get(f"{phase_key}.fixture.enabled")) if manifest else False
+    nested_enabled = manifest_bool(nested.get("enabled")) if nested else False
+    flat_effective = manifest.get(f"{phase_key}.fixture.effective_enabled") if manifest else None
+    nested_effective = nested.get("effective_enabled") if nested else None
+    effective_enabled = (
+        manifest_bool(nested_effective)
+        if nested_effective is not None
+        else (
+            manifest_bool(flat_effective)
+            if flat_effective is not None
+            else False
+        )
+    )
+    return not flat_enabled and not nested_enabled and not effective_enabled
+
+
+def p5_7_reason_values(row: dict[str, Any]) -> set[str]:
+    return p5_all_reason_values(
+        row,
+        (
+            "reason",
+            "raw_reason",
+            "current_reason",
+            "future_reason",
+            "active_reasons",
+            "final_gate_last_reason",
+            "pred_al_last_reason",
+        ),
+    )
+
+
+def p5_7_final_candidate_row(row: dict[str, Any]) -> bool:
+    traj_id = finite_float(row.get("final_candidate_traj_id"))
+    return str(row.get("phase", "")).strip().lower() == "final" or (
+        traj_id is not None and traj_id >= 0
+    )
+
+
+def p5_7_rejected_candidate_row(row: dict[str, Any]) -> bool:
+    if not p5_7_final_candidate_row(row):
+        return False
+    return (
+        manifest_bool(row.get("final_candidate_rejected"))
+        or p5_action(row, "action") in {P5_REPLAN_ACTION, P5_EMERGENCY_ACTION}
+        or p5_action(row, "raw_action") in {P5_REPLAN_ACTION, P5_EMERGENCY_ACTION}
+        or p5_final_gate_failed(row)
+    )
+
+
+def p5_7_candidate_identity(row: dict[str, Any]) -> dict[str, Any]:
+    traj_id = finite_float(row.get("final_candidate_traj_id"))
+    start_time = finite_float(row.get("final_candidate_start_time_s"))
+    duration = finite_float(row.get("final_candidate_duration_s"))
+    return {
+        "traj_id": None if traj_id is None else int(traj_id),
+        "start_time_s": start_time,
+        "duration_s": duration,
+        "present": traj_id is not None and traj_id >= 0 and start_time is not None,
+    }
+
+
+def p5_7_bspline_matches_candidate(
+    candidate: dict[str, Any],
+    bspline_row: dict[str, Any],
+) -> bool:
+    if not candidate.get("present"):
+        return False
+    candidate_traj_id = candidate.get("traj_id")
+    bspline_traj_id = finite_float(bspline_row.get("traj_id"))
+    if bspline_traj_id is None or int(bspline_traj_id) != int(candidate_traj_id):
+        return False
+    candidate_start = finite_float(candidate.get("start_time_s"))
+    bspline_start = finite_float(bspline_row.get("start_time_s"))
+    if candidate_start is None or bspline_start is None:
+        return True
+    return abs(candidate_start - bspline_start) <= 1.0e-6
+
+
+def p5_7_candidate_published(
+    row: dict[str, Any],
+    bspline_rows: list[dict[str, Any]],
+) -> bool:
+    candidate = p5_7_candidate_identity(row)
+    return any(p5_7_bspline_matches_candidate(candidate, bspline) for bspline in bspline_rows)
+
+
+def p5_7_row_exclusion_causes(row: dict[str, Any]) -> list[str]:
+    reasons = p5_7_reason_values(row)
+    causes: list[str] = []
+    if "current_stale" in reasons or (
+        (finite_float(row.get("current_stale_duration_s")) or 0.0) > 0.0
+        and p5_7_rejected_candidate_row(row)
+    ):
+        causes.append("current_stale")
+    if "current_invalid" in reasons:
+        causes.append("current_invalid")
+    if str(row.get("phase", "")).strip().lower() == "startup" or "snapshot_unavailable" in reasons:
+        causes.append("startup_snapshot_unavailable")
+    if reasons & {"future_unknown", "al_invalid", "pred_al_invalid"}:
+        causes.append("future_unknown")
+    if p5_6_reason_has_topic_gap(reasons):
+        causes.append("topic_gap")
+    if any(P5_3_FIXTURE_REASON in reason for reason in reasons):
+        causes.append("p5_3_runtime_high_risk")
+    if any(P5_4_FIXTURE_REASON in reason for reason in reasons):
+        causes.append("p5_4_runtime_high_risk")
+    return causes
+
+
+def p5_7_sample_is_rejected_fixture(row: dict[str, Any]) -> bool:
+    return (
+        str(row.get("trajectory_sample_source", "")) == "final_candidate"
+        and int(row.get("inside_high_risk_zone", 0) or 0)
+        and int(row.get("inside_tau_window", 0) or 0)
+        and int(row.get("fixture_match", 0) or 0)
+        and int(row.get("bad", 0) or 0)
+        and P5_7_FIXTURE_REASON
+        in (
+            str(row.get("reason", "")).lower()
+            + " "
+            + str(row.get("fixture_expected_reason", "")).lower()
+            + " "
+            + str(row.get("expected_reason", "")).lower()
+        )
+    )
+
+
+def p5_7_runtime_fixture_contamination(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    contaminated: list[dict[str, Any]] = []
+    for row in rows:
+        if str(row.get("trajectory_sample_source", "")) != "runtime_committed":
+            continue
+        text = (
+            str(row.get("reason", "")).lower()
+            + " "
+            + str(row.get("fixture_expected_reason", "")).lower()
+            + " "
+            + str(row.get("expected_reason", "")).lower()
+        )
+        if P5_7_FIXTURE_REASON in text or (
+            int(row.get("inside_high_risk_zone", 0) or 0)
+            and int(row.get("inside_tau_window", 0) or 0)
+            and int(row.get("fixture_match", 0) or 0)
+        ):
+            contaminated.append(row)
+    return contaminated
+
+
+def p5_7_cause_exclusion_summary(
+    rejected_rows: list[dict[str, Any]],
+    sample_rows: list[dict[str, Any]],
+) -> dict[str, Any]:
+    by_cause: dict[str, list[dict[str, Any]]] = {
+        "current_stale": [],
+        "current_invalid": [],
+        "future_unknown": [],
+        "startup_snapshot_unavailable": [],
+        "topic_gap": [],
+        "p5_3_runtime_high_risk": [],
+        "p5_4_runtime_high_risk": [],
+    }
+    for row in rejected_rows:
+        for cause in p5_7_row_exclusion_causes(row):
+            by_cause.setdefault(cause, []).append(row)
+    for row in sample_rows:
+        source = str(row.get("trajectory_sample_source", ""))
+        text = str(row.get("reason", "")).lower() + " " + str(row.get("fixture_expected_reason", "")).lower()
+        if source == "runtime_committed" and P5_3_FIXTURE_REASON in text:
+            by_cause["p5_3_runtime_high_risk"].append(row)
+        if source == "runtime_committed" and P5_4_FIXTURE_REASON in text:
+            by_cause["p5_4_runtime_high_risk"].append(row)
+    runtime_p5_7 = p5_7_runtime_fixture_contamination(sample_rows)
+    return {
+        "current_stale_action_count": len(by_cause["current_stale"]),
+        "current_invalid_action_count": len(by_cause["current_invalid"]),
+        "future_unknown_action_count": len(by_cause["future_unknown"]),
+        "startup_snapshot_action_count": len(by_cause["startup_snapshot_unavailable"]),
+        "topic_gap_action_count": len(by_cause["topic_gap"]),
+        "p5_3_runtime_high_risk_count": len(by_cause["p5_3_runtime_high_risk"]),
+        "p5_4_runtime_high_risk_count": len(by_cause["p5_4_runtime_high_risk"]),
+        "p5_7_runtime_fixture_contamination_count": len(runtime_p5_7),
+    }
+
+
+def p5_7_cause_exclusion_rows(gates: dict[str, Any]) -> list[dict[str, Any]]:
+    summary = gates.get("cause_exclusion", {}) or {}
+    specs = [
+        ("current_stale", "current_stale_action_count"),
+        ("current_invalid", "current_invalid_action_count"),
+        ("future_unknown", "future_unknown_action_count"),
+        ("startup_snapshot", "startup_snapshot_action_count"),
+        ("topic_gap", "topic_gap_action_count"),
+        ("p5_3_runtime_high_risk", "p5_3_runtime_high_risk_count"),
+        ("p5_4_runtime_high_risk", "p5_4_runtime_high_risk_count"),
+        ("p5_7_runtime_fixture_contamination", "p5_7_runtime_fixture_contamination_count"),
+    ]
+    return [
+        {
+            "cause": cause,
+            "count": int(summary.get(key, 0) or 0),
+        }
+        for cause, key in specs
+    ]
+
+
+def validate_p5_7_required_figures(
+    figure_paths: list[Path],
+    failures: list[str],
+) -> None:
+    for figure_path in figure_paths:
+        if not figure_path.is_file() or figure_path.stat().st_size <= 0:
+            failures.append(
+                "P5-7 required figure missing: "
+                f"{figure_path.name}; missing final-gate rejection figure "
+                "evidence prevents P5-7 acceptance"
+            )
+
+
+def validate_p5_7_hard_gates(
+    manifest: dict[str, Any],
+    validator_summary: dict[str, Any],
+    topic_health: dict[str, dict[str, Any]],
+    p0_health_summary: dict[str, Any],
+    p0_health_rows: list[dict[str, Any]],
+    p5_rows: list[dict[str, Any]],
+    p5_summary: dict[str, Any],
+    bspline_rows: list[dict[str, Any]],
+    failures: list[str],
+    inconclusive: list[str],
+    topic_timestamps: dict[str, list[float]] | None = None,
+) -> dict[str, Any]:
+    manifest_gates = p5_manifest_gate_values(manifest)
+    fixture = p5_7_fixture_from_manifest(manifest)
+    p5_3_disabled = p5_7_other_fixture_disabled(manifest, "p5_3")
+    p5_4_disabled = p5_7_other_fixture_disabled(manifest, "p5_4")
+    p5_5_disabled = p5_7_other_fixture_disabled(manifest, "p5_5")
+    p5_6_disabled = p5_7_other_fixture_disabled(manifest, "p5_6")
+    topic_statuses = {
+        topic: (topic_health.get(topic) or {}).get("status", "MISSING")
+        for topic in P5_TOPIC_EXPECTATIONS
+    }
+    sample_rows = p5_3_sample_rows(
+        p5_rows,
+        fixture,
+        tau_window_field="query_tau_s",
+    )
+    final_candidate_rows = [row for row in p5_rows if p5_7_final_candidate_row(row)]
+    rejected_rows = [row for row in final_candidate_rows if p5_7_rejected_candidate_row(row)]
+    rejected_indices = {
+        idx
+        for idx, row in enumerate(p5_rows)
+        if any(row is rejected for rejected in rejected_rows)
+    }
+    rejected_fixture_samples = [
+        row
+        for row in sample_rows
+        if int(row.get("status_row_index", -1) or -1) in rejected_indices
+        and p5_7_sample_is_rejected_fixture(row)
+    ]
+    runtime_contamination = p5_7_runtime_fixture_contamination(sample_rows)
+    published_rejected_rows = [
+        row for row in rejected_rows if p5_7_candidate_published(row, bspline_rows)
+    ]
+    candidate_identities = [p5_7_candidate_identity(row) for row in rejected_rows]
+    identity_present = bool(candidate_identities) and all(
+        bool(identity.get("present")) for identity in candidate_identities
+    )
+    final_gate_fail_count_visible = int(p5_summary.get("final_gate_fail_count_max", 0) or 0) > 0
+    final_gate_fail_duration_visible = any(
+        finite_float(row.get("final_gate_fail_duration_s")) is not None
+        for row in rejected_rows
+    )
+    reason_chain_ok = any(
+        (
+            "final_gate_failed" in p5_7_reason_values(row)
+            or "future_bad" in p5_7_reason_values(row)
+            or P5_7_FIXTURE_REASON in " ".join(
+                str(sample.get("reason", "")).lower()
+                for sample in p5_3_sample_list(row)
+            )
+        )
+        for row in rejected_rows
+    )
+    cause_exclusion = p5_7_cause_exclusion_summary(rejected_rows, sample_rows)
+    active_topic_gap = p5_3_active_topic_gap_summary(
+        rejected_fixture_samples,
+        topic_timestamps,
+    )
+    p0_startup = summarize_p0_startup_snapshot_unavailable(p0_health_rows)
+    gates = {
+        **manifest_gates,
+        "validator_summary_present": bool(validator_summary),
+        "validator_passed": validator_summary.get("passed") is True,
+        "fixture": fixture,
+        "fixture_present": bool(fixture.get("present")),
+        "fixture_enabled": bool(fixture.get("enabled")),
+        "fixture_effective_enabled": bool(fixture.get("effective_enabled")),
+        "fixture_name_ok": fixture.get("name") == P5_7_FIXTURE_NAME,
+        "fixture_geometry_valid": bool(fixture.get("valid_geometry")),
+        "fixture_ready": bool(
+            fixture.get("present")
+            and fixture.get("enabled")
+            and fixture.get("effective_enabled")
+            and fixture.get("name") == P5_7_FIXTURE_NAME
+            and fixture.get("valid_geometry")
+        ),
+        "p5_3_fixture_disabled": bool(p5_3_disabled),
+        "p5_4_fixture_disabled": bool(p5_4_disabled),
+        "p5_5_fixture_disabled": bool(p5_5_disabled),
+        "p5_6_fixture_disabled": bool(p5_6_disabled),
+        "required_p5_topics_stable": all(
+            status == "PASS"
+            for topic, status in topic_statuses.items()
+            if P5_TOPIC_EXPECTATIONS.get(topic) != "planner-dependent"
+        ),
+        "topic_statuses": topic_statuses,
+        "active_topic_gap": active_topic_gap,
+        "active_required_p5_topics_stable": bool(
+            active_topic_gap.get("required_continuous_topics_stable", True)
+        ),
+        "p0_health_rows_present": int(p0_health_summary.get("row_count", 0) or 0) > 0,
+        **p0_startup,
+        "p0_post_startup_ready": p0_startup["post_startup_ready_false_count"] == 0,
+        "p0_post_startup_non_stale": p0_startup["post_startup_stale_true_count"] == 0,
+        "p5_status_rows_present": int(p5_summary.get("status_rows", 0) or 0) > 0,
+        "p5_json_parse_ok": int(p5_summary.get("parse_error_count", 0) or 0) == 0,
+        "p5_inspection_ok": not bool(p5_summary.get("inspection_error")),
+        "final_candidate_row_count": len(final_candidate_rows),
+        "rejected_candidate_row_count": len(rejected_rows),
+        "final_candidate_rejected": len(rejected_rows) > 0,
+        "candidate_identity_present": identity_present,
+        "fixture_sample_count": len(sample_rows),
+        "rejected_fixture_sample_count": len(rejected_fixture_samples),
+        "rejected_candidate_hit_fixture": len(rejected_fixture_samples) > 0,
+        "runtime_contamination_count": len(runtime_contamination),
+        "runtime_committed_unpolluted": len(runtime_contamination) == 0,
+        "final_gate_fail_count_visible": final_gate_fail_count_visible,
+        "final_gate_fail_duration_visible": final_gate_fail_duration_visible,
+        "reason_chain_ok": reason_chain_ok,
+        "bspline_row_count": len(bspline_rows),
+        "published_rejected_candidate_count": len(published_rejected_rows),
+        "rejected_candidate_not_published": len(published_rejected_rows) == 0
+        and len(rejected_rows) > 0
+        and identity_present,
+        "cause_exclusion": cause_exclusion,
+        "current_stale_excluded": int(cause_exclusion.get("current_stale_action_count", 0) or 0) == 0,
+        "current_invalid_excluded": int(cause_exclusion.get("current_invalid_action_count", 0) or 0) == 0,
+        "future_unknown_excluded": int(cause_exclusion.get("future_unknown_action_count", 0) or 0) == 0,
+        "startup_snapshot_excluded": int(cause_exclusion.get("startup_snapshot_action_count", 0) or 0) == 0,
+        "topic_gap_excluded": int(cause_exclusion.get("topic_gap_action_count", 0) or 0) == 0,
+        "p5_3_runtime_high_risk_excluded": int(cause_exclusion.get("p5_3_runtime_high_risk_count", 0) or 0) == 0,
+        "p5_4_runtime_high_risk_excluded": int(cause_exclusion.get("p5_4_runtime_high_risk_count", 0) or 0) == 0,
+        "first_rejected_candidate_row": rejected_rows[0] if rejected_rows else None,
+        "first_rejected_fixture_sample": rejected_fixture_samples[0]
+        if rejected_fixture_samples
+        else None,
+        "first_published_rejected_candidate": published_rejected_rows[0]
+        if published_rejected_rows
+        else None,
+        "blocked_scenario_missing": not bool(fixture.get("present")),
+    }
+
+    if not (
+        gates["manifest_safety_profile_p5"]
+        and gates["manifest_p0_enabled"]
+        and gates["manifest_p5_final_enabled"]
+        and gates["manifest_expected_false_ok"]
+    ):
+        failures.append("P5-7 manifest does not enable P0/P5 final with P1-P4 disabled")
+    if not gates["p5_3_fixture_disabled"]:
+        failures.append("P5-7 P5-3 high-risk fixture must remain disabled")
+    if not gates["p5_4_fixture_disabled"]:
+        failures.append("P5-7 P5-4 near-risk fixture must remain disabled")
+    if not gates["p5_5_fixture_disabled"]:
+        failures.append("P5-7 P5-5 stale fixture must remain disabled")
+    if not gates["p5_6_fixture_disabled"]:
+        failures.append("P5-7 P5-6 future-unknown fixture must remain disabled")
+    if not gates["fixture_present"]:
+        failures.append("P5-7 rejected trajectory fixture manifest is missing")
+    elif not gates["fixture_enabled"]:
+        failures.append("P5-7 rejected trajectory fixture is disabled")
+    elif not gates["fixture_effective_enabled"]:
+        failures.append("P5-7 rejected trajectory fixture is not effectively enabled")
+    elif not gates["fixture_name_ok"]:
+        failures.append(
+            f"P5-7 fixture name is not {P5_7_FIXTURE_NAME}: {fixture.get('name')}"
+        )
+    elif not gates["fixture_geometry_valid"]:
+        failures.append("P5-7 rejected trajectory fixture bounds or tau window are invalid")
+    if not gates["validator_summary_present"]:
+        failures.append("P5-7 validator summary is missing")
+    elif not gates["validator_passed"]:
+        failures.append("P5-7 validator summary did not pass")
+    if not gates["required_p5_topics_stable"]:
+        failures.append("P5-7 required P0/P5 topics are not all stable")
+    if not gates["active_required_p5_topics_stable"]:
+        failures.append("P5-7 active rejection-window topic gap exceeded threshold")
+    if not gates["p0_health_rows_present"]:
+        failures.append("P5-7 P0 health rows are missing")
+    if not gates["startup_snapshot_unavailable_bounded"]:
+        failures.append("P5-7 P0 startup snapshot_unavailable prefix is not bounded")
+    if not gates["p0_post_startup_ready"]:
+        failures.append("P5-7 P0 health reported ready=false after startup")
+    if not gates["p0_post_startup_non_stale"]:
+        failures.append("P5-7 P0 health reported stale=true after startup")
+    if not gates["p5_status_rows_present"]:
+        failures.append("P5-7 P5 status rows are missing")
+    if not gates["p5_json_parse_ok"]:
+        failures.append("P5-7 P5 status JSON parse errors were observed")
+    if not gates["p5_inspection_ok"]:
+        failures.append("P5-7 P5 status inspection did not complete cleanly")
+    if not gates["final_candidate_rejected"]:
+        failures.append("P5-7 final candidate was not rejected")
+    if not gates["candidate_identity_present"]:
+        failures.append("P5-7 rejected candidate identity fields are missing")
+    if not gates["rejected_candidate_hit_fixture"]:
+        failures.append("P5-7 rejected final candidate did not hit the rejected trajectory fixture")
+    if not gates["runtime_committed_unpolluted"]:
+        failures.append("P5-7 fixture contaminated runtime_committed samples")
+    if not gates["final_gate_fail_count_visible"]:
+        failures.append("P5-7 final_gate_fail_count did not increase")
+    if not gates["final_gate_fail_duration_visible"]:
+        failures.append("P5-7 final_gate_fail_duration_s was not visible")
+    if not gates["reason_chain_ok"]:
+        failures.append("P5-7 reason chain did not expose final_gate_failed/future_bad/final reject evidence")
+    if not gates["rejected_candidate_not_published"] and gates[
+        "published_rejected_candidate_count"
+    ]:
+        failures.append("P5-7 rejected candidate was published on /drone_0_planning/bspline")
+    elif not gates["rejected_candidate_not_published"]:
+        failures.append(
+            "P5-7 rejected candidate no-publish proof was unavailable"
+        )
+    if not gates["current_stale_excluded"]:
+        failures.append("P5-7 current_stale cause contaminated final reject evidence")
+    if not gates["current_invalid_excluded"]:
+        failures.append("P5-7 current_invalid cause contaminated final reject evidence")
+    if not gates["future_unknown_excluded"]:
+        failures.append("P5-7 future_unknown cause contaminated final reject evidence")
+    if not gates["startup_snapshot_excluded"]:
+        failures.append("P5-7 startup/snapshot_unavailable cause contaminated final reject evidence")
+    if not gates["topic_gap_excluded"]:
+        failures.append("P5-7 topic gap cause contaminated final reject evidence")
+    if not gates["p5_3_runtime_high_risk_excluded"]:
+        failures.append("P5-7 P5-3 runtime high-risk cause contaminated final reject evidence")
+    if not gates["p5_4_runtime_high_risk_excluded"]:
+        failures.append("P5-7 P5-4 runtime high-risk cause contaminated final reject evidence")
+
+    required = (
+        "manifest_safety_profile_p5",
+        "manifest_p0_enabled",
+        "manifest_p5_final_enabled",
+        "manifest_expected_false_ok",
+        "p5_3_fixture_disabled",
+        "p5_4_fixture_disabled",
+        "p5_5_fixture_disabled",
+        "p5_6_fixture_disabled",
+        "fixture_ready",
+        "validator_summary_present",
+        "validator_passed",
+        "required_p5_topics_stable",
+        "active_required_p5_topics_stable",
+        "p0_health_rows_present",
+        "startup_snapshot_unavailable_bounded",
+        "p0_post_startup_ready",
+        "p0_post_startup_non_stale",
+        "p5_status_rows_present",
+        "p5_json_parse_ok",
+        "p5_inspection_ok",
+        "final_candidate_rejected",
+        "candidate_identity_present",
+        "rejected_candidate_hit_fixture",
+        "runtime_committed_unpolluted",
+        "final_gate_fail_count_visible",
+        "final_gate_fail_duration_visible",
+        "reason_chain_ok",
+        "rejected_candidate_not_published",
+        "current_stale_excluded",
+        "current_invalid_excluded",
+        "future_unknown_excluded",
+        "startup_snapshot_excluded",
+        "topic_gap_excluded",
+        "p5_3_runtime_high_risk_excluded",
+        "p5_4_runtime_high_risk_excluded",
+    )
+    gates["passed"] = all(bool(gates.get(key)) for key in required)
+    return gates
+
+
+def build_p5_7_bspline_publish_rows(
+    p5_rows: list[dict[str, Any]],
+    bspline_rows: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    for row in p5_rows:
+        if not p5_7_final_candidate_row(row):
+            continue
+        identity = p5_7_candidate_identity(row)
+        rows.append(
+            {
+                "bag_time_s": row.get("bag_time_s", ""),
+                "source": "final_candidate",
+                "traj_id": "" if identity.get("traj_id") is None else identity.get("traj_id"),
+                "start_time_s": "" if identity.get("start_time_s") is None else identity.get("start_time_s"),
+                "duration_s": "" if identity.get("duration_s") is None else identity.get("duration_s"),
+                "rejected": 1 if p5_7_rejected_candidate_row(row) else 0,
+                "published_match": 1 if p5_7_candidate_published(row, bspline_rows) else 0,
+                "action": row.get("action", ""),
+                "reason": row.get("reason", ""),
+            }
+        )
+    for row in bspline_rows:
+        rows.append(
+            {
+                "bag_time_s": row.get("bag_time_s", ""),
+                "source": "bspline_publish",
+                "traj_id": row.get("traj_id", ""),
+                "start_time_s": row.get("start_time_s", ""),
+                "duration_s": row.get("duration_s", ""),
+                "rejected": 0,
+                "published_match": 1,
+                "action": "",
+                "reason": "",
+            }
+        )
+    return rows
+
+
+def plot_p5_7_bspline_publish_timeline(rows: list[dict[str, Any]], path: Path) -> bool:
+    if not rows:
+        return False
+    fig, ax = plt.subplots(figsize=(8.6, 3.8))
+    t_rel = relative_time(rows)
+    y_values = {
+        "final_candidate": 1.0,
+        "bspline_publish": 0.0,
+    }
+    colors = {
+        "final_candidate": "#dc2626",
+        "bspline_publish": "#2563eb",
+    }
+    for idx, row in enumerate(rows):
+        source = str(row.get("source", ""))
+        ax.scatter(
+            t_rel[idx] if idx < len(t_rel) else idx,
+            y_values.get(source, 0.5),
+            s=80 if int(row.get("rejected", 0) or 0) else 46,
+            color=colors.get(source, "#6b7280"),
+            marker="x" if int(row.get("rejected", 0) or 0) else "o",
+        )
+    ax.set_yticks([0.0, 1.0], ["bspline publish", "final candidate"])
+    ax.set_xlabel("time since first row [s]")
+    ax.set_title("P5-7 final candidate rejection vs bspline publish")
+    ax.grid(True, axis="x", alpha=0.25)
+    fig.tight_layout()
+    fig.savefig(path, dpi=160)
+    plt.close(fig)
+    return True
+
+
+def plot_p5_7_candidate_vs_committed_trajectory(
+    rows: list[dict[str, Any]],
+    path: Path,
+) -> bool:
+    if not rows:
+        return False
+    fig, ax = plt.subplots(figsize=(7, 5.4))
+    for source, color, marker in (
+        ("final_candidate", "#dc2626", "x"),
+        ("runtime_committed", "#2563eb", "o"),
+    ):
+        subset = [
+            row
+            for row in rows
+            if str(row.get("trajectory_sample_source", "")) == source
+        ]
+        xs = [finite_float(row.get("x")) for row in subset]
+        ys = [finite_float(row.get("y")) for row in subset]
+        points = [
+            (x, y)
+            for x, y in zip(xs, ys)
+            if x is not None and y is not None
+        ]
+        if points:
+            ax.scatter(
+                [point[0] for point in points],
+                [point[1] for point in points],
+                color=color,
+                marker=marker,
+                s=42,
+                label=source,
+                alpha=0.85,
+            )
+    ax.set_xlabel("x [m]")
+    ax.set_ylabel("y [m]")
+    ax.set_title("P5-7 final candidate vs committed trajectory samples")
+    ax.set_aspect("equal", adjustable="box")
+    ax.grid(True, alpha=0.25)
+    ax.legend(loc="best")
+    fig.tight_layout()
+    fig.savefig(path, dpi=160)
+    plt.close(fig)
+    return True
+
+
+def plot_p5_7_cause_exclusion_summary(
+    gates: dict[str, Any],
+    path: Path,
+) -> bool:
+    rows = p5_7_cause_exclusion_rows(gates)
+    if not rows:
+        return False
+    labels = [str(row["cause"]) for row in rows]
+    counts = [int(row["count"]) for row in rows]
+    fig, ax = plt.subplots(figsize=(8.2, 4.8))
+    ax.bar(labels, counts, color=["#16a34a" if count == 0 else "#dc2626" for count in counts])
+    ax.set_ylabel("count")
+    ax.set_title("P5-7 excluded cause summary")
+    ax.tick_params(axis="x", labelrotation=30)
+    ax.grid(True, axis="y", alpha=0.25)
+    fig.tight_layout()
+    fig.savefig(path, dpi=160)
+    plt.close(fig)
+    return True
+
+
 def p0_5_affine_c_pi(x: Any, y: Any, z: Any, tau: Any) -> Any:
     return 20.0 + 2.0 * x + 3.0 * y + 4.0 * z + 5.0 * tau
 
@@ -9761,6 +10488,12 @@ def next_debug_branch(
         if status == "PASS":
             return "PASS -> P5-7"
         return P5_6_FAIL_BRANCH
+    if normalized_experiment_id == "P5-7":
+        if status == "PASS":
+            return "PASS -> P5-8"
+        if status == "BLOCKED_SCENARIO_MISSING":
+            return P5_7_BLOCKED_BRANCH
+        return P5_7_FAIL_BRANCH
     if status == "PASS":
         pass_branches = {
             "B0-1": "continue_to_B0-2_open_sky_baseline",
@@ -9837,6 +10570,9 @@ def analyze(args: argparse.Namespace) -> dict[str, Any]:
     p5_6_figure_paths = {
         name: figures_dir / name for name in P5_6_FIGURE_FILENAMES
     }
+    p5_7_figure_paths = {
+        name: figures_dir / name for name in P5_7_FIGURE_FILENAMES
+    }
     p0_phase = is_p0_experiment(args)
     p0_4_phase = is_experiment(args, "P0-4")
     p0_phase_index = p0_phase_number(args.experiment_id)
@@ -9848,6 +10584,7 @@ def analyze(args: argparse.Namespace) -> dict[str, Any]:
     p5_4_phase = is_experiment(args, "P5-4")
     p5_5_phase = is_experiment(args, "P5-5")
     p5_6_phase = is_experiment(args, "P5-6")
+    p5_7_phase = is_experiment(args, "P5-7")
     p5_runtime_phase = is_p5_runtime_experiment(args)
     p0_runtime_phase = p0_phase or p5_runtime_phase
     if bool(getattr(args, "blocked_fixture_audit", False)):
@@ -10263,23 +11000,20 @@ def analyze(args: argparse.Namespace) -> dict[str, Any]:
             write_csv(p0_6_overlay_path, p0_6_fields, p0_6_overlap)
             p0_csv_artifacts.extend([str(p0_6_overlap_path), str(p0_6_overlay_path)])
 
-        health_figure_path = (
-            figures_dir / "p5_3_debug_p0_health_timeline.png"
-            if p5_3_phase
-            else (
-                p5_4_figure_paths["p5_4_p0_health.png"]
-                if p5_4_phase
-                else (
-                    p5_5_figure_paths["p5_5_p0_health.png"]
-                    if p5_5_phase
-                    else (
-                        p5_6_figure_paths["p5_6_p0_health_unknown_timeline.png"]
-                        if p5_6_phase
-                        else figures_dir / f"{prefix}_p0_health_timeline.png"
-                    )
-                )
-            )
-        )
+        if p5_3_phase:
+            health_figure_path = figures_dir / "p5_3_debug_p0_health_timeline.png"
+        elif p5_4_phase:
+            health_figure_path = p5_4_figure_paths["p5_4_p0_health.png"]
+        elif p5_5_phase:
+            health_figure_path = p5_5_figure_paths["p5_5_p0_health.png"]
+        elif p5_6_phase:
+            health_figure_path = p5_6_figure_paths[
+                "p5_6_p0_health_unknown_timeline.png"
+            ]
+        elif p5_7_phase:
+            health_figure_path = p5_7_figure_paths["p5_7_p0_health.png"]
+        else:
+            health_figure_path = figures_dir / f"{prefix}_p0_health_timeline.png"
         reason_figure_path = figures_dir / f"{prefix}_p0_reason_histogram.png"
         distribution_figure_path = figures_dir / f"{prefix}_pl_cost_distribution.png"
         snapshot_figure_path = figures_dir / f"{prefix}_risk_grid_snapshot_overview.png"
@@ -10481,9 +11215,13 @@ def analyze(args: argparse.Namespace) -> dict[str, Any]:
                 p5_5_figure_paths["p5_5_scenario_topdown.png"]
                 if p5_5_phase
                 else (
-                    p5_6_figure_paths["p5_6_scenario_topdown.png"]
-                    if p5_6_phase
-                    else figures_dir / f"{prefix}_scenario_topdown.png"
+                    p5_7_figure_paths["p5_7_scenario_topdown.png"]
+                    if p5_7_phase
+                    else (
+                        p5_6_figure_paths["p5_6_scenario_topdown.png"]
+                        if p5_6_phase
+                        else figures_dir / f"{prefix}_scenario_topdown.png"
+                    )
                 )
             )
         )
@@ -10495,9 +11233,13 @@ def analyze(args: argparse.Namespace) -> dict[str, Any]:
             p5_5_figure_paths["p5_5_topic_activity_timeline.png"]
             if p5_5_phase
             else (
-                figures_dir / "p5_6_topic_activity_timeline.png"
-                if p5_6_phase
-                else figures_dir / f"{prefix}_topic_activity_timeline.png"
+                p5_7_figure_paths["p5_7_topic_activity_timeline.png"]
+                if p5_7_phase
+                else (
+                    figures_dir / "p5_6_topic_activity_timeline.png"
+                    if p5_6_phase
+                    else figures_dir / f"{prefix}_topic_activity_timeline.png"
+                )
             )
         )
     )
@@ -10591,8 +11333,22 @@ def analyze(args: argparse.Namespace) -> dict[str, Any]:
         failures,
         inconclusive,
         allow_replan=p5_runtime_phase,
-        allow_emergency=p5_2_phase or p5_3_phase or p5_4_phase or p5_5_phase or p5_6_phase,
-        allow_final_gate_failure=p5_2_phase or p5_3_phase or p5_4_phase or p5_5_phase or p5_6_phase,
+        allow_emergency=(
+            p5_2_phase
+            or p5_3_phase
+            or p5_4_phase
+            or p5_5_phase
+            or p5_6_phase
+            or p5_7_phase
+        ),
+        allow_final_gate_failure=(
+            p5_2_phase
+            or p5_3_phase
+            or p5_4_phase
+            or p5_5_phase
+            or p5_6_phase
+            or p5_7_phase
+        ),
     )
     if p0_requires_odom_gate and p5_summary.get("action_counts"):
         failures.append(f"{experiment_label} P5 status reported actions while P5 is disabled")
@@ -10605,6 +11361,7 @@ def analyze(args: argparse.Namespace) -> dict[str, Any]:
     p5_4_gates: dict[str, Any] = {}
     p5_5_gates: dict[str, Any] = {}
     p5_6_gates: dict[str, Any] = {}
+    p5_7_gates: dict[str, Any] = {}
     p5_3_overlap: list[dict[str, Any]] = []
     p5_3_samples: list[dict[str, Any]] = []
     p5_3_event_window_rows: list[dict[str, Any]] = []
@@ -10617,6 +11374,10 @@ def analyze(args: argparse.Namespace) -> dict[str, Any]:
     p5_5_integrity_error = ""
     p5_6_samples: list[dict[str, Any]] = []
     p5_6_event_window_samples: list[dict[str, Any]] = []
+    p5_7_samples: list[dict[str, Any]] = []
+    p5_7_bspline_rows: list[dict[str, Any]] = []
+    p5_7_bspline_error = ""
+    p5_7_publish_rows: list[dict[str, Any]] = []
     p5_csv_artifacts: list[str] = []
     p5_figure_artifacts: list[str] = []
     p5_required_figures: list[Path] = []
@@ -10766,6 +11527,38 @@ def analyze(args: argparse.Namespace) -> dict[str, Any]:
             p5_6_samples,
             list((p5_6_gates.get("accepted_window") or {}).get("row_indices") or []),
         )
+    if p5_7_phase:
+        p5_7_bspline_rows, p5_7_bspline_error = (
+            read_bspline_messages(bag_dir, metadata)
+            if bag_dir is not None
+            else ([], "missing bag dir")
+        )
+        if p5_7_bspline_error:
+            inconclusive.append(
+                f"could not inspect P5-7 /drone_0_planning/bspline evidence: {p5_7_bspline_error}"
+            )
+        p5_7_gates = validate_p5_7_hard_gates(
+            manifest,
+            validator_summary,
+            topic_health,
+            p0_health_summary,
+            health_rows,
+            p5_rows,
+            p5_summary,
+            p5_7_bspline_rows,
+            failures,
+            inconclusive,
+            topic_timestamps,
+        )
+        p5_7_samples = p5_3_sample_rows(
+            p5_rows,
+            p5_7_gates.get("fixture", {}),
+            tau_window_field="query_tau_s",
+        )
+        p5_7_publish_rows = build_p5_7_bspline_publish_rows(
+            p5_rows,
+            p5_7_bspline_rows,
+        )
 
     csv_artifacts = [str(topic_counts_path)]
     csv_artifacts.extend(p0_csv_artifacts)
@@ -10790,6 +11583,9 @@ def analyze(args: argparse.Namespace) -> dict[str, Any]:
         p5_6_unknown_action_path = csv_dir / "p5_6_unknown_action_timeline.csv"
         p5_6_cause_exclusion_path = csv_dir / "p5_6_cause_exclusion_summary.csv"
         p5_6_samples_path = csv_dir / "p5_6_future_unknown_sample_diagnostics.csv"
+        p5_7_samples_path = csv_dir / "p5_7_rejected_trajectory_sample_diagnostics.csv"
+        p5_7_bspline_publish_path = csv_dir / "p5_7_bspline_publish_timeline.csv"
+        p5_7_cause_exclusion_path = csv_dir / "p5_7_cause_exclusion_summary.csv"
         action_rows = []
         t_rel = relative_time(p5_rows)
         for idx, row in enumerate(p5_rows):
@@ -11023,6 +11819,28 @@ def analyze(args: argparse.Namespace) -> dict[str, Any]:
                 P5_6_CAUSE_EXCLUSION_FIELDS,
                 p5_6_cause_exclusion_rows(p5_6_gates),
             )
+        if p5_7_phase:
+            write_csv(p5_7_samples_path, P5_SAMPLE_FIELDS, p5_7_samples)
+            write_csv(
+                p5_7_bspline_publish_path,
+                [
+                    "bag_time_s",
+                    "source",
+                    "traj_id",
+                    "start_time_s",
+                    "duration_s",
+                    "rejected",
+                    "published_match",
+                    "action",
+                    "reason",
+                ],
+                p5_7_publish_rows,
+            )
+            write_csv(
+                p5_7_cause_exclusion_path,
+                ["cause", "count"],
+                p5_7_cause_exclusion_rows(p5_7_gates),
+            )
         p5_csv_artifacts.extend(
             [
                 str(p5_action_path),
@@ -11046,6 +11864,10 @@ def analyze(args: argparse.Namespace) -> dict[str, Any]:
             p5_csv_artifacts.append(str(p5_6_samples_path))
             p5_csv_artifacts.append(str(p5_6_unknown_action_path))
             p5_csv_artifacts.append(str(p5_6_cause_exclusion_path))
+        if p5_7_phase:
+            p5_csv_artifacts.append(str(p5_7_samples_path))
+            p5_csv_artifacts.append(str(p5_7_bspline_publish_path))
+            p5_csv_artifacts.append(str(p5_7_cause_exclusion_path))
         csv_artifacts.extend(
             artifact
             for artifact in p5_csv_artifacts
@@ -11077,7 +11899,9 @@ def analyze(args: argparse.Namespace) -> dict[str, Any]:
         )
         p5_current_im_vs_action_figure_path = figures_dir / f"{prefix}_current_im_vs_action.png"
         p5_debounce_figure_path = (
-            p5_5_figure_paths["p5_5_debounce_timeline.png"]
+            p5_7_figure_paths["p5_7_final_gate_fail_timeline.png"]
+            if p5_7_phase
+            else p5_5_figure_paths["p5_5_debounce_timeline.png"]
             if p5_5_phase
             else (
                 p5_6_figure_paths["p5_6_debounce_timeline.png"]
@@ -11107,9 +11931,16 @@ def analyze(args: argparse.Namespace) -> dict[str, Any]:
                     p5_5_figure_paths["p5_5_trajectory_integrity_samples.png"]
                     if p5_5_phase
                     else (
-                        p5_6_figure_paths["p5_6_trajectory_integrity_samples.png"]
-                        if p5_6_phase
-                        else figures_dir / f"{prefix}_trajectory_integrity_samples.png"
+                        p5_7_figure_paths["p5_7_trajectory_integrity_samples.png"]
+                        if p5_7_phase
+                        else (
+                            p5_6_figure_paths[
+                                "p5_6_trajectory_integrity_samples.png"
+                            ]
+                            if p5_6_phase
+                            else figures_dir
+                            / f"{prefix}_trajectory_integrity_samples.png"
+                        )
                     )
                 )
             )
@@ -11234,6 +12065,21 @@ def analyze(args: argparse.Namespace) -> dict[str, Any]:
         ]
         p5_6_unknown_overlay_path = p5_6_figure_paths[
             "p5_6_unknown_field_overlay.png"
+        ]
+        p5_7_overlay_path = p5_7_figure_paths[
+            "p5_7_rejected_trajectory_overlay.png"
+        ]
+        p5_7_bspline_publish_figure_path = p5_7_figure_paths[
+            "p5_7_bspline_publish_timeline.png"
+        ]
+        p5_7_action_reason_path = p5_7_figure_paths[
+            "p5_7_action_reason_timeline.png"
+        ]
+        p5_7_candidate_vs_committed_path = p5_7_figure_paths[
+            "p5_7_candidate_vs_committed_trajectory.png"
+        ]
+        p5_7_cause_exclusion_figure_path = p5_7_figure_paths[
+            "p5_7_cause_exclusion_summary.png"
         ]
         if plot_p5_action_timeline(p5_rows, p5_action_figure_path):
             p5_figure_artifacts.append(str(p5_action_figure_path))
@@ -11524,6 +12370,30 @@ def analyze(args: argparse.Namespace) -> dict[str, Any]:
                 p5_6_cause_exclusion_figure_path,
             ):
                 p5_figure_artifacts.append(str(p5_6_cause_exclusion_figure_path))
+        if p5_7_phase:
+            if plot_p5_3_sample_high_risk_overlay(
+                p5_7_samples,
+                p5_7_gates.get("fixture", {}),
+                p5_7_overlay_path,
+            ):
+                p5_figure_artifacts.append(str(p5_7_overlay_path))
+            if plot_p5_7_bspline_publish_timeline(
+                p5_7_publish_rows,
+                p5_7_bspline_publish_figure_path,
+            ):
+                p5_figure_artifacts.append(str(p5_7_bspline_publish_figure_path))
+            if plot_p5_3_reason_timeline(p5_rows, p5_7_action_reason_path):
+                p5_figure_artifacts.append(str(p5_7_action_reason_path))
+            if plot_p5_7_candidate_vs_committed_trajectory(
+                p5_7_samples,
+                p5_7_candidate_vs_committed_path,
+            ):
+                p5_figure_artifacts.append(str(p5_7_candidate_vs_committed_path))
+            if plot_p5_7_cause_exclusion_summary(
+                p5_7_gates,
+                p5_7_cause_exclusion_figure_path,
+            ):
+                p5_figure_artifacts.append(str(p5_7_cause_exclusion_figure_path))
         required_runtime_figures = [
             scenario_figure_path,
             topic_activity_figure_path,
@@ -11594,6 +12464,10 @@ def analyze(args: argparse.Namespace) -> dict[str, Any]:
             required_runtime_figures = [
                 p5_6_figure_paths[name] for name in P5_6_FIGURE_FILENAMES
             ]
+        if p5_7_phase:
+            required_runtime_figures = [
+                p5_7_figure_paths[name] for name in P5_7_FIGURE_FILENAMES
+            ]
         required_runtime_figures = list(dict.fromkeys(required_runtime_figures))
         p5_required_figures.extend(required_runtime_figures)
 
@@ -11636,6 +12510,7 @@ def analyze(args: argparse.Namespace) -> dict[str, Any]:
         p5_4_required = set(p5_4_figure_paths.values())
         p5_5_required = set(p5_5_figure_paths.values())
         p5_6_required = set(p5_6_figure_paths.values())
+        p5_7_required = set(p5_7_figure_paths.values())
         for figure_path in p5_required_figures:
             if not figure_path.is_file() or figure_path.stat().st_size <= 0:
                 if p5_3_phase and figure_path in p5_3_event_window_required:
@@ -11662,13 +12537,17 @@ def analyze(args: argparse.Namespace) -> dict[str, Any]:
                     validate_p5_5_required_figures([figure_path], failures)
                 elif p5_6_phase and figure_path in p5_6_required:
                     validate_p5_6_required_figures([figure_path], failures)
+                elif p5_7_phase and figure_path in p5_7_required:
+                    validate_p5_7_required_figures([figure_path], failures)
                 else:
                     inconclusive.append(
                         f"{experiment_label} required figure was not generated or is empty: {figure_path}"
                     )
 
     status = "PASS"
-    if p5_5_phase and bool(p5_5_gates.get("blocked_scenario_missing")):
+    if p5_7_phase and bool(p5_7_gates.get("blocked_scenario_missing")):
+        status = "BLOCKED_SCENARIO_MISSING"
+    elif p5_5_phase and bool(p5_5_gates.get("blocked_scenario_missing")):
         status = "BLOCKED_SCENARIO_MISSING"
     elif p5_4_phase and bool(p5_4_gates.get("blocked_scenario_missing")):
         status = "BLOCKED_SCENARIO_MISSING"
@@ -11707,6 +12586,8 @@ def analyze(args: argparse.Namespace) -> dict[str, Any]:
             "p5_4_hard_gates": p5_4_gates,
             "p5_5_hard_gates": p5_5_gates,
             "p5_6_hard_gates": p5_6_gates,
+            "p5_7_hard_gates": p5_7_gates,
+            "p5_7_bspline_error": p5_7_bspline_error,
             "marker_evidence": p5_marker_summary,
             "p5_5_integrity_stamp_error": p5_5_integrity_error,
         },

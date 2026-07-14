@@ -135,6 +135,12 @@ struct P5GateStatus {
   int final_gate_fail_count = 0;
   double final_gate_fail_duration_s = 0.0;
   std::string final_gate_last_reason;
+  int final_candidate_traj_id = -1;
+  double final_candidate_start_time_s =
+      std::numeric_limits<double>::quiet_NaN();
+  double final_candidate_duration_s =
+      std::numeric_limits<double>::quiet_NaN();
+  bool final_candidate_rejected = false;
   std::string pred_al_mode;
   double pred_hal_min = std::numeric_limits<double>::quiet_NaN();
   double pred_val_min = std::numeric_limits<double>::quiet_NaN();

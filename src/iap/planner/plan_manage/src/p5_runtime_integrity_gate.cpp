@@ -650,6 +650,9 @@ P5GateStatus P5RuntimeIntegrityGate::evaluateFinal(
   P5GateStatus status = evaluate(local_data, snapshot,
                                  EvalContext{true, now_s, emergency_time_s});
   status = applyFinalGateBudget(status, now_s);
+  status.final_candidate_rejected =
+      status.action != P5GateAction::OK &&
+      status.final_candidate_traj_id >= 0;
   publishStatus(status, "final");
   return status;
 }
@@ -801,6 +804,11 @@ P5GateStatus P5RuntimeIntegrityGate::evaluateFutureGate(
 
   const double trajectory_start_time_s = local_data.start_time_.seconds();
   const double duration = std::max(0.0, local_data.duration_);
+  if (context.final_gate) {
+    status.final_candidate_traj_id = local_data.traj_id_;
+    status.final_candidate_start_time_s = trajectory_start_time_s;
+    status.final_candidate_duration_s = duration;
+  }
   double t_cur = context.now_s - trajectory_start_time_s;
   t_cur = std::clamp(t_cur, 0.0, duration);
   const double t_end = std::min(duration, t_cur + config_.horizon_s);
@@ -853,7 +861,8 @@ P5GateStatus P5RuntimeIntegrityGate::evaluateFutureGate(
     viz_sample.tau_s = tau;
     iap::PredictedPLSample pl;
     const bool pl_ok =
-        snapshot->queryPredictedPL(p, context.now_s + tau, &pl, tau);
+        snapshot->queryPredictedPL(p, context.now_s + tau, &pl, tau,
+                                   context.final_gate);
     const PredAlertLimitSample al = pred_alert_limit_provider_.evaluate(
         p, context.now_s + tau, current.hal, current.val);
     if (!pl_ok && isFutureCoverageLimit(pl)) {
@@ -979,6 +988,10 @@ P5GateStatus P5RuntimeIntegrityGate::merge(const P5GateStatus& a,
   out.current_stale_duration_s = a.current_stale_duration_s;
   out.current_low_margin_duration_s = a.current_low_margin_duration_s;
   out.future_unknown_duration_s = b.future_unknown_duration_s;
+  out.final_candidate_traj_id = b.final_candidate_traj_id;
+  out.final_candidate_start_time_s = b.final_candidate_start_time_s;
+  out.final_candidate_duration_s = b.final_candidate_duration_s;
+  out.final_candidate_rejected = b.final_candidate_rejected;
   out.pred_al_mode = b.pred_al_mode;
   out.pred_hal_min = b.pred_hal_min;
   out.pred_val_min = b.pred_val_min;
@@ -1187,6 +1200,14 @@ std::string P5RuntimeIntegrityGate::toJson(
       << jsonNumber(status.final_gate_fail_duration_s)
       << ",\"final_gate_last_reason\":"
       << jsonString(status.final_gate_last_reason)
+      << ",\"final_candidate_traj_id\":"
+      << status.final_candidate_traj_id
+      << ",\"final_candidate_start_time_s\":"
+      << jsonNumber(status.final_candidate_start_time_s)
+      << ",\"final_candidate_duration_s\":"
+      << jsonNumber(status.final_candidate_duration_s)
+      << ",\"final_candidate_rejected\":"
+      << (status.final_candidate_rejected ? "true" : "false")
       << ",\"pred_al_mode\":" << jsonString(status.pred_al_mode)
       << ",\"pred_hal_min\":" << jsonNumber(status.pred_hal_min)
       << ",\"pred_val_min\":" << jsonNumber(status.pred_val_min)

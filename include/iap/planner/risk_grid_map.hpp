@@ -57,6 +57,22 @@ struct P5_6FutureUnknownZoneFixtureConfig {
   double tau_max_s = 2.0;
 };
 
+struct P5_7RejectedTrajectoryFixtureConfig {
+  bool enabled = false;
+  bool effective_enabled = false;
+  std::string name = "rejected_trajectory_zone_v1";
+  double x_min_m = -11.7;
+  double x_max_m = -8.7;
+  double y_min_m = -0.75;
+  double y_max_m = 0.75;
+  double z_min_m = 1.0;
+  double z_max_m = 1.35;
+  double tau_min_s = 0.6;
+  double tau_max_s = 2.0;
+  double hpl_pred_m = 10.2;
+  double vpl_pred_m = 10.2;
+};
+
 struct RiskGridMapParams {
   std::string frame_id = "map";
   double resolution_m = 0.75;
@@ -73,6 +89,7 @@ struct RiskGridMapParams {
   P5_3HighRiskZoneFixtureConfig p5_3_fixture;
   P5_4NearRiskZoneFixtureConfig p5_4_fixture;
   P5_6FutureUnknownZoneFixtureConfig p5_6_fixture;
+  P5_7RejectedTrajectoryFixtureConfig p5_7_fixture;
 };
 
 struct RiskGridHealth {
@@ -191,7 +208,8 @@ class RiskGridSnapshot {
                         double query_time_s,
                         PredictedPLSample* out,
                         double p5_4_fixture_horizon_s =
-                            std::numeric_limits<double>::quiet_NaN()) const;
+                            std::numeric_limits<double>::quiet_NaN(),
+                        bool p5_7_final_candidate = false) const;
 
   bool voxelAt(int horizon_id,
                const Eigen::Vector3i& id,

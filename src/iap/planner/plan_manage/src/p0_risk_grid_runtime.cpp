@@ -479,6 +479,58 @@ P0RiskGridRuntime::Config P0RiskGridRuntime::declareAndReadConfig(
   if (p5_6_fixture.tau_min_s > p5_6_fixture.tau_max_s) {
     std::swap(p5_6_fixture.tau_min_s, p5_6_fixture.tau_max_s);
   }
+  auto& p5_7_fixture = config.grid.p5_7_fixture;
+  p5_7_fixture.enabled =
+      node->declare_parameter<bool>("p5_7.fixture.enabled",
+                                    p5_7_fixture.enabled);
+  p5_7_fixture.effective_enabled =
+      node->declare_parameter<bool>("p5_7.fixture.effective_enabled",
+                                    p5_7_fixture.effective_enabled);
+  p5_7_fixture.name =
+      node->declare_parameter<std::string>("p5_7.fixture.name",
+                                           p5_7_fixture.name);
+  p5_7_fixture.x_min_m =
+      node->declare_parameter<double>("p5_7.fixture.x_min",
+                                      p5_7_fixture.x_min_m);
+  p5_7_fixture.x_max_m =
+      node->declare_parameter<double>("p5_7.fixture.x_max",
+                                      p5_7_fixture.x_max_m);
+  p5_7_fixture.y_min_m =
+      node->declare_parameter<double>("p5_7.fixture.y_min",
+                                      p5_7_fixture.y_min_m);
+  p5_7_fixture.y_max_m =
+      node->declare_parameter<double>("p5_7.fixture.y_max",
+                                      p5_7_fixture.y_max_m);
+  p5_7_fixture.z_min_m =
+      node->declare_parameter<double>("p5_7.fixture.z_min",
+                                      p5_7_fixture.z_min_m);
+  p5_7_fixture.z_max_m =
+      node->declare_parameter<double>("p5_7.fixture.z_max",
+                                      p5_7_fixture.z_max_m);
+  p5_7_fixture.tau_min_s =
+      node->declare_parameter<double>("p5_7.fixture.tau_min",
+                                      p5_7_fixture.tau_min_s);
+  p5_7_fixture.tau_max_s =
+      node->declare_parameter<double>("p5_7.fixture.tau_max",
+                                      p5_7_fixture.tau_max_s);
+  p5_7_fixture.hpl_pred_m =
+      node->declare_parameter<double>("p5_7.fixture.hpl_pred_m",
+                                      p5_7_fixture.hpl_pred_m);
+  p5_7_fixture.vpl_pred_m =
+      node->declare_parameter<double>("p5_7.fixture.vpl_pred_m",
+                                      p5_7_fixture.vpl_pred_m);
+  if (p5_7_fixture.x_min_m > p5_7_fixture.x_max_m) {
+    std::swap(p5_7_fixture.x_min_m, p5_7_fixture.x_max_m);
+  }
+  if (p5_7_fixture.y_min_m > p5_7_fixture.y_max_m) {
+    std::swap(p5_7_fixture.y_min_m, p5_7_fixture.y_max_m);
+  }
+  if (p5_7_fixture.z_min_m > p5_7_fixture.z_max_m) {
+    std::swap(p5_7_fixture.z_min_m, p5_7_fixture.z_max_m);
+  }
+  if (p5_7_fixture.tau_min_s > p5_7_fixture.tau_max_s) {
+    std::swap(p5_7_fixture.tau_min_s, p5_7_fixture.tau_max_s);
+  }
   return config;
 }
 

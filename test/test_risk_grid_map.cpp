@@ -879,6 +879,60 @@ TEST(RiskGridMapTest, P5_6FixtureDisabledByDefaultDoesNotAlterProviderOutput) {
   EXPECT_NEAR(pl.hpl_pred, AffineProvider::affine(query, 0.5), 1.0e-9);
 }
 
+TEST(RiskGridMapTest, P5_7FixtureOnlyAltersFinalCandidateQueries) {
+  iap::RiskGridMapParams params;
+  params.resolution_m = 0.2;
+  params.size_x_m = 5.0;
+  params.size_y_m = 2.5;
+  params.size_z_m = 2.0;
+  params.horizons_s = {0.0, 0.6, 1.0, 1.5, 2.0};
+  params.stale_timeout_s = 10.0;
+  params.p5_7_fixture.enabled = true;
+  params.p5_7_fixture.effective_enabled = true;
+  ASSERT_EQ(params.p5_7_fixture.name, "rejected_trajectory_zone_v1");
+  ASSERT_DOUBLE_EQ(params.p5_7_fixture.x_min_m, -11.7);
+  ASSERT_DOUBLE_EQ(params.p5_7_fixture.x_max_m, -8.7);
+
+  iap::RiskGridMap grid(params);
+  AffineProvider provider;
+  std::string reason;
+  ASSERT_TRUE(grid.refreshFromProvider(Eigen::Vector3d(-10.2, 0.0, 1.2),
+                                       10.0, provider, &reason))
+      << reason;
+
+  auto snapshot = grid.acquireSnapshot();
+  ASSERT_NE(snapshot, nullptr);
+  const Eigen::Vector3d rejected_point(-10.2, 0.0, 1.2);
+
+  iap::PredictedPLSample runtime_sample;
+  ASSERT_TRUE(snapshot->queryPredictedPL(rejected_point, 10.8,
+                                        &runtime_sample))
+      << runtime_sample.reason;
+  EXPECT_TRUE(runtime_sample.valid);
+  EXPECT_EQ(runtime_sample.reason, "ok");
+  EXPECT_FALSE(runtime_sample.fixture_match);
+  EXPECT_NEAR(runtime_sample.hpl_pred,
+              AffineProvider::affine(rejected_point, 0.8), 1.0e-9);
+
+  iap::PredictedPLSample final_sample;
+  ASSERT_TRUE(snapshot->queryPredictedPL(
+      rejected_point, 10.8, &final_sample,
+      std::numeric_limits<double>::quiet_NaN(), true))
+      << final_sample.reason;
+  EXPECT_TRUE(final_sample.valid);
+  EXPECT_TRUE(final_sample.available);
+  EXPECT_FALSE(final_sample.stale);
+  EXPECT_EQ(final_sample.reason, "p5_7_rejected_trajectory");
+  EXPECT_NEAR(final_sample.query_tau_s, 0.8, 1.0e-12);
+  EXPECT_TRUE(final_sample.fixture_match);
+  EXPECT_DOUBLE_EQ(final_sample.fixture_expected_hpl, 10.2);
+  EXPECT_DOUBLE_EQ(final_sample.fixture_expected_vpl, 10.2);
+  EXPECT_EQ(final_sample.fixture_expected_reason,
+            "p5_7_rejected_trajectory");
+  EXPECT_DOUBLE_EQ(final_sample.hpl_pred, 10.2);
+  EXPECT_DOUBLE_EQ(final_sample.vpl_pred, 10.2);
+}
+
 TEST(RiskGridMapTest, P5_6FixtureMarksOnlyInBoundsTauSamplesUnknown) {
   iap::RiskGridMapParams params = base_params();
   params.horizons_s = {0.0, 0.5, 1.0, 1.5, 2.0};

@@ -45,6 +45,10 @@ def p5_row(**overrides):
         "final_gate_fail_count": 0,
         "final_gate_fail_duration_s": 0.0,
         "final_gate_last_reason": "",
+        "final_candidate_traj_id": -1,
+        "final_candidate_start_time_s": "",
+        "final_candidate_duration_s": "",
+        "final_candidate_rejected": False,
         "pred_al_mode": "current_msg_constant",
         "pred_hal_min": 10.0,
         "pred_val_min": 10.0,
@@ -687,6 +691,134 @@ def p5_6_status_rows():
             bad_count=0,
             samples=unknown_samples,
         ),
+    ]
+
+
+def p5_7_manifest(enabled=True, effective_enabled=True):
+    manifest = p5_manifest()
+    manifest.update(
+        {
+            "p5_3.fixture.enabled": False,
+            "p5_4.fixture.enabled": False,
+            "p5_5.fixture.enabled": False,
+            "p5_6.fixture.enabled": False,
+            "p5_6.fixture.effective_enabled": False,
+            "p5_7.fixture.enabled": enabled,
+            "p5_7.fixture.effective_enabled": effective_enabled,
+            "p5_7.fixture.name": "rejected_trajectory_zone_v1",
+            "p5_7.fixture.x_min": -11.7,
+            "p5_7.fixture.x_max": -8.7,
+            "p5_7.fixture.y_min": -0.75,
+            "p5_7.fixture.y_max": 0.75,
+            "p5_7.fixture.z_min": 1.0,
+            "p5_7.fixture.z_max": 1.35,
+            "p5_7.fixture.tau_min": 0.6,
+            "p5_7.fixture.tau_max": 2.0,
+            "p5_7.fixture.hpl_pred_m": 10.2,
+            "p5_7.fixture.vpl_pred_m": 10.2,
+            "p5_7.fixture.expected_hal_m": 10.0,
+            "p5_7.fixture.expected_val_m": 10.0,
+            "p5_7.fixture.expected_im_m": -0.2,
+            "p5_7": {
+                "fixture": {
+                    "enabled": enabled,
+                    "effective_enabled": effective_enabled,
+                    "name": "rejected_trajectory_zone_v1",
+                    "bounds": {
+                        "x": [-11.7, -8.7],
+                        "y": [-0.75, 0.75],
+                        "z": [1.0, 1.35],
+                    },
+                    "tau_window_s": [0.6, 2.0],
+                    "injected_pl_m": {"hpl_pred": 10.2, "vpl_pred": 10.2},
+                    "expected_alert_limit_m": {
+                        "mode": "current_msg_constant",
+                        "hal": 10.0,
+                        "val": 10.0,
+                    },
+                    "expected_im_m": -0.2,
+                    "expected_reason": "p5_7_rejected_trajectory",
+                    "sample_source": "final_candidate",
+                }
+            },
+        }
+    )
+    return manifest
+
+
+def p5_7_rejected_sample(**overrides):
+    row = p5_3_sample(
+        tau_s=0.8,
+        query_tau_s=0.8,
+        x=-10.2,
+        y=0.0,
+        z=1.2,
+        hpl=10.2,
+        vpl=10.2,
+        im_min=-0.2,
+        bad=True,
+        reason="future_low_margin:p5_7_rejected_trajectory",
+        fixture_match=True,
+        fixture_expected_hpl=10.2,
+        fixture_expected_vpl=10.2,
+        fixture_expected_reason="p5_7_rejected_trajectory",
+        trajectory_sample_source="final_candidate",
+    )
+    row.update(overrides)
+    return row
+
+
+def p5_7_runtime_sample(**overrides):
+    row = p5_3_sample(
+        tau_s=0.8,
+        query_tau_s=0.8,
+        x=-12.0,
+        y=0.0,
+        z=1.2,
+        hpl=1.0,
+        vpl=1.0,
+        im_min=9.0,
+        bad=False,
+        reason="ok",
+        fixture_match=False,
+        trajectory_sample_source="runtime_committed",
+    )
+    row.update(overrides)
+    return row
+
+
+def p5_7_status_rows(**final_overrides):
+    final_row = p5_row(
+        bag_time_s=10.0,
+        phase="final",
+        action="REQUEST_REPLAN",
+        raw_action="REQUEST_REPLAN",
+        reason="final_gate_failed",
+        raw_reason="future_bad",
+        future_reason="future_bad",
+        active_reasons=["future_bad", "final_gate_failed"],
+        future_min_im=-0.2,
+        first_bad_tau=0.8,
+        bad_ratio=0.3,
+        sample_count=2,
+        bad_count=1,
+        final_gate_fail_count=1,
+        final_gate_fail_duration_s=0.2,
+        final_gate_last_reason="future_bad",
+        final_candidate_traj_id=77,
+        final_candidate_start_time_s=123.0,
+        final_candidate_duration_s=3.0,
+        final_candidate_rejected=True,
+        samples=[p5_3_sample(), p5_7_rejected_sample()],
+    )
+    final_row.update(final_overrides)
+    return [
+        p5_row(
+            bag_time_s=9.0,
+            phase="runtime",
+            samples=[p5_7_runtime_sample()],
+        ),
+        final_row,
     ]
 
 
@@ -2545,6 +2677,211 @@ class P5_6AnalyzerTest(unittest.TestCase):
                 "p5_6_trajectory_integrity_samples.png",
             ],
             analyzer.P5_6_FIGURE_FILENAMES,
+        )
+
+
+class P5_7AnalyzerTest(unittest.TestCase):
+    def validate_rows(
+        self,
+        rows=None,
+        manifest=None,
+        p0_rows=None,
+        topic_timestamps=None,
+        topic_health=None,
+        bspline_rows=None,
+    ):
+        status_rows = rows if rows is not None else p5_7_status_rows()
+        p0_health_rows = p0_rows if p0_rows is not None else bounded_startup_p0_rows()
+        p5_summary = analyzer.summarize_p5_status_rows(status_rows)
+        failures = []
+        inconclusive = []
+        gates = analyzer.validate_p5_7_hard_gates(
+            manifest if manifest is not None else p5_7_manifest(),
+            {"passed": True},
+            topic_health if topic_health is not None else p5_topic_health(),
+            analyzer.summarize_p0_health(p0_health_rows),
+            p0_health_rows,
+            status_rows,
+            p5_summary,
+            bspline_rows if bspline_rows is not None else [],
+            failures,
+            inconclusive,
+            topic_timestamps,
+        )
+        return p5_summary, gates, failures, inconclusive
+
+    def test_p5_7_passes_with_rejected_final_candidate_not_published(self):
+        _, gates, failures, inconclusive = self.validate_rows()
+
+        self.assertEqual([], failures)
+        self.assertEqual([], inconclusive)
+        self.assertTrue(gates["passed"])
+        self.assertTrue(gates["fixture_ready"])
+        self.assertTrue(gates["final_candidate_rejected"])
+        self.assertTrue(gates["candidate_identity_present"])
+        self.assertTrue(gates["rejected_candidate_hit_fixture"])
+        self.assertTrue(gates["runtime_committed_unpolluted"])
+        self.assertTrue(gates["final_gate_fail_count_visible"])
+        self.assertTrue(gates["final_gate_fail_duration_visible"])
+        self.assertTrue(gates["reason_chain_ok"])
+        self.assertTrue(gates["rejected_candidate_not_published"])
+
+    def test_p5_7_reports_blocked_when_fixture_manifest_is_missing(self):
+        _, gates, failures, inconclusive = self.validate_rows(manifest=p5_manifest())
+
+        self.assertEqual([], inconclusive)
+        self.assertFalse(gates["passed"])
+        self.assertTrue(gates["blocked_scenario_missing"])
+        self.assertFalse(gates["fixture_present"])
+        self.assertTrue(
+            any("rejected trajectory fixture manifest is missing" in failure for failure in failures),
+            failures,
+        )
+        self.assertEqual(
+            analyzer.P5_7_BLOCKED_BRANCH,
+            analyzer.next_debug_branch(
+                "BLOCKED_SCENARIO_MISSING",
+                failures,
+                [],
+                "P5-7",
+            ),
+        )
+
+    def test_p5_7_fails_when_fixture_disabled_or_not_effective(self):
+        _, disabled_gates, disabled_failures, _ = self.validate_rows(
+            manifest=p5_7_manifest(enabled=False)
+        )
+
+        self.assertFalse(disabled_gates["passed"])
+        self.assertFalse(disabled_gates["fixture_enabled"])
+        self.assertTrue(any("fixture is disabled" in failure for failure in disabled_failures), disabled_failures)
+
+        _, ineffective_gates, ineffective_failures, _ = self.validate_rows(
+            manifest=p5_7_manifest(effective_enabled=False)
+        )
+
+        self.assertFalse(ineffective_gates["passed"])
+        self.assertFalse(ineffective_gates["fixture_effective_enabled"])
+        self.assertTrue(
+            any("not effectively enabled" in failure for failure in ineffective_failures),
+            ineffective_failures,
+        )
+
+    def test_p5_7_fails_when_earlier_fixture_is_enabled(self):
+        pollution_specs = [
+            ("p5_3.fixture.enabled", "p5_3_fixture_disabled", "P5-3"),
+            ("p5_4.fixture.enabled", "p5_4_fixture_disabled", "P5-4"),
+            ("p5_5.fixture.enabled", "p5_5_fixture_disabled", "P5-5"),
+            ("p5_6.fixture.enabled", "p5_6_fixture_disabled", "P5-6"),
+        ]
+        for flat_key, gate_key, label in pollution_specs:
+            with self.subTest(label=label):
+                manifest = p5_7_manifest()
+                manifest[flat_key] = True
+                if flat_key.startswith("p5_6"):
+                    manifest["p5_6.fixture.effective_enabled"] = True
+                _, gates, failures, _ = self.validate_rows(manifest=manifest)
+
+                self.assertFalse(gates["passed"])
+                self.assertFalse(gates[gate_key])
+                self.assertTrue(any(label in failure for failure in failures), failures)
+
+    def test_p5_7_fails_when_final_gate_fail_count_does_not_increase(self):
+        rows = p5_7_status_rows(final_gate_fail_count=0)
+
+        _, gates, failures, _ = self.validate_rows(rows=rows)
+
+        self.assertFalse(gates["passed"])
+        self.assertFalse(gates["final_gate_fail_count_visible"])
+        self.assertTrue(any("final_gate_fail_count did not increase" in failure for failure in failures), failures)
+
+    def test_p5_7_fails_when_rejected_candidate_is_published(self):
+        bspline_rows = [
+            {
+                "bag_time_s": 10.1,
+                "traj_id": 77,
+                "start_time_s": 123.0,
+                "duration_s": 3.0,
+            }
+        ]
+
+        _, gates, failures, _ = self.validate_rows(bspline_rows=bspline_rows)
+
+        self.assertFalse(gates["passed"])
+        self.assertFalse(gates["rejected_candidate_not_published"])
+        self.assertEqual(1, gates["published_rejected_candidate_count"])
+        self.assertTrue(any("was published" in failure for failure in failures), failures)
+
+    def test_p5_7_fails_when_reason_chain_does_not_point_to_final_reject(self):
+        rows = p5_7_status_rows(
+            reason="current_low_margin",
+            raw_reason="current_low_margin",
+            future_reason="",
+            active_reasons=["current_low_margin"],
+            final_gate_last_reason="current_low_margin",
+            samples=[
+                p5_3_sample(),
+                p5_7_rejected_sample(
+                    reason="low_margin_without_fixture_source",
+                    fixture_expected_reason="",
+                ),
+            ],
+        )
+
+        _, gates, failures, _ = self.validate_rows(rows=rows)
+
+        self.assertFalse(gates["passed"])
+        self.assertFalse(gates["reason_chain_ok"])
+        self.assertTrue(
+            any("reason chain did not expose" in failure for failure in failures),
+            failures,
+        )
+
+    def test_p5_7_required_figures_are_fail_closed(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            failures = []
+            analyzer.validate_p5_7_required_figures(
+                [Path(tmpdir) / "p5_7_missing.png"],
+                failures,
+            )
+
+        self.assertEqual(1, len(failures))
+        self.assertIn("P5-7 required figure missing", failures[0])
+
+    def test_p5_7_next_branch_is_exact(self):
+        self.assertEqual(
+            "PASS -> P5-8",
+            analyzer.next_debug_branch("PASS", [], [], "P5-7"),
+        )
+        self.assertEqual(
+            analyzer.P5_7_FAIL_BRANCH,
+            analyzer.next_debug_branch("FAIL", ["P5-7 evidence failed"], [], "P5-7"),
+        )
+        self.assertEqual(
+            analyzer.P5_7_BLOCKED_BRANCH,
+            analyzer.next_debug_branch(
+                "BLOCKED_SCENARIO_MISSING",
+                ["P5-7 rejected trajectory fixture manifest is missing"],
+                [],
+                "P5-7",
+            ),
+        )
+
+    def test_p5_7_required_figure_filenames_are_exact(self):
+        self.assertEqual(
+            [
+                "p5_7_scenario_topdown.png",
+                "p5_7_rejected_trajectory_overlay.png",
+                "p5_7_final_gate_fail_timeline.png",
+                "p5_7_bspline_publish_timeline.png",
+                "p5_7_action_reason_timeline.png",
+                "p5_7_candidate_vs_committed_trajectory.png",
+                "p5_7_topic_activity_timeline.png",
+                "p5_7_cause_exclusion_summary.png",
+                "p5_7_p0_health.png",
+                "p5_7_trajectory_integrity_samples.png",
+            ],
+            analyzer.P5_7_FIGURE_FILENAMES,
         )
 
 
