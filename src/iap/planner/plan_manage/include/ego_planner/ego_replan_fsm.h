@@ -81,6 +81,7 @@ namespace ego_planner
 
     bool flag_escape_emergency_ = false;
     bool p5_final_gate_emergency_candidate_ = false;
+    bool p5_waiting_for_p0_ready_ = false;
 
     /* ROS utils */
     rclcpp::Node::SharedPtr node_;
@@ -112,6 +113,7 @@ namespace ego_planner
 
     void readGivenWps();
     void planNextWaypoint(const Eigen::Vector3d next_wp);
+    bool shouldDeferP5FinalGateForP0Ready();
     void getLocalTarget();
     rclcpp::Time plannerNow() const;
 

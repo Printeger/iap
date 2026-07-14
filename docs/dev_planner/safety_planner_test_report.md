@@ -4069,3 +4069,175 @@ Verification notes:
 Final conclusion:
 
 FAIL -> debug P5-7 final gate reject / unsafe publish blocking
+
+### P5-7 GPU-Restored Rerun
+
+Environment check:
+
+| Check | Result |
+|---|---|
+| GPU visibility | `PASS`: `nvidia-smi` reported NVIDIA-SMI `580.126.09`, CUDA `13.0`, and an RTX 4070-class GPU before launch. |
+| ROS environment | `PASS`: launched from `/home/dev/ws_iap` with `/opt/ros/jazzy/setup.bash` and the current workspace overlay sourced. |
+| GPU runtime crash regression | `PASS`: launch output contained no `cudaErrorNoDevice` or `GPU points/covs not allocated`, and `iap_rosnode` finished cleanly. |
+
+Formal launch:
+
+```bash
+ros2 launch iap test_planner.launch.py \
+  experiment:=p5_corridor scenario:=manual \
+  run_duration_s:=90 validation_duration_s:=90 \
+  start_rviz:=false run_validator:=true record_bag:=true \
+  planner_enable_p5_final:=true
+```
+
+Analyzer:
+
+```bash
+python3 scripts/dev_planner/analyze_safety_planner_run.py \
+  --experiment-id P5-7 \
+  --export-dir /home/dev/ws_iap/src/iap/results/planner_validation/exports/test_planner_p5_corridor_manual_1784037433214 \
+  --bag-dir /home/dev/ws_iap/src/iap/results/planner_validation/bags/test_planner_p5_corridor_manual_20260714T135713Z \
+  --fail-on-threshold
+```
+
+Latest artifacts:
+
+| Artifact | Path |
+|---|---|
+| Export | `/home/dev/ws_iap/src/iap/results/planner_validation/exports/test_planner_p5_corridor_manual_1784037433214` |
+| Bag | `/home/dev/ws_iap/src/iap/results/planner_validation/bags/test_planner_p5_corridor_manual_20260714T135713Z` |
+| Analyzer summary | `/home/dev/ws_iap/src/iap/results/planner_validation/exports/test_planner_p5_corridor_manual_1784037433214/metadata/safety_planner_analysis_summary.json` |
+| Analyzer status | `FAIL`: analyzer exit `2`, `passed=false`, `status=FAIL`, `next_debug_branch=FAIL -> debug P5-7 final gate reject / unsafe publish blocking`. |
+| Rosbag summary | Storage `mcap`; size `849M`; duration `90.052142499s`; messages `487346`. |
+
+P5-7 gate table:
+
+| Gate | Result |
+|---|---|
+| Validator | `PASS`: validator summary `passed=true`, `message_count=883`, `gnss_valid_seen=true`, and `fallback_valid_seen=true`. |
+| Runtime environment | `PASS`: GPU-backed `iap_rosnode` initialized and ran through shutdown without the prior Docker GPU-mount failure. |
+| P5-7 fixture manifest | `PASS`: flat and nested manifest fields record `p5_7.fixture.enabled=true`, `effective_enabled=true`, and `name=rejected_trajectory_zone_v1`. |
+| Fixture bounds and tau | `PASS`: manifest bounds are `x=[-11.7,-8.7]`, `y=[-0.75,0.75]`, `z=[1.0,1.35]`, `tau=[0.6,2.0]`, with injected `hpl=vpl=10.2`. |
+| P5-3/P5-4/P5-5/P5-6 isolation | `PASS`: all earlier P5 fixtures are disabled or effectively disabled in the manifest. |
+| Core continuous topics | `PASS`: `/iap/integrity`, `/sim/drone_0/lidar_body`, and `/drone_0_visual_slam/odom` were continuous with `885`, `897`, and `885` messages respectively. |
+| P0/P5 evidence topics | `FAIL`: `/planning/risk_grid_health`, `/planning/integrity_gate_status`, P5 RViz topics, and P0 cloud topics all had `0` messages. |
+| P0 health evidence | `FAIL`: `risk_grid_health` had header-only CSV evidence and no post-startup ready/non-stale rows. |
+| P5 status evidence | `FAIL`: `/planning/integrity_gate_status` and `/iap/rviz/p5_gate_status` had no rows, so no action/reason or final-gate state was recorded. |
+| Final candidate rejection | `FAIL`: no final candidate row, rejected candidate identity, rejected fixture sample, final-gate fail counter increase, or final-gate fail duration was visible. |
+| Unsafe publish blocking | `FAIL`: `/drone_0_planning/bspline` had `0` messages, but no rejected candidate `traj_id`/`start_time` existed, so no-publish proof was unavailable. |
+| Cause exclusions | `PASS`: current-stale, current-invalid, future-unknown, startup/snapshot, topic-gap, P5-3, P5-4, and P5-7 runtime fixture contamination counts are all `0`; this does not replace missing final-gate evidence. |
+
+Required P5-7 figure conclusions:
+
+| Figure filename | Conclusion |
+|---|---|
+| `p5_7_scenario_topdown.png` | Generated; shows the corridor scenario context for the GPU-restored run, but not final-gate rejection evidence. |
+| `p5_7_rejected_trajectory_overlay.png` | Missing; no final-candidate sample diagnostics were available to overlay on the rejected trajectory fixture. |
+| `p5_7_final_gate_fail_timeline.png` | Missing; no P5 status rows existed to plot final-gate fail counters or duration. |
+| `p5_7_bspline_publish_timeline.png` | Missing; the publish CSV was header-only because there was no rejected candidate identity to compare against `/drone_0_planning/bspline`. |
+| `p5_7_candidate_vs_committed_trajectory.png` | Missing; no final-candidate or runtime-committed trajectory sample diagnostics existed. |
+| `p5_7_action_reason_timeline.png` | Missing; no P5 action/reason rows existed in the bag. |
+| `p5_7_topic_activity_timeline.png` | Generated; shows continuous integrity/LiDAR/odom alongside missing P0/P5 planner evidence topics. |
+| `p5_7_p0_health.png` | Missing; no P0 risk-grid health rows were available. |
+| `p5_7_cause_exclusion_summary.png` | Generated; shows zero counted alternate causes, but there were no rejected candidate rows to accept P5-7. |
+| `p5_7_trajectory_integrity_samples.png` | Missing; no trajectory integrity marker rows were available. |
+
+Verification notes:
+
+| Check | Result |
+|---|---|
+| Python compile check | `PASS`: `python3 -m py_compile launch/test_planner.launch.py scripts/dev_planner/analyze_safety_planner_run.py`. |
+| Focused analyzer tests | `PASS`: `python3 test/test_analyze_safety_planner_run_p5_1.py` ran `101` tests. |
+| Diff whitespace check | `PASS`: `git diff --check`. |
+
+Final conclusion:
+
+FAIL -> debug P5-7 final gate reject / unsafe publish blocking
+
+### P5-7 Nonblocking Startup Guard Rerun
+
+Code change under test:
+
+| Change | Result |
+|---|---|
+| Preset target startup | `planNextWaypoint()` now computes and records the waypoint target without spinning inside `init()`; it only requests `REPLAN_TRAJ` when already in `EXEC_TRAJ`. |
+| P0-ready guard | `planFromGlobalTraj()` defers P5 final-gate planning while P0 final-gate prerequisites report `ready=false` or `stale=true`, letting the executor publish P0 health first. |
+
+Formal launch:
+
+```bash
+source /opt/ros/jazzy/setup.bash
+source /home/dev/ws_iap/install/setup.bash
+ros2 launch iap test_planner.launch.py \
+  experiment:=p5_corridor scenario:=manual \
+  run_duration_s:=90 validation_duration_s:=90 \
+  start_rviz:=false run_validator:=true record_bag:=true \
+  planner_enable_p5_final:=true
+```
+
+Analyzer:
+
+```bash
+cd /home/dev/ws_iap/src/iap
+python3 scripts/dev_planner/analyze_safety_planner_run.py \
+  --experiment-id P5-7 \
+  --export-dir /home/dev/ws_iap/src/iap/results/planner_validation/exports/test_planner_p5_corridor_manual_1784043624321 \
+  --bag-dir /home/dev/ws_iap/src/iap/results/planner_validation/bags/test_planner_p5_corridor_manual_20260714T154024Z \
+  --fail-on-threshold
+```
+
+Fresh artifacts:
+
+| Artifact | Path |
+|---|---|
+| Export | `/home/dev/ws_iap/src/iap/results/planner_validation/exports/test_planner_p5_corridor_manual_1784043624321` |
+| Bag | `/home/dev/ws_iap/src/iap/results/planner_validation/bags/test_planner_p5_corridor_manual_20260714T154024Z` |
+| Analyzer summary | `/home/dev/ws_iap/src/iap/results/planner_validation/exports/test_planner_p5_corridor_manual_1784043624321/metadata/safety_planner_analysis_summary.json` |
+| Analyzer status | `FAIL`: analyzer exit `2`, `passed=false`, `status=FAIL`, `next_debug_branch=FAIL -> debug P5-7 final gate reject / unsafe publish blocking`. |
+| Rosbag summary | Storage `mcap`; size `848.0 MiB`; duration `90.042921269s`; messages `487323`. |
+
+P5-7 gate table:
+
+| Gate | Result |
+|---|---|
+| GPU-backed IAP runtime | `PASS`: `iap_rosnode` loaded `libodometry_estimation_gpu.so`, registered the GPU linearization hook, and finished cleanly; no `cudaErrorNoDevice` or `GPU points/covs not allocated` appeared. |
+| Validator | `PASS`: validator summary `passed=true`, `message_count=883`, `gnss_valid_seen=true`, and `fallback_valid_seen=true`. |
+| P5-7 fixture manifest | `PASS`: `p5_7.fixture.enabled=true`, `effective_enabled=true`, `name=rejected_trajectory_zone_v1`, with `hpl=vpl=10.2`. |
+| P5-3/P5-4/P5-5/P5-6 isolation | `PASS`: all earlier P5 fixtures are disabled or effectively disabled in the manifest. |
+| Core continuous topics | `PASS`: `/iap/integrity=885`, `/sim/drone_0/lidar_body=897`, `/drone_0_visual_slam/odom=885`. |
+| P0 readiness evidence | `PASS`: `/planning/risk_grid_health` published one ready row with `ready=true`, `stale=false`, `valid_ratio=0.9890625`, `unknown_ratio=0.0109375`, `generation_id=1`, `reason=ok`. |
+| P0 periodicity after planning starts | `FAIL`: only one P0 health/cloud publish occurred; the first actual planning attempt still monopolized `ego_planner_node` before later P0 timer callbacks could run. |
+| P5 status evidence | `FAIL`: `/planning/integrity_gate_status`, `/iap/rviz/p5_gate_status`, `/iap/rviz/trajectory_integrity_samples`, `/iap/rviz/current_traj_integrity_colored`, and `/iap/rviz/p5_current_im_bars` all had `0` messages. |
+| Final candidate rejection | `FAIL`: no final candidate row, rejected candidate identity, rejected fixture sample, final-gate fail counter increase, or final-gate fail duration was visible. |
+| Unsafe publish blocking | `FAIL`: `/drone_0_planning/bspline` had `0` messages, but no rejected candidate `traj_id`/`start_time` existed, so no-publish proof was unavailable. |
+| Cause exclusions | `PASS`: current-stale, current-invalid, future-unknown, startup/snapshot, topic-gap, P5-3, P5-4, and P5-7 runtime fixture contamination counts are all `0`; this does not replace missing final-gate evidence. |
+| Shutdown behavior | `FAIL`: `ego_planner_node` again required SIGKILL after SIGINT/SIGTERM, consistent with a blocking planning call after P0 readiness. |
+
+Required P5-7 figure conclusions:
+
+| Figure filename | Conclusion |
+|---|---|
+| `p5_7_scenario_topdown.png` | Generated; shows the corridor scenario context for the rerun. |
+| `p5_7_rejected_trajectory_overlay.png` | Missing; no final-candidate sample diagnostics were available to overlay on the rejected trajectory fixture. |
+| `p5_7_final_gate_fail_timeline.png` | Missing; no P5 status rows existed to plot final-gate fail counters or duration. |
+| `p5_7_bspline_publish_timeline.png` | Missing; the publish CSV had no rejected candidate identity to compare against `/drone_0_planning/bspline`. |
+| `p5_7_candidate_vs_committed_trajectory.png` | Missing; no final-candidate or runtime-committed trajectory sample diagnostics existed. |
+| `p5_7_action_reason_timeline.png` | Missing; no P5 action/reason rows existed in the bag. |
+| `p5_7_topic_activity_timeline.png` | Generated; shows continuous integrity/LiDAR/odom, one P0 health/cloud publish, and missing P5 evidence topics. |
+| `p5_7_p0_health.png` | Generated; confirms the nonblocking startup guard recovered a ready/non-stale P0 health row. |
+| `p5_7_cause_exclusion_summary.png` | Generated; shows zero counted alternate causes, but there were no rejected candidate rows to accept P5-7. |
+
+Verification notes:
+
+| Check | Result |
+|---|---|
+| Workspace `iap` build | `PASS`: `colcon build --packages-select ego_planner iap --event-handlers console_direct+` selected `iap`; this workspace exposes nested planner packages only with explicit base paths. |
+| Nested ego planner build | `PASS`: `colcon --log-base /home/dev/ws_iap/log build --base-paths src/iap/planner/plan_manage src/iap/planner/plan_env src/iap/planner/path_searching src/iap/planner/bspline_opt src/iap/planner/traj_utils --packages-select ego_planner --build-base /home/dev/ws_iap/build --install-base /home/dev/ws_iap/install --event-handlers console_direct+`. |
+| Python compile check | `PASS`: `python3 -m py_compile launch/test_planner.launch.py scripts/dev_planner/analyze_safety_planner_run.py`. |
+| Focused analyzer tests | `PASS`: `python3 test/test_analyze_safety_planner_run_p5_1.py` ran `101` tests. |
+| Focused P0/P5 ego-planner CTests | `PASS`: `ctest --test-dir /home/dev/ws_iap/build/ego_planner -R "test_p5_runtime_integrity_gate|test_p0_risk_grid_runtime" --output-on-failure`. |
+| Focused predictor/risk-grid CTests | `PASS`: `ctest --test-dir /home/dev/ws_iap/build/iap -R "test_predictor_module|test_risk_grid_map" --output-on-failure`. |
+
+Final conclusion:
+
+FAIL -> debug P5-7 final gate reject / unsafe publish blocking

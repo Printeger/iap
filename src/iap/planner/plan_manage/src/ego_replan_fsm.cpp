@@ -1,5 +1,6 @@
 
 #include <ego_planner/ego_replan_fsm.h>
+#include <ego_planner/p0_risk_grid_runtime.h>
 #include <ego_planner/p5_runtime_integrity_gate.h>
 #include <iap/planner/risk_grid_map.hpp>
 
@@ -213,17 +214,14 @@ namespace ego_planner
       have_target_ = true;
       have_new_target_ = true;
 
-      /*** FSM状态转换 ***/
-      if (exec_state_ == WAIT_TARGET)
-        changeFSMExecState(GEN_NEW_TRAJ, "TRIG");
-      else
+      if (exec_state_ == EXEC_TRAJ)
       {
-        while (exec_state_ != EXEC_TRAJ)
-        {
-          rclcpp::spin_some(node_);
-          std::this_thread::sleep_for(std::chrono::milliseconds(1));
-        }
         changeFSMExecState(REPLAN_TRAJ, "TRIG");
+      }
+      else if (target_type_ != TARGET_TYPE::PRESET_TARGET &&
+               exec_state_ == WAIT_TARGET)
+      {
+        changeFSMExecState(GEN_NEW_TRAJ, "TRIG");
       }
 
       visualization_->displayGlobalPathList(gloabl_traj, 0.1, 0);
@@ -539,7 +537,10 @@ namespace ego_planner
           }
           else
           {
-            RCLCPP_ERROR(node_->get_logger(), "Failed to generate the first trajectory!!!");
+            if (!p5_waiting_for_p0_ready_)
+            {
+              RCLCPP_ERROR(node_->get_logger(), "Failed to generate the first trajectory!!!");
+            }
             changeFSMExecState(SEQUENTIAL_START, "FSM");
           }
         }
@@ -680,8 +681,39 @@ namespace ego_planner
     }
   }
 
+  bool EGOReplanFSM::shouldDeferP5FinalGateForP0Ready()
+  {
+    if (!planner_manager_ || !planner_manager_->p0_risk_grid_runtime_ ||
+        !planner_manager_->p5_integrity_gate_ ||
+        !planner_manager_->p5_integrity_gate_->finalGateEnabled())
+    {
+      p5_waiting_for_p0_ready_ = false;
+      return false;
+    }
+    const auto health = planner_manager_->p0_risk_grid_runtime_->health();
+    if (health.ready && !health.stale)
+    {
+      p5_waiting_for_p0_ready_ = false;
+      return false;
+    }
+    p5_waiting_for_p0_ready_ = true;
+    RCLCPP_WARN_THROTTLE(
+        node_->get_logger(), *node_->get_clock(), 1000,
+        "Deferring P5 final-gate planning until P0 risk grid is ready: ready=%d stale=%d reason=%s generation_id=%lu age_s=%.3f",
+        static_cast<int>(health.ready), static_cast<int>(health.stale),
+        health.reason.c_str(), static_cast<unsigned long>(health.generation_id),
+        health.age_s);
+    return true;
+  }
+
   bool EGOReplanFSM::planFromGlobalTraj(const int trial_times /*=1*/) // zx-todo
   {
+    if (shouldDeferP5FinalGateForP0Ready())
+    {
+      p5_final_gate_emergency_candidate_ = false;
+      return false;
+    }
+
     start_pt_ = odom_pos_;
     start_vel_ = odom_vel_;
     start_acc_.setZero();
