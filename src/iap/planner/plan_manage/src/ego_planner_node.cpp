@@ -1,10 +1,17 @@
 #include <rclcpp/rclcpp.hpp>
+#include <rclcpp/executors/multi_threaded_executor.hpp>
 #include <visualization_msgs/msg/marker.hpp>
+#include <cstddef>
 #include <iostream>
 
 #include <ego_planner/ego_replan_fsm.h>
 
 using namespace ego_planner;
+
+namespace
+{
+constexpr std::size_t kExecutorThreadCount = 4;
+}
 
 int main(int argc, char **argv)
 {
@@ -15,7 +22,10 @@ int main(int argc, char **argv)
 
   rebo_replan.init(node);
 
-  rclcpp::spin(node);
+  rclcpp::executors::MultiThreadedExecutor exec(rclcpp::ExecutorOptions(),
+                                                kExecutorThreadCount);
+  exec.add_node(node);
+  exec.spin();
   rclcpp::shutdown();
 
   return 0;

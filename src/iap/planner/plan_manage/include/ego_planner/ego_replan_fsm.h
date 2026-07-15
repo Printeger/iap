@@ -114,6 +114,7 @@ namespace ego_planner
     void readGivenWps();
     void planNextWaypoint(const Eigen::Vector3d next_wp);
     bool shouldDeferP5FinalGateForP0Ready();
+    int globalTrajTrialLimitForP5FinalGate() const;
     void getLocalTarget();
     rclcpp::Time plannerNow() const;
 

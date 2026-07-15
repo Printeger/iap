@@ -132,6 +132,7 @@ class P0RiskGridRuntime {
   iap::RiskGridMap::OccupancyPredicate occupancy_predicate_;
   iap::IntegritySnapshotBuilder snapshot_builder_;
 
+  rclcpp::CallbackGroup::SharedPtr callback_group_;
   rclcpp::TimerBase::SharedPtr refresh_timer_;
   std::shared_ptr<SafetyRvizPublisher> safety_viz_;
   rclcpp::Publisher<std_msgs::msg::String>::SharedPtr health_pub_;

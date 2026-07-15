@@ -603,50 +603,62 @@ void P0RiskGridRuntime::createRosInterfaces() {
   if (!node_ || !config_.enable_risk_grid) {
     return;
   }
+  callback_group_ =
+      node_->create_callback_group(rclcpp::CallbackGroupType::MutuallyExclusive);
+  rclcpp::SubscriptionOptions subscription_options;
+  subscription_options.callback_group = callback_group_;
   const rclcpp::QoS qos(50);
   odom_sub_ = node_->create_subscription<nav_msgs::msg::Odometry>(
       config_.odom_topic, qos,
       [this](const nav_msgs::msg::Odometry::ConstSharedPtr msg) {
         odomCallback(msg);
-      });
+      },
+      subscription_options);
   integrity_sub_ = node_->create_subscription<iap::msg::IntegrityReport>(
       config_.integrity_topic, qos,
       [this](const iap::msg::IntegrityReport::ConstSharedPtr msg) {
         integrityCallback(msg);
-      });
+      },
+      subscription_options);
   range_sub_ = node_->create_subscription<gnss_comm::msg::GnssMeasMsg>(
       config_.range_meas_topic, qos,
       [this](const gnss_comm::msg::GnssMeasMsg::ConstSharedPtr msg) {
         rangeCallback(msg);
-      });
+      },
+      subscription_options);
   ephem_sub_ = node_->create_subscription<gnss_comm::msg::GnssEphemMsg>(
       config_.ephem_topic, qos,
       [this](const gnss_comm::msg::GnssEphemMsg::ConstSharedPtr msg) {
         ephemCallback(msg);
-      });
+      },
+      subscription_options);
   glo_ephem_sub_ =
       node_->create_subscription<gnss_comm::msg::GnssGloEphemMsg>(
           config_.glo_ephem_topic, qos,
           [this](const gnss_comm::msg::GnssGloEphemMsg::ConstSharedPtr msg) {
             gloEphemCallback(msg);
-          });
+          },
+          subscription_options);
   receiver_lla_sub_ =
       node_->create_subscription<sensor_msgs::msg::NavSatFix>(
           config_.receiver_lla_topic, qos,
           [this](const sensor_msgs::msg::NavSatFix::ConstSharedPtr msg) {
             receiverLlaCallback(msg);
-          });
+          },
+          subscription_options);
   iono_sub_ =
       node_->create_subscription<gnss_comm::msg::GnssIonosphereParameter>(
           config_.iono_topic, qos,
           [this](const gnss_comm::msg::GnssIonosphereParameter::ConstSharedPtr msg) {
             ionoCallback(msg);
-          });
+          },
+          subscription_options);
   cloud_sub_ = node_->create_subscription<sensor_msgs::msg::PointCloud2>(
       config_.map_topic, rclcpp::QoS(2).transient_local().reliable(),
       [this](const sensor_msgs::msg::PointCloud2::ConstSharedPtr msg) {
         cloudCallback(msg);
-      });
+      },
+      subscription_options);
 
   if (config_.debug_metrics_enable) {
     health_pub_ =
@@ -658,7 +670,8 @@ void P0RiskGridRuntime::createRosInterfaces() {
       std::max(0.001, config_.grid.refresh_period_s);
   refresh_timer_ = node_->create_wall_timer(
       std::chrono::duration<double>(period_s),
-      [this]() { refreshTimerCallback(); });
+      [this]() { refreshTimerCallback(); },
+      callback_group_);
 }
 
 void P0RiskGridRuntime::refreshTimerCallback() {

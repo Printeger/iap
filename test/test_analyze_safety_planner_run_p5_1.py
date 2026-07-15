@@ -2726,6 +2726,15 @@ class P5_7AnalyzerTest(unittest.TestCase):
         self.assertTrue(gates["reason_chain_ok"])
         self.assertTrue(gates["rejected_candidate_not_published"])
 
+    def test_p5_7_accepts_rejected_final_candidate_at_first_status_row(self):
+        rows = p5_7_status_rows()[1:]
+
+        _, gates, failures, _ = self.validate_rows(rows=rows)
+
+        self.assertEqual([], failures)
+        self.assertTrue(gates["passed"])
+        self.assertTrue(gates["rejected_candidate_hit_fixture"])
+
     def test_p5_7_reports_blocked_when_fixture_manifest_is_missing(self):
         _, gates, failures, inconclusive = self.validate_rows(manifest=p5_manifest())
 
@@ -2836,6 +2845,60 @@ class P5_7AnalyzerTest(unittest.TestCase):
             any("reason chain did not expose" in failure for failure in failures),
             failures,
         )
+
+    def test_p5_7_ignores_unrelated_future_unknown_final_replans(self):
+        rows = p5_7_status_rows() + [
+            p5_row(
+                bag_time_s=11.0,
+                phase="final",
+                action="REQUEST_REPLAN",
+                raw_action="REQUEST_REPLAN",
+                reason="future_unknown",
+                raw_reason="future_unknown",
+                future_reason="future_unknown",
+                active_reasons=["future_unknown"],
+                unknown_ratio=1.0,
+                unknown_count=1,
+                final_candidate_traj_id=78,
+                final_candidate_start_time_s=124.0,
+                final_candidate_duration_s=3.0,
+                final_candidate_rejected=True,
+                samples=[
+                    p5_3_sample(
+                        tau_s=0.8,
+                        query_tau_s=0.8,
+                        hpl="",
+                        vpl="",
+                        im_min="",
+                        unknown=True,
+                        reason="future_unknown",
+                        trajectory_sample_source="final_candidate",
+                    )
+                ],
+            )
+        ]
+
+        _, gates, failures, _ = self.validate_rows(rows=rows)
+
+        self.assertTrue(gates["passed"])
+        self.assertTrue(gates["future_unknown_excluded"])
+        self.assertFalse(any("future_unknown cause contaminated" in failure for failure in failures), failures)
+
+    def test_p5_7_fails_when_fixture_reject_is_future_unknown_attributed(self):
+        rows = p5_7_status_rows(
+            reason="future_unknown",
+            raw_reason="future_unknown",
+            future_reason="future_unknown",
+            active_reasons=["future_unknown"],
+            unknown_ratio=1.0,
+            unknown_count=1,
+        )
+
+        _, gates, failures, _ = self.validate_rows(rows=rows)
+
+        self.assertFalse(gates["passed"])
+        self.assertFalse(gates["future_unknown_excluded"])
+        self.assertTrue(any("future_unknown cause contaminated" in failure for failure in failures), failures)
 
     def test_p5_7_required_figures_are_fail_closed(self):
         with tempfile.TemporaryDirectory() as tmpdir:

@@ -576,11 +576,16 @@ void P5RuntimeIntegrityGate::createRosInterfaces() {
   if (!node_ || (!config_.enable_runtime_gate && !config_.enable_final_gate)) {
     return;
   }
+  callback_group_ =
+      node_->create_callback_group(rclcpp::CallbackGroupType::MutuallyExclusive);
+  rclcpp::SubscriptionOptions subscription_options;
+  subscription_options.callback_group = callback_group_;
   integrity_sub_ = node_->create_subscription<iap::msg::IntegrityReport>(
       config_.integrity_topic, rclcpp::QoS(20),
       [this](const iap::msg::IntegrityReport::ConstSharedPtr msg) {
         integrityCallback(msg);
-      });
+      },
+      subscription_options);
   if (config_.debug_metrics_enable) {
     status_pub_ =
         node_->create_publisher<std_msgs::msg::String>(config_.status_topic, 10);

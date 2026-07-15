@@ -9598,6 +9598,16 @@ def validate_p5_7_required_figures(
             )
 
 
+def p5_7_status_row_index(row: dict[str, Any]) -> int:
+    value = row.get("status_row_index", -1)
+    if value is None or value == "":
+        return -1
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return -1
+
+
 def validate_p5_7_hard_gates(
     manifest: dict[str, Any],
     validator_summary: dict[str, Any],
@@ -9636,8 +9646,17 @@ def validate_p5_7_hard_gates(
     rejected_fixture_samples = [
         row
         for row in sample_rows
-        if int(row.get("status_row_index", -1) or -1) in rejected_indices
+        if p5_7_status_row_index(row) in rejected_indices
         and p5_7_sample_is_rejected_fixture(row)
+    ]
+    rejected_fixture_indices = {
+        p5_7_status_row_index(row)
+        for row in rejected_fixture_samples
+    }
+    rejected_fixture_rows = [
+        row
+        for idx, row in enumerate(p5_rows)
+        if idx in rejected_fixture_indices and p5_7_rejected_candidate_row(row)
     ]
     runtime_contamination = p5_7_runtime_fixture_contamination(sample_rows)
     published_rejected_rows = [
@@ -9663,7 +9682,10 @@ def validate_p5_7_hard_gates(
         )
         for row in rejected_rows
     )
-    cause_exclusion = p5_7_cause_exclusion_summary(rejected_rows, sample_rows)
+    cause_exclusion = p5_7_cause_exclusion_summary(
+        rejected_fixture_rows,
+        sample_rows,
+    )
     active_topic_gap = p5_3_active_topic_gap_summary(
         rejected_fixture_samples,
         topic_timestamps,

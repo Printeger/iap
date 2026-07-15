@@ -6,6 +6,11 @@
 
 namespace ego_planner
 {
+  namespace
+  {
+    constexpr int kP5FinalGateGlobalTrajTrialLimit = 1;
+    constexpr int kDefaultGlobalTrajTrialLimit = 10;
+  }
 
   void EGOReplanFSM::init(rclcpp::Node::SharedPtr &node)
   {
@@ -528,7 +533,8 @@ namespace ego_planner
       {
         if (have_odom_ && have_target_ && have_trigger_)
         {
-          bool success = planFromGlobalTraj(10); // zx-todo
+          bool success =
+              planFromGlobalTraj(globalTrajTrialLimitForP5FinalGate());
           if (success)
           {
             changeFSMExecState(EXEC_TRAJ, "FSM");
@@ -556,7 +562,7 @@ namespace ego_planner
     case GEN_NEW_TRAJ:
     {
 
-      bool success = planFromGlobalTraj(10); // zx-todo
+      bool success = planFromGlobalTraj(globalTrajTrialLimitForP5FinalGate());
       if (success)
       {
         changeFSMExecState(EXEC_TRAJ, "FSM");
@@ -704,6 +710,16 @@ namespace ego_planner
         health.reason.c_str(), static_cast<unsigned long>(health.generation_id),
         health.age_s);
     return true;
+  }
+
+  int EGOReplanFSM::globalTrajTrialLimitForP5FinalGate() const
+  {
+    if (planner_manager_ && planner_manager_->p5_integrity_gate_ &&
+        planner_manager_->p5_integrity_gate_->finalGateEnabled())
+    {
+      return kP5FinalGateGlobalTrajTrialLimit;
+    }
+    return kDefaultGlobalTrajTrialLimit;
   }
 
   bool EGOReplanFSM::planFromGlobalTraj(const int trial_times /*=1*/) // zx-todo

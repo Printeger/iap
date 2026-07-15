@@ -257,6 +257,7 @@ class P5RuntimeIntegrityGate {
   rclcpp::Node::SharedPtr node_;
   Config config_;
   PredAlertLimitProvider pred_alert_limit_provider_;
+  rclcpp::CallbackGroup::SharedPtr callback_group_;
   rclcpp::Subscription<iap::msg::IntegrityReport>::SharedPtr integrity_sub_;
   rclcpp::Publisher<std_msgs::msg::String>::SharedPtr status_pub_;
   std::shared_ptr<SafetyRvizPublisher> safety_viz_;
