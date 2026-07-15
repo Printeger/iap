@@ -1650,6 +1650,7 @@ def _launch_setup(context):
         "p0.enable_risk_grid": p0_enabled,
         "p1.use_integrity_cost": p1_use_for_manifest,
         "p1.metrics_only": p1_metrics_only_for_manifest,
+        "p1.lambda_integrity": _param_float(context, "p1.lambda_integrity"),
         "p1.debug_csv_path": p1_debug_path_for_manifest,
         "p0.skip_occupied_voxels": _param_bool(context, "p0.skip_occupied_voxels"),
         "p0.predictor.source_mode": LaunchConfiguration("p0.predictor.source_mode").perform(context),

@@ -4540,3 +4540,102 @@ Verification notes:
 Final conclusion:
 
 PASS -> P1-2
+
+### P1-2 Enabled Soft Cost Risk Reduction
+
+Launch:
+
+```bash
+source /opt/ros/jazzy/setup.bash
+source /home/dev/ws_iap/install/setup.bash
+ros2 launch iap test_planner.launch.py \
+  experiment:=p1_degraded_lidar_good \
+  p1.metrics_only:=false \
+  p1.lambda_integrity:=0.00001 \
+  run_duration_s:=90 \
+  validation_duration_s:=90 \
+  start_rviz:=false \
+  run_validator:=true \
+  record_bag:=true
+```
+
+Analyzer:
+
+```bash
+cd /home/dev/ws_iap/src/iap
+python3 scripts/dev_planner/analyze_safety_planner_run.py \
+  --experiment-id P1-2 \
+  --export-dir /home/dev/ws_iap/src/iap/results/planner_validation/exports/test_planner_p1_degraded_lidar_good_gnss_degraded_lidar_good_1784128720128 \
+  --bag-dir /home/dev/ws_iap/src/iap/results/planner_validation/bags/test_planner_p1_degraded_lidar_good_gnss_degraded_lidar_good_20260715T151840Z \
+  --baseline-export-dir /home/dev/ws_iap/src/iap/results/planner_validation/exports/test_planner_p1_degraded_lidar_good_gnss_degraded_lidar_good_1784126287120 \
+  --baseline-bag-dir /home/dev/ws_iap/src/iap/results/planner_validation/bags/test_planner_p1_degraded_lidar_good_gnss_degraded_lidar_good_20260715T143807Z \
+  --fail-on-threshold
+```
+
+Fresh artifacts:
+
+| Artifact | Path |
+|---|---|
+| P1-2 export | `/home/dev/ws_iap/src/iap/results/planner_validation/exports/test_planner_p1_degraded_lidar_good_gnss_degraded_lidar_good_1784128720128` |
+| P1-2 bag | `/home/dev/ws_iap/src/iap/results/planner_validation/bags/test_planner_p1_degraded_lidar_good_gnss_degraded_lidar_good_20260715T151840Z` |
+| P1-2 analyzer summary | `/home/dev/ws_iap/src/iap/results/planner_validation/exports/test_planner_p1_degraded_lidar_good_gnss_degraded_lidar_good_1784128720128/metadata/safety_planner_analysis_summary.json` |
+| P1-1 metrics-only reference export | `/home/dev/ws_iap/src/iap/results/planner_validation/exports/test_planner_p1_degraded_lidar_good_gnss_degraded_lidar_good_1784126287120` |
+| P1-1 metrics-only reference bag | `/home/dev/ws_iap/src/iap/results/planner_validation/bags/test_planner_p1_degraded_lidar_good_gnss_degraded_lidar_good_20260715T143807Z` |
+| Auxiliary P0 baseline export | `/home/dev/ws_iap/src/iap/results/planner_validation/exports/test_planner_p0_open_sky_gnss_degraded_lidar_good_1784125848611` |
+| Auxiliary P0 baseline bag | `/home/dev/ws_iap/src/iap/results/planner_validation/bags/test_planner_p0_open_sky_gnss_degraded_lidar_good_20260715T143048Z` |
+| Analyzer status | `FAIL`: analyzer exit `2`, `passed=false`, `status=FAIL`, `next_debug_branch=FAIL -> lambda/gradient debug`. |
+
+Analyzer failures:
+
+| Field | Value |
+|---|---|
+| Failures | `P1-2 risk profile nearest-neighbor match coverage is insufficient (P1-2 200/1.000, P1-1 0/0.000)`; `P1-2 risk metric unavailable: neither c_pi nor pl could be sampled`; `P1-2 cause exclusion found P5 leakage or unreduced risk`. |
+| Inconclusive | `[]` |
+| Warnings | `[]` |
+
+P1-2 gate table:
+
+| Gate | Result |
+|---|---|
+| Manifest | `PASS`: `planner_safety_profile=p1`, `p0.enable_risk_grid=true`, `planner_enable_p1=true`, `p1.metrics_only=false`, `p1.use_integrity_cost=true`, `p1.lambda_integrity=0.00001`, and P2/P3/P4/P5 disabled. |
+| P0 health | `PASS`: startup snapshot-unavailable rows were bounded to `3` rows over `1.000291586s`; post-startup rows `48`, ready-false count `0`, stale count `0`, and full-unknown count `0`. |
+| Validator | `PASS`: validator summary `passed=true`, `message_count=849`, `gnss_valid_seen=true`, `lidar_valid_seen=true`, and `fallback_valid_seen=true`. |
+| P1 CSV/objective applied | `PASS`: debug CSV row count `818`, parse errors `0`, positive sample rows `818`, positive hit rows `15`, nonfinite cost/gradient rows `0`, `applied_to_objective_true_count=818`, invalid `applied_to_objective` rows `0`, and `weighted_f_integrity_max=1.9173e-07`. |
+| P1 RViz | `PASS`: `/iap/rviz/p1_integrity_metrics=18`, `/iap/rviz/p1_integrity_samples=18`, and `/iap/rviz/p1_integrity_push_vectors=18`. |
+| Bspline publish | `PASS`: P1-2 `/drone_0_planning/bspline=19` with a final nonempty path; the P1-1 reference bag had `22` bspline rows and a final nonempty path. |
+| Risk profile reduction | `FAIL`: P1-2 matched `200/200` trajectory samples, but the P1-1 reference matched `0/200` against its latest `/iap/rviz/predicted_pl_cloud`; no `c_pi` or `pl` mean/max comparison was available, so strict reduction could not be proven. |
+| Trajectory stability | `PASS`: final path finite/nonempty, length `2.122241291m`, reference length `2.160776672m`, tortuosity `1.004407626 <= 3.0`, max segment `0.417614821m <= 2.0m`, and length threshold `7.160776672m`. |
+| Cause exclusion | `FAIL`: P5 status/RViz leakage counts were `0`, objective-not-applied count was `0`, trajectory-stability failure count was `0`, but `risk_profile_not_reduced=1`. |
+
+Required P1-2 figure conclusions:
+
+| Figure filename | Conclusion |
+|---|---|
+| `p1_2_scenario_topdown.png` | Confirms the P1-2 and P1-1 reference runs are the same `gnss_degraded_lidar_good` scenario, so the failed comparison is not from a scenario mismatch. |
+| `p1_2_topic_activity_timeline.png` | Confirms P1 RViz topics, P0 cloud topics, and bspline publication were active while P5 gate topics remained absent. |
+| `p1_2_p0_health.png` | Confirms P0 recovered after bounded startup and stayed ready, non-stale, and not full-unknown during the evaluation window. |
+| `p1_2_p1_objective_timeline.png` | Confirms P1 integrity cost rows were applied to the optimizer objective with `lambda=0.00001`. |
+| `p1_2_integrity_cost_debug_summary.png` | Confirms the P1 CSV was nonempty, parseable, finite, had positive sample/hit evidence, and had `applied_to_objective=true` rows. |
+| `p1_2_risk_profile_vs_p1_1.png` | Shows the decisive failure: P1-2 has full matched risk samples, but P1-1 has zero matched reference samples, leaving no valid `c_pi` or `pl` reduction metric. |
+| `p1_2_trajectory_overlay_vs_p1_1.png` | Confirms both final bspline paths are finite and nonempty; the risk failure is from reference cloud coverage, not an oscillatory P1-2 final path. |
+| `p1_2_bspline_publish_timeline.png` | Confirms both P1-2 and the P1-1 reference published nonempty bsplines for final-trajectory inspection. |
+| `p1_2_manifest_switch_summary.png` | Confirms the intended P1-2 switch state: enabled P1 objective cost, metrics-only disabled, exact lambda present, and later safety phases disabled. |
+| `p1_2_validation_summary.png` | Confirms all prerequisite gates passed except P1-1 risk match coverage, risk reduction, and the derived cause-exclusion gate. |
+| `p1_2_cause_exclusion_summary.png` | Confirms the only active exclusion count was `risk_profile_not_reduced=1`; objective application and P5 leakage were not the cause. |
+
+Verification notes:
+
+| Check | Result |
+|---|---|
+| Python compile check | `PASS`: `python3 -m py_compile launch/test_planner.launch.py scripts/dev_planner/analyze_safety_planner_run.py`. |
+| Focused P1-1 analyzer tests | `PASS`: `python3 test/test_analyze_safety_planner_run_p1_1.py`. |
+| Focused P1-2 analyzer tests | `PASS`: `python3 test/test_analyze_safety_planner_run_p1_2.py`. |
+| Focused P5 analyzer regression tests | `PASS`: `python3 test/test_analyze_safety_planner_run_p5_1.py`. |
+| Focused P0-6 analyzer regression tests | `PASS`: `python3 test/test_analyze_safety_planner_run_p0_6.py`. |
+| Workspace `iap` build | `PASS`: `colcon build --packages-select iap --event-handlers console_direct+`. |
+| GPU runtime | `PASS`: `nvidia-smi` detected the RTX 4070 Ti SUPER runtime GPU. |
+| Diff hygiene | `PASS`: `git diff --check`. |
+
+Final conclusion:
+
+FAIL -> lambda/gradient debug

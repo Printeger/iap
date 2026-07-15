@@ -1,0 +1,445 @@
+#!/usr/bin/env python3
+
+import importlib.util
+from pathlib import Path
+import unittest
+
+
+SCRIPT_PATH = (
+    Path(__file__).resolve().parents[1]
+    / "scripts"
+    / "dev_planner"
+    / "analyze_safety_planner_run.py"
+)
+spec = importlib.util.spec_from_file_location("analyze_safety_planner_run", SCRIPT_PATH)
+analyzer = importlib.util.module_from_spec(spec)
+assert spec.loader is not None
+spec.loader.exec_module(analyzer)
+
+
+def p1_2_manifest(**overrides):
+    manifest = {
+        "experiment": "p1_degraded_lidar_good",
+        "scenario": "gnss_degraded_lidar_good",
+        "planner_safety_profile": "p1",
+        "p0.enable_risk_grid": True,
+        "p0.resolution_m": 0.75,
+        "planner_enable_p1": True,
+        "p1.metrics_only": False,
+        "p1.use_integrity_cost": True,
+        "p1.lambda_integrity": 0.00001,
+        "planner_enable_p2": False,
+        "planner_enable_p3_local": False,
+        "planner_enable_p3_global": False,
+        "planner_enable_p4": False,
+        "planner_enable_p5_runtime": False,
+        "planner_enable_p5_final": False,
+    }
+    manifest.update(overrides)
+    return manifest
+
+
+def p1_1_reference_manifest(**overrides):
+    manifest = p1_2_manifest(**{"p1.metrics_only": True})
+    manifest.update(overrides)
+    return manifest
+
+
+def topic_health(**overrides):
+    health = {
+        topic: {"status": "PASS", "count": 3}
+        for topic in analyzer.P1_TOPIC_EXPECTATIONS
+    }
+    health.update(overrides)
+    return health
+
+
+def metadata(**topic_count_overrides):
+    topic_counts = {
+        analyzer.P5_STATUS_TOPIC: 0,
+        **{topic: 0 for topic in analyzer.P5_RVIZ_TOPICS},
+        "/iap/rviz/p2_candidate_trajectories": 0,
+        "/iap/rviz/p3_reference_bias": 0,
+        "/iap/rviz/p4_astar_guides": 0,
+    }
+    topic_counts.update(topic_count_overrides)
+    return {"missing": False, "topic_counts": topic_counts}
+
+
+def p0_row(idx, **overrides):
+    row = {
+        "stamp": float(idx),
+        "ready": True,
+        "stale": False,
+        "valid_ratio": 1.0,
+        "unknown_ratio": 0.0,
+        "reason": "ok",
+    }
+    row.update(overrides)
+    return row
+
+
+def p1_debug_row(**overrides):
+    row = {
+        "stamp": 1.0,
+        "lbfgs_iter": 1,
+        "snapshot_generation_id": 2,
+        "query_base_time_s": 1.0,
+        "sample_count": 4,
+        "hit_count": 3,
+        "miss_count": 1,
+        "stale_count": 0,
+        "miss_ratio": 0.25,
+        "stale_ratio": 0.0,
+        "f_integrity": 1.2,
+        "weighted_f_integrity": 0.02,
+        "grad_norm_integrity": 0.1,
+        "grad_norm_original": 2.0,
+        "grad_ratio": 0.05,
+        "clipped_grad_count": 0,
+        "fallback_reason": "ok",
+        "applied_to_objective": 1,
+    }
+    row.update(overrides)
+    return row
+
+
+def p1_debug_summary(rows=None, **kwargs):
+    return analyzer.summarize_p1_integrity_debug_rows(
+        [p1_debug_row()] if rows is None else rows,
+        **kwargs,
+    )
+
+
+def bspline_rows(y=0.0, *, zigzag=False):
+    if zigzag:
+        pts = [
+            (0.0, 0.0, 1.0),
+            (1.0, 3.0, 1.0),
+            (2.0, -3.0, 1.0),
+            (3.0, 3.0, 1.0),
+            (4.0, -3.0, 1.0),
+            (5.0, 0.0, 1.0),
+        ]
+    else:
+        pts = [(float(x), y, 1.0) for x in range(11)]
+    return [
+        {
+            "bag_time_s": 1.0,
+            "traj_id": 1,
+            "start_time_s": 0.0,
+            "duration_s": 3.0,
+            "order": 3,
+            "pos_pts_count": len(pts),
+            "knots_count": len(pts) + 3,
+            "pos_pts_xyz": pts,
+            "pos_pts_xy": [(x, y) for x, y, _ in pts],
+        }
+    ]
+
+
+def cloud_rows(y, *, c_pi=1.0, pl=1.0, include_c_pi=True):
+    rows = []
+    for idx in range(21):
+        x = idx * 0.5
+        row = {
+            "stamp": 1.0,
+            "x": x,
+            "y": y,
+            "z": 1.0,
+            "pl": pl,
+            "hpl": pl,
+            "vpl": pl,
+            "valid": 1,
+            "unknown": 0,
+            "stale": 0,
+            "source_flags": 0,
+        }
+        row["c_pi"] = c_pi if include_c_pi else ""
+        rows.append(row)
+    return rows
+
+
+def run_gate(
+    *,
+    manifest=None,
+    validator=None,
+    health=None,
+    meta=None,
+    p0_rows=None,
+    debug_summary=None,
+    p1_2_bspline=None,
+    baseline_export=Path("/tmp/p1_1_export"),
+    baseline_bag=Path("/tmp/p1_1_bag"),
+    baseline_manifest_data=None,
+    baseline_bspline=None,
+    p1_2_cloud=None,
+    baseline_cloud=None,
+):
+    manifest = p1_2_manifest() if manifest is None else manifest
+    validator = {"passed": True} if validator is None else validator
+    health = topic_health() if health is None else health
+    meta = metadata() if meta is None else meta
+    p0_rows = [p0_row(idx) for idx in range(5)] if p0_rows is None else p0_rows
+    p0_summary = analyzer.summarize_p0_health(p0_rows)
+    debug_summary = p1_debug_summary() if debug_summary is None else debug_summary
+    p1_2_bspline = bspline_rows(0.0) if p1_2_bspline is None else p1_2_bspline
+    baseline_manifest_data = (
+        p1_1_reference_manifest()
+        if baseline_manifest_data is None
+        else baseline_manifest_data
+    )
+    baseline_bspline = bspline_rows(5.0) if baseline_bspline is None else baseline_bspline
+    p1_2_cloud = cloud_rows(0.0, c_pi=1.0, pl=1.0) if p1_2_cloud is None else p1_2_cloud
+    baseline_cloud = (
+        cloud_rows(5.0, c_pi=5.0, pl=5.0)
+        if baseline_cloud is None
+        else baseline_cloud
+    )
+    risk_comparison = analyzer.compare_p1_2_risk_profiles(
+        p1_2_bspline,
+        baseline_bspline,
+        p1_2_cloud,
+        baseline_cloud,
+        p0_resolution_m=0.75,
+    )
+    failures = []
+    inconclusive = []
+    gates = analyzer.validate_p1_2_hard_gates(
+        manifest,
+        validator,
+        health,
+        meta,
+        p0_summary,
+        p0_rows,
+        debug_summary,
+        p1_2_bspline,
+        "",
+        baseline_export,
+        baseline_bag,
+        baseline_manifest_data,
+        baseline_bspline,
+        "",
+        risk_comparison,
+        failures,
+        inconclusive,
+    )
+    return gates, failures, inconclusive, risk_comparison
+
+
+class P1_2AnalyzerTest(unittest.TestCase):
+    def test_happy_path_passes_gate(self):
+        gates, failures, inconclusive, risk = run_gate()
+
+        self.assertEqual(failures, [])
+        self.assertEqual(inconclusive, [])
+        self.assertTrue(gates["passed"])
+        self.assertTrue(gates["p1_applied_to_objective"])
+        self.assertTrue(gates["risk_profile_reduced"])
+        self.assertEqual(risk["comparison_metric"], "c_pi")
+
+    def test_manifest_rejects_metrics_only_wrong_lambda_disabled_p1_and_enabled_later_phases(self):
+        bad_manifests = [
+            p1_2_manifest(planner_safety_profile="off"),
+            p1_2_manifest(**{"p0.enable_risk_grid": False}),
+            p1_2_manifest(**{"p1.metrics_only": True}),
+            p1_2_manifest(**{"p1.use_integrity_cost": False}),
+            p1_2_manifest(**{"p1.lambda_integrity": 0.0}),
+            p1_2_manifest(**{"planner_enable_p1": False}),
+            p1_2_manifest(**{"planner_enable_p2": True}),
+            p1_2_manifest(**{"planner_enable_p3_local": True}),
+            p1_2_manifest(**{"planner_enable_p3_global": True}),
+            p1_2_manifest(**{"planner_enable_p4": True}),
+            p1_2_manifest(**{"planner_enable_p5_runtime": True}),
+            p1_2_manifest(**{"planner_enable_p5_final": True}),
+        ]
+
+        for manifest in bad_manifests:
+            with self.subTest(manifest=manifest):
+                _, failures, _, _ = run_gate(manifest=manifest)
+                self.assertTrue(any("manifest" in item for item in failures), failures)
+
+    def test_missing_and_wrong_p1_1_reference_fail(self):
+        _, missing_failures, _, _ = run_gate(
+            baseline_export=None,
+            baseline_bag=None,
+            baseline_manifest_data={},
+            baseline_bspline=[],
+            baseline_cloud=[],
+        )
+        self.assertTrue(any("P1-1 reference" in item for item in missing_failures), missing_failures)
+
+        _, wrong_failures, _, _ = run_gate(
+            baseline_manifest_data=p1_1_reference_manifest(
+                scenario="other",
+                **{"p1.metrics_only": False},
+            )
+        )
+        self.assertTrue(any("reference manifest" in item for item in wrong_failures), wrong_failures)
+
+    def test_missing_and_empty_csv_fail(self):
+        _, missing_failures, _, _ = run_gate(debug_summary=p1_debug_summary([], missing=True))
+        _, empty_failures, _, _ = run_gate(debug_summary=p1_debug_summary([]))
+
+        self.assertTrue(any("missing" in item for item in missing_failures), missing_failures)
+        self.assertTrue(any("no data rows" in item for item in empty_failures), empty_failures)
+
+    def test_no_applied_to_objective_true_fails(self):
+        debug_summary = p1_debug_summary([p1_debug_row(applied_to_objective=0)])
+
+        _, failures, _, _ = run_gate(debug_summary=debug_summary)
+
+        self.assertTrue(any("applied_to_objective=true" in item for item in failures), failures)
+
+    def test_nonfinite_cost_or_gradient_fails(self):
+        debug_summary = p1_debug_summary([p1_debug_row(grad_norm_integrity="nan")])
+
+        _, failures, _, _ = run_gate(debug_summary=debug_summary)
+
+        self.assertTrue(any("non-finite" in item for item in failures), failures)
+
+    def test_p0_health_failure_fails(self):
+        bad_rows = [
+            ([p0_row(0), p0_row(1, ready=False)], "ready=false"),
+            ([p0_row(0), p0_row(1, stale=True)], "stale=true"),
+            ([p0_row(0), p0_row(1, valid_ratio=0.0, unknown_ratio=1.0)], "full unknown"),
+        ]
+
+        for rows, expected in bad_rows:
+            with self.subTest(expected=expected):
+                _, failures, _, _ = run_gate(p0_rows=rows)
+                self.assertTrue(any(expected in item for item in failures), failures)
+
+    def test_validator_failure_fails(self):
+        _, failures, _, _ = run_gate(validator={"passed": False})
+
+        self.assertTrue(any("validator" in item for item in failures), failures)
+
+    def test_p1_rviz_missing_fails(self):
+        health = topic_health(
+            **{analyzer.P1_SAMPLES_TOPIC: {"status": "FAIL", "count": 0}}
+        )
+
+        _, failures, _, _ = run_gate(health=health)
+
+        self.assertTrue(any("RViz" in item for item in failures), failures)
+
+    def test_bspline_missing_fails(self):
+        _, failures, _, _ = run_gate(p1_2_bspline=[])
+
+        self.assertTrue(any("bspline" in item for item in failures), failures)
+
+    def test_xy_only_bspline_does_not_satisfy_p1_2_xyz_risk_path(self):
+        xy_only = [
+            {
+                "bag_time_s": 1.0,
+                "traj_id": 1,
+                "pos_pts_count": 3,
+                "pos_pts_xy": [(0.0, 0.0), (1.0, 0.0), (2.0, 0.0)],
+                "pos_pts_xyz": [],
+            }
+        ]
+
+        gates, failures, _, risk = run_gate(p1_2_bspline=xy_only)
+
+        self.assertFalse(gates["p1_2_nonempty_bspline_path_present"])
+        self.assertEqual(risk["p1_2_path_xyz"], [])
+        self.assertTrue(
+            any("risk profile nearest-neighbor match coverage" in item for item in failures),
+            failures,
+        )
+
+    def test_risk_profile_not_reduced_fails(self):
+        _, failures, _, risk = run_gate(
+            p1_2_cloud=cloud_rows(0.0, c_pi=6.0, pl=6.0),
+            baseline_cloud=cloud_rows(5.0, c_pi=5.0, pl=5.0),
+        )
+
+        self.assertFalse(risk["risk_reduced"])
+        self.assertTrue(any("risk profile" in item for item in failures), failures)
+
+    def test_risk_profile_falls_back_to_pl_when_c_pi_unavailable(self):
+        gates, failures, _, risk = run_gate(
+            p1_2_cloud=cloud_rows(0.0, pl=1.0, include_c_pi=False),
+            baseline_cloud=cloud_rows(5.0, pl=5.0, include_c_pi=False),
+        )
+
+        self.assertEqual(failures, [])
+        self.assertEqual(risk["comparison_metric"], "pl")
+        self.assertTrue(gates["risk_profile_reduced"])
+
+    def test_risk_profile_without_c_pi_or_pl_fails(self):
+        bad_current = [
+            {**row, "pl": "", "c_pi": ""}
+            for row in cloud_rows(0.0, include_c_pi=False)
+        ]
+        bad_baseline = [
+            {**row, "pl": "", "c_pi": ""}
+            for row in cloud_rows(5.0, include_c_pi=False)
+        ]
+
+        _, failures, _, risk = run_gate(
+            p1_2_cloud=bad_current,
+            baseline_cloud=bad_baseline,
+        )
+
+        self.assertIsNone(risk["comparison_metric"])
+        self.assertTrue(any("risk metric" in item for item in failures), failures)
+
+    def test_risk_profile_match_coverage_failure_fails(self):
+        _, failures, _, risk = run_gate(
+            baseline_cloud=cloud_rows(100.0, c_pi=5.0, pl=5.0),
+        )
+
+        self.assertFalse(risk["p1_1_match_ok"])
+        self.assertTrue(
+            any("risk profile nearest-neighbor match coverage" in item for item in failures),
+            failures,
+        )
+
+    def test_trajectory_oscillation_gate_fails(self):
+        _, failures, _, risk = run_gate(p1_2_bspline=bspline_rows(0.0, zigzag=True))
+
+        self.assertFalse(risk["trajectory_stability"]["passed"])
+        self.assertTrue(any("trajectory stability" in item for item in failures), failures)
+
+    def test_p5_leakage_fails(self):
+        _, failures, _, _ = run_gate(meta=metadata(**{analyzer.P5_GATE_STATUS_TOPIC: 2}))
+
+        self.assertTrue(any("P5 leakage" in item for item in failures), failures)
+
+    def test_next_branch_is_exact_for_p1_2(self):
+        self.assertEqual(
+            analyzer.next_debug_branch("PASS", [], [], "P1-2"),
+            "PASS -> P1-3",
+        )
+        self.assertEqual(
+            analyzer.next_debug_branch("FAIL", ["x"], [], "P1-2"),
+            "FAIL -> lambda/gradient debug",
+        )
+        self.assertEqual(
+            analyzer.next_debug_branch("INCONCLUSIVE", [], ["x"], "P1-2"),
+            "FAIL -> lambda/gradient debug",
+        )
+
+    def test_required_figure_filenames_are_exact(self):
+        self.assertEqual(
+            analyzer.P1_2_FIGURE_FILENAMES,
+            [
+                "p1_2_scenario_topdown.png",
+                "p1_2_topic_activity_timeline.png",
+                "p1_2_p0_health.png",
+                "p1_2_p1_objective_timeline.png",
+                "p1_2_integrity_cost_debug_summary.png",
+                "p1_2_risk_profile_vs_p1_1.png",
+                "p1_2_trajectory_overlay_vs_p1_1.png",
+                "p1_2_bspline_publish_timeline.png",
+                "p1_2_manifest_switch_summary.png",
+                "p1_2_validation_summary.png",
+                "p1_2_cause_exclusion_summary.png",
+            ],
+        )
+
+
+if __name__ == "__main__":
+    unittest.main()
