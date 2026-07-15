@@ -1617,6 +1617,20 @@ def _launch_setup(context):
     p5_6_fixture_requested = _param_bool(context, "p5_6.fixture.enabled")
     p5_6_fixture_effective = _p5_6_fixture_effective_enabled(context)
     overrides = _launch_arg_overrides()
+    p1_enabled_for_manifest = bool(safety_enabled.get("p1"))
+    p1_use_for_manifest = (
+        _param_bool(context, "p1.use_integrity_cost")
+        if "p1.use_integrity_cost" in overrides
+        else p1_enabled_for_manifest
+    )
+    p1_metrics_only_for_manifest = (
+        _param_bool(context, "p1.metrics_only")
+        if "p1.metrics_only" in overrides
+        else (not p1_enabled_for_manifest)
+    )
+    p1_debug_path_for_manifest = LaunchConfiguration("p1.debug_csv_path").perform(context)
+    if not p1_debug_path_for_manifest:
+        p1_debug_path_for_manifest = str(Path(export_dir) / "planner_p1_integrity_cost_debug.csv")
     p5_final_for_fixture = (
         _param_bool(context, "p5.enable_final_gate")
         if "p5.enable_final_gate" in overrides
@@ -1634,6 +1648,9 @@ def _launch_setup(context):
         "export_dir": export_dir,
         "planner_safety_profile": safety_profile,
         "p0.enable_risk_grid": p0_enabled,
+        "p1.use_integrity_cost": p1_use_for_manifest,
+        "p1.metrics_only": p1_metrics_only_for_manifest,
+        "p1.debug_csv_path": p1_debug_path_for_manifest,
         "p0.skip_occupied_voxels": _param_bool(context, "p0.skip_occupied_voxels"),
         "p0.predictor.source_mode": LaunchConfiguration("p0.predictor.source_mode").perform(context),
         "p0.predictor.gnss_epoch_policy": LaunchConfiguration("p0.predictor.gnss_epoch_policy").perform(context),

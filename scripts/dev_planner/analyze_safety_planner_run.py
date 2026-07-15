@@ -30,7 +30,9 @@ TOPIC_ACTIVITY_TOPICS = [
     "/drone_0_visual_slam/odom",
     "/drone_0_planning/bspline",
 ]
-P0_HEALTH_TOPIC = "/planning/risk_grid_health"
+P0_HEALTH_TOPIC = "/iap/rviz/risk_grid_health"
+P0_HEALTH_LEGACY_TOPIC = "/planning/risk_grid_health"
+P0_HEALTH_TOPICS = (P0_HEALTH_TOPIC, P0_HEALTH_LEGACY_TOPIC)
 P0_PL_CLOUD_TOPIC = "/iap/rviz/predicted_pl_cloud"
 P0_VALIDITY_CLOUD_TOPIC = "/iap/rviz/risk_validity_cloud"
 P0_TOPIC_ACTIVITY_TOPICS = TOPIC_ACTIVITY_TOPICS + [
@@ -55,7 +57,7 @@ P0_4_TOPIC_EXPECTATIONS = {
 }
 SCENARIO_MAP_TOPICS = ["/map_generator/global_cloud", "/map_generator/local_cloud"]
 SAFETY_OFF_ZERO_TOPICS = [
-    "/planning/risk_grid_health",
+    P0_HEALTH_LEGACY_TOPIC,
     "/iap/rviz/risk_grid_health",
     "/iap/rviz/predicted_pl_cloud",
     "/iap/rviz/risk_validity_cloud",
@@ -75,6 +77,22 @@ P5_RVIZ_TOPICS = [
     P5_GATE_STATUS_TOPIC,
     P5_CURRENT_IM_BARS_TOPIC,
 ]
+P1_METRICS_TOPIC = "/iap/rviz/p1_integrity_metrics"
+P1_SAMPLES_TOPIC = "/iap/rviz/p1_integrity_samples"
+P1_PUSH_VECTORS_TOPIC = "/iap/rviz/p1_integrity_push_vectors"
+P1_RVIZ_TOPICS = [
+    P1_METRICS_TOPIC,
+    P1_SAMPLES_TOPIC,
+    P1_PUSH_VECTORS_TOPIC,
+]
+P1_TOPIC_ACTIVITY_TOPICS = P0_TOPIC_ACTIVITY_TOPICS + P1_RVIZ_TOPICS
+P1_TOPIC_EXPECTATIONS = {
+    **P0_TOPIC_EXPECTATIONS,
+    P1_METRICS_TOPIC: "present",
+    P1_SAMPLES_TOPIC: "present",
+    P1_PUSH_VECTORS_TOPIC: "present",
+    P5_STATUS_TOPIC: "absent-or-zero",
+}
 P5_TOPIC_ACTIVITY_TOPICS = P0_TOPIC_ACTIVITY_TOPICS + [
     P5_STATUS_TOPIC,
     *P5_RVIZ_TOPICS,
@@ -92,6 +110,9 @@ P5_TOPIC_EXPECTATIONS = {
     P5_CURRENT_TRAJ_TOPIC: "present",
     P5_GATE_STATUS_TOPIC: "present",
     P5_CURRENT_IM_BARS_TOPIC: "present",
+}
+TOPIC_ALIASES = {
+    P0_HEALTH_TOPIC: (P0_HEALTH_LEGACY_TOPIC,),
 }
 P5_DISABLED_TOPIC_EXPECTATIONS = {
     **P0_TOPIC_EXPECTATIONS,
@@ -144,6 +165,23 @@ P5_7_BLOCKED_BRANCH = (
 )
 P5_8_FAIL_BRANCH = "FAIL -> debug switch isolation"
 P5_8_PASS_BRANCH = "PASS -> Phase 3 / P1-1"
+P1_1_FAIL_BRANCH = "FAIL -> debug metrics-only gate"
+P1_1_PASS_BRANCH = "PASS -> P1-2"
+P1_1_TRAJECTORY_RMS_THRESHOLD_M = 0.5
+P1_1_TRAJECTORY_MAX_THRESHOLD_M = 1.5
+P1_1_DEBUG_CSV_NAME = "planner_p1_integrity_cost_debug.csv"
+P1_1_FIGURE_FILENAMES = [
+    "p1_1_scenario_topdown.png",
+    "p1_1_topic_activity_timeline.png",
+    "p1_1_p0_health.png",
+    "p1_1_p1_metrics_timeline.png",
+    "p1_1_integrity_cost_debug_summary.png",
+    "p1_1_trajectory_overlay_vs_baseline.png",
+    "p1_1_bspline_publish_timeline.png",
+    "p1_1_manifest_switch_summary.png",
+    "p1_1_validation_summary.png",
+    "p1_1_cause_exclusion_summary.png",
+]
 P5_8_FIGURE_FILENAMES = [
     "p5_8_scenario_topdown.png",
     "p5_8_topic_activity_timeline.png",
@@ -437,6 +475,33 @@ P5_6_CAUSE_EXCLUSION_FIELDS = [
     "first_raw_action",
     "first_reason",
 ]
+P1_DEBUG_FIELDS = [
+    "stamp",
+    "lbfgs_iter",
+    "snapshot_generation_id",
+    "query_base_time_s",
+    "sample_count",
+    "hit_count",
+    "miss_count",
+    "stale_count",
+    "miss_ratio",
+    "stale_ratio",
+    "f_integrity",
+    "weighted_f_integrity",
+    "grad_norm_integrity",
+    "grad_norm_original",
+    "grad_ratio",
+    "clipped_grad_count",
+    "fallback_reason",
+    "applied_to_objective",
+]
+P1_DEBUG_FINITE_FIELDS = [
+    "f_integrity",
+    "weighted_f_integrity",
+    "grad_norm_integrity",
+    "grad_norm_original",
+    "grad_ratio",
+]
 ODOM_TRUTH_TOPIC = "/sim/drone_0/truth_odom"
 ODOM_EST_TOPIC = "/drone_0_visual_slam/odom"
 CONTINUOUS_MIN_COVERAGE_RATIO = 0.8
@@ -554,6 +619,10 @@ def is_p5_runtime_experiment(args: argparse.Namespace) -> bool:
 
 def is_p5_disabled_experiment(args: argparse.Namespace) -> bool:
     return str(args.experiment_id).strip().upper() == "P5-8"
+
+
+def is_p1_1_experiment(args: argparse.Namespace) -> bool:
+    return str(args.experiment_id).strip().upper() == "P1-1"
 
 
 def p0_phase_number(experiment_id: Any) -> int | None:
@@ -895,12 +964,63 @@ def read_topic_timestamps(
         return timestamps, str(exc)
 
 
+def parse_rviz_p0_health_text(raw: str) -> dict[str, Any]:
+    data: dict[str, Any] = {"reason": ""}
+    for line in raw.splitlines():
+        key, sep, value = line.partition(":")
+        if not sep:
+            continue
+        key = key.strip().lower()
+        value = value.strip()
+        if key == "gen":
+            data["generation_id"] = int(finite_float(value) or 0)
+        elif key == "age":
+            data["age_s"] = finite_float(value.split()[0] if value else None)
+        elif key == "valid":
+            data["valid_ratio"] = (
+                finite_float(value.rstrip("%")) / 100.0
+                if finite_float(value.rstrip("%")) is not None
+                else math.nan
+            )
+        elif key == "unknown":
+            data["unknown_ratio"] = (
+                finite_float(value.rstrip("%")) / 100.0
+                if finite_float(value.rstrip("%")) is not None
+                else math.nan
+            )
+        elif key == "status":
+            status = value.upper()
+            data["ready"] = status == "READY"
+            data["stale"] = status == "STALE"
+        elif key == "reason":
+            data["reason"] = value
+    data["snapshot_available"] = int(data.get("generation_id", 0) or 0) > 0
+    return data
+
+
+def p0_health_payload(msg: Any) -> tuple[str, str]:
+    raw = getattr(msg, "data", None)
+    if isinstance(raw, str):
+        return raw, "json"
+    markers = getattr(msg, "markers", None)
+    if markers is not None:
+        for marker in markers:
+            text = getattr(marker, "text", "")
+            if isinstance(text, str) and text.strip():
+                return text, "rviz_text"
+        return "", "rviz_text"
+    return "", "unknown"
+
+
 def parse_p0_health(msg: Any, timestamp_ns: int) -> dict[str, Any]:
-    raw = getattr(msg, "data", "")
+    raw, payload_format = p0_health_payload(msg)
     try:
-        data = json.loads(raw)
-    except json.JSONDecodeError:
-        data = {"reason": f"invalid_json:{raw[:80]}"}
+        if payload_format == "rviz_text":
+            data = parse_rviz_p0_health_text(raw)
+        else:
+            data = json.loads(raw)
+    except (json.JSONDecodeError, TypeError, ValueError, IndexError):
+        data = {"reason": f"invalid_{payload_format}:{raw[:80]}"}
     row = {
         "stamp": float(timestamp_ns) * 1.0e-9,
         "ready": bool(data.get("ready", False)),
@@ -1058,7 +1178,7 @@ def read_p0_bag_artifacts(
     if metadata.get("missing") or not bag_dir:
         return {}, "missing rosbag metadata"
     topics = {
-        P0_HEALTH_TOPIC,
+        *P0_HEALTH_TOPICS,
         P0_PL_CLOUD_TOPIC,
         P0_VALIDITY_CLOUD_TOPIC,
         "/sim/drone_0/truth_odom",
@@ -1097,7 +1217,7 @@ def read_p0_bag_artifacts(
                 continue
             artifacts["topics_seen"].add(topic)
             msg = deserialize_message(raw, msg_types[topic])
-            if topic == P0_HEALTH_TOPIC:
+            if topic in P0_HEALTH_TOPICS:
                 artifacts["health_rows"].append(parse_p0_health(msg, timestamp))
             elif topic == P0_PL_CLOUD_TOPIC:
                 rows = pointcloud_metric_rows(msg, timestamp)
@@ -1178,6 +1298,138 @@ def resampled_path_distance(
         [[np.interp(sample, y, [float(row[key]) for row in b]) for key in ("x", "y", "z")] for sample in samples_b]
     )
     return float(np.sqrt(np.mean(np.sum((path_a - path_b) ** 2, axis=1))))
+
+
+def xy_path_array(path: Any) -> np.ndarray:
+    points: list[tuple[float, float]] = []
+    for point in path or []:
+        if isinstance(point, dict):
+            x_value = point.get("x")
+            y_value = point.get("y")
+        else:
+            try:
+                x_value = point[0]
+                y_value = point[1]
+            except (TypeError, IndexError):
+                continue
+        x = finite_float(x_value)
+        y = finite_float(y_value)
+        if x is None or y is None:
+            continue
+        points.append((x, y))
+    return np.asarray(points, dtype=float)
+
+
+def xy_path_length(path: Any) -> float:
+    points = xy_path_array(path)
+    if len(points) < 2:
+        return 0.0
+    return float(np.linalg.norm(np.diff(points, axis=0), axis=1).sum())
+
+
+def arc_length_resample_xy(path: Any, n: int = 200) -> np.ndarray | None:
+    points = xy_path_array(path)
+    if len(points) < 2:
+        return None
+    segment_lengths = np.linalg.norm(np.diff(points, axis=0), axis=1)
+    cumulative = np.concatenate(([0.0], np.cumsum(segment_lengths)))
+    total = float(cumulative[-1])
+    if not math.isfinite(total) or total <= 1.0e-9:
+        return None
+    normalized = cumulative / total
+    unique_s, unique_indices = np.unique(normalized, return_index=True)
+    unique_points = points[unique_indices]
+    if len(unique_s) < 2:
+        return None
+    samples = np.linspace(0.0, 1.0, n)
+    return np.column_stack(
+        [
+            np.interp(samples, unique_s, unique_points[:, 0]),
+            np.interp(samples, unique_s, unique_points[:, 1]),
+        ]
+    )
+
+
+def arc_length_resampled_xy_distance(
+    p1_path: Any,
+    baseline_path: Any,
+    n: int = 200,
+) -> dict[str, Any]:
+    p1_sampled = arc_length_resample_xy(p1_path, n)
+    baseline_sampled = arc_length_resample_xy(baseline_path, n)
+    p1_points = xy_path_array(p1_path)
+    baseline_points = xy_path_array(baseline_path)
+    summary: dict[str, Any] = {
+        "p1_point_count": int(len(p1_points)),
+        "baseline_point_count": int(len(baseline_points)),
+        "p1_path_length_m": xy_path_length(p1_path),
+        "baseline_path_length_m": xy_path_length(baseline_path),
+        "sample_count": n,
+        "rms_distance_m": None,
+        "max_distance_m": None,
+        "threshold_rms_m": P1_1_TRAJECTORY_RMS_THRESHOLD_M,
+        "threshold_max_m": P1_1_TRAJECTORY_MAX_THRESHOLD_M,
+        "within_threshold": False,
+        "p1_path_xy": [
+            [float(point[0]), float(point[1])]
+            for point in p1_points
+        ],
+        "baseline_path_xy": [
+            [float(point[0]), float(point[1])]
+            for point in baseline_points
+        ],
+    }
+    if p1_sampled is None or baseline_sampled is None:
+        return summary
+    distances = np.linalg.norm(p1_sampled - baseline_sampled, axis=1)
+    rms = float(np.sqrt(np.mean(np.square(distances))))
+    max_distance = float(np.max(distances))
+    summary.update(
+        {
+            "rms_distance_m": rms,
+            "max_distance_m": max_distance,
+            "within_threshold": (
+                rms <= P1_1_TRAJECTORY_RMS_THRESHOLD_M
+                and max_distance <= P1_1_TRAJECTORY_MAX_THRESHOLD_M
+            ),
+            "resampled_distances_m": [float(value) for value in distances],
+        }
+    )
+    return summary
+
+
+def final_nonempty_bspline_path(rows: list[dict[str, Any]]) -> list[tuple[float, float]]:
+    for row in reversed(rows):
+        path = row.get("pos_pts_xy") or row.get("path_xy") or []
+        points = [
+            (float(point[0]), float(point[1]))
+            for point in xy_path_array(path)
+        ]
+        if len(points) >= 2:
+            return points
+    return []
+
+
+def compare_final_bspline_paths(
+    p1_rows: list[dict[str, Any]],
+    baseline_rows: list[dict[str, Any]],
+) -> dict[str, Any]:
+    p1_path = final_nonempty_bspline_path(p1_rows)
+    baseline_path = final_nonempty_bspline_path(baseline_rows)
+    comparison = arc_length_resampled_xy_distance(p1_path, baseline_path)
+    comparison.update(
+        {
+            "p1_bspline_row_count": len(p1_rows),
+            "baseline_bspline_row_count": len(baseline_rows),
+            "p1_nonempty_path_count": sum(
+                1 for row in p1_rows if len(xy_path_array(row.get("pos_pts_xy") or row.get("path_xy") or [])) >= 2
+            ),
+            "baseline_nonempty_path_count": sum(
+                1 for row in baseline_rows if len(xy_path_array(row.get("pos_pts_xy") or row.get("path_xy") or [])) >= 2
+            ),
+        }
+    )
+    return comparison
 
 
 def validate_manifest(
@@ -1570,6 +1822,18 @@ def csv_bool(value: Any) -> bool:
         return True
     number = finite_float(value)
     return bool(number) if number is not None else False
+
+
+def explicit_csv_bool(value: Any) -> bool | None:
+    text = str(value).strip().lower()
+    if text in {"1", "true", "yes", "y"}:
+        return True
+    if text in {"0", "false", "no", "n"}:
+        return False
+    number = finite_float(value)
+    if number is None:
+        return None
+    return bool(number)
 
 
 def source_category(value: Any) -> str:
@@ -4930,8 +5194,17 @@ def topic_health_from_metadata(
     expectations = expectations or CORE_TOPIC_EXPECTATIONS
     for topic, expected in expectations.items():
         count = int(topic_counts.get(topic, 0) or 0)
+        timing_topic = topic
+        for alias in TOPIC_ALIASES.get(topic, ()):
+            alias_count = int(topic_counts.get(alias, 0) or 0)
+            if count <= 0 and alias_count > 0:
+                count = alias_count
+                timing_topic = alias
+                break
+            if not timings.get(timing_topic) and timings.get(alias):
+                timing_topic = alias
         hz = count / duration_s if duration_s > 0.0 else None
-        timing = timings.get(topic, {}) or {}
+        timing = timings.get(timing_topic, {}) or {}
         span_s = finite_float(timing.get("span_s"))
         max_gap_s = finite_float(timing.get("max_gap_s"))
         coverage_ratio = (span_s / duration_s) if span_s is not None and duration_s > 0.0 else None
@@ -4961,6 +5234,7 @@ def topic_health_from_metadata(
             "coverage_ratio": coverage_ratio,
             "max_gap_s": max_gap_s,
             "status": status,
+            "source_topic": timing_topic,
         }
     if P5_STATUS_TOPIC not in expectations:
         p5_count = int(topic_counts.get(P5_STATUS_TOPIC, 0) or 0)
@@ -5099,6 +5373,12 @@ def read_bspline_messages(
             knots = [finite_float(value) for value in getattr(msg, "knots", [])]
             finite_knots = [value for value in knots if value is not None]
             duration = max(finite_knots) if finite_knots else None
+            pos_pts_xy = [
+                (float(point.x), float(point.y))
+                for point in getattr(msg, "pos_pts", []) or []
+                if finite_float(getattr(point, "x", None)) is not None
+                and finite_float(getattr(point, "y", None)) is not None
+            ]
             rows.append(
                 {
                     "bag_time_s": float(timestamp) * 1.0e-9,
@@ -5107,6 +5387,7 @@ def read_bspline_messages(
                     "duration_s": "" if duration is None else duration,
                     "order": getattr(msg, "order", ""),
                     "pos_pts_count": len(getattr(msg, "pos_pts", []) or []),
+                    "pos_pts_xy": pos_pts_xy,
                     "knots_count": len(getattr(msg, "knots", []) or []),
                 }
             )
@@ -5389,6 +5670,129 @@ def numeric_summary(rows: list[dict[str, Any]], key: str) -> dict[str, Any]:
         f"{key}_mean": float(np.mean(values)) if values else None,
         f"{key}_max": max(values) if values else None,
     }
+
+
+def p1_debug_csv_path(export_dir: Path, manifest: dict[str, Any]) -> Path:
+    manifest_path = str(manifest.get("p1.debug_csv_path", "")).strip() if manifest else ""
+    if manifest_path:
+        path = Path(manifest_path).expanduser()
+        return path if path.is_absolute() else export_dir / path
+    return export_dir / P1_1_DEBUG_CSV_NAME
+
+
+def summarize_p1_integrity_debug_rows(
+    rows: list[dict[str, Any]],
+    *,
+    missing: bool = False,
+    path: str = "",
+    read_error: str = "",
+    missing_fields: list[str] | None = None,
+    malformed_row_count: int = 0,
+) -> dict[str, Any]:
+    missing_fields = missing_fields or []
+    field_nonfinite_counts = {
+        field: sum(1 for row in rows if finite_float(row.get(field)) is None)
+        for field in P1_DEBUG_FINITE_FIELDS
+    }
+    any_nonfinite = sum(field_nonfinite_counts.values())
+    applied_states = [explicit_csv_bool(row.get("applied_to_objective")) for row in rows]
+    applied_true_count = sum(1 for state in applied_states if state is True)
+    applied_false_count = sum(1 for state in applied_states if state is False)
+    applied_invalid_count = sum(1 for state in applied_states if state is None)
+    sample_positive_rows = [
+        row for row in rows if (finite_float(row.get("sample_count")) or 0.0) > 0.0
+    ]
+    hit_positive_rows = [
+        row for row in rows if (finite_float(row.get("hit_count")) or 0.0) > 0.0
+    ]
+    fallback_reasons = Counter(
+        str(row.get("fallback_reason", "")).strip() or "<empty>"
+        for row in rows
+    )
+    summary: dict[str, Any] = {
+        "missing": missing,
+        "path": path,
+        "read_error": read_error,
+        "row_count": len(rows),
+        "missing_fields": list(missing_fields),
+        "malformed_row_count": malformed_row_count,
+        "parse_error_count": len(missing_fields) + malformed_row_count + applied_invalid_count,
+        "finite_cost_gradient": any_nonfinite == 0 and bool(rows),
+        "nonfinite_cost_gradient_count": any_nonfinite,
+        "field_nonfinite_counts": field_nonfinite_counts,
+        "positive_sample_rows": len(sample_positive_rows),
+        "positive_hit_rows": len(hit_positive_rows),
+        "sample_count_max": max(
+            (int(finite_float(row.get("sample_count")) or 0) for row in rows),
+            default=0,
+        ),
+        "hit_count_max": max(
+            (int(finite_float(row.get("hit_count")) or 0) for row in rows),
+            default=0,
+        ),
+        "applied_to_objective_true_count": applied_true_count,
+        "applied_to_objective_false_count": applied_false_count,
+        "applied_to_objective_invalid_count": applied_invalid_count,
+        "fallback_reason_counts": dict(sorted(fallback_reasons.items())),
+    }
+    for key in (
+        "f_integrity",
+        "weighted_f_integrity",
+        "grad_norm_integrity",
+        "grad_norm_original",
+        "grad_ratio",
+        "miss_ratio",
+        "stale_ratio",
+    ):
+        summary.update(numeric_summary(rows, key))
+    summary["computed_metrics"] = (
+        len(rows) > 0
+        and summary["parse_error_count"] == 0
+        and summary["finite_cost_gradient"]
+        and summary["positive_sample_rows"] > 0
+        and summary["positive_hit_rows"] > 0
+    )
+    summary["metrics_only_not_applied"] = (
+        len(rows) > 0
+        and summary["applied_to_objective_true_count"] == 0
+        and summary["applied_to_objective_invalid_count"] == 0
+        and summary["applied_to_objective_false_count"] == len(rows)
+    )
+    return summary
+
+
+def read_p1_integrity_debug_csv(path: Path) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    if not path.is_file():
+        summary = summarize_p1_integrity_debug_rows(
+            [],
+            missing=True,
+            path=str(path),
+        )
+        return [], summary
+    try:
+        with path.open(newline="") as f:
+            reader = csv.DictReader(f)
+            fieldnames = list(reader.fieldnames or [])
+            rows = list(reader)
+    except Exception as exc:
+        summary = summarize_p1_integrity_debug_rows(
+            [],
+            missing=False,
+            path=str(path),
+            read_error=str(exc),
+            malformed_row_count=1,
+        )
+        return [], summary
+    missing_fields = [field for field in P1_DEBUG_FIELDS if field not in fieldnames]
+    malformed_row_count = sum(1 for row in rows if None in row)
+    summary = summarize_p1_integrity_debug_rows(
+        rows,
+        missing=False,
+        path=str(path),
+        missing_fields=missing_fields,
+        malformed_row_count=malformed_row_count,
+    )
+    return rows, summary
 
 
 def summarize_p5_status_rows(p5_rows: list[dict[str, Any]], p5_error: str = "") -> dict[str, Any]:
@@ -5727,6 +6131,317 @@ def summarize_p0_startup_snapshot_unavailable(
         "post_startup_stale_true_count": post_stale,
         "post_startup_full_unknown_count": post_full_unknown,
     }
+
+
+def p1_1_manifest_gate_values(manifest: dict[str, Any]) -> dict[str, bool]:
+    expected_false = (
+        "planner_enable_p2",
+        "planner_enable_p3_local",
+        "planner_enable_p3_global",
+        "planner_enable_p4",
+        "planner_enable_p5_runtime",
+        "planner_enable_p5_final",
+    )
+    return {
+        "manifest_present": bool(manifest),
+        "manifest_safety_profile_p1": str(manifest.get("planner_safety_profile", "")).lower()
+        == "p1",
+        "manifest_p0_enabled": manifest.get("p0.enable_risk_grid") is True,
+        "manifest_p1_enabled": manifest.get("planner_enable_p1") is True,
+        "manifest_p1_metrics_only": manifest.get("p1.metrics_only") is True,
+        "manifest_p1_use_integrity_cost": manifest.get("p1.use_integrity_cost") is True,
+        "manifest_p2_p5_disabled": all(manifest.get(key) is False for key in expected_false),
+        "manifest_expected_false_ok": all(manifest.get(key) is False for key in expected_false),
+    }
+
+
+def p1_1_baseline_manifest_gate_values(
+    manifest: dict[str, Any],
+    baseline_manifest: dict[str, Any],
+) -> dict[str, bool]:
+    expected_false = (
+        "planner_enable_p1",
+        "planner_enable_p2",
+        "planner_enable_p3_local",
+        "planner_enable_p3_global",
+        "planner_enable_p4",
+        "planner_enable_p5_runtime",
+        "planner_enable_p5_final",
+    )
+    return {
+        "baseline_manifest_present": bool(baseline_manifest),
+        "baseline_manifest_experiment_p0_open_sky": str(
+            baseline_manifest.get("experiment", "")
+        )
+        == "p0_open_sky",
+        "baseline_manifest_scenario_matches": bool(manifest)
+        and str(baseline_manifest.get("scenario", ""))
+        == str(manifest.get("scenario", "")),
+        "baseline_manifest_safety_profile_off": str(
+            baseline_manifest.get("planner_safety_profile", "")
+        ).lower()
+        == "off",
+        "baseline_manifest_p0_enabled": baseline_manifest.get("p0.enable_risk_grid")
+        is True,
+        "baseline_manifest_p1_p5_disabled": all(
+            baseline_manifest.get(key) is False for key in expected_false
+        ),
+    }
+
+
+def p1_1_cause_exclusion_rows(gates: dict[str, Any]) -> list[dict[str, Any]]:
+    topic_counts = gates.get("disabled_topic_counts", {}) or {}
+    p5_count = int(topic_counts.get(P5_STATUS_TOPIC, 0) or 0)
+    p5_rviz_count = sum(int(topic_counts.get(topic, 0) or 0) for topic in P5_RVIZ_TOPICS)
+    other_phase_viz_count = sum(
+        int(topic_counts.get(topic, 0) or 0)
+        for topic in (
+            "/iap/rviz/p2_candidate_trajectories",
+            "/iap/rviz/p3_reference_bias",
+            "/iap/rviz/p4_astar_guides",
+        )
+    )
+    return [
+        {
+            "cause": "objective_application",
+            "count": int(gates.get("applied_to_objective_true_count", 0) or 0),
+        },
+        {
+            "cause": "p5_status_leakage",
+            "count": p5_count,
+        },
+        {
+            "cause": "p5_rviz_leakage",
+            "count": p5_rviz_count,
+        },
+        {
+            "cause": "p2_p4_viz_leakage",
+            "count": other_phase_viz_count,
+        },
+        {
+            "cause": "trajectory_rms_over_threshold",
+            "count": 0 if gates.get("trajectory_rms_within_threshold") else 1,
+        },
+        {
+            "cause": "trajectory_max_over_threshold",
+            "count": 0 if gates.get("trajectory_max_within_threshold") else 1,
+        },
+    ]
+
+
+def validate_p1_1_hard_gates(
+    manifest: dict[str, Any],
+    validator_summary: dict[str, Any],
+    topic_health: dict[str, dict[str, Any]],
+    metadata: dict[str, Any],
+    p0_health_summary: dict[str, Any],
+    p0_health_rows: list[dict[str, Any]],
+    p1_debug_summary: dict[str, Any],
+    p1_bspline_rows: list[dict[str, Any]],
+    p1_bspline_error: str,
+    baseline_export_dir: Path | None,
+    baseline_bag_dir: Path | None,
+    baseline_manifest: dict[str, Any],
+    baseline_bspline_rows: list[dict[str, Any]],
+    baseline_bspline_error: str,
+    bspline_comparison: dict[str, Any],
+    failures: list[str],
+    inconclusive: list[str],
+) -> dict[str, Any]:
+    manifest_gates = p1_1_manifest_gate_values(manifest)
+    baseline_manifest_gates = p1_1_baseline_manifest_gate_values(
+        manifest,
+        baseline_manifest,
+    )
+    p0_startup = summarize_p0_startup_snapshot_unavailable(p0_health_rows)
+    p1_rviz_topic_statuses = {
+        topic: (topic_health.get(topic) or {}).get("status", "MISSING")
+        for topic in P1_RVIZ_TOPICS
+    }
+    p1_rviz_topic_counts = {
+        topic: int((topic_health.get(topic) or {}).get("count", 0) or 0)
+        for topic in P1_RVIZ_TOPICS
+    }
+    disabled_topic_counts = {
+        topic: int((metadata.get("topic_counts", {}) or {}).get(topic, 0) or 0)
+        for topic in (
+            P5_STATUS_TOPIC,
+            *P5_RVIZ_TOPICS,
+            "/iap/rviz/p2_candidate_trajectories",
+            "/iap/rviz/p3_reference_bias",
+            "/iap/rviz/p4_astar_guides",
+        )
+    }
+    rms_distance = finite_float(bspline_comparison.get("rms_distance_m"))
+    max_distance = finite_float(bspline_comparison.get("max_distance_m"))
+    gates: dict[str, Any] = {
+        **manifest_gates,
+        **baseline_manifest_gates,
+        "validator_summary_present": bool(validator_summary),
+        "validator_passed": validator_summary.get("passed") is True,
+        "p0_health_rows_present": int(p0_health_summary.get("row_count", 0) or 0) > 0,
+        **p0_startup,
+        "p0_startup_snapshot_unavailable_bounded": bool(
+            p0_startup.get("startup_snapshot_unavailable_bounded", False)
+        ),
+        "p0_post_startup_rows_present": int(p0_startup.get("post_startup_rows", 0) or 0)
+        > 0,
+        "p0_post_startup_ready": int(p0_startup.get("post_startup_ready_false_count", 0) or 0)
+        == 0,
+        "p0_post_startup_non_stale": int(
+            p0_startup.get("post_startup_stale_true_count", 0) or 0
+        )
+        == 0,
+        "p0_post_startup_not_full_unknown": int(
+            p0_startup.get("post_startup_full_unknown_count", 0) or 0
+        )
+        == 0,
+        "p1_csv_present": not bool(p1_debug_summary.get("missing")),
+        "p1_csv_nonempty": int(p1_debug_summary.get("row_count", 0) or 0) > 0,
+        "p1_csv_parse_ok": int(p1_debug_summary.get("parse_error_count", 0) or 0)
+        == 0
+        and not bool(p1_debug_summary.get("read_error")),
+        "p1_csv_finite_cost_gradient": bool(
+            p1_debug_summary.get("finite_cost_gradient", False)
+        ),
+        "p1_positive_sample_hit": int(
+            p1_debug_summary.get("positive_sample_rows", 0) or 0
+        )
+        > 0
+        and int(p1_debug_summary.get("positive_hit_rows", 0) or 0) > 0,
+        "applied_to_objective_true_count": int(
+            p1_debug_summary.get("applied_to_objective_true_count", 0) or 0
+        ),
+        "p1_not_applied_to_objective": int(
+            p1_debug_summary.get("applied_to_objective_true_count", 0) or 0
+        )
+        == 0
+        and int(p1_debug_summary.get("applied_to_objective_invalid_count", 0) or 0)
+        == 0
+        and int(p1_debug_summary.get("applied_to_objective_false_count", 0) or 0)
+        == int(p1_debug_summary.get("row_count", 0) or 0)
+        and int(p1_debug_summary.get("row_count", 0) or 0) > 0,
+        "p1_rviz_topic_statuses": p1_rviz_topic_statuses,
+        "p1_rviz_topic_counts": p1_rviz_topic_counts,
+        "p1_rviz_topics_present": all(
+            p1_rviz_topic_counts.get(topic, 0) > 0 for topic in P1_RVIZ_TOPICS
+        ),
+        "p1_bspline_inspection_ok": not bool(p1_bspline_error),
+        "bspline_publish_present": len(p1_bspline_rows) > 0
+        and int(
+            (topic_health.get("/drone_0_planning/bspline") or {}).get("count", 0) or 0
+        )
+        > 0,
+        "p1_nonempty_bspline_path_present": int(
+            bspline_comparison.get("p1_nonempty_path_count", 0) or 0
+        )
+        > 0,
+        "baseline_export_dir_present": baseline_export_dir is not None,
+        "baseline_bag_dir_present": baseline_bag_dir is not None,
+        "baseline_bspline_inspection_ok": not bool(baseline_bspline_error),
+        "baseline_bspline_publish_present": len(baseline_bspline_rows) > 0,
+        "baseline_nonempty_bspline_path_present": int(
+            bspline_comparison.get("baseline_nonempty_path_count", 0) or 0
+        )
+        > 0,
+        "trajectory_rms_distance_m": rms_distance,
+        "trajectory_max_distance_m": max_distance,
+        "trajectory_rms_threshold_m": P1_1_TRAJECTORY_RMS_THRESHOLD_M,
+        "trajectory_max_threshold_m": P1_1_TRAJECTORY_MAX_THRESHOLD_M,
+        "trajectory_rms_within_threshold": rms_distance is not None
+        and rms_distance <= P1_1_TRAJECTORY_RMS_THRESHOLD_M,
+        "trajectory_max_within_threshold": max_distance is not None
+        and max_distance <= P1_1_TRAJECTORY_MAX_THRESHOLD_M,
+        "disabled_topic_counts": disabled_topic_counts,
+    }
+    gates["trajectory_vs_baseline_passed"] = (
+        gates["p1_nonempty_bspline_path_present"]
+        and gates["baseline_nonempty_bspline_path_present"]
+        and gates["trajectory_rms_within_threshold"]
+        and gates["trajectory_max_within_threshold"]
+    )
+    gates["cause_exclusion_rows"] = p1_1_cause_exclusion_rows(gates)
+    gates["cause_exclusion_passed"] = all(
+        int(row.get("count", 0) or 0) == 0
+        for row in gates["cause_exclusion_rows"]
+    )
+
+    if not gates["manifest_present"]:
+        failures.append("P1-1 checks require test_planner_manifest.json")
+    elif not (
+        gates["manifest_safety_profile_p1"]
+        and gates["manifest_p0_enabled"]
+        and gates["manifest_p1_enabled"]
+        and gates["manifest_p1_metrics_only"]
+        and gates["manifest_p1_use_integrity_cost"]
+        and gates["manifest_p2_p5_disabled"]
+    ):
+        failures.append(
+            "P1-1 manifest must set profile=p1, enable P0/P1 metrics-only, "
+            "use integrity cost, and disable P2/P3/P4/P5"
+        )
+    if not gates["validator_summary_present"]:
+        failures.append("P1-1 validator summary is missing")
+    elif not gates["validator_passed"]:
+        failures.append("P1-1 validator summary did not pass")
+    if not gates["p0_health_rows_present"]:
+        failures.append("P1-1 P0 health rows are missing")
+    if not gates["p0_startup_snapshot_unavailable_bounded"]:
+        failures.append("P1-1 P0 startup snapshot_unavailable prefix is not bounded")
+    if not gates["p0_post_startup_rows_present"]:
+        failures.append("P1-1 P0 health has no post-startup rows")
+    if not gates["p0_post_startup_ready"]:
+        failures.append("P1-1 P0 health reported ready=false after startup")
+    if not gates["p0_post_startup_non_stale"]:
+        failures.append("P1-1 P0 health reported stale=true after startup")
+    if not gates["p0_post_startup_not_full_unknown"]:
+        failures.append("P1-1 P0 health reported full unknown after startup")
+    if not gates["p1_csv_present"]:
+        failures.append(f"P1-1 {P1_1_DEBUG_CSV_NAME} is missing")
+    elif not gates["p1_csv_nonempty"]:
+        failures.append(f"P1-1 {P1_1_DEBUG_CSV_NAME} has no data rows")
+    if not gates["p1_csv_parse_ok"]:
+        failures.append(f"P1-1 {P1_1_DEBUG_CSV_NAME} is not parseable")
+    if not gates["p1_csv_finite_cost_gradient"]:
+        failures.append("P1-1 P1 debug CSV has non-finite integrity cost/gradient fields")
+    if not gates["p1_positive_sample_hit"]:
+        failures.append("P1-1 P1 debug CSV has no positive sample/hit evidence")
+    if not gates["p1_not_applied_to_objective"]:
+        failures.append("P1-1 P1 debug CSV requires every applied_to_objective row to be explicit false")
+    if not gates["p1_rviz_topics_present"]:
+        failures.append("P1-1 required P1 RViz topics are missing")
+    if p1_bspline_error:
+        failures.append(f"P1-1 could not inspect /drone_0_planning/bspline: {p1_bspline_error}")
+    if not gates["bspline_publish_present"]:
+        failures.append("P1-1 /drone_0_planning/bspline was not published")
+    if baseline_export_dir is None or baseline_bag_dir is None:
+        failures.append("P1-1 requires --baseline-export-dir and --baseline-bag-dir")
+    if not gates["baseline_manifest_present"]:
+        failures.append("P1-1 baseline requires test_planner_manifest.json")
+    elif not (
+        gates["baseline_manifest_experiment_p0_open_sky"]
+        and gates["baseline_manifest_scenario_matches"]
+        and gates["baseline_manifest_safety_profile_off"]
+        and gates["baseline_manifest_p0_enabled"]
+        and gates["baseline_manifest_p1_p5_disabled"]
+    ):
+        failures.append(
+            "P1-1 baseline manifest must be fresh P0-only p0_open_sky for the same scenario"
+        )
+    if baseline_bspline_error:
+        failures.append(f"P1-1 could not inspect baseline bspline evidence: {baseline_bspline_error}")
+    if not gates["baseline_bspline_publish_present"]:
+        failures.append("P1-1 baseline /drone_0_planning/bspline evidence is missing")
+    if not gates["trajectory_vs_baseline_passed"]:
+        failures.append(
+            "P1-1 trajectory differs from baseline beyond metrics-only thresholds "
+            f"(rms={rms_distance}, max={max_distance})"
+        )
+    if not gates["cause_exclusion_passed"]:
+        failures.append("P1-1 cause exclusion found objective or disabled-phase leakage")
+
+    gates["passed"] = not any(message.startswith("P1-1") for message in failures + inconclusive)
+    return gates
 
 
 def validate_p5_2_hard_gates(
@@ -10428,6 +11143,287 @@ def plot_p5_8_cause_exclusion_summary(
     return True
 
 
+def plot_p1_metrics_timeline(rows: list[dict[str, Any]], path: Path) -> bool:
+    if not rows:
+        return False
+    stamps = [finite_float(row.get("stamp")) for row in rows]
+    finite_stamps = [value for value in stamps if value is not None]
+    if not finite_stamps:
+        return False
+    t0 = finite_stamps[0]
+    t = [math.nan if value is None else value - t0 for value in stamps]
+    fig, axes = plt.subplots(3, 1, figsize=(11, 7.2), sharex=True)
+    axes[0].plot(t, finite_or_nan(rows, "sample_count"), label="sample_count", color="#2563eb")
+    axes[0].plot(t, finite_or_nan(rows, "hit_count"), label="hit_count", color="#16a34a")
+    axes[0].set_ylabel("samples")
+    axes[0].legend(loc="best")
+    axes[1].plot(t, finite_or_nan(rows, "f_integrity"), label="f_integrity", color="#7c3aed")
+    axes[1].plot(
+        t,
+        finite_or_nan(rows, "weighted_f_integrity"),
+        label="weighted_f_integrity",
+        color="#f97316",
+    )
+    axes[1].set_ylabel("cost")
+    axes[1].legend(loc="best")
+    axes[2].plot(
+        t,
+        finite_or_nan(rows, "grad_norm_integrity"),
+        label="grad_norm_integrity",
+        color="#0f766e",
+    )
+    axes[2].plot(t, finite_or_nan(rows, "grad_ratio"), label="grad_ratio", color="#dc2626")
+    axes[2].set_ylabel("gradient")
+    axes[2].set_xlabel("time since first P1 debug row [s]")
+    axes[2].legend(loc="best")
+    for ax in axes:
+        ax.grid(True, alpha=0.25)
+    fig.suptitle("P1-1 integrity metrics timeline")
+    fig.tight_layout()
+    fig.savefig(path, dpi=160)
+    plt.close(fig)
+    return True
+
+
+def plot_p1_integrity_cost_debug_summary(
+    summary: dict[str, Any],
+    path: Path,
+) -> bool:
+    labels = [
+        "rows",
+        "sample rows",
+        "hit rows",
+        "nonfinite",
+        "applied",
+    ]
+    values = [
+        int(summary.get("row_count", 0) or 0),
+        int(summary.get("positive_sample_rows", 0) or 0),
+        int(summary.get("positive_hit_rows", 0) or 0),
+        int(summary.get("nonfinite_cost_gradient_count", 0) or 0),
+        int(summary.get("applied_to_objective_true_count", 0) or 0),
+    ]
+    fig, axes = plt.subplots(1, 2, figsize=(12, 5.2))
+    axes[0].bar(labels, values, color=["#16a34a", "#16a34a", "#16a34a", "#dc2626", "#dc2626"])
+    axes[0].set_ylabel("count")
+    axes[0].set_title("P1 debug CSV gate evidence")
+    axes[0].tick_params(axis="x", rotation=20)
+    axes[0].grid(True, axis="y", alpha=0.25)
+
+    axes[1].axis("off")
+    lines = [
+        f"path: {summary.get('path', '')}",
+        f"missing: {summary.get('missing')}",
+        f"read_error: {summary.get('read_error', '')}",
+        f"missing_fields: {summary.get('missing_fields', [])}",
+        f"fallback_reasons: {summary.get('fallback_reason_counts', {})}",
+        f"f_integrity_max: {summary.get('f_integrity_max')}",
+        f"grad_norm_integrity_max: {summary.get('grad_norm_integrity_max')}",
+        f"computed_metrics: {summary.get('computed_metrics')}",
+        f"metrics_only_not_applied: {summary.get('metrics_only_not_applied')}",
+    ]
+    axes[1].text(0.02, 0.95, "\n".join(lines), va="top", ha="left", family="monospace", fontsize=8.5)
+    axes[1].set_title("CSV summary")
+    fig.tight_layout()
+    fig.savefig(path, dpi=160)
+    plt.close(fig)
+    return True
+
+
+def plot_p1_trajectory_overlay_vs_baseline(
+    comparison: dict[str, Any],
+    path: Path,
+) -> bool:
+    p1_path = comparison.get("p1_path_xy") or []
+    baseline_path = comparison.get("baseline_path_xy") or []
+    fig, axes = plt.subplots(1, 2, figsize=(12, 5.4))
+    ax = axes[0]
+    if p1_path:
+        x, y = xy_columns(p1_path)
+        ax.plot(x, y, color="#2563eb", lw=1.8, label="P1-1 final bspline")
+        ax.scatter([x[0]], [y[0]], c="#111827", s=42, marker="o")
+        ax.scatter([x[-1]], [y[-1]], c="#2563eb", s=58, marker="*")
+    if baseline_path:
+        x, y = xy_columns(baseline_path)
+        ax.plot(x, y, color="#f97316", lw=1.5, ls="--", label="P0 baseline final bspline")
+        ax.scatter([x[0]], [y[0]], c="#4b5563", s=42, marker="o")
+        ax.scatter([x[-1]], [y[-1]], c="#f97316", s=58, marker="*")
+    if not p1_path and not baseline_path:
+        ax.text(0.5, 0.5, "No bspline paths available", ha="center", va="center")
+    ax.set_xlabel("x [m]")
+    ax.set_ylabel("y [m]")
+    ax.set_title("Final bspline control-point paths")
+    ax.set_aspect("equal", adjustable="datalim")
+    ax.grid(True, alpha=0.25)
+    ax.legend(loc="best")
+
+    distances = [
+        value
+        for value in (finite_float(item) for item in comparison.get("resampled_distances_m", []) or [])
+        if value is not None
+    ]
+    if distances:
+        axes[1].plot(np.linspace(0.0, 1.0, len(distances)), distances, color="#7c3aed")
+        axes[1].axhline(
+            P1_1_TRAJECTORY_MAX_THRESHOLD_M,
+            color="#dc2626",
+            ls="--",
+            lw=1.0,
+            label="max gate",
+        )
+        axes[1].set_xlabel("normalized arc length")
+        axes[1].set_ylabel("XY distance [m]")
+        axes[1].legend(loc="best")
+    else:
+        axes[1].axis("off")
+        axes[1].text(
+            0.02,
+            0.95,
+            "Trajectory distance unavailable",
+            va="top",
+            ha="left",
+            fontsize=11,
+        )
+    axes[1].set_title(
+        "RMS="
+        f"{comparison.get('rms_distance_m')} m, max={comparison.get('max_distance_m')} m"
+    )
+    axes[1].grid(True, alpha=0.25)
+    fig.tight_layout()
+    fig.savefig(path, dpi=160)
+    plt.close(fig)
+    return True
+
+
+def plot_p1_bspline_publish_timeline(
+    p1_rows: list[dict[str, Any]],
+    baseline_rows: list[dict[str, Any]],
+    path: Path,
+) -> bool:
+    fig, ax = plt.subplots(figsize=(9.5, 4.8))
+    plotted = False
+    for label, rows, color in (
+        ("P1-1", p1_rows, "#2563eb"),
+        ("baseline", baseline_rows, "#f97316"),
+    ):
+        if rows:
+            t_rel = relative_time(rows)
+            y = [finite_float(row.get("pos_pts_count")) or 0.0 for row in rows]
+            ax.scatter(t_rel, y, s=34, color=color, label=label)
+            ax.plot(t_rel, y, color=color, lw=0.9, alpha=0.45)
+            plotted = True
+    if plotted:
+        ax.set_xlabel("time since first publish in each run [s]")
+        ax.set_ylabel("pos_pts_count")
+        ax.legend(loc="best")
+    else:
+        ax.bar(["P1-1", "baseline"], [len(p1_rows), len(baseline_rows)], color=["#dc2626", "#dc2626"])
+        ax.set_ylabel("read bspline rows")
+    ax.set_title("P1-1 bspline publish timeline")
+    ax.grid(True, axis="y", alpha=0.25)
+    fig.tight_layout()
+    fig.savefig(path, dpi=160)
+    plt.close(fig)
+    return True
+
+
+def plot_p1_manifest_switch_summary(
+    manifest: dict[str, Any],
+    gates: dict[str, Any],
+    path: Path,
+) -> bool:
+    specs = [
+        ("profile=p1", gates.get("manifest_safety_profile_p1")),
+        ("P0 risk grid on", gates.get("manifest_p0_enabled")),
+        ("P1 on", gates.get("manifest_p1_enabled")),
+        ("metrics_only", gates.get("manifest_p1_metrics_only")),
+        ("use_integrity_cost", gates.get("manifest_p1_use_integrity_cost")),
+        ("P2-P5 off", gates.get("manifest_p2_p5_disabled")),
+    ]
+    labels = [item[0] for item in specs]
+    values = [1 if item[1] else 0 for item in specs]
+    fig, axes = plt.subplots(1, 2, figsize=(12, 5.2))
+    axes[0].barh(labels, values, color=["#16a34a" if value else "#dc2626" for value in values])
+    axes[0].set_xlim(0, 1.05)
+    axes[0].set_xticks([0, 1], ["FAIL", "PASS"])
+    axes[0].invert_yaxis()
+    axes[0].set_title("P1-1 manifest gates")
+    axes[0].grid(True, axis="x", alpha=0.25)
+
+    axes[1].axis("off")
+    keys = [
+        "planner_safety_profile",
+        "p0.enable_risk_grid",
+        "planner_enable_p1",
+        "p1.metrics_only",
+        "p1.use_integrity_cost",
+        "planner_enable_p2",
+        "planner_enable_p3_local",
+        "planner_enable_p3_global",
+        "planner_enable_p4",
+        "planner_enable_p5_runtime",
+        "planner_enable_p5_final",
+    ]
+    text = "\n".join(f"{key}: {manifest.get(key, '<missing>')}" for key in keys)
+    axes[1].text(0.02, 0.95, text, va="top", ha="left", family="monospace", fontsize=9)
+    axes[1].set_title("Manifest values")
+    fig.tight_layout()
+    fig.savefig(path, dpi=160)
+    plt.close(fig)
+    return True
+
+
+def plot_p1_validation_summary(
+    validator_summary: dict[str, Any],
+    p1_debug_summary: dict[str, Any],
+    gates: dict[str, Any],
+    path: Path,
+) -> bool:
+    fig, ax = plt.subplots(figsize=(10.5, 5.4))
+    ax.axis("off")
+    lines = [
+        f"validator_present: {bool(validator_summary)}",
+        f"validator_passed: {validator_summary.get('passed') if validator_summary else '<missing>'}",
+        f"P0 post-startup ready: {gates.get('p0_post_startup_ready')}",
+        f"P0 post-startup non-stale: {gates.get('p0_post_startup_non_stale')}",
+        f"P0 post-startup not full unknown: {gates.get('p0_post_startup_not_full_unknown')}",
+        f"P1 CSV rows: {p1_debug_summary.get('row_count', 0)}",
+        f"P1 computed metrics: {p1_debug_summary.get('computed_metrics')}",
+        f"P1 not applied: {p1_debug_summary.get('metrics_only_not_applied')}",
+        f"P1 RViz counts: {gates.get('p1_rviz_topic_counts', {})}",
+        f"bspline publish present: {gates.get('bspline_publish_present')}",
+        f"baseline present: {gates.get('baseline_bspline_publish_present')}",
+        f"trajectory RMS/max: {gates.get('trajectory_rms_distance_m')} / {gates.get('trajectory_max_distance_m')}",
+    ]
+    ax.text(0.02, 0.95, "\n".join(lines), va="top", ha="left", family="monospace", fontsize=9.5)
+    ax.set_title("P1-1 validation summary")
+    fig.tight_layout()
+    fig.savefig(path, dpi=160)
+    plt.close(fig)
+    return True
+
+
+def plot_p1_cause_exclusion_summary(
+    gates: dict[str, Any],
+    path: Path,
+) -> bool:
+    rows = p1_1_cause_exclusion_rows(gates)
+    if not rows:
+        return False
+    labels = [str(row["cause"]) for row in rows]
+    counts = [int(row["count"]) for row in rows]
+    fig, ax = plt.subplots(figsize=(10.2, 4.8))
+    ax.bar(labels, counts, color=["#16a34a" if count == 0 else "#dc2626" for count in counts])
+    ax.set_ylabel("count")
+    ax.set_title("P1-1 cause exclusion summary")
+    ax.tick_params(axis="x", labelrotation=25)
+    ax.grid(True, axis="y", alpha=0.25)
+    fig.tight_layout()
+    fig.savefig(path, dpi=160)
+    plt.close(fig)
+    return True
+
+
 def p0_5_affine_c_pi(x: Any, y: Any, z: Any, tau: Any) -> Any:
     return 20.0 + 2.0 * x + 3.0 * y + 4.0 * z + 5.0 * tau
 
@@ -10886,6 +11882,8 @@ def next_debug_branch(
 ) -> str:
     text = " ".join(failures + inconclusive).lower()
     normalized_experiment_id = str(experiment_id).strip().upper()
+    if normalized_experiment_id == "P1-1":
+        return P1_1_PASS_BRANCH if status == "PASS" else P1_1_FAIL_BRANCH
     if normalized_experiment_id == "P5-1":
         return "PASS -> P5-2" if status == "PASS" else "debug P5 thresholds/AL provider"
     if normalized_experiment_id == "P5-2":
@@ -11002,11 +12000,15 @@ def analyze(args: argparse.Namespace) -> dict[str, Any]:
     p5_8_figure_paths = {
         name: figures_dir / name for name in P5_8_FIGURE_FILENAMES
     }
+    p1_1_figure_paths = {
+        name: figures_dir / name for name in P1_1_FIGURE_FILENAMES
+    }
     p0_phase = is_p0_experiment(args)
     p0_4_phase = is_experiment(args, "P0-4")
     p0_phase_index = p0_phase_number(args.experiment_id)
     p0_requires_odom_gate = p0_odom_gate_required(args.experiment_id)
     experiment_label = str(args.experiment_id).strip().upper()
+    p1_1_phase = is_p1_1_experiment(args)
     p5_1_phase = is_experiment(args, "P5-1")
     p5_2_phase = is_experiment(args, "P5-2")
     p5_3_phase = is_experiment(args, "P5-3")
@@ -11017,7 +12019,7 @@ def analyze(args: argparse.Namespace) -> dict[str, Any]:
     p5_8_phase = is_experiment(args, "P5-8")
     p5_runtime_phase = is_p5_runtime_experiment(args)
     p5_disabled_phase = is_p5_disabled_experiment(args)
-    p0_runtime_phase = p0_phase or p5_runtime_phase or p5_disabled_phase
+    p0_runtime_phase = p0_phase or p1_1_phase or p5_runtime_phase or p5_disabled_phase
     if bool(getattr(args, "blocked_fixture_audit", False)):
         if experiment_label != "P0-6":
             raise ValueError("--blocked-fixture-audit is only defined for P0-6")
@@ -11057,22 +12059,30 @@ def analyze(args: argparse.Namespace) -> dict[str, Any]:
         print(json.dumps(summary, indent=2, sort_keys=True))
         return summary
     topic_expectations = (
-        P5_DISABLED_TOPIC_EXPECTATIONS
-        if p5_disabled_phase
+        P1_TOPIC_EXPECTATIONS
+        if p1_1_phase
         else (
-            P5_TOPIC_EXPECTATIONS
-            if p5_runtime_phase
+            P5_DISABLED_TOPIC_EXPECTATIONS
+            if p5_disabled_phase
             else (
-                P0_4_TOPIC_EXPECTATIONS
-                if p0_4_phase
-                else (P0_TOPIC_EXPECTATIONS if p0_phase else CORE_TOPIC_EXPECTATIONS)
+                P5_TOPIC_EXPECTATIONS
+                if p5_runtime_phase
+                else (
+                    P0_4_TOPIC_EXPECTATIONS
+                    if p0_4_phase
+                    else (P0_TOPIC_EXPECTATIONS if p0_phase else CORE_TOPIC_EXPECTATIONS)
+                )
             )
         )
     )
     topic_activity_topics = (
-        P5_TOPIC_ACTIVITY_TOPICS
-        if p5_runtime_phase or p5_disabled_phase
-        else (P0_TOPIC_ACTIVITY_TOPICS if p0_phase else TOPIC_ACTIVITY_TOPICS)
+        P1_TOPIC_ACTIVITY_TOPICS
+        if p1_1_phase
+        else (
+            P5_TOPIC_ACTIVITY_TOPICS
+            if p5_runtime_phase or p5_disabled_phase
+            else (P0_TOPIC_ACTIVITY_TOPICS if p0_phase else TOPIC_ACTIVITY_TOPICS)
+        )
     )
 
     failures: list[str] = []
@@ -11088,7 +12098,9 @@ def analyze(args: argparse.Namespace) -> dict[str, Any]:
     )
     integrity_rows, integrity_summary = read_integrity_csv(export_dir / "test_planner_integrity_validation.csv")
 
-    if p5_runtime_phase:
+    if p1_1_phase:
+        pass
+    elif p5_runtime_phase:
         validate_p5_manifest(
             manifest,
             failures,
@@ -11137,6 +12149,13 @@ def analyze(args: argparse.Namespace) -> dict[str, Any]:
         failures.append("test_planner_integrity_validation.csv has no data rows")
     integrity_summary.update(summarize_integrity_source_fields(integrity_rows))
 
+    p1_debug_rows: list[dict[str, Any]] = []
+    p1_debug_summary: dict[str, Any] = {}
+    if p1_1_phase:
+        p1_debug_rows, p1_debug_summary = read_p1_integrity_debug_csv(
+            p1_debug_csv_path(export_dir, manifest)
+        )
+
     safety_off_topic_counts = {}
     if is_experiment(args, "B0-4"):
         validate_b0_4_fallback_requirements(
@@ -11153,6 +12172,15 @@ def analyze(args: argparse.Namespace) -> dict[str, Any]:
     p0_required_figures: list[Path] = []
     p0_health_summary: dict[str, Any] = {}
     baseline_scenario_data: dict[str, Any] = {}
+    baseline_export_dir = Path(args.baseline_export_dir).expanduser().resolve() if args.baseline_export_dir else None
+    baseline_bag_dir = Path(args.baseline_bag_dir).expanduser().resolve() if args.baseline_bag_dir else None
+    baseline_manifest = (
+        read_json_if_exists(baseline_export_dir / "test_planner_manifest.json")
+        if baseline_export_dir is not None
+        else {}
+    )
+    baseline_metadata: dict[str, Any] = {"missing": True, "topic_counts": {}}
+    baseline_artifacts: dict[str, Any] = {}
     health_rows: list[dict[str, Any]] = []
     if p0_runtime_phase:
         p0_artifacts, p0_error = (
@@ -11171,9 +12199,6 @@ def analyze(args: argparse.Namespace) -> dict[str, Any]:
         odom_rows = list(p0_artifacts.get("odom_rows", []) or [])
 
         baseline_trajectory_rows: list[dict[str, Any]] = []
-        baseline_artifacts: dict[str, Any] = {}
-        baseline_export_dir = Path(args.baseline_export_dir).expanduser().resolve() if args.baseline_export_dir else None
-        baseline_bag_dir = Path(args.baseline_bag_dir).expanduser().resolve() if args.baseline_bag_dir else None
         if baseline_bag_dir is not None:
             baseline_metadata = read_bag_metadata(baseline_bag_dir)
             baseline_artifacts, baseline_error = read_p0_bag_artifacts(baseline_bag_dir, baseline_metadata)
@@ -11247,7 +12272,7 @@ def analyze(args: argparse.Namespace) -> dict[str, Any]:
             inconclusive,
             allow_high_unknown=p0_4_phase,
             allow_explainable_startup_unavailable=(
-                p0_4_phase or p5_runtime_phase or p5_disabled_phase
+                p0_4_phase or p1_1_phase or p5_runtime_phase or p5_disabled_phase
             ),
         )
         p0_4_semantics: dict[str, Any] = {}
@@ -11439,7 +12464,9 @@ def analyze(args: argparse.Namespace) -> dict[str, Any]:
             write_csv(p0_6_overlay_path, p0_6_fields, p0_6_overlap)
             p0_csv_artifacts.extend([str(p0_6_overlap_path), str(p0_6_overlay_path)])
 
-        if p5_3_phase:
+        if p1_1_phase:
+            health_figure_path = p1_1_figure_paths["p1_1_p0_health.png"]
+        elif p5_3_phase:
             health_figure_path = figures_dir / "p5_3_debug_p0_health_timeline.png"
         elif p5_4_phase:
             health_figure_path = p5_4_figure_paths["p5_4_p0_health.png"]
@@ -11647,24 +12674,28 @@ def analyze(args: argparse.Namespace) -> dict[str, Any]:
 
     figures: list[str] = []
     scenario_figure_path = (
-        figures_dir / "p5_3_debug_scenario_topdown.png"
-        if p5_3_phase
+        p1_1_figure_paths["p1_1_scenario_topdown.png"]
+        if p1_1_phase
         else (
-            p5_4_figure_paths["p5_4_scenario_topdown.png"]
-            if p5_4_phase
+            figures_dir / "p5_3_debug_scenario_topdown.png"
+            if p5_3_phase
             else (
-                p5_5_figure_paths["p5_5_scenario_topdown.png"]
-                if p5_5_phase
+                p5_4_figure_paths["p5_4_scenario_topdown.png"]
+                if p5_4_phase
                 else (
-                    p5_7_figure_paths["p5_7_scenario_topdown.png"]
-                    if p5_7_phase
+                    p5_5_figure_paths["p5_5_scenario_topdown.png"]
+                    if p5_5_phase
                     else (
-                        p5_8_figure_paths["p5_8_scenario_topdown.png"]
-                        if p5_8_phase
+                        p5_7_figure_paths["p5_7_scenario_topdown.png"]
+                        if p5_7_phase
                         else (
-                            p5_6_figure_paths["p5_6_scenario_topdown.png"]
-                            if p5_6_phase
-                            else figures_dir / f"{prefix}_scenario_topdown.png"
+                            p5_8_figure_paths["p5_8_scenario_topdown.png"]
+                            if p5_8_phase
+                            else (
+                                p5_6_figure_paths["p5_6_scenario_topdown.png"]
+                                if p5_6_phase
+                                else figures_dir / f"{prefix}_scenario_topdown.png"
+                            )
                         )
                     )
                 )
@@ -11672,21 +12703,25 @@ def analyze(args: argparse.Namespace) -> dict[str, Any]:
         )
     )
     topic_activity_figure_path = (
-        figures_dir / "p5_3_debug_topic_activity_timeline.png"
-        if p5_3_phase
+        p1_1_figure_paths["p1_1_topic_activity_timeline.png"]
+        if p1_1_phase
         else (
-            p5_5_figure_paths["p5_5_topic_activity_timeline.png"]
-            if p5_5_phase
+            figures_dir / "p5_3_debug_topic_activity_timeline.png"
+            if p5_3_phase
             else (
-                p5_7_figure_paths["p5_7_topic_activity_timeline.png"]
-                if p5_7_phase
+                p5_5_figure_paths["p5_5_topic_activity_timeline.png"]
+                if p5_5_phase
                 else (
-                    p5_8_figure_paths["p5_8_topic_activity_timeline.png"]
-                    if p5_8_phase
+                    p5_7_figure_paths["p5_7_topic_activity_timeline.png"]
+                    if p5_7_phase
                     else (
-                        figures_dir / "p5_6_topic_activity_timeline.png"
-                        if p5_6_phase
-                        else figures_dir / f"{prefix}_topic_activity_timeline.png"
+                        p5_8_figure_paths["p5_8_topic_activity_timeline.png"]
+                        if p5_8_phase
+                        else (
+                            figures_dir / "p5_6_topic_activity_timeline.png"
+                            if p5_6_phase
+                            else figures_dir / f"{prefix}_topic_activity_timeline.png"
+                        )
                     )
                 )
             )
@@ -11699,7 +12734,7 @@ def analyze(args: argparse.Namespace) -> dict[str, Any]:
         scenario_data, scenario_error = read_scenario_plot_data(bag_dir, metadata)
         if scenario_error:
             warnings.append(f"scenario top-down plot data could not be read: {scenario_error}")
-        if p0_phase and baseline_scenario_data.get("truth_xy"):
+        if (p0_phase or p1_1_phase) and baseline_scenario_data.get("truth_xy"):
             scenario_data["baseline_truth_xy"] = baseline_scenario_data.get("truth_xy", [])
         if plot_scenario_topdown(scenario_data, scenario_figure_path):
             figures.append(str(scenario_figure_path))
@@ -11830,6 +12865,12 @@ def analyze(args: argparse.Namespace) -> dict[str, Any]:
     p5_7_publish_rows: list[dict[str, Any]] = []
     p5_8_bspline_rows: list[dict[str, Any]] = []
     p5_8_bspline_error = ""
+    p1_1_gates: dict[str, Any] = {}
+    p1_1_bspline_rows: list[dict[str, Any]] = []
+    p1_1_bspline_error = ""
+    p1_1_baseline_bspline_rows: list[dict[str, Any]] = []
+    p1_1_baseline_bspline_error = ""
+    p1_1_bspline_comparison: dict[str, Any] = {}
     p5_csv_artifacts: list[str] = []
     p5_figure_artifacts: list[str] = []
     p5_required_figures: list[Path] = []
@@ -11842,6 +12883,41 @@ def analyze(args: argparse.Namespace) -> dict[str, Any]:
         p5_marker_summary = summarize_p5_marker_evidence(p5_marker_rows, p5_marker_error)
         if p5_marker_error:
             inconclusive.append(f"could not inspect P5 RViz marker evidence: {p5_marker_error}")
+    if p1_1_phase:
+        p1_1_bspline_rows, p1_1_bspline_error = (
+            read_bspline_messages(bag_dir, metadata)
+            if bag_dir is not None
+            else ([], "missing bag dir")
+        )
+        if baseline_bag_dir is not None:
+            if baseline_metadata.get("missing"):
+                baseline_metadata = read_bag_metadata(baseline_bag_dir)
+            p1_1_baseline_bspline_rows, p1_1_baseline_bspline_error = (
+                read_bspline_messages(baseline_bag_dir, baseline_metadata)
+            )
+        p1_1_bspline_comparison = compare_final_bspline_paths(
+            p1_1_bspline_rows,
+            p1_1_baseline_bspline_rows,
+        )
+        p1_1_gates = validate_p1_1_hard_gates(
+            manifest,
+            validator_summary,
+            topic_health,
+            metadata,
+            p0_health_summary,
+            health_rows,
+            p1_debug_summary,
+            p1_1_bspline_rows,
+            p1_1_bspline_error,
+            baseline_export_dir,
+            baseline_bag_dir,
+            baseline_manifest,
+            p1_1_baseline_bspline_rows,
+            p1_1_baseline_bspline_error,
+            p1_1_bspline_comparison,
+            failures,
+            inconclusive,
+        )
     if p5_5_phase:
         p5_5_integrity_rows, p5_5_integrity_error = (
             read_p5_5_integrity_stamp_evidence(bag_dir, metadata)
@@ -12945,6 +14021,197 @@ def analyze(args: argparse.Namespace) -> dict[str, Any]:
         required_runtime_figures = list(dict.fromkeys(required_runtime_figures))
         p5_required_figures.extend(required_runtime_figures)
 
+    p1_1_figure_artifacts: list[str] = []
+    p1_1_required_figures: list[Path] = []
+    if p1_1_phase:
+        p1_debug_path = Path(str(p1_debug_summary.get("path", "")))
+        if p1_debug_path.is_file():
+            csv_artifacts.append(str(p1_debug_path))
+
+        p1_summary_path = csv_dir / "p1_1_integrity_cost_debug_summary.csv"
+        p1_bspline_path = csv_dir / "p1_1_bspline_publish_timeline.csv"
+        p1_trajectory_path = csv_dir / "p1_1_trajectory_vs_baseline.csv"
+        p1_manifest_path = csv_dir / "p1_1_manifest_switch_summary.csv"
+        p1_validation_path = csv_dir / "p1_1_validation_summary.csv"
+        p1_cause_path = csv_dir / "p1_1_cause_exclusion_summary.csv"
+
+        write_csv(
+            p1_summary_path,
+            [
+                "path",
+                "missing",
+                "row_count",
+                "parse_error_count",
+                "positive_sample_rows",
+                "positive_hit_rows",
+                "nonfinite_cost_gradient_count",
+                "applied_to_objective_true_count",
+                "applied_to_objective_invalid_count",
+                "computed_metrics",
+                "metrics_only_not_applied",
+            ],
+            [p1_debug_summary],
+        )
+        bspline_publish_rows = [
+            {**row, "run_label": "p1_1"}
+            for row in p1_1_bspline_rows
+        ] + [
+            {**row, "run_label": "baseline"}
+            for row in p1_1_baseline_bspline_rows
+        ]
+        write_csv(
+            p1_bspline_path,
+            [
+                "run_label",
+                "bag_time_s",
+                "traj_id",
+                "start_time_s",
+                "duration_s",
+                "order",
+                "pos_pts_count",
+                "knots_count",
+            ],
+            bspline_publish_rows,
+        )
+        write_csv(
+            p1_trajectory_path,
+            [
+                "p1_bspline_row_count",
+                "baseline_bspline_row_count",
+                "p1_nonempty_path_count",
+                "baseline_nonempty_path_count",
+                "p1_point_count",
+                "baseline_point_count",
+                "p1_path_length_m",
+                "baseline_path_length_m",
+                "rms_distance_m",
+                "max_distance_m",
+                "threshold_rms_m",
+                "threshold_max_m",
+                "within_threshold",
+            ],
+            [p1_1_bspline_comparison],
+        )
+        write_csv(
+            p1_manifest_path,
+            ["gate", "passed"],
+            [
+                {"gate": key, "passed": int(bool(p1_1_gates.get(key)))}
+                for key in (
+                    "manifest_safety_profile_p1",
+                    "manifest_p0_enabled",
+                    "manifest_p1_enabled",
+                    "manifest_p1_metrics_only",
+                    "manifest_p1_use_integrity_cost",
+                    "manifest_p2_p5_disabled",
+                    "baseline_manifest_present",
+                    "baseline_manifest_experiment_p0_open_sky",
+                    "baseline_manifest_scenario_matches",
+                    "baseline_manifest_safety_profile_off",
+                    "baseline_manifest_p0_enabled",
+                    "baseline_manifest_p1_p5_disabled",
+                )
+            ],
+        )
+        write_csv(
+            p1_validation_path,
+            ["gate", "passed"],
+            [
+                {"gate": key, "passed": int(bool(p1_1_gates.get(key)))}
+                for key in (
+                    "validator_passed",
+                    "p0_post_startup_ready",
+                    "p0_post_startup_non_stale",
+                    "p0_post_startup_not_full_unknown",
+                    "p1_csv_nonempty",
+                    "p1_csv_finite_cost_gradient",
+                    "p1_positive_sample_hit",
+                    "p1_not_applied_to_objective",
+                    "p1_rviz_topics_present",
+                    "bspline_publish_present",
+                    "baseline_manifest_present",
+                    "baseline_manifest_scenario_matches",
+                    "baseline_manifest_safety_profile_off",
+                    "baseline_manifest_p0_enabled",
+                    "baseline_manifest_p1_p5_disabled",
+                    "trajectory_vs_baseline_passed",
+                    "cause_exclusion_passed",
+                )
+            ],
+        )
+        write_csv(
+            p1_cause_path,
+            ["cause", "count"],
+            p1_1_cause_exclusion_rows(p1_1_gates),
+        )
+        csv_artifacts.extend(
+            [
+                str(p1_summary_path),
+                str(p1_bspline_path),
+                str(p1_trajectory_path),
+                str(p1_manifest_path),
+                str(p1_validation_path),
+                str(p1_cause_path),
+            ]
+        )
+
+        if plot_p1_metrics_timeline(
+            p1_debug_rows,
+            p1_1_figure_paths["p1_1_p1_metrics_timeline.png"],
+        ):
+            p1_1_figure_artifacts.append(
+                str(p1_1_figure_paths["p1_1_p1_metrics_timeline.png"])
+            )
+        if plot_p1_integrity_cost_debug_summary(
+            p1_debug_summary,
+            p1_1_figure_paths["p1_1_integrity_cost_debug_summary.png"],
+        ):
+            p1_1_figure_artifacts.append(
+                str(p1_1_figure_paths["p1_1_integrity_cost_debug_summary.png"])
+            )
+        if plot_p1_trajectory_overlay_vs_baseline(
+            p1_1_bspline_comparison,
+            p1_1_figure_paths["p1_1_trajectory_overlay_vs_baseline.png"],
+        ):
+            p1_1_figure_artifacts.append(
+                str(p1_1_figure_paths["p1_1_trajectory_overlay_vs_baseline.png"])
+            )
+        if plot_p1_bspline_publish_timeline(
+            p1_1_bspline_rows,
+            p1_1_baseline_bspline_rows,
+            p1_1_figure_paths["p1_1_bspline_publish_timeline.png"],
+        ):
+            p1_1_figure_artifacts.append(
+                str(p1_1_figure_paths["p1_1_bspline_publish_timeline.png"])
+            )
+        if plot_p1_manifest_switch_summary(
+            manifest,
+            p1_1_gates,
+            p1_1_figure_paths["p1_1_manifest_switch_summary.png"],
+        ):
+            p1_1_figure_artifacts.append(
+                str(p1_1_figure_paths["p1_1_manifest_switch_summary.png"])
+            )
+        if plot_p1_validation_summary(
+            validator_summary,
+            p1_debug_summary,
+            p1_1_gates,
+            p1_1_figure_paths["p1_1_validation_summary.png"],
+        ):
+            p1_1_figure_artifacts.append(
+                str(p1_1_figure_paths["p1_1_validation_summary.png"])
+            )
+        if plot_p1_cause_exclusion_summary(
+            p1_1_gates,
+            p1_1_figure_paths["p1_1_cause_exclusion_summary.png"],
+        ):
+            p1_1_figure_artifacts.append(
+                str(p1_1_figure_paths["p1_1_cause_exclusion_summary.png"])
+            )
+        p1_1_required_figures = [
+            p1_1_figure_paths[name] for name in P1_1_FIGURE_FILENAMES
+        ]
+
     p5_8_figure_artifacts: list[str] = []
     p5_8_required_figures: list[Path] = []
     if p5_8_phase:
@@ -13140,6 +14407,16 @@ def analyze(args: argparse.Namespace) -> dict[str, Any]:
                     inconclusive.append(
                         f"{experiment_label} required figure was not generated or is empty: {figure_path}"
                     )
+    if p1_1_phase:
+        figures.extend(
+            artifact for artifact in p1_1_figure_artifacts if artifact not in figures
+        )
+        for figure_path in p1_1_required_figures:
+            if not figure_path.is_file() or figure_path.stat().st_size <= 0:
+                failures.append(
+                    "P1-1 required figure missing: "
+                    f"{figure_path.name}; missing metrics-only isolation evidence prevents P1-1 acceptance"
+                )
     if p5_8_phase:
         figures.extend(
             artifact for artifact in p5_8_figure_artifacts if artifact not in figures
@@ -13185,6 +14462,16 @@ def analyze(args: argparse.Namespace) -> dict[str, Any]:
         "topic_timing_error": topic_timing_error,
         "integrity_summary": integrity_summary,
         "p0_summary": p0_summary,
+        "p1_1_hard_gates": p1_1_gates,
+        "p1_summary": {
+            "metrics_debug": p1_debug_summary,
+            "baseline_export_dir": str(baseline_export_dir) if baseline_export_dir is not None else "",
+            "baseline_bag_dir": str(baseline_bag_dir) if baseline_bag_dir is not None else "",
+            "baseline_manifest": baseline_manifest,
+            "bspline_comparison": p1_1_bspline_comparison,
+            "p1_bspline_error": p1_1_bspline_error,
+            "baseline_bspline_error": p1_1_baseline_bspline_error,
+        },
         "p5_summary": {
             **p5_summary,
             "p5_1_hard_gates": p5_1_gates,

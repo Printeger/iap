@@ -4423,3 +4423,120 @@ Verification notes:
 Final conclusion:
 
 PASS -> Phase 3 / P1-1
+
+### P1-1 Metrics-Only No Trajectory Effect
+
+Code change under test:
+
+| Change | Result |
+|---|---|
+| Analyzer P1-1 gate | `PASS`: `--experiment-id P1-1` now requires `planner_safety_profile=p1`, P0 risk grid enabled, P1 enabled with `p1.metrics_only=true` and `p1.use_integrity_cost=true`, P2/P3/P4/P5 disabled, validator pass, healthy post-startup P0 rows, P1 debug CSV evidence, P1 RViz topic activity, bspline publish, and fresh baseline arguments. |
+| Metrics-only proof | `IMPLEMENTED`: `planner_p1_integrity_cost_debug.csv` must be present, nonempty, parseable, finite for cost/gradient fields, have positive sample/hit rows, and contain zero `applied_to_objective=true` rows. |
+| Baseline isolation proof | `IMPLEMENTED`: final nonempty P1 bspline control points are compared with final nonempty fresh P0-only baseline bspline control points using arc-length-resampled XY distance; pass gates are RMS `<= 0.5m` and max `<= 1.5m`. |
+| Required artifacts | `IMPLEMENTED`: analyzer requires all ten P1-1 figures named by the acceptance plan and records `p1_1_hard_gates`, P1 metrics summary, baseline paths, bspline comparison metrics, and exact `next_debug_branch`. |
+| P0 health evidence source | `PASS`: analyzer reads either raw `/planning/risk_grid_health` JSON or the recorded `/iap/rviz/risk_grid_health` marker text, so the formal bag's P0 health gate is evaluated from recorded evidence. |
+| Vocabulary | `IMPLEMENTED`: `CONTEXT.md` defines `P1 metrics-only trajectory isolation evidence`; no ADR was added. |
+
+GPU precheck:
+
+| Check | Result |
+|---|---|
+| `nvidia-smi` | `PASS`: GPU visible as NVIDIA GeForce RTX 4070, driver `580.126.09`, CUDA `13.0`; no CPU fallback was used. |
+
+Fresh P0-only baseline launch:
+
+```bash
+source /opt/ros/jazzy/setup.bash
+source /home/dev/ws_iap/install/setup.bash
+ros2 launch iap test_planner.launch.py \
+  experiment:=p0_open_sky \
+  scenario:=gnss_degraded_lidar_good \
+  run_duration_s:=90 \
+  validation_duration_s:=90 \
+  start_rviz:=false \
+  run_validator:=true \
+  record_bag:=true
+```
+
+Formal P1-1 launch:
+
+```bash
+source /opt/ros/jazzy/setup.bash
+source /home/dev/ws_iap/install/setup.bash
+ros2 launch iap test_planner.launch.py \
+  experiment:=p1_degraded_lidar_good \
+  p1.metrics_only:=true \
+  run_duration_s:=90 \
+  validation_duration_s:=90 \
+  start_rviz:=false \
+  run_validator:=true \
+  record_bag:=true
+```
+
+Analyzer:
+
+```bash
+cd /home/dev/ws_iap/src/iap
+python3 scripts/dev_planner/analyze_safety_planner_run.py \
+  --experiment-id P1-1 \
+  --export-dir /home/dev/ws_iap/src/iap/results/planner_validation/exports/test_planner_p1_degraded_lidar_good_gnss_degraded_lidar_good_1784126287120 \
+  --bag-dir /home/dev/ws_iap/src/iap/results/planner_validation/bags/test_planner_p1_degraded_lidar_good_gnss_degraded_lidar_good_20260715T143807Z \
+  --baseline-export-dir /home/dev/ws_iap/src/iap/results/planner_validation/exports/test_planner_p0_open_sky_gnss_degraded_lidar_good_1784125848611 \
+  --baseline-bag-dir /home/dev/ws_iap/src/iap/results/planner_validation/bags/test_planner_p0_open_sky_gnss_degraded_lidar_good_20260715T143048Z \
+  --fail-on-threshold
+```
+
+Fresh artifacts:
+
+| Artifact | Path |
+|---|---|
+| P0 baseline export | `/home/dev/ws_iap/src/iap/results/planner_validation/exports/test_planner_p0_open_sky_gnss_degraded_lidar_good_1784125848611` |
+| P0 baseline bag | `/home/dev/ws_iap/src/iap/results/planner_validation/bags/test_planner_p0_open_sky_gnss_degraded_lidar_good_20260715T143048Z` |
+| P1 export | `/home/dev/ws_iap/src/iap/results/planner_validation/exports/test_planner_p1_degraded_lidar_good_gnss_degraded_lidar_good_1784126287120` |
+| P1 bag | `/home/dev/ws_iap/src/iap/results/planner_validation/bags/test_planner_p1_degraded_lidar_good_gnss_degraded_lidar_good_20260715T143807Z` |
+| Analyzer summary | `/home/dev/ws_iap/src/iap/results/planner_validation/exports/test_planner_p1_degraded_lidar_good_gnss_degraded_lidar_good_1784126287120/metadata/safety_planner_analysis_summary.json` |
+| Analyzer status | `PASS`: analyzer exit `0`, `passed=true`, `status=PASS`, `next_debug_branch=PASS -> P1-2`, `failures=[]`, `inconclusive=[]`. |
+
+P1-1 gate table:
+
+| Gate | Result |
+|---|---|
+| Manifest | `PASS`: `planner_safety_profile=p1`, `p0.enable_risk_grid=true`, `planner_enable_p1=true`, `p1.metrics_only=true`, `p1.use_integrity_cost=true`, and P2/P3/P4/P5 disabled. |
+| P0 health | `PASS`: `startup_snapshot_unavailable_rows=3`, bounded startup duration `1.000295162s`, `post_startup_rows=39`, `post_startup_ready_false_count=0`, `post_startup_stale_true_count=0`, and `post_startup_full_unknown_count=0`. |
+| Validator | `PASS`: validator summary `passed=true`, `message_count=844`, `gnss_valid_seen=true`, `lidar_valid_seen=true`, and `fallback_valid_seen=true`. |
+| P1 CSV | `PASS`: debug CSV row count `1256`, positive sample rows `1256`, positive hit rows `18`, finite cost/gradient fields, `applied_to_objective_true_count=0`, and `applied_to_objective_invalid_count=0`. |
+| P1 RViz | `PASS`: `/iap/rviz/p1_integrity_metrics=18`, `/iap/rviz/p1_integrity_samples=18`, and `/iap/rviz/p1_integrity_push_vectors=18`. |
+| Bspline publish | `PASS`: P1 `/drone_0_planning/bspline=22` with nonempty control-point paths; baseline bspline rows `17` with nonempty control-point paths. |
+| Baseline manifest | `PASS`: baseline manifest is `experiment=p0_open_sky`, `scenario=gnss_degraded_lidar_good`, `planner_safety_profile=off`, `p0.enable_risk_grid=true`, and P1/P2/P3/P4/P5 disabled. |
+| Trajectory vs baseline | `PASS`: final bspline XY shape distance RMS `0.2927769255m <= 0.5m`; max `0.5394939175m <= 1.5m`. |
+| Cause exclusion | `PASS`: metrics-only rows were not applied to the objective, P2/P3/P4/P5 leakage checks stayed clear, and the trajectory threshold gate passed. |
+
+Required P1-1 figure conclusions:
+
+| Figure filename | Conclusion |
+|---|---|
+| `p1_1_scenario_topdown.png` | Proves the P1 and fresh P0 baseline runs used the same scenario context for the close-trajectory claim. |
+| `p1_1_topic_activity_timeline.png` | Proves P1 computed and emitted metrics evidence while the bspline topic stayed available for the close-trajectory comparison. |
+| `p1_1_p0_health.png` | Proves the P0 risk grid was ready, non-stale, and not full-unknown after startup, so P1 metrics were computed against live P0 evidence. |
+| `p1_1_p1_metrics_timeline.png` | Proves P1 computed integrity metrics over optimizer evaluations, including positive sample and hit evidence. |
+| `p1_1_integrity_cost_debug_summary.png` | Proves P1 computed finite integrity cost/gradient values but did not enter them into the planner objective (`applied_to_objective_true_count=0`). |
+| `p1_1_trajectory_overlay_vs_baseline.png` | Proves the final P1 bspline stayed close to the fresh P0 baseline shape within RMS and max thresholds. |
+| `p1_1_bspline_publish_timeline.png` | Proves both runs produced final nonempty bspline control-point paths for trajectory isolation. |
+| `p1_1_manifest_switch_summary.png` | Proves P1 was configured metrics-only with integrity cost enabled and P2/P3/P4/P5 disabled, excluding objective application by configuration. |
+| `p1_1_validation_summary.png` | Proves the validator, P0 health, P1 metrics CSV, P1 RViz, bspline, and baseline trajectory gates passed together. |
+| `p1_1_cause_exclusion_summary.png` | Proves objective application and disabled-phase leakage were excluded, leaving the accepted evidence as metrics-only with no trajectory effect. |
+
+Verification notes:
+
+| Check | Result |
+|---|---|
+| Python compile check | `PASS`: `python3 -m py_compile launch/test_planner.launch.py scripts/dev_planner/analyze_safety_planner_run.py`. |
+| Focused P1-1 analyzer tests | `PASS`: `python3 test/test_analyze_safety_planner_run_p1_1.py` ran `13` tests. |
+| Focused P5 analyzer regression tests | `PASS`: `python3 test/test_analyze_safety_planner_run_p5_1.py` ran `111` tests. |
+| Focused P0-6 analyzer regression tests | `PASS`: `python3 test/test_analyze_safety_planner_run_p0_6.py` ran `2` tests. |
+| Workspace `iap` build | `PASS`: `colcon build --packages-select iap --event-handlers console_direct+`. |
+| Diff hygiene | `PASS`: `git diff --check`. |
+
+Final conclusion:
+
+PASS -> P1-2

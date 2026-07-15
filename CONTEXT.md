@@ -100,6 +100,10 @@ _Avoid_: action count alone, rejected sample with no candidate identity, missing
 Evidence that a `planner_safety_profile=p5` run keeps P0 RiskGridMap and the base planner alive while `planner_enable_p5_runtime=false` and `planner_enable_p5_final=false` leave P5 status, RViz, replan, emergency, and final-gate channels absent or zero-count.
 _Avoid_: treating missing P0 health as successful isolation, accepting P5-disabled runs with P5 status leakage, CPU fallback substitutions for GPU launch failures
 
+**P1 metrics-only trajectory isolation evidence**:
+Evidence that a `planner_safety_profile=p1` run computes P1 integrity cost and gradient metrics, keeps every P1 debug row `applied_to_objective=false`, publishes the P1 RViz evidence topics, and leaves the final `/drone_0_planning/bspline` control-point path close to a fresh same-scenario P0-only baseline.
+_Avoid_: accepting a metrics-only run without a fresh baseline, using truth odom drift instead of planner bspline shape, or passing by suppressing P1 metrics/objective evidence.
+
 **Causal replan evidence**:
 Analyzer/status evidence that a `REQUEST_REPLAN` action and the future-risk gate/reason that caused it are both traceable in the same P5 run, including concurrent current and future reasons when both gates are active.
 _Avoid_: action count without gate reason, margin evidence with no replan attribution
