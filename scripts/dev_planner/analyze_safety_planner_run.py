@@ -93,6 +93,14 @@ P5_TOPIC_EXPECTATIONS = {
     P5_GATE_STATUS_TOPIC: "present",
     P5_CURRENT_IM_BARS_TOPIC: "present",
 }
+P5_DISABLED_TOPIC_EXPECTATIONS = {
+    **P0_TOPIC_EXPECTATIONS,
+    P5_STATUS_TOPIC: "absent-or-zero",
+    P5_TRAJECTORY_SAMPLES_TOPIC: "absent-or-zero",
+    P5_CURRENT_TRAJ_TOPIC: "absent-or-zero",
+    P5_GATE_STATUS_TOPIC: "absent-or-zero",
+    P5_CURRENT_IM_BARS_TOPIC: "absent-or-zero",
+}
 P5_EMERGENCY_ACTION = "REQUEST_EMERGENCY_STOP_CANDIDATE"
 P5_REPLAN_ACTION = "REQUEST_REPLAN"
 P5_OK_ACTION = "OK"
@@ -134,6 +142,18 @@ P5_7_FAIL_BRANCH = (
 P5_7_BLOCKED_BRANCH = (
     "BLOCKED_SCENARIO_MISSING -> implement rejected trajectory fixture first"
 )
+P5_8_FAIL_BRANCH = "FAIL -> debug switch isolation"
+P5_8_PASS_BRANCH = "PASS -> Phase 3 / P1-1"
+P5_8_FIGURE_FILENAMES = [
+    "p5_8_scenario_topdown.png",
+    "p5_8_topic_activity_timeline.png",
+    "p5_8_p0_health.png",
+    "p5_8_p5_disabled_topic_summary.png",
+    "p5_8_bspline_publish_timeline.png",
+    "p5_8_manifest_switch_summary.png",
+    "p5_8_validation_summary.png",
+    "p5_8_cause_exclusion_summary.png",
+]
 P5_7_FIGURE_FILENAMES = [
     "p5_7_scenario_topdown.png",
     "p5_7_rejected_trajectory_overlay.png",
@@ -530,6 +550,10 @@ def is_p5_runtime_experiment(args: argparse.Namespace) -> bool:
         "P5-6",
         "P5-7",
     }
+
+
+def is_p5_disabled_experiment(args: argparse.Namespace) -> bool:
+    return str(args.experiment_id).strip().upper() == "P5-8"
 
 
 def p0_phase_number(experiment_id: Any) -> int | None:
@@ -4927,6 +4951,8 @@ def topic_health_from_metadata(
                 status = "FAIL"
         elif expected in {"planner-dependent", "present"}:
             status = "PASS" if count > 0 else "FAIL"
+        elif expected == "absent-or-zero":
+            status = "PASS" if count == 0 else "FAIL"
         topic_health[topic] = {
             "expected": expected,
             "count": count,
@@ -4974,6 +5000,8 @@ def validate_topic_health(
                 failures.append(f"required topic {topic} is missing or not continuous")
             elif expected == "active-periodic":
                 failures.append(f"required topic {topic} is missing or not periodic after planner activation")
+            elif expected == "absent-or-zero":
+                failures.append(f"topic {topic} should be absent or zero-count while P5 is disabled")
             elif expected == "planner-dependent":
                 continue
             else:
@@ -9891,6 +9919,224 @@ def validate_p5_7_hard_gates(
     return gates
 
 
+def p5_8_manifest_gate_values(manifest: dict[str, Any]) -> dict[str, bool]:
+    expected_false = (
+        "planner_enable_p1",
+        "planner_enable_p2",
+        "planner_enable_p3_local",
+        "planner_enable_p3_global",
+        "planner_enable_p4",
+        "planner_enable_p5_runtime",
+        "planner_enable_p5_final",
+    )
+    return {
+        "manifest_present": bool(manifest),
+        "manifest_safety_profile_p5": str(manifest.get("planner_safety_profile", "")).lower()
+        == "p5",
+        "manifest_p0_enabled": manifest.get("p0.enable_risk_grid") is True,
+        "manifest_p5_runtime_disabled": manifest.get("planner_enable_p5_runtime") is False,
+        "manifest_p5_final_disabled": manifest.get("planner_enable_p5_final") is False,
+        "manifest_p1_p4_disabled": all(
+            manifest.get(key) is False
+            for key in (
+                "planner_enable_p1",
+                "planner_enable_p2",
+                "planner_enable_p3_local",
+                "planner_enable_p3_global",
+                "planner_enable_p4",
+            )
+        ),
+        "manifest_expected_false_ok": all(manifest.get(key) is False for key in expected_false),
+    }
+
+
+def p5_disabled_topic_counts(
+    topic_health: dict[str, dict[str, Any]],
+) -> dict[str, int]:
+    return {
+        topic: int((topic_health.get(topic) or {}).get("count", 0) or 0)
+        for topic in (P5_STATUS_TOPIC, *P5_RVIZ_TOPICS)
+    }
+
+
+def p5_8_cause_exclusion_counts(
+    p5_summary: dict[str, Any],
+    topic_health: dict[str, dict[str, Any]],
+) -> dict[str, int]:
+    p5_counts = p5_disabled_topic_counts(topic_health)
+    return {
+        "p5_status_rows": int(p5_summary.get("status_rows", 0) or 0),
+        "p5_replan_action_count": int(p5_summary.get("replan_action_count", 0) or 0)
+        + int(p5_summary.get("raw_replan_action_count", 0) or 0),
+        "p5_emergency_action_count": int(p5_summary.get("emergency_action_count", 0) or 0)
+        + int(p5_summary.get("raw_emergency_action_count", 0) or 0),
+        "p5_final_gate_fail_rows": int(p5_summary.get("final_gate_fail_rows", 0) or 0),
+        "p5_final_gate_fail_count_max": int(
+            p5_summary.get("final_gate_fail_count_max", 0) or 0
+        ),
+        "p5_final_gate_emergency_rows": int(
+            p5_summary.get("final_gate_emergency_rows", 0) or 0
+        ),
+        "p5_status_topic_count": p5_counts.get(P5_STATUS_TOPIC, 0),
+        "p5_rviz_nonzero_topic_count": sum(
+            1 for topic in P5_RVIZ_TOPICS if p5_counts.get(topic, 0) > 0
+        ),
+    }
+
+
+def validate_p5_8_hard_gates(
+    manifest: dict[str, Any],
+    validator_summary: dict[str, Any],
+    topic_health: dict[str, dict[str, Any]],
+    p0_health_summary: dict[str, Any],
+    p0_health_rows: list[dict[str, Any]],
+    p5_summary: dict[str, Any],
+    bspline_rows: list[dict[str, Any]],
+    bspline_error: str,
+    failures: list[str],
+    inconclusive: list[str],
+) -> dict[str, Any]:
+    manifest_gates = p5_8_manifest_gate_values(manifest)
+    p0_startup = summarize_p0_startup_snapshot_unavailable(p0_health_rows)
+    topic_statuses = {
+        topic: (topic_health.get(topic) or {}).get("status", "MISSING")
+        for topic in P5_DISABLED_TOPIC_EXPECTATIONS
+    }
+    p5_counts = p5_disabled_topic_counts(topic_health)
+    cause_exclusion = p5_8_cause_exclusion_counts(p5_summary, topic_health)
+    bspline_topic_health = topic_health.get("/drone_0_planning/bspline") or {}
+    bspline_topic_count = int(bspline_topic_health.get("count", 0) or 0)
+    p0_required_topics_stable = all(
+        (topic_health.get(topic) or {}).get("status") == "PASS"
+        for topic, expected in P0_TOPIC_EXPECTATIONS.items()
+        if expected != "planner-dependent"
+    )
+    gates = {
+        **manifest_gates,
+        "validator_summary_present": bool(validator_summary),
+        "validator_passed": validator_summary.get("passed") is True,
+        "topic_statuses": topic_statuses,
+        "required_p0_topics_stable": p0_required_topics_stable,
+        "bspline_topic_count": bspline_topic_count,
+        "bspline_row_count": len(bspline_rows),
+        "bspline_publish_present": bspline_topic_count > 0,
+        "bspline_inspection_ok": not bool(bspline_error),
+        "p0_health_rows_present": int(p0_health_summary.get("row_count", 0) or 0) > 0,
+        **p0_startup,
+        "p0_post_startup_rows_present": p0_startup["post_startup_rows"] > 0,
+        "p0_post_startup_ready": p0_startup["post_startup_ready_false_count"] == 0,
+        "p0_post_startup_non_stale": p0_startup["post_startup_stale_true_count"] == 0,
+        "p0_post_startup_not_full_unknown": (
+            p0_startup["post_startup_full_unknown_count"] == 0
+        ),
+        "p5_disabled_topic_counts": p5_counts,
+        "p5_disabled_topics_zero": all(count == 0 for count in p5_counts.values()),
+        "p5_status_rows_zero": int(p5_summary.get("status_rows", 0) or 0) == 0,
+        "p5_json_parse_ok": int(p5_summary.get("parse_error_count", 0) or 0) == 0,
+        "p5_inspection_ok": not bool(p5_summary.get("inspection_error")),
+        "p5_no_replan": cause_exclusion["p5_replan_action_count"] == 0,
+        "p5_no_emergency": cause_exclusion["p5_emergency_action_count"] == 0,
+        "p5_no_final_gate_failure": (
+            cause_exclusion["p5_final_gate_fail_rows"] == 0
+            and cause_exclusion["p5_final_gate_fail_count_max"] == 0
+            and cause_exclusion["p5_final_gate_emergency_rows"] == 0
+        ),
+        "cause_exclusion": cause_exclusion,
+    }
+
+    if not gates["manifest_present"]:
+        failures.append("P5-8 manifest is missing")
+    elif not (
+        gates["manifest_safety_profile_p5"]
+        and gates["manifest_p0_enabled"]
+        and gates["manifest_p5_runtime_disabled"]
+        and gates["manifest_p5_final_disabled"]
+        and gates["manifest_p1_p4_disabled"]
+    ):
+        failures.append(
+            "P5-8 manifest must record planner_safety_profile=p5, "
+            "p0.enable_risk_grid=true, P5 runtime/final disabled, and P1-P4 disabled"
+        )
+    if not gates["validator_summary_present"]:
+        failures.append("P5-8 validator summary is missing")
+    elif not gates["validator_passed"]:
+        failures.append("P5-8 validator summary did not pass")
+    if not gates["required_p0_topics_stable"]:
+        failures.append("P5-8 required base/P0 topics are not all stable")
+    if not gates["bspline_publish_present"]:
+        failures.append("P5-8 /drone_0_planning/bspline did not publish")
+    if not gates["bspline_inspection_ok"]:
+        failures.append(f"P5-8 could not inspect bspline messages: {bspline_error}")
+    if not gates["p0_health_rows_present"]:
+        failures.append("P5-8 P0 health rows are missing")
+    if not gates["startup_snapshot_unavailable_bounded"]:
+        failures.append("P5-8 P0 startup snapshot_unavailable prefix is not bounded")
+    if not gates["p0_post_startup_rows_present"]:
+        failures.append("P5-8 P0 health has no post-startup rows")
+    if not gates["p0_post_startup_ready"]:
+        failures.append("P5-8 P0 health reported ready=false after startup")
+    if not gates["p0_post_startup_non_stale"]:
+        failures.append("P5-8 P0 health reported stale=true after startup")
+    if not gates["p0_post_startup_not_full_unknown"]:
+        failures.append("P5-8 P0 health reported full-frame unknown after startup")
+    if not gates["p5_disabled_topics_zero"]:
+        failures.append(
+            "P5-8 P5 status/RViz topics were not zero-count: "
+            + ", ".join(f"{topic}={count}" for topic, count in sorted(p5_counts.items()))
+        )
+    if not gates["p5_status_rows_zero"]:
+        failures.append("P5-8 P5 status rows must be absent while P5 is disabled")
+    if not gates["p5_json_parse_ok"]:
+        failures.append("P5-8 P5 status JSON parse errors were observed")
+    if not gates["p5_inspection_ok"]:
+        failures.append("P5-8 P5 status inspection did not complete cleanly")
+    if not gates["p5_no_replan"]:
+        failures.append("P5-8 observed P5 replan behavior while P5 is disabled")
+    if not gates["p5_no_emergency"]:
+        failures.append("P5-8 observed P5 emergency behavior while P5 is disabled")
+    if not gates["p5_no_final_gate_failure"]:
+        failures.append("P5-8 observed P5 final-gate failure while P5 is disabled")
+
+    required = (
+        "manifest_present",
+        "manifest_safety_profile_p5",
+        "manifest_p0_enabled",
+        "manifest_p5_runtime_disabled",
+        "manifest_p5_final_disabled",
+        "manifest_p1_p4_disabled",
+        "validator_summary_present",
+        "validator_passed",
+        "required_p0_topics_stable",
+        "bspline_publish_present",
+        "bspline_inspection_ok",
+        "p0_health_rows_present",
+        "startup_snapshot_unavailable_bounded",
+        "p0_post_startup_rows_present",
+        "p0_post_startup_ready",
+        "p0_post_startup_non_stale",
+        "p0_post_startup_not_full_unknown",
+        "p5_disabled_topics_zero",
+        "p5_status_rows_zero",
+        "p5_json_parse_ok",
+        "p5_inspection_ok",
+        "p5_no_replan",
+        "p5_no_emergency",
+        "p5_no_final_gate_failure",
+    )
+    gates["passed"] = all(bool(gates.get(key)) for key in required)
+    return gates
+
+
+def p5_8_cause_exclusion_rows(gates: dict[str, Any]) -> list[dict[str, Any]]:
+    return [
+        {
+            "cause": cause,
+            "count": int(count or 0),
+        }
+        for cause, count in sorted((gates.get("cause_exclusion") or {}).items())
+    ]
+
+
 def build_p5_7_bspline_publish_rows(
     p5_rows: list[dict[str, Any]],
     bspline_rows: list[dict[str, Any]],
@@ -10020,6 +10266,160 @@ def plot_p5_7_cause_exclusion_summary(
     ax.bar(labels, counts, color=["#16a34a" if count == 0 else "#dc2626" for count in counts])
     ax.set_ylabel("count")
     ax.set_title("P5-7 excluded cause summary")
+    ax.tick_params(axis="x", labelrotation=30)
+    ax.grid(True, axis="y", alpha=0.25)
+    fig.tight_layout()
+    fig.savefig(path, dpi=160)
+    plt.close(fig)
+    return True
+
+
+def plot_p5_8_disabled_topic_summary(
+    topic_health: dict[str, dict[str, Any]],
+    p5_summary: dict[str, Any],
+    path: Path,
+) -> bool:
+    topics = [P5_STATUS_TOPIC, *P5_RVIZ_TOPICS]
+    counts = [int((topic_health.get(topic) or {}).get("count", 0) or 0) for topic in topics]
+    fig, axes = plt.subplots(1, 2, figsize=(12, 5.2))
+    axes[0].barh(topics, counts, color=["#16a34a" if count == 0 else "#dc2626" for count in counts])
+    axes[0].invert_yaxis()
+    axes[0].set_xlabel("bag messages")
+    axes[0].set_title("P5 disabled topic counts")
+    axes[0].grid(True, axis="x", alpha=0.25)
+
+    axes[1].axis("off")
+    text = "\n".join(
+        [
+            f"status_rows: {p5_summary.get('status_rows', 0)}",
+            f"actions: {p5_summary.get('action_counts', {})}",
+            f"raw_actions: {p5_summary.get('raw_action_counts', {})}",
+            f"replan_action_count: {p5_summary.get('replan_action_count', 0)}",
+            f"emergency_action_count: {p5_summary.get('emergency_action_count', 0)}",
+            f"final_gate_fail_rows: {p5_summary.get('final_gate_fail_rows', 0)}",
+            f"final_gate_fail_count_max: {p5_summary.get('final_gate_fail_count_max', 0)}",
+        ]
+    )
+    axes[1].text(0.02, 0.95, text, va="top", ha="left", family="monospace", fontsize=9)
+    axes[1].set_title("P5 action/final-gate leakage")
+    fig.tight_layout()
+    fig.savefig(path, dpi=160)
+    plt.close(fig)
+    return True
+
+
+def plot_p5_8_bspline_publish_timeline(
+    rows: list[dict[str, Any]],
+    topic_health: dict[str, dict[str, Any]],
+    path: Path,
+) -> bool:
+    topic_count = int(
+        (topic_health.get("/drone_0_planning/bspline") or {}).get("count", 0) or 0
+    )
+    fig, ax = plt.subplots(figsize=(9.2, 4.2))
+    if rows:
+        t_rel = relative_time(rows)
+        y = [finite_float(row.get("pos_pts_count")) or 0.0 for row in rows]
+        ax.scatter(t_rel, y, color="#2563eb", s=34, label="bspline publish")
+        ax.plot(t_rel, y, color="#2563eb", lw=0.9, alpha=0.45)
+        ax.set_xlabel("time since first bspline publish [s]")
+        ax.set_ylabel("pos_pts_count")
+    else:
+        ax.bar(["/drone_0_planning/bspline"], [topic_count], color="#16a34a" if topic_count > 0 else "#dc2626")
+        ax.set_ylabel("bag messages")
+    ax.set_title("P5-8 bspline publish activity")
+    ax.grid(True, axis="y", alpha=0.25)
+    if rows:
+        ax.legend(loc="best")
+    fig.tight_layout()
+    fig.savefig(path, dpi=160)
+    plt.close(fig)
+    return True
+
+
+def plot_p5_8_manifest_switch_summary(
+    manifest: dict[str, Any],
+    gates: dict[str, Any],
+    path: Path,
+) -> bool:
+    specs = [
+        ("profile=p5", gates.get("manifest_safety_profile_p5")),
+        ("P0 risk grid on", gates.get("manifest_p0_enabled")),
+        ("P5 runtime off", gates.get("manifest_p5_runtime_disabled")),
+        ("P5 final off", gates.get("manifest_p5_final_disabled")),
+        ("P1-P4 off", gates.get("manifest_p1_p4_disabled")),
+    ]
+    labels = [item[0] for item in specs]
+    values = [1 if item[1] else 0 for item in specs]
+    fig, axes = plt.subplots(1, 2, figsize=(12, 5.2))
+    axes[0].barh(labels, values, color=["#16a34a" if value else "#dc2626" for value in values])
+    axes[0].set_xlim(0, 1.05)
+    axes[0].set_xticks([0, 1], ["FAIL", "PASS"])
+    axes[0].invert_yaxis()
+    axes[0].set_title("Manifest switch gates")
+    axes[0].grid(True, axis="x", alpha=0.25)
+
+    axes[1].axis("off")
+    keys = [
+        "planner_safety_profile",
+        "p0.enable_risk_grid",
+        "planner_enable_p5_runtime",
+        "planner_enable_p5_final",
+        "planner_enable_p1",
+        "planner_enable_p2",
+        "planner_enable_p3_local",
+        "planner_enable_p3_global",
+        "planner_enable_p4",
+    ]
+    text = "\n".join(f"{key}: {manifest.get(key, '<missing>')}" for key in keys)
+    axes[1].text(0.02, 0.95, text, va="top", ha="left", family="monospace", fontsize=9)
+    axes[1].set_title("Manifest values")
+    fig.tight_layout()
+    fig.savefig(path, dpi=160)
+    plt.close(fig)
+    return True
+
+
+def plot_p5_8_validation_summary(
+    validator_summary: dict[str, Any],
+    integrity_summary: dict[str, Any],
+    gates: dict[str, Any],
+    path: Path,
+) -> bool:
+    fig, ax = plt.subplots(figsize=(10.5, 5.4))
+    ax.axis("off")
+    lines = [
+        f"validator_present: {bool(validator_summary)}",
+        f"validator_passed: {validator_summary.get('passed') if validator_summary else '<missing>'}",
+        f"integrity_rows: {integrity_summary.get('row_count', 0)}",
+        f"required_p0_topics_stable: {gates.get('required_p0_topics_stable')}",
+        f"bspline_topic_count: {gates.get('bspline_topic_count')}",
+        f"bspline_row_count: {gates.get('bspline_row_count')}",
+        f"p0_post_startup_ready: {gates.get('p0_post_startup_ready')}",
+        f"p0_post_startup_non_stale: {gates.get('p0_post_startup_non_stale')}",
+        f"p0_post_startup_not_full_unknown: {gates.get('p0_post_startup_not_full_unknown')}",
+    ]
+    ax.text(0.02, 0.95, "\n".join(lines), va="top", ha="left", family="monospace", fontsize=10)
+    ax.set_title("P5-8 validation summary")
+    fig.tight_layout()
+    fig.savefig(path, dpi=160)
+    plt.close(fig)
+    return True
+
+
+def plot_p5_8_cause_exclusion_summary(
+    gates: dict[str, Any],
+    path: Path,
+) -> bool:
+    rows = p5_8_cause_exclusion_rows(gates)
+    if not rows:
+        return False
+    labels = [str(row["cause"]) for row in rows]
+    counts = [int(row["count"]) for row in rows]
+    fig, ax = plt.subplots(figsize=(9.2, 4.8))
+    ax.bar(labels, counts, color=["#16a34a" if count == 0 else "#dc2626" for count in counts])
+    ax.set_ylabel("count")
+    ax.set_title("P5-8 disabled-switch cause exclusion")
     ax.tick_params(axis="x", labelrotation=30)
     ax.grid(True, axis="y", alpha=0.25)
     fig.tight_layout()
@@ -10516,6 +10916,10 @@ def next_debug_branch(
         if status == "BLOCKED_SCENARIO_MISSING":
             return P5_7_BLOCKED_BRANCH
         return P5_7_FAIL_BRANCH
+    if normalized_experiment_id == "P5-8":
+        if status == "PASS":
+            return P5_8_PASS_BRANCH
+        return P5_8_FAIL_BRANCH
     if status == "PASS":
         pass_branches = {
             "B0-1": "continue_to_B0-2_open_sky_baseline",
@@ -10595,6 +10999,9 @@ def analyze(args: argparse.Namespace) -> dict[str, Any]:
     p5_7_figure_paths = {
         name: figures_dir / name for name in P5_7_FIGURE_FILENAMES
     }
+    p5_8_figure_paths = {
+        name: figures_dir / name for name in P5_8_FIGURE_FILENAMES
+    }
     p0_phase = is_p0_experiment(args)
     p0_4_phase = is_experiment(args, "P0-4")
     p0_phase_index = p0_phase_number(args.experiment_id)
@@ -10607,8 +11014,10 @@ def analyze(args: argparse.Namespace) -> dict[str, Any]:
     p5_5_phase = is_experiment(args, "P5-5")
     p5_6_phase = is_experiment(args, "P5-6")
     p5_7_phase = is_experiment(args, "P5-7")
+    p5_8_phase = is_experiment(args, "P5-8")
     p5_runtime_phase = is_p5_runtime_experiment(args)
-    p0_runtime_phase = p0_phase or p5_runtime_phase
+    p5_disabled_phase = is_p5_disabled_experiment(args)
+    p0_runtime_phase = p0_phase or p5_runtime_phase or p5_disabled_phase
     if bool(getattr(args, "blocked_fixture_audit", False)):
         if experiment_label != "P0-6":
             raise ValueError("--blocked-fixture-audit is only defined for P0-6")
@@ -10648,17 +11057,21 @@ def analyze(args: argparse.Namespace) -> dict[str, Any]:
         print(json.dumps(summary, indent=2, sort_keys=True))
         return summary
     topic_expectations = (
-        P5_TOPIC_EXPECTATIONS
-        if p5_runtime_phase
+        P5_DISABLED_TOPIC_EXPECTATIONS
+        if p5_disabled_phase
         else (
-            P0_4_TOPIC_EXPECTATIONS
-            if p0_4_phase
-            else (P0_TOPIC_EXPECTATIONS if p0_phase else CORE_TOPIC_EXPECTATIONS)
+            P5_TOPIC_EXPECTATIONS
+            if p5_runtime_phase
+            else (
+                P0_4_TOPIC_EXPECTATIONS
+                if p0_4_phase
+                else (P0_TOPIC_EXPECTATIONS if p0_phase else CORE_TOPIC_EXPECTATIONS)
+            )
         )
     )
     topic_activity_topics = (
         P5_TOPIC_ACTIVITY_TOPICS
-        if p5_runtime_phase
+        if p5_runtime_phase or p5_disabled_phase
         else (P0_TOPIC_ACTIVITY_TOPICS if p0_phase else TOPIC_ACTIVITY_TOPICS)
     )
 
@@ -10682,6 +11095,8 @@ def analyze(args: argparse.Namespace) -> dict[str, Any]:
             inconclusive,
             experiment_label=experiment_label,
         )
+    elif p5_disabled_phase:
+        pass
     else:
         validate_manifest(
             manifest,
@@ -10831,7 +11246,9 @@ def analyze(args: argparse.Namespace) -> dict[str, Any]:
             failures,
             inconclusive,
             allow_high_unknown=p0_4_phase,
-            allow_explainable_startup_unavailable=p0_4_phase or p5_runtime_phase,
+            allow_explainable_startup_unavailable=(
+                p0_4_phase or p5_runtime_phase or p5_disabled_phase
+            ),
         )
         p0_4_semantics: dict[str, Any] = {}
         if p0_4_phase:
@@ -11034,6 +11451,8 @@ def analyze(args: argparse.Namespace) -> dict[str, Any]:
             ]
         elif p5_7_phase:
             health_figure_path = p5_7_figure_paths["p5_7_p0_health.png"]
+        elif p5_8_phase:
+            health_figure_path = p5_8_figure_paths["p5_8_p0_health.png"]
         else:
             health_figure_path = figures_dir / f"{prefix}_p0_health_timeline.png"
         reason_figure_path = figures_dir / f"{prefix}_p0_reason_histogram.png"
@@ -11240,9 +11659,13 @@ def analyze(args: argparse.Namespace) -> dict[str, Any]:
                     p5_7_figure_paths["p5_7_scenario_topdown.png"]
                     if p5_7_phase
                     else (
-                        p5_6_figure_paths["p5_6_scenario_topdown.png"]
-                        if p5_6_phase
-                        else figures_dir / f"{prefix}_scenario_topdown.png"
+                        p5_8_figure_paths["p5_8_scenario_topdown.png"]
+                        if p5_8_phase
+                        else (
+                            p5_6_figure_paths["p5_6_scenario_topdown.png"]
+                            if p5_6_phase
+                            else figures_dir / f"{prefix}_scenario_topdown.png"
+                        )
                     )
                 )
             )
@@ -11258,9 +11681,13 @@ def analyze(args: argparse.Namespace) -> dict[str, Any]:
                 p5_7_figure_paths["p5_7_topic_activity_timeline.png"]
                 if p5_7_phase
                 else (
-                    figures_dir / "p5_6_topic_activity_timeline.png"
-                    if p5_6_phase
-                    else figures_dir / f"{prefix}_topic_activity_timeline.png"
+                    p5_8_figure_paths["p5_8_topic_activity_timeline.png"]
+                    if p5_8_phase
+                    else (
+                        figures_dir / "p5_6_topic_activity_timeline.png"
+                        if p5_6_phase
+                        else figures_dir / f"{prefix}_topic_activity_timeline.png"
+                    )
                 )
             )
         )
@@ -11384,6 +11811,7 @@ def analyze(args: argparse.Namespace) -> dict[str, Any]:
     p5_5_gates: dict[str, Any] = {}
     p5_6_gates: dict[str, Any] = {}
     p5_7_gates: dict[str, Any] = {}
+    p5_8_gates: dict[str, Any] = {}
     p5_3_overlap: list[dict[str, Any]] = []
     p5_3_samples: list[dict[str, Any]] = []
     p5_3_event_window_rows: list[dict[str, Any]] = []
@@ -11400,6 +11828,8 @@ def analyze(args: argparse.Namespace) -> dict[str, Any]:
     p5_7_bspline_rows: list[dict[str, Any]] = []
     p5_7_bspline_error = ""
     p5_7_publish_rows: list[dict[str, Any]] = []
+    p5_8_bspline_rows: list[dict[str, Any]] = []
+    p5_8_bspline_error = ""
     p5_csv_artifacts: list[str] = []
     p5_figure_artifacts: list[str] = []
     p5_required_figures: list[Path] = []
@@ -11580,6 +12010,28 @@ def analyze(args: argparse.Namespace) -> dict[str, Any]:
         p5_7_publish_rows = build_p5_7_bspline_publish_rows(
             p5_rows,
             p5_7_bspline_rows,
+        )
+    if p5_8_phase:
+        p5_8_bspline_rows, p5_8_bspline_error = (
+            read_bspline_messages(bag_dir, metadata)
+            if bag_dir is not None
+            else ([], "missing bag dir")
+        )
+        if p5_8_bspline_error:
+            inconclusive.append(
+                f"could not inspect P5-8 /drone_0_planning/bspline evidence: {p5_8_bspline_error}"
+            )
+        p5_8_gates = validate_p5_8_hard_gates(
+            manifest,
+            validator_summary,
+            topic_health,
+            p0_health_summary,
+            health_rows,
+            p5_summary,
+            p5_8_bspline_rows,
+            p5_8_bspline_error,
+            failures,
+            inconclusive,
         )
 
     csv_artifacts = [str(topic_counts_path)]
@@ -12493,6 +12945,129 @@ def analyze(args: argparse.Namespace) -> dict[str, Any]:
         required_runtime_figures = list(dict.fromkeys(required_runtime_figures))
         p5_required_figures.extend(required_runtime_figures)
 
+    p5_8_figure_artifacts: list[str] = []
+    p5_8_required_figures: list[Path] = []
+    if p5_8_phase:
+        p5_8_disabled_topic_path = csv_dir / "p5_8_p5_disabled_topic_summary.csv"
+        p5_8_bspline_path = csv_dir / "p5_8_bspline_publish_timeline.csv"
+        p5_8_manifest_path = csv_dir / "p5_8_manifest_switch_summary.csv"
+        p5_8_validation_path = csv_dir / "p5_8_validation_summary.csv"
+        p5_8_cause_path = csv_dir / "p5_8_cause_exclusion_summary.csv"
+        write_csv(
+            p5_8_disabled_topic_path,
+            ["topic", "count", "status"],
+            [
+                {
+                    "topic": topic,
+                    "count": int((topic_health.get(topic) or {}).get("count", 0) or 0),
+                    "status": (topic_health.get(topic) or {}).get("status", "MISSING"),
+                }
+                for topic in (P5_STATUS_TOPIC, *P5_RVIZ_TOPICS)
+            ],
+        )
+        write_csv(
+            p5_8_bspline_path,
+            [
+                "bag_time_s",
+                "traj_id",
+                "start_time_s",
+                "duration_s",
+                "order",
+                "pos_pts_count",
+                "knots_count",
+            ],
+            p5_8_bspline_rows,
+        )
+        write_csv(
+            p5_8_manifest_path,
+            ["gate", "passed"],
+            [
+                {"gate": key, "passed": int(bool(p5_8_gates.get(key)))}
+                for key in (
+                    "manifest_safety_profile_p5",
+                    "manifest_p0_enabled",
+                    "manifest_p5_runtime_disabled",
+                    "manifest_p5_final_disabled",
+                    "manifest_p1_p4_disabled",
+                )
+            ],
+        )
+        write_csv(
+            p5_8_validation_path,
+            ["gate", "passed"],
+            [
+                {"gate": key, "passed": int(bool(p5_8_gates.get(key)))}
+                for key in (
+                    "validator_passed",
+                    "required_p0_topics_stable",
+                    "bspline_publish_present",
+                    "p0_post_startup_ready",
+                    "p0_post_startup_non_stale",
+                    "p0_post_startup_not_full_unknown",
+                    "p5_disabled_topics_zero",
+                )
+            ],
+        )
+        write_csv(
+            p5_8_cause_path,
+            ["cause", "count"],
+            p5_8_cause_exclusion_rows(p5_8_gates),
+        )
+        p5_8_csv_artifacts = [
+            str(p5_8_disabled_topic_path),
+            str(p5_8_bspline_path),
+            str(p5_8_manifest_path),
+            str(p5_8_validation_path),
+            str(p5_8_cause_path),
+        ]
+        csv_artifacts.extend(
+            artifact for artifact in p5_8_csv_artifacts if artifact not in csv_artifacts
+        )
+
+        if plot_p5_8_disabled_topic_summary(
+            topic_health,
+            p5_summary,
+            p5_8_figure_paths["p5_8_p5_disabled_topic_summary.png"],
+        ):
+            p5_8_figure_artifacts.append(
+                str(p5_8_figure_paths["p5_8_p5_disabled_topic_summary.png"])
+            )
+        if plot_p5_8_bspline_publish_timeline(
+            p5_8_bspline_rows,
+            topic_health,
+            p5_8_figure_paths["p5_8_bspline_publish_timeline.png"],
+        ):
+            p5_8_figure_artifacts.append(
+                str(p5_8_figure_paths["p5_8_bspline_publish_timeline.png"])
+            )
+        if plot_p5_8_manifest_switch_summary(
+            manifest,
+            p5_8_gates,
+            p5_8_figure_paths["p5_8_manifest_switch_summary.png"],
+        ):
+            p5_8_figure_artifacts.append(
+                str(p5_8_figure_paths["p5_8_manifest_switch_summary.png"])
+            )
+        if plot_p5_8_validation_summary(
+            validator_summary,
+            integrity_summary,
+            p5_8_gates,
+            p5_8_figure_paths["p5_8_validation_summary.png"],
+        ):
+            p5_8_figure_artifacts.append(
+                str(p5_8_figure_paths["p5_8_validation_summary.png"])
+            )
+        if plot_p5_8_cause_exclusion_summary(
+            p5_8_gates,
+            p5_8_figure_paths["p5_8_cause_exclusion_summary.png"],
+        ):
+            p5_8_figure_artifacts.append(
+                str(p5_8_figure_paths["p5_8_cause_exclusion_summary.png"])
+            )
+        p5_8_required_figures = [
+            p5_8_figure_paths[name] for name in P5_8_FIGURE_FILENAMES
+        ]
+
     if is_experiment(args, "B0-4"):
         required_figures = [
             scenario_figure_path,
@@ -12565,6 +13140,16 @@ def analyze(args: argparse.Namespace) -> dict[str, Any]:
                     inconclusive.append(
                         f"{experiment_label} required figure was not generated or is empty: {figure_path}"
                     )
+    if p5_8_phase:
+        figures.extend(
+            artifact for artifact in p5_8_figure_artifacts if artifact not in figures
+        )
+        for figure_path in p5_8_required_figures:
+            if not figure_path.is_file() or figure_path.stat().st_size <= 0:
+                failures.append(
+                    "P5-8 required figure missing: "
+                    f"{figure_path.name}; missing disabled-switch evidence prevents P5-8 acceptance"
+                )
 
     status = "PASS"
     if p5_7_phase and bool(p5_7_gates.get("blocked_scenario_missing")):
@@ -12609,7 +13194,9 @@ def analyze(args: argparse.Namespace) -> dict[str, Any]:
             "p5_5_hard_gates": p5_5_gates,
             "p5_6_hard_gates": p5_6_gates,
             "p5_7_hard_gates": p5_7_gates,
+            "p5_8_hard_gates": p5_8_gates,
             "p5_7_bspline_error": p5_7_bspline_error,
+            "p5_8_bspline_error": p5_8_bspline_error,
             "marker_evidence": p5_marker_summary,
             "p5_5_integrity_stamp_error": p5_5_integrity_error,
         },

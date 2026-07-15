@@ -4333,3 +4333,93 @@ Verification notes:
 Final conclusion:
 
 PASS -> P5-8
+
+### P5-8 P5 Disabled No Effect
+
+Code change under test:
+
+| Change | Result |
+|---|---|
+| Analyzer P5-8 gate | `PASS`: added a dedicated disabled-switch gate requiring `planner_safety_profile=p5`, P0 enabled, P5 runtime/final disabled, P1-P4 disabled, live P0/base planner evidence, zero P5 status/RViz counts, and zero P5 replan/emergency/final-gate behavior. |
+| `p5_corridor` preset | `PASS`: experiment preset now explicitly sets `p0.enable_risk_grid=true`, so the exact P5-8 command keeps P0 alive even with both P5 switches disabled. |
+| Vocabulary | `PASS`: `CONTEXT.md` now defines `P5 disabled switch isolation evidence`; no ADR was added. |
+
+GPU precheck:
+
+| Check | Result |
+|---|---|
+| `nvidia-smi` | `PASS`: GPU visible as NVIDIA GeForce RTX 4070, driver `580.126.09`, CUDA `13.0`; no CPU fallback was used. |
+
+Formal launch:
+
+```bash
+source /opt/ros/jazzy/setup.bash
+source /home/dev/ws_iap/install/setup.bash
+ros2 launch iap test_planner.launch.py \
+  experiment:=p5_corridor \
+  planner_enable_p5_runtime:=false \
+  planner_enable_p5_final:=false \
+  run_duration_s:=60 \
+  validation_duration_s:=60 \
+  start_rviz:=false \
+  run_validator:=true \
+  record_bag:=true
+```
+
+Analyzer:
+
+```bash
+cd /home/dev/ws_iap/src/iap
+python3 scripts/dev_planner/analyze_safety_planner_run.py \
+  --experiment-id P5-8 \
+  --export-dir /home/dev/ws_iap/src/iap/results/planner_validation/exports/test_planner_p5_corridor_lidar_corridor_degenerate_1784124177630 \
+  --bag-dir /home/dev/ws_iap/src/iap/results/planner_validation/bags/test_planner_p5_corridor_lidar_corridor_degenerate_20260715T140257Z \
+  --fail-on-threshold
+```
+
+Fresh artifacts:
+
+| Artifact | Path |
+|---|---|
+| Export | `/home/dev/ws_iap/src/iap/results/planner_validation/exports/test_planner_p5_corridor_lidar_corridor_degenerate_1784124177630` |
+| Bag | `/home/dev/ws_iap/src/iap/results/planner_validation/bags/test_planner_p5_corridor_lidar_corridor_degenerate_20260715T140257Z` |
+| Analyzer summary | `/home/dev/ws_iap/src/iap/results/planner_validation/exports/test_planner_p5_corridor_lidar_corridor_degenerate_1784124177630/metadata/safety_planner_analysis_summary.json` |
+| Analyzer status | `PASS`: analyzer exit `0`, `passed=true`, `status=PASS`, `next_debug_branch=PASS -> Phase 3 / P1-1`, `failures=[]`, `inconclusive=[]`. |
+| Launch status | `PASS`: launch returned `0`; validator printed `ARAIM validation PASSED`. Shutdown-time SIGINT cleanup aborts appeared in helper visualization/bridge nodes after evidence capture and did not affect analyzer gates. |
+
+P5-8 gate table:
+
+| Gate | Result |
+|---|---|
+| Manifest switch isolation | `PASS`: `planner_safety_profile=p5`, `p0.enable_risk_grid=true`, `planner_enable_p5_runtime=false`, `planner_enable_p5_final=false`, and P1-P4 switches were all false. |
+| Validator | `PASS`: validator summary `passed=true`, `message_count=584`, `lidar_valid_seen=true`, `fallback_valid_seen=true`, `required_fusion_mode=lidar_only`, and `required_final_source=LIDAR`. |
+| Base/P0 topics | `PASS`: `/iap/integrity=585`, `/sim/drone_0/lidar_body=596`, `/drone_0_visual_slam/odom=585`, `/planning/risk_grid_health=45`, P0 PL/validity cloud topics `42` each. |
+| P0 health evidence | `PASS`: `startup_snapshot_unavailable_rows=3`, `post_startup_rows=42`, and post-startup ready/non-stale/not-full-unknown gates were all true. |
+| Planner output | `PASS`: `/drone_0_planning/bspline=17`; message inspection found `17` bspline publish rows. |
+| P5 status/RViz absent | `PASS`: `/planning/integrity_gate_status=0`, `/iap/rviz/trajectory_integrity_samples=0`, `/iap/rviz/current_traj_integrity_colored=0`, `/iap/rviz/p5_gate_status=0`, `/iap/rviz/p5_current_im_bars=0`. |
+| P5 action/final-gate leakage | `PASS`: `p5_status_rows=0`, `p5_replan_action_count=0`, `p5_emergency_action_count=0`, `p5_final_gate_fail_rows=0`, `p5_final_gate_fail_count_max=0`. |
+
+Required P5-8 figure conclusions:
+
+| Figure filename | Conclusion |
+|---|---|
+| `p5_8_scenario_topdown.png` | Generated; shows the corridor scenario context for the disabled-switch run. |
+| `p5_8_topic_activity_timeline.png` | Generated; shows active integrity/LiDAR/odom/P0/bspline channels and absent P5 status/RViz event rows. |
+| `p5_8_p0_health.png` | Generated; confirms P0 transitions from bounded startup unavailable rows into ready, non-stale, non-full-unknown health. |
+| `p5_8_p5_disabled_topic_summary.png` | Generated; confirms all P5 status/RViz topic counts are zero and no P5 action/final-gate rows exist. |
+| `p5_8_bspline_publish_timeline.png` | Generated; confirms the base planner continued publishing bsplines with P5 disabled. |
+| `p5_8_manifest_switch_summary.png` | Generated; summarizes the manifest switch isolation state. |
+| `p5_8_validation_summary.png` | Generated; summarizes validator, P0 health, topic, and bspline gates. |
+| `p5_8_cause_exclusion_summary.png` | Generated; all P5 leakage/cause counts are zero. |
+
+Verification notes:
+
+| Check | Result |
+|---|---|
+| Python compile check | `PASS`: `python3 -m py_compile launch/test_planner.launch.py scripts/dev_planner/analyze_safety_planner_run.py`. |
+| Focused analyzer tests | `PASS`: `python3 test/test_analyze_safety_planner_run_p5_1.py` ran `111` tests. |
+| Workspace `iap` build | `PASS`: `colcon build --packages-select iap --event-handlers console_direct+`. |
+
+Final conclusion:
+
+PASS -> Phase 3 / P1-1

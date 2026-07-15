@@ -404,6 +404,7 @@ EXPERIMENT_PRESETS = {
     "p5_corridor": {
         "scenario": "lidar_corridor_degenerate",
         "planner_safety_profile": "p5",
+        "p0.enable_risk_grid": "true",
         "p0.debug_metrics_enable": "true",
         "p5.debug_metrics_enable": "true",
     },

@@ -746,6 +746,75 @@ def p5_7_manifest(enabled=True, effective_enabled=True):
     return manifest
 
 
+def p5_8_manifest():
+    manifest = p5_manifest()
+    manifest.update(
+        {
+            "planner_enable_p5_runtime": False,
+            "planner_enable_p5_final": False,
+            "p5_3.fixture.enabled": False,
+            "p5_4.fixture.enabled": False,
+            "p5_5.fixture.enabled": False,
+            "p5_6.fixture.enabled": False,
+            "p5_6.fixture.effective_enabled": False,
+            "p5_7.fixture.enabled": True,
+            "p5_7.fixture.effective_enabled": False,
+        }
+    )
+    return manifest
+
+
+def p5_8_topic_health(**count_overrides):
+    counts = {
+        "/iap/integrity": 60,
+        "/sim/drone_0/lidar_body": 60,
+        "/drone_0_visual_slam/odom": 60,
+        "/drone_0_planning/bspline": 4,
+        analyzer.P0_HEALTH_TOPIC: 50,
+        analyzer.P0_PL_CLOUD_TOPIC: 50,
+        analyzer.P0_VALIDITY_CLOUD_TOPIC: 50,
+        analyzer.P5_STATUS_TOPIC: 0,
+        analyzer.P5_TRAJECTORY_SAMPLES_TOPIC: 0,
+        analyzer.P5_CURRENT_TRAJ_TOPIC: 0,
+        analyzer.P5_GATE_STATUS_TOPIC: 0,
+        analyzer.P5_CURRENT_IM_BARS_TOPIC: 0,
+    }
+    counts.update(count_overrides)
+    return {
+        topic: {
+            "expected": analyzer.P5_DISABLED_TOPIC_EXPECTATIONS.get(topic, "present"),
+            "count": count,
+            "status": "PASS" if (
+                (
+                    analyzer.P5_DISABLED_TOPIC_EXPECTATIONS.get(topic)
+                    == "absent-or-zero"
+                    and count == 0
+                )
+                or (
+                    analyzer.P5_DISABLED_TOPIC_EXPECTATIONS.get(topic)
+                    != "absent-or-zero"
+                    and count > 0
+                )
+            ) else "FAIL",
+        }
+        for topic, count in counts.items()
+    }
+
+
+def bspline_rows():
+    return [
+        {
+            "bag_time_s": 10.0,
+            "traj_id": 1,
+            "start_time_s": 10.0,
+            "duration_s": 3.0,
+            "order": 3,
+            "pos_pts_count": 8,
+            "knots_count": 12,
+        }
+    ]
+
+
 def p5_7_rejected_sample(**overrides):
     row = p5_3_sample(
         tau_s=0.8,
@@ -2945,6 +3014,146 @@ class P5_7AnalyzerTest(unittest.TestCase):
                 "p5_7_trajectory_integrity_samples.png",
             ],
             analyzer.P5_7_FIGURE_FILENAMES,
+        )
+
+
+class P5_8AnalyzerTest(unittest.TestCase):
+    def validate_rows(
+        self,
+        rows=None,
+        manifest=None,
+        p0_rows=None,
+        topic_health=None,
+        validator_summary=None,
+        bspline=None,
+        bspline_error="",
+    ):
+        status_rows = rows if rows is not None else []
+        p0_health_rows = p0_rows if p0_rows is not None else bounded_startup_p0_rows()
+        p5_summary = analyzer.summarize_p5_status_rows(status_rows)
+        failures = []
+        inconclusive = []
+        gates = analyzer.validate_p5_8_hard_gates(
+            manifest if manifest is not None else p5_8_manifest(),
+            validator_summary if validator_summary is not None else {"passed": True},
+            topic_health if topic_health is not None else p5_8_topic_health(),
+            analyzer.summarize_p0_health(p0_health_rows),
+            p0_health_rows,
+            p5_summary,
+            bspline if bspline is not None else bspline_rows(),
+            bspline_error,
+            failures,
+            inconclusive,
+        )
+        return p5_summary, gates, failures, inconclusive
+
+    def test_p5_8_passes_with_p0_alive_and_p5_channels_zero(self):
+        _, gates, failures, inconclusive = self.validate_rows()
+
+        self.assertEqual([], failures)
+        self.assertEqual([], inconclusive)
+        self.assertTrue(gates["passed"])
+        self.assertTrue(gates["manifest_p5_runtime_disabled"])
+        self.assertTrue(gates["manifest_p5_final_disabled"])
+        self.assertTrue(gates["p5_disabled_topics_zero"])
+        self.assertTrue(gates["p5_status_rows_zero"])
+        self.assertTrue(gates["bspline_publish_present"])
+        self.assertTrue(gates["p0_post_startup_ready"])
+        self.assertTrue(gates["p0_post_startup_non_stale"])
+        self.assertTrue(gates["p0_post_startup_not_full_unknown"])
+
+    def test_p5_8_fails_when_manifest_keeps_p5_enabled_or_p0_disabled(self):
+        manifest = p5_8_manifest()
+        manifest["planner_enable_p5_runtime"] = True
+        manifest["p0.enable_risk_grid"] = False
+
+        _, gates, failures, _ = self.validate_rows(manifest=manifest)
+
+        self.assertFalse(gates["passed"])
+        self.assertFalse(gates["manifest_p5_runtime_disabled"])
+        self.assertFalse(gates["manifest_p0_enabled"])
+        self.assertTrue(any("manifest must record" in failure for failure in failures), failures)
+
+    def test_p5_8_fails_when_p5_status_or_rviz_topics_publish(self):
+        topic_health = p5_8_topic_health(
+            **{
+                analyzer.P5_STATUS_TOPIC: 2,
+                analyzer.P5_GATE_STATUS_TOPIC: 1,
+            }
+        )
+
+        _, gates, failures, _ = self.validate_rows(topic_health=topic_health)
+
+        self.assertFalse(gates["passed"])
+        self.assertFalse(gates["p5_disabled_topics_zero"])
+        self.assertEqual(2, gates["p5_disabled_topic_counts"][analyzer.P5_STATUS_TOPIC])
+        self.assertTrue(any("P5 status/RViz topics" in failure for failure in failures), failures)
+
+    def test_p5_8_fails_on_p5_replan_emergency_or_final_gate_behavior(self):
+        rows = [
+            p5_row(
+                action="REQUEST_REPLAN",
+                raw_action="REQUEST_EMERGENCY_STOP_CANDIDATE",
+                final_gate_fail_count=1,
+                final_gate_fail_duration_s=0.1,
+            )
+        ]
+
+        _, gates, failures, _ = self.validate_rows(rows=rows)
+
+        self.assertFalse(gates["passed"])
+        self.assertFalse(gates["p5_status_rows_zero"])
+        self.assertFalse(gates["p5_no_replan"])
+        self.assertFalse(gates["p5_no_emergency"])
+        self.assertFalse(gates["p5_no_final_gate_failure"])
+        self.assertTrue(any("replan behavior" in failure for failure in failures), failures)
+        self.assertTrue(any("emergency behavior" in failure for failure in failures), failures)
+        self.assertTrue(any("final-gate failure" in failure for failure in failures), failures)
+
+    def test_p5_8_fails_on_post_startup_full_unknown_p0(self):
+        rows = bounded_startup_p0_rows()
+        rows[-1] = p0_health_row(
+            99,
+            ready=True,
+            stale=False,
+            valid_ratio=0.0,
+            unknown_ratio=1.0,
+            reason="fallback_unknown",
+        )
+
+        _, gates, failures, _ = self.validate_rows(p0_rows=rows)
+
+        self.assertFalse(gates["passed"])
+        self.assertFalse(gates["p0_post_startup_not_full_unknown"])
+        self.assertTrue(any("full-frame unknown" in failure for failure in failures), failures)
+
+    def test_p5_8_next_branch_is_exact(self):
+        self.assertEqual(
+            analyzer.P5_8_PASS_BRANCH,
+            analyzer.next_debug_branch("PASS", [], [], "P5-8"),
+        )
+        self.assertEqual(
+            analyzer.P5_8_FAIL_BRANCH,
+            analyzer.next_debug_branch("FAIL", ["P5-8 evidence failed"], [], "P5-8"),
+        )
+        self.assertEqual(
+            analyzer.P5_8_FAIL_BRANCH,
+            analyzer.next_debug_branch("INCONCLUSIVE", [], ["missing"], "P5-8"),
+        )
+
+    def test_p5_8_required_figure_filenames_are_exact(self):
+        self.assertEqual(
+            [
+                "p5_8_scenario_topdown.png",
+                "p5_8_topic_activity_timeline.png",
+                "p5_8_p0_health.png",
+                "p5_8_p5_disabled_topic_summary.png",
+                "p5_8_bspline_publish_timeline.png",
+                "p5_8_manifest_switch_summary.png",
+                "p5_8_validation_summary.png",
+                "p5_8_cause_exclusion_summary.png",
+            ],
+            analyzer.P5_8_FIGURE_FILENAMES,
         )
 
 

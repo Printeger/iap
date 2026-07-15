@@ -96,6 +96,10 @@ _Avoid_: runtime-committed trajectory contamination, P5-3/P5-4/P5-5/P5-6 fixture
 Status, sample, and bspline evidence tying a rejected final candidate to `traj_id`/`start_time`, final-gate failure counters, final-candidate sample diagnostics inside the fixture, and absence of a matching committed bspline publish.
 _Avoid_: action count alone, rejected sample with no candidate identity, missing publish topic inspection
 
+**P5 disabled switch isolation evidence**:
+Evidence that a `planner_safety_profile=p5` run keeps P0 RiskGridMap and the base planner alive while `planner_enable_p5_runtime=false` and `planner_enable_p5_final=false` leave P5 status, RViz, replan, emergency, and final-gate channels absent or zero-count.
+_Avoid_: treating missing P0 health as successful isolation, accepting P5-disabled runs with P5 status leakage, CPU fallback substitutions for GPU launch failures
+
 **Causal replan evidence**:
 Analyzer/status evidence that a `REQUEST_REPLAN` action and the future-risk gate/reason that caused it are both traceable in the same P5 run, including concurrent current and future reasons when both gates are active.
 _Avoid_: action count without gate reason, margin evidence with no replan attribution
