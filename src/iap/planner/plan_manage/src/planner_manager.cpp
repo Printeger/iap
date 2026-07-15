@@ -3,6 +3,7 @@
 #include <ego_planner/p0_risk_grid_runtime.h>
 #include <ego_planner/p5_runtime_integrity_gate.h>
 #include <ego_planner/safety_rviz_publisher.h>
+#include <iap/planner/risk_grid_map.hpp>
 #include <limits>
 #include <thread>
 #include <utility>
@@ -245,6 +246,11 @@ namespace ego_planner
     {
       planning_risk_context_.generation_id =
           planning_risk_context_.snapshot->generation_id();
+      const double snapshot_stamp_s = planning_risk_context_.snapshot->stamp_s();
+      if (std::isfinite(snapshot_stamp_s))
+      {
+        planning_risk_context_.query_base_time_s = snapshot_stamp_s;
+      }
     }
 
     cout << "[RiskContext] planning_generation_id="
@@ -725,7 +731,21 @@ namespace ego_planner
     t_refine = rclcpp::Clock().now() - t_start;
 
     // save planned results
-    updateTrajInfo(pos, plannerNow());
+    const auto accepted_time = plannerNow();
+    bspline_optimizer_->setRiskSnapshot(planning_snapshot, planning_query_base_time_s);
+    const bool p1_profile_written =
+        bspline_optimizer_->writeP1AcceptedTrajectoryRiskProfile(
+            pos, ++p1_accepted_profile_seq_, local_data_.traj_id_ + 1,
+            accepted_time.seconds());
+    bspline_optimizer_->clearRiskSnapshot();
+    if (p1_profile_written)
+    {
+      cout << "[P1] accepted_trajectory_risk_profile="
+           << bspline_optimizer_->p1AcceptedTrajectoryRiskProfilePath()
+           << ", profile_seq=" << p1_accepted_profile_seq_
+           << ", trajectory_id=" << (local_data_.traj_id_ + 1) << endl;
+    }
+    updateTrajInfo(pos, accepted_time);
 
     static double sum_time = 0;
     static int count_success = 0;

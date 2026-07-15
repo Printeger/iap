@@ -3,6 +3,13 @@
 > 规则：任何代码改动必须在这里记录，并包含 IAP-RQ-XXX。
 
 ## Unreleased
+- fix(planner-p1-risk-profile-evidence): IAP-RQ-320 / IAP-RQ-400 / IAP-RQ-410 — make P1-2 risk-reduction evidence use accepted final-trajectory profiles instead of latest RViz cloud coverage.
+  - `bspline_optimizer`: writes `planner_p1_accepted_trajectory_risk_profile.csv` beside the P1 debug CSV with 200 samples from each accepted final bspline, including objective application state, metrics-only state, lambda, snapshot generation, query base time, hit/valid/stale flags, `c_pi`, and miss reason.
+  - `planner_manager`: preserves the planning P0 risk snapshot for the accepted bspline profile, aligns planner risk queries to the snapshot stamp, and logs the accepted profile path/sequence before publishing trajectory info.
+  - `test_planner.launch.py`: records `p1.accepted_profile_path` in the manifest and widens the P1 degraded-LiDAR preset's P0 X extent so fresh P1 final accepted trajectories remain inside the reference risk grid without changing the global P0 map default.
+  - `analyze_safety_planner_run.py`: makes P1-2 compare final `profile_seq` rows from P1-2 and P1-1 accepted-profile CSVs, keeps strict `>=20` and `>=0.5` coverage gates, requires strict mean/max `c_pi` reduction, treats missing/low-coverage profiles as hard failures, and keeps `/iap/rviz/predicted_pl_cloud` as diagnostic overlay evidence only.
+  - Added required `p1_2_risk_sample_coverage_overlay.png`, expanded P1-2 cause exclusions for accepted-profile missing/coverage/reduction failure, and covered the analyzer with focused missing-profile, low-coverage, mean/max-not-reduced, cloud-miss happy-path, and required-figure tests.
+  - Fresh rerun result is archived in `docs/dev_planner/safety_planner_test_report.md`: P1-1 accepted-profile reference passed coverage (`200/200`), but P1-2 final accepted profile had `0/200` finite `c_pi` samples, so P1-2 remains `FAIL -> lambda/gradient debug`.
 - fix(planner-p5-3-query-alignment-proof): IAP-RQ-320 — make P5-3 query-alignment evidence authoritative and fail-closed.
   - `risk_grid_map.cpp`: `queryPredictedPL()` now emits P5-3 fixture diagnostics (`fixture_match`, expected PL, expected reason) from the same snapshot-relative query-time fixture decision that injects `10.2/10.2` PL; fixture interval checks use the existing boundary epsilon so tau-boundary queries cannot fall through to interpolation-only evidence.
   - `p5_runtime_integrity_gate`: carries the runtime fixture diagnostics into non-decision P5 status `samples` JSON alongside `query_tau_s`.

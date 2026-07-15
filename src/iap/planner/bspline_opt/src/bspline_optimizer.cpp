@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <cmath>
 #include <fstream>
+#include <iomanip>
 #include <limits>
 #include <utility>
 // using namespace std;
@@ -13,12 +14,26 @@ namespace ego_planner
 {
   namespace
   {
+    constexpr int kP1AcceptedProfileSampleCount = 200;
+    constexpr const char *kP1AcceptedProfileCsvName =
+        "planner_p1_accepted_trajectory_risk_profile.csv";
+
     double pathLength(const std::vector<Eigen::Vector3d> &path)
     {
       double length = 0.0;
       for (size_t i = 1; i < path.size(); ++i)
         length += (path[i] - path[i - 1]).norm();
       return length;
+    }
+
+    std::string siblingPath(const std::string &path, const std::string &filename)
+    {
+      const auto slash = path.find_last_of("/\\");
+      if (slash == std::string::npos)
+      {
+        return filename;
+      }
+      return path.substr(0, slash + 1) + filename;
     }
 
     void writeP4Csv(const P4RiskAStarConfig &config,
@@ -2233,6 +2248,100 @@ namespace ego_planner
         << metrics.clipped_grad_count << ','
         << metrics.fallback_reason << ','
         << (metrics.applied_to_objective ? 1 : 0) << '\n';
+  }
+
+  std::string BsplineOptimizer::p1AcceptedTrajectoryRiskProfilePath() const
+  {
+    if (p1_config_.debug_csv_path.empty())
+    {
+      return kP1AcceptedProfileCsvName;
+    }
+    return siblingPath(p1_config_.debug_csv_path, kP1AcceptedProfileCsvName);
+  }
+
+  bool BsplineOptimizer::writeP1AcceptedTrajectoryRiskProfile(
+      UniformBspline trajectory,
+      const uint64_t profile_seq,
+      const uint64_t trajectory_id,
+      const double stamp_s) const
+  {
+    if (!p1_config_.debug_csv_enable || p1_config_.debug_csv_path.empty() ||
+        !risk_snapshot_)
+    {
+      return false;
+    }
+
+    const double duration = trajectory.getTimeSum();
+    if (!std::isfinite(duration) || duration < 0.0)
+    {
+      return false;
+    }
+
+    const std::string profile_path = p1AcceptedTrajectoryRiskProfilePath();
+    std::ifstream existing(profile_path);
+    const bool write_header =
+        !existing.good() || existing.peek() == std::ifstream::traits_type::eof();
+    existing.close();
+
+    std::ofstream out(profile_path, std::ios::app);
+    if (!out.good())
+    {
+      return false;
+    }
+    out << std::setprecision(17);
+    if (write_header)
+    {
+      out << "profile_seq,stamp,trajectory_id,applied_to_objective,metrics_only,"
+             "lambda_integrity,snapshot_generation_id,query_base_time_s,"
+             "sample_index,arc_fraction,t_s,x,y,z,hit,valid,stale,c_pi,reason\n";
+    }
+
+    const bool applied_to_objective =
+        p1_config_.use_integrity_cost && !p1_config_.metrics_only &&
+        p1_config_.lambda_integrity != 0.0;
+    const int denom = std::max(1, kP1AcceptedProfileSampleCount - 1);
+    for (int sample_index = 0; sample_index < kP1AcceptedProfileSampleCount;
+         ++sample_index)
+    {
+      const double arc_fraction =
+          static_cast<double>(sample_index) / static_cast<double>(denom);
+      const double t_s = duration * arc_fraction;
+      const Eigen::Vector3d p = trajectory.evaluateDeBoorT(t_s);
+      iap::RiskCostSample sample;
+      const bool hit =
+          risk_snapshot_->queryCost(p, risk_query_base_time_s_ + t_s, &sample);
+      const bool c_pi_finite =
+          hit && sample.valid && !sample.stale && std::isfinite(sample.cost);
+      std::string reason = sample.reason.empty() ? "query_miss" : sample.reason;
+      if (!hit && reason == "not_evaluated")
+      {
+        reason = "query_miss";
+      }
+
+      out << profile_seq << ','
+          << stamp_s << ','
+          << trajectory_id << ','
+          << (applied_to_objective ? 1 : 0) << ','
+          << (p1_config_.metrics_only ? 1 : 0) << ','
+          << p1_config_.lambda_integrity << ','
+          << risk_snapshot_->generation_id() << ','
+          << risk_query_base_time_s_ << ','
+          << sample_index << ','
+          << arc_fraction << ','
+          << t_s << ','
+          << p.x() << ','
+          << p.y() << ','
+          << p.z() << ','
+          << (hit ? 1 : 0) << ','
+          << (sample.valid ? 1 : 0) << ','
+          << (sample.stale ? 1 : 0) << ',';
+      if (c_pi_finite)
+      {
+        out << sample.cost;
+      }
+      out << ',' << reason << '\n';
+    }
+    return true;
   }
 
   bool BsplineOptimizer::evaluateReboundCostForTest(const Eigen::MatrixXd &control_points,

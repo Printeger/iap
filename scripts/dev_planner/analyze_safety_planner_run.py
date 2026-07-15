@@ -178,6 +178,7 @@ P1_2_MAX_TORTUOSITY = 3.0
 P1_1_TRAJECTORY_RMS_THRESHOLD_M = 0.5
 P1_1_TRAJECTORY_MAX_THRESHOLD_M = 1.5
 P1_1_DEBUG_CSV_NAME = "planner_p1_integrity_cost_debug.csv"
+P1_ACCEPTED_PROFILE_CSV_NAME = "planner_p1_accepted_trajectory_risk_profile.csv"
 P1_1_FIGURE_FILENAMES = [
     "p1_1_scenario_topdown.png",
     "p1_1_topic_activity_timeline.png",
@@ -197,6 +198,7 @@ P1_2_FIGURE_FILENAMES = [
     "p1_2_p1_objective_timeline.png",
     "p1_2_integrity_cost_debug_summary.png",
     "p1_2_risk_profile_vs_p1_1.png",
+    "p1_2_risk_sample_coverage_overlay.png",
     "p1_2_trajectory_overlay_vs_p1_1.png",
     "p1_2_bspline_publish_timeline.png",
     "p1_2_manifest_switch_summary.png",
@@ -515,6 +517,27 @@ P1_DEBUG_FIELDS = [
     "clipped_grad_count",
     "fallback_reason",
     "applied_to_objective",
+]
+P1_ACCEPTED_PROFILE_FIELDS = [
+    "profile_seq",
+    "stamp",
+    "trajectory_id",
+    "applied_to_objective",
+    "metrics_only",
+    "lambda_integrity",
+    "snapshot_generation_id",
+    "query_base_time_s",
+    "sample_index",
+    "arc_fraction",
+    "t_s",
+    "x",
+    "y",
+    "z",
+    "hit",
+    "valid",
+    "stale",
+    "c_pi",
+    "reason",
 ]
 P1_DEBUG_FINITE_FIELDS = [
     "f_integrity",
@@ -1694,6 +1717,58 @@ def trajectory_risk_profile(
     return summary
 
 
+def p1_cloud_plot_context(
+    cloud_rows: list[dict[str, Any]],
+    *,
+    max_points: int = 2500,
+) -> dict[str, Any]:
+    valid_points = [
+        (
+            finite_float(row.get("x")),
+            finite_float(row.get("y")),
+            finite_float(row.get("z")),
+            finite_float(row.get("c_pi")),
+            finite_float(row.get("pl")),
+        )
+        for row in cloud_rows
+        if row_flag(row, "valid")
+    ]
+    valid_points = [
+        point
+        for point in valid_points
+        if point[0] is not None and point[1] is not None and point[2] is not None
+    ]
+    if not valid_points:
+        return {"valid_point_count": 0, "bounds": {}, "points": []}
+    xyz = np.asarray([[point[0], point[1], point[2]] for point in valid_points], dtype=float)
+    if len(valid_points) > max_points:
+        indices = np.linspace(0, len(valid_points) - 1, max_points, dtype=int)
+        plotted = [valid_points[int(index)] for index in indices]
+    else:
+        plotted = valid_points
+    return {
+        "valid_point_count": len(valid_points),
+        "bounds": {
+            "x_min": float(np.min(xyz[:, 0])),
+            "x_max": float(np.max(xyz[:, 0])),
+            "y_min": float(np.min(xyz[:, 1])),
+            "y_max": float(np.max(xyz[:, 1])),
+            "z_min": float(np.min(xyz[:, 2])),
+            "z_max": float(np.max(xyz[:, 2])),
+        },
+        "points": [
+            {
+                "x": float(point[0]),
+                "y": float(point[1]),
+                "z": float(point[2]),
+                "c_pi": "" if point[3] is None else float(point[3]),
+                "pl": "" if point[4] is None else float(point[4]),
+            }
+            for point in plotted
+        ],
+    }
+
+
 def compare_p1_2_risk_profiles(
     p1_2_rows: list[dict[str, Any]],
     p1_1_rows: list[dict[str, Any]],
@@ -1701,30 +1776,50 @@ def compare_p1_2_risk_profiles(
     p1_1_cloud_rows: list[dict[str, Any]],
     *,
     p0_resolution_m: float,
+    p1_2_accepted_profile_rows: list[dict[str, Any]] | None = None,
+    p1_1_accepted_profile_rows: list[dict[str, Any]] | None = None,
+    p1_2_accepted_profile_summary: dict[str, Any] | None = None,
+    p1_1_accepted_profile_summary: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     p1_2_path = final_nonempty_bspline_path_xyz(p1_2_rows)
     p1_1_path = final_nonempty_bspline_path_xyz(p1_1_rows)
-    p1_2_profile = trajectory_risk_profile(
+    p1_2_cloud_profile = trajectory_risk_profile(
         p1_2_path,
         p1_2_cloud_rows,
         p0_resolution_m=p0_resolution_m,
     )
-    p1_1_profile = trajectory_risk_profile(
+    p1_1_cloud_profile = trajectory_risk_profile(
         p1_1_path,
         p1_1_cloud_rows,
         p0_resolution_m=p0_resolution_m,
     )
+    p1_2_profile = (
+        dict(p1_2_accepted_profile_summary)
+        if p1_2_accepted_profile_summary is not None
+        else summarize_p1_accepted_profile_rows(
+            [] if p1_2_accepted_profile_rows is None else p1_2_accepted_profile_rows,
+            missing=p1_2_accepted_profile_rows is None,
+        )
+    )
+    p1_1_profile = (
+        dict(p1_1_accepted_profile_summary)
+        if p1_1_accepted_profile_summary is not None
+        else summarize_p1_accepted_profile_rows(
+            [] if p1_1_accepted_profile_rows is None else p1_1_accepted_profile_rows,
+            missing=p1_1_accepted_profile_rows is None,
+        )
+    )
     stability = path_stability_metrics(p1_2_path, p1_1_path)
-    comparison_metric = None
-    for metric in ("c_pi", "pl"):
+    comparison_metric = (
+        "c_pi"
         if (
-            p1_2_profile.get(f"{metric}_mean") is not None
-            and p1_2_profile.get(f"{metric}_max") is not None
-            and p1_1_profile.get(f"{metric}_mean") is not None
-            and p1_1_profile.get(f"{metric}_max") is not None
-        ):
-            comparison_metric = metric
-            break
+            p1_2_profile.get("c_pi_mean") is not None
+            and p1_2_profile.get("c_pi_max") is not None
+            and p1_1_profile.get("c_pi_mean") is not None
+            and p1_1_profile.get("c_pi_max") is not None
+        )
+        else None
+    )
     current_mean = (
         finite_float(p1_2_profile.get(f"{comparison_metric}_mean"))
         if comparison_metric
@@ -1776,7 +1871,17 @@ def compare_p1_2_risk_profiles(
         ],
         "p1_2_profile": p1_2_profile,
         "p1_1_profile": p1_1_profile,
+        "p1_2_cloud_diagnostic_profile": p1_2_cloud_profile,
+        "p1_1_cloud_diagnostic_profile": p1_1_cloud_profile,
+        "p1_2_cloud_context": p1_cloud_plot_context(p1_2_cloud_rows),
+        "p1_1_cloud_context": p1_cloud_plot_context(p1_1_cloud_rows),
         "trajectory_stability": stability,
+        "risk_source": "accepted_trajectory_profile_csv",
+        "accepted_profile_missing": bool(
+            p1_2_profile.get("missing") or p1_1_profile.get("missing")
+        ),
+        "current_profile_missing": bool(p1_2_profile.get("missing")),
+        "reference_profile_missing": bool(p1_1_profile.get("missing")),
         "comparison_metric": comparison_metric,
         "current_mean": current_mean,
         "current_max": current_max,
@@ -6046,6 +6151,134 @@ def p1_debug_csv_path(export_dir: Path, manifest: dict[str, Any]) -> Path:
     return export_dir / P1_1_DEBUG_CSV_NAME
 
 
+def p1_accepted_profile_csv_path(export_dir: Path, manifest: dict[str, Any]) -> Path:
+    manifest_path = str(manifest.get("p1.accepted_profile_path", "")).strip() if manifest else ""
+    if manifest_path:
+        path = Path(manifest_path).expanduser()
+        return path if path.is_absolute() else export_dir / path
+    return p1_debug_csv_path(export_dir, manifest).with_name(P1_ACCEPTED_PROFILE_CSV_NAME)
+
+
+def p1_profile_seq_value(row: dict[str, Any]) -> tuple[int, float]:
+    value = finite_float(row.get("profile_seq"))
+    if value is None:
+        return (0, -1.0)
+    return (1, value)
+
+
+def summarize_p1_accepted_profile_rows(
+    rows: list[dict[str, Any]],
+    *,
+    missing: bool = False,
+    path: str = "",
+    read_error: str = "",
+    missing_fields: list[str] | None = None,
+    malformed_row_count: int = 0,
+) -> dict[str, Any]:
+    missing_fields = missing_fields or []
+    selected_rows: list[dict[str, Any]] = []
+    selected_profile_seq: Any = None
+    if rows:
+        selected_key = max(p1_profile_seq_value(row) for row in rows)
+        selected_rows = [row for row in rows if p1_profile_seq_value(row) == selected_key]
+        selected_profile_seq = (
+            selected_key[1] if selected_key[0] == 1 else selected_rows[-1].get("profile_seq", "")
+        )
+    sample_rows: list[dict[str, Any]] = []
+    c_pi_values: list[float] = []
+    parse_error_count = len(missing_fields) + malformed_row_count
+    for row in selected_rows:
+        c_pi = finite_float(row.get("c_pi"))
+        hit_state = explicit_csv_bool(row.get("hit"))
+        valid_state = explicit_csv_bool(row.get("valid"))
+        stale_state = explicit_csv_bool(row.get("stale"))
+        if hit_state is None or valid_state is None or stale_state is None:
+            parse_error_count += 1
+        usable = (
+            hit_state is True
+            and valid_state is True
+            and stale_state is False
+            and c_pi is not None
+        )
+        if usable:
+            c_pi_values.append(float(c_pi))
+        sample_rows.append(
+            {
+                "profile_seq": row.get("profile_seq", ""),
+                "trajectory_id": row.get("trajectory_id", ""),
+                "applied_to_objective": row.get("applied_to_objective", ""),
+                "metrics_only": row.get("metrics_only", ""),
+                "lambda_integrity": row.get("lambda_integrity", ""),
+                "snapshot_generation_id": row.get("snapshot_generation_id", ""),
+                "query_base_time_s": row.get("query_base_time_s", ""),
+                "sample_index": row.get("sample_index", ""),
+                "arc_fraction": row.get("arc_fraction", ""),
+                "t_s": row.get("t_s", ""),
+                "x": row.get("x", ""),
+                "y": row.get("y", ""),
+                "z": row.get("z", ""),
+                "matched": 1 if usable else 0,
+                "hit": 1 if hit_state is True else 0,
+                "valid": 1 if valid_state is True else 0,
+                "stale": 1 if stale_state is True else 0,
+                "c_pi": "" if c_pi is None or not usable else c_pi,
+                "reason": row.get("reason", ""),
+            }
+        )
+    matched_count = len(c_pi_values)
+    sample_count = len(selected_rows)
+    return {
+        "missing": missing,
+        "path": path,
+        "read_error": read_error,
+        "row_count": len(rows),
+        "missing_fields": list(missing_fields),
+        "malformed_row_count": malformed_row_count,
+        "parse_error_count": parse_error_count,
+        "selected_profile_seq": selected_profile_seq,
+        "sample_count": sample_count,
+        "matched_sample_count": matched_count,
+        "match_ratio": ratio(matched_count, sample_count),
+        "c_pi_count": len(c_pi_values),
+        "c_pi_mean": float(np.mean(c_pi_values)) if c_pi_values else None,
+        "c_pi_max": max(c_pi_values) if c_pi_values else None,
+        "samples": sample_rows,
+    }
+
+
+def read_p1_accepted_profile_csv(path: Path) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    if not path.is_file():
+        summary = summarize_p1_accepted_profile_rows(
+            [],
+            missing=True,
+            path=str(path),
+        )
+        return [], summary
+    try:
+        with path.open(newline="") as f:
+            reader = csv.DictReader(f)
+            fieldnames = list(reader.fieldnames or [])
+            rows = list(reader)
+    except Exception as exc:
+        summary = summarize_p1_accepted_profile_rows(
+            [],
+            missing=False,
+            path=str(path),
+            read_error=str(exc),
+        )
+        return [], summary
+    missing_fields = [
+        field for field in P1_ACCEPTED_PROFILE_FIELDS if field not in fieldnames
+    ]
+    summary = summarize_p1_accepted_profile_rows(
+        rows,
+        missing=False,
+        path=str(path),
+        missing_fields=missing_fields,
+    )
+    return rows, summary
+
+
 def summarize_p1_integrity_debug_rows(
     rows: list[dict[str, Any]],
     *,
@@ -6880,8 +7113,32 @@ def p1_2_cause_exclusion_rows(gates: dict[str, Any]) -> list[dict[str, Any]]:
     p5_rviz_count = sum(int(topic_counts.get(topic, 0) or 0) for topic in P5_RVIZ_TOPICS)
     return [
         {
+            "cause": "p0_stale_after_startup",
+            "count": 0 if gates.get("p0_post_startup_non_stale") else 1,
+        },
+        {
+            "cause": "p1_csv_missing",
+            "count": 0 if gates.get("p1_csv_present") else 1,
+        },
+        {
+            "cause": "planner_publish_failure",
+            "count": 0 if gates.get("bspline_publish_present") else 1,
+        },
+        {
             "cause": "objective_not_applied",
             "count": 0 if gates.get("p1_applied_to_objective") else 1,
+        },
+        {
+            "cause": "accepted_profile_missing",
+            "count": 0 if not gates.get("accepted_profile_missing") else 1,
+        },
+        {
+            "cause": "reference_profile_coverage_miss",
+            "count": 0 if gates.get("p1_1_risk_match_ok") else 1,
+        },
+        {
+            "cause": "current_profile_coverage_miss",
+            "count": 0 if gates.get("p1_2_risk_match_ok") else 1,
         },
         {
             "cause": "p5_status_leakage",
@@ -7019,10 +7276,25 @@ def validate_p1_2_hard_gates(
             p1_2_profile.get("matched_sample_count", 0) or 0
         ),
         "p1_2_risk_match_ratio": float(p1_2_profile.get("match_ratio", 0.0) or 0.0),
+        "p1_2_accepted_profile_path": p1_2_profile.get("path", ""),
+        "p1_2_accepted_profile_missing": bool(p1_2_profile.get("missing")),
+        "p1_2_accepted_profile_parse_ok": int(
+            p1_2_profile.get("parse_error_count", 0) or 0
+        )
+        == 0
+        and not bool(p1_2_profile.get("read_error")),
         "p1_1_risk_matched_sample_count": int(
             p1_1_profile.get("matched_sample_count", 0) or 0
         ),
         "p1_1_risk_match_ratio": float(p1_1_profile.get("match_ratio", 0.0) or 0.0),
+        "p1_1_accepted_profile_path": p1_1_profile.get("path", ""),
+        "p1_1_accepted_profile_missing": bool(p1_1_profile.get("missing")),
+        "p1_1_accepted_profile_parse_ok": int(
+            p1_1_profile.get("parse_error_count", 0) or 0
+        )
+        == 0
+        and not bool(p1_1_profile.get("read_error")),
+        "accepted_profile_missing": bool(risk_comparison.get("accepted_profile_missing")),
         "risk_match_min_count": P1_2_MIN_RISK_MATCH_COUNT,
         "risk_match_min_ratio": P1_2_MIN_RISK_MATCH_RATIO,
         "p1_2_risk_match_ok": bool(risk_comparison.get("p1_2_match_ok")),
@@ -7124,16 +7396,26 @@ def validate_p1_2_hard_gates(
         )
     if not gates["reference_bspline_publish_present"]:
         failures.append("P1-2 P1-1 reference /drone_0_planning/bspline evidence is missing")
+    if gates["accepted_profile_missing"]:
+        failures.append(
+            "P1-2 accepted trajectory risk profile CSV missing "
+            f"(current={gates['p1_2_accepted_profile_path']}, "
+            f"reference={gates['p1_1_accepted_profile_path']})"
+        )
+    if not gates["p1_2_accepted_profile_parse_ok"]:
+        failures.append("P1-2 accepted trajectory risk profile CSV is not parseable")
+    if not gates["p1_1_accepted_profile_parse_ok"]:
+        failures.append("P1-2 P1-1 reference accepted trajectory risk profile CSV is not parseable")
     if not gates["p1_2_risk_match_ok"] or not gates["p1_1_risk_match_ok"]:
         failures.append(
-            "P1-2 risk profile nearest-neighbor match coverage is insufficient "
+            "P1-2 accepted trajectory risk profile coverage is insufficient "
             f"(P1-2 {gates['p1_2_risk_matched_sample_count']}/"
             f"{gates['p1_2_risk_match_ratio']:.3f}, P1-1 "
             f"{gates['p1_1_risk_matched_sample_count']}/"
             f"{gates['p1_1_risk_match_ratio']:.3f})"
         )
     if not gates["risk_metric_available"]:
-        failures.append("P1-2 risk metric unavailable: neither c_pi nor pl could be sampled")
+        failures.append("P1-2 risk metric unavailable: accepted profile c_pi could not be sampled")
     elif not gates["risk_profile_reduced"]:
         failures.append(
             "P1-2 trajectory risk profile did not strictly reduce vs P1-1 reference "
@@ -7146,7 +7428,7 @@ def validate_p1_2_hard_gates(
     if not gates["p5_contamination_zero"]:
         failures.append("P1-2 P5 leakage detected while P5 is disabled")
     if not gates["cause_exclusion_passed"]:
-        failures.append("P1-2 cause exclusion found P5 leakage or unreduced risk")
+        failures.append("P1-2 cause exclusion found unreduced risk, coverage loss, missing evidence, publish failure, P0 stale, or P5 leakage")
 
     gates["passed"] = not any(message.startswith("P1-2") for message in failures + inconclusive)
     return gates
@@ -12226,6 +12508,152 @@ def plot_p1_2_risk_profile_vs_p1_1(
     return True
 
 
+def plot_p1_2_risk_sample_coverage_overlay(
+    comparison: dict[str, Any],
+    path: Path,
+) -> bool:
+    p1_2_profile = comparison.get("p1_2_profile", {}) or {}
+    p1_1_profile = comparison.get("p1_1_profile", {}) or {}
+    p1_2_cloud = comparison.get("p1_2_cloud_context", {}) or {}
+    p1_1_cloud = comparison.get("p1_1_cloud_context", {}) or {}
+    fig, axes = plt.subplots(1, 2, figsize=(13.2, 5.8))
+    ax = axes[0]
+
+    for label, context, color in (
+        ("P1-2 RViz cloud", p1_2_cloud, "#94a3b8"),
+        ("P1-1 RViz cloud", p1_1_cloud, "#cbd5e1"),
+    ):
+        points = context.get("points", []) or []
+        xs = [finite_float(row.get("x")) for row in points]
+        ys = [finite_float(row.get("y")) for row in points]
+        cloud_xy = [
+            (x, y)
+            for x, y in zip(xs, ys)
+            if x is not None and y is not None
+        ]
+        if cloud_xy:
+            ax.scatter(
+                [point[0] for point in cloud_xy],
+                [point[1] for point in cloud_xy],
+                s=6,
+                c=color,
+                alpha=0.22,
+                linewidths=0,
+                label=label,
+            )
+
+    status_styles = {
+        "valid": ("#16a34a", "o"),
+        "stale": ("#f97316", "^"),
+        "miss": ("#dc2626", "x"),
+        "invalid": ("#6b7280", "s"),
+    }
+    for run_label, profile, line_color in (
+        ("P1-2", p1_2_profile, "#2563eb"),
+        ("P1-1 ref", p1_1_profile, "#f97316"),
+    ):
+        samples = profile.get("samples", []) or []
+        path_points: list[tuple[float, float]] = []
+        by_status: dict[str, list[tuple[float, float]]] = {
+            key: [] for key in status_styles
+        }
+        for row in samples:
+            x = finite_float(row.get("x"))
+            y = finite_float(row.get("y"))
+            if x is None or y is None:
+                continue
+            path_points.append((x, y))
+            if int(row.get("matched", 0) or 0) == 1:
+                status = "valid"
+            elif int(row.get("stale", 0) or 0) == 1:
+                status = "stale"
+            elif int(row.get("hit", 0) or 0) == 0:
+                status = "miss"
+            else:
+                status = "invalid"
+            by_status[status].append((x, y))
+        if path_points:
+            ax.plot(
+                [point[0] for point in path_points],
+                [point[1] for point in path_points],
+                color=line_color,
+                lw=1.4,
+                alpha=0.8,
+                label=f"{run_label} profile path",
+            )
+        for status, points in by_status.items():
+            if not points:
+                continue
+            color, marker = status_styles[status]
+            ax.scatter(
+                [point[0] for point in points],
+                [point[1] for point in points],
+                s=28 if status == "valid" else 34,
+                c=color,
+                marker=marker,
+                alpha=0.88,
+                label=f"{run_label} {status}",
+            )
+
+    ax.set_title(
+        "Accepted profile coverage "
+        f"P1-2={p1_2_profile.get('matched_sample_count')}/"
+        f"{p1_2_profile.get('sample_count')} "
+        f"P1-1={p1_1_profile.get('matched_sample_count')}/"
+        f"{p1_1_profile.get('sample_count')}"
+    )
+    ax.set_xlabel("x [m]")
+    ax.set_ylabel("y [m]")
+    ax.set_aspect("equal", adjustable="datalim")
+    ax.grid(True, alpha=0.25)
+    ax.legend(loc="best", fontsize=7.6)
+
+    axes[1].axis("off")
+
+    def bounds_text(label: str, context: dict[str, Any]) -> list[str]:
+        bounds = context.get("bounds", {}) or {}
+        if not bounds:
+            return [f"{label} RViz cloud: no valid points"]
+        return [
+            f"{label} RViz cloud valid: {context.get('valid_point_count', 0)}",
+            f"  x: {bounds.get('x_min')} .. {bounds.get('x_max')}",
+            f"  y: {bounds.get('y_min')} .. {bounds.get('y_max')}",
+            f"  z: {bounds.get('z_min')} .. {bounds.get('z_max')}",
+        ]
+
+    lines = [
+        f"risk_source: {comparison.get('risk_source')}",
+        f"accepted_profile_missing: {comparison.get('accepted_profile_missing')}",
+        f"coverage_gate P1-2/P1-1: "
+        f"{comparison.get('p1_2_match_ok')} / {comparison.get('p1_1_match_ok')}",
+        f"min_count: {comparison.get('min_matched_sample_count')}",
+        f"min_ratio: {comparison.get('min_match_ratio')}",
+        f"risk_reduced: {comparison.get('risk_reduced')}",
+        f"c_pi mean P1-2/P1-1: "
+        f"{comparison.get('current_mean')} / {comparison.get('reference_mean')}",
+        f"c_pi max P1-2/P1-1: "
+        f"{comparison.get('current_max')} / {comparison.get('reference_max')}",
+        "",
+        *bounds_text("P1-2", p1_2_cloud),
+        "",
+        *bounds_text("P1-1", p1_1_cloud),
+    ]
+    axes[1].text(
+        0.02,
+        0.95,
+        "\n".join(lines),
+        va="top",
+        ha="left",
+        family="monospace",
+        fontsize=9.0,
+    )
+    axes[1].set_title("Coverage conclusion")
+    fig.tight_layout()
+    fig.savefig(path, dpi=160)
+    plt.close(fig)
+    return True
+
+
 def plot_p1_2_trajectory_overlay_vs_p1_1(
     comparison: dict[str, Any],
     path: Path,
@@ -12343,6 +12771,15 @@ def plot_p1_2_validation_summary(
         f"weighted_f_integrity_max: {gates.get('weighted_f_integrity_max')}",
         f"P1 RViz counts: {gates.get('p1_rviz_topic_counts', {})}",
         f"bspline publish present: {gates.get('bspline_publish_present')}",
+        f"accepted profile missing: {gates.get('accepted_profile_missing')}",
+        f"accepted profile paths P1-2/P1-1: "
+        f"{gates.get('p1_2_accepted_profile_path')} / "
+        f"{gates.get('p1_1_accepted_profile_path')}",
+        f"accepted profile coverage P1-2/P1-1: "
+        f"{gates.get('p1_2_risk_matched_sample_count')}/"
+        f"{gates.get('p1_2_risk_match_ratio')} / "
+        f"{gates.get('p1_1_risk_matched_sample_count')}/"
+        f"{gates.get('p1_1_risk_match_ratio')}",
         f"risk metric: {gates.get('risk_comparison_metric')}",
         f"risk mean/max P1-2: {gates.get('risk_current_mean')} / {gates.get('risk_current_max')}",
         f"risk mean/max P1-1: {gates.get('risk_reference_mean')} / {gates.get('risk_reference_max')}",
@@ -13113,9 +13550,16 @@ def analyze(args: argparse.Namespace) -> dict[str, Any]:
 
     p1_debug_rows: list[dict[str, Any]] = []
     p1_debug_summary: dict[str, Any] = {}
+    p1_accepted_profile_rows: list[dict[str, Any]] = []
+    p1_accepted_profile_summary: dict[str, Any] = {}
     if p1_phase:
         p1_debug_rows, p1_debug_summary = read_p1_integrity_debug_csv(
             p1_debug_csv_path(export_dir, manifest)
+        )
+        p1_accepted_profile_rows, p1_accepted_profile_summary = (
+            read_p1_accepted_profile_csv(
+                p1_accepted_profile_csv_path(export_dir, manifest)
+            )
         )
 
     safety_off_topic_counts = {}
@@ -13848,6 +14292,8 @@ def analyze(args: argparse.Namespace) -> dict[str, Any]:
     p1_2_bspline_error = ""
     p1_2_reference_bspline_rows: list[dict[str, Any]] = []
     p1_2_reference_bspline_error = ""
+    p1_2_reference_profile_rows: list[dict[str, Any]] = []
+    p1_2_reference_profile_summary: dict[str, Any] = {}
     p1_2_reference_cloud_rows: list[dict[str, Any]] = []
     p1_2_reference_cloud_source = ""
     p1_2_risk_comparison: dict[str, Any] = {}
@@ -13910,6 +14356,18 @@ def analyze(args: argparse.Namespace) -> dict[str, Any]:
             p1_2_reference_bspline_rows, p1_2_reference_bspline_error = (
                 read_bspline_messages(baseline_bag_dir, baseline_metadata)
             )
+        if baseline_export_dir is not None:
+            p1_2_reference_profile_rows, p1_2_reference_profile_summary = (
+                read_p1_accepted_profile_csv(
+                    p1_accepted_profile_csv_path(baseline_export_dir, baseline_manifest)
+                )
+            )
+        else:
+            p1_2_reference_profile_summary = summarize_p1_accepted_profile_rows(
+                [],
+                missing=True,
+                path="",
+            )
         p1_2_reference_cloud_rows, p1_2_reference_cloud_source = (
             read_reference_p0_cloud_rows(
                 baseline_export_dir,
@@ -13925,6 +14383,10 @@ def analyze(args: argparse.Namespace) -> dict[str, Any]:
             pl_cloud_rows,
             p1_2_reference_cloud_rows,
             p0_resolution_m=p0_resolution_m,
+            p1_2_accepted_profile_rows=p1_accepted_profile_rows,
+            p1_1_accepted_profile_rows=p1_2_reference_profile_rows,
+            p1_2_accepted_profile_summary=p1_accepted_profile_summary,
+            p1_1_accepted_profile_summary=p1_2_reference_profile_summary,
         )
         p1_2_gates = validate_p1_2_hard_gates(
             manifest,
@@ -15245,6 +15707,14 @@ def analyze(args: argparse.Namespace) -> dict[str, Any]:
         p1_debug_path = Path(str(p1_debug_summary.get("path", "")))
         if p1_debug_path.is_file():
             csv_artifacts.append(str(p1_debug_path))
+        p1_profile_path = Path(str(p1_accepted_profile_summary.get("path", "")))
+        if p1_profile_path.is_file():
+            csv_artifacts.append(str(p1_profile_path))
+        p1_reference_profile_path = Path(
+            str(p1_2_reference_profile_summary.get("path", ""))
+        )
+        if p1_reference_profile_path.is_file():
+            csv_artifacts.append(str(p1_reference_profile_path))
 
         p1_summary_path = csv_dir / "p1_2_integrity_cost_debug_summary.csv"
         p1_bspline_path = csv_dir / "p1_2_bspline_publish_timeline.csv"
@@ -15310,6 +15780,10 @@ def analyze(args: argparse.Namespace) -> dict[str, Any]:
                 "p1_1_match_ratio",
                 "min_matched_sample_count",
                 "min_match_ratio",
+                "risk_source",
+                "accepted_profile_missing",
+                "p1_2_accepted_profile_path",
+                "p1_1_accepted_profile_path",
                 "p1_1_cloud_source",
             ],
             [
@@ -15326,6 +15800,10 @@ def analyze(args: argparse.Namespace) -> dict[str, Any]:
                     "p1_1_match_ratio": p1_1_profile.get("match_ratio"),
                     "min_matched_sample_count": P1_2_MIN_RISK_MATCH_COUNT,
                     "min_match_ratio": P1_2_MIN_RISK_MATCH_RATIO,
+                    "risk_source": p1_2_risk_comparison.get("risk_source"),
+                    "accepted_profile_missing": p1_2_risk_comparison.get("accepted_profile_missing"),
+                    "p1_2_accepted_profile_path": p1_2_profile.get("path"),
+                    "p1_1_accepted_profile_path": p1_1_profile.get("path"),
                     "p1_1_cloud_source": p1_2_reference_cloud_source,
                 }
             ],
@@ -15347,12 +15825,16 @@ def analyze(args: argparse.Namespace) -> dict[str, Any]:
                 "y",
                 "z",
                 "matched",
+                "hit",
+                "valid",
+                "stale",
                 "nearest_distance_m",
                 "nearest_x",
                 "nearest_y",
                 "nearest_z",
                 "c_pi",
                 "pl",
+                "reason",
             ],
             risk_sample_rows,
         )
@@ -15423,6 +15905,9 @@ def analyze(args: argparse.Namespace) -> dict[str, Any]:
                     "reference_manifest_scenario_matches",
                     "reference_manifest_p1_metrics_only",
                     "reference_bspline_publish_present",
+                    "accepted_profile_missing",
+                    "p1_2_accepted_profile_parse_ok",
+                    "p1_1_accepted_profile_parse_ok",
                     "p1_2_risk_match_ok",
                     "p1_1_risk_match_ok",
                     "risk_profile_reduced",
@@ -15472,6 +15957,13 @@ def analyze(args: argparse.Namespace) -> dict[str, Any]:
         ):
             p1_2_figure_artifacts.append(
                 str(p1_2_figure_paths["p1_2_risk_profile_vs_p1_1.png"])
+            )
+        if plot_p1_2_risk_sample_coverage_overlay(
+            p1_2_risk_comparison,
+            p1_2_figure_paths["p1_2_risk_sample_coverage_overlay.png"],
+        ):
+            p1_2_figure_artifacts.append(
+                str(p1_2_figure_paths["p1_2_risk_sample_coverage_overlay.png"])
             )
         if plot_p1_2_trajectory_overlay_vs_p1_1(
             p1_2_risk_comparison,
@@ -15783,6 +16275,7 @@ def analyze(args: argparse.Namespace) -> dict[str, Any]:
         "p1_2_hard_gates": p1_2_gates,
         "p1_summary": {
             "metrics_debug": p1_debug_summary,
+            "accepted_profile": p1_accepted_profile_summary,
             "baseline_export_dir": str(baseline_export_dir) if baseline_export_dir is not None else "",
             "baseline_bag_dir": str(baseline_bag_dir) if baseline_bag_dir is not None else "",
             "baseline_manifest": baseline_manifest,
@@ -15796,6 +16289,7 @@ def analyze(args: argparse.Namespace) -> dict[str, Any]:
                 "bspline_error": p1_2_reference_bspline_error,
                 "pl_cloud_source": p1_2_reference_cloud_source,
                 "pl_cloud_rows": len(p1_2_reference_cloud_rows),
+                "accepted_profile": p1_2_reference_profile_summary,
             },
             "p1_2_objective": {
                 "lambda_integrity": manifest.get("p1.lambda_integrity"),

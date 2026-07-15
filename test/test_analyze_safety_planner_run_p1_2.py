@@ -160,6 +160,46 @@ def cloud_rows(y, *, c_pi=1.0, pl=1.0, include_c_pi=True):
     return rows
 
 
+def accepted_profile_rows(
+    y,
+    *,
+    c_pi=1.0,
+    valid_count=200,
+    c_pi_values=None,
+    profile_seq=3,
+):
+    values = list(c_pi_values or [])
+    rows = []
+    for idx in range(200):
+        x = 10.0 * idx / 199.0
+        valid = idx < valid_count
+        value = values[idx] if idx < len(values) else c_pi
+        rows.append(
+            {
+                "profile_seq": profile_seq,
+                "stamp": 10.0,
+                "trajectory_id": 1,
+                "applied_to_objective": 1,
+                "metrics_only": 0,
+                "lambda_integrity": 0.00001,
+                "snapshot_generation_id": 4,
+                "query_base_time_s": 9.0,
+                "sample_index": idx,
+                "arc_fraction": idx / 199.0,
+                "t_s": 3.0 * idx / 199.0,
+                "x": x,
+                "y": y,
+                "z": 1.0,
+                "hit": 1 if valid else 0,
+                "valid": 1 if valid else 0,
+                "stale": 0,
+                "c_pi": value if valid else "",
+                "reason": "ok" if valid else "query_miss",
+            }
+        )
+    return rows
+
+
 def run_gate(
     *,
     manifest=None,
@@ -175,6 +215,10 @@ def run_gate(
     baseline_bspline=None,
     p1_2_cloud=None,
     baseline_cloud=None,
+    p1_2_profile=None,
+    baseline_profile=None,
+    p1_2_profile_missing=False,
+    baseline_profile_missing=False,
 ):
     manifest = p1_2_manifest() if manifest is None else manifest
     validator = {"passed": True} if validator is None else validator
@@ -196,12 +240,18 @@ def run_gate(
         if baseline_cloud is None
         else baseline_cloud
     )
+    if p1_2_profile is None and not p1_2_profile_missing:
+        p1_2_profile = accepted_profile_rows(0.0, c_pi=1.0)
+    if baseline_profile is None and not baseline_profile_missing:
+        baseline_profile = accepted_profile_rows(5.0, c_pi=5.0)
     risk_comparison = analyzer.compare_p1_2_risk_profiles(
         p1_2_bspline,
         baseline_bspline,
         p1_2_cloud,
         baseline_cloud,
         p0_resolution_m=0.75,
+        p1_2_accepted_profile_rows=None if p1_2_profile_missing else p1_2_profile,
+        p1_1_accepted_profile_rows=None if baseline_profile_missing else baseline_profile,
     )
     failures = []
     inconclusive = []
@@ -229,7 +279,9 @@ def run_gate(
 
 class P1_2AnalyzerTest(unittest.TestCase):
     def test_happy_path_passes_gate(self):
-        gates, failures, inconclusive, risk = run_gate()
+        gates, failures, inconclusive, risk = run_gate(
+            baseline_cloud=cloud_rows(100.0, c_pi=5.0, pl=5.0)
+        )
 
         self.assertEqual(failures, [])
         self.assertEqual(inconclusive, [])
@@ -237,6 +289,7 @@ class P1_2AnalyzerTest(unittest.TestCase):
         self.assertTrue(gates["p1_applied_to_objective"])
         self.assertTrue(gates["risk_profile_reduced"])
         self.assertEqual(risk["comparison_metric"], "c_pi")
+        self.assertEqual(risk["risk_source"], "accepted_trajectory_profile_csv")
 
     def test_manifest_rejects_metrics_only_wrong_lambda_disabled_p1_and_enabled_later_phases(self):
         bad_manifests = [
@@ -345,55 +398,58 @@ class P1_2AnalyzerTest(unittest.TestCase):
         self.assertFalse(gates["p1_2_nonempty_bspline_path_present"])
         self.assertEqual(risk["p1_2_path_xyz"], [])
         self.assertTrue(
-            any("risk profile nearest-neighbor match coverage" in item for item in failures),
+            any("trajectory stability" in item for item in failures),
             failures,
         )
 
     def test_risk_profile_not_reduced_fails(self):
         _, failures, _, risk = run_gate(
-            p1_2_cloud=cloud_rows(0.0, c_pi=6.0, pl=6.0),
-            baseline_cloud=cloud_rows(5.0, c_pi=5.0, pl=5.0),
+            p1_2_profile=accepted_profile_rows(0.0, c_pi=6.0),
+            baseline_profile=accepted_profile_rows(5.0, c_pi=5.0),
         )
 
         self.assertFalse(risk["risk_reduced"])
         self.assertTrue(any("risk profile" in item for item in failures), failures)
 
-    def test_risk_profile_falls_back_to_pl_when_c_pi_unavailable(self):
-        gates, failures, _, risk = run_gate(
-            p1_2_cloud=cloud_rows(0.0, pl=1.0, include_c_pi=False),
-            baseline_cloud=cloud_rows(5.0, pl=5.0, include_c_pi=False),
+    def test_risk_profile_max_not_lower_fails_even_when_mean_is_lower(self):
+        current_values = [1.0] * 199 + [10.0]
+        _, failures, _, risk = run_gate(
+            p1_2_profile=accepted_profile_rows(0.0, c_pi_values=current_values),
+            baseline_profile=accepted_profile_rows(5.0, c_pi=5.0),
         )
 
-        self.assertEqual(failures, [])
-        self.assertEqual(risk["comparison_metric"], "pl")
-        self.assertTrue(gates["risk_profile_reduced"])
+        self.assertLess(risk["current_mean"], risk["reference_mean"])
+        self.assertGreaterEqual(risk["current_max"], risk["reference_max"])
+        self.assertFalse(risk["risk_reduced"])
+        self.assertTrue(any("risk profile" in item for item in failures), failures)
 
     def test_risk_profile_without_c_pi_or_pl_fails(self):
-        bad_current = [
-            {**row, "pl": "", "c_pi": ""}
-            for row in cloud_rows(0.0, include_c_pi=False)
-        ]
-        bad_baseline = [
-            {**row, "pl": "", "c_pi": ""}
-            for row in cloud_rows(5.0, include_c_pi=False)
-        ]
+        bad_current = [{**row, "c_pi": ""} for row in accepted_profile_rows(0.0)]
+        bad_baseline = [{**row, "c_pi": ""} for row in accepted_profile_rows(5.0)]
 
         _, failures, _, risk = run_gate(
-            p1_2_cloud=bad_current,
-            baseline_cloud=bad_baseline,
+            p1_2_profile=bad_current,
+            baseline_profile=bad_baseline,
         )
 
         self.assertIsNone(risk["comparison_metric"])
         self.assertTrue(any("risk metric" in item for item in failures), failures)
 
+    def test_missing_profile_csv_fails(self):
+        gates, failures, _, risk = run_gate(p1_2_profile_missing=True)
+
+        self.assertTrue(gates["accepted_profile_missing"])
+        self.assertTrue(risk["accepted_profile_missing"])
+        self.assertTrue(any("accepted trajectory risk profile CSV missing" in item for item in failures), failures)
+
     def test_risk_profile_match_coverage_failure_fails(self):
         _, failures, _, risk = run_gate(
-            baseline_cloud=cloud_rows(100.0, c_pi=5.0, pl=5.0),
+            baseline_profile=accepted_profile_rows(5.0, c_pi=5.0, valid_count=10),
         )
 
         self.assertFalse(risk["p1_1_match_ok"])
         self.assertTrue(
-            any("risk profile nearest-neighbor match coverage" in item for item in failures),
+            any("accepted trajectory risk profile coverage" in item for item in failures),
             failures,
         )
 
@@ -432,6 +488,7 @@ class P1_2AnalyzerTest(unittest.TestCase):
                 "p1_2_p1_objective_timeline.png",
                 "p1_2_integrity_cost_debug_summary.png",
                 "p1_2_risk_profile_vs_p1_1.png",
+                "p1_2_risk_sample_coverage_overlay.png",
                 "p1_2_trajectory_overlay_vs_p1_1.png",
                 "p1_2_bspline_publish_timeline.png",
                 "p1_2_manifest_switch_summary.png",

@@ -3,8 +3,13 @@
 #include <iap/planner/risk_grid_map.hpp>
 #include <rclcpp/rclcpp.hpp>
 
+#include <chrono>
 #include <cmath>
+#include <cstdio>
+#include <fstream>
 #include <memory>
+#include <map>
+#include <sstream>
 #include <string>
 #include <vector>
 
@@ -45,6 +50,26 @@ class UnknownProvider : public iap::RiskPredictionProvider {
     results->assign(queries.size(), iap::RiskPredictionResult{});
     for (auto& result : *results) {
       result.reason = "test_unknown";
+    }
+    return true;
+  }
+};
+
+class StaleProvider : public iap::RiskPredictionProvider {
+ public:
+  bool batchQuery(const std::vector<iap::RiskPredictionQuery>& queries,
+                  std::vector<iap::RiskPredictionResult>* results) override {
+    results->clear();
+    results->reserve(queries.size());
+    for (std::size_t i = 0; i < queries.size(); ++i) {
+      iap::RiskPredictionResult result;
+      result.available = true;
+      result.valid = true;
+      result.stale = true;
+      result.hpl_pred = 10.0;
+      result.vpl_pred = 10.0;
+      result.reason = "test_stale";
+      results->push_back(result);
     }
     return true;
   }
@@ -138,6 +163,43 @@ bool evaluate(ego_planner::BsplineOptimizer& optimizer,
               double* cost,
               Eigen::MatrixXd* gradient) {
   return optimizer.evaluateReboundCostForTest(q, 0.1, *cost, *gradient);
+}
+
+std::vector<std::string> splitCsvLine(const std::string& line) {
+  std::vector<std::string> fields;
+  std::stringstream ss(line);
+  std::string field;
+  while (std::getline(ss, field, ',')) {
+    fields.push_back(field);
+  }
+  if (!line.empty() && line.back() == ',') {
+    fields.emplace_back();
+  }
+  return fields;
+}
+
+std::vector<std::map<std::string, std::string>> readCsvRows(const std::string& path) {
+  std::ifstream in(path);
+  std::string line;
+  std::vector<std::map<std::string, std::string>> rows;
+  if (!std::getline(in, line)) {
+    return rows;
+  }
+  const auto header = splitCsvLine(line);
+  while (std::getline(in, line)) {
+    const auto fields = splitCsvLine(line);
+    std::map<std::string, std::string> row;
+    for (std::size_t i = 0; i < header.size(); ++i) {
+      row[header[i]] = i < fields.size() ? fields[i] : "";
+    }
+    rows.push_back(row);
+  }
+  return rows;
+}
+
+std::string tempProfilePath(const std::string& name) {
+  const auto now = std::chrono::steady_clock::now().time_since_epoch().count();
+  return "/tmp/" + name + "_" + std::to_string(now) + ".csv";
 }
 
 ego_planner::BsplineOptimizer::P1IntegrityConfig disabledConfig() {
@@ -385,4 +447,116 @@ TEST(P1IntegrityCostTest, UnknownSmallPenaltyAddsCostWithZeroGradient) {
   EXPECT_NEAR(metrics.f_integrity, 3.0, 1.0e-12);
   EXPECT_NEAR(cost, original_cost + 6.0, 1.0e-12);
   EXPECT_TRUE(gradient.isApprox(original_gradient, 0.0));
+}
+
+TEST(P1IntegrityCostTest, MetricsOnlyAcceptedProfileWritesFiniteSamples) {
+  ego_planner::SwarmTrajData swarm;
+  const Eigen::MatrixXd q = makeControlPoints();
+  AffineProvider provider(10.0, Eigen::Vector3d(1.0, 0.0, 0.0));
+  auto snapshot = makeSnapshot(provider);
+  const std::string debug_path = tempProfilePath("p1_metrics_debug");
+  const std::string profile_path =
+      "/tmp/planner_p1_accepted_trajectory_risk_profile.csv";
+  std::remove(debug_path.c_str());
+  std::remove(profile_path.c_str());
+
+  auto config = disabledConfig();
+  config.use_integrity_cost = true;
+  config.metrics_only = true;
+  config.lambda_integrity = 3.0;
+  config.debug_csv_enable = true;
+  config.debug_csv_path = debug_path;
+  auto optimizer = makeOptimizer(config, &swarm);
+  optimizer->setRiskSnapshot(snapshot, snapshot->stamp_s());
+  ego_planner::UniformBspline trajectory(q, 3, 0.1);
+
+  ASSERT_TRUE(optimizer->writeP1AcceptedTrajectoryRiskProfile(
+      trajectory, 7, 42, 123.0));
+  const auto rows = readCsvRows(optimizer->p1AcceptedTrajectoryRiskProfilePath());
+  ASSERT_EQ(rows.size(), 200U);
+  int finite_count = 0;
+  for (const auto& row : rows) {
+    EXPECT_EQ(row.at("profile_seq"), "7");
+    EXPECT_EQ(row.at("trajectory_id"), "42");
+    EXPECT_EQ(row.at("applied_to_objective"), "0");
+    EXPECT_EQ(row.at("metrics_only"), "1");
+    EXPECT_EQ(row.at("hit"), "1");
+    EXPECT_EQ(row.at("valid"), "1");
+    EXPECT_EQ(row.at("stale"), "0");
+    EXPECT_FALSE(row.at("c_pi").empty());
+    finite_count++;
+  }
+  EXPECT_EQ(finite_count, 200);
+  std::remove(debug_path.c_str());
+  std::remove(profile_path.c_str());
+}
+
+TEST(P1IntegrityCostTest, EnabledAcceptedProfileRecordsAppliedObjectiveAndLambda) {
+  ego_planner::SwarmTrajData swarm;
+  const Eigen::MatrixXd q = makeControlPoints();
+  AffineProvider provider(10.0, Eigen::Vector3d(1.0, 0.0, 0.0));
+  auto snapshot = makeSnapshot(provider);
+  const std::string debug_path = tempProfilePath("p1_enabled_debug");
+  const std::string profile_path =
+      "/tmp/planner_p1_accepted_trajectory_risk_profile.csv";
+  std::remove(debug_path.c_str());
+  std::remove(profile_path.c_str());
+
+  auto config = disabledConfig();
+  config.use_integrity_cost = true;
+  config.metrics_only = false;
+  config.lambda_integrity = 0.00001;
+  config.debug_csv_enable = true;
+  config.debug_csv_path = debug_path;
+  auto optimizer = makeOptimizer(config, &swarm);
+  optimizer->setRiskSnapshot(snapshot, snapshot->stamp_s());
+  ego_planner::UniformBspline trajectory(q, 3, 0.1);
+
+  ASSERT_TRUE(optimizer->writeP1AcceptedTrajectoryRiskProfile(
+      trajectory, 8, 43, 124.0));
+  const auto rows = readCsvRows(optimizer->p1AcceptedTrajectoryRiskProfilePath());
+  ASSERT_EQ(rows.size(), 200U);
+  for (const auto& row : rows) {
+    EXPECT_EQ(row.at("applied_to_objective"), "1");
+    EXPECT_EQ(row.at("metrics_only"), "0");
+    EXPECT_DOUBLE_EQ(std::stod(row.at("lambda_integrity")), 0.00001);
+    EXPECT_FALSE(row.at("c_pi").empty());
+  }
+  std::remove(debug_path.c_str());
+  std::remove(profile_path.c_str());
+}
+
+TEST(P1IntegrityCostTest, AcceptedProfileLeavesCpiBlankForStaleMisses) {
+  ego_planner::SwarmTrajData swarm;
+  const Eigen::MatrixXd q = makeControlPoints();
+  StaleProvider provider;
+  auto snapshot = makeSnapshot(provider);
+  const std::string debug_path = tempProfilePath("p1_stale_debug");
+  const std::string profile_path =
+      "/tmp/planner_p1_accepted_trajectory_risk_profile.csv";
+  std::remove(debug_path.c_str());
+  std::remove(profile_path.c_str());
+
+  auto config = disabledConfig();
+  config.use_integrity_cost = true;
+  config.metrics_only = false;
+  config.lambda_integrity = 0.00001;
+  config.debug_csv_enable = true;
+  config.debug_csv_path = debug_path;
+  auto optimizer = makeOptimizer(config, &swarm);
+  optimizer->setRiskSnapshot(snapshot, snapshot->stamp_s());
+  ego_planner::UniformBspline trajectory(q, 3, 0.1);
+
+  ASSERT_TRUE(optimizer->writeP1AcceptedTrajectoryRiskProfile(
+      trajectory, 9, 44, 125.0));
+  const auto rows = readCsvRows(optimizer->p1AcceptedTrajectoryRiskProfilePath());
+  ASSERT_EQ(rows.size(), 200U);
+  for (const auto& row : rows) {
+    EXPECT_EQ(row.at("hit"), "0");
+    EXPECT_EQ(row.at("valid"), "0");
+    EXPECT_EQ(row.at("stale"), "1");
+    EXPECT_TRUE(row.at("c_pi").empty());
+  }
+  std::remove(debug_path.c_str());
+  std::remove(profile_path.c_str());
 }

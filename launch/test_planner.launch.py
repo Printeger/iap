@@ -430,6 +430,7 @@ EXPERIMENT_PRESETS = {
     "p1_degraded_lidar_good": {
         "scenario": "gnss_degraded_lidar_good",
         "planner_safety_profile": "p1",
+        "p0.size_x_m": "42.0",
         "p1.debug_csv_enable": "true",
         "safety_viz.enable_p1_viz": "true",
     },
@@ -1631,6 +1632,9 @@ def _launch_setup(context):
     p1_debug_path_for_manifest = LaunchConfiguration("p1.debug_csv_path").perform(context)
     if not p1_debug_path_for_manifest:
         p1_debug_path_for_manifest = str(Path(export_dir) / "planner_p1_integrity_cost_debug.csv")
+    p1_accepted_profile_path_for_manifest = str(
+        Path(p1_debug_path_for_manifest).with_name("planner_p1_accepted_trajectory_risk_profile.csv")
+    )
     p5_final_for_fixture = (
         _param_bool(context, "p5.enable_final_gate")
         if "p5.enable_final_gate" in overrides
@@ -1652,6 +1656,7 @@ def _launch_setup(context):
         "p1.metrics_only": p1_metrics_only_for_manifest,
         "p1.lambda_integrity": _param_float(context, "p1.lambda_integrity"),
         "p1.debug_csv_path": p1_debug_path_for_manifest,
+        "p1.accepted_profile_path": p1_accepted_profile_path_for_manifest,
         "p0.skip_occupied_voxels": _param_bool(context, "p0.skip_occupied_voxels"),
         "p0.predictor.source_mode": LaunchConfiguration("p0.predictor.source_mode").perform(context),
         "p0.predictor.gnss_epoch_policy": LaunchConfiguration("p0.predictor.gnss_epoch_policy").perform(context),
