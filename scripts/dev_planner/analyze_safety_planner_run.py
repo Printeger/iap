@@ -8,7 +8,9 @@ from collections import Counter
 import csv
 import json
 import math
+import os
 import re
+import resource
 import textwrap
 from pathlib import Path
 from typing import Any
@@ -217,6 +219,9 @@ P1_2_FIGURE_FILENAMES = [
     "p1_2_gradient_direction_field_overlay.png",
     "p1_2_refresh_latency_vs_stale_threshold.png",
     "p1_2_replan_load_correlation.png",
+    "p1_2_timebase_alignment.png",
+    "p1_2_temporal_horizon_admission.png",
+    "p1_2_generation_singleflight_timeline.png",
 ]
 P1_2_OPTIONAL_FIGURE_FILENAMES = [
     "p1_2_p0_callback_timeline.png",
@@ -570,6 +575,7 @@ P1_ACCEPTED_PROFILE_FIELDS = [
     "pre_x", "pre_y", "pre_z",
     "disp_x", "disp_y", "disp_z",
     "grad_dot_displacement", "delta_c_pi",
+    "objective_requested", "objective_applied", "p1_fallback", "fallback_reason",
 ]
 P1_ACCEPTED_PROFILE_CONTEXT_FIELDS = [
     "profile_seq", "trajectory_id", "planning_attempt_id", "candidate_id", "planning_start_s", "accepted_stamp_s",
@@ -586,6 +592,7 @@ P1_ACCEPTED_PROFILE_CONTEXT_FIELDS = [
     "query_time_match", "fresh", "coverage_ok", "spatial_miss_count",
     "temporal_miss_count", "occupied_miss_count", "stale_miss_count",
     "invalid_miss_count", "trajectory_start_stamp_s",
+    "objective_requested", "objective_applied", "p1_fallback", "fallback_reason",
 ]
 P1_DEBUG_FINITE_FIELDS = [
     "f_integrity",
@@ -14246,21 +14253,286 @@ def plot_p1_2_refresh_latency_vs_stale_threshold(
     return True
 
 
-def plot_p1_2_replan_load_correlation(
-    timeline_rows: list[dict[str, Any]], health_rows: list[dict[str, Any]], path: Path
+def normalize_p1_2_timebases(
+    timeline_rows: list[dict[str, Any]],
+    health_rows: list[dict[str, Any]],
+    manifest: dict[str, Any],
+) -> dict[str, Any]:
+    """Plan bounded run-relative bins without assuming unrelated epochs align."""
+    run_duration_s = finite_float(manifest.get("run_duration_s")) if manifest else None
+    if run_duration_s is None or run_duration_s <= 0.0:
+        run_duration_s = 90.0
+    tolerance_s = max(2.0, 0.05 * run_duration_s)
+    max_span_s = run_duration_s + tolerance_s
+    timebase = manifest.get("timebase", {}) if isinstance(manifest, dict) else {}
+    timeline_spec = timebase.get("planning_timeline", {}) if isinstance(timebase, dict) else {}
+    health_spec = timebase.get("p0_health_payload", {}) if isinstance(timebase, dict) else {}
+    timeline_field = str(timeline_spec.get("field", "stamp_s"))
+    health_field = str(health_spec.get("field", "health_callback_stamp_s"))
+    timeline_domain = str(timeline_spec.get("domain", ""))
+    health_domain = str(health_spec.get("domain", ""))
+    timeline_raw = [finite_float(row.get(timeline_field)) for row in timeline_rows]
+    health_raw = [finite_float(row.get(health_field)) for row in health_rows]
+    timeline_raw = [value for value in timeline_raw if value is not None]
+    health_raw = [value for value in health_raw if value is not None]
+    causal = bool(
+        timeline_raw and health_raw and timeline_domain
+        and timeline_domain == health_domain
+    )
+    reasons: list[str] = []
+    if causal:
+        origin_s = min(min(timeline_raw), min(health_raw))
+        timeline_relative = [value - origin_s for value in timeline_raw]
+        health_relative = [value - origin_s for value in health_raw]
+        mapping_mode = "explicit_common_clock"
+    else:
+        origin_s = None
+        timeline_relative = (
+            [value - min(timeline_raw) for value in timeline_raw]
+            if timeline_raw else []
+        )
+        health_receive = [finite_float(row.get("stamp")) for row in health_rows]
+        health_receive = [value for value in health_receive if value is not None]
+        health_relative = (
+            [value - min(health_receive) for value in health_receive]
+            if health_receive else []
+        )
+        mapping_mode = "independent_subplots"
+        reasons.append(
+            "timebase domains are not explicitly proven equal; causal alignment unavailable"
+        )
+    observed_span_s = max(
+        [0.0, *timeline_relative, *health_relative]
+    )
+    span_ok = observed_span_s <= max_span_s + 1.0e-9
+    if not span_ok:
+        reasons.append(
+            f"observed run-relative span {observed_span_s:.3f}s exceeds "
+            f"bounded limit {max_span_s:.3f}s"
+        )
+    bounded_span_s = min(observed_span_s, max_span_s)
+    bin_count = max(2, int(math.ceil(bounded_span_s)) + 2)
+    series_count = 12
+    estimated_bin_bytes = bin_count * series_count * np.dtype(np.float64).itemsize
+    memory_limit_bytes = 1024 * 1024
+    memory_ok = estimated_bin_bytes <= memory_limit_bytes
+    if not memory_ok:
+        reasons.append(
+            f"estimated bin storage {estimated_bin_bytes} bytes exceeds "
+            f"limit {memory_limit_bytes} bytes"
+        )
+    verdict = "PASS" if causal and span_ok and memory_ok else "UNAVAILABLE"
+    return {
+        "verdict": verdict,
+        "causal_alignment_proven": causal,
+        "mapping_mode": mapping_mode,
+        "run_duration_s": run_duration_s,
+        "tolerance_s": tolerance_s,
+        "max_span_s": max_span_s,
+        "observed_span_s": observed_span_s,
+        "span_ok": span_ok,
+        "bin_count": bin_count,
+        "estimated_bin_bytes": estimated_bin_bytes,
+        "memory_limit_bytes": memory_limit_bytes,
+        "memory_ok": memory_ok,
+        "timeline_domain": timeline_domain or "undeclared",
+        "health_domain": health_domain or "undeclared",
+        "timeline_field": timeline_field,
+        "health_field": health_field,
+        "origin_s": origin_s,
+        "timeline_relative_s": timeline_relative,
+        "health_relative_s": health_relative,
+        "reasons": reasons,
+    }
+
+
+def _atomic_write_json(path: Path, payload: dict[str, Any]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = path.with_name(f".{path.name}.{os.getpid()}.tmp")
+    temporary.write_text(json.dumps(payload, indent=2, sort_keys=True, default=str) + "\n")
+    temporary.replace(path)
+
+
+def write_p1_2_provisional_summary(
+    path: Path, timebase_alignment: dict[str, Any]
+) -> None:
+    reasons = list(timebase_alignment.get("reasons", []))
+    reason = reasons[0] if reasons else "timebase analysis incomplete"
+    _atomic_write_json(path, {
+        "analysis_complete": False,
+        "passed": False,
+        "failures": [f"timebase: {reason}"],
+        "warnings": [],
+        "inconclusive": [],
+        "timebase_alignment": timebase_alignment,
+        "peak_rss_kib": resource.getrusage(resource.RUSAGE_SELF).ru_maxrss,
+    })
+
+
+def summarize_p1_generation_singleflight(
+    timeline_rows: list[dict[str, Any]],
+) -> dict[str, Any]:
+    stages = ("p1_admission", "acquire", "optimizer_start")
+    counts: dict[str, dict[str, int]] = {}
+    for row in timeline_rows:
+        stage = str(row.get("stage", ""))
+        if stage not in stages:
+            continue
+        generation = str(row.get("snapshot_generation_id", "0"))
+        bucket = counts.setdefault(generation, {key: 0 for key in stages})
+        bucket[stage] += 1
+    duplicates = [
+        {"generation": generation, "stage": stage, "count": count}
+        for generation, bucket in counts.items()
+        for stage, count in bucket.items()
+        if count > 1
+    ]
+    return {
+        "generation_counts": counts,
+        "duplicates": duplicates,
+        "max_admission_per_generation": max(
+            [bucket["p1_admission"] for bucket in counts.values()] or [0]
+        ),
+        "max_acquisition_per_generation": max(
+            [bucket["acquire"] for bucket in counts.values()] or [0]
+        ),
+        "max_optimizer_start_per_generation": max(
+            [bucket["optimizer_start"] for bucket in counts.values()] or [0]
+        ),
+        "passed": bool(counts) and not duplicates,
+    }
+
+
+def plot_p1_2_timebase_alignment(
+    alignment: dict[str, Any], path: Path,
+    reference_alignment: dict[str, Any] | None = None,
 ) -> bool:
-    event_times = [finite_float(row.get("stamp_s")) for row in timeline_rows]
-    health_times = [finite_float(row.get("stamp")) for row in health_rows]
+    fig, axes = plt.subplots(2, 1, figsize=(12.0, 7.5))
+    for axis, label, data in (
+        (axes[0], "P1-2", alignment),
+        (axes[1], "P1-1", reference_alignment or {}),
+    ):
+        timeline = list(data.get("timeline_relative_s", []))
+        health = list(data.get("health_relative_s", []))
+        if timeline:
+            axis.scatter(timeline, np.zeros(len(timeline)), s=8,
+                         label=f"planning ({data.get('timeline_domain')})")
+        if health:
+            axis.scatter(health, np.ones(len(health)), s=8,
+                         label=f"health ({data.get('health_domain')})")
+        causal = bool(data.get("causal_alignment_proven"))
+        axis.set_title(
+            f"{label}: {data.get('mapping_mode', 'UNAVAILABLE')} — "
+            f"causal={'YES' if causal else 'NO'}; bins={data.get('bin_count', 0)}; "
+            f"buffer={data.get('estimated_bin_bytes', 0)}/{data.get('memory_limit_bytes', 0)} B"
+        )
+        axis.set_yticks((0, 1), ("planning", "health"))
+        axis.grid(True, alpha=0.25)
+        if timeline or health:
+            axis.legend(loc="best", fontsize=8)
+        elif label == "P1-2":
+            axis.text(0.5, 0.5, "UNAVAILABLE", transform=axis.transAxes,
+                      ha="center")
+    axes[-1].set_xlabel("run-relative seconds (shared origin only when proven)")
+    fig.tight_layout()
+    fig.savefig(path, dpi=160)
+    plt.close(fig)
+    return True
+
+
+def plot_p1_2_temporal_horizon_admission(
+    manifest: dict[str, Any], timeline_rows: list[dict[str, Any]],
+    context_rows: list[dict[str, Any]], path: Path,
+) -> bool:
+    horizons = [finite_float(value) for value in manifest.get("p0.horizons_s", [])]
+    horizons = [value for value in horizons if value is not None]
+    horizon_min = min(horizons) if horizons else 0.0
+    horizon_max = max(horizons) if horizons else 0.0
+    candidate_max = max(
+        [finite_float(row.get("trajectory_time_max_s")) or 0.0
+         for row in context_rows] or [0.0]
+    )
+    fig, ax = plt.subplots(figsize=(12.0, 4.8))
+    ax.axvspan(horizon_min, horizon_max, color="#16a34a", alpha=0.2,
+               label="P0 temporal horizon")
+    if candidate_max > 0.0:
+        ax.plot([0.0, candidate_max], [1.0, 1.0], linewidth=8,
+                color="#2563eb", label="candidate")
+        if candidate_max > horizon_max:
+            ax.plot([horizon_max, candidate_max], [1.0, 1.0], linewidth=8,
+                    color="#dc2626", label="out of horizon")
+    decisions = Counter(str(row.get("outcome", "")) for row in timeline_rows
+                        if str(row.get("stage", "")) in {"p1_admission", "accept", "publish"})
+    ax.text(0.01, 0.93, f"decisions={dict(decisions)}",
+            transform=ax.transAxes, va="top", family="monospace")
+    ax.set_ylim(0.5, 1.5)
+    ax.set_yticks([1.0], ["trajectory"])
+    ax.set_xlabel("trajectory-relative seconds")
+    ax.set_title("P1 temporal horizon is diagnostic/soft; base/P5 gates own publication")
+    ax.grid(True, alpha=0.25)
+    ax.legend(loc="best")
+    fig.tight_layout(); fig.savefig(path, dpi=160); plt.close(fig)
+    return True
+
+
+def plot_p1_2_generation_singleflight_timeline(
+    timeline_rows: list[dict[str, Any]], path: Path,
+) -> bool:
+    summary = summarize_p1_generation_singleflight(timeline_rows)
+    counts = summary["generation_counts"]
+    generations = sorted(
+        counts,
+        key=lambda value: (0, int(value)) if value.isdigit() else (1, value),
+    )
+    fig, ax = plt.subplots(figsize=(12.0, 5.8))
+    x = np.arange(len(generations))
+    width = 0.25
+    for offset, stage, color in (
+        (-width, "p1_admission", "#2563eb"),
+        (0.0, "acquire", "#0891b2"),
+        (width, "optimizer_start", "#f97316"),
+    ):
+        values = [counts[generation][stage] for generation in generations]
+        bars = ax.bar(x + offset, values, width, label=stage, color=color)
+        for bar, value in zip(bars, values):
+            if value > 1:
+                bar.set_color("#dc2626")
+    ax.axhline(1.0, color="#dc2626", linestyle="--", label="per-generation limit")
+    ax.set_xticks(x, generations, rotation=45, ha="right")
+    ax.set_ylabel("actual expensive-boundary events")
+    ax.set_xlabel("P0 generation")
+    ax.set_title("P1 generation singleflight — duplicates are red")
+    ax.grid(True, axis="y", alpha=0.25); ax.legend(loc="best")
+    if not generations:
+        ax.text(0.5, 0.5, "UNAVAILABLE", transform=ax.transAxes, ha="center")
+    fig.tight_layout(); fig.savefig(path, dpi=160); plt.close(fig)
+    return True
+
+
+def plot_p1_2_replan_load_correlation(
+    timeline_rows: list[dict[str, Any]], health_rows: list[dict[str, Any]], path: Path,
+    *, timebase_alignment: dict[str, Any] | None = None,
+) -> bool:
+    alignment = timebase_alignment or normalize_p1_2_timebases(
+        timeline_rows, health_rows, {}
+    )
+    event_times = list(alignment.get("timeline_relative_s", []))
+    health_times = list(alignment.get("health_relative_s", []))
     finite_times = [value for value in (*event_times, *health_times) if value is not None]
     fig, axes = plt.subplots(3, 1, figsize=(12.2, 9.2), sharex=True)
-    if not finite_times:
-        axes[0].text(0.5, 0.5, "UNAVAILABLE", transform=axes[0].transAxes, ha="center")
+    if not finite_times or not alignment.get("span_ok") or not alignment.get("memory_ok"):
+        message = "UNAVAILABLE\n" + "\n".join(alignment.get("reasons", []))
+        axes[0].text(0.5, 0.5, message, transform=axes[0].transAxes, ha="center")
     else:
-        start = math.floor(min(finite_times))
-        end = math.ceil(max(finite_times)) + 1.0
-        bins = np.arange(start, end + 1.0, 1.0)
+        bins = np.arange(0.0, float(alignment["bin_count"]), 1.0)
+        normalized_timeline = []
+        for row, stamp in zip(timeline_rows, event_times):
+            normalized_timeline.append({**row, "stamp_s": stamp})
+        normalized_health = []
+        for row, stamp in zip(health_rows, health_times):
+            normalized_health.append({**row, "stamp": stamp})
         sorted_timeline = sorted(
-            timeline_rows, key=lambda row: finite_float(row.get("stamp_s")) or -math.inf
+            normalized_timeline, key=lambda row: finite_float(row.get("stamp_s")) or -math.inf
         )
         reacquisitions: list[float | None] = []
         rejected_generation: str | None = None
@@ -14272,12 +14544,12 @@ def plot_p1_2_replan_load_correlation(
                     reacquisitions.append(finite_float(row.get("stamp_s")))
                 rejected_generation = None
         series = (
-            ("acquisition", [finite_float(row.get("stamp_s")) for row in timeline_rows if str(row.get("stage", "")) == "acquire"], "#2563eb"),
-            ("optimizer", [finite_float(row.get("stamp_s")) for row in timeline_rows if str(row.get("stage", "")) == "optimizer_start"], "#0891b2"),
-            ("rejected", [finite_float(row.get("stamp_s")) for row in timeline_rows if str(row.get("outcome", "")) == "rejected"], "#dc2626"),
-            ("deferred", [finite_float(row.get("stamp_s")) for row in timeline_rows if "deferred" in str(row.get("outcome", "")) or "deferred" in str(row.get("reason", ""))], "#9333ea"),
+            ("acquisition", [finite_float(row.get("stamp_s")) for row in normalized_timeline if str(row.get("stage", "")) == "acquire"], "#2563eb"),
+            ("optimizer", [finite_float(row.get("stamp_s")) for row in normalized_timeline if str(row.get("stage", "")) == "optimizer_start"], "#0891b2"),
+            ("rejected", [finite_float(row.get("stamp_s")) for row in normalized_timeline if str(row.get("outcome", "")) == "rejected"], "#dc2626"),
+            ("deferred", [finite_float(row.get("stamp_s")) for row in normalized_timeline if "deferred" in str(row.get("outcome", "")) or "deferred" in str(row.get("reason", ""))], "#9333ea"),
             ("reacquisition", reacquisitions, "#0d9488"),
-            ("fallback", [finite_float(row.get("stamp_s")) for row in timeline_rows if str(row.get("fallback_branch", "")) not in {"", "none"}], "#f97316"),
+            ("fallback", [finite_float(row.get("stamp_s")) for row in normalized_timeline if str(row.get("fallback_branch", "")) not in {"", "none"}], "#f97316"),
         )
         centers = 0.5 * (bins[:-1] + bins[1:])
         for label, values, color in series:
@@ -14287,7 +14559,7 @@ def plot_p1_2_replan_load_correlation(
         def binned_mean(field: str) -> np.ndarray:
             sums = np.zeros(len(bins) - 1)
             counts = np.zeros(len(bins) - 1)
-            for row in health_rows:
+            for row in normalized_health:
                 stamp = finite_float(row.get("stamp"))
                 value = finite_float(row.get(field))
                 if stamp is None or value is None:
@@ -14304,7 +14576,7 @@ def plot_p1_2_replan_load_correlation(
             stamps: list[float] = []
             weights: list[float] = []
             previous: float | None = None
-            for row in health_rows:
+            for row in normalized_health:
                 stamp = finite_float(row.get("stamp"))
                 value = finite_float(row.get(field))
                 if stamp is None or value is None:
@@ -14316,7 +14588,14 @@ def plot_p1_2_replan_load_correlation(
             counts, _ = np.histogram(stamps, bins=bins, weights=weights)
             axes[2].step(centers, counts, where="mid", label=field, color=color)
     axes[0].set_ylabel("events / 1 s bin")
-    axes[0].set_title("Generation-gated planning load: attempts, rejects, deferred retries, fallback")
+    causal_note = (
+        "causal alignment proven" if alignment.get("causal_alignment_proven")
+        else "independent run-relative displays; causal alignment UNAVAILABLE"
+    )
+    axes[0].set_title(
+        "Generation-gated planning load: attempts, rejects, deferred retries, fallback\n"
+        + causal_note
+    )
     axes[1].set_ylabel("milliseconds")
     axes[1].set_title("P0 refresh/queue/CPU mean on the same 1 s bins")
     axes[2].set_ylabel("callbacks / bin")
@@ -14335,6 +14614,8 @@ def plot_p1_2_replan_load_correlation(
 
 P1_2_HARD_GATE_ROWS = [
     ("manifest contract", ("manifest_present", "manifest_safety_profile_p1", "manifest_p0_enabled", "manifest_p1_enabled", "manifest_p1_metrics_only_false", "manifest_p1_use_integrity_cost", "manifest_p1_lambda_integrity_ok", "manifest_p0_stale_timeout_ok", "manifest_p2_p5_disabled"), ("manifest_p1_lambda_integrity", "manifest_p1_lambda_integrity_expected", "manifest_p0_stale_timeout_s")),
+    ("timebase alignment", ("timebase_alignment_proven", "timebase_span_bounded", "timebase_memory_bounded"), ("timebase_mapping_mode", "timebase_bin_count", "timebase_estimated_bin_bytes", "timebase_reasons")),
+    ("generation singleflight", ("generation_singleflight_passed",), ("max_admission_per_generation", "max_acquisition_per_generation", "max_optimizer_start_per_generation", "generation_singleflight_duplicates")),
     ("validator", ("validator_summary_present", "validator_passed"), ()),
     ("P1-2 raw P0 startup/health", ("p0_health_rows_present", "p0_startup_snapshot_unavailable_bounded", "p0_post_startup_rows_present", "p0_post_startup_ready", "p0_post_startup_non_stale", "p0_post_startup_not_full_unknown", "p0_health_max_gap_ok"), ("post_startup_rows", "p0_health_max_gap_s")),
     ("P1-1 raw P0 startup/health", ("reference_p0_health_rows_present", "reference_p0_startup_snapshot_unavailable_bounded", "reference_p0_post_startup_rows_present", "reference_p0_post_startup_ready", "reference_p0_post_startup_non_stale", "reference_p0_post_startup_not_full_unknown", "reference_p0_health_max_gap_ok"), ("reference_post_startup_rows", "reference_p0_health_max_gap_s")),
@@ -14838,6 +15119,7 @@ def analyze_p0_5_synthetic_only(
         next_branch = "continue_to_P0-6"
 
     summary = {
+        "analysis_complete": True,
         "experiment_id": args.experiment_id,
         "status": status,
         "passed": status == "PASS",
@@ -15997,6 +16279,9 @@ def analyze(args: argparse.Namespace) -> dict[str, Any]:
     p1_1_baseline_bspline_error = ""
     p1_1_bspline_comparison: dict[str, Any] = {}
     p1_2_gates: dict[str, Any] = {}
+    p1_2_timebase_alignment: dict[str, Any] = {}
+    p1_1_timebase_alignment: dict[str, Any] = {}
+    p1_2_singleflight: dict[str, Any] = {}
     p1_2_bspline_rows: list[dict[str, Any]] = []
     p1_2_bspline_error = ""
     p1_2_reference_bspline_rows: list[dict[str, Any]] = []
@@ -16254,6 +16539,55 @@ def analyze(args: argparse.Namespace) -> dict[str, Any]:
             p1_2_reference_timeline_info,
             p1_2_reference_health_summary,
             p1_2_reference_health_rows,
+        )
+        p1_2_timebase_alignment = normalize_p1_2_timebases(
+            p1_planning_context_timeline_rows, health_rows, manifest
+        )
+        p1_1_timebase_alignment = normalize_p1_2_timebases(
+            p1_2_reference_timeline_rows, p1_2_reference_health_rows,
+            baseline_manifest,
+        )
+        p1_2_singleflight = summarize_p1_generation_singleflight(
+            p1_planning_context_timeline_rows
+        )
+        p1_2_gates.update({
+            "timebase_alignment_proven": bool(
+                p1_2_timebase_alignment.get("causal_alignment_proven")
+                and p1_1_timebase_alignment.get("causal_alignment_proven")
+            ),
+            "timebase_span_bounded": bool(
+                p1_2_timebase_alignment.get("span_ok")
+                and p1_1_timebase_alignment.get("span_ok")
+            ),
+            "timebase_memory_bounded": bool(
+                p1_2_timebase_alignment.get("memory_ok")
+                and p1_1_timebase_alignment.get("memory_ok")
+            ),
+            "timebase_mapping_mode": {
+                "p1_2": p1_2_timebase_alignment.get("mapping_mode"),
+                "p1_1": p1_1_timebase_alignment.get("mapping_mode"),
+            },
+            "timebase_bin_count": {
+                "p1_2": p1_2_timebase_alignment.get("bin_count"),
+                "p1_1": p1_1_timebase_alignment.get("bin_count"),
+            },
+            "timebase_estimated_bin_bytes": {
+                "p1_2": p1_2_timebase_alignment.get("estimated_bin_bytes"),
+                "p1_1": p1_1_timebase_alignment.get("estimated_bin_bytes"),
+            },
+            "timebase_reasons": [
+                *p1_2_timebase_alignment.get("reasons", []),
+                *p1_1_timebase_alignment.get("reasons", []),
+            ],
+            "generation_singleflight_passed": p1_2_singleflight.get("passed", False),
+            "max_admission_per_generation": p1_2_singleflight.get("max_admission_per_generation"),
+            "max_acquisition_per_generation": p1_2_singleflight.get("max_acquisition_per_generation"),
+            "max_optimizer_start_per_generation": p1_2_singleflight.get("max_optimizer_start_per_generation"),
+            "generation_singleflight_duplicates": p1_2_singleflight.get("duplicates", []),
+        })
+        write_p1_2_provisional_summary(
+            metadata_dir / "safety_planner_analysis_summary.json",
+            p1_2_timebase_alignment,
         )
     if p5_5_phase:
         p5_5_integrity_rows, p5_5_integrity_error = (
@@ -17574,6 +17908,17 @@ def analyze(args: argparse.Namespace) -> dict[str, Any]:
         p1_cause_path = csv_dir / "p1_2_cause_exclusion_summary.csv"
         p1_hard_gate_csv_path = csv_dir / "p1_2_hard_gates.csv"
         p1_hard_gate_json_path = csv_dir / "p1_2_hard_gates.json"
+        provisional_gate_rows = p1_2_hard_gate_rows(p1_2_gates)
+        write_csv(
+            p1_hard_gate_csv_path,
+            ["id", "label", "verdict", "governing_values", "failure_reason"],
+            provisional_gate_rows,
+        )
+        write_json(p1_hard_gate_json_path, {
+            "analysis_complete": False,
+            "passed": False,
+            "gates": provisional_gate_rows,
+        })
 
         write_csv(
             p1_summary_path,
@@ -17928,9 +18273,34 @@ def analyze(args: argparse.Namespace) -> dict[str, Any]:
             p1_planning_context_timeline_rows,
             health_rows,
             p1_2_figure_paths["p1_2_replan_load_correlation.png"],
+            timebase_alignment=p1_2_timebase_alignment,
         ):
             p1_2_figure_artifacts.append(str(
                 p1_2_figure_paths["p1_2_replan_load_correlation.png"]
+            ))
+        if plot_p1_2_timebase_alignment(
+            p1_2_timebase_alignment,
+            p1_2_figure_paths["p1_2_timebase_alignment.png"],
+            p1_1_timebase_alignment,
+        ):
+            p1_2_figure_artifacts.append(str(
+                p1_2_figure_paths["p1_2_timebase_alignment.png"]
+            ))
+        if plot_p1_2_temporal_horizon_admission(
+            manifest,
+            p1_planning_context_timeline_rows,
+            p1_accepted_profile_context_rows,
+            p1_2_figure_paths["p1_2_temporal_horizon_admission.png"],
+        ):
+            p1_2_figure_artifacts.append(str(
+                p1_2_figure_paths["p1_2_temporal_horizon_admission.png"]
+            ))
+        if plot_p1_2_generation_singleflight_timeline(
+            p1_planning_context_timeline_rows,
+            p1_2_figure_paths["p1_2_generation_singleflight_timeline.png"],
+        ):
+            p1_2_figure_artifacts.append(str(
+                p1_2_figure_paths["p1_2_generation_singleflight_timeline.png"]
             ))
         if plot_p1_2_p0_callback_timeline(
             health_rows, p1_2_figure_paths["p1_2_p0_callback_timeline.png"]
@@ -18265,6 +18635,12 @@ def analyze(args: argparse.Namespace) -> dict[str, Any]:
         "p0_summary": p0_summary,
         "p1_1_hard_gates": p1_1_gates,
         "p1_2_hard_gates": p1_2_gates,
+        "timebase_alignment": {
+            "p1_2": p1_2_timebase_alignment,
+            "p1_1": p1_1_timebase_alignment,
+        },
+        "generation_singleflight": p1_2_singleflight,
+        "peak_rss_kib": resource.getrusage(resource.RUSAGE_SELF).ru_maxrss,
         "p1_summary": {
             "metrics_debug": p1_debug_summary,
             "accepted_profile": p1_accepted_profile_summary,

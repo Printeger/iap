@@ -145,6 +145,8 @@ namespace ego_planner
       double planning_start_s = std::numeric_limits<double>::quiet_NaN();
       uint64_t planning_attempt_id = 0;
       uint64_t candidate_id = 0;
+      bool objective_allowed = true;
+      std::string fallback_reason = "none";
     };
 
     struct OptimizerCostBreakdown

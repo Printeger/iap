@@ -930,6 +930,7 @@ namespace ego_planner
         (planner_manager_->p5_integrity_gate_->runtimeEnabled() ||
          planner_manager_->p5_integrity_gate_->finalGateEnabled());
     std::shared_ptr<const iap::RiskGridSnapshot> admitted_snapshot;
+    bool acquire_p1_context = true;
     if (planner_manager_->p1AdmissionEnabled() && !p5_owns_admission)
     {
       admitted_snapshot = planner_manager_->acquireRiskGridSnapshot();
@@ -948,8 +949,11 @@ namespace ego_planner
           health.stale;
       const uint64_t generation = admitted_snapshot
           ? admitted_snapshot->generation_id() : 0;
+      const bool has_existing_trajectory =
+          previous_local_data.traj_id_ > 0 && previous_local_data.duration_ > 0.0;
       const auto admission = p1_replan_admission_.admit(
-          generation, health.ready, stale);
+          generation, health.ready, stale, has_existing_trajectory);
+      acquire_p1_context = admission.acquire_p1_context;
       if (!admission.allow_expensive_planning)
       {
         planner_manager_->recordP1RetryDeferred(
@@ -960,7 +964,8 @@ namespace ego_planner
 
     if (planner_manager_->p1AdmissionEnabled() && !p5_owns_admission)
       planner_manager_->beginPlanningRiskContextWithSnapshot(
-          plannerNow().seconds(), admitted_snapshot);
+          plannerNow().seconds(),
+          acquire_p1_context ? admitted_snapshot : nullptr);
     else
       planner_manager_->beginPlanningRiskContext(plannerNow().seconds());
     struct PlanningRiskContextGuard

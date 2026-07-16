@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 
 import importlib.util
+import json
 from pathlib import Path
 import tempfile
 import unittest
@@ -23,6 +24,16 @@ def p1_2_manifest(**overrides):
         "experiment": "p1_degraded_lidar_good",
         "scenario": "gnss_degraded_lidar_good",
         "planner_safety_profile": "p1",
+        "run_duration_s": 90.0,
+        "validation_duration_s": 90.0,
+        "timebase": {
+            "planning_timeline": {"domain": "sim_message", "field": "stamp_s"},
+            "p0_health_payload": {
+                "domain": "sim_message",
+                "field": "health_callback_stamp_s",
+            },
+            "bag_receive": {"domain": "system_receive", "field": "stamp"},
+        },
         "p0.enable_risk_grid": True,
         "p0.resolution_m": 0.75,
         "p0.stale_timeout_s": 1.0,
@@ -71,6 +82,7 @@ def metadata(**topic_count_overrides):
 def p0_row(idx, **overrides):
     row = {
         "stamp": float(idx),
+        "health_callback_stamp_s": float(idx),
         "ready": True,
         "stale": False,
         "valid_ratio": 1.0,
@@ -229,6 +241,10 @@ def accepted_profile_rows(
                 "disp_z": 0.0,
                 "grad_dot_displacement": -0.1,
                 "delta_c_pi": -0.1,
+                "objective_requested": 0 if metrics_only else 1,
+                "objective_applied": applied_to_objective,
+                "p1_fallback": 0 if applied_to_objective else 1,
+                "fallback_reason": "none" if applied_to_objective else "metrics_only",
             }
         )
     return rows
@@ -261,6 +277,10 @@ def accepted_profile_context(rows):
         "temporal_miss_count": 0, "occupied_miss_count": 0,
         "stale_miss_count": 0, "invalid_miss_count": 200 - matched,
         "trajectory_start_stamp_s": 10.0,
+        "objective_requested": first["objective_requested"],
+        "objective_applied": first["objective_applied"],
+        "p1_fallback": first["p1_fallback"],
+        "fallback_reason": first["fallback_reason"],
     }]
 
 
@@ -639,6 +659,9 @@ class P1_2AnalyzerTest(unittest.TestCase):
                 "p1_2_gradient_direction_field_overlay.png",
                 "p1_2_refresh_latency_vs_stale_threshold.png",
                 "p1_2_replan_load_correlation.png",
+                "p1_2_timebase_alignment.png",
+                "p1_2_temporal_horizon_admission.png",
+                "p1_2_generation_singleflight_timeline.png",
             ],
         )
 
@@ -870,9 +893,9 @@ class P1_2AnalyzerTest(unittest.TestCase):
         self.assertFalse(result["valid"])
         self.assertIn("temporal_out_of_horizon", result["reasons"])
 
-    def test_p1_2_required_figure_contract_has_sixteen_nonempty_names(self):
-        self.assertEqual(len(analyzer.P1_2_FIGURE_FILENAMES), 16)
-        self.assertEqual(len(set(analyzer.P1_2_FIGURE_FILENAMES)), 16)
+    def test_p1_2_required_figure_contract_has_nineteen_nonempty_names(self):
+        self.assertEqual(len(analyzer.P1_2_FIGURE_FILENAMES), 19)
+        self.assertEqual(len(set(analyzer.P1_2_FIGURE_FILENAMES)), 19)
         self.assertIn(
             "p1_2_snapshot_spatial_bounds_overlay.png",
             analyzer.P1_2_FIGURE_FILENAMES,
@@ -950,7 +973,83 @@ class P1_2AnalyzerTest(unittest.TestCase):
                 timeline, [p0_row(idx) for idx in range(5)], paths[3]))
             self.assertTrue(all(path.stat().st_size > 0 for path in paths))
 
+    def test_mixed_timebases_are_bounded_and_unmapped_fail_closed(self):
+        planning_epoch = 1657065600.0
+        health_epoch = 1784221650.0
+        timeline = [
+            {"stamp_s": planning_epoch + second, "stage": "acquire", "outcome": "started"}
+            for second in range(91)
+        ]
+        health = [
+            p0_row(
+                second,
+                stamp=health_epoch + second,
+                health_callback_stamp_s=planning_epoch + second,
+            )
+            for second in range(91)
+        ]
+        # The legacy absolute-epoch implementation would create this many
+        # one-second bins before plotting and was killed by the cgroup OOM.
+        self.assertEqual(
+            int(max(row["stamp"] for row in health)
+                - min(row["stamp_s"] for row in timeline)) + 1,
+            127156141,
+        )
+        manifest = {"run_duration_s": 90.0}
+        alignment = analyzer.normalize_p1_2_timebases(timeline, health, manifest)
+        self.assertFalse(alignment["causal_alignment_proven"])
+        self.assertEqual(alignment["verdict"], "UNAVAILABLE")
+        self.assertLessEqual(alignment["bin_count"], 96)
+        self.assertLessEqual(alignment["estimated_bin_bytes"], 1024 * 1024)
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            figure = tmp_path / "p1_2_replan_load_correlation.png"
+            summary = tmp_path / "safety_planner_analysis_summary.json"
+            self.assertTrue(analyzer.plot_p1_2_replan_load_correlation(
+                timeline, health, figure, timebase_alignment=alignment))
+            analyzer.write_p1_2_provisional_summary(summary, alignment)
+            self.assertGreater(figure.stat().st_size, 0)
+            payload = json.loads(summary.read_text())
+            self.assertFalse(payload["passed"])
+            self.assertFalse(payload["analysis_complete"])
+            self.assertIn("timebase", payload["failures"][0])
+
+    def test_explicit_common_sim_clock_uses_one_shared_origin(self):
+        planning_epoch = 1657065600.0
+        receive_epoch = 1784221650.0
+        timeline = [
+            {"stamp_s": planning_epoch + second, "stage": "acquire"}
+            for second in range(91)
+        ]
+        health = [
+            p0_row(
+                second,
+                stamp=receive_epoch + second,
+                health_callback_stamp_s=planning_epoch + second + 0.25,
+            )
+            for second in range(91)
+        ]
+        manifest = {
+            "run_duration_s": 90.0,
+            "timebase": {
+                "planning_timeline": {"domain": "sim_message", "field": "stamp_s"},
+                "p0_health_payload": {
+                    "domain": "sim_message",
+                    "field": "health_callback_stamp_s",
+                },
+                "bag_receive": {"domain": "system_receive", "field": "stamp"},
+            },
+        }
+        alignment = analyzer.normalize_p1_2_timebases(timeline, health, manifest)
+        self.assertTrue(alignment["causal_alignment_proven"])
+        self.assertEqual(alignment["verdict"], "PASS")
+        self.assertEqual(alignment["mapping_mode"], "explicit_common_clock")
+        self.assertAlmostEqual(alignment["health_relative_s"][0], 0.25)
+        self.assertAlmostEqual(alignment["timeline_relative_s"][-1], 90.0)
+        self.assertLessEqual(alignment["bin_count"], 96)
+
     def test_required_png_completeness_is_a_final_hard_gate(self):
+        self.assertEqual(len(analyzer.P1_2_FIGURE_FILENAMES), 19)
         with tempfile.TemporaryDirectory() as tmp:
             paths = [Path(tmp) / name for name in analyzer.P1_2_FIGURE_FILENAMES]
             for path in paths[:-1]:

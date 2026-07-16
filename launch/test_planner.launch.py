@@ -1662,6 +1662,16 @@ def _launch_setup(context):
         "scenario": scenario,
         "runtime_config_path": runtime_config_path,
         "export_dir": export_dir,
+        "run_duration_s": run_duration_s,
+        "validation_duration_s": validation_duration_s,
+        "timebase": {
+            "planning_timeline": {"domain": "sim_message", "field": "stamp_s"},
+            "p0_health_payload": {
+                "domain": "sim_message",
+                "field": "health_callback_stamp_s",
+            },
+            "bag_receive": {"domain": "system_receive", "field": "stamp"},
+        },
         "planner_safety_profile": safety_profile,
         "p0.enable_risk_grid": p0_enabled,
         "p1.use_integrity_cost": p1_use_for_manifest,

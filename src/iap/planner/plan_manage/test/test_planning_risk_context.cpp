@@ -1,4 +1,5 @@
 #include <ego_planner/planner_manager.h>
+#include <ego_planner/p1_soft_fallback_policy.h>
 
 #include <gtest/gtest.h>
 #include <iap/planner/risk_grid_map.hpp>
@@ -177,6 +178,70 @@ TEST(P1AcceptedContextValidationTest,
   EXPECT_EQ(result.covered_sample_count, 25U);
   EXPECT_EQ(result.occupied_miss_count, 175U);
   EXPECT_FALSE(result.valid);
+}
+
+TEST(P1SoftFallbackPolicyTest,
+     MetricsOnlyNeverRejectsBaseCandidateForTemporalHorizon) {
+  iap::P1AcceptedContextValidation validation;
+  validation.snapshot_available = true;
+  validation.spatial_in_bounds = true;
+  validation.frame_match = true;
+  validation.generation_match = true;
+  validation.query_time_match = true;
+  validation.fresh = true;
+  validation.temporal_in_horizon = false;
+  validation.coverage_ok = false;
+  validation.valid = false;
+
+  const auto decision = ego_planner::decideP1SoftFallback({
+      true, false, false, validation});
+
+  EXPECT_TRUE(decision.publish_candidate);
+  EXPECT_FALSE(decision.objective_allowed);
+  EXPECT_EQ(decision.action,
+            ego_planner::P1SoftFallbackAction::PUBLISH_BASE_CANDIDATE);
+  EXPECT_EQ(decision.reason, "metrics_only_temporal_out_of_horizon");
+}
+
+TEST(P1SoftFallbackPolicyTest,
+     EnabledModeFallsBackToBaseCandidateWhenContextCannotCoverTrajectory) {
+  iap::P1AcceptedContextValidation validation;
+  validation.snapshot_available = true;
+  validation.spatial_in_bounds = true;
+  validation.frame_match = true;
+  validation.generation_match = true;
+  validation.query_time_match = true;
+  validation.fresh = true;
+  validation.temporal_in_horizon = false;
+  validation.coverage_ok = false;
+  validation.valid = false;
+  const auto decision = ego_planner::decideP1SoftFallback({
+      false, false, false, validation});
+
+  EXPECT_TRUE(decision.publish_candidate);
+  EXPECT_FALSE(decision.objective_allowed);
+  EXPECT_EQ(decision.action,
+            ego_planner::P1SoftFallbackAction::PUBLISH_BASE_CANDIDATE);
+  EXPECT_EQ(decision.reason, "temporal_out_of_horizon");
+}
+
+TEST(P1SoftFallbackPolicyTest,
+     PostOptimizationInvalidityKeepsExistingOrDefersBaseInitialFallback) {
+  iap::P1AcceptedContextValidation validation;
+  validation.fresh = false;
+  validation.valid = false;
+  const auto keep_existing = ego_planner::decideP1SoftFallback({
+      false, true, true, validation});
+  EXPECT_FALSE(keep_existing.publish_candidate);
+  EXPECT_EQ(keep_existing.action,
+            ego_planner::P1SoftFallbackAction::KEEP_EXISTING_TRAJECTORY);
+
+  const auto initial = ego_planner::decideP1SoftFallback({
+      false, true, false, validation});
+  EXPECT_FALSE(initial.publish_candidate);
+  EXPECT_TRUE(initial.retry_base_on_new_generation);
+  EXPECT_EQ(initial.action,
+            ego_planner::P1SoftFallbackAction::DEFER_BASE_INITIAL_FALLBACK);
 }
 
 TEST(P1AcceptedContextValidationTest,

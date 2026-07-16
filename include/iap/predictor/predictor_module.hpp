@@ -12,6 +12,13 @@
 
 namespace iap {
 
+struct PredictorBatchDiagnostics {
+  std::size_t query_count = 0;
+  std::size_t unique_positions = 0;
+  std::size_t lidar_evaluations = 0;
+  std::size_t lidar_cache_hits = 0;
+};
+
 class PredictorModule {
  public:
   PredictorModule();
@@ -25,6 +32,9 @@ class PredictorModule {
       std::shared_ptr<const std::vector<Eigen::Vector3d>> points);
 
   PredictorQueryResult query(const PredictorQueryInput& input) const;
+  std::vector<PredictorQueryResult> queryBatch(
+      const std::vector<PredictorQueryInput>& inputs,
+      PredictorBatchDiagnostics* diagnostics = nullptr) const;
 
   const PredictorParams& params() const { return params_; }
 
@@ -33,6 +43,9 @@ class PredictorModule {
   GnssAdvisoryPredictor gnss_;
   LidarAdvisoryPredictor lidar_;
   FusionAdvisoryPredictor fusion_;
+  PredictorQueryResult queryWithLidar(
+      const PredictorQueryInput& input,
+      const LidarAdvisoryResult* cached_lidar) const;
 };
 
 }  // namespace iap

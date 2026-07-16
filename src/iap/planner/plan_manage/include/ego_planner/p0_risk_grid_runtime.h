@@ -129,6 +129,9 @@ class P0RiskGridRuntime {
     double health_state_mutex_wait_ms = std::numeric_limits<double>::quiet_NaN();
     double health_state_mutex_hold_ms = std::numeric_limits<double>::quiet_NaN();
     std::size_t refresh_query_count = 0;
+    std::size_t predictor_unique_positions = 0;
+    std::size_t predictor_lidar_evaluations = 0;
+    std::size_t predictor_lidar_cache_hits = 0;
     uint64_t input_callback_count = 0;
     uint64_t health_callback_count = 0;
     bool snapshot_available = false;
@@ -205,6 +208,9 @@ class P0RiskGridRuntime {
   double last_generation_interval_ms_ = std::numeric_limits<double>::quiet_NaN();
   bool last_snapshot_available_ = false;
   std::size_t last_refresh_query_count_ = 0;
+  std::size_t last_predictor_unique_positions_ = 0;
+  std::size_t last_predictor_lidar_evaluations_ = 0;
+  std::size_t last_predictor_lidar_cache_hits_ = 0;
   double last_refresh_start_stamp_s_ = std::numeric_limits<double>::quiet_NaN();
   double last_refresh_end_stamp_s_ = std::numeric_limits<double>::quiet_NaN();
   double last_health_callback_stamp_s_ = std::numeric_limits<double>::quiet_NaN();

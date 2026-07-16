@@ -1,6 +1,7 @@
 #include <iap/predictor/predictor_module.hpp>
 
 #include <cmath>
+#include <unordered_map>
 #include <utility>
 
 namespace iap {
@@ -256,6 +257,12 @@ void PredictorModule::set_lidar_map_points(
 
 PredictorQueryResult PredictorModule::query(
     const PredictorQueryInput& input) const {
+  return queryWithLidar(input, nullptr);
+}
+
+PredictorQueryResult PredictorModule::queryWithLidar(
+    const PredictorQueryInput& input,
+    const LidarAdvisoryResult* cached_lidar) const {
   PredictorQueryResult out;
   out.query_position_map = input.query_position_map;
   out.query_time_s = input.query_time_s;
@@ -342,8 +349,10 @@ PredictorQueryResult PredictorModule::query(
   }
 
   if (source_allows_lidar(params_.source_mode)) {
-    out.lidar = lidar_.query(working_input.query_position_map,
-                             working_input.snapshot);
+    out.lidar = cached_lidar
+                    ? *cached_lidar
+                    : lidar_.query(working_input.query_position_map,
+                                   working_input.snapshot);
   } else {
     out.lidar = disabled_lidar_result("lidar_disabled");
   }
@@ -369,6 +378,60 @@ PredictorQueryResult PredictorModule::query(
   }
   out.source_flags = make_source_flags(out);
   return out;
+}
+
+std::vector<PredictorQueryResult> PredictorModule::queryBatch(
+    const std::vector<PredictorQueryInput>& inputs,
+    PredictorBatchDiagnostics* diagnostics) const {
+  struct Key {
+    double x;
+    double y;
+    double z;
+    double snapshot_stamp;
+    bool operator==(const Key& other) const {
+      return x == other.x && y == other.y && z == other.z &&
+             snapshot_stamp == other.snapshot_stamp;
+    }
+  };
+  struct Hash {
+    std::size_t operator()(const Key& key) const {
+      std::size_t seed = std::hash<double>{}(key.x);
+      for (const double value : {key.y, key.z, key.snapshot_stamp}) {
+        seed ^= std::hash<double>{}(value) + 0x9e3779b9u + (seed << 6) +
+                (seed >> 2);
+      }
+      return seed;
+    }
+  };
+
+  PredictorBatchDiagnostics local;
+  local.query_count = inputs.size();
+  std::unordered_map<Key, LidarAdvisoryResult, Hash> lidar_cache;
+  lidar_cache.reserve(inputs.size());
+  std::vector<PredictorQueryResult> outputs;
+  outputs.reserve(inputs.size());
+  for (const auto& input : inputs) {
+    const bool cacheable = source_allows_lidar(params_.source_mode) &&
+                           input.query_position_map.allFinite() &&
+                           std::isfinite(input.snapshot.stamp);
+    const Key key{input.query_position_map.x(), input.query_position_map.y(),
+                  input.query_position_map.z(), input.snapshot.stamp};
+    const auto cached = cacheable ? lidar_cache.find(key) : lidar_cache.end();
+    const LidarAdvisoryResult* cached_lidar =
+        cached == lidar_cache.end() ? nullptr : &cached->second;
+    PredictorQueryResult result = queryWithLidar(input, cached_lidar);
+    if (cached_lidar) {
+      ++local.lidar_cache_hits;
+    } else if (cacheable &&
+               result.lidar.fallback_reason != "not_evaluated") {
+      lidar_cache.emplace(key, result.lidar);
+      ++local.lidar_evaluations;
+    }
+    outputs.push_back(std::move(result));
+  }
+  local.unique_positions = lidar_cache.size();
+  if (diagnostics) *diagnostics = local;
+  return outputs;
 }
 
 }  // namespace iap

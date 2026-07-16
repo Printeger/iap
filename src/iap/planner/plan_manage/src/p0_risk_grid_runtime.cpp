@@ -111,18 +111,6 @@ PredictorPositionCacheKey makePredictorPositionCacheKey(
   return PredictorPositionCacheKey{position.x(), position.y(), position.z()};
 }
 
-bool predictorQueryCanUsePositionCache(
-    const iap::RiskPredictionQuery& query) {
-  return query.position_w.allFinite() && std::isfinite(query.query_time_s) &&
-         std::isfinite(query.horizon_s) && query.horizon_s >= 0.0;
-}
-
-bool predictorBatchCanCacheByPositionOnly(
-    const iap::PredictorParams& params) {
-  return params.source_mode == iap::PredictorSourceMode::LidarOnly &&
-         params.gnss_epoch_policy == iap::PredictorGnssEpochPolicy::Disabled;
-}
-
 iap::RiskPredictionResult makeRiskPredictionResult(
     const iap::PredictorQueryResult& prediction) {
   iap::RiskPredictionResult out;
@@ -191,72 +179,68 @@ class PredictorModuleRiskProvider final : public iap::RiskPredictionProvider {
     if (queries.empty()) {
       return true;
     }
-    if (worker_count_ > 1) {
-      // Every task owns a PredictorModule copy. Results are written to their
-      // original query index, so serial and parallel batches are equivalent
-      // and the RiskGridMap merge order remains deterministic.
-      const int worker_count = std::min<int>(worker_count_, queries.size());
-      std::vector<std::future<void>> workers;
-      workers.reserve(static_cast<std::size_t>(worker_count));
-      for (int worker_id = 0; worker_id < worker_count; ++worker_id) {
-        workers.push_back(std::async(std::launch::async,
-            [this, &queries, results, worker_id, worker_count]() {
-              iap::PredictorModule worker_module = module_;
-              for (std::size_t index = static_cast<std::size_t>(worker_id);
-                   index < queries.size(); index += static_cast<std::size_t>(worker_count)) {
-                const auto& query = queries[index];
-                const iap::PredictorQueryInput input(query.position_w, snapshot_,
-                    query.query_time_s, query.horizon_s, "map", snapshot_.stamp);
-                (*results)[index] = makeRiskPredictionResult(worker_module.query(input));
-              }
-            }));
-      }
-      for (auto& worker : workers) {
-        worker.get();
-      }
-      return true;
-    }
-    const bool use_position_cache =
-        predictorBatchCanCacheByPositionOnly(module_.params());
-    std::unordered_map<PredictorPositionCacheKey,
-                       iap::RiskPredictionResult,
-                       PredictorPositionCacheHash>
-        position_cache;
-    if (use_position_cache) {
-      position_cache.reserve(queries.size());
-    }
+    std::unordered_map<PredictorPositionCacheKey, std::size_t,
+                       PredictorPositionCacheHash> group_by_position;
+    std::vector<std::vector<std::size_t>> groups;
+    group_by_position.reserve(queries.size());
     for (std::size_t index = 0; index < queries.size(); ++index) {
-      const auto& query = queries[index];
-      const bool cacheable =
-          use_position_cache && predictorQueryCanUsePositionCache(query);
-      if (cacheable) {
-        const PredictorPositionCacheKey key =
-            makePredictorPositionCacheKey(query.position_w);
-        const auto cached = position_cache.find(key);
-        if (cached != position_cache.end()) {
-          (*results)[index] = cached->second;
-          continue;
-        }
-      }
-
-      iap::PredictorQueryInput input(query.position_w, snapshot_,
-                                     query.query_time_s, query.horizon_s,
-                                     "map", snapshot_.stamp);
-      const iap::PredictorQueryResult prediction = module_.query(input);
-      iap::RiskPredictionResult out = makeRiskPredictionResult(prediction);
-      if (cacheable) {
-        position_cache.emplace(makePredictorPositionCacheKey(query.position_w),
-                               out);
-      }
-      (*results)[index] = out;
+      const auto key = makePredictorPositionCacheKey(queries[index].position_w);
+      const auto inserted = group_by_position.emplace(key, groups.size());
+      if (inserted.second) groups.emplace_back();
+      groups[inserted.first->second].push_back(index);
+    }
+    const int worker_count = std::min<int>(worker_count_, groups.size());
+    std::vector<std::future<iap::PredictorBatchDiagnostics>> workers;
+    workers.reserve(static_cast<std::size_t>(worker_count));
+    for (int worker_id = 0; worker_id < worker_count; ++worker_id) {
+      workers.push_back(std::async(std::launch::async,
+          [this, &queries, &groups, results, worker_id, worker_count]() {
+            iap::PredictorModule worker_module = module_;
+            iap::PredictorBatchDiagnostics aggregate;
+            for (std::size_t group_index = static_cast<std::size_t>(worker_id);
+                 group_index < groups.size();
+                 group_index += static_cast<std::size_t>(worker_count)) {
+              std::vector<iap::PredictorQueryInput> inputs;
+              inputs.reserve(groups[group_index].size());
+              for (const std::size_t index : groups[group_index]) {
+                const auto& query = queries[index];
+                inputs.emplace_back(query.position_w, snapshot_,
+                    query.query_time_s, query.horizon_s, "map", snapshot_.stamp);
+              }
+              iap::PredictorBatchDiagnostics diagnostics;
+              const auto predictions = worker_module.queryBatch(inputs, &diagnostics);
+              for (std::size_t local = 0; local < predictions.size(); ++local) {
+                (*results)[groups[group_index][local]] =
+                    makeRiskPredictionResult(predictions[local]);
+              }
+              aggregate.query_count += diagnostics.query_count;
+              aggregate.unique_positions += diagnostics.unique_positions;
+              aggregate.lidar_evaluations += diagnostics.lidar_evaluations;
+              aggregate.lidar_cache_hits += diagnostics.lidar_cache_hits;
+            }
+            return aggregate;
+          }));
+    }
+    last_diagnostics_ = {};
+    for (auto& worker : workers) {
+      const auto diagnostics = worker.get();
+      last_diagnostics_.query_count += diagnostics.query_count;
+      last_diagnostics_.unique_positions += diagnostics.unique_positions;
+      last_diagnostics_.lidar_evaluations += diagnostics.lidar_evaluations;
+      last_diagnostics_.lidar_cache_hits += diagnostics.lidar_cache_hits;
     }
     return true;
+  }
+
+  const iap::PredictorBatchDiagnostics& diagnostics() const {
+    return last_diagnostics_;
   }
 
  private:
   iap::PredictorModule module_;
   iap::IntegritySnapshot snapshot_;
   int worker_count_ = 1;
+  iap::PredictorBatchDiagnostics last_diagnostics_;
 };
 
 class TimedRiskProvider final : public iap::RiskPredictionProvider {
@@ -841,6 +825,7 @@ void P0RiskGridRuntime::refreshTimerCallback() {
 
   std::unique_ptr<iap::RiskPredictionProvider> local_provider;
   iap::RiskPredictionProvider* provider = provider_.get();
+  PredictorModuleRiskProvider* predictor_provider = nullptr;
   if (provider == nullptr) {
     iap::PredictorParams predictor_params;
     predictor_params.freshness.enabled = true;
@@ -877,8 +862,10 @@ void P0RiskGridRuntime::refreshTimerCallback() {
     iap::PredictorModule module(predictor_params);
     module.set_lidar_map_points(std::move(lidar_map_points));
     module.set_lidar_fim_primitives(std::move(lidar_fim_primitives));
-    local_provider = std::make_unique<PredictorModuleRiskProvider>(
+    auto owned_predictor_provider = std::make_unique<PredictorModuleRiskProvider>(
         std::move(module), snapshot, config_.predictor_effective_worker_count);
+    predictor_provider = owned_predictor_provider.get();
+    local_provider = std::move(owned_predictor_provider);
     provider = local_provider.get();
   }
 
@@ -907,6 +894,13 @@ void P0RiskGridRuntime::refreshTimerCallback() {
     last_refresh_elapsed_ms_ = std::chrono::duration<double, std::milli>(
         std::chrono::steady_clock::now() - refresh_start).count();
     last_provider_batch_duration_ms_ = timed_provider.durationMs();
+    if (predictor_provider)
+    {
+      const auto& diagnostics = predictor_provider->diagnostics();
+      last_predictor_unique_positions_ = diagnostics.unique_positions;
+      last_predictor_lidar_evaluations_ = diagnostics.lidar_evaluations;
+      last_predictor_lidar_cache_hits_ = diagnostics.lidar_cache_hits;
+    }
     last_refresh_end_stamp_s_ = refresh_end_stamp_s;
     last_refresh_end_steady_s_ = steadyNowSeconds();
     last_generation_interval_ms_ = std::isfinite(last_generation_end_steady_s_)
@@ -1026,6 +1020,9 @@ void P0RiskGridRuntime::publishHealth(const iap::RiskGridHealth& health,
       << "\"snapshot_available\":"
       << (state.snapshot_available ? "true" : "false") << ","
       << "\"refresh_query_count\":" << state.refresh_query_count << ","
+      << "\"predictor_unique_positions\":" << state.predictor_unique_positions << ","
+      << "\"predictor_lidar_evaluations\":" << state.predictor_lidar_evaluations << ","
+      << "\"predictor_lidar_cache_hits\":" << state.predictor_lidar_cache_hits << ","
       << "\"predictor_requested_worker_count\":" << config_.predictor_requested_worker_count << ","
       << "\"predictor_effective_worker_count\":" << config_.predictor_effective_worker_count << ","
       << "\"reason\":" << jsonString(out_health.reason)
@@ -1110,6 +1107,9 @@ P0RiskGridRuntime::healthPublicationStateSnapshot() const {
   state.health_state_mutex_wait_ms = last_health_state_mutex_wait_ms_;
   state.health_state_mutex_hold_ms = last_health_state_mutex_hold_ms_;
   state.refresh_query_count = last_refresh_query_count_;
+  state.predictor_unique_positions = last_predictor_unique_positions_;
+  state.predictor_lidar_evaluations = last_predictor_lidar_evaluations_;
+  state.predictor_lidar_cache_hits = last_predictor_lidar_cache_hits_;
   state.input_callback_count = input_callback_count_;
   state.health_callback_count = health_callback_count_;
   state.snapshot_available = last_snapshot_available_;

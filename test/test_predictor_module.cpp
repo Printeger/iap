@@ -753,6 +753,38 @@ TEST(PredictorModuleTest, ModuleFusesGnssAndLidarWithoutGridFields) {
   write_fusion_lambda_artifact(result.fused);
 }
 
+TEST(PredictorModuleTest, BatchMatchesScalarAndCachesLidarPerPosition) {
+  iap::PredictorModule module(make_params());
+  module.set_lidar_fim_primitives(make_lidar_primitives());
+  const auto snapshot = make_snapshot(true, true);
+  std::vector<iap::PredictorQueryInput> inputs;
+  for (const Eigen::Vector3d position :
+       {Eigen::Vector3d(1.0, 2.0, 3.0), Eigen::Vector3d(-1.0, 0.5, 2.0)}) {
+    for (int horizon = 0; horizon < 5; ++horizon) {
+      inputs.emplace_back(position, snapshot, 123.5 + 0.5 * horizon,
+                          0.5 * horizon, "map");
+    }
+  }
+
+  iap::PredictorBatchDiagnostics diagnostics;
+  const auto batch = module.queryBatch(inputs, &diagnostics);
+
+  ASSERT_EQ(batch.size(), inputs.size());
+  EXPECT_EQ(diagnostics.query_count, 10U);
+  EXPECT_EQ(diagnostics.unique_positions, 2U);
+  EXPECT_EQ(diagnostics.lidar_evaluations, 2U);
+  EXPECT_EQ(diagnostics.lidar_cache_hits, 8U);
+  for (std::size_t index = 0; index < inputs.size(); ++index) {
+    const auto scalar = module.query(inputs[index]);
+    EXPECT_EQ(batch[index].valid, scalar.valid);
+    EXPECT_EQ(batch[index].fallback_reason, scalar.fallback_reason);
+    EXPECT_DOUBLE_EQ(batch[index].fused.hpl, scalar.fused.hpl);
+    EXPECT_DOUBLE_EQ(batch[index].fused.vpl, scalar.fused.vpl);
+    EXPECT_TRUE(batch[index].lidar.lambda_lidar.isApprox(
+        scalar.lidar.lambda_lidar, 1.0e-12));
+  }
+}
+
 TEST(PredictorModuleTest,
      LidarOnlyAutoPolicyDoesNotRequireGnssEpochFreshness) {
   auto params = make_params();

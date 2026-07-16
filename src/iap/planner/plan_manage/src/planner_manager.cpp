@@ -1,5 +1,6 @@
 // #include <fstream>
 #include <ego_planner/planner_manager.h>
+#include <ego_planner/p1_soft_fallback_policy.h>
 #include <ego_planner/p0_risk_grid_runtime.h>
 #include <ego_planner/p5_runtime_integrity_gate.h>
 #include <ego_planner/safety_rviz_publisher.h>
@@ -360,12 +361,15 @@ namespace ego_planner
   {
     planning_risk_context_.pre_publish_s = now_s;
     const bool fresh = planningRiskContextFresh(now_s, reason);
-    last_p1_rejection_requires_new_generation_ = !fresh && reason &&
+    const bool blocks_publish = !fresh && planning_risk_context_.p1_objective_applied;
+    last_p1_rejection_requires_new_generation_ = blocks_publish && reason &&
         (*reason == "stale_planning_risk_context" ||
          *reason == "planning_risk_context_unavailable");
     appendPlanningRiskContextTimeline("pre_publish", now_s,
-        fresh ? "fresh" : "rejected", reason ? *reason : "");
-    return fresh;
+        fresh ? "fresh" : (blocks_publish ? "rejected" : "base_fallback"),
+        reason ? *reason : "",
+        blocks_publish ? "existing_trajectory" : "p1_soft_fallback");
+    return fresh || !blocks_publish;
   }
 
   bool EGOPlannerManager::finalizeP1AcceptedRiskProfile(
@@ -490,6 +494,12 @@ namespace ego_planner
   {
     last_p1_rejection_reason_.clear();
     last_p1_rejection_requires_new_generation_ = false;
+    const auto p1_config = bspline_optimizer_->getP1IntegrityConfig();
+    const bool has_existing_trajectory =
+        local_data_.traj_id_ > 0 && local_data_.duration_ > 0.0;
+    bool p1_objective_allowed =
+        p1_config.use_integrity_cost && !p1_config.metrics_only;
+    std::string p1_fallback_reason = "none";
     static int count = 0;
     printf("\033[47;30m\n[drone %d replan %d]==============================================\033[0m\n", pp_.drone_id, count++);
 
@@ -523,7 +533,10 @@ namespace ego_planner
     const auto planning_snapshot = currentPlanningRiskSnapshot();
     const double planning_query_base_time_s = currentPlanningQueryBaseTime();
     const auto set_p1_context = [this, planning_snapshot,
-                                 planning_query_base_time_s](const uint64_t candidate_id)
+                                 planning_query_base_time_s,
+                                 &p1_objective_allowed,
+                                 &p1_fallback_reason,
+                                 &p1_config](const uint64_t candidate_id)
     {
       planning_risk_context_.candidate_id = candidate_id;
       BsplineOptimizer::P1PlanningRiskContext context;
@@ -532,6 +545,12 @@ namespace ego_planner
       context.planning_start_s = planning_risk_context_.planning_start_s;
       context.planning_attempt_id = planning_risk_context_.planning_attempt_id;
       context.candidate_id = candidate_id;
+      context.objective_allowed = p1_objective_allowed;
+      context.fallback_reason = p1_fallback_reason;
+      planning_risk_context_.p1_objective_allowed = p1_objective_allowed;
+      planning_risk_context_.p1_objective_applied =
+          p1_objective_allowed && p1_config.use_integrity_cost;
+      planning_risk_context_.p1_fallback_reason = p1_fallback_reason;
       bspline_optimizer_->setP1PlanningRiskContext(std::move(context));
     };
 
@@ -693,6 +712,28 @@ namespace ego_planner
     // 将轨迹变为B样条轨迹
     Eigen::MatrixXd ctrl_pts, ctrl_pts_temp;
     UniformBspline::parameterizeToBspline(ts, point_set, start_end_derivatives, ctrl_pts);
+
+    if (p1_config.use_integrity_cost)
+    {
+      set_p1_context(0);
+      const UniformBspline initial_candidate(ctrl_pts, 3, ts);
+      const auto validation =
+          bspline_optimizer_->validateP1AcceptedTrajectoryRiskContext(
+              initial_candidate, plannerNow().seconds(), trajectory_frame_id_);
+      const auto fallback = decideP1SoftFallback({
+          p1_config.metrics_only, false, has_existing_trajectory, validation});
+      p1_objective_allowed = fallback.objective_allowed;
+      p1_fallback_reason = fallback.reason;
+      planning_risk_context_.p1_objective_allowed = p1_objective_allowed;
+      planning_risk_context_.p1_objective_applied = false;
+      planning_risk_context_.p1_fallback_reason = p1_fallback_reason;
+      appendPlanningRiskContextTimeline(
+          "p1_admission", plannerNow().seconds(),
+          p1_objective_allowed ? "p1_objective" : "base_fallback",
+          p1_fallback_reason,
+          p1_objective_allowed ? "none" : "p1_soft_fallback");
+      bspline_optimizer_->clearRiskSnapshot();
+    }
 
     vector<std::pair<int, int>> segments;
     if (bspline_optimizer_->getP4RiskAStarConfig().enable_risk_aware_astar)
@@ -916,7 +957,12 @@ namespace ego_planner
     const auto accepted_time = plannerNow();
     set_p1_context(selected_p1_candidate_id);
     std::string freshness_reason;
-    if (!planningRiskContextFresh(accepted_time.seconds(), &freshness_reason))
+    const bool objective_applied =
+        p1_objective_allowed && p1_config.use_integrity_cost &&
+        !p1_config.metrics_only && p1_config.lambda_integrity != 0.0;
+    planning_risk_context_.p1_objective_applied = objective_applied;
+    if (!planningRiskContextFresh(accepted_time.seconds(), &freshness_reason) &&
+        objective_applied)
     {
       last_p1_rejection_reason_ = freshness_reason;
       last_p1_rejection_requires_new_generation_ =
@@ -934,21 +980,38 @@ namespace ego_planner
             pos, accepted_time.seconds(), trajectory_frame_id_);
     if (!accepted_context.valid)
     {
-      last_p1_rejection_reason_ = accepted_context.failure_reasons.empty()
-          ? "accepted_context_invalid"
-          : accepted_context.failure_reasons.front();
-      last_p1_rejection_requires_new_generation_ =
-          !accepted_context.fresh || accepted_context.stale_miss_count > 0;
+      const auto fallback = decideP1SoftFallback({
+          p1_config.metrics_only, objective_applied,
+          has_existing_trajectory, accepted_context});
+      last_p1_rejection_reason_ = fallback.reason;
+      p1_fallback_reason = fallback.reason;
+      planning_risk_context_.p1_fallback_reason = fallback.reason;
+      planning_risk_context_.p1_objective_applied = false;
+      if (!fallback.publish_candidate)
+      {
+        last_p1_rejection_requires_new_generation_ =
+            fallback.retry_base_on_new_generation || !accepted_context.fresh ||
+            accepted_context.stale_miss_count > 0;
+        appendPlanningRiskContextTimeline("accept", accepted_time.seconds(),
+            "rejected", last_p1_rejection_reason_,
+            fallback.retry_base_on_new_generation
+                ? "base_initial_fallback_next_generation"
+                : "existing_trajectory");
+        bspline_optimizer_->clearRiskSnapshot();
+        continous_failures_count_++;
+        return false;
+      }
       appendPlanningRiskContextTimeline("accept", accepted_time.seconds(),
-          "rejected", last_p1_rejection_reason_,
-          "existing_poly_random_failure_budget");
-      bspline_optimizer_->clearRiskSnapshot();
-      continous_failures_count_++;
-      return false;
+          "base_fallback", fallback.reason, "p1_soft_fallback");
     }
-    planning_risk_context_.accepted_s = accepted_time.seconds();
-    appendPlanningRiskContextTimeline("accept", accepted_time.seconds(),
-        "fresh", "ok");
+    else
+    {
+      planning_risk_context_.accepted_s = accepted_time.seconds();
+      appendPlanningRiskContextTimeline("accept", accepted_time.seconds(),
+          objective_applied ? "fresh" : "base_fallback",
+          objective_applied ? "ok" : p1_fallback_reason,
+          objective_applied ? "none" : "p1_soft_fallback");
+    }
     updateTrajInfo(pos, accepted_time);
 
     static double sum_time = 0;

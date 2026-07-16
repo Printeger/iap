@@ -56,6 +56,9 @@ namespace ego_planner
       uint64_t generation_id = 0;
       uint64_t planning_attempt_id = 0;
       uint64_t candidate_id = 0;
+      bool p1_objective_allowed = true;
+      bool p1_objective_applied = false;
+      std::string p1_fallback_reason = "none";
       bool active = false;
     };
 

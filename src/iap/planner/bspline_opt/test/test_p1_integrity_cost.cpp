@@ -732,6 +732,43 @@ TEST(P1IntegrityCostTest, MetricsOnlyAcceptedProfileWritesFiniteSamples) {
   std::remove(profile_path.c_str());
 }
 
+TEST(P1IntegrityCostTest, BaseFallbackWithoutSnapshotWritesFailClosedProfile) {
+  ego_planner::SwarmTrajData swarm;
+  const Eigen::MatrixXd q = makeControlPoints();
+  const std::string debug_path = tempProfilePath("p1_base_fallback_debug");
+  const std::string profile_path =
+      "/tmp/planner_p1_accepted_trajectory_risk_profile.csv";
+  std::remove(debug_path.c_str());
+  std::remove(profile_path.c_str());
+
+  auto config = disabledConfig();
+  config.use_integrity_cost = true;
+  config.metrics_only = false;
+  config.lambda_integrity = 0.00001;
+  config.debug_csv_enable = true;
+  config.debug_csv_path = debug_path;
+  auto optimizer = makeOptimizer(config, &swarm);
+  ego_planner::BsplineOptimizer::P1PlanningRiskContext context;
+  context.objective_allowed = false;
+  context.fallback_reason = "snapshot_unavailable";
+  optimizer->setP1PlanningRiskContext(context);
+
+  ASSERT_TRUE(optimizer->writeP1AcceptedTrajectoryRiskProfile(
+      ego_planner::UniformBspline(q, 3, 0.1), 8, 43, 123.0));
+  const auto rows = readCsvRows(profile_path);
+  ASSERT_EQ(rows.size(), 200U);
+  for (const auto& row : rows) {
+    EXPECT_EQ(row.at("hit"), "0");
+    EXPECT_EQ(row.at("reason"), "snapshot_unavailable");
+    EXPECT_EQ(row.at("objective_requested"), "1");
+    EXPECT_EQ(row.at("objective_applied"), "0");
+    EXPECT_EQ(row.at("p1_fallback"), "1");
+    EXPECT_EQ(row.at("fallback_reason"), "snapshot_unavailable");
+  }
+  std::remove(debug_path.c_str());
+  std::remove(profile_path.c_str());
+}
+
 TEST(P1IntegrityCostTest, EnabledAcceptedProfileRecordsAppliedObjectiveAndLambda) {
   ego_planner::SwarmTrajData swarm;
   const Eigen::MatrixXd q = makeControlPoints();
