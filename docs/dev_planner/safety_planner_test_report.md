@@ -4640,6 +4640,35 @@ Final conclusion:
 
 FAIL -> lambda/gradient debug
 
+## P1-2 accepted-profile semantic repair — fresh pair result (2026-07-16)
+
+The prescribed fresh pair was run once, in order, without changing `p0.size_x_m`, P5 semantics, thresholds, or the fixed P1 lambda. The first analyzer invocation occurred before the recorder had written `metadata.yaml`; it was rerun after both bags finalized. The final `--fail-on-threshold` analyzer exit was `2`, with `passed=false`, `status=FAIL`, no inconclusive result, and `next_debug_branch=FAIL -> lambda/gradient debug`. This is a failed acceptance result, not a basis to enter P1-3.
+
+| Artifact | Path |
+|---|---|
+| P1-1 metrics-only export | `results/planner_validation/exports/test_planner_p1_degraded_lidar_good_gnss_degraded_lidar_good_1784180174174` |
+| P1-1 metrics-only bag | `results/planner_validation/bags/test_planner_p1_degraded_lidar_good_gnss_degraded_lidar_good_20260716T053614Z` |
+| P1-2 enabled export | `results/planner_validation/exports/test_planner_p1_degraded_lidar_good_gnss_degraded_lidar_good_1784180294294` |
+| P1-2 enabled bag | `results/planner_validation/bags/test_planner_p1_degraded_lidar_good_gnss_degraded_lidar_good_20260716T053814Z` |
+| Analyzer summary | `results/planner_validation/exports/test_planner_p1_degraded_lidar_good_gnss_degraded_lidar_good_1784180294294/metadata/safety_planner_analysis_summary.json` |
+
+Commands were the exact 90-second P1-1 metrics-only and P1-2 enabled commands documented above, followed by the documented P1-2 analyzer command with these four fresh export/bag paths and `--fail-on-threshold`.
+
+| Hard gate / evidence | Result |
+|---|---|
+| P1-1 reference coverage | **FAIL** — final profile `80/200` (`0.400`), below the required `>=20` and `>=0.5`. |
+| P1-2 final coverage | **PASS alone** — final profile `166/200` (`0.830`), but not sufficient because the reference profile failed. |
+| Finite valid `c_pi` strict reduction | **FAIL** — mean reduced (`0.4017985982 < 0.4046028449`) but max increased (`0.4235663081 > 0.4151654454`). |
+| P0 health / required topics | **FAIL** — raw `/planning/risk_grid_health` was missing or non-periodic after activation; post-startup P0 rows also showed ready=false, stale=true, and full-unknown evidence. |
+| Profile sidecar and debug binding | **FAIL** — the P1-1 sidecar was absent; the P1-2 final tuple did not match the parsed objective-applied debug tuple because the debug CSV had epoch query-base values written at default stream precision. The writer now uses precision 17 for future debug rows, but this failed pair remains failed evidence. |
+| Accepted-profile format/context | **FAIL** — reference context/metadata could not prove the required complete final-profile binding. |
+| Trajectory stability | **FAIL** — the analyzer could not establish the final P1-2 published path from the required bag evidence. |
+| Required figures | **FAIL** — scenario top-down, topic activity, and P0 health figures were absent because the required bag-derived topic evidence failed. Generated objective/profile figures are diagnostic only. |
+
+Figure conclusions: `p1_2_risk_profile_vs_p1_1.png` supports the strict-max-reduction failure; `p1_2_risk_sample_coverage_overlay.png` supports the 80/200 versus 166/200 coverage finding; `p1_2_p1_objective_timeline.png` supports that P1-2 used `lambda=0.00001`; and the missing bag-derived scenario/topic/P0-health figures support—not negate—the required-topic failure. No RViz latest cloud or older profile was substituted for the accepted-profile gates.
+
+Final status: **P1-2 FAIL — do not run P1-3.**
+
 ## P1-2 accepted-profile semantic repair (implementation-only verification)
 
 This section records a code/test-only repair after the archived run above. It is **not** a replacement for the fresh P1-1/P1-2 evidence pair and does not change the conclusion above.

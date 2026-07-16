@@ -770,6 +770,7 @@ def p5_8_topic_health(**count_overrides):
         "/sim/drone_0/lidar_body": 60,
         "/drone_0_visual_slam/odom": 60,
         "/drone_0_planning/bspline": 4,
+        analyzer.P0_HEALTH_LEGACY_TOPIC: 50,
         analyzer.P0_HEALTH_TOPIC: 50,
         analyzer.P0_PL_CLOUD_TOPIC: 50,
         analyzer.P0_VALIDITY_CLOUD_TOPIC: 50,
@@ -1131,6 +1132,7 @@ class P5_2AnalyzerTest(unittest.TestCase):
             "/iap/integrity": {"span_s": 59.0, "max_gap_s": 0.1},
             "/sim/drone_0/lidar_body": {"span_s": 59.0, "max_gap_s": 0.1},
             "/drone_0_visual_slam/odom": {"span_s": 59.0, "max_gap_s": 0.1},
+            analyzer.P0_HEALTH_LEGACY_TOPIC: {"span_s": 59.0, "max_gap_s": 0.5},
             "/planning/risk_grid_health": {"span_s": 59.0, "max_gap_s": 0.5},
         }
 

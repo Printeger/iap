@@ -37,6 +37,7 @@ P0_PL_CLOUD_TOPIC = "/iap/rviz/predicted_pl_cloud"
 P0_VALIDITY_CLOUD_TOPIC = "/iap/rviz/risk_validity_cloud"
 P0_TOPIC_ACTIVITY_TOPICS = TOPIC_ACTIVITY_TOPICS + [
     P0_HEALTH_TOPIC,
+    P0_HEALTH_LEGACY_TOPIC,
     P0_PL_CLOUD_TOPIC,
     P0_VALIDITY_CLOUD_TOPIC,
 ]
@@ -46,6 +47,7 @@ P0_TOPIC_EXPECTATIONS = {
     "/drone_0_visual_slam/odom": "continuous",
     "/drone_0_planning/bspline": "planner-dependent",
     P0_HEALTH_TOPIC: "active-periodic",
+    P0_HEALTH_LEGACY_TOPIC: "active-periodic",
     P0_PL_CLOUD_TOPIC: "present",
     P0_VALIDITY_CLOUD_TOPIC: "present",
 }
@@ -6463,6 +6465,15 @@ def summarize_p1_integrity_debug_rows(
         str(row.get("fallback_reason", "")).strip() or "<empty>"
         for row in rows
     )
+    def context_tuple(row: dict[str, Any]) -> tuple[str, str, str, str] | None:
+        values = tuple(str(row.get(key, "")).strip() for key in (
+            "planning_attempt_id", "candidate_id", "snapshot_generation_id", "query_base_time_s"
+        ))
+        return values if all(values) else None
+    applied_context_tuples = {
+        context for row, state in zip(rows, applied_states)
+        if state is True for context in [context_tuple(row)] if context is not None
+    }
     summary: dict[str, Any] = {
         "missing": missing,
         "path": path,
@@ -6488,6 +6499,7 @@ def summarize_p1_integrity_debug_rows(
         "applied_to_objective_false_count": applied_false_count,
         "applied_to_objective_invalid_count": applied_invalid_count,
         "fallback_reason_counts": dict(sorted(fallback_reasons.items())),
+        "applied_context_tuples": [list(value) for value in sorted(applied_context_tuples)],
     }
     for key in (
         "f_integrity",
@@ -7367,6 +7379,15 @@ def validate_p1_2_hard_gates(
         value = values.get(key, []) or []
         return str(value[0]) if len(value) == 1 else ""
     expected_lambda = finite_float(manifest.get("p1.lambda_integrity"))
+    selected_profile_context_tuple = tuple(
+        profile_value(p1_2_metadata, key)
+        for key in ("planning_attempt_id", "candidate_id", "snapshot_generation_id", "query_base_time_s")
+    )
+    applied_debug_context_tuples = {
+        tuple(str(value) for value in context)
+        for context in (p1_debug_summary.get("applied_context_tuples", []) or [])
+        if len(context) == 4
+    }
     gates: dict[str, Any] = {
         **manifest_gates,
         **reference_manifest_gates,
@@ -7416,6 +7437,12 @@ def validate_p1_2_hard_gates(
             p1_debug_summary.get("applied_to_objective_invalid_count", 0) or 0
         )
         == 0,
+        "p1_final_profile_context_in_debug": (
+            all(selected_profile_context_tuple)
+            and selected_profile_context_tuple in applied_debug_context_tuples
+        ),
+        "p1_final_profile_context_tuple": list(selected_profile_context_tuple),
+        "p1_applied_debug_context_tuples": [list(value) for value in sorted(applied_debug_context_tuples)],
         "weighted_f_integrity_max": weighted_max,
         "p1_weighted_integrity_positive": weighted_max is not None and weighted_max > 0.0,
         "p1_rviz_topic_statuses": p1_rviz_topic_statuses,
@@ -7547,6 +7574,8 @@ def validate_p1_2_hard_gates(
         failures.append("P1-2 P1 debug CSV never reported applied_to_objective=true")
     if not gates["p1_applied_to_objective_parse_ok"]:
         failures.append("P1-2 P1 debug CSV has invalid applied_to_objective values")
+    if not gates["p1_final_profile_context_in_debug"]:
+        failures.append("P1-2 selected accepted profile has no matching objective-applied debug candidate/context tuple")
     if not gates["p1_weighted_integrity_positive"]:
         failures.append("P1-2 weighted_f_integrity_max is not positive")
     if not gates["p1_rviz_topics_present"]:

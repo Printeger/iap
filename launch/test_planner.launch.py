@@ -1672,7 +1672,7 @@ def _launch_setup(context):
         "p0.stale_timeout_s": _param_float(context, "p0.stale_timeout_s"),
         "p0.batch_worker_count": 1,
         "p0.predictor.requested_worker_count": _param_int(context, "p0.predictor.worker_count"),
-        "p0.predictor.effective_worker_count": 1,
+        "p0.predictor.effective_worker_count": _param_int(context, "p0.predictor.worker_count"),
         "p0.skip_occupied_voxels": _param_bool(context, "p0.skip_occupied_voxels"),
         "p0.predictor.source_mode": LaunchConfiguration("p0.predictor.source_mode").perform(context),
         "p0.predictor.gnss_epoch_policy": LaunchConfiguration("p0.predictor.gnss_epoch_policy").perform(context),

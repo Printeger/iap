@@ -75,6 +75,21 @@ class StaleProvider : public iap::RiskPredictionProvider {
   }
 };
 
+class InvalidProvider : public iap::RiskPredictionProvider {
+ public:
+  bool batchQuery(const std::vector<iap::RiskPredictionQuery>& queries,
+                  std::vector<iap::RiskPredictionResult>* results) override {
+    results->assign(queries.size(), iap::RiskPredictionResult{});
+    for (auto& result : *results) {
+      result.available = true;
+      result.valid = false;
+      result.stale = false;
+      result.reason = "invalid_cost";
+    }
+    return true;
+  }
+};
+
 iap::RiskGridMapParams makeParams() {
   iap::RiskGridMapParams params;
   params.resolution_m = 1.0;
@@ -447,6 +462,29 @@ TEST(P1IntegrityCostTest, UnknownSmallPenaltyAddsCostWithZeroGradient) {
   EXPECT_NEAR(metrics.f_integrity, 3.0, 1.0e-12);
   EXPECT_NEAR(cost, original_cost + 6.0, 1.0e-12);
   EXPECT_TRUE(gradient.isApprox(original_gradient, 0.0));
+}
+
+TEST(P1IntegrityCostTest, InvalidMissIsConservativeWithoutInventedGradient) {
+  ego_planner::SwarmTrajData swarm;
+  const Eigen::MatrixXd q = makeControlPoints();
+  InvalidProvider provider;
+  auto snapshot = makeSnapshot(provider);
+
+  auto config = disabledConfig();
+  config.use_integrity_cost = true;
+  config.metrics_only = false;
+  config.lambda_integrity = 2.0;
+  config.unknown_policy = "skip";
+  config.unknown_soft_penalty = 3.0;
+  double cost = 0.0;
+  Eigen::MatrixXd gradient;
+  auto optimizer = makeOptimizer(config, &swarm);
+  optimizer->setRiskSnapshot(snapshot, snapshot->stamp_s());
+  ASSERT_TRUE(evaluate(*optimizer, q, &cost, &gradient));
+
+  const auto& metrics = optimizer->getLastP1IntegrityMetrics();
+  EXPECT_GT(metrics.f_integrity, 0.0);
+  EXPECT_EQ(metrics.grad_norm_integrity, 0.0);
 }
 
 TEST(P1IntegrityCostTest, SpatialOutOfMapUsesCappedInwardBarrierWithSkipPolicy) {

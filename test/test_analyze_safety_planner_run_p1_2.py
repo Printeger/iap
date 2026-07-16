@@ -83,8 +83,10 @@ def p1_debug_row(**overrides):
     row = {
         "stamp": 1.0,
         "lbfgs_iter": 1,
-        "snapshot_generation_id": 2,
-        "query_base_time_s": 1.0,
+        "planning_attempt_id": 11,
+        "candidate_id": 7,
+        "snapshot_generation_id": 4,
+        "query_base_time_s": 9.0,
         "sample_count": 4,
         "hit_count": 3,
         "miss_count": 1,
@@ -528,6 +530,15 @@ class P1_2AnalyzerTest(unittest.TestCase):
 
         self.assertFalse(gates["p1_2_accepted_profile_format_ok"])
         self.assertTrue(any("one metadata tuple" in item for item in failures), failures)
+
+    def test_final_profile_requires_matching_objective_debug_tuple(self):
+        debug_rows = [p1_debug_row(candidate_id=99)]
+        gates, failures, _, _ = run_gate(
+            debug_summary=p1_debug_summary(debug_rows)
+        )
+
+        self.assertFalse(gates["p1_final_profile_context_in_debug"])
+        self.assertTrue(any("matching objective-applied debug" in item for item in failures), failures)
 
     def test_required_topic_failure_blocks_nested_gate(self):
         health = topic_health(**{analyzer.P0_HEALTH_TOPIC: {"status": "FAIL", "count": 3}})

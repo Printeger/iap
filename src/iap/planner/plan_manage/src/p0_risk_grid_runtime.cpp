@@ -4,6 +4,7 @@
 #include <chrono>
 #include <cmath>
 #include <exception>
+#include <future>
 #include <iomanip>
 #include <memory>
 #include <sstream>
@@ -169,16 +170,45 @@ iap::PredictorGnssEpochPolicy parsePredictorGnssEpochPolicy(
 class PredictorModuleRiskProvider final : public iap::RiskPredictionProvider {
  public:
   PredictorModuleRiskProvider(iap::PredictorModule module,
-                              iap::IntegritySnapshot snapshot)
-      : module_(std::move(module)), snapshot_(std::move(snapshot)) {}
+                              iap::IntegritySnapshot snapshot,
+                              int worker_count)
+      : module_(std::move(module)), snapshot_(std::move(snapshot)),
+        worker_count_(std::max(1, worker_count)) {}
 
   bool batchQuery(const std::vector<iap::RiskPredictionQuery>& queries,
                   std::vector<iap::RiskPredictionResult>* results) override {
     if (results == nullptr) {
       return false;
     }
-    results->clear();
-    results->reserve(queries.size());
+    results->assign(queries.size(), iap::RiskPredictionResult{});
+    if (queries.empty()) {
+      return true;
+    }
+    if (worker_count_ > 1) {
+      // Every task owns a PredictorModule copy. Results are written to their
+      // original query index, so serial and parallel batches are equivalent
+      // and the RiskGridMap merge order remains deterministic.
+      const int worker_count = std::min<int>(worker_count_, queries.size());
+      std::vector<std::future<void>> workers;
+      workers.reserve(static_cast<std::size_t>(worker_count));
+      for (int worker_id = 0; worker_id < worker_count; ++worker_id) {
+        workers.push_back(std::async(std::launch::async,
+            [this, &queries, results, worker_id, worker_count]() {
+              iap::PredictorModule worker_module = module_;
+              for (std::size_t index = static_cast<std::size_t>(worker_id);
+                   index < queries.size(); index += static_cast<std::size_t>(worker_count)) {
+                const auto& query = queries[index];
+                const iap::PredictorQueryInput input(query.position_w, snapshot_,
+                    query.query_time_s, query.horizon_s, "map", snapshot_.stamp);
+                (*results)[index] = makeRiskPredictionResult(worker_module.query(input));
+              }
+            }));
+      }
+      for (auto& worker : workers) {
+        worker.get();
+      }
+      return true;
+    }
     const bool use_position_cache =
         predictorBatchCanCacheByPositionOnly(module_.params());
     std::unordered_map<PredictorPositionCacheKey,
@@ -188,7 +218,8 @@ class PredictorModuleRiskProvider final : public iap::RiskPredictionProvider {
     if (use_position_cache) {
       position_cache.reserve(queries.size());
     }
-    for (const auto& query : queries) {
+    for (std::size_t index = 0; index < queries.size(); ++index) {
+      const auto& query = queries[index];
       const bool cacheable =
           use_position_cache && predictorQueryCanUsePositionCache(query);
       if (cacheable) {
@@ -196,7 +227,7 @@ class PredictorModuleRiskProvider final : public iap::RiskPredictionProvider {
             makePredictorPositionCacheKey(query.position_w);
         const auto cached = position_cache.find(key);
         if (cached != position_cache.end()) {
-          results->push_back(cached->second);
+          (*results)[index] = cached->second;
           continue;
         }
       }
@@ -210,7 +241,7 @@ class PredictorModuleRiskProvider final : public iap::RiskPredictionProvider {
         position_cache.emplace(makePredictorPositionCacheKey(query.position_w),
                                out);
       }
-      results->push_back(out);
+      (*results)[index] = out;
     }
     return true;
   }
@@ -218,6 +249,7 @@ class PredictorModuleRiskProvider final : public iap::RiskPredictionProvider {
  private:
   iap::PredictorModule module_;
   iap::IntegritySnapshot snapshot_;
+  int worker_count_ = 1;
 };
 
 }  // namespace
@@ -293,11 +325,7 @@ P0RiskGridRuntime::Config P0RiskGridRuntime::declareAndReadConfig(
           config.predictor_lidar_fim_radius_m);
   config.predictor_requested_worker_count = static_cast<int>(std::max<int64_t>(1,
       node->declare_parameter<int>("p0.predictor.worker_count", 1)));
-  // PredictorModule keeps no shared mutable query state.  The current P0
-  // provider deliberately runs in deterministic source order; recording both
-  // values makes that choice auditable and avoids claiming parallelism that
-  // would alter query/result ordering.
-  config.predictor_effective_worker_count = 1;
+  config.predictor_effective_worker_count = config.predictor_requested_worker_count;
   config.p0_6_fixture.enabled =
       node->declare_parameter<bool>("p0_6.fixture.enabled", false);
   config.p0_6_fixture.name =
@@ -793,7 +821,7 @@ void P0RiskGridRuntime::refreshTimerCallback() {
     module.set_lidar_map_points(std::move(lidar_map_points));
     module.set_lidar_fim_primitives(std::move(lidar_fim_primitives));
     local_provider = std::make_unique<PredictorModuleRiskProvider>(
-        std::move(module), snapshot);
+        std::move(module), snapshot, config_.predictor_effective_worker_count);
     provider = local_provider.get();
   }
 

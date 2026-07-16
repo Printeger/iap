@@ -324,16 +324,22 @@ bool validate_corner(const RiskVoxel& voxel,
                      std::string* reason) {
   if (voxel.unknown) {
     if (reason) {
+      const bool conservative_miss_reason =
+          voxel.reason.find("stale") != std::string::npos ||
+          voxel.reason.find("invalid") != std::string::npos ||
+          voxel.reason.find("time_") == 0;
       *reason =
           (voxel.source_flags & RISK_GRID_SOURCE_OCCUPIED_SKIP) != 0u
               ? "occupied"
-              : "unknown_voxel";
+              : (conservative_miss_reason ? voxel.reason : "unknown_voxel");
     }
     return false;
   }
   if (!voxel.valid) {
     if (reason) {
-      *reason = "invalid_voxel";
+      *reason = voxel.reason.empty() || voxel.reason == "not_evaluated"
+          ? "invalid_voxel"
+          : voxel.reason;
     }
     return false;
   }

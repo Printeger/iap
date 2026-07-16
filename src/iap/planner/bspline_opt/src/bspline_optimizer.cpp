@@ -2197,9 +2197,10 @@ namespace ego_planner
             viz.reason == "position_out_of_interpolation_bounds";
         const bool conservative_scalar_miss =
             viz.reason.find("stale") != std::string::npos ||
+            viz.reason.find("invalid") != std::string::npos ||
             viz.reason == "time_out_of_range" ||
             viz.reason == "time_out_of_horizon" ||
-            viz.reason == "invalid_query";
+            viz.reason == "mixed";
         Eigen::Vector3d barrier_grad = Eigen::Vector3d::Zero();
         double barrier_cost = 0.0;
         const bool has_barrier = spatial_boundary_miss &&
@@ -2313,6 +2314,10 @@ namespace ego_planner
     {
       return;
     }
+    // Candidate/context identity is compared with the accepted-profile
+    // sidecar.  Preserve enough precision for snapshot-relative time bases
+    // instead of collapsing epoch seconds to the default stream precision.
+    out << std::setprecision(17);
     if (write_header)
     {
       out << "stamp,lbfgs_iter,planning_attempt_id,candidate_id,snapshot_generation_id,query_base_time_s,"
