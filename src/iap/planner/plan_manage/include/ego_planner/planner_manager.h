@@ -104,6 +104,9 @@ namespace ego_planner
     bool preparePlanningRiskPublish(double now_s, std::string *reason = nullptr);
     bool finalizeP1AcceptedRiskProfile(double publish_stamp_s);
     std::string p1PlanningContextTimelinePath() const;
+    bool p1AdmissionEnabled() const;
+    const std::string &lastP1RejectionReason() const { return last_p1_rejection_reason_; }
+    void recordP1RetryDeferred(const std::string &reason, double stamp_s);
 
     PlanParameters pp_;
     LocalTrajData local_data_;
@@ -132,6 +135,8 @@ namespace ego_planner
     uint64_t p3_batch_id_{0};
     PlanningRiskContext planning_risk_context_;
     TimeProvider time_provider_;
+    std::string trajectory_frame_id_{"map"};
+    std::string last_p1_rejection_reason_;
 
     void appendPlanningRiskContextTimeline(const std::string &stage,
                                            double stamp_s,

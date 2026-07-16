@@ -224,6 +224,12 @@ namespace ego_planner
 
   void BsplineOptimizer::setP1PlanningRiskContext(P1PlanningRiskContext context)
   {
+    if (!p1_pre_optimization_traces_.empty() &&
+        p1_pre_optimization_traces_.begin()->first.first !=
+            context.planning_attempt_id)
+    {
+      p1_pre_optimization_traces_.clear();
+    }
     p1_risk_context_ = std::move(context);
     risk_snapshot_ = p1_risk_context_.snapshot;
     risk_query_base_time_s_ = p1_risk_context_.query_base_time_s;
@@ -1762,6 +1768,7 @@ namespace ego_planner
   // 设置时间间隔ts，调用rebound_optimize(final_cost)将轨迹推出障碍物，得到最优的无碰撞轨迹，并将其控制点赋值给optimal_points
   bool BsplineOptimizer::BsplineOptimizeTrajRebound(Eigen::MatrixXd &optimal_points, double ts)
   {
+    captureP1PreOptimizationTrajectory(cps_.points, ts);
     setBsplineInterval(ts);
 
     double final_cost;
@@ -1776,6 +1783,7 @@ namespace ego_planner
   // 得到最优的无碰撞轨迹，并将其控制点赋值给optimal_points
   bool BsplineOptimizer::BsplineOptimizeTrajRebound(Eigen::MatrixXd &optimal_points, double &final_cost, const ControlPoints &control_points, double ts)
   {
+    captureP1PreOptimizationTrajectory(control_points.points, ts);
     // 将时间间隔存储到成员变量
     setBsplineInterval(ts);
 
@@ -1839,6 +1847,19 @@ namespace ego_planner
       lbfgs_params.mem_size = 16; // 算法保存的历史优化步数
       lbfgs_params.max_iterations = 200;
       lbfgs_params.g_epsilon = 0.01;
+      if (p1_config_.use_integrity_cost && !p1_config_.metrics_only &&
+          p1_config_.lambda_integrity != 0.0)
+      {
+        std::vector<double> initial_gradient(
+            static_cast<std::size_t>(variable_num_), 0.0);
+        double initial_cost = 0.0;
+        combineCostRebound(q, initial_gradient.data(), initial_cost,
+                           variable_num_);
+        const double variable_norm = Eigen::Map<const Eigen::VectorXd>(
+            q, variable_num_).norm();
+        lbfgs_params.g_epsilon = p1LbfgsGradientEpsilon(
+            last_p1_metrics_.weighted_grad_integrity_norm, variable_norm);
+      }
 
       /* ---------- optimize ---------- */
       t1 = rclcpp::Clock().now();
@@ -2366,12 +2387,33 @@ namespace ego_planner
     return siblingPath(p1_config_.debug_csv_path, kP1AcceptedProfileContextCsvName);
   }
 
+  void BsplineOptimizer::captureP1PreOptimizationTrajectory(
+      const Eigen::MatrixXd &control_points, const double interval_s)
+  {
+    if (control_points.rows() != 3 || control_points.cols() <= order_ ||
+        !std::isfinite(interval_s) || interval_s <= 0.0)
+      return;
+    P1PreOptimizationTrace trace;
+    trace.control_points = control_points;
+    trace.interval_s = interval_s;
+    p1_pre_optimization_traces_[
+        {p1_risk_context_.planning_attempt_id, p1_risk_context_.candidate_id}] =
+        std::move(trace);
+  }
+
+  void BsplineOptimizer::setP1PreOptimizationTrajectoryForTest(
+      const Eigen::MatrixXd &control_points, const double interval_s)
+  {
+    captureP1PreOptimizationTrajectory(control_points, interval_s);
+  }
+
   bool BsplineOptimizer::writeP1AcceptedTrajectoryRiskProfile(
       UniformBspline trajectory,
       const uint64_t profile_seq,
       const uint64_t trajectory_id,
       const double stamp_s,
-      const double planning_start_s) const
+      const double planning_start_s,
+      const std::string &trajectory_frame_id) const
   {
     if (!p1_config_.debug_csv_enable || p1_config_.debug_csv_path.empty() ||
         !risk_snapshot_)
@@ -2401,7 +2443,9 @@ namespace ego_planner
     {
       out << "profile_seq,stamp,trajectory_id,planning_attempt_id,candidate_id,applied_to_objective,metrics_only,"
              "lambda_integrity,snapshot_generation_id,query_base_time_s,"
-             "sample_index,arc_fraction,t_s,x,y,z,hit,valid,stale,c_pi,reason\n";
+             "sample_index,arc_fraction,t_s,x,y,z,hit,valid,stale,c_pi,reason,"
+             "trace_available,grad_x,grad_y,grad_z,neg_grad_x,neg_grad_y,neg_grad_z,"
+             "pre_x,pre_y,pre_z,disp_x,disp_y,disp_z,grad_dot_displacement,delta_c_pi\n";
     }
 
     const bool applied_to_objective =
@@ -2416,6 +2460,24 @@ namespace ego_planner
         std::numeric_limits<double>::infinity());
     Eigen::Vector3d trajectory_max = Eigen::Vector3d::Constant(
         -std::numeric_limits<double>::infinity());
+    std::vector<iap::P1AcceptedContextSample> validation_samples;
+    validation_samples.reserve(kP1AcceptedProfileSampleCount);
+    const auto trace_it = p1_pre_optimization_traces_.find(
+        {p1_risk_context_.planning_attempt_id, p1_risk_context_.candidate_id});
+    const bool trace_available =
+        trace_it != p1_pre_optimization_traces_.end() &&
+        trace_it->second.control_points.rows() == 3 &&
+        trace_it->second.control_points.cols() > order_ &&
+        std::isfinite(trace_it->second.interval_s) &&
+        trace_it->second.interval_s > 0.0;
+    std::unique_ptr<UniformBspline> pre_trajectory;
+    double pre_duration = std::numeric_limits<double>::quiet_NaN();
+    if (trace_available)
+    {
+      pre_trajectory = std::make_unique<UniformBspline>(
+          trace_it->second.control_points, order_, trace_it->second.interval_s);
+      pre_duration = pre_trajectory->getTimeSum();
+    }
     for (int sample_index = 0; sample_index < kP1AcceptedProfileSampleCount;
          ++sample_index)
     {
@@ -2430,6 +2492,35 @@ namespace ego_planner
           risk_snapshot_->queryCost(p, risk_query_base_time_s_ + t_s, &sample);
       const bool c_pi_finite =
           hit && sample.valid && !sample.stale && std::isfinite(sample.cost);
+      Eigen::Vector3d evidence_grad = sample.grad;
+      Eigen::Vector3d pre_position = Eigen::Vector3d::Constant(
+          std::numeric_limits<double>::quiet_NaN());
+      Eigen::Vector3d displacement = pre_position;
+      double grad_dot_displacement = std::numeric_limits<double>::quiet_NaN();
+      double delta_c_pi = std::numeric_limits<double>::quiet_NaN();
+      if (pre_trajectory && std::isfinite(pre_duration))
+      {
+        const double pre_t_s = pre_duration * arc_fraction;
+        pre_position = pre_trajectory->evaluateDeBoorT(pre_t_s);
+        iap::RiskCostSample pre_sample;
+        const bool pre_hit = risk_snapshot_->queryCost(
+            pre_position, risk_query_base_time_s_ + pre_t_s, &pre_sample);
+        const bool pre_cost_finite = pre_hit && pre_sample.valid &&
+            !pre_sample.stale && std::isfinite(pre_sample.cost) &&
+            pre_sample.grad.allFinite();
+        if (pre_cost_finite && c_pi_finite)
+        {
+          evidence_grad = pre_sample.grad;
+          displacement = p - pre_position;
+          grad_dot_displacement = evidence_grad.dot(displacement);
+          delta_c_pi = sample.cost - pre_sample.cost;
+        }
+      }
+      const double grad_norm = evidence_grad.norm();
+      Eigen::Vector3d negative_gradient = Eigen::Vector3d::Zero();
+      if (evidence_grad.allFinite() && std::isfinite(grad_norm) &&
+          grad_norm > 1.0e-12)
+        negative_gradient = -evidence_grad / grad_norm;
       std::string reason = sample.reason.empty() ? "query_miss" : sample.reason;
       if (!hit && reason == "not_evaluated")
       {
@@ -2443,6 +2534,15 @@ namespace ego_planner
         ++query_miss_count;
       else
         ++invalid_count;
+
+      iap::P1AcceptedContextSample validation_sample;
+      validation_sample.position_w = p;
+      validation_sample.trajectory_time_s = t_s;
+      validation_sample.query_hit = hit;
+      validation_sample.query_valid = sample.valid;
+      validation_sample.query_stale = sample.stale;
+      validation_sample.query_reason = reason;
+      validation_samples.push_back(std::move(validation_sample));
 
       out << profile_seq << ','
           << stamp_s << ','
@@ -2467,7 +2567,29 @@ namespace ego_planner
       {
         out << sample.cost;
       }
-      out << ',' << reason << '\n';
+      out << ',' << reason << ',' << (trace_available ? 1 : 0) << ','
+          << evidence_grad.x() << ',' << evidence_grad.y() << ','
+          << evidence_grad.z() << ',' << negative_gradient.x() << ','
+          << negative_gradient.y() << ',' << negative_gradient.z();
+      for (int axis = 0; axis < 3; ++axis)
+      {
+        out << ',';
+        if (pre_position.allFinite())
+          out << pre_position(axis);
+      }
+      for (int axis = 0; axis < 3; ++axis)
+      {
+        out << ',';
+        if (displacement.allFinite())
+          out << displacement(axis);
+      }
+      out << ',';
+      if (std::isfinite(grad_dot_displacement))
+        out << grad_dot_displacement;
+      out << ',';
+      if (std::isfinite(delta_c_pi))
+        out << delta_c_pi;
+      out << '\n';
     }
     out.close();
 
@@ -2476,11 +2598,17 @@ namespace ego_planner
     // it atomically so a killed writer can never leave a partially appended
     // row that looks like evidence for an older trajectory.
     std::ostringstream context;
-    const Eigen::Vector3d min_bound = risk_snapshot_->origin();
-    const Eigen::Vector3i dims = risk_snapshot_->voxelNum();
-    const double resolution = risk_snapshot_->params().resolution_m;
-    const Eigen::Vector3d max_bound = min_bound +
-        ((dims.array().max(0).cast<double>() - 1.0).max(0.0) * resolution).matrix();
+    iap::P1AcceptedContextValidationInput validation_input;
+    validation_input.snapshot = risk_snapshot_;
+    validation_input.snapshot_frame_id = risk_snapshot_->params().frame_id;
+    validation_input.trajectory_frame_id = trajectory_frame_id;
+    validation_input.expected_generation_id = risk_snapshot_->generation_id();
+    validation_input.query_base_time_s = risk_query_base_time_s_;
+    validation_input.accepted_stamp_s = stamp_s;
+    validation_input.samples = validation_samples;
+    const auto validation = iap::validateP1AcceptedContext(validation_input);
+    const Eigen::Vector3d min_bound = validation.interpolation_min;
+    const Eigen::Vector3d max_bound = validation.interpolation_max;
     const auto &horizons = risk_snapshot_->params().horizons_s;
     const auto horizon_minmax = std::minmax_element(horizons.begin(), horizons.end());
     const double tau_min = horizon_minmax.first == horizons.end() ? 0.0 : *horizon_minmax.first;
@@ -2491,7 +2619,7 @@ namespace ego_planner
             ? p1_risk_context_.planning_start_s
             : planning_start_s;
     context << std::setprecision(17);
-    context << "profile_seq,trajectory_id,planning_attempt_id,candidate_id,planning_start_s,accepted_stamp_s,planning_duration_s,snapshot_generation_id,snapshot_stamp_s,query_base_time_s,snapshot_center_x,snapshot_center_y,snapshot_center_z,snapshot_x_min,snapshot_x_max,snapshot_y_min,snapshot_y_max,snapshot_z_min,snapshot_z_max,snapshot_time_min_s,snapshot_time_max_s,trajectory_x_min,trajectory_x_max,trajectory_y_min,trajectory_y_max,trajectory_z_min,trajectory_z_max,trajectory_time_min_s,trajectory_time_max_s,expected_sample_count,matched_sample_count,match_ratio,query_miss_count,stale_count,invalid_count,miss_reason_histogram\n";
+    context << "profile_seq,trajectory_id,planning_attempt_id,candidate_id,planning_start_s,accepted_stamp_s,planning_duration_s,snapshot_generation_id,snapshot_stamp_s,query_base_time_s,snapshot_center_x,snapshot_center_y,snapshot_center_z,snapshot_x_min,snapshot_x_max,snapshot_y_min,snapshot_y_max,snapshot_z_min,snapshot_z_max,snapshot_time_min_s,snapshot_time_max_s,trajectory_x_min,trajectory_x_max,trajectory_y_min,trajectory_y_max,trajectory_z_min,trajectory_z_max,trajectory_time_min_s,trajectory_time_max_s,expected_sample_count,matched_sample_count,match_ratio,query_miss_count,stale_count,invalid_count,miss_reason_histogram,snapshot_frame_id,trajectory_frame_id,spatial_in_bounds,temporal_in_horizon,frame_match,generation_match,query_time_match,fresh,coverage_ok,spatial_miss_count,temporal_miss_count,occupied_miss_count,stale_miss_count,invalid_miss_count\n";
     std::map<std::string, int> miss_reasons;
     // Count categories against the same immutable snapshot used for the rows;
     // it never consults the runtime's latest P0 generation.
@@ -2524,7 +2652,20 @@ namespace ego_planner
             << 0.0 << ',' << duration << ','
             << kP1AcceptedProfileSampleCount << ',' << matched_count << ',' << static_cast<double>(matched_count) / kP1AcceptedProfileSampleCount << ','
             << query_miss_count << ',' << stale_count << ',' << invalid_count << ','
-            << miss_reason_histogram.str() << '\n';
+            << miss_reason_histogram.str() << ','
+            << risk_snapshot_->params().frame_id << ',' << trajectory_frame_id << ','
+            << (validation.spatial_in_bounds ? 1 : 0) << ','
+            << (validation.temporal_in_horizon ? 1 : 0) << ','
+            << (validation.frame_match ? 1 : 0) << ','
+            << (validation.generation_match ? 1 : 0) << ','
+            << (validation.query_time_match ? 1 : 0) << ','
+            << (validation.fresh ? 1 : 0) << ','
+            << (validation.coverage_ok ? 1 : 0) << ','
+            << validation.spatial_miss_count << ','
+            << validation.temporal_miss_count << ','
+            << validation.occupied_miss_count << ','
+            << validation.stale_miss_count << ','
+            << validation.invalid_miss_count << '\n';
     const std::string temp_context_path = context_path + ".tmp";
     {
       std::ofstream context_file(temp_context_path, std::ios::trunc);
@@ -2541,6 +2682,46 @@ namespace ego_planner
       return false;
     }
     return true;
+  }
+
+  iap::P1AcceptedContextValidation
+  BsplineOptimizer::validateP1AcceptedTrajectoryRiskContext(
+      UniformBspline trajectory, const double accepted_stamp_s,
+      const std::string &trajectory_frame_id) const
+  {
+    iap::P1AcceptedContextValidationInput input;
+    input.snapshot = risk_snapshot_;
+    input.snapshot_frame_id = risk_snapshot_
+        ? risk_snapshot_->params().frame_id : "";
+    input.trajectory_frame_id = trajectory_frame_id;
+    input.expected_generation_id = p1_risk_context_.snapshot
+        ? p1_risk_context_.snapshot->generation_id() : 0;
+    input.query_base_time_s = risk_query_base_time_s_;
+    input.accepted_stamp_s = accepted_stamp_s;
+    if (!risk_snapshot_)
+      return iap::validateP1AcceptedContext(input);
+    const double duration = trajectory.getTimeSum();
+    if (!std::isfinite(duration) || duration < 0.0)
+      return iap::validateP1AcceptedContext(input);
+    const int denominator = std::max(1, kP1AcceptedProfileSampleCount - 1);
+    input.samples.reserve(kP1AcceptedProfileSampleCount);
+    for (int sample_index = 0; sample_index < kP1AcceptedProfileSampleCount;
+         ++sample_index)
+    {
+      const double t_s = duration * static_cast<double>(sample_index) /
+          static_cast<double>(denominator);
+      iap::RiskCostSample query;
+      iap::P1AcceptedContextSample sample;
+      sample.position_w = trajectory.evaluateDeBoorT(t_s);
+      sample.trajectory_time_s = t_s;
+      sample.query_hit = risk_snapshot_->queryCost(
+          sample.position_w, risk_query_base_time_s_ + t_s, &query);
+      sample.query_valid = query.valid;
+      sample.query_stale = query.stale;
+      sample.query_reason = query.reason;
+      input.samples.push_back(std::move(sample));
+    }
+    return iap::validateP1AcceptedContext(input);
   }
 
   bool BsplineOptimizer::evaluateReboundCostForTest(const Eigen::MatrixXd &control_points,
@@ -2569,6 +2750,25 @@ namespace ego_planner
     gradient = Eigen::MatrixXd::Zero(3, cps_.size);
     memcpy(gradient.data() + 3 * order_, grad.data(), variable_num_ * sizeof(double));
     return true;
+  }
+
+  double BsplineOptimizer::p1LbfgsGradientEpsilon(
+      const double initial_weighted_p1_gradient_norm,
+      const double variable_norm) const
+  {
+    constexpr double kHistoricalEpsilon = 0.01;
+    constexpr double kMinimumObjectiveAppliedEpsilon = 1.0e-8;
+    if (!p1_config_.use_integrity_cost || p1_config_.metrics_only ||
+        p1_config_.lambda_integrity == 0.0 ||
+        !std::isfinite(initial_weighted_p1_gradient_norm) ||
+        initial_weighted_p1_gradient_norm <= 0.0)
+      return kHistoricalEpsilon;
+    const double scale = std::max(1.0, std::abs(variable_norm));
+    const double relative_p1_gradient =
+        0.1 * initial_weighted_p1_gradient_norm / scale;
+    return std::min(kHistoricalEpsilon,
+                    std::max(kMinimumObjectiveAppliedEpsilon,
+                             relative_p1_gradient));
   }
 
   // 计算损失

@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <chrono>
 #include <cmath>
+#include <ctime>
 #include <exception>
 #include <future>
 #include <iomanip>
@@ -256,6 +257,27 @@ class PredictorModuleRiskProvider final : public iap::RiskPredictionProvider {
   iap::PredictorModule module_;
   iap::IntegritySnapshot snapshot_;
   int worker_count_ = 1;
+};
+
+class TimedRiskProvider final : public iap::RiskPredictionProvider {
+ public:
+  explicit TimedRiskProvider(iap::RiskPredictionProvider* provider)
+      : provider_(provider) {}
+
+  bool batchQuery(const std::vector<iap::RiskPredictionQuery>& queries,
+                  std::vector<iap::RiskPredictionResult>* results) override {
+    const auto start = std::chrono::steady_clock::now();
+    const bool success = provider_ && provider_->batchQuery(queries, results);
+    duration_ms_ += std::chrono::duration<double, std::milli>(
+        std::chrono::steady_clock::now() - start).count();
+    return success;
+  }
+
+  double durationMs() const { return duration_ms_; }
+
+ private:
+  iap::RiskPredictionProvider* provider_ = nullptr;
+  double duration_ms_ = 0.0;
 };
 
 }  // namespace
@@ -716,6 +738,10 @@ void P0RiskGridRuntime::createRosInterfaces() {
       node_, SafetyRvizPublisher::declareAndReadConfig(node_));
   const double period_s =
       std::max(0.001, config_.grid.refresh_period_s);
+  {
+    std::lock_guard<std::mutex> lock(health_state_mutex_);
+    next_refresh_scheduled_steady_s_ = steadyNowSeconds() + period_s;
+  }
   refresh_timer_ = node_->create_wall_timer(
       std::chrono::duration<double>(period_s),
       [this]() { refreshTimerCallback(); },
@@ -740,6 +766,7 @@ void P0RiskGridRuntime::healthTimerCallback() {
     std::lock_guard<std::mutex> lock(health_state_mutex_);
     last_health_callback_stamp_s_ = now_s;
     last_health_callback_steady_s_ = callback_steady_s;
+    ++health_callback_count_;
     // A wall timer has no exposed scheduled-fire stamp.  The callback group
     // is reentrant, so this remains a conservative observable queue delay.
     last_health_callback_queue_delay_ms_ = 0.0;
@@ -758,21 +785,28 @@ void P0RiskGridRuntime::refreshTimerCallback() {
   if (!config_.enable_risk_grid) {
     return;
   }
-  const auto reset_refresh_timer = [this]() {
-    if (refresh_timer_) {
-      refresh_timer_->reset();
-    }
-  };
   const auto refresh_start = std::chrono::steady_clock::now();
   const double refresh_start_steady_s = steadyNowSeconds();
   const double now_s = currentMessageStamp();
   {
     std::lock_guard<std::mutex> health_lock(health_state_mutex_);
     last_refresh_stamp_s_ = now_s;
+    last_refresh_scheduled_steady_s_ = next_refresh_scheduled_steady_s_;
+    last_refresh_queue_delay_ms_ = std::isfinite(next_refresh_scheduled_steady_s_)
+        ? std::max(0.0, 1000.0 * (refresh_start_steady_s -
+                                  next_refresh_scheduled_steady_s_))
+        : std::numeric_limits<double>::quiet_NaN();
+    const double period_s = std::max(0.001, config_.grid.refresh_period_s);
+    if (!std::isfinite(next_refresh_scheduled_steady_s_))
+      next_refresh_scheduled_steady_s_ = refresh_start_steady_s + period_s;
+    while (next_refresh_scheduled_steady_s_ <= refresh_start_steady_s)
+      next_refresh_scheduled_steady_s_ += period_s;
     last_refresh_start_stamp_s_ = now_s;
     last_refresh_start_steady_s_ = refresh_start_steady_s;
     last_snapshot_available_ = false;
     last_refresh_query_count_ = 0;
+    last_provider_batch_duration_ms_ =
+        std::numeric_limits<double>::quiet_NaN();
   }
   if (!std::isfinite(now_s) || now_s <= 0.0) {
     risk_grid_.markRefreshFailure(now_s, "message_stamp_unavailable");
@@ -784,7 +818,6 @@ void P0RiskGridRuntime::refreshTimerCallback() {
       last_refresh_end_stamp_s_ = refresh_end_stamp_s;
       last_refresh_end_steady_s_ = steadyNowSeconds();
     }
-    reset_refresh_timer();
     return;
   }
   iap::IntegritySnapshot snapshot;
@@ -799,7 +832,6 @@ void P0RiskGridRuntime::refreshTimerCallback() {
       last_refresh_end_steady_s_ = steadyNowSeconds();
     }
     publishHealth(risk_grid_.health(now_s), now_s);
-    reset_refresh_timer();
     return;
   }
   {
@@ -862,7 +894,8 @@ void P0RiskGridRuntime::refreshTimerCallback() {
         layer_voxel_count * config_.grid.horizons_s.size();
   }
   const auto occupancy_predicate = combinedOccupancyPredicate();
-  risk_grid_.refreshFromProvider(snapshot.p_wb, now_s, *provider,
+  TimedRiskProvider timed_provider(provider);
+  risk_grid_.refreshFromProvider(snapshot.p_wb, now_s, timed_provider,
                                  occupancy_predicate, &reason);
   const iap::RiskGridHealth health = risk_grid_.health(now_s);
   const auto viz_snapshot = risk_grid_.acquireSnapshot();
@@ -873,8 +906,14 @@ void P0RiskGridRuntime::refreshTimerCallback() {
                                       : std::numeric_limits<double>::quiet_NaN();
     last_refresh_elapsed_ms_ = std::chrono::duration<double, std::milli>(
         std::chrono::steady_clock::now() - refresh_start).count();
+    last_provider_batch_duration_ms_ = timed_provider.durationMs();
     last_refresh_end_stamp_s_ = refresh_end_stamp_s;
     last_refresh_end_steady_s_ = steadyNowSeconds();
+    last_generation_interval_ms_ = std::isfinite(last_generation_end_steady_s_)
+        ? 1000.0 * (last_refresh_end_steady_s_ -
+                    last_generation_end_steady_s_)
+        : std::numeric_limits<double>::quiet_NaN();
+    last_generation_end_steady_s_ = last_refresh_end_steady_s_;
   }
   publishHealth(health, now_s);
   if (safety_viz_) {
@@ -883,7 +922,6 @@ void P0RiskGridRuntime::refreshTimerCallback() {
     safety_viz_->publishRiskValidityCloud(viz_snapshot, snapshot.p_wb.z(),
                                           now_s);
   }
-  reset_refresh_timer();
 }
 
 void P0RiskGridRuntime::publishHealth(const iap::RiskGridHealth& health,
@@ -899,7 +937,18 @@ void P0RiskGridRuntime::publishHealth(const iap::RiskGridHealth& health,
     const auto mutex_acquired = std::chrono::steady_clock::now();
     last_publish_stamp_s_ = now_s;
     last_publish_steady_s_ = steadyNowSeconds();
+    const double process_cpu_ms = 1000.0 * static_cast<double>(std::clock()) /
+        static_cast<double>(CLOCKS_PER_SEC);
+    last_process_cpu_delta_ms_ = std::isfinite(last_process_cpu_ms_)
+        ? process_cpu_ms - last_process_cpu_ms_
+        : std::numeric_limits<double>::quiet_NaN();
+    last_process_cpu_ms_ = process_cpu_ms;
     state = healthPublicationStateSnapshot();
+    state.input_callback_age_s =
+        std::isfinite(last_input_callback_steady_s_)
+            ? std::max(0.0, last_publish_steady_s_ -
+                                last_input_callback_steady_s_)
+            : std::numeric_limits<double>::quiet_NaN();
     last_health_state_mutex_wait_ms_ =
         std::chrono::duration<double, std::milli>(mutex_acquired - mutex_wait_start).count();
     last_health_state_mutex_hold_ms_ =
@@ -956,11 +1005,20 @@ void P0RiskGridRuntime::publishHealth(const iap::RiskGridHealth& health,
       << "\"health_callback_stamp_s\":" << jsonNumber(state.health_callback_stamp_s) << ","
       << "\"publish_stamp_s\":" << jsonNumber(state.publish_stamp_s) << ","
       << "\"refresh_callback_start_steady_s\":" << jsonNumber(state.refresh_start_steady_s) << ","
+      << "\"refresh_scheduled_steady_s\":" << jsonNumber(state.refresh_scheduled_steady_s) << ","
       << "\"refresh_callback_end_steady_s\":" << jsonNumber(state.refresh_end_steady_s) << ","
       << "\"health_callback_steady_s\":" << jsonNumber(state.health_callback_steady_s) << ","
       << "\"publish_steady_s\":" << jsonNumber(state.publish_steady_s) << ","
       << "\"last_grid_stamp_s\":" << jsonNumber(state.last_grid_stamp_s) << ","
       << "\"refresh_elapsed_ms\":" << jsonNumber(state.refresh_elapsed_ms) << ","
+      << "\"refresh_duration_ms\":" << jsonNumber(state.refresh_elapsed_ms) << ","
+      << "\"refresh_queue_delay_ms\":" << jsonNumber(state.refresh_queue_delay_ms) << ","
+      << "\"provider_batch_duration_ms\":" << jsonNumber(state.provider_batch_duration_ms) << ","
+      << "\"generation_interval_ms\":" << jsonNumber(state.generation_interval_ms) << ","
+      << "\"input_callback_age_s\":" << jsonNumber(state.input_callback_age_s) << ","
+      << "\"input_callback_count\":" << state.input_callback_count << ","
+      << "\"health_callback_count\":" << state.health_callback_count << ","
+      << "\"process_cpu_delta_ms\":" << jsonNumber(state.process_cpu_delta_ms) << ","
       << "\"health_callback_duration_ms\":" << jsonNumber(state.health_callback_duration_ms) << ","
       << "\"health_callback_queue_delay_ms\":" << jsonNumber(state.health_callback_queue_delay_ms) << ","
       << "\"health_state_mutex_wait_ms\":" << jsonNumber(state.health_state_mutex_wait_ms) << ","
@@ -1032,6 +1090,7 @@ P0RiskGridRuntime::healthPublicationStateSnapshot() const {
   // it hard to regress into publishing under the mutex.
   HealthPublicationState state;
   state.refresh_stamp_s = last_refresh_stamp_s_;
+  state.refresh_scheduled_steady_s = last_refresh_scheduled_steady_s_;
   state.refresh_start_stamp_s = last_refresh_start_stamp_s_;
   state.refresh_end_stamp_s = last_refresh_end_stamp_s_;
   state.health_callback_stamp_s = last_health_callback_stamp_s_;
@@ -1042,13 +1101,25 @@ P0RiskGridRuntime::healthPublicationStateSnapshot() const {
   state.publish_steady_s = last_publish_steady_s_;
   state.last_grid_stamp_s = last_grid_stamp_s_;
   state.refresh_elapsed_ms = last_refresh_elapsed_ms_;
+  state.refresh_queue_delay_ms = last_refresh_queue_delay_ms_;
+  state.provider_batch_duration_ms = last_provider_batch_duration_ms_;
+  state.generation_interval_ms = last_generation_interval_ms_;
+  state.process_cpu_delta_ms = last_process_cpu_delta_ms_;
   state.health_callback_duration_ms = last_health_callback_duration_ms_;
   state.health_callback_queue_delay_ms = last_health_callback_queue_delay_ms_;
   state.health_state_mutex_wait_ms = last_health_state_mutex_wait_ms_;
   state.health_state_mutex_hold_ms = last_health_state_mutex_hold_ms_;
   state.refresh_query_count = last_refresh_query_count_;
+  state.input_callback_count = input_callback_count_;
+  state.health_callback_count = health_callback_count_;
   state.snapshot_available = last_snapshot_available_;
   return state;
+}
+
+void P0RiskGridRuntime::recordInputCallback() {
+  std::lock_guard<std::mutex> health_lock(health_state_mutex_);
+  last_input_callback_steady_s_ = steadyNowSeconds();
+  ++input_callback_count_;
 }
 
 void P0RiskGridRuntime::odomCallback(
@@ -1056,6 +1127,7 @@ void P0RiskGridRuntime::odomCallback(
   if (!msg) {
     return;
   }
+  recordInputCallback();
   std::lock_guard<std::mutex> health_lock(health_state_mutex_);
   latest_odom_stamp_ = stampToSec(msg->header.stamp);
   latest_odom_p_ = Eigen::Vector3d(msg->pose.pose.position.x,
@@ -1077,6 +1149,7 @@ void P0RiskGridRuntime::integrityCallback(
   if (!msg) {
     return;
   }
+  recordInputCallback();
   std::lock_guard<std::mutex> health_lock(health_state_mutex_);
   latest_current_ = currentFromMsg(*msg);
   latest_current_valid_ = latest_current_.valid;
@@ -1087,6 +1160,7 @@ void P0RiskGridRuntime::rangeCallback(
   if (!msg) {
     return;
   }
+  recordInputCallback();
   std::lock_guard<std::mutex> health_lock(health_state_mutex_);
   if (!origin_set_) {
     return;
@@ -1180,6 +1254,9 @@ void P0RiskGridRuntime::rangeCallback(
 
 void P0RiskGridRuntime::ephemCallback(
     const gnss_comm::msg::GnssEphemMsg::ConstSharedPtr msg) {
+  if (msg) {
+    recordInputCallback();
+  }
   auto ephem = gnss_comm::msg2ephem(msg);
   if (ephem) {
     std::lock_guard<std::mutex> lock(health_state_mutex_);
@@ -1189,6 +1266,9 @@ void P0RiskGridRuntime::ephemCallback(
 
 void P0RiskGridRuntime::gloEphemCallback(
     const gnss_comm::msg::GnssGloEphemMsg::ConstSharedPtr msg) {
+  if (msg) {
+    recordInputCallback();
+  }
   auto ephem = gnss_comm::msg2glo_ephem(msg);
   if (ephem) {
     std::lock_guard<std::mutex> lock(health_state_mutex_);
@@ -1201,6 +1281,7 @@ void P0RiskGridRuntime::receiverLlaCallback(
   if (!msg) {
     return;
   }
+  recordInputCallback();
   std::lock_guard<std::mutex> lock(health_state_mutex_);
   if (origin_set_) {
     return;
@@ -1216,6 +1297,9 @@ void P0RiskGridRuntime::receiverLlaCallback(
 
 void P0RiskGridRuntime::ionoCallback(
     const gnss_comm::msg::GnssIonosphereParameter::ConstSharedPtr msg) {
+  if (msg) {
+    recordInputCallback();
+  }
   if (msg && msg->type == 0 && msg->parameters.size() >= 8) {
     std::lock_guard<std::mutex> lock(health_state_mutex_);
     iono_params_.assign(msg->parameters.begin(), msg->parameters.begin() + 8);
@@ -1224,6 +1308,9 @@ void P0RiskGridRuntime::ionoCallback(
 
 void P0RiskGridRuntime::cloudCallback(
     const sensor_msgs::msg::PointCloud2::ConstSharedPtr msg) {
+  if (msg) {
+    recordInputCallback();
+  }
   auto clear_lidar_inputs = [this](const std::string& reason) {
     iap::LidarFimPrimitiveGenerationDiagnostics diagnostics;
     diagnostics.valid = false;
@@ -1243,7 +1330,10 @@ void P0RiskGridRuntime::cloudCallback(
     return;
   }
 
-  latest_map_stamp_ = stampToSec(msg->header.stamp);
+  {
+    std::lock_guard<std::mutex> health_lock(health_state_mutex_);
+    latest_map_stamp_ = stampToSec(msg->header.stamp);
+  }
 
   auto points = std::make_shared<std::vector<Eigen::Vector3d>>();
   auto normals = std::make_shared<std::vector<Eigen::Vector3d>>();

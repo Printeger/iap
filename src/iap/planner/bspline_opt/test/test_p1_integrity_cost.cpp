@@ -43,6 +43,30 @@ class AffineProvider : public iap::RiskPredictionProvider {
   Eigen::Vector3d grad_;
 };
 
+class SpatiotemporalAffineProvider : public iap::RiskPredictionProvider {
+ public:
+  bool batchQuery(const std::vector<iap::RiskPredictionQuery>& queries,
+                  std::vector<iap::RiskPredictionResult>* results) override {
+    results->clear();
+    results->reserve(queries.size());
+    for (const auto& query : queries) {
+      iap::RiskPredictionResult result;
+      result.available = true;
+      result.valid = true;
+      result.stale = false;
+      const double value = 20.0 + 2.0 * query.position_w.x() +
+                           3.0 * query.position_w.y() +
+                           4.0 * query.position_w.z() +
+                           5.0 * query.horizon_s;
+      result.hpl_pred = value;
+      result.vpl_pred = value;
+      result.reason = "ok";
+      results->push_back(result);
+    }
+    return true;
+  }
+};
+
 class UnknownProvider : public iap::RiskPredictionProvider {
  public:
   bool batchQuery(const std::vector<iap::RiskPredictionQuery>& queries,
@@ -312,6 +336,105 @@ TEST(P1IntegrityCostTest, EnabledAddsExpectedCostAndGradient) {
   EXPECT_DOUBLE_EQ(breakdown.original_cost, original_cost);
   EXPECT_NEAR(breakdown.total_cost, enabled_cost, 1.0e-12);
   EXPECT_NEAR(breakdown.integrity_cost, metrics.weighted_f_integrity, 1.0e-12);
+}
+
+TEST(P1IntegrityCostTest,
+     AffineWeightedGradientMatchesCentralDifferenceForEveryFreeControlPoint) {
+  ego_planner::SwarmTrajData swarm;
+  const Eigen::MatrixXd q = makeControlPoints();
+  SpatiotemporalAffineProvider provider;
+  auto snapshot = makeSnapshot(provider);
+  auto config = disabledConfig();
+  config.use_integrity_cost = true;
+  config.metrics_only = false;
+  config.lambda_integrity = 0.00001;
+  config.integrity_grad_norm_max = 100.0;
+  config.max_samples_per_eval = 9;
+  auto enabled = makeOptimizer(config, &swarm);
+  enabled->setRiskSnapshot(snapshot, snapshot->stamp_s());
+  auto original = makeOptimizer(disabledConfig(), &swarm);
+
+  double enabled_cost = 0.0;
+  double original_cost = 0.0;
+  Eigen::MatrixXd enabled_gradient;
+  Eigen::MatrixXd original_gradient;
+  ASSERT_TRUE(evaluate(*enabled, q, &enabled_cost, &enabled_gradient));
+  ASSERT_TRUE(evaluate(*original, q, &original_cost, &original_gradient));
+  const Eigen::MatrixXd integrity_gradient =
+      enabled_gradient - original_gradient;
+  constexpr double kStep = 1.0e-5;
+  for (int column = 3; column < q.cols(); ++column) {
+    for (int axis = 0; axis < 3; ++axis) {
+      Eigen::MatrixXd plus = q;
+      Eigen::MatrixXd minus = q;
+      plus(axis, column) += kStep;
+      minus(axis, column) -= kStep;
+      double plus_enabled = 0.0, plus_original = 0.0;
+      double minus_enabled = 0.0, minus_original = 0.0;
+      Eigen::MatrixXd ignored;
+      ASSERT_TRUE(evaluate(*enabled, plus, &plus_enabled, &ignored));
+      ASSERT_TRUE(evaluate(*original, plus, &plus_original, &ignored));
+      ASSERT_TRUE(evaluate(*enabled, minus, &minus_enabled, &ignored));
+      ASSERT_TRUE(evaluate(*original, minus, &minus_original, &ignored));
+      const double finite_difference =
+          ((plus_enabled - plus_original) -
+           (minus_enabled - minus_original)) /
+          (2.0 * kStep);
+      EXPECT_NEAR(integrity_gradient(axis, column), finite_difference, 2.0e-8)
+          << "axis=" << axis << " control_point=" << column;
+    }
+  }
+}
+
+TEST(P1IntegrityCostTest, FixedLambdaNegativeGradientStepLowersIntegrityCost) {
+  ego_planner::SwarmTrajData swarm;
+  const Eigen::MatrixXd q = makeControlPoints();
+  SpatiotemporalAffineProvider provider;
+  auto snapshot = makeSnapshot(provider);
+  auto config = disabledConfig();
+  config.use_integrity_cost = true;
+  config.metrics_only = false;
+  config.lambda_integrity = 0.00001;
+  config.integrity_grad_norm_max = 100.0;
+  auto optimizer = makeOptimizer(config, &swarm);
+  optimizer->setRiskSnapshot(snapshot, snapshot->stamp_s());
+  double before_total = 0.0;
+  Eigen::MatrixXd total_gradient;
+  ASSERT_TRUE(evaluate(*optimizer, q, &before_total, &total_gradient));
+  const double before_integrity =
+      optimizer->getLastP1IntegrityMetrics().f_integrity;
+  Eigen::MatrixXd moved = q;
+  Eigen::MatrixXd direction = total_gradient;
+  direction.leftCols(3).setZero();
+  ASSERT_GT(direction.norm(), 0.0);
+  moved -= 1.0e-3 * direction / direction.norm();
+  double after_total = 0.0;
+  Eigen::MatrixXd after_gradient;
+  ASSERT_TRUE(evaluate(*optimizer, moved, &after_total, &after_gradient));
+  const double after_integrity =
+      optimizer->getLastP1IntegrityMetrics().f_integrity;
+  EXPECT_LT(after_integrity, before_integrity);
+  EXPECT_LT((total_gradient.array() * (moved - q).array()).sum(), 0.0);
+}
+
+TEST(P1IntegrityCostTest,
+     ObjectiveAppliedConvergenceResolvesFixedLambdaWhileMetricsOnlyIsUnchanged) {
+  ego_planner::SwarmTrajData swarm;
+  auto applied_config = disabledConfig();
+  applied_config.use_integrity_cost = true;
+  applied_config.metrics_only = false;
+  applied_config.lambda_integrity = 0.00001;
+  auto applied = makeOptimizer(applied_config, &swarm);
+  const double applied_epsilon =
+      applied->p1LbfgsGradientEpsilon(5.0e-7, 2.0);
+  EXPECT_GE(applied_epsilon, 1.0e-8);
+  EXPECT_LT(applied_epsilon, 1.0e-6);
+
+  auto metrics_config = applied_config;
+  metrics_config.metrics_only = true;
+  auto metrics_only = makeOptimizer(metrics_config, &swarm);
+  EXPECT_DOUBLE_EQ(
+      metrics_only->p1LbfgsGradientEpsilon(5.0e-7, 2.0), 0.01);
 }
 
 TEST(P1IntegrityCostTest, DisabledCostBreakdownHasNoIntegrityCost) {
@@ -597,6 +720,10 @@ TEST(P1IntegrityCostTest, EnabledAcceptedProfileRecordsAppliedObjectiveAndLambda
     EXPECT_EQ(row.at("metrics_only"), "0");
     EXPECT_DOUBLE_EQ(std::stod(row.at("lambda_integrity")), 0.00001);
     EXPECT_FALSE(row.at("c_pi").empty());
+    EXPECT_NEAR(std::stod(row.at("grad_x")), 1.0, 1e-9);
+    EXPECT_NEAR(std::stod(row.at("neg_grad_x")), -1.0, 1e-9);
+    EXPECT_NEAR(std::stod(row.at("neg_grad_y")), 0.0, 1e-9);
+    EXPECT_NEAR(std::stod(row.at("neg_grad_z")), 0.0, 1e-9);
   }
   std::remove(debug_path.c_str());
   std::remove(profile_path.c_str());
@@ -643,6 +770,47 @@ TEST(P1IntegrityCostTest, AcceptedProfileWritesBoundedContextSidecar) {
   std::remove(debug_path.c_str());
   std::remove(profile_path.c_str());
   std::remove(context_path.c_str());
+}
+
+TEST(P1IntegrityCostTest, AcceptedProfileBindsGradientToActualDisplacement) {
+  ego_planner::SwarmTrajData swarm;
+  const Eigen::MatrixXd before = makeControlPoints();
+  Eigen::MatrixXd after = before;
+  after.row(0).array() -= 0.1;
+  AffineProvider provider(10.0, Eigen::Vector3d(1.0, 0.0, 0.0));
+  auto snapshot = makeSnapshot(provider);
+  const std::string debug_path = tempProfilePath("p1_direction_debug");
+  std::remove(debug_path.c_str());
+  std::remove("/tmp/planner_p1_accepted_trajectory_risk_profile.csv");
+
+  auto config = disabledConfig();
+  config.use_integrity_cost = true;
+  config.metrics_only = false;
+  config.lambda_integrity = 0.00001;
+  config.debug_csv_enable = true;
+  config.debug_csv_path = debug_path;
+  auto optimizer = makeOptimizer(config, &swarm);
+  ego_planner::BsplineOptimizer::P1PlanningRiskContext context;
+  context.snapshot = snapshot;
+  context.query_base_time_s = snapshot->stamp_s();
+  context.planning_attempt_id = 51;
+  context.candidate_id = 7;
+  optimizer->setP1PlanningRiskContext(context);
+  optimizer->setP1PreOptimizationTrajectoryForTest(before, 0.1);
+
+  ASSERT_TRUE(optimizer->writeP1AcceptedTrajectoryRiskProfile(
+      ego_planner::UniformBspline(after, 3, 0.1), 11, 46, 10.5));
+  const auto rows = readCsvRows(optimizer->p1AcceptedTrajectoryRiskProfilePath());
+  ASSERT_EQ(rows.size(), 200U);
+  for (const auto &row : rows)
+  {
+    EXPECT_EQ(row.at("trace_available"), "1");
+    EXPECT_NEAR(std::stod(row.at("disp_x")), -0.1, 1e-9);
+    EXPECT_NEAR(std::stod(row.at("grad_dot_displacement")), -0.1, 1e-9);
+    EXPECT_NEAR(std::stod(row.at("delta_c_pi")), -0.1, 1e-9);
+  }
+  std::remove(debug_path.c_str());
+  std::remove("/tmp/planner_p1_accepted_trajectory_risk_profile.csv");
 }
 
 TEST(P1IntegrityCostTest, AcceptedProfileLeavesCpiBlankForStaleMisses) {

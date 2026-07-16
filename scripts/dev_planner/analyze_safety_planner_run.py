@@ -9,6 +9,7 @@ import csv
 import json
 import math
 import re
+import textwrap
 from pathlib import Path
 from typing import Any
 
@@ -212,6 +213,10 @@ P1_2_FIGURE_FILENAMES = [
     "p1_2_result_dashboard.png",
     "p1_2_artifact_completeness.png",
     "p1_2_cause_exclusion_summary.png",
+    "p1_2_snapshot_spatial_bounds_overlay.png",
+    "p1_2_gradient_direction_field_overlay.png",
+    "p1_2_refresh_latency_vs_stale_threshold.png",
+    "p1_2_replan_load_correlation.png",
 ]
 P1_2_OPTIONAL_FIGURE_FILENAMES = [
     "p1_2_p0_callback_timeline.png",
@@ -559,6 +564,12 @@ P1_ACCEPTED_PROFILE_FIELDS = [
     "stale",
     "c_pi",
     "reason",
+    "trace_available",
+    "grad_x", "grad_y", "grad_z",
+    "neg_grad_x", "neg_grad_y", "neg_grad_z",
+    "pre_x", "pre_y", "pre_z",
+    "disp_x", "disp_y", "disp_z",
+    "grad_dot_displacement", "delta_c_pi",
 ]
 P1_ACCEPTED_PROFILE_CONTEXT_FIELDS = [
     "profile_seq", "trajectory_id", "planning_attempt_id", "candidate_id", "planning_start_s", "accepted_stamp_s",
@@ -570,6 +581,11 @@ P1_ACCEPTED_PROFILE_CONTEXT_FIELDS = [
     "trajectory_y_min", "trajectory_y_max", "trajectory_z_min", "trajectory_z_max",
     "expected_sample_count", "matched_sample_count",
     "match_ratio", "query_miss_count", "stale_count", "invalid_count", "miss_reason_histogram",
+    "snapshot_frame_id", "trajectory_frame_id", "spatial_in_bounds",
+    "temporal_in_horizon", "frame_match", "generation_match",
+    "query_time_match", "fresh", "coverage_ok", "spatial_miss_count",
+    "temporal_miss_count", "occupied_miss_count", "stale_miss_count",
+    "invalid_miss_count",
 ]
 P1_DEBUG_FINITE_FIELDS = [
     "f_integrity",
@@ -996,29 +1012,48 @@ def read_scenario_plot_data(
         data: dict[str, Any] = {
             "map_topic": map_topic,
             "map_points": [],
+            "map_frame_ids": [],
+            "map_stamps": [],
             "truth_xy": [],
+            "truth_frame_ids": [],
+            "truth_stamps": [],
             "slam_xy": [],
+            "slam_frame_ids": [],
+            "slam_stamps": [],
             "bspline_paths": [],
+            "bspline_start_stamps": [],
         }
         while reader.has_next():
-            topic, raw, _ = reader.read_next()
+            topic, raw, timestamp = reader.read_next()
             if topic not in msg_types:
                 continue
             if topic == map_topic and not data["map_points"]:
                 msg = deserialize_message(raw, msg_types[topic])
                 data["map_points"] = pointcloud_xyz(msg)
+                frame_id = str(getattr(getattr(msg, "header", None), "frame_id", ""))
+                if frame_id:
+                    data["map_frame_ids"].append(frame_id)
+                data["map_stamps"].append(msg_stamp_or_bag_time(msg, timestamp))
             elif topic == "/sim/drone_0/truth_odom":
                 truth_seen += 1
                 if (truth_seen - 1) % truth_stride == 0:
                     msg = deserialize_message(raw, msg_types[topic])
                     pos = msg.pose.pose.position
                     data["truth_xy"].append((float(pos.x), float(pos.y)))
+                    frame_id = str(getattr(getattr(msg, "header", None), "frame_id", ""))
+                    if frame_id and frame_id not in data["truth_frame_ids"]:
+                        data["truth_frame_ids"].append(frame_id)
+                    data["truth_stamps"].append(msg_stamp_or_bag_time(msg, timestamp))
             elif topic == "/drone_0_visual_slam/odom":
                 slam_seen += 1
                 if (slam_seen - 1) % slam_stride == 0:
                     msg = deserialize_message(raw, msg_types[topic])
                     pos = msg.pose.pose.position
                     data["slam_xy"].append((float(pos.x), float(pos.y)))
+                    frame_id = str(getattr(getattr(msg, "header", None), "frame_id", ""))
+                    if frame_id and frame_id not in data["slam_frame_ids"]:
+                        data["slam_frame_ids"].append(frame_id)
+                    data["slam_stamps"].append(msg_stamp_or_bag_time(msg, timestamp))
             elif topic == "/drone_0_planning/bspline":
                 msg = deserialize_message(raw, msg_types[topic])
                 path = [
@@ -1028,6 +1063,12 @@ def read_scenario_plot_data(
                 ]
                 if path:
                     data["bspline_paths"].append(path)
+                    start = getattr(msg, "start_time", None)
+                    if start is not None:
+                        data["bspline_start_stamps"].append(
+                            float(getattr(start, "sec", 0))
+                            + float(getattr(start, "nanosec", 0)) * 1.0e-9
+                        )
         return data, ""
     except Exception as exc:  # pragma: no cover - depends on local ROS Python env
         return {}, str(exc)
@@ -1135,8 +1176,13 @@ def parse_p0_health(msg: Any, timestamp_ns: int) -> dict[str, Any]:
     for field in (
         "refresh_callback_start_stamp_s", "refresh_callback_end_stamp_s",
         "health_callback_stamp_s", "publish_stamp_s",
-        "refresh_callback_start_steady_s", "refresh_callback_end_steady_s",
+        "refresh_scheduled_steady_s", "refresh_callback_start_steady_s",
+        "refresh_callback_end_steady_s",
         "health_callback_steady_s", "publish_steady_s",
+        "refresh_duration_ms", "refresh_queue_delay_ms",
+        "provider_batch_duration_ms", "generation_interval_ms",
+        "input_callback_age_s", "input_callback_count", "health_callback_count",
+        "process_cpu_delta_ms",
         "health_callback_duration_ms", "health_callback_queue_delay_ms",
         "health_state_mutex_wait_ms", "health_state_mutex_hold_ms",
         "refresh_query_count", "predictor_requested_worker_count",
@@ -1169,9 +1215,10 @@ def pointcloud_metric_rows(msg: Any, timestamp_ns: int) -> list[dict[str, Any]]:
     if not all(name in field_names for name in required):
         return []
     stamp = msg_stamp_or_bag_time(msg, timestamp_ns)
+    frame_id = str(getattr(getattr(msg, "header", None), "frame_id", ""))
     rows: list[dict[str, Any]] = []
     for point in point_cloud2.read_points(msg, field_names=required, skip_nans=False):
-        row = {"stamp": stamp}
+        row = {"stamp": stamp, "frame_id": frame_id}
         for name in required:
             value = point[name]
             if hasattr(value, "item"):
@@ -1264,6 +1311,7 @@ def extract_pose_row(msg: Any, timestamp_ns: int, topic: str) -> dict[str, Any] 
         "topic": topic,
         "stamp": msg_stamp_or_bag_time(msg, timestamp_ns),
         "bag_time_s": float(timestamp_ns) * 1.0e-9,
+        "frame_id": str(getattr(getattr(msg, "header", None), "frame_id", "")),
         "x": x,
         "y": y,
         "z": z,
@@ -1369,6 +1417,53 @@ def read_p0_bag_artifacts(
     except Exception as exc:  # pragma: no cover - depends on local ROS Python env
         artifacts["topics_seen"] = sorted(artifacts["topics_seen"])
         return artifacts, str(exc)
+
+
+def read_p0_cloud_at_snapshot(
+    bag_dir: Path,
+    metadata: dict[str, Any],
+    snapshot_stamp_s: float,
+    snapshot_frame_id: str,
+    *,
+    tolerance_s: float = 1.0e-6,
+) -> tuple[list[dict[str, Any]], str]:
+    """Read only the P0 cloud whose recorded header matches the accepted snapshot."""
+    if metadata.get("missing") or not bag_dir:
+        return [], "missing rosbag metadata"
+    try:
+        from rclpy.serialization import deserialize_message
+        from rosidl_runtime_py.utilities import get_message
+
+        reader = open_bag_reader(bag_dir, metadata)
+        type_map = {topic.name: topic.type for topic in reader.get_all_topics_and_types()}
+        if P0_PL_CLOUD_TOPIC not in type_map:
+            return [], f"{P0_PL_CLOUD_TOPIC} is absent from the bag"
+        msg_type = get_message(type_map[P0_PL_CLOUD_TOPIC])
+        closest: tuple[float, float, str] | None = None
+        while reader.has_next():
+            topic, raw, timestamp = reader.read_next()
+            if topic != P0_PL_CLOUD_TOPIC:
+                continue
+            msg = deserialize_message(raw, msg_type)
+            stamp_s = msg_stamp_or_bag_time(msg, timestamp)
+            frame_id = str(getattr(getattr(msg, "header", None), "frame_id", "")).strip()
+            delta_s = abs(stamp_s - snapshot_stamp_s)
+            if closest is None or delta_s < closest[0]:
+                closest = (delta_s, stamp_s, frame_id)
+            if delta_s <= tolerance_s and frame_id == snapshot_frame_id:
+                rows = pointcloud_metric_rows(msg, timestamp)
+                if rows:
+                    return rows, ""
+                return [], "matching P0 cloud has no decodable metric rows"
+        closest_detail = "none" if closest is None else (
+            f"stamp={closest[1]:.9f}, frame={closest[2]!r}, delta_s={closest[0]:.9g}"
+        )
+        return [], (
+            "no P0 cloud exactly matches accepted snapshot "
+            f"stamp={snapshot_stamp_s:.9f}, frame={snapshot_frame_id!r}; closest={closest_detail}"
+        )
+    except Exception as exc:  # pragma: no cover - depends on local ROS Python env
+        return [], str(exc)
 
 
 def path_length(rows: list[dict[str, Any]]) -> float:
@@ -1792,8 +1887,13 @@ def p1_cloud_plot_context(
         for point in valid_points
         if point[0] is not None and point[1] is not None and point[2] is not None
     ]
+    frame_ids = sorted({str(row.get("frame_id", "")).strip() for row in cloud_rows if str(row.get("frame_id", "")).strip()})
+    stamps = sorted({value for row in cloud_rows if (value := finite_float(row.get("stamp"))) is not None})
     if not valid_points:
-        return {"valid_point_count": 0, "bounds": {}, "points": []}
+        return {
+            "valid_point_count": 0, "bounds": {}, "points": [],
+            "frame_ids": frame_ids, "stamps": stamps,
+        }
     xyz = np.asarray([[point[0], point[1], point[2]] for point in valid_points], dtype=float)
     if len(valid_points) > max_points:
         indices = np.linspace(0, len(valid_points) - 1, max_points, dtype=int)
@@ -1802,6 +1902,8 @@ def p1_cloud_plot_context(
         plotted = valid_points
     return {
         "valid_point_count": len(valid_points),
+        "frame_ids": frame_ids,
+        "stamps": stamps,
         "bounds": {
             "x_min": float(np.min(xyz[:, 0])),
             "x_max": float(np.max(xyz[:, 0])),
@@ -6312,6 +6414,14 @@ def summarize_p1_accepted_profile_rows(
         )
     sample_rows: list[dict[str, Any]] = []
     c_pi_values: list[float] = []
+    trace_numeric_fields = (
+        "grad_x", "grad_y", "grad_z", "neg_grad_x", "neg_grad_y", "neg_grad_z",
+        "pre_x", "pre_y", "pre_z", "disp_x", "disp_y", "disp_z",
+        "grad_dot_displacement", "delta_c_pi",
+    )
+    trace_available_count = 0
+    matched_trace_count = 0
+    directional_descent_sample_count = 0
     parse_error_count = len(missing_fields) + malformed_row_count
     for row in selected_rows:
         c_pi = finite_float(row.get("c_pi"))
@@ -6328,6 +6438,20 @@ def summarize_p1_accepted_profile_rows(
         )
         if usable:
             c_pi_values.append(float(c_pi))
+        trace_state = explicit_csv_bool(row.get("trace_available"))
+        if trace_state is True:
+            trace_available_count += 1
+        trace_values = {
+            field: finite_float(row.get(field)) for field in trace_numeric_fields
+        }
+        trace_finite = all(value is not None for value in trace_values.values())
+        if usable and trace_state is True and trace_finite:
+            matched_trace_count += 1
+            if (
+                trace_values["grad_dot_displacement"] < 0.0
+                and trace_values["delta_c_pi"] < 0.0
+            ):
+                directional_descent_sample_count += 1
         sample_rows.append(
             {
                 "profile_seq": row.get("profile_seq", ""),
@@ -6352,6 +6476,11 @@ def summarize_p1_accepted_profile_rows(
                 "stale": 1 if stale_state is True else 0,
                 "c_pi": "" if c_pi is None or not usable else c_pi,
                 "reason": row.get("reason", ""),
+                "trace_available": 1 if trace_state is True else 0,
+                **{
+                    field: "" if value is None else value
+                    for field, value in trace_values.items()
+                },
             }
         )
     matched_count = len(c_pi_values)
@@ -6372,6 +6501,14 @@ def summarize_p1_accepted_profile_rows(
         "c_pi_count": len(c_pi_values),
         "c_pi_mean": float(np.mean(c_pi_values)) if c_pi_values else None,
         "c_pi_max": max(c_pi_values) if c_pi_values else None,
+        "trace_available_count": trace_available_count,
+        "matched_trace_count": matched_trace_count,
+        "directional_descent_sample_count": directional_descent_sample_count,
+        "gradient_trace_complete": (
+            sample_count == P1_2_RISK_SAMPLE_COUNT
+            and trace_available_count == sample_count
+            and matched_trace_count == matched_count
+        ),
         "samples": sample_rows,
         **format_summary,
     }
@@ -6451,22 +6588,56 @@ def validate_p1_profile_context(
         return result
     context = matching[0]
     result["context"] = context
-    numeric = {key: finite_float(context.get(key)) for key in P1_ACCEPTED_PROFILE_CONTEXT_FIELDS if key not in ("profile_seq", "miss_reason_histogram")}
-    required_numeric = ("trajectory_id", "planning_attempt_id", "candidate_id", "planning_start_s", "accepted_stamp_s", "planning_duration_s", "snapshot_generation_id", "snapshot_stamp_s", "query_base_time_s", "snapshot_x_min", "snapshot_x_max", "snapshot_y_min", "snapshot_y_max", "snapshot_z_min", "snapshot_z_max", "snapshot_time_min_s", "snapshot_time_max_s", "trajectory_x_min", "trajectory_x_max", "trajectory_y_min", "trajectory_y_max", "trajectory_z_min", "trajectory_z_max", "trajectory_time_min_s", "trajectory_time_max_s", "expected_sample_count", "matched_sample_count", "match_ratio", "query_miss_count", "stale_count", "invalid_count")
+    numeric = {
+        key: finite_float(context.get(key))
+        for key in P1_ACCEPTED_PROFILE_CONTEXT_FIELDS
+        if key not in (
+            "profile_seq", "miss_reason_histogram", "snapshot_frame_id",
+            "trajectory_frame_id",
+        )
+    }
+    required_numeric = (
+        "trajectory_id", "planning_attempt_id", "candidate_id", "planning_start_s",
+        "accepted_stamp_s", "planning_duration_s", "snapshot_generation_id",
+        "snapshot_stamp_s", "query_base_time_s", "snapshot_x_min", "snapshot_x_max",
+        "snapshot_y_min", "snapshot_y_max", "snapshot_z_min", "snapshot_z_max",
+        "snapshot_time_min_s", "snapshot_time_max_s", "trajectory_x_min",
+        "trajectory_x_max", "trajectory_y_min", "trajectory_y_max", "trajectory_z_min",
+        "trajectory_z_max", "trajectory_time_min_s", "trajectory_time_max_s",
+        "expected_sample_count", "matched_sample_count", "match_ratio",
+        "query_miss_count", "stale_count", "invalid_count", "spatial_in_bounds",
+        "temporal_in_horizon", "frame_match", "generation_match", "query_time_match",
+        "fresh", "coverage_ok", "spatial_miss_count", "temporal_miss_count",
+        "occupied_miss_count", "stale_miss_count", "invalid_miss_count",
+    )
     if any(numeric.get(key) is None for key in required_numeric):
         result["reasons"].append("context_nonfinite")
         return result
     samples = profile.get("samples", []) or []
-    def sample_in_bounds(row: dict[str, Any]) -> bool:
-        x, y, z, t_s = (finite_float(row.get(key)) for key in ("x", "y", "z", "t_s"))
+    def sample_spatially_in_bounds(row: dict[str, Any]) -> bool:
+        x, y, z = (finite_float(row.get(key)) for key in ("x", "y", "z"))
         return (
-            x is not None and y is not None and z is not None and t_s is not None
-            and numeric["snapshot_x_min"] <= x <= numeric["snapshot_x_max"]
-            and numeric["snapshot_y_min"] <= y <= numeric["snapshot_y_max"]
-            and numeric["snapshot_z_min"] <= z <= numeric["snapshot_z_max"]
-            and numeric["snapshot_time_min_s"] <= numeric["query_base_time_s"] + t_s <= numeric["snapshot_time_max_s"]
+            x is not None and y is not None and z is not None
+            and numeric["snapshot_x_min"] <= x < numeric["snapshot_x_max"] - 1.0e-12
+            and numeric["snapshot_y_min"] <= y < numeric["snapshot_y_max"] - 1.0e-12
+            and numeric["snapshot_z_min"] <= z < numeric["snapshot_z_max"] - 1.0e-12
         )
-    in_bounds = len(samples) == P1_2_RISK_SAMPLE_COUNT and all(sample_in_bounds(row) for row in samples)
+    def sample_temporally_in_horizon(row: dict[str, Any]) -> bool:
+        t_s = finite_float(row.get("t_s"))
+        return (
+            t_s is not None
+            and numeric["snapshot_time_min_s"] - 1.0e-12
+            <= numeric["query_base_time_s"] + t_s
+            <= numeric["snapshot_time_max_s"] + 1.0e-12
+        )
+    spatial_in_bounds = (
+        len(samples) == P1_2_RISK_SAMPLE_COUNT
+        and all(sample_spatially_in_bounds(row) for row in samples)
+    )
+    temporal_in_horizon = (
+        len(samples) == P1_2_RISK_SAMPLE_COUNT
+        and all(sample_temporally_in_horizon(row) for row in samples)
+    )
     bindings_ok = (
         str(context.get("trajectory_id")) == str((profile.get("metadata_tuple_values", {}).get("trajectory_id") or [""])[0])
         and str(context.get("planning_attempt_id")) == str((profile.get("metadata_tuple_values", {}).get("planning_attempt_id") or [""])[0])
@@ -6476,6 +6647,15 @@ def validate_p1_profile_context(
         and int(numeric["expected_sample_count"]) == P1_2_RISK_SAMPLE_COUNT
         and int(numeric["matched_sample_count"]) == int(profile.get("matched_sample_count", 0) or 0)
         and abs(numeric["match_ratio"] - float(profile.get("match_ratio", 0.0) or 0.0)) <= 1.0e-12
+    )
+    snapshot_frame_id = str(context.get("snapshot_frame_id", "")).strip()
+    trajectory_frame_id = str(context.get("trajectory_frame_id", "")).strip()
+    frame_match = bool(snapshot_frame_id) and snapshot_frame_id == trajectory_frame_id
+    query_time_match = abs(numeric["query_base_time_s"] - numeric["snapshot_stamp_s"]) <= 1.0e-9
+    authoritative_binding_flags_ok = (
+        explicit_csv_bool(context.get("frame_match")) is frame_match
+        and explicit_csv_bool(context.get("generation_match")) is True
+        and explicit_csv_bool(context.get("query_time_match")) is query_time_match
     )
     profile_stamps = {finite_float(row.get("stamp")) for row in samples}
     profile_stamps.discard(None)
@@ -6489,10 +6669,86 @@ def validate_p1_profile_context(
     )
     context_age_s = numeric["accepted_stamp_s"] - numeric["snapshot_stamp_s"]
     fresh = context_age_s >= 0.0 and (stale_timeout_s is None or context_age_s <= stale_timeout_s)
-    result.update({"in_bounds": in_bounds, "bindings_ok": bindings_ok, "accepted_stamp_matches": accepted_stamp_matches, "trajectory_bounds_match": trajectory_bounds_match, "fresh": fresh, "context_age_s": context_age_s})
-    result["valid"] = bool(profile.get("format_valid")) and in_bounds and bindings_ok and accepted_stamp_matches and trajectory_bounds_match and fresh
+    coverage_ok = (
+        int(numeric["matched_sample_count"]) >= P1_2_MIN_RISK_MATCH_COUNT
+        and numeric["match_ratio"] >= P1_2_MIN_RISK_MATCH_RATIO
+    )
+    authoritative_validation_flags_ok = (
+        explicit_csv_bool(context.get("spatial_in_bounds")) is spatial_in_bounds
+        and explicit_csv_bool(context.get("temporal_in_horizon")) is temporal_in_horizon
+        and explicit_csv_bool(context.get("fresh")) is fresh
+        and explicit_csv_bool(context.get("coverage_ok")) is coverage_ok
+    )
+    classified_counts = {
+        "spatial_miss_count": 0,
+        "temporal_miss_count": 0,
+        "occupied_miss_count": 0,
+        "stale_miss_count": 0,
+        "invalid_miss_count": 0,
+    }
+    for sample in samples:
+        if not sample_spatially_in_bounds(sample):
+            classified_counts["spatial_miss_count"] += 1
+        elif not sample_temporally_in_horizon(sample):
+            classified_counts["temporal_miss_count"] += 1
+        elif int(sample.get("stale", 0) or 0) == 1 or "stale" in str(sample.get("reason", "")):
+            classified_counts["stale_miss_count"] += 1
+        elif "occupied" in str(sample.get("reason", "")):
+            classified_counts["occupied_miss_count"] += 1
+        elif int(sample.get("matched", 0) or 0) != 1:
+            classified_counts["invalid_miss_count"] += 1
+    reason_counts_match = all(
+        int(numeric[key]) == value for key, value in classified_counts.items()
+    )
+    result.update({
+        # Keep the legacy aggregate for old JSON readers, but never use it to
+        # label a temporal miss as a spatial miss.
+        "in_bounds": spatial_in_bounds and temporal_in_horizon,
+        "spatial_in_bounds": spatial_in_bounds,
+        "temporal_in_horizon": temporal_in_horizon,
+        "bindings_ok": bindings_ok,
+        "frame_match": frame_match,
+        "query_time_match": query_time_match,
+        "authoritative_binding_flags_ok": authoritative_binding_flags_ok,
+        "authoritative_validation_flags_ok": authoritative_validation_flags_ok,
+        "classified_counts": classified_counts,
+        "reason_counts_match": reason_counts_match,
+        "accepted_stamp_matches": accepted_stamp_matches,
+        "trajectory_bounds_match": trajectory_bounds_match,
+        "fresh": fresh,
+        "context_age_s": context_age_s,
+    })
+    result["valid"] = (
+        bool(profile.get("format_valid"))
+        and spatial_in_bounds
+        and temporal_in_horizon
+        and bindings_ok
+        and frame_match
+        and query_time_match
+        and authoritative_binding_flags_ok
+        and authoritative_validation_flags_ok
+        and reason_counts_match
+        and accepted_stamp_matches
+        and trajectory_bounds_match
+        and fresh
+    )
     if not result["valid"]:
-        result["reasons"].append("context_profile_binding_or_bounds_invalid")
+        if not spatial_in_bounds:
+            result["reasons"].append("spatial_out_of_interpolation_bounds")
+        if not temporal_in_horizon:
+            result["reasons"].append("temporal_out_of_horizon")
+        if not bindings_ok or not accepted_stamp_matches or not trajectory_bounds_match:
+            result["reasons"].append("context_profile_binding_invalid")
+        if not frame_match:
+            result["reasons"].append("frame_mismatch")
+        if not query_time_match:
+            result["reasons"].append("query_time_mismatch")
+        if not authoritative_binding_flags_ok or not authoritative_validation_flags_ok:
+            result["reasons"].append("authoritative_sidecar_disagrees")
+        if not reason_counts_match:
+            result["reasons"].append("sidecar_reason_counts_disagree")
+        if not fresh:
+            result["reasons"].append("context_stale")
     return result
 
 
@@ -7624,6 +7880,15 @@ def validate_p1_2_hard_gates(
         == 0
         and not bool(p1_2_profile.get("read_error")),
         "p1_2_accepted_profile_format_ok": bool(p1_2_profile.get("format_valid")),
+        "p1_2_gradient_trace_complete": bool(
+            p1_2_profile.get("gradient_trace_complete")
+        ),
+        "p1_2_directional_descent_sample_count": int(
+            p1_2_profile.get("directional_descent_sample_count", 0) or 0
+        ),
+        "p1_2_directional_descent_observed": int(
+            p1_2_profile.get("directional_descent_sample_count", 0) or 0
+        ) > 0,
         "p1_2_accepted_profile_context_ok": bool(p1_2_context.get("valid")),
         "p1_2_profile_objective_metadata_ok": profile_value(p1_2_metadata, "metrics_only") in ("0", "false", "False")
         and profile_value(p1_2_metadata, "applied_to_objective") in ("1", "true", "True")
@@ -7640,6 +7905,9 @@ def validate_p1_2_hard_gates(
         == 0
         and not bool(p1_1_profile.get("read_error")),
         "p1_1_accepted_profile_format_ok": bool(p1_1_profile.get("format_valid")),
+        "p1_1_gradient_trace_complete": bool(
+            p1_1_profile.get("gradient_trace_complete")
+        ),
         "p1_1_accepted_profile_context_ok": bool(p1_1_context.get("valid")),
         "p1_1_profile_objective_metadata_ok": profile_value(p1_1_metadata, "metrics_only") in ("1", "true", "True")
         and profile_value(p1_1_metadata, "applied_to_objective") in ("0", "false", "False")
@@ -7798,6 +8066,14 @@ def validate_p1_2_hard_gates(
         failures.append("P1-2 P1-1 reference accepted trajectory risk profile CSV is not parseable")
     if not gates["p1_2_accepted_profile_format_ok"] or not gates["p1_1_accepted_profile_format_ok"]:
         failures.append("P1-2 final accepted profile must contain exactly unique sample_index=0..199 and one metadata tuple")
+    if not gates["p1_2_gradient_trace_complete"] or not gates["p1_1_gradient_trace_complete"]:
+        failures.append(
+            "P1-2 accepted profiles are missing complete snapshot-bound gradient/displacement trace evidence"
+        )
+    if not gates["p1_2_directional_descent_observed"]:
+        failures.append(
+            "P1-2 objective-applied profile has no sample with grad·displacement<0 and delta_c_pi<0"
+        )
     if not gates["p1_2_accepted_profile_context_ok"] or not gates["p1_1_accepted_profile_context_ok"]:
         failures.append("P1-2 accepted-profile context sidecar is missing, stale, out of bounds, or not bound to the selected profile")
     if not gates["p1_2_planning_context_timeline_ok"] or not gates["p1_1_planning_context_timeline_ok"]:
@@ -12634,14 +12910,16 @@ def p1_2_risk_scene_alignment(
     p1_2_scene: dict[str, Any],
     p1_1_scene: dict[str, Any],
 ) -> dict[str, Any]:
-    """Fail closed unless every plotted scene source is recorded and co-located."""
+    """Fail closed unless every plotted source has an exact recorded context."""
     reasons: list[str] = []
     source_status: dict[str, bool] = {}
-    for label, profile_key, path_key, cloud_key, scene in (
-        ("P1-2", "p1_2_profile", "p1_2_path_xyz", "p1_2_cloud_context", p1_2_scene),
-        ("P1-1", "p1_1_profile", "p1_1_path_xyz", "p1_1_cloud_context", p1_1_scene),
+    for label, profile_key, context_key, path_key, cloud_key, scene in (
+        ("P1-2", "p1_2_profile", "p1_2_context", "p1_2_path_xyz", "p1_2_cloud_context", p1_2_scene),
+        ("P1-1", "p1_1_profile", "p1_1_context", "p1_1_path_xyz", "p1_1_cloud_context", p1_1_scene),
     ):
         profile = comparison.get(profile_key, {}) or {}
+        context = comparison.get(context_key, {}) or {}
+        sidecar = context.get("context", {}) or {}
         cloud = comparison.get(cloud_key, {}) or {}
         profile_points = _p1_2_xy_points(profile.get("samples", []) or [])
         accepted_path = _p1_2_xy_points(comparison.get(path_key, []) or [])
@@ -12666,11 +12944,66 @@ def p1_2_risk_scene_alignment(
             ):
                 source_status[key] = False
                 reasons.append(f"{key} cannot be spatially aligned to final accepted profile")
+        snapshot_frame = str(sidecar.get("snapshot_frame_id", "")).strip()
+        trajectory_frame = str(sidecar.get("trajectory_frame_id", "")).strip()
+        snapshot_stamp = finite_float(sidecar.get("snapshot_stamp_s"))
+        accepted_stamp = finite_float(sidecar.get("accepted_stamp_s"))
+        generation = finite_float(sidecar.get("snapshot_generation_id"))
+        binding_key = f"{label} sidecar frame/generation/timestamp binding"
+        source_status[binding_key] = bool(
+            context.get("valid") and snapshot_frame
+            and snapshot_frame == trajectory_frame
+            and snapshot_stamp is not None and accepted_stamp is not None
+            and generation is not None
+        )
+        if not source_status[binding_key]:
+            reasons.append(f"{binding_key} unavailable or invalid")
+        for source_name, field in (
+            ("bag map", "map_frame_ids"),
+            ("bag odom", "slam_frame_ids"),
+            ("bag truth", "truth_frame_ids"),
+        ):
+            frames = sorted({str(value).strip() for value in scene.get(field, []) or [] if str(value).strip()})
+            key = f"{label} {source_name} frame"
+            source_status[key] = bool(snapshot_frame and frames == [snapshot_frame])
+            if not source_status[key]:
+                reasons.append(
+                    f"{key} mismatch/unavailable: expected={snapshot_frame!r}, recorded={frames}"
+                )
+        cloud_frames = sorted({str(value).strip() for value in cloud.get("frame_ids", []) or [] if str(value).strip()})
+        cloud_stamps = [finite_float(value) for value in cloud.get("stamps", []) or []]
+        cloud_stamps = [value for value in cloud_stamps if value is not None]
+        cloud_key_name = f"{label} risk cloud exact snapshot stamp/frame"
+        source_status[cloud_key_name] = bool(
+            snapshot_frame and cloud_frames == [snapshot_frame]
+            and snapshot_stamp is not None
+            and any(abs(value - snapshot_stamp) <= 1.0e-6 for value in cloud_stamps)
+        )
+        if not source_status[cloud_key_name]:
+            reasons.append(
+                f"{cloud_key_name} unavailable: frame={cloud_frames}, "
+                f"snapshot_stamp={snapshot_stamp}, cloud_stamps={cloud_stamps[:5]}"
+            )
+        bspline_stamps = [finite_float(value) for value in scene.get("bspline_start_stamps", []) or []]
+        bspline_stamps = [value for value in bspline_stamps if value is not None]
+        bspline_key = f"{label} accepted trajectory exact start stamp"
+        source_status[bspline_key] = bool(
+            accepted_stamp is not None
+            and any(abs(value - accepted_stamp) <= 1.0e-6 for value in bspline_stamps)
+        )
+        if not source_status[bspline_key]:
+            reasons.append(
+                f"{bspline_key} unavailable: accepted={accepted_stamp}, "
+                f"recorded={bspline_stamps[-5:]}"
+            )
     return {
         "available": all(source_status.values()) and not reasons,
         "reasons": reasons,
         "source_status": source_status,
-        "method": "raw recorded XY bounds overlap; no inferred heatmap",
+        "method": (
+            "exact sidecar frame/generation/snapshot stamp + risk-cloud header stamp + "
+            "bspline start stamp; raw XY overlap; no inferred transform or heatmap"
+        ),
     }
 
 
@@ -12909,7 +13242,15 @@ def p1_2_artifact_completeness_rows(
             (label, "planning-context timeline", exists(p1_planning_context_timeline_csv_path(export_dir, manifest)) if export_dir else False),
             (label, "P1 debug CSV", exists(p1_debug_csv_path(export_dir, manifest)) if export_dir else False),
         ])
-    rows.append(("P1-2", "all required figures", all(exists(item) for item in required_figures if item != path)))
+    rows.append((
+        "P1-2",
+        "all pre-dashboard required figures",
+        all(
+            exists(item)
+            for item in required_figures
+            if item != path and item.name != "p1_2_result_dashboard.png"
+        ),
+    ))
     return rows
 
 
@@ -13629,6 +13970,227 @@ def plot_p1_2_p0_health_and_context_freshness(
     return True
 
 
+def _plot_profile_spatial_bounds_axis(
+    axis: Any, label: str, profile: dict[str, Any], context: dict[str, Any]
+) -> None:
+    samples = profile.get("samples", []) or []
+    sidecar = context.get("context", {}) or {}
+    x_min = finite_float(sidecar.get("snapshot_x_min"))
+    x_max = finite_float(sidecar.get("snapshot_x_max"))
+    y_min = finite_float(sidecar.get("snapshot_y_min"))
+    y_max = finite_float(sidecar.get("snapshot_y_max"))
+    if None not in (x_min, x_max, y_min, y_max):
+        axis.plot(
+            [x_min, x_max, x_max, x_min, x_min],
+            [y_min, y_min, y_max, y_max, y_min],
+            color="#111827", linewidth=1.8, label="strict interpolation interior",
+        )
+    categories = (
+        ("matched", lambda row: int(row.get("matched", 0) or 0) == 1, "#16a34a"),
+        ("spatial", lambda row: "spatial" in str(row.get("reason", "")), "#dc2626"),
+        ("occupied", lambda row: "occupied" in str(row.get("reason", "")), "#9333ea"),
+        ("stale", lambda row: int(row.get("stale", 0) or 0) == 1, "#f97316"),
+        ("other invalid", lambda row: True, "#64748b"),
+    )
+    remaining = list(samples)
+    for name, predicate, color in categories:
+        selected = [row for row in remaining if predicate(row)]
+        remaining = [row for row in remaining if row not in selected]
+        points = [
+            (finite_float(row.get("x")), finite_float(row.get("y")))
+            for row in selected
+        ]
+        points = [point for point in points if point[0] is not None and point[1] is not None]
+        if points:
+            axis.scatter(
+                [point[0] for point in points], [point[1] for point in points],
+                s=15, color=color, alpha=0.8, label=f"{name} ({len(points)})",
+            )
+    axis.set_title(
+        f"{label}\nframe={sidecar.get('snapshot_frame_id', '<missing>')} "
+        f"gen={sidecar.get('snapshot_generation_id', '<missing>')} "
+        f"stamp={sidecar.get('snapshot_stamp_s', '<missing>')} "
+        f"coverage={profile.get('matched_sample_count', 0)}/{profile.get('sample_count', 0)}"
+    )
+    axis.set_xlabel("x [m]")
+    axis.set_ylabel("y [m]")
+    axis.set_aspect("equal", adjustable="datalim")
+    axis.grid(True, alpha=0.25)
+    axis.legend(loc="best", fontsize=7.2)
+
+
+def plot_p1_2_snapshot_spatial_bounds_overlay(
+    comparison: dict[str, Any], path: Path
+) -> bool:
+    fig, axes = plt.subplots(1, 2, figsize=(14.5, 6.2))
+    _plot_profile_spatial_bounds_axis(
+        axes[0], "P1-1 metrics-only", comparison.get("p1_1_profile", {}) or {},
+        comparison.get("p1_1_context", {}) or {},
+    )
+    _plot_profile_spatial_bounds_axis(
+        axes[1], "P1-2 enabled", comparison.get("p1_2_profile", {}) or {},
+        comparison.get("p1_2_context", {}) or {},
+    )
+    fig.suptitle("Final 200-point profiles: spatial bounds separated from temporal/query misses")
+    fig.tight_layout()
+    fig.savefig(path, dpi=160)
+    plt.close(fig)
+    return True
+
+
+def _plot_gradient_trace_axis(axis: Any, label: str, profile: dict[str, Any]) -> None:
+    rows = profile.get("samples", []) or []
+    rows = [row for idx, row in enumerate(rows) if idx % 8 == 0]
+    finite_rows = [
+        row for row in rows
+        if all(finite_float(row.get(key)) is not None for key in (
+            "x", "y", "pre_x", "pre_y", "neg_grad_x", "neg_grad_y",
+            "disp_x", "disp_y",
+        ))
+    ]
+    if finite_rows:
+        x = np.asarray([float(row["pre_x"]) for row in finite_rows])
+        y = np.asarray([float(row["pre_y"]) for row in finite_rows])
+        axis.quiver(
+            x, y,
+            [float(row["neg_grad_x"]) for row in finite_rows],
+            [float(row["neg_grad_y"]) for row in finite_rows],
+            color="#2563eb", angles="xy", scale_units="xy", scale=1.0,
+            width=0.004, label="normalized -gradient",
+        )
+        axis.quiver(
+            x, y,
+            [float(row["disp_x"]) for row in finite_rows],
+            [float(row["disp_y"]) for row in finite_rows],
+            color="#f97316", angles="xy", scale_units="xy", scale=1.0,
+            width=0.004, label="actual displacement",
+        )
+        c_pi = [finite_float(row.get("c_pi")) for row in finite_rows]
+        if any(value is not None for value in c_pi):
+            axis.scatter(
+                [float(row["x"]) for row in finite_rows],
+                [float(row["y"]) for row in finite_rows],
+                c=[math.nan if value is None else value for value in c_pi],
+                cmap="magma", s=16, alpha=0.75, label="final c_pi samples",
+            )
+    dot_values = [
+        finite_float(row.get("grad_dot_displacement")) for row in profile.get("samples", []) or []
+    ]
+    delta_values = [
+        finite_float(row.get("delta_c_pi")) for row in profile.get("samples", []) or []
+    ]
+    dot_values = [value for value in dot_values if value is not None]
+    delta_values = [value for value in delta_values if value is not None]
+    axis.set_title(
+        f"{label}\nmean grad·Δp={np.mean(dot_values) if dot_values else math.nan:.4g}, "
+        f"mean Δc_pi={np.mean(delta_values) if delta_values else math.nan:.4g}"
+    )
+    axis.set_xlabel("x [m]")
+    axis.set_ylabel("y [m]")
+    axis.set_aspect("equal", adjustable="datalim")
+    axis.grid(True, alpha=0.25)
+    if finite_rows:
+        axis.legend(loc="best", fontsize=7.2)
+
+
+def plot_p1_2_gradient_direction_field_overlay(
+    comparison: dict[str, Any], path: Path
+) -> bool:
+    fig, axes = plt.subplots(1, 2, figsize=(14.5, 6.2))
+    _plot_gradient_trace_axis(
+        axes[0], "P1-1 metrics-only", comparison.get("p1_1_profile", {}) or {}
+    )
+    _plot_gradient_trace_axis(
+        axes[1], "P1-2 enabled", comparison.get("p1_2_profile", {}) or {}
+    )
+    fig.suptitle("Snapshot-bound gradient direction, optimizer displacement, and directional derivative")
+    fig.tight_layout()
+    fig.savefig(path, dpi=160)
+    plt.close(fig)
+    return True
+
+
+def plot_p1_2_refresh_latency_vs_stale_threshold(
+    rows: list[dict[str, Any]], stale_timeout_s: float, path: Path,
+    reference_rows: list[dict[str, Any]] | None = None,
+) -> bool:
+    fig, axes = plt.subplots(2, 1, figsize=(12.2, 7.4), sharex=False)
+    plotted = False
+    for label, source, color in (
+        ("P1-2", rows, "#2563eb"),
+        ("P1-1", list(reference_rows or []), "#f97316"),
+    ):
+        if not source:
+            continue
+        x = [finite_float(row.get("stamp")) for row in source]
+        axes[0].plot(x, finite_or_nan(source, "refresh_duration_ms"), color=color, label=f"{label} duration")
+        axes[0].plot(x, finite_or_nan(source, "refresh_queue_delay_ms"), "--", color=color, label=f"{label} queue")
+        axes[0].plot(x, finite_or_nan(source, "provider_batch_duration_ms"), ":", color=color, label=f"{label} provider")
+        axes[1].plot(x, [1000.0 * (finite_float(row.get("age_s")) or 0.0) for row in source], color=color, label=f"{label} context age")
+        rejected_x = [finite_float(row.get("stamp")) for row in source if bool(row.get("stale")) or not bool(row.get("ready", True))]
+        if rejected_x:
+            axes[1].scatter(rejected_x, [1000.0 * stale_timeout_s] * len(rejected_x), marker="x", color=color, label=f"{label} stale/not-ready")
+        plotted = True
+    for axis in axes:
+        axis.axhline(1000.0 * stale_timeout_s, color="#dc2626", linestyle="--", linewidth=1.4, label="stale threshold")
+        axis.grid(True, alpha=0.25)
+        if plotted:
+            axis.legend(loc="best", fontsize=7.5)
+    axes[0].set_ylabel("latency [ms]")
+    axes[0].set_title("Refresh compute/provider/queue latency vs unchanged freshness budget")
+    axes[1].set_ylabel("age [ms]")
+    axes[1].set_xlabel("bag time [s]")
+    axes[1].set_title("Published snapshot age and stale/not-ready observations")
+    fig.tight_layout()
+    fig.savefig(path, dpi=160)
+    plt.close(fig)
+    return True
+
+
+def plot_p1_2_replan_load_correlation(
+    timeline_rows: list[dict[str, Any]], health_rows: list[dict[str, Any]], path: Path
+) -> bool:
+    event_times = [finite_float(row.get("stamp_s")) for row in timeline_rows]
+    health_times = [finite_float(row.get("stamp")) for row in health_rows]
+    finite_times = [value for value in (*event_times, *health_times) if value is not None]
+    fig, axes = plt.subplots(2, 1, figsize=(12.2, 7.4), sharex=True)
+    if not finite_times:
+        axes[0].text(0.5, 0.5, "UNAVAILABLE", transform=axes[0].transAxes, ha="center")
+    else:
+        start = math.floor(min(finite_times))
+        end = math.ceil(max(finite_times)) + 1.0
+        bins = np.arange(start, end + 1.0, 1.0)
+        series = (
+            ("acquisition/optimizer", [finite_float(row.get("stamp_s")) for row in timeline_rows if str(row.get("stage", "")) in {"acquire", "optimizer_start"}], "#2563eb"),
+            ("rejected", [finite_float(row.get("stamp_s")) for row in timeline_rows if str(row.get("outcome", "")) == "rejected"], "#dc2626"),
+            ("deferred", [finite_float(row.get("stamp_s")) for row in timeline_rows if "deferred" in str(row.get("outcome", "")) or "deferred" in str(row.get("reason", ""))], "#9333ea"),
+            ("fallback", [finite_float(row.get("stamp_s")) for row in timeline_rows if str(row.get("fallback_branch", "")) not in {"", "none"}], "#f97316"),
+        )
+        centers = 0.5 * (bins[:-1] + bins[1:])
+        for label, values, color in series:
+            finite_values = [value for value in values if value is not None]
+            counts, _ = np.histogram(finite_values, bins=bins)
+            axes[0].step(centers, counts, where="mid", label=label, color=color)
+        hx = [value for value in health_times if value is not None]
+        axes[1].plot(hx, finite_or_nan(health_rows, "refresh_duration_ms"), label="refresh duration [ms]", color="#2563eb")
+        axes[1].plot(hx, finite_or_nan(health_rows, "refresh_queue_delay_ms"), "--", label="queue delay [ms]", color="#dc2626")
+        axes[1].plot(hx, finite_or_nan(health_rows, "process_cpu_delta_ms"), ":", label="process CPU delta [ms]", color="#16a34a")
+    axes[0].set_ylabel("events / 1 s bin")
+    axes[0].set_title("Generation-gated planning load: attempts, rejects, deferred retries, fallback")
+    axes[1].set_ylabel("milliseconds")
+    axes[1].set_xlabel("recorded time [s]")
+    axes[1].set_title("P0 refresh/queue/CPU load on the same time bins")
+    for axis in axes:
+        axis.grid(True, alpha=0.25)
+        handles, _ = axis.get_legend_handles_labels()
+        if handles:
+            axis.legend(loc="best", fontsize=7.5)
+    fig.tight_layout()
+    fig.savefig(path, dpi=160)
+    plt.close(fig)
+    return True
+
+
 P1_2_HARD_GATE_ROWS = [
     ("manifest contract", ("manifest_present", "manifest_safety_profile_p1", "manifest_p0_enabled", "manifest_p1_enabled", "manifest_p1_metrics_only_false", "manifest_p1_use_integrity_cost", "manifest_p1_lambda_integrity_ok", "manifest_p0_stale_timeout_ok", "manifest_p2_p5_disabled"), ("manifest_p1_lambda_integrity", "manifest_p1_lambda_integrity_expected", "manifest_p0_stale_timeout_s")),
     ("validator", ("validator_summary_present", "validator_passed"), ()),
@@ -13643,6 +14205,7 @@ P1_2_HARD_GATE_ROWS = [
     ("P1-1 bspline publish", ("reference_bspline_inspection_ok", "reference_bspline_publish_present", "reference_nonempty_bspline_path_present"), ()),
     ("accepted profiles present/parse", ("accepted_profiles_present", "p1_2_accepted_profile_parse_ok", "p1_1_accepted_profile_parse_ok"), ("accepted_profile_missing", "p1_2_accepted_profile_path", "p1_1_accepted_profile_path")),
     ("accepted profile format", ("p1_2_accepted_profile_format_ok", "p1_1_accepted_profile_format_ok"), ()),
+    ("gradient direction trace", ("p1_2_gradient_trace_complete", "p1_1_gradient_trace_complete", "p1_2_directional_descent_observed"), ("p1_2_directional_descent_sample_count",)),
     ("accepted profile context", ("p1_2_accepted_profile_context_ok", "p1_1_accepted_profile_context_ok", "p1_2_planning_context_timeline_ok", "p1_1_planning_context_timeline_ok"), ("p1_2_context_age_s", "p1_1_context_age_s", "stale_timeout_s")),
     ("accepted profile objective metadata", ("p1_2_profile_objective_metadata_ok", "p1_1_profile_objective_metadata_ok"), ()),
     ("strict accepted-profile coverage", ("p1_2_risk_match_ok", "p1_1_risk_match_ok"), ("p1_2_risk_matched_sample_count", "p1_2_risk_match_ratio", "p1_1_risk_matched_sample_count", "p1_1_risk_match_ratio", "risk_match_min_count", "risk_match_min_ratio")),
@@ -13651,6 +14214,7 @@ P1_2_HARD_GATE_ROWS = [
     ("recorded risk-scene alignment", ("risk_scene_overlay_available",), ("risk_scene_alignment_reasons",)),
     ("P5 isolation", ("p5_contamination_zero",), ("disabled_topic_counts",)),
     ("cause exclusion", ("cause_exclusion_passed",), ("cause_exclusion_rows",)),
+    ("required PNG completeness", ("required_png_completeness",), ("required_png_missing",)),
 ]
 
 
@@ -13659,31 +14223,74 @@ def p1_2_hard_gate_rows(gates: dict[str, Any]) -> list[dict[str, Any]]:
     for label, verdict_keys, value_keys in P1_2_HARD_GATE_ROWS:
         verdict = all(bool(gates.get(key)) for key in verdict_keys)
         values = {key: gates.get(key) for key in (*verdict_keys, *value_keys)}
-        rows.append({"gate": label, "passed": verdict, "governing_values": values})
+        gate_id = re.sub(r"[^a-z0-9]+", "_", label.lower()).strip("_")
+        failed_keys = [key for key in verdict_keys if not bool(gates.get(key))]
+        detail_values: list[str] = []
+        for key in value_keys:
+            value = gates.get(key)
+            if key.endswith("reasons") and isinstance(value, list):
+                detail_values.extend(str(item) for item in value)
+        failure_reason = "" if verdict else "; ".join(
+            [f"failed: {', '.join(failed_keys)}", *detail_values]
+        )
+        rows.append({
+            "id": gate_id,
+            "label": label,
+            "verdict": "PASS" if verdict else "FAIL",
+            "governing_values": values,
+            "failure_reason": failure_reason,
+            # Compatibility aliases for existing downstream report readers.
+            "gate": label,
+            "passed": verdict,
+        })
     return rows
 
 
 def plot_p1_2_result_dashboard(gates: dict[str, Any], path: Path) -> bool:
     rows = p1_2_hard_gate_rows(gates)
-    fig, ax = plt.subplots(figsize=(15.5, max(9.0, 0.52 * len(rows))))
+    rendered: list[tuple[dict[str, Any], list[str]]] = []
+    for row in rows:
+        payload = json.dumps(
+            {
+                "governing_values": row["governing_values"],
+                "failure_reason": row["failure_reason"],
+            },
+            sort_keys=True,
+            default=str,
+        )
+        rendered.append((row, textwrap.wrap(payload, width=150) or [""]))
+    total_lines = sum(max(1, len(lines)) for _, lines in rendered)
+    fig, ax = plt.subplots(figsize=(18.0, max(10.0, 0.32 * total_lines + 0.35 * len(rows))))
     ax.axis("off")
     y = 0.98
-    line_height = 0.95 / max(1, len(rows))
-    for row in rows:
-        verdict = "PASS" if row["passed"] else "FAIL"
+    line_height = 0.94 / max(1, total_lines + len(rows))
+    for row, lines in rendered:
+        verdict = row["verdict"]
         color = "#15803d" if row["passed"] else "#dc2626"
-        values = json.dumps(row["governing_values"], sort_keys=True, default=str)
-        if len(values) > 180:
-            values = values[:177] + "..."
         ax.text(0.01, y, verdict, color=color, weight="bold", family="monospace", va="top")
-        ax.text(0.08, y, str(row["gate"]), weight="bold", va="top")
-        ax.text(0.31, y, values, family="monospace", fontsize=7.6, va="top")
-        y -= line_height
+        ax.text(0.08, y, str(row["label"]), weight="bold", va="top")
+        ax.text(0.31, y, "\n".join(lines), family="monospace", fontsize=7.4, va="top")
+        y -= line_height * (len(lines) + 1)
     ax.set_title("P1-2 hard-gate dashboard — verdicts and governing values", pad=16)
     fig.tight_layout()
     fig.savefig(path, dpi=160)
     plt.close(fig)
     return True
+
+
+def apply_p1_2_required_figure_gate(
+    gates: dict[str, Any], required_figures: list[Path], failures: list[str]
+) -> None:
+    missing = missing_required_figure_paths(required_figures)
+    gates["required_png_missing"] = [path.name for path in missing]
+    gates["required_png_completeness"] = not missing
+    for path in missing:
+        failure = (
+            "P1-2 required figure missing: "
+            f"{path.name}; missing enabled-cost risk-reduction evidence prevents P1-2 acceptance"
+        )
+        if failure not in failures:
+            failures.append(failure)
 
 
 def plot_p1_2_p0_callback_timeline(rows: list[dict[str, Any]], path: Path) -> bool:
@@ -14720,6 +15327,17 @@ def analyze(args: argparse.Namespace) -> dict[str, Any]:
                 *PREDICTOR_LIDAR_INPUT_FIELDS,
                 *P0_UNKNOWN_REASON_FIELDS,
                 "refresh_elapsed_ms",
+                "refresh_scheduled_steady_s",
+                "refresh_callback_start_steady_s",
+                "refresh_callback_end_steady_s",
+                "refresh_duration_ms",
+                "refresh_queue_delay_ms",
+                "provider_batch_duration_ms",
+                "generation_interval_ms",
+                "input_callback_age_s",
+                "input_callback_count",
+                "health_callback_count",
+                "process_cpu_delta_ms",
                 "snapshot_available",
                 "reason",
             ],
@@ -14727,12 +15345,12 @@ def analyze(args: argparse.Namespace) -> dict[str, Any]:
         )
         write_csv(
             cloud_path,
-            ["stamp", "x", "y", "z", "pl", "hpl", "vpl", "c_pi", "valid", "unknown", "stale", "source_flags"],
+            ["stamp", "x", "y", "z", "pl", "hpl", "vpl", "c_pi", "valid", "unknown", "stale", "source_flags", "frame_id"],
             pl_cloud_rows,
         )
         write_csv(
             validity_path,
-            ["stamp", "x", "y", "z", "pl", "hpl", "vpl", "c_pi", "valid", "unknown", "stale", "source_flags"],
+            ["stamp", "x", "y", "z", "pl", "hpl", "vpl", "c_pi", "valid", "unknown", "stale", "source_flags", "frame_id"],
             validity_cloud_rows,
         )
         write_csv(
@@ -15362,14 +15980,79 @@ def analyze(args: argparse.Namespace) -> dict[str, Any]:
                 missing=True,
                 path="",
             )
-        p1_2_reference_cloud_rows, p1_2_reference_cloud_source = (
-            read_reference_p0_cloud_rows(
-                baseline_export_dir,
-                baseline_artifacts,
-                "p1_1",
-                "P1-1 bag latest predicted PL cloud",
-            )
+        current_context_preview = validate_p1_profile_context(
+            p1_accepted_profile_summary,
+            p1_accepted_profile_context_rows,
+            p1_accepted_profile_context_info,
+            stale_timeout_s=finite_float(manifest.get("p0.stale_timeout_s")),
         )
+        current_sidecar = current_context_preview.get("context", {}) or {}
+        current_snapshot_stamp = finite_float(current_sidecar.get("snapshot_stamp_s"))
+        current_snapshot_frame = str(current_sidecar.get("snapshot_frame_id", "")).strip()
+        if bag_dir is not None and current_snapshot_stamp is not None and current_snapshot_frame:
+            pl_cloud_rows, current_cloud_error = read_p0_cloud_at_snapshot(
+                bag_dir,
+                metadata,
+                current_snapshot_stamp,
+                current_snapshot_frame,
+            )
+            if current_cloud_error:
+                warnings.append(f"P1-2 exact accepted-snapshot risk cloud unavailable: {current_cloud_error}")
+            elif pl_cloud_rows:
+                exact_cloud_path = csv_dir / "p1_2_accepted_snapshot_pl_cloud.csv"
+                write_csv(
+                    exact_cloud_path,
+                    ["stamp", "x", "y", "z", "pl", "hpl", "vpl", "c_pi", "valid", "unknown", "stale", "source_flags", "frame_id"],
+                    pl_cloud_rows,
+                )
+                csv_artifacts.append(str(exact_cloud_path))
+        else:
+            pl_cloud_rows = []
+            warnings.append("P1-2 exact accepted-snapshot risk cloud unavailable: sidecar binding missing")
+
+        reference_context_preview = validate_p1_profile_context(
+            p1_2_reference_profile_summary,
+            p1_2_reference_context_rows,
+            p1_2_reference_context_info,
+            stale_timeout_s=finite_float(baseline_manifest.get("p0.stale_timeout_s")),
+        )
+        reference_sidecar = reference_context_preview.get("context", {}) or {}
+        reference_snapshot_stamp = finite_float(reference_sidecar.get("snapshot_stamp_s"))
+        reference_snapshot_frame = str(reference_sidecar.get("snapshot_frame_id", "")).strip()
+        if (
+            baseline_bag_dir is not None
+            and reference_snapshot_stamp is not None
+            and reference_snapshot_frame
+        ):
+            p1_2_reference_cloud_rows, reference_cloud_error = read_p0_cloud_at_snapshot(
+                baseline_bag_dir,
+                baseline_metadata,
+                reference_snapshot_stamp,
+                reference_snapshot_frame,
+            )
+            p1_2_reference_cloud_source = (
+                "P1-1 exact accepted-snapshot predicted PL cloud"
+                if not reference_cloud_error else ""
+            )
+            if reference_cloud_error:
+                warnings.append(
+                    "P1-1 exact accepted-snapshot risk cloud unavailable: "
+                    f"{reference_cloud_error}"
+                )
+            elif p1_2_reference_cloud_rows:
+                exact_reference_cloud_path = (
+                    csv_dir / "p1_1_reference_accepted_snapshot_pl_cloud.csv"
+                )
+                write_csv(
+                    exact_reference_cloud_path,
+                    ["stamp", "x", "y", "z", "pl", "hpl", "vpl", "c_pi", "valid", "unknown", "stale", "source_flags", "frame_id"],
+                    p1_2_reference_cloud_rows,
+                )
+                csv_artifacts.append(str(exact_reference_cloud_path))
+        else:
+            p1_2_reference_cloud_rows = []
+            p1_2_reference_cloud_source = ""
+            warnings.append("P1-1 exact accepted-snapshot risk cloud unavailable: sidecar binding missing")
         p1_2_reference_health_rows = list(
             baseline_artifacts.get("health_rows", []) or []
         )
@@ -16740,6 +17423,8 @@ def analyze(args: argparse.Namespace) -> dict[str, Any]:
         p1_manifest_path = csv_dir / "p1_2_manifest_switch_summary.csv"
         p1_validation_path = csv_dir / "p1_2_validation_summary.csv"
         p1_cause_path = csv_dir / "p1_2_cause_exclusion_summary.csv"
+        p1_hard_gate_csv_path = csv_dir / "p1_2_hard_gates.csv"
+        p1_hard_gate_json_path = csv_dir / "p1_2_hard_gates.json"
 
         write_csv(
             p1_summary_path,
@@ -16851,6 +17536,12 @@ def analyze(args: argparse.Namespace) -> dict[str, Any]:
                 "c_pi",
                 "pl",
                 "reason",
+                "trace_available",
+                "grad_x", "grad_y", "grad_z",
+                "neg_grad_x", "neg_grad_y", "neg_grad_z",
+                "pre_x", "pre_y", "pre_z",
+                "disp_x", "disp_y", "disp_z",
+                "grad_dot_displacement", "delta_c_pi",
             ],
             risk_sample_rows,
         )
@@ -17059,6 +17750,37 @@ def analyze(args: argparse.Namespace) -> dict[str, Any]:
             p1_2_figure_artifacts.append(
                 str(p1_2_figure_paths["p1_2_cause_exclusion_summary.png"])
             )
+        if plot_p1_2_snapshot_spatial_bounds_overlay(
+            p1_2_risk_comparison,
+            p1_2_figure_paths["p1_2_snapshot_spatial_bounds_overlay.png"],
+        ):
+            p1_2_figure_artifacts.append(str(
+                p1_2_figure_paths["p1_2_snapshot_spatial_bounds_overlay.png"]
+            ))
+        if plot_p1_2_gradient_direction_field_overlay(
+            p1_2_risk_comparison,
+            p1_2_figure_paths["p1_2_gradient_direction_field_overlay.png"],
+        ):
+            p1_2_figure_artifacts.append(str(
+                p1_2_figure_paths["p1_2_gradient_direction_field_overlay.png"]
+            ))
+        if plot_p1_2_refresh_latency_vs_stale_threshold(
+            health_rows,
+            finite_float(manifest.get("p0.stale_timeout_s")) or 1.0,
+            p1_2_figure_paths["p1_2_refresh_latency_vs_stale_threshold.png"],
+            reference_rows=p1_2_reference_health_rows,
+        ):
+            p1_2_figure_artifacts.append(str(
+                p1_2_figure_paths["p1_2_refresh_latency_vs_stale_threshold.png"]
+            ))
+        if plot_p1_2_replan_load_correlation(
+            p1_planning_context_timeline_rows,
+            health_rows,
+            p1_2_figure_paths["p1_2_replan_load_correlation.png"],
+        ):
+            p1_2_figure_artifacts.append(str(
+                p1_2_figure_paths["p1_2_replan_load_correlation.png"]
+            ))
         if plot_p1_2_p0_callback_timeline(
             health_rows, p1_2_figure_paths["p1_2_p0_callback_timeline.png"]
         ):
@@ -17073,13 +17795,6 @@ def analyze(args: argparse.Namespace) -> dict[str, Any]:
             p1_2_figure_paths["p1_2_replan_fallback_timeline.png"],
         ):
             p1_2_figure_artifacts.append(str(p1_2_figure_paths["p1_2_replan_fallback_timeline.png"]))
-        if plot_p1_2_result_dashboard(
-            p1_2_gates,
-            p1_2_figure_paths["p1_2_result_dashboard.png"],
-        ):
-            p1_2_figure_artifacts.append(
-                str(p1_2_figure_paths["p1_2_result_dashboard.png"])
-            )
         if plot_p1_2_artifact_completeness(
             export_dir,
             bag_dir,
@@ -17096,6 +17811,45 @@ def analyze(args: argparse.Namespace) -> dict[str, Any]:
         p1_2_required_figures = [
             p1_2_figure_paths[name] for name in P1_2_FIGURE_FILENAMES
         ]
+        # The dashboard is deliberately rendered last from the same structured
+        # hard-gate records. First prove every other required PNG is nonempty.
+        pre_dashboard_figures = [
+            path for path in p1_2_required_figures
+            if path.name != "p1_2_result_dashboard.png"
+        ]
+        apply_p1_2_required_figure_gate(
+            p1_2_gates, pre_dashboard_figures, failures
+        )
+        if plot_p1_2_result_dashboard(
+            p1_2_gates,
+            p1_2_figure_paths["p1_2_result_dashboard.png"],
+        ):
+            p1_2_figure_artifacts.append(
+                str(p1_2_figure_paths["p1_2_result_dashboard.png"])
+            )
+        apply_p1_2_required_figure_gate(
+            p1_2_gates, p1_2_required_figures, failures
+        )
+        hard_gate_rows = p1_2_hard_gate_rows(p1_2_gates)
+        p1_2_gates["passed"] = all(row["verdict"] == "PASS" for row in hard_gate_rows)
+        p1_2_gates["records"] = hard_gate_rows
+        for row in hard_gate_rows:
+            if row["verdict"] == "FAIL":
+                message = f"P1-2 hard gate {row['id']} failed: {row['failure_reason']}"
+                if message not in failures:
+                    failures.append(message)
+        write_csv(
+            p1_hard_gate_csv_path,
+            ["id", "label", "verdict", "governing_values", "failure_reason"],
+            hard_gate_rows,
+        )
+        write_json(
+            p1_hard_gate_json_path,
+            {"passed": p1_2_gates["passed"], "gates": hard_gate_rows},
+        )
+        csv_artifacts.extend([
+            str(p1_hard_gate_csv_path), str(p1_hard_gate_json_path)
+        ])
 
     p5_8_figure_artifacts: list[str] = []
     p5_8_required_figures: list[Path] = []
@@ -17329,6 +18083,8 @@ def analyze(args: argparse.Namespace) -> dict[str, Any]:
         status = "BLOCKED_SCENARIO_MISSING"
     elif p5_4_phase and bool(p5_4_gates.get("blocked_scenario_missing")):
         status = "BLOCKED_SCENARIO_MISSING"
+    elif p1_2_phase and not bool(p1_2_gates.get("passed")):
+        status = "FAIL"
     elif failures:
         status = "FAIL"
     elif inconclusive:

@@ -104,6 +104,7 @@ class P0RiskGridRuntime {
   void refreshTimerCallback();
   void healthTimerCallback();
   void publishHealth(const iap::RiskGridHealth& health, double now_s);
+  void recordInputCallback();
 
   struct HealthPublicationState {
     double refresh_stamp_s = std::numeric_limits<double>::quiet_NaN();
@@ -111,17 +112,25 @@ class P0RiskGridRuntime {
     double refresh_end_stamp_s = std::numeric_limits<double>::quiet_NaN();
     double health_callback_stamp_s = std::numeric_limits<double>::quiet_NaN();
     double publish_stamp_s = std::numeric_limits<double>::quiet_NaN();
+    double refresh_scheduled_steady_s = std::numeric_limits<double>::quiet_NaN();
     double refresh_start_steady_s = std::numeric_limits<double>::quiet_NaN();
     double refresh_end_steady_s = std::numeric_limits<double>::quiet_NaN();
     double health_callback_steady_s = std::numeric_limits<double>::quiet_NaN();
     double publish_steady_s = std::numeric_limits<double>::quiet_NaN();
     double last_grid_stamp_s = std::numeric_limits<double>::quiet_NaN();
     double refresh_elapsed_ms = std::numeric_limits<double>::quiet_NaN();
+    double refresh_queue_delay_ms = std::numeric_limits<double>::quiet_NaN();
+    double provider_batch_duration_ms = std::numeric_limits<double>::quiet_NaN();
+    double generation_interval_ms = std::numeric_limits<double>::quiet_NaN();
+    double input_callback_age_s = std::numeric_limits<double>::quiet_NaN();
+    double process_cpu_delta_ms = std::numeric_limits<double>::quiet_NaN();
     double health_callback_duration_ms = std::numeric_limits<double>::quiet_NaN();
     double health_callback_queue_delay_ms = std::numeric_limits<double>::quiet_NaN();
     double health_state_mutex_wait_ms = std::numeric_limits<double>::quiet_NaN();
     double health_state_mutex_hold_ms = std::numeric_limits<double>::quiet_NaN();
     std::size_t refresh_query_count = 0;
+    uint64_t input_callback_count = 0;
+    uint64_t health_callback_count = 0;
     bool snapshot_available = false;
   };
   HealthPublicationState healthPublicationStateSnapshot() const;
@@ -191,6 +200,9 @@ class P0RiskGridRuntime {
   double last_refresh_stamp_s_ = std::numeric_limits<double>::quiet_NaN();
   double last_grid_stamp_s_ = std::numeric_limits<double>::quiet_NaN();
   double last_refresh_elapsed_ms_ = std::numeric_limits<double>::quiet_NaN();
+  double last_refresh_queue_delay_ms_ = std::numeric_limits<double>::quiet_NaN();
+  double last_provider_batch_duration_ms_ = std::numeric_limits<double>::quiet_NaN();
+  double last_generation_interval_ms_ = std::numeric_limits<double>::quiet_NaN();
   bool last_snapshot_available_ = false;
   std::size_t last_refresh_query_count_ = 0;
   double last_refresh_start_stamp_s_ = std::numeric_limits<double>::quiet_NaN();
@@ -198,13 +210,21 @@ class P0RiskGridRuntime {
   double last_health_callback_stamp_s_ = std::numeric_limits<double>::quiet_NaN();
   double last_publish_stamp_s_ = std::numeric_limits<double>::quiet_NaN();
   double last_refresh_start_steady_s_ = std::numeric_limits<double>::quiet_NaN();
+  double last_refresh_scheduled_steady_s_ = std::numeric_limits<double>::quiet_NaN();
+  double next_refresh_scheduled_steady_s_ = std::numeric_limits<double>::quiet_NaN();
   double last_refresh_end_steady_s_ = std::numeric_limits<double>::quiet_NaN();
+  double last_generation_end_steady_s_ = std::numeric_limits<double>::quiet_NaN();
+  double last_input_callback_steady_s_ = std::numeric_limits<double>::quiet_NaN();
   double last_health_callback_steady_s_ = std::numeric_limits<double>::quiet_NaN();
   double last_publish_steady_s_ = std::numeric_limits<double>::quiet_NaN();
   double last_health_callback_duration_ms_ = std::numeric_limits<double>::quiet_NaN();
   double last_health_callback_queue_delay_ms_ = std::numeric_limits<double>::quiet_NaN();
   double last_health_state_mutex_wait_ms_ = std::numeric_limits<double>::quiet_NaN();
   double last_health_state_mutex_hold_ms_ = std::numeric_limits<double>::quiet_NaN();
+  double last_process_cpu_ms_ = std::numeric_limits<double>::quiet_NaN();
+  double last_process_cpu_delta_ms_ = std::numeric_limits<double>::quiet_NaN();
+  uint64_t input_callback_count_ = 0;
+  uint64_t health_callback_count_ = 0;
   bool origin_set_ = false;
   Eigen::Vector3d origin_ecef_ = Eigen::Vector3d::Zero();
   std::unordered_map<uint32_t, gnss_comm::EphemPtr> ephem_cache_;

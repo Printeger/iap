@@ -167,6 +167,7 @@ add_library(iap SHARED
   src/iap/planner/unified_risk_grid.cpp
   src/iap/planner/predicted_araim.cpp
   src/iap/planner/risk_grid_map.cpp
+  src/iap/planner/p1_accepted_context_validation.cpp
   src/iap/predictor/gnss_geometry_pl_predictor.cpp
   # independent advisory predictor query module
   src/iap/predictor/gnss_advisory_predictor.cpp

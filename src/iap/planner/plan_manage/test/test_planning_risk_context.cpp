@@ -2,6 +2,7 @@
 
 #include <gtest/gtest.h>
 #include <iap/planner/risk_grid_map.hpp>
+#include <iap/planner/p1_accepted_context_validation.hpp>
 
 #include <memory>
 #include <string>
@@ -112,6 +113,95 @@ TEST(PlanningRiskContextTest, StaleContextFailsClosedAgainstItsImmutableSnapshot
   EXPECT_EQ(reason, "ok");
   EXPECT_FALSE(manager.planningRiskContextFresh(20.1, &reason));
   EXPECT_EQ(reason, "stale_planning_risk_context");
+}
+
+TEST(P1AcceptedContextValidationTest,
+     SeparatesStrictSpatialInteriorFromTemporalHorizon) {
+  auto snapshot = makeSnapshot(1.0, 10.0);
+  ASSERT_NE(snapshot, nullptr);
+  iap::P1AcceptedContextValidationInput input;
+  input.snapshot = snapshot;
+  input.snapshot_frame_id = "map";
+  input.trajectory_frame_id = "map";
+  input.expected_generation_id = snapshot->generation_id();
+  input.query_base_time_s = snapshot->stamp_s();
+  input.accepted_stamp_s = 10.5;
+  for (int index = 0; index < 200; ++index) {
+    iap::P1AcceptedContextSample sample;
+    sample.position_w = Eigen::Vector3d(0.0, 0.0, 0.0);
+    sample.trajectory_time_s = 5.7 * static_cast<double>(index) / 199.0;
+    sample.query_hit = sample.trajectory_time_s <= 1.0;
+    sample.query_valid = sample.query_hit;
+    sample.query_stale = false;
+    sample.query_reason = sample.query_hit ? "ok" : "time_out_of_horizon";
+    input.samples.push_back(sample);
+  }
+
+  const auto result = iap::validateP1AcceptedContext(input);
+
+  EXPECT_TRUE(result.spatial_in_bounds);
+  EXPECT_FALSE(result.temporal_in_horizon);
+  EXPECT_EQ(result.spatial_miss_count, 0U);
+  EXPECT_GT(result.temporal_miss_count, 0U);
+  EXPECT_FALSE(result.valid);
+}
+
+TEST(P1AcceptedContextValidationTest,
+     EnforcesFrameGenerationFreshnessAndCoverageBinding) {
+  auto snapshot = makeSnapshot(1.0, 10.0);
+  ASSERT_NE(snapshot, nullptr);
+  iap::P1AcceptedContextValidationInput input;
+  input.snapshot = snapshot;
+  input.snapshot_frame_id = "map";
+  input.trajectory_frame_id = "odom";
+  input.expected_generation_id = snapshot->generation_id() + 1;
+  input.query_base_time_s = snapshot->stamp_s();
+  input.accepted_stamp_s = 20.1;
+  for (int index = 0; index < 200; ++index) {
+    iap::P1AcceptedContextSample sample;
+    sample.position_w = Eigen::Vector3d::Zero();
+    sample.trajectory_time_s = 0.5;
+    sample.query_stale = false;
+    sample.query_reason = index < 25 ? "ok" : "occupied";
+    sample.query_hit = index < 25;
+    sample.query_valid = sample.query_hit;
+    input.samples.push_back(sample);
+  }
+
+  const auto result = iap::validateP1AcceptedContext(input);
+
+  EXPECT_FALSE(result.frame_match);
+  EXPECT_FALSE(result.generation_match);
+  EXPECT_FALSE(result.fresh);
+  EXPECT_FALSE(result.coverage_ok);
+  EXPECT_EQ(result.covered_sample_count, 25U);
+  EXPECT_EQ(result.occupied_miss_count, 175U);
+  EXPECT_FALSE(result.valid);
+}
+
+TEST(P1AcceptedContextValidationTest,
+     RejectsMapEdgeThatCannotSupportTrilinearInterpolation) {
+  auto snapshot = makeSnapshot(1.0, 10.0);
+  ASSERT_NE(snapshot, nullptr);
+  iap::P1AcceptedContextValidationInput input;
+  input.snapshot = snapshot;
+  input.snapshot_frame_id = "map";
+  input.trajectory_frame_id = "map";
+  input.expected_generation_id = snapshot->generation_id();
+  input.query_base_time_s = snapshot->stamp_s();
+  input.accepted_stamp_s = 10.5;
+  iap::P1AcceptedContextSample sample;
+  sample.position_w = snapshot->origin();
+  sample.trajectory_time_s = 0.5;
+  sample.query_reason = "position_out_of_interpolation_bounds";
+  sample.query_stale = false;
+  input.samples.assign(200, sample);
+
+  const auto result = iap::validateP1AcceptedContext(input);
+
+  EXPECT_FALSE(result.spatial_in_bounds);
+  EXPECT_EQ(result.spatial_miss_count, 200U);
+  EXPECT_FALSE(result.valid);
 }
 
 TEST(PlanningTimeProviderTest, EmergencyStopUsesProvidedSimStamp) {

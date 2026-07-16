@@ -9,9 +9,11 @@
 #include <plan_env/grid_map.h>
 #include <plan_env/obj_predictor.h>
 #include <rclcpp/rclcpp.hpp>
+#include <iap/planner/p1_accepted_context_validation.hpp>
 #include "bspline_opt/lbfgs.hpp"
 #include <traj_utils/plan_container.hpp>
 #include <memory>
+#include <map>
 #include <string>
 
 namespace iap
@@ -234,12 +236,20 @@ namespace ego_planner
     void setP4RiskAStarConfigForTest(const P4RiskAStarConfig &config) { p4_config_ = config; }
     bool evaluateReboundCostForTest(const Eigen::MatrixXd &control_points, double ts,
                                     double &cost, Eigen::MatrixXd &gradient);
+    double p1LbfgsGradientEpsilon(double initial_weighted_p1_gradient_norm,
+                                  double variable_norm) const;
+    void setP1PreOptimizationTrajectoryForTest(
+        const Eigen::MatrixXd &control_points, double interval_s);
     bool writeP1AcceptedTrajectoryRiskProfile(UniformBspline trajectory,
                                               uint64_t profile_seq,
                                               uint64_t trajectory_id,
                                               double stamp_s,
                                               double planning_start_s =
-                                                  std::numeric_limits<double>::quiet_NaN()) const;
+                                                  std::numeric_limits<double>::quiet_NaN(),
+                                              const std::string &trajectory_frame_id = "map") const;
+    iap::P1AcceptedContextValidation validateP1AcceptedTrajectoryRiskContext(
+        UniformBspline trajectory, double accepted_stamp_s,
+        const std::string &trajectory_frame_id) const;
 
   private:
     GridMap::Ptr grid_map_;
@@ -290,6 +300,13 @@ namespace ego_planner
     double risk_query_base_time_s_{0.0};
     P1PlanningRiskContext p1_risk_context_;
     bool p1_debug_csv_header_written_{false};
+    struct P1PreOptimizationTrace
+    {
+      Eigen::MatrixXd control_points;
+      double interval_s = std::numeric_limits<double>::quiet_NaN();
+    };
+    std::map<std::pair<uint64_t, uint64_t>, P1PreOptimizationTrace>
+        p1_pre_optimization_traces_;
 
     int variable_num_;              // optimization variables
     int iter_num_;                  // iteration of the solver
@@ -324,6 +341,8 @@ namespace ego_planner
                            int &first_control_point,
                            double weights[4]) const;
     void writeP1DebugCsv(const P1IntegrityMetrics &metrics) const;
+    void captureP1PreOptimizationTrajectory(
+        const Eigen::MatrixXd &control_points, double interval_s);
     bool check_collision_and_rebound(void);
 
     static int earlyExit(void *func_data, const double *x, const double *g, const double fx, const double xnorm, const double gnorm, const double step, int n, int k, int ls);

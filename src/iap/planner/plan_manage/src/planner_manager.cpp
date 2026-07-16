@@ -185,6 +185,7 @@ namespace ego_planner
     grid_map_.reset(new GridMap);
     // grid_map_->initMap(nh);
     grid_map_->initMap(node);
+    node->get_parameter("grid_map/frame_id", trajectory_frame_id_);
 
     bspline_optimizer_.reset(new BsplineOptimizer);
     // bspline_optimizer_->setParam(nh);
@@ -364,12 +365,26 @@ namespace ego_planner
     planning_risk_context_.publish_s = publish_stamp_s;
     const bool written = bspline_optimizer_->writeP1AcceptedTrajectoryRiskProfile(
         local_data_.position_traj_, ++p1_accepted_profile_seq_, local_data_.traj_id_,
-        publish_stamp_s, planning_risk_context_.planning_start_s);
+        publish_stamp_s, planning_risk_context_.planning_start_s,
+        trajectory_frame_id_);
     appendPlanningRiskContextTimeline("publish", publish_stamp_s,
         written ? "published" : "published_without_profile",
         written ? "ok" : "accepted_profile_write_failed");
     bspline_optimizer_->clearRiskSnapshot();
     return written;
+  }
+
+  bool EGOPlannerManager::p1AdmissionEnabled() const
+  {
+    if (!bspline_optimizer_) return false;
+    return bspline_optimizer_->getP1IntegrityConfig().use_integrity_cost;
+  }
+
+  void EGOPlannerManager::recordP1RetryDeferred(
+      const std::string &reason, const double stamp_s)
+  {
+    appendPlanningRiskContextTimeline("retry_deferred", stamp_s, "deferred",
+        reason, "existing_polynomial");
   }
 
   void EGOPlannerManager::setPlanningRiskContextForTest(
@@ -450,7 +465,7 @@ namespace ego_planner
                                         Eigen::Vector3d start_acc, Eigen::Vector3d local_target_pt,
                                         Eigen::Vector3d local_target_vel, bool flag_polyInit, bool flag_randomPolyTraj)
   {
-    const double planning_start_s = plannerNow().seconds();
+    last_p1_rejection_reason_.clear();
     static int count = 0;
     printf("\033[47;30m\n[drone %d replan %d]==============================================\033[0m\n", pp_.drone_id, count++);
 
@@ -879,10 +894,26 @@ namespace ego_planner
     std::string freshness_reason;
     if (!planningRiskContextFresh(accepted_time.seconds(), &freshness_reason))
     {
+      last_p1_rejection_reason_ = freshness_reason;
       appendPlanningRiskContextTimeline("accept", accepted_time.seconds(),
           "rejected", freshness_reason, "existing_poly_random_failure_budget");
       bspline_optimizer_->clearRiskSnapshot();
       clearPlanningRiskContext();
+      continous_failures_count_++;
+      return false;
+    }
+    const auto accepted_context =
+        bspline_optimizer_->validateP1AcceptedTrajectoryRiskContext(
+            pos, accepted_time.seconds(), trajectory_frame_id_);
+    if (!accepted_context.valid)
+    {
+      last_p1_rejection_reason_ = accepted_context.failure_reasons.empty()
+          ? "accepted_context_invalid"
+          : accepted_context.failure_reasons.front();
+      appendPlanningRiskContextTimeline("accept", accepted_time.seconds(),
+          "rejected", last_p1_rejection_reason_,
+          "existing_poly_random_failure_budget");
+      bspline_optimizer_->clearRiskSnapshot();
       continous_failures_count_++;
       return false;
     }

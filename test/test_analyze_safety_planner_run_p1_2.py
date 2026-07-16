@@ -76,6 +76,13 @@ def p0_row(idx, **overrides):
         "valid_ratio": 1.0,
         "unknown_ratio": 0.0,
         "reason": "ok",
+        "refresh_duration_ms": 400.0,
+        "refresh_queue_delay_ms": 10.0,
+        "provider_batch_duration_ms": 350.0,
+        "generation_interval_ms": 500.0,
+        "input_callback_count": idx + 1,
+        "health_callback_count": idx + 1,
+        "process_cpu_delta_ms": 25.0,
     }
     row.update(overrides)
     return row
@@ -147,7 +154,8 @@ def cloud_rows(y, *, c_pi=1.0, pl=1.0, include_c_pi=True):
     for idx in range(21):
         x = idx * 0.5
         row = {
-            "stamp": 1.0,
+            "stamp": 9.0,
+            "frame_id": "map",
             "x": x,
             "y": y,
             "z": 1.0,
@@ -203,6 +211,21 @@ def accepted_profile_rows(
                 "stale": 0,
                 "c_pi": value if valid else "",
                 "reason": "ok" if valid else "query_miss",
+                "trace_available": 1,
+                "grad_x": 1.0,
+                "grad_y": 0.0,
+                "grad_z": 0.0,
+                "neg_grad_x": -1.0,
+                "neg_grad_y": 0.0,
+                "neg_grad_z": 0.0,
+                "pre_x": x + 0.1,
+                "pre_y": y,
+                "pre_z": 1.0,
+                "disp_x": -0.1,
+                "disp_y": 0.0,
+                "disp_z": 0.0,
+                "grad_dot_displacement": -0.1,
+                "delta_c_pi": -0.1,
             }
         )
     return rows
@@ -228,6 +251,12 @@ def accepted_profile_context(rows):
         "expected_sample_count": 200, "matched_sample_count": matched,
         "match_ratio": matched / 200.0, "query_miss_count": 200 - matched,
         "stale_count": 0, "invalid_count": 0, "miss_reason_histogram": "",
+        "snapshot_frame_id": "map", "trajectory_frame_id": "map",
+        "spatial_in_bounds": 1, "temporal_in_horizon": 1,
+        "frame_match": 1, "generation_match": 1, "query_time_match": 1,
+        "fresh": 1, "coverage_ok": 1, "spatial_miss_count": 0,
+        "temporal_miss_count": 0, "occupied_miss_count": 0,
+        "stale_miss_count": 0, "invalid_miss_count": 200 - matched,
     }]
 
 
@@ -602,6 +631,10 @@ class P1_2AnalyzerTest(unittest.TestCase):
                 "p1_2_result_dashboard.png",
                 "p1_2_artifact_completeness.png",
                 "p1_2_cause_exclusion_summary.png",
+                "p1_2_snapshot_spatial_bounds_overlay.png",
+                "p1_2_gradient_direction_field_overlay.png",
+                "p1_2_refresh_latency_vs_stale_threshold.png",
+                "p1_2_replan_load_correlation.png",
             ],
         )
 
@@ -716,13 +749,21 @@ class P1_2AnalyzerTest(unittest.TestCase):
         )
         current_scene = {
             "map_points": [(float(x), 0.0, 0.0) for x in range(11)],
+            "map_frame_ids": ["map"], "map_stamps": [9.0],
             "truth_xy": [(0.0, 0.0), (10.0, 0.0)],
+            "truth_frame_ids": ["map"], "truth_stamps": [9.0, 10.0],
             "slam_xy": [(0.0, 0.0), (10.0, 0.0)],
+            "slam_frame_ids": ["map"], "slam_stamps": [9.0, 10.0],
+            "bspline_start_stamps": [10.0],
         }
         reference_scene = {
             "map_points": [(float(x), 5.0, 0.0) for x in range(11)],
+            "map_frame_ids": ["map"], "map_stamps": [9.0],
             "truth_xy": [(0.0, 5.0), (10.0, 5.0)],
+            "truth_frame_ids": ["map"], "truth_stamps": [9.0, 10.0],
             "slam_xy": [(0.0, 5.0), (10.0, 5.0)],
+            "slam_frame_ids": ["map"], "slam_stamps": [9.0, 10.0],
+            "bspline_start_stamps": [10.0],
         }
         alignment = analyzer.p1_2_risk_scene_alignment(
             comparison, current_scene, reference_scene
@@ -795,6 +836,120 @@ class P1_2AnalyzerTest(unittest.TestCase):
 
         self.assertFalse(result["bindings_ok"])
         self.assertFalse(result["valid"])
+
+    def test_profile_context_separates_spatial_bounds_from_time_horizon(self):
+        profile = accepted_profile_rows(0.0)
+        for row in profile:
+            row["t_s"] = 5.7 * row["sample_index"] / 199.0
+        summary = analyzer.summarize_p1_accepted_profile_rows(profile)
+        context = accepted_profile_context(profile)
+        context[0]["trajectory_time_max_s"] = 5.7
+        context[0]["snapshot_time_max_s"] = 11.0
+
+        result = analyzer.validate_p1_profile_context(
+            summary, context, {"path": "context"}, stale_timeout_s=1.0
+        )
+
+        self.assertTrue(result["spatial_in_bounds"])
+        self.assertFalse(result["temporal_in_horizon"])
+        self.assertFalse(result["valid"])
+        self.assertIn("temporal_out_of_horizon", result["reasons"])
+
+    def test_p1_2_required_figure_contract_has_sixteen_nonempty_names(self):
+        self.assertEqual(len(analyzer.P1_2_FIGURE_FILENAMES), 16)
+        self.assertEqual(len(set(analyzer.P1_2_FIGURE_FILENAMES)), 16)
+        self.assertIn(
+            "p1_2_snapshot_spatial_bounds_overlay.png",
+            analyzer.P1_2_FIGURE_FILENAMES,
+        )
+        self.assertIn(
+            "p1_2_gradient_direction_field_overlay.png",
+            analyzer.P1_2_FIGURE_FILENAMES,
+        )
+        self.assertIn(
+            "p1_2_refresh_latency_vs_stale_threshold.png",
+            analyzer.P1_2_FIGURE_FILENAMES,
+        )
+        self.assertIn(
+            "p1_2_replan_load_correlation.png",
+            analyzer.P1_2_FIGURE_FILENAMES,
+        )
+
+    def test_gradient_trace_schema_and_data_fail_closed(self):
+        rows = accepted_profile_rows(0.0)
+        summary = analyzer.summarize_p1_accepted_profile_rows(rows)
+        self.assertTrue(summary["gradient_trace_complete"])
+        rows[10]["trace_available"] = 0
+        summary = analyzer.summarize_p1_accepted_profile_rows(rows)
+        self.assertFalse(summary["gradient_trace_complete"])
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "profile.csv"
+            legacy_fields = [field for field in analyzer.P1_ACCEPTED_PROFILE_FIELDS
+                             if not field.startswith("grad_") and field != "trace_available"]
+            path.write_text(",".join(legacy_fields) + "\n")
+            _, parsed = analyzer.read_p1_accepted_profile_csv(path)
+            self.assertIn("trace_available", parsed["missing_fields"])
+            self.assertIn("grad_x", parsed["missing_fields"])
+
+    def test_hard_gate_rows_are_structured_and_preserve_long_failure_reason(self):
+        gates, _, _, _ = run_gate()
+        long_reason = "frame mismatch: " + "x" * 500
+        gates["risk_scene_overlay_available"] = False
+        gates["risk_scene_alignment_reasons"] = [long_reason]
+        rows = analyzer.p1_2_hard_gate_rows(gates)
+        scene = next(row for row in rows if row["id"] == "recorded_risk_scene_alignment")
+        self.assertEqual(
+            set(("id", "label", "verdict", "governing_values", "failure_reason"))
+            <= set(scene), True,
+        )
+        self.assertEqual(scene["verdict"], "FAIL")
+        self.assertIn(long_reason, scene["failure_reason"])
+
+    def test_four_new_required_diagnostic_plots_are_nonempty(self):
+        comparison = analyzer.compare_p1_2_risk_profiles(
+            bspline_rows(0.0), bspline_rows(5.0), cloud_rows(0.0), cloud_rows(5.0),
+            p0_resolution_m=0.75,
+            p1_2_accepted_profile_rows=accepted_profile_rows(0.0),
+            p1_1_accepted_profile_rows=accepted_profile_rows(
+                5.0, applied_to_objective=0, metrics_only=1),
+            p1_2_context_rows=accepted_profile_context(accepted_profile_rows(0.0)),
+            p1_1_context_rows=accepted_profile_context(accepted_profile_rows(
+                5.0, applied_to_objective=0, metrics_only=1)),
+            p1_2_context_info={"path": "current"},
+            p1_1_context_info={"path": "reference"},
+            stale_timeout_s=1.0,
+        )
+        timeline = [
+            {"stamp_s": 1.0, "stage": "optimizer_start", "outcome": "started", "reason": "ok"},
+            {"stamp_s": 1.1, "stage": "accept", "outcome": "rejected", "reason": "context_stale"},
+            {"stamp_s": 1.2, "stage": "retry", "outcome": "deferred", "reason": "retry_deferred_same_generation"},
+        ]
+        with tempfile.TemporaryDirectory() as tmp:
+            paths = [Path(tmp) / f"plot_{idx}.png" for idx in range(4)]
+            self.assertTrue(analyzer.plot_p1_2_snapshot_spatial_bounds_overlay(comparison, paths[0]))
+            self.assertTrue(analyzer.plot_p1_2_gradient_direction_field_overlay(comparison, paths[1]))
+            self.assertTrue(analyzer.plot_p1_2_refresh_latency_vs_stale_threshold(
+                [p0_row(idx) for idx in range(5)], 1.0, paths[2]))
+            self.assertTrue(analyzer.plot_p1_2_replan_load_correlation(
+                timeline, [p0_row(idx) for idx in range(5)], paths[3]))
+            self.assertTrue(all(path.stat().st_size > 0 for path in paths))
+
+    def test_required_png_completeness_is_a_final_hard_gate(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            paths = [Path(tmp) / name for name in analyzer.P1_2_FIGURE_FILENAMES]
+            for path in paths[:-1]:
+                path.write_bytes(b"png")
+            gates = {}
+            failures = []
+            analyzer.apply_p1_2_required_figure_gate(gates, paths, failures)
+            self.assertFalse(gates["required_png_completeness"])
+            self.assertTrue(any(paths[-1].name in failure for failure in failures))
+            paths[-1].write_bytes(b"png")
+            failures.clear()
+            analyzer.apply_p1_2_required_figure_gate(gates, paths, failures)
+            self.assertTrue(gates["required_png_completeness"])
+            self.assertEqual(failures, [])
 
 
 if __name__ == "__main__":

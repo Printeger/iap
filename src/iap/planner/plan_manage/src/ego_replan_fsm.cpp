@@ -939,6 +939,29 @@ namespace ego_planner
       }
     } planning_risk_context_guard{planner_manager_.get()};
 
+    const uint64_t p1_admission_generation =
+        planner_manager_->currentPlanningGenerationId();
+    const bool p5_owns_admission = planner_manager_->p5_integrity_gate_ &&
+        (planner_manager_->p5_integrity_gate_->runtimeEnabled() ||
+         planner_manager_->p5_integrity_gate_->finalGateEnabled());
+    if (planner_manager_->p1AdmissionEnabled() && !p5_owns_admission)
+    {
+      const auto snapshot = planner_manager_->currentPlanningRiskSnapshot();
+      const auto health = snapshot ? snapshot->health() : iap::RiskGridHealth{};
+      std::string context_reason;
+      const bool context_fresh = planner_manager_->planningRiskContextFresh(
+          plannerNow().seconds(), &context_reason);
+      const auto admission = p1_replan_admission_.admit(
+          p1_admission_generation, health.ready,
+          health.stale || !context_fresh);
+      if (!admission.allow_expensive_planning)
+      {
+        planner_manager_->recordP1RetryDeferred(
+            admission.reason, plannerNow().seconds());
+        return false;
+      }
+    }
+
     getLocalTarget();
 
     bool plan_and_refine_success =
@@ -946,6 +969,14 @@ namespace ego_planner
     have_new_target_ = false;
 
     cout << "refine_success=" << plan_and_refine_success << endl;
+
+    if (!plan_and_refine_success && planner_manager_->p1AdmissionEnabled() &&
+        !p5_owns_admission &&
+        planner_manager_->lastP1RejectionReason().find("stale") !=
+            std::string::npos)
+    {
+      p1_replan_admission_.recordStaleRejection(p1_admission_generation);
+    }
 
     if (plan_and_refine_success)
     {
@@ -1023,6 +1054,11 @@ namespace ego_planner
         RCLCPP_WARN(node_->get_logger(),
                     "P1 blocked stale planning context before bspline publish: %s",
                     freshness_reason.c_str());
+        if (planner_manager_->p1AdmissionEnabled() && !p5_owns_admission &&
+            freshness_reason.find("stale") != std::string::npos)
+        {
+          p1_replan_admission_.recordStaleRejection(p1_admission_generation);
+        }
         planner_manager_->local_data_ = previous_local_data;
         return false;
       }
@@ -1034,6 +1070,10 @@ namespace ego_planner
       {
         RCLCPP_WARN(node_->get_logger(),
                     "P1 published fresh bspline but could not write accepted-profile evidence");
+      }
+      if (planner_manager_->p1AdmissionEnabled() && !p5_owns_admission)
+      {
+        p1_replan_admission_.recordSuccess(p1_admission_generation);
       }
 
       /* 2. publish traj to the next drone of swarm */

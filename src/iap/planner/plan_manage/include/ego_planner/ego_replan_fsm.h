@@ -19,6 +19,7 @@
 #include "geometry_msgs/msg/pose_stamped.hpp"
 #include "traj_utils/msg/data_disp.hpp"
 #include "ego_planner/planner_manager.h"
+#include "ego_planner/p1_replan_admission.h"
 #include "traj_utils/planning_visualization.h"
 
 using std::vector;
@@ -82,6 +83,7 @@ namespace ego_planner
     bool flag_escape_emergency_ = false;
     bool p5_final_gate_emergency_candidate_ = false;
     bool p5_waiting_for_p0_ready_ = false;
+    P1ReplanAdmission p1_replan_admission_;
 
     /* ROS utils */
     rclcpp::Node::SharedPtr node_;

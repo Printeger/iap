@@ -1,12 +1,15 @@
 #include <ego_planner/p0_risk_grid_runtime.h>
 
 #include <cmath>
+#include <atomic>
+#include <chrono>
 #include <limits>
 #include <memory>
 #include <mutex>
 #include <stdexcept>
 #include <string>
 #include <vector>
+#include <thread>
 
 #include <gtest/gtest.h>
 #include <sensor_msgs/point_cloud2_iterator.hpp>
@@ -39,6 +42,33 @@ class FakeProvider final : public iap::RiskPredictionProvider {
     }
     return true;
   }
+};
+
+class DelayedProvider final : public iap::RiskPredictionProvider {
+ public:
+  DelayedProvider(std::chrono::milliseconds delay,
+                  std::shared_ptr<std::atomic<int>> calls)
+      : delay_(delay), calls_(std::move(calls)) {}
+
+  bool batchQuery(const std::vector<iap::RiskPredictionQuery>& queries,
+                  std::vector<iap::RiskPredictionResult>* results) override {
+    std::this_thread::sleep_for(delay_);
+    calls_->fetch_add(1);
+    results->assign(queries.size(), iap::RiskPredictionResult{});
+    for (auto& result : *results) {
+      result.available = true;
+      result.valid = true;
+      result.stale = false;
+      result.hpl_pred = 1.0;
+      result.vpl_pred = 1.0;
+      result.reason = "ok";
+    }
+    return true;
+  }
+
+ private:
+  std::chrono::milliseconds delay_;
+  std::shared_ptr<std::atomic<int>> calls_;
 };
 
 ego_planner::P0RiskGridRuntime::Config enabledConfig() {
@@ -606,6 +636,83 @@ TEST_F(P0RiskGridRuntimeStampTest, P0_6FixtureProducesOccupiedSkipHealth) {
     }
   }
   EXPECT_EQ(occupied_skip_voxel_count, health.occupied_skip_count);
+}
+
+TEST_F(P0RiskGridRuntimeStampTest,
+       SlowRefreshKeepsDeadlineCadenceHealthAndInputProgress) {
+  ensure_rclcpp();
+  auto node = std::make_shared<rclcpp::Node>(
+      "p0_slow_refresh_deadline_test",
+      rclcpp::NodeOptions().allow_undeclared_parameters(false));
+  auto config = enabledConfig();
+  config.grid.refresh_period_s = 0.05;
+  config.grid.stale_timeout_s = 1.0;
+  auto provider_calls = std::make_shared<std::atomic<int>>(0);
+  P0RiskGridRuntime runtime(
+      node, config,
+      std::make_unique<DelayedProvider>(std::chrono::milliseconds(80),
+                                        provider_calls));
+  seedValidInputs(&runtime, 100.0, 100.0);
+
+  std::atomic<int> health_callbacks{0};
+  std::atomic<int> ready_non_stale_callbacks{0};
+  std::mutex health_message_mutex;
+  std::string last_health_message;
+  auto health_sub = node->create_subscription<std_msgs::msg::String>(
+      "/planning/risk_grid_health", 100,
+      [&](const std_msgs::msg::String::ConstSharedPtr message) {
+        health_callbacks.fetch_add(1);
+        {
+          std::lock_guard<std::mutex> lock(health_message_mutex);
+          last_health_message = message->data;
+        }
+        if (message->data.find("\"ready\":true") != std::string::npos &&
+            message->data.find("\"stale\":false") != std::string::npos) {
+          ready_non_stale_callbacks.fetch_add(1);
+        }
+      });
+  (void)health_sub;
+
+  rclcpp::executors::MultiThreadedExecutor executor(rclcpp::ExecutorOptions(), 4);
+  executor.add_node(node);
+  std::thread spin_thread([&executor]() { executor.spin(); });
+  std::atomic<bool> update_inputs{true};
+  std::thread input_thread([&]() {
+    double stamp = 100.0;
+    while (update_inputs.load()) {
+      stamp += 0.01;
+      seedValidInputs(&runtime, stamp, stamp);
+      std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    }
+  });
+  std::this_thread::sleep_for(std::chrono::milliseconds(1050));
+  update_inputs.store(false);
+  input_thread.join();
+  executor.cancel();
+  spin_thread.join();
+
+  const auto health = runtime.health();
+  EXPECT_GE(provider_calls->load(), 10);
+  EXPECT_GE(health.generation_id, 10U);
+  EXPECT_GE(health_callbacks.load(), 12);
+  EXPECT_GT(ready_non_stale_callbacks.load(), 0);
+  EXPECT_TRUE(health.ready);
+  EXPECT_FALSE(health.stale);
+  std::lock_guard<std::mutex> lock(health_message_mutex);
+  EXPECT_NE(last_health_message.find("\"refresh_scheduled_steady_s\":"),
+            std::string::npos);
+  EXPECT_NE(last_health_message.find("\"refresh_queue_delay_ms\":"),
+            std::string::npos);
+  EXPECT_NE(last_health_message.find("\"provider_batch_duration_ms\":"),
+            std::string::npos);
+  EXPECT_NE(last_health_message.find("\"generation_interval_ms\":"),
+            std::string::npos);
+  EXPECT_NE(last_health_message.find("\"input_callback_count\":"),
+            std::string::npos);
+  EXPECT_NE(last_health_message.find("\"health_callback_count\":"),
+            std::string::npos);
+  EXPECT_NE(last_health_message.find("\"process_cpu_delta_ms\":"),
+            std::string::npos);
 }
 
 TEST_F(P0RiskGridRuntimeStampTest, OdomStampIsPreferredForRefreshTime) {
