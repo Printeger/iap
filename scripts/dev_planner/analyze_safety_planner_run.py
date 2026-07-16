@@ -502,6 +502,8 @@ P5_6_CAUSE_EXCLUSION_FIELDS = [
 P1_DEBUG_FIELDS = [
     "stamp",
     "lbfgs_iter",
+    "planning_attempt_id",
+    "candidate_id",
     "snapshot_generation_id",
     "query_base_time_s",
     "sample_count",
@@ -523,6 +525,8 @@ P1_ACCEPTED_PROFILE_FIELDS = [
     "profile_seq",
     "stamp",
     "trajectory_id",
+    "planning_attempt_id",
+    "candidate_id",
     "applied_to_objective",
     "metrics_only",
     "lambda_integrity",
@@ -541,7 +545,7 @@ P1_ACCEPTED_PROFILE_FIELDS = [
     "reason",
 ]
 P1_ACCEPTED_PROFILE_CONTEXT_FIELDS = [
-    "profile_seq", "trajectory_id", "planning_start_s", "accepted_stamp_s",
+    "profile_seq", "trajectory_id", "planning_attempt_id", "candidate_id", "planning_start_s", "accepted_stamp_s",
     "planning_duration_s", "snapshot_generation_id", "snapshot_stamp_s",
     "query_base_time_s", "snapshot_x_min", "snapshot_x_max",
     "snapshot_y_min", "snapshot_y_max", "snapshot_z_min", "snapshot_z_max",
@@ -549,7 +553,7 @@ P1_ACCEPTED_PROFILE_CONTEXT_FIELDS = [
     "trajectory_time_max_s", "trajectory_x_min", "trajectory_x_max",
     "trajectory_y_min", "trajectory_y_max", "trajectory_z_min", "trajectory_z_max",
     "expected_sample_count", "matched_sample_count",
-    "match_ratio", "query_miss_count", "stale_count", "invalid_count",
+    "match_ratio", "query_miss_count", "stale_count", "invalid_count", "miss_reason_histogram",
 ]
 P1_DEBUG_FINITE_FIELDS = [
     "f_integrity",
@@ -6205,7 +6209,7 @@ def p1_profile_format_summary(rows: list[dict[str, Any]]) -> dict[str, Any]:
     indices = [finite_float(row.get("sample_index")) for row in rows]
     integer_indices = [int(value) for value in indices if value is not None and value.is_integer()]
     tuple_fields = (
-        "trajectory_id", "applied_to_objective", "metrics_only",
+        "trajectory_id", "planning_attempt_id", "candidate_id", "applied_to_objective", "metrics_only",
         "lambda_integrity", "snapshot_generation_id", "query_base_time_s",
     )
     tuple_values = {
@@ -6267,6 +6271,8 @@ def summarize_p1_accepted_profile_rows(
                 "profile_seq": row.get("profile_seq", ""),
                 "stamp": row.get("stamp", ""),
                 "trajectory_id": row.get("trajectory_id", ""),
+                "planning_attempt_id": row.get("planning_attempt_id", ""),
+                "candidate_id": row.get("candidate_id", ""),
                 "applied_to_objective": row.get("applied_to_objective", ""),
                 "metrics_only": row.get("metrics_only", ""),
                 "lambda_integrity": row.get("lambda_integrity", ""),
@@ -6383,8 +6389,8 @@ def validate_p1_profile_context(
         return result
     context = matching[0]
     result["context"] = context
-    numeric = {key: finite_float(context.get(key)) for key in P1_ACCEPTED_PROFILE_CONTEXT_FIELDS if key not in ("profile_seq",)}
-    required_numeric = ("trajectory_id", "planning_start_s", "accepted_stamp_s", "planning_duration_s", "snapshot_generation_id", "snapshot_stamp_s", "query_base_time_s", "snapshot_x_min", "snapshot_x_max", "snapshot_y_min", "snapshot_y_max", "snapshot_z_min", "snapshot_z_max", "snapshot_time_min_s", "snapshot_time_max_s", "trajectory_x_min", "trajectory_x_max", "trajectory_y_min", "trajectory_y_max", "trajectory_z_min", "trajectory_z_max", "trajectory_time_min_s", "trajectory_time_max_s", "expected_sample_count", "matched_sample_count", "match_ratio", "query_miss_count", "stale_count", "invalid_count")
+    numeric = {key: finite_float(context.get(key)) for key in P1_ACCEPTED_PROFILE_CONTEXT_FIELDS if key not in ("profile_seq", "miss_reason_histogram")}
+    required_numeric = ("trajectory_id", "planning_attempt_id", "candidate_id", "planning_start_s", "accepted_stamp_s", "planning_duration_s", "snapshot_generation_id", "snapshot_stamp_s", "query_base_time_s", "snapshot_x_min", "snapshot_x_max", "snapshot_y_min", "snapshot_y_max", "snapshot_z_min", "snapshot_z_max", "snapshot_time_min_s", "snapshot_time_max_s", "trajectory_x_min", "trajectory_x_max", "trajectory_y_min", "trajectory_y_max", "trajectory_z_min", "trajectory_z_max", "trajectory_time_min_s", "trajectory_time_max_s", "expected_sample_count", "matched_sample_count", "match_ratio", "query_miss_count", "stale_count", "invalid_count")
     if any(numeric.get(key) is None for key in required_numeric):
         result["reasons"].append("context_nonfinite")
         return result
@@ -6401,6 +6407,8 @@ def validate_p1_profile_context(
     in_bounds = len(samples) == P1_2_RISK_SAMPLE_COUNT and all(sample_in_bounds(row) for row in samples)
     bindings_ok = (
         str(context.get("trajectory_id")) == str((profile.get("metadata_tuple_values", {}).get("trajectory_id") or [""])[0])
+        and str(context.get("planning_attempt_id")) == str((profile.get("metadata_tuple_values", {}).get("planning_attempt_id") or [""])[0])
+        and str(context.get("candidate_id")) == str((profile.get("metadata_tuple_values", {}).get("candidate_id") or [""])[0])
         and str(context.get("snapshot_generation_id")) == str((profile.get("metadata_tuple_values", {}).get("snapshot_generation_id") or [""])[0])
         and str(context.get("query_base_time_s")) == str((profile.get("metadata_tuple_values", {}).get("query_base_time_s") or [""])[0])
         and int(numeric["expected_sample_count"]) == P1_2_RISK_SAMPLE_COUNT

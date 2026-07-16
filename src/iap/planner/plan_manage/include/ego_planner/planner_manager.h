@@ -44,7 +44,9 @@ namespace ego_planner
     {
       std::shared_ptr<const iap::RiskGridSnapshot> snapshot;
       double query_base_time_s = 0.0;
+      double planning_start_s = 0.0;
       uint64_t generation_id = 0;
+      uint64_t planning_attempt_id = 0;
       bool active = false;
     };
 
@@ -110,6 +112,7 @@ namespace ego_planner
 
     int continous_failures_count_{0};
     uint64_t p1_accepted_profile_seq_{0};
+    uint64_t p1_planning_attempt_seq_{0};
     uint64_t p2_batch_id_{0};
     uint64_t p3_batch_id_{0};
     PlanningRiskContext planning_risk_context_;

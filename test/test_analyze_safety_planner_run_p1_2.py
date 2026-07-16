@@ -181,6 +181,8 @@ def accepted_profile_rows(
                 "profile_seq": profile_seq,
                 "stamp": 10.0,
                 "trajectory_id": 1,
+                "planning_attempt_id": 11,
+                "candidate_id": 7,
                 "applied_to_objective": applied_to_objective,
                 "metrics_only": metrics_only,
                 "lambda_integrity": 0.00001,
@@ -207,6 +209,7 @@ def accepted_profile_context(rows):
     matched = sum(int(row["hit"]) and int(row["valid"]) and not int(row["stale"]) for row in rows)
     return [{
         "profile_seq": first["profile_seq"], "trajectory_id": first["trajectory_id"],
+        "planning_attempt_id": first["planning_attempt_id"], "candidate_id": first["candidate_id"],
         "planning_start_s": 9.9, "accepted_stamp_s": 10.0, "planning_duration_s": 0.1,
         "snapshot_generation_id": first["snapshot_generation_id"], "snapshot_stamp_s": 9.0,
         "query_base_time_s": first["query_base_time_s"],
@@ -220,7 +223,7 @@ def accepted_profile_context(rows):
         "trajectory_time_min_s": 0.0, "trajectory_time_max_s": 3.0,
         "expected_sample_count": 200, "matched_sample_count": matched,
         "match_ratio": matched / 200.0, "query_miss_count": 200 - matched,
-        "stale_count": 0, "invalid_count": 0,
+        "stale_count": 0, "invalid_count": 0, "miss_reason_histogram": "",
     }]
 
 
@@ -517,6 +520,14 @@ class P1_2AnalyzerTest(unittest.TestCase):
 
         self.assertFalse(gates["p1_2_accepted_profile_format_ok"])
         self.assertTrue(any("unique sample_index" in item for item in failures), failures)
+
+    def test_mixed_final_candidate_tuple_fails_closed(self):
+        profile = accepted_profile_rows(0.0)
+        profile[-1]["candidate_id"] = 99
+        gates, failures, _, _ = run_gate(p1_2_profile=profile)
+
+        self.assertFalse(gates["p1_2_accepted_profile_format_ok"])
+        self.assertTrue(any("one metadata tuple" in item for item in failures), failures)
 
     def test_required_topic_failure_blocks_nested_gate(self):
         health = topic_health(**{analyzer.P0_HEALTH_TOPIC: {"status": "FAIL", "count": 3}})

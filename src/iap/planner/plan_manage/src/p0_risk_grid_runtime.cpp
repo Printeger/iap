@@ -291,6 +291,13 @@ P0RiskGridRuntime::Config P0RiskGridRuntime::declareAndReadConfig(
       node->declare_parameter<double>(
           "p0.predictor.lidar_fim_radius_m",
           config.predictor_lidar_fim_radius_m);
+  config.predictor_requested_worker_count = static_cast<int>(std::max<int64_t>(1,
+      node->declare_parameter<int>("p0.predictor.worker_count", 1)));
+  // PredictorModule keeps no shared mutable query state.  The current P0
+  // provider deliberately runs in deterministic source order; recording both
+  // values makes that choice auditable and avoids claiming parallelism that
+  // would alter query/result ordering.
+  config.predictor_effective_worker_count = 1;
   config.p0_6_fixture.enabled =
       node->declare_parameter<bool>("p0_6.fixture.enabled", false);
   config.p0_6_fixture.name =
@@ -603,12 +610,14 @@ void P0RiskGridRuntime::createRosInterfaces() {
   if (!node_ || !config_.enable_risk_grid) {
     return;
   }
-  callback_group_ =
+  input_callback_group_ =
+      node_->create_callback_group(rclcpp::CallbackGroupType::MutuallyExclusive);
+  refresh_callback_group_ =
       node_->create_callback_group(rclcpp::CallbackGroupType::MutuallyExclusive);
   health_callback_group_ =
       node_->create_callback_group(rclcpp::CallbackGroupType::Reentrant);
   rclcpp::SubscriptionOptions subscription_options;
-  subscription_options.callback_group = callback_group_;
+  subscription_options.callback_group = input_callback_group_;
   const rclcpp::QoS qos(50);
   odom_sub_ = node_->create_subscription<nav_msgs::msg::Odometry>(
       config_.odom_topic, qos,
@@ -673,7 +682,7 @@ void P0RiskGridRuntime::createRosInterfaces() {
   refresh_timer_ = node_->create_wall_timer(
       std::chrono::duration<double>(period_s),
       [this]() { refreshTimerCallback(); },
-      callback_group_);
+      refresh_callback_group_);
   // Health must remain observable while a full grid refresh is evaluating a
   // large predictor batch.  It intentionally publishes the latest snapshot
   // state rather than waiting for that batch to finish.
@@ -688,6 +697,10 @@ void P0RiskGridRuntime::healthTimerCallback() {
     return;
   }
   const double now_s = currentMessageStamp();
+  {
+    std::lock_guard<std::mutex> lock(health_state_mutex_);
+    last_health_callback_stamp_s_ = now_s;
+  }
   publishHealth(std::isfinite(now_s) ? risk_grid_.health(now_s)
                                      : risk_grid_.health(), now_s);
 }
@@ -706,15 +719,18 @@ void P0RiskGridRuntime::refreshTimerCallback() {
   {
     std::lock_guard<std::mutex> health_lock(health_state_mutex_);
     last_refresh_stamp_s_ = now_s;
+    last_refresh_start_stamp_s_ = now_s;
     last_snapshot_available_ = false;
     last_refresh_query_count_ = 0;
   }
   if (!std::isfinite(now_s) || now_s <= 0.0) {
     risk_grid_.markRefreshFailure(now_s, "message_stamp_unavailable");
+    const double refresh_end_stamp_s = currentMessageStamp();
     {
       std::lock_guard<std::mutex> health_lock(health_state_mutex_);
       last_refresh_elapsed_ms_ = std::chrono::duration<double, std::milli>(
           std::chrono::steady_clock::now() - refresh_start).count();
+      last_refresh_end_stamp_s_ = refresh_end_stamp_s;
     }
     reset_refresh_timer();
     return;
@@ -722,10 +738,12 @@ void P0RiskGridRuntime::refreshTimerCallback() {
   iap::IntegritySnapshot snapshot;
   if (!buildSnapshot(now_s, &snapshot)) {
     risk_grid_.markRefreshFailure(now_s, "snapshot_unavailable");
+    const double refresh_end_stamp_s = currentMessageStamp();
     {
       std::lock_guard<std::mutex> health_lock(health_state_mutex_);
       last_refresh_elapsed_ms_ = std::chrono::duration<double, std::milli>(
           std::chrono::steady_clock::now() - refresh_start).count();
+      last_refresh_end_stamp_s_ = refresh_end_stamp_s;
     }
     publishHealth(risk_grid_.health(now_s), now_s);
     reset_refresh_timer();
@@ -791,22 +809,24 @@ void P0RiskGridRuntime::refreshTimerCallback() {
         layer_voxel_count * config_.grid.horizons_s.size();
   }
   const auto occupancy_predicate = combinedOccupancyPredicate();
-  risk_grid_.refreshFromProvider(latest_odom_p_, now_s, *provider,
+  risk_grid_.refreshFromProvider(snapshot.p_wb, now_s, *provider,
                                  occupancy_predicate, &reason);
   const iap::RiskGridHealth health = risk_grid_.health(now_s);
   const auto viz_snapshot = risk_grid_.acquireSnapshot();
+  const double refresh_end_stamp_s = currentMessageStamp();
   {
     std::lock_guard<std::mutex> health_lock(health_state_mutex_);
     last_grid_stamp_s_ = viz_snapshot ? viz_snapshot->stamp_s()
                                       : std::numeric_limits<double>::quiet_NaN();
     last_refresh_elapsed_ms_ = std::chrono::duration<double, std::milli>(
         std::chrono::steady_clock::now() - refresh_start).count();
+    last_refresh_end_stamp_s_ = refresh_end_stamp_s;
   }
   publishHealth(health, now_s);
   if (safety_viz_) {
-    safety_viz_->publishPredictedPLCloud(viz_snapshot, latest_odom_p_.z(),
+    safety_viz_->publishPredictedPLCloud(viz_snapshot, snapshot.p_wb.z(),
                                          now_s);
-    safety_viz_->publishRiskValidityCloud(viz_snapshot, latest_odom_p_.z(),
+    safety_viz_->publishRiskValidityCloud(viz_snapshot, snapshot.p_wb.z(),
                                           now_s);
   }
   reset_refresh_timer();
@@ -861,11 +881,16 @@ void P0RiskGridRuntime::publishHealth(const iap::RiskGridHealth& health,
       << "\"dominant_unknown_count\":"
       << out_health.dominant_unknown_count << ","
       << "\"refresh_stamp_s\":" << jsonNumber(last_refresh_stamp_s_) << ","
+      << "\"refresh_callback_start_stamp_s\":" << jsonNumber(last_refresh_start_stamp_s_) << ","
+      << "\"refresh_callback_end_stamp_s\":" << jsonNumber(last_refresh_end_stamp_s_) << ","
+      << "\"health_callback_stamp_s\":" << jsonNumber(last_health_callback_stamp_s_) << ","
       << "\"last_grid_stamp_s\":" << jsonNumber(last_grid_stamp_s_) << ","
       << "\"refresh_elapsed_ms\":" << jsonNumber(last_refresh_elapsed_ms_) << ","
       << "\"snapshot_available\":"
       << (last_snapshot_available_ ? "true" : "false") << ","
       << "\"refresh_query_count\":" << last_refresh_query_count_ << ","
+      << "\"predictor_requested_worker_count\":" << config_.predictor_requested_worker_count << ","
+      << "\"predictor_effective_worker_count\":" << config_.predictor_effective_worker_count << ","
       << "\"reason\":" << jsonString(out_health.reason)
       << "}";
   if (health_pub_) {
@@ -957,7 +982,11 @@ void P0RiskGridRuntime::integrityCallback(
 
 void P0RiskGridRuntime::rangeCallback(
     const gnss_comm::msg::GnssMeasMsg::ConstSharedPtr msg) {
-  if (!msg || !origin_set_) {
+  if (!msg) {
+    return;
+  }
+  std::lock_guard<std::mutex> health_lock(health_state_mutex_);
+  if (!origin_set_) {
     return;
   }
   const auto obs_list = gnss_comm::msg2meas(msg);
@@ -1051,6 +1080,7 @@ void P0RiskGridRuntime::ephemCallback(
     const gnss_comm::msg::GnssEphemMsg::ConstSharedPtr msg) {
   auto ephem = gnss_comm::msg2ephem(msg);
   if (ephem) {
+    std::lock_guard<std::mutex> lock(health_state_mutex_);
     ephem_cache_[ephem->sat] = ephem;
   }
 }
@@ -1059,13 +1089,18 @@ void P0RiskGridRuntime::gloEphemCallback(
     const gnss_comm::msg::GnssGloEphemMsg::ConstSharedPtr msg) {
   auto ephem = gnss_comm::msg2glo_ephem(msg);
   if (ephem) {
+    std::lock_guard<std::mutex> lock(health_state_mutex_);
     glo_ephem_cache_[ephem->sat] = ephem;
   }
 }
 
 void P0RiskGridRuntime::receiverLlaCallback(
     const sensor_msgs::msg::NavSatFix::ConstSharedPtr msg) {
-  if (!msg || origin_set_) {
+  if (!msg) {
+    return;
+  }
+  std::lock_guard<std::mutex> lock(health_state_mutex_);
+  if (origin_set_) {
     return;
   }
   if (std::isfinite(msg->latitude) && std::isfinite(msg->longitude) &&
@@ -1080,6 +1115,7 @@ void P0RiskGridRuntime::receiverLlaCallback(
 void P0RiskGridRuntime::ionoCallback(
     const gnss_comm::msg::GnssIonosphereParameter::ConstSharedPtr msg) {
   if (msg && msg->type == 0 && msg->parameters.size() >= 8) {
+    std::lock_guard<std::mutex> lock(health_state_mutex_);
     iono_params_.assign(msg->parameters.begin(), msg->parameters.begin() + 8);
   }
 }
@@ -1254,22 +1290,48 @@ Eigen::Matrix3d P0RiskGridRuntime::currentPriorInformation(
 bool P0RiskGridRuntime::buildSnapshot(
     const double now_s,
     iap::IntegritySnapshot* snapshot) const {
-  if (snapshot == nullptr || !latest_odom_pose_valid_ ||
-      !latest_current_valid_) {
+  if (snapshot == nullptr) {
+    return false;
+  }
+  // Copy a coherent input state before the expensive predictor work starts.
+  // Input callbacks may now continue concurrently with refresh.
+  double odom_stamp = std::numeric_limits<double>::quiet_NaN();
+  Eigen::Vector3d odom_position = Eigen::Vector3d::Zero();
+  Eigen::Quaterniond odom_orientation = Eigen::Quaterniond::Identity();
+  bool odom_valid = false;
+  iap::CurrentIntegrityState current;
+  bool current_valid = false;
+  std::optional<iap::GnssEpoch> epoch;
+  {
+    std::lock_guard<std::mutex> lock(health_state_mutex_);
+    odom_stamp = latest_odom_stamp_;
+    odom_position = latest_odom_p_;
+    odom_orientation = latest_odom_q_;
+    odom_valid = latest_odom_pose_valid_;
+    current = latest_current_;
+    current_valid = latest_current_valid_;
+    epoch = latest_epoch_;
+  }
+  if (!odom_valid || !current_valid) {
     return false;
   }
   iap::IntegritySnapshotBuilderInput input;
   input.stamp = now_s;
-  input.has_pose = latest_odom_pose_valid_;
-  input.pose_stamp = latest_odom_stamp_;
-  input.p_wb = latest_odom_p_;
-  input.q_wb = latest_odom_q_;
-  input.current = latest_current_;
-  const iap::GnssEpoch* epoch = activeGnssEpoch(now_s);
-  input.gnss_epoch = epoch;
+  input.has_pose = odom_valid;
+  input.pose_stamp = odom_stamp;
+  input.p_wb = odom_position;
+  input.q_wb = odom_orientation;
+  input.current = current;
+  if (epoch) {
+    const double age_s = now_s - epoch->stamp;
+    if (std::isfinite(age_s) &&
+        (config_.gnss_epoch_max_age_s < 0.0 || age_s <= config_.gnss_epoch_max_age_s)) {
+      input.gnss_epoch = &*epoch;
+    }
+  }
   const Eigen::Matrix3d lambda_prior =
       config_.predictor_use_current_integrity_prior
-          ? currentPriorInformation(latest_current_)
+          ? currentPriorInformation(current)
           : Eigen::Matrix3d::Zero();
   if (config_.predictor_use_current_integrity_prior &&
       lambda_prior.trace() > 0.0 && lambda_prior.allFinite()) {

@@ -129,6 +129,20 @@ namespace ego_planner
       int clipped_grad_count = 0;
       std::string fallback_reason = "not_evaluated";
       bool applied_to_objective = false;
+      uint64_t planning_attempt_id = 0;
+      uint64_t candidate_id = 0;
+    };
+
+    // The planning manager creates this immutable tuple once per planning
+    // attempt.  Keeping it in the optimizer binds objective/debug/profile
+    // evidence to one P0 snapshot instead of whichever snapshot is newest.
+    struct P1PlanningRiskContext
+    {
+      std::shared_ptr<const iap::RiskGridSnapshot> snapshot;
+      double query_base_time_s = 0.0;
+      double planning_start_s = std::numeric_limits<double>::quiet_NaN();
+      uint64_t planning_attempt_id = 0;
+      uint64_t candidate_id = 0;
     };
 
     struct OptimizerCostBreakdown
@@ -181,6 +195,7 @@ namespace ego_planner
     void setDroneId(const int drone_id);
     void setRiskSnapshot(std::shared_ptr<const iap::RiskGridSnapshot> snapshot,
                          double query_base_time_s);
+    void setP1PlanningRiskContext(P1PlanningRiskContext context);
     void clearRiskSnapshot();
     void setP4RiskSnapshot(std::shared_ptr<const iap::RiskGridSnapshot> snapshot,
                            double query_base_time_s);
@@ -273,6 +288,7 @@ namespace ego_planner
     OptimizerCostBreakdown last_optimizer_cost_breakdown_;
     std::shared_ptr<const iap::RiskGridSnapshot> risk_snapshot_;
     double risk_query_base_time_s_{0.0};
+    P1PlanningRiskContext p1_risk_context_;
     bool p1_debug_csv_header_written_{false};
 
     int variable_num_;              // optimization variables

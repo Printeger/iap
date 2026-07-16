@@ -449,6 +449,44 @@ TEST(P1IntegrityCostTest, UnknownSmallPenaltyAddsCostWithZeroGradient) {
   EXPECT_TRUE(gradient.isApprox(original_gradient, 0.0));
 }
 
+TEST(P1IntegrityCostTest, SpatialOutOfMapUsesCappedInwardBarrierWithSkipPolicy) {
+  ego_planner::SwarmTrajData swarm;
+  Eigen::MatrixXd q = makeControlPoints();
+  q.row(0).setConstant(20.0);  // outside the authoritative snapshot bounds
+  AffineProvider provider(10.0, Eigen::Vector3d(1.0, 0.0, 0.0));
+  auto snapshot = makeSnapshot(provider);
+
+  double original_cost = 0.0;
+  Eigen::MatrixXd original_gradient;
+  auto original = makeOptimizer(disabledConfig(), &swarm);
+  ASSERT_TRUE(evaluate(*original, q, &original_cost, &original_gradient));
+
+  auto config = disabledConfig();
+  config.use_integrity_cost = true;
+  config.metrics_only = false;
+  config.lambda_integrity = 1.0;
+  config.unknown_policy = "skip";
+  config.unknown_soft_penalty = 1.0;
+  config.integrity_grad_norm_max = 0.05;
+  double barrier_cost = 0.0;
+  Eigen::MatrixXd barrier_gradient;
+  auto optimizer = makeOptimizer(config, &swarm);
+  optimizer->setRiskSnapshot(snapshot, snapshot->stamp_s());
+  ASSERT_TRUE(evaluate(*optimizer, q, &barrier_cost, &barrier_gradient));
+
+  const auto& metrics = optimizer->getLastP1IntegrityMetrics();
+  EXPECT_TRUE(metrics.applied_to_objective);
+  EXPECT_EQ(metrics.hit_count, 0);
+  EXPECT_GT(metrics.f_integrity, 0.0);
+  EXPECT_GT(barrier_cost, original_cost);
+  // At x > max, d(cost)/dx is positive; gradient descent therefore moves x
+  // inward, toward the snapshot interior.
+  EXPECT_GT(metrics.weighted_grad_integrity_norm, 0.0);
+  const auto& samples = optimizer->getLastP1IntegrityVizSamples();
+  ASSERT_FALSE(samples.empty());
+  EXPECT_GT(samples.front().grad.x(), 0.0);
+}
+
 TEST(P1IntegrityCostTest, MetricsOnlyAcceptedProfileWritesFiniteSamples) {
   ego_planner::SwarmTrajData swarm;
   const Eigen::MatrixXd q = makeControlPoints();

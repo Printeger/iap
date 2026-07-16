@@ -240,6 +240,8 @@ namespace ego_planner
   {
     planning_risk_context_ = PlanningRiskContext{};
     planning_risk_context_.active = true;
+    planning_risk_context_.planning_start_s = now_s;
+    planning_risk_context_.planning_attempt_id = ++p1_planning_attempt_seq_;
     planning_risk_context_.query_base_time_s = now_s;
     planning_risk_context_.snapshot = acquireRiskGridSnapshot();
     if (planning_risk_context_.snapshot)
@@ -274,6 +276,8 @@ namespace ego_planner
   {
     planning_risk_context_ = PlanningRiskContext{};
     planning_risk_context_.active = true;
+    planning_risk_context_.planning_start_s = query_base_time_s;
+    planning_risk_context_.planning_attempt_id = ++p1_planning_attempt_seq_;
     planning_risk_context_.query_base_time_s = query_base_time_s;
     planning_risk_context_.snapshot = std::move(snapshot);
     if (planning_risk_context_.snapshot)
@@ -374,6 +378,17 @@ namespace ego_planner
 
     const auto planning_snapshot = currentPlanningRiskSnapshot();
     const double planning_query_base_time_s = currentPlanningQueryBaseTime();
+    const auto set_p1_context = [this, planning_snapshot,
+                                 planning_query_base_time_s](const uint64_t candidate_id)
+    {
+      BsplineOptimizer::P1PlanningRiskContext context;
+      context.snapshot = planning_snapshot;
+      context.query_base_time_s = planning_query_base_time_s;
+      context.planning_start_s = planning_risk_context_.planning_start_s;
+      context.planning_attempt_id = planning_risk_context_.planning_attempt_id;
+      context.candidate_id = candidate_id;
+      bspline_optimizer_->setP1PlanningRiskContext(std::move(context));
+    };
 
     rclcpp::Time t_start = rclcpp::Clock().now();
     rclcpp::Duration t_init(0, 0), t_opt(0, 0), t_refine(0, 0);
@@ -554,6 +569,7 @@ namespace ego_planner
 
     /*** STEP 2: OPTIMIZE ***/
     bool flag_step_1_success = false;
+    uint64_t selected_p1_candidate_id = 1;
     vector<vector<Eigen::Vector3d>> vis_trajs;
 
     if (pp_.use_distinctive_trajs)
@@ -567,7 +583,8 @@ namespace ego_planner
       std::vector<P2CandidateInput> p2_candidates;
       for (int i = trajs.size() - 1; i >= 0; i--)
       {
-        bspline_optimizer_->setRiskSnapshot(planning_snapshot, planning_query_base_time_s);
+        const uint64_t candidate_id = static_cast<uint64_t>(trajs.size() - i);
+        set_p1_context(candidate_id);
         const bool p1_candidate_success =
             bspline_optimizer_->BsplineOptimizeTrajRebound(ctrl_pts_temp, final_cost, trajs[i], ts);
         bspline_optimizer_->clearRiskSnapshot();
@@ -585,7 +602,7 @@ namespace ego_planner
 
           flag_step_1_success = true;
           P2CandidateInput p2_candidate;
-          p2_candidate.candidate_id = static_cast<int>(trajs.size() - i);
+          p2_candidate.candidate_id = static_cast<int>(candidate_id);
           p2_candidate.control_points = ctrl_pts_temp;
           p2_candidate.final_cost = final_cost;
           p2_candidate.cost_breakdown = bspline_optimizer_->getLastOptimizerCostBreakdown();
@@ -650,6 +667,8 @@ namespace ego_planner
             p2_result.selected_index < static_cast<int>(p2_candidates.size()))
         {
           ctrl_pts = p2_candidates[p2_result.selected_index].control_points;
+          selected_p1_candidate_id = static_cast<uint64_t>(
+              p2_candidates[p2_result.selected_index].candidate_id);
           if (p2_config_.enable_candidate_ranking)
           {
             cout << "[P2] selected_candidate="
@@ -666,7 +685,7 @@ namespace ego_planner
     }
     else
     {
-      bspline_optimizer_->setRiskSnapshot(planning_snapshot, planning_query_base_time_s);
+      set_p1_context(selected_p1_candidate_id);
       flag_step_1_success = bspline_optimizer_->BsplineOptimizeTrajRebound(ctrl_pts, ts);
       bspline_optimizer_->clearRiskSnapshot();
       if (safety_viz_)
@@ -733,7 +752,7 @@ namespace ego_planner
 
     // save planned results
     const auto accepted_time = plannerNow();
-    bspline_optimizer_->setRiskSnapshot(planning_snapshot, planning_query_base_time_s);
+    set_p1_context(selected_p1_candidate_id);
     const bool p1_profile_written =
         bspline_optimizer_->writeP1AcceptedTrajectoryRiskProfile(
             pos, ++p1_accepted_profile_seq_, local_data_.traj_id_ + 1,

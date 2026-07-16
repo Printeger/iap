@@ -3,10 +3,13 @@
 #include <iap/planner/risk_grid_map.hpp>
 
 #include <algorithm>
+#include <cstdio>
 #include <cmath>
 #include <fstream>
 #include <iomanip>
 #include <limits>
+#include <map>
+#include <sstream>
 #include <utility>
 // using namespace std;
 
@@ -36,6 +39,46 @@ namespace ego_planner
         return filename;
       }
       return path.substr(0, slash + 1) + filename;
+    }
+
+    // The trilinear query domain is the cell-centre interior, not merely the
+    // allocated voxel box.  This is derived from the immutable snapshot so a
+    // P1 evaluation cannot be pulled toward bounds from a later refresh.
+    bool snapshotInteriorBarrier(const iap::RiskGridSnapshot &snapshot,
+                                 const Eigen::Vector3d &p,
+                                 double penalty,
+                                 double cost_max,
+                                 double grad_max,
+                                 double *cost,
+                                 Eigen::Vector3d *grad)
+    {
+      if (!cost || !grad || !p.allFinite())
+        return false;
+      const double resolution = snapshot.params().resolution_m;
+      const Eigen::Vector3i dims = snapshot.voxelNum();
+      if (!(resolution > 0.0) || dims.minCoeff() < 2)
+        return false;
+      const Eigen::Vector3d lower = snapshot.origin() +
+          Eigen::Vector3d::Constant(0.5 * resolution);
+      const Eigen::Vector3d upper = snapshot.origin() +
+          (dims.cast<double>().array() - 0.5).matrix() * resolution;
+      Eigen::Vector3d displacement = Eigen::Vector3d::Zero();
+      for (int axis = 0; axis < 3; ++axis)
+      {
+        if (p(axis) < lower(axis))
+          displacement(axis) = p(axis) - lower(axis);
+        else if (p(axis) > upper(axis))
+          displacement(axis) = p(axis) - upper(axis);
+      }
+      if (displacement.squaredNorm() <= 0.0)
+        return false;
+      const double bounded_penalty = std::max(1.0, penalty);
+      *cost = std::min(cost_max, 0.5 * bounded_penalty * displacement.squaredNorm());
+      *grad = bounded_penalty * displacement;
+      const double norm = grad->norm();
+      if (grad_max > 0.0 && norm > grad_max)
+        *grad *= grad_max / norm;
+      return true;
     }
 
     void writeP4Csv(const P4RiskAStarConfig &config,
@@ -175,12 +218,22 @@ namespace ego_planner
   {
     risk_snapshot_ = std::move(snapshot);
     risk_query_base_time_s_ = query_base_time_s;
+    p1_risk_context_.snapshot = risk_snapshot_;
+    p1_risk_context_.query_base_time_s = risk_query_base_time_s_;
+  }
+
+  void BsplineOptimizer::setP1PlanningRiskContext(P1PlanningRiskContext context)
+  {
+    p1_risk_context_ = std::move(context);
+    risk_snapshot_ = p1_risk_context_.snapshot;
+    risk_query_base_time_s_ = p1_risk_context_.query_base_time_s;
   }
 
   void BsplineOptimizer::clearRiskSnapshot()
   {
     risk_snapshot_.reset();
     risk_query_base_time_s_ = 0.0;
+    p1_risk_context_ = P1PlanningRiskContext{};
   }
 
   void BsplineOptimizer::setP4RiskSnapshot(std::shared_ptr<const iap::RiskGridSnapshot> snapshot,
@@ -2064,6 +2117,8 @@ namespace ego_planner
     cost = 0.0;
     gradient.setZero();
     metrics = P1IntegrityMetrics{};
+    metrics.planning_attempt_id = p1_risk_context_.planning_attempt_id;
+    metrics.candidate_id = p1_risk_context_.candidate_id;
     last_p1_viz_samples_.clear();
 
     if (!risk_snapshot_)
@@ -2135,15 +2190,48 @@ namespace ego_planner
         viz.hit = false;
         viz.stale = sample.stale;
         viz.unknown = true;
-        viz.reason = hit ? sample.reason : "query_miss";
-        if (small_penalty)
+        viz.reason = sample.reason.empty() || sample.reason == "not_evaluated"
+            ? "query_miss" : sample.reason;
+        const bool spatial_boundary_miss =
+            viz.reason == "position_out_of_map" ||
+            viz.reason == "position_out_of_interpolation_bounds";
+        const bool conservative_scalar_miss =
+            viz.reason.find("stale") != std::string::npos ||
+            viz.reason == "time_out_of_range" ||
+            viz.reason == "time_out_of_horizon" ||
+            viz.reason == "invalid_query";
+        Eigen::Vector3d barrier_grad = Eigen::Vector3d::Zero();
+        double barrier_cost = 0.0;
+        const bool has_barrier = spatial_boundary_miss &&
+            snapshotInteriorBarrier(*risk_snapshot_, p,
+                                    p1_config_.unknown_soft_penalty,
+                                    cost_max, grad_max,
+                                    &barrier_cost, &barrier_grad);
+        if (has_barrier)
         {
-          viz.cost = std::max(0.0, p1_config_.unknown_soft_penalty);
+          viz.cost = barrier_cost;
+          viz.grad = barrier_grad;
+          viz.push = -p1_config_.lambda_integrity * barrier_grad;
         }
         last_p1_viz_samples_.push_back(viz);
-        if (small_penalty)
+        if (has_barrier)
         {
-          cost += std::max(0.0, p1_config_.unknown_soft_penalty);
+          cost += barrier_cost;
+          int first_control_point = 0;
+          double weights[4] = {0.0, 0.0, 0.0, 0.0};
+          if (cubicBasisForTime(t, static_cast<int>(q.cols()), first_control_point, weights))
+          {
+            for (int i = 0; i < 4; ++i)
+              gradient.col(first_control_point + i) += weights[i] * barrier_grad;
+          }
+        }
+        else if (small_penalty || conservative_scalar_miss)
+        {
+          // Stale/invalid/time misses must not silently look like low risk.
+          // They have no trustworthy spatial direction, so retain zero grad.
+          const double penalty = std::max(1.0, p1_config_.unknown_soft_penalty);
+          viz.cost = penalty;
+          cost += penalty;
         }
         continue;
       }
@@ -2205,7 +2293,8 @@ namespace ego_planner
     metrics.weighted_f_integrity = p1_config_.lambda_integrity * cost;
     metrics.grad_norm_integrity = gradient.norm();
     metrics.weighted_grad_integrity_norm = std::abs(p1_config_.lambda_integrity) * metrics.grad_norm_integrity;
-    metrics.fallback_reason = metrics.hit_count > 0 || small_penalty ? "ok" : "no_valid_samples";
+    metrics.fallback_reason = metrics.hit_count > 0 || small_penalty ||
+                                      metrics.miss_count > 0 ? "ok" : "no_valid_samples";
   }
 
   void BsplineOptimizer::writeP1DebugCsv(const P1IntegrityMetrics &metrics) const
@@ -2226,7 +2315,7 @@ namespace ego_planner
     }
     if (write_header)
     {
-      out << "stamp,lbfgs_iter,snapshot_generation_id,query_base_time_s,"
+      out << "stamp,lbfgs_iter,planning_attempt_id,candidate_id,snapshot_generation_id,query_base_time_s,"
              "sample_count,hit_count,miss_count,stale_count,miss_ratio,stale_ratio,"
              "f_integrity,weighted_f_integrity,grad_norm_integrity,grad_norm_original,"
              "grad_ratio,clipped_grad_count,fallback_reason,applied_to_objective\n";
@@ -2234,6 +2323,8 @@ namespace ego_planner
 
     out << rclcpp::Clock().now().seconds() << ','
         << iter_num_ << ','
+        << metrics.planning_attempt_id << ','
+        << metrics.candidate_id << ','
         << metrics.snapshot_generation_id << ','
         << risk_query_base_time_s_ << ','
         << metrics.sample_count << ','
@@ -2303,7 +2394,7 @@ namespace ego_planner
     out << std::setprecision(17);
     if (write_header)
     {
-      out << "profile_seq,stamp,trajectory_id,applied_to_objective,metrics_only,"
+      out << "profile_seq,stamp,trajectory_id,planning_attempt_id,candidate_id,applied_to_objective,metrics_only,"
              "lambda_integrity,snapshot_generation_id,query_base_time_s,"
              "sample_index,arc_fraction,t_s,x,y,z,hit,valid,stale,c_pi,reason\n";
     }
@@ -2351,6 +2442,8 @@ namespace ego_planner
       out << profile_seq << ','
           << stamp_s << ','
           << trajectory_id << ','
+          << p1_risk_context_.planning_attempt_id << ','
+          << p1_risk_context_.candidate_id << ','
           << (applied_to_objective ? 1 : 0) << ','
           << (p1_config_.metrics_only ? 1 : 0) << ','
           << p1_config_.lambda_integrity << ','
@@ -2374,13 +2467,10 @@ namespace ego_planner
     out.close();
 
     const std::string context_path = p1AcceptedTrajectoryRiskProfileContextPath();
-    std::ifstream existing_context(context_path);
-    const bool write_context_header = !existing_context.good() ||
-        existing_context.peek() == std::ifstream::traits_type::eof();
-    existing_context.close();
-    std::ofstream context(context_path, std::ios::app);
-    if (!context.good())
-      return false;
+    // A sidecar is an authoritative binding for one accepted profile.  Replace
+    // it atomically so a killed writer can never leave a partially appended
+    // row that looks like evidence for an older trajectory.
+    std::ostringstream context;
     const Eigen::Vector3d min_bound = risk_snapshot_->origin();
     const Eigen::Vector3i dims = risk_snapshot_->voxelNum();
     const double resolution = risk_snapshot_->params().resolution_m;
@@ -2391,11 +2481,36 @@ namespace ego_planner
     const double tau_min = horizon_minmax.first == horizons.end() ? 0.0 : *horizon_minmax.first;
     const double tau_max = horizon_minmax.second == horizons.end() ? 0.0 : *horizon_minmax.second;
     const Eigen::Vector3d center = 0.5 * (min_bound + max_bound);
+    const double immutable_planning_start_s =
+        std::isfinite(p1_risk_context_.planning_start_s)
+            ? p1_risk_context_.planning_start_s
+            : planning_start_s;
     context << std::setprecision(17);
-    if (write_context_header)
-      context << "profile_seq,trajectory_id,planning_start_s,accepted_stamp_s,planning_duration_s,snapshot_generation_id,snapshot_stamp_s,query_base_time_s,snapshot_center_x,snapshot_center_y,snapshot_center_z,snapshot_x_min,snapshot_x_max,snapshot_y_min,snapshot_y_max,snapshot_z_min,snapshot_z_max,snapshot_time_min_s,snapshot_time_max_s,trajectory_x_min,trajectory_x_max,trajectory_y_min,trajectory_y_max,trajectory_z_min,trajectory_z_max,trajectory_time_min_s,trajectory_time_max_s,expected_sample_count,matched_sample_count,match_ratio,query_miss_count,stale_count,invalid_count\n";
-    context << profile_seq << ',' << trajectory_id << ',' << planning_start_s << ',' << stamp_s << ','
-            << (std::isfinite(planning_start_s) ? stamp_s - planning_start_s : std::numeric_limits<double>::quiet_NaN()) << ','
+    context << "profile_seq,trajectory_id,planning_attempt_id,candidate_id,planning_start_s,accepted_stamp_s,planning_duration_s,snapshot_generation_id,snapshot_stamp_s,query_base_time_s,snapshot_center_x,snapshot_center_y,snapshot_center_z,snapshot_x_min,snapshot_x_max,snapshot_y_min,snapshot_y_max,snapshot_z_min,snapshot_z_max,snapshot_time_min_s,snapshot_time_max_s,trajectory_x_min,trajectory_x_max,trajectory_y_min,trajectory_y_max,trajectory_z_min,trajectory_z_max,trajectory_time_min_s,trajectory_time_max_s,expected_sample_count,matched_sample_count,match_ratio,query_miss_count,stale_count,invalid_count,miss_reason_histogram\n";
+    std::map<std::string, int> miss_reasons;
+    // Count categories against the same immutable snapshot used for the rows;
+    // it never consults the runtime's latest P0 generation.
+    for (int sample_index = 0; sample_index < kP1AcceptedProfileSampleCount; ++sample_index)
+    {
+      const double t_s = duration * static_cast<double>(sample_index) / static_cast<double>(denom);
+      iap::RiskCostSample sample;
+      const bool hit = risk_snapshot_->queryCost(
+          trajectory.evaluateDeBoorT(t_s), risk_query_base_time_s_ + t_s, &sample);
+      if (!(hit && sample.valid && !sample.stale && std::isfinite(sample.cost)))
+        ++miss_reasons[sample.reason.empty() ? "query_miss" : sample.reason];
+    }
+    std::ostringstream miss_reason_histogram;
+    bool first_reason = true;
+    for (const auto &entry : miss_reasons)
+    {
+      if (!first_reason) miss_reason_histogram << '|';
+      miss_reason_histogram << entry.first << ':' << entry.second;
+      first_reason = false;
+    }
+    context << profile_seq << ',' << trajectory_id << ','
+            << p1_risk_context_.planning_attempt_id << ',' << p1_risk_context_.candidate_id << ','
+            << immutable_planning_start_s << ',' << stamp_s << ','
+            << (std::isfinite(immutable_planning_start_s) ? stamp_s - immutable_planning_start_s : std::numeric_limits<double>::quiet_NaN()) << ','
             << risk_snapshot_->generation_id() << ',' << risk_snapshot_->stamp_s() << ',' << risk_query_base_time_s_ << ','
             << center.x() << ',' << center.y() << ',' << center.z() << ','
             << min_bound.x() << ',' << max_bound.x() << ',' << min_bound.y() << ',' << max_bound.y() << ',' << min_bound.z() << ',' << max_bound.z() << ','
@@ -2403,7 +2518,23 @@ namespace ego_planner
             << trajectory_min.x() << ',' << trajectory_max.x() << ',' << trajectory_min.y() << ',' << trajectory_max.y() << ',' << trajectory_min.z() << ',' << trajectory_max.z() << ','
             << 0.0 << ',' << duration << ','
             << kP1AcceptedProfileSampleCount << ',' << matched_count << ',' << static_cast<double>(matched_count) / kP1AcceptedProfileSampleCount << ','
-            << query_miss_count << ',' << stale_count << ',' << invalid_count << '\n';
+            << query_miss_count << ',' << stale_count << ',' << invalid_count << ','
+            << miss_reason_histogram.str() << '\n';
+    const std::string temp_context_path = context_path + ".tmp";
+    {
+      std::ofstream context_file(temp_context_path, std::ios::trunc);
+      if (!context_file.good())
+        return false;
+      context_file << context.str();
+      context_file.flush();
+      if (!context_file.good())
+        return false;
+    }
+    if (std::rename(temp_context_path.c_str(), context_path.c_str()) != 0)
+    {
+      std::remove(temp_context_path.c_str());
+      return false;
+    }
     return true;
   }
 

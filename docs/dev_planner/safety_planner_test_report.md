@@ -4640,6 +4640,21 @@ Final conclusion:
 
 FAIL -> lambda/gradient debug
 
+## P1-2 accepted-profile semantic repair (implementation-only verification)
+
+This section records a code/test-only repair after the archived run above. It is **not** a replacement for the fresh P1-1/P1-2 evidence pair and does not change the conclusion above.
+
+The old `profile_seq=24/26` CSVs can show their reported reasons and coverage, but cannot prove the newer `planning_attempt_id`/`candidate_id` binding, atomic one-row sidecar, or callback scheduler stamps; those fields did not exist in the old artifacts. The old results therefore remain diagnostic: seq 24 had `127/200` finite samples and seq 26 had `0/200`, with the seq-26 histogram reported above. They must not be used to pass P1-2.
+
+Implemented checks:
+
+| Check | Result |
+|---|---|
+| Snapshot/candidate binding and atomic accepted sidecar | `PASS` in focused unit/analyzer tests; the sidecar now contains attempt/candidate IDs, snapshot/trajectory bounds, and a miss histogram. |
+| P1 spatial out-of-map/interpolation barrier | `PASS`: unit test proves nonzero capped cost and an inward gradient under `unknown_policy=skip`. |
+| P0 input/refresh/health isolation | `PASS`: P0 runtime tests pass with separate callback groups and coherent refresh input copying. |
+| Fresh 90s P1-1 + P1-2 pair and `--fail-on-threshold` | `NOT RUN`; required before any `PASS -> P1-3` claim. |
+
 ### P1-2 Debug/Rerun Risk-Profile Evidence Chain
 
 This rerun supersedes the previous P1-2 latest-cloud comparison above. The new acceptance source is the runtime `planner_p1_accepted_trajectory_risk_profile.csv` written from each accepted final bspline; `/iap/rviz/predicted_pl_cloud` is retained only as diagnostic overlay context.

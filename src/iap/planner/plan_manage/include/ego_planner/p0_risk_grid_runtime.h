@@ -71,6 +71,8 @@ class P0RiskGridRuntime {
     bool predictor_lidar_legacy_observability = true;
     double predictor_lidar_fim_radius_m =
         iap::LidarObservabilityFim::Params{}.fim_radius_m;
+    int predictor_requested_worker_count = 1;
+    int predictor_effective_worker_count = 1;
     P0_6FixtureConfig p0_6_fixture;
   };
 
@@ -133,7 +135,11 @@ class P0RiskGridRuntime {
   iap::RiskGridMap::OccupancyPredicate occupancy_predicate_;
   iap::IntegritySnapshotBuilder snapshot_builder_;
 
-  rclcpp::CallbackGroup::SharedPtr callback_group_;
+  // Inputs, heavy refresh, and health publication deliberately use distinct
+  // execution paths.  Refresh may take longer than a sensor period, but must
+  // never prevent the next input state from being recorded.
+  rclcpp::CallbackGroup::SharedPtr input_callback_group_;
+  rclcpp::CallbackGroup::SharedPtr refresh_callback_group_;
   rclcpp::CallbackGroup::SharedPtr health_callback_group_;
   rclcpp::TimerBase::SharedPtr refresh_timer_;
   rclcpp::TimerBase::SharedPtr health_timer_;
@@ -164,6 +170,9 @@ class P0RiskGridRuntime {
   double last_refresh_elapsed_ms_ = std::numeric_limits<double>::quiet_NaN();
   bool last_snapshot_available_ = false;
   std::size_t last_refresh_query_count_ = 0;
+  double last_refresh_start_stamp_s_ = std::numeric_limits<double>::quiet_NaN();
+  double last_refresh_end_stamp_s_ = std::numeric_limits<double>::quiet_NaN();
+  double last_health_callback_stamp_s_ = std::numeric_limits<double>::quiet_NaN();
   bool origin_set_ = false;
   Eigen::Vector3d origin_ecef_ = Eigen::Vector3d::Zero();
   std::unordered_map<uint32_t, gnss_comm::EphemPtr> ephem_cache_;
