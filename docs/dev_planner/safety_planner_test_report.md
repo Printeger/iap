@@ -5148,4 +5148,106 @@ Observation: P0 stale-after-startup, reference coverage loss, and unreduced risk
 Verdict: FAIL.
 Conclusion: Continue only on the analyzer-selected lambda/gradient branch.
 
+### Supplementary fresh figures
+
+![P1-2 integrity source timeline](../../results/planner_validation/exports/test_planner_p1_degraded_lidar_good_gnss_degraded_lidar_good_1784193251717/figures/p1_2_integrity_source_timeline.png)
+
+Observation: GNSS and LiDAR final-source activity is present throughout the validator interval.
+Verdict: PASS.
+Conclusion: Integrity-source availability is not the P1-2 failure.
+
+![P1-2 integrity HPL VPL timeline](../../results/planner_validation/exports/test_planner_p1_degraded_lidar_good_gnss_degraded_lidar_good_1784193251717/figures/p1_2_integrity_hpl_vpl_timeline.png)
+
+Observation: Recorded HPL/VPL values are finite and continuous across the run.
+Verdict: PASS.
+Conclusion: The validator-backed integrity stream is available for analysis.
+
+![P1-2 P0 health diagnostic](../../results/planner_validation/exports/test_planner_p1_degraded_lidar_good_gnss_degraded_lidar_good_1784193251717/figures/p1_2_p0_health_diagnostic.png)
+
+Observation: Diagnostic P0 health shows repeated stale and unavailable intervals.
+Verdict: FAIL.
+Conclusion: This supplementary view agrees with the authoritative raw-health gate.
+
+![P1-2 P0 reason histogram](../../results/planner_validation/exports/test_planner_p1_degraded_lidar_good_gnss_degraded_lidar_good_1784193251717/figures/p1_2_p0_reason_histogram.png)
+
+Observation: The recorded reason distribution includes stale/unavailable behavior alongside valid snapshots.
+Verdict: FAIL.
+Conclusion: P0 health failures are recurrent rather than a missing-topic artifact.
+
+![P1-2 PL cost distribution](../../results/planner_validation/exports/test_planner_p1_degraded_lidar_good_gnss_degraded_lidar_good_1784193251717/figures/p1_2_pl_cost_distribution.png)
+
+Observation: Recorded PL/risk costs are present and finite.
+Verdict: PASS.
+Conclusion: Cost availability does not establish accepted-profile reduction.
+
+![P1-2 risk grid snapshot overview](../../results/planner_validation/exports/test_planner_p1_degraded_lidar_good_gnss_degraded_lidar_good_1784193251717/figures/p1_2_risk_grid_snapshot_overview.png)
+
+Observation: Recorded risk-grid snapshot diagnostics are available for the run.
+Verdict: PASS.
+Conclusion: Snapshot evidence exists, but the accepted spatial context still fails bounds validation.
+
+![P1-2 odom truth topdown](../../results/planner_validation/exports/test_planner_p1_degraded_lidar_good_gnss_degraded_lidar_good_1784193251717/figures/p1_2_odom_truth_topdown.png)
+
+Observation: Bag-derived odometry and truth paths are both present.
+Verdict: PASS.
+Conclusion: The scene overlay has recorded motion context.
+
+![P1-2 odom error timeline](../../results/planner_validation/exports/test_planner_p1_degraded_lidar_good_gnss_degraded_lidar_good_1784193251717/figures/p1_2_odom_error_timeline.png)
+
+Observation: Odometry error is measurable from the fresh bag.
+Verdict: PASS.
+Conclusion: Odom diagnostics remain supplementary to the accepted-profile gates.
+
+![P1-2 P0 health versus odom error](../../results/planner_validation/exports/test_planner_p1_degraded_lidar_good_gnss_degraded_lidar_good_1784193251717/figures/p1_2_p0_health_vs_odom_error.png)
+
+Observation: P0 health and odometry error can be compared on recorded time axes.
+Verdict: PASS.
+Conclusion: The view supports diagnosis but does not override raw health or c_pi gates.
+
+![P1-2 integrity cost debug summary](../../results/planner_validation/exports/test_planner_p1_degraded_lidar_good_gnss_degraded_lidar_good_1784193251717/figures/p1_2_integrity_cost_debug_summary.png)
+
+Observation: The debug CSV is nonempty, finite, objective-applied, and contains positive hits/cost.
+Verdict: PASS.
+Conclusion: Objective application is proven.
+
+![P1-2 bspline publish timeline](../../results/planner_validation/exports/test_planner_p1_degraded_lidar_good_gnss_degraded_lidar_good_1784193251717/figures/p1_2_bspline_publish_timeline.png)
+
+Observation: Fresh P1-1 and P1-2 bspline publications are present.
+Verdict: PASS.
+Conclusion: Planner publication failure is excluded.
+
+![P1-2 manifest switch summary](../../results/planner_validation/exports/test_planner_p1_degraded_lidar_good_gnss_degraded_lidar_good_1784193251717/figures/p1_2_manifest_switch_summary.png)
+
+Observation: P0/P1 and the objective switch are enabled with exact lambda; P2-P5 are disabled.
+Verdict: PASS.
+Conclusion: The formal pair has the intended phase isolation.
+
+![P1-2 validation summary](../../results/planner_validation/exports/test_planner_p1_degraded_lidar_good_gnss_degraded_lidar_good_1784193251717/figures/p1_2_validation_summary.png)
+
+Observation: Validator, objective, topic, and publication evidence pass while health/coverage/reduction do not.
+Verdict: FAIL.
+Conclusion: The aggregate validation remains terminally failed.
+
+![P1-2 P0 callback timeline](../../results/planner_validation/exports/test_planner_p1_degraded_lidar_good_gnss_degraded_lidar_good_1784193251717/figures/p1_2_p0_callback_timeline.png)
+
+Observation: Raw P0 callback timing is recorded during the active interval.
+Verdict: PASS.
+Conclusion: Callback observability is present for freshness diagnosis.
+
+![P1-2 planning context age timeline](../../results/planner_validation/exports/test_planner_p1_degraded_lidar_good_gnss_degraded_lidar_good_1784193251717/figures/p1_2_planning_context_age_timeline.png)
+
+Observation: Context ages repeatedly approach or exceed the `1.0 s` stale threshold even though the final accepted ages are below it.
+Verdict: FAIL.
+Conclusion: Recurrent planning-context staleness is directly visible.
+
+![P1-2 replan fallback timeline](../../results/planner_validation/exports/test_planner_p1_degraded_lidar_good_gnss_degraded_lidar_good_1784193251717/figures/p1_2_replan_fallback_timeline.png)
+
+Observation: The final timeline contains repeated rejection, reacquisition, and fallback activity.
+Verdict: FAIL.
+Conclusion: Replan-storm behavior accompanies the raw health/freshness failure.
+
+### Post-run implementation review note
+
+The independent spec review found two analyzer limitations that cannot be repaired without invalidating the terminal one-shot workflow: recorded-scene alignment currently proves nonempty, overlapping XY bounds but does not additionally verify frame IDs or timestamp/snapshot identity; and the dashboard enumerates the 21 evaluation gates above but not the later required-PNG completeness check, while long governing-value JSON is visually truncated. These limitations do not turn any observed failure into a pass. They are disclosed for the next implementation branch and were not patched or rerun after the formal analyzer invocation.
+
 Final terminal result: **FAIL -> lambda/gradient debug. P1-3 was not run.**
