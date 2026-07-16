@@ -386,7 +386,9 @@ void SafetyRvizPublisher::publishPredictedPLCloud(
   if (!predicted_pl_cloud_pub_ || !shouldPublish(now_s, &last_grid_publish_s_)) {
     return;
   }
-  const rclcpp::Time stamp = stamp_from_seconds(node_, now_s);
+  const double snapshot_stamp_s = snapshot && valid_stamp_s(snapshot->stamp_s())
+      ? snapshot->stamp_s() : now_s;
+  const rclcpp::Time stamp = stamp_from_seconds(node_, snapshot_stamp_s);
   predicted_pl_cloud_pub_->publish(
       buildPredictedPLCloud(snapshot, config_, current_altitude_m, stamp));
 }
@@ -399,7 +401,9 @@ void SafetyRvizPublisher::publishRiskValidityCloud(
       !shouldPublish(now_s, &last_validity_publish_s_)) {
     return;
   }
-  const rclcpp::Time stamp = stamp_from_seconds(node_, now_s);
+  const double snapshot_stamp_s = snapshot && valid_stamp_s(snapshot->stamp_s())
+      ? snapshot->stamp_s() : now_s;
+  const rclcpp::Time stamp = stamp_from_seconds(node_, snapshot_stamp_s);
   risk_validity_cloud_pub_->publish(
       buildRiskValidityCloud(snapshot, config_, current_altitude_m, stamp));
 }
@@ -563,7 +567,7 @@ sensor_msgs::msg::PointCloud2 SafetyRvizPublisher::buildPredictedPLCloud(
 
   sensor_msgs::PointCloud2Modifier modifier(cloud);
   modifier.setPointCloud2Fields(
-      12,
+      13,
       "x", 1, sensor_msgs::msg::PointField::FLOAT32,
       "y", 1, sensor_msgs::msg::PointField::FLOAT32,
       "z", 1, sensor_msgs::msg::PointField::FLOAT32,
@@ -575,7 +579,8 @@ sensor_msgs::msg::PointCloud2 SafetyRvizPublisher::buildPredictedPLCloud(
       "valid", 1, sensor_msgs::msg::PointField::UINT8,
       "unknown", 1, sensor_msgs::msg::PointField::UINT8,
       "stale", 1, sensor_msgs::msg::PointField::UINT8,
-      "source_flags", 1, sensor_msgs::msg::PointField::UINT32);
+      "source_flags", 1, sensor_msgs::msg::PointField::UINT32,
+      "generation_id", 1, sensor_msgs::msg::PointField::UINT32);
   modifier.resize(rows.size());
 
   sensor_msgs::PointCloud2Iterator<float> x(cloud, "x");
@@ -591,6 +596,8 @@ sensor_msgs::msg::PointCloud2 SafetyRvizPublisher::buildPredictedPLCloud(
   sensor_msgs::PointCloud2Iterator<uint8_t> stale(cloud, "stale");
   sensor_msgs::PointCloud2Iterator<uint32_t> source_flags(cloud,
                                                           "source_flags");
+  sensor_msgs::PointCloud2Iterator<uint32_t> generation_id(cloud,
+                                                           "generation_id");
   for (const auto& row : rows) {
     const double scalar_pl =
         std::max(row.voxel.hpl_pred, row.voxel.vpl_pred);
@@ -607,8 +614,9 @@ sensor_msgs::msg::PointCloud2 SafetyRvizPublisher::buildPredictedPLCloud(
     *unknown = row.voxel.unknown ? 1u : 0u;
     *stale = row.voxel.stale ? 1u : 0u;
     *source_flags = row.voxel.source_flags;
+    *generation_id = static_cast<uint32_t>(snapshot->generation_id());
     ++x; ++y; ++z; ++rgb; ++pl; ++hpl; ++vpl; ++c_pi;
-    ++valid; ++unknown; ++stale; ++source_flags;
+    ++valid; ++unknown; ++stale; ++source_flags; ++generation_id;
   }
   return cloud;
 }
@@ -662,7 +670,7 @@ sensor_msgs::msg::PointCloud2 SafetyRvizPublisher::buildRiskValidityCloud(
 
   sensor_msgs::PointCloud2Modifier modifier(cloud);
   modifier.setPointCloud2Fields(
-      8,
+      9,
       "x", 1, sensor_msgs::msg::PointField::FLOAT32,
       "y", 1, sensor_msgs::msg::PointField::FLOAT32,
       "z", 1, sensor_msgs::msg::PointField::FLOAT32,
@@ -670,7 +678,8 @@ sensor_msgs::msg::PointCloud2 SafetyRvizPublisher::buildRiskValidityCloud(
       "valid", 1, sensor_msgs::msg::PointField::UINT8,
       "unknown", 1, sensor_msgs::msg::PointField::UINT8,
       "stale", 1, sensor_msgs::msg::PointField::UINT8,
-      "source_flags", 1, sensor_msgs::msg::PointField::UINT32);
+      "source_flags", 1, sensor_msgs::msg::PointField::UINT32,
+      "generation_id", 1, sensor_msgs::msg::PointField::UINT32);
   modifier.resize(rows.size());
 
   sensor_msgs::PointCloud2Iterator<float> x(cloud, "x");
@@ -682,6 +691,8 @@ sensor_msgs::msg::PointCloud2 SafetyRvizPublisher::buildRiskValidityCloud(
   sensor_msgs::PointCloud2Iterator<uint8_t> stale(cloud, "stale");
   sensor_msgs::PointCloud2Iterator<uint32_t> source_flags(cloud,
                                                           "source_flags");
+  sensor_msgs::PointCloud2Iterator<uint32_t> generation_id(cloud,
+                                                           "generation_id");
   for (const auto& row : rows) {
     *x = static_cast<float>(row.p.x());
     *y = static_cast<float>(row.p.y());
@@ -691,7 +702,9 @@ sensor_msgs::msg::PointCloud2 SafetyRvizPublisher::buildRiskValidityCloud(
     *unknown = row.voxel.unknown ? 1u : 0u;
     *stale = row.voxel.stale ? 1u : 0u;
     *source_flags = row.voxel.source_flags;
+    *generation_id = static_cast<uint32_t>(snapshot->generation_id());
     ++x; ++y; ++z; ++rgb; ++valid; ++unknown; ++stale; ++source_flags;
+    ++generation_id;
   }
   return cloud;
 }

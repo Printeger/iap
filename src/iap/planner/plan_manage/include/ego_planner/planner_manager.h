@@ -91,6 +91,9 @@ namespace ego_planner
     bool checkCollision(int drone_id);
     std::shared_ptr<const iap::RiskGridSnapshot> acquireRiskGridSnapshot() const;
     const PlanningRiskContext &beginPlanningRiskContext(double now_s);
+    const PlanningRiskContext &beginPlanningRiskContextWithSnapshot(
+        double now_s,
+        std::shared_ptr<const iap::RiskGridSnapshot> snapshot);
     void clearPlanningRiskContext();
     const PlanningRiskContext &planningRiskContext() const { return planning_risk_context_; }
     std::shared_ptr<const iap::RiskGridSnapshot> currentPlanningRiskSnapshot() const { return planning_risk_context_.snapshot; }
@@ -106,7 +109,12 @@ namespace ego_planner
     std::string p1PlanningContextTimelinePath() const;
     bool p1AdmissionEnabled() const;
     const std::string &lastP1RejectionReason() const { return last_p1_rejection_reason_; }
-    void recordP1RetryDeferred(const std::string &reason, double stamp_s);
+    bool lastP1RejectionRequiresNewGeneration() const {
+      return last_p1_rejection_requires_new_generation_;
+    }
+    void recordP1RetryDeferred(
+        const std::string &reason, double stamp_s,
+        std::shared_ptr<const iap::RiskGridSnapshot> snapshot);
 
     PlanParameters pp_;
     LocalTrajData local_data_;
@@ -137,12 +145,14 @@ namespace ego_planner
     TimeProvider time_provider_;
     std::string trajectory_frame_id_{"map"};
     std::string last_p1_rejection_reason_;
+    bool last_p1_rejection_requires_new_generation_{false};
 
     void appendPlanningRiskContextTimeline(const std::string &stage,
                                            double stamp_s,
                                            const std::string &outcome,
                                            const std::string &reason,
-                                           const std::string &fallback_branch = "") const;
+                                           const std::string &fallback_branch = "",
+                                           const PlanningRiskContext *context_override = nullptr) const;
 
     void updateTrajInfo(const UniformBspline &position_traj, const rclcpp::Time time_now);
 

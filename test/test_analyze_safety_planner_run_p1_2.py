@@ -83,6 +83,8 @@ def p0_row(idx, **overrides):
         "input_callback_count": idx + 1,
         "health_callback_count": idx + 1,
         "process_cpu_delta_ms": 25.0,
+        "generation_id": 4,
+        "last_grid_stamp_s": 9.0,
     }
     row.update(overrides)
     return row
@@ -166,6 +168,7 @@ def cloud_rows(y, *, c_pi=1.0, pl=1.0, include_c_pi=True):
             "unknown": 0,
             "stale": 0,
             "source_flags": 0,
+            "generation_id": 4,
         }
         row["c_pi"] = c_pi if include_c_pi else ""
         rows.append(row)
@@ -257,6 +260,7 @@ def accepted_profile_context(rows):
         "fresh": 1, "coverage_ok": 1, "spatial_miss_count": 0,
         "temporal_miss_count": 0, "occupied_miss_count": 0,
         "stale_miss_count": 0, "invalid_miss_count": 200 - matched,
+        "trajectory_start_stamp_s": 10.0,
     }]
 
 
@@ -747,6 +751,9 @@ class P1_2AnalyzerTest(unittest.TestCase):
             p1_1_context_info={"path": "reference"},
             stale_timeout_s=1.0,
         )
+        health_context = analyzer.p1_health_snapshot_context([p0_row(0)])
+        comparison["p1_2_health_context"] = health_context
+        comparison["p1_1_health_context"] = health_context
         current_scene = {
             "map_points": [(float(x), 0.0, 0.0) for x in range(11)],
             "map_frame_ids": ["map"], "map_stamps": [9.0],
@@ -769,6 +776,14 @@ class P1_2AnalyzerTest(unittest.TestCase):
             comparison, current_scene, reference_scene
         )
         self.assertTrue(alignment["available"], alignment)
+        comparison["p1_2_health_context"]["snapshots"][0]["generation_id"] = 99
+        self.assertFalse(analyzer.p1_2_risk_scene_alignment(
+            comparison, current_scene, reference_scene)["available"])
+        comparison["p1_2_health_context"]["snapshots"][0]["generation_id"] = 4
+        current_scene["bspline_start_stamps"] = [10.1]
+        self.assertFalse(analyzer.p1_2_risk_scene_alignment(
+            comparison, current_scene, reference_scene)["available"])
+        current_scene["bspline_start_stamps"] = [10.0]
         gates, failures, inconclusive, _ = run_gate()
         self.assertEqual(failures, [])
         self.assertEqual(inconclusive, [])

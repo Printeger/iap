@@ -241,13 +241,21 @@ namespace ego_planner
   const EGOPlannerManager::PlanningRiskContext &
   EGOPlannerManager::beginPlanningRiskContext(const double now_s)
   {
+    return beginPlanningRiskContextWithSnapshot(now_s, acquireRiskGridSnapshot());
+  }
+
+  const EGOPlannerManager::PlanningRiskContext &
+  EGOPlannerManager::beginPlanningRiskContextWithSnapshot(
+      const double now_s,
+      std::shared_ptr<const iap::RiskGridSnapshot> snapshot)
+  {
     planning_risk_context_ = PlanningRiskContext{};
     planning_risk_context_.active = true;
     planning_risk_context_.planning_start_s = now_s;
     planning_risk_context_.snapshot_acquired_s = now_s;
     planning_risk_context_.planning_attempt_id = ++p1_planning_attempt_seq_;
     planning_risk_context_.query_base_time_s = now_s;
-    planning_risk_context_.snapshot = acquireRiskGridSnapshot();
+    planning_risk_context_.snapshot = std::move(snapshot);
     if (planning_risk_context_.snapshot)
     {
       planning_risk_context_.generation_id =
@@ -291,7 +299,8 @@ namespace ego_planner
 
   void EGOPlannerManager::appendPlanningRiskContextTimeline(
       const std::string &stage, const double stamp_s, const std::string &outcome,
-      const std::string &reason, const std::string &fallback_branch) const
+      const std::string &reason, const std::string &fallback_branch,
+      const PlanningRiskContext *context_override) const
   {
     const std::string path = p1PlanningContextTimelinePath();
     std::ifstream existing(path);
@@ -306,7 +315,8 @@ namespace ego_planner
              "snapshot_stamp_s,query_base_time_s,context_age_s,stale_threshold_s,"
              "outcome,reason,fallback_branch\n";
     }
-    const auto &ctx = planning_risk_context_;
+    const auto &ctx = context_override ? *context_override
+                                       : planning_risk_context_;
     const double threshold = ctx.snapshot ? ctx.snapshot->params().stale_timeout_s
                                           : std::numeric_limits<double>::quiet_NaN();
     const double age = std::isfinite(ctx.snapshot_stamp_s) ? stamp_s - ctx.snapshot_stamp_s
@@ -350,6 +360,9 @@ namespace ego_planner
   {
     planning_risk_context_.pre_publish_s = now_s;
     const bool fresh = planningRiskContextFresh(now_s, reason);
+    last_p1_rejection_requires_new_generation_ = !fresh && reason &&
+        (*reason == "stale_planning_risk_context" ||
+         *reason == "planning_risk_context_unavailable");
     appendPlanningRiskContextTimeline("pre_publish", now_s,
         fresh ? "fresh" : "rejected", reason ? *reason : "");
     return fresh;
@@ -366,7 +379,7 @@ namespace ego_planner
     const bool written = bspline_optimizer_->writeP1AcceptedTrajectoryRiskProfile(
         local_data_.position_traj_, ++p1_accepted_profile_seq_, local_data_.traj_id_,
         publish_stamp_s, planning_risk_context_.planning_start_s,
-        trajectory_frame_id_);
+        trajectory_frame_id_, local_data_.start_time_.seconds());
     appendPlanningRiskContextTimeline("publish", publish_stamp_s,
         written ? "published" : "published_without_profile",
         written ? "ok" : "accepted_profile_write_failed");
@@ -381,10 +394,20 @@ namespace ego_planner
   }
 
   void EGOPlannerManager::recordP1RetryDeferred(
-      const std::string &reason, const double stamp_s)
+      const std::string &reason, const double stamp_s,
+      std::shared_ptr<const iap::RiskGridSnapshot> snapshot)
   {
+    PlanningRiskContext deferred_context;
+    deferred_context.snapshot = std::move(snapshot);
+    deferred_context.query_base_time_s = stamp_s;
+    if (deferred_context.snapshot)
+    {
+      deferred_context.generation_id = deferred_context.snapshot->generation_id();
+      deferred_context.snapshot_stamp_s = deferred_context.snapshot->stamp_s();
+      deferred_context.query_base_time_s = deferred_context.snapshot_stamp_s;
+    }
     appendPlanningRiskContextTimeline("retry_deferred", stamp_s, "deferred",
-        reason, "existing_polynomial");
+        reason, "existing_polynomial", &deferred_context);
   }
 
   void EGOPlannerManager::setPlanningRiskContextForTest(
@@ -466,6 +489,7 @@ namespace ego_planner
                                         Eigen::Vector3d local_target_vel, bool flag_polyInit, bool flag_randomPolyTraj)
   {
     last_p1_rejection_reason_.clear();
+    last_p1_rejection_requires_new_generation_ = false;
     static int count = 0;
     printf("\033[47;30m\n[drone %d replan %d]==============================================\033[0m\n", pp_.drone_id, count++);
 
@@ -895,6 +919,9 @@ namespace ego_planner
     if (!planningRiskContextFresh(accepted_time.seconds(), &freshness_reason))
     {
       last_p1_rejection_reason_ = freshness_reason;
+      last_p1_rejection_requires_new_generation_ =
+          freshness_reason == "stale_planning_risk_context" ||
+          freshness_reason == "planning_risk_context_unavailable";
       appendPlanningRiskContextTimeline("accept", accepted_time.seconds(),
           "rejected", freshness_reason, "existing_poly_random_failure_budget");
       bspline_optimizer_->clearRiskSnapshot();
@@ -910,6 +937,8 @@ namespace ego_planner
       last_p1_rejection_reason_ = accepted_context.failure_reasons.empty()
           ? "accepted_context_invalid"
           : accepted_context.failure_reasons.front();
+      last_p1_rejection_requires_new_generation_ =
+          !accepted_context.fresh || accepted_context.stale_miss_count > 0;
       appendPlanningRiskContextTimeline("accept", accepted_time.seconds(),
           "rejected", last_p1_rejection_reason_,
           "existing_poly_random_failure_budget");

@@ -3,6 +3,7 @@
 #include <cmath>
 #include <atomic>
 #include <chrono>
+#include <condition_variable>
 #include <limits>
 #include <memory>
 #include <mutex>
@@ -69,6 +70,48 @@ class DelayedProvider final : public iap::RiskPredictionProvider {
  private:
   std::chrono::milliseconds delay_;
   std::shared_ptr<std::atomic<int>> calls_;
+};
+
+class BlockingProvider final : public iap::RiskPredictionProvider {
+ public:
+  bool batchQuery(const std::vector<iap::RiskPredictionQuery>& queries,
+                  std::vector<iap::RiskPredictionResult>* results) override {
+    {
+      std::lock_guard<std::mutex> lock(mutex_);
+      entered_ = true;
+    }
+    condition_.notify_all();
+    std::unique_lock<std::mutex> lock(mutex_);
+    condition_.wait(lock, [this]() { return released_; });
+    results->assign(queries.size(), iap::RiskPredictionResult{});
+    for (auto& result : *results) {
+      result.available = true;
+      result.valid = true;
+      result.hpl_pred = 1.0;
+      result.vpl_pred = 1.0;
+      result.reason = "ok";
+    }
+    return true;
+  }
+
+  void waitUntilEntered() {
+    std::unique_lock<std::mutex> lock(mutex_);
+    condition_.wait(lock, [this]() { return entered_; });
+  }
+
+  void release() {
+    {
+      std::lock_guard<std::mutex> lock(mutex_);
+      released_ = true;
+    }
+    condition_.notify_all();
+  }
+
+ private:
+  std::mutex mutex_;
+  std::condition_variable condition_;
+  bool entered_ = false;
+  bool released_ = false;
 };
 
 ego_planner::P0RiskGridRuntime::Config enabledConfig() {
@@ -230,6 +273,14 @@ class P0RiskGridRuntimeStampTest : public ::testing::Test {
                             const double now_s,
                             iap::IntegritySnapshot* snapshot) {
     return runtime->buildSnapshot(now_s, snapshot);
+  }
+
+  static bool refreshOnce(P0RiskGridRuntime* runtime) {
+    return runtime->refreshOnceForTest();
+  }
+
+  static void publishHealthNow(P0RiskGridRuntime* runtime) {
+    runtime->healthTimerCallback();
   }
 
   static void sendCloud(
@@ -713,6 +764,54 @@ TEST_F(P0RiskGridRuntimeStampTest,
             std::string::npos);
   EXPECT_NE(last_health_message.find("\"process_cpu_delta_ms\":"),
             std::string::npos);
+}
+
+TEST_F(P0RiskGridRuntimeStampTest,
+       BlockedRefreshDoesNotStarveHealthAndConsecutiveStaleReports) {
+  ensure_rclcpp();
+  auto node = std::make_shared<rclcpp::Node>(
+      "p0_blocked_refresh_contention_test",
+      rclcpp::NodeOptions().allow_undeclared_parameters(false));
+  auto config = enabledConfig();
+  config.grid.stale_timeout_s = 1.0;
+  auto provider = std::make_unique<BlockingProvider>();
+  auto* provider_ptr = provider.get();
+  P0RiskGridRuntime runtime(node, config, std::move(provider));
+  seedValidInputs(&runtime, 100.0, 100.0);
+
+  std::atomic<int> health_callbacks{0};
+  std::atomic<int> stale_callbacks{0};
+  auto health_sub = node->create_subscription<std_msgs::msg::String>(
+      "/planning/risk_grid_health", 100,
+      [&](const std_msgs::msg::String::ConstSharedPtr message) {
+        health_callbacks.fetch_add(1);
+        if (message->data.find("\"stale\":true") != std::string::npos)
+          stale_callbacks.fetch_add(1);
+      });
+  (void)health_sub;
+  rclcpp::executors::MultiThreadedExecutor executor(rclcpp::ExecutorOptions(), 4);
+  executor.add_node(node);
+  std::thread spin_thread([&executor]() { executor.spin(); });
+  std::thread refresh_thread([&runtime]() { refreshOnce(&runtime); });
+  provider_ptr->waitUntilEntered();
+  for (int index = 0; index < 5; ++index) {
+    publishHealthNow(&runtime);
+    std::this_thread::sleep_for(std::chrono::milliseconds(30));
+  }
+  EXPECT_GE(health_callbacks.load(), 4);
+  provider_ptr->release();
+  refresh_thread.join();
+  EXPECT_TRUE(runtime.health().ready);
+
+  setOdomStamp(&runtime, 102.0);
+  for (int index = 0; index < 3; ++index) {
+    publishHealthNow(&runtime);
+    std::this_thread::sleep_for(std::chrono::milliseconds(20));
+  }
+  executor.cancel();
+  spin_thread.join();
+  EXPECT_GE(stale_callbacks.load(), 2);
+  EXPECT_TRUE(runtime.health().stale);
 }
 
 TEST_F(P0RiskGridRuntimeStampTest, OdomStampIsPreferredForRefreshTime) {

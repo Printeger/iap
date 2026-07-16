@@ -926,7 +926,43 @@ namespace ego_planner
     p5_final_gate_emergency_candidate_ = false;
     const LocalTrajData previous_local_data = planner_manager_->local_data_;
 
-    planner_manager_->beginPlanningRiskContext(plannerNow().seconds());
+    const bool p5_owns_admission = planner_manager_->p5_integrity_gate_ &&
+        (planner_manager_->p5_integrity_gate_->runtimeEnabled() ||
+         planner_manager_->p5_integrity_gate_->finalGateEnabled());
+    std::shared_ptr<const iap::RiskGridSnapshot> admitted_snapshot;
+    if (planner_manager_->p1AdmissionEnabled() && !p5_owns_admission)
+    {
+      admitted_snapshot = planner_manager_->acquireRiskGridSnapshot();
+      const auto health = admitted_snapshot ? admitted_snapshot->health()
+                                            : iap::RiskGridHealth{};
+      const double now_s = plannerNow().seconds();
+      const double age_s = admitted_snapshot
+          ? now_s - admitted_snapshot->stamp_s()
+          : std::numeric_limits<double>::infinity();
+      const double stale_timeout_s = admitted_snapshot
+          ? admitted_snapshot->params().stale_timeout_s
+          : 0.0;
+      const bool stale = !admitted_snapshot || !std::isfinite(age_s) ||
+          age_s < 0.0 ||
+          (stale_timeout_s >= 0.0 && age_s > stale_timeout_s) ||
+          health.stale;
+      const uint64_t generation = admitted_snapshot
+          ? admitted_snapshot->generation_id() : 0;
+      const auto admission = p1_replan_admission_.admit(
+          generation, health.ready, stale);
+      if (!admission.allow_expensive_planning)
+      {
+        planner_manager_->recordP1RetryDeferred(
+            admission.reason, now_s, admitted_snapshot);
+        return false;
+      }
+    }
+
+    if (planner_manager_->p1AdmissionEnabled() && !p5_owns_admission)
+      planner_manager_->beginPlanningRiskContextWithSnapshot(
+          plannerNow().seconds(), admitted_snapshot);
+    else
+      planner_manager_->beginPlanningRiskContext(plannerNow().seconds());
     struct PlanningRiskContextGuard
     {
       EGOPlannerManager *manager = nullptr;
@@ -941,26 +977,6 @@ namespace ego_planner
 
     const uint64_t p1_admission_generation =
         planner_manager_->currentPlanningGenerationId();
-    const bool p5_owns_admission = planner_manager_->p5_integrity_gate_ &&
-        (planner_manager_->p5_integrity_gate_->runtimeEnabled() ||
-         planner_manager_->p5_integrity_gate_->finalGateEnabled());
-    if (planner_manager_->p1AdmissionEnabled() && !p5_owns_admission)
-    {
-      const auto snapshot = planner_manager_->currentPlanningRiskSnapshot();
-      const auto health = snapshot ? snapshot->health() : iap::RiskGridHealth{};
-      std::string context_reason;
-      const bool context_fresh = planner_manager_->planningRiskContextFresh(
-          plannerNow().seconds(), &context_reason);
-      const auto admission = p1_replan_admission_.admit(
-          p1_admission_generation, health.ready,
-          health.stale || !context_fresh);
-      if (!admission.allow_expensive_planning)
-      {
-        planner_manager_->recordP1RetryDeferred(
-            admission.reason, plannerNow().seconds());
-        return false;
-      }
-    }
 
     getLocalTarget();
 
@@ -972,8 +988,7 @@ namespace ego_planner
 
     if (!plan_and_refine_success && planner_manager_->p1AdmissionEnabled() &&
         !p5_owns_admission &&
-        planner_manager_->lastP1RejectionReason().find("stale") !=
-            std::string::npos)
+        planner_manager_->lastP1RejectionRequiresNewGeneration())
     {
       p1_replan_admission_.recordStaleRejection(p1_admission_generation);
     }
@@ -1055,7 +1070,7 @@ namespace ego_planner
                     "P1 blocked stale planning context before bspline publish: %s",
                     freshness_reason.c_str());
         if (planner_manager_->p1AdmissionEnabled() && !p5_owns_admission &&
-            freshness_reason.find("stale") != std::string::npos)
+            planner_manager_->lastP1RejectionRequiresNewGeneration())
         {
           p1_replan_admission_.recordStaleRejection(p1_admission_generation);
         }

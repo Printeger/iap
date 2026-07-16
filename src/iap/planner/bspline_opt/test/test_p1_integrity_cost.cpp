@@ -403,8 +403,16 @@ TEST(P1IntegrityCostTest, FixedLambdaNegativeGradientStepLowersIntegrityCost) {
   ASSERT_TRUE(evaluate(*optimizer, q, &before_total, &total_gradient));
   const double before_integrity =
       optimizer->getLastP1IntegrityMetrics().f_integrity;
+  auto no_p1_config = config;
+  no_p1_config.use_integrity_cost = false;
+  no_p1_config.lambda_integrity = 0.0;
+  auto no_p1 = makeOptimizer(no_p1_config, &swarm);
+  no_p1->setRiskSnapshot(snapshot, snapshot->stamp_s());
+  double original_cost = 0.0;
+  Eigen::MatrixXd original_gradient;
+  ASSERT_TRUE(evaluate(*no_p1, q, &original_cost, &original_gradient));
   Eigen::MatrixXd moved = q;
-  Eigen::MatrixXd direction = total_gradient;
+  Eigen::MatrixXd direction = total_gradient - original_gradient;
   direction.leftCols(3).setZero();
   ASSERT_GT(direction.norm(), 0.0);
   moved -= 1.0e-3 * direction / direction.norm();
@@ -414,7 +422,41 @@ TEST(P1IntegrityCostTest, FixedLambdaNegativeGradientStepLowersIntegrityCost) {
   const double after_integrity =
       optimizer->getLastP1IntegrityMetrics().f_integrity;
   EXPECT_LT(after_integrity, before_integrity);
-  EXPECT_LT((total_gradient.array() * (moved - q).array()).sum(), 0.0);
+  EXPECT_LT((direction.array() * (moved - q).array()).sum(), 0.0);
+}
+
+TEST(P1IntegrityCostTest,
+     ObjectiveAppliedLbfgsMovesAlongDescentWithinIterationBudget) {
+  ego_planner::SwarmTrajData swarm;
+  const Eigen::MatrixXd before = makeControlPoints();
+  AffineProvider provider(10.0, Eigen::Vector3d(1.0, 0.0, 0.0));
+  auto snapshot = makeSnapshot(provider);
+  auto config = disabledConfig();
+  config.use_integrity_cost = true;
+  config.metrics_only = false;
+  config.lambda_integrity = 0.00001;
+  config.integrity_grad_norm_max = 100.0;
+  auto optimizer = makeOptimizer(config, &swarm);
+  optimizer->setRiskSnapshot(snapshot, snapshot->stamp_s());
+  double initial_cost = 0.0;
+  Eigen::MatrixXd initial_gradient;
+  ASSERT_TRUE(evaluate(*optimizer, before, &initial_cost, &initial_gradient));
+
+  Eigen::MatrixXd after = before;
+  double final_cost = 0.0;
+  int iterations = 0;
+  const auto started = std::chrono::steady_clock::now();
+  ASSERT_TRUE(optimizer->optimizeReboundCostForTest(
+      after, 0.1, 40, final_cost, iterations));
+  const double elapsed_s = std::chrono::duration<double>(
+      std::chrono::steady_clock::now() - started).count();
+  const Eigen::MatrixXd displacement = after - before;
+  EXPECT_GT(iterations, 0);
+  EXPECT_LE(iterations, 40);
+  EXPECT_LT(elapsed_s, 1.0);
+  EXPECT_GT(displacement.rightCols(before.cols() - 3).norm(), 0.0);
+  EXPECT_LT((initial_gradient.array() * displacement.array()).sum(), 0.0);
+  EXPECT_LT(final_cost, initial_cost);
 }
 
 TEST(P1IntegrityCostTest,

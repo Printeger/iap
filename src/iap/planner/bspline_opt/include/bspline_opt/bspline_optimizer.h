@@ -236,6 +236,9 @@ namespace ego_planner
     void setP4RiskAStarConfigForTest(const P4RiskAStarConfig &config) { p4_config_ = config; }
     bool evaluateReboundCostForTest(const Eigen::MatrixXd &control_points, double ts,
                                     double &cost, Eigen::MatrixXd &gradient);
+    bool optimizeReboundCostForTest(Eigen::MatrixXd &control_points, double ts,
+                                    int max_iterations, double &final_cost,
+                                    int &iterations);
     double p1LbfgsGradientEpsilon(double initial_weighted_p1_gradient_norm,
                                   double variable_norm) const;
     void setP1PreOptimizationTrajectoryForTest(
@@ -246,7 +249,9 @@ namespace ego_planner
                                               double stamp_s,
                                               double planning_start_s =
                                                   std::numeric_limits<double>::quiet_NaN(),
-                                              const std::string &trajectory_frame_id = "map") const;
+                                              const std::string &trajectory_frame_id = "map",
+                                              double trajectory_start_stamp_s =
+                                                  std::numeric_limits<double>::quiet_NaN()) const;
     iap::P1AcceptedContextValidation validateP1AcceptedTrajectoryRiskContext(
         UniformBspline trajectory, double accepted_stamp_s,
         const std::string &trajectory_frame_id) const;
@@ -296,6 +301,7 @@ namespace ego_planner
     std::vector<P1IntegrityVizSample> last_p1_viz_samples_;
     std::vector<P4GuideViz> last_p4_guides_;
     OptimizerCostBreakdown last_optimizer_cost_breakdown_;
+    bool suppress_rebound_collision_for_test_{false};
     std::shared_ptr<const iap::RiskGridSnapshot> risk_snapshot_;
     double risk_query_base_time_s_{0.0};
     P1PlanningRiskContext p1_risk_context_;

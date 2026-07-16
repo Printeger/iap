@@ -585,7 +585,7 @@ P1_ACCEPTED_PROFILE_CONTEXT_FIELDS = [
     "temporal_in_horizon", "frame_match", "generation_match",
     "query_time_match", "fresh", "coverage_ok", "spatial_miss_count",
     "temporal_miss_count", "occupied_miss_count", "stale_miss_count",
-    "invalid_miss_count",
+    "invalid_miss_count", "trajectory_start_stamp_s",
 ]
 P1_DEBUG_FINITE_FIELDS = [
     "f_integrity",
@@ -1183,6 +1183,7 @@ def parse_p0_health(msg: Any, timestamp_ns: int) -> dict[str, Any]:
         "provider_batch_duration_ms", "generation_interval_ms",
         "input_callback_age_s", "input_callback_count", "health_callback_count",
         "process_cpu_delta_ms",
+        "last_grid_stamp_s",
         "health_callback_duration_ms", "health_callback_queue_delay_ms",
         "health_state_mutex_wait_ms", "health_state_mutex_hold_ms",
         "refresh_query_count", "predictor_requested_worker_count",
@@ -1210,6 +1211,7 @@ def pointcloud_metric_rows(msg: Any, timestamp_ns: int) -> list[dict[str, Any]]:
         "unknown",
         "stale",
         "source_flags",
+        "generation_id",
     ]
     field_names = [field.name for field in getattr(msg, "fields", [])]
     if not all(name in field_names for name in required):
@@ -1889,10 +1891,12 @@ def p1_cloud_plot_context(
     ]
     frame_ids = sorted({str(row.get("frame_id", "")).strip() for row in cloud_rows if str(row.get("frame_id", "")).strip()})
     stamps = sorted({value for row in cloud_rows if (value := finite_float(row.get("stamp"))) is not None})
+    generation_ids = sorted({int(value) for row in cloud_rows if (value := finite_float(row.get("generation_id"))) is not None})
     if not valid_points:
         return {
             "valid_point_count": 0, "bounds": {}, "points": [],
             "frame_ids": frame_ids, "stamps": stamps,
+            "generation_ids": generation_ids,
         }
     xyz = np.asarray([[point[0], point[1], point[2]] for point in valid_points], dtype=float)
     if len(valid_points) > max_points:
@@ -1904,6 +1908,7 @@ def p1_cloud_plot_context(
         "valid_point_count": len(valid_points),
         "frame_ids": frame_ids,
         "stamps": stamps,
+        "generation_ids": generation_ids,
         "bounds": {
             "x_min": float(np.min(xyz[:, 0])),
             "x_max": float(np.max(xyz[:, 0])),
@@ -1923,6 +1928,22 @@ def p1_cloud_plot_context(
             for point in plotted
         ],
     }
+
+
+def p1_health_snapshot_context(rows: list[dict[str, Any]]) -> dict[str, Any]:
+    snapshots: list[dict[str, Any]] = []
+    for row in rows:
+        generation = finite_float(row.get("generation_id"))
+        snapshot_stamp = finite_float(row.get("last_grid_stamp_s"))
+        if generation is None or snapshot_stamp is None:
+            continue
+        snapshots.append({
+            "generation_id": int(generation),
+            "snapshot_stamp_s": snapshot_stamp,
+            "ready": bool(row.get("ready")),
+            "stale": bool(row.get("stale")),
+        })
+    return {"snapshots": snapshots, "snapshot_count": len(snapshots)}
 
 
 def compare_p1_2_risk_profiles(
@@ -6609,6 +6630,7 @@ def validate_p1_profile_context(
         "temporal_in_horizon", "frame_match", "generation_match", "query_time_match",
         "fresh", "coverage_ok", "spatial_miss_count", "temporal_miss_count",
         "occupied_miss_count", "stale_miss_count", "invalid_miss_count",
+        "trajectory_start_stamp_s",
     )
     if any(numeric.get(key) is None for key in required_numeric):
         result["reasons"].append("context_nonfinite")
@@ -6618,9 +6640,9 @@ def validate_p1_profile_context(
         x, y, z = (finite_float(row.get(key)) for key in ("x", "y", "z"))
         return (
             x is not None and y is not None and z is not None
-            and numeric["snapshot_x_min"] <= x < numeric["snapshot_x_max"] - 1.0e-12
-            and numeric["snapshot_y_min"] <= y < numeric["snapshot_y_max"] - 1.0e-12
-            and numeric["snapshot_z_min"] <= z < numeric["snapshot_z_max"] - 1.0e-12
+            and numeric["snapshot_x_min"] - 1.0e-12 <= x < numeric["snapshot_x_max"] - 1.0e-12
+            and numeric["snapshot_y_min"] - 1.0e-12 <= y < numeric["snapshot_y_max"] - 1.0e-12
+            and numeric["snapshot_z_min"] - 1.0e-12 <= z < numeric["snapshot_z_max"] - 1.0e-12
         )
     def sample_temporally_in_horizon(row: dict[str, Any]) -> bool:
         t_s = finite_float(row.get("t_s"))
@@ -12948,13 +12970,14 @@ def p1_2_risk_scene_alignment(
         trajectory_frame = str(sidecar.get("trajectory_frame_id", "")).strip()
         snapshot_stamp = finite_float(sidecar.get("snapshot_stamp_s"))
         accepted_stamp = finite_float(sidecar.get("accepted_stamp_s"))
+        trajectory_start_stamp = finite_float(sidecar.get("trajectory_start_stamp_s"))
         generation = finite_float(sidecar.get("snapshot_generation_id"))
         binding_key = f"{label} sidecar frame/generation/timestamp binding"
         source_status[binding_key] = bool(
             context.get("valid") and snapshot_frame
             and snapshot_frame == trajectory_frame
             and snapshot_stamp is not None and accepted_stamp is not None
-            and generation is not None
+            and trajectory_start_stamp is not None and generation is not None
         )
         if not source_status[binding_key]:
             reasons.append(f"{binding_key} unavailable or invalid")
@@ -12973,27 +12996,47 @@ def p1_2_risk_scene_alignment(
         cloud_frames = sorted({str(value).strip() for value in cloud.get("frame_ids", []) or [] if str(value).strip()})
         cloud_stamps = [finite_float(value) for value in cloud.get("stamps", []) or []]
         cloud_stamps = [value for value in cloud_stamps if value is not None]
+        cloud_generations = [int(value) for value in cloud.get("generation_ids", []) or []]
         cloud_key_name = f"{label} risk cloud exact snapshot stamp/frame"
         source_status[cloud_key_name] = bool(
             snapshot_frame and cloud_frames == [snapshot_frame]
             and snapshot_stamp is not None
             and any(abs(value - snapshot_stamp) <= 1.0e-6 for value in cloud_stamps)
+            and generation is not None and int(generation) in cloud_generations
         )
         if not source_status[cloud_key_name]:
             reasons.append(
                 f"{cloud_key_name} unavailable: frame={cloud_frames}, "
-                f"snapshot_stamp={snapshot_stamp}, cloud_stamps={cloud_stamps[:5]}"
+                f"snapshot_stamp={snapshot_stamp}, cloud_stamps={cloud_stamps[:5]}, "
+                f"generation={generation}, cloud_generations={cloud_generations}"
+            )
+        health = comparison.get(
+            "p1_2_health_context" if label == "P1-2" else "p1_1_health_context",
+            {},
+        ) or {}
+        health_key = f"{label} health exact snapshot generation/stamp"
+        source_status[health_key] = bool(
+            generation is not None and snapshot_stamp is not None and any(
+                int(row.get("generation_id", -1)) == int(generation)
+                and abs(float(row.get("snapshot_stamp_s")) - snapshot_stamp) <= 1.0e-6
+                for row in health.get("snapshots", []) or []
+            )
+        )
+        if not source_status[health_key]:
+            reasons.append(
+                f"{health_key} unavailable: generation={generation}, "
+                f"snapshot_stamp={snapshot_stamp}"
             )
         bspline_stamps = [finite_float(value) for value in scene.get("bspline_start_stamps", []) or []]
         bspline_stamps = [value for value in bspline_stamps if value is not None]
         bspline_key = f"{label} accepted trajectory exact start stamp"
         source_status[bspline_key] = bool(
-            accepted_stamp is not None
-            and any(abs(value - accepted_stamp) <= 1.0e-6 for value in bspline_stamps)
+            trajectory_start_stamp is not None
+            and any(abs(value - trajectory_start_stamp) <= 1.0e-6 for value in bspline_stamps)
         )
         if not source_status[bspline_key]:
             reasons.append(
-                f"{bspline_key} unavailable: accepted={accepted_stamp}, "
+                f"{bspline_key} unavailable: trajectory_start={trajectory_start_stamp}, "
                 f"recorded={bspline_stamps[-5:]}"
             )
     return {
@@ -13001,8 +13044,8 @@ def p1_2_risk_scene_alignment(
         "reasons": reasons,
         "source_status": source_status,
         "method": (
-            "exact sidecar frame/generation/snapshot stamp + risk-cloud header stamp + "
-            "bspline start stamp; raw XY overlap; no inferred transform or heatmap"
+            "exact sidecar frame/generation/snapshot stamp + health/cloud generation/stamp + "
+            "bspline trajectory-start stamp; raw XY overlap; no inferred transform or heatmap"
         ),
     }
 
@@ -13988,6 +14031,7 @@ def _plot_profile_spatial_bounds_axis(
     categories = (
         ("matched", lambda row: int(row.get("matched", 0) or 0) == 1, "#16a34a"),
         ("spatial", lambda row: "spatial" in str(row.get("reason", "")), "#dc2626"),
+        ("temporal", lambda row: "time" in str(row.get("reason", "")) or "temporal" in str(row.get("reason", "")), "#0ea5e9"),
         ("occupied", lambda row: "occupied" in str(row.get("reason", "")), "#9333ea"),
         ("stale", lambda row: int(row.get("stale", 0) or 0) == 1, "#f97316"),
         ("other invalid", lambda row: True, "#64748b"),
@@ -14044,13 +14088,21 @@ def _plot_gradient_trace_axis(axis: Any, label: str, profile: dict[str, Any]) ->
     finite_rows = [
         row for row in rows
         if all(finite_float(row.get(key)) is not None for key in (
-            "x", "y", "pre_x", "pre_y", "neg_grad_x", "neg_grad_y",
+            "x", "y", "pre_x", "pre_y", "grad_x", "grad_y",
+            "neg_grad_x", "neg_grad_y",
             "disp_x", "disp_y",
         ))
     ]
     if finite_rows:
         x = np.asarray([float(row["pre_x"]) for row in finite_rows])
         y = np.asarray([float(row["pre_y"]) for row in finite_rows])
+        axis.quiver(
+            x, y,
+            [float(row["grad_x"]) for row in finite_rows],
+            [float(row["grad_y"]) for row in finite_rows],
+            color="#dc2626", angles="xy", scale_units="xy", scale=1.0,
+            width=0.003, alpha=0.65, label="gradient",
+        )
         axis.quiver(
             x, y,
             [float(row["neg_grad_x"]) for row in finite_rows],
@@ -14073,6 +14125,20 @@ def _plot_gradient_trace_axis(axis: Any, label: str, profile: dict[str, Any]) ->
                 c=[math.nan if value is None else value for value in c_pi],
                 cmap="magma", s=16, alpha=0.75, label="final c_pi samples",
             )
+            contour_rows = [
+                row for row in profile.get("samples", []) or []
+                if all(finite_float(row.get(key)) is not None for key in ("x", "y", "c_pi"))
+            ]
+            if len(contour_rows) >= 3:
+                try:
+                    axis.tricontour(
+                        [float(row["x"]) for row in contour_rows],
+                        [float(row["y"]) for row in contour_rows],
+                        [float(row["c_pi"]) for row in contour_rows],
+                        levels=6, colors="#111827", linewidths=0.5, alpha=0.45,
+                    )
+                except (ValueError, RuntimeError):
+                    pass
     dot_values = [
         finite_float(row.get("grad_dot_displacement")) for row in profile.get("samples", []) or []
     ]
@@ -14113,12 +14179,14 @@ def plot_p1_2_gradient_direction_field_overlay(
 def plot_p1_2_refresh_latency_vs_stale_threshold(
     rows: list[dict[str, Any]], stale_timeout_s: float, path: Path,
     reference_rows: list[dict[str, Any]] | None = None,
+    timeline_rows: list[dict[str, Any]] | None = None,
+    reference_timeline_rows: list[dict[str, Any]] | None = None,
 ) -> bool:
     fig, axes = plt.subplots(2, 1, figsize=(12.2, 7.4), sharex=False)
     plotted = False
-    for label, source, color in (
-        ("P1-2", rows, "#2563eb"),
-        ("P1-1", list(reference_rows or []), "#f97316"),
+    for label, source, planning_rows, color in (
+        ("P1-2", rows, list(timeline_rows or []), "#2563eb"),
+        ("P1-1", list(reference_rows or []), list(reference_timeline_rows or []), "#f97316"),
     ):
         if not source:
             continue
@@ -14130,6 +14198,37 @@ def plot_p1_2_refresh_latency_vs_stale_threshold(
         rejected_x = [finite_float(row.get("stamp")) for row in source if bool(row.get("stale")) or not bool(row.get("ready", True))]
         if rejected_x:
             axes[1].scatter(rejected_x, [1000.0 * stale_timeout_s] * len(rejected_x), marker="x", color=color, label=f"{label} stale/not-ready")
+        rejection_times = [
+            finite_float(row.get("stamp_s")) for row in planning_rows
+            if str(row.get("outcome", "")) == "rejected"
+        ]
+        rejection_times = [value for value in rejection_times if value is not None]
+        if rejection_times:
+            axes[1].scatter(
+                rejection_times, [1050.0 * stale_timeout_s] * len(rejection_times),
+                marker="v", facecolors="none", edgecolors=color,
+                label=f"{label} planning rejection",
+            )
+        classification = {"compute timeout": [], "scheduling starvation": [], "input unavailable": []}
+        for row in source:
+            stamp = finite_float(row.get("stamp"))
+            if stamp is None or (bool(row.get("ready")) and not bool(row.get("stale"))):
+                continue
+            reason = str(row.get("reason", "")).lower()
+            duration = finite_float(row.get("refresh_duration_ms")) or 0.0
+            queue_delay = finite_float(row.get("refresh_queue_delay_ms")) or 0.0
+            if "input" in reason or "snapshot_unavailable" in reason or "not_ready" in reason:
+                classification["input unavailable"].append(stamp)
+            elif queue_delay > max(duration, 0.1 * 1000.0 * stale_timeout_s):
+                classification["scheduling starvation"].append(stamp)
+            elif duration + queue_delay >= 1000.0 * stale_timeout_s:
+                classification["compute timeout"].append(stamp)
+        for marker, (cause, stamps) in zip(("s", "D", "P"), classification.items()):
+            if stamps:
+                axes[0].scatter(
+                    stamps, [1000.0 * stale_timeout_s] * len(stamps),
+                    marker=marker, s=24, label=f"{label} {cause}",
+                )
         plotted = True
     for axis in axes:
         axis.axhline(1000.0 * stale_timeout_s, color="#dc2626", linestyle="--", linewidth=1.4, label="stale threshold")
@@ -14153,17 +14252,31 @@ def plot_p1_2_replan_load_correlation(
     event_times = [finite_float(row.get("stamp_s")) for row in timeline_rows]
     health_times = [finite_float(row.get("stamp")) for row in health_rows]
     finite_times = [value for value in (*event_times, *health_times) if value is not None]
-    fig, axes = plt.subplots(2, 1, figsize=(12.2, 7.4), sharex=True)
+    fig, axes = plt.subplots(3, 1, figsize=(12.2, 9.2), sharex=True)
     if not finite_times:
         axes[0].text(0.5, 0.5, "UNAVAILABLE", transform=axes[0].transAxes, ha="center")
     else:
         start = math.floor(min(finite_times))
         end = math.ceil(max(finite_times)) + 1.0
         bins = np.arange(start, end + 1.0, 1.0)
+        sorted_timeline = sorted(
+            timeline_rows, key=lambda row: finite_float(row.get("stamp_s")) or -math.inf
+        )
+        reacquisitions: list[float | None] = []
+        rejected_generation: str | None = None
+        for row in sorted_timeline:
+            if str(row.get("outcome", "")) == "rejected":
+                rejected_generation = str(row.get("snapshot_generation_id", ""))
+            elif str(row.get("stage", "")) == "acquire" and rejected_generation is not None:
+                if str(row.get("snapshot_generation_id", "")) != rejected_generation:
+                    reacquisitions.append(finite_float(row.get("stamp_s")))
+                rejected_generation = None
         series = (
-            ("acquisition/optimizer", [finite_float(row.get("stamp_s")) for row in timeline_rows if str(row.get("stage", "")) in {"acquire", "optimizer_start"}], "#2563eb"),
+            ("acquisition", [finite_float(row.get("stamp_s")) for row in timeline_rows if str(row.get("stage", "")) == "acquire"], "#2563eb"),
+            ("optimizer", [finite_float(row.get("stamp_s")) for row in timeline_rows if str(row.get("stage", "")) == "optimizer_start"], "#0891b2"),
             ("rejected", [finite_float(row.get("stamp_s")) for row in timeline_rows if str(row.get("outcome", "")) == "rejected"], "#dc2626"),
             ("deferred", [finite_float(row.get("stamp_s")) for row in timeline_rows if "deferred" in str(row.get("outcome", "")) or "deferred" in str(row.get("reason", ""))], "#9333ea"),
+            ("reacquisition", reacquisitions, "#0d9488"),
             ("fallback", [finite_float(row.get("stamp_s")) for row in timeline_rows if str(row.get("fallback_branch", "")) not in {"", "none"}], "#f97316"),
         )
         centers = 0.5 * (bins[:-1] + bins[1:])
@@ -14171,15 +14284,44 @@ def plot_p1_2_replan_load_correlation(
             finite_values = [value for value in values if value is not None]
             counts, _ = np.histogram(finite_values, bins=bins)
             axes[0].step(centers, counts, where="mid", label=label, color=color)
-        hx = [value for value in health_times if value is not None]
-        axes[1].plot(hx, finite_or_nan(health_rows, "refresh_duration_ms"), label="refresh duration [ms]", color="#2563eb")
-        axes[1].plot(hx, finite_or_nan(health_rows, "refresh_queue_delay_ms"), "--", label="queue delay [ms]", color="#dc2626")
-        axes[1].plot(hx, finite_or_nan(health_rows, "process_cpu_delta_ms"), ":", label="process CPU delta [ms]", color="#16a34a")
+        def binned_mean(field: str) -> np.ndarray:
+            sums = np.zeros(len(bins) - 1)
+            counts = np.zeros(len(bins) - 1)
+            for row in health_rows:
+                stamp = finite_float(row.get("stamp"))
+                value = finite_float(row.get(field))
+                if stamp is None or value is None:
+                    continue
+                index = int(np.searchsorted(bins, stamp, side="right") - 1)
+                if 0 <= index < len(sums):
+                    sums[index] += value
+                    counts[index] += 1
+            return np.divide(sums, counts, out=np.full_like(sums, np.nan), where=counts > 0)
+        axes[1].plot(centers, binned_mean("refresh_duration_ms"), label="refresh duration [ms]", color="#2563eb")
+        axes[1].plot(centers, binned_mean("refresh_queue_delay_ms"), "--", label="queue delay [ms]", color="#dc2626")
+        axes[1].plot(centers, binned_mean("process_cpu_delta_ms"), ":", label="process CPU delta [ms]", color="#16a34a")
+        for field, color in (("input_callback_count", "#2563eb"), ("health_callback_count", "#16a34a")):
+            stamps: list[float] = []
+            weights: list[float] = []
+            previous: float | None = None
+            for row in health_rows:
+                stamp = finite_float(row.get("stamp"))
+                value = finite_float(row.get(field))
+                if stamp is None or value is None:
+                    continue
+                delta = 0.0 if previous is None else max(0.0, value - previous)
+                previous = value
+                stamps.append(stamp)
+                weights.append(delta)
+            counts, _ = np.histogram(stamps, bins=bins, weights=weights)
+            axes[2].step(centers, counts, where="mid", label=field, color=color)
     axes[0].set_ylabel("events / 1 s bin")
     axes[0].set_title("Generation-gated planning load: attempts, rejects, deferred retries, fallback")
     axes[1].set_ylabel("milliseconds")
-    axes[1].set_xlabel("recorded time [s]")
-    axes[1].set_title("P0 refresh/queue/CPU load on the same time bins")
+    axes[1].set_title("P0 refresh/queue/CPU mean on the same 1 s bins")
+    axes[2].set_ylabel("callbacks / bin")
+    axes[2].set_xlabel("recorded time [s]")
+    axes[2].set_title("Input and health callback progress on the same 1 s bins")
     for axis in axes:
         axis.grid(True, alpha=0.25)
         handles, _ = axis.get_legend_handles_labels()
@@ -15338,6 +15480,7 @@ def analyze(args: argparse.Namespace) -> dict[str, Any]:
                 "input_callback_count",
                 "health_callback_count",
                 "process_cpu_delta_ms",
+                "last_grid_stamp_s",
                 "snapshot_available",
                 "reason",
             ],
@@ -15345,12 +15488,12 @@ def analyze(args: argparse.Namespace) -> dict[str, Any]:
         )
         write_csv(
             cloud_path,
-            ["stamp", "x", "y", "z", "pl", "hpl", "vpl", "c_pi", "valid", "unknown", "stale", "source_flags", "frame_id"],
+            ["stamp", "x", "y", "z", "pl", "hpl", "vpl", "c_pi", "valid", "unknown", "stale", "source_flags", "frame_id", "generation_id"],
             pl_cloud_rows,
         )
         write_csv(
             validity_path,
-            ["stamp", "x", "y", "z", "pl", "hpl", "vpl", "c_pi", "valid", "unknown", "stale", "source_flags", "frame_id"],
+            ["stamp", "x", "y", "z", "pl", "hpl", "vpl", "c_pi", "valid", "unknown", "stale", "source_flags", "frame_id", "generation_id"],
             validity_cloud_rows,
         )
         write_csv(
@@ -16002,7 +16145,7 @@ def analyze(args: argparse.Namespace) -> dict[str, Any]:
                 exact_cloud_path = csv_dir / "p1_2_accepted_snapshot_pl_cloud.csv"
                 write_csv(
                     exact_cloud_path,
-                    ["stamp", "x", "y", "z", "pl", "hpl", "vpl", "c_pi", "valid", "unknown", "stale", "source_flags", "frame_id"],
+                    ["stamp", "x", "y", "z", "pl", "hpl", "vpl", "c_pi", "valid", "unknown", "stale", "source_flags", "frame_id", "generation_id"],
                     pl_cloud_rows,
                 )
                 csv_artifacts.append(str(exact_cloud_path))
@@ -16045,7 +16188,7 @@ def analyze(args: argparse.Namespace) -> dict[str, Any]:
                 )
                 write_csv(
                     exact_reference_cloud_path,
-                    ["stamp", "x", "y", "z", "pl", "hpl", "vpl", "c_pi", "valid", "unknown", "stale", "source_flags", "frame_id"],
+                    ["stamp", "x", "y", "z", "pl", "hpl", "vpl", "c_pi", "valid", "unknown", "stale", "source_flags", "frame_id", "generation_id"],
                     p1_2_reference_cloud_rows,
                 )
                 csv_artifacts.append(str(exact_reference_cloud_path))
@@ -16075,6 +16218,12 @@ def analyze(args: argparse.Namespace) -> dict[str, Any]:
             p1_2_context_info=p1_accepted_profile_context_info,
             p1_1_context_info=p1_2_reference_context_info,
             stale_timeout_s=finite_float(manifest.get("p0.stale_timeout_s")),
+        )
+        p1_2_risk_comparison["p1_2_health_context"] = (
+            p1_health_snapshot_context(health_rows)
+        )
+        p1_2_risk_comparison["p1_1_health_context"] = (
+            p1_health_snapshot_context(p1_2_reference_health_rows)
         )
         p1_2_risk_comparison["risk_scene_alignment"] = p1_2_risk_scene_alignment(
             p1_2_risk_comparison,
@@ -17769,6 +17918,8 @@ def analyze(args: argparse.Namespace) -> dict[str, Any]:
             finite_float(manifest.get("p0.stale_timeout_s")) or 1.0,
             p1_2_figure_paths["p1_2_refresh_latency_vs_stale_threshold.png"],
             reference_rows=p1_2_reference_health_rows,
+            timeline_rows=p1_planning_context_timeline_rows,
+            reference_timeline_rows=p1_2_reference_timeline_rows,
         ):
             p1_2_figure_artifacts.append(str(
                 p1_2_figure_paths["p1_2_refresh_latency_vs_stale_threshold.png"]
