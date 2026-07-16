@@ -198,15 +198,19 @@ P1_2_FIGURE_FILENAMES = [
     "p1_2_scenario_topdown.png",
     "p1_2_topic_activity_timeline.png",
     "p1_2_p0_health.png",
-    "p1_2_p1_objective_timeline.png",
-    "p1_2_integrity_cost_debug_summary.png",
+    "p1_2_snapshot_candidate_binding.png",
+    "p1_2_objective_gradient_timeline.png",
     "p1_2_risk_profile_vs_p1_1.png",
-    "p1_2_risk_sample_coverage_overlay.png",
+    "p1_2_accepted_profile_coverage_overlay.png",
     "p1_2_trajectory_overlay_vs_p1_1.png",
+    "p1_2_artifact_completeness.png",
+    "p1_2_cause_exclusion_summary.png",
+]
+P1_2_OPTIONAL_FIGURE_FILENAMES = [
+    "p1_2_integrity_cost_debug_summary.png",
     "p1_2_bspline_publish_timeline.png",
     "p1_2_manifest_switch_summary.png",
     "p1_2_validation_summary.png",
-    "p1_2_cause_exclusion_summary.png",
 ]
 P5_8_FIGURE_FILENAMES = [
     "p5_8_scenario_topdown.png",
@@ -657,6 +661,15 @@ def ensure_dirs(export_dir: Path) -> tuple[Path, Path, Path]:
 def artifact_prefix(experiment_id: str) -> str:
     prefix = re.sub(r"[^a-z0-9]+", "_", str(experiment_id).strip().lower()).strip("_")
     return prefix or "run"
+
+
+def missing_required_figure_paths(required_figures: list[Path]) -> list[Path]:
+    """Return every absent/empty required figure so acceptance cannot silently pass."""
+    return [
+        figure_path
+        for figure_path in required_figures
+        if not figure_path.is_file() or figure_path.stat().st_size <= 0
+    ]
 
 
 def is_experiment(args: argparse.Namespace, experiment_id: str) -> bool:
@@ -6474,6 +6487,9 @@ def summarize_p1_integrity_debug_rows(
         context for row, state in zip(rows, applied_states)
         if state is True for context in [context_tuple(row)] if context is not None
     }
+    context_tuples = {
+        context for row in rows for context in [context_tuple(row)] if context is not None
+    }
     summary: dict[str, Any] = {
         "missing": missing,
         "path": path,
@@ -6499,6 +6515,7 @@ def summarize_p1_integrity_debug_rows(
         "applied_to_objective_false_count": applied_false_count,
         "applied_to_objective_invalid_count": applied_invalid_count,
         "fallback_reason_counts": dict(sorted(fallback_reasons.items())),
+        "context_tuples": [list(value) for value in sorted(context_tuples)],
         "applied_context_tuples": [list(value) for value in sorted(applied_context_tuples)],
     }
     for key in (
@@ -12398,6 +12415,196 @@ def plot_p1_metrics_timeline(
     return True
 
 
+def plot_p1_2_objective_gradient_timeline(
+    p1_2_rows: list[dict[str, Any]],
+    p1_1_rows: list[dict[str, Any]],
+    p1_2_profile: dict[str, Any],
+    p1_1_profile: dict[str, Any],
+    path: Path,
+) -> bool:
+    """Render the two-run objective evidence without changing P1 gate semantics."""
+    fig, axes = plt.subplots(2, 2, figsize=(13.2, 8.0))
+    runs = (("P1-2 enabled", p1_2_rows, p1_2_profile, "#2563eb"),
+            ("P1-1 metrics-only", p1_1_rows, p1_1_profile, "#f97316"))
+    plotted = False
+    for label, rows, profile, color in runs:
+        stamps = [finite_float(row.get("stamp")) for row in rows]
+        finite_stamps = [stamp for stamp in stamps if stamp is not None]
+        if not finite_stamps:
+            continue
+        t0 = finite_stamps[0]
+        t = [math.nan if stamp is None else stamp - t0 for stamp in stamps]
+        applied = [
+            math.nan if explicit_csv_bool(row.get("applied_to_objective")) is None
+            else int(bool(explicit_csv_bool(row.get("applied_to_objective"))))
+            for row in rows
+        ]
+        axes[0, 0].plot(t, applied, label=label, color=color, alpha=0.9)
+        axes[0, 1].plot(t, finite_or_nan(rows, "f_integrity"), label=f"{label} f", color=color)
+        axes[0, 1].plot(t, finite_or_nan(rows, "weighted_f_integrity"), "--",
+                        label=f"{label} weighted", color=color, alpha=0.8)
+        axes[1, 0].plot(t, finite_or_nan(rows, "grad_norm_integrity"),
+                        label=f"{label} integrity", color=color)
+        axes[1, 0].plot(t, finite_or_nan(rows, "grad_norm_original"), "--",
+                        label=f"{label} original", color=color, alpha=0.8)
+        axes[1, 1].plot(t, finite_or_nan(rows, "grad_ratio"), label=label, color=color)
+        values = profile.get("metadata_tuple_values", {}) or {}
+        lambda_values = values.get("lambda_integrity", []) or []
+        axes[0, 0].text(
+            0.02, 0.92 if label.startswith("P1-2") else 0.80,
+            f"{label} lambda={lambda_values[0] if len(lambda_values) == 1 else '<ambiguous>'}",
+            transform=axes[0, 0].transAxes, color=color, fontsize=9,
+        )
+        plotted = True
+    titles = (
+        "metrics-only / applied-to-objective state",
+        "integrity objective (raw / weighted)",
+        "gradient norms (integrity / original)",
+        "integrity gradient ratio",
+    )
+    for axis, title in zip(axes.flat, titles):
+        axis.set_title(title)
+        axis.set_xlabel("time since each run's first debug row [s]")
+        axis.grid(True, alpha=0.25)
+        if plotted:
+            axis.legend(loc="best", fontsize=8)
+    axes[0, 0].set_ylim(-0.1, 1.1)
+    fig.suptitle("P1-2 objective / gradient timeline against fresh P1-1 reference")
+    fig.tight_layout()
+    fig.savefig(path, dpi=160)
+    plt.close(fig)
+    return True
+
+
+def _p1_profile_binding_tuple(profile: dict[str, Any]) -> tuple[str, str, str, str]:
+    values = profile.get("metadata_tuple_values", {}) or {}
+    return tuple(
+        str((values.get(key) or [""])[0]) if len(values.get(key) or []) == 1 else ""
+        for key in ("planning_attempt_id", "candidate_id", "snapshot_generation_id", "query_base_time_s")
+    )
+
+
+def plot_p1_2_snapshot_candidate_binding(
+    p1_2_profile: dict[str, Any],
+    p1_1_profile: dict[str, Any],
+    p1_2_context: dict[str, Any],
+    p1_1_context: dict[str, Any],
+    p1_2_debug_summary: dict[str, Any],
+    p1_1_debug_summary: dict[str, Any],
+    gates: dict[str, Any],
+    path: Path,
+) -> bool:
+    """Make final-profile/sidecar/debug candidate binding inspectable in one artifact."""
+    fig, axes = plt.subplots(1, 2, figsize=(15.0, 6.0))
+    for axis, label, profile, context, debug, expected_applied in (
+        (axes[0], "P1-1 metrics-only", p1_1_profile, p1_1_context, p1_1_debug_summary, False),
+        (axes[1], "P1-2 enabled", p1_2_profile, p1_2_context, p1_2_debug_summary, True),
+    ):
+        profile_tuple = _p1_profile_binding_tuple(profile)
+        debug_tuples = [tuple(value) for value in (debug.get("context_tuples", []) or [])]
+        applied_tuples = [tuple(value) for value in (debug.get("applied_context_tuples", []) or [])]
+        matching_debug_count = sum(item == profile_tuple for item in debug_tuples)
+        matching_applied_count = sum(item == profile_tuple for item in applied_tuples)
+        sidecar_context = context.get("context", {}) or {}
+        sidecar_tuple = tuple(str(sidecar_context.get(key, "")) for key in (
+            "planning_attempt_id", "candidate_id", "snapshot_generation_id", "query_base_time_s"))
+        profile_trajectory_id = str(
+            ((profile.get("metadata_tuple_values", {}) or {}).get("trajectory_id") or [""])[0]
+        )
+        sidecar_trajectory_id = str(sidecar_context.get("trajectory_id", ""))
+        expected_count = matching_applied_count if expected_applied else matching_debug_count
+        unique_context_tuple = (
+            bool(profile.get("format_valid"))
+            and bool(context.get("valid"))
+            and expected_count == 1
+        )
+        lines = [
+            f"final profile seq: {profile.get('selected_profile_seq')}",
+            f"profile trajectory_id: {profile_trajectory_id}",
+            f"sidecar trajectory_id: {sidecar_trajectory_id}",
+            "debug trajectory_id: unavailable (not in P1 debug CSV schema)",
+            f"profile tuple: {profile_tuple}",
+            f"sidecar tuple: {sidecar_tuple}",
+            f"profile format valid: {profile.get('format_valid')}",
+            f"sidecar valid: {context.get('valid')}",
+            f"debug rows: {debug.get('row_count', 0)}",
+            f"debug tuple matches: {matching_debug_count}",
+            f"objective-applied tuple matches: {matching_applied_count}",
+            f"expected debug mode: {'applied' if expected_applied else 'metrics-only'}",
+            f"unique context-tuple verdict: {unique_context_tuple}",
+        ]
+        axis.axis("off")
+        axis.text(0.02, 0.95, "\n".join(lines), va="top", ha="left", family="monospace", fontsize=9.2)
+        axis.set_title(label)
+    fig.suptitle(
+        "P1 final accepted-profile / sidecar / debug snapshot-candidate binding "
+        f"(P1-2 hard binding: {gates.get('p1_final_profile_context_in_debug')})"
+    )
+    fig.tight_layout()
+    fig.savefig(path, dpi=160)
+    plt.close(fig)
+    return True
+
+
+def p1_2_artifact_completeness_rows(
+    p1_2_export_dir: Path,
+    p1_2_bag_dir: Path | None,
+    p1_1_export_dir: Path | None,
+    p1_1_bag_dir: Path | None,
+    p1_2_manifest: dict[str, Any],
+    p1_1_manifest: dict[str, Any],
+    required_figures: list[Path],
+    path: Path,
+) -> list[tuple[str, str, bool]]:
+    """Collect the two-run input-artifact contract used by the completeness figure."""
+    def exists(candidate: Path | None) -> bool:
+        return candidate is not None and candidate.is_file() and candidate.stat().st_size > 0
+    rows: list[tuple[str, str, bool]] = []
+    for label, export_dir, bag_dir, manifest in (
+        ("P1-1", p1_1_export_dir, p1_1_bag_dir, p1_1_manifest),
+        ("P1-2", p1_2_export_dir, p1_2_bag_dir, p1_2_manifest),
+    ):
+        rows.extend([
+            (label, "manifest", exists(export_dir / "test_planner_manifest.json") if export_dir else False),
+            (label, "validator summary", exists(export_dir / "test_planner_validation_summary.json") if export_dir else False),
+            (label, "bag metadata.yaml", exists(bag_dir / "metadata.yaml") if bag_dir else False),
+            (label, "accepted profile", exists(p1_accepted_profile_csv_path(export_dir, manifest)) if export_dir else False),
+            (label, "atomic context sidecar", exists(p1_accepted_profile_context_csv_path(export_dir, manifest)) if export_dir else False),
+            (label, "P1 debug CSV", exists(p1_debug_csv_path(export_dir, manifest)) if export_dir else False),
+        ])
+    rows.append(("P1-2", "all required figures", all(exists(item) for item in required_figures if item != path)))
+    return rows
+
+
+def plot_p1_2_artifact_completeness(
+    p1_2_export_dir: Path,
+    p1_2_bag_dir: Path | None,
+    p1_1_export_dir: Path | None,
+    p1_1_bag_dir: Path | None,
+    p1_2_manifest: dict[str, Any],
+    p1_1_manifest: dict[str, Any],
+    required_figures: list[Path],
+    path: Path,
+) -> bool:
+    """Show the input-artifact contract for both runs; the figure gate remains fail-closed."""
+    rows = p1_2_artifact_completeness_rows(
+        p1_2_export_dir, p1_2_bag_dir, p1_1_export_dir, p1_1_bag_dir,
+        p1_2_manifest, p1_1_manifest, required_figures, path,
+    )
+    labels = [f"{run}: {artifact}" for run, artifact, _ in rows]
+    values = [1 if present else 0 for _, _, present in rows]
+    fig, ax = plt.subplots(figsize=(11.8, 6.4))
+    ax.barh(labels, values, color=["#16a34a" if present else "#dc2626" for present in values])
+    ax.set_xlim(0, 1.15)
+    ax.set_xticks([0, 1], ["missing", "present"])
+    ax.set_title("P1-2 fresh-pair artifact completeness (required inputs and figures)")
+    ax.grid(True, axis="x", alpha=0.25)
+    fig.tight_layout()
+    fig.savefig(path, dpi=160)
+    plt.close(fig)
+    return True
+
+
 def plot_p1_integrity_cost_debug_summary(
     summary: dict[str, Any],
     path: Path,
@@ -13616,7 +13823,8 @@ def analyze(args: argparse.Namespace) -> dict[str, Any]:
         name: figures_dir / name for name in P1_1_FIGURE_FILENAMES
     }
     p1_2_figure_paths = {
-        name: figures_dir / name for name in P1_2_FIGURE_FILENAMES
+        name: figures_dir / name
+        for name in (*P1_2_FIGURE_FILENAMES, *P1_2_OPTIONAL_FIGURE_FILENAMES)
     }
     p0_phase = is_p0_experiment(args)
     p0_4_phase = is_experiment(args, "P0-4")
@@ -14521,6 +14729,8 @@ def analyze(args: argparse.Namespace) -> dict[str, Any]:
     p1_2_reference_profile_summary: dict[str, Any] = {}
     p1_2_reference_context_rows: list[dict[str, Any]] = []
     p1_2_reference_context_info: dict[str, Any] = {}
+    p1_2_reference_debug_rows: list[dict[str, Any]] = []
+    p1_2_reference_debug_summary: dict[str, Any] = {}
     p1_2_reference_cloud_rows: list[dict[str, Any]] = []
     p1_2_reference_cloud_source = ""
     p1_2_risk_comparison: dict[str, Any] = {}
@@ -14607,6 +14817,11 @@ def analyze(args: argparse.Namespace) -> dict[str, Any]:
                 read_bspline_messages(baseline_bag_dir, baseline_metadata)
             )
         if baseline_export_dir is not None:
+            p1_2_reference_debug_rows, p1_2_reference_debug_summary = (
+                read_p1_integrity_debug_csv(
+                    p1_debug_csv_path(baseline_export_dir, baseline_manifest)
+                )
+            )
             p1_2_reference_profile_rows, p1_2_reference_profile_summary = (
                 read_p1_accepted_profile_csv(
                     p1_accepted_profile_csv_path(baseline_export_dir, baseline_manifest)
@@ -16195,13 +16410,28 @@ def analyze(args: argparse.Namespace) -> dict[str, Any]:
             ]
         )
 
-        if plot_p1_metrics_timeline(
+        if plot_p1_2_objective_gradient_timeline(
             p1_debug_rows,
-            p1_2_figure_paths["p1_2_p1_objective_timeline.png"],
-            title="P1-2 objective integrity timeline",
+            p1_2_reference_debug_rows,
+            p1_accepted_profile_summary,
+            p1_2_reference_profile_summary,
+            p1_2_figure_paths["p1_2_objective_gradient_timeline.png"],
         ):
             p1_2_figure_artifacts.append(
-                str(p1_2_figure_paths["p1_2_p1_objective_timeline.png"])
+                str(p1_2_figure_paths["p1_2_objective_gradient_timeline.png"])
+            )
+        if plot_p1_2_snapshot_candidate_binding(
+            p1_accepted_profile_summary,
+            p1_2_reference_profile_summary,
+            p1_2_risk_comparison.get("p1_2_context", {}) or {},
+            p1_2_risk_comparison.get("p1_1_context", {}) or {},
+            p1_debug_summary,
+            p1_2_reference_debug_summary,
+            p1_2_gates,
+            p1_2_figure_paths["p1_2_snapshot_candidate_binding.png"],
+        ):
+            p1_2_figure_artifacts.append(
+                str(p1_2_figure_paths["p1_2_snapshot_candidate_binding.png"])
             )
         if plot_p1_integrity_cost_debug_summary(
             p1_debug_summary,
@@ -16220,10 +16450,10 @@ def analyze(args: argparse.Namespace) -> dict[str, Any]:
             )
         if plot_p1_2_risk_sample_coverage_overlay(
             p1_2_risk_comparison,
-            p1_2_figure_paths["p1_2_risk_sample_coverage_overlay.png"],
+            p1_2_figure_paths["p1_2_accepted_profile_coverage_overlay.png"],
         ):
             p1_2_figure_artifacts.append(
-                str(p1_2_figure_paths["p1_2_risk_sample_coverage_overlay.png"])
+                str(p1_2_figure_paths["p1_2_accepted_profile_coverage_overlay.png"])
             )
         if plot_p1_2_trajectory_overlay_vs_p1_1(
             p1_2_risk_comparison,
@@ -16266,6 +16496,19 @@ def analyze(args: argparse.Namespace) -> dict[str, Any]:
         ):
             p1_2_figure_artifacts.append(
                 str(p1_2_figure_paths["p1_2_cause_exclusion_summary.png"])
+            )
+        if plot_p1_2_artifact_completeness(
+            export_dir,
+            bag_dir,
+            baseline_export_dir,
+            baseline_bag_dir,
+            manifest,
+            baseline_manifest,
+            [p1_2_figure_paths[name] for name in P1_2_FIGURE_FILENAMES],
+            p1_2_figure_paths["p1_2_artifact_completeness.png"],
+        ):
+            p1_2_figure_artifacts.append(
+                str(p1_2_figure_paths["p1_2_artifact_completeness.png"])
             )
         p1_2_required_figures = [
             p1_2_figure_paths[name] for name in P1_2_FIGURE_FILENAMES
@@ -16480,12 +16723,11 @@ def analyze(args: argparse.Namespace) -> dict[str, Any]:
         figures.extend(
             artifact for artifact in p1_2_figure_artifacts if artifact not in figures
         )
-        for figure_path in p1_2_required_figures:
-            if not figure_path.is_file() or figure_path.stat().st_size <= 0:
-                failures.append(
-                    "P1-2 required figure missing: "
-                    f"{figure_path.name}; missing enabled-cost risk-reduction evidence prevents P1-2 acceptance"
-                )
+        for figure_path in missing_required_figure_paths(p1_2_required_figures):
+            failures.append(
+                "P1-2 required figure missing: "
+                f"{figure_path.name}; missing enabled-cost risk-reduction evidence prevents P1-2 acceptance"
+            )
     if p5_8_phase:
         figures.extend(
             artifact for artifact in p5_8_figure_artifacts if artifact not in figures

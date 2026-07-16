@@ -2,6 +2,7 @@
 
 import importlib.util
 from pathlib import Path
+import tempfile
 import unittest
 
 
@@ -585,17 +586,103 @@ class P1_2AnalyzerTest(unittest.TestCase):
                 "p1_2_scenario_topdown.png",
                 "p1_2_topic_activity_timeline.png",
                 "p1_2_p0_health.png",
-                "p1_2_p1_objective_timeline.png",
-                "p1_2_integrity_cost_debug_summary.png",
+                "p1_2_snapshot_candidate_binding.png",
+                "p1_2_objective_gradient_timeline.png",
                 "p1_2_risk_profile_vs_p1_1.png",
-                "p1_2_risk_sample_coverage_overlay.png",
+                "p1_2_accepted_profile_coverage_overlay.png",
                 "p1_2_trajectory_overlay_vs_p1_1.png",
-                "p1_2_bspline_publish_timeline.png",
-                "p1_2_manifest_switch_summary.png",
-                "p1_2_validation_summary.png",
+                "p1_2_artifact_completeness.png",
                 "p1_2_cause_exclusion_summary.png",
             ],
         )
+
+    def test_required_figure_check_fails_closed_for_missing_or_empty_artifacts(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            present = root / "present.png"
+            empty = root / "empty.png"
+            missing = root / "missing.png"
+            present.write_bytes(b"png")
+            empty.touch()
+            self.assertEqual(
+                analyzer.missing_required_figure_paths([present, empty, missing]),
+                [empty, missing],
+            )
+
+    def test_binding_and_objective_gradient_figures_render_from_both_runs(self):
+        current = accepted_profile_rows(0.0)
+        reference = accepted_profile_rows(5.0, applied_to_objective=0, metrics_only=1)
+        current_summary = analyzer.summarize_p1_accepted_profile_rows(current)
+        reference_summary = analyzer.summarize_p1_accepted_profile_rows(reference)
+        current_context = analyzer.validate_p1_profile_context(
+            current_summary, accepted_profile_context(current), {"path": "current"}
+        )
+        reference_context = analyzer.validate_p1_profile_context(
+            reference_summary, accepted_profile_context(reference), {"path": "reference"}
+        )
+        current_debug = p1_debug_summary([p1_debug_row()])
+        reference_debug = p1_debug_summary([p1_debug_row(applied_to_objective=0)])
+        self.assertEqual(current_debug["context_tuples"], [["11", "7", "4", "9.0"]])
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            binding = root / "binding.png"
+            objective = root / "objective.png"
+            self.assertTrue(analyzer.plot_p1_2_snapshot_candidate_binding(
+                current_summary, reference_summary, current_context, reference_context,
+                current_debug, reference_debug,
+                {"p1_final_profile_context_in_debug": True}, binding,
+            ))
+            self.assertTrue(analyzer.plot_p1_2_objective_gradient_timeline(
+                [p1_debug_row()], [p1_debug_row(applied_to_objective=0)],
+                current_summary, reference_summary, objective,
+            ))
+            self.assertGreater(binding.stat().st_size, 0)
+            self.assertGreater(objective.stat().st_size, 0)
+
+    def test_artifact_completeness_figure_shows_missing_inputs(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            current_export = root / "p1_2_export"
+            current_bag = root / "p1_2_bag"
+            reference_export = root / "p1_1_export"
+            reference_bag = root / "p1_1_bag"
+            for directory in (current_export, current_bag, reference_export, reference_bag):
+                directory.mkdir()
+            for export in (current_export, reference_export):
+                for name in (
+                    "test_planner_manifest.json", "test_planner_validation_summary.json",
+                    analyzer.P1_ACCEPTED_PROFILE_CSV_NAME,
+                    analyzer.P1_ACCEPTED_PROFILE_CONTEXT_CSV_NAME,
+                    analyzer.P1_1_DEBUG_CSV_NAME,
+                ):
+                    (export / name).write_text("evidence")
+            for bag in (current_bag, reference_bag):
+                (bag / "metadata.yaml").write_text("rosbag2_bagfile_information: {}")
+            figure = root / "artifact_completeness.png"
+            self.assertTrue(analyzer.plot_p1_2_artifact_completeness(
+                current_export, current_bag, reference_export, reference_bag,
+                {}, {}, [figure], figure,
+            ))
+            self.assertGreater(figure.stat().st_size, 0)
+            (reference_export / analyzer.P1_1_DEBUG_CSV_NAME).unlink()
+            rows = analyzer.p1_2_artifact_completeness_rows(
+                current_export, current_bag, reference_export, reference_bag,
+                {}, {}, [figure], figure,
+            )
+            self.assertIn(("P1-1", "P1 debug CSV", False), rows)
+
+    def test_sidecar_trajectory_mismatch_fails_profile_context_validation(self):
+        profile = accepted_profile_rows(0.0)
+        summary = analyzer.summarize_p1_accepted_profile_rows(profile)
+        context = accepted_profile_context(profile)
+        context[0]["trajectory_id"] = 999
+
+        result = analyzer.validate_p1_profile_context(
+            summary, context, {"path": "context"}
+        )
+
+        self.assertFalse(result["bindings_ok"])
+        self.assertFalse(result["valid"])
 
 
 if __name__ == "__main__":
