@@ -5251,3 +5251,249 @@ Conclusion: Replan-storm behavior accompanies the raw health/freshness failure.
 The independent spec review found two analyzer limitations that cannot be repaired without invalidating the terminal one-shot workflow: recorded-scene alignment currently proves nonempty, overlapping XY bounds but does not additionally verify frame IDs or timestamp/snapshot identity; and the dashboard enumerates the 21 evaluation gates above but not the later required-PNG completeness check, while long governing-value JSON is visually truncated. These limitations do not turn any observed failure into a pass. They are disclosed for the next implementation branch and were not patched or rerun after the formal analyzer invocation.
 
 Final terminal result: **FAIL -> lambda/gradient debug. P1-3 was not run.**
+
+### Repair implementation and fresh rerun — 2026-07-16 15:50–17:15 UTC
+
+This is the terminal addendum to the unique authoritative section above. It records the repair implementation at `HEAD=08615061618cdbbef68c8811fa8b9aa2f8ec3355`, the fresh pair produced from that clean commit, and the one permitted analyzer invocation. Historical sections were not rewritten and P1-3 was not run.
+
+#### Starting state, red loop, and implementation result
+
+- Fixed point: `ee8ce05202d9fba34b2ea8d7af94400720a6555c`; implementation commits: `edb3479` and `0861506`.
+- Diagnostic directory: `results/planner_validation/debug/p1_2_20260716T155043Z/`. It contains the initial `HEAD`, status, diff, `diff --check`, red assertions, green commands, launch logs, artifact checks, and the raw one-shot analyzer log.
+- Red tests proved the missing shared accepted-context classification, refresh deadline/latency evidence, fixed-lambda gradient effectiveness/trace, and generation admission behavior before production edits.
+- Green tests after implementation and review fixes: analyzer suites P1-1/P1-2/P5-1/P0-6 = `15/39/111/2`; focused GTests `test_p1_integrity_cost=20`, `test_planning_risk_context=7`, `test_p0_risk_grid_runtime=31`, and `test_p1_replan_admission=4`, all with zero failures.
+- Independent Standards review found no repository-standard violation. Independent Spec review found acquisition-before-admission and incomplete cloud/health binding plus test/plot gaps; those concrete findings were fixed before the formal preflight. The analyzer remains a large divergent module, which was recorded as a design judgment rather than split during this safety repair.
+
+| Hypothesis | Fresh conclusion | Governing evidence |
+|---|---|---|
+| H1 refresh compute/scheduling causes stale | **CONFIRMED** | P1-2 raw health: 275 rows, refresh duration mean/max `904.255/968.558 ms`, queue delay mean/max `666.890/941.971 ms`, generation interval mean/max `939.759/969.617 ms`, age mean/max `0.965/2.009 s`; stale `162/275`. |
+| H2 snapshot binding/bounds are conflated | **CONFIRMED for temporal horizon; spatial result unavailable** | Each run rejected 26 final candidates as `temporal_out_of_horizon`; no accepted profile/context sidecar was produced. The implementation now separates spatial, temporal, frame, generation, query-time, freshness, and reason coverage, but no candidate reached accepted publication in this pair. |
+| H3 gradient sign/frame/time/termination | **UNIT-LEVEL CONFIRMED; RUNTIME INCONCLUSIVE** | Affine FD, normalized negative-gradient descent, and bounded actual L-BFGS tests pass at fixed lambda. P1-2 debug has 26,006 finite objective-applied rows and weighted max `7.873423278315697e-06`; no accepted trajectory exists for runtime `grad·Δp` or `Δc_pi`. |
+| H4 stale retry feedback storm | **PARTIALLY CONFIRMED** | P1-2: 28 acquisitions across 25 generations, max 2 per generation; P1-1: generation `0` was acquired 311 times. Deferred rows were `87,232` and `86,702`; expensive optimizer starts were bounded to 50 and 405, but the formal single-acquisition invariant was not met at startup/unavailable and some healthy generations. |
+| H5 coverage selection bias | **INCONCLUSIVE** | Both accepted profiles are absent, giving `0/200` coverage. No complete final profiles exist to compare. |
+
+#### Final preflight
+
+All ROS commands used `set +u`, sourced ROS Jazzy and `/home/dev/ws_iap/install/setup.bash`, then enabled `set -e`.
+
+| Check | Result |
+|---|---|
+| `python3 -m py_compile scripts/dev_planner/analyze_safety_planner_run.py` | PASS |
+| P1-1/P1-2/P5-1/P0-6 analyzer suites | PASS: `15/39/111/2` |
+| `colcon build --packages-select iap --event-handlers console_direct+` | PASS |
+| nested planner `colcon build --packages-up-to ego_planner --event-handlers console_direct+` | PASS: 5 packages |
+| Four focused CTests after build | PASS: `20/7/31/4` constituent GTests |
+| Workspace `colcon test-result --all` | Historical non-focused debt: 968 tests, 1 error, 541 failures, 33 skipped; focused GTests above all pass. Failures are existing lint/format/XML and `poscmd_2_odom` records and do not replace focused results. |
+| `nvidia-smi` | PASS; RTX 4070 Ti SUPER visible |
+| `git diff --check`, clean status, debug-prefix scan | PASS; no source residue |
+
+#### Fresh pair and exact commands
+
+- P1-1 export: `/home/dev/ws_iap/src/iap/results/planner_validation/exports/test_planner_p1_degraded_lidar_good_gnss_degraded_lidar_good_1784221534659`
+- P1-1 bag: `/home/dev/ws_iap/src/iap/results/planner_validation/bags/test_planner_p1_degraded_lidar_good_gnss_degraded_lidar_good_20260716T170534Z`
+- P1-2 export: `/home/dev/ws_iap/src/iap/results/planner_validation/exports/test_planner_p1_degraded_lidar_good_gnss_degraded_lidar_good_1784221650125`
+- P1-2 bag: `/home/dev/ws_iap/src/iap/results/planner_validation/bags/test_planner_p1_degraded_lidar_good_gnss_degraded_lidar_good_20260716T170730Z`
+
+P1-1 launch used `ros2 launch iap test_planner.launch.py experiment:=p1_degraded_lidar_good planner_safety_profile:=p1 p1.metrics_only:=true p1.lambda_integrity:=0.00001 run_duration_s:=90 validation_duration_s:=90 start_rviz:=false run_validator:=true record_bag:=true`. P1-2 used the identical command with only `p1.metrics_only:=false`. Both launch commands returned 0 after the recorder stopped. Both validators passed and both manifests preserve exact lambda and phase isolation. P1-2 debug rows have `applied_to_objective=1`; P1-1 is metrics-only. Both runs failed to publish a bspline and omitted the accepted profile/context files because all 26 context-bound final candidates were rejected for exceeding the 2-second temporal horizon.
+
+The analyzer was invoked exactly once:
+
+```text
+python3 scripts/dev_planner/analyze_safety_planner_run.py --experiment-id P1-2 --export-dir /home/dev/ws_iap/src/iap/results/planner_validation/exports/test_planner_p1_degraded_lidar_good_gnss_degraded_lidar_good_1784221650125 --bag-dir /home/dev/ws_iap/src/iap/results/planner_validation/bags/test_planner_p1_degraded_lidar_good_gnss_degraded_lidar_good_20260716T170730Z --baseline-export-dir /home/dev/ws_iap/src/iap/results/planner_validation/exports/test_planner_p1_degraded_lidar_good_gnss_degraded_lidar_good_1784221534659 --baseline-bag-dir /home/dev/ws_iap/src/iap/results/planner_validation/bags/test_planner_p1_degraded_lidar_good_gnss_degraded_lidar_good_20260716T170534Z --fail-on-threshold
+```
+
+Raw analyzer exit was **137**. No terminal `safety_planner_analysis_summary.json`, hard-gate CSV/JSON, dashboard, artifact-completeness PNG, or replan-load PNG was written. The cgroup recorded `oom_kill=1`. The direct trigger is an unnormalized timebase join: health stamps span `1784221650.904..1784221739.904`, while planning-timeline stamps span `1657065600.140..1657065690.373`; the replan plot attempted one-second bins across that approximately 127 million-second separation. Per the one-shot contract, the analyzer was not rerun and its artifacts were not replaced.
+
+#### Hard-gate audit
+
+Because exit 137 occurred before structured hard-gate serialization, the official analyzer hard-gate record is **UNAVAILABLE**. The complete 23-row audit below is the fail-closed reading of files the one invocation wrote before termination; it is not represented as an analyzer-returned summary.
+
+| ID | Verdict | Governing evidence / failure reason |
+|---|---|---|
+| manifest_contract | PASS | Current manifest has P0/P1 enabled, metrics-only false, exact lambda `1e-05`, stale timeout unchanged, P2-P5 disabled. |
+| validator | PASS | `passed=true`, 762 messages, GNSS/LiDAR/fallback seen. |
+| p1_2_raw_p0_startup_health | FAIL | Non-stale gate false; 162/275 health rows stale, age max `2.009 s`. |
+| p1_1_raw_p0_startup_health | FAIL | Launch/timeline records recurrent stale/unavailable acquisition; no accepted publish. |
+| p1_debug_csv | PASS | 26,006 rows, finite cost/gradient, positive hits, objective applied on all rows. |
+| snapshot_candidate_binding | FAIL | No final accepted profile/context tuple exists. |
+| p1_rviz_and_required_topics | FAIL | P1 RViz topics present, but `/drone_0_planning/bspline` count is zero. |
+| p1_2_bspline_publish | FAIL | No P1-2 bspline publication or nonempty path. |
+| p1_1_reference_paths | PASS | Both fresh absolute reference paths are present. |
+| p1_1_reference_manifest | PASS | Metrics-only identity, scenario, lambda, P0/P1 and P2-P5 isolation match. |
+| p1_1_bspline_publish | FAIL | No P1-1 bspline publication or nonempty path. |
+| accepted_profiles_present_parse | FAIL | Both accepted profile CSVs and sidecars are absent. |
+| accepted_profile_format | FAIL | No 200-sample accepted profile is available to validate. |
+| gradient_direction_trace | FAIL | Debug gradient is finite, but accepted-profile displacement/descent trace is absent. |
+| accepted_profile_context | FAIL | Timelines exist; accepted context sidecars do not. |
+| accepted_profile_objective_metadata | FAIL | No accepted profile metadata exists for either run. |
+| strict_accepted_profile_coverage | FAIL | P1-2 and P1-1 are both `0/200`, ratio `0.0`. |
+| strict_c_pi_mean_max_reduction | FAIL | No accepted-profile mean/max values exist. |
+| trajectory_stability | FAIL | Current/reference point counts are both zero. |
+| recorded_risk_scene_alignment | FAIL | Exact accepted trajectory/snapshot tuple is unavailable. |
+| p5_isolation | PASS | P5 status/RViz leakage counts are zero. |
+| cause_exclusion | FAIL | Stale health, publish failure, missing profiles, coverage miss, no reduction, stability failure, and scene unavailability remain active. |
+| required_png_completeness | FAIL | 13/16 required PNGs nonempty; dashboard, artifact completeness, and replan-load correlation are missing. |
+
+Official `passed`, `failures`, `warnings`, and `inconclusive` arrays are **UNAVAILABLE** because the analyzer was killed before summary serialization. This necessarily fails the requirement for `exit=0`, `passed=true`, empty failures/inconclusive, and all hard gates passing.
+
+#### Fresh figures written before the OOM kill
+
+![P1-2 scenario topdown](../../results/planner_validation/exports/test_planner_p1_degraded_lidar_good_gnss_degraded_lidar_good_1784221650125/figures/p1_2_scenario_topdown.png)
+
+Observation: The recorded scene and odometry samples are present.
+Verdict: PASS.
+Conclusion: Scenario input availability is not the terminal failure.
+
+![P1-2 risk trajectory scene overlay](../../results/planner_validation/exports/test_planner_p1_degraded_lidar_good_gnss_degraded_lidar_good_1784221650125/figures/p1_2_risk_trajectory_scene_overlay.png)
+
+Observation: No accepted trajectory/snapshot tuple can be aligned.
+Verdict: FAIL.
+Conclusion: The scene gate fails closed instead of drawing an inferred heatmap.
+
+![P1-2 topic activity timeline](../../results/planner_validation/exports/test_planner_p1_degraded_lidar_good_gnss_degraded_lidar_good_1784221650125/figures/p1_2_topic_activity_timeline.png)
+
+Observation: Health and P1 evidence topics are active, while bspline count is zero.
+Verdict: FAIL.
+Conclusion: Topic transport works, but no final trajectory was published.
+
+![P1-2 P0 health and context freshness](../../results/planner_validation/exports/test_planner_p1_degraded_lidar_good_gnss_degraded_lidar_good_1784221650125/figures/p1_2_p0_health_and_context_freshness.png)
+
+Observation: 162 of 275 health rows are stale and context attempts are repeatedly deferred/rejected.
+Verdict: FAIL.
+Conclusion: The one-second freshness contract is not sustained.
+
+![P1-2 snapshot candidate binding](../../results/planner_validation/exports/test_planner_p1_degraded_lidar_good_gnss_degraded_lidar_good_1784221650125/figures/p1_2_snapshot_candidate_binding.png)
+
+Observation: Attempts bind during optimization, but no accepted profile tuple exists.
+Verdict: FAIL.
+Conclusion: Final accepted binding cannot be proven.
+
+![P1-2 objective gradient timeline](../../results/planner_validation/exports/test_planner_p1_degraded_lidar_good_gnss_degraded_lidar_good_1784221650125/figures/p1_2_objective_gradient_timeline.png)
+
+Observation: Objective-applied debug gradients are finite and nonzero.
+Verdict: PASS for objective application; FAIL for accepted effectiveness.
+Conclusion: The optimizer receives P1, but no accepted displacement trace reaches publication.
+
+![P1-2 risk profile versus P1-1](../../results/planner_validation/exports/test_planner_p1_degraded_lidar_good_gnss_degraded_lidar_good_1784221650125/figures/p1_2_risk_profile_vs_p1_1.png)
+
+Observation: Both accepted profiles are missing.
+Verdict: FAIL.
+Conclusion: Strict mean/max reduction is unavailable.
+
+![P1-2 accepted profile coverage](../../results/planner_validation/exports/test_planner_p1_degraded_lidar_good_gnss_degraded_lidar_good_1784221650125/figures/p1_2_accepted_profile_coverage_overlay.png)
+
+Observation: Coverage is `0/200` for both runs.
+Verdict: FAIL.
+Conclusion: Coverage cannot be recovered by selecting only valid samples.
+
+![P1-2 trajectory overlay versus P1-1](../../results/planner_validation/exports/test_planner_p1_degraded_lidar_good_gnss_degraded_lidar_good_1784221650125/figures/p1_2_trajectory_overlay_vs_p1_1.png)
+
+Observation: Neither bag contains a published bspline.
+Verdict: FAIL.
+Conclusion: Trajectory stability and comparison are unavailable.
+
+![P1-2 cause exclusion summary](../../results/planner_validation/exports/test_planner_p1_degraded_lidar_good_gnss_degraded_lidar_good_1784221650125/figures/p1_2_cause_exclusion_summary.png)
+
+Observation: Stale health, publish failure, missing coverage, missing reduction, stability, and alignment remain active.
+Verdict: FAIL.
+Conclusion: The fresh failure is not explained by P5 leakage or a disabled objective.
+
+![P1-2 snapshot spatial bounds overlay](../../results/planner_validation/exports/test_planner_p1_degraded_lidar_good_gnss_degraded_lidar_good_1784221650125/figures/p1_2_snapshot_spatial_bounds_overlay.png)
+
+Observation: No accepted 200-sample trajectory exists to classify against strict interpolation interior bounds.
+Verdict: FAIL/UNAVAILABLE.
+Conclusion: Temporal rejection is proven independently; spatial acceptance is not inferred.
+
+![P1-2 gradient direction field overlay](../../results/planner_validation/exports/test_planner_p1_degraded_lidar_good_gnss_degraded_lidar_good_1784221650125/figures/p1_2_gradient_direction_field_overlay.png)
+
+Observation: Accepted-profile gradient, negative-gradient, displacement, and delta-cost rows are absent.
+Verdict: FAIL/UNAVAILABLE.
+Conclusion: Synthetic descent passes, but the formal direction-field evidence does not exist.
+
+![P1-2 refresh latency versus stale threshold](../../results/planner_validation/exports/test_planner_p1_degraded_lidar_good_gnss_degraded_lidar_good_1784221650125/figures/p1_2_refresh_latency_vs_stale_threshold.png)
+
+Observation: Refresh duration approaches one second and queue delay is also large relative to the same budget.
+Verdict: FAIL.
+Conclusion: Compute plus scheduling contention crosses the freshness margin without falsifying timestamps.
+
+![P1-2 integrity source timeline](../../results/planner_validation/exports/test_planner_p1_degraded_lidar_good_gnss_degraded_lidar_good_1784221650125/figures/p1_2_integrity_source_timeline.png)
+
+Observation: GNSS, LiDAR, and fallback integrity evidence remains available.
+Verdict: PASS.
+Conclusion: Source availability is not the planning failure.
+
+![P1-2 HPL/VPL timeline](../../results/planner_validation/exports/test_planner_p1_degraded_lidar_good_gnss_degraded_lidar_good_1784221650125/figures/p1_2_integrity_hpl_vpl_timeline.png)
+
+Observation: Validator-backed HPL/VPL samples are continuous and finite.
+Verdict: PASS.
+Conclusion: Integrity validation data is present.
+
+![P1-2 P0 health diagnostic](../../results/planner_validation/exports/test_planner_p1_degraded_lidar_good_gnss_degraded_lidar_good_1784221650125/figures/p1_2_p0_health_diagnostic.png)
+
+Observation: Stale and snapshot-unavailable states recur after startup.
+Verdict: FAIL.
+Conclusion: Raw health independently rejects steady freshness.
+
+![P1-2 P0 reason histogram](../../results/planner_validation/exports/test_planner_p1_degraded_lidar_good_gnss_degraded_lidar_good_1784221650125/figures/p1_2_p0_reason_histogram.png)
+
+Observation: Reasons are 152 stale, 113 ok, and 10 snapshot unavailable.
+Verdict: FAIL.
+Conclusion: Staleness dominates rather than appearing as a single startup sample.
+
+![P1-2 PL cost distribution](../../results/planner_validation/exports/test_planner_p1_degraded_lidar_good_gnss_degraded_lidar_good_1784221650125/figures/p1_2_pl_cost_distribution.png)
+
+Observation: Recorded PL cost samples are finite.
+Verdict: PASS.
+Conclusion: Cost input exists even though no final profile is accepted.
+
+![P1-2 risk grid snapshot overview](../../results/planner_validation/exports/test_planner_p1_degraded_lidar_good_gnss_degraded_lidar_good_1784221650125/figures/p1_2_risk_grid_snapshot_overview.png)
+
+Observation: Risk-grid evidence is present with generation metadata.
+Verdict: PASS for availability.
+Conclusion: Availability does not satisfy freshness or final binding.
+
+![P1-2 odom truth topdown](../../results/planner_validation/exports/test_planner_p1_degraded_lidar_good_gnss_degraded_lidar_good_1784221650125/figures/p1_2_odom_truth_topdown.png)
+
+Observation: Odom and truth tracks are recorded.
+Verdict: PASS.
+Conclusion: Motion evidence exists independently of planner publication.
+
+![P1-2 odom error timeline](../../results/planner_validation/exports/test_planner_p1_degraded_lidar_good_gnss_degraded_lidar_good_1784221650125/figures/p1_2_odom_error_timeline.png)
+
+Observation: Odom error can be evaluated over the active interval.
+Verdict: PASS.
+Conclusion: Odom observability is not the missing artifact.
+
+![P1-2 P0 health versus odom error](../../results/planner_validation/exports/test_planner_p1_degraded_lidar_good_gnss_degraded_lidar_good_1784221650125/figures/p1_2_p0_health_vs_odom_error.png)
+
+Observation: Health and odom error share recorded bag time for this diagnostic.
+Verdict: PASS as a diagnostic.
+Conclusion: It does not override the stale health gate.
+
+![P1-2 integrity cost debug summary](../../results/planner_validation/exports/test_planner_p1_degraded_lidar_good_gnss_degraded_lidar_good_1784221650125/figures/p1_2_integrity_cost_debug_summary.png)
+
+Observation: 26,006 rows are finite, hit-bearing, and objective-applied.
+Verdict: PASS.
+Conclusion: Objective application is proven before final admission.
+
+![P1-2 bspline publish timeline](../../results/planner_validation/exports/test_planner_p1_degraded_lidar_good_gnss_degraded_lidar_good_1784221650125/figures/p1_2_bspline_publish_timeline.png)
+
+Observation: The publication timeline is empty for both runs.
+Verdict: FAIL.
+Conclusion: No current or reference trajectory reached publication.
+
+![P1-2 manifest switch summary](../../results/planner_validation/exports/test_planner_p1_degraded_lidar_good_gnss_degraded_lidar_good_1784221650125/figures/p1_2_manifest_switch_summary.png)
+
+Observation: The objective switch, exact lambda, P0/P1 enablement, and P2-P5 isolation are correct.
+Verdict: PASS.
+Conclusion: The formal configuration contract is satisfied.
+
+![P1-2 validation summary](../../results/planner_validation/exports/test_planner_p1_degraded_lidar_good_gnss_degraded_lidar_good_1784221650125/figures/p1_2_validation_summary.png)
+
+Observation: Validator/objective/RViz checks pass; freshness, bspline, coverage, reduction, and stability fail.
+Verdict: FAIL.
+Conclusion: Partial analyzer evidence already prevents acceptance.
+
+The three required figures not produced are `p1_2_result_dashboard.png`, `p1_2_artifact_completeness.png`, and `p1_2_replan_load_correlation.png`; all are explicitly **UNAVAILABLE**, and required-PNG completeness is FAIL.
+
+Final terminal result: **FAIL -> analyzer timebase normalization/OOM debug.** The runtime branch beneath that failure is temporal-horizon/initial-trajectory admission; no spatial-map expansion, lambda sweep, stale-timeout change, hard-gate relaxation, P5 semantic change, analyzer rerun, or P1-3 execution was performed.
