@@ -4927,3 +4927,225 @@ Verification notes:
 Final conclusion:
 
 FAIL -> lambda/gradient debug
+
+## P1-2 Health/Freshness Repair — Runtime Authoritative Result
+
+Terminal preflight result for the required clean commit `e1e185d94aa98b78f2541f3d261cdc2386559aa8` on 2026-07-16. `git status --short` was empty and `git rev-parse HEAD` exactly matched the required commit.
+
+| Preflight command | Outcome |
+|---|---|
+| `python3 -m py_compile launch/test_planner.launch.py scripts/dev_planner/analyze_safety_planner_run.py` | PASS |
+| `python3 test/test_analyze_safety_planner_run_p1_1.py` | PASS — 15 tests |
+| `python3 test/test_analyze_safety_planner_run_p1_2.py` | PASS — 30 tests |
+| `python3 test/test_analyze_safety_planner_run_p5_1.py` | PASS — 111 tests |
+| `python3 test/test_analyze_safety_planner_run_p0_6.py` | PASS — 2 tests |
+| `source /opt/ros/jazzy/setup.bash; colcon build --packages-select iap --event-handlers console_direct+` | FAIL before build: with the validation shell's `set -u`, `/opt/ros/jazzy/setup.bash: line 8` aborted on unset `AMENT_TRACE_SETUP_FILES`. |
+
+The terminal preflight rule was applied. Planner build, focused CTests, `colcon test-result --all`, both P1 launches, artifact creation, and the analyzer were **not run**. Therefore there are no fresh export/bag absolute paths, no analyzer exit/status/failures/warnings/inconclusive items or `next_debug_branch`, no final accepted profiles, and no generated figures to assess. No previous export, bag, profile, RViz data, or figure was reused; P0/P5 settings and source code were unchanged.
+
+Final terminal result: **FAIL -> preflight environment setup. P1-3 was not run.**
+
+## 2026-07-16 P1-2 Health/Freshness Repair — Fresh Authoritative Validation
+
+This section supersedes the immediately preceding nounset-preflight result only by adding a new, complete run. The earlier entry remains the historical record of that environment-loading failure. Requirements: IAP-RQ-320, IAP-RQ-400, and IAP-RQ-410.
+
+### Clean-state and preflight record
+
+The starting revision was `e1e185d94aa98b78f2541f3d261cdc2386559aa8`. The initial `git status --short` contained only the three user-owned documentation changes in `docs/CHANGES.md`, `docs/TRACEABILITY.md`, and this report; they were preserved. `git diff --check` passed before implementation. The analyzer and focused tests were then extended before the runtime preflight.
+
+Every ROS/colcon command used the following environment shape so ROS setup was sourced with nounset disabled:
+
+```bash
+bash -lc '
+  set +u
+  source /opt/ros/jazzy/setup.bash
+  source /home/dev/ws_iap/install/setup.bash
+  set -e
+  # command
+'
+```
+
+| Preflight target | Result |
+|---|---|
+| Python compile | PASS |
+| P1-1 analyzer suite | PASS — 15 tests |
+| P1-2 analyzer suite | PASS — 33 tests |
+| P5-1 analyzer suite | PASS — 111 tests |
+| P0-6 analyzer suite | PASS — 2 tests |
+| `colcon build --packages-select iap --event-handlers console_direct+` | PASS |
+| Planner build through `ego_planner` | PASS |
+| `test_p1_integrity_cost` | PASS — 15 tests |
+| `test_planning_risk_context` | PASS — 4 tests |
+| `test_p0_risk_grid_runtime` | PASS — 29 tests |
+| `nvidia-smi` | PASS — NVIDIA GPU available; driver 580.126.09, CUDA 13.0 |
+| `colcon test-result --all` | Historical aggregate remains non-clean: 954 tests, 1 error, 541 failures, 33 skipped, dominated by stored lint results. All three focused P1-2 CTest targets above passed. |
+
+### Formal serial pair and analyzer command
+
+P1-1 was launched first and allowed to finish before P1-2:
+
+```bash
+ros2 launch iap test_planner.launch.py \
+  experiment:=p1_degraded_lidar_good \
+  planner_safety_profile:=p1 \
+  p1.metrics_only:=true \
+  p1.lambda_integrity:=0.00001 \
+  run_duration_s:=90 validation_duration_s:=90 \
+  start_rviz:=false run_validator:=true record_bag:=true
+
+ros2 launch iap test_planner.launch.py \
+  experiment:=p1_degraded_lidar_good \
+  planner_safety_profile:=p1 \
+  p1.metrics_only:=false \
+  p1.lambda_integrity:=0.00001 \
+  run_duration_s:=90 validation_duration_s:=90 \
+  start_rviz:=false run_validator:=true record_bag:=true
+```
+
+Both launch commands returned zero. Both validators passed and saw GNSS, LiDAR, and fallback-valid integrity. Shutdown emitted process-termination noise after recording, but the required artifacts and bag metadata were complete and nonempty.
+
+The analyzer was invoked exactly once, with only this fresh pair, and its raw exit code was preserved:
+
+```bash
+python3 scripts/dev_planner/analyze_safety_planner_run.py \
+  --experiment-id P1-2 \
+  --export-dir /home/dev/ws_iap/src/iap/results/planner_validation/exports/test_planner_p1_degraded_lidar_good_gnss_degraded_lidar_good_1784193251717 \
+  --bag-dir /home/dev/ws_iap/src/iap/results/planner_validation/bags/test_planner_p1_degraded_lidar_good_gnss_degraded_lidar_good_20260716T091411Z \
+  --baseline-export-dir /home/dev/ws_iap/src/iap/results/planner_validation/exports/test_planner_p1_degraded_lidar_good_gnss_degraded_lidar_good_1784193115093 \
+  --baseline-bag-dir /home/dev/ws_iap/src/iap/results/planner_validation/bags/test_planner_p1_degraded_lidar_good_gnss_degraded_lidar_good_20260716T091155Z \
+  --fail-on-threshold
+```
+
+Fresh absolute paths:
+
+| Artifact | Absolute path |
+|---|---|
+| P1-1 export | `/home/dev/ws_iap/src/iap/results/planner_validation/exports/test_planner_p1_degraded_lidar_good_gnss_degraded_lidar_good_1784193115093` |
+| P1-1 bag | `/home/dev/ws_iap/src/iap/results/planner_validation/bags/test_planner_p1_degraded_lidar_good_gnss_degraded_lidar_good_20260716T091155Z` |
+| P1-2 export | `/home/dev/ws_iap/src/iap/results/planner_validation/exports/test_planner_p1_degraded_lidar_good_gnss_degraded_lidar_good_1784193251717` |
+| P1-2 bag | `/home/dev/ws_iap/src/iap/results/planner_validation/bags/test_planner_p1_degraded_lidar_good_gnss_degraded_lidar_good_20260716T091411Z` |
+
+The P1-1 final accepted metadata is `applied_to_objective=0`, `metrics_only=1`, and `lambda_integrity=0.00001`. The P1-2 final accepted metadata is `applied_to_objective=1`, `metrics_only=0`, and the same exact lambda. Both manifests preserve the P0 geometry and `p0.stale_timeout_s=1.0`; P2 through P5 are disabled.
+
+### Terminal analyzer result
+
+| Field | Value |
+|---|---|
+| Raw exit code | `2` |
+| Status | `FAIL`, `passed=false` |
+| Failures | 13 |
+| Warnings | `[]` |
+| Inconclusive | `[]` |
+| Next debug branch | `FAIL -> lambda/gradient debug` |
+
+The failures report repeated raw-health not-ready/stale/full-unknown states, invalid accepted-profile contexts, insufficient reference coverage, no strict c_pi reduction, and the resulting cause-exclusion failure. The validator itself passed.
+
+### Complete hard-gate table
+
+| # | Hard gate | Verdict | Governing values |
+|---:|---|---|---|
+| 1 | Manifest contract | PASS | P1 profile; P0/P1 enabled; P1-2 metrics-only false; objective enabled; lambda `1e-5`; stale timeout `1.0 s`; P2-P5 disabled. |
+| 2 | Validator | PASS | Summary present; `passed=true`; 856 messages; GNSS/LiDAR/fallback validity seen. |
+| 3 | P1-2 raw P0 startup/health | FAIL | 251 post-startup rows; max health gap `0.500282 s` passes, but ready/non-stale/not-full-unknown are all false. |
+| 4 | P1-1 raw P0 startup/health | FAIL | 259 post-startup rows; max health gap `0.502757 s` passes; ready and not-full-unknown pass, but non-stale and bounded startup prefix fail. |
+| 5 | P1 debug CSV | PASS | 323,395 objective-applied rows; 0 invalid application flags; finite cost/gradient; positive hits; max weighted integrity cost `8.6783394e-06`. |
+| 6 | Snapshot/candidate binding | PASS | Final tuple `(planning_attempt=1279, candidate=1, snapshot_generation=18, query_base=1657065621.5122585)` is present among 1,429 applied debug tuples. |
+| 7 | P1 RViz and required topics | PASS | Each P1 RViz topic count is 31; required topics pass. |
+| 8 | P1-2 bspline publish | PASS | Inspection valid; publish and nonempty final path present. |
+| 9 | P1-1 reference paths | PASS | Fresh reference export and bag present. |
+| 10 | P1-1 reference manifest | PASS | Scenario/profile/P0/P1/lambda/metrics-only identity/stale timeout match; P2-P5 disabled. |
+| 11 | P1-1 bspline publish | PASS | Inspection valid; publish and nonempty path present. |
+| 12 | Accepted profiles present/parse | PASS | Both fresh final accepted-profile CSVs are present and parseable. |
+| 13 | Accepted profile format | PASS | Both final profiles have the required unique sample/metadata form. |
+| 14 | Accepted profile context | FAIL | Both ages are fresh (`0.897992 s` and `0.870034 s` <= `1.0 s`) and both binding/timeline checks pass, but both profiles are outside their recorded snapshot bounds, so both contexts are invalid. |
+| 15 | Accepted profile objective metadata | PASS | P1-2 applied/not metrics-only; P1-1 not applied/metrics-only; lambda exact. |
+| 16 | Strict accepted-profile coverage | FAIL | P1-2 `109/200=0.545` passes the `>=20` and `>=0.5` threshold; P1-1 `25/200=0.125` fails. |
+| 17 | Strict c_pi mean/max reduction | FAIL | P1-2 mean/max `0.3833449572/0.4069297301`; P1-1 `0.3352760785/0.3386945454`; both increased. |
+| 18 | Trajectory stability | PASS | 12 points; path `3.968089 m <= 23.619246 m`; max segment `0.441916 m <= 2.0 m`; tortuosity `1.018183 <= 3.0`. |
+| 19 | Recorded risk-scene alignment | PASS | All final profiles, trajectories, raw P0 risk points, and both bags' map/odom/truth data were present with overlapping recorded XY bounds; no inferred heatmap. |
+| 20 | P5 isolation | PASS | All five disabled P5/status topics have count zero. |
+| 21 | Cause exclusion | FAIL | Active causes: P0 stale after startup, reference coverage miss, and risk profile not reduced. Missing CSV/profile, publish failure, current coverage miss, P5 leakage, instability, and unavailable scene alignment are excluded. |
+
+### Raw health, freshness, binding, reduction, and replan evidence
+
+The authoritative `/planning/risk_grid_health` stream was periodic in both bags. P1-2 had 251 rows, maximum gap `0.500282 s`, 163 stale rows (`64.94%`), eight not-ready rows, eight full-unknown rows, mean unknown ratio `0.06681`, and mean refresh time `776.10 ms`. P1-1 had 267 raw rows, maximum gate gap `0.502757 s`, 125 stale rows (`46.82%`), eight not-ready rows, eight full-unknown rows, mean unknown ratio `0.05121`, and mean refresh time `534.84 ms`. These raw values explain why periodicity passes while authoritative readiness/freshness gates fail.
+
+The accepted sidecars each contain one matching row. Accepted stamps, binding tuples, trajectory bounds, and planning timelines match, and both context ages are below the `1.0 s` threshold. Both sidecars still fail closed because their final accepted trajectories are outside the recorded snapshot spatial bounds.
+
+The P1-2 timeline contains 1,655 acquisitions over `24.514 s` (`67.51/s`), 1,369 rejected accepts, 749 stale-context rejections immediately followed by reacquisition, and 1,369 existing-polynomial fallback branches; 17 fresh pre-publish checks led to 17 publishes. P1-1 contains 3,981 acquisitions over `89.606 s` (`44.43/s`), 3,419 rejected accepts, 2,539 stale rejections immediately followed by reacquisition, and 3,419 fallbacks; 11 fresh pre-publish checks led to 11 publishes. This is direct stale rejection/reacquisition/fallback and replan-storm evidence. P5 status rows remain absent because P5 is intentionally disabled, so P5's own storm counter is not the source of this conclusion.
+
+### Required figures
+
+![P1-2 scenario topdown](../../results/planner_validation/exports/test_planner_p1_degraded_lidar_good_gnss_degraded_lidar_good_1784193251717/figures/p1_2_scenario_topdown.png)
+
+Observation: The fresh P1-1 and P1-2 runs share the degraded-GNSS/LiDAR-good scenario and recorded spatial context.
+Verdict: PASS.
+Conclusion: The comparison is scenario-compatible.
+
+![P1-2 recorded risk and trajectory scene](../../results/planner_validation/exports/test_planner_p1_degraded_lidar_good_gnss_degraded_lidar_good_1784193251717/figures/p1_2_risk_trajectory_scene_overlay.png)
+
+Observation: The overlay uses only final profiles, accepted trajectories, raw P0 risk, and bag-derived map/odom/truth; all required sources align.
+Verdict: PASS.
+Conclusion: Scene evidence is available without an inferred heatmap, but it does not prove risk reduction.
+
+![P1-2 topic activity timeline](../../results/planner_validation/exports/test_planner_p1_degraded_lidar_good_gnss_degraded_lidar_good_1784193251717/figures/p1_2_topic_activity_timeline.png)
+
+Observation: Required P0/P1 topics are present and the raw health stream is periodic; disabled gate topics remain absent.
+Verdict: PASS.
+Conclusion: Topic availability is not the terminal failure.
+
+![P1-2 P0 health and context freshness](../../results/planner_validation/exports/test_planner_p1_degraded_lidar_good_gnss_degraded_lidar_good_1784193251717/figures/p1_2_p0_health_and_context_freshness.png)
+
+Observation: Both health streams have sub-second gaps, but stale/not-ready/full-unknown states recur; both accepted ages are below `1.0 s`.
+Verdict: FAIL.
+Conclusion: Timely publication and fresh accepted timestamps do not overcome authoritative raw-health and spatial-context invalidity.
+
+![P1-2 snapshot candidate binding](../../results/planner_validation/exports/test_planner_p1_degraded_lidar_good_gnss_degraded_lidar_good_1784193251717/figures/p1_2_snapshot_candidate_binding.png)
+
+Observation: Final attempt/candidate/snapshot/query-base metadata matches an applied optimizer context tuple.
+Verdict: PASS.
+Conclusion: The final objective evidence is bound to the recorded planning context.
+
+![P1-2 objective gradient timeline](../../results/planner_validation/exports/test_planner_p1_degraded_lidar_good_gnss_degraded_lidar_good_1784193251717/figures/p1_2_objective_gradient_timeline.png)
+
+Observation: P1-2 contains 323,395 finite objective-applied debug rows and positive weighted integrity cost.
+Verdict: PASS.
+Conclusion: The cost is active and finite; effectiveness, not application, fails.
+
+![P1-2 risk profile versus P1-1](../../results/planner_validation/exports/test_planner_p1_degraded_lidar_good_gnss_degraded_lidar_good_1784193251717/figures/p1_2_risk_profile_vs_p1_1.png)
+
+Observation: P1-2 c_pi mean and maximum exceed the P1-1 reference values.
+Verdict: FAIL.
+Conclusion: Strict mean/max accepted-profile risk reduction is not demonstrated.
+
+![P1-2 accepted profile coverage](../../results/planner_validation/exports/test_planner_p1_degraded_lidar_good_gnss_degraded_lidar_good_1784193251717/figures/p1_2_accepted_profile_coverage_overlay.png)
+
+Observation: P1-2 coverage is `109/200=0.545`, while P1-1 coverage is `25/200=0.125`.
+Verdict: FAIL.
+Conclusion: The reference final profile fails the strict coverage prerequisite.
+
+![P1-2 trajectory overlay versus P1-1](../../results/planner_validation/exports/test_planner_p1_degraded_lidar_good_gnss_degraded_lidar_good_1784193251717/figures/p1_2_trajectory_overlay_vs_p1_1.png)
+
+Observation: The P1-2 final path is finite, nonempty, short, and within segment/tortuosity limits.
+Verdict: PASS.
+Conclusion: Trajectory instability is excluded as the cause.
+
+![P1-2 result dashboard](../../results/planner_validation/exports/test_planner_p1_degraded_lidar_good_gnss_degraded_lidar_good_1784193251717/figures/p1_2_result_dashboard.png)
+
+Observation: The dashboard enumerates all 21 hard gates with verdicts and governing values.
+Verdict: FAIL.
+Conclusion: Raw health, accepted context, strict coverage, strict reduction, and cause exclusion prevent acceptance.
+
+![P1-2 artifact completeness](../../results/planner_validation/exports/test_planner_p1_degraded_lidar_good_gnss_degraded_lidar_good_1784193251717/figures/p1_2_artifact_completeness.png)
+
+Observation: The fresh manifests, validator summaries, profiles, context sidecars, planning timelines, debug CSVs, bags, and required figures are nonempty.
+Verdict: PASS.
+Conclusion: The FAIL is evidence-driven rather than caused by missing primary artifacts.
+
+![P1-2 cause exclusion summary](../../results/planner_validation/exports/test_planner_p1_degraded_lidar_good_gnss_degraded_lidar_good_1784193251717/figures/p1_2_cause_exclusion_summary.png)
+
+Observation: P0 stale-after-startup, reference coverage loss, and unreduced risk remain active; P5 leakage and publish/parse/scene failures are excluded.
+Verdict: FAIL.
+Conclusion: Continue only on the analyzer-selected lambda/gradient branch.
+
+Final terminal result: **FAIL -> lambda/gradient debug. P1-3 was not run.**

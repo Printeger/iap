@@ -25,6 +25,7 @@ def p1_2_manifest(**overrides):
         "planner_safety_profile": "p1",
         "p0.enable_risk_grid": True,
         "p0.resolution_m": 0.75,
+        "p0.stale_timeout_s": 1.0,
         "planner_enable_p1": True,
         "p1.metrics_only": False,
         "p1.use_integrity_cost": True,
@@ -257,6 +258,7 @@ def run_gate(
     baseline_profile=None,
     p1_2_profile_missing=False,
     baseline_profile_missing=False,
+    risk_scene_alignment=None,
 ):
     manifest = p1_2_manifest() if manifest is None else manifest
     validator = {"passed": True} if validator is None else validator
@@ -296,6 +298,9 @@ def run_gate(
         p1_1_context_info={"missing": baseline_profile_missing, "path": "baseline"},
         stale_timeout_s=1.0,
     )
+    risk_comparison["risk_scene_alignment"] = risk_scene_alignment or {
+        "available": True, "reasons": [], "source_status": {},
+    }
     failures = []
     inconclusive = []
     gates = analyzer.validate_p1_2_hard_gates(
@@ -316,6 +321,8 @@ def run_gate(
         risk_comparison,
         failures,
         inconclusive,
+        reference_p0_health_summary=analyzer.summarize_p0_health(p0_rows),
+        reference_p0_health_rows=p0_rows,
     )
     return gates, failures, inconclusive, risk_comparison
 
@@ -584,18 +591,31 @@ class P1_2AnalyzerTest(unittest.TestCase):
             analyzer.P1_2_FIGURE_FILENAMES,
             [
                 "p1_2_scenario_topdown.png",
+                "p1_2_risk_trajectory_scene_overlay.png",
                 "p1_2_topic_activity_timeline.png",
-                "p1_2_p0_health.png",
+                "p1_2_p0_health_and_context_freshness.png",
                 "p1_2_snapshot_candidate_binding.png",
                 "p1_2_objective_gradient_timeline.png",
                 "p1_2_risk_profile_vs_p1_1.png",
                 "p1_2_accepted_profile_coverage_overlay.png",
                 "p1_2_trajectory_overlay_vs_p1_1.png",
+                "p1_2_result_dashboard.png",
                 "p1_2_artifact_completeness.png",
                 "p1_2_cause_exclusion_summary.png",
+            ],
+        )
+
+    def test_supplementary_figure_filenames_retain_diagnostics(self):
+        self.assertEqual(
+            analyzer.P1_2_OPTIONAL_FIGURE_FILENAMES,
+            [
                 "p1_2_p0_callback_timeline.png",
                 "p1_2_planning_context_age_timeline.png",
                 "p1_2_replan_fallback_timeline.png",
+                "p1_2_integrity_cost_debug_summary.png",
+                "p1_2_bspline_publish_timeline.png",
+                "p1_2_manifest_switch_summary.png",
+                "p1_2_validation_summary.png",
             ],
         )
 
@@ -641,6 +661,95 @@ class P1_2AnalyzerTest(unittest.TestCase):
             ))
             self.assertGreater(binding.stat().st_size, 0)
             self.assertGreater(objective.stat().st_size, 0)
+
+    def test_risk_scene_alignment_fails_closed_and_unavailable_plot_is_nonempty(self):
+        comparison = analyzer.compare_p1_2_risk_profiles(
+            bspline_rows(0.0), bspline_rows(5.0), cloud_rows(0.0), cloud_rows(5.0),
+            p0_resolution_m=0.75,
+            p1_2_accepted_profile_rows=accepted_profile_rows(0.0),
+            p1_1_accepted_profile_rows=accepted_profile_rows(
+                5.0, applied_to_objective=0, metrics_only=1
+            ),
+        )
+        current_scene = {
+            "map_points": [(0.0, 0.0, 0.0)],
+            "truth_xy": [(0.0, 0.0), (10.0, 0.0)],
+            "slam_xy": [(0.0, 0.0), (10.0, 0.0)],
+        }
+        reference_scene = {
+            "map_points": [(0.0, 5.0, 0.0)],
+            "truth_xy": [(0.0, 5.0), (10.0, 5.0)],
+            "slam_xy": [],
+        }
+
+        alignment = analyzer.p1_2_risk_scene_alignment(
+            comparison, current_scene, reference_scene
+        )
+
+        self.assertFalse(alignment["available"])
+        self.assertTrue(any("P1-1 bag odom" in item for item in alignment["reasons"]))
+        with tempfile.TemporaryDirectory() as tmp:
+            figure = Path(tmp) / "unavailable.png"
+            self.assertTrue(analyzer.plot_p1_2_risk_trajectory_scene_overlay(
+                comparison, current_scene, reference_scene, alignment, figure
+            ))
+            self.assertGreater(figure.stat().st_size, 0)
+        gates, failures, _, _ = run_gate(risk_scene_alignment=alignment)
+        self.assertFalse(gates["risk_scene_overlay_available"])
+        self.assertTrue(any("cannot be aligned" in item for item in failures), failures)
+
+    def test_new_health_freshness_scene_and_dashboard_plots_are_nonempty(self):
+        comparison = analyzer.compare_p1_2_risk_profiles(
+            bspline_rows(0.0), bspline_rows(5.0), cloud_rows(0.0), cloud_rows(5.0),
+            p0_resolution_m=0.75,
+            p1_2_accepted_profile_rows=accepted_profile_rows(0.0),
+            p1_1_accepted_profile_rows=accepted_profile_rows(
+                5.0, applied_to_objective=0, metrics_only=1
+            ),
+            p1_2_context_rows=accepted_profile_context(accepted_profile_rows(0.0)),
+            p1_1_context_rows=accepted_profile_context(accepted_profile_rows(
+                5.0, applied_to_objective=0, metrics_only=1
+            )),
+            p1_2_context_info={"path": "current"},
+            p1_1_context_info={"path": "reference"},
+            stale_timeout_s=1.0,
+        )
+        current_scene = {
+            "map_points": [(float(x), 0.0, 0.0) for x in range(11)],
+            "truth_xy": [(0.0, 0.0), (10.0, 0.0)],
+            "slam_xy": [(0.0, 0.0), (10.0, 0.0)],
+        }
+        reference_scene = {
+            "map_points": [(float(x), 5.0, 0.0) for x in range(11)],
+            "truth_xy": [(0.0, 5.0), (10.0, 5.0)],
+            "slam_xy": [(0.0, 5.0), (10.0, 5.0)],
+        }
+        alignment = analyzer.p1_2_risk_scene_alignment(
+            comparison, current_scene, reference_scene
+        )
+        self.assertTrue(alignment["available"], alignment)
+        gates, failures, inconclusive, _ = run_gate()
+        self.assertEqual(failures, [])
+        self.assertEqual(inconclusive, [])
+        gate_rows = analyzer.p1_2_hard_gate_rows(gates)
+        self.assertTrue(gate_rows)
+        self.assertTrue(all({"gate", "passed", "governing_values"} <= set(row) for row in gate_rows))
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            paths = [root / name for name in ("scene.png", "health.png", "dashboard.png")]
+            self.assertTrue(analyzer.plot_p1_2_risk_trajectory_scene_overlay(
+                comparison, current_scene, reference_scene, alignment, paths[0]
+            ))
+            self.assertTrue(analyzer.plot_p1_2_p0_health_and_context_freshness(
+                [p0_row(idx) for idx in range(5)],
+                [p0_row(idx) for idx in range(5)],
+                comparison.get("p1_2_context", {}),
+                comparison.get("p1_1_context", {}),
+                stale_timeout_s=1.0,
+                path=paths[1],
+            ))
+            self.assertTrue(analyzer.plot_p1_2_result_dashboard(gates, paths[2]))
+            self.assertTrue(all(path.stat().st_size > 0 for path in paths))
 
     def test_artifact_completeness_figure_shows_missing_inputs(self):
         with tempfile.TemporaryDirectory() as tmp:

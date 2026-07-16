@@ -176,6 +176,7 @@ P1_2_FAIL_BRANCH = "FAIL -> lambda/gradient debug"
 P1_2_PASS_BRANCH = "PASS -> P1-3"
 P1_2_LAMBDA_INTEGRITY = 0.00001
 P1_2_LAMBDA_TOLERANCE = 1.0e-12
+P1_2_STALE_TIMEOUT_S = 1.0
 P1_2_RISK_SAMPLE_COUNT = 200
 P1_2_MIN_RISK_MATCH_COUNT = 20
 P1_2_MIN_RISK_MATCH_RATIO = 0.5
@@ -200,20 +201,22 @@ P1_1_FIGURE_FILENAMES = [
 ]
 P1_2_FIGURE_FILENAMES = [
     "p1_2_scenario_topdown.png",
+    "p1_2_risk_trajectory_scene_overlay.png",
     "p1_2_topic_activity_timeline.png",
-    "p1_2_p0_health.png",
+    "p1_2_p0_health_and_context_freshness.png",
     "p1_2_snapshot_candidate_binding.png",
     "p1_2_objective_gradient_timeline.png",
     "p1_2_risk_profile_vs_p1_1.png",
     "p1_2_accepted_profile_coverage_overlay.png",
     "p1_2_trajectory_overlay_vs_p1_1.png",
+    "p1_2_result_dashboard.png",
     "p1_2_artifact_completeness.png",
     "p1_2_cause_exclusion_summary.png",
+]
+P1_2_OPTIONAL_FIGURE_FILENAMES = [
     "p1_2_p0_callback_timeline.png",
     "p1_2_planning_context_age_timeline.png",
     "p1_2_replan_fallback_timeline.png",
-]
-P1_2_OPTIONAL_FIGURE_FILENAMES = [
     "p1_2_integrity_cost_debug_summary.png",
     "p1_2_bspline_publish_timeline.png",
     "p1_2_manifest_switch_summary.png",
@@ -7288,6 +7291,7 @@ def p1_2_manifest_gate_values(manifest: dict[str, Any]) -> dict[str, bool]:
         "planner_enable_p5_final",
     )
     lambda_value = finite_float(manifest.get("p1.lambda_integrity")) if manifest else None
+    stale_timeout_s = finite_float(manifest.get("p0.stale_timeout_s")) if manifest else None
     return {
         "manifest_present": bool(manifest),
         "manifest_safety_profile_p1": str(manifest.get("planner_safety_profile", "")).lower()
@@ -7300,6 +7304,9 @@ def p1_2_manifest_gate_values(manifest: dict[str, Any]) -> dict[str, bool]:
         "manifest_p1_lambda_integrity_expected": P1_2_LAMBDA_INTEGRITY,
         "manifest_p1_lambda_integrity_ok": lambda_value is not None
         and abs(lambda_value - P1_2_LAMBDA_INTEGRITY) <= P1_2_LAMBDA_TOLERANCE,
+        "manifest_p0_stale_timeout_s": stale_timeout_s,
+        "manifest_p0_stale_timeout_ok": stale_timeout_s is not None
+        and abs(stale_timeout_s - P1_2_STALE_TIMEOUT_S) <= P1_2_LAMBDA_TOLERANCE,
         "manifest_p2_p5_disabled": all(manifest.get(key) is False for key in expected_false),
         "manifest_expected_false_ok": all(manifest.get(key) is False for key in expected_false),
     }
@@ -7318,6 +7325,7 @@ def p1_2_reference_manifest_gate_values(
         "planner_enable_p5_final",
     )
     lambda_value = finite_float(reference_manifest.get("p1.lambda_integrity"))
+    stale_timeout_s = finite_float(reference_manifest.get("p0.stale_timeout_s"))
     return {
         "reference_manifest_present": bool(reference_manifest),
         "reference_manifest_scenario_matches": bool(manifest)
@@ -7339,6 +7347,8 @@ def p1_2_reference_manifest_gate_values(
         is True,
         "reference_manifest_matched_lambda": lambda_value is not None
         and abs(lambda_value - P1_2_LAMBDA_INTEGRITY) <= P1_2_LAMBDA_TOLERANCE,
+        "reference_manifest_stale_timeout_ok": stale_timeout_s is not None
+        and abs(stale_timeout_s - P1_2_STALE_TIMEOUT_S) <= P1_2_LAMBDA_TOLERANCE,
         "reference_manifest_metrics_only_identity": str(
             reference_manifest.get("p1.reference_identity", "metrics_only_lambda_0.00001_not_applied")
         ) == "metrics_only_lambda_0.00001_not_applied",
@@ -7397,6 +7407,10 @@ def p1_2_cause_exclusion_rows(gates: dict[str, Any]) -> list[dict[str, Any]]:
             "cause": "trajectory_stability_failure",
             "count": 0 if gates.get("trajectory_stability_passed") else 1,
         },
+        {
+            "cause": "risk_scene_alignment_unavailable",
+            "count": 0 if gates.get("risk_scene_overlay_available") else 1,
+        },
     ]
 
 
@@ -7422,6 +7436,8 @@ def validate_p1_2_hard_gates(
     p1_2_timeline_info: dict[str, Any] | None = None,
     p1_1_timeline_rows: list[dict[str, Any]] | None = None,
     p1_1_timeline_info: dict[str, Any] | None = None,
+    reference_p0_health_summary: dict[str, Any] | None = None,
+    reference_p0_health_rows: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     manifest_gates = p1_2_manifest_gate_values(manifest)
     reference_manifest_gates = p1_2_reference_manifest_gate_values(
@@ -7429,6 +7445,17 @@ def validate_p1_2_hard_gates(
         reference_manifest,
     )
     p0_startup = summarize_p0_startup_snapshot_unavailable(p0_health_rows)
+    reference_p0_health_rows = list(reference_p0_health_rows or [])
+    reference_p0_health_summary = dict(reference_p0_health_summary or {})
+    reference_p0_startup = summarize_p0_startup_snapshot_unavailable(
+        reference_p0_health_rows
+    )
+    _, p0_health_gaps = _p1_2_health_gap_values(p0_health_rows)
+    _, reference_p0_health_gaps = _p1_2_health_gap_values(reference_p0_health_rows)
+    p0_health_max_gap_s = max(p0_health_gaps) if p0_health_gaps else None
+    reference_p0_health_max_gap_s = (
+        max(reference_p0_health_gaps) if reference_p0_health_gaps else None
+    )
     p1_rviz_topic_statuses = {
         topic: (topic_health.get(topic) or {}).get("status", "MISSING")
         for topic in P1_RVIZ_TOPICS
@@ -7453,6 +7480,8 @@ def validate_p1_2_hard_gates(
         value = values.get(key, []) or []
         return str(value[0]) if len(value) == 1 else ""
     expected_lambda = finite_float(manifest.get("p1.lambda_integrity"))
+    stale_timeout_s = finite_float(manifest.get("p0.stale_timeout_s"))
+    risk_scene_alignment = risk_comparison.get("risk_scene_alignment", {}) or {}
     selected_profile_context_tuple = tuple(
         profile_value(p1_2_metadata, key)
         for key in ("planning_attempt_id", "candidate_id", "snapshot_generation_id", "query_base_time_s")
@@ -7495,6 +7524,34 @@ def validate_p1_2_hard_gates(
             p0_startup.get("post_startup_full_unknown_count", 0) or 0
         )
         == 0,
+        "post_startup_rows": int(p0_startup.get("post_startup_rows", 0) or 0),
+        "p0_health_max_gap_s": p0_health_max_gap_s,
+        "p0_health_max_gap_ok": p0_health_max_gap_s is not None
+        and p0_health_max_gap_s <= P0_HEALTH_ACTIVE_MAX_GAP_S,
+        "reference_p0_health_rows_present": int(
+            reference_p0_health_summary.get("row_count", 0) or 0
+        ) > 0,
+        "reference_p0_startup_snapshot_unavailable_bounded": bool(
+            reference_p0_startup.get("startup_snapshot_unavailable_bounded", False)
+        ),
+        "reference_p0_post_startup_rows_present": int(
+            reference_p0_startup.get("post_startup_rows", 0) or 0
+        ) > 0,
+        "reference_p0_post_startup_ready": int(
+            reference_p0_startup.get("post_startup_ready_false_count", 0) or 0
+        ) == 0,
+        "reference_p0_post_startup_non_stale": int(
+            reference_p0_startup.get("post_startup_stale_true_count", 0) or 0
+        ) == 0,
+        "reference_p0_post_startup_not_full_unknown": int(
+            reference_p0_startup.get("post_startup_full_unknown_count", 0) or 0
+        ) == 0,
+        "reference_post_startup_rows": int(
+            reference_p0_startup.get("post_startup_rows", 0) or 0
+        ),
+        "reference_p0_health_max_gap_s": reference_p0_health_max_gap_s,
+        "reference_p0_health_max_gap_ok": reference_p0_health_max_gap_s is not None
+        and reference_p0_health_max_gap_s <= P0_HEALTH_ACTIVE_MAX_GAP_S,
         "p1_csv_present": not bool(p1_debug_summary.get("missing")),
         "p1_csv_nonempty": int(p1_debug_summary.get("row_count", 0) or 0) > 0,
         "p1_csv_parse_ok": int(p1_debug_summary.get("parse_error_count", 0) or 0)
@@ -7588,6 +7645,7 @@ def validate_p1_2_hard_gates(
         and profile_value(p1_1_metadata, "applied_to_objective") in ("0", "false", "False")
         and finite_float(profile_value(p1_1_metadata, "lambda_integrity")) == expected_lambda,
         "accepted_profile_missing": bool(risk_comparison.get("accepted_profile_missing")),
+        "accepted_profiles_present": not bool(risk_comparison.get("accepted_profile_missing")),
         "risk_match_min_count": P1_2_MIN_RISK_MATCH_COUNT,
         "risk_match_min_ratio": P1_2_MIN_RISK_MATCH_RATIO,
         "p1_2_risk_match_ok": bool(risk_comparison.get("p1_2_match_ok")),
@@ -7608,6 +7666,11 @@ def validate_p1_2_hard_gates(
         ),
         "p1_2_planning_context_timeline_ok": timeline_valid(p1_2_timeline_rows, p1_2_timeline_info),
         "p1_1_planning_context_timeline_ok": timeline_valid(p1_1_timeline_rows, p1_1_timeline_info),
+        "p1_2_context_age_s": p1_2_context.get("context_age_s"),
+        "p1_1_context_age_s": p1_1_context.get("context_age_s"),
+        "stale_timeout_s": stale_timeout_s,
+        "risk_scene_overlay_available": bool(risk_scene_alignment.get("available")),
+        "risk_scene_alignment_reasons": list(risk_scene_alignment.get("reasons", []) or []),
     }
     gates["cause_exclusion_rows"] = p1_2_cause_exclusion_rows(gates)
     gates["cause_exclusion_passed"] = all(
@@ -7624,12 +7687,14 @@ def validate_p1_2_hard_gates(
         and gates["manifest_p1_metrics_only_false"]
         and gates["manifest_p1_use_integrity_cost"]
         and gates["manifest_p1_lambda_integrity_ok"]
+        and gates["manifest_p0_stale_timeout_ok"]
         and gates["manifest_p2_p5_disabled"]
     ):
         failures.append(
             "P1-2 manifest must set profile=p1, enable P0/P1, set "
             "p1.metrics_only=false, use integrity cost, "
-            f"p1.lambda_integrity={P1_2_LAMBDA_INTEGRITY:.5f}, and disable P2/P3/P4/P5"
+            f"p1.lambda_integrity={P1_2_LAMBDA_INTEGRITY:.5f}, "
+            f"p0.stale_timeout_s={P1_2_STALE_TIMEOUT_S:.1f}, and disable P2/P3/P4/P5"
         )
     if not gates["validator_summary_present"]:
         failures.append("P1-2 validator summary is missing")
@@ -7647,6 +7712,28 @@ def validate_p1_2_hard_gates(
         failures.append("P1-2 P0 health reported stale=true after startup")
     if not gates["p0_post_startup_not_full_unknown"]:
         failures.append("P1-2 P0 health reported full unknown after startup")
+    if not gates["p0_health_max_gap_ok"]:
+        failures.append(
+            "P1-2 raw /planning/risk_grid_health periodicity failed "
+            f"(max gap {gates['p0_health_max_gap_s']}, limit {P0_HEALTH_ACTIVE_MAX_GAP_S})"
+        )
+    if not gates["reference_p0_health_rows_present"]:
+        failures.append("P1-2 P1-1 reference raw P0 health rows are missing")
+    if not gates["reference_p0_startup_snapshot_unavailable_bounded"]:
+        failures.append("P1-2 P1-1 reference P0 startup snapshot_unavailable prefix is not bounded")
+    if not gates["reference_p0_post_startup_rows_present"]:
+        failures.append("P1-2 P1-1 reference P0 health has no post-startup rows")
+    if not gates["reference_p0_post_startup_ready"]:
+        failures.append("P1-2 P1-1 reference P0 health reported ready=false after startup")
+    if not gates["reference_p0_post_startup_non_stale"]:
+        failures.append("P1-2 P1-1 reference P0 health reported stale=true after startup")
+    if not gates["reference_p0_post_startup_not_full_unknown"]:
+        failures.append("P1-2 P1-1 reference P0 health reported full unknown after startup")
+    if not gates["reference_p0_health_max_gap_ok"]:
+        failures.append(
+            "P1-2 P1-1 reference raw /planning/risk_grid_health periodicity failed "
+            f"(max gap {gates['reference_p0_health_max_gap_s']}, limit {P0_HEALTH_ACTIVE_MAX_GAP_S})"
+        )
     if not gates["p1_csv_present"]:
         failures.append(f"P1-2 {P1_1_DEBUG_CSV_NAME} is missing")
     elif not gates["p1_csv_nonempty"]:
@@ -7685,11 +7772,13 @@ def validate_p1_2_hard_gates(
         and gates["reference_manifest_p1_metrics_only"]
         and gates["reference_manifest_p1_use_integrity_cost"]
         and gates["reference_manifest_matched_lambda"]
+        and gates["reference_manifest_stale_timeout_ok"]
         and gates["reference_manifest_metrics_only_identity"]
         and gates["reference_manifest_p2_p5_disabled"]
     ):
         failures.append(
-            "P1-2 P1-1 reference manifest must be a matched metrics-only P1 reference (lambda=0.00001, not applied) with P0/P1 enabled and P2/P3/P4/P5 disabled"
+            "P1-2 P1-1 reference manifest must be a matched metrics-only P1 reference "
+            "(lambda=0.00001, stale_timeout=1.0, not applied) with P0/P1 enabled and P2/P3/P4/P5 disabled"
         )
     if reference_bspline_error:
         failures.append(
@@ -7734,6 +7823,11 @@ def validate_p1_2_hard_gates(
         )
     if not gates["trajectory_stability_passed"]:
         failures.append("P1-2 trajectory stability gate failed")
+    if not gates["risk_scene_overlay_available"]:
+        failures.append(
+            "P1-2 risk/trajectory scene sources are unavailable or cannot be aligned: "
+            + "; ".join(gates["risk_scene_alignment_reasons"])
+        )
     if not gates["p5_contamination_zero"]:
         failures.append("P1-2 P5 leakage detected while P5 is disabled")
     if not gates["cause_exclusion_passed"]:
@@ -12489,6 +12583,174 @@ def plot_p1_metrics_timeline(
     return True
 
 
+def _p1_2_xy_points(values: list[Any], *, require_c_pi: bool = False) -> list[tuple[float, float]]:
+    points: list[tuple[float, float]] = []
+    for value in values:
+        if isinstance(value, dict):
+            x = finite_float(value.get("x"))
+            y = finite_float(value.get("y"))
+            if require_c_pi and finite_float(value.get("c_pi")) is None:
+                continue
+        else:
+            try:
+                x = finite_float(value[0])
+                y = finite_float(value[1])
+            except (IndexError, TypeError):
+                continue
+        if x is not None and y is not None:
+            points.append((x, y))
+    return points
+
+
+def _p1_2_xy_bounds(points: list[tuple[float, float]]) -> tuple[float, float, float, float] | None:
+    if not points:
+        return None
+    return (
+        min(point[0] for point in points),
+        max(point[0] for point in points),
+        min(point[1] for point in points),
+        max(point[1] for point in points),
+    )
+
+
+def _p1_2_bounds_overlap(
+    first: tuple[float, float, float, float] | None,
+    second: tuple[float, float, float, float] | None,
+    *,
+    margin_m: float = 2.0,
+) -> bool:
+    if first is None or second is None:
+        return False
+    return not (
+        first[1] + margin_m < second[0]
+        or second[1] + margin_m < first[0]
+        or first[3] + margin_m < second[2]
+        or second[3] + margin_m < first[2]
+    )
+
+
+def p1_2_risk_scene_alignment(
+    comparison: dict[str, Any],
+    p1_2_scene: dict[str, Any],
+    p1_1_scene: dict[str, Any],
+) -> dict[str, Any]:
+    """Fail closed unless every plotted scene source is recorded and co-located."""
+    reasons: list[str] = []
+    source_status: dict[str, bool] = {}
+    for label, profile_key, path_key, cloud_key, scene in (
+        ("P1-2", "p1_2_profile", "p1_2_path_xyz", "p1_2_cloud_context", p1_2_scene),
+        ("P1-1", "p1_1_profile", "p1_1_path_xyz", "p1_1_cloud_context", p1_1_scene),
+    ):
+        profile = comparison.get(profile_key, {}) or {}
+        cloud = comparison.get(cloud_key, {}) or {}
+        profile_points = _p1_2_xy_points(profile.get("samples", []) or [])
+        accepted_path = _p1_2_xy_points(comparison.get(path_key, []) or [])
+        risk_points = _p1_2_xy_points(cloud.get("points", []) or [], require_c_pi=True)
+        sources = {
+            "final accepted profile": profile_points,
+            "accepted trajectory": accepted_path,
+            "P0 risk points": risk_points,
+            "bag map": _p1_2_xy_points(scene.get("map_points", []) or []),
+            "bag odom": _p1_2_xy_points(scene.get("slam_xy", []) or []),
+            "bag truth": _p1_2_xy_points(scene.get("truth_xy", []) or []),
+        }
+        profile_bounds = _p1_2_xy_bounds(profile_points)
+        for source_name, points in sources.items():
+            key = f"{label} {source_name}"
+            source_status[key] = bool(points)
+            if not points:
+                reasons.append(f"{key} unavailable")
+                continue
+            if source_name != "final accepted profile" and not _p1_2_bounds_overlap(
+                profile_bounds, _p1_2_xy_bounds(points)
+            ):
+                source_status[key] = False
+                reasons.append(f"{key} cannot be spatially aligned to final accepted profile")
+    return {
+        "available": all(source_status.values()) and not reasons,
+        "reasons": reasons,
+        "source_status": source_status,
+        "method": "raw recorded XY bounds overlap; no inferred heatmap",
+    }
+
+
+def plot_p1_2_risk_trajectory_scene_overlay(
+    comparison: dict[str, Any],
+    p1_2_scene: dict[str, Any],
+    p1_1_scene: dict[str, Any],
+    alignment: dict[str, Any],
+    path: Path,
+) -> bool:
+    fig, axes = plt.subplots(1, 2, figsize=(14.5, 6.4))
+    if not alignment.get("available"):
+        for axis in axes:
+            axis.axis("off")
+        axes[0].text(
+            0.5, 0.55, "UNAVAILABLE\nrecorded sources cannot be aligned",
+            ha="center", va="center", fontsize=15, color="#dc2626", weight="bold",
+        )
+        axes[1].text(
+            0.02, 0.95, "\n".join(alignment.get("reasons", []) or ["alignment evidence missing"]),
+            ha="left", va="top", family="monospace", fontsize=9,
+        )
+        fig.suptitle("P1-2 risk / trajectory scene overlay — unavailable (no inferred heatmap)")
+        fig.tight_layout()
+        fig.savefig(path, dpi=160)
+        plt.close(fig)
+        return True
+
+    for axis, label, profile_key, path_key, cloud_key, scene in (
+        (axes[0], "P1-2 enabled", "p1_2_profile", "p1_2_path_xyz", "p1_2_cloud_context", p1_2_scene),
+        (axes[1], "P1-1 metrics-only", "p1_1_profile", "p1_1_path_xyz", "p1_1_cloud_context", p1_1_scene),
+    ):
+        map_points = _p1_2_xy_points(scene.get("map_points", []) or [])
+        if map_points:
+            axis.scatter(
+                [point[0] for point in map_points], [point[1] for point in map_points],
+                s=1.0, c="#cbd5e1", alpha=0.22, linewidths=0, label="bag map",
+            )
+        risk_rows = [
+            row for row in ((comparison.get(cloud_key, {}) or {}).get("points", []) or [])
+            if finite_float(row.get("x")) is not None
+            and finite_float(row.get("y")) is not None
+            and finite_float(row.get("c_pi")) is not None
+        ]
+        scatter = axis.scatter(
+            [float(row["x"]) for row in risk_rows],
+            [float(row["y"]) for row in risk_rows],
+            c=[float(row["c_pi"]) for row in risk_rows],
+            cmap="magma", s=10, alpha=0.65, linewidths=0, label="raw P0 c_pi points",
+        )
+        fig.colorbar(scatter, ax=axis, fraction=0.045, pad=0.02, label="recorded c_pi")
+        truth = _p1_2_xy_points(scene.get("truth_xy", []) or [])
+        odom = _p1_2_xy_points(scene.get("slam_xy", []) or [])
+        accepted_path = _p1_2_xy_points(comparison.get(path_key, []) or [])
+        profile = _p1_2_xy_points(
+            ((comparison.get(profile_key, {}) or {}).get("samples", []) or [])
+        )
+        for points, color, style, name, width in (
+            (truth, "#16a34a", "-", "bag truth", 1.5),
+            (odom, "#0891b2", "--", "bag odom", 1.3),
+            (accepted_path, "#f97316", "-.", "accepted trajectory", 1.7),
+            (profile, "#2563eb", "-", "final accepted profile", 2.0),
+        ):
+            axis.plot(
+                [point[0] for point in points], [point[1] for point in points],
+                color=color, linestyle=style, linewidth=width, label=name,
+            )
+        axis.set_title(label)
+        axis.set_xlabel("x [m]")
+        axis.set_ylabel("y [m]")
+        axis.set_aspect("equal", adjustable="datalim")
+        axis.grid(True, alpha=0.25)
+        axis.legend(loc="best", fontsize=7.4)
+    fig.suptitle("Recorded risk / final-profile / accepted-trajectory scene overlay")
+    fig.tight_layout()
+    fig.savefig(path, dpi=160)
+    plt.close(fig)
+    return True
+
+
 def plot_p1_2_objective_gradient_timeline(
     p1_2_rows: list[dict[str, Any]],
     p1_1_rows: list[dict[str, Any]],
@@ -12644,6 +12906,7 @@ def p1_2_artifact_completeness_rows(
             (label, "bag metadata.yaml", exists(bag_dir / "metadata.yaml") if bag_dir else False),
             (label, "accepted profile", exists(p1_accepted_profile_csv_path(export_dir, manifest)) if export_dir else False),
             (label, "atomic context sidecar", exists(p1_accepted_profile_context_csv_path(export_dir, manifest)) if export_dir else False),
+            (label, "planning-context timeline", exists(p1_planning_context_timeline_csv_path(export_dir, manifest)) if export_dir else False),
             (label, "P1 debug CSV", exists(p1_debug_csv_path(export_dir, manifest)) if export_dir else False),
         ])
     rows.append(("P1-2", "all required figures", all(exists(item) for item in required_figures if item != path)))
@@ -13288,6 +13551,135 @@ def plot_p1_2_validation_summary(
     ]
     ax.text(0.02, 0.95, "\n".join(lines), va="top", ha="left", family="monospace", fontsize=9.2)
     ax.set_title("P1-2 validation summary")
+    fig.tight_layout()
+    fig.savefig(path, dpi=160)
+    plt.close(fig)
+    return True
+
+
+def _p1_2_health_gap_values(rows: list[dict[str, Any]]) -> tuple[list[float], list[float]]:
+    stamps = [value for value in (finite_float(row.get("stamp")) for row in rows) if value is not None]
+    stamps.sort()
+    return stamps[1:], [current - previous for previous, current in zip(stamps, stamps[1:])]
+
+
+def plot_p1_2_p0_health_and_context_freshness(
+    p1_2_rows: list[dict[str, Any]],
+    p1_1_rows: list[dict[str, Any]],
+    p1_2_context: dict[str, Any],
+    p1_1_context: dict[str, Any],
+    *,
+    stale_timeout_s: float,
+    path: Path,
+) -> bool:
+    """Show only authoritative raw-health and accepted-context freshness evidence."""
+    fig, axes = plt.subplots(4, 1, figsize=(12.4, 10.0), sharex=False)
+    plotted = False
+    for label, rows, color in (
+        ("P1-2", p1_2_rows, "#2563eb"),
+        ("P1-1", p1_1_rows, "#f97316"),
+    ):
+        stamps = [finite_float(row.get("stamp")) for row in rows]
+        finite_stamps = [stamp for stamp in stamps if stamp is not None]
+        if not finite_stamps:
+            continue
+        t0 = finite_stamps[0]
+        t = [math.nan if stamp is None else stamp - t0 for stamp in stamps]
+        axes[0].step(t, [int(bool(row.get("ready"))) for row in rows], where="post", color=color, label=f"{label} ready")
+        axes[0].step(t, [int(bool(row.get("stale"))) for row in rows], where="post", color=color, linestyle="--", label=f"{label} stale")
+        axes[1].plot(t, finite_or_nan(rows, "unknown_ratio"), color=color, label=f"{label} unknown_ratio")
+        gap_stamps, gaps = _p1_2_health_gap_values(rows)
+        if gap_stamps:
+            axes[2].plot(
+                [stamp - t0 for stamp in gap_stamps], gaps,
+                marker="o", markersize=3, color=color, label=f"{label} raw-health gap",
+            )
+        plotted = True
+    axes[0].set_ylim(-0.08, 1.08)
+    axes[0].set_ylabel("raw bool")
+    axes[0].set_title(f"Authoritative {P0_HEALTH_LEGACY_TOPIC} readiness / stale state")
+    axes[1].set_ylim(-0.05, 1.05)
+    axes[1].set_ylabel("ratio")
+    axes[1].set_title("Authoritative raw-health unknown ratio")
+    axes[2].axhline(P0_HEALTH_ACTIVE_MAX_GAP_S, color="#dc2626", linestyle="--", label=f"gap limit {P0_HEALTH_ACTIVE_MAX_GAP_S:g}s")
+    axes[2].set_ylabel("gap [s]")
+    axes[2].set_xlabel("time since each run's first raw-health row [s]")
+    axes[2].set_title("Raw health-topic inter-message gaps")
+    context_labels = ["P1-2 accepted", "P1-1 accepted"]
+    context_ages = [finite_float(p1_2_context.get("context_age_s")), finite_float(p1_1_context.get("context_age_s"))]
+    bars = [math.nan if value is None else value for value in context_ages]
+    axes[3].bar(
+        context_labels, bars,
+        color=["#16a34a" if value is not None and 0.0 <= value <= stale_timeout_s else "#dc2626" for value in context_ages],
+    )
+    axes[3].axhline(stale_timeout_s, color="#dc2626", linestyle="--", label=f"freshness threshold {stale_timeout_s:g}s")
+    axes[3].set_ylabel("context age [s]")
+    axes[3].set_title("Final accepted-context ages")
+    for axis in axes:
+        axis.grid(True, alpha=0.25)
+        handles, _ = axis.get_legend_handles_labels()
+        if handles:
+            axis.legend(loc="best", fontsize=8)
+    if not plotted:
+        axes[0].text(0.5, 0.5, "RAW HEALTH UNAVAILABLE", transform=axes[0].transAxes, ha="center", va="center", color="#dc2626")
+    fig.suptitle("P1-2 authoritative P0 health and accepted-context freshness")
+    fig.tight_layout()
+    fig.savefig(path, dpi=160)
+    plt.close(fig)
+    return True
+
+
+P1_2_HARD_GATE_ROWS = [
+    ("manifest contract", ("manifest_present", "manifest_safety_profile_p1", "manifest_p0_enabled", "manifest_p1_enabled", "manifest_p1_metrics_only_false", "manifest_p1_use_integrity_cost", "manifest_p1_lambda_integrity_ok", "manifest_p0_stale_timeout_ok", "manifest_p2_p5_disabled"), ("manifest_p1_lambda_integrity", "manifest_p1_lambda_integrity_expected", "manifest_p0_stale_timeout_s")),
+    ("validator", ("validator_summary_present", "validator_passed"), ()),
+    ("P1-2 raw P0 startup/health", ("p0_health_rows_present", "p0_startup_snapshot_unavailable_bounded", "p0_post_startup_rows_present", "p0_post_startup_ready", "p0_post_startup_non_stale", "p0_post_startup_not_full_unknown", "p0_health_max_gap_ok"), ("post_startup_rows", "p0_health_max_gap_s")),
+    ("P1-1 raw P0 startup/health", ("reference_p0_health_rows_present", "reference_p0_startup_snapshot_unavailable_bounded", "reference_p0_post_startup_rows_present", "reference_p0_post_startup_ready", "reference_p0_post_startup_non_stale", "reference_p0_post_startup_not_full_unknown", "reference_p0_health_max_gap_ok"), ("reference_post_startup_rows", "reference_p0_health_max_gap_s")),
+    ("P1 debug CSV", ("p1_csv_present", "p1_csv_nonempty", "p1_csv_parse_ok", "p1_csv_finite_cost_gradient", "p1_positive_sample_hit", "p1_applied_to_objective", "p1_applied_to_objective_parse_ok", "p1_weighted_integrity_positive"), ("applied_to_objective_true_count", "applied_to_objective_invalid_count", "weighted_f_integrity_max")),
+    ("snapshot/candidate binding", ("p1_final_profile_context_in_debug",), ("p1_final_profile_context_tuple", "p1_applied_debug_context_tuples")),
+    ("P1 RViz and required topics", ("p1_rviz_topics_present", "required_topics_passed"), ("p1_rviz_topic_counts", "p1_rviz_topic_statuses")),
+    ("P1-2 bspline publish", ("p1_2_bspline_inspection_ok", "bspline_publish_present", "p1_2_nonempty_bspline_path_present"), ()),
+    ("P1-1 reference paths", ("reference_export_dir_present", "reference_bag_dir_present"), ()),
+    ("P1-1 reference manifest", ("reference_manifest_present", "reference_manifest_scenario_matches", "reference_manifest_safety_profile_p1", "reference_manifest_p0_enabled", "reference_manifest_p1_enabled", "reference_manifest_p1_metrics_only", "reference_manifest_p1_use_integrity_cost", "reference_manifest_matched_lambda", "reference_manifest_stale_timeout_ok", "reference_manifest_metrics_only_identity", "reference_manifest_p2_p5_disabled"), ()),
+    ("P1-1 bspline publish", ("reference_bspline_inspection_ok", "reference_bspline_publish_present", "reference_nonempty_bspline_path_present"), ()),
+    ("accepted profiles present/parse", ("accepted_profiles_present", "p1_2_accepted_profile_parse_ok", "p1_1_accepted_profile_parse_ok"), ("accepted_profile_missing", "p1_2_accepted_profile_path", "p1_1_accepted_profile_path")),
+    ("accepted profile format", ("p1_2_accepted_profile_format_ok", "p1_1_accepted_profile_format_ok"), ()),
+    ("accepted profile context", ("p1_2_accepted_profile_context_ok", "p1_1_accepted_profile_context_ok", "p1_2_planning_context_timeline_ok", "p1_1_planning_context_timeline_ok"), ("p1_2_context_age_s", "p1_1_context_age_s", "stale_timeout_s")),
+    ("accepted profile objective metadata", ("p1_2_profile_objective_metadata_ok", "p1_1_profile_objective_metadata_ok"), ()),
+    ("strict accepted-profile coverage", ("p1_2_risk_match_ok", "p1_1_risk_match_ok"), ("p1_2_risk_matched_sample_count", "p1_2_risk_match_ratio", "p1_1_risk_matched_sample_count", "p1_1_risk_match_ratio", "risk_match_min_count", "risk_match_min_ratio")),
+    ("strict c_pi mean/max reduction", ("risk_metric_available", "risk_profile_reduced"), ("risk_comparison_metric", "risk_current_mean", "risk_reference_mean", "risk_current_max", "risk_reference_max")),
+    ("trajectory stability", ("trajectory_stability_passed",), ("trajectory_stability",)),
+    ("recorded risk-scene alignment", ("risk_scene_overlay_available",), ("risk_scene_alignment_reasons",)),
+    ("P5 isolation", ("p5_contamination_zero",), ("disabled_topic_counts",)),
+    ("cause exclusion", ("cause_exclusion_passed",), ("cause_exclusion_rows",)),
+]
+
+
+def p1_2_hard_gate_rows(gates: dict[str, Any]) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    for label, verdict_keys, value_keys in P1_2_HARD_GATE_ROWS:
+        verdict = all(bool(gates.get(key)) for key in verdict_keys)
+        values = {key: gates.get(key) for key in (*verdict_keys, *value_keys)}
+        rows.append({"gate": label, "passed": verdict, "governing_values": values})
+    return rows
+
+
+def plot_p1_2_result_dashboard(gates: dict[str, Any], path: Path) -> bool:
+    rows = p1_2_hard_gate_rows(gates)
+    fig, ax = plt.subplots(figsize=(15.5, max(9.0, 0.52 * len(rows))))
+    ax.axis("off")
+    y = 0.98
+    line_height = 0.95 / max(1, len(rows))
+    for row in rows:
+        verdict = "PASS" if row["passed"] else "FAIL"
+        color = "#15803d" if row["passed"] else "#dc2626"
+        values = json.dumps(row["governing_values"], sort_keys=True, default=str)
+        if len(values) > 180:
+            values = values[:177] + "..."
+        ax.text(0.01, y, verdict, color=color, weight="bold", family="monospace", va="top")
+        ax.text(0.08, y, str(row["gate"]), weight="bold", va="top")
+        ax.text(0.31, y, values, family="monospace", fontsize=7.6, va="top")
+        y -= line_height
+    ax.set_title("P1-2 hard-gate dashboard — verdicts and governing values", pad=16)
     fig.tight_layout()
     fig.savefig(path, dpi=160)
     plt.close(fig)
@@ -14428,7 +14820,7 @@ def analyze(args: argparse.Namespace) -> dict[str, Any]:
         if p1_1_phase:
             health_figure_path = p1_1_figure_paths["p1_1_p0_health.png"]
         elif p1_2_phase:
-            health_figure_path = p1_2_figure_paths["p1_2_p0_health.png"]
+            health_figure_path = figures_dir / "p1_2_p0_health_diagnostic.png"
         elif p5_3_phase:
             health_figure_path = figures_dir / "p5_3_debug_p0_health_timeline.png"
         elif p5_4_phase:
@@ -14701,6 +15093,7 @@ def analyze(args: argparse.Namespace) -> dict[str, Any]:
     source_figure_path = figures_dir / f"{prefix}_integrity_source_timeline.png"
     integrity_figure_path = figures_dir / f"{prefix}_integrity_hpl_vpl_timeline.png"
 
+    scenario_data: dict[str, Any] = {}
     if bag_dir is not None:
         scenario_data, scenario_error = read_scenario_plot_data(bag_dir, metadata)
         if scenario_error:
@@ -14855,6 +15248,8 @@ def analyze(args: argparse.Namespace) -> dict[str, Any]:
     p1_2_reference_debug_summary: dict[str, Any] = {}
     p1_2_reference_cloud_rows: list[dict[str, Any]] = []
     p1_2_reference_cloud_source = ""
+    p1_2_reference_health_rows: list[dict[str, Any]] = []
+    p1_2_reference_health_summary: dict[str, Any] = {"row_count": 0}
     p1_2_risk_comparison: dict[str, Any] = {}
     p5_csv_artifacts: list[str] = []
     p5_figure_artifacts: list[str] = []
@@ -14975,6 +15370,12 @@ def analyze(args: argparse.Namespace) -> dict[str, Any]:
                 "P1-1 bag latest predicted PL cloud",
             )
         )
+        p1_2_reference_health_rows = list(
+            baseline_artifacts.get("health_rows", []) or []
+        )
+        p1_2_reference_health_summary = summarize_p0_health(
+            p1_2_reference_health_rows
+        )
         p0_resolution_m = finite_float(manifest.get("p0.resolution_m")) or 0.75
         p1_2_risk_comparison = compare_p1_2_risk_profiles(
             p1_2_bspline_rows,
@@ -14991,6 +15392,11 @@ def analyze(args: argparse.Namespace) -> dict[str, Any]:
             p1_2_context_info=p1_accepted_profile_context_info,
             p1_1_context_info=p1_2_reference_context_info,
             stale_timeout_s=finite_float(manifest.get("p0.stale_timeout_s")),
+        )
+        p1_2_risk_comparison["risk_scene_alignment"] = p1_2_risk_scene_alignment(
+            p1_2_risk_comparison,
+            scenario_data,
+            baseline_scenario_data,
         )
         p1_2_gates = validate_p1_2_hard_gates(
             manifest,
@@ -15014,6 +15420,8 @@ def analyze(args: argparse.Namespace) -> dict[str, Any]:
             p1_planning_context_timeline_info,
             p1_2_reference_timeline_rows,
             p1_2_reference_timeline_info,
+            p1_2_reference_health_summary,
+            p1_2_reference_health_rows,
         )
     if p5_5_phase:
         p5_5_integrity_rows, p5_5_integrity_error = (
@@ -16543,6 +16951,27 @@ def analyze(args: argparse.Namespace) -> dict[str, Any]:
             ]
         )
 
+        if plot_p1_2_risk_trajectory_scene_overlay(
+            p1_2_risk_comparison,
+            scenario_data,
+            baseline_scenario_data,
+            p1_2_risk_comparison.get("risk_scene_alignment", {}) or {},
+            p1_2_figure_paths["p1_2_risk_trajectory_scene_overlay.png"],
+        ):
+            p1_2_figure_artifacts.append(
+                str(p1_2_figure_paths["p1_2_risk_trajectory_scene_overlay.png"])
+            )
+        if plot_p1_2_p0_health_and_context_freshness(
+            health_rows,
+            p1_2_reference_health_rows,
+            p1_2_risk_comparison.get("p1_2_context", {}) or {},
+            p1_2_risk_comparison.get("p1_1_context", {}) or {},
+            stale_timeout_s=finite_float(manifest.get("p0.stale_timeout_s")) or 1.0,
+            path=p1_2_figure_paths["p1_2_p0_health_and_context_freshness.png"],
+        ):
+            p1_2_figure_artifacts.append(
+                str(p1_2_figure_paths["p1_2_p0_health_and_context_freshness.png"])
+            )
         if plot_p1_2_objective_gradient_timeline(
             p1_debug_rows,
             p1_2_reference_debug_rows,
@@ -16644,6 +17073,13 @@ def analyze(args: argparse.Namespace) -> dict[str, Any]:
             p1_2_figure_paths["p1_2_replan_fallback_timeline.png"],
         ):
             p1_2_figure_artifacts.append(str(p1_2_figure_paths["p1_2_replan_fallback_timeline.png"]))
+        if plot_p1_2_result_dashboard(
+            p1_2_gates,
+            p1_2_figure_paths["p1_2_result_dashboard.png"],
+        ):
+            p1_2_figure_artifacts.append(
+                str(p1_2_figure_paths["p1_2_result_dashboard.png"])
+            )
         if plot_p1_2_artifact_completeness(
             export_dir,
             bag_dir,

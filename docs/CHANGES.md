@@ -359,3 +359,15 @@
   - All `glim_LIBRARIES` → `iap_LIBRARIES`; install paths `share/glim` → `share/iap`, `bin/glim` → `bin/iap`.
   - `colcon build --packages-select iap` passes; `ros2 pkg list | grep iap` shows `iap`.
 - Init: add traceability & agent rules. (IAP-RQ-000)
+
+## 2026-07-16 (P1-2 Health/Freshness Repair runtime validation)
+
+- IAP-RQ-320/IAP-RQ-400/IAP-RQ-410: Terminal validation preflight at clean `HEAD=e1e185d94aa98b78f2541f3d261cdc2386559aa8` ran the supplied Python compile and focused suites successfully (15/30/111/2 tests). The IAP build command then stopped before compilation because `/opt/ros/jazzy/setup.bash` was sourced under `set -u` and referenced unset `AMENT_TRACE_SETUP_FILES`.
+- Per the one-shot validation contract, no retry, source change, planner build, CTest, workspace test-result scan, P1-1/P1-2 launch, analyzer run, artifact reuse, or P1-3 execution occurred. Outcome: **FAIL -> preflight environment setup**.
+
+## 2026-07-16 (P1-2 fresh authoritative health/freshness validation)
+
+- IAP-RQ-320/IAP-RQ-400/IAP-RQ-410: Expanded the P1-2 analyzer contract to twelve hard-gated figures, including recorded-only risk-scene alignment, authoritative raw P0 health/context freshness, complete gate dashboard, artifact completeness, and cause exclusion. Missing or unalignable source data now renders a labelled unavailable figure and fails closed.
+- Updated the focused P1-2 analyzer suite for the twelve exact figure names, supplementary diagnostics, fail-closed scene behavior, dashboard gates, and nonempty plot output. Preflight passed Python compile, analyzer suites (15/33/111/2), the IAP and planner builds, and focused CTests (15/4/29). Historical workspace lint results remain separately non-clean.
+- Ran one fresh serial P1-1/P1-2 pair with exact `p1.lambda_integrity=0.00001`, then invoked the analyzer exactly once with only those four paths. The analyzer returned exit 2, status FAIL, no warnings/inconclusive items, and `next_debug_branch=FAIL -> lambda/gradient debug`.
+- Terminal evidence: both validators and manifests passed, objective application/binding/trajectory stability/recorded scene/P5 isolation passed, but raw P0 health, accepted-context validity, P1-1 coverage (`25/200`), strict c_pi reduction (P1-2 mean/max `0.383345/0.406930` versus `0.335276/0.338695`), and cause exclusion failed. P1-3 was not run.

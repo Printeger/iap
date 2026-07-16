@@ -90,3 +90,7 @@
   - GNSS clock single-owner contract收敛：`clock_owner_mode` 跨模块联动，默认切到 `gnss`。
   - 增加 ready 时序契约：`IapSharedState::{set,clear,is}_clock_ready`；GNSS 生产 ready，odometry 在 GNSS-owner 下仅 `current+ready` 才读 `C(i)`。
   - 观测与一致性：`KeyLifecycleMonitor` 记录 ownership/missing/conflict/violation；A/B 验收日志显示 `c missing/conflicts/violations = 0`，无 hard optimizer error。
+
+- 2026-07-16: IAP-RQ-320 / IAP-RQ-400 / IAP-RQ-410 P1-2 Health/Freshness Repair fresh-runtime validation is **FAIL -> preflight environment setup**. Clean `HEAD=e1e185d94aa98b78f2541f3d261cdc2386559aa8`; Python compile and focused analyzer suites passed, but the IAP build stopped while sourcing ROS Jazzy with `set -u` (`AMENT_TRACE_SETUP_FILES` unset). No fresh P1-1/P1-2 exports or bags, analyzer output, final profiles, figures, or P1-3 evidence exist for this attempt; no older artifacts were used.
+
+- 2026-07-16: IAP-RQ-320 / IAP-RQ-400 / IAP-RQ-410 fresh authoritative P1-2 validation is **FAIL -> lambda/gradient debug**. The analyzer now hard-gates twelve required figures and fails closed on unavailable recorded risk-scene alignment. Fresh serial paths: P1-1 export `1784193115093`, bag `20260716T091155Z`; P1-2 export `1784193251717`, bag `20260716T091411Z`. One analyzer invocation returned exit 2 with failures in raw P0 health, accepted spatial context, reference coverage (`25/200`), and strict c_pi reduction; objective application/binding, validators, trajectory stability, scene alignment, and P5 isolation passed. P1-3 was not run.
