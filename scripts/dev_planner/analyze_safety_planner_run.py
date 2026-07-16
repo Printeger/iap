@@ -14271,10 +14271,18 @@ def normalize_p1_2_timebases(
     health_field = str(health_spec.get("field", "health_callback_stamp_s"))
     timeline_domain = str(timeline_spec.get("domain", ""))
     health_domain = str(health_spec.get("domain", ""))
-    timeline_raw = [finite_float(row.get(timeline_field)) for row in timeline_rows]
-    health_raw = [finite_float(row.get(health_field)) for row in health_rows]
-    timeline_raw = [value for value in timeline_raw if value is not None]
-    health_raw = [value for value in health_raw if value is not None]
+    timeline_samples = [
+        (index, value)
+        for index, row in enumerate(timeline_rows)
+        if (value := finite_float(row.get(timeline_field))) is not None
+    ]
+    health_samples = [
+        (index, value)
+        for index, row in enumerate(health_rows)
+        if (value := finite_float(row.get(health_field))) is not None
+    ]
+    timeline_raw = [value for _, value in timeline_samples]
+    health_raw = [value for _, value in health_samples]
     causal = bool(
         timeline_raw and health_raw and timeline_domain
         and timeline_domain == health_domain
@@ -14291,8 +14299,12 @@ def normalize_p1_2_timebases(
             [value - min(timeline_raw) for value in timeline_raw]
             if timeline_raw else []
         )
-        health_receive = [finite_float(row.get("stamp")) for row in health_rows]
-        health_receive = [value for value in health_receive if value is not None]
+        health_receive_samples = [
+            (index, value)
+            for index, row in enumerate(health_rows)
+            if (value := finite_float(row.get("stamp"))) is not None
+        ]
+        health_receive = [value for _, value in health_receive_samples]
         health_relative = (
             [value - min(health_receive) for value in health_receive]
             if health_receive else []
@@ -14342,6 +14354,12 @@ def normalize_p1_2_timebases(
         "origin_s": origin_s,
         "timeline_relative_s": timeline_relative,
         "health_relative_s": health_relative,
+        "timeline_row_indices": [index for index, _ in timeline_samples],
+        "health_row_indices": [
+            index for index, _ in (
+                health_samples if causal else health_receive_samples
+            )
+        ],
         "reasons": reasons,
     }
 
@@ -14519,18 +14537,27 @@ def plot_p1_2_replan_load_correlation(
     event_times = list(alignment.get("timeline_relative_s", []))
     health_times = list(alignment.get("health_relative_s", []))
     finite_times = [value for value in (*event_times, *health_times) if value is not None]
-    fig, axes = plt.subplots(3, 1, figsize=(12.2, 9.2), sharex=True)
+    fig, axes = plt.subplots(
+        3, 1, figsize=(12.2, 9.2),
+        sharex=bool(alignment.get("causal_alignment_proven")),
+    )
     if not finite_times or not alignment.get("span_ok") or not alignment.get("memory_ok"):
         message = "UNAVAILABLE\n" + "\n".join(alignment.get("reasons", []))
         axes[0].text(0.5, 0.5, message, transform=axes[0].transAxes, ha="center")
     else:
         bins = np.arange(0.0, float(alignment["bin_count"]), 1.0)
-        normalized_timeline = []
-        for row, stamp in zip(timeline_rows, event_times):
-            normalized_timeline.append({**row, "stamp_s": stamp})
-        normalized_health = []
-        for row, stamp in zip(health_rows, health_times):
-            normalized_health.append({**row, "stamp": stamp})
+        normalized_timeline = [
+            {**timeline_rows[index], "stamp_s": stamp}
+            for index, stamp in zip(
+                alignment.get("timeline_row_indices", []), event_times
+            )
+        ]
+        normalized_health = [
+            {**health_rows[index], "stamp": stamp}
+            for index, stamp in zip(
+                alignment.get("health_row_indices", []), health_times
+            )
+        ]
         sorted_timeline = sorted(
             normalized_timeline, key=lambda row: finite_float(row.get("stamp_s")) or -math.inf
         )
@@ -14587,20 +14614,42 @@ def plot_p1_2_replan_load_correlation(
                 weights.append(delta)
             counts, _ = np.histogram(stamps, bins=bins, weights=weights)
             axes[2].step(centers, counts, where="mid", label=field, color=color)
+        if not alignment.get("causal_alignment_proven"):
+            # These panels deliberately use separate origins.  Keep planning
+            # and health evidence visually separate and suppress the callback
+            # panel so the figure cannot imply cross-domain causality.
+            axes[0].set_title(
+                "Planning load only — run-relative planning clock; no health alignment"
+            )
+            axes[1].set_title(
+                "P0 latency only — run-relative bag-receive clock; no planning alignment"
+            )
+            axes[2].cla()
+            axes[2].text(
+                0.5, 0.5,
+                "UNAVAILABLE FOR CAUSAL CORRELATION\n"
+                "No recorded mapping between planning and health clocks",
+                transform=axes[2].transAxes, ha="center", va="center",
+                color="#b91c1c", weight="bold",
+            )
+            axes[2].set_axis_off()
     axes[0].set_ylabel("events / 1 s bin")
     causal_note = (
         "causal alignment proven" if alignment.get("causal_alignment_proven")
         else "independent run-relative displays; causal alignment UNAVAILABLE"
     )
-    axes[0].set_title(
-        "Generation-gated planning load: attempts, rejects, deferred retries, fallback\n"
-        + causal_note
-    )
+    if alignment.get("causal_alignment_proven"):
+        axes[0].set_title(
+            "Generation-gated planning load: attempts, rejects, deferred retries, fallback\n"
+            + causal_note
+        )
     axes[1].set_ylabel("milliseconds")
-    axes[1].set_title("P0 refresh/queue/CPU mean on the same 1 s bins")
+    if alignment.get("causal_alignment_proven"):
+        axes[1].set_title("P0 refresh/queue/CPU mean on the same 1 s bins")
     axes[2].set_ylabel("callbacks / bin")
     axes[2].set_xlabel("recorded time [s]")
-    axes[2].set_title("Input and health callback progress on the same 1 s bins")
+    if alignment.get("causal_alignment_proven"):
+        axes[2].set_title("Input and health callback progress on the same 1 s bins")
     for axis in axes:
         axis.grid(True, alpha=0.25)
         handles, _ = axis.get_legend_handles_labels()

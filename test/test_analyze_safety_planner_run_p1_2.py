@@ -999,6 +999,7 @@ class P1_2AnalyzerTest(unittest.TestCase):
         alignment = analyzer.normalize_p1_2_timebases(timeline, health, manifest)
         self.assertFalse(alignment["causal_alignment_proven"])
         self.assertEqual(alignment["verdict"], "UNAVAILABLE")
+        self.assertEqual(alignment["mapping_mode"], "independent_subplots")
         self.assertLessEqual(alignment["bin_count"], 96)
         self.assertLessEqual(alignment["estimated_bin_bytes"], 1024 * 1024)
         with tempfile.TemporaryDirectory() as tmp:
@@ -1047,6 +1048,30 @@ class P1_2AnalyzerTest(unittest.TestCase):
         self.assertAlmostEqual(alignment["health_relative_s"][0], 0.25)
         self.assertAlmostEqual(alignment["timeline_relative_s"][-1], 90.0)
         self.assertLessEqual(alignment["bin_count"], 96)
+
+    def test_timebase_normalization_keeps_rows_bound_after_invalid_startup_stamp(self):
+        timeline = [
+            {"stamp_s": "", "stage": "startup"},
+            {"stamp_s": 100.0, "stage": "acquire"},
+        ]
+        health = [
+            p0_row(0, stamp="", health_callback_stamp_s=""),
+            p0_row(1, stamp=200.0, health_callback_stamp_s=100.25),
+        ]
+        manifest = {
+            "run_duration_s": 90.0,
+            "timebase": {
+                "planning_timeline": {"domain": "sim", "field": "stamp_s"},
+                "p0_health_payload": {
+                    "domain": "sim", "field": "health_callback_stamp_s"
+                },
+            },
+        }
+        alignment = analyzer.normalize_p1_2_timebases(timeline, health, manifest)
+        self.assertEqual(alignment["timeline_row_indices"], [1])
+        self.assertEqual(alignment["health_row_indices"], [1])
+        self.assertEqual(alignment["timeline_relative_s"], [0.0])
+        self.assertEqual(alignment["health_relative_s"], [0.25])
 
     def test_required_png_completeness_is_a_final_hard_gate(self):
         self.assertEqual(len(analyzer.P1_2_FIGURE_FILENAMES), 19)
