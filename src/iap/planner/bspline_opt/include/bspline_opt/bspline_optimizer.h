@@ -211,6 +211,7 @@ namespace ego_planner
     const std::vector<P1IntegrityVizSample> &getLastP1IntegrityVizSamples() const { return last_p1_viz_samples_; }
     const P1IntegrityConfig &getP1IntegrityConfig() const { return p1_config_; }
     std::string p1AcceptedTrajectoryRiskProfilePath() const;
+    std::string p1AcceptedTrajectoryRiskProfileContextPath() const;
     const P4RiskAStarConfig &getP4RiskAStarConfig() const { return p4_config_; }
     const std::vector<P4GuideViz> &getLastP4GuideViz() const { return last_p4_guides_; }
     const OptimizerCostBreakdown &getLastOptimizerCostBreakdown() const { return last_optimizer_cost_breakdown_; }
@@ -221,7 +222,9 @@ namespace ego_planner
     bool writeP1AcceptedTrajectoryRiskProfile(UniformBspline trajectory,
                                               uint64_t profile_seq,
                                               uint64_t trajectory_id,
-                                              double stamp_s) const;
+                                              double stamp_s,
+                                              double planning_start_s =
+                                                  std::numeric_limits<double>::quiet_NaN()) const;
 
   private:
     GridMap::Ptr grid_map_;

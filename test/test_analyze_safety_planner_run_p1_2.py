@@ -167,6 +167,8 @@ def accepted_profile_rows(
     valid_count=200,
     c_pi_values=None,
     profile_seq=3,
+    applied_to_objective=1,
+    metrics_only=0,
 ):
     values = list(c_pi_values or [])
     rows = []
@@ -179,8 +181,8 @@ def accepted_profile_rows(
                 "profile_seq": profile_seq,
                 "stamp": 10.0,
                 "trajectory_id": 1,
-                "applied_to_objective": 1,
-                "metrics_only": 0,
+                "applied_to_objective": applied_to_objective,
+                "metrics_only": metrics_only,
                 "lambda_integrity": 0.00001,
                 "snapshot_generation_id": 4,
                 "query_base_time_s": 9.0,
@@ -198,6 +200,36 @@ def accepted_profile_rows(
             }
         )
     return rows
+
+
+def accepted_profile_context(rows):
+    first = rows[0]
+    matched = sum(int(row["hit"]) and int(row["valid"]) and not int(row["stale"]) for row in rows)
+    return [{
+        "profile_seq": first["profile_seq"], "trajectory_id": first["trajectory_id"],
+        "planning_start_s": 9.9, "accepted_stamp_s": 10.0, "planning_duration_s": 0.1,
+        "snapshot_generation_id": first["snapshot_generation_id"], "snapshot_stamp_s": 9.0,
+        "query_base_time_s": first["query_base_time_s"],
+        "snapshot_x_min": -1.0, "snapshot_x_max": 11.0,
+        "snapshot_y_min": -1.0, "snapshot_y_max": 11.0,
+        "snapshot_z_min": 0.0, "snapshot_z_max": 2.0,
+        "snapshot_time_min_s": 9.0, "snapshot_time_max_s": 13.0,
+        "trajectory_x_min": 0.0, "trajectory_x_max": 10.0,
+        "trajectory_y_min": y_min(rows), "trajectory_y_max": y_max(rows),
+        "trajectory_z_min": 1.0, "trajectory_z_max": 1.0,
+        "trajectory_time_min_s": 0.0, "trajectory_time_max_s": 3.0,
+        "expected_sample_count": 200, "matched_sample_count": matched,
+        "match_ratio": matched / 200.0, "query_miss_count": 200 - matched,
+        "stale_count": 0, "invalid_count": 0,
+    }]
+
+
+def y_min(rows):
+    return min(row["y"] for row in rows)
+
+
+def y_max(rows):
+    return max(row["y"] for row in rows)
 
 
 def run_gate(
@@ -243,7 +275,7 @@ def run_gate(
     if p1_2_profile is None and not p1_2_profile_missing:
         p1_2_profile = accepted_profile_rows(0.0, c_pi=1.0)
     if baseline_profile is None and not baseline_profile_missing:
-        baseline_profile = accepted_profile_rows(5.0, c_pi=5.0)
+        baseline_profile = accepted_profile_rows(5.0, c_pi=5.0, applied_to_objective=0, metrics_only=1)
     risk_comparison = analyzer.compare_p1_2_risk_profiles(
         p1_2_bspline,
         baseline_bspline,
@@ -252,6 +284,11 @@ def run_gate(
         p0_resolution_m=0.75,
         p1_2_accepted_profile_rows=None if p1_2_profile_missing else p1_2_profile,
         p1_1_accepted_profile_rows=None if baseline_profile_missing else baseline_profile,
+        p1_2_context_rows=None if p1_2_profile_missing else accepted_profile_context(p1_2_profile),
+        p1_1_context_rows=None if baseline_profile_missing else accepted_profile_context(baseline_profile),
+        p1_2_context_info={"missing": p1_2_profile_missing, "path": "current"},
+        p1_1_context_info={"missing": baseline_profile_missing, "path": "baseline"},
+        stale_timeout_s=1.0,
     )
     failures = []
     inconclusive = []
@@ -463,6 +500,47 @@ class P1_2AnalyzerTest(unittest.TestCase):
         _, failures, _, _ = run_gate(meta=metadata(**{analyzer.P5_GATE_STATUS_TOPIC: 2}))
 
         self.assertTrue(any("P5 leakage" in item for item in failures), failures)
+
+    def test_final_profile_never_falls_back_to_earlier_complete_profile(self):
+        good = accepted_profile_rows(0.0, profile_seq=2)
+        bad = accepted_profile_rows(0.0, profile_seq=3, valid_count=10)
+        gates, failures, _, risk = run_gate(p1_2_profile=good + bad)
+
+        self.assertEqual(risk["p1_2_profile"]["selected_profile_seq"], 3.0)
+        self.assertFalse(gates["p1_2_risk_match_ok"])
+        self.assertTrue(any("coverage is insufficient" in item for item in failures), failures)
+
+    def test_duplicate_or_missing_final_sample_index_fails_closed(self):
+        profile = accepted_profile_rows(0.0)
+        profile[-1]["sample_index"] = 0
+        gates, failures, _, _ = run_gate(p1_2_profile=profile)
+
+        self.assertFalse(gates["p1_2_accepted_profile_format_ok"])
+        self.assertTrue(any("unique sample_index" in item for item in failures), failures)
+
+    def test_required_topic_failure_blocks_nested_gate(self):
+        health = topic_health(**{analyzer.P0_HEALTH_TOPIC: {"status": "FAIL", "count": 3}})
+        gates, failures, _, _ = run_gate(health=health)
+
+        self.assertFalse(gates["required_topics_passed"])
+        self.assertFalse(gates["passed"])
+        self.assertTrue(any("required topics" in item for item in failures), failures)
+
+    def test_stale_or_out_of_bounds_context_fails_closed(self):
+        profile = accepted_profile_rows(0.0)
+        context = accepted_profile_context(profile)
+        context[0]["snapshot_stamp_s"] = 8.0
+        risk = analyzer.compare_p1_2_risk_profiles(
+            bspline_rows(0.0), bspline_rows(5.0), cloud_rows(0.0), cloud_rows(5.0),
+            p0_resolution_m=0.75, p1_2_accepted_profile_rows=profile,
+            p1_1_accepted_profile_rows=accepted_profile_rows(5.0, applied_to_objective=0, metrics_only=1),
+            p1_2_context_rows=context,
+            p1_1_context_rows=accepted_profile_context(accepted_profile_rows(5.0, applied_to_objective=0, metrics_only=1)),
+            p1_2_context_info={"path": "current"}, p1_1_context_info={"path": "reference"},
+            stale_timeout_s=1.0,
+        )
+        self.assertFalse(risk["p1_2_context"]["valid"])
+        self.assertFalse(risk["p1_2_context"]["fresh"])
 
     def test_next_branch_is_exact_for_p1_2(self):
         self.assertEqual(

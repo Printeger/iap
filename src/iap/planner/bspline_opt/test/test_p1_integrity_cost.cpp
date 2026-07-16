@@ -526,6 +526,49 @@ TEST(P1IntegrityCostTest, EnabledAcceptedProfileRecordsAppliedObjectiveAndLambda
   std::remove(profile_path.c_str());
 }
 
+TEST(P1IntegrityCostTest, AcceptedProfileWritesBoundedContextSidecar) {
+  ego_planner::SwarmTrajData swarm;
+  const Eigen::MatrixXd q = makeControlPoints();
+  AffineProvider provider(10.0, Eigen::Vector3d(1.0, 0.0, 0.0));
+  auto snapshot = makeSnapshot(provider);
+  const std::string debug_path = tempProfilePath("p1_context_debug");
+  const std::string profile_path =
+      "/tmp/planner_p1_accepted_trajectory_risk_profile.csv";
+  const std::string context_path =
+      "/tmp/planner_p1_accepted_trajectory_risk_profile_context.csv";
+  std::remove(debug_path.c_str());
+  std::remove(profile_path.c_str());
+  std::remove(context_path.c_str());
+
+  auto config = disabledConfig();
+  config.use_integrity_cost = true;
+  config.metrics_only = false;
+  config.lambda_integrity = 0.00001;
+  config.debug_csv_enable = true;
+  config.debug_csv_path = debug_path;
+  auto optimizer = makeOptimizer(config, &swarm);
+  optimizer->setRiskSnapshot(snapshot, snapshot->stamp_s());
+  ego_planner::UniformBspline trajectory(q, 3, 0.1);
+
+  ASSERT_TRUE(optimizer->writeP1AcceptedTrajectoryRiskProfile(
+      trajectory, 10, 45, 126.0, 125.5));
+  const auto context_rows =
+      readCsvRows(optimizer->p1AcceptedTrajectoryRiskProfileContextPath());
+  ASSERT_EQ(context_rows.size(), 1U);
+  const auto& context = context_rows.front();
+  EXPECT_EQ(context.at("profile_seq"), "10");
+  EXPECT_EQ(context.at("trajectory_id"), "45");
+  EXPECT_EQ(context.at("expected_sample_count"), "200");
+  EXPECT_EQ(context.at("matched_sample_count"), "200");
+  EXPECT_EQ(context.at("snapshot_generation_id"),
+            std::to_string(snapshot->generation_id()));
+  EXPECT_LT(std::stod(context.at("snapshot_x_min")),
+            std::stod(context.at("snapshot_x_max")));
+  std::remove(debug_path.c_str());
+  std::remove(profile_path.c_str());
+  std::remove(context_path.c_str());
+}
+
 TEST(P1IntegrityCostTest, AcceptedProfileLeavesCpiBlankForStaleMisses) {
   ego_planner::SwarmTrajData swarm;
   const Eigen::MatrixXd q = makeControlPoints();

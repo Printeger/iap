@@ -98,6 +98,7 @@ class P0RiskGridRuntime {
 
   void createRosInterfaces();
   void refreshTimerCallback();
+  void healthTimerCallback();
   void publishHealth(const iap::RiskGridHealth& health, double now_s);
 
   void odomCallback(const nav_msgs::msg::Odometry::ConstSharedPtr msg);
@@ -133,7 +134,9 @@ class P0RiskGridRuntime {
   iap::IntegritySnapshotBuilder snapshot_builder_;
 
   rclcpp::CallbackGroup::SharedPtr callback_group_;
+  rclcpp::CallbackGroup::SharedPtr health_callback_group_;
   rclcpp::TimerBase::SharedPtr refresh_timer_;
+  rclcpp::TimerBase::SharedPtr health_timer_;
   std::shared_ptr<SafetyRvizPublisher> safety_viz_;
   rclcpp::Publisher<std_msgs::msg::String>::SharedPtr health_pub_;
   rclcpp::Subscription<nav_msgs::msg::Odometry>::SharedPtr odom_sub_;
@@ -179,6 +182,7 @@ class P0RiskGridRuntime {
   std::size_t latest_lidar_fim_primitive_count_ = 0;
   std::size_t latest_lidar_fim_valid_normal_count_ = 0;
   std::string latest_lidar_fim_fallback_reason_ = "not_evaluated";
+  mutable std::mutex health_state_mutex_;
 };
 
 }  // namespace ego_planner

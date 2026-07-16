@@ -341,6 +341,7 @@ namespace ego_planner
                                         Eigen::Vector3d start_acc, Eigen::Vector3d local_target_pt,
                                         Eigen::Vector3d local_target_vel, bool flag_polyInit, bool flag_randomPolyTraj)
   {
+    const double planning_start_s = plannerNow().seconds();
     static int count = 0;
     printf("\033[47;30m\n[drone %d replan %d]==============================================\033[0m\n", pp_.drone_id, count++);
 
@@ -736,7 +737,7 @@ namespace ego_planner
     const bool p1_profile_written =
         bspline_optimizer_->writeP1AcceptedTrajectoryRiskProfile(
             pos, ++p1_accepted_profile_seq_, local_data_.traj_id_ + 1,
-            accepted_time.seconds());
+            accepted_time.seconds(), planning_start_s);
     bspline_optimizer_->clearRiskSnapshot();
     if (p1_profile_written)
     {

@@ -179,6 +179,7 @@ P1_1_TRAJECTORY_RMS_THRESHOLD_M = 0.5
 P1_1_TRAJECTORY_MAX_THRESHOLD_M = 1.5
 P1_1_DEBUG_CSV_NAME = "planner_p1_integrity_cost_debug.csv"
 P1_ACCEPTED_PROFILE_CSV_NAME = "planner_p1_accepted_trajectory_risk_profile.csv"
+P1_ACCEPTED_PROFILE_CONTEXT_CSV_NAME = "planner_p1_accepted_trajectory_risk_profile_context.csv"
 P1_1_FIGURE_FILENAMES = [
     "p1_1_scenario_topdown.png",
     "p1_1_topic_activity_timeline.png",
@@ -538,6 +539,17 @@ P1_ACCEPTED_PROFILE_FIELDS = [
     "stale",
     "c_pi",
     "reason",
+]
+P1_ACCEPTED_PROFILE_CONTEXT_FIELDS = [
+    "profile_seq", "trajectory_id", "planning_start_s", "accepted_stamp_s",
+    "planning_duration_s", "snapshot_generation_id", "snapshot_stamp_s",
+    "query_base_time_s", "snapshot_x_min", "snapshot_x_max",
+    "snapshot_y_min", "snapshot_y_max", "snapshot_z_min", "snapshot_z_max",
+    "snapshot_time_min_s", "snapshot_time_max_s", "trajectory_time_min_s",
+    "trajectory_time_max_s", "trajectory_x_min", "trajectory_x_max",
+    "trajectory_y_min", "trajectory_y_max", "trajectory_z_min", "trajectory_z_max",
+    "expected_sample_count", "matched_sample_count",
+    "match_ratio", "query_miss_count", "stale_count", "invalid_count",
 ]
 P1_DEBUG_FINITE_FIELDS = [
     "f_integrity",
@@ -1780,6 +1792,11 @@ def compare_p1_2_risk_profiles(
     p1_1_accepted_profile_rows: list[dict[str, Any]] | None = None,
     p1_2_accepted_profile_summary: dict[str, Any] | None = None,
     p1_1_accepted_profile_summary: dict[str, Any] | None = None,
+    p1_2_context_rows: list[dict[str, Any]] | None = None,
+    p1_1_context_rows: list[dict[str, Any]] | None = None,
+    p1_2_context_info: dict[str, Any] | None = None,
+    p1_1_context_info: dict[str, Any] | None = None,
+    stale_timeout_s: float | None = None,
 ) -> dict[str, Any]:
     p1_2_path = final_nonempty_bspline_path_xyz(p1_2_rows)
     p1_1_path = final_nonempty_bspline_path_xyz(p1_1_rows)
@@ -1809,6 +1826,14 @@ def compare_p1_2_risk_profiles(
             missing=p1_1_accepted_profile_rows is None,
         )
     )
+    p1_2_context = validate_p1_profile_context(
+        p1_2_profile, p1_2_context_rows, p1_2_context_info,
+        stale_timeout_s=stale_timeout_s,
+    ) if p1_2_context_rows is not None or p1_2_context_info is not None else {}
+    p1_1_context = validate_p1_profile_context(
+        p1_1_profile, p1_1_context_rows, p1_1_context_info,
+        stale_timeout_s=stale_timeout_s,
+    ) if p1_1_context_rows is not None or p1_1_context_info is not None else {}
     stability = path_stability_metrics(p1_2_path, p1_1_path)
     comparison_metric = (
         "c_pi"
@@ -1871,6 +1896,8 @@ def compare_p1_2_risk_profiles(
         ],
         "p1_2_profile": p1_2_profile,
         "p1_1_profile": p1_1_profile,
+        "p1_2_context": p1_2_context,
+        "p1_1_context": p1_1_context,
         "p1_2_cloud_diagnostic_profile": p1_2_cloud_profile,
         "p1_1_cloud_diagnostic_profile": p1_1_cloud_profile,
         "p1_2_cloud_context": p1_cloud_plot_context(p1_2_cloud_rows),
@@ -6159,11 +6186,44 @@ def p1_accepted_profile_csv_path(export_dir: Path, manifest: dict[str, Any]) -> 
     return p1_debug_csv_path(export_dir, manifest).with_name(P1_ACCEPTED_PROFILE_CSV_NAME)
 
 
+def p1_accepted_profile_context_csv_path(export_dir: Path, manifest: dict[str, Any]) -> Path:
+    manifest_path = str(manifest.get("p1.accepted_profile_context_path", "")).strip() if manifest else ""
+    if manifest_path:
+        path = Path(manifest_path).expanduser()
+        return path if path.is_absolute() else export_dir / path
+    return p1_accepted_profile_csv_path(export_dir, manifest).with_name(P1_ACCEPTED_PROFILE_CONTEXT_CSV_NAME)
+
+
 def p1_profile_seq_value(row: dict[str, Any]) -> tuple[int, float]:
     value = finite_float(row.get("profile_seq"))
     if value is None:
         return (0, -1.0)
     return (1, value)
+
+
+def p1_profile_format_summary(rows: list[dict[str, Any]]) -> dict[str, Any]:
+    indices = [finite_float(row.get("sample_index")) for row in rows]
+    integer_indices = [int(value) for value in indices if value is not None and value.is_integer()]
+    tuple_fields = (
+        "trajectory_id", "applied_to_objective", "metrics_only",
+        "lambda_integrity", "snapshot_generation_id", "query_base_time_s",
+    )
+    tuple_values = {
+        field: {str(row.get(field, "")).strip() for row in rows}
+        for field in tuple_fields
+    }
+    return {
+        "expected_sample_count": P1_2_RISK_SAMPLE_COUNT,
+        "unique_sample_index_count": len(set(integer_indices)),
+        "sample_indices_complete": set(integer_indices) == set(range(P1_2_RISK_SAMPLE_COUNT)),
+        "single_metadata_tuple": all(len(values) == 1 and "" not in values for values in tuple_values.values()),
+        "metadata_tuple_values": {key: sorted(value) for key, value in tuple_values.items()},
+        "format_valid": len(rows) == P1_2_RISK_SAMPLE_COUNT
+        and len(integer_indices) == len(rows)
+        and len(set(integer_indices)) == len(rows)
+        and set(integer_indices) == set(range(P1_2_RISK_SAMPLE_COUNT))
+        and all(len(values) == 1 and "" not in values for values in tuple_values.values()),
+    }
 
 
 def summarize_p1_accepted_profile_rows(
@@ -6205,6 +6265,7 @@ def summarize_p1_accepted_profile_rows(
         sample_rows.append(
             {
                 "profile_seq": row.get("profile_seq", ""),
+                "stamp": row.get("stamp", ""),
                 "trajectory_id": row.get("trajectory_id", ""),
                 "applied_to_objective": row.get("applied_to_objective", ""),
                 "metrics_only": row.get("metrics_only", ""),
@@ -6227,6 +6288,7 @@ def summarize_p1_accepted_profile_rows(
         )
     matched_count = len(c_pi_values)
     sample_count = len(selected_rows)
+    format_summary = p1_profile_format_summary(selected_rows)
     return {
         "missing": missing,
         "path": path,
@@ -6243,6 +6305,7 @@ def summarize_p1_accepted_profile_rows(
         "c_pi_mean": float(np.mean(c_pi_values)) if c_pi_values else None,
         "c_pi_max": max(c_pi_values) if c_pi_values else None,
         "samples": sample_rows,
+        **format_summary,
     }
 
 
@@ -6277,6 +6340,90 @@ def read_p1_accepted_profile_csv(path: Path) -> tuple[list[dict[str, Any]], dict
         missing_fields=missing_fields,
     )
     return rows, summary
+
+
+def read_p1_accepted_profile_context_csv(path: Path) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    if not path.is_file():
+        return [], {"missing": True, "path": str(path), "read_error": "", "rows": []}
+    try:
+        with path.open(newline="") as f:
+            reader = csv.DictReader(f)
+            fields = list(reader.fieldnames or [])
+            rows = list(reader)
+    except Exception as exc:
+        return [], {"missing": False, "path": str(path), "read_error": str(exc), "rows": []}
+    return rows, {
+        "missing": False,
+        "path": str(path),
+        "read_error": "",
+        "rows": rows,
+        "missing_fields": [field for field in P1_ACCEPTED_PROFILE_CONTEXT_FIELDS if field not in fields],
+    }
+
+
+def validate_p1_profile_context(
+    profile: dict[str, Any], context_rows: list[dict[str, Any]] | None, context_info: dict[str, Any] | None,
+    *, stale_timeout_s: float | None = None,
+) -> dict[str, Any]:
+    info = dict(context_info or {})
+    rows = list(context_rows or [])
+    selected = finite_float(profile.get("selected_profile_seq"))
+    matching = [
+        row for row in rows
+        if selected is not None and finite_float(row.get("profile_seq")) == selected
+    ]
+    result: dict[str, Any] = {
+        "path": info.get("path", ""), "missing": bool(info.get("missing", context_rows is None)),
+        "read_error": info.get("read_error", ""), "missing_fields": list(info.get("missing_fields", []) or []),
+        "matching_row_count": len(matching), "selected_profile_seq": profile.get("selected_profile_seq"),
+        "valid": False, "reasons": [],
+    }
+    if result["missing"] or result["read_error"] or result["missing_fields"] or len(matching) != 1:
+        result["reasons"].append("context_missing_or_ambiguous")
+        return result
+    context = matching[0]
+    result["context"] = context
+    numeric = {key: finite_float(context.get(key)) for key in P1_ACCEPTED_PROFILE_CONTEXT_FIELDS if key not in ("profile_seq",)}
+    required_numeric = ("trajectory_id", "planning_start_s", "accepted_stamp_s", "planning_duration_s", "snapshot_generation_id", "snapshot_stamp_s", "query_base_time_s", "snapshot_x_min", "snapshot_x_max", "snapshot_y_min", "snapshot_y_max", "snapshot_z_min", "snapshot_z_max", "snapshot_time_min_s", "snapshot_time_max_s", "trajectory_x_min", "trajectory_x_max", "trajectory_y_min", "trajectory_y_max", "trajectory_z_min", "trajectory_z_max", "trajectory_time_min_s", "trajectory_time_max_s", "expected_sample_count", "matched_sample_count", "match_ratio", "query_miss_count", "stale_count", "invalid_count")
+    if any(numeric.get(key) is None for key in required_numeric):
+        result["reasons"].append("context_nonfinite")
+        return result
+    samples = profile.get("samples", []) or []
+    def sample_in_bounds(row: dict[str, Any]) -> bool:
+        x, y, z, t_s = (finite_float(row.get(key)) for key in ("x", "y", "z", "t_s"))
+        return (
+            x is not None and y is not None and z is not None and t_s is not None
+            and numeric["snapshot_x_min"] <= x <= numeric["snapshot_x_max"]
+            and numeric["snapshot_y_min"] <= y <= numeric["snapshot_y_max"]
+            and numeric["snapshot_z_min"] <= z <= numeric["snapshot_z_max"]
+            and numeric["snapshot_time_min_s"] <= numeric["query_base_time_s"] + t_s <= numeric["snapshot_time_max_s"]
+        )
+    in_bounds = len(samples) == P1_2_RISK_SAMPLE_COUNT and all(sample_in_bounds(row) for row in samples)
+    bindings_ok = (
+        str(context.get("trajectory_id")) == str((profile.get("metadata_tuple_values", {}).get("trajectory_id") or [""])[0])
+        and str(context.get("snapshot_generation_id")) == str((profile.get("metadata_tuple_values", {}).get("snapshot_generation_id") or [""])[0])
+        and str(context.get("query_base_time_s")) == str((profile.get("metadata_tuple_values", {}).get("query_base_time_s") or [""])[0])
+        and int(numeric["expected_sample_count"]) == P1_2_RISK_SAMPLE_COUNT
+        and int(numeric["matched_sample_count"]) == int(profile.get("matched_sample_count", 0) or 0)
+        and abs(numeric["match_ratio"] - float(profile.get("match_ratio", 0.0) or 0.0)) <= 1.0e-12
+    )
+    profile_stamps = {finite_float(row.get("stamp")) for row in samples}
+    profile_stamps.discard(None)
+    accepted_stamp_matches = len(profile_stamps) == 1 and abs(next(iter(profile_stamps)) - numeric["accepted_stamp_s"]) <= 1.0e-9
+    trajectory_bounds_match = bool(samples) and all(
+        numeric["trajectory_x_min"] <= finite_float(row.get("x")) <= numeric["trajectory_x_max"]
+        and numeric["trajectory_y_min"] <= finite_float(row.get("y")) <= numeric["trajectory_y_max"]
+        and numeric["trajectory_z_min"] <= finite_float(row.get("z")) <= numeric["trajectory_z_max"]
+        for row in samples
+        if finite_float(row.get("x")) is not None and finite_float(row.get("y")) is not None and finite_float(row.get("z")) is not None
+    )
+    context_age_s = numeric["accepted_stamp_s"] - numeric["snapshot_stamp_s"]
+    fresh = context_age_s >= 0.0 and (stale_timeout_s is None or context_age_s <= stale_timeout_s)
+    result.update({"in_bounds": in_bounds, "bindings_ok": bindings_ok, "accepted_stamp_matches": accepted_stamp_matches, "trajectory_bounds_match": trajectory_bounds_match, "fresh": fresh, "context_age_s": context_age_s})
+    result["valid"] = bool(profile.get("format_valid")) and in_bounds and bindings_ok and accepted_stamp_matches and trajectory_bounds_match and fresh
+    if not result["valid"]:
+        result["reasons"].append("context_profile_binding_or_bounds_invalid")
+    return result
 
 
 def summarize_p1_integrity_debug_rows(
@@ -6925,6 +7072,10 @@ def validate_p1_1_hard_gates(
         "p1_rviz_topics_present": all(
             p1_rviz_topic_counts.get(topic, 0) > 0 for topic in P1_RVIZ_TOPICS
         ),
+        "required_topics_passed": all(
+            (topic_health.get(topic) or {}).get("status") == "PASS"
+            for topic in P1_TOPIC_EXPECTATIONS
+        ),
         "p1_bspline_inspection_ok": not bool(p1_bspline_error),
         "bspline_publish_present": len(p1_bspline_rows) > 0
         and int(
@@ -7198,8 +7349,16 @@ def validate_p1_2_hard_gates(
     }
     p1_2_profile = risk_comparison.get("p1_2_profile", {}) or {}
     p1_1_profile = risk_comparison.get("p1_1_profile", {}) or {}
+    p1_2_context = risk_comparison.get("p1_2_context", {}) or {}
+    p1_1_context = risk_comparison.get("p1_1_context", {}) or {}
     trajectory_stability = risk_comparison.get("trajectory_stability", {}) or {}
     weighted_max = finite_float(p1_debug_summary.get("weighted_f_integrity_max"))
+    p1_2_metadata = p1_2_profile.get("metadata_tuple_values", {}) or {}
+    p1_1_metadata = p1_1_profile.get("metadata_tuple_values", {}) or {}
+    def profile_value(values: dict[str, Any], key: str) -> str:
+        value = values.get(key, []) or []
+        return str(value[0]) if len(value) == 1 else ""
+    expected_lambda = finite_float(manifest.get("p1.lambda_integrity"))
     gates: dict[str, Any] = {
         **manifest_gates,
         **reference_manifest_gates,
@@ -7257,6 +7416,10 @@ def validate_p1_2_hard_gates(
             p1_rviz_topic_counts.get(topic, 0) > 0 for topic in P1_RVIZ_TOPICS
         ),
         "p1_2_bspline_inspection_ok": not bool(p1_2_bspline_error),
+        "required_topics_passed": all(
+            (topic_health.get(topic) or {}).get("status") == "PASS"
+            for topic in P1_TOPIC_EXPECTATIONS
+        ),
         "bspline_publish_present": len(p1_2_bspline_rows) > 0
         and int(
             (topic_health.get("/drone_0_planning/bspline") or {}).get("count", 0) or 0
@@ -7283,6 +7446,11 @@ def validate_p1_2_hard_gates(
         )
         == 0
         and not bool(p1_2_profile.get("read_error")),
+        "p1_2_accepted_profile_format_ok": bool(p1_2_profile.get("format_valid")),
+        "p1_2_accepted_profile_context_ok": bool(p1_2_context.get("valid")),
+        "p1_2_profile_objective_metadata_ok": profile_value(p1_2_metadata, "metrics_only") in ("0", "false", "False")
+        and profile_value(p1_2_metadata, "applied_to_objective") in ("1", "true", "True")
+        and finite_float(profile_value(p1_2_metadata, "lambda_integrity")) == expected_lambda,
         "p1_1_risk_matched_sample_count": int(
             p1_1_profile.get("matched_sample_count", 0) or 0
         ),
@@ -7294,6 +7462,11 @@ def validate_p1_2_hard_gates(
         )
         == 0
         and not bool(p1_1_profile.get("read_error")),
+        "p1_1_accepted_profile_format_ok": bool(p1_1_profile.get("format_valid")),
+        "p1_1_accepted_profile_context_ok": bool(p1_1_context.get("valid")),
+        "p1_1_profile_objective_metadata_ok": profile_value(p1_1_metadata, "metrics_only") in ("1", "true", "True")
+        and profile_value(p1_1_metadata, "applied_to_objective") in ("0", "false", "False")
+        and finite_float(profile_value(p1_1_metadata, "lambda_integrity")) == expected_lambda,
         "accepted_profile_missing": bool(risk_comparison.get("accepted_profile_missing")),
         "risk_match_min_count": P1_2_MIN_RISK_MATCH_COUNT,
         "risk_match_min_ratio": P1_2_MIN_RISK_MATCH_RATIO,
@@ -7370,6 +7543,8 @@ def validate_p1_2_hard_gates(
         failures.append("P1-2 weighted_f_integrity_max is not positive")
     if not gates["p1_rviz_topics_present"]:
         failures.append("P1-2 required P1 RViz topics are missing")
+    if not gates["required_topics_passed"]:
+        failures.append("P1-2 one or more required topics failed periodicity or presence checks")
     if p1_2_bspline_error:
         failures.append(f"P1-2 could not inspect /drone_0_planning/bspline: {p1_2_bspline_error}")
     if not gates["bspline_publish_present"]:
@@ -7406,6 +7581,12 @@ def validate_p1_2_hard_gates(
         failures.append("P1-2 accepted trajectory risk profile CSV is not parseable")
     if not gates["p1_1_accepted_profile_parse_ok"]:
         failures.append("P1-2 P1-1 reference accepted trajectory risk profile CSV is not parseable")
+    if not gates["p1_2_accepted_profile_format_ok"] or not gates["p1_1_accepted_profile_format_ok"]:
+        failures.append("P1-2 final accepted profile must contain exactly unique sample_index=0..199 and one metadata tuple")
+    if not gates["p1_2_accepted_profile_context_ok"] or not gates["p1_1_accepted_profile_context_ok"]:
+        failures.append("P1-2 accepted-profile context sidecar is missing, stale, out of bounds, or not bound to the selected profile")
+    if not gates["p1_2_profile_objective_metadata_ok"] or not gates["p1_1_profile_objective_metadata_ok"]:
+        failures.append("P1-2 accepted profile metadata does not prove enabled/reference objective semantics or manifest lambda")
     if not gates["p1_2_risk_match_ok"] or not gates["p1_1_risk_match_ok"]:
         failures.append(
             "P1-2 accepted trajectory risk profile coverage is insufficient "
@@ -7430,7 +7611,7 @@ def validate_p1_2_hard_gates(
     if not gates["cause_exclusion_passed"]:
         failures.append("P1-2 cause exclusion found unreduced risk, coverage loss, missing evidence, publish failure, P0 stale, or P5 leakage")
 
-    gates["passed"] = not any(message.startswith("P1-2") for message in failures + inconclusive)
+    gates["passed"] = gates["required_topics_passed"] and not any(message.startswith("P1-2") for message in failures + inconclusive)
     return gates
 
 
@@ -13552,6 +13733,8 @@ def analyze(args: argparse.Namespace) -> dict[str, Any]:
     p1_debug_summary: dict[str, Any] = {}
     p1_accepted_profile_rows: list[dict[str, Any]] = []
     p1_accepted_profile_summary: dict[str, Any] = {}
+    p1_accepted_profile_context_rows: list[dict[str, Any]] = []
+    p1_accepted_profile_context_info: dict[str, Any] = {}
     if p1_phase:
         p1_debug_rows, p1_debug_summary = read_p1_integrity_debug_csv(
             p1_debug_csv_path(export_dir, manifest)
@@ -13559,6 +13742,11 @@ def analyze(args: argparse.Namespace) -> dict[str, Any]:
         p1_accepted_profile_rows, p1_accepted_profile_summary = (
             read_p1_accepted_profile_csv(
                 p1_accepted_profile_csv_path(export_dir, manifest)
+            )
+        )
+        p1_accepted_profile_context_rows, p1_accepted_profile_context_info = (
+            read_p1_accepted_profile_context_csv(
+                p1_accepted_profile_context_csv_path(export_dir, manifest)
             )
         )
 
@@ -14294,6 +14482,8 @@ def analyze(args: argparse.Namespace) -> dict[str, Any]:
     p1_2_reference_bspline_error = ""
     p1_2_reference_profile_rows: list[dict[str, Any]] = []
     p1_2_reference_profile_summary: dict[str, Any] = {}
+    p1_2_reference_context_rows: list[dict[str, Any]] = []
+    p1_2_reference_context_info: dict[str, Any] = {}
     p1_2_reference_cloud_rows: list[dict[str, Any]] = []
     p1_2_reference_cloud_source = ""
     p1_2_risk_comparison: dict[str, Any] = {}
@@ -14344,6 +14534,29 @@ def analyze(args: argparse.Namespace) -> dict[str, Any]:
             failures,
             inconclusive,
         )
+        p1_1_context = validate_p1_profile_context(
+            p1_accepted_profile_summary,
+            p1_accepted_profile_context_rows,
+            p1_accepted_profile_context_info,
+            stale_timeout_s=finite_float(manifest.get("p0.stale_timeout_s")),
+        )
+        metadata_values = p1_accepted_profile_summary.get("metadata_tuple_values", {}) or {}
+        def p1_1_profile_value(key: str) -> str:
+            values = metadata_values.get(key, []) or []
+            return str(values[0]) if len(values) == 1 else ""
+        p1_1_metadata_ok = (
+            p1_1_profile_value("metrics_only") in ("1", "true", "True")
+            and p1_1_profile_value("applied_to_objective") in ("0", "false", "False")
+        )
+        p1_1_gates.update({
+            "accepted_profile_format_ok": bool(p1_accepted_profile_summary.get("format_valid")),
+            "accepted_profile_context_ok": bool(p1_1_context.get("valid")),
+            "accepted_profile_metadata_ok": p1_1_metadata_ok,
+            "accepted_profile_context": p1_1_context,
+        })
+        if not all((p1_1_gates["accepted_profile_format_ok"], p1_1_gates["accepted_profile_context_ok"], p1_1_metadata_ok)):
+            failures.append("P1-1 final accepted profile must be complete, context-bound, and metrics-only")
+            p1_1_gates["passed"] = False
     if p1_2_phase:
         p1_2_bspline_rows, p1_2_bspline_error = (
             read_bspline_messages(bag_dir, metadata)
@@ -14360,6 +14573,11 @@ def analyze(args: argparse.Namespace) -> dict[str, Any]:
             p1_2_reference_profile_rows, p1_2_reference_profile_summary = (
                 read_p1_accepted_profile_csv(
                     p1_accepted_profile_csv_path(baseline_export_dir, baseline_manifest)
+                )
+            )
+            p1_2_reference_context_rows, p1_2_reference_context_info = (
+                read_p1_accepted_profile_context_csv(
+                    p1_accepted_profile_context_csv_path(baseline_export_dir, baseline_manifest)
                 )
             )
         else:
@@ -14387,6 +14605,11 @@ def analyze(args: argparse.Namespace) -> dict[str, Any]:
             p1_1_accepted_profile_rows=p1_2_reference_profile_rows,
             p1_2_accepted_profile_summary=p1_accepted_profile_summary,
             p1_1_accepted_profile_summary=p1_2_reference_profile_summary,
+            p1_2_context_rows=p1_accepted_profile_context_rows,
+            p1_1_context_rows=p1_2_reference_context_rows,
+            p1_2_context_info=p1_accepted_profile_context_info,
+            p1_1_context_info=p1_2_reference_context_info,
+            stale_timeout_s=finite_float(manifest.get("p0.stale_timeout_s")),
         )
         p1_2_gates = validate_p1_2_hard_gates(
             manifest,

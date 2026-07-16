@@ -1635,6 +1635,9 @@ def _launch_setup(context):
     p1_accepted_profile_path_for_manifest = str(
         Path(p1_debug_path_for_manifest).with_name("planner_p1_accepted_trajectory_risk_profile.csv")
     )
+    p1_accepted_profile_context_path_for_manifest = str(
+        Path(p1_debug_path_for_manifest).with_name("planner_p1_accepted_trajectory_risk_profile_context.csv")
+    )
     p5_final_for_fixture = (
         _param_bool(context, "p5.enable_final_gate")
         if "p5.enable_final_gate" in overrides
@@ -1657,6 +1660,15 @@ def _launch_setup(context):
         "p1.lambda_integrity": _param_float(context, "p1.lambda_integrity"),
         "p1.debug_csv_path": p1_debug_path_for_manifest,
         "p1.accepted_profile_path": p1_accepted_profile_path_for_manifest,
+        "p1.accepted_profile_context_path": p1_accepted_profile_context_path_for_manifest,
+        "p0.resolution_m": _param_float(context, "p0.resolution_m"),
+        "p0.size_x_m": _param_float(context, "p0.size_x_m"),
+        "p0.size_y_m": _param_float(context, "p0.size_y_m"),
+        "p0.size_z_m": _param_float(context, "p0.size_z_m"),
+        "p0.horizons_s": _csv_floats(LaunchConfiguration("p0.horizons_s").perform(context)),
+        "p0.refresh_period_s": _param_float(context, "p0.refresh_period_s"),
+        "p0.stale_timeout_s": _param_float(context, "p0.stale_timeout_s"),
+        "p0.batch_worker_count": 1,
         "p0.skip_occupied_voxels": _param_bool(context, "p0.skip_occupied_voxels"),
         "p0.predictor.source_mode": LaunchConfiguration("p0.predictor.source_mode").perform(context),
         "p0.predictor.gnss_epoch_policy": LaunchConfiguration("p0.predictor.gnss_epoch_policy").perform(context),

@@ -17,6 +17,8 @@ namespace ego_planner
     constexpr int kP1AcceptedProfileSampleCount = 200;
     constexpr const char *kP1AcceptedProfileCsvName =
         "planner_p1_accepted_trajectory_risk_profile.csv";
+    constexpr const char *kP1AcceptedProfileContextCsvName =
+        "planner_p1_accepted_trajectory_risk_profile_context.csv";
 
     double pathLength(const std::vector<Eigen::Vector3d> &path)
     {
@@ -2259,11 +2261,21 @@ namespace ego_planner
     return siblingPath(p1_config_.debug_csv_path, kP1AcceptedProfileCsvName);
   }
 
+  std::string BsplineOptimizer::p1AcceptedTrajectoryRiskProfileContextPath() const
+  {
+    if (p1_config_.debug_csv_path.empty())
+    {
+      return kP1AcceptedProfileContextCsvName;
+    }
+    return siblingPath(p1_config_.debug_csv_path, kP1AcceptedProfileContextCsvName);
+  }
+
   bool BsplineOptimizer::writeP1AcceptedTrajectoryRiskProfile(
       UniformBspline trajectory,
       const uint64_t profile_seq,
       const uint64_t trajectory_id,
-      const double stamp_s) const
+      const double stamp_s,
+      const double planning_start_s) const
   {
     if (!p1_config_.debug_csv_enable || p1_config_.debug_csv_path.empty() ||
         !risk_snapshot_)
@@ -2300,6 +2312,14 @@ namespace ego_planner
         p1_config_.use_integrity_cost && !p1_config_.metrics_only &&
         p1_config_.lambda_integrity != 0.0;
     const int denom = std::max(1, kP1AcceptedProfileSampleCount - 1);
+    int matched_count = 0;
+    int query_miss_count = 0;
+    int stale_count = 0;
+    int invalid_count = 0;
+    Eigen::Vector3d trajectory_min = Eigen::Vector3d::Constant(
+        std::numeric_limits<double>::infinity());
+    Eigen::Vector3d trajectory_max = Eigen::Vector3d::Constant(
+        -std::numeric_limits<double>::infinity());
     for (int sample_index = 0; sample_index < kP1AcceptedProfileSampleCount;
          ++sample_index)
     {
@@ -2307,6 +2327,8 @@ namespace ego_planner
           static_cast<double>(sample_index) / static_cast<double>(denom);
       const double t_s = duration * arc_fraction;
       const Eigen::Vector3d p = trajectory.evaluateDeBoorT(t_s);
+      trajectory_min = trajectory_min.cwiseMin(p);
+      trajectory_max = trajectory_max.cwiseMax(p);
       iap::RiskCostSample sample;
       const bool hit =
           risk_snapshot_->queryCost(p, risk_query_base_time_s_ + t_s, &sample);
@@ -2317,6 +2339,14 @@ namespace ego_planner
       {
         reason = "query_miss";
       }
+      if (c_pi_finite)
+        ++matched_count;
+      else if (sample.stale)
+        ++stale_count;
+      else if (!hit)
+        ++query_miss_count;
+      else
+        ++invalid_count;
 
       out << profile_seq << ','
           << stamp_s << ','
@@ -2341,6 +2371,39 @@ namespace ego_planner
       }
       out << ',' << reason << '\n';
     }
+    out.close();
+
+    const std::string context_path = p1AcceptedTrajectoryRiskProfileContextPath();
+    std::ifstream existing_context(context_path);
+    const bool write_context_header = !existing_context.good() ||
+        existing_context.peek() == std::ifstream::traits_type::eof();
+    existing_context.close();
+    std::ofstream context(context_path, std::ios::app);
+    if (!context.good())
+      return false;
+    const Eigen::Vector3d min_bound = risk_snapshot_->origin();
+    const Eigen::Vector3i dims = risk_snapshot_->voxelNum();
+    const double resolution = risk_snapshot_->params().resolution_m;
+    const Eigen::Vector3d max_bound = min_bound +
+        ((dims.array().max(0).cast<double>() - 1.0).max(0.0) * resolution).matrix();
+    const auto &horizons = risk_snapshot_->params().horizons_s;
+    const auto horizon_minmax = std::minmax_element(horizons.begin(), horizons.end());
+    const double tau_min = horizon_minmax.first == horizons.end() ? 0.0 : *horizon_minmax.first;
+    const double tau_max = horizon_minmax.second == horizons.end() ? 0.0 : *horizon_minmax.second;
+    const Eigen::Vector3d center = 0.5 * (min_bound + max_bound);
+    context << std::setprecision(17);
+    if (write_context_header)
+      context << "profile_seq,trajectory_id,planning_start_s,accepted_stamp_s,planning_duration_s,snapshot_generation_id,snapshot_stamp_s,query_base_time_s,snapshot_center_x,snapshot_center_y,snapshot_center_z,snapshot_x_min,snapshot_x_max,snapshot_y_min,snapshot_y_max,snapshot_z_min,snapshot_z_max,snapshot_time_min_s,snapshot_time_max_s,trajectory_x_min,trajectory_x_max,trajectory_y_min,trajectory_y_max,trajectory_z_min,trajectory_z_max,trajectory_time_min_s,trajectory_time_max_s,expected_sample_count,matched_sample_count,match_ratio,query_miss_count,stale_count,invalid_count\n";
+    context << profile_seq << ',' << trajectory_id << ',' << planning_start_s << ',' << stamp_s << ','
+            << (std::isfinite(planning_start_s) ? stamp_s - planning_start_s : std::numeric_limits<double>::quiet_NaN()) << ','
+            << risk_snapshot_->generation_id() << ',' << risk_snapshot_->stamp_s() << ',' << risk_query_base_time_s_ << ','
+            << center.x() << ',' << center.y() << ',' << center.z() << ','
+            << min_bound.x() << ',' << max_bound.x() << ',' << min_bound.y() << ',' << max_bound.y() << ',' << min_bound.z() << ',' << max_bound.z() << ','
+            << risk_query_base_time_s_ + tau_min << ',' << risk_query_base_time_s_ + tau_max << ','
+            << trajectory_min.x() << ',' << trajectory_max.x() << ',' << trajectory_min.y() << ',' << trajectory_max.y() << ',' << trajectory_min.z() << ',' << trajectory_max.z() << ','
+            << 0.0 << ',' << duration << ','
+            << kP1AcceptedProfileSampleCount << ',' << matched_count << ',' << static_cast<double>(matched_count) / kP1AcceptedProfileSampleCount << ','
+            << query_miss_count << ',' << stale_count << ',' << invalid_count << '\n';
     return true;
   }
 

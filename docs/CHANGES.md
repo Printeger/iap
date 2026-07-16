@@ -3,6 +3,11 @@
 > 规则：任何代码改动必须在这里记录，并包含 IAP-RQ-XXX。
 
 ## Unreleased
+- fix(planner-p1-accepted-context): IAP-RQ-320 / IAP-RQ-400 / IAP-RQ-410 — make accepted P1 profile evidence fail closed and decouple P0 health cadence from refresh latency.
+  - Each accepted final B-spline now writes `planner_p1_accepted_trajectory_risk_profile_context.csv` beside the existing 200-sample profile. The sidecar binds profile sequence, trajectory, planning/acceptance timing, snapshot generation/query base, spatial/time bounds, expected/matched samples, and miss categories.
+  - The analyzer selects only the greatest `profile_seq`; it requires exactly one complete `sample_index=0..199` set, one metadata tuple, an in-bounds/fresh matching context, P1-1 metrics-only metadata, P1-2 enabled metadata and exact lambda, and all required topic-health statuses before P1-2 can pass.
+  - P0 adds an independent periodic health timer so the original JSON health topic continues reporting snapshot age while a heavy refresh is running. The launch manifest records P0 geometry, timing, and batch-worker configuration.
+  - Focused P1-2 analyzer coverage now includes final-profile non-fallback, duplicate-index rejection, and required-topic failure. No fresh P1-1/P1-2 ROS rerun was performed in this change; acceptance remains `FAIL -> lambda/gradient debug` until those artifacts exist.
 - fix(planner-p1-risk-profile-evidence): IAP-RQ-320 / IAP-RQ-400 / IAP-RQ-410 — make P1-2 risk-reduction evidence use accepted final-trajectory profiles instead of latest RViz cloud coverage.
   - `bspline_optimizer`: writes `planner_p1_accepted_trajectory_risk_profile.csv` beside the P1 debug CSV with 200 samples from each accepted final bspline, including objective application state, metrics-only state, lambda, snapshot generation, query base time, hit/valid/stale flags, `c_pi`, and miss reason.
   - `planner_manager`: preserves the planning P0 risk snapshot for the accepted bspline profile, aligns planner risk queries to the snapshot stamp, and logs the accepted profile path/sequence before publishing trajectory info.

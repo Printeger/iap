@@ -605,6 +605,8 @@ void P0RiskGridRuntime::createRosInterfaces() {
   }
   callback_group_ =
       node_->create_callback_group(rclcpp::CallbackGroupType::MutuallyExclusive);
+  health_callback_group_ =
+      node_->create_callback_group(rclcpp::CallbackGroupType::Reentrant);
   rclcpp::SubscriptionOptions subscription_options;
   subscription_options.callback_group = callback_group_;
   const rclcpp::QoS qos(50);
@@ -672,6 +674,22 @@ void P0RiskGridRuntime::createRosInterfaces() {
       std::chrono::duration<double>(period_s),
       [this]() { refreshTimerCallback(); },
       callback_group_);
+  // Health must remain observable while a full grid refresh is evaluating a
+  // large predictor batch.  It intentionally publishes the latest snapshot
+  // state rather than waiting for that batch to finish.
+  health_timer_ = node_->create_wall_timer(
+      std::chrono::duration<double>(period_s),
+      [this]() { healthTimerCallback(); },
+      health_callback_group_);
+}
+
+void P0RiskGridRuntime::healthTimerCallback() {
+  if (!config_.enable_risk_grid) {
+    return;
+  }
+  const double now_s = currentMessageStamp();
+  publishHealth(std::isfinite(now_s) ? risk_grid_.health(now_s)
+                                     : risk_grid_.health(), now_s);
 }
 
 void P0RiskGridRuntime::refreshTimerCallback() {
@@ -685,28 +703,38 @@ void P0RiskGridRuntime::refreshTimerCallback() {
   };
   const auto refresh_start = std::chrono::steady_clock::now();
   const double now_s = currentMessageStamp();
-  last_refresh_stamp_s_ = now_s;
-  last_snapshot_available_ = false;
-  last_refresh_query_count_ = 0;
+  {
+    std::lock_guard<std::mutex> health_lock(health_state_mutex_);
+    last_refresh_stamp_s_ = now_s;
+    last_snapshot_available_ = false;
+    last_refresh_query_count_ = 0;
+  }
   if (!std::isfinite(now_s) || now_s <= 0.0) {
     risk_grid_.markRefreshFailure(now_s, "message_stamp_unavailable");
-    last_refresh_elapsed_ms_ =
-        std::chrono::duration<double, std::milli>(
-            std::chrono::steady_clock::now() - refresh_start).count();
+    {
+      std::lock_guard<std::mutex> health_lock(health_state_mutex_);
+      last_refresh_elapsed_ms_ = std::chrono::duration<double, std::milli>(
+          std::chrono::steady_clock::now() - refresh_start).count();
+    }
     reset_refresh_timer();
     return;
   }
   iap::IntegritySnapshot snapshot;
   if (!buildSnapshot(now_s, &snapshot)) {
     risk_grid_.markRefreshFailure(now_s, "snapshot_unavailable");
-    last_refresh_elapsed_ms_ =
-        std::chrono::duration<double, std::milli>(
-            std::chrono::steady_clock::now() - refresh_start).count();
+    {
+      std::lock_guard<std::mutex> health_lock(health_state_mutex_);
+      last_refresh_elapsed_ms_ = std::chrono::duration<double, std::milli>(
+          std::chrono::steady_clock::now() - refresh_start).count();
+    }
     publishHealth(risk_grid_.health(now_s), now_s);
     reset_refresh_timer();
     return;
   }
-  last_snapshot_available_ = true;
+  {
+    std::lock_guard<std::mutex> health_lock(health_state_mutex_);
+    last_snapshot_available_ = true;
+  }
 
   std::unique_ptr<iap::RiskPredictionProvider> local_provider;
   iap::RiskPredictionProvider* provider = provider_.get();
@@ -757,18 +785,23 @@ void P0RiskGridRuntime::refreshTimerCallback() {
       static_cast<std::size_t>(std::max(0, voxel_num.x())) *
       static_cast<std::size_t>(std::max(0, voxel_num.y())) *
       static_cast<std::size_t>(std::max(0, voxel_num.z()));
-  last_refresh_query_count_ =
-      layer_voxel_count * config_.grid.horizons_s.size();
+  {
+    std::lock_guard<std::mutex> health_lock(health_state_mutex_);
+    last_refresh_query_count_ =
+        layer_voxel_count * config_.grid.horizons_s.size();
+  }
   const auto occupancy_predicate = combinedOccupancyPredicate();
   risk_grid_.refreshFromProvider(latest_odom_p_, now_s, *provider,
                                  occupancy_predicate, &reason);
   const iap::RiskGridHealth health = risk_grid_.health(now_s);
   const auto viz_snapshot = risk_grid_.acquireSnapshot();
-  last_grid_stamp_s_ = viz_snapshot ? viz_snapshot->stamp_s()
-                                    : std::numeric_limits<double>::quiet_NaN();
-  last_refresh_elapsed_ms_ =
-      std::chrono::duration<double, std::milli>(
-          std::chrono::steady_clock::now() - refresh_start).count();
+  {
+    std::lock_guard<std::mutex> health_lock(health_state_mutex_);
+    last_grid_stamp_s_ = viz_snapshot ? viz_snapshot->stamp_s()
+                                      : std::numeric_limits<double>::quiet_NaN();
+    last_refresh_elapsed_ms_ = std::chrono::duration<double, std::milli>(
+        std::chrono::steady_clock::now() - refresh_start).count();
+  }
   publishHealth(health, now_s);
   if (safety_viz_) {
     safety_viz_->publishPredictedPLCloud(viz_snapshot, latest_odom_p_.z(),
@@ -781,6 +814,7 @@ void P0RiskGridRuntime::refreshTimerCallback() {
 
 void P0RiskGridRuntime::publishHealth(const iap::RiskGridHealth& health,
                                       const double now_s) {
+  std::lock_guard<std::mutex> health_lock(health_state_mutex_);
   const iap::RiskGridHealth enriched_health =
       addLidarPredictorInputHealth(health);
   if (safety_viz_) {
@@ -895,6 +929,7 @@ void P0RiskGridRuntime::odomCallback(
   if (!msg) {
     return;
   }
+  std::lock_guard<std::mutex> health_lock(health_state_mutex_);
   latest_odom_stamp_ = stampToSec(msg->header.stamp);
   latest_odom_p_ = Eigen::Vector3d(msg->pose.pose.position.x,
                                    msg->pose.pose.position.y,
@@ -915,6 +950,7 @@ void P0RiskGridRuntime::integrityCallback(
   if (!msg) {
     return;
   }
+  std::lock_guard<std::mutex> health_lock(health_state_mutex_);
   latest_current_ = currentFromMsg(*msg);
   latest_current_valid_ = latest_current_.valid;
 }
@@ -1258,6 +1294,7 @@ iap::RiskGridHealth P0RiskGridRuntime::addLidarPredictorInputHealth(
 }
 
 double P0RiskGridRuntime::currentMessageStamp() const {
+  std::lock_guard<std::mutex> health_lock(health_state_mutex_);
   if (std::isfinite(latest_odom_stamp_) && latest_odom_stamp_ > 0.0) {
     return latest_odom_stamp_;
   }

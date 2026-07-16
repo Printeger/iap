@@ -104,6 +104,10 @@ _Avoid_: treating missing P0 health as successful isolation, accepting P5-disabl
 Evidence that a `planner_safety_profile=p1` run computes P1 integrity cost and gradient metrics, keeps every P1 debug row `applied_to_objective=false`, publishes the P1 RViz evidence topics, and leaves the final `/drone_0_planning/bspline` control-point path close to a fresh same-scenario P0-only baseline.
 _Avoid_: accepting a metrics-only run without a fresh baseline, using truth odom drift instead of planner bspline shape, or passing by suppressing P1 metrics/objective evidence.
 
+**Accepted-profile context evidence**:
+The per-accepted-trajectory sidecar bound to the same P0 snapshot and query-base that P1 used while planning. It records planning/acceptance times, snapshot generation and bounds, trajectory time bounds, expected samples, and miss categories. It is fail-closed evidence: it is neither an RViz cloud nor an analyzer reconstruction of risk.
+_Avoid_: latest RViz cloud as pass evidence, a prior accepted profile, or re-querying a newer snapshot in the analyzer.
+
 **Causal replan evidence**:
 Analyzer/status evidence that a `REQUEST_REPLAN` action and the future-risk gate/reason that caused it are both traceable in the same P5 run, including concurrent current and future reasons when both gates are active.
 _Avoid_: action count without gate reason, margin evidence with no replan attribution
