@@ -121,3 +121,12 @@
 | IAP-RQ-400 | P1 temporal coverage is a soft preference, never a global trajectory hard gate; metrics-only and enabled-unavailable cases need explicit base fallback | `p1_soft_fallback_policy.h`, `planner_manager.cpp`, `bspline_optimizer.cpp`, `test_planning_risk_context`, `test_p1_integrity_cost`; profile/sidecar rows append objective-requested/applied and fallback reason fields, including a fail-closed 200-sample profile when no snapshot exists | **IMPLEMENTED; fresh accepted-profile reduction pending** |
 | IAP-RQ-410 | Every P0 generation, including generation 0 and startup-unavailable, has at most one planning admission before context acquisition/optimizer start | `p1_replan_admission.{h,cpp}`, `ego_replan_fsm.cpp`, `test_p1_replan_admission`; typed decisions cover base-initial fallback, keep-existing, same-generation deferral, and retry on the next ready/non-stale generation | **IMPLEMENTED; fresh no-storm evidence pending** |
 | IAP-RQ-320 | P0 refresh must fit the unchanged freshness budget by avoiding repeated predictor work | `predictor_module.{hpp,cpp}`, `p0_risk_grid_runtime.{h,cpp}`, `test_predictor_module`, `test_p0_risk_grid_runtime`; batch queries reuse one LiDAR advisory per unique position while preserving per-horizon GNSS/freshness/fusion results and output order; health exposes evaluation/cache counters | **IMPLEMENTED; fresh latency evidence pending** |
+
+## 2026-07-16 P1-2 mixed-timebase repair fresh terminal evidence
+
+| Req ID | Fresh evidence | Result |
+|---|---|---|
+| IAP-RQ-320 | Fresh P1-1/P1-2 exports `1784225624574`/`1784225745662`, bags `20260716T181344Z`/`20260716T181545Z`; both validators PASS; P1-2 P0 refresh mean/max/p95 `329.794/375.824/351.757 ms`, queue max `0.179 ms`, generation interval max `513.298 ms`, post-startup ready/non-stale | **PASS raw freshness; formal analyzer gate unavailable** |
+| IAP-RQ-400 | P1-1 final profile `190/200`, mean/max `0.414578/0.424604`, metrics-only temporal fallback; P1-2 `200/200`, objective applied, mean/max `0.414881/0.432228` | **FAIL: strict mean/max reduction** |
+| IAP-RQ-410 | Bags contain 18/20 bsplines; admission/acquisition max `1/1`, optimizer-start max P1-1 `8`, P1-2 `4` | **FAIL: strict optimizer-start singleflight** |
+| IAP-RQ-320 / IAP-RQ-400 / IAP-RQ-410 | Sole analyzer invocation raw exit 1, `csv_artifacts` initialization-order exception, no structured summary/hard-gate files, 2/19 required PNGs | **FAIL -> analyzer csv_artifacts initialization-order / optimizer-start singleflight debug; P1-3 not run** |
