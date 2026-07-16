@@ -89,7 +89,10 @@ P1_RVIZ_TOPICS = [
 ]
 P1_TOPIC_ACTIVITY_TOPICS = P0_TOPIC_ACTIVITY_TOPICS + P1_RVIZ_TOPICS
 P1_TOPIC_EXPECTATIONS = {
-    **P0_TOPIC_EXPECTATIONS,
+    # P1 accepts only raw JSON health. RViz health remains available for
+    # diagnosis but is deliberately absent from the hard-gate contract.
+    **{topic: expectation for topic, expectation in P0_TOPIC_EXPECTATIONS.items()
+       if topic != P0_HEALTH_TOPIC},
     P1_METRICS_TOPIC: "present",
     P1_SAMPLES_TOPIC: "present",
     P1_PUSH_VECTORS_TOPIC: "present",
@@ -182,6 +185,7 @@ P1_1_TRAJECTORY_MAX_THRESHOLD_M = 1.5
 P1_1_DEBUG_CSV_NAME = "planner_p1_integrity_cost_debug.csv"
 P1_ACCEPTED_PROFILE_CSV_NAME = "planner_p1_accepted_trajectory_risk_profile.csv"
 P1_ACCEPTED_PROFILE_CONTEXT_CSV_NAME = "planner_p1_accepted_trajectory_risk_profile_context.csv"
+P1_PLANNING_CONTEXT_TIMELINE_CSV_NAME = "planner_p1_planning_context_timeline.csv"
 P1_1_FIGURE_FILENAMES = [
     "p1_1_scenario_topdown.png",
     "p1_1_topic_activity_timeline.png",
@@ -205,6 +209,9 @@ P1_2_FIGURE_FILENAMES = [
     "p1_2_trajectory_overlay_vs_p1_1.png",
     "p1_2_artifact_completeness.png",
     "p1_2_cause_exclusion_summary.png",
+    "p1_2_p0_callback_timeline.png",
+    "p1_2_planning_context_age_timeline.png",
+    "p1_2_replan_fallback_timeline.png",
 ]
 P1_2_OPTIONAL_FIGURE_FILENAMES = [
     "p1_2_integrity_cost_debug_summary.png",
@@ -1122,6 +1129,17 @@ def parse_p0_health(msg: Any, timestamp_ns: int) -> dict[str, Any]:
         row[field] = data.get(field, 0)
     for field in PREDICTOR_LIDAR_INPUT_FIELDS:
         row[field] = data.get(field, "" if field.endswith("_reason") else 0)
+    for field in (
+        "refresh_callback_start_stamp_s", "refresh_callback_end_stamp_s",
+        "health_callback_stamp_s", "publish_stamp_s",
+        "refresh_callback_start_steady_s", "refresh_callback_end_steady_s",
+        "health_callback_steady_s", "publish_steady_s",
+        "health_callback_duration_ms", "health_callback_queue_delay_ms",
+        "health_state_mutex_wait_ms", "health_state_mutex_hold_ms",
+        "refresh_query_count", "predictor_requested_worker_count",
+        "predictor_effective_worker_count",
+    ):
+        row[field] = data.get(field, math.nan)
     return row
 
 
@@ -1296,7 +1314,9 @@ def read_p0_bag_artifacts(
                 continue
             artifacts["topics_seen"].add(topic)
             msg = deserialize_message(raw, msg_types[topic])
-            if topic in P0_HEALTH_TOPICS:
+            if topic == P0_HEALTH_LEGACY_TOPIC:
+                # Raw JSON is the sole P1 acceptance source. RViz marker/text
+                # output is diagnostic and must never be mixed into these rows.
                 artifacts["health_rows"].append(parse_p0_health(msg, timestamp))
             elif topic == P0_PL_CLOUD_TOPIC:
                 rows = pointcloud_metric_rows(msg, timestamp)
@@ -6213,6 +6233,30 @@ def p1_accepted_profile_context_csv_path(export_dir: Path, manifest: dict[str, A
     return p1_accepted_profile_csv_path(export_dir, manifest).with_name(P1_ACCEPTED_PROFILE_CONTEXT_CSV_NAME)
 
 
+def p1_planning_context_timeline_csv_path(export_dir: Path, manifest: dict[str, Any]) -> Path:
+    manifest_path = str(manifest.get("p1.planning_context_timeline_path", "")).strip() if manifest else ""
+    if manifest_path:
+        path = Path(manifest_path).expanduser()
+        return path if path.is_absolute() else export_dir / path
+    return p1_accepted_profile_csv_path(export_dir, manifest).with_name(P1_PLANNING_CONTEXT_TIMELINE_CSV_NAME)
+
+
+def read_p1_planning_context_timeline_csv(path: Path) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    required = {"stage", "stamp_s", "planning_attempt_id", "snapshot_generation_id",
+                "snapshot_stamp_s", "query_base_time_s", "context_age_s",
+                "stale_threshold_s", "outcome", "reason", "fallback_branch"}
+    if not path.is_file():
+        return [], {"missing": True, "path": str(path), "read_error": "", "missing_fields": sorted(required)}
+    try:
+        with path.open(newline="") as f:
+            reader = csv.DictReader(f)
+            fields = set(reader.fieldnames or [])
+            rows = list(reader)
+    except Exception as exc:
+        return [], {"missing": False, "path": str(path), "read_error": str(exc), "missing_fields": []}
+    return rows, {"missing": False, "path": str(path), "read_error": "", "missing_fields": sorted(required - fields)}
+
+
 def p1_profile_seq_value(row: dict[str, Any]) -> tuple[int, float]:
     value = finite_float(row.get("profile_seq"))
     if value is None:
@@ -7113,6 +7157,9 @@ def validate_p1_1_hard_gates(
             (topic_health.get(topic) or {}).get("status") == "PASS"
             for topic in P1_TOPIC_EXPECTATIONS
         ),
+        "raw_health_topic_passed": (
+            (topic_health.get(P0_HEALTH_LEGACY_TOPIC) or {}).get("status") == "PASS"
+        ),
         "p1_bspline_inspection_ok": not bool(p1_bspline_error),
         "bspline_publish_present": len(p1_bspline_rows) > 0
         and int(
@@ -7270,6 +7317,7 @@ def p1_2_reference_manifest_gate_values(
         "planner_enable_p5_runtime",
         "planner_enable_p5_final",
     )
+    lambda_value = finite_float(reference_manifest.get("p1.lambda_integrity"))
     return {
         "reference_manifest_present": bool(reference_manifest),
         "reference_manifest_scenario_matches": bool(manifest)
@@ -7289,6 +7337,11 @@ def p1_2_reference_manifest_gate_values(
             "p1.use_integrity_cost"
         )
         is True,
+        "reference_manifest_matched_lambda": lambda_value is not None
+        and abs(lambda_value - P1_2_LAMBDA_INTEGRITY) <= P1_2_LAMBDA_TOLERANCE,
+        "reference_manifest_metrics_only_identity": str(
+            reference_manifest.get("p1.reference_identity", "metrics_only_lambda_0.00001_not_applied")
+        ) == "metrics_only_lambda_0.00001_not_applied",
         "reference_manifest_p2_p5_disabled": all(
             reference_manifest.get(key) is False for key in expected_false
         ),
@@ -7365,6 +7418,10 @@ def validate_p1_2_hard_gates(
     risk_comparison: dict[str, Any],
     failures: list[str],
     inconclusive: list[str],
+    p1_2_timeline_rows: list[dict[str, Any]] | None = None,
+    p1_2_timeline_info: dict[str, Any] | None = None,
+    p1_1_timeline_rows: list[dict[str, Any]] | None = None,
+    p1_1_timeline_info: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     manifest_gates = p1_2_manifest_gate_values(manifest)
     reference_manifest_gates = p1_2_reference_manifest_gate_values(
@@ -7405,6 +7462,17 @@ def validate_p1_2_hard_gates(
         for context in (p1_debug_summary.get("applied_context_tuples", []) or [])
         if len(context) == 4
     }
+    def timeline_valid(rows: list[dict[str, Any]] | None, info: dict[str, Any] | None) -> bool:
+        if rows is None and info is None:
+            # Direct unit callers from the pre-timeline contract retain their
+            # focused scope; production invocation always supplies evidence.
+            return True
+        info = info or {}
+        rows = rows or []
+        return not info.get("missing") and not info.get("read_error") and not info.get("missing_fields") and bool(rows) and all(
+            str(row.get("outcome", "")) != "published" or str(row.get("reason", "")) == "ok"
+            for row in rows
+        )
     gates: dict[str, Any] = {
         **manifest_gates,
         **reference_manifest_gates,
@@ -7538,6 +7606,8 @@ def validate_p1_2_hard_gates(
             int(disabled_topic_counts.get(topic, 0) or 0) == 0
             for topic in (P5_STATUS_TOPIC, *P5_RVIZ_TOPICS)
         ),
+        "p1_2_planning_context_timeline_ok": timeline_valid(p1_2_timeline_rows, p1_2_timeline_info),
+        "p1_1_planning_context_timeline_ok": timeline_valid(p1_1_timeline_rows, p1_1_timeline_info),
     }
     gates["cause_exclusion_rows"] = p1_2_cause_exclusion_rows(gates)
     gates["cause_exclusion_passed"] = all(
@@ -7614,10 +7684,12 @@ def validate_p1_2_hard_gates(
         and gates["reference_manifest_p1_enabled"]
         and gates["reference_manifest_p1_metrics_only"]
         and gates["reference_manifest_p1_use_integrity_cost"]
+        and gates["reference_manifest_matched_lambda"]
+        and gates["reference_manifest_metrics_only_identity"]
         and gates["reference_manifest_p2_p5_disabled"]
     ):
         failures.append(
-            "P1-2 P1-1 reference manifest must be same-scenario metrics-only P1 with P0/P1 enabled and P2/P3/P4/P5 disabled"
+            "P1-2 P1-1 reference manifest must be a matched metrics-only P1 reference (lambda=0.00001, not applied) with P0/P1 enabled and P2/P3/P4/P5 disabled"
         )
     if reference_bspline_error:
         failures.append(
@@ -7639,6 +7711,8 @@ def validate_p1_2_hard_gates(
         failures.append("P1-2 final accepted profile must contain exactly unique sample_index=0..199 and one metadata tuple")
     if not gates["p1_2_accepted_profile_context_ok"] or not gates["p1_1_accepted_profile_context_ok"]:
         failures.append("P1-2 accepted-profile context sidecar is missing, stale, out of bounds, or not bound to the selected profile")
+    if not gates["p1_2_planning_context_timeline_ok"] or not gates["p1_1_planning_context_timeline_ok"]:
+        failures.append("P1-2 planning-context timeline is missing, malformed, or records an invalid published outcome")
     if not gates["p1_2_profile_objective_metadata_ok"] or not gates["p1_1_profile_objective_metadata_ok"]:
         failures.append("P1-2 accepted profile metadata does not prove enabled/reference objective semantics or manifest lambda")
     if not gates["p1_2_risk_match_ok"] or not gates["p1_1_risk_match_ok"]:
@@ -13220,6 +13294,47 @@ def plot_p1_2_validation_summary(
     return True
 
 
+def plot_p1_2_p0_callback_timeline(rows: list[dict[str, Any]], path: Path) -> bool:
+    if not rows:
+        return False
+    x = [finite_float(row.get("stamp")) for row in rows]
+    fig, ax = plt.subplots(figsize=(10.8, 4.8))
+    ax.plot(x, [finite_float(row.get("refresh_elapsed_ms")) for row in rows], label="refresh ms")
+    ax.plot(x, [finite_float(row.get("health_callback_duration_ms")) for row in rows], label="health callback ms")
+    ax.plot(x, [finite_float(row.get("health_state_mutex_hold_ms")) for row in rows], label="mutex hold ms")
+    ax.set_title("P1-2 raw P0 callback timeline (authoritative JSON)")
+    ax.set_xlabel("bag time [s]"); ax.set_ylabel("duration [ms]"); ax.grid(True, alpha=.25); ax.legend()
+    fig.tight_layout(); fig.savefig(path, dpi=160); plt.close(fig)
+    return True
+
+
+def plot_p1_2_planning_context_age_timeline(rows: list[dict[str, Any]], path: Path) -> bool:
+    if not rows:
+        return False
+    x = [finite_float(row.get("stamp_s")) for row in rows]
+    age = [finite_float(row.get("context_age_s")) for row in rows]
+    limit = [finite_float(row.get("stale_threshold_s")) for row in rows]
+    fig, ax = plt.subplots(figsize=(10.8, 4.8))
+    ax.plot(x, age, marker="o", label="context age")
+    ax.plot(x, limit, linestyle="--", label="stale threshold")
+    ax.set_title("P1-2 planning context freshness timeline")
+    ax.set_xlabel("planner time [s]"); ax.set_ylabel("seconds"); ax.grid(True, alpha=.25); ax.legend()
+    fig.tight_layout(); fig.savefig(path, dpi=160); plt.close(fig)
+    return True
+
+
+def plot_p1_2_replan_fallback_timeline(rows: list[dict[str, Any]], path: Path) -> bool:
+    if not rows:
+        return False
+    fig, ax = plt.subplots(figsize=(10.8, 4.8)); ax.axis("off")
+    lines = [f"{row.get('stamp_s')}: {row.get('stage')} → {row.get('outcome')} ({row.get('reason')})"
+             for row in rows[-24:]]
+    ax.text(.02, .96, "\n".join(lines), va="top", family="monospace", fontsize=8.5)
+    ax.set_title("P1-2 replan / fallback timeline")
+    fig.tight_layout(); fig.savefig(path, dpi=160); plt.close(fig)
+    return True
+
+
 def plot_p1_2_cause_exclusion_summary(
     gates: dict[str, Any],
     path: Path,
@@ -13980,6 +14095,8 @@ def analyze(args: argparse.Namespace) -> dict[str, Any]:
     p1_accepted_profile_summary: dict[str, Any] = {}
     p1_accepted_profile_context_rows: list[dict[str, Any]] = []
     p1_accepted_profile_context_info: dict[str, Any] = {}
+    p1_planning_context_timeline_rows: list[dict[str, Any]] = []
+    p1_planning_context_timeline_info: dict[str, Any] = {}
     if p1_phase:
         p1_debug_rows, p1_debug_summary = read_p1_integrity_debug_csv(
             p1_debug_csv_path(export_dir, manifest)
@@ -13992,6 +14109,11 @@ def analyze(args: argparse.Namespace) -> dict[str, Any]:
         p1_accepted_profile_context_rows, p1_accepted_profile_context_info = (
             read_p1_accepted_profile_context_csv(
                 p1_accepted_profile_context_csv_path(export_dir, manifest)
+            )
+        )
+        p1_planning_context_timeline_rows, p1_planning_context_timeline_info = (
+            read_p1_planning_context_timeline_csv(
+                p1_planning_context_timeline_csv_path(export_dir, manifest)
             )
         )
 
@@ -14805,6 +14927,8 @@ def analyze(args: argparse.Namespace) -> dict[str, Any]:
             failures.append("P1-1 final accepted profile must be complete, context-bound, and metrics-only")
             p1_1_gates["passed"] = False
     if p1_2_phase:
+        p1_2_reference_timeline_rows: list[dict[str, Any]] = []
+        p1_2_reference_timeline_info: dict[str, Any] = {"missing": True}
         p1_2_bspline_rows, p1_2_bspline_error = (
             read_bspline_messages(bag_dir, metadata)
             if bag_dir is not None
@@ -14830,6 +14954,11 @@ def analyze(args: argparse.Namespace) -> dict[str, Any]:
             p1_2_reference_context_rows, p1_2_reference_context_info = (
                 read_p1_accepted_profile_context_csv(
                     p1_accepted_profile_context_csv_path(baseline_export_dir, baseline_manifest)
+                )
+            )
+            p1_2_reference_timeline_rows, p1_2_reference_timeline_info = (
+                read_p1_planning_context_timeline_csv(
+                    p1_planning_context_timeline_csv_path(baseline_export_dir, baseline_manifest)
                 )
             )
         else:
@@ -14881,6 +15010,10 @@ def analyze(args: argparse.Namespace) -> dict[str, Any]:
             p1_2_risk_comparison,
             failures,
             inconclusive,
+            p1_planning_context_timeline_rows,
+            p1_planning_context_timeline_info,
+            p1_2_reference_timeline_rows,
+            p1_2_reference_timeline_info,
         )
     if p5_5_phase:
         p5_5_integrity_rows, p5_5_integrity_error = (
@@ -16497,6 +16630,20 @@ def analyze(args: argparse.Namespace) -> dict[str, Any]:
             p1_2_figure_artifacts.append(
                 str(p1_2_figure_paths["p1_2_cause_exclusion_summary.png"])
             )
+        if plot_p1_2_p0_callback_timeline(
+            health_rows, p1_2_figure_paths["p1_2_p0_callback_timeline.png"]
+        ):
+            p1_2_figure_artifacts.append(str(p1_2_figure_paths["p1_2_p0_callback_timeline.png"]))
+        if plot_p1_2_planning_context_age_timeline(
+            p1_planning_context_timeline_rows,
+            p1_2_figure_paths["p1_2_planning_context_age_timeline.png"],
+        ):
+            p1_2_figure_artifacts.append(str(p1_2_figure_paths["p1_2_planning_context_age_timeline.png"]))
+        if plot_p1_2_replan_fallback_timeline(
+            p1_planning_context_timeline_rows,
+            p1_2_figure_paths["p1_2_replan_fallback_timeline.png"],
+        ):
+            p1_2_figure_artifacts.append(str(p1_2_figure_paths["p1_2_replan_fallback_timeline.png"]))
         if plot_p1_2_artifact_completeness(
             export_dir,
             bag_dir,

@@ -4,6 +4,8 @@
 #include <ego_planner/p5_runtime_integrity_gate.h>
 #include <ego_planner/safety_rviz_publisher.h>
 #include <iap/planner/risk_grid_map.hpp>
+#include <fstream>
+#include <iomanip>
 #include <limits>
 #include <thread>
 #include <utility>
@@ -241,6 +243,7 @@ namespace ego_planner
     planning_risk_context_ = PlanningRiskContext{};
     planning_risk_context_.active = true;
     planning_risk_context_.planning_start_s = now_s;
+    planning_risk_context_.snapshot_acquired_s = now_s;
     planning_risk_context_.planning_attempt_id = ++p1_planning_attempt_seq_;
     planning_risk_context_.query_base_time_s = now_s;
     planning_risk_context_.snapshot = acquireRiskGridSnapshot();
@@ -249,6 +252,7 @@ namespace ego_planner
       planning_risk_context_.generation_id =
           planning_risk_context_.snapshot->generation_id();
       const double snapshot_stamp_s = planning_risk_context_.snapshot->stamp_s();
+      planning_risk_context_.snapshot_stamp_s = snapshot_stamp_s;
       if (std::isfinite(snapshot_stamp_s))
       {
         planning_risk_context_.query_base_time_s = snapshot_stamp_s;
@@ -262,12 +266,110 @@ namespace ego_planner
          << ", snapshot_available="
          << static_cast<int>(static_cast<bool>(planning_risk_context_.snapshot))
          << endl;
+    appendPlanningRiskContextTimeline("acquire", now_s, "acquired",
+        planning_risk_context_.snapshot ? "ok" : "snapshot_unavailable");
     return planning_risk_context_;
   }
 
   void EGOPlannerManager::clearPlanningRiskContext()
   {
     planning_risk_context_ = PlanningRiskContext{};
+  }
+
+  std::string EGOPlannerManager::p1PlanningContextTimelinePath() const
+  {
+    const std::string profile_path = bspline_optimizer_
+        ? bspline_optimizer_->p1AcceptedTrajectoryRiskProfilePath()
+        : "planner_p1_accepted_trajectory_risk_profile.csv";
+    const std::string suffix = "planner_p1_accepted_trajectory_risk_profile.csv";
+    const auto found = profile_path.rfind(suffix);
+    return found == std::string::npos
+        ? profile_path + ".planning_context_timeline.csv"
+        : profile_path.substr(0, found) + "planner_p1_planning_context_timeline.csv";
+  }
+
+  void EGOPlannerManager::appendPlanningRiskContextTimeline(
+      const std::string &stage, const double stamp_s, const std::string &outcome,
+      const std::string &reason, const std::string &fallback_branch) const
+  {
+    const std::string path = p1PlanningContextTimelinePath();
+    std::ifstream existing(path);
+    const bool header = !existing.good() ||
+        existing.peek() == std::ifstream::traits_type::eof();
+    existing.close();
+    std::ofstream out(path, std::ios::app);
+    if (!out.good()) return;
+    out << std::setprecision(17);
+    if (header) {
+      out << "stage,stamp_s,planning_attempt_id,candidate_id,snapshot_generation_id,"
+             "snapshot_stamp_s,query_base_time_s,context_age_s,stale_threshold_s,"
+             "outcome,reason,fallback_branch\n";
+    }
+    const auto &ctx = planning_risk_context_;
+    const double threshold = ctx.snapshot ? ctx.snapshot->params().stale_timeout_s
+                                          : std::numeric_limits<double>::quiet_NaN();
+    const double age = std::isfinite(ctx.snapshot_stamp_s) ? stamp_s - ctx.snapshot_stamp_s
+                                                            : std::numeric_limits<double>::quiet_NaN();
+    out << stage << ',' << stamp_s << ',' << ctx.planning_attempt_id << ','
+        << ctx.candidate_id << ',' << ctx.generation_id << ',' << ctx.snapshot_stamp_s << ','
+        << ctx.query_base_time_s << ',' << age << ',' << threshold << ','
+        << outcome << ',' << reason << ',' << fallback_branch << '\n';
+  }
+
+  bool EGOPlannerManager::planningRiskContextFresh(
+      const double now_s, std::string *reason) const
+  {
+    // Safety-off/P0-off planning keeps its historical behavior: there is no
+    // P0-derived candidate to guard. Once P0 is enabled, absence of its
+    // snapshot is fail-closed for the P1 evidence path.
+    if (!p0_risk_grid_runtime_ && !planning_risk_context_.snapshot)
+    {
+      if (reason) *reason = "risk_grid_disabled";
+      return true;
+    }
+    const auto &ctx = planning_risk_context_;
+    if (!ctx.active || !ctx.snapshot || !std::isfinite(ctx.snapshot_stamp_s) ||
+        !std::isfinite(now_s)) {
+      if (reason) *reason = "planning_risk_context_unavailable";
+      return false;
+    }
+    const double stale_timeout_s = ctx.snapshot->params().stale_timeout_s;
+    const double age_s = now_s - ctx.snapshot_stamp_s;
+    if (!std::isfinite(age_s) || age_s < 0.0 ||
+        (stale_timeout_s >= 0.0 && age_s > stale_timeout_s)) {
+      if (reason) *reason = "stale_planning_risk_context";
+      return false;
+    }
+    if (reason) *reason = "ok";
+    return true;
+  }
+
+  bool EGOPlannerManager::preparePlanningRiskPublish(
+      const double now_s, std::string *reason)
+  {
+    planning_risk_context_.pre_publish_s = now_s;
+    const bool fresh = planningRiskContextFresh(now_s, reason);
+    appendPlanningRiskContextTimeline("pre_publish", now_s,
+        fresh ? "fresh" : "rejected", reason ? *reason : "");
+    return fresh;
+  }
+
+  bool EGOPlannerManager::finalizeP1AcceptedRiskProfile(
+      const double publish_stamp_s)
+  {
+    // Freshness is checked immediately before the ROS publish.  Do not move a
+    // second check here: it could create a published trajectory without the
+    // evidence row for the same already-approved candidate.
+    planning_risk_context_.accepted_s = publish_stamp_s;
+    planning_risk_context_.publish_s = publish_stamp_s;
+    const bool written = bspline_optimizer_->writeP1AcceptedTrajectoryRiskProfile(
+        local_data_.position_traj_, ++p1_accepted_profile_seq_, local_data_.traj_id_,
+        publish_stamp_s, planning_risk_context_.planning_start_s);
+    appendPlanningRiskContextTimeline("publish", publish_stamp_s,
+        written ? "published" : "published_without_profile",
+        written ? "ok" : "accepted_profile_write_failed");
+    bspline_optimizer_->clearRiskSnapshot();
+    return written;
   }
 
   void EGOPlannerManager::setPlanningRiskContextForTest(
@@ -277,6 +379,7 @@ namespace ego_planner
     planning_risk_context_ = PlanningRiskContext{};
     planning_risk_context_.active = true;
     planning_risk_context_.planning_start_s = query_base_time_s;
+    planning_risk_context_.snapshot_acquired_s = query_base_time_s;
     planning_risk_context_.planning_attempt_id = ++p1_planning_attempt_seq_;
     planning_risk_context_.query_base_time_s = query_base_time_s;
     planning_risk_context_.snapshot = std::move(snapshot);
@@ -284,6 +387,8 @@ namespace ego_planner
     {
       planning_risk_context_.generation_id =
           planning_risk_context_.snapshot->generation_id();
+      planning_risk_context_.snapshot_stamp_s =
+          planning_risk_context_.snapshot->stamp_s();
     }
   }
 
@@ -381,6 +486,7 @@ namespace ego_planner
     const auto set_p1_context = [this, planning_snapshot,
                                  planning_query_base_time_s](const uint64_t candidate_id)
     {
+      planning_risk_context_.candidate_id = candidate_id;
       BsplineOptimizer::P1PlanningRiskContext context;
       context.snapshot = planning_snapshot;
       context.query_base_time_s = planning_query_base_time_s;
@@ -585,8 +691,16 @@ namespace ego_planner
       {
         const uint64_t candidate_id = static_cast<uint64_t>(trajs.size() - i);
         set_p1_context(candidate_id);
+        planning_risk_context_.optimizer_start_s = plannerNow().seconds();
+        appendPlanningRiskContextTimeline("optimizer_start",
+            planning_risk_context_.optimizer_start_s, "started", "ok");
         const bool p1_candidate_success =
             bspline_optimizer_->BsplineOptimizeTrajRebound(ctrl_pts_temp, final_cost, trajs[i], ts);
+        planning_risk_context_.optimizer_end_s = plannerNow().seconds();
+        appendPlanningRiskContextTimeline("optimizer_end",
+            planning_risk_context_.optimizer_end_s,
+            p1_candidate_success ? "candidate_success" : "candidate_failure",
+            p1_candidate_success ? "ok" : "optimizer_failure");
         bspline_optimizer_->clearRiskSnapshot();
         if (safety_viz_)
         {
@@ -686,7 +800,15 @@ namespace ego_planner
     else
     {
       set_p1_context(selected_p1_candidate_id);
+      planning_risk_context_.optimizer_start_s = plannerNow().seconds();
+      appendPlanningRiskContextTimeline("optimizer_start",
+          planning_risk_context_.optimizer_start_s, "started", "ok");
       flag_step_1_success = bspline_optimizer_->BsplineOptimizeTrajRebound(ctrl_pts, ts);
+      planning_risk_context_.optimizer_end_s = plannerNow().seconds();
+      appendPlanningRiskContextTimeline("optimizer_end",
+          planning_risk_context_.optimizer_end_s,
+          flag_step_1_success ? "candidate_success" : "candidate_failure",
+          flag_step_1_success ? "ok" : "optimizer_failure");
       bspline_optimizer_->clearRiskSnapshot();
       if (safety_viz_)
       {
@@ -750,21 +872,23 @@ namespace ego_planner
     // t_refine = ros::Time::now() - t_start;
     t_refine = rclcpp::Clock().now() - t_start;
 
-    // save planned results
+    // Bind the final candidate to a newly acquired immutable context tuple,
+    // then fail closed before it can mutate LocalTrajData or profile evidence.
     const auto accepted_time = plannerNow();
     set_p1_context(selected_p1_candidate_id);
-    const bool p1_profile_written =
-        bspline_optimizer_->writeP1AcceptedTrajectoryRiskProfile(
-            pos, ++p1_accepted_profile_seq_, local_data_.traj_id_ + 1,
-            accepted_time.seconds(), planning_start_s);
-    bspline_optimizer_->clearRiskSnapshot();
-    if (p1_profile_written)
+    std::string freshness_reason;
+    if (!planningRiskContextFresh(accepted_time.seconds(), &freshness_reason))
     {
-      cout << "[P1] accepted_trajectory_risk_profile="
-           << bspline_optimizer_->p1AcceptedTrajectoryRiskProfilePath()
-           << ", profile_seq=" << p1_accepted_profile_seq_
-           << ", trajectory_id=" << (local_data_.traj_id_ + 1) << endl;
+      appendPlanningRiskContextTimeline("accept", accepted_time.seconds(),
+          "rejected", freshness_reason, "existing_poly_random_failure_budget");
+      bspline_optimizer_->clearRiskSnapshot();
+      clearPlanningRiskContext();
+      continous_failures_count_++;
+      return false;
     }
+    planning_risk_context_.accepted_s = accepted_time.seconds();
+    appendPlanningRiskContextTimeline("accept", accepted_time.seconds(),
+        "fresh", "ok");
     updateTrajInfo(pos, accepted_time);
 
     static double sum_time = 0;

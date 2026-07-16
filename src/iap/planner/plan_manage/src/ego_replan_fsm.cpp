@@ -1013,8 +1013,28 @@ namespace ego_planner
         }
       }
 
+      // P5 intentionally evaluates its own latest snapshot semantics above.
+      // P1 publication is different: it must remain bound to the immutable
+      // snapshot used to optimize this exact candidate.
+      std::string freshness_reason;
+      if (!planner_manager_->preparePlanningRiskPublish(
+              plannerNow().seconds(), &freshness_reason))
+      {
+        RCLCPP_WARN(node_->get_logger(),
+                    "P1 blocked stale planning context before bspline publish: %s",
+                    freshness_reason.c_str());
+        planner_manager_->local_data_ = previous_local_data;
+        return false;
+      }
+
       /* 1. publish traj to traj_server */
       bspline_pub_->publish(bspline);
+      if (!planner_manager_->finalizeP1AcceptedRiskProfile(
+              plannerNow().seconds()))
+      {
+        RCLCPP_WARN(node_->get_logger(),
+                    "P1 published fresh bspline but could not write accepted-profile evidence");
+      }
 
       /* 2. publish traj to the next drone of swarm */
 

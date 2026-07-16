@@ -525,6 +525,21 @@ TEST(P0RiskGridRuntimeTest, EnabledRuntimeConstructsWithInjectedProvider) {
   EXPECT_EQ(health.reason, "message_stamp_unavailable");
 }
 
+TEST(P0RiskGridRuntimeTest, RawHealthTopicIsAbsoluteAndIndependentOfDebugFlag) {
+  ensure_rclcpp();
+  auto config = enabledConfig();
+  config.debug_metrics_enable = false;
+  EXPECT_EQ(config.health_topic, "/planning/risk_grid_health");
+  auto node = std::make_shared<rclcpp::Node>(
+      "p0_raw_health_contract_test",
+      rclcpp::NodeOptions().allow_undeclared_parameters(false));
+  ego_planner::P0RiskGridRuntime runtime(
+      node, config, std::make_unique<FakeProvider>());
+  // Construction creates the publisher even when debug metrics are disabled;
+  // this count is observable without depending on a RViz subscriber.
+  EXPECT_EQ(node->count_publishers("/planning/risk_grid_health"), 1u);
+}
+
 TEST(SafetyRvizPublisherTest, RiskGridHealthMarkerUsesProvidedStamp) {
   ego_planner::SafetyRvizPublisher::Config config;
   config.frame_id = "map";

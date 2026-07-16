@@ -60,7 +60,9 @@ class P0RiskGridRuntime {
     std::string receiver_lla_topic = "/ublox_driver/receiver_lla";
     std::string iono_topic = "/ublox_driver/iono_params";
     std::string map_topic = "/map_generator/global_cloud";
-    std::string health_topic = "planning/risk_grid_health";
+    // This is an evidence topic, not a debug topic.  Keep it absolute so a
+    // namespaced planner cannot silently move it away from the bag contract.
+    std::string health_topic = "/planning/risk_grid_health";
     double gnss_epoch_max_age_s = 2.0;
     iap::PredictorSourceMode predictor_source_mode =
         iap::PredictorSourceMode::Fusion;
@@ -102,6 +104,27 @@ class P0RiskGridRuntime {
   void refreshTimerCallback();
   void healthTimerCallback();
   void publishHealth(const iap::RiskGridHealth& health, double now_s);
+
+  struct HealthPublicationState {
+    double refresh_stamp_s = std::numeric_limits<double>::quiet_NaN();
+    double refresh_start_stamp_s = std::numeric_limits<double>::quiet_NaN();
+    double refresh_end_stamp_s = std::numeric_limits<double>::quiet_NaN();
+    double health_callback_stamp_s = std::numeric_limits<double>::quiet_NaN();
+    double publish_stamp_s = std::numeric_limits<double>::quiet_NaN();
+    double refresh_start_steady_s = std::numeric_limits<double>::quiet_NaN();
+    double refresh_end_steady_s = std::numeric_limits<double>::quiet_NaN();
+    double health_callback_steady_s = std::numeric_limits<double>::quiet_NaN();
+    double publish_steady_s = std::numeric_limits<double>::quiet_NaN();
+    double last_grid_stamp_s = std::numeric_limits<double>::quiet_NaN();
+    double refresh_elapsed_ms = std::numeric_limits<double>::quiet_NaN();
+    double health_callback_duration_ms = std::numeric_limits<double>::quiet_NaN();
+    double health_callback_queue_delay_ms = std::numeric_limits<double>::quiet_NaN();
+    double health_state_mutex_wait_ms = std::numeric_limits<double>::quiet_NaN();
+    double health_state_mutex_hold_ms = std::numeric_limits<double>::quiet_NaN();
+    std::size_t refresh_query_count = 0;
+    bool snapshot_available = false;
+  };
+  HealthPublicationState healthPublicationStateSnapshot() const;
 
   void odomCallback(const nav_msgs::msg::Odometry::ConstSharedPtr msg);
   void integrityCallback(const iap::msg::IntegrityReport::ConstSharedPtr msg);
@@ -173,6 +196,15 @@ class P0RiskGridRuntime {
   double last_refresh_start_stamp_s_ = std::numeric_limits<double>::quiet_NaN();
   double last_refresh_end_stamp_s_ = std::numeric_limits<double>::quiet_NaN();
   double last_health_callback_stamp_s_ = std::numeric_limits<double>::quiet_NaN();
+  double last_publish_stamp_s_ = std::numeric_limits<double>::quiet_NaN();
+  double last_refresh_start_steady_s_ = std::numeric_limits<double>::quiet_NaN();
+  double last_refresh_end_steady_s_ = std::numeric_limits<double>::quiet_NaN();
+  double last_health_callback_steady_s_ = std::numeric_limits<double>::quiet_NaN();
+  double last_publish_steady_s_ = std::numeric_limits<double>::quiet_NaN();
+  double last_health_callback_duration_ms_ = std::numeric_limits<double>::quiet_NaN();
+  double last_health_callback_queue_delay_ms_ = std::numeric_limits<double>::quiet_NaN();
+  double last_health_state_mutex_wait_ms_ = std::numeric_limits<double>::quiet_NaN();
+  double last_health_state_mutex_hold_ms_ = std::numeric_limits<double>::quiet_NaN();
   bool origin_set_ = false;
   Eigen::Vector3d origin_ecef_ = Eigen::Vector3d::Zero();
   std::unordered_map<uint32_t, gnss_comm::EphemPtr> ephem_cache_;

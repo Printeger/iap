@@ -101,6 +101,19 @@ TEST(PlanningRiskContextTest, BeginWithoutP0RuntimeCreatesDeterministicNullConte
   EXPECT_FALSE(manager.planningRiskContext().active);
 }
 
+TEST(PlanningRiskContextTest, StaleContextFailsClosedAgainstItsImmutableSnapshot) {
+  ego_planner::EGOPlannerManager manager;
+  auto snapshot = makeSnapshot(1.0, 10.0);
+  ASSERT_NE(snapshot, nullptr);
+  manager.setPlanningRiskContextForTest(snapshot, 10.0);
+
+  std::string reason;
+  EXPECT_TRUE(manager.planningRiskContextFresh(19.9, &reason));
+  EXPECT_EQ(reason, "ok");
+  EXPECT_FALSE(manager.planningRiskContextFresh(20.1, &reason));
+  EXPECT_EQ(reason, "stale_planning_risk_context");
+}
+
 TEST(PlanningTimeProviderTest, EmergencyStopUsesProvidedSimStamp) {
   ego_planner::EGOPlannerManager manager;
   const rclcpp::Time sim_stamp(1657065601, 234000000, RCL_ROS_TIME);

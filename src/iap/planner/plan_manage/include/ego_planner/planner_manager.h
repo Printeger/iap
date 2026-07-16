@@ -6,6 +6,7 @@
 #include <cstdint>
 #include <functional>
 #include <memory>
+#include <string>
 
 #include <bspline_opt/bspline_optimizer.h>
 #include <bspline_opt/uniform_bspline.h>
@@ -45,8 +46,16 @@ namespace ego_planner
       std::shared_ptr<const iap::RiskGridSnapshot> snapshot;
       double query_base_time_s = 0.0;
       double planning_start_s = 0.0;
+      double snapshot_acquired_s = 0.0;
+      double snapshot_stamp_s = 0.0;
+      double optimizer_start_s = 0.0;
+      double optimizer_end_s = 0.0;
+      double accepted_s = 0.0;
+      double pre_publish_s = 0.0;
+      double publish_s = 0.0;
       uint64_t generation_id = 0;
       uint64_t planning_attempt_id = 0;
+      uint64_t candidate_id = 0;
       bool active = false;
     };
 
@@ -89,6 +98,12 @@ namespace ego_planner
     uint64_t currentPlanningGenerationId() const { return planning_risk_context_.generation_id; }
     void setPlanningRiskContextForTest(std::shared_ptr<const iap::RiskGridSnapshot> snapshot,
                                        double query_base_time_s);
+    // P1 candidates are fail-closed against the same immutable snapshot they
+    // were optimized with. These methods are intentionally separate from P5.
+    bool planningRiskContextFresh(double now_s, std::string *reason = nullptr) const;
+    bool preparePlanningRiskPublish(double now_s, std::string *reason = nullptr);
+    bool finalizeP1AcceptedRiskProfile(double publish_stamp_s);
+    std::string p1PlanningContextTimelinePath() const;
 
     PlanParameters pp_;
     LocalTrajData local_data_;
@@ -117,6 +132,12 @@ namespace ego_planner
     uint64_t p3_batch_id_{0};
     PlanningRiskContext planning_risk_context_;
     TimeProvider time_provider_;
+
+    void appendPlanningRiskContextTimeline(const std::string &stage,
+                                           double stamp_s,
+                                           const std::string &outcome,
+                                           const std::string &reason,
+                                           const std::string &fallback_branch = "") const;
 
     void updateTrajInfo(const UniformBspline &position_traj, const rclcpp::Time time_now);
 

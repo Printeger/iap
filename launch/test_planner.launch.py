@@ -431,6 +431,10 @@ EXPERIMENT_PRESETS = {
         "scenario": "gnss_degraded_lidar_good",
         "planner_safety_profile": "p1",
         "p0.size_x_m": "42.0",
+        # P1-2 keeps the existing 1 s stale timeout and grid geometry. Four
+        # deterministic worker-local predictors address the measured refresh
+        # bottleneck without changing P0 acceptance semantics.
+        "p0.predictor.worker_count": "4",
         "p1.debug_csv_enable": "true",
         "safety_viz.enable_p1_viz": "true",
     },
@@ -1640,6 +1644,9 @@ def _launch_setup(context):
     p1_accepted_profile_context_path_for_manifest = str(
         Path(p1_debug_path_for_manifest).with_name("planner_p1_accepted_trajectory_risk_profile_context.csv")
     )
+    p1_planning_context_timeline_path_for_manifest = str(
+        Path(p1_debug_path_for_manifest).with_name("planner_p1_planning_context_timeline.csv")
+    )
     p5_final_for_fixture = (
         _param_bool(context, "p5.enable_final_gate")
         if "p5.enable_final_gate" in overrides
@@ -1663,6 +1670,9 @@ def _launch_setup(context):
         "p1.debug_csv_path": p1_debug_path_for_manifest,
         "p1.accepted_profile_path": p1_accepted_profile_path_for_manifest,
         "p1.accepted_profile_context_path": p1_accepted_profile_context_path_for_manifest,
+        "p1.planning_context_timeline_path": p1_planning_context_timeline_path_for_manifest,
+        "p1.reference_identity": "metrics_only_lambda_0.00001_not_applied",
+        "p0.raw_health_topic": "/planning/risk_grid_health",
         "p0.resolution_m": _param_float(context, "p0.resolution_m"),
         "p0.size_x_m": _param_float(context, "p0.size_x_m"),
         "p0.size_y_m": _param_float(context, "p0.size_y_m"),

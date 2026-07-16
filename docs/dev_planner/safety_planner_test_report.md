@@ -4640,6 +4640,12 @@ Final conclusion:
 
 FAIL -> lambda/gradient debug
 
+## P1-2 P0-Health/Freshness Repair — Authoritative Fresh Pair
+
+Implementation record only; prior failed runtime history remains authoritative until a new serial pair is run. `/planning/risk_grid_health` is the sole P1 P0-health source; RViz is diagnostic. The P1 degraded preset uses four predictor workers while preserving the 1.0 s stale timeout. `planner_p1_planning_context_timeline.csv` records acquisition, optimizer, accept, pre-publish, and publish timing; stale contexts fail closed before trajectory update, evidence write, or bspline publication.
+
+The matched P1-1 reference command is metrics-only with `lambda_integrity=0.00001` and `applied_to_objective=false`; it does not replace the formal P1-1 no-effect result. The repaired analyzer hard-gates 13 nonempty figures. Until a fresh pair passes all gates, the result is `FAIL -> lambda/gradient debug`; do not run P1-3.
+
 ## P1-2 Post-Repair Fresh Pair — Authoritative Result
 
 This final entry supersedes every earlier implementation-only and runtime P1-2 conclusion while preserving those sections as historical diagnostics. The serial `2026-07-16` fresh pair is fully documented in the **P1-2 Post-Repair Fresh Pair — Detailed Evidence** section above: P1-1 export/bag `1784181834979` / `20260716T060354Z`, P1-2 export/bag `1784181942139` / `20260716T060542Z`, and the sole analyzer invocation used only those four absolute paths.

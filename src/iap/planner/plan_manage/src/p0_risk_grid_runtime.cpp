@@ -32,6 +32,12 @@ bool finite(double value) {
   return std::isfinite(value);
 }
 
+double steadyNowSeconds() {
+  static const auto epoch = std::chrono::steady_clock::now();
+  return std::chrono::duration<double>(std::chrono::steady_clock::now() - epoch)
+      .count();
+}
+
 std::string jsonNumber(double value) {
   if (!std::isfinite(value)) {
     return "null";
@@ -300,8 +306,12 @@ P0RiskGridRuntime::Config P0RiskGridRuntime::declareAndReadConfig(
                                            "/ublox_driver/iono_params");
   config.map_topic = node->declare_parameter<std::string>(
       "p0.map_topic", "/map_generator/global_cloud");
-  config.health_topic = node->declare_parameter<std::string>(
-      "p0.health_topic", "planning/risk_grid_health");
+  // Raw health is an acceptance artifact and must not inherit a node
+  // namespace.  Keep declaring the old parameter for launch compatibility,
+  // but deliberately publish the authoritative absolute topic.
+  node->declare_parameter<std::string>("p0.health_topic",
+                                       "/planning/risk_grid_health");
+  config.health_topic = "/planning/risk_grid_health";
   config.gnss_epoch_max_age_s =
       node->declare_parameter<double>("p0.gnss_epoch_max_age_s", 2.0);
   config.predictor_source_mode = parsePredictorSourceMode(
@@ -699,10 +709,9 @@ void P0RiskGridRuntime::createRosInterfaces() {
       },
       subscription_options);
 
-  if (config_.debug_metrics_enable) {
-    health_pub_ =
-        node_->create_publisher<std_msgs::msg::String>(config_.health_topic, 10);
-  }
+  // Do not couple the machine-readable health contract to RViz/debug flags.
+  health_pub_ = node_->create_publisher<std_msgs::msg::String>(
+      "/planning/risk_grid_health", 10);
   safety_viz_ = std::make_shared<SafetyRvizPublisher>(
       node_, SafetyRvizPublisher::declareAndReadConfig(node_));
   const double period_s =
@@ -724,13 +733,25 @@ void P0RiskGridRuntime::healthTimerCallback() {
   if (!config_.enable_risk_grid) {
     return;
   }
+  const auto callback_start = std::chrono::steady_clock::now();
+  const double callback_steady_s = steadyNowSeconds();
   const double now_s = currentMessageStamp();
   {
     std::lock_guard<std::mutex> lock(health_state_mutex_);
     last_health_callback_stamp_s_ = now_s;
+    last_health_callback_steady_s_ = callback_steady_s;
+    // A wall timer has no exposed scheduled-fire stamp.  The callback group
+    // is reentrant, so this remains a conservative observable queue delay.
+    last_health_callback_queue_delay_ms_ = 0.0;
   }
   publishHealth(std::isfinite(now_s) ? risk_grid_.health(now_s)
                                      : risk_grid_.health(), now_s);
+  const double duration_ms = std::chrono::duration<double, std::milli>(
+      std::chrono::steady_clock::now() - callback_start).count();
+  {
+    std::lock_guard<std::mutex> lock(health_state_mutex_);
+    last_health_callback_duration_ms_ = duration_ms;
+  }
 }
 
 void P0RiskGridRuntime::refreshTimerCallback() {
@@ -743,11 +764,13 @@ void P0RiskGridRuntime::refreshTimerCallback() {
     }
   };
   const auto refresh_start = std::chrono::steady_clock::now();
+  const double refresh_start_steady_s = steadyNowSeconds();
   const double now_s = currentMessageStamp();
   {
     std::lock_guard<std::mutex> health_lock(health_state_mutex_);
     last_refresh_stamp_s_ = now_s;
     last_refresh_start_stamp_s_ = now_s;
+    last_refresh_start_steady_s_ = refresh_start_steady_s;
     last_snapshot_available_ = false;
     last_refresh_query_count_ = 0;
   }
@@ -759,6 +782,7 @@ void P0RiskGridRuntime::refreshTimerCallback() {
       last_refresh_elapsed_ms_ = std::chrono::duration<double, std::milli>(
           std::chrono::steady_clock::now() - refresh_start).count();
       last_refresh_end_stamp_s_ = refresh_end_stamp_s;
+      last_refresh_end_steady_s_ = steadyNowSeconds();
     }
     reset_refresh_timer();
     return;
@@ -772,6 +796,7 @@ void P0RiskGridRuntime::refreshTimerCallback() {
       last_refresh_elapsed_ms_ = std::chrono::duration<double, std::milli>(
           std::chrono::steady_clock::now() - refresh_start).count();
       last_refresh_end_stamp_s_ = refresh_end_stamp_s;
+      last_refresh_end_steady_s_ = steadyNowSeconds();
     }
     publishHealth(risk_grid_.health(now_s), now_s);
     reset_refresh_timer();
@@ -849,6 +874,7 @@ void P0RiskGridRuntime::refreshTimerCallback() {
     last_refresh_elapsed_ms_ = std::chrono::duration<double, std::milli>(
         std::chrono::steady_clock::now() - refresh_start).count();
     last_refresh_end_stamp_s_ = refresh_end_stamp_s;
+    last_refresh_end_steady_s_ = steadyNowSeconds();
   }
   publishHealth(health, now_s);
   if (safety_viz_) {
@@ -862,13 +888,29 @@ void P0RiskGridRuntime::refreshTimerCallback() {
 
 void P0RiskGridRuntime::publishHealth(const iap::RiskGridHealth& health,
                                       const double now_s) {
-  std::lock_guard<std::mutex> health_lock(health_state_mutex_);
-  const iap::RiskGridHealth enriched_health =
-      addLidarPredictorInputHealth(health);
+  // Never serialize or invoke ROS publishers while the input/refresh state
+  // mutex is held. A slow subscriber or RViz transport must not block input
+  // callbacks or turn health into a self-fulfilling stale signal.
+  const iap::RiskGridHealth enriched_health = addLidarPredictorInputHealth(health);
+  const auto mutex_wait_start = std::chrono::steady_clock::now();
+  HealthPublicationState state;
+  {
+    std::lock_guard<std::mutex> health_lock(health_state_mutex_);
+    const auto mutex_acquired = std::chrono::steady_clock::now();
+    last_publish_stamp_s_ = now_s;
+    last_publish_steady_s_ = steadyNowSeconds();
+    state = healthPublicationStateSnapshot();
+    last_health_state_mutex_wait_ms_ =
+        std::chrono::duration<double, std::milli>(mutex_acquired - mutex_wait_start).count();
+    last_health_state_mutex_hold_ms_ =
+        std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - mutex_acquired).count();
+    state.health_state_mutex_wait_ms = last_health_state_mutex_wait_ms_;
+    state.health_state_mutex_hold_ms = last_health_state_mutex_hold_ms_;
+  }
   if (safety_viz_) {
     safety_viz_->publishRiskGridHealth(enriched_health, now_s);
   }
-  if (!config_.debug_metrics_enable || !node_) {
+  if (!node_ || !health_pub_) {
     return;
   }
   const auto& out_health = enriched_health;
@@ -908,24 +950,31 @@ void P0RiskGridRuntime::publishHealth(const iap::RiskGridHealth& health,
       << jsonString(out_health.dominant_unknown_reason) << ","
       << "\"dominant_unknown_count\":"
       << out_health.dominant_unknown_count << ","
-      << "\"refresh_stamp_s\":" << jsonNumber(last_refresh_stamp_s_) << ","
-      << "\"refresh_callback_start_stamp_s\":" << jsonNumber(last_refresh_start_stamp_s_) << ","
-      << "\"refresh_callback_end_stamp_s\":" << jsonNumber(last_refresh_end_stamp_s_) << ","
-      << "\"health_callback_stamp_s\":" << jsonNumber(last_health_callback_stamp_s_) << ","
-      << "\"last_grid_stamp_s\":" << jsonNumber(last_grid_stamp_s_) << ","
-      << "\"refresh_elapsed_ms\":" << jsonNumber(last_refresh_elapsed_ms_) << ","
+      << "\"refresh_stamp_s\":" << jsonNumber(state.refresh_stamp_s) << ","
+      << "\"refresh_callback_start_stamp_s\":" << jsonNumber(state.refresh_start_stamp_s) << ","
+      << "\"refresh_callback_end_stamp_s\":" << jsonNumber(state.refresh_end_stamp_s) << ","
+      << "\"health_callback_stamp_s\":" << jsonNumber(state.health_callback_stamp_s) << ","
+      << "\"publish_stamp_s\":" << jsonNumber(state.publish_stamp_s) << ","
+      << "\"refresh_callback_start_steady_s\":" << jsonNumber(state.refresh_start_steady_s) << ","
+      << "\"refresh_callback_end_steady_s\":" << jsonNumber(state.refresh_end_steady_s) << ","
+      << "\"health_callback_steady_s\":" << jsonNumber(state.health_callback_steady_s) << ","
+      << "\"publish_steady_s\":" << jsonNumber(state.publish_steady_s) << ","
+      << "\"last_grid_stamp_s\":" << jsonNumber(state.last_grid_stamp_s) << ","
+      << "\"refresh_elapsed_ms\":" << jsonNumber(state.refresh_elapsed_ms) << ","
+      << "\"health_callback_duration_ms\":" << jsonNumber(state.health_callback_duration_ms) << ","
+      << "\"health_callback_queue_delay_ms\":" << jsonNumber(state.health_callback_queue_delay_ms) << ","
+      << "\"health_state_mutex_wait_ms\":" << jsonNumber(state.health_state_mutex_wait_ms) << ","
+      << "\"health_state_mutex_hold_ms\":" << jsonNumber(state.health_state_mutex_hold_ms) << ","
       << "\"snapshot_available\":"
-      << (last_snapshot_available_ ? "true" : "false") << ","
-      << "\"refresh_query_count\":" << last_refresh_query_count_ << ","
+      << (state.snapshot_available ? "true" : "false") << ","
+      << "\"refresh_query_count\":" << state.refresh_query_count << ","
       << "\"predictor_requested_worker_count\":" << config_.predictor_requested_worker_count << ","
       << "\"predictor_effective_worker_count\":" << config_.predictor_effective_worker_count << ","
       << "\"reason\":" << jsonString(out_health.reason)
       << "}";
-  if (health_pub_) {
-    std_msgs::msg::String msg;
-    msg.data = oss.str();
-    health_pub_->publish(msg);
-  }
+  std_msgs::msg::String msg;
+  msg.data = oss.str();
+  health_pub_->publish(msg);
   RCLCPP_INFO_THROTTLE(node_->get_logger(), *node_->get_clock(), 2000,
                        "[p0] risk grid ready=%d stale=%d age=%.3f "
                        "valid=%.3f unknown=%.3f gen=%lu "
@@ -972,9 +1021,34 @@ void P0RiskGridRuntime::publishHealth(const iap::RiskGridHealth& health,
                        out_health.dominant_unknown_reason.c_str(),
                        static_cast<unsigned long>(
                            out_health.dominant_unknown_count),
-                       last_refresh_stamp_s_, last_grid_stamp_s_,
-                       last_refresh_elapsed_ms_, last_refresh_query_count_,
+                       state.refresh_stamp_s, state.last_grid_stamp_s,
+                       state.refresh_elapsed_ms, state.refresh_query_count,
                        out_health.reason.c_str());
+}
+
+P0RiskGridRuntime::HealthPublicationState
+P0RiskGridRuntime::healthPublicationStateSnapshot() const {
+  // Caller owns health_state_mutex_. Keeping this as a copy-only helper makes
+  // it hard to regress into publishing under the mutex.
+  HealthPublicationState state;
+  state.refresh_stamp_s = last_refresh_stamp_s_;
+  state.refresh_start_stamp_s = last_refresh_start_stamp_s_;
+  state.refresh_end_stamp_s = last_refresh_end_stamp_s_;
+  state.health_callback_stamp_s = last_health_callback_stamp_s_;
+  state.publish_stamp_s = last_publish_stamp_s_;
+  state.refresh_start_steady_s = last_refresh_start_steady_s_;
+  state.refresh_end_steady_s = last_refresh_end_steady_s_;
+  state.health_callback_steady_s = last_health_callback_steady_s_;
+  state.publish_steady_s = last_publish_steady_s_;
+  state.last_grid_stamp_s = last_grid_stamp_s_;
+  state.refresh_elapsed_ms = last_refresh_elapsed_ms_;
+  state.health_callback_duration_ms = last_health_callback_duration_ms_;
+  state.health_callback_queue_delay_ms = last_health_callback_queue_delay_ms_;
+  state.health_state_mutex_wait_ms = last_health_state_mutex_wait_ms_;
+  state.health_state_mutex_hold_ms = last_health_state_mutex_hold_ms_;
+  state.refresh_query_count = last_refresh_query_count_;
+  state.snapshot_available = last_snapshot_available_;
+  return state;
 }
 
 void P0RiskGridRuntime::odomCallback(

@@ -9,6 +9,8 @@
   - 验证方式（Test/Experiment）
   - 可观测日志字段（Logs/Metrics）
 
+| IAP-RQ-320 / IAP-RQ-400 / IAP-RQ-410 | P0 authoritative health and P1 fresh planning context | `planner/plan_manage/src/p0_risk_grid_runtime.cpp`, `planner_manager.cpp`, `ego_replan_fsm.cpp`, `launch/test_planner.launch.py`, `scripts/dev_planner/analyze_safety_planner_run.py` | `test_p0_risk_grid_runtime`, `test_planning_risk_context`, `test_analyze_safety_planner_run_p1_2.py` | raw-health timing/generation, context timeline, accepted profile tuple, 13 figures | **DONE** |
+
 ---
 
 ## 1. 需求追溯表

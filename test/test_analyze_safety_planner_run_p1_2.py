@@ -542,7 +542,7 @@ class P1_2AnalyzerTest(unittest.TestCase):
         self.assertTrue(any("matching objective-applied debug" in item for item in failures), failures)
 
     def test_required_topic_failure_blocks_nested_gate(self):
-        health = topic_health(**{analyzer.P0_HEALTH_TOPIC: {"status": "FAIL", "count": 3}})
+        health = topic_health(**{analyzer.P0_HEALTH_LEGACY_TOPIC: {"status": "FAIL", "count": 3}})
         gates, failures, _, _ = run_gate(health=health)
 
         self.assertFalse(gates["required_topics_passed"])
@@ -593,6 +593,9 @@ class P1_2AnalyzerTest(unittest.TestCase):
                 "p1_2_trajectory_overlay_vs_p1_1.png",
                 "p1_2_artifact_completeness.png",
                 "p1_2_cause_exclusion_summary.png",
+                "p1_2_p0_callback_timeline.png",
+                "p1_2_planning_context_age_timeline.png",
+                "p1_2_replan_fallback_timeline.png",
             ],
         )
 
