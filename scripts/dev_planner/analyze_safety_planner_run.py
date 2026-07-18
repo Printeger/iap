@@ -12,6 +12,7 @@ import os
 import re
 import resource
 import textwrap
+import uuid
 from pathlib import Path
 from typing import Any
 
@@ -222,6 +223,9 @@ P1_2_FIGURE_FILENAMES = [
     "p1_2_timebase_alignment.png",
     "p1_2_temporal_horizon_admission.png",
     "p1_2_generation_singleflight_timeline.png",
+    "p1_2_candidate_optimization_funnel.png",
+    "p1_2_objective_contribution_ratio.png",
+    "p1_2_gradient_displacement_alignment.png",
 ]
 P1_2_OPTIONAL_FIGURE_FILENAMES = [
     "p1_2_p0_callback_timeline.png",
@@ -6348,6 +6352,41 @@ def p1_debug_csv_path(export_dir: Path, manifest: dict[str, Any]) -> Path:
         path = Path(manifest_path).expanduser()
         return path if path.is_absolute() else export_dir / path
     return export_dir / P1_1_DEBUG_CSV_NAME
+
+
+def p1_candidate_optimization_csv_path(export_dir: Path, manifest: dict[str, Any]) -> Path:
+    configured = str(manifest.get("p1.candidate_optimization_path", "")).strip() if manifest else ""
+    if configured:
+        path = Path(configured).expanduser()
+        return path if path.is_absolute() else export_dir / path
+    return p1_debug_csv_path(export_dir, manifest).with_name(
+        "planner_p1_candidate_optimization.csv"
+    )
+
+
+def read_p1_candidate_optimization_csv(path: Path) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    required = {"planning_attempt_id", "candidate_id", "snapshot_generation_id",
+                "query_base_time_s", "selected", "max_candidates_per_attempt"}
+    if not path.is_file():
+        return [], {"path": str(path), "missing": True, "valid": False, "row_count": 0}
+    try:
+        with path.open(newline="") as source:
+            reader = csv.DictReader(source)
+            fields = set(reader.fieldnames or [])
+            rows = list(reader)
+    except Exception as exc:
+        return [], {"path": str(path), "missing": False, "valid": False,
+                    "row_count": 0, "read_error": str(exc)}
+    keys = [(str(row.get("planning_attempt_id", "")), str(row.get("candidate_id", "")))
+            for row in rows]
+    max_limit = max([int(finite_float(row.get("max_candidates_per_attempt")) or 0)
+                     for row in rows] or [0])
+    valid = bool(rows) and required.issubset(fields) and len(keys) == len(set(keys)) and \
+        max_limit >= 1 and max_limit <= 8
+    return rows, {"path": str(path), "missing": False, "valid": valid,
+                  "row_count": len(rows), "missing_fields": sorted(required - fields),
+                  "duplicate_attempt_candidate": len(keys) != len(set(keys)),
+                  "configured_limit": max_limit}
 
 
 def p1_accepted_profile_csv_path(export_dir: Path, manifest: dict[str, Any]) -> Path:
@@ -14389,22 +14428,54 @@ def write_p1_2_provisional_summary(
 
 def summarize_p1_generation_singleflight(
     timeline_rows: list[dict[str, Any]],
+    max_candidates_per_attempt: int = 8,
 ) -> dict[str, Any]:
     stages = ("p1_admission", "acquire", "optimizer_start")
     counts: dict[str, dict[str, int]] = {}
+    attempts: dict[str, set[str]] = {}
+    acquisitions: dict[str, set[str]] = {}
+    starts: set[tuple[str, str, str]] = set()
+    duplicate_starts: list[dict[str, str]] = []
     for row in timeline_rows:
         stage = str(row.get("stage", ""))
         if stage not in stages:
             continue
         generation = str(row.get("snapshot_generation_id", "0"))
+        attempt = str(row.get("planning_attempt_id", "0"))
+        candidate = str(row.get("candidate_id", "0"))
         bucket = counts.setdefault(generation, {key: 0 for key in stages})
         bucket[stage] += 1
+        if stage == "p1_admission" and attempt != "0":
+            attempts.setdefault(generation, set()).add(attempt)
+        elif stage == "acquire" and attempt != "0":
+            acquisitions.setdefault(generation, set()).add(attempt)
+        elif stage == "optimizer_start":
+            key = (generation, attempt, candidate)
+            if key in starts:
+                duplicate_starts.append({"generation": generation,
+                                         "attempt": attempt,
+                                         "candidate": candidate})
+            starts.add(key)
     duplicates = [
-        {"generation": generation, "stage": stage, "count": count}
-        for generation, bucket in counts.items()
-        for stage, count in bucket.items()
-        if count > 1
+        {"generation": generation, "stage": "planning_attempt", "count": len(value)}
+        for generation, value in attempts.items() if len(value) > 1
+    ] + [
+        {"generation": generation, "stage": "context_acquisition", "count": len(value)}
+        for generation, value in acquisitions.items() if len(value) > 1
+    ] + [
+        {"generation": row["generation"], "stage": "optimizer_start_duplicate", "count": 2,
+         "attempt": row["attempt"], "candidate": row["candidate"]}
+        for row in duplicate_starts
     ]
+    candidate_counts: dict[str, int] = {}
+    for generation, attempt, _ in starts:
+        key = f"{generation}:{attempt}"
+        candidate_counts[key] = candidate_counts.get(key, 0) + 1
+    candidate_over_limit = [
+        {"generation_attempt": key, "count": count}
+        for key, count in candidate_counts.items() if count > max_candidates_per_attempt
+    ]
+    duplicates.extend({"stage": "candidate_limit", **entry} for entry in candidate_over_limit)
     return {
         "generation_counts": counts,
         "duplicates": duplicates,
@@ -14414,9 +14485,10 @@ def summarize_p1_generation_singleflight(
         "max_acquisition_per_generation": max(
             [bucket["acquire"] for bucket in counts.values()] or [0]
         ),
-        "max_optimizer_start_per_generation": max(
-            [bucket["optimizer_start"] for bucket in counts.values()] or [0]
-        ),
+        "max_optimizer_start_per_generation": max([bucket["optimizer_start"] for bucket in counts.values()] or [0]),
+        "candidate_counts": candidate_counts,
+        "candidate_limit": max_candidates_per_attempt,
+        "candidate_over_limit": candidate_over_limit,
         "passed": bool(counts) and not duplicates,
     }
 
@@ -14523,6 +14595,57 @@ def plot_p1_2_generation_singleflight_timeline(
     ax.grid(True, axis="y", alpha=0.25); ax.legend(loc="best")
     if not generations:
         ax.text(0.5, 0.5, "UNAVAILABLE", transform=ax.transAxes, ha="center")
+    fig.tight_layout(); fig.savefig(path, dpi=160); plt.close(fig)
+    return True
+
+
+def _p1_candidate_values(rows: list[dict[str, Any]], field: str) -> list[float]:
+    return [value for value in (finite_float(row.get(field)) for row in rows)
+            if value is not None]
+
+
+def plot_p1_2_candidate_optimization_funnel(rows: list[dict[str, Any]], path: Path) -> bool:
+    fig, ax = plt.subplots(figsize=(10.5, 5.5))
+    optimized = len(rows)
+    selected = sum(finite_float(row.get("selected")) == 1.0 for row in rows)
+    labels, values = ["optimized", "selected"], [optimized, selected]
+    bars = ax.bar(labels, values, color=["#2563eb", "#16a34a"])
+    for bar, value in zip(bars, values):
+        ax.text(bar.get_x() + bar.get_width() / 2, value, str(value), ha="center", va="bottom")
+    ax.set_title("P1 candidate optimization funnel")
+    ax.set_ylabel("candidate count"); ax.grid(True, axis="y", alpha=0.25)
+    if not rows: ax.text(0.5, 0.5, "UNAVAILABLE", transform=ax.transAxes, ha="center")
+    fig.tight_layout(); fig.savefig(path, dpi=160); plt.close(fig)
+    return True
+
+
+def plot_p1_2_objective_contribution_ratio(rows: list[dict[str, Any]], path: Path) -> bool:
+    fig, ax = plt.subplots(figsize=(11.0, 5.5))
+    x = np.arange(len(rows))
+    base = _p1_candidate_values(rows, "post_base_objective")
+    p1 = _p1_candidate_values(rows, "weighted_p1_cost")
+    count = min(len(base), len(p1))
+    if count:
+        denominator = np.maximum(np.abs(np.asarray(base[:count])), 1e-12)
+        ax.bar(x[:count], np.asarray(p1[:count]) / denominator, color="#7c3aed")
+    else: ax.text(0.5, 0.5, "UNAVAILABLE", transform=ax.transAxes, ha="center")
+    ax.axhline(0.0, color="black", linewidth=0.8); ax.set_xlabel("candidate row")
+    ax.set_ylabel("weighted P1 / base objective")
+    ax.set_title("P1 objective contribution ratio (diagnostic)"); ax.grid(True, axis="y", alpha=0.25)
+    fig.tight_layout(); fig.savefig(path, dpi=160); plt.close(fig)
+    return True
+
+
+def plot_p1_2_gradient_displacement_alignment(rows: list[dict[str, Any]], path: Path) -> bool:
+    fig, ax = plt.subplots(figsize=(11.0, 5.5))
+    values = _p1_candidate_values(rows, "grad_integrity_dot_displacement")
+    if values:
+        colors = ["#16a34a" if value <= 0 else "#dc2626" for value in values]
+        ax.bar(np.arange(len(values)), values, color=colors)
+    else: ax.text(0.5, 0.5, "UNAVAILABLE", transform=ax.transAxes, ha="center")
+    ax.axhline(0.0, color="black", linewidth=0.8); ax.set_xlabel("candidate row")
+    ax.set_ylabel("integrity gradient · displacement")
+    ax.set_title("P1 gradient–displacement alignment (diagnostic)"); ax.grid(True, axis="y", alpha=0.25)
     fig.tight_layout(); fig.savefig(path, dpi=160); plt.close(fig)
     return True
 
@@ -15374,7 +15497,7 @@ def next_debug_branch(
     return "debug_B0-1_baseline"
 
 
-def analyze(args: argparse.Namespace) -> dict[str, Any]:
+def _analyze_impl(args: argparse.Namespace) -> dict[str, Any]:
     export_dir = Path(args.export_dir).expanduser().resolve()
     bag_dir = Path(args.bag_dir).expanduser().resolve() if args.bag_dir else None
     csv_dir, figures_dir, metadata_dir = ensure_dirs(export_dir)
@@ -15500,6 +15623,10 @@ def analyze(args: argparse.Namespace) -> dict[str, Any]:
     failures: list[str] = []
     warnings: list[str] = []
     inconclusive: list[str] = []
+    # These registries must precede exact-cloud extraction.  In particular,
+    # no exception may be converted into an UnboundLocalError at this seam.
+    csv_artifacts: list[str] = getattr(args, "_csv_artifacts", [])
+    figure_artifacts: list[str] = getattr(args, "_figure_artifacts", [])
     manifest = read_json_if_exists(export_dir / "test_planner_manifest.json")
     validator_summary = read_json_if_exists(export_dir / "test_planner_validation_summary.json")
     metadata = read_bag_metadata(bag_dir) if bag_dir is not None else {"missing": True, "topic_counts": {}}
@@ -15563,6 +15690,8 @@ def analyze(args: argparse.Namespace) -> dict[str, Any]:
 
     p1_debug_rows: list[dict[str, Any]] = []
     p1_debug_summary: dict[str, Any] = {}
+    p1_candidate_optimization_rows: list[dict[str, Any]] = []
+    p1_candidate_optimization_summary: dict[str, Any] = {}
     p1_accepted_profile_rows: list[dict[str, Any]] = []
     p1_accepted_profile_summary: dict[str, Any] = {}
     p1_accepted_profile_context_rows: list[dict[str, Any]] = []
@@ -15572,6 +15701,11 @@ def analyze(args: argparse.Namespace) -> dict[str, Any]:
     if p1_phase:
         p1_debug_rows, p1_debug_summary = read_p1_integrity_debug_csv(
             p1_debug_csv_path(export_dir, manifest)
+        )
+        p1_candidate_optimization_rows, p1_candidate_optimization_summary = (
+            read_p1_candidate_optimization_csv(
+                p1_candidate_optimization_csv_path(export_dir, manifest)
+            )
         )
         p1_accepted_profile_rows, p1_accepted_profile_summary = (
             read_p1_accepted_profile_csv(
@@ -16597,7 +16731,9 @@ def analyze(args: argparse.Namespace) -> dict[str, Any]:
             baseline_manifest,
         )
         p1_2_singleflight = summarize_p1_generation_singleflight(
-            p1_planning_context_timeline_rows
+            p1_planning_context_timeline_rows,
+            max(1, min(8, int(finite_float(
+                manifest.get("p1.max_candidates_per_attempt")) or 8))),
         )
         p1_2_gates.update({
             "timebase_alignment_proven": bool(
@@ -16830,7 +16966,7 @@ def analyze(args: argparse.Namespace) -> dict[str, Any]:
             inconclusive,
         )
 
-    csv_artifacts = [str(topic_counts_path)]
+    csv_artifacts.append(str(topic_counts_path))
     csv_artifacts.extend(p0_csv_artifacts)
     if p5_rows:
         p5_status_path = csv_dir / f"{prefix}_p5_status.csv"
@@ -17935,6 +18071,11 @@ def analyze(args: argparse.Namespace) -> dict[str, Any]:
     p1_2_figure_artifacts: list[str] = []
     p1_2_required_figures: list[Path] = []
     if p1_2_phase:
+        candidate_csv_path = Path(str(p1_candidate_optimization_summary.get("path", "")))
+        if candidate_csv_path.is_file() and candidate_csv_path.stat().st_size > 0:
+            csv_artifacts.append(str(candidate_csv_path))
+        if not bool(p1_candidate_optimization_summary.get("valid")):
+            failures.append("P1-2 candidate optimization CSV is missing, malformed, or duplicates an attempt/candidate")
         p1_debug_path = Path(str(p1_debug_summary.get("path", "")))
         if p1_debug_path.is_file():
             csv_artifacts.append(str(p1_debug_path))
@@ -18351,6 +18492,27 @@ def analyze(args: argparse.Namespace) -> dict[str, Any]:
             p1_2_figure_artifacts.append(str(
                 p1_2_figure_paths["p1_2_generation_singleflight_timeline.png"]
             ))
+        if plot_p1_2_candidate_optimization_funnel(
+            p1_candidate_optimization_rows,
+            p1_2_figure_paths["p1_2_candidate_optimization_funnel.png"],
+        ):
+            p1_2_figure_artifacts.append(str(
+                p1_2_figure_paths["p1_2_candidate_optimization_funnel.png"]
+            ))
+        if plot_p1_2_objective_contribution_ratio(
+            p1_candidate_optimization_rows,
+            p1_2_figure_paths["p1_2_objective_contribution_ratio.png"],
+        ):
+            p1_2_figure_artifacts.append(str(
+                p1_2_figure_paths["p1_2_objective_contribution_ratio.png"]
+            ))
+        if plot_p1_2_gradient_displacement_alignment(
+            p1_candidate_optimization_rows,
+            p1_2_figure_paths["p1_2_gradient_displacement_alignment.png"],
+        ):
+            p1_2_figure_artifacts.append(str(
+                p1_2_figure_paths["p1_2_gradient_displacement_alignment.png"]
+            ))
         if plot_p1_2_p0_callback_timeline(
             health_rows, p1_2_figure_paths["p1_2_p0_callback_timeline.png"]
         ):
@@ -18662,6 +18824,7 @@ def analyze(args: argparse.Namespace) -> dict[str, Any]:
 
     summary = {
         "experiment_id": args.experiment_id,
+        "analysis_run_id": getattr(args, "_analysis_run_id", ""),
         "status": status,
         "passed": status == "PASS",
         "failures": failures,
@@ -18752,6 +18915,99 @@ def analyze(args: argparse.Namespace) -> dict[str, Any]:
     summary["summary_path"] = str(out_path)
     print(json.dumps(summary, indent=2, sort_keys=True))
     return summary
+
+
+def _nonempty_artifacts(paths: list[Any]) -> list[str]:
+    """Keep manifests truthful if an analysis aborts part-way through."""
+    result: list[str] = []
+    for value in paths:
+        path = Path(str(value))
+        if path.is_file() and path.stat().st_size > 0:
+            text_path = str(path)
+            if text_path not in result:
+                result.append(text_path)
+    return result
+
+
+def analyze(args: argparse.Namespace) -> dict[str, Any]:
+    """Run analysis with a fresh, fail-closed summary for every invocation.
+
+    P1-2 previously created its CSV registry after bag/exact-cloud extraction;
+    an exception there could both mask the original error and leave an old
+    successful summary in place.  The lifecycle guard owns the early
+    registries and atomically replaces that provisional record on every exit.
+    """
+    export_dir = Path(args.export_dir).expanduser().resolve()
+    bag_dir = Path(args.bag_dir).expanduser().resolve() if args.bag_dir else None
+    csv_dir, figures_dir, metadata_dir = ensure_dirs(export_dir)
+    del csv_dir, figures_dir  # directories must exist before any extraction
+    analysis_run_id = uuid.uuid4().hex
+    setattr(args, "_analysis_run_id", analysis_run_id)
+    summary_path = metadata_dir / "safety_planner_analysis_summary.json"
+    failures: list[str] = []
+    warnings: list[str] = []
+    inconclusive: list[str] = []
+    csv_artifacts: list[str] = []
+    figure_artifacts: list[str] = []
+    setattr(args, "_csv_artifacts", csv_artifacts)
+    setattr(args, "_figure_artifacts", figure_artifacts)
+    is_p1_2 = str(args.experiment_id).strip().upper() == "P1-2"
+    provisional_alignment = {
+        "verdict": "UNAVAILABLE",
+        "causal_alignment_proven": False,
+        "bin_count": 0,
+        "estimated_bin_bytes": 0,
+        "memory_limit_bytes": 1024 * 1024,
+        "reasons": ["analysis has not established a common clock mapping"],
+    }
+    if is_p1_2:
+        # This is intentionally before metadata/bag reads and plotting.
+        write_p1_2_provisional_summary(summary_path, provisional_alignment)
+        provisional = read_json_if_exists(summary_path)
+        provisional["analysis_run_id"] = analysis_run_id
+        provisional["experiment_id"] = args.experiment_id
+        provisional["export_dir"] = str(export_dir)
+        provisional["bag_dir"] = str(bag_dir) if bag_dir else ""
+        provisional["artifacts"] = {"csv": [], "figures": []}
+        _atomic_write_json(summary_path, provisional)
+    try:
+        summary = _analyze_impl(args)
+        artifacts = summary.setdefault("artifacts", {})
+        artifacts["csv"] = _nonempty_artifacts(artifacts.get("csv", []))
+        artifacts["figures"] = _nonempty_artifacts(artifacts.get("figures", []))
+        summary["analysis_run_id"] = analysis_run_id
+        _atomic_write_json(summary_path, summary)
+        summary["summary_path"] = str(summary_path)
+        return summary
+    except Exception as error:
+        phase = "p1_2_analysis" if is_p1_2 else "analysis"
+        failures.append(
+            f"{phase} exception {type(error).__name__}: {error}"
+        )
+        summary = {
+            "experiment_id": args.experiment_id,
+            "analysis_run_id": analysis_run_id,
+            "status": "FAIL",
+            "passed": False,
+            "failures": failures,
+            "warnings": warnings,
+            "inconclusive": inconclusive,
+            "exception": {"phase": phase, "type": type(error).__name__,
+                          "message": str(error)},
+            "peak_rss_kib": resource.getrusage(resource.RUSAGE_SELF).ru_maxrss,
+            "export_dir": str(export_dir),
+            "bag_dir": str(bag_dir) if bag_dir else "",
+            "artifacts": {
+                "csv": _nonempty_artifacts(csv_artifacts),
+                "figures": _nonempty_artifacts(figure_artifacts),
+            },
+        }
+        if is_p1_2:
+            summary["timebase_alignment"] = {"p1_2": provisional_alignment}
+        _atomic_write_json(summary_path, summary)
+        summary["summary_path"] = str(summary_path)
+        print(json.dumps(summary, indent=2, sort_keys=True))
+        return summary
 
 
 def parse_args() -> argparse.Namespace:

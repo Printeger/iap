@@ -111,6 +111,7 @@ namespace ego_planner
       double unknown_soft_penalty = 1.0;
       bool debug_csv_enable = false;
       std::string debug_csv_path;
+      int max_candidates_per_attempt = 8;
     };
 
     struct P1IntegrityMetrics
@@ -154,6 +155,36 @@ namespace ego_planner
       double total_cost = 0.0;
       double original_cost = 0.0;
       double integrity_cost = 0.0;
+    };
+
+    // A compact, test-facing record of one optimizer invocation.  This is
+    // intentionally aggregate evidence: the accepted-profile CSV remains the
+    // authoritative per-sample record.
+    struct P1OptimizationTrace
+    {
+      double pre_base_objective = std::numeric_limits<double>::quiet_NaN();
+      double post_base_objective = std::numeric_limits<double>::quiet_NaN();
+      double pre_total_objective = std::numeric_limits<double>::quiet_NaN();
+      double post_total_objective = std::numeric_limits<double>::quiet_NaN();
+      double raw_p1_cost = std::numeric_limits<double>::quiet_NaN();
+      double weighted_p1_cost = std::numeric_limits<double>::quiet_NaN();
+      double base_gradient_norm = std::numeric_limits<double>::quiet_NaN();
+      double p1_gradient_norm = std::numeric_limits<double>::quiet_NaN();
+      double total_gradient_norm = std::numeric_limits<double>::quiet_NaN();
+      double displacement_norm = std::numeric_limits<double>::quiet_NaN();
+      double grad_integrity_dot_displacement = std::numeric_limits<double>::quiet_NaN();
+      double pre_mean_c_pi = std::numeric_limits<double>::quiet_NaN();
+      double pre_max_c_pi = std::numeric_limits<double>::quiet_NaN();
+      double post_mean_c_pi = std::numeric_limits<double>::quiet_NaN();
+      double post_max_c_pi = std::numeric_limits<double>::quiet_NaN();
+      uint64_t planning_attempt_id = 0;
+      uint64_t candidate_id = 0;
+      uint64_t snapshot_generation_id = 0;
+      double query_base_time_s = std::numeric_limits<double>::quiet_NaN();
+      bool selected = false;
+      int solver_result = 0;
+      std::string termination_reason;
+      int iteration_count = 0;
     };
 
     struct P1IntegrityVizSample
@@ -234,6 +265,10 @@ namespace ego_planner
     const P4RiskAStarConfig &getP4RiskAStarConfig() const { return p4_config_; }
     const std::vector<P4GuideViz> &getLastP4GuideViz() const { return last_p4_guides_; }
     const OptimizerCostBreakdown &getLastOptimizerCostBreakdown() const { return last_optimizer_cost_breakdown_; }
+    const P1OptimizationTrace &getLastP1OptimizationTrace() const { return last_p1_optimization_trace_; }
+    std::string p1CandidateOptimizationPath() const;
+    void setLastP1OptimizationSelected(bool selected);
+    void writeP1OptimizationTrace(const P1OptimizationTrace &trace) const;
     void setP1IntegrityConfigForTest(const P1IntegrityConfig &config) { p1_config_ = config; }
     void setP4RiskAStarConfigForTest(const P4RiskAStarConfig &config) { p4_config_ = config; }
     bool evaluateReboundCostForTest(const Eigen::MatrixXd &control_points, double ts,
@@ -303,6 +338,7 @@ namespace ego_planner
     std::vector<P1IntegrityVizSample> last_p1_viz_samples_;
     std::vector<P4GuideViz> last_p4_guides_;
     OptimizerCostBreakdown last_optimizer_cost_breakdown_;
+    P1OptimizationTrace last_p1_optimization_trace_;
     bool suppress_rebound_collision_for_test_{false};
     std::shared_ptr<const iap::RiskGridSnapshot> risk_snapshot_;
     double risk_query_base_time_s_{0.0};
@@ -349,6 +385,7 @@ namespace ego_planner
                            int &first_control_point,
                            double weights[4]) const;
     void writeP1DebugCsv(const P1IntegrityMetrics &metrics) const;
+    void writeP1CandidateOptimizationCsv(const P1OptimizationTrace &trace) const;
     void captureP1PreOptimizationTrajectory(
         const Eigen::MatrixXd &control_points, double interval_s);
     bool check_collision_and_rebound(void);

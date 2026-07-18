@@ -729,6 +729,7 @@ ARG_DEFAULTS = [
     ("p1.unknown_soft_penalty", "1.0"),
     ("p1.debug_csv_enable", "false"),
     ("p1.debug_csv_path", ""),
+    ("p1.max_candidates_per_attempt", "8"),
     ("p2.enable_candidate_ranking", "false"),
     ("p2.metrics_only", "true"),
     ("p2.sample_dt_s", "0.2"),
@@ -1322,6 +1323,7 @@ def _ego_planner_node(context, drone_id, planner_odom_topic, cloud_topic, camera
             {"p1.unknown_soft_penalty": _param_float(context, "p1.unknown_soft_penalty")},
             {"p1.debug_csv_enable": _param_bool(context, "p1.debug_csv_enable")},
             {"p1.debug_csv_path": p1_debug_path},
+            {"p1.max_candidates_per_attempt": max(1, min(8, _param_int(context, "p1.max_candidates_per_attempt")))},
             {"p2.enable_candidate_ranking": p2_use},
             {"p2.metrics_only": p2_metrics_only},
             {"p2.sample_dt_s": _param_float(context, "p2.sample_dt_s")},
@@ -1641,6 +1643,9 @@ def _launch_setup(context):
     p1_accepted_profile_path_for_manifest = str(
         Path(p1_debug_path_for_manifest).with_name("planner_p1_accepted_trajectory_risk_profile.csv")
     )
+    p1_candidate_optimization_path_for_manifest = str(
+        Path(p1_debug_path_for_manifest).with_name("planner_p1_candidate_optimization.csv")
+    )
     p1_accepted_profile_context_path_for_manifest = str(
         Path(p1_debug_path_for_manifest).with_name("planner_p1_accepted_trajectory_risk_profile_context.csv")
     )
@@ -1678,6 +1683,8 @@ def _launch_setup(context):
         "p1.metrics_only": p1_metrics_only_for_manifest,
         "p1.lambda_integrity": _param_float(context, "p1.lambda_integrity"),
         "p1.debug_csv_path": p1_debug_path_for_manifest,
+        "p1.max_candidates_per_attempt": max(1, min(8, _param_int(context, "p1.max_candidates_per_attempt"))),
+        "p1.candidate_optimization_path": p1_candidate_optimization_path_for_manifest,
         "p1.accepted_profile_path": p1_accepted_profile_path_for_manifest,
         "p1.accepted_profile_context_path": p1_accepted_profile_context_path_for_manifest,
         "p1.planning_context_timeline_path": p1_planning_context_timeline_path_for_manifest,

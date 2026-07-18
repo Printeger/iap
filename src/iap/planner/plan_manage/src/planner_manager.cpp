@@ -248,13 +248,17 @@ namespace ego_planner
   const EGOPlannerManager::PlanningRiskContext &
   EGOPlannerManager::beginPlanningRiskContextWithSnapshot(
       const double now_s,
-      std::shared_ptr<const iap::RiskGridSnapshot> snapshot)
+      std::shared_ptr<const iap::RiskGridSnapshot> snapshot,
+      const uint64_t planning_attempt_id)
   {
     planning_risk_context_ = PlanningRiskContext{};
     planning_risk_context_.active = true;
     planning_risk_context_.planning_start_s = now_s;
     planning_risk_context_.snapshot_acquired_s = now_s;
-    planning_risk_context_.planning_attempt_id = ++p1_planning_attempt_seq_;
+    planning_risk_context_.planning_attempt_id = planning_attempt_id
+        ? planning_attempt_id : ++p1_planning_attempt_seq_;
+    p1_planning_attempt_seq_ = std::max(
+        p1_planning_attempt_seq_, planning_risk_context_.planning_attempt_id);
     planning_risk_context_.query_base_time_s = now_s;
     planning_risk_context_.snapshot = std::move(snapshot);
     if (planning_risk_context_.snapshot)
@@ -412,6 +416,13 @@ namespace ego_planner
     }
     appendPlanningRiskContextTimeline("retry_deferred", stamp_s, "deferred",
         reason, "existing_polynomial", &deferred_context);
+  }
+
+  void EGOPlannerManager::recordP1StaleRejection(
+      const std::string &reason, const double stamp_s)
+  {
+    appendPlanningRiskContextTimeline("stale_rejection", stamp_s, "rejected",
+        reason, "existing_trajectory");
   }
 
   void EGOPlannerManager::setPlanningRiskContextForTest(
@@ -757,11 +768,16 @@ namespace ego_planner
     bool flag_step_1_success = false;
     uint64_t selected_p1_candidate_id = 1;
     vector<vector<Eigen::Vector3d>> vis_trajs;
+    std::vector<BsplineOptimizer::P1OptimizationTrace> p1_candidate_traces;
 
     if (pp_.use_distinctive_trajs)
     {
       // cout << "enter" << endl;
       std::vector<ControlPoints> trajs = bspline_optimizer_->distinctiveTrajs(segments);
+      const int candidate_limit = std::clamp(
+          p1_config.max_candidates_per_attempt, 1, 8);
+      if (static_cast<int>(trajs.size()) > candidate_limit)
+        trajs.resize(static_cast<std::size_t>(candidate_limit));
       cout << "\033[1;33m"
            << "multi-trajs=" << trajs.size() << "\033[1;0m" << endl;
 
@@ -781,6 +797,8 @@ namespace ego_planner
             planning_risk_context_.optimizer_end_s,
             p1_candidate_success ? "candidate_success" : "candidate_failure",
             p1_candidate_success ? "ok" : "optimizer_failure");
+        p1_candidate_traces.push_back(
+            bspline_optimizer_->getLastP1OptimizationTrace());
         bspline_optimizer_->clearRiskSnapshot();
         if (safety_viz_)
         {
@@ -871,6 +889,18 @@ namespace ego_planner
                  << ", metrics_only=" << p2_config_.metrics_only << endl;
           }
         }
+        for (auto &trace : p1_candidate_traces)
+        {
+          trace.selected = trace.candidate_id == selected_p1_candidate_id;
+          bspline_optimizer_->writeP1OptimizationTrace(trace);
+        }
+      }
+      else
+      {
+        // Failed optimizations are still evidence for an admitted candidate;
+        // write one definitive unselected row for each of them.
+        for (const auto &trace : p1_candidate_traces)
+          bspline_optimizer_->writeP1OptimizationTrace(trace);
       }
 
       t_opt = rclcpp::Clock().now() - t_start;
@@ -889,6 +919,9 @@ namespace ego_planner
           planning_risk_context_.optimizer_end_s,
           flag_step_1_success ? "candidate_success" : "candidate_failure",
           flag_step_1_success ? "ok" : "optimizer_failure");
+      auto trace = bspline_optimizer_->getLastP1OptimizationTrace();
+      trace.selected = flag_step_1_success;
+      bspline_optimizer_->writeP1OptimizationTrace(trace);
       bspline_optimizer_->clearRiskSnapshot();
       if (safety_viz_)
       {

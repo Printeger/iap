@@ -148,6 +148,7 @@ namespace ego_planner
     node->declare_parameter("p1.unknown_soft_penalty", 1.0);
     node->declare_parameter("p1.debug_csv_enable", false);
     node->declare_parameter("p1.debug_csv_path", std::string(""));
+    node->declare_parameter("p1.max_candidates_per_attempt", 8);
     node->declare_parameter("p4.enable_risk_aware_astar", false);
     node->declare_parameter("p4.lambda_p4_risk", 0.05);
     node->declare_parameter("p4.risk_cost_max", 100.0);
@@ -180,6 +181,9 @@ namespace ego_planner
     node->get_parameter("p1.unknown_soft_penalty", p1_config_.unknown_soft_penalty);
     node->get_parameter("p1.debug_csv_enable", p1_config_.debug_csv_enable);
     node->get_parameter("p1.debug_csv_path", p1_config_.debug_csv_path);
+    node->get_parameter("p1.max_candidates_per_attempt", p1_config_.max_candidates_per_attempt);
+    p1_config_.max_candidates_per_attempt = std::clamp(
+        p1_config_.max_candidates_per_attempt, 1, 8);
     node->get_parameter("p4.enable_risk_aware_astar", p4_config_.enable_risk_aware_astar);
     node->get_parameter("p4.lambda_p4_risk", p4_config_.lambda_p4_risk);
     node->get_parameter("p4.risk_cost_max", p4_config_.risk_cost_max);
@@ -1769,6 +1773,7 @@ namespace ego_planner
   // 设置时间间隔ts，调用rebound_optimize(final_cost)将轨迹推出障碍物，得到最优的无碰撞轨迹，并将其控制点赋值给optimal_points
   bool BsplineOptimizer::BsplineOptimizeTrajRebound(Eigen::MatrixXd &optimal_points, double ts)
   {
+    last_p1_optimization_trace_ = P1OptimizationTrace{};
     captureP1PreOptimizationTrajectory(cps_.points, ts);
     setBsplineInterval(ts);
 
@@ -1776,6 +1781,27 @@ namespace ego_planner
     bool flag_success = rebound_optimize(final_cost);
 
     optimal_points = cps_.points;
+    last_p1_optimization_trace_.planning_attempt_id =
+        p1_risk_context_.planning_attempt_id;
+    last_p1_optimization_trace_.candidate_id = p1_risk_context_.candidate_id;
+    last_p1_optimization_trace_.snapshot_generation_id = risk_snapshot_
+        ? risk_snapshot_->generation_id() : 0;
+    last_p1_optimization_trace_.query_base_time_s = risk_query_base_time_s_;
+    last_p1_optimization_trace_.post_total_objective = final_cost;
+    last_p1_optimization_trace_.post_base_objective =
+        last_optimizer_cost_breakdown_.original_cost;
+    last_p1_optimization_trace_.raw_p1_cost = last_p1_metrics_.f_integrity;
+    last_p1_optimization_trace_.weighted_p1_cost =
+        last_p1_metrics_.weighted_f_integrity;
+    last_p1_optimization_trace_.base_gradient_norm =
+        last_p1_metrics_.grad_norm_original;
+    last_p1_optimization_trace_.p1_gradient_norm =
+        last_p1_metrics_.grad_norm_integrity;
+    last_p1_optimization_trace_.total_gradient_norm =
+        std::numeric_limits<double>::quiet_NaN();
+    last_p1_optimization_trace_.iteration_count = iter_num_;
+    last_p1_optimization_trace_.termination_reason =
+        flag_success ? "success" : "optimizer_failure";
 
     return flag_success;
   }
@@ -1784,6 +1810,7 @@ namespace ego_planner
   // 得到最优的无碰撞轨迹，并将其控制点赋值给optimal_points
   bool BsplineOptimizer::BsplineOptimizeTrajRebound(Eigen::MatrixXd &optimal_points, double &final_cost, const ControlPoints &control_points, double ts)
   {
+    last_p1_optimization_trace_ = P1OptimizationTrace{};
     captureP1PreOptimizationTrajectory(control_points.points, ts);
     // 将时间间隔存储到成员变量
     setBsplineInterval(ts);
@@ -1793,6 +1820,25 @@ namespace ego_planner
     bool flag_success = rebound_optimize(final_cost);
 
     optimal_points = cps_.points;
+    last_p1_optimization_trace_.planning_attempt_id =
+        p1_risk_context_.planning_attempt_id;
+    last_p1_optimization_trace_.candidate_id = p1_risk_context_.candidate_id;
+    last_p1_optimization_trace_.snapshot_generation_id = risk_snapshot_
+        ? risk_snapshot_->generation_id() : 0;
+    last_p1_optimization_trace_.query_base_time_s = risk_query_base_time_s_;
+    last_p1_optimization_trace_.post_total_objective = final_cost;
+    last_p1_optimization_trace_.post_base_objective =
+        last_optimizer_cost_breakdown_.original_cost;
+    last_p1_optimization_trace_.raw_p1_cost = last_p1_metrics_.f_integrity;
+    last_p1_optimization_trace_.weighted_p1_cost =
+        last_p1_metrics_.weighted_f_integrity;
+    last_p1_optimization_trace_.base_gradient_norm =
+        last_p1_metrics_.grad_norm_original;
+    last_p1_optimization_trace_.p1_gradient_norm =
+        last_p1_metrics_.grad_norm_integrity;
+    last_p1_optimization_trace_.iteration_count = iter_num_;
+    last_p1_optimization_trace_.termination_reason =
+        flag_success ? "success" : "optimizer_failure";
 
     return flag_success;
   }
@@ -1857,6 +1903,22 @@ namespace ego_planner
         double initial_cost = 0.0;
         combineCostRebound(q, initial_gradient.data(), initial_cost,
                            variable_num_);
+        last_p1_optimization_trace_.planning_attempt_id =
+            p1_risk_context_.planning_attempt_id;
+        last_p1_optimization_trace_.candidate_id = p1_risk_context_.candidate_id;
+        last_p1_optimization_trace_.snapshot_generation_id = risk_snapshot_
+            ? risk_snapshot_->generation_id() : 0;
+        last_p1_optimization_trace_.query_base_time_s = risk_query_base_time_s_;
+        last_p1_optimization_trace_.pre_total_objective = initial_cost;
+        last_p1_optimization_trace_.pre_base_objective =
+            last_optimizer_cost_breakdown_.original_cost;
+        last_p1_optimization_trace_.raw_p1_cost = last_p1_metrics_.f_integrity;
+        last_p1_optimization_trace_.weighted_p1_cost =
+            last_p1_metrics_.weighted_f_integrity;
+        last_p1_optimization_trace_.base_gradient_norm =
+            last_p1_metrics_.grad_norm_original;
+        last_p1_optimization_trace_.p1_gradient_norm =
+            last_p1_metrics_.grad_norm_integrity;
         const double variable_norm = Eigen::Map<const Eigen::VectorXd>(
             q, variable_num_).norm();
         lbfgs_params.g_epsilon = p1LbfgsGradientEpsilon(
@@ -1867,6 +1929,9 @@ namespace ego_planner
       t1 = rclcpp::Clock().now();
       // 执行优化
       int result = lbfgs::lbfgs_optimize(variable_num_, q, &final_cost, BsplineOptimizer::costFunctionRebound, NULL, BsplineOptimizer::earlyExit, this, &lbfgs_params);
+      last_p1_optimization_trace_.solver_result = result;
+      last_p1_optimization_trace_.iteration_count = iter_num_;
+      last_p1_optimization_trace_.termination_reason = lbfgs::lbfgs_strerror(result);
       t2 = rclcpp::Clock().now();
       double time_ms = (t2 - t1).seconds() * 1000;
       double total_time_ms = (t2 - t0).seconds() * 1000;
@@ -2371,6 +2436,63 @@ namespace ego_planner
         << (metrics.applied_to_objective ? 1 : 0) << '\n';
   }
 
+  std::string BsplineOptimizer::p1CandidateOptimizationPath() const
+  {
+    if (p1_config_.debug_csv_path.empty())
+      return "planner_p1_candidate_optimization.csv";
+    return siblingPath(p1_config_.debug_csv_path,
+                       "planner_p1_candidate_optimization.csv");
+  }
+
+  void BsplineOptimizer::writeP1CandidateOptimizationCsv(
+      const P1OptimizationTrace &trace) const
+  {
+    if (!p1_config_.debug_csv_enable || p1_config_.debug_csv_path.empty())
+      return;
+    const std::string path = p1CandidateOptimizationPath();
+    std::ifstream existing(path);
+    const bool header = !existing.good() ||
+        existing.peek() == std::ifstream::traits_type::eof();
+    existing.close();
+    std::ofstream out(path, std::ios::app);
+    if (!out.good()) return;
+    out << std::setprecision(17);
+    if (header) {
+      out << "stamp,planning_attempt_id,candidate_id,snapshot_generation_id,query_base_time_s,"
+             "pre_base_objective,post_base_objective,pre_total_objective,post_total_objective,"
+             "raw_p1_cost,weighted_p1_cost,base_gradient_norm,p1_gradient_norm,total_gradient_norm,"
+             "displacement_norm,grad_integrity_dot_displacement,pre_mean_c_pi,pre_max_c_pi,"
+             "post_mean_c_pi,post_max_c_pi,selected,solver_result,termination_reason,iteration_count,"
+             "objective_allowed,fallback_reason,max_candidates_per_attempt\n";
+    }
+    out << rclcpp::Clock().now().seconds() << ',' << trace.planning_attempt_id << ','
+        << trace.candidate_id << ',' << trace.snapshot_generation_id << ','
+        << trace.query_base_time_s << ',' << trace.pre_base_objective << ','
+        << trace.post_base_objective << ',' << trace.pre_total_objective << ','
+        << trace.post_total_objective << ',' << trace.raw_p1_cost << ','
+        << trace.weighted_p1_cost << ',' << trace.base_gradient_norm << ','
+        << trace.p1_gradient_norm << ',' << trace.total_gradient_norm << ','
+        << trace.displacement_norm << ',' << trace.grad_integrity_dot_displacement << ','
+        << trace.pre_mean_c_pi << ',' << trace.pre_max_c_pi << ','
+        << trace.post_mean_c_pi << ',' << trace.post_max_c_pi << ','
+        << (trace.selected ? 1 : 0) << ',' << trace.solver_result << ','
+        << trace.termination_reason << ',' << trace.iteration_count << ','
+        << (p1_risk_context_.objective_allowed ? 1 : 0) << ','
+        << p1_risk_context_.fallback_reason << ','
+        << p1_config_.max_candidates_per_attempt << '\n';
+  }
+
+  void BsplineOptimizer::setLastP1OptimizationSelected(const bool selected)
+  {
+    last_p1_optimization_trace_.selected = selected;
+  }
+
+  void BsplineOptimizer::writeP1OptimizationTrace(
+      const P1OptimizationTrace &trace) const
+  {
+    writeP1CandidateOptimizationCsv(trace);
+  }
+
   std::string BsplineOptimizer::p1AcceptedTrajectoryRiskProfilePath() const
   {
     if (p1_config_.debug_csv_path.empty())
@@ -2789,6 +2911,17 @@ namespace ego_planner
     double initial_cost = 0.0;
     combineCostRebound(x.data(), initial_gradient.data(), initial_cost,
                        variable_num_);
+    P1OptimizationTrace trace;
+    trace.planning_attempt_id = p1_risk_context_.planning_attempt_id;
+    trace.candidate_id = p1_risk_context_.candidate_id;
+    trace.snapshot_generation_id = risk_snapshot_ ? risk_snapshot_->generation_id() : 0;
+    trace.query_base_time_s = risk_query_base_time_s_;
+    trace.pre_total_objective = initial_cost;
+    trace.pre_base_objective = last_optimizer_cost_breakdown_.original_cost;
+    trace.raw_p1_cost = last_p1_metrics_.f_integrity;
+    trace.weighted_p1_cost = last_p1_metrics_.weighted_f_integrity;
+    trace.base_gradient_norm = last_p1_metrics_.grad_norm_original;
+    trace.p1_gradient_norm = last_p1_metrics_.grad_norm_integrity;
 
     lbfgs::lbfgs_parameter_t parameters;
     lbfgs::lbfgs_load_default_parameters(&parameters);
@@ -2804,6 +2937,21 @@ namespace ego_planner
         &parameters);
     suppress_rebound_collision_for_test_ = false;
     iterations = iter_num_;
+    // L-BFGS has already evaluated the terminal point.  Do not issue another
+    // callback here: the rebound solver's collision/restart state is not a
+    // pure postcondition and a second callback can re-enter it after cleanup.
+    trace.post_total_objective = final_cost;
+    trace.post_base_objective = last_optimizer_cost_breakdown_.original_cost;
+    trace.raw_p1_cost = last_p1_metrics_.f_integrity;
+    trace.weighted_p1_cost = last_p1_metrics_.weighted_f_integrity;
+    trace.total_gradient_norm = std::numeric_limits<double>::quiet_NaN();
+    trace.displacement_norm = (Eigen::Map<const Eigen::VectorXd>(
+        x.data(), variable_num_) - Eigen::Map<const Eigen::VectorXd>(
+        control_points.data() + 3 * order_, variable_num_)).norm();
+    trace.solver_result = result;
+    trace.iteration_count = iterations;
+    trace.termination_reason = lbfgs::lbfgs_strerror(result);
+    last_p1_optimization_trace_ = trace;
     memcpy(control_points.data() + 3 * order_, x.data(),
            variable_num_ * sizeof(double));
     return std::isfinite(final_cost) &&

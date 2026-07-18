@@ -20,6 +20,10 @@ class P1ReplanAdmission {
     bool acquire_p1_context = true;
     Action action = Action::ALLOW_P1;
     std::string reason = "attempt_allowed";
+    // Non-zero only when this tick is admitted.  It is deliberately owned by
+    // the admission gate, rather than by a later context constructor, so a
+    // deferred tick cannot accidentally look like a planning attempt.
+    uint64_t planning_attempt_id = 0;
   };
 
   Decision admit(uint64_t generation_id, bool ready, bool stale,
@@ -39,6 +43,7 @@ class P1ReplanAdmission {
   uint64_t successful_generation_ = 0;
   bool has_attempted_generation_ = false;
   bool pending_retry_ = false;
+  uint64_t planning_attempt_seq_ = 0;
 };
 
 }  // namespace ego_planner

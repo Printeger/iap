@@ -96,7 +96,8 @@ namespace ego_planner
     const PlanningRiskContext &beginPlanningRiskContext(double now_s);
     const PlanningRiskContext &beginPlanningRiskContextWithSnapshot(
         double now_s,
-        std::shared_ptr<const iap::RiskGridSnapshot> snapshot);
+        std::shared_ptr<const iap::RiskGridSnapshot> snapshot,
+        uint64_t planning_attempt_id = 0);
     void clearPlanningRiskContext();
     const PlanningRiskContext &planningRiskContext() const { return planning_risk_context_; }
     std::shared_ptr<const iap::RiskGridSnapshot> currentPlanningRiskSnapshot() const { return planning_risk_context_.snapshot; }
@@ -118,6 +119,7 @@ namespace ego_planner
     void recordP1RetryDeferred(
         const std::string &reason, double stamp_s,
         std::shared_ptr<const iap::RiskGridSnapshot> snapshot);
+    void recordP1StaleRejection(const std::string &reason, double stamp_s);
 
     PlanParameters pp_;
     LocalTrajData local_data_;

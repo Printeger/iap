@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 
+import argparse
 import importlib.util
 import json
 from pathlib import Path
@@ -662,6 +663,9 @@ class P1_2AnalyzerTest(unittest.TestCase):
                 "p1_2_timebase_alignment.png",
                 "p1_2_temporal_horizon_admission.png",
                 "p1_2_generation_singleflight_timeline.png",
+                "p1_2_candidate_optimization_funnel.png",
+                "p1_2_objective_contribution_ratio.png",
+                "p1_2_gradient_displacement_alignment.png",
             ],
         )
 
@@ -893,9 +897,9 @@ class P1_2AnalyzerTest(unittest.TestCase):
         self.assertFalse(result["valid"])
         self.assertIn("temporal_out_of_horizon", result["reasons"])
 
-    def test_p1_2_required_figure_contract_has_nineteen_nonempty_names(self):
-        self.assertEqual(len(analyzer.P1_2_FIGURE_FILENAMES), 19)
-        self.assertEqual(len(set(analyzer.P1_2_FIGURE_FILENAMES)), 19)
+    def test_p1_2_required_figure_contract_has_twenty_two_nonempty_names(self):
+        self.assertEqual(len(analyzer.P1_2_FIGURE_FILENAMES), 22)
+        self.assertEqual(len(set(analyzer.P1_2_FIGURE_FILENAMES)), 22)
         self.assertIn(
             "p1_2_snapshot_spatial_bounds_overlay.png",
             analyzer.P1_2_FIGURE_FILENAMES,
@@ -1074,7 +1078,7 @@ class P1_2AnalyzerTest(unittest.TestCase):
         self.assertEqual(alignment["health_relative_s"], [0.25])
 
     def test_required_png_completeness_is_a_final_hard_gate(self):
-        self.assertEqual(len(analyzer.P1_2_FIGURE_FILENAMES), 19)
+        self.assertEqual(len(analyzer.P1_2_FIGURE_FILENAMES), 22)
         with tempfile.TemporaryDirectory() as tmp:
             paths = [Path(tmp) / name for name in analyzer.P1_2_FIGURE_FILENAMES]
             for path in paths[:-1]:
@@ -1089,6 +1093,32 @@ class P1_2AnalyzerTest(unittest.TestCase):
             analyzer.apply_p1_2_required_figure_gate(gates, paths, failures)
             self.assertTrue(gates["required_png_completeness"])
             self.assertEqual(failures, [])
+
+    def test_analyzer_exception_replaces_provisional_summary_with_fresh_failure(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            old_summary = root / "metadata" / "safety_planner_analysis_summary.json"
+            old_summary.parent.mkdir(parents=True)
+            old_summary.write_text(json.dumps({"passed": True, "analysis_run_id": "old"}))
+            original = analyzer.read_bag_metadata
+            analyzer.read_bag_metadata = lambda _bag: (_ for _ in ()).throw(
+                RuntimeError("fixture exact-cloud extraction failed")
+            )
+            try:
+                result = analyzer.analyze(argparse.Namespace(
+                    experiment_id="P1-2", export_dir=str(root), bag_dir=str(root / "bag"),
+                    baseline_export_dir="", baseline_bag_dir="", p0_2_export_dir="",
+                    p0_2_bag_dir="", synthetic_only=False, blocked_fixture_audit=False,
+                    fail_on_threshold=True,
+                ))
+            finally:
+                analyzer.read_bag_metadata = original
+            self.assertEqual(result["status"], "FAIL")
+            self.assertEqual(result["exception"]["type"], "RuntimeError")
+            self.assertNotEqual(result["analysis_run_id"], "old")
+            persisted = json.loads(old_summary.read_text())
+            self.assertEqual(persisted["analysis_run_id"], result["analysis_run_id"])
+            self.assertEqual(persisted["artifacts"], {"csv": [], "figures": []})
 
 
 if __name__ == "__main__":

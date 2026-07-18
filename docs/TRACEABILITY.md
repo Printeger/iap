@@ -130,3 +130,11 @@
 | IAP-RQ-400 | P1-1 final profile `190/200`, mean/max `0.414578/0.424604`, metrics-only temporal fallback; P1-2 `200/200`, objective applied, mean/max `0.414881/0.432228` | **FAIL: strict mean/max reduction** |
 | IAP-RQ-410 | Bags contain 18/20 bsplines; admission/acquisition max `1/1`, optimizer-start max P1-1 `8`, P1-2 `4` | **FAIL: strict optimizer-start singleflight** |
 | IAP-RQ-320 / IAP-RQ-400 / IAP-RQ-410 | Sole analyzer invocation raw exit 1, `csv_artifacts` initialization-order exception, no structured summary/hard-gate files, 2/19 required PNGs | **FAIL -> analyzer csv_artifacts initialization-order / optimizer-start singleflight debug; P1-3 not run** |
+
+## 2026-07-18 P1-2 analyzer/singleflight/fixed-lambda repair
+
+| Req ID | Requirement/evidence seam | Implementation | Verification | Status |
+|---|---|---|---|---|
+| IAP-RQ-320 | Analyzer must produce a fresh structured failure rather than reuse an old summary when extraction/plotting aborts | `scripts/dev_planner/analyze_safety_planner_run.py`: atomic provisional/final lifecycle and valid-artifact filtering | P1-2 analyzer exception-lifecycle regression | **IMPLEMENTED; fresh run pending** |
+| IAP-RQ-400 | Fixed-lambda candidate optimization evidence must bind objective/gradient/displacement fields to an immutable snapshot context | `bspline_optimizer.{h,cpp}`, `planner_manager.cpp`, `test_planner.launch.py`, candidate CSV and 3 required figures | `test_p1_integrity_cost`, P1-2 analyzer suite | **IMPLEMENTED; fresh strict reduction pending** |
+| IAP-RQ-410 | One admitted attempt and one context acquisition per P0 generation; multiple distinct candidates are valid inside that attempt | `p1_replan_admission.{h,cpp}`, `ego_replan_fsm.cpp`, `planner_manager.cpp`, candidate-aware analyzer summary | `test_p1_replan_admission`, `test_planning_risk_context` | **IMPLEMENTED; fresh no-storm evidence pending** |

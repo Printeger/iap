@@ -8,6 +8,7 @@ TEST(P1ReplanAdmissionTest, SameRejectedGenerationIsSingleFlight) {
   int expensive_plans = 0;
 
   auto first = admission.admit(7, true, false);
+  EXPECT_NE(first.planning_attempt_id, 0U);
   if (first.allow_expensive_planning) {
     ++acquisitions;
     ++expensive_plans;
@@ -38,6 +39,7 @@ TEST(P1ReplanAdmissionTest, RetryRequiresANewHealthyGeneration) {
   EXPECT_FALSE(admission.admit(4, true, true).allow_expensive_planning);
   const auto retry = admission.admit(5, true, false);
   EXPECT_TRUE(retry.allow_expensive_planning);
+  EXPECT_NE(retry.planning_attempt_id, 0U);
   EXPECT_EQ(retry.reason, "retry_new_healthy_generation");
 
   admission.recordSuccess(5);
@@ -56,6 +58,7 @@ TEST(P1ReplanAdmissionTest, UnavailableGenerationZeroAllowsOneBaseInitialFallbac
   EXPECT_FALSE(initial.acquire_p1_context);
   EXPECT_EQ(initial.action,
             ego_planner::P1ReplanAdmission::Action::ALLOW_BASE_INITIAL_FALLBACK);
+  EXPECT_NE(initial.planning_attempt_id, 0U);
   for (int tick = 0; tick < 20; ++tick) {
     EXPECT_FALSE(admission.admit(0, false, true, false).allow_expensive_planning);
   }
@@ -73,6 +76,18 @@ TEST(P1ReplanAdmissionTest, UnavailableGenerationKeepsExistingTrajectory) {
             ego_planner::P1ReplanAdmission::Action::DEFER_KEEP_EXISTING);
   EXPECT_TRUE(admission.pendingRetry());
   EXPECT_FALSE(admission.admit(0, false, true, true).allow_expensive_planning);
+}
+
+TEST(P1ReplanAdmissionTest, DeferredTicksDoNotAllocatePlanningAttemptIds) {
+  ego_planner::P1ReplanAdmission admission;
+  const auto admitted = admission.admit(12, true, false);
+  ASSERT_TRUE(admitted.allow_expensive_planning);
+  ASSERT_NE(admitted.planning_attempt_id, 0U);
+  const auto deferred = admission.admit(12, true, false);
+  EXPECT_FALSE(deferred.allow_expensive_planning);
+  EXPECT_EQ(deferred.planning_attempt_id, 0U);
+  const auto next = admission.admit(13, true, false);
+  EXPECT_EQ(next.planning_attempt_id, admitted.planning_attempt_id + 1U);
 }
 
 TEST(P1ReplanAdmissionTest, P5BypassDoesNotMutateP1AdmissionState) {

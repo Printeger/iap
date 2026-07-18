@@ -931,6 +931,7 @@ namespace ego_planner
          planner_manager_->p5_integrity_gate_->finalGateEnabled());
     std::shared_ptr<const iap::RiskGridSnapshot> admitted_snapshot;
     bool acquire_p1_context = true;
+    uint64_t p1_planning_attempt_id = 0;
     if (planner_manager_->p1AdmissionEnabled() && !p5_owns_admission)
     {
       admitted_snapshot = planner_manager_->acquireRiskGridSnapshot();
@@ -954,6 +955,7 @@ namespace ego_planner
       const auto admission = p1_replan_admission_.admit(
           generation, health.ready, stale, has_existing_trajectory);
       acquire_p1_context = admission.acquire_p1_context;
+      p1_planning_attempt_id = admission.planning_attempt_id;
       if (!admission.allow_expensive_planning)
       {
         planner_manager_->recordP1RetryDeferred(
@@ -965,7 +967,8 @@ namespace ego_planner
     if (planner_manager_->p1AdmissionEnabled() && !p5_owns_admission)
       planner_manager_->beginPlanningRiskContextWithSnapshot(
           plannerNow().seconds(),
-          acquire_p1_context ? admitted_snapshot : nullptr);
+          acquire_p1_context ? admitted_snapshot : nullptr,
+          p1_planning_attempt_id);
     else
       planner_manager_->beginPlanningRiskContext(plannerNow().seconds());
     struct PlanningRiskContextGuard
@@ -995,6 +998,8 @@ namespace ego_planner
         !p5_owns_admission &&
         planner_manager_->lastP1RejectionRequiresNewGeneration())
     {
+      planner_manager_->recordP1StaleRejection(
+          planner_manager_->lastP1RejectionReason(), plannerNow().seconds());
       p1_replan_admission_.recordStaleRejection(p1_admission_generation);
     }
 
@@ -1077,6 +1082,8 @@ namespace ego_planner
         if (planner_manager_->p1AdmissionEnabled() && !p5_owns_admission &&
             planner_manager_->lastP1RejectionRequiresNewGeneration())
         {
+          planner_manager_->recordP1StaleRejection(
+              freshness_reason, plannerNow().seconds());
           p1_replan_admission_.recordStaleRejection(p1_admission_generation);
         }
         planner_manager_->local_data_ = previous_local_data;
