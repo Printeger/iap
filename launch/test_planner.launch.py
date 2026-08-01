@@ -4,6 +4,7 @@ import os
 import shutil
 import subprocess
 import sys
+import sys
 import time
 import uuid
 from pathlib import Path
@@ -2387,6 +2388,7 @@ def _launch_setup(context):
     if record_bag:
         bag_recorder = ExecuteProcess(
                 cmd=[
+                    sys.executable,
                     str(Path(get_package_prefix("iap")) / "lib" / "iap" /
                         "planner_bag_recorder_with_finalizer.py"),
                     "--manifest", evidence["manifest_path"],

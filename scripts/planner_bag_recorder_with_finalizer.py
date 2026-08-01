@@ -43,7 +43,8 @@ def main() -> int:
 
     finalizer = Path(__file__).with_name("finalize_planner_evidence_manifest.py")
     finalized = subprocess.run(
-        [str(finalizer), "--manifest", args.manifest, "--wait-timeout-s", "15"],
+        [sys.executable, str(finalizer), "--manifest", args.manifest,
+         "--wait-timeout-s", "15"],
         check=False,
     )
     if finalized.returncode != 0:
