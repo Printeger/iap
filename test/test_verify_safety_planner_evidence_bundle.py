@@ -53,7 +53,7 @@ class EvidenceBundlePreflightTest(unittest.TestCase):
         common = {"schema_version": preflight.SCHEMA, "run_id": "run-1", "manifest_path": str(manifest_path)}
         payloads = {
             "planner_p1_integrity_cost_debug.csv": [{**common, "applied_to_objective": "1"}],
-            "planner_p1_candidate_optimization.csv": [{**common, "planning_attempt_id": "1", "selected": "1", "optimization_success": "1", "pre_mean_c_pi": "0.5", "pre_max_c_pi": "0.6", "post_mean_c_pi": "0.4", "post_max_c_pi": "0.5"}],
+            "planner_p1_candidate_optimization.csv": [{**common, "planning_attempt_id": "1", "selected": "1", "optimization_success": "1", "pre_mean_c_pi": "0.5", "pre_max_c_pi": "0.6", "post_mean_c_pi": "0.4", "post_max_c_pi": "0.5", "support_full_valid": "1", "support_sample_count": "200", "pre_support_valid_count": "200", "post_support_valid_count": "200", "pre_support_coverage": "1", "post_support_coverage": "1"}],
             "planner_p1_accepted_trajectory_risk_profile.csv": [{**common, "sample_index": str(i)} for i in range(200)],
             "planner_p1_accepted_trajectory_risk_profile_context.csv": [{**common, "profile_seq": "1"}],
             "planner_p1_planning_context_timeline.csv": [{**common, "stage": "publish"}],
@@ -80,6 +80,24 @@ class EvidenceBundlePreflightTest(unittest.TestCase):
             result = preflight.validate_bundle(export, bag, metrics_only=False, lambda_value=0.00001)
         self.assertFalse(result["passed"])
         self.assertTrue(any("run ID mismatch" in error for error in result["errors"]))
+
+    def test_rejects_partial_candidate_lattice_support(self):
+        root, export, bag = self.make_bundle()
+        self.addCleanup(root.cleanup)
+        payload = {"schema_version": preflight.SCHEMA, "run_id": "run-1", "manifest_path": str(export / "test_planner_manifest.json"), "export_dir": str(export), "bag_path": str(bag)}
+        path = export / "planner_p1_candidate_optimization.csv"
+        with path.open(newline="") as handle:
+            rows = list(csv.DictReader(handle))
+        rows[0]["pre_support_valid_count"] = "199"
+        rows[0]["pre_support_coverage"] = "0.995"
+        with path.open("w", newline="") as handle:
+            writer = csv.DictWriter(handle, fieldnames=sorted(rows[0]))
+            writer.writeheader()
+            writer.writerows(rows)
+        with mock.patch.object(preflight, "read_bag_provenance", return_value=([payload], "")):
+            result = preflight.validate_bundle(export, bag, metrics_only=False, lambda_value=0.00001)
+        self.assertFalse(result["passed"])
+        self.assertIn("candidate lacks full valid fixed-lattice support", result["errors"])
 
 
 if __name__ == "__main__":

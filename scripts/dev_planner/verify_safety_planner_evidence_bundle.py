@@ -163,6 +163,19 @@ def validate_bundle(export_dir, bag_dir, *, metrics_only, lambda_value):
         for field in ("pre_mean_c_pi", "pre_max_c_pi", "post_mean_c_pi", "post_max_c_pi"):
             if not finite(row.get(field)):
                 errors.append(f"candidate {field} is non-finite")
+        sample_count = row.get("support_sample_count")
+        pre_count = row.get("pre_support_valid_count")
+        post_count = row.get("post_support_valid_count")
+        pre_coverage = row.get("pre_support_coverage")
+        post_coverage = row.get("post_support_coverage")
+        if not truthy(row.get("support_full_valid")) or \
+                not all(finite(value) for value in (sample_count, pre_count, post_count,
+                                                    pre_coverage, post_coverage)) or \
+                float(sample_count) <= 0.0 or \
+                float(pre_count) != float(sample_count) or \
+                float(post_count) != float(sample_count) or \
+                float(pre_coverage) != 1.0 or float(post_coverage) != 1.0:
+            errors.append("candidate lacks full valid fixed-lattice support")
     if not candidate:
         errors.append("candidate optimization CSV is empty")
     for attempt, rows in attempts.items():

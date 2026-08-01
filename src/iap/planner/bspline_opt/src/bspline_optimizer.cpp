@@ -3035,6 +3035,12 @@ namespace ego_planner
         ? p1_risk_context_.snapshot->generation_id() : 0;
     input.query_base_time_s = risk_query_base_time_s_;
     input.accepted_stamp_s = accepted_stamp_s;
+    // Candidate optimization evidence is evaluated on exactly the same
+    // 200-sample lattice as the accepted-profile contract.  A partial
+    // profile is useful diagnostic evidence but cannot admit an enabled P1
+    // candidate, because it cannot prove pre/post risk on common support.
+    input.minimum_covered_samples = kP1AcceptedProfileSampleCount;
+    input.minimum_coverage_ratio = 1.0;
     if (!risk_snapshot_)
       return iap::validateP1AcceptedContext(input);
     const double duration = trajectory.getTimeSum();
