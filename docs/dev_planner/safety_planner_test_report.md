@@ -5498,6 +5498,129 @@ The three required figures not produced are `p1_2_result_dashboard.png`, `p1_2_a
 
 Final terminal result: **FAIL -> analyzer timebase normalization/OOM debug.** The runtime branch beneath that failure is temporal-horizon/initial-trajectory admission; no spatial-map expansion, lambda sweep, stale-timeout change, hard-gate relaxation, P5 semantic change, analyzer rerun, or P1-3 execution was performed.
 
+## 2026-08-01 authoritative fixed-lambda evidence-provenance validation
+
+This append is the sole result for this repaired run. `HEAD=545150a2d7568b6666446702564df3035be3f927`, worktree clean; runtime prefixes were `/home/dev/ws_iap/install/iap`, `/home/dev/ws_iap/install/ego_planner`, and `/home/dev/ws_iap/install/bspline_opt`. The runtime launch was `/home/dev/ws_iap/src/iap/launch/test_planner.launch.py`, planner executable `/home/dev/ws_iap/build/ego_planner/ego_planner_node`, and library `/home/dev/ws_iap/build/bspline_opt/libbspline_opt.a`; manifest hashes bind all three.
+
+The 30-second plumbing smoke passed the strict provenance preflight. Both formal launches exited `0`, their recorder wrappers finalized bag metadata and manifests, and both individual pre-analyzer checks passed. No older artifact was reused.
+
+| Evidence | Fresh absolute path |
+| --- | --- |
+| P1-1 export | `/home/dev/ws_iap/src/iap/results/planner_validation/exports/test_planner_p1_degraded_lidar_good_gnss_degraded_lidar_good_1785579638756` |
+| P1-1 bag | `/home/dev/ws_iap/src/iap/results/planner_validation/bags/test_planner_p1_degraded_lidar_good_gnss_degraded_lidar_good_20260801T102038Z` |
+| P1-2 export | `/home/dev/ws_iap/src/iap/results/planner_validation/exports/test_planner_p1_degraded_lidar_good_gnss_degraded_lidar_good_1785579749216` |
+| P1-2 bag | `/home/dev/ws_iap/src/iap/results/planner_validation/bags/test_planner_p1_degraded_lidar_good_gnss_degraded_lidar_good_20260801T102229Z` |
+
+P1-1 used `p1.metrics_only:=true`, P1-2 used `p1.metrics_only:=false`, and both manifests record `lambda_integrity=0.00001`, schema `p1_evidence_provenance_v1`, and distinct run IDs (`c4bddf70b7304ec6aa5e33165fc1dae1` / `20ab2054dfc646e8818af8e52709d55e`). The sole analyzer command used exactly those four paths with `--fail-on-threshold`; exit was `2`, `status=FAIL`, `passed=false`, warnings and inconclusive lists were empty, and peak RSS was `514136 KiB`.
+
+| Hard gate | Verdict |
+| --- | --- |
+| Manifest, timebase, singleflight, validator | PASS |
+| P1-2 raw P0 startup/health | FAIL — startup `snapshot_unavailable` prefix unbounded |
+| P1-1 raw P0 startup/health | FAIL — reference remained ready=false/stale/full-unknown after analyzer startup boundary |
+| P1 debug, snapshot/candidate binding, P1 RViz, both bspline publishes | PASS |
+| Candidate trace | FAIL — schema/finite gate failed; support, selection, timeline, and profile binding passed |
+| Accepted profile parse/format/context/objective/coverage | PASS — both 200/200 |
+| Gradient direction | FAIL — no accepted-profile sample had both gradient·displacement<0 and delta c_pi<0 |
+| Strict mean/max c_pi reduction | FAIL — enabled mean/max `0.4177114314/0.4287837639`, baseline `0.4102988787/0.4271364029` |
+| Trajectory stability, P5 isolation, required PNG completeness | PASS |
+| Recorded risk-scene alignment and cause exclusion | FAIL — exact health snapshot/odom alignment unavailable; risk is unreduced |
+| Provenance pair identity | PASS — same commit/schema/config, different run IDs, current install hashes |
+
+![artifact provenance](../../results/planner_validation/exports/test_planner_p1_degraded_lidar_good_gnss_degraded_lidar_good_1785579749216/figures/p1_2_artifact_provenance.png)
+
+Observation: Manifest, CSV, validator, and bag identities bind to this commit and two fresh runs. Verdict: PASS. Conclusion: provenance is not the cause of this failure.
+
+![scenario](../../results/planner_validation/exports/test_planner_p1_degraded_lidar_good_gnss_degraded_lidar_good_1785579749216/figures/p1_2_scenario_topdown.png)
+
+Observation: Both paths are drawn in the same degraded-LiDAR scenario. Verdict: DIAGNOSTIC. Conclusion: scenario identity is controlled, not proof of reduction.
+
+![risk scene](../../results/planner_validation/exports/test_planner_p1_degraded_lidar_good_gnss_degraded_lidar_good_1785579749216/figures/p1_2_risk_trajectory_scene_overlay.png)
+
+Observation: Exact recorded health/odom snapshot alignment is unavailable. Verdict: FAIL. Conclusion: the scene cannot independently prove the risk comparison.
+
+![topic activity](../../results/planner_validation/exports/test_planner_p1_degraded_lidar_good_gnss_degraded_lidar_good_1785579749216/figures/p1_2_topic_activity_timeline.png)
+
+Observation: health, P1 RViz, candidate, and bspline activity were recorded. Verdict: PASS. Conclusion: publication completeness is not the failure.
+
+![P0 health](../../results/planner_validation/exports/test_planner_p1_degraded_lidar_good_gnss_degraded_lidar_good_1785579749216/figures/p1_2_p0_health_and_context_freshness.png)
+
+Observation: steady state is healthy, but startup/reference health hard gates fail. Verdict: FAIL. Conclusion: startup-boundary health semantics need repair.
+
+![candidate binding](../../results/planner_validation/exports/test_planner_p1_degraded_lidar_good_gnss_degraded_lidar_good_1785579749216/figures/p1_2_snapshot_candidate_binding.png)
+
+Observation: selected attempt/candidate/generation/query-time tuples reconcile. Verdict: PASS. Conclusion: candidate identity binding itself holds.
+
+![objective gradient](../../results/planner_validation/exports/test_planner_p1_degraded_lidar_good_gnss_degraded_lidar_good_1785579749216/figures/p1_2_objective_gradient_timeline.png)
+
+Observation: enabled P1 contributes a finite weighted objective. Verdict: PASS. Conclusion: λ reached the optimizer.
+
+![risk profile](../../results/planner_validation/exports/test_planner_p1_degraded_lidar_good_gnss_degraded_lidar_good_1785579749216/figures/p1_2_risk_profile_vs_p1_1.png)
+
+Observation: enabled mean and max c_pi exceed the metrics-only reference. Verdict: FAIL. Conclusion: fixed-λ P1-2 did not reduce accepted risk.
+
+![coverage](../../results/planner_validation/exports/test_planner_p1_degraded_lidar_good_gnss_degraded_lidar_good_1785579749216/figures/p1_2_accepted_profile_coverage_overlay.png)
+
+Observation: both final profiles have 200/200 matched samples. Verdict: PASS. Conclusion: the reduction failure is not missing coverage.
+
+![trajectory stability](../../results/planner_validation/exports/test_planner_p1_degraded_lidar_good_gnss_degraded_lidar_good_1785579749216/figures/p1_2_trajectory_overlay_vs_p1_1.png)
+
+Observation: both final published B-splines are finite and nonempty. Verdict: PASS. Conclusion: instability is excluded.
+
+![dashboard](../../results/planner_validation/exports/test_planner_p1_degraded_lidar_good_gnss_degraded_lidar_good_1785579749216/figures/p1_2_result_dashboard.png)
+
+Observation: dashboard lists the failed hard gates and complete PNG contract. Verdict: FAIL. Conclusion: no progression is authorized.
+
+![artifact completeness](../../results/planner_validation/exports/test_planner_p1_degraded_lidar_good_gnss_degraded_lidar_good_1785579749216/figures/p1_2_artifact_completeness.png)
+
+Observation: required artifacts are present, nonempty, and run-bound. Verdict: PASS. Conclusion: recording completeness passed.
+
+![cause exclusion](../../results/planner_validation/exports/test_planner_p1_degraded_lidar_good_gnss_degraded_lidar_good_1785579749216/figures/p1_2_cause_exclusion_summary.png)
+
+Observation: unreduced risk and unavailable scene alignment remain. Verdict: FAIL. Conclusion: the result cannot be accepted.
+
+![spatial bounds](../../results/planner_validation/exports/test_planner_p1_degraded_lidar_good_gnss_degraded_lidar_good_1785579749216/figures/p1_2_snapshot_spatial_bounds_overlay.png)
+
+Observation: snapshot-bound evidence is available for the accepted profile. Verdict: PASS. Conclusion: spatial bounds do not explain the reduction failure.
+
+![gradient field](../../results/planner_validation/exports/test_planner_p1_degraded_lidar_good_gnss_degraded_lidar_good_1785579749216/figures/p1_2_gradient_direction_field_overlay.png)
+
+Observation: no accepted directional-descent witness meets both required signs. Verdict: FAIL. Conclusion: debug P1 candidate selection/ranking.
+
+![refresh latency](../../results/planner_validation/exports/test_planner_p1_degraded_lidar_good_gnss_degraded_lidar_good_1785579749216/figures/p1_2_refresh_latency_vs_stale_threshold.png)
+
+Observation: steady refresh is within the configured stale threshold. Verdict: PASS. Conclusion: only startup/reference classification remains suspect.
+
+![replan load](../../results/planner_validation/exports/test_planner_p1_degraded_lidar_good_gnss_degraded_lidar_good_1785579749216/figures/p1_2_replan_load_correlation.png)
+
+Observation: no duplicate generation lifecycle was found. Verdict: PASS. Conclusion: replan storms are excluded.
+
+![timebase](../../results/planner_validation/exports/test_planner_p1_degraded_lidar_good_gnss_degraded_lidar_good_1785579749216/figures/p1_2_timebase_alignment.png)
+
+Observation: common-clock mapping is bounded. Verdict: PASS. Conclusion: analyzer timebase is not the cause.
+
+![temporal admission](../../results/planner_validation/exports/test_planner_p1_degraded_lidar_good_gnss_degraded_lidar_good_1785579749216/figures/p1_2_temporal_horizon_admission.png)
+
+Observation: strict full-support admission distinguishes fallbacks from P1 candidates. Verdict: PASS. Conclusion: incomplete candidates did not pass as evidence.
+
+![singleflight](../../results/planner_validation/exports/test_planner_p1_degraded_lidar_good_gnss_degraded_lidar_good_1785579749216/figures/p1_2_generation_singleflight_timeline.png)
+
+Observation: maximum admission/acquisition/optimizer-start per generation is one. Verdict: PASS. Conclusion: normal candidate lifecycle is reconciled.
+
+![candidate funnel](../../results/planner_validation/exports/test_planner_p1_degraded_lidar_good_gnss_degraded_lidar_good_1785579749216/figures/p1_2_candidate_optimization_funnel.png)
+
+Observation: selected full-support candidates exist, but analyzer’s broader finite-schema check fails. Verdict: FAIL. Conclusion: CSV finite-field contract still needs repair.
+
+![objective contribution](../../results/planner_validation/exports/test_planner_p1_degraded_lidar_good_gnss_degraded_lidar_good_1785579749216/figures/p1_2_objective_contribution_ratio.png)
+
+Observation: weighted P1 contribution is measurable. Verdict: PASS. Conclusion: this is not an unmeasurable fixed-λ case.
+
+![gradient displacement](../../results/planner_validation/exports/test_planner_p1_degraded_lidar_good_gnss_degraded_lidar_good_1785579749216/figures/p1_2_gradient_displacement_alignment.png)
+
+Observation: required negative alignment and negative delta c_pi are absent in the accepted profile. Verdict: FAIL. Conclusion: candidate ranking/selection evidence does not establish descent.
+
+Final terminal branch: **FAIL -> P1 candidate selection/ranking debug.** No P1-3 and no lambda sweep were run.
+
 ## Mixed-timebase/soft-fallback repair and fresh rerun — 2026-07-16 17:41–18:18 UTC
 
 This addendum is the only authority for this attempt. Work started from `HEAD=7a90d41b36f5022f556a81c4ca5eb7debefec926` with a clean worktree. Implementation commits are `0353960` and `5224451`. Historical report sections and artifacts were preserved. The fixed constraints remained unchanged: `p1.lambda_integrity=0.00001`, `p0.stale_timeout_s=1.0`, P0 geometry, analyzer thresholds, and P5 semantics. No lambda sweep or P1-3 run occurred.
@@ -5872,3 +5995,9 @@ Verdict: DIAGNOSTIC.
 Conclusion: The malformed runtime rows fail the authoritative evidence gate.
 
 Final terminal result: **FAIL -> lambda/gradient debug.** P1-3 remains out of scope.
+
+## 2026-08-01 authoritative fixed-lambda provenance-validation terminal record
+
+This terminal pointer is appended after all historical sections. The complete hard-gate table, commands, fresh absolute paths, run/schema identities, all 23 required figures, and Observation/Verdict/Conclusion captions are recorded in the immediately preceding `2026-08-01 authoritative fixed-lambda evidence-provenance validation` section. Its sole analyzer invocation exited `2` (`FAIL`, `passed=false`, `warnings=[]`, `inconclusive=[]`, peak RSS `514136 KiB`).
+
+Final terminal branch: **FAIL -> P1 candidate selection/ranking debug.** No P1-3 and no lambda sweep were run.
