@@ -307,6 +307,11 @@ namespace ego_planner
       const std::string &reason, const std::string &fallback_branch,
       const PlanningRiskContext *context_override) const
   {
+    // Unit-level lifecycle checks intentionally construct a manager before
+    // the optimizer/artifact registry is initialized.  Those checks must not
+    // dereference a null writer merely to emit optional runtime evidence.
+    if (!bspline_optimizer_)
+      return;
     const std::string path = p1PlanningContextTimelinePath();
     std::ifstream existing(path);
     const bool header = !existing.good() ||
