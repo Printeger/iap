@@ -5621,6 +5621,33 @@ Observation: required negative alignment and negative delta c_pi are absent in t
 
 Final terminal branch: **FAIL -> P1 candidate selection/ranking debug.** No P1-3 and no lambda sweep were run.
 
+## 2026-08-01 fresh P1-2 candidate-selection plumbing smoke (red feedback loop)
+
+This is a fresh, non-authoritative 30-second plumbing smoke. It was deliberately stopped before the 90-second P1-1/P1-2 pair and before any formal analyzer invocation because the candidate-selection contract was red. It must not be reused as formal evidence or as a replacement for the required formal PNG set.
+
+- HEAD: `ea9c57ce7577439c282757dfe13b86e0f7a1762f` (clean worktree).
+- Runtime prefixes: `iap=/home/dev/ws_iap/install/iap`, `ego_planner=/home/dev/ws_iap/install/ego_planner`, `bspline_opt=/home/dev/ws_iap/install/bspline_opt`.
+- Launch: `ros2 launch iap test_planner.launch.py experiment:=p1_degraded_lidar_good planner_safety_profile:=p1 p1.metrics_only:=false p1.lambda_integrity:=0.00001 run_duration_s:=30 validation_duration_s:=30 start_rviz:=false run_validator:=true record_bag:=true` (recorder and all writers exited; manifest process end `2026-08-01T12:00:19Z`).
+- Export: `/home/dev/ws_iap/src/iap/results/planner_validation/exports/test_planner_p1_degraded_lidar_good_gnss_degraded_lidar_good_1785585589011`.
+- Bag: `/home/dev/ws_iap/src/iap/results/planner_validation/bags/test_planner_p1_degraded_lidar_good_gnss_degraded_lidar_good_20260801T115949Z`.
+- Identity: run ID `2c47ddba3e0b400794ecad102b64f7b8`, schema `p1_evidence_provenance_v2`, enabled mode, `lambda_integrity=0.00001`.
+- Preflight bundle verifier: exit `0`, `passed=true`; validator summary is `passed=true`; bag metadata is complete and includes `/planning/risk_grid_health`, P1 RViz, and 13 `/drone_0_planning/bspline` messages.
+
+| Smoke gate | Verdict | Observation |
+| --- | --- | --- |
+| Runtime/provenance binding | PASS | Manifest binds clean HEAD, workspace/install prefixes, executable/launch hashes, run/schema ID, export, bag, and start/end stamps. |
+| CSV finite/full-support contract | PASS | Four candidate rows have 200/200 pre/post support and finite pre/post mean/max values. |
+| Optimizer and lifecycle identity | PASS | Each of attempts 18–21 has one successful selected optimizer row and an exact `replacement/rejected` timeline row. |
+| Candidate P1 descent/admission | FAIL | Actual candidate count is one despite configured maximum eight. Attempts 18–21 respectively change `(mean,max)` by `(-0.001892,+0.002961)`, `(-0.000745,+0.000507)`, `(-0.001487,+0.000808)`, and `(+0.007253,+0.005595)`. None satisfies full-support mean/max non-regression with one strict decrease. |
+| Existing-trajectory protection | PASS | All four candidate rows record `replacement_accepted=0` and `p1_self_risk_regression`; the published trajectory is retained. |
+| Accepted-profile selection binding | FAIL | The retained profile/context remains attempt 17's temporal-horizon base fallback, not any rejected attempt 18–21 candidate. It cannot be represented as a newly accepted enabled P1 candidate. |
+
+Observation: The smoke proves that the provenance and writer wiring are live on the rebuilt runtime, while all available enabled candidates regress the maximum fixed-lattice risk.
+
+Verdict: FAIL.
+
+Conclusion: This is a candidate-generation/selection-quality failure, not a lambda change, P0-geometry, stale-threshold, P5, or recorder/provenance failure. The safe behavior is to retain the existing trajectory and wait for the next healthy generation. No formal pair, formal analyzer, P1-3, lambda sweep, or new formal figures were run. Final terminal branch: **FAIL -> P1 candidate selection/ranking debug.**
+
 ## Mixed-timebase/soft-fallback repair and fresh rerun — 2026-07-16 17:41–18:18 UTC
 
 This addendum is the only authority for this attempt. Work started from `HEAD=7a90d41b36f5022f556a81c4ca5eb7debefec926` with a clean worktree. Implementation commits are `0353960` and `5224451`. Historical report sections and artifacts were preserved. The fixed constraints remained unchanged: `p1.lambda_integrity=0.00001`, `p0.stale_timeout_s=1.0`, P0 geometry, analyzer thresholds, and P5 semantics. No lambda sweep or P1-3 run occurred.
