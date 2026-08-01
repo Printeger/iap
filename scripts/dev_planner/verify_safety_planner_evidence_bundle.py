@@ -182,6 +182,29 @@ def validate_bundle(export_dir, bag_dir, *, metrics_only, lambda_value):
         selected = [row for row in rows if truthy(row.get("selected")) and truthy(row.get("optimization_success"))]
         if not 1 <= len(rows) <= 8 or len(selected) != 1:
             errors.append(f"attempt {attempt} lacks exactly one selected successful candidate")
+    rejected = [row for row in candidate if truthy(row.get("selected")) and
+                not truthy(row.get("replacement_accepted"))]
+    if rejected:
+        decision_path = Path(str(manifest.get(
+            "p1.replacement_decision_path", export_dir / "planner_p1_replacement_decision.csv")))
+        profile_path = Path(str(manifest.get(
+            "p1.candidate_retained_profile_path", export_dir / "planner_p1_candidate_retained_profile.csv")))
+        decision_rows, decision_errors = read_csv(decision_path, manifest_path, run_id)
+        profile_rows, profile_errors = read_csv(profile_path, manifest_path, run_id)
+        errors.extend(decision_errors)
+        errors.extend(profile_errors)
+        for row in rejected:
+            attempt, candidate_id = row.get("planning_attempt_id"), row.get("candidate_id")
+            decisions = [item for item in decision_rows
+                if item.get("planning_attempt_id") == attempt and
+                item.get("optimizer_selected_candidate_id") == candidate_id and
+                not truthy(item.get("replacement_accepted")) and
+                item.get("final_trajectory_source") == "retained_incumbent"]
+            compared = [item for item in profile_rows
+                if item.get("planning_attempt_id") == attempt and item.get("candidate_id") == candidate_id]
+            if len(decisions) != 1 or sum(item.get("trajectory_role") == "optimizer_selected_candidate" for item in compared) != 200 or \
+                    sum(item.get("trajectory_role") == "retained_incumbent" for item in compared) != 200:
+                errors.append(f"rejected candidate {attempt}/{candidate_id} lacks retained-incumbent closure")
     debug = csv_rows.get("planner_p1_integrity_cost_debug.csv", [])
     if not metrics_only and not any(truthy(row.get("applied_to_objective")) for row in debug):
         errors.append("enabled P1 debug has no applied_to_objective=true")

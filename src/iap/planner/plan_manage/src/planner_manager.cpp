@@ -1039,7 +1039,7 @@ namespace ego_planner
                 const UniformBspline selected_candidate(
                     ctrl_pts, 3, ts);
                 bspline_optimizer_->writeP1CandidateRetainedProfile(
-                    selected_candidate, trace.candidate_id,
+                    selected_candidate, trace.planning_attempt_id, trace.candidate_id,
                     local_data_.position_traj_, local_data_.traj_id_,
                     "retained_incumbent");
                 bspline_optimizer_->writeP1ReplacementDecision(
@@ -1171,7 +1171,8 @@ namespace ego_planner
             "replacement", plannerNow().seconds(), "rejected",
             decision.replacement_reason, "existing_trajectory");
         bspline_optimizer_->writeP1CandidateRetainedProfile(
-            UniformBspline(ctrl_pts, 3, ts), trace.candidate_id,
+            UniformBspline(ctrl_pts, 3, ts), trace.planning_attempt_id,
+            trace.candidate_id,
             local_data_.position_traj_, local_data_.traj_id_,
             "retained_incumbent");
         bspline_optimizer_->writeP1ReplacementDecision(

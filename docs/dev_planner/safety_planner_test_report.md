@@ -6028,3 +6028,12 @@ Final terminal result: **FAIL -> lambda/gradient debug.** P1-3 remains out of sc
 This terminal pointer is appended after all historical sections. The complete hard-gate table, commands, fresh absolute paths, run/schema identities, all 23 required figures, and Observation/Verdict/Conclusion captions are recorded in the immediately preceding `2026-08-01 authoritative fixed-lambda evidence-provenance validation` section. Its sole analyzer invocation exited `2` (`FAIL`, `passed=false`, `warnings=[]`, `inconclusive=[]`, peak RSS `514136 KiB`).
 
 Final terminal branch: **FAIL -> P1 candidate selection/ranking debug.** No P1-3 and no lambda sweep were run.
+
+## 2026-08-01 P1 candidate-generation / objective-alignment diagnostic terminal record
+
+- Latest formal authoritative run: none for this implementation cycle. The 90-second formal pair and formal analyzer were not run because the enabled diagnostic smoke did not meet its entry condition.
+- Latest diagnostic smoke: run ID `23c92c95b28e4114b76be7a282307a8d`; export `/home/dev/ws_iap/src/iap/results/planner_validation/exports/test_planner_p1_degraded_lidar_good_gnss_degraded_lidar_good_1785606139682`; expected bag `/home/dev/ws_iap/src/iap/results/planner_validation/bags/test_planner_p1_degraded_lidar_good_gnss_degraded_lidar_good_20260801T174219Z`.
+- Diagnostic outcome: enabled 30-second smoke emitted v3 candidate, replacement-decision, and paired-profile artifacts, but every optimizer-selected candidate was ineligible and retained (`p1_self_risk_regression`); the expected bag was absent. Its diagnostic-only analyzer exited `2`. Subsequent fail-closed artifact checks correct the attempt binding and enforce per-attempt selection/retention reconciliation; this failed smoke remains non-authoritative.
+- Progression authority: none. Retained-incumbent evidence cannot satisfy P1-2 effectiveness.
+- Final branch: **FAIL -> P1 candidate generation / objective alignment debug**.
+- P1-3 permission: denied; P1-3 was not run. No lambda sweep was run.

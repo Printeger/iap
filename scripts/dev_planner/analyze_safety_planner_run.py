@@ -633,6 +633,9 @@ P1_CANDIDATE_OPTIMIZATION_FIELDS = [
     "candidate_rank", "p1_descent", "rank_eligible", "replacement_accepted",
     "replacement_reason", "incumbent_available", "incumbent_mean_c_pi", "incumbent_max_c_pi",
     "fallback_reason", "termination_reason", "max_candidates_per_attempt",
+    "aggregation_mode", "aggregation_temperature", "adaptive_sample_count", "fixed_sample_count", "peak_contribution",
+    "fanout_input_segments", "fanout_surviving_segments", "fanout_returned_count", "fanout_configured_cap", "fanout_truncated",
+    "fanout_optimizer_successes", "fanout_full_support", "fanout_p1_descent_eligible", "fanout_supplemental_count", "fanout_singleton_reason",
 ]
 P1_CANDIDATE_OPTIMIZATION_FINITE_FIELDS = [
     field for field in P1_CANDIDATE_OPTIMIZATION_FIELDS
@@ -642,6 +645,7 @@ P1_CANDIDATE_OPTIMIZATION_FINITE_FIELDS = [
         "optimization_success", "selected", "objective_allowed", "objective_applied",
         "p1_descent", "rank_eligible", "replacement_accepted",
         "selection_reason", "replacement_reason", "fallback_reason", "termination_reason",
+        "aggregation_mode", "fanout_singleton_reason",
     }
 ]
 ODOM_TRUTH_TOPIC = "/sim/drone_0/truth_odom"
@@ -6589,6 +6593,48 @@ def validate_p1_candidate_optimization_evidence(
         timeline_rows is not None and
         rejected_selected_identities.issubset(replacement_rejection_timeline_identities)
     )
+    # A selected-but-rejected optimizer result is not a publish.  Close that
+    # distinction with its own run-bound decision and paired lattice profile;
+    # do not let either artifact contribute to effectiveness.
+    decision_path = Path(str(summary.get("path", ""))).with_name(
+        "planner_p1_replacement_decision.csv")
+    retained_path = Path(str(summary.get("path", ""))).with_name(
+        "planner_p1_candidate_retained_profile.csv")
+    decision_rows: list[dict[str, Any]] = []
+    retained_rows: list[dict[str, Any]] = []
+    try:
+        if decision_path.is_file():
+            with decision_path.open(newline="") as source:
+                decision_rows = list(csv.DictReader(source))
+        if retained_path.is_file():
+            with retained_path.open(newline="") as source:
+                retained_rows = list(csv.DictReader(source))
+    except Exception:
+        decision_rows, retained_rows = [], []
+    retained_artifacts_reconciled = True
+    for generation, attempt, candidate in rejected_selected_identities:
+        matching_decisions = [row for row in decision_rows
+            if str(row.get("snapshot_generation_id", "")) == generation and
+            str(row.get("planning_attempt_id", "")) == attempt and
+            str(row.get("optimizer_selected_candidate_id", "")) == candidate and
+            explicit_csv_bool(row.get("replacement_accepted")) is False and
+            row.get("final_trajectory_source") == "retained_incumbent"]
+        matching_profiles = [row for row in retained_rows
+            if str(row.get("snapshot_generation_id", "")) == generation and
+            str(row.get("planning_attempt_id", "")) == attempt and
+            str(row.get("candidate_id", "")) == candidate]
+        candidate_profile = [row for row in matching_profiles
+            if row.get("trajectory_role") == "optimizer_selected_candidate"]
+        incumbent_profile = [row for row in matching_profiles
+            if row.get("trajectory_role") == "retained_incumbent"]
+        retained_artifacts_reconciled = retained_artifacts_reconciled and (
+            len(matching_decisions) == 1 and len(candidate_profile) == 200 and
+            len(incumbent_profile) == 200 and all(
+                row.get("final_trajectory_source") == "retained_incumbent"
+                for row in matching_profiles))
+    accepted_profile_is_not_rejected_candidate = not rejected_selected_identities or (
+        bool(profile_tuple) and all(
+            profile_tuple != identity for identity in rejected_selected_identities))
     schema_finite = bool(summary.get("valid"))
     return {
         "checked": True, "schema_finite": schema_finite,
@@ -6597,6 +6643,8 @@ def validate_p1_candidate_optimization_evidence(
         "timeline_reconciled": timeline_reconciled,
         "accepted_profile_reconciled": accepted_profile_reconciled,
         "replacement_rejections_reconciled": replacement_rejections_reconciled,
+        "retained_artifacts_reconciled": retained_artifacts_reconciled,
+        "accepted_profile_is_not_rejected_candidate": accepted_profile_is_not_rejected_candidate,
         "attempts": {attempt: len(value) for attempt, value in attempts.items()},
         "optimizer_identities": [list(value) for value in sorted(identities)],
         "timeline_optimizer_identities": [list(value) for value in sorted(timeline_identities)],
@@ -6607,7 +6655,8 @@ def validate_p1_candidate_optimization_evidence(
                                                         sorted(replacement_rejection_timeline_identities)],
         "passed": schema_finite and support_ok and candidate_count_ok and
         selected_success_per_attempt and timeline_reconciled and accepted_profile_reconciled and
-        replacement_rejections_reconciled,
+        replacement_rejections_reconciled and retained_artifacts_reconciled and
+        accepted_profile_is_not_rejected_candidate,
     }
 
 
@@ -8289,6 +8338,10 @@ def validate_p1_2_hard_gates(
         "candidate_trace_profile_reconciled": candidate_evidence.get("accepted_profile_reconciled", False),
         "candidate_trace_replacement_rejections_reconciled": candidate_evidence.get(
             "replacement_rejections_reconciled", False),
+        "candidate_trace_retained_artifacts_reconciled": candidate_evidence.get(
+            "retained_artifacts_reconciled", False),
+        "candidate_trace_accepted_profile_not_rejected": candidate_evidence.get(
+            "accepted_profile_is_not_rejected_candidate", False),
         "candidate_trace_evidence": candidate_evidence,
         "weighted_f_integrity_max": weighted_max,
         "p1_weighted_integrity_positive": weighted_max is not None and weighted_max > 0.0,
@@ -15273,7 +15326,7 @@ P1_2_HARD_GATE_ROWS = [
     ("P1-1 raw P0 startup/health", ("reference_p0_health_rows_present", "reference_p0_startup_snapshot_unavailable_bounded", "reference_p0_post_startup_rows_present", "reference_p0_post_startup_ready", "reference_p0_post_startup_non_stale", "reference_p0_post_startup_not_full_unknown", "reference_p0_health_max_gap_ok"), ("reference_post_startup_rows", "reference_p0_health_max_gap_s")),
     ("P1 debug CSV", ("p1_csv_present", "p1_csv_nonempty", "p1_csv_parse_ok", "p1_csv_finite_cost_gradient", "p1_positive_sample_hit", "p1_applied_to_objective", "p1_applied_to_objective_parse_ok", "p1_weighted_integrity_positive"), ("applied_to_objective_true_count", "applied_to_objective_invalid_count", "weighted_f_integrity_max")),
     ("snapshot/candidate binding", ("p1_final_profile_context_in_debug",), ("p1_final_profile_context_tuple", "p1_applied_debug_context_tuples")),
-    ("candidate optimization evidence", ("candidate_trace_schema_finite", "candidate_trace_support_full_valid", "candidate_trace_count_within_limit", "candidate_trace_one_selected_success", "candidate_trace_timeline_reconciled", "candidate_trace_profile_reconciled"), ("candidate_trace_evidence",)),
+    ("candidate optimization evidence", ("candidate_trace_schema_finite", "candidate_trace_support_full_valid", "candidate_trace_count_within_limit", "candidate_trace_one_selected_success", "candidate_trace_timeline_reconciled", "candidate_trace_profile_reconciled", "candidate_trace_replacement_rejections_reconciled", "candidate_trace_retained_artifacts_reconciled", "candidate_trace_accepted_profile_not_rejected"), ("candidate_trace_evidence",)),
     ("P1 RViz and required topics", ("p1_rviz_topics_present", "required_topics_passed"), ("p1_rviz_topic_counts", "p1_rviz_topic_statuses")),
     ("P1-2 bspline publish", ("p1_2_bspline_inspection_ok", "bspline_publish_present", "p1_2_nonempty_bspline_path_present"), ()),
     ("P1-1 reference paths", ("reference_export_dir_present", "reference_bag_dir_present"), ()),

@@ -91,12 +91,30 @@ def main():
     decisions, profiles, timeline = data["decision"], data["profile"], data["timeline"]
     selected = [r for r in candidates if truthy(r.get("selected"))]
     if not candidates: errors.append("candidate artifact has no rows")
-    if len(selected) != 1: errors.append("candidate artifact lacks exactly one optimizer-selected row")
-    retained = [r for r in decisions if not truthy(r.get("replacement_accepted"))]
+    selected_by_attempt = {}
+    for row in selected:
+        selected_by_attempt.setdefault(row.get("planning_attempt_id"), []).append(row)
+    if not selected_by_attempt or any(len(value) != 1 for value in selected_by_attempt.values()):
+        errors.append("candidate artifact lacks exactly one optimizer-selected row per attempt")
+    retained = [r for r in selected if not truthy(r.get("replacement_accepted"))]
     if retained:
-        if not profiles: errors.append("retained decision has no comparison profile")
-        for decision in retained:
-            matching = [r for r in profiles if r.get("planning_attempt_id") == decision.get("planning_attempt_id")]
+        if not decisions:
+            errors.append("retained optimizer selection has no replacement-decision artifact")
+        if not profiles:
+            errors.append("retained optimizer selection has no comparison profile")
+        for candidate in retained:
+            matching_decisions = [r for r in decisions
+                                  if r.get("planning_attempt_id") == candidate.get("planning_attempt_id")
+                                  and r.get("optimizer_selected_candidate_id") == candidate.get("candidate_id")]
+            if len(matching_decisions) != 1:
+                errors.append("retained optimizer selection does not have one matching replacement decision")
+                continue
+            decision = matching_decisions[0]
+            if truthy(decision.get("replacement_accepted")) or decision.get("final_trajectory_source") != "retained_incumbent":
+                errors.append("replacement decision does not identify retained incumbent final source")
+            matching = [r for r in profiles
+                        if r.get("planning_attempt_id") == decision.get("planning_attempt_id")
+                        and r.get("candidate_id") == decision.get("optimizer_selected_candidate_id")]
             candidate_samples = [r for r in matching if r.get("trajectory_role") == "optimizer_selected_candidate"]
             incumbent_samples = [r for r in matching if r.get("trajectory_role") == "retained_incumbent"]
             if len(candidate_samples) != 200 or len(incumbent_samples) != 200:

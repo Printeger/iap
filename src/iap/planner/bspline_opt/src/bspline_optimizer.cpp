@@ -435,11 +435,11 @@ namespace ego_planner
       return oneSeg;
     }
 
-    constexpr int MAX_TRAJS = 8;                                                                            // 最多的轨迹数量
     constexpr int VARIS = 2;                                                                                // 允许的变化种类数
-    int seg_upbound = std::min((int)segments.size(), static_cast<int>(floor(log(MAX_TRAJS) / log(VARIS)))); // 允许变换的片段数量上限
+    const int max_trajs = std::clamp(p1_config_.max_candidates_per_attempt, 1, 8);
+    int seg_upbound = std::min((int)segments.size(), static_cast<int>(floor(log(max_trajs) / log(VARIS)))); // 允许变换的片段数量上限
     std::vector<ControlPoints> control_pts_buf;
-    control_pts_buf.reserve(MAX_TRAJS);
+    control_pts_buf.reserve(max_trajs);
     const double RESOLUTION = grid_map_->getResolution();
     const double CTRL_PT_DIST = (cps_.points.col(0) - cps_.points.col(cps_.size - 1)).norm() / (cps_.size - 1); // 计算控制点间的平均距离
 
@@ -750,7 +750,8 @@ namespace ego_planner
     std::fill(selection.begin(), selection.end(), 0);
     selection[0] = -1; // init
     // 计算最大组合数
-    int max_traj_nums = static_cast<int>(pow(VARIS, seg_upbound));
+    int max_traj_nums = std::min(max_trajs,
+        static_cast<int>(pow(VARIS, seg_upbound)));
     for (int i = 0; i < max_traj_nums; i++)
     {
       // 2.1 Calculate the selection table.
@@ -2870,7 +2871,8 @@ namespace ego_planner
   }
 
   bool BsplineOptimizer::writeP1CandidateRetainedProfile(
-      UniformBspline candidate, const uint64_t candidate_id,
+      UniformBspline candidate, const uint64_t planning_attempt_id,
+      const uint64_t candidate_id,
       UniformBspline incumbent, const uint64_t incumbent_trajectory_id,
       const std::string &final_trajectory_source) const
   {
@@ -2902,7 +2904,7 @@ namespace ego_planner
             point, risk_query_base_time_s_ + t_s, &sample);
         out << p1_config_.evidence_schema_version << ',' << p1_config_.evidence_run_id << ','
             << p1_config_.evidence_manifest_path << ','
-            << p1_risk_context_.planning_attempt_id << ',' << candidate_id << ','
+            << planning_attempt_id << ',' << candidate_id << ','
             << role << ',' << trajectory_id << ',' << risk_snapshot_->generation_id() << ','
             << risk_query_base_time_s_ << ',' << final_trajectory_source << ','
             << index << ',' << t_s << ',' << point.x() << ',' << point.y() << ','

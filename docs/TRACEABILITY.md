@@ -11,6 +11,7 @@
 
 | IAP-RQ-320 / IAP-RQ-400 / IAP-RQ-410 | P0 authoritative health and P1 fresh planning context | `planner/plan_manage/src/p0_risk_grid_runtime.cpp`, `planner_manager.cpp`, `ego_replan_fsm.cpp`, `launch/test_planner.launch.py`, `scripts/dev_planner/analyze_safety_planner_run.py` | `test_p0_risk_grid_runtime`, `test_planning_risk_context`, `test_analyze_safety_planner_run_p1_2.py` | raw-health timing/generation, context timeline, accepted profile tuple, 13 figures | **DONE** |
 | IAP-RQ-320 / IAP-RQ-400 / IAP-RQ-410 | P1 formal artifact provenance and fixed-lambda evidence binding | `launch/test_planner.launch.py`, P1 optimizer/timeline writers, `test_araim_validator.py`, `verify_safety_planner_evidence_bundle.py`, `analyze_safety_planner_run.py` | `test_verify_safety_planner_evidence_bundle.py`, `test_analyze_safety_planner_run_p1_2.py`, P1 smoke then fresh pair | `schema_version`, `run_id`, `manifest_path`, clean commit, install/runtime paths, bag provenance, process stamps | **IMPLEMENTED; formal run pending** |
+| IAP-RQ-400 / IAP-RQ-410 | P1 candidate fan-out and objective evidence must be deterministic, bounded, aligned to fixed-200 admission, and distinguish rejected candidate from retained incumbent | `src/iap/planner/bspline_opt/{include/bspline_opt/bspline_optimizer.h,src/bspline_optimizer.cpp}`, `src/iap/planner/plan_manage/src/planner_manager.cpp`, `launch/test_planner.launch.py`, `scripts/dev_planner/analyze_p1_candidate_diagnostic_smoke.py` | `test_p1_integrity_cost`, `test_p1_candidate_selection`; explicit-run diagnostic smoke | candidate CSV v3 fan-out/aggregation fields, replacement decision, paired fixed-200 candidate/retained profiles, six diagnostic figures | **IMPLEMENTED; fresh enabled smoke pending** |
 
 ---
 
@@ -86,8 +87,6 @@
 
 ## 2. 未映射改动（临时区）
 > 如果你临时改了代码但还没决定它对应哪个需求，先把改动写在这里（提交前必须移入上表）。
-
-| IAP-RQ-400 / IAP-RQ-410 | P1 candidate fan-out and objective evidence must be deterministic, bounded, aligned to fixed-200 admission, and distinguish rejected candidate from retained incumbent | `src/iap/planner/bspline_opt/{include/bspline_opt/bspline_optimizer.h,src/bspline_optimizer.cpp}`, `src/iap/planner/plan_manage/src/planner_manager.cpp`, `launch/test_planner.launch.py`, `scripts/dev_planner/analyze_p1_candidate_diagnostic_smoke.py` | `test_p1_integrity_cost`, `test_p1_candidate_selection`; candidate CSV v3 fan-out/aggregation fields, replacement-decision CSV, paired candidate/retained fixed-200 CSV, six diagnostic figures | **IMPLEMENTED; fresh enabled smoke pending** |
 
 - 2026-03-22: IAP-RQ-010 / IAP-RQ-200
   - GNSS clock single-owner contract收敛：`clock_owner_mode` 跨模块联动，默认切到 `gnss`。
