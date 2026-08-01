@@ -747,6 +747,13 @@ namespace ego_planner
           p1_objective_allowed ? "none" : "p1_soft_fallback");
       bspline_optimizer_->clearRiskSnapshot();
     }
+    // The candidate CSV is the strict fixed-lattice P1 evidence contract. A
+    // base fallback remains visible in the lifecycle timeline and accepted
+    // profile sidecar, but it is not a P1 optimizer start because it lacks
+    // full P1 lattice support. Metrics-only remains evidence after valid
+    // admission, even though its objective is not applied.
+    const bool write_p1_candidate_trace =
+        p1_objective_allowed || p1_fallback_reason == "metrics_only";
 
     vector<std::pair<int, int>> segments;
     if (bspline_optimizer_->getP4RiskAStarConfig().enable_risk_aware_astar)
@@ -790,17 +797,22 @@ namespace ego_planner
         const uint64_t candidate_id = static_cast<uint64_t>(trajs.size() - i);
         set_p1_context(candidate_id);
         planning_risk_context_.optimizer_start_s = plannerNow().seconds();
-        appendPlanningRiskContextTimeline("optimizer_start",
+        appendPlanningRiskContextTimeline(
+            write_p1_candidate_trace ? "optimizer_start" : "base_optimizer_start",
             planning_risk_context_.optimizer_start_s, "started", "ok");
         const bool p1_candidate_success =
             bspline_optimizer_->BsplineOptimizeTrajRebound(ctrl_pts_temp, final_cost, trajs[i], ts);
         planning_risk_context_.optimizer_end_s = plannerNow().seconds();
-        appendPlanningRiskContextTimeline("optimizer_end",
+        appendPlanningRiskContextTimeline(
+            write_p1_candidate_trace ? "optimizer_end" : "base_optimizer_end",
             planning_risk_context_.optimizer_end_s,
             p1_candidate_success ? "candidate_success" : "candidate_failure",
             p1_candidate_success ? "ok" : "optimizer_failure");
-        p1_candidate_traces.push_back(
-            bspline_optimizer_->getLastP1OptimizationTrace());
+        if (write_p1_candidate_trace)
+        {
+          p1_candidate_traces.push_back(
+              bspline_optimizer_->getLastP1OptimizationTrace());
+        }
         bspline_optimizer_->clearRiskSnapshot();
         if (safety_viz_)
         {
@@ -935,11 +947,13 @@ namespace ego_planner
     {
       set_p1_context(selected_p1_candidate_id);
       planning_risk_context_.optimizer_start_s = plannerNow().seconds();
-      appendPlanningRiskContextTimeline("optimizer_start",
+      appendPlanningRiskContextTimeline(
+          write_p1_candidate_trace ? "optimizer_start" : "base_optimizer_start",
           planning_risk_context_.optimizer_start_s, "started", "ok");
       flag_step_1_success = bspline_optimizer_->BsplineOptimizeTrajRebound(ctrl_pts, ts);
       planning_risk_context_.optimizer_end_s = plannerNow().seconds();
-      appendPlanningRiskContextTimeline("optimizer_end",
+      appendPlanningRiskContextTimeline(
+          write_p1_candidate_trace ? "optimizer_end" : "base_optimizer_end",
           planning_risk_context_.optimizer_end_s,
           flag_step_1_success ? "candidate_success" : "candidate_failure",
           flag_step_1_success ? "ok" : "optimizer_failure");
@@ -948,7 +962,8 @@ namespace ego_planner
       trace.selection_score = trace.post_total_objective;
       trace.selection_reason = flag_step_1_success
           ? "single_candidate" : "optimizer_failure";
-      bspline_optimizer_->writeP1OptimizationTrace(trace);
+      if (write_p1_candidate_trace)
+        bspline_optimizer_->writeP1OptimizationTrace(trace);
       bspline_optimizer_->clearRiskSnapshot();
       if (safety_viz_)
       {
