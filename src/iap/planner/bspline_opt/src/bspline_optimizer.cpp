@@ -23,6 +23,134 @@ namespace ego_planner
     constexpr const char *kP1AcceptedProfileContextCsvName =
         "planner_p1_accepted_trajectory_risk_profile_context.csv";
 
+    // Candidate evidence must be measured against one lattice, rather than
+    // against whichever adaptive samples happened to be visited by L-BFGS.
+    // Keep this aligned with the accepted-profile lattice so the aggregate
+    // record can be reconciled with the per-sample artifact.
+    constexpr int kP1CandidateEvidenceSampleCount = 200;
+
+    uint64_t fnv1aAppend(uint64_t hash, const std::string &value)
+    {
+      constexpr uint64_t kPrime = 1099511628211ULL;
+      for (const unsigned char character : value)
+      {
+        hash ^= character;
+        hash *= kPrime;
+      }
+      return hash;
+    }
+
+    std::string hashHex(uint64_t hash)
+    {
+      std::ostringstream stream;
+      stream << std::hex << std::setfill('0') << std::setw(16) << hash;
+      return stream.str();
+    }
+
+    template <typename Writer>
+    std::string stableHash(Writer writer)
+    {
+      std::ostringstream stream;
+      stream << std::setprecision(17);
+      writer(stream);
+      return hashHex(fnv1aAppend(1469598103934665603ULL, stream.str()));
+    }
+
+    std::string matrixHash(const Eigen::MatrixXd &points)
+    {
+      return stableHash([&points](std::ostream &stream) {
+        stream << points.rows() << ':' << points.cols() << ':';
+        for (int column = 0; column < points.cols(); ++column)
+          for (int row = 0; row < points.rows(); ++row)
+            stream << points(row, column) << ':';
+      });
+    }
+
+    struct P1CandidateLatticeStats
+    {
+      int sample_count = kP1CandidateEvidenceSampleCount;
+      int valid_count = 0;
+      double mean_c_pi = std::numeric_limits<double>::quiet_NaN();
+      double max_c_pi = std::numeric_limits<double>::quiet_NaN();
+      std::string support_signature;
+
+      bool fullValid() const
+      {
+        return sample_count == kP1CandidateEvidenceSampleCount &&
+            valid_count == sample_count && std::isfinite(mean_c_pi) &&
+            std::isfinite(max_c_pi);
+      }
+    };
+
+    P1CandidateLatticeStats evaluateP1CandidateLattice(
+        const std::shared_ptr<const iap::RiskGridSnapshot> &snapshot,
+        const Eigen::MatrixXd &control_points, const int order,
+        const double interval_s, const double query_base_time_s)
+    {
+      P1CandidateLatticeStats stats;
+      if (!snapshot || control_points.rows() != 3 ||
+          control_points.cols() <= order || order != 3 ||
+          !std::isfinite(interval_s) || interval_s <= 0.0 ||
+          !std::isfinite(query_base_time_s))
+      {
+        return stats;
+      }
+      const auto &params = snapshot->params();
+      stats.support_signature = stableHash(
+          [&snapshot, &params, query_base_time_s](std::ostream &stream) {
+            const Eigen::Vector3d origin = snapshot->origin();
+            const Eigen::Vector3i voxel_num = snapshot->voxelNum();
+            stream << snapshot->generation_id() << ':' << snapshot->stamp_s() << ':'
+                   << query_base_time_s << ':' << params.frame_id << ':'
+                   << params.resolution_m << ':' << origin.transpose() << ':'
+                   << voxel_num.transpose() << ':'
+                   << kP1CandidateEvidenceSampleCount << ':';
+            for (const double horizon : params.horizons_s)
+              stream << horizon << ':';
+          });
+      const double duration =
+          static_cast<double>(control_points.cols() - order) * interval_s;
+      if (!std::isfinite(duration) || duration <= 0.0)
+        return stats;
+      UniformBspline trajectory(control_points, order, interval_s);
+      double total = 0.0;
+      double maximum = -std::numeric_limits<double>::infinity();
+      for (int sample_index = 0; sample_index < stats.sample_count;
+           ++sample_index)
+      {
+        const double fraction = static_cast<double>(sample_index) /
+            static_cast<double>(stats.sample_count - 1);
+        iap::RiskCostSample sample;
+        const Eigen::Vector3d position =
+            trajectory.evaluateDeBoorT(duration * fraction);
+        const bool hit = snapshot->queryCost(
+            position, query_base_time_s + duration * fraction, &sample);
+        if (!hit || !sample.valid || sample.stale || !std::isfinite(sample.cost))
+          continue;
+        ++stats.valid_count;
+        total += sample.cost;
+        maximum = std::max(maximum, sample.cost);
+      }
+      if (stats.valid_count > 0)
+      {
+        stats.mean_c_pi = total / static_cast<double>(stats.valid_count);
+        stats.max_c_pi = maximum;
+      }
+      return stats;
+    }
+
+    std::string p1ConfigHash(const ego_planner::BsplineOptimizer::P1IntegrityConfig &config)
+    {
+      return stableHash([&config](std::ostream &stream) {
+        stream << config.use_integrity_cost << ':' << config.metrics_only << ':'
+               << config.lambda_integrity << ':' << config.sample_dt_min_s << ':'
+               << config.sample_dt_scale << ':' << config.max_samples_per_eval << ':'
+               << config.integrity_cost_max << ':' << config.integrity_grad_norm_max << ':'
+               << config.unknown_policy << ':' << config.unknown_soft_penalty << ':'
+               << config.max_candidates_per_attempt;
+      });
+    }
+
     double pathLength(const std::vector<Eigen::Vector3d> &path)
     {
       double length = 0.0;
@@ -1062,6 +1190,8 @@ namespace ego_planner
 
     double cost;
     opt->combineCostRebound(x, grad, cost, n);
+    opt->last_rebound_total_gradient_norm_ =
+        Eigen::Map<const Eigen::VectorXd>(grad, n).norm();
 
     opt->iter_num_ += 1;
     return cost;
@@ -1781,27 +1911,9 @@ namespace ego_planner
     bool flag_success = rebound_optimize(final_cost);
 
     optimal_points = cps_.points;
-    last_p1_optimization_trace_.planning_attempt_id =
-        p1_risk_context_.planning_attempt_id;
-    last_p1_optimization_trace_.candidate_id = p1_risk_context_.candidate_id;
-    last_p1_optimization_trace_.snapshot_generation_id = risk_snapshot_
-        ? risk_snapshot_->generation_id() : 0;
-    last_p1_optimization_trace_.query_base_time_s = risk_query_base_time_s_;
-    last_p1_optimization_trace_.post_total_objective = final_cost;
-    last_p1_optimization_trace_.post_base_objective =
-        last_optimizer_cost_breakdown_.original_cost;
-    last_p1_optimization_trace_.raw_p1_cost = last_p1_metrics_.f_integrity;
-    last_p1_optimization_trace_.weighted_p1_cost =
-        last_p1_metrics_.weighted_f_integrity;
-    last_p1_optimization_trace_.base_gradient_norm =
-        last_p1_metrics_.grad_norm_original;
-    last_p1_optimization_trace_.p1_gradient_norm =
-        last_p1_metrics_.grad_norm_integrity;
-    last_p1_optimization_trace_.total_gradient_norm =
-        std::numeric_limits<double>::quiet_NaN();
-    last_p1_optimization_trace_.iteration_count = iter_num_;
-    last_p1_optimization_trace_.termination_reason =
-        flag_success ? "success" : "optimizer_failure";
+    last_p1_optimization_trace_.optimization_success = flag_success;
+    if (!flag_success)
+      last_p1_optimization_trace_.selection_reason = "optimizer_failure";
 
     return flag_success;
   }
@@ -1820,25 +1932,9 @@ namespace ego_planner
     bool flag_success = rebound_optimize(final_cost);
 
     optimal_points = cps_.points;
-    last_p1_optimization_trace_.planning_attempt_id =
-        p1_risk_context_.planning_attempt_id;
-    last_p1_optimization_trace_.candidate_id = p1_risk_context_.candidate_id;
-    last_p1_optimization_trace_.snapshot_generation_id = risk_snapshot_
-        ? risk_snapshot_->generation_id() : 0;
-    last_p1_optimization_trace_.query_base_time_s = risk_query_base_time_s_;
-    last_p1_optimization_trace_.post_total_objective = final_cost;
-    last_p1_optimization_trace_.post_base_objective =
-        last_optimizer_cost_breakdown_.original_cost;
-    last_p1_optimization_trace_.raw_p1_cost = last_p1_metrics_.f_integrity;
-    last_p1_optimization_trace_.weighted_p1_cost =
-        last_p1_metrics_.weighted_f_integrity;
-    last_p1_optimization_trace_.base_gradient_norm =
-        last_p1_metrics_.grad_norm_original;
-    last_p1_optimization_trace_.p1_gradient_norm =
-        last_p1_metrics_.grad_norm_integrity;
-    last_p1_optimization_trace_.iteration_count = iter_num_;
-    last_p1_optimization_trace_.termination_reason =
-        flag_success ? "success" : "optimizer_failure";
+    last_p1_optimization_trace_.optimization_success = flag_success;
+    if (!flag_success)
+      last_p1_optimization_trace_.selection_reason = "optimizer_failure";
 
     return flag_success;
   }
@@ -1888,6 +1984,51 @@ namespace ego_planner
       double q[variable_num_];
       memcpy(q, cps_.points.data() + 3 * start_id, variable_num_ * sizeof(q[0]));
 
+      // Record a complete, fixed-lattice pre-state before L-BFGS can mutate
+      // the candidate.  This is intentionally separate from the adaptive
+      // objective sampling used by the optimizer itself.
+      const Eigen::MatrixXd initial_control_points = cps_.points;
+      const auto pre_lattice = evaluateP1CandidateLattice(
+          risk_snapshot_, initial_control_points, order_, bspline_interval_,
+          risk_query_base_time_s_);
+      std::vector<double> initial_gradient(
+          static_cast<std::size_t>(variable_num_), 0.0);
+      double initial_cost = 0.0;
+      combineCostRebound(q, initial_gradient.data(), initial_cost, variable_num_);
+      last_rebound_total_gradient_norm_ = Eigen::Map<const Eigen::VectorXd>(
+          initial_gradient.data(), variable_num_).norm();
+      P1OptimizationTrace &trace = last_p1_optimization_trace_;
+      trace.planning_attempt_id = p1_risk_context_.planning_attempt_id;
+      trace.candidate_id = p1_risk_context_.candidate_id;
+      trace.snapshot_generation_id = risk_snapshot_ ? risk_snapshot_->generation_id() : 0;
+      trace.query_base_time_s = risk_query_base_time_s_;
+      trace.pre_base_objective = last_optimizer_cost_breakdown_.original_cost;
+      trace.pre_total_objective = initial_cost;
+      trace.pre_raw_p1_cost = last_p1_metrics_.f_integrity;
+      trace.pre_weighted_p1_cost = last_p1_metrics_.weighted_f_integrity;
+      trace.raw_p1_cost = trace.pre_raw_p1_cost;
+      trace.weighted_p1_cost = trace.pre_weighted_p1_cost;
+      trace.pre_base_gradient_norm = last_p1_metrics_.grad_norm_original;
+      trace.pre_raw_p1_gradient_norm = last_p1_metrics_.grad_norm_integrity;
+      trace.pre_weighted_p1_gradient_norm =
+          last_p1_metrics_.weighted_grad_integrity_norm;
+      trace.pre_total_gradient_norm = last_rebound_total_gradient_norm_;
+      trace.base_gradient_norm = trace.pre_base_gradient_norm;
+      trace.p1_gradient_norm = trace.pre_raw_p1_gradient_norm;
+      trace.total_gradient_norm = trace.pre_total_gradient_norm;
+      trace.pre_mean_c_pi = pre_lattice.mean_c_pi;
+      trace.pre_max_c_pi = pre_lattice.max_c_pi;
+      trace.support_sample_count = pre_lattice.sample_count;
+      trace.pre_support_valid_count = pre_lattice.valid_count;
+      trace.pre_support_coverage = static_cast<double>(pre_lattice.valid_count) /
+          static_cast<double>(std::max(1, pre_lattice.sample_count));
+      trace.support_signature = pre_lattice.support_signature;
+      trace.initial_control_points_hash = matrixHash(initial_control_points);
+      trace.p1_config_hash = p1ConfigHash(p1_config_);
+      trace.objective_allowed = p1_risk_context_.objective_allowed;
+      trace.objective_applied = last_p1_metrics_.applied_to_objective;
+      trace.fallback_reason = p1_risk_context_.fallback_reason;
+
       // 初始化L-BFGS算法的参数
       lbfgs::lbfgs_parameter_t lbfgs_params;
       lbfgs::lbfgs_load_default_parameters(&lbfgs_params);
@@ -1898,27 +2039,6 @@ namespace ego_planner
           p1_risk_context_.objective_allowed &&
           p1_config_.lambda_integrity != 0.0)
       {
-        std::vector<double> initial_gradient(
-            static_cast<std::size_t>(variable_num_), 0.0);
-        double initial_cost = 0.0;
-        combineCostRebound(q, initial_gradient.data(), initial_cost,
-                           variable_num_);
-        last_p1_optimization_trace_.planning_attempt_id =
-            p1_risk_context_.planning_attempt_id;
-        last_p1_optimization_trace_.candidate_id = p1_risk_context_.candidate_id;
-        last_p1_optimization_trace_.snapshot_generation_id = risk_snapshot_
-            ? risk_snapshot_->generation_id() : 0;
-        last_p1_optimization_trace_.query_base_time_s = risk_query_base_time_s_;
-        last_p1_optimization_trace_.pre_total_objective = initial_cost;
-        last_p1_optimization_trace_.pre_base_objective =
-            last_optimizer_cost_breakdown_.original_cost;
-        last_p1_optimization_trace_.raw_p1_cost = last_p1_metrics_.f_integrity;
-        last_p1_optimization_trace_.weighted_p1_cost =
-            last_p1_metrics_.weighted_f_integrity;
-        last_p1_optimization_trace_.base_gradient_norm =
-            last_p1_metrics_.grad_norm_original;
-        last_p1_optimization_trace_.p1_gradient_norm =
-            last_p1_metrics_.grad_norm_integrity;
         const double variable_norm = Eigen::Map<const Eigen::VectorXd>(
             q, variable_num_).norm();
         lbfgs_params.g_epsilon = p1LbfgsGradientEpsilon(
@@ -1929,9 +2049,51 @@ namespace ego_planner
       t1 = rclcpp::Clock().now();
       // 执行优化
       int result = lbfgs::lbfgs_optimize(variable_num_, q, &final_cost, BsplineOptimizer::costFunctionRebound, NULL, BsplineOptimizer::earlyExit, this, &lbfgs_params);
-      last_p1_optimization_trace_.solver_result = result;
-      last_p1_optimization_trace_.iteration_count = iter_num_;
-      last_p1_optimization_trace_.termination_reason = lbfgs::lbfgs_strerror(result);
+      // The final callback supplied the terminal metrics and gradient.  Copy
+      // q explicitly before querying the fixed lattice, because a solver
+      // error/restart must not leave evidence attached to an older callback.
+      memcpy(cps_.points.data() + 3 * start_id, q,
+             variable_num_ * sizeof(q[0]));
+      const auto post_lattice = evaluateP1CandidateLattice(
+          risk_snapshot_, cps_.points, order_, bspline_interval_,
+          risk_query_base_time_s_);
+      trace.post_total_objective = final_cost;
+      trace.post_base_objective = last_optimizer_cost_breakdown_.original_cost;
+      trace.post_raw_p1_cost = last_p1_metrics_.f_integrity;
+      trace.post_weighted_p1_cost = last_p1_metrics_.weighted_f_integrity;
+      trace.raw_p1_cost = trace.post_raw_p1_cost;
+      trace.weighted_p1_cost = trace.post_weighted_p1_cost;
+      trace.post_base_gradient_norm = last_p1_metrics_.grad_norm_original;
+      trace.post_raw_p1_gradient_norm = last_p1_metrics_.grad_norm_integrity;
+      trace.post_weighted_p1_gradient_norm =
+          last_p1_metrics_.weighted_grad_integrity_norm;
+      trace.post_total_gradient_norm = last_rebound_total_gradient_norm_;
+      trace.total_gradient_norm = trace.post_total_gradient_norm;
+      trace.displacement_norm = (cps_.points - initial_control_points).norm();
+      double raw_integrity_cost = 0.0;
+      Eigen::MatrixXd raw_integrity_gradient = Eigen::MatrixXd::Zero(
+          3, initial_control_points.cols());
+      P1IntegrityMetrics raw_integrity_metrics;
+      const P1IntegrityMetrics terminal_metrics = last_p1_metrics_;
+      const auto terminal_viz_samples = last_p1_viz_samples_;
+      calcIntegrityTrajectoryCost(initial_control_points, raw_integrity_cost,
+                                  raw_integrity_gradient, raw_integrity_metrics);
+      last_p1_metrics_ = terminal_metrics;
+      last_p1_viz_samples_ = terminal_viz_samples;
+      trace.grad_integrity_dot_displacement =
+          (raw_integrity_gradient.array() *
+           (cps_.points - initial_control_points).array()).sum();
+      trace.post_mean_c_pi = post_lattice.mean_c_pi;
+      trace.post_max_c_pi = post_lattice.max_c_pi;
+      trace.post_support_valid_count = post_lattice.valid_count;
+      trace.post_support_coverage = static_cast<double>(post_lattice.valid_count) /
+          static_cast<double>(std::max(1, post_lattice.sample_count));
+      trace.support_full_valid = pre_lattice.fullValid() && post_lattice.fullValid() &&
+          pre_lattice.support_signature == post_lattice.support_signature &&
+          !pre_lattice.support_signature.empty();
+      trace.solver_result = result;
+      trace.iteration_count = iter_num_;
+      trace.termination_reason = lbfgs::lbfgs_strerror(result);
       t2 = rclcpp::Clock().now();
       double time_ms = (t2 - t1).seconds() * 1000;
       double total_time_ms = (t2 - t0).seconds() * 1000;
@@ -2463,7 +2625,16 @@ namespace ego_planner
              "raw_p1_cost,weighted_p1_cost,base_gradient_norm,p1_gradient_norm,total_gradient_norm,"
              "displacement_norm,grad_integrity_dot_displacement,pre_mean_c_pi,pre_max_c_pi,"
              "post_mean_c_pi,post_max_c_pi,selected,solver_result,termination_reason,iteration_count,"
-             "objective_allowed,fallback_reason,max_candidates_per_attempt\n";
+             "objective_allowed,objective_applied,fallback_reason,max_candidates_per_attempt,"
+             "pre_raw_p1_cost,post_raw_p1_cost,pre_weighted_p1_cost,post_weighted_p1_cost,"
+             "pre_base_gradient_norm,post_base_gradient_norm,"
+             "pre_raw_p1_gradient_norm,post_raw_p1_gradient_norm,"
+             "pre_weighted_p1_gradient_norm,post_weighted_p1_gradient_norm,"
+             "pre_total_gradient_norm,post_total_gradient_norm,"
+             "support_sample_count,pre_support_valid_count,post_support_valid_count,"
+             "pre_support_coverage,post_support_coverage,support_full_valid,"
+             "support_signature,initial_control_points_hash,p1_config_hash,"
+             "optimization_success,selection_score,selection_reason\n";
     }
     out << rclcpp::Clock().now().seconds() << ',' << trace.planning_attempt_id << ','
         << trace.candidate_id << ',' << trace.snapshot_generation_id << ','
@@ -2477,9 +2648,23 @@ namespace ego_planner
         << trace.post_mean_c_pi << ',' << trace.post_max_c_pi << ','
         << (trace.selected ? 1 : 0) << ',' << trace.solver_result << ','
         << trace.termination_reason << ',' << trace.iteration_count << ','
-        << (p1_risk_context_.objective_allowed ? 1 : 0) << ','
-        << p1_risk_context_.fallback_reason << ','
-        << p1_config_.max_candidates_per_attempt << '\n';
+        << (trace.objective_allowed ? 1 : 0) << ','
+        << (trace.objective_applied ? 1 : 0) << ','
+        << trace.fallback_reason << ','
+        << p1_config_.max_candidates_per_attempt << ','
+        << trace.pre_raw_p1_cost << ',' << trace.post_raw_p1_cost << ','
+        << trace.pre_weighted_p1_cost << ',' << trace.post_weighted_p1_cost << ','
+        << trace.pre_base_gradient_norm << ',' << trace.post_base_gradient_norm << ','
+        << trace.pre_raw_p1_gradient_norm << ',' << trace.post_raw_p1_gradient_norm << ','
+        << trace.pre_weighted_p1_gradient_norm << ','
+        << trace.post_weighted_p1_gradient_norm << ','
+        << trace.pre_total_gradient_norm << ',' << trace.post_total_gradient_norm << ','
+        << trace.support_sample_count << ',' << trace.pre_support_valid_count << ','
+        << trace.post_support_valid_count << ',' << trace.pre_support_coverage << ','
+        << trace.post_support_coverage << ',' << (trace.support_full_valid ? 1 : 0) << ','
+        << trace.support_signature << ',' << trace.initial_control_points_hash << ','
+        << trace.p1_config_hash << ',' << (trace.optimization_success ? 1 : 0) << ','
+        << trace.selection_score << ',' << trace.selection_reason << '\n';
   }
 
   void BsplineOptimizer::setLastP1OptimizationSelected(const bool selected)
@@ -2908,6 +3093,10 @@ namespace ego_planner
         static_cast<std::size_t>(variable_num_), 0.0);
     memcpy(x.data(), cps_.points.data() + 3 * order_,
            variable_num_ * sizeof(double));
+    const Eigen::MatrixXd initial_control_points = control_points;
+    const auto pre_lattice = evaluateP1CandidateLattice(
+        risk_snapshot_, initial_control_points, order_, bspline_interval_,
+        risk_query_base_time_s_);
     double initial_cost = 0.0;
     combineCostRebound(x.data(), initial_gradient.data(), initial_cost,
                        variable_num_);
@@ -2922,6 +3111,26 @@ namespace ego_planner
     trace.weighted_p1_cost = last_p1_metrics_.weighted_f_integrity;
     trace.base_gradient_norm = last_p1_metrics_.grad_norm_original;
     trace.p1_gradient_norm = last_p1_metrics_.grad_norm_integrity;
+    trace.pre_raw_p1_cost = last_p1_metrics_.f_integrity;
+    trace.pre_weighted_p1_cost = last_p1_metrics_.weighted_f_integrity;
+    trace.pre_base_gradient_norm = last_p1_metrics_.grad_norm_original;
+    trace.pre_raw_p1_gradient_norm = last_p1_metrics_.grad_norm_integrity;
+    trace.pre_weighted_p1_gradient_norm =
+        last_p1_metrics_.weighted_grad_integrity_norm;
+    trace.pre_total_gradient_norm = Eigen::Map<const Eigen::VectorXd>(
+        initial_gradient.data(), variable_num_).norm();
+    trace.pre_mean_c_pi = pre_lattice.mean_c_pi;
+    trace.pre_max_c_pi = pre_lattice.max_c_pi;
+    trace.support_sample_count = pre_lattice.sample_count;
+    trace.pre_support_valid_count = pre_lattice.valid_count;
+    trace.pre_support_coverage = static_cast<double>(pre_lattice.valid_count) /
+        static_cast<double>(std::max(1, pre_lattice.sample_count));
+    trace.support_signature = pre_lattice.support_signature;
+    trace.initial_control_points_hash = matrixHash(initial_control_points);
+    trace.p1_config_hash = p1ConfigHash(p1_config_);
+    trace.objective_allowed = p1_risk_context_.objective_allowed;
+    trace.objective_applied = last_p1_metrics_.applied_to_objective;
+    trace.fallback_reason = p1_risk_context_.fallback_reason;
 
     lbfgs::lbfgs_parameter_t parameters;
     lbfgs::lbfgs_load_default_parameters(&parameters);
@@ -2944,16 +3153,56 @@ namespace ego_planner
     trace.post_base_objective = last_optimizer_cost_breakdown_.original_cost;
     trace.raw_p1_cost = last_p1_metrics_.f_integrity;
     trace.weighted_p1_cost = last_p1_metrics_.weighted_f_integrity;
-    trace.total_gradient_norm = std::numeric_limits<double>::quiet_NaN();
+    trace.post_raw_p1_cost = last_p1_metrics_.f_integrity;
+    trace.post_weighted_p1_cost = last_p1_metrics_.weighted_f_integrity;
+    trace.post_base_gradient_norm = last_p1_metrics_.grad_norm_original;
+    trace.post_raw_p1_gradient_norm = last_p1_metrics_.grad_norm_integrity;
+    trace.post_weighted_p1_gradient_norm =
+        last_p1_metrics_.weighted_grad_integrity_norm;
+    trace.post_total_gradient_norm = last_rebound_total_gradient_norm_;
+    trace.total_gradient_norm = trace.post_total_gradient_norm;
     trace.displacement_norm = (Eigen::Map<const Eigen::VectorXd>(
         x.data(), variable_num_) - Eigen::Map<const Eigen::VectorXd>(
         control_points.data() + 3 * order_, variable_num_)).norm();
     trace.solver_result = result;
     trace.iteration_count = iterations;
     trace.termination_reason = lbfgs::lbfgs_strerror(result);
-    last_p1_optimization_trace_ = trace;
     memcpy(control_points.data() + 3 * order_, x.data(),
            variable_num_ * sizeof(double));
+    const auto post_lattice = evaluateP1CandidateLattice(
+        risk_snapshot_, control_points, order_, bspline_interval_,
+        risk_query_base_time_s_);
+    trace.displacement_norm = (control_points - initial_control_points).norm();
+    Eigen::MatrixXd raw_integrity_gradient = Eigen::MatrixXd::Zero(
+        3, initial_control_points.cols());
+    double raw_integrity_cost = 0.0;
+    P1IntegrityMetrics raw_integrity_metrics;
+    const P1IntegrityMetrics terminal_metrics = last_p1_metrics_;
+    const auto terminal_viz_samples = last_p1_viz_samples_;
+    calcIntegrityTrajectoryCost(initial_control_points, raw_integrity_cost,
+                                raw_integrity_gradient, raw_integrity_metrics);
+    last_p1_metrics_ = terminal_metrics;
+    last_p1_viz_samples_ = terminal_viz_samples;
+    trace.grad_integrity_dot_displacement =
+        (raw_integrity_gradient.array() *
+         (control_points - initial_control_points).array()).sum();
+    trace.post_mean_c_pi = post_lattice.mean_c_pi;
+    trace.post_max_c_pi = post_lattice.max_c_pi;
+    trace.post_support_valid_count = post_lattice.valid_count;
+    trace.post_support_coverage = static_cast<double>(post_lattice.valid_count) /
+        static_cast<double>(std::max(1, post_lattice.sample_count));
+    trace.support_full_valid = pre_lattice.fullValid() && post_lattice.fullValid() &&
+        pre_lattice.support_signature == post_lattice.support_signature &&
+        !pre_lattice.support_signature.empty();
+    trace.optimization_success = std::isfinite(final_cost) &&
+        (result == lbfgs::LBFGS_CONVERGENCE ||
+         result == lbfgs::LBFGSERR_MAXIMUMITERATION ||
+         result == lbfgs::LBFGS_ALREADY_MINIMIZED ||
+         result == lbfgs::LBFGS_STOP);
+    trace.selection_score = final_cost;
+    trace.selection_reason = trace.optimization_success
+        ? "deterministic_single_candidate" : "optimizer_failure";
+    last_p1_optimization_trace_ = trace;
     return std::isfinite(final_cost) &&
         (result == lbfgs::LBFGS_CONVERGENCE ||
          result == lbfgs::LBFGSERR_MAXIMUMITERATION ||

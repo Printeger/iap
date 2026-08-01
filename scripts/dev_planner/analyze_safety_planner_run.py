@@ -605,6 +605,31 @@ P1_DEBUG_FINITE_FIELDS = [
     "grad_norm_original",
     "grad_ratio",
 ]
+P1_CANDIDATE_OPTIMIZATION_FIELDS = [
+    "planning_attempt_id", "candidate_id", "snapshot_generation_id", "query_base_time_s",
+    "pre_base_objective", "post_base_objective", "pre_total_objective", "post_total_objective",
+    "pre_raw_p1_cost", "post_raw_p1_cost", "pre_weighted_p1_cost", "post_weighted_p1_cost",
+    "pre_base_gradient_norm", "post_base_gradient_norm",
+    "pre_raw_p1_gradient_norm", "post_raw_p1_gradient_norm",
+    "pre_weighted_p1_gradient_norm", "post_weighted_p1_gradient_norm",
+    "pre_total_gradient_norm", "post_total_gradient_norm",
+    "displacement_norm", "grad_integrity_dot_displacement",
+    "pre_mean_c_pi", "pre_max_c_pi", "post_mean_c_pi", "post_max_c_pi",
+    "support_sample_count", "pre_support_valid_count", "post_support_valid_count",
+    "pre_support_coverage", "post_support_coverage", "support_full_valid",
+    "support_signature", "initial_control_points_hash", "p1_config_hash",
+    "optimization_success", "selected", "solver_result", "iteration_count",
+    "objective_allowed", "objective_applied", "selection_score", "selection_reason",
+    "fallback_reason", "termination_reason", "max_candidates_per_attempt",
+]
+P1_CANDIDATE_OPTIMIZATION_FINITE_FIELDS = [
+    field for field in P1_CANDIDATE_OPTIMIZATION_FIELDS
+    if field not in {
+        "support_signature", "initial_control_points_hash", "p1_config_hash",
+        "optimization_success", "selected", "objective_allowed", "objective_applied",
+        "selection_reason", "fallback_reason", "termination_reason",
+    }
+]
 ODOM_TRUTH_TOPIC = "/sim/drone_0/truth_odom"
 ODOM_EST_TOPIC = "/drone_0_visual_slam/odom"
 CONTINUOUS_MIN_COVERAGE_RATIO = 0.8
@@ -6365,8 +6390,7 @@ def p1_candidate_optimization_csv_path(export_dir: Path, manifest: dict[str, Any
 
 
 def read_p1_candidate_optimization_csv(path: Path) -> tuple[list[dict[str, Any]], dict[str, Any]]:
-    required = {"planning_attempt_id", "candidate_id", "snapshot_generation_id",
-                "query_base_time_s", "selected", "max_candidates_per_attempt"}
+    required = set(P1_CANDIDATE_OPTIMIZATION_FIELDS)
     if not path.is_file():
         return [], {"path": str(path), "missing": True, "valid": False, "row_count": 0}
     try:
@@ -6379,14 +6403,120 @@ def read_p1_candidate_optimization_csv(path: Path) -> tuple[list[dict[str, Any]]
                     "row_count": 0, "read_error": str(exc)}
     keys = [(str(row.get("planning_attempt_id", "")), str(row.get("candidate_id", "")))
             for row in rows]
+    finite_errors = [
+        {"row": index, "field": field}
+        for index, row in enumerate(rows)
+        for field in P1_CANDIDATE_OPTIMIZATION_FINITE_FIELDS
+        if finite_float(row.get(field)) is None
+    ]
+    bool_errors = [
+        {"row": index, "field": field}
+        for index, row in enumerate(rows)
+        for field in ("support_full_valid", "optimization_success", "selected",
+                      "objective_allowed", "objective_applied")
+        if explicit_csv_bool(row.get(field)) is None
+    ]
+    empty_identity_fields = [
+        {"row": index, "field": field}
+        for index, row in enumerate(rows)
+        for field in ("support_signature", "initial_control_points_hash", "p1_config_hash",
+                      "selection_reason", "fallback_reason", "termination_reason")
+        if not str(row.get(field, "")).strip()
+    ]
     max_limit = max([int(finite_float(row.get("max_candidates_per_attempt")) or 0)
                      for row in rows] or [0])
     valid = bool(rows) and required.issubset(fields) and len(keys) == len(set(keys)) and \
-        max_limit >= 1 and max_limit <= 8
+        max_limit >= 1 and max_limit <= 8 and not finite_errors and not bool_errors and \
+        not empty_identity_fields
     return rows, {"path": str(path), "missing": False, "valid": valid,
                   "row_count": len(rows), "missing_fields": sorted(required - fields),
                   "duplicate_attempt_candidate": len(keys) != len(set(keys)),
-                  "configured_limit": max_limit}
+                  "configured_limit": max_limit, "finite_errors": finite_errors,
+                  "boolean_errors": bool_errors, "empty_identity_fields": empty_identity_fields}
+
+
+def validate_p1_candidate_optimization_evidence(
+    rows: list[dict[str, Any]], summary: dict[str, Any],
+    timeline_rows: list[dict[str, Any]] | None,
+    accepted_profile: dict[str, Any] | None,
+) -> dict[str, Any]:
+    """Validate the one-authoritative-row contract for each optimizer start."""
+    if not rows:
+        return {
+            "checked": True, "schema_finite": False, "candidate_count_ok": False,
+            "selected_success_per_attempt": False, "timeline_reconciled": False,
+            "accepted_profile_reconciled": False, "passed": False,
+            "attempts": {}, "optimizer_identities": [],
+        }
+    attempts: dict[str, list[dict[str, Any]]] = {}
+    identities: set[tuple[str, str, str]] = set()
+    support_ok = True
+    for row in rows:
+        generation = str(row.get("snapshot_generation_id", ""))
+        attempt = str(row.get("planning_attempt_id", ""))
+        candidate = str(row.get("candidate_id", ""))
+        identities.add((generation, attempt, candidate))
+        attempts.setdefault(attempt, []).append(row)
+        sample_count = finite_float(row.get("support_sample_count"))
+        pre_count = finite_float(row.get("pre_support_valid_count"))
+        post_count = finite_float(row.get("post_support_valid_count"))
+        support_ok = support_ok and (
+            explicit_csv_bool(row.get("support_full_valid")) is True
+            and sample_count is not None and sample_count > 0
+            and pre_count == sample_count and post_count == sample_count
+            and finite_float(row.get("pre_support_coverage")) == 1.0
+            and finite_float(row.get("post_support_coverage")) == 1.0
+        )
+    configured_limits = [finite_float(row.get("max_candidates_per_attempt")) for row in rows]
+    candidate_count_ok = all(
+        1 <= len(attempt_rows) <= 8
+        and all(limit is not None and 1 <= limit <= 8 and len(attempt_rows) <= int(limit)
+                for limit in configured_limits)
+        for attempt_rows in attempts.values()
+    )
+    selected_success_per_attempt = all(
+        sum(
+            explicit_csv_bool(row.get("selected")) is True
+            and explicit_csv_bool(row.get("optimization_success")) is True
+            for row in attempt_rows
+        ) == 1
+        for attempt_rows in attempts.values()
+    )
+    timeline_identities = {
+        (str(row.get("snapshot_generation_id", "")),
+         str(row.get("planning_attempt_id", "")), str(row.get("candidate_id", "")))
+        for row in (timeline_rows or [])
+        if str(row.get("stage", "")) == "optimizer_start"
+    }
+    timeline_reconciled = bool(timeline_rows is None) or identities == timeline_identities
+    metadata = (accepted_profile or {}).get("metadata_tuple_values", {}) or {}
+    profile_tuple = tuple(
+        str((metadata.get(field) or [""])[0])
+        if len(metadata.get(field) or []) == 1 else ""
+        for field in ("snapshot_generation_id", "planning_attempt_id", "candidate_id")
+    )
+    selected_identities = {
+        (str(row.get("snapshot_generation_id", "")), str(row.get("planning_attempt_id", "")),
+         str(row.get("candidate_id", "")))
+        for row in rows if explicit_csv_bool(row.get("selected")) is True
+    }
+    accepted_profile_reconciled = not accepted_profile or (
+        all(profile_tuple) and profile_tuple in selected_identities
+    )
+    schema_finite = bool(summary.get("valid"))
+    return {
+        "checked": True, "schema_finite": schema_finite,
+        "support_full_valid": support_ok, "candidate_count_ok": candidate_count_ok,
+        "selected_success_per_attempt": selected_success_per_attempt,
+        "timeline_reconciled": timeline_reconciled,
+        "accepted_profile_reconciled": accepted_profile_reconciled,
+        "attempts": {attempt: len(value) for attempt, value in attempts.items()},
+        "optimizer_identities": [list(value) for value in sorted(identities)],
+        "timeline_optimizer_identities": [list(value) for value in sorted(timeline_identities)],
+        "selected_identities": [list(value) for value in sorted(selected_identities)],
+        "passed": schema_finite and support_ok and candidate_count_ok and
+        selected_success_per_attempt and timeline_reconciled and accepted_profile_reconciled,
+    }
 
 
 def p1_accepted_profile_csv_path(export_dir: Path, manifest: dict[str, Any]) -> Path:
@@ -7762,6 +7892,8 @@ def validate_p1_2_hard_gates(
     p1_1_timeline_info: dict[str, Any] | None = None,
     reference_p0_health_summary: dict[str, Any] | None = None,
     reference_p0_health_rows: list[dict[str, Any]] | None = None,
+    p1_candidate_optimization_rows: list[dict[str, Any]] | None = None,
+    p1_candidate_optimization_summary: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     manifest_gates = p1_2_manifest_gate_values(manifest)
     reference_manifest_gates = p1_2_reference_manifest_gate_values(
@@ -7806,6 +7938,23 @@ def validate_p1_2_hard_gates(
     expected_lambda = finite_float(manifest.get("p1.lambda_integrity"))
     stale_timeout_s = finite_float(manifest.get("p0.stale_timeout_s"))
     risk_scene_alignment = risk_comparison.get("risk_scene_alignment", {}) or {}
+    # Keep direct unit callers that predate the candidate artifact focused on
+    # their original gate.  Production always supplies the artifact and is
+    # fail-closed when it is missing or incomplete.
+    if p1_candidate_optimization_rows is None and p1_candidate_optimization_summary is None:
+        candidate_evidence = {
+            "checked": False, "schema_finite": True, "support_full_valid": True,
+            "candidate_count_ok": True, "selected_success_per_attempt": True,
+            "timeline_reconciled": True, "accepted_profile_reconciled": True,
+            "passed": True, "attempts": {}, "optimizer_identities": [],
+        }
+    else:
+        candidate_evidence = validate_p1_candidate_optimization_evidence(
+            p1_candidate_optimization_rows or [],
+            p1_candidate_optimization_summary or {},
+            p1_2_timeline_rows,
+            p1_2_profile,
+        )
     selected_profile_context_tuple = tuple(
         profile_value(p1_2_metadata, key)
         for key in ("planning_attempt_id", "candidate_id", "snapshot_generation_id", "query_base_time_s")
@@ -7909,6 +8058,13 @@ def validate_p1_2_hard_gates(
         ),
         "p1_final_profile_context_tuple": list(selected_profile_context_tuple),
         "p1_applied_debug_context_tuples": [list(value) for value in sorted(applied_debug_context_tuples)],
+        "candidate_trace_schema_finite": candidate_evidence.get("schema_finite", False),
+        "candidate_trace_support_full_valid": candidate_evidence.get("support_full_valid", False),
+        "candidate_trace_count_within_limit": candidate_evidence.get("candidate_count_ok", False),
+        "candidate_trace_one_selected_success": candidate_evidence.get("selected_success_per_attempt", False),
+        "candidate_trace_timeline_reconciled": candidate_evidence.get("timeline_reconciled", False),
+        "candidate_trace_profile_reconciled": candidate_evidence.get("accepted_profile_reconciled", False),
+        "candidate_trace_evidence": candidate_evidence,
         "weighted_f_integrity_max": weighted_max,
         "p1_weighted_integrity_positive": weighted_max is not None and weighted_max > 0.0,
         "p1_rviz_topic_statuses": p1_rviz_topic_statuses,
@@ -8086,6 +8242,18 @@ def validate_p1_2_hard_gates(
         failures.append("P1-2 P1 debug CSV has invalid applied_to_objective values")
     if not gates["p1_final_profile_context_in_debug"]:
         failures.append("P1-2 selected accepted profile has no matching objective-applied debug candidate/context tuple")
+    if not gates["candidate_trace_schema_finite"]:
+        failures.append("P1-2 candidate optimization trace is missing required schema fields or finite values")
+    if not gates["candidate_trace_support_full_valid"]:
+        failures.append("P1-2 candidate optimization trace lacks full valid fixed-lattice support")
+    if not gates["candidate_trace_count_within_limit"]:
+        failures.append("P1-2 candidate optimization count is outside the configured 1..8 limit")
+    if not gates["candidate_trace_one_selected_success"]:
+        failures.append("P1-2 requires exactly one selected successful candidate per planning attempt")
+    if not gates["candidate_trace_timeline_reconciled"]:
+        failures.append("P1-2 candidate optimizer identities do not reconcile with the planning timeline")
+    if not gates["candidate_trace_profile_reconciled"]:
+        failures.append("P1-2 selected candidate does not reconcile with the accepted profile")
     if not gates["p1_weighted_integrity_positive"]:
         failures.append("P1-2 weighted_f_integrity_max is not positive")
     if not gates["p1_rviz_topics_present"]:
@@ -14467,6 +14635,14 @@ def summarize_p1_generation_singleflight(
          "attempt": row["attempt"], "candidate": row["candidate"]}
         for row in duplicate_starts
     ]
+    # A generation is admitted and acquired exactly once; sets above detect
+    # conflicting IDs, while these raw counts also detect repeated identical
+    # timeline records and missing lifecycle records.
+    for generation, bucket in counts.items():
+        for stage in ("p1_admission", "acquire"):
+            if bucket[stage] != 1:
+                duplicates.append({"generation": generation, "stage": stage,
+                                   "count": bucket[stage]})
     candidate_counts: dict[str, int] = {}
     for generation, attempt, _ in starts:
         key = f"{generation}:{attempt}"
@@ -14605,7 +14781,7 @@ def _p1_candidate_values(rows: list[dict[str, Any]], field: str) -> list[float]:
 
 
 def plot_p1_2_candidate_optimization_funnel(rows: list[dict[str, Any]], path: Path) -> bool:
-    fig, ax = plt.subplots(figsize=(10.5, 5.5))
+    fig, (ax, risk_ax) = plt.subplots(1, 2, figsize=(12.5, 5.5))
     optimized = len(rows)
     selected = sum(finite_float(row.get("selected")) == 1.0 for row in rows)
     labels, values = ["optimized", "selected"], [optimized, selected]
@@ -14614,6 +14790,20 @@ def plot_p1_2_candidate_optimization_funnel(rows: list[dict[str, Any]], path: Pa
         ax.text(bar.get_x() + bar.get_width() / 2, value, str(value), ha="center", va="bottom")
     ax.set_title("P1 candidate optimization funnel")
     ax.set_ylabel("candidate count"); ax.grid(True, axis="y", alpha=0.25)
+    pre_mean = _p1_candidate_values(rows, "pre_mean_c_pi")
+    post_mean = _p1_candidate_values(rows, "post_mean_c_pi")
+    pre_max = _p1_candidate_values(rows, "pre_max_c_pi")
+    post_max = _p1_candidate_values(rows, "post_max_c_pi")
+    if pre_mean and post_mean and pre_max and post_max:
+        risk_ax.bar(np.arange(2) - 0.18, [np.mean(pre_mean), np.mean(pre_max)], 0.36,
+                    label="pre", color="#f97316")
+        risk_ax.bar(np.arange(2) + 0.18, [np.mean(post_mean), np.mean(post_max)], 0.36,
+                    label="post", color="#16a34a")
+        risk_ax.set_xticks((0, 1), ("mean c_pi", "max c_pi")); risk_ax.legend()
+    else:
+        risk_ax.text(0.5, 0.5, "UNAVAILABLE", transform=risk_ax.transAxes, ha="center")
+    risk_ax.set_title("fixed-lattice candidate risk")
+    risk_ax.set_ylabel("c_pi"); risk_ax.grid(True, axis="y", alpha=0.25)
     if not rows: ax.text(0.5, 0.5, "UNAVAILABLE", transform=ax.transAxes, ha="center")
     fig.tight_layout(); fig.savefig(path, dpi=160); plt.close(fig)
     return True
@@ -14622,16 +14812,28 @@ def plot_p1_2_candidate_optimization_funnel(rows: list[dict[str, Any]], path: Pa
 def plot_p1_2_objective_contribution_ratio(rows: list[dict[str, Any]], path: Path) -> bool:
     fig, ax = plt.subplots(figsize=(11.0, 5.5))
     x = np.arange(len(rows))
-    base = _p1_candidate_values(rows, "post_base_objective")
-    p1 = _p1_candidate_values(rows, "weighted_p1_cost")
-    count = min(len(base), len(p1))
+    objective_ratios = []
+    gradient_ratios = []
+    for row in rows:
+        base = finite_float(row.get("pre_base_objective"))
+        p1 = finite_float(row.get("pre_weighted_p1_cost"))
+        base_grad = finite_float(row.get("pre_base_gradient_norm"))
+        p1_grad = finite_float(row.get("pre_weighted_p1_gradient_norm"))
+        if base is not None and p1 is not None:
+            objective_ratios.append(p1 / max(abs(base), 1e-12))
+        if base_grad is not None and p1_grad is not None:
+            gradient_ratios.append(p1_grad / max(abs(base_grad), 1e-12))
+    count = min(len(objective_ratios), len(gradient_ratios))
     if count:
-        denominator = np.maximum(np.abs(np.asarray(base[:count])), 1e-12)
-        ax.bar(x[:count], np.asarray(p1[:count]) / denominator, color="#7c3aed")
+        ax.bar(x[:count] - 0.2, objective_ratios[:count], 0.4,
+               color="#7c3aed", label="weighted P1 / base objective")
+        ax.bar(x[:count] + 0.2, gradient_ratios[:count], 0.4,
+               color="#0891b2", label="weighted P1 / base gradient")
+        ax.legend(fontsize=8)
     else: ax.text(0.5, 0.5, "UNAVAILABLE", transform=ax.transAxes, ha="center")
     ax.axhline(0.0, color="black", linewidth=0.8); ax.set_xlabel("candidate row")
-    ax.set_ylabel("weighted P1 / base objective")
-    ax.set_title("P1 objective contribution ratio (diagnostic)"); ax.grid(True, axis="y", alpha=0.25)
+    ax.set_ylabel("ratio")
+    ax.set_title("P1 objective and gradient contribution ratios"); ax.grid(True, axis="y", alpha=0.25)
     fig.tight_layout(); fig.savefig(path, dpi=160); plt.close(fig)
     return True
 
@@ -14639,13 +14841,21 @@ def plot_p1_2_objective_contribution_ratio(rows: list[dict[str, Any]], path: Pat
 def plot_p1_2_gradient_displacement_alignment(rows: list[dict[str, Any]], path: Path) -> bool:
     fig, ax = plt.subplots(figsize=(11.0, 5.5))
     values = _p1_candidate_values(rows, "grad_integrity_dot_displacement")
-    if values:
-        colors = ["#16a34a" if value <= 0 else "#dc2626" for value in values]
-        ax.bar(np.arange(len(values)), values, color=colors)
+    deltas = _p1_candidate_values(rows, "post_mean_c_pi")
+    pre_means = _p1_candidate_values(rows, "pre_mean_c_pi")
+    delta_means = [post - pre for pre, post in zip(pre_means, deltas)]
+    count = min(len(values), len(delta_means))
+    if count:
+        colors = ["#16a34a" if value <= 0 else "#dc2626" for value in values[:count]]
+        ax.bar(np.arange(count) - 0.2, values[:count], 0.4, color=colors,
+               label="raw grad · displacement")
+        ax.bar(np.arange(count) + 0.2, delta_means[:count], 0.4, color="#2563eb",
+               label="delta mean c_pi")
+        ax.legend(fontsize=8)
     else: ax.text(0.5, 0.5, "UNAVAILABLE", transform=ax.transAxes, ha="center")
     ax.axhline(0.0, color="black", linewidth=0.8); ax.set_xlabel("candidate row")
-    ax.set_ylabel("integrity gradient · displacement")
-    ax.set_title("P1 gradient–displacement alignment (diagnostic)"); ax.grid(True, axis="y", alpha=0.25)
+    ax.set_ylabel("alignment / delta c_pi")
+    ax.set_title("P1 gradient, displacement, and delta c_pi evidence"); ax.grid(True, axis="y", alpha=0.25)
     fig.tight_layout(); fig.savefig(path, dpi=160); plt.close(fig)
     return True
 
@@ -14793,6 +15003,7 @@ P1_2_HARD_GATE_ROWS = [
     ("P1-1 raw P0 startup/health", ("reference_p0_health_rows_present", "reference_p0_startup_snapshot_unavailable_bounded", "reference_p0_post_startup_rows_present", "reference_p0_post_startup_ready", "reference_p0_post_startup_non_stale", "reference_p0_post_startup_not_full_unknown", "reference_p0_health_max_gap_ok"), ("reference_post_startup_rows", "reference_p0_health_max_gap_s")),
     ("P1 debug CSV", ("p1_csv_present", "p1_csv_nonempty", "p1_csv_parse_ok", "p1_csv_finite_cost_gradient", "p1_positive_sample_hit", "p1_applied_to_objective", "p1_applied_to_objective_parse_ok", "p1_weighted_integrity_positive"), ("applied_to_objective_true_count", "applied_to_objective_invalid_count", "weighted_f_integrity_max")),
     ("snapshot/candidate binding", ("p1_final_profile_context_in_debug",), ("p1_final_profile_context_tuple", "p1_applied_debug_context_tuples")),
+    ("candidate optimization evidence", ("candidate_trace_schema_finite", "candidate_trace_support_full_valid", "candidate_trace_count_within_limit", "candidate_trace_one_selected_success", "candidate_trace_timeline_reconciled", "candidate_trace_profile_reconciled"), ("candidate_trace_evidence",)),
     ("P1 RViz and required topics", ("p1_rviz_topics_present", "required_topics_passed"), ("p1_rviz_topic_counts", "p1_rviz_topic_statuses")),
     ("P1-2 bspline publish", ("p1_2_bspline_inspection_ok", "bspline_publish_present", "p1_2_nonempty_bspline_path_present"), ()),
     ("P1-1 reference paths", ("reference_export_dir_present", "reference_bag_dir_present"), ()),
@@ -16722,6 +16933,8 @@ def _analyze_impl(args: argparse.Namespace) -> dict[str, Any]:
             p1_2_reference_timeline_info,
             p1_2_reference_health_summary,
             p1_2_reference_health_rows,
+            p1_candidate_optimization_rows,
+            p1_candidate_optimization_summary,
         )
         p1_2_timebase_alignment = normalize_p1_2_timebases(
             p1_planning_context_timeline_rows, health_rows, manifest

@@ -177,6 +177,35 @@ namespace ego_planner
       double pre_max_c_pi = std::numeric_limits<double>::quiet_NaN();
       double post_mean_c_pi = std::numeric_limits<double>::quiet_NaN();
       double post_max_c_pi = std::numeric_limits<double>::quiet_NaN();
+      // Preserve both sides of every quantity.  The legacy aggregate fields
+      // above remain for compatibility with earlier exported CSVs.
+      double pre_raw_p1_cost = std::numeric_limits<double>::quiet_NaN();
+      double post_raw_p1_cost = std::numeric_limits<double>::quiet_NaN();
+      double pre_weighted_p1_cost = std::numeric_limits<double>::quiet_NaN();
+      double post_weighted_p1_cost = std::numeric_limits<double>::quiet_NaN();
+      double pre_base_gradient_norm = std::numeric_limits<double>::quiet_NaN();
+      double post_base_gradient_norm = std::numeric_limits<double>::quiet_NaN();
+      double pre_raw_p1_gradient_norm = std::numeric_limits<double>::quiet_NaN();
+      double post_raw_p1_gradient_norm = std::numeric_limits<double>::quiet_NaN();
+      double pre_weighted_p1_gradient_norm = std::numeric_limits<double>::quiet_NaN();
+      double post_weighted_p1_gradient_norm = std::numeric_limits<double>::quiet_NaN();
+      double pre_total_gradient_norm = std::numeric_limits<double>::quiet_NaN();
+      double post_total_gradient_norm = std::numeric_limits<double>::quiet_NaN();
+      double pre_support_coverage = std::numeric_limits<double>::quiet_NaN();
+      double post_support_coverage = std::numeric_limits<double>::quiet_NaN();
+      int support_sample_count = 0;
+      int pre_support_valid_count = 0;
+      int post_support_valid_count = 0;
+      bool support_full_valid = false;
+      bool optimization_success = false;
+      bool objective_allowed = false;
+      bool objective_applied = false;
+      double selection_score = std::numeric_limits<double>::quiet_NaN();
+      std::string selection_reason = "not_selected";
+      std::string fallback_reason = "not_evaluated";
+      std::string support_signature;
+      std::string initial_control_points_hash;
+      std::string p1_config_hash;
       uint64_t planning_attempt_id = 0;
       uint64_t candidate_id = 0;
       uint64_t snapshot_generation_id = 0;
@@ -339,6 +368,7 @@ namespace ego_planner
     std::vector<P4GuideViz> last_p4_guides_;
     OptimizerCostBreakdown last_optimizer_cost_breakdown_;
     P1OptimizationTrace last_p1_optimization_trace_;
+    double last_rebound_total_gradient_norm_{std::numeric_limits<double>::quiet_NaN()};
     bool suppress_rebound_collision_for_test_{false};
     std::shared_ptr<const iap::RiskGridSnapshot> risk_snapshot_;
     double risk_query_base_time_s_{0.0};

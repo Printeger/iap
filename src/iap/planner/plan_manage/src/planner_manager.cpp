@@ -892,6 +892,22 @@ namespace ego_planner
         for (auto &trace : p1_candidate_traces)
         {
           trace.selected = trace.candidate_id == selected_p1_candidate_id;
+          trace.selection_score = trace.post_total_objective;
+          trace.selection_reason = trace.selected
+              ? (p2_config_.enable_candidate_ranking
+                     ? "p2_candidate_ranking" : "optimizer_cost")
+              : (trace.optimization_success
+                     ? "not_selected" : "optimizer_failure");
+          for (const auto &metric : p2_result.metrics)
+          {
+            if (metric.candidate_id == static_cast<int>(trace.candidate_id))
+            {
+              trace.selection_score = metric.candidate_score;
+              trace.selection_reason = metric.selected
+                  ? "p2_candidate_ranking" : metric.fallback_reason;
+              break;
+            }
+          }
           bspline_optimizer_->writeP1OptimizationTrace(trace);
         }
       }
@@ -900,7 +916,13 @@ namespace ego_planner
         // Failed optimizations are still evidence for an admitted candidate;
         // write one definitive unselected row for each of them.
         for (const auto &trace : p1_candidate_traces)
-          bspline_optimizer_->writeP1OptimizationTrace(trace);
+        {
+          auto failed_trace = trace;
+          failed_trace.selected = false;
+          failed_trace.selection_score = failed_trace.post_total_objective;
+          failed_trace.selection_reason = "no_successful_candidate";
+          bspline_optimizer_->writeP1OptimizationTrace(failed_trace);
+        }
       }
 
       t_opt = rclcpp::Clock().now() - t_start;
@@ -921,6 +943,9 @@ namespace ego_planner
           flag_step_1_success ? "ok" : "optimizer_failure");
       auto trace = bspline_optimizer_->getLastP1OptimizationTrace();
       trace.selected = flag_step_1_success;
+      trace.selection_score = trace.post_total_objective;
+      trace.selection_reason = flag_step_1_success
+          ? "single_candidate" : "optimizer_failure";
       bspline_optimizer_->writeP1OptimizationTrace(trace);
       bspline_optimizer_->clearRiskSnapshot();
       if (safety_viz_)

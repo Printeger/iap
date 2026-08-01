@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 
 import argparse
+import csv
 import importlib.util
 import json
 from pathlib import Path
@@ -135,6 +136,38 @@ def p1_debug_summary(rows=None, **kwargs):
         [p1_debug_row()] if rows is None else rows,
         **kwargs,
     )
+
+
+def candidate_optimization_row(**overrides):
+    row = {field: 1.0 for field in analyzer.P1_CANDIDATE_OPTIMIZATION_FIELDS}
+    row.update({
+        "planning_attempt_id": 11, "candidate_id": 7,
+        "snapshot_generation_id": 4, "query_base_time_s": 9.0,
+        "pre_base_objective": 10.0, "post_base_objective": 9.0,
+        "pre_total_objective": 10.1, "post_total_objective": 9.1,
+        "pre_raw_p1_cost": 100.0, "post_raw_p1_cost": 90.0,
+        "pre_weighted_p1_cost": 0.001, "post_weighted_p1_cost": 0.0009,
+        "pre_base_gradient_norm": 2.0, "post_base_gradient_norm": 1.0,
+        "pre_raw_p1_gradient_norm": 0.1, "post_raw_p1_gradient_norm": 0.05,
+        "pre_weighted_p1_gradient_norm": 0.000001,
+        "post_weighted_p1_gradient_norm": 0.0000005,
+        "pre_total_gradient_norm": 2.0, "post_total_gradient_norm": 1.0,
+        "displacement_norm": 0.1, "grad_integrity_dot_displacement": -0.01,
+        "pre_mean_c_pi": 5.0, "pre_max_c_pi": 6.0,
+        "post_mean_c_pi": 4.0, "post_max_c_pi": 5.0,
+        "support_sample_count": 200, "pre_support_valid_count": 200,
+        "post_support_valid_count": 200, "pre_support_coverage": 1.0,
+        "post_support_coverage": 1.0, "support_full_valid": 1,
+        "support_signature": "snapshot-lattice-v1",
+        "initial_control_points_hash": "initial-v1", "p1_config_hash": "config-v1",
+        "optimization_success": 1, "selected": 1, "solver_result": 0,
+        "iteration_count": 4, "termination_reason": "converged",
+        "objective_allowed": 1, "objective_applied": 1,
+        "selection_score": 9.1, "selection_reason": "single_candidate",
+        "fallback_reason": "none", "max_candidates_per_attempt": 8,
+    })
+    row.update(overrides)
+    return row
 
 
 def bspline_rows(y=0.0, *, zigzag=False):
@@ -382,6 +415,65 @@ def run_gate(
 
 
 class P1_2AnalyzerTest(unittest.TestCase):
+    def test_candidate_trace_reconciles_fixed_lattice_timeline_and_profile(self):
+        profile = accepted_profile_rows(0.0)
+        profile_summary = analyzer.summarize_p1_accepted_profile_rows(profile)
+        rows = [candidate_optimization_row()]
+        evidence = analyzer.validate_p1_candidate_optimization_evidence(
+            rows, {"valid": True},
+            [{"stage": "optimizer_start", "snapshot_generation_id": 4,
+              "planning_attempt_id": 11, "candidate_id": 7}],
+            profile_summary,
+        )
+        self.assertTrue(evidence["passed"])
+
+    def test_candidate_trace_fails_closed_without_one_selected_success_or_full_support(self):
+        profile_summary = analyzer.summarize_p1_accepted_profile_rows(
+            accepted_profile_rows(0.0)
+        )
+        row = candidate_optimization_row(selected=0, post_support_valid_count=199,
+                                         post_support_coverage=0.995,
+                                         support_full_valid=0)
+        evidence = analyzer.validate_p1_candidate_optimization_evidence(
+            [row], {"valid": True}, [], profile_summary,
+        )
+        self.assertFalse(evidence["passed"])
+        self.assertFalse(evidence["support_full_valid"])
+        self.assertFalse(evidence["selected_success_per_attempt"])
+
+    def test_candidate_csv_requires_nonempty_termination_reason(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "candidate.csv"
+            fieldnames = analyzer.P1_CANDIDATE_OPTIMIZATION_FIELDS
+            row = candidate_optimization_row(termination_reason="")
+            with path.open("w", newline="") as output:
+                writer = csv.DictWriter(output, fieldnames=fieldnames)
+                writer.writeheader()
+                writer.writerow(row)
+            _, summary = analyzer.read_p1_candidate_optimization_csv(path)
+        self.assertFalse(summary["valid"])
+        self.assertIn(
+            {"row": 0, "field": "termination_reason"},
+            summary["empty_identity_fields"],
+        )
+
+    def test_singleflight_rejects_duplicate_same_attempt_and_acquisition_records(self):
+        timeline = [
+            {"stage": "p1_admission", "snapshot_generation_id": 4,
+             "planning_attempt_id": 11, "candidate_id": 0},
+            {"stage": "p1_admission", "snapshot_generation_id": 4,
+             "planning_attempt_id": 11, "candidate_id": 0},
+            {"stage": "acquire", "snapshot_generation_id": 4,
+             "planning_attempt_id": 11, "candidate_id": 0},
+            {"stage": "acquire", "snapshot_generation_id": 4,
+             "planning_attempt_id": 11, "candidate_id": 0},
+            {"stage": "optimizer_start", "snapshot_generation_id": 4,
+             "planning_attempt_id": 11, "candidate_id": 7},
+        ]
+        summary = analyzer.summarize_p1_generation_singleflight(timeline)
+        self.assertFalse(summary["passed"])
+        self.assertEqual(summary["max_admission_per_generation"], 2)
+        self.assertEqual(summary["max_acquisition_per_generation"], 2)
     def test_happy_path_passes_gate(self):
         gates, failures, inconclusive, risk = run_gate(
             baseline_cloud=cloud_rows(100.0, c_pi=5.0, pl=5.0)
