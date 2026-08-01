@@ -6596,17 +6596,19 @@ def validate_p1_candidate_optimization_evidence(
     # A selected-but-rejected optimizer result is not a publish.  Close that
     # distinction with its own run-bound decision and paired lattice profile;
     # do not let either artifact contribute to effectiveness.
-    decision_path = Path(str(summary.get("path", ""))).with_name(
-        "planner_p1_replacement_decision.csv")
-    retained_path = Path(str(summary.get("path", ""))).with_name(
-        "planner_p1_candidate_retained_profile.csv")
+    summary_path = str(summary.get("path", "")).strip()
+    artifact_dir = Path(summary_path).parent if summary_path else None
+    decision_path = (artifact_dir / "planner_p1_replacement_decision.csv"
+                     if artifact_dir is not None else None)
+    retained_path = (artifact_dir / "planner_p1_candidate_retained_profile.csv"
+                     if artifact_dir is not None else None)
     decision_rows: list[dict[str, Any]] = []
     retained_rows: list[dict[str, Any]] = []
     try:
-        if decision_path.is_file():
+        if decision_path is not None and decision_path.is_file():
             with decision_path.open(newline="") as source:
                 decision_rows = list(csv.DictReader(source))
-        if retained_path.is_file():
+        if retained_path is not None and retained_path.is_file():
             with retained_path.open(newline="") as source:
                 retained_rows = list(csv.DictReader(source))
     except Exception:

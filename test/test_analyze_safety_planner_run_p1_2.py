@@ -465,7 +465,7 @@ class P1_2AnalyzerTest(unittest.TestCase):
         self.assertFalse(evidence["support_full_valid"])
         self.assertFalse(evidence["selected_success_per_attempt"])
 
-    def test_candidate_trace_requires_rejected_replacement_lifecycle_binding(self):
+    def test_candidate_trace_requires_rejected_replacement_lifecycle_and_artifact_binding(self):
         row = candidate_optimization_row(
             replacement_accepted=0,
             replacement_reason="p1_replacement_risk_regression",
@@ -485,6 +485,52 @@ class P1_2AnalyzerTest(unittest.TestCase):
         evidence = analyzer.validate_p1_candidate_optimization_evidence(
             [row], {"valid": True}, timeline, None)
         self.assertTrue(evidence["replacement_rejections_reconciled"])
+        self.assertFalse(evidence["retained_artifacts_reconciled"])
+        self.assertFalse(evidence["passed"])
+
+    def test_candidate_trace_reconciles_retained_incumbent_without_counting_it_as_publish(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            directory = Path(tmp)
+            accepted = accepted_profile_rows(0.0)
+            for item in accepted:
+                item.update({"snapshot_generation_id": 5, "planning_attempt_id": 12,
+                             "candidate_id": 99})
+            profile_summary = analyzer.summarize_p1_accepted_profile_rows(accepted)
+            profile_summary["path"] = str(directory / "planner_p1_accepted_trajectory_risk_profile.csv")
+            rejected = candidate_optimization_row(replacement_accepted=0,
+                                                   replacement_reason="risk_regression")
+            published = candidate_optimization_row(snapshot_generation_id=5,
+                                                    planning_attempt_id=12, candidate_id=99)
+            decision = directory / "planner_p1_replacement_decision.csv"
+            decision.write_text(
+                "snapshot_generation_id,planning_attempt_id,optimizer_selected_candidate_id,replacement_accepted,final_trajectory_source\n"
+                "4,11,7,0,retained_incumbent\n")
+            retained = directory / "planner_p1_candidate_retained_profile.csv"
+            rows = []
+            for role in ("optimizer_selected_candidate", "retained_incumbent"):
+                rows.extend({"snapshot_generation_id": "4", "planning_attempt_id": "11",
+                             "candidate_id": "7", "trajectory_role": role,
+                             "final_trajectory_source": "retained_incumbent"}
+                            for _ in range(200))
+            with retained.open("w", newline="") as output:
+                writer = csv.DictWriter(output, fieldnames=sorted(rows[0]))
+                writer.writeheader(); writer.writerows(rows)
+            timeline = [
+                {"stage": "optimizer_start", "snapshot_generation_id": 4,
+                 "planning_attempt_id": 11, "candidate_id": 7},
+                {"stage": "replacement", "outcome": "rejected",
+                 "snapshot_generation_id": 4, "planning_attempt_id": 11,
+                 "candidate_id": 7},
+                {"stage": "optimizer_start", "snapshot_generation_id": 5,
+                 "planning_attempt_id": 12, "candidate_id": 99},
+            ]
+            evidence = analyzer.validate_p1_candidate_optimization_evidence(
+                [rejected, published],
+                {"valid": True,
+                 "path": str(directory / "planner_p1_candidate_optimization.csv")},
+                timeline, profile_summary)
+        self.assertTrue(evidence["retained_artifacts_reconciled"])
+        self.assertTrue(evidence["accepted_profile_is_not_rejected_candidate"])
         self.assertTrue(evidence["passed"])
 
     def test_candidate_csv_requires_nonempty_termination_reason(self):
