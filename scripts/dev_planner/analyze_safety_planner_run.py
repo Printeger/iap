@@ -181,10 +181,11 @@ P1_2_FAIL_BRANCH = "FAIL -> artifact provenance/runtime install/recording comple
 P1_2_LAMBDA_FAIL_BRANCH = "FAIL -> lambda/gradient debug"
 P1_2_SELECTION_FAIL_BRANCH = "FAIL -> P1 candidate selection/ranking debug"
 P1_2_PASS_BRANCH = "PASS -> P1-3"
-P1_EVIDENCE_SCHEMA_VERSION = "p1_evidence_provenance_v1"
+P1_EVIDENCE_SCHEMA_VERSION = "p1_evidence_provenance_v2"
 P1_2_LAMBDA_INTEGRITY = 0.00001
 P1_2_LAMBDA_TOLERANCE = 1.0e-12
 P1_2_STALE_TIMEOUT_S = 1.0
+P1_2_SCENE_INPUT_MAX_DELTA_S = 0.1
 P1_2_RISK_SAMPLE_COUNT = 200
 P1_2_MIN_RISK_MATCH_COUNT = 20
 P1_2_MIN_RISK_MATCH_RATIO = 0.5
@@ -629,14 +630,18 @@ P1_CANDIDATE_OPTIMIZATION_FIELDS = [
     "support_signature", "initial_control_points_hash", "p1_config_hash",
     "optimization_success", "selected", "solver_result", "iteration_count",
     "objective_allowed", "objective_applied", "selection_score", "selection_reason",
+    "candidate_rank", "p1_descent", "rank_eligible", "replacement_accepted",
+    "replacement_reason", "incumbent_available", "incumbent_mean_c_pi", "incumbent_max_c_pi",
     "fallback_reason", "termination_reason", "max_candidates_per_attempt",
 ]
 P1_CANDIDATE_OPTIMIZATION_FINITE_FIELDS = [
     field for field in P1_CANDIDATE_OPTIMIZATION_FIELDS
     if field not in {
+        "schema_version", "run_id", "manifest_path",
         "support_signature", "initial_control_points_hash", "p1_config_hash",
         "optimization_success", "selected", "objective_allowed", "objective_applied",
-        "selection_reason", "fallback_reason", "termination_reason",
+        "p1_descent", "rank_eligible", "replacement_accepted",
+        "selection_reason", "replacement_reason", "fallback_reason", "termination_reason",
     }
 ]
 ODOM_TRUTH_TOPIC = "/sim/drone_0/truth_odom"
@@ -6437,36 +6442,60 @@ def read_p1_candidate_optimization_csv(path: Path) -> tuple[list[dict[str, Any]]
                     "row_count": 0, "read_error": str(exc)}
     keys = [(str(row.get("planning_attempt_id", "")), str(row.get("candidate_id", "")))
             for row in rows]
+    def row_identity(index: int, row: dict[str, Any]) -> dict[str, Any]:
+        return {
+            "row": index,
+            "planning_attempt_id": row.get("planning_attempt_id", ""),
+            "candidate_id": row.get("candidate_id", ""),
+        }
+
     finite_errors = [
-        {"row": index, "field": field}
+        {
+            **row_identity(index, row),
+            "field": field,
+            "raw_value": row.get(field),
+            "expected_type": "finite numeric",
+        }
         for index, row in enumerate(rows)
         for field in P1_CANDIDATE_OPTIMIZATION_FINITE_FIELDS
         if finite_float(row.get(field)) is None
     ]
     bool_errors = [
-        {"row": index, "field": field}
+        {**row_identity(index, row), "field": field,
+         "raw_value": row.get(field), "expected_type": "boolean 0/1"}
         for index, row in enumerate(rows)
         for field in ("support_full_valid", "optimization_success", "selected",
-                      "objective_allowed", "objective_applied")
+                      "objective_allowed", "objective_applied", "p1_descent",
+                      "rank_eligible", "replacement_accepted", "incumbent_available")
         if explicit_csv_bool(row.get(field)) is None
     ]
     empty_identity_fields = [
-        {"row": index, "field": field}
+        {**row_identity(index, row), "field": field,
+         "raw_value": row.get(field), "expected_type": "nonempty string"}
         for index, row in enumerate(rows)
-        for field in ("support_signature", "initial_control_points_hash", "p1_config_hash",
-                      "selection_reason", "fallback_reason", "termination_reason")
+        for field in ("schema_version", "run_id", "manifest_path", "support_signature",
+                      "initial_control_points_hash", "p1_config_hash", "selection_reason",
+                      "replacement_reason", "fallback_reason", "termination_reason")
         if not str(row.get(field, "")).strip()
+    ]
+    schema_errors = [
+        {**row_identity(index, row), "field": "schema_version",
+         "raw_value": row.get("schema_version"),
+         "expected_type": P1_EVIDENCE_SCHEMA_VERSION}
+        for index, row in enumerate(rows)
+        if str(row.get("schema_version", "")).strip() != P1_EVIDENCE_SCHEMA_VERSION
     ]
     max_limit = max([int(finite_float(row.get("max_candidates_per_attempt")) or 0)
                      for row in rows] or [0])
     valid = bool(rows) and required.issubset(fields) and len(keys) == len(set(keys)) and \
         max_limit >= 1 and max_limit <= 8 and not finite_errors and not bool_errors and \
-        not empty_identity_fields
+        not empty_identity_fields and not schema_errors
     return rows, {"path": str(path), "missing": False, "valid": valid,
                   "row_count": len(rows), "missing_fields": sorted(required - fields),
                   "duplicate_attempt_candidate": len(keys) != len(set(keys)),
                   "configured_limit": max_limit, "finite_errors": finite_errors,
-                  "boolean_errors": bool_errors, "empty_identity_fields": empty_identity_fields}
+                  "boolean_errors": bool_errors, "empty_identity_fields": empty_identity_fields,
+                  "schema_errors": schema_errors}
 
 
 def validate_p1_candidate_optimization_evidence(
@@ -6479,7 +6508,8 @@ def validate_p1_candidate_optimization_evidence(
         return {
             "checked": True, "schema_finite": False, "candidate_count_ok": False,
             "selected_success_per_attempt": False, "timeline_reconciled": False,
-            "accepted_profile_reconciled": False, "passed": False,
+            "accepted_profile_reconciled": False,
+            "replacement_rejections_reconciled": False, "passed": False,
             "attempts": {}, "optimizer_identities": [],
         }
     attempts: dict[str, list[dict[str, Any]]] = {}
@@ -6537,6 +6567,28 @@ def validate_p1_candidate_optimization_evidence(
     accepted_profile_reconciled = not accepted_profile or (
         all(profile_tuple) and profile_tuple in selected_identities
     )
+    # A selected optimizer row is deliberately retained even when its result
+    # is not allowed to replace a healthier published trajectory.  That row
+    # must be paired with an explicit lifecycle rejection; otherwise an
+    # evidence consumer could mistake optimizer selection for publication.
+    rejected_selected_identities = {
+        (str(row.get("snapshot_generation_id", "")),
+         str(row.get("planning_attempt_id", "")), str(row.get("candidate_id", "")))
+        for row in rows
+        if explicit_csv_bool(row.get("selected")) is True and
+        explicit_csv_bool(row.get("replacement_accepted")) is False
+    }
+    replacement_rejection_timeline_identities = {
+        (str(row.get("snapshot_generation_id", "")),
+         str(row.get("planning_attempt_id", "")), str(row.get("candidate_id", "")))
+        for row in (timeline_rows or [])
+        if str(row.get("stage", "")) == "replacement" and
+        str(row.get("outcome", "")) == "rejected"
+    }
+    replacement_rejections_reconciled = (
+        timeline_rows is not None and
+        rejected_selected_identities.issubset(replacement_rejection_timeline_identities)
+    )
     schema_finite = bool(summary.get("valid"))
     return {
         "checked": True, "schema_finite": schema_finite,
@@ -6544,12 +6596,18 @@ def validate_p1_candidate_optimization_evidence(
         "selected_success_per_attempt": selected_success_per_attempt,
         "timeline_reconciled": timeline_reconciled,
         "accepted_profile_reconciled": accepted_profile_reconciled,
+        "replacement_rejections_reconciled": replacement_rejections_reconciled,
         "attempts": {attempt: len(value) for attempt, value in attempts.items()},
         "optimizer_identities": [list(value) for value in sorted(identities)],
         "timeline_optimizer_identities": [list(value) for value in sorted(timeline_identities)],
         "selected_identities": [list(value) for value in sorted(selected_identities)],
+        "rejected_selected_identities": [list(value) for value in
+                                        sorted(rejected_selected_identities)],
+        "replacement_rejection_timeline_identities": [list(value) for value in
+                                                        sorted(replacement_rejection_timeline_identities)],
         "passed": schema_finite and support_ok and candidate_count_ok and
-        selected_success_per_attempt and timeline_reconciled and accepted_profile_reconciled,
+        selected_success_per_attempt and timeline_reconciled and accepted_profile_reconciled and
+        replacement_rejections_reconciled,
     }
 
 
@@ -7416,7 +7474,18 @@ def p0_health_row_full_unknown(row: dict[str, Any]) -> bool:
 
 def summarize_p0_startup_snapshot_unavailable(
     rows: list[dict[str, Any]],
+    activation_stamp_s: float | None = None,
 ) -> dict[str, Any]:
+    pre_activation_rows = 0
+    if activation_stamp_s is not None:
+        active_rows = []
+        for row in rows:
+            stamp = finite_float(row.get("stamp"))
+            if stamp is None or stamp < activation_stamp_s:
+                pre_activation_rows += 1
+                continue
+            active_rows.append(row)
+        rows = active_rows
     prefix: list[dict[str, Any]] = []
     for row in rows:
         if str(row.get("reason", "")).strip().lower() != "snapshot_unavailable":
@@ -7441,6 +7510,8 @@ def summarize_p0_startup_snapshot_unavailable(
     post_stale = sum(1 for row in post_startup_rows if bool(row.get("stale")))
     post_full_unknown = sum(1 for row in post_startup_rows if p0_health_row_full_unknown(row))
     return {
+        "activation_stamp_s": activation_stamp_s,
+        "pre_activation_rows": pre_activation_rows,
         "startup_snapshot_unavailable_rows": len(prefix),
         "startup_snapshot_unavailable_duration_s": duration_s,
         "startup_snapshot_unavailable_bounded": bounded,
@@ -7449,6 +7520,13 @@ def summarize_p0_startup_snapshot_unavailable(
         "post_startup_stale_true_count": post_stale,
         "post_startup_full_unknown_count": post_full_unknown,
     }
+
+
+def p1_planner_activation_stamp(timeline_rows: list[dict[str, Any]] | None) -> float | None:
+    stamps = [finite_float(row.get("stamp_s")) for row in (timeline_rows or [])
+              if str(row.get("stage", "")).strip() == "planner_activation"]
+    stamps = [stamp for stamp in stamps if stamp is not None]
+    return min(stamps) if len(stamps) == 1 else None
 
 
 def p1_1_manifest_gate_values(manifest: dict[str, Any]) -> dict[str, bool]:
@@ -7565,13 +7643,15 @@ def validate_p1_1_hard_gates(
     bspline_comparison: dict[str, Any],
     failures: list[str],
     inconclusive: list[str],
+    p1_timeline_rows: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     manifest_gates = p1_1_manifest_gate_values(manifest)
     baseline_manifest_gates = p1_1_baseline_manifest_gate_values(
         manifest,
         baseline_manifest,
     )
-    p0_startup = summarize_p0_startup_snapshot_unavailable(p0_health_rows)
+    p0_startup = summarize_p0_startup_snapshot_unavailable(
+        p0_health_rows, p1_planner_activation_stamp(p1_timeline_rows))
     p1_rviz_topic_statuses = {
         topic: (topic_health.get(topic) or {}).get("status", "MISSING")
         for topic in P1_RVIZ_TOPICS
@@ -8042,12 +8122,12 @@ def validate_p1_2_hard_gates(
         manifest,
         reference_manifest,
     )
-    p0_startup = summarize_p0_startup_snapshot_unavailable(p0_health_rows)
+    p0_startup = summarize_p0_startup_snapshot_unavailable(
+        p0_health_rows, p1_planner_activation_stamp(p1_2_timeline_rows))
     reference_p0_health_rows = list(reference_p0_health_rows or [])
     reference_p0_health_summary = dict(reference_p0_health_summary or {})
     reference_p0_startup = summarize_p0_startup_snapshot_unavailable(
-        reference_p0_health_rows
-    )
+        reference_p0_health_rows, p1_planner_activation_stamp(p1_1_timeline_rows))
     _, p0_health_gaps = _p1_2_health_gap_values(p0_health_rows)
     _, reference_p0_health_gaps = _p1_2_health_gap_values(reference_p0_health_rows)
     p0_health_max_gap_s = max(p0_health_gaps) if p0_health_gaps else None
@@ -8088,6 +8168,7 @@ def validate_p1_2_hard_gates(
             "checked": False, "schema_finite": True, "support_full_valid": True,
             "candidate_count_ok": True, "selected_success_per_attempt": True,
             "timeline_reconciled": True, "accepted_profile_reconciled": True,
+            "replacement_rejections_reconciled": True,
             "passed": True, "attempts": {}, "optimizer_identities": [],
         }
     else:
@@ -8206,6 +8287,8 @@ def validate_p1_2_hard_gates(
         "candidate_trace_one_selected_success": candidate_evidence.get("selected_success_per_attempt", False),
         "candidate_trace_timeline_reconciled": candidate_evidence.get("timeline_reconciled", False),
         "candidate_trace_profile_reconciled": candidate_evidence.get("accepted_profile_reconciled", False),
+        "candidate_trace_replacement_rejections_reconciled": candidate_evidence.get(
+            "replacement_rejections_reconciled", False),
         "candidate_trace_evidence": candidate_evidence,
         "weighted_f_integrity_max": weighted_max,
         "p1_weighted_integrity_positive": weighted_max is not None and weighted_max > 0.0,
@@ -13291,6 +13374,7 @@ def p1_2_risk_scene_alignment(
     """Fail closed unless every plotted source has an exact recorded context."""
     reasons: list[str] = []
     source_status: dict[str, bool] = {}
+    time_bindings: dict[str, dict[str, float | None]] = {}
     for label, profile_key, context_key, path_key, cloud_key, scene in (
         ("P1-2", "p1_2_profile", "p1_2_context", "p1_2_path_xyz", "p1_2_cloud_context", p1_2_scene),
         ("P1-1", "p1_1_profile", "p1_1_context", "p1_1_path_xyz", "p1_1_cloud_context", p1_1_scene),
@@ -13395,13 +13479,33 @@ def p1_2_risk_scene_alignment(
                 f"{bspline_key} unavailable: trajectory_start={trajectory_start_stamp}, "
                 f"recorded={bspline_stamps[-5:]}"
             )
+        for source_name, stamp_field in (("bag odom", "slam_stamps"),
+                                         ("bag truth", "truth_stamps")):
+            stamps = [finite_float(value) for value in scene.get(stamp_field, []) or []]
+            stamps = [value for value in stamps if value is not None]
+            closest = (min(stamps, key=lambda value: abs(value - trajectory_start_stamp))
+                       if stamps and trajectory_start_stamp is not None else None)
+            delta = (abs(closest - trajectory_start_stamp)
+                     if closest is not None and trajectory_start_stamp is not None else None)
+            key = f"{label} {source_name} accepted-start time binding"
+            time_bindings[key] = {"accepted_start_s": trajectory_start_stamp,
+                                  "recorded_stamp_s": closest, "delta_s": delta}
+            source_status[key] = bool(delta is not None and
+                                      delta <= P1_2_SCENE_INPUT_MAX_DELTA_S)
+            if not source_status[key]:
+                reasons.append(
+                    f"{key} unavailable/outside {P1_2_SCENE_INPUT_MAX_DELTA_S:.3f}s: "
+                    f"accepted_start={trajectory_start_stamp}, closest={closest}"
+                )
     return {
         "available": all(source_status.values()) and not reasons,
         "reasons": reasons,
         "source_status": source_status,
+        "time_bindings": time_bindings,
         "method": (
             "exact sidecar frame/generation/snapshot stamp + health/cloud generation/stamp + "
-            "bspline trajectory-start stamp; raw XY overlap; no inferred transform or heatmap"
+            "bspline trajectory-start stamp + native bag odom/truth within 100ms; raw XY overlap; "
+            "no inferred transform or heatmap"
         ),
     }
 
@@ -16917,6 +17021,7 @@ def _analyze_impl(args: argparse.Namespace) -> dict[str, Any]:
             p1_1_bspline_comparison,
             failures,
             inconclusive,
+            p1_planning_context_timeline_rows,
         )
         p1_1_context = validate_p1_profile_context(
             p1_accepted_profile_summary,

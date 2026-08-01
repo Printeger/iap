@@ -1,5 +1,6 @@
 // #include <fstream>
 #include <ego_planner/planner_manager.h>
+#include <ego_planner/p1_candidate_selection.h>
 #include <ego_planner/p1_soft_fallback_policy.h>
 #include <ego_planner/p0_risk_grid_runtime.h>
 #include <ego_planner/p5_runtime_integrity_gate.h>
@@ -46,6 +47,31 @@ namespace ego_planner
       out.applied_to_objective = metrics.applied_to_objective;
       out.fallback_reason = metrics.fallback_reason;
       return out;
+    }
+
+    P1CandidateEvidence toP1CandidateEvidence(
+        const BsplineOptimizer::P1OptimizationTrace &trace)
+    {
+      P1CandidateEvidence evidence;
+      evidence.planning_attempt_id = trace.planning_attempt_id;
+      evidence.candidate_id = trace.candidate_id;
+      evidence.snapshot_generation_id = trace.snapshot_generation_id;
+      evidence.pre_base_objective = trace.pre_base_objective;
+      evidence.post_base_objective = trace.post_base_objective;
+      evidence.pre_raw_p1_objective = trace.pre_raw_p1_cost;
+      evidence.post_raw_p1_objective = trace.post_raw_p1_cost;
+      evidence.pre_weighted_p1_objective = trace.pre_weighted_p1_cost;
+      evidence.post_weighted_p1_objective = trace.post_weighted_p1_cost;
+      evidence.pre_total_objective = trace.pre_total_objective;
+      evidence.post_total_objective = trace.post_total_objective;
+      evidence.pre_mean_c_pi = trace.pre_mean_c_pi;
+      evidence.post_mean_c_pi = trace.post_mean_c_pi;
+      evidence.pre_max_c_pi = trace.pre_max_c_pi;
+      evidence.post_max_c_pi = trace.post_max_c_pi;
+      evidence.gradient_dot_displacement = trace.grad_integrity_dot_displacement;
+      evidence.optimization_success = trace.optimization_success;
+      evidence.full_support = trace.support_full_valid;
+      return evidence;
     }
 
     std::vector<SafetyVizP1Sample> toSafetyVizP1Samples(
@@ -271,6 +297,16 @@ namespace ego_planner
       {
         planning_risk_context_.query_base_time_s = snapshot_stamp_s;
       }
+    }
+
+    // P0 may legitimately publish startup health before the planner admits
+    // its first P1 attempt.  Record the boundary once so offline validation
+    // never guesses from CSV ordering.
+    if (!p1_activation_recorded_)
+    {
+      appendPlanningRiskContextTimeline("planner_activation", now_s,
+          "activated", "p1_planner_ready");
+      p1_activation_recorded_ = true;
     }
 
     cout << "[RiskContext] planning_generation_id="
@@ -780,6 +816,7 @@ namespace ego_planner
 
     /*** STEP 2: OPTIMIZE ***/
     bool flag_step_1_success = false;
+    bool p1_preference_rejected = false;
     uint64_t selected_p1_candidate_id = 1;
     vector<vector<Eigen::Vector3d>> vis_trajs;
     std::vector<BsplineOptimizer::P1OptimizationTrace> p1_candidate_traces;
@@ -908,26 +945,79 @@ namespace ego_planner
                  << ", metrics_only=" << p2_config_.metrics_only << endl;
           }
         }
-        for (auto &trace : p1_candidate_traces)
+        if (!p1_candidate_traces.empty())
         {
-          trace.selected = trace.candidate_id == selected_p1_candidate_id;
-          trace.selection_score = trace.post_total_objective;
-          trace.selection_reason = trace.selected
-              ? (p2_config_.enable_candidate_ranking
-                     ? "p2_candidate_ranking" : "optimizer_cost")
-              : (trace.optimization_success
-                     ? "not_selected" : "optimizer_failure");
-          for (const auto &metric : p2_result.metrics)
+          std::vector<P1CandidateEvidence> evidence;
+          evidence.reserve(p1_candidate_traces.size());
+          for (const auto &trace : p1_candidate_traces)
+            evidence.push_back(toP1CandidateEvidence(trace));
+          P1CandidateEvidence incumbent_evidence;
+          const P1CandidateEvidence *incumbent = nullptr;
+          if (has_existing_trajectory)
           {
-            if (metric.candidate_id == static_cast<int>(trace.candidate_id))
+            incumbent = &incumbent_evidence;
+            // Candidate optimizations clear their temporary optimizer
+            // context. Re-bind the immutable planning snapshot solely for
+            // this fixed-lattice incumbent measurement, then clear it again
+            // before any return path can publish or retry.
+            bspline_optimizer_->setRiskSnapshot(
+                planning_snapshot, planning_query_base_time_s);
+            const auto incumbent_summary = bspline_optimizer_->evaluateP1FixedLatticeRisk(
+                local_data_.position_traj_);
+            bspline_optimizer_->clearRiskSnapshot();
+            if (incumbent_summary.full_support)
             {
-              trace.selection_score = metric.candidate_score;
-              trace.selection_reason = metric.selected
-                  ? "p2_candidate_ranking" : metric.fallback_reason;
-              break;
+              incumbent_evidence.full_support = true;
+              incumbent_evidence.pre_mean_c_pi = incumbent_summary.mean_c_pi;
+              incumbent_evidence.post_mean_c_pi = incumbent_summary.mean_c_pi;
+              incumbent_evidence.pre_max_c_pi = incumbent_summary.max_c_pi;
+              incumbent_evidence.post_max_c_pi = incumbent_summary.max_c_pi;
             }
           }
-          bspline_optimizer_->writeP1OptimizationTrace(trace);
+          const auto decisions = selectP1Candidates(evidence, incumbent);
+          for (std::size_t index = 0; index < p1_candidate_traces.size(); ++index)
+          {
+            auto &trace = p1_candidate_traces[index];
+            const auto &decision = decisions[index];
+            trace.selected = decision.selected;
+            trace.selection_score = trace.post_total_objective;
+            trace.selection_reason = decision.selection_reason;
+            trace.candidate_rank = decision.rank;
+            trace.p1_descent = decision.p1_descent;
+            trace.rank_eligible = decision.rank_eligible;
+            trace.replacement_accepted = decision.replace_published_trajectory;
+            trace.replacement_reason = decision.replacement_reason;
+            if (incumbent && incumbent->full_support)
+            {
+              trace.incumbent_available = true;
+              trace.incumbent_mean_c_pi = incumbent->post_mean_c_pi;
+              trace.incumbent_max_c_pi = incumbent->post_max_c_pi;
+            }
+            if (decision.selected)
+            {
+              selected_p1_candidate_id = trace.candidate_id;
+              for (const auto &candidate : p2_candidates)
+              {
+                if (candidate.candidate_id == static_cast<int>(trace.candidate_id))
+                {
+                  ctrl_pts = candidate.control_points;
+                  break;
+                }
+              }
+              p1_preference_rejected = p1_objective_allowed &&
+                  !p1_config.metrics_only && has_existing_trajectory &&
+                  !decision.replace_published_trajectory;
+              if (p1_preference_rejected)
+              {
+                last_p1_rejection_reason_ = decision.replacement_reason;
+                last_p1_rejection_requires_new_generation_ = true;
+                appendPlanningRiskContextTimeline(
+                    "replacement", plannerNow().seconds(), "rejected",
+                    decision.replacement_reason, "existing_trajectory");
+              }
+            }
+            bspline_optimizer_->writeP1OptimizationTrace(trace);
+          }
         }
       }
       else
@@ -963,10 +1053,71 @@ namespace ego_planner
           flag_step_1_success ? "candidate_success" : "candidate_failure",
           flag_step_1_success ? "ok" : "optimizer_failure");
       auto trace = bspline_optimizer_->getLastP1OptimizationTrace();
-      trace.selected = flag_step_1_success;
+      P1CandidateEvidence candidate_evidence;
+      candidate_evidence.planning_attempt_id = trace.planning_attempt_id;
+      candidate_evidence.candidate_id = trace.candidate_id;
+      candidate_evidence.snapshot_generation_id = trace.snapshot_generation_id;
+      candidate_evidence.pre_base_objective = trace.pre_base_objective;
+      candidate_evidence.post_base_objective = trace.post_base_objective;
+      candidate_evidence.pre_raw_p1_objective = trace.pre_raw_p1_cost;
+      candidate_evidence.post_raw_p1_objective = trace.post_raw_p1_cost;
+      candidate_evidence.pre_weighted_p1_objective = trace.pre_weighted_p1_cost;
+      candidate_evidence.post_weighted_p1_objective = trace.post_weighted_p1_cost;
+      candidate_evidence.pre_total_objective = trace.pre_total_objective;
+      candidate_evidence.post_total_objective = trace.post_total_objective;
+      candidate_evidence.pre_mean_c_pi = trace.pre_mean_c_pi;
+      candidate_evidence.post_mean_c_pi = trace.post_mean_c_pi;
+      candidate_evidence.pre_max_c_pi = trace.pre_max_c_pi;
+      candidate_evidence.post_max_c_pi = trace.post_max_c_pi;
+      candidate_evidence.gradient_dot_displacement =
+          trace.grad_integrity_dot_displacement;
+      candidate_evidence.optimization_success = flag_step_1_success;
+      candidate_evidence.full_support = trace.support_full_valid;
+      P1CandidateEvidence incumbent_evidence;
+      const P1CandidateEvidence *incumbent = nullptr;
+      if (has_existing_trajectory)
+      {
+        incumbent = &incumbent_evidence;
+        const auto incumbent_summary = bspline_optimizer_->evaluateP1FixedLatticeRisk(
+            local_data_.position_traj_);
+        trace.incumbent_mean_c_pi = incumbent_summary.mean_c_pi;
+        trace.incumbent_max_c_pi = incumbent_summary.max_c_pi;
+        if (incumbent_summary.full_support)
+        {
+          // Replacement only compares P1 risk.  Objective fields are kept
+          // finite so the policy can diagnose this as an incumbent evidence
+          // tuple without inventing a cross-trajectory base-cost ordering.
+          incumbent_evidence.full_support = true;
+          incumbent_evidence.pre_mean_c_pi = incumbent_summary.mean_c_pi;
+          incumbent_evidence.post_mean_c_pi = incumbent_summary.mean_c_pi;
+          incumbent_evidence.pre_max_c_pi = incumbent_summary.max_c_pi;
+          incumbent_evidence.post_max_c_pi = incumbent_summary.max_c_pi;
+          trace.incumbent_available = true;
+        }
+      }
+      const auto decisions = selectP1Candidates({candidate_evidence}, incumbent);
+      const auto &decision = decisions.front();
+      trace.selected = decision.selected;
       trace.selection_score = trace.post_total_objective;
-      trace.selection_reason = flag_step_1_success
-          ? "single_candidate" : "optimizer_failure";
+      trace.selection_reason = decision.selection_reason;
+      trace.candidate_rank = decision.rank;
+      trace.p1_descent = decision.p1_descent;
+      trace.rank_eligible = decision.rank_eligible;
+      trace.replacement_accepted = decision.replace_published_trajectory;
+      trace.replacement_reason = decision.replacement_reason;
+      // A P1-enabled replan must not overwrite a usable published trajectory
+      // merely because the low-weight total objective converged.  This is a
+      // publication preference only; it neither calls nor changes P5.
+      p1_preference_rejected = flag_step_1_success && p1_objective_allowed &&
+          !p1_config.metrics_only && has_existing_trajectory &&
+          !decision.replace_published_trajectory;
+      if (p1_preference_rejected) {
+        last_p1_rejection_reason_ = decision.replacement_reason;
+        last_p1_rejection_requires_new_generation_ = true;
+        appendPlanningRiskContextTimeline(
+            "replacement", plannerNow().seconds(), "rejected",
+            decision.replacement_reason, "existing_trajectory");
+      }
       if (write_p1_candidate_trace)
         bspline_optimizer_->writeP1OptimizationTrace(trace);
       bspline_optimizer_->clearRiskSnapshot();
@@ -983,6 +1134,12 @@ namespace ego_planner
     }
 
     cout << "plan_success=" << flag_step_1_success << endl;
+    if (p1_preference_rejected)
+    {
+      visualization_->displayOptimalList(ctrl_pts, 0);
+      continous_failures_count_++;
+      return false;
+    }
     if (!flag_step_1_success)
     {
       visualization_->displayOptimalList(ctrl_pts, 0);

@@ -144,6 +144,7 @@ namespace ego_planner
     int continous_failures_count_{0};
     uint64_t p1_accepted_profile_seq_{0};
     uint64_t p1_planning_attempt_seq_{0};
+    bool p1_activation_recorded_{false};
     uint64_t p2_batch_id_{0};
     uint64_t p3_batch_id_{0};
     PlanningRiskContext planning_risk_context_;

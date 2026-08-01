@@ -141,6 +141,9 @@ def p1_debug_summary(rows=None, **kwargs):
 def candidate_optimization_row(**overrides):
     row = {field: 1.0 for field in analyzer.P1_CANDIDATE_OPTIMIZATION_FIELDS}
     row.update({
+        "schema_version": analyzer.P1_EVIDENCE_SCHEMA_VERSION,
+        "run_id": "0123456789abcdef0123456789abcdef",
+        "manifest_path": "/tmp/test_planner_manifest.json",
         "planning_attempt_id": 11, "candidate_id": 7,
         "snapshot_generation_id": 4, "query_base_time_s": 9.0,
         "pre_base_objective": 10.0, "post_base_objective": 9.0,
@@ -164,6 +167,10 @@ def candidate_optimization_row(**overrides):
         "iteration_count": 4, "termination_reason": "converged",
         "objective_allowed": 1, "objective_applied": 1,
         "selection_score": 9.1, "selection_reason": "single_candidate",
+        "candidate_rank": 1, "p1_descent": 1, "rank_eligible": 1,
+        "replacement_accepted": 1, "replacement_reason": "initial_p1_candidate",
+        "incumbent_available": 0,
+        "incumbent_mean_c_pi": 5.1, "incumbent_max_c_pi": 6.1,
         "fallback_reason": "none", "max_candidates_per_attempt": 8,
     })
     row.update(overrides)
@@ -415,6 +422,23 @@ def run_gate(
 
 
 class P1_2AnalyzerTest(unittest.TestCase):
+    def test_p0_startup_boundary_excludes_only_pre_activation_rows(self):
+        rows = [
+            p0_row(index, stamp=float(index), ready=False, stale=True,
+                   valid_ratio=0.0, unknown_ratio=1.0,
+                   reason="snapshot_unavailable")
+            for index in range(4)
+        ] + [p0_row(4, stamp=4.0)]
+        before_activation = analyzer.summarize_p0_startup_snapshot_unavailable(
+            rows, activation_stamp_s=4.0)
+        self.assertEqual(before_activation["pre_activation_rows"], 4)
+        self.assertTrue(before_activation["startup_snapshot_unavailable_bounded"])
+        self.assertEqual(before_activation["post_startup_ready_false_count"], 0)
+
+        active_prefix = analyzer.summarize_p0_startup_snapshot_unavailable(
+            rows, activation_stamp_s=0.0)
+        self.assertFalse(active_prefix["startup_snapshot_unavailable_bounded"])
+
     def test_candidate_trace_reconciles_fixed_lattice_timeline_and_profile(self):
         profile = accepted_profile_rows(0.0)
         profile_summary = analyzer.summarize_p1_accepted_profile_rows(profile)
@@ -441,6 +465,28 @@ class P1_2AnalyzerTest(unittest.TestCase):
         self.assertFalse(evidence["support_full_valid"])
         self.assertFalse(evidence["selected_success_per_attempt"])
 
+    def test_candidate_trace_requires_rejected_replacement_lifecycle_binding(self):
+        row = candidate_optimization_row(
+            replacement_accepted=0,
+            replacement_reason="p1_replacement_risk_regression",
+        )
+        timeline = [
+            {"stage": "optimizer_start", "snapshot_generation_id": 4,
+             "planning_attempt_id": 11, "candidate_id": 7},
+        ]
+        evidence = analyzer.validate_p1_candidate_optimization_evidence(
+            [row], {"valid": True}, timeline, None)
+        self.assertFalse(evidence["replacement_rejections_reconciled"])
+        self.assertFalse(evidence["passed"])
+        timeline.append(
+            {"stage": "replacement", "outcome": "rejected",
+             "snapshot_generation_id": 4, "planning_attempt_id": 11,
+             "candidate_id": 7})
+        evidence = analyzer.validate_p1_candidate_optimization_evidence(
+            [row], {"valid": True}, timeline, None)
+        self.assertTrue(evidence["replacement_rejections_reconciled"])
+        self.assertTrue(evidence["passed"])
+
     def test_candidate_csv_requires_nonempty_termination_reason(self):
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "candidate.csv"
@@ -452,10 +498,43 @@ class P1_2AnalyzerTest(unittest.TestCase):
                 writer.writerow(row)
             _, summary = analyzer.read_p1_candidate_optimization_csv(path)
         self.assertFalse(summary["valid"])
-        self.assertIn(
-            {"row": 0, "field": "termination_reason"},
-            summary["empty_identity_fields"],
-        )
+        error = next(item for item in summary["empty_identity_fields"]
+                     if item["field"] == "termination_reason")
+        self.assertEqual(error["row"], 0)
+        self.assertEqual(error["planning_attempt_id"], "11")
+        self.assertEqual(error["candidate_id"], "7")
+        self.assertEqual(error["expected_type"], "nonempty string")
+
+    def test_candidate_csv_provenance_strings_are_not_numeric_finite_fields(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "candidate.csv"
+            with path.open("w", newline="") as output:
+                writer = csv.DictWriter(
+                    output, fieldnames=analyzer.P1_CANDIDATE_OPTIMIZATION_FIELDS)
+                writer.writeheader()
+                writer.writerow(candidate_optimization_row())
+            _, summary = analyzer.read_p1_candidate_optimization_csv(path)
+        self.assertTrue(summary["valid"], summary)
+        self.assertEqual(summary["finite_errors"], [])
+
+    def test_candidate_csv_nan_inf_and_empty_numeric_report_full_identity(self):
+        for raw in ("nan", "inf", ""):
+            with self.subTest(raw=raw), tempfile.TemporaryDirectory() as tmp:
+                path = Path(tmp) / "candidate.csv"
+                with path.open("w", newline="") as output:
+                    writer = csv.DictWriter(
+                        output, fieldnames=analyzer.P1_CANDIDATE_OPTIMIZATION_FIELDS)
+                    writer.writeheader()
+                    writer.writerow(candidate_optimization_row(post_total_objective=raw))
+                _, summary = analyzer.read_p1_candidate_optimization_csv(path)
+                self.assertFalse(summary["valid"])
+                error = next(item for item in summary["finite_errors"]
+                             if item["field"] == "post_total_objective")
+                self.assertEqual(error["row"], 0)
+                self.assertEqual(error["planning_attempt_id"], "11")
+                self.assertEqual(error["candidate_id"], "7")
+                self.assertEqual(error["raw_value"], raw)
+                self.assertEqual(error["expected_type"], "finite numeric")
 
     def test_singleflight_rejects_duplicate_same_attempt_and_acquisition_records(self):
         timeline = [
@@ -908,6 +987,10 @@ class P1_2AnalyzerTest(unittest.TestCase):
         self.assertFalse(analyzer.p1_2_risk_scene_alignment(
             comparison, current_scene, reference_scene)["available"])
         current_scene["bspline_start_stamps"] = [10.0]
+        current_scene["slam_stamps"] = [10.101]
+        self.assertFalse(analyzer.p1_2_risk_scene_alignment(
+            comparison, current_scene, reference_scene)["available"])
+        current_scene["slam_stamps"] = [10.0]
         gates, failures, inconclusive, _ = run_gate()
         self.assertEqual(failures, [])
         self.assertEqual(inconclusive, [])

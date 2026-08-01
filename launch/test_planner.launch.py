@@ -27,7 +27,7 @@ from launch_ros.actions import Node
 from launch_ros.descriptions import ComposableNode
 
 
-P1_EVIDENCE_SCHEMA_VERSION = "p1_evidence_provenance_v1"
+P1_EVIDENCE_SCHEMA_VERSION = "p1_evidence_provenance_v2"
 
 
 def _sha256_file(path):

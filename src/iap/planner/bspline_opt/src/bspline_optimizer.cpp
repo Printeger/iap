@@ -2643,7 +2643,7 @@ namespace ego_planner
              "support_sample_count,pre_support_valid_count,post_support_valid_count,"
              "pre_support_coverage,post_support_coverage,support_full_valid,"
              "support_signature,initial_control_points_hash,p1_config_hash,"
-             "optimization_success,selection_score,selection_reason\n";
+             "optimization_success,selection_score,selection_reason,candidate_rank,p1_descent,rank_eligible,replacement_accepted,replacement_reason,incumbent_available,incumbent_mean_c_pi,incumbent_max_c_pi\n";
     }
     out << p1_config_.evidence_schema_version << ',' << p1_config_.evidence_run_id << ','
         << p1_config_.evidence_manifest_path << ',' << rclcpp::Clock().now().seconds() << ',' << trace.planning_attempt_id << ','
@@ -2674,7 +2674,13 @@ namespace ego_planner
         << trace.post_support_coverage << ',' << (trace.support_full_valid ? 1 : 0) << ','
         << trace.support_signature << ',' << trace.initial_control_points_hash << ','
         << trace.p1_config_hash << ',' << (trace.optimization_success ? 1 : 0) << ','
-        << trace.selection_score << ',' << trace.selection_reason << '\n';
+        << trace.selection_score << ',' << trace.selection_reason << ','
+        << trace.candidate_rank << ',' << (trace.p1_descent ? 1 : 0) << ','
+        << (trace.rank_eligible ? 1 : 0) << ','
+        << (trace.replacement_accepted ? 1 : 0) << ','
+        << trace.replacement_reason << ',' << (trace.incumbent_available ? 1 : 0) << ','
+        << trace.incumbent_mean_c_pi << ','
+        << trace.incumbent_max_c_pi << '\n';
   }
 
   void BsplineOptimizer::setLastP1OptimizationSelected(const bool selected)
@@ -3065,6 +3071,40 @@ namespace ego_planner
       input.samples.push_back(std::move(sample));
     }
     return iap::validateP1AcceptedContext(input);
+  }
+
+  BsplineOptimizer::P1FixedLatticeRiskSummary
+  BsplineOptimizer::evaluateP1FixedLatticeRisk(UniformBspline trajectory) const
+  {
+    P1FixedLatticeRiskSummary summary;
+    if (!risk_snapshot_)
+      return summary;
+    const double duration = trajectory.getTimeSum();
+    if (!std::isfinite(duration) || duration < 0.0)
+      return summary;
+    const int denominator = std::max(1, kP1AcceptedProfileSampleCount - 1);
+    double sum = 0.0;
+    double maximum = -std::numeric_limits<double>::infinity();
+    for (int index = 0; index < kP1AcceptedProfileSampleCount; ++index)
+    {
+      const double t_s = duration * static_cast<double>(index) /
+          static_cast<double>(denominator);
+      iap::RiskCostSample sample;
+      const bool hit = risk_snapshot_->queryCost(
+          trajectory.evaluateDeBoorT(t_s), risk_query_base_time_s_ + t_s, &sample);
+      if (!hit || !sample.valid || sample.stale || !std::isfinite(sample.cost))
+        return summary;
+      sum += sample.cost;
+      maximum = std::max(maximum, sample.cost);
+      ++summary.valid_sample_count;
+    }
+    summary.full_support = summary.valid_sample_count == kP1AcceptedProfileSampleCount;
+    if (summary.full_support)
+    {
+      summary.mean_c_pi = sum / static_cast<double>(summary.valid_sample_count);
+      summary.max_c_pi = maximum;
+    }
+    return summary;
   }
 
   bool BsplineOptimizer::evaluateReboundCostForTest(const Eigen::MatrixXd &control_points,

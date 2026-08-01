@@ -15,7 +15,7 @@ import sys
 from pathlib import Path
 
 
-SCHEMA = "p1_evidence_provenance_v1"
+SCHEMA = "p1_evidence_provenance_v2"
 CSV_KEYS = {
     "planner_p1_integrity_cost_debug.csv": "p1.debug_csv_path",
     "planner_p1_candidate_optimization.csv": "p1.candidate_optimization_path",

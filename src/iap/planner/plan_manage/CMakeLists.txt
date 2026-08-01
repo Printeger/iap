@@ -64,6 +64,7 @@ add_executable(ego_planner_node
   src/planner_manager.cpp
   src/p0_risk_grid_runtime.cpp
   src/p1_replan_admission.cpp
+  src/p1_candidate_selection.cpp
   src/p2_candidate_ranking.cpp
   src/p3_reference_bias.cpp
   src/p5_runtime_integrity_gate.cpp
@@ -109,6 +110,10 @@ if(BUILD_TESTING)
   ament_add_gtest(test_p1_replan_admission
     test/test_p1_replan_admission.cpp
     src/p1_replan_admission.cpp
+  )
+  ament_add_gtest(test_p1_candidate_selection
+    test/test_p1_candidate_selection.cpp
+    src/p1_candidate_selection.cpp
   )
   ament_target_dependencies(test_p0_risk_grid_runtime
     rclcpp nav_msgs geometry_msgs std_msgs sensor_msgs visualization_msgs
@@ -161,6 +166,7 @@ if(BUILD_TESTING)
     test/test_planning_risk_context.cpp
     src/planner_manager.cpp
     src/p0_risk_grid_runtime.cpp
+    src/p1_candidate_selection.cpp
     src/p2_candidate_ranking.cpp
     src/p3_reference_bias.cpp
     src/p5_runtime_integrity_gate.cpp

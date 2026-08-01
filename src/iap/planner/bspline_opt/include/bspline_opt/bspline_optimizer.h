@@ -165,6 +165,14 @@ namespace ego_planner
       double integrity_cost = 0.0;
     };
 
+    struct P1FixedLatticeRiskSummary
+    {
+      bool full_support = false;
+      int valid_sample_count = 0;
+      double mean_c_pi = std::numeric_limits<double>::quiet_NaN();
+      double max_c_pi = std::numeric_limits<double>::quiet_NaN();
+    };
+
     // A compact, test-facing record of one optimizer invocation.  This is
     // intentionally aggregate evidence: the accepted-profile CSV remains the
     // authoritative per-sample record.
@@ -210,6 +218,16 @@ namespace ego_planner
       bool objective_applied = false;
       double selection_score = std::numeric_limits<double>::quiet_NaN();
       std::string selection_reason = "not_selected";
+      int candidate_rank = 0;
+      bool p1_descent = false;
+      bool rank_eligible = false;
+      bool replacement_accepted = false;
+      std::string replacement_reason = "not_evaluated";
+      bool incumbent_available = false;
+      // Finite by construction: availability disambiguates the startup case
+      // without weakening the candidate CSV finite-value contract.
+      double incumbent_mean_c_pi = 0.0;
+      double incumbent_max_c_pi = 0.0;
       std::string fallback_reason = "not_evaluated";
       std::string support_signature;
       std::string initial_control_points_hash;
@@ -329,6 +347,8 @@ namespace ego_planner
     iap::P1AcceptedContextValidation validateP1AcceptedTrajectoryRiskContext(
         UniformBspline trajectory, double accepted_stamp_s,
         const std::string &trajectory_frame_id) const;
+    P1FixedLatticeRiskSummary evaluateP1FixedLatticeRisk(
+        UniformBspline trajectory) const;
 
   private:
     GridMap::Ptr grid_map_;
