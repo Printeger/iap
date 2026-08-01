@@ -577,6 +577,7 @@ if(DEFINED ENV{ROS_VERSION})
       scripts/planner_bag_recorder_with_finalizer.py
       scripts/dev_planner/finalize_planner_evidence_manifest.py
       scripts/dev_planner/verify_safety_planner_evidence_bundle.py
+      scripts/dev_planner/analyze_p1_candidate_diagnostic_smoke.py
       scripts/test_predictor_validator.py
       scripts/dev_predictor/analyze_predictor_system_e1.py
       scripts/dev_predictor/analyze_predictor_system_e2.py

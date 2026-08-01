@@ -118,6 +118,12 @@ namespace ego_planner
       std::string evidence_run_id;
       std::string evidence_manifest_path;
       int max_candidates_per_attempt = 8;
+      // Admission is judged on a fixed 200-sample lattice.  Keep the soft
+      // objective on that same lattice so a narrow peak cannot be hidden by
+      // adaptive optimizer sampling.  `fixed_200_mean` is the selected P1-2
+      // alignment mode; smooth-max is retained only as explicit provenance.
+      std::string objective_aggregation_mode = "fixed_200_mean";
+      double smooth_max_temperature = 0.01;
     };
 
     const P1IntegrityConfig &p1IntegrityConfig() const { return p1_config_; }
@@ -171,6 +177,24 @@ namespace ego_planner
       int valid_sample_count = 0;
       double mean_c_pi = std::numeric_limits<double>::quiet_NaN();
       double max_c_pi = std::numeric_limits<double>::quiet_NaN();
+    };
+
+    struct P1FanoutDiagnostics
+    {
+      int input_topology_segments = 0;
+      int surviving_topology_segments = 0;
+      int returned_candidate_count = 0;
+      int configured_cap = 8;
+      int optimizer_success_count = 0;
+      int full_support_count = 0;
+      int p1_descent_eligible_count = 0;
+      int supplemental_candidate_count = 0;
+      bool truncated = false;
+      bool singleton_due_to_empty_segments = false;
+      bool singleton_due_to_degenerate_segments = false;
+      bool singleton_due_to_opposite_direction_unavailable = false;
+      std::string optimizer_selected_candidate = "";
+      std::string replacement_acceptance = "not_evaluated";
     };
 
     // A compact, test-facing record of one optimizer invocation.  This is
@@ -240,6 +264,12 @@ namespace ego_planner
       int solver_result = 0;
       std::string termination_reason;
       int iteration_count = 0;
+      std::string aggregation_mode = "adaptive_mean";
+      double aggregation_temperature = 0.0;
+      int adaptive_sample_count = 0;
+      int fixed_sample_count = 200;
+      double peak_contribution = 0.0;
+      P1FanoutDiagnostics fanout;
     };
 
     struct P1IntegrityVizSample
@@ -305,6 +335,13 @@ namespace ego_planner
     std::vector<Eigen::Vector3d> ref_pts_;
 
     std::vector<ControlPoints> distinctiveTrajs(vector<std::pair<int, int>> segments);
+    const P1FanoutDiagnostics &lastP1FanoutDiagnostics() const {
+      return last_p1_fanout_diagnostics_;
+    }
+    std::vector<ControlPoints> supplementP1RiskGradientCandidates(
+        const ControlPoints &base,
+        const std::shared_ptr<const iap::RiskGridSnapshot> &snapshot,
+        double query_base_time_s, int remaining_capacity);
     std::vector<std::pair<int, int>> initControlPoints(Eigen::MatrixXd &init_points, bool flag_first_init = true);
     bool BsplineOptimizeTrajRebound(Eigen::MatrixXd &optimal_points, double ts); // must be called after initControlPoints()
     bool BsplineOptimizeTrajRebound(Eigen::MatrixXd &optimal_points, double &final_cost, const ControlPoints &control_points, double ts);
@@ -322,8 +359,19 @@ namespace ego_planner
     const OptimizerCostBreakdown &getLastOptimizerCostBreakdown() const { return last_optimizer_cost_breakdown_; }
     const P1OptimizationTrace &getLastP1OptimizationTrace() const { return last_p1_optimization_trace_; }
     std::string p1CandidateOptimizationPath() const;
+    std::string p1ReplacementDecisionPath() const;
+    std::string p1CandidateRetainedProfilePath() const;
     void setLastP1OptimizationSelected(bool selected);
     void writeP1OptimizationTrace(const P1OptimizationTrace &trace) const;
+    void writeP1ReplacementDecision(const P1OptimizationTrace &trace,
+                                    uint64_t incumbent_trajectory_id,
+                                    double incumbent_start_stamp_s,
+                                    const std::string &final_trajectory_source,
+                                    const std::string &publish_identity) const;
+    bool writeP1CandidateRetainedProfile(
+        UniformBspline candidate, uint64_t candidate_id,
+        UniformBspline incumbent, uint64_t incumbent_trajectory_id,
+        const std::string &final_trajectory_source) const;
     void setP1IntegrityConfigForTest(const P1IntegrityConfig &config) { p1_config_ = config; }
     void setP4RiskAStarConfigForTest(const P4RiskAStarConfig &config) { p4_config_ = config; }
     bool evaluateReboundCostForTest(const Eigen::MatrixXd &control_points, double ts,
@@ -396,6 +444,7 @@ namespace ego_planner
     std::vector<P4GuideViz> last_p4_guides_;
     OptimizerCostBreakdown last_optimizer_cost_breakdown_;
     P1OptimizationTrace last_p1_optimization_trace_;
+    P1FanoutDiagnostics last_p1_fanout_diagnostics_;
     double last_rebound_total_gradient_norm_{std::numeric_limits<double>::quiet_NaN()};
     bool suppress_rebound_collision_for_test_{false};
     std::shared_ptr<const iap::RiskGridSnapshot> risk_snapshot_;

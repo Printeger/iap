@@ -87,6 +87,8 @@
 ## 2. 未映射改动（临时区）
 > 如果你临时改了代码但还没决定它对应哪个需求，先把改动写在这里（提交前必须移入上表）。
 
+| IAP-RQ-400 / IAP-RQ-410 | P1 candidate fan-out and objective evidence must be deterministic, bounded, aligned to fixed-200 admission, and distinguish rejected candidate from retained incumbent | `src/iap/planner/bspline_opt/{include/bspline_opt/bspline_optimizer.h,src/bspline_optimizer.cpp}`, `src/iap/planner/plan_manage/src/planner_manager.cpp`, `launch/test_planner.launch.py`, `scripts/dev_planner/analyze_p1_candidate_diagnostic_smoke.py` | `test_p1_integrity_cost`, `test_p1_candidate_selection`; candidate CSV v3 fan-out/aggregation fields, replacement-decision CSV, paired candidate/retained fixed-200 CSV, six diagnostic figures | **IMPLEMENTED; fresh enabled smoke pending** |
+
 - 2026-03-22: IAP-RQ-010 / IAP-RQ-200
   - GNSS clock single-owner contract收敛：`clock_owner_mode` 跨模块联动，默认切到 `gnss`。
   - 增加 ready 时序契约：`IapSharedState::{set,clear,is}_clock_ready`；GNSS 生产 ready，odometry 在 GNSS-owner 下仅 `current+ready` 才读 `C(i)`。

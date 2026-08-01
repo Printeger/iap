@@ -22,6 +22,10 @@ namespace ego_planner
         "planner_p1_accepted_trajectory_risk_profile.csv";
     constexpr const char *kP1AcceptedProfileContextCsvName =
         "planner_p1_accepted_trajectory_risk_profile_context.csv";
+    constexpr const char *kP1ReplacementDecisionCsvName =
+        "planner_p1_replacement_decision.csv";
+    constexpr const char *kP1CandidateRetainedProfileCsvName =
+        "planner_p1_candidate_retained_profile.csv";
 
     // Candidate evidence must be measured against one lattice, rather than
     // against whichever adaptive samples happened to be visited by L-BFGS.
@@ -147,7 +151,9 @@ namespace ego_planner
                << config.sample_dt_scale << ':' << config.max_samples_per_eval << ':'
                << config.integrity_cost_max << ':' << config.integrity_grad_norm_max << ':'
                << config.unknown_policy << ':' << config.unknown_soft_penalty << ':'
-               << config.max_candidates_per_attempt;
+               << config.max_candidates_per_attempt << ':'
+               << config.objective_aggregation_mode << ':'
+               << config.smooth_max_temperature;
       });
     }
 
@@ -280,6 +286,9 @@ namespace ego_planner
     node->declare_parameter("p1.evidence_run_id", std::string(""));
     node->declare_parameter("p1.evidence_manifest_path", std::string(""));
     node->declare_parameter("p1.max_candidates_per_attempt", 8);
+    node->declare_parameter("p1.objective_aggregation_mode",
+                            std::string("fixed_200_mean"));
+    node->declare_parameter("p1.smooth_max_temperature", 0.01);
     node->declare_parameter("p4.enable_risk_aware_astar", false);
     node->declare_parameter("p4.lambda_p4_risk", 0.05);
     node->declare_parameter("p4.risk_cost_max", 100.0);
@@ -316,8 +325,20 @@ namespace ego_planner
     node->get_parameter("p1.evidence_run_id", p1_config_.evidence_run_id);
     node->get_parameter("p1.evidence_manifest_path", p1_config_.evidence_manifest_path);
     node->get_parameter("p1.max_candidates_per_attempt", p1_config_.max_candidates_per_attempt);
+    node->get_parameter("p1.objective_aggregation_mode",
+                        p1_config_.objective_aggregation_mode);
+    node->get_parameter("p1.smooth_max_temperature",
+                        p1_config_.smooth_max_temperature);
     p1_config_.max_candidates_per_attempt = std::clamp(
         p1_config_.max_candidates_per_attempt, 1, 8);
+    if (p1_config_.objective_aggregation_mode != "adaptive_mean" &&
+        p1_config_.objective_aggregation_mode != "fixed_200_mean")
+    {
+      RCLCPP_WARN(rclcpp::get_logger("BsplineOptimizer"),
+                  "unsupported p1.objective_aggregation_mode '%s'; using fixed_200_mean",
+                  p1_config_.objective_aggregation_mode.c_str());
+      p1_config_.objective_aggregation_mode = "fixed_200_mean";
+    }
     node->get_parameter("p4.enable_risk_aware_astar", p4_config_.enable_risk_aware_astar);
     node->get_parameter("p4.lambda_p4_risk", p4_config_.lambda_p4_risk);
     node->get_parameter("p4.risk_cost_max", p4_config_.risk_cost_max);
@@ -400,10 +421,17 @@ namespace ego_planner
   // 返回多个安全的控制点集
   std::vector<ControlPoints> BsplineOptimizer::distinctiveTrajs(vector<std::pair<int, int>> segments)
   {
+    last_p1_fanout_diagnostics_ = P1FanoutDiagnostics{};
+    last_p1_fanout_diagnostics_.input_topology_segments =
+        static_cast<int>(segments.size());
+    last_p1_fanout_diagnostics_.configured_cap =
+        std::clamp(p1_config_.max_candidates_per_attempt, 1, 8);
     if (segments.size() == 0) // will be invoked again later.
     {
       std::vector<ControlPoints> oneSeg;
       oneSeg.push_back(cps_);
+      last_p1_fanout_diagnostics_.returned_candidate_count = 1;
+      last_p1_fanout_diagnostics_.singleton_due_to_empty_segments = true;
       return oneSeg;
     }
 
@@ -544,6 +572,7 @@ namespace ego_planner
               }
             }
 
+            last_p1_fanout_diagnostics_.singleton_due_to_degenerate_segments = true;
             std::vector<ControlPoints> blank;
             return blank;
           }
@@ -710,6 +739,9 @@ namespace ego_planner
     {
       std::vector<ControlPoints> oneSeg;
       oneSeg.push_back(cps_);
+      last_p1_fanout_diagnostics_.surviving_topology_segments = 0;
+      last_p1_fanout_diagnostics_.returned_candidate_count = 1;
+      last_p1_fanout_diagnostics_.singleton_due_to_opposite_direction_unavailable = true;
       return oneSeg;
     }
 
@@ -815,8 +847,69 @@ namespace ego_planner
     abandon_this_trajectory:;
     }
 
+    last_p1_fanout_diagnostics_.surviving_topology_segments = seg_upbound;
+    last_p1_fanout_diagnostics_.returned_candidate_count =
+        static_cast<int>(control_pts_buf.size());
+    last_p1_fanout_diagnostics_.truncated =
+        static_cast<int>(control_pts_buf.size()) >
+        last_p1_fanout_diagnostics_.configured_cap;
+    if (control_pts_buf.size() == 1 && seg_upbound <
+        last_p1_fanout_diagnostics_.input_topology_segments)
+    {
+      last_p1_fanout_diagnostics_.singleton_due_to_degenerate_segments = true;
+    }
     return control_pts_buf;
   } // namespace ego_planner
+
+  std::vector<ControlPoints> BsplineOptimizer::supplementP1RiskGradientCandidates(
+      const ControlPoints &base,
+      const std::shared_ptr<const iap::RiskGridSnapshot> &snapshot,
+      const double query_base_time_s, const int remaining_capacity)
+  {
+    std::vector<ControlPoints> supplemental;
+    if (!snapshot || remaining_capacity <= 0 || base.points.rows() != 3 ||
+        base.size <= order_ || base.points.cols() != base.size ||
+        !std::isfinite(query_base_time_s))
+      return supplemental;
+
+    Eigen::Vector3d aggregate_gradient = Eigen::Vector3d::Zero();
+    const int first = std::max(order_, 0);
+    const int last = std::max(first, base.size - 1);
+    for (int column = first; column < last; ++column)
+    {
+      const double fraction = static_cast<double>(column - first) /
+          static_cast<double>(std::max(1, last - first));
+      iap::RiskCostSample sample;
+      if (snapshot->queryCost(base.points.col(column),
+                              query_base_time_s + fraction *
+                                  static_cast<double>(base.size - order_) *
+                                      std::max(1.0e-6, bspline_interval_),
+                              &sample) &&
+          sample.valid && !sample.stale && sample.grad.allFinite())
+      {
+        aggregate_gradient += sample.grad;
+      }
+    }
+    if (!aggregate_gradient.allFinite() || aggregate_gradient.norm() <= 1.0e-12)
+      return supplemental;
+
+    const Eigen::Vector3d direction = -aggregate_gradient.normalized();
+    constexpr double kDisplacementsM[] = {0.025, 0.05, 0.10};
+    for (const double displacement : kDisplacementsM)
+    {
+      if (static_cast<int>(supplemental.size()) >= remaining_capacity)
+        break;
+      ControlPoints candidate = base;
+      for (int column = first; column < last; ++column)
+        candidate.points.col(column) += displacement * direction;
+      supplemental.push_back(std::move(candidate));
+    }
+    last_p1_fanout_diagnostics_.supplemental_candidate_count =
+        static_cast<int>(supplemental.size());
+    last_p1_fanout_diagnostics_.returned_candidate_count +=
+        static_cast<int>(supplemental.size());
+    return supplemental;
+  }
 
   /* This function is very similar to check_collision_and_rebound().
    * It was written separately, just because I did it once and it has been running stably since March 2020.
@@ -2034,6 +2127,20 @@ namespace ego_planner
       trace.objective_allowed = p1_risk_context_.objective_allowed;
       trace.objective_applied = last_p1_metrics_.applied_to_objective;
       trace.fallback_reason = p1_risk_context_.fallback_reason;
+      trace.aggregation_mode = p1_config_.objective_aggregation_mode;
+      trace.aggregation_temperature = p1_config_.smooth_max_temperature;
+      const double adaptive_dt = std::max(p1_config_.sample_dt_min_s,
+          bspline_interval_ * std::max(0.0, p1_config_.sample_dt_scale));
+      trace.adaptive_sample_count = adaptive_dt > 0.0 && std::isfinite(adaptive_dt)
+          ? std::max(1, static_cast<int>(std::ceil(
+                static_cast<double>(initial_control_points.cols() - order_) *
+                bspline_interval_ / adaptive_dt)))
+          : 0;
+      if (p1_config_.max_samples_per_eval > 0)
+        trace.adaptive_sample_count = std::min(
+            trace.adaptive_sample_count, p1_config_.max_samples_per_eval);
+      trace.fixed_sample_count = kP1CandidateEvidenceSampleCount;
+      trace.peak_contribution = 0.0;
 
       // 初始化L-BFGS算法的参数
       lbfgs::lbfgs_parameter_t lbfgs_params;
@@ -2412,12 +2519,16 @@ namespace ego_planner
       return;
     }
 
-    int sample_count = static_cast<int>(std::ceil(duration / raw_dt));
-    sample_count = std::max(1, sample_count);
+    int adaptive_sample_count = static_cast<int>(std::ceil(duration / raw_dt));
+    adaptive_sample_count = std::max(1, adaptive_sample_count);
     if (p1_config_.max_samples_per_eval > 0)
     {
-      sample_count = std::min(sample_count, p1_config_.max_samples_per_eval);
+      adaptive_sample_count = std::min(
+          adaptive_sample_count, p1_config_.max_samples_per_eval);
     }
+    const int sample_count = p1_config_.objective_aggregation_mode ==
+        "fixed_200_mean" ? kP1CandidateEvidenceSampleCount
+                           : adaptive_sample_count;
     metrics.sample_count = sample_count;
 
     UniformBspline traj(q, order_, bspline_interval_);
@@ -2615,6 +2726,20 @@ namespace ego_planner
                        "planner_p1_candidate_optimization.csv");
   }
 
+  std::string BsplineOptimizer::p1ReplacementDecisionPath() const
+  {
+    return p1_config_.debug_csv_path.empty()
+        ? kP1ReplacementDecisionCsvName
+        : siblingPath(p1_config_.debug_csv_path, kP1ReplacementDecisionCsvName);
+  }
+
+  std::string BsplineOptimizer::p1CandidateRetainedProfilePath() const
+  {
+    return p1_config_.debug_csv_path.empty()
+        ? kP1CandidateRetainedProfileCsvName
+        : siblingPath(p1_config_.debug_csv_path, kP1CandidateRetainedProfileCsvName);
+  }
+
   void BsplineOptimizer::writeP1CandidateOptimizationCsv(
       const P1OptimizationTrace &trace) const
   {
@@ -2643,7 +2768,9 @@ namespace ego_planner
              "support_sample_count,pre_support_valid_count,post_support_valid_count,"
              "pre_support_coverage,post_support_coverage,support_full_valid,"
              "support_signature,initial_control_points_hash,p1_config_hash,"
-             "optimization_success,selection_score,selection_reason,candidate_rank,p1_descent,rank_eligible,replacement_accepted,replacement_reason,incumbent_available,incumbent_mean_c_pi,incumbent_max_c_pi\n";
+             "optimization_success,selection_score,selection_reason,candidate_rank,p1_descent,rank_eligible,replacement_accepted,replacement_reason,incumbent_available,incumbent_mean_c_pi,incumbent_max_c_pi,"
+             "aggregation_mode,aggregation_temperature,adaptive_sample_count,fixed_sample_count,peak_contribution,"
+             "fanout_input_segments,fanout_surviving_segments,fanout_returned_count,fanout_configured_cap,fanout_truncated,fanout_optimizer_successes,fanout_full_support,fanout_p1_descent_eligible,fanout_supplemental_count,fanout_singleton_reason\n";
     }
     out << p1_config_.evidence_schema_version << ',' << p1_config_.evidence_run_id << ','
         << p1_config_.evidence_manifest_path << ',' << rclcpp::Clock().now().seconds() << ',' << trace.planning_attempt_id << ','
@@ -2680,7 +2807,22 @@ namespace ego_planner
         << (trace.replacement_accepted ? 1 : 0) << ','
         << trace.replacement_reason << ',' << (trace.incumbent_available ? 1 : 0) << ','
         << trace.incumbent_mean_c_pi << ','
-        << trace.incumbent_max_c_pi << '\n';
+        << trace.incumbent_max_c_pi << ','
+        << trace.aggregation_mode << ',' << trace.aggregation_temperature << ','
+        << trace.adaptive_sample_count << ',' << trace.fixed_sample_count << ','
+        << trace.peak_contribution << ','
+        << trace.fanout.input_topology_segments << ','
+        << trace.fanout.surviving_topology_segments << ','
+        << trace.fanout.returned_candidate_count << ','
+        << trace.fanout.configured_cap << ',' << (trace.fanout.truncated ? 1 : 0) << ','
+        << trace.fanout.optimizer_success_count << ','
+        << trace.fanout.full_support_count << ','
+        << trace.fanout.p1_descent_eligible_count << ','
+        << trace.fanout.supplemental_candidate_count << ','
+        << (trace.fanout.singleton_due_to_empty_segments ? "empty_segments" :
+            trace.fanout.singleton_due_to_degenerate_segments ? "degenerate_segments" :
+            trace.fanout.singleton_due_to_opposite_direction_unavailable ? "opposite_direction_unavailable" : "none")
+        << '\n';
   }
 
   void BsplineOptimizer::setLastP1OptimizationSelected(const bool selected)
@@ -2692,6 +2834,86 @@ namespace ego_planner
       const P1OptimizationTrace &trace) const
   {
     writeP1CandidateOptimizationCsv(trace);
+  }
+
+  void BsplineOptimizer::writeP1ReplacementDecision(
+      const P1OptimizationTrace &trace, const uint64_t incumbent_trajectory_id,
+      const double incumbent_start_stamp_s,
+      const std::string &final_trajectory_source,
+      const std::string &publish_identity) const
+  {
+    if (!p1_config_.debug_csv_enable || p1_config_.debug_csv_path.empty())
+      return;
+    const std::string path = p1ReplacementDecisionPath();
+    std::ifstream existing(path);
+    const bool header = !existing.good() ||
+        existing.peek() == std::ifstream::traits_type::eof();
+    existing.close();
+    std::ofstream out(path, std::ios::app);
+    if (!out.good()) return;
+    out << std::setprecision(17);
+    if (header) {
+      out << "schema_version,run_id,manifest_path,stamp,planning_attempt_id,optimizer_selected_candidate_id,rejected_candidate_id,snapshot_generation_id,query_base_time_s,"
+             "replacement_accepted,replacement_reason,incumbent_trajectory_id,incumbent_start_stamp_s,incumbent_mean_c_pi,incumbent_max_c_pi,"
+             "candidate_mean_c_pi,candidate_max_c_pi,final_trajectory_source,publish_identity\n";
+    }
+    out << p1_config_.evidence_schema_version << ',' << p1_config_.evidence_run_id << ','
+        << p1_config_.evidence_manifest_path << ',' << rclcpp::Clock().now().seconds() << ','
+        << trace.planning_attempt_id << ',' << trace.candidate_id << ','
+        << (trace.replacement_accepted ? 0 : trace.candidate_id) << ','
+        << trace.snapshot_generation_id << ',' << trace.query_base_time_s << ','
+        << (trace.replacement_accepted ? 1 : 0) << ',' << trace.replacement_reason << ','
+        << incumbent_trajectory_id << ',' << incumbent_start_stamp_s << ','
+        << trace.incumbent_mean_c_pi << ',' << trace.incumbent_max_c_pi << ','
+        << trace.post_mean_c_pi << ',' << trace.post_max_c_pi << ','
+        << final_trajectory_source << ',' << publish_identity << '\n';
+  }
+
+  bool BsplineOptimizer::writeP1CandidateRetainedProfile(
+      UniformBspline candidate, const uint64_t candidate_id,
+      UniformBspline incumbent, const uint64_t incumbent_trajectory_id,
+      const std::string &final_trajectory_source) const
+  {
+    if (!p1_config_.debug_csv_enable || p1_config_.debug_csv_path.empty() ||
+        !risk_snapshot_ || !std::isfinite(risk_query_base_time_s_))
+      return false;
+    const std::string path = p1CandidateRetainedProfilePath();
+    std::ifstream existing(path);
+    const bool header = !existing.good() ||
+        existing.peek() == std::ifstream::traits_type::eof();
+    existing.close();
+    std::ofstream out(path, std::ios::app);
+    if (!out.good()) return false;
+    out << std::setprecision(17);
+    if (header) {
+      out << "schema_version,run_id,manifest_path,planning_attempt_id,candidate_id,trajectory_role,trajectory_id,snapshot_generation_id,query_base_time_s,final_trajectory_source,sample_index,t_s,x,y,z,c_pi,valid,stale,reason\n";
+    }
+    const auto write_trajectory = [&](UniformBspline trajectory,
+                                      const char *role, uint64_t trajectory_id) {
+      const double duration = trajectory.getTimeSum();
+      if (!std::isfinite(duration) || duration < 0.0) return false;
+      for (int index = 0; index < kP1CandidateEvidenceSampleCount; ++index) {
+        const double fraction = static_cast<double>(index) /
+            static_cast<double>(kP1CandidateEvidenceSampleCount - 1);
+        const double t_s = duration * fraction;
+        const Eigen::Vector3d point = trajectory.evaluateDeBoorT(t_s);
+        iap::RiskCostSample sample;
+        const bool hit = risk_snapshot_->queryCost(
+            point, risk_query_base_time_s_ + t_s, &sample);
+        out << p1_config_.evidence_schema_version << ',' << p1_config_.evidence_run_id << ','
+            << p1_config_.evidence_manifest_path << ','
+            << p1_risk_context_.planning_attempt_id << ',' << candidate_id << ','
+            << role << ',' << trajectory_id << ',' << risk_snapshot_->generation_id() << ','
+            << risk_query_base_time_s_ << ',' << final_trajectory_source << ','
+            << index << ',' << t_s << ',' << point.x() << ',' << point.y() << ','
+            << point.z() << ',' << sample.cost << ','
+            << (hit && sample.valid ? 1 : 0) << ',' << (sample.stale ? 1 : 0) << ','
+            << sample.reason << '\n';
+      }
+      return true;
+    };
+    return write_trajectory(candidate, "optimizer_selected_candidate", candidate_id) &&
+        write_trajectory(incumbent, "retained_incumbent", incumbent_trajectory_id);
   }
 
   std::string BsplineOptimizer::p1AcceptedTrajectoryRiskProfilePath() const

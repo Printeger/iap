@@ -86,4 +86,24 @@ TEST(P1CandidateSelectionTest, RanksOnlyCandidatesFromOneAttempt) {
   EXPECT_FALSE(decisions[0].selected);
 }
 
+TEST(P1CandidateSelectionTest, NarrowPeakFixtureRejectsAdaptiveMeanOnlyImprovement) {
+  // Deterministic objective-alignment fixture: the legacy adaptive mean
+  // appears to improve, while the admission lattice catches a narrow peak.
+  auto narrow_peak = attempt19();
+  narrow_peak.pre_raw_p1_objective = 4.0;
+  narrow_peak.post_raw_p1_objective = 3.0;  // adaptive 30-sample mean descends
+  narrow_peak.pre_total_objective = 10.0;
+  narrow_peak.post_total_objective = 9.0;
+  narrow_peak.pre_mean_c_pi = 4.0;
+  narrow_peak.post_mean_c_pi = 3.0;
+  narrow_peak.pre_max_c_pi = 6.0;
+  narrow_peak.post_max_c_pi = 7.0;  // fixed-200 lattice sees the peak rise
+  const auto decisions = ego_planner::selectP1Candidates({narrow_peak}, nullptr);
+  ASSERT_EQ(decisions.size(), 1U);
+  EXPECT_TRUE(decisions[0].total_descent);
+  EXPECT_FALSE(decisions[0].p1_descent);
+  EXPECT_FALSE(decisions[0].rank_eligible);
+  EXPECT_FALSE(decisions[0].replace_published_trajectory);
+}
+
 }  // namespace

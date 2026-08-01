@@ -27,7 +27,7 @@ from launch_ros.actions import Node
 from launch_ros.descriptions import ComposableNode
 
 
-P1_EVIDENCE_SCHEMA_VERSION = "p1_evidence_provenance_v2"
+P1_EVIDENCE_SCHEMA_VERSION = "p1_evidence_provenance_v3"
 
 
 def _sha256_file(path):
@@ -821,6 +821,8 @@ ARG_DEFAULTS = [
     ("p1.debug_csv_enable", "false"),
     ("p1.debug_csv_path", ""),
     ("p1.max_candidates_per_attempt", "8"),
+    ("p1.objective_aggregation_mode", "fixed_200_mean"),
+    ("p1.smooth_max_temperature", "0.01"),
     ("p2.enable_candidate_ranking", "false"),
     ("p2.metrics_only", "true"),
     ("p2.sample_dt_s", "0.2"),
@@ -1418,6 +1420,8 @@ def _ego_planner_node(context, drone_id, planner_odom_topic, cloud_topic, camera
             {"p1.evidence_run_id": evidence["run_id"]},
             {"p1.evidence_manifest_path": evidence["manifest_path"]},
             {"p1.max_candidates_per_attempt": max(1, min(8, _param_int(context, "p1.max_candidates_per_attempt")))},
+            {"p1.objective_aggregation_mode": LaunchConfiguration("p1.objective_aggregation_mode").perform(context)},
+            {"p1.smooth_max_temperature": _param_float(context, "p1.smooth_max_temperature")},
             {"p2.enable_candidate_ranking": p2_use},
             {"p2.metrics_only": p2_metrics_only},
             {"p2.sample_dt_s": _param_float(context, "p2.sample_dt_s")},
@@ -1786,6 +1790,12 @@ def _launch_setup(context):
         "p1.accepted_profile_path": p1_accepted_profile_path_for_manifest,
         "p1.accepted_profile_context_path": p1_accepted_profile_context_path_for_manifest,
         "p1.planning_context_timeline_path": p1_planning_context_timeline_path_for_manifest,
+        "p1.replacement_decision_path": str(
+            Path(p1_debug_path_for_manifest).with_name("planner_p1_replacement_decision.csv")),
+        "p1.candidate_retained_profile_path": str(
+            Path(p1_debug_path_for_manifest).with_name("planner_p1_candidate_retained_profile.csv")),
+        "p1.objective_aggregation_mode": LaunchConfiguration("p1.objective_aggregation_mode").perform(context),
+        "p1.smooth_max_temperature": _param_float(context, "p1.smooth_max_temperature"),
         "p1.reference_identity": "metrics_only_lambda_0.00001_not_applied",
         "p0.raw_health_topic": "/planning/risk_grid_health",
         "p0.resolution_m": _param_float(context, "p0.resolution_m"),

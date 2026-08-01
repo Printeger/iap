@@ -183,6 +183,8 @@ std::unique_ptr<ego_planner::BsplineOptimizer> makeOptimizer(
       rclcpp::Parameter("p1.unknown_soft_penalty", p1_config.unknown_soft_penalty),
       rclcpp::Parameter("p1.debug_csv_enable", p1_config.debug_csv_enable),
       rclcpp::Parameter("p1.debug_csv_path", p1_config.debug_csv_path),
+      rclcpp::Parameter("p1.objective_aggregation_mode", p1_config.objective_aggregation_mode),
+      rclcpp::Parameter("p1.smooth_max_temperature", p1_config.smooth_max_temperature),
   });
   auto node = std::make_shared<rclcpp::Node>(
       "test_p1_integrity_cost_" + std::to_string(node_id++), options);
@@ -711,6 +713,7 @@ TEST(P1IntegrityCostTest, SampleCountIsCapped) {
   config.sample_dt_min_s = 0.001;
   config.sample_dt_scale = 0.01;
   config.max_samples_per_eval = 3;
+  config.objective_aggregation_mode = "adaptive_mean";
   double cost = 0.0;
   Eigen::MatrixXd gradient;
   auto optimizer = makeOptimizer(config, &swarm);
@@ -718,6 +721,36 @@ TEST(P1IntegrityCostTest, SampleCountIsCapped) {
   ASSERT_TRUE(evaluate(*optimizer, q, &cost, &gradient));
 
   EXPECT_EQ(optimizer->getLastP1IntegrityMetrics().sample_count, 3);
+}
+
+TEST(P1IntegrityCostTest, FixedLatticeModeAndRiskGradientSupplementAreDeterministic) {
+  ego_planner::SwarmTrajData swarm;
+  const Eigen::MatrixXd q = makeControlPoints();
+  AffineProvider provider(10.0, Eigen::Vector3d(1.0, 0.0, 0.0));
+  auto snapshot = makeSnapshot(provider);
+  auto config = disabledConfig();
+  config.use_integrity_cost = true;
+  config.metrics_only = false;
+  config.lambda_integrity = 0.00001;
+  config.objective_aggregation_mode = "fixed_200_mean";
+  auto optimizer = makeOptimizer(config, &swarm);
+  optimizer->setRiskSnapshot(snapshot, snapshot->stamp_s());
+  optimizer->setBsplineInterval(0.1);
+  double cost = 0.0;
+  Eigen::MatrixXd gradient;
+  ASSERT_TRUE(evaluate(*optimizer, q, &cost, &gradient));
+  EXPECT_EQ(optimizer->getLastP1IntegrityMetrics().sample_count, 200);
+
+  ego_planner::ControlPoints base;
+  base.resize(q.cols());
+  base.points = q;
+  const auto candidates = optimizer->supplementP1RiskGradientCandidates(
+      base, snapshot, snapshot->stamp_s(), 7);
+  ASSERT_EQ(candidates.size(), 3U);
+  EXPECT_GT((candidates[0].points - base.points).norm(), 0.0);
+  EXPECT_LT((candidates[0].points - base.points).norm(),
+            (candidates[2].points - base.points).norm());
+  EXPECT_EQ(optimizer->lastP1FanoutDiagnostics().supplemental_candidate_count, 3);
 }
 
 TEST(P1IntegrityCostTest, SnapshotGenerationStaysFixedUntilReset) {

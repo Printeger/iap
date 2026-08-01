@@ -6,6 +6,7 @@
 #include <ego_planner/p5_runtime_integrity_gate.h>
 #include <ego_planner/safety_rviz_publisher.h>
 #include <iap/planner/risk_grid_map.hpp>
+#include <algorithm>
 #include <fstream>
 #include <iomanip>
 #include <limits>
@@ -827,6 +828,22 @@ namespace ego_planner
       std::vector<ControlPoints> trajs = bspline_optimizer_->distinctiveTrajs(segments);
       const int candidate_limit = std::clamp(
           p1_config.max_candidates_per_attempt, 1, 8);
+      const auto fanout_before_supplement =
+          bspline_optimizer_->lastP1FanoutDiagnostics();
+      // A cap is not a candidate-count target.  When topology construction
+      // truthfully yielded only its base trajectory, make enabled P1's
+      // low-weight preference observable with deterministic, snapshot-bound
+      // risk-gradient variants.  Metrics-only remains exactly as generated.
+      if (p1_objective_allowed && !p1_config.metrics_only && trajs.size() == 1 &&
+          (fanout_before_supplement.singleton_due_to_empty_segments ||
+           fanout_before_supplement.singleton_due_to_degenerate_segments ||
+           fanout_before_supplement.singleton_due_to_opposite_direction_unavailable))
+      {
+        const auto supplemental = bspline_optimizer_->supplementP1RiskGradientCandidates(
+            trajs.front(), planning_snapshot, planning_query_base_time_s,
+            candidate_limit - static_cast<int>(trajs.size()));
+        trajs.insert(trajs.end(), supplemental.begin(), supplemental.end());
+      }
       if (static_cast<int>(trajs.size()) > candidate_limit)
         trajs.resize(static_cast<std::size_t>(candidate_limit));
       cout << "\033[1;33m"
@@ -1014,8 +1031,37 @@ namespace ego_planner
                 appendPlanningRiskContextTimeline(
                     "replacement", plannerNow().seconds(), "rejected",
                     decision.replacement_reason, "existing_trajectory");
+                // Preserve the selected-but-rejected candidate and the
+                // incumbent on the identical fixed 200-sample lattice.  The
+                // accepted-profile artifact remains reserved for publishes.
+                bspline_optimizer_->setRiskSnapshot(
+                    planning_snapshot, planning_query_base_time_s);
+                const UniformBspline selected_candidate(
+                    ctrl_pts, 3, ts);
+                bspline_optimizer_->writeP1CandidateRetainedProfile(
+                    selected_candidate, trace.candidate_id,
+                    local_data_.position_traj_, local_data_.traj_id_,
+                    "retained_incumbent");
+                bspline_optimizer_->writeP1ReplacementDecision(
+                    trace, local_data_.traj_id_, local_data_.start_time_.seconds(),
+                    "retained_incumbent",
+                    "incumbent:" + std::to_string(local_data_.traj_id_));
+                bspline_optimizer_->clearRiskSnapshot();
               }
             }
+            trace.fanout = bspline_optimizer_->lastP1FanoutDiagnostics();
+            trace.fanout.optimizer_success_count =
+                static_cast<int>(p2_candidates.size());
+            trace.fanout.full_support_count = static_cast<int>(std::count_if(
+                p1_candidate_traces.begin(), p1_candidate_traces.end(),
+                [](const auto &item) { return item.support_full_valid; }));
+            trace.fanout.p1_descent_eligible_count = static_cast<int>(std::count_if(
+                decisions.begin(), decisions.end(),
+                [](const auto &item) { return item.rank_eligible; }));
+            trace.fanout.optimizer_selected_candidate =
+                std::to_string(selected_p1_candidate_id);
+            trace.fanout.replacement_acceptance =
+                decision.replace_published_trajectory ? "accepted" : "rejected";
             bspline_optimizer_->writeP1OptimizationTrace(trace);
           }
         }
@@ -1030,6 +1076,13 @@ namespace ego_planner
           failed_trace.selected = false;
           failed_trace.selection_score = failed_trace.post_total_objective;
           failed_trace.selection_reason = "no_successful_candidate";
+          failed_trace.fanout = bspline_optimizer_->lastP1FanoutDiagnostics();
+          failed_trace.fanout.optimizer_success_count = 0;
+          failed_trace.fanout.full_support_count = static_cast<int>(std::count_if(
+              p1_candidate_traces.begin(), p1_candidate_traces.end(),
+              [](const auto &item) { return item.support_full_valid; }));
+          failed_trace.fanout.optimizer_selected_candidate = "none";
+          failed_trace.fanout.replacement_acceptance = "not_evaluated";
           bspline_optimizer_->writeP1OptimizationTrace(failed_trace);
         }
       }
@@ -1117,7 +1170,22 @@ namespace ego_planner
         appendPlanningRiskContextTimeline(
             "replacement", plannerNow().seconds(), "rejected",
             decision.replacement_reason, "existing_trajectory");
+        bspline_optimizer_->writeP1CandidateRetainedProfile(
+            UniformBspline(ctrl_pts, 3, ts), trace.candidate_id,
+            local_data_.position_traj_, local_data_.traj_id_,
+            "retained_incumbent");
+        bspline_optimizer_->writeP1ReplacementDecision(
+            trace, local_data_.traj_id_, local_data_.start_time_.seconds(),
+            "retained_incumbent",
+            "incumbent:" + std::to_string(local_data_.traj_id_));
       }
+      trace.fanout = bspline_optimizer_->lastP1FanoutDiagnostics();
+      trace.fanout.optimizer_success_count = flag_step_1_success ? 1 : 0;
+      trace.fanout.full_support_count = trace.support_full_valid ? 1 : 0;
+      trace.fanout.p1_descent_eligible_count = decision.rank_eligible ? 1 : 0;
+      trace.fanout.optimizer_selected_candidate = std::to_string(trace.candidate_id);
+      trace.fanout.replacement_acceptance =
+          decision.replace_published_trajectory ? "accepted" : "rejected";
       if (write_p1_candidate_trace)
         bspline_optimizer_->writeP1OptimizationTrace(trace);
       bspline_optimizer_->clearRiskSnapshot();
