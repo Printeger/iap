@@ -573,6 +573,9 @@ if(DEFINED ENV{ROS_VERSION})
     )
     install(PROGRAMS
       scripts/test_araim_validator.py
+      scripts/planner_evidence_provenance_publisher.py
+      scripts/dev_planner/finalize_planner_evidence_manifest.py
+      scripts/dev_planner/verify_safety_planner_evidence_bundle.py
       scripts/test_predictor_validator.py
       scripts/dev_predictor/analyze_predictor_system_e1.py
       scripts/dev_predictor/analyze_predictor_system_e2.py

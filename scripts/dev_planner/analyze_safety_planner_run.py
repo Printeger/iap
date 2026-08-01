@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 from collections import Counter
 import csv
+import hashlib
 import json
 import math
 import os
@@ -176,8 +177,11 @@ P5_8_FAIL_BRANCH = "FAIL -> debug switch isolation"
 P5_8_PASS_BRANCH = "PASS -> Phase 3 / P1-1"
 P1_1_FAIL_BRANCH = "FAIL -> debug metrics-only gate"
 P1_1_PASS_BRANCH = "PASS -> P1-2"
-P1_2_FAIL_BRANCH = "FAIL -> lambda/gradient debug"
+P1_2_FAIL_BRANCH = "FAIL -> artifact provenance/runtime install/recording completeness debug"
+P1_2_LAMBDA_FAIL_BRANCH = "FAIL -> lambda/gradient debug"
+P1_2_SELECTION_FAIL_BRANCH = "FAIL -> P1 candidate selection/ranking debug"
 P1_2_PASS_BRANCH = "PASS -> P1-3"
+P1_EVIDENCE_SCHEMA_VERSION = "p1_evidence_provenance_v1"
 P1_2_LAMBDA_INTEGRITY = 0.00001
 P1_2_LAMBDA_TOLERANCE = 1.0e-12
 P1_2_STALE_TIMEOUT_S = 1.0
@@ -204,6 +208,7 @@ P1_1_FIGURE_FILENAMES = [
     "p1_1_cause_exclusion_summary.png",
 ]
 P1_2_FIGURE_FILENAMES = [
+    "p1_2_artifact_provenance.png",
     "p1_2_scenario_topdown.png",
     "p1_2_risk_trajectory_scene_overlay.png",
     "p1_2_topic_activity_timeline.png",
@@ -530,6 +535,7 @@ P5_6_CAUSE_EXCLUSION_FIELDS = [
     "first_reason",
 ]
 P1_DEBUG_FIELDS = [
+    "schema_version", "run_id", "manifest_path",
     "stamp",
     "lbfgs_iter",
     "planning_attempt_id",
@@ -552,6 +558,7 @@ P1_DEBUG_FIELDS = [
     "applied_to_objective",
 ]
 P1_ACCEPTED_PROFILE_FIELDS = [
+    "schema_version", "run_id", "manifest_path",
     "profile_seq",
     "stamp",
     "trajectory_id",
@@ -582,6 +589,7 @@ P1_ACCEPTED_PROFILE_FIELDS = [
     "objective_requested", "objective_applied", "p1_fallback", "fallback_reason",
 ]
 P1_ACCEPTED_PROFILE_CONTEXT_FIELDS = [
+    "schema_version", "run_id", "manifest_path",
     "profile_seq", "trajectory_id", "planning_attempt_id", "candidate_id", "planning_start_s", "accepted_stamp_s",
     "planning_duration_s", "snapshot_generation_id", "snapshot_stamp_s",
     "query_base_time_s", "snapshot_x_min", "snapshot_x_max",
@@ -606,6 +614,7 @@ P1_DEBUG_FINITE_FIELDS = [
     "grad_ratio",
 ]
 P1_CANDIDATE_OPTIMIZATION_FIELDS = [
+    "schema_version", "run_id", "manifest_path",
     "planning_attempt_id", "candidate_id", "snapshot_generation_id", "query_base_time_s",
     "pre_base_objective", "post_base_objective", "pre_total_objective", "post_total_objective",
     "pre_raw_p1_cost", "post_raw_p1_cost", "pre_weighted_p1_cost", "post_weighted_p1_cost",
@@ -967,6 +976,31 @@ def open_bag_reader(bag_dir: Path, metadata: dict[str, Any]) -> Any:
         ),
     )
     return reader
+
+
+def read_evidence_provenance_messages(
+    bag_dir: Path | None, metadata: dict[str, Any]
+) -> tuple[list[dict[str, Any]], str]:
+    if bag_dir is None or int((metadata.get("topic_counts", {}) or {}).get("/planning/evidence_provenance", 0) or 0) <= 0:
+        return [], "missing /planning/evidence_provenance"
+    try:
+        from rclpy.serialization import deserialize_message
+        from rosidl_runtime_py.utilities import get_message
+
+        reader = open_bag_reader(bag_dir, metadata)
+        type_map = {topic.name: topic.type for topic in reader.get_all_topics_and_types()}
+        msg_type = get_message(type_map["/planning/evidence_provenance"])
+        payloads: list[dict[str, Any]] = []
+        while reader.has_next():
+            topic, raw, _ = reader.read_next()
+            if topic != "/planning/evidence_provenance":
+                continue
+            payload = json.loads(str(deserialize_message(raw, msg_type).data))
+            if isinstance(payload, dict):
+                payloads.append(payload)
+        return payloads, ""
+    except Exception as exc:  # pragma: no cover - requires local rosbag bindings
+        return [], str(exc)
 
 
 def pointcloud_xyz(msg: Any, max_points: int = 120_000) -> list[tuple[float, float, float]]:
@@ -6544,7 +6578,7 @@ def p1_planning_context_timeline_csv_path(export_dir: Path, manifest: dict[str, 
 
 
 def read_p1_planning_context_timeline_csv(path: Path) -> tuple[list[dict[str, Any]], dict[str, Any]]:
-    required = {"stage", "stamp_s", "planning_attempt_id", "snapshot_generation_id",
+    required = {"schema_version", "run_id", "manifest_path", "stage", "stamp_s", "planning_attempt_id", "snapshot_generation_id",
                 "snapshot_stamp_s", "query_base_time_s", "context_age_s",
                 "stale_threshold_s", "outcome", "reason", "fallback_branch"}
     if not path.is_file():
@@ -7866,6 +7900,114 @@ def p1_2_cause_exclusion_rows(gates: dict[str, Any]) -> list[dict[str, Any]]:
             "count": 0 if gates.get("risk_scene_overlay_available") else 1,
         },
     ]
+
+
+def validate_p1_artifact_provenance(
+    export_dir: Path | None,
+    bag_dir: Path | None,
+    manifest: dict[str, Any],
+    validator_summary: dict[str, Any],
+    metadata: dict[str, Any],
+) -> dict[str, Any]:
+    """Validate that all P1 files are one fresh, immutable evidence bundle."""
+    errors: list[str] = []
+    provenance = manifest.get("artifact_provenance", {}) if manifest else {}
+    if export_dir is None or bag_dir is None or not isinstance(provenance, dict):
+        return {"passed": False, "errors": ["missing export, bag, or artifact_provenance"]}
+    export_dir = export_dir.resolve()
+    bag_dir = bag_dir.resolve()
+    run_id = str(provenance.get("run_id", ""))
+    manifest_path = (export_dir / "test_planner_manifest.json").resolve()
+    if provenance.get("schema_version") != P1_EVIDENCE_SCHEMA_VERSION or not run_id:
+        errors.append("invalid schema version or run ID")
+    if not str(provenance.get("git_commit", "")) or not provenance.get("git_worktree_clean"):
+        errors.append("manifest does not prove a clean git commit")
+    if Path(str(manifest.get("export_dir", ""))).resolve() != export_dir:
+        errors.append("manifest export path mismatch")
+    if Path(str(provenance.get("bag_path", ""))).resolve() != bag_dir:
+        errors.append("manifest bag path mismatch")
+    if not provenance.get("process_start_stamp_utc") or not provenance.get("process_end_stamp_utc"):
+        errors.append("manifest lacks process start/end stamps")
+    if not provenance.get("bag_metadata_complete") or not provenance.get("validator_summary_complete"):
+        errors.append("manifest was not finalized after recorder/validator exit")
+    install_prefix = str(provenance.get("install_prefix", ""))
+    runtime_paths = provenance.get("runtime_paths", {}) or {}
+    if not install_prefix or not all(str(runtime_paths.get(key, {}).get("path", ""))
+                                     for key in ("launch", "planner_executable", "bspline_library")):
+        errors.append("manifest lacks resolved runtime launch/executable/library paths")
+    for key in ("launch", "planner_executable", "bspline_library"):
+        entry = runtime_paths.get(key, {}) or {}
+        path = str(entry.get("path", ""))
+        expected_hash = str(entry.get("sha256", ""))
+        if not expected_hash or not Path(path).is_file():
+            errors.append(f"{key} path/hash is unavailable")
+        elif hashlib.sha256(Path(path).read_bytes()).hexdigest() != expected_hash:
+            errors.append(f"{key} hash no longer matches manifest")
+    for key in ("planner_executable", "bspline_library"):
+        path = str(runtime_paths.get(key, {}).get("path", ""))
+        if path and not path.startswith(install_prefix):
+            # Symlink-install resolves binaries into this workspace build; both
+            # locations are recorded, and foreign workspace paths are rejected.
+            workspace = str(provenance.get("workspace_root", ""))
+            if not workspace or not path.startswith(workspace):
+                errors.append(f"{key} is outside the recorded workspace/install")
+    start_epoch = finite_float(provenance.get("process_start_epoch_s"))
+    artifact_paths = (
+        p1_debug_csv_path(export_dir, manifest),
+        p1_candidate_optimization_csv_path(export_dir, manifest),
+        p1_accepted_profile_csv_path(export_dir, manifest),
+        p1_accepted_profile_context_csv_path(export_dir, manifest),
+        p1_planning_context_timeline_csv_path(export_dir, manifest),
+    )
+    for path in artifact_paths:
+        path = path.resolve()
+        if path.parent != export_dir:
+            errors.append(f"artifact is outside current export: {path}")
+            continue
+        if not path.is_file() or path.stat().st_size == 0:
+            errors.append(f"artifact missing or empty: {path.name}")
+            continue
+        if start_epoch is not None and path.stat().st_mtime + 1.0e-3 < start_epoch:
+            errors.append(f"artifact predates current run: {path.name}")
+        try:
+            with path.open(newline="") as source:
+                rows = list(csv.DictReader(source))
+        except Exception as exc:
+            errors.append(f"artifact cannot be read: {path.name}: {exc}")
+            continue
+        if not rows:
+            errors.append(f"artifact has no rows: {path.name}")
+        for row in rows:
+            if row.get("schema_version") != P1_EVIDENCE_SCHEMA_VERSION:
+                errors.append(f"legacy/schema-mismatched CSV: {path.name}")
+                break
+            if row.get("run_id") != run_id:
+                errors.append(f"run ID mismatch: {path.name}")
+                break
+            if Path(str(row.get("manifest_path", ""))).resolve() != manifest_path:
+                errors.append(f"manifest binding mismatch: {path.name}")
+                break
+    if validator_summary.get("schema_version") != P1_EVIDENCE_SCHEMA_VERSION or validator_summary.get("run_id") != run_id:
+        errors.append("validator schema/run identity mismatch")
+    if Path(str(validator_summary.get("manifest_path", ""))).resolve() != manifest_path:
+        errors.append("validator manifest binding mismatch")
+    if not (bag_dir / "metadata.yaml").is_file():
+        errors.append("bag metadata is missing")
+    bag_payloads, bag_error = read_evidence_provenance_messages(bag_dir, metadata)
+    if bag_error:
+        errors.append("bag provenance unreadable: " + bag_error)
+    elif not any(
+        payload.get("schema_version") == P1_EVIDENCE_SCHEMA_VERSION
+        and payload.get("run_id") == run_id
+        and Path(str(payload.get("manifest_path", ""))).resolve() == manifest_path
+        and Path(str(payload.get("export_dir", ""))).resolve() == export_dir
+        and Path(str(payload.get("bag_path", ""))).resolve() == bag_dir
+        for payload in bag_payloads
+    ):
+        errors.append("bag provenance payload does not bind this manifest/run/export/bag")
+    return {"passed": not errors, "errors": errors, "run_id": run_id,
+            "schema_version": provenance.get("schema_version"),
+            "git_commit": provenance.get("git_commit"), "install_prefix": install_prefix}
 
 
 def validate_p1_2_hard_gates(
@@ -13511,6 +13653,30 @@ def p1_2_artifact_completeness_rows(
     return rows
 
 
+def plot_p1_2_artifact_provenance(gates: dict[str, Any], path: Path) -> bool:
+    current = gates.get("artifact_provenance_current", {}) or {}
+    reference = gates.get("artifact_provenance_reference", {}) or {}
+    labels = ["schema", "run ID", "git commit", "install prefix", "bundle"]
+    values = [
+        int(bool(current.get("schema_version")) and current.get("schema_version") == reference.get("schema_version")),
+        int(bool(current.get("run_id")) and bool(reference.get("run_id")) and current.get("run_id") != reference.get("run_id")),
+        int(bool(current.get("git_commit")) and current.get("git_commit") == reference.get("git_commit")),
+        int(bool(current.get("install_prefix")) and current.get("install_prefix") == reference.get("install_prefix")),
+        int(bool(gates.get("artifact_provenance_pair_identity_ok"))),
+    ]
+    fig, axis = plt.subplots(figsize=(9, 4))
+    colors = ["#2e7d32" if value else "#c62828" for value in values]
+    axis.bar(labels, values, color=colors)
+    axis.set_ylim(0, 1.15)
+    axis.set_ylabel("bound / verified")
+    axis.set_title("P1-2 artifact provenance: manifest, CSV, validator, bag")
+    axis.text(0.01, 0.02, "current=" + str(current.get("run_id", ""))[:16] + "  reference=" + str(reference.get("run_id", ""))[:16], transform=axis.transAxes, fontsize=8)
+    fig.tight_layout()
+    fig.savefig(path, dpi=160)
+    plt.close(fig)
+    return path.is_file() and path.stat().st_size > 0
+
+
 def plot_p1_2_artifact_completeness(
     p1_2_export_dir: Path,
     p1_2_bag_dir: Path | None,
@@ -15623,7 +15789,21 @@ def next_debug_branch(
     if normalized_experiment_id == "P1-1":
         return P1_1_PASS_BRANCH if status == "PASS" else P1_1_FAIL_BRANCH
     if normalized_experiment_id == "P1-2":
-        return P1_2_PASS_BRANCH if status == "PASS" else P1_2_FAIL_BRANCH
+        if status == "PASS":
+            return P1_2_PASS_BRANCH
+        # Do not send a recording/provenance failure to a numerical tuning
+        # branch merely because an old report happened to mention lambda.
+        if "trajectory risk profile did not strictly reduce" in text:
+            return P1_2_SELECTION_FAIL_BRANCH
+        numerical_markers = (
+            "weighted_f_integrity_max is not positive",
+            "no sample with grad·displacement<0",
+            "fixed-lattice effectiveness",
+            "unmeasurable weighted-p1 contribution",
+        )
+        if any(marker in text for marker in numerical_markers):
+            return P1_2_LAMBDA_FAIL_BRANCH
+        return P1_2_FAIL_BRANCH
     if normalized_experiment_id == "P5-1":
         return "PASS -> P5-2" if status == "PASS" else "debug P5 thresholds/AL provider"
     if normalized_experiment_id == "P5-2":
@@ -16983,6 +17163,40 @@ def _analyze_impl(args: argparse.Namespace) -> dict[str, Any]:
             "max_optimizer_start_per_generation": p1_2_singleflight.get("max_optimizer_start_per_generation"),
             "generation_singleflight_duplicates": p1_2_singleflight.get("duplicates", []),
         })
+        baseline_validator_summary = (
+            read_json_if_exists(
+                baseline_export_dir / "test_planner_validation_summary.json"
+            )
+            if baseline_export_dir is not None else {}
+        )
+        current_provenance = validate_p1_artifact_provenance(
+            export_dir, bag_dir, manifest, validator_summary, metadata
+        )
+        reference_provenance = validate_p1_artifact_provenance(
+            baseline_export_dir, baseline_bag_dir, baseline_manifest,
+            baseline_validator_summary, baseline_metadata,
+        )
+        pair_identity_ok = (
+            current_provenance.get("passed")
+            and reference_provenance.get("passed")
+            and current_provenance.get("schema_version") == reference_provenance.get("schema_version")
+            and current_provenance.get("git_commit") == reference_provenance.get("git_commit")
+            and current_provenance.get("run_id") != reference_provenance.get("run_id")
+        )
+        p1_2_gates.update({
+            "artifact_provenance_current_passed": bool(current_provenance.get("passed")),
+            "artifact_provenance_reference_passed": bool(reference_provenance.get("passed")),
+            "artifact_provenance_pair_identity_ok": pair_identity_ok,
+            "artifact_provenance_current": current_provenance,
+            "artifact_provenance_reference": reference_provenance,
+        })
+        if not current_provenance.get("passed"):
+            failures.append("P1-2 artifact provenance failed: " + "; ".join(current_provenance.get("errors", [])))
+        if not reference_provenance.get("passed"):
+            failures.append("P1-2 P1-1 reference artifact provenance failed: " + "; ".join(reference_provenance.get("errors", [])))
+        if not pair_identity_ok:
+            failures.append("P1-2 formal pair does not prove matched code/schema with distinct run IDs")
+        p1_2_gates["passed"] = bool(p1_2_gates.get("passed")) and pair_identity_ok
         write_p1_2_provisional_summary(
             metadata_dir / "safety_planner_analysis_summary.json",
             p1_2_timebase_alignment,
@@ -18740,6 +18954,13 @@ def _analyze_impl(args: argparse.Namespace) -> dict[str, Any]:
             p1_2_figure_paths["p1_2_replan_fallback_timeline.png"],
         ):
             p1_2_figure_artifacts.append(str(p1_2_figure_paths["p1_2_replan_fallback_timeline.png"]))
+        if plot_p1_2_artifact_provenance(
+            p1_2_gates,
+            p1_2_figure_paths["p1_2_artifact_provenance.png"],
+        ):
+            p1_2_figure_artifacts.append(
+                str(p1_2_figure_paths["p1_2_artifact_provenance.png"])
+            )
         if plot_p1_2_artifact_completeness(
             export_dir,
             bag_dir,

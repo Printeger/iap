@@ -316,7 +316,7 @@ namespace ego_planner
     if (!out.good()) return;
     out << std::setprecision(17);
     if (header) {
-      out << "stage,stamp_s,planning_attempt_id,candidate_id,snapshot_generation_id,"
+      out << "schema_version,run_id,manifest_path,stage,stamp_s,planning_attempt_id,candidate_id,snapshot_generation_id,"
              "snapshot_stamp_s,query_base_time_s,context_age_s,stale_threshold_s,"
              "outcome,reason,fallback_branch\n";
     }
@@ -326,7 +326,9 @@ namespace ego_planner
                                           : std::numeric_limits<double>::quiet_NaN();
     const double age = std::isfinite(ctx.snapshot_stamp_s) ? stamp_s - ctx.snapshot_stamp_s
                                                             : std::numeric_limits<double>::quiet_NaN();
-    out << stage << ',' << stamp_s << ',' << ctx.planning_attempt_id << ','
+    const auto &p1 = bspline_optimizer_->p1IntegrityConfig();
+    out << p1.evidence_schema_version << ',' << p1.evidence_run_id << ','
+        << p1.evidence_manifest_path << ',' << stage << ',' << stamp_s << ',' << ctx.planning_attempt_id << ','
         << ctx.candidate_id << ',' << ctx.generation_id << ',' << ctx.snapshot_stamp_s << ','
         << ctx.query_base_time_s << ',' << age << ',' << threshold << ','
         << outcome << ',' << reason << ',' << fallback_branch << '\n';

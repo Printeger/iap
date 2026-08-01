@@ -111,8 +111,16 @@ namespace ego_planner
       double unknown_soft_penalty = 1.0;
       bool debug_csv_enable = false;
       std::string debug_csv_path;
+      // Immutable launch identity copied into every P1 artifact row.  These
+      // fields deliberately travel with the optimizer rather than being
+      // inferred from a "latest" export directory after the run.
+      std::string evidence_schema_version;
+      std::string evidence_run_id;
+      std::string evidence_manifest_path;
       int max_candidates_per_attempt = 8;
     };
+
+    const P1IntegrityConfig &p1IntegrityConfig() const { return p1_config_; }
 
     struct P1IntegrityMetrics
     {

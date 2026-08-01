@@ -32,6 +32,13 @@ class TestAraimValidator(Node):
                 "summary_path", "/tmp/test_araim_validation_summary.json"
             ).value
         )
+        self.schema_version = str(
+            self.declare_parameter("schema_version", "").value
+        ).strip()
+        self.run_id = str(self.declare_parameter("run_id", "").value).strip()
+        self.manifest_path = str(
+            self.declare_parameter("manifest_path", "").value
+        ).strip()
         self.required_fusion_mode = self.declare_parameter(
             "required_fusion_mode", "max_pl"
         ).value
@@ -76,6 +83,9 @@ class TestAraimValidator(Node):
         self.csv_writer = csv.writer(self.csv_file)
         self.csv_writer.writerow(
             [
+                "schema_version",
+                "run_id",
+                "manifest_path",
                 "stamp",
                 "integrity_state",
                 "hpl",
@@ -139,6 +149,9 @@ class TestAraimValidator(Node):
         stamp = msg.header.stamp.sec + 1.0e-9 * msg.header.stamp.nanosec
         self.csv_writer.writerow(
             [
+                self.schema_version,
+                self.run_id,
+                self.manifest_path,
                 f"{stamp:.9f}",
                 int(msg.integrity_state),
                 f"{msg.hpl:.9g}",
@@ -226,6 +239,9 @@ class TestAraimValidator(Node):
             )
 
         summary = {
+            "schema_version": self.schema_version,
+            "run_id": self.run_id,
+            "manifest_path": self.manifest_path,
             "passed": not failures,
             "failures": failures,
             "message_count": self.count,

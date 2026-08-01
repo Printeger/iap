@@ -1,0 +1,86 @@
+#!/usr/bin/env python3
+
+import csv
+import importlib.util
+import json
+import tempfile
+import time
+import unittest
+from unittest import mock
+from pathlib import Path
+
+
+MODULE_PATH = Path(__file__).parents[1] / "scripts" / "dev_planner" / "verify_safety_planner_evidence_bundle.py"
+SPEC = importlib.util.spec_from_file_location("p1_preflight", MODULE_PATH)
+preflight = importlib.util.module_from_spec(SPEC)
+assert SPEC.loader is not None
+SPEC.loader.exec_module(preflight)
+
+
+class EvidenceBundlePreflightTest(unittest.TestCase):
+    def make_bundle(self):
+        root = tempfile.TemporaryDirectory()
+        export = Path(root.name) / "export"
+        bag = Path(root.name) / "bag"
+        export.mkdir()
+        bag.mkdir()
+        manifest_path = export / "test_planner_manifest.json"
+        started = time.time() - 1.0
+        manifest = {
+            "experiment": "p1_smoke",
+            "scenario": "degraded_lidar_good",
+            "export_dir": str(export),
+            "planner_safety_profile": "p1",
+            "p1.metrics_only": False,
+            "p1.lambda_integrity": 0.00001,
+            "p1.debug_csv_path": str(export / "planner_p1_integrity_cost_debug.csv"),
+            "p1.candidate_optimization_path": str(export / "planner_p1_candidate_optimization.csv"),
+            "p1.accepted_profile_path": str(export / "planner_p1_accepted_trajectory_risk_profile.csv"),
+            "p1.accepted_profile_context_path": str(export / "planner_p1_accepted_trajectory_risk_profile_context.csv"),
+            "p1.planning_context_timeline_path": str(export / "planner_p1_planning_context_timeline.csv"),
+            "artifact_provenance": {
+                "schema_version": preflight.SCHEMA, "run_id": "run-1", "git_commit": "abc",
+                "git_worktree_clean": True, "bag_path": str(bag), "process_start_epoch_s": started,
+                "process_start_stamp_utc": "2026-08-01T00:00:00Z", "process_end_stamp_utc": "2026-08-01T00:00:30Z",
+                "validator_summary_complete": True, "bag_metadata_complete": True,
+                "runtime_paths": {
+                    key: {"path": str(MODULE_PATH), "sha256": __import__("hashlib").sha256(MODULE_PATH.read_bytes()).hexdigest()}
+                    for key in ("launch", "planner_executable", "bspline_library")
+                },
+            },
+        }
+        manifest_path.write_text(json.dumps(manifest))
+        common = {"schema_version": preflight.SCHEMA, "run_id": "run-1", "manifest_path": str(manifest_path)}
+        payloads = {
+            "planner_p1_integrity_cost_debug.csv": [{**common, "applied_to_objective": "1"}],
+            "planner_p1_candidate_optimization.csv": [{**common, "planning_attempt_id": "1", "selected": "1", "optimization_success": "1", "pre_mean_c_pi": "0.5", "pre_max_c_pi": "0.6", "post_mean_c_pi": "0.4", "post_max_c_pi": "0.5"}],
+            "planner_p1_accepted_trajectory_risk_profile.csv": [{**common, "sample_index": str(i)} for i in range(200)],
+            "planner_p1_accepted_trajectory_risk_profile_context.csv": [{**common, "profile_seq": "1"}],
+            "planner_p1_planning_context_timeline.csv": [{**common, "stage": "publish"}],
+        }
+        for name, rows in payloads.items():
+            with (export / name).open("w", newline="") as handle:
+                writer = csv.DictWriter(handle, fieldnames=sorted(rows[0]))
+                writer.writeheader(); writer.writerows(rows)
+        (export / "test_planner_validation_summary.json").write_text(json.dumps({**common, "passed": True}))
+        (bag / "metadata.yaml").write_text("\n".join(("/planning/evidence_provenance", "/planning/risk_grid_health", "/drone_0_planning/bspline", *preflight.P1_RVIZ_TOPICS)))
+        return root, export, bag
+
+    def test_accepts_bound_fresh_bundle_and_rejects_mixed_run(self):
+        root, export, bag = self.make_bundle()
+        self.addCleanup(root.cleanup)
+        payload = {"schema_version": preflight.SCHEMA, "run_id": "run-1", "manifest_path": str(export / "test_planner_manifest.json"), "export_dir": str(export), "bag_path": str(bag)}
+        with mock.patch.object(preflight, "read_bag_provenance", return_value=([payload], "")):
+            result = preflight.validate_bundle(export, bag, metrics_only=False, lambda_value=0.00001)
+        self.assertTrue(result["passed"], result["errors"])
+        path = export / "planner_p1_candidate_optimization.csv"
+        content = path.read_text().replace("run-1", "other-run", 1)
+        path.write_text(content)
+        with mock.patch.object(preflight, "read_bag_provenance", return_value=([payload], "")):
+            result = preflight.validate_bundle(export, bag, metrics_only=False, lambda_value=0.00001)
+        self.assertFalse(result["passed"])
+        self.assertTrue(any("run ID mismatch" in error for error in result["errors"]))
+
+
+if __name__ == "__main__":
+    unittest.main()

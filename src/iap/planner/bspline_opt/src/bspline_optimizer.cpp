@@ -276,6 +276,9 @@ namespace ego_planner
     node->declare_parameter("p1.unknown_soft_penalty", 1.0);
     node->declare_parameter("p1.debug_csv_enable", false);
     node->declare_parameter("p1.debug_csv_path", std::string(""));
+    node->declare_parameter("p1.evidence_schema_version", std::string(""));
+    node->declare_parameter("p1.evidence_run_id", std::string(""));
+    node->declare_parameter("p1.evidence_manifest_path", std::string(""));
     node->declare_parameter("p1.max_candidates_per_attempt", 8);
     node->declare_parameter("p4.enable_risk_aware_astar", false);
     node->declare_parameter("p4.lambda_p4_risk", 0.05);
@@ -309,6 +312,9 @@ namespace ego_planner
     node->get_parameter("p1.unknown_soft_penalty", p1_config_.unknown_soft_penalty);
     node->get_parameter("p1.debug_csv_enable", p1_config_.debug_csv_enable);
     node->get_parameter("p1.debug_csv_path", p1_config_.debug_csv_path);
+    node->get_parameter("p1.evidence_schema_version", p1_config_.evidence_schema_version);
+    node->get_parameter("p1.evidence_run_id", p1_config_.evidence_run_id);
+    node->get_parameter("p1.evidence_manifest_path", p1_config_.evidence_manifest_path);
     node->get_parameter("p1.max_candidates_per_attempt", p1_config_.max_candidates_per_attempt);
     p1_config_.max_candidates_per_attempt = std::clamp(
         p1_config_.max_candidates_per_attempt, 1, 8);
@@ -2570,13 +2576,16 @@ namespace ego_planner
     out << std::setprecision(17);
     if (write_header)
     {
-      out << "stamp,lbfgs_iter,planning_attempt_id,candidate_id,snapshot_generation_id,query_base_time_s,"
+      out << "schema_version,run_id,manifest_path,stamp,lbfgs_iter,planning_attempt_id,candidate_id,snapshot_generation_id,query_base_time_s,"
              "sample_count,hit_count,miss_count,stale_count,miss_ratio,stale_ratio,"
              "f_integrity,weighted_f_integrity,grad_norm_integrity,grad_norm_original,"
              "grad_ratio,clipped_grad_count,fallback_reason,applied_to_objective\n";
     }
 
-    out << rclcpp::Clock().now().seconds() << ','
+    out << p1_config_.evidence_schema_version << ','
+        << p1_config_.evidence_run_id << ','
+        << p1_config_.evidence_manifest_path << ','
+        << rclcpp::Clock().now().seconds() << ','
         << iter_num_ << ','
         << metrics.planning_attempt_id << ','
         << metrics.candidate_id << ','
@@ -2620,7 +2629,7 @@ namespace ego_planner
     if (!out.good()) return;
     out << std::setprecision(17);
     if (header) {
-      out << "stamp,planning_attempt_id,candidate_id,snapshot_generation_id,query_base_time_s,"
+      out << "schema_version,run_id,manifest_path,stamp,planning_attempt_id,candidate_id,snapshot_generation_id,query_base_time_s,"
              "pre_base_objective,post_base_objective,pre_total_objective,post_total_objective,"
              "raw_p1_cost,weighted_p1_cost,base_gradient_norm,p1_gradient_norm,total_gradient_norm,"
              "displacement_norm,grad_integrity_dot_displacement,pre_mean_c_pi,pre_max_c_pi,"
@@ -2636,7 +2645,8 @@ namespace ego_planner
              "support_signature,initial_control_points_hash,p1_config_hash,"
              "optimization_success,selection_score,selection_reason\n";
     }
-    out << rclcpp::Clock().now().seconds() << ',' << trace.planning_attempt_id << ','
+    out << p1_config_.evidence_schema_version << ',' << p1_config_.evidence_run_id << ','
+        << p1_config_.evidence_manifest_path << ',' << rclcpp::Clock().now().seconds() << ',' << trace.planning_attempt_id << ','
         << trace.candidate_id << ',' << trace.snapshot_generation_id << ','
         << trace.query_base_time_s << ',' << trace.pre_base_objective << ','
         << trace.post_base_objective << ',' << trace.pre_total_objective << ','
@@ -2750,7 +2760,7 @@ namespace ego_planner
     out << std::setprecision(17);
     if (write_header)
     {
-      out << "profile_seq,stamp,trajectory_id,planning_attempt_id,candidate_id,applied_to_objective,metrics_only,"
+      out << "schema_version,run_id,manifest_path,profile_seq,stamp,trajectory_id,planning_attempt_id,candidate_id,applied_to_objective,metrics_only,"
              "lambda_integrity,snapshot_generation_id,query_base_time_s,"
              "sample_index,arc_fraction,t_s,x,y,z,hit,valid,stale,c_pi,reason,"
              "trace_available,grad_x,grad_y,grad_z,neg_grad_x,neg_grad_y,neg_grad_z,"
@@ -2863,7 +2873,10 @@ namespace ego_planner
       validation_sample.query_reason = reason;
       validation_samples.push_back(std::move(validation_sample));
 
-      out << profile_seq << ','
+      out << p1_config_.evidence_schema_version << ','
+          << p1_config_.evidence_run_id << ','
+          << p1_config_.evidence_manifest_path << ','
+          << profile_seq << ','
           << stamp_s << ','
           << trajectory_id << ','
           << p1_risk_context_.planning_attempt_id << ','
@@ -2946,7 +2959,7 @@ namespace ego_planner
             ? p1_risk_context_.planning_start_s
             : planning_start_s;
     context << std::setprecision(17);
-    context << "profile_seq,trajectory_id,planning_attempt_id,candidate_id,planning_start_s,accepted_stamp_s,planning_duration_s,snapshot_generation_id,snapshot_stamp_s,query_base_time_s,snapshot_center_x,snapshot_center_y,snapshot_center_z,snapshot_x_min,snapshot_x_max,snapshot_y_min,snapshot_y_max,snapshot_z_min,snapshot_z_max,snapshot_time_min_s,snapshot_time_max_s,trajectory_x_min,trajectory_x_max,trajectory_y_min,trajectory_y_max,trajectory_z_min,trajectory_z_max,trajectory_time_min_s,trajectory_time_max_s,expected_sample_count,matched_sample_count,match_ratio,query_miss_count,stale_count,invalid_count,miss_reason_histogram,snapshot_frame_id,trajectory_frame_id,spatial_in_bounds,temporal_in_horizon,frame_match,generation_match,query_time_match,fresh,coverage_ok,spatial_miss_count,temporal_miss_count,occupied_miss_count,stale_miss_count,invalid_miss_count,trajectory_start_stamp_s,objective_requested,objective_applied,p1_fallback,fallback_reason\n";
+    context << "schema_version,run_id,manifest_path,profile_seq,trajectory_id,planning_attempt_id,candidate_id,planning_start_s,accepted_stamp_s,planning_duration_s,snapshot_generation_id,snapshot_stamp_s,query_base_time_s,snapshot_center_x,snapshot_center_y,snapshot_center_z,snapshot_x_min,snapshot_x_max,snapshot_y_min,snapshot_y_max,snapshot_z_min,snapshot_z_max,snapshot_time_min_s,snapshot_time_max_s,trajectory_x_min,trajectory_x_max,trajectory_y_min,trajectory_y_max,trajectory_z_min,trajectory_z_max,trajectory_time_min_s,trajectory_time_max_s,expected_sample_count,matched_sample_count,match_ratio,query_miss_count,stale_count,invalid_count,miss_reason_histogram,snapshot_frame_id,trajectory_frame_id,spatial_in_bounds,temporal_in_horizon,frame_match,generation_match,query_time_match,fresh,coverage_ok,spatial_miss_count,temporal_miss_count,occupied_miss_count,stale_miss_count,invalid_miss_count,trajectory_start_stamp_s,objective_requested,objective_applied,p1_fallback,fallback_reason\n";
     std::ostringstream miss_reason_histogram;
     bool first_reason = true;
     for (const auto &entry : miss_reasons)
@@ -2955,7 +2968,10 @@ namespace ego_planner
       miss_reason_histogram << entry.first << ':' << entry.second;
       first_reason = false;
     }
-    context << profile_seq << ',' << trajectory_id << ','
+    context << p1_config_.evidence_schema_version << ','
+            << p1_config_.evidence_run_id << ','
+            << p1_config_.evidence_manifest_path << ','
+            << profile_seq << ',' << trajectory_id << ','
             << p1_risk_context_.planning_attempt_id << ',' << p1_risk_context_.candidate_id << ','
             << immutable_planning_start_s << ',' << stamp_s << ','
             << (std::isfinite(immutable_planning_start_s) ? stamp_s - immutable_planning_start_s : std::numeric_limits<double>::quiet_NaN()) << ','

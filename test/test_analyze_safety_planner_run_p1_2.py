@@ -725,10 +725,14 @@ class P1_2AnalyzerTest(unittest.TestCase):
         )
         self.assertEqual(
             analyzer.next_debug_branch("FAIL", ["x"], [], "P1-2"),
-            "FAIL -> lambda/gradient debug",
+            "FAIL -> artifact provenance/runtime install/recording completeness debug",
         )
         self.assertEqual(
             analyzer.next_debug_branch("INCONCLUSIVE", [], ["x"], "P1-2"),
+            "FAIL -> artifact provenance/runtime install/recording completeness debug",
+        )
+        self.assertEqual(
+            analyzer.next_debug_branch("FAIL", ["weighted_f_integrity_max is not positive"], [], "P1-2"),
             "FAIL -> lambda/gradient debug",
         )
 
@@ -736,6 +740,7 @@ class P1_2AnalyzerTest(unittest.TestCase):
         self.assertEqual(
             analyzer.P1_2_FIGURE_FILENAMES,
             [
+                "p1_2_artifact_provenance.png",
                 "p1_2_scenario_topdown.png",
                 "p1_2_risk_trajectory_scene_overlay.png",
                 "p1_2_topic_activity_timeline.png",
@@ -989,9 +994,10 @@ class P1_2AnalyzerTest(unittest.TestCase):
         self.assertFalse(result["valid"])
         self.assertIn("temporal_out_of_horizon", result["reasons"])
 
-    def test_p1_2_required_figure_contract_has_twenty_two_nonempty_names(self):
-        self.assertEqual(len(analyzer.P1_2_FIGURE_FILENAMES), 22)
-        self.assertEqual(len(set(analyzer.P1_2_FIGURE_FILENAMES)), 22)
+    def test_p1_2_required_figure_contract_has_twenty_three_nonempty_names(self):
+        self.assertEqual(len(analyzer.P1_2_FIGURE_FILENAMES), 23)
+        self.assertEqual(len(set(analyzer.P1_2_FIGURE_FILENAMES)), 23)
+        self.assertIn("p1_2_artifact_provenance.png", analyzer.P1_2_FIGURE_FILENAMES)
         self.assertIn(
             "p1_2_snapshot_spatial_bounds_overlay.png",
             analyzer.P1_2_FIGURE_FILENAMES,
@@ -1170,7 +1176,7 @@ class P1_2AnalyzerTest(unittest.TestCase):
         self.assertEqual(alignment["health_relative_s"], [0.25])
 
     def test_required_png_completeness_is_a_final_hard_gate(self):
-        self.assertEqual(len(analyzer.P1_2_FIGURE_FILENAMES), 22)
+        self.assertEqual(len(analyzer.P1_2_FIGURE_FILENAMES), 23)
         with tempfile.TemporaryDirectory() as tmp:
             paths = [Path(tmp) / name for name in analyzer.P1_2_FIGURE_FILENAMES]
             for path in paths[:-1]:

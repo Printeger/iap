@@ -1,25 +1,114 @@
 import json
+import hashlib
 import os
 import shutil
+import subprocess
 import sys
 import time
+import uuid
 from pathlib import Path
 
-from ament_index_python.packages import get_package_share_directory
+from ament_index_python.packages import get_package_prefix, get_package_share_directory
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument
 from launch.actions import EmitEvent
 from launch.actions import ExecuteProcess
 from launch.actions import LogInfo
 from launch.actions import OpaqueFunction
+from launch.actions import RegisterEventHandler
 from launch.actions import SetEnvironmentVariable
 from launch.actions import TimerAction
 from launch.conditions import IfCondition
 from launch.events import Shutdown
+from launch.event_handlers import OnProcessExit
 from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import ComposableNodeContainer
 from launch_ros.actions import Node
 from launch_ros.descriptions import ComposableNode
+
+
+P1_EVIDENCE_SCHEMA_VERSION = "p1_evidence_provenance_v1"
+
+
+def _sha256_file(path):
+    path = Path(path).resolve()
+    if not path.is_file():
+        return ""
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for block in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(block)
+    return digest.hexdigest()
+
+
+def _command_text(command, cwd):
+    try:
+        return subprocess.check_output(command, cwd=str(cwd), text=True).strip()
+    except (OSError, subprocess.CalledProcessError):
+        return ""
+
+
+def _git_repository(iap_prefix):
+    candidates = [
+        Path(__file__).resolve().parents[1],
+        Path(iap_prefix).resolve().parents[1] / "src" / "iap",
+    ]
+    for candidate in candidates:
+        if (candidate / ".git").exists():
+            return candidate
+    return None
+
+
+def _git_provenance(repo):
+    if repo is None:
+        return "", False
+    try:
+        commit = subprocess.check_output(
+            ["git", "rev-parse", "HEAD"], cwd=str(repo), text=True
+        ).strip()
+        status = subprocess.run(
+            ["git", "status", "--porcelain"], cwd=str(repo), text=True,
+            stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, check=True,
+        ).stdout
+        return commit, not bool(status.strip())
+    except (OSError, subprocess.CalledProcessError):
+        return "", False
+
+
+def _runtime_provenance(iap_share, export_dir, bag_output_dir, experiment, scenario):
+    iap_prefix = Path(get_package_prefix("iap")).resolve()
+    repo = _git_repository(iap_prefix)
+    git_commit, git_worktree_clean = _git_provenance(repo)
+    ego_prefix = Path(get_package_prefix("ego_planner")).resolve()
+    bspline_prefix = Path(get_package_prefix("bspline_opt")).resolve()
+    workspace_install = iap_prefix.parent
+    planner_executable = (ego_prefix / "lib" / "ego_planner" / "ego_planner_node").resolve()
+    bspline_library = (bspline_prefix / "lib" / "libbspline_opt.a").resolve()
+    launch_path = Path(__file__).resolve()
+    return {
+        "schema_version": P1_EVIDENCE_SCHEMA_VERSION,
+        "run_id": uuid.uuid4().hex,
+        "git_commit": git_commit,
+        "baseline_commit": "ca82cb52a05d0c904721dca6c9a3e60c215e9e25",
+        "git_worktree_clean": git_worktree_clean,
+        "source_repository": str(repo) if repo else "",
+        "workspace_root": str(iap_prefix.parents[1]),
+        "install_prefix": str(workspace_install),
+        "export_dir": str(Path(export_dir).resolve()),
+        "bag_path": str(Path(bag_output_dir).resolve()),
+        "experiment": experiment,
+        "scenario": scenario,
+        "process_start_stamp_utc": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+        "process_start_epoch_s": time.time(),
+        "runtime_paths": {
+            "iap_prefix": str(iap_prefix),
+            "ego_planner_prefix": str(ego_prefix),
+            "bspline_opt_prefix": str(bspline_prefix),
+            "launch": {"path": str(launch_path), "sha256": _sha256_file(launch_path)},
+            "planner_executable": {"path": str(planner_executable), "sha256": _sha256_file(planner_executable)},
+            "bspline_library": {"path": str(bspline_library), "sha256": _sha256_file(bspline_library)},
+        },
+    }
 
 
 def _as_bool(value):
@@ -1105,7 +1194,7 @@ def _odom_visualization_node(name, odom_topic, cmd_topic, topic_prefix, color, d
     )
 
 
-def _ego_planner_node(context, drone_id, planner_odom_topic, cloud_topic, camera_pose_topic, depth_topic, bspline_topic, map_size, goal, point_num, safety_profile, safety_enabled, p0_enabled, export_dir):
+def _ego_planner_node(context, drone_id, planner_odom_topic, cloud_topic, camera_pose_topic, depth_topic, bspline_topic, map_size, goal, point_num, safety_profile, safety_enabled, p0_enabled, export_dir, evidence):
     p1_enabled = safety_enabled["p1"]
     p2_enabled = safety_enabled["p2"]
     p3_local_enabled = safety_enabled["p3_local"]
@@ -1323,6 +1412,9 @@ def _ego_planner_node(context, drone_id, planner_odom_topic, cloud_topic, camera
             {"p1.unknown_soft_penalty": _param_float(context, "p1.unknown_soft_penalty")},
             {"p1.debug_csv_enable": _param_bool(context, "p1.debug_csv_enable")},
             {"p1.debug_csv_path": p1_debug_path},
+            {"p1.evidence_schema_version": evidence["schema_version"]},
+            {"p1.evidence_run_id": evidence["run_id"]},
+            {"p1.evidence_manifest_path": evidence["manifest_path"]},
             {"p1.max_candidates_per_attempt": max(1, min(8, _param_int(context, "p1.max_candidates_per_attempt")))},
             {"p2.enable_candidate_ranking": p2_use},
             {"p2.metrics_only": p2_metrics_only},
@@ -1507,6 +1599,18 @@ def _launch_setup(context):
     runtime_config_path, runtime_root, export_dir = _runtime_config(context, use_gnss, use_araim, allow_truth_alignment)
     gnss_scenario_file = _materialize_gnss_scenario(gnss_scenario_file, export_dir)
 
+    bag_root_dir = LaunchConfiguration("bag_output_dir").perform(context).strip()
+    if not bag_root_dir:
+        bag_root_dir = str(Path(runtime_root) / "bag")
+    bag_stamp = time.strftime("%Y%m%dT%H%M%SZ", time.gmtime())
+    bag_scenario = _safe_path_component(scenario, "manual")
+    bag_experiment = _safe_path_component(experiment, "experiment")
+    bag_output_dir = str(Path(bag_root_dir) / f"test_planner_{bag_experiment}_{bag_scenario}_{bag_stamp}")
+    if record_bag:
+        os.makedirs(bag_root_dir, exist_ok=True)
+    evidence = _runtime_provenance(iap_share, export_dir, bag_output_dir, experiment, scenario)
+    evidence["manifest_path"] = str((Path(export_dir) / "test_planner_manifest.json").resolve())
+
     truth_odom_topic = "/sim/drone_0/truth_odom"
     iap_odom_topic = "/drone_0_visual_slam/odom"
     planner_odom_topic = truth_odom_topic
@@ -1551,6 +1655,7 @@ def _launch_setup(context):
             safety_enabled,
             p0_enabled,
             export_dir,
+            evidence,
         ),
         Node(
             package="ego_planner",
@@ -1575,16 +1680,6 @@ def _launch_setup(context):
         ]
     else:
         planner_actions = planner_nodes
-
-    bag_root_dir = LaunchConfiguration("bag_output_dir").perform(context).strip()
-    if not bag_root_dir:
-        bag_root_dir = str(Path(runtime_root) / "bag")
-    bag_stamp = time.strftime("%Y%m%dT%H%M%SZ", time.gmtime())
-    bag_scenario = _safe_path_component(scenario, "manual")
-    bag_experiment = _safe_path_component(experiment, "experiment")
-    bag_output_dir = str(Path(bag_root_dir) / f"test_planner_{bag_experiment}_{bag_scenario}_{bag_stamp}")
-    if record_bag:
-        os.makedirs(bag_root_dir, exist_ok=True)
 
     p5_3_fixture_hpl = _param_float(context, "p5_3.fixture.hpl_pred_m")
     p5_3_fixture_vpl = _param_float(context, "p5_3.fixture.vpl_pred_m")
@@ -1663,6 +1758,7 @@ def _launch_setup(context):
     )
 
     manifest = {
+        "artifact_provenance": evidence,
         "experiment": experiment,
         "scenario": scenario,
         "runtime_config_path": runtime_config_path,
@@ -1988,6 +2084,7 @@ def _launch_setup(context):
         LogInfo(msg=f"[test_planner] scenario: {scenario}"),
         LogInfo(msg=f"[test_planner] runtime IAP config: {runtime_config_path}"),
         LogInfo(msg=f"[test_planner] export dir: {export_dir}"),
+        LogInfo(msg=f"[test_planner] evidence run_id: {evidence['run_id']} schema: {evidence['schema_version']}"),
         LogInfo(msg=f"[test_planner] planner_safety_profile: {safety_profile}"),
         LogInfo(msg=f"[test_planner] safety switches: {safety_enabled}, p0={p0_enabled}"),
         LogInfo(msg=f"[test_planner] GNSS scenario: {gnss_scenario_file}"),
@@ -2256,6 +2353,13 @@ def _launch_setup(context):
         *planner_actions,
         Node(
             package="iap",
+            executable="planner_evidence_provenance_publisher.py",
+            name="test_planner_evidence_provenance",
+            output="screen",
+            parameters=[{"manifest_path": evidence["manifest_path"]}],
+        ),
+        Node(
+            package="iap",
             executable="test_araim_validator.py",
             name="test_planner_integrity_validator",
             output="screen",
@@ -2266,6 +2370,9 @@ def _launch_setup(context):
                 {"min_messages": 10},
                 {"csv_path": str(Path(export_dir) / "test_planner_integrity_validation.csv")},
                 {"summary_path": str(Path(export_dir) / "test_planner_validation_summary.json")},
+                {"schema_version": evidence["schema_version"]},
+                {"run_id": evidence["run_id"]},
+                {"manifest_path": evidence["manifest_path"]},
                 {"required_fusion_mode": LaunchConfiguration("integrity_fusion_mode").perform(context)},
                 {"require_gnss_valid": _param_bool(context, "validator_require_gnss_valid")},
                 {"require_lidar_valid": _param_bool(context, "validator_require_lidar_valid")},
@@ -2277,8 +2384,7 @@ def _launch_setup(context):
     ])
 
     if record_bag:
-        actions.append(
-            ExecuteProcess(
+        bag_recorder = ExecuteProcess(
                 cmd=[
                     "ros2",
                     "bag",
@@ -2314,6 +2420,7 @@ def _launch_setup(context):
                     "/ublox_driver/iono_params",
                     "/tf",
                     "/planning/risk_grid_health",
+                    "/planning/evidence_provenance",
                     "/planning/integrity_gate_status",
                     "/iap/rviz/risk_grid_health",
                     "/iap/rviz/predicted_pl_cloud",
@@ -2331,7 +2438,22 @@ def _launch_setup(context):
                 ],
                 output="screen",
             )
-        )
+        actions.append(bag_recorder)
+        actions.append(RegisterEventHandler(
+            OnProcessExit(
+                target_action=bag_recorder,
+                on_exit=[
+                    ExecuteProcess(
+                        cmd=[
+                            str(Path(get_package_prefix("iap")) / "lib" / "iap" / "finalize_planner_evidence_manifest.py"),
+                            "--manifest", evidence["manifest_path"],
+                            "--wait-timeout-s", "15",
+                        ],
+                        output="screen",
+                    )
+                ],
+            )
+        ))
 
     if start_rviz:
         actions.append(
