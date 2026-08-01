@@ -45,7 +45,12 @@ def main():
         pass
     finally:
         node.destroy_node()
-        rclpy.shutdown()
+        # launch may already have shut the shared ROS context down before the
+        # executor unwinds.  Treat that normal shutdown ordering as success so
+        # the provenance publisher cannot make an otherwise complete run look
+        # like a failed evidence process.
+        if rclpy.ok():
+            rclpy.shutdown()
 
 
 if __name__ == "__main__":

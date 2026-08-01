@@ -20,7 +20,6 @@ from launch.actions import SetEnvironmentVariable
 from launch.actions import TimerAction
 from launch.conditions import IfCondition
 from launch.events import Shutdown
-from launch.event_handlers import OnProcessExit
 from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import ComposableNodeContainer
 from launch_ros.actions import Node
@@ -729,7 +728,9 @@ ARG_DEFAULTS = [
     ("p0.size_x_m", "30.0"),
     ("p0.size_y_m", "30.0"),
     ("p0.size_z_m", "6.0"),
-    ("p0.horizons_s", "0.0,0.5,1.0,1.5,2.0"),
+    # The fixed P1 lattice must cover every sample of the initial
+    # degraded-LiDAR B-spline (about 2.1 s) before P1 can be admitted.
+    ("p0.horizons_s", "0.0,0.5,1.0,1.5,2.0,2.5"),
     ("p0.refresh_period_s", "0.5"),
     ("p0.stale_timeout_s", "1.0"),
     ("p0.skip_occupied_voxels", "true"),
@@ -2386,11 +2387,11 @@ def _launch_setup(context):
     if record_bag:
         bag_recorder = ExecuteProcess(
                 cmd=[
-                    "ros2",
-                    "bag",
-                    "record",
-                    "-o",
-                    bag_output_dir,
+                    str(Path(get_package_prefix("iap")) / "lib" / "iap" /
+                        "planner_bag_recorder_with_finalizer.py"),
+                    "--manifest", evidence["manifest_path"],
+                    "--bag-output", bag_output_dir,
+                    "--",
                     "/iap/integrity",
                     "/gnss_sim/diagnostics",
                     truth_odom_topic,
@@ -2437,23 +2438,8 @@ def _launch_setup(context):
                     "/iap/rviz/p4_astar_guides",
                 ],
                 output="screen",
-            )
+        )
         actions.append(bag_recorder)
-        actions.append(RegisterEventHandler(
-            OnProcessExit(
-                target_action=bag_recorder,
-                on_exit=[
-                    ExecuteProcess(
-                        cmd=[
-                            str(Path(get_package_prefix("iap")) / "lib" / "iap" / "finalize_planner_evidence_manifest.py"),
-                            "--manifest", evidence["manifest_path"],
-                            "--wait-timeout-s", "15",
-                        ],
-                        output="screen",
-                    )
-                ],
-            )
-        ))
 
     if start_rviz:
         actions.append(
