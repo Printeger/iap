@@ -6037,3 +6037,12 @@ Final terminal branch: **FAIL -> P1 candidate selection/ranking debug.** No P1-3
 - Progression authority: none. Retained-incumbent evidence cannot satisfy P1-2 effectiveness.
 - Final branch: **FAIL -> P1 candidate generation / objective alignment debug**.
 - P1-3 permission: denied; P1-3 was not run. No lambda sweep was run.
+
+## 2026-08-02 P1 fixed-lambda recorder and diagnostic terminal record
+
+- Recorder preflight: run ID `4d502ac6ca854f5ea5cc1dc8906c4e25`; export `/home/dev/ws_iap/src/iap/results/planner_validation/exports/test_planner_baseline_fused_nominal_off_fused_nominal_1785649397489`; bag `/home/dev/ws_iap/src/iap/results/planner_validation/bags/test_planner_baseline_fused_nominal_off_fused_nominal_20260802T054317Z`. Recorder command was persisted, exit code was `0`, metadata and manifest finalization both passed.
+- Latest diagnostic smoke: run ID `3b42b9d499b64789bbbfba08b62f906a`; export `/home/dev/ws_iap/src/iap/results/planner_validation/exports/test_planner_p1_degraded_lidar_good_gnss_degraded_lidar_good_1785649427090`; bag `/home/dev/ws_iap/src/iap/results/planner_validation/bags/test_planner_p1_degraded_lidar_good_gnss_degraded_lidar_good_20260802T054347Z`.
+- Observation: recorder/bag provenance passed, but the planner repeatedly failed first-trajectory generation before any P1-admitted optimizer start. `planner_p1_candidate_optimization.csv` was absent, so the explicit diagnostic analyzer generated its figures and exited `2` with zero candidate rows.
+- Progression authority: none. The diagnostic smoke entry condition is not met; no 90-second P1-1/P1-2 pair or formal analyzer was run.
+- Final branch: **FAIL -> P1 candidate generation / objective alignment debug**.
+- P1-3 permission: denied; no P1-3 and no lambda sweep were run.
