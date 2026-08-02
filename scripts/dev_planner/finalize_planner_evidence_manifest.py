@@ -13,6 +13,8 @@ def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--manifest", required=True)
     parser.add_argument("--wait-timeout-s", type=float, default=15.0)
+    parser.add_argument("--recorder-exit-code", type=int)
+    parser.add_argument("--recorder-command", default="")
     args = parser.parse_args()
     path = Path(args.manifest).resolve()
     if not path.is_file():
@@ -34,13 +36,17 @@ def main() -> int:
         "bag_metadata_complete": metadata_path.is_file() and metadata_path.stat().st_size > 0,
         "validator_summary_path": str(validator_path.resolve()) if validator_path.exists() else "",
         "validator_summary_complete": validator_path.is_file() and validator_path.stat().st_size > 0,
+        "recorder_exit_code": args.recorder_exit_code,
+        "recorder_completed": args.recorder_exit_code == 0,
+        "recorder_command": args.recorder_command,
     })
     temporary = path.with_suffix(path.suffix + ".tmp")
     temporary.write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n")
     os.replace(temporary, path)
     print(json.dumps({"manifest": str(path), "run_id": provenance.get("run_id"),
                       "bag_metadata_complete": provenance["bag_metadata_complete"],
-                      "validator_summary_complete": provenance["validator_summary_complete"]}, sort_keys=True))
+                      "validator_summary_complete": provenance["validator_summary_complete"],
+                      "recorder_completed": provenance["recorder_completed"]}, sort_keys=True))
     return 0
 
 

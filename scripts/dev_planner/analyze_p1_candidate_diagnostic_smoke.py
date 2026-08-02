@@ -144,14 +144,20 @@ def main():
     ax.set(title="P1 candidate fan-out funnel", ylabel="count")
     save(fig, out_dir / "p1_diag_fanout_funnel.png")
 
-    # 3: fixed lattice deltas
+    # 3: fixed lattice deltas; attempt markers prevent cross-attempt confusion.
     fig, ax = plt.subplots(figsize=(6, 5))
+    markers = ("o", "s", "^", "D", "P", "X")
+    attempts = sorted({row.get("planning_attempt_id", "") for row in candidates})
     for row in candidates:
         x = num(row, "post_mean_c_pi") - num(row, "pre_mean_c_pi")
         y = num(row, "post_max_c_pi") - num(row, "pre_max_c_pi")
-        ax.scatter(x, y, c="#16a34a" if truthy(row.get("rank_eligible")) else "#dc2626")
-        ax.annotate(row.get("candidate_id", "?"), (x, y))
+        attempt_index = attempts.index(row.get("planning_attempt_id", ""))
+        color = plt.cm.tab10(attempt_index % 10)
+        ax.scatter(x, y, marker=markers[attempt_index % len(markers)], c=[color],
+                   edgecolors="black" if truthy(row.get("selected")) else "none", s=70)
+        ax.annotate(f"{row.get('planning_attempt_id','?')}/{row.get('candidate_id','?')}", (x, y))
     ax.axhline(0, color="black", lw=.7); ax.axvline(0, color="black", lw=.7)
+    ax.axvspan(-1e9, 0, ymax=.5, color="#dcfce7", alpha=.25)
     ax.set(title="Fixed-200 mean/max delta", xlabel="Δ mean c_pi", ylabel="Δ max c_pi")
     save(fig, out_dir / "p1_diag_mean_max_delta_scatter.png")
 
@@ -173,6 +179,34 @@ def main():
     ax.axhline(0, color="black", lw=.7); ax.legend(); ax.set(title="Objective / admission-gate alignment", xlabel="candidate")
     save(fig, out_dir / "p1_diag_objective_gate_alignment.png")
 
+    # 6: convergence/collapse, using hashes and final objective proximity.
+    fig, ax = plt.subplots(figsize=(8, 4))
+    for attempt in attempts:
+        group = [r for r in candidates if r.get("planning_attempt_id") == attempt]
+        xs = [num(r, "displacement_norm") for r in group]
+        ys = [num(r, "post_total_objective") for r in group]
+        ax.scatter(xs, ys, label=f"attempt {attempt}")
+    ax.set(title="Candidate convergence / collapse proxy", xlabel="control-point displacement (m)",
+           ylabel="post total objective")
+    ax.legend()
+    save(fig, out_dir / "p1_diag_candidate_convergence.png")
+
+    # 7: objective decomposition is intentionally per-attempt, never linked across attempts.
+    fig, axes = plt.subplots(max(1, len(attempts)), 1, figsize=(8, 3 * max(1, len(attempts))), squeeze=False)
+    fields = (("base", "pre_base_objective", "post_base_objective"),
+              ("raw P1", "pre_raw_p1_cost", "post_raw_p1_cost"),
+              ("weighted P1", "pre_weighted_p1_cost", "post_weighted_p1_cost"),
+              ("total", "pre_total_objective", "post_total_objective"))
+    for axis, attempt in zip(axes[:, 0], attempts):
+        group = [r for r in candidates if r.get("planning_attempt_id") == attempt]
+        labels = [r.get("candidate_id", "?") for r in group]
+        for offset, (label, pre, post) in enumerate(fields):
+            axis.plot(labels, [num(r, pre) for r in group], marker="o", label=f"{label} pre")
+            axis.plot(labels, [num(r, post) for r in group], marker="x", linestyle="--", label=f"{label} post")
+        axis.set_title(f"Attempt {attempt}: objective decomposition")
+        axis.legend(ncol=2, fontsize=7)
+    save(fig, out_dir / "p1_diag_objective_decomposition.png")
+
     # 6: lifecycle swimlane
     fig, ax = plt.subplots(figsize=(9, 4))
     stages = {stage: index for index, stage in enumerate(sorted({r.get("stage", "") for r in timeline}))}
@@ -180,6 +214,17 @@ def main():
         ax.scatter(num(row, "stamp_s"), stages[row.get("stage", "")], c="#2563eb")
     ax.set_yticks(list(stages.values()), list(stages.keys())); ax.set(title="P1 lifecycle swimlane", xlabel="stamp (s)")
     save(fig, out_dir / "p1_diag_lifecycle_swimlane.png")
+
+    # 9: artifact/provenance timeline.
+    fig, ax = plt.subplots(figsize=(9, 3))
+    events = [("launch start", provenance.get("process_start_epoch_s")),
+              ("launch end", provenance.get("process_end_epoch_s"))]
+    for label, stamp in events:
+        if stamp is not None:
+            ax.axvline(float(stamp), label=label)
+    ax.set(title="Artifact / provenance timeline", xlabel="epoch seconds")
+    ax.legend() if any(stamp is not None for _, stamp in events) else ax.text(.5, .5, "timestamps unavailable", ha="center")
+    save(fig, out_dir / "p1_diag_artifact_provenance_timeline.png")
 
     status = "PASS (diagnostic only)" if not errors else "FAIL"
     report = out_dir / "p1_candidate_diagnostic_smoke.md"

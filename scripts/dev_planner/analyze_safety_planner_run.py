@@ -623,11 +623,11 @@ P1_CANDIDATE_OPTIMIZATION_FIELDS = [
     "pre_raw_p1_gradient_norm", "post_raw_p1_gradient_norm",
     "pre_weighted_p1_gradient_norm", "post_weighted_p1_gradient_norm",
     "pre_total_gradient_norm", "post_total_gradient_norm",
-    "displacement_norm", "grad_integrity_dot_displacement",
+    "displacement_norm", "grad_integrity_dot_displacement", "weighted_p1_gradient_dot_displacement", "total_gradient_dot_displacement",
     "pre_mean_c_pi", "pre_max_c_pi", "post_mean_c_pi", "post_max_c_pi",
     "support_sample_count", "pre_support_valid_count", "post_support_valid_count",
     "pre_support_coverage", "post_support_coverage", "support_full_valid",
-    "support_signature", "initial_control_points_hash", "p1_config_hash",
+    "support_signature", "initial_control_points_hash", "final_control_points_hash", "p1_config_hash",
     "optimization_success", "selected", "solver_result", "iteration_count",
     "objective_allowed", "objective_applied", "selection_score", "selection_reason",
     "candidate_rank", "p1_descent", "rank_eligible", "replacement_accepted",
@@ -641,7 +641,7 @@ P1_CANDIDATE_OPTIMIZATION_FINITE_FIELDS = [
     field for field in P1_CANDIDATE_OPTIMIZATION_FIELDS
     if field not in {
         "schema_version", "run_id", "manifest_path",
-        "support_signature", "initial_control_points_hash", "p1_config_hash",
+        "support_signature", "initial_control_points_hash", "final_control_points_hash", "p1_config_hash",
         "optimization_success", "selected", "objective_allowed", "objective_applied",
         "p1_descent", "rank_eligible", "replacement_accepted",
         "selection_reason", "replacement_reason", "fallback_reason", "termination_reason",
@@ -6478,7 +6478,7 @@ def read_p1_candidate_optimization_csv(path: Path) -> tuple[list[dict[str, Any]]
          "raw_value": row.get(field), "expected_type": "nonempty string"}
         for index, row in enumerate(rows)
         for field in ("schema_version", "run_id", "manifest_path", "support_signature",
-                      "initial_control_points_hash", "p1_config_hash", "selection_reason",
+                      "initial_control_points_hash", "final_control_points_hash", "p1_config_hash", "selection_reason",
                       "replacement_reason", "fallback_reason", "termination_reason")
         if not str(row.get(field, "")).strip()
     ]

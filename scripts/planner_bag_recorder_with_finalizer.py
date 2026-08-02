@@ -26,8 +26,9 @@ def main() -> int:
     if not topics:
         raise SystemExit("at least one bag topic is required")
 
-    recorder = subprocess.Popen(
-        ["ros2", "bag", "record", "-o", args.bag_output, *topics])
+    recorder_command = ["ros2", "bag", "record", "-o", args.bag_output, *topics]
+    print("[planner_bag_recorder] command=" + " ".join(recorder_command), flush=True)
+    recorder = subprocess.Popen(recorder_command)
     stopping = False
 
     def request_stop(signum, _frame):
@@ -40,11 +41,13 @@ def main() -> int:
     signal.signal(signal.SIGINT, request_stop)
     signal.signal(signal.SIGTERM, request_stop)
     recorder_exit = recorder.wait()
+    print(f"[planner_bag_recorder] exit_code={recorder_exit}", flush=True)
 
     finalizer = Path(__file__).with_name("finalize_planner_evidence_manifest.py")
     finalized = subprocess.run(
         [sys.executable, str(finalizer), "--manifest", args.manifest,
-         "--wait-timeout-s", "15"],
+         "--wait-timeout-s", "15", "--recorder-exit-code", str(recorder_exit),
+         "--recorder-command", " ".join(recorder_command)],
         check=False,
     )
     if finalized.returncode != 0:

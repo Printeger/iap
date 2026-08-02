@@ -753,6 +753,29 @@ TEST(P1IntegrityCostTest, FixedLatticeModeAndRiskGradientSupplementAreDeterminis
   EXPECT_EQ(optimizer->lastP1FanoutDiagnostics().supplemental_candidate_count, 3);
 }
 
+TEST(P1IntegrityCostTest, Fixed200RawGradientProbeDescends) {
+  ego_planner::SwarmTrajData swarm;
+  const Eigen::MatrixXd q = makeControlPoints();
+  AffineProvider provider(10.0, Eigen::Vector3d(1.0, 0.0, 0.0));
+  auto snapshot = makeSnapshot(provider);
+  auto config = disabledConfig();
+  config.use_integrity_cost = true;
+  config.metrics_only = false;
+  config.lambda_integrity = 0.00001;
+  config.objective_aggregation_mode = "fixed_200_mean";
+  auto optimizer = makeOptimizer(config, &swarm);
+  optimizer->setRiskSnapshot(snapshot, snapshot->stamp_s());
+  double before = 0.0;
+  Eigen::MatrixXd gradient;
+  ASSERT_TRUE(optimizer->evaluateP1RawCostForTest(q, 0.1, before, gradient));
+  ASSERT_GT(gradient.norm(), 0.0);
+  Eigen::MatrixXd probe = q - 0.01 * gradient / gradient.norm();
+  double after = 0.0;
+  Eigen::MatrixXd after_gradient;
+  ASSERT_TRUE(optimizer->evaluateP1RawCostForTest(probe, 0.1, after, after_gradient));
+  EXPECT_LT(after, before);
+}
+
 TEST(P1IntegrityCostTest, SnapshotGenerationStaysFixedUntilReset) {
   ego_planner::SwarmTrajData swarm;
   const Eigen::MatrixXd q = makeControlPoints();

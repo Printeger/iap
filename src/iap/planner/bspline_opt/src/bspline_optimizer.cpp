@@ -2197,6 +2197,14 @@ namespace ego_planner
       trace.grad_integrity_dot_displacement =
           (raw_integrity_gradient.array() *
            (cps_.points - initial_control_points).array()).sum();
+      trace.weighted_p1_gradient_dot_displacement =
+          p1_config_.lambda_integrity * trace.grad_integrity_dot_displacement;
+      const Eigen::MatrixXd total_displacement = cps_.points - initial_control_points;
+      trace.total_gradient_dot_displacement =
+          Eigen::Map<const Eigen::VectorXd>(initial_gradient.data(), variable_num_).dot(
+              Eigen::Map<const Eigen::VectorXd>(
+                  total_displacement.data() + 3 * start_id, variable_num_));
+      trace.final_control_points_hash = matrixHash(cps_.points);
       trace.post_mean_c_pi = post_lattice.mean_c_pi;
       trace.post_max_c_pi = post_lattice.max_c_pi;
       trace.post_support_valid_count = post_lattice.valid_count;
@@ -2758,7 +2766,7 @@ namespace ego_planner
       out << "schema_version,run_id,manifest_path,stamp,planning_attempt_id,candidate_id,snapshot_generation_id,query_base_time_s,"
              "pre_base_objective,post_base_objective,pre_total_objective,post_total_objective,"
              "raw_p1_cost,weighted_p1_cost,base_gradient_norm,p1_gradient_norm,total_gradient_norm,"
-             "displacement_norm,grad_integrity_dot_displacement,pre_mean_c_pi,pre_max_c_pi,"
+             "displacement_norm,grad_integrity_dot_displacement,weighted_p1_gradient_dot_displacement,total_gradient_dot_displacement,pre_mean_c_pi,pre_max_c_pi,"
              "post_mean_c_pi,post_max_c_pi,selected,solver_result,termination_reason,iteration_count,"
              "objective_allowed,objective_applied,fallback_reason,max_candidates_per_attempt,"
              "pre_raw_p1_cost,post_raw_p1_cost,pre_weighted_p1_cost,post_weighted_p1_cost,"
@@ -2768,7 +2776,7 @@ namespace ego_planner
              "pre_total_gradient_norm,post_total_gradient_norm,"
              "support_sample_count,pre_support_valid_count,post_support_valid_count,"
              "pre_support_coverage,post_support_coverage,support_full_valid,"
-             "support_signature,initial_control_points_hash,p1_config_hash,"
+             "support_signature,initial_control_points_hash,final_control_points_hash,p1_config_hash,"
              "optimization_success,selection_score,selection_reason,candidate_rank,p1_descent,rank_eligible,replacement_accepted,replacement_reason,incumbent_available,incumbent_mean_c_pi,incumbent_max_c_pi,"
              "aggregation_mode,aggregation_temperature,adaptive_sample_count,fixed_sample_count,peak_contribution,"
              "fanout_input_segments,fanout_surviving_segments,fanout_returned_count,fanout_configured_cap,fanout_truncated,fanout_optimizer_successes,fanout_full_support,fanout_p1_descent_eligible,fanout_supplemental_count,fanout_singleton_reason\n";
@@ -2782,6 +2790,8 @@ namespace ego_planner
         << trace.weighted_p1_cost << ',' << trace.base_gradient_norm << ','
         << trace.p1_gradient_norm << ',' << trace.total_gradient_norm << ','
         << trace.displacement_norm << ',' << trace.grad_integrity_dot_displacement << ','
+        << trace.weighted_p1_gradient_dot_displacement << ','
+        << trace.total_gradient_dot_displacement << ','
         << trace.pre_mean_c_pi << ',' << trace.pre_max_c_pi << ','
         << trace.post_mean_c_pi << ',' << trace.post_max_c_pi << ','
         << (trace.selected ? 1 : 0) << ',' << trace.solver_result << ','
@@ -2801,6 +2811,7 @@ namespace ego_planner
         << trace.post_support_valid_count << ',' << trace.pre_support_coverage << ','
         << trace.post_support_coverage << ',' << (trace.support_full_valid ? 1 : 0) << ','
         << trace.support_signature << ',' << trace.initial_control_points_hash << ','
+        << trace.final_control_points_hash << ','
         << trace.p1_config_hash << ',' << (trace.optimization_success ? 1 : 0) << ','
         << trace.selection_score << ',' << trace.selection_reason << ','
         << trace.candidate_rank << ',' << (trace.p1_descent ? 1 : 0) << ','
@@ -3359,6 +3370,21 @@ namespace ego_planner
     return true;
   }
 
+  bool BsplineOptimizer::evaluateP1RawCostForTest(
+      const Eigen::MatrixXd &control_points, const double ts, double &cost,
+      Eigen::MatrixXd &gradient)
+  {
+    if (control_points.rows() != 3 || control_points.cols() <= order_ ||
+        !std::isfinite(ts) || ts <= 0.0 || !risk_snapshot_)
+      return false;
+    setBsplineInterval(ts);
+    P1IntegrityMetrics metrics;
+    gradient = Eigen::MatrixXd::Zero(3, control_points.cols());
+    calcIntegrityTrajectoryCost(control_points, cost, gradient, metrics);
+    last_p1_metrics_ = metrics;
+    return std::isfinite(cost) && gradient.allFinite();
+  }
+
   bool BsplineOptimizer::optimizeReboundCostForTest(
       Eigen::MatrixXd &control_points, const double ts,
       const int max_iterations, double &final_cost, int &iterations)
@@ -3472,6 +3498,13 @@ namespace ego_planner
     trace.grad_integrity_dot_displacement =
         (raw_integrity_gradient.array() *
          (control_points - initial_control_points).array()).sum();
+    trace.weighted_p1_gradient_dot_displacement =
+        p1_config_.lambda_integrity * trace.grad_integrity_dot_displacement;
+    const Eigen::MatrixXd total_displacement = control_points - initial_control_points;
+    trace.total_gradient_dot_displacement = Eigen::Map<const Eigen::VectorXd>(
+        initial_gradient.data(), variable_num_).dot(Eigen::Map<const Eigen::VectorXd>(
+            total_displacement.data() + 3 * order_, variable_num_));
+    trace.final_control_points_hash = matrixHash(control_points);
     trace.post_mean_c_pi = post_lattice.mean_c_pi;
     trace.post_max_c_pi = post_lattice.max_c_pi;
     trace.post_support_valid_count = post_lattice.valid_count;

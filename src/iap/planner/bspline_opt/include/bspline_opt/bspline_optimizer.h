@@ -213,6 +213,8 @@ namespace ego_planner
       double total_gradient_norm = std::numeric_limits<double>::quiet_NaN();
       double displacement_norm = std::numeric_limits<double>::quiet_NaN();
       double grad_integrity_dot_displacement = std::numeric_limits<double>::quiet_NaN();
+      double weighted_p1_gradient_dot_displacement = std::numeric_limits<double>::quiet_NaN();
+      double total_gradient_dot_displacement = std::numeric_limits<double>::quiet_NaN();
       double pre_mean_c_pi = std::numeric_limits<double>::quiet_NaN();
       double pre_max_c_pi = std::numeric_limits<double>::quiet_NaN();
       double post_mean_c_pi = std::numeric_limits<double>::quiet_NaN();
@@ -255,6 +257,7 @@ namespace ego_planner
       std::string fallback_reason = "not_evaluated";
       std::string support_signature;
       std::string initial_control_points_hash;
+      std::string final_control_points_hash;
       std::string p1_config_hash;
       uint64_t planning_attempt_id = 0;
       uint64_t candidate_id = 0;
@@ -377,6 +380,8 @@ namespace ego_planner
     void setP4RiskAStarConfigForTest(const P4RiskAStarConfig &config) { p4_config_ = config; }
     bool evaluateReboundCostForTest(const Eigen::MatrixXd &control_points, double ts,
                                     double &cost, Eigen::MatrixXd &gradient);
+    bool evaluateP1RawCostForTest(const Eigen::MatrixXd &control_points, double ts,
+                                  double &cost, Eigen::MatrixXd &gradient);
     bool optimizeReboundCostForTest(Eigen::MatrixXd &control_points, double ts,
                                     int max_iterations, double &final_cost,
                                     int &iterations);
