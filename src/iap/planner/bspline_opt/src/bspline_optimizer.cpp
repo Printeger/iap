@@ -3003,7 +3003,7 @@ namespace ego_planner
     {
       out << "schema_version,run_id,manifest_path,profile_seq,stamp,trajectory_id,planning_attempt_id,candidate_id,applied_to_objective,metrics_only,"
              "lambda_integrity,snapshot_generation_id,query_base_time_s,"
-             "sample_index,arc_fraction,t_s,x,y,z,hit,valid,stale,c_pi,reason,"
+             "sample_index,arc_fraction,t_s,x,y,z,hit,valid,stale,base_collision_occupied,c_pi,reason,"
              "trace_available,grad_x,grad_y,grad_z,neg_grad_x,neg_grad_y,neg_grad_z,"
              "pre_x,pre_y,pre_z,disp_x,disp_y,disp_z,grad_dot_displacement,delta_c_pi,"
              "objective_requested,objective_applied,p1_fallback,fallback_reason\n";
@@ -3058,6 +3058,11 @@ namespace ego_planner
           risk_snapshot_->queryCost(p, risk_query_base_time_s_ + t_s, &sample);
       const bool c_pi_finite =
           hit && sample.valid && !sample.stale && std::isfinite(sample.cost);
+      // Rebound's collision phase queries this same inflated occupancy map.
+      // Persist the point-wise predicate beside the P0 query so an occupied
+      // strict-support miss can be distinguished from a recorder/frame issue.
+      const bool base_collision_occupied = grid_map_ &&
+          grid_map_->getInflateOccupancy(p);
       Eigen::Vector3d evidence_grad = sample.grad;
       Eigen::Vector3d pre_position = Eigen::Vector3d::Constant(
           std::numeric_limits<double>::quiet_NaN());
@@ -3135,7 +3140,8 @@ namespace ego_planner
           << p.z() << ','
           << (hit ? 1 : 0) << ','
           << (sample.valid ? 1 : 0) << ','
-          << (sample.stale ? 1 : 0) << ',';
+          << (sample.stale ? 1 : 0) << ','
+          << (base_collision_occupied ? 1 : 0) << ',';
       if (c_pi_finite)
       {
         out << sample.cost;

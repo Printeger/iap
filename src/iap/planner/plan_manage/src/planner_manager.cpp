@@ -339,6 +339,91 @@ namespace ego_planner
         : profile_path.substr(0, found) + "planner_p1_planning_context_timeline.csv";
   }
 
+  std::string EGOPlannerManager::p1PreAdmissionAttemptPath() const
+  {
+    const std::string profile_path = bspline_optimizer_
+        ? bspline_optimizer_->p1AcceptedTrajectoryRiskProfilePath()
+        : "planner_p1_accepted_trajectory_risk_profile.csv";
+    const std::string suffix = "planner_p1_accepted_trajectory_risk_profile.csv";
+    const auto found = profile_path.rfind(suffix);
+    return found == std::string::npos
+        ? profile_path + ".pre_admission_attempt.csv"
+        : profile_path.substr(0, found) + "planner_p1_pre_admission_attempt.csv";
+  }
+
+  void EGOPlannerManager::writeP1PreAdmissionAttempt(
+      const std::string &stage, const uint64_t candidate_id,
+      const UniformBspline &initial_trajectory,
+      const iap::P1AcceptedContextValidation &initial_validation,
+      const UniformBspline *base_optimized_trajectory,
+      const bool base_optimizer_success, const std::string &base_reason,
+      const std::string &p1_admission_verdict,
+      const std::string &p1_admission_reason) const
+  {
+    if (!bspline_optimizer_) return;
+    const auto &p1 = bspline_optimizer_->p1IntegrityConfig();
+    if (!p1.debug_csv_enable || p1.debug_csv_path.empty()) return;
+    const std::string path = p1PreAdmissionAttemptPath();
+    std::ifstream existing(path);
+    const bool header = !existing.good() ||
+        existing.peek() == std::ifstream::traits_type::eof();
+    existing.close();
+    std::ofstream out(path, std::ios::app);
+    if (!out.good()) return;
+    // UniformBspline predates const-qualified accessors.  Copying for these
+    // scalar queries preserves the immutable pre-admission input.
+    UniformBspline initial_duration_probe = initial_trajectory;
+    const double initial_duration = initial_duration_probe.getTimeSum();
+    double base_duration = std::numeric_limits<double>::quiet_NaN();
+    if (base_optimized_trajectory) {
+      UniformBspline base_duration_probe = *base_optimized_trajectory;
+      base_duration = base_duration_probe.getTimeSum();
+    }
+    const double snapshot_time_min = planning_risk_context_.query_base_time_s +
+        initial_validation.horizon_min_s;
+    const double snapshot_time_max = planning_risk_context_.query_base_time_s +
+        initial_validation.horizon_max_s;
+    const double initial_time_max = planning_risk_context_.query_base_time_s +
+        initial_duration;
+    const double base_time_max = planning_risk_context_.query_base_time_s +
+        base_duration;
+    out << std::setprecision(17);
+    if (header) {
+      out << "schema_version,run_id,manifest_path,stage,planning_attempt_id,candidate_id,"
+             "snapshot_generation_id,snapshot_stamp_s,query_base_time_s,snapshot_time_min_s,snapshot_time_max_s,"
+             "initial_duration_s,initial_time_min_s,initial_time_max_s,initial_temporal_margin_s,"
+             "expected_sample_count,matched_sample_count,spatial_miss_count,temporal_miss_count,occupied_miss_count,stale_miss_count,invalid_miss_count,"
+             "p1_admission_verdict,p1_admission_reason,base_optimizer_success,base_optimizer_reason,"
+             "base_duration_s,base_time_min_s,base_time_max_s,base_temporal_margin_s,base_full_p1_support\n";
+    }
+    const bool base_full_support = base_optimized_trajectory &&
+        base_optimizer_success &&
+        bspline_optimizer_->validateP1AcceptedTrajectoryRiskContext(
+            *base_optimized_trajectory, plannerNow().seconds(),
+            trajectory_frame_id_).valid;
+    out << p1.evidence_schema_version << ',' << p1.evidence_run_id << ','
+        << p1.evidence_manifest_path << ',' << stage << ','
+        << planning_risk_context_.planning_attempt_id << ',' << candidate_id << ','
+        << planning_risk_context_.generation_id << ','
+        << planning_risk_context_.snapshot_stamp_s << ','
+        << planning_risk_context_.query_base_time_s << ','
+        << snapshot_time_min << ',' << snapshot_time_max << ','
+        << initial_duration << ',' << planning_risk_context_.query_base_time_s << ','
+        << initial_time_max << ',' << (snapshot_time_max - initial_time_max) << ','
+        << initial_validation.expected_sample_count << ','
+        << initial_validation.covered_sample_count << ','
+        << initial_validation.spatial_miss_count << ','
+        << initial_validation.temporal_miss_count << ','
+        << initial_validation.occupied_miss_count << ','
+        << initial_validation.stale_miss_count << ','
+        << initial_validation.invalid_miss_count << ','
+        << p1_admission_verdict << ',' << p1_admission_reason << ','
+        << (base_optimizer_success ? 1 : 0) << ',' << base_reason << ','
+        << base_duration << ',' << planning_risk_context_.query_base_time_s << ','
+        << base_time_max << ',' << (snapshot_time_max - base_time_max) << ','
+        << (base_full_support ? 1 : 0) << '\n';
+  }
+
   void EGOPlannerManager::appendPlanningRiskContextTimeline(
       const std::string &stage, const double stamp_s, const std::string &outcome,
       const std::string &reason, const std::string &fallback_branch,
@@ -767,16 +852,17 @@ namespace ego_planner
     // 将轨迹变为B样条轨迹
     Eigen::MatrixXd ctrl_pts, ctrl_pts_temp;
     UniformBspline::parameterizeToBspline(ts, point_set, start_end_derivatives, ctrl_pts);
+    const UniformBspline initial_candidate(ctrl_pts, 3, ts);
+    iap::P1AcceptedContextValidation initial_p1_validation;
 
     if (p1_config.use_integrity_cost)
     {
       set_p1_context(0);
-      const UniformBspline initial_candidate(ctrl_pts, 3, ts);
-      const auto validation =
+      initial_p1_validation =
           bspline_optimizer_->validateP1AcceptedTrajectoryRiskContext(
               initial_candidate, plannerNow().seconds(), trajectory_frame_id_);
       const auto fallback = decideP1SoftFallback({
-          p1_config.metrics_only, false, has_existing_trajectory, validation});
+          p1_config.metrics_only, false, has_existing_trajectory, initial_p1_validation});
       p1_objective_allowed = fallback.objective_allowed;
       p1_fallback_reason = fallback.reason;
       planning_risk_context_.p1_objective_allowed = p1_objective_allowed;
@@ -787,6 +873,12 @@ namespace ego_planner
           p1_objective_allowed ? "p1_objective" : "base_fallback",
           p1_fallback_reason,
           p1_objective_allowed ? "none" : "p1_soft_fallback");
+      // Record the actual pre-admission seed.  A later published base
+      // trajectory cannot be used to reconstruct this H1/H2/H3/H4 evidence.
+      writeP1PreAdmissionAttempt(
+          "initial_admission", 0, initial_candidate, initial_p1_validation, nullptr,
+          false, "not_run", p1_objective_allowed ? "p1_objective" : "base_fallback",
+          p1_fallback_reason);
       bspline_optimizer_->clearRiskSnapshot();
     }
     // The candidate CSV is the strict fixed-lattice P1 evidence contract. A
@@ -883,6 +975,24 @@ namespace ego_planner
         if (p1_candidate_success)
         {
 
+          if (!p1_objective_allowed && p1_config.use_integrity_cost)
+          {
+            // Diagnostic-only: establish whether a collision-feasible base
+            // result would have 200/200 support before changing admission.
+            bspline_optimizer_->setRiskSnapshot(
+                planning_snapshot, planning_query_base_time_s);
+            const UniformBspline base_trajectory(ctrl_pts_temp, 3, ts);
+            const auto base_validation =
+                bspline_optimizer_->validateP1AcceptedTrajectoryRiskContext(
+                    base_trajectory, plannerNow().seconds(), trajectory_frame_id_);
+            writeP1PreAdmissionAttempt(
+                "base_optimizer_result", candidate_id, initial_candidate,
+                initial_p1_validation, &base_trajectory, true, "ok",
+                base_validation.valid ? "p1_objective_candidate" : "base_fallback",
+                base_validation.valid ? "ok" : p1FallbackReason(base_validation));
+            bspline_optimizer_->clearRiskSnapshot();
+          }
+
           cout << "traj " << trajs.size() - i << " success." << endl;
 
           flag_step_1_success = true;
@@ -903,6 +1013,13 @@ namespace ego_planner
         }
         else
         {
+          if (!p1_objective_allowed && p1_config.use_integrity_cost)
+          {
+            writeP1PreAdmissionAttempt(
+                "base_optimizer_result", candidate_id, initial_candidate,
+                initial_p1_validation, nullptr, false, "optimizer_failure",
+                "base_fallback", p1_fallback_reason);
+          }
           cout << "traj " << trajs.size() - i << " failed." << endl;
         }
       }

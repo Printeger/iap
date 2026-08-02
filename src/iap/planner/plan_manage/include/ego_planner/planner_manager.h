@@ -159,6 +159,15 @@ namespace ego_planner
                                            const std::string &reason,
                                            const std::string &fallback_branch = "",
                                            const PlanningRiskContext *context_override = nullptr) const;
+    std::string p1PreAdmissionAttemptPath() const;
+    void writeP1PreAdmissionAttempt(
+        const std::string &stage, uint64_t candidate_id,
+        const UniformBspline &initial_trajectory,
+        const iap::P1AcceptedContextValidation &initial_validation,
+        const UniformBspline *base_optimized_trajectory,
+        bool base_optimizer_success, const std::string &base_reason,
+        const std::string &p1_admission_verdict,
+        const std::string &p1_admission_reason) const;
 
     void updateTrajInfo(const UniformBspline &position_traj, const rclcpp::Time time_now);
 

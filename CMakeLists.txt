@@ -645,6 +645,14 @@ if(DEFINED ENV{ROS_VERSION})
         NAME test_verify_planner_recorder_smoke
         COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test/test_verify_planner_recorder_smoke.py
       )
+      add_test(
+        NAME test_verify_p1_pre_admission_feedback
+        COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test/test_verify_p1_pre_admission_feedback.py
+      )
+      add_test(
+        NAME test_analyze_p1_pre_admission_smoke
+        COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test/test_analyze_p1_pre_admission_smoke.py
+      )
     endif()
     ament_export_include_directories(include ${EIGEN3_INCLUDE_DIR} ${OpenCV_INCLUDE_DIRS})
     ament_export_libraries(${iap_LIBRARIES} ${GTSAM_LIBRARIES} fmt spdlog::spdlog)

@@ -1753,6 +1753,9 @@ def _launch_setup(context):
     p1_planning_context_timeline_path_for_manifest = str(
         Path(p1_debug_path_for_manifest).with_name("planner_p1_planning_context_timeline.csv")
     )
+    p1_pre_admission_attempt_path_for_manifest = str(
+        Path(p1_debug_path_for_manifest).with_name("planner_p1_pre_admission_attempt.csv")
+    )
     p5_final_for_fixture = (
         _param_bool(context, "p5.enable_final_gate")
         if "p5.enable_final_gate" in overrides
@@ -1790,6 +1793,7 @@ def _launch_setup(context):
         "p1.accepted_profile_path": p1_accepted_profile_path_for_manifest,
         "p1.accepted_profile_context_path": p1_accepted_profile_context_path_for_manifest,
         "p1.planning_context_timeline_path": p1_planning_context_timeline_path_for_manifest,
+        "p1.pre_admission_attempt_path": p1_pre_admission_attempt_path_for_manifest,
         "p1.replacement_decision_path": str(
             Path(p1_debug_path_for_manifest).with_name("planner_p1_replacement_decision.csv")),
         "p1.candidate_retained_profile_path": str(
@@ -2416,6 +2420,11 @@ def _launch_setup(context):
                     sim_depth_topic,
                     "/map_generator/global_cloud",
                     "/map_generator/local_cloud",
+                    # The planner and P0 both consult this exact inflated map.
+                    # Record it so a strict-support rejection near the start can
+                    # be checked against the source occupancy rather than
+                    # inferred from a risk-profile reason alone.
+                    f"/drone_{drone_id}_grid/grid_map/occupancy_inflate",
                     camera_pose_topic,
                     pos_cmd_topic,
                     bspline_topic,
