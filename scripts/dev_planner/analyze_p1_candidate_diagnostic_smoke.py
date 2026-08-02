@@ -122,7 +122,9 @@ def main():
                 errors.append("retained replacement decision does not publish the incumbent identity")
             matching = [r for r in profiles
                         if r.get("planning_attempt_id") == decision.get("planning_attempt_id")
-                        and r.get("candidate_id") == decision.get("optimizer_selected_candidate_id")]
+                        and r.get("candidate_id") == decision.get("optimizer_selected_candidate_id")
+                        and r.get("snapshot_generation_id") == decision.get("snapshot_generation_id")
+                        and r.get("query_base_time_s") == decision.get("query_base_time_s")]
             candidate_samples = [r for r in matching if r.get("trajectory_role") == "optimizer_selected_candidate"]
             incumbent_samples = [r for r in matching if r.get("trajectory_role") == "retained_incumbent"]
             if len(candidate_samples) != 200 or len(incumbent_samples) != 200:
