@@ -30,7 +30,8 @@ def truthy(value):
     return str(value).strip().lower() in {"1", "true"}
 
 
-def validate(export_dir: Path, run_id: str, require_instrumented: bool):
+def validate(export_dir: Path, run_id: str, require_instrumented: bool,
+             expect_zero_p1: bool = False):
     export_dir = export_dir.resolve()
     errors = []
     manifest_path = export_dir / "test_planner_manifest.json"
@@ -54,8 +55,12 @@ def validate(export_dir: Path, run_id: str, require_instrumented: bool):
     pre_rows = read_rows(export_dir / PRE_ADMISSION)
     counts = {
         "base_optimizer_start": stage["base_optimizer_start"],
-        "base_optimizer_success": outcome["candidate_success"],
-        "base_optimizer_failure": outcome["candidate_failure"],
+        "base_optimizer_success": sum(
+            1 for row in timeline if row.get("stage") == "base_optimizer_end" and
+            row.get("outcome") == "candidate_success"),
+        "base_optimizer_failure": sum(
+            1 for row in timeline if row.get("stage") == "base_optimizer_end" and
+            row.get("outcome") == "candidate_failure"),
         "base_publish": stage["publish"],
         "p1_admission_temporal_out_of_horizon": sum(
             1 for row in timeline if row.get("stage") == "p1_admission" and
@@ -71,14 +76,16 @@ def validate(export_dir: Path, run_id: str, require_instrumented: bool):
         "pre_admission_rows": len(pre_rows),
     }
     # The frozen 2026-08-02 bundle is a characterization fixture.  Its
-    # expected failure must remain distinguishable from first-trajectory loss.
+    # expected failure must remain distinguishable from first-trajectory loss,
+    # but a fresh healthy bundle is allowed to progress past this state.
     if counts["base_optimizer_success"] <= 0 or counts["base_publish"] <= 0:
-        errors.append("fixture does not prove base planning partially succeeded")
-    if counts["p1_optimizer_start"] != 0 or counts["candidate_rows"] != 0:
-        errors.append("fixture no longer represents zero-P1-candidate failure")
-    if (counts["p1_admission_temporal_out_of_horizon"] +
-            counts["p1_admission_coverage_insufficient"]) <= 0:
-        errors.append("fixture lacks direct temporal/full-support rejection")
+        errors.append("bundle does not prove base planning partially succeeded")
+    if expect_zero_p1:
+        if counts["p1_optimizer_start"] != 0 or counts["candidate_rows"] != 0:
+            errors.append("fixture no longer represents zero-P1-candidate failure")
+        if (counts["p1_admission_temporal_out_of_horizon"] +
+                counts["p1_admission_coverage_insufficient"]) <= 0:
+            errors.append("fixture lacks direct temporal/full-support rejection")
     if require_instrumented:
         required = {
             "initial_duration_s", "initial_temporal_margin_s",
@@ -98,8 +105,11 @@ def main():
     parser.add_argument("--export-dir", required=True, type=Path)
     parser.add_argument("--run-id", required=True)
     parser.add_argument("--require-instrumented", action="store_true")
+    parser.add_argument("--expect-zero-p1", action="store_true",
+                        help="assert the historical no-candidate characterization fixture")
     args = parser.parse_args()
-    result = validate(args.export_dir, args.run_id, args.require_instrumented)
+    result = validate(args.export_dir, args.run_id, args.require_instrumented,
+                      args.expect_zero_p1)
     print(json.dumps(result, indent=2, sort_keys=True))
     return 0 if result["passed"] else 2
 

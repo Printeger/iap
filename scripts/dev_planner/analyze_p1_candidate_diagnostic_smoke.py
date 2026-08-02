@@ -281,9 +281,17 @@ def main():
             f"snapshot/query-base window: `{provenance.get('process_start_stamp_utc', 'unknown')} to {provenance.get('process_end_stamp_utc', 'unknown')}`; "
             "diagnostic (non-authoritative).")
         empty = not candidates
+        candidate_observation = (
+            "No candidate trajectory was emitted; candidate-specific charts are unavailable."
+            if empty else
+            f"{len(candidates)} fixed-200 candidate rows were emitted across {len(attempts)} attempts.")
+        lifecycle_conclusion = (
+            "The lifecycle contains P1 optimizer evidence, but this diagnostic remains non-authoritative."
+            if candidates else
+            "Base planning partially succeeded, but no strict P1 candidate was emitted.")
         figures = [
-            ("Full scenario top-down", "p1_diag_topdown_scene.png", "No candidate trajectory was emitted; any plotted retained comparison is diagnostic only." if empty else f"{len(candidates)} candidate rows were rendered from the explicit bundle."),
-            ("Fan-out funnel", "p1_diag_fanout_funnel.png", f"{len(candidates)} candidate rows were present in the explicit bundle."),
+            ("Full scenario top-down", "p1_diag_topdown_scene.png", candidate_observation),
+            ("Fan-out funnel", "p1_diag_fanout_funnel.png", candidate_observation),
             ("Mean/max delta scatter", "p1_diag_mean_max_delta_scatter.png", "No point can meet an effectiveness gate when candidate rows are absent." if empty else "Fixed-200 pre/post mean and max deltas are plotted per attempt/candidate."),
             ("Candidate convergence/collapse", "p1_diag_candidate_convergence.png", "This run has no candidate pairwise evidence; collapse is therefore unassessed." if empty else "Candidate terminal displacement and objective evidence are plotted; pairwise sidecar evidence remains required for collapse proof."),
             ("Objective decomposition", "p1_diag_objective_decomposition.png", "No optimizer objective row was emitted." if empty else "Pre/post objective components are shown separately for each attempt."),
@@ -296,7 +304,9 @@ def main():
             handle.write("\n## 2026-08-02 diagnostic-smoke figure evidence (non-authoritative)\n\n")
             for title, filename, observation in figures:
                 image = Path(os.path.relpath(out_dir / filename, main_report.parent))
-                handle.write(f"### {title}\n\n![{title}]({image})\n\nObservation: {observation}\n\n{metadata}\n\nVerdict: {status}.\n\nConclusion: This diagnostic figure does not grant P1-2 effectiveness or progression.\n\n")
+                conclusion = lifecycle_conclusion if title == "Lifecycle swimlane" else (
+                    "This figure is diagnostic only and cannot establish P1-2 effectiveness or progression.")
+                handle.write(f"### {title}\n\n![{title}]({image})\n\nObservation: {observation}\n\n{metadata}\n\nVerdict: {status}.\n\nConclusion: {conclusion}\n\n")
     print(report)
     return 0 if not errors else 2
 

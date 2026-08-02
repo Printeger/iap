@@ -41,16 +41,16 @@ class P1PreAdmissionFeedbackTest(unittest.TestCase):
 
     def test_characterizes_base_publish_without_p1_candidate(self):
         export, run_id = self.bundle()
-        result = pre_admission.validate(export, run_id, False)
+        result = pre_admission.validate(export, run_id, False, expect_zero_p1=True)
         self.assertTrue(result["passed"], result["errors"])
         self.assertEqual(result["counts"]["p1_optimizer_start"], 0)
         self.assertEqual(result["counts"]["candidate_rows"], 0)
 
     def test_requires_new_feedback_contract(self):
         export, run_id = self.bundle()
-        self.assertFalse(pre_admission.validate(export, run_id, True)["passed"])
+        self.assertFalse(pre_admission.validate(export, run_id, True, expect_zero_p1=True)["passed"])
         export, run_id = self.bundle(instrumented=True)
-        self.assertTrue(pre_admission.validate(export, run_id, True)["passed"])
+        self.assertTrue(pre_admission.validate(export, run_id, True, expect_zero_p1=True)["passed"])
 
 
 if __name__ == "__main__":

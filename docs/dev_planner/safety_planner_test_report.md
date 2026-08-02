@@ -6165,3 +6165,145 @@ Conclusion: This diagnostic figure does not grant P1-2 effectiveness or progress
 - Progression authority: none. Retained-incumbent evidence and an empty candidate artifact cannot satisfy P1-2 effectiveness.
 - Final branch: **FAIL -> P1 candidate generation / objective alignment debug**.
 - P1-3 permission: denied. No P1-3 and no lambda sweep were run.
+
+## 2026-08-02 P1 pre-admission diagnostic figures (non-authoritative)
+
+### Full recorded scenario top-down
+
+![Full recorded scenario top-down](../../results/planner_validation/exports/test_planner_p1_degraded_lidar_good_gnss_degraded_lidar_good_1785691239134/p1_pre_admission_diagnostic/pre_admission_topdown.png)
+
+Observation: Rendered directly from the explicit bundle; 3274 lifecycle rows and 3200 profile samples.
+
+Run ID: `1917ed284f6c4c97a897bd3d194993a7`; HEAD: `913160cf721f450fdda18412f08da49c94c2a9b4`; runtime hashes: `bspline_library=7b137031f395d0f0b96e56f26e1ea9f1a3141bc1668934bc82905910e343e6d4, launch=ef97513db024686bd34db2b1c56e14a51aad9944feae1efbbe467e0ccf3c2517, planner_executable=026ccbac054ae1c2b9f8b7ba0e15cc6f338cf9c790eff45665a700b43bb83e9a`; export: `/home/dev/ws_iap/src/iap/results/planner_validation/exports/test_planner_p1_degraded_lidar_good_gnss_degraded_lidar_good_1785691239134`; bag: `/home/dev/ws_iap/src/iap/results/planner_validation/bags/test_planner_p1_degraded_lidar_good_gnss_degraded_lidar_good_20260802T172039Z`; attempts/generations/query-base: `1/0/1657065600.3091443; 1/0/1657065600.3091443; 2/1/1657065602.5070639; 2/1/1657065602.5070639; 2/1/1657065602.5070639; 3/3/1657065603.4980941; 3/3/1657065603.4980941; 4/5/1657065604.498106; 4/5/1657065604.498106; 4/5/1657065604.498106; 5/6/1657065604.9980764; 5/6/1657065604.9980764; 6/8/1657065605.9980845; 6/8/1657065605.9980845; 6/8/1657065605.9980845; 7/10/1657065606.9980948; 7/10/1657065606.9980948; 8/12/1657065607.9980919; 8/12/1657065607.9980919; 8/12/1657065607.9980919; 9/13/1657065608.498107; 9/13/1657065608.498107; 10/21/1657065612.4981184; 10/21/1657065612.4981184; 10/21/1657065612.4981184; 10/21/1657065612.4981184; 10/21/1657065612.4981184; 11/23/1657065613.4981074; 11/23/1657065613.4981074; 12/25/1657065614.4980981; 12/25/1657065614.4980981; 13/27/1657065615.4981084; 13/27/1657065615.4981084; 13/27/1657065615.4981084; 14/29/1657065616.4981072; 14/29/1657065616.4981072; 15/31/1657065617.4981146; 15/31/1657065617.4981146; 16/33/1657065618.4980819; 16/33/1657065618.4980819; 17/35/1657065619.4980922; 17/35/1657065619.4980922; 18/37/1657065620.4980817; 19/38/1657065620.9980962; 20/39/1657065621.4980831`; time window: `2026-08-02T17:20:39Z to 2026-08-02T17:21:09Z`; diagnostic (non-authoritative).
+
+Verdict: PASS.
+
+Conclusion: It supports pre-admission root-cause diagnosis only; it cannot establish P1-2 effectiveness.
+
+## 2026-08-02 P1 pre-admission / fixed-lambda final terminal record
+
+- Latest formal authoritative run: none; no 90-second pair or formal analyzer was run.
+- Latest diagnostic smoke: `1917ed284f6c4c97a897bd3d194993a7`, clean `HEAD=913160cf721f450fdda18412f08da49c94c2a9b4`; recorder/metadata/manifest/validator and the one diagnostic analyzer passed.
+- Evidence: 3 P1 admissions (attempts 18–20), 12 optimizer-success, fixed-support `200/200` candidate rows; all 12 have higher post fixed-200 mean and positive raw-P1-gradient·displacement, hence `rank_eligible=0`. Winners `18/1`, `19/4`, and `20/4` were rejected as `p1_self_risk_regression` and each is bound to one decision plus 200/200 candidate/incumbent retained profiles.
+- H1 is rejected because base optimization retained the seed time parameterization. Deterministic fixed-200 raw-gradient descent/finite-difference coverage and matching raw-P1/fixed-200 costs support H2; pairwise control-point/profile matrices and the P0-occupied/base-map disagreement remain open diagnostics.
+- Progression authority: none. Entry-to-formal fails because no candidate is eligible or replaces the incumbent with required mean/max non-regression and one strict decrease.
+- Final branch: **FAIL -> P1 pre-admission temporal/full-support debug**.
+- P1-3 permission: denied. No P1-3 and no lambda sweep were run.
+
+## 2026-08-02 P1 pre-admission / fixed-lambda superseding terminal record
+
+- Latest formal authoritative run: none; no 90-second pair or formal analyzer was run.
+- Latest diagnostic smoke: `1917ed284f6c4c97a897bd3d194993a7`, clean `HEAD=913160cf721f450fdda18412f08da49c94c2a9b4`, export `test_planner_p1_degraded_lidar_good_gnss_degraded_lidar_good_1785691239134`, finalized bag `test_planner_p1_degraded_lidar_good_gnss_degraded_lidar_good_20260802T172039Z`. Recorder/metadata/manifest/validator and the one diagnostic analyzer passed.
+- Superseding correction: P1 did admit attempts 18–20 and emitted 12 full-support (`200/200`) optimizer-success candidate rows, but all 12 regressed fixed-200 mean risk, had positive raw-P1-gradient·displacement, and had `rank_eligible=0`; selected candidates `18/1`, `19/4`, and `20/4` were retained-incumbent rejections.
+- Retention binding: each selected rejection has one matching decision and 200 candidate plus 200 incumbent comparison samples on the same generation/query-base. It is diagnostic evidence only and supplies no effectiveness credit.
+- H1 is rejected (base optimization did not shorten the seed time parameterization); the deterministic raw-gradient/finite-difference test and matching raw-P1/fixed-200 costs support H2 over H1/H4. Final candidate pairwise control-point/profile evidence remains incomplete, and the P0-occupied/base-map disagreement remains open.
+- Progression authority: none. Entry-to-formal fails because no eligible candidate can replace the incumbent with mean/max non-regression and one strict reduction.
+- Final branch: **FAIL -> P1 pre-admission temporal/full-support debug**.
+- P1-3 permission: denied. No P1-3 and no lambda sweep were run.
+
+## 2026-08-02 P1 pre-admission / fixed-lambda diagnostic terminal record
+
+- Latest formal authoritative run: none. No 90-second P1-1/P1-2 pair or formal analyzer was run.
+- Latest diagnostic smoke: run ID `1917ed284f6c4c97a897bd3d194993a7`, clean `HEAD=913160cf721f450fdda18412f08da49c94c2a9b4`; export `/home/dev/ws_iap/src/iap/results/planner_validation/exports/test_planner_p1_degraded_lidar_good_gnss_degraded_lidar_good_1785691239134`; finalized bag `/home/dev/ws_iap/src/iap/results/planner_validation/bags/test_planner_p1_degraded_lidar_good_gnss_degraded_lidar_good_20260802T172039Z`. Recorder, metadata, manifest, validator, and explicit pre-admission diagnostic analyzer passed.
+- Correction to the figure-section boilerplate above: this smoke did produce candidate evidence. It has 20 admissions: 15 `temporal_out_of_horizon`, 1 `coverage_insufficient`, 1 `snapshot_unavailable`, and 3 `p1_objective`; 12 P1 optimizer starts/candidate rows (four per admitted attempt, cap eight), all fixed support `200/200` and optimizer-successful. The relevant P1 attempts are 18/19/20 at generations 37/38/39 and query bases `1657065620.4980817`, `1657065620.9980962`, and `1657065621.4980831`.
+- H1 is not supported: every base-optimizer postpass retained the same spline duration as its seed, so no `initial duration > 2.5 s` to `base duration <= 2.5 s` transition occurred. H2 is supported by the runtime evidence: the deterministic fixed-200 raw-gradient probe/finite-difference unit checks pass, while all 12 combined L-BFGS candidates have positive raw-P1-gradient·displacement and post mean `c_pi` greater than pre mean. H4 cost binding is consistent (`post_raw_p1_cost == post_mean_c_pi` on all rows); the remaining full callback-gradient binding and pairwise control-point/iteration evidence are not yet sufficient to clear H3/H4 completely.
+- Candidate result: optimizer winners for attempts 18/19/20 are `1/4/4`; all were rejected for `p1_self_risk_regression`, and no row is `rank_eligible`. The final fixed-200 mean/max values converge within each attempt despite distinct initial hashes, but required pairwise control-point/risk-profile matrices have not yet been emitted, so collapse is a diagnostic finding rather than a closed proof.
+- Retained-incumbent evidence: three replacement decisions match the selected tuples and each has exactly 200 `optimizer_selected_candidate` plus 200 `retained_incumbent` samples on the same generation/query-base, with `final_trajectory_source=retained_incumbent` and `publish_identity=incumbent:<id>`; none is counted as P1-2 effectiveness.
+- Occupied-start diagnosis: 53 published-profile samples at indices 0–5 are P0 `occupied`, but the newly recorded same-point base inflated-map predicate is false for all 53. This rules out treating them as verified base-map collisions; it does not prove self-occupancy. P0 occupied-mask/source/stamp alignment remains open, and support stays strict `200/200`.
+- Progression authority: none. Entry-to-formal fails because no candidate is eligible and no selected candidate can replace the incumbent with mean/max non-regression and one strict decrease.
+- Final branch: **FAIL -> P1 pre-admission temporal/full-support debug**.
+- P1-3 permission: denied. No P1-3 and no lambda sweep were run.
+
+### P1 admission funnel
+
+![P1 admission funnel](../../results/planner_validation/exports/test_planner_p1_degraded_lidar_good_gnss_degraded_lidar_good_1785691239134/p1_pre_admission_diagnostic/pre_admission_funnel.png)
+
+Observation: 45 instrumented rows; candidate rows=12.
+
+Run ID: `1917ed284f6c4c97a897bd3d194993a7`; HEAD: `913160cf721f450fdda18412f08da49c94c2a9b4`; runtime hashes: `bspline_library=7b137031f395d0f0b96e56f26e1ea9f1a3141bc1668934bc82905910e343e6d4, launch=ef97513db024686bd34db2b1c56e14a51aad9944feae1efbbe467e0ccf3c2517, planner_executable=026ccbac054ae1c2b9f8b7ba0e15cc6f338cf9c790eff45665a700b43bb83e9a`; export: `/home/dev/ws_iap/src/iap/results/planner_validation/exports/test_planner_p1_degraded_lidar_good_gnss_degraded_lidar_good_1785691239134`; bag: `/home/dev/ws_iap/src/iap/results/planner_validation/bags/test_planner_p1_degraded_lidar_good_gnss_degraded_lidar_good_20260802T172039Z`; attempts/generations/query-base: `1/0/1657065600.3091443; 1/0/1657065600.3091443; 2/1/1657065602.5070639; 2/1/1657065602.5070639; 2/1/1657065602.5070639; 3/3/1657065603.4980941; 3/3/1657065603.4980941; 4/5/1657065604.498106; 4/5/1657065604.498106; 4/5/1657065604.498106; 5/6/1657065604.9980764; 5/6/1657065604.9980764; 6/8/1657065605.9980845; 6/8/1657065605.9980845; 6/8/1657065605.9980845; 7/10/1657065606.9980948; 7/10/1657065606.9980948; 8/12/1657065607.9980919; 8/12/1657065607.9980919; 8/12/1657065607.9980919; 9/13/1657065608.498107; 9/13/1657065608.498107; 10/21/1657065612.4981184; 10/21/1657065612.4981184; 10/21/1657065612.4981184; 10/21/1657065612.4981184; 10/21/1657065612.4981184; 11/23/1657065613.4981074; 11/23/1657065613.4981074; 12/25/1657065614.4980981; 12/25/1657065614.4980981; 13/27/1657065615.4981084; 13/27/1657065615.4981084; 13/27/1657065615.4981084; 14/29/1657065616.4981072; 14/29/1657065616.4981072; 15/31/1657065617.4981146; 15/31/1657065617.4981146; 16/33/1657065618.4980819; 16/33/1657065618.4980819; 17/35/1657065619.4980922; 17/35/1657065619.4980922; 18/37/1657065620.4980817; 19/38/1657065620.9980962; 20/39/1657065621.4980831`; time window: `2026-08-02T17:20:39Z to 2026-08-02T17:21:09Z`; diagnostic (non-authoritative).
+
+Verdict: PASS.
+
+Conclusion: It confirms base planning partially succeeded but strict P1 pre-admission did not produce candidate evidence.
+
+### Duration versus snapshot horizon
+
+![Duration versus snapshot horizon](../../results/planner_validation/exports/test_planner_p1_degraded_lidar_good_gnss_degraded_lidar_good_1785691239134/p1_pre_admission_diagnostic/pre_admission_duration.png)
+
+Observation: Initial, base-optimized, and immutable remaining-horizon durations are plotted per attempt.
+
+Run ID: `1917ed284f6c4c97a897bd3d194993a7`; HEAD: `913160cf721f450fdda18412f08da49c94c2a9b4`; runtime hashes: `bspline_library=7b137031f395d0f0b96e56f26e1ea9f1a3141bc1668934bc82905910e343e6d4, launch=ef97513db024686bd34db2b1c56e14a51aad9944feae1efbbe467e0ccf3c2517, planner_executable=026ccbac054ae1c2b9f8b7ba0e15cc6f338cf9c790eff45665a700b43bb83e9a`; export: `/home/dev/ws_iap/src/iap/results/planner_validation/exports/test_planner_p1_degraded_lidar_good_gnss_degraded_lidar_good_1785691239134`; bag: `/home/dev/ws_iap/src/iap/results/planner_validation/bags/test_planner_p1_degraded_lidar_good_gnss_degraded_lidar_good_20260802T172039Z`; attempts/generations/query-base: `1/0/1657065600.3091443; 1/0/1657065600.3091443; 2/1/1657065602.5070639; 2/1/1657065602.5070639; 2/1/1657065602.5070639; 3/3/1657065603.4980941; 3/3/1657065603.4980941; 4/5/1657065604.498106; 4/5/1657065604.498106; 4/5/1657065604.498106; 5/6/1657065604.9980764; 5/6/1657065604.9980764; 6/8/1657065605.9980845; 6/8/1657065605.9980845; 6/8/1657065605.9980845; 7/10/1657065606.9980948; 7/10/1657065606.9980948; 8/12/1657065607.9980919; 8/12/1657065607.9980919; 8/12/1657065607.9980919; 9/13/1657065608.498107; 9/13/1657065608.498107; 10/21/1657065612.4981184; 10/21/1657065612.4981184; 10/21/1657065612.4981184; 10/21/1657065612.4981184; 10/21/1657065612.4981184; 11/23/1657065613.4981074; 11/23/1657065613.4981074; 12/25/1657065614.4980981; 12/25/1657065614.4980981; 13/27/1657065615.4981084; 13/27/1657065615.4981084; 13/27/1657065615.4981084; 14/29/1657065616.4981072; 14/29/1657065616.4981072; 15/31/1657065617.4981146; 15/31/1657065617.4981146; 16/33/1657065618.4980819; 16/33/1657065618.4980819; 17/35/1657065619.4980922; 17/35/1657065619.4980922; 18/37/1657065620.4980817; 19/38/1657065620.9980962; 20/39/1657065621.4980831`; time window: `2026-08-02T17:20:39Z to 2026-08-02T17:21:09Z`; diagnostic (non-authoritative).
+
+Verdict: PASS.
+
+Conclusion: It supports pre-admission root-cause diagnosis only; it cannot establish P1-2 effectiveness.
+
+### Coverage reason heatmap
+
+![Coverage reason heatmap](../../results/planner_validation/exports/test_planner_p1_degraded_lidar_good_gnss_degraded_lidar_good_1785691239134/p1_pre_admission_diagnostic/pre_admission_coverage.png)
+
+Observation: Rendered directly from the explicit bundle; 3274 lifecycle rows and 3200 profile samples.
+
+Run ID: `1917ed284f6c4c97a897bd3d194993a7`; HEAD: `913160cf721f450fdda18412f08da49c94c2a9b4`; runtime hashes: `bspline_library=7b137031f395d0f0b96e56f26e1ea9f1a3141bc1668934bc82905910e343e6d4, launch=ef97513db024686bd34db2b1c56e14a51aad9944feae1efbbe467e0ccf3c2517, planner_executable=026ccbac054ae1c2b9f8b7ba0e15cc6f338cf9c790eff45665a700b43bb83e9a`; export: `/home/dev/ws_iap/src/iap/results/planner_validation/exports/test_planner_p1_degraded_lidar_good_gnss_degraded_lidar_good_1785691239134`; bag: `/home/dev/ws_iap/src/iap/results/planner_validation/bags/test_planner_p1_degraded_lidar_good_gnss_degraded_lidar_good_20260802T172039Z`; attempts/generations/query-base: `1/0/1657065600.3091443; 1/0/1657065600.3091443; 2/1/1657065602.5070639; 2/1/1657065602.5070639; 2/1/1657065602.5070639; 3/3/1657065603.4980941; 3/3/1657065603.4980941; 4/5/1657065604.498106; 4/5/1657065604.498106; 4/5/1657065604.498106; 5/6/1657065604.9980764; 5/6/1657065604.9980764; 6/8/1657065605.9980845; 6/8/1657065605.9980845; 6/8/1657065605.9980845; 7/10/1657065606.9980948; 7/10/1657065606.9980948; 8/12/1657065607.9980919; 8/12/1657065607.9980919; 8/12/1657065607.9980919; 9/13/1657065608.498107; 9/13/1657065608.498107; 10/21/1657065612.4981184; 10/21/1657065612.4981184; 10/21/1657065612.4981184; 10/21/1657065612.4981184; 10/21/1657065612.4981184; 11/23/1657065613.4981074; 11/23/1657065613.4981074; 12/25/1657065614.4980981; 12/25/1657065614.4980981; 13/27/1657065615.4981084; 13/27/1657065615.4981084; 13/27/1657065615.4981084; 14/29/1657065616.4981072; 14/29/1657065616.4981072; 15/31/1657065617.4981146; 15/31/1657065617.4981146; 16/33/1657065618.4980819; 16/33/1657065618.4980819; 17/35/1657065619.4980922; 17/35/1657065619.4980922; 18/37/1657065620.4980817; 19/38/1657065620.9980962; 20/39/1657065621.4980831`; time window: `2026-08-02T17:20:39Z to 2026-08-02T17:21:09Z`; diagnostic (non-authoritative).
+
+Verdict: PASS.
+
+Conclusion: It supports pre-admission root-cause diagnosis only; it cannot establish P1-2 effectiveness.
+
+### Occupied-start close-up
+
+![Occupied-start close-up](../../results/planner_validation/exports/test_planner_p1_degraded_lidar_good_gnss_degraded_lidar_good_1785691239134/p1_pre_admission_diagnostic/pre_admission_occupied_start.png)
+
+Observation: Recorded occupied samples 0–5=53.
+
+Run ID: `1917ed284f6c4c97a897bd3d194993a7`; HEAD: `913160cf721f450fdda18412f08da49c94c2a9b4`; runtime hashes: `bspline_library=7b137031f395d0f0b96e56f26e1ea9f1a3141bc1668934bc82905910e343e6d4, launch=ef97513db024686bd34db2b1c56e14a51aad9944feae1efbbe467e0ccf3c2517, planner_executable=026ccbac054ae1c2b9f8b7ba0e15cc6f338cf9c790eff45665a700b43bb83e9a`; export: `/home/dev/ws_iap/src/iap/results/planner_validation/exports/test_planner_p1_degraded_lidar_good_gnss_degraded_lidar_good_1785691239134`; bag: `/home/dev/ws_iap/src/iap/results/planner_validation/bags/test_planner_p1_degraded_lidar_good_gnss_degraded_lidar_good_20260802T172039Z`; attempts/generations/query-base: `1/0/1657065600.3091443; 1/0/1657065600.3091443; 2/1/1657065602.5070639; 2/1/1657065602.5070639; 2/1/1657065602.5070639; 3/3/1657065603.4980941; 3/3/1657065603.4980941; 4/5/1657065604.498106; 4/5/1657065604.498106; 4/5/1657065604.498106; 5/6/1657065604.9980764; 5/6/1657065604.9980764; 6/8/1657065605.9980845; 6/8/1657065605.9980845; 6/8/1657065605.9980845; 7/10/1657065606.9980948; 7/10/1657065606.9980948; 8/12/1657065607.9980919; 8/12/1657065607.9980919; 8/12/1657065607.9980919; 9/13/1657065608.498107; 9/13/1657065608.498107; 10/21/1657065612.4981184; 10/21/1657065612.4981184; 10/21/1657065612.4981184; 10/21/1657065612.4981184; 10/21/1657065612.4981184; 11/23/1657065613.4981074; 11/23/1657065613.4981074; 12/25/1657065614.4980981; 12/25/1657065614.4980981; 13/27/1657065615.4981084; 13/27/1657065615.4981084; 13/27/1657065615.4981084; 14/29/1657065616.4981072; 14/29/1657065616.4981072; 15/31/1657065617.4981146; 15/31/1657065617.4981146; 16/33/1657065618.4980819; 16/33/1657065618.4980819; 17/35/1657065619.4980922; 17/35/1657065619.4980922; 18/37/1657065620.4980817; 19/38/1657065620.9980962; 20/39/1657065621.4980831`; time window: `2026-08-02T17:20:39Z to 2026-08-02T17:21:09Z`; diagnostic (non-authoritative).
+
+Verdict: UNAVAILABLE.
+
+Conclusion: It supports pre-admission root-cause diagnosis only; it cannot establish P1-2 effectiveness.
+
+### Base optimizer lifecycle
+
+![Base optimizer lifecycle](../../results/planner_validation/exports/test_planner_p1_degraded_lidar_good_gnss_degraded_lidar_good_1785691239134/p1_pre_admission_diagnostic/pre_admission_base_lifecycle.png)
+
+Observation: Rendered directly from the explicit bundle; 3274 lifecycle rows and 3200 profile samples.
+
+Run ID: `1917ed284f6c4c97a897bd3d194993a7`; HEAD: `913160cf721f450fdda18412f08da49c94c2a9b4`; runtime hashes: `bspline_library=7b137031f395d0f0b96e56f26e1ea9f1a3141bc1668934bc82905910e343e6d4, launch=ef97513db024686bd34db2b1c56e14a51aad9944feae1efbbe467e0ccf3c2517, planner_executable=026ccbac054ae1c2b9f8b7ba0e15cc6f338cf9c790eff45665a700b43bb83e9a`; export: `/home/dev/ws_iap/src/iap/results/planner_validation/exports/test_planner_p1_degraded_lidar_good_gnss_degraded_lidar_good_1785691239134`; bag: `/home/dev/ws_iap/src/iap/results/planner_validation/bags/test_planner_p1_degraded_lidar_good_gnss_degraded_lidar_good_20260802T172039Z`; attempts/generations/query-base: `1/0/1657065600.3091443; 1/0/1657065600.3091443; 2/1/1657065602.5070639; 2/1/1657065602.5070639; 2/1/1657065602.5070639; 3/3/1657065603.4980941; 3/3/1657065603.4980941; 4/5/1657065604.498106; 4/5/1657065604.498106; 4/5/1657065604.498106; 5/6/1657065604.9980764; 5/6/1657065604.9980764; 6/8/1657065605.9980845; 6/8/1657065605.9980845; 6/8/1657065605.9980845; 7/10/1657065606.9980948; 7/10/1657065606.9980948; 8/12/1657065607.9980919; 8/12/1657065607.9980919; 8/12/1657065607.9980919; 9/13/1657065608.498107; 9/13/1657065608.498107; 10/21/1657065612.4981184; 10/21/1657065612.4981184; 10/21/1657065612.4981184; 10/21/1657065612.4981184; 10/21/1657065612.4981184; 11/23/1657065613.4981074; 11/23/1657065613.4981074; 12/25/1657065614.4980981; 12/25/1657065614.4980981; 13/27/1657065615.4981084; 13/27/1657065615.4981084; 13/27/1657065615.4981084; 14/29/1657065616.4981072; 14/29/1657065616.4981072; 15/31/1657065617.4981146; 15/31/1657065617.4981146; 16/33/1657065618.4980819; 16/33/1657065618.4980819; 17/35/1657065619.4980922; 17/35/1657065619.4980922; 18/37/1657065620.4980817; 19/38/1657065620.9980962; 20/39/1657065621.4980831`; time window: `2026-08-02T17:20:39Z to 2026-08-02T17:21:09Z`; diagnostic (non-authoritative).
+
+Verdict: PASS.
+
+Conclusion: It confirms base planning partially succeeded but strict P1 pre-admission did not produce candidate evidence.
+
+### P1 lifecycle swimlane
+
+![P1 lifecycle swimlane](../../results/planner_validation/exports/test_planner_p1_degraded_lidar_good_gnss_degraded_lidar_good_1785691239134/p1_pre_admission_diagnostic/pre_admission_swimlane.png)
+
+Observation: Rendered directly from the explicit bundle; 3274 lifecycle rows and 3200 profile samples.
+
+Run ID: `1917ed284f6c4c97a897bd3d194993a7`; HEAD: `913160cf721f450fdda18412f08da49c94c2a9b4`; runtime hashes: `bspline_library=7b137031f395d0f0b96e56f26e1ea9f1a3141bc1668934bc82905910e343e6d4, launch=ef97513db024686bd34db2b1c56e14a51aad9944feae1efbbe467e0ccf3c2517, planner_executable=026ccbac054ae1c2b9f8b7ba0e15cc6f338cf9c790eff45665a700b43bb83e9a`; export: `/home/dev/ws_iap/src/iap/results/planner_validation/exports/test_planner_p1_degraded_lidar_good_gnss_degraded_lidar_good_1785691239134`; bag: `/home/dev/ws_iap/src/iap/results/planner_validation/bags/test_planner_p1_degraded_lidar_good_gnss_degraded_lidar_good_20260802T172039Z`; attempts/generations/query-base: `1/0/1657065600.3091443; 1/0/1657065600.3091443; 2/1/1657065602.5070639; 2/1/1657065602.5070639; 2/1/1657065602.5070639; 3/3/1657065603.4980941; 3/3/1657065603.4980941; 4/5/1657065604.498106; 4/5/1657065604.498106; 4/5/1657065604.498106; 5/6/1657065604.9980764; 5/6/1657065604.9980764; 6/8/1657065605.9980845; 6/8/1657065605.9980845; 6/8/1657065605.9980845; 7/10/1657065606.9980948; 7/10/1657065606.9980948; 8/12/1657065607.9980919; 8/12/1657065607.9980919; 8/12/1657065607.9980919; 9/13/1657065608.498107; 9/13/1657065608.498107; 10/21/1657065612.4981184; 10/21/1657065612.4981184; 10/21/1657065612.4981184; 10/21/1657065612.4981184; 10/21/1657065612.4981184; 11/23/1657065613.4981074; 11/23/1657065613.4981074; 12/25/1657065614.4980981; 12/25/1657065614.4980981; 13/27/1657065615.4981084; 13/27/1657065615.4981084; 13/27/1657065615.4981084; 14/29/1657065616.4981072; 14/29/1657065616.4981072; 15/31/1657065617.4981146; 15/31/1657065617.4981146; 16/33/1657065618.4980819; 16/33/1657065618.4980819; 17/35/1657065619.4980922; 17/35/1657065619.4980922; 18/37/1657065620.4980817; 19/38/1657065620.9980962; 20/39/1657065621.4980831`; time window: `2026-08-02T17:20:39Z to 2026-08-02T17:21:09Z`; diagnostic (non-authoritative).
+
+Verdict: PASS.
+
+Conclusion: It confirms base planning partially succeeded but strict P1 pre-admission did not produce candidate evidence.
+
+### Artifact/provenance timeline
+
+![Artifact/provenance timeline](../../results/planner_validation/exports/test_planner_p1_degraded_lidar_good_gnss_degraded_lidar_good_1785691239134/p1_pre_admission_diagnostic/pre_admission_provenance.png)
+
+Observation: Rendered directly from the explicit bundle; 3274 lifecycle rows and 3200 profile samples.
+
+Run ID: `1917ed284f6c4c97a897bd3d194993a7`; HEAD: `913160cf721f450fdda18412f08da49c94c2a9b4`; runtime hashes: `bspline_library=7b137031f395d0f0b96e56f26e1ea9f1a3141bc1668934bc82905910e343e6d4, launch=ef97513db024686bd34db2b1c56e14a51aad9944feae1efbbe467e0ccf3c2517, planner_executable=026ccbac054ae1c2b9f8b7ba0e15cc6f338cf9c790eff45665a700b43bb83e9a`; export: `/home/dev/ws_iap/src/iap/results/planner_validation/exports/test_planner_p1_degraded_lidar_good_gnss_degraded_lidar_good_1785691239134`; bag: `/home/dev/ws_iap/src/iap/results/planner_validation/bags/test_planner_p1_degraded_lidar_good_gnss_degraded_lidar_good_20260802T172039Z`; attempts/generations/query-base: `1/0/1657065600.3091443; 1/0/1657065600.3091443; 2/1/1657065602.5070639; 2/1/1657065602.5070639; 2/1/1657065602.5070639; 3/3/1657065603.4980941; 3/3/1657065603.4980941; 4/5/1657065604.498106; 4/5/1657065604.498106; 4/5/1657065604.498106; 5/6/1657065604.9980764; 5/6/1657065604.9980764; 6/8/1657065605.9980845; 6/8/1657065605.9980845; 6/8/1657065605.9980845; 7/10/1657065606.9980948; 7/10/1657065606.9980948; 8/12/1657065607.9980919; 8/12/1657065607.9980919; 8/12/1657065607.9980919; 9/13/1657065608.498107; 9/13/1657065608.498107; 10/21/1657065612.4981184; 10/21/1657065612.4981184; 10/21/1657065612.4981184; 10/21/1657065612.4981184; 10/21/1657065612.4981184; 11/23/1657065613.4981074; 11/23/1657065613.4981074; 12/25/1657065614.4980981; 12/25/1657065614.4980981; 13/27/1657065615.4981084; 13/27/1657065615.4981084; 13/27/1657065615.4981084; 14/29/1657065616.4981072; 14/29/1657065616.4981072; 15/31/1657065617.4981146; 15/31/1657065617.4981146; 16/33/1657065618.4980819; 16/33/1657065618.4980819; 17/35/1657065619.4980922; 17/35/1657065619.4980922; 18/37/1657065620.4980817; 19/38/1657065620.9980962; 20/39/1657065621.4980831`; time window: `2026-08-02T17:20:39Z to 2026-08-02T17:21:09Z`; diagnostic (non-authoritative).
+
+Verdict: PASS.
+
+Conclusion: It supports pre-admission root-cause diagnosis only; it cannot establish P1-2 effectiveness.
+
+## 2026-08-02 P1 pre-admission / fixed-lambda physical-end terminal record
+
+- Latest formal authoritative run: none; no 90-second pair or formal analyzer was run.
+- Latest diagnostic smoke: `1917ed284f6c4c97a897bd3d194993a7`, clean `HEAD=913160cf721f450fdda18412f08da49c94c2a9b4`; recorder/metadata/manifest/validator and the one diagnostic analyzer passed.
+- Three P1 admissions (attempts 18–20) emitted 12 optimizer-success, fixed-support `200/200` candidate rows. All 12 have higher post fixed-200 mean and positive raw-P1-gradient·displacement; `rank_eligible=0`. Winners `18/1`, `19/4`, and `20/4` were retained-incumbent rejections with paired `200/200` profile evidence.
+- H1 is rejected because base optimization retained the seed time parameterization. Deterministic fixed-200 raw-gradient descent/finite-difference coverage and matching raw-P1/fixed-200 costs support H2; pairwise control-point/profile matrices and the P0-occupied/base-map disagreement remain open.
+- Progression authority: none. Entry-to-formal fails because no candidate is eligible or replaces the incumbent with required mean/max non-regression and one strict decrease.
+- Final branch: **FAIL -> P1 pre-admission temporal/full-support debug**.
+- P1-3 permission: denied. No P1-3 and no lambda sweep were run.
