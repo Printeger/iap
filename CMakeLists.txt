@@ -641,6 +641,10 @@ if(DEFINED ENV{ROS_VERSION})
         NAME test_phase2_summary_schema
         COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test/test_phase2_summary_schema.py
       )
+      add_test(
+        NAME test_verify_planner_recorder_smoke
+        COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test/test_verify_planner_recorder_smoke.py
+      )
     endif()
     ament_export_include_directories(include ${EIGEN3_INCLUDE_DIR} ${OpenCV_INCLUDE_DIRS})
     ament_export_libraries(${iap_LIBRARIES} ${GTSAM_LIBRARIES} fmt spdlog::spdlog)

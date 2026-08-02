@@ -71,7 +71,14 @@ def main():
     errors = []
     if not bag_dir.is_dir(): errors.append(f"missing bag: {bag_dir}")
     if not manifest_path.is_file(): errors.append(f"missing manifest: {manifest_path}")
-    manifest = json.loads(manifest_path.read_text()) if manifest_path.is_file() else {}
+    if manifest_path.is_file():
+        try:
+            manifest = json.loads(manifest_path.read_text())
+        except (OSError, json.JSONDecodeError) as exc:
+            manifest = {}
+            errors.append(f"invalid manifest: {manifest_path}: {exc}")
+    else:
+        manifest = {}
     provenance = manifest.get("artifact_provenance", {})
     if provenance.get("schema_version") != SCHEMA or provenance.get("run_id") != args.run_id:
         errors.append("manifest schema/run-id does not match explicit bundle")
@@ -118,7 +125,8 @@ def main():
             decision = matching_decisions[0]
             if truthy(decision.get("replacement_accepted")) or decision.get("final_trajectory_source") != "retained_incumbent":
                 errors.append("replacement decision does not identify retained incumbent final source")
-            if not decision.get("publish_identity", "").startswith("incumbent:"):
+            expected_publish_identity = f"incumbent:{decision.get('incumbent_trajectory_id', '')}"
+            if decision.get("publish_identity") != expected_publish_identity:
                 errors.append("retained replacement decision does not publish the incumbent identity")
             matching = [r for r in profiles
                         if r.get("planning_attempt_id") == decision.get("planning_attempt_id")
@@ -138,6 +146,9 @@ def main():
                                    published.get("snapshot_generation_id"), published.get("query_base_time_s"))
                 if published_tuple == rejected_tuple:
                     errors.append("rejected candidate appears in accepted-profile publish identity")
+                if (published.get("trajectory_id") == decision.get("incumbent_trajectory_id") and
+                    published.get("final_trajectory_source") == "retained_incumbent"):
+                    break
 
     # 1: top-down scene
     fig, ax = plt.subplots(figsize=(7, 5))
@@ -269,13 +280,14 @@ def main():
             f"{','.join('/'.join(str(row.get(k, '?')) for k in ('planning_attempt_id', 'candidate_id', 'snapshot_generation_id', 'query_base_time_s')) for row in candidates) or 'none'}`; "
             f"snapshot/query-base window: `{provenance.get('process_start_stamp_utc', 'unknown')} to {provenance.get('process_end_stamp_utc', 'unknown')}`; "
             "diagnostic (non-authoritative).")
+        empty = not candidates
         figures = [
-            ("Full scenario top-down", "p1_diag_topdown_scene.png", "No candidate trajectory was emitted; any plotted retained comparison is diagnostic only."),
+            ("Full scenario top-down", "p1_diag_topdown_scene.png", "No candidate trajectory was emitted; any plotted retained comparison is diagnostic only." if empty else f"{len(candidates)} candidate rows were rendered from the explicit bundle."),
             ("Fan-out funnel", "p1_diag_fanout_funnel.png", f"{len(candidates)} candidate rows were present in the explicit bundle."),
-            ("Mean/max delta scatter", "p1_diag_mean_max_delta_scatter.png", "No point can meet an effectiveness gate when candidate rows are absent."),
-            ("Candidate convergence/collapse", "p1_diag_candidate_convergence.png", "This run has no candidate pairwise evidence; collapse is therefore unassessed."),
-            ("Objective decomposition", "p1_diag_objective_decomposition.png", "No optimizer objective row was emitted."),
-            ("Gradient/displacement", "p1_diag_gradient_displacement.png", "Gradient/gate direction is unassessed without candidate rows."),
+            ("Mean/max delta scatter", "p1_diag_mean_max_delta_scatter.png", "No point can meet an effectiveness gate when candidate rows are absent." if empty else "Fixed-200 pre/post mean and max deltas are plotted per attempt/candidate."),
+            ("Candidate convergence/collapse", "p1_diag_candidate_convergence.png", "This run has no candidate pairwise evidence; collapse is therefore unassessed." if empty else "Candidate terminal displacement and objective evidence are plotted; pairwise sidecar evidence remains required for collapse proof."),
+            ("Objective decomposition", "p1_diag_objective_decomposition.png", "No optimizer objective row was emitted." if empty else "Pre/post objective components are shown separately for each attempt."),
+            ("Gradient/displacement", "p1_diag_gradient_displacement.png", "Gradient/gate direction is unassessed without candidate rows." if empty else "Raw/total gradient-to-displacement and fixed-lattice deltas are shown."),
             ("Per-attempt retained profile", "p1_diag_profile_comparison.png", f"{len(retained)} selected-and-retained candidate decisions were observed."),
             ("Lifecycle swimlane", "p1_diag_lifecycle_swimlane.png", "Lifecycle events are shown only from the explicit run timeline."),
             ("Artifact/provenance timeline", "p1_diag_artifact_provenance_timeline.png", "Recorder and launch bounds are shown from manifest provenance."),
