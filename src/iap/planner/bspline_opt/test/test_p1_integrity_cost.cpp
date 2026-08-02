@@ -733,6 +733,9 @@ TEST(P1IntegrityCostTest, FixedLatticeModeAndRiskGradientSupplementAreDeterminis
   config.metrics_only = false;
   config.lambda_integrity = 0.00001;
   config.objective_aggregation_mode = "fixed_200_mean";
+  // This H4 finite-difference check validates sampling/projection, not the
+  // separately tested conservative gradient clip.
+  config.integrity_grad_norm_max = 100.0;
   auto optimizer = makeOptimizer(config, &swarm);
   optimizer->setRiskSnapshot(snapshot, snapshot->stamp_s());
   optimizer->setBsplineInterval(0.1);
@@ -763,17 +766,39 @@ TEST(P1IntegrityCostTest, Fixed200RawGradientProbeDescends) {
   config.metrics_only = false;
   config.lambda_integrity = 0.00001;
   config.objective_aggregation_mode = "fixed_200_mean";
+  // Validate lattice/projection itself, independently of the conservative
+  // per-sample clip (covered by GradientClippingIsRecorded).
+  config.integrity_grad_norm_max = 100.0;
   auto optimizer = makeOptimizer(config, &swarm);
   optimizer->setRiskSnapshot(snapshot, snapshot->stamp_s());
   double before = 0.0;
   Eigen::MatrixXd gradient;
   ASSERT_TRUE(optimizer->evaluateP1RawCostForTest(q, 0.1, before, gradient));
-  ASSERT_GT(gradient.norm(), 0.0);
-  Eigen::MatrixXd probe = q - 0.01 * gradient / gradient.norm();
+  // Match the L-BFGS variable map: the spline prefix is immutable.  This is
+  // deliberately not a whole-control-point test, because that could hide a
+  // projection error in the optimizer callback.
+  Eigen::MatrixXd active_gradient = Eigen::MatrixXd::Zero(q.rows(), q.cols());
+  active_gradient.rightCols(q.cols() - optimizer->getOrder()) =
+      gradient.rightCols(q.cols() - optimizer->getOrder());
+  ASSERT_GT(active_gradient.norm(), 0.0);
+  Eigen::MatrixXd probe = q - 0.01 * active_gradient / active_gradient.norm();
   double after = 0.0;
   Eigen::MatrixXd after_gradient;
   ASSERT_TRUE(optimizer->evaluateP1RawCostForTest(probe, 0.1, after, after_gradient));
   EXPECT_LT(after, before);
+
+  // H4: on the same fixed-200 lattice, the raw callback gradient must agree
+  // with a central finite difference along the actual active variable block.
+  constexpr double kFiniteDifferenceStep = 1.0e-5;
+  const Eigen::MatrixXd direction = active_gradient / active_gradient.norm();
+  double plus = 0.0, minus = 0.0;
+  Eigen::MatrixXd ignored;
+  ASSERT_TRUE(optimizer->evaluateP1RawCostForTest(
+      q + kFiniteDifferenceStep * direction, 0.1, plus, ignored));
+  ASSERT_TRUE(optimizer->evaluateP1RawCostForTest(
+      q - kFiniteDifferenceStep * direction, 0.1, minus, ignored));
+  EXPECT_NEAR((plus - minus) / (2.0 * kFiniteDifferenceStep),
+              gradient.cwiseProduct(direction).sum(), 1.0e-6);
 }
 
 TEST(P1IntegrityCostTest, SnapshotGenerationStaysFixedUntilReset) {

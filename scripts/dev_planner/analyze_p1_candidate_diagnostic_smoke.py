@@ -10,6 +10,7 @@ import argparse
 import csv
 import json
 import math
+import os
 from pathlib import Path
 
 import matplotlib
@@ -21,6 +22,7 @@ NAMES = {
     "candidate": "planner_p1_candidate_optimization.csv",
     "decision": "planner_p1_replacement_decision.csv",
     "profile": "planner_p1_candidate_retained_profile.csv",
+    "accepted_profile": "planner_p1_accepted_trajectory_risk_profile.csv",
     "timeline": "planner_p1_planning_context_timeline.csv",
 }
 
@@ -59,6 +61,8 @@ def main():
     parser.add_argument("--bag-dir", required=True, type=Path)
     parser.add_argument("--run-id", required=True)
     parser.add_argument("--output-dir", type=Path)
+    parser.add_argument("--main-report", type=Path,
+                        help="append per-figure diagnostic evidence to this primary report")
     args = parser.parse_args()
     export_dir, bag_dir = args.export_dir.resolve(), args.bag_dir.resolve()
     out_dir = (args.output_dir or export_dir / "p1_candidate_diagnostic_smoke").resolve()
@@ -105,13 +109,17 @@ def main():
         for candidate in retained:
             matching_decisions = [r for r in decisions
                                   if r.get("planning_attempt_id") == candidate.get("planning_attempt_id")
-                                  and r.get("optimizer_selected_candidate_id") == candidate.get("candidate_id")]
+                                  and r.get("optimizer_selected_candidate_id") == candidate.get("candidate_id")
+                                  and r.get("snapshot_generation_id") == candidate.get("snapshot_generation_id")
+                                  and r.get("query_base_time_s") == candidate.get("query_base_time_s")]
             if len(matching_decisions) != 1:
                 errors.append("retained optimizer selection does not have one matching replacement decision")
                 continue
             decision = matching_decisions[0]
             if truthy(decision.get("replacement_accepted")) or decision.get("final_trajectory_source") != "retained_incumbent":
                 errors.append("replacement decision does not identify retained incumbent final source")
+            if not decision.get("publish_identity", "").startswith("incumbent:"):
+                errors.append("retained replacement decision does not publish the incumbent identity")
             matching = [r for r in profiles
                         if r.get("planning_attempt_id") == decision.get("planning_attempt_id")
                         and r.get("candidate_id") == decision.get("optimizer_selected_candidate_id")]
@@ -121,6 +129,13 @@ def main():
                 errors.append("retained decision does not have paired 200-sample profiles")
             if any(r.get("final_trajectory_source") != "retained_incumbent" for r in matching):
                 errors.append("retained comparison profile does not identify incumbent final source")
+            rejected_tuple = (candidate.get("planning_attempt_id"), candidate.get("candidate_id"),
+                              candidate.get("snapshot_generation_id"), candidate.get("query_base_time_s"))
+            for published in data["accepted_profile"]:
+                published_tuple = (published.get("planning_attempt_id"), published.get("candidate_id"),
+                                   published.get("snapshot_generation_id"), published.get("query_base_time_s"))
+                if published_tuple == rejected_tuple:
+                    errors.append("rejected candidate appears in accepted-profile publish identity")
 
     # 1: top-down scene
     fig, ax = plt.subplots(figsize=(7, 5))
@@ -170,14 +185,15 @@ def main():
     ax.legend() if profiles else ax.text(.5, .5, "not retained", ha="center")
     save(fig, out_dir / "p1_diag_profile_comparison.png")
 
-    # 5: objective vs gate
+    # 5: gradient/displacement direction against the fixed-lattice gate.
     fig, ax = plt.subplots(figsize=(8, 4))
     ids = [r.get("candidate_id", "?") for r in candidates]
-    ax.plot(ids, [num(r, "post_raw_p1_cost") - num(r, "pre_raw_p1_cost") for r in candidates], "o-", label="objective Δ")
+    ax.plot(ids, [num(r, "grad_integrity_dot_displacement") for r in candidates], "o-", label="raw P1 gradient · displacement")
+    ax.plot(ids, [num(r, "total_gradient_dot_displacement") for r in candidates], "d-", label="total gradient · displacement")
     ax.plot(ids, [num(r, "post_mean_c_pi") - num(r, "pre_mean_c_pi") for r in candidates], "s-", label="gate mean Δ")
     ax.plot(ids, [num(r, "post_max_c_pi") - num(r, "pre_max_c_pi") for r in candidates], "^-", label="gate max Δ")
-    ax.axhline(0, color="black", lw=.7); ax.legend(); ax.set(title="Objective / admission-gate alignment", xlabel="candidate")
-    save(fig, out_dir / "p1_diag_objective_gate_alignment.png")
+    ax.axhline(0, color="black", lw=.7); ax.legend(); ax.set(title="Gradient / displacement and admission-gate alignment", xlabel="candidate")
+    save(fig, out_dir / "p1_diag_gradient_displacement.png")
 
     # 6: convergence/collapse, using hashes and final objective proximity.
     fig, ax = plt.subplots(figsize=(8, 4))
@@ -237,6 +253,36 @@ def main():
         f"- Time window: {provenance.get('process_start_stamp_utc', 'unknown')} to {provenance.get('process_end_stamp_utc', 'unknown')}",
         f"- Diagnostic status: {status}", *(f"- Error: {error}" for error in errors), "",
     ]))
+    if args.main_report:
+        main_report = args.main_report.resolve()
+        main_report.parent.mkdir(parents=True, exist_ok=True)
+        runtime = provenance.get("runtime_paths", {})
+        runtime_hashes = ", ".join(
+            f"{name}={value.get('sha256', 'unknown')}" for name, value in runtime.items()
+            if isinstance(value, dict)) or "unknown"
+        metadata = (
+            f"Run ID: `{args.run_id}`; HEAD: `{provenance.get('git_commit', 'unknown')}`; "
+            f"runtime hashes: `{runtime_hashes}`; export: `{export_dir}`; bag: `{bag_dir}`; "
+            f"attempt/candidate/generation/query-base: `"
+            f"{','.join('/'.join(str(row.get(k, '?')) for k in ('planning_attempt_id', 'candidate_id', 'snapshot_generation_id', 'query_base_time_s')) for row in candidates) or 'none'}`; "
+            f"snapshot/query-base window: `{provenance.get('process_start_stamp_utc', 'unknown')} to {provenance.get('process_end_stamp_utc', 'unknown')}`; "
+            "diagnostic (non-authoritative).")
+        figures = [
+            ("Full scenario top-down", "p1_diag_topdown_scene.png", "No candidate trajectory was emitted; any plotted retained comparison is diagnostic only."),
+            ("Fan-out funnel", "p1_diag_fanout_funnel.png", f"{len(candidates)} candidate rows were present in the explicit bundle."),
+            ("Mean/max delta scatter", "p1_diag_mean_max_delta_scatter.png", "No point can meet an effectiveness gate when candidate rows are absent."),
+            ("Candidate convergence/collapse", "p1_diag_candidate_convergence.png", "This run has no candidate pairwise evidence; collapse is therefore unassessed."),
+            ("Objective decomposition", "p1_diag_objective_decomposition.png", "No optimizer objective row was emitted."),
+            ("Gradient/displacement", "p1_diag_gradient_displacement.png", "Gradient/gate direction is unassessed without candidate rows."),
+            ("Per-attempt retained profile", "p1_diag_profile_comparison.png", f"{len(retained)} selected-and-retained candidate decisions were observed."),
+            ("Lifecycle swimlane", "p1_diag_lifecycle_swimlane.png", "Lifecycle events are shown only from the explicit run timeline."),
+            ("Artifact/provenance timeline", "p1_diag_artifact_provenance_timeline.png", "Recorder and launch bounds are shown from manifest provenance."),
+        ]
+        with main_report.open("a") as handle:
+            handle.write("\n## 2026-08-02 diagnostic-smoke figure evidence (non-authoritative)\n\n")
+            for title, filename, observation in figures:
+                image = Path(os.path.relpath(out_dir / filename, main_report.parent))
+                handle.write(f"### {title}\n\n![{title}]({image})\n\nObservation: {observation}\n\n{metadata}\n\nVerdict: {status}.\n\nConclusion: This diagnostic figure does not grant P1-2 effectiveness or progression.\n\n")
     print(report)
     return 0 if not errors else 2
 

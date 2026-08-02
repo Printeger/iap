@@ -6,20 +6,23 @@ import json
 from pathlib import Path
 
 
-def main() -> int:
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--export-dir", required=True, type=Path)
-    parser.add_argument("--bag-dir", required=True, type=Path)
-    args = parser.parse_args()
-    export_dir, bag_dir = args.export_dir.resolve(), args.bag_dir.resolve()
+def validate(export_dir: Path, bag_dir: Path) -> dict:
+    """Return all preflight failures; malformed evidence never raises."""
+    export_dir, bag_dir = export_dir.resolve(), bag_dir.resolve()
     manifest_path = export_dir / "test_planner_manifest.json"
     errors = []
+    manifest = {}
     if not manifest_path.is_file():
         errors.append(f"missing manifest: {manifest_path}")
-        manifest = {}
     else:
-        manifest = json.loads(manifest_path.read_text())
+        try:
+            manifest = json.loads(manifest_path.read_text())
+        except (OSError, json.JSONDecodeError) as exc:
+            errors.append(f"invalid manifest: {manifest_path}: {exc}")
     provenance = manifest.get("artifact_provenance", {})
+    if not isinstance(provenance, dict):
+        errors.append("manifest artifact_provenance is not an object")
+        provenance = {}
     metadata = bag_dir / "metadata.yaml"
     if not bag_dir.is_dir(): errors.append(f"missing bag directory: {bag_dir}")
     if not metadata.is_file() or not metadata.stat().st_size:
@@ -34,9 +37,18 @@ def main() -> int:
         errors.append(f"recorder did not complete normally: {provenance.get('recorder_exit_code')}")
     if not provenance.get("recorder_command"):
         errors.append("manifest lacks recorder command")
-    print(json.dumps({"passed": not errors, "errors": errors,
-                      "manifest": str(manifest_path), "bag": str(bag_dir)}, indent=2))
-    return 0 if not errors else 2
+    return {"passed": not errors, "errors": errors,
+            "manifest": str(manifest_path), "bag": str(bag_dir)}
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--export-dir", required=True, type=Path)
+    parser.add_argument("--bag-dir", required=True, type=Path)
+    args = parser.parse_args()
+    result = validate(args.export_dir, args.bag_dir)
+    print(json.dumps(result, indent=2))
+    return 0 if result["passed"] else 2
 
 
 if __name__ == "__main__":
