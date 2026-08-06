@@ -14,6 +14,7 @@ TARGETS = (
     (
         "bspline_opt/test_p1_integrity_cost",
         "P1IntegrityCostTest.FixedLambdaConflictFixtureCharacterizesLegacyRegression:"
+        "P1IntegrityCostTest.LegacyOneStageCollapsesFourDistinctProjectedRiskSeeds:"
         "P1IntegrityCostTest.FixedLambdaTwoStagePreferenceDescendsRisk",
     ),
     (

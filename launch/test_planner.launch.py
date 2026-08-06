@@ -89,7 +89,7 @@ def _runtime_provenance(iap_share, export_dir, bag_output_dir, experiment, scena
         "schema_version": P1_EVIDENCE_SCHEMA_VERSION,
         "run_id": uuid.uuid4().hex,
         "git_commit": git_commit,
-        "baseline_commit": "ca82cb52a05d0c904721dca6c9a3e60c215e9e25",
+        "baseline_commit": "34fa22f17c3778c2f98a777e01516b878c183120",
         "git_worktree_clean": git_worktree_clean,
         "source_repository": str(repo) if repo else "",
         "workspace_root": str(iap_prefix.parents[1]),

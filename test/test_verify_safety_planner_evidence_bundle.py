@@ -51,6 +51,7 @@ class EvidenceBundlePreflightTest(unittest.TestCase):
             "p1.planning_context_timeline_path": str(export / "planner_p1_planning_context_timeline.csv"),
             "artifact_provenance": {
                 "schema_version": preflight.SCHEMA, "run_id": "run-1", "git_commit": "abc",
+                "baseline_commit": preflight.BASELINE_COMMIT,
                 "git_worktree_clean": True, "bag_path": str(bag), "process_start_epoch_s": started,
                 "process_start_stamp_utc": "2026-08-01T00:00:00Z", "process_end_stamp_utc": "2026-08-01T00:00:30Z",
                 "validator_summary_complete": True, "bag_metadata_complete": True,
@@ -111,6 +112,7 @@ class EvidenceBundlePreflightTest(unittest.TestCase):
             for stage, checkpoint in (("base_prepass", "start"),
                                       ("base_prepass", "terminal"),
                                       ("p1_stage", "first_direction"),
+                                      ("p1_stage", "first_accepted_step"),
                                       ("p1_stage", "terminal"))
         ]
         payloads = {
@@ -162,6 +164,75 @@ class EvidenceBundlePreflightTest(unittest.TestCase):
             result = preflight.validate_bundle(export, bag, metrics_only=False, lambda_value=0.00001)
         self.assertFalse(result["passed"])
         self.assertTrue(any("run ID mismatch" in error for error in result["errors"]))
+
+    def test_rejects_wrong_fixed_baseline_commit(self):
+        root, export, bag = self.make_bundle()
+        self.addCleanup(root.cleanup)
+        manifest_path = export / "test_planner_manifest.json"
+        manifest = json.loads(manifest_path.read_text())
+        manifest["artifact_provenance"]["baseline_commit"] = "ca82cb52"
+        manifest_path.write_text(json.dumps(manifest))
+        payload = {"schema_version": preflight.SCHEMA, "run_id": "run-1",
+                   "manifest_path": str(manifest_path),
+                   "export_dir": str(export), "bag_path": str(bag)}
+        with mock.patch.object(
+                preflight, "read_bag_provenance", return_value=([payload], "")):
+            result = preflight.validate_bundle(
+                export, bag, metrics_only=False, lambda_value=0.00001)
+        self.assertFalse(result["passed"])
+        self.assertIn(
+            "manifest baseline commit does not match fixed P1 baseline",
+            result["errors"])
+
+    def test_rejects_missing_first_accepted_optimizer_checkpoint(self):
+        root, export, bag = self.make_bundle()
+        self.addCleanup(root.cleanup)
+        manifest_path = export / "test_planner_manifest.json"
+        path = export / "planner_p1_optimizer_checkpoint.csv"
+        with path.open(newline="") as handle:
+            rows = [row for row in csv.DictReader(handle)
+                    if row["checkpoint"] != "first_accepted_step"]
+        with path.open("w", newline="") as handle:
+            writer = csv.DictWriter(handle, fieldnames=sorted(rows[0]))
+            writer.writeheader(); writer.writerows(rows)
+        payload = {"schema_version": preflight.SCHEMA, "run_id": "run-1",
+                   "manifest_path": str(manifest_path),
+                   "export_dir": str(export), "bag_path": str(bag)}
+        with mock.patch.object(
+                preflight, "read_bag_provenance", return_value=([payload], "")):
+            result = preflight.validate_bundle(
+                export, bag, metrics_only=False, lambda_value=0.00001)
+        self.assertFalse(result["passed"])
+        self.assertTrue(any("lacks optimizer checkpoints" in error
+                            for error in result["errors"]))
+
+    def test_rejects_unrecorded_optimizer_restart(self):
+        root, export, bag = self.make_bundle()
+        self.addCleanup(root.cleanup)
+        manifest_path = export / "test_planner_manifest.json"
+        path = export / "planner_p1_optimizer_checkpoint.csv"
+        with path.open(newline="") as handle:
+            rows = list(csv.DictReader(handle))
+        for row in rows:
+            if (row["candidate_id"] == "1" and
+                    row["stage"] == "p1_stage" and
+                    row["checkpoint"] == "terminal"):
+                row["restart_index"] = "1"
+            else:
+                row["restart_index"] = "0"
+        with path.open("w", newline="") as handle:
+            writer = csv.DictWriter(handle, fieldnames=sorted(rows[0]))
+            writer.writeheader(); writer.writerows(rows)
+        payload = {"schema_version": preflight.SCHEMA, "run_id": "run-1",
+                   "manifest_path": str(manifest_path),
+                   "export_dir": str(export), "bag_path": str(bag)}
+        with mock.patch.object(
+                preflight, "read_bag_provenance", return_value=([payload], "")):
+            result = preflight.validate_bundle(
+                export, bag, metrics_only=False, lambda_value=0.00001)
+        self.assertFalse(result["passed"])
+        self.assertTrue(any("lacks optimizer restart checkpoint" in error
+                            for error in result["errors"]))
 
     def test_rejects_partial_candidate_lattice_support(self):
         root, export, bag = self.make_bundle()

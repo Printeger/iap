@@ -550,6 +550,79 @@ TEST(P1IntegrityCostTest,
   EXPECT_LT(trace.post_total_objective, trace.pre_total_objective);
 }
 
+TEST(P1IntegrityCostTest,
+     LegacyOneStageCollapsesFourDistinctProjectedRiskSeeds) {
+  ego_planner::SwarmTrajData swarm;
+  const Eigen::MatrixXd base = makeFixedLambdaConflictControlPoints();
+  AffineProvider provider(20.0, Eigen::Vector3d(0.0, -1.0, 0.0));
+  auto snapshot = makeSnapshot(provider);
+  auto config = disabledConfig();
+  config.use_integrity_cost = true;
+  config.metrics_only = false;
+  config.lambda_integrity = 0.00001;
+  config.integrity_grad_norm_max = 100.0;
+  config.objective_aggregation_mode = "fixed_200_mean";
+  auto optimizer = makeOptimizer(config, &swarm);
+  ego_planner::BsplineOptimizer::P1PlanningRiskContext context;
+  context.snapshot = snapshot;
+  context.query_base_time_s = snapshot->stamp_s();
+  context.planning_start_s = snapshot->stamp_s();
+  context.planning_attempt_id = 93;
+  optimizer->setP1PlanningRiskContext(context);
+
+  double raw_cost = 0.0;
+  Eigen::MatrixXd raw_gradient;
+  ASSERT_TRUE(optimizer->evaluateP1RawCostForTest(
+      base, 0.1, raw_cost, raw_gradient));
+  raw_gradient.leftCols(optimizer->getOrder()).setZero();
+  const double max_column_norm = raw_gradient.colwise().norm().maxCoeff();
+  ASSERT_GT(max_column_norm, 0.0);
+
+  std::vector<Eigen::MatrixXd> initial_candidates;
+  std::vector<Eigen::MatrixXd> final_candidates;
+  for (const double displacement : {0.0, 0.025, 0.05, 0.10}) {
+    initial_candidates.push_back(
+        base - displacement * raw_gradient / max_column_norm);
+  }
+  double minimum_initial_distance =
+      std::numeric_limits<double>::infinity();
+  for (std::size_t left = 0; left < initial_candidates.size(); ++left) {
+    for (std::size_t right = left + 1;
+         right < initial_candidates.size(); ++right) {
+      minimum_initial_distance = std::min(
+          minimum_initial_distance,
+          (initial_candidates[left] - initial_candidates[right]).norm());
+    }
+  }
+  EXPECT_GT(minimum_initial_distance, 1.0e-2);
+
+  for (std::size_t index = 0; index < initial_candidates.size(); ++index) {
+    context.candidate_id = index + 1;
+    optimizer->setP1PlanningRiskContext(context);
+    Eigen::MatrixXd terminal = initial_candidates[index];
+    double final_cost = 0.0;
+    int iterations = 0;
+    ASSERT_TRUE(optimizer->optimizeReboundCostForTest(
+        terminal, 0.1, 80, final_cost, iterations));
+    const auto trace = optimizer->getLastP1OptimizationTrace();
+    EXPECT_GT(trace.grad_integrity_dot_displacement, 0.0);
+    EXPECT_GT(trace.post_mean_c_pi, trace.pre_mean_c_pi);
+    EXPECT_GT(trace.post_max_c_pi, trace.pre_max_c_pi);
+    final_candidates.push_back(std::move(terminal));
+  }
+
+  double maximum_final_distance = 0.0;
+  for (std::size_t left = 0; left < final_candidates.size(); ++left) {
+    for (std::size_t right = left + 1;
+         right < final_candidates.size(); ++right) {
+      maximum_final_distance = std::max(
+          maximum_final_distance,
+          (final_candidates[left] - final_candidates[right]).norm());
+    }
+  }
+  EXPECT_LT(maximum_final_distance, 1.0e-3);
+}
+
 TEST(P1IntegrityCostTest, FixedLambdaTwoStagePreferenceDescendsRisk) {
   ego_planner::SwarmTrajData swarm;
   const Eigen::MatrixXd topology_seed =
@@ -1398,16 +1471,22 @@ TEST(P1IntegrityCostTest,
 }
 
 TEST(P1IntegrityCostTest,
-     Fixed200SmoothObjectivesCannotImplyHardMaxNonRegressionAtTie) {
+     Fixed200OneDimensionalFixtureHasNoMeanMaxFeasibleImprovement) {
   constexpr int kSampleCount = 200;
   constexpr double kInitialCost = 10.0;
   constexpr double kEpsilon = 1.0e-5;
   constexpr double kTemperature = 0.01;
   constexpr double kAlpha = 0.90;
-  const std::vector<double> initial(kSampleCount, kInitialCost);
-  std::vector<double> candidate(kSampleCount,
-                                kInitialCost - kEpsilon);
-  candidate.front() = kInitialCost + kEpsilon;
+  // This fixture has exactly one feasible scalar degree of freedom x.  Its
+  // first sample is C+x and the remaining 199 samples are C-x.
+  const auto feasible_profile = [](const double x) {
+    std::vector<double> profile(kSampleCount, kInitialCost - x);
+    profile.front() = kInitialCost + x;
+    return profile;
+  };
+  const auto initial = feasible_profile(0.0);
+  const auto candidate = feasible_profile(kEpsilon);
+  const auto opposite_candidate = feasible_profile(-kEpsilon);
 
   const auto mean = [](const std::vector<double>& costs) {
     double sum = 0.0;
@@ -1477,10 +1556,21 @@ TEST(P1IntegrityCostTest,
       *std::max_element(initial.begin(), initial.end());
   const double candidate_max =
       *std::max_element(candidate.begin(), candidate.end());
-  EXPECT_GT(candidate_max, initial_max);
+  EXPECT_GT(*std::max_element(opposite_candidate.begin(),
+                              opposite_candidate.end()),
+            initial_max);
   EXPECT_LT(mean(candidate), mean(initial));
   EXPECT_LT(lse(candidate), lse(initial));
   EXPECT_LT(smooth_cvar(candidate), smooth_cvar(initial));
+
+  // No non-zero feasible x can pass the simultaneous mean/max gate: x>0
+  // raises the first-sample maximum; x<0 raises the mean by -198*x/200; and
+  // x=0 has no strict improvement.  An all-samples-down direction is outside
+  // this deterministic fixture's one-dimensional feasible set.
+  EXPECT_GT(candidate_max, initial_max);
+  EXPECT_GT(mean(opposite_candidate), mean(initial));
+  EXPECT_DOUBLE_EQ(mean(initial), kInitialCost);
+  EXPECT_DOUBLE_EQ(initial_max, kInitialCost);
 
   // At the tied profile all three differentiable objectives assign weight
   // 1/N to every sample.  The exact common directional derivative is

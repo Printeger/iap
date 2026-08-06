@@ -16,6 +16,7 @@ from pathlib import Path
 
 
 SCHEMA = "p1_evidence_provenance_v4"
+BASELINE_COMMIT = "34fa22f17c3778c2f98a777e01516b878c183120"
 CSV_KEYS = {
     "planner_p1_integrity_cost_debug.csv": "p1.debug_csv_path",
     "planner_p1_candidate_optimization.csv": "p1.candidate_optimization_path",
@@ -123,6 +124,8 @@ def validate_bundle(export_dir, bag_dir, *, metrics_only, lambda_value):
         errors.append("manifest bag path does not bind this bag")
     if not str(provenance.get("git_commit", "")) or not provenance.get("git_worktree_clean"):
         errors.append("manifest does not prove a clean git commit")
+    if provenance.get("baseline_commit") != BASELINE_COMMIT:
+        errors.append("manifest baseline commit does not match fixed P1 baseline")
     for key in ("launch", "planner_executable", "bspline_library"):
         entry = (provenance.get("runtime_paths", {}) or {}).get(key, {}) or {}
         path, digest = Path(str(entry.get("path", ""))), str(entry.get("sha256", ""))
@@ -305,8 +308,24 @@ def validate_bundle(export_dir, bag_dir, *, metrics_only, lambda_value):
                        row.get("candidate_id") == candidate_id]
         names = {(row.get("stage"), row.get("checkpoint")) for row in checkpoints}
         if ("p1_stage", "first_direction") not in names or \
+                ("p1_stage", "first_accepted_step") not in names or \
                 ("p1_stage", "terminal") not in names:
             errors.append(f"candidate {attempt}/{candidate_id} lacks optimizer checkpoints")
+        restart_indices = {
+            int(row["restart_index"])
+            for row in checkpoints
+            if str(row.get("restart_index", "")).isdigit() and
+            int(row["restart_index"]) > 0
+        }
+        recorded_restart_indices = {
+            int(row["restart_index"])
+            for row in checkpoints
+            if row.get("checkpoint") == "restart" and
+            str(row.get("restart_index", "")).isdigit()
+        }
+        if not restart_indices.issubset(recorded_restart_indices):
+            errors.append(
+                f"candidate {attempt}/{candidate_id} lacks optimizer restart checkpoint")
         if not metrics_only and (("base_prepass", "start") not in names or
                                  ("base_prepass", "terminal") not in names):
             errors.append(f"candidate {attempt}/{candidate_id} lacks base-prepass checkpoints")
