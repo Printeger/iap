@@ -244,6 +244,41 @@ TEST(P1SoftFallbackPolicyTest,
             ego_planner::P1SoftFallbackAction::DEFER_BASE_INITIAL_FALLBACK);
 }
 
+TEST(P1SoftFallbackPolicyTest,
+     SuccessfulBasePrepassWithoutFullSupportPublishesInitialBaseCandidate) {
+  const auto decision = ego_planner::decideP1BasePrepassFallback({
+      true, false, false});
+
+  EXPECT_EQ(decision.action,
+            ego_planner::P1SoftFallbackAction::PUBLISH_BASE_CANDIDATE);
+  EXPECT_TRUE(decision.publish_candidate);
+  EXPECT_FALSE(decision.objective_allowed);
+  EXPECT_EQ(decision.reason, "base_prepass_no_full_support");
+}
+
+TEST(P1SoftFallbackPolicyTest,
+     SuccessfulBasePrepassWithoutFullSupportKeepsExistingTrajectory) {
+  const auto decision = ego_planner::decideP1BasePrepassFallback({
+      true, false, true});
+
+  EXPECT_EQ(decision.action,
+            ego_planner::P1SoftFallbackAction::KEEP_EXISTING_TRAJECTORY);
+  EXPECT_FALSE(decision.publish_candidate);
+  EXPECT_FALSE(decision.objective_allowed);
+  EXPECT_EQ(decision.reason, "base_prepass_no_full_support");
+}
+
+TEST(P1SoftFallbackPolicyTest, FullSupportAdmitsNormalizedP1Stage) {
+  const auto decision = ego_planner::decideP1BasePrepassFallback({
+      true, true, false});
+
+  EXPECT_EQ(decision.action,
+            ego_planner::P1SoftFallbackAction::USE_P1_CANDIDATE);
+  EXPECT_TRUE(decision.publish_candidate);
+  EXPECT_TRUE(decision.objective_allowed);
+  EXPECT_EQ(decision.reason, "ok");
+}
+
 TEST(P1AcceptedContextValidationTest,
      RejectsMapEdgeThatCannotSupportTrilinearInterpolation) {
   auto snapshot = makeSnapshot(1.0, 10.0);

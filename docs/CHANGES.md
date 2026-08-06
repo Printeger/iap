@@ -3,6 +3,12 @@
 > 规则：任何代码改动必须在这里记录，并包含 IAP-RQ-XXX。
 
 ## Unreleased
+- fix(planner-p1-base-prepass-fallback): IAP-RQ-400 / IAP-RQ-410 — keep P1 a soft preference when the two-stage base prepass succeeds but the fixed-200 risk lattice cannot cover the initial trajectory.
+  - A full-support base prepass still enters only the normalized P1 stage. An unsupported but collision-feasible base result now establishes the initial trajectory when no incumbent exists; with an incumbent it remains fail-closed and keeps that incumbent. Failed base optimization is never published.
+  - Both distinctive and single-candidate planning paths update objective/timeline identity before choosing the next stage, so a base fallback cannot impersonate a P1 optimizer start or emit strict candidate evidence.
+  - The fresh 30-second run `6b8193a91a744d639833a1b819d29cac` exposed the regression: the 4.4-second startup trajectory exceeded the unchanged 2.5-second P0 horizon and every successful prepass was discarded. The failed run and its ten diagnostic figures remain recorded in `docs/dev_planner/safety_planner_test_report.md`.
+  - The diagnostic lifecycle plot now renders large timelines as one vectorized collection and appends its complete report fragment atomically; a 30,000-row regression prevents the prior ten-minute per-row plotting path.
+  - Focused verification: 13 `test_planning_risk_context` tests, the diagnostic/pre-admission Python tests, and the fixed-lambda feedback runner pass. The fixed lambda, 1.0-second stale timeout, P0 geometry/horizons, fixed support, P5 semantics, and P1-3 prohibition are unchanged.
 - feat(planner-p1-evidence-v4): IAP-RQ-320 / IAP-RQ-400 / IAP-RQ-410 — make fixed-lambda convergence, diversity, and occupied-corner attribution independently replayable from one fail-closed evidence bundle.
   - The sole accepted schema is now `p1_evidence_provenance_v4`; launch manifests, validator/preflight, diagnostic smoke, and formal analyzer reject legacy or incomplete bundles.
   - Candidate evidence adds active/full base, raw-P1, normalized-weighted-P1, and total gradient norms; base/P1 cosine; frozen normalization and base-prepass fields; actual normalized-P1/anchor merit decomposition; aggregation parameters; and terminal/selection/replacement identities.

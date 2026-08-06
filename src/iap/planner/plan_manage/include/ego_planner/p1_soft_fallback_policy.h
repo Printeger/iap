@@ -28,6 +28,33 @@ struct P1SoftFallbackDecision {
   std::string reason = "ok";
 };
 
+struct P1BasePrepassFallbackInput {
+  bool base_optimizer_success = false;
+  bool full_p1_support = false;
+  bool has_existing_trajectory = false;
+};
+
+inline P1SoftFallbackDecision decideP1BasePrepassFallback(
+    const P1BasePrepassFallbackInput& input) {
+  if (input.base_optimizer_success && input.full_p1_support) {
+    return {};
+  }
+
+  const std::string reason = input.base_optimizer_success
+      ? "base_prepass_no_full_support"
+      : "base_prepass_optimizer_failure";
+  if (input.base_optimizer_success && !input.has_existing_trajectory) {
+    return {P1SoftFallbackAction::PUBLISH_BASE_CANDIDATE, true, false,
+            false, reason};
+  }
+  if (input.has_existing_trajectory) {
+    return {P1SoftFallbackAction::KEEP_EXISTING_TRAJECTORY, false, false,
+            false, reason};
+  }
+  return {P1SoftFallbackAction::DEFER_BASE_INITIAL_FALLBACK, false, false,
+          true, reason};
+}
+
 inline std::string p1FallbackReason(
     const iap::P1AcceptedContextValidation& validation) {
   if (!validation.snapshot_available) return "snapshot_unavailable";

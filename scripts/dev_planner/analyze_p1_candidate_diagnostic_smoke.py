@@ -60,6 +60,21 @@ def save(fig, path):
     plt.close(fig)
 
 
+def plot_lifecycle(ax, timeline):
+    """Render any timeline size with one vectorized scatter collection."""
+    stages = {stage: index for index, stage in
+              enumerate(sorted({row.get("stage", "") for row in timeline}))}
+    if timeline:
+        ax.scatter([num(row, "stamp_s") for row in timeline],
+                   [stages[row.get("stage", "")] for row in timeline],
+                   c="#2563eb", s=8)
+        ax.set_yticks(list(stages.values()), list(stages.keys()))
+    else:
+        ax.axis("off")
+        ax.text(.5, .5, "UNAVAILABLE", ha="center")
+    ax.set(title="P1 lifecycle swimlane", xlabel="stamp (s)")
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--export-dir", required=True, type=Path)
@@ -302,14 +317,7 @@ def main():
 
     # 6: lifecycle swimlane
     fig, ax = plt.subplots(figsize=(9, 4))
-    stages = {stage: index for index, stage in enumerate(sorted({r.get("stage", "") for r in timeline}))}
-    for row in timeline:
-        ax.scatter(num(row, "stamp_s"), stages[row.get("stage", "")], c="#2563eb")
-    if timeline:
-        ax.set_yticks(list(stages.values()), list(stages.keys()))
-    else:
-        ax.axis("off"); ax.text(.5, .5, "UNAVAILABLE", ha="center")
-    ax.set(title="P1 lifecycle swimlane", xlabel="stamp (s)")
+    plot_lifecycle(ax, timeline)
     save(fig, out_dir / "p1_diag_lifecycle_swimlane.png")
 
     # 9: artifact/provenance timeline.
@@ -369,13 +377,23 @@ def main():
             ("Lifecycle swimlane", "p1_diag_lifecycle_swimlane.png", "Lifecycle events are shown only from the explicit run timeline."),
             ("Artifact/provenance timeline", "p1_diag_artifact_provenance_timeline.png", "Recorder and launch bounds are shown from manifest provenance."),
         ]
+        run_date = str(provenance.get("process_start_stamp_utc", "unknown"))[:10]
+        fragment = [
+            f"\n## {run_date} diagnostic-smoke figure evidence (non-authoritative)\n\n"]
+        for title, filename, observation in figures:
+            image = Path(os.path.relpath(out_dir / filename, main_report.parent))
+            conclusion = lifecycle_conclusion if title == "Lifecycle swimlane" else (
+                "This figure is diagnostic only and cannot establish P1-2 effectiveness or progression.")
+            fragment.append(
+                f"### {title}\n\n![{title}]({image})\n\nObservation: {observation}\n\n"
+                f"{metadata}\n\nVerdict: {status}.\n\nConclusion: {conclusion}\n\n")
+        fragment.append(
+            "### Diagnostic terminal record\n\n"
+            f"Observation: Analyzer completed once for run `{args.run_id}`.\n\n"
+            f"Verdict: {status}.\n\n"
+            "Conclusion: This terminal record supersedes no other run and does not grant formal progression.\n")
         with main_report.open("a") as handle:
-            handle.write("\n## 2026-08-02 diagnostic-smoke figure evidence (non-authoritative)\n\n")
-            for title, filename, observation in figures:
-                image = Path(os.path.relpath(out_dir / filename, main_report.parent))
-                conclusion = lifecycle_conclusion if title == "Lifecycle swimlane" else (
-                    "This figure is diagnostic only and cannot establish P1-2 effectiveness or progression.")
-                handle.write(f"### {title}\n\n![{title}]({image})\n\nObservation: {observation}\n\n{metadata}\n\nVerdict: {status}.\n\nConclusion: {conclusion}\n\n")
+            handle.write("".join(fragment))
     print(report)
     return 0 if not errors else 2
 

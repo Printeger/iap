@@ -920,7 +920,7 @@ namespace ego_planner
     // profile sidecar, but it is not a P1 optimizer start because it lacks
     // full P1 lattice support. Metrics-only remains evidence after valid
     // admission, even though its objective is not applied.
-    const bool write_p1_candidate_trace =
+    bool write_p1_candidate_trace =
         p1_objective_allowed || p1_fallback_reason == "metrics_only";
 
     vector<std::pair<int, int>> segments;
@@ -957,13 +957,15 @@ namespace ego_planner
           p1_config.max_candidates_per_attempt, 1, 8);
       const auto fanout_before_supplement =
           bspline_optimizer_->lastP1FanoutDiagnostics();
-      const bool normalized_p1_stage = p1_objective_allowed &&
+      bool normalized_p1_stage = p1_objective_allowed &&
           !p1_config.metrics_only && p1_config.lambda_integrity != 0.0;
       if (normalized_p1_stage)
       {
         std::vector<ControlPoints> base_candidates;
+        std::vector<ControlPoints> unsupported_base_candidates;
         std::vector<BsplineOptimizer::P1BasePrepassTrace> base_prepasses;
         base_candidates.reserve(trajs.size());
+        unsupported_base_candidates.reserve(trajs.size());
         base_prepasses.reserve(trajs.size());
         for (std::size_t topology_index = 0;
              topology_index < trajs.size(); ++topology_index)
@@ -996,19 +998,41 @@ namespace ego_planner
               !base_success ? "optimizer_failure" :
               !base_full_support ? "fixed_support_not_full" : "ok");
           bspline_optimizer_->clearRiskSnapshot();
-          if (!base_success || !base_full_support)
+          if (!base_success)
             continue;
           base_control_points.points = base_points;
+          if (!base_full_support)
+          {
+            unsupported_base_candidates.push_back(std::move(base_control_points));
+            continue;
+          }
           base_candidates.push_back(std::move(base_control_points));
           base_prepasses.push_back(base_prepass);
         }
         trajs = std::move(base_candidates);
         candidate_prepasses = std::move(base_prepasses);
 
+        const auto prepass_fallback = decideP1BasePrepassFallback({
+            !trajs.empty() || !unsupported_base_candidates.empty(),
+            !trajs.empty(), has_existing_trajectory});
+        normalized_p1_stage =
+            prepass_fallback.action == P1SoftFallbackAction::USE_P1_CANDIDATE;
+        if (prepass_fallback.action ==
+            P1SoftFallbackAction::PUBLISH_BASE_CANDIDATE)
+        {
+          trajs = std::move(unsupported_base_candidates);
+          candidate_prepasses.clear();
+        }
+        else if (!normalized_p1_stage)
+        {
+          trajs.clear();
+          candidate_prepasses.clear();
+        }
+
         // The supplement is generated only after a collision-feasible,
         // full-support base prepass.  Each active control point follows its
         // own projected fixed-200 raw P1 gradient; the base seed is retained.
-        if (trajs.size() == 1 &&
+        if (normalized_p1_stage && trajs.size() == 1 &&
             (fanout_before_supplement.singleton_due_to_empty_segments ||
              fanout_before_supplement.singleton_due_to_degenerate_segments ||
              fanout_before_supplement.singleton_due_to_opposite_direction_unavailable))
@@ -1025,10 +1049,14 @@ namespace ego_planner
           candidate_prepasses.insert(
               candidate_prepasses.end(), supplemental.size(), prepass);
         }
-        const bool p1_admitted = !trajs.empty();
-        p1_objective_allowed = p1_admitted;
-        p1_fallback_reason = p1_admitted ? "none" :
-            "base_prepass_no_full_support";
+        const bool p1_admitted = normalized_p1_stage && !trajs.empty();
+        p1_objective_allowed = prepass_fallback.objective_allowed;
+        p1_fallback_reason = p1_admitted ? "none" : prepass_fallback.reason;
+        planning_risk_context_.p1_objective_allowed = p1_objective_allowed;
+        planning_risk_context_.p1_objective_applied = false;
+        planning_risk_context_.p1_fallback_reason = p1_fallback_reason;
+        write_p1_candidate_trace =
+            p1_objective_allowed || p1_fallback_reason == "metrics_only";
         appendPlanningRiskContextTimeline(
             "p1_admission", plannerNow().seconds(),
             p1_admitted ? "p1_objective" : "base_fallback",
@@ -1321,12 +1349,13 @@ namespace ego_planner
     else
     {
       set_p1_context(selected_p1_candidate_id);
-      const bool normalized_p1_stage = p1_objective_allowed &&
+      bool normalized_p1_stage = p1_objective_allowed &&
           !p1_config.metrics_only && p1_config.lambda_integrity != 0.0;
       BsplineOptimizer::P1BasePrepassTrace base_prepass;
       ControlPoints p1_seed;
       double normalized_final_cost = 0.0;
       bool base_prepass_ready = !normalized_p1_stage;
+      bool base_candidate_ready = base_prepass_ready;
       if (normalized_p1_stage)
       {
         appendPlanningRiskContextTimeline(
@@ -1346,9 +1375,20 @@ namespace ego_planner
           p1_seed = bspline_optimizer_->getControlPoints();
         }
         base_prepass_ready = base_success && base_full_support;
-        p1_objective_allowed = base_prepass_ready;
-        p1_fallback_reason = base_prepass_ready ? "none" :
-            "base_prepass_no_full_support";
+        const auto prepass_fallback = decideP1BasePrepassFallback({
+            base_success, base_full_support, has_existing_trajectory});
+        normalized_p1_stage =
+            prepass_fallback.action == P1SoftFallbackAction::USE_P1_CANDIDATE;
+        base_candidate_ready = normalized_p1_stage ||
+            prepass_fallback.action ==
+                P1SoftFallbackAction::PUBLISH_BASE_CANDIDATE;
+        p1_objective_allowed = prepass_fallback.objective_allowed;
+        p1_fallback_reason = base_prepass_ready ? "none" : prepass_fallback.reason;
+        planning_risk_context_.p1_objective_allowed = p1_objective_allowed;
+        planning_risk_context_.p1_objective_applied = false;
+        planning_risk_context_.p1_fallback_reason = p1_fallback_reason;
+        write_p1_candidate_trace =
+            p1_objective_allowed || p1_fallback_reason == "metrics_only";
         appendPlanningRiskContextTimeline(
             "base_prepass_end", plannerNow().seconds(),
             base_prepass_ready ? "candidate_success" : "candidate_failure",
@@ -1367,7 +1407,7 @@ namespace ego_planner
           write_p1_candidate_trace ? "optimizer_start" : "base_optimizer_start",
           planning_risk_context_.optimizer_start_s, "started", "ok");
       std::string optimizer_reason = "ok";
-      flag_step_1_success = base_prepass_ready && (normalized_p1_stage
+      flag_step_1_success = base_candidate_ready && (normalized_p1_stage
           ? bspline_optimizer_->BsplineOptimizeTrajNormalizedP1(
                 ctrl_pts, normalized_final_cost, p1_seed, ts, base_prepass,
                 &optimizer_reason)
