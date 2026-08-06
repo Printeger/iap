@@ -8264,3 +8264,11 @@ Observation: Fresh enabled smoke run `086cf8f90659456f863c8d1ebfbaa2ca` at clean
 Verdict: PASS (entry to one fresh formal pair only).
 
 Conclusion: This physical-end record supersedes the preceding diagnostic-only progression disclaimer only for scheduling one new serial P1-1/P1-2 pair. It establishes full-support objective admission, candidate diversity, directional descent, winner/replacement closure, provenance, and lifecycle gates without changing fixed lambda, P0, or P5 semantics. It does not itself prove formal cross-run effectiveness and does not authorize P1-3.
+
+## P1-1 fixed-lambda formal command preflight failure — 2026-08-06
+
+Observation: Metrics-only run `df3321e59a3c42fda4dcda19ca8ed005` at clean HEAD `1c279a53e32ae58370312a5fa2aece558b38c536` used export `test_planner_p1_degraded_lidar_good_gnss_degraded_lidar_good_1786044364792` and bag `test_planner_p1_degraded_lidar_good_gnss_degraded_lidar_good_20260806T192604Z`. Recorder, metadata, manifest, and validator finalized, but its one-shot preflight failed with `manifest lambda_integrity does not match requested lambda`: the legacy P1-1 command omitted the explicit override and the metrics-only manifest recorded `p1.lambda_integrity=0.0`, violating this fixed-lambda task's `0.00001` invariant.
+
+Verdict: FAIL (preflight; P1-2 and formal analyzer not invoked).
+
+Conclusion: This unpaired P1-1 run is retained and must not be verified or reused again. The formal P1-1 command now explicitly sets `p1.lambda_integrity:=0.00001`; metrics remain non-applied, so this corrects reference provenance without changing planner behavior or any algorithmic gate. A wholly fresh pair is required, and P1-3 remains unauthorized.

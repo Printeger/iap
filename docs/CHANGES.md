@@ -3,6 +3,7 @@
 > 规则：任何代码改动必须在这里记录，并包含 IAP-RQ-XXX。
 
 ## Unreleased
+- docs(planner-p1-formal-command): IAP-RQ-400 — make the P1-1 formal command explicitly retain `p1.lambda_integrity=0.00001` in metrics-only mode, matching the fixed-lambda reference identity and fail-closed bundle verifier.
 - fix(planner-p1-formal-future-window): IAP-RQ-320 / IAP-RQ-400 / IAP-RQ-410 — compare matched receding-horizon futures and bind the exact accepted snapshot in formal evidence.
   - Formal pair `a108aec05ef844b19964b9f38540c078` / `52960d0b50554dc18c00c29f33763300` retained raw profiles of different remaining lengths (`2.020 m` reference versus `0.388 m` enabled). The old whole-profile mean mixed low-risk history available only to P1-1 into the comparison. Formal reduction now uses the terminal arc common to both accepted profiles while preserving both original 200-sample artifacts and their full-profile statistics. On the retained counterexample, aligned P1-2 mean/max are `0.419435/0.424264` versus P1-1 `0.422964/0.428375`.
   - Accepted publication force-emits the immutable planning snapshot's predicted-risk cloud with its exact snapshot header, bypassing only the periodic RViz rate limiter so bag scene evidence cannot depend on scheduler phase.
