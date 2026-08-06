@@ -3,6 +3,7 @@
 > 规则：任何代码改动必须在这里记录，并包含 IAP-RQ-XXX。
 
 ## Unreleased
+- evidence(planner-p1-replacement-window-smoke): IAP-RQ-400 / IAP-RQ-410 — fresh 30 s enabled run `9a16ed929f94426ca3dd360b5b91a64c` at clean HEAD `75f057a` passed its one-shot v4 preflight and one-shot diagnostic entry gate. All 44 candidates across 11 attempts had fixed `200/200` support; every attempt had exactly one accepted winner with mean/max non-regression, strict descent, and negative raw-gradient/displacement alignment. All incumbent rows used a positive shared forward-time window, and final control-point/profile diversity remained distinguishable. This authorizes a fresh formal pair, not P1-3.
 - fix(planner-p1-replacement-window): IAP-RQ-400 / IAP-RQ-410 — compare candidate and incumbent over one shared forward-time fixed-200 window before replacement.
   - Formal P1-2 run `e21a8c022b6747e792678d5d0a413f6f` exposed a domain mismatch: attempt 24 compared a `1.800 s` candidate against a `0.393 s` remaining incumbent. The full candidate mean included future absent from the incumbent and caused a false rejection (`0.417883 > 0.417578`), while the shared `0.393 s` window strictly favored the candidate (`0.414708/0.418529 < 0.417578/0.422587`).
   - Candidate self-descent and ranking remain on the complete fixed-200 profile. Replacement and post-refinement incumbent checks independently resample both trajectories to 200 points over `min(candidate duration, incumbent remaining duration)` from the same planning epoch and immutable snapshot.
