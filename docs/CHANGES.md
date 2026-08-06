@@ -3,6 +3,10 @@
 > 规则：任何代码改动必须在这里记录，并包含 IAP-RQ-XXX。
 
 ## Unreleased
+- fix(planner-p1-metrics-only-preflight): IAP-RQ-400 / IAP-RQ-410 — distinguish a metrics-only reference with no optimizer attempt from an incomplete enabled-objective evidence bundle.
+  - A metrics-only run may legitimately produce v4 debug, accepted-profile, context, and lifecycle evidence without entering candidate optimization. In that case the six optimizer-attempt artifacts (candidate/control-point/profile/pairwise/checkpoint and P0 query-corner CSVs) may all be absent.
+  - The artifact group remains atomic and fail closed: enabled P1 always requires every optimizer-attempt sidecar, and metrics-only also requires the complete group whenever any member exists. All mode-independent provenance, validator, accepted-profile, timeline, topic, bag, and runtime-hash checks remain mandatory.
+  - Synthetic regressions cover the absent-group metrics-only baseline and a partial-group rejection. Formal pair 3 is retained as a preflight failure and its analyzer was not invoked; a fresh clean pair is required.
 - fix(planner-p1-formal-alignment): IAP-RQ-320 / IAP-RQ-400 / IAP-RQ-410 — align eligible-candidate ranking and formal provenance with the fixed-200 acceptance contract.
   - The retained formal pair `57f357cd8b844035a2c9ed37172d0903` / `b0a41fb1381449d186f99bf1e92656d0` proved that one eligible candidate already beat P1-1 in both mean/max, but a lower normalized-merit candidate was selected and failed the strict cross-run reduction gate. Among candidates that already satisfy optimizer success, base/total descent, fixed-200 self-descent, full support, and incumbent replacement, selection now orders fixed-200 mean, max, normalized merit, then candidate ID. The scalar optimizer objective and P5 authority are unchanged.
   - Deferred two-stage admission is now recorded as `p1_admission_pending`; the final `p1_admission` remains the one counted decision for generation singleflight. Unselected candidates write `replacement_reason=not_selected`, closing the v4 nonempty-schema contract.

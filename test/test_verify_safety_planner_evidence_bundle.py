@@ -201,6 +201,67 @@ class EvidenceBundlePreflightTest(unittest.TestCase):
 
         self.assertTrue(result["passed"], result["errors"])
 
+    def test_metrics_only_without_optimizer_attempt_does_not_require_attempt_sidecars(self):
+        root, export, bag = self.make_bundle()
+        self.addCleanup(root.cleanup)
+        manifest_path = export / "test_planner_manifest.json"
+        manifest = json.loads(manifest_path.read_text())
+        manifest["p1.metrics_only"] = True
+        manifest_path.write_text(json.dumps(manifest))
+        common = {
+            "schema_version": preflight.SCHEMA,
+            "run_id": "run-1",
+            "manifest_path": str(manifest_path),
+        }
+        debug_path = export / "planner_p1_integrity_cost_debug.csv"
+        with debug_path.open("w", newline="") as handle:
+            writer = csv.DictWriter(handle, fieldnames=sorted({
+                **common, "applied_to_objective": "0"}))
+            writer.writeheader()
+            writer.writerow({**common, "applied_to_objective": "0"})
+        for filename in preflight.OPTIMIZER_ATTEMPT_CSVS:
+            (export / filename).unlink()
+        payload = {
+            **common,
+            "export_dir": str(export),
+            "bag_path": str(bag),
+        }
+
+        with mock.patch.object(
+                preflight, "read_bag_provenance", return_value=([payload], "")):
+            result = preflight.validate_bundle(
+                export, bag, metrics_only=True, lambda_value=0.00001)
+
+        self.assertTrue(result["passed"], result["errors"])
+
+    def test_metrics_only_partial_optimizer_attempt_sidecars_fail_closed(self):
+        root, export, bag = self.make_bundle()
+        self.addCleanup(root.cleanup)
+        manifest_path = export / "test_planner_manifest.json"
+        manifest = json.loads(manifest_path.read_text())
+        manifest["p1.metrics_only"] = True
+        manifest_path.write_text(json.dumps(manifest))
+        for filename in preflight.OPTIMIZER_ATTEMPT_CSVS:
+            if filename != "planner_p0_occupancy_query_evidence.csv":
+                (export / filename).unlink()
+        payload = {
+            "schema_version": preflight.SCHEMA,
+            "run_id": "run-1",
+            "manifest_path": str(manifest_path),
+            "export_dir": str(export),
+            "bag_path": str(bag),
+        }
+
+        with mock.patch.object(
+                preflight, "read_bag_provenance", return_value=([payload], "")):
+            result = preflight.validate_bundle(
+                export, bag, metrics_only=True, lambda_value=0.00001)
+
+        self.assertFalse(result["passed"])
+        self.assertTrue(any(
+            "planner_p1_candidate_optimization.csv" in error
+            for error in result["errors"]), result["errors"])
+
 
 if __name__ == "__main__":
     unittest.main()

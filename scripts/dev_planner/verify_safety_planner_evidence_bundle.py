@@ -28,6 +28,14 @@ CSV_KEYS = {
     "planner_p1_accepted_trajectory_risk_profile_context.csv": "p1.accepted_profile_context_path",
     "planner_p1_planning_context_timeline.csv": "p1.planning_context_timeline_path",
 }
+OPTIMIZER_ATTEMPT_CSVS = frozenset({
+    "planner_p1_candidate_optimization.csv",
+    "planner_p1_candidate_control_points.csv",
+    "planner_p1_candidate_profile.csv",
+    "planner_p1_candidate_pairwise.csv",
+    "planner_p1_optimizer_checkpoint.csv",
+    "planner_p0_occupancy_query_evidence.csv",
+})
 P1_RVIZ_TOPICS = (
     "/iap/rviz/p1_integrity_samples",
     "/iap/rviz/p1_integrity_push_vectors",
@@ -135,16 +143,28 @@ def validate_bundle(export_dir, bag_dir, *, metrics_only, lambda_value):
     if not provenance.get("bag_metadata_complete"):
         errors.append("bag metadata has not been finalized")
 
-    csv_rows = {}
+    csv_paths = {}
     for filename, manifest_key in CSV_KEYS.items():
         raw_path = Path(str(manifest.get(manifest_key, export_dir / filename)))
         path = raw_path.resolve() if raw_path.is_absolute() else (export_dir / raw_path).resolve()
+        csv_paths[filename] = path
         if path.parent != export_dir:
             errors.append(f"artifact escapes export directory: {path}")
         if path.name != filename:
             errors.append(f"manifest path has wrong artifact name: {path}")
         if provenance.get("process_start_epoch_s") and path.exists() and path.stat().st_mtime + 1e-3 < float(provenance["process_start_epoch_s"]):
             errors.append(f"artifact predates current run: {path}")
+
+    optimizer_attempt_artifacts_present = any(
+        csv_paths[filename].exists() for filename in OPTIMIZER_ATTEMPT_CSVS)
+    enforce_optimizer_attempt_artifacts = (
+        not metrics_only or optimizer_attempt_artifacts_present)
+
+    csv_rows = {}
+    for filename, path in csv_paths.items():
+        if filename in OPTIMIZER_ATTEMPT_CSVS and not enforce_optimizer_attempt_artifacts:
+            csv_rows[filename] = []
+            continue
         rows, row_errors = read_csv(path, manifest_path, run_id)
         csv_rows[filename] = rows
         errors.extend(row_errors)
@@ -181,7 +201,7 @@ def validate_bundle(export_dir, bag_dir, *, metrics_only, lambda_value):
                 float(post_count) != float(sample_count) or \
                 float(pre_coverage) != 1.0 or float(post_coverage) != 1.0:
             errors.append("candidate lacks full valid fixed-lattice support")
-    if not candidate:
+    if enforce_optimizer_attempt_artifacts and not candidate:
         errors.append("candidate optimization CSV is empty")
     for attempt, rows in attempts.items():
         selected = [row for row in rows if truthy(row.get("selected")) and truthy(row.get("optimization_success"))]
@@ -252,7 +272,7 @@ def validate_bundle(export_dir, bag_dir, *, metrics_only, lambda_value):
         if not metrics_only and (("base_prepass", "start") not in names or
                                  ("base_prepass", "terminal") not in names):
             errors.append(f"candidate {attempt}/{candidate_id} lacks base-prepass checkpoints")
-    if not occupancy_rows:
+    if enforce_optimizer_attempt_artifacts and not occupancy_rows:
         errors.append("P0 occupancy query evidence is empty")
     if candidate and not pairwise_rows:
         errors.append("candidate pairwise evidence is empty")
