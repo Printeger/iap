@@ -484,6 +484,20 @@ class P1_2AnalyzerTest(unittest.TestCase):
         self.assertEqual(summary["post_startup_ready_false_count"], 0)
         self.assertEqual(summary["post_startup_stale_true_count"], 0)
 
+        failures = []
+        inconclusive = []
+        analyzer.validate_p0_requirements(
+            "P1-2",
+            p1_2_manifest(),
+            analyzer.summarize_p0_health(rows),
+            analyzer.summarize_p0_cloud_rows(cloud_rows(0.0)),
+            failures,
+            inconclusive,
+            allow_explainable_startup_unavailable=True,
+        )
+        self.assertEqual(failures, [])
+        self.assertEqual(inconclusive, [])
+
     def test_candidate_trace_reconciles_fixed_lattice_timeline_and_profile(self):
         profile = accepted_profile_rows(0.0)
         profile_summary = analyzer.summarize_p1_accepted_profile_rows(profile)
@@ -709,6 +723,77 @@ class P1_2AnalyzerTest(unittest.TestCase):
         summary = analyzer.summarize_p1_generation_singleflight(timeline)
         self.assertTrue(summary["passed"], summary)
         self.assertEqual(summary["max_admission_per_generation"], 1)
+
+    def test_singleflight_allows_admission_rejection_without_acquisition(self):
+        timeline = [
+            {"stage": "p1_admission", "snapshot_generation_id": 4,
+             "planning_attempt_id": 11, "candidate_id": 0},
+            {"stage": "p1_admission", "snapshot_generation_id": 5,
+             "planning_attempt_id": 12, "candidate_id": 0},
+            {"stage": "acquire", "snapshot_generation_id": 5,
+             "planning_attempt_id": 12, "candidate_id": 0},
+            {"stage": "optimizer_start", "snapshot_generation_id": 5,
+             "planning_attempt_id": 12, "candidate_id": 1},
+        ]
+
+        summary = analyzer.summarize_p1_generation_singleflight(timeline)
+
+        self.assertTrue(summary["passed"], summary)
+        self.assertEqual(summary["generation_counts"]["4"]["acquire"], 0)
+
+    def test_singleflight_allows_context_acquisition_before_close_to_goal(self):
+        summary = analyzer.summarize_p1_generation_singleflight([
+            {"stage": "acquire", "snapshot_generation_id": 4,
+             "planning_attempt_id": 11, "candidate_id": 0},
+        ])
+
+        self.assertTrue(summary["passed"], summary)
+        self.assertEqual(summary["generation_counts"]["4"]["p1_admission"], 0)
+
+    def test_terminal_common_arc_comparison_excludes_unshared_history(self):
+        current = accepted_profile_rows(0.0, c_pi=4.0)
+        for index, row in enumerate(current):
+            row["x"] = 8.0 + 2.0 * index / 199.0
+        reference_values = [0.1] * 150 + [5.0] * 50
+        reference = accepted_profile_rows(
+            5.0,
+            c_pi_values=reference_values,
+            applied_to_objective=0,
+            metrics_only=1,
+        )
+
+        comparison = analyzer.compare_p1_2_risk_profiles(
+            bspline_rows(0.0), bspline_rows(5.0),
+            cloud_rows(0.0), cloud_rows(5.0),
+            p0_resolution_m=0.75,
+            p1_2_accepted_profile_rows=current,
+            p1_1_accepted_profile_rows=reference,
+        )
+
+        self.assertEqual(comparison["comparison_mode"], "terminal_common_arc_window")
+        self.assertLess(comparison["current_mean"], comparison["reference_mean"])
+        self.assertLess(comparison["current_max"], comparison["reference_max"])
+        self.assertTrue(comparison["risk_reduced"], comparison)
+
+    def test_metrics_only_reference_does_not_require_displacement_descent_trace(self):
+        reference = accepted_profile_rows(
+            5.0, c_pi=5.0, applied_to_objective=0, metrics_only=1)
+        for row in reference[31:42]:
+            for field in (
+                "disp_x", "disp_y", "disp_z",
+                "grad_dot_displacement", "delta_c_pi",
+            ):
+                row[field] = ""
+
+        gates, failures, inconclusive, _ = run_gate(
+            baseline_profile=reference,
+            baseline_cloud=cloud_rows(100.0, c_pi=5.0, pl=5.0),
+        )
+
+        self.assertFalse(gates["p1_1_gradient_trace_complete"])
+        self.assertEqual(failures, [])
+        self.assertEqual(inconclusive, [])
+
     def test_happy_path_passes_gate(self):
         gates, failures, inconclusive, risk = run_gate(
             baseline_cloud=cloud_rows(100.0, c_pi=5.0, pl=5.0)
@@ -720,7 +805,10 @@ class P1_2AnalyzerTest(unittest.TestCase):
         self.assertTrue(gates["p1_applied_to_objective"])
         self.assertTrue(gates["risk_profile_reduced"])
         self.assertEqual(risk["comparison_metric"], "c_pi")
-        self.assertEqual(risk["risk_source"], "accepted_trajectory_profile_csv")
+        self.assertEqual(
+            risk["risk_source"],
+            "accepted_trajectory_profile_csv_terminal_common_arc",
+        )
 
     def test_manifest_rejects_metrics_only_wrong_lambda_disabled_p1_and_enabled_later_phases(self):
         bad_manifests = [
@@ -1135,6 +1223,14 @@ class P1_2AnalyzerTest(unittest.TestCase):
             comparison, current_scene, reference_scene
         )
         self.assertTrue(alignment["available"], alignment)
+        reference_scene["slam_xy"] = [(-120.0, -60.0), (-110.0, -55.0)]
+        divergent_odom_alignment = analyzer.p1_2_risk_scene_alignment(
+            comparison, current_scene, reference_scene
+        )
+        self.assertTrue(divergent_odom_alignment["available"], divergent_odom_alignment)
+        self.assertFalse(
+            divergent_odom_alignment["spatial_overlap"]["P1-1 bag odom"])
+        reference_scene["slam_xy"] = [(0.0, 5.0), (10.0, 5.0)]
         comparison["p1_2_health_context"]["snapshots"][0]["generation_id"] = 99
         self.assertFalse(analyzer.p1_2_risk_scene_alignment(
             comparison, current_scene, reference_scene)["available"])

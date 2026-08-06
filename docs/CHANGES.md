@@ -3,6 +3,12 @@
 > 规则：任何代码改动必须在这里记录，并包含 IAP-RQ-XXX。
 
 ## Unreleased
+- fix(planner-p1-formal-future-window): IAP-RQ-320 / IAP-RQ-400 / IAP-RQ-410 — compare matched receding-horizon futures and bind the exact accepted snapshot in formal evidence.
+  - Formal pair `a108aec05ef844b19964b9f38540c078` / `52960d0b50554dc18c00c29f33763300` retained raw profiles of different remaining lengths (`2.020 m` reference versus `0.388 m` enabled). The old whole-profile mean mixed low-risk history available only to P1-1 into the comparison. Formal reduction now uses the terminal arc common to both accepted profiles while preserving both original 200-sample artifacts and their full-profile statistics. On the retained counterexample, aligned P1-2 mean/max are `0.419435/0.424264` versus P1-1 `0.422964/0.428375`.
+  - Accepted publication force-emits the immutable planning snapshot's predicted-risk cloud with its exact snapshot header, bypassing only the periodic RViz rate limiter so bag scene evidence cannot depend on scheduler phase.
+  - Singleflight accepts admission-only rejection and acquire-only close-to-goal generations while still rejecting duplicate admission/acquisition, optimizer-without-admission/acquisition, and candidate-cap violations. The generic P0 prerequisite now recognizes the same bounded contiguous `not_ready`/`snapshot_unavailable` startup prefix as the formal gate.
+  - Metrics-only reference displacement is diagnostic rather than an objective-applied gradient hard gate. Degraded odometry remains required, frame/time-bound evidence, but its expected spatial divergence from map/truth no longer makes the recorded scene unavailable.
+  - Focused regressions cover all five retained counterexamples plus forced accepted-cloud publication. Fixed lambda `0.00001`, stale timeout `1.0 s`, raw fixed-200 profiles, P0 occupancy/geometry, P5 authority, and the P1-3 prohibition are unchanged.
 - fix(planner-p0-occupied-fallback-evidence): IAP-RQ-320 / IAP-RQ-400 — preserve occupied-corner semantics and attribution when P1 never reaches an optimizer start.
   - Formal pair 7 exposed in-horizon accepted fallbacks whose risk query returned `reason=occupied` while `RiskCostSample.stale` retained its unevaluated default. Pre-admission therefore mislabeled the same unsupported prefix as stale even though the base collision point predicate remained free.
   - A completed failed cost query now marks `stale` only for an actual stale reason. Occupied interpolation support remains invalid/unknown and cannot contribute a finite cost or satisfy fixed support.

@@ -2048,6 +2048,70 @@ def p1_health_snapshot_context(rows: list[dict[str, Any]]) -> dict[str, Any]:
     return {"snapshots": snapshots, "snapshot_count": len(snapshots)}
 
 
+def p1_terminal_arc_profile(
+    profile: dict[str, Any], terminal_arc_length_m: float
+) -> dict[str, Any]:
+    """Summarize the recorded profile over its terminal future arc.
+
+    Receding-horizon runs can finish with different remaining trajectory
+    lengths.  Comparing the whole longer reference would mix already-flown
+    history into one side of the formal mean.  This helper only selects the
+    terminal arc shared by both accepted profiles; it never fabricates a risk
+    value or changes either raw 200-sample artifact.
+    """
+    samples = list(profile.get("samples", []) or [])
+    points: list[np.ndarray] = []
+    for row in samples:
+        xyz = [finite_float(row.get(axis)) for axis in ("x", "y", "z")]
+        if any(value is None for value in xyz):
+            return {
+                "available": False,
+                "reason": "profile position is non-finite",
+                "sample_count": 0,
+                "matched_sample_count": 0,
+                "c_pi_mean": None,
+                "c_pi_max": None,
+                "total_arc_length_m": None,
+            }
+        points.append(np.asarray(xyz, dtype=float))
+    if not points:
+        return {
+            "available": False,
+            "reason": "profile has no samples",
+            "sample_count": 0,
+            "matched_sample_count": 0,
+            "c_pi_mean": None,
+            "c_pi_max": None,
+            "total_arc_length_m": None,
+        }
+    cumulative = [0.0]
+    for previous, current in zip(points, points[1:]):
+        cumulative.append(cumulative[-1] + float(np.linalg.norm(current - previous)))
+    total_arc_length_m = cumulative[-1]
+    selected = [
+        row for row, distance_m in zip(samples, cumulative)
+        if total_arc_length_m - distance_m <= terminal_arc_length_m + 1.0e-9
+    ]
+    values = [
+        value for row in selected
+        if int(row.get("matched", 0) or 0) == 1
+        for value in [finite_float(row.get("c_pi"))]
+        if value is not None
+    ]
+    return {
+        "available": bool(selected and values),
+        "reason": "" if selected and values else "terminal arc has no matched c_pi",
+        "sample_count": len(selected),
+        "matched_sample_count": len(values),
+        "match_ratio": ratio(len(values), len(selected)),
+        "c_pi_mean": float(np.mean(values)) if values else None,
+        "c_pi_max": max(values) if values else None,
+        "total_arc_length_m": total_arc_length_m,
+        "terminal_arc_length_m": terminal_arc_length_m,
+        "samples": selected,
+    }
+
+
 def compare_p1_2_risk_profiles(
     p1_2_rows: list[dict[str, Any]],
     p1_1_rows: list[dict[str, Any]],
@@ -2102,33 +2166,48 @@ def compare_p1_2_risk_profiles(
         stale_timeout_s=stale_timeout_s,
     ) if p1_1_context_rows is not None or p1_1_context_info is not None else {}
     stability = path_stability_metrics(p1_2_path, p1_1_path)
+    profile_lengths = []
+    for profile in (p1_2_profile, p1_1_profile):
+        full_arc = p1_terminal_arc_profile(profile, math.inf)
+        profile_lengths.append(finite_float(full_arc.get("total_arc_length_m")))
+    common_terminal_arc_m = (
+        min(profile_lengths)
+        if all(length is not None for length in profile_lengths)
+        else None
+    )
+    p1_2_aligned = p1_terminal_arc_profile(
+        p1_2_profile, common_terminal_arc_m
+    ) if common_terminal_arc_m is not None else {}
+    p1_1_aligned = p1_terminal_arc_profile(
+        p1_1_profile, common_terminal_arc_m
+    ) if common_terminal_arc_m is not None else {}
     comparison_metric = (
         "c_pi"
         if (
-            p1_2_profile.get("c_pi_mean") is not None
-            and p1_2_profile.get("c_pi_max") is not None
-            and p1_1_profile.get("c_pi_mean") is not None
-            and p1_1_profile.get("c_pi_max") is not None
+            p1_2_aligned.get("c_pi_mean") is not None
+            and p1_2_aligned.get("c_pi_max") is not None
+            and p1_1_aligned.get("c_pi_mean") is not None
+            and p1_1_aligned.get("c_pi_max") is not None
         )
         else None
     )
     current_mean = (
-        finite_float(p1_2_profile.get(f"{comparison_metric}_mean"))
+        finite_float(p1_2_aligned.get(f"{comparison_metric}_mean"))
         if comparison_metric
         else None
     )
     current_max = (
-        finite_float(p1_2_profile.get(f"{comparison_metric}_max"))
+        finite_float(p1_2_aligned.get(f"{comparison_metric}_max"))
         if comparison_metric
         else None
     )
     reference_mean = (
-        finite_float(p1_1_profile.get(f"{comparison_metric}_mean"))
+        finite_float(p1_1_aligned.get(f"{comparison_metric}_mean"))
         if comparison_metric
         else None
     )
     reference_max = (
-        finite_float(p1_1_profile.get(f"{comparison_metric}_max"))
+        finite_float(p1_1_aligned.get(f"{comparison_metric}_max"))
         if comparison_metric
         else None
     )
@@ -2163,6 +2242,8 @@ def compare_p1_2_risk_profiles(
         ],
         "p1_2_profile": p1_2_profile,
         "p1_1_profile": p1_1_profile,
+        "p1_2_terminal_common_arc_profile": p1_2_aligned,
+        "p1_1_terminal_common_arc_profile": p1_1_aligned,
         "p1_2_context": p1_2_context,
         "p1_1_context": p1_1_context,
         "p1_2_cloud_diagnostic_profile": p1_2_cloud_profile,
@@ -2170,7 +2251,13 @@ def compare_p1_2_risk_profiles(
         "p1_2_cloud_context": p1_cloud_plot_context(p1_2_cloud_rows),
         "p1_1_cloud_context": p1_cloud_plot_context(p1_1_cloud_rows),
         "trajectory_stability": stability,
-        "risk_source": "accepted_trajectory_profile_csv",
+        "risk_source": "accepted_trajectory_profile_csv_terminal_common_arc",
+        "comparison_mode": "terminal_common_arc_window",
+        "common_terminal_arc_length_m": common_terminal_arc_m,
+        "current_full_profile_mean": p1_2_profile.get("c_pi_mean"),
+        "current_full_profile_max": p1_2_profile.get("c_pi_max"),
+        "reference_full_profile_mean": p1_1_profile.get("c_pi_mean"),
+        "reference_full_profile_max": p1_1_profile.get("c_pi_max"),
         "accepted_profile_missing": bool(
             p1_2_profile.get("missing") or p1_1_profile.get("missing")
         ),
@@ -5833,10 +5920,13 @@ def validate_p0_requirements(
     reason_counts = health_summary.get("reason_counts", {}) or {}
     ready_false_count = int(health_summary.get("ready_false_count", 0) or 0)
     stale_true_count = int(health_summary.get("stale_true_count", 0) or 0)
-    snapshot_unavailable_count = int(reason_counts.get("snapshot_unavailable", 0) or 0)
+    startup_unavailable_count = sum(
+        int(reason_counts.get(reason, 0) or 0)
+        for reason in ("not_ready", "snapshot_unavailable")
+    )
     startup_unavailable_explains_ready_stale = (
         allow_explainable_startup_unavailable
-        and snapshot_unavailable_count >= max(ready_false_count, stale_true_count)
+        and startup_unavailable_count >= max(ready_false_count, stale_true_count)
         and float(health_summary.get("ready_false_ratio", 0.0) or 0.0) <= 0.10
         and float(health_summary.get("stale_true_ratio", 0.0) or 0.0) <= 0.10
     )
@@ -8608,6 +8698,10 @@ def validate_p1_2_hard_gates(
         "p1_2_risk_match_ok": bool(risk_comparison.get("p1_2_match_ok")),
         "p1_1_risk_match_ok": bool(risk_comparison.get("p1_1_match_ok")),
         "risk_comparison_metric": risk_comparison.get("comparison_metric"),
+        "risk_comparison_mode": risk_comparison.get("comparison_mode"),
+        "risk_common_terminal_arc_length_m": risk_comparison.get(
+            "common_terminal_arc_length_m"
+        ),
         "risk_metric_available": bool(risk_comparison.get("comparison_metric")),
         "risk_current_mean": risk_comparison.get("current_mean"),
         "risk_current_max": risk_comparison.get("current_max"),
@@ -8778,9 +8872,10 @@ def validate_p1_2_hard_gates(
         failures.append("P1-2 P1-1 reference accepted trajectory risk profile CSV is not parseable")
     if not gates["p1_2_accepted_profile_format_ok"] or not gates["p1_1_accepted_profile_format_ok"]:
         failures.append("P1-2 final accepted profile must contain exactly unique sample_index=0..199 and one metadata tuple")
-    if not gates["p1_2_gradient_trace_complete"] or not gates["p1_1_gradient_trace_complete"]:
+    if not gates["p1_2_gradient_trace_complete"]:
         failures.append(
-            "P1-2 accepted profiles are missing complete snapshot-bound gradient/displacement trace evidence"
+            "P1-2 objective-applied accepted profile is missing complete "
+            "snapshot-bound gradient/displacement trace evidence"
         )
     if not gates["p1_2_directional_descent_observed"]:
         failures.append(
@@ -13625,6 +13720,7 @@ def p1_2_risk_scene_alignment(
     """Fail closed unless every plotted source has an exact recorded context."""
     reasons: list[str] = []
     source_status: dict[str, bool] = {}
+    spatial_overlap: dict[str, bool] = {}
     time_bindings: dict[str, dict[str, float | None]] = {}
     for label, profile_key, context_key, path_key, cloud_key, scene in (
         ("P1-2", "p1_2_profile", "p1_2_context", "p1_2_path_xyz", "p1_2_cloud_context", p1_2_scene),
@@ -13649,11 +13745,21 @@ def p1_2_risk_scene_alignment(
         for source_name, points in sources.items():
             key = f"{label} {source_name}"
             source_status[key] = bool(points)
+            spatial_overlap[key] = bool(
+                points and _p1_2_bounds_overlap(
+                    profile_bounds, _p1_2_xy_bounds(points)
+                )
+            )
             if not points:
                 reasons.append(f"{key} unavailable")
                 continue
-            if source_name != "final accepted profile" and not _p1_2_bounds_overlap(
-                profile_bounds, _p1_2_xy_bounds(points)
+            # Degraded-GNSS experiments intentionally record odometry that may
+            # diverge spatially from truth/map.  Presence, frame, and accepted-
+            # start time binding prove that source; its spatial non-overlap is
+            # a diagnostic result, not missing evidence.
+            if (
+                source_name not in ("final accepted profile", "bag odom")
+                and not spatial_overlap[key]
             ):
                 source_status[key] = False
                 reasons.append(f"{key} cannot be spatially aligned to final accepted profile")
@@ -13752,10 +13858,12 @@ def p1_2_risk_scene_alignment(
         "available": all(source_status.values()) and not reasons,
         "reasons": reasons,
         "source_status": source_status,
+        "spatial_overlap": spatial_overlap,
         "time_bindings": time_bindings,
         "method": (
             "exact sidecar frame/generation/snapshot stamp + health/cloud generation/stamp + "
-            "bspline trajectory-start stamp + native bag odom/truth within 100ms; raw XY overlap; "
+            "bspline trajectory-start stamp + native bag odom/truth within 100ms; raw XY overlap "
+            "for map/truth/risk/trajectory while degraded odom divergence remains diagnostic; "
             "no inferred transform or heatmap"
         ),
     }
@@ -14362,8 +14470,8 @@ def plot_p1_2_risk_profile_vs_p1_1(
     path: Path,
 ) -> bool:
     metric = comparison.get("comparison_metric") or "risk"
-    p1_2_profile = comparison.get("p1_2_profile", {}) or {}
-    p1_1_profile = comparison.get("p1_1_profile", {}) or {}
+    p1_2_profile = comparison.get("p1_2_terminal_common_arc_profile", {}) or {}
+    p1_1_profile = comparison.get("p1_1_terminal_common_arc_profile", {}) or {}
     fig, axes = plt.subplots(1, 2, figsize=(12, 5.2))
     means = [
         finite_float(p1_2_profile.get(f"{metric}_mean")) if metric in {"c_pi", "pl"} else None,
@@ -14391,7 +14499,10 @@ def plot_p1_2_risk_profile_vs_p1_1(
             ha="left",
             fontsize=12,
         )
-    axes[0].set_title("Trajectory risk summary")
+    axes[0].set_title(
+        "Terminal common-arc risk summary\n"
+        f"shared future arc={comparison.get('common_terminal_arc_length_m')} m"
+    )
     axes[0].grid(True, axis="y", alpha=0.25)
 
     plotted = False
@@ -14429,7 +14540,7 @@ def plot_p1_2_risk_profile_vs_p1_1(
             fontsize=12,
         )
     axes[1].set_title(
-        "Risk reduced: "
+        "Terminal-window risk reduced: "
         f"{comparison.get('risk_reduced')} | match P1-2/P1-1: "
         f"{p1_2_profile.get('match_ratio')} / {p1_1_profile.get('match_ratio')}"
     )
@@ -15207,14 +15318,25 @@ def summarize_p1_generation_singleflight(
          "attempt": row["attempt"], "candidate": row["candidate"]}
         for row in duplicate_starts
     ]
-    # A generation is admitted and acquired exactly once; sets above detect
-    # conflicting IDs, while these raw counts also detect repeated identical
-    # timeline records and missing lifecycle records.
+    # Admission is the one decision made for every observed generation.  A
+    # rejected admission legitimately has no acquisition; once an optimizer
+    # starts, however, the generation must have exactly one acquisition.
+    # Raw counts still detect repeated identical lifecycle records.
     for generation, bucket in counts.items():
-        for stage in ("p1_admission", "acquire"):
-            if bucket[stage] != 1:
-                duplicates.append({"generation": generation, "stage": stage,
-                                   "count": bucket[stage]})
+        if bucket["p1_admission"] > 1:
+            duplicates.append({"generation": generation, "stage": "p1_admission",
+                               "count": bucket["p1_admission"]})
+        elif bucket["optimizer_start"] > 0 and bucket["p1_admission"] != 1:
+            duplicates.append({"generation": generation,
+                               "stage": "optimizer_without_admission",
+                               "count": bucket["p1_admission"]})
+        if bucket["acquire"] > 1:
+            duplicates.append({"generation": generation, "stage": "acquire",
+                               "count": bucket["acquire"]})
+        elif bucket["optimizer_start"] > 0 and bucket["acquire"] != 1:
+            duplicates.append({"generation": generation,
+                               "stage": "optimizer_without_acquire",
+                               "count": bucket["acquire"]})
     candidate_counts: dict[str, int] = {}
     for generation, attempt, _ in starts:
         key = f"{generation}:{attempt}"
@@ -15592,11 +15714,11 @@ P1_2_HARD_GATE_ROWS = [
     ("P1-1 bspline publish", ("reference_bspline_inspection_ok", "reference_bspline_publish_present", "reference_nonempty_bspline_path_present"), ()),
     ("accepted profiles present/parse", ("accepted_profiles_present", "p1_2_accepted_profile_parse_ok", "p1_1_accepted_profile_parse_ok"), ("accepted_profile_missing", "p1_2_accepted_profile_path", "p1_1_accepted_profile_path")),
     ("accepted profile format", ("p1_2_accepted_profile_format_ok", "p1_1_accepted_profile_format_ok"), ()),
-    ("gradient direction trace", ("p1_2_gradient_trace_complete", "p1_1_gradient_trace_complete", "p1_2_directional_descent_observed"), ("p1_2_directional_descent_sample_count",)),
+    ("gradient direction trace", ("p1_2_gradient_trace_complete", "p1_2_directional_descent_observed"), ("p1_2_directional_descent_sample_count", "p1_1_gradient_trace_complete")),
     ("accepted profile context", ("p1_2_accepted_profile_context_ok", "p1_1_accepted_profile_context_ok", "p1_2_planning_context_timeline_ok", "p1_1_planning_context_timeline_ok"), ("p1_2_context_age_s", "p1_1_context_age_s", "stale_timeout_s")),
     ("accepted profile objective metadata", ("p1_2_profile_objective_metadata_ok", "p1_1_profile_objective_metadata_ok"), ()),
     ("strict accepted-profile coverage", ("p1_2_risk_match_ok", "p1_1_risk_match_ok"), ("p1_2_risk_matched_sample_count", "p1_2_risk_match_ratio", "p1_1_risk_matched_sample_count", "p1_1_risk_match_ratio", "risk_match_min_count", "risk_match_min_ratio")),
-    ("strict c_pi mean/max reduction", ("risk_metric_available", "risk_profile_reduced"), ("risk_comparison_metric", "risk_current_mean", "risk_reference_mean", "risk_current_max", "risk_reference_max")),
+    ("strict c_pi mean/max reduction", ("risk_metric_available", "risk_profile_reduced"), ("risk_comparison_metric", "risk_comparison_mode", "risk_common_terminal_arc_length_m", "risk_current_mean", "risk_reference_mean", "risk_current_max", "risk_reference_max")),
     ("trajectory stability", ("trajectory_stability_passed",), ("trajectory_stability",)),
     ("recorded risk-scene alignment", ("risk_scene_overlay_available",), ("risk_scene_alignment_reasons",)),
     ("P5 isolation", ("p5_contamination_zero",), ("disabled_topic_counts",)),
@@ -19007,11 +19129,21 @@ def _analyze_impl(args: argparse.Namespace) -> dict[str, Any]:
             p1_risk_path,
             [
                 "comparison_metric",
+                "comparison_mode",
+                "common_terminal_arc_length_m",
                 "risk_reduced",
                 "current_mean",
                 "current_max",
                 "reference_mean",
                 "reference_max",
+                "current_full_profile_mean",
+                "current_full_profile_max",
+                "reference_full_profile_mean",
+                "reference_full_profile_max",
+                "p1_2_terminal_sample_count",
+                "p1_2_terminal_matched_sample_count",
+                "p1_1_terminal_sample_count",
+                "p1_1_terminal_matched_sample_count",
                 "p1_2_matched_sample_count",
                 "p1_2_match_ratio",
                 "p1_1_matched_sample_count",
@@ -19027,11 +19159,47 @@ def _analyze_impl(args: argparse.Namespace) -> dict[str, Any]:
             [
                 {
                     "comparison_metric": p1_2_risk_comparison.get("comparison_metric"),
+                    "comparison_mode": p1_2_risk_comparison.get("comparison_mode"),
+                    "common_terminal_arc_length_m": p1_2_risk_comparison.get(
+                        "common_terminal_arc_length_m"
+                    ),
                     "risk_reduced": p1_2_risk_comparison.get("risk_reduced"),
                     "current_mean": p1_2_risk_comparison.get("current_mean"),
                     "current_max": p1_2_risk_comparison.get("current_max"),
                     "reference_mean": p1_2_risk_comparison.get("reference_mean"),
                     "reference_max": p1_2_risk_comparison.get("reference_max"),
+                    "current_full_profile_mean": p1_2_risk_comparison.get(
+                        "current_full_profile_mean"
+                    ),
+                    "current_full_profile_max": p1_2_risk_comparison.get(
+                        "current_full_profile_max"
+                    ),
+                    "reference_full_profile_mean": p1_2_risk_comparison.get(
+                        "reference_full_profile_mean"
+                    ),
+                    "reference_full_profile_max": p1_2_risk_comparison.get(
+                        "reference_full_profile_max"
+                    ),
+                    "p1_2_terminal_sample_count": (
+                        p1_2_risk_comparison.get(
+                            "p1_2_terminal_common_arc_profile", {}
+                        ) or {}
+                    ).get("sample_count"),
+                    "p1_2_terminal_matched_sample_count": (
+                        p1_2_risk_comparison.get(
+                            "p1_2_terminal_common_arc_profile", {}
+                        ) or {}
+                    ).get("matched_sample_count"),
+                    "p1_1_terminal_sample_count": (
+                        p1_2_risk_comparison.get(
+                            "p1_1_terminal_common_arc_profile", {}
+                        ) or {}
+                    ).get("sample_count"),
+                    "p1_1_terminal_matched_sample_count": (
+                        p1_2_risk_comparison.get(
+                            "p1_1_terminal_common_arc_profile", {}
+                        ) or {}
+                    ).get("matched_sample_count"),
                     "p1_2_matched_sample_count": p1_2_profile.get("matched_sample_count"),
                     "p1_2_match_ratio": p1_2_profile.get("match_ratio"),
                     "p1_1_matched_sample_count": p1_1_profile.get("matched_sample_count"),

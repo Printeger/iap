@@ -382,8 +382,14 @@ void SafetyRvizPublisher::publishRiskGridHealth(
 void SafetyRvizPublisher::publishPredictedPLCloud(
     const std::shared_ptr<const iap::RiskGridSnapshot>& snapshot,
     double current_altitude_m,
-    double now_s) {
-  if (!predicted_pl_cloud_pub_ || !shouldPublish(now_s, &last_grid_publish_s_)) {
+    double now_s,
+    bool force) {
+  if (!predicted_pl_cloud_pub_) {
+    return;
+  }
+  if (force) {
+    last_grid_publish_s_ = now_s;
+  } else if (!shouldPublish(now_s, &last_grid_publish_s_)) {
     return;
   }
   const double snapshot_stamp_s = snapshot && valid_stamp_s(snapshot->stamp_s())

@@ -1796,6 +1796,14 @@ namespace ego_planner
           objective_applied ? "ok" : p1_fallback_reason,
           objective_applied ? "none" : "p1_soft_fallback");
     }
+    // The formal scene must contain the exact immutable snapshot used by the
+    // accepted trajectory.  Periodic RViz throttling is intentionally bypassed
+    // for this one evidence publication; the snapshot header retains its own
+    // generation stamp and P0 values/occupancy semantics are unchanged.
+    if (safety_viz_ && planning_snapshot)
+      safety_viz_->publishPredictedPLCloud(
+          planning_snapshot, pos.evaluateDeBoorT(0.0).z(),
+          accepted_time.seconds(), true);
     updateTrajInfo(pos, accepted_time);
     if (objective_applied)
       has_p1_preference_incumbent_ = true;

@@ -164,7 +164,8 @@ class SafetyRvizPublisher {
   void publishPredictedPLCloud(
       const std::shared_ptr<const iap::RiskGridSnapshot>& snapshot,
       double current_altitude_m,
-      double now_s);
+      double now_s,
+      bool force = false);
   void publishRiskValidityCloud(
       const std::shared_ptr<const iap::RiskGridSnapshot>& snapshot,
       double current_altitude_m,

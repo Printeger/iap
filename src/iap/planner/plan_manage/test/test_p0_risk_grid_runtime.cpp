@@ -639,6 +639,36 @@ TEST(SafetyRvizPublisherTest, RiskGridHealthMarkerUsesProvidedStamp) {
   EXPECT_EQ(markers.markers.front().header.stamp.nanosec, 123000000u);
 }
 
+TEST(SafetyRvizPublisherTest, AcceptedSnapshotCloudBypassesPeriodicThrottle) {
+  ensure_rclcpp();
+  auto node = std::make_shared<rclcpp::Node>(
+      "accepted_snapshot_cloud_force_publish_test",
+      rclcpp::NodeOptions().allow_undeclared_parameters(false));
+  ego_planner::SafetyRvizPublisher::Config config;
+  config.publish_rate_hz = 1.0;
+  ego_planner::SafetyRvizPublisher publisher(node, config);
+
+  std::atomic<int> received{0};
+  auto subscription = node->create_subscription<sensor_msgs::msg::PointCloud2>(
+      config.predicted_pl_cloud_topic, rclcpp::QoS(10).best_effort(),
+      [&](const sensor_msgs::msg::PointCloud2::ConstSharedPtr) {
+        received.fetch_add(1);
+      });
+  (void)subscription;
+  rclcpp::executors::SingleThreadedExecutor executor;
+  executor.add_node(node);
+
+  publisher.publishPredictedPLCloud(nullptr, 1.0, 100.0);
+  executor.spin_some();
+  publisher.publishPredictedPLCloud(nullptr, 1.0, 100.1);
+  executor.spin_some();
+  EXPECT_EQ(received.load(), 1);
+
+  publisher.publishPredictedPLCloud(nullptr, 1.0, 100.1, true);
+  executor.spin_some();
+  EXPECT_EQ(received.load(), 2);
+}
+
 namespace ego_planner {
 
 TEST_F(P0RiskGridRuntimeStampTest, P0_6FixtureProducesOccupiedSkipHealth) {
