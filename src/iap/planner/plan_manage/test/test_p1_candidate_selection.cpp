@@ -86,6 +86,29 @@ TEST(P1CandidateSelectionTest, RanksOnlyCandidatesFromOneAttempt) {
   EXPECT_FALSE(decisions[0].selected);
 }
 
+TEST(P1CandidateSelectionTest,
+     PrefersLowerFixedLatticeRiskBeforeOptimizerMerit) {
+  auto lower_risk = attempt19();
+  lower_risk.candidate_id = 1;
+  lower_risk.post_mean_c_pi = 0.391;
+  lower_risk.post_max_c_pi = 0.421;
+  lower_risk.post_total_objective = 0.20;
+
+  auto lower_merit = attempt19();
+  lower_merit.candidate_id = 2;
+  lower_merit.post_mean_c_pi = 0.392;
+  lower_merit.post_max_c_pi = 0.422;
+  lower_merit.post_total_objective = 0.10;
+
+  const auto decisions =
+      ego_planner::selectP1Candidates({lower_risk, lower_merit}, nullptr);
+  ASSERT_EQ(decisions.size(), 2U);
+  EXPECT_TRUE(decisions[0].selected);
+  EXPECT_EQ(decisions[0].rank, 1);
+  EXPECT_FALSE(decisions[1].selected);
+  EXPECT_EQ(decisions[1].replacement_reason, "not_selected");
+}
+
 TEST(P1CandidateSelectionTest, NarrowPeakFixtureRejectsAdaptiveMeanOnlyImprovement) {
   // Deterministic objective-alignment fixture: the legacy adaptive mean
   // appears to improve, while the admission lattice catches a narrow peak.

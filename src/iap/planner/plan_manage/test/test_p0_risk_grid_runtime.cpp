@@ -767,6 +767,36 @@ TEST_F(P0RiskGridRuntimeStampTest,
 }
 
 TEST_F(P0RiskGridRuntimeStampTest,
+       HealthJsonPreservesExactSnapshotStampForEvidenceBinding) {
+  ensure_rclcpp();
+  auto node = std::make_shared<rclcpp::Node>(
+      "p0_health_stamp_precision_test",
+      rclcpp::NodeOptions().allow_undeclared_parameters(false));
+  P0RiskGridRuntime runtime(node, enabledConfig(),
+                            std::make_unique<FakeProvider>());
+  constexpr double kSnapshotStamp = 1657065621.4871123;
+  seedValidInputs(&runtime, kSnapshotStamp, kSnapshotStamp);
+  ASSERT_TRUE(refreshOnce(&runtime));
+
+  std::string health_message;
+  auto health_sub = node->create_subscription<std_msgs::msg::String>(
+      "/planning/risk_grid_health", 10,
+      [&](const std_msgs::msg::String::ConstSharedPtr message) {
+        health_message = message->data;
+      });
+  (void)health_sub;
+  rclcpp::executors::SingleThreadedExecutor executor;
+  executor.add_node(node);
+  publishHealthNow(&runtime);
+  executor.spin_some();
+
+  ASSERT_FALSE(health_message.empty());
+  EXPECT_NE(health_message.find(
+                "\"last_grid_stamp_s\":1657065621.4871123"),
+            std::string::npos);
+}
+
+TEST_F(P0RiskGridRuntimeStampTest,
        BlockedRefreshDoesNotStarveHealthAndConsecutiveStaleReports) {
   ensure_rclcpp();
   auto node = std::make_shared<rclcpp::Node>(

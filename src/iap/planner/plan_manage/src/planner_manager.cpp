@@ -919,7 +919,9 @@ namespace ego_planner
       planning_risk_context_.p1_objective_applied = false;
       planning_risk_context_.p1_fallback_reason = p1_fallback_reason;
       appendPlanningRiskContextTimeline(
-          "p1_admission", plannerNow().seconds(),
+          defer_admission_until_base_prepass ? "p1_admission_pending"
+                                             : "p1_admission",
+          plannerNow().seconds(),
           defer_admission_until_base_prepass ? "base_prepass_pending" :
           p1_objective_allowed ? "p1_objective" : "base_fallback",
           p1_fallback_reason,

@@ -24,7 +24,7 @@ Singleton fan-out happens only after the base prepass. It retains the base seed 
 
 An incumbent replacement comparison uses the same immutable snapshot and query base as the candidates, but samples only the incumbent segment that remains at the planning epoch. If the incumbent started at `t_start`, its source parameter begins at `clamp(planning_start-t_start, 0, duration)` while risk-grid query `tau` begins at zero from the candidate query base. Already-flown history is not part of a future replacement decision.
 
-Ranking remains a soft-merit choice inside the existing mean/max publication preference: when at least one self-descending candidate also satisfies incumbent non-regression, those publishable candidates rank before candidates that would necessarily be rejected, with normalized merit and candidate ID as deterministic tie-breakers. If none can replace the incumbent, the optimizer still records exactly one selected winner and rejects publication as before.
+Ranking remains a soft preference inside the existing mean/max publication policy. Candidates that would satisfy incumbent non-regression rank before candidates that would necessarily be rejected. Among those publishable candidates, the deterministic order is fixed-200 mean, fixed-200 max, normalized merit, then candidate ID. This makes selection use the same risk statistics as acceptance without changing the differentiable scalar merit used within each optimizer. If none can replace the incumbent, the optimizer still records exactly one selected winner and rejects publication as before.
 
 ## Rejected alternatives
 

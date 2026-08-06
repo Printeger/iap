@@ -44,7 +44,7 @@ std::string jsonNumber(double value) {
     return "null";
   }
   std::ostringstream oss;
-  oss << std::setprecision(12) << value;
+  oss << std::setprecision(17) << value;
   return oss.str();
 }
 

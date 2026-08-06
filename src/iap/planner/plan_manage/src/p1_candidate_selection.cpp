@@ -53,9 +53,10 @@ std::vector<P1CandidateDecision> selectP1Candidates(
     decision.rank_eligible = candidate.optimization_success &&
         decision.p1_descent && decision.total_descent;
     decision.selection_reason = candidate.optimization_success
-        ? (decision.rank_eligible ? "p1_preference_then_optimizer_cost"
+        ? (decision.rank_eligible ? "p1_fixed_mean_then_max_then_optimizer_cost"
                                   : "optimizer_success_p1_preference_rejected")
         : "optimizer_failure";
+    decision.replacement_reason = "not_selected";
     decisions.push_back(std::move(decision));
   }
 
@@ -68,8 +69,10 @@ std::vector<P1CandidateDecision> selectP1Candidates(
     const auto& b = candidates[right];
     const bool a_replaces = !incumbent || replacesIncumbent(a, *incumbent);
     const bool b_replaces = !incumbent || replacesIncumbent(b, *incumbent);
-    return std::make_tuple(!a_replaces, a.post_total_objective, a.candidate_id) <
-        std::make_tuple(!b_replaces, b.post_total_objective, b.candidate_id);
+    return std::make_tuple(!a_replaces, a.post_mean_c_pi, a.post_max_c_pi,
+                           a.post_total_objective, a.candidate_id) <
+        std::make_tuple(!b_replaces, b.post_mean_c_pi, b.post_max_c_pi,
+                        b.post_total_objective, b.candidate_id);
   });
   for (std::size_t index = 0; index < eligible.size(); ++index) {
     decisions[eligible[index]].rank = static_cast<int>(index) + 1;

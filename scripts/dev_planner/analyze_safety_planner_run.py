@@ -7662,8 +7662,9 @@ def summarize_p0_startup_snapshot_unavailable(
             active_rows.append(row)
         rows = active_rows
     prefix: list[dict[str, Any]] = []
+    startup_reasons = {"not_ready", "snapshot_unavailable"}
     for row in rows:
-        if str(row.get("reason", "")).strip().lower() != "snapshot_unavailable":
+        if str(row.get("reason", "")).strip().lower() not in startup_reasons:
             break
         prefix.append(row)
     post_startup_rows = rows[len(prefix) :]
@@ -7676,9 +7677,8 @@ def summarize_p0_startup_snapshot_unavailable(
     bounded = (
         not prefix
         or (
-            len(prefix) <= 3
+            duration_s <= 3.0
             and ratio(len(prefix), row_count) <= 0.10
-            and max(ready_false_prefix, stale_prefix, full_unknown_prefix) <= 3
         )
     )
     post_ready_false = sum(1 for row in post_startup_rows if not bool(row.get("ready")))

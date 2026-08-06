@@ -454,6 +454,36 @@ class P1_2AnalyzerTest(unittest.TestCase):
             rows, activation_stamp_s=0.0)
         self.assertFalse(active_prefix["startup_snapshot_unavailable_bounded"])
 
+    def test_p0_startup_accepts_rate_independent_not_ready_prefix(self):
+        rows = [
+            p0_row(0, stamp=0.0, ready=False, stale=True,
+                   valid_ratio=0.0, unknown_ratio=1.0, reason="not_ready"),
+            p0_row(1, stamp=0.0, ready=False, stale=True,
+                   valid_ratio=0.0, unknown_ratio=1.0,
+                   reason="snapshot_unavailable"),
+            p0_row(2, stamp=0.5, ready=False, stale=True,
+                   valid_ratio=0.0, unknown_ratio=1.0,
+                   reason="snapshot_unavailable"),
+            p0_row(3, stamp=0.5, ready=False, stale=True,
+                   valid_ratio=0.0, unknown_ratio=1.0,
+                   reason="snapshot_unavailable"),
+            p0_row(4, stamp=1.0, ready=False, stale=True,
+                   valid_ratio=0.0, unknown_ratio=1.0,
+                   reason="snapshot_unavailable"),
+            p0_row(5, stamp=1.0, ready=False, stale=True,
+                   valid_ratio=0.0, unknown_ratio=1.0,
+                   reason="snapshot_unavailable"),
+            p0_row(6, stamp=1.5, ready=False, stale=True,
+                   valid_ratio=0.0, unknown_ratio=1.0,
+                   reason="snapshot_unavailable"),
+        ] + [p0_row(index, stamp=1.75 + 0.25 * (index - 7))
+             for index in range(7, 107)]
+        summary = analyzer.summarize_p0_startup_snapshot_unavailable(rows)
+        self.assertEqual(summary["startup_snapshot_unavailable_rows"], 7)
+        self.assertTrue(summary["startup_snapshot_unavailable_bounded"])
+        self.assertEqual(summary["post_startup_ready_false_count"], 0)
+        self.assertEqual(summary["post_startup_stale_true_count"], 0)
+
     def test_candidate_trace_reconciles_fixed_lattice_timeline_and_profile(self):
         profile = accepted_profile_rows(0.0)
         profile_summary = analyzer.summarize_p1_accepted_profile_rows(profile)
@@ -614,6 +644,21 @@ class P1_2AnalyzerTest(unittest.TestCase):
         self.assertFalse(summary["passed"])
         self.assertEqual(summary["max_admission_per_generation"], 2)
         self.assertEqual(summary["max_acquisition_per_generation"], 2)
+
+    def test_singleflight_counts_pending_and_final_admission_as_one_decision(self):
+        timeline = [
+            {"stage": "acquire", "snapshot_generation_id": 4,
+             "planning_attempt_id": 11, "candidate_id": 0},
+            {"stage": "p1_admission_pending", "snapshot_generation_id": 4,
+             "planning_attempt_id": 11, "candidate_id": 0},
+            {"stage": "p1_admission", "snapshot_generation_id": 4,
+             "planning_attempt_id": 11, "candidate_id": 1},
+            {"stage": "optimizer_start", "snapshot_generation_id": 4,
+             "planning_attempt_id": 11, "candidate_id": 1},
+        ]
+        summary = analyzer.summarize_p1_generation_singleflight(timeline)
+        self.assertTrue(summary["passed"], summary)
+        self.assertEqual(summary["max_admission_per_generation"], 1)
     def test_happy_path_passes_gate(self):
         gates, failures, inconclusive, risk = run_gate(
             baseline_cloud=cloud_rows(100.0, c_pi=5.0, pl=5.0)
