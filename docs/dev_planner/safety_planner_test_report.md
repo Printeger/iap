@@ -7556,3 +7556,11 @@ Observation: The one-shot v4 preflight returned `passed=true`, `errors=[]`, and 
 Verdict: PASS (entry to one fresh formal pair only).
 
 Conclusion: This physical-end record supersedes the generic diagnostic terminal statement solely for formal-pair scheduling. It establishes the prescribed entry gates but not formal cross-run effectiveness and does not authorize P1-3.
+
+## P1-2 fixed-lambda formal pair 5 preflight failure — 2026-08-06
+
+Observation: The serial 90 s runs completed at clean HEAD `9eb5a9c`. P1-1 run `440a2847837941e282304c002d6ebdd9` used export `test_planner_p1_degraded_lidar_good_gnss_degraded_lidar_good_1786038625642` and bag `test_planner_p1_degraded_lidar_good_gnss_degraded_lidar_good_20260806T175025Z`; its one-shot preflight passed. P1-2 run `a1cdc7436f2946e691823e94330191cb` used export `test_planner_p1_degraded_lidar_good_gnss_degraded_lidar_good_1786038727326` and bag `test_planner_p1_degraded_lidar_good_gnss_degraded_lidar_good_20260806T175207Z`; its one-shot preflight failed because no full-support P1 optimizer attempt occurred, so candidate sidecars and objective-applied debug evidence were absent. Pre-admission evidence shows attempt 20 had initial `200/200` support but the base prepass optimizer failed. Attempt 21 stayed within the unchanged 2.5 s horizon but had 46 snapshot-baked stale samples (`154/200`), so the successful base prepass correctly fell back for insufficient coverage. Earlier base-prepass results exceeded the fixed horizon. No support, freshness, occupied, lambda, or P5 gate was weakened.
+
+Verdict: FAIL (preflight; formal analyzer not invoked).
+
+Conclusion: This pair is retained as failed evidence and must not be analyzed or reused. It grants neither formal progression nor P1-3 permission. A fresh pair is required to obtain the mandated base-prepass-success plus `200/200` intersection; a consecutive repeat of the same condition returns debugging to the deterministic invariant instead of permitting blind retries.
