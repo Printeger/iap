@@ -147,6 +147,15 @@ Eigen::MatrixXd makeControlPoints() {
   return q;
 }
 
+Eigen::MatrixXd makeFixedLambdaConflictControlPoints() {
+  Eigen::MatrixXd q = makeControlPoints();
+  // The test optimizer's terminal target remains on Y=0.  Starting the whole
+  // curve at Y=1 therefore makes the base terminal descent pull the active
+  // suffix toward -Y, while a -Y affine risk field rewards motion toward +Y.
+  q.row(1).setConstant(1.0);
+  return q;
+}
+
 void ensureRclcpp() {
   if (!rclcpp::ok()) {
     int argc = 0;
@@ -460,6 +469,60 @@ TEST(P1IntegrityCostTest,
   EXPECT_GT(displacement.rightCols(before.cols() - 3).norm(), 0.0);
   EXPECT_LT((initial_gradient.array() * displacement.array()).sum(), 0.0);
   EXPECT_LT(final_cost, initial_cost);
+}
+
+TEST(P1IntegrityCostTest,
+     FixedLambdaConflictFixtureCharacterizesLegacyRegression) {
+  ego_planner::SwarmTrajData swarm;
+  const Eigen::MatrixXd initial = makeFixedLambdaConflictControlPoints();
+  AffineProvider provider(20.0, Eigen::Vector3d(0.0, -1.0, 0.0));
+  auto snapshot = makeSnapshot(provider);
+  auto config = disabledConfig();
+  config.use_integrity_cost = true;
+  config.metrics_only = false;
+  config.lambda_integrity = 0.00001;
+  config.integrity_grad_norm_max = 100.0;
+  config.objective_aggregation_mode = "fixed_200_mean";
+  auto optimizer = makeOptimizer(config, &swarm);
+  ego_planner::BsplineOptimizer::P1PlanningRiskContext context;
+  context.snapshot = snapshot;
+  context.query_base_time_s = snapshot->stamp_s();
+  context.planning_start_s = snapshot->stamp_s();
+  context.planning_attempt_id = 92;
+  context.candidate_id = 1;
+  optimizer->setP1PlanningRiskContext(context);
+
+  double raw_cost = 0.0;
+  Eigen::MatrixXd raw_gradient;
+  ASSERT_TRUE(optimizer->evaluateP1RawCostForTest(
+      initial, 0.1, raw_cost, raw_gradient));
+  Eigen::MatrixXd active_gradient = Eigen::MatrixXd::Zero(
+      initial.rows(), initial.cols());
+  active_gradient.rightCols(initial.cols() - optimizer->getOrder()) =
+      raw_gradient.rightCols(initial.cols() - optimizer->getOrder());
+  ASSERT_GT(active_gradient.norm(), 0.0);
+
+  constexpr double kProbeDisplacementM = 0.025;
+  const double max_column_norm = active_gradient.colwise().norm().maxCoeff();
+  const Eigen::MatrixXd probe = initial -
+      (kProbeDisplacementM / max_column_norm) * active_gradient;
+  double probe_cost = 0.0;
+  Eigen::MatrixXd ignored;
+  ASSERT_TRUE(optimizer->evaluateP1RawCostForTest(
+      probe, 0.1, probe_cost, ignored));
+  EXPECT_LT(probe_cost, raw_cost);
+
+  Eigen::MatrixXd terminal = initial;
+  double final_cost = 0.0;
+  int iterations = 0;
+  ASSERT_TRUE(optimizer->optimizeReboundCostForTest(
+      terminal, 0.1, 80, final_cost, iterations));
+  const auto trace = optimizer->getLastP1OptimizationTrace();
+  ASSERT_TRUE(trace.support_full_valid);
+  EXPECT_GT(trace.grad_integrity_dot_displacement, 0.0);
+  EXPECT_GT(trace.post_mean_c_pi, trace.pre_mean_c_pi);
+  EXPECT_GT(trace.post_max_c_pi, trace.pre_max_c_pi);
+  EXPECT_LT(trace.post_total_objective, trace.pre_total_objective);
 }
 
 TEST(P1IntegrityCostTest,

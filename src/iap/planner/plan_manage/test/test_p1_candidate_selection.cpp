@@ -106,4 +106,39 @@ TEST(P1CandidateSelectionTest, NarrowPeakFixtureRejectsAdaptiveMeanOnlyImproveme
   EXPECT_FALSE(decisions[0].replace_published_trajectory);
 }
 
+TEST(P1CandidateSelectionTest,
+     RejectsLegacyFixedLambdaConflictAndSelectsNormalizedWinner) {
+  auto legacy = attempt20();
+  legacy.planning_attempt_id = 92;
+  legacy.candidate_id = 1;
+  legacy.pre_mean_c_pi = 19.0;
+  legacy.pre_max_c_pi = 19.0;
+  legacy.post_mean_c_pi = 19.6;
+  legacy.post_max_c_pi = 20.0;
+  legacy.gradient_dot_displacement = 0.01;
+
+  auto normalized = legacy;
+  normalized.candidate_id = 2;
+  normalized.post_base_objective = 0.20;
+  normalized.post_raw_p1_objective = legacy.pre_raw_p1_objective - 0.01;
+  normalized.post_weighted_p1_objective =
+      legacy.pre_weighted_p1_objective - 1.0e-7;
+  normalized.post_total_objective = legacy.pre_total_objective - 0.10;
+  normalized.post_mean_c_pi = 18.99;
+  normalized.post_max_c_pi = 18.99;
+  normalized.gradient_dot_displacement = -0.01;
+
+  auto incumbent = normalized;
+  incumbent.post_mean_c_pi = 19.0;
+  incumbent.post_max_c_pi = 19.0;
+  const auto decisions = ego_planner::selectP1Candidates(
+      {legacy, normalized}, &incumbent);
+  ASSERT_EQ(decisions.size(), 2U);
+  EXPECT_FALSE(decisions[0].rank_eligible);
+  EXPECT_FALSE(decisions[0].selected);
+  EXPECT_TRUE(decisions[1].rank_eligible);
+  EXPECT_TRUE(decisions[1].selected);
+  EXPECT_TRUE(decisions[1].replace_published_trajectory);
+}
+
 }  // namespace

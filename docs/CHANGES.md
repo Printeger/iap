@@ -3,6 +3,10 @@
 > 规则：任何代码改动必须在这里记录，并包含 IAP-RQ-XXX。
 
 ## Unreleased
+- test(planner-p1-2-fixed-lambda-counterexample): IAP-RQ-400 / IAP-RQ-410 — add a seconds-scale, ROS-free feedback command and a deterministic conflict fixture for the fixed `p1.lambda_integrity=0.00001` failure.
+  - `run_p1_fixed_lambda_feedback.py` invokes only the named optimizer and selection GTests, emits structured JSON with elapsed time and red/green status, and fails when a filter executes fewer tests than expected.
+  - The fixture keeps one immutable snapshot/query base and fixed 200-sample mean, verifies the analytic raw P1 descent probe, and characterizes the legacy one-stage optimizer counterexample: total/base descent moves along the positive raw-P1 gradient and increases both mean and max risk.
+  - Candidate-selection coverage proves that the legacy optimizer winner remains selected for identity closure but is not rank-eligible or replacement-admitted, while a normalized descent candidate is selected and admitted. The feedback loop intentionally remains red until the two-stage optimizer test is implemented; no ROS launch, P1-3, or lambda sweep is involved.
 - fix(planner-p1-2-selection-provenance): IAP-RQ-320 / IAP-RQ-400 / IAP-RQ-410 — prevent a successful low-weight P1 optimizer result from silently replacing an existing trajectory when its fixed-lattice P1 risk regresses.
   - `P1CandidateSelection` separates same-attempt ranking from cross-attempt replacement. A full-support candidate must reduce or preserve both mean/max `c_pi` with one strict decrease before it is rank-eligible; a rejected replacement retains the existing trajectory and is deferred until a new healthy generation, without affecting P5.
   - The deterministic Attempt 19/20 regression records that these are separate replans: Attempt 19 descends P1 risk; Attempt 20 descends base/total objective but raises raw/weighted P1 and mean/max risk, so it is diagnostic-selected but not replacement-admitted.
