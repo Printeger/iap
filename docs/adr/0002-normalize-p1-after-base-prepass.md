@@ -12,6 +12,8 @@ The prepass changes control-point positions but preserves the seed's knot interv
 
 The formal `test_planner` P1 fixture continues replanning until the manager's existing 0.2 m close-to-goal boundary instead of stopping at the generic 1.0 m threshold. Both metrics-only and enabled runs use the same declared manifest value. This is test-fixture observability, not a production planner or P1 objective change.
 
+Base fallbacks may advance the receding horizon only until the active global goal obtains its first published normalized-P1 trajectory. Thereafter, an optimizer failure or incomplete fixed support retains that P1 incumbent. A new global goal or emergency trajectory resets the incumbent identity. This prevents a later non-P1 fallback from invalidating the authoritative selected-candidate/profile binding.
+
 ## Decision
 
 Each topology seed first runs the unchanged base rebound optimizer. A successful base result with full `200/200` support defines a frozen base-improvement budget `DeltaB`. For each P1 seed, the active raw P1 gradient norm `G` freezes

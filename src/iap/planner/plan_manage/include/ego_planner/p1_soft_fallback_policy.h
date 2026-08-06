@@ -32,6 +32,7 @@ struct P1BasePrepassFallbackInput {
   bool base_optimizer_success = false;
   bool full_p1_support = false;
   bool has_existing_trajectory = false;
+  bool has_p1_preference_incumbent = false;
 };
 
 inline bool canP1BasePrepassRecoverSupport(
@@ -53,6 +54,10 @@ inline P1SoftFallbackDecision decideP1BasePrepassFallback(
       ? "base_prepass_no_full_support"
       : "base_prepass_optimizer_failure";
   if (input.base_optimizer_success) {
+    if (input.has_p1_preference_incumbent) {
+      return {P1SoftFallbackAction::KEEP_EXISTING_TRAJECTORY, false, false,
+              false, reason};
+    }
     return {P1SoftFallbackAction::PUBLISH_BASE_CANDIDATE, true, false,
             false, reason};
   }

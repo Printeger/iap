@@ -1036,7 +1036,8 @@ namespace ego_planner
 
         const auto prepass_fallback = decideP1BasePrepassFallback({
             !trajs.empty() || !unsupported_base_candidates.empty(),
-            !trajs.empty(), has_existing_trajectory});
+            !trajs.empty(), has_existing_trajectory,
+            has_p1_preference_incumbent_});
         normalized_p1_stage =
             prepass_fallback.action == P1SoftFallbackAction::USE_P1_CANDIDATE;
         if (prepass_fallback.action ==
@@ -1049,6 +1050,17 @@ namespace ego_planner
         {
           trajs.clear();
           candidate_prepasses.clear();
+        }
+        if (prepass_fallback.action ==
+                P1SoftFallbackAction::KEEP_EXISTING_TRAJECTORY &&
+            has_p1_preference_incumbent_)
+        {
+          p1_preference_rejected = true;
+          last_p1_rejection_reason_ = prepass_fallback.reason;
+          last_p1_rejection_requires_new_generation_ = true;
+          appendPlanningRiskContextTimeline(
+              "replacement", plannerNow().seconds(), "rejected",
+              prepass_fallback.reason, "existing_trajectory");
         }
 
         // The supplement is generated only after a collision-feasible,
@@ -1411,7 +1423,8 @@ namespace ego_planner
         }
         base_prepass_ready = base_success && base_full_support;
         const auto prepass_fallback = decideP1BasePrepassFallback({
-            base_success, base_full_support, has_existing_trajectory});
+            base_success, base_full_support, has_existing_trajectory,
+            has_p1_preference_incumbent_});
         normalized_p1_stage =
             prepass_fallback.action == P1SoftFallbackAction::USE_P1_CANDIDATE;
         base_candidate_ready = normalized_p1_stage ||
@@ -1434,6 +1447,17 @@ namespace ego_planner
             base_prepass_ready ? "p1_objective" : "base_fallback",
             p1_fallback_reason,
             base_prepass_ready ? "none" : "p1_soft_fallback");
+        if (prepass_fallback.action ==
+                P1SoftFallbackAction::KEEP_EXISTING_TRAJECTORY &&
+            has_p1_preference_incumbent_)
+        {
+          p1_preference_rejected = true;
+          last_p1_rejection_reason_ = prepass_fallback.reason;
+          last_p1_rejection_requires_new_generation_ = true;
+          appendPlanningRiskContextTimeline(
+              "replacement", plannerNow().seconds(), "rejected",
+              prepass_fallback.reason, "existing_trajectory");
+        }
         p1_seed.points = base_points;
         set_p1_context(selected_p1_candidate_id);
       }
@@ -1773,6 +1797,8 @@ namespace ego_planner
           objective_applied ? "none" : "p1_soft_fallback");
     }
     updateTrajInfo(pos, accepted_time);
+    if (objective_applied)
+      has_p1_preference_incumbent_ = true;
 
     static double sum_time = 0;
     static int count_success = 0;
@@ -1798,6 +1824,7 @@ namespace ego_planner
     }
 
     updateTrajInfo(UniformBspline(control_points, 3, 1.0), plannerNow());
+    has_p1_preference_incumbent_ = false;
 
     return true;
   }
@@ -1897,6 +1924,7 @@ namespace ego_planner
 
     auto time_now = plannerNow();
 
+    has_p1_preference_incumbent_ = false;
     global_data_.setGlobalTraj(gl_traj, time_now);
 
     return true;
@@ -2021,6 +2049,7 @@ namespace ego_planner
 
     auto time_now = plannerNow();
 
+    has_p1_preference_incumbent_ = false;
     global_data_.setGlobalTraj(gl_traj, time_now);
 
     return true;
