@@ -3,6 +3,11 @@
 > 规则：任何代码改动必须在这里记录，并包含 IAP-RQ-XXX。
 
 ## Unreleased
+- fix(planner-p0-frozen-occupancy-epoch): IAP-RQ-320 / IAP-RQ-400 — bind each P0 refresh to one immutable occupancy-map epoch while the live map continues updating.
+  - GridMap now captures geometry, raw/fused/inflated buffers, cloud stamp, and generation under one short writer lock, then serves all refresh queries from that read-only copy. A 10 Hz cloud update after capture cannot mix generations inside the P0 snapshot; the next refresh captures the next epoch.
+  - A configured epoch factory that cannot capture a complete post-cloud epoch fails closed as `occupancy_generation_changed`. The existing RiskGrid regression still rejects a query source that changes generation within one captured refresh.
+  - The fresh run `5c19f4ac1976483fbc779af41c814bec` proved the prior whole-refresh terminal check was unsatisfiable in this fixture: provider construction took about 438 ms while occupancy advanced every 100 ms, leaving only a stale prior snapshot. Its failed preflight and ten diagnostic figures remain in the primary report.
+  - Focused verification: all 33 `test_p0_risk_grid_runtime` tests and all 33 `test_risk_grid_map` tests pass. P0 geometry, horizons, occupied-skip semantics, 1.0-second stale timeout, fixed P1 lambda/support, and P5 semantics are unchanged.
 - fix(planner-p1-base-prepass-fallback): IAP-RQ-400 / IAP-RQ-410 — keep P1 a soft preference when the two-stage base prepass succeeds but the fixed-200 risk lattice cannot cover the initial trajectory.
   - A full-support base prepass still enters only the normalized P1 stage. An unsupported but collision-feasible base result now establishes the initial trajectory when no incumbent exists; with an incumbent it remains fail-closed and keeps that incumbent. Failed base optimization is never published.
   - Both distinctive and single-candidate planning paths update objective/timeline identity before choosing the next stage, so a base fallback cannot impersonate a P1 optimizer start or emit strict candidate evidence.

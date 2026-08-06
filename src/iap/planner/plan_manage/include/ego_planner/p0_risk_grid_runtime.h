@@ -98,6 +98,8 @@ class P0RiskGridRuntime {
   void setOccupancyPredicate(iap::RiskGridMap::OccupancyPredicate predicate);
   void setOccupancyDiagnosticQuery(
       iap::RiskGridMap::OccupancyDiagnosticQuery query);
+  void setOccupancyDiagnosticQueryFactory(
+      std::function<iap::RiskGridMap::OccupancyDiagnosticQuery()> factory);
 
  private:
   friend class P0RiskGridRuntimeStampTest;
@@ -173,6 +175,8 @@ class P0RiskGridRuntime {
   std::unique_ptr<iap::RiskPredictionProvider> provider_;
   iap::RiskGridMap::OccupancyPredicate occupancy_predicate_;
   iap::RiskGridMap::OccupancyDiagnosticQuery occupancy_diagnostic_query_;
+  std::function<iap::RiskGridMap::OccupancyDiagnosticQuery()>
+      occupancy_diagnostic_query_factory_;
   iap::IntegritySnapshotBuilder snapshot_builder_;
 
   // Inputs, heavy refresh, and health publication deliberately use distinct

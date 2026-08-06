@@ -627,6 +627,11 @@ void P0RiskGridRuntime::setOccupancyDiagnosticQuery(
   occupancy_diagnostic_query_ = std::move(query);
 }
 
+void P0RiskGridRuntime::setOccupancyDiagnosticQueryFactory(
+    std::function<iap::RiskGridMap::OccupancyDiagnosticQuery()> factory) {
+  occupancy_diagnostic_query_factory_ = std::move(factory);
+}
+
 bool P0RiskGridRuntime::p0_6_fixture_occupied(
     const Eigen::Vector3d& pos) const {
   const auto& fixture = config_.p0_6_fixture;
@@ -657,17 +662,27 @@ P0RiskGridRuntime::combinedOccupancyPredicate() const {
 
 iap::RiskGridMap::OccupancyDiagnosticQuery
 P0RiskGridRuntime::combinedOccupancyDiagnosticQuery() const {
-  if (!occupancy_diagnostic_query_) {
+  auto query = occupancy_diagnostic_query_factory_
+      ? occupancy_diagnostic_query_factory_()
+      : occupancy_diagnostic_query_;
+  if (occupancy_diagnostic_query_factory_ && !query) {
+    query = [](const Eigen::Vector3d&) {
+      iap::RiskOccupancyDiagnostic diagnostic;
+      diagnostic.source = "occupancy_snapshot_unavailable";
+      return diagnostic;
+    };
+  }
+  if (!query) {
     return {};
   }
   const bool fixture_enabled =
       config_.p0_6_fixture.enabled &&
       config_.p0_6_fixture.name == "occupied_overlap_box_v1";
   if (!fixture_enabled) {
-    return occupancy_diagnostic_query_;
+    return query;
   }
-  return [this](const Eigen::Vector3d& pos) {
-    auto diagnostic = occupancy_diagnostic_query_(pos);
+  return [this, query = std::move(query)](const Eigen::Vector3d& pos) {
+    auto diagnostic = query(pos);
     if (p0_6_fixture_occupied(pos)) {
       diagnostic.available = true;
       diagnostic.raw_occupied = true;

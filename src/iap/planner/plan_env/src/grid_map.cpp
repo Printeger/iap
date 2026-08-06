@@ -728,6 +728,7 @@ void GridMap::updateOccupancyCallback()
     return;
   }
   md_.last_occ_update_time_ = node_->now();
+  std::lock_guard<std::mutex> occupancy_lock(occupancy_epoch_mutex_);
   occupancy_update_sequence_.fetch_add(1, std::memory_order_acq_rel);
 
   /* update occupancy */
@@ -830,6 +831,7 @@ void GridMap::cloudCallback(const sensor_msgs::msg::PointCloud2::ConstPtr &img)
   if (isnan(md_.camera_pos_(0)) || isnan(md_.camera_pos_(1)) || isnan(md_.camera_pos_(2)))
     return;
 
+  std::lock_guard<std::mutex> occupancy_lock(occupancy_epoch_mutex_);
   occupancy_update_sequence_.fetch_add(1, std::memory_order_acq_rel);
 
   this->resetBuffer(md_.camera_pos_ - mp_.local_update_range_,
@@ -1045,6 +1047,7 @@ uint64_t GridMap::occupancyGeneration() const
 GridMap::OccupancyDiagnostic GridMap::queryOccupancyDiagnostic(
     const Eigen::Vector3d &pos) const
 {
+  std::lock_guard<std::mutex> lock(occupancy_epoch_mutex_);
   OccupancyDiagnostic out;
   out.resolution_m = mp_.resolution_;
   out.inflation_m = mp_.obstacles_inflation_;
@@ -1102,6 +1105,95 @@ GridMap::OccupancyDiagnostic GridMap::queryOccupancyDiagnostic(
   out.source = raw_cloud ? "raw_cloud" : raw_fused ? "fused_depth" :
       out.inflated_occupied ? "inflated_neighbor" : "free";
   return out;
+}
+
+GridMap::OccupancyDiagnosticQuery
+GridMap::captureOccupancyDiagnosticQuery() const
+{
+  struct FrozenEpoch
+  {
+    Eigen::Vector3d map_origin = Eigen::Vector3d::Zero();
+    Eigen::Vector3i map_voxel_num = Eigen::Vector3i::Zero();
+    double resolution = std::numeric_limits<double>::quiet_NaN();
+    double resolution_inv = std::numeric_limits<double>::quiet_NaN();
+    double inflation = std::numeric_limits<double>::quiet_NaN();
+    double min_occupancy_log = std::numeric_limits<double>::quiet_NaN();
+    std::string frame_id;
+    double cloud_stamp_s = std::numeric_limits<double>::quiet_NaN();
+    uint64_t generation = 0;
+    std::vector<double> fused;
+    std::vector<char> inflated;
+    std::vector<char> raw_cloud;
+  };
+
+  auto epoch = std::make_shared<FrozenEpoch>();
+  {
+    std::lock_guard<std::mutex> lock(occupancy_epoch_mutex_);
+    const uint64_t sequence = occupancy_update_sequence_.load(
+        std::memory_order_acquire);
+    const double cloud_stamp_s = occupancy_cloud_stamp_s_.load(
+        std::memory_order_acquire);
+    if ((sequence & 1u) != 0u || sequence == 0u ||
+        !std::isfinite(cloud_stamp_s))
+      return {};
+    epoch->map_origin = mp_.map_origin_;
+    epoch->map_voxel_num = mp_.map_voxel_num_;
+    epoch->resolution = mp_.resolution_;
+    epoch->resolution_inv = mp_.resolution_inv_;
+    epoch->inflation = mp_.obstacles_inflation_;
+    epoch->min_occupancy_log = mp_.min_occupancy_log_;
+    epoch->frame_id = mp_.frame_id_;
+    epoch->cloud_stamp_s = cloud_stamp_s;
+    epoch->generation = sequence / 2u;
+    epoch->fused = md_.occupancy_buffer_;
+    epoch->inflated = md_.occupancy_buffer_inflate_;
+    epoch->raw_cloud = md_.occupancy_buffer_raw_cloud_;
+  }
+
+  return [epoch = std::move(epoch)](const Eigen::Vector3d &pos) {
+    OccupancyDiagnostic out;
+    out.resolution_m = epoch->resolution;
+    out.inflation_m = epoch->inflation;
+    out.frame_id = epoch->frame_id;
+    out.cloud_stamp_s = epoch->cloud_stamp_s;
+    out.generation = epoch->generation;
+    if (!pos.allFinite() || !std::isfinite(epoch->resolution_inv) ||
+        epoch->resolution_inv <= 0.0)
+      return out;
+    for (int axis = 0; axis < 3; ++axis)
+      out.voxel_index(axis) = static_cast<int>(std::floor(
+          (pos(axis) - epoch->map_origin(axis)) * epoch->resolution_inv));
+    for (int axis = 0; axis < 3; ++axis)
+    {
+      if (out.voxel_index(axis) < 0 ||
+          out.voxel_index(axis) >= epoch->map_voxel_num(axis))
+      {
+        out.source = "position_out_of_map";
+        return out;
+      }
+    }
+    const int address = out.voxel_index(0) * epoch->map_voxel_num(1) *
+            epoch->map_voxel_num(2) +
+        out.voxel_index(1) * epoch->map_voxel_num(2) + out.voxel_index(2);
+    out.voxel_center =
+        (out.voxel_index.cast<double>() + Eigen::Vector3d::Constant(0.5)) *
+            epoch->resolution + epoch->map_origin;
+    const bool raw_cloud = address >= 0 &&
+        address < static_cast<int>(epoch->raw_cloud.size()) &&
+        epoch->raw_cloud[static_cast<std::size_t>(address)] != 0;
+    const bool raw_fused = address >= 0 &&
+        address < static_cast<int>(epoch->fused.size()) &&
+        epoch->fused[static_cast<std::size_t>(address)] >
+            epoch->min_occupancy_log;
+    out.raw_occupied = raw_cloud || raw_fused;
+    out.inflated_occupied = address >= 0 &&
+        address < static_cast<int>(epoch->inflated.size()) &&
+        epoch->inflated[static_cast<std::size_t>(address)] != 0;
+    out.available = true;
+    out.source = raw_cloud ? "raw_cloud" : raw_fused ? "fused_depth" :
+        out.inflated_occupied ? "inflated_neighbor" : "free";
+    return out;
+  };
 }
 
 // int GridMap::getVoxelNum() {

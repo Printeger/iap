@@ -4,11 +4,13 @@
 #include <Eigen/Eigen>
 #include <Eigen/StdVector>
 #include <atomic>
+#include <functional>
 #include <cv_bridge/cv_bridge.hpp>
 #include <geometry_msgs/msg/pose_stamped.hpp>
 #include <iostream>
 #include <cstdint>
 #include <limits>
+#include <mutex>
 #include <random>
 #include <nav_msgs/msg/odometry.hpp>
 #include <queue>
@@ -176,6 +178,8 @@ public:
     uint64_t generation = 0;
     std::string source = "unavailable";
   };
+  using OccupancyDiagnosticQuery =
+      std::function<OccupancyDiagnostic(const Eigen::Vector3d &)>;
 
   // occupancy map management
   void resetBuffer();
@@ -195,6 +199,7 @@ public:
   inline int getInflateOccupancy(Eigen::Vector3d pos);
   OccupancyDiagnostic queryOccupancyDiagnostic(
       const Eigen::Vector3d &pos) const;
+  OccupancyDiagnosticQuery captureOccupancyDiagnosticQuery() const;
   uint64_t occupancyGeneration() const;
 
   inline void boundIndex(Eigen::Vector3i &id);
@@ -282,6 +287,7 @@ private:
   std::atomic<uint64_t> occupancy_update_sequence_{0};
   std::atomic<double> occupancy_cloud_stamp_s_{
       std::numeric_limits<double>::quiet_NaN()};
+  mutable std::mutex occupancy_epoch_mutex_;
 };
 
 /* ============================== definition of inline function
@@ -348,6 +354,7 @@ inline void GridMap::setOccupied(Eigen::Vector3d pos)
   Eigen::Vector3i id;
   posToIndex(pos, id);
 
+  std::lock_guard<std::mutex> lock(occupancy_epoch_mutex_);
   occupancy_update_sequence_.fetch_add(1, std::memory_order_acq_rel);
   md_.occupancy_buffer_inflate_[id(0) * mp_.map_voxel_num_(1) * mp_.map_voxel_num_(2) +
                                 id(1) * mp_.map_voxel_num_(2) + id(2)] = 1;
@@ -368,6 +375,7 @@ inline void GridMap::setOccupancy(Eigen::Vector3d pos, double occ)
   Eigen::Vector3i id;
   posToIndex(pos, id);
 
+  std::lock_guard<std::mutex> lock(occupancy_epoch_mutex_);
   occupancy_update_sequence_.fetch_add(1, std::memory_order_acq_rel);
   md_.occupancy_buffer_[toAddress(id)] = occ;
   occupancy_update_sequence_.fetch_add(1, std::memory_order_release);

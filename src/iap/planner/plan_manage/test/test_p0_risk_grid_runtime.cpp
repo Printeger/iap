@@ -829,6 +829,72 @@ TEST_F(P0RiskGridRuntimeStampTest, OdomStampIsPreferredForRefreshTime) {
   EXPECT_DOUBLE_EQ(currentRefreshStamp(runtime), 123.5);
 }
 
+TEST_F(P0RiskGridRuntimeStampTest,
+       OccupancyEpochFactoryFreezesOneGenerationPerRefresh) {
+  ensure_rclcpp();
+  auto node = std::make_shared<rclcpp::Node>(
+      "p0_frozen_occupancy_epoch_test",
+      rclcpp::NodeOptions().allow_undeclared_parameters(false));
+  P0RiskGridRuntime runtime(node, enabledConfig(),
+                            std::make_unique<FakeProvider>());
+  uint64_t capture_count = 0;
+  runtime.setOccupancyDiagnosticQueryFactory([&capture_count]() {
+    const uint64_t captured_generation = ++capture_count;
+    return [captured_generation](const Eigen::Vector3d& position) {
+      iap::RiskOccupancyDiagnostic diagnostic;
+      diagnostic.available = true;
+      diagnostic.occupancy_generation = captured_generation;
+      diagnostic.voxel_center = position;
+      diagnostic.resolution_m = 1.0;
+      diagnostic.frame_id = "map";
+      diagnostic.cloud_stamp_s = 100.0 + captured_generation;
+      diagnostic.source = "frozen_test_epoch";
+      return diagnostic;
+    };
+  });
+  seedValidInputs(&runtime, 100.0, 100.0);
+
+  EXPECT_TRUE(runtime.refreshOnceForTest());
+  ASSERT_EQ(capture_count, 1u);
+  const auto first = runtime.acquireSnapshot();
+  ASSERT_NE(first, nullptr);
+  iap::RiskCostSample first_cost;
+  iap::RiskCostQueryTrace first_trace;
+  ASSERT_TRUE(first->queryCost(Eigen::Vector3d::Zero(), 100.0,
+                               &first_cost, &first_trace));
+  ASSERT_FALSE(first_trace.corners.empty());
+  EXPECT_EQ(first_trace.corners.front().occupancy.occupancy_generation, 1u);
+
+  seedValidInputs(&runtime, 100.5, 100.5);
+  EXPECT_TRUE(runtime.refreshOnceForTest());
+  EXPECT_EQ(capture_count, 2u);
+  const auto second = runtime.acquireSnapshot();
+  ASSERT_NE(second, nullptr);
+  iap::RiskCostSample second_cost;
+  iap::RiskCostQueryTrace second_trace;
+  ASSERT_TRUE(second->queryCost(Eigen::Vector3d::Zero(), 100.5,
+                                &second_cost, &second_trace));
+  ASSERT_FALSE(second_trace.corners.empty());
+  EXPECT_EQ(second_trace.corners.front().occupancy.occupancy_generation, 2u);
+}
+
+TEST_F(P0RiskGridRuntimeStampTest,
+       MissingOccupancyEpochFromConfiguredFactoryFailsClosed) {
+  ensure_rclcpp();
+  auto node = std::make_shared<rclcpp::Node>(
+      "p0_missing_occupancy_epoch_test",
+      rclcpp::NodeOptions().allow_undeclared_parameters(false));
+  P0RiskGridRuntime runtime(node, enabledConfig(),
+                            std::make_unique<FakeProvider>());
+  runtime.setOccupancyDiagnosticQueryFactory(
+      []() { return iap::RiskGridMap::OccupancyDiagnosticQuery{}; });
+  seedValidInputs(&runtime, 100.0, 100.0);
+
+  EXPECT_FALSE(runtime.refreshOnceForTest());
+  EXPECT_FALSE(runtime.health().ready);
+  EXPECT_EQ(runtime.health().reason, "occupancy_generation_changed");
+}
+
 TEST_F(P0RiskGridRuntimeStampTest, CurrentStampIsFallbackWhenOdomInvalid) {
   ensure_rclcpp();
   auto node = std::make_shared<rclcpp::Node>(
