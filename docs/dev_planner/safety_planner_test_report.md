@@ -9020,3 +9020,11 @@ Observation: Clean HEAD `4cc7dee` produced fresh serial P1-1 run `06c11f5fd9b846
 Verdict: FAIL (the differentiable fixed-200 mean objective is not aligned with the required terminal maximum).
 
 Conclusion: This pair is retained and will never be reanalyzed. Following H4, production moves to the first prescribed smooth peak alternative: stable normalized fixed-200 log-sum-exp at `T=0.01 c_pi`, with analytic softmax gradient and the unchanged fixed lambda/frozen budget. No P0/P5 semantic, hard constraint, or nondifferentiable max is introduced. A new build, diagnostic smoke, and wholly fresh formal pair are required; P1-3 remains prohibited.
+
+### Superseding P1 fixed-lambda diagnostic terminal record — 2026-08-06 verifier output-path failure
+
+Observation: Clean HEAD `f7c7e7a1063c0529ed763c9f53eaff57dedaa1be` produced fresh enabled run `f7acf44945d84900b9f9836f8d3d1e00`, export `/home/dev/ws_iap/src/iap/results/planner_validation/exports/test_planner_p1_degraded_lidar_good_gnss_degraded_lidar_good_1786052454941`, and bag `/home/dev/ws_iap/src/iap/results/planner_validation/bags/test_planner_p1_degraded_lidar_good_gnss_degraded_lidar_good_20260806T214054Z`. Recorder metadata, validator summary, and manifest finalized. Its sole bundle-verifier invocation requested `/metadata/p1_evidence_bundle_verification.json` before the `metadata/` directory existed and exited with `FileNotFoundError` while writing the result.
+
+Verdict: FAIL (verification invocation/output provenance incomplete).
+
+Conclusion: This run is retained and its verifier is never rerun; no diagnostic analyzer is invoked. The next wholly fresh smoke will pre-create its verifier output directory before the sole verifier call. This is an operational evidence failure, not evidence for or against LSE effectiveness, and it does not authorize formal or P1-3.
