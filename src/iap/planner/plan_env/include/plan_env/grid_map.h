@@ -3,9 +3,12 @@
 
 #include <Eigen/Eigen>
 #include <Eigen/StdVector>
+#include <atomic>
 #include <cv_bridge/cv_bridge.hpp>
 #include <geometry_msgs/msg/pose_stamped.hpp>
 #include <iostream>
+#include <cstdint>
+#include <limits>
 #include <random>
 #include <nav_msgs/msg/odometry.hpp>
 #include <queue>
@@ -97,6 +100,7 @@ struct MappingData
 
   std::vector<double> occupancy_buffer_;
   std::vector<char> occupancy_buffer_inflate_;
+  std::vector<char> occupancy_buffer_raw_cloud_;
 
   // camera position and pose data
 
@@ -157,6 +161,22 @@ public:
     INVALID_IDX = -10000
   };
 
+  struct OccupancyDiagnostic
+  {
+    bool available = false;
+    bool raw_occupied = false;
+    bool inflated_occupied = false;
+    Eigen::Vector3i voxel_index = Eigen::Vector3i::Constant(-1);
+    Eigen::Vector3d voxel_center = Eigen::Vector3d::Constant(
+        std::numeric_limits<double>::quiet_NaN());
+    double resolution_m = std::numeric_limits<double>::quiet_NaN();
+    double inflation_m = std::numeric_limits<double>::quiet_NaN();
+    std::string frame_id;
+    double cloud_stamp_s = std::numeric_limits<double>::quiet_NaN();
+    uint64_t generation = 0;
+    std::string source = "unavailable";
+  };
+
   // occupancy map management
   void resetBuffer();
   void resetBuffer(Eigen::Vector3d min, Eigen::Vector3d max);
@@ -173,6 +193,9 @@ public:
   inline int getOccupancy(Eigen::Vector3d pos);
   inline int getOccupancy(Eigen::Vector3i id);
   inline int getInflateOccupancy(Eigen::Vector3d pos);
+  OccupancyDiagnostic queryOccupancyDiagnostic(
+      const Eigen::Vector3d &pos) const;
+  uint64_t occupancyGeneration() const;
 
   inline void boundIndex(Eigen::Vector3i &id);
   inline bool isUnknown(const Eigen::Vector3i &id);
@@ -256,6 +279,9 @@ private:
   uniform_real_distribution<double> rand_noise_;
   normal_distribution<double> rand_noise2_;
   default_random_engine eng_;
+  std::atomic<uint64_t> occupancy_update_sequence_{0};
+  std::atomic<double> occupancy_cloud_stamp_s_{
+      std::numeric_limits<double>::quiet_NaN()};
 };
 
 /* ============================== definition of inline function
@@ -322,8 +348,10 @@ inline void GridMap::setOccupied(Eigen::Vector3d pos)
   Eigen::Vector3i id;
   posToIndex(pos, id);
 
+  occupancy_update_sequence_.fetch_add(1, std::memory_order_acq_rel);
   md_.occupancy_buffer_inflate_[id(0) * mp_.map_voxel_num_(1) * mp_.map_voxel_num_(2) +
                                 id(1) * mp_.map_voxel_num_(2) + id(2)] = 1;
+  occupancy_update_sequence_.fetch_add(1, std::memory_order_release);
 }
 
 inline void GridMap::setOccupancy(Eigen::Vector3d pos, double occ)
@@ -340,7 +368,9 @@ inline void GridMap::setOccupancy(Eigen::Vector3d pos, double occ)
   Eigen::Vector3i id;
   posToIndex(pos, id);
 
+  occupancy_update_sequence_.fetch_add(1, std::memory_order_acq_rel);
   md_.occupancy_buffer_[toAddress(id)] = occ;
+  occupancy_update_sequence_.fetch_add(1, std::memory_order_release);
 }
 
 inline int GridMap::getOccupancy(Eigen::Vector3d pos)

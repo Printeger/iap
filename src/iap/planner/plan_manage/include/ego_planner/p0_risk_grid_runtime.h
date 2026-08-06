@@ -96,6 +96,8 @@ class P0RiskGridRuntime {
   iap::RiskGridHealth health() const;
   bool refreshOnceForTest();
   void setOccupancyPredicate(iap::RiskGridMap::OccupancyPredicate predicate);
+  void setOccupancyDiagnosticQuery(
+      iap::RiskGridMap::OccupancyDiagnosticQuery query);
 
  private:
   friend class P0RiskGridRuntimeStampTest;
@@ -160,6 +162,8 @@ class P0RiskGridRuntime {
       iap::RiskGridHealth health) const;
   bool p0_6_fixture_occupied(const Eigen::Vector3d& pos) const;
   iap::RiskGridMap::OccupancyPredicate combinedOccupancyPredicate() const;
+  iap::RiskGridMap::OccupancyDiagnosticQuery
+  combinedOccupancyDiagnosticQuery() const;
   double currentMessageStamp() const;
   double currentRefreshStamp() const;
 
@@ -168,6 +172,7 @@ class P0RiskGridRuntime {
   iap::RiskGridMap risk_grid_;
   std::unique_ptr<iap::RiskPredictionProvider> provider_;
   iap::RiskGridMap::OccupancyPredicate occupancy_predicate_;
+  iap::RiskGridMap::OccupancyDiagnosticQuery occupancy_diagnostic_query_;
   iap::IntegritySnapshotBuilder snapshot_builder_;
 
   // Inputs, heavy refresh, and health publication deliberately use distinct

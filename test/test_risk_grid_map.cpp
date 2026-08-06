@@ -280,6 +280,80 @@ TEST(RiskGridMapTest, SkipOccupiedVoxelsMarksOccupiedAsUnknown) {
   EXPECT_FALSE(pl.valid);
 }
 
+TEST(RiskGridMapTest, QueryTraceAttributesOccupiedInterpolationCorner) {
+  iap::RiskGridMapParams params = base_params();
+  params.skip_occupied_voxels = true;
+  iap::RiskGridMap grid(params);
+  AffineProvider provider;
+  std::string reason;
+
+  const auto occupied = [](const Eigen::Vector3d& p) {
+    iap::RiskOccupancyDiagnostic diagnostic;
+    diagnostic.available = true;
+    diagnostic.raw_occupied = p.x() > 0.5;
+    diagnostic.inflated_occupied = diagnostic.raw_occupied;
+    diagnostic.frame_id = "map";
+    diagnostic.cloud_stamp_s = 9.9;
+    diagnostic.occupancy_generation = 7;
+    diagnostic.resolution_m = 1.0;
+    diagnostic.inflation_m = 0.0;
+    diagnostic.source = "test_map";
+    return diagnostic;
+  };
+  ASSERT_TRUE(grid.refreshFromProvider(
+      Eigen::Vector3d::Zero(), 10.0, provider, occupied, &reason)) << reason;
+
+  const auto snapshot = grid.acquireSnapshot();
+  ASSERT_NE(snapshot, nullptr);
+  const Eigen::Vector3d query_point(0.1, 0.1, 0.1);
+  EXPECT_FALSE(occupied(query_point).inflated_occupied);
+
+  iap::RiskCostSample cost;
+  iap::RiskCostQueryTrace trace;
+  EXPECT_FALSE(snapshot->queryCost(query_point, 10.5, &cost, &trace));
+  EXPECT_EQ(cost.reason, "occupied");
+  EXPECT_FALSE(trace.success);
+  EXPECT_EQ(trace.reason, "occupied");
+  ASSERT_EQ(trace.corners.size(), 16u);
+  const auto occupied_corners = std::count_if(
+      trace.corners.begin(), trace.corners.end(), [](const auto& corner) {
+        return corner.invalid_reason == "occupied" &&
+               corner.occupancy.inflated_occupied;
+      });
+  EXPECT_EQ(occupied_corners, 8);
+  for (const auto& corner : trace.corners) {
+    EXPECT_TRUE(corner.occupancy.available);
+    EXPECT_EQ(corner.occupancy.occupancy_generation, 7u);
+    EXPECT_EQ(corner.occupancy.frame_id, "map");
+    EXPECT_EQ(corner.voxel_index, corner.occupancy.voxel_index);
+    EXPECT_TRUE(corner.voxel_position.isApprox(
+        corner.occupancy.voxel_center));
+  }
+}
+
+TEST(RiskGridMapTest, RefreshRejectsChangingOccupancyGeneration) {
+  iap::RiskGridMapParams params = base_params();
+  iap::RiskGridMap grid(params);
+  AffineProvider provider;
+  std::string reason;
+  int calls = 0;
+  const auto changing_generation = [&calls](const Eigen::Vector3d&) {
+    iap::RiskOccupancyDiagnostic diagnostic;
+    diagnostic.available = true;
+    diagnostic.occupancy_generation = ++calls < 20 ? 11u : 12u;
+    diagnostic.source = "test_map";
+    return diagnostic;
+  };
+
+  EXPECT_FALSE(grid.refreshFromProvider(
+      Eigen::Vector3d::Zero(), 10.0, provider,
+      changing_generation, &reason));
+  EXPECT_EQ(reason, "occupancy_generation_changed");
+  EXPECT_EQ(provider.query_count, 0);
+  EXPECT_EQ(grid.acquireSnapshot(), nullptr);
+  EXPECT_EQ(grid.health().reason, "occupancy_generation_changed");
+}
+
 TEST(RiskGridMapTest, SkipOccupiedVoxelsKeepsFreePredicateBehavior) {
   iap::RiskGridMapParams params = base_params();
   params.skip_occupied_voxels = true;

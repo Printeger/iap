@@ -118,6 +118,8 @@ struct RiskGridHealth {
   std::string reason = "not_ready";
 };
 
+struct RiskOccupancyDiagnostic;
+
 struct RiskVoxel {
   double c_pi = std::numeric_limits<double>::quiet_NaN();
   double hpl_pred = std::numeric_limits<double>::quiet_NaN();
@@ -128,6 +130,7 @@ struct RiskVoxel {
   bool unknown = true;
   uint32_t source_flags = 0u;
   std::string reason = "not_evaluated";
+  std::shared_ptr<const RiskOccupancyDiagnostic> occupancy;
 };
 
 struct RiskCostSample {
@@ -137,6 +140,52 @@ struct RiskCostSample {
   Eigen::Vector3d grad = Eigen::Vector3d::Zero();
   uint64_t generation_id = 0;
   std::string reason = "not_evaluated";
+};
+
+struct RiskOccupancyDiagnostic {
+  bool available = false;
+  bool raw_occupied = false;
+  bool inflated_occupied = false;
+  Eigen::Vector3i voxel_index = Eigen::Vector3i::Constant(-1);
+  Eigen::Vector3d voxel_center = Eigen::Vector3d::Constant(
+      std::numeric_limits<double>::quiet_NaN());
+  double resolution_m = std::numeric_limits<double>::quiet_NaN();
+  double inflation_m = std::numeric_limits<double>::quiet_NaN();
+  std::string frame_id;
+  double cloud_stamp_s = std::numeric_limits<double>::quiet_NaN();
+  uint64_t occupancy_generation = 0;
+  std::string source = "unavailable";
+};
+
+struct RiskCostQueryCornerTrace {
+  int temporal_layer = -1;
+  int horizon_id = -1;
+  double horizon_s = std::numeric_limits<double>::quiet_NaN();
+  double temporal_weight = 0.0;
+  int corner_id = -1;
+  Eigen::Vector3i voxel_index = Eigen::Vector3i::Constant(-1);
+  Eigen::Vector3d voxel_position = Eigen::Vector3d::Constant(
+      std::numeric_limits<double>::quiet_NaN());
+  double spatial_weight = 0.0;
+  uint32_t source_flags = 0u;
+  double c_pi = std::numeric_limits<double>::quiet_NaN();
+  bool valid = false;
+  bool stale = true;
+  bool unknown = true;
+  std::string invalid_reason = "not_evaluated";
+  RiskOccupancyDiagnostic occupancy;
+};
+
+struct RiskCostQueryTrace {
+  Eigen::Vector3d query_point = Eigen::Vector3d::Constant(
+      std::numeric_limits<double>::quiet_NaN());
+  double query_time_s = std::numeric_limits<double>::quiet_NaN();
+  double query_tau_s = std::numeric_limits<double>::quiet_NaN();
+  uint64_t risk_generation_id = 0;
+  std::string frame_id;
+  bool success = false;
+  std::string reason = "not_evaluated";
+  std::vector<RiskCostQueryCornerTrace> corners;
 };
 
 struct PredictedPLSample {
@@ -203,6 +252,10 @@ class RiskGridSnapshot {
   bool queryCost(const Eigen::Vector3d& p_w,
                  double query_time_s,
                  RiskCostSample* out) const;
+  bool queryCost(const Eigen::Vector3d& p_w,
+                 double query_time_s,
+                 RiskCostSample* out,
+                 RiskCostQueryTrace* trace) const;
 
   bool queryPredictedPL(const Eigen::Vector3d& p_w,
                         double query_time_s,
@@ -226,6 +279,8 @@ class RiskGridSnapshot {
 class RiskGridMap {
  public:
   using OccupancyPredicate = std::function<bool(const Eigen::Vector3d&)>;
+  using OccupancyDiagnosticQuery =
+      std::function<RiskOccupancyDiagnostic(const Eigen::Vector3d&)>;
 
   RiskGridMap();
   explicit RiskGridMap(RiskGridMapParams params);
@@ -254,6 +309,11 @@ class RiskGridMap {
                            double now_s,
                            RiskPredictionProvider& provider,
                            const OccupancyPredicate& is_occupied,
+                           std::string* reason = nullptr);
+  bool refreshFromProvider(const Eigen::Vector3d& uav_position_w,
+                           double now_s,
+                           RiskPredictionProvider& provider,
+                           const OccupancyDiagnosticQuery& occupancy_query,
                            std::string* reason = nullptr);
 
   void markRefreshFailure(double now_s, const std::string& reason);

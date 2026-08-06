@@ -622,6 +622,11 @@ void P0RiskGridRuntime::setOccupancyPredicate(
   occupancy_predicate_ = std::move(predicate);
 }
 
+void P0RiskGridRuntime::setOccupancyDiagnosticQuery(
+    iap::RiskGridMap::OccupancyDiagnosticQuery query) {
+  occupancy_diagnostic_query_ = std::move(query);
+}
+
 bool P0RiskGridRuntime::p0_6_fixture_occupied(
     const Eigen::Vector3d& pos) const {
   const auto& fixture = config_.p0_6_fixture;
@@ -647,6 +652,29 @@ P0RiskGridRuntime::combinedOccupancyPredicate() const {
       return true;
     }
     return p0_6_fixture_occupied(pos);
+  };
+}
+
+iap::RiskGridMap::OccupancyDiagnosticQuery
+P0RiskGridRuntime::combinedOccupancyDiagnosticQuery() const {
+  if (!occupancy_diagnostic_query_) {
+    return {};
+  }
+  const bool fixture_enabled =
+      config_.p0_6_fixture.enabled &&
+      config_.p0_6_fixture.name == "occupied_overlap_box_v1";
+  if (!fixture_enabled) {
+    return occupancy_diagnostic_query_;
+  }
+  return [this](const Eigen::Vector3d& pos) {
+    auto diagnostic = occupancy_diagnostic_query_(pos);
+    if (p0_6_fixture_occupied(pos)) {
+      diagnostic.available = true;
+      diagnostic.raw_occupied = true;
+      diagnostic.inflated_occupied = true;
+      diagnostic.source = "p0_6_fixture";
+    }
+    return diagnostic;
   };
 }
 
@@ -880,10 +908,18 @@ void P0RiskGridRuntime::refreshTimerCallback() {
     last_refresh_query_count_ =
         layer_voxel_count * config_.grid.horizons_s.size();
   }
+  const auto occupancy_diagnostic_query =
+      combinedOccupancyDiagnosticQuery();
   const auto occupancy_predicate = combinedOccupancyPredicate();
   TimedRiskProvider timed_provider(provider);
-  risk_grid_.refreshFromProvider(snapshot.p_wb, now_s, timed_provider,
-                                 occupancy_predicate, &reason);
+  if (occupancy_diagnostic_query) {
+    risk_grid_.refreshFromProvider(
+        snapshot.p_wb, now_s, timed_provider,
+        occupancy_diagnostic_query, &reason);
+  } else {
+    risk_grid_.refreshFromProvider(snapshot.p_wb, now_s, timed_provider,
+                                   occupancy_predicate, &reason);
+  }
   const iap::RiskGridHealth health = risk_grid_.health(now_s);
   const auto viz_snapshot = risk_grid_.acquireSnapshot();
   const double refresh_end_stamp_s = currentMessageStamp();

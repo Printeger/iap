@@ -3,6 +3,11 @@
 > 规则：任何代码改动必须在这里记录，并包含 IAP-RQ-XXX。
 
 ## Unreleased
+- fix(planner-p0-occupied-attribution): IAP-RQ-320 / IAP-RQ-400 — bind occupied risk-grid failures to the actual spatiotemporal interpolation support and the occupancy-map epoch without weakening fail-closed semantics.
+  - `RiskGridSnapshot::queryCost` has a read-only trace overload that records the query point/time, both participating horizon layers, every trilinear corner's weight/index/position/source flags/value/invalid reason, and the captured raw/inflated occupancy diagnostic.
+  - GridMap exposes raw-cloud/fused versus inflated occupancy, voxel index/center, resolution, inflation, frame, cloud stamp, and a seqlock-style generation. P0 refresh rejects a changing generation before publishing a healthy snapshot and does not retry that generation.
+  - Regression coverage proves that a free query point can still be conservatively rejected because an interpolation corner is occupied, and that a mid-refresh generation change is rejected. Existing occupied results remain invalid/unknown; fixed support and P0/P5 geometry are unchanged.
+  - Focused verification: all 33 `test_risk_grid_map`, all 31 `test_p0_risk_grid_runtime`, and the fixed-lambda feedback runner pass after rebuilding IAP, `plan_env`, and `ego_planner`.
 - fix(planner-p1-2-two-stage-normalization): IAP-RQ-400 / IAP-RQ-410 — replace enabled P1's one-stage low-weight optimization with a base-feasible prepass followed by a frozen, budget-normalized soft P1 stage.
   - The fixed constants are `lambda_ref=1e-5`, `beta=0.10`, and `reference_displacement=0.025 m`; the launch/manifest `p1.lambda_integrity` remains `0.00001`. The merit uses the raw P1 delta from the candidate seed plus a differentiable candidate-local anchor, and remains frozen through internal rebound restarts.
   - Production planning now records `base_prepass_start/end`, delays full P1 admission until the prepass result has `200/200` support, applies the existing candidate cap only to P1 optimizer starts, and preserves all collision, feasibility, swarm, terminal, replacement, snapshot, and P5 gates.

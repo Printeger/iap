@@ -387,29 +387,65 @@ bool interpolate_cost_layer(const RiskGridSnapshot::Generation& generation,
                             const Eigen::Vector3d& frac,
                             const double query_time_s,
                             SpatialCostInterp* out,
-                            std::string* reason) {
+                            std::string* reason,
+                            RiskCostQueryTrace* trace = nullptr,
+                            const int temporal_layer = -1,
+                            const double temporal_weight = 0.0) {
   double c[2][2][2]{};
+  bool valid = true;
+  std::string first_invalid_reason;
+  const double wx[2] = {1.0 - frac.x(), frac.x()};
+  const double wy[2] = {1.0 - frac.y(), frac.y()};
+  const double wz[2] = {1.0 - frac.z(), frac.z()};
   for (int dx = 0; dx <= 1; ++dx) {
     for (int dy = 0; dy <= 1; ++dy) {
       for (int dz = 0; dz <= 1; ++dz) {
         const Eigen::Vector3i id = base_id + Eigen::Vector3i(dx, dy, dz);
         const RiskVoxel& voxel = voxel_at(generation, horizon_id, id);
-        if (!validate_corner(voxel, query_time_s,
-                             generation.params.stale_timeout_s,
-                             false, true, reason)) {
-          return false;
+        std::string corner_reason;
+        const bool corner_valid = validate_corner(
+            voxel, query_time_s, generation.params.stale_timeout_s,
+            false, true, &corner_reason);
+        if (!corner_valid && first_invalid_reason.empty()) {
+          first_invalid_reason = corner_reason;
+          valid = false;
+        }
+        if (trace) {
+          RiskCostQueryCornerTrace corner;
+          corner.temporal_layer = temporal_layer;
+          corner.horizon_id = horizon_id;
+          corner.horizon_s = generation.params.horizons_s[
+              static_cast<std::size_t>(horizon_id)];
+          corner.temporal_weight = temporal_weight;
+          corner.corner_id = dx * 4 + dy * 2 + dz;
+          corner.voxel_index = id;
+          corner.voxel_position =
+              (id.cast<double>() + Eigen::Vector3d::Constant(0.5)) *
+                  generation.params.resolution_m + generation.origin;
+          corner.spatial_weight = wx[dx] * wy[dy] * wz[dz];
+          corner.source_flags = voxel.source_flags;
+          corner.c_pi = voxel.c_pi;
+          corner.valid = voxel.valid;
+          corner.stale = voxel.stale;
+          corner.unknown = voxel.unknown;
+          corner.invalid_reason = corner_valid ? "none" : corner_reason;
+          if (voxel.occupancy) {
+            corner.occupancy = *voxel.occupancy;
+          }
+          trace->corners.push_back(std::move(corner));
         }
         c[dx][dy][dz] = voxel.c_pi;
       }
     }
   }
 
-  const double fx = frac.x();
-  const double fy = frac.y();
-  const double fz = frac.z();
-  const double wx[2] = {1.0 - fx, fx};
-  const double wy[2] = {1.0 - fy, fy};
-  const double wz[2] = {1.0 - fz, fz};
+  if (!valid) {
+    if (reason) {
+      *reason = first_invalid_reason;
+    }
+    return false;
+  }
+
   double value = 0.0;
   for (int dx = 0; dx <= 1; ++dx) {
     for (int dy = 0; dy <= 1; ++dy) {
@@ -537,48 +573,71 @@ bool trilinear_base(const RiskGridSnapshot& snapshot,
 bool RiskGridSnapshot::queryCost(const Eigen::Vector3d& p_w,
                                  const double query_time_s,
                                  RiskCostSample* out) const {
+  return queryCost(p_w, query_time_s, out, nullptr);
+}
+
+bool RiskGridSnapshot::queryCost(const Eigen::Vector3d& p_w,
+                                 const double query_time_s,
+                                 RiskCostSample* out,
+                                 RiskCostQueryTrace* trace) const {
   if (out == nullptr) {
     return false;
   }
   *out = RiskCostSample{};
   out->cost = params().unknown_cost;
   out->generation_id = generation_id();
-  if (!generation_) {
-    out->reason = "snapshot_not_ready";
+  if (trace) {
+    *trace = RiskCostQueryTrace{};
+    trace->query_point = p_w;
+    trace->query_time_s = query_time_s;
+    trace->risk_generation_id = generation_id();
+    trace->frame_id = params().frame_id;
+  }
+  const auto fail = [&](const std::string& failure) {
+    out->reason = failure;
+    if (trace) {
+      trace->success = false;
+      trace->reason = failure;
+    }
     return false;
+  };
+  if (!generation_) {
+    return fail("snapshot_not_ready");
   }
   if (!p_w.allFinite() || !std::isfinite(query_time_s)) {
-    out->reason = "invalid_query";
-    return false;
+    return fail("invalid_query");
   }
   const double tau = query_time_s - generation_->stamp_s;
+  if (trace) {
+    trace->query_tau_s = tau;
+  }
   HorizonBracket bracket;
   std::string reason;
   if (!find_horizon_bracket(generation_->params.horizons_s, tau,
                             &bracket, &reason)) {
-    out->reason = reason;
-    return false;
+    return fail(reason);
   }
   Eigen::Vector3i base_id;
   Eigen::Vector3d frac;
   if (!trilinear_base(*this, p_w, &base_id, &frac, &reason)) {
-    out->reason = reason;
-    return false;
+    return fail(reason);
   }
 
   SpatialCostInterp lower;
-  if (!interpolate_cost_layer(*generation_, bracket.lower, base_id, frac,
-                              query_time_s, &lower, &reason)) {
-    out->reason = reason;
-    return false;
-  }
+  const bool lower_valid = interpolate_cost_layer(
+      *generation_, bracket.lower, base_id, frac, query_time_s, &lower,
+      &reason, trace, 0, 1.0 - bracket.weight_upper);
+  const std::string lower_reason = reason;
   SpatialCostInterp upper = lower;
+  bool upper_valid = lower_valid;
+  std::string upper_reason;
   if (bracket.upper != bracket.lower) {
-    if (!interpolate_cost_layer(*generation_, bracket.upper, base_id, frac,
-                                query_time_s, &upper, &reason)) {
-      out->reason = reason;
-      return false;
-    }
+    upper_valid = interpolate_cost_layer(
+        *generation_, bracket.upper, base_id, frac, query_time_s, &upper,
+        &upper_reason, trace, 1, bracket.weight_upper);
+  }
+  if (!lower_valid || !upper_valid) {
+    return fail(!lower_valid ? lower_reason : upper_reason);
   }
 
   const double w = bracket.weight_upper;
@@ -587,6 +646,10 @@ bool RiskGridSnapshot::queryCost(const Eigen::Vector3d& p_w,
   out->valid = true;
   out->stale = false;
   out->reason = "ok";
+  if (trace) {
+    trace->success = true;
+    trace->reason = "ok";
+  }
   return true;
 }
 
@@ -824,6 +887,27 @@ bool RiskGridMap::refreshFromProvider(const Eigen::Vector3d& uav_position_w,
                                       RiskPredictionProvider& provider,
                                       const OccupancyPredicate& is_occupied,
                                       std::string* reason) {
+  OccupancyDiagnosticQuery diagnostic_query;
+  if (is_occupied) {
+    diagnostic_query = [is_occupied](const Eigen::Vector3d& position) {
+      RiskOccupancyDiagnostic diagnostic;
+      diagnostic.available = true;
+      diagnostic.raw_occupied = is_occupied(position);
+      diagnostic.inflated_occupied = diagnostic.raw_occupied;
+      diagnostic.source = "occupancy_predicate";
+      return diagnostic;
+    };
+  }
+  return refreshFromProvider(
+      uav_position_w, now_s, provider, diagnostic_query, reason);
+}
+
+bool RiskGridMap::refreshFromProvider(
+    const Eigen::Vector3d& uav_position_w,
+    const double now_s,
+    RiskPredictionProvider& provider,
+    const OccupancyDiagnosticQuery& occupancy_query,
+    std::string* reason) {
   if (!uav_position_w.allFinite() || !std::isfinite(now_s)) {
     if (reason) {
       *reason = "invalid_refresh_input";
@@ -855,7 +939,11 @@ bool RiskGridMap::refreshFromProvider(const Eigen::Vector3d& uav_position_w,
       static_cast<std::size_t>(total_voxel_count));
   std::vector<bool> occupied_skip(static_cast<std::size_t>(total_voxel_count),
                                   false);
+  std::vector<RiskOccupancyDiagnostic> occupancy_diagnostics(
+      static_cast<std::size_t>(total_voxel_count));
   uint64_t occupied_skip_count = 0;
+  uint64_t bound_occupancy_generation = 0;
+  bool occupancy_binding_failed = false;
   queries.reserve(static_cast<std::size_t>(total_voxel_count));
   query_voxel_indices.reserve(static_cast<std::size_t>(total_voxel_count));
   for (int h = 0; h < horizon_count; ++h) {
@@ -876,8 +964,36 @@ bool RiskGridMap::refreshFromProvider(const Eigen::Vector3d& uav_position_w,
           query.horizon_s = params_copy.horizons_s[static_cast<std::size_t>(h)];
           query.query_time_s = now_s + query.horizon_s;
           voxel_queries[voxel_index] = query;
-          if (params_copy.skip_occupied_voxels && is_occupied &&
-              is_occupied(query.position_w)) {
+          if (occupancy_query) {
+            auto diagnostic = occupancy_query(query.position_w);
+            if (!diagnostic.available &&
+                diagnostic.source.find("occupancy_") == 0) {
+              occupancy_binding_failed = true;
+            }
+            if (diagnostic.occupancy_generation != 0) {
+              if (bound_occupancy_generation == 0) {
+                bound_occupancy_generation = diagnostic.occupancy_generation;
+              } else if (bound_occupancy_generation !=
+                         diagnostic.occupancy_generation) {
+                occupancy_binding_failed = true;
+              }
+            }
+            if ((diagnostic.voxel_index.array() < 0).any()) {
+              diagnostic.voxel_index = id;
+            }
+            if (!diagnostic.voxel_center.allFinite()) {
+              diagnostic.voxel_center = query.position_w;
+            }
+            if (!std::isfinite(diagnostic.resolution_m)) {
+              diagnostic.resolution_m = params_copy.resolution_m;
+            }
+            if (diagnostic.frame_id.empty()) {
+              diagnostic.frame_id = params_copy.frame_id;
+            }
+            occupancy_diagnostics[voxel_index] = std::move(diagnostic);
+          }
+          if (params_copy.skip_occupied_voxels && occupancy_query &&
+              occupancy_diagnostics[voxel_index].inflated_occupied) {
             occupied_skip[voxel_index] = true;
             ++occupied_skip_count;
             continue;
@@ -889,6 +1005,14 @@ bool RiskGridMap::refreshFromProvider(const Eigen::Vector3d& uav_position_w,
     }
   }
 
+  if (occupancy_binding_failed) {
+    if (reason) {
+      *reason = "occupancy_generation_changed";
+    }
+    markRefreshFailure(now_s, "occupancy_generation_changed");
+    return false;
+  }
+
   std::vector<RiskPredictionResult> results;
   if (!queries.empty()) {
     if (!provider.batchQuery(queries, &results) ||
@@ -898,6 +1022,18 @@ bool RiskGridMap::refreshFromProvider(const Eigen::Vector3d& uav_position_w,
         *reason = failure;
       }
       markRefreshFailure(now_s, failure);
+      return false;
+    }
+  }
+  if (occupancy_query && bound_occupancy_generation != 0) {
+    const auto terminal_diagnostic = occupancy_query(uav_position_w);
+    if (!terminal_diagnostic.available ||
+        terminal_diagnostic.occupancy_generation !=
+            bound_occupancy_generation) {
+      if (reason) {
+        *reason = "occupancy_generation_changed";
+      }
+      markRefreshFailure(now_s, "occupancy_generation_changed");
       return false;
     }
   }
@@ -940,6 +1076,10 @@ bool RiskGridMap::refreshFromProvider(const Eigen::Vector3d& uav_position_w,
   for (std::size_t i = 0; i < next->voxels.size(); ++i) {
     RiskVoxel voxel;
     voxel.stamp_s = voxel_queries[i].query_time_s;
+    if (occupancy_diagnostics[i].available) {
+      voxel.occupancy = std::make_shared<const RiskOccupancyDiagnostic>(
+          occupancy_diagnostics[i]);
+    }
     if (occupied_skip[i]) {
       voxel.source_flags = RISK_GRID_SOURCE_OCCUPIED_SKIP;
       voxel.valid = false;

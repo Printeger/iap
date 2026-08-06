@@ -117,6 +117,7 @@ void GridMap::initMap(rclcpp::Node::SharedPtr node)
 
   md_.occupancy_buffer_ = vector<double>(buffer_size, mp_.clamp_min_log_ - mp_.unknown_flag_);
   md_.occupancy_buffer_inflate_ = vector<char>(buffer_size, 0);
+  md_.occupancy_buffer_raw_cloud_ = vector<char>(buffer_size, 0);
 
   md_.count_hit_and_miss_ = vector<short>(buffer_size, 0);
   md_.count_hit_ = vector<short>(buffer_size, 0);
@@ -232,6 +233,7 @@ void GridMap::resetBuffer(Eigen::Vector3d min_pos, Eigen::Vector3d max_pos)
       for (int z = min_id(2); z <= max_id(2); ++z)
       {
         md_.occupancy_buffer_inflate_[toAddress(x, y, z)] = 0;
+        md_.occupancy_buffer_raw_cloud_[toAddress(x, y, z)] = 0;
       }
 }
 
@@ -726,6 +728,7 @@ void GridMap::updateOccupancyCallback()
     return;
   }
   md_.last_occ_update_time_ = node_->now();
+  occupancy_update_sequence_.fetch_add(1, std::memory_order_acq_rel);
 
   /* update occupancy */
   // ros::Time t1, t2, t3, t4;
@@ -738,6 +741,10 @@ void GridMap::updateOccupancyCallback()
 
   if (md_.local_updated_)
     clearAndInflateLocalMap();
+
+  occupancy_cloud_stamp_s_.store(
+      md_.last_occ_update_time_.seconds(), std::memory_order_release);
+  occupancy_update_sequence_.fetch_add(1, std::memory_order_release);
 
   // t4 = ros::Time::now();
 
@@ -823,6 +830,8 @@ void GridMap::cloudCallback(const sensor_msgs::msg::PointCloud2::ConstPtr &img)
   if (isnan(md_.camera_pos_(0)) || isnan(md_.camera_pos_(1)) || isnan(md_.camera_pos_(2)))
     return;
 
+  occupancy_update_sequence_.fetch_add(1, std::memory_order_acq_rel);
+
   this->resetBuffer(md_.camera_pos_ - mp_.local_update_range_,
                     md_.camera_pos_ + mp_.local_update_range_);
 
@@ -857,6 +866,10 @@ void GridMap::cloudCallback(const sensor_msgs::msg::PointCloud2::ConstPtr &img)
 
       /* inflate the point */
       // 点云膨胀
+      Eigen::Vector3i raw_id;
+      posToIndex(p3d, raw_id);
+      if (isInMap(raw_id))
+        md_.occupancy_buffer_raw_cloud_[toAddress(raw_id)] = 1;
       for (int x = -inf_step; x <= inf_step; ++x)
         for (int y = -inf_step; y <= inf_step; ++y)
           for (int z = -inf_step_z; z <= inf_step_z; ++z)
@@ -912,6 +925,9 @@ void GridMap::cloudCallback(const sensor_msgs::msg::PointCloud2::ConstPtr &img)
         md_.occupancy_buffer_inflate_[toAddress(x, y, ceil_id)] = 1;
       }
   }
+  occupancy_cloud_stamp_s_.store(
+      rclcpp::Time(img->header.stamp).seconds(), std::memory_order_release);
+  occupancy_update_sequence_.fetch_add(1, std::memory_order_release);
 }
 
 void GridMap::publishMap()
@@ -1018,6 +1034,75 @@ bool GridMap::odomValid() { return md_.has_odom_; }
 bool GridMap::hasDepthObservation() { return md_.has_first_depth_; }
 
 Eigen::Vector3d GridMap::getOrigin() { return mp_.map_origin_; }
+
+uint64_t GridMap::occupancyGeneration() const
+{
+  const uint64_t sequence = occupancy_update_sequence_.load(
+      std::memory_order_acquire);
+  return (sequence & 1u) == 0u ? sequence / 2u : 0u;
+}
+
+GridMap::OccupancyDiagnostic GridMap::queryOccupancyDiagnostic(
+    const Eigen::Vector3d &pos) const
+{
+  OccupancyDiagnostic out;
+  out.resolution_m = mp_.resolution_;
+  out.inflation_m = mp_.obstacles_inflation_;
+  out.frame_id = mp_.frame_id_;
+  out.cloud_stamp_s = occupancy_cloud_stamp_s_.load(
+      std::memory_order_acquire);
+  if (!pos.allFinite())
+    return out;
+
+  const uint64_t before = occupancy_update_sequence_.load(
+      std::memory_order_acquire);
+  if ((before & 1u) != 0u)
+  {
+    out.source = "occupancy_update_in_progress";
+    return out;
+  }
+  for (int axis = 0; axis < 3; ++axis)
+    out.voxel_index(axis) = static_cast<int>(std::floor(
+        (pos(axis) - mp_.map_origin_(axis)) * mp_.resolution_inv_));
+  for (int axis = 0; axis < 3; ++axis)
+  {
+    if (out.voxel_index(axis) < 0 ||
+        out.voxel_index(axis) >= mp_.map_voxel_num_(axis))
+    {
+      out.source = "position_out_of_map";
+      return out;
+    }
+  }
+  const int address = out.voxel_index(0) * mp_.map_voxel_num_(1) *
+          mp_.map_voxel_num_(2) +
+      out.voxel_index(1) * mp_.map_voxel_num_(2) + out.voxel_index(2);
+  out.voxel_center =
+      (out.voxel_index.cast<double>() + Eigen::Vector3d::Constant(0.5)) *
+          mp_.resolution_ + mp_.map_origin_;
+  const bool raw_cloud =
+      address >= 0 && address < static_cast<int>(md_.occupancy_buffer_raw_cloud_.size()) &&
+      md_.occupancy_buffer_raw_cloud_[static_cast<std::size_t>(address)] != 0;
+  const bool raw_fused =
+      address >= 0 && address < static_cast<int>(md_.occupancy_buffer_.size()) &&
+      md_.occupancy_buffer_[static_cast<std::size_t>(address)] >
+          mp_.min_occupancy_log_;
+  out.raw_occupied = raw_cloud || raw_fused;
+  out.inflated_occupied =
+      address >= 0 && address < static_cast<int>(md_.occupancy_buffer_inflate_.size()) &&
+      md_.occupancy_buffer_inflate_[static_cast<std::size_t>(address)] != 0;
+  const uint64_t after = occupancy_update_sequence_.load(
+      std::memory_order_acquire);
+  if (before != after || (after & 1u) != 0u)
+  {
+    out.source = "occupancy_generation_changed";
+    return out;
+  }
+  out.available = true;
+  out.generation = after / 2u;
+  out.source = raw_cloud ? "raw_cloud" : raw_fused ? "fused_depth" :
+      out.inflated_occupied ? "inflated_neighbor" : "free";
+  return out;
+}
 
 // int GridMap::getVoxelNum() {
 //   return mp_.map_voxel_num_[0] * mp_.map_voxel_num_[1] * mp_.map_voxel_num_[2];
