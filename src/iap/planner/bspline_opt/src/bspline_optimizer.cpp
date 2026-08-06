@@ -164,7 +164,8 @@ namespace ego_planner
                << config.unknown_policy << ':' << config.unknown_soft_penalty << ':'
                << config.max_candidates_per_attempt << ':'
                << config.objective_aggregation_mode << ':'
-               << config.smooth_max_temperature;
+               << config.smooth_max_temperature << ':'
+               << config.smooth_cvar_alpha;
       });
     }
 
@@ -298,8 +299,9 @@ namespace ego_planner
     node->declare_parameter("p1.evidence_manifest_path", std::string(""));
     node->declare_parameter("p1.max_candidates_per_attempt", 8);
     node->declare_parameter("p1.objective_aggregation_mode",
-                            std::string("fixed_200_lse"));
+                            std::string("fixed_200_smooth_cvar"));
     node->declare_parameter("p1.smooth_max_temperature", 0.01);
+    node->declare_parameter("p1.smooth_cvar_alpha", 0.90);
     node->declare_parameter("p4.enable_risk_aware_astar", false);
     node->declare_parameter("p4.lambda_p4_risk", 0.05);
     node->declare_parameter("p4.risk_cost_max", 100.0);
@@ -340,24 +342,40 @@ namespace ego_planner
                         p1_config_.objective_aggregation_mode);
     node->get_parameter("p1.smooth_max_temperature",
                         p1_config_.smooth_max_temperature);
+    node->get_parameter("p1.smooth_cvar_alpha",
+                        p1_config_.smooth_cvar_alpha);
     p1_config_.max_candidates_per_attempt = std::clamp(
         p1_config_.max_candidates_per_attempt, 1, 8);
     if (p1_config_.objective_aggregation_mode != "adaptive_mean" &&
         p1_config_.objective_aggregation_mode != "fixed_200_mean" &&
-        p1_config_.objective_aggregation_mode != "fixed_200_lse")
+        p1_config_.objective_aggregation_mode != "fixed_200_lse" &&
+        p1_config_.objective_aggregation_mode != "fixed_200_smooth_cvar")
     {
       RCLCPP_WARN(rclcpp::get_logger("BsplineOptimizer"),
-                  "unsupported p1.objective_aggregation_mode '%s'; using fixed_200_lse",
+                  "unsupported p1.objective_aggregation_mode '%s'; using fixed_200_smooth_cvar",
                   p1_config_.objective_aggregation_mode.c_str());
-      p1_config_.objective_aggregation_mode = "fixed_200_lse";
+      p1_config_.objective_aggregation_mode = "fixed_200_smooth_cvar";
     }
-    if (p1_config_.objective_aggregation_mode == "fixed_200_lse" &&
+    const bool smooth_fixed_aggregation =
+        p1_config_.objective_aggregation_mode == "fixed_200_lse" ||
+        p1_config_.objective_aggregation_mode == "fixed_200_smooth_cvar";
+    if (smooth_fixed_aggregation &&
         (!(p1_config_.smooth_max_temperature > 0.0) ||
          !std::isfinite(p1_config_.smooth_max_temperature)))
     {
       RCLCPP_WARN(rclcpp::get_logger("BsplineOptimizer"),
                   "invalid p1.smooth_max_temperature %.17g; using fixed_200_mean",
                   p1_config_.smooth_max_temperature);
+      p1_config_.objective_aggregation_mode = "fixed_200_mean";
+    }
+    if (p1_config_.objective_aggregation_mode == "fixed_200_smooth_cvar" &&
+        (!(p1_config_.smooth_cvar_alpha > 0.0) ||
+         !(p1_config_.smooth_cvar_alpha < 1.0) ||
+         !std::isfinite(p1_config_.smooth_cvar_alpha)))
+    {
+      RCLCPP_WARN(rclcpp::get_logger("BsplineOptimizer"),
+                  "invalid p1.smooth_cvar_alpha %.17g; using fixed_200_mean",
+                  p1_config_.smooth_cvar_alpha);
       p1_config_.objective_aggregation_mode = "fixed_200_mean";
     }
     node->get_parameter("p4.enable_risk_aware_astar", p4_config_.enable_risk_aware_astar);
@@ -2298,6 +2316,9 @@ namespace ego_planner
       }
       trace.aggregation_mode = p1_config_.objective_aggregation_mode;
       trace.aggregation_temperature = p1_config_.smooth_max_temperature;
+      trace.aggregation_tail_fraction =
+          p1_config_.objective_aggregation_mode == "fixed_200_smooth_cvar"
+              ? p1_config_.smooth_cvar_alpha : 0.0;
       const double adaptive_dt = std::max(p1_config_.sample_dt_min_s,
           bspline_interval_ * std::max(0.0, p1_config_.sample_dt_scale));
       trace.adaptive_sample_count = adaptive_dt > 0.0 && std::isfinite(adaptive_dt)
@@ -2741,7 +2762,8 @@ namespace ego_planner
     }
     const bool fixed_lattice =
         p1_config_.objective_aggregation_mode == "fixed_200_mean" ||
-        p1_config_.objective_aggregation_mode == "fixed_200_lse";
+        p1_config_.objective_aggregation_mode == "fixed_200_lse" ||
+        p1_config_.objective_aggregation_mode == "fixed_200_smooth_cvar";
     const int sample_count = fixed_lattice
         ? kP1CandidateEvidenceSampleCount : adaptive_sample_count;
     metrics.sample_count = sample_count;
@@ -2906,6 +2928,76 @@ namespace ego_planner
         else
         {
           cost = maximum_cost;
+          std::fill(aggregation_weights.begin(), aggregation_weights.end(),
+                    1.0 / static_cast<double>(sample_count));
+        }
+      }
+      else if (p1_config_.objective_aggregation_mode ==
+               "fixed_200_smooth_cvar")
+      {
+        const double temperature = p1_config_.smooth_max_temperature;
+        const double tail_probability = 1.0 - p1_config_.smooth_cvar_alpha;
+        const double target_tail_mass =
+            tail_probability * static_cast<double>(sample_count);
+        double minimum_cost = std::numeric_limits<double>::infinity();
+        double maximum_cost = -std::numeric_limits<double>::infinity();
+        for (const auto &sample : objective_samples)
+        {
+          minimum_cost = std::min(minimum_cost, sample.cost);
+          maximum_cost = std::max(maximum_cost, sample.cost);
+        }
+        const auto stable_sigmoid = [](const double value) {
+          if (value >= 0.0)
+            return 1.0 / (1.0 + std::exp(-value));
+          const double exponential = std::exp(value);
+          return exponential / (1.0 + exponential);
+        };
+        const auto stable_softplus = [](const double value) {
+          return value > 0.0
+              ? value + std::log1p(std::exp(-value))
+              : std::log1p(std::exp(value));
+        };
+
+        // The eta derivative is monotone.  Fixed-count bisection keeps the
+        // auxiliary threshold deterministic; the 64*T guard reaches sigmoid
+        // saturation without evaluating an overflowing exponential.
+        double eta_lower = minimum_cost - 64.0 * temperature;
+        double eta_upper = maximum_cost + 64.0 * temperature;
+        for (int iteration = 0; iteration < 100; ++iteration)
+        {
+          const double eta_midpoint = 0.5 * (eta_lower + eta_upper);
+          double sigmoid_sum = 0.0;
+          for (const auto &sample : objective_samples)
+            sigmoid_sum += stable_sigmoid(
+                (sample.cost - eta_midpoint) / temperature);
+          if (sigmoid_sum > target_tail_mass)
+            eta_lower = eta_midpoint;
+          else
+            eta_upper = eta_midpoint;
+        }
+        const double eta = 0.5 * (eta_lower + eta_upper);
+        const double tail_scale = 1.0 / target_tail_mass;
+        // Normalize the smooth approximation so a tied profile returns its
+        // common c_pi exactly.  This q-independent entropy bias preserves the
+        // envelope gradient and keeps unknown-skip zero-cost semantics intact.
+        const double binary_entropy =
+            -tail_probability * std::log(tail_probability) -
+            p1_config_.smooth_cvar_alpha *
+                std::log(p1_config_.smooth_cvar_alpha);
+        cost = eta - temperature * binary_entropy / tail_probability;
+        for (int index = 0; index < sample_count; ++index)
+        {
+          const double standardized =
+              (objective_samples[index].cost - eta) / temperature;
+          cost += tail_scale * temperature * stable_softplus(standardized);
+          // By the envelope theorem, eta's implicit derivative vanishes at
+          // its stationary point; only these smooth tail weights remain.
+          aggregation_weights[index] =
+              tail_scale * stable_sigmoid(standardized);
+        }
+        if (minimum_cost == maximum_cost)
+        {
+          cost = minimum_cost;
           std::fill(aggregation_weights.begin(), aggregation_weights.end(),
                     1.0 / static_cast<double>(sample_count));
         }
@@ -3084,7 +3176,7 @@ namespace ego_planner
              "support_signature,initial_control_points_hash,final_control_points_hash,p1_config_hash,"
              "optimization_success,selection_score,selection_reason,candidate_rank,p1_descent,rank_eligible,replacement_accepted,replacement_reason,incumbent_available,incumbent_mean_c_pi,incumbent_max_c_pi,"
              "replacement_comparison_mode,replacement_comparison_duration_s,replacement_candidate_mean_c_pi,replacement_candidate_max_c_pi,"
-             "aggregation_mode,aggregation_temperature,adaptive_sample_count,fixed_sample_count,peak_contribution,"
+             "aggregation_mode,aggregation_temperature,aggregation_tail_fraction,adaptive_sample_count,fixed_sample_count,peak_contribution,"
              "pre_full_base_gradient_norm,post_full_base_gradient_norm,pre_full_raw_p1_gradient_norm,post_full_raw_p1_gradient_norm,"
              "pre_normalized_weighted_p1_gradient_norm,post_normalized_weighted_p1_gradient_norm,pre_base_p1_cosine,post_base_p1_cosine,"
              "pre_full_normalized_weighted_p1_gradient_norm,post_full_normalized_weighted_p1_gradient_norm,pre_full_total_gradient_norm,post_full_total_gradient_norm,"
@@ -3137,6 +3229,7 @@ namespace ego_planner
         << trace.replacement_candidate_mean_c_pi << ','
         << trace.replacement_candidate_max_c_pi << ','
         << trace.aggregation_mode << ',' << trace.aggregation_temperature << ','
+        << trace.aggregation_tail_fraction << ','
         << trace.adaptive_sample_count << ',' << trace.fixed_sample_count << ','
         << trace.peak_contribution << ','
         << trace.pre_full_base_gradient_norm << ','

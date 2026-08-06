@@ -33,6 +33,9 @@ class EvidenceBundlePreflightTest(unittest.TestCase):
             "planner_safety_profile": "p1",
             "p1.metrics_only": False,
             "p1.lambda_integrity": 0.00001,
+            "p1.objective_aggregation_mode": "fixed_200_smooth_cvar",
+            "p1.smooth_max_temperature": 0.01,
+            "p1.smooth_cvar_alpha": 0.90,
             "p1.debug_csv_path": str(export / "planner_p1_integrity_cost_debug.csv"),
             "p1.candidate_optimization_path": str(export / "planner_p1_candidate_optimization.csv"),
             **{key: str(export / filename) for filename, key in preflight.CSV_KEYS.items()
@@ -68,6 +71,10 @@ class EvidenceBundlePreflightTest(unittest.TestCase):
             "support_sample_count": "200", "pre_support_valid_count": "200",
             "post_support_valid_count": "200", "pre_support_coverage": "1",
             "post_support_coverage": "1", "rank_eligible": "1",
+            "aggregation_mode": "fixed_200_smooth_cvar",
+            "aggregation_temperature": "0.01",
+            "aggregation_tail_fraction": "0.90",
+            "fixed_sample_count": "200", "peak_contribution": "0.02",
             "grad_integrity_dot_displacement": "-0.01",
             "normalization_mode": "base_improvement_budget_v1",
             "base_prepass_success": "1",
@@ -173,6 +180,26 @@ class EvidenceBundlePreflightTest(unittest.TestCase):
             result = preflight.validate_bundle(export, bag, metrics_only=False, lambda_value=0.00001)
         self.assertFalse(result["passed"])
         self.assertIn("candidate lacks full valid fixed-lattice support", result["errors"])
+
+    def test_rejects_wrong_smooth_cvar_provenance(self):
+        root, export, bag = self.make_bundle()
+        self.addCleanup(root.cleanup)
+        payload = {"schema_version": preflight.SCHEMA, "run_id": "run-1",
+                   "manifest_path": str(export / "test_planner_manifest.json"),
+                   "export_dir": str(export), "bag_path": str(bag)}
+        path = export / "planner_p1_candidate_optimization.csv"
+        with path.open(newline="") as handle:
+            rows = list(csv.DictReader(handle))
+        rows[0]["aggregation_tail_fraction"] = "0.80"
+        with path.open("w", newline="") as handle:
+            writer = csv.DictWriter(handle, fieldnames=sorted(rows[0]))
+            writer.writeheader(); writer.writerows(rows)
+        with mock.patch.object(preflight, "read_bag_provenance", return_value=([payload], "")):
+            result = preflight.validate_bundle(
+                export, bag, metrics_only=False, lambda_value=0.00001)
+        self.assertFalse(result["passed"])
+        self.assertIn("candidate smooth-CVaR aggregation evidence is invalid",
+                      result["errors"])
 
     def test_rejects_authoritative_profile_that_regresses_selected_seed(self):
         root, export, bag = self.make_bundle()

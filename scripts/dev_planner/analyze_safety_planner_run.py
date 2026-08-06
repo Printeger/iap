@@ -657,7 +657,7 @@ P1_CANDIDATE_OPTIMIZATION_FIELDS = [
     "replacement_comparison_mode", "replacement_comparison_duration_s",
     "replacement_candidate_mean_c_pi", "replacement_candidate_max_c_pi",
     "fallback_reason", "termination_reason", "max_candidates_per_attempt",
-    "aggregation_mode", "aggregation_temperature", "adaptive_sample_count", "fixed_sample_count", "peak_contribution",
+    "aggregation_mode", "aggregation_temperature", "aggregation_tail_fraction", "adaptive_sample_count", "fixed_sample_count", "peak_contribution",
     "fanout_input_segments", "fanout_surviving_segments", "fanout_returned_count", "fanout_configured_cap", "fanout_truncated",
     "fanout_optimizer_successes", "fanout_full_support", "fanout_p1_descent_eligible", "fanout_supplemental_count", "fanout_singleton_reason",
 ]

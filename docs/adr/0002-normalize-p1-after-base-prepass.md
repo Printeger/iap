@@ -44,7 +44,13 @@ The first fresh formal pair after recorded-profile closure exposed the remaining
 
 `Jp1 = m + T * (log(sum_i exp((c_i-m)/T)) - log(200))`,
 
-where `m=max_i c_i` and `T=0.01 c_pi`. The max shift makes the exponentials numerically stable, subtraction of `log(200)` preserves `c_pi` units and returns the common value for a tied profile, and the analytic trajectory gradient is `sum_i softmax_i * grad(c_i)`. The maximum softmax weight is recorded as `peak_contribution`. This remains a differentiable soft preference inside the same frozen budget; fixed-200 mean remains only for regression comparison. Smooth CVaR is not introduced unless a fresh LSE run fails the same mean/max gate.
+where `m=max_i c_i` and `T=0.01 c_pi`. The max shift makes the exponentials numerically stable, subtraction of `log(200)` preserves `c_pi` units and returns the common value for a tied profile, and the analytic trajectory gradient is `sum_i softmax_i * grad(c_i)`. The maximum softmax weight is recorded as `peak_contribution`.
+
+The fresh LSE formal pair then reduced aligned mean `0.4204437873 -> 0.4187024725` but increased max `0.4244592145 -> 0.4245587735`. H4 therefore selects its third and final differentiable alternative. With `N=200`, confidence/tail parameter `alpha=0.90`, `p=1-alpha`, and `T=0.01 c_pi`, the raw P1 objective is the entropy-normalized smooth CVaR
+
+`Jp1 = eta + (1/(p*N))*sum_i T*softplus((c_i-eta)/T) - T*H(p)/p`,
+
+where `eta` is the unique deterministic solution of `sum_i sigmoid((c_i-eta)/T)=p*N` and `H(p)=-p*log(p)-(1-p)*log(1-p)`. A fixed 100-iteration bisection brackets `eta` outside the sampled range; branch-stable sigmoid and softplus avoid overflow and underflow. The entropy subtraction is trajectory-independent and makes any tied profile return its common `c_pi` exactly, preserving zero-cost unknown-skip and constant-penalty semantics. By the envelope theorem, the analytic sample weight is `sigmoid((c_i-eta)/T)/(p*N)`; its maximum is recorded as `peak_contribution`, while `aggregation_tail_fraction=0.90` records `alpha`. Fixed mean and LSE remain test-only comparison modes. This stays inside the same frozen scalar budget and does not add a hard P1 constraint or change P0/P5 authority.
 
 STEP3 feasibility refinement happens after optimizer selection and can change both control points and knot interval. Before publication, the refined trajectory is therefore evaluated again on the candidate attempt's immutable snapshot and fixed 200-sample lattice. It must retain mean/max non-regression with at least one strict decrease relative to the selected candidate seed and, when an incumbent exists, relative to that incumbent. Failure rejects this publication and retains the incumbent; startup records an explicit `no_publish_no_incumbent` disposition. This is a publication-consistency check for the existing soft preference, not an optimizer constraint or P5 gate.
 

@@ -138,6 +138,17 @@ def validate_bundle(export_dir, bag_dir, *, metrics_only, lambda_value):
         errors.append("manifest metrics_only does not match requested mode")
     if abs(float(manifest.get("p1.lambda_integrity", float("nan"))) - lambda_value) > 1e-12:
         errors.append("manifest lambda_integrity does not match requested lambda")
+    expected_aggregation_mode = "fixed_200_smooth_cvar"
+    expected_temperature = 0.01
+    expected_alpha = 0.90
+    if manifest.get("p1.objective_aggregation_mode") != expected_aggregation_mode:
+        errors.append("manifest P1 aggregation mode is not fixed_200_smooth_cvar")
+    if not finite(manifest.get("p1.smooth_max_temperature")) or abs(
+            float(manifest["p1.smooth_max_temperature"]) - expected_temperature) > 1e-12:
+        errors.append("manifest P1 smooth-CVaR temperature is not 0.01")
+    if not finite(manifest.get("p1.smooth_cvar_alpha")) or abs(
+            float(manifest["p1.smooth_cvar_alpha"]) - expected_alpha) > 1e-12:
+        errors.append("manifest P1 smooth-CVaR alpha is not 0.90")
     if not provenance.get("validator_summary_complete"):
         errors.append("validator summary has not been finalized")
     if not provenance.get("bag_metadata_complete"):
@@ -185,6 +196,19 @@ def validate_bundle(export_dir, bag_dir, *, metrics_only, lambda_value):
     attempts = {}
     for row in candidate:
         attempts.setdefault(row.get("planning_attempt_id"), []).append(row)
+        if row.get("aggregation_mode") != expected_aggregation_mode or not all(
+                finite(row.get(field)) for field in (
+                    "aggregation_temperature", "aggregation_tail_fraction",
+                    "fixed_sample_count", "peak_contribution")):
+            errors.append("candidate smooth-CVaR aggregation evidence is incomplete")
+        else:
+            peak_limit = 1.0 / (
+                float(row["fixed_sample_count"]) * (1.0 - expected_alpha))
+            if abs(float(row["aggregation_temperature"]) - expected_temperature) > 1e-12 or \
+                    abs(float(row["aggregation_tail_fraction"]) - expected_alpha) > 1e-12 or \
+                    float(row["fixed_sample_count"]) != 200.0 or \
+                    not 0.0 < float(row["peak_contribution"]) <= peak_limit + 1e-9:
+                errors.append("candidate smooth-CVaR aggregation evidence is invalid")
         for field in ("pre_mean_c_pi", "pre_max_c_pi", "post_mean_c_pi", "post_max_c_pi"):
             if not finite(row.get(field)):
                 errors.append(f"candidate {field} is non-finite")

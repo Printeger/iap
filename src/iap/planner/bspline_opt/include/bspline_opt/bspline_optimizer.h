@@ -120,11 +120,12 @@ namespace ego_planner
       int max_candidates_per_attempt = 8;
       // Admission is judged on a fixed 200-sample lattice.  Keep the soft
       // objective on that same lattice so a narrow peak cannot be hidden by
-      // adaptive optimizer sampling.  `fixed_200_lse` is the selected P1-2
-      // alignment mode after fixed-mean formal evidence reduced the mean but
-      // regressed the peak.  The normalized log-sum-exp remains in c_pi units.
-      std::string objective_aggregation_mode = "fixed_200_lse";
+      // adaptive optimizer sampling.  Mean and normalized LSE both produced
+      // retained formal peak counterexamples, so the selected P1-2 mode is a
+      // differentiable upper-tail CVaR on the same fixed support.
+      std::string objective_aggregation_mode = "fixed_200_smooth_cvar";
       double smooth_max_temperature = 0.01;
+      double smooth_cvar_alpha = 0.90;
     };
 
     const P1IntegrityConfig &p1IntegrityConfig() const { return p1_config_; }
@@ -350,6 +351,7 @@ namespace ego_planner
       int iteration_count = 0;
       std::string aggregation_mode = "adaptive_mean";
       double aggregation_temperature = 0.0;
+      double aggregation_tail_fraction = 0.0;
       int adaptive_sample_count = 0;
       int fixed_sample_count = 200;
       double peak_contribution = 0.0;

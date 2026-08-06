@@ -218,6 +218,7 @@ std::unique_ptr<ego_planner::BsplineOptimizer> makeOptimizer(
       rclcpp::Parameter("p1.debug_csv_path", p1_config.debug_csv_path),
       rclcpp::Parameter("p1.objective_aggregation_mode", p1_config.objective_aggregation_mode),
       rclcpp::Parameter("p1.smooth_max_temperature", p1_config.smooth_max_temperature),
+      rclcpp::Parameter("p1.smooth_cvar_alpha", p1_config.smooth_cvar_alpha),
   });
   auto node = std::make_shared<rclcpp::Node>(
       "test_p1_integrity_cost_" + std::to_string(node_id++), options);
@@ -711,6 +712,16 @@ TEST(P1IntegrityCostTest, EvidenceV4WritesAllCandidateSidecars) {
             "p1_evidence_provenance_v4");
   EXPECT_EQ(candidate_rows.front().at("normalization_mode"),
             "base_improvement_budget_v1");
+  EXPECT_EQ(candidate_rows.front().at("aggregation_mode"),
+            "fixed_200_smooth_cvar");
+  EXPECT_DOUBLE_EQ(std::stod(candidate_rows.front().at(
+                       "aggregation_temperature")), 0.01);
+  EXPECT_DOUBLE_EQ(std::stod(candidate_rows.front().at(
+                       "aggregation_tail_fraction")), 0.90);
+  EXPECT_EQ(std::stoi(candidate_rows.front().at("fixed_sample_count")), 200);
+  EXPECT_GT(std::stod(candidate_rows.front().at("peak_contribution")), 0.0);
+  EXPECT_LE(std::stod(candidate_rows.front().at("peak_contribution")),
+            1.0 / 20.0 + 1.0e-9);
   EXPECT_FALSE(candidate_rows.front().at(
       "pre_full_total_gradient_norm").empty());
   const auto control_rows = readCsvRows(optimizer->p1CandidateControlPointsPath());
@@ -1214,7 +1225,93 @@ TEST(P1IntegrityCostTest, Fixed200LseIsStableForTiesAndWideRange) {
 }
 
 TEST(P1IntegrityCostTest,
-     Fixed200LseDescentClosesDeterministicMeanPeakConflict) {
+     Fixed200SmoothCvarMatchesFiniteDifferenceAndTailMass) {
+  ego_planner::SwarmTrajData swarm;
+  const Eigen::MatrixXd q = makeControlPoints();
+  AffineProvider provider(10.0, Eigen::Vector3d(1.0, 0.0, 0.0));
+  auto snapshot = makeSnapshot(provider);
+
+  auto config = disabledConfig();
+  config.use_integrity_cost = true;
+  config.lambda_integrity = 0.00001;
+  config.integrity_grad_norm_max = 100.0;
+  config.objective_aggregation_mode = "fixed_200_smooth_cvar";
+  config.smooth_max_temperature = 0.01;
+  config.smooth_cvar_alpha = 0.90;
+  auto optimizer = makeOptimizer(config, &swarm);
+  optimizer->setRiskSnapshot(snapshot, snapshot->stamp_s());
+
+  double cost = 0.0;
+  Eigen::MatrixXd gradient;
+  ASSERT_TRUE(optimizer->evaluateP1RawCostForTest(q, 0.1, cost, gradient));
+  EXPECT_EQ(optimizer->p1IntegrityConfig().objective_aggregation_mode,
+            "fixed_200_smooth_cvar");
+  EXPECT_EQ(optimizer->getLastP1IntegrityMetrics().sample_count, 200);
+  EXPECT_TRUE(std::isfinite(cost));
+  EXPECT_GT(optimizer->getLastP1IntegrityMetrics().peak_contribution,
+            1.0 / 200.0);
+  EXPECT_LE(optimizer->getLastP1IntegrityMetrics().peak_contribution,
+            1.0 / 20.0 + 1.0e-12);
+
+  constexpr double kEpsilon = 1.0e-5;
+  for (int col = optimizer->getOrder(); col < q.cols(); ++col) {
+    Eigen::MatrixXd plus = q;
+    Eigen::MatrixXd minus = q;
+    plus(0, col) += kEpsilon;
+    minus(0, col) -= kEpsilon;
+    double plus_cost = 0.0;
+    double minus_cost = 0.0;
+    Eigen::MatrixXd ignored;
+    ASSERT_TRUE(optimizer->evaluateP1RawCostForTest(
+        plus, 0.1, plus_cost, ignored));
+    ASSERT_TRUE(optimizer->evaluateP1RawCostForTest(
+        minus, 0.1, minus_cost, ignored));
+    EXPECT_NEAR(gradient(0, col),
+                (plus_cost - minus_cost) / (2.0 * kEpsilon), 2.0e-5)
+        << "control point " << col;
+  }
+}
+
+TEST(P1IntegrityCostTest, Fixed200SmoothCvarIsStableForTiesAndWideRange) {
+  ego_planner::SwarmTrajData swarm;
+  const Eigen::MatrixXd q = makeControlPoints();
+  auto config = disabledConfig();
+  config.use_integrity_cost = true;
+  config.lambda_integrity = 0.00001;
+  config.integrity_grad_norm_max = 100.0;
+  config.objective_aggregation_mode = "fixed_200_smooth_cvar";
+  config.smooth_max_temperature = 0.01;
+  config.smooth_cvar_alpha = 0.90;
+
+  AffineProvider tied_provider(10.0, Eigen::Vector3d::Zero());
+  auto tied_snapshot = makeSnapshot(tied_provider);
+  auto tied_optimizer = makeOptimizer(config, &swarm);
+  tied_optimizer->setRiskSnapshot(tied_snapshot, tied_snapshot->stamp_s());
+  double tied_cost = 0.0;
+  Eigen::MatrixXd tied_gradient;
+  ASSERT_TRUE(tied_optimizer->evaluateP1RawCostForTest(
+      q, 0.1, tied_cost, tied_gradient));
+  EXPECT_NEAR(tied_cost, 10.0, 1.0e-10);
+  EXPECT_NEAR(tied_gradient.norm(), 0.0, 1.0e-12);
+  EXPECT_NEAR(tied_optimizer->getLastP1IntegrityMetrics().peak_contribution,
+              1.0 / 200.0, 1.0e-10);
+
+  AffineProvider wide_provider(50.0, Eigen::Vector3d(40.0, 0.0, 0.0));
+  auto wide_snapshot = makeSnapshot(wide_provider);
+  auto wide_optimizer = makeOptimizer(config, &swarm);
+  wide_optimizer->setRiskSnapshot(wide_snapshot, wide_snapshot->stamp_s());
+  double wide_cost = 0.0;
+  Eigen::MatrixXd wide_gradient;
+  ASSERT_TRUE(wide_optimizer->evaluateP1RawCostForTest(
+      q, 0.1, wide_cost, wide_gradient));
+  EXPECT_TRUE(std::isfinite(wide_cost));
+  EXPECT_TRUE(wide_gradient.allFinite());
+  EXPECT_GT(wide_cost, 50.0);
+  EXPECT_LT(wide_cost, 100.0);
+}
+
+TEST(P1IntegrityCostTest,
+     Fixed200SmoothObjectivesCloseDeterministicMeanPeakConflict) {
   ego_planner::SwarmTrajData swarm;
   const Eigen::MatrixXd q = makeControlPoints();
   MeanPeakConflictProvider provider;
@@ -1267,6 +1364,27 @@ TEST(P1IntegrityCostTest,
   ASSERT_TRUE(lse_probe_profile.full_support);
   EXPECT_LT(lse_probe_profile.max_c_pi, initial_profile.max_c_pi);
   EXPECT_LT(lse_cost, initial_profile.max_c_pi);
+
+  config.objective_aggregation_mode = "fixed_200_smooth_cvar";
+  config.smooth_cvar_alpha = 0.90;
+  auto cvar_optimizer = makeOptimizer(config, &swarm);
+  cvar_optimizer->setRiskSnapshot(snapshot, snapshot->stamp_s());
+  double cvar_cost = 0.0;
+  Eigen::MatrixXd cvar_gradient;
+  ASSERT_TRUE(cvar_optimizer->evaluateP1RawCostForTest(
+      q, 0.1, cvar_cost, cvar_gradient));
+  cvar_gradient.leftCols(cvar_optimizer->getOrder()).setZero();
+  cvar_gradient.row(0).setZero();
+  cvar_gradient.row(2).setZero();
+  ASSERT_GT(cvar_gradient.colwise().norm().maxCoeff(), 0.0);
+  Eigen::MatrixXd cvar_probe = q -
+      1.0e-3 * cvar_gradient /
+      cvar_gradient.colwise().norm().maxCoeff();
+  const auto cvar_probe_profile = cvar_optimizer->evaluateP1FixedLatticeRisk(
+      ego_planner::UniformBspline(cvar_probe, 3, 0.1));
+  ASSERT_TRUE(cvar_probe_profile.full_support);
+  EXPECT_LT(cvar_probe_profile.max_c_pi, initial_profile.max_c_pi);
+  EXPECT_LT(cvar_cost, initial_profile.max_c_pi);
 }
 
 TEST(P1IntegrityCostTest, SnapshotGenerationStaysFixedUntilReset) {
