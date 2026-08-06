@@ -6567,6 +6567,14 @@ Verdict: PASS (entry to one fresh formal pair only).
 
 Conclusion: This physical-end record supersedes the generic diagnostic terminal statement solely for formal-pair scheduling. It establishes the prescribed entry gates but not formal cross-run effectiveness and does not authorize P1-3.
 
+## P1-2 fixed-lambda formal pair 4 — 2026-08-06
+
+Observation: Both one-shot v4 preflights passed with `errors=[]` for the serial 90 s runs at clean HEAD `f791988`: P1-1 run `e71f64d35b29461a8b42b0de66200c4c` (export `test_planner_p1_degraded_lidar_good_gnss_degraded_lidar_good_1786038031700`, bag `test_planner_p1_degraded_lidar_good_gnss_degraded_lidar_good_20260806T174031Z`) and P1-2 run `db59a607da1242dbafec3efcaad507dc` (export `test_planner_p1_degraded_lidar_good_gnss_degraded_lidar_good_1786038129171`, bag `test_planner_p1_degraded_lidar_good_gnss_degraded_lidar_good_20260806T174209Z`). Formal analysis `195401c1b70440a68b2cdc1f28e9b02d` was invoked exactly once and produced 39/39 nonempty figures with `inconclusive=[]`. Four hard gates failed. The first failure is candidate identity closure: attempt 20 candidate CSV and replacement-decision evidence identify selected/rejected candidate 1, while the replacement timeline retained the last optimized candidate ID 4. Strict cross-run reduction also failed because P1-2 mean/max `0.4081955951173893/0.42154450174055974` compared with P1-1 `0.405132620677483/0.4285194244232377` (max improved, mean regressed). Recorded-scene alignment failed because P1-1 had no risk cloud at the exact accepted snapshot stamp; the nearest recorded cloud was `0.498969078 s` away. Cause exclusion therefore failed as a consequence.
+
+Verdict: FAIL.
+
+Conclusion: This pair is retained as failed evidence and must not be analyzed or reused. Debugging returns first to the selected-candidate lifecycle identity mismatch; strict mean alignment and exact P1-1 scene capture remain preserved as later hard gates. This pair grants neither formal progression nor P1-3 permission.
+
 ## 2026-08-06 P1-2 fixed-lambda v4 diagnostic entry PASS
 
 Fresh enabled smoke command: `ros2 launch iap test_planner.launch.py experiment:=p1_degraded_lidar_good planner_safety_profile:=p1 p1.metrics_only:=false p1.lambda_integrity:=0.00001 run_duration_s:=30 validation_duration_s:=30 start_rviz:=false run_validator:=true record_bag:=true`.
