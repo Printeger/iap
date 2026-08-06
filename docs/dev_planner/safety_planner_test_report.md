@@ -7572,3 +7572,11 @@ Observation: The serial 90 s runs completed at clean HEAD `06d8c7b888f24499d567c
 Verdict: FAIL (formal effectiveness).
 
 Conclusion: This pair is retained as the first fully aligned evidence after the lifecycle-identity repair. It closes the identity and scene-attribution branches but proves that the current candidate preference/ranking does not yet satisfy the formal strict mean/max requirement. It grants neither progression nor P1-3 permission; debugging returns to the fixed deterministic candidate/profile evidence before a fresh pair is permitted.
+
+## P1-2 fixed-lambda formal pair 7 preflight failure — 2026-08-06
+
+Observation: A discriminating repeat pair completed at clean HEAD `e41cc6d7e6252a293db7804c4ce7c4e9cf465d82` to distinguish pair-6 terminal-window variability from an admission failure. P1-1 run `9ed0db0d0a13479090e7ebee17b1a94d` used export `test_planner_p1_degraded_lidar_good_gnss_degraded_lidar_good_1786039677893` and bag `test_planner_p1_degraded_lidar_good_gnss_degraded_lidar_good_20260806T180757Z`; its one-shot preflight passed. P1-2 run `5857d8e416a24543a09086486dff174d` used export `test_planner_p1_degraded_lidar_good_gnss_degraded_lidar_good_1786039778625` and bag `test_planner_p1_degraded_lidar_good_gnss_degraded_lidar_good_20260806T180938Z`; its one-shot preflight failed because no full-support optimizer attempt occurred, leaving the atomic candidate artifact group absent and no objective-applied debug row. The final two attempts fit the unchanged temporal horizon (`2.4 s` and `2.1 s`) but had only `137/200` and `141/200` initial matches. Their unmatched prefixes were reported as stale by pre-admission and as occupied by accepted-profile query status; all had `base_collision_occupied=0`. This is now an occupied-corner attribution/evidence problem, not permission to weaken support or rerun blindly.
+
+Verdict: FAIL (preflight; formal analyzer not invoked).
+
+Conclusion: Pair 7 is retained and ends repeated formal scheduling. The next work item is deterministic P0 interpolation-corner attribution for the full-support admission boundary; no analyzer was invoked, no threshold was relaxed, and P1-3 remains unauthorized.
