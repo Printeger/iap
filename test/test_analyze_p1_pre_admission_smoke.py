@@ -9,7 +9,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).parents[1]
 SCRIPT = ROOT / "scripts/dev_planner/analyze_p1_pre_admission_smoke.py"
-SCHEMA = "p1_evidence_provenance_v3"
+SCHEMA = "p1_evidence_provenance_v4"
 
 
 class P1PreAdmissionAnalyzerTest(unittest.TestCase):

@@ -143,8 +143,10 @@ namespace ego_planner
       double full_grad_norm_integrity = 0.0;
       double weighted_grad_integrity_norm = 0.0;
       double normalized_weighted_grad_integrity_norm = 0.0;
+      double full_normalized_weighted_grad_integrity_norm = 0.0;
       double grad_norm_original = 0.0;
       double full_grad_norm_original = 0.0;
+      double full_total_gradient_norm = 0.0;
       double grad_ratio = 0.0;
       double base_p1_cosine = 0.0;
       double miss_ratio = 0.0;
@@ -188,6 +190,26 @@ namespace ego_planner
       int iteration_count = 0;
       bool success = false;
       std::string termination_reason = "not_run";
+    };
+
+    struct P1OptimizerCheckpoint
+    {
+      std::string stage = "p1_stage";
+      std::string checkpoint = "not_recorded";
+      int restart_index = 0;
+      int iteration = 0;
+      int line_search_count = 0;
+      double step = 0.0;
+      double objective = std::numeric_limits<double>::quiet_NaN();
+      double base_objective = std::numeric_limits<double>::quiet_NaN();
+      double raw_p1_objective = std::numeric_limits<double>::quiet_NaN();
+      double normalized_p1_objective = 0.0;
+      double anchor_objective = 0.0;
+      double x_norm = std::numeric_limits<double>::quiet_NaN();
+      double gradient_norm = std::numeric_limits<double>::quiet_NaN();
+      double directional_derivative = std::numeric_limits<double>::quiet_NaN();
+      int solver_result = 0;
+      std::string reason = "none";
     };
 
     struct P1FixedLatticeRiskSummary
@@ -256,8 +278,12 @@ namespace ego_planner
       double post_weighted_p1_gradient_norm = std::numeric_limits<double>::quiet_NaN();
       double pre_normalized_weighted_p1_gradient_norm = std::numeric_limits<double>::quiet_NaN();
       double post_normalized_weighted_p1_gradient_norm = std::numeric_limits<double>::quiet_NaN();
+      double pre_full_normalized_weighted_p1_gradient_norm = std::numeric_limits<double>::quiet_NaN();
+      double post_full_normalized_weighted_p1_gradient_norm = std::numeric_limits<double>::quiet_NaN();
       double pre_total_gradient_norm = std::numeric_limits<double>::quiet_NaN();
       double post_total_gradient_norm = std::numeric_limits<double>::quiet_NaN();
+      double pre_full_total_gradient_norm = std::numeric_limits<double>::quiet_NaN();
+      double post_full_total_gradient_norm = std::numeric_limits<double>::quiet_NaN();
       double pre_base_p1_cosine = 0.0;
       double post_base_p1_cosine = 0.0;
       double pre_normalized_p1_cost = 0.0;
@@ -418,6 +444,11 @@ namespace ego_planner
     std::string p1CandidateOptimizationPath() const;
     std::string p1ReplacementDecisionPath() const;
     std::string p1CandidateRetainedProfilePath() const;
+    std::string p1CandidateControlPointsPath() const;
+    std::string p1CandidateProfilePath() const;
+    std::string p1CandidatePairwisePath() const;
+    std::string p1OptimizerCheckpointPath() const;
+    std::string p0OccupancyQueryEvidencePath() const;
     void setLastP1OptimizationSelected(bool selected);
     void writeP1OptimizationTrace(const P1OptimizationTrace &trace) const;
     void writeP1ReplacementDecision(const P1OptimizationTrace &trace,
@@ -541,6 +572,20 @@ namespace ego_planner
     };
     std::map<std::pair<uint64_t, uint64_t>, P1PreOptimizationTrace>
         p1_pre_optimization_traces_;
+    struct P1CandidateArtifact
+    {
+      Eigen::MatrixXd initial_control_points;
+      Eigen::MatrixXd final_control_points;
+      double interval_s = std::numeric_limits<double>::quiet_NaN();
+      std::shared_ptr<const iap::RiskGridSnapshot> snapshot;
+      double query_base_time_s = std::numeric_limits<double>::quiet_NaN();
+      std::vector<P1OptimizerCheckpoint> checkpoints;
+    };
+    std::map<std::pair<uint64_t, uint64_t>, P1CandidateArtifact>
+        p1_candidate_artifacts_;
+    std::vector<P1OptimizerCheckpoint> current_p1_checkpoints_;
+    Eigen::VectorXd current_p1_last_accepted_x_;
+    int current_p1_restart_index_{0};
 
     int variable_num_;              // optimization variables
     int iter_num_;                  // iteration of the solver
@@ -578,6 +623,9 @@ namespace ego_planner
     void writeP1CandidateOptimizationCsv(const P1OptimizationTrace &trace) const;
     void captureP1PreOptimizationTrajectory(
         const Eigen::MatrixXd &control_points, double interval_s);
+    void captureP1PostOptimizationTrajectory(
+        const Eigen::MatrixXd &control_points, double interval_s);
+    void writeP1CandidateSidecars(const P1OptimizationTrace &trace) const;
     bool check_collision_and_rebound(void);
 
     static int earlyExit(void *func_data, const double *x, const double *g, const double fx, const double xnorm, const double gnorm, const double step, int n, int k, int ls);

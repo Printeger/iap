@@ -17,11 +17,16 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
-SCHEMA = "p1_evidence_provenance_v3"
+SCHEMA = "p1_evidence_provenance_v4"
 NAMES = {
     "candidate": "planner_p1_candidate_optimization.csv",
+    "control_points": "planner_p1_candidate_control_points.csv",
+    "candidate_profile": "planner_p1_candidate_profile.csv",
+    "pairwise": "planner_p1_candidate_pairwise.csv",
+    "checkpoint": "planner_p1_optimizer_checkpoint.csv",
+    "occupancy": "planner_p0_occupancy_query_evidence.csv",
     "decision": "planner_p1_replacement_decision.csv",
-    "profile": "planner_p1_candidate_retained_profile.csv",
+    "retained_profile": "planner_p1_candidate_retained_profile.csv",
     "accepted_profile": "planner_p1_accepted_trajectory_risk_profile.csv",
     "timeline": "planner_p1_planning_context_timeline.csv",
 }
@@ -88,7 +93,7 @@ def main():
     for key, name in NAMES.items():
         path = export_dir / name
         if not path.is_file() or not path.stat().st_size:
-            if key in {"decision", "profile"}:
+            if key in {"decision", "retained_profile"}:
                 data[key] = []
                 continue
             errors.append(f"missing artifact: {path}")
@@ -99,7 +104,12 @@ def main():
             errors.append(f"provenance mismatch: {path.name}")
 
     candidates = data["candidate"]
-    decisions, profiles, timeline = data["decision"], data["profile"], data["timeline"]
+    decisions = data["decision"]
+    profiles = data["retained_profile"]
+    candidate_profiles = data["candidate_profile"]
+    pairwise = data["pairwise"]
+    occupancy = data["occupancy"]
+    timeline = data["timeline"]
     selected = [r for r in candidates if truthy(r.get("selected"))]
     if not candidates: errors.append("candidate artifact has no rows")
     selected_by_attempt = {}
@@ -152,14 +162,17 @@ def main():
 
     # 1: top-down scene
     fig, ax = plt.subplots(figsize=(7, 5))
-    for role, color in (("optimizer_selected_candidate", "#dc2626"),
-                        ("retained_incumbent", "#2563eb")):
-        group = [r for r in profiles if r.get("trajectory_role") == role]
+    for phase, color in (("initial", "#f97316"), ("final", "#2563eb")):
+        group = [r for r in candidate_profiles
+                 if r.get("phase") == phase and truthy(r.get("valid"))]
         if group:
             ax.plot([num(r, "x") for r in group], [num(r, "y") for r in group],
-                    color=color, label=role)
+                    color=color, label=phase)
     ax.set(title="P1 diagnostic top-down scene", xlabel="x (m)", ylabel="y (m)")
-    ax.legend() if profiles else ax.text(.5, .5, "no retained comparison", ha="center")
+    if candidate_profiles:
+        ax.legend()
+    else:
+        ax.axis("off"); ax.text(.5, .5, "UNAVAILABLE", ha="center")
     save(fig, out_dir / "p1_diag_topdown_scene.png")
 
     # 2: funnel
@@ -170,6 +183,8 @@ def main():
               num(latest, "fanout_p1_descent_eligible", 0)]
     ax.bar(["segments", "generated", "optimized", "support", "eligible"], counts, color="#7c3aed")
     ax.set(title="P1 candidate fan-out funnel", ylabel="count")
+    if not candidates:
+        ax.clear(); ax.axis("off"); ax.text(.5, .5, "UNAVAILABLE", ha="center")
     save(fig, out_dir / "p1_diag_fanout_funnel.png")
 
     # 3: fixed lattice deltas; attempt markers prevent cross-attempt confusion.
@@ -187,15 +202,51 @@ def main():
     ax.axhline(0, color="black", lw=.7); ax.axvline(0, color="black", lw=.7)
     ax.axvspan(-1e9, 0, ymax=.5, color="#dcfce7", alpha=.25)
     ax.set(title="Fixed-200 mean/max delta", xlabel="Δ mean c_pi", ylabel="Δ max c_pi")
+    if not candidates:
+        ax.clear(); ax.axis("off"); ax.text(.5, .5, "UNAVAILABLE", ha="center")
     save(fig, out_dir / "p1_diag_mean_max_delta_scatter.png")
 
-    # 4: paired profile
+    # 4: initial/final control-point and risk-profile pairwise matrices.
+    fig, axes = plt.subplots(2, 2, figsize=(10, 8))
+    pair_ids = sorted({row.get("candidate_id_a", "") for row in pairwise} |
+                      {row.get("candidate_id_b", "") for row in pairwise})
+    for column, phase in enumerate(("initial", "final")):
+        phase_rows = [row for row in pairwise if row.get("phase") == phase]
+        for axis, field, title in (
+                (axes[0, column], "control_point_distance", "control-point distance"),
+                (axes[1, column], "risk_profile_distance", "risk-profile distance")):
+            if pair_ids and phase_rows:
+                matrix = [[math.nan for _ in pair_ids] for _ in pair_ids]
+                positions = {value: index for index, value in enumerate(pair_ids)}
+                for row in phase_rows:
+                    a, b = positions[row["candidate_id_a"]], positions[row["candidate_id_b"]]
+                    matrix[a][b] = matrix[b][a] = num(row, field)
+                image = axis.imshow(matrix, cmap="viridis")
+                fig.colorbar(image, ax=axis, fraction=.046)
+                axis.set_xticks(range(len(pair_ids)), pair_ids)
+                axis.set_yticks(range(len(pair_ids)), pair_ids)
+            else:
+                axis.axis("off")
+                axis.text(.5, .5, "UNAVAILABLE", ha="center", va="center")
+            axis.set_title(f"{phase} {title}")
+    save(fig, out_dir / "p1_diag_pairwise_matrices.png")
+
+    # 5: every candidate's deterministic fixed-200 initial/final profile.
     fig, ax = plt.subplots(figsize=(8, 4))
-    for role, color in (("optimizer_selected_candidate", "#dc2626"), ("retained_incumbent", "#2563eb")):
-        group = [r for r in profiles if r.get("trajectory_role") == role]
-        if group: ax.plot([num(r, "sample_index") for r in group], [num(r, "c_pi") for r in group], color=color, label=role)
-    ax.set(title="Fixed-200 candidate / retained-incumbent profile", xlabel="sample", ylabel="c_pi")
-    ax.legend() if profiles else ax.text(.5, .5, "not retained", ha="center")
+    for candidate_id in sorted({row.get("candidate_id", "") for row in candidate_profiles}):
+        for phase, style in (("initial", "--"), ("final", "-")):
+            group = [row for row in candidate_profiles
+                     if row.get("candidate_id") == candidate_id and
+                     row.get("phase") == phase and truthy(row.get("valid"))]
+            if group:
+                ax.plot([num(row, "sample_index") for row in group],
+                        [num(row, "c_pi") for row in group], linestyle=style,
+                        label=f"{candidate_id}/{phase}")
+    ax.set(title="Per-candidate fixed-200 risk profiles", xlabel="sample", ylabel="c_pi")
+    if candidate_profiles:
+        ax.legend(fontsize=7, ncol=2)
+    else:
+        ax.axis("off"); ax.text(.5, .5, "UNAVAILABLE", ha="center")
     save(fig, out_dir / "p1_diag_profile_comparison.png")
 
     # 5: gradient/displacement direction against the fixed-lattice gate.
@@ -206,25 +257,16 @@ def main():
     ax.plot(ids, [num(r, "post_mean_c_pi") - num(r, "pre_mean_c_pi") for r in candidates], "s-", label="gate mean Δ")
     ax.plot(ids, [num(r, "post_max_c_pi") - num(r, "pre_max_c_pi") for r in candidates], "^-", label="gate max Δ")
     ax.axhline(0, color="black", lw=.7); ax.legend(); ax.set(title="Gradient / displacement and admission-gate alignment", xlabel="candidate")
+    if not candidates:
+        ax.clear(); ax.axis("off"); ax.text(.5, .5, "UNAVAILABLE", ha="center")
     save(fig, out_dir / "p1_diag_gradient_displacement.png")
-
-    # 6: convergence/collapse, using hashes and final objective proximity.
-    fig, ax = plt.subplots(figsize=(8, 4))
-    for attempt in attempts:
-        group = [r for r in candidates if r.get("planning_attempt_id") == attempt]
-        xs = [num(r, "displacement_norm") for r in group]
-        ys = [num(r, "post_total_objective") for r in group]
-        ax.scatter(xs, ys, label=f"attempt {attempt}")
-    ax.set(title="Candidate convergence / collapse proxy", xlabel="control-point displacement (m)",
-           ylabel="post total objective")
-    ax.legend()
-    save(fig, out_dir / "p1_diag_candidate_convergence.png")
 
     # 7: objective decomposition is intentionally per-attempt, never linked across attempts.
     fig, axes = plt.subplots(max(1, len(attempts)), 1, figsize=(8, 3 * max(1, len(attempts))), squeeze=False)
     fields = (("base", "pre_base_objective", "post_base_objective"),
               ("raw P1", "pre_raw_p1_cost", "post_raw_p1_cost"),
-              ("weighted P1", "pre_weighted_p1_cost", "post_weighted_p1_cost"),
+              ("normalized P1", "pre_normalized_p1_cost", "post_normalized_p1_cost"),
+              ("anchor", "pre_anchor_cost", "post_anchor_cost"),
               ("total", "pre_total_objective", "post_total_objective"))
     for axis, attempt in zip(axes[:, 0], attempts):
         group = [r for r in candidates if r.get("planning_attempt_id") == attempt]
@@ -234,14 +276,40 @@ def main():
             axis.plot(labels, [num(r, post) for r in group], marker="x", linestyle="--", label=f"{label} post")
         axis.set_title(f"Attempt {attempt}: objective decomposition")
         axis.legend(ncol=2, fontsize=7)
+    if not attempts:
+        axes[0, 0].axis("off")
+        axes[0, 0].text(.5, .5, "UNAVAILABLE", ha="center")
     save(fig, out_dir / "p1_diag_objective_decomposition.png")
+
+    # 8: P0 interpolation-corner attribution, separate from query points.
+    fig, ax = plt.subplots(figsize=(8, 6))
+    if occupancy:
+        query_rows = occupancy[::max(1, len(occupancy) // 1000)]
+        ax.scatter([num(row, "query_x") for row in query_rows],
+                   [num(row, "query_y") for row in query_rows], s=5,
+                   color="#2563eb", alpha=.35, label="query points")
+        corner_rows = [row for row in occupancy
+                       if truthy(row.get("inflated_occupied"))]
+        ax.scatter([num(row, "corner_x") for row in corner_rows],
+                   [num(row, "corner_y") for row in corner_rows], s=25,
+                   color="#dc2626", label="inflated occupied corners")
+        ax.legend()
+    else:
+        ax.axis("off"); ax.text(.5, .5, "UNAVAILABLE", ha="center")
+    ax.set(title="P0 query points and interpolation-corner occupancy",
+           xlabel="x (m)", ylabel="y (m)")
+    save(fig, out_dir / "p1_diag_p0_occupancy_overlay.png")
 
     # 6: lifecycle swimlane
     fig, ax = plt.subplots(figsize=(9, 4))
     stages = {stage: index for index, stage in enumerate(sorted({r.get("stage", "") for r in timeline}))}
     for row in timeline:
         ax.scatter(num(row, "stamp_s"), stages[row.get("stage", "")], c="#2563eb")
-    ax.set_yticks(list(stages.values()), list(stages.keys())); ax.set(title="P1 lifecycle swimlane", xlabel="stamp (s)")
+    if timeline:
+        ax.set_yticks(list(stages.values()), list(stages.keys()))
+    else:
+        ax.axis("off"); ax.text(.5, .5, "UNAVAILABLE", ha="center")
+    ax.set(title="P1 lifecycle swimlane", xlabel="stamp (s)")
     save(fig, out_dir / "p1_diag_lifecycle_swimlane.png")
 
     # 9: artifact/provenance timeline.
@@ -293,10 +361,11 @@ def main():
             ("Full scenario top-down", "p1_diag_topdown_scene.png", candidate_observation),
             ("Fan-out funnel", "p1_diag_fanout_funnel.png", candidate_observation),
             ("Mean/max delta scatter", "p1_diag_mean_max_delta_scatter.png", "No point can meet an effectiveness gate when candidate rows are absent." if empty else "Fixed-200 pre/post mean and max deltas are plotted per attempt/candidate."),
-            ("Candidate convergence/collapse", "p1_diag_candidate_convergence.png", "This run has no candidate pairwise evidence; collapse is therefore unassessed." if empty else "Candidate terminal displacement and objective evidence are plotted; pairwise sidecar evidence remains required for collapse proof."),
+            ("Initial/final pairwise matrices", "p1_diag_pairwise_matrices.png", "Pairwise evidence is unavailable." if not pairwise else "Initial/final control-point and fixed-200 risk-profile distance matrices are shown."),
             ("Objective decomposition", "p1_diag_objective_decomposition.png", "No optimizer objective row was emitted." if empty else "Pre/post objective components are shown separately for each attempt."),
             ("Gradient/displacement", "p1_diag_gradient_displacement.png", "Gradient/gate direction is unassessed without candidate rows." if empty else "Raw/total gradient-to-displacement and fixed-lattice deltas are shown."),
-            ("Per-attempt retained profile", "p1_diag_profile_comparison.png", f"{len(retained)} selected-and-retained candidate decisions were observed."),
+            ("Per-attempt candidate profile", "p1_diag_profile_comparison.png", "Candidate profiles are unavailable." if not candidate_profiles else "Every candidate initial/final fixed-200 profile is plotted."),
+            ("P0 occupied/base-collision overlay", "p1_diag_p0_occupancy_overlay.png", "P0 corner evidence is unavailable." if not occupancy else "Query points are plotted separately from the interpolation corners that own occupancy attribution."),
             ("Lifecycle swimlane", "p1_diag_lifecycle_swimlane.png", "Lifecycle events are shown only from the explicit run timeline."),
             ("Artifact/provenance timeline", "p1_diag_artifact_provenance_timeline.png", "Recorder and launch bounds are shown from manifest provenance."),
         ]

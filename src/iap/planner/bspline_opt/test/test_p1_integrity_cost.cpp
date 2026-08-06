@@ -616,6 +616,115 @@ TEST(P1IntegrityCostTest, FixedLambdaTwoStagePreferenceDescendsRisk) {
   EXPECT_TRUE(distinguishable);
 }
 
+TEST(P1IntegrityCostTest, EvidenceV4WritesAllCandidateSidecars) {
+  ego_planner::SwarmTrajData swarm;
+  Eigen::MatrixXd points = makeFixedLambdaConflictControlPoints();
+  AffineProvider provider(10.0, Eigen::Vector3d(0.0, -1.0, 0.0));
+  auto snapshot = makeSnapshot(provider);
+  const std::string debug_path = tempProfilePath("p1_v4_sidecar_debug");
+
+  auto config = disabledConfig();
+  config.use_integrity_cost = true;
+  config.metrics_only = false;
+  config.lambda_integrity = 0.00001;
+  config.integrity_grad_norm_max = 100.0;
+  config.debug_csv_enable = true;
+  config.debug_csv_path = debug_path;
+  config.evidence_schema_version = "p1_evidence_provenance_v4";
+  config.evidence_run_id = "v4-sidecar-test";
+  config.evidence_manifest_path = "/tmp/v4-sidecar-manifest.json";
+  auto optimizer = makeOptimizer(config, &swarm);
+  optimizer->setP1IntegrityConfigForTest(config);
+  ego_planner::BsplineOptimizer::P1PlanningRiskContext context;
+  context.snapshot = snapshot;
+  context.query_base_time_s = snapshot->stamp_s();
+  context.planning_start_s = snapshot->stamp_s();
+  context.planning_attempt_id = 101;
+  context.candidate_id = 1;
+  optimizer->setP1PlanningRiskContext(context);
+
+  const std::vector<std::string> sidecars = {
+      debug_path,
+      optimizer->p1CandidateOptimizationPath(),
+      optimizer->p1CandidateControlPointsPath(),
+      optimizer->p1CandidateProfilePath(),
+      optimizer->p1CandidatePairwisePath(),
+      optimizer->p1OptimizerCheckpointPath(),
+      optimizer->p0OccupancyQueryEvidencePath(),
+  };
+  for (const auto& path : sidecars) std::remove(path.c_str());
+
+  double base_cost = 0.0;
+  int base_iterations = 0;
+  ASSERT_TRUE(optimizer->optimizeP1BasePrepassForTest(
+      points, 0.1, 80, base_cost, base_iterations));
+  const auto base_prepass = optimizer->getLastP1BasePrepassTrace();
+  std::string normalization_reason;
+  ASSERT_TRUE(optimizer->prepareP1NormalizedStage(
+      points, 0.1, base_prepass, &normalization_reason))
+      << normalization_reason;
+  double final_cost = 0.0;
+  int iterations = 0;
+  ASSERT_TRUE(optimizer->optimizeReboundCostForTest(
+      points, 0.1, 80, final_cost, iterations));
+  auto trace = optimizer->getLastP1OptimizationTrace();
+  trace.selected = true;
+  trace.optimization_success = true;
+  trace.rank_eligible = true;
+  trace.replacement_accepted = true;
+  optimizer->writeP1OptimizationTrace(trace);
+
+  const auto candidate_rows = readCsvRows(optimizer->p1CandidateOptimizationPath());
+  ASSERT_EQ(candidate_rows.size(), 1U);
+  {
+    std::ifstream candidate_file(optimizer->p1CandidateOptimizationPath());
+    std::string header_line;
+    std::string value_line;
+    ASSERT_TRUE(std::getline(candidate_file, header_line));
+    ASSERT_TRUE(std::getline(candidate_file, value_line));
+    EXPECT_EQ(splitCsvLine(header_line).size(), splitCsvLine(value_line).size());
+  }
+  EXPECT_EQ(candidate_rows.front().at("schema_version"),
+            "p1_evidence_provenance_v4");
+  EXPECT_EQ(candidate_rows.front().at("normalization_mode"),
+            "base_improvement_budget_v1");
+  EXPECT_FALSE(candidate_rows.front().at(
+      "pre_full_total_gradient_norm").empty());
+  const auto control_rows = readCsvRows(optimizer->p1CandidateControlPointsPath());
+  ASSERT_EQ(control_rows.size(), static_cast<std::size_t>(2 * points.cols()));
+  const auto profile_rows = readCsvRows(optimizer->p1CandidateProfilePath());
+  ASSERT_EQ(profile_rows.size(), 400U);
+  EXPECT_EQ(std::count_if(profile_rows.begin(), profile_rows.end(),
+      [](const auto& row) { return row.at("phase") == "initial"; }), 200);
+  EXPECT_TRUE(std::all_of(profile_rows.begin(), profile_rows.end(),
+      [](const auto& row) {
+        return row.at("valid") == "1" && !row.at("c_pi").empty() &&
+            row.at("invalid_reason") == "none";
+      }));
+  const auto pairwise_rows = readCsvRows(optimizer->p1CandidatePairwisePath());
+  ASSERT_EQ(pairwise_rows.size(), 2U);
+  const auto checkpoint_rows = readCsvRows(optimizer->p1OptimizerCheckpointPath());
+  EXPECT_TRUE(std::any_of(checkpoint_rows.begin(), checkpoint_rows.end(),
+      [](const auto& row) {
+        return row.at("stage") == "base_prepass" &&
+            row.at("checkpoint") == "terminal";
+      }));
+  EXPECT_TRUE(std::any_of(checkpoint_rows.begin(), checkpoint_rows.end(),
+      [](const auto& row) {
+        return row.at("stage") == "p1_stage" &&
+            row.at("checkpoint") == "first_accepted_step";
+      }));
+  const auto occupancy_rows = readCsvRows(
+      optimizer->p0OccupancyQueryEvidencePath());
+  EXPECT_GE(occupancy_rows.size(), 3200U);
+  EXPECT_TRUE(std::all_of(occupancy_rows.begin(), occupancy_rows.end(),
+      [](const auto& row) {
+        return row.at("schema_version") == "p1_evidence_provenance_v4";
+      }));
+
+  for (const auto& path : sidecars) std::remove(path.c_str());
+}
+
 TEST(P1IntegrityCostTest,
      FixedLambdaFeedbackGateUsesOneSnapshotAndRecordsAuthoritativeDiagnostic) {
   ego_planner::SwarmTrajData swarm;

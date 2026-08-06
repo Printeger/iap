@@ -13,7 +13,7 @@ from collections import Counter
 from pathlib import Path
 
 
-SCHEMA = "p1_evidence_provenance_v3"
+SCHEMA = "p1_evidence_provenance_v4"
 TIMELINE = "planner_p1_planning_context_timeline.csv"
 PRE_ADMISSION = "planner_p1_pre_admission_attempt.csv"
 CANDIDATE = "planner_p1_candidate_optimization.csv"

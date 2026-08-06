@@ -19,7 +19,7 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import numpy as np
 
-SCHEMA = "p1_evidence_provenance_v3"
+SCHEMA = "p1_evidence_provenance_v4"
 FILES = {
     "timeline": "planner_p1_planning_context_timeline.csv",
     "attempt": "planner_p1_pre_admission_attempt.csv",

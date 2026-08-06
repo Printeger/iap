@@ -15,10 +15,15 @@ import sys
 from pathlib import Path
 
 
-SCHEMA = "p1_evidence_provenance_v3"
+SCHEMA = "p1_evidence_provenance_v4"
 CSV_KEYS = {
     "planner_p1_integrity_cost_debug.csv": "p1.debug_csv_path",
     "planner_p1_candidate_optimization.csv": "p1.candidate_optimization_path",
+    "planner_p1_candidate_control_points.csv": "p1.candidate_control_points_path",
+    "planner_p1_candidate_profile.csv": "p1.candidate_profile_path",
+    "planner_p1_candidate_pairwise.csv": "p1.candidate_pairwise_path",
+    "planner_p1_optimizer_checkpoint.csv": "p1.optimizer_checkpoint_path",
+    "planner_p0_occupancy_query_evidence.csv": "p0.occupancy_query_evidence_path",
     "planner_p1_accepted_trajectory_risk_profile.csv": "p1.accepted_profile_path",
     "planner_p1_accepted_trajectory_risk_profile_context.csv": "p1.accepted_profile_context_path",
     "planner_p1_planning_context_timeline.csv": "p1.planning_context_timeline_path",
@@ -182,6 +187,83 @@ def validate_bundle(export_dir, bag_dir, *, metrics_only, lambda_value):
         selected = [row for row in rows if truthy(row.get("selected")) and truthy(row.get("optimization_success"))]
         if not 1 <= len(rows) <= 8 or len(selected) != 1:
             errors.append(f"attempt {attempt} lacks exactly one selected successful candidate")
+        if not metrics_only:
+            eligible = [row for row in rows if truthy(row.get("rank_eligible"))]
+            if not eligible:
+                errors.append(f"attempt {attempt} has no rank-eligible candidate")
+            for winner in selected:
+                numeric = {
+                    field: float(winner[field]) for field in (
+                        "pre_mean_c_pi", "pre_max_c_pi", "post_mean_c_pi",
+                        "post_max_c_pi", "grad_integrity_dot_displacement")
+                    if finite(winner.get(field))
+                }
+                if len(numeric) != 5 or \
+                        numeric["post_mean_c_pi"] > numeric["pre_mean_c_pi"] + 1e-12 or \
+                        numeric["post_max_c_pi"] > numeric["pre_max_c_pi"] + 1e-12 or \
+                        not (numeric["post_mean_c_pi"] < numeric["pre_mean_c_pi"] - 1e-12 or
+                             numeric["post_max_c_pi"] < numeric["pre_max_c_pi"] - 1e-12) or \
+                        numeric["grad_integrity_dot_displacement"] >= 0.0:
+                    errors.append(f"attempt {attempt} selected winner lacks fixed-200 P1 descent")
+                if winner.get("normalization_mode") != "base_improvement_budget_v1" or \
+                        not truthy(winner.get("base_prepass_success")):
+                    errors.append(f"attempt {attempt} selected winner lacks frozen normalization evidence")
+
+    control_rows = csv_rows.get("planner_p1_candidate_control_points.csv", [])
+    profile_rows = csv_rows.get("planner_p1_candidate_profile.csv", [])
+    pairwise_rows = csv_rows.get("planner_p1_candidate_pairwise.csv", [])
+    checkpoint_rows = csv_rows.get("planner_p1_optimizer_checkpoint.csv", [])
+    occupancy_rows = csv_rows.get("planner_p0_occupancy_query_evidence.csv", [])
+    candidate_keys = {
+        (row.get("planning_attempt_id"), row.get("candidate_id"))
+        for row in candidate
+    }
+    for attempt, candidate_id in candidate_keys:
+        points = [row for row in control_rows
+                  if row.get("planning_attempt_id") == attempt and
+                  row.get("candidate_id") == candidate_id]
+        phases = {phase: [row for row in points if row.get("phase") == phase]
+                  for phase in ("initial", "final")}
+        if any(not rows for rows in phases.values()) or \
+                len(phases["initial"]) != len(phases["final"]):
+            errors.append(f"candidate {attempt}/{candidate_id} lacks initial/final control points")
+        samples = [row for row in profile_rows
+                   if row.get("planning_attempt_id") == attempt and
+                   row.get("candidate_id") == candidate_id]
+        for phase in ("initial", "final"):
+            phase_rows = [row for row in samples if row.get("phase") == phase]
+            if len(phase_rows) != 200 or \
+                    {int(row["sample_index"]) for row in phase_rows
+                     if str(row.get("sample_index", "")).isdigit()} != set(range(200)):
+                errors.append(f"candidate {attempt}/{candidate_id} {phase} profile is not fixed-200")
+            for row in phase_rows:
+                if truthy(row.get("valid")):
+                    if not finite(row.get("c_pi")) or row.get("invalid_reason") != "none":
+                        errors.append(f"candidate {attempt}/{candidate_id} has malformed valid profile sample")
+                elif str(row.get("c_pi", "")).strip() or not str(row.get("invalid_reason", "")).strip():
+                    errors.append(f"candidate {attempt}/{candidate_id} mixes invalid reason with c_pi")
+        checkpoints = [row for row in checkpoint_rows
+                       if row.get("planning_attempt_id") == attempt and
+                       row.get("candidate_id") == candidate_id]
+        names = {(row.get("stage"), row.get("checkpoint")) for row in checkpoints}
+        if ("p1_stage", "first_direction") not in names or \
+                ("p1_stage", "terminal") not in names:
+            errors.append(f"candidate {attempt}/{candidate_id} lacks optimizer checkpoints")
+        if not metrics_only and (("base_prepass", "start") not in names or
+                                 ("base_prepass", "terminal") not in names):
+            errors.append(f"candidate {attempt}/{candidate_id} lacks base-prepass checkpoints")
+    if not occupancy_rows:
+        errors.append("P0 occupancy query evidence is empty")
+    if candidate and not pairwise_rows:
+        errors.append("candidate pairwise evidence is empty")
+    if not metrics_only and pairwise_rows:
+        final_distances = [float(row["control_point_distance"])
+                           for row in pairwise_rows
+                           if row.get("phase") == "final" and
+                           finite(row.get("control_point_distance")) and
+                           row.get("candidate_id_a") != row.get("candidate_id_b")]
+        if not final_distances or max(final_distances) <= 1e-4:
+            errors.append("final candidates collapse in control-point space")
     rejected = [row for row in candidate if truthy(row.get("selected")) and
                 not truthy(row.get("replacement_accepted"))]
     if rejected:

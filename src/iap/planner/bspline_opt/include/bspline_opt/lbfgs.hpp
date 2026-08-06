@@ -1200,15 +1200,15 @@ namespace lbfgs
                 vec2norm(&xnorm, x, n);
                 vec2norm(&gnorm, g, n);
 
-                // /* Report the progress. */
-                // if (cd.proc_progress)
-                // {
-                //     if ((ret = cd.proc_progress(cd.instance, x, g, fx, xnorm, gnorm, step, cd.n, k, ls)))
-                //     {
-                //         loop = 0;
-                //         continue;
-                //     }
-                // }
+                /* Report an accepted line-search step. */
+                if (cd.proc_progress)
+                {
+                    if ((ret = cd.proc_progress(cd.instance, x, g, fx, xnorm, gnorm, step, cd.n, k, ls)))
+                    {
+                        loop = 0;
+                        continue;
+                    }
+                }
 
                 /*
                 Convergence test.

@@ -27,7 +27,7 @@ from launch_ros.actions import Node
 from launch_ros.descriptions import ComposableNode
 
 
-P1_EVIDENCE_SCHEMA_VERSION = "p1_evidence_provenance_v3"
+P1_EVIDENCE_SCHEMA_VERSION = "p1_evidence_provenance_v4"
 
 
 def _sha256_file(path):
@@ -1747,6 +1747,21 @@ def _launch_setup(context):
     p1_candidate_optimization_path_for_manifest = str(
         Path(p1_debug_path_for_manifest).with_name("planner_p1_candidate_optimization.csv")
     )
+    p1_candidate_control_points_path_for_manifest = str(
+        Path(p1_debug_path_for_manifest).with_name("planner_p1_candidate_control_points.csv")
+    )
+    p1_candidate_profile_path_for_manifest = str(
+        Path(p1_debug_path_for_manifest).with_name("planner_p1_candidate_profile.csv")
+    )
+    p1_candidate_pairwise_path_for_manifest = str(
+        Path(p1_debug_path_for_manifest).with_name("planner_p1_candidate_pairwise.csv")
+    )
+    p1_optimizer_checkpoint_path_for_manifest = str(
+        Path(p1_debug_path_for_manifest).with_name("planner_p1_optimizer_checkpoint.csv")
+    )
+    p0_occupancy_query_evidence_path_for_manifest = str(
+        Path(p1_debug_path_for_manifest).with_name("planner_p0_occupancy_query_evidence.csv")
+    )
     p1_accepted_profile_context_path_for_manifest = str(
         Path(p1_debug_path_for_manifest).with_name("planner_p1_accepted_trajectory_risk_profile_context.csv")
     )
@@ -1790,6 +1805,11 @@ def _launch_setup(context):
         "p1.debug_csv_path": p1_debug_path_for_manifest,
         "p1.max_candidates_per_attempt": max(1, min(8, _param_int(context, "p1.max_candidates_per_attempt"))),
         "p1.candidate_optimization_path": p1_candidate_optimization_path_for_manifest,
+        "p1.candidate_control_points_path": p1_candidate_control_points_path_for_manifest,
+        "p1.candidate_profile_path": p1_candidate_profile_path_for_manifest,
+        "p1.candidate_pairwise_path": p1_candidate_pairwise_path_for_manifest,
+        "p1.optimizer_checkpoint_path": p1_optimizer_checkpoint_path_for_manifest,
+        "p0.occupancy_query_evidence_path": p0_occupancy_query_evidence_path_for_manifest,
         "p1.accepted_profile_path": p1_accepted_profile_path_for_manifest,
         "p1.accepted_profile_context_path": p1_accepted_profile_context_path_for_manifest,
         "p1.planning_context_timeline_path": p1_planning_context_timeline_path_for_manifest,

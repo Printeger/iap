@@ -3,6 +3,12 @@
 > 规则：任何代码改动必须在这里记录，并包含 IAP-RQ-XXX。
 
 ## Unreleased
+- feat(planner-p1-evidence-v4): IAP-RQ-320 / IAP-RQ-400 / IAP-RQ-410 — make fixed-lambda convergence, diversity, and occupied-corner attribution independently replayable from one fail-closed evidence bundle.
+  - The sole accepted schema is now `p1_evidence_provenance_v4`; launch manifests, validator/preflight, diagnostic smoke, and formal analyzer reject legacy or incomplete bundles.
+  - Candidate evidence adds active/full base, raw-P1, normalized-weighted-P1, and total gradient norms; base/P1 cosine; frozen normalization and base-prepass fields; actual normalized-P1/anchor merit decomposition; aggregation parameters; and terminal/selection/replacement identities.
+  - Five required sidecars record initial/final control points, each candidate's two fixed-200 profiles with invalid values separated from reasons, initial/final control-point and profile pairwise distances, base/P1 optimizer checkpoints, and the exact two-layer/trilinear P0 occupancy query support with captured raw/inflated map epoch diagnostics.
+  - The explicit-bundle diagnostic generates the required ten views and marks candidate-dependent views `UNAVAILABLE` when source evidence is absent. The formal 23-figure contract embeds pairwise diversity in snapshot/candidate binding, actual normalized merit in objective decomposition, and inflated interpolation corners in the recorded scene overlay.
+  - Focused verification covers the C++ sidecar writer, strict bundle preflight, analyzer candidate/hard-gate semantics, and Python schema parsing. The fixed lambda, fixed `200/200` support, P0/P5 hard semantics, and P1-3 prohibition remain unchanged.
 - fix(planner-p0-occupied-attribution): IAP-RQ-320 / IAP-RQ-400 — bind occupied risk-grid failures to the actual spatiotemporal interpolation support and the occupancy-map epoch without weakening fail-closed semantics.
   - `RiskGridSnapshot::queryCost` has a read-only trace overload that records the query point/time, both participating horizon layers, every trilinear corner's weight/index/position/source flags/value/invalid reason, and the captured raw/inflated occupancy diagnostic.
   - GridMap exposes raw-cloud/fused versus inflated occupancy, voxel index/center, resolution, inflation, frame, cloud stamp, and a seqlock-style generation. P0 refresh rejects a changing generation before publishing a healthy snapshot and does not retry that generation.

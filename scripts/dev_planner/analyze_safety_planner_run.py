@@ -181,7 +181,7 @@ P1_2_FAIL_BRANCH = "FAIL -> artifact provenance/runtime install/recording comple
 P1_2_LAMBDA_FAIL_BRANCH = "FAIL -> lambda/gradient debug"
 P1_2_SELECTION_FAIL_BRANCH = "FAIL -> P1 candidate selection/ranking debug"
 P1_2_PASS_BRANCH = "PASS -> P1-3"
-P1_EVIDENCE_SCHEMA_VERSION = "p1_evidence_provenance_v3"
+P1_EVIDENCE_SCHEMA_VERSION = "p1_evidence_provenance_v4"
 P1_2_LAMBDA_INTEGRITY = 0.00001
 P1_2_LAMBDA_TOLERANCE = 1.0e-12
 P1_2_STALE_TIMEOUT_S = 1.0
@@ -196,6 +196,13 @@ P1_1_DEBUG_CSV_NAME = "planner_p1_integrity_cost_debug.csv"
 P1_ACCEPTED_PROFILE_CSV_NAME = "planner_p1_accepted_trajectory_risk_profile.csv"
 P1_ACCEPTED_PROFILE_CONTEXT_CSV_NAME = "planner_p1_accepted_trajectory_risk_profile_context.csv"
 P1_PLANNING_CONTEXT_TIMELINE_CSV_NAME = "planner_p1_planning_context_timeline.csv"
+P1_V4_SIDECAR_ARTIFACTS = {
+    "p1.candidate_control_points_path": "planner_p1_candidate_control_points.csv",
+    "p1.candidate_profile_path": "planner_p1_candidate_profile.csv",
+    "p1.candidate_pairwise_path": "planner_p1_candidate_pairwise.csv",
+    "p1.optimizer_checkpoint_path": "planner_p1_optimizer_checkpoint.csv",
+    "p0.occupancy_query_evidence_path": "planner_p0_occupancy_query_evidence.csv",
+}
 P1_1_FIGURE_FILENAMES = [
     "p1_1_scenario_topdown.png",
     "p1_1_topic_activity_timeline.png",
@@ -623,6 +630,21 @@ P1_CANDIDATE_OPTIMIZATION_FIELDS = [
     "pre_raw_p1_gradient_norm", "post_raw_p1_gradient_norm",
     "pre_weighted_p1_gradient_norm", "post_weighted_p1_gradient_norm",
     "pre_total_gradient_norm", "post_total_gradient_norm",
+    "pre_full_base_gradient_norm", "post_full_base_gradient_norm",
+    "pre_full_raw_p1_gradient_norm", "post_full_raw_p1_gradient_norm",
+    "pre_normalized_weighted_p1_gradient_norm", "post_normalized_weighted_p1_gradient_norm",
+    "pre_base_p1_cosine", "post_base_p1_cosine",
+    "pre_full_normalized_weighted_p1_gradient_norm", "post_full_normalized_weighted_p1_gradient_norm",
+    "pre_full_total_gradient_norm", "post_full_total_gradient_norm",
+    "pre_normalized_p1_cost", "post_normalized_p1_cost",
+    "pre_anchor_cost", "post_anchor_cost",
+    "normalization_mode", "normalization_reference_lambda", "normalization_scale",
+    "normalization_budget_fraction", "normalization_base_improvement_budget",
+    "normalization_reference_displacement_m",
+    "base_prepass_pre_objective", "base_prepass_post_objective",
+    "base_prepass_duration_ms", "base_prepass_solver_result",
+    "base_prepass_iteration_count", "base_prepass_success",
+    "base_prepass_termination_reason",
     "displacement_norm", "grad_integrity_dot_displacement", "weighted_p1_gradient_dot_displacement", "total_gradient_dot_displacement",
     "pre_mean_c_pi", "pre_max_c_pi", "post_mean_c_pi", "post_max_c_pi",
     "support_sample_count", "pre_support_valid_count", "post_support_valid_count",
@@ -645,7 +667,8 @@ P1_CANDIDATE_OPTIMIZATION_FINITE_FIELDS = [
         "optimization_success", "selected", "objective_allowed", "objective_applied",
         "p1_descent", "rank_eligible", "replacement_accepted",
         "selection_reason", "replacement_reason", "fallback_reason", "termination_reason",
-        "aggregation_mode", "fanout_singleton_reason",
+        "aggregation_mode", "fanout_singleton_reason", "normalization_mode",
+        "base_prepass_termination_reason",
     }
 ]
 ODOM_TRUTH_TOPIC = "/sim/drone_0/truth_odom"
@@ -6432,6 +6455,24 @@ def p1_candidate_optimization_csv_path(export_dir: Path, manifest: dict[str, Any
     )
 
 
+def p1_v4_sidecar_path(
+    export_dir: Path, manifest: dict[str, Any], manifest_key: str,
+) -> Path:
+    filename = P1_V4_SIDECAR_ARTIFACTS[manifest_key]
+    configured = str(manifest.get(manifest_key, "")).strip() if manifest else ""
+    if configured:
+        path = Path(configured).expanduser()
+        return path if path.is_absolute() else export_dir / path
+    return export_dir / filename
+
+
+def read_csv_rows(path: Path) -> list[dict[str, Any]]:
+    if not path.is_file() or path.stat().st_size <= 0:
+        return []
+    with path.open(newline="") as source:
+        return list(csv.DictReader(source))
+
+
 def read_p1_candidate_optimization_csv(path: Path) -> tuple[list[dict[str, Any]], dict[str, Any]]:
     required = set(P1_CANDIDATE_OPTIMIZATION_FIELDS)
     if not path.is_file():
@@ -6470,7 +6511,8 @@ def read_p1_candidate_optimization_csv(path: Path) -> tuple[list[dict[str, Any]]
         for index, row in enumerate(rows)
         for field in ("support_full_valid", "optimization_success", "selected",
                       "objective_allowed", "objective_applied", "p1_descent",
-                      "rank_eligible", "replacement_accepted", "incumbent_available")
+                      "rank_eligible", "replacement_accepted", "incumbent_available",
+                      "base_prepass_success")
         if explicit_csv_bool(row.get(field)) is None
     ]
     empty_identity_fields = [
@@ -6479,7 +6521,8 @@ def read_p1_candidate_optimization_csv(path: Path) -> tuple[list[dict[str, Any]]
         for index, row in enumerate(rows)
         for field in ("schema_version", "run_id", "manifest_path", "support_signature",
                       "initial_control_points_hash", "final_control_points_hash", "p1_config_hash", "selection_reason",
-                      "replacement_reason", "fallback_reason", "termination_reason")
+                      "replacement_reason", "fallback_reason", "termination_reason",
+                      "normalization_mode", "base_prepass_termination_reason")
         if not str(row.get(field, "")).strip()
     ]
     schema_errors = [
@@ -6506,6 +6549,7 @@ def validate_p1_candidate_optimization_evidence(
     rows: list[dict[str, Any]], summary: dict[str, Any],
     timeline_rows: list[dict[str, Any]] | None,
     accepted_profile: dict[str, Any] | None,
+    v4_sidecar_rows: dict[str, list[dict[str, Any]]] | None = None,
 ) -> dict[str, Any]:
     """Validate the one-authoritative-row contract for each optimizer start."""
     if not rows:
@@ -6550,6 +6594,33 @@ def validate_p1_candidate_optimization_evidence(
         ) == 1
         for attempt_rows in attempts.values()
     )
+    rank_eligible_per_attempt = all(
+        any(explicit_csv_bool(row.get("rank_eligible")) is True
+            for row in attempt_rows)
+        for attempt_rows in attempts.values()
+    )
+    selected_rows = [
+        row for row in rows if explicit_csv_bool(row.get("selected")) is True
+    ]
+    selected_descent = all(
+        (finite_float(row.get("post_mean_c_pi")) or 0.0)
+            <= (finite_float(row.get("pre_mean_c_pi")) or 0.0) + 1.0e-12
+        and (finite_float(row.get("post_max_c_pi")) or 0.0)
+            <= (finite_float(row.get("pre_max_c_pi")) or 0.0) + 1.0e-12
+        and (
+            (finite_float(row.get("post_mean_c_pi")) or 0.0)
+                < (finite_float(row.get("pre_mean_c_pi")) or 0.0) - 1.0e-12
+            or (finite_float(row.get("post_max_c_pi")) or 0.0)
+                < (finite_float(row.get("pre_max_c_pi")) or 0.0) - 1.0e-12
+        )
+        and (finite_float(row.get("grad_integrity_dot_displacement")) or 0.0) < 0.0
+        and (finite_float(row.get("post_total_objective")) or 0.0)
+            < (finite_float(row.get("pre_total_objective")) or 0.0) - 1.0e-12
+        and explicit_csv_bool(row.get("rank_eligible")) is True
+        and row.get("normalization_mode") == "base_improvement_budget_v1"
+        and explicit_csv_bool(row.get("base_prepass_success")) is True
+        for row in selected_rows
+    ) and bool(selected_rows)
     timeline_identities = {
         (str(row.get("snapshot_generation_id", "")),
          str(row.get("planning_attempt_id", "")), str(row.get("candidate_id", "")))
@@ -6638,10 +6709,62 @@ def validate_p1_candidate_optimization_evidence(
         bool(profile_tuple) and all(
             profile_tuple != identity for identity in rejected_selected_identities))
     schema_finite = bool(summary.get("valid"))
+    enforce_sidecars = v4_sidecar_rows is not None
+    sidecar_rows = {
+        P1_V4_SIDECAR_ARTIFACTS[key]: value
+        for key, value in (v4_sidecar_rows or {}).items()
+        if key in P1_V4_SIDECAR_ARTIFACTS
+    }
+    sidecars_present = not enforce_sidecars or all(
+        sidecar_rows.get(filename) for filename in P1_V4_SIDECAR_ARTIFACTS.values()
+    )
+    control_rows = sidecar_rows.get("planner_p1_candidate_control_points.csv", [])
+    profile_rows = sidecar_rows.get("planner_p1_candidate_profile.csv", [])
+    checkpoint_rows = sidecar_rows.get("planner_p1_optimizer_checkpoint.csv", [])
+    occupancy_rows = sidecar_rows.get("planner_p0_occupancy_query_evidence.csv", [])
+    candidate_sidecars_complete = sidecars_present and (
+        not enforce_sidecars or bool(occupancy_rows))
+    for row in rows if enforce_sidecars else []:
+        attempt, candidate = row.get("planning_attempt_id"), row.get("candidate_id")
+        points = [item for item in control_rows
+                  if item.get("planning_attempt_id") == attempt and
+                  item.get("candidate_id") == candidate]
+        initial_points = [item for item in points if item.get("phase") == "initial"]
+        final_points = [item for item in points if item.get("phase") == "final"]
+        profiles = [item for item in profile_rows
+                    if item.get("planning_attempt_id") == attempt and
+                    item.get("candidate_id") == candidate]
+        checkpoints = [item for item in checkpoint_rows
+                       if item.get("planning_attempt_id") == attempt and
+                       item.get("candidate_id") == candidate]
+        checkpoint_names = {(item.get("stage"), item.get("checkpoint"))
+                            for item in checkpoints}
+        candidate_sidecars_complete = candidate_sidecars_complete and (
+            bool(initial_points) and len(initial_points) == len(final_points)
+            and sum(item.get("phase") == "initial" for item in profiles) == P1_2_RISK_SAMPLE_COUNT
+            and sum(item.get("phase") == "final" for item in profiles) == P1_2_RISK_SAMPLE_COUNT
+            and ("base_prepass", "start") in checkpoint_names
+            and ("base_prepass", "terminal") in checkpoint_names
+            and ("p1_stage", "first_direction") in checkpoint_names
+            and ("p1_stage", "terminal") in checkpoint_names
+        )
+    pairwise_rows = sidecar_rows.get("planner_p1_candidate_pairwise.csv", [])
+    distinguishable_final_candidates = not enforce_sidecars or any(
+        item.get("phase") == "final"
+        and item.get("candidate_id_a") != item.get("candidate_id_b")
+        and (finite_float(item.get("control_point_distance")) or 0.0) > 1.0e-4
+        and (finite_float(item.get("risk_profile_distance")) or 0.0) > 1.0e-8
+        and explicit_csv_bool(item.get("profile_valid")) is True
+        for item in pairwise_rows
+    )
     return {
         "checked": True, "schema_finite": schema_finite,
         "support_full_valid": support_ok, "candidate_count_ok": candidate_count_ok,
         "selected_success_per_attempt": selected_success_per_attempt,
+        "rank_eligible_per_attempt": rank_eligible_per_attempt,
+        "selected_descent": selected_descent,
+        "v4_sidecars_complete": candidate_sidecars_complete,
+        "distinguishable_final_candidates": distinguishable_final_candidates,
         "timeline_reconciled": timeline_reconciled,
         "accepted_profile_reconciled": accepted_profile_reconciled,
         "replacement_rejections_reconciled": replacement_rejections_reconciled,
@@ -6658,7 +6781,8 @@ def validate_p1_candidate_optimization_evidence(
         "passed": schema_finite and support_ok and candidate_count_ok and
         selected_success_per_attempt and timeline_reconciled and accepted_profile_reconciled and
         replacement_rejections_reconciled and retained_artifacts_reconciled and
-        accepted_profile_is_not_rejected_candidate,
+        accepted_profile_is_not_rejected_candidate and rank_eligible_per_attempt and
+        selected_descent and candidate_sidecars_complete and distinguishable_final_candidates,
     }
 
 
@@ -8086,6 +8210,8 @@ def validate_p1_artifact_provenance(
     artifact_paths = (
         p1_debug_csv_path(export_dir, manifest),
         p1_candidate_optimization_csv_path(export_dir, manifest),
+        *(p1_v4_sidecar_path(export_dir, manifest, key)
+          for key in P1_V4_SIDECAR_ARTIFACTS),
         p1_accepted_profile_csv_path(export_dir, manifest),
         p1_accepted_profile_context_csv_path(export_dir, manifest),
         p1_planning_context_timeline_csv_path(export_dir, manifest),
@@ -8167,6 +8293,7 @@ def validate_p1_2_hard_gates(
     reference_p0_health_rows: list[dict[str, Any]] | None = None,
     p1_candidate_optimization_rows: list[dict[str, Any]] | None = None,
     p1_candidate_optimization_summary: dict[str, Any] | None = None,
+    p1_v4_sidecar_rows: dict[str, list[dict[str, Any]]] | None = None,
 ) -> dict[str, Any]:
     manifest_gates = p1_2_manifest_gate_values(manifest)
     reference_manifest_gates = p1_2_reference_manifest_gate_values(
@@ -8218,6 +8345,9 @@ def validate_p1_2_hard_gates(
         candidate_evidence = {
             "checked": False, "schema_finite": True, "support_full_valid": True,
             "candidate_count_ok": True, "selected_success_per_attempt": True,
+            "rank_eligible_per_attempt": True, "selected_descent": True,
+            "v4_sidecars_complete": True,
+            "distinguishable_final_candidates": True,
             "timeline_reconciled": True, "accepted_profile_reconciled": True,
             "replacement_rejections_reconciled": True,
             "passed": True, "attempts": {}, "optimizer_identities": [],
@@ -8228,6 +8358,7 @@ def validate_p1_2_hard_gates(
             p1_candidate_optimization_summary or {},
             p1_2_timeline_rows,
             p1_2_profile,
+            p1_v4_sidecar_rows,
         )
     selected_profile_context_tuple = tuple(
         profile_value(p1_2_metadata, key)
@@ -8336,6 +8467,13 @@ def validate_p1_2_hard_gates(
         "candidate_trace_support_full_valid": candidate_evidence.get("support_full_valid", False),
         "candidate_trace_count_within_limit": candidate_evidence.get("candidate_count_ok", False),
         "candidate_trace_one_selected_success": candidate_evidence.get("selected_success_per_attempt", False),
+        "candidate_trace_rank_eligible_per_attempt": candidate_evidence.get(
+            "rank_eligible_per_attempt", False),
+        "candidate_trace_selected_descent": candidate_evidence.get("selected_descent", False),
+        "candidate_trace_v4_sidecars_complete": candidate_evidence.get(
+            "v4_sidecars_complete", False),
+        "candidate_trace_final_diversity": candidate_evidence.get(
+            "distinguishable_final_candidates", False),
         "candidate_trace_timeline_reconciled": candidate_evidence.get("timeline_reconciled", False),
         "candidate_trace_profile_reconciled": candidate_evidence.get("accepted_profile_reconciled", False),
         "candidate_trace_replacement_rejections_reconciled": candidate_evidence.get(
@@ -8530,6 +8668,17 @@ def validate_p1_2_hard_gates(
         failures.append("P1-2 candidate optimization count is outside the configured 1..8 limit")
     if not gates["candidate_trace_one_selected_success"]:
         failures.append("P1-2 requires exactly one selected successful candidate per planning attempt")
+    if not gates["candidate_trace_rank_eligible_per_attempt"]:
+        failures.append("P1-2 requires at least one rank-eligible candidate per planning attempt")
+    if not gates["candidate_trace_selected_descent"]:
+        failures.append(
+            "P1-2 selected winner lacks total-objective descent, fixed-200 mean/max "
+            "non-regression, negative raw-gradient alignment, or frozen normalization"
+        )
+    if not gates["candidate_trace_v4_sidecars_complete"]:
+        failures.append("P1-2 v4 candidate/profile/checkpoint/P0-query sidecars are incomplete")
+    if not gates["candidate_trace_final_diversity"]:
+        failures.append("P1-2 final candidates collapse in control-point or risk-profile space")
     if not gates["candidate_trace_timeline_reconciled"]:
         failures.append("P1-2 candidate optimizer identities do not reconcile with the planning timeline")
     if not gates["candidate_trace_profile_reconciled"]:
@@ -13571,6 +13720,7 @@ def plot_p1_2_risk_trajectory_scene_overlay(
     p1_1_scene: dict[str, Any],
     alignment: dict[str, Any],
     path: Path,
+    occupancy_rows: list[dict[str, Any]] | None = None,
 ) -> bool:
     fig, axes = plt.subplots(1, 2, figsize=(14.5, 6.4))
     if not alignment.get("available"):
@@ -13619,6 +13769,20 @@ def plot_p1_2_risk_trajectory_scene_overlay(
         profile = _p1_2_xy_points(
             ((comparison.get(profile_key, {}) or {}).get("samples", []) or [])
         )
+        if label == "P1-2 enabled":
+            occupied_corners = [
+                row for row in (occupancy_rows or [])
+                if explicit_csv_bool(row.get("inflated_occupied")) is True
+                and finite_float(row.get("corner_x")) is not None
+                and finite_float(row.get("corner_y")) is not None
+            ]
+            if occupied_corners:
+                axis.scatter(
+                    [float(row["corner_x"]) for row in occupied_corners],
+                    [float(row["corner_y"]) for row in occupied_corners],
+                    s=22, marker="x", color="#dc2626",
+                    label="inflated occupied interpolation corner",
+                )
         for points, color, style, name, width in (
             (truth, "#16a34a", "-", "bag truth", 1.5),
             (odom, "#0891b2", "--", "bag odom", 1.3),
@@ -13720,12 +13884,13 @@ def plot_p1_2_snapshot_candidate_binding(
     p1_1_debug_summary: dict[str, Any],
     gates: dict[str, Any],
     path: Path,
+    pairwise_rows: list[dict[str, Any]] | None = None,
 ) -> bool:
-    """Make final-profile/sidecar/debug candidate binding inspectable in one artifact."""
-    fig, axes = plt.subplots(1, 2, figsize=(15.0, 6.0))
+    """Show final-profile binding and initial/final candidate diversity together."""
+    fig, axes = plt.subplots(3, 2, figsize=(15.0, 15.0))
     for axis, label, profile, context, debug, expected_applied in (
-        (axes[0], "P1-1 metrics-only", p1_1_profile, p1_1_context, p1_1_debug_summary, False),
-        (axes[1], "P1-2 enabled", p1_2_profile, p1_2_context, p1_2_debug_summary, True),
+        (axes[0, 0], "P1-1 metrics-only", p1_1_profile, p1_1_context, p1_1_debug_summary, False),
+        (axes[0, 1], "P1-2 enabled", p1_2_profile, p1_2_context, p1_2_debug_summary, True),
     ):
         profile_tuple = _p1_profile_binding_tuple(profile)
         debug_tuples = [tuple(value) for value in (debug.get("context_tuples", []) or [])]
@@ -13763,6 +13928,35 @@ def plot_p1_2_snapshot_candidate_binding(
         axis.axis("off")
         axis.text(0.02, 0.95, "\n".join(lines), va="top", ha="left", family="monospace", fontsize=9.2)
         axis.set_title(label)
+    pairwise_rows = list(pairwise_rows or [])
+    candidate_ids = sorted(
+        {str(row.get("candidate_id_a", "")) for row in pairwise_rows}
+        | {str(row.get("candidate_id_b", "")) for row in pairwise_rows}
+    )
+    positions = {candidate_id: index for index, candidate_id in enumerate(candidate_ids)}
+    for column, phase in enumerate(("initial", "final")):
+        phase_rows = [row for row in pairwise_rows if row.get("phase") == phase]
+        for axis, field, label in (
+            (axes[1, column], "control_point_distance", "control-point distance"),
+            (axes[2, column], "risk_profile_distance", "risk-profile distance"),
+        ):
+            matrix = np.full((len(candidate_ids), len(candidate_ids)), np.nan)
+            for row in phase_rows:
+                a = positions.get(str(row.get("candidate_id_a", "")))
+                b = positions.get(str(row.get("candidate_id_b", "")))
+                value = finite_float(row.get(field))
+                if a is not None and b is not None and value is not None:
+                    matrix[a, b] = matrix[b, a] = value
+            if candidate_ids and np.isfinite(matrix).any():
+                image = axis.imshow(matrix, cmap="viridis")
+                fig.colorbar(image, ax=axis, fraction=0.046)
+                axis.set_xticks(range(len(candidate_ids)), candidate_ids)
+                axis.set_yticks(range(len(candidate_ids)), candidate_ids)
+            else:
+                axis.axis("off")
+                axis.text(0.5, 0.5, "UNAVAILABLE", transform=axis.transAxes,
+                          ha="center", va="center")
+            axis.set_title(f"P1-2 {phase} {label}")
     fig.suptitle(
         "P1 final accepted-profile / sidecar / debug snapshot-candidate binding "
         f"(P1-2 hard binding: {gates.get('p1_final_profile_context_in_debug')})"
@@ -13800,6 +13994,12 @@ def p1_2_artifact_completeness_rows(
             (label, "planning-context timeline", exists(p1_planning_context_timeline_csv_path(export_dir, manifest)) if export_dir else False),
             (label, "P1 debug CSV", exists(p1_debug_csv_path(export_dir, manifest)) if export_dir else False),
         ])
+        rows.extend(
+            (label, filename,
+             exists(p1_v4_sidecar_path(export_dir, manifest, key))
+             if export_dir else False)
+            for key, filename in P1_V4_SIDECAR_ARTIFACTS.items()
+        )
     rows.append((
         "P1-2",
         "all pre-dashboard required figures",
@@ -15135,30 +15335,39 @@ def plot_p1_2_candidate_optimization_funnel(rows: list[dict[str, Any]], path: Pa
 
 
 def plot_p1_2_objective_contribution_ratio(rows: list[dict[str, Any]], path: Path) -> bool:
-    fig, ax = plt.subplots(figsize=(11.0, 5.5))
-    x = np.arange(len(rows))
-    objective_ratios = []
-    gradient_ratios = []
-    for row in rows:
-        base = finite_float(row.get("pre_base_objective"))
-        p1 = finite_float(row.get("pre_weighted_p1_cost"))
-        base_grad = finite_float(row.get("pre_base_gradient_norm"))
-        p1_grad = finite_float(row.get("pre_weighted_p1_gradient_norm"))
-        if base is not None and p1 is not None:
-            objective_ratios.append(p1 / max(abs(base), 1e-12))
-        if base_grad is not None and p1_grad is not None:
-            gradient_ratios.append(p1_grad / max(abs(base_grad), 1e-12))
-    count = min(len(objective_ratios), len(gradient_ratios))
-    if count:
-        ax.bar(x[:count] - 0.2, objective_ratios[:count], 0.4,
-               color="#7c3aed", label="weighted P1 / base objective")
-        ax.bar(x[:count] + 0.2, gradient_ratios[:count], 0.4,
-               color="#0891b2", label="weighted P1 / base gradient")
-        ax.legend(fontsize=8)
-    else: ax.text(0.5, 0.5, "UNAVAILABLE", transform=ax.transAxes, ha="center")
+    fig, ax = plt.subplots(figsize=(12.0, 6.0))
+    x = np.arange(len(rows), dtype=float)
+    width = 0.36
+    complete = all(
+        finite_float(row.get(field)) is not None
+        for row in rows
+        for field in ("pre_base_objective", "post_base_objective",
+                      "pre_normalized_p1_cost", "post_normalized_p1_cost",
+                      "pre_anchor_cost", "post_anchor_cost",
+                      "pre_total_objective", "post_total_objective")
+    )
+    if rows and complete:
+        for offset, phase, alpha in ((-width / 2, "pre", 0.55),
+                                     (width / 2, "post", 1.0)):
+            base = np.array([float(row[f"{phase}_base_objective"]) for row in rows])
+            normalized = np.array([float(row[f"{phase}_normalized_p1_cost"]) for row in rows])
+            anchor = np.array([float(row[f"{phase}_anchor_cost"]) for row in rows])
+            total = np.array([float(row[f"{phase}_total_objective"]) for row in rows])
+            ax.bar(x + offset, base, width, alpha=alpha, color="#2563eb",
+                   label=f"{phase} base")
+            ax.bar(x + offset, normalized, width, bottom=base, alpha=alpha,
+                   color="#7c3aed", label=f"{phase} normalized P1")
+            ax.bar(x + offset, anchor, width, bottom=base + normalized,
+                   alpha=alpha, color="#f97316", label=f"{phase} anchor")
+            ax.scatter(x + offset, total, marker="x", color="black",
+                       label=f"{phase} recorded merit")
+        ax.legend(fontsize=7, ncol=2)
+    else:
+        ax.text(0.5, 0.5, "UNAVAILABLE", transform=ax.transAxes, ha="center")
     ax.axhline(0.0, color="black", linewidth=0.8); ax.set_xlabel("candidate row")
-    ax.set_ylabel("ratio")
-    ax.set_title("P1 objective and gradient contribution ratios"); ax.grid(True, axis="y", alpha=0.25)
+    ax.set_ylabel("optimizer merit")
+    ax.set_title("Actual optimizer merit: base + frozen normalized P1 + anchor")
+    ax.grid(True, axis="y", alpha=0.25)
     fig.tight_layout(); fig.savefig(path, dpi=160); plt.close(fig)
     return True
 
@@ -16248,6 +16457,7 @@ def _analyze_impl(args: argparse.Namespace) -> dict[str, Any]:
     p1_accepted_profile_context_info: dict[str, Any] = {}
     p1_planning_context_timeline_rows: list[dict[str, Any]] = []
     p1_planning_context_timeline_info: dict[str, Any] = {}
+    p1_v4_sidecar_rows: dict[str, list[dict[str, Any]]] = {}
     if p1_phase:
         p1_debug_rows, p1_debug_summary = read_p1_integrity_debug_csv(
             p1_debug_csv_path(export_dir, manifest)
@@ -16272,6 +16482,10 @@ def _analyze_impl(args: argparse.Namespace) -> dict[str, Any]:
                 p1_planning_context_timeline_csv_path(export_dir, manifest)
             )
         )
+        p1_v4_sidecar_rows = {
+            key: read_csv_rows(p1_v4_sidecar_path(export_dir, manifest, key))
+            for key in P1_V4_SIDECAR_ARTIFACTS
+        }
 
     safety_off_topic_counts = {}
     if is_experiment(args, "B0-4"):
@@ -17275,6 +17489,7 @@ def _analyze_impl(args: argparse.Namespace) -> dict[str, Any]:
             p1_2_reference_health_rows,
             p1_candidate_optimization_rows,
             p1_candidate_optimization_summary,
+            p1_v4_sidecar_rows,
         )
         p1_2_timebase_alignment = normalize_p1_2_timebases(
             p1_planning_context_timeline_rows, health_rows, manifest
@@ -18661,6 +18876,10 @@ def _analyze_impl(args: argparse.Namespace) -> dict[str, Any]:
         candidate_csv_path = Path(str(p1_candidate_optimization_summary.get("path", "")))
         if candidate_csv_path.is_file() and candidate_csv_path.stat().st_size > 0:
             csv_artifacts.append(str(candidate_csv_path))
+        for key in P1_V4_SIDECAR_ARTIFACTS:
+            sidecar_path = p1_v4_sidecar_path(export_dir, manifest, key)
+            if sidecar_path.is_file() and sidecar_path.stat().st_size > 0:
+                csv_artifacts.append(str(sidecar_path))
         if not bool(p1_candidate_optimization_summary.get("valid")):
             failures.append("P1-2 candidate optimization CSV is missing, malformed, or duplicates an attempt/candidate")
         p1_debug_path = Path(str(p1_debug_summary.get("path", "")))
@@ -18919,6 +19138,8 @@ def _analyze_impl(args: argparse.Namespace) -> dict[str, Any]:
             baseline_scenario_data,
             p1_2_risk_comparison.get("risk_scene_alignment", {}) or {},
             p1_2_figure_paths["p1_2_risk_trajectory_scene_overlay.png"],
+            occupancy_rows=p1_v4_sidecar_rows.get(
+                "p0.occupancy_query_evidence_path", []),
         ):
             p1_2_figure_artifacts.append(
                 str(p1_2_figure_paths["p1_2_risk_trajectory_scene_overlay.png"])
@@ -18953,6 +19174,7 @@ def _analyze_impl(args: argparse.Namespace) -> dict[str, Any]:
             p1_2_reference_debug_summary,
             p1_2_gates,
             p1_2_figure_paths["p1_2_snapshot_candidate_binding.png"],
+            pairwise_rows=p1_v4_sidecar_rows.get("p1.candidate_pairwise_path", []),
         ):
             p1_2_figure_artifacts.append(
                 str(p1_2_figure_paths["p1_2_snapshot_candidate_binding.png"])

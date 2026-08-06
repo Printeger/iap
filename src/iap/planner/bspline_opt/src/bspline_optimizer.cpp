@@ -27,6 +27,16 @@ namespace ego_planner
         "planner_p1_replacement_decision.csv";
     constexpr const char *kP1CandidateRetainedProfileCsvName =
         "planner_p1_candidate_retained_profile.csv";
+    constexpr const char *kP1CandidateControlPointsCsvName =
+        "planner_p1_candidate_control_points.csv";
+    constexpr const char *kP1CandidateProfileCsvName =
+        "planner_p1_candidate_profile.csv";
+    constexpr const char *kP1CandidatePairwiseCsvName =
+        "planner_p1_candidate_pairwise.csv";
+    constexpr const char *kP1OptimizerCheckpointCsvName =
+        "planner_p1_optimizer_checkpoint.csv";
+    constexpr const char *kP0OccupancyQueryEvidenceCsvName =
+        "planner_p0_occupancy_query_evidence.csv";
 
     // Candidate evidence must be measured against one lattice, rather than
     // against whichever adaptive samples happened to be visited by L-BFGS.
@@ -389,6 +399,7 @@ namespace ego_planner
             context.planning_attempt_id)
     {
       p1_pre_optimization_traces_.clear();
+      p1_candidate_artifacts_.clear();
     }
     p1_risk_context_ = std::move(context);
     risk_snapshot_ = p1_risk_context_.snapshot;
@@ -1279,8 +1290,43 @@ namespace ego_planner
   int BsplineOptimizer::earlyExit(void *func_data, const double *x, const double *g, const double fx, const double xnorm, const double gnorm, const double step, int n, int k, int ls)
   {
     BsplineOptimizer *opt = reinterpret_cast<BsplineOptimizer *>(func_data);
-    // cout << "k=" << k << endl;
-    // cout << "opt->flag_continue_to_optimize_=" << opt->flag_continue_to_optimize_ << endl;
+    if (k > 0)
+    {
+      const bool first_accepted = std::none_of(
+          opt->current_p1_checkpoints_.begin(),
+          opt->current_p1_checkpoints_.end(), [](const auto &item) {
+            return item.checkpoint == "first_accepted_step";
+          });
+      P1OptimizerCheckpoint checkpoint;
+      checkpoint.stage = opt->p1_base_prepass_active_
+          ? "base_prepass" : "p1_stage";
+      checkpoint.checkpoint = first_accepted
+          ? "first_accepted_step" : "accepted_iteration";
+      checkpoint.restart_index = opt->current_p1_restart_index_;
+      checkpoint.iteration = k;
+      checkpoint.line_search_count = ls;
+      checkpoint.step = step;
+      checkpoint.objective = fx;
+      checkpoint.base_objective =
+          opt->last_optimizer_cost_breakdown_.original_cost;
+      checkpoint.raw_p1_objective = opt->last_p1_metrics_.f_integrity;
+      checkpoint.normalized_p1_objective =
+          opt->last_optimizer_cost_breakdown_.normalized_integrity_cost;
+      checkpoint.anchor_objective =
+          opt->last_optimizer_cost_breakdown_.anchor_cost;
+      checkpoint.x_norm = xnorm;
+      checkpoint.gradient_norm = gnorm;
+      if (opt->current_p1_last_accepted_x_.size() == n)
+      {
+        const Eigen::Map<const Eigen::VectorXd> accepted_x(x, n);
+        const Eigen::Map<const Eigen::VectorXd> accepted_gradient(g, n);
+        checkpoint.directional_derivative = accepted_gradient.dot(
+            accepted_x - opt->current_p1_last_accepted_x_);
+        opt->current_p1_last_accepted_x_ = accepted_x;
+      }
+      if (first_accepted || k % 10 == 0)
+        opt->current_p1_checkpoints_.push_back(std::move(checkpoint));
+    }
     return (opt->force_stop_type_ == STOP_FOR_ERROR || opt->force_stop_type_ == STOP_FOR_REBOUND);
   }
 
@@ -2010,6 +2056,7 @@ namespace ego_planner
 
     double final_cost;
     bool flag_success = rebound_optimize(final_cost);
+    captureP1PostOptimizationTrajectory(cps_.points, ts);
 
     optimal_points = cps_.points;
     last_p1_optimization_trace_.optimization_success = flag_success;
@@ -2031,6 +2078,7 @@ namespace ego_planner
     cps_ = control_points;
 
     bool flag_success = rebound_optimize(final_cost);
+    captureP1PostOptimizationTrajectory(cps_.points, ts);
 
     optimal_points = cps_.points;
     last_p1_optimization_trace_.optimization_success = flag_success;
@@ -2112,6 +2160,7 @@ namespace ego_planner
     bool flag_force_return, flag_occ, success;
     new_lambda2_ = lambda2_;
     constexpr int MAX_RESART_NUMS_SET = 3;
+    current_p1_checkpoints_.clear();
     do
     {
       /* ---------- prepare ---------- */
@@ -2139,6 +2188,32 @@ namespace ego_planner
       combineCostRebound(q, initial_gradient.data(), initial_cost, variable_num_);
       last_rebound_total_gradient_norm_ = Eigen::Map<const Eigen::VectorXd>(
           initial_gradient.data(), variable_num_).norm();
+      current_p1_restart_index_ = restart_nums;
+      if (restart_nums > 0)
+      {
+        P1OptimizerCheckpoint restart;
+        restart.stage = p1_base_prepass_active_ ? "base_prepass" : "p1_stage";
+        restart.checkpoint = "restart";
+        restart.restart_index = restart_nums;
+        restart.reason = "collision_or_swarm_recheck";
+        current_p1_checkpoints_.push_back(std::move(restart));
+      }
+      P1OptimizerCheckpoint first_direction;
+      first_direction.stage = p1_base_prepass_active_ ? "base_prepass" : "p1_stage";
+      first_direction.checkpoint = "first_direction";
+      first_direction.restart_index = restart_nums;
+      first_direction.objective = initial_cost;
+      first_direction.base_objective = last_optimizer_cost_breakdown_.original_cost;
+      first_direction.raw_p1_objective = last_p1_metrics_.f_integrity;
+      first_direction.normalized_p1_objective =
+          last_optimizer_cost_breakdown_.normalized_integrity_cost;
+      first_direction.anchor_objective = last_optimizer_cost_breakdown_.anchor_cost;
+      first_direction.x_norm = Eigen::Map<const Eigen::VectorXd>(
+          q, variable_num_).norm();
+      first_direction.gradient_norm = last_rebound_total_gradient_norm_;
+      first_direction.directional_derivative =
+          -last_rebound_total_gradient_norm_ * last_rebound_total_gradient_norm_;
+      current_p1_checkpoints_.push_back(std::move(first_direction));
       P1OptimizationTrace &trace = last_p1_optimization_trace_;
       trace.planning_attempt_id = p1_risk_context_.planning_attempt_id;
       trace.candidate_id = p1_risk_context_.candidate_id;
@@ -2160,11 +2235,15 @@ namespace ego_planner
           last_p1_metrics_.weighted_grad_integrity_norm;
       trace.pre_normalized_weighted_p1_gradient_norm =
           last_p1_metrics_.normalized_weighted_grad_integrity_norm;
+      trace.pre_full_normalized_weighted_p1_gradient_norm =
+          last_p1_metrics_.full_normalized_weighted_grad_integrity_norm;
       trace.pre_normalized_p1_cost =
           last_p1_metrics_.normalized_weighted_f_integrity;
       trace.pre_anchor_cost = last_p1_metrics_.anchor_cost;
       trace.pre_base_p1_cosine = last_p1_metrics_.base_p1_cosine;
       trace.pre_total_gradient_norm = last_rebound_total_gradient_norm_;
+      trace.pre_full_total_gradient_norm =
+          last_p1_metrics_.full_total_gradient_norm;
       trace.base_gradient_norm = trace.pre_base_gradient_norm;
       trace.p1_gradient_norm = trace.pre_raw_p1_gradient_norm;
       trace.total_gradient_norm = trace.pre_total_gradient_norm;
@@ -2243,8 +2322,26 @@ namespace ego_planner
 
       /* ---------- optimize ---------- */
       t1 = rclcpp::Clock().now();
+      current_p1_last_accepted_x_ = Eigen::Map<const Eigen::VectorXd>(
+          q, variable_num_);
       // 执行优化
       int result = lbfgs::lbfgs_optimize(variable_num_, q, &final_cost, BsplineOptimizer::costFunctionRebound, NULL, BsplineOptimizer::earlyExit, this, &lbfgs_params);
+      P1OptimizerCheckpoint terminal;
+      terminal.stage = p1_base_prepass_active_ ? "base_prepass" : "p1_stage";
+      terminal.checkpoint = "terminal";
+      terminal.restart_index = restart_nums;
+      terminal.iteration = iter_num_;
+      terminal.objective = final_cost;
+      terminal.base_objective = last_optimizer_cost_breakdown_.original_cost;
+      terminal.raw_p1_objective = last_p1_metrics_.f_integrity;
+      terminal.normalized_p1_objective =
+          last_optimizer_cost_breakdown_.normalized_integrity_cost;
+      terminal.anchor_objective = last_optimizer_cost_breakdown_.anchor_cost;
+      terminal.x_norm = Eigen::Map<const Eigen::VectorXd>(q, variable_num_).norm();
+      terminal.gradient_norm = last_rebound_total_gradient_norm_;
+      terminal.solver_result = result;
+      terminal.reason = lbfgs::lbfgs_strerror(result);
+      current_p1_checkpoints_.push_back(std::move(terminal));
       // The final callback supplied the terminal metrics and gradient.  Copy
       // q explicitly before querying the fixed lattice, because a solver
       // error/restart must not leave evidence attached to an older callback.
@@ -2269,11 +2366,15 @@ namespace ego_planner
           last_p1_metrics_.weighted_grad_integrity_norm;
       trace.post_normalized_weighted_p1_gradient_norm =
           last_p1_metrics_.normalized_weighted_grad_integrity_norm;
+      trace.post_full_normalized_weighted_p1_gradient_norm =
+          last_p1_metrics_.full_normalized_weighted_grad_integrity_norm;
       trace.post_normalized_p1_cost =
           last_p1_metrics_.normalized_weighted_f_integrity;
       trace.post_anchor_cost = last_p1_metrics_.anchor_cost;
       trace.post_base_p1_cosine = last_p1_metrics_.base_p1_cosine;
       trace.post_total_gradient_norm = last_rebound_total_gradient_norm_;
+      trace.post_full_total_gradient_norm =
+          last_p1_metrics_.full_total_gradient_norm;
       trace.total_gradient_norm = trace.post_total_gradient_norm;
       trace.displacement_norm = (cps_.points - initial_control_points).norm();
       double raw_integrity_cost = 0.0;
@@ -2844,6 +2945,41 @@ namespace ego_planner
         : siblingPath(p1_config_.debug_csv_path, kP1CandidateRetainedProfileCsvName);
   }
 
+  std::string BsplineOptimizer::p1CandidateControlPointsPath() const
+  {
+    return p1_config_.debug_csv_path.empty()
+        ? kP1CandidateControlPointsCsvName
+        : siblingPath(p1_config_.debug_csv_path, kP1CandidateControlPointsCsvName);
+  }
+
+  std::string BsplineOptimizer::p1CandidateProfilePath() const
+  {
+    return p1_config_.debug_csv_path.empty()
+        ? kP1CandidateProfileCsvName
+        : siblingPath(p1_config_.debug_csv_path, kP1CandidateProfileCsvName);
+  }
+
+  std::string BsplineOptimizer::p1CandidatePairwisePath() const
+  {
+    return p1_config_.debug_csv_path.empty()
+        ? kP1CandidatePairwiseCsvName
+        : siblingPath(p1_config_.debug_csv_path, kP1CandidatePairwiseCsvName);
+  }
+
+  std::string BsplineOptimizer::p1OptimizerCheckpointPath() const
+  {
+    return p1_config_.debug_csv_path.empty()
+        ? kP1OptimizerCheckpointCsvName
+        : siblingPath(p1_config_.debug_csv_path, kP1OptimizerCheckpointCsvName);
+  }
+
+  std::string BsplineOptimizer::p0OccupancyQueryEvidencePath() const
+  {
+    return p1_config_.debug_csv_path.empty()
+        ? kP0OccupancyQueryEvidenceCsvName
+        : siblingPath(p1_config_.debug_csv_path, kP0OccupancyQueryEvidenceCsvName);
+  }
+
   void BsplineOptimizer::writeP1CandidateOptimizationCsv(
       const P1OptimizationTrace &trace) const
   {
@@ -2876,6 +3012,7 @@ namespace ego_planner
              "aggregation_mode,aggregation_temperature,adaptive_sample_count,fixed_sample_count,peak_contribution,"
              "pre_full_base_gradient_norm,post_full_base_gradient_norm,pre_full_raw_p1_gradient_norm,post_full_raw_p1_gradient_norm,"
              "pre_normalized_weighted_p1_gradient_norm,post_normalized_weighted_p1_gradient_norm,pre_base_p1_cosine,post_base_p1_cosine,"
+             "pre_full_normalized_weighted_p1_gradient_norm,post_full_normalized_weighted_p1_gradient_norm,pre_full_total_gradient_norm,post_full_total_gradient_norm,"
              "pre_normalized_p1_cost,post_normalized_p1_cost,pre_anchor_cost,post_anchor_cost,"
              "normalization_mode,normalization_reference_lambda,normalization_scale,normalization_budget_fraction,normalization_base_improvement_budget,normalization_reference_displacement_m,"
              "base_prepass_pre_objective,base_prepass_post_objective,base_prepass_duration_ms,base_prepass_solver_result,base_prepass_iteration_count,base_prepass_success,base_prepass_termination_reason,"
@@ -2930,6 +3067,10 @@ namespace ego_planner
         << trace.pre_normalized_weighted_p1_gradient_norm << ','
         << trace.post_normalized_weighted_p1_gradient_norm << ','
         << trace.pre_base_p1_cosine << ',' << trace.post_base_p1_cosine << ','
+        << trace.pre_full_normalized_weighted_p1_gradient_norm << ','
+        << trace.post_full_normalized_weighted_p1_gradient_norm << ','
+        << trace.pre_full_total_gradient_norm << ','
+        << trace.post_full_total_gradient_norm << ','
         << trace.pre_normalized_p1_cost << ','
         << trace.post_normalized_p1_cost << ','
         << trace.pre_anchor_cost << ',' << trace.post_anchor_cost << ','
@@ -2965,10 +3106,258 @@ namespace ego_planner
     last_p1_optimization_trace_.selected = selected;
   }
 
+  void BsplineOptimizer::writeP1CandidateSidecars(
+      const P1OptimizationTrace &trace) const
+  {
+    if (!p1_config_.debug_csv_enable || p1_config_.debug_csv_path.empty())
+      return;
+    const auto key = std::make_pair(
+        trace.planning_attempt_id, trace.candidate_id);
+    const auto artifact_it = p1_candidate_artifacts_.find(key);
+    if (artifact_it == p1_candidate_artifacts_.end())
+      return;
+    const auto &artifact = artifact_it->second;
+    const auto append_stream = [](const std::string &path,
+                                  const std::string &header) {
+      std::ifstream existing(path);
+      const bool write_header = !existing.good() ||
+          existing.peek() == std::ifstream::traits_type::eof();
+      existing.close();
+      std::ofstream out(path, std::ios::app);
+      out << std::setprecision(17);
+      if (out.good() && write_header)
+        out << header << '\n';
+      return out;
+    };
+    const auto prefix = [&](std::ostream &out, const uint64_t candidate_id) {
+      out << p1_config_.evidence_schema_version << ','
+          << p1_config_.evidence_run_id << ','
+          << p1_config_.evidence_manifest_path << ','
+          << trace.planning_attempt_id << ',' << candidate_id << ','
+          << trace.snapshot_generation_id << ',' << trace.query_base_time_s;
+    };
+
+    auto control_points = append_stream(
+        p1CandidateControlPointsPath(),
+        "schema_version,run_id,manifest_path,planning_attempt_id,candidate_id,snapshot_generation_id,query_base_time_s,phase,control_point_index,x,y,z,control_points_hash");
+    if (control_points.good())
+    {
+      const auto write_points = [&](const char *phase,
+                                    const Eigen::MatrixXd &points) {
+        const std::string hash = matrixHash(points);
+        for (int column = 0; column < points.cols(); ++column)
+        {
+          prefix(control_points, trace.candidate_id);
+          control_points << ',' << phase << ',' << column << ','
+              << points(0, column) << ',' << points(1, column) << ','
+              << points(2, column) << ',' << hash << '\n';
+        }
+      };
+      write_points("initial", artifact.initial_control_points);
+      write_points("final", artifact.final_control_points);
+    }
+
+    std::ofstream profile = append_stream(
+        p1CandidateProfilePath(),
+        "schema_version,run_id,manifest_path,planning_attempt_id,candidate_id,snapshot_generation_id,query_base_time_s,phase,sample_index,t_s,x,y,z,valid,stale,c_pi,invalid_reason");
+    std::ofstream occupancy = append_stream(
+        p0OccupancyQueryEvidencePath(),
+        "schema_version,run_id,manifest_path,planning_attempt_id,candidate_id,snapshot_generation_id,query_base_time_s,phase,sample_index,query_x,query_y,query_z,query_time_s,query_tau_s,query_reason,temporal_layer,horizon_id,horizon_s,temporal_weight,corner_id,corner_weight,corner_ix,corner_iy,corner_iz,corner_x,corner_y,corner_z,source_flags,c_pi,invalid_reason,occupancy_available,raw_occupied,inflated_occupied,occupancy_ix,occupancy_iy,occupancy_iz,occupancy_x,occupancy_y,occupancy_z,resolution_m,inflation_m,frame_id,cloud_stamp_s,occupancy_generation,occupancy_source");
+    const auto sample_points = [&](const P1CandidateArtifact &source_artifact,
+                                   const uint64_t candidate_id,
+                                   const char *phase,
+                                   const Eigen::MatrixXd &points,
+                                   std::vector<double> *costs,
+                                   std::string *failure,
+                                   const bool emit_rows) {
+      if (!source_artifact.snapshot || points.rows() != 3 || points.cols() <= order_ ||
+          !std::isfinite(source_artifact.interval_s) || source_artifact.interval_s <= 0.0)
+      {
+        if (failure) *failure = "artifact_context_unavailable";
+        return false;
+      }
+      UniformBspline trajectory(points, 3, source_artifact.interval_s);
+      const double duration = trajectory.getTimeSum();
+      bool all_valid = true;
+      if (costs) costs->clear();
+      for (int sample_index = 0;
+           sample_index < kP1CandidateEvidenceSampleCount; ++sample_index)
+      {
+        const double fraction = static_cast<double>(sample_index) /
+            static_cast<double>(kP1CandidateEvidenceSampleCount - 1);
+        const double t_s = duration * fraction;
+        const Eigen::Vector3d point = trajectory.evaluateDeBoorT(t_s);
+        iap::RiskCostSample sample;
+        iap::RiskCostQueryTrace query_trace;
+        const bool valid = source_artifact.snapshot->queryCost(
+            point, source_artifact.query_base_time_s + t_s, &sample, &query_trace) &&
+            sample.valid;
+        all_valid = all_valid && valid;
+        if (costs)
+          costs->push_back(valid ? sample.cost :
+              std::numeric_limits<double>::quiet_NaN());
+        if (emit_rows && profile.good())
+        {
+          prefix(profile, candidate_id);
+          profile << ',' << phase << ',' << sample_index << ',' << t_s << ','
+              << point.x() << ',' << point.y() << ',' << point.z() << ','
+              << (valid ? 1 : 0) << ',' << (sample.stale ? 1 : 0) << ',';
+          if (valid) profile << sample.cost;
+          profile << ',' << (valid ? "none" : sample.reason) << '\n';
+        }
+        if (emit_rows && occupancy.good())
+        {
+          for (const auto &corner : query_trace.corners)
+          {
+            prefix(occupancy, candidate_id);
+            occupancy << ',' << phase << ',' << sample_index << ','
+                << point.x() << ',' << point.y() << ',' << point.z() << ','
+                << source_artifact.query_base_time_s + t_s << ','
+                << query_trace.query_tau_s << ',' << query_trace.reason << ','
+                << corner.temporal_layer << ',' << corner.horizon_id << ','
+                << corner.horizon_s << ',' << corner.temporal_weight << ','
+                << corner.corner_id << ',' << corner.spatial_weight << ','
+                << corner.voxel_index.x() << ',' << corner.voxel_index.y() << ','
+                << corner.voxel_index.z() << ',' << corner.voxel_position.x() << ','
+                << corner.voxel_position.y() << ',' << corner.voxel_position.z() << ','
+                << corner.source_flags << ',';
+            if (std::isfinite(corner.c_pi)) occupancy << corner.c_pi;
+            occupancy << ',' << corner.invalid_reason << ','
+                << (corner.occupancy.available ? 1 : 0) << ','
+                << (corner.occupancy.raw_occupied ? 1 : 0) << ','
+                << (corner.occupancy.inflated_occupied ? 1 : 0) << ','
+                << corner.occupancy.voxel_index.x() << ','
+                << corner.occupancy.voxel_index.y() << ','
+                << corner.occupancy.voxel_index.z() << ','
+                << corner.occupancy.voxel_center.x() << ','
+                << corner.occupancy.voxel_center.y() << ','
+                << corner.occupancy.voxel_center.z() << ','
+                << corner.occupancy.resolution_m << ','
+                << corner.occupancy.inflation_m << ','
+                << corner.occupancy.frame_id << ','
+                << corner.occupancy.cloud_stamp_s << ','
+                << corner.occupancy.occupancy_generation << ','
+                << corner.occupancy.source << '\n';
+          }
+        }
+      }
+      if (!all_valid && failure) *failure = "fixed_support_not_full";
+      return all_valid;
+    };
+    std::vector<double> ignored_costs;
+    std::string ignored_failure;
+    sample_points(artifact, trace.candidate_id, "initial",
+                  artifact.initial_control_points, &ignored_costs,
+                  &ignored_failure, true);
+    sample_points(artifact, trace.candidate_id, "final",
+                  artifact.final_control_points, &ignored_costs,
+                  &ignored_failure, true);
+
+    auto checkpoints = append_stream(
+        p1OptimizerCheckpointPath(),
+        "schema_version,run_id,manifest_path,planning_attempt_id,candidate_id,snapshot_generation_id,query_base_time_s,stage,checkpoint,restart_index,iteration,line_search_count,step,objective,base_objective,raw_p1_objective,normalized_p1_objective,anchor_objective,x_norm,gradient_norm,directional_derivative,solver_result,reason");
+    if (checkpoints.good())
+    {
+      const auto write_checkpoint = [&](const P1OptimizerCheckpoint &item) {
+        prefix(checkpoints, trace.candidate_id);
+        checkpoints << ',' << item.stage << ',' << item.checkpoint << ','
+            << item.restart_index << ',' << item.iteration << ','
+            << item.line_search_count << ',' << item.step << ','
+            << item.objective << ',' << item.base_objective << ','
+            << item.raw_p1_objective << ',' << item.normalized_p1_objective << ','
+            << item.anchor_objective << ',' << item.x_norm << ','
+            << item.gradient_norm << ',' << item.directional_derivative << ','
+            << item.solver_result << ',' << item.reason << '\n';
+      };
+      if (std::isfinite(trace.base_prepass_pre_objective) &&
+          std::isfinite(trace.base_prepass_post_objective))
+      {
+        P1OptimizerCheckpoint base_start;
+        base_start.stage = "base_prepass";
+        base_start.checkpoint = "start";
+        base_start.objective = trace.base_prepass_pre_objective;
+        base_start.base_objective = trace.base_prepass_pre_objective;
+        write_checkpoint(base_start);
+        P1OptimizerCheckpoint base_end;
+        base_end.stage = "base_prepass";
+        base_end.checkpoint = "terminal";
+        base_end.iteration = trace.base_prepass_iteration_count;
+        base_end.objective = trace.base_prepass_post_objective;
+        base_end.base_objective = trace.base_prepass_post_objective;
+        base_end.solver_result = trace.base_prepass_solver_result;
+        base_end.reason = trace.base_prepass_termination_reason;
+        write_checkpoint(base_end);
+      }
+      for (const auto &item : artifact.checkpoints)
+        write_checkpoint(item);
+    }
+
+    if (!trace.selected)
+      return;
+    auto pairwise = append_stream(
+        p1CandidatePairwisePath(),
+        "schema_version,run_id,manifest_path,planning_attempt_id,candidate_id_a,candidate_id_b,snapshot_generation_id,query_base_time_s,phase,control_point_distance,risk_profile_distance,profile_valid,invalid_reason");
+    if (!pairwise.good())
+      return;
+    std::vector<std::pair<std::pair<uint64_t, uint64_t>, const P1CandidateArtifact *>> attempt_artifacts;
+    for (const auto &item : p1_candidate_artifacts_)
+      if (item.first.first == trace.planning_attempt_id)
+        attempt_artifacts.push_back({item.first, &item.second});
+    for (std::size_t a = 0; a < attempt_artifacts.size(); ++a)
+      for (std::size_t b = a; b < attempt_artifacts.size(); ++b)
+        for (const char *phase : {"initial", "final"})
+        {
+          const auto &left = *attempt_artifacts[a].second;
+          const auto &right = *attempt_artifacts[b].second;
+          const Eigen::MatrixXd &left_points = std::string(phase) == "initial"
+              ? left.initial_control_points : left.final_control_points;
+          const Eigen::MatrixXd &right_points = std::string(phase) == "initial"
+              ? right.initial_control_points : right.final_control_points;
+          const bool point_shapes_match =
+              left_points.rows() == right_points.rows() &&
+              left_points.cols() == right_points.cols();
+          std::vector<double> left_costs, right_costs;
+          std::string left_failure, right_failure;
+          const bool left_valid = sample_points(
+              left, attempt_artifacts[a].first.second, phase, left_points,
+              &left_costs, &left_failure, false);
+          const bool right_valid = sample_points(
+              right, attempt_artifacts[b].first.second, phase, right_points,
+              &right_costs, &right_failure, false);
+          double profile_distance = 0.0;
+          if (left_valid && right_valid && left_costs.size() == right_costs.size())
+          {
+            for (std::size_t index = 0; index < left_costs.size(); ++index)
+              profile_distance += std::pow(
+                  left_costs[index] - right_costs[index], 2);
+            profile_distance = std::sqrt(profile_distance /
+                static_cast<double>(std::max<std::size_t>(1, left_costs.size())));
+          }
+          pairwise << p1_config_.evidence_schema_version << ','
+              << p1_config_.evidence_run_id << ','
+              << p1_config_.evidence_manifest_path << ','
+              << trace.planning_attempt_id << ','
+              << attempt_artifacts[a].first.second << ','
+              << attempt_artifacts[b].first.second << ','
+              << trace.snapshot_generation_id << ',' << trace.query_base_time_s << ','
+              << phase << ',';
+          if (point_shapes_match)
+            pairwise << (left_points - right_points).norm();
+          pairwise << ',';
+          if (left_valid && right_valid) pairwise << profile_distance;
+          const bool pair_valid = point_shapes_match && left_valid && right_valid;
+          pairwise << ',' << (pair_valid ? 1 : 0) << ','
+              << (!point_shapes_match ? "control_point_shape_mismatch" :
+                  pair_valid ? "none" :
+                  !left_valid ? left_failure : right_failure) << '\n';
+        }
+  }
+
   void BsplineOptimizer::writeP1OptimizationTrace(
       const P1OptimizationTrace &trace) const
   {
     writeP1CandidateOptimizationCsv(trace);
+    writeP1CandidateSidecars(trace);
   }
 
   void BsplineOptimizer::writeP1ReplacementDecision(
@@ -3082,6 +3471,23 @@ namespace ego_planner
     p1_pre_optimization_traces_[
         {p1_risk_context_.planning_attempt_id, p1_risk_context_.candidate_id}] =
         std::move(trace);
+  }
+
+  void BsplineOptimizer::captureP1PostOptimizationTrajectory(
+      const Eigen::MatrixXd &control_points, const double interval_s)
+  {
+    const auto key = std::make_pair(
+        p1_risk_context_.planning_attempt_id, p1_risk_context_.candidate_id);
+    auto &artifact = p1_candidate_artifacts_[key];
+    const auto pre = p1_pre_optimization_traces_.find(key);
+    artifact.initial_control_points =
+        pre != p1_pre_optimization_traces_.end()
+            ? pre->second.control_points : control_points;
+    artifact.final_control_points = control_points;
+    artifact.interval_s = interval_s;
+    artifact.snapshot = risk_snapshot_;
+    artifact.query_base_time_s = risk_query_base_time_s_;
+    artifact.checkpoints = current_p1_checkpoints_;
   }
 
   void BsplineOptimizer::setP1PreOptimizationTrajectoryForTest(
@@ -3614,6 +4020,9 @@ namespace ego_planner
     if (control_points.rows() != 3 || control_points.cols() <= order_ ||
         !std::isfinite(ts) || ts <= 0.0 || max_iterations <= 0)
       return false;
+    captureP1PreOptimizationTrajectory(control_points, ts);
+    current_p1_checkpoints_.clear();
+    current_p1_restart_index_ = 0;
     setBsplineInterval(ts);
     cps_.resize(static_cast<int>(control_points.cols()));
     cps_.points = control_points;
@@ -3634,6 +4043,22 @@ namespace ego_planner
     double initial_cost = 0.0;
     combineCostRebound(x.data(), initial_gradient.data(), initial_cost,
                        variable_num_);
+    P1OptimizerCheckpoint first_direction;
+    first_direction.stage = p1_base_prepass_active_ ? "base_prepass" : "p1_stage";
+    first_direction.checkpoint = "first_direction";
+    first_direction.objective = initial_cost;
+    first_direction.base_objective = last_optimizer_cost_breakdown_.original_cost;
+    first_direction.raw_p1_objective = last_p1_metrics_.f_integrity;
+    first_direction.normalized_p1_objective =
+        last_optimizer_cost_breakdown_.normalized_integrity_cost;
+    first_direction.anchor_objective = last_optimizer_cost_breakdown_.anchor_cost;
+    first_direction.x_norm = Eigen::Map<const Eigen::VectorXd>(
+        x.data(), variable_num_).norm();
+    first_direction.gradient_norm = Eigen::Map<const Eigen::VectorXd>(
+        initial_gradient.data(), variable_num_).norm();
+    first_direction.directional_derivative =
+        -first_direction.gradient_norm * first_direction.gradient_norm;
+    current_p1_checkpoints_.push_back(std::move(first_direction));
     P1OptimizationTrace trace;
     trace.planning_attempt_id = p1_risk_context_.planning_attempt_id;
     trace.candidate_id = p1_risk_context_.candidate_id;
@@ -3656,12 +4081,16 @@ namespace ego_planner
         last_p1_metrics_.weighted_grad_integrity_norm;
     trace.pre_normalized_weighted_p1_gradient_norm =
         last_p1_metrics_.normalized_weighted_grad_integrity_norm;
+    trace.pre_full_normalized_weighted_p1_gradient_norm =
+        last_p1_metrics_.full_normalized_weighted_grad_integrity_norm;
     trace.pre_normalized_p1_cost =
         last_p1_metrics_.normalized_weighted_f_integrity;
     trace.pre_anchor_cost = last_p1_metrics_.anchor_cost;
     trace.pre_base_p1_cosine = last_p1_metrics_.base_p1_cosine;
     trace.pre_total_gradient_norm = Eigen::Map<const Eigen::VectorXd>(
         initial_gradient.data(), variable_num_).norm();
+    trace.pre_full_total_gradient_norm =
+        last_p1_metrics_.full_total_gradient_norm;
     trace.pre_mean_c_pi = pre_lattice.mean_c_pi;
     trace.pre_max_c_pi = pre_lattice.max_c_pi;
     trace.support_sample_count = pre_lattice.sample_count;
@@ -3711,9 +4140,12 @@ namespace ego_planner
             : last_p1_metrics_.weighted_grad_integrity_norm,
         Eigen::Map<const Eigen::VectorXd>(x.data(), variable_num_).norm());
     suppress_rebound_collision_for_test_ = true;
+    current_p1_last_accepted_x_ = Eigen::Map<const Eigen::VectorXd>(
+        x.data(), variable_num_);
     const int result = lbfgs::lbfgs_optimize(
         variable_num_, x.data(), &final_cost,
-        BsplineOptimizer::costFunctionRebound, nullptr, nullptr, this,
+        BsplineOptimizer::costFunctionRebound, nullptr,
+        BsplineOptimizer::earlyExit, this,
         &parameters);
     suppress_rebound_collision_for_test_ = false;
     iterations = iter_num_;
@@ -3735,11 +4167,15 @@ namespace ego_planner
         last_p1_metrics_.weighted_grad_integrity_norm;
     trace.post_normalized_weighted_p1_gradient_norm =
         last_p1_metrics_.normalized_weighted_grad_integrity_norm;
+    trace.post_full_normalized_weighted_p1_gradient_norm =
+        last_p1_metrics_.full_normalized_weighted_grad_integrity_norm;
     trace.post_normalized_p1_cost =
         last_p1_metrics_.normalized_weighted_f_integrity;
     trace.post_anchor_cost = last_p1_metrics_.anchor_cost;
     trace.post_base_p1_cosine = last_p1_metrics_.base_p1_cosine;
     trace.post_total_gradient_norm = last_rebound_total_gradient_norm_;
+    trace.post_full_total_gradient_norm =
+        last_p1_metrics_.full_total_gradient_norm;
     trace.total_gradient_norm = trace.post_total_gradient_norm;
     trace.displacement_norm = (Eigen::Map<const Eigen::VectorXd>(
         x.data(), variable_num_) - Eigen::Map<const Eigen::VectorXd>(
@@ -3747,6 +4183,22 @@ namespace ego_planner
     trace.solver_result = result;
     trace.iteration_count = iterations;
     trace.termination_reason = lbfgs::lbfgs_strerror(result);
+    P1OptimizerCheckpoint terminal;
+    terminal.stage = p1_base_prepass_active_ ? "base_prepass" : "p1_stage";
+    terminal.checkpoint = "terminal";
+    terminal.iteration = iterations;
+    terminal.objective = final_cost;
+    terminal.base_objective = last_optimizer_cost_breakdown_.original_cost;
+    terminal.raw_p1_objective = last_p1_metrics_.f_integrity;
+    terminal.normalized_p1_objective =
+        last_optimizer_cost_breakdown_.normalized_integrity_cost;
+    terminal.anchor_objective = last_optimizer_cost_breakdown_.anchor_cost;
+    terminal.x_norm = Eigen::Map<const Eigen::VectorXd>(
+        x.data(), variable_num_).norm();
+    terminal.gradient_norm = last_rebound_total_gradient_norm_;
+    terminal.solver_result = result;
+    terminal.reason = trace.termination_reason;
+    current_p1_checkpoints_.push_back(std::move(terminal));
     memcpy(control_points.data() + 3 * order_, x.data(),
            variable_num_ * sizeof(double));
     const auto post_lattice = evaluateP1CandidateLattice(
@@ -3790,6 +4242,7 @@ namespace ego_planner
     trace.selection_reason = trace.optimization_success
         ? "deterministic_single_candidate" : "optimizer_failure";
     last_p1_optimization_trace_ = trace;
+    captureP1PostOptimizationTrajectory(control_points, ts);
     return std::isfinite(final_cost) &&
         (result == lbfgs::LBFGS_CONVERGENCE ||
          result == lbfgs::LBFGSERR_MAXIMUMITERATION ||
@@ -3929,6 +4382,10 @@ namespace ego_planner
               std::abs(p1_config_.lambda_integrity *
                        p1_normalized_stage_.scale) *
               metrics.grad_norm_integrity;
+          metrics.full_normalized_weighted_grad_integrity_norm =
+              std::abs(p1_config_.lambda_integrity *
+                       p1_normalized_stage_.scale) *
+              metrics.full_grad_norm_integrity;
           last_optimizer_cost_breakdown_.normalized_integrity_cost = normalized_p1;
           last_optimizer_cost_breakdown_.anchor_cost = anchor;
           last_optimizer_cost_breakdown_.integrity_cost = normalized_p1 + anchor;
@@ -3940,6 +4397,9 @@ namespace ego_planner
           metrics.normalized_weighted_f_integrity = metrics.weighted_f_integrity;
           metrics.normalized_weighted_grad_integrity_norm =
               metrics.weighted_grad_integrity_norm;
+          metrics.full_normalized_weighted_grad_integrity_norm =
+              std::abs(p1_config_.lambda_integrity) *
+              metrics.full_grad_norm_integrity;
           last_optimizer_cost_breakdown_.normalized_integrity_cost =
               metrics.weighted_f_integrity;
           last_optimizer_cost_breakdown_.integrity_cost =
@@ -3948,8 +4408,10 @@ namespace ego_planner
       }
 
       last_p1_metrics_ = metrics;
-      writeP1DebugCsv(last_p1_metrics_);
     }
+    last_p1_metrics_.full_total_gradient_norm = grad_3D.norm();
+    if (p1_should_evaluate)
+      writeP1DebugCsv(last_p1_metrics_);
     last_optimizer_cost_breakdown_.total_cost = f_combine;
     memcpy(grad, grad_3D.data() + 3 * order_, n * sizeof(grad[0]));
   }
