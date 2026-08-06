@@ -1,5 +1,11 @@
 # Traceability Matrix (IAP)
 
+## 2026-08-06 P1 LSE formal peak counterexample
+
+| Req ID | Evidence | Verification | Status |
+|---|---|---|---|
+| IAP-RQ-320 / IAP-RQ-400 / IAP-RQ-410 | Fresh pair `2ae433176f7842638fa0cd0767e3d64e` / `39a598c00b1d4944ab7adc3a4875d0f3` at clean `559e134`; sole analysis `f77a2480fc304409a6637470a9d4b44d`; common terminal arc `0.2680614616 m`; P1-2 mean/max `0.4187024725`/`0.4245587735` versus P1-1 `0.4204437873`/`0.4244592145` | Both sole v4 preflights PASS; 39/39 nonempty formal figures; `warnings=[]`, `inconclusive=[]`; all independent hard gates PASS, while `risk_profile_reduced` and its dependent cause-exclusion gate FAIL solely because max increased by `9.9559e-05` | **FAIL; retain pair, implement smooth CVaR, P1-3 prohibited** |
+
 ## 2026-08-06 P1 recorded-profile formal-entry smoke
 
 | Req ID | Evidence | Verification | Status |
