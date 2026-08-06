@@ -195,4 +195,52 @@ TEST(P1CandidateSelectionTest,
   EXPECT_TRUE(decisions[1].replace_published_trajectory);
 }
 
+TEST(P1CandidateSelectionTest,
+     RejectsRefinementThatRegressesSelectedSeedMean) {
+  const auto decision = ego_planner::decideP1RefinementRisk({
+      true,
+      0.4124807459, 0.4268373904,
+      0.4145949651, 0.4232666943,
+      true,
+      0.4130000000, 0.4270000000});
+  EXPECT_FALSE(decision.accept);
+  EXPECT_EQ(decision.reason, "p1_refinement_self_risk_regression");
+}
+
+TEST(P1CandidateSelectionTest,
+     RejectsRefinementThatNoLongerStrictlyReplacesIncumbent) {
+  const auto decision = ego_planner::decideP1RefinementRisk({
+      true,
+      0.42, 0.44,
+      0.40, 0.43,
+      true,
+      0.40, 0.43});
+  EXPECT_FALSE(decision.accept);
+  EXPECT_EQ(decision.reason,
+            "p1_refinement_replacement_risk_regression");
+}
+
+TEST(P1CandidateSelectionTest,
+     AcceptsFullSupportRefinementThatPreservesBothComparisons) {
+  const auto decision = ego_planner::decideP1RefinementRisk({
+      true,
+      0.42, 0.44,
+      0.40, 0.43,
+      true,
+      0.41, 0.43});
+  EXPECT_TRUE(decision.accept);
+  EXPECT_EQ(decision.reason, "p1_refined_risk_preference_improved");
+}
+
+TEST(P1CandidateSelectionTest, RejectsRefinementWithoutFullSupport) {
+  const auto decision = ego_planner::decideP1RefinementRisk({
+      false,
+      0.42, 0.44,
+      0.40, 0.43,
+      false,
+      0.0, 0.0});
+  EXPECT_FALSE(decision.accept);
+  EXPECT_EQ(decision.reason, "p1_refinement_fixed_support_not_full");
+}
+
 }  // namespace

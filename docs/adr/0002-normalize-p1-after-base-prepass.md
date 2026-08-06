@@ -26,6 +26,8 @@ An incumbent replacement comparison uses the same immutable snapshot and query b
 
 Ranking remains a soft preference inside the existing mean/max publication policy. Candidates that would satisfy incumbent non-regression rank before candidates that would necessarily be rejected. Among those publishable candidates, the deterministic order is fixed-200 mean, fixed-200 max, normalized merit, then candidate ID. This makes selection use the same risk statistics as acceptance without changing the differentiable scalar merit used within each optimizer. If none can replace the incumbent, the optimizer still records exactly one selected winner and rejects publication as before.
 
+STEP3 feasibility refinement happens after optimizer selection and can change both control points and knot interval. Before publication, the refined trajectory is therefore evaluated again on the candidate attempt's immutable snapshot and fixed 200-sample lattice. It must retain mean/max non-regression with at least one strict decrease relative to the selected candidate seed and, when an incumbent exists, relative to that incumbent. Failure rejects this publication and retains the incumbent; startup records an explicit `no_publish_no_incumbent` disposition. This is a publication-consistency check for the existing soft preference, not an optimizer constraint or P5 gate.
+
 ## Rejected alternatives
 
 - A global constant multiplier is scene- and attempt-scale dependent.
@@ -34,3 +36,5 @@ Ranking remains a soft preference inside the existing mean/max publication polic
 ## Consequences
 
 Evidence records active and full gradient norms separately, the frozen scale/budget constants, base-prepass termination, normalized P1 and anchor components, and the unchanged raw/lambda-weighted quantities. The legacy one-stage test-only path remains available solely as a deterministic counterexample.
+
+Candidate rows are emitted only after STEP3 reaches its terminal disposition. A rejected refinement keeps the optimizer metrics intact in the candidate table, records the actual refined mean/max in the replacement decision, and writes the refined candidate plus the retained incumbent (or candidate-only startup failure) to the disposition profile. Verifiers and analyzers compare the authoritative accepted profile against the same seed/incumbent rule.

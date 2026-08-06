@@ -139,6 +139,9 @@ def main():
         if not profiles:
             errors.append("retained optimizer selection has no comparison profile")
         for candidate in retained:
+            incumbent_available = truthy(candidate.get("incumbent_available"))
+            expected_source = ("retained_incumbent" if incumbent_available
+                               else "no_publish_no_incumbent")
             matching_decisions = [r for r in decisions
                                   if r.get("planning_attempt_id") == candidate.get("planning_attempt_id")
                                   and r.get("optimizer_selected_candidate_id") == candidate.get("candidate_id")
@@ -148,9 +151,10 @@ def main():
                 errors.append("retained optimizer selection does not have one matching replacement decision")
                 continue
             decision = matching_decisions[0]
-            if truthy(decision.get("replacement_accepted")) or decision.get("final_trajectory_source") != "retained_incumbent":
+            if truthy(decision.get("replacement_accepted")) or decision.get("final_trajectory_source") != expected_source:
                 errors.append("replacement decision does not identify retained incumbent final source")
-            expected_publish_identity = f"incumbent:{decision.get('incumbent_trajectory_id', '')}"
+            expected_publish_identity = (f"incumbent:{decision.get('incumbent_trajectory_id', '')}"
+                                         if incumbent_available else "none")
             if decision.get("publish_identity") != expected_publish_identity:
                 errors.append("retained replacement decision does not publish the incumbent identity")
             matching = [r for r in profiles
@@ -160,9 +164,9 @@ def main():
                         and r.get("query_base_time_s") == decision.get("query_base_time_s")]
             candidate_samples = [r for r in matching if r.get("trajectory_role") == "optimizer_selected_candidate"]
             incumbent_samples = [r for r in matching if r.get("trajectory_role") == "retained_incumbent"]
-            if len(candidate_samples) != 200 or len(incumbent_samples) != 200:
+            if len(candidate_samples) != 200 or len(incumbent_samples) != (200 if incumbent_available else 0):
                 errors.append("retained decision does not have paired 200-sample profiles")
-            if any(r.get("final_trajectory_source") != "retained_incumbent" for r in matching):
+            if any(r.get("final_trajectory_source") != expected_source for r in matching):
                 errors.append("retained comparison profile does not identify incumbent final source")
             rejected_tuple = (candidate.get("planning_attempt_id"), candidate.get("candidate_id"),
                               candidate.get("snapshot_generation_id"), candidate.get("query_base_time_s"))

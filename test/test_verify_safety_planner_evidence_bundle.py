@@ -116,7 +116,13 @@ class EvidenceBundlePreflightTest(unittest.TestCase):
                 {**common, "planning_attempt_id": "1", "candidate_id": "1",
                  "phase": "initial", "sample_index": "0", "corner_id": "0"}
             ],
-            "planner_p1_accepted_trajectory_risk_profile.csv": [{**common, "sample_index": str(i)} for i in range(200)],
+            "planner_p1_accepted_trajectory_risk_profile.csv": [
+                {**common, "profile_seq": "1", "sample_index": str(i),
+                 "planning_attempt_id": "1", "candidate_id": "1",
+                 "snapshot_generation_id": "4", "c_pi": "0.3",
+                 "valid": "1", "stale": "0"}
+                for i in range(200)
+            ],
             "planner_p1_accepted_trajectory_risk_profile_context.csv": [{**common, "profile_seq": "1"}],
             "planner_p1_planning_context_timeline.csv": [{**common, "stage": "publish"}],
         }
@@ -160,6 +166,29 @@ class EvidenceBundlePreflightTest(unittest.TestCase):
             result = preflight.validate_bundle(export, bag, metrics_only=False, lambda_value=0.00001)
         self.assertFalse(result["passed"])
         self.assertIn("candidate lacks full valid fixed-lattice support", result["errors"])
+
+    def test_rejects_authoritative_profile_that_regresses_selected_seed(self):
+        root, export, bag = self.make_bundle()
+        self.addCleanup(root.cleanup)
+        payload = {"schema_version": preflight.SCHEMA, "run_id": "run-1",
+                   "manifest_path": str(export / "test_planner_manifest.json"),
+                   "export_dir": str(export), "bag_path": str(bag)}
+        profile = export / "planner_p1_accepted_trajectory_risk_profile.csv"
+        with profile.open(newline="") as handle:
+            rows = list(csv.DictReader(handle))
+        for row in rows:
+            row["c_pi"] = "0.55"
+        with profile.open("w", newline="") as handle:
+            writer = csv.DictWriter(handle, fieldnames=sorted(rows[0]))
+            writer.writeheader(); writer.writerows(rows)
+        with mock.patch.object(
+                preflight, "read_bag_provenance", return_value=([payload], "")):
+            result = preflight.validate_bundle(
+                export, bag, metrics_only=False, lambda_value=0.00001)
+        self.assertFalse(result["passed"])
+        self.assertIn(
+            "authoritative accepted profile regresses selected P1 seed",
+            result["errors"])
 
     def test_metrics_only_candidates_do_not_require_replacement_closure(self):
         root, export, bag = self.make_bundle()

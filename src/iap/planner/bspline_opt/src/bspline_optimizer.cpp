@@ -3396,7 +3396,7 @@ namespace ego_planner
   bool BsplineOptimizer::writeP1CandidateRetainedProfile(
       UniformBspline candidate, const uint64_t planning_attempt_id,
       const uint64_t candidate_id,
-      UniformBspline incumbent, const uint64_t incumbent_trajectory_id,
+      const UniformBspline *incumbent, const uint64_t incumbent_trajectory_id,
       const std::string &final_trajectory_source,
       const double incumbent_start_t_s) const
   {
@@ -3444,10 +3444,12 @@ namespace ego_planner
       }
       return true;
     };
-    return write_trajectory(
-               candidate, "optimizer_selected_candidate", candidate_id, 0.0) &&
-        write_trajectory(incumbent, "retained_incumbent",
-                         incumbent_trajectory_id, incumbent_start_t_s);
+    if (!write_trajectory(
+            candidate, "optimizer_selected_candidate", candidate_id, 0.0))
+      return false;
+    return !incumbent || write_trajectory(
+        *incumbent, "retained_incumbent", incumbent_trajectory_id,
+        incumbent_start_t_s);
   }
 
   std::string BsplineOptimizer::p1AcceptedTrajectoryRiskProfilePath() const

@@ -496,6 +496,19 @@ class P1_2AnalyzerTest(unittest.TestCase):
         )
         self.assertTrue(evidence["passed"])
 
+    def test_candidate_trace_rejects_refined_accepted_profile_risk_regression(self):
+        profile_summary = analyzer.summarize_p1_accepted_profile_rows(
+            accepted_profile_rows(0.0, c_pi=5.5)
+        )
+        evidence = analyzer.validate_p1_candidate_optimization_evidence(
+            [candidate_optimization_row()], {"valid": True},
+            [{"stage": "optimizer_start", "snapshot_generation_id": 4,
+              "planning_attempt_id": 11, "candidate_id": 7}],
+            profile_summary,
+        )
+        self.assertFalse(evidence["accepted_profile_preference_preserved"])
+        self.assertFalse(evidence["passed"])
+
     def test_candidate_trace_fails_closed_without_one_selected_success_or_full_support(self):
         profile_summary = analyzer.summarize_p1_accepted_profile_rows(
             accepted_profile_rows(0.0)
@@ -543,7 +556,8 @@ class P1_2AnalyzerTest(unittest.TestCase):
             profile_summary = analyzer.summarize_p1_accepted_profile_rows(accepted)
             profile_summary["path"] = str(directory / "planner_p1_accepted_trajectory_risk_profile.csv")
             rejected = candidate_optimization_row(replacement_accepted=0,
-                                                   replacement_reason="risk_regression")
+                                                   replacement_reason="risk_regression",
+                                                   incumbent_available=1)
             published = candidate_optimization_row(snapshot_generation_id=5,
                                                     planning_attempt_id=12, candidate_id=99)
             decision = directory / "planner_p1_replacement_decision.csv"
@@ -576,6 +590,42 @@ class P1_2AnalyzerTest(unittest.TestCase):
                 timeline, profile_summary)
         self.assertTrue(evidence["retained_artifacts_reconciled"])
         self.assertTrue(evidence["accepted_profile_is_not_rejected_candidate"])
+        self.assertTrue(evidence["passed"])
+
+    def test_candidate_trace_closes_rejected_startup_without_fabricated_incumbent(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            directory = Path(tmp)
+            rejected = candidate_optimization_row(
+                replacement_accepted=0,
+                replacement_reason="p1_refinement_self_risk_regression",
+                incumbent_available=0)
+            decision = directory / "planner_p1_replacement_decision.csv"
+            decision.write_text(
+                "snapshot_generation_id,planning_attempt_id,optimizer_selected_candidate_id,replacement_accepted,final_trajectory_source\n"
+                "4,11,7,0,no_publish_no_incumbent\n")
+            retained = directory / "planner_p1_candidate_retained_profile.csv"
+            rows = [
+                {"snapshot_generation_id": "4", "planning_attempt_id": "11",
+                 "candidate_id": "7", "trajectory_role": "optimizer_selected_candidate",
+                 "final_trajectory_source": "no_publish_no_incumbent"}
+                for _ in range(200)
+            ]
+            with retained.open("w", newline="") as output:
+                writer = csv.DictWriter(output, fieldnames=sorted(rows[0]))
+                writer.writeheader(); writer.writerows(rows)
+            timeline = [
+                {"stage": "optimizer_start", "snapshot_generation_id": 4,
+                 "planning_attempt_id": 11, "candidate_id": 7},
+                {"stage": "replacement", "outcome": "rejected",
+                 "snapshot_generation_id": 4, "planning_attempt_id": 11,
+                 "candidate_id": 7},
+            ]
+            evidence = analyzer.validate_p1_candidate_optimization_evidence(
+                [rejected],
+                {"valid": True,
+                 "path": str(directory / "planner_p1_candidate_optimization.csv")},
+                timeline, None)
+        self.assertTrue(evidence["retained_artifacts_reconciled"])
         self.assertTrue(evidence["passed"])
 
     def test_candidate_csv_requires_nonempty_termination_reason(self):

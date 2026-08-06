@@ -298,15 +298,19 @@ def validate_bundle(export_dir, bag_dir, *, metrics_only, lambda_value):
         errors.extend(profile_errors)
         for row in rejected:
             attempt, candidate_id = row.get("planning_attempt_id"), row.get("candidate_id")
+            incumbent_available = truthy(row.get("incumbent_available"))
+            expected_source = ("retained_incumbent" if incumbent_available
+                               else "no_publish_no_incumbent")
             decisions = [item for item in decision_rows
                 if item.get("planning_attempt_id") == attempt and
                 item.get("optimizer_selected_candidate_id") == candidate_id and
                 not truthy(item.get("replacement_accepted")) and
-                item.get("final_trajectory_source") == "retained_incumbent"]
+                item.get("final_trajectory_source") == expected_source]
             compared = [item for item in profile_rows
                 if item.get("planning_attempt_id") == attempt and item.get("candidate_id") == candidate_id]
+            expected_incumbent_samples = 200 if incumbent_available else 0
             if len(decisions) != 1 or sum(item.get("trajectory_role") == "optimizer_selected_candidate" for item in compared) != 200 or \
-                    sum(item.get("trajectory_role") == "retained_incumbent" for item in compared) != 200:
+                    sum(item.get("trajectory_role") == "retained_incumbent" for item in compared) != expected_incumbent_samples:
                 errors.append(f"rejected candidate {attempt}/{candidate_id} lacks retained-incumbent closure")
     debug = csv_rows.get("planner_p1_integrity_cost_debug.csv", [])
     if not metrics_only and not any(truthy(row.get("applied_to_objective")) for row in debug):
@@ -314,6 +318,48 @@ def validate_bundle(export_dir, bag_dir, *, metrics_only, lambda_value):
     profile = csv_rows.get("planner_p1_accepted_trajectory_risk_profile.csv", [])
     if len(profile) < 200:
         errors.append("accepted profile has fewer than 200 samples")
+    elif not metrics_only:
+        sequence_values = [float(row.get("profile_seq"))
+                           for row in profile if finite(row.get("profile_seq"))]
+        latest_sequence = max(sequence_values) if sequence_values else None
+        accepted_rows = [row for row in profile
+                         if latest_sequence is not None and
+                         finite(row.get("profile_seq")) and
+                         float(row["profile_seq"]) == latest_sequence]
+        accepted_values = [float(row["c_pi"]) for row in accepted_rows
+                           if truthy(row.get("valid")) and
+                           not truthy(row.get("stale")) and
+                           finite(row.get("c_pi"))]
+        accepted_identity = {
+            (row.get("snapshot_generation_id"), row.get("planning_attempt_id"),
+             row.get("candidate_id")) for row in accepted_rows
+        }
+        matching_winners = [row for row in candidate
+            if truthy(row.get("selected")) and
+            (row.get("snapshot_generation_id"), row.get("planning_attempt_id"),
+             row.get("candidate_id")) in accepted_identity]
+        if len(accepted_rows) != 200 or len(accepted_values) != 200 or \
+                len(accepted_identity) != 1 or len(matching_winners) != 1:
+            errors.append("authoritative accepted profile does not bind one selected fixed-200 candidate")
+        else:
+            winner = matching_winners[0]
+            accepted_mean = sum(accepted_values) / len(accepted_values)
+            accepted_max = max(accepted_values)
+            seed_mean = float(winner["pre_mean_c_pi"])
+            seed_max = float(winner["pre_max_c_pi"])
+            if accepted_mean > seed_mean + 1e-12 or \
+                    accepted_max > seed_max + 1e-12 or \
+                    not (accepted_mean < seed_mean - 1e-12 or
+                         accepted_max < seed_max - 1e-12):
+                errors.append("authoritative accepted profile regresses selected P1 seed")
+            if truthy(winner.get("incumbent_available")):
+                incumbent_mean = float(winner["incumbent_mean_c_pi"])
+                incumbent_max = float(winner["incumbent_max_c_pi"])
+                if accepted_mean > incumbent_mean + 1e-12 or \
+                        accepted_max > incumbent_max + 1e-12 or \
+                        not (accepted_mean < incumbent_mean - 1e-12 or
+                             accepted_max < incumbent_max - 1e-12):
+                    errors.append("authoritative accepted profile no longer replaces incumbent")
 
     metadata_path = bag_dir / "metadata.yaml"
     if not metadata_path.is_file() or metadata_path.stat().st_size == 0:

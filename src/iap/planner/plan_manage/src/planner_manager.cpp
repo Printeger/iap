@@ -964,6 +964,7 @@ namespace ego_planner
     /*** STEP 2: OPTIMIZE ***/
     bool flag_step_1_success = false;
     bool p1_preference_rejected = false;
+    bool p1_candidate_traces_deferred = false;
     uint64_t selected_p1_candidate_id = 1;
     vector<vector<Eigen::Vector3d>> vis_trajs;
     std::vector<BsplineOptimizer::P1OptimizationTrace> p1_candidate_traces;
@@ -1320,7 +1321,7 @@ namespace ego_planner
                     ctrl_pts, 3, ts);
                 bspline_optimizer_->writeP1CandidateRetainedProfile(
                     selected_candidate, trace.planning_attempt_id, trace.candidate_id,
-                    local_data_.position_traj_, local_data_.traj_id_,
+                    &local_data_.position_traj_, local_data_.traj_id_,
                     "retained_incumbent", incumbent_start_t_s);
                 bspline_optimizer_->writeP1ReplacementDecision(
                     trace, local_data_.traj_id_, local_data_.start_time_.seconds(),
@@ -1342,7 +1343,15 @@ namespace ego_planner
                 std::to_string(selected_p1_candidate_id);
             trace.fanout.replacement_acceptance =
                 decision.replace_published_trajectory ? "accepted" : "rejected";
-            bspline_optimizer_->writeP1OptimizationTrace(trace);
+          }
+          if (p1_preference_rejected)
+          {
+            for (const auto &trace : p1_candidate_traces)
+              bspline_optimizer_->writeP1OptimizationTrace(trace);
+          }
+          else
+          {
+            p1_candidate_traces_deferred = true;
           }
         }
       }
@@ -1513,7 +1522,7 @@ namespace ego_planner
         bspline_optimizer_->writeP1CandidateRetainedProfile(
             UniformBspline(ctrl_pts, 3, ts), trace.planning_attempt_id,
             trace.candidate_id,
-            local_data_.position_traj_, local_data_.traj_id_,
+            &local_data_.position_traj_, local_data_.traj_id_,
             "retained_incumbent", incumbent_start_t_s);
         bspline_optimizer_->writeP1ReplacementDecision(
             trace, local_data_.traj_id_, local_data_.start_time_.seconds(),
@@ -1528,7 +1537,13 @@ namespace ego_planner
       trace.fanout.replacement_acceptance =
           decision.replace_published_trajectory ? "accepted" : "rejected";
       if (write_p1_candidate_trace)
-        bspline_optimizer_->writeP1OptimizationTrace(trace);
+      {
+        p1_candidate_traces.push_back(trace);
+        if (p1_preference_rejected || !flag_step_1_success)
+          bspline_optimizer_->writeP1OptimizationTrace(trace);
+        else
+          p1_candidate_traces_deferred = true;
+      }
       bspline_optimizer_->clearRiskSnapshot();
       if (safety_viz_)
       {
@@ -1597,6 +1612,104 @@ namespace ego_planner
 
     // t_refine = ros::Time::now() - t_start;
     t_refine = rclcpp::Clock().now() - t_start;
+
+    // STEP3 is allowed to change both the control points and the interval.
+    // Close the P1 publication decision over that actual final trajectory,
+    // on the same immutable snapshot and fixed 200-sample lattice.  This is
+    // a soft-preference publication check; collision/feasibility/P5 remain
+    // independently authoritative.
+    if (p1_candidate_traces_deferred)
+    {
+      set_p1_context(selected_p1_candidate_id);
+      auto selected_trace = std::find_if(
+          p1_candidate_traces.begin(), p1_candidate_traces.end(),
+          [selected_p1_candidate_id](const auto &trace) {
+            return trace.selected &&
+                trace.candidate_id == selected_p1_candidate_id;
+          });
+      if (selected_trace == p1_candidate_traces.end())
+      {
+        last_p1_rejection_reason_ = "p1_refinement_selected_trace_missing";
+        last_p1_rejection_requires_new_generation_ = true;
+        appendPlanningRiskContextTimeline(
+            "replacement", plannerNow().seconds(), "rejected",
+            last_p1_rejection_reason_, "existing_trajectory");
+        for (const auto &trace : p1_candidate_traces)
+          bspline_optimizer_->writeP1OptimizationTrace(trace);
+        bspline_optimizer_->clearRiskSnapshot();
+        continous_failures_count_++;
+        return false;
+      }
+
+      const auto refined_summary =
+          bspline_optimizer_->evaluateP1FixedLatticeRisk(pos);
+      const auto refinement_decision = decideP1RefinementRisk({
+          refined_summary.full_support,
+          selected_trace->pre_mean_c_pi,
+          selected_trace->pre_max_c_pi,
+          refined_summary.mean_c_pi,
+          refined_summary.max_c_pi,
+          selected_trace->incumbent_available,
+          selected_trace->incumbent_mean_c_pi,
+          selected_trace->incumbent_max_c_pi});
+      selected_trace->replacement_accepted = refinement_decision.accept;
+      selected_trace->replacement_reason = refinement_decision.reason;
+      selected_trace->fanout.replacement_acceptance =
+          refinement_decision.accept ? "accepted" : "rejected";
+
+      if (!refinement_decision.accept)
+      {
+        last_p1_rejection_reason_ = refinement_decision.reason;
+        last_p1_rejection_requires_new_generation_ = true;
+        appendPlanningRiskContextTimeline(
+            "replacement", plannerNow().seconds(), "rejected",
+            refinement_decision.reason,
+            has_existing_trajectory ? "existing_trajectory"
+                                    : "no_publish_no_incumbent");
+        if (has_existing_trajectory)
+        {
+          bspline_optimizer_->writeP1CandidateRetainedProfile(
+              pos, selected_trace->planning_attempt_id,
+              selected_trace->candidate_id,
+              &local_data_.position_traj_, local_data_.traj_id_,
+              "retained_incumbent", incumbent_start_t_s);
+          // The decision artifact names the actual refined trajectory risk;
+          // optimizer candidate metrics remain unchanged in the candidate
+          // table and are recoverable from its profile sidecar.
+          auto final_decision_trace = *selected_trace;
+          final_decision_trace.post_mean_c_pi = refined_summary.mean_c_pi;
+          final_decision_trace.post_max_c_pi = refined_summary.max_c_pi;
+          bspline_optimizer_->writeP1ReplacementDecision(
+              final_decision_trace, local_data_.traj_id_,
+              local_data_.start_time_.seconds(), "retained_incumbent",
+              "incumbent:" + std::to_string(local_data_.traj_id_));
+        }
+        else
+        {
+          bspline_optimizer_->writeP1CandidateRetainedProfile(
+              pos, selected_trace->planning_attempt_id,
+              selected_trace->candidate_id, nullptr, 0,
+              "no_publish_no_incumbent", 0.0);
+          auto final_decision_trace = *selected_trace;
+          final_decision_trace.post_mean_c_pi = refined_summary.mean_c_pi;
+          final_decision_trace.post_max_c_pi = refined_summary.max_c_pi;
+          bspline_optimizer_->writeP1ReplacementDecision(
+              final_decision_trace, 0, 0.0, "no_publish_no_incumbent",
+              "none");
+        }
+        for (const auto &trace : p1_candidate_traces)
+          bspline_optimizer_->writeP1OptimizationTrace(trace);
+        bspline_optimizer_->clearRiskSnapshot();
+        continous_failures_count_++;
+        return false;
+      }
+
+      appendPlanningRiskContextTimeline(
+          "replacement", plannerNow().seconds(), "accepted",
+          refinement_decision.reason, "refined_candidate");
+      for (const auto &trace : p1_candidate_traces)
+        bspline_optimizer_->writeP1OptimizationTrace(trace);
+    }
 
     // Bind the final candidate to a newly acquired immutable context tuple,
     // then fail closed before it can mutate LocalTrajData or profile evidence.

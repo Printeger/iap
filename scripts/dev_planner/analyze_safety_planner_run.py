@@ -6557,6 +6557,7 @@ def validate_p1_candidate_optimization_evidence(
             "checked": True, "schema_finite": False, "candidate_count_ok": False,
             "selected_success_per_attempt": False, "timeline_reconciled": False,
             "accepted_profile_reconciled": False,
+            "accepted_profile_preference_preserved": False,
             "replacement_rejections_reconciled": False, "passed": False,
             "attempts": {}, "optimizer_identities": [],
         }
@@ -6642,6 +6643,39 @@ def validate_p1_candidate_optimization_evidence(
     accepted_profile_reconciled = not accepted_profile or (
         all(profile_tuple) and profile_tuple in selected_identities
     )
+    accepted_profile_preference_preserved = not accepted_profile
+    if accepted_profile and accepted_profile_reconciled:
+        matching_selected = [
+            row for row in selected_rows
+            if (str(row.get("snapshot_generation_id", "")),
+                str(row.get("planning_attempt_id", "")),
+                str(row.get("candidate_id", ""))) == profile_tuple
+        ]
+        accepted_mean = finite_float(accepted_profile.get("c_pi_mean"))
+        accepted_max = finite_float(accepted_profile.get("c_pi_max"))
+        if len(matching_selected) == 1 and accepted_mean is not None and accepted_max is not None:
+            selected = matching_selected[0]
+            seed_mean = finite_float(selected.get("pre_mean_c_pi"))
+            seed_max = finite_float(selected.get("pre_max_c_pi"))
+            self_non_regression = (
+                seed_mean is not None and seed_max is not None
+                and accepted_mean <= seed_mean + 1.0e-12
+                and accepted_max <= seed_max + 1.0e-12
+                and (accepted_mean < seed_mean - 1.0e-12
+                     or accepted_max < seed_max - 1.0e-12)
+            )
+            incumbent_ok = True
+            if explicit_csv_bool(selected.get("incumbent_available")) is True:
+                incumbent_mean = finite_float(selected.get("incumbent_mean_c_pi"))
+                incumbent_max = finite_float(selected.get("incumbent_max_c_pi"))
+                incumbent_ok = (
+                    incumbent_mean is not None and incumbent_max is not None
+                    and accepted_mean <= incumbent_mean + 1.0e-12
+                    and accepted_max <= incumbent_max + 1.0e-12
+                    and (accepted_mean < incumbent_mean - 1.0e-12
+                         or accepted_max < incumbent_max - 1.0e-12)
+                )
+            accepted_profile_preference_preserved = self_non_regression and incumbent_ok
     # A selected optimizer row is deliberately retained even when its result
     # is not allowed to replace a healthier published trajectory.  That row
     # must be paired with an explicit lifecycle rejection; otherwise an
@@ -6686,12 +6720,20 @@ def validate_p1_candidate_optimization_evidence(
         decision_rows, retained_rows = [], []
     retained_artifacts_reconciled = True
     for generation, attempt, candidate in rejected_selected_identities:
+        selected_row = next((row for row in selected_rows
+            if str(row.get("snapshot_generation_id", "")) == generation and
+            str(row.get("planning_attempt_id", "")) == attempt and
+            str(row.get("candidate_id", "")) == candidate), {})
+        incumbent_available = explicit_csv_bool(
+            selected_row.get("incumbent_available")) is True
+        expected_source = ("retained_incumbent" if incumbent_available
+                           else "no_publish_no_incumbent")
         matching_decisions = [row for row in decision_rows
             if str(row.get("snapshot_generation_id", "")) == generation and
             str(row.get("planning_attempt_id", "")) == attempt and
             str(row.get("optimizer_selected_candidate_id", "")) == candidate and
             explicit_csv_bool(row.get("replacement_accepted")) is False and
-            row.get("final_trajectory_source") == "retained_incumbent"]
+            row.get("final_trajectory_source") == expected_source]
         matching_profiles = [row for row in retained_rows
             if str(row.get("snapshot_generation_id", "")) == generation and
             str(row.get("planning_attempt_id", "")) == attempt and
@@ -6702,8 +6744,8 @@ def validate_p1_candidate_optimization_evidence(
             if row.get("trajectory_role") == "retained_incumbent"]
         retained_artifacts_reconciled = retained_artifacts_reconciled and (
             len(matching_decisions) == 1 and len(candidate_profile) == 200 and
-            len(incumbent_profile) == 200 and all(
-                row.get("final_trajectory_source") == "retained_incumbent"
+            len(incumbent_profile) == (200 if incumbent_available else 0) and all(
+                row.get("final_trajectory_source") == expected_source
                 for row in matching_profiles))
     accepted_profile_is_not_rejected_candidate = not rejected_selected_identities or (
         bool(profile_tuple) and all(
@@ -6767,6 +6809,7 @@ def validate_p1_candidate_optimization_evidence(
         "distinguishable_final_candidates": distinguishable_final_candidates,
         "timeline_reconciled": timeline_reconciled,
         "accepted_profile_reconciled": accepted_profile_reconciled,
+        "accepted_profile_preference_preserved": accepted_profile_preference_preserved,
         "replacement_rejections_reconciled": replacement_rejections_reconciled,
         "retained_artifacts_reconciled": retained_artifacts_reconciled,
         "accepted_profile_is_not_rejected_candidate": accepted_profile_is_not_rejected_candidate,
@@ -6780,6 +6823,7 @@ def validate_p1_candidate_optimization_evidence(
                                                         sorted(replacement_rejection_timeline_identities)],
         "passed": schema_finite and support_ok and candidate_count_ok and
         selected_success_per_attempt and timeline_reconciled and accepted_profile_reconciled and
+        accepted_profile_preference_preserved and
         replacement_rejections_reconciled and retained_artifacts_reconciled and
         accepted_profile_is_not_rejected_candidate and rank_eligible_per_attempt and
         selected_descent and candidate_sidecars_complete and distinguishable_final_candidates,
@@ -8349,6 +8393,7 @@ def validate_p1_2_hard_gates(
             "v4_sidecars_complete": True,
             "distinguishable_final_candidates": True,
             "timeline_reconciled": True, "accepted_profile_reconciled": True,
+            "accepted_profile_preference_preserved": True,
             "replacement_rejections_reconciled": True,
             "passed": True, "attempts": {}, "optimizer_identities": [],
         }
@@ -8476,6 +8521,8 @@ def validate_p1_2_hard_gates(
             "distinguishable_final_candidates", False),
         "candidate_trace_timeline_reconciled": candidate_evidence.get("timeline_reconciled", False),
         "candidate_trace_profile_reconciled": candidate_evidence.get("accepted_profile_reconciled", False),
+        "candidate_trace_accepted_profile_preference_preserved": candidate_evidence.get(
+            "accepted_profile_preference_preserved", False),
         "candidate_trace_replacement_rejections_reconciled": candidate_evidence.get(
             "replacement_rejections_reconciled", False),
         "candidate_trace_retained_artifacts_reconciled": candidate_evidence.get(
@@ -15537,7 +15584,7 @@ P1_2_HARD_GATE_ROWS = [
     ("P1-1 raw P0 startup/health", ("reference_p0_health_rows_present", "reference_p0_startup_snapshot_unavailable_bounded", "reference_p0_post_startup_rows_present", "reference_p0_post_startup_ready", "reference_p0_post_startup_non_stale", "reference_p0_post_startup_not_full_unknown", "reference_p0_health_max_gap_ok"), ("reference_post_startup_rows", "reference_p0_health_max_gap_s")),
     ("P1 debug CSV", ("p1_csv_present", "p1_csv_nonempty", "p1_csv_parse_ok", "p1_csv_finite_cost_gradient", "p1_positive_sample_hit", "p1_applied_to_objective", "p1_applied_to_objective_parse_ok", "p1_weighted_integrity_positive"), ("applied_to_objective_true_count", "applied_to_objective_invalid_count", "weighted_f_integrity_max")),
     ("snapshot/candidate binding", ("p1_final_profile_context_in_debug",), ("p1_final_profile_context_tuple", "p1_applied_debug_context_tuples")),
-    ("candidate optimization evidence", ("candidate_trace_schema_finite", "candidate_trace_support_full_valid", "candidate_trace_count_within_limit", "candidate_trace_one_selected_success", "candidate_trace_timeline_reconciled", "candidate_trace_profile_reconciled", "candidate_trace_replacement_rejections_reconciled", "candidate_trace_retained_artifacts_reconciled", "candidate_trace_accepted_profile_not_rejected"), ("candidate_trace_evidence",)),
+    ("candidate optimization evidence", ("candidate_trace_schema_finite", "candidate_trace_support_full_valid", "candidate_trace_count_within_limit", "candidate_trace_one_selected_success", "candidate_trace_timeline_reconciled", "candidate_trace_profile_reconciled", "candidate_trace_accepted_profile_preference_preserved", "candidate_trace_replacement_rejections_reconciled", "candidate_trace_retained_artifacts_reconciled", "candidate_trace_accepted_profile_not_rejected"), ("candidate_trace_evidence",)),
     ("P1 RViz and required topics", ("p1_rviz_topics_present", "required_topics_passed"), ("p1_rviz_topic_counts", "p1_rviz_topic_statuses")),
     ("P1-2 bspline publish", ("p1_2_bspline_inspection_ok", "bspline_publish_present", "p1_2_nonempty_bspline_path_present"), ()),
     ("P1-1 reference paths", ("reference_export_dir_present", "reference_bag_dir_present"), ()),

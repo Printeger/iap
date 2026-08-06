@@ -459,7 +459,7 @@ namespace ego_planner
     bool writeP1CandidateRetainedProfile(
         UniformBspline candidate, uint64_t planning_attempt_id,
         uint64_t candidate_id,
-        UniformBspline incumbent, uint64_t incumbent_trajectory_id,
+        const UniformBspline *incumbent, uint64_t incumbent_trajectory_id,
         const std::string &final_trajectory_source,
         double incumbent_start_t_s = 0.0) const;
     void setP1IntegrityConfigForTest(const P1IntegrityConfig &config) { p1_config_ = config; }

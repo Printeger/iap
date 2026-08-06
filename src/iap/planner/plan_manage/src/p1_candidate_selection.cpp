@@ -117,4 +117,51 @@ std::vector<P1CandidateDecision> selectP1Candidates(
   return decisions;
 }
 
+P1RefinementRiskDecision decideP1RefinementRisk(
+    const P1RefinementRiskEvidence& evidence) {
+  P1RefinementRiskDecision decision;
+  const bool finite_values =
+      std::isfinite(evidence.seed_mean_c_pi) &&
+      std::isfinite(evidence.seed_max_c_pi) &&
+      std::isfinite(evidence.refined_mean_c_pi) &&
+      std::isfinite(evidence.refined_max_c_pi) &&
+      (!evidence.incumbent_available ||
+       (std::isfinite(evidence.incumbent_mean_c_pi) &&
+        std::isfinite(evidence.incumbent_max_c_pi)));
+  if (!evidence.full_support || !finite_values) {
+    decision.reason = "p1_refinement_fixed_support_not_full";
+    return decision;
+  }
+
+  const bool self_non_regression =
+      evidence.refined_mean_c_pi <= evidence.seed_mean_c_pi &&
+      evidence.refined_max_c_pi <= evidence.seed_max_c_pi;
+  const bool self_strict_descent =
+      evidence.refined_mean_c_pi < evidence.seed_mean_c_pi ||
+      evidence.refined_max_c_pi < evidence.seed_max_c_pi;
+  if (!self_non_regression || !self_strict_descent) {
+    decision.reason = "p1_refinement_self_risk_regression";
+    return decision;
+  }
+
+  if (evidence.incumbent_available) {
+    const bool incumbent_non_regression =
+        evidence.refined_mean_c_pi <= evidence.incumbent_mean_c_pi &&
+        evidence.refined_max_c_pi <= evidence.incumbent_max_c_pi;
+    const bool incumbent_strict_descent =
+        evidence.refined_mean_c_pi < evidence.incumbent_mean_c_pi ||
+        evidence.refined_max_c_pi < evidence.incumbent_max_c_pi;
+    if (!incumbent_non_regression || !incumbent_strict_descent) {
+      decision.reason = "p1_refinement_replacement_risk_regression";
+      return decision;
+    }
+  }
+
+  decision.accept = true;
+  decision.reason = evidence.incumbent_available
+      ? "p1_refined_risk_preference_improved"
+      : "initial_p1_refined_candidate";
+  return decision;
+}
+
 }  // namespace ego_planner

@@ -42,10 +42,32 @@ struct P1CandidateDecision {
   std::string replacement_reason;
 };
 
+struct P1RefinementRiskEvidence {
+  bool full_support = false;
+  double seed_mean_c_pi = 0.0;
+  double seed_max_c_pi = 0.0;
+  double refined_mean_c_pi = 0.0;
+  double refined_max_c_pi = 0.0;
+  bool incumbent_available = false;
+  double incumbent_mean_c_pi = 0.0;
+  double incumbent_max_c_pi = 0.0;
+};
+
+struct P1RefinementRiskDecision {
+  bool accept = false;
+  std::string reason;
+};
+
 // `incumbent` must be measured on the candidate attempt's immutable snapshot
 // and fixed sample lattice.  A null incumbent means startup/no trajectory.
 std::vector<P1CandidateDecision> selectP1Candidates(
     const std::vector<P1CandidateEvidence>& candidates,
     const P1CandidateEvidence* incumbent);
+
+// STEP3 may change both control points and timing after optimizer selection.
+// Re-check the actual publication candidate on the same fixed lattice so a
+// feasibility refinement cannot invalidate the recorded P1 preference.
+P1RefinementRiskDecision decideP1RefinementRisk(
+    const P1RefinementRiskEvidence& evidence);
 
 }  // namespace ego_planner
