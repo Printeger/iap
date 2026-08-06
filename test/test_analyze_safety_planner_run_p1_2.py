@@ -1251,6 +1251,29 @@ class P1_2AnalyzerTest(unittest.TestCase):
             comparison, current_scene, reference_scene
         )
         self.assertTrue(alignment["available"], alignment)
+        # A metrics-only reference observation does not republish its source
+        # B-spline.  Its trajectory identity therefore binds to the original
+        # publish stamp, while odom/truth bind to the later observation epoch.
+        reference_context = comparison["p1_1_context"]["context"]
+        reference_context["fallback_reason"] = "metrics_only_reference_observation"
+        reference_context["accepted_stamp_s"] = 11.0
+        reference_context["trajectory_start_stamp_s"] = 10.0
+        reference_scene["slam_stamps"] = [11.0]
+        reference_scene["truth_stamps"] = [11.0]
+        observed_alignment = analyzer.p1_2_risk_scene_alignment(
+            comparison, current_scene, reference_scene
+        )
+        self.assertTrue(observed_alignment["available"], observed_alignment)
+        self.assertEqual(
+            observed_alignment["time_bindings"][
+                "P1-1 bag odom accepted-start time binding"
+            ]["accepted_start_s"],
+            11.0,
+        )
+        reference_context["fallback_reason"] = "metrics_only"
+        reference_context["accepted_stamp_s"] = 10.0
+        reference_scene["slam_stamps"] = [9.0, 10.0]
+        reference_scene["truth_stamps"] = [9.0, 10.0]
         reference_scene["slam_xy"] = [(-120.0, -60.0), (-110.0, -55.0)]
         divergent_odom_alignment = analyzer.p1_2_risk_scene_alignment(
             comparison, current_scene, reference_scene

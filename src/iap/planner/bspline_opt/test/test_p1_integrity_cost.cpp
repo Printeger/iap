@@ -1337,7 +1337,7 @@ TEST(P1IntegrityCostTest,
   const Eigen::Vector3d expected_end = trajectory.evaluateDeBoorT(0.35);
 
   ASSERT_TRUE(optimizer->writeP1AcceptedTrajectoryRiskProfile(
-      trajectory, 8, 43, 10.5, 10.4, "map", 10.2, 0.2, 0.15));
+      trajectory, 8, 43, 10.2, 10.1, "map", 10.0, 0.2, 0.15));
   const auto rows = readCsvRows(profile_path);
   ASSERT_EQ(rows.size(), 200U);
   EXPECT_NEAR(std::stod(rows.front().at("t_s")), 0.0, 1e-12);
@@ -1349,6 +1349,8 @@ TEST(P1IntegrityCostTest,
   EXPECT_NEAR(std::stod(context_rows.front().at("trajectory_time_max_s")),
               0.15, 1e-12);
   EXPECT_NEAR(std::stod(context_rows.front().at("trajectory_start_stamp_s")),
+              10.0, 1e-12);
+  EXPECT_NEAR(std::stod(context_rows.front().at("accepted_stamp_s")),
               10.2, 1e-12);
   EXPECT_EQ(context_rows.front().at("temporal_in_horizon"), "1");
 

@@ -599,12 +599,10 @@ namespace ego_planner
     // rename must not let a later retry append a second 200-row profile under
     // the same identity.
     const uint64_t profile_seq = ++p1_accepted_profile_seq_;
-    const double segment_start_stamp_s =
-        local_data_.start_time_.seconds() + trajectory_start_t_s;
     const bool written = bspline_optimizer_->writeP1AcceptedTrajectoryRiskProfile(
         local_data_.position_traj_, profile_seq, local_data_.traj_id_,
         observation_stamp_s, planning_risk_context_.planning_start_s,
-        trajectory_frame_id_, segment_start_stamp_s,
+        trajectory_frame_id_, local_data_.start_time_.seconds(),
         trajectory_start_t_s, remaining_duration_s);
     if (!written)
     {

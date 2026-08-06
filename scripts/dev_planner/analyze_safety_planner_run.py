@@ -13872,19 +13872,24 @@ def p1_2_risk_scene_alignment(
                                          ("bag truth", "truth_stamps")):
             stamps = [finite_float(value) for value in scene.get(stamp_field, []) or []]
             stamps = [value for value in stamps if value is not None]
-            closest = (min(stamps, key=lambda value: abs(value - trajectory_start_stamp))
-                       if stamps and trajectory_start_stamp is not None else None)
-            delta = (abs(closest - trajectory_start_stamp)
-                     if closest is not None and trajectory_start_stamp is not None else None)
+            # trajectory_start_stamp_s identifies the original published
+            # B-spline.  A metrics-only reference observation deliberately
+            # does not republish that trajectory, so its scene epoch is the
+            # later accepted/observation stamp instead.
+            scene_epoch_stamp = accepted_stamp
+            closest = (min(stamps, key=lambda value: abs(value - scene_epoch_stamp))
+                       if stamps and scene_epoch_stamp is not None else None)
+            delta = (abs(closest - scene_epoch_stamp)
+                     if closest is not None and scene_epoch_stamp is not None else None)
             key = f"{label} {source_name} accepted-start time binding"
-            time_bindings[key] = {"accepted_start_s": trajectory_start_stamp,
+            time_bindings[key] = {"accepted_start_s": scene_epoch_stamp,
                                   "recorded_stamp_s": closest, "delta_s": delta}
             source_status[key] = bool(delta is not None and
                                       delta <= P1_2_SCENE_INPUT_MAX_DELTA_S)
             if not source_status[key]:
                 reasons.append(
                     f"{key} unavailable/outside {P1_2_SCENE_INPUT_MAX_DELTA_S:.3f}s: "
-                    f"accepted_start={trajectory_start_stamp}, closest={closest}"
+                    f"accepted_start={scene_epoch_stamp}, closest={closest}"
                 )
     return {
         "available": all(source_status.values()) and not reasons,

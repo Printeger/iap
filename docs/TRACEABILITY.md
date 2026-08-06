@@ -1,5 +1,11 @@
 # Traceability Matrix (IAP)
 
+## 2026-08-06 P1 reference-observation dual timestamp binding
+
+| Req ID | Evidence | Verification | Status |
+|---|---|---|---|
+| IAP-RQ-320 / IAP-RQ-400 | Metrics-only reference observations keep the original B-spline publish/start identity in `trajectory_start_stamp_s` and the later observation/snapshot scene epoch in `accepted_stamp_s`; retained pair `eb2093a86c694128bed41ce3f9077997` / `306f8baafa184fd2976be702174f9fd9`, sole analysis `297909f855ce464ab8421342621dbec7` | C++ writer regression asserts distinct `10.0`/`10.2` source/observation stamps; analyzer regression binds B-spline to `10.0` and odom/truth to `11.0`; focused suites pass. Retained formal pair already proved strict aligned mean/max reduction but remains FAIL and is never reanalyzed | **IMPLEMENTED; fresh smoke/formal pair pending** |
+
 ## 2026-08-06 P1 fixed-lambda formal-entry smoke
 
 | Req ID | Evidence | Verification | Status |
