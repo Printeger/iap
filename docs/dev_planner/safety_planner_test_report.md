@@ -6307,3 +6307,124 @@ Conclusion: It supports pre-admission root-cause diagnosis only; it cannot estab
 - Progression authority: none. Entry-to-formal fails because no candidate is eligible or replaces the incumbent with required mean/max non-regression and one strict decrease.
 - Final branch: **FAIL -> P1 pre-admission temporal/full-support debug**.
 - P1-3 permission: denied. No P1-3 and no lambda sweep were run.
+
+## 2026-08-02 diagnostic-smoke figure evidence (non-authoritative)
+
+### Full scenario top-down
+
+![Full scenario top-down](../../results/planner_validation/exports/test_planner_p1_degraded_lidar_good_gnss_degraded_lidar_good_1786032578582/p1_candidate_diagnostic_smoke/p1_diag_topdown_scene.png)
+
+Observation: No candidate trajectory was emitted; candidate-specific charts are unavailable.
+
+Run ID: `6b8193a91a744d639833a1b819d29cac`; HEAD: `b9ed986d55471051bb8ec81aed24744481339e41`; runtime hashes: `bspline_library=a9c43be9eeccbbc62a2d292147e671fba6d6073b265570b8c6f2caf4a17a2d26, launch=6babf7d586ed13d312f0b13830b53a55dcf1aed99e86687ebc8bb57e64b8f331, planner_executable=fda6bd97aa6bbdc44800558925d0f937b8932254e3a5d76a772d9db57299a13f`; export: `/home/dev/ws_iap/src/iap/results/planner_validation/exports/test_planner_p1_degraded_lidar_good_gnss_degraded_lidar_good_1786032578582`; bag: `/home/dev/ws_iap/src/iap/results/planner_validation/bags/test_planner_p1_degraded_lidar_good_gnss_degraded_lidar_good_20260806T160938Z`; attempt/candidate/generation/query-base: `none`; snapshot/query-base window: `2026-08-06T16:09:38Z to 2026-08-06T16:10:09Z`; diagnostic (non-authoritative).
+
+Verdict: FAIL.
+
+Conclusion: This figure is diagnostic only and cannot establish P1-2 effectiveness or progression.
+### Fan-out funnel
+
+![Fan-out funnel](../../results/planner_validation/exports/test_planner_p1_degraded_lidar_good_gnss_degraded_lidar_good_1786032578582/p1_candidate_diagnostic_smoke/p1_diag_fanout_funnel.png)
+
+Observation: No candidate trajectory was emitted; candidate-specific charts are unavailable.
+
+Run ID: `6b8193a91a744d639833a1b819d29cac`; HEAD: `b9ed986d55471051bb8ec81aed24744481339e41`; runtime hashes: `bspline_library=a9c43be9eeccbbc62a2d292147e671fba6d6073b265570b8c6f2caf4a17a2d26, launch=6babf7d586ed13d312f0b13830b53a55dcf1aed99e86687ebc8bb57e64b8f331, planner_executable=fda6bd97aa6bbdc44800558925d0f937b8932254e3a5d76a772d9db57299a13f`; export: `/home/dev/ws_iap/src/iap/results/planner_validation/exports/test_planner_p1_degraded_lidar_good_gnss_degraded_lidar_good_1786032578582`; bag: `/home/dev/ws_iap/src/iap/results/planner_validation/bags/test_planner_p1_degraded_lidar_good_gnss_degraded_lidar_good_20260806T160938Z`; attempt/candidate/generation/query-base: `none`; snapshot/query-base window: `2026-08-06T16:09:38Z to 2026-08-06T16:10:09Z`; diagnostic (non-authoritative).
+
+Verdict: FAIL.
+
+Conclusion: This figure is diagnostic only and cannot establish P1-2 effectiveness or progression.
+
+### Mean/max delta scatter
+
+![Mean/max delta scatter](../../results/planner_validation/exports/test_planner_p1_degraded_lidar_good_gnss_degraded_lidar_good_1786032578582/p1_candidate_diagnostic_smoke/p1_diag_mean_max_delta_scatter.png)
+
+Observation: No point can meet an effectiveness gate when candidate rows are absent.
+
+Run ID: `6b8193a91a744d639833a1b819d29cac`; HEAD: `b9ed986d55471051bb8ec81aed24744481339e41`; runtime hashes: `bspline_library=a9c43be9eeccbbc62a2d292147e671fba6d6073b265570b8c6f2caf4a17a2d26, launch=6babf7d586ed13d312f0b13830b53a55dcf1aed99e86687ebc8bb57e64b8f331, planner_executable=fda6bd97aa6bbdc44800558925d0f937b8932254e3a5d76a772d9db57299a13f`; export: `/home/dev/ws_iap/src/iap/results/planner_validation/exports/test_planner_p1_degraded_lidar_good_gnss_degraded_lidar_good_1786032578582`; bag: `/home/dev/ws_iap/src/iap/results/planner_validation/bags/test_planner_p1_degraded_lidar_good_gnss_degraded_lidar_good_20260806T160938Z`; attempt/candidate/generation/query-base: `none`; snapshot/query-base window: `2026-08-06T16:09:38Z to 2026-08-06T16:10:09Z`; diagnostic (non-authoritative).
+
+Verdict: FAIL.
+
+Conclusion: This figure is diagnostic only and cannot establish P1-2 effectiveness or progression.
+
+### Initial/final pairwise matrices
+
+![Initial/final pairwise matrices](../../results/planner_validation/exports/test_planner_p1_degraded_lidar_good_gnss_degraded_lidar_good_1786032578582/p1_candidate_diagnostic_smoke/p1_diag_pairwise_matrices.png)
+
+Observation: Pairwise evidence is unavailable.
+
+Run ID: `6b8193a91a744d639833a1b819d29cac`; HEAD: `b9ed986d55471051bb8ec81aed24744481339e41`; runtime hashes: `bspline_library=a9c43be9eeccbbc62a2d292147e671fba6d6073b265570b8c6f2caf4a17a2d26, launch=6babf7d586ed13d312f0b13830b53a55dcf1aed99e86687ebc8bb57e64b8f331, planner_executable=fda6bd97aa6bbdc44800558925d0f937b8932254e3a5d76a772d9db57299a13f`; export: `/home/dev/ws_iap/src/iap/results/planner_validation/exports/test_planner_p1_degraded_lidar_good_gnss_degraded_lidar_good_1786032578582`; bag: `/home/dev/ws_iap/src/iap/results/planner_validation/bags/test_planner_p1_degraded_lidar_good_gnss_degraded_lidar_good_20260806T160938Z`; attempt/candidate/generation/query-base: `none`; snapshot/query-base window: `2026-08-06T16:09:38Z to 2026-08-06T16:10:09Z`; diagnostic (non-authoritative).
+
+Verdict: FAIL.
+
+Conclusion: This figure is diagnostic only and cannot establish P1-2 effectiveness or progression.
+
+### Objective decomposition
+
+![Objective decomposition](../../results/planner_validation/exports/test_planner_p1_degraded_lidar_good_gnss_degraded_lidar_good_1786032578582/p1_candidate_diagnostic_smoke/p1_diag_objective_decomposition.png)
+
+Observation: No optimizer objective row was emitted.
+
+Run ID: `6b8193a91a744d639833a1b819d29cac`; HEAD: `b9ed986d55471051bb8ec81aed24744481339e41`; runtime hashes: `bspline_library=a9c43be9eeccbbc62a2d292147e671fba6d6073b265570b8c6f2caf4a17a2d26, launch=6babf7d586ed13d312f0b13830b53a55dcf1aed99e86687ebc8bb57e64b8f331, planner_executable=fda6bd97aa6bbdc44800558925d0f937b8932254e3a5d76a772d9db57299a13f`; export: `/home/dev/ws_iap/src/iap/results/planner_validation/exports/test_planner_p1_degraded_lidar_good_gnss_degraded_lidar_good_1786032578582`; bag: `/home/dev/ws_iap/src/iap/results/planner_validation/bags/test_planner_p1_degraded_lidar_good_gnss_degraded_lidar_good_20260806T160938Z`; attempt/candidate/generation/query-base: `none`; snapshot/query-base window: `2026-08-06T16:09:38Z to 2026-08-06T16:10:09Z`; diagnostic (non-authoritative).
+
+Verdict: FAIL.
+
+Conclusion: This figure is diagnostic only and cannot establish P1-2 effectiveness or progression.
+
+### Gradient/displacement
+
+![Gradient/displacement](../../results/planner_validation/exports/test_planner_p1_degraded_lidar_good_gnss_degraded_lidar_good_1786032578582/p1_candidate_diagnostic_smoke/p1_diag_gradient_displacement.png)
+
+Observation: Gradient/gate direction is unassessed without candidate rows.
+
+Run ID: `6b8193a91a744d639833a1b819d29cac`; HEAD: `b9ed986d55471051bb8ec81aed24744481339e41`; runtime hashes: `bspline_library=a9c43be9eeccbbc62a2d292147e671fba6d6073b265570b8c6f2caf4a17a2d26, launch=6babf7d586ed13d312f0b13830b53a55dcf1aed99e86687ebc8bb57e64b8f331, planner_executable=fda6bd97aa6bbdc44800558925d0f937b8932254e3a5d76a772d9db57299a13f`; export: `/home/dev/ws_iap/src/iap/results/planner_validation/exports/test_planner_p1_degraded_lidar_good_gnss_degraded_lidar_good_1786032578582`; bag: `/home/dev/ws_iap/src/iap/results/planner_validation/bags/test_planner_p1_degraded_lidar_good_gnss_degraded_lidar_good_20260806T160938Z`; attempt/candidate/generation/query-base: `none`; snapshot/query-base window: `2026-08-06T16:09:38Z to 2026-08-06T16:10:09Z`; diagnostic (non-authoritative).
+
+Verdict: FAIL.
+
+Conclusion: This figure is diagnostic only and cannot establish P1-2 effectiveness or progression.
+
+### Per-attempt candidate profile
+
+![Per-attempt candidate profile](../../results/planner_validation/exports/test_planner_p1_degraded_lidar_good_gnss_degraded_lidar_good_1786032578582/p1_candidate_diagnostic_smoke/p1_diag_profile_comparison.png)
+
+Observation: Candidate profiles are unavailable.
+
+Run ID: `6b8193a91a744d639833a1b819d29cac`; HEAD: `b9ed986d55471051bb8ec81aed24744481339e41`; runtime hashes: `bspline_library=a9c43be9eeccbbc62a2d292147e671fba6d6073b265570b8c6f2caf4a17a2d26, launch=6babf7d586ed13d312f0b13830b53a55dcf1aed99e86687ebc8bb57e64b8f331, planner_executable=fda6bd97aa6bbdc44800558925d0f937b8932254e3a5d76a772d9db57299a13f`; export: `/home/dev/ws_iap/src/iap/results/planner_validation/exports/test_planner_p1_degraded_lidar_good_gnss_degraded_lidar_good_1786032578582`; bag: `/home/dev/ws_iap/src/iap/results/planner_validation/bags/test_planner_p1_degraded_lidar_good_gnss_degraded_lidar_good_20260806T160938Z`; attempt/candidate/generation/query-base: `none`; snapshot/query-base window: `2026-08-06T16:09:38Z to 2026-08-06T16:10:09Z`; diagnostic (non-authoritative).
+
+Verdict: FAIL.
+
+Conclusion: This figure is diagnostic only and cannot establish P1-2 effectiveness or progression.
+
+### P0 occupied/base-collision overlay
+
+![P0 occupied/base-collision overlay](../../results/planner_validation/exports/test_planner_p1_degraded_lidar_good_gnss_degraded_lidar_good_1786032578582/p1_candidate_diagnostic_smoke/p1_diag_p0_occupancy_overlay.png)
+
+Observation: P0 corner evidence is unavailable.
+
+Run ID: `6b8193a91a744d639833a1b819d29cac`; HEAD: `b9ed986d55471051bb8ec81aed24744481339e41`; runtime hashes: `bspline_library=a9c43be9eeccbbc62a2d292147e671fba6d6073b265570b8c6f2caf4a17a2d26, launch=6babf7d586ed13d312f0b13830b53a55dcf1aed99e86687ebc8bb57e64b8f331, planner_executable=fda6bd97aa6bbdc44800558925d0f937b8932254e3a5d76a772d9db57299a13f`; export: `/home/dev/ws_iap/src/iap/results/planner_validation/exports/test_planner_p1_degraded_lidar_good_gnss_degraded_lidar_good_1786032578582`; bag: `/home/dev/ws_iap/src/iap/results/planner_validation/bags/test_planner_p1_degraded_lidar_good_gnss_degraded_lidar_good_20260806T160938Z`; attempt/candidate/generation/query-base: `none`; snapshot/query-base window: `2026-08-06T16:09:38Z to 2026-08-06T16:10:09Z`; diagnostic (non-authoritative).
+
+Verdict: FAIL.
+
+Conclusion: This figure is diagnostic only and cannot establish P1-2 effectiveness or progression.
+
+### Lifecycle swimlane
+
+![Lifecycle swimlane](../../results/planner_validation/exports/test_planner_p1_degraded_lidar_good_gnss_degraded_lidar_good_1786032578582/p1_candidate_diagnostic_smoke/p1_diag_lifecycle_swimlane.png)
+
+Observation: Lifecycle events are shown only from the explicit run timeline.
+
+Run ID: `6b8193a91a744d639833a1b819d29cac`; HEAD: `b9ed986d55471051bb8ec81aed24744481339e41`; runtime hashes: `bspline_library=a9c43be9eeccbbc62a2d292147e671fba6d6073b265570b8c6f2caf4a17a2d26, launch=6babf7d586ed13d312f0b13830b53a55dcf1aed99e86687ebc8bb57e64b8f331, planner_executable=fda6bd97aa6bbdc44800558925d0f937b8932254e3a5d76a772d9db57299a13f`; export: `/home/dev/ws_iap/src/iap/results/planner_validation/exports/test_planner_p1_degraded_lidar_good_gnss_degraded_lidar_good_1786032578582`; bag: `/home/dev/ws_iap/src/iap/results/planner_validation/bags/test_planner_p1_degraded_lidar_good_gnss_degraded_lidar_good_20260806T160938Z`; attempt/candidate/generation/query-base: `none`; snapshot/query-base window: `2026-08-06T16:09:38Z to 2026-08-06T16:10:09Z`; diagnostic (non-authoritative).
+
+Verdict: FAIL.
+
+Conclusion: Base planning partially succeeded, but no strict P1 candidate was emitted.
+
+### Artifact/provenance timeline
+
+![Artifact/provenance timeline](../../results/planner_validation/exports/test_planner_p1_degraded_lidar_good_gnss_degraded_lidar_good_1786032578582/p1_candidate_diagnostic_smoke/p1_diag_artifact_provenance_timeline.png)
+
+Observation: Recorder and launch bounds are shown from manifest provenance.
+
+Run ID: `6b8193a91a744d639833a1b819d29cac`; HEAD: `b9ed986d55471051bb8ec81aed24744481339e41`; runtime hashes: `bspline_library=a9c43be9eeccbbc62a2d292147e671fba6d6073b265570b8c6f2caf4a17a2d26, launch=6babf7d586ed13d312f0b13830b53a55dcf1aed99e86687ebc8bb57e64b8f331, planner_executable=fda6bd97aa6bbdc44800558925d0f937b8932254e3a5d76a772d9db57299a13f`; export: `/home/dev/ws_iap/src/iap/results/planner_validation/exports/test_planner_p1_degraded_lidar_good_gnss_degraded_lidar_good_1786032578582`; bag: `/home/dev/ws_iap/src/iap/results/planner_validation/bags/test_planner_p1_degraded_lidar_good_gnss_degraded_lidar_good_20260806T160938Z`; attempt/candidate/generation/query-base: `none`; snapshot/query-base window: `2026-08-06T16:09:38Z to 2026-08-06T16:10:09Z`; diagnostic (non-authoritative).
+
+Verdict: FAIL.
+
+Conclusion: This figure is diagnostic only and cannot establish P1-2 effectiveness or progression.
