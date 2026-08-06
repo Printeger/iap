@@ -1,5 +1,11 @@
 # Traceability Matrix (IAP)
 
+## 2026-08-06 P1 soft-objective / hard-acceptance incompatibility
+
+| Req ID | Evidence | Verification | Status |
+|---|---|---|---|
+| IAP-RQ-320 / IAP-RQ-400 / IAP-RQ-410 | Fresh smooth-CVaR pair `d7f1a11470ab454398968eebc6288b60` / `a0a1d5ad774a4b6f91c27709abc6f5d4` at clean `d1a7d2a`; sole analysis `fb41d1aaf6934fdd8d6441fb39d35f2e`; common terminal arc `0.2701304166 m`; P1-2 mean/max `0.4184994876`/`0.4242653019` versus P1-1 `0.4196563658`/`0.4236384817` | Both sole v4 preflights PASS; 39/39 formal figures nonempty; fixed support, candidate closure, singleflight, P1 application, P5 isolation, scene/profile binding PASS; strict max, baseline P0 freshness, and `/tmp` runtime-path provenance FAIL. Focused test `Fixed200SmoothObjectivesCannotImplyHardMaxNonRegressionAtTie` proves on one fixed-200 vector that mean, normalized LSE, and smooth CVaR all decrease while exact max increases. | **BLOCKED BY SPEC DECISION; all three prescribed differentiable H4 objectives lack the logical implication required by the hard mean/max gate; P1-3 prohibited** |
+
 ## 2026-08-06 P1 smooth-CVaR formal recorder capacity failure
 
 | Req ID | Evidence | Verification | Status |

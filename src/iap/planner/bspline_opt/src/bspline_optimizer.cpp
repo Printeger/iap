@@ -4433,6 +4433,25 @@ namespace ego_planner
       trace.base_prepass_termination_reason =
           p1_normalized_stage_.base_prepass.termination_reason;
     }
+    trace.aggregation_mode = p1_config_.objective_aggregation_mode;
+    trace.aggregation_temperature = p1_config_.smooth_max_temperature;
+    trace.aggregation_tail_fraction =
+        p1_config_.objective_aggregation_mode == "fixed_200_smooth_cvar"
+            ? p1_config_.smooth_cvar_alpha : 0.0;
+    const double adaptive_dt = std::max(
+        p1_config_.sample_dt_min_s,
+        bspline_interval_ * std::max(0.0, p1_config_.sample_dt_scale));
+    trace.adaptive_sample_count =
+        adaptive_dt > 0.0 && std::isfinite(adaptive_dt)
+            ? std::max(1, static_cast<int>(std::ceil(
+                  static_cast<double>(initial_control_points.cols() - order_) *
+                  bspline_interval_ / adaptive_dt)))
+            : 0;
+    if (p1_config_.max_samples_per_eval > 0)
+      trace.adaptive_sample_count = std::min(
+          trace.adaptive_sample_count, p1_config_.max_samples_per_eval);
+    trace.fixed_sample_count = kP1CandidateEvidenceSampleCount;
+    trace.peak_contribution = last_p1_metrics_.peak_contribution;
 
     lbfgs::lbfgs_parameter_t parameters;
     lbfgs::lbfgs_load_default_parameters(&parameters);

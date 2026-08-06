@@ -652,6 +652,9 @@ TEST(P1IntegrityCostTest, EvidenceV4WritesAllCandidateSidecars) {
   config.metrics_only = false;
   config.lambda_integrity = 0.00001;
   config.integrity_grad_norm_max = 100.0;
+  config.objective_aggregation_mode = "fixed_200_smooth_cvar";
+  config.smooth_max_temperature = 0.01;
+  config.smooth_cvar_alpha = 0.90;
   config.debug_csv_enable = true;
   config.debug_csv_path = debug_path;
   config.evidence_schema_version = "p1_evidence_provenance_v4";
@@ -659,6 +662,8 @@ TEST(P1IntegrityCostTest, EvidenceV4WritesAllCandidateSidecars) {
   config.evidence_manifest_path = "/tmp/v4-sidecar-manifest.json";
   auto optimizer = makeOptimizer(config, &swarm);
   optimizer->setP1IntegrityConfigForTest(config);
+  ASSERT_EQ(optimizer->p1IntegrityConfig().objective_aggregation_mode,
+            "fixed_200_smooth_cvar");
   ego_planner::BsplineOptimizer::P1PlanningRiskContext context;
   context.snapshot = snapshot;
   context.query_base_time_s = snapshot->stamp_s();
@@ -682,6 +687,8 @@ TEST(P1IntegrityCostTest, EvidenceV4WritesAllCandidateSidecars) {
   int base_iterations = 0;
   ASSERT_TRUE(optimizer->optimizeP1BasePrepassForTest(
       points, 0.1, 80, base_cost, base_iterations));
+  ASSERT_EQ(optimizer->p1IntegrityConfig().objective_aggregation_mode,
+            "fixed_200_smooth_cvar");
   const auto base_prepass = optimizer->getLastP1BasePrepassTrace();
   std::string normalization_reason;
   ASSERT_TRUE(optimizer->prepareP1NormalizedStage(
@@ -691,7 +698,10 @@ TEST(P1IntegrityCostTest, EvidenceV4WritesAllCandidateSidecars) {
   int iterations = 0;
   ASSERT_TRUE(optimizer->optimizeReboundCostForTest(
       points, 0.1, 80, final_cost, iterations));
+  ASSERT_EQ(optimizer->p1IntegrityConfig().objective_aggregation_mode,
+            "fixed_200_smooth_cvar");
   auto trace = optimizer->getLastP1OptimizationTrace();
+  ASSERT_EQ(trace.aggregation_mode, "fixed_200_smooth_cvar");
   trace.selected = true;
   trace.optimization_success = true;
   trace.rank_eligible = true;
@@ -1385,6 +1395,100 @@ TEST(P1IntegrityCostTest,
   ASSERT_TRUE(cvar_probe_profile.full_support);
   EXPECT_LT(cvar_probe_profile.max_c_pi, initial_profile.max_c_pi);
   EXPECT_LT(cvar_cost, initial_profile.max_c_pi);
+}
+
+TEST(P1IntegrityCostTest,
+     Fixed200SmoothObjectivesCannotImplyHardMaxNonRegressionAtTie) {
+  constexpr int kSampleCount = 200;
+  constexpr double kInitialCost = 10.0;
+  constexpr double kEpsilon = 1.0e-5;
+  constexpr double kTemperature = 0.01;
+  constexpr double kAlpha = 0.90;
+  const std::vector<double> initial(kSampleCount, kInitialCost);
+  std::vector<double> candidate(kSampleCount,
+                                kInitialCost - kEpsilon);
+  candidate.front() = kInitialCost + kEpsilon;
+
+  const auto mean = [](const std::vector<double>& costs) {
+    double sum = 0.0;
+    for (const double cost : costs) {
+      sum += cost;
+    }
+    return sum / static_cast<double>(costs.size());
+  };
+  const auto lse = [](const std::vector<double>& costs) {
+    const double maximum = *std::max_element(costs.begin(), costs.end());
+    double exponential_sum = 0.0;
+    for (const double cost : costs) {
+      exponential_sum += std::exp((cost - maximum) / kTemperature);
+    }
+    return maximum + kTemperature *
+        (std::log(exponential_sum) -
+         std::log(static_cast<double>(costs.size())));
+  };
+  const auto smooth_cvar = [](const std::vector<double>& costs) {
+    const double tail_probability = 1.0 - kAlpha;
+    const double target_tail_mass =
+        tail_probability * static_cast<double>(costs.size());
+    const double minimum = *std::min_element(costs.begin(), costs.end());
+    const double maximum = *std::max_element(costs.begin(), costs.end());
+    if (minimum == maximum) {
+      return minimum;
+    }
+    const auto sigmoid = [](const double value) {
+      if (value >= 0.0) {
+        return 1.0 / (1.0 + std::exp(-value));
+      }
+      const double exponential = std::exp(value);
+      return exponential / (1.0 + exponential);
+    };
+    const auto softplus = [](const double value) {
+      return value > 0.0
+          ? value + std::log1p(std::exp(-value))
+          : std::log1p(std::exp(value));
+    };
+    double eta_lower = minimum - 64.0 * kTemperature;
+    double eta_upper = maximum + 64.0 * kTemperature;
+    for (int iteration = 0; iteration < 100; ++iteration) {
+      const double eta_midpoint = 0.5 * (eta_lower + eta_upper);
+      double sigmoid_sum = 0.0;
+      for (const double cost : costs) {
+        sigmoid_sum += sigmoid((cost - eta_midpoint) / kTemperature);
+      }
+      if (sigmoid_sum > target_tail_mass) {
+        eta_lower = eta_midpoint;
+      } else {
+        eta_upper = eta_midpoint;
+      }
+    }
+    const double eta = 0.5 * (eta_lower + eta_upper);
+    const double entropy =
+        -tail_probability * std::log(tail_probability) -
+        kAlpha * std::log(kAlpha);
+    double objective = eta - kTemperature * entropy / tail_probability;
+    for (const double cost : costs) {
+      objective += kTemperature / target_tail_mass *
+          softplus((cost - eta) / kTemperature);
+    }
+    return objective;
+  };
+
+  const double initial_max =
+      *std::max_element(initial.begin(), initial.end());
+  const double candidate_max =
+      *std::max_element(candidate.begin(), candidate.end());
+  EXPECT_GT(candidate_max, initial_max);
+  EXPECT_LT(mean(candidate), mean(initial));
+  EXPECT_LT(lse(candidate), lse(initial));
+  EXPECT_LT(smooth_cvar(candidate), smooth_cvar(initial));
+
+  // At the tied profile all three differentiable objectives assign weight
+  // 1/N to every sample.  The exact common directional derivative is
+  // (1 - (N - 1)) / N, which is negative even though one sample becomes the
+  // new, strictly larger maximum.
+  EXPECT_LT((1.0 - static_cast<double>(kSampleCount - 1)) /
+                static_cast<double>(kSampleCount),
+            0.0);
 }
 
 TEST(P1IntegrityCostTest, SnapshotGenerationStaysFixedUntilReset) {
