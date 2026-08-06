@@ -1147,6 +1147,13 @@ def _param_int(context, name):
     return int(LaunchConfiguration(name).perform(context))
 
 
+def _fixed_lattice_no_replan_threshold(safety_enabled):
+    # P1 formal evidence needs one last receding-horizon plan after the
+    # trajectory fits the 2.5 s snapshot horizon.  Match the manager's own
+    # 0.2 m "Close to goal" boundary so timing cannot end the fixture first.
+    return 0.2 if safety_enabled.get("p1", False) else 1.0
+
+
 def _p5_6_fixture_effective_enabled(context):
     return _param_bool(context, "p5_6.fixture.enabled") and not _param_bool(context, "p5_5.fixture.enabled")
 
@@ -1273,7 +1280,7 @@ def _ego_planner_node(context, drone_id, planner_odom_topic, cloud_topic, camera
         parameters=[
             {"fsm/flight_type": 2},
             {"fsm/thresh_replan_time": 1.0},
-            {"fsm/thresh_no_replan_meter": 1.0},
+            {"fsm/thresh_no_replan_meter": _fixed_lattice_no_replan_threshold(safety_enabled)},
             {"fsm/planning_horizon": _param_float(context, "manager/planning_horizon")},
             {"fsm/planning_horizen_time": 3.0},
             {"fsm/emergency_time": 1.0},
@@ -1798,6 +1805,7 @@ def _launch_setup(context):
             "bag_receive": {"domain": "system_receive", "field": "stamp"},
         },
         "planner_safety_profile": safety_profile,
+        "fsm.thresh_no_replan_meter": _fixed_lattice_no_replan_threshold(safety_enabled),
         "p0.enable_risk_grid": p0_enabled,
         "p1.use_integrity_cost": p1_use_for_manifest,
         "p1.metrics_only": p1_metrics_only_for_manifest,

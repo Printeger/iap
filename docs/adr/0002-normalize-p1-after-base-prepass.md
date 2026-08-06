@@ -10,6 +10,8 @@ At `p1.lambda_integrity=0.00001`, the raw P1 gradient is analytically correct bu
 
 The prepass changes control-point positions but preserves the seed's knot interval and control-point count. Admission therefore skips the prepass when the seed already exceeds the immutable snapshot time horizon: no positional optimizer can recover that support. The existing base fallback advances the receding horizon instead. Spatial and occupied interpolation-corner misses remain prepass-eligible because moving control points can repair them.
 
+The formal `test_planner` P1 fixture continues replanning until the manager's existing 0.2 m close-to-goal boundary instead of stopping at the generic 1.0 m threshold. Both metrics-only and enabled runs use the same declared manifest value. This is test-fixture observability, not a production planner or P1 objective change.
+
 ## Decision
 
 Each topology seed first runs the unchanged base rebound optimizer. A successful base result with full `200/200` support defines a frozen base-improvement budget `DeltaB`. For each P1 seed, the active raw P1 gradient norm `G` freezes
