@@ -1,5 +1,11 @@
 # Traceability Matrix (IAP)
 
+## 2026-08-06 P1 reference-observation dual timestamp smoke
+
+| Req ID | Evidence | Verification | Status |
+|---|---|---|---|
+| IAP-RQ-320 / IAP-RQ-400 / IAP-RQ-410 | Fresh metrics-only run `00ee130958c1429db48fce6feb7f14a9` at clean `7f749c7`; final sequence `16`, unchanged trajectory `14`, source start `1657065619.9290924`, later observation `1657065621.4310680`, `200/200` over `2.098024 s` | v4 verifier PASS/errors=[]; source-to-recorded-B-spline delta `2.38e-7 s`; observation-to-odom/truth deltas `3.02/1.97 ms`; exact cloud/context available | **PASS; enabled diagnostic smoke pending** |
+
 ## 2026-08-06 P1 reference-observation dual timestamp binding
 
 | Req ID | Evidence | Verification | Status |

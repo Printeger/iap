@@ -8726,3 +8726,11 @@ Observation: Clean HEAD `af5a4a2` produced fresh serial P1-1 run `eb2093a86c6941
 Verdict: FAIL (source trajectory start and later observation epoch conflated).
 
 Conclusion: The retained pair proves the effectiveness and all other formal gates but cannot grant progression because exact recorded-scene identity fails closed. `trajectory_start_stamp_s` must bind the original published B-spline, while `accepted_stamp_s` must bind the later reference observation and odom/truth scene epoch. This pair will never be reanalyzed; validation resumes only with a fresh build, smoke, pair, and single analyzer invocation. P1-3 remains prohibited.
+
+### Superseding P1 fixed-lambda dual-timestamp smoke record — 2026-08-06
+
+Observation: Fresh 30-second metrics-only run `00ee130958c1429db48fce6feb7f14a9` at clean HEAD `7f749c79ef46e37323a23d5b7b14ef959dcf5b4d` (export `/home/dev/ws_iap/src/iap/results/planner_validation/exports/test_planner_p1_degraded_lidar_good_gnss_degraded_lidar_good_1786049219947`, bag `/home/dev/ws_iap/src/iap/results/planner_validation/bags/test_planner_p1_degraded_lidar_good_gnss_degraded_lidar_good_20260806T204659Z`) passed its v4 bundle verifier with `errors=[]`. Final metrics-only reference sequence `16` retained trajectory `14`, fallback `metrics_only_reference_observation`, and real fixed `200/200` support over `2.0980244637 s`. `trajectory_start_stamp_s=1657065619.9290924` matched the original bag B-spline start within `2.38e-7 s`; `accepted_stamp_s=1657065621.4310680` was the later observation epoch by `1.5019755 s` and matched bag odom/truth within `3.02/1.97 ms`. Bag scene readers returned no errors.
+
+Verdict: PASS (dual-timestamp integration smoke).
+
+Conclusion: The original non-republished trajectory identity and the later immutable-snapshot scene epoch are independently recorded and replayable. This closes the retained formal pair's only root failure and authorizes one fresh enabled 30-second diagnostic entry run. It does not authorize artifact reuse, formal analyzer reuse, or P1-3.
