@@ -1,5 +1,11 @@
 # Traceability Matrix (IAP)
 
+## 2026-08-06 P1 recorded-profile formal-entry smoke
+
+| Req ID | Evidence | Verification | Status |
+|---|---|---|---|
+| IAP-RQ-320 / IAP-RQ-400 / IAP-RQ-410 | Fresh enabled run `c8281cb59d9c4df5990d177258d4488b` at clean `78db4ef`; 52 candidates/13 attempts; context history and bag each contain 27 trajectory bindings, with latest recorded sequence `27` selected | Sole v4 verifier PASS/errors=[]; sole ten-figure diagnostic PASS; all candidates optimizer-success/rank-eligible/`200/200`/P1-descent; 13/13 winners strict mean+max descent, negative gradient displacement, accepted | **PASS; fresh formal pair authorized** |
+
 ## 2026-08-06 P1 recorded-profile shutdown boundary
 
 | Req ID | Evidence | Verification | Status |

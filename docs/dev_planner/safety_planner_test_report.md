@@ -8880,3 +8880,135 @@ Observation: Clean HEAD `f7518ed` produced fresh serial P1-1 run `f560550d96614b
 Verdict: FAIL (accepted-profile writer and rosbag shutdown boundary were not atomic).
 
 Conclusion: The retained pair proves fixed-lambda effectiveness but cannot grant progression because its newest CSV profile is not a recorded trajectory. The context sidecar now retains every completed binding through atomic whole-history replacement, and formal analysis selects the greatest profile sequence with an exact B-spline start in the explicit bag. It does not relax timestamps, reuse this analysis, or infer missing data. This pair will never be reanalyzed; a fresh build, diagnostic smoke, and wholly fresh formal pair are required. P1-3 remains prohibited.
+
+## 2026-08-06 recorded-profile-boundary diagnostic smoke figures (non-authoritative)
+
+Common authority for every figure below: run `c8281cb59d9c4df5990d177258d4488b`; clean HEAD `78db4ef6ed724b3885ecdbad71723b27fd9970f4`; runtime hashes `bspline=959b8dda210613eedacf9f9cfb9f722e5c46ad0beb2d74566072f2589c19c4f3`, `launch=d3d8c5987124536d2b24a3f6207841d98490a382cc63d140e239ecbb68bd29d1`, `planner=dcf6f7476cc9bd31aa430793149d9622bab36360e294d97d74b0c13a20de7e48`; export `/home/dev/ws_iap/src/iap/results/planner_validation/exports/test_planner_p1_degraded_lidar_good_gnss_degraded_lidar_good_1786051086767`; bag `/home/dev/ws_iap/src/iap/results/planner_validation/bags/test_planner_p1_degraded_lidar_good_gnss_degraded_lidar_good_20260806T211806Z`; attempts `19–31`; generations `31–55`; query-base window `1657065616.9820921–1657065628.9822066`; runtime window `2026-08-06T21:18:06Z–21:18:37Z`; diagnostic non-authoritative.
+
+### Full scenario top-down
+
+![Full scenario top-down](../../results/planner_validation/exports/test_planner_p1_degraded_lidar_good_gnss_degraded_lidar_good_1786051086767/p1_candidate_diagnostic_smoke/p1_diag_topdown_scene.png)
+
+Observation: The recorded scene contains all 52 candidate trajectories across 13 attempts.
+
+Authority: Common run/HEAD/runtime/export/bag/attempt/generation/query-base/time-window authority declared above.
+
+Verdict: PASS (diagnostic only).
+
+Conclusion: Spatial evidence is available; this figure alone is not formal effectiveness evidence.
+
+### Fan-out funnel
+
+![Fan-out funnel](../../results/planner_validation/exports/test_planner_p1_degraded_lidar_good_gnss_degraded_lidar_good_1786051086767/p1_candidate_diagnostic_smoke/p1_diag_fanout_funnel.png)
+
+Observation: Each of 13 attempts retains four bounded candidate starts and one selected winner.
+
+Authority: Common run/HEAD/runtime/export/bag/attempt/generation/query-base/time-window authority declared above.
+
+Verdict: PASS (diagnostic only).
+
+Conclusion: Candidate generation and the configured cap are provenance-closed.
+
+### Mean/max delta scatter
+
+![Mean/max delta scatter](../../results/planner_validation/exports/test_planner_p1_degraded_lidar_good_gnss_degraded_lidar_good_1786051086767/p1_candidate_diagnostic_smoke/p1_diag_mean_max_delta_scatter.png)
+
+Observation: All 52 candidates descend; all 13 winners strictly reduce both fixed-200 mean and max.
+
+Authority: Common run/HEAD/runtime/export/bag/attempt/generation/query-base/time-window authority declared above.
+
+Verdict: PASS (diagnostic only).
+
+Conclusion: The deterministic non-regression entry gate is green.
+
+### Initial/final pairwise matrices
+
+![Initial/final pairwise matrices](../../results/planner_validation/exports/test_planner_p1_degraded_lidar_good_gnss_degraded_lidar_good_1786051086767/p1_candidate_diagnostic_smoke/p1_diag_pairwise_matrices.png)
+
+Observation: Initial and final candidate distances remain nonzero across all 13 fan-out groups.
+
+Authority: Common run/HEAD/runtime/export/bag/attempt/generation/query-base/time-window authority declared above.
+
+Verdict: PASS (diagnostic only).
+
+Conclusion: Projected seeds and candidate-local anchors preserve diversity.
+
+### Objective decomposition
+
+![Objective decomposition](../../results/planner_validation/exports/test_planner_p1_degraded_lidar_good_gnss_degraded_lidar_good_1786051086767/p1_candidate_diagnostic_smoke/p1_diag_objective_decomposition.png)
+
+Observation: Base, normalized P1, anchor, and total merit components are present for all 13 attempts.
+
+Authority: Common run/HEAD/runtime/export/bag/attempt/generation/query-base/time-window authority declared above.
+
+Verdict: PASS (diagnostic only).
+
+Conclusion: Frozen-normalization evidence is complete.
+
+### Gradient/displacement alignment
+
+![Gradient/displacement alignment](../../results/planner_validation/exports/test_planner_p1_degraded_lidar_good_gnss_degraded_lidar_good_1786051086767/p1_candidate_diagnostic_smoke/p1_diag_gradient_displacement.png)
+
+Observation: All 13 selected winners have negative raw-P1-gradient dot displacement.
+
+Authority: Common run/HEAD/runtime/export/bag/attempt/generation/query-base/time-window authority declared above.
+
+Verdict: PASS (diagnostic only).
+
+Conclusion: All winners move in the intended risk-descent direction.
+
+### Per-attempt profile
+
+![Per-attempt profile](../../results/planner_validation/exports/test_planner_p1_degraded_lidar_good_gnss_degraded_lidar_good_1786051086767/p1_candidate_diagnostic_smoke/p1_diag_profile_comparison.png)
+
+Observation: All 52 initial/final candidate profiles contain exactly 200 valid samples per phase.
+
+Authority: Common run/HEAD/runtime/export/bag/attempt/generation/query-base/time-window authority declared above.
+
+Verdict: PASS (diagnostic only).
+
+Conclusion: No invalid sample is represented as finite risk.
+
+### P0 occupied/base-collision overlay
+
+![P0 occupied/base-collision overlay](../../results/planner_validation/exports/test_planner_p1_degraded_lidar_good_gnss_degraded_lidar_good_1786051086767/p1_candidate_diagnostic_smoke/p1_diag_p0_occupancy_overlay.png)
+
+Observation: Query points and owning interpolation corners remain separately attributable in the captured epoch.
+
+Authority: Common run/HEAD/runtime/export/bag/attempt/generation/query-base/time-window authority declared above.
+
+Verdict: PASS (diagnostic only).
+
+Conclusion: P0 occupied semantics were not relaxed.
+
+### Lifecycle swimlane
+
+![Lifecycle swimlane](../../results/planner_validation/exports/test_planner_p1_degraded_lidar_good_gnss_degraded_lidar_good_1786051086767/p1_candidate_diagnostic_smoke/p1_diag_lifecycle_swimlane.png)
+
+Observation: Admission, prepass, candidate optimization, selection, replacement, and publication close for all 13 attempts.
+
+Authority: Common run/HEAD/runtime/export/bag/attempt/generation/query-base/time-window authority declared above.
+
+Verdict: PASS (diagnostic only).
+
+Conclusion: There is exactly one accepted winner per attempt and no same-generation retry.
+
+### Artifact/provenance timeline
+
+![Artifact/provenance timeline](../../results/planner_validation/exports/test_planner_p1_degraded_lidar_good_gnss_degraded_lidar_good_1786051086767/p1_candidate_diagnostic_smoke/p1_diag_artifact_provenance_timeline.png)
+
+Observation: Recorder, validator, manifest, runtime hashes, and all v4 sidecars share one run identity; the atomic accepted-context history has 27 rows, rosbag has 27 B-splines, and the selector chooses latest sequence `27`.
+
+Authority: Common run/HEAD/runtime/export/bag/attempt/generation/query-base/time-window authority declared above.
+
+Verdict: PASS (diagnostic only).
+
+Conclusion: The shutdown-boundary repair is exercised end to end.
+
+### Superseding P1 fixed-lambda diagnostic terminal record — 2026-08-06 recorded-profile boundary
+
+Observation: The fresh run's sole verifier returned `passed=true, errors=[]`; its sole diagnostic analyzer wrote all ten nonempty figures and returned PASS. All 52 candidates across 13 attempts were optimizer-successful, rank-eligible, full fixed `200/200`, and P1-descending. All 13 selected winners strictly lowered mean/max, had negative raw-gradient displacement, and were accepted. Accepted context history and the bag reconciled all 27 sequences, including latest sequence `27`.
+
+Verdict: PASS (diagnostic entry-to-formal).
+
+Conclusion: Fixed support, normalized convergence, diversity, winner/replacement/lifecycle closure, P0 attribution, provenance, and the recorded-profile boundary are green. This authorizes one wholly fresh serial 90-second P1-1/P1-2 pair and exactly one formal analyzer invocation for that pair. It does not authorize P1-3.
