@@ -8572,3 +8572,11 @@ Observation: At clean HEAD `768cc5e6fd53a6aaf7161b6dd77389953f6b4dad`, P1-1 run 
 Verdict: FAIL (formal; repeated unsupported terminal reference arc).
 
 Conclusion: Repetition rules out scheduler luck as a debugging strategy. The next implementation records one genuine fixed-200 remaining-incumbent observation in metrics-only mode when the same accepted trajectory first enters a later immutable snapshot horizon, with exact snapshot-cloud binding and no trajectory/P0/P5 change. A fresh metrics-only smoke, enabled diagnostic entry run, and wholly fresh formal pair are required. P1-3 remains prohibited and was not run.
+
+### Superseding P1 fixed-lambda diagnostic terminal record — 2026-08-06 metrics-only future observation
+
+Observation: At clean HEAD `30f4146f6f34fb18f8b91b876751ba295966d4cc`, fresh 30-second metrics-only run `b2467bf0b8d64d00a46a5e58e25ad2f9` used export `test_planner_p1_degraded_lidar_good_gnss_degraded_lidar_good_1786048093142` and bag `test_planner_p1_degraded_lidar_good_gnss_degraded_lidar_good_20260806T202813Z`. Recorder, metadata, manifest, validator, and the sole v4 verifier finalized PASS with `errors=[]`. The final observation preserved accepted trajectory `12` and measured its real remaining `1.386992 s` on snapshot generation `30` at query base `1657065616.9940934`: all `200/200` samples are valid, `temporal_in_horizon=1`, temporal/occupied misses are zero, fallback is exactly `metrics_only_reference_observation`, and the exact captured cloud was forced into the bag. Timeline evidence contains three reference observations for three distinct trajectory IDs and no duplicate trajectory observation.
+
+Verdict: PASS (metrics-only integration diagnostic).
+
+Conclusion: The repeated unsupported-terminal-reference defect is closed without extrapolation, trajectory mutation, republish, optimizer change, P0/P5 change, lambda change, or support relaxation. A wholly fresh enabled 30-second entry smoke is required next. This diagnostic does not grant P1-3 permission.

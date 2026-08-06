@@ -1,5 +1,11 @@
 # Traceability Matrix (IAP)
 
+## 2026-08-06 P1 metrics-only future-observation smoke
+
+| Req ID | Evidence | Verification | Status |
+|---|---|---|---|
+| IAP-RQ-320 / IAP-RQ-400 / IAP-RQ-410 | Fresh run `b2467bf0b8d64d00a46a5e58e25ad2f9` at clean `30f4146`; final context/profile sequence `15` binds unchanged trajectory `12` to snapshot generation `30`, query base `1657065616.9940934`, fallback `metrics_only_reference_observation`, and an exact forced risk cloud | Sole v4 verifier PASS; remaining duration `1.386992 s <= 2.5 s`; fixed support `200/200`; `temporal_in_horizon=1`; temporal/occupied misses `0/0`; one observation per trajectory ID | **PASS; enabled diagnostic smoke pending** |
+
 > 目的：确保“需求（IAP-RQ）↔ 实现 ↔ 测试/实验 ↔ 日志/指标”可追溯，防止做错/做多/漏做。
 
 ## 0. 规则
