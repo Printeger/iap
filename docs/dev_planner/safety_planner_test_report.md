@@ -7264,3 +7264,11 @@ Observation: The one-shot v4 preflight returned `passed=true`, `errors=[]`, and 
 Verdict: PASS (entry to one fresh formal pair only).
 
 Conclusion: This physical-end record supersedes the generic diagnostic-only terminal statement solely for formal-pair scheduling. It establishes the prescribed entry gates but not formal accepted-profile effectiveness and does not authorize P1-3.
+
+## P1-2 fixed-lambda formal pair 3 preflight failure — 2026-08-06
+
+Observation: The serial 90 s launches completed at clean HEAD `20e03b3`. P1-1 metrics-only run `34fea7a730374925a1171ce8e95da177` used export `test_planner_p1_degraded_lidar_good_gnss_degraded_lidar_good_1786037413418` and bag `test_planner_p1_degraded_lidar_good_gnss_degraded_lidar_good_20260806T173013Z`; P1-2 enabled run `6d01558d0b294ad085b1849364af0b91` used export `test_planner_p1_degraded_lidar_good_gnss_degraded_lidar_good_1786037509679` and bag `test_planner_p1_degraded_lidar_good_gnss_degraded_lidar_good_20260806T173149Z`. Both recorders finalized their bag metadata, manifests, and passing validator summaries. The one-shot P1-2 preflight passed with `errors=[]`. The one-shot P1-1 preflight failed because this metrics-only run produced no candidate-optimization attempt and therefore no candidate control-point/profile/pairwise/checkpoint or P0-corner sidecars; its v4 debug, accepted profile, accepted-profile context, planning timeline, validator, and bag provenance were present. The verifier treated enabled-objective optimizer sidecars as unconditionally required.
+
+Verdict: FAIL (preflight; formal analyzer not invoked).
+
+Conclusion: This pair is retained as failed evidence and must not be analyzed or reused. The first hard gate is the verifier's mode-insensitive requirement for optimizer-attempt sidecars in a metrics-only baseline with no optimizer attempt. This record grants neither formal progression nor P1-3 permission.
