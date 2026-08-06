@@ -66,8 +66,10 @@ std::vector<P1CandidateDecision> selectP1Candidates(
   std::sort(eligible.begin(), eligible.end(), [&](std::size_t left, std::size_t right) {
     const auto& a = candidates[left];
     const auto& b = candidates[right];
-    return std::tie(a.post_total_objective, a.candidate_id) <
-        std::tie(b.post_total_objective, b.candidate_id);
+    const bool a_replaces = !incumbent || replacesIncumbent(a, *incumbent);
+    const bool b_replaces = !incumbent || replacesIncumbent(b, *incumbent);
+    return std::make_tuple(!a_replaces, a.post_total_objective, a.candidate_id) <
+        std::make_tuple(!b_replaces, b.post_total_objective, b.candidate_id);
   });
   for (std::size_t index = 0; index < eligible.size(); ++index) {
     decisions[eligible[index]].rank = static_cast<int>(index) + 1;

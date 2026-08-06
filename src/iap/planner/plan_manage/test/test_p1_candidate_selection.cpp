@@ -141,4 +141,35 @@ TEST(P1CandidateSelectionTest,
   EXPECT_TRUE(decisions[1].replace_published_trajectory);
 }
 
+TEST(P1CandidateSelectionTest,
+     PrefersReplaceableCandidateOverLowerMeritIncumbentRegression) {
+  auto incumbent = attempt19();
+  incumbent.post_mean_c_pi = 0.40;
+  incumbent.post_max_c_pi = 0.50;
+
+  auto lower_merit_regression = attempt19();
+  lower_merit_regression.candidate_id = 1;
+  lower_merit_regression.pre_total_objective = 1.0;
+  lower_merit_regression.post_total_objective = 0.10;
+  lower_merit_regression.pre_mean_c_pi = 0.46;
+  lower_merit_regression.post_mean_c_pi = 0.45;
+  lower_merit_regression.pre_max_c_pi = 0.56;
+  lower_merit_regression.post_max_c_pi = 0.55;
+
+  auto replaceable = lower_merit_regression;
+  replaceable.candidate_id = 2;
+  replaceable.post_total_objective = 0.20;
+  replaceable.pre_mean_c_pi = 0.41;
+  replaceable.post_mean_c_pi = 0.39;
+  replaceable.pre_max_c_pi = 0.51;
+  replaceable.post_max_c_pi = 0.49;
+
+  const auto decisions = ego_planner::selectP1Candidates(
+      {lower_merit_regression, replaceable}, &incumbent);
+  ASSERT_EQ(decisions.size(), 2U);
+  EXPECT_FALSE(decisions[0].selected);
+  EXPECT_TRUE(decisions[1].selected);
+  EXPECT_TRUE(decisions[1].replace_published_trajectory);
+}
+
 }  // namespace

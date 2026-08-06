@@ -3397,7 +3397,8 @@ namespace ego_planner
       UniformBspline candidate, const uint64_t planning_attempt_id,
       const uint64_t candidate_id,
       UniformBspline incumbent, const uint64_t incumbent_trajectory_id,
-      const std::string &final_trajectory_source) const
+      const std::string &final_trajectory_source,
+      const double incumbent_start_t_s) const
   {
     if (!p1_config_.debug_csv_enable || p1_config_.debug_csv_path.empty() ||
         !risk_snapshot_ || !std::isfinite(risk_query_base_time_s_))
@@ -3414,14 +3415,20 @@ namespace ego_planner
       out << "schema_version,run_id,manifest_path,planning_attempt_id,candidate_id,trajectory_role,trajectory_id,snapshot_generation_id,query_base_time_s,final_trajectory_source,sample_index,t_s,x,y,z,c_pi,valid,stale,reason\n";
     }
     const auto write_trajectory = [&](UniformBspline trajectory,
-                                      const char *role, uint64_t trajectory_id) {
-      const double duration = trajectory.getTimeSum();
-      if (!std::isfinite(duration) || duration < 0.0) return false;
+                                      const char *role, uint64_t trajectory_id,
+                                      double source_start_t_s) {
+      const double total_duration = trajectory.getTimeSum();
+      if (!std::isfinite(total_duration) || total_duration < 0.0 ||
+          !std::isfinite(source_start_t_s))
+        return false;
+      source_start_t_s = std::clamp(source_start_t_s, 0.0, total_duration);
+      const double duration = total_duration - source_start_t_s;
       for (int index = 0; index < kP1CandidateEvidenceSampleCount; ++index) {
         const double fraction = static_cast<double>(index) /
             static_cast<double>(kP1CandidateEvidenceSampleCount - 1);
         const double t_s = duration * fraction;
-        const Eigen::Vector3d point = trajectory.evaluateDeBoorT(t_s);
+        const Eigen::Vector3d point = trajectory.evaluateDeBoorT(
+            source_start_t_s + t_s);
         iap::RiskCostSample sample;
         const bool hit = risk_snapshot_->queryCost(
             point, risk_query_base_time_s_ + t_s, &sample);
@@ -3437,8 +3444,10 @@ namespace ego_planner
       }
       return true;
     };
-    return write_trajectory(candidate, "optimizer_selected_candidate", candidate_id) &&
-        write_trajectory(incumbent, "retained_incumbent", incumbent_trajectory_id);
+    return write_trajectory(
+               candidate, "optimizer_selected_candidate", candidate_id, 0.0) &&
+        write_trajectory(incumbent, "retained_incumbent",
+                         incumbent_trajectory_id, incumbent_start_t_s);
   }
 
   std::string BsplineOptimizer::p1AcceptedTrajectoryRiskProfilePath() const
@@ -3844,14 +3853,19 @@ namespace ego_planner
   }
 
   BsplineOptimizer::P1FixedLatticeRiskSummary
-  BsplineOptimizer::evaluateP1FixedLatticeRisk(UniformBspline trajectory) const
+  BsplineOptimizer::evaluateP1FixedLatticeRisk(
+      UniformBspline trajectory, double trajectory_start_t_s) const
   {
     P1FixedLatticeRiskSummary summary;
     if (!risk_snapshot_)
       return summary;
-    const double duration = trajectory.getTimeSum();
-    if (!std::isfinite(duration) || duration < 0.0)
+    const double total_duration = trajectory.getTimeSum();
+    if (!std::isfinite(total_duration) || total_duration < 0.0 ||
+        !std::isfinite(trajectory_start_t_s))
       return summary;
+    trajectory_start_t_s = std::clamp(
+        trajectory_start_t_s, 0.0, total_duration);
+    const double duration = total_duration - trajectory_start_t_s;
     const int denominator = std::max(1, kP1AcceptedProfileSampleCount - 1);
     double sum = 0.0;
     double maximum = -std::numeric_limits<double>::infinity();
@@ -3861,7 +3875,8 @@ namespace ego_planner
           static_cast<double>(denominator);
       iap::RiskCostSample sample;
       const bool hit = risk_snapshot_->queryCost(
-          trajectory.evaluateDeBoorT(t_s), risk_query_base_time_s_ + t_s, &sample);
+          trajectory.evaluateDeBoorT(trajectory_start_t_s + t_s),
+          risk_query_base_time_s_ + t_s, &sample);
       if (!hit || !sample.valid || sample.stale || !std::isfinite(sample.cost))
         return summary;
       sum += sample.cost;

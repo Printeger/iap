@@ -3,6 +3,11 @@
 > 规则：任何代码改动必须在这里记录，并包含 IAP-RQ-XXX。
 
 ## Unreleased
+- fix(planner-p1-incumbent-window): IAP-RQ-400 / IAP-RQ-410 — compare normalized P1 candidates against the incumbent's future segment on the candidate query epoch.
+  - The failed formal pair `44488f3441b3408a84624d500d638684` / `7d0dae399cc746c48dd31294a2bdd747` exposed two independent fail-closed issues: metrics-only preflight was incorrectly requiring enabled replacement artifacts, and enabled replacement evaluation sampled the incumbent's entire historical B-spline while candidates started at the current query base.
+  - Incumbent fixed-200 evaluation and retained-profile evidence now start at `clamp(planning_start_time - incumbent_start_time, 0, duration)` while risk queries retain the candidate's immutable query base and restart `tau` at zero. This removes already-flown low-risk history from the comparison without changing the snapshot, lattice size, occupied semantics, or non-regression gate.
+  - When multiple self-descending candidates exist, candidates that satisfy the existing incumbent mean/max gate rank before non-replaceable candidates; frozen soft merit and candidate ID remain the tie-breakers. A unique non-replaceable winner is still selected and rejected when no candidate can replace the incumbent.
+  - Metrics-only v4 preflight still requires full candidate/profile/checkpoint/occupancy evidence but does not require enabled replacement-decision or retained-incumbent sidecars.
 - fix(planner-trajectory-command-qos): IAP-RQ-400 / IAP-RQ-410 — retain the latest accepted B-spline command for a late-starting trajectory server.
   - The fresh run `9e9103bd130040fcb905aca5a52e27af` had a healthy continuously advancing P0 grid but recorded zero `/drone_0_planning/bspline` messages: the startup base fallback was published before `traj_server` became ready, so the vehicle stayed still and every later seed remained 4.4 seconds long against the unchanged 2.5-second P0 horizon.
   - The planner publisher and trajectory-server subscriber now share reliable, transient-local, keep-last-one QoS. This changes command delivery only; P0 geometry/horizon/stale semantics, fixed P1 lambda/support, optimizer admission, and P5 gates are unchanged.

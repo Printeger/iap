@@ -161,6 +161,46 @@ class EvidenceBundlePreflightTest(unittest.TestCase):
         self.assertFalse(result["passed"])
         self.assertIn("candidate lacks full valid fixed-lattice support", result["errors"])
 
+    def test_metrics_only_candidates_do_not_require_replacement_closure(self):
+        root, export, bag = self.make_bundle()
+        self.addCleanup(root.cleanup)
+        manifest_path = export / "test_planner_manifest.json"
+        manifest = json.loads(manifest_path.read_text())
+        manifest["p1.metrics_only"] = True
+        manifest_path.write_text(json.dumps(manifest))
+        common = {
+            "schema_version": preflight.SCHEMA,
+            "run_id": "run-1",
+            "manifest_path": str(manifest_path),
+        }
+        payload = {
+            **common,
+            "export_dir": str(export),
+            "bag_path": str(bag),
+        }
+        debug_path = export / "planner_p1_integrity_cost_debug.csv"
+        with debug_path.open("w", newline="") as handle:
+            writer = csv.DictWriter(handle, fieldnames=sorted({
+                **common, "applied_to_objective": "0"}))
+            writer.writeheader()
+            writer.writerow({**common, "applied_to_objective": "0"})
+        candidate_path = export / "planner_p1_candidate_optimization.csv"
+        with candidate_path.open(newline="") as handle:
+            candidates = list(csv.DictReader(handle))
+        for candidate in candidates:
+            candidate["replacement_accepted"] = "0"
+        with candidate_path.open("w", newline="") as handle:
+            writer = csv.DictWriter(handle, fieldnames=sorted(candidates[0]))
+            writer.writeheader()
+            writer.writerows(candidates)
+
+        with mock.patch.object(
+                preflight, "read_bag_provenance", return_value=([payload], "")):
+            result = preflight.validate_bundle(
+                export, bag, metrics_only=True, lambda_value=0.00001)
+
+        self.assertTrue(result["passed"], result["errors"])
+
 
 if __name__ == "__main__":
     unittest.main()

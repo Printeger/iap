@@ -460,7 +460,8 @@ namespace ego_planner
         UniformBspline candidate, uint64_t planning_attempt_id,
         uint64_t candidate_id,
         UniformBspline incumbent, uint64_t incumbent_trajectory_id,
-        const std::string &final_trajectory_source) const;
+        const std::string &final_trajectory_source,
+        double incumbent_start_t_s = 0.0) const;
     void setP1IntegrityConfigForTest(const P1IntegrityConfig &config) { p1_config_ = config; }
     void setP4RiskAStarConfigForTest(const P4RiskAStarConfig &config) { p4_config_ = config; }
     bool evaluateReboundCostForTest(const Eigen::MatrixXd &control_points, double ts,
@@ -495,7 +496,8 @@ namespace ego_planner
         UniformBspline trajectory, double accepted_stamp_s,
         const std::string &trajectory_frame_id) const;
     P1FixedLatticeRiskSummary evaluateP1FixedLatticeRisk(
-        UniformBspline trajectory) const;
+        UniformBspline trajectory,
+        double trajectory_start_t_s = 0.0) const;
 
   private:
     GridMap::Ptr grid_map_;

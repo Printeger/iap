@@ -1019,6 +1019,31 @@ TEST(P1IntegrityCostTest, FixedLatticeModeAndRiskGradientSupplementAreDeterminis
   EXPECT_EQ(optimizer->lastP1FanoutDiagnostics().supplemental_candidate_count, 3);
 }
 
+TEST(P1IntegrityCostTest, IncumbentRiskUsesOnlyFutureTrajectoryWindow) {
+  ego_planner::SwarmTrajData swarm;
+  const Eigen::MatrixXd q = makeControlPoints();
+  AffineProvider provider(10.0, Eigen::Vector3d(1.0, 0.0, 0.0));
+  auto snapshot = makeSnapshot(provider);
+  auto config = disabledConfig();
+  config.use_integrity_cost = true;
+  config.metrics_only = false;
+  config.lambda_integrity = 0.00001;
+  config.objective_aggregation_mode = "fixed_200_mean";
+  auto optimizer = makeOptimizer(config, &swarm);
+  optimizer->setRiskSnapshot(snapshot, snapshot->stamp_s());
+
+  ego_planner::UniformBspline trajectory(q, 3, 0.1);
+  const double future_start_t_s = trajectory.getTimeSum() * 0.5;
+  const auto whole = optimizer->evaluateP1FixedLatticeRisk(trajectory);
+  const auto future = optimizer->evaluateP1FixedLatticeRisk(
+      trajectory, future_start_t_s);
+
+  ASSERT_TRUE(whole.full_support);
+  ASSERT_TRUE(future.full_support);
+  EXPECT_GT(future.mean_c_pi, whole.mean_c_pi);
+  EXPECT_DOUBLE_EQ(future.max_c_pi, whole.max_c_pi);
+}
+
 TEST(P1IntegrityCostTest, Fixed200RawGradientProbeDescends) {
   ego_planner::SwarmTrajData swarm;
   const Eigen::MatrixXd q = makeControlPoints();

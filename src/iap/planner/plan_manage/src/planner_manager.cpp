@@ -699,6 +699,17 @@ namespace ego_planner
 
     const auto planning_snapshot = currentPlanningRiskSnapshot();
     const double planning_query_base_time_s = currentPlanningQueryBaseTime();
+    double incumbent_start_t_s = 0.0;
+    if (has_existing_trajectory &&
+        std::isfinite(planning_risk_context_.planning_start_s) &&
+        std::isfinite(local_data_.start_time_.seconds()) &&
+        std::isfinite(local_data_.duration_))
+    {
+      incumbent_start_t_s = std::clamp(
+          planning_risk_context_.planning_start_s -
+              local_data_.start_time_.seconds(),
+          0.0, std::max(0.0, local_data_.duration_));
+    }
     const auto set_p1_context = [this, planning_snapshot,
                                  planning_query_base_time_s,
                                  &p1_objective_allowed,
@@ -1242,7 +1253,7 @@ namespace ego_planner
             bspline_optimizer_->setRiskSnapshot(
                 planning_snapshot, planning_query_base_time_s);
             const auto incumbent_summary = bspline_optimizer_->evaluateP1FixedLatticeRisk(
-                local_data_.position_traj_);
+                local_data_.position_traj_, incumbent_start_t_s);
             bspline_optimizer_->clearRiskSnapshot();
             if (incumbent_summary.full_support)
             {
@@ -1303,7 +1314,7 @@ namespace ego_planner
                 bspline_optimizer_->writeP1CandidateRetainedProfile(
                     selected_candidate, trace.planning_attempt_id, trace.candidate_id,
                     local_data_.position_traj_, local_data_.traj_id_,
-                    "retained_incumbent");
+                    "retained_incumbent", incumbent_start_t_s);
                 bspline_optimizer_->writeP1ReplacementDecision(
                     trace, local_data_.traj_id_, local_data_.start_time_.seconds(),
                     "retained_incumbent",
@@ -1454,7 +1465,7 @@ namespace ego_planner
       {
         incumbent = &incumbent_evidence;
         const auto incumbent_summary = bspline_optimizer_->evaluateP1FixedLatticeRisk(
-            local_data_.position_traj_);
+            local_data_.position_traj_, incumbent_start_t_s);
         trace.incumbent_mean_c_pi = incumbent_summary.mean_c_pi;
         trace.incumbent_max_c_pi = incumbent_summary.max_c_pi;
         if (incumbent_summary.full_support)
@@ -1496,7 +1507,7 @@ namespace ego_planner
             UniformBspline(ctrl_pts, 3, ts), trace.planning_attempt_id,
             trace.candidate_id,
             local_data_.position_traj_, local_data_.traj_id_,
-            "retained_incumbent");
+            "retained_incumbent", incumbent_start_t_s);
         bspline_optimizer_->writeP1ReplacementDecision(
             trace, local_data_.traj_id_, local_data_.start_time_.seconds(),
             "retained_incumbent",

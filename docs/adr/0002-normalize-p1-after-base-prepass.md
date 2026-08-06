@@ -22,6 +22,10 @@ The normalization and differentiable seed anchor remain constant across one cand
 
 Singleton fan-out happens only after the base prepass. It retains the base seed and adds `0.025/0.05/0.10 m` candidates using each active control point's own projected fixed-200 `-raw P1` gradient. The configured candidate count remains a cap.
 
+An incumbent replacement comparison uses the same immutable snapshot and query base as the candidates, but samples only the incumbent segment that remains at the planning epoch. If the incumbent started at `t_start`, its source parameter begins at `clamp(planning_start-t_start, 0, duration)` while risk-grid query `tau` begins at zero from the candidate query base. Already-flown history is not part of a future replacement decision.
+
+Ranking remains a soft-merit choice inside the existing mean/max publication preference: when at least one self-descending candidate also satisfies incumbent non-regression, those publishable candidates rank before candidates that would necessarily be rejected, with normalized merit and candidate ID as deterministic tie-breakers. If none can replace the incumbent, the optimizer still records exactly one selected winner and rejects publication as before.
+
 ## Rejected alternatives
 
 - A global constant multiplier is scene- and attempt-scale dependent.

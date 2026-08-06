@@ -264,8 +264,9 @@ def validate_bundle(export_dir, bag_dir, *, metrics_only, lambda_value):
                            row.get("candidate_id_a") != row.get("candidate_id_b")]
         if not final_distances or max(final_distances) <= 1e-4:
             errors.append("final candidates collapse in control-point space")
-    rejected = [row for row in candidate if truthy(row.get("selected")) and
-                not truthy(row.get("replacement_accepted"))]
+    rejected = [] if metrics_only else [
+        row for row in candidate if truthy(row.get("selected")) and
+        not truthy(row.get("replacement_accepted"))]
     if rejected:
         decision_path = Path(str(manifest.get(
             "p1.replacement_decision_path", export_dir / "planner_p1_replacement_decision.csv")))
