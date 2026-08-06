@@ -7564,3 +7564,11 @@ Observation: The serial 90 s runs completed at clean HEAD `9eb5a9c`. P1-1 run `4
 Verdict: FAIL (preflight; formal analyzer not invoked).
 
 Conclusion: This pair is retained as failed evidence and must not be analyzed or reused. It grants neither formal progression nor P1-3 permission. A fresh pair is required to obtain the mandated base-prepass-success plus `200/200` intersection; a consecutive repeat of the same condition returns debugging to the deterministic invariant instead of permitting blind retries.
+
+## P1-2 fixed-lambda formal pair 6 effectiveness failure — 2026-08-06
+
+Observation: The serial 90 s runs completed at clean HEAD `06d8c7b888f24499d567cdbbf42ab1bf59c4539c`. P1-1 run `c27222a27c2b449aa7ddb5ef7d5149a1` used export `test_planner_p1_degraded_lidar_good_gnss_degraded_lidar_good_1786038958722` and bag `test_planner_p1_degraded_lidar_good_gnss_degraded_lidar_good_20260806T175558Z`; P1-2 run `8276994c76de47d5be0644fb51d0b199` used export `test_planner_p1_degraded_lidar_good_gnss_degraded_lidar_good_1786039060530` and bag `test_planner_p1_degraded_lidar_good_gnss_degraded_lidar_good_20260806T175740Z`. Both one-shot preflights passed. The prescribed formal analyzer was invoked exactly once as analysis `f8ec28b5007440a5b06c565125fbb80b`, produced all 39 figures, and reported `warnings=[]` and `inconclusive=[]`. Candidate identity closure, exact risk-scene alignment, provenance, support, lifecycle, and all other independent hard gates passed. The sole effectiveness failure was strict fixed-200 reduction: P1-2 mean/max were `0.41067471803525524`/`0.42340327647813447`, versus P1-1 `0.4035370368815203`/`0.42252574615186456`; the consequent cause-exclusion gate therefore also failed with `risk_profile_not_reduced=1`.
+
+Verdict: FAIL (formal effectiveness).
+
+Conclusion: This pair is retained as the first fully aligned evidence after the lifecycle-identity repair. It closes the identity and scene-attribution branches but proves that the current candidate preference/ranking does not yet satisfy the formal strict mean/max requirement. It grants neither progression nor P1-3 permission; debugging returns to the fixed deterministic candidate/profile evidence before a fresh pair is permitted.
