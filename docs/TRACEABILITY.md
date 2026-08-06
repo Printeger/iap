@@ -1,5 +1,11 @@
 # Traceability Matrix (IAP)
 
+## 2026-08-06 P1 retained-incumbent formal-entry smoke
+
+| Req ID | Evidence | Verification | Status |
+|---|---|---|---|
+| IAP-RQ-320 / IAP-RQ-400 / IAP-RQ-410 | Fresh enabled run `46d542b10f0840b09c494b18b720ed3b` at clean `006d4d9`; 36 candidates/9 attempts; 36 distinct initial/final hashes; 54 nonzero initial/final pairwise control-point and profile comparisons | v4 verifier PASS; sole diagnostic PASS with ten nonempty PNGs; all rows optimizer-success/rank-eligible/`200/200`/P1-descent; exactly one accepted winner per attempt; all winners strictly lower mean/max with negative raw-gradient dot displacement | **PASS; fresh formal pair authorized** |
+
 ## 2026-08-06 P1 retained-incumbent presence closure
 
 | Req ID | Evidence | Verification | Status |

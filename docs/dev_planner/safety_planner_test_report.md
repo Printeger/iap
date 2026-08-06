@@ -8742,3 +8742,133 @@ Observation: Fresh enabled 30-second run `99352acb7ad94aea923172569f6f6537` at c
 Verdict: FAIL (retained-incumbent identity conflated with comparison support).
 
 Conclusion: The run is retained and cannot authorize formal. Incumbent presence must be recorded before fixed-200 comparison, while incomplete comparison must continue rejecting replacement closed. A red-then-green regression now fixes this distinction; a wholly fresh enabled entry run is required. P0 occupied-corner semantics, fixed support, and P1-3 remain unchanged.
+
+## 2026-08-06 retained-incumbent diagnostic-smoke figure evidence (non-authoritative)
+
+### Full scenario top-down
+
+![Full scenario top-down](../../results/planner_validation/exports/test_planner_p1_degraded_lidar_good_gnss_degraded_lidar_good_1786049693467/p1_candidate_diagnostic_smoke/p1_diag_topdown_scene.png)
+
+Observation: 36 fixed-200 candidate rows across 9 attempts are shown in the recorded scenario.
+
+Authority: run `46d542b10f0840b09c494b18b720ed3b`; HEAD `006d4d9534b09f8fd3cf2d347907301f31adb97c`; runtime hashes `bspline=fa89a31a87e28ee18afe88b4b0d331e068a093fe3b3e32f33a1074e4387408a6`, `launch=d3d8c5987124536d2b24a3f6207841d98490a382cc63d140e239ecbb68bd29d1`, `planner=f93663218b3c5517c4fb3bb7135977a025ed6cd1f550a9ec4e26eb9f6434e233`; export `/home/dev/ws_iap/src/iap/results/planner_validation/exports/test_planner_p1_degraded_lidar_good_gnss_degraded_lidar_good_1786049693467`; bag `/home/dev/ws_iap/src/iap/results/planner_validation/bags/test_planner_p1_degraded_lidar_good_gnss_degraded_lidar_good_20260806T205453Z`; attempts `24–32`, candidates `1–4`, generations `39,41,43,45,47,49,51,53,55`, query-base window `1657065621.0021017–1657065629.0021124`; runtime window `2026-08-06T20:54:53Z–20:55:24Z`; diagnostic non-authoritative.
+
+Verdict: PASS (diagnostic only).
+
+Conclusion: The scene contains replayable candidate trajectories; this figure alone does not establish formal effectiveness.
+
+### Fan-out funnel
+
+![Fan-out funnel](../../results/planner_validation/exports/test_planner_p1_degraded_lidar_good_gnss_degraded_lidar_good_1786049693467/p1_candidate_diagnostic_smoke/p1_diag_fanout_funnel.png)
+
+Observation: Every attempt retains the base candidate and its projected-gradient fan-out within the configured cap.
+
+Authority: run `46d542b10f0840b09c494b18b720ed3b`; HEAD `006d4d9534b09f8fd3cf2d347907301f31adb97c`; runtime hashes `bspline=fa89a31a87e28ee18afe88b4b0d331e068a093fe3b3e32f33a1074e4387408a6`, `launch=d3d8c5987124536d2b24a3f6207841d98490a382cc63d140e239ecbb68bd29d1`, `planner=f93663218b3c5517c4fb3bb7135977a025ed6cd1f550a9ec4e26eb9f6434e233`; export `/home/dev/ws_iap/src/iap/results/planner_validation/exports/test_planner_p1_degraded_lidar_good_gnss_degraded_lidar_good_1786049693467`; bag `/home/dev/ws_iap/src/iap/results/planner_validation/bags/test_planner_p1_degraded_lidar_good_gnss_degraded_lidar_good_20260806T205453Z`; attempts `24–32`, candidates `1–4`, generations `39,41,43,45,47,49,51,53,55`, query-base window `1657065621.0021017–1657065629.0021124`; runtime window `2026-08-06T20:54:53Z–20:55:24Z`; diagnostic non-authoritative.
+
+Verdict: PASS (diagnostic only).
+
+Conclusion: Generation, optimization, full-support, and eligibility funnel counts remain bounded and nonzero.
+
+### Mean/max delta scatter
+
+![Mean/max delta scatter](../../results/planner_validation/exports/test_planner_p1_degraded_lidar_good_gnss_degraded_lidar_good_1786049693467/p1_candidate_diagnostic_smoke/p1_diag_mean_max_delta_scatter.png)
+
+Observation: All 36 candidates reduce fixed-200 mean and max; all 9 selected winners are strict in both coordinates.
+
+Authority: run `46d542b10f0840b09c494b18b720ed3b`; HEAD `006d4d9534b09f8fd3cf2d347907301f31adb97c`; runtime hashes `bspline=fa89a31a87e28ee18afe88b4b0d331e068a093fe3b3e32f33a1074e4387408a6`, `launch=d3d8c5987124536d2b24a3f6207841d98490a382cc63d140e239ecbb68bd29d1`, `planner=f93663218b3c5517c4fb3bb7135977a025ed6cd1f550a9ec4e26eb9f6434e233`; export `/home/dev/ws_iap/src/iap/results/planner_validation/exports/test_planner_p1_degraded_lidar_good_gnss_degraded_lidar_good_1786049693467`; bag `/home/dev/ws_iap/src/iap/results/planner_validation/bags/test_planner_p1_degraded_lidar_good_gnss_degraded_lidar_good_20260806T205453Z`; attempts `24–32`, candidates `1–4`, generations `39,41,43,45,47,49,51,53,55`, query-base window `1657065621.0021017–1657065629.0021124`; runtime window `2026-08-06T20:54:53Z–20:55:24Z`; diagnostic non-authoritative.
+
+Verdict: PASS (diagnostic only).
+
+Conclusion: The deterministic per-candidate non-regression and strict-descent entry gate is satisfied.
+
+### Initial/final pairwise matrices
+
+![Initial/final pairwise matrices](../../results/planner_validation/exports/test_planner_p1_degraded_lidar_good_gnss_degraded_lidar_good_1786049693467/p1_candidate_diagnostic_smoke/p1_diag_pairwise_matrices.png)
+
+Observation: Initial and final control-point/profile matrices each contain 54 nonzero off-diagonal entries; all 36 initial and final hashes are distinct.
+
+Authority: run `46d542b10f0840b09c494b18b720ed3b`; HEAD `006d4d9534b09f8fd3cf2d347907301f31adb97c`; runtime hashes `bspline=fa89a31a87e28ee18afe88b4b0d331e068a093fe3b3e32f33a1074e4387408a6`, `launch=d3d8c5987124536d2b24a3f6207841d98490a382cc63d140e239ecbb68bd29d1`, `planner=f93663218b3c5517c4fb3bb7135977a025ed6cd1f550a9ec4e26eb9f6434e233`; export `/home/dev/ws_iap/src/iap/results/planner_validation/exports/test_planner_p1_degraded_lidar_good_gnss_degraded_lidar_good_1786049693467`; bag `/home/dev/ws_iap/src/iap/results/planner_validation/bags/test_planner_p1_degraded_lidar_good_gnss_degraded_lidar_good_20260806T205453Z`; attempts `24–32`, candidates `1–4`, generations `39,41,43,45,47,49,51,53,55`, query-base window `1657065621.0021017–1657065629.0021124`; runtime window `2026-08-06T20:54:53Z–20:55:24Z`; diagnostic non-authoritative.
+
+Verdict: PASS (diagnostic only).
+
+Conclusion: Projected seeds and candidate-local anchors preserve distinguishable final solutions.
+
+### Objective decomposition
+
+![Objective decomposition](../../results/planner_validation/exports/test_planner_p1_degraded_lidar_good_gnss_degraded_lidar_good_1786049693467/p1_candidate_diagnostic_smoke/p1_diag_objective_decomposition.png)
+
+Observation: Base, raw P1, normalized P1, anchor, and total components are separated per attempt without cross-attempt lines.
+
+Authority: run `46d542b10f0840b09c494b18b720ed3b`; HEAD `006d4d9534b09f8fd3cf2d347907301f31adb97c`; runtime hashes `bspline=fa89a31a87e28ee18afe88b4b0d331e068a093fe3b3e32f33a1074e4387408a6`, `launch=d3d8c5987124536d2b24a3f6207841d98490a382cc63d140e239ecbb68bd29d1`, `planner=f93663218b3c5517c4fb3bb7135977a025ed6cd1f550a9ec4e26eb9f6434e233`; export `/home/dev/ws_iap/src/iap/results/planner_validation/exports/test_planner_p1_degraded_lidar_good_gnss_degraded_lidar_good_1786049693467`; bag `/home/dev/ws_iap/src/iap/results/planner_validation/bags/test_planner_p1_degraded_lidar_good_gnss_degraded_lidar_good_20260806T205453Z`; attempts `24–32`, candidates `1–4`, generations `39,41,43,45,47,49,51,53,55`, query-base window `1657065621.0021017–1657065629.0021124`; runtime window `2026-08-06T20:54:53Z–20:55:24Z`; diagnostic non-authoritative.
+
+Verdict: PASS (diagnostic only).
+
+Conclusion: Frozen-normalization merit decomposition is present for every optimizer start.
+
+### Gradient/displacement
+
+![Gradient/displacement](../../results/planner_validation/exports/test_planner_p1_degraded_lidar_good_gnss_degraded_lidar_good_1786049693467/p1_candidate_diagnostic_smoke/p1_diag_gradient_displacement.png)
+
+Observation: Every winner has `raw P1 gradient · displacement < 0`, aligned with strict fixed-lattice descent.
+
+Authority: run `46d542b10f0840b09c494b18b720ed3b`; HEAD `006d4d9534b09f8fd3cf2d347907301f31adb97c`; runtime hashes `bspline=fa89a31a87e28ee18afe88b4b0d331e068a093fe3b3e32f33a1074e4387408a6`, `launch=d3d8c5987124536d2b24a3f6207841d98490a382cc63d140e239ecbb68bd29d1`, `planner=f93663218b3c5517c4fb3bb7135977a025ed6cd1f550a9ec4e26eb9f6434e233`; export `/home/dev/ws_iap/src/iap/results/planner_validation/exports/test_planner_p1_degraded_lidar_good_gnss_degraded_lidar_good_1786049693467`; bag `/home/dev/ws_iap/src/iap/results/planner_validation/bags/test_planner_p1_degraded_lidar_good_gnss_degraded_lidar_good_20260806T205453Z`; attempts `24–32`, candidates `1–4`, generations `39,41,43,45,47,49,51,53,55`, query-base window `1657065621.0021017–1657065629.0021124`; runtime window `2026-08-06T20:54:53Z–20:55:24Z`; diagnostic non-authoritative.
+
+Verdict: PASS (diagnostic only).
+
+Conclusion: The normalized preference closes the legacy positive-gradient displacement counterexample.
+
+### Per-attempt candidate profile
+
+![Per-attempt candidate profile](../../results/planner_validation/exports/test_planner_p1_degraded_lidar_good_gnss_degraded_lidar_good_1786049693467/p1_candidate_diagnostic_smoke/p1_diag_profile_comparison.png)
+
+Observation: Every initial/final candidate profile is represented by exactly 200 valid samples.
+
+Authority: run `46d542b10f0840b09c494b18b720ed3b`; HEAD `006d4d9534b09f8fd3cf2d347907301f31adb97c`; runtime hashes `bspline=fa89a31a87e28ee18afe88b4b0d331e068a093fe3b3e32f33a1074e4387408a6`, `launch=d3d8c5987124536d2b24a3f6207841d98490a382cc63d140e239ecbb68bd29d1`, `planner=f93663218b3c5517c4fb3bb7135977a025ed6cd1f550a9ec4e26eb9f6434e233`; export `/home/dev/ws_iap/src/iap/results/planner_validation/exports/test_planner_p1_degraded_lidar_good_gnss_degraded_lidar_good_1786049693467`; bag `/home/dev/ws_iap/src/iap/results/planner_validation/bags/test_planner_p1_degraded_lidar_good_gnss_degraded_lidar_good_20260806T205453Z`; attempts `24–32`, candidates `1–4`, generations `39,41,43,45,47,49,51,53,55`, query-base window `1657065621.0021017–1657065629.0021124`; runtime window `2026-08-06T20:54:53Z–20:55:24Z`; diagnostic non-authoritative.
+
+Verdict: PASS (diagnostic only).
+
+Conclusion: No invalid sample is mixed with a finite `c_pi` in candidate admission evidence.
+
+### P0 occupied/base-collision overlay
+
+![P0 occupied/base-collision overlay](../../results/planner_validation/exports/test_planner_p1_degraded_lidar_good_gnss_degraded_lidar_good_1786049693467/p1_candidate_diagnostic_smoke/p1_diag_p0_occupancy_overlay.png)
+
+Observation: Query points and the interpolation corners owning occupied attribution are plotted separately from captured P0 evidence.
+
+Authority: run `46d542b10f0840b09c494b18b720ed3b`; HEAD `006d4d9534b09f8fd3cf2d347907301f31adb97c`; runtime hashes `bspline=fa89a31a87e28ee18afe88b4b0d331e068a093fe3b3e32f33a1074e4387408a6`, `launch=d3d8c5987124536d2b24a3f6207841d98490a382cc63d140e239ecbb68bd29d1`, `planner=f93663218b3c5517c4fb3bb7135977a025ed6cd1f550a9ec4e26eb9f6434e233`; export `/home/dev/ws_iap/src/iap/results/planner_validation/exports/test_planner_p1_degraded_lidar_good_gnss_degraded_lidar_good_1786049693467`; bag `/home/dev/ws_iap/src/iap/results/planner_validation/bags/test_planner_p1_degraded_lidar_good_gnss_degraded_lidar_good_20260806T205453Z`; attempts `24–32`, candidates `1–4`, generations `39,41,43,45,47,49,51,53,55`, query-base window `1657065621.0021017–1657065629.0021124`; runtime window `2026-08-06T20:54:53Z–20:55:24Z`; diagnostic non-authoritative.
+
+Verdict: PASS (diagnostic only).
+
+Conclusion: Occupied interpolation support remains invalid and attributable; no P0 semantics are relaxed.
+
+### Lifecycle swimlane
+
+![Lifecycle swimlane](../../results/planner_validation/exports/test_planner_p1_degraded_lidar_good_gnss_degraded_lidar_good_1786049693467/p1_candidate_diagnostic_smoke/p1_diag_lifecycle_swimlane.png)
+
+Observation: Admission, base prepass, optimizer, selection, replacement, and publication events are present for the explicit run.
+
+Authority: run `46d542b10f0840b09c494b18b720ed3b`; HEAD `006d4d9534b09f8fd3cf2d347907301f31adb97c`; runtime hashes `bspline=fa89a31a87e28ee18afe88b4b0d331e068a093fe3b3e32f33a1074e4387408a6`, `launch=d3d8c5987124536d2b24a3f6207841d98490a382cc63d140e239ecbb68bd29d1`, `planner=f93663218b3c5517c4fb3bb7135977a025ed6cd1f550a9ec4e26eb9f6434e233`; export `/home/dev/ws_iap/src/iap/results/planner_validation/exports/test_planner_p1_degraded_lidar_good_gnss_degraded_lidar_good_1786049693467`; bag `/home/dev/ws_iap/src/iap/results/planner_validation/bags/test_planner_p1_degraded_lidar_good_gnss_degraded_lidar_good_20260806T205453Z`; attempts `24–32`, candidates `1–4`, generations `39,41,43,45,47,49,51,53,55`, query-base window `1657065621.0021017–1657065629.0021124`; runtime window `2026-08-06T20:54:53Z–20:55:24Z`; diagnostic non-authoritative.
+
+Verdict: PASS (diagnostic only).
+
+Conclusion: Each attempt has exactly one selected and accepted winner, with no same-generation retry.
+
+### Artifact/provenance timeline
+
+![Artifact/provenance timeline](../../results/planner_validation/exports/test_planner_p1_degraded_lidar_good_gnss_degraded_lidar_good_1786049693467/p1_candidate_diagnostic_smoke/p1_diag_artifact_provenance_timeline.png)
+
+Observation: Recorder and launch bounds are present and all v4 artifacts share one run/manifest identity.
+
+Authority: run `46d542b10f0840b09c494b18b720ed3b`; HEAD `006d4d9534b09f8fd3cf2d347907301f31adb97c`; runtime hashes `bspline=fa89a31a87e28ee18afe88b4b0d331e068a093fe3b3e32f33a1074e4387408a6`, `launch=d3d8c5987124536d2b24a3f6207841d98490a382cc63d140e239ecbb68bd29d1`, `planner=f93663218b3c5517c4fb3bb7135977a025ed6cd1f550a9ec4e26eb9f6434e233`; export `/home/dev/ws_iap/src/iap/results/planner_validation/exports/test_planner_p1_degraded_lidar_good_gnss_degraded_lidar_good_1786049693467`; bag `/home/dev/ws_iap/src/iap/results/planner_validation/bags/test_planner_p1_degraded_lidar_good_gnss_degraded_lidar_good_20260806T205453Z`; attempts `24–32`, candidates `1–4`, generations `39,41,43,45,47,49,51,53,55`, query-base window `1657065621.0021017–1657065629.0021124`; runtime window `2026-08-06T20:54:53Z–20:55:24Z`; diagnostic non-authoritative.
+
+Verdict: PASS (diagnostic only).
+
+Conclusion: Recorder, validator, manifest, runtime hashes, bag, and candidate artifacts are provenance-closed.
+
+### Superseding P1 fixed-lambda diagnostic terminal record — 2026-08-06 retained-incumbent entry
+
+Observation: Analyzer completed exactly once for run `46d542b10f0840b09c494b18b720ed3b` and wrote all ten required nonempty figures. The v4 verifier passed with `errors=[]`. Across 9 attempts, all 36 candidates were optimizer-successful, rank-eligible, fixed `200/200`, and P1-descending. Each attempt selected and accepted exactly one winner; all nine winners strictly lowered mean and max and had negative raw-P1-gradient/displacement alignment. All 36 initial and final hashes are distinct, and initial/final control-point/profile pairwise evidence each preserves 54 nonzero entries.
+
+Verdict: PASS (diagnostic entry-to-formal).
+
+Conclusion: Fixed support, normalized convergence, diversity, winner identity, replacement closure, lifecycle, P0 attribution, and provenance entry gates are green. This authorizes one wholly fresh serial 90-second P1-1/P1-2 pair and exactly one formal analyzer invocation for that pair. It does not authorize P1-3.
