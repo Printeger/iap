@@ -324,6 +324,10 @@ namespace ego_planner
       // without weakening the candidate CSV finite-value contract.
       double incumbent_mean_c_pi = 0.0;
       double incumbent_max_c_pi = 0.0;
+      std::string replacement_comparison_mode = "full_profile";
+      double replacement_comparison_duration_s = 0.0;
+      double replacement_candidate_mean_c_pi = 0.0;
+      double replacement_candidate_max_c_pi = 0.0;
       std::string fallback_reason = "not_evaluated";
       std::string support_signature;
       std::string initial_control_points_hash;
@@ -497,7 +501,8 @@ namespace ego_planner
         const std::string &trajectory_frame_id) const;
     P1FixedLatticeRiskSummary evaluateP1FixedLatticeRisk(
         UniformBspline trajectory,
-        double trajectory_start_t_s = 0.0) const;
+        double trajectory_start_t_s = 0.0,
+        double window_duration_s = std::numeric_limits<double>::infinity()) const;
 
   private:
     GridMap::Ptr grid_map_;

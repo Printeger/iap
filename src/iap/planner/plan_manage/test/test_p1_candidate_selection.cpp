@@ -196,6 +196,57 @@ TEST(P1CandidateSelectionTest,
 }
 
 TEST(P1CandidateSelectionTest,
+     SharedForwardWindowCanReplaceShorterIncumbentWithoutFullTailBias) {
+  auto incumbent = attempt19();
+  incumbent.post_mean_c_pi = 0.4175775564;
+  incumbent.post_max_c_pi = 0.4225869124;
+  incumbent.replacement_comparison_available = true;
+
+  auto candidate = attempt19();
+  candidate.pre_mean_c_pi = 0.4181317122;
+  candidate.post_mean_c_pi = 0.4178828438;
+  candidate.pre_max_c_pi = 0.4216667275;
+  candidate.post_max_c_pi = 0.4214786380;
+  candidate.replacement_comparison_available = true;
+  candidate.replacement_mean_c_pi = 0.4147075069;
+  candidate.replacement_max_c_pi = 0.4185286263;
+  candidate.replacement_incumbent_mean_c_pi = 0.4175775564;
+  candidate.replacement_incumbent_max_c_pi = 0.4225869124;
+
+  const auto decisions =
+      ego_planner::selectP1Candidates({candidate}, &incumbent);
+
+  ASSERT_EQ(decisions.size(), 1U);
+  EXPECT_TRUE(decisions[0].rank_eligible);
+  EXPECT_TRUE(decisions[0].selected);
+  EXPECT_TRUE(decisions[0].replace_published_trajectory);
+  EXPECT_EQ(decisions[0].replacement_reason, "p1_risk_preference_improved");
+}
+
+TEST(P1CandidateSelectionTest,
+     SharedWindowMissingForCandidateRejectsWithoutFullProfileFallback) {
+  auto incumbent = attempt19();
+  incumbent.post_mean_c_pi = 0.50;
+  incumbent.post_max_c_pi = 0.60;
+  incumbent.replacement_comparison_available = true;
+
+  auto candidate = attempt19();
+  candidate.pre_mean_c_pi = 0.41;
+  candidate.post_mean_c_pi = 0.40;
+  candidate.pre_max_c_pi = 0.51;
+  candidate.post_max_c_pi = 0.50;
+
+  const auto decisions =
+      ego_planner::selectP1Candidates({candidate}, &incumbent);
+
+  ASSERT_EQ(decisions.size(), 1U);
+  EXPECT_TRUE(decisions[0].selected);
+  EXPECT_FALSE(decisions[0].replace_published_trajectory);
+  EXPECT_EQ(decisions[0].replacement_reason,
+            "p1_replacement_risk_regression");
+}
+
+TEST(P1CandidateSelectionTest,
      RejectsRefinementThatRegressesSelectedSeedMean) {
   const auto decision = ego_planner::decideP1RefinementRisk({
       true,
@@ -228,6 +279,26 @@ TEST(P1CandidateSelectionTest,
       0.40, 0.43,
       true,
       0.41, 0.43});
+  EXPECT_TRUE(decision.accept);
+  EXPECT_EQ(decision.reason, "p1_refined_risk_preference_improved");
+}
+
+TEST(P1CandidateSelectionTest,
+     RefinementUsesSharedForwardWindowForIncumbentComparison) {
+  ego_planner::P1RefinementRiskEvidence evidence{
+      true,
+      0.4181317122, 0.4216667275,
+      0.4178828438, 0.4214786380,
+      true,
+      0.4175775564, 0.4225869124};
+  evidence.replacement_comparison_available = true;
+  evidence.replacement_candidate_mean_c_pi = 0.4147075069;
+  evidence.replacement_candidate_max_c_pi = 0.4185286263;
+  evidence.replacement_incumbent_mean_c_pi = 0.4175775564;
+  evidence.replacement_incumbent_max_c_pi = 0.4225869124;
+
+  const auto decision = ego_planner::decideP1RefinementRisk(evidence);
+
   EXPECT_TRUE(decision.accept);
   EXPECT_EQ(decision.reason, "p1_refined_risk_preference_improved");
 }

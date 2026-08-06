@@ -30,11 +30,26 @@ bool p1Descent(const P1CandidateEvidence& value) {
 
 bool replacesIncumbent(const P1CandidateEvidence& candidate,
                        const P1CandidateEvidence& incumbent) {
+  // Once the caller enables shared-window comparison, every candidate must
+  // carry its own candidate/incumbent tuple.  A missing tuple rejects closed;
+  // it must never fall back to comparing unequal full-profile domains.
+  if (incumbent.replacement_comparison_available &&
+      !candidate.replacement_comparison_available) {
+    return false;
+  }
+  const double candidate_mean = candidate.replacement_comparison_available
+      ? candidate.replacement_mean_c_pi : candidate.post_mean_c_pi;
+  const double candidate_max = candidate.replacement_comparison_available
+      ? candidate.replacement_max_c_pi : candidate.post_max_c_pi;
+  const double incumbent_mean = candidate.replacement_comparison_available
+      ? candidate.replacement_incumbent_mean_c_pi : incumbent.post_mean_c_pi;
+  const double incumbent_max = candidate.replacement_comparison_available
+      ? candidate.replacement_incumbent_max_c_pi : incumbent.post_max_c_pi;
   return incumbent.full_support && finite(incumbent) &&
-      candidate.post_mean_c_pi <= incumbent.post_mean_c_pi &&
-      candidate.post_max_c_pi <= incumbent.post_max_c_pi &&
-      (candidate.post_mean_c_pi < incumbent.post_mean_c_pi ||
-       candidate.post_max_c_pi < incumbent.post_max_c_pi);
+      std::isfinite(candidate_mean) && std::isfinite(candidate_max) &&
+      std::isfinite(incumbent_mean) && std::isfinite(incumbent_max) &&
+      candidate_mean <= incumbent_mean && candidate_max <= incumbent_max &&
+      (candidate_mean < incumbent_mean || candidate_max < incumbent_max);
 }
 
 }  // namespace
@@ -145,12 +160,20 @@ P1RefinementRiskDecision decideP1RefinementRisk(
   }
 
   if (evidence.incumbent_available) {
+    const double candidate_mean = evidence.replacement_comparison_available
+        ? evidence.replacement_candidate_mean_c_pi : evidence.refined_mean_c_pi;
+    const double candidate_max = evidence.replacement_comparison_available
+        ? evidence.replacement_candidate_max_c_pi : evidence.refined_max_c_pi;
+    const double incumbent_mean = evidence.replacement_comparison_available
+        ? evidence.replacement_incumbent_mean_c_pi : evidence.incumbent_mean_c_pi;
+    const double incumbent_max = evidence.replacement_comparison_available
+        ? evidence.replacement_incumbent_max_c_pi : evidence.incumbent_max_c_pi;
     const bool incumbent_non_regression =
-        evidence.refined_mean_c_pi <= evidence.incumbent_mean_c_pi &&
-        evidence.refined_max_c_pi <= evidence.incumbent_max_c_pi;
+        std::isfinite(candidate_mean) && std::isfinite(candidate_max) &&
+        std::isfinite(incumbent_mean) && std::isfinite(incumbent_max) &&
+        candidate_mean <= incumbent_mean && candidate_max <= incumbent_max;
     const bool incumbent_strict_descent =
-        evidence.refined_mean_c_pi < evidence.incumbent_mean_c_pi ||
-        evidence.refined_max_c_pi < evidence.incumbent_max_c_pi;
+        candidate_mean < incumbent_mean || candidate_max < incumbent_max;
     if (!incumbent_non_regression || !incumbent_strict_descent) {
       decision.reason = "p1_refinement_replacement_risk_regression";
       return decision;

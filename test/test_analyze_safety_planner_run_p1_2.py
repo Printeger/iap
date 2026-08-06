@@ -186,6 +186,10 @@ def candidate_optimization_row(**overrides):
         "replacement_accepted": 1, "replacement_reason": "initial_p1_candidate",
         "incumbent_available": 0,
         "incumbent_mean_c_pi": 5.1, "incumbent_max_c_pi": 6.1,
+        "replacement_comparison_mode": "full_profile",
+        "replacement_comparison_duration_s": 0.0,
+        "replacement_candidate_mean_c_pi": 4.0,
+        "replacement_candidate_max_c_pi": 5.0,
         "fallback_reason": "none", "max_candidates_per_attempt": 8,
     })
     row.update(overrides)
@@ -522,6 +526,30 @@ class P1_2AnalyzerTest(unittest.TestCase):
         )
         self.assertFalse(evidence["accepted_profile_preference_preserved"])
         self.assertFalse(evidence["passed"])
+
+    def test_candidate_trace_uses_shared_forward_window_for_incumbent(self):
+        profile_summary = analyzer.summarize_p1_accepted_profile_rows(
+            accepted_profile_rows(0.0, c_pi=4.5)
+        )
+        row = candidate_optimization_row(
+            incumbent_available=1,
+            incumbent_mean_c_pi=4.0,
+            incumbent_max_c_pi=4.4,
+            replacement_comparison_mode="shared_forward_time_window",
+            replacement_comparison_duration_s=0.4,
+            replacement_candidate_mean_c_pi=3.5,
+            replacement_candidate_max_c_pi=4.0,
+        )
+
+        evidence = analyzer.validate_p1_candidate_optimization_evidence(
+            [row], {"valid": True},
+            [{"stage": "optimizer_start", "snapshot_generation_id": 4,
+              "planning_attempt_id": 11, "candidate_id": 7}],
+            profile_summary,
+        )
+
+        self.assertTrue(evidence["accepted_profile_preference_preserved"])
+        self.assertTrue(evidence["passed"], evidence)
 
     def test_candidate_trace_fails_closed_without_one_selected_success_or_full_support(self):
         profile_summary = analyzer.summarize_p1_accepted_profile_rows(

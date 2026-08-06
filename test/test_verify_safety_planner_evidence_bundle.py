@@ -71,6 +71,13 @@ class EvidenceBundlePreflightTest(unittest.TestCase):
             "grad_integrity_dot_displacement": "-0.01",
             "normalization_mode": "base_improvement_budget_v1",
             "base_prepass_success": "1",
+            "incumbent_available": "0",
+            "incumbent_mean_c_pi": "0.6",
+            "incumbent_max_c_pi": "0.7",
+            "replacement_comparison_mode": "full_profile",
+            "replacement_comparison_duration_s": "0",
+            "replacement_candidate_mean_c_pi": "0.4",
+            "replacement_candidate_max_c_pi": "0.5",
         }
         candidate_rows = [
             {**candidate_base, "candidate_id": "1", "selected": "1"},
@@ -189,6 +196,44 @@ class EvidenceBundlePreflightTest(unittest.TestCase):
         self.assertIn(
             "authoritative accepted profile regresses selected P1 seed",
             result["errors"])
+
+    def test_shared_forward_window_closes_incumbent_replacement(self):
+        root, export, bag = self.make_bundle()
+        self.addCleanup(root.cleanup)
+        manifest_path = export / "test_planner_manifest.json"
+        payload = {
+            "schema_version": preflight.SCHEMA,
+            "run_id": "run-1",
+            "manifest_path": str(manifest_path),
+            "export_dir": str(export),
+            "bag_path": str(bag),
+        }
+        candidate_path = export / "planner_p1_candidate_optimization.csv"
+        with candidate_path.open(newline="") as handle:
+            candidates = list(csv.DictReader(handle))
+        winner = next(row for row in candidates if row["selected"] == "1")
+        winner.update({
+            "incumbent_available": "1",
+            # The accepted full candidate profile is 0.3 and would regress
+            # this shorter incumbent if the unequal domains were compared.
+            "incumbent_mean_c_pi": "0.25",
+            "incumbent_max_c_pi": "0.35",
+            "replacement_comparison_mode": "shared_forward_time_window",
+            "replacement_comparison_duration_s": "0.4",
+            "replacement_candidate_mean_c_pi": "0.20",
+            "replacement_candidate_max_c_pi": "0.30",
+        })
+        with candidate_path.open("w", newline="") as handle:
+            writer = csv.DictWriter(handle, fieldnames=sorted(candidates[0]))
+            writer.writeheader()
+            writer.writerows(candidates)
+
+        with mock.patch.object(
+                preflight, "read_bag_provenance", return_value=([payload], "")):
+            result = preflight.validate_bundle(
+                export, bag, metrics_only=False, lambda_value=0.00001)
+
+        self.assertTrue(result["passed"], result["errors"])
 
     def test_metrics_only_candidates_do_not_require_replacement_closure(self):
         root, export, bag = self.make_bundle()

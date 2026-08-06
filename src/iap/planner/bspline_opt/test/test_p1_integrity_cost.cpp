@@ -1037,11 +1037,16 @@ TEST(P1IntegrityCostTest, IncumbentRiskUsesOnlyFutureTrajectoryWindow) {
   const auto whole = optimizer->evaluateP1FixedLatticeRisk(trajectory);
   const auto future = optimizer->evaluateP1FixedLatticeRisk(
       trajectory, future_start_t_s);
+  const auto shared_forward_window = optimizer->evaluateP1FixedLatticeRisk(
+      trajectory, future_start_t_s, trajectory.getTimeSum() * 0.1);
 
   ASSERT_TRUE(whole.full_support);
   ASSERT_TRUE(future.full_support);
+  ASSERT_TRUE(shared_forward_window.full_support);
   EXPECT_GT(future.mean_c_pi, whole.mean_c_pi);
+  EXPECT_LT(shared_forward_window.mean_c_pi, future.mean_c_pi);
   EXPECT_DOUBLE_EQ(future.max_c_pi, whole.max_c_pi);
+  EXPECT_LT(shared_forward_window.max_c_pi, future.max_c_pi);
 }
 
 TEST(P1IntegrityCostTest, Fixed200RawGradientProbeDescends) {

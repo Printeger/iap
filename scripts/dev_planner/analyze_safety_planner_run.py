@@ -654,6 +654,8 @@ P1_CANDIDATE_OPTIMIZATION_FIELDS = [
     "objective_allowed", "objective_applied", "selection_score", "selection_reason",
     "candidate_rank", "p1_descent", "rank_eligible", "replacement_accepted",
     "replacement_reason", "incumbent_available", "incumbent_mean_c_pi", "incumbent_max_c_pi",
+    "replacement_comparison_mode", "replacement_comparison_duration_s",
+    "replacement_candidate_mean_c_pi", "replacement_candidate_max_c_pi",
     "fallback_reason", "termination_reason", "max_candidates_per_attempt",
     "aggregation_mode", "aggregation_temperature", "adaptive_sample_count", "fixed_sample_count", "peak_contribution",
     "fanout_input_segments", "fanout_surviving_segments", "fanout_returned_count", "fanout_configured_cap", "fanout_truncated",
@@ -668,6 +670,7 @@ P1_CANDIDATE_OPTIMIZATION_FINITE_FIELDS = [
         "p1_descent", "rank_eligible", "replacement_accepted",
         "selection_reason", "replacement_reason", "fallback_reason", "termination_reason",
         "aggregation_mode", "fanout_singleton_reason", "normalization_mode",
+        "replacement_comparison_mode",
         "base_prepass_termination_reason",
     }
 ]
@@ -6758,12 +6761,21 @@ def validate_p1_candidate_optimization_evidence(
             if explicit_csv_bool(selected.get("incumbent_available")) is True:
                 incumbent_mean = finite_float(selected.get("incumbent_mean_c_pi"))
                 incumbent_max = finite_float(selected.get("incumbent_max_c_pi"))
+                candidate_replacement_mean = accepted_mean
+                candidate_replacement_max = accepted_max
+                if selected.get("replacement_comparison_mode") == "shared_forward_time_window":
+                    candidate_replacement_mean = finite_float(
+                        selected.get("replacement_candidate_mean_c_pi"))
+                    candidate_replacement_max = finite_float(
+                        selected.get("replacement_candidate_max_c_pi"))
                 incumbent_ok = (
                     incumbent_mean is not None and incumbent_max is not None
-                    and accepted_mean <= incumbent_mean + 1.0e-12
-                    and accepted_max <= incumbent_max + 1.0e-12
-                    and (accepted_mean < incumbent_mean - 1.0e-12
-                         or accepted_max < incumbent_max - 1.0e-12)
+                    and candidate_replacement_mean is not None
+                    and candidate_replacement_max is not None
+                    and candidate_replacement_mean <= incumbent_mean + 1.0e-12
+                    and candidate_replacement_max <= incumbent_max + 1.0e-12
+                    and (candidate_replacement_mean < incumbent_mean - 1.0e-12
+                         or candidate_replacement_max < incumbent_max - 1.0e-12)
                 )
             accepted_profile_preference_preserved = self_non_regression and incumbent_ok
     # A selected optimizer row is deliberately retained even when its result

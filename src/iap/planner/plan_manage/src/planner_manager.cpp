@@ -1262,23 +1262,70 @@ namespace ego_planner
           if (has_existing_trajectory)
           {
             incumbent = &incumbent_evidence;
+            // This marker makes a missing per-candidate shared-window tuple
+            // reject closed instead of falling back to unequal full profiles.
+            incumbent_evidence.replacement_comparison_available = true;
             // Candidate optimizations clear their temporary optimizer
-            // context. Re-bind the immutable planning snapshot solely for
-            // this fixed-lattice incumbent measurement, then clear it again
-            // before any return path can publish or retry.
+            // context. Re-bind the immutable planning snapshot solely for a
+            // shared forward-time replacement comparison. Candidate
+            // self-descent/ranking remains on each full fixed-200 profile.
             bspline_optimizer_->setRiskSnapshot(
                 planning_snapshot, planning_query_base_time_s);
-            const auto incumbent_summary = bspline_optimizer_->evaluateP1FixedLatticeRisk(
-                local_data_.position_traj_, incumbent_start_t_s);
-            bspline_optimizer_->clearRiskSnapshot();
-            if (incumbent_summary.full_support)
+            const double incumbent_remaining_duration_s = std::max(
+                0.0, local_data_.duration_ - incumbent_start_t_s);
+            for (std::size_t index = 0; index < evidence.size(); ++index)
             {
+              const auto candidate_it = std::find_if(
+                  p2_candidates.begin(), p2_candidates.end(),
+                  [&evidence, index](const auto &candidate) {
+                    return candidate.candidate_id ==
+                        static_cast<int>(evidence[index].candidate_id);
+                  });
+              if (candidate_it == p2_candidates.end())
+                continue;
+              UniformBspline candidate(
+                  candidate_it->control_points, 3, ts);
+              const double comparison_duration_s = std::min(
+                  candidate.getTimeSum(), incumbent_remaining_duration_s);
+              if (!(comparison_duration_s > 0.0))
+                continue;
+              const auto candidate_summary =
+                  bspline_optimizer_->evaluateP1FixedLatticeRisk(
+                      candidate, 0.0, comparison_duration_s);
+              const auto incumbent_summary =
+                  bspline_optimizer_->evaluateP1FixedLatticeRisk(
+                      local_data_.position_traj_, incumbent_start_t_s,
+                      comparison_duration_s);
+              if (!candidate_summary.full_support ||
+                  !incumbent_summary.full_support)
+                continue;
+              evidence[index].replacement_comparison_available = true;
+              evidence[index].replacement_mean_c_pi =
+                  candidate_summary.mean_c_pi;
+              evidence[index].replacement_max_c_pi =
+                  candidate_summary.max_c_pi;
+              evidence[index].replacement_incumbent_mean_c_pi =
+                  incumbent_summary.mean_c_pi;
+              evidence[index].replacement_incumbent_max_c_pi =
+                  incumbent_summary.max_c_pi;
               incumbent_evidence.full_support = true;
               incumbent_evidence.pre_mean_c_pi = incumbent_summary.mean_c_pi;
               incumbent_evidence.post_mean_c_pi = incumbent_summary.mean_c_pi;
               incumbent_evidence.pre_max_c_pi = incumbent_summary.max_c_pi;
               incumbent_evidence.post_max_c_pi = incumbent_summary.max_c_pi;
+              auto &trace = p1_candidate_traces[index];
+              trace.incumbent_available = true;
+              trace.incumbent_mean_c_pi = incumbent_summary.mean_c_pi;
+              trace.incumbent_max_c_pi = incumbent_summary.max_c_pi;
+              trace.replacement_comparison_mode =
+                  "shared_forward_time_window";
+              trace.replacement_comparison_duration_s = comparison_duration_s;
+              trace.replacement_candidate_mean_c_pi =
+                  candidate_summary.mean_c_pi;
+              trace.replacement_candidate_max_c_pi =
+                  candidate_summary.max_c_pi;
             }
+            bspline_optimizer_->clearRiskSnapshot();
           }
           const auto decisions = selectP1Candidates(evidence, incumbent);
           for (std::size_t index = 0; index < p1_candidate_traces.size(); ++index)
@@ -1293,12 +1340,6 @@ namespace ego_planner
             trace.rank_eligible = decision.rank_eligible;
             trace.replacement_accepted = decision.replace_published_trajectory;
             trace.replacement_reason = decision.replacement_reason;
-            if (incumbent && incumbent->full_support)
-            {
-              trace.incumbent_available = true;
-              trace.incumbent_mean_c_pi = incumbent->post_mean_c_pi;
-              trace.incumbent_max_c_pi = incumbent->post_max_c_pi;
-            }
             if (decision.selected)
             {
               // Candidate optimization leaves the shared planning context on
@@ -1505,21 +1546,47 @@ namespace ego_planner
       if (has_existing_trajectory)
       {
         incumbent = &incumbent_evidence;
-        const auto incumbent_summary = bspline_optimizer_->evaluateP1FixedLatticeRisk(
-            local_data_.position_traj_, incumbent_start_t_s);
-        trace.incumbent_mean_c_pi = incumbent_summary.mean_c_pi;
-        trace.incumbent_max_c_pi = incumbent_summary.max_c_pi;
-        if (incumbent_summary.full_support)
+        // Require the candidate-specific shared-window tuple below.  If the
+        // risk evaluation is incomplete, replacement rejects closed.
+        incumbent_evidence.replacement_comparison_available = true;
+        UniformBspline candidate(ctrl_pts, 3, ts);
+        const double comparison_duration_s = std::min(
+            candidate.getTimeSum(),
+            std::max(0.0, local_data_.duration_ - incumbent_start_t_s));
+        if (comparison_duration_s > 0.0)
         {
-          // Replacement only compares P1 risk.  Objective fields are kept
-          // finite so the policy can diagnose this as an incumbent evidence
-          // tuple without inventing a cross-trajectory base-cost ordering.
-          incumbent_evidence.full_support = true;
-          incumbent_evidence.pre_mean_c_pi = incumbent_summary.mean_c_pi;
-          incumbent_evidence.post_mean_c_pi = incumbent_summary.mean_c_pi;
-          incumbent_evidence.pre_max_c_pi = incumbent_summary.max_c_pi;
-          incumbent_evidence.post_max_c_pi = incumbent_summary.max_c_pi;
-          trace.incumbent_available = true;
+          const auto candidate_summary =
+              bspline_optimizer_->evaluateP1FixedLatticeRisk(
+                  candidate, 0.0, comparison_duration_s);
+          const auto incumbent_summary =
+              bspline_optimizer_->evaluateP1FixedLatticeRisk(
+                  local_data_.position_traj_, incumbent_start_t_s,
+                  comparison_duration_s);
+          if (candidate_summary.full_support && incumbent_summary.full_support)
+          {
+            // Replacement only compares P1 risk.  Objective fields are kept
+            // finite so the policy can diagnose this as an incumbent evidence
+            // tuple without inventing a cross-trajectory base-cost ordering.
+            incumbent_evidence.full_support = true;
+            incumbent_evidence.pre_mean_c_pi = incumbent_summary.mean_c_pi;
+            incumbent_evidence.post_mean_c_pi = incumbent_summary.mean_c_pi;
+            incumbent_evidence.pre_max_c_pi = incumbent_summary.max_c_pi;
+            incumbent_evidence.post_max_c_pi = incumbent_summary.max_c_pi;
+            candidate_evidence.replacement_comparison_available = true;
+            candidate_evidence.replacement_mean_c_pi = candidate_summary.mean_c_pi;
+            candidate_evidence.replacement_max_c_pi = candidate_summary.max_c_pi;
+            candidate_evidence.replacement_incumbent_mean_c_pi =
+                incumbent_summary.mean_c_pi;
+            candidate_evidence.replacement_incumbent_max_c_pi =
+                incumbent_summary.max_c_pi;
+            trace.incumbent_available = true;
+            trace.incumbent_mean_c_pi = incumbent_summary.mean_c_pi;
+            trace.incumbent_max_c_pi = incumbent_summary.max_c_pi;
+            trace.replacement_comparison_mode = "shared_forward_time_window";
+            trace.replacement_comparison_duration_s = comparison_duration_s;
+            trace.replacement_candidate_mean_c_pi = candidate_summary.mean_c_pi;
+            trace.replacement_candidate_max_c_pi = candidate_summary.max_c_pi;
+          }
         }
       }
       const auto decisions = selectP1Candidates({candidate_evidence}, incumbent);
@@ -1668,15 +1735,59 @@ namespace ego_planner
 
       const auto refined_summary =
           bspline_optimizer_->evaluateP1FixedLatticeRisk(pos);
-      const auto refinement_decision = decideP1RefinementRisk({
+      P1RefinementRiskEvidence refinement_evidence{
           refined_summary.full_support,
           selected_trace->pre_mean_c_pi,
           selected_trace->pre_max_c_pi,
           refined_summary.mean_c_pi,
           refined_summary.max_c_pi,
-          selected_trace->incumbent_available,
+          has_existing_trajectory,
           selected_trace->incumbent_mean_c_pi,
-          selected_trace->incumbent_max_c_pi});
+          selected_trace->incumbent_max_c_pi};
+      if (has_existing_trajectory)
+      {
+        const double comparison_duration_s = std::min(
+            pos.getTimeSum(),
+            std::max(0.0, local_data_.duration_ - incumbent_start_t_s));
+        if (comparison_duration_s > 0.0)
+        {
+          const auto refined_comparison =
+              bspline_optimizer_->evaluateP1FixedLatticeRisk(
+                  pos, 0.0, comparison_duration_s);
+          const auto incumbent_comparison =
+              bspline_optimizer_->evaluateP1FixedLatticeRisk(
+                  local_data_.position_traj_, incumbent_start_t_s,
+                  comparison_duration_s);
+          if (refined_comparison.full_support && incumbent_comparison.full_support)
+          {
+            refinement_evidence.replacement_comparison_available = true;
+            refinement_evidence.replacement_candidate_mean_c_pi =
+                refined_comparison.mean_c_pi;
+            refinement_evidence.replacement_candidate_max_c_pi =
+                refined_comparison.max_c_pi;
+            refinement_evidence.replacement_incumbent_mean_c_pi =
+                incumbent_comparison.mean_c_pi;
+            refinement_evidence.replacement_incumbent_max_c_pi =
+                incumbent_comparison.max_c_pi;
+            selected_trace->incumbent_mean_c_pi = incumbent_comparison.mean_c_pi;
+            selected_trace->incumbent_max_c_pi = incumbent_comparison.max_c_pi;
+            selected_trace->replacement_comparison_mode =
+                "shared_forward_time_window";
+            selected_trace->replacement_comparison_duration_s =
+                comparison_duration_s;
+            selected_trace->replacement_candidate_mean_c_pi =
+                refined_comparison.mean_c_pi;
+            selected_trace->replacement_candidate_max_c_pi =
+                refined_comparison.max_c_pi;
+          }
+        }
+        // STEP3 replacement evidence is part of full support.  Never reuse
+        // the STEP1 tuple after control points or timing have changed.
+        if (!refinement_evidence.replacement_comparison_available)
+          refinement_evidence.full_support = false;
+      }
+      const auto refinement_decision =
+          decideP1RefinementRisk(refinement_evidence);
       selected_trace->replacement_accepted = refinement_decision.accept;
       selected_trace->replacement_reason = refinement_decision.reason;
       selected_trace->fanout.replacement_acceptance =

@@ -28,6 +28,14 @@ struct P1CandidateEvidence {
   double gradient_dot_displacement = 0.0;
   bool optimization_success = false;
   bool full_support = false;
+  // Replacement compares candidate and incumbent on the same forward-time
+  // window from the current planning epoch.  Full-profile values above remain
+  // authoritative for self-descent and candidate ranking.
+  bool replacement_comparison_available = false;
+  double replacement_mean_c_pi = 0.0;
+  double replacement_max_c_pi = 0.0;
+  double replacement_incumbent_mean_c_pi = 0.0;
+  double replacement_incumbent_max_c_pi = 0.0;
 };
 
 struct P1CandidateDecision {
@@ -51,6 +59,11 @@ struct P1RefinementRiskEvidence {
   bool incumbent_available = false;
   double incumbent_mean_c_pi = 0.0;
   double incumbent_max_c_pi = 0.0;
+  bool replacement_comparison_available = false;
+  double replacement_candidate_mean_c_pi = 0.0;
+  double replacement_candidate_max_c_pi = 0.0;
+  double replacement_incumbent_mean_c_pi = 0.0;
+  double replacement_incumbent_max_c_pi = 0.0;
 };
 
 struct P1RefinementRiskDecision {
@@ -58,8 +71,9 @@ struct P1RefinementRiskDecision {
   std::string reason;
 };
 
-// `incumbent` must be measured on the candidate attempt's immutable snapshot
-// and fixed sample lattice.  A null incumbent means startup/no trajectory.
+// `incumbent` and every candidate replacement tuple must be measured on the
+// attempt's immutable snapshot and the same forward-time fixed-200 window.
+// A null incumbent means startup/no trajectory.
 std::vector<P1CandidateDecision> selectP1Candidates(
     const std::vector<P1CandidateEvidence>& candidates,
     const P1CandidateEvidence* incumbent);

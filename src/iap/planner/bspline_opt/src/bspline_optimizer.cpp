@@ -3009,6 +3009,7 @@ namespace ego_planner
              "pre_support_coverage,post_support_coverage,support_full_valid,"
              "support_signature,initial_control_points_hash,final_control_points_hash,p1_config_hash,"
              "optimization_success,selection_score,selection_reason,candidate_rank,p1_descent,rank_eligible,replacement_accepted,replacement_reason,incumbent_available,incumbent_mean_c_pi,incumbent_max_c_pi,"
+             "replacement_comparison_mode,replacement_comparison_duration_s,replacement_candidate_mean_c_pi,replacement_candidate_max_c_pi,"
              "aggregation_mode,aggregation_temperature,adaptive_sample_count,fixed_sample_count,peak_contribution,"
              "pre_full_base_gradient_norm,post_full_base_gradient_norm,pre_full_raw_p1_gradient_norm,post_full_raw_p1_gradient_norm,"
              "pre_normalized_weighted_p1_gradient_norm,post_normalized_weighted_p1_gradient_norm,pre_base_p1_cosine,post_base_p1_cosine,"
@@ -3057,6 +3058,10 @@ namespace ego_planner
         << trace.replacement_reason << ',' << (trace.incumbent_available ? 1 : 0) << ','
         << trace.incumbent_mean_c_pi << ','
         << trace.incumbent_max_c_pi << ','
+        << trace.replacement_comparison_mode << ','
+        << trace.replacement_comparison_duration_s << ','
+        << trace.replacement_candidate_mean_c_pi << ','
+        << trace.replacement_candidate_max_c_pi << ','
         << trace.aggregation_mode << ',' << trace.aggregation_temperature << ','
         << trace.adaptive_sample_count << ',' << trace.fixed_sample_count << ','
         << trace.peak_contribution << ','
@@ -3379,7 +3384,7 @@ namespace ego_planner
     if (header) {
       out << "schema_version,run_id,manifest_path,stamp,planning_attempt_id,optimizer_selected_candidate_id,rejected_candidate_id,snapshot_generation_id,query_base_time_s,"
              "replacement_accepted,replacement_reason,incumbent_trajectory_id,incumbent_start_stamp_s,incumbent_mean_c_pi,incumbent_max_c_pi,"
-             "candidate_mean_c_pi,candidate_max_c_pi,final_trajectory_source,publish_identity\n";
+             "candidate_mean_c_pi,candidate_max_c_pi,replacement_comparison_mode,replacement_comparison_duration_s,replacement_candidate_mean_c_pi,replacement_candidate_max_c_pi,final_trajectory_source,publish_identity\n";
     }
     out << p1_config_.evidence_schema_version << ',' << p1_config_.evidence_run_id << ','
         << p1_config_.evidence_manifest_path << ',' << rclcpp::Clock().now().seconds() << ','
@@ -3390,6 +3395,10 @@ namespace ego_planner
         << incumbent_trajectory_id << ',' << incumbent_start_stamp_s << ','
         << trace.incumbent_mean_c_pi << ',' << trace.incumbent_max_c_pi << ','
         << trace.post_mean_c_pi << ',' << trace.post_max_c_pi << ','
+        << trace.replacement_comparison_mode << ','
+        << trace.replacement_comparison_duration_s << ','
+        << trace.replacement_candidate_mean_c_pi << ','
+        << trace.replacement_candidate_max_c_pi << ','
         << final_trajectory_source << ',' << publish_identity << '\n';
   }
 
@@ -3926,7 +3935,8 @@ namespace ego_planner
 
   BsplineOptimizer::P1FixedLatticeRiskSummary
   BsplineOptimizer::evaluateP1FixedLatticeRisk(
-      UniformBspline trajectory, double trajectory_start_t_s) const
+      UniformBspline trajectory, double trajectory_start_t_s,
+      double window_duration_s) const
   {
     P1FixedLatticeRiskSummary summary;
     if (!risk_snapshot_)
@@ -3937,7 +3947,10 @@ namespace ego_planner
       return summary;
     trajectory_start_t_s = std::clamp(
         trajectory_start_t_s, 0.0, total_duration);
-    const double duration = total_duration - trajectory_start_t_s;
+    const double remaining_duration = total_duration - trajectory_start_t_s;
+    const double duration = std::isfinite(window_duration_s)
+        ? std::min(remaining_duration, std::max(0.0, window_duration_s))
+        : remaining_duration;
     const int denominator = std::max(1, kP1AcceptedProfileSampleCount - 1);
     double sum = 0.0;
     double maximum = -std::numeric_limits<double>::infinity();

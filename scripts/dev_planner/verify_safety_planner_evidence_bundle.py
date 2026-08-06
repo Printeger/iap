@@ -188,6 +188,20 @@ def validate_bundle(export_dir, bag_dir, *, metrics_only, lambda_value):
         for field in ("pre_mean_c_pi", "pre_max_c_pi", "post_mean_c_pi", "post_max_c_pi"):
             if not finite(row.get(field)):
                 errors.append(f"candidate {field} is non-finite")
+        if not metrics_only and truthy(row.get("incumbent_available")):
+            comparison_fields = (
+                "replacement_comparison_duration_s",
+                "replacement_candidate_mean_c_pi",
+                "replacement_candidate_max_c_pi",
+                "incumbent_mean_c_pi",
+                "incumbent_max_c_pi",
+            )
+            if row.get("replacement_comparison_mode") != \
+                    "shared_forward_time_window" or \
+                    not all(finite(row.get(field)) for field in comparison_fields) or \
+                    float(row["replacement_comparison_duration_s"]) <= 0.0:
+                errors.append(
+                    "incumbent replacement lacks shared forward-time fixed-200 evidence")
         sample_count = row.get("support_sample_count")
         pre_count = row.get("pre_support_valid_count")
         post_count = row.get("post_support_valid_count")
@@ -355,10 +369,18 @@ def validate_bundle(export_dir, bag_dir, *, metrics_only, lambda_value):
             if truthy(winner.get("incumbent_available")):
                 incumbent_mean = float(winner["incumbent_mean_c_pi"])
                 incumbent_max = float(winner["incumbent_max_c_pi"])
-                if accepted_mean > incumbent_mean + 1e-12 or \
-                        accepted_max > incumbent_max + 1e-12 or \
-                        not (accepted_mean < incumbent_mean - 1e-12 or
-                             accepted_max < incumbent_max - 1e-12):
+                candidate_replacement_mean = accepted_mean
+                candidate_replacement_max = accepted_max
+                if winner.get("replacement_comparison_mode") == \
+                        "shared_forward_time_window":
+                    candidate_replacement_mean = float(
+                        winner["replacement_candidate_mean_c_pi"])
+                    candidate_replacement_max = float(
+                        winner["replacement_candidate_max_c_pi"])
+                if candidate_replacement_mean > incumbent_mean + 1e-12 or \
+                        candidate_replacement_max > incumbent_max + 1e-12 or \
+                        not (candidate_replacement_mean < incumbent_mean - 1e-12 or
+                             candidate_replacement_max < incumbent_max - 1e-12):
                     errors.append("authoritative accepted profile no longer replaces incumbent")
 
     metadata_path = bag_dir / "metadata.yaml"

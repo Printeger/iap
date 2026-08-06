@@ -8272,3 +8272,11 @@ Observation: Metrics-only run `df3321e59a3c42fda4dcda19ca8ed005` at clean HEAD `
 Verdict: FAIL (preflight; P1-2 and formal analyzer not invoked).
 
 Conclusion: This unpaired P1-1 run is retained and must not be verified or reused again. The formal P1-1 command now explicitly sets `p1.lambda_integrity:=0.00001`; metrics remain non-applied, so this corrects reference provenance without changing planner behavior or any algorithmic gate. A wholly fresh pair is required, and P1-3 remains unauthorized.
+
+## P1-2 fixed-lambda formal pair 9 preflight replacement-window failure — 2026-08-06
+
+Observation: The serial fixed-lambda runs completed at clean HEAD `13b726da46706a8ec109c4ddaf2a7fdd3c462660`. P1-1 run `7452c6c28cea4a86ab14d761484e0120` used export `test_planner_p1_degraded_lidar_good_gnss_degraded_lidar_good_1786044556255` and bag `test_planner_p1_degraded_lidar_good_gnss_degraded_lidar_good_20260806T192916Z`; its one-shot preflight passed. P1-2 run `e21a8c022b6747e792678d5d0a413f6f` used export `test_planner_p1_degraded_lidar_good_gnss_degraded_lidar_good_1786044666346` and bag `test_planner_p1_degraded_lidar_good_gnss_degraded_lidar_good_20260806T193106Z`; its one-shot preflight failed because the authoritative profile remained base-fallback trajectory 17 rather than a selected P1 candidate. All three later optimizer winners had full support, optimizer success, total/P1 descent, and negative gradient/displacement, but were rejected against that incumbent.
+
+Verdict: FAIL (preflight; formal analyzer not invoked).
+
+Conclusion: The pair is retained and must not be analyzed or reused. Its attempt-24 retained sidecar proves a comparison-domain defect: the full `1.800 s` candidate mean/max were `0.417883/0.421479` while the incumbent had only `0.393 s` remaining at `0.417578/0.422587`; on their shared forward `0.393 s`, the candidate is strictly better at `0.414708/0.418529`. The repair keeps full-profile self-descent but uses a separately recorded shared-forward-time fixed-200 window for incumbent replacement and post-refinement checks. Fresh deterministic verification and smoke are required before another formal pair; P1-3 remains unauthorized.
