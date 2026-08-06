@@ -8564,3 +8564,11 @@ Observation: Analyzer completed once for run `d00bac8e15a84bb7b06412513cebafc0`.
 Verdict: PASS (diagnostic only).
 
 Conclusion: This terminal record supersedes no other run and does not grant formal progression.
+
+### Superseding P1 fixed-lambda formal terminal record — 2026-08-06 repeated terminal-horizon failure
+
+Observation: At clean HEAD `768cc5e6fd53a6aaf7161b6dd77389953f6b4dad`, P1-1 run `ae7b136a79a34a709ed12c94fdbcd58e` used export `test_planner_p1_degraded_lidar_good_gnss_degraded_lidar_good_1786046998283` and bag `test_planner_p1_degraded_lidar_good_gnss_degraded_lidar_good_20260806T200958Z`; P1-2 run `6213ec56c318490a8641674bb23738b7` used export `test_planner_p1_degraded_lidar_good_gnss_degraded_lidar_good_1786047129533` and bag `test_planner_p1_degraded_lidar_good_gnss_degraded_lidar_good_20260806T201209Z`. Both sole v4 preflight invocations passed with `errors=[]`. Formal analysis `1f208ef8544b49d1a261723d7df56124` was invoked exactly once, generated all 39 figures, and returned `status=FAIL`, `inconclusive=[]`, `warnings=[]`, and four failures. Both accepted contexts, scene binding, candidate optimization, provenance, lifecycle, P0, P5 isolation, and every independent hard gate passed. The sole root failure was unavailable strict risk reduction: P1-2's terminal `0.387126 m` arc had `200/200` values, but the P1-1 terminal arc had `0/30` because its final `3.0 s` trajectory exceeded the unchanged `2.5 s` snapshot horizon. Full-profile means/maxes (`0.417233/0.424482` enabled versus `0.385290/0.412382` reference) are intentionally not substituted because they cover unequal history. This is the second consecutive fresh pair with the same terminal-reference gap; the pair is retained and will not be analyzed again.
+
+Verdict: FAIL (formal; repeated unsupported terminal reference arc).
+
+Conclusion: Repetition rules out scheduler luck as a debugging strategy. The next implementation records one genuine fixed-200 remaining-incumbent observation in metrics-only mode when the same accepted trajectory first enters a later immutable snapshot horizon, with exact snapshot-cloud binding and no trajectory/P0/P5 change. A fresh metrics-only smoke, enabled diagnostic entry run, and wholly fresh formal pair are required. P1-3 remains prohibited and was not run.

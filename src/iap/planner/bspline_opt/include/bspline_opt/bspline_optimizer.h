@@ -495,7 +495,10 @@ namespace ego_planner
                                                   std::numeric_limits<double>::quiet_NaN(),
                                               const std::string &trajectory_frame_id = "map",
                                               double trajectory_start_stamp_s =
-                                                  std::numeric_limits<double>::quiet_NaN()) const;
+                                                  std::numeric_limits<double>::quiet_NaN(),
+                                              double trajectory_start_t_s = 0.0,
+                                              double window_duration_s =
+                                                  std::numeric_limits<double>::infinity()) const;
     iap::P1AcceptedContextValidation validateP1AcceptedTrajectoryRiskContext(
         UniformBspline trajectory, double accepted_stamp_s,
         const std::string &trajectory_frame_id) const;

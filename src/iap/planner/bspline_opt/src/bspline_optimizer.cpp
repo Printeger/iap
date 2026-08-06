@@ -3523,18 +3523,28 @@ namespace ego_planner
       const double stamp_s,
       const double planning_start_s,
       const std::string &trajectory_frame_id,
-      const double trajectory_start_stamp_s) const
+      const double trajectory_start_stamp_s,
+      const double trajectory_start_t_s,
+      const double window_duration_s) const
   {
     if (!p1_config_.debug_csv_enable || p1_config_.debug_csv_path.empty())
     {
       return false;
     }
 
-    const double duration = trajectory.getTimeSum();
-    if (!std::isfinite(duration) || duration < 0.0)
+    const double full_duration = trajectory.getTimeSum();
+    if (!std::isfinite(full_duration) || full_duration < 0.0 ||
+        !std::isfinite(trajectory_start_t_s) || trajectory_start_t_s < 0.0 ||
+        std::isnan(window_duration_s) || window_duration_s < 0.0)
     {
       return false;
     }
+    const double segment_start_t_s = std::clamp(
+        trajectory_start_t_s, 0.0, full_duration);
+    const double remaining_duration = full_duration - segment_start_t_s;
+    const double duration = std::isfinite(window_duration_s)
+        ? std::min(window_duration_s, remaining_duration)
+        : remaining_duration;
 
     const std::string profile_path = p1AcceptedTrajectoryRiskProfilePath();
     std::ifstream existing(profile_path);
@@ -3625,7 +3635,8 @@ namespace ego_planner
       const double arc_fraction =
           static_cast<double>(sample_index) / static_cast<double>(denom);
       const double t_s = duration * arc_fraction;
-      const Eigen::Vector3d p = trajectory.evaluateDeBoorT(t_s);
+      const Eigen::Vector3d p = trajectory.evaluateDeBoorT(
+          segment_start_t_s + t_s);
       trajectory_min = trajectory_min.cwiseMin(p);
       trajectory_max = trajectory_max.cwiseMax(p);
       iap::RiskCostSample sample;
@@ -3648,7 +3659,12 @@ namespace ego_planner
       double delta_c_pi = std::numeric_limits<double>::quiet_NaN();
       if (pre_trajectory && std::isfinite(pre_duration))
       {
-        const double pre_t_s = pre_duration * arc_fraction;
+        const double pre_segment_start_t_s = std::clamp(
+            segment_start_t_s, 0.0, pre_duration);
+        const double pre_window_duration = std::min(
+            duration, pre_duration - pre_segment_start_t_s);
+        const double pre_t_s = pre_segment_start_t_s +
+            pre_window_duration * arc_fraction;
         pre_position = pre_trajectory->evaluateDeBoorT(pre_t_s);
         iap::RiskCostSample pre_sample;
         const bool pre_hit = risk_snapshot_ && risk_snapshot_->queryCost(

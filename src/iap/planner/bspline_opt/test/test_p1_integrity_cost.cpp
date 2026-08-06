@@ -1309,6 +1309,54 @@ TEST(P1IntegrityCostTest, MetricsOnlyAcceptedProfileWritesFiniteSamples) {
   std::remove(profile_path.c_str());
 }
 
+TEST(P1IntegrityCostTest,
+     MetricsOnlyReferenceObservationSamplesOnlyRemainingTrajectoryWindow) {
+  ego_planner::SwarmTrajData swarm;
+  const Eigen::MatrixXd q = makeControlPoints();
+  AffineProvider provider(10.0, Eigen::Vector3d(1.0, 0.0, 0.0));
+  auto snapshot = makeSnapshot(provider);
+  const std::string debug_path = tempProfilePath("p1_reference_observation_debug");
+  const std::string profile_path =
+      "/tmp/planner_p1_accepted_trajectory_risk_profile.csv";
+  const std::string context_path =
+      "/tmp/planner_p1_accepted_trajectory_risk_profile_context.csv";
+  std::remove(debug_path.c_str());
+  std::remove(profile_path.c_str());
+  std::remove(context_path.c_str());
+
+  auto config = disabledConfig();
+  config.use_integrity_cost = true;
+  config.metrics_only = true;
+  config.lambda_integrity = 0.00001;
+  config.debug_csv_enable = true;
+  config.debug_csv_path = debug_path;
+  auto optimizer = makeOptimizer(config, &swarm);
+  optimizer->setRiskSnapshot(snapshot, snapshot->stamp_s());
+  ego_planner::UniformBspline trajectory(q, 3, 0.1);
+  const Eigen::Vector3d expected_start = trajectory.evaluateDeBoorT(0.2);
+  const Eigen::Vector3d expected_end = trajectory.evaluateDeBoorT(0.35);
+
+  ASSERT_TRUE(optimizer->writeP1AcceptedTrajectoryRiskProfile(
+      trajectory, 8, 43, 10.5, 10.4, "map", 10.2, 0.2, 0.15));
+  const auto rows = readCsvRows(profile_path);
+  ASSERT_EQ(rows.size(), 200U);
+  EXPECT_NEAR(std::stod(rows.front().at("t_s")), 0.0, 1e-12);
+  EXPECT_NEAR(std::stod(rows.back().at("t_s")), 0.15, 1e-12);
+  EXPECT_NEAR(std::stod(rows.front().at("x")), expected_start.x(), 1e-12);
+  EXPECT_NEAR(std::stod(rows.back().at("x")), expected_end.x(), 1e-12);
+  const auto context_rows = readCsvRows(context_path);
+  ASSERT_EQ(context_rows.size(), 1U);
+  EXPECT_NEAR(std::stod(context_rows.front().at("trajectory_time_max_s")),
+              0.15, 1e-12);
+  EXPECT_NEAR(std::stod(context_rows.front().at("trajectory_start_stamp_s")),
+              10.2, 1e-12);
+  EXPECT_EQ(context_rows.front().at("temporal_in_horizon"), "1");
+
+  std::remove(debug_path.c_str());
+  std::remove(profile_path.c_str());
+  std::remove(context_path.c_str());
+}
+
 TEST(P1IntegrityCostTest, BaseFallbackWithoutSnapshotWritesFailClosedProfile) {
   ego_planner::SwarmTrajData swarm;
   const Eigen::MatrixXd q = makeControlPoints();

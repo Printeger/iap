@@ -2,6 +2,7 @@
 
 #include <iap/planner/p1_accepted_context_validation.hpp>
 
+#include <cmath>
 #include <string>
 
 namespace ego_planner {
@@ -42,6 +43,19 @@ inline bool canP1BasePrepassRecoverSupport(
   // or occupied-corner support, never a trajectory that already exceeds the
   // immutable snapshot time horizon.
   return validation.temporal_in_horizon;
+}
+
+inline bool shouldRecordP1MetricsOnlyReferenceObservation(
+    const bool metrics_only,
+    const uint64_t trajectory_id,
+    const uint64_t observed_trajectory_id,
+    const double remaining_duration_s,
+    const double snapshot_horizon_s) {
+  return metrics_only && trajectory_id > 0 &&
+      trajectory_id != observed_trajectory_id &&
+      std::isfinite(remaining_duration_s) && remaining_duration_s > 0.0 &&
+      std::isfinite(snapshot_horizon_s) && snapshot_horizon_s > 0.0 &&
+      remaining_duration_s <= snapshot_horizon_s + 1.0e-9;
 }
 
 inline P1SoftFallbackDecision decideP1BasePrepassFallback(

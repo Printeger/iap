@@ -1388,6 +1388,30 @@ class P1_2AnalyzerTest(unittest.TestCase):
         self.assertTrue(result["metrics_only_temporal_fallback"])
         self.assertTrue(result["valid"], result["reasons"])
 
+    def test_metrics_only_remaining_trajectory_observation_is_bound_context(self):
+        profile = accepted_profile_rows(
+            5.0, metrics_only=True, applied_to_objective=0
+        )
+        for row in profile:
+            row["fallback_reason"] = "metrics_only_reference_observation"
+        summary = analyzer.summarize_p1_accepted_profile_rows(profile)
+        context = accepted_profile_context(profile)
+        context[0].update({
+            "objective_requested": 0,
+            "objective_applied": 0,
+            "p1_fallback": 1,
+            "fallback_reason": "metrics_only_reference_observation",
+        })
+
+        result = analyzer.validate_p1_profile_context(
+            summary, context, {"path": "reference-observation"},
+            stale_timeout_s=1.0,
+        )
+
+        self.assertTrue(result["temporal_in_horizon"])
+        self.assertFalse(result["metrics_only_temporal_fallback"])
+        self.assertTrue(result["valid"], result["reasons"])
+
     def test_p1_2_required_figure_contract_has_twenty_three_nonempty_names(self):
         self.assertEqual(len(analyzer.P1_2_FIGURE_FILENAMES), 23)
         self.assertEqual(len(set(analyzer.P1_2_FIGURE_FILENAMES)), 23)

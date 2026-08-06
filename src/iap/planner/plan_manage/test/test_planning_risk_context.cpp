@@ -302,6 +302,22 @@ TEST(P1SoftFallbackPolicyTest,
 }
 
 TEST(P1SoftFallbackPolicyTest,
+     MetricsOnlyReferenceObservationIsOncePerTrajectoryInsideHorizon) {
+  EXPECT_FALSE(ego_planner::shouldRecordP1MetricsOnlyReferenceObservation(
+      false, 7, 0, 2.0, 2.5));
+  EXPECT_FALSE(ego_planner::shouldRecordP1MetricsOnlyReferenceObservation(
+      true, 0, 0, 2.0, 2.5));
+  EXPECT_FALSE(ego_planner::shouldRecordP1MetricsOnlyReferenceObservation(
+      true, 7, 7, 2.0, 2.5));
+  EXPECT_FALSE(ego_planner::shouldRecordP1MetricsOnlyReferenceObservation(
+      true, 7, 0, 3.0, 2.5));
+  EXPECT_FALSE(ego_planner::shouldRecordP1MetricsOnlyReferenceObservation(
+      true, 7, 0, 0.0, 2.5));
+  EXPECT_TRUE(ego_planner::shouldRecordP1MetricsOnlyReferenceObservation(
+      true, 7, 0, 2.5, 2.5));
+}
+
+TEST(P1SoftFallbackPolicyTest,
      PostOptimizationInvalidityKeepsExistingOrDefersBaseInitialFallback) {
   iap::P1AcceptedContextValidation validation;
   validation.fresh = false;

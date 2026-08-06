@@ -110,6 +110,7 @@ namespace ego_planner
     bool planningRiskContextFresh(double now_s, std::string *reason = nullptr) const;
     bool preparePlanningRiskPublish(double now_s, std::string *reason = nullptr);
     bool finalizeP1AcceptedRiskProfile(double publish_stamp_s);
+    bool recordP1MetricsOnlyReferenceObservation(double observation_stamp_s);
     std::string p1PlanningContextTimelinePath() const;
     bool p1AdmissionEnabled() const;
     const std::string &lastP1RejectionReason() const { return last_p1_rejection_reason_; }
@@ -143,6 +144,7 @@ namespace ego_planner
 
     int continous_failures_count_{0};
     uint64_t p1_accepted_profile_seq_{0};
+    uint64_t p1_metrics_reference_observed_trajectory_id_{0};
     uint64_t p1_planning_attempt_seq_{0};
     bool p1_activation_recorded_{false};
     bool has_p1_preference_incumbent_{false};

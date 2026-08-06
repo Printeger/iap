@@ -551,6 +551,84 @@ namespace ego_planner
     return written;
   }
 
+  bool EGOPlannerManager::recordP1MetricsOnlyReferenceObservation(
+      const double observation_stamp_s)
+  {
+    if (!bspline_optimizer_ || !planning_risk_context_.active ||
+        !planning_risk_context_.snapshot || local_data_.traj_id_ == 0 ||
+        !std::isfinite(observation_stamp_s) ||
+        !std::isfinite(local_data_.start_time_.seconds()) ||
+        !std::isfinite(local_data_.duration_))
+      return false;
+
+    const auto &config = bspline_optimizer_->p1IntegrityConfig();
+    std::string freshness_reason;
+    if (!planningRiskContextFresh(observation_stamp_s, &freshness_reason))
+      return false;
+    const double trajectory_start_t_s = std::clamp(
+        observation_stamp_s - local_data_.start_time_.seconds(),
+        0.0, std::max(0.0, local_data_.duration_));
+    const double remaining_duration_s =
+        std::max(0.0, local_data_.duration_ - trajectory_start_t_s);
+    const auto &horizons = planning_risk_context_.snapshot->params().horizons_s;
+    const auto horizon_max_it = std::max_element(horizons.begin(), horizons.end());
+    const double snapshot_horizon_s = horizon_max_it == horizons.end()
+        ? std::numeric_limits<double>::quiet_NaN() : *horizon_max_it;
+    if (!shouldRecordP1MetricsOnlyReferenceObservation(
+            config.metrics_only, local_data_.traj_id_,
+            p1_metrics_reference_observed_trajectory_id_,
+            remaining_duration_s, snapshot_horizon_s))
+      return false;
+
+    planning_risk_context_.candidate_id = 0;
+    planning_risk_context_.p1_objective_allowed = false;
+    planning_risk_context_.p1_objective_applied = false;
+    planning_risk_context_.p1_fallback_reason =
+        "metrics_only_reference_observation";
+    BsplineOptimizer::P1PlanningRiskContext context;
+    context.snapshot = planning_risk_context_.snapshot;
+    context.query_base_time_s = planning_risk_context_.query_base_time_s;
+    context.planning_start_s = planning_risk_context_.planning_start_s;
+    context.planning_attempt_id = planning_risk_context_.planning_attempt_id;
+    context.candidate_id = 0;
+    context.objective_allowed = false;
+    context.fallback_reason = "metrics_only_reference_observation";
+    bspline_optimizer_->setP1PlanningRiskContext(std::move(context));
+
+    // Reserve the sequence before the multi-file write.  A failed context
+    // rename must not let a later retry append a second 200-row profile under
+    // the same identity.
+    const uint64_t profile_seq = ++p1_accepted_profile_seq_;
+    const double segment_start_stamp_s =
+        local_data_.start_time_.seconds() + trajectory_start_t_s;
+    const bool written = bspline_optimizer_->writeP1AcceptedTrajectoryRiskProfile(
+        local_data_.position_traj_, profile_seq, local_data_.traj_id_,
+        observation_stamp_s, planning_risk_context_.planning_start_s,
+        trajectory_frame_id_, segment_start_stamp_s,
+        trajectory_start_t_s, remaining_duration_s);
+    if (!written)
+    {
+      appendPlanningRiskContextTimeline(
+          "reference_observation", observation_stamp_s, "write_failed",
+          "accepted_profile_write_failed", "existing_trajectory");
+      return false;
+    }
+
+    p1_metrics_reference_observed_trajectory_id_ = local_data_.traj_id_;
+    appendPlanningRiskContextTimeline(
+        "reference_observation", observation_stamp_s, "recorded",
+        "metrics_only_reference_observation", "existing_trajectory");
+    // Formal scene evidence must bind the same immutable snapshot used for
+    // this read-only incumbent observation, independent of the periodic RViz
+    // publisher phase.
+    if (safety_viz_)
+      safety_viz_->publishPredictedPLCloud(
+          planning_risk_context_.snapshot,
+          local_data_.position_traj_.evaluateDeBoorT(trajectory_start_t_s).z(),
+          observation_stamp_s, true);
+    return true;
+  }
+
   bool EGOPlannerManager::p1AdmissionEnabled() const
   {
     if (!bspline_optimizer_) return false;
