@@ -6960,3 +6960,23 @@ Observation: Fresh run `22cce67d0cf148fc9a4d288574691242` produced 12 strict `20
 Verdict: PASS (entry to formal only).
 
 Conclusion: This physical-end record supersedes the earlier diagnostic-entry failures, authorizes one fresh serial P1-1/P1-2 formal pair, and does not authorize P1-3.
+
+## 2026-08-06 fresh fixed-lambda formal pair — preflight FAIL
+
+The serial 90-second pair used clean HEAD `cf6392c092741993d49e428b5b731fb53b981a2c` and exact `p1.lambda_integrity=0.00001`:
+
+- P1-1 metrics-only: export `1786035357532`, bag `20260806T165557Z`, run `44488f3441b3408a84624d500d638684`.
+- P1-2 enabled: export `1786035455177`, bag `20260806T165735Z`, run `7d0dae399cc746c48dd31294a2bdd747`.
+
+Both manifests finalized with recorder exit zero, complete bag metadata, complete validator summaries, schema v4, and 90-second bags. The required one-shot preflights failed before formal analysis:
+
+- P1-1 produced two metrics-only candidate rows but no replacement/retained-incumbent artifacts. The verifier incorrectly applied enabled replacement-closure requirements to those measurement-only rows.
+- P1-2 produced no strict candidate artifacts. Its final two base prepasses were temporally covered (`2.4 s` and `1.8 s`) but remained `coverage_insufficient` because interpolation support included occupied corners; the vehicle then reached close-to-goal before another generation could enter a full-support P1 stage.
+
+### Formal preflight terminal record
+
+Observation: P1-1 published 19 B-splines and P1-2 published 21. P1-1 reached two full-support metrics-only attempts; P1-2 reached the fixed temporal horizon but not `200/200` valid interpolation support in this run.
+
+Verdict: FAIL.
+
+Conclusion: This physical-end record supersedes the diagnostic permission for this pair only. The formal analyzer was not invoked, P1-3 was not run, and debugging returns to deterministic metrics-only verifier semantics plus full-support closed-loop admission without weakening occupied or fixed-support gates.
