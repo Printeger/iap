@@ -281,6 +281,27 @@ TEST(P1SoftFallbackPolicyTest,
 }
 
 TEST(P1SoftFallbackPolicyTest,
+     FixedDurationOutsideSnapshotHorizonCannotEnterBasePrepass) {
+  iap::P1AcceptedContextValidation validation;
+  validation.snapshot_available = true;
+  validation.spatial_in_bounds = true;
+  validation.temporal_in_horizon = false;
+  validation.frame_match = true;
+  validation.generation_match = true;
+  validation.query_time_match = true;
+  validation.fresh = true;
+  validation.coverage_ok = false;
+
+  EXPECT_FALSE(ego_planner::canP1BasePrepassRecoverSupport(validation));
+
+  // A fixed-duration prepass cannot repair time support, but it can move
+  // control points away from occupied interpolation corners.
+  validation.temporal_in_horizon = true;
+  validation.occupied_miss_count = 1;
+  EXPECT_TRUE(ego_planner::canP1BasePrepassRecoverSupport(validation));
+}
+
+TEST(P1SoftFallbackPolicyTest,
      PostOptimizationInvalidityKeepsExistingOrDefersBaseInitialFallback) {
   iap::P1AcceptedContextValidation validation;
   validation.fresh = false;

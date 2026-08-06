@@ -8,6 +8,8 @@ Accepted for P1-2 fixed-lambda validation.
 
 At `p1.lambda_integrity=0.00001`, the raw P1 gradient is analytically correct but its weighted magnitude is roughly nine orders below the base optimizer gradient in the recorded conflict case. A one-stage scalar objective can therefore reduce base and total cost while moving along the positive raw-P1 gradient and increasing fixed-200 mean/max risk.
 
+The prepass changes control-point positions but preserves the seed's knot interval and control-point count. Admission therefore skips the prepass when the seed already exceeds the immutable snapshot time horizon: no positional optimizer can recover that support. The existing base fallback advances the receding horizon instead. Spatial and occupied interpolation-corner misses remain prepass-eligible because moving control points can repair them.
+
 ## Decision
 
 Each topology seed first runs the unchanged base rebound optimizer. A successful base result with full `200/200` support defines a frozen base-improvement budget `DeltaB`. For each P1 seed, the active raw P1 gradient norm `G` freezes

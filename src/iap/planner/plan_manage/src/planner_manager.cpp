@@ -901,7 +901,8 @@ namespace ego_planner
               initial_candidate, plannerNow().seconds(), trajectory_frame_id_);
       const bool defer_admission_until_base_prepass =
           !p1_config.metrics_only && p1_config.lambda_integrity != 0.0 &&
-          planning_snapshot && std::isfinite(planning_query_base_time_s);
+          planning_snapshot && std::isfinite(planning_query_base_time_s) &&
+          canP1BasePrepassRecoverSupport(initial_p1_validation);
       if (defer_admission_until_base_prepass)
       {
         p1_objective_allowed = true;

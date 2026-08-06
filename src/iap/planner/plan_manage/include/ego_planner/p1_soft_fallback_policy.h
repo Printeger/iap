@@ -34,6 +34,15 @@ struct P1BasePrepassFallbackInput {
   bool has_existing_trajectory = false;
 };
 
+inline bool canP1BasePrepassRecoverSupport(
+    const iap::P1AcceptedContextValidation& validation) {
+  // The base prepass changes control-point positions, but it preserves the
+  // knot interval and control-point count.  It may therefore recover spatial
+  // or occupied-corner support, never a trajectory that already exceeds the
+  // immutable snapshot time horizon.
+  return validation.temporal_in_horizon;
+}
+
 inline P1SoftFallbackDecision decideP1BasePrepassFallback(
     const P1BasePrepassFallbackInput& input) {
   if (input.base_optimizer_success && input.full_p1_support) {

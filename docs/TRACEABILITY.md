@@ -174,3 +174,10 @@
 | IAP-RQ-400 | The authoritative published trajectory must preserve the fixed-200 P1 preference after STEP3 changes control points/timing | `p1_candidate_selection.{h,cpp}`, `planner_manager.cpp`, `test_p1_candidate_selection`; final mean/max must descend from the selected seed and, when present, strictly replace the incumbent on the immutable attempt snapshot | **IMPLEMENTED; fresh smoke pending** |
 | IAP-RQ-410 | A refinement regression must not overwrite the incumbent or create ambiguous candidate/publication identity | deferred candidate trace emission; replacement timeline/decision and candidate-retained profile closure, including truthful `no_publish_no_incumbent` startup disposition | **IMPLEMENTED; fresh smoke pending** |
 | IAP-RQ-320 / IAP-RQ-400 | Preflight and formal analysis must detect post-optimizer risk regression | `verify_safety_planner_evidence_bundle.py`, `analyze_safety_planner_run.py`, focused Python regressions; accepted profile is matched by generation/attempt/candidate and compared against seed/incumbent mean/max | **IMPLEMENTED; fresh smoke pending** |
+
+## 2026-08-06 P1-2 temporal prepass admission closure
+
+| Req ID | Requirement/evidence seam | Implementation and focused verification | Status |
+|---|---|---|---|
+| IAP-RQ-400 / IAP-RQ-410 | A base prepass must not consume an optimizer start when the fixed knot interval/control-point count already proves the seed exceeds the immutable P0 time horizon | `canP1BasePrepassRecoverSupport` in `p1_soft_fallback_policy.h`, guarded admission in `planner_manager.cpp`, `P1SoftFallbackPolicyTest.FixedDurationOutsideSnapshotHorizonCannotEnterBasePrepass`; spatial/occupied misses remain recoverable | **IMPLEMENTED; fresh smoke pending** |
+| IAP-RQ-320 / IAP-RQ-400 | Temporal admission repair must preserve P0 geometry, fixed-200 support, fixed lambda, and P5 semantics | No P0/P5/config change; only the provably futile prepass is skipped before the existing base fallback | **IMPLEMENTED; fresh smoke pending** |
