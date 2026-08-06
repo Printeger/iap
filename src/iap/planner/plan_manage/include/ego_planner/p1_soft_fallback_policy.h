@@ -43,7 +43,7 @@ inline P1SoftFallbackDecision decideP1BasePrepassFallback(
   const std::string reason = input.base_optimizer_success
       ? "base_prepass_no_full_support"
       : "base_prepass_optimizer_failure";
-  if (input.base_optimizer_success && !input.has_existing_trajectory) {
+  if (input.base_optimizer_success) {
     return {P1SoftFallbackAction::PUBLISH_BASE_CANDIDATE, true, false,
             false, reason};
   }

@@ -312,13 +312,13 @@ TEST(P1SoftFallbackPolicyTest,
 }
 
 TEST(P1SoftFallbackPolicyTest,
-     SuccessfulBasePrepassWithoutFullSupportKeepsExistingTrajectory) {
+     SuccessfulBasePrepassWithoutFullSupportAdvancesRecedingHorizon) {
   const auto decision = ego_planner::decideP1BasePrepassFallback({
       true, false, true});
 
   EXPECT_EQ(decision.action,
-            ego_planner::P1SoftFallbackAction::KEEP_EXISTING_TRAJECTORY);
-  EXPECT_FALSE(decision.publish_candidate);
+            ego_planner::P1SoftFallbackAction::PUBLISH_BASE_CANDIDATE);
+  EXPECT_TRUE(decision.publish_candidate);
   EXPECT_FALSE(decision.objective_allowed);
   EXPECT_EQ(decision.reason, "base_prepass_no_full_support");
 }
