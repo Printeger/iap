@@ -1,12 +1,18 @@
 #include <ego_planner/planner_manager.h>
 #include <ego_planner/p1_soft_fallback_policy.h>
+#include <ego_planner/trajectory_command_qos.h>
 
 #include <gtest/gtest.h>
 #include <iap/planner/risk_grid_map.hpp>
 #include <iap/planner/p1_accepted_context_validation.hpp>
+#include <rclcpp/executors/single_threaded_executor.hpp>
+#include <traj_utils/msg/bspline.hpp>
 
+#include <atomic>
+#include <chrono>
 #include <memory>
 #include <string>
+#include <thread>
 #include <vector>
 
 namespace {
@@ -64,6 +70,14 @@ std::shared_ptr<const iap::RiskGridSnapshot> makeSnapshot(double value,
   return snapshot;
 }
 
+void ensureRclcpp() {
+  if (!rclcpp::ok()) {
+    int argc = 0;
+    char** argv = nullptr;
+    rclcpp::init(argc, argv);
+  }
+}
+
 }  // namespace
 
 TEST(PlanningRiskContextTest, ManualContextKeepsGenerationUntilClear) {
@@ -101,6 +115,47 @@ TEST(PlanningRiskContextTest, BeginWithoutP0RuntimeCreatesDeterministicNullConte
 
   manager.clearPlanningRiskContext();
   EXPECT_FALSE(manager.planningRiskContext().active);
+}
+
+TEST(PlanningRiskContextTest, TrajectoryCommandSurvivesLateSubscriber) {
+  const auto profile = ego_planner::trajectoryCommandQos().get_rmw_qos_profile();
+  EXPECT_EQ(profile.history, RMW_QOS_POLICY_HISTORY_KEEP_LAST);
+  EXPECT_EQ(profile.depth, 1u);
+  EXPECT_EQ(profile.reliability, RMW_QOS_POLICY_RELIABILITY_RELIABLE);
+  EXPECT_EQ(profile.durability, RMW_QOS_POLICY_DURABILITY_TRANSIENT_LOCAL);
+
+  ensureRclcpp();
+  auto publisher_node = std::make_shared<rclcpp::Node>(
+      "trajectory_command_qos_publisher_test");
+  auto publisher = publisher_node->create_publisher<traj_utils::msg::Bspline>(
+      "/test/trajectory_command_qos", ego_planner::trajectoryCommandQos());
+  rclcpp::executors::SingleThreadedExecutor executor;
+  executor.add_node(publisher_node);
+  executor.spin_some();
+
+  traj_utils::msg::Bspline command;
+  command.traj_id = 42;
+  publisher->publish(command);
+
+  std::atomic<int> received_traj_id{-1};
+  auto subscriber_node = std::make_shared<rclcpp::Node>(
+      "trajectory_command_qos_subscriber_test");
+  auto subscription =
+      subscriber_node->create_subscription<traj_utils::msg::Bspline>(
+          "/test/trajectory_command_qos", ego_planner::trajectoryCommandQos(),
+          [&received_traj_id](const traj_utils::msg::Bspline& message) {
+            received_traj_id.store(message.traj_id);
+          });
+  executor.add_node(subscriber_node);
+
+  const auto deadline = std::chrono::steady_clock::now() +
+      std::chrono::seconds(2);
+  while (received_traj_id.load() < 0 &&
+         std::chrono::steady_clock::now() < deadline) {
+    executor.spin_some();
+    std::this_thread::sleep_for(std::chrono::milliseconds(10));
+  }
+  EXPECT_EQ(received_traj_id.load(), 42);
 }
 
 TEST(PlanningRiskContextTest, StaleContextFailsClosedAgainstItsImmutableSnapshot) {

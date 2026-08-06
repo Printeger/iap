@@ -1,4 +1,5 @@
 #include "bspline_opt/uniform_bspline.h"
+#include "ego_planner/trajectory_command_qos.h"
 #include "nav_msgs/msg/odometry.hpp"
 #include "traj_utils/msg/bspline.hpp"
 #include "quadrotor_msgs/msg/position_command.hpp"
@@ -256,7 +257,7 @@ int main(int argc, char **argv)
 
   auto bspline_sub = node->create_subscription<traj_utils::msg::Bspline>(
       "planning/bspline",
-      10,
+      ego_planner::trajectoryCommandQos(),
       bsplineCallback);
   odom_sub = node->create_subscription<nav_msgs::msg::Odometry>(
       "odometry",

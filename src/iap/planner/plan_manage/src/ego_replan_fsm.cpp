@@ -2,6 +2,7 @@
 #include <ego_planner/ego_replan_fsm.h>
 #include <ego_planner/p0_risk_grid_runtime.h>
 #include <ego_planner/p5_runtime_integrity_gate.h>
+#include <ego_planner/trajectory_command_qos.h>
 #include <iap/planner/risk_grid_map.hpp>
 
 namespace ego_planner
@@ -118,7 +119,11 @@ namespace ego_planner
           this->BroadcastBsplineCallback(msg);
         });
 
-    bspline_pub_ = node_->create_publisher<traj_utils::msg::Bspline>("planning/bspline", 10);
+    // A newly accepted trajectory is a stateful command.  Retain the latest
+    // command so a traj_server that completes startup after the planner does
+    // not miss the only publication and leave the vehicle stationary.
+    bspline_pub_ = node_->create_publisher<traj_utils::msg::Bspline>(
+        "planning/bspline", trajectoryCommandQos());
     data_disp_pub_ = node_->create_publisher<traj_utils::msg::DataDisp>("planning/data_display", 100);
 
     if (target_type_ == TARGET_TYPE::MANUAL_TARGET)

@@ -3,6 +3,10 @@
 > 规则：任何代码改动必须在这里记录，并包含 IAP-RQ-XXX。
 
 ## Unreleased
+- fix(planner-trajectory-command-qos): IAP-RQ-400 / IAP-RQ-410 — retain the latest accepted B-spline command for a late-starting trajectory server.
+  - The fresh run `9e9103bd130040fcb905aca5a52e27af` had a healthy continuously advancing P0 grid but recorded zero `/drone_0_planning/bspline` messages: the startup base fallback was published before `traj_server` became ready, so the vehicle stayed still and every later seed remained 4.4 seconds long against the unchanged 2.5-second P0 horizon.
+  - The planner publisher and trajectory-server subscriber now share reliable, transient-local, keep-last-one QoS. This changes command delivery only; P0 geometry/horizon/stale semantics, fixed P1 lambda/support, optimizer admission, and P5 gates are unchanged.
+  - A focused regression fixes the QoS contract, and the planning-context/P1 admission/P0 runtime suites plus the fixed-lambda feedback loop pass.
 - fix(planner-p0-frozen-occupancy-epoch): IAP-RQ-320 / IAP-RQ-400 — bind each P0 refresh to one immutable occupancy-map epoch while the live map continues updating.
   - GridMap now captures geometry, raw/fused/inflated buffers, cloud stamp, and generation under one short writer lock, then serves all refresh queries from that read-only copy. A 10 Hz cloud update after capture cannot mix generations inside the P0 snapshot; the next refresh captures the next epoch.
   - A configured epoch factory that cannot capture a complete post-cloud epoch fails closed as `occupancy_generation_changed`. The existing RiskGrid regression still rejects a query source that changes generation within one captured refresh.
