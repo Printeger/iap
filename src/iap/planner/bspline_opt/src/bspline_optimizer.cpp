@@ -3812,9 +3812,22 @@ namespace ego_planner
     out.close();
 
     const std::string context_path = p1AcceptedTrajectoryRiskProfileContextPath();
-    // A sidecar is an authoritative binding for one accepted profile.  Replace
-    // it atomically so a killed writer can never leave a partially appended
-    // row that looks like evidence for an older trajectory.
+    // Keep every completed accepted-profile binding.  The analyzer needs the
+    // history to select the latest trajectory that actually crossed the DDS
+    // recorder boundary; launch shutdown can otherwise leave one newer CSV
+    // profile whose already-published message did not reach rosbag.  Rewrite
+    // the complete history atomically so an interrupted writer can expose
+    // neither a partial row nor a false binding.
+    std::string existing_context;
+    {
+      std::ifstream context_file(context_path);
+      if (context_file.good())
+      {
+        std::ostringstream buffer;
+        buffer << context_file.rdbuf();
+        existing_context = buffer.str();
+      }
+    }
     std::ostringstream context;
     iap::P1AcceptedContextValidationInput validation_input;
     validation_input.snapshot = risk_snapshot_;
@@ -3841,7 +3854,15 @@ namespace ego_planner
             ? p1_risk_context_.planning_start_s
             : planning_start_s;
     context << std::setprecision(17);
-    context << "schema_version,run_id,manifest_path,profile_seq,trajectory_id,planning_attempt_id,candidate_id,planning_start_s,accepted_stamp_s,planning_duration_s,snapshot_generation_id,snapshot_stamp_s,query_base_time_s,snapshot_center_x,snapshot_center_y,snapshot_center_z,snapshot_x_min,snapshot_x_max,snapshot_y_min,snapshot_y_max,snapshot_z_min,snapshot_z_max,snapshot_time_min_s,snapshot_time_max_s,trajectory_x_min,trajectory_x_max,trajectory_y_min,trajectory_y_max,trajectory_z_min,trajectory_z_max,trajectory_time_min_s,trajectory_time_max_s,expected_sample_count,matched_sample_count,match_ratio,query_miss_count,stale_count,invalid_count,miss_reason_histogram,snapshot_frame_id,trajectory_frame_id,spatial_in_bounds,temporal_in_horizon,frame_match,generation_match,query_time_match,fresh,coverage_ok,spatial_miss_count,temporal_miss_count,occupied_miss_count,stale_miss_count,invalid_miss_count,trajectory_start_stamp_s,objective_requested,objective_applied,p1_fallback,fallback_reason\n";
+    if (existing_context.empty())
+    {
+      context << "schema_version,run_id,manifest_path,profile_seq,trajectory_id,planning_attempt_id,candidate_id,planning_start_s,accepted_stamp_s,planning_duration_s,snapshot_generation_id,snapshot_stamp_s,query_base_time_s,snapshot_center_x,snapshot_center_y,snapshot_center_z,snapshot_x_min,snapshot_x_max,snapshot_y_min,snapshot_y_max,snapshot_z_min,snapshot_z_max,snapshot_time_min_s,snapshot_time_max_s,trajectory_x_min,trajectory_x_max,trajectory_y_min,trajectory_y_max,trajectory_z_min,trajectory_z_max,trajectory_time_min_s,trajectory_time_max_s,expected_sample_count,matched_sample_count,match_ratio,query_miss_count,stale_count,invalid_count,miss_reason_histogram,snapshot_frame_id,trajectory_frame_id,spatial_in_bounds,temporal_in_horizon,frame_match,generation_match,query_time_match,fresh,coverage_ok,spatial_miss_count,temporal_miss_count,occupied_miss_count,stale_miss_count,invalid_miss_count,trajectory_start_stamp_s,objective_requested,objective_applied,p1_fallback,fallback_reason\n";
+    }
+    else
+    {
+      context << existing_context;
+      if (existing_context.back() != '\n') context << '\n';
+    }
     std::ostringstream miss_reason_histogram;
     bool first_reason = true;
     for (const auto &entry : miss_reasons)

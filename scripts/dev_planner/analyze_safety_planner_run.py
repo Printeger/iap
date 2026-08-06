@@ -7012,12 +7012,17 @@ def summarize_p1_accepted_profile_rows(
     read_error: str = "",
     missing_fields: list[str] | None = None,
     malformed_row_count: int = 0,
+    preferred_profile_seq: float | None = None,
 ) -> dict[str, Any]:
     missing_fields = missing_fields or []
     selected_rows: list[dict[str, Any]] = []
     selected_profile_seq: Any = None
     if rows:
-        selected_key = max(p1_profile_seq_value(row) for row in rows)
+        selected_key = (
+            (1, preferred_profile_seq)
+            if preferred_profile_seq is not None
+            else max(p1_profile_seq_value(row) for row in rows)
+        )
         selected_rows = [row for row in rows if p1_profile_seq_value(row) == selected_key]
         selected_profile_seq = (
             selected_key[1] if selected_key[0] == 1 else selected_rows[-1].get("profile_seq", "")
@@ -7122,6 +7127,65 @@ def summarize_p1_accepted_profile_rows(
         "samples": sample_rows,
         **format_summary,
     }
+
+
+def select_latest_recorded_p1_profile(
+    rows: list[dict[str, Any]],
+    context_rows: list[dict[str, Any]],
+    bspline_rows: list[dict[str, Any]],
+    *,
+    source_summary: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Select the newest complete profile whose trajectory is present in rosbag.
+
+    The profile writer and DDS recorder are separate processes.  During launch
+    shutdown, the writer may finish one final 200-row profile after rosbag has
+    stopped receiving.  Historical context rows let formal analysis ignore
+    that unrecorded tail without weakening timestamp alignment.
+    """
+    recorded_starts = [
+        value for value in (
+            finite_float(row.get("start_time_s")) for row in bspline_rows
+        ) if value is not None
+    ]
+    profile_sequences = {
+        value for value in (finite_float(row.get("profile_seq")) for row in rows)
+        if value is not None
+    }
+    recorded_candidates = sorted({
+        sequence
+        for context in context_rows
+        for sequence in [finite_float(context.get("profile_seq"))]
+        for trajectory_start in [finite_float(context.get("trajectory_start_stamp_s"))]
+        if sequence is not None
+        and sequence in profile_sequences
+        and trajectory_start is not None
+        and any(abs(trajectory_start - stamp) <= 1.0e-6 for stamp in recorded_starts)
+    })
+    source = source_summary or {}
+    selected = recorded_candidates[-1] if recorded_candidates else None
+    summary = summarize_p1_accepted_profile_rows(
+        rows,
+        missing=bool(source.get("missing", False)),
+        path=str(source.get("path", "")),
+        read_error=str(source.get("read_error", "")),
+        missing_fields=list(source.get("missing_fields", []) or []),
+        malformed_row_count=int(source.get("malformed_row_count", 0) or 0),
+        preferred_profile_seq=selected,
+    ) if selected is not None else summarize_p1_accepted_profile_rows(
+        [],
+        missing=bool(source.get("missing", False)),
+        path=str(source.get("path", "")),
+        read_error=str(source.get("read_error", "")),
+        missing_fields=list(source.get("missing_fields", []) or []),
+        malformed_row_count=int(source.get("malformed_row_count", 0) or 0),
+    )
+    summary.update({
+        "recorded_bspline_binding": selected is not None,
+        "recorded_profile_candidates": recorded_candidates,
+        "recorded_bspline_start_stamps": recorded_starts,
+    })
+    return summary
 
 
 def read_p1_accepted_profile_csv(path: Path) -> tuple[list[dict[str, Any]], dict[str, Any]]:
@@ -17562,6 +17626,18 @@ def _analyze_impl(args: argparse.Namespace) -> dict[str, Any]:
                 missing=True,
                 path="",
             )
+        p1_accepted_profile_summary = select_latest_recorded_p1_profile(
+            p1_accepted_profile_rows,
+            p1_accepted_profile_context_rows,
+            p1_2_bspline_rows,
+            source_summary=p1_accepted_profile_summary,
+        )
+        p1_2_reference_profile_summary = select_latest_recorded_p1_profile(
+            p1_2_reference_profile_rows,
+            p1_2_reference_context_rows,
+            p1_2_reference_bspline_rows,
+            source_summary=p1_2_reference_profile_summary,
+        )
         current_context_preview = validate_p1_profile_context(
             p1_accepted_profile_summary,
             p1_accepted_profile_context_rows,

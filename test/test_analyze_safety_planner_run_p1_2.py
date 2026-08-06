@@ -1174,6 +1174,42 @@ class P1_2AnalyzerTest(unittest.TestCase):
             self.assertGreater(binding.stat().st_size, 0)
             self.assertGreater(objective.stat().st_size, 0)
 
+    def test_profile_selection_ignores_shutdown_tail_not_recorded_in_bag(self):
+        recorded = accepted_profile_rows(0.0)
+        unrecorded = accepted_profile_rows(0.0)
+        for row in recorded:
+            row["profile_seq"] = 8
+            row["trajectory_id"] = 43
+            row["stamp"] = 10.2
+        for row in unrecorded:
+            row["profile_seq"] = 9
+            row["trajectory_id"] = 44
+            row["stamp"] = 11.2
+        recorded_context = accepted_profile_context(recorded)[0]
+        recorded_context.update({
+            "profile_seq": 8,
+            "trajectory_id": 43,
+            "accepted_stamp_s": 10.2,
+            "trajectory_start_stamp_s": 10.0,
+        })
+        unrecorded_context = accepted_profile_context(unrecorded)[0]
+        unrecorded_context.update({
+            "profile_seq": 9,
+            "trajectory_id": 44,
+            "accepted_stamp_s": 11.2,
+            "trajectory_start_stamp_s": 11.0,
+        })
+
+        summary = analyzer.select_latest_recorded_p1_profile(
+            recorded + unrecorded,
+            [recorded_context, unrecorded_context],
+            [{"start_time_s": 10.0}],
+        )
+
+        self.assertEqual(summary["selected_profile_seq"], 8.0)
+        self.assertEqual(summary["recorded_profile_candidates"], [8.0])
+        self.assertTrue(summary["recorded_bspline_binding"])
+
     def test_risk_scene_alignment_fails_closed_and_unavailable_plot_is_nonempty(self):
         comparison = analyzer.compare_p1_2_risk_profiles(
             bspline_rows(0.0), bspline_rows(5.0), cloud_rows(0.0), cloud_rows(5.0),

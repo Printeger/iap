@@ -1359,6 +1359,50 @@ TEST(P1IntegrityCostTest,
   std::remove(context_path.c_str());
 }
 
+TEST(P1IntegrityCostTest,
+     AcceptedProfileContextAtomicallyRetainsEarlierPublishBindings) {
+  ego_planner::SwarmTrajData swarm;
+  const Eigen::MatrixXd q = makeControlPoints();
+  AffineProvider provider(10.0, Eigen::Vector3d(1.0, 0.0, 0.0));
+  auto snapshot = makeSnapshot(provider);
+  const std::string debug_path = tempProfilePath("p1_context_history_debug");
+  const std::string profile_path =
+      "/tmp/planner_p1_accepted_trajectory_risk_profile.csv";
+  const std::string context_path =
+      "/tmp/planner_p1_accepted_trajectory_risk_profile_context.csv";
+  std::remove(debug_path.c_str());
+  std::remove(profile_path.c_str());
+  std::remove(context_path.c_str());
+
+  auto config = disabledConfig();
+  config.use_integrity_cost = true;
+  config.metrics_only = false;
+  config.lambda_integrity = 0.00001;
+  config.debug_csv_enable = true;
+  config.debug_csv_path = debug_path;
+  auto optimizer = makeOptimizer(config, &swarm);
+  optimizer->setRiskSnapshot(snapshot, snapshot->stamp_s());
+  ego_planner::UniformBspline trajectory(q, 3, 0.1);
+
+  ASSERT_TRUE(optimizer->writeP1AcceptedTrajectoryRiskProfile(
+      trajectory, 8, 43, 10.2, 10.1, "map", 10.0));
+  ASSERT_TRUE(optimizer->writeP1AcceptedTrajectoryRiskProfile(
+      trajectory, 9, 44, 11.2, 11.1, "map", 11.0));
+
+  const auto context_rows = readCsvRows(context_path);
+  ASSERT_EQ(context_rows.size(), 2U);
+  EXPECT_EQ(context_rows[0].at("profile_seq"), "8");
+  EXPECT_EQ(context_rows[1].at("profile_seq"), "9");
+  EXPECT_NEAR(std::stod(context_rows[0].at("trajectory_start_stamp_s")),
+              10.0, 1e-12);
+  EXPECT_NEAR(std::stod(context_rows[1].at("trajectory_start_stamp_s")),
+              11.0, 1e-12);
+
+  std::remove(debug_path.c_str());
+  std::remove(profile_path.c_str());
+  std::remove(context_path.c_str());
+}
+
 TEST(P1IntegrityCostTest, BaseFallbackWithoutSnapshotWritesFailClosedProfile) {
   ego_planner::SwarmTrajData swarm;
   const Eigen::MatrixXd q = makeControlPoints();

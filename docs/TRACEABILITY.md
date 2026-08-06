@@ -1,5 +1,11 @@
 # Traceability Matrix (IAP)
 
+## 2026-08-06 P1 recorded-profile shutdown boundary
+
+| Req ID | Evidence | Verification | Status |
+|---|---|---|---|
+| IAP-RQ-320 / IAP-RQ-400 | Retained fresh pair `f560550d96614bcfa9208bb9f1de10fe` / `e81b98a26d864cb68dfd2b442157ea14`, sole formal analysis `7a677e5327914de2aca1566d92eae9f3`: strict mean/max reduction passed, but profile seq `89` started at `1657065690.4515567` after rosbag's final recorded seq `88` start `1657065689.439588` | Accepted context is now atomic history; `select_latest_recorded_p1_profile` chooses the greatest profile sequence with an exact bag B-spline start. `AcceptedProfileContextAtomicallyRetainsEarlierPublishBindings`, `test_profile_selection_ignores_shutdown_tail_not_recorded_in_bag`, full 32-test integrity suite, and full 64-test P1-2 analyzer suite pass | **IMPLEMENTED; fresh smoke/formal pair required** |
+
 ## 2026-08-06 P1 retained-incumbent formal-entry smoke
 
 | Req ID | Evidence | Verification | Status |
