@@ -3547,6 +3547,32 @@ namespace ego_planner
              "objective_requested,objective_applied,p1_fallback,fallback_reason\n";
     }
 
+    // Candidate sidecars normally emit this trace during optimizer starts.
+    // A strict-support fallback has no candidate artifact, but its occupied
+    // interpolation corners are exactly the evidence needed to distinguish a
+    // legitimate P0 support miss from a point-wise collision/frame mismatch.
+    // Keep the same v4 schema and append accepted-profile queries under an
+    // explicit phase rather than fabricating an optimizer candidate.
+    std::ofstream occupancy;
+    if (risk_snapshot_ &&
+        p1_config_.evidence_schema_version == "p1_evidence_provenance_v4")
+    {
+      const std::string occupancy_path = p0OccupancyQueryEvidencePath();
+      std::ifstream occupancy_existing(occupancy_path);
+      const bool occupancy_header = !occupancy_existing.good() ||
+          occupancy_existing.peek() == std::ifstream::traits_type::eof();
+      occupancy_existing.close();
+      occupancy.open(occupancy_path, std::ios::app);
+      if (occupancy.good())
+      {
+        occupancy << std::setprecision(17);
+        if (occupancy_header)
+        {
+          occupancy << "schema_version,run_id,manifest_path,planning_attempt_id,candidate_id,snapshot_generation_id,query_base_time_s,phase,sample_index,query_x,query_y,query_z,query_time_s,query_tau_s,query_reason,temporal_layer,horizon_id,horizon_s,temporal_weight,corner_id,corner_weight,corner_ix,corner_iy,corner_iz,corner_x,corner_y,corner_z,source_flags,c_pi,invalid_reason,occupancy_available,raw_occupied,inflated_occupied,occupancy_ix,occupancy_iy,occupancy_iz,occupancy_x,occupancy_y,occupancy_z,resolution_m,inflation_m,frame_id,cloud_stamp_s,occupancy_generation,occupancy_source\n";
+        }
+      }
+    }
+
     const bool applied_to_objective =
         p1_config_.use_integrity_cost && !p1_config_.metrics_only &&
         p1_risk_context_.objective_allowed &&
@@ -3592,8 +3618,10 @@ namespace ego_planner
       trajectory_min = trajectory_min.cwiseMin(p);
       trajectory_max = trajectory_max.cwiseMax(p);
       iap::RiskCostSample sample;
+      iap::RiskCostQueryTrace query_trace;
       const bool hit = risk_snapshot_ &&
-          risk_snapshot_->queryCost(p, risk_query_base_time_s_ + t_s, &sample);
+          risk_snapshot_->queryCost(
+              p, risk_query_base_time_s_ + t_s, &sample, &query_trace);
       const bool c_pi_finite =
           hit && sample.valid && !sample.stale && std::isfinite(sample.cost);
       // Rebound's collision phase queries this same inflated occupancy map.
@@ -3656,6 +3684,48 @@ namespace ego_planner
       validation_sample.query_stale = sample.stale;
       validation_sample.query_reason = reason;
       validation_samples.push_back(std::move(validation_sample));
+
+      if (occupancy.good())
+      {
+        for (const auto &corner : query_trace.corners)
+        {
+          occupancy << p1_config_.evidence_schema_version << ','
+              << p1_config_.evidence_run_id << ','
+              << p1_config_.evidence_manifest_path << ','
+              << p1_risk_context_.planning_attempt_id << ','
+              << p1_risk_context_.candidate_id << ','
+              << risk_snapshot_->generation_id() << ','
+              << risk_query_base_time_s_ << ",accepted," << sample_index << ','
+              << p.x() << ',' << p.y() << ',' << p.z() << ','
+              << risk_query_base_time_s_ + t_s << ','
+              << query_trace.query_tau_s << ',' << query_trace.reason << ','
+              << corner.temporal_layer << ',' << corner.horizon_id << ','
+              << corner.horizon_s << ',' << corner.temporal_weight << ','
+              << corner.corner_id << ',' << corner.spatial_weight << ','
+              << corner.voxel_index.x() << ',' << corner.voxel_index.y() << ','
+              << corner.voxel_index.z() << ',' << corner.voxel_position.x() << ','
+              << corner.voxel_position.y() << ',' << corner.voxel_position.z() << ','
+              << corner.source_flags << ',';
+          if (std::isfinite(corner.c_pi))
+            occupancy << corner.c_pi;
+          occupancy << ',' << corner.invalid_reason << ','
+              << (corner.occupancy.available ? 1 : 0) << ','
+              << (corner.occupancy.raw_occupied ? 1 : 0) << ','
+              << (corner.occupancy.inflated_occupied ? 1 : 0) << ','
+              << corner.occupancy.voxel_index.x() << ','
+              << corner.occupancy.voxel_index.y() << ','
+              << corner.occupancy.voxel_index.z() << ','
+              << corner.occupancy.voxel_center.x() << ','
+              << corner.occupancy.voxel_center.y() << ','
+              << corner.occupancy.voxel_center.z() << ','
+              << corner.occupancy.resolution_m << ','
+              << corner.occupancy.inflation_m << ','
+              << corner.occupancy.frame_id << ','
+              << corner.occupancy.cloud_stamp_s << ','
+              << corner.occupancy.occupancy_generation << ','
+              << corner.occupancy.source << '\n';
+        }
+      }
 
       out << p1_config_.evidence_schema_version << ','
           << p1_config_.evidence_run_id << ','

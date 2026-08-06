@@ -3,6 +3,11 @@
 > 规则：任何代码改动必须在这里记录，并包含 IAP-RQ-XXX。
 
 ## Unreleased
+- fix(planner-p0-occupied-fallback-evidence): IAP-RQ-320 / IAP-RQ-400 — preserve occupied-corner semantics and attribution when P1 never reaches an optimizer start.
+  - Formal pair 7 exposed in-horizon accepted fallbacks whose risk query returned `reason=occupied` while `RiskCostSample.stale` retained its unevaluated default. Pre-admission therefore mislabeled the same unsupported prefix as stale even though the base collision point predicate remained free.
+  - A completed failed cost query now marks `stale` only for an actual stale reason. Occupied interpolation support remains invalid/unknown and cannot contribute a finite cost or satisfy fixed support.
+  - Every v4 accepted-profile query now appends its exact two-layer/trilinear corner trace under `phase=accepted`, including raw/inflated occupancy and captured map generation. This keeps P0 attribution available even when no candidate optimizer artifact exists; it does not fabricate a candidate or relax enabled preflight.
+  - Regressions cover free query-point/occupied-corner freshness semantics and accepted-fallback corner evidence. Fixed lambda `0.00001`, stale timeout `1.0 s`, P0 geometry/occupancy, fixed `200/200` support, and P5 semantics are unchanged.
 - fix(planner-p1-selected-lifecycle-identity): IAP-RQ-400 / IAP-RQ-410 — rebind the immutable planning context to the selected candidate before recording replacement or stale-rejection lifecycle events.
   - Formal pair 4 exposed an attempt where risk-first ranking selected/rejected candidate 1 and the decision/retained artifacts agreed, but the timeline still named candidate 4, the last optimizer executed.
   - The selected branch now uses the existing context binder before any decision lifecycle output. This changes evidence identity only; candidate ranking, frozen merit, fixed lambda/support, incumbent comparison, P0/P5 semantics, and publication decisions are unchanged.

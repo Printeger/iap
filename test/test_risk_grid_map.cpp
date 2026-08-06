@@ -312,6 +312,7 @@ TEST(RiskGridMapTest, QueryTraceAttributesOccupiedInterpolationCorner) {
   iap::RiskCostQueryTrace trace;
   EXPECT_FALSE(snapshot->queryCost(query_point, 10.5, &cost, &trace));
   EXPECT_EQ(cost.reason, "occupied");
+  EXPECT_FALSE(cost.stale);
   EXPECT_FALSE(trace.success);
   EXPECT_EQ(trace.reason, "occupied");
   ASSERT_EQ(trace.corners.size(), 16u);

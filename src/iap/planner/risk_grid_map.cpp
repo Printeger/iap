@@ -594,6 +594,12 @@ bool RiskGridSnapshot::queryCost(const Eigen::Vector3d& p_w,
     trace->frame_id = params().frame_id;
   }
   const auto fail = [&](const std::string& failure) {
+    // A completed query can be invalid without being stale.  In particular,
+    // occupied interpolation corners are a spatial support decision, not a
+    // freshness failure.  Preserve the conservative default only for an
+    // unevaluated sample; once queryCost classifies a failure, expose the
+    // actual category to admission/evidence consumers.
+    out->stale = failure.find("stale") != std::string::npos;
     out->reason = failure;
     if (trace) {
       trace->success = false;

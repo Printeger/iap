@@ -1341,6 +1341,70 @@ TEST(P1IntegrityCostTest, BaseFallbackWithoutSnapshotWritesFailClosedProfile) {
   std::remove(profile_path.c_str());
 }
 
+TEST(P1IntegrityCostTest,
+     AcceptedFallbackWritesOccupiedInterpolationCornerEvidence) {
+  ego_planner::SwarmTrajData swarm;
+  const Eigen::MatrixXd q = makeControlPoints();
+  AffineProvider provider(10.0, Eigen::Vector3d(1.0, 0.0, 0.0));
+  auto params = makeParams();
+  params.skip_occupied_voxels = true;
+  iap::RiskGridMap grid(params);
+  const auto occupancy = [](const Eigen::Vector3d& p) {
+    iap::RiskOccupancyDiagnostic diagnostic;
+    diagnostic.available = true;
+    diagnostic.raw_occupied = p.x() > 0.5;
+    diagnostic.inflated_occupied = diagnostic.raw_occupied;
+    diagnostic.frame_id = "map";
+    diagnostic.cloud_stamp_s = 9.9;
+    diagnostic.occupancy_generation = 17;
+    diagnostic.resolution_m = 1.0;
+    diagnostic.inflation_m = 0.0;
+    diagnostic.source = "accepted_fallback_test";
+    return diagnostic;
+  };
+  std::string refresh_reason;
+  ASSERT_TRUE(grid.refreshFromProvider(
+      Eigen::Vector3d::Zero(), 10.0, provider, occupancy, &refresh_reason))
+      << refresh_reason;
+  auto snapshot = grid.acquireSnapshot();
+  ASSERT_NE(snapshot, nullptr);
+
+  const std::string debug_path = tempProfilePath("p1_occupied_fallback_debug");
+  const std::string profile_path =
+      "/tmp/planner_p1_accepted_trajectory_risk_profile.csv";
+  auto config = disabledConfig();
+  config.use_integrity_cost = true;
+  config.metrics_only = false;
+  config.lambda_integrity = 0.00001;
+  config.debug_csv_enable = true;
+  config.debug_csv_path = debug_path;
+  config.evidence_schema_version = "p1_evidence_provenance_v4";
+  config.evidence_run_id = "accepted-fallback-occupancy-test";
+  config.evidence_manifest_path = "/tmp/accepted-fallback-manifest.json";
+  auto optimizer = makeOptimizer(config, &swarm);
+  optimizer->setP1IntegrityConfigForTest(config);
+  optimizer->setRiskSnapshot(snapshot, snapshot->stamp_s());
+  std::remove(profile_path.c_str());
+  std::remove(optimizer->p0OccupancyQueryEvidencePath().c_str());
+
+  ASSERT_TRUE(optimizer->writeP1AcceptedTrajectoryRiskProfile(
+      ego_planner::UniformBspline(q, 3, 0.1), 9, 44, 10.5));
+  const auto rows = readCsvRows(optimizer->p0OccupancyQueryEvidencePath());
+  ASSERT_GE(rows.size(), 1600U);
+  EXPECT_TRUE(std::all_of(rows.begin(), rows.end(), [](const auto& row) {
+    return row.at("phase") == "accepted";
+  }));
+  EXPECT_TRUE(std::any_of(rows.begin(), rows.end(), [](const auto& row) {
+    return row.at("invalid_reason") == "occupied" &&
+        row.at("inflated_occupied") == "1" &&
+        row.at("occupancy_generation") == "17";
+  }));
+
+  std::remove(debug_path.c_str());
+  std::remove(profile_path.c_str());
+  std::remove(optimizer->p0OccupancyQueryEvidencePath().c_str());
+}
+
 TEST(P1IntegrityCostTest, EnabledAcceptedProfileRecordsAppliedObjectiveAndLambda) {
   ego_planner::SwarmTrajData swarm;
   const Eigen::MatrixXd q = makeControlPoints();
