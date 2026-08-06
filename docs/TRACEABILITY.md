@@ -1,5 +1,11 @@
 # Traceability Matrix (IAP)
 
+## 2026-08-06 P1 smooth-CVaR formal recorder capacity failure
+
+| Req ID | Evidence | Verification | Status |
+|---|---|---|---|
+| IAP-RQ-320 / IAP-RQ-400 / IAP-RQ-410 | Clean pair `3b4b7c2ef18241f3b7e9e2a901d8e434` / `dc7cedeff7934d1d9ad1f71586ae7e2f`; P1-2 export `1786054422358`, bag `20260806T221342Z`; filesystem exhausted during finalization | P1-1 sole preflight PASS; P1-2 recorder SIGKILL; sole P1-2 preflight FAIL on missing process-end/validator/bag metadata plus truncated sidecars; formal analyzer not invoked | **FAIL (operational); retain pair, recover reproducible capacity, fresh pair required** |
+
 ## 2026-08-06 P1 smooth-CVaR peak alignment
 
 | Req ID | Evidence | Verification | Status |

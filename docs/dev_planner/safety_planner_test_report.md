@@ -9312,3 +9312,11 @@ Observation: Clean HEAD `0afb316f8660e9ca4d28590522ef72ed049c391b` produced fres
 Verdict: PASS (diagnostic entry-to-formal).
 
 Conclusion: The final H4 smooth-CVaR objective, fixed support, frozen normalization, candidate diversity, winner/replacement closure, P0 attribution, and v4 provenance are green. This authorizes exactly one wholly fresh serial 90-second P1-1/P1-2 pair and one formal analyzer invocation for that pair. It does not authorize P1-3.
+
+### Superseding P1 fixed-lambda formal terminal record — 2026-08-06 smooth-CVaR recorder capacity failure
+
+Observation: Clean HEAD `9e2a5240f35e6bd240862893b126c300a4ae5e2c` produced serial P1-1 run `3b4b7c2ef18241f3b7e9e2a901d8e434` (export `test_planner_p1_degraded_lidar_good_gnss_degraded_lidar_good_1786054308701`, bag `test_planner_p1_degraded_lidar_good_gnss_degraded_lidar_good_20260806T221148Z`) and P1-2 run `dc7cedeff7934d1d9ad1f71586ae7e2f` (export `test_planner_p1_degraded_lidar_good_gnss_degraded_lidar_good_1786054422358`, bag `test_planner_p1_degraded_lidar_good_gnss_degraded_lidar_good_20260806T221342Z`). P1-1 finalized and its sole v4 preflight returned `passed=true, errors=[]`. P1-2 exhausted the evidence filesystem during shutdown after writing approximately `1.09 GB` of occupancy-corner evidence and `1.76 GB` of MCAP; recorder/finalizer was SIGKILLed. Its sole preflight then failed on missing process-end, validator-summary, bag-metadata, and recorder-completion provenance plus truncated candidate sidecars. Build products had also been cleaned to recover capacity before that preflight, so runtime-path availability appeared as an additional failure; the missing finalizer and truncated artifacts independently make the bundle invalid. No formal analyzer was invoked.
+
+Verdict: FAIL (formal preflight; operational evidence finalization).
+
+Conclusion: The pair is retained and will never be analyzed or reused. It provides no conclusion about smooth-CVaR effectiveness. All exports, bags, manifests, and the failed verifier JSON remain intact; capacity recovery is limited to reproducible build/runtime caches, followed by a clean rebuild and wholly fresh serial pair. P1-3 remains prohibited.
