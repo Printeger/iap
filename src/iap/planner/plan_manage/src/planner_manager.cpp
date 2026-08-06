@@ -1287,6 +1287,11 @@ namespace ego_planner
             }
             if (decision.selected)
             {
+              // Candidate optimization leaves the shared planning context on
+              // the last candidate that ran. Rebind it to the actual winner
+              // before any replacement/rejection lifecycle evidence is
+              // emitted so every downstream identity names the same result.
+              set_p1_context(trace.candidate_id);
               selected_p1_candidate_id = trace.candidate_id;
               for (const auto &candidate : p2_candidates)
               {

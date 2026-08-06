@@ -3,6 +3,9 @@
 > 规则：任何代码改动必须在这里记录，并包含 IAP-RQ-XXX。
 
 ## Unreleased
+- fix(planner-p1-selected-lifecycle-identity): IAP-RQ-400 / IAP-RQ-410 — rebind the immutable planning context to the selected candidate before recording replacement or stale-rejection lifecycle events.
+  - Formal pair 4 exposed an attempt where risk-first ranking selected/rejected candidate 1 and the decision/retained artifacts agreed, but the timeline still named candidate 4, the last optimizer executed.
+  - The selected branch now uses the existing context binder before any decision lifecycle output. This changes evidence identity only; candidate ranking, frozen merit, fixed lambda/support, incumbent comparison, P0/P5 semantics, and publication decisions are unchanged.
 - fix(planner-p1-metrics-only-preflight): IAP-RQ-400 / IAP-RQ-410 — distinguish a metrics-only reference with no optimizer attempt from an incomplete enabled-objective evidence bundle.
   - A metrics-only run may legitimately produce v4 debug, accepted-profile, context, and lifecycle evidence without entering candidate optimization. In that case the six optimizer-attempt artifacts (candidate/control-point/profile/pairwise/checkpoint and P0 query-corner CSVs) may all be absent.
   - The artifact group remains atomic and fail closed: enabled P1 always requires every optimizer-attempt sidecar, and metrics-only also requires the complete group whenever any member exists. All mode-independent provenance, validator, accepted-profile, timeline, topic, bag, and runtime-hash checks remain mandatory.
