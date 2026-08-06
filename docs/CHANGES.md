@@ -3,6 +3,12 @@
 > 规则：任何代码改动必须在这里记录，并包含 IAP-RQ-XXX。
 
 ## Unreleased
+- fix(planner-p1-2-two-stage-normalization): IAP-RQ-400 / IAP-RQ-410 — replace enabled P1's one-stage low-weight optimization with a base-feasible prepass followed by a frozen, budget-normalized soft P1 stage.
+  - The fixed constants are `lambda_ref=1e-5`, `beta=0.10`, and `reference_displacement=0.025 m`; the launch/manifest `p1.lambda_integrity` remains `0.00001`. The merit uses the raw P1 delta from the candidate seed plus a differentiable candidate-local anchor, and remains frozen through internal rebound restarts.
+  - Production planning now records `base_prepass_start/end`, delays full P1 admission until the prepass result has `200/200` support, applies the existing candidate cap only to P1 optimizer starts, and preserves all collision, feasibility, swarm, terminal, replacement, snapshot, and P5 gates.
+  - Singleton supplements are generated after the prepass from the true fixed-200 projected gradient of every active control point at maximum per-column displacements `0.025/0.05/0.10 m`; the base seed remains present and the fixed prefix remains unchanged.
+  - Candidate evidence separates active and full base/raw-P1 norms, raw lambda-weighted and normalized-weighted P1 norms, base/P1 cosine, frozen normalization fields, base-prepass termination/duration, and actual normalized-P1/anchor merit components. The design rationale is recorded in ADR 0002.
+  - Focused verification: the JSON feedback runner is green in about 0.18 s; all 26 `test_p1_integrity_cost`, 4 `test_p1_candidate_selection`, and 10 `test_planning_risk_context` tests pass; nested packages through `ego_planner` build successfully. No P1-3 or lambda sweep is included.
 - test(planner-p1-2-fixed-lambda-counterexample): IAP-RQ-400 / IAP-RQ-410 — add a seconds-scale, ROS-free feedback command and a deterministic conflict fixture for the fixed `p1.lambda_integrity=0.00001` failure.
   - `run_p1_fixed_lambda_feedback.py` invokes only the named optimizer and selection GTests, emits structured JSON with elapsed time and red/green status, and fails when a filter executes fewer tests than expected.
   - The fixture keeps one immutable snapshot/query base and fixed 200-sample mean, verifies the analytic raw P1 descent probe, and characterizes the legacy one-stage optimizer counterexample: total/base descent moves along the positive raw-P1 gradient and increases both mean and max risk.

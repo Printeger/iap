@@ -137,10 +137,16 @@ namespace ego_planner
       uint64_t snapshot_generation_id = 0;
       double f_integrity = 0.0;
       double weighted_f_integrity = 0.0;
+      double normalized_weighted_f_integrity = 0.0;
+      double anchor_cost = 0.0;
       double grad_norm_integrity = 0.0;
+      double full_grad_norm_integrity = 0.0;
       double weighted_grad_integrity_norm = 0.0;
+      double normalized_weighted_grad_integrity_norm = 0.0;
       double grad_norm_original = 0.0;
+      double full_grad_norm_original = 0.0;
       double grad_ratio = 0.0;
+      double base_p1_cosine = 0.0;
       double miss_ratio = 0.0;
       double stale_ratio = 0.0;
       int clipped_grad_count = 0;
@@ -169,6 +175,19 @@ namespace ego_planner
       double total_cost = 0.0;
       double original_cost = 0.0;
       double integrity_cost = 0.0;
+      double normalized_integrity_cost = 0.0;
+      double anchor_cost = 0.0;
+    };
+
+    struct P1BasePrepassTrace
+    {
+      double pre_objective = std::numeric_limits<double>::quiet_NaN();
+      double post_objective = std::numeric_limits<double>::quiet_NaN();
+      double duration_ms = 0.0;
+      int solver_result = 0;
+      int iteration_count = 0;
+      bool success = false;
+      std::string termination_reason = "not_run";
     };
 
     struct P1FixedLatticeRiskSummary
@@ -227,12 +246,37 @@ namespace ego_planner
       double post_weighted_p1_cost = std::numeric_limits<double>::quiet_NaN();
       double pre_base_gradient_norm = std::numeric_limits<double>::quiet_NaN();
       double post_base_gradient_norm = std::numeric_limits<double>::quiet_NaN();
+      double pre_full_base_gradient_norm = std::numeric_limits<double>::quiet_NaN();
+      double post_full_base_gradient_norm = std::numeric_limits<double>::quiet_NaN();
       double pre_raw_p1_gradient_norm = std::numeric_limits<double>::quiet_NaN();
       double post_raw_p1_gradient_norm = std::numeric_limits<double>::quiet_NaN();
+      double pre_full_raw_p1_gradient_norm = std::numeric_limits<double>::quiet_NaN();
+      double post_full_raw_p1_gradient_norm = std::numeric_limits<double>::quiet_NaN();
       double pre_weighted_p1_gradient_norm = std::numeric_limits<double>::quiet_NaN();
       double post_weighted_p1_gradient_norm = std::numeric_limits<double>::quiet_NaN();
+      double pre_normalized_weighted_p1_gradient_norm = std::numeric_limits<double>::quiet_NaN();
+      double post_normalized_weighted_p1_gradient_norm = std::numeric_limits<double>::quiet_NaN();
       double pre_total_gradient_norm = std::numeric_limits<double>::quiet_NaN();
       double post_total_gradient_norm = std::numeric_limits<double>::quiet_NaN();
+      double pre_base_p1_cosine = 0.0;
+      double post_base_p1_cosine = 0.0;
+      double pre_normalized_p1_cost = 0.0;
+      double post_normalized_p1_cost = 0.0;
+      double pre_anchor_cost = 0.0;
+      double post_anchor_cost = 0.0;
+      double base_prepass_pre_objective = std::numeric_limits<double>::quiet_NaN();
+      double base_prepass_post_objective = std::numeric_limits<double>::quiet_NaN();
+      double base_prepass_duration_ms = 0.0;
+      int base_prepass_solver_result = 0;
+      int base_prepass_iteration_count = 0;
+      bool base_prepass_success = false;
+      std::string base_prepass_termination_reason = "not_run";
+      std::string normalization_mode = "none";
+      double normalization_reference_lambda = 1.0e-5;
+      double normalization_scale = 1.0;
+      double normalization_budget_fraction = 0.10;
+      double normalization_base_improvement_budget = 0.0;
+      double normalization_reference_displacement_m = 0.025;
       double pre_support_coverage = std::numeric_limits<double>::quiet_NaN();
       double post_support_coverage = std::numeric_limits<double>::quiet_NaN();
       int support_sample_count = 0;
@@ -348,6 +392,13 @@ namespace ego_planner
     std::vector<std::pair<int, int>> initControlPoints(Eigen::MatrixXd &init_points, bool flag_first_init = true);
     bool BsplineOptimizeTrajRebound(Eigen::MatrixXd &optimal_points, double ts); // must be called after initControlPoints()
     bool BsplineOptimizeTrajRebound(Eigen::MatrixXd &optimal_points, double &final_cost, const ControlPoints &control_points, double ts);
+    bool BsplineOptimizeTrajBasePrepass(
+        Eigen::MatrixXd &optimal_points, double &final_cost,
+        const ControlPoints &control_points, double ts);
+    bool BsplineOptimizeTrajNormalizedP1(
+        Eigen::MatrixXd &optimal_points, double &final_cost,
+        const ControlPoints &seed_control_points, double ts,
+        const P1BasePrepassTrace &base_prepass, std::string *reason = nullptr);
     bool BsplineOptimizeTrajRefine(const Eigen::MatrixXd &init_points, const double ts, Eigen::MatrixXd &optimal_points);
 
     inline int getOrder(void) { return order_; }
@@ -361,6 +412,9 @@ namespace ego_planner
     const std::vector<P4GuideViz> &getLastP4GuideViz() const { return last_p4_guides_; }
     const OptimizerCostBreakdown &getLastOptimizerCostBreakdown() const { return last_optimizer_cost_breakdown_; }
     const P1OptimizationTrace &getLastP1OptimizationTrace() const { return last_p1_optimization_trace_; }
+    const P1BasePrepassTrace &getLastP1BasePrepassTrace() const {
+      return last_p1_base_prepass_trace_;
+    }
     std::string p1CandidateOptimizationPath() const;
     std::string p1ReplacementDecisionPath() const;
     std::string p1CandidateRetainedProfilePath() const;
@@ -385,6 +439,14 @@ namespace ego_planner
     bool optimizeReboundCostForTest(Eigen::MatrixXd &control_points, double ts,
                                     int max_iterations, double &final_cost,
                                     int &iterations);
+    bool optimizeP1BasePrepassForTest(Eigen::MatrixXd &control_points, double ts,
+                                      int max_iterations, double &final_cost,
+                                      int &iterations);
+    bool prepareP1NormalizedStage(const Eigen::MatrixXd &seed_control_points,
+                                  double ts,
+                                  const P1BasePrepassTrace &base_prepass,
+                                  std::string *reason = nullptr);
+    void clearP1NormalizedStage();
     double p1LbfgsGradientEpsilon(double initial_weighted_p1_gradient_norm,
                                   double variable_norm) const;
     void setP1PreOptimizationTrajectoryForTest(
@@ -450,9 +512,24 @@ namespace ego_planner
     std::vector<P4GuideViz> last_p4_guides_;
     OptimizerCostBreakdown last_optimizer_cost_breakdown_;
     P1OptimizationTrace last_p1_optimization_trace_;
+    P1BasePrepassTrace last_p1_base_prepass_trace_;
     P1FanoutDiagnostics last_p1_fanout_diagnostics_;
     double last_rebound_total_gradient_norm_{std::numeric_limits<double>::quiet_NaN()};
     bool suppress_rebound_collision_for_test_{false};
+    bool p1_base_prepass_active_{false};
+    struct P1NormalizedStage
+    {
+      bool enabled = false;
+      double reference_lambda = 1.0e-5;
+      double budget_fraction = 0.10;
+      double reference_displacement_m = 0.025;
+      double base_improvement_budget = 0.0;
+      double raw_gradient_norm = 0.0;
+      double scale = 1.0;
+      double seed_raw_cost = 0.0;
+      Eigen::MatrixXd seed_control_points;
+      P1BasePrepassTrace base_prepass;
+    } p1_normalized_stage_;
     std::shared_ptr<const iap::RiskGridSnapshot> risk_snapshot_;
     double risk_query_base_time_s_{0.0};
     P1PlanningRiskContext p1_risk_context_;

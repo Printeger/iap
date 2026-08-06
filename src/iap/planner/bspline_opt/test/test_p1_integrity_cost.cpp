@@ -3,6 +3,7 @@
 #include <iap/planner/risk_grid_map.hpp>
 #include <rclcpp/rclcpp.hpp>
 
+#include <algorithm>
 #include <chrono>
 #include <cmath>
 #include <cstdio>
@@ -523,6 +524,96 @@ TEST(P1IntegrityCostTest,
   EXPECT_GT(trace.post_mean_c_pi, trace.pre_mean_c_pi);
   EXPECT_GT(trace.post_max_c_pi, trace.pre_max_c_pi);
   EXPECT_LT(trace.post_total_objective, trace.pre_total_objective);
+}
+
+TEST(P1IntegrityCostTest, FixedLambdaTwoStagePreferenceDescendsRisk) {
+  ego_planner::SwarmTrajData swarm;
+  const Eigen::MatrixXd topology_seed =
+      makeFixedLambdaConflictControlPoints();
+  AffineProvider provider(20.0, Eigen::Vector3d(0.0, -1.0, 0.0));
+  auto snapshot = makeSnapshot(provider);
+  auto config = disabledConfig();
+  config.use_integrity_cost = true;
+  config.metrics_only = false;
+  config.lambda_integrity = 0.00001;
+  config.integrity_grad_norm_max = 100.0;
+  config.objective_aggregation_mode = "fixed_200_mean";
+  auto optimizer = makeOptimizer(config, &swarm);
+  ego_planner::BsplineOptimizer::P1PlanningRiskContext context;
+  context.snapshot = snapshot;
+  context.query_base_time_s = snapshot->stamp_s();
+  context.planning_start_s = snapshot->stamp_s();
+  context.planning_attempt_id = 92;
+  optimizer->setP1PlanningRiskContext(context);
+
+  Eigen::MatrixXd base = topology_seed;
+  double base_cost = 0.0;
+  int base_iterations = 0;
+  ASSERT_TRUE(optimizer->optimizeP1BasePrepassForTest(
+      base, 0.1, 80, base_cost, base_iterations));
+  const auto base_prepass = optimizer->getLastP1BasePrepassTrace();
+  ASSERT_TRUE(base_prepass.success);
+  EXPECT_LT(base_prepass.post_objective, base_prepass.pre_objective);
+
+  double raw_cost = 0.0;
+  Eigen::MatrixXd raw_gradient;
+  ASSERT_TRUE(optimizer->evaluateP1RawCostForTest(
+      base, 0.1, raw_cost, raw_gradient));
+  raw_gradient.leftCols(optimizer->getOrder()).setZero();
+  const double max_column_norm = raw_gradient.colwise().norm().maxCoeff();
+  ASSERT_GT(max_column_norm, 0.0);
+
+  std::vector<Eigen::MatrixXd> initial_candidates;
+  for (const double displacement : {0.0, 0.025, 0.05, 0.10})
+    initial_candidates.push_back(
+        base - displacement * raw_gradient / max_column_norm);
+  for (std::size_t left = 0; left < initial_candidates.size(); ++left)
+    for (std::size_t right = left + 1; right < initial_candidates.size(); ++right)
+      EXPECT_GT((initial_candidates[left] - initial_candidates[right]).norm(),
+                1.0e-6);
+
+  std::vector<Eigen::MatrixXd> finals;
+  std::vector<ego_planner::BsplineOptimizer::P1OptimizationTrace> traces;
+  for (std::size_t index = 0; index < initial_candidates.size(); ++index) {
+    context.candidate_id = index + 1;
+    optimizer->setP1PlanningRiskContext(context);
+    std::string reason;
+    ASSERT_TRUE(optimizer->prepareP1NormalizedStage(
+        initial_candidates[index], 0.1, base_prepass, &reason)) << reason;
+    Eigen::MatrixXd terminal = initial_candidates[index];
+    double terminal_cost = 0.0;
+    int iterations = 0;
+    ASSERT_TRUE(optimizer->optimizeReboundCostForTest(
+        terminal, 0.1, 80, terminal_cost, iterations));
+    finals.push_back(terminal);
+    traces.push_back(optimizer->getLastP1OptimizationTrace());
+    optimizer->clearP1NormalizedStage();
+  }
+
+  const auto eligible = std::count_if(
+      traces.begin(), traces.end(), [](const auto& trace) {
+        return trace.optimization_success && trace.support_full_valid &&
+            trace.post_total_objective <= trace.pre_total_objective &&
+            trace.post_mean_c_pi <= trace.pre_mean_c_pi &&
+            trace.post_max_c_pi <= trace.pre_max_c_pi &&
+            (trace.post_mean_c_pi < trace.pre_mean_c_pi ||
+             trace.post_max_c_pi < trace.pre_max_c_pi) &&
+            trace.grad_integrity_dot_displacement < 0.0;
+      });
+  EXPECT_GE(eligible, 1);
+  EXPECT_TRUE(std::all_of(traces.begin(), traces.end(), [](const auto& trace) {
+    return trace.normalization_mode == "base_improvement_budget_v1" &&
+        trace.normalization_reference_lambda == 1.0e-5 &&
+        trace.normalization_budget_fraction == 0.10 &&
+        trace.normalization_reference_displacement_m == 0.025 &&
+        trace.normalization_scale > 0.0;
+  }));
+  bool distinguishable = false;
+  for (std::size_t left = 0; left < finals.size(); ++left)
+    for (std::size_t right = left + 1; right < finals.size(); ++right)
+      distinguishable = distinguishable ||
+          (finals[left] - finals[right]).norm() > 1.0e-4;
+  EXPECT_TRUE(distinguishable);
 }
 
 TEST(P1IntegrityCostTest,

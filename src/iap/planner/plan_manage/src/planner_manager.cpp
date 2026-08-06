@@ -861,17 +861,31 @@ namespace ego_planner
       initial_p1_validation =
           bspline_optimizer_->validateP1AcceptedTrajectoryRiskContext(
               initial_candidate, plannerNow().seconds(), trajectory_frame_id_);
-      const auto fallback = decideP1SoftFallback({
-          p1_config.metrics_only, false, has_existing_trajectory, initial_p1_validation});
-      p1_objective_allowed = fallback.objective_allowed;
-      p1_fallback_reason = fallback.reason;
+      const bool defer_admission_until_base_prepass =
+          !p1_config.metrics_only && p1_config.lambda_integrity != 0.0 &&
+          planning_snapshot && std::isfinite(planning_query_base_time_s);
+      if (defer_admission_until_base_prepass)
+      {
+        p1_objective_allowed = true;
+        p1_fallback_reason = "pending_base_prepass";
+      }
+      else
+      {
+        const auto fallback = decideP1SoftFallback({
+            p1_config.metrics_only, false, has_existing_trajectory,
+            initial_p1_validation});
+        p1_objective_allowed = fallback.objective_allowed;
+        p1_fallback_reason = fallback.reason;
+      }
       planning_risk_context_.p1_objective_allowed = p1_objective_allowed;
       planning_risk_context_.p1_objective_applied = false;
       planning_risk_context_.p1_fallback_reason = p1_fallback_reason;
       appendPlanningRiskContextTimeline(
           "p1_admission", plannerNow().seconds(),
+          defer_admission_until_base_prepass ? "base_prepass_pending" :
           p1_objective_allowed ? "p1_objective" : "base_fallback",
           p1_fallback_reason,
+          defer_admission_until_base_prepass ? "none" :
           p1_objective_allowed ? "none" : "p1_soft_fallback");
       // Record the actual pre-admission seed.  A later published base
       // trajectory cannot be used to reconstruct this H1/H2/H3/H4 evidence.
@@ -918,26 +932,95 @@ namespace ego_planner
     {
       // cout << "enter" << endl;
       std::vector<ControlPoints> trajs = bspline_optimizer_->distinctiveTrajs(segments);
+      std::vector<BsplineOptimizer::P1BasePrepassTrace> candidate_prepasses;
       const int candidate_limit = std::clamp(
           p1_config.max_candidates_per_attempt, 1, 8);
       const auto fanout_before_supplement =
           bspline_optimizer_->lastP1FanoutDiagnostics();
-      // A cap is not a candidate-count target.  When topology construction
-      // truthfully yielded only its base trajectory, make enabled P1's
-      // low-weight preference observable with deterministic, snapshot-bound
-      // risk-gradient variants.  Metrics-only remains exactly as generated.
-      if (p1_objective_allowed && !p1_config.metrics_only && trajs.size() == 1 &&
-          (fanout_before_supplement.singleton_due_to_empty_segments ||
-           fanout_before_supplement.singleton_due_to_degenerate_segments ||
-           fanout_before_supplement.singleton_due_to_opposite_direction_unavailable))
+      const bool normalized_p1_stage = p1_objective_allowed &&
+          !p1_config.metrics_only && p1_config.lambda_integrity != 0.0;
+      if (normalized_p1_stage)
       {
-        const auto supplemental = bspline_optimizer_->supplementP1RiskGradientCandidates(
-            trajs.front(), planning_snapshot, planning_query_base_time_s,
-            candidate_limit - static_cast<int>(trajs.size()));
-        trajs.insert(trajs.end(), supplemental.begin(), supplemental.end());
+        std::vector<ControlPoints> base_candidates;
+        std::vector<BsplineOptimizer::P1BasePrepassTrace> base_prepasses;
+        base_candidates.reserve(trajs.size());
+        base_prepasses.reserve(trajs.size());
+        for (std::size_t topology_index = 0;
+             topology_index < trajs.size(); ++topology_index)
+        {
+          set_p1_context(static_cast<uint64_t>(topology_index + 1));
+          const double base_start_s = plannerNow().seconds();
+          appendPlanningRiskContextTimeline(
+              "base_prepass_start", base_start_s, "started", "ok");
+          Eigen::MatrixXd base_points;
+          double base_cost = 0.0;
+          const bool base_success =
+              bspline_optimizer_->BsplineOptimizeTrajBasePrepass(
+                  base_points, base_cost, trajs[topology_index], ts);
+          const auto base_prepass =
+              bspline_optimizer_->getLastP1BasePrepassTrace();
+          bool base_full_support = false;
+          ControlPoints base_control_points;
+          if (base_success)
+          {
+            const auto base_summary =
+                bspline_optimizer_->evaluateP1FixedLatticeRisk(
+                    UniformBspline(base_points, 3, ts));
+            base_full_support = base_summary.full_support;
+            base_control_points = bspline_optimizer_->getControlPoints();
+          }
+          appendPlanningRiskContextTimeline(
+              "base_prepass_end", plannerNow().seconds(),
+              base_success && base_full_support ? "candidate_success"
+                                                : "candidate_failure",
+              !base_success ? "optimizer_failure" :
+              !base_full_support ? "fixed_support_not_full" : "ok");
+          bspline_optimizer_->clearRiskSnapshot();
+          if (!base_success || !base_full_support)
+            continue;
+          base_control_points.points = base_points;
+          base_candidates.push_back(std::move(base_control_points));
+          base_prepasses.push_back(base_prepass);
+        }
+        trajs = std::move(base_candidates);
+        candidate_prepasses = std::move(base_prepasses);
+
+        // The supplement is generated only after a collision-feasible,
+        // full-support base prepass.  Each active control point follows its
+        // own projected fixed-200 raw P1 gradient; the base seed is retained.
+        if (trajs.size() == 1 &&
+            (fanout_before_supplement.singleton_due_to_empty_segments ||
+             fanout_before_supplement.singleton_due_to_degenerate_segments ||
+             fanout_before_supplement.singleton_due_to_opposite_direction_unavailable))
+        {
+          bspline_optimizer_->setRiskSnapshot(
+              planning_snapshot, planning_query_base_time_s);
+          const auto supplemental =
+              bspline_optimizer_->supplementP1RiskGradientCandidates(
+                  trajs.front(), planning_snapshot, planning_query_base_time_s,
+                  candidate_limit - static_cast<int>(trajs.size()));
+          bspline_optimizer_->clearRiskSnapshot();
+          const auto prepass = candidate_prepasses.front();
+          trajs.insert(trajs.end(), supplemental.begin(), supplemental.end());
+          candidate_prepasses.insert(
+              candidate_prepasses.end(), supplemental.size(), prepass);
+        }
+        const bool p1_admitted = !trajs.empty();
+        p1_objective_allowed = p1_admitted;
+        p1_fallback_reason = p1_admitted ? "none" :
+            "base_prepass_no_full_support";
+        appendPlanningRiskContextTimeline(
+            "p1_admission", plannerNow().seconds(),
+            p1_admitted ? "p1_objective" : "base_fallback",
+            p1_fallback_reason,
+            p1_admitted ? "none" : "p1_soft_fallback");
       }
       if (static_cast<int>(trajs.size()) > candidate_limit)
+      {
         trajs.resize(static_cast<std::size_t>(candidate_limit));
+        if (candidate_prepasses.size() > trajs.size())
+          candidate_prepasses.resize(trajs.size());
+      }
       cout << "\033[1;33m"
            << "multi-trajs=" << trajs.size() << "\033[1;0m" << endl;
 
@@ -951,14 +1034,21 @@ namespace ego_planner
         appendPlanningRiskContextTimeline(
             write_p1_candidate_trace ? "optimizer_start" : "base_optimizer_start",
             planning_risk_context_.optimizer_start_s, "started", "ok");
-        const bool p1_candidate_success =
-            bspline_optimizer_->BsplineOptimizeTrajRebound(ctrl_pts_temp, final_cost, trajs[i], ts);
+        std::string optimizer_reason = "ok";
+        const bool p1_candidate_success = normalized_p1_stage
+            ? bspline_optimizer_->BsplineOptimizeTrajNormalizedP1(
+                  ctrl_pts_temp, final_cost, trajs[i], ts,
+                  candidate_prepasses[static_cast<std::size_t>(i)],
+                  &optimizer_reason)
+            : bspline_optimizer_->BsplineOptimizeTrajRebound(
+                  ctrl_pts_temp, final_cost, trajs[i], ts);
         planning_risk_context_.optimizer_end_s = plannerNow().seconds();
         appendPlanningRiskContextTimeline(
             write_p1_candidate_trace ? "optimizer_end" : "base_optimizer_end",
             planning_risk_context_.optimizer_end_s,
             p1_candidate_success ? "candidate_success" : "candidate_failure",
-            p1_candidate_success ? "ok" : "optimizer_failure");
+            p1_candidate_success ? "ok" :
+            optimizer_reason == "ok" ? "optimizer_failure" : optimizer_reason);
         if (write_p1_candidate_trace)
         {
           p1_candidate_traces.push_back(
@@ -1211,17 +1301,65 @@ namespace ego_planner
     else
     {
       set_p1_context(selected_p1_candidate_id);
+      const bool normalized_p1_stage = p1_objective_allowed &&
+          !p1_config.metrics_only && p1_config.lambda_integrity != 0.0;
+      BsplineOptimizer::P1BasePrepassTrace base_prepass;
+      ControlPoints p1_seed;
+      double normalized_final_cost = 0.0;
+      bool base_prepass_ready = !normalized_p1_stage;
+      if (normalized_p1_stage)
+      {
+        appendPlanningRiskContextTimeline(
+            "base_prepass_start", plannerNow().seconds(), "started", "ok");
+        const ControlPoints topology_seed = bspline_optimizer_->getControlPoints();
+        Eigen::MatrixXd base_points;
+        double base_cost = 0.0;
+        const bool base_success =
+            bspline_optimizer_->BsplineOptimizeTrajBasePrepass(
+                base_points, base_cost, topology_seed, ts);
+        base_prepass = bspline_optimizer_->getLastP1BasePrepassTrace();
+        bool base_full_support = false;
+        if (base_success)
+        {
+          base_full_support = bspline_optimizer_->evaluateP1FixedLatticeRisk(
+              UniformBspline(base_points, 3, ts)).full_support;
+          p1_seed = bspline_optimizer_->getControlPoints();
+        }
+        base_prepass_ready = base_success && base_full_support;
+        p1_objective_allowed = base_prepass_ready;
+        p1_fallback_reason = base_prepass_ready ? "none" :
+            "base_prepass_no_full_support";
+        appendPlanningRiskContextTimeline(
+            "base_prepass_end", plannerNow().seconds(),
+            base_prepass_ready ? "candidate_success" : "candidate_failure",
+            !base_success ? "optimizer_failure" :
+            !base_full_support ? "fixed_support_not_full" : "ok");
+        appendPlanningRiskContextTimeline(
+            "p1_admission", plannerNow().seconds(),
+            base_prepass_ready ? "p1_objective" : "base_fallback",
+            p1_fallback_reason,
+            base_prepass_ready ? "none" : "p1_soft_fallback");
+        p1_seed.points = base_points;
+        set_p1_context(selected_p1_candidate_id);
+      }
       planning_risk_context_.optimizer_start_s = plannerNow().seconds();
       appendPlanningRiskContextTimeline(
           write_p1_candidate_trace ? "optimizer_start" : "base_optimizer_start",
           planning_risk_context_.optimizer_start_s, "started", "ok");
-      flag_step_1_success = bspline_optimizer_->BsplineOptimizeTrajRebound(ctrl_pts, ts);
+      std::string optimizer_reason = "ok";
+      flag_step_1_success = base_prepass_ready && (normalized_p1_stage
+          ? bspline_optimizer_->BsplineOptimizeTrajNormalizedP1(
+                ctrl_pts, normalized_final_cost, p1_seed, ts, base_prepass,
+                &optimizer_reason)
+          : bspline_optimizer_->BsplineOptimizeTrajRebound(ctrl_pts, ts));
       planning_risk_context_.optimizer_end_s = plannerNow().seconds();
       appendPlanningRiskContextTimeline(
           write_p1_candidate_trace ? "optimizer_end" : "base_optimizer_end",
           planning_risk_context_.optimizer_end_s,
           flag_step_1_success ? "candidate_success" : "candidate_failure",
-          flag_step_1_success ? "ok" : "optimizer_failure");
+          flag_step_1_success ? "ok" :
+          !base_prepass_ready ? "base_prepass_failed" :
+          optimizer_reason == "ok" ? "optimizer_failure" : optimizer_reason);
       auto trace = bspline_optimizer_->getLastP1OptimizationTrace();
       P1CandidateEvidence candidate_evidence;
       candidate_evidence.planning_attempt_id = trace.planning_attempt_id;

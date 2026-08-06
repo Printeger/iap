@@ -3,6 +3,7 @@
 #include <iap/planner/risk_grid_map.hpp>
 
 #include <algorithm>
+#include <chrono>
 #include <cstdio>
 #include <cmath>
 #include <fstream>
@@ -873,36 +874,36 @@ namespace ego_planner
         !std::isfinite(query_base_time_s))
       return supplemental;
 
-    Eigen::Vector3d aggregate_gradient = Eigen::Vector3d::Zero();
+    const auto previous_snapshot = risk_snapshot_;
+    const double previous_query_base = risk_query_base_time_s_;
+    risk_snapshot_ = snapshot;
+    risk_query_base_time_s_ = query_base_time_s;
+    double raw_cost = 0.0;
+    Eigen::MatrixXd projected_gradient = Eigen::MatrixXd::Zero(
+        3, base.size);
+    P1IntegrityMetrics metrics;
+    calcIntegrityTrajectoryCost(
+        base.points, raw_cost, projected_gradient, metrics);
+    risk_snapshot_ = previous_snapshot;
+    risk_query_base_time_s_ = previous_query_base;
     const int first = std::max(order_, 0);
-    const int last = std::max(first, base.size - 1);
-    for (int column = first; column < last; ++column)
-    {
-      const double fraction = static_cast<double>(column - first) /
-          static_cast<double>(std::max(1, last - first));
-      iap::RiskCostSample sample;
-      if (snapshot->queryCost(base.points.col(column),
-                              query_base_time_s + fraction *
-                                  static_cast<double>(base.size - order_) *
-                                      std::max(1.0e-6, bspline_interval_),
-                              &sample) &&
-          sample.valid && !sample.stale && sample.grad.allFinite())
-      {
-        aggregate_gradient += sample.grad;
-      }
-    }
-    if (!aggregate_gradient.allFinite() || aggregate_gradient.norm() <= 1.0e-12)
+    projected_gradient.leftCols(first).setZero();
+    const double max_column_norm =
+        projected_gradient.colwise().norm().maxCoeff();
+    if (!projected_gradient.allFinite() ||
+        !std::isfinite(max_column_norm) || max_column_norm <= 1.0e-12 ||
+        metrics.sample_count != kP1CandidateEvidenceSampleCount ||
+        metrics.hit_count != kP1CandidateEvidenceSampleCount)
       return supplemental;
 
-    const Eigen::Vector3d direction = -aggregate_gradient.normalized();
     constexpr double kDisplacementsM[] = {0.025, 0.05, 0.10};
     for (const double displacement : kDisplacementsM)
     {
       if (static_cast<int>(supplemental.size()) >= remaining_capacity)
         break;
       ControlPoints candidate = base;
-      for (int column = first; column < last; ++column)
-        candidate.points.col(column) += displacement * direction;
+      candidate.points -=
+          (displacement / max_column_norm) * projected_gradient;
       supplemental.push_back(std::move(candidate));
     }
     last_p1_fanout_diagnostics_.supplemental_candidate_count =
@@ -2039,6 +2040,47 @@ namespace ego_planner
     return flag_success;
   }
 
+  bool BsplineOptimizer::BsplineOptimizeTrajBasePrepass(
+      Eigen::MatrixXd &optimal_points, double &final_cost,
+      const ControlPoints &control_points, const double ts)
+  {
+    clearP1NormalizedStage();
+    p1_base_prepass_active_ = true;
+    const auto started = std::chrono::steady_clock::now();
+    const bool success = BsplineOptimizeTrajRebound(
+        optimal_points, final_cost, control_points, ts);
+    p1_base_prepass_active_ = false;
+    last_p1_base_prepass_trace_.pre_objective =
+        last_p1_optimization_trace_.pre_base_objective;
+    last_p1_base_prepass_trace_.post_objective =
+        last_p1_optimization_trace_.post_base_objective;
+    last_p1_base_prepass_trace_.duration_ms = 1000.0 *
+        std::chrono::duration<double>(
+            std::chrono::steady_clock::now() - started).count();
+    last_p1_base_prepass_trace_.solver_result =
+        last_p1_optimization_trace_.solver_result;
+    last_p1_base_prepass_trace_.iteration_count =
+        last_p1_optimization_trace_.iteration_count;
+    last_p1_base_prepass_trace_.success = success;
+    last_p1_base_prepass_trace_.termination_reason =
+        last_p1_optimization_trace_.termination_reason;
+    return success;
+  }
+
+  bool BsplineOptimizer::BsplineOptimizeTrajNormalizedP1(
+      Eigen::MatrixXd &optimal_points, double &final_cost,
+      const ControlPoints &seed_control_points, const double ts,
+      const P1BasePrepassTrace &base_prepass, std::string *reason)
+  {
+    if (!prepareP1NormalizedStage(
+            seed_control_points.points, ts, base_prepass, reason))
+      return false;
+    const bool success = BsplineOptimizeTrajRebound(
+        optimal_points, final_cost, seed_control_points, ts);
+    clearP1NormalizedStage();
+    return success;
+  }
+
   // 设置初始控制点init_points、时间间隔ts，调用refine_optimize()重新分配时间，得到最优的动力学可行轨迹，并将其控制点赋值给optimal_points
   bool BsplineOptimizer::BsplineOptimizeTrajRefine(const Eigen::MatrixXd &init_points, const double ts, Eigen::MatrixXd &optimal_points)
   {
@@ -2109,9 +2151,19 @@ namespace ego_planner
       trace.raw_p1_cost = trace.pre_raw_p1_cost;
       trace.weighted_p1_cost = trace.pre_weighted_p1_cost;
       trace.pre_base_gradient_norm = last_p1_metrics_.grad_norm_original;
+      trace.pre_full_base_gradient_norm =
+          last_p1_metrics_.full_grad_norm_original;
       trace.pre_raw_p1_gradient_norm = last_p1_metrics_.grad_norm_integrity;
+      trace.pre_full_raw_p1_gradient_norm =
+          last_p1_metrics_.full_grad_norm_integrity;
       trace.pre_weighted_p1_gradient_norm =
           last_p1_metrics_.weighted_grad_integrity_norm;
+      trace.pre_normalized_weighted_p1_gradient_norm =
+          last_p1_metrics_.normalized_weighted_grad_integrity_norm;
+      trace.pre_normalized_p1_cost =
+          last_p1_metrics_.normalized_weighted_f_integrity;
+      trace.pre_anchor_cost = last_p1_metrics_.anchor_cost;
+      trace.pre_base_p1_cosine = last_p1_metrics_.base_p1_cosine;
       trace.pre_total_gradient_norm = last_rebound_total_gradient_norm_;
       trace.base_gradient_norm = trace.pre_base_gradient_norm;
       trace.p1_gradient_norm = trace.pre_raw_p1_gradient_norm;
@@ -2128,6 +2180,33 @@ namespace ego_planner
       trace.objective_allowed = p1_risk_context_.objective_allowed;
       trace.objective_applied = last_p1_metrics_.applied_to_objective;
       trace.fallback_reason = p1_risk_context_.fallback_reason;
+      if (p1_normalized_stage_.enabled)
+      {
+        trace.normalization_mode = "base_improvement_budget_v1";
+        trace.normalization_reference_lambda =
+            p1_normalized_stage_.reference_lambda;
+        trace.normalization_scale = p1_normalized_stage_.scale;
+        trace.normalization_budget_fraction =
+            p1_normalized_stage_.budget_fraction;
+        trace.normalization_base_improvement_budget =
+            p1_normalized_stage_.base_improvement_budget;
+        trace.normalization_reference_displacement_m =
+            p1_normalized_stage_.reference_displacement_m;
+        trace.base_prepass_pre_objective =
+            p1_normalized_stage_.base_prepass.pre_objective;
+        trace.base_prepass_post_objective =
+            p1_normalized_stage_.base_prepass.post_objective;
+        trace.base_prepass_duration_ms =
+            p1_normalized_stage_.base_prepass.duration_ms;
+        trace.base_prepass_solver_result =
+            p1_normalized_stage_.base_prepass.solver_result;
+        trace.base_prepass_iteration_count =
+            p1_normalized_stage_.base_prepass.iteration_count;
+        trace.base_prepass_success =
+            p1_normalized_stage_.base_prepass.success;
+        trace.base_prepass_termination_reason =
+            p1_normalized_stage_.base_prepass.termination_reason;
+      }
       trace.aggregation_mode = p1_config_.objective_aggregation_mode;
       trace.aggregation_temperature = p1_config_.smooth_max_temperature;
       const double adaptive_dt = std::max(p1_config_.sample_dt_min_s,
@@ -2156,7 +2235,10 @@ namespace ego_planner
         const double variable_norm = Eigen::Map<const Eigen::VectorXd>(
             q, variable_num_).norm();
         lbfgs_params.g_epsilon = p1LbfgsGradientEpsilon(
-            last_p1_metrics_.weighted_grad_integrity_norm, variable_norm);
+            p1_normalized_stage_.enabled
+                ? last_p1_metrics_.normalized_weighted_grad_integrity_norm
+                : last_p1_metrics_.weighted_grad_integrity_norm,
+            variable_norm);
       }
 
       /* ---------- optimize ---------- */
@@ -2178,9 +2260,19 @@ namespace ego_planner
       trace.raw_p1_cost = trace.post_raw_p1_cost;
       trace.weighted_p1_cost = trace.post_weighted_p1_cost;
       trace.post_base_gradient_norm = last_p1_metrics_.grad_norm_original;
+      trace.post_full_base_gradient_norm =
+          last_p1_metrics_.full_grad_norm_original;
       trace.post_raw_p1_gradient_norm = last_p1_metrics_.grad_norm_integrity;
+      trace.post_full_raw_p1_gradient_norm =
+          last_p1_metrics_.full_grad_norm_integrity;
       trace.post_weighted_p1_gradient_norm =
           last_p1_metrics_.weighted_grad_integrity_norm;
+      trace.post_normalized_weighted_p1_gradient_norm =
+          last_p1_metrics_.normalized_weighted_grad_integrity_norm;
+      trace.post_normalized_p1_cost =
+          last_p1_metrics_.normalized_weighted_f_integrity;
+      trace.post_anchor_cost = last_p1_metrics_.anchor_cost;
+      trace.post_base_p1_cosine = last_p1_metrics_.base_p1_cosine;
       trace.post_total_gradient_norm = last_rebound_total_gradient_norm_;
       trace.total_gradient_norm = trace.post_total_gradient_norm;
       trace.displacement_norm = (cps_.points - initial_control_points).norm();
@@ -2668,7 +2760,10 @@ namespace ego_planner
 
     metrics.f_integrity = cost;
     metrics.weighted_f_integrity = p1_config_.lambda_integrity * cost;
-    metrics.grad_norm_integrity = gradient.norm();
+    metrics.full_grad_norm_integrity = gradient.norm();
+    metrics.grad_norm_integrity = gradient.cols() > order_
+        ? gradient.rightCols(gradient.cols() - order_).norm()
+        : 0.0;
     metrics.weighted_grad_integrity_norm = std::abs(p1_config_.lambda_integrity) * metrics.grad_norm_integrity;
     metrics.fallback_reason = metrics.hit_count > 0 || small_penalty ||
                                       metrics.miss_count > 0 ? "ok" : "no_valid_samples";
@@ -2779,6 +2874,11 @@ namespace ego_planner
              "support_signature,initial_control_points_hash,final_control_points_hash,p1_config_hash,"
              "optimization_success,selection_score,selection_reason,candidate_rank,p1_descent,rank_eligible,replacement_accepted,replacement_reason,incumbent_available,incumbent_mean_c_pi,incumbent_max_c_pi,"
              "aggregation_mode,aggregation_temperature,adaptive_sample_count,fixed_sample_count,peak_contribution,"
+             "pre_full_base_gradient_norm,post_full_base_gradient_norm,pre_full_raw_p1_gradient_norm,post_full_raw_p1_gradient_norm,"
+             "pre_normalized_weighted_p1_gradient_norm,post_normalized_weighted_p1_gradient_norm,pre_base_p1_cosine,post_base_p1_cosine,"
+             "pre_normalized_p1_cost,post_normalized_p1_cost,pre_anchor_cost,post_anchor_cost,"
+             "normalization_mode,normalization_reference_lambda,normalization_scale,normalization_budget_fraction,normalization_base_improvement_budget,normalization_reference_displacement_m,"
+             "base_prepass_pre_objective,base_prepass_post_objective,base_prepass_duration_ms,base_prepass_solver_result,base_prepass_iteration_count,base_prepass_success,base_prepass_termination_reason,"
              "fanout_input_segments,fanout_surviving_segments,fanout_returned_count,fanout_configured_cap,fanout_truncated,fanout_optimizer_successes,fanout_full_support,fanout_p1_descent_eligible,fanout_supplemental_count,fanout_singleton_reason\n";
     }
     out << p1_config_.evidence_schema_version << ',' << p1_config_.evidence_run_id << ','
@@ -2823,6 +2923,29 @@ namespace ego_planner
         << trace.aggregation_mode << ',' << trace.aggregation_temperature << ','
         << trace.adaptive_sample_count << ',' << trace.fixed_sample_count << ','
         << trace.peak_contribution << ','
+        << trace.pre_full_base_gradient_norm << ','
+        << trace.post_full_base_gradient_norm << ','
+        << trace.pre_full_raw_p1_gradient_norm << ','
+        << trace.post_full_raw_p1_gradient_norm << ','
+        << trace.pre_normalized_weighted_p1_gradient_norm << ','
+        << trace.post_normalized_weighted_p1_gradient_norm << ','
+        << trace.pre_base_p1_cosine << ',' << trace.post_base_p1_cosine << ','
+        << trace.pre_normalized_p1_cost << ','
+        << trace.post_normalized_p1_cost << ','
+        << trace.pre_anchor_cost << ',' << trace.post_anchor_cost << ','
+        << trace.normalization_mode << ','
+        << trace.normalization_reference_lambda << ','
+        << trace.normalization_scale << ','
+        << trace.normalization_budget_fraction << ','
+        << trace.normalization_base_improvement_budget << ','
+        << trace.normalization_reference_displacement_m << ','
+        << trace.base_prepass_pre_objective << ','
+        << trace.base_prepass_post_objective << ','
+        << trace.base_prepass_duration_ms << ','
+        << trace.base_prepass_solver_result << ','
+        << trace.base_prepass_iteration_count << ','
+        << (trace.base_prepass_success ? 1 : 0) << ','
+        << trace.base_prepass_termination_reason << ','
         << trace.fanout.input_topology_segments << ','
         << trace.fanout.surviving_topology_segments << ','
         << trace.fanout.returned_candidate_count << ','
@@ -3391,6 +3514,99 @@ namespace ego_planner
     return std::isfinite(cost) && gradient.allFinite();
   }
 
+  bool BsplineOptimizer::optimizeP1BasePrepassForTest(
+      Eigen::MatrixXd &control_points, const double ts,
+      const int max_iterations, double &final_cost, int &iterations)
+  {
+    clearP1NormalizedStage();
+    p1_base_prepass_active_ = true;
+    const auto started = std::chrono::steady_clock::now();
+    const bool success = optimizeReboundCostForTest(
+        control_points, ts, max_iterations, final_cost, iterations);
+    p1_base_prepass_active_ = false;
+    last_p1_base_prepass_trace_.pre_objective =
+        last_p1_optimization_trace_.pre_base_objective;
+    last_p1_base_prepass_trace_.post_objective =
+        last_p1_optimization_trace_.post_base_objective;
+    last_p1_base_prepass_trace_.duration_ms = 1000.0 *
+        std::chrono::duration<double>(
+            std::chrono::steady_clock::now() - started).count();
+    last_p1_base_prepass_trace_.solver_result =
+        last_p1_optimization_trace_.solver_result;
+    last_p1_base_prepass_trace_.iteration_count = iterations;
+    last_p1_base_prepass_trace_.success = success;
+    last_p1_base_prepass_trace_.termination_reason =
+        last_p1_optimization_trace_.termination_reason;
+    return success;
+  }
+
+  bool BsplineOptimizer::prepareP1NormalizedStage(
+      const Eigen::MatrixXd &seed_control_points, const double ts,
+      const P1BasePrepassTrace &base_prepass, std::string *reason)
+  {
+    clearP1NormalizedStage();
+    const auto fail = [&](const char *message) {
+      if (reason)
+        *reason = message;
+      return false;
+    };
+    if (!base_prepass.success ||
+        !std::isfinite(base_prepass.pre_objective) ||
+        !std::isfinite(base_prepass.post_objective))
+      return fail("base_prepass_failed");
+    if (seed_control_points.rows() != 3 ||
+        seed_control_points.cols() <= order_ ||
+        !std::isfinite(ts) || ts <= 0.0 || !risk_snapshot_)
+      return fail("invalid_normalization_seed");
+
+    double raw_cost = 0.0;
+    Eigen::MatrixXd raw_gradient;
+    if (!evaluateP1RawCostForTest(
+            seed_control_points, ts, raw_cost, raw_gradient))
+      return fail("raw_p1_evaluation_failed");
+    const auto metrics = last_p1_metrics_;
+    if (metrics.sample_count != kP1CandidateEvidenceSampleCount ||
+        metrics.hit_count != kP1CandidateEvidenceSampleCount ||
+        metrics.miss_count != 0 || metrics.stale_count != 0)
+      return fail("fixed_support_not_full");
+
+    const double active_gradient_norm = raw_gradient.rightCols(
+        seed_control_points.cols() - order_).norm();
+    if (!std::isfinite(active_gradient_norm) ||
+        active_gradient_norm <= 1.0e-12)
+      return fail("raw_p1_gradient_too_small");
+
+    constexpr double kBaseBudgetEpsilon = 1.0e-9;
+    const double budget = std::max(
+        base_prepass.pre_objective - base_prepass.post_objective,
+        kBaseBudgetEpsilon);
+    p1_normalized_stage_.enabled = true;
+    p1_normalized_stage_.base_improvement_budget = budget;
+    p1_normalized_stage_.raw_gradient_norm = active_gradient_norm;
+    p1_normalized_stage_.seed_raw_cost = raw_cost;
+    p1_normalized_stage_.seed_control_points = seed_control_points;
+    p1_normalized_stage_.base_prepass = base_prepass;
+    p1_normalized_stage_.scale =
+        p1_normalized_stage_.budget_fraction * budget /
+        (p1_normalized_stage_.reference_lambda *
+         p1_normalized_stage_.reference_displacement_m *
+         active_gradient_norm);
+    if (!std::isfinite(p1_normalized_stage_.scale) ||
+        p1_normalized_stage_.scale <= 0.0)
+    {
+      clearP1NormalizedStage();
+      return fail("normalization_scale_invalid");
+    }
+    if (reason)
+      *reason = "ok";
+    return true;
+  }
+
+  void BsplineOptimizer::clearP1NormalizedStage()
+  {
+    p1_normalized_stage_ = P1NormalizedStage{};
+  }
+
   bool BsplineOptimizer::optimizeReboundCostForTest(
       Eigen::MatrixXd &control_points, const double ts,
       const int max_iterations, double &final_cost, int &iterations)
@@ -3432,9 +3648,18 @@ namespace ego_planner
     trace.pre_raw_p1_cost = last_p1_metrics_.f_integrity;
     trace.pre_weighted_p1_cost = last_p1_metrics_.weighted_f_integrity;
     trace.pre_base_gradient_norm = last_p1_metrics_.grad_norm_original;
+    trace.pre_full_base_gradient_norm = last_p1_metrics_.full_grad_norm_original;
     trace.pre_raw_p1_gradient_norm = last_p1_metrics_.grad_norm_integrity;
+    trace.pre_full_raw_p1_gradient_norm =
+        last_p1_metrics_.full_grad_norm_integrity;
     trace.pre_weighted_p1_gradient_norm =
         last_p1_metrics_.weighted_grad_integrity_norm;
+    trace.pre_normalized_weighted_p1_gradient_norm =
+        last_p1_metrics_.normalized_weighted_grad_integrity_norm;
+    trace.pre_normalized_p1_cost =
+        last_p1_metrics_.normalized_weighted_f_integrity;
+    trace.pre_anchor_cost = last_p1_metrics_.anchor_cost;
+    trace.pre_base_p1_cosine = last_p1_metrics_.base_p1_cosine;
     trace.pre_total_gradient_norm = Eigen::Map<const Eigen::VectorXd>(
         initial_gradient.data(), variable_num_).norm();
     trace.pre_mean_c_pi = pre_lattice.mean_c_pi;
@@ -3449,13 +3674,41 @@ namespace ego_planner
     trace.objective_allowed = p1_risk_context_.objective_allowed;
     trace.objective_applied = last_p1_metrics_.applied_to_objective;
     trace.fallback_reason = p1_risk_context_.fallback_reason;
+    if (p1_normalized_stage_.enabled)
+    {
+      trace.normalization_mode = "base_improvement_budget_v1";
+      trace.normalization_reference_lambda =
+          p1_normalized_stage_.reference_lambda;
+      trace.normalization_scale = p1_normalized_stage_.scale;
+      trace.normalization_budget_fraction =
+          p1_normalized_stage_.budget_fraction;
+      trace.normalization_base_improvement_budget =
+          p1_normalized_stage_.base_improvement_budget;
+      trace.normalization_reference_displacement_m =
+          p1_normalized_stage_.reference_displacement_m;
+      trace.base_prepass_pre_objective =
+          p1_normalized_stage_.base_prepass.pre_objective;
+      trace.base_prepass_post_objective =
+          p1_normalized_stage_.base_prepass.post_objective;
+      trace.base_prepass_duration_ms =
+          p1_normalized_stage_.base_prepass.duration_ms;
+      trace.base_prepass_solver_result =
+          p1_normalized_stage_.base_prepass.solver_result;
+      trace.base_prepass_iteration_count =
+          p1_normalized_stage_.base_prepass.iteration_count;
+      trace.base_prepass_success = p1_normalized_stage_.base_prepass.success;
+      trace.base_prepass_termination_reason =
+          p1_normalized_stage_.base_prepass.termination_reason;
+    }
 
     lbfgs::lbfgs_parameter_t parameters;
     lbfgs::lbfgs_load_default_parameters(&parameters);
     parameters.mem_size = 16;
     parameters.max_iterations = max_iterations;
     parameters.g_epsilon = p1LbfgsGradientEpsilon(
-        last_p1_metrics_.weighted_grad_integrity_norm,
+        p1_normalized_stage_.enabled
+            ? last_p1_metrics_.normalized_weighted_grad_integrity_norm
+            : last_p1_metrics_.weighted_grad_integrity_norm,
         Eigen::Map<const Eigen::VectorXd>(x.data(), variable_num_).norm());
     suppress_rebound_collision_for_test_ = true;
     const int result = lbfgs::lbfgs_optimize(
@@ -3474,9 +3727,18 @@ namespace ego_planner
     trace.post_raw_p1_cost = last_p1_metrics_.f_integrity;
     trace.post_weighted_p1_cost = last_p1_metrics_.weighted_f_integrity;
     trace.post_base_gradient_norm = last_p1_metrics_.grad_norm_original;
+    trace.post_full_base_gradient_norm = last_p1_metrics_.full_grad_norm_original;
     trace.post_raw_p1_gradient_norm = last_p1_metrics_.grad_norm_integrity;
+    trace.post_full_raw_p1_gradient_norm =
+        last_p1_metrics_.full_grad_norm_integrity;
     trace.post_weighted_p1_gradient_norm =
         last_p1_metrics_.weighted_grad_integrity_norm;
+    trace.post_normalized_weighted_p1_gradient_norm =
+        last_p1_metrics_.normalized_weighted_grad_integrity_norm;
+    trace.post_normalized_p1_cost =
+        last_p1_metrics_.normalized_weighted_f_integrity;
+    trace.post_anchor_cost = last_p1_metrics_.anchor_cost;
+    trace.post_base_p1_cosine = last_p1_metrics_.base_p1_cosine;
     trace.post_total_gradient_norm = last_rebound_total_gradient_norm_;
     trace.total_gradient_norm = trace.post_total_gradient_norm;
     trace.displacement_norm = (Eigen::Map<const Eigen::VectorXd>(
@@ -3591,35 +3853,98 @@ namespace ego_planner
     // Eigen::MatrixXd grad_3D = lambda1_ * g_smoothness + new_lambda2_ * g_distance + lambda3_ * g_feasibility + new_lambda2_ * g_mov_objs;
 
     last_p1_metrics_ = P1IntegrityMetrics{};
+    last_p1_metrics_.full_grad_norm_original = grad_3D.norm();
+    last_p1_metrics_.grad_norm_original = grad_3D.rightCols(
+        std::max(0, cps_.size - order_)).norm();
     last_p1_viz_samples_.clear();
     last_optimizer_cost_breakdown_ = OptimizerCostBreakdown{};
     last_optimizer_cost_breakdown_.original_cost = f_original;
     last_optimizer_cost_breakdown_.total_cost = f_original;
     const bool p1_should_evaluate =
-        risk_snapshot_ && (p1_config_.metrics_only || p1_config_.use_integrity_cost || p1_config_.debug_csv_enable);
+        !p1_base_prepass_active_ && risk_snapshot_ &&
+        (p1_config_.metrics_only || p1_config_.use_integrity_cost ||
+         p1_config_.debug_csv_enable);
     if (p1_should_evaluate)
     {
       double f_integrity = 0.0;
       Eigen::MatrixXd g_integrity = Eigen::MatrixXd::Zero(3, cps_.size);
-      P1IntegrityMetrics metrics;
+      P1IntegrityMetrics metrics = last_p1_metrics_;
       calcIntegrityTrajectoryCost(cps_.points, f_integrity, g_integrity, metrics);
-      metrics.grad_norm_original = grad_3D.norm();
+      metrics.full_grad_norm_original = grad_3D.norm();
+      metrics.grad_norm_original = grad_3D.rightCols(
+          std::max(0, cps_.size - order_)).norm();
+      metrics.full_grad_norm_integrity = g_integrity.norm();
+      metrics.grad_norm_integrity = g_integrity.rightCols(
+          std::max(0, cps_.size - order_)).norm();
       metrics.weighted_f_integrity = p1_config_.lambda_integrity * f_integrity;
-      metrics.weighted_grad_integrity_norm = std::abs(p1_config_.lambda_integrity) * g_integrity.norm();
+      metrics.weighted_grad_integrity_norm =
+          std::abs(p1_config_.lambda_integrity) * metrics.grad_norm_integrity;
       if (metrics.grad_norm_original > 1.0e-12)
       {
         metrics.grad_ratio = metrics.weighted_grad_integrity_norm / metrics.grad_norm_original;
       }
+      if (metrics.grad_norm_original > 1.0e-12 &&
+          metrics.grad_norm_integrity > 1.0e-12)
+      {
+        const auto base_active = grad_3D.rightCols(
+            std::max(0, cps_.size - order_));
+        const auto p1_active = g_integrity.rightCols(
+            std::max(0, cps_.size - order_));
+        metrics.base_p1_cosine =
+            base_active.cwiseProduct(p1_active).sum() /
+            (metrics.grad_norm_original * metrics.grad_norm_integrity);
+      }
       metrics.applied_to_objective =
           p1_config_.use_integrity_cost && !p1_config_.metrics_only &&
           p1_risk_context_.objective_allowed &&
-          p1_config_.lambda_integrity != 0.0;
+          p1_config_.lambda_integrity != 0.0 &&
+          !p1_base_prepass_active_;
 
       if (metrics.applied_to_objective)
       {
-        f_combine += p1_config_.lambda_integrity * f_integrity;
-        grad_3D += p1_config_.lambda_integrity * g_integrity;
-        last_optimizer_cost_breakdown_.integrity_cost = metrics.weighted_f_integrity;
+        if (p1_normalized_stage_.enabled)
+        {
+          const double normalized_p1 = p1_config_.lambda_integrity *
+              p1_normalized_stage_.scale *
+              (f_integrity - p1_normalized_stage_.seed_raw_cost);
+          const Eigen::MatrixXd displacement =
+              cps_.points - p1_normalized_stage_.seed_control_points;
+          const double anchor_coefficient =
+              (p1_config_.lambda_integrity /
+               p1_normalized_stage_.reference_lambda) *
+              p1_normalized_stage_.budget_fraction *
+              p1_normalized_stage_.base_improvement_budget /
+              (2.0 * p1_normalized_stage_.reference_displacement_m *
+               p1_normalized_stage_.reference_displacement_m);
+          const double anchor = anchor_coefficient * displacement.squaredNorm();
+          const Eigen::MatrixXd normalized_gradient =
+              p1_config_.lambda_integrity * p1_normalized_stage_.scale *
+                  g_integrity +
+              2.0 * anchor_coefficient * displacement;
+          f_combine += normalized_p1 + anchor;
+          grad_3D += normalized_gradient;
+          metrics.normalized_weighted_f_integrity = normalized_p1;
+          metrics.anchor_cost = anchor;
+          metrics.normalized_weighted_grad_integrity_norm =
+              std::abs(p1_config_.lambda_integrity *
+                       p1_normalized_stage_.scale) *
+              metrics.grad_norm_integrity;
+          last_optimizer_cost_breakdown_.normalized_integrity_cost = normalized_p1;
+          last_optimizer_cost_breakdown_.anchor_cost = anchor;
+          last_optimizer_cost_breakdown_.integrity_cost = normalized_p1 + anchor;
+        }
+        else
+        {
+          f_combine += p1_config_.lambda_integrity * f_integrity;
+          grad_3D += p1_config_.lambda_integrity * g_integrity;
+          metrics.normalized_weighted_f_integrity = metrics.weighted_f_integrity;
+          metrics.normalized_weighted_grad_integrity_norm =
+              metrics.weighted_grad_integrity_norm;
+          last_optimizer_cost_breakdown_.normalized_integrity_cost =
+              metrics.weighted_f_integrity;
+          last_optimizer_cost_breakdown_.integrity_cost =
+              metrics.weighted_f_integrity;
+        }
       }
 
       last_p1_metrics_ = metrics;
