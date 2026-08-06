@@ -105,9 +105,40 @@ class EvidenceBundlePreflightTest(unittest.TestCase):
             for candidate in ("1", "2") for phase in ("initial", "final")
             for index in range(200)
         ]
+        def checkpoint_payload(candidate, stage, checkpoint):
+            row = {
+                **common, "planning_attempt_id": "1",
+                "candidate_id": candidate, "snapshot_generation_id": "4",
+                "query_base_time_s": "9.0", "stage": stage,
+                "checkpoint": checkpoint, "restart_index": "0",
+                "iteration": "0", "line_search_count": "0", "step": "0",
+                "objective": "1.0", "base_objective": "0.8",
+                "raw_p1_objective": "nan",
+                "normalized_p1_objective": "0.0", "anchor_objective": "0.0",
+                "x_norm": "nan", "gradient_norm": "nan",
+                "directional_derivative": "nan", "solver_result": "0",
+                "reason": "none",
+            }
+            if stage == "p1_stage":
+                row.update({
+                    "raw_p1_objective": "0.2", "x_norm": "1.0",
+                    "gradient_norm": "0.5",
+                })
+            if checkpoint == "first_direction":
+                row["directional_derivative"] = "-0.25"
+            elif checkpoint == "first_accepted_step":
+                row.update({
+                    "iteration": "1", "line_search_count": "1",
+                    "step": "0.1", "objective": "0.9",
+                    "directional_derivative": "-0.01",
+                })
+            elif checkpoint == "terminal":
+                row.update({"iteration": "2", "objective": "0.8",
+                            "reason": "success"})
+            return row
+
         checkpoint_rows = [
-            {**common, "planning_attempt_id": "1", "candidate_id": candidate,
-             "stage": stage, "checkpoint": checkpoint}
+            checkpoint_payload(candidate, stage, checkpoint)
             for candidate in ("1", "2")
             for stage, checkpoint in (("base_prepass", "start"),
                                       ("base_prepass", "terminal"),
@@ -232,6 +263,78 @@ class EvidenceBundlePreflightTest(unittest.TestCase):
                 export, bag, metrics_only=False, lambda_value=0.00001)
         self.assertFalse(result["passed"])
         self.assertTrue(any("lacks optimizer restart checkpoint" in error
+                            for error in result["errors"]))
+
+    def test_rejects_malformed_optimizer_checkpoint_index(self):
+        root, export, bag = self.make_bundle()
+        self.addCleanup(root.cleanup)
+        manifest_path = export / "test_planner_manifest.json"
+        path = export / "planner_p1_optimizer_checkpoint.csv"
+        with path.open(newline="") as handle:
+            rows = list(csv.DictReader(handle))
+        for row in rows:
+            row["restart_index"] = "not-an-int"
+        with path.open("w", newline="") as handle:
+            writer = csv.DictWriter(handle, fieldnames=sorted(rows[0]))
+            writer.writeheader(); writer.writerows(rows)
+        payload = {"schema_version": preflight.SCHEMA, "run_id": "run-1",
+                   "manifest_path": str(manifest_path),
+                   "export_dir": str(export), "bag_path": str(bag)}
+        with mock.patch.object(
+                preflight, "read_bag_provenance", return_value=([payload], "")):
+            result = preflight.validate_bundle(
+                export, bag, metrics_only=False, lambda_value=0.00001)
+        self.assertFalse(result["passed"])
+        self.assertTrue(any("malformed integer fields" in error
+                            for error in result["errors"]))
+
+    def test_rejects_incomplete_optimizer_checkpoint_header(self):
+        root, export, bag = self.make_bundle()
+        self.addCleanup(root.cleanup)
+        manifest_path = export / "test_planner_manifest.json"
+        path = export / "planner_p1_optimizer_checkpoint.csv"
+        with path.open(newline="") as handle:
+            rows = list(csv.DictReader(handle))
+        for row in rows:
+            del row["line_search_count"]
+        with path.open("w", newline="") as handle:
+            writer = csv.DictWriter(handle, fieldnames=sorted(rows[0]))
+            writer.writeheader(); writer.writerows(rows)
+        payload = {"schema_version": preflight.SCHEMA, "run_id": "run-1",
+                   "manifest_path": str(manifest_path),
+                   "export_dir": str(export), "bag_path": str(bag)}
+        with mock.patch.object(
+                preflight, "read_bag_provenance", return_value=([payload], "")):
+            result = preflight.validate_bundle(
+                export, bag, metrics_only=False, lambda_value=0.00001)
+        self.assertFalse(result["passed"])
+        self.assertTrue(any("CSV header is missing required fields" in error
+                            for error in result["errors"]))
+
+    def test_rejects_empty_first_accepted_checkpoint_payload(self):
+        root, export, bag = self.make_bundle()
+        self.addCleanup(root.cleanup)
+        manifest_path = export / "test_planner_manifest.json"
+        path = export / "planner_p1_optimizer_checkpoint.csv"
+        with path.open(newline="") as handle:
+            rows = list(csv.DictReader(handle))
+        for row in rows:
+            if row["checkpoint"] == "first_accepted_step":
+                row["objective"] = ""
+                row["directional_derivative"] = ""
+                row["step"] = ""
+        with path.open("w", newline="") as handle:
+            writer = csv.DictWriter(handle, fieldnames=sorted(rows[0]))
+            writer.writeheader(); writer.writerows(rows)
+        payload = {"schema_version": preflight.SCHEMA, "run_id": "run-1",
+                   "manifest_path": str(manifest_path),
+                   "export_dir": str(export), "bag_path": str(bag)}
+        with mock.patch.object(
+                preflight, "read_bag_provenance", return_value=([payload], "")):
+            result = preflight.validate_bundle(
+                export, bag, metrics_only=False, lambda_value=0.00001)
+        self.assertFalse(result["passed"])
+        self.assertTrue(any("lacks accepted-step payload" in error
                             for error in result["errors"]))
 
     def test_rejects_partial_candidate_lattice_support(self):

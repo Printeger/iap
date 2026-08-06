@@ -42,6 +42,14 @@ P1_RVIZ_TOPICS = (
     "/iap/rviz/p1_integrity_push_vectors",
     "/iap/rviz/p1_integrity_metrics",
 )
+CHECKPOINT_FIELDS = frozenset({
+    "schema_version", "run_id", "manifest_path", "planning_attempt_id",
+    "candidate_id", "snapshot_generation_id", "query_base_time_s", "stage",
+    "checkpoint", "restart_index", "iteration", "line_search_count", "step",
+    "objective", "base_objective", "raw_p1_objective",
+    "normalized_p1_objective", "anchor_objective", "x_norm", "gradient_norm",
+    "directional_derivative", "solver_result", "reason",
+})
 
 
 def read_bag_provenance(bag_dir):
@@ -78,7 +86,20 @@ def truthy(value):
     return str(value).strip().lower() in {"1", "true"}
 
 
-def read_csv(path, expected_manifest, expected_run):
+def integer(value):
+    text = str(value).strip()
+    if not text:
+        return None
+    try:
+        parsed = int(text)
+    except ValueError:
+        return None
+    if text.lstrip("+-").isdigit():
+        return parsed
+    return None
+
+
+def read_csv(path, expected_manifest, expected_run, required_fields=frozenset()):
     errors = []
     if not path.is_file() or path.stat().st_size == 0:
         return [], [f"missing or empty CSV: {path}"]
@@ -89,6 +110,11 @@ def read_csv(path, expected_manifest, expected_run):
     required = {"schema_version", "run_id", "manifest_path"}
     if not required.issubset(fields):
         errors.append(f"legacy provenance CSV header: {path}")
+    missing_fields = required_fields - fields
+    if missing_fields:
+        errors.append(
+            f"CSV header is missing required fields in {path}: "
+            f"{','.join(sorted(missing_fields))}")
     if not rows:
         errors.append(f"CSV has no rows: {path}")
     for index, row in enumerate(rows):
@@ -179,7 +205,12 @@ def validate_bundle(export_dir, bag_dir, *, metrics_only, lambda_value):
         if filename in OPTIMIZER_ATTEMPT_CSVS and not enforce_optimizer_attempt_artifacts:
             csv_rows[filename] = []
             continue
-        rows, row_errors = read_csv(path, manifest_path, run_id)
+        required_fields = (
+            CHECKPOINT_FIELDS
+            if filename == "planner_p1_optimizer_checkpoint.csv"
+            else frozenset())
+        rows, row_errors = read_csv(
+            path, manifest_path, run_id, required_fields)
         csv_rows[filename] = rows
         errors.extend(row_errors)
 
@@ -275,6 +306,66 @@ def validate_bundle(export_dir, bag_dir, *, metrics_only, lambda_value):
     pairwise_rows = csv_rows.get("planner_p1_candidate_pairwise.csv", [])
     checkpoint_rows = csv_rows.get("planner_p1_optimizer_checkpoint.csv", [])
     occupancy_rows = csv_rows.get("planner_p0_occupancy_query_evidence.csv", [])
+    accepted_checkpoints = {"first_accepted_step", "accepted_iteration"}
+    p1_numeric_checkpoints = {
+        "first_direction", "first_accepted_step", "accepted_iteration",
+        "terminal",
+    }
+    for index, row in enumerate(checkpoint_rows):
+        label = f"optimizer checkpoint row {index}"
+        restart_index = integer(row.get("restart_index"))
+        iteration = integer(row.get("iteration"))
+        line_search_count = integer(row.get("line_search_count"))
+        solver_result = integer(row.get("solver_result"))
+        attempt_id = integer(row.get("planning_attempt_id"))
+        candidate_id = integer(row.get("candidate_id"))
+        generation_id = integer(row.get("snapshot_generation_id"))
+        if restart_index is None or restart_index < 0 or \
+                iteration is None or iteration < 0 or \
+                line_search_count is None or line_search_count < 0 or \
+                solver_result is None or attempt_id is None or attempt_id <= 0 or \
+                candidate_id is None or candidate_id <= 0 or \
+                generation_id is None or generation_id <= 0:
+            errors.append(f"{label} has malformed integer fields")
+        if not finite(row.get("query_base_time_s")):
+            errors.append(f"{label} has invalid query-base time")
+        if row.get("stage") not in {"base_prepass", "p1_stage"} or \
+                row.get("checkpoint") not in {
+                    "start", "first_direction", "first_accepted_step",
+                    "accepted_iteration", "terminal", "restart",
+                }:
+            errors.append(f"{label} has invalid stage/checkpoint")
+        if not finite(row.get("step")) or float(row.get("step", -1.0)) < 0.0:
+            errors.append(f"{label} has invalid step")
+        checkpoint = row.get("checkpoint")
+        stage = row.get("stage")
+        if checkpoint in {"start", "terminal"} and not all(
+                finite(row.get(field))
+                for field in ("objective", "base_objective")):
+            errors.append(f"{label} lacks terminal objective payload")
+        if stage == "p1_stage" and checkpoint in p1_numeric_checkpoints and \
+                not all(finite(row.get(field)) for field in (
+                    "objective", "base_objective", "raw_p1_objective",
+                    "normalized_p1_objective", "anchor_objective", "x_norm",
+                    "gradient_norm")):
+            errors.append(f"{label} lacks P1 component payload")
+        if checkpoint == "first_direction" and \
+                (not finite(row.get("directional_derivative")) or
+                 float(row["directional_derivative"]) > 0.0):
+            errors.append(f"{label} lacks first-direction payload")
+        if checkpoint in accepted_checkpoints:
+            if iteration is None or iteration <= 0 or \
+                    line_search_count is None or line_search_count <= 0 or \
+                    not finite(row.get("directional_derivative")) or \
+                    not finite(row.get("step")) or float(row["step"]) <= 0.0:
+                errors.append(f"{label} lacks accepted-step payload")
+        if checkpoint == "restart" and (restart_index is None or
+                                         restart_index <= 0 or
+                                         row.get("reason") in {"", "none", None}):
+            errors.append(f"{label} lacks restart payload")
+        if checkpoint == "terminal" and \
+                row.get("reason") in {"", "none", None}:
+            errors.append(f"{label} lacks terminal solver payload")
     candidate_keys = {
         (row.get("planning_attempt_id"), row.get("candidate_id"))
         for row in candidate
@@ -306,22 +397,35 @@ def validate_bundle(export_dir, bag_dir, *, metrics_only, lambda_value):
         checkpoints = [row for row in checkpoint_rows
                        if row.get("planning_attempt_id") == attempt and
                        row.get("candidate_id") == candidate_id]
+        candidate_row = next(
+            row for row in candidate
+            if row.get("planning_attempt_id") == attempt and
+            row.get("candidate_id") == candidate_id)
+        for row in checkpoints:
+            if row.get("snapshot_generation_id") != \
+                    candidate_row.get("snapshot_generation_id") or \
+                    not finite(row.get("query_base_time_s")) or \
+                    not finite(candidate_row.get("query_base_time_s")) or \
+                    abs(float(row["query_base_time_s"]) -
+                        float(candidate_row["query_base_time_s"])) > 1.0e-12:
+                errors.append(
+                    f"candidate {attempt}/{candidate_id} checkpoint binding mismatch")
         names = {(row.get("stage"), row.get("checkpoint")) for row in checkpoints}
         if ("p1_stage", "first_direction") not in names or \
                 ("p1_stage", "first_accepted_step") not in names or \
                 ("p1_stage", "terminal") not in names:
             errors.append(f"candidate {attempt}/{candidate_id} lacks optimizer checkpoints")
         restart_indices = {
-            int(row["restart_index"])
+            (row.get("stage"), integer(row.get("restart_index")))
             for row in checkpoints
-            if str(row.get("restart_index", "")).isdigit() and
-            int(row["restart_index"]) > 0
+            if integer(row.get("restart_index")) is not None and
+            integer(row.get("restart_index")) > 0
         }
         recorded_restart_indices = {
-            int(row["restart_index"])
+            (row.get("stage"), integer(row.get("restart_index")))
             for row in checkpoints
             if row.get("checkpoint") == "restart" and
-            str(row.get("restart_index", "")).isdigit()
+            integer(row.get("restart_index")) is not None
         }
         if not restart_indices.issubset(recorded_restart_indices):
             errors.append(

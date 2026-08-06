@@ -92,6 +92,31 @@ class MeanPeakConflictProvider : public iap::RiskPredictionProvider {
   }
 };
 
+class OneFreeControlPointConflictProvider : public iap::RiskPredictionProvider {
+ public:
+  bool batchQuery(const std::vector<iap::RiskPredictionQuery>& queries,
+                  std::vector<iap::RiskPredictionResult>* results) override {
+    results->clear();
+    results->reserve(queries.size());
+    for (const auto& query : queries) {
+      iap::RiskPredictionResult result;
+      result.available = true;
+      result.valid = true;
+      result.stale = false;
+      // Affine in both grid time and Y, so the snapshot's spatial/temporal
+      // interpolation preserves this field exactly.  The sign changes once
+      // inside the 0.1 s spline domain.
+      const double value = 50.0 +
+          (0.02 - query.horizon_s) * query.position_w.y();
+      result.hpl_pred = value;
+      result.vpl_pred = value;
+      result.reason = "ok";
+      results->push_back(result);
+    }
+    return true;
+  }
+};
+
 class UnknownProvider : public iap::RiskPredictionProvider {
  public:
   bool batchQuery(const std::vector<iap::RiskPredictionQuery>& queries,
@@ -1471,114 +1496,86 @@ TEST(P1IntegrityCostTest,
 }
 
 TEST(P1IntegrityCostTest,
-     Fixed200OneDimensionalFixtureHasNoMeanMaxFeasibleImprovement) {
-  constexpr int kSampleCount = 200;
-  constexpr double kInitialCost = 10.0;
-  constexpr double kEpsilon = 1.0e-5;
-  constexpr double kTemperature = 0.01;
-  constexpr double kAlpha = 0.90;
-  // This fixture has exactly one feasible scalar degree of freedom x.  Its
-  // first sample is C+x and the remaining 199 samples are C-x.
-  const auto feasible_profile = [](const double x) {
-    std::vector<double> profile(kSampleCount, kInitialCost - x);
-    profile.front() = kInitialCost + x;
-    return profile;
-  };
-  const auto initial = feasible_profile(0.0);
-  const auto candidate = feasible_profile(kEpsilon);
-  const auto opposite_candidate = feasible_profile(-kEpsilon);
+     ProductionFixed200ModesHaveNoGateFeasibleRiskDirection) {
+  ego_planner::SwarmTrajData swarm;
+  Eigen::MatrixXd initial(3, 4);
+  initial << -1.5, -1.0, -0.5, 0.0,
+             0.0, 0.0, 0.0, 0.0,
+             1.0, 1.0, 1.0, 1.0;
+  OneFreeControlPointConflictProvider provider;
+  auto snapshot = makeSnapshot(provider);
+  constexpr double kTs = 0.1;
+  constexpr double kProbeDisplacementM = 0.1;
 
-  const auto mean = [](const std::vector<double>& costs) {
-    double sum = 0.0;
-    for (const double cost : costs) {
-      sum += cost;
-    }
-    return sum / static_cast<double>(costs.size());
-  };
-  const auto lse = [](const std::vector<double>& costs) {
-    const double maximum = *std::max_element(costs.begin(), costs.end());
-    double exponential_sum = 0.0;
-    for (const double cost : costs) {
-      exponential_sum += std::exp((cost - maximum) / kTemperature);
-    }
-    return maximum + kTemperature *
-        (std::log(exponential_sum) -
-         std::log(static_cast<double>(costs.size())));
-  };
-  const auto smooth_cvar = [](const std::vector<double>& costs) {
-    const double tail_probability = 1.0 - kAlpha;
-    const double target_tail_mass =
-        tail_probability * static_cast<double>(costs.size());
-    const double minimum = *std::min_element(costs.begin(), costs.end());
-    const double maximum = *std::max_element(costs.begin(), costs.end());
-    if (minimum == maximum) {
-      return minimum;
-    }
-    const auto sigmoid = [](const double value) {
-      if (value >= 0.0) {
-        return 1.0 / (1.0 + std::exp(-value));
-      }
-      const double exponential = std::exp(value);
-      return exponential / (1.0 + exponential);
-    };
-    const auto softplus = [](const double value) {
-      return value > 0.0
-          ? value + std::log1p(std::exp(-value))
-          : std::log1p(std::exp(value));
-    };
-    double eta_lower = minimum - 64.0 * kTemperature;
-    double eta_upper = maximum + 64.0 * kTemperature;
-    for (int iteration = 0; iteration < 100; ++iteration) {
-      const double eta_midpoint = 0.5 * (eta_lower + eta_upper);
-      double sigmoid_sum = 0.0;
-      for (const double cost : costs) {
-        sigmoid_sum += sigmoid((cost - eta_midpoint) / kTemperature);
-      }
-      if (sigmoid_sum > target_tail_mass) {
-        eta_lower = eta_midpoint;
-      } else {
-        eta_upper = eta_midpoint;
-      }
-    }
-    const double eta = 0.5 * (eta_lower + eta_upper);
-    const double entropy =
-        -tail_probability * std::log(tail_probability) -
-        kAlpha * std::log(kAlpha);
-    double objective = eta - kTemperature * entropy / tail_probability;
-    for (const double cost : costs) {
-      objective += kTemperature / target_tail_mass *
-          softplus((cost - eta) / kTemperature);
-    }
-    return objective;
-  };
+  auto config = disabledConfig();
+  config.use_integrity_cost = true;
+  config.lambda_integrity = 0.00001;
+  config.integrity_grad_norm_max = 100.0;
+  config.smooth_max_temperature = 0.01;
+  config.smooth_cvar_alpha = 0.90;
 
-  const double initial_max =
-      *std::max_element(initial.begin(), initial.end());
-  const double candidate_max =
-      *std::max_element(candidate.begin(), candidate.end());
-  EXPECT_GT(*std::max_element(opposite_candidate.begin(),
-                              opposite_candidate.end()),
-            initial_max);
-  EXPECT_LT(mean(candidate), mean(initial));
-  EXPECT_LT(lse(candidate), lse(initial));
-  EXPECT_LT(smooth_cvar(candidate), smooth_cvar(initial));
+  for (const std::string mode : {
+           "fixed_200_mean", "fixed_200_lse",
+           "fixed_200_smooth_cvar"}) {
+    config.objective_aggregation_mode = mode;
+    auto optimizer = makeOptimizer(config, &swarm);
+    optimizer->setRiskSnapshot(snapshot, snapshot->stamp_s());
 
-  // No non-zero feasible x can pass the simultaneous mean/max gate: x>0
-  // raises the first-sample maximum; x<0 raises the mean by -198*x/200; and
-  // x=0 has no strict improvement.  An all-samples-down direction is outside
-  // this deterministic fixture's one-dimensional feasible set.
-  EXPECT_GT(candidate_max, initial_max);
-  EXPECT_GT(mean(opposite_candidate), mean(initial));
-  EXPECT_DOUBLE_EQ(mean(initial), kInitialCost);
-  EXPECT_DOUBLE_EQ(initial_max, kInitialCost);
+    double initial_objective = 0.0;
+    Eigen::MatrixXd initial_gradient;
+    ASSERT_TRUE(optimizer->evaluateP1RawCostForTest(
+        initial, kTs, initial_objective, initial_gradient));
+    ASSERT_EQ(initial_gradient.cols(), 4);
+    EXPECT_NEAR(initial_objective, 50.0, 1.0e-10) << mode;
+    // Cubic order freezes the first three columns.  The provider is invariant
+    // in X/Z, so the fourth control point's Y coordinate is the only free
+    // variable that can change any fixed-lattice risk sample.
+    // Raw derivatives for the fixed prefix may be nonzero, but they are not
+    // optimizer variables.  Projecting to the active suffix leaves one
+    // risk-relevant scalar component.
+    EXPECT_NEAR(initial_gradient(0, 3), 0.0, 1.0e-12);
+    EXPECT_NEAR(initial_gradient(2, 3), 0.0, 1.0e-12);
+    ASSERT_LT(initial_gradient(1, 3), 0.0);
 
-  // At the tied profile all three differentiable objectives assign weight
-  // 1/N to every sample.  The exact common directional derivative is
-  // (1 - (N - 1)) / N, which is negative even though one sample becomes the
-  // new, strictly larger maximum.
-  EXPECT_LT((1.0 - static_cast<double>(kSampleCount - 1)) /
-                static_cast<double>(kSampleCount),
-            0.0);
+    const auto initial_profile = optimizer->evaluateP1FixedLatticeRisk(
+        ego_planner::UniformBspline(initial, 3, kTs));
+    ASSERT_TRUE(initial_profile.full_support);
+    EXPECT_EQ(initial_profile.valid_sample_count, 200);
+    EXPECT_NEAR(initial_profile.mean_c_pi, 50.0, 1.0e-10);
+    EXPECT_NEAR(initial_profile.max_c_pi, 50.0, 1.0e-10);
+
+    Eigen::MatrixXd descent = initial;
+    descent(1, 3) += kProbeDisplacementM;
+    double descent_objective = 0.0;
+    Eigen::MatrixXd ignored_gradient;
+    ASSERT_TRUE(optimizer->evaluateP1RawCostForTest(
+        descent, kTs, descent_objective, ignored_gradient));
+    const auto descent_profile = optimizer->evaluateP1FixedLatticeRisk(
+        ego_planner::UniformBspline(descent, 3, kTs));
+    ASSERT_TRUE(descent_profile.full_support);
+    EXPECT_LT(descent_objective, initial_objective) << mode;
+    EXPECT_LT(descent_profile.mean_c_pi, initial_profile.mean_c_pi) << mode;
+    EXPECT_GT(descent_profile.max_c_pi, initial_profile.max_c_pi) << mode;
+
+    Eigen::MatrixXd opposite = initial;
+    opposite(1, 3) -= kProbeDisplacementM;
+    const auto opposite_profile = optimizer->evaluateP1FixedLatticeRisk(
+        ego_planner::UniformBspline(opposite, 3, kTs));
+    ASSERT_TRUE(opposite_profile.full_support);
+    EXPECT_GT(opposite_profile.mean_c_pi, initial_profile.mean_c_pi) << mode;
+
+    for (const int invariant_row : {0, 2}) {
+      Eigen::MatrixXd risk_invariant = initial;
+      risk_invariant(invariant_row, 3) += kProbeDisplacementM;
+      const auto invariant_profile = optimizer->evaluateP1FixedLatticeRisk(
+          ego_planner::UniformBspline(risk_invariant, 3, kTs));
+      ASSERT_TRUE(invariant_profile.full_support);
+      EXPECT_NEAR(invariant_profile.mean_c_pi,
+                  initial_profile.mean_c_pi, 1.0e-10) << mode;
+      EXPECT_NEAR(invariant_profile.max_c_pi,
+                  initial_profile.max_c_pi, 1.0e-10) << mode;
+    }
+  }
 }
 
 TEST(P1IntegrityCostTest, SnapshotGenerationStaysFixedUntilReset) {
