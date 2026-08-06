@@ -6559,6 +6559,140 @@ Verdict: FAIL.
 
 Conclusion: This terminal record supersedes no other run and does not grant formal progression.
 
+## 2026-08-06 P1-2 fixed-lambda v4 diagnostic entry PASS
+
+Fresh enabled smoke command: `ros2 launch iap test_planner.launch.py experiment:=p1_degraded_lidar_good planner_safety_profile:=p1 p1.metrics_only:=false p1.lambda_integrity:=0.00001 run_duration_s:=30 validation_duration_s:=30 start_rviz:=false run_validator:=true record_bag:=true`.
+
+The one-shot bundle verifier returned `passed=true`, `errors=[]`. The one-shot diagnostic analyzer returned PASS and generated all ten required nonempty figures. This diagnostic record grants entry to a fresh formal pair only; it does not establish P1-2 effectiveness.
+
+### Full scenario top-down
+
+![Full scenario top-down](../../results/planner_validation/exports/test_planner_p1_degraded_lidar_good_gnss_degraded_lidar_good_1786035114961/p1_candidate_diagnostic_smoke/p1_diag_topdown_scene.png)
+
+Observation: The explicit bag supplies the map, vehicle truth/odometry, start/goal, and published trajectories for the complete scenario view.
+
+Verdict: PASS.
+
+Conclusion: Scene evidence is available and bound to the fresh bundle; this figure is diagnostic only.
+
+Authority: run `22cce67d0cf148fc9a4d288574691242`; HEAD `16a168a4649162833e5af32f18b4f244cfaa882e`; export `1786035114961`; bag `20260806T165154Z`; window `2026-08-06T16:51:54Z`–`16:52:25Z`; all attempts/generations; diagnostic authority.
+
+### Candidate fan-out funnel
+
+![Candidate fan-out funnel](../../results/planner_validation/exports/test_planner_p1_degraded_lidar_good_gnss_degraded_lidar_good_1786035114961/p1_candidate_diagnostic_smoke/p1_diag_fanout_funnel.png)
+
+Observation: Attempts 20–22 each emitted four candidates; all 12 optimizers succeeded with fixed support `200/200`, all 12 were rank-eligible, and exactly one winner was selected per attempt.
+
+Verdict: PASS.
+
+Conclusion: Candidate-cap, full-support, optimizer-success, ranking, and exactly-one-winner entry gates are closed.
+
+Authority: run `22cce67d0cf148fc9a4d288574691242`; HEAD `16a168a4649162833e5af32f18b4f244cfaa882e`; attempts `20–22`; generations `30–32`; fixed lambda `0.00001`; diagnostic authority.
+
+### Mean/max delta scatter
+
+![Mean/max delta scatter](../../results/planner_validation/exports/test_planner_p1_degraded_lidar_good_gnss_degraded_lidar_good_1786035114961/p1_candidate_diagnostic_smoke/p1_diag_mean_max_delta_scatter.png)
+
+Observation: All 12 candidates strictly reduced both risk summaries. Mean deltas span `-2.65185e-4` to `-2.04982e-4`; max deltas span `-2.20886e-4` to `-1.81419e-4`.
+
+Verdict: PASS.
+
+Conclusion: The fixed-200 mean objective also satisfies per-candidate max non-regression in this deterministic smoke.
+
+Authority: run `22cce67d0cf148fc9a4d288574691242`; attempts `20–22`; same snapshot/query lattice within each attempt; aggregation `fixed_200_mean`; diagnostic authority.
+
+### Initial/final pairwise matrices
+
+![Initial/final pairwise matrices](../../results/planner_validation/exports/test_planner_p1_degraded_lidar_good_gnss_degraded_lidar_good_1786035114961/p1_candidate_diagnostic_smoke/p1_diag_pairwise_matrices.png)
+
+Observation: Initial control-point pairwise distance reaches `0.225008 m` and final distance reaches `0.224039 m`; risk-profile distances remain nonzero, and all 12 final control-point hashes are distinct.
+
+Verdict: PASS.
+
+Conclusion: Projected seeding and candidate-local anchors preserve measurable initial and final diversity.
+
+Authority: run `22cce67d0cf148fc9a4d288574691242`; attempts `20–22`; 60 phase-tagged pairwise rows; diagnostic authority.
+
+### Per-attempt objective decomposition
+
+![Per-attempt objective decomposition](../../results/planner_validation/exports/test_planner_p1_degraded_lidar_good_gnss_degraded_lidar_good_1786035114961/p1_candidate_diagnostic_smoke/p1_diag_objective_decomposition.png)
+
+Observation: For attempt 20 winner 4, total merit changes `0.0153566 -> -0.0554794`, with normalized P1 `0 -> -0.142013` and anchor `0 -> 0.0701912`; attempts 21–22 show the same frozen-budget decomposition pattern.
+
+Verdict: PASS.
+
+Conclusion: Recorded optimizer merit is the frozen normalized two-stage objective, not raw lambda multiplication alone.
+
+Authority: run `22cce67d0cf148fc9a4d288574691242`; attempt/candidate/generation/query-base `20/4/30/1657065616.996573`; runtime planner SHA-256 `764e48f74a3a679fdb77eccce72fed0de5b9306870b2e0d1236e9e493e85bcfb`; diagnostic authority.
+
+### Gradient/displacement alignment
+
+![Gradient/displacement alignment](../../results/planner_validation/exports/test_planner_p1_degraded_lidar_good_gnss_degraded_lidar_good_1786035114961/p1_candidate_diagnostic_smoke/p1_diag_gradient_displacement.png)
+
+Observation: Raw-P1-gradient dot displacement is negative for all 12 candidates, spanning `-2.65067e-4` to `-2.05243e-4`.
+
+Verdict: PASS.
+
+Conclusion: Each optimized displacement follows a raw P1 descent component and closes the H2-B direction gate.
+
+Authority: run `22cce67d0cf148fc9a4d288574691242`; attempts `20–22`; active-variable analytic gradient; fixed support `200/200`; diagnostic authority.
+
+### Per-attempt profile
+
+![Per-attempt profile](../../results/planner_validation/exports/test_planner_p1_degraded_lidar_good_gnss_degraded_lidar_good_1786035114961/p1_candidate_diagnostic_smoke/p1_diag_profile_comparison.png)
+
+Observation: Initial/final profile sidecars contain 200 ordered samples per candidate with normal `c_pi` values separated from invalid reasons; all three selected profiles reduce mean and max relative to their seeds.
+
+Verdict: PASS.
+
+Conclusion: Profile support, ordering, and initial/final comparison are replayable for every candidate.
+
+Authority: run `22cce67d0cf148fc9a4d288574691242`; attempts `20–22`; candidates `1–4`; snapshot generations `30–32`; diagnostic authority.
+
+### P0 occupied/base-collision overlay
+
+![P0 occupied/base-collision overlay](../../results/planner_validation/exports/test_planner_p1_degraded_lidar_good_gnss_degraded_lidar_good_1786035114961/p1_candidate_diagnostic_smoke/p1_diag_p0_occupancy_overlay.png)
+
+Observation: The v4 occupancy sidecar records the exact two-layer trilinear corner support, including raw/inflated occupancy and captured map generation, for candidate query failures.
+
+Verdict: PASS.
+
+Conclusion: Occupied attribution compares interpolation corners in one captured epoch and does not substitute point-wise live occupancy.
+
+Authority: run `22cce67d0cf148fc9a4d288574691242`; 49,179,935-byte occupancy sidecar; same attempt/snapshot/query-base tuple as candidate evidence; diagnostic authority.
+
+### Lifecycle swimlane
+
+![Lifecycle swimlane](../../results/planner_validation/exports/test_planner_p1_degraded_lidar_good_gnss_degraded_lidar_good_1786035114961/p1_candidate_diagnostic_smoke/p1_diag_lifecycle_swimlane.png)
+
+Observation: Successful unsupported base prepasses repeatedly advanced the receding horizon; trajectory duration entered the fixed 2.5-second P0 horizon, after which attempts 20–22 started strict P1 optimization. The vehicle subsequently reached the close-to-goal state.
+
+Verdict: PASS.
+
+Conclusion: The one-command startup, base-only advance, base prepass, P1 fan-out, selection, rejection, and incumbent-retention sequence is observable without a same-generation retry loop.
+
+Authority: run `22cce67d0cf148fc9a4d288574691242`; full `2026-08-06T16:51:54Z`–`16:52:25Z` lifecycle; generations through 55; diagnostic authority.
+
+### Artifact/provenance timeline
+
+![Artifact/provenance timeline](../../results/planner_validation/exports/test_planner_p1_degraded_lidar_good_gnss_degraded_lidar_good_1786035114961/p1_candidate_diagnostic_smoke/p1_diag_artifact_provenance_timeline.png)
+
+Observation: Manifest schema is `p1_evidence_provenance_v4`; recorder exit is zero, bag metadata and validator summary are complete, and the one-shot preflight reports `passed=true`, `errors=[]`.
+
+Verdict: PASS.
+
+Conclusion: Export, bag, manifest, runtime hashes, sidecars, and figures share one clean-HEAD provenance identity.
+
+Authority: run `22cce67d0cf148fc9a4d288574691242`; HEAD `16a168a4649162833e5af32f18b4f244cfaa882e`; launch SHA-256 `6babf7d586ed13d312f0b13830b53a55dcf1aed99e86687ebc8bb57e64b8f331`; diagnostic authority.
+
+### Diagnostic terminal record
+
+Observation: The explicit fresh bundle produced 12 strict candidate rows, three consistent retained-incumbent decisions, ten nonempty figures, a passing v4 preflight, and a passing one-shot diagnostic analyzer.
+
+Verdict: PASS (entry to formal only).
+
+Conclusion: This terminal record supersedes no prior evidence and authorizes a fresh serial P1-1/P1-2 formal pair. It does not authorize P1-3.
+
 ## 2026-08-06 diagnostic-smoke figure evidence (non-authoritative)
 
 ### Full scenario top-down
@@ -6818,3 +6952,11 @@ Observation: Analyzer completed once for run `2a1d0341223142c6a06626f2882ea3dc`.
 Verdict: FAIL.
 
 Conclusion: This terminal record supersedes no other run and does not grant formal progression.
+
+### Diagnostic terminal record (superseding)
+
+Observation: Fresh run `22cce67d0cf148fc9a4d288574691242` produced 12 strict `200/200` candidate rows, three identity-closed retained-incumbent decisions, a passing v4 preflight, and a passing one-shot diagnostic analyzer with ten nonempty figures.
+
+Verdict: PASS (entry to formal only).
+
+Conclusion: This physical-end record supersedes the earlier diagnostic-entry failures, authorizes one fresh serial P1-1/P1-2 formal pair, and does not authorize P1-3.
