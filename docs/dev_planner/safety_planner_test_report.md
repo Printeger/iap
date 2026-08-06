@@ -7118,3 +7118,11 @@ Observation: The one-shot v4 preflight returned `passed=true`, `errors=[]`; the 
 Verdict: PASS (entry to fresh formal pair only).
 
 Conclusion: This physical-end record supersedes the generic diagnostic-only terminal statement for entry-gate scheduling, authorizes one fresh serial P1-1/P1-2 pair, and does not establish formal effectiveness or authorize P1-3.
+
+## P1-2 fixed-lambda formal pair 2 — 2026-08-06
+
+Observation: Both one-shot bundle preflights passed with `errors=[]` under `p1_evidence_provenance_v4`. The serial 90 s runs were P1-1 run `57f357cd8b844035a2c9ed37172d0903` (export `test_planner_p1_degraded_lidar_good_gnss_degraded_lidar_good_1786036319916`, bag `test_planner_p1_degraded_lidar_good_gnss_degraded_lidar_good_20260806T171159Z`) and P1-2 run `b0a41fb1381449d186f99bf1e92656d0` (export `test_planner_p1_degraded_lidar_good_gnss_degraded_lidar_good_1786036424164`, bag `test_planner_p1_degraded_lidar_good_gnss_degraded_lidar_good_20260806T171344Z`) at clean HEAD `62fa635`. Formal analysis `7d6a83d26dc44879ac79137091e1a755` was invoked exactly once and produced 39 figures. It reported P1-2 accepted-profile mean/max `0.4125386011944866/0.42669043098087955` versus P1-1 `0.4116728602025039/0.42596767763564497`, plus hard-gate failures in generation singleflight accounting, startup P0-health classification, finite candidate-schema interpretation, and exact health/snapshot scene alignment.
+
+Verdict: FAIL.
+
+Conclusion: This pair is retained as failed evidence. It grants neither formal progression nor P1-3 permission. Any correction requires a new clean commit and an entirely fresh formal pair; this pair's analyzer must not be rerun.
