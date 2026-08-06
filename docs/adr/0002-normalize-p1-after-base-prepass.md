@@ -40,12 +40,19 @@ Metrics-only reference trajectories may be accepted before their terminal arc en
 
 Ranking remains a soft preference inside the existing mean/max publication policy. Candidates that would satisfy incumbent non-regression rank before candidates that would necessarily be rejected. Among those publishable candidates, the deterministic order is fixed-200 mean, fixed-200 max, normalized merit, then candidate ID. This makes selection use the same risk statistics as acceptance without changing the differentiable scalar merit used within each optimizer. If none can replace the incumbent, the optimizer still records exactly one selected winner and rejects publication as before.
 
+The first fresh formal pair after recorded-profile closure exposed the remaining aggregation mismatch: fixed-200 mean strictly improved while the terminal maximum regressed (`0.4189355852 -> 0.4184126651` mean, `0.4234621220 -> 0.4249930265` max). Following the fixed H4 order, the P1-stage raw objective is therefore the normalized log-sum-exp over those same 200 samples,
+
+`Jp1 = m + T * (log(sum_i exp((c_i-m)/T)) - log(200))`,
+
+where `m=max_i c_i` and `T=0.01 c_pi`. The max shift makes the exponentials numerically stable, subtraction of `log(200)` preserves `c_pi` units and returns the common value for a tied profile, and the analytic trajectory gradient is `sum_i softmax_i * grad(c_i)`. The maximum softmax weight is recorded as `peak_contribution`. This remains a differentiable soft preference inside the same frozen budget; fixed-200 mean remains only for regression comparison. Smooth CVaR is not introduced unless a fresh LSE run fails the same mean/max gate.
+
 STEP3 feasibility refinement happens after optimizer selection and can change both control points and knot interval. Before publication, the refined trajectory is therefore evaluated again on the candidate attempt's immutable snapshot and fixed 200-sample lattice. It must retain mean/max non-regression with at least one strict decrease relative to the selected candidate seed and, when an incumbent exists, relative to that incumbent. Failure rejects this publication and retains the incumbent; startup records an explicit `no_publish_no_incumbent` disposition. This is a publication-consistency check for the existing soft preference, not an optimizer constraint or P5 gate.
 
 ## Rejected alternatives
 
 - A global constant multiplier is scene- and attempt-scale dependent.
 - A hard P1 non-regression constraint would blur the P1 soft-preference and P5 hard-safety boundary.
+- A nondifferentiable maximum would break the scalar analytic-gradient optimizer contract.
 
 ## Consequences
 

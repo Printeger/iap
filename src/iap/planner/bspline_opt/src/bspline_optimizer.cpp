@@ -298,7 +298,7 @@ namespace ego_planner
     node->declare_parameter("p1.evidence_manifest_path", std::string(""));
     node->declare_parameter("p1.max_candidates_per_attempt", 8);
     node->declare_parameter("p1.objective_aggregation_mode",
-                            std::string("fixed_200_mean"));
+                            std::string("fixed_200_lse"));
     node->declare_parameter("p1.smooth_max_temperature", 0.01);
     node->declare_parameter("p4.enable_risk_aware_astar", false);
     node->declare_parameter("p4.lambda_p4_risk", 0.05);
@@ -343,11 +343,21 @@ namespace ego_planner
     p1_config_.max_candidates_per_attempt = std::clamp(
         p1_config_.max_candidates_per_attempt, 1, 8);
     if (p1_config_.objective_aggregation_mode != "adaptive_mean" &&
-        p1_config_.objective_aggregation_mode != "fixed_200_mean")
+        p1_config_.objective_aggregation_mode != "fixed_200_mean" &&
+        p1_config_.objective_aggregation_mode != "fixed_200_lse")
     {
       RCLCPP_WARN(rclcpp::get_logger("BsplineOptimizer"),
-                  "unsupported p1.objective_aggregation_mode '%s'; using fixed_200_mean",
+                  "unsupported p1.objective_aggregation_mode '%s'; using fixed_200_lse",
                   p1_config_.objective_aggregation_mode.c_str());
+      p1_config_.objective_aggregation_mode = "fixed_200_lse";
+    }
+    if (p1_config_.objective_aggregation_mode == "fixed_200_lse" &&
+        (!(p1_config_.smooth_max_temperature > 0.0) ||
+         !std::isfinite(p1_config_.smooth_max_temperature)))
+    {
+      RCLCPP_WARN(rclcpp::get_logger("BsplineOptimizer"),
+                  "invalid p1.smooth_max_temperature %.17g; using fixed_200_mean",
+                  p1_config_.smooth_max_temperature);
       p1_config_.objective_aggregation_mode = "fixed_200_mean";
     }
     node->get_parameter("p4.enable_risk_aware_astar", p4_config_.enable_risk_aware_astar);
@@ -2299,7 +2309,7 @@ namespace ego_planner
         trace.adaptive_sample_count = std::min(
             trace.adaptive_sample_count, p1_config_.max_samples_per_eval);
       trace.fixed_sample_count = kP1CandidateEvidenceSampleCount;
-      trace.peak_contribution = 0.0;
+      trace.peak_contribution = last_p1_metrics_.peak_contribution;
 
       // 初始化L-BFGS算法的参数
       lbfgs::lbfgs_parameter_t lbfgs_params;
@@ -2382,6 +2392,7 @@ namespace ego_planner
           3, initial_control_points.cols());
       P1IntegrityMetrics raw_integrity_metrics;
       const P1IntegrityMetrics terminal_metrics = last_p1_metrics_;
+      trace.peak_contribution = terminal_metrics.peak_contribution;
       const auto terminal_viz_samples = last_p1_viz_samples_;
       calcIntegrityTrajectoryCost(initial_control_points, raw_integrity_cost,
                                   raw_integrity_gradient, raw_integrity_metrics);
@@ -2728,10 +2739,22 @@ namespace ego_planner
       adaptive_sample_count = std::min(
           adaptive_sample_count, p1_config_.max_samples_per_eval);
     }
-    const int sample_count = p1_config_.objective_aggregation_mode ==
-        "fixed_200_mean" ? kP1CandidateEvidenceSampleCount
-                           : adaptive_sample_count;
+    const bool fixed_lattice =
+        p1_config_.objective_aggregation_mode == "fixed_200_mean" ||
+        p1_config_.objective_aggregation_mode == "fixed_200_lse";
+    const int sample_count = fixed_lattice
+        ? kP1CandidateEvidenceSampleCount : adaptive_sample_count;
     metrics.sample_count = sample_count;
+
+    struct ObjectiveSample
+    {
+      double cost = 0.0;
+      Eigen::Vector3d spatial_gradient = Eigen::Vector3d::Zero();
+      int first_control_point = -1;
+      double basis[4] = {0.0, 0.0, 0.0, 0.0};
+    };
+    std::vector<ObjectiveSample> objective_samples(
+        static_cast<std::size_t>(sample_count));
 
     UniformBspline traj(q, order_, bspline_interval_);
     const double denom = sample_count > 1 ? static_cast<double>(sample_count - 1) : 1.0;
@@ -2783,16 +2806,18 @@ namespace ego_planner
           viz.grad = barrier_grad;
           viz.push = -p1_config_.lambda_integrity * barrier_grad;
         }
-        last_p1_viz_samples_.push_back(viz);
         if (has_barrier)
         {
-          cost += barrier_cost;
+          ObjectiveSample &objective_sample = objective_samples[sample_id];
+          objective_sample.cost = barrier_cost;
+          objective_sample.spatial_gradient = barrier_grad;
           int first_control_point = 0;
           double weights[4] = {0.0, 0.0, 0.0, 0.0};
           if (cubicBasisForTime(t, static_cast<int>(q.cols()), first_control_point, weights))
           {
             for (int i = 0; i < 4; ++i)
-              gradient.col(first_control_point + i) += weights[i] * barrier_grad;
+              objective_sample.basis[i] = weights[i];
+            objective_sample.first_control_point = first_control_point;
           }
         }
         else if (small_penalty || conservative_scalar_miss)
@@ -2801,8 +2826,9 @@ namespace ego_planner
           // They have no trustworthy spatial direction, so retain zero grad.
           const double penalty = std::max(1.0, p1_config_.unknown_soft_penalty);
           viz.cost = penalty;
-          cost += penalty;
+          objective_samples[sample_id].cost = penalty;
         }
+        last_p1_viz_samples_.push_back(viz);
         continue;
       }
 
@@ -2825,7 +2851,9 @@ namespace ego_planner
         metrics.clipped_grad_count++;
       }
 
-      cost += sample_cost;
+      ObjectiveSample &objective_sample = objective_samples[sample_id];
+      objective_sample.cost = sample_cost;
+      objective_sample.spatial_gradient = sample_grad;
       viz.hit = true;
       viz.stale = sample.stale;
       viz.unknown = false;
@@ -2840,9 +2868,8 @@ namespace ego_planner
       if (cubicBasisForTime(t, static_cast<int>(q.cols()), first_control_point, weights))
       {
         for (int i = 0; i < 4; ++i)
-        {
-          gradient.col(first_control_point + i) += weights[i] * sample_grad;
-        }
+          objective_sample.basis[i] = weights[i];
+        objective_sample.first_control_point = first_control_point;
       }
       else
       {
@@ -2852,9 +2879,56 @@ namespace ego_planner
 
     if (sample_count > 0)
     {
-      const double inv_count = 1.0 / static_cast<double>(sample_count);
-      cost *= inv_count;
-      gradient *= inv_count;
+      std::vector<double> aggregation_weights(
+          static_cast<std::size_t>(sample_count),
+          1.0 / static_cast<double>(sample_count));
+      if (p1_config_.objective_aggregation_mode == "fixed_200_lse")
+      {
+        const double temperature = p1_config_.smooth_max_temperature;
+        double maximum_cost = -std::numeric_limits<double>::infinity();
+        for (const auto &sample : objective_samples)
+          maximum_cost = std::max(maximum_cost, sample.cost);
+        double exponential_sum = 0.0;
+        for (int index = 0; index < sample_count; ++index)
+        {
+          aggregation_weights[index] = std::exp(
+              (objective_samples[index].cost - maximum_cost) / temperature);
+          exponential_sum += aggregation_weights[index];
+        }
+        if (exponential_sum > 0.0 && std::isfinite(exponential_sum))
+        {
+          cost = maximum_cost + temperature *
+              (std::log(exponential_sum) -
+               std::log(static_cast<double>(sample_count)));
+          for (double &weight : aggregation_weights)
+            weight /= exponential_sum;
+        }
+        else
+        {
+          cost = maximum_cost;
+          std::fill(aggregation_weights.begin(), aggregation_weights.end(),
+                    1.0 / static_cast<double>(sample_count));
+        }
+      }
+      else
+      {
+        for (const auto &sample : objective_samples)
+          cost += sample.cost;
+        cost /= static_cast<double>(sample_count);
+      }
+
+      for (int index = 0; index < sample_count; ++index)
+      {
+        const auto &sample = objective_samples[index];
+        if (sample.first_control_point < 0)
+          continue;
+        for (int basis_index = 0; basis_index < 4; ++basis_index)
+          gradient.col(sample.first_control_point + basis_index) +=
+              aggregation_weights[index] * sample.basis[basis_index] *
+              sample.spatial_gradient;
+      }
+      metrics.peak_contribution = *std::max_element(
+          aggregation_weights.begin(), aggregation_weights.end());
       metrics.miss_ratio = static_cast<double>(metrics.miss_count) / static_cast<double>(sample_count);
       metrics.stale_ratio = static_cast<double>(metrics.stale_count) / static_cast<double>(sample_count);
     }
@@ -4347,6 +4421,7 @@ namespace ego_planner
     double raw_integrity_cost = 0.0;
     P1IntegrityMetrics raw_integrity_metrics;
     const P1IntegrityMetrics terminal_metrics = last_p1_metrics_;
+    trace.peak_contribution = terminal_metrics.peak_contribution;
     const auto terminal_viz_samples = last_p1_viz_samples_;
     calcIntegrityTrajectoryCost(initial_control_points, raw_integrity_cost,
                                 raw_integrity_gradient, raw_integrity_metrics);

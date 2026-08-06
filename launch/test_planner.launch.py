@@ -821,7 +821,7 @@ ARG_DEFAULTS = [
     ("p1.debug_csv_enable", "false"),
     ("p1.debug_csv_path", ""),
     ("p1.max_candidates_per_attempt", "8"),
-    ("p1.objective_aggregation_mode", "fixed_200_mean"),
+    ("p1.objective_aggregation_mode", "fixed_200_lse"),
     ("p1.smooth_max_temperature", "0.01"),
     ("p2.enable_candidate_ranking", "false"),
     ("p2.metrics_only", "true"),

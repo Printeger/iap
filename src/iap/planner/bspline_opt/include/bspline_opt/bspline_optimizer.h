@@ -120,9 +120,10 @@ namespace ego_planner
       int max_candidates_per_attempt = 8;
       // Admission is judged on a fixed 200-sample lattice.  Keep the soft
       // objective on that same lattice so a narrow peak cannot be hidden by
-      // adaptive optimizer sampling.  `fixed_200_mean` is the selected P1-2
-      // alignment mode; smooth-max is retained only as explicit provenance.
-      std::string objective_aggregation_mode = "fixed_200_mean";
+      // adaptive optimizer sampling.  `fixed_200_lse` is the selected P1-2
+      // alignment mode after fixed-mean formal evidence reduced the mean but
+      // regressed the peak.  The normalized log-sum-exp remains in c_pi units.
+      std::string objective_aggregation_mode = "fixed_200_lse";
       double smooth_max_temperature = 0.01;
     };
 
@@ -151,6 +152,7 @@ namespace ego_planner
       double base_p1_cosine = 0.0;
       double miss_ratio = 0.0;
       double stale_ratio = 0.0;
+      double peak_contribution = 0.0;
       int clipped_grad_count = 0;
       std::string fallback_reason = "not_evaluated";
       bool applied_to_objective = false;
