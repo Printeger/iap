@@ -4,7 +4,7 @@
 
 | Req ID | Evidence | Verification | Status |
 |---|---|---|---|
-| IAP-RQ-400 / IAP-RQ-410 | `fixed_200_smooth_cvar`, `alpha=0.90`, `T=0.01`; deterministic eta solve; stable sigmoid/softplus; entropy normalization; envelope gradient; v4 aggregation tail evidence and fail-closed preflight | `Fixed200SmoothCvarMatchesFiniteDifferenceAndTailMass`; `Fixed200SmoothCvarIsStableForTiesAndWideRange`; `Fixed200SmoothObjectivesCloseDeterministicMeanPeakConflict`; all 37 P1 integrity tests; eight verifier tests; 64 formal-analyzer tests | **IMPLEMENTED; fresh build/smoke required** |
+| IAP-RQ-400 / IAP-RQ-410 | `fixed_200_smooth_cvar`, `alpha=0.90`, `T=0.01`; deterministic eta solve; stable sigmoid/softplus; entropy normalization; envelope gradient; v4 aggregation tail evidence; fresh run `805116b6bce9441886e15d216a0d4332` at clean `0afb316` | 37 P1 integrity, eight verifier, and 64 formal-analyzer tests; sole v4 preflight PASS; sole ten-figure diagnostic PASS; 56/56 full-support eligible candidates, 14/14 unique published winners, strict descent/negative alignment, 56 distinct final hashes, peak contribution `0.00767–0.01603` | **PASS; fresh formal pair authorized** |
 
 ## 2026-08-06 P1 LSE formal peak counterexample
 
