@@ -7311,12 +7311,32 @@ def validate_p1_profile_context(
     reason_counts_match = all(
         int(numeric[key]) == value for key, value in classified_counts.items()
     )
+    metadata = profile.get("metadata_tuple_values", {}) or {}
+    metrics_only_values = list(metadata.get("metrics_only", []) or [])
+    applied_values = list(metadata.get("applied_to_objective", []) or [])
+    metrics_only_temporal_fallback = (
+        not temporal_in_horizon
+        and len(metrics_only_values) == 1
+        and explicit_csv_bool(metrics_only_values[0]) is True
+        and len(applied_values) == 1
+        and explicit_csv_bool(applied_values[0]) is False
+        and explicit_csv_bool(context.get("objective_requested")) is False
+        and explicit_csv_bool(context.get("objective_applied")) is False
+        and explicit_csv_bool(context.get("p1_fallback")) is True
+        and context.get("fallback_reason") == "metrics_only_temporal_out_of_horizon"
+        and int(numeric["temporal_miss_count"]) > 0
+        and coverage_ok
+    )
+    temporal_context_acceptable = (
+        temporal_in_horizon or metrics_only_temporal_fallback
+    )
     result.update({
         # Keep the legacy aggregate for old JSON readers, but never use it to
         # label a temporal miss as a spatial miss.
         "in_bounds": spatial_in_bounds and temporal_in_horizon,
         "spatial_in_bounds": spatial_in_bounds,
         "temporal_in_horizon": temporal_in_horizon,
+        "metrics_only_temporal_fallback": metrics_only_temporal_fallback,
         "bindings_ok": bindings_ok,
         "frame_match": frame_match,
         "query_time_match": query_time_match,
@@ -7332,7 +7352,7 @@ def validate_p1_profile_context(
     result["valid"] = (
         bool(profile.get("format_valid"))
         and spatial_in_bounds
-        and temporal_in_horizon
+        and temporal_context_acceptable
         and bindings_ok
         and frame_match
         and query_time_match
@@ -7346,7 +7366,7 @@ def validate_p1_profile_context(
     if not result["valid"]:
         if not spatial_in_bounds:
             result["reasons"].append("spatial_out_of_interpolation_bounds")
-        if not temporal_in_horizon:
+        if not temporal_context_acceptable:
             result["reasons"].append("temporal_out_of_horizon")
         if not bindings_ok or not accepted_stamp_matches or not trajectory_bounds_match:
             result["reasons"].append("context_profile_binding_invalid")

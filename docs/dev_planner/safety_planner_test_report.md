@@ -8418,3 +8418,11 @@ Observation: Fresh enabled run `9a16ed929f94426ca3dd360b5b91a64c` completed at c
 Verdict: PASS (entry-to-formal only).
 
 Conclusion: This record supersedes the preceding diagnostic-only terminal wording for run `9a16ed929f94426ca3dd360b5b91a64c` and authorizes one wholly fresh, serial fixed-lambda P1-1/P1-2 formal pair. It does not authorize or execute P1-3.
+
+### Superseding P1 fixed-lambda formal terminal record — 2026-08-06 pair 6
+
+Observation: At clean HEAD `2f9da0f4a2c76cfd7a4209babc2fa4234589032e`, the serial P1-1 run `5a95b19dc4a843629c11de55d4844430` (export `test_planner_p1_degraded_lidar_good_gnss_degraded_lidar_good_1786045990358`, bag `test_planner_p1_degraded_lidar_good_gnss_degraded_lidar_good_20260806T195310Z`) and P1-2 run `606dfad213b841bb8c9b69edb05eb626` (export `test_planner_p1_degraded_lidar_good_gnss_degraded_lidar_good_1786046108998`, bag `test_planner_p1_degraded_lidar_good_gnss_degraded_lidar_good_20260806T195509Z`) each passed its sole v4 preflight with `errors=[]`. Formal analysis `2dbe939de7e8422abae257afd0148271` was invoked exactly once, generated all 39 required figures, and returned `status=FAIL`, `inconclusive=[]`, `warnings=[]`. All independent hard gates passed; the failure chain began at P1-1 accepted-context classification. Its final metrics-only profile was fresh and exactly frame/generation/query-time bound with `106/200` genuine samples, but the trajectory duration was `3.0 s` against the unchanged `2.5 s` snapshot horizon. Consequently the terminal `0.375069 m` common arc contained zero matched P1-1 values, so strict mean/max reduction is unavailable without fabrication. The pair is retained and will not be analyzed again.
+
+Verdict: FAIL (formal; unsupported terminal reference arc).
+
+Conclusion: This record supersedes any generated wording that attributes the first failure to missing or unbound P1-1 provenance. The provenance is valid under the explicit metrics-only temporal fallback, but the formal effectiveness value remains unavailable and fail closed. Historical fresh references with `1.8 s` and `2.4 s` fully supported final trajectories demonstrate that the prescribed fixed scenario is satisfiable; a new diagnostic smoke and wholly fresh formal pair are required. P1-3 remains prohibited and was not run.

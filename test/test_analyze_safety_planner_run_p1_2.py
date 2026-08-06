@@ -1357,6 +1357,37 @@ class P1_2AnalyzerTest(unittest.TestCase):
         self.assertFalse(result["valid"])
         self.assertIn("temporal_out_of_horizon", result["reasons"])
 
+    def test_metrics_only_temporal_fallback_preserves_reference_context(self):
+        profile = accepted_profile_rows(
+            0.0, metrics_only=True, applied_to_objective=0
+        )
+        for index, row in enumerate(profile):
+            row["t_s"] = 3.0 * index / 199.0
+            row["fallback_reason"] = "metrics_only_temporal_out_of_horizon"
+            if index >= 166:
+                row["hit"] = 0
+                row["valid"] = 0
+                row["reason"] = "time_out_of_horizon"
+        summary = analyzer.summarize_p1_accepted_profile_rows(profile)
+        context = accepted_profile_context(profile)
+        context[0].update({
+            "snapshot_time_max_s": 11.5,
+            "trajectory_time_max_s": 3.0,
+            "temporal_in_horizon": 0,
+            "temporal_miss_count": 34,
+            "invalid_miss_count": 0,
+            "p1_fallback": 1,
+            "fallback_reason": "metrics_only_temporal_out_of_horizon",
+        })
+
+        result = analyzer.validate_p1_profile_context(
+            summary, context, {"path": "context"}, stale_timeout_s=1.0
+        )
+
+        self.assertFalse(result["temporal_in_horizon"])
+        self.assertTrue(result["metrics_only_temporal_fallback"])
+        self.assertTrue(result["valid"], result["reasons"])
+
     def test_p1_2_required_figure_contract_has_twenty_three_nonempty_names(self):
         self.assertEqual(len(analyzer.P1_2_FIGURE_FILENAMES), 23)
         self.assertEqual(len(set(analyzer.P1_2_FIGURE_FILENAMES)), 23)
