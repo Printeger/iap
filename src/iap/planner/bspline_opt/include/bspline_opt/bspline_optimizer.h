@@ -320,6 +320,11 @@ namespace ego_planner
       bool replacement_accepted = false;
       std::string replacement_reason = "not_evaluated";
       bool incumbent_available = false;
+      // Incumbent presence is an identity fact, not a statement that a
+      // candidate-specific fixed-200 comparison obtained full support.
+      // Rejected-candidate evidence must retain that identity even when the
+      // comparison itself fails closed.
+      void markIncumbentAvailable() { incumbent_available = true; }
       // Finite by construction: availability disambiguates the startup case
       // without weakening the candidate CSV finite-value contract.
       double incumbent_mean_c_pi = 0.0;

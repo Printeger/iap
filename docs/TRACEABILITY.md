@@ -1,5 +1,11 @@
 # Traceability Matrix (IAP)
 
+## 2026-08-06 P1 retained-incumbent presence closure
+
+| Req ID | Evidence | Verification | Status |
+|---|---|---|---|
+| IAP-RQ-400 / IAP-RQ-410 | Failed entry run `99352acb7ad94aea923172569f6f6537`, attempt `20/1`: decision/profile retain trajectory `15`, but candidate row incorrectly recorded `incumbent_available=0` when its comparison had `197/200` support | `P1OptimizationTrace::markIncumbentAvailable()` records identity before comparison in multi/single candidate paths; red-then-green `IncumbentPresenceDoesNotDependOnComparisonSupport`; candidate-selection and bundle-verifier suites pass | **IMPLEMENTED; fresh enabled smoke pending** |
+
 ## 2026-08-06 P1 reference-observation dual timestamp smoke
 
 | Req ID | Evidence | Verification | Status |

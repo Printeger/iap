@@ -1617,3 +1617,18 @@ TEST(P1IntegrityCostTest, AcceptedProfileLeavesCpiBlankForStaleMisses) {
   std::remove(debug_path.c_str());
   std::remove(profile_path.c_str());
 }
+
+TEST(P1IntegrityCostTest,
+     IncumbentPresenceDoesNotDependOnComparisonSupport) {
+  ego_planner::BsplineOptimizer::P1OptimizationTrace trace;
+  EXPECT_FALSE(trace.incumbent_available);
+
+  // The published incumbent still exists when an occupied interpolation
+  // corner prevents a full fixed-200 comparison.  Its presence must close
+  // retained-trajectory identity independently from comparison statistics.
+  trace.markIncumbentAvailable();
+
+  EXPECT_TRUE(trace.incumbent_available);
+  EXPECT_EQ(trace.replacement_comparison_mode, "full_profile");
+  EXPECT_DOUBLE_EQ(trace.replacement_comparison_duration_s, 0.0);
+}

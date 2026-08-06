@@ -1337,6 +1337,8 @@ namespace ego_planner
           const P1CandidateEvidence *incumbent = nullptr;
           if (has_existing_trajectory)
           {
+            for (auto &trace : p1_candidate_traces)
+              trace.markIncumbentAvailable();
             incumbent = &incumbent_evidence;
             // This marker makes a missing per-candidate shared-window tuple
             // reject closed instead of falling back to unequal full profiles.
@@ -1390,7 +1392,6 @@ namespace ego_planner
               incumbent_evidence.pre_max_c_pi = incumbent_summary.max_c_pi;
               incumbent_evidence.post_max_c_pi = incumbent_summary.max_c_pi;
               auto &trace = p1_candidate_traces[index];
-              trace.incumbent_available = true;
               trace.incumbent_mean_c_pi = incumbent_summary.mean_c_pi;
               trace.incumbent_max_c_pi = incumbent_summary.max_c_pi;
               trace.replacement_comparison_mode =
@@ -1621,6 +1622,7 @@ namespace ego_planner
       const P1CandidateEvidence *incumbent = nullptr;
       if (has_existing_trajectory)
       {
+        trace.markIncumbentAvailable();
         incumbent = &incumbent_evidence;
         // Require the candidate-specific shared-window tuple below.  If the
         // risk evaluation is incomplete, replacement rejects closed.
@@ -1655,7 +1657,6 @@ namespace ego_planner
                 incumbent_summary.mean_c_pi;
             candidate_evidence.replacement_incumbent_max_c_pi =
                 incumbent_summary.max_c_pi;
-            trace.incumbent_available = true;
             trace.incumbent_mean_c_pi = incumbent_summary.mean_c_pi;
             trace.incumbent_max_c_pi = incumbent_summary.max_c_pi;
             trace.replacement_comparison_mode = "shared_forward_time_window";

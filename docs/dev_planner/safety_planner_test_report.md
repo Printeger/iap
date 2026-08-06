@@ -8734,3 +8734,11 @@ Observation: Fresh 30-second metrics-only run `00ee130958c1429db48fce6feb7f14a9`
 Verdict: PASS (dual-timestamp integration smoke).
 
 Conclusion: The original non-republished trajectory identity and the later immutable-snapshot scene epoch are independently recorded and replayable. This closes the retained formal pair's only root failure and authorizes one fresh enabled 30-second diagnostic entry run. It does not authorize artifact reuse, formal analyzer reuse, or P1-3.
+
+### Superseding P1 fixed-lambda diagnostic entry record — 2026-08-06 retained-incumbent contradiction
+
+Observation: Fresh enabled 30-second run `99352acb7ad94aea923172569f6f6537` at clean HEAD `d70879fe91cfc4a93e9e1f47ac727a98d3bb63f3` (export `/home/dev/ws_iap/src/iap/results/planner_validation/exports/test_planner_p1_degraded_lidar_good_gnss_degraded_lidar_good_1786049340521`, bag `/home/dev/ws_iap/src/iap/results/planner_validation/bags/test_planner_p1_degraded_lidar_good_gnss_degraded_lidar_good_20260806T204900Z`) finalized recorder, metadata, manifest, and validator. Its v4 verifier failed first with `rejected candidate 20/1 lacks retained-incumbent closure`; therefore the diagnostic analyzer was not invoked. Attempt `20/1` selected an optimizer-successful, rank-eligible, P1-descending candidate and correctly rejected it as `p1_replacement_risk_regression`. The decision retained trajectory `15`, and the disposition sidecar contained 200 candidate plus 200 incumbent rows. Three incumbent rows were legitimately `occupied`, leaving comparison support `197/200`; production consequently left `incumbent_available=0`, contradicting the retained decision/profile despite the physical incumbent's existence.
+
+Verdict: FAIL (retained-incumbent identity conflated with comparison support).
+
+Conclusion: The run is retained and cannot authorize formal. Incumbent presence must be recorded before fixed-200 comparison, while incomplete comparison must continue rejecting replacement closed. A red-then-green regression now fixes this distinction; a wholly fresh enabled entry run is required. P0 occupied-corner semantics, fixed support, and P1-3 remain unchanged.
