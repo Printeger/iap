@@ -1,5 +1,11 @@
 # Traceability Matrix (IAP)
 
+## 2026-08-06 P1 fixed-lambda formal-entry smoke
+
+| Req ID | Evidence | Verification | Status |
+|---|---|---|---|
+| IAP-RQ-320 / IAP-RQ-400 / IAP-RQ-410 | Fresh enabled run `011a3f77fe354724a1c5d07024676c2f` at clean `f81474a`; 36 candidates/9 attempts; 36 unique initial and final hashes; 54 nonzero initial and final pairwise control-point/profile comparisons | Sole v4 verifier PASS and sole ten-figure diagnostic PASS; every row `200/200`, optimizer-successful, rank-eligible, P1-descending; exactly one accepted winner per attempt; every winner strictly lowers mean/max with negative raw-gradient/displacement dot product | **PASS; fresh formal pair authorized** |
+
 ## 2026-08-06 P1 metrics-only future-observation smoke
 
 | Req ID | Evidence | Verification | Status |
