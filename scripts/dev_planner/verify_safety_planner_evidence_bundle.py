@@ -9,10 +9,19 @@ authoritative analyzer invocation.
 import argparse
 import csv
 import hashlib
+import importlib.util
 import json
 import math
 import sys
 from pathlib import Path
+
+
+_FORMAL_METRICS_PATH = Path(__file__).with_name("p1_formal_metrics.py")
+_FORMAL_METRICS_SPEC = importlib.util.spec_from_file_location(
+    "p1_formal_metrics", _FORMAL_METRICS_PATH)
+formal_metrics = importlib.util.module_from_spec(_FORMAL_METRICS_SPEC)
+assert _FORMAL_METRICS_SPEC.loader is not None
+_FORMAL_METRICS_SPEC.loader.exec_module(formal_metrics)
 
 
 SCHEMA = "p1_evidence_provenance_v4"
@@ -131,7 +140,9 @@ def read_csv(path, expected_manifest, expected_run, required_fields=frozenset())
     return rows, errors
 
 
-def validate_bundle(export_dir, bag_dir, *, metrics_only, lambda_value):
+def validate_bundle(
+        export_dir, bag_dir, *, metrics_only, lambda_value,
+        calibration_path=None):
     errors = []
     export_dir, bag_dir = Path(export_dir).resolve(), Path(bag_dir).resolve()
     manifest_path = export_dir / "test_planner_manifest.json"
@@ -141,6 +152,20 @@ def validate_bundle(export_dir, bag_dir, *, metrics_only, lambda_value):
     provenance = manifest.get("artifact_provenance")
     if not isinstance(provenance, dict):
         return {"passed": False, "errors": ["manifest has no artifact_provenance"]}
+    calibration_binding = manifest.get("p1.formal_calibration", {}) or {}
+    calibration_result = {}
+    requested_calibration = calibration_path or calibration_binding.get("path")
+    formal_p1_run = bool(
+        manifest.get("planner_safety_profile") == "p1"
+        and manifest.get("record_bag") is True
+        and (formal_metrics._finite(manifest.get("run_duration_s")) or 0.0) >= 90.0
+    )
+    if formal_p1_run and not requested_calibration:
+        errors.append("formal P1 preflight requires a pre-frozen calibration manifest")
+    if requested_calibration:
+        calibration_result = formal_metrics.validate_calibration_binding(
+            requested_calibration, manifest)
+        errors.extend(calibration_result.get("errors", []))
     run_id = str(provenance.get("run_id", ""))
     if provenance.get("schema_version") != SCHEMA or not run_id:
         errors.append("manifest schema version or run ID is invalid")
@@ -551,7 +576,8 @@ def validate_bundle(export_dir, bag_dir, *, metrics_only, lambda_value):
             errors.append("bag provenance payload does not bind this manifest/run/export/bag")
     return {"passed": not errors, "errors": errors, "run_id": run_id,
             "schema_version": provenance.get("schema_version"), "manifest": str(manifest_path),
-            "export_dir": str(export_dir), "bag_dir": str(bag_dir)}
+            "export_dir": str(export_dir), "bag_dir": str(bag_dir),
+            "formal_calibration": calibration_result}
 
 
 def main():
@@ -560,11 +586,13 @@ def main():
     parser.add_argument("--bag-dir", required=True)
     parser.add_argument("--metrics-only", choices=("true", "false"), required=True)
     parser.add_argument("--lambda-integrity", type=float, default=0.00001)
+    parser.add_argument("--p1-calibration")
     parser.add_argument("--json-out")
     args = parser.parse_args()
     result = validate_bundle(args.export_dir, args.bag_dir,
                              metrics_only=args.metrics_only == "true",
-                             lambda_value=args.lambda_integrity)
+                             lambda_value=args.lambda_integrity,
+                             calibration_path=args.p1_calibration)
     encoded = json.dumps(result, indent=2, sort_keys=True)
     if args.json_out:
         Path(args.json_out).write_text(encoded + "\n")

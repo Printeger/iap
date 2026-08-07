@@ -1,0 +1,16 @@
+{
+  "schema_version": "p1_formal_calibration_pairs_v1",
+  "calibration_id": "p1-null-YYYYMMDD-clean-head",
+  "pairs": [
+    {"pair_id": "null-01", "run_a_export": "/absolute/export/01a", "run_b_export": "/absolute/export/01b"},
+    {"pair_id": "null-02", "run_a_export": "/absolute/export/02a", "run_b_export": "/absolute/export/02b"},
+    {"pair_id": "null-03", "run_a_export": "/absolute/export/03a", "run_b_export": "/absolute/export/03b"},
+    {"pair_id": "null-04", "run_a_export": "/absolute/export/04a", "run_b_export": "/absolute/export/04b"},
+    {"pair_id": "null-05", "run_a_export": "/absolute/export/05a", "run_b_export": "/absolute/export/05b"},
+    {"pair_id": "null-06", "run_a_export": "/absolute/export/06a", "run_b_export": "/absolute/export/06b"},
+    {"pair_id": "null-07", "run_a_export": "/absolute/export/07a", "run_b_export": "/absolute/export/07b"},
+    {"pair_id": "null-08", "run_a_export": "/absolute/export/08a", "run_b_export": "/absolute/export/08b"},
+    {"pair_id": "null-09", "run_a_export": "/absolute/export/09a", "run_b_export": "/absolute/export/09b"},
+    {"pair_id": "null-10", "run_a_export": "/absolute/export/10a", "run_b_export": "/absolute/export/10b"}
+  ]
+}

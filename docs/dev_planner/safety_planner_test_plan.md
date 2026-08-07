@@ -67,6 +67,106 @@ all
 | P3 | reference/local target bias | 替代 global obstacle-aware planner |
 | P4 | collision segment A* guide preference | 处理 collision-free high-risk 轨迹 |
 
+### 1.4 P1-2 独立运行 formal effectiveness（预冻结容差）
+
+P1-2 的 formal effectiveness 不再要求独立运行之间 exact mean/max 都严格下降。它只使用在 formal pair 启动前冻结的 10 组 P1-1/P1-1 空效应校准：
+
+```text
+reference_mean - current_mean > tau_mean
+reference_cvar - current_cvar > tau_cvar
+current_max - reference_max <= tau_max
+```
+
+这里的容差只适用于独立运行间的 formal 比较。生产 planner 在同一个 immutable snapshot 上的 candidate selection、incumbent replacement、fixed-200 exact-max non-regression 仍然严格；P1 仍是 soft preference，P5 仍是唯一 hard integrity safety authority。
+
+校准与 formal 比较都在两份权威 accepted-profile CSV 的共同末端弧长上生成标记为 `derived=true` 的固定 200 点 lattice。raw CSV 不得改写。mean、exact max 和 smooth CVaR 都来自该 lattice；CVaR 固定为 `fixed_200_smooth_cvar`、`alpha=0.90`、`T=0.01`、100 次 `eta` 二分。
+
+#### A. 先完成 10 组串行空效应运行
+
+每组包含两次独立的 90 秒 P1-1 metrics-only 运行，共 20 次。每次必须使用 clean HEAD、相同 scenario/P0/runtime hashes、`lambda=0.00001`、`record_bag:=false`、`run_validator:=true`。必须保存 manifest、validator、accepted profile/context 和 P0 corner provenance；每个有效 run 必须是健康 P0 和完整 `200/200` support。无效 run 保留，但不得写入最终 10-pair manifest；重新执行 fresh run 补足。
+
+```bash
+ros2 launch iap test_planner.launch.py \
+  experiment:=p1_degraded_lidar_good \
+  planner_safety_profile:=p1 \
+  p1.metrics_only:=true \
+  p1.lambda_integrity:=0.00001 \
+  run_duration_s:=90 validation_duration_s:=90 \
+  start_rviz:=false run_validator:=true record_bag:=false
+```
+
+将 10 组最终有效 export 的绝对路径写入
+`docs/dev_planner/p1_formal_calibration_pairs.example.json` 所示的 manifest，然后冻结容差：
+
+```bash
+python3 scripts/dev_planner/calibrate_p1_formal_tolerances.py \
+  --pairs-manifest /absolute/path/p1_formal_calibration_pairs.json \
+  --output-dir /absolute/path/p1_formal_calibration
+```
+
+输出必须包含：
+
+```text
+p1_formal_tolerance_calibration_v1.json
+p1_formal_calibration_pairs.csv
+p1_formal_calibration_validity.csv
+p1_formal_null_effect_distribution.png
+p1_formal_error_budget.png
+```
+
+JSON 中的三个阈值固定为 `max_j(s_*) + epsilon_det`，其中
+`epsilon_det = 2*(epsilon_grid + epsilon_resample)`。校准成功后禁止修改或重建代码；不得根据 P1-2 结果追加样本、扩大或重算阈值。
+
+#### B. 运行 fresh diagnostic 与 formal pair
+
+先运行一轮 fresh 30 秒 enabled diagnostic 验证 plumbing，不调整阈值。然后用同一个 calibration JSON 串行启动全新的 90 秒 P1-1 和 P1-2；launch 参数只写入 test manifest，不传给 planner：
+
+```bash
+# P1-1 reference
+ros2 launch iap test_planner.launch.py \
+  experiment:=p1_degraded_lidar_good planner_safety_profile:=p1 \
+  p1.metrics_only:=true p1.lambda_integrity:=0.00001 \
+  p1.formal_calibration_manifest:=/absolute/path/p1_formal_tolerance_calibration_v1.json \
+  run_duration_s:=90 validation_duration_s:=90 \
+  start_rviz:=false run_validator:=true record_bag:=true
+
+# P1-2 enabled；必须等 P1-1 完全结束后再启动
+ros2 launch iap test_planner.launch.py \
+  experiment:=p1_degraded_lidar_good planner_safety_profile:=p1 \
+  p1.metrics_only:=false p1.lambda_integrity:=0.00001 \
+  p1.formal_calibration_manifest:=/absolute/path/p1_formal_tolerance_calibration_v1.json \
+  run_duration_s:=90 validation_duration_s:=90 \
+  start_rviz:=false run_validator:=true record_bag:=true
+```
+
+分别只执行一次 preflight：
+
+```bash
+python3 scripts/dev_planner/verify_safety_planner_evidence_bundle.py \
+  --export-dir /absolute/P1-1/export --bag-dir /absolute/P1-1/bag \
+  --metrics-only true --lambda-integrity 0.00001 \
+  --p1-calibration /absolute/path/p1_formal_tolerance_calibration_v1.json
+
+python3 scripts/dev_planner/verify_safety_planner_evidence_bundle.py \
+  --export-dir /absolute/P1-2/export --bag-dir /absolute/P1-2/bag \
+  --metrics-only false --lambda-integrity 0.00001 \
+  --p1-calibration /absolute/path/p1_formal_tolerance_calibration_v1.json
+```
+
+仅在两次 preflight 都 PASS 后，对该 pair 调用一次 formal analyzer：
+
+```bash
+python3 scripts/dev_planner/analyze_safety_planner_run.py \
+  --experiment-id P1-2 \
+  --export-dir /absolute/P1-2/export --bag-dir /absolute/P1-2/bag \
+  --baseline-export-dir /absolute/P1-1/export \
+  --baseline-bag-dir /absolute/P1-1/bag \
+  --p1-calibration /absolute/path/p1_formal_tolerance_calibration_v1.json \
+  --fail-on-threshold
+```
+
+缺失、事后生成、ID/SHA 不一致、HEAD/runtime/config 不匹配的 calibration 一律 FAIL。相邻 raw 空间采样超过 `p0.resolution_m/2`、相邻时间采样超过最小 horizon 间距一半，或 formal corner/resampling residual 超过冻结界时，结果为 `INCONCLUSIVE`，不得扩大容差。最终 PASS 还要求全部既有 provenance、P0、candidate/support、trajectory、P5 isolation 和 PNG gates 通过，并且 `failures=[]`、`inconclusive=[]`。PASS 只授予进入 P1-3 的权限，本步骤不执行 P1-3；旧 formal pair 禁止按新容差重分析。
+
 ---
 
 ## 2. 测试环境与通用启动命令

@@ -108,6 +108,14 @@ _Avoid_: accepting a metrics-only run without a fresh baseline, using truth odom
 The per-accepted-trajectory sidecar bound to the same P0 snapshot and query-base that P1 used while planning. It records planning/acceptance times, snapshot generation and bounds, trajectory time bounds, expected samples, and miss categories. It is fail-closed evidence: it is neither an RViz cloud nor an analyzer reconstruction of risk.
 _Avoid_: latest RViz cloud as pass evidence, a prior accepted profile, or re-querying a newer snapshot in the analyzer.
 
+**Formal null-effect calibration**:
+The immutable tolerance JSON frozen from ten predeclared serial P1-1/P1-1 pairs before a fresh P1-1/P1-2 pair starts. It governs independent-run formal effectiveness only.
+_Avoid_: runtime candidate tolerance, post-hoc threshold tuning, reanalysis of an old pair
+
+**Derived common-terminal-arc fixed-200 lattice**:
+An analyzer-created, explicitly labeled comparison lattice obtained by arc-length interpolation over the shared terminal arc of two authoritative accepted profiles. It does not replace or rewrite either raw CSV.
+_Avoid_: raw accepted profile, same-snapshot candidate lattice, extrapolated risk values
+
 **Causal replan evidence**:
 Analyzer/status evidence that a `REQUEST_REPLAN` action and the future-risk gate/reason that caused it are both traceable in the same P5 run, including concurrent current and future reasons when both gates are active.
 _Avoid_: action count without gate reason, margin evidence with no replan attribution

@@ -537,6 +537,144 @@ class EvidenceBundlePreflightTest(unittest.TestCase):
             "planner_p1_candidate_optimization.csv" in error
             for error in result["errors"]), result["errors"])
 
+    def test_formal_preflight_requires_bound_prelaunch_calibration(self):
+        root, export, bag = self.make_bundle()
+        self.addCleanup(root.cleanup)
+        manifest_path = export / "test_planner_manifest.json"
+        manifest = json.loads(manifest_path.read_text())
+        provenance = manifest["artifact_provenance"]
+        manifest.update({
+            "scenario": "degraded_lidar_good",
+            "p0.resolution_m": 0.75,
+            "p0.horizons_s": [0.0, 0.5, 1.0],
+            "p0.enable_risk_grid": True,
+            "p1.use_integrity_cost": True,
+            "p1.max_candidates_per_attempt": 8,
+            "planner_safety_profile": "p1",
+            "run_duration_s": 90.0,
+            "validation_duration_s": 90.0,
+            "record_bag": True,
+            "run_validator": True,
+        })
+        runtime_hashes = {
+            key: provenance["runtime_paths"][key]["sha256"]
+            for key in ("launch", "planner_executable", "bspline_library")
+        }
+        calibration_path = export / "calibration.json"
+        calibration_payload = {
+            "schema_version": "p1_formal_tolerance_calibration_v1",
+            "calibration_id": "cal-1",
+            "generated_at_epoch_s": provenance["process_start_epoch_s"] - 1.0,
+            "git_commit": provenance["git_commit"],
+            "baseline_commit": provenance["baseline_commit"],
+            "scenario": manifest["scenario"],
+            "runtime_hashes": runtime_hashes,
+            "p0": {"resolution_m": 0.75, "horizons_s": [0.0, 0.5, 1.0]},
+            "smooth_cvar": {
+                "mode": "fixed_200_smooth_cvar", "alpha": 0.90,
+                "temperature": 0.01, "eta_bisection_iterations": 100,
+            },
+            "lambda_integrity": 0.00001,
+            "configuration_identity": {
+                "experiment": manifest["experiment"],
+                "planner_safety_profile": "p1",
+                "p0.enable_risk_grid": True,
+                "p0.resolution_m": 0.75,
+                "p0.horizons_s": [0.0, 0.5, 1.0],
+                "p1.use_integrity_cost": True,
+                "p1.max_candidates_per_attempt": 8,
+                "p1.lambda_integrity": 0.00001,
+                "p1.objective_aggregation_mode": "fixed_200_smooth_cvar",
+                "p1.smooth_cvar_alpha": 0.90,
+                "p1.smooth_max_temperature": 0.01,
+                "run_duration_s": 90.0,
+                "validation_duration_s": 90.0,
+                "record_bag": False,
+                "run_validator": True,
+            },
+            "conformal": {"pair_count": 10, "coverage": 0.90},
+            "run_ids": [f"null-{index}" for index in range(20)],
+            "pairs": [
+                {
+                    "pair_id": f"pair-{index}", "valid": True,
+                    "run_a_id": f"null-{2 * index}",
+                    "run_b_id": f"null-{2 * index + 1}",
+                    "run_a_mean": 1.0, "run_b_mean": 0.99, "s_mean": 0.01,
+                    "run_a_cvar": 1.0, "run_b_cvar": 0.98, "s_cvar": 0.02,
+                    "run_a_max": 1.0, "run_b_max": 0.97, "s_max": 0.03,
+                }
+                for index in range(10)
+            ],
+            "null_effect_maxima": {
+                "s_mean": 0.01, "s_cvar": 0.02, "s_max": 0.03,
+            },
+            "deterministic_error": {
+                "epsilon_grid": 0.0, "epsilon_resample": 0.0,
+                "epsilon_det": 0.0,
+            },
+            "thresholds": {"tau_mean": 0.01, "tau_cvar": 0.02, "tau_max": 0.03},
+        }
+        calibration_path.write_text(json.dumps(calibration_payload))
+        manifest_path.write_text(json.dumps(manifest))
+        payload = {
+            "schema_version": preflight.SCHEMA, "run_id": "run-1",
+            "manifest_path": str(manifest_path), "export_dir": str(export),
+            "bag_path": str(bag),
+        }
+        with mock.patch.object(
+                preflight, "read_bag_provenance", return_value=([payload], "")):
+            result = preflight.validate_bundle(
+                export, bag, metrics_only=False, lambda_value=0.00001,
+                calibration_path=calibration_path)
+        self.assertFalse(result["passed"])
+        self.assertTrue(any("calibration" in error.lower() for error in result["errors"]))
+
+        digest = __import__("hashlib").sha256(calibration_path.read_bytes()).hexdigest()
+        manifest["p1.formal_calibration"] = {
+            "calibration_id": "cal-1", "path": str(calibration_path),
+            "sha256": digest,
+        }
+        manifest_path.write_text(json.dumps(manifest))
+        with mock.patch.object(
+                preflight, "read_bag_provenance", return_value=([payload], "")):
+            result = preflight.validate_bundle(
+                export, bag, metrics_only=False, lambda_value=0.00001,
+                calibration_path=calibration_path)
+        self.assertTrue(result["passed"], result["errors"])
+
+        calibration_payload["generated_at_epoch_s"] = provenance["process_start_epoch_s"] + 1.0
+        calibration_path.write_text(json.dumps(calibration_payload))
+        manifest["p1.formal_calibration"]["sha256"] = __import__("hashlib").sha256(
+            calibration_path.read_bytes()).hexdigest()
+        manifest_path.write_text(json.dumps(manifest))
+        with mock.patch.object(
+                preflight, "read_bag_provenance", return_value=([payload], "")):
+            result = preflight.validate_bundle(
+                export, bag, metrics_only=False, lambda_value=0.00001,
+                calibration_path=calibration_path)
+        self.assertFalse(result["passed"])
+        self.assertTrue(any("before formal run" in error for error in result["errors"]))
+
+    def test_formal_p1_preflight_without_calibration_fails_closed(self):
+        root, export, bag = self.make_bundle()
+        self.addCleanup(root.cleanup)
+        manifest_path = export / "test_planner_manifest.json"
+        manifest = json.loads(manifest_path.read_text())
+        manifest.update({"record_bag": True, "run_duration_s": 90.0})
+        manifest_path.write_text(json.dumps(manifest))
+        payload = {
+            "schema_version": preflight.SCHEMA, "run_id": "run-1",
+            "manifest_path": str(manifest_path), "export_dir": str(export),
+            "bag_path": str(bag),
+        }
+        with mock.patch.object(
+                preflight, "read_bag_provenance", return_value=([payload], "")):
+            result = preflight.validate_bundle(
+                export, bag, metrics_only=False, lambda_value=0.00001)
+        self.assertFalse(result["passed"])
+        self.assertTrue(any(
+            "pre-frozen calibration" in error for error in result["errors"]))
+
 
 if __name__ == "__main__":
     unittest.main()

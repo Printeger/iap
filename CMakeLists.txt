@@ -579,6 +579,9 @@ if(DEFINED ENV{ROS_VERSION})
       scripts/dev_planner/verify_planner_recorder_smoke.py
       scripts/dev_planner/verify_safety_planner_evidence_bundle.py
       scripts/dev_planner/analyze_p1_candidate_diagnostic_smoke.py
+      scripts/dev_planner/analyze_safety_planner_run.py
+      scripts/dev_planner/calibrate_p1_formal_tolerances.py
+      scripts/dev_planner/p1_formal_metrics.py
       scripts/test_predictor_validator.py
       scripts/dev_predictor/analyze_predictor_system_e1.py
       scripts/dev_predictor/analyze_predictor_system_e2.py
@@ -652,6 +655,14 @@ if(DEFINED ENV{ROS_VERSION})
       add_test(
         NAME test_analyze_p1_pre_admission_smoke
         COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test/test_analyze_p1_pre_admission_smoke.py
+      )
+      add_test(
+        NAME test_p1_formal_metrics
+        COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test/test_p1_formal_metrics.py
+      )
+      add_test(
+        NAME test_calibrate_p1_formal_tolerances
+        COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test/test_calibrate_p1_formal_tolerances.py
       )
     endif()
     ament_export_include_directories(include ${EIGEN3_INCLUDE_DIR} ${OpenCV_INCLUDE_DIRS})

@@ -372,6 +372,7 @@ def run_gate(
     p1_2_profile_missing=False,
     baseline_profile_missing=False,
     risk_scene_alignment=None,
+    effectiveness_conclusive=True,
 ):
     manifest = p1_2_manifest() if manifest is None else manifest
     validator = {"passed": True} if validator is None else validator
@@ -436,11 +437,96 @@ def run_gate(
         inconclusive,
         reference_p0_health_summary=analyzer.summarize_p0_health(p0_rows),
         reference_p0_health_rows=p0_rows,
+        effectiveness_conclusive=effectiveness_conclusive,
     )
     return gates, failures, inconclusive, risk_comparison
 
 
 class P1_2AnalyzerTest(unittest.TestCase):
+    def test_formal_numerical_residual_overrun_is_inconclusive(self):
+        current = accepted_profile_rows(0.0, c_pi=1.0)
+        reference = accepted_profile_rows(
+            5.0, c_pi=2.0, applied_to_objective=0, metrics_only=1)
+        comparison = analyzer.compare_p1_2_risk_profiles(
+            bspline_rows(0.0), bspline_rows(5.0), cloud_rows(0.0), cloud_rows(5.0),
+            p0_resolution_m=0.75, p1_2_accepted_profile_rows=current,
+            p1_1_accepted_profile_rows=reference,
+        )
+        def corners(rows):
+            return [{
+                "phase": "accepted", "sample_index": row["sample_index"],
+                "planning_attempt_id": row["planning_attempt_id"],
+                "candidate_id": row["candidate_id"],
+                "snapshot_generation_id": row["snapshot_generation_id"],
+                "query_base_time_s": row["query_base_time_s"],
+                "temporal_weight": 1.0, "corner_weight": 1.0,
+                "c_pi": row["c_pi"],
+            } for row in rows]
+        calibration_payload = {
+            "p0": {"resolution_m": 0.75, "horizons_s": [0.0, 0.5, 1.0]},
+            "deterministic_error": {"epsilon_grid": 0.0, "epsilon_resample": 0.0},
+        }
+        evidence = analyzer.p1_formal_numerical_evidence(
+            comparison, current, reference, corners(current), corners(reference),
+            p1_2_manifest(), p1_1_reference_manifest(), calibration_payload,
+        )
+        self.assertTrue(evidence["passed"], evidence)
+
+        bad_corners = corners(current)
+        bad_corners[0]["c_pi"] = 1.1
+        evidence = analyzer.p1_formal_numerical_evidence(
+            comparison, current, reference, bad_corners, corners(reference),
+            p1_2_manifest(), p1_1_reference_manifest(), calibration_payload,
+        )
+        self.assertFalse(evidence["passed"])
+        self.assertTrue(any(
+            "corner reconstruction residual" in reason
+            for reason in evidence["inconclusive_reasons"]
+        ))
+
+        resampling_overrun = dict(comparison)
+        resampling_overrun["epsilon_resample"] = 0.01
+        evidence = analyzer.p1_formal_numerical_evidence(
+            resampling_overrun, current, reference, corners(current), corners(reference),
+            p1_2_manifest(), p1_1_reference_manifest(), calibration_payload,
+        )
+        self.assertTrue(any(
+            "resampling residual" in reason
+            for reason in evidence["inconclusive_reasons"]
+        ))
+
+        sparse = [dict(row) for row in current]
+        sparse[100]["x"] = sparse[99]["x"] + 1.0
+        evidence = analyzer.p1_formal_numerical_evidence(
+            comparison, sparse, reference, corners(sparse), corners(reference),
+            p1_2_manifest(), p1_1_reference_manifest(), calibration_payload,
+        )
+        self.assertTrue(any(
+            "sampling is insufficient" in reason
+            for reason in evidence["inconclusive_reasons"]
+        ))
+
+    def test_formal_mean_and_cvar_improvements_must_strictly_exceed_thresholds(self):
+        reference = accepted_profile_rows(
+            5.0, c_pi=1.0, applied_to_objective=0, metrics_only=1)
+        equal = analyzer.compare_p1_2_risk_profiles(
+            bspline_rows(0.0), bspline_rows(5.0), cloud_rows(0.0), cloud_rows(5.0),
+            p0_resolution_m=0.75,
+            p1_2_accepted_profile_rows=accepted_profile_rows(0.0, c_pi=0.9),
+            p1_1_accepted_profile_rows=reference,
+            formal_thresholds={"tau_mean": 0.1, "tau_cvar": 0.1, "tau_max": 0.0},
+        )
+        self.assertFalse(equal["formal_effectiveness"]["passed"])
+
+        strict = analyzer.compare_p1_2_risk_profiles(
+            bspline_rows(0.0), bspline_rows(5.0), cloud_rows(0.0), cloud_rows(5.0),
+            p0_resolution_m=0.75,
+            p1_2_accepted_profile_rows=accepted_profile_rows(0.0, c_pi=0.899),
+            p1_1_accepted_profile_rows=reference,
+            formal_thresholds={"tau_mean": 0.1, "tau_cvar": 0.1, "tau_max": 0.0},
+        )
+        self.assertTrue(strict["formal_effectiveness"]["passed"])
+
     def test_p0_startup_boundary_excludes_only_pre_activation_rows(self):
         rows = [
             p0_row(index, stamp=float(index), ready=False, stale=True,
@@ -798,7 +884,12 @@ class P1_2AnalyzerTest(unittest.TestCase):
             p1_1_accepted_profile_rows=reference,
         )
 
-        self.assertEqual(comparison["comparison_mode"], "terminal_common_arc_window")
+        self.assertEqual(
+            comparison["comparison_mode"],
+            "derived_fixed_200_common_terminal_arc",
+        )
+        self.assertEqual(len(comparison["p1_2_derived_fixed_200_profile"]), 200)
+        self.assertIsNotNone(comparison["current_cvar"])
         self.assertLess(comparison["current_mean"], comparison["reference_mean"])
         self.assertLess(comparison["current_max"], comparison["reference_max"])
         self.assertTrue(comparison["risk_reduced"], comparison)
@@ -835,7 +926,7 @@ class P1_2AnalyzerTest(unittest.TestCase):
         self.assertEqual(risk["comparison_metric"], "c_pi")
         self.assertEqual(
             risk["risk_source"],
-            "accepted_trajectory_profile_csv_terminal_common_arc",
+            "accepted_trajectory_profile_csv_derived_fixed_200_common_terminal_arc",
         )
 
     def test_manifest_rejects_metrics_only_wrong_lambda_disabled_p1_and_enabled_later_phases(self):
@@ -1086,6 +1177,38 @@ class P1_2AnalyzerTest(unittest.TestCase):
             analyzer.next_debug_branch("FAIL", ["weighted_f_integrity_max is not positive"], [], "P1-2"),
             "FAIL -> lambda/gradient debug",
         )
+
+    def test_numerical_insufficiency_has_inconclusive_final_status(self):
+        self.assertEqual(
+            analyzer.non_blocked_analysis_status(
+                p1_2_phase=True,
+                p1_2_passed=False,
+                failures=[],
+                inconclusive=["resampling residual exceeds frozen calibration bound"],
+            ),
+            "INCONCLUSIVE",
+        )
+        self.assertEqual(
+            analyzer.non_blocked_analysis_status(
+                p1_2_phase=True,
+                p1_2_passed=False,
+                failures=["formal effectiveness failed"],
+                inconclusive=["resampling residual exceeds frozen calibration bound"],
+            ),
+            "FAIL",
+        )
+
+        current = accepted_profile_rows(0.0, c_pi=1.0)
+        reference = accepted_profile_rows(
+            5.0, c_pi=1.0, applied_to_objective=0, metrics_only=1)
+        _, failures, _, _ = run_gate(
+            p1_2_profile=current,
+            baseline_profile=reference,
+            effectiveness_conclusive=False,
+        )
+        self.assertFalse(any(
+            "noise-significant mean/CVaR" in failure for failure in failures
+        ), failures)
 
     def test_required_figure_filenames_are_exact(self):
         self.assertEqual(

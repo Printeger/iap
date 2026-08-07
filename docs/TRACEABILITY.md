@@ -1,5 +1,11 @@
 # Traceability Matrix (IAP)
 
+## 2026-08-07 P1 pre-frozen independent-run formal tolerance
+
+| Req ID | Evidence | Verification | Status |
+|---|---|---|---|
+| IAP-RQ-320 / IAP-RQ-400 / IAP-RQ-410 | Ten serial P1-1/P1-1 pairs; derived common-terminal-arc fixed-200 mean/smooth-CVaR/exact-max; corner and resampling error budget; formal manifest ID/SHA/pre-run binding. Production same-snapshot candidate/replacement exact-max gates and P5 authority are unchanged. | `scripts/dev_planner/{p1_formal_metrics.py,calibrate_p1_formal_tolerances.py,verify_safety_planner_evidence_bundle.py,analyze_safety_planner_run.py}`, `launch/test_planner.launch.py`, ADR 0003, `test/{test_p1_formal_metrics.py,test_calibrate_p1_formal_tolerances.py,test_verify_safety_planner_evidence_bundle.py,test_analyze_safety_planner_run_p1_2.py,test_test_planner_launch.py}` | **IMPLEMENTED; 10-pair clean calibration and wholly fresh diagnostic/formal runs pending; old pairs prohibited** |
+
 ## 2026-08-06 P1 soft-objective / hard-acceptance incompatibility
 
 | Req ID | Evidence | Verification | Status |

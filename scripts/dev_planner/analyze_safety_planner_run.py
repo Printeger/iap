@@ -7,6 +7,7 @@ import argparse
 from collections import Counter
 import csv
 import hashlib
+import importlib.util
 import json
 import math
 import os
@@ -22,6 +23,14 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import numpy as np
+
+
+_P1_FORMAL_METRICS_PATH = Path(__file__).with_name("p1_formal_metrics.py")
+_P1_FORMAL_METRICS_SPEC = importlib.util.spec_from_file_location(
+    "p1_formal_metrics", _P1_FORMAL_METRICS_PATH)
+p1_formal_metrics = importlib.util.module_from_spec(_P1_FORMAL_METRICS_SPEC)
+assert _P1_FORMAL_METRICS_SPEC.loader is not None
+_P1_FORMAL_METRICS_SPEC.loader.exec_module(p1_formal_metrics)
 
 
 CORE_TOPIC_EXPECTATIONS = {
@@ -2131,6 +2140,7 @@ def compare_p1_2_risk_profiles(
     p1_2_context_info: dict[str, Any] | None = None,
     p1_1_context_info: dict[str, Any] | None = None,
     stale_timeout_s: float | None = None,
+    formal_thresholds: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     p1_2_path = final_nonempty_bspline_path_xyz(p1_2_rows)
     p1_1_path = final_nonempty_bspline_path_xyz(p1_1_rows)
@@ -2184,55 +2194,51 @@ def compare_p1_2_risk_profiles(
     p1_1_aligned = p1_terminal_arc_profile(
         p1_1_profile, common_terminal_arc_m
     ) if common_terminal_arc_m is not None else {}
-    comparison_metric = (
-        "c_pi"
-        if (
-            p1_2_aligned.get("c_pi_mean") is not None
-            and p1_2_aligned.get("c_pi_max") is not None
-            and p1_1_aligned.get("c_pi_mean") is not None
-            and p1_1_aligned.get("c_pi_max") is not None
+    fixed_comparison: dict[str, Any] = {}
+    comparison_error = ""
+    try:
+        fixed_comparison = p1_formal_metrics.compare_profiles(
+            p1_2_profile.get("samples", []) or [],
+            p1_1_profile.get("samples", []) or [],
         )
-        else None
+    except ValueError as exc:
+        comparison_error = str(exc)
+    comparison_metric = "c_pi" if fixed_comparison else None
+    current_mean = finite_float(fixed_comparison.get("current_mean"))
+    current_cvar = finite_float(fixed_comparison.get("current_cvar"))
+    current_max = finite_float(fixed_comparison.get("current_max"))
+    reference_mean = finite_float(fixed_comparison.get("reference_mean"))
+    reference_cvar = finite_float(fixed_comparison.get("reference_cvar"))
+    reference_max = finite_float(fixed_comparison.get("reference_max"))
+    thresholds = formal_thresholds or {
+        "tau_mean": 0.0, "tau_cvar": 0.0, "tau_max": 0.0,
+    }
+    effectiveness = (
+        p1_formal_metrics.evaluate_effectiveness(
+            current_mean=current_mean,
+            reference_mean=reference_mean,
+            current_cvar=current_cvar,
+            reference_cvar=reference_cvar,
+            current_max=current_max,
+            reference_max=reference_max,
+            thresholds=thresholds,
+        )
+        if all(value is not None for value in (
+            current_mean, current_cvar, current_max,
+            reference_mean, reference_cvar, reference_max,
+        ))
+        else {"passed": False}
     )
-    current_mean = (
-        finite_float(p1_2_aligned.get(f"{comparison_metric}_mean"))
-        if comparison_metric
-        else None
-    )
-    current_max = (
-        finite_float(p1_2_aligned.get(f"{comparison_metric}_max"))
-        if comparison_metric
-        else None
-    )
-    reference_mean = (
-        finite_float(p1_1_aligned.get(f"{comparison_metric}_mean"))
-        if comparison_metric
-        else None
-    )
-    reference_max = (
-        finite_float(p1_1_aligned.get(f"{comparison_metric}_max"))
-        if comparison_metric
-        else None
-    )
-    risk_reduced = (
-        current_mean is not None
-        and current_max is not None
-        and reference_mean is not None
-        and reference_max is not None
-        and current_mean < reference_mean
-        and current_max < reference_max
-    )
+    risk_reduced = bool(effectiveness.get("passed"))
     p1_2_match_ok = (
-        int(p1_2_profile.get("matched_sample_count", 0) or 0)
-        >= P1_2_MIN_RISK_MATCH_COUNT
-        and float(p1_2_profile.get("match_ratio", 0.0) or 0.0)
-        >= P1_2_MIN_RISK_MATCH_RATIO
+        bool(p1_2_profile.get("format_valid"))
+        and int(p1_2_profile.get("matched_sample_count", 0) or 0) == 200
+        and float(p1_2_profile.get("match_ratio", 0.0) or 0.0) == 1.0
     )
     p1_1_match_ok = (
-        int(p1_1_profile.get("matched_sample_count", 0) or 0)
-        >= P1_2_MIN_RISK_MATCH_COUNT
-        and float(p1_1_profile.get("match_ratio", 0.0) or 0.0)
-        >= P1_2_MIN_RISK_MATCH_RATIO
+        bool(p1_1_profile.get("format_valid"))
+        and int(p1_1_profile.get("matched_sample_count", 0) or 0) == 200
+        and float(p1_1_profile.get("match_ratio", 0.0) or 0.0) == 1.0
     )
     return {
         "p1_2_path_xyz": [
@@ -2254,9 +2260,21 @@ def compare_p1_2_risk_profiles(
         "p1_2_cloud_context": p1_cloud_plot_context(p1_2_cloud_rows),
         "p1_1_cloud_context": p1_cloud_plot_context(p1_1_cloud_rows),
         "trajectory_stability": stability,
-        "risk_source": "accepted_trajectory_profile_csv_terminal_common_arc",
-        "comparison_mode": "terminal_common_arc_window",
-        "common_terminal_arc_length_m": common_terminal_arc_m,
+        "risk_source": "accepted_trajectory_profile_csv_derived_fixed_200_common_terminal_arc",
+        "comparison_mode": fixed_comparison.get(
+            "comparison_mode", "derived_fixed_200_common_terminal_arc"
+        ),
+        "comparison_error": comparison_error,
+        "derived_lattice": True,
+        "fixed_sample_count": 200,
+        "common_terminal_arc_length_m": fixed_comparison.get(
+            "common_terminal_arc_length_m", common_terminal_arc_m
+        ),
+        "p1_2_derived_fixed_200_profile": fixed_comparison.get("current_lattice", []),
+        "p1_1_derived_fixed_200_profile": fixed_comparison.get("reference_lattice", []),
+        "epsilon_resample": fixed_comparison.get("epsilon_resample"),
+        "current_resampling_residual": fixed_comparison.get("current_resampling_residual"),
+        "reference_resampling_residual": fixed_comparison.get("reference_resampling_residual"),
         "current_full_profile_mean": p1_2_profile.get("c_pi_mean"),
         "current_full_profile_max": p1_2_profile.get("c_pi_max"),
         "reference_full_profile_mean": p1_1_profile.get("c_pi_mean"),
@@ -2268,14 +2286,17 @@ def compare_p1_2_risk_profiles(
         "reference_profile_missing": bool(p1_1_profile.get("missing")),
         "comparison_metric": comparison_metric,
         "current_mean": current_mean,
+        "current_cvar": current_cvar,
         "current_max": current_max,
         "reference_mean": reference_mean,
+        "reference_cvar": reference_cvar,
         "reference_max": reference_max,
+        "formal_effectiveness": effectiveness,
         "risk_reduced": bool(risk_reduced),
         "p1_2_match_ok": bool(p1_2_match_ok),
         "p1_1_match_ok": bool(p1_1_match_ok),
-        "min_matched_sample_count": P1_2_MIN_RISK_MATCH_COUNT,
-        "min_match_ratio": P1_2_MIN_RISK_MATCH_RATIO,
+        "min_matched_sample_count": 200,
+        "min_match_ratio": 1.0,
     }
 
 
@@ -8373,8 +8394,8 @@ def p1_2_cause_exclusion_rows(gates: dict[str, Any]) -> list[dict[str, Any]]:
             "count": p5_rviz_count,
         },
         {
-            "cause": "risk_profile_not_reduced",
-            "count": 0 if gates.get("risk_profile_reduced") else 1,
+            "cause": "formal_effectiveness_not_proven",
+            "count": 0 if gates.get("risk_effectiveness_passed") else 1,
         },
         {
             "cause": "trajectory_stability_failure",
@@ -8497,6 +8518,96 @@ def validate_p1_artifact_provenance(
             "git_commit": provenance.get("git_commit"), "install_prefix": install_prefix}
 
 
+def _accepted_corner_rows(
+    profile_rows: list[dict[str, Any]],
+    corner_rows: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    if not profile_rows:
+        return []
+    first = profile_rows[0]
+    keys = (
+        "planning_attempt_id", "candidate_id", "snapshot_generation_id",
+        "query_base_time_s",
+    )
+    identity = tuple(str(first.get(key, "")).strip() for key in keys)
+    return [
+        row for row in corner_rows
+        if str(row.get("phase", "")).strip() == "accepted"
+        and tuple(str(row.get(key, "")).strip() for key in keys) == identity
+    ]
+
+
+def p1_formal_numerical_evidence(
+    risk_comparison: dict[str, Any],
+    current_profile_rows: list[dict[str, Any]],
+    reference_profile_rows: list[dict[str, Any]],
+    current_corner_rows: list[dict[str, Any]],
+    reference_corner_rows: list[dict[str, Any]],
+    current_manifest: dict[str, Any],
+    reference_manifest: dict[str, Any],
+    calibration: dict[str, Any],
+) -> dict[str, Any]:
+    """Apply fail-closed sampling and deterministic-residual sufficiency gates."""
+    reasons: list[str] = []
+    p0 = calibration.get("p0", {}) or {}
+    resolution = finite_float(p0.get("resolution_m"))
+    horizons = p0.get("horizons_s", []) or []
+    if resolution is None:
+        return {"passed": False, "inconclusive_reasons": [
+            "calibration P0 resolution is unavailable"
+        ]}
+    try:
+        current_sampling = p1_formal_metrics.sampling_sufficiency(
+            current_profile_rows, resolution_m=resolution, horizons_s=horizons)
+        reference_sampling = p1_formal_metrics.sampling_sufficiency(
+            reference_profile_rows, resolution_m=resolution, horizons_s=horizons)
+    except ValueError as exc:
+        return {"passed": False, "inconclusive_reasons": [
+            f"formal profile sampling is invalid: {exc}"
+        ]}
+    if not current_sampling.get("passed"):
+        reasons.append("P1-2 raw spatial/temporal sampling is insufficient")
+    if not reference_sampling.get("passed"):
+        reasons.append("P1-1 raw spatial/temporal sampling is insufficient")
+    current_grid = p1_formal_metrics.corner_reconstruction_residual(
+        current_profile_rows,
+        _accepted_corner_rows(current_profile_rows, current_corner_rows),
+    )
+    reference_grid = p1_formal_metrics.corner_reconstruction_residual(
+        reference_profile_rows,
+        _accepted_corner_rows(reference_profile_rows, reference_corner_rows),
+    )
+    error_budget = calibration.get("deterministic_error", {}) or {}
+    epsilon_grid_bound = finite_float(error_budget.get("epsilon_grid"))
+    epsilon_resample_bound = finite_float(error_budget.get("epsilon_resample"))
+    if not current_grid.get("complete") or not reference_grid.get("complete"):
+        reasons.append("formal accepted-phase corner reconstruction is incomplete")
+    elif (
+        epsilon_grid_bound is None
+        or float(current_grid["epsilon_grid"]) > epsilon_grid_bound + 1.0e-12
+        or float(reference_grid["epsilon_grid"]) > epsilon_grid_bound + 1.0e-12
+    ):
+        reasons.append("formal corner reconstruction residual exceeds frozen calibration bound")
+    epsilon_resample = finite_float(risk_comparison.get("epsilon_resample"))
+    if (
+        epsilon_resample is None
+        or epsilon_resample_bound is None
+        or epsilon_resample > epsilon_resample_bound + 1.0e-12
+    ):
+        reasons.append("formal fixed-200 resampling residual exceeds frozen calibration bound")
+    return {
+        "passed": not reasons,
+        "inconclusive_reasons": reasons,
+        "current_sampling": current_sampling,
+        "reference_sampling": reference_sampling,
+        "current_corner_reconstruction": current_grid,
+        "reference_corner_reconstruction": reference_grid,
+        "epsilon_grid_bound": epsilon_grid_bound,
+        "epsilon_resample": epsilon_resample,
+        "epsilon_resample_bound": epsilon_resample_bound,
+    }
+
+
 def validate_p1_2_hard_gates(
     manifest: dict[str, Any],
     validator_summary: dict[str, Any],
@@ -8524,6 +8635,7 @@ def validate_p1_2_hard_gates(
     p1_candidate_optimization_rows: list[dict[str, Any]] | None = None,
     p1_candidate_optimization_summary: dict[str, Any] | None = None,
     p1_v4_sidecar_rows: dict[str, list[dict[str, Any]]] | None = None,
+    effectiveness_conclusive: bool = True,
 ) -> dict[str, Any]:
     manifest_gates = p1_2_manifest_gate_values(manifest)
     reference_manifest_gates = p1_2_reference_manifest_gate_values(
@@ -8568,6 +8680,7 @@ def validate_p1_2_hard_gates(
     expected_lambda = finite_float(manifest.get("p1.lambda_integrity"))
     stale_timeout_s = finite_float(manifest.get("p0.stale_timeout_s"))
     risk_scene_alignment = risk_comparison.get("risk_scene_alignment", {}) or {}
+    formal_effectiveness = risk_comparison.get("formal_effectiveness", {}) or {}
     # Keep direct unit callers that predate the candidate artifact focused on
     # their original gate.  Production always supplies the artifact and is
     # fail-closed when it is missing or incomplete.
@@ -8789,8 +8902,8 @@ def validate_p1_2_hard_gates(
         and finite_float(profile_value(p1_1_metadata, "lambda_integrity")) == expected_lambda,
         "accepted_profile_missing": bool(risk_comparison.get("accepted_profile_missing")),
         "accepted_profiles_present": not bool(risk_comparison.get("accepted_profile_missing")),
-        "risk_match_min_count": P1_2_MIN_RISK_MATCH_COUNT,
-        "risk_match_min_ratio": P1_2_MIN_RISK_MATCH_RATIO,
+        "risk_match_min_count": 200,
+        "risk_match_min_ratio": 1.0,
         "p1_2_risk_match_ok": bool(risk_comparison.get("p1_2_match_ok")),
         "p1_1_risk_match_ok": bool(risk_comparison.get("p1_1_match_ok")),
         "risk_comparison_metric": risk_comparison.get("comparison_metric"),
@@ -8800,9 +8913,25 @@ def validate_p1_2_hard_gates(
         ),
         "risk_metric_available": bool(risk_comparison.get("comparison_metric")),
         "risk_current_mean": risk_comparison.get("current_mean"),
+        "risk_current_cvar": risk_comparison.get("current_cvar"),
         "risk_current_max": risk_comparison.get("current_max"),
         "risk_reference_mean": risk_comparison.get("reference_mean"),
+        "risk_reference_cvar": risk_comparison.get("reference_cvar"),
         "risk_reference_max": risk_comparison.get("reference_max"),
+        "risk_mean_improvement": formal_effectiveness.get("mean_improvement"),
+        "risk_cvar_improvement": formal_effectiveness.get("cvar_improvement"),
+        "risk_max_regression": formal_effectiveness.get("max_regression"),
+        "risk_tau_mean": formal_effectiveness.get("tau_mean"),
+        "risk_tau_cvar": formal_effectiveness.get("tau_cvar"),
+        "risk_tau_max": formal_effectiveness.get("tau_max"),
+        "risk_mean_remaining_margin": formal_effectiveness.get("mean_remaining_margin"),
+        "risk_cvar_remaining_margin": formal_effectiveness.get("cvar_remaining_margin"),
+        "risk_max_remaining_margin": formal_effectiveness.get("max_remaining_margin"),
+        "risk_mean_significant": bool(formal_effectiveness.get("mean_significant")),
+        "risk_cvar_significant": bool(formal_effectiveness.get("cvar_significant")),
+        "risk_max_regression_bounded": bool(
+            formal_effectiveness.get("max_regression_bounded")),
+        "risk_effectiveness_passed": bool(formal_effectiveness.get("passed")),
         "risk_profile_reduced": bool(risk_comparison.get("risk_reduced")),
         "trajectory_stability": trajectory_stability,
         "trajectory_stability_passed": bool(trajectory_stability.get("passed")),
@@ -8991,15 +9120,17 @@ def validate_p1_2_hard_gates(
             f"{gates['p1_1_risk_matched_sample_count']}/"
             f"{gates['p1_1_risk_match_ratio']:.3f})"
         )
-    if not gates["risk_metric_available"]:
-        failures.append("P1-2 risk metric unavailable: accepted profile c_pi could not be sampled")
-    elif not gates["risk_profile_reduced"]:
-        failures.append(
-            "P1-2 trajectory risk profile did not strictly reduce vs P1-1 reference "
-            f"({gates['risk_comparison_metric']}: mean "
-            f"{gates['risk_current_mean']} vs {gates['risk_reference_mean']}, "
-            f"max {gates['risk_current_max']} vs {gates['risk_reference_max']})"
-        )
+    if effectiveness_conclusive:
+        if not gates["risk_metric_available"]:
+            failures.append("P1-2 risk metric unavailable: accepted profile c_pi could not be sampled")
+        elif not gates["risk_effectiveness_passed"]:
+            failures.append(
+                "P1-2 trajectory risk profile did not prove noise-significant mean/CVaR "
+                "improvement with bounded exact-max regression "
+                f"(mean improvement/tau {gates['risk_mean_improvement']}/{gates['risk_tau_mean']}, "
+                f"CVaR improvement/tau {gates['risk_cvar_improvement']}/{gates['risk_tau_cvar']}, "
+                f"max regression/tau {gates['risk_max_regression']}/{gates['risk_tau_max']})"
+            )
     if not gates["trajectory_stability_passed"]:
         failures.append("P1-2 trajectory stability gate failed")
     if not gates["risk_scene_overlay_available"]:
@@ -14607,15 +14738,13 @@ def plot_p1_2_risk_profile_vs_p1_1(
     axes[0].grid(True, axis="y", alpha=0.25)
 
     plotted = False
-    for label, profile, color in (
-        ("P1-2", p1_2_profile, "#2563eb"),
-        ("P1-1 ref", p1_1_profile, "#f97316"),
+    for label, samples, color in (
+        ("P1-2", comparison.get("p1_2_derived_fixed_200_profile", []), "#2563eb"),
+        ("P1-1 ref", comparison.get("p1_1_derived_fixed_200_profile", []), "#f97316"),
     ):
-        samples = profile.get("samples", []) or []
         values = [
             finite_float(row.get(metric))
             for row in samples
-            if int(row.get("matched", 0) or 0) == 1
         ]
         values = [value for value in values if value is not None]
         if values:
@@ -14641,8 +14770,8 @@ def plot_p1_2_risk_profile_vs_p1_1(
             fontsize=12,
         )
     axes[1].set_title(
-        "Terminal-window risk reduced: "
-        f"{comparison.get('risk_reduced')} | match P1-2/P1-1: "
+        "Derived fixed-200 formal effectiveness: "
+        f"{(comparison.get('formal_effectiveness', {}) or {}).get('passed')} | match P1-2/P1-1: "
         f"{p1_2_profile.get('match_ratio')} / {p1_1_profile.get('match_ratio')}"
     )
     axes[1].grid(True, alpha=0.25)
@@ -14925,9 +15054,15 @@ def plot_p1_2_validation_summary(
         f"{gates.get('p1_1_risk_matched_sample_count')}/"
         f"{gates.get('p1_1_risk_match_ratio')}",
         f"risk metric: {gates.get('risk_comparison_metric')}",
-        f"risk mean/max P1-2: {gates.get('risk_current_mean')} / {gates.get('risk_current_max')}",
-        f"risk mean/max P1-1: {gates.get('risk_reference_mean')} / {gates.get('risk_reference_max')}",
-        f"risk reduced: {gates.get('risk_profile_reduced')}",
+        f"risk mean/CVaR/max P1-2: {gates.get('risk_current_mean')} / "
+        f"{gates.get('risk_current_cvar')} / {gates.get('risk_current_max')}",
+        f"risk mean/CVaR/max P1-1: {gates.get('risk_reference_mean')} / "
+        f"{gates.get('risk_reference_cvar')} / {gates.get('risk_reference_max')}",
+        f"improvement mean/CVaR; max regression: {gates.get('risk_mean_improvement')} / "
+        f"{gates.get('risk_cvar_improvement')} / {gates.get('risk_max_regression')}",
+        f"frozen tau mean/CVaR/max: {gates.get('risk_tau_mean')} / "
+        f"{gates.get('risk_tau_cvar')} / {gates.get('risk_tau_max')}",
+        f"formal effectiveness: {gates.get('risk_effectiveness_passed')}",
         f"trajectory stability: {gates.get('trajectory_stability_passed')}",
         f"P5 contamination zero: {gates.get('p5_contamination_zero')}",
     ]
@@ -15800,6 +15935,7 @@ def plot_p1_2_replan_load_correlation(
 
 P1_2_HARD_GATE_ROWS = [
     ("manifest contract", ("manifest_present", "manifest_safety_profile_p1", "manifest_p0_enabled", "manifest_p1_enabled", "manifest_p1_metrics_only_false", "manifest_p1_use_integrity_cost", "manifest_p1_lambda_integrity_ok", "manifest_p0_stale_timeout_ok", "manifest_p2_p5_disabled"), ("manifest_p1_lambda_integrity", "manifest_p1_lambda_integrity_expected", "manifest_p0_stale_timeout_s")),
+    ("pre-frozen calibration provenance and numerical sufficiency", ("formal_calibration_current_bound", "formal_calibration_reference_bound", "formal_calibration_pair_identity_ok", "formal_numerical_sufficiency"), ("formal_calibration_id", "formal_calibration_sha256", "formal_numerical_evidence")),
     ("timebase alignment", ("timebase_alignment_proven", "timebase_span_bounded", "timebase_memory_bounded"), ("timebase_mapping_mode", "timebase_bin_count", "timebase_estimated_bin_bytes", "timebase_reasons")),
     ("generation singleflight", ("generation_singleflight_passed",), ("max_admission_per_generation", "max_acquisition_per_generation", "max_optimizer_start_per_generation", "generation_singleflight_duplicates")),
     ("validator", ("validator_summary_present", "validator_passed"), ()),
@@ -15819,7 +15955,7 @@ P1_2_HARD_GATE_ROWS = [
     ("accepted profile context", ("p1_2_accepted_profile_context_ok", "p1_1_accepted_profile_context_ok", "p1_2_planning_context_timeline_ok", "p1_1_planning_context_timeline_ok"), ("p1_2_context_age_s", "p1_1_context_age_s", "stale_timeout_s")),
     ("accepted profile objective metadata", ("p1_2_profile_objective_metadata_ok", "p1_1_profile_objective_metadata_ok"), ()),
     ("strict accepted-profile coverage", ("p1_2_risk_match_ok", "p1_1_risk_match_ok"), ("p1_2_risk_matched_sample_count", "p1_2_risk_match_ratio", "p1_1_risk_matched_sample_count", "p1_1_risk_match_ratio", "risk_match_min_count", "risk_match_min_ratio")),
-    ("strict c_pi mean/max reduction", ("risk_metric_available", "risk_profile_reduced"), ("risk_comparison_metric", "risk_comparison_mode", "risk_common_terminal_arc_length_m", "risk_current_mean", "risk_reference_mean", "risk_current_max", "risk_reference_max")),
+    ("noise-significant mean/CVaR improvement and bounded exact-max regression", ("risk_metric_available", "risk_effectiveness_passed"), ("risk_comparison_metric", "risk_comparison_mode", "risk_common_terminal_arc_length_m", "risk_current_mean", "risk_reference_mean", "risk_current_cvar", "risk_reference_cvar", "risk_current_max", "risk_reference_max", "risk_mean_improvement", "risk_cvar_improvement", "risk_max_regression", "risk_tau_mean", "risk_tau_cvar", "risk_tau_max", "risk_mean_remaining_margin", "risk_cvar_remaining_margin", "risk_max_remaining_margin")),
     ("trajectory stability", ("trajectory_stability_passed",), ("trajectory_stability",)),
     ("recorded risk-scene alignment", ("risk_scene_overlay_available",), ("risk_scene_alignment_reasons",)),
     ("P5 isolation", ("p5_contamination_zero",), ("disabled_topic_counts",)),
@@ -16431,7 +16567,7 @@ def next_debug_branch(
             return P1_2_PASS_BRANCH
         # Do not send a recording/provenance failure to a numerical tuning
         # branch merely because an old report happened to mention lambda.
-        if "trajectory risk profile did not strictly reduce" in text:
+        if "did not prove noise-significant mean/cvar" in text:
             return P1_2_SELECTION_FAIL_BRANCH
         numerical_markers = (
             "weighted_f_integrity_max is not positive",
@@ -16524,6 +16660,20 @@ def next_debug_branch(
     if "risk_grid_health" in text or "unknown" in text or "stale" in text:
         return "debug_P0_risk_grid_health"
     return "debug_B0-1_baseline"
+
+
+def non_blocked_analysis_status(
+    *, p1_2_phase: bool, p1_2_passed: bool,
+    failures: list[str], inconclusive: list[str],
+) -> str:
+    """Resolve FAIL versus INCONCLUSIVE after scenario-blocked gates."""
+    if failures:
+        return "FAIL"
+    if inconclusive:
+        return "INCONCLUSIVE"
+    if p1_2_phase and not p1_2_passed:
+        return "FAIL"
+    return "PASS"
 
 
 def _analyze_impl(args: argparse.Namespace) -> dict[str, Any]:
@@ -17514,6 +17664,9 @@ def _analyze_impl(args: argparse.Namespace) -> dict[str, Any]:
     p1_2_reference_health_rows: list[dict[str, Any]] = []
     p1_2_reference_health_summary: dict[str, Any] = {"row_count": 0}
     p1_2_risk_comparison: dict[str, Any] = {}
+    p1_formal_calibration_current: dict[str, Any] = {}
+    p1_formal_calibration_reference: dict[str, Any] = {}
+    p1_formal_numerical: dict[str, Any] = {}
     p5_csv_artifacts: list[str] = []
     p5_figure_artifacts: list[str] = []
     p5_required_figures: list[Path] = []
@@ -17638,6 +17791,39 @@ def _analyze_impl(args: argparse.Namespace) -> dict[str, Any]:
             p1_2_reference_bspline_rows,
             source_summary=p1_2_reference_profile_summary,
         )
+        calibration_path_value = str(
+            getattr(args, "p1_calibration", "") or ""
+        ).strip()
+        if not calibration_path_value:
+            failures.append("P1-2 formal analysis requires --p1-calibration")
+        else:
+            p1_formal_calibration_current = (
+                p1_formal_metrics.validate_calibration_binding(
+                    calibration_path_value, manifest)
+            )
+            p1_formal_calibration_reference = (
+                p1_formal_metrics.validate_calibration_binding(
+                    calibration_path_value, baseline_manifest)
+            )
+            if not p1_formal_calibration_current.get("passed"):
+                failures.append(
+                    "P1-2 calibration binding failed: "
+                    + "; ".join(p1_formal_calibration_current.get("errors", []))
+                )
+            if not p1_formal_calibration_reference.get("passed"):
+                failures.append(
+                    "P1-2 P1-1 reference calibration binding failed: "
+                    + "; ".join(p1_formal_calibration_reference.get("errors", []))
+                )
+            if (
+                p1_formal_calibration_current.get("calibration_id")
+                != p1_formal_calibration_reference.get("calibration_id")
+                or p1_formal_calibration_current.get("sha256")
+                != p1_formal_calibration_reference.get("sha256")
+            ):
+                failures.append(
+                    "P1-2 formal pair does not bind one calibration ID/SHA256"
+                )
         current_context_preview = validate_p1_profile_context(
             p1_accepted_profile_summary,
             p1_accepted_profile_context_rows,
@@ -17733,7 +17919,40 @@ def _analyze_impl(args: argparse.Namespace) -> dict[str, Any]:
             p1_2_context_info=p1_accepted_profile_context_info,
             p1_1_context_info=p1_2_reference_context_info,
             stale_timeout_s=finite_float(manifest.get("p0.stale_timeout_s")),
+            formal_thresholds=(
+                (p1_formal_calibration_current.get("calibration", {}) or {}).get(
+                    "thresholds")
+                if p1_formal_calibration_current.get("passed")
+                and p1_formal_calibration_reference.get("passed")
+                else None
+            ),
         )
+        formal_calibration_payload = (
+            p1_formal_calibration_current.get("calibration", {}) or {}
+        )
+        reference_corner_rows = (
+            read_csv_rows(p1_v4_sidecar_path(
+                baseline_export_dir, baseline_manifest,
+                "p0.occupancy_query_evidence_path"))
+            if baseline_export_dir is not None else []
+        )
+        if formal_calibration_payload:
+            p1_formal_numerical = p1_formal_numerical_evidence(
+                p1_2_risk_comparison,
+                list(p1_accepted_profile_summary.get("samples", []) or []),
+                list(p1_2_reference_profile_summary.get("samples", []) or []),
+                list(p1_v4_sidecar_rows.get(
+                    "p0.occupancy_query_evidence_path", []) or []),
+                reference_corner_rows,
+                manifest,
+                baseline_manifest,
+                formal_calibration_payload,
+            )
+            inconclusive.extend(
+                "P1-2 " + reason
+                for reason in p1_formal_numerical.get(
+                    "inconclusive_reasons", [])
+            )
         p1_2_risk_comparison["p1_2_health_context"] = (
             p1_health_snapshot_context(health_rows)
         )
@@ -17772,6 +17991,8 @@ def _analyze_impl(args: argparse.Namespace) -> dict[str, Any]:
             p1_candidate_optimization_rows,
             p1_candidate_optimization_summary,
             p1_v4_sidecar_rows,
+            effectiveness_conclusive=not bool(
+                p1_formal_numerical.get("inconclusive_reasons")),
         )
         p1_2_timebase_alignment = normalize_p1_2_timebases(
             p1_planning_context_timeline_rows, health_rows, manifest
@@ -17786,6 +18007,26 @@ def _analyze_impl(args: argparse.Namespace) -> dict[str, Any]:
                 manifest.get("p1.max_candidates_per_attempt")) or 8))),
         )
         p1_2_gates.update({
+            "formal_calibration_current_bound": bool(
+                p1_formal_calibration_current.get("passed")),
+            "formal_calibration_reference_bound": bool(
+                p1_formal_calibration_reference.get("passed")),
+            "formal_calibration_pair_identity_ok": bool(
+                p1_formal_calibration_current.get("passed")
+                and p1_formal_calibration_reference.get("passed")
+                and p1_formal_calibration_current.get("calibration_id")
+                == p1_formal_calibration_reference.get("calibration_id")
+                and p1_formal_calibration_current.get("sha256")
+                == p1_formal_calibration_reference.get("sha256")),
+            "formal_numerical_sufficiency": bool(
+                p1_formal_numerical.get("passed")),
+            "formal_calibration_id": p1_formal_calibration_current.get(
+                "calibration_id"),
+            "formal_calibration_sha256": p1_formal_calibration_current.get(
+                "sha256"),
+            "formal_calibration_current": p1_formal_calibration_current,
+            "formal_calibration_reference": p1_formal_calibration_reference,
+            "formal_numerical_evidence": p1_formal_numerical,
             "timebase_alignment_proven": bool(
                 p1_2_timebase_alignment.get("causal_alignment_proven")
                 and p1_1_timebase_alignment.get("causal_alignment_proven")
@@ -17853,7 +18094,13 @@ def _analyze_impl(args: argparse.Namespace) -> dict[str, Any]:
             failures.append("P1-2 P1-1 reference artifact provenance failed: " + "; ".join(reference_provenance.get("errors", [])))
         if not pair_identity_ok:
             failures.append("P1-2 formal pair does not prove matched code/schema with distinct run IDs")
-        p1_2_gates["passed"] = bool(p1_2_gates.get("passed")) and pair_identity_ok
+        p1_2_gates["passed"] = bool(p1_2_gates.get("passed")) and all((
+            pair_identity_ok,
+            p1_2_gates.get("formal_calibration_current_bound"),
+            p1_2_gates.get("formal_calibration_reference_bound"),
+            p1_2_gates.get("formal_calibration_pair_identity_ok"),
+            p1_2_gates.get("formal_numerical_sufficiency"),
+        ))
         write_p1_2_provisional_summary(
             metadata_dir / "safety_planner_analysis_summary.json",
             p1_2_timebase_alignment,
@@ -19180,6 +19427,7 @@ def _analyze_impl(args: argparse.Namespace) -> dict[str, Any]:
         p1_bspline_path = csv_dir / "p1_2_bspline_publish_timeline.csv"
         p1_risk_path = csv_dir / "p1_2_risk_profile_vs_p1_1.csv"
         p1_risk_samples_path = csv_dir / "p1_2_risk_profile_samples.csv"
+        p1_derived_lattice_path = csv_dir / "p1_2_derived_fixed_200_common_arc.csv"
         p1_trajectory_path = csv_dir / "p1_2_trajectory_stability.csv"
         p1_manifest_path = csv_dir / "p1_2_manifest_switch_summary.csv"
         p1_validation_path = csv_dir / "p1_2_validation_summary.csv"
@@ -19246,9 +19494,20 @@ def _analyze_impl(args: argparse.Namespace) -> dict[str, Any]:
                 "common_terminal_arc_length_m",
                 "risk_reduced",
                 "current_mean",
+                "current_cvar",
                 "current_max",
                 "reference_mean",
+                "reference_cvar",
                 "reference_max",
+                "mean_improvement",
+                "cvar_improvement",
+                "max_regression",
+                "tau_mean",
+                "tau_cvar",
+                "tau_max",
+                "mean_remaining_margin",
+                "cvar_remaining_margin",
+                "max_remaining_margin",
                 "current_full_profile_mean",
                 "current_full_profile_max",
                 "reference_full_profile_mean",
@@ -19278,9 +19537,12 @@ def _analyze_impl(args: argparse.Namespace) -> dict[str, Any]:
                     ),
                     "risk_reduced": p1_2_risk_comparison.get("risk_reduced"),
                     "current_mean": p1_2_risk_comparison.get("current_mean"),
+                    "current_cvar": p1_2_risk_comparison.get("current_cvar"),
                     "current_max": p1_2_risk_comparison.get("current_max"),
                     "reference_mean": p1_2_risk_comparison.get("reference_mean"),
+                    "reference_cvar": p1_2_risk_comparison.get("reference_cvar"),
                     "reference_max": p1_2_risk_comparison.get("reference_max"),
+                    **(p1_2_risk_comparison.get("formal_effectiveness", {}) or {}),
                     "current_full_profile_mean": p1_2_risk_comparison.get(
                         "current_full_profile_mean"
                     ),
@@ -19317,8 +19579,8 @@ def _analyze_impl(args: argparse.Namespace) -> dict[str, Any]:
                     "p1_2_match_ratio": p1_2_profile.get("match_ratio"),
                     "p1_1_matched_sample_count": p1_1_profile.get("matched_sample_count"),
                     "p1_1_match_ratio": p1_1_profile.get("match_ratio"),
-                    "min_matched_sample_count": P1_2_MIN_RISK_MATCH_COUNT,
-                    "min_match_ratio": P1_2_MIN_RISK_MATCH_RATIO,
+                    "min_matched_sample_count": 200,
+                    "min_match_ratio": 1.0,
                     "risk_source": p1_2_risk_comparison.get("risk_source"),
                     "accepted_profile_missing": p1_2_risk_comparison.get("accepted_profile_missing"),
                     "p1_2_accepted_profile_path": p1_2_profile.get("path"),
@@ -19362,6 +19624,23 @@ def _analyze_impl(args: argparse.Namespace) -> dict[str, Any]:
                 "grad_dot_displacement", "delta_c_pi",
             ],
             risk_sample_rows,
+        )
+        derived_lattice_rows = [
+            {**row, "run_label": "p1_2", "derived": 1}
+            for row in p1_2_risk_comparison.get(
+                "p1_2_derived_fixed_200_profile", []) or []
+        ] + [
+            {**row, "run_label": "p1_1_reference", "derived": 1}
+            for row in p1_2_risk_comparison.get(
+                "p1_1_derived_fixed_200_profile", []) or []
+        ]
+        write_csv(
+            p1_derived_lattice_path,
+            [
+                "run_label", "derived", "sample_index", "arc_fraction",
+                "arc_distance_m", "t_s", "x", "y", "z", "c_pi",
+            ],
+            derived_lattice_rows,
         )
         write_csv(
             p1_trajectory_path,
@@ -19435,7 +19714,14 @@ def _analyze_impl(args: argparse.Namespace) -> dict[str, Any]:
                     "p1_1_accepted_profile_parse_ok",
                     "p1_2_risk_match_ok",
                     "p1_1_risk_match_ok",
-                    "risk_profile_reduced",
+                    "formal_calibration_current_bound",
+                    "formal_calibration_reference_bound",
+                    "formal_calibration_pair_identity_ok",
+                    "formal_numerical_sufficiency",
+                    "risk_mean_significant",
+                    "risk_cvar_significant",
+                    "risk_max_regression_bounded",
+                    "risk_effectiveness_passed",
                     "trajectory_stability_passed",
                     "p5_contamination_zero",
                     "cause_exclusion_passed",
@@ -19453,6 +19739,7 @@ def _analyze_impl(args: argparse.Namespace) -> dict[str, Any]:
                 str(p1_bspline_path),
                 str(p1_risk_path),
                 str(p1_risk_samples_path),
+                str(p1_derived_lattice_path),
                 str(p1_trajectory_path),
                 str(p1_manifest_path),
                 str(p1_validation_path),
@@ -19959,12 +20246,13 @@ def _analyze_impl(args: argparse.Namespace) -> dict[str, Any]:
         status = "BLOCKED_SCENARIO_MISSING"
     elif p5_4_phase and bool(p5_4_gates.get("blocked_scenario_missing")):
         status = "BLOCKED_SCENARIO_MISSING"
-    elif p1_2_phase and not bool(p1_2_gates.get("passed")):
-        status = "FAIL"
-    elif failures:
-        status = "FAIL"
-    elif inconclusive:
-        status = "INCONCLUSIVE"
+    else:
+        status = non_blocked_analysis_status(
+            p1_2_phase=p1_2_phase,
+            p1_2_passed=bool(p1_2_gates.get("passed")),
+            failures=failures,
+            inconclusive=inconclusive,
+        )
 
     summary = {
         "experiment_id": args.experiment_id,
@@ -20163,6 +20451,10 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--baseline-bag-dir", default="", help="baseline rosbag directory, recorded for compatibility")
     parser.add_argument("--p0-2-export-dir", default="", help="healthy P0-2 export directory for P0-3+ comparisons")
     parser.add_argument("--p0-2-bag-dir", default="", help="healthy P0-2 rosbag directory for P0-3+ comparisons")
+    parser.add_argument(
+        "--p1-calibration", default="",
+        help="pre-frozen p1_formal_tolerance_calibration_v1.json (required for P1-2)",
+    )
     parser.add_argument("--synthetic-only", action="store_true", help="run analyzer-only synthetic experiment without ROS artifacts")
     parser.add_argument("--blocked-fixture-audit", action="store_true", help="write a blocked fixture-audit summary without ROS artifacts")
     parser.add_argument("--fail-on-threshold", action="store_true", help="exit non-zero unless analysis status is PASS")

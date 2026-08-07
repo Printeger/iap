@@ -41,6 +41,34 @@ def _sha256_file(path):
     return digest.hexdigest()
 
 
+def _formal_calibration_provenance(value):
+    """Read immutable experiment provenance; never forward it to the planner."""
+    raw = str(value).strip()
+    if not raw:
+        return {}
+    path = Path(raw).expanduser().resolve()
+    if not path.is_file():
+        raise RuntimeError(f"P1 formal calibration file is missing: {path}")
+    try:
+        payload = json.loads(path.read_text())
+    except (OSError, json.JSONDecodeError) as exc:
+        raise RuntimeError(f"P1 formal calibration is unreadable: {path}: {exc}") from exc
+    if (
+        not isinstance(payload, dict)
+        or payload.get("schema_version") != "p1_formal_tolerance_calibration_v1"
+        or not str(payload.get("calibration_id", "")).strip()
+        or not isinstance(payload.get("generated_at_epoch_s"), (int, float))
+    ):
+        raise RuntimeError(f"P1 formal calibration has an invalid contract: {path}")
+    return {
+        "calibration_id": payload["calibration_id"],
+        "path": str(path),
+        "sha256": _sha256_file(path),
+        "generated_at_epoch_s": float(payload["generated_at_epoch_s"]),
+        "generated_at_utc": str(payload.get("generated_at_utc", "")),
+    }
+
+
 def _command_text(command, cwd):
     try:
         return subprocess.check_output(command, cwd=str(cwd), text=True).strip()
@@ -824,6 +852,7 @@ ARG_DEFAULTS = [
     ("p1.objective_aggregation_mode", "fixed_200_smooth_cvar"),
     ("p1.smooth_max_temperature", "0.01"),
     ("p1.smooth_cvar_alpha", "0.90"),
+    ("p1.formal_calibration_manifest", ""),
     ("p2.enable_candidate_ranking", "false"),
     ("p2.metrics_only", "true"),
     ("p2.sample_dt_s", "0.2"),
@@ -1625,6 +1654,9 @@ def _launch_setup(context):
         os.makedirs(bag_root_dir, exist_ok=True)
     evidence = _runtime_provenance(iap_share, export_dir, bag_output_dir, experiment, scenario)
     evidence["manifest_path"] = str((Path(export_dir) / "test_planner_manifest.json").resolve())
+    formal_calibration = _formal_calibration_provenance(
+        LaunchConfiguration("p1.formal_calibration_manifest").perform(context)
+    )
 
     truth_odom_topic = "/sim/drone_0/truth_odom"
     iap_odom_topic = "/drone_0_visual_slam/odom"
@@ -1798,6 +1830,8 @@ def _launch_setup(context):
         "export_dir": export_dir,
         "run_duration_s": run_duration_s,
         "validation_duration_s": validation_duration_s,
+        "record_bag": record_bag,
+        "run_validator": run_validator,
         "timebase": {
             "planning_timeline": {"domain": "sim_message", "field": "stamp_s"},
             "p0_health_payload": {
@@ -1831,6 +1865,7 @@ def _launch_setup(context):
         "p1.objective_aggregation_mode": LaunchConfiguration("p1.objective_aggregation_mode").perform(context),
         "p1.smooth_max_temperature": _param_float(context, "p1.smooth_max_temperature"),
         "p1.smooth_cvar_alpha": _param_float(context, "p1.smooth_cvar_alpha"),
+        "p1.formal_calibration": formal_calibration,
         "p1.reference_identity": "metrics_only_lambda_0.00001_not_applied",
         "p0.raw_health_topic": "/planning/risk_grid_health",
         "p0.resolution_m": _param_float(context, "p0.resolution_m"),
