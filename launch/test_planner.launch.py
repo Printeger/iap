@@ -318,7 +318,7 @@ P1_FORK_MAP_PRESET = {
     "corridor_half_width_y_m": "5.0",
     "p1_fixture_mirror_y": "false",
     "p1_fixture_central_obstacle_enabled": "true",
-    "p1_fixture_central_x_min_m": "-7.0",
+    "p1_fixture_central_x_min_m": "-5.0",
     "p1_fixture_central_x_max_m": "-1.0",
     "p1_fixture_central_y_half_width_m": "0.65",
     "p1_fixture_central_z_max_m": "2.8",

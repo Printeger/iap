@@ -17,7 +17,7 @@ struct P1FixtureConfig {
   std::string name;
   bool mirror_y = false;
   bool central_obstacle_enabled = true;
-  double central_x_min_m = -7.0;
+  double central_x_min_m = -5.0;
   double central_x_max_m = -1.0;
   double central_y_half_width_m = 0.65;
   double central_z_max_m = 2.8;
