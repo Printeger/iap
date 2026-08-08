@@ -637,6 +637,12 @@ EXPERIMENT_PRESETS = {
         "p0.size_x_m": "42.0",
         "p0.predictor.worker_count": "4",
         "planner_start_delay_s": "10.0",
+        # Keep successive replans closer than the fixed 0.8 m decision window.
+        # This is part of the formal configuration identity, not an analyzer
+        # relaxation: the checkpoint remains truth x=-9.5+/-0.4 m.
+        "manager/max_vel": "1.0",
+        "optimization/max_vel": "1.0",
+        "bspline/limit_vel": "1.0",
         "p1.debug_csv_enable": "true",
         "p1.lambda_integrity": "0.00001",
         "p1.normalization_budget_fraction": "0.30",
@@ -2005,6 +2011,11 @@ def _launch_setup(context):
             "smooth_cvar_alpha": _param_float(context, "p1.smooth_cvar_alpha"),
             "smooth_max_temperature": _param_float(context, "p1.smooth_max_temperature"),
         },
+        "planner_dynamics": {
+            "manager_max_velocity_mps": _param_float(context, "manager/max_vel"),
+            "optimizer_max_velocity_mps": _param_float(context, "optimization/max_vel"),
+            "bspline_limit_velocity_mps": _param_float(context, "bspline/limit_vel"),
+        },
         "decision_checkpoint": {
             "truth_x_m": -9.5, "truth_x_tolerance_m": 0.4,
             "truth_source_topic": truth_odom_topic,
@@ -2028,6 +2039,9 @@ def _launch_setup(context):
         "planner_start_delay_s": max(
             0.0, float(LaunchConfiguration("planner_start_delay_s").perform(context))
         ),
+        "manager/max_vel": _param_float(context, "manager/max_vel"),
+        "optimization/max_vel": _param_float(context, "optimization/max_vel"),
+        "bspline/limit_vel": _param_float(context, "bspline/limit_vel"),
         "record_bag": record_bag,
         "run_validator": run_validator,
         "timebase": {

@@ -685,6 +685,9 @@ def validate_calibration_binding(
             "run_duration_s",
             "validation_duration_s",
             "planner_start_delay_s",
+            "manager/max_vel",
+            "optimization/max_vel",
+            "bspline/limit_vel",
             "p1.normalization_budget_fraction",
         )
         for key in exact_config_keys:

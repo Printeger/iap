@@ -47,6 +47,18 @@ class TestPlannerLaunchTest(unittest.TestCase):
             MODULE.EXPERIMENT_PRESETS["p1_fork_formal"]["planner_start_delay_s"],
             "10.0",
         )
+        self.assertEqual(
+            MODULE.EXPERIMENT_PRESETS["p1_fork_formal"]["manager/max_vel"],
+            "1.0",
+        )
+        self.assertEqual(
+            MODULE.EXPERIMENT_PRESETS["p1_fork_formal"]["optimization/max_vel"],
+            "1.0",
+        )
+        self.assertEqual(
+            MODULE.EXPERIMENT_PRESETS["p1_fork_formal"]["bspline/limit_vel"],
+            "1.0",
+        )
 
     def test_fork_and_mirror_share_geometry_identity_except_mirror_flag(self):
         primary = MODULE.SCENARIO_PRESETS["p1_fork_fused_v1"]

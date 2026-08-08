@@ -90,7 +90,10 @@ def analyze_run(export_value: str | Path) -> dict[str, Any]:
     for key, value in (("p1.lambda_integrity", 1e-5),
                        ("p1.normalization_budget_fraction", 0.30),
                        ("run_duration_s", 90.0), ("validation_duration_s", 90.0),
-                       ("planner_start_delay_s", 10.0)):
+                       ("planner_start_delay_s", 10.0),
+                       ("manager/max_vel", 1.0),
+                       ("optimization/max_vel", 1.0),
+                       ("bspline/limit_vel", 1.0)):
         actual = _number(manifest.get(key))
         if actual is None or abs(actual - value) > 1e-12:
             errors.append(f"contract mismatch: {key}")
