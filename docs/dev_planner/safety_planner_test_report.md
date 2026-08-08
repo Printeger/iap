@@ -9372,6 +9372,13 @@ The wholly fresh serial formal pair was P1-1 reference run `47b2db0965654615858e
 
 On the derived fixed-200 common terminal arc, reference/current mean were `0.422723385075205 / 0.42053498464043243`, an improvement of `0.002188400434772586`, leaving margin `-0.00338626983909035` against `tau_mean`. Reference/current smooth CVaR were `0.4229506897153588 / 0.4207697400598349`, an improvement of `0.0021809496555239005`, leaving margin `-0.0023310479227861005` against `tau_cvar`. Reference/current exact max were `0.4265749078690929 / 0.4245884435173881`, so max regression was `-0.0019864643517047975` and passed with `0.006511890608784932` margin to `tau_max`. The effect gate and its derivative cause-exclusion gate failed because mean and CVaR improvements did not exceed their frozen null-effect thresholds; all numerical sufficiency checks remained conclusive.
 
+The analyzer's exact terminal arrays were `inconclusive=[]`, `warnings=[]`, and:
+
+- `P1-2 trajectory risk profile did not prove noise-significant mean/CVaR improvement with bounded exact-max regression (mean improvement/tau 0.002188400434772586/0.005574670273862936, CVaR improvement/tau 0.0021809496555239005/0.004511997578310001, max regression/tau -0.0019864643517047975/0.004525426257080134)`
+- `P1-2 cause exclusion found unreduced risk, coverage loss, missing evidence, publish failure, P0 stale, or P5 leakage`
+- `P1-2 hard gate noise_significant_mean_cvar_improvement_and_bounded_exact_max_regression failed: failed: risk_effectiveness_passed`
+- `P1-2 hard gate cause_exclusion failed: failed: cause_exclusion_passed`
+
 ![Formal result dashboard](p1_formal_test_report_artifacts/2026-08-08-000aa07/p1_2_result_dashboard.png)
 
 ![Formal risk-profile comparison](p1_formal_test_report_artifacts/2026-08-08-000aa07/p1_2_risk_profile_vs_p1_1.png)
@@ -9388,7 +9395,13 @@ On the derived fixed-200 common terminal arc, reference/current mean were `0.422
 
 Long-term JSON/CSV/PNG evidence is frozen under `p1_formal_test_report_artifacts/2026-08-08-000aa07/`, including both formal preflights, diagnostic preflight, calibration outputs, formal summary, hard gates, and the derived lattice.
 
-After evidence copying, the three exact manifest-owned bag directories were deleted without globbing. Diagnostic bag size/SHA were `722,738,042 bytes` / `7fadf6d41b2a621bbc1f382ec0d07a2aa559feb0d7b3d2f4e60e548348127171`; P1-1 were `2,058,583,149 bytes` / `d54cea0774a4503e6597f930514cf8dc802ab475c1dd4533f4e9c743df608c34`; P1-2 were `2,139,214,797 bytes` / `d363d0113b6c7a56837683297390a3098b34a5a22c19b69067e47cb89d4bcd53`. All three paths are absent. Available space increased by `4,910,833,664 bytes`; deletion is irreversible and the analyzer cannot be rerun from these bags.
+After evidence copying, the three exact manifest-owned bag directories were deleted without globbing:
+
+- Diagnostic: `/home/dev/ws_iap/src/iap/results/planner_validation/bags/test_planner_p1_degraded_lidar_good_gnss_degraded_lidar_good_20260808T082804Z`; `722,738,042 bytes`; metadata SHA256 `7fadf6d41b2a621bbc1f382ec0d07a2aa559feb0d7b3d2f4e60e548348127171`; deletion confirmed, path absent.
+- P1-1: `/home/dev/ws_iap/src/iap/results/planner_validation/bags/test_planner_p1_degraded_lidar_good_gnss_degraded_lidar_good_20260808T083023Z`; `2,058,583,149 bytes`; metadata SHA256 `d54cea0774a4503e6597f930514cf8dc802ab475c1dd4533f4e9c743df608c34`; deletion confirmed, path absent.
+- P1-2: `/home/dev/ws_iap/src/iap/results/planner_validation/bags/test_planner_p1_degraded_lidar_good_gnss_degraded_lidar_good_20260808T083209Z`; `2,139,214,797 bytes`; metadata SHA256 `d363d0113b6c7a56837683297390a3098b34a5a22c19b69067e47cb89d4bcd53`; deletion confirmed, path absent.
+
+Available space increased by `4,910,833,664 bytes`; deletion is irreversible and the analyzer cannot be rerun from these bags.
 
 Verdict: **FAIL** (formal effect below pre-frozen mean/CVaR thresholds; conclusive).
 
