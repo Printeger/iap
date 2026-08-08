@@ -726,7 +726,7 @@ TEST(P1IntegrityCostTest, FixedLambdaTwoStagePreferenceDescendsRisk) {
   EXPECT_TRUE(std::all_of(traces.begin(), traces.end(), [](const auto& trace) {
     return trace.normalization_mode == "base_improvement_budget_v1" &&
         trace.normalization_reference_lambda == 1.0e-5 &&
-        trace.normalization_budget_fraction == 0.10 &&
+        trace.normalization_budget_fraction == 0.30 &&
         trace.normalization_reference_displacement_m == 0.025 &&
         trace.normalization_scale > 0.0;
   }));

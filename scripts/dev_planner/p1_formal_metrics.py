@@ -56,6 +56,133 @@ def _truthy(value: Any) -> bool:
     return str(value).strip().lower() in {"1", "true", "yes"}
 
 
+def select_decision_checkpoint(
+    truth_rows: Iterable[dict[str, Any]],
+    estimate_rows: Iterable[dict[str, Any]],
+    *,
+    target_x_m: float = -9.5,
+    x_tolerance_m: float = 0.4,
+    localization_limit_m: float = 0.5,
+) -> dict[str, Any]:
+    """Select the one deterministic truth-progress checkpoint, fail closed."""
+    candidates = []
+    for row in truth_rows:
+        values = {key: _finite(row.get(key)) for key in ("stamp_s", "x", "y", "z")}
+        if all(value is not None for value in values.values()) and abs(
+            float(values["x"]) - target_x_m
+        ) <= x_tolerance_m:
+            candidates.append({key: float(value) for key, value in values.items()})
+    if len(candidates) != 1:
+        return {
+            "passed": False, "status": "INCONCLUSIVE",
+            "reason": "decision_checkpoint_not_unique",
+            "matching_truth_count": len(candidates),
+        }
+    truth = candidates[0]
+    estimates = []
+    for row in estimate_rows:
+        values = {key: _finite(row.get(key)) for key in ("stamp_s", "x", "y", "z")}
+        if all(value is not None for value in values.values()):
+            estimates.append({key: float(value) for key, value in values.items()})
+    if not estimates:
+        return {
+            "passed": False, "status": "INCONCLUSIVE",
+            "reason": "decision_checkpoint_estimate_missing", "truth": truth,
+        }
+    estimate = min(estimates, key=lambda row: abs(row["stamp_s"] - truth["stamp_s"]))
+    error = math.dist(
+        (truth["x"], truth["y"], truth["z"]),
+        (estimate["x"], estimate["y"], estimate["z"]),
+    )
+    return {
+        "passed": error <= localization_limit_m,
+        "status": "PASS" if error <= localization_limit_m else "FAIL",
+        "reason": "ok" if error <= localization_limit_m else "localization_error_exceeded",
+        "truth": truth, "estimate": estimate,
+        "localization_error_m": error,
+        "localization_limit_m": localization_limit_m,
+    }
+
+
+def localization_pair_gate(
+    current: dict[str, Any], reference: dict[str, Any], *, delta_limit_m: float = 0.25
+) -> dict[str, Any]:
+    current_error = _finite(current.get("localization_error_m"))
+    reference_error = _finite(reference.get("localization_error_m"))
+    delta = (
+        abs(float(current_error) - float(reference_error))
+        if current_error is not None and reference_error is not None else math.inf
+    )
+    passed = bool(current.get("passed")) and bool(reference.get("passed")) and delta <= delta_limit_m
+    return {"passed": passed, "error_delta_m": delta, "delta_limit_m": delta_limit_m}
+
+
+def candidate_route_precheck(
+    rows: Iterable[dict[str, Any]], *, support_count: int = FIXED_SAMPLE_COUNT
+) -> dict[str, Any]:
+    """Summarize collision-feasible full-support upper/lower candidates."""
+    grouped: dict[str, list[dict[str, Any]]] = {}
+    for row in rows:
+        candidate_id = str(row.get("candidate_id", "")).strip()
+        if candidate_id:
+            grouped.setdefault(candidate_id, []).append(row)
+    lane_candidates: dict[str, list[dict[str, Any]]] = {"lower": [], "upper": []}
+    selected: list[dict[str, Any]] = []
+    rejected: list[dict[str, Any]] = []
+    required_indices = set(range(support_count))
+    for candidate_id, candidate_rows in grouped.items():
+        explicit_lanes = {str(row.get("lane", "")).strip().lower() for row in candidate_rows}
+        explicit_lanes.discard("")
+        if len(explicit_lanes) == 1:
+            lane = explicit_lanes.pop()
+        else:
+            y_values = [_finite(row.get("y")) for row in candidate_rows]
+            finite_y = [float(value) for value in y_values if value is not None]
+            lane = "upper" if finite_y and sum(finite_y) / len(finite_y) > 0.0 else "lower"
+        indices = {_finite(row.get("sample_index")) for row in candidate_rows}
+        integer_indices = {int(value) for value in indices if value is not None and value.is_integer()}
+        values = [_finite(row.get("c_pi")) for row in candidate_rows]
+        costs = [float(value) for value in values if value is not None]
+        full_support = (
+            len(candidate_rows) == support_count
+            and integer_indices == required_indices
+            and len(costs) == support_count
+            and all(_usable(row) for row in candidate_rows)
+        )
+        collision_free = all(_truthy(row.get("collision_free")) for row in candidate_rows)
+        summary = {
+            "candidate_id": candidate_id, "lane": lane,
+            "collision_free": collision_free, "full_support": full_support,
+            "sample_count": len(candidate_rows),
+        }
+        if full_support:
+            summary.update({
+                "mean": sum(costs) / support_count,
+                "cvar": smooth_cvar(costs), "max": max(costs),
+            })
+        if lane not in lane_candidates or not collision_free or not full_support:
+            rejected.append(summary)
+            continue
+        lane_candidates[lane].append(summary)
+        if any(_truthy(row.get("selected")) for row in candidate_rows):
+            selected.append(summary)
+    lane_summary = {}
+    for lane, candidates in lane_candidates.items():
+        lane_summary[lane] = {
+            "candidate_count": len(candidates),
+            "mean_risk": (sum(item["mean"] for item in candidates) / len(candidates)) if candidates else None,
+            "mean_cvar": (sum(item["cvar"] for item in candidates) / len(candidates)) if candidates else None,
+            "max_risk": max((item["max"] for item in candidates), default=None),
+            "candidates": candidates,
+        }
+    passed = all(lane_summary[lane]["candidate_count"] > 0 for lane in ("lower", "upper")) and len(selected) == 1
+    return {
+        "passed": passed, "status": "PASS" if passed else "INCONCLUSIVE",
+        "lanes": lane_summary, "selected": selected[0] if len(selected) == 1 else None,
+        "rejected": rejected,
+    }
+
+
 def _stable_sigmoid(value: float) -> float:
     if value >= 0.0:
         if value > 709.0:
@@ -230,25 +357,31 @@ def compare_profiles(
     alpha: float = SMOOTH_CVAR_ALPHA,
     temperature: float = SMOOTH_CVAR_TEMPERATURE,
 ) -> dict[str, Any]:
-    """Compare two authoritative profiles on a derived common terminal arc."""
+    """Compare two authoritative fixed-200 profiles at one decision checkpoint."""
     current_points = _profile_points(current_rows)
     reference_points = _profile_points(reference_rows)
-    common_arc = min(
-        current_points[-1]["distance_m"], reference_points[-1]["distance_m"]
-    )
-    if common_arc <= 0.0:
-        raise ValueError("profiles must share a positive arc length")
-    current_lattice = _fixed_terminal_lattice(current_points, common_arc, count=count)
-    reference_lattice = _fixed_terminal_lattice(reference_points, common_arc, count=count)
+    if len(current_points) != count or len(reference_points) != count:
+        raise ValueError(f"decision-checkpoint profiles require {count}/{count} support")
+    def as_lattice(points: list[dict[str, float]]) -> list[dict[str, Any]]:
+        return [
+            {
+                "sample_index": index,
+                "arc_fraction": index / (count - 1),
+                "arc_distance_m": point["distance_m"],
+                "derived": False,
+                **{key: point[key] for key in ("x", "y", "z", "t_s", "c_pi")},
+            }
+            for index, point in enumerate(points)
+        ]
+    current_lattice = as_lattice(current_points)
+    reference_lattice = as_lattice(reference_points)
     current_values = [float(row["c_pi"]) for row in current_lattice]
     reference_values = [float(row["c_pi"]) for row in reference_lattice]
-    current_residual = _resampling_residual(current_points, current_lattice, common_arc)
-    reference_residual = _resampling_residual(reference_points, reference_lattice, common_arc)
     return {
-        "comparison_mode": "derived_fixed_200_common_terminal_arc",
-        "derived": True,
+        "comparison_mode": "first_deterministic_decision_checkpoint_fixed_200",
+        "derived": False,
         "sample_count": count,
-        "common_terminal_arc_length_m": common_arc,
+        "common_terminal_arc_length_m": None,
         "current_lattice": current_lattice,
         "reference_lattice": reference_lattice,
         "current_mean": sum(current_values) / count,
@@ -257,9 +390,9 @@ def compare_profiles(
         "reference_cvar": smooth_cvar(reference_values, alpha=alpha, temperature=temperature),
         "current_max": max(current_values),
         "reference_max": max(reference_values),
-        "current_resampling_residual": current_residual,
-        "reference_resampling_residual": reference_residual,
-        "epsilon_resample": max(current_residual, reference_residual),
+        "current_resampling_residual": 0.0,
+        "reference_resampling_residual": 0.0,
+        "epsilon_resample": 0.0,
     }
 
 
@@ -503,6 +636,11 @@ def validate_calibration_binding(
             errors.append(f"P1 calibration {key} does not match formal run")
     if manifest.get("scenario") != calibration.get("scenario"):
         errors.append("P1 calibration scenario does not match formal run")
+    fingerprint = str(manifest.get("scenario_fingerprint", "")).strip()
+    if not fingerprint or fingerprint != calibration.get("scenario_fingerprint"):
+        errors.append("P1 calibration scenario fingerprint does not match formal run")
+    if manifest.get("scenario_contract") != calibration.get("scenario_contract"):
+        errors.append("P1 calibration expanded scenario contract does not match formal run")
     p0 = calibration.get("p0", {}) or {}
     if not _same_number(manifest.get("p0.resolution_m"), p0.get("resolution_m")):
         errors.append("P1 calibration P0 resolution does not match formal run")
@@ -513,6 +651,7 @@ def validate_calibration_binding(
         ("p1.lambda_integrity", calibration.get("lambda_integrity")),
         ("p1.smooth_cvar_alpha", smooth.get("alpha")),
         ("p1.smooth_max_temperature", smooth.get("temperature")),
+        ("p1.normalization_budget_fraction", calibration.get("normalization_budget_fraction")),
     )
     for key, expected in expected_values:
         if not _same_number(manifest.get(key), expected):
@@ -534,6 +673,8 @@ def validate_calibration_binding(
             "p1.use_integrity_cost",
             "p1.max_candidates_per_attempt",
             "p1.objective_aggregation_mode",
+            "scenario_fingerprint",
+            "scenario_contract",
             "run_validator",
             *P0_CONFIGURATION_KEYS,
         )
@@ -543,6 +684,7 @@ def validate_calibration_binding(
             "p1.smooth_max_temperature",
             "run_duration_s",
             "validation_duration_s",
+            "p1.normalization_budget_fraction",
         )
         for key in exact_config_keys:
             if manifest.get(key) != calibration_config.get(key):

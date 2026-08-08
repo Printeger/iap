@@ -864,11 +864,11 @@ class P1_2AnalyzerTest(unittest.TestCase):
         self.assertTrue(summary["passed"], summary)
         self.assertEqual(summary["generation_counts"]["4"]["p1_admission"], 0)
 
-    def test_terminal_common_arc_comparison_excludes_unshared_history(self):
+    def test_decision_checkpoint_compares_full_fixed_support(self):
         current = accepted_profile_rows(0.0, c_pi=4.0)
         for index, row in enumerate(current):
             row["x"] = 8.0 + 2.0 * index / 199.0
-        reference_values = [0.1] * 150 + [5.0] * 50
+        reference_values = [5.0] * 200
         reference = accepted_profile_rows(
             5.0,
             c_pi_values=reference_values,
@@ -886,7 +886,7 @@ class P1_2AnalyzerTest(unittest.TestCase):
 
         self.assertEqual(
             comparison["comparison_mode"],
-            "derived_fixed_200_common_terminal_arc",
+            "first_deterministic_decision_checkpoint_fixed_200",
         )
         self.assertEqual(len(comparison["p1_2_derived_fixed_200_profile"]), 200)
         self.assertIsNotNone(comparison["current_cvar"])
@@ -926,7 +926,7 @@ class P1_2AnalyzerTest(unittest.TestCase):
         self.assertEqual(risk["comparison_metric"], "c_pi")
         self.assertEqual(
             risk["risk_source"],
-            "accepted_trajectory_profile_csv_derived_fixed_200_common_terminal_arc",
+            "accepted_trajectory_profile_csv_first_deterministic_decision_checkpoint_fixed_200",
         )
 
     def test_manifest_rejects_metrics_only_wrong_lambda_disabled_p1_and_enabled_later_phases(self):

@@ -166,6 +166,15 @@ def _safe_path_component(value, fallback):
     return safe or fallback
 
 
+def _scenario_fingerprint(scenario, expanded_contract):
+    """Return a stable identity for the fully expanded scenario contract."""
+    canonical = json.dumps(
+        {"scenario": str(scenario), "contract": expanded_contract},
+        sort_keys=True, separators=(",", ":"), ensure_ascii=True,
+    ).encode("utf-8")
+    return "sha256:" + hashlib.sha256(canonical).hexdigest()
+
+
 OPEN_MAP_PRESET = {
     "tree_density_lower_left_per_m2": "0.02",
     "tree_density_lower_right_per_m2": "0.02",
@@ -284,6 +293,53 @@ GNSS_DEGRADED_PRESET = {
     "gnss_enable_nlos": "true",
     "gnss_enable_multipath": "true",
     "gnss_enable_fault_injection": "false",
+}
+
+
+P1_FORK_MAP_PRESET = {
+    **DEFAULT_ROUTE_PRESET,
+    "init_z": "1.5",
+    "goal_z": "1.5",
+    "forest_size_x_m": "28.0",
+    "forest_size_y_m": "10.0",
+    "tree_density_lower_left_per_m2": "0.0",
+    "tree_density_lower_right_per_m2": "0.0",
+    "tree_density_upper_left_per_m2": "0.0",
+    "tree_density_upper_right_per_m2": "0.0",
+    "canopy_density_lower_left": "0.0",
+    "canopy_density_lower_right": "0.0",
+    "canopy_density_upper_left": "0.0",
+    "canopy_density_upper_right": "0.0",
+    "forest_random_seed": "41021",
+    "terminal_wall_enabled": "false",
+    "corridor_floor_enabled": "true",
+    "corridor_x_min_m": "-14.0",
+    "corridor_x_max_m": "14.0",
+    "corridor_half_width_y_m": "5.0",
+    "p1_fixture_mirror_y": "false",
+    "p1_fixture_central_obstacle_enabled": "true",
+    "p1_fixture_central_x_min_m": "-7.0",
+    "p1_fixture_central_x_max_m": "-2.0",
+    "p1_fixture_central_y_half_width_m": "0.65",
+    "p1_fixture_central_z_max_m": "2.8",
+    "p1_fixture_lane_center_m": "2.0",
+    "p1_fixture_lane_half_width_m": "0.75",
+    "p1_fixture_safe_tree_density_per_m2": "0.25",
+    "p1_fixture_risky_tree_density_per_m2": "0.75",
+    "p1_fixture_safe_canopy_probability": "0.05",
+    "p1_fixture_risky_canopy_probability": "0.85",
+}
+
+
+P1_FUSED_SENSOR_PRESET = {
+    **GNSS_DEGRADED_PRESET,
+    "use_gnss": "true", "use_araim": "true",
+    "gnss_time_source": "odom_stamp",
+    "enable_gnss_integrity": "true", "enable_gnss_araim": "true",
+    "enable_lidar_integrity": "true", "integrity_fusion_mode": "max_pl",
+    "validator_require_gnss_valid": "true",
+    "validator_require_lidar_valid": "true",
+    "validator_required_final_source": "",
 }
 
 
@@ -437,6 +493,26 @@ SCENARIO_PRESETS = {
         "validator_require_lidar_valid": "true",
         "validator_required_final_source": "",
     },
+    "p1_fork_fused_v1": {
+        **P1_FORK_MAP_PRESET, **P1_FUSED_SENSOR_PRESET,
+        "p1_map_fixture": "p1_fork_fused_v1",
+    },
+    "p1_fork_fused_mirror_v1": {
+        **P1_FORK_MAP_PRESET, **P1_FUSED_SENSOR_PRESET,
+        "p1_map_fixture": "p1_fork_fused_mirror_v1",
+        "p1_fixture_mirror_y": "true",
+    },
+    "p1_fork_symmetric_null_v1": {
+        **P1_FORK_MAP_PRESET, **P1_FUSED_SENSOR_PRESET,
+        "p1_map_fixture": "p1_fork_symmetric_null_v1",
+        "p1_fixture_risky_tree_density_per_m2": "0.25",
+        "p1_fixture_risky_canopy_probability": "0.05",
+    },
+    "p1_soft_risk_island_v1": {
+        **P1_FORK_MAP_PRESET, **P1_FUSED_SENSOR_PRESET,
+        "p1_map_fixture": "p1_soft_risk_island_v1",
+        "p1_fixture_central_obstacle_enabled": "false",
+    },
 }
 
 
@@ -553,6 +629,16 @@ EXPERIMENT_PRESETS = {
         # bottleneck without changing P0 acceptance semantics.
         "p0.predictor.worker_count": "4",
         "p1.debug_csv_enable": "true",
+        "safety_viz.enable_p1_viz": "true",
+    },
+    "p1_fork_formal": {
+        "scenario": "p1_fork_fused_v1",
+        "planner_safety_profile": "p1",
+        "p0.size_x_m": "42.0",
+        "p0.predictor.worker_count": "4",
+        "p1.debug_csv_enable": "true",
+        "p1.lambda_integrity": "0.00001",
+        "p1.normalization_budget_fraction": "0.30",
         "safety_viz.enable_p1_viz": "true",
     },
     "p2_degraded_lidar_good": {
@@ -703,8 +789,22 @@ ARG_DEFAULTS = [
     ("corridor_wall_thickness_y_m", "0.10"),
     ("corridor_floor_thickness_z_m", "0.05"),
     ("corridor_surface_resolution_m", "0.10"),
+    ("p1_map_fixture", ""),
+    ("p1_fixture_mirror_y", "false"),
+    ("p1_fixture_central_obstacle_enabled", "false"),
+    ("p1_fixture_central_x_min_m", "-7.0"),
+    ("p1_fixture_central_x_max_m", "-2.0"),
+    ("p1_fixture_central_y_half_width_m", "0.65"),
+    ("p1_fixture_central_z_max_m", "2.8"),
+    ("p1_fixture_lane_center_m", "2.0"),
+    ("p1_fixture_lane_half_width_m", "0.75"),
+    ("p1_fixture_safe_tree_density_per_m2", "0.25"),
+    ("p1_fixture_risky_tree_density_per_m2", "0.75"),
+    ("p1_fixture_safe_canopy_probability", "0.05"),
+    ("p1_fixture_risky_canopy_probability", "0.85"),
     ("gnss_pr_noise_base", "5.0"),
     ("gnss_dop_noise_base", "0.5"),
+    ("gnss_random_seed", "20260429"),
     ("gnss_ephemeris_source", "rinex"),
     ("gnss_time_source", "trigger_topic"),
     ("gnss_enabled_constellations", "GPS,BDS,GAL,GLO"),
@@ -852,6 +952,7 @@ ARG_DEFAULTS = [
     ("p1.objective_aggregation_mode", "fixed_200_smooth_cvar"),
     ("p1.smooth_max_temperature", "0.01"),
     ("p1.smooth_cvar_alpha", "0.90"),
+    ("p1.normalization_budget_fraction", "0.30"),
     ("p1.formal_calibration_manifest", ""),
     ("p2.enable_candidate_ranking", "false"),
     ("p2.metrics_only", "true"),
@@ -1460,6 +1561,7 @@ def _ego_planner_node(context, drone_id, planner_odom_topic, cloud_topic, camera
             {"p1.objective_aggregation_mode": LaunchConfiguration("p1.objective_aggregation_mode").perform(context)},
             {"p1.smooth_max_temperature": _param_float(context, "p1.smooth_max_temperature")},
             {"p1.smooth_cvar_alpha": _param_float(context, "p1.smooth_cvar_alpha")},
+            {"p1.normalization_budget_fraction": _param_float(context, "p1.normalization_budget_fraction")},
             {"p2.enable_candidate_ranking": p2_use},
             {"p2.metrics_only": p2_metrics_only},
             {"p2.sample_dt_s": _param_float(context, "p2.sample_dt_s")},
@@ -1822,10 +1924,85 @@ def _launch_setup(context):
         context, p5_final_for_fixture
     )
 
+    scenario_contract = {
+        "geometry": {
+            "fixture_algorithm_version": "p1_deterministic_fork_geometry_v1",
+            "fixture": LaunchConfiguration("p1_map_fixture").perform(context),
+            "mirror_y": _param_bool(context, "p1_fixture_mirror_y"),
+            "start_m": [init_x, init_y, init_z],
+            "goal_m": [float(goal[0]), float(goal[1]), float(goal[2])],
+            "central_obstacle": {
+                "enabled": _param_bool(context, "p1_fixture_central_obstacle_enabled"),
+                "x_m": [_param_float(context, "p1_fixture_central_x_min_m"),
+                        _param_float(context, "p1_fixture_central_x_max_m")],
+                "y_half_width_m": _param_float(context, "p1_fixture_central_y_half_width_m"),
+                "z_m": [0.0, _param_float(context, "p1_fixture_central_z_max_m")],
+            },
+            "lanes": {
+                "center_abs_y_m": _param_float(context, "p1_fixture_lane_center_m"),
+                "half_width_m": _param_float(context, "p1_fixture_lane_half_width_m"),
+                "safe_tree_density_per_m2": _param_float(context, "p1_fixture_safe_tree_density_per_m2"),
+                "risky_tree_density_per_m2": _param_float(context, "p1_fixture_risky_tree_density_per_m2"),
+                "safe_canopy_probability": _param_float(context, "p1_fixture_safe_canopy_probability"),
+                "risky_canopy_probability": _param_float(context, "p1_fixture_risky_canopy_probability"),
+            },
+            "forest_seed": _param_int(context, "forest_random_seed"),
+            "map_resolution_m": _param_float(context, "corridor_map_resolution_m"),
+            "trunk_radius_m": _param_float(context, "trunk_radius_m"),
+            "canopy_resolution_m": _param_float(context, "canopy_resolution_m"),
+            "fixture_short_trunk_height_m": 1.05,
+            "fixture_risky_trunk_height_m": 2.85,
+            "fixture_canopy_base_z_m": 2.85,
+            "fixture_canopy_ball_center_z_m": 3.25,
+            "fixture_canopy_ball_radius_m": 0.42,
+            "fixture_canopy_clip_radius_m": 1.10,
+            "fixture_lane_x_start_m": -7.8,
+            "fixture_lane_x_span_m": 16.0,
+            "fixture_lane_boundary_offset_m": 0.35,
+            "fixture_lane_density_area_m2": 32.0,
+            "fixture_soft_island_density_area_m2": 24.0,
+            "fixture_soft_island_x_m": [-6.0, 2.0],
+            "fixture_soft_island_center_y_m": 0.9,
+            "fixture_soft_island_trunk_offset_y_m": 1.15,
+            "terminal_wall_enabled": _param_bool(context, "terminal_wall_enabled"),
+        },
+        "risk_sources": ["gnss_map_occlusion", "lidar_observability"],
+        "gnss": {
+            "scenario_file": str(gnss_scenario_file),
+            "scenario_file_sha256": _sha256_file(gnss_scenario_file),
+            "random_seed": _param_int(context, "gnss_random_seed"),
+            "ephemeris_source": gnss_ephemeris_source,
+            "enabled_constellations": gnss_enabled_constellations,
+            "pseudorange_noise_std_m": _param_float(context, "gnss_pr_noise_base"),
+            "doppler_noise_std_mps": _param_float(context, "gnss_dop_noise_base"),
+            "map_occlusion": _param_bool(context, "gnss_enable_map_occlusion"),
+            "skymask": _param_bool(context, "gnss_enable_skymask"),
+            "nlos": _param_bool(context, "gnss_enable_nlos"),
+            "multipath": _param_bool(context, "gnss_enable_multipath"),
+        },
+        "p1": {
+            "lambda_integrity": _param_float(context, "p1.lambda_integrity"),
+            "normalization_budget_fraction": _param_float(context, "p1.normalization_budget_fraction"),
+            "aggregation_mode": LaunchConfiguration("p1.objective_aggregation_mode").perform(context),
+            "smooth_cvar_alpha": _param_float(context, "p1.smooth_cvar_alpha"),
+            "smooth_max_temperature": _param_float(context, "p1.smooth_max_temperature"),
+        },
+        "decision_checkpoint": {
+            "truth_x_m": -9.5, "truth_x_tolerance_m": 0.4,
+            "truth_source_topic": truth_odom_topic,
+            "profile_sample_zero_binding": "planner_truth_odom_state_at_planning_start",
+            "localization_error_limit_m": 0.5,
+            "pair_error_delta_limit_m": 0.25,
+        },
+    }
+    scenario_fingerprint = _scenario_fingerprint(scenario, scenario_contract)
+
     manifest = {
         "artifact_provenance": evidence,
         "experiment": experiment,
         "scenario": scenario,
+        "scenario_contract": scenario_contract,
+        "scenario_fingerprint": scenario_fingerprint,
         "runtime_config_path": runtime_config_path,
         "export_dir": export_dir,
         "run_duration_s": run_duration_s,
@@ -1858,6 +2035,8 @@ def _launch_setup(context):
         "p1.accepted_profile_context_path": p1_accepted_profile_context_path_for_manifest,
         "p1.planning_context_timeline_path": p1_planning_context_timeline_path_for_manifest,
         "p1.pre_admission_attempt_path": p1_pre_admission_attempt_path_for_manifest,
+        "p1.candidate_route_precheck_path": str(
+            Path(export_dir) / "metadata" / "p1_candidate_route_precheck.json"),
         "p1.replacement_decision_path": str(
             Path(p1_debug_path_for_manifest).with_name("planner_p1_replacement_decision.csv")),
         "p1.candidate_retained_profile_path": str(
@@ -1865,6 +2044,7 @@ def _launch_setup(context):
         "p1.objective_aggregation_mode": LaunchConfiguration("p1.objective_aggregation_mode").perform(context),
         "p1.smooth_max_temperature": _param_float(context, "p1.smooth_max_temperature"),
         "p1.smooth_cvar_alpha": _param_float(context, "p1.smooth_cvar_alpha"),
+        "p1.normalization_budget_fraction": _param_float(context, "p1.normalization_budget_fraction"),
         "p1.formal_calibration": formal_calibration,
         "p1.reference_identity": "metrics_only_lambda_0.00001_not_applied",
         "p0.raw_health_topic": "/planning/risk_grid_health",
@@ -2231,6 +2411,19 @@ def _launch_setup(context):
                 {"corridor_wall_thickness_y_m": _param_float(context, "corridor_wall_thickness_y_m")},
                 {"corridor_floor_thickness_z_m": _param_float(context, "corridor_floor_thickness_z_m")},
                 {"corridor_surface_resolution_m": _param_float(context, "corridor_surface_resolution_m")},
+                {"p1_map_fixture": LaunchConfiguration("p1_map_fixture").perform(context)},
+                {"p1_fixture_mirror_y": _param_bool(context, "p1_fixture_mirror_y")},
+                {"p1_fixture_central_obstacle_enabled": _param_bool(context, "p1_fixture_central_obstacle_enabled")},
+                {"p1_fixture_central_x_min_m": _param_float(context, "p1_fixture_central_x_min_m")},
+                {"p1_fixture_central_x_max_m": _param_float(context, "p1_fixture_central_x_max_m")},
+                {"p1_fixture_central_y_half_width_m": _param_float(context, "p1_fixture_central_y_half_width_m")},
+                {"p1_fixture_central_z_max_m": _param_float(context, "p1_fixture_central_z_max_m")},
+                {"p1_fixture_lane_center_m": _param_float(context, "p1_fixture_lane_center_m")},
+                {"p1_fixture_lane_half_width_m": _param_float(context, "p1_fixture_lane_half_width_m")},
+                {"p1_fixture_safe_tree_density_per_m2": _param_float(context, "p1_fixture_safe_tree_density_per_m2")},
+                {"p1_fixture_risky_tree_density_per_m2": _param_float(context, "p1_fixture_risky_tree_density_per_m2")},
+                {"p1_fixture_safe_canopy_probability": _param_float(context, "p1_fixture_safe_canopy_probability")},
+                {"p1_fixture_risky_canopy_probability": _param_float(context, "p1_fixture_risky_canopy_probability")},
                 {"p0_6.fixture.enabled": _param_bool(context, "p0_6.fixture.enabled")},
                 {"p0_6.fixture.name": LaunchConfiguration("p0_6.fixture.name").perform(context)},
                 {"p0_6.fixture.x_min": _param_float(context, "p0_6.fixture.x_min")},
@@ -2336,6 +2529,7 @@ def _launch_setup(context):
                 {"origin_alt_m": 25.0},
                 {"pseudorange_noise_std_m": _param_float(context, "gnss_pr_noise_base")},
                 {"doppler_noise_std_mps": _param_float(context, "gnss_dop_noise_base")},
+                {"random_seed": _param_int(context, "gnss_random_seed")},
                 {"time_source": gnss_time_source},
                 {"trigger_topic": sim_lidar_topic},
                 {"scenario_file": gnss_scenario_file},

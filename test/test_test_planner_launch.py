@@ -14,6 +14,46 @@ SPEC.loader.exec_module(MODULE)
 
 
 class TestPlannerLaunchTest(unittest.TestCase):
+    def test_p1_redesign_scenarios_are_named_and_have_fixed_contracts(self):
+        expected = {
+            "p1_fork_fused_v1",
+            "p1_fork_fused_mirror_v1",
+            "p1_fork_symmetric_null_v1",
+            "p1_soft_risk_island_v1",
+        }
+        self.assertTrue(expected.issubset(MODULE.SCENARIO_PRESETS))
+        for name in expected:
+            preset = MODULE.SCENARIO_PRESETS[name]
+            self.assertEqual(float(preset["init_z"]), 1.5)
+            self.assertEqual(float(preset["goal_z"]), 1.5)
+            self.assertEqual(preset["terminal_wall_enabled"], "false")
+            self.assertEqual(int(preset["forest_random_seed"]), 41021)
+            self.assertEqual(preset["p1_map_fixture"], name)
+
+    def test_fork_and_mirror_share_geometry_identity_except_mirror_flag(self):
+        primary = MODULE.SCENARIO_PRESETS["p1_fork_fused_v1"]
+        mirror = MODULE.SCENARIO_PRESETS["p1_fork_fused_mirror_v1"]
+        differing = {
+            key for key in set(primary) | set(mirror)
+            if primary.get(key) != mirror.get(key)
+        }
+        self.assertEqual(differing, {"p1_map_fixture", "p1_fixture_mirror_y"})
+
+    def test_scenario_fingerprint_is_canonical_and_sensitive(self):
+        payload = {"geometry": {"seed": 11, "density": 0.25}, "risk": ["gnss", "lidar"]}
+        first = MODULE._scenario_fingerprint("p1_fork_fused_v1", payload)
+        reordered = MODULE._scenario_fingerprint(
+            "p1_fork_fused_v1",
+            {"risk": ["gnss", "lidar"], "geometry": {"density": 0.25, "seed": 11}},
+        )
+        changed = MODULE._scenario_fingerprint(
+            "p1_fork_fused_v1",
+            {"geometry": {"seed": 12, "density": 0.25}, "risk": ["gnss", "lidar"]},
+        )
+        self.assertEqual(first, reordered)
+        self.assertNotEqual(first, changed)
+        self.assertRegex(first, r"^sha256:[0-9a-f]{64}$")
+
     def test_p1_fixed_lattice_keeps_replanning_to_planner_goal_boundary(self):
         self.assertEqual(
             MODULE._fixed_lattice_no_replan_threshold({"p1": True}), 0.2

@@ -38,6 +38,45 @@ def profile(count=200, *, length=10.0, offset=0.0, value=lambda fraction: fracti
 
 
 class SmoothCvarContractTest(unittest.TestCase):
+    def test_decision_checkpoint_requires_one_truth_sample_and_stable_estimate(self):
+        truth = [
+            {"stamp_s": 1.0, "x": -10.0, "y": 0.0, "z": 1.5},
+            {"stamp_s": 2.0, "x": -9.5, "y": 0.0, "z": 1.5},
+            {"stamp_s": 3.0, "x": -9.0, "y": 0.0, "z": 1.5},
+        ]
+        estimate = [{"stamp_s": 2.01, "x": -9.2, "y": 0.0, "z": 1.5}]
+        result = metrics.select_decision_checkpoint(truth, estimate)
+        self.assertTrue(result["passed"])
+        self.assertAlmostEqual(result["truth"]["x"], -9.5)
+        self.assertLessEqual(result["localization_error_m"], 0.5)
+
+        ambiguous = metrics.select_decision_checkpoint(
+            truth + [{"stamp_s": 2.1, "x": -9.45, "y": 0.0, "z": 1.5}], estimate
+        )
+        self.assertFalse(ambiguous["passed"])
+        self.assertEqual(ambiguous["status"], "INCONCLUSIVE")
+
+    def test_candidate_route_precheck_requires_both_lanes_and_full_support(self):
+        rows = []
+        for candidate_id, lane, risk in ((1, "lower", 0.2), (2, "upper", 0.7)):
+            for index in range(200):
+                rows.append({
+                    "candidate_id": candidate_id, "lane": lane,
+                    "sample_index": index, "collision_free": 1,
+                    "matched": 1, "c_pi": risk,
+                    "selected": candidate_id == 1,
+                })
+        result = metrics.candidate_route_precheck(rows)
+        self.assertTrue(result["passed"])
+        self.assertEqual(result["lanes"]["lower"]["candidate_count"], 1)
+        self.assertEqual(result["lanes"]["upper"]["candidate_count"], 1)
+        self.assertEqual(result["selected"]["lane"], "lower")
+
+        insufficient = [row for row in rows if not (
+            row["candidate_id"] == 2 and row["sample_index"] == 199
+        )]
+        self.assertFalse(metrics.candidate_route_precheck(insufficient)["passed"])
+
     def test_production_golden_vectors_cover_tie_peak_and_extreme_ranges(self):
         self.assertAlmostEqual(metrics.smooth_cvar([7.25] * 200), 7.25, places=12)
         self.assertAlmostEqual(
@@ -56,17 +95,18 @@ class SmoothCvarContractTest(unittest.TestCase):
 
 
 class FixedArcLatticeContractTest(unittest.TestCase):
-    def test_common_terminal_arc_is_derived_fixed_200_for_unequal_raw_counts(self):
+    def test_decision_checkpoint_comparison_rejects_non_fixed_support(self):
         current = profile(317, length=12.0, value=lambda f: 10.0 - f)
         reference = profile(73, length=8.0, offset=4.0, value=lambda f: 12.0 - 2.0 * f)
-        comparison = metrics.compare_profiles(current, reference)
-        self.assertEqual(comparison["comparison_mode"], "derived_fixed_200_common_terminal_arc")
-        self.assertTrue(comparison["derived"])
+        with self.assertRaisesRegex(ValueError, "200/200"):
+            metrics.compare_profiles(current, reference)
+        comparison = metrics.compare_profiles(profile(), profile(value=lambda f: 2.0 - f))
+        self.assertEqual(comparison["comparison_mode"], "first_deterministic_decision_checkpoint_fixed_200")
+        self.assertFalse(comparison["derived"])
         self.assertEqual(comparison["sample_count"], 200)
-        self.assertAlmostEqual(comparison["common_terminal_arc_length_m"], 8.0)
+        self.assertIsNone(comparison["common_terminal_arc_length_m"])
         self.assertEqual(len(comparison["current_lattice"]), 200)
         self.assertEqual(len(comparison["reference_lattice"]), 200)
-        self.assertAlmostEqual(comparison["current_lattice"][0]["x"], 4.0)
 
     def test_zero_length_and_low_coverage_fail_closed(self):
         zero = profile(200, length=0.0, value=lambda _f: 1.0)
@@ -148,6 +188,8 @@ class CalibrationBindingContractTest(unittest.TestCase):
                 "git_commit": "head",
                 "baseline_commit": "baseline",
                 "scenario": "scenario",
+                "scenario_fingerprint": "sha256:scenario",
+                "scenario_contract": {"fixture": "fork"},
                 "experiment": "p1_degraded_lidar_good",
                 "runtime_hashes": {
                     "launch": "launch", "planner_executable": "planner",
@@ -159,6 +201,7 @@ class CalibrationBindingContractTest(unittest.TestCase):
                     "temperature": 0.01, "eta_bisection_iterations": 100,
                 },
                 "lambda_integrity": 0.00001,
+                "normalization_budget_fraction": 0.30,
                 "configuration_identity": {
                     "experiment": "p1_degraded_lidar_good",
                     "planner_safety_profile": "p1",
@@ -171,6 +214,9 @@ class CalibrationBindingContractTest(unittest.TestCase):
                     "p1.objective_aggregation_mode": "fixed_200_smooth_cvar",
                     "p1.smooth_cvar_alpha": 0.90,
                     "p1.smooth_max_temperature": 0.01,
+                    "p1.normalization_budget_fraction": 0.30,
+                    "scenario_fingerprint": "sha256:scenario",
+                    "scenario_contract": {"fixture": "fork"},
                     "run_duration_s": 90.0,
                     "validation_duration_s": 90.0,
                     "record_bag": False,
@@ -202,6 +248,8 @@ class CalibrationBindingContractTest(unittest.TestCase):
             digest = hashlib.sha256(path.read_bytes()).hexdigest()
             manifest = {
                 "scenario": "scenario",
+                "scenario_fingerprint": "sha256:scenario",
+                "scenario_contract": {"fixture": "fork"},
                 "experiment": "p1_degraded_lidar_good",
                 "p0.resolution_m": 0.75,
                 "p0.horizons_s": [0.0, 0.5, 1.0],
@@ -209,6 +257,7 @@ class CalibrationBindingContractTest(unittest.TestCase):
                 "p1.objective_aggregation_mode": "fixed_200_smooth_cvar",
                 "p1.smooth_cvar_alpha": 0.90,
                 "p1.smooth_max_temperature": 0.01,
+                "p1.normalization_budget_fraction": 0.30,
                 "planner_safety_profile": "p1",
                 "p0.enable_risk_grid": True,
                 "p1.use_integrity_cost": True,

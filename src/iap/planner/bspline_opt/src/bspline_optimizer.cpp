@@ -302,6 +302,7 @@ namespace ego_planner
                             std::string("fixed_200_smooth_cvar"));
     node->declare_parameter("p1.smooth_max_temperature", 0.01);
     node->declare_parameter("p1.smooth_cvar_alpha", 0.90);
+    node->declare_parameter("p1.normalization_budget_fraction", 0.30);
     node->declare_parameter("p4.enable_risk_aware_astar", false);
     node->declare_parameter("p4.lambda_p4_risk", 0.05);
     node->declare_parameter("p4.risk_cost_max", 100.0);
@@ -344,6 +345,17 @@ namespace ego_planner
                         p1_config_.smooth_max_temperature);
     node->get_parameter("p1.smooth_cvar_alpha",
                         p1_config_.smooth_cvar_alpha);
+    node->get_parameter("p1.normalization_budget_fraction",
+                        p1_config_.normalization_budget_fraction);
+    if (!std::isfinite(p1_config_.normalization_budget_fraction) ||
+        p1_config_.normalization_budget_fraction <= 0.0 ||
+        p1_config_.normalization_budget_fraction > 1.0)
+    {
+      RCLCPP_WARN(rclcpp::get_logger("BsplineOptimizer"),
+                  "invalid p1.normalization_budget_fraction %.17g; using 0.30",
+                  p1_config_.normalization_budget_fraction);
+      p1_config_.normalization_budget_fraction = 0.30;
+    }
     p1_config_.max_candidates_per_attempt = std::clamp(
         p1_config_.max_candidates_per_attempt, 1, 8);
     if (p1_config_.objective_aggregation_mode != "adaptive_mean" &&
@@ -2121,6 +2133,8 @@ namespace ego_planner
       const ControlPoints &control_points, const double ts)
   {
     clearP1NormalizedStage();
+    p1_normalized_stage_.budget_fraction =
+        p1_config_.normalization_budget_fraction;
     p1_base_prepass_active_ = true;
     const auto started = std::chrono::steady_clock::now();
     const bool success = BsplineOptimizeTrajRebound(
@@ -4255,6 +4269,8 @@ namespace ego_planner
       const P1BasePrepassTrace &base_prepass, std::string *reason)
   {
     clearP1NormalizedStage();
+    p1_normalized_stage_.budget_fraction =
+        p1_config_.normalization_budget_fraction;
     const auto fail = [&](const char *message) {
       if (reason)
         *reason = message;

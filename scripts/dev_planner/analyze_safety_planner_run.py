@@ -2260,12 +2260,12 @@ def compare_p1_2_risk_profiles(
         "p1_2_cloud_context": p1_cloud_plot_context(p1_2_cloud_rows),
         "p1_1_cloud_context": p1_cloud_plot_context(p1_1_cloud_rows),
         "trajectory_stability": stability,
-        "risk_source": "accepted_trajectory_profile_csv_derived_fixed_200_common_terminal_arc",
+        "risk_source": "accepted_trajectory_profile_csv_first_deterministic_decision_checkpoint_fixed_200",
         "comparison_mode": fixed_comparison.get(
-            "comparison_mode", "derived_fixed_200_common_terminal_arc"
+            "comparison_mode", "first_deterministic_decision_checkpoint_fixed_200"
         ),
         "comparison_error": comparison_error,
-        "derived_lattice": True,
+        "derived_lattice": False,
         "fixed_sample_count": 200,
         "common_terminal_arc_length_m": fixed_comparison.get(
             "common_terminal_arc_length_m", common_terminal_arc_m
@@ -7156,8 +7156,11 @@ def select_latest_recorded_p1_profile(
     bspline_rows: list[dict[str, Any]],
     *,
     source_summary: dict[str, Any] | None = None,
+    truth_rows: list[dict[str, Any]] | None = None,
+    checkpoint_x_m: float = -9.5,
+    checkpoint_tolerance_m: float = 0.4,
 ) -> dict[str, Any]:
-    """Select the newest complete profile whose trajectory is present in rosbag.
+    """Select the recorded profile at the deterministic truth-progress checkpoint.
 
     The profile writer and DDS recorder are separate processes.  During launch
     shutdown, the writer may finish one final 200-row profile after rosbag has
@@ -7184,7 +7187,35 @@ def select_latest_recorded_p1_profile(
         and any(abs(trajectory_start - stamp) <= 1.0e-6 for stamp in recorded_starts)
     })
     source = source_summary or {}
-    selected = recorded_candidates[-1] if recorded_candidates else None
+    checkpoint_candidates = list(recorded_candidates)
+    checkpoint_bindings: list[dict[str, Any]] = []
+    if truth_rows is not None:
+        checkpoint_candidates = []
+        finite_truth = [
+            (finite_float(row.get("stamp")), finite_float(row.get("x")))
+            for row in truth_rows
+        ]
+        finite_truth = [(stamp, x) for stamp, x in finite_truth if stamp is not None and x is not None]
+        for sequence in recorded_candidates:
+            contexts = [
+                row for row in context_rows
+                if finite_float(row.get("profile_seq")) == sequence
+            ]
+            if len(contexts) != 1 or not finite_truth:
+                continue
+            planning_stamp = finite_float(contexts[0].get("planning_start_s"))
+            if planning_stamp is None:
+                planning_stamp = finite_float(contexts[0].get("stamp"))
+            if planning_stamp is None:
+                continue
+            truth_stamp, truth_x = min(finite_truth, key=lambda item: abs(item[0] - planning_stamp))
+            checkpoint_bindings.append({
+                "profile_seq": sequence, "planning_stamp_s": planning_stamp,
+                "truth_stamp_s": truth_stamp, "truth_x_m": truth_x,
+            })
+            if abs(truth_x - checkpoint_x_m) <= checkpoint_tolerance_m:
+                checkpoint_candidates.append(sequence)
+    selected = checkpoint_candidates[0] if len(checkpoint_candidates) == 1 else None
     summary = summarize_p1_accepted_profile_rows(
         rows,
         missing=bool(source.get("missing", False)),
@@ -7204,9 +7235,51 @@ def select_latest_recorded_p1_profile(
     summary.update({
         "recorded_bspline_binding": selected is not None,
         "recorded_profile_candidates": recorded_candidates,
+        "decision_checkpoint_candidates": checkpoint_candidates,
+        "decision_checkpoint_bindings": checkpoint_bindings,
+        "decision_checkpoint_unique": len(checkpoint_candidates) == 1,
         "recorded_bspline_start_stamps": recorded_starts,
     })
     return summary
+
+
+def decision_checkpoint_localization_gate(
+    profile_summary: dict[str, Any],
+    truth_rows: list[dict[str, Any]],
+    estimate_rows: list[dict[str, Any]],
+    *,
+    error_limit_m: float = 0.5,
+) -> dict[str, Any]:
+    selected = finite_float(profile_summary.get("selected_profile_seq"))
+    bindings = [
+        row for row in profile_summary.get("decision_checkpoint_bindings", [])
+        if finite_float(row.get("profile_seq")) == selected
+    ]
+    if len(bindings) != 1:
+        return {"passed": False, "status": "INCONCLUSIVE", "reason": "checkpoint_binding_not_unique"}
+    stamp = finite_float(bindings[0].get("planning_stamp_s"))
+    def nearest(rows: list[dict[str, Any]]) -> dict[str, Any] | None:
+        finite = [
+            row for row in rows
+            if finite_float(row.get("stamp")) is not None
+            and all(finite_float(row.get(key)) is not None for key in ("x", "y", "z"))
+        ]
+        return min(finite, key=lambda row: abs(float(row["stamp"]) - stamp)) if finite and stamp is not None else None
+    truth = nearest(truth_rows)
+    estimate = nearest(estimate_rows)
+    if truth is None or estimate is None:
+        return {"passed": False, "status": "INCONCLUSIVE", "reason": "localization_samples_missing"}
+    error = math.dist(
+        tuple(float(truth[key]) for key in ("x", "y", "z")),
+        tuple(float(estimate[key]) for key in ("x", "y", "z")),
+    )
+    return {
+        "passed": error <= error_limit_m,
+        "status": "PASS" if error <= error_limit_m else "FAIL",
+        "reason": "ok" if error <= error_limit_m else "localization_error_exceeded",
+        "localization_error_m": error, "localization_error_limit_m": error_limit_m,
+        "planning_stamp_s": stamp,
+    }
 
 
 def read_p1_accepted_profile_csv(path: Path) -> tuple[list[dict[str, Any]], dict[str, Any]]:
@@ -16933,6 +17006,8 @@ def _analyze_impl(args: argparse.Namespace) -> dict[str, Any]:
     baseline_metadata: dict[str, Any] = {"missing": True, "topic_counts": {}}
     baseline_artifacts: dict[str, Any] = {}
     health_rows: list[dict[str, Any]] = []
+    odom_truth_rows: list[dict[str, Any]] = []
+    odom_rows: list[dict[str, Any]] = []
     if p0_runtime_phase:
         p0_artifacts, p0_error = (
             read_p0_bag_artifacts(bag_dir, metadata)
@@ -17784,13 +17859,116 @@ def _analyze_impl(args: argparse.Namespace) -> dict[str, Any]:
             p1_accepted_profile_context_rows,
             p1_2_bspline_rows,
             source_summary=p1_accepted_profile_summary,
+            truth_rows=odom_truth_rows,
         )
         p1_2_reference_profile_summary = select_latest_recorded_p1_profile(
             p1_2_reference_profile_rows,
             p1_2_reference_context_rows,
             p1_2_reference_bspline_rows,
             source_summary=p1_2_reference_profile_summary,
+            truth_rows=list(baseline_artifacts.get("odom_truth_rows", []) or []),
         )
+        if not p1_accepted_profile_summary.get("decision_checkpoint_unique"):
+            inconclusive.append(
+                "P1-2 enabled run has no unique truth x=-9.5+/-0.4 m decision checkpoint"
+            )
+        if not p1_2_reference_profile_summary.get("decision_checkpoint_unique"):
+            inconclusive.append(
+                "P1-1 reference run has no unique truth x=-9.5+/-0.4 m decision checkpoint"
+            )
+        current_localization_gate = decision_checkpoint_localization_gate(
+            p1_accepted_profile_summary, odom_truth_rows, odom_rows
+        )
+        reference_localization_gate = decision_checkpoint_localization_gate(
+            p1_2_reference_profile_summary,
+            list(baseline_artifacts.get("odom_truth_rows", []) or []),
+            list(baseline_artifacts.get("odom_rows", []) or []),
+        )
+        for label, gate in (
+            ("enabled", current_localization_gate),
+            ("reference", reference_localization_gate),
+        ):
+            if gate.get("status") == "INCONCLUSIVE":
+                inconclusive.append(f"P1-2 {label} decision-checkpoint localization is inconclusive")
+            elif not gate.get("passed"):
+                failures.append(f"P1-2 {label} decision-checkpoint localization error exceeds 0.5 m")
+        pair_localization_gate = p1_formal_metrics.localization_pair_gate(
+            current_localization_gate, reference_localization_gate
+        )
+        if not pair_localization_gate.get("passed") and all(
+            gate.get("status") != "INCONCLUSIVE"
+            for gate in (current_localization_gate, reference_localization_gate)
+        ):
+            failures.append("P1-2 reference/enabled localization-error delta exceeds 0.25 m")
+        checkpoint_attempt = str(
+            (p1_accepted_profile_summary.get("samples", [{}]) or [{}])[0].get(
+                "planning_attempt_id", ""
+            )
+        )
+        optimization_by_candidate = {
+            str(row.get("candidate_id", "")): row
+            for row in p1_candidate_optimization_rows
+            if str(row.get("planning_attempt_id", "")) == checkpoint_attempt
+        }
+        occupancy_rows = p1_v4_sidecar_rows.get(
+            "p0.occupancy_query_evidence_path", []
+        )
+        precheck_rows: list[dict[str, Any]] = []
+        for row in p1_v4_sidecar_rows.get("p1.candidate_profile_path", []):
+            if (
+                str(row.get("planning_attempt_id", "")) != checkpoint_attempt
+                or str(row.get("phase", "")) != "final"
+            ):
+                continue
+            metadata_row = optimization_by_candidate.get(str(row.get("candidate_id", "")), {})
+            candidate_occupancy = [
+                item for item in occupancy_rows
+                if str(item.get("planning_attempt_id", "")) == checkpoint_attempt
+                and str(item.get("candidate_id", "")) == str(row.get("candidate_id", ""))
+                and str(item.get("phase", "")) == "final"
+                and str(item.get("sample_index", "")) == str(row.get("sample_index", ""))
+            ]
+            interpolation_weight = sum(
+                (finite_float(item.get("temporal_weight")) or 0.0)
+                * (finite_float(item.get("corner_weight")) or 0.0)
+                for item in candidate_occupancy
+            )
+            sample_collision_free = (
+                bool(candidate_occupancy)
+                and abs(interpolation_weight - 1.0) <= 1.0e-9
+                and all(
+                    explicit_csv_bool(item.get("occupancy_available")) is True
+                    and explicit_csv_bool(item.get("inflated_occupied")) is False
+                    for item in candidate_occupancy
+                )
+            )
+            precheck_rows.append({
+                **row,
+                "matched": (
+                    explicit_csv_bool(row.get("valid")) is True
+                    and explicit_csv_bool(row.get("stale")) is False
+                ),
+                "collision_free": (
+                    explicit_csv_bool(metadata_row.get("optimization_success")) is True
+                    and sample_collision_free
+                ),
+                "selected": explicit_csv_bool(metadata_row.get("selected")) is True,
+            })
+        candidate_route_precheck = p1_formal_metrics.candidate_route_precheck(
+            precheck_rows
+        )
+        precheck_path = Path(
+            str(manifest.get("p1.candidate_route_precheck_path", "")).strip()
+            or str(export_dir / "metadata" / "p1_candidate_route_precheck.json")
+        )
+        precheck_path.parent.mkdir(parents=True, exist_ok=True)
+        precheck_path.write_text(
+            json.dumps(candidate_route_precheck, indent=2, sort_keys=True) + "\n"
+        )
+        if not candidate_route_precheck.get("passed"):
+            inconclusive.append(
+                "P1-2 checkpoint candidate precheck lacks collision-feasible full-200 upper/lower routes"
+            )
         calibration_path_value = str(
             getattr(args, "p1_calibration", "") or ""
         ).strip()

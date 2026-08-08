@@ -90,13 +90,46 @@ def _artifact_path(export: Path, manifest: dict[str, Any], key: str, filename: s
     return path
 
 
-def _latest_profile(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    sequences = [_float(row.get("profile_seq")) for row in rows]
-    finite_sequences = [value for value in sequences if value is not None]
-    if not finite_sequences:
+def _decision_profile(
+    rows: list[dict[str, Any]],
+    contexts: list[dict[str, Any]],
+    manifest: dict[str, Any],
+) -> list[dict[str, Any]]:
+    checkpoint = ((manifest.get("scenario_contract", {}) or {}).get(
+        "decision_checkpoint", {}) or {})
+    if (
+        checkpoint.get("truth_source_topic") != "/sim/drone_0/truth_odom"
+        or checkpoint.get("profile_sample_zero_binding")
+        != "planner_truth_odom_state_at_planning_start"
+    ):
+        raise CalibrationError("decision checkpoint is not bound to planner truth odometry")
+    sequences = sorted({
+        value for value in (_float(row.get("profile_seq")) for row in rows)
+        if value is not None
+    })
+    if not sequences:
         raise CalibrationError("accepted profile has no finite profile_seq")
-    selected = max(finite_sequences)
+    qualifying = []
+    for sequence in sequences:
+        sequence_rows = [row for row in rows if _float(row.get("profile_seq")) == sequence]
+        first = min(sequence_rows, key=lambda row: _float(row.get("sample_index")) or 0.0)
+        first_x = _float(first.get("x"))
+        if first_x is not None and abs(first_x - (-9.5)) <= 0.4:
+            qualifying.append(sequence)
+    if len(qualifying) != 1:
+        raise CalibrationError(
+            "accepted profile decision checkpoint at truth x=-9.5+/-0.4 m is missing/ambiguous"
+        )
+    selected = qualifying[0]
     result = [row for row in rows if _float(row.get("profile_seq")) == selected]
+    matching_contexts = [
+        row for row in contexts if _float(row.get("profile_seq")) == selected
+    ]
+    if (
+        len(matching_contexts) != 1
+        or _float(matching_contexts[0].get("planning_start_s")) is None
+    ):
+        raise CalibrationError("decision profile lacks one truth-time planning context")
     indices = [_float(row.get("sample_index")) for row in result]
     integer_indices = [int(value) for value in indices if value is not None and value.is_integer()]
     if len(result) != 200 or set(integer_indices) != set(range(200)):
@@ -126,6 +159,8 @@ def _configuration_identity(manifest: dict[str, Any]) -> dict[str, Any]:
         "baseline_commit": provenance.get("baseline_commit"),
         "experiment": manifest.get("experiment"),
         "scenario": manifest.get("scenario"),
+        "scenario_fingerprint": manifest.get("scenario_fingerprint"),
+        "scenario_contract": manifest.get("scenario_contract"),
         "planner_safety_profile": manifest.get("planner_safety_profile"),
         "p1.use_integrity_cost": manifest.get("p1.use_integrity_cost"),
         "p1.max_candidates_per_attempt": manifest.get("p1.max_candidates_per_attempt"),
@@ -133,6 +168,7 @@ def _configuration_identity(manifest: dict[str, Any]) -> dict[str, Any]:
         "p1.objective_aggregation_mode": manifest.get("p1.objective_aggregation_mode"),
         "p1.smooth_cvar_alpha": manifest.get("p1.smooth_cvar_alpha"),
         "p1.smooth_max_temperature": manifest.get("p1.smooth_max_temperature"),
+        "p1.normalization_budget_fraction": manifest.get("p1.normalization_budget_fraction"),
         "run_duration_s": manifest.get("run_duration_s"),
         "validation_duration_s": manifest.get("validation_duration_s"),
         "record_bag": manifest.get("record_bag"),
@@ -151,6 +187,7 @@ def _validate_fixed_contract(manifest: dict[str, Any]) -> None:
         "p1.objective_aggregation_mode": "fixed_200_smooth_cvar",
         "record_bag": False,
         "run_validator": True,
+        "scenario": "p1_fork_fused_v1",
     }
     for key, value in expected.items():
         if manifest.get(key) != value:
@@ -161,6 +198,7 @@ def _validate_fixed_contract(manifest: dict[str, Any]) -> None:
         "p1.lambda_integrity": 1.0e-5,
         "p1.smooth_cvar_alpha": 0.90,
         "p1.smooth_max_temperature": 0.01,
+        "p1.normalization_budget_fraction": 0.30,
     }
     for key, expected_value in numeric.items():
         value = _float(manifest.get(key))
@@ -197,7 +235,10 @@ def _load_run(export_value: Any) -> dict[str, Any]:
         export, manifest, "p0.occupancy_query_evidence_path",
         "planner_p0_occupancy_query_evidence.csv",
     )
-    profile_rows = _latest_profile(_read_csv(profile_path))
+    contexts = _read_csv(context_path)
+    profile_rows = _decision_profile(
+        _read_csv(profile_path), contexts, manifest
+    )
     for row in profile_rows:
         if row.get("schema_version") != EVIDENCE_SCHEMA or row.get("run_id") != run_id:
             raise CalibrationError(f"profile provenance mismatch: {run_id}")
@@ -217,7 +258,6 @@ def _load_run(export_value: Any) -> dict[str, Any]:
     if not sufficiency["passed"]:
         raise CalibrationError(f"sampling sufficiency failed: {run_id}")
 
-    contexts = _read_csv(context_path)
     sequence = str(profile_rows[0].get("profile_seq", ""))
     matching_contexts = [row for row in contexts if str(row.get("profile_seq", "")) == sequence]
     if len(matching_contexts) != 1:
@@ -451,6 +491,8 @@ def calibrate(
         "git_commit": reference_config["git_commit"],
         "baseline_commit": reference_config["baseline_commit"],
         "scenario": reference_config["scenario"],
+        "scenario_fingerprint": reference_config["scenario_fingerprint"],
+        "scenario_contract": reference_config["scenario_contract"],
         "experiment": reference_config["experiment"],
         "runtime_hashes": reference_runtime,
         "configuration_identity": reference_config,
@@ -463,8 +505,9 @@ def calibrate(
             "temperature": 0.01, "eta_bisection_iterations": 100,
         },
         "lambda_integrity": 1.0e-5,
+        "normalization_budget_fraction": 0.30,
         "comparison": {
-            "mode": "derived_fixed_200_common_terminal_arc", "derived": True,
+            "mode": "first_deterministic_decision_checkpoint_fixed_200", "derived": False,
             "sample_count": 200,
         },
         "conformal": {

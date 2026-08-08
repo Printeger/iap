@@ -126,6 +126,7 @@ namespace ego_planner
       std::string objective_aggregation_mode = "fixed_200_smooth_cvar";
       double smooth_max_temperature = 0.01;
       double smooth_cvar_alpha = 0.90;
+      double normalization_budget_fraction = 0.30;
     };
 
     const P1IntegrityConfig &p1IntegrityConfig() const { return p1_config_; }
@@ -303,7 +304,7 @@ namespace ego_planner
       std::string normalization_mode = "none";
       double normalization_reference_lambda = 1.0e-5;
       double normalization_scale = 1.0;
-      double normalization_budget_fraction = 0.10;
+      double normalization_budget_fraction = 0.30;
       double normalization_base_improvement_budget = 0.0;
       double normalization_reference_displacement_m = 0.025;
       double pre_support_coverage = std::numeric_limits<double>::quiet_NaN();
@@ -571,7 +572,7 @@ namespace ego_planner
     {
       bool enabled = false;
       double reference_lambda = 1.0e-5;
-      double budget_fraction = 0.10;
+      double budget_fraction = 0.30;
       double reference_displacement_m = 0.025;
       double base_improvement_budget = 0.0;
       double raw_gradient_norm = 0.0;

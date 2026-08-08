@@ -26,6 +26,7 @@ struct ForestGroups {
   std::vector<Point> canopy;
   std::vector<Point> terminal_wall;
   std::vector<Point> p0_6_fixture;
+  std::vector<Point> p1_fixture;
 };
 
 struct TrunkInstance {
@@ -322,6 +323,30 @@ class Demo11CorridorMapPublisher : public rclcpp::Node {
         declare_parameter<double>("p0_6.fixture.z_min", 1.0);
     p0_6_fixture_z_max_m_ =
         declare_parameter<double>("p0_6.fixture.z_max", 2.0);
+    p1_map_fixture_ = declare_parameter<std::string>("p1_map_fixture", "");
+    p1_fixture_mirror_y_ = declare_parameter<bool>("p1_fixture_mirror_y", false);
+    p1_fixture_central_obstacle_enabled_ =
+        declare_parameter<bool>("p1_fixture_central_obstacle_enabled", false);
+    p1_fixture_central_x_min_m_ =
+        declare_parameter<double>("p1_fixture_central_x_min_m", -7.0);
+    p1_fixture_central_x_max_m_ =
+        declare_parameter<double>("p1_fixture_central_x_max_m", -2.0);
+    p1_fixture_central_y_half_width_m_ =
+        declare_parameter<double>("p1_fixture_central_y_half_width_m", 0.65);
+    p1_fixture_central_z_max_m_ =
+        declare_parameter<double>("p1_fixture_central_z_max_m", 2.8);
+    p1_fixture_lane_center_m_ =
+        declare_parameter<double>("p1_fixture_lane_center_m", 2.0);
+    p1_fixture_lane_half_width_m_ =
+        declare_parameter<double>("p1_fixture_lane_half_width_m", 0.75);
+    p1_fixture_safe_tree_density_per_m2_ =
+        declare_parameter<double>("p1_fixture_safe_tree_density_per_m2", 0.25);
+    p1_fixture_risky_tree_density_per_m2_ =
+        declare_parameter<double>("p1_fixture_risky_tree_density_per_m2", 0.75);
+    p1_fixture_safe_canopy_probability_ =
+        declare_parameter<double>("p1_fixture_safe_canopy_probability", 0.05);
+    p1_fixture_risky_canopy_probability_ =
+        declare_parameter<double>("p1_fixture_risky_canopy_probability", 0.85);
 
     build_map();
     global_cloud_ = make_cloud(groups_.all);
@@ -329,6 +354,7 @@ class Demo11CorridorMapPublisher : public rclcpp::Node {
     canopy_cloud_ = make_cloud(groups_.canopy);
     terminal_wall_cloud_ = make_cloud(groups_.terminal_wall);
     p0_6_fixture_cloud_ = make_cloud(groups_.p0_6_fixture);
+    p1_fixture_cloud_ = make_cloud(groups_.p1_fixture);
 
     const auto qos = rclcpp::QoS(1).transient_local().reliable();
     global_pub_ = create_publisher<sensor_msgs::msg::PointCloud2>(
@@ -343,6 +369,8 @@ class Demo11CorridorMapPublisher : public rclcpp::Node {
         "/demo11/terminal_wall_cloud", qos);
     p0_6_fixture_pub_ = create_publisher<sensor_msgs::msg::PointCloud2>(
         "/demo11/p0_6_fixture_cloud", qos);
+    p1_fixture_pub_ = create_publisher<sensor_msgs::msg::PointCloud2>(
+        "/demo11/p1_fixture_cloud", qos);
 
     const auto period = std::chrono::duration<double>(
         1.0 / std::max(0.1, publish_rate_hz_));
@@ -392,6 +420,24 @@ class Demo11CorridorMapPublisher : public rclcpp::Node {
         p0_6_fixture_z_min_m_, p0_6_fixture_z_max_m_,
         groups_.p0_6_fixture.size(),
         resolution_, random_seed_);
+    if (!p1_map_fixture_.empty()) {
+      RCLCPP_INFO(
+          get_logger(),
+          "P1 scenario fixture=%s mirror_y=%s points=%zu central=%s "
+          "x=%.2f..%.2f y_half=%.2f z=0..%.2f lane_center=+/-%.2f "
+          "lane_half_width=%.2f safe/risky_density=%.2f/%.2f "
+          "safe/risky_canopy=%.2f/%.2f seed=%d",
+          p1_map_fixture_.c_str(), p1_fixture_mirror_y_ ? "true" : "false",
+          groups_.p1_fixture.size(),
+          p1_fixture_central_obstacle_enabled_ ? "true" : "false",
+          p1_fixture_central_x_min_m_, p1_fixture_central_x_max_m_,
+          p1_fixture_central_y_half_width_m_, p1_fixture_central_z_max_m_,
+          p1_fixture_lane_center_m_, p1_fixture_lane_half_width_m_,
+          p1_fixture_safe_tree_density_per_m2_,
+          p1_fixture_risky_tree_density_per_m2_,
+          p1_fixture_safe_canopy_probability_,
+          p1_fixture_risky_canopy_probability_, random_seed_);
+    }
   }
 
  private:
@@ -587,6 +633,83 @@ class Demo11CorridorMapPublisher : public rclcpp::Node {
             resolution_);
   }
 
+  void add_p1_fixture_geometry() {
+    if (p1_map_fixture_.empty()) {
+      return;
+    }
+    ForestGroups base;
+    const auto add_fixture_trunk = [&](double x, double y, double height) {
+      add_cylinder(base.p1_fixture, base.all, x, y, trunk_radius_m_, 0.0,
+                   height, resolution_);
+    };
+    const auto add_fixture_canopy = [&](double x, double y) {
+      // The lowest crown point is 2.85 m, above the vehicle collision
+      // envelope at the fixed 1.5 m flight altitude.
+      add_sphere_clipped_to_hemisphere(
+          base.p1_fixture, base.all, x, y, 3.25, 0.42,
+          x, y, 2.85, 1.10, canopy_resolution_m_);
+    };
+    const auto add_lane = [&](double center_y, double density,
+                              double canopy_probability, bool short_features) {
+      const int count = std::max(2, static_cast<int>(std::llround(32.0 * density)));
+      const int canopy_count = static_cast<int>(std::llround(count * canopy_probability));
+      for (int index = 0; index < count; ++index) {
+        const double fraction = (static_cast<double>(index) + 0.5) / count;
+        const double x = -7.8 + 16.0 * fraction;
+        const double side = (index % 2 == 0) ? -1.0 : 1.0;
+        const double y = center_y + side * (p1_fixture_lane_half_width_m_ + 0.35);
+        add_fixture_trunk(x, y, short_features ? 1.05 : 2.85);
+        if (index < canopy_count) {
+          add_fixture_canopy(x, y);
+        }
+      }
+    };
+
+    if (p1_fixture_central_obstacle_enabled_) {
+      add_box(base.p1_fixture, base.all,
+              p1_fixture_central_x_min_m_, p1_fixture_central_x_max_m_,
+              -p1_fixture_central_y_half_width_m_,
+              p1_fixture_central_y_half_width_m_, 0.0,
+              p1_fixture_central_z_max_m_, resolution_);
+    }
+
+    if (p1_map_fixture_ == "p1_fork_symmetric_null_v1") {
+      add_lane(-p1_fixture_lane_center_m_,
+               p1_fixture_safe_tree_density_per_m2_,
+               p1_fixture_safe_canopy_probability_, true);
+      const auto lower = base.p1_fixture;
+      for (const auto& point : lower) {
+        append_point(base.p1_fixture, point.x, -point.y, point.z);
+        append_point(base.all, point.x, -point.y, point.z);
+      }
+    } else if (p1_map_fixture_ == "p1_soft_risk_island_v1") {
+      // No blocking object: crowns are offset toward +Y and remain overhead,
+      // leaving the straight route collision-feasible while degrading GNSS.
+      const int count = std::max(4, static_cast<int>(std::llround(
+          24.0 * p1_fixture_risky_tree_density_per_m2_)));
+      for (int index = 0; index < count; ++index) {
+        const double fraction = (static_cast<double>(index) + 0.5) / count;
+        const double x = -6.0 + 8.0 * fraction;
+        const double y = 0.9 + ((index % 2 == 0) ? 1.15 : -1.15);
+        add_fixture_trunk(x, y, 2.85);
+        add_fixture_canopy(x, y);
+      }
+    } else {
+      add_lane(-p1_fixture_lane_center_m_,
+               p1_fixture_safe_tree_density_per_m2_,
+               p1_fixture_safe_canopy_probability_, true);
+      add_lane(p1_fixture_lane_center_m_,
+               p1_fixture_risky_tree_density_per_m2_,
+               p1_fixture_risky_canopy_probability_, false);
+    }
+
+    for (const auto& point : base.p1_fixture) {
+      const double y = p1_fixture_mirror_y_ ? -point.y : point.y;
+      append_point(groups_.p1_fixture, point.x, y, point.z);
+      append_point(groups_.all, point.x, y, point.z);
+    }
+  }
+
   void build_map() {
     groups_ = ForestGroups{};
     trunks_.clear();
@@ -708,6 +831,7 @@ class Demo11CorridorMapPublisher : public rclcpp::Node {
 
     add_corridor_degenerate_geometry();
     add_p0_6_fixture_geometry();
+    add_p1_fixture_geometry();
   }
 
   sensor_msgs::msg::PointCloud2 make_cloud(const std::vector<Point>& points) const {
@@ -741,12 +865,14 @@ class Demo11CorridorMapPublisher : public rclcpp::Node {
     canopy_cloud_.header.stamp = stamp;
     terminal_wall_cloud_.header.stamp = stamp;
     p0_6_fixture_cloud_.header.stamp = stamp;
+    p1_fixture_cloud_.header.stamp = stamp;
     global_pub_->publish(global_cloud_);
     local_pub_->publish(global_cloud_);
     trunk_pub_->publish(trunk_cloud_);
     canopy_pub_->publish(canopy_cloud_);
     terminal_wall_pub_->publish(terminal_wall_cloud_);
     p0_6_fixture_pub_->publish(p0_6_fixture_cloud_);
+    p1_fixture_pub_->publish(p1_fixture_cloud_);
   }
 
   double resolution_ = 0.10;
@@ -807,6 +933,19 @@ class Demo11CorridorMapPublisher : public rclcpp::Node {
   double p0_6_fixture_y_max_m_ = 0.75;
   double p0_6_fixture_z_min_m_ = 1.0;
   double p0_6_fixture_z_max_m_ = 2.0;
+  std::string p1_map_fixture_;
+  bool p1_fixture_mirror_y_ = false;
+  bool p1_fixture_central_obstacle_enabled_ = false;
+  double p1_fixture_central_x_min_m_ = -7.0;
+  double p1_fixture_central_x_max_m_ = -2.0;
+  double p1_fixture_central_y_half_width_m_ = 0.65;
+  double p1_fixture_central_z_max_m_ = 2.8;
+  double p1_fixture_lane_center_m_ = 2.0;
+  double p1_fixture_lane_half_width_m_ = 0.75;
+  double p1_fixture_safe_tree_density_per_m2_ = 0.25;
+  double p1_fixture_risky_tree_density_per_m2_ = 0.75;
+  double p1_fixture_safe_canopy_probability_ = 0.05;
+  double p1_fixture_risky_canopy_probability_ = 0.85;
   std::array<int, 4> region_tree_counts_{};
   std::array<int, 4> region_canopy_counts_{};
   std::vector<TrunkInstance> trunks_;
@@ -816,12 +955,14 @@ class Demo11CorridorMapPublisher : public rclcpp::Node {
   sensor_msgs::msg::PointCloud2 canopy_cloud_;
   sensor_msgs::msg::PointCloud2 terminal_wall_cloud_;
   sensor_msgs::msg::PointCloud2 p0_6_fixture_cloud_;
+  sensor_msgs::msg::PointCloud2 p1_fixture_cloud_;
   rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr global_pub_;
   rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr local_pub_;
   rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr trunk_pub_;
   rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr canopy_pub_;
   rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr terminal_wall_pub_;
   rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr p0_6_fixture_pub_;
+  rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr p1_fixture_pub_;
   rclcpp::TimerBase::SharedPtr timer_;
 };
 

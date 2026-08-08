@@ -29,6 +29,8 @@ class EvidenceBundlePreflightTest(unittest.TestCase):
         manifest = {
             "experiment": "p1_smoke",
             "scenario": "degraded_lidar_good",
+            "scenario_fingerprint": "sha256:preflight-test",
+            "scenario_contract": {"fixture": "fork"},
             "export_dir": str(export),
             "planner_safety_profile": "p1",
             "p1.metrics_only": False,
@@ -555,6 +557,7 @@ class EvidenceBundlePreflightTest(unittest.TestCase):
             "validation_duration_s": 90.0,
             "record_bag": True,
             "run_validator": True,
+            "p1.normalization_budget_fraction": 0.30,
         })
         runtime_hashes = {
             key: provenance["runtime_paths"][key]["sha256"]
@@ -568,6 +571,8 @@ class EvidenceBundlePreflightTest(unittest.TestCase):
             "git_commit": provenance["git_commit"],
             "baseline_commit": provenance["baseline_commit"],
             "scenario": manifest["scenario"],
+            "scenario_fingerprint": manifest["scenario_fingerprint"],
+            "scenario_contract": manifest["scenario_contract"],
             "runtime_hashes": runtime_hashes,
             "p0": {"resolution_m": 0.75, "horizons_s": [0.0, 0.5, 1.0]},
             "smooth_cvar": {
@@ -575,6 +580,7 @@ class EvidenceBundlePreflightTest(unittest.TestCase):
                 "temperature": 0.01, "eta_bisection_iterations": 100,
             },
             "lambda_integrity": 0.00001,
+            "normalization_budget_fraction": 0.30,
             "configuration_identity": {
                 "experiment": manifest["experiment"],
                 "planner_safety_profile": "p1",
@@ -587,6 +593,9 @@ class EvidenceBundlePreflightTest(unittest.TestCase):
                 "p1.objective_aggregation_mode": "fixed_200_smooth_cvar",
                 "p1.smooth_cvar_alpha": 0.90,
                 "p1.smooth_max_temperature": 0.01,
+                "p1.normalization_budget_fraction": 0.30,
+                "scenario_fingerprint": manifest["scenario_fingerprint"],
+                "scenario_contract": manifest["scenario_contract"],
                 "run_duration_s": 90.0,
                 "validation_duration_s": 90.0,
                 "record_bag": False,
