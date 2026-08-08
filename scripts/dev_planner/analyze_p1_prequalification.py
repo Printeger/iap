@@ -89,7 +89,8 @@ def analyze_run(export_value: str | Path) -> dict[str, Any]:
             errors.append(f"contract mismatch: {key}")
     for key, value in (("p1.lambda_integrity", 1e-5),
                        ("p1.normalization_budget_fraction", 0.30),
-                       ("run_duration_s", 90.0), ("validation_duration_s", 90.0)):
+                       ("run_duration_s", 90.0), ("validation_duration_s", 90.0),
+                       ("planner_start_delay_s", 10.0)):
         actual = _number(manifest.get(key))
         if actual is None or abs(actual - value) > 1e-12:
             errors.append(f"contract mismatch: {key}")
@@ -242,6 +243,16 @@ def evaluate_pair(kind: str, reference: dict[str, Any], enabled: dict[str, Any])
     failures = []
     if not reference.get("passed") or not enabled.get("passed"):
         failures.append("one or both run hard gates failed")
+    values = [_number(run.get(key)) for run in (reference, enabled)
+              for key in ("mean", "cvar", "max", "path_length_m")]
+    if any(value is None for value in values) or float(reference.get("path_length_m") or 0) <= 0:
+        failures.append("pair metrics are incomplete")
+        return {"kind": kind, "passed": False, "failures": failures,
+                "mean_improvement": None, "cvar_improvement": None,
+                "max_regression": None, "path_growth": None,
+                "localization_error_delta_m": None,
+                "reference_run_id": reference.get("run_id"),
+                "enabled_run_id": enabled.get("run_id")}
     mean_improvement = float(reference["mean"]) - float(enabled["mean"])
     cvar_improvement = float(reference["cvar"]) - float(enabled["cvar"])
     max_regression = float(enabled["max"]) - float(reference["max"])

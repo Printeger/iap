@@ -43,6 +43,10 @@ class TestPlannerLaunchTest(unittest.TestCase):
             self.assertEqual(preset["terminal_wall_enabled"], "false")
             self.assertEqual(int(preset["forest_random_seed"]), 41021)
             self.assertEqual(preset["p1_map_fixture"], name)
+        self.assertEqual(
+            MODULE.EXPERIMENT_PRESETS["p1_fork_formal"]["planner_start_delay_s"],
+            "10.0",
+        )
 
     def test_fork_and_mirror_share_geometry_identity_except_mirror_flag(self):
         primary = MODULE.SCENARIO_PRESETS["p1_fork_fused_v1"]

@@ -24,6 +24,13 @@ def run(lane, mean, cvar, maximum, length=10.0):
 
 
 class P1PrequalificationTest(unittest.TestCase):
+    def test_missing_metrics_fail_closed_instead_of_raising(self):
+        incomplete = run("lower", 1.0, 1.0, 1.0)
+        incomplete["mean"] = None
+        result = MODULE.evaluate_pair("primary", incomplete, run("lower", .9, .9, .9))
+        self.assertFalse(result["passed"])
+        self.assertIn("metrics", " ".join(result["failures"]))
+
     def test_primary_and_mirror_direction_and_effectiveness(self):
         reference = run("upper", 1.0, 1.1, 1.2)
         primary = MODULE.evaluate_pair("primary", reference, run("lower", .98, 1.08, 1.19))

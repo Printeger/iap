@@ -684,6 +684,7 @@ def validate_calibration_binding(
             "p1.smooth_max_temperature",
             "run_duration_s",
             "validation_duration_s",
+            "planner_start_delay_s",
             "p1.normalization_budget_fraction",
         )
         for key in exact_config_keys:

@@ -636,6 +636,7 @@ EXPERIMENT_PRESETS = {
         "planner_safety_profile": "p1",
         "p0.size_x_m": "42.0",
         "p0.predictor.worker_count": "4",
+        "planner_start_delay_s": "10.0",
         "p1.debug_csv_enable": "true",
         "p1.lambda_integrity": "0.00001",
         "p1.normalization_budget_fraction": "0.30",
@@ -2024,6 +2025,9 @@ def _launch_setup(context):
         "export_dir": export_dir,
         "run_duration_s": run_duration_s,
         "validation_duration_s": validation_duration_s,
+        "planner_start_delay_s": max(
+            0.0, float(LaunchConfiguration("planner_start_delay_s").perform(context))
+        ),
         "record_bag": record_bag,
         "run_validator": run_validator,
         "timebase": {

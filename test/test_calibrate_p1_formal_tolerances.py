@@ -28,6 +28,20 @@ def write_csv(path, rows):
 
 
 class CalibrationToolContractTest(unittest.TestCase):
+    def test_decision_profile_selects_unique_nearest_sequence_in_window(self):
+        manifest = {"scenario_contract": {"decision_checkpoint": {
+            "truth_source_topic": "/sim/drone_0/truth_odom",
+            "profile_sample_zero_binding": "planner_truth_odom_state_at_planning_start",
+        }}}
+        rows = []
+        contexts = []
+        for sequence, x in ((1, -9.8), (2, -9.4)):
+            contexts.append({"profile_seq": str(sequence), "planning_start_s": "1.0"})
+            rows.extend({"profile_seq": str(sequence), "sample_index": str(index), "x": str(x)}
+                        for index in range(200))
+        selected = calibration._decision_profile(rows, contexts, manifest)
+        self.assertEqual({row["profile_seq"] for row in selected}, {"2"})
+
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)
@@ -88,6 +102,7 @@ class CalibrationToolContractTest(unittest.TestCase):
             "planner_safety_profile": "p1",
             "run_duration_s": 90.0,
             "validation_duration_s": 90.0,
+            "planner_start_delay_s": 10.0,
             "record_bag": False,
             "run_validator": True,
             "p0.enable_risk_grid": True,

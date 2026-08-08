@@ -219,6 +219,7 @@ class CalibrationBindingContractTest(unittest.TestCase):
                     "scenario_contract": {"fixture": "fork"},
                     "run_duration_s": 90.0,
                     "validation_duration_s": 90.0,
+                    "planner_start_delay_s": 10.0,
                     "record_bag": False,
                     "run_validator": True,
                 },
@@ -264,6 +265,7 @@ class CalibrationBindingContractTest(unittest.TestCase):
                 "p1.max_candidates_per_attempt": 8,
                 "run_duration_s": 90.0,
                 "validation_duration_s": 90.0,
+                "planner_start_delay_s": 10.0,
                 "record_bag": True,
                 "run_validator": True,
                 "artifact_provenance": {

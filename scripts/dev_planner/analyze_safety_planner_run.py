@@ -7215,6 +7215,17 @@ def select_latest_recorded_p1_profile(
             })
             if abs(truth_x - checkpoint_x_m) <= checkpoint_tolerance_m:
                 checkpoint_candidates.append(sequence)
+    if truth_rows is not None and checkpoint_candidates:
+        distances = {
+            binding["profile_seq"]: abs(binding["truth_x_m"] - checkpoint_x_m)
+            for binding in checkpoint_bindings
+            if binding["profile_seq"] in checkpoint_candidates
+        }
+        best_distance = min(distances.values())
+        checkpoint_candidates = [
+            sequence for sequence in checkpoint_candidates
+            if abs(distances[sequence] - best_distance) <= 1.0e-12
+        ]
     selected = checkpoint_candidates[0] if len(checkpoint_candidates) == 1 else None
     summary = summarize_p1_accepted_profile_rows(
         rows,

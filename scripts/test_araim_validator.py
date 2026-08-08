@@ -13,6 +13,14 @@ from rclpy.node import Node
 from iap.msg import IntegrityReport
 
 
+def safe_publisher_count(node, topic, observed_counts):
+    """Use the last live graph observation when shutdown invalidates context."""
+    try:
+        return int(node.count_publishers(topic))
+    except Exception:  # rclpy raises RCLError after launch begins context shutdown.
+        return int(observed_counts[-1]) if observed_counts else 0
+
+
 class TestAraimValidator(Node):
     def __init__(self):
         super().__init__("test_araim_validator")
@@ -192,7 +200,8 @@ class TestAraimValidator(Node):
         if self.done:
             return
         self.done = True
-        publishers_now = self.count_publishers(self.integrity_topic)
+        publishers_now = safe_publisher_count(
+            self, self.integrity_topic, self.publisher_counts)
         self.publisher_counts.append(int(publishers_now))
 
         failures = []
