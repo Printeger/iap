@@ -61,8 +61,13 @@ class TestPlannerLaunchTest(unittest.TestCase):
         )
         self.assertEqual(
             MODULE.EXPERIMENT_PRESETS["p1_fork_formal"]["p0.horizons_s"],
-            "0.0,0.5,1.0,1.5,2.0,2.5,4.0,6.0,8.0,10.0,12.0,14.0,16.0",
+            "0.0,0.5,1.0,1.5,2.0,2.5,3.5,4.5,5.5,6.5,7.5,8.5,9.5,10.5,11.5,12.5,13.5,14.5,15.5,16.0",
         )
+        horizons = [float(value) for value in
+                    MODULE.EXPERIMENT_PRESETS["p1_fork_formal"]["p0.horizons_s"].split(",")]
+        self.assertLessEqual(max(b - a for a, b in zip(horizons, horizons[1:])), 1.0)
+        self.assertGreaterEqual(horizons[-1], 13.2)
+        self.assertEqual(MODULE.EXPERIMENT_PRESETS["p1_fork_formal"]["p0.size_y_m"], "12.0")
         self.assertEqual(
             MODULE.EXPERIMENT_PRESETS["p1_fork_formal"]["fsm.thresh_replan_time"],
             "0.5",

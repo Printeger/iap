@@ -91,6 +91,7 @@ def analyze_run(export_value: str | Path) -> dict[str, Any]:
                        ("p1.normalization_budget_fraction", 0.30),
                        ("run_duration_s", 90.0), ("validation_duration_s", 90.0),
                        ("planner_start_delay_s", 10.0),
+                       ("p0.size_y_m", 12.0),
                        ("manager/max_vel", 1.0),
                        ("optimization/max_vel", 1.0),
                        ("bspline/limit_vel", 1.0),
@@ -99,8 +100,8 @@ def analyze_run(export_value: str | Path) -> dict[str, Any]:
         if actual is None or abs(actual - value) > 1e-12:
             errors.append(f"contract mismatch: {key}")
     if manifest.get("p0.horizons_s") != [
-        0.0, 0.5, 1.0, 1.5, 2.0, 2.5, 4.0, 6.0, 8.0, 10.0,
-        12.0, 14.0, 16.0
+        0.0, 0.5, 1.0, 1.5, 2.0, 2.5, 3.5, 4.5, 5.5, 6.5,
+        7.5, 8.5, 9.5, 10.5, 11.5, 12.5, 13.5, 14.5, 15.5, 16.0
     ]:
         errors.append("contract mismatch: p0.horizons_s")
     if provenance.get("schema_version") != "p1_evidence_provenance_v4" or not run_id:

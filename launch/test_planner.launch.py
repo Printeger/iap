@@ -319,7 +319,7 @@ P1_FORK_MAP_PRESET = {
     "p1_fixture_mirror_y": "false",
     "p1_fixture_central_obstacle_enabled": "true",
     "p1_fixture_central_x_min_m": "-7.0",
-    "p1_fixture_central_x_max_m": "-2.0",
+    "p1_fixture_central_x_max_m": "-1.0",
     "p1_fixture_central_y_half_width_m": "0.65",
     "p1_fixture_central_z_max_m": "2.8",
     "p1_fixture_lane_center_m": "2.0",
@@ -640,7 +640,8 @@ EXPERIMENT_PRESETS = {
         # checkpoint. The original 0--2.5 s prefix is unchanged; sparse future
         # layers through 16 s extend only this experiment's immutable
         # prediction contract.
-        "p0.horizons_s": "0.0,0.5,1.0,1.5,2.0,2.5,4.0,6.0,8.0,10.0,12.0,14.0,16.0",
+        "p0.horizons_s": "0.0,0.5,1.0,1.5,2.0,2.5,3.5,4.5,5.5,6.5,7.5,8.5,9.5,10.5,11.5,12.5,13.5,14.5,15.5,16.0",
+        "p0.size_y_m": "12.0",
         "planner_start_delay_s": "10.0",
         "fsm.thresh_replan_time": "0.5",
         # Keep successive replans closer than the fixed 0.8 m decision window.

@@ -18,6 +18,7 @@ auto key(const P1FixturePoint& point) {
 
 TEST(P1FixtureGeometry, CentralObstacleLeavesEqualLaneClearance) {
   P1FixtureConfig config;
+  EXPECT_DOUBLE_EQ(config.central_x_max_m, -1.0);
   config.name = "p1_fork_fused_v1";
   const auto points = iap::planner::make_p1_fixture_points(config);
   ASSERT_FALSE(points.empty());
