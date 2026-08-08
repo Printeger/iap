@@ -12,6 +12,8 @@
 #include <sensor_msgs/msg/point_cloud2.hpp>
 #include <sensor_msgs/point_cloud2_iterator.hpp>
 
+#include <iap/planner/p1_fixture_geometry.hpp>
+
 namespace {
 
 struct Point {
@@ -637,76 +639,26 @@ class Demo11CorridorMapPublisher : public rclcpp::Node {
     if (p1_map_fixture_.empty()) {
       return;
     }
-    ForestGroups base;
-    const auto add_fixture_trunk = [&](double x, double y, double height) {
-      add_cylinder(base.p1_fixture, base.all, x, y, trunk_radius_m_, 0.0,
-                   height, resolution_);
-    };
-    const auto add_fixture_canopy = [&](double x, double y) {
-      // The lowest crown point is 2.85 m, above the vehicle collision
-      // envelope at the fixed 1.5 m flight altitude.
-      add_sphere_clipped_to_hemisphere(
-          base.p1_fixture, base.all, x, y, 3.25, 0.42,
-          x, y, 2.85, 1.10, canopy_resolution_m_);
-    };
-    const auto add_lane = [&](double center_y, double density,
-                              double canopy_probability, bool short_features) {
-      const int count = std::max(2, static_cast<int>(std::llround(32.0 * density)));
-      const int canopy_count = static_cast<int>(std::llround(count * canopy_probability));
-      for (int index = 0; index < count; ++index) {
-        const double fraction = (static_cast<double>(index) + 0.5) / count;
-        const double x = -7.8 + 16.0 * fraction;
-        const double side = (index % 2 == 0) ? -1.0 : 1.0;
-        const double y = center_y + side * (p1_fixture_lane_half_width_m_ + 0.35);
-        add_fixture_trunk(x, y, short_features ? 1.05 : 2.85);
-        if (index < canopy_count) {
-          add_fixture_canopy(x, y);
-        }
-      }
-    };
-
-    if (p1_fixture_central_obstacle_enabled_) {
-      add_box(base.p1_fixture, base.all,
-              p1_fixture_central_x_min_m_, p1_fixture_central_x_max_m_,
-              -p1_fixture_central_y_half_width_m_,
-              p1_fixture_central_y_half_width_m_, 0.0,
-              p1_fixture_central_z_max_m_, resolution_);
-    }
-
-    if (p1_map_fixture_ == "p1_fork_symmetric_null_v1") {
-      add_lane(-p1_fixture_lane_center_m_,
-               p1_fixture_safe_tree_density_per_m2_,
-               p1_fixture_safe_canopy_probability_, true);
-      const auto lower = base.p1_fixture;
-      for (const auto& point : lower) {
-        append_point(base.p1_fixture, point.x, -point.y, point.z);
-        append_point(base.all, point.x, -point.y, point.z);
-      }
-    } else if (p1_map_fixture_ == "p1_soft_risk_island_v1") {
-      // No blocking object: crowns are offset toward +Y and remain overhead,
-      // leaving the straight route collision-feasible while degrading GNSS.
-      const int count = std::max(4, static_cast<int>(std::llround(
-          24.0 * p1_fixture_risky_tree_density_per_m2_)));
-      for (int index = 0; index < count; ++index) {
-        const double fraction = (static_cast<double>(index) + 0.5) / count;
-        const double x = -6.0 + 8.0 * fraction;
-        const double y = 0.9 + ((index % 2 == 0) ? 1.15 : -1.15);
-        add_fixture_trunk(x, y, 2.85);
-        add_fixture_canopy(x, y);
-      }
-    } else {
-      add_lane(-p1_fixture_lane_center_m_,
-               p1_fixture_safe_tree_density_per_m2_,
-               p1_fixture_safe_canopy_probability_, true);
-      add_lane(p1_fixture_lane_center_m_,
-               p1_fixture_risky_tree_density_per_m2_,
-               p1_fixture_risky_canopy_probability_, false);
-    }
-
-    for (const auto& point : base.p1_fixture) {
-      const double y = p1_fixture_mirror_y_ ? -point.y : point.y;
-      append_point(groups_.p1_fixture, point.x, y, point.z);
-      append_point(groups_.all, point.x, y, point.z);
+    iap::planner::P1FixtureConfig config;
+    config.name = p1_map_fixture_;
+    config.mirror_y = p1_fixture_mirror_y_;
+    config.central_obstacle_enabled = p1_fixture_central_obstacle_enabled_;
+    config.central_x_min_m = p1_fixture_central_x_min_m_;
+    config.central_x_max_m = p1_fixture_central_x_max_m_;
+    config.central_y_half_width_m = p1_fixture_central_y_half_width_m_;
+    config.central_z_max_m = p1_fixture_central_z_max_m_;
+    config.lane_center_m = p1_fixture_lane_center_m_;
+    config.lane_half_width_m = p1_fixture_lane_half_width_m_;
+    config.safe_tree_density_per_m2 = p1_fixture_safe_tree_density_per_m2_;
+    config.risky_tree_density_per_m2 = p1_fixture_risky_tree_density_per_m2_;
+    config.safe_canopy_probability = p1_fixture_safe_canopy_probability_;
+    config.risky_canopy_probability = p1_fixture_risky_canopy_probability_;
+    config.trunk_radius_m = trunk_radius_m_;
+    config.resolution_m = resolution_;
+    config.canopy_resolution_m = canopy_resolution_m_;
+    for (const auto& point : iap::planner::make_p1_fixture_points(config)) {
+      append_point(groups_.p1_fixture, point.x, point.y, point.z);
+      append_point(groups_.all, point.x, point.y, point.z);
     }
   }
 

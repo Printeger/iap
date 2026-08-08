@@ -14,6 +14,20 @@ SPEC.loader.exec_module(MODULE)
 
 
 class TestPlannerLaunchTest(unittest.TestCase):
+    def test_runtime_and_export_roots_are_optional_and_resolved_per_run(self):
+        defaults = dict(MODULE.ARG_DEFAULTS)
+        self.assertEqual(defaults["runtime_root_dir"], "")
+        self.assertEqual(defaults["export_root_dir"], "")
+        runtime, export = MODULE._resolve_run_roots(
+            "sim_demo11", "p1_fork_formal", "p1_fork_fused_v1", 1234,
+            runtime_root_dir="/work/runtime", export_root_dir="/work/exports",
+        )
+        self.assertEqual(runtime, Path("/work/runtime/iap_sim_demo11_test_planner_1234"))
+        self.assertEqual(
+            export,
+            Path("/work/exports/test_planner_p1_fork_formal_p1_fork_fused_v1_1234"),
+        )
+
     def test_p1_redesign_scenarios_are_named_and_have_fixed_contracts(self):
         expected = {
             "p1_fork_fused_v1",

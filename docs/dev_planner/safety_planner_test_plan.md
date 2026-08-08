@@ -67,9 +67,36 @@ all
 | P3 | reference/local target bias | 替代 global obstacle-aware planner |
 | P4 | collision segment A* guide preference | 处理 collision-free high-risk 轨迹 |
 
-### 1.4 P1-2 独立运行 formal effectiveness（预冻结容差）
+### 1.4 P1-2 一次性 fork campaign（预冻结容差）
 
-P1-2 的 formal effectiveness 不再要求独立运行之间 exact mean/max 都严格下降。它只使用在 formal pair 启动前冻结的 10 组 P1-1/P1-1 空效应校准：
+P1-2 只通过可恢复状态机入口运行，禁止手工跳过或删除失败运行：
+
+```bash
+python3 scripts/dev_planner/run_p1_2_campaign.py --dry-run \
+  --campaign-root results/planner_validation/campaigns/p1-2-dry-run
+
+python3 scripts/dev_planner/run_p1_2_campaign.py \
+  --campaign-root results/planner_validation/campaigns/p1-2-$(date -u +%Y%m%dT%H%M%SZ)
+```
+
+`campaign.json` 绑定 clean code SHA，并为每步保存命令、退出码、run ID、manifest、export、bag 和日志路径。同 SHA 的意外中断可用相同命令恢复；已有失败状态不会被覆盖。launch 的 `runtime_root_dir`、`export_root_dir` 和 `bag_output_dir` 将运行时配置、ROS 日志与证据放在 ignored `results/planner_validation`，空值仍保持历史默认路径。
+
+#### A. 十次串行预资格
+
+状态机先运行主场景两组 reference/enabled，再运行 mirror、symmetric-null、soft-risk 各一组 reference/enabled。全部使用 `experiment:=p1_fork_formal`、90 秒、`lambda=1e-5`、normalization `0.30`、validator 开启、bag 关闭。独立的 `analyze_p1_prequalification.py` 读取 manifest、truth/estimate、accepted/context、candidate、occupancy、validator 和 provenance；它不导入或调用 formal analyzer。
+
+预资格要求上下通道均 collision-feasible 且完整 `200/200`，检查点唯一，单次定位误差 `<=0.5 m`、pair 差值 `<=0.25 m`，P0/context/validator/provenance 门全部通过，并满足：
+
+- 两个主场景 enabled 均选下路，mean 改善 `>0.00836`、CVaR 改善 `>0.00677`、max 不回退；
+- mirror enabled 选上路且 mean/CVaR 改善、max 不回退；
+- null 的 mean/CVaR 绝对变化分别 `<=0.005574670273862936` / `<=0.004511997578310001`，路径增长 `<=5%`；
+- soft-risk enabled 从下方绕行，mean/CVaR 改善且 max 不回退。
+
+真实 publisher 点云是验收对象：主障碍对上下通道等净空；mirror 是逐点精确 Y 反射；null 点集严格对称；soft-risk 仅生成 `z>=2.85 m` 的 overhead crown，不含碰撞高度的树干或中央障碍。
+
+#### B. 二十次校准和 formal pair
+
+仅在十次预资格全部 PASS 后，状态机串行执行 20 次主场景 metrics-only 运行，按相邻顺序固定为 10 个不重叠 pair。校准器冻结场景 fingerprint、SHA、GNSS、P0/P1 配置与 runtime hashes。其 formal 判据为：
 
 ```text
 reference_mean - current_mean > tau_mean
@@ -77,95 +104,7 @@ reference_cvar - current_cvar > tau_cvar
 current_max - reference_max <= tau_max
 ```
 
-这里的容差只适用于独立运行间的 formal 比较。生产 planner 在同一个 immutable snapshot 上的 candidate selection、incumbent replacement、fixed-200 exact-max non-regression 仍然严格；P1 仍是 soft preference，P5 仍是唯一 hard integrity safety authority。
-
-校准与 formal 比较都在两份权威 accepted-profile CSV 的共同末端弧长上生成标记为 `derived=true` 的固定 200 点 lattice。raw CSV 不得改写。mean、exact max 和 smooth CVaR 都来自该 lattice；CVaR 固定为 `fixed_200_smooth_cvar`、`alpha=0.90`、`T=0.01`、100 次 `eta` 二分。
-
-#### A. 先完成 10 组串行空效应运行
-
-每组包含两次独立的 90 秒 P1-1 metrics-only 运行，共 20 次。每次必须使用 clean HEAD、相同 scenario/P0/runtime hashes、`lambda=0.00001`、`record_bag:=false`、`run_validator:=true`。必须保存 manifest、validator、accepted profile/context 和 P0 corner provenance；每个有效 run 必须是健康 P0 和完整 `200/200` support。无效 run 保留，但不得写入最终 10-pair manifest；重新执行 fresh run 补足。
-
-```bash
-ros2 launch iap test_planner.launch.py \
-  experiment:=p1_degraded_lidar_good \
-  planner_safety_profile:=p1 \
-  p1.metrics_only:=true \
-  p1.lambda_integrity:=0.00001 \
-  run_duration_s:=90 validation_duration_s:=90 \
-  start_rviz:=false run_validator:=true record_bag:=false
-```
-
-将 10 组最终有效 export 的绝对路径写入
-`docs/dev_planner/p1_formal_calibration_pairs.example.json` 所示的 manifest，然后冻结容差：
-
-```bash
-python3 scripts/dev_planner/calibrate_p1_formal_tolerances.py \
-  --pairs-manifest /absolute/path/p1_formal_calibration_pairs.json \
-  --output-dir /absolute/path/p1_formal_calibration
-```
-
-输出必须包含：
-
-```text
-p1_formal_tolerance_calibration_v1.json
-p1_formal_calibration_pairs.csv
-p1_formal_calibration_validity.csv
-p1_formal_null_effect_distribution.png
-p1_formal_error_budget.png
-```
-
-JSON 中的三个阈值固定为 `max_j(s_*) + epsilon_det`，其中
-`epsilon_det = 2*(epsilon_grid + epsilon_resample)`。校准成功后禁止修改或重建代码；不得根据 P1-2 结果追加样本、扩大或重算阈值。
-
-#### B. 运行 fresh diagnostic 与 formal pair
-
-先运行一轮 fresh 30 秒 enabled diagnostic 验证 plumbing，不调整阈值。然后用同一个 calibration JSON 串行启动全新的 90 秒 P1-1 和 P1-2；launch 参数只写入 test manifest，不传给 planner：
-
-```bash
-# P1-1 reference
-ros2 launch iap test_planner.launch.py \
-  experiment:=p1_degraded_lidar_good planner_safety_profile:=p1 \
-  p1.metrics_only:=true p1.lambda_integrity:=0.00001 \
-  p1.formal_calibration_manifest:=/absolute/path/p1_formal_tolerance_calibration_v1.json \
-  run_duration_s:=90 validation_duration_s:=90 \
-  start_rviz:=false run_validator:=true record_bag:=true
-
-# P1-2 enabled；必须等 P1-1 完全结束后再启动
-ros2 launch iap test_planner.launch.py \
-  experiment:=p1_degraded_lidar_good planner_safety_profile:=p1 \
-  p1.metrics_only:=false p1.lambda_integrity:=0.00001 \
-  p1.formal_calibration_manifest:=/absolute/path/p1_formal_tolerance_calibration_v1.json \
-  run_duration_s:=90 validation_duration_s:=90 \
-  start_rviz:=false run_validator:=true record_bag:=true
-```
-
-分别只执行一次 preflight：
-
-```bash
-python3 scripts/dev_planner/verify_safety_planner_evidence_bundle.py \
-  --export-dir /absolute/P1-1/export --bag-dir /absolute/P1-1/bag \
-  --metrics-only true --lambda-integrity 0.00001 \
-  --p1-calibration /absolute/path/p1_formal_tolerance_calibration_v1.json
-
-python3 scripts/dev_planner/verify_safety_planner_evidence_bundle.py \
-  --export-dir /absolute/P1-2/export --bag-dir /absolute/P1-2/bag \
-  --metrics-only false --lambda-integrity 0.00001 \
-  --p1-calibration /absolute/path/p1_formal_tolerance_calibration_v1.json
-```
-
-仅在两次 preflight 都 PASS 后，对该 pair 调用一次 formal analyzer：
-
-```bash
-python3 scripts/dev_planner/analyze_safety_planner_run.py \
-  --experiment-id P1-2 \
-  --export-dir /absolute/P1-2/export --bag-dir /absolute/P1-2/bag \
-  --baseline-export-dir /absolute/P1-1/export \
-  --baseline-bag-dir /absolute/P1-1/bag \
-  --p1-calibration /absolute/path/p1_formal_tolerance_calibration_v1.json \
-  --fail-on-threshold
-```
-
-缺失、事后生成、ID/SHA 不一致、HEAD/runtime/config 不匹配的 calibration 一律 FAIL。相邻 raw 空间采样超过 `p0.resolution_m/2`、相邻时间采样超过最小 horizon 间距一半，或 formal corner/resampling residual 超过冻结界时，结果为 `INCONCLUSIVE`，不得扩大容差。最终 PASS 还要求全部既有 provenance、P0、candidate/support、trajectory、P5 isolation 和 PNG gates 通过，并且 `failures=[]`、`inconclusive=[]`。PASS 只授予进入 P1-3 的权限，本步骤不执行 P1-3；旧 formal pair 禁止按新容差重分析。
+容差仅用于独立运行 formal 比较；生产 same-snapshot candidate/replacement exact-max gates、P5 权限和 fallback 语义不变。冻结后禁止修改或重建。状态机随后各运行一次 fresh 90 秒 reference/enabled（bag 开启），各调用一次 preflight；仅两者 PASS 才原子记录并消费唯一一次 formal analyzer invocation。conclusive FAIL/INCONCLUSIVE 后不得调参或重试。PASS 只记录“P1-3 获准”，本流程不运行 P1-3。
 
 ---
 

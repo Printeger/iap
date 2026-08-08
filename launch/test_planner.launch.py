@@ -686,6 +686,8 @@ ARG_DEFAULTS = [
     ("record_bag", "false"),
     ("run_validator", "true"),
     ("bag_output_dir", "/home/dev/ws_iap/src/iap/results/planner_validation/bags"),
+    ("runtime_root_dir", ""),
+    ("export_root_dir", ""),
     ("run_duration_s", "90"),
     ("validation_duration_s", "85"),
     ("allow_truth_alignment", "true"),
@@ -1130,25 +1132,40 @@ def _materialize_gnss_scenario(scenario_file, export_dir):
     return str(path)
 
 
+def _resolve_run_roots(config_name, experiment_name, scenario_name, run_token,
+                       *, runtime_root_dir="", export_root_dir=""):
+    runtime_base = Path(runtime_root_dir).expanduser() if runtime_root_dir else Path("/tmp")
+    export_base = (
+        Path(export_root_dir).expanduser()
+        if export_root_dir
+        else Path("/home/dev/ws_iap/src/iap/results/planner_validation/exports")
+    )
+    runtime_root = runtime_base / f"iap_{config_name}_test_planner_{run_token}"
+    export_dir = export_base / (
+        f"test_planner_{experiment_name}_{scenario_name}_{run_token}"
+    )
+    return runtime_root, export_dir
+
+
 def _runtime_config(context, use_gnss, use_araim, allow_truth_alignment):
     iap_share = Path(get_package_share_directory("iap"))
     base_config = iap_share / "config"
     config_subdir = LaunchConfiguration("config_subdir").perform(context)
     config_name = config_subdir.replace("/", "_").replace("\\", "_")
     run_stamp = int(time.time() * 1000)
-    runtime_root = Path("/tmp") / f"iap_{config_name}_test_planner_{os.getpid()}_{run_stamp}"
-    runtime_config_dir = runtime_root / config_subdir
     experiment_name = _safe_path_component(
         LaunchConfiguration("experiment").perform(context), "experiment"
     )
     scenario_name = _safe_path_component(
         LaunchConfiguration("scenario").perform(context), "scenario"
     )
-    export_dir = (
-        Path("/home/dev/ws_iap/src/iap/results/planner_validation")
-        / "exports"
-        / f"test_planner_{experiment_name}_{scenario_name}_{run_stamp}"
+    runtime_root, export_dir = _resolve_run_roots(
+        config_name, experiment_name, scenario_name,
+        f"{os.getpid()}_{run_stamp}",
+        runtime_root_dir=LaunchConfiguration("runtime_root_dir").perform(context).strip(),
+        export_root_dir=LaunchConfiguration("export_root_dir").perform(context).strip(),
     )
+    runtime_config_dir = runtime_root / config_subdir
     export_dir.mkdir(parents=True, exist_ok=True)
 
     shutil.copytree(base_config / config_subdir, runtime_config_dir, ignore_dangling_symlinks=True)

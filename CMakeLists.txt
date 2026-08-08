@@ -639,7 +639,9 @@ if(DEFINED ENV{ROS_VERSION})
       ament_add_gtest(test_alert_limit_model test/test_alert_limit_model.cpp)
       target_link_libraries(test_alert_limit_model iap)
       ament_add_gtest(test_run_log_manager test/test_run_log_manager.cpp)
+      ament_add_gtest(test_p1_fixture_geometry test/test_p1_fixture_geometry.cpp)
       target_link_libraries(test_run_log_manager iap)
+      target_link_libraries(test_p1_fixture_geometry iap)
       add_test(
         NAME test_phase2_summary_schema
         COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test/test_phase2_summary_schema.py
