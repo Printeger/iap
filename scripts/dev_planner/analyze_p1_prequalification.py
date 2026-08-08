@@ -97,6 +97,10 @@ def analyze_run(export_value: str | Path) -> dict[str, Any]:
         actual = _number(manifest.get(key))
         if actual is None or abs(actual - value) > 1e-12:
             errors.append(f"contract mismatch: {key}")
+    if manifest.get("p0.horizons_s") != [
+        0.0, 0.5, 1.0, 1.5, 2.0, 2.5, 4.0, 6.0, 8.0, 10.0
+    ]:
+        errors.append("contract mismatch: p0.horizons_s")
     if provenance.get("schema_version") != "p1_evidence_provenance_v4" or not run_id:
         errors.append("invalid provenance schema/run ID")
     if provenance.get("git_worktree_clean") is not True:

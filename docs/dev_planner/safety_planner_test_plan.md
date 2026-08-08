@@ -83,7 +83,7 @@ python3 scripts/dev_planner/run_p1_2_campaign.py \
 
 #### A. 十次串行预资格
 
-状态机先运行主场景两组 reference/enabled，再运行 mirror、symmetric-null、soft-risk 各一组 reference/enabled。全部使用 `experiment:=p1_fork_formal`、90 秒、`lambda=1e-5`、normalization `0.30`、validator 开启、bag 关闭。formal preset 将 manager、optimizer 和 B-spline 的速度上限都固定为 `1.0 m/s`，使真实 replan 间距不跨过固定的 `x=-9.5+/-0.4 m` 决策窗口；该速度被 manifest、场景 fingerprint、校准和 formal binding 共同冻结。独立的 `analyze_p1_prequalification.py` 读取 manifest、truth/estimate、accepted/context、candidate、occupancy、validator 和 provenance；它不导入或调用 formal analyzer。
+状态机先运行主场景两组 reference/enabled，再运行 mirror、symmetric-null、soft-risk 各一组 reference/enabled。全部使用 `experiment:=p1_fork_formal`、90 秒、`lambda=1e-5`、normalization `0.30`、validator 开启、bag 关闭。formal preset 将 manager、optimizer 和 B-spline 的速度上限都固定为 `1.0 m/s`，使真实 replan 间距不跨过固定的 `x=-9.5+/-0.4 m` 决策窗口；P0 horizon 保留原 `0–2.5 s` 层并添加 `4/6/8/10 s` 稀疏层，以覆盖该速度下约 8.7 s 的完整局部轨迹。速度和完整 horizon 向量被 manifest、场景 fingerprint、校准和 formal binding 共同冻结。独立的 `analyze_p1_prequalification.py` 读取 manifest、truth/estimate、accepted/context、candidate、occupancy、validator 和 provenance；它不导入或调用 formal analyzer。
 
 预资格要求上下通道均 collision-feasible 且完整 `200/200`，检查点唯一，单次定位误差 `<=0.5 m`、pair 差值 `<=0.25 m`，P0/context/validator/provenance 门全部通过，并满足：
 

@@ -636,6 +636,10 @@ EXPERIMENT_PRESETS = {
         "planner_safety_profile": "p1",
         "p0.size_x_m": "42.0",
         "p0.predictor.worker_count": "4",
+        # Cover the complete fixed-200 local trajectory at the 1 m/s formal
+        # checkpoint. The original 0--2.5 s prefix is unchanged; sparse future
+        # layers extend only this experiment's immutable prediction contract.
+        "p0.horizons_s": "0.0,0.5,1.0,1.5,2.0,2.5,4.0,6.0,8.0,10.0",
         "planner_start_delay_s": "10.0",
         # Keep successive replans closer than the fixed 0.8 m decision window.
         # This is part of the formal configuration identity, not an analyzer
@@ -2015,6 +2019,11 @@ def _launch_setup(context):
             "manager_max_velocity_mps": _param_float(context, "manager/max_vel"),
             "optimizer_max_velocity_mps": _param_float(context, "optimization/max_vel"),
             "bspline_limit_velocity_mps": _param_float(context, "bspline/limit_vel"),
+        },
+        "p0_prediction": {
+            "horizons_s": _csv_floats(
+                LaunchConfiguration("p0.horizons_s").perform(context)
+            ),
         },
         "decision_checkpoint": {
             "truth_x_m": -9.5, "truth_x_tolerance_m": 0.4,
