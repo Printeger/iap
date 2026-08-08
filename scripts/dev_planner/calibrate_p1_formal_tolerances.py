@@ -182,6 +182,7 @@ def _configuration_identity(manifest: dict[str, Any]) -> dict[str, Any]:
         "manager/max_vel": manifest.get("manager/max_vel"),
         "optimization/max_vel": manifest.get("optimization/max_vel"),
         "bspline/limit_vel": manifest.get("bspline/limit_vel"),
+        "fsm.thresh_replan_time": manifest.get("fsm.thresh_replan_time"),
         "record_bag": manifest.get("record_bag"),
         "run_validator": manifest.get("run_validator"),
     }
@@ -210,6 +211,7 @@ def _validate_fixed_contract(manifest: dict[str, Any]) -> None:
         "manager/max_vel": 1.0,
         "optimization/max_vel": 1.0,
         "bspline/limit_vel": 1.0,
+        "fsm.thresh_replan_time": 0.5,
         "p1.lambda_integrity": 1.0e-5,
         "p1.smooth_cvar_alpha": 0.90,
         "p1.smooth_max_temperature": 0.01,

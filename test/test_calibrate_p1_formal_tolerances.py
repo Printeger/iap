@@ -106,6 +106,7 @@ class CalibrationToolContractTest(unittest.TestCase):
             "manager/max_vel": 1.0,
             "optimization/max_vel": 1.0,
             "bspline/limit_vel": 1.0,
+            "fsm.thresh_replan_time": 0.5,
             "record_bag": False,
             "run_validator": True,
             "p0.enable_risk_grid": True,

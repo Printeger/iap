@@ -638,9 +638,11 @@ EXPERIMENT_PRESETS = {
         "p0.predictor.worker_count": "4",
         # Cover the complete fixed-200 local trajectory at the 1 m/s formal
         # checkpoint. The original 0--2.5 s prefix is unchanged; sparse future
-        # layers extend only this experiment's immutable prediction contract.
-        "p0.horizons_s": "0.0,0.5,1.0,1.5,2.0,2.5,4.0,6.0,8.0,10.0",
+        # layers through 16 s extend only this experiment's immutable
+        # prediction contract.
+        "p0.horizons_s": "0.0,0.5,1.0,1.5,2.0,2.5,4.0,6.0,8.0,10.0,12.0,14.0,16.0",
         "planner_start_delay_s": "10.0",
+        "fsm.thresh_replan_time": "0.5",
         # Keep successive replans closer than the fixed 0.8 m decision window.
         # This is part of the formal configuration identity, not an analyzer
         # relaxation: the checkpoint remains truth x=-9.5+/-0.4 m.
@@ -703,6 +705,7 @@ ARG_DEFAULTS = [
     ("validation_duration_s", "85"),
     ("allow_truth_alignment", "true"),
     ("planner_start_delay_s", "0.0"),
+    ("fsm.thresh_replan_time", "1.0"),
     ("enable_preflight_takeoff", "false"),
     ("preflight_ground_z", "0.0"),
     ("preflight_ground_hold_s", "10.0"),
@@ -1438,7 +1441,7 @@ def _ego_planner_node(context, drone_id, planner_odom_topic, cloud_topic, camera
         ],
         parameters=[
             {"fsm/flight_type": 2},
-            {"fsm/thresh_replan_time": 1.0},
+            {"fsm/thresh_replan_time": _param_float(context, "fsm.thresh_replan_time")},
             {"fsm/thresh_no_replan_meter": _fixed_lattice_no_replan_threshold(safety_enabled)},
             {"fsm/planning_horizon": _param_float(context, "manager/planning_horizon")},
             {"fsm/planning_horizen_time": 3.0},
@@ -2019,6 +2022,7 @@ def _launch_setup(context):
             "manager_max_velocity_mps": _param_float(context, "manager/max_vel"),
             "optimizer_max_velocity_mps": _param_float(context, "optimization/max_vel"),
             "bspline_limit_velocity_mps": _param_float(context, "bspline/limit_vel"),
+            "replan_period_s": _param_float(context, "fsm.thresh_replan_time"),
         },
         "p0_prediction": {
             "horizons_s": _csv_floats(
@@ -2051,6 +2055,7 @@ def _launch_setup(context):
         "manager/max_vel": _param_float(context, "manager/max_vel"),
         "optimization/max_vel": _param_float(context, "optimization/max_vel"),
         "bspline/limit_vel": _param_float(context, "bspline/limit_vel"),
+        "fsm.thresh_replan_time": _param_float(context, "fsm.thresh_replan_time"),
         "record_bag": record_bag,
         "run_validator": run_validator,
         "timebase": {

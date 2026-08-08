@@ -688,6 +688,7 @@ def validate_calibration_binding(
             "manager/max_vel",
             "optimization/max_vel",
             "bspline/limit_vel",
+            "fsm.thresh_replan_time",
             "p1.normalization_budget_fraction",
         )
         for key in exact_config_keys:

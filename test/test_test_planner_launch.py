@@ -61,7 +61,11 @@ class TestPlannerLaunchTest(unittest.TestCase):
         )
         self.assertEqual(
             MODULE.EXPERIMENT_PRESETS["p1_fork_formal"]["p0.horizons_s"],
-            "0.0,0.5,1.0,1.5,2.0,2.5,4.0,6.0,8.0,10.0",
+            "0.0,0.5,1.0,1.5,2.0,2.5,4.0,6.0,8.0,10.0,12.0,14.0,16.0",
+        )
+        self.assertEqual(
+            MODULE.EXPERIMENT_PRESETS["p1_fork_formal"]["fsm.thresh_replan_time"],
+            "0.5",
         )
 
     def test_fork_and_mirror_share_geometry_identity_except_mirror_flag(self):
