@@ -4,7 +4,7 @@
 
 | Req ID | Evidence | Verification | Status |
 |---|---|---|---|
-| IAP-RQ-320 / IAP-RQ-400 / IAP-RQ-410 | Ten serial P1-1/P1-1 pairs; derived common-terminal-arc fixed-200 mean/smooth-CVaR/exact-max; corner and resampling error budget; formal manifest ID/SHA/pre-run binding. Production same-snapshot candidate/replacement exact-max gates and P5 authority are unchanged. | `scripts/dev_planner/{p1_formal_metrics.py,calibrate_p1_formal_tolerances.py,verify_safety_planner_evidence_bundle.py,analyze_safety_planner_run.py}`, `launch/test_planner.launch.py`, ADR 0003, `test/{test_p1_formal_metrics.py,test_calibrate_p1_formal_tolerances.py,test_verify_safety_planner_evidence_bundle.py,test_analyze_safety_planner_run_p1_2.py,test_test_planner_launch.py}` | **IMPLEMENTED; 10-pair clean calibration and wholly fresh diagnostic/formal runs pending; old pairs prohibited** |
+| IAP-RQ-320 / IAP-RQ-400 / IAP-RQ-410 | Ten serial P1-1/P1-1 pairs; derived common-terminal-arc fixed-200 mean/smooth-CVaR/exact-max; corner and resampling error budget; formal manifest ID/SHA/pre-run binding. Production same-snapshot candidate/replacement exact-max gates and P5 authority are unchanged. | Clean `000aa07`: 20 valid unique 90-second runs, frozen calibration `p1-null-20260808-000aa07`; diagnostic `cf80084c…` PASS; formal pair `47b2db09…` / `07b9d9ef…`, sole analysis `12f418ec…`; evidence in `docs/dev_planner/p1_formal_test_report_artifacts/2026-08-08-000aa07/` | **FORMAL FAIL (conclusive): mean/CVaR improvement below frozen thresholds; exact max improved; P1-3 prohibited** |
 
 ## 2026-08-06 P1 soft-objective / hard-acceptance incompatibility
 

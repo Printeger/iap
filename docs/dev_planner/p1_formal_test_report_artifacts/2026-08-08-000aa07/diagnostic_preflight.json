@@ -1,0 +1,10 @@
+{
+  "bag_dir": "/home/dev/ws_iap/src/iap/results/planner_validation/bags/test_planner_p1_degraded_lidar_good_gnss_degraded_lidar_good_20260808T082804Z",
+  "errors": [],
+  "export_dir": "/home/dev/ws_iap/src/iap/results/planner_validation/exports/test_planner_p1_degraded_lidar_good_gnss_degraded_lidar_good_1786177684578",
+  "formal_calibration": {},
+  "manifest": "/home/dev/ws_iap/src/iap/results/planner_validation/exports/test_planner_p1_degraded_lidar_good_gnss_degraded_lidar_good_1786177684578/test_planner_manifest.json",
+  "passed": true,
+  "run_id": "cf80084cff7e4d649d972462c9f93365",
+  "schema_version": "p1_evidence_provenance_v4"
+}

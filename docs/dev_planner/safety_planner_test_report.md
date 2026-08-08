@@ -9330,3 +9330,66 @@ Observation: The same fixed-200 acceptance mismatch is mathematical, not a remai
 Verdict: BLOCKED BY DESIGN (formal FAIL; deterministic algorithm/acceptance incompatibility).
 
 Conclusion: The three permitted H4 modes have been exhausted on the same production-evaluated B-spline/snapshot/fixed-lattice fixture: fixed mean, normalized LSE at `T=0.01`, and smooth CVaR at `alpha=0.90`, `T=0.01` all select the only scalar risk-descent side, which violates the simultaneous exact-max gate. Continuing to tune `T`, `alpha`, seeds, anchor, or reference displacement cannot add a risk direction to that planner fixture. The fresh CVaR pair above remains retained but is not accepted formal evidence because baseline P0 freshness, runtime-path provenance, and the obsolete manifest baseline identity fail closed. A design authority must choose whether to (1) authorize an exact-max hard candidate/optimizer constraint, (2) authorize a nonsmooth/epigraph max objective, or (3) redefine formal effectiveness to the chosen differentiable scalar plus mean. Until that choice, fixed lambda `1e-5`, P0/P5 semantics, and all evidence remain unchanged; P1-3 is not authorized or run.
+
+## 2026-08-08 P1 pre-frozen calibration and formal acceptance — clean `000aa07`
+
+The campaign ran from clean HEAD `000aa07722a1d101518781b08fc68a91f987f652`. Build and all 407 tests passed before evidence collection. Workspace capacity was 130 GB, and `TMPDIR`, `ROS_HOME`, and `ROS_LOG_DIR` were campaign-local. No tracked file, build, runtime configuration, or frozen calibration changed from the first calibration run through the sole formal analyzer invocation.
+
+### Calibration
+
+Twenty unique valid 90-second metrics-only runs were executed serially in the predeclared `01A, 01B, …, 10A, 10B` order. The calibration tool revalidated clean provenance, identical HEAD/runtime/configuration, validator PASS, healthy accepted context/P0, finite `200/200` support, corner reconstruction, sampling sufficiency, unique run IDs, and globally non-overlapping process intervals. Two additional runs (`01B` attempt 1 and `10A` attempt 1) were retained as invalid because their terminal profiles lacked complete finite matched support; neither occupied a slot.
+
+All export names below are under `results/planner_validation/exports/`:
+
+| Pair | A run / export | B run / export |
+|---|---|---|
+| 01 | `a09ad20893694fe485210d8d79875999` / `…1786175524920` | `5f5f2a47cff3487d88650e6ebbf811e2` / `…1786175710049` |
+| 02 | `45582788ce314a5f8c25f80d9c05776e` / `…1786175811317` | `973fac7130c5492891e18a166972f738` / `…1786175907748` |
+| 03 | `68652fe09a394a2f8df77947b30f2b0d` / `…1786175999512` | `113fe0263c7243a78592e9c08f00a24c` / `…1786176095925` |
+| 04 | `56c378d221d148b992afa1e28ecbce1e` / `…1786176187582` | `cff6834cb3014a7aaf63b4bf2f82fd4d` / `…1786176283803` |
+| 05 | `18925afeacfc4432bf10726e0011ee31` / `…1786176380020` | `da64b39f213b47069dafc303cccf7ee0` / `…1786176476095` |
+| 06 | `681968b83d4a4126b6b7092cb0cc8048` / `…1786176567744` | `b5fb06eb45b046bd93c2989de7454970` / `…1786176668978` |
+| 07 | `b778ae854aff47a2b0e5101fabde260b` / `…1786176765148` | `51ac05a2fb9b46ef880d98277fba73b9` / `…1786176856768` |
+| 08 | `1207d5e3fbc54d32aa657919a8638a11` / `…1786176957982` | `61e44ca2a1e24f68bdb7a9bb5494a012` / `…1786177049681` |
+| 09 | `b0b6fb222f7747ada4929f7e39def6df` / `…1786177141346` | `6245427ce8bb403bb661fa94041ccb5d` / `…1786177233019` |
+| 10 | `8d0528f8d0d34f88bc58371ad5f938be` / `…1786177427426` | `1df28de1daf14c7fbca9bb585ba41e98` / `…1786177523694` |
+
+Frozen calibration ID `p1-null-20260808-000aa07` has SHA256 `1cd539cde7d999f101927133fff46992dd77332ff94e0d44ecc8e4aaae47c169`. The null maxima are `s_mean=0.00553007250438009`, `s_cvar=0.004467399808827155`, and `s_max=0.004480828487597288`. The deterministic budget is `epsilon_grid=1.6653345369377348e-16`, `epsilon_resample=2.229888474125641e-05`, and `epsilon_det=4.4597769482845884e-05`. Therefore `tau_mean=0.005574670273862936`, `tau_cvar=0.004511997578310001`, and `tau_max=0.004525426257080134`.
+
+![Null-effect distribution](p1_formal_test_report_artifacts/2026-08-08-000aa07/p1_formal_null_effect_distribution.png)
+
+![Frozen error budget](p1_formal_test_report_artifacts/2026-08-08-000aa07/p1_formal_error_budget.png)
+
+### Diagnostic and formal terminal record
+
+The fresh 30-second enabled diagnostic run `cf80084cff7e4d649d972462c9f93365` (export `…1786177684578`, bag `…20260808T082804Z`) passed its sole ordinary preflight with `errors=[]`. Its sole independent diagnostic analysis passed with 56 candidate rows and generated all required figures; this result was plumbing-only and granted no progression.
+
+![Diagnostic fan-out](p1_formal_test_report_artifacts/2026-08-08-000aa07/p1_diag_fanout_funnel.png)
+
+![Diagnostic provenance](p1_formal_test_report_artifacts/2026-08-08-000aa07/p1_diag_artifact_provenance_timeline.png)
+
+The wholly fresh serial formal pair was P1-1 reference run `47b2db0965654615858ed8151960884b` (export `…1786177823988`, bag `…20260808T083023Z`) followed by P1-2 enabled run `07b9d9ef7f7741808948757d00ecb033` (export `…1786177929751`, bag `…20260808T083209Z`). Both manifests bound the same prelaunch calibration ID/path/SHA, and each bundle's only preflight passed with `errors=[]`. The formal analyzer was invoked exactly once; analysis `12f418eca0e042a7b88f80918ad67172` returned `status=FAIL`, `warnings=[]`, and `inconclusive=[]`.
+
+On the derived fixed-200 common terminal arc, reference/current mean were `0.422723385075205 / 0.42053498464043243`, an improvement of `0.002188400434772586`, leaving margin `-0.00338626983909035` against `tau_mean`. Reference/current smooth CVaR were `0.4229506897153588 / 0.4207697400598349`, an improvement of `0.0021809496555239005`, leaving margin `-0.0023310479227861005` against `tau_cvar`. Reference/current exact max were `0.4265749078690929 / 0.4245884435173881`, so max regression was `-0.0019864643517047975` and passed with `0.006511890608784932` margin to `tau_max`. The effect gate and its derivative cause-exclusion gate failed because mean and CVaR improvements did not exceed their frozen null-effect thresholds; all numerical sufficiency checks remained conclusive.
+
+![Formal result dashboard](p1_formal_test_report_artifacts/2026-08-08-000aa07/p1_2_result_dashboard.png)
+
+![Formal risk-profile comparison](p1_formal_test_report_artifacts/2026-08-08-000aa07/p1_2_risk_profile_vs_p1_1.png)
+
+![Formal scene overlay](p1_formal_test_report_artifacts/2026-08-08-000aa07/p1_2_risk_trajectory_scene_overlay.png)
+
+![Formal P0/context](p1_formal_test_report_artifacts/2026-08-08-000aa07/p1_2_p0_health_and_context_freshness.png)
+
+![Formal artifact provenance](p1_formal_test_report_artifacts/2026-08-08-000aa07/p1_2_artifact_provenance.png)
+
+![Formal candidate funnel](p1_formal_test_report_artifacts/2026-08-08-000aa07/p1_2_candidate_optimization_funnel.png)
+
+![Formal cause exclusion](p1_formal_test_report_artifacts/2026-08-08-000aa07/p1_2_cause_exclusion_summary.png)
+
+Long-term JSON/CSV/PNG evidence is frozen under `p1_formal_test_report_artifacts/2026-08-08-000aa07/`, including both formal preflights, diagnostic preflight, calibration outputs, formal summary, hard gates, and the derived lattice.
+
+After evidence copying, the three exact manifest-owned bag directories were deleted without globbing. Diagnostic bag size/SHA were `722,738,042 bytes` / `7fadf6d41b2a621bbc1f382ec0d07a2aa559feb0d7b3d2f4e60e548348127171`; P1-1 were `2,058,583,149 bytes` / `d54cea0774a4503e6597f930514cf8dc802ab475c1dd4533f4e9c743df608c34`; P1-2 were `2,139,214,797 bytes` / `d363d0113b6c7a56837683297390a3098b34a5a22c19b69067e47cb89d4bcd53`. All three paths are absent. Available space increased by `4,910,833,664 bytes`; deletion is irreversible and the analyzer cannot be rerun from these bags.
+
+Verdict: **FAIL** (formal effect below pre-frozen mean/CVaR thresholds; conclusive).
+
+Conclusion: P1-3 is not authorized and was not executed. This formal pair is terminal evidence and will not be replaced, reused, or analyzed again.
