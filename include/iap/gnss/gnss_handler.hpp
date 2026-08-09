@@ -28,9 +28,10 @@ namespace iap {
  *   new_factors.add(gnss_factors);
  * @endcode
  *
- * Each call to get_factors() drains all epochs that fall within
- * `time_tolerance` seconds of `frame_stamp` and produces one
- * PseudorangeFactor + one DopplerFactor per non-excluded satellite.
+ * Each call to get_factors() consumes only the nearest epoch within
+ * `time_tolerance` seconds of `frame_stamp` and produces one PseudorangeFactor
+ * + one DopplerFactor per non-excluded satellite. Older superseded epochs are
+ * discarded; later epochs remain queued for a future state.
  *
  * Satellite state (sat_pos, sat_vel) is stored in ECEF.  The receiver ECEF
  * position is reconstructed inside each factor as:
@@ -63,7 +64,7 @@ class GnssHandler {
   void insert_epoch(const GnssEpoch& epoch);
 
   /**
-   * @brief Collect all buffered epochs near @p frame_stamp and build factors.
+   * @brief Collect the nearest buffered epoch to @p frame_stamp and build factors.
    *
    * @param frame_idx    Smoother index i (used to form keys X(i), V(i), C(i))
    * @param frame_stamp  Timestamp of the LiDAR/IMU frame [s]

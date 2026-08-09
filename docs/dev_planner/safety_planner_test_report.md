@@ -9652,3 +9652,28 @@ startup blocks are absent. Compact hashes are under
 `p1_formal_test_report_artifacts/2026-08-09-62396ac/`; raw c35 evidence remains
 losslessly compressed under
 `results/planner_validation/campaigns/p1-2-20260809-62396ac-c35/`.
+
+### c36 retained incomplete result and single-epoch GNSS binding
+
+Clean c36 (`24b9b8719998528efe7ca6095a1c3c7ff39539da`) completed all ten
+prescribed serial 90-second runs after the formal-only NAIVE stationary
+initialization repair. Seven passed every hard gate. The failed primary-1
+enabled, primary-2 reference, and soft-risk reference runs had checkpoint
+localization errors of `82.768`, `182.789`, and `63.030 m`; the other seven
+were `0.190..0.220 m`. All ten retained collision-feasible two-arm `200/200`
+candidate proofs. Null passed; both primary enabled runs selected lower, but
+the hard-gate failures make c36 incomplete/non-comparable. Only c31/c32 count.
+
+The three divergent logs uniquely show two GNSS receiver epochs collapsed
+onto the first odometry state (`164` factors / 82 satellite records) and false
+clock drift of `6.2..6.6 m/s`. Stable runs injected one epoch (`82` factors /
+41 satellites). `GnssHandler` now selects only the nearest in-tolerance epoch,
+discards superseded older epochs, and preserves later epochs for their own
+state. A red/green backlog regression proves both properties. A stressed 4 s
+LiDAR-delay installed-runtime smoke still injected exactly 82 factors, solved
+clock drift `0.0779 m/s`, and aligned at `0.011°`. No GNSS noise, geometry,
+risk, lambda, normalization, P0/P5, collision, or fallback parameter changed.
+Compact evidence is under
+`p1_formal_test_report_artifacts/2026-08-09-24b9b87/`; raw evidence remains
+losslessly compressed under `results/planner_validation/campaigns/c36_24b9b87/`.
+Calibration, formal analyzer, and P1-3 did not run.

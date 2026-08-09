@@ -2109,6 +2109,7 @@ def _launch_setup(context):
             "odometry_initialization_mode": odometry_initialization_mode,
             "odometry_initialization_window_s": 1.0,
             "required_strict_margin_s": lidar_start_delay_s - 1.0,
+            "gnss_epoch_frame_binding": "nearest_single_epoch",
         },
         "gnss": {
             "scenario_file": str(gnss_scenario_file),

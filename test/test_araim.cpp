@@ -21,12 +21,51 @@
 #include <iap/integrity/integrity_monitor.hpp>
 #include <iap/integrity/integrity_report_mapping.hpp>
 #include <iap/integrity/numerical_guard.hpp>
+#include <iap/gnss/gnss_handler.hpp>
 #include <iap/odometry/estimation_frame.hpp>
 #include <iap/predictor/lidar_observability_fim.hpp>
 #include <iap/trunk/trunk_map.hpp>
 #include <iap/trunk/trunk_types.hpp>
 
 using namespace iap;
+
+TEST(GnssHandlerEpochBindingTest, ConsumesOnlyNearestEpochAndRetainsLaterEpoch) {
+  GnssHandler::Params params;
+  params.time_tolerance = 0.1;
+  GnssHandler handler(params);
+
+  auto epoch = [](double stamp, int satellite_count) {
+    GnssEpoch value;
+    value.stamp = stamp;
+    for (int i = 0; i < satellite_count; ++i) {
+      SatObs sat;
+      sat.sat_id = i + 1;
+      sat.constellation = 'G';
+      sat.elevation = 1.0;
+      value.sats.push_back(sat);
+    }
+    return value;
+  };
+
+  handler.insert_epoch(epoch(99.93, 1));
+  handler.insert_epoch(epoch(100.04, 2));
+  handler.insert_epoch(epoch(100.08, 3));
+
+  std::vector<GnssEpoch> consumed;
+  const auto first = handler.get_factors(
+      0, 100.0, Eigen::Vector3d::Zero(), &consumed);
+  ASSERT_EQ(consumed.size(), 1U);
+  EXPECT_DOUBLE_EQ(consumed.front().stamp, 100.04);
+  EXPECT_EQ(first.size(), 4U);
+  EXPECT_EQ(handler.queue_size(), 1U);
+
+  const auto second = handler.get_factors(
+      1, 100.1, Eigen::Vector3d::Zero(), &consumed);
+  ASSERT_EQ(consumed.size(), 1U);
+  EXPECT_DOUBLE_EQ(consumed.front().stamp, 100.08);
+  EXPECT_EQ(second.size(), 6U);
+  EXPECT_EQ(handler.queue_size(), 0U);
+}
 
 // ============================================================================
 // §1: ARAIM core

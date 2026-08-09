@@ -1,5 +1,11 @@
 # Traceability Matrix (IAP)
 
+## 2026-08-09 P1-2 c36 retained result and single-epoch GNSS binding
+
+| Req ID | Evidence | Verification | Status |
+|---|---|---|---|
+| IAP-RQ-020 / IAP-RQ-320 / IAP-RQ-400 / IAP-RQ-410 / IAP-RQ-422 | Clean c36 (`24b9b87`) completed 10/10 runs but passed 7/10 hard gates. Three startup divergences (`82.768/182.789/63.030 m`) uniquely coincide with first-update double-epoch injection (`164` factors, 82 satellite records, false `6.2..6.6 m/s` clock drift); stable runs inject 82 factors/41 satellites. | `GnssHandlerEpochBindingTest.ConsumesOnlyNearestEpochAndRetainsLaterEpoch` red/green proves one nearest epoch per state and preservation of the next epoch. Manifest/fingerprint bind `nearest_single_epoch`; all scientific parameters remain unchanged. | **IMPLEMENTED; c36 incomplete/non-comparable; only c31/c32 count; fresh campaign required; formal analyzer zero; P1-3 prohibited** |
+
 ## 2026-08-09 P1-2 deterministic stationary initialization repair
 
 | Req ID | Evidence | Verification | Status |

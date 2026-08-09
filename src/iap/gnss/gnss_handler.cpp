@@ -55,21 +55,41 @@ gtsam::NonlinearFactorGraph GnssHandler::get_factors(
     const Eigen::Vector3d&  anc_ecef,
     std::vector<GnssEpoch>* out_epochs) {
 
-  // Drain matching epochs from the queue
+  // Bind at most one receiver epoch to a state. Multiple observations from
+  // distinct times constrain distinct clock/velocity states and must never be
+  // collapsed onto one LiDAR frame during startup backlog recovery.
   std::vector<GnssEpoch> matched;
   {
     std::lock_guard<std::mutex> lk(mutex_);
     auto& q = epoch_queue_;
+    const double oldest_allowed = frame_stamp - params_.time_tolerance;
     auto it = q.begin();
     while (it != q.end()) {
-      if (std::abs(it->stamp - frame_stamp) <= params_.time_tolerance) {
-        matched.push_back(std::move(*it));
-        it = q.erase(it);
-      } else if (it->stamp < frame_stamp - params_.time_tolerance) {
+      if (it->stamp < oldest_allowed) {
         it = q.erase(it);  // too old — discard
       } else {
         ++it;
       }
+    }
+
+    auto nearest = q.end();
+    double nearest_dt = params_.time_tolerance;
+    for (it = q.begin(); it != q.end(); ++it) {
+      const double dt = std::abs(it->stamp - frame_stamp);
+      if (dt <= nearest_dt) {
+        nearest = it;
+        nearest_dt = dt;
+      }
+    }
+    if (nearest != q.end()) {
+      const double selected_stamp = nearest->stamp;
+      matched.push_back(std::move(*nearest));
+      // The selected epoch supersedes every older buffered epoch. Preserve
+      // later epochs, including those also inside this frame's tolerance, for
+      // their own future state.
+      q.erase(std::remove_if(q.begin(), q.end(), [selected_stamp](const GnssEpoch& epoch) {
+        return epoch.stamp <= selected_stamp;
+      }), q.end());
     }
   }
 
