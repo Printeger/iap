@@ -1,5 +1,11 @@
 # Traceability Matrix (IAP)
 
+## 2026-08-09 P1-2 terminal prequalification result
+
+| Req ID | Evidence | Verification | Status |
+|---|---|---|---|
+| IAP-RQ-320 / IAP-RQ-400 / IAP-RQ-410 / IAP-RQ-422 | Clean c32 (`da5b15a`) passed all ten per-run hard gates and exact two-arm proofs, but both primary enabled runs selected upper and regressed mean/CVaR/max; mirror direction failed and null CVaR exceeded tolerance. c17, c31, and c32 are three complete comparable primary scientific failures after compliant repairs. | Independent summary and compact hashes are frozen in `docs/dev_planner/p1_formal_test_report_artifacts/2026-08-09-da5b15a/`; raw CSV evidence is retained losslessly gzipped. No calibration, formal run/analyzer, or P1-3 occurred. | **P1-2 BLOCKED at prequalification by preregistered three-campaign stop rule; P1-3 prohibited** |
+
 ## 2026-08-09 P1-2 continuous physical GNSS-mask repair
 
 | Req ID | Evidence | Verification | Status |

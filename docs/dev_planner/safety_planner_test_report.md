@@ -9537,3 +9537,27 @@ mask above the canonical reference arm so the real voxel/raycast model cannot
 pass through gaps between sparse canopy balls. Exact mirror, null/soft scene
 isolation, flight-layer clearance, and unchanged tree/canopy parameters are
 covered by generated-point tests. A fresh campaign must restart at run one.
+
+### c32 terminal prequalification result
+
+Clean c32 (`da5b15a`) completed all ten prescribed serial 90-second runs with
+10/10 per-run hard gates, validator, localization, unique-checkpoint, and exact
+collision-feasible two-arm `200/200` proofs passing. The independent analyzer
+returned conclusive FAIL. Both primary enabled runs selected upper rather than
+the required lower arm. Pair 1/2 mean improvements were
+`-0.0066301236/-0.0064866900`, smooth-CVaR improvements were
+`-0.0106870542/-0.0104222447`, and exact-max regressions were
+`0.0073815138/0.0067824229`. Mirror enabled selected lower rather than upper;
+null CVaR change magnitude `0.0058367864` exceeded the frozen
+`0.0045119976` limit. Soft-risk passed every pair gate.
+
+The physical v12 mask changed real candidate risks but did not close the
+primary direction/effect gate. c17, c31, and c32 are three complete comparable
+fresh reproductions after compliant repairs. The preregistered stop rule is
+therefore met; further geometry tuning from c32 would be selective tuning and
+would violate the experiment protocol. P1-2 is blocked at prequalification.
+Calibration, formal preflight/pair, formal analyzer, and P1-3 were not run.
+Compact evidence and hashes are archived under
+`p1_formal_test_report_artifacts/2026-08-09-da5b15a/`; losslessly-gzipped raw
+evidence remains under
+`results/planner_validation/campaigns/p1-2-20260809-da5b15a-c32/`.
