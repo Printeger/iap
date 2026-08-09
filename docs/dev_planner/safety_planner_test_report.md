@@ -9469,3 +9469,14 @@ prepass that may recover the remaining 7–43 occupied samples. The next clean
 campaign adds only 17 s and 18 s P0 layers, preserving the <=1 s layer gap and
 all safety/fallback semantics. Raw evidence remains under
 `results/planner_validation/campaigns/p1-2-20260809-b764a15-c10/`.
+
+Clean c11 (`bf001d0`) completed 10/10 validator-PASS runs and eliminated all
+temporal misses. The remaining 19–45 misses were occupied corners: paths
+returned toward center immediately after the late `x=-2` box exit while P0
+still conservatively reconstructed that box, and the nominally fly-over 1.05 m
+safe/null trunks grazed the flight layer. The next clean campaign moves the
+unchanged-length, equal-clearance box to `x=-9..-4`, immediately after the
+checkpoint, and lowers only the safe/null short trunks to 0.55 m. Risky tall
+features, density/canopy, mirror/null symmetry, P0, lambda, and all gates remain
+unchanged. Raw c11 evidence remains under
+`results/planner_validation/campaigns/p1-2-20260809-bf001d0-c11/`.

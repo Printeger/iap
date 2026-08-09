@@ -17,8 +17,8 @@ struct P1FixtureConfig {
   std::string name;
   bool mirror_y = false;
   bool central_obstacle_enabled = true;
-  double central_x_min_m = -7.0;
-  double central_x_max_m = -2.0;
+  double central_x_min_m = -9.0;
+  double central_x_max_m = -4.0;
   double central_y_half_width_m = 0.65;
   double central_z_max_m = 2.8;
   double lane_center_m = 2.0;
@@ -80,7 +80,7 @@ inline std::vector<P1FixturePoint> make_p1_fixture_points(const P1FixtureConfig&
       const double side = index % 2 == 0 ? -1.0 : 1.0;
       const double y = center_y + side * (config.lane_half_width_m + 0.35);
       append_p1_cylinder(base, x, y, config.trunk_radius_m,
-                         short_features ? 1.05 : 2.85, config.resolution_m);
+                         short_features ? 0.55 : 2.85, config.resolution_m);
       if (index < canopy_count) append_p1_canopy(base, x, y, config.canopy_resolution_m);
     }
   };
