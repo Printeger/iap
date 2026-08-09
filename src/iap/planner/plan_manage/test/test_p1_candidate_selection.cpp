@@ -247,6 +247,39 @@ TEST(P1CandidateSelectionTest,
 }
 
 TEST(P1CandidateSelectionTest,
+     CollisionFeasibleCandidateReplacesCollisionInfeasibleIncumbent) {
+  auto incumbent = attempt19();
+  incumbent.replacement_comparison_available = true;
+
+  auto candidate = attempt19();
+  candidate.replacement_incumbent_collision_infeasible = true;
+
+  const auto decisions =
+      ego_planner::selectP1Candidates({candidate}, &incumbent);
+
+  ASSERT_EQ(decisions.size(), 1U);
+  EXPECT_TRUE(decisions[0].selected);
+  EXPECT_TRUE(decisions[0].replace_published_trajectory);
+  EXPECT_EQ(decisions[0].replacement_reason,
+            "p0_collision_feasible_replacement");
+}
+
+TEST(P1CandidateSelectionTest,
+     MissingIncumbentEvidenceIsNotTreatedAsCollisionInfeasible) {
+  auto incumbent = attempt19();
+  incumbent.replacement_comparison_available = true;
+
+  auto candidate = attempt19();
+
+  const auto decisions =
+      ego_planner::selectP1Candidates({candidate}, &incumbent);
+
+  ASSERT_EQ(decisions.size(), 1U);
+  EXPECT_TRUE(decisions[0].selected);
+  EXPECT_FALSE(decisions[0].replace_published_trajectory);
+}
+
+TEST(P1CandidateSelectionTest,
      RejectsRefinementThatRegressesSelectedSeedMean) {
   const auto decision = ego_planner::decideP1RefinementRisk({
       true,
@@ -281,6 +314,22 @@ TEST(P1CandidateSelectionTest,
       0.41, 0.43});
   EXPECT_TRUE(decision.accept);
   EXPECT_EQ(decision.reason, "p1_refined_risk_preference_improved");
+}
+
+TEST(P1CandidateSelectionTest,
+     CollisionFeasibleRefinementReplacesCollisionInfeasibleIncumbent) {
+  ego_planner::P1RefinementRiskEvidence evidence{
+      true,
+      0.42, 0.44,
+      0.40, 0.43,
+      true,
+      0.0, 0.0};
+  evidence.replacement_incumbent_collision_infeasible = true;
+
+  const auto decision = ego_planner::decideP1RefinementRisk(evidence);
+
+  EXPECT_TRUE(decision.accept);
+  EXPECT_EQ(decision.reason, "p0_collision_feasible_refined_replacement");
 }
 
 TEST(P1CandidateSelectionTest,

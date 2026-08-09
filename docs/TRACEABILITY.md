@@ -1,5 +1,11 @@
 # Traceability Matrix (IAP)
 
+## 2026-08-09 P1-2 collision-feasible replacement closure
+
+| Req ID | Evidence | Verification | Status |
+|---|---|---|---|
+| IAP-RQ-320 / IAP-RQ-400 / IAP-RQ-410 / IAP-RQ-422 | Retained c14 (`be1e8ea`) 10/10 validator PASS; fixed-200 fan-out candidates existed, but an occupancy-invalid incumbent was indistinguishable from missing comparison evidence and metrics-only fan-out lacked persistent collision constraints. The repair carries P0-derived symmetric base-point/direction constraints, filters both channels on fixed-200 support, and permits replacement only for fully classified occupancy-only incumbent failure. | `test_p1_candidate_selection` proves occupancy-only replacement, STEP3 closure, and missing-evidence rejection; `test_planning_risk_context` covers formal-only symmetric fan-out; calibration tests prove unique nearest-event selection and typed same-event reference resolution. A new clean campaign is required. | **IMPLEMENTED; c14 retained; calibration/formal/analyzer not started; P1-3 prohibited** |
+
 ## 2026-08-07 P1 pre-frozen independent-run formal tolerance
 
 | Req ID | Evidence | Verification | Status |

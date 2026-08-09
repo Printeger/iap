@@ -4181,7 +4181,13 @@ namespace ego_planner
           trajectory.evaluateDeBoorT(trajectory_start_t_s + t_s),
           risk_query_base_time_s_ + t_s, &sample);
       if (!hit || !sample.valid || sample.stale || !std::isfinite(sample.cost))
-        return summary;
+      {
+        if (sample.reason == "occupied")
+          ++summary.occupied_sample_count;
+        else
+          ++summary.evidence_miss_count;
+        continue;
+      }
       sum += sample.cost;
       maximum = std::max(maximum, sample.cost);
       ++summary.valid_sample_count;

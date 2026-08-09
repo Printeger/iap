@@ -36,6 +36,10 @@ struct P1CandidateEvidence {
   double replacement_max_c_pi = 0.0;
   double replacement_incumbent_mean_c_pi = 0.0;
   double replacement_incumbent_max_c_pi = 0.0;
+  // True only when the identical fixed lattice was evaluated completely and
+  // every unsupported incumbent sample was rejected by P0 occupancy.  This
+  // is distinct from a missing/stale/out-of-bounds risk tuple.
+  bool replacement_incumbent_collision_infeasible = false;
 };
 
 struct P1CandidateDecision {
@@ -64,6 +68,7 @@ struct P1RefinementRiskEvidence {
   double replacement_candidate_max_c_pi = 0.0;
   double replacement_incumbent_mean_c_pi = 0.0;
   double replacement_incumbent_max_c_pi = 0.0;
+  bool replacement_incumbent_collision_infeasible = false;
 };
 
 struct P1RefinementRiskDecision {

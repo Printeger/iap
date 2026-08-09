@@ -1058,6 +1058,7 @@ namespace ego_planner
           p1_config.max_candidates_per_attempt, 1, 8);
       const auto fanout_before_supplement =
           bspline_optimizer_->lastP1FanoutDiagnostics();
+      bool collision_fanout_active = false;
       if (trajs.size() == 1 &&
           fanout_before_supplement.singleton_due_to_empty_segments &&
           initial_p1_validation.occupied_miss_count > 0 &&
@@ -1071,8 +1072,19 @@ namespace ego_planner
         for (const auto& points : fanout) {
           ControlPoints candidate = prototype;
           candidate.points = points;
+          for (int column = 3; column < points.cols() - 3; ++column) {
+            const Eigen::Vector3d displacement =
+                points.col(column) - prototype.points.col(column);
+            if (displacement.norm() <= 1.0e-9) continue;
+            candidate.base_point[column].push_back(
+                prototype.points.col(column));
+            candidate.direction[column].push_back(displacement.normalized());
+            candidate.clearance = std::max(
+                candidate.clearance, pp_.p1_collision_fanout_clearance_m_);
+          }
           trajs.push_back(std::move(candidate));
         }
+        collision_fanout_active = trajs.size() > 1;
       }
       bool normalized_p1_stage = p1_objective_allowed &&
           !p1_config.metrics_only && p1_config.lambda_integrity != 0.0;
@@ -1212,13 +1224,24 @@ namespace ego_planner
             write_p1_candidate_trace ? "optimizer_start" : "base_optimizer_start",
             planning_risk_context_.optimizer_start_s, "started", "ok");
         std::string optimizer_reason = "ok";
-        const bool p1_candidate_success = normalized_p1_stage
+        bool p1_candidate_success = normalized_p1_stage
             ? bspline_optimizer_->BsplineOptimizeTrajNormalizedP1(
                   ctrl_pts_temp, final_cost, trajs[i], ts,
                   candidate_prepasses[static_cast<std::size_t>(i)],
                   &optimizer_reason)
             : bspline_optimizer_->BsplineOptimizeTrajRebound(
                   ctrl_pts_temp, final_cost, trajs[i], ts);
+        if (p1_candidate_success && collision_fanout_active)
+        {
+          const auto support = bspline_optimizer_->evaluateP1FixedLatticeRisk(
+              UniformBspline(ctrl_pts_temp, 3, ts));
+          p1_candidate_success = support.full_support;
+          if (!p1_candidate_success) optimizer_reason =
+              support.occupied_sample_count > 0 &&
+              support.evidence_miss_count == 0
+              ? "p0_collision_support_not_full"
+              : "p0_collision_support_unavailable";
+        }
         planning_risk_context_.optimizer_end_s = plannerNow().seconds();
         appendPlanningRiskContextTimeline(
             write_p1_candidate_trace ? "optimizer_end" : "base_optimizer_end",
@@ -1393,9 +1416,15 @@ namespace ego_planner
                   bspline_optimizer_->evaluateP1FixedLatticeRisk(
                       local_data_.position_traj_, incumbent_start_t_s,
                       comparison_duration_s);
-              if (!candidate_summary.full_support ||
-                  !incumbent_summary.full_support)
+              if (!candidate_summary.full_support)
                 continue;
+              if (!incumbent_summary.full_support)
+              {
+                evidence[index].replacement_incumbent_collision_infeasible =
+                    incumbent_summary.occupied_sample_count > 0 &&
+                    incumbent_summary.evidence_miss_count == 0;
+                continue;
+              }
               evidence[index].replacement_comparison_available = true;
               evidence[index].replacement_mean_c_pi =
                   candidate_summary.mean_c_pi;
@@ -1659,7 +1688,13 @@ namespace ego_planner
               bspline_optimizer_->evaluateP1FixedLatticeRisk(
                   local_data_.position_traj_, incumbent_start_t_s,
                   comparison_duration_s);
-          if (candidate_summary.full_support && incumbent_summary.full_support)
+          if (candidate_summary.full_support && !incumbent_summary.full_support)
+          {
+            candidate_evidence.replacement_incumbent_collision_infeasible =
+                incumbent_summary.occupied_sample_count > 0 &&
+                incumbent_summary.evidence_miss_count == 0;
+          }
+          else if (candidate_summary.full_support && incumbent_summary.full_support)
           {
             // Replacement only compares P1 risk.  Objective fields are kept
             // finite so the policy can diagnose this as an incumbent evidence
@@ -1876,10 +1911,17 @@ namespace ego_planner
             selected_trace->replacement_candidate_max_c_pi =
                 refined_comparison.max_c_pi;
           }
+          else if (refined_comparison.full_support &&
+                   incumbent_comparison.occupied_sample_count > 0 &&
+                   incumbent_comparison.evidence_miss_count == 0)
+          {
+            refinement_evidence.replacement_incumbent_collision_infeasible = true;
+          }
         }
         // STEP3 replacement evidence is part of full support.  Never reuse
         // the STEP1 tuple after control points or timing have changed.
-        if (!refinement_evidence.replacement_comparison_available)
+        if (!refinement_evidence.replacement_comparison_available &&
+            !refinement_evidence.replacement_incumbent_collision_infeasible)
           refinement_evidence.full_support = false;
       }
       const auto refinement_decision =

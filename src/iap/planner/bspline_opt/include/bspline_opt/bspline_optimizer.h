@@ -220,6 +220,8 @@ namespace ego_planner
     {
       bool full_support = false;
       int valid_sample_count = 0;
+      int occupied_sample_count = 0;
+      int evidence_miss_count = 0;
       double mean_c_pi = std::numeric_limits<double>::quiet_NaN();
       double max_c_pi = std::numeric_limits<double>::quiet_NaN();
     };

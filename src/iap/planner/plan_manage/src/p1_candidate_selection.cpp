@@ -30,6 +30,12 @@ bool p1Descent(const P1CandidateEvidence& value) {
 
 bool replacesIncumbent(const P1CandidateEvidence& candidate,
                        const P1CandidateEvidence& incumbent) {
+  // IAP-RQ-320/IAP-RQ-400/IAP-RQ-410: P0 occupancy is a classified hard
+  // infeasibility, not an absent P1 comparison tuple.
+  if (candidate.full_support &&
+      candidate.replacement_incumbent_collision_infeasible) {
+    return true;
+  }
   // Once the caller enables shared-window comparison, every candidate must
   // carry its own candidate/incumbent tuple.  A missing tuple rejects closed;
   // it must never fall back to comparing unequal full-profile domains.
@@ -125,7 +131,10 @@ std::vector<P1CandidateDecision> selectP1Candidates(
     decision.replacement_reason = "initial_p1_candidate";
   } else if (replacesIncumbent(candidates[winner], *incumbent)) {
     decision.replace_published_trajectory = true;
-    decision.replacement_reason = "p1_risk_preference_improved";
+    decision.replacement_reason =
+        candidates[winner].replacement_incumbent_collision_infeasible
+        ? "p0_collision_feasible_replacement"
+        : "p1_risk_preference_improved";
   } else {
     decision.replacement_reason = "p1_replacement_risk_regression";
   }
@@ -160,6 +169,11 @@ P1RefinementRiskDecision decideP1RefinementRisk(
   }
 
   if (evidence.incumbent_available) {
+    if (evidence.replacement_incumbent_collision_infeasible) {
+      decision.accept = true;
+      decision.reason = "p0_collision_feasible_refined_replacement";
+      return decision;
+    }
     const double candidate_mean = evidence.replacement_comparison_available
         ? evidence.replacement_candidate_mean_c_pi : evidence.refined_mean_c_pi;
     const double candidate_max = evidence.replacement_comparison_available

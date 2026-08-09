@@ -109,22 +109,41 @@ def _decision_profile(
     })
     if not sequences:
         raise CalibrationError("accepted profile has no finite profile_seq")
-    qualifying = []
+    sequence_distance = {}
     for sequence in sequences:
         sequence_rows = [row for row in rows if _float(row.get("profile_seq")) == sequence]
         first = min(sequence_rows, key=lambda row: _float(row.get("sample_index")) or 0.0)
         first_x = _float(first.get("x"))
         if first_x is not None and abs(first_x - (-9.5)) <= 0.4:
-            qualifying.append(sequence)
-    event_starts = {
-        _float(context.get("planning_start_s"))
+            sequence_distance[sequence] = abs(first_x - (-9.5))
+    sequence_events = {
+        sequence: _float(context.get("planning_start_s"))
+        for sequence in sequence_distance
         for context in contexts
-        if _float(context.get("profile_seq")) in qualifying
+        if _float(context.get("profile_seq")) == sequence
     }
-    if len(event_starts) != 1 or None in event_starts:
+    if set(sequence_events) != set(sequence_distance) or any(
+            event is None for event in sequence_events.values()):
         raise CalibrationError(
             "accepted profile decision checkpoint at truth x=-9.5+/-0.4 m is missing/ambiguous"
         )
+    event_distance = {}
+    for sequence, event in sequence_events.items():
+        event_distance[event] = min(
+            event_distance.get(event, math.inf), sequence_distance[sequence])
+    if not event_distance:
+        raise CalibrationError(
+            "accepted profile decision checkpoint at truth x=-9.5+/-0.4 m is missing/ambiguous"
+        )
+    minimum_distance = min(event_distance.values())
+    nearest_events = [event for event, distance in event_distance.items()
+                      if abs(distance - minimum_distance) <= 1e-12]
+    if len(nearest_events) != 1:
+        raise CalibrationError(
+            "accepted profile decision checkpoint at truth x=-9.5+/-0.4 m is missing/ambiguous"
+        )
+    qualifying = [sequence for sequence, event in sequence_events.items()
+                  if event == nearest_events[0]]
     if len(qualifying) > 1:
         observations = [
             sequence for sequence in qualifying
