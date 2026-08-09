@@ -111,12 +111,12 @@ class P1PrequalificationTest(unittest.TestCase):
                 expected,
             )
             optimization, candidates = MODULE._candidate_evidence_paths(
-                export, manifest, metrics_only=True
+                export, manifest
             )
             self.assertIsNone(optimization)
             self.assertEqual(candidates, expected)
             optimization, candidates = MODULE._candidate_evidence_paths(
-                export, manifest, metrics_only=False
+                export, manifest
             )
             self.assertIsNone(optimization)
             self.assertEqual(candidates, expected)

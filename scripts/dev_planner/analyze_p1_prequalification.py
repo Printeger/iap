@@ -65,9 +65,8 @@ def _artifact(export: Path, manifest: dict[str, Any], key: str, filename: str) -
 
 
 def _candidate_evidence_paths(
-    export: Path, manifest: dict[str, Any], metrics_only: bool
+    export: Path, manifest: dict[str, Any]
 ) -> tuple[Path | None, Path]:
-    del metrics_only
     return None, _artifact(
         export, manifest, "p1.prequalification_candidate_profile_path",
         "planner_p1_prequalification_candidate_profile.csv",
@@ -289,7 +288,7 @@ def analyze_run(export_value: str | Path) -> dict[str, Any]:
     precheck = {"passed": False, "status": "INCONCLUSIVE"}
     try:
         optimization_path, candidates_path = _candidate_evidence_paths(
-            export, manifest, metrics_only)
+            export, manifest)
         optimization = (_read_csv(optimization_path)
                         if optimization_path is not None else [])
         candidates = _read_csv(candidates_path)
