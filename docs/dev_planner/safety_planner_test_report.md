@@ -9406,3 +9406,38 @@ Available space increased by `4,910,833,664 bytes`; deletion is irreversible and
 Verdict: **FAIL** (formal effect below pre-frozen mean/CVaR thresholds; conclusive).
 
 Conclusion: P1-3 is not authorized and was not executed. This formal pair is terminal evidence and will not be replaced, reused, or analyzed again.
+
+## P1-2 one-shot fork campaign — prequalification blocker (2026-08-09)
+
+The new SHA-bound campaign entry and independent prequalification analyzer were
+run continuously through repeated fresh qualification attempts. The terminal
+three campaigns c6/c7/c8 each completed all ten prescribed serial 90-second
+runs with 10/10 validator PASS. Each stopped at `prequalification_analysis`
+with exit 2. No calibration run, formal pair, preflight, formal bag, or formal
+analyzer invocation started; P1-3 was not run.
+
+The stable blocker is collision-feasible fixed-200 support at the immutable
+truth checkpoint `x=-9.5+/-0.4 m`:
+
+| Campaign | Clean HEAD | Result |
+|---|---|---|
+| c6 | `fbe090c` | primary support `98..192/200`; occupied misses and some missing checkpoints |
+| c7 | `c8f7341` | primary/mirror/null `185..194/200`; 6–15 occupied entrance samples; soft-risk checkpoint missing |
+| c8 | `db97778` | primary `167/166`, mirror/null `125..162`; soft-risk checkpoint missing |
+
+Compliant repairs preserved the unchanged 1-second voxel-stale rule, exact
+mirror/null symmetry, equal upper/lower clearance, density/canopy settings,
+fixed lambda, normalization, fallback semantics, and all analyzer thresholds.
+They removed temporal-stale failures and localized collision misses, but did
+not close the gate. Enabled profiles consequently remained base fallbacks and
+P1 was not applied at the checkpoint, so pair effectiveness metrics were not
+scientifically available.
+
+Further shrinking/removing the central obstacle or treating occupied/partial
+profiles as complete would violate the preregistered central-obstacle and
+collision-feasible `200/200` contract. The three-fresh-campaign stop condition
+is therefore met: **P1-2 BLOCKED; P1-3 is not authorized**.
+
+Compact evidence and SHA256 bindings are archived under
+`p1_formal_test_report_artifacts/2026-08-09-db97778/`; raw campaign exports
+remain under ignored `results/planner_validation/campaigns/`.
