@@ -283,7 +283,6 @@ def analyze_run(export_value: str | Path) -> dict[str, Any]:
 
     precheck = {"passed": False, "status": "INCONCLUSIVE"}
     try:
-        attempt = str(profile[0]["planning_attempt_id"])
         optimization_path, candidates_path = _candidate_evidence_paths(
             export, manifest, metrics_only)
         optimization = (_read_csv(optimization_path)
@@ -309,14 +308,14 @@ def analyze_run(export_value: str | Path) -> dict[str, Any]:
                 **row,
                 "matched": _truthy(row.get("valid")) and not _truthy(row.get("stale")),
                 "collision_free": _truthy(row.get("collision_free"))
-                if use_prequalification_profile else (
+                if metrics_only else (
                     bool(matching) and abs(weight - 1.0) <= 1e-9
                     and _truthy(meta.get("optimization_success"))
                     and all(_truthy(item.get("occupancy_available"))
                             and not _truthy(item.get("inflated_occupied"))
                             for item in matching)),
                 "selected": _truthy(row.get("selected"))
-                if use_prequalification_profile else _truthy(meta.get("selected")),
+                if metrics_only else _truthy(meta.get("selected")),
             })
         precheck = formal_metrics.candidate_route_precheck(precheck_rows)
         if not precheck.get("passed"):
