@@ -68,6 +68,21 @@ inline void append_p1_canopy(std::vector<P1FixturePoint>& points, double cx,
       }
 }
 
+inline void append_p1_observability_landmarks(
+    std::vector<P1FixturePoint>& points, double resolution) {
+  // Symmetric survey pylons outside both flight lanes add longitudinal and
+  // vertical LiDAR structure without changing tree density/canopy parameters
+  // or obstructing either fork homotopy.
+  for (const double x : {-10.5, -7.0, -3.5, 0.0}) {
+    const std::size_t first = points.size();
+    append_p1_box(points, x - 0.25, x + 0.25, -4.85, -4.35,
+                  0.0, 1.25, resolution);
+    const std::size_t last = points.size();
+    for (std::size_t index = first; index < last; ++index)
+      points.push_back({points[index].x, -points[index].y, points[index].z});
+  }
+}
+
 inline std::vector<P1FixturePoint> make_p1_fixture_points(const P1FixtureConfig& config) {
   std::vector<P1FixturePoint> base;
   const auto add_lane = [&](double center_y, double density,
@@ -108,6 +123,7 @@ inline std::vector<P1FixturePoint> make_p1_fixture_points(const P1FixtureConfig&
     add_lane(config.lane_center_m, config.risky_tree_density_per_m2,
              config.risky_canopy_probability, false);
   }
+  append_p1_observability_landmarks(base, config.resolution_m);
   if (config.mirror_y)
     for (auto& point : base) point.y = -point.y;
   return base;

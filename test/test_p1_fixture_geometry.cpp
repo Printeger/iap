@@ -76,7 +76,7 @@ TEST(P1FixtureGeometry, SoftRiskIslandHasNoCollisionHeightPoints) {
   const auto points = iap::planner::make_p1_fixture_points(config);
   ASSERT_FALSE(points.empty());
   EXPECT_TRUE(std::all_of(points.begin(), points.end(), [](const auto& point) {
-    return point.z >= 2.85;
+    return std::abs(point.y) >= 3.0 || point.z >= 2.85;
   }));
 }
 
@@ -87,7 +87,7 @@ TEST(P1FixtureGeometry, SymmetricSafeLaneFeaturesStayBelowFlightLayer) {
   const auto points = iap::planner::make_p1_fixture_points(config);
   ASSERT_FALSE(points.empty());
   EXPECT_TRUE(std::all_of(points.begin(), points.end(), [](const auto& point) {
-    return point.z <= 0.55 + 1.0e-12;
+    return std::abs(point.y) >= 3.0 || point.z <= 0.55 + 1.0e-12;
   }));
 }
 
@@ -104,6 +104,28 @@ TEST(P1FixtureGeometry, RiskyLaneTrunksLeaveConservativeCenterClearance) {
     return !risky_trunk(point) ||
            std::abs(point.y - config.lane_center_m) >= 1.35;
   }));
+}
+
+TEST(P1FixtureGeometry, FormalFixturesProvideSymmetricCollisionNeutralLidarLandmarks) {
+  P1FixtureConfig config;
+  config.name = "p1_soft_risk_island_v1";
+  const auto points = iap::planner::make_p1_fixture_points(config);
+  std::vector<P1FixturePoint> landmarks;
+  std::copy_if(points.begin(), points.end(), std::back_inserter(landmarks),
+               [](const auto& point) {
+                 return std::abs(point.y) >= 4.25 && point.z >= 0.6 &&
+                     point.z <= 1.4;
+               });
+  ASSERT_GT(landmarks.size(), 100U);
+  std::vector<std::tuple<double, double, double>> values;
+  for (const auto& point : landmarks) values.push_back(key(point));
+  std::sort(values.begin(), values.end());
+  for (const auto& point : landmarks) {
+    EXPECT_TRUE(std::binary_search(
+        values.begin(), values.end(), std::tuple{point.x, -point.y, point.z}));
+    EXPECT_GT(std::abs(point.y) - config.lane_center_m,
+              config.lane_half_width_m + 1.0);
+  }
 }
 
 }  // namespace

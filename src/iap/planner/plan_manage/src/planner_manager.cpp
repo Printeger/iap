@@ -553,6 +553,8 @@ namespace ego_planner
         local_data_.position_traj_, ++p1_accepted_profile_seq_, local_data_.traj_id_,
         publish_stamp_s, planning_risk_context_.planning_start_s,
         trajectory_frame_id_, local_data_.start_time_.seconds());
+    published_trajectory_p1_objective_applied_ =
+        planning_risk_context_.p1_objective_applied;
     appendPlanningRiskContextTimeline("publish", publish_stamp_s,
         written ? "published" : "published_without_profile",
         written ? "ok" : "accepted_profile_write_failed");
@@ -560,7 +562,7 @@ namespace ego_planner
     return written;
   }
 
-  bool EGOPlannerManager::recordP1MetricsOnlyReferenceObservation(
+  bool EGOPlannerManager::recordP1FormalDecisionObservation(
       const double observation_stamp_s)
   {
     if (!bspline_optimizer_ || !planning_risk_context_.active ||
@@ -583,25 +585,42 @@ namespace ego_planner
     const auto horizon_max_it = std::max_element(horizons.begin(), horizons.end());
     const double snapshot_horizon_s = horizon_max_it == horizons.end()
         ? std::numeric_limits<double>::quiet_NaN() : *horizon_max_it;
-    if (!shouldRecordP1MetricsOnlyReferenceObservation(
+    const Eigen::Vector3d observation_position =
+        local_data_.position_traj_.evaluateDeBoorT(trajectory_start_t_s);
+    const bool formal_checkpoint_observation =
+        pp_.p1_collision_fanout_preserve_homotopies_ &&
+        shouldRecordP1FormalCheckpointObservation(
+            true, local_data_.traj_id_,
+            p1_formal_observed_trajectory_id_,
+            remaining_duration_s, snapshot_horizon_s,
+            observation_position.x(), -9.5, 0.4);
+    const bool legacy_metrics_observation =
+        !pp_.p1_collision_fanout_preserve_homotopies_ &&
+        shouldRecordP1MetricsOnlyReferenceObservation(
             config.metrics_only, local_data_.traj_id_,
-            p1_metrics_reference_observed_trajectory_id_,
-            remaining_duration_s, snapshot_horizon_s))
+            p1_formal_observed_trajectory_id_,
+            remaining_duration_s, snapshot_horizon_s);
+    if (!formal_checkpoint_observation && !legacy_metrics_observation)
       return false;
 
+    const bool enabled_incumbent_observation = !config.metrics_only;
+    const bool observed_objective_applied = enabled_incumbent_observation &&
+        published_trajectory_p1_objective_applied_;
+    const std::string observation_reason = enabled_incumbent_observation
+        ? "p1_enabled_retained_incumbent_observation"
+        : "metrics_only_reference_observation";
     planning_risk_context_.candidate_id = 0;
-    planning_risk_context_.p1_objective_allowed = false;
-    planning_risk_context_.p1_objective_applied = false;
-    planning_risk_context_.p1_fallback_reason =
-        "metrics_only_reference_observation";
+    planning_risk_context_.p1_objective_allowed = observed_objective_applied;
+    planning_risk_context_.p1_objective_applied = observed_objective_applied;
+    planning_risk_context_.p1_fallback_reason = observation_reason;
     BsplineOptimizer::P1PlanningRiskContext context;
     context.snapshot = planning_risk_context_.snapshot;
     context.query_base_time_s = planning_risk_context_.query_base_time_s;
     context.planning_start_s = planning_risk_context_.planning_start_s;
     context.planning_attempt_id = planning_risk_context_.planning_attempt_id;
     context.candidate_id = 0;
-    context.objective_allowed = false;
-    context.fallback_reason = "metrics_only_reference_observation";
+    context.objective_allowed = observed_objective_applied;
+    context.fallback_reason = observation_reason;
     bspline_optimizer_->setP1PlanningRiskContext(std::move(context));
 
     // Reserve the sequence before the multi-file write.  A failed context
@@ -621,10 +640,10 @@ namespace ego_planner
       return false;
     }
 
-    p1_metrics_reference_observed_trajectory_id_ = local_data_.traj_id_;
+    p1_formal_observed_trajectory_id_ = local_data_.traj_id_;
     appendPlanningRiskContextTimeline(
         "reference_observation", observation_stamp_s, "recorded",
-        "metrics_only_reference_observation", "existing_trajectory");
+        observation_reason, "existing_trajectory");
     // Formal scene evidence must bind the same immutable snapshot used for
     // this read-only incumbent observation, independent of the periodic RViz
     // publisher phase.

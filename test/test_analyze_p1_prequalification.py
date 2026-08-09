@@ -66,6 +66,36 @@ class P1PrequalificationTest(unittest.TestCase):
             MODULE._validate_provenance_rows(
                 [dict(row, run_id="other")], "run-1", manifest, "candidate")
 
+    def test_metrics_only_candidate_profile_is_strictly_export_bound(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            export = Path(tmp).resolve()
+            expected = export / "planner_p1_prequalification_candidate_profile.csv"
+            manifest = {
+                "p1.prequalification_candidate_profile_path": str(expected),
+            }
+            self.assertEqual(
+                MODULE._artifact(
+                    export, manifest,
+                    "p1.prequalification_candidate_profile_path",
+                    "planner_p1_prequalification_candidate_profile.csv",
+                ),
+                expected,
+            )
+            optimization, candidates = MODULE._candidate_evidence_paths(
+                export, manifest, metrics_only=True
+            )
+            self.assertIsNone(optimization)
+            self.assertEqual(candidates, expected)
+            manifest["p1.prequalification_candidate_profile_path"] = str(
+                export.parent / expected.name
+            )
+            with self.assertRaisesRegex(MODULE.PrequalificationError, "binding"):
+                MODULE._artifact(
+                    export, manifest,
+                    "p1.prequalification_candidate_profile_path",
+                    "planner_p1_prequalification_candidate_profile.csv",
+                )
+
     def test_missing_metrics_fail_closed_instead_of_raising(self):
         incomplete = run("lower", 1.0, 1.0, 1.0)
         incomplete["mean"] = None

@@ -64,6 +64,26 @@ def _artifact(export: Path, manifest: dict[str, Any], key: str, filename: str) -
     return path
 
 
+def _candidate_evidence_paths(
+    export: Path, manifest: dict[str, Any], metrics_only: bool
+) -> tuple[Path | None, Path]:
+    if metrics_only:
+        return None, _artifact(
+            export, manifest, "p1.prequalification_candidate_profile_path",
+            "planner_p1_prequalification_candidate_profile.csv",
+        )
+    return (
+        _artifact(
+            export, manifest, "p1.candidate_optimization_path",
+            "planner_p1_candidate_optimization.csv",
+        ),
+        _artifact(
+            export, manifest, "p1.candidate_profile_path",
+            "planner_p1_candidate_profile.csv",
+        ),
+    )
+
+
 def _identity(row: dict[str, Any]) -> tuple[str, ...]:
     return tuple(str(row.get(key, "")) for key in (
         "planning_attempt_id", "candidate_id", "snapshot_generation_id", "query_base_time_s"
@@ -264,16 +284,12 @@ def analyze_run(export_value: str | Path) -> dict[str, Any]:
     precheck = {"passed": False, "status": "INCONCLUSIVE"}
     try:
         attempt = str(profile[0]["planning_attempt_id"])
-        prequalification_path = Path(str(manifest.get(
-            "p1.prequalification_candidate_profile_path", "")))
-        use_prequalification_profile = metrics_only and prequalification_path.is_file()
-        optimization = [] if use_prequalification_profile else _read_csv(_artifact(
-            export, manifest, "p1.candidate_optimization_path",
-            "planner_p1_candidate_optimization.csv"))
-        candidates = _read_csv(prequalification_path) if use_prequalification_profile else _read_csv(
-            _artifact(export, manifest, "p1.candidate_profile_path",
-                      "planner_p1_candidate_profile.csv"))
-        if not use_prequalification_profile:
+        optimization_path, candidates_path = _candidate_evidence_paths(
+            export, manifest, metrics_only)
+        optimization = (_read_csv(optimization_path)
+                        if optimization_path is not None else [])
+        candidates = _read_csv(candidates_path)
+        if optimization_path is not None:
             _validate_provenance_rows(
                 optimization, run_id, manifest_path, "candidate optimization")
         _validate_provenance_rows(candidates, run_id, manifest_path, "candidate profile")

@@ -108,6 +108,25 @@ inline bool shouldRecordP1MetricsOnlyReferenceObservation(
       remaining_duration_s <= snapshot_horizon_s + 1.0e-9;
 }
 
+inline bool shouldRecordP1FormalCheckpointObservation(
+    const bool formal_observation_enabled,
+    const uint64_t trajectory_id,
+    const uint64_t observed_trajectory_id,
+    const double remaining_duration_s,
+    const double snapshot_horizon_s,
+    const double current_x_m,
+    const double checkpoint_x_m,
+    const double checkpoint_half_width_m) {
+  return formal_observation_enabled && trajectory_id > 0 &&
+      trajectory_id != observed_trajectory_id &&
+      std::isfinite(remaining_duration_s) && remaining_duration_s > 0.0 &&
+      std::isfinite(snapshot_horizon_s) && snapshot_horizon_s > 0.0 &&
+      remaining_duration_s <= snapshot_horizon_s + 1.0e-9 &&
+      std::isfinite(current_x_m) && std::isfinite(checkpoint_x_m) &&
+      std::isfinite(checkpoint_half_width_m) && checkpoint_half_width_m >= 0.0 &&
+      std::abs(current_x_m - checkpoint_x_m) <= checkpoint_half_width_m;
+}
+
 inline P1SoftFallbackDecision decideP1BasePrepassFallback(
     const P1BasePrepassFallbackInput& input) {
   if (input.base_optimizer_success && input.full_p1_support) {

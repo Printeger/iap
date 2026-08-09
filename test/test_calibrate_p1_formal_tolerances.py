@@ -58,6 +58,24 @@ class CalibrationToolContractTest(unittest.TestCase):
         selected = calibration._decision_profile(rows, contexts, manifest)
         self.assertEqual({row["profile_seq"] for row in selected}, {"1"})
 
+    def test_decision_profile_selects_enabled_retained_incumbent_observation(self):
+        manifest = {"scenario_contract": {"decision_checkpoint": {
+            "truth_source_topic": "/sim/drone_0/truth_odom",
+            "profile_sample_zero_binding": "planner_truth_odom_state_at_planning_start",
+        }}}
+        rows = []
+        contexts = []
+        for sequence, reason in (
+            (1, "p1_enabled_retained_incumbent_observation"),
+            (2, "p1_replacement_risk_regression"),
+        ):
+            contexts.append({"profile_seq": str(sequence), "planning_start_s": "1.0"})
+            rows.extend({"profile_seq": str(sequence), "sample_index": str(index),
+                         "x": "-9.5", "fallback_reason": reason}
+                        for index in range(200))
+        selected = calibration._decision_profile(rows, contexts, manifest)
+        self.assertEqual({row["profile_seq"] for row in selected}, {"1"})
+
     def test_decision_profile_selects_event_nearest_checkpoint(self):
         manifest = {"scenario_contract": {"decision_checkpoint": {
             "truth_source_topic": "/sim/drone_0/truth_odom",

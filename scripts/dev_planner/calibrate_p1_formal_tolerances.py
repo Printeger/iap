@@ -148,8 +148,10 @@ def _decision_profile(
         observations = [
             sequence for sequence in qualifying
             if any(
-                str(row.get("fallback_reason", "")) ==
-                "metrics_only_reference_observation"
+                str(row.get("fallback_reason", "")) in {
+                    "metrics_only_reference_observation",
+                    "p1_enabled_retained_incumbent_observation",
+                }
                 for row in rows if _float(row.get("profile_seq")) == sequence
             )
         ]

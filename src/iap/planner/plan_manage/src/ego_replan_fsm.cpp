@@ -988,11 +988,10 @@ namespace ego_planner
       }
     } planning_risk_context_guard{planner_manager_.get()};
 
-    // Metrics-only is the formal reference, not a planner objective.  Observe
-    // each already-accepted incumbent once when its genuine remaining future
-    // first fits the immutable P0 horizon; this changes no command or P0/P5
-    // decision and supplies no extrapolated risk value.
-    planner_manager_->recordP1MetricsOnlyReferenceObservation(
+    // Formal qualification observes the actual executing incumbent once in
+    // the immutable decision window. This is read-only for both reference and
+    // enabled runs and changes no command, replacement, P0, or P5 decision.
+    planner_manager_->recordP1FormalDecisionObservation(
         plannerNow().seconds());
 
     const uint64_t p1_admission_generation =
