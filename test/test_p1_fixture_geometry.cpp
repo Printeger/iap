@@ -120,6 +120,17 @@ TEST(P1FixtureGeometry, FormalLaneCentersHaveEqualLowAltitudeClearance) {
   }
 }
 
+TEST(P1FixtureGeometry, FormalLaneBoundaryTrunksStayOnTheExternalSide) {
+  P1FixtureConfig config;
+  config.name = "p1_fork_fused_v1";
+  config.central_obstacle_enabled = false;
+  config.lane_center_m = 2.5;
+  const auto points = iap::planner::make_p1_fixture_points(config);
+  EXPECT_TRUE(std::none_of(points.begin(), points.end(), [&config](const auto& point) {
+    return point.z <= 0.55 && std::abs(point.y) < config.lane_center_m;
+  }));
+}
+
 TEST(P1FixtureGeometry, DenseObservableCanopiesCoverDeclaredLowerRouteOnlyAboveFlight) {
   P1FixtureConfig config;
   config.name = "p1_fork_fused_v1";

@@ -52,8 +52,14 @@ inline std::vector<Eigen::MatrixXd> makeP1PrequalificationEvidenceFanout(
     double clearance_m, int candidate_cap,
     double first_normal_sign = 1.0) {
   if (!formal_evidence_enabled) return {seed};
+  Eigen::MatrixXd neutral_seed = seed;
+  // A retained incumbent can already be committed to one fork arm. Route
+  // availability evidence must not inherit that endpoint side: rebuild the
+  // lateral chord about the current start position before producing the
+  // equal-clearance pair. These candidates remain evidence-only.
+  neutral_seed.row(1).setConstant(seed(1, 0));
   const auto fanout = makeP1CollisionClearanceFanout(
-      seed, 1, clearance_m, candidate_cap, first_normal_sign, true);
+      neutral_seed, 1, clearance_m, candidate_cap, first_normal_sign, true);
   if (fanout.size() <= 1) return {seed};
   // The seed can already be one-sided. Formal evidence consists only of the
   // exact chord-centred lower/upper pair and is never passed to optimization.
@@ -162,20 +168,19 @@ inline bool isP1IncumbentTrajectoryExecuting(
 
 inline bool shouldDeferP1PeriodicReplanForFormalCheckpoint(
     bool formal_observation_enabled, bool checkpoint_already_recorded,
-    double current_x_m, double trajectory_end_x_m, double checkpoint_x_m,
-    double checkpoint_half_width_m, double approach_margin_m) {
+    double current_x_m, double checkpoint_x_m, double checkpoint_half_width_m,
+    double approach_margin_m) {
   if (!formal_observation_enabled || checkpoint_already_recorded ||
-      !std::isfinite(current_x_m) || !std::isfinite(trajectory_end_x_m) ||
-      !std::isfinite(checkpoint_x_m) ||
+      !std::isfinite(current_x_m) || !std::isfinite(checkpoint_x_m) ||
       !std::isfinite(checkpoint_half_width_m) ||
       !std::isfinite(approach_margin_m) || checkpoint_half_width_m < 0.0 ||
       approach_margin_m < 0.0) {
     return false;
   }
   const double window_entry_x = checkpoint_x_m - checkpoint_half_width_m;
-  return current_x_m < window_entry_x &&
-      current_x_m >= window_entry_x - approach_margin_m &&
-      trajectory_end_x_m >= checkpoint_x_m + checkpoint_half_width_m;
+  const double window_exit_x = checkpoint_x_m + checkpoint_half_width_m;
+  return current_x_m >= window_entry_x - approach_margin_m &&
+      current_x_m <= window_exit_x;
 }
 
 inline P1SoftFallbackDecision decideP1BasePrepassFallback(

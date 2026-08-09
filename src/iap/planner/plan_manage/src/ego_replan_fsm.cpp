@@ -658,8 +658,6 @@ namespace ego_planner
       t_cur = std::min(info->duration_, t_cur);
 
       Eigen::Vector3d pos = info->position_traj_.evaluateDeBoorT(t_cur);
-      const Eigen::Vector3d trajectory_end =
-          info->position_traj_.evaluateDeBoorT(info->duration_);
       // Formal evidence is sampled by the non-mutating timer observer at the
       // physical checkpoint. A synchronous periodic replan can otherwise
       // occupy the mutually-exclusive FSM callback while the vehicle crosses
@@ -669,8 +667,8 @@ namespace ego_planner
       const bool defer_periodic_replan_for_p1_checkpoint =
           shouldDeferP1PeriodicReplanForFormalCheckpoint(
               planner_manager_->pp_.p1_collision_fanout_preserve_homotopies_,
-              planner_manager_->p1FormalCheckpointRecorded(), pos.x(),
-              trajectory_end.x(), -9.5, 0.4, 1.5);
+              planner_manager_->p1FormalCheckpointRecorded(), pos.x(), -9.5,
+              0.4, 1.5);
 
       /* && (end_pt_ - pos).norm() < 0.5 */
       if ((target_type_ == TARGET_TYPE::PRESET_TARGET) &&

@@ -92,8 +92,9 @@ inline std::vector<P1FixturePoint> make_p1_fixture_points(const P1FixtureConfig&
     for (int index = 0; index < count; ++index) {
       const double fraction = (static_cast<double>(index) + 0.5) / count;
       const double x = -7.8 + 16.0 * fraction;
-      const double side = index % 2 == 0 ? -1.0 : 1.0;
-      const double y = center_y + side * (config.lane_half_width_m + 1.25);
+      const double external_sign = center_y < 0.0 ? -1.0 : 1.0;
+      const double y = center_y +
+          external_sign * (config.lane_half_width_m + 1.25);
       append_p1_cylinder(base, x, y, config.trunk_radius_m,
                          short_features ? 0.55 : 2.85, config.resolution_m);
       if (index < canopy_count) {

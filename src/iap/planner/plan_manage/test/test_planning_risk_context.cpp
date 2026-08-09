@@ -375,6 +375,23 @@ TEST(P1SoftFallbackPolicyTest,
 }
 
 TEST(P1SoftFallbackPolicyTest,
+     FormalEvidenceFanoutNeutralizesCommittedEndpointSide) {
+  Eigen::MatrixXd committed_seed = Eigen::MatrixXd::Zero(3, 12);
+  for (int column = 0; column < committed_seed.cols(); ++column) {
+    const double fraction = static_cast<double>(column) /
+        static_cast<double>(committed_seed.cols() - 1);
+    committed_seed(0, column) = 10.0 * fraction;
+    committed_seed(1, column) = -1.5 * fraction;
+  }
+  const auto evidence = ego_planner::makeP1PrequalificationEvidenceFanout(
+      committed_seed, true, 2.5, 3, -1.0);
+  ASSERT_EQ(evidence.size(), 2u);
+  EXPECT_TRUE((evidence[0].row(1) + evidence[1].row(1)).isZero(1.0e-12));
+  EXPECT_TRUE(evidence[0].row(1).tail(3).isZero(1.0e-12));
+  EXPECT_TRUE(evidence[1].row(1).tail(3).isZero(1.0e-12));
+}
+
+TEST(P1SoftFallbackPolicyTest,
      MetricsOnlyReferenceObservationIsOncePerTrajectoryInsideHorizon) {
   EXPECT_FALSE(ego_planner::shouldRecordP1MetricsOnlyReferenceObservation(
       false, 7, 0, 2.0, 2.5));
@@ -441,17 +458,17 @@ TEST(P1SoftFallbackPolicyTest,
 TEST(P1SoftFallbackPolicyTest,
      FormalCheckpointApproachDefersOnlyPeriodicReplanning) {
   EXPECT_TRUE(ego_planner::shouldDeferP1PeriodicReplanForFormalCheckpoint(
-      true, false, -10.5, 0.0, -9.5, 0.4, 1.5));
+      true, false, -10.5, -9.5, 0.4, 1.5));
   EXPECT_FALSE(ego_planner::shouldDeferP1PeriodicReplanForFormalCheckpoint(
-      false, false, -10.5, 0.0, -9.5, 0.4, 1.5));
+      false, false, -10.5, -9.5, 0.4, 1.5));
   EXPECT_FALSE(ego_planner::shouldDeferP1PeriodicReplanForFormalCheckpoint(
-      true, true, -10.5, 0.0, -9.5, 0.4, 1.5));
+      true, true, -10.5, -9.5, 0.4, 1.5));
   EXPECT_FALSE(ego_planner::shouldDeferP1PeriodicReplanForFormalCheckpoint(
-      true, false, -11.5, 0.0, -9.5, 0.4, 1.5));
+      true, false, -11.5, -9.5, 0.4, 1.5));
+  EXPECT_TRUE(ego_planner::shouldDeferP1PeriodicReplanForFormalCheckpoint(
+      true, false, -9.8, -9.5, 0.4, 1.5));
   EXPECT_FALSE(ego_planner::shouldDeferP1PeriodicReplanForFormalCheckpoint(
-      true, false, -9.8, 0.0, -9.5, 0.4, 1.5));
-  EXPECT_FALSE(ego_planner::shouldDeferP1PeriodicReplanForFormalCheckpoint(
-      true, false, -10.5, -10.0, -9.5, 0.4, 1.5));
+      true, false, -9.0, -9.5, 0.4, 1.5));
 }
 
 TEST(P1SoftFallbackPolicyTest,
