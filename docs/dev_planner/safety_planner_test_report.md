@@ -9436,7 +9436,12 @@ scientifically available.
 Further shrinking/removing the central obstacle or treating occupied/partial
 profiles as complete would violate the preregistered central-obstacle and
 collision-feasible `200/200` contract. The three-fresh-campaign stop condition
-is therefore met: **P1-2 BLOCKED; P1-3 is not authorized**.
+was initially considered met. A subsequent Spec review invalidated that
+terminal conclusion: the original central obstacle was not fully observable
+inside the hard-coded 5.5 m forward local-map window at the early decision
+checkpoint. A compliant, fingerprinted formal-only 10 m observability repair
+remains available. Therefore c6/c7/c8 are retained diagnostics, **P1-2 is
+continuing**, and P1-3 is still not authorized.
 
 Compact evidence and SHA256 bindings are archived under
 `p1_formal_test_report_artifacts/2026-08-09-db97778/`; raw campaign exports

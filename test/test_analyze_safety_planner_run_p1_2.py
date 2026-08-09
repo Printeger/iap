@@ -1333,6 +1333,28 @@ class P1_2AnalyzerTest(unittest.TestCase):
         self.assertEqual(summary["recorded_profile_candidates"], [8.0])
         self.assertTrue(summary["recorded_bspline_binding"])
 
+    def test_profile_selection_rejects_multiple_truth_checkpoint_profiles(self):
+        first = accepted_profile_rows(0.0)
+        second = accepted_profile_rows(0.0)
+        contexts = []
+        for sequence, rows, start in ((8, first, 10.0), (9, second, 11.0)):
+            for row in rows:
+                row["profile_seq"] = sequence
+            context = accepted_profile_context(rows)[0]
+            context.update({"profile_seq": sequence,
+                            "trajectory_start_stamp_s": start,
+                            "planning_start_s": start})
+            contexts.append(context)
+        summary = analyzer.select_latest_recorded_p1_profile(
+            first + second, contexts,
+            [{"start_time_s": 10.0}, {"start_time_s": 11.0}],
+            truth_rows=[{"stamp": 10.0, "x": -9.7},
+                        {"stamp": 11.0, "x": -9.3}],
+        )
+        self.assertIsNone(summary["selected_profile_seq"])
+        self.assertFalse(summary["decision_checkpoint_unique"])
+        self.assertEqual(summary["decision_checkpoint_candidates"], [8.0, 9.0])
+
     def test_risk_scene_alignment_fails_closed_and_unavailable_plot_is_nonempty(self):
         comparison = analyzer.compare_p1_2_risk_profiles(
             bspline_rows(0.0), bspline_rows(5.0), cloud_rows(0.0), cloud_rows(5.0),

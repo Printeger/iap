@@ -1,4 +1,4 @@
-# P1-2 prequalification blocker evidence
+# P1-2 retained prequalification diagnostic evidence
 
 Tested clean HEAD: `db97778` (campaign c8). P1-3 was not run.
 
@@ -23,9 +23,16 @@ could not be evaluated.
 
 Further shrinking/removing the central obstacle or accepting occupied/partial
 profiles would violate the preregistered central-obstacle, collision-feasible
-`200/200`, and safety/fallback semantics. Under the three-fresh-campaign stop
-rule, P1-2 is blocked and P1-3 remains unauthorized.
+`200/200`, and safety/fallback semantics. A subsequent Spec review found a
+different compliant repair that had not been tried: the original obstacle was
+not fully inside the hard-coded 5.5 m forward local-map window at the early
+decision checkpoint. The terminal blocker conclusion is therefore withdrawn.
+These campaigns remain immutable diagnostics; a fresh campaign must test the
+restored original geometry with a fingerprinted 10 m formal-only observability
+range. P1-3 remains unauthorized.
 
 Raw evidence is retained under ignored
-`results/planner_validation/campaigns/<campaign>/`. `artifact_hashes.sha256`
-binds each campaign state, independent prequalification JSON, and run CSV.
+`results/planner_validation/campaigns/<campaign>/`. The compact directory now
+contains the c6/c7/c8 campaign JSON, all three summary JSON files, and the c8
+run/pair CSV files. `archived_artifact_hashes.sha256` binds those copied files;
+`artifact_hashes.sha256` retains the original raw-path bindings.

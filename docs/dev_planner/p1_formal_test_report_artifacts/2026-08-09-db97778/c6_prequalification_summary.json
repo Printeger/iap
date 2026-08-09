@@ -1,0 +1,359 @@
+{
+  "pairs": [
+    {
+      "cvar_improvement": null,
+      "enabled_run_id": "1f4e7327d9994cd2aab761d01a757e6f",
+      "failures": [
+        "one or both run hard gates failed",
+        "pair metrics are incomplete"
+      ],
+      "kind": "primary",
+      "localization_error_delta_m": null,
+      "max_regression": null,
+      "mean_improvement": null,
+      "passed": false,
+      "path_growth": null,
+      "reference_run_id": "ab0a9946c00a40718b336b8f84a374ba"
+    },
+    {
+      "cvar_improvement": null,
+      "enabled_run_id": "94a9d42a8b7f452d8d68bb5885664ee5",
+      "failures": [
+        "one or both run hard gates failed",
+        "pair metrics are incomplete"
+      ],
+      "kind": "primary",
+      "localization_error_delta_m": null,
+      "max_regression": null,
+      "mean_improvement": null,
+      "passed": false,
+      "path_growth": null,
+      "reference_run_id": "9681cf84a07c4f469fffd2f19b17ca74"
+    },
+    {
+      "cvar_improvement": null,
+      "enabled_run_id": "bb20daa89c2f486a8e005a120e2b5603",
+      "failures": [
+        "one or both run hard gates failed",
+        "pair metrics are incomplete"
+      ],
+      "kind": "mirror",
+      "localization_error_delta_m": null,
+      "max_regression": null,
+      "mean_improvement": null,
+      "passed": false,
+      "path_growth": null,
+      "reference_run_id": "59929b7960b64a308daf1f3ec9ca5059"
+    },
+    {
+      "cvar_improvement": null,
+      "enabled_run_id": "07c2dc1f0faa43e8a694aec0037709c3",
+      "failures": [
+        "one or both run hard gates failed",
+        "pair metrics are incomplete"
+      ],
+      "kind": "null",
+      "localization_error_delta_m": null,
+      "max_regression": null,
+      "mean_improvement": null,
+      "passed": false,
+      "path_growth": null,
+      "reference_run_id": "ec099d6d195a4e919739c4ea4d7c2366"
+    },
+    {
+      "cvar_improvement": null,
+      "enabled_run_id": "1a6ab2f867a0444398d34344bf85bd2d",
+      "failures": [
+        "one or both run hard gates failed",
+        "pair metrics are incomplete"
+      ],
+      "kind": "soft_risk",
+      "localization_error_delta_m": null,
+      "max_regression": null,
+      "mean_improvement": null,
+      "passed": false,
+      "path_growth": null,
+      "reference_run_id": "0172bd082f104a178cd863af2977005c"
+    }
+  ],
+  "passed": false,
+  "runs": [
+    {
+      "candidate_precheck": {
+        "passed": false,
+        "status": "INCONCLUSIVE"
+      },
+      "checkpoint_truth_dt_s": null,
+      "cvar": null,
+      "errors": [
+        "accepted context is not fresh, complete, and identity-bound",
+        "accepted profile invalid: could not convert string to float: ''",
+        "candidate/occupancy precheck invalid: list index out of range"
+      ],
+      "export_dir": "/home/dev/ws_iap/src/iap/results/planner_validation/campaigns/p1-2-20260808-fbe090c-c6/runs/pre_primary_1_reference/exports/test_planner_p1_fork_formal_p1_fork_fused_v1_311804_1786209154636",
+      "hard_gates": {
+        "passed": false
+      },
+      "localization_error_m": null,
+      "max": null,
+      "mean": null,
+      "metrics_only": true,
+      "passed": false,
+      "path_length_m": null,
+      "run_id": "ab0a9946c00a40718b336b8f84a374ba",
+      "scenario": "p1_fork_fused_v1",
+      "selected_lane": null
+    },
+    {
+      "candidate_precheck": {
+        "passed": false,
+        "status": "INCONCLUSIVE"
+      },
+      "checkpoint_truth_dt_s": null,
+      "cvar": null,
+      "errors": [
+        "accepted context is not fresh, complete, and identity-bound",
+        "enabled profile was not applied to the objective",
+        "accepted profile invalid: could not convert string to float: ''",
+        "candidate/occupancy precheck invalid: list index out of range"
+      ],
+      "export_dir": "/home/dev/ws_iap/src/iap/results/planner_validation/campaigns/p1-2-20260808-fbe090c-c6/runs/pre_primary_1_enabled/exports/test_planner_p1_fork_formal_p1_fork_fused_v1_329809_1786209245737",
+      "hard_gates": {
+        "passed": false
+      },
+      "localization_error_m": null,
+      "max": null,
+      "mean": null,
+      "metrics_only": false,
+      "passed": false,
+      "path_length_m": null,
+      "run_id": "1f4e7327d9994cd2aab761d01a757e6f",
+      "scenario": "p1_fork_fused_v1",
+      "selected_lane": null
+    },
+    {
+      "candidate_precheck": {
+        "passed": false,
+        "status": "INCONCLUSIVE"
+      },
+      "checkpoint_truth_dt_s": null,
+      "cvar": null,
+      "errors": [
+        "accepted context is not fresh, complete, and identity-bound",
+        "accepted profile invalid: could not convert string to float: ''",
+        "candidate/occupancy precheck invalid: list index out of range"
+      ],
+      "export_dir": "/home/dev/ws_iap/src/iap/results/planner_validation/campaigns/p1-2-20260808-fbe090c-c6/runs/pre_primary_2_reference/exports/test_planner_p1_fork_formal_p1_fork_fused_v1_348192_1786209341436",
+      "hard_gates": {
+        "passed": false
+      },
+      "localization_error_m": null,
+      "max": null,
+      "mean": null,
+      "metrics_only": true,
+      "passed": false,
+      "path_length_m": null,
+      "run_id": "9681cf84a07c4f469fffd2f19b17ca74",
+      "scenario": "p1_fork_fused_v1",
+      "selected_lane": null
+    },
+    {
+      "candidate_precheck": {
+        "passed": false,
+        "status": "INCONCLUSIVE"
+      },
+      "checkpoint_truth_dt_s": null,
+      "cvar": null,
+      "errors": [
+        "accepted context is not fresh, complete, and identity-bound",
+        "enabled profile was not applied to the objective",
+        "accepted profile invalid: could not convert string to float: ''",
+        "candidate/occupancy precheck invalid: list index out of range"
+      ],
+      "export_dir": "/home/dev/ws_iap/src/iap/results/planner_validation/campaigns/p1-2-20260808-fbe090c-c6/runs/pre_primary_2_enabled/exports/test_planner_p1_fork_formal_p1_fork_fused_v1_366601_1786209437137",
+      "hard_gates": {
+        "passed": false
+      },
+      "localization_error_m": null,
+      "max": null,
+      "mean": null,
+      "metrics_only": false,
+      "passed": false,
+      "path_length_m": null,
+      "run_id": "94a9d42a8b7f452d8d68bb5885664ee5",
+      "scenario": "p1_fork_fused_v1",
+      "selected_lane": null
+    },
+    {
+      "candidate_precheck": {
+        "passed": false,
+        "status": "INCONCLUSIVE"
+      },
+      "checkpoint_truth_dt_s": null,
+      "cvar": null,
+      "errors": [
+        "accepted context is not fresh, complete, and identity-bound",
+        "accepted profile invalid: could not convert string to float: ''",
+        "candidate/occupancy precheck invalid: list index out of range"
+      ],
+      "export_dir": "/home/dev/ws_iap/src/iap/results/planner_validation/campaigns/p1-2-20260808-fbe090c-c6/runs/pre_mirror_reference/exports/test_planner_p1_fork_formal_p1_fork_fused_mirror_v1_384525_1786209528235",
+      "hard_gates": {
+        "passed": false
+      },
+      "localization_error_m": null,
+      "max": null,
+      "mean": null,
+      "metrics_only": true,
+      "passed": false,
+      "path_length_m": null,
+      "run_id": "59929b7960b64a308daf1f3ec9ca5059",
+      "scenario": "p1_fork_fused_mirror_v1",
+      "selected_lane": null
+    },
+    {
+      "candidate_precheck": {
+        "passed": false,
+        "status": "INCONCLUSIVE"
+      },
+      "checkpoint_truth_dt_s": null,
+      "cvar": null,
+      "errors": [
+        "accepted profile invalid: accepted profile decision checkpoint at truth x=-9.5+/-0.4 m is missing/ambiguous",
+        "candidate/occupancy precheck invalid: list index out of range"
+      ],
+      "export_dir": "/home/dev/ws_iap/src/iap/results/planner_validation/campaigns/p1-2-20260808-fbe090c-c6/runs/pre_mirror_enabled/exports/test_planner_p1_fork_formal_p1_fork_fused_mirror_v1_402326_1786209619330",
+      "hard_gates": {
+        "passed": false
+      },
+      "localization_error_m": null,
+      "max": null,
+      "mean": null,
+      "metrics_only": false,
+      "passed": false,
+      "path_length_m": null,
+      "run_id": "bb20daa89c2f486a8e005a120e2b5603",
+      "scenario": "p1_fork_fused_mirror_v1",
+      "selected_lane": null
+    },
+    {
+      "candidate_precheck": {
+        "lanes": {
+          "lower": {
+            "candidate_count": 0,
+            "candidates": [],
+            "max_risk": null,
+            "mean_cvar": null,
+            "mean_risk": null
+          },
+          "upper": {
+            "candidate_count": 0,
+            "candidates": [],
+            "max_risk": null,
+            "mean_cvar": null,
+            "mean_risk": null
+          }
+        },
+        "passed": false,
+        "rejected": [],
+        "selected": null,
+        "status": "INCONCLUSIVE"
+      },
+      "checkpoint_truth_dt_s": 0.0,
+      "cvar": 1.6206919806962177,
+      "errors": [
+        "candidate precheck lacks collision-feasible full-200 upper/lower routes"
+      ],
+      "export_dir": "/home/dev/ws_iap/src/iap/results/planner_validation/campaigns/p1-2-20260808-fbe090c-c6/runs/pre_null_reference/exports/test_planner_p1_fork_formal_p1_fork_symmetric_null_v1_420202_1786209710387",
+      "hard_gates": {
+        "passed": false
+      },
+      "localization_error_m": 0.273686457,
+      "max": 1.6587628716120741,
+      "mean": 1.592783325597731,
+      "metrics_only": true,
+      "passed": false,
+      "path_length_m": 9.195073141510447,
+      "run_id": "ec099d6d195a4e919739c4ea4d7c2366",
+      "scenario": "p1_fork_symmetric_null_v1",
+      "selected_lane": "upper"
+    },
+    {
+      "candidate_precheck": {
+        "passed": false,
+        "status": "INCONCLUSIVE"
+      },
+      "checkpoint_truth_dt_s": null,
+      "cvar": null,
+      "errors": [
+        "accepted context is not fresh, complete, and identity-bound",
+        "enabled profile was not applied to the objective",
+        "accepted profile invalid: could not convert string to float: ''",
+        "candidate/occupancy precheck invalid: list index out of range"
+      ],
+      "export_dir": "/home/dev/ws_iap/src/iap/results/planner_validation/campaigns/p1-2-20260808-fbe090c-c6/runs/pre_null_enabled/exports/test_planner_p1_fork_formal_p1_fork_symmetric_null_v1_437985_1786209801538",
+      "hard_gates": {
+        "passed": false
+      },
+      "localization_error_m": null,
+      "max": null,
+      "mean": null,
+      "metrics_only": false,
+      "passed": false,
+      "path_length_m": null,
+      "run_id": "07c2dc1f0faa43e8a694aec0037709c3",
+      "scenario": "p1_fork_symmetric_null_v1",
+      "selected_lane": null
+    },
+    {
+      "candidate_precheck": {
+        "passed": false,
+        "status": "INCONCLUSIVE"
+      },
+      "checkpoint_truth_dt_s": null,
+      "cvar": null,
+      "errors": [
+        "accepted profile invalid: accepted profile decision checkpoint at truth x=-9.5+/-0.4 m is missing/ambiguous",
+        "candidate/occupancy precheck invalid: list index out of range"
+      ],
+      "export_dir": "/home/dev/ws_iap/src/iap/results/planner_validation/campaigns/p1-2-20260808-fbe090c-c6/runs/pre_soft_reference/exports/test_planner_p1_fork_formal_p1_soft_risk_island_v1_455756_1786209892639",
+      "hard_gates": {
+        "passed": false
+      },
+      "localization_error_m": null,
+      "max": null,
+      "mean": null,
+      "metrics_only": true,
+      "passed": false,
+      "path_length_m": null,
+      "run_id": "0172bd082f104a178cd863af2977005c",
+      "scenario": "p1_soft_risk_island_v1",
+      "selected_lane": null
+    },
+    {
+      "candidate_precheck": {
+        "passed": false,
+        "status": "INCONCLUSIVE"
+      },
+      "checkpoint_truth_dt_s": null,
+      "cvar": null,
+      "errors": [
+        "accepted profile invalid: accepted profile decision checkpoint at truth x=-9.5+/-0.4 m is missing/ambiguous",
+        "candidate/occupancy precheck invalid: list index out of range"
+      ],
+      "export_dir": "/home/dev/ws_iap/src/iap/results/planner_validation/campaigns/p1-2-20260808-fbe090c-c6/runs/pre_soft_enabled/exports/test_planner_p1_fork_formal_p1_soft_risk_island_v1_475044_1786209988346",
+      "hard_gates": {
+        "passed": false
+      },
+      "localization_error_m": null,
+      "max": null,
+      "mean": null,
+      "metrics_only": false,
+      "passed": false,
+      "path_length_m": null,
+      "run_id": "1a6ab2f867a0444398d34344bf85bd2d",
+      "scenario": "p1_soft_risk_island_v1",
+      "selected_lane": null
+    }
+  ],
+  "schema_version": "p1_2_prequalification_v1"
+}

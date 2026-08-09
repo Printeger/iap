@@ -652,6 +652,7 @@ def validate_calibration_binding(
         ("p1.smooth_cvar_alpha", smooth.get("alpha")),
         ("p1.smooth_max_temperature", smooth.get("temperature")),
         ("p1.normalization_budget_fraction", calibration.get("normalization_budget_fraction")),
+        ("grid_map/local_update_range_x", 10.0),
     )
     for key, expected in expected_values:
         if not _same_number(manifest.get(key), expected):

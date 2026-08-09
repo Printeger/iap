@@ -70,6 +70,27 @@ def _identity(row: dict[str, Any]) -> tuple[str, ...]:
     ))
 
 
+def _same_attempt_context(left: dict[str, Any], right: dict[str, Any]) -> bool:
+    return all(str(left.get(key, "")) == str(right.get(key, "")) for key in (
+        "planning_attempt_id", "snapshot_generation_id", "query_base_time_s"
+    ))
+
+
+def _validate_provenance_rows(
+    rows: list[dict[str, Any]], run_id: str, manifest_path: Path, label: str
+) -> None:
+    if not rows:
+        raise PrequalificationError(f"{label} provenance is empty")
+    expected_manifest = manifest_path.resolve()
+    for row in rows:
+        if (
+            row.get("schema_version") != "p1_evidence_provenance_v4"
+            or row.get("run_id") != run_id
+            or Path(str(row.get("manifest_path", ""))).resolve() != expected_manifest
+        ):
+            raise PrequalificationError(f"{label} provenance binding failed")
+
+
 def analyze_run(export_value: str | Path) -> dict[str, Any]:
     export = Path(export_value).expanduser().resolve()
     manifest_path = export / "test_planner_manifest.json"
@@ -95,7 +116,8 @@ def analyze_run(export_value: str | Path) -> dict[str, Any]:
                        ("manager/max_vel", 1.0),
                        ("optimization/max_vel", 1.0),
                        ("bspline/limit_vel", 1.0),
-                       ("fsm.thresh_replan_time", 0.5)):
+                       ("fsm.thresh_replan_time", 0.5),
+                       ("grid_map/local_update_range_x", 10.0)):
         actual = _number(manifest.get(key))
         if actual is None or abs(actual - value) > 1e-12:
             errors.append(f"contract mismatch: {key}")
@@ -211,20 +233,23 @@ def analyze_run(export_value: str | Path) -> dict[str, Any]:
         occupancy = _read_csv(_artifact(
             export, manifest, "p0.occupancy_query_evidence_path",
             "planner_p0_occupancy_query_evidence.csv"))
-        metadata = {str(row.get("candidate_id")): row for row in optimization
-                    if str(row.get("planning_attempt_id")) == attempt}
+        _validate_provenance_rows(optimization, run_id, manifest_path, "candidate optimization")
+        _validate_provenance_rows(candidates, run_id, manifest_path, "candidate profile")
+        _validate_provenance_rows(occupancy, run_id, manifest_path, "occupancy")
+        context = profile[0]
+        metadata = {_identity(row): row for row in optimization
+                    if _same_attempt_context(row, context)}
         precheck_rows = []
         for row in candidates:
-            if str(row.get("planning_attempt_id")) != attempt or row.get("phase") != "final":
+            if not _same_attempt_context(row, context) or row.get("phase") != "final":
                 continue
             matching = [item for item in occupancy
-                        if str(item.get("planning_attempt_id")) == attempt
-                        and str(item.get("candidate_id")) == str(row.get("candidate_id"))
+                        if _identity(item) == _identity(row)
                         and item.get("phase") == "final"
                         and str(item.get("sample_index")) == str(row.get("sample_index"))]
             weight = sum((float(item["temporal_weight"]) * float(item["corner_weight"]))
                          for item in matching)
-            meta = metadata.get(str(row.get("candidate_id")), {})
+            meta = metadata.get(_identity(row), {})
             precheck_rows.append({
                 **row,
                 "matched": _truthy(row.get("valid")) and not _truthy(row.get("stale")),

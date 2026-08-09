@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <iterator>
 #include <tuple>
 #include <vector>
 
@@ -18,20 +19,26 @@ auto key(const P1FixturePoint& point) {
 
 TEST(P1FixtureGeometry, CentralObstacleLeavesEqualLaneClearance) {
   P1FixtureConfig config;
-  EXPECT_DOUBLE_EQ(config.central_x_min_m, -4.5);
-  EXPECT_DOUBLE_EQ(config.central_x_max_m, -1.0);
-  EXPECT_DOUBLE_EQ(config.central_y_half_width_m, 0.35);
+  EXPECT_DOUBLE_EQ(config.central_x_min_m, -7.0);
+  EXPECT_DOUBLE_EQ(config.central_x_max_m, -2.0);
+  EXPECT_DOUBLE_EQ(config.central_y_half_width_m, 0.65);
   config.name = "p1_fork_fused_v1";
   const auto points = iap::planner::make_p1_fixture_points(config);
   ASSERT_FALSE(points.empty());
-  const double upper_clearance = config.lane_center_m - config.central_y_half_width_m;
-  const double lower_clearance = -config.central_y_half_width_m - (-config.lane_center_m);
-  EXPECT_DOUBLE_EQ(upper_clearance, lower_clearance);
-  EXPECT_GT(upper_clearance, 0.35);
-  EXPECT_TRUE(std::any_of(points.begin(), points.end(), [&](const auto& point) {
+  std::vector<P1FixturePoint> central;
+  std::copy_if(points.begin(), points.end(), std::back_inserter(central), [&](const auto& point) {
     return point.x >= config.central_x_min_m && point.x <= config.central_x_max_m &&
            std::abs(point.y) <= config.central_y_half_width_m && point.z <= 2.8;
-  }));
+  });
+  ASSERT_FALSE(central.empty());
+  const auto [min_y, max_y] = std::minmax_element(
+      central.begin(), central.end(), [](const auto& lhs, const auto& rhs) {
+        return lhs.y < rhs.y;
+      });
+  const double upper_clearance = config.lane_center_m - max_y->y;
+  const double lower_clearance = min_y->y - (-config.lane_center_m);
+  EXPECT_NEAR(upper_clearance, lower_clearance, config.resolution_m + 1e-9);
+  EXPECT_GT(std::min(upper_clearance, lower_clearance), config.lane_half_width_m);
 }
 
 TEST(P1FixtureGeometry, MirrorIsExactPointwiseYReflection) {

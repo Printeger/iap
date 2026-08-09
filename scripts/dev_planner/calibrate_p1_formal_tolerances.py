@@ -115,19 +115,12 @@ def _decision_profile(
         first = min(sequence_rows, key=lambda row: _float(row.get("sample_index")) or 0.0)
         first_x = _float(first.get("x"))
         if first_x is not None and abs(first_x - (-9.5)) <= 0.4:
-            qualifying.append((sequence, abs(first_x - (-9.5))))
-    if not qualifying:
+            qualifying.append(sequence)
+    if len(qualifying) != 1:
         raise CalibrationError(
             "accepted profile decision checkpoint at truth x=-9.5+/-0.4 m is missing/ambiguous"
         )
-    best_distance = min(distance for _, distance in qualifying)
-    nearest = [sequence for sequence, distance in qualifying
-               if abs(distance - best_distance) <= 1.0e-12]
-    if len(nearest) != 1:
-        raise CalibrationError(
-            "accepted profile decision checkpoint at truth x=-9.5+/-0.4 m is missing/ambiguous"
-        )
-    selected = nearest[0]
+    selected = qualifying[0]
     result = [row for row in rows if _float(row.get("profile_seq")) == selected]
     matching_contexts = [
         row for row in contexts if _float(row.get("profile_seq")) == selected
@@ -176,6 +169,7 @@ def _configuration_identity(manifest: dict[str, Any]) -> dict[str, Any]:
         "p1.smooth_cvar_alpha": manifest.get("p1.smooth_cvar_alpha"),
         "p1.smooth_max_temperature": manifest.get("p1.smooth_max_temperature"),
         "p1.normalization_budget_fraction": manifest.get("p1.normalization_budget_fraction"),
+        "grid_map/local_update_range_x": manifest.get("grid_map/local_update_range_x"),
         "run_duration_s": manifest.get("run_duration_s"),
         "validation_duration_s": manifest.get("validation_duration_s"),
         "planner_start_delay_s": manifest.get("planner_start_delay_s"),
@@ -216,6 +210,7 @@ def _validate_fixed_contract(manifest: dict[str, Any]) -> None:
         "p1.smooth_cvar_alpha": 0.90,
         "p1.smooth_max_temperature": 0.01,
         "p1.normalization_budget_fraction": 0.30,
+        "grid_map/local_update_range_x": 10.0,
     }
     for key, expected_value in numeric.items():
         value = _float(manifest.get(key))

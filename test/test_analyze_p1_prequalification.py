@@ -24,6 +24,22 @@ def run(lane, mean, cvar, maximum, length=10.0):
 
 
 class P1PrequalificationTest(unittest.TestCase):
+    def test_candidate_rows_require_run_manifest_and_attempt_context_binding(self):
+        manifest = Path("/e/test_planner_manifest.json")
+        row = {
+            "schema_version": "p1_evidence_provenance_v4",
+            "run_id": "run-1", "manifest_path": str(manifest),
+            "planning_attempt_id": "7", "candidate_id": "2",
+            "snapshot_generation_id": "11", "query_base_time_s": "5.0",
+        }
+        MODULE._validate_provenance_rows([row], "run-1", manifest, "candidate")
+        self.assertTrue(MODULE._same_attempt_context(row, dict(row)))
+        changed = dict(row, snapshot_generation_id="12")
+        self.assertFalse(MODULE._same_attempt_context(row, changed))
+        with self.assertRaisesRegex(MODULE.PrequalificationError, "provenance"):
+            MODULE._validate_provenance_rows(
+                [dict(row, run_id="other")], "run-1", manifest, "candidate")
+
     def test_missing_metrics_fail_closed_instead_of_raising(self):
         incomplete = run("lower", 1.0, 1.0, 1.0)
         incomplete["mean"] = None

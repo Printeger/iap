@@ -318,9 +318,10 @@ P1_FORK_MAP_PRESET = {
     "corridor_half_width_y_m": "5.0",
     "p1_fixture_mirror_y": "false",
     "p1_fixture_central_obstacle_enabled": "true",
-    "p1_fixture_central_x_min_m": "-4.5",
-    "p1_fixture_central_x_max_m": "-1.0",
-    "p1_fixture_central_y_half_width_m": "0.35",
+    "p1_fixture_central_x_min_m": "-7.0",
+    "p1_fixture_central_x_max_m": "-2.0",
+    "p1_fixture_central_y_half_width_m": "0.65",
+    "grid_map/local_update_range_x": "10.0",
     "p1_fixture_central_z_max_m": "2.8",
     "p1_fixture_lane_center_m": "2.0",
     "p1_fixture_lane_half_width_m": "0.75",
@@ -644,6 +645,9 @@ EXPERIMENT_PRESETS = {
         "p0.size_y_m": "12.0",
         "planner_start_delay_s": "10.0",
         "fsm.thresh_replan_time": "0.5",
+        # Observe the central fork before the first formal decision checkpoint.
+        # The default remains 5.5 m for every other experiment.
+        "grid_map/local_update_range_x": "10.0",
         # Keep successive replans closer than the fixed 0.8 m decision window.
         # This is part of the formal configuration identity, not an analyzer
         # relaxation: the checkpoint remains truth x=-9.5+/-0.4 m.
@@ -819,6 +823,7 @@ ARG_DEFAULTS = [
     ("p1_fixture_risky_tree_density_per_m2", "0.75"),
     ("p1_fixture_safe_canopy_probability", "0.05"),
     ("p1_fixture_risky_canopy_probability", "0.85"),
+    ("grid_map/local_update_range_x", "5.5"),
     ("gnss_pr_noise_base", "5.0"),
     ("gnss_dop_noise_base", "0.5"),
     ("gnss_random_seed", "20260429"),
@@ -1459,7 +1464,7 @@ def _ego_planner_node(context, drone_id, planner_odom_topic, cloud_topic, camera
             {"grid_map/map_size_x": map_size_x},
             {"grid_map/map_size_y": map_size_y},
             {"grid_map/map_size_z": map_size_z},
-            {"grid_map/local_update_range_x": 5.5},
+            {"grid_map/local_update_range_x": _param_float(context, "grid_map/local_update_range_x")},
             {"grid_map/local_update_range_y": 5.5},
             {"grid_map/local_update_range_z": 4.5},
             {"grid_map/obstacles_inflation": 0.099},
@@ -2024,6 +2029,7 @@ def _launch_setup(context):
             "optimizer_max_velocity_mps": _param_float(context, "optimization/max_vel"),
             "bspline_limit_velocity_mps": _param_float(context, "bspline/limit_vel"),
             "replan_period_s": _param_float(context, "fsm.thresh_replan_time"),
+            "local_update_range_x_m": _param_float(context, "grid_map/local_update_range_x"),
         },
         "p0_prediction": {
             "horizons_s": _csv_floats(
@@ -2057,6 +2063,7 @@ def _launch_setup(context):
         "optimization/max_vel": _param_float(context, "optimization/max_vel"),
         "bspline/limit_vel": _param_float(context, "bspline/limit_vel"),
         "fsm.thresh_replan_time": _param_float(context, "fsm.thresh_replan_time"),
+        "grid_map/local_update_range_x": _param_float(context, "grid_map/local_update_range_x"),
         "record_bag": record_bag,
         "run_validator": run_validator,
         "timebase": {

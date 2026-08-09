@@ -1,4 +1,5 @@
 import importlib.util
+import json
 import tempfile
 import unittest
 from pathlib import Path
@@ -52,6 +53,23 @@ class P12CampaignTest(unittest.TestCase):
             self.assertTrue((root / "campaign.json").is_file())
             self.assertTrue(all(step.get("command") for step in result["steps"]))
             self.assertTrue(all(step["status"] == "planned" for step in result["steps"]))
+
+    def test_nonzero_launch_still_indexes_finalized_run_evidence(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            export = root / "runs/failed/exports/export"
+            export.mkdir(parents=True)
+            (export / "test_planner_manifest.json").write_text(json.dumps({
+                "artifact_provenance": {"run_id": "failed-run", "bag_path": ""}
+            }))
+            (export / "test_planner_validation_summary.json").write_text(json.dumps({
+                "passed": False, "errors": ["intentional failure"]
+            }))
+            step = {"id": "failed", "phase": "prequalification"}
+            MODULE._capture_launch_evidence(step, root)
+            self.assertEqual(step["run_id"], "failed-run")
+            self.assertEqual(step["export_dir"], str(export.resolve()))
+            self.assertFalse(step["gate_result"]["validator_passed"])
 
 
 if __name__ == "__main__":

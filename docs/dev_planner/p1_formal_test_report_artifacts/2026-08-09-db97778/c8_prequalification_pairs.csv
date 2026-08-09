@@ -1,0 +1,6 @@
+kind,reference_run_id,enabled_run_id,passed,mean_improvement,cvar_improvement,max_regression,path_growth,localization_error_delta_m
+primary,633d7c4f52d04dfaa198a323e23915e4,2c9c7f83a1254ee7be77d160ae344ec4,False,,,,,
+primary,e831699ffe3e428caf58f57eb1f4a6d7,d44c3c71d19344dfa70d01c6f3ec365b,False,,,,,
+mirror,40de0ab3c8b8430aa24eaed0b7b708df,a64581971f21473bad684b551d030f69,False,,,,,
+null,a7369e21eef94ada9bffdeb81299d802,a77333a9c3784fd184ecff3801a2f148,False,,,,,
+soft_risk,fa832f82048e4cb7af9ca47f5cf40522,12e315ee20f643d3adfec9dc10ceac99,False,,,,,

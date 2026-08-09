@@ -142,6 +142,19 @@ def _discover_run(step: dict[str, Any], campaign_root: Path) -> None:
                                "validator_errors": ["validator summary unreadable"]}
 
 
+def _capture_launch_evidence(
+    step: dict[str, Any], campaign_root: Path, *, required: bool = False
+) -> None:
+    try:
+        _discover_run(step, campaign_root)
+    except (CampaignError, OSError, ValueError, json.JSONDecodeError) as exc:
+        step["evidence_discovery"] = {"indexed": False, "error": str(exc)}
+        if required:
+            raise CampaignError(str(exc)) from exc
+    else:
+        step["evidence_discovery"] = {"indexed": True}
+
+
 def _capture_gate_result(step: dict[str, Any], root: Path) -> None:
     candidate: Path | None = None
     if step["phase"] == "prequalification_analysis":
@@ -312,8 +325,8 @@ def run_campaign(campaign_root: Path, *, git_sha: str | None = None,
         step["exit_code"] = result.returncode
         step["log_path"] = str(log_path)
         step["ended_at_utc"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
-        if step["phase"] in {"prequalification", "calibration", "formal_run"} and result.returncode == 0:
-            _discover_run(step, root)
+        if step["phase"] in {"prequalification", "calibration", "formal_run"}:
+            _capture_launch_evidence(step, root, required=result.returncode == 0)
         _capture_gate_result(step, root)
         if result.returncode != 0:
             step["status"] = "failed"

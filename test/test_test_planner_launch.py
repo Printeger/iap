@@ -69,6 +69,10 @@ class TestPlannerLaunchTest(unittest.TestCase):
         self.assertGreaterEqual(horizons[-1], 13.2)
         self.assertEqual(MODULE.EXPERIMENT_PRESETS["p1_fork_formal"]["p0.size_y_m"], "12.0")
         self.assertEqual(
+            MODULE.EXPERIMENT_PRESETS["p1_fork_formal"]["grid_map/local_update_range_x"],
+            "10.0",
+        )
+        self.assertEqual(
             MODULE.EXPERIMENT_PRESETS["p1_fork_formal"]["fsm.thresh_replan_time"],
             "0.5",
         )
