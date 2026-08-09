@@ -49,6 +49,12 @@ class TestPlannerLaunchTest(unittest.TestCase):
         )
         defaults = dict(MODULE.ARG_DEFAULTS)
         self.assertEqual(defaults["lidar_start_delay_s"], "0.0")
+        self.assertEqual(defaults["odometry_initialization_mode"], "")
+        self.assertEqual(
+            MODULE.EXPERIMENT_PRESETS["p1_fork_formal"]
+            ["odometry_initialization_mode"],
+            "NAIVE",
+        )
         formal_lidar_delay = float(
             MODULE.EXPERIMENT_PRESETS["p1_fork_formal"]["lidar_start_delay_s"]
         )
@@ -137,6 +143,19 @@ class TestPlannerLaunchTest(unittest.TestCase):
         self.assertEqual(
             MODULE._fixed_lattice_no_replan_threshold({"p1": False}), 1.0
         )
+
+    def test_runtime_odometry_mode_override_preserves_commented_config(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "config_odometry_gpu.json"
+            path.write_text(
+                '{\n  "odometry_estimation": {\n'
+                '    "initialization_mode": "LOOSE", // permitted modes\n'
+                '    "initialization_window_size": 1.0\n  }\n}\n'
+            )
+            MODULE._override_odometry_initialization_mode(path, "NAIVE")
+            updated = path.read_text()
+            self.assertIn('"initialization_mode": "NAIVE", // permitted modes', updated)
+            self.assertIn('"initialization_window_size": 1.0', updated)
 
     def test_formal_calibration_is_manifest_only_provenance(self):
         with tempfile.TemporaryDirectory() as tmp:

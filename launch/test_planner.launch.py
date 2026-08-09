@@ -1,6 +1,7 @@
 import json
 import hashlib
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -644,8 +645,11 @@ EXPERIMENT_PRESETS = {
         "p0.horizons_s": "0.0,0.5,1.0,1.5,2.0,2.5,3.5,4.5,5.5,6.5,7.5,8.5,9.5,10.5,11.5,12.5,13.5,14.5,15.5,16.0,17.0,18.0,19.0,20.0,21.0,22.0,23.0,24.0",
         "p0.size_y_m": "12.0",
         "planner_start_delay_s": "10.0",
-        # GLIM's loose initializer requires a full 1.0 s IMU window before its
-        # first LiDAR frame. Keep a deterministic margin over that contract.
+        # The deterministic simulator starts stationary. Use its measured
+        # gravity vector instead of solving an underconstrained loose GICP/IMU
+        # problem over the repeated startup scene.
+        "odometry_initialization_mode": "NAIVE",
+        # Accumulate a full IMU window before the first LiDAR frame.
         "lidar_start_delay_s": "2.0",
         "fsm.thresh_replan_time": "0.9",
         # Observe the entire central fork and put the local target beyond its
@@ -717,6 +721,7 @@ ARG_DEFAULTS = [
     ("allow_truth_alignment", "true"),
     ("planner_start_delay_s", "0.0"),
     ("lidar_start_delay_s", "0.0"),
+    ("odometry_initialization_mode", ""),
     ("fsm.thresh_replan_time", "1.0"),
     ("enable_preflight_takeoff", "false"),
     ("preflight_ground_z", "0.0"),
@@ -1177,6 +1182,19 @@ def _resolve_run_roots(config_name, experiment_name, scenario_name, run_token,
     return runtime_root, export_dir
 
 
+def _override_odometry_initialization_mode(config_path, mode):
+    """Patch GLIM's JSON-with-comments config without discarding its comments."""
+    path = Path(config_path)
+    source = path.read_text()
+    pattern = r'("initialization_mode"\s*:\s*")[^"]+("\s*,)'
+    updated, count = re.subn(pattern, rf'\g<1>{mode}\g<2>', source, count=1)
+    if count != 1:
+        raise RuntimeError(
+            f"expected exactly one initialization_mode in {path}; found {count}"
+        )
+    path.write_text(updated)
+
+
 def _runtime_config(context, use_gnss, use_araim, allow_truth_alignment):
     iap_share = Path(get_package_share_directory("iap"))
     base_config = iap_share / "config"
@@ -1203,6 +1221,20 @@ def _runtime_config(context, use_gnss, use_araim, allow_truth_alignment):
 
     config_ros_path = runtime_config_dir / "config_ros.json"
     config_gnss_path = runtime_config_dir / "config_gnss.json"
+    config_odometry_path = runtime_config_dir / "config_odometry_gpu.json"
+
+    odometry_initialization_mode = LaunchConfiguration(
+        "odometry_initialization_mode"
+    ).perform(context).strip().upper()
+    if odometry_initialization_mode:
+        if odometry_initialization_mode not in {"LOOSE", "NAIVE"}:
+            raise RuntimeError(
+                "odometry_initialization_mode must be LOOSE, NAIVE, or empty; "
+                f"got '{odometry_initialization_mode}'"
+            )
+        _override_odometry_initialization_mode(
+            config_odometry_path, odometry_initialization_mode
+        )
 
     with config_ros_path.open() as f:
         config_ros = json.load(f)
@@ -1746,6 +1778,10 @@ def _launch_setup(context):
     lidar_start_delay_s = max(
         0.0, float(LaunchConfiguration("lidar_start_delay_s").perform(context))
     )
+    odometry_initialization_mode = (
+        LaunchConfiguration("odometry_initialization_mode")
+        .perform(context).strip().upper() or "LOOSE"
+    )
 
     drone_id = LaunchConfiguration("drone_id").perform(context)
     init_x = float(LaunchConfiguration("init_x").perform(context))
@@ -2070,7 +2106,7 @@ def _launch_setup(context):
         "risk_sources": ["gnss_map_occlusion", "lidar_observability"],
         "sensor_startup": {
             "lidar_start_delay_s": lidar_start_delay_s,
-            "odometry_initialization_mode": "LOOSE",
+            "odometry_initialization_mode": odometry_initialization_mode,
             "odometry_initialization_window_s": 1.0,
             "required_strict_margin_s": lidar_start_delay_s - 1.0,
         },

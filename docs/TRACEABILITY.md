@@ -1,5 +1,11 @@
 # Traceability Matrix (IAP)
 
+## 2026-08-09 P1-2 deterministic stationary initialization repair
+
+| Req ID | Evidence | Verification | Status |
+|---|---|---|---|
+| IAP-RQ-320 / IAP-RQ-400 / IAP-RQ-410 / IAP-RQ-422 | Delay-only smoke supplied the full IMU window but `LOOSE` converged to `124.659°` alignment rotation with nonphysical velocity/bias in the stationary repeated startup scene. | `p1_fork_formal` alone materializes `NAIVE` into the run-local GLIM config; defaults are unchanged and manifest/fingerprint bind the effective mode. Unit regression preserves JSON comments. Installed 8 s smoke initialized identity pose, zero velocity/bias, and `0.007°` alignment rotation. | **IMPLEMENTED; fresh c36 required; formal analyzer zero; P1-3 prohibited** |
+
 ## 2026-08-09 P1-2 c35 retained result and LiDAR initialization ordering
 
 | Req ID | Evidence | Verification | Status |
