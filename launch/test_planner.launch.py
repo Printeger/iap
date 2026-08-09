@@ -1979,7 +1979,7 @@ def _launch_setup(context):
 
     scenario_contract = {
         "geometry": {
-            "fixture_algorithm_version": "p1_deterministic_fork_geometry_v11",
+            "fixture_algorithm_version": "p1_deterministic_fork_geometry_v12",
             "fixture": LaunchConfiguration("p1_map_fixture").perform(context),
             "mirror_y": _param_bool(context, "p1_fixture_mirror_y"),
             "start_m": [init_x, init_y, init_z],
@@ -2018,6 +2018,12 @@ def _launch_setup(context):
                 },
                 "gnss_occluding_risky_canopies": {
                     "primary": "upper", "mirror": "lower",
+                },
+                "continuous_overhead_gnss_mask": {
+                    "primary": "upper", "mirror": "lower",
+                    "x_m": [-11.5, 2.5],
+                    "half_width_y_m": 1.25,
+                    "z_m": [2.85, 3.15],
                 },
                 "soft_island": "y=-2.0_m",
                 "null": "symmetric",

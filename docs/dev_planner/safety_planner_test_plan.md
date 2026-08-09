@@ -91,6 +91,8 @@ v10 依据 c29 的完整结构证据收紧物理对照：v9 使 primary referenc
 
 v11 将 formal reference 明确定义为镜像绑定的无 P1 控制臂：只在 metrics-only 且 preserve-homotopies 的现有实验中，从已经 ordinary optimizer 成功并通过碰撞支持的候选中按几何 Y 选择 primary 上路、mirror 下路；选择器不读取任何风险值，enabled、默认 planner、P0/P5、replacement 与 emergency 路径均不受影响。primary/mirror 的不变密集树干继续位于 enabled 首选臂，不变的 risky canopy 数量、尺寸和概率移到 reference 臂上方以产生真实 GNSS LOS 遮挡，精确场景镜像同步交换两者。null 和已通过的 soft 几何保持 v10 不变。
 
+v12 针对 c31 已证明的稀疏球形树冠 LOS 间隙，在 canonical reference 臂上方增加连续物理 GNSS mask：`x=-11.5..2.5 m`、横向半宽 `1.25 m`、`z=2.85..3.15 m`。它与 GNSS simulator 的真实 `0.5 m` map voxel / `0.25 m` ray sample 交互，不写死风险值；全体点保持在飞行层以上，primary/mirror 仍由同一生成点集逐点 Y 反射，null/soft 不生成该 mask。树木/树冠数值参数、固定 lambda/normalization、P0/P5、碰撞、急停、replacement 和 fallback 均不改变。
+
 预资格要求上下通道均 collision-feasible 且完整 `200/200`，检查点唯一，单次定位误差 `<=0.5 m`、pair 差值 `<=0.25 m`，P0/context/validator/provenance 门全部通过，并满足：
 
 - 两个主场景 enabled 均选下路，mean 改善 `>0.00836`、CVaR 改善 `>0.00677`、max 不回退；

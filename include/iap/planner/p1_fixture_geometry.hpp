@@ -95,6 +95,18 @@ inline void append_p1_overhead_observability_rafters(
                   2.85, 3.35, resolution);
 }
 
+inline void append_p1_overhead_gnss_mask(
+    std::vector<P1FixturePoint>& points, double center_y, double resolution) {
+  // The simulator classifies real map occlusion by sampling 0.5 m voxels at
+  // 0.25 m intervals along each satellite LOS.  A continuous, collision-
+  // neutral overhead surface therefore provides a reproducible urban/forest
+  // canopy mask without encoding any risk score or changing the registered
+  // tree/canopy population.  Its generous planform catches oblique LOS rays
+  // while remaining spatially separated from the opposite fork arm.
+  append_p1_box(points, -11.5, 2.5, center_y - 1.25, center_y + 1.25,
+                2.85, 3.15, resolution);
+}
+
 inline std::vector<P1FixturePoint> make_p1_fixture_points(const P1FixtureConfig& config) {
   std::vector<P1FixturePoint> base;
   const auto add_lane = [&](double center_y, double density,
@@ -169,6 +181,8 @@ inline std::vector<P1FixturePoint> make_p1_fixture_points(const P1FixtureConfig&
              config.risky_canopy_probability, false, config.lane_center_m);
     add_lane(config.lane_center_m, config.safe_tree_density_per_m2,
              config.safe_canopy_probability, true, config.lane_center_m);
+    append_p1_overhead_gnss_mask(
+        base, config.lane_center_m, config.resolution_m);
   }
   append_p1_observability_landmarks(base, config.resolution_m);
   if (config.mirror_y)

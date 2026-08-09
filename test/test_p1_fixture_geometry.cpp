@@ -197,6 +197,41 @@ TEST(P1FixtureGeometry, UnchangedRiskyCanopiesOccludeOppositeBaselineRouteAboveF
                            }));
 }
 
+TEST(P1FixtureGeometry, FormalReferenceArmHasContinuousCollisionNeutralGnssMask) {
+  P1FixtureConfig config;
+  config.name = "p1_fork_fused_v1";
+  config.central_obstacle_enabled = false;
+  const auto points = iap::planner::make_p1_fixture_points(config);
+
+  // A continuous overhead surface is required because the GNSS simulator
+  // samples 0.5 m occupancy voxels along each satellite LOS.  Sparse canopy
+  // balls alone can leave unintentional ray gaps between adjacent trees.
+  for (double x = -10.0; x <= 1.0 + 1.0e-9; x += 0.5) {
+    for (double y = config.lane_center_m - 0.75;
+         y <= config.lane_center_m + 0.75 + 1.0e-9; y += 0.5) {
+      EXPECT_TRUE(std::any_of(points.begin(), points.end(), [x, y](const auto& point) {
+        return std::abs(point.x - x) <= 0.11 &&
+            std::abs(point.y - y) <= 0.11 && point.z >= 2.85 - 1.0e-12;
+      })) << "missing overhead GNSS mask near x=" << x << ", y=" << y;
+    }
+  }
+  EXPECT_TRUE(std::all_of(points.begin(), points.end(), [&config](const auto& point) {
+    const bool inside_reference_arm =
+        point.x >= -10.1 && point.x <= 1.1 &&
+        std::abs(point.y - config.lane_center_m) <= 0.86;
+    return !inside_reference_arm || point.z >= 2.85 - 1.0e-12;
+  }));
+
+  P1FixtureConfig null_config = config;
+  null_config.name = "p1_fork_symmetric_null_v1";
+  const auto null_points = iap::planner::make_p1_fixture_points(null_config);
+  EXPECT_TRUE(std::none_of(null_points.begin(), null_points.end(), [&config](const auto& point) {
+    return point.x >= -10.1 && point.x <= 1.1 &&
+        std::abs(point.y - config.lane_center_m) <= 0.86 &&
+        point.z >= 2.85 - 1.0e-12;
+  }));
+}
+
 TEST(P1FixtureGeometry, FormalFixturesProvideSymmetricCollisionNeutralLidarLandmarks) {
   P1FixtureConfig config;
   config.name = "p1_soft_risk_island_v1";

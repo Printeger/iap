@@ -1,5 +1,11 @@
 # Traceability Matrix (IAP)
 
+## 2026-08-09 P1-2 continuous physical GNSS-mask repair
+
+| Req ID | Evidence | Verification | Status |
+|---|---|---|---|
+| IAP-RQ-320 / IAP-RQ-400 / IAP-RQ-410 / IAP-RQ-422 | Clean c31 (`1958af4`) passed every structural, safety, localization, null, and soft gate, but its two complete primary pairs improved mean by only `0.001412/0.001991` and CVaR by `0.000656/0.002457`; sparse canopy balls leave gaps under the simulator's 0.5 m voxel / 0.25 m LOS sampler. | Geometry v12 adds a continuous `z=2.85..3.15 m` physical GNSS mask above the canonical reference arm, exact-mirrors it with the scene, excludes null/soft, and binds its dimensions into the scenario fingerprint. `FormalReferenceArmHasContinuousCollisionNeutralGnssMask` plus existing pointwise mirror/null/clearance regressions pass. | **IMPLEMENTED; second comparable failure retained; fresh third campaign required; analyzer count zero; P1-3 prohibited** |
+
 ## 2026-08-09 P1-2 gradual collision-envelope binding
 
 | Req ID | Evidence | Verification | Status |

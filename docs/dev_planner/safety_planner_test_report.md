@@ -9516,3 +9516,24 @@ Clean c20 (`65fdaf3`) completed all ten serial 90-second runs with 10/10 validat
 The next clean campaign makes the formal checkpoint a once-per-process, full-200-only observation; records same-attempt admitted collision-fanout profiles for both arms in one canonical export-bound artifact; and binds geometry v3 with taller, closer, exact-symmetric lane-external survey pylons from the start through the fork. These repairs do not alter lambda, normalization, risk values, P0/P5 safety/fallback decisions, tree density/canopy settings, mirror/null symmetry, or route clearance.
 
 Clean c21 (`ab0ffeb`) completed all ten serial runs with 10/10 validator PASS. The independent analyzer then exited 1 before pair evaluation: an invalid accepted profile took the exception path before `metrics_only` was locally assigned, although the now-arm-independent candidate artifact call still referenced it. c21 is retained and is not reanalyzed after removing that obsolete argument. It supplies no scientific result; calibration, formal preflight/run/analyzer, and P1-3 remain unstarted. Raw evidence is under `results/planner_validation/campaigns/p1-2-20260809-ab0ffeb-c21/`, with large CSVs losslessly gzipped.
+
+### c31 complete comparable prequalification failure
+
+Clean c31 (`1958af4`) completed the prescribed ten serial runs. Every run
+passed validator, P0/context/provenance, safety, localization, unique-checkpoint,
+and exact two-arm `200/200` gates. Primary reference selected upper twice and
+enabled selected lower twice; mirror reflected those choices exactly. Null and
+soft-risk pairs passed. The two primary mean improvements were only
+`0.00141195` and `0.00199095`, and smooth-CVaR improvements were `0.00065593`
+and `0.00245669`, below the preregistered `0.00836` and `0.00677` thresholds.
+Mirror mean/CVaR improvements were `0.00117764`/`0.0000329`, with exact-max
+regression `0.00012166`. Thus c31 is the second complete comparable scientific
+failure after c17; calibration, formal preflight/pair/analyzer, and P1-3 did
+not start. Raw evidence is retained losslessly compressed under
+`results/planner_validation/campaigns/p1-2-20260809-1958af4-c31/`.
+
+The compliant v12 repair adds a continuous collision-neutral physical GNSS
+mask above the canonical reference arm so the real voxel/raycast model cannot
+pass through gaps between sparse canopy balls. Exact mirror, null/soft scene
+isolation, flight-layer clearance, and unchanged tree/canopy parameters are
+covered by generated-point tests. A fresh campaign must restart at run one.
