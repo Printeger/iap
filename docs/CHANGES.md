@@ -611,3 +611,9 @@
 - The P1-only `test_planner` fixture now keeps replanning to the manager's existing 0.2 m goal boundary, and records that threshold in the manifest. Other profiles retain the 1.0 m threshold. This removes timing-dependent loss of the final 200/200 metrics-only observation without changing runtime planner defaults or safety semantics.
 - Once a normalized P1 trajectory has been published for the active global goal, a later unsupported base prepass can no longer overwrite it. Before the first P1 publish, the same base fallback remains available to advance the receding horizon; new global goals and emergency trajectories reset the P1-incumbent identity.
 - Enabled smoke run `55340378…` exposed this closure bug: attempt 18 published a 200/200 P1 winner, then attempt 20 overwrote the authoritative profile with a `149/200 base_prepass_no_full_support` fallback. Preflight rejected the resulting identity, and the bundle is retained without analyzer reuse.
+
+## 2026-08-09 (P1-2 c37 SO3 startup feedback repair)
+
+- IAP-RQ-320/IAP-RQ-400/IAP-RQ-410/IAP-RQ-422: retained c37 after 9/10 hard-gate runs; the lone localization divergence was caused upstream when SO3 control consumed body-frame specific force including gravity as world-frame linear acceleration.
+- The planner test launch now feeds SO3 control from the simulator's existing world-linear-acceleration IMU stream while leaving the IAP estimator on its body-specific-force stream. Provenance records the feedback semantics; no risk, geometry, GNSS/LiDAR, lambda, normalization, safety, or fallback setting changed.
+- A red/green launch contract and three installed-runtime startup smokes produced maximum localization errors of `0.061`, `0.012`, and `0.022 m`, with first GNSS clock-drift estimates near zero. c37 remains incomplete/non-comparable; calibration, formal analyzer, and P1-3 remain unstarted.

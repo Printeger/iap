@@ -9677,3 +9677,30 @@ Compact evidence is under
 `p1_formal_test_report_artifacts/2026-08-09-24b9b87/`; raw evidence remains
 losslessly compressed under `results/planner_validation/campaigns/c36_24b9b87/`.
 Calibration, formal analyzer, and P1-3 did not run.
+
+### c37 retained incomplete result and SO3 acceleration-semantics repair
+
+Clean c37 (`e52832a6a84e24cf0c72a1a4252b79636623664d`) completed all ten
+prescribed serial 90-second runs. Nine passed every hard gate. The sole failed
+run, primary-2 enabled `1f87d0b8…`, had `91.4916 m` checkpoint localization
+error; all other runs were `0.112..0.298 m`, and all ten had collision-feasible
+complete `200/200` upper/lower candidate proofs. Null and soft-risk pairs
+passed. Primary-1 mean/CVaR improvements were `+0.001715879/+0.000649596`;
+primary-2 was invalid due to the hard failure, and mirror direction was
+inconsistent. Thus c37 is incomplete/non-comparable and only c31/c32 count.
+
+The failed run respected the repaired single-epoch GNSS binding (`82` factors /
+41 satellites), but the SO3 controller consumed IAP body specific force
+including gravity where its control law expects world linear acceleration.
+The resulting feedback drove startup acceleration to `96..112 m/s²` and the
+first clock-drift estimate to `6.4642 m/s`. The test-first repair remaps only
+SO3 feedback to the simulator's existing world-acceleration stream and records
+that semantic in provenance; IAP retains its correct specific-force stream.
+Three installed-runtime startup smokes had maximum localization errors of
+`0.061`, `0.012`, and `0.022 m`. No geometry, sensor noise, risk, lambda,
+normalization, P0/P5, collision, safety, or fallback parameter changed.
+Compact evidence is under
+`p1_formal_test_report_artifacts/2026-08-09-e52832a/`; raw c37 evidence remains
+losslessly compressed under `results/planner_validation/campaigns/c37_e52832a/`.
+Calibration, formal preflight/pair/analyzer, and P1-3 did not run; formal
+analyzer invocation count remains zero.

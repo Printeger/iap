@@ -31,6 +31,11 @@ from launch_ros.descriptions import ComposableNode
 P1_EVIDENCE_SCHEMA_VERSION = "p1_evidence_provenance_v4"
 
 
+def _so3_feedback_imu_topic(sim_imu_topic, _iap_imu_topic):
+    """Return the world-frame linear-acceleration stream expected by SO3Control."""
+    return sim_imu_topic
+
+
 def _sha256_file(path):
     path = Path(path).resolve()
     if not path.is_file():
@@ -1857,6 +1862,9 @@ def _launch_setup(context):
     planner_odom_topic = truth_odom_topic
     sim_imu_topic = "/sim/drone_0/imu"
     iap_imu_topic = "/sim/drone_0/imu_iap"
+    so3_feedback_imu_topic = _so3_feedback_imu_topic(
+        sim_imu_topic, iap_imu_topic
+    )
     sim_lidar_topic = "/sim/drone_0/lidar"
     iap_lidar_topic = "/sim/drone_0/lidar_body"
     sim_depth_topic = "/sim/drone_0/depth"
@@ -2110,6 +2118,7 @@ def _launch_setup(context):
             "odometry_initialization_window_s": 1.0,
             "required_strict_margin_s": lidar_start_delay_s - 1.0,
             "gnss_epoch_frame_binding": "nearest_single_epoch",
+            "so3_feedback_imu_semantics": "world_linear_acceleration",
         },
         "gnss": {
             "scenario_file": str(gnss_scenario_file),
@@ -2808,7 +2817,7 @@ def _launch_setup(context):
                         ("motors", "/test_planner/motors"),
                         ("corrections", "/test_planner/corrections"),
                         ("so3_cmd", so3_cmd_topic),
-                        ("imu", iap_imu_topic),
+                        ("imu", so3_feedback_imu_topic),
                     ],
                 )
             ],

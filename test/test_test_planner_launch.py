@@ -14,6 +14,14 @@ SPEC.loader.exec_module(MODULE)
 
 
 class TestPlannerLaunchTest(unittest.TestCase):
+    def test_so3_feedback_uses_world_linear_acceleration_not_iap_specific_force(self):
+        self.assertEqual(
+            MODULE._so3_feedback_imu_topic(
+                "/sim/drone_0/imu", "/sim/drone_0/imu_iap"
+            ),
+            "/sim/drone_0/imu",
+        )
+
     def test_runtime_and_export_roots_are_optional_and_resolved_per_run(self):
         defaults = dict(MODULE.ARG_DEFAULTS)
         self.assertEqual(defaults["runtime_root_dir"], "")

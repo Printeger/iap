@@ -435,6 +435,13 @@
 | IAP-RQ-320 / IAP-RQ-400 / IAP-RQ-422 | Lane structure must not obstruct the central split or post-fork merge | geometry v8 moves unchanged-count/dimension trunks to each lane's external boundary; `FormalLaneBoundaryTrunksStayOnTheExternalSide`, low-altitude-clearance, exact-mirror, and exact-null regressions pass | **IMPLEMENTED; fresh campaign required** |
 | IAP-RQ-320 / IAP-RQ-400 / IAP-RQ-410 / IAP-RQ-422 | c27 cannot advance because checkpoint and two-arm hard gates remain incomplete | c27 (`a18ed52`) retained 10/10 validator-success runs; reference mirror/null/soft passed both gates, while enabled checkpoints and primary/opposite arms remained incomplete | **NOT TERMINAL; incomplete/non-comparable; formal analyzer count zero** |
 
+## 2026-08-09 P1-2 c37 SO3 startup feedback repair
+
+| Req ID | Requirement/evidence seam | Implementation and retained evidence | Status |
+|---|---|---|---|
+| IAP-RQ-320 / IAP-RQ-400 / IAP-RQ-410 | The estimator and flight controller must consume acceleration streams with their declared coordinate/force semantics | `test_planner.launch.py` retains body specific force for IAP and maps SO3 feedback to the simulator's world linear acceleration; the manifest binds `so3_feedback_imu_semantics=world_linear_acceleration`; launch regression proves the topic contract | **IMPLEMENTED; fresh campaign required** |
+| IAP-RQ-320 / IAP-RQ-400 / IAP-RQ-410 / IAP-RQ-422 | c37 cannot advance because one run failed the localization hard gate | c37 (`e52832a`) retained all ten runs and 10/10 complete two-arm candidate proofs, but `pre_primary_2_enabled` reached `91.4916 m` checkpoint error after an upstream `96..112 m/s²` startup acceleration; only 9/10 hard gates passed | **NOT TERMINAL; incomplete/non-comparable; formal analyzer count zero** |
+
 ## 2026-08-09 P1-2 c28 overhead-observability repair
 
 | Req ID | Requirement/evidence seam | Implementation and retained evidence | Status |
