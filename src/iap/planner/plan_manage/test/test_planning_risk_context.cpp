@@ -407,6 +407,24 @@ TEST(P1SoftFallbackPolicyTest,
 }
 
 TEST(P1SoftFallbackPolicyTest,
+     ExecutingTrajectoryMayObserveWithoutRequestingAReplan) {
+  EXPECT_TRUE(ego_planner::shouldAttemptP1ExecutingFormalObservation(
+      true, false, false, true, true, 11));
+  EXPECT_FALSE(ego_planner::shouldAttemptP1ExecutingFormalObservation(
+      false, false, false, true, true, 11));
+  EXPECT_FALSE(ego_planner::shouldAttemptP1ExecutingFormalObservation(
+      true, true, false, true, true, 11));
+  EXPECT_FALSE(ego_planner::shouldAttemptP1ExecutingFormalObservation(
+      true, false, true, true, true, 11));
+  EXPECT_FALSE(ego_planner::shouldAttemptP1ExecutingFormalObservation(
+      true, false, false, false, true, 11));
+  EXPECT_FALSE(ego_planner::shouldAttemptP1ExecutingFormalObservation(
+      true, false, false, true, false, 11));
+  EXPECT_FALSE(ego_planner::shouldAttemptP1ExecutingFormalObservation(
+      true, false, false, true, true, 0));
+}
+
+TEST(P1SoftFallbackPolicyTest,
      PostOptimizationInvalidityKeepsExistingOrDefersBaseInitialFallback) {
   iap::P1AcceptedContextValidation validation;
   validation.fresh = false;

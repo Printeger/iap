@@ -106,6 +106,25 @@ TEST(P1FixtureGeometry, RiskyLaneTrunksLeaveConservativeCenterClearance) {
   }));
 }
 
+TEST(P1FixtureGeometry, RiskyCanopiesOccludeGnssAboveButNotInsideFlightLane) {
+  P1FixtureConfig config;
+  config.name = "p1_fork_fused_v1";
+  config.central_obstacle_enabled = false;
+  const auto points = iap::planner::make_p1_fixture_points(config);
+  const auto over_risky_lane = [&config](const auto& point) {
+    return std::abs(point.y - config.lane_center_m) <=
+        config.resolution_m + 1.0e-12;
+  };
+  EXPECT_GT(std::count_if(points.begin(), points.end(),
+                          [&over_risky_lane](const auto& point) {
+                            return over_risky_lane(point) && point.z >= 2.83;
+                          }), 100);
+  EXPECT_TRUE(std::none_of(points.begin(), points.end(),
+                           [&over_risky_lane](const auto& point) {
+                             return over_risky_lane(point) && point.z < 2.83;
+                           }));
+}
+
 TEST(P1FixtureGeometry, FormalFixturesProvideSymmetricCollisionNeutralLidarLandmarks) {
   P1FixtureConfig config;
   config.name = "p1_soft_risk_island_v1";

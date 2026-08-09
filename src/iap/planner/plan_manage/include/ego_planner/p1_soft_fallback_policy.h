@@ -141,6 +141,16 @@ inline bool shouldRecordP1FormalCheckpointObservation(
       std::abs(current_x_m - checkpoint_x_m) <= checkpoint_half_width_m;
 }
 
+inline bool shouldAttemptP1ExecutingFormalObservation(
+    bool p1_admission_enabled, bool p5_owns_admission,
+    bool checkpoint_already_recorded, bool executing_trajectory,
+    bool snapshot_available,
+    uint64_t observation_attempt_id) {
+  return p1_admission_enabled && !p5_owns_admission &&
+      !checkpoint_already_recorded && executing_trajectory &&
+      snapshot_available && observation_attempt_id > 0;
+}
+
 inline P1SoftFallbackDecision decideP1BasePrepassFallback(
     const P1BasePrepassFallbackInput& input) {
   if (input.base_optimizer_success && input.full_p1_support) {

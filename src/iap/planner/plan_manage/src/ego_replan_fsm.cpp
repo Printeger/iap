@@ -1,6 +1,7 @@
 
 #include <ego_planner/ego_replan_fsm.h>
 #include <ego_planner/p0_risk_grid_runtime.h>
+#include <ego_planner/p1_soft_fallback_policy.h>
 #include <ego_planner/p5_runtime_integrity_gate.h>
 #include <ego_planner/trajectory_command_qos.h>
 #include <iap/planner/risk_grid_map.hpp>
@@ -509,6 +510,30 @@ namespace ego_planner
       fsm_num = 0;
     }
 
+    const bool p5_owns_admission = planner_manager_->p5_integrity_gate_ &&
+        (planner_manager_->p5_integrity_gate_->runtimeEnabled() ||
+         planner_manager_->p5_integrity_gate_->finalGateEnabled());
+    if (shouldAttemptP1ExecutingFormalObservation(
+            planner_manager_->p1AdmissionEnabled(), p5_owns_admission,
+            planner_manager_->p1FormalCheckpointRecorded(),
+            exec_state_ == EXEC_TRAJ,
+            static_cast<bool>(p1_formal_observation_snapshot_),
+            p1_formal_observation_attempt_id_))
+    {
+      const double now_s = plannerNow().seconds();
+      planner_manager_->beginPlanningRiskContextWithSnapshot(
+          now_s, p1_formal_observation_snapshot_,
+          p1_formal_observation_attempt_id_);
+      const bool recorded =
+          planner_manager_->recordP1FormalDecisionObservation(now_s);
+      planner_manager_->clearPlanningRiskContext();
+      if (recorded)
+      {
+        p1_formal_observation_snapshot_.reset();
+        p1_formal_observation_attempt_id_ = 0;
+      }
+    }
+
     switch (exec_state_)
     {
     case INIT:
@@ -961,21 +986,17 @@ namespace ego_planner
           generation, health.ready, stale, has_existing_trajectory);
       acquire_p1_context = admission.acquire_p1_context;
       p1_planning_attempt_id = admission.planning_attempt_id;
+      if (admission.allow_expensive_planning && admission.acquire_p1_context &&
+          admission.planning_attempt_id > 0 && admitted_snapshot)
+      {
+        // Retain the exact immutable attempt context for the executing-state
+        // checkpoint observer. Replanning is event-driven and can otherwise
+        // be silent while the incumbent traverses the fixed window.
+        p1_formal_observation_snapshot_ = admitted_snapshot;
+        p1_formal_observation_attempt_id_ = admission.planning_attempt_id;
+      }
       if (!admission.allow_expensive_planning)
       {
-        if (admission.action ==
-                P1ReplanAdmission::Action::DEFER_SAME_GENERATION &&
-            admission.evidence_attempt_id > 0 && admitted_snapshot)
-        {
-          // Same-generation admission remains single-flight. This temporary
-          // context only observes the executing incumbent against the exact
-          // immutable snapshot/attempt that already produced candidate
-          // evidence; it cannot optimize, replace, or publish a command.
-          planner_manager_->beginPlanningRiskContextWithSnapshot(
-              now_s, admitted_snapshot, admission.evidence_attempt_id);
-          planner_manager_->recordP1FormalDecisionObservation(now_s);
-          planner_manager_->clearPlanningRiskContext();
-        }
         planner_manager_->recordP1RetryDeferred(
             admission.reason, now_s, admitted_snapshot);
         return false;

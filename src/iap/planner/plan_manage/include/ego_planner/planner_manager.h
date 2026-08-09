@@ -111,6 +111,9 @@ namespace ego_planner
     bool preparePlanningRiskPublish(double now_s, std::string *reason = nullptr);
     bool finalizeP1AcceptedRiskProfile(double publish_stamp_s);
     bool recordP1FormalDecisionObservation(double observation_stamp_s);
+    bool p1FormalCheckpointRecorded() const {
+      return p1_formal_checkpoint_recorded_;
+    }
     std::string p1PlanningContextTimelinePath() const;
     bool p1AdmissionEnabled() const;
     const std::string &lastP1RejectionReason() const { return last_p1_rejection_reason_; }

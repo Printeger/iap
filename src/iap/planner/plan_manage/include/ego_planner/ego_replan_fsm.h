@@ -84,6 +84,8 @@ namespace ego_planner
     bool p5_final_gate_emergency_candidate_ = false;
     bool p5_waiting_for_p0_ready_ = false;
     P1ReplanAdmission p1_replan_admission_;
+    std::shared_ptr<const iap::RiskGridSnapshot> p1_formal_observation_snapshot_;
+    uint64_t p1_formal_observation_attempt_id_ = 0;
 
     /* ROS utils */
     rclcpp::Node::SharedPtr node_;

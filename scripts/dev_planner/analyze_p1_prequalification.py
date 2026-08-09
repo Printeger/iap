@@ -101,6 +101,48 @@ def _prequalification_candidate_rows(
     ]
 
 
+def _select_prequalification_candidate_rows(
+    candidates: list[dict[str, Any]], checkpoint_x_m: float = -9.5,
+    checkpoint_half_width_m: float = 0.4,
+) -> list[dict[str, Any]]:
+    """Select the latest complete route-availability proof before commitment.
+
+    The accepted profile is measured at the fixed checkpoint. Candidate
+    availability is necessarily established before the incumbent has already
+    entered one fork arm, but every selected row remains bound to one immutable
+    snapshot/attempt tuple and the real collision result.
+    """
+    grouped: dict[tuple[str, ...], list[dict[str, Any]]] = {}
+    for row in candidates:
+        if row.get("phase") != "prequalification_evidence":
+            continue
+        key = tuple(str(row.get(field, "")) for field in (
+            "planning_attempt_id", "snapshot_generation_id", "query_base_time_s"
+        ))
+        grouped.setdefault(key, []).append({
+            **row,
+            "matched": _truthy(row.get("valid")) and not _truthy(row.get("stale")),
+            "collision_free": _truthy(row.get("collision_free")),
+            "selected": _truthy(row.get("selected")),
+        })
+    latest_allowed_x = checkpoint_x_m - checkpoint_half_width_m
+    eligible: list[tuple[int, tuple[str, ...], list[dict[str, Any]]]] = []
+    for key, rows in grouped.items():
+        first_samples = [row for row in rows if str(row.get("sample_index", "")) == "0"]
+        start_x = [_number(row.get("x")) for row in first_samples]
+        attempt = _number(key[0])
+        if (attempt is None or not start_x or any(x is None for x in start_x)
+                or max(float(x) for x in start_x) > latest_allowed_x + 1e-12):
+            continue
+        eligible.append((int(attempt), key, rows))
+    if not eligible:
+        return []
+    passing = [item for item in eligible if formal_metrics.candidate_route_precheck(
+        item[2], require_selected=False).get("passed")]
+    selected = max(passing or eligible, key=lambda item: (item[0], item[1]))
+    return selected[2]
+
+
 def _validate_provenance_rows(
     rows: list[dict[str, Any]], run_id: str, manifest_path: Path, label: str
 ) -> None:
@@ -297,8 +339,7 @@ def analyze_run(export_value: str | Path) -> dict[str, Any]:
             _validate_provenance_rows(
                 optimization, run_id, manifest_path, "candidate optimization")
         _validate_provenance_rows(candidates, run_id, manifest_path, "candidate profile")
-        context = profile[0]
-        precheck_rows = _prequalification_candidate_rows(candidates, context)
+        precheck_rows = _select_prequalification_candidate_rows(candidates)
         precheck = formal_metrics.candidate_route_precheck(
             precheck_rows, require_selected=False
         )

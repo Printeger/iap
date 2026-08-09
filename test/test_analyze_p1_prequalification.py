@@ -95,6 +95,30 @@ class P1PrequalificationTest(unittest.TestCase):
         rows = MODULE._prequalification_candidate_rows([candidate], context)
         self.assertTrue(rows[0]["collision_free"])
 
+    def test_candidate_availability_uses_latest_complete_precheckpoint_attempt(self):
+        rows = []
+        for attempt, x, collision_free in (
+            (5, -11.6, True), (6, -10.8, True), (11, -9.4, False)
+        ):
+            for candidate_id, y in (("1", -2.0), ("2", 2.0)):
+                for sample_index in range(200):
+                    rows.append({
+                        "planning_attempt_id": str(attempt),
+                        "candidate_id": candidate_id,
+                        "snapshot_generation_id": str(attempt + 100),
+                        "query_base_time_s": str(attempt + 1000),
+                        "phase": "prequalification_evidence",
+                        "sample_index": str(sample_index), "x": str(x),
+                        "y": str(y), "c_pi": "1.0", "valid": "1",
+                        "stale": "0", "collision_free": str(collision_free),
+                        "selected": "0",
+                    })
+
+        selected = MODULE._select_prequalification_candidate_rows(rows)
+        self.assertEqual({row["planning_attempt_id"] for row in selected}, {"6"})
+        self.assertTrue(MODULE.formal_metrics.candidate_route_precheck(
+            selected, require_selected=False)["passed"])
+
     def test_both_arms_use_strictly_export_bound_prequalification_candidates(self):
         with tempfile.TemporaryDirectory() as tmp:
             export = Path(tmp).resolve()

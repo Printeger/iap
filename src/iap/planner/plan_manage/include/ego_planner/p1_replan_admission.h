@@ -24,10 +24,6 @@ class P1ReplanAdmission {
     // the admission gate, rather than by a later context constructor, so a
     // deferred tick cannot accidentally look like a planning attempt.
     uint64_t planning_attempt_id = 0;
-    // A same-generation deferred tick may perform read-only formal evidence
-    // capture against the immutable snapshot from the preceding attempt. It
-    // must never allocate a new planning attempt or authorize optimization.
-    uint64_t evidence_attempt_id = 0;
   };
 
   Decision admit(uint64_t generation_id, bool ready, bool stale,

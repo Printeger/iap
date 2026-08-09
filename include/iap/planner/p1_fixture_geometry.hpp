@@ -96,7 +96,14 @@ inline std::vector<P1FixturePoint> make_p1_fixture_points(const P1FixtureConfig&
       const double y = center_y + side * (config.lane_half_width_m + 0.75);
       append_p1_cylinder(base, x, y, config.trunk_radius_m,
                          short_features ? 0.55 : 2.85, config.resolution_m);
-      if (index < canopy_count) append_p1_canopy(base, x, y, config.canopy_resolution_m);
+      if (index < canopy_count) {
+        // Keep the preregistered tree/canopy counts and dimensions, but place
+        // risky crowns over their lane so real LOS ray-casting sees the
+        // intended GNSS asymmetry. The crown remains wholly above the flight
+        // layer; trunks retain their conservative lateral clearance.
+        const double canopy_y = short_features ? y : center_y;
+        append_p1_canopy(base, x, canopy_y, config.canopy_resolution_m);
+      }
     }
   };
   if (config.central_obstacle_enabled)
