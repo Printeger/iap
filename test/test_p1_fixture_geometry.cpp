@@ -87,7 +87,8 @@ TEST(P1FixtureGeometry, SymmetricSafeLaneFeaturesStayBelowFlightLayer) {
   const auto points = iap::planner::make_p1_fixture_points(config);
   ASSERT_FALSE(points.empty());
   EXPECT_TRUE(std::all_of(points.begin(), points.end(), [](const auto& point) {
-    return std::abs(point.y) >= 3.0 || point.z <= 0.55 + 1.0e-12;
+    return std::abs(point.y) >= 3.0 || point.z <= 0.55 + 1.0e-12 ||
+        point.z >= 2.85 - 1.0e-12;
   }));
 }
 
@@ -129,6 +130,24 @@ TEST(P1FixtureGeometry, FormalLaneBoundaryTrunksStayOnTheExternalSide) {
   EXPECT_TRUE(std::none_of(points.begin(), points.end(), [&config](const auto& point) {
     return point.z <= 0.55 && std::abs(point.y) < config.lane_center_m;
   }));
+}
+
+TEST(P1FixtureGeometry, OverheadRaftersAddCollisionNeutralLaneObservability) {
+  std::vector<P1FixturePoint> rafters;
+  iap::planner::append_p1_overhead_observability_rafters(
+      rafters, -2.5, 0.10);
+  ASSERT_GT(rafters.size(), 1000U);
+  EXPECT_TRUE(std::all_of(rafters.begin(), rafters.end(), [](const auto& point) {
+    return point.z >= 2.85 - 1.0e-12 && point.z <= 3.35 + 1.0e-12 &&
+        std::abs(point.y + 2.5) <= 0.30 + 1.0e-12;
+  }));
+
+  P1FixtureConfig soft;
+  soft.name = "p1_soft_risk_island_v1";
+  soft.central_obstacle_enabled = false;
+  soft.lane_center_m = 2.5;
+  const auto points = iap::planner::make_p1_fixture_points(soft);
+  EXPECT_GE(points.size(), rafters.size());
 }
 
 TEST(P1FixtureGeometry, DenseObservableCanopiesCoverDeclaredLowerRouteOnlyAboveFlight) {

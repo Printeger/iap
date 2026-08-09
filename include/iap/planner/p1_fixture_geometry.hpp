@@ -83,6 +83,18 @@ inline void append_p1_observability_landmarks(
   }
 }
 
+inline void append_p1_overhead_observability_rafters(
+    std::vector<P1FixturePoint>& points, double center_y, double resolution) {
+  // Compact structured returns above the flight layer strengthen the real
+  // LiDAR geometry without occupying either homotopy or encoding a risk
+  // value. Counts and dimensions of the preregistered trees/canopies are not
+  // changed.
+  for (const double x : {-10.0, -8.0, -6.0, -4.0, -2.0})
+    append_p1_box(points, x - 0.30, x + 0.30,
+                  center_y - 0.30, center_y + 0.30,
+                  2.85, 3.35, resolution);
+}
+
 inline std::vector<P1FixturePoint> make_p1_fixture_points(const P1FixtureConfig& config) {
   std::vector<P1FixturePoint> base;
   const auto add_lane = [&](double center_y, double density,
@@ -114,6 +126,8 @@ inline std::vector<P1FixturePoint> make_p1_fixture_points(const P1FixtureConfig&
   if (config.name == "p1_fork_symmetric_null_v1") {
     add_lane(-config.lane_center_m, config.safe_tree_density_per_m2,
              config.safe_canopy_probability, true);
+    append_p1_overhead_observability_rafters(
+        base, -config.lane_center_m, config.resolution_m);
     const auto lower = base;
     for (const auto& point : lower) base.push_back({point.x, -point.y, point.z});
   } else if (config.name == "p1_soft_risk_island_v1") {
@@ -125,6 +139,8 @@ inline std::vector<P1FixturePoint> make_p1_fixture_points(const P1FixtureConfig&
                        -config.lane_center_m,
                        config.canopy_resolution_m);
     }
+    append_p1_overhead_observability_rafters(
+        base, -config.lane_center_m, config.resolution_m);
   } else {
     // Real c24/c25 evidence showed that the dense structured point cloud's
     // LiDAR information dominates its GNSS canopy penalty in the fused field.
@@ -132,6 +148,8 @@ inline std::vector<P1FixturePoint> make_p1_fixture_points(const P1FixtureConfig&
     // the exact scene mirror moves it to the required upper route.
     add_lane(-config.lane_center_m, config.risky_tree_density_per_m2,
              config.risky_canopy_probability, false);
+    append_p1_overhead_observability_rafters(
+        base, -config.lane_center_m, config.resolution_m);
     add_lane(config.lane_center_m, config.safe_tree_density_per_m2,
              config.safe_canopy_probability, true);
   }
