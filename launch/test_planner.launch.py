@@ -644,6 +644,9 @@ EXPERIMENT_PRESETS = {
         "p0.horizons_s": "0.0,0.5,1.0,1.5,2.0,2.5,3.5,4.5,5.5,6.5,7.5,8.5,9.5,10.5,11.5,12.5,13.5,14.5,15.5,16.0,17.0,18.0,19.0,20.0,21.0,22.0,23.0,24.0",
         "p0.size_y_m": "12.0",
         "planner_start_delay_s": "10.0",
+        # GLIM's loose initializer requires a full 1.0 s IMU window before its
+        # first LiDAR frame. Keep a deterministic margin over that contract.
+        "lidar_start_delay_s": "2.0",
         "fsm.thresh_replan_time": "0.9",
         # Observe the entire central fork and put the local target beyond its
         # terminal face before the first formal decision checkpoint.
@@ -713,6 +716,7 @@ ARG_DEFAULTS = [
     ("validation_duration_s", "85"),
     ("allow_truth_alignment", "true"),
     ("planner_start_delay_s", "0.0"),
+    ("lidar_start_delay_s", "0.0"),
     ("fsm.thresh_replan_time", "1.0"),
     ("enable_preflight_takeoff", "false"),
     ("preflight_ground_z", "0.0"),
@@ -1739,6 +1743,9 @@ def _launch_setup(context):
     use_araim = _as_bool(LaunchConfiguration("use_araim").perform(context))
     allow_truth_alignment = _as_bool(LaunchConfiguration("allow_truth_alignment").perform(context))
     enable_preflight_takeoff = _as_bool(LaunchConfiguration("enable_preflight_takeoff").perform(context))
+    lidar_start_delay_s = max(
+        0.0, float(LaunchConfiguration("lidar_start_delay_s").perform(context))
+    )
 
     drone_id = LaunchConfiguration("drone_id").perform(context)
     init_x = float(LaunchConfiguration("init_x").perform(context))
@@ -1979,7 +1986,7 @@ def _launch_setup(context):
 
     scenario_contract = {
         "geometry": {
-            "fixture_algorithm_version": "p1_deterministic_fork_geometry_v15",
+            "fixture_algorithm_version": "p1_deterministic_fork_geometry_v13",
             "fixture": LaunchConfiguration("p1_map_fixture").perform(context),
             "mirror_y": _param_bool(context, "p1_fixture_mirror_y"),
             "start_m": [init_x, init_y, init_z],
@@ -2040,18 +2047,6 @@ def _launch_setup(context):
                 "half_width_m": 0.25,
                 "z_m": [0.0, 3.0],
             },
-            "startup_localization_beacons": {
-                "kind": "symmetric_low_staggered_blocks",
-                "fixtures": ["p1_fork_fused_v1", "p1_fork_fused_mirror_v1"],
-                "x_m": [-11.25, -10.75],
-                "center_abs_y_m": 0.5,
-                "half_width_y_m": 0.2,
-                "half_width_x_m": 0.25,
-                "z_m": [0.0, 0.55],
-                "formal_min_lane_center_clearance_m": 1.8,
-                "lidar_forward_dot_min": 0.5,
-                "checkpoint_relation": "behind_vehicle",
-            },
             "boundary_tree_layout": {
                 "mode": "alternating_external_and_central-box-bounded_inner",
                 "inner_x_m": [-8.0, -3.0],
@@ -2073,6 +2068,12 @@ def _launch_setup(context):
             "terminal_wall_enabled": _param_bool(context, "terminal_wall_enabled"),
         },
         "risk_sources": ["gnss_map_occlusion", "lidar_observability"],
+        "sensor_startup": {
+            "lidar_start_delay_s": lidar_start_delay_s,
+            "odometry_initialization_mode": "LOOSE",
+            "odometry_initialization_window_s": 1.0,
+            "required_strict_margin_s": lidar_start_delay_s - 1.0,
+        },
         "gnss": {
             "scenario_file": str(gnss_scenario_file),
             "scenario_file_sha256": _sha256_file(gnss_scenario_file),
@@ -2135,6 +2136,7 @@ def _launch_setup(context):
         "planner_start_delay_s": max(
             0.0, float(LaunchConfiguration("planner_start_delay_s").perform(context))
         ),
+        "lidar_start_delay_s": lidar_start_delay_s,
         "manager/max_vel": _param_float(context, "manager/max_vel"),
         "manager/planning_horizon": _param_float(context, "manager/planning_horizon"),
         "manager/p1_collision_fanout_clearance_m": _param_float(
@@ -2482,6 +2484,35 @@ def _launch_setup(context):
     manifest_path = Path(export_dir) / "test_planner_manifest.json"
     manifest_path.write_text(json.dumps(manifest, indent=2) + "\n")
 
+    lidar_renderer_node = Node(
+        package="local_sensing",
+        executable="pcl_render_node",
+        name="drone_0_pcl_render_node",
+        output="screen",
+        remappings=[
+            ("global_map", "/map_generator/global_cloud"),
+            ("local_map", "/map_generator/local_cloud"),
+            ("odometry", truth_odom_topic),
+            ("pcl_render_node/cloud", sim_lidar_topic),
+            ("depth", sim_depth_topic),
+            ("camera_pose", camera_pose_topic),
+        ],
+        parameters=[
+            {"sensing_horizon": 10.0},
+            {"sensing_rate": 10.0},
+            {"estimation_rate": 15.0},
+            {"map/x_size": map_size[0]},
+            {"map/y_size": map_size[1]},
+            {"map/z_size": map_size[2]},
+            {"map/resolution": 0.1},
+            camera_file,
+        ],
+    )
+    lidar_renderer_action = (
+        TimerAction(period=lidar_start_delay_s, actions=[lidar_renderer_node])
+        if lidar_start_delay_s > 0.0 else lidar_renderer_node
+    )
+
     actions = [
         LogInfo(msg="[test_planner] self-contained planner closed-loop demo"),
         LogInfo(msg=f"[test_planner] experiment: {experiment}"),
@@ -2576,30 +2607,7 @@ def _launch_setup(context):
                 {"p0_6.fixture.z_max": _param_float(context, "p0_6.fixture.z_max")},
             ],
         ),
-        Node(
-            package="local_sensing",
-            executable="pcl_render_node",
-            name="drone_0_pcl_render_node",
-            output="screen",
-            remappings=[
-                ("global_map", "/map_generator/global_cloud"),
-                ("local_map", "/map_generator/local_cloud"),
-                ("odometry", truth_odom_topic),
-                ("pcl_render_node/cloud", sim_lidar_topic),
-                ("depth", sim_depth_topic),
-                ("camera_pose", camera_pose_topic),
-            ],
-            parameters=[
-                {"sensing_horizon": 10.0},
-                {"sensing_rate": 10.0},
-                {"estimation_rate": 15.0},
-                {"map/x_size": map_size[0]},
-                {"map/y_size": map_size[1]},
-                {"map/z_size": map_size[2]},
-                {"map/resolution": 0.1},
-                camera_file,
-            ],
-        ),
+        lidar_renderer_action,
         Node(
             package="iap",
             executable="demo4_lidar_body_bridge",

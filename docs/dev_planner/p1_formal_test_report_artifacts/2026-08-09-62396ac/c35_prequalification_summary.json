@@ -1,0 +1,674 @@
+{
+  "pairs": [
+    {
+      "cvar_improvement": null,
+      "enabled_run_id": "7b3b582a21134faea214a6f50c03f9cb",
+      "failures": [
+        "one or both run hard gates failed",
+        "pair metrics are incomplete"
+      ],
+      "kind": "primary",
+      "localization_error_delta_m": null,
+      "max_regression": null,
+      "mean_improvement": null,
+      "passed": false,
+      "path_growth": null,
+      "reference_run_id": "a96bce5d087b4819a26ec9a26c55a329"
+    },
+    {
+      "cvar_improvement": 0.0038883757276011455,
+      "enabled_run_id": "9374f672cae8425fb896f0e49ebc3aa1",
+      "failures": [
+        "one or both run hard gates failed",
+        "primary mean improvement too small",
+        "primary CVaR improvement too small"
+      ],
+      "kind": "primary",
+      "localization_error_delta_m": 0.077476161,
+      "max_regression": -0.0024462226608410464,
+      "mean_improvement": 0.0015110456756455282,
+      "passed": false,
+      "path_growth": 0.008137536410615098,
+      "reference_run_id": "789452b6916a411296c97edbdd70c782"
+    },
+    {
+      "cvar_improvement": -0.002319034714429513,
+      "enabled_run_id": "0e448842d41b49b9b3a2cce7b267a294",
+      "failures": [
+        "one or both run hard gates failed",
+        "pairwise localization-error delta exceeded 0.25 m",
+        "mirror risk direction is inconsistent"
+      ],
+      "kind": "mirror",
+      "localization_error_delta_m": 153.52932773400002,
+      "max_regression": 0.001458509128533736,
+      "mean_improvement": 0.0025905590886183827,
+      "passed": false,
+      "path_growth": -0.008038498554564177,
+      "reference_run_id": "a3d1e2049b214e7f9ea46c012802e639"
+    },
+    {
+      "cvar_improvement": 0.0012908493983518898,
+      "enabled_run_id": "42ad62d3d0b444c68aa39c44847ef253",
+      "failures": [],
+      "kind": "null",
+      "localization_error_delta_m": 0.019906194999999988,
+      "max_regression": -0.0011913890783596948,
+      "mean_improvement": 0.0027033211234124277,
+      "passed": true,
+      "path_growth": 0.0012999608104227178,
+      "reference_run_id": "b218d46122e84d7c863079c4c8449ec8"
+    },
+    {
+      "cvar_improvement": 0.000525638766843084,
+      "enabled_run_id": "e9781016c5a04e8cbebc97da6f09d844",
+      "failures": [],
+      "kind": "soft_risk",
+      "localization_error_delta_m": 0.0038396980000000025,
+      "max_regression": -0.00038815153115034917,
+      "mean_improvement": 0.003247706408143314,
+      "passed": true,
+      "path_growth": 0.0012066453529968602,
+      "reference_run_id": "517e55e1ae7c4684bf7b16301541b069"
+    }
+  ],
+  "passed": false,
+  "runs": [
+    {
+      "candidate_precheck": {
+        "lanes": {
+          "lower": {
+            "candidate_count": 0,
+            "candidates": [],
+            "max_risk": null,
+            "mean_cvar": null,
+            "mean_risk": null
+          },
+          "upper": {
+            "candidate_count": 0,
+            "candidates": [],
+            "max_risk": null,
+            "mean_cvar": null,
+            "mean_risk": null
+          }
+        },
+        "passed": false,
+        "rejected": [
+          {
+            "candidate_id": "1",
+            "collision_free": false,
+            "full_support": false,
+            "lane": "lower",
+            "sample_count": 200
+          },
+          {
+            "candidate_id": "2",
+            "collision_free": false,
+            "full_support": false,
+            "lane": "upper",
+            "sample_count": 200
+          }
+        ],
+        "selected": null,
+        "status": "INCONCLUSIVE"
+      },
+      "checkpoint_truth_dt_s": 0.0,
+      "cvar": 1.5972861003237304,
+      "errors": [
+        "checkpoint localization error exceeds 0.50 m",
+        "candidate precheck lacks collision-feasible full-200 upper/lower routes"
+      ],
+      "export_dir": "/home/dev/ws_iap/src/iap/results/planner_validation/campaigns/p1-2-20260809-62396ac-c35/runs/pre_primary_1_reference/exports/test_planner_p1_fork_formal_p1_fork_fused_v1_3336355_1786309494619",
+      "hard_gates": {
+        "passed": false
+      },
+      "localization_error_m": 60.589273091,
+      "max": 1.6505111264313772,
+      "mean": 1.5330702714625761,
+      "metrics_only": true,
+      "passed": false,
+      "path_length_m": 11.575598338411183,
+      "run_id": "a96bce5d087b4819a26ec9a26c55a329",
+      "scenario": "p1_fork_fused_v1",
+      "selected_lane": "upper"
+    },
+    {
+      "candidate_precheck": {
+        "lanes": {
+          "lower": {
+            "candidate_count": 0,
+            "candidates": [],
+            "max_risk": null,
+            "mean_cvar": null,
+            "mean_risk": null
+          },
+          "upper": {
+            "candidate_count": 0,
+            "candidates": [],
+            "max_risk": null,
+            "mean_cvar": null,
+            "mean_risk": null
+          }
+        },
+        "passed": false,
+        "rejected": [
+          {
+            "candidate_id": "1",
+            "collision_free": false,
+            "full_support": false,
+            "lane": "lower",
+            "sample_count": 200
+          },
+          {
+            "candidate_id": "2",
+            "collision_free": false,
+            "full_support": false,
+            "lane": "upper",
+            "sample_count": 200
+          }
+        ],
+        "selected": null,
+        "status": "INCONCLUSIVE"
+      },
+      "checkpoint_truth_dt_s": null,
+      "cvar": null,
+      "errors": [
+        "accepted context is not fresh, complete, and identity-bound",
+        "enabled profile was not applied to the objective",
+        "accepted profile invalid: could not convert string to float: ''",
+        "candidate precheck lacks collision-feasible full-200 upper/lower routes"
+      ],
+      "export_dir": "/home/dev/ws_iap/src/iap/results/planner_validation/campaigns/p1-2-20260809-62396ac-c35/runs/pre_primary_1_enabled/exports/test_planner_p1_fork_formal_p1_fork_fused_v1_3355581_1786309585965",
+      "hard_gates": {
+        "passed": false
+      },
+      "localization_error_m": null,
+      "max": null,
+      "mean": null,
+      "metrics_only": false,
+      "passed": false,
+      "path_length_m": null,
+      "run_id": "7b3b582a21134faea214a6f50c03f9cb",
+      "scenario": "p1_fork_fused_v1",
+      "selected_lane": null
+    },
+    {
+      "candidate_precheck": {
+        "lanes": {
+          "lower": {
+            "candidate_count": 0,
+            "candidates": [],
+            "max_risk": null,
+            "mean_cvar": null,
+            "mean_risk": null
+          },
+          "upper": {
+            "candidate_count": 0,
+            "candidates": [],
+            "max_risk": null,
+            "mean_cvar": null,
+            "mean_risk": null
+          }
+        },
+        "passed": false,
+        "rejected": [
+          {
+            "candidate_id": "1",
+            "collision_free": false,
+            "full_support": false,
+            "lane": "lower",
+            "sample_count": 200
+          },
+          {
+            "candidate_id": "2",
+            "collision_free": false,
+            "full_support": false,
+            "lane": "upper",
+            "sample_count": 200
+          }
+        ],
+        "selected": null,
+        "status": "INCONCLUSIVE"
+      },
+      "checkpoint_truth_dt_s": 0.0,
+      "cvar": 1.5971787718266983,
+      "errors": [
+        "candidate precheck lacks collision-feasible full-200 upper/lower routes"
+      ],
+      "export_dir": "/home/dev/ws_iap/src/iap/results/planner_validation/campaigns/p1-2-20260809-62396ac-c35/runs/pre_primary_2_reference/exports/test_planner_p1_fork_formal_p1_fork_fused_v1_3375434_1786309686710",
+      "hard_gates": {
+        "passed": false
+      },
+      "localization_error_m": 0.193749694,
+      "max": 1.650371120016414,
+      "mean": 1.5331796494858043,
+      "metrics_only": true,
+      "passed": false,
+      "path_length_m": 11.573067201058794,
+      "run_id": "789452b6916a411296c97edbdd70c782",
+      "scenario": "p1_fork_fused_v1",
+      "selected_lane": "upper"
+    },
+    {
+      "candidate_precheck": {
+        "lanes": {
+          "lower": {
+            "candidate_count": 0,
+            "candidates": [],
+            "max_risk": null,
+            "mean_cvar": null,
+            "mean_risk": null
+          },
+          "upper": {
+            "candidate_count": 0,
+            "candidates": [],
+            "max_risk": null,
+            "mean_cvar": null,
+            "mean_risk": null
+          }
+        },
+        "passed": false,
+        "rejected": [
+          {
+            "candidate_id": "1",
+            "collision_free": false,
+            "full_support": false,
+            "lane": "lower",
+            "sample_count": 200
+          },
+          {
+            "candidate_id": "2",
+            "collision_free": false,
+            "full_support": false,
+            "lane": "upper",
+            "sample_count": 200
+          }
+        ],
+        "selected": null,
+        "status": "INCONCLUSIVE"
+      },
+      "checkpoint_truth_dt_s": 0.0,
+      "cvar": 1.5932903960990972,
+      "errors": [
+        "candidate precheck lacks collision-feasible full-200 upper/lower routes"
+      ],
+      "export_dir": "/home/dev/ws_iap/src/iap/results/planner_validation/campaigns/p1-2-20260809-62396ac-c35/runs/pre_primary_2_enabled/exports/test_planner_p1_fork_formal_p1_fork_fused_v1_3394646_1786309782406",
+      "hard_gates": {
+        "passed": false
+      },
+      "localization_error_m": 0.116273533,
+      "max": 1.647924897355573,
+      "mean": 1.5316686038101588,
+      "metrics_only": false,
+      "passed": false,
+      "path_length_m": 11.667243456789905,
+      "run_id": "9374f672cae8425fb896f0e49ebc3aa1",
+      "scenario": "p1_fork_fused_v1",
+      "selected_lane": "lower"
+    },
+    {
+      "candidate_precheck": {
+        "lanes": {
+          "lower": {
+            "candidate_count": 0,
+            "candidates": [],
+            "max_risk": null,
+            "mean_cvar": null,
+            "mean_risk": null
+          },
+          "upper": {
+            "candidate_count": 0,
+            "candidates": [],
+            "max_risk": null,
+            "mean_cvar": null,
+            "mean_risk": null
+          }
+        },
+        "passed": false,
+        "rejected": [
+          {
+            "candidate_id": "1",
+            "collision_free": false,
+            "full_support": false,
+            "lane": "upper",
+            "sample_count": 200
+          },
+          {
+            "candidate_id": "2",
+            "collision_free": false,
+            "full_support": false,
+            "lane": "lower",
+            "sample_count": 200
+          }
+        ],
+        "selected": null,
+        "status": "INCONCLUSIVE"
+      },
+      "checkpoint_truth_dt_s": 0.0,
+      "cvar": 1.554284558530944,
+      "errors": [
+        "checkpoint localization error exceeds 0.50 m",
+        "candidate precheck lacks collision-feasible full-200 upper/lower routes"
+      ],
+      "export_dir": "/home/dev/ws_iap/src/iap/results/planner_validation/campaigns/p1-2-20260809-62396ac-c35/runs/pre_mirror_reference/exports/test_planner_p1_fork_formal_p1_fork_fused_mirror_v1_3413667_1786309878105",
+      "hard_gates": {
+        "passed": false
+      },
+      "localization_error_m": 153.720593989,
+      "max": 1.6073197727698065,
+      "mean": 1.4983117547855602,
+      "metrics_only": true,
+      "passed": false,
+      "path_length_m": 11.666755642283801,
+      "run_id": "a3d1e2049b214e7f9ea46c012802e639",
+      "scenario": "p1_fork_fused_mirror_v1",
+      "selected_lane": "lower"
+    },
+    {
+      "candidate_precheck": {
+        "lanes": {
+          "lower": {
+            "candidate_count": 0,
+            "candidates": [],
+            "max_risk": null,
+            "mean_cvar": null,
+            "mean_risk": null
+          },
+          "upper": {
+            "candidate_count": 0,
+            "candidates": [],
+            "max_risk": null,
+            "mean_cvar": null,
+            "mean_risk": null
+          }
+        },
+        "passed": false,
+        "rejected": [
+          {
+            "candidate_id": "1",
+            "collision_free": false,
+            "full_support": false,
+            "lane": "upper",
+            "sample_count": 200
+          },
+          {
+            "candidate_id": "2",
+            "collision_free": false,
+            "full_support": false,
+            "lane": "lower",
+            "sample_count": 200
+          }
+        ],
+        "selected": null,
+        "status": "INCONCLUSIVE"
+      },
+      "checkpoint_truth_dt_s": 2.384185791015625e-07,
+      "cvar": 1.5566035932453735,
+      "errors": [
+        "candidate precheck lacks collision-feasible full-200 upper/lower routes"
+      ],
+      "export_dir": "/home/dev/ws_iap/src/iap/results/planner_validation/campaigns/p1-2-20260809-62396ac-c35/runs/pre_mirror_enabled/exports/test_planner_p1_fork_formal_p1_fork_fused_mirror_v1_3432602_1786309969472",
+      "hard_gates": {
+        "passed": false
+      },
+      "localization_error_m": 0.191266255,
+      "max": 1.6087782818983403,
+      "mean": 1.4957211956969418,
+      "metrics_only": false,
+      "passed": false,
+      "path_length_m": 11.57297244391685,
+      "run_id": "0e448842d41b49b9b3a2cce7b267a294",
+      "scenario": "p1_fork_fused_mirror_v1",
+      "selected_lane": "upper"
+    },
+    {
+      "candidate_precheck": {
+        "lanes": {
+          "lower": {
+            "candidate_count": 1,
+            "candidates": [
+              {
+                "candidate_id": "1",
+                "collision_free": true,
+                "cvar": 1.5305986756429018,
+                "full_support": true,
+                "lane": "lower",
+                "max": 1.5618610164451694,
+                "mean": 1.50342943520766,
+                "sample_count": 200
+              }
+            ],
+            "max_risk": 1.5618610164451694,
+            "mean_cvar": 1.5305986756429018,
+            "mean_risk": 1.50342943520766
+          },
+          "upper": {
+            "candidate_count": 1,
+            "candidates": [
+              {
+                "candidate_id": "2",
+                "collision_free": true,
+                "cvar": 1.531090603981199,
+                "full_support": true,
+                "lane": "upper",
+                "max": 1.5618610164451694,
+                "mean": 1.505540158353745,
+                "sample_count": 200
+              }
+            ],
+            "max_risk": 1.5618610164451694,
+            "mean_cvar": 1.531090603981199,
+            "mean_risk": 1.505540158353745
+          }
+        },
+        "passed": true,
+        "rejected": [],
+        "selected": null,
+        "status": "PASS"
+      },
+      "checkpoint_truth_dt_s": 0.0,
+      "cvar": 1.5489748131876424,
+      "errors": [],
+      "export_dir": "/home/dev/ws_iap/src/iap/results/planner_validation/campaigns/p1-2-20260809-62396ac-c35/runs/pre_null_reference/exports/test_planner_p1_fork_formal_p1_fork_symmetric_null_v1_3451555_1786310070215",
+      "hard_gates": {
+        "passed": true
+      },
+      "localization_error_m": 0.206552453,
+      "max": 1.6028187982415512,
+      "mean": 1.5037936192681738,
+      "metrics_only": true,
+      "passed": true,
+      "path_length_m": 11.411113538842557,
+      "run_id": "b218d46122e84d7c863079c4c8449ec8",
+      "scenario": "p1_fork_symmetric_null_v1",
+      "selected_lane": "upper"
+    },
+    {
+      "candidate_precheck": {
+        "lanes": {
+          "lower": {
+            "candidate_count": 1,
+            "candidates": [
+              {
+                "candidate_id": "1",
+                "collision_free": true,
+                "cvar": 1.5314552857602528,
+                "full_support": true,
+                "lane": "lower",
+                "max": 1.5623005036632163,
+                "mean": 1.5031731281928626,
+                "sample_count": 200
+              }
+            ],
+            "max_risk": 1.5623005036632163,
+            "mean_cvar": 1.5314552857602528,
+            "mean_risk": 1.5031731281928626
+          },
+          "upper": {
+            "candidate_count": 1,
+            "candidates": [
+              {
+                "candidate_id": "2",
+                "collision_free": true,
+                "cvar": 1.5319255229533444,
+                "full_support": true,
+                "lane": "upper",
+                "max": 1.5623005036632163,
+                "mean": 1.5052788142904598,
+                "sample_count": 200
+              }
+            ],
+            "max_risk": 1.5623005036632163,
+            "mean_cvar": 1.5319255229533444,
+            "mean_risk": 1.5052788142904598
+          }
+        },
+        "passed": true,
+        "rejected": [],
+        "selected": null,
+        "status": "PASS"
+      },
+      "checkpoint_truth_dt_s": 0.0,
+      "cvar": 1.5476839637892905,
+      "errors": [],
+      "export_dir": "/home/dev/ws_iap/src/iap/results/planner_validation/campaigns/p1-2-20260809-62396ac-c35/runs/pre_null_enabled/exports/test_planner_p1_fork_formal_p1_fork_symmetric_null_v1_3470648_1786310165911",
+      "hard_gates": {
+        "passed": true
+      },
+      "localization_error_m": 0.186646258,
+      "max": 1.6016274091631915,
+      "mean": 1.5010902981447614,
+      "metrics_only": false,
+      "passed": true,
+      "path_length_m": 11.425947539246337,
+      "run_id": "42ad62d3d0b444c68aa39c44847ef253",
+      "scenario": "p1_fork_symmetric_null_v1",
+      "selected_lane": "lower"
+    },
+    {
+      "candidate_precheck": {
+        "lanes": {
+          "lower": {
+            "candidate_count": 1,
+            "candidates": [
+              {
+                "candidate_id": "1",
+                "collision_free": true,
+                "cvar": 1.5380427121697648,
+                "full_support": true,
+                "lane": "lower",
+                "max": 1.5692320344180537,
+                "mean": 1.510863356381007,
+                "sample_count": 200
+              }
+            ],
+            "max_risk": 1.5692320344180537,
+            "mean_cvar": 1.5380427121697648,
+            "mean_risk": 1.510863356381007
+          },
+          "upper": {
+            "candidate_count": 1,
+            "candidates": [
+              {
+                "candidate_id": "2",
+                "collision_free": true,
+                "cvar": 1.5388014435075046,
+                "full_support": true,
+                "lane": "upper",
+                "max": 1.5692320344180537,
+                "mean": 1.5141127766767364,
+                "sample_count": 200
+              }
+            ],
+            "max_risk": 1.5692320344180537,
+            "mean_cvar": 1.5388014435075046,
+            "mean_risk": 1.5141127766767364
+          }
+        },
+        "passed": true,
+        "rejected": [],
+        "selected": null,
+        "status": "PASS"
+      },
+      "checkpoint_truth_dt_s": 2.384185791015625e-07,
+      "cvar": 1.5577716567906095,
+      "errors": [],
+      "export_dir": "/home/dev/ws_iap/src/iap/results/planner_validation/campaigns/p1-2-20260809-62396ac-c35/runs/pre_soft_reference/exports/test_planner_p1_fork_formal_p1_soft_risk_island_v1_3489205_1786310256849",
+      "hard_gates": {
+        "passed": true
+      },
+      "localization_error_m": 0.205772439,
+      "max": 1.6119355346723747,
+      "mean": 1.5126744286626745,
+      "metrics_only": true,
+      "passed": true,
+      "path_length_m": 11.411414659914078,
+      "run_id": "517e55e1ae7c4684bf7b16301541b069",
+      "scenario": "p1_soft_risk_island_v1",
+      "selected_lane": "upper"
+    },
+    {
+      "candidate_precheck": {
+        "lanes": {
+          "lower": {
+            "candidate_count": 1,
+            "candidates": [
+              {
+                "candidate_id": "1",
+                "collision_free": true,
+                "cvar": 1.5385402483755652,
+                "full_support": true,
+                "lane": "lower",
+                "max": 1.569071173821983,
+                "mean": 1.5103658778302085,
+                "sample_count": 200
+              }
+            ],
+            "max_risk": 1.569071173821983,
+            "mean_cvar": 1.5385402483755652,
+            "mean_risk": 1.5103658778302085
+          },
+          "upper": {
+            "candidate_count": 1,
+            "candidates": [
+              {
+                "candidate_id": "2",
+                "collision_free": true,
+                "cvar": 1.5392636546765073,
+                "full_support": true,
+                "lane": "upper",
+                "max": 1.569071173821983,
+                "mean": 1.5136050297664454,
+                "sample_count": 200
+              }
+            ],
+            "max_risk": 1.569071173821983,
+            "mean_cvar": 1.5392636546765073,
+            "mean_risk": 1.5136050297664454
+          }
+        },
+        "passed": true,
+        "rejected": [],
+        "selected": null,
+        "status": "PASS"
+      },
+      "checkpoint_truth_dt_s": 2.384185791015625e-07,
+      "cvar": 1.5572460180237664,
+      "errors": [],
+      "export_dir": "/home/dev/ws_iap/src/iap/results/planner_validation/campaigns/p1-2-20260809-62396ac-c35/runs/pre_soft_enabled/exports/test_planner_p1_fork_formal_p1_soft_risk_island_v1_3508529_1786310352543",
+      "hard_gates": {
+        "passed": true
+      },
+      "localization_error_m": 0.209612137,
+      "max": 1.6115473831412244,
+      "mean": 1.5094267222545312,
+      "metrics_only": false,
+      "passed": true,
+      "path_length_m": 11.425184190384583,
+      "run_id": "e9781016c5a04e8cbebc97da6f09d844",
+      "scenario": "p1_soft_risk_island_v1",
+      "selected_lane": "lower"
+    }
+  ],
+  "schema_version": "p1_2_prequalification_v1"
+}

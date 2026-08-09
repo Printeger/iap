@@ -47,6 +47,12 @@ class TestPlannerLaunchTest(unittest.TestCase):
             MODULE.EXPERIMENT_PRESETS["p1_fork_formal"]["planner_start_delay_s"],
             "10.0",
         )
+        defaults = dict(MODULE.ARG_DEFAULTS)
+        self.assertEqual(defaults["lidar_start_delay_s"], "0.0")
+        formal_lidar_delay = float(
+            MODULE.EXPERIMENT_PRESETS["p1_fork_formal"]["lidar_start_delay_s"]
+        )
+        self.assertGreater(formal_lidar_delay, 1.0)
         self.assertEqual(
             MODULE.EXPERIMENT_PRESETS["p1_fork_formal"]["manager/max_vel"],
             "1.0",

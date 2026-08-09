@@ -1,5 +1,11 @@
 # Traceability Matrix (IAP)
 
+## 2026-08-09 P1-2 c35 retained result and LiDAR initialization ordering
+
+| Req ID | Evidence | Verification | Status |
+|---|---|---|---|
+| IAP-RQ-320 / IAP-RQ-400 / IAP-RQ-410 / IAP-RQ-422 | Clean c35 (`62396ac`) was incomplete: primary/mirror reference localization reached `60.589/153.721 m`, and v15 blocks broke primary two-arm support. Logs show first LiDAR at `0.733..0.933 s` before GLIM's `1.0 s` loose-init window. | v14/v15 geometry is removed, restoring v13. Formal-only LiDAR delay `2.0 s` is bound in scenario fingerprint/manifest; default is `0`. Launch test requires delay `>1.0 s`; geometry test proves no added low startup obstruction. | **IMPLEMENTED; c35 incomplete/non-comparable; only c31/c32 count; fresh campaign required; formal analyzer zero; P1-3 prohibited** |
+
 ## 2026-08-09 P1-2 c34 retained result and real-FOV startup repair
 
 | Req ID | Evidence | Verification | Status |

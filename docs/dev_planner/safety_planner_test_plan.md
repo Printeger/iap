@@ -99,6 +99,8 @@ v14 根据 c33 在 planner 启动前发生的单次镜像定位发散，增加�
 
 c34 证明 v14 的“前向可见”假设错误：真实 renderer 除距离外还要求三维单位方向与 yaw 点积 `>=0.5`，`|y|=4.5 m` pylons 在静止起点的新增点全部被过滤。v15 将其改为仅在 primary/mirror 存在的对称低矮 blocks（`x=-11.25/-10.75 m`、`|y|=0.5 m`、`z=0..0.55 m`），显式测试真实 FOV 不等式与可见点数。它们低于飞行层、距 formal lane centre 至少 `1.8 m`、到 checkpoint 位于机后；null/soft 不变。
 
+c35 证明 v15 blocks 既未消除定位发散，又破坏 primary 的 P0 collision-feasible 双臂支持，故全部撤销并恢复 v13 点云。日志显示 GLIM `LOOSE` initializer 要求 `1.0 s` IMU window，而首个 LiDAR frame 在 `0.733..0.933 s` 到达。formal preset 因此只将 LiDAR renderer 延迟到 `2.0 s`；IAP/IMU 正常启动以预先积累 buffer，默认非 formal 行为仍为零延迟。场景指纹/manifest 固定 mode、window、delay 和 strict margin，测试要求 `delay > window`。
+
 预资格要求上下通道均 collision-feasible 且完整 `200/200`，检查点唯一，单次定位误差 `<=0.5 m`、pair 差值 `<=0.25 m`，P0/context/validator/provenance 门全部通过，并满足：
 
 - 两个主场景 enabled 均选下路，mean 改善 `>0.00836`、CVaR 改善 `>0.00677`、max 不回退；

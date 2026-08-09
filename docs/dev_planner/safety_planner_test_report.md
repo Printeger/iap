@@ -9630,3 +9630,25 @@ Compact hashes are under
 `p1_formal_test_report_artifacts/2026-08-09-62a7b55/`; raw c34 evidence is
 retained losslessly compressed under
 `results/planner_validation/campaigns/p1-2-20260809-62a7b55-c34/`.
+
+### c35 retained incomplete result and LiDAR initialization ordering
+
+Clean c35 (`62396acdfd3ba9a2aecdd0702b5b799e9265f3f5`) completed all ten
+v15 prequalification runs. Only null and soft-risk pairs passed. Primary
+reference localization reached `60.589 m`, mirror reference reached
+`153.721 m`, and the low startup blocks caused primary candidate prechecks to
+lose collision-feasible full-200 support. c35 is incomplete/non-comparable;
+only c31 and c32 count. No calibration, formal analyzer, or P1-3 ran.
+
+The runtime config uses GLIM `LOOSE` initialization with a `1.0 s` window, but
+logs place first LiDAR input at simulation time `0.733..0.933 s`. The v15
+geometry is therefore removed entirely, restoring v13 exact points and
+candidate clearance. The test-first repair leaves default launch behavior at
+zero delay but binds a `2.0 s` LiDAR renderer delay in the formal preset, so
+IAP accumulates more than the full IMU initialization window before any point
+frame. Scenario fingerprint and manifest record mode, window, delay, and
+margin. Launch tests require the strict inequality; geometry tests prove the
+startup blocks are absent. Compact hashes are under
+`p1_formal_test_report_artifacts/2026-08-09-62396ac/`; raw c35 evidence remains
+losslessly compressed under
+`results/planner_validation/campaigns/p1-2-20260809-62396ac-c35/`.

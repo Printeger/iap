@@ -83,22 +83,6 @@ inline void append_p1_observability_landmarks(
   }
 }
 
-inline void append_p1_startup_localization_beacons(
-    std::vector<P1FixturePoint>& points, double resolution) {
-  // Low symmetric blocks supply non-repetitive returns inside the real
-  // 60-degree forward LiDAR half-FOV while the vehicle is stationary at
-  // x=-12 m. They remain below the flight layer, outside both formal lane
-  // centres, and behind the vehicle by the risk checkpoint.
-  for (const double x : {-11.25, -10.75}) {
-    const std::size_t first = points.size();
-    append_p1_box(points, x - 0.25, x + 0.25, -0.70, -0.30,
-                  0.0, 0.55, resolution);
-    const std::size_t last = points.size();
-    for (std::size_t index = first; index < last; ++index)
-      points.push_back({points[index].x, -points[index].y, points[index].z});
-  }
-}
-
 inline void append_p1_overhead_observability_rafters(
     std::vector<P1FixturePoint>& points, double center_y, double resolution) {
   // Compact structured returns above the flight layer strengthen the real
@@ -199,7 +183,6 @@ inline std::vector<P1FixturePoint> make_p1_fixture_points(const P1FixtureConfig&
              config.safe_canopy_probability, true, config.lane_center_m);
     append_p1_overhead_gnss_mask(
         base, config.lane_center_m, config.resolution_m);
-    append_p1_startup_localization_beacons(base, config.resolution_m);
   }
   append_p1_observability_landmarks(base, config.resolution_m);
   if (config.mirror_y)
