@@ -1979,7 +1979,7 @@ def _launch_setup(context):
 
     scenario_contract = {
         "geometry": {
-            "fixture_algorithm_version": "p1_deterministic_fork_geometry_v9",
+            "fixture_algorithm_version": "p1_deterministic_fork_geometry_v10",
             "fixture": LaunchConfiguration("p1_map_fixture").perform(context),
             "mirror_y": _param_bool(context, "p1_fixture_mirror_y"),
             "start_m": [init_x, init_y, init_z],
@@ -2021,6 +2021,17 @@ def _launch_setup(context):
                 "center_abs_y_m": 4.0,
                 "half_width_m": 0.25,
                 "z_m": [0.0, 3.0],
+            },
+            "boundary_tree_layout": {
+                "mode": "alternating_external_and_central-box-bounded_inner",
+                "inner_x_m": [-8.0, -3.0],
+                "formal_min_lane_center_clearance_m": 1.70,
+            },
+            "collision_neutral_rafters": {
+                "fixtures": ["p1_soft_risk_island_v1"],
+                "x_m": [-10.0, -8.0, -6.0, -4.0, -2.0],
+                "half_width_m": 0.30,
+                "z_m": [2.85, 3.35],
             },
             "fixture_lane_x_start_m": -7.8,
             "fixture_lane_x_span_m": 16.0,

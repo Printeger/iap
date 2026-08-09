@@ -121,14 +121,20 @@ TEST(P1FixtureGeometry, FormalLaneCentersHaveEqualLowAltitudeClearance) {
   }
 }
 
-TEST(P1FixtureGeometry, FormalLaneBoundaryTrunksStayOnTheExternalSide) {
+TEST(P1FixtureGeometry, FormalInnerBoundaryTrunksStayBesideCentralObstacle) {
   P1FixtureConfig config;
   config.name = "p1_fork_fused_v1";
   config.central_obstacle_enabled = false;
   config.lane_center_m = 2.5;
   const auto points = iap::planner::make_p1_fixture_points(config);
-  EXPECT_TRUE(std::none_of(points.begin(), points.end(), [&config](const auto& point) {
+  const auto inner = [&config](const auto& point) {
     return point.z <= 0.55 && std::abs(point.y) < config.lane_center_m;
+  };
+  EXPECT_TRUE(std::any_of(points.begin(), points.end(), inner));
+  EXPECT_TRUE(std::all_of(points.begin(), points.end(), [&config, &inner](const auto& point) {
+    return !inner(point) ||
+        (point.x >= config.central_x_min_m - 1.0e-12 &&
+         point.x <= config.central_x_max_m + 1.0e-12);
   }));
 }
 
@@ -148,6 +154,28 @@ TEST(P1FixtureGeometry, OverheadRaftersAddCollisionNeutralLaneObservability) {
   soft.lane_center_m = 2.5;
   const auto points = iap::planner::make_p1_fixture_points(soft);
   EXPECT_GE(points.size(), rafters.size());
+}
+
+TEST(P1FixtureGeometry, SymmetricNullDoesNotAddOverheadRafters) {
+  P1FixtureConfig config;
+  config.name = "p1_fork_symmetric_null_v1";
+  config.central_obstacle_enabled = false;
+  config.lane_center_m = 2.5;
+  const auto points = iap::planner::make_p1_fixture_points(config);
+  EXPECT_TRUE(std::none_of(points.begin(), points.end(), [](const auto& point) {
+    return point.z >= 2.85 - 1.0e-12 && std::abs(point.y) < 3.0;
+  }));
+}
+
+TEST(P1FixtureGeometry, SoftIslandKeepsDeclaredMinusTwoMeterCenter) {
+  P1FixtureConfig config;
+  config.name = "p1_soft_risk_island_v1";
+  config.central_obstacle_enabled = false;
+  config.lane_center_m = 2.5;
+  const auto points = iap::planner::make_p1_fixture_points(config);
+  EXPECT_TRUE(std::any_of(points.begin(), points.end(), [](const auto& point) {
+    return point.z >= 2.85 - 1.0e-12 && std::abs(point.y + 1.97) <= 0.031;
+  }));
 }
 
 TEST(P1FixtureGeometry, DenseObservableCanopiesCoverDeclaredLowerRouteOnlyAboveFlight) {

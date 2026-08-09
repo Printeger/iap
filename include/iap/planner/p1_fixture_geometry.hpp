@@ -102,11 +102,31 @@ inline std::vector<P1FixturePoint> make_p1_fixture_points(const P1FixtureConfig&
     const int count = std::max(2, static_cast<int>(std::llround(32.0 * density)));
     const int canopy_count = static_cast<int>(std::llround(count * canopy_probability));
     for (int index = 0; index < count; ++index) {
+      const bool external = index % 2 == 0;
+      const int inner_count = count / 2;
       const double fraction = (static_cast<double>(index) + 0.5) / count;
-      const double x = -7.8 + 16.0 * fraction;
+      double x = -7.8 + 16.0 * fraction;
       const double external_sign = center_y < 0.0 ? -1.0 : 1.0;
-      const double y = center_y +
+      double y = center_y +
           external_sign * (config.lane_half_width_m + 1.25);
+      if (!external) {
+        // The denser primary boundary must remain observable to the ordinary
+        // (metrics-only) planner, but inner trunks must never obstruct the
+        // split or merge. Keep them alongside the already occupied central
+        // box and put their nearest surface exactly 1.70 m from either formal
+        // lane centre. Primary density can then break the base-path tie while
+        // mirror/null retain the same geometric construction.
+        const int inner_index = index / 2;
+        const double inner_fraction =
+            (static_cast<double>(inner_index) + 0.5) / inner_count;
+        x = config.central_x_min_m + config.trunk_radius_m +
+            (config.central_x_max_m - config.central_x_min_m -
+             2.0 * config.trunk_radius_m) * inner_fraction;
+        const double inner_surface_abs = config.central_y_half_width_m +
+            0.20 * std::max(0.0, config.lane_center_m - 2.0);
+        y = std::copysign(
+            inner_surface_abs - config.trunk_radius_m, center_y);
+      }
       append_p1_cylinder(base, x, y, config.trunk_radius_m,
                          short_features ? 0.55 : 2.85, config.resolution_m);
       if (index < canopy_count) {
@@ -126,8 +146,6 @@ inline std::vector<P1FixturePoint> make_p1_fixture_points(const P1FixtureConfig&
   if (config.name == "p1_fork_symmetric_null_v1") {
     add_lane(-config.lane_center_m, config.safe_tree_density_per_m2,
              config.safe_canopy_probability, true);
-    append_p1_overhead_observability_rafters(
-        base, -config.lane_center_m, config.resolution_m);
     const auto lower = base;
     for (const auto& point : lower) base.push_back({point.x, -point.y, point.z});
   } else if (config.name == "p1_soft_risk_island_v1") {
@@ -136,7 +154,7 @@ inline std::vector<P1FixturePoint> make_p1_fixture_points(const P1FixtureConfig&
     for (int index = 0; index < count; ++index) {
       const double fraction = (static_cast<double>(index) + 0.5) / count;
       append_p1_canopy(base, -6.0 + 8.0 * fraction,
-                       -config.lane_center_m,
+                       -2.0,
                        config.canopy_resolution_m);
     }
     append_p1_overhead_observability_rafters(
@@ -148,8 +166,6 @@ inline std::vector<P1FixturePoint> make_p1_fixture_points(const P1FixtureConfig&
     // the exact scene mirror moves it to the required upper route.
     add_lane(-config.lane_center_m, config.risky_tree_density_per_m2,
              config.risky_canopy_probability, false);
-    append_p1_overhead_observability_rafters(
-        base, -config.lane_center_m, config.resolution_m);
     add_lane(config.lane_center_m, config.safe_tree_density_per_m2,
              config.safe_canopy_probability, true);
   }

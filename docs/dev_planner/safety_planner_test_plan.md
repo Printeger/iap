@@ -87,6 +87,8 @@ python3 scripts/dev_planner/run_p1_2_campaign.py \
 
 v9 保留 v8 的 checkpoint 与 neutral-arm 合同：formal-only defer 覆盖 1.5 m approach 以及 `x=-9.5+/-0.4 m` 闭区间，成功记录立即释放；若记录始终失败，越过窗口出口即恢复。预资格 evidence pair 先将已单侧提交 seed 的横向控制点中和到当前 start-Y，再产生不变 `2.5 m` 等净空精确反射 pair；不变数量/尺寸树干全部位于各自通道外侧，避免中央分流与汇合段阻挡，且 evidence 候选仍不进入优化或命令选择。为恢复不阻挡飞行的真实近场 LiDAR 结构，v9 在 `z=2.85..3.35 m` 添加五个小型高架 rafter：primary/soft 位于下路、mirror 精确反射到上路、null 为逐点对称 pair；它们不含风险值且不改变树/树冠数值参数。
 
+v10 依据 c29 的完整结构证据收紧物理对照：v9 使 primary reference 与 enabled 同走下路，且 null 成对 rafter 将两次定位误差推过 `0.50 m`。不变数量/尺寸的边界树恢复内外交替，但所有内侧树干只分布在中央箱体 `x=-8..-3 m` 的纵向范围，并保持 formal lane centre `>=1.70 m` 净空，因而不再进入箱体后的 merge；primary/mirror/null 移除无效 rafter，精确镜像和 null 对称不变。soft 单独保留碰撞层之上的定位结构，并将不变数量/尺寸的树冠放到 manifest 已声明的 `y=-2.0 m`，使 `y=-2.5 m` 下路确实从岛下方绕行。所有变化均为真实生成点云，不写入风险值，也不改变固定 lambda、normalization、树密度/树冠概率、P0/P5 或 fallback 语义。
+
 预资格要求上下通道均 collision-feasible 且完整 `200/200`，检查点唯一，单次定位误差 `<=0.5 m`、pair 差值 `<=0.25 m`，P0/context/validator/provenance 门全部通过，并满足：
 
 - 两个主场景 enabled 均选下路，mean 改善 `>0.00836`、CVaR 改善 `>0.00677`、max 不回退；
