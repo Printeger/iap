@@ -617,3 +617,10 @@
 - IAP-RQ-320/IAP-RQ-400/IAP-RQ-410/IAP-RQ-422: retained c37 after 9/10 hard-gate runs; the lone localization divergence was caused upstream when SO3 control consumed body-frame specific force including gravity as world-frame linear acceleration.
 - The planner test launch now feeds SO3 control from the simulator's existing world-linear-acceleration IMU stream while leaving the IAP estimator on its body-specific-force stream. Provenance records the feedback semantics; no risk, geometry, GNSS/LiDAR, lambda, normalization, safety, or fallback setting changed.
 - A red/green launch contract and three installed-runtime startup smokes produced maximum localization errors of `0.061`, `0.012`, and `0.022 m`, with first GNSS clock-drift estimates near zero. c37 remains incomplete/non-comparable; calibration, formal analyzer, and P1-3 remain unstarted.
+
+## 2026-08-09 (P1-2 terminal c38 prequalification blocker)
+
+- IAP-RQ-320/IAP-RQ-400/IAP-RQ-410/IAP-RQ-422: clean c38 (`c9782a5`) completed the prescribed ten serial 90-second runs with 10/10 validator, provenance, P0, safety, localization, unique-checkpoint, and collision-feasible two-arm `200/200` gates passing.
+- Both primary enabled runs selected lower and improved max, but mean improvements `0.002999/0.001657` remained below `>0.00836`; CVaR improvements `0.006611/0.000653` remained below `>0.00677`. Mirror selected upper but exact max regressed by `0.00000808`; null and soft-risk passed.
+- c31, c32, and c38 are three complete comparable fresh failures of the primary scientific gate after compliant physical sensor-geometry and startup-chain repairs. The preregistered stop rule is met; further outcome-driven geometry/threshold/parameter tuning is prohibited. Calibration, formal runs/preflights/analyzer, and P1-3 did not run; formal analyzer invocation count is zero.
+- Compact, hash-bound campaign/summary/run/pair evidence for all three stop-rule campaigns is tracked under `p1_formal_test_report_artifacts/2026-08-09-{1958af4,da5b15a,c9782a5}/`; ignored raw evidence remains losslessly compressed.

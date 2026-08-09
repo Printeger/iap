@@ -9531,6 +9531,8 @@ regression `0.00012166`. Under the corrected accounting (c17 was incomplete),
 c31 is the first complete comparable scientific failure; calibration, formal
 preflight/pair/analyzer, and P1-3 did not start. Raw evidence is retained losslessly compressed under
 `results/planner_validation/campaigns/p1-2-20260809-1958af4-c31/`.
+Compact c31 campaign, summary, run/pair CSV, analyzer log, and hashes are under
+`p1_formal_test_report_artifacts/2026-08-09-1958af4/`.
 
 The compliant v12 repair adds a continuous collision-neutral physical GNSS
 mask above the canonical reference arm so the real voxel/raycast model cannot
@@ -9704,3 +9706,33 @@ Compact evidence is under
 losslessly compressed under `results/planner_validation/campaigns/c37_e52832a/`.
 Calibration, formal preflight/pair/analyzer, and P1-3 did not run; formal
 analyzer invocation count remains zero.
+
+### c38 terminal complete prequalification failure
+
+Clean c38 (`c9782a5ffdb6ecd9ff03b07854eef62f6e3bb075`) completed all ten
+prescribed serial 90-second qualification runs. Every run passed validator,
+provenance, P0, safety, unique-checkpoint, localization (`0.184..0.404 m`), and
+collision-feasible complete `200/200` upper/lower candidate gates. Primary
+reference selected upper twice and enabled selected lower twice. Pair 1 mean,
+smooth-CVaR, and max changes were `+0.002999467`, `+0.006610549`, and
+`-0.004488635`; pair 2 changes were `+0.001657008`, `+0.000652959`, and
+`-0.000769282`. Both therefore failed the fixed `>0.00836` mean and
+`>0.00677` CVaR gates. Mirror selected the required upper route and improved
+mean/CVaR, but exact max regressed by `0.000008077`, failing its direction
+contract. Null and soft-risk passed.
+
+c38 is the third complete comparable fresh campaign after c31 (`1958af4`) and
+c32 (`da5b15a`) to fail the primary scientific effectiveness gate. Between
+those campaigns, compliant repairs separated GNSS obstruction from LiDAR
+observability and eliminated startup initialization, GNSS epoch-binding, and
+SO3 acceleration-semantic failures. c38 proves those hard gates are now stable,
+but the fixed-lambda physical effect remains below the preregistered threshold.
+Changing geometry, thresholds, lambda, normalization, or choosing another run
+after observing these results would violate the stop/no-tuning protocol.
+
+P1-2 is therefore blocked at prequalification. No 20-run calibration, formal
+run, formal preflight, or formal analyzer was executed; formal analyzer
+invocation count remains zero. P1-3 was not run. Compact evidence and hashes
+are under `p1_formal_test_report_artifacts/2026-08-09-c9782a5/`; raw evidence
+is retained losslessly compressed under
+`results/planner_validation/campaigns/c38_c9782a5/`.

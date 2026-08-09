@@ -1,0 +1,696 @@
+{
+  "pairs": [
+    {
+      "cvar_improvement": 0.0006559327802040382,
+      "enabled_run_id": "25e1488ee1d04195aab1771f7fc5751c",
+      "failures": [
+        "primary mean improvement too small",
+        "primary CVaR improvement too small"
+      ],
+      "kind": "primary",
+      "localization_error_delta_m": 0.046707745999999994,
+      "max_regression": -0.0007428652621837006,
+      "mean_improvement": 0.0014119491008559582,
+      "passed": false,
+      "path_growth": 0.0009572186584791975,
+      "reference_run_id": "d4921886795345b5aeb3261268b85844"
+    },
+    {
+      "cvar_improvement": 0.0024566864960706702,
+      "enabled_run_id": "9c385a01f49b4ca7992edc5d6d9f98cd",
+      "failures": [
+        "primary mean improvement too small",
+        "primary CVaR improvement too small"
+      ],
+      "kind": "primary",
+      "localization_error_delta_m": 0.030148579999999994,
+      "max_regression": -0.0022606900927777396,
+      "mean_improvement": 0.0019909480390916112,
+      "passed": false,
+      "path_growth": 0.0021232470951231264,
+      "reference_run_id": "e9fe48f822ab44dabb3d9f2e3b17a38b"
+    },
+    {
+      "cvar_improvement": 3.291843215325052e-05,
+      "enabled_run_id": "a3c37079387d41bd8205bd3492530382",
+      "failures": [
+        "mirror risk direction is inconsistent"
+      ],
+      "kind": "mirror",
+      "localization_error_delta_m": 0.0037213559999999812,
+      "max_regression": 0.00012166272489899654,
+      "mean_improvement": 0.0011776394467397644,
+      "passed": false,
+      "path_growth": -0.0021833043365719895,
+      "reference_run_id": "41fb2d051dce4d75a2c4b6ecece780e1"
+    },
+    {
+      "cvar_improvement": 0.000687569786175457,
+      "enabled_run_id": "88d32876b4a9431cba8a440b9a1d7b9c",
+      "failures": [],
+      "kind": "null",
+      "localization_error_delta_m": 0.050465622000000016,
+      "max_regression": -0.0007060576217807757,
+      "mean_improvement": 0.002179416264437739,
+      "passed": true,
+      "path_growth": 0.0006445900944009875,
+      "reference_run_id": "ba32c14f6bbc4083beee1dd41b07e2be"
+    },
+    {
+      "cvar_improvement": 0.0008751809477960393,
+      "enabled_run_id": "71c60d2bea4e4fdb95f4d5136d70f4de",
+      "failures": [],
+      "kind": "soft_risk",
+      "localization_error_delta_m": 0.11703254199999999,
+      "max_regression": -0.000909070115010957,
+      "mean_improvement": 0.0034594368104470252,
+      "passed": true,
+      "path_growth": 0.0014632240066814184,
+      "reference_run_id": "790ad49cb8374be7a542b08a6c3a620d"
+    }
+  ],
+  "passed": false,
+  "runs": [
+    {
+      "candidate_precheck": {
+        "lanes": {
+          "lower": {
+            "candidate_count": 1,
+            "candidates": [
+              {
+                "candidate_id": "1",
+                "collision_free": true,
+                "cvar": 1.4285974721615593,
+                "full_support": true,
+                "lane": "lower",
+                "max": 1.4573306139808864,
+                "mean": 1.4074772212972477,
+                "sample_count": 200
+              }
+            ],
+            "max_risk": 1.4573306139808864,
+            "mean_cvar": 1.4285974721615593,
+            "mean_risk": 1.4074772212972477
+          },
+          "upper": {
+            "candidate_count": 1,
+            "candidates": [
+              {
+                "candidate_id": "2",
+                "collision_free": true,
+                "cvar": 1.4286686106744786,
+                "full_support": true,
+                "lane": "upper",
+                "max": 1.4573306139808864,
+                "mean": 1.4086045009204782,
+                "sample_count": 200
+              }
+            ],
+            "max_risk": 1.4573306139808864,
+            "mean_cvar": 1.4286686106744786,
+            "mean_risk": 1.4086045009204782
+          }
+        },
+        "passed": true,
+        "rejected": [],
+        "selected": null,
+        "status": "PASS"
+      },
+      "checkpoint_truth_dt_s": 2.384185791015625e-07,
+      "cvar": 1.4471905335225543,
+      "errors": [],
+      "export_dir": "/home/dev/ws_iap/src/iap/results/planner_validation/campaigns/p1-2-20260809-1958af4-c31/runs/pre_primary_1_reference/exports/test_planner_p1_fork_formal_p1_fork_fused_v1_2451973_1786301737744",
+      "hard_gates": {
+        "passed": true
+      },
+      "localization_error_m": 0.187309541,
+      "max": 1.4988425129708687,
+      "mean": 1.407805700912443,
+      "metrics_only": true,
+      "passed": true,
+      "path_length_m": 11.413868608551832,
+      "run_id": "d4921886795345b5aeb3261268b85844",
+      "scenario": "p1_fork_fused_v1",
+      "selected_lane": "upper"
+    },
+    {
+      "candidate_precheck": {
+        "lanes": {
+          "lower": {
+            "candidate_count": 1,
+            "candidates": [
+              {
+                "candidate_id": "1",
+                "collision_free": true,
+                "cvar": 1.429186971659629,
+                "full_support": true,
+                "lane": "lower",
+                "max": 1.4571656285423986,
+                "mean": 1.4072612303623588,
+                "sample_count": 200
+              }
+            ],
+            "max_risk": 1.4571656285423986,
+            "mean_cvar": 1.429186971659629,
+            "mean_risk": 1.4072612303623588
+          },
+          "upper": {
+            "candidate_count": 1,
+            "candidates": [
+              {
+                "candidate_id": "2",
+                "collision_free": true,
+                "cvar": 1.4292411616881853,
+                "full_support": true,
+                "lane": "upper",
+                "max": 1.4571656285423986,
+                "mean": 1.4083777151738326,
+                "sample_count": 200
+              }
+            ],
+            "max_risk": 1.4571656285423986,
+            "mean_cvar": 1.4292411616881853,
+            "mean_risk": 1.4083777151738326
+          }
+        },
+        "passed": true,
+        "rejected": [],
+        "selected": null,
+        "status": "PASS"
+      },
+      "checkpoint_truth_dt_s": 0.0,
+      "cvar": 1.4465346007423503,
+      "errors": [],
+      "export_dir": "/home/dev/ws_iap/src/iap/results/planner_validation/campaigns/p1-2-20260809-1958af4-c31/runs/pre_primary_1_enabled/exports/test_planner_p1_fork_formal_p1_fork_fused_v1_2470764_1786301833451",
+      "hard_gates": {
+        "passed": true
+      },
+      "localization_error_m": 0.234017287,
+      "max": 1.498099647708685,
+      "mean": 1.406393751811587,
+      "metrics_only": false,
+      "passed": true,
+      "path_length_m": 11.424794176549367,
+      "run_id": "25e1488ee1d04195aab1771f7fc5751c",
+      "scenario": "p1_fork_fused_v1",
+      "selected_lane": "lower"
+    },
+    {
+      "candidate_precheck": {
+        "lanes": {
+          "lower": {
+            "candidate_count": 1,
+            "candidates": [
+              {
+                "candidate_id": "1",
+                "collision_free": true,
+                "cvar": 1.42616554302244,
+                "full_support": true,
+                "lane": "lower",
+                "max": 1.4467466035171999,
+                "mean": 1.4086189164510217,
+                "sample_count": 200
+              }
+            ],
+            "max_risk": 1.4467466035171999,
+            "mean_cvar": 1.42616554302244,
+            "mean_risk": 1.4086189164510217
+          },
+          "upper": {
+            "candidate_count": 1,
+            "candidates": [
+              {
+                "candidate_id": "2",
+                "collision_free": true,
+                "cvar": 1.4262883305663543,
+                "full_support": true,
+                "lane": "upper",
+                "max": 1.4467466035171999,
+                "mean": 1.4096848383109337,
+                "sample_count": 200
+              }
+            ],
+            "max_risk": 1.4467466035171999,
+            "mean_cvar": 1.4262883305663543,
+            "mean_risk": 1.4096848383109337
+          }
+        },
+        "passed": true,
+        "rejected": [],
+        "selected": null,
+        "status": "PASS"
+      },
+      "checkpoint_truth_dt_s": 0.0,
+      "cvar": 1.4544761171618803,
+      "errors": [],
+      "export_dir": "/home/dev/ws_iap/src/iap/results/planner_validation/campaigns/p1-2-20260809-1958af4-c31/runs/pre_primary_2_reference/exports/test_planner_p1_fork_formal_p1_fork_fused_v1_2490081_1786301934195",
+      "hard_gates": {
+        "passed": true
+      },
+      "localization_error_m": 0.153639693,
+      "max": 1.5032365992395773,
+      "mean": 1.4112547965823958,
+      "metrics_only": true,
+      "passed": true,
+      "path_length_m": 11.569400827865065,
+      "run_id": "e9fe48f822ab44dabb3d9f2e3b17a38b",
+      "scenario": "p1_fork_fused_v1",
+      "selected_lane": "upper"
+    },
+    {
+      "candidate_precheck": {
+        "lanes": {
+          "lower": {
+            "candidate_count": 1,
+            "candidates": [
+              {
+                "candidate_id": "1",
+                "collision_free": true,
+                "cvar": 1.4255107062939585,
+                "full_support": true,
+                "lane": "lower",
+                "max": 1.4508416730925253,
+                "mean": 1.4066970173940794,
+                "sample_count": 200
+              }
+            ],
+            "max_risk": 1.4508416730925253,
+            "mean_cvar": 1.4255107062939585,
+            "mean_risk": 1.4066970173940794
+          },
+          "upper": {
+            "candidate_count": 1,
+            "candidates": [
+              {
+                "candidate_id": "2",
+                "collision_free": true,
+                "cvar": 1.4256220381861109,
+                "full_support": true,
+                "lane": "upper",
+                "max": 1.4508416730925253,
+                "mean": 1.4077625312360782,
+                "sample_count": 200
+              }
+            ],
+            "max_risk": 1.4508416730925253,
+            "mean_cvar": 1.4256220381861109,
+            "mean_risk": 1.4077625312360782
+          }
+        },
+        "passed": true,
+        "rejected": [],
+        "selected": null,
+        "status": "PASS"
+      },
+      "checkpoint_truth_dt_s": 0.0,
+      "cvar": 1.4520194306658096,
+      "errors": [],
+      "export_dir": "/home/dev/ws_iap/src/iap/results/planner_validation/campaigns/p1-2-20260809-1958af4-c31/runs/pre_primary_2_enabled/exports/test_planner_p1_fork_formal_p1_fork_fused_v1_2509307_1786302029888",
+      "hard_gates": {
+        "passed": true
+      },
+      "localization_error_m": 0.123491113,
+      "max": 1.5009759091467996,
+      "mean": 1.4092638485433042,
+      "metrics_only": false,
+      "passed": true,
+      "path_length_m": 11.593965524565146,
+      "run_id": "9c385a01f49b4ca7992edc5d6d9f98cd",
+      "scenario": "p1_fork_fused_v1",
+      "selected_lane": "lower"
+    },
+    {
+      "candidate_precheck": {
+        "lanes": {
+          "lower": {
+            "candidate_count": 1,
+            "candidates": [
+              {
+                "candidate_id": "2",
+                "collision_free": true,
+                "cvar": 1.427984669265316,
+                "full_support": true,
+                "lane": "lower",
+                "max": 1.4565648046182371,
+                "mean": 1.4079529097167012,
+                "sample_count": 200
+              }
+            ],
+            "max_risk": 1.4565648046182371,
+            "mean_cvar": 1.427984669265316,
+            "mean_risk": 1.4079529097167012
+          },
+          "upper": {
+            "candidate_count": 1,
+            "candidates": [
+              {
+                "candidate_id": "1",
+                "collision_free": true,
+                "cvar": 1.4279469708670678,
+                "full_support": true,
+                "lane": "upper",
+                "max": 1.4565648046182371,
+                "mean": 1.4069816167188929,
+                "sample_count": 200
+              }
+            ],
+            "max_risk": 1.4565648046182371,
+            "mean_cvar": 1.4279469708670678,
+            "mean_risk": 1.4069816167188929
+          }
+        },
+        "passed": true,
+        "rejected": [],
+        "selected": null,
+        "status": "PASS"
+      },
+      "checkpoint_truth_dt_s": 0.0,
+      "cvar": 1.4460219264623797,
+      "errors": [],
+      "export_dir": "/home/dev/ws_iap/src/iap/results/planner_validation/campaigns/p1-2-20260809-1958af4-c31/runs/pre_mirror_reference/exports/test_planner_p1_fork_formal_p1_fork_fused_mirror_v1_2528261_1786302125589",
+      "hard_gates": {
+        "passed": true
+      },
+      "localization_error_m": 0.203340388,
+      "max": 1.49755344576093,
+      "mean": 1.4068890606483342,
+      "metrics_only": true,
+      "passed": true,
+      "path_length_m": 11.432081380852065,
+      "run_id": "41fb2d051dce4d75a2c4b6ecece780e1",
+      "scenario": "p1_fork_fused_mirror_v1",
+      "selected_lane": "lower"
+    },
+    {
+      "candidate_precheck": {
+        "lanes": {
+          "lower": {
+            "candidate_count": 1,
+            "candidates": [
+              {
+                "candidate_id": "2",
+                "collision_free": true,
+                "cvar": 1.4283572258044477,
+                "full_support": true,
+                "lane": "lower",
+                "max": 1.456400612636516,
+                "mean": 1.4074019932493156,
+                "sample_count": 200
+              }
+            ],
+            "max_risk": 1.456400612636516,
+            "mean_cvar": 1.4283572258044477,
+            "mean_risk": 1.4074019932493156
+          },
+          "upper": {
+            "candidate_count": 1,
+            "candidates": [
+              {
+                "candidate_id": "1",
+                "collision_free": true,
+                "cvar": 1.4283398311522195,
+                "full_support": true,
+                "lane": "upper",
+                "max": 1.456400612636516,
+                "mean": 1.4064521488540092,
+                "sample_count": 200
+              }
+            ],
+            "max_risk": 1.456400612636516,
+            "mean_cvar": 1.4283398311522195,
+            "mean_risk": 1.4064521488540092
+          }
+        },
+        "passed": true,
+        "rejected": [],
+        "selected": null,
+        "status": "PASS"
+      },
+      "checkpoint_truth_dt_s": 0.0,
+      "cvar": 1.4459890080302265,
+      "errors": [],
+      "export_dir": "/home/dev/ws_iap/src/iap/results/planner_validation/campaigns/p1-2-20260809-1958af4-c31/runs/pre_mirror_enabled/exports/test_planner_p1_fork_formal_p1_fork_fused_mirror_v1_2546735_1786302216813",
+      "hard_gates": {
+        "passed": true
+      },
+      "localization_error_m": 0.207061744,
+      "max": 1.497675108485829,
+      "mean": 1.4057114212015944,
+      "metrics_only": false,
+      "passed": true,
+      "path_length_m": 11.407121667997206,
+      "run_id": "a3c37079387d41bd8205bd3492530382",
+      "scenario": "p1_fork_fused_mirror_v1",
+      "selected_lane": "upper"
+    },
+    {
+      "candidate_precheck": {
+        "lanes": {
+          "lower": {
+            "candidate_count": 1,
+            "candidates": [
+              {
+                "candidate_id": "1",
+                "collision_free": true,
+                "cvar": 1.5309718448256378,
+                "full_support": true,
+                "lane": "lower",
+                "max": 1.5627910048190325,
+                "mean": 1.503364391500396,
+                "sample_count": 200
+              }
+            ],
+            "max_risk": 1.5627910048190325,
+            "mean_cvar": 1.5309718448256378,
+            "mean_risk": 1.503364391500396
+          },
+          "upper": {
+            "candidate_count": 1,
+            "candidates": [
+              {
+                "candidate_id": "2",
+                "collision_free": true,
+                "cvar": 1.5314576033927874,
+                "full_support": true,
+                "lane": "upper",
+                "max": 1.5627910048190325,
+                "mean": 1.5054714899680408,
+                "sample_count": 200
+              }
+            ],
+            "max_risk": 1.5627910048190325,
+            "mean_cvar": 1.5314576033927874,
+            "mean_risk": 1.5054714899680408
+          }
+        },
+        "passed": true,
+        "rejected": [],
+        "selected": null,
+        "status": "PASS"
+      },
+      "checkpoint_truth_dt_s": 0.0,
+      "cvar": 1.548645472339872,
+      "errors": [],
+      "export_dir": "/home/dev/ws_iap/src/iap/results/planner_validation/campaigns/p1-2-20260809-1958af4-c31/runs/pre_null_reference/exports/test_planner_p1_fork_formal_p1_fork_symmetric_null_v1_2565524_1786302317543",
+      "hard_gates": {
+        "passed": true
+      },
+      "localization_error_m": 0.199948634,
+      "max": 1.6024644032539366,
+      "mean": 1.5035084661471507,
+      "metrics_only": true,
+      "passed": true,
+      "path_length_m": 11.415604332074329,
+      "run_id": "ba32c14f6bbc4083beee1dd41b07e2be",
+      "scenario": "p1_fork_symmetric_null_v1",
+      "selected_lane": "upper"
+    },
+    {
+      "candidate_precheck": {
+        "lanes": {
+          "lower": {
+            "candidate_count": 1,
+            "candidates": [
+              {
+                "candidate_id": "1",
+                "collision_free": true,
+                "cvar": 1.5307538786682682,
+                "full_support": true,
+                "lane": "lower",
+                "max": 1.5613918818689163,
+                "mean": 1.5026672786056556,
+                "sample_count": 200
+              }
+            ],
+            "max_risk": 1.5613918818689163,
+            "mean_cvar": 1.5307538786682682,
+            "mean_risk": 1.5026672786056556
+          },
+          "upper": {
+            "candidate_count": 1,
+            "candidates": [
+              {
+                "candidate_id": "2",
+                "collision_free": true,
+                "cvar": 1.5312263726869133,
+                "full_support": true,
+                "lane": "upper",
+                "max": 1.5613918818689163,
+                "mean": 1.5047758053224953,
+                "sample_count": 200
+              }
+            ],
+            "max_risk": 1.5613918818689163,
+            "mean_cvar": 1.5312263726869133,
+            "mean_risk": 1.5047758053224953
+          }
+        },
+        "passed": true,
+        "rejected": [],
+        "selected": null,
+        "status": "PASS"
+      },
+      "checkpoint_truth_dt_s": 0.0,
+      "cvar": 1.5479579025536965,
+      "errors": [],
+      "export_dir": "/home/dev/ws_iap/src/iap/results/planner_validation/campaigns/p1-2-20260809-1958af4-c31/runs/pre_null_enabled/exports/test_planner_p1_fork_formal_p1_fork_symmetric_null_v1_2584799_1786302413242",
+      "hard_gates": {
+        "passed": true
+      },
+      "localization_error_m": 0.250414256,
+      "max": 1.6017583456321558,
+      "mean": 1.501329049882713,
+      "metrics_only": false,
+      "passed": true,
+      "path_length_m": 11.422962717548385,
+      "run_id": "88d32876b4a9431cba8a440b9a1d7b9c",
+      "scenario": "p1_fork_symmetric_null_v1",
+      "selected_lane": "lower"
+    },
+    {
+      "candidate_precheck": {
+        "lanes": {
+          "lower": {
+            "candidate_count": 1,
+            "candidates": [
+              {
+                "candidate_id": "1",
+                "collision_free": true,
+                "cvar": 1.5377763110128713,
+                "full_support": true,
+                "lane": "lower",
+                "max": 1.5685146450949343,
+                "mean": 1.5109305754526008,
+                "sample_count": 200
+              }
+            ],
+            "max_risk": 1.5685146450949343,
+            "mean_cvar": 1.5377763110128713,
+            "mean_risk": 1.5109305754526008
+          },
+          "upper": {
+            "candidate_count": 1,
+            "candidates": [
+              {
+                "candidate_id": "2",
+                "collision_free": true,
+                "cvar": 1.5385386310888671,
+                "full_support": true,
+                "lane": "upper",
+                "max": 1.5685146450949343,
+                "mean": 1.5141786848467331,
+                "sample_count": 200
+              }
+            ],
+            "max_risk": 1.5685146450949343,
+            "mean_cvar": 1.5385386310888671,
+            "mean_risk": 1.5141786848467331
+          }
+        },
+        "passed": true,
+        "rejected": [],
+        "selected": null,
+        "status": "PASS"
+      },
+      "checkpoint_truth_dt_s": 2.384185791015625e-07,
+      "cvar": 1.5575897014105555,
+      "errors": [],
+      "export_dir": "/home/dev/ws_iap/src/iap/results/planner_validation/campaigns/p1-2-20260809-1958af4-c31/runs/pre_soft_reference/exports/test_planner_p1_fork_formal_p1_soft_risk_island_v1_2604057_1786302508947",
+      "hard_gates": {
+        "passed": true
+      },
+      "localization_error_m": 0.189612749,
+      "max": 1.6117841762734917,
+      "mean": 1.512564174391595,
+      "metrics_only": true,
+      "passed": true,
+      "path_length_m": 11.414759437211767,
+      "run_id": "790ad49cb8374be7a542b08a6c3a620d",
+      "scenario": "p1_soft_risk_island_v1",
+      "selected_lane": "upper"
+    },
+    {
+      "candidate_precheck": {
+        "lanes": {
+          "lower": {
+            "candidate_count": 1,
+            "candidates": [
+              {
+                "candidate_id": "1",
+                "collision_free": true,
+                "cvar": 1.5381644422130067,
+                "full_support": true,
+                "lane": "lower",
+                "max": 1.5679497568383471,
+                "mean": 1.5104888574094115,
+                "sample_count": 200
+              }
+            ],
+            "max_risk": 1.5679497568383471,
+            "mean_cvar": 1.5381644422130067,
+            "mean_risk": 1.5104888574094115
+          },
+          "upper": {
+            "candidate_count": 1,
+            "candidates": [
+              {
+                "candidate_id": "2",
+                "collision_free": true,
+                "cvar": 1.5388969827293761,
+                "full_support": true,
+                "lane": "upper",
+                "max": 1.5679497568383471,
+                "mean": 1.5137463497656165,
+                "sample_count": 200
+              }
+            ],
+            "max_risk": 1.5679497568383471,
+            "mean_cvar": 1.5388969827293761,
+            "mean_risk": 1.5137463497656165
+          }
+        },
+        "passed": true,
+        "rejected": [],
+        "selected": null,
+        "status": "PASS"
+      },
+      "checkpoint_truth_dt_s": 0.0,
+      "cvar": 1.5567145204627595,
+      "errors": [],
+      "export_dir": "/home/dev/ws_iap/src/iap/results/planner_validation/campaigns/p1-2-20260809-1958af4-c31/runs/pre_soft_enabled/exports/test_planner_p1_fork_formal_p1_soft_risk_island_v1_2623335_1786302604644",
+      "hard_gates": {
+        "passed": true
+      },
+      "localization_error_m": 0.306645291,
+      "max": 1.6108751061584807,
+      "mean": 1.509104737581148,
+      "metrics_only": false,
+      "passed": true,
+      "path_length_m": 11.43146178725079,
+      "run_id": "71c60d2bea4e4fdb95f4d5136d70f4de",
+      "scenario": "p1_soft_risk_island_v1",
+      "selected_lane": "lower"
+    }
+  ],
+  "schema_version": "p1_2_prequalification_v1"
+}

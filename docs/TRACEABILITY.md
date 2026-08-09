@@ -442,6 +442,13 @@
 | IAP-RQ-320 / IAP-RQ-400 / IAP-RQ-410 | The estimator and flight controller must consume acceleration streams with their declared coordinate/force semantics | `test_planner.launch.py` retains body specific force for IAP and maps SO3 feedback to the simulator's world linear acceleration; the manifest binds `so3_feedback_imu_semantics=world_linear_acceleration`; launch regression proves the topic contract | **IMPLEMENTED; fresh campaign required** |
 | IAP-RQ-320 / IAP-RQ-400 / IAP-RQ-410 / IAP-RQ-422 | c37 cannot advance because one run failed the localization hard gate | c37 (`e52832a`) retained all ten runs and 10/10 complete two-arm candidate proofs, but `pre_primary_2_enabled` reached `91.4916 m` checkpoint error after an upstream `96..112 m/s²` startup acceleration; only 9/10 hard gates passed | **NOT TERMINAL; incomplete/non-comparable; formal analyzer count zero** |
 
+## 2026-08-09 P1-2 terminal c38 result
+
+| Req ID | Requirement/evidence seam | Implementation and retained evidence | Status |
+|---|---|---|---|
+| IAP-RQ-320 / IAP-RQ-400 / IAP-RQ-410 / IAP-RQ-422 | Prequalification must exceed both primary effectiveness thresholds in two fresh pairs before calibration | c38 (`c9782a5`) passed all ten hard-gate runs and both enabled arms selected lower, but mean gains were `0.002999/0.001657 < 0.00836` and CVaR gains were `0.006611/0.000653 < 0.00677`; compact summary and hashes are archived under `2026-08-09-c9782a5/` | **TERMINAL SCIENTIFIC BLOCKER; third complete comparable failure (c31/c32/c38)** |
+| IAP-RQ-320 / IAP-RQ-400 / IAP-RQ-410 / IAP-RQ-422 | Stop after the same scientific gate fails in three complete fresh campaigns with compliant repairs exhausted | c31 established insufficient physical contrast; c32 exposed and motivated repair of the LiDAR/GNSS mask interaction; c38 retained correct primary route direction after the compliant repair but still missed the fixed effect thresholds. Further outcome-driven geometry or parameter changes would violate the no-tuning rule. All three compact bundles and hashes are tracked under `2026-08-09-{1958af4,da5b15a,c9782a5}/`. | **STOP RULE SATISFIED; calibration/formal analyzer/P1-3 not run; analyzer count zero** |
+
 ## 2026-08-09 P1-2 c28 overhead-observability repair
 
 | Req ID | Requirement/evidence seam | Implementation and retained evidence | Status |

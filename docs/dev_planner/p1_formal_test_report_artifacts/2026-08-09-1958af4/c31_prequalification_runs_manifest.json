@@ -1,0 +1,30 @@
+{
+  "pairs": [
+    {
+      "enabled_export": "/home/dev/ws_iap/src/iap/results/planner_validation/campaigns/p1-2-20260809-1958af4-c31/runs/pre_primary_1_enabled/exports/test_planner_p1_fork_formal_p1_fork_fused_v1_2470764_1786301833451",
+      "kind": "primary",
+      "reference_export": "/home/dev/ws_iap/src/iap/results/planner_validation/campaigns/p1-2-20260809-1958af4-c31/runs/pre_primary_1_reference/exports/test_planner_p1_fork_formal_p1_fork_fused_v1_2451973_1786301737744"
+    },
+    {
+      "enabled_export": "/home/dev/ws_iap/src/iap/results/planner_validation/campaigns/p1-2-20260809-1958af4-c31/runs/pre_primary_2_enabled/exports/test_planner_p1_fork_formal_p1_fork_fused_v1_2509307_1786302029888",
+      "kind": "primary",
+      "reference_export": "/home/dev/ws_iap/src/iap/results/planner_validation/campaigns/p1-2-20260809-1958af4-c31/runs/pre_primary_2_reference/exports/test_planner_p1_fork_formal_p1_fork_fused_v1_2490081_1786301934195"
+    },
+    {
+      "enabled_export": "/home/dev/ws_iap/src/iap/results/planner_validation/campaigns/p1-2-20260809-1958af4-c31/runs/pre_mirror_enabled/exports/test_planner_p1_fork_formal_p1_fork_fused_mirror_v1_2546735_1786302216813",
+      "kind": "mirror",
+      "reference_export": "/home/dev/ws_iap/src/iap/results/planner_validation/campaigns/p1-2-20260809-1958af4-c31/runs/pre_mirror_reference/exports/test_planner_p1_fork_formal_p1_fork_fused_mirror_v1_2528261_1786302125589"
+    },
+    {
+      "enabled_export": "/home/dev/ws_iap/src/iap/results/planner_validation/campaigns/p1-2-20260809-1958af4-c31/runs/pre_null_enabled/exports/test_planner_p1_fork_formal_p1_fork_symmetric_null_v1_2584799_1786302413242",
+      "kind": "null",
+      "reference_export": "/home/dev/ws_iap/src/iap/results/planner_validation/campaigns/p1-2-20260809-1958af4-c31/runs/pre_null_reference/exports/test_planner_p1_fork_formal_p1_fork_symmetric_null_v1_2565524_1786302317543"
+    },
+    {
+      "enabled_export": "/home/dev/ws_iap/src/iap/results/planner_validation/campaigns/p1-2-20260809-1958af4-c31/runs/pre_soft_enabled/exports/test_planner_p1_fork_formal_p1_soft_risk_island_v1_2623335_1786302604644",
+      "kind": "soft_risk",
+      "reference_export": "/home/dev/ws_iap/src/iap/results/planner_validation/campaigns/p1-2-20260809-1958af4-c31/runs/pre_soft_reference/exports/test_planner_p1_fork_formal_p1_soft_risk_island_v1_2604057_1786302508947"
+    }
+  ],
+  "schema_version": "p1_2_prequalification_runs_v1"
+}
