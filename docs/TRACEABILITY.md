@@ -1,5 +1,11 @@
 # Traceability Matrix (IAP)
 
+## 2026-08-09 P1-2 gradual collision-envelope binding
+
+| Req ID | Evidence | Verification | Status |
+|---|---|---|---|
+| IAP-RQ-320 / IAP-RQ-400 / IAP-RQ-410 / IAP-RQ-422 | Retained c15 (`f2f96a6`) 10/10 validator PASS; all enabled STEP1 candidates reached fixed-200 support, while a wrongly shared collision base point forced immediate 2.5 m displacement and made STEP3 durations 25–35 s. The repair translates each base point so the declared gradual fan-out column lies exactly on the same clearance plane. | `P1SoftFallbackPolicyTest.OccupiedSingletonGetsSymmetricGeometricFanout` proves exact clearance-plane distance, gradual base translation, endpoints, symmetry, and zero-miss no-op. A new clean campaign is required. | **IMPLEMENTED; c15 retained; calibration/formal/analyzer not started; P1-3 prohibited** |
+
 ## 2026-08-09 P1-2 collision-feasible replacement closure
 
 | Req ID | Evidence | Verification | Status |

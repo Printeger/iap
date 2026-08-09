@@ -1076,9 +1076,12 @@ namespace ego_planner
             const Eigen::Vector3d displacement =
                 points.col(column) - prototype.points.col(column);
             if (displacement.norm() <= 1.0e-9) continue;
+            const Eigen::Vector3d direction = displacement.normalized();
             candidate.base_point[column].push_back(
-                prototype.points.col(column));
-            candidate.direction[column].push_back(displacement.normalized());
+                makeP1CollisionConstraintBasePoint(
+                    prototype.points.col(column), points.col(column), direction,
+                    pp_.p1_collision_fanout_clearance_m_));
+            candidate.direction[column].push_back(direction);
             candidate.clearance = std::max(
                 candidate.clearance, pp_.p1_collision_fanout_clearance_m_);
           }

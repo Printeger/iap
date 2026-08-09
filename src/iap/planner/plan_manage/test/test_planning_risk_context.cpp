@@ -316,6 +316,13 @@ TEST(P1SoftFallbackPolicyTest,
   EXPECT_TRUE(fanout[1].col(seed.cols() - 1).isApprox(seed.col(seed.cols() - 1)));
   EXPECT_EQ(ego_planner::makeP1CollisionClearanceFanout(
       seed, 0, 2.5, 3).size(), 1u);
+
+  const Eigen::Vector3d direction =
+      (fanout[1].col(3) - seed.col(3)).normalized();
+  const auto base = ego_planner::makeP1CollisionConstraintBasePoint(
+      seed.col(3), fanout[1].col(3), direction, 2.5);
+  EXPECT_NEAR((fanout[1].col(3) - base).dot(direction), 2.5, 1.0e-12);
+  EXPECT_LT((base - seed.col(3)).norm(), 2.5);
 }
 
 TEST(P1SoftFallbackPolicyTest,

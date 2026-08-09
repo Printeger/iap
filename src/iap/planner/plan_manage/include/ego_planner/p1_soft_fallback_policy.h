@@ -40,6 +40,16 @@ inline std::vector<Eigen::MatrixXd> makeP1CollisionClearanceFanout(
   return result;
 }
 
+inline Eigen::Vector3d makeP1CollisionConstraintBasePoint(
+    const Eigen::Vector3d& seed_point,
+    const Eigen::Vector3d& displaced_point,
+    const Eigen::Vector3d& unit_direction,
+    double clearance_m) {
+  const double displacement =
+      (displaced_point - seed_point).dot(unit_direction);
+  return seed_point + (displacement - clearance_m) * unit_direction;
+}
+
 enum class P1SoftFallbackAction {
   USE_P1_CANDIDATE,
   PUBLISH_BASE_CANDIDATE,
