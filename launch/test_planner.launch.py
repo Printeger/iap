@@ -648,6 +648,7 @@ EXPERIMENT_PRESETS = {
         # Observe the entire central fork and put the local target beyond its
         # terminal face before the first formal decision checkpoint.
         "manager/planning_horizon": "10.5",
+        "manager/p1_collision_fanout_clearance_m": "2.5",
         "grid_map/local_update_range_x": "11.0",
         # At 1 m/s, one 0.9 s planning event intersects the fixed 0.8 m window.
         # This is configuration identity, not an analyzer relaxation.
@@ -1047,6 +1048,7 @@ ARG_DEFAULTS = [
     ("manager/control_points_distance", "0.4"),
     ("manager/feasibility_tolerance", "0.05"),
     ("manager/planning_horizon", "7.5"),
+    ("manager/p1_collision_fanout_clearance_m", "0.0"),
     ("manager/use_distinctive_trajs", "true"),
     ("optimization/lambda_smooth", "1.0"),
     ("optimization/lambda_collision", "0.5"),
@@ -1675,6 +1677,8 @@ def _ego_planner_node(context, drone_id, planner_odom_topic, cloud_topic, camera
             {"manager/control_points_distance": _param_float(context, "manager/control_points_distance")},
             {"manager/feasibility_tolerance": _param_float(context, "manager/feasibility_tolerance")},
             {"manager/planning_horizon": _param_float(context, "manager/planning_horizon")},
+            {"manager/p1_collision_fanout_clearance_m": _param_float(
+                context, "manager/p1_collision_fanout_clearance_m")},
             {"manager/use_distinctive_trajs": _param_bool(context, "manager/use_distinctive_trajs")},
             {"manager/drone_id": int(drone_id)},
             {"manager/use_integrity_global_search": False},
@@ -2030,6 +2034,8 @@ def _launch_setup(context):
             "bspline_limit_velocity_mps": _param_float(context, "bspline/limit_vel"),
             "replan_period_s": _param_float(context, "fsm.thresh_replan_time"),
             "planning_horizon_m": _param_float(context, "manager/planning_horizon"),
+            "collision_fanout_clearance_m": _param_float(
+                context, "manager/p1_collision_fanout_clearance_m"),
             "local_update_range_x_m": _param_float(context, "grid_map/local_update_range_x"),
         },
         "p0_prediction": {
@@ -2062,6 +2068,8 @@ def _launch_setup(context):
         ),
         "manager/max_vel": _param_float(context, "manager/max_vel"),
         "manager/planning_horizon": _param_float(context, "manager/planning_horizon"),
+        "manager/p1_collision_fanout_clearance_m": _param_float(
+            context, "manager/p1_collision_fanout_clearance_m"),
         "optimization/max_vel": _param_float(context, "optimization/max_vel"),
         "bspline/limit_vel": _param_float(context, "bspline/limit_vel"),
         "fsm.thresh_replan_time": _param_float(context, "fsm.thresh_replan_time"),

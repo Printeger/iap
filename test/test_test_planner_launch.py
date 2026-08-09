@@ -77,6 +77,11 @@ class TestPlannerLaunchTest(unittest.TestCase):
             "10.5",
         )
         self.assertEqual(
+            MODULE.EXPERIMENT_PRESETS["p1_fork_formal"]
+            ["manager/p1_collision_fanout_clearance_m"],
+            "2.5",
+        )
+        self.assertEqual(
             MODULE.EXPERIMENT_PRESETS["p1_fork_formal"]["fsm.thresh_replan_time"],
             "0.9",
         )

@@ -653,6 +653,7 @@ def validate_calibration_binding(
         ("p1.smooth_max_temperature", smooth.get("temperature")),
         ("p1.normalization_budget_fraction", calibration.get("normalization_budget_fraction")),
         ("manager/planning_horizon", 10.5),
+        ("manager/p1_collision_fanout_clearance_m", 2.5),
         ("grid_map/local_update_range_x", 11.0),
     )
     for key, expected in expected_values:

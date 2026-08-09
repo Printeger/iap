@@ -9489,3 +9489,14 @@ the unchanged-length box at `x=-8..-3` and symmetrically moves both lanes'
 boundary features 0.4 m outward; generated-point tests enforce flight-layer
 trunk clearance. Raw c12 evidence remains under
 `results/planner_validation/campaigns/p1-2-20260809-79b962e-c12/`.
+
+Clean c13 (`b89872a`) completed 10/10 validator-PASS runs but did not close the
+occupied-support gate. Across c11-c13, physical-map `distinctiveTrajs` remained
+a singleton whenever P0's stricter corner reconstruction found occupied
+samples; the existing P1 supplement was reachable only after a full-support
+base prepass. The next clean campaign uses a default-off, formal-bound 2.5 m
+symmetric path-normal collision fan-out before that unchanged prepass, only for
+P0-proven occupied singleton seeds. It reads no risk value and preserves the
+original collision optimizer, 200/200 filter, cap, selection, and fallback.
+Raw c13 evidence remains under
+`results/planner_validation/campaigns/p1-2-20260809-b89872a-c13/`.

@@ -2,10 +2,43 @@
 
 #include <iap/planner/p1_accepted_context_validation.hpp>
 
+#include <algorithm>
 #include <cmath>
 #include <string>
+#include <vector>
 
 namespace ego_planner {
+
+inline std::vector<Eigen::MatrixXd> makeP1CollisionClearanceFanout(
+    const Eigen::MatrixXd& seed, std::size_t occupied_miss_count,
+    double clearance_m, int candidate_cap) {
+  std::vector<Eigen::MatrixXd> result{seed};
+  if (occupied_miss_count == 0 || !std::isfinite(clearance_m) ||
+      clearance_m <= 0.0 || candidate_cap < 2 || seed.rows() != 3 ||
+      seed.cols() < 8) {
+    return result;
+  }
+  Eigen::Vector2d tangent =
+      (seed.block<2, 1>(0, seed.cols() - 1) - seed.block<2, 1>(0, 0));
+  if (!tangent.allFinite() || tangent.norm() <= 1.0e-9) return result;
+  tangent.normalize();
+  const Eigen::Vector2d normal(-tangent.y(), tangent.x());
+  for (double sign : {1.0, -1.0}) {
+    if (static_cast<int>(result.size()) >= candidate_cap) break;
+    Eigen::MatrixXd candidate = seed;
+    const int active_count = seed.cols() - 6;
+    for (int column = 3; column < seed.cols() - 3; ++column) {
+      const double fraction = static_cast<double>(column - 2) /
+          static_cast<double>(active_count + 1);
+      const double envelope = std::min({1.0, 3.0 * fraction,
+                                        3.0 * (1.0 - fraction)});
+      candidate.block<2, 1>(0, column) +=
+          sign * clearance_m * envelope * normal;
+    }
+    result.push_back(std::move(candidate));
+  }
+  return result;
+}
 
 enum class P1SoftFallbackAction {
   USE_P1_CANDIDATE,

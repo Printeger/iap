@@ -302,6 +302,23 @@ TEST(P1SoftFallbackPolicyTest,
 }
 
 TEST(P1SoftFallbackPolicyTest,
+     OccupiedSingletonGetsSymmetricGeometricFanout) {
+  Eigen::MatrixXd seed = Eigen::MatrixXd::Zero(3, 10);
+  for (int column = 0; column < seed.cols(); ++column)
+    seed(0, column) = static_cast<double>(column);
+  const auto fanout = ego_planner::makeP1CollisionClearanceFanout(
+      seed, 3, 2.5, 3);
+  ASSERT_EQ(fanout.size(), 3u);
+  EXPECT_TRUE(fanout[0].isApprox(seed));
+  EXPECT_GT(fanout[1].row(1).maxCoeff(), 2.0);
+  EXPECT_LT(fanout[2].row(1).minCoeff(), -2.0);
+  EXPECT_TRUE(fanout[1].col(0).isApprox(seed.col(0)));
+  EXPECT_TRUE(fanout[1].col(seed.cols() - 1).isApprox(seed.col(seed.cols() - 1)));
+  EXPECT_EQ(ego_planner::makeP1CollisionClearanceFanout(
+      seed, 0, 2.5, 3).size(), 1u);
+}
+
+TEST(P1SoftFallbackPolicyTest,
      MetricsOnlyReferenceObservationIsOncePerTrajectoryInsideHorizon) {
   EXPECT_FALSE(ego_planner::shouldRecordP1MetricsOnlyReferenceObservation(
       false, 7, 0, 2.0, 2.5));

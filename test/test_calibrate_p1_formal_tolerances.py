@@ -124,6 +124,7 @@ class CalibrationToolContractTest(unittest.TestCase):
             "bspline/limit_vel": 1.0,
             "fsm.thresh_replan_time": 0.9,
             "manager/planning_horizon": 10.5,
+            "manager/p1_collision_fanout_clearance_m": 2.5,
             "grid_map/local_update_range_x": 11.0,
             "record_bag": False,
             "run_validator": True,

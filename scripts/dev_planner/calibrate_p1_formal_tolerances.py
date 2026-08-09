@@ -190,6 +190,8 @@ def _configuration_identity(manifest: dict[str, Any]) -> dict[str, Any]:
         "p1.normalization_budget_fraction": manifest.get("p1.normalization_budget_fraction"),
         "grid_map/local_update_range_x": manifest.get("grid_map/local_update_range_x"),
         "manager/planning_horizon": manifest.get("manager/planning_horizon"),
+        "manager/p1_collision_fanout_clearance_m": manifest.get(
+            "manager/p1_collision_fanout_clearance_m"),
         "run_duration_s": manifest.get("run_duration_s"),
         "validation_duration_s": manifest.get("validation_duration_s"),
         "planner_start_delay_s": manifest.get("planner_start_delay_s"),
@@ -227,6 +229,7 @@ def _validate_fixed_contract(manifest: dict[str, Any]) -> None:
         "bspline/limit_vel": 1.0,
         "fsm.thresh_replan_time": 0.9,
         "manager/planning_horizon": 10.5,
+        "manager/p1_collision_fanout_clearance_m": 2.5,
         "p1.lambda_integrity": 1.0e-5,
         "p1.smooth_cvar_alpha": 0.90,
         "p1.smooth_max_temperature": 0.01,

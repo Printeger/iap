@@ -145,6 +145,7 @@ namespace ego_planner
     node->declare_parameter("manager/feasibility_tolerance", 0.0);
     node->declare_parameter("manager/control_points_distance", -1.0);
     node->declare_parameter("manager/planning_horizon", 5.0);
+    node->declare_parameter("manager/p1_collision_fanout_clearance_m", 0.0);
     node->declare_parameter("manager/use_distinctive_trajs", false);
     node->declare_parameter("manager/drone_id", -1);
     node->declare_parameter("p2.enable_candidate_ranking", false);
@@ -179,6 +180,8 @@ namespace ego_planner
     node->get_parameter("manager/feasibility_tolerance", pp_.feasibility_tolerance_);
     node->get_parameter("manager/control_points_distance", pp_.ctrl_pt_dist);
     node->get_parameter("manager/planning_horizon", pp_.planning_horizen_);
+    node->get_parameter("manager/p1_collision_fanout_clearance_m",
+                        pp_.p1_collision_fanout_clearance_m_);
     node->get_parameter("manager/use_distinctive_trajs", pp_.use_distinctive_trajs);
     node->get_parameter("manager/drone_id", pp_.drone_id);
     node->get_parameter("p2.enable_candidate_ranking", p2_config_.enable_candidate_ranking);
@@ -1055,6 +1058,22 @@ namespace ego_planner
           p1_config.max_candidates_per_attempt, 1, 8);
       const auto fanout_before_supplement =
           bspline_optimizer_->lastP1FanoutDiagnostics();
+      if (trajs.size() == 1 &&
+          fanout_before_supplement.singleton_due_to_empty_segments &&
+          initial_p1_validation.occupied_miss_count > 0 &&
+          pp_.p1_collision_fanout_clearance_m_ > 0.0) {
+        const auto fanout = makeP1CollisionClearanceFanout(
+            trajs.front().points, initial_p1_validation.occupied_miss_count,
+            pp_.p1_collision_fanout_clearance_m_, candidate_limit);
+        const ControlPoints prototype = trajs.front();
+        trajs.clear();
+        trajs.reserve(fanout.size());
+        for (const auto& points : fanout) {
+          ControlPoints candidate = prototype;
+          candidate.points = points;
+          trajs.push_back(std::move(candidate));
+        }
+      }
       bool normalized_p1_stage = p1_objective_allowed &&
           !p1_config.metrics_only && p1_config.lambda_integrity != 0.0;
       if (normalized_p1_stage)

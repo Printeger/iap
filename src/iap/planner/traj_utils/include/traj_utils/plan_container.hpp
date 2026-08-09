@@ -195,6 +195,7 @@ namespace ego_planner
     double ctrl_pt_dist;                  // distance between adjacient B-spline control points
     double feasibility_tolerance_;        // permitted ratio of vel/acc exceeding limits
     double planning_horizen_;
+    double p1_collision_fanout_clearance_m_ = 0.0;
     bool use_distinctive_trajs;
     int drone_id; // single drone: drone_id <= -1, swarm: drone_id >= 0
 
