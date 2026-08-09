@@ -9538,7 +9538,7 @@ pass through gaps between sparse canopy balls. Exact mirror, null/soft scene
 isolation, flight-layer clearance, and unchanged tree/canopy parameters are
 covered by generated-point tests. A fresh campaign must restart at run one.
 
-### c32 terminal prequalification result
+### c32 retained prequalification result and stop-rule correction
 
 Clean c32 (`da5b15a`) completed all ten prescribed serial 90-second runs with
 10/10 per-run hard gates, validator, localization, unique-checkpoint, and exact
@@ -9552,11 +9552,14 @@ null CVaR change magnitude `0.0058367864` exceeded the frozen
 `0.0045119976` limit. Soft-risk passed every pair gate.
 
 The physical v12 mask changed real candidate risks but did not close the
-primary direction/effect gate. c17, c31, and c32 are three complete comparable
-fresh reproductions after compliant repairs. The preregistered stop rule is
-therefore met; further geometry tuning from c32 would be selective tuning and
-would violate the experiment protocol. P1-2 is blocked at prequalification.
-Calibration, formal preflight/pair, formal analyzer, and P1-3 were not run.
+primary direction/effect gate. Final Spec review found that c17 had only 3/10
+passing runs and one complete primary pair, so it cannot count as a complete
+comparable campaign. Only c31 and c32 currently count; the preregistered
+three-campaign stop rule is not met. c32's candidate evidence shows the
+low-altitude mask made upper fused risk lower through LiDAR observability,
+which supplies a compliant sensor-geometry repair direction. P1-2 therefore
+continues. Calibration, formal preflight/pair, formal analyzer, and P1-3 were
+not run.
 Compact evidence and hashes are archived under
 `p1_formal_test_report_artifacts/2026-08-09-da5b15a/`; losslessly-gzipped raw
 evidence remains under
