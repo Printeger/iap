@@ -9459,3 +9459,13 @@ The next clean campaign binds a 10.5 m planning horizon, 11 m forward local
 range, and 0.9 s replan interval, and gives the overhead-only soft-risk island
 the same symmetric central fork. Raw c9 evidence remains under
 `results/planner_validation/campaigns/p1-2-20260809-02f9a0e-c9/`.
+
+Clean c10 (`b764a15`) then completed 10/10 validator-PASS runs and made the
+checkpoint a unique planning event in every scenario. It stopped at the same
+independent prequalification boundary because the longer early-fork trajectory
+was exactly 18 s while the formal P0 lattice ended at 16 s. All ten profiles
+therefore had 23 temporal misses; enabled mode correctly did not enter the base
+prepass that may recover the remaining 7–43 occupied samples. The next clean
+campaign adds only 17 s and 18 s P0 layers, preserving the <=1 s layer gap and
+all safety/fallback semantics. Raw evidence remains under
+`results/planner_validation/campaigns/p1-2-20260809-b764a15-c10/`.
