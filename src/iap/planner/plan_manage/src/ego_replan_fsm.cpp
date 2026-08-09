@@ -658,6 +658,19 @@ namespace ego_planner
       t_cur = std::min(info->duration_, t_cur);
 
       Eigen::Vector3d pos = info->position_traj_.evaluateDeBoorT(t_cur);
+      const Eigen::Vector3d trajectory_end =
+          info->position_traj_.evaluateDeBoorT(info->duration_);
+      // Formal evidence is sampled by the non-mutating timer observer at the
+      // physical checkpoint. A synchronous periodic replan can otherwise
+      // occupy the mutually-exclusive FSM callback while the vehicle crosses
+      // the narrow window. Keep the already collision-checked incumbent for
+      // the short approach; collision monitoring and emergency handling are
+      // unchanged.
+      const bool defer_periodic_replan_for_p1_checkpoint =
+          shouldDeferP1PeriodicReplanForFormalCheckpoint(
+              planner_manager_->pp_.p1_collision_fanout_preserve_homotopies_,
+              planner_manager_->p1FormalCheckpointRecorded(), pos.x(),
+              trajectory_end.x(), -9.5, 0.4, 1.5);
 
       /* && (end_pt_ - pos).norm() < 0.5 */
       if ((target_type_ == TARGET_TYPE::PRESET_TARGET) &&
@@ -683,12 +696,15 @@ namespace ego_planner
           changeFSMExecState(WAIT_TARGET, "FSM");
           goto force_return;
         }
-        else if ((end_pt_ - pos).norm() > no_replan_thresh_ && t_cur > replan_thresh_)
+        else if ((end_pt_ - pos).norm() > no_replan_thresh_ &&
+                 t_cur > replan_thresh_ &&
+                 !defer_periodic_replan_for_p1_checkpoint)
         {
           changeFSMExecState(REPLAN_TRAJ, "FSM");
         }
       }
-      else if (t_cur > replan_thresh_)
+      else if (t_cur > replan_thresh_ &&
+               !defer_periodic_replan_for_p1_checkpoint)
       {
         changeFSMExecState(REPLAN_TRAJ, "FSM");
       }

@@ -75,7 +75,7 @@ inline void append_p1_observability_landmarks(
   // or obstructing either fork homotopy.
   for (const double x : {-12.0, -10.0, -8.0, -6.0, -4.0, -2.0, 0.0}) {
     const std::size_t first = points.size();
-    append_p1_box(points, x - 0.25, x + 0.25, -4.25, -3.75,
+    append_p1_box(points, x - 0.25, x + 0.25, -4.75, -4.25,
                   0.0, 3.0, resolution);
     const std::size_t last = points.size();
     for (std::size_t index = first; index < last; ++index)
@@ -93,7 +93,7 @@ inline std::vector<P1FixturePoint> make_p1_fixture_points(const P1FixtureConfig&
       const double fraction = (static_cast<double>(index) + 0.5) / count;
       const double x = -7.8 + 16.0 * fraction;
       const double side = index % 2 == 0 ? -1.0 : 1.0;
-      const double y = center_y + side * (config.lane_half_width_m + 0.75);
+      const double y = center_y + side * (config.lane_half_width_m + 1.25);
       append_p1_cylinder(base, x, y, config.trunk_radius_m,
                          short_features ? 0.55 : 2.85, config.resolution_m);
       if (index < canopy_count) {

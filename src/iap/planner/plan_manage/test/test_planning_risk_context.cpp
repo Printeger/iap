@@ -439,6 +439,22 @@ TEST(P1SoftFallbackPolicyTest,
 }
 
 TEST(P1SoftFallbackPolicyTest,
+     FormalCheckpointApproachDefersOnlyPeriodicReplanning) {
+  EXPECT_TRUE(ego_planner::shouldDeferP1PeriodicReplanForFormalCheckpoint(
+      true, false, -10.5, 0.0, -9.5, 0.4, 1.5));
+  EXPECT_FALSE(ego_planner::shouldDeferP1PeriodicReplanForFormalCheckpoint(
+      false, false, -10.5, 0.0, -9.5, 0.4, 1.5));
+  EXPECT_FALSE(ego_planner::shouldDeferP1PeriodicReplanForFormalCheckpoint(
+      true, true, -10.5, 0.0, -9.5, 0.4, 1.5));
+  EXPECT_FALSE(ego_planner::shouldDeferP1PeriodicReplanForFormalCheckpoint(
+      true, false, -11.5, 0.0, -9.5, 0.4, 1.5));
+  EXPECT_FALSE(ego_planner::shouldDeferP1PeriodicReplanForFormalCheckpoint(
+      true, false, -9.8, 0.0, -9.5, 0.4, 1.5));
+  EXPECT_FALSE(ego_planner::shouldDeferP1PeriodicReplanForFormalCheckpoint(
+      true, false, -10.5, -10.0, -9.5, 0.4, 1.5));
+}
+
+TEST(P1SoftFallbackPolicyTest,
      PostOptimizationInvalidityKeepsExistingOrDefersBaseInitialFallback) {
   iap::P1AcceptedContextValidation validation;
   validation.fresh = false;

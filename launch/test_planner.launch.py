@@ -650,6 +650,7 @@ EXPERIMENT_PRESETS = {
         "manager/planning_horizon": "10.5",
         "manager/p1_collision_fanout_clearance_m": "2.5",
         "manager/p1_collision_fanout_preserve_homotopies": "true",
+        "p1_fixture_lane_center_m": "2.5",
         "grid_map/local_update_range_x": "11.0",
         # At 1 m/s, one 0.9 s planning event intersects the fixed 0.8 m window.
         # This is configuration identity, not an analyzer relaxation.
@@ -1978,7 +1979,7 @@ def _launch_setup(context):
 
     scenario_contract = {
         "geometry": {
-            "fixture_algorithm_version": "p1_deterministic_fork_geometry_v6",
+            "fixture_algorithm_version": "p1_deterministic_fork_geometry_v7",
             "fixture": LaunchConfiguration("p1_map_fixture").perform(context),
             "mirror_y": _param_bool(context, "p1_fixture_mirror_y"),
             "start_m": [init_x, init_y, init_z],

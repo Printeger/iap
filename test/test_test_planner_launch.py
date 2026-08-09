@@ -83,6 +83,11 @@ class TestPlannerLaunchTest(unittest.TestCase):
         )
         self.assertEqual(
             MODULE.EXPERIMENT_PRESETS["p1_fork_formal"]
+            ["p1_fixture_lane_center_m"],
+            "2.5",
+        )
+        self.assertEqual(
+            MODULE.EXPERIMENT_PRESETS["p1_fork_formal"]
             ["manager/p1_collision_fanout_preserve_homotopies"],
             "true",
         )

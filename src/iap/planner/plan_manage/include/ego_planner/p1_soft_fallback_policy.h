@@ -160,6 +160,24 @@ inline bool isP1IncumbentTrajectoryExecuting(
       now_s <= trajectory_start_s + trajectory_duration_s;
 }
 
+inline bool shouldDeferP1PeriodicReplanForFormalCheckpoint(
+    bool formal_observation_enabled, bool checkpoint_already_recorded,
+    double current_x_m, double trajectory_end_x_m, double checkpoint_x_m,
+    double checkpoint_half_width_m, double approach_margin_m) {
+  if (!formal_observation_enabled || checkpoint_already_recorded ||
+      !std::isfinite(current_x_m) || !std::isfinite(trajectory_end_x_m) ||
+      !std::isfinite(checkpoint_x_m) ||
+      !std::isfinite(checkpoint_half_width_m) ||
+      !std::isfinite(approach_margin_m) || checkpoint_half_width_m < 0.0 ||
+      approach_margin_m < 0.0) {
+    return false;
+  }
+  const double window_entry_x = checkpoint_x_m - checkpoint_half_width_m;
+  return current_x_m < window_entry_x &&
+      current_x_m >= window_entry_x - approach_margin_m &&
+      trajectory_end_x_m >= checkpoint_x_m + checkpoint_half_width_m;
+}
+
 inline P1SoftFallbackDecision decideP1BasePrepassFallback(
     const P1BasePrepassFallbackInput& input) {
   if (input.base_optimizer_success && input.full_p1_support) {
