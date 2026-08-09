@@ -11,7 +11,9 @@ namespace ego_planner {
 
 inline std::vector<Eigen::MatrixXd> makeP1CollisionClearanceFanout(
     const Eigen::MatrixXd& seed, std::size_t occupied_miss_count,
-    double clearance_m, int candidate_cap) {
+    double clearance_m, int candidate_cap,
+    double first_normal_sign = 1.0,
+    bool center_on_endpoint_chord = false) {
   std::vector<Eigen::MatrixXd> result{seed};
   if (occupied_miss_count == 0 || !std::isfinite(clearance_m) ||
       clearance_m <= 0.0 || candidate_cap < 2 || seed.rows() != 3 ||
@@ -23,7 +25,8 @@ inline std::vector<Eigen::MatrixXd> makeP1CollisionClearanceFanout(
   if (!tangent.allFinite() || tangent.norm() <= 1.0e-9) return result;
   tangent.normalize();
   const Eigen::Vector2d normal(-tangent.y(), tangent.x());
-  for (double sign : {1.0, -1.0}) {
+  const double canonical_sign = first_normal_sign < 0.0 ? -1.0 : 1.0;
+  for (double sign : {canonical_sign, -canonical_sign}) {
     if (static_cast<int>(result.size()) >= candidate_cap) break;
     Eigen::MatrixXd candidate = seed;
     const int active_count = seed.cols() - 6;
@@ -32,8 +35,12 @@ inline std::vector<Eigen::MatrixXd> makeP1CollisionClearanceFanout(
           static_cast<double>(active_count + 1);
       const double envelope = std::min({1.0, 3.0 * fraction,
                                         3.0 * (1.0 - fraction)});
-      candidate.block<2, 1>(0, column) +=
-          sign * clearance_m * envelope * normal;
+      if (center_on_endpoint_chord) {
+        candidate.block<2, 1>(0, column) =
+            (1.0 - fraction) * seed.block<2, 1>(0, 0) +
+            fraction * seed.block<2, 1>(0, seed.cols() - 1);
+      }
+      candidate.block<2, 1>(0, column) += sign * clearance_m * envelope * normal;
     }
     result.push_back(std::move(candidate));
   }

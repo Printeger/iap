@@ -659,6 +659,10 @@ def validate_calibration_binding(
     for key, expected in expected_values:
         if not _same_number(manifest.get(key), expected):
             errors.append(f"P1 calibration {key} does not match formal run")
+    if manifest.get("manager/p1_collision_fanout_preserve_homotopies") is not True:
+        errors.append("P1 calibration preserve-homotopies contract does not match formal run")
+    if manifest.get("manager/p1_collision_fanout_mirror_y") is not False:
+        errors.append("P1 calibration fanout mirror contract does not match formal run")
     if manifest.get("p1.objective_aggregation_mode") != smooth.get("mode"):
         errors.append("P1 calibration aggregation mode does not match formal run")
     if smooth.get("eta_bisection_iterations") != ETA_BISECTION_ITERATIONS:
@@ -679,6 +683,8 @@ def validate_calibration_binding(
             "scenario_fingerprint",
             "scenario_contract",
             "run_validator",
+            "manager/p1_collision_fanout_preserve_homotopies",
+            "manager/p1_collision_fanout_mirror_y",
             *P0_CONFIGURATION_KEYS,
         )
         numeric_config_keys = (

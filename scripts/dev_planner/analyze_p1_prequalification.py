@@ -156,9 +156,15 @@ def analyze_run(export_value: str | Path) -> dict[str, Any]:
             errors.append(f"contract mismatch: {key}")
     if manifest.get("p0.horizons_s") != [
         0.0, 0.5, 1.0, 1.5, 2.0, 2.5, 3.5, 4.5, 5.5, 6.5,
-        7.5, 8.5, 9.5, 10.5, 11.5, 12.5, 13.5, 14.5, 15.5, 16.0, 17.0, 18.0
+        7.5, 8.5, 9.5, 10.5, 11.5, 12.5, 13.5, 14.5, 15.5, 16.0,
+        17.0, 18.0, 19.0, 20.0, 21.0, 22.0, 23.0, 24.0
     ]:
         errors.append("contract mismatch: p0.horizons_s")
+    if manifest.get("manager/p1_collision_fanout_preserve_homotopies") is not True:
+        errors.append("contract mismatch: preserve collision homotopies")
+    expected_mirror = manifest.get("scenario") == "p1_fork_fused_mirror_v1"
+    if manifest.get("manager/p1_collision_fanout_mirror_y") is not expected_mirror:
+        errors.append("contract mismatch: collision fanout mirror binding")
     if provenance.get("schema_version") != "p1_evidence_provenance_v4" or not run_id:
         errors.append("invalid provenance schema/run ID")
     if provenance.get("git_worktree_clean") is not True:
@@ -258,12 +264,18 @@ def analyze_run(export_value: str | Path) -> dict[str, Any]:
     precheck = {"passed": False, "status": "INCONCLUSIVE"}
     try:
         attempt = str(profile[0]["planning_attempt_id"])
-        optimization = _read_csv(_artifact(
+        prequalification_path = Path(str(manifest.get(
+            "p1.prequalification_candidate_profile_path", "")))
+        use_prequalification_profile = metrics_only and prequalification_path.is_file()
+        optimization = [] if use_prequalification_profile else _read_csv(_artifact(
             export, manifest, "p1.candidate_optimization_path",
             "planner_p1_candidate_optimization.csv"))
-        candidates = _read_csv(_artifact(
-            export, manifest, "p1.candidate_profile_path", "planner_p1_candidate_profile.csv"))
-        _validate_provenance_rows(optimization, run_id, manifest_path, "candidate optimization")
+        candidates = _read_csv(prequalification_path) if use_prequalification_profile else _read_csv(
+            _artifact(export, manifest, "p1.candidate_profile_path",
+                      "planner_p1_candidate_profile.csv"))
+        if not use_prequalification_profile:
+            _validate_provenance_rows(
+                optimization, run_id, manifest_path, "candidate optimization")
         _validate_provenance_rows(candidates, run_id, manifest_path, "candidate profile")
         context = profile[0]
         metadata = {_identity(row): row for row in optimization
@@ -280,11 +292,15 @@ def analyze_run(export_value: str | Path) -> dict[str, Any]:
             precheck_rows.append({
                 **row,
                 "matched": _truthy(row.get("valid")) and not _truthy(row.get("stale")),
-                "collision_free": bool(matching) and abs(weight - 1.0) <= 1e-9
-                and _truthy(meta.get("optimization_success"))
-                and all(_truthy(item.get("occupancy_available"))
-                        and not _truthy(item.get("inflated_occupied")) for item in matching),
-                "selected": _truthy(meta.get("selected")),
+                "collision_free": _truthy(row.get("collision_free"))
+                if use_prequalification_profile else (
+                    bool(matching) and abs(weight - 1.0) <= 1e-9
+                    and _truthy(meta.get("optimization_success"))
+                    and all(_truthy(item.get("occupancy_available"))
+                            and not _truthy(item.get("inflated_occupied"))
+                            for item in matching)),
+                "selected": _truthy(row.get("selected"))
+                if use_prequalification_profile else _truthy(meta.get("selected")),
             })
         precheck = formal_metrics.candidate_route_precheck(precheck_rows)
         if not precheck.get("passed"):

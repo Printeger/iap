@@ -146,6 +146,8 @@ namespace ego_planner
     node->declare_parameter("manager/control_points_distance", -1.0);
     node->declare_parameter("manager/planning_horizon", 5.0);
     node->declare_parameter("manager/p1_collision_fanout_clearance_m", 0.0);
+    node->declare_parameter("manager/p1_collision_fanout_preserve_homotopies", false);
+    node->declare_parameter("manager/p1_collision_fanout_mirror_y", false);
     node->declare_parameter("manager/use_distinctive_trajs", false);
     node->declare_parameter("manager/drone_id", -1);
     node->declare_parameter("p2.enable_candidate_ranking", false);
@@ -182,6 +184,10 @@ namespace ego_planner
     node->get_parameter("manager/planning_horizon", pp_.planning_horizen_);
     node->get_parameter("manager/p1_collision_fanout_clearance_m",
                         pp_.p1_collision_fanout_clearance_m_);
+    node->get_parameter("manager/p1_collision_fanout_preserve_homotopies",
+                        pp_.p1_collision_fanout_preserve_homotopies_);
+    node->get_parameter("manager/p1_collision_fanout_mirror_y",
+                        pp_.p1_collision_fanout_mirror_y_);
     node->get_parameter("manager/use_distinctive_trajs", pp_.use_distinctive_trajs);
     node->get_parameter("manager/drone_id", pp_.drone_id);
     node->get_parameter("p2.enable_candidate_ranking", p2_config_.enable_candidate_ranking);
@@ -1061,11 +1067,15 @@ namespace ego_planner
       bool collision_fanout_active = false;
       if (trajs.size() == 1 &&
           fanout_before_supplement.singleton_due_to_empty_segments &&
-          initial_p1_validation.occupied_miss_count > 0 &&
+          (initial_p1_validation.occupied_miss_count > 0 ||
+           pp_.p1_collision_fanout_preserve_homotopies_) &&
           pp_.p1_collision_fanout_clearance_m_ > 0.0) {
         const auto fanout = makeP1CollisionClearanceFanout(
-            trajs.front().points, initial_p1_validation.occupied_miss_count,
-            pp_.p1_collision_fanout_clearance_m_, candidate_limit);
+            trajs.front().points,
+            std::max<std::size_t>(initial_p1_validation.occupied_miss_count, 1),
+            pp_.p1_collision_fanout_clearance_m_, candidate_limit,
+            pp_.p1_collision_fanout_mirror_y_ ? 1.0 : -1.0,
+            pp_.p1_collision_fanout_preserve_homotopies_);
         const ControlPoints prototype = trajs.front();
         trajs.clear();
         trajs.reserve(fanout.size());
@@ -1371,6 +1381,20 @@ namespace ego_planner
                  << ", fallback=" << p2_result.fallback_reason
                  << ", metrics_only=" << p2_config_.metrics_only << endl;
           }
+        }
+        if (pp_.p1_collision_fanout_preserve_homotopies_ &&
+            p1_config.metrics_only && planning_snapshot &&
+            std::isfinite(planning_query_base_time_s))
+        {
+          for (const auto &candidate : p2_candidates)
+          {
+            set_p1_context(static_cast<uint64_t>(candidate.candidate_id));
+            bspline_optimizer_->writeP1PrequalificationCandidateProfile(
+                UniformBspline(candidate.control_points, 3, ts),
+                candidate.candidate_id ==
+                    static_cast<int>(selected_p1_candidate_id));
+          }
+          set_p1_context(selected_p1_candidate_id);
         }
         if (!p1_candidate_traces.empty())
         {

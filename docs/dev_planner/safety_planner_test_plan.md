@@ -83,7 +83,7 @@ python3 scripts/dev_planner/run_p1_2_campaign.py \
 
 #### A. 十次串行预资格
 
-状态机先运行主场景两组 reference/enabled，再运行 mirror、symmetric-null、soft-risk 各一组 reference/enabled。全部使用 `experiment:=p1_fork_formal`、90 秒、`lambda=1e-5`、normalization `0.30`、validator 开启、bag 关闭。formal preset 将 manager、optimizer 和 B-spline 的速度上限都固定为 `1.0 m/s`，并将 replan 周期固定为 `0.5 s`，使真实 replan 间距不跨过固定的 `x=-9.5+/-0.4 m` 决策窗口；P0 horizon 保留原 `0–2.5 s` 层，以最大 `1 s` 间隔延伸至 `16 s`，覆盖实测最长 13.2 s 轨迹且不超过原 1 s voxel-stale 限制。formal P0 横向范围是覆盖场景的 12 m；中央障碍是严格对称的 `x=-4.5..-1`、`|y|<=0.35`，使真实路径在入口前完成上下通道分离并满足保守插值净空。这些值被 manifest、场景 fingerprint、校准和 formal binding 共同冻结。独立的 `analyze_p1_prequalification.py` 读取 manifest、truth/estimate、accepted/context、candidate、occupancy、validator 和 provenance；它不导入或调用 formal analyzer。
+状态机先运行主场景两组 reference/enabled，再运行 mirror、symmetric-null、soft-risk 各一组 reference/enabled。全部使用 `experiment:=p1_fork_formal`、90 秒、`lambda=1e-5`、normalization `0.30`、validator 开启、bag 关闭。formal preset 将 manager、optimizer 和 B-spline 的速度上限都固定为 `1.0 m/s`，并将 replan 周期固定为 `0.9 s`，使真实 replan 间距不跨过固定的 `x=-9.5+/-0.4 m` 决策窗口；P0 horizon 保留原 `0–2.5 s` 层，以最大 `1 s` 间隔延伸至 `24 s`，覆盖 c16 实测最长 22.8 s 的正常 checkpoint 轨迹且不超过原 1 s voxel-stale 限制。formal P0 横向范围是覆盖场景的 12 m；中央障碍是严格对称的 `x=-4.5..-1`、`|y|<=0.35`，使真实路径在入口前完成上下通道分离并满足保守插值净空。formal-only fanout 还在后续 replan 从端点弦重建两侧 homotopy，其候选顺序随精确 Y mirror 翻转；默认 planner 行为不变。这些值被 manifest、场景 fingerprint、校准和 formal binding 共同冻结。独立的 `analyze_p1_prequalification.py` 读取 manifest、truth/estimate、accepted/context、candidate、occupancy、validator 和 provenance；metrics-only 的候选 precheck 使用专用只读 base-optimizer profile，不进入 formal analyzer。
 
 预资格要求上下通道均 collision-feasible 且完整 `200/200`，检查点唯一，单次定位误差 `<=0.5 m`、pair 差值 `<=0.25 m`，P0/context/validator/provenance 门全部通过，并满足：
 

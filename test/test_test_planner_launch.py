@@ -61,7 +61,7 @@ class TestPlannerLaunchTest(unittest.TestCase):
         )
         self.assertEqual(
             MODULE.EXPERIMENT_PRESETS["p1_fork_formal"]["p0.horizons_s"],
-            "0.0,0.5,1.0,1.5,2.0,2.5,3.5,4.5,5.5,6.5,7.5,8.5,9.5,10.5,11.5,12.5,13.5,14.5,15.5,16.0,17.0,18.0",
+            "0.0,0.5,1.0,1.5,2.0,2.5,3.5,4.5,5.5,6.5,7.5,8.5,9.5,10.5,11.5,12.5,13.5,14.5,15.5,16.0,17.0,18.0,19.0,20.0,21.0,22.0,23.0,24.0",
         )
         horizons = [float(value) for value in
                     MODULE.EXPERIMENT_PRESETS["p1_fork_formal"]["p0.horizons_s"].split(",")]
@@ -80,6 +80,11 @@ class TestPlannerLaunchTest(unittest.TestCase):
             MODULE.EXPERIMENT_PRESETS["p1_fork_formal"]
             ["manager/p1_collision_fanout_clearance_m"],
             "2.5",
+        )
+        self.assertEqual(
+            MODULE.EXPERIMENT_PRESETS["p1_fork_formal"]
+            ["manager/p1_collision_fanout_preserve_homotopies"],
+            "true",
         )
         self.assertEqual(
             MODULE.EXPERIMENT_PRESETS["p1_fork_formal"]["fsm.thresh_replan_time"],

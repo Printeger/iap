@@ -641,7 +641,7 @@ EXPERIMENT_PRESETS = {
         # checkpoint. The original 0--2.5 s prefix is unchanged; sparse future
         # layers through 16 s extend only this experiment's immutable
         # prediction contract.
-        "p0.horizons_s": "0.0,0.5,1.0,1.5,2.0,2.5,3.5,4.5,5.5,6.5,7.5,8.5,9.5,10.5,11.5,12.5,13.5,14.5,15.5,16.0,17.0,18.0",
+        "p0.horizons_s": "0.0,0.5,1.0,1.5,2.0,2.5,3.5,4.5,5.5,6.5,7.5,8.5,9.5,10.5,11.5,12.5,13.5,14.5,15.5,16.0,17.0,18.0,19.0,20.0,21.0,22.0,23.0,24.0",
         "p0.size_y_m": "12.0",
         "planner_start_delay_s": "10.0",
         "fsm.thresh_replan_time": "0.9",
@@ -649,6 +649,7 @@ EXPERIMENT_PRESETS = {
         # terminal face before the first formal decision checkpoint.
         "manager/planning_horizon": "10.5",
         "manager/p1_collision_fanout_clearance_m": "2.5",
+        "manager/p1_collision_fanout_preserve_homotopies": "true",
         "grid_map/local_update_range_x": "11.0",
         # At 1 m/s, one 0.9 s planning event intersects the fixed 0.8 m window.
         # This is configuration identity, not an analyzer relaxation.
@@ -1049,6 +1050,8 @@ ARG_DEFAULTS = [
     ("manager/feasibility_tolerance", "0.05"),
     ("manager/planning_horizon", "7.5"),
     ("manager/p1_collision_fanout_clearance_m", "0.0"),
+    ("manager/p1_collision_fanout_preserve_homotopies", "false"),
+    ("manager/p1_collision_fanout_mirror_y", "false"),
     ("manager/use_distinctive_trajs", "true"),
     ("optimization/lambda_smooth", "1.0"),
     ("optimization/lambda_collision", "0.5"),
@@ -1679,6 +1682,10 @@ def _ego_planner_node(context, drone_id, planner_odom_topic, cloud_topic, camera
             {"manager/planning_horizon": _param_float(context, "manager/planning_horizon")},
             {"manager/p1_collision_fanout_clearance_m": _param_float(
                 context, "manager/p1_collision_fanout_clearance_m")},
+            {"manager/p1_collision_fanout_preserve_homotopies": _param_bool(
+                context, "manager/p1_collision_fanout_preserve_homotopies")},
+            {"manager/p1_collision_fanout_mirror_y": _param_bool(
+                context, "p1_fixture_mirror_y")},
             {"manager/use_distinctive_trajs": _param_bool(context, "manager/use_distinctive_trajs")},
             {"manager/drone_id": int(drone_id)},
             {"manager/use_integrity_global_search": False},
@@ -1940,6 +1947,10 @@ def _launch_setup(context):
     p1_candidate_pairwise_path_for_manifest = str(
         Path(p1_debug_path_for_manifest).with_name("planner_p1_candidate_pairwise.csv")
     )
+    p1_prequalification_candidate_profile_path_for_manifest = str(
+        Path(p1_debug_path_for_manifest).with_name(
+            "planner_p1_prequalification_candidate_profile.csv")
+    )
     p1_optimizer_checkpoint_path_for_manifest = str(
         Path(p1_debug_path_for_manifest).with_name("planner_p1_optimizer_checkpoint.csv")
     )
@@ -2036,6 +2047,10 @@ def _launch_setup(context):
             "planning_horizon_m": _param_float(context, "manager/planning_horizon"),
             "collision_fanout_clearance_m": _param_float(
                 context, "manager/p1_collision_fanout_clearance_m"),
+            "collision_fanout_preserve_homotopies": _param_bool(
+                context, "manager/p1_collision_fanout_preserve_homotopies"),
+            "collision_fanout_mirror_y": _param_bool(
+                context, "p1_fixture_mirror_y"),
             "local_update_range_x_m": _param_float(context, "grid_map/local_update_range_x"),
         },
         "p0_prediction": {
@@ -2070,6 +2085,10 @@ def _launch_setup(context):
         "manager/planning_horizon": _param_float(context, "manager/planning_horizon"),
         "manager/p1_collision_fanout_clearance_m": _param_float(
             context, "manager/p1_collision_fanout_clearance_m"),
+        "manager/p1_collision_fanout_preserve_homotopies": _param_bool(
+            context, "manager/p1_collision_fanout_preserve_homotopies"),
+        "manager/p1_collision_fanout_mirror_y": _param_bool(
+            context, "p1_fixture_mirror_y"),
         "optimization/max_vel": _param_float(context, "optimization/max_vel"),
         "bspline/limit_vel": _param_float(context, "bspline/limit_vel"),
         "fsm.thresh_replan_time": _param_float(context, "fsm.thresh_replan_time"),
@@ -2104,6 +2123,8 @@ def _launch_setup(context):
         "p1.pre_admission_attempt_path": p1_pre_admission_attempt_path_for_manifest,
         "p1.candidate_route_precheck_path": str(
             Path(export_dir) / "metadata" / "p1_candidate_route_precheck.json"),
+        "p1.prequalification_candidate_profile_path":
+            p1_prequalification_candidate_profile_path_for_manifest,
         "p1.replacement_decision_path": str(
             Path(p1_debug_path_for_manifest).with_name("planner_p1_replacement_decision.csv")),
         "p1.candidate_retained_profile_path": str(

@@ -326,6 +326,33 @@ TEST(P1SoftFallbackPolicyTest,
 }
 
 TEST(P1SoftFallbackPolicyTest,
+     FormalFanoutPreservesBothChordHomotopiesAndMirrorsCandidateIdentity) {
+  Eigen::MatrixXd lower_seed = Eigen::MatrixXd::Zero(3, 12);
+  for (int column = 0; column < lower_seed.cols(); ++column) {
+    const double fraction = static_cast<double>(column) /
+        static_cast<double>(lower_seed.cols() - 1);
+    lower_seed(0, column) = 10.0 * fraction;
+    lower_seed(1, column) = -3.0 * std::sin(M_PI * fraction);
+  }
+  Eigen::MatrixXd mirrored_seed = lower_seed;
+  mirrored_seed.row(1) *= -1.0;
+
+  const auto primary = ego_planner::makeP1CollisionClearanceFanout(
+      lower_seed, 1, 2.5, 3, -1.0, true);
+  const auto mirror = ego_planner::makeP1CollisionClearanceFanout(
+      mirrored_seed, 1, 2.5, 3, 1.0, true);
+  ASSERT_EQ(primary.size(), 3u);
+  ASSERT_EQ(mirror.size(), primary.size());
+  EXPECT_LT(primary[1].row(1).mean(), 0.0);
+  EXPECT_GT(primary[2].row(1).mean(), 0.0);
+  for (std::size_t index = 0; index < primary.size(); ++index) {
+    Eigen::MatrixXd reflected = primary[index];
+    reflected.row(1) *= -1.0;
+    EXPECT_TRUE(mirror[index].isApprox(reflected, 1.0e-12));
+  }
+}
+
+TEST(P1SoftFallbackPolicyTest,
      MetricsOnlyReferenceObservationIsOncePerTrajectoryInsideHorizon) {
   EXPECT_FALSE(ego_planner::shouldRecordP1MetricsOnlyReferenceObservation(
       false, 7, 0, 2.0, 2.5));

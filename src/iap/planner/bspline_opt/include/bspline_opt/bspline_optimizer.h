@@ -462,11 +462,14 @@ namespace ego_planner
     std::string p1CandidateRetainedProfilePath() const;
     std::string p1CandidateControlPointsPath() const;
     std::string p1CandidateProfilePath() const;
+    std::string p1PrequalificationCandidateProfilePath() const;
     std::string p1CandidatePairwisePath() const;
     std::string p1OptimizerCheckpointPath() const;
     std::string p0OccupancyQueryEvidencePath() const;
     void setLastP1OptimizationSelected(bool selected);
     void writeP1OptimizationTrace(const P1OptimizationTrace &trace) const;
+    bool writeP1PrequalificationCandidateProfile(
+        UniformBspline candidate, bool selected);
     void writeP1ReplacementDecision(const P1OptimizationTrace &trace,
                                     uint64_t incumbent_trajectory_id,
                                     double incumbent_start_stamp_s,

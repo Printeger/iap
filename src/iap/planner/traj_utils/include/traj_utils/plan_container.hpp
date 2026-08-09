@@ -196,6 +196,8 @@ namespace ego_planner
     double feasibility_tolerance_;        // permitted ratio of vel/acc exceeding limits
     double planning_horizen_;
     double p1_collision_fanout_clearance_m_ = 0.0;
+    bool p1_collision_fanout_preserve_homotopies_ = false;
+    bool p1_collision_fanout_mirror_y_ = false;
     bool use_distinctive_trajs;
     int drone_id; // single drone: drone_id <= -1, swarm: drone_id >= 0
 

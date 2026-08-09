@@ -211,6 +211,10 @@ def _configuration_identity(manifest: dict[str, Any]) -> dict[str, Any]:
         "manager/planning_horizon": manifest.get("manager/planning_horizon"),
         "manager/p1_collision_fanout_clearance_m": manifest.get(
             "manager/p1_collision_fanout_clearance_m"),
+        "manager/p1_collision_fanout_preserve_homotopies": manifest.get(
+            "manager/p1_collision_fanout_preserve_homotopies"),
+        "manager/p1_collision_fanout_mirror_y": manifest.get(
+            "manager/p1_collision_fanout_mirror_y"),
         "run_duration_s": manifest.get("run_duration_s"),
         "validation_duration_s": manifest.get("validation_duration_s"),
         "planner_start_delay_s": manifest.get("planner_start_delay_s"),
@@ -235,6 +239,8 @@ def _validate_fixed_contract(manifest: dict[str, Any]) -> None:
         "record_bag": False,
         "run_validator": True,
         "scenario": "p1_fork_fused_v1",
+        "manager/p1_collision_fanout_preserve_homotopies": True,
+        "manager/p1_collision_fanout_mirror_y": False,
     }
     for key, value in expected.items():
         if manifest.get(key) != value:

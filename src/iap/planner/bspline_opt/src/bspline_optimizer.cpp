@@ -3139,6 +3139,59 @@ namespace ego_planner
         : siblingPath(p1_config_.debug_csv_path, kP1CandidateProfileCsvName);
   }
 
+  std::string BsplineOptimizer::p1PrequalificationCandidateProfilePath() const
+  {
+    return p1_config_.debug_csv_path.empty()
+        ? "planner_p1_prequalification_candidate_profile.csv"
+        : siblingPath(p1_config_.debug_csv_path,
+                      "planner_p1_prequalification_candidate_profile.csv");
+  }
+
+  bool BsplineOptimizer::writeP1PrequalificationCandidateProfile(
+      UniformBspline candidate, const bool selected)
+  {
+    if (!p1_config_.debug_csv_enable || p1_config_.debug_csv_path.empty() ||
+        !risk_snapshot_ || !std::isfinite(risk_query_base_time_s_))
+      return false;
+    const auto summary = evaluateP1FixedLatticeRisk(candidate);
+    const std::string path = p1PrequalificationCandidateProfilePath();
+    std::ifstream existing(path);
+    const bool header = !existing.good() ||
+        existing.peek() == std::ifstream::traits_type::eof();
+    existing.close();
+    std::ofstream out(path, std::ios::app);
+    if (!out.good()) return false;
+    out << std::setprecision(17);
+    if (header) {
+      out << "schema_version,run_id,manifest_path,planning_attempt_id,candidate_id,snapshot_generation_id,query_base_time_s,phase,sample_index,t_s,x,y,z,valid,stale,c_pi,invalid_reason,collision_free,optimization_success,selected\n";
+    }
+    const double duration = candidate.getTimeSum();
+    for (int index = 0; index < kP1CandidateEvidenceSampleCount; ++index) {
+      const double fraction = static_cast<double>(index) /
+          static_cast<double>(kP1CandidateEvidenceSampleCount - 1);
+      const double t_s = duration * fraction;
+      const Eigen::Vector3d point = candidate.evaluateDeBoorT(t_s);
+      iap::RiskCostSample sample;
+      const bool hit = risk_snapshot_->queryCost(
+          point, risk_query_base_time_s_ + t_s, &sample);
+      out << p1_config_.evidence_schema_version << ','
+          << p1_config_.evidence_run_id << ','
+          << p1_config_.evidence_manifest_path << ','
+          << p1_risk_context_.planning_attempt_id << ','
+          << p1_risk_context_.candidate_id << ','
+          << risk_snapshot_->generation_id() << ','
+          << risk_query_base_time_s_ << ",final," << index << ',' << t_s << ','
+          << point.x() << ',' << point.y() << ',' << point.z() << ','
+          << (hit && sample.valid ? 1 : 0) << ','
+          << (hit && sample.stale ? 1 : 0) << ',';
+      if (hit && sample.valid) out << sample.cost;
+      out << ',' << (hit ? sample.reason : "query_failed") << ','
+          << (summary.full_support ? 1 : 0) << ",1,"
+          << (selected ? 1 : 0) << '\n';
+    }
+    return out.good();
+  }
+
   std::string BsplineOptimizer::p1CandidatePairwisePath() const
   {
     return p1_config_.debug_csv_path.empty()
