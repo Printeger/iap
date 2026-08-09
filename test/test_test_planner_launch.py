@@ -70,13 +70,21 @@ class TestPlannerLaunchTest(unittest.TestCase):
         self.assertEqual(MODULE.EXPERIMENT_PRESETS["p1_fork_formal"]["p0.size_y_m"], "12.0")
         self.assertEqual(
             MODULE.EXPERIMENT_PRESETS["p1_fork_formal"]["grid_map/local_update_range_x"],
-            "10.0",
+            "11.0",
+        )
+        self.assertEqual(
+            MODULE.EXPERIMENT_PRESETS["p1_fork_formal"]["manager/planning_horizon"],
+            "10.5",
         )
         self.assertEqual(
             MODULE.EXPERIMENT_PRESETS["p1_fork_formal"]["fsm.thresh_replan_time"],
-            "0.5",
+            "0.9",
         )
-
+        self.assertEqual(
+            MODULE.SCENARIO_PRESETS["p1_soft_risk_island_v1"]
+            ["p1_fixture_central_obstacle_enabled"],
+            "true",
+        )
     def test_fork_and_mirror_share_geometry_identity_except_mirror_flag(self):
         primary = MODULE.SCENARIO_PRESETS["p1_fork_fused_v1"]
         mirror = MODULE.SCENARIO_PRESETS["p1_fork_fused_mirror_v1"]

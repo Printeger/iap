@@ -9446,3 +9446,16 @@ continuing**, and P1-3 is still not authorized.
 Compact evidence and SHA256 bindings are archived under
 `p1_formal_test_report_artifacts/2026-08-09-db97778/`; raw campaign exports
 remain under ignored `results/planner_validation/campaigns/`.
+
+Follow-up c9 at clean `02f9a0e` completed all ten 90-second runs with 10/10
+validator PASS and stopped at independent prequalification. Strict selection
+found multiple profiles in every fixed checkpoint window; soft-risk had no
+checkpoint profile. The logs exposed the causal geometry/planner seam:
+`manager/planning_horizon=7.5` placed the local target at the obstacle terminal
+boundary (`x=-2`) near the decision event, and EGO rejected it as occupied, so
+distinctive fan-out remained a single unsupported topology until after the
+fork. No calibration, bagged formal run, preflight, or formal analyzer began.
+The next clean campaign binds a 10.5 m planning horizon, 11 m forward local
+range, and 0.9 s replan interval, and gives the overhead-only soft-risk island
+the same symmetric central fork. Raw c9 evidence remains under
+`results/planner_validation/campaigns/p1-2-20260809-02f9a0e-c9/`.

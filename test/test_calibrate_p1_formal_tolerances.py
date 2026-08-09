@@ -42,6 +42,22 @@ class CalibrationToolContractTest(unittest.TestCase):
         with self.assertRaisesRegex(calibration.CalibrationError, "missing/ambiguous"):
             calibration._decision_profile(rows, contexts, manifest)
 
+    def test_decision_profile_selects_only_authoritative_reference_at_one_event(self):
+        manifest = {"scenario_contract": {"decision_checkpoint": {
+            "truth_source_topic": "/sim/drone_0/truth_odom",
+            "profile_sample_zero_binding": "planner_truth_odom_state_at_planning_start",
+        }}}
+        rows = []
+        contexts = []
+        for sequence, reason in ((1, "metrics_only_reference_observation"),
+                                 (2, "metrics_only_coverage_insufficient")):
+            contexts.append({"profile_seq": str(sequence), "planning_start_s": "1.0"})
+            rows.extend({"profile_seq": str(sequence), "sample_index": str(index),
+                         "x": "-9.5", "fallback_reason": reason}
+                        for index in range(200))
+        selected = calibration._decision_profile(rows, contexts, manifest)
+        self.assertEqual({row["profile_seq"] for row in selected}, {"1"})
+
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)
@@ -106,8 +122,9 @@ class CalibrationToolContractTest(unittest.TestCase):
             "manager/max_vel": 1.0,
             "optimization/max_vel": 1.0,
             "bspline/limit_vel": 1.0,
-            "fsm.thresh_replan_time": 0.5,
-            "grid_map/local_update_range_x": 10.0,
+            "fsm.thresh_replan_time": 0.9,
+            "manager/planning_horizon": 10.5,
+            "grid_map/local_update_range_x": 11.0,
             "record_bag": False,
             "run_validator": True,
             "p0.enable_risk_grid": True,

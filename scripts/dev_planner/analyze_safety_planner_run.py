@@ -7215,6 +7215,23 @@ def select_latest_recorded_p1_profile(
             })
             if abs(truth_x - checkpoint_x_m) <= checkpoint_tolerance_m:
                 checkpoint_candidates.append(sequence)
+    checkpoint_events = {
+        finite_float(binding.get("planning_stamp_s"))
+        for binding in checkpoint_bindings
+        if binding.get("profile_seq") in checkpoint_candidates
+    }
+    if len(checkpoint_events) == 1 and None not in checkpoint_events and len(checkpoint_candidates) > 1:
+        observations = [
+            sequence for sequence in checkpoint_candidates
+            if any(
+                finite_float(row.get("profile_seq")) == sequence and
+                str(row.get("fallback_reason", "")) ==
+                "metrics_only_reference_observation"
+                for row in rows
+            )
+        ]
+        if len(observations) == 1:
+            checkpoint_candidates = observations
     selected = checkpoint_candidates[0] if len(checkpoint_candidates) == 1 else None
     summary = summarize_p1_accepted_profile_rows(
         rows,

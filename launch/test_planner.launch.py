@@ -321,7 +321,7 @@ P1_FORK_MAP_PRESET = {
     "p1_fixture_central_x_min_m": "-7.0",
     "p1_fixture_central_x_max_m": "-2.0",
     "p1_fixture_central_y_half_width_m": "0.65",
-    "grid_map/local_update_range_x": "10.0",
+    "grid_map/local_update_range_x": "11.0",
     "p1_fixture_central_z_max_m": "2.8",
     "p1_fixture_lane_center_m": "2.0",
     "p1_fixture_lane_half_width_m": "0.75",
@@ -512,7 +512,7 @@ SCENARIO_PRESETS = {
     "p1_soft_risk_island_v1": {
         **P1_FORK_MAP_PRESET, **P1_FUSED_SENSOR_PRESET,
         "p1_map_fixture": "p1_soft_risk_island_v1",
-        "p1_fixture_central_obstacle_enabled": "false",
+        "p1_fixture_central_obstacle_enabled": "true",
     },
 }
 
@@ -644,13 +644,13 @@ EXPERIMENT_PRESETS = {
         "p0.horizons_s": "0.0,0.5,1.0,1.5,2.0,2.5,3.5,4.5,5.5,6.5,7.5,8.5,9.5,10.5,11.5,12.5,13.5,14.5,15.5,16.0",
         "p0.size_y_m": "12.0",
         "planner_start_delay_s": "10.0",
-        "fsm.thresh_replan_time": "0.5",
-        # Observe the central fork before the first formal decision checkpoint.
-        # The default remains 5.5 m for every other experiment.
-        "grid_map/local_update_range_x": "10.0",
-        # Keep successive replans closer than the fixed 0.8 m decision window.
-        # This is part of the formal configuration identity, not an analyzer
-        # relaxation: the checkpoint remains truth x=-9.5+/-0.4 m.
+        "fsm.thresh_replan_time": "0.9",
+        # Observe the entire central fork and put the local target beyond its
+        # terminal face before the first formal decision checkpoint.
+        "manager/planning_horizon": "10.5",
+        "grid_map/local_update_range_x": "11.0",
+        # At 1 m/s, one 0.9 s planning event intersects the fixed 0.8 m window.
+        # This is configuration identity, not an analyzer relaxation.
         "manager/max_vel": "1.0",
         "optimization/max_vel": "1.0",
         "bspline/limit_vel": "1.0",
@@ -2029,6 +2029,7 @@ def _launch_setup(context):
             "optimizer_max_velocity_mps": _param_float(context, "optimization/max_vel"),
             "bspline_limit_velocity_mps": _param_float(context, "bspline/limit_vel"),
             "replan_period_s": _param_float(context, "fsm.thresh_replan_time"),
+            "planning_horizon_m": _param_float(context, "manager/planning_horizon"),
             "local_update_range_x_m": _param_float(context, "grid_map/local_update_range_x"),
         },
         "p0_prediction": {
@@ -2060,6 +2061,7 @@ def _launch_setup(context):
             0.0, float(LaunchConfiguration("planner_start_delay_s").perform(context))
         ),
         "manager/max_vel": _param_float(context, "manager/max_vel"),
+        "manager/planning_horizon": _param_float(context, "manager/planning_horizon"),
         "optimization/max_vel": _param_float(context, "optimization/max_vel"),
         "bspline/limit_vel": _param_float(context, "bspline/limit_vel"),
         "fsm.thresh_replan_time": _param_float(context, "fsm.thresh_replan_time"),

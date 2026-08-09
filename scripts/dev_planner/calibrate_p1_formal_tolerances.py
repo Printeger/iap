@@ -116,10 +116,29 @@ def _decision_profile(
         first_x = _float(first.get("x"))
         if first_x is not None and abs(first_x - (-9.5)) <= 0.4:
             qualifying.append(sequence)
-    if len(qualifying) != 1:
+    event_starts = {
+        _float(context.get("planning_start_s"))
+        for context in contexts
+        if _float(context.get("profile_seq")) in qualifying
+    }
+    if len(event_starts) != 1 or None in event_starts:
         raise CalibrationError(
             "accepted profile decision checkpoint at truth x=-9.5+/-0.4 m is missing/ambiguous"
         )
+    if len(qualifying) > 1:
+        observations = [
+            sequence for sequence in qualifying
+            if any(
+                str(row.get("fallback_reason", "")) ==
+                "metrics_only_reference_observation"
+                for row in rows if _float(row.get("profile_seq")) == sequence
+            )
+        ]
+        if len(observations) != 1:
+            raise CalibrationError(
+                "accepted profile decision checkpoint at truth x=-9.5+/-0.4 m is missing/ambiguous"
+            )
+        qualifying = observations
     selected = qualifying[0]
     result = [row for row in rows if _float(row.get("profile_seq")) == selected]
     matching_contexts = [
@@ -170,6 +189,7 @@ def _configuration_identity(manifest: dict[str, Any]) -> dict[str, Any]:
         "p1.smooth_max_temperature": manifest.get("p1.smooth_max_temperature"),
         "p1.normalization_budget_fraction": manifest.get("p1.normalization_budget_fraction"),
         "grid_map/local_update_range_x": manifest.get("grid_map/local_update_range_x"),
+        "manager/planning_horizon": manifest.get("manager/planning_horizon"),
         "run_duration_s": manifest.get("run_duration_s"),
         "validation_duration_s": manifest.get("validation_duration_s"),
         "planner_start_delay_s": manifest.get("planner_start_delay_s"),
@@ -205,12 +225,13 @@ def _validate_fixed_contract(manifest: dict[str, Any]) -> None:
         "manager/max_vel": 1.0,
         "optimization/max_vel": 1.0,
         "bspline/limit_vel": 1.0,
-        "fsm.thresh_replan_time": 0.5,
+        "fsm.thresh_replan_time": 0.9,
+        "manager/planning_horizon": 10.5,
         "p1.lambda_integrity": 1.0e-5,
         "p1.smooth_cvar_alpha": 0.90,
         "p1.smooth_max_temperature": 0.01,
         "p1.normalization_budget_fraction": 0.30,
-        "grid_map/local_update_range_x": 10.0,
+        "grid_map/local_update_range_x": 11.0,
     }
     for key, expected_value in numeric.items():
         value = _float(manifest.get(key))

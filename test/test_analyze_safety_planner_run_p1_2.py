@@ -1355,6 +1355,26 @@ class P1_2AnalyzerTest(unittest.TestCase):
         self.assertFalse(summary["decision_checkpoint_unique"])
         self.assertEqual(summary["decision_checkpoint_candidates"], [8.0, 9.0])
 
+    def test_profile_selection_uses_authoritative_reference_within_one_event(self):
+        observation = accepted_profile_rows(0.0, profile_seq=8,
+                                            applied_to_objective=0, metrics_only=1)
+        fallback = accepted_profile_rows(0.0, profile_seq=9,
+                                         applied_to_objective=0, metrics_only=1)
+        for row in observation:
+            row["fallback_reason"] = "metrics_only_reference_observation"
+        contexts = []
+        for rows in (observation, fallback):
+            context = accepted_profile_context(rows)[0]
+            context.update({"trajectory_start_stamp_s": 10.0,
+                            "planning_start_s": 10.0})
+            contexts.append(context)
+        summary = analyzer.select_latest_recorded_p1_profile(
+            observation + fallback, contexts, [{"start_time_s": 10.0}],
+            truth_rows=[{"stamp": 10.0, "x": -9.5}],
+        )
+        self.assertEqual(summary["selected_profile_seq"], 8.0)
+        self.assertTrue(summary["decision_checkpoint_unique"])
+
     def test_risk_scene_alignment_fails_closed_and_unavailable_plot_is_nonempty(self):
         comparison = analyzer.compare_p1_2_risk_profiles(
             bspline_rows(0.0), bspline_rows(5.0), cloud_rows(0.0), cloud_rows(5.0),

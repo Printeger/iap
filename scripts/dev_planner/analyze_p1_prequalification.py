@@ -116,8 +116,9 @@ def analyze_run(export_value: str | Path) -> dict[str, Any]:
                        ("manager/max_vel", 1.0),
                        ("optimization/max_vel", 1.0),
                        ("bspline/limit_vel", 1.0),
-                       ("fsm.thresh_replan_time", 0.5),
-                       ("grid_map/local_update_range_x", 10.0)):
+                       ("fsm.thresh_replan_time", 0.9),
+                       ("manager/planning_horizon", 10.5),
+                       ("grid_map/local_update_range_x", 11.0)):
         actual = _number(manifest.get(key))
         if actual is None or abs(actual - value) > 1e-12:
             errors.append(f"contract mismatch: {key}")
