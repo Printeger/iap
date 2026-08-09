@@ -1381,6 +1381,16 @@ namespace ego_planner
         const auto p2_result = rankP2Candidates(
             p2_candidates, p2_config_, p2_snapshot, planning_query_base_time_s, ts,
             plannerNow().seconds(), ++p2_batch_id_);
+        std::vector<double> candidate_mean_y;
+        candidate_mean_y.reserve(p2_candidates.size());
+        for (const auto& candidate : p2_candidates)
+          candidate_mean_y.push_back(candidate.control_points.row(1).mean());
+        const int selected_candidate_index =
+            selectP1FormalMetricsOnlyReferenceCandidate(
+                candidate_mean_y,
+                pp_.p1_collision_fanout_preserve_homotopies_,
+                p1_config.metrics_only, pp_.p1_collision_fanout_mirror_y_,
+                p2_result.selected_index);
         if (safety_viz_)
         {
           std::vector<SafetyVizP2Candidate> viz_candidates;
@@ -1391,7 +1401,7 @@ namespace ego_planner
             SafetyVizP2Candidate viz;
             viz.candidate_id = p2_candidates[candidate_idx].candidate_id;
             viz.selected =
-                static_cast<int>(candidate_idx) == p2_result.selected_index;
+                static_cast<int>(candidate_idx) == selected_candidate_index;
             viz.fallback = p2_result.fallback;
             viz.reason = p2_result.fallback_reason;
             viz.control_points =
@@ -1412,16 +1422,16 @@ namespace ego_planner
           safety_viz_->publishP2Candidates(viz_candidates,
                                            plannerNow().seconds());
         }
-        if (p2_result.selected_index >= 0 &&
-            p2_result.selected_index < static_cast<int>(p2_candidates.size()))
+        if (selected_candidate_index >= 0 &&
+            selected_candidate_index < static_cast<int>(p2_candidates.size()))
         {
-          ctrl_pts = p2_candidates[p2_result.selected_index].control_points;
+          ctrl_pts = p2_candidates[selected_candidate_index].control_points;
           selected_p1_candidate_id = static_cast<uint64_t>(
-              p2_candidates[p2_result.selected_index].candidate_id);
+              p2_candidates[selected_candidate_index].candidate_id);
           if (p2_config_.enable_candidate_ranking)
           {
             cout << "[P2] selected_candidate="
-                 << p2_candidates[p2_result.selected_index].candidate_id
+                 << p2_candidates[selected_candidate_index].candidate_id
                  << ", fallback=" << p2_result.fallback_reason
                  << ", metrics_only=" << p2_config_.metrics_only << endl;
           }

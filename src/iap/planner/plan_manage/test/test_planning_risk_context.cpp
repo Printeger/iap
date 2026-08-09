@@ -375,6 +375,19 @@ TEST(P1SoftFallbackPolicyTest,
 }
 
 TEST(P1SoftFallbackPolicyTest,
+     FormalMetricsOnlyReferenceUsesMirrorBoundCanonicalArm) {
+  const std::vector<double> candidate_mean_y{-1.8, 2.1, -0.4};
+  EXPECT_EQ(ego_planner::selectP1FormalMetricsOnlyReferenceCandidate(
+      candidate_mean_y, true, true, false, 0), 1);
+  EXPECT_EQ(ego_planner::selectP1FormalMetricsOnlyReferenceCandidate(
+      candidate_mean_y, true, true, true, 0), 0);
+  EXPECT_EQ(ego_planner::selectP1FormalMetricsOnlyReferenceCandidate(
+      candidate_mean_y, false, true, false, 2), 2);
+  EXPECT_EQ(ego_planner::selectP1FormalMetricsOnlyReferenceCandidate(
+      candidate_mean_y, true, false, false, 2), 2);
+}
+
+TEST(P1SoftFallbackPolicyTest,
      FormalEvidenceFanoutNeutralizesCommittedEndpointSide) {
   Eigen::MatrixXd committed_seed = Eigen::MatrixXd::Zero(3, 12);
   for (int column = 0; column < committed_seed.cols(); ++column) {

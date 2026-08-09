@@ -178,22 +178,22 @@ TEST(P1FixtureGeometry, SoftIslandKeepsDeclaredMinusTwoMeterCenter) {
   }));
 }
 
-TEST(P1FixtureGeometry, DenseObservableCanopiesCoverDeclaredLowerRouteOnlyAboveFlight) {
+TEST(P1FixtureGeometry, UnchangedRiskyCanopiesOccludeOppositeBaselineRouteAboveFlight) {
   P1FixtureConfig config;
   config.name = "p1_fork_fused_v1";
   config.central_obstacle_enabled = false;
   const auto points = iap::planner::make_p1_fixture_points(config);
-  const auto over_dense_lane = [&config](const auto& point) {
-    return std::abs(point.y + config.lane_center_m) <=
+  const auto over_baseline_lane = [&config](const auto& point) {
+    return std::abs(point.y - config.lane_center_m) <=
         config.resolution_m + 1.0e-12;
   };
   EXPECT_GT(std::count_if(points.begin(), points.end(),
-                          [&over_dense_lane](const auto& point) {
-                            return over_dense_lane(point) && point.z >= 2.83;
+                          [&over_baseline_lane](const auto& point) {
+                            return over_baseline_lane(point) && point.z >= 2.83;
                           }), 100);
   EXPECT_TRUE(std::none_of(points.begin(), points.end(),
-                           [&over_dense_lane](const auto& point) {
-                             return over_dense_lane(point) && point.z < 2.83;
+                           [&over_baseline_lane](const auto& point) {
+                             return over_baseline_lane(point) && point.z < 2.83;
                            }));
 }
 

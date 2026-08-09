@@ -66,6 +66,33 @@ inline std::vector<Eigen::MatrixXd> makeP1PrequalificationEvidenceFanout(
   return {fanout.begin() + 1, fanout.end()};
 }
 
+inline int selectP1FormalMetricsOnlyReferenceCandidate(
+    const std::vector<double>& candidate_mean_y,
+    bool formal_homotopies_enabled, bool metrics_only, bool mirror_y,
+    int default_index) {
+  if (!formal_homotopies_enabled || !metrics_only ||
+      default_index < 0 ||
+      default_index >= static_cast<int>(candidate_mean_y.size())) {
+    return default_index;
+  }
+  // The formal reference is a deterministic no-P1 control: primary uses the
+  // canonical upper arm and the exact-mirror fixture uses the lower arm.
+  // This tie-break never reads a risk value and is inactive outside the
+  // preserve-homotopies experiment.
+  const double canonical_sign = mirror_y ? -1.0 : 1.0;
+  int selected = default_index;
+  double best = canonical_sign * candidate_mean_y[default_index];
+  for (int index = 0; index < static_cast<int>(candidate_mean_y.size()); ++index) {
+    if (!std::isfinite(candidate_mean_y[index])) continue;
+    const double score = canonical_sign * candidate_mean_y[index];
+    if (!std::isfinite(best) || score > best) {
+      selected = index;
+      best = score;
+    }
+  }
+  return selected;
+}
+
 inline Eigen::Vector3d makeP1CollisionConstraintBasePoint(
     const Eigen::Vector3d& seed_point,
     const Eigen::Vector3d& displaced_point,

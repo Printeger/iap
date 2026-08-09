@@ -89,6 +89,8 @@ v9 保留 v8 的 checkpoint 与 neutral-arm 合同：formal-only defer 覆盖 1.
 
 v10 依据 c29 的完整结构证据收紧物理对照：v9 使 primary reference 与 enabled 同走下路，且 null 成对 rafter 将两次定位误差推过 `0.50 m`。不变数量/尺寸的边界树恢复内外交替，但所有内侧树干只分布在中央箱体 `x=-8..-3 m` 的纵向范围，并保持 formal lane centre `>=1.70 m` 净空，因而不再进入箱体后的 merge；primary/mirror/null 移除无效 rafter，精确镜像和 null 对称不变。soft 单独保留碰撞层之上的定位结构，并将不变数量/尺寸的树冠放到 manifest 已声明的 `y=-2.0 m`，使 `y=-2.5 m` 下路确实从岛下方绕行。所有变化均为真实生成点云，不写入风险值，也不改变固定 lambda、normalization、树密度/树冠概率、P0/P5 或 fallback 语义。
 
+v11 将 formal reference 明确定义为镜像绑定的无 P1 控制臂：只在 metrics-only 且 preserve-homotopies 的现有实验中，从已经 ordinary optimizer 成功并通过碰撞支持的候选中按几何 Y 选择 primary 上路、mirror 下路；选择器不读取任何风险值，enabled、默认 planner、P0/P5、replacement 与 emergency 路径均不受影响。primary/mirror 的不变密集树干继续位于 enabled 首选臂，不变的 risky canopy 数量、尺寸和概率移到 reference 臂上方以产生真实 GNSS LOS 遮挡，精确场景镜像同步交换两者。null 和已通过的 soft 几何保持 v10 不变。
+
 预资格要求上下通道均 collision-feasible 且完整 `200/200`，检查点唯一，单次定位误差 `<=0.5 m`、pair 差值 `<=0.25 m`，P0/context/validator/provenance 门全部通过，并满足：
 
 - 两个主场景 enabled 均选下路，mean 改善 `>0.00836`、CVaR 改善 `>0.00677`、max 不回退；

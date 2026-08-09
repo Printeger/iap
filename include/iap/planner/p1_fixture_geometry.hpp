@@ -98,7 +98,8 @@ inline void append_p1_overhead_observability_rafters(
 inline std::vector<P1FixturePoint> make_p1_fixture_points(const P1FixtureConfig& config) {
   std::vector<P1FixturePoint> base;
   const auto add_lane = [&](double center_y, double density,
-                            double canopy_probability, bool short_features) {
+                            double canopy_probability, bool short_features,
+                            double canopy_center_y) {
     const int count = std::max(2, static_cast<int>(std::llround(32.0 * density)));
     const int canopy_count = static_cast<int>(std::llround(count * canopy_probability));
     for (int index = 0; index < count; ++index) {
@@ -131,10 +132,10 @@ inline std::vector<P1FixturePoint> make_p1_fixture_points(const P1FixtureConfig&
                          short_features ? 0.55 : 2.85, config.resolution_m);
       if (index < canopy_count) {
         // Keep the preregistered tree/canopy counts and dimensions, but place
-        // risky crowns over their lane so real LOS ray-casting sees the
-        // intended GNSS asymmetry. The crown remains wholly above the flight
-        // layer; trunks retain their conservative lateral clearance.
-        const double canopy_y = short_features ? y : center_y;
+        // crowns at the caller-declared LOS location so real ray-casting sees
+        // the intended GNSS asymmetry. The crown remains wholly above the
+        // flight layer; trunks retain their conservative lateral clearance.
+        const double canopy_y = short_features ? y : canopy_center_y;
         append_p1_canopy(base, x, canopy_y, config.canopy_resolution_m);
       }
     }
@@ -145,7 +146,7 @@ inline std::vector<P1FixturePoint> make_p1_fixture_points(const P1FixtureConfig&
                   0.0, config.central_z_max_m, config.resolution_m);
   if (config.name == "p1_fork_symmetric_null_v1") {
     add_lane(-config.lane_center_m, config.safe_tree_density_per_m2,
-             config.safe_canopy_probability, true);
+             config.safe_canopy_probability, true, -config.lane_center_m);
     const auto lower = base;
     for (const auto& point : lower) base.push_back({point.x, -point.y, point.z});
   } else if (config.name == "p1_soft_risk_island_v1") {
@@ -160,14 +161,14 @@ inline std::vector<P1FixturePoint> make_p1_fixture_points(const P1FixtureConfig&
     append_p1_overhead_observability_rafters(
         base, -config.lane_center_m, config.resolution_m);
   } else {
-    // Real c24/c25 evidence showed that the dense structured point cloud's
-    // LiDAR information dominates its GNSS canopy penalty in the fused field.
-    // Put that unchanged physical structure on the preregistered lower route;
-    // the exact scene mirror moves it to the required upper route.
+    // Dense trunks retain LiDAR structure on the preferred lower route. The
+    // unchanged risky-crown count is placed over the canonical reference arm
+    // so physical GNSS LOS obstruction supplies the spatial contrast; exact
+    // scene mirror reflection swaps both roles.
     add_lane(-config.lane_center_m, config.risky_tree_density_per_m2,
-             config.risky_canopy_probability, false);
+             config.risky_canopy_probability, false, config.lane_center_m);
     add_lane(config.lane_center_m, config.safe_tree_density_per_m2,
-             config.safe_canopy_probability, true);
+             config.safe_canopy_probability, true, config.lane_center_m);
   }
   append_p1_observability_landmarks(base, config.resolution_m);
   if (config.mirror_y)

@@ -1979,7 +1979,7 @@ def _launch_setup(context):
 
     scenario_contract = {
         "geometry": {
-            "fixture_algorithm_version": "p1_deterministic_fork_geometry_v10",
+            "fixture_algorithm_version": "p1_deterministic_fork_geometry_v11",
             "fixture": LaunchConfiguration("p1_map_fixture").perform(context),
             "mirror_y": _param_bool(context, "p1_fixture_mirror_y"),
             "start_m": [init_x, init_y, init_z],
@@ -2009,10 +2009,17 @@ def _launch_setup(context):
             "fixture_canopy_ball_center_z_m": 3.25,
             "fixture_canopy_ball_radius_m": 0.42,
             "fixture_canopy_clip_radius_m": 1.10,
-            "dense_structured_lane": {
-                "primary": "lower",
-                "mirror": "upper",
-                "soft_island": "lower",
+            "formal_arm_roles": {
+                "canonical_metrics_only_reference": {
+                    "primary": "upper", "mirror": "lower",
+                },
+                "dense_lidar_trunks": {
+                    "primary": "lower", "mirror": "upper",
+                },
+                "gnss_occluding_risky_canopies": {
+                    "primary": "upper", "mirror": "lower",
+                },
+                "soft_island": "y=-2.0_m",
                 "null": "symmetric",
             },
             "lidar_observability_landmarks": {
