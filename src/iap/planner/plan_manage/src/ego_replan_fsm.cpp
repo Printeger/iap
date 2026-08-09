@@ -963,6 +963,19 @@ namespace ego_planner
       p1_planning_attempt_id = admission.planning_attempt_id;
       if (!admission.allow_expensive_planning)
       {
+        if (admission.action ==
+                P1ReplanAdmission::Action::DEFER_SAME_GENERATION &&
+            admission.evidence_attempt_id > 0 && admitted_snapshot)
+        {
+          // Same-generation admission remains single-flight. This temporary
+          // context only observes the executing incumbent against the exact
+          // immutable snapshot/attempt that already produced candidate
+          // evidence; it cannot optimize, replace, or publish a command.
+          planner_manager_->beginPlanningRiskContextWithSnapshot(
+              now_s, admitted_snapshot, admission.evidence_attempt_id);
+          planner_manager_->recordP1FormalDecisionObservation(now_s);
+          planner_manager_->clearPlanningRiskContext();
+        }
         planner_manager_->recordP1RetryDeferred(
             admission.reason, now_s, admitted_snapshot);
         return false;

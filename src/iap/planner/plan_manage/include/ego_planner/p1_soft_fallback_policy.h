@@ -47,6 +47,19 @@ inline std::vector<Eigen::MatrixXd> makeP1CollisionClearanceFanout(
   return result;
 }
 
+inline std::vector<Eigen::MatrixXd> makeP1PrequalificationEvidenceFanout(
+    const Eigen::MatrixXd& seed, bool formal_evidence_enabled,
+    double clearance_m, int candidate_cap,
+    double first_normal_sign = 1.0) {
+  if (!formal_evidence_enabled) return {seed};
+  const auto fanout = makeP1CollisionClearanceFanout(
+      seed, 1, clearance_m, candidate_cap, first_normal_sign, true);
+  if (fanout.size() <= 1) return {seed};
+  // The seed can already be one-sided. Formal evidence consists only of the
+  // exact chord-centred lower/upper pair and is never passed to optimization.
+  return {fanout.begin() + 1, fanout.end()};
+}
+
 inline Eigen::Vector3d makeP1CollisionConstraintBasePoint(
     const Eigen::Vector3d& seed_point,
     const Eigen::Vector3d& displaced_point,

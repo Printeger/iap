@@ -82,13 +82,13 @@ class P1PrequalificationTest(unittest.TestCase):
         self.assertTrue(result["passed"])
         self.assertIsNone(result["selected"])
 
-    def test_enabled_admitted_candidates_use_recorded_collision_result(self):
+    def test_prequalification_evidence_uses_recorded_collision_result(self):
         context = {
             "planning_attempt_id": "7", "snapshot_generation_id": "11",
             "query_base_time_s": "5.0",
         }
         candidate = {
-            **context, "candidate_id": "2", "phase": "admitted",
+            **context, "candidate_id": "2", "phase": "prequalification_evidence",
             "sample_index": "0", "valid": "1", "stale": "0",
             "collision_free": "1", "selected": "0",
         }

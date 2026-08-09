@@ -353,6 +353,28 @@ TEST(P1SoftFallbackPolicyTest,
 }
 
 TEST(P1SoftFallbackPolicyTest,
+     FormalEvidenceFanoutDoesNotDependOnPlannerReturningEmptySegments) {
+  Eigen::MatrixXd one_sided_seed = Eigen::MatrixXd::Zero(3, 12);
+  for (int column = 0; column < one_sided_seed.cols(); ++column) {
+    const double fraction = static_cast<double>(column) /
+        static_cast<double>(one_sided_seed.cols() - 1);
+    one_sided_seed(0, column) = 10.0 * fraction;
+    one_sided_seed(1, column) = -2.0 * std::sin(M_PI * fraction);
+  }
+
+  const auto evidence = ego_planner::makeP1PrequalificationEvidenceFanout(
+      one_sided_seed, true, 2.5, 3, -1.0);
+  ASSERT_EQ(evidence.size(), 2u);
+  EXPECT_LT(evidence[0].row(1).mean(), 0.0);
+  EXPECT_GT(evidence[1].row(1).mean(), 0.0);
+
+  const auto disabled = ego_planner::makeP1PrequalificationEvidenceFanout(
+      one_sided_seed, false, 2.5, 3, -1.0);
+  ASSERT_EQ(disabled.size(), 1u);
+  EXPECT_TRUE(disabled.front().isApprox(one_sided_seed));
+}
+
+TEST(P1SoftFallbackPolicyTest,
      MetricsOnlyReferenceObservationIsOncePerTrajectoryInsideHorizon) {
   EXPECT_FALSE(ego_planner::shouldRecordP1MetricsOnlyReferenceObservation(
       false, 7, 0, 2.0, 2.5));

@@ -1249,17 +1249,21 @@ namespace ego_planner
           candidate_prepasses.resize(trajs.size());
       }
       if (pp_.p1_collision_fanout_preserve_homotopies_ && planning_snapshot &&
-          std::isfinite(planning_query_base_time_s))
+          std::isfinite(planning_query_base_time_s) && !trajs.empty())
       {
+        const auto evidence_fanout = makeP1PrequalificationEvidenceFanout(
+            trajs.front().points, true,
+            pp_.p1_collision_fanout_clearance_m_, candidate_limit,
+            pp_.p1_collision_fanout_mirror_y_ ? 1.0 : -1.0);
         bspline_optimizer_->setRiskSnapshot(
             planning_snapshot, planning_query_base_time_s);
-        for (int index = static_cast<int>(trajs.size()) - 1; index >= 0; --index)
+        for (std::size_t index = 0; index < evidence_fanout.size(); ++index)
         {
-          const uint64_t candidate_id = static_cast<uint64_t>(trajs.size() - index);
+          const uint64_t candidate_id = static_cast<uint64_t>(index + 1);
           set_p1_context(candidate_id);
           bspline_optimizer_->writeP1PrequalificationCandidateProfile(
-              UniformBspline(trajs[static_cast<std::size_t>(index)].points, 3, ts),
-              false, "admitted");
+              UniformBspline(evidence_fanout[index], 3, ts),
+              false, "prequalification_evidence");
         }
         bspline_optimizer_->clearRiskSnapshot();
       }

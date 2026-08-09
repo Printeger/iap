@@ -86,8 +86,28 @@ TEST(P1ReplanAdmissionTest, DeferredTicksDoNotAllocatePlanningAttemptIds) {
   const auto deferred = admission.admit(12, true, false);
   EXPECT_FALSE(deferred.allow_expensive_planning);
   EXPECT_EQ(deferred.planning_attempt_id, 0U);
+  EXPECT_EQ(deferred.evidence_attempt_id, admitted.planning_attempt_id);
   const auto next = admission.admit(13, true, false);
   EXPECT_EQ(next.planning_attempt_id, admitted.planning_attempt_id + 1U);
+}
+
+TEST(P1ReplanAdmissionTest, OnlySameGenerationDeferralMayReuseEvidenceIdentity) {
+  ego_planner::P1ReplanAdmission admission;
+  const auto unavailable = admission.admit(0, false, true, true);
+  EXPECT_EQ(unavailable.evidence_attempt_id, 0U);
+
+  const auto admitted = admission.admit(12, true, false);
+  ASSERT_NE(admitted.planning_attempt_id, 0U);
+  EXPECT_EQ(admitted.evidence_attempt_id, admitted.planning_attempt_id);
+
+  const auto same_generation = admission.admit(12, true, false);
+  EXPECT_EQ(same_generation.action,
+            ego_planner::P1ReplanAdmission::Action::DEFER_SAME_GENERATION);
+  EXPECT_EQ(same_generation.evidence_attempt_id,
+            admitted.planning_attempt_id);
+
+  const auto unhealthy_new_generation = admission.admit(13, false, true);
+  EXPECT_EQ(unhealthy_new_generation.evidence_attempt_id, 0U);
 }
 
 TEST(P1ReplanAdmissionTest, P5BypassDoesNotMutateP1AdmissionState) {

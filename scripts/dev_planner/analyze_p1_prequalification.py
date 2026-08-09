@@ -96,7 +96,8 @@ def _prequalification_candidate_rows(
             "selected": _truthy(row.get("selected")),
         }
         for row in candidates
-        if _same_attempt_context(row, context) and row.get("phase") == "admitted"
+        if _same_attempt_context(row, context)
+        and row.get("phase") == "prequalification_evidence"
     ]
 
 
