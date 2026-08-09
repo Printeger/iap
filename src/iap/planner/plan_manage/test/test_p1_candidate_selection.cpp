@@ -363,4 +363,20 @@ TEST(P1CandidateSelectionTest, RejectsRefinementWithoutFullSupport) {
   EXPECT_EQ(decision.reason, "p1_refinement_fixed_support_not_full");
 }
 
+TEST(P1CandidateSelectionTest,
+     MetricsOnlyRefinementCannotGateTheBasePlannerPublication) {
+  ego_planner::P1RefinementRiskEvidence evidence{
+      false,
+      0.40, 0.42,
+      0.45, 0.48,
+      true,
+      0.39, 0.41};
+  evidence.metrics_only = true;
+
+  const auto decision = ego_planner::decideP1RefinementRisk(evidence);
+
+  EXPECT_TRUE(decision.accept);
+  EXPECT_EQ(decision.reason, "metrics_only_refinement_observation");
+}
+
 }  // namespace

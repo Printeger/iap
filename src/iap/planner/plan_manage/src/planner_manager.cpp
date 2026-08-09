@@ -1902,6 +1902,7 @@ namespace ego_planner
           has_existing_trajectory,
           selected_trace->incumbent_mean_c_pi,
           selected_trace->incumbent_max_c_pi};
+      refinement_evidence.metrics_only = p1_config.metrics_only;
       if (has_existing_trajectory)
       {
         const double comparison_duration_s = std::min(

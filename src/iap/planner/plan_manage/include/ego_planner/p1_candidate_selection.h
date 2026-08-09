@@ -69,6 +69,7 @@ struct P1RefinementRiskEvidence {
   double replacement_incumbent_mean_c_pi = 0.0;
   double replacement_incumbent_max_c_pi = 0.0;
   bool replacement_incumbent_collision_infeasible = false;
+  bool metrics_only = false;
 };
 
 struct P1RefinementRiskDecision {

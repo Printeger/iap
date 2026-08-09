@@ -144,6 +144,14 @@ std::vector<P1CandidateDecision> selectP1Candidates(
 P1RefinementRiskDecision decideP1RefinementRisk(
     const P1RefinementRiskEvidence& evidence) {
   P1RefinementRiskDecision decision;
+  // Metrics-only is a read-only observation of the base planner. P1 support
+  // or risk comparisons may be recorded, but must never become a publication
+  // gate when the P1 objective is disabled.
+  if (evidence.metrics_only) {
+    decision.accept = true;
+    decision.reason = "metrics_only_refinement_observation";
+    return decision;
+  }
   const bool finite_values =
       std::isfinite(evidence.seed_mean_c_pi) &&
       std::isfinite(evidence.seed_max_c_pi) &&
