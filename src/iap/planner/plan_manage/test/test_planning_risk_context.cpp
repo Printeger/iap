@@ -425,6 +425,20 @@ TEST(P1SoftFallbackPolicyTest,
 }
 
 TEST(P1SoftFallbackPolicyTest,
+     IncumbentExecutionIsIndependentOfTransientFsmReplanState) {
+  EXPECT_TRUE(ego_planner::isP1IncumbentTrajectoryExecuting(
+      7, 100.0, 12.0, 105.0));
+  EXPECT_TRUE(ego_planner::isP1IncumbentTrajectoryExecuting(
+      7, 100.0, 12.0, 112.0));
+  EXPECT_FALSE(ego_planner::isP1IncumbentTrajectoryExecuting(
+      0, 100.0, 12.0, 105.0));
+  EXPECT_FALSE(ego_planner::isP1IncumbentTrajectoryExecuting(
+      7, 100.0, 12.0, 99.9));
+  EXPECT_FALSE(ego_planner::isP1IncumbentTrajectoryExecuting(
+      7, 100.0, 12.0, 112.1));
+}
+
+TEST(P1SoftFallbackPolicyTest,
      PostOptimizationInvalidityKeepsExistingOrDefersBaseInitialFallback) {
   iap::P1AcceptedContextValidation validation;
   validation.fresh = false;

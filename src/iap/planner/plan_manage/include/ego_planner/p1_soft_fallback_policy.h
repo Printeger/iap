@@ -151,6 +151,15 @@ inline bool shouldAttemptP1ExecutingFormalObservation(
       latest_snapshot_available && observation_attempt_id > 0;
 }
 
+inline bool isP1IncumbentTrajectoryExecuting(
+    uint64_t trajectory_id, double trajectory_start_s,
+    double trajectory_duration_s, double now_s) {
+  return trajectory_id > 0 && std::isfinite(trajectory_start_s) &&
+      std::isfinite(trajectory_duration_s) && trajectory_duration_s > 0.0 &&
+      std::isfinite(now_s) && now_s >= trajectory_start_s &&
+      now_s <= trajectory_start_s + trajectory_duration_s;
+}
+
 inline P1SoftFallbackDecision decideP1BasePrepassFallback(
     const P1BasePrepassFallbackInput& input) {
   if (input.base_optimizer_success && input.full_p1_support) {

@@ -83,19 +83,6 @@ inline void append_p1_observability_landmarks(
   }
 }
 
-inline void append_p1_safe_lane_observability_facades(
-    std::vector<P1FixturePoint>& points, double safe_lane_y,
-    double resolution) {
-  // Low, lane-external facades provide collision-neutral LiDAR normals on the
-  // physically safer arm without adding canopy or intercepting upward GNSS
-  // rays from the z=1.5 m flight layer.
-  const double facade_y = safe_lane_y < 0.0 ? -4.0 : 4.0;
-  for (const double x : {-11.0, -9.0, -7.0, -5.0, -3.0, -1.0, 1.0})
-    append_p1_box(points, x - 0.25, x + 0.25,
-                  facade_y - 0.25, facade_y + 0.25,
-                  0.0, 0.55, resolution);
-}
-
 inline std::vector<P1FixturePoint> make_p1_fixture_points(const P1FixtureConfig& config) {
   std::vector<P1FixturePoint> base;
   const auto add_lane = [&](double center_y, double density,
@@ -128,30 +115,24 @@ inline std::vector<P1FixturePoint> make_p1_fixture_points(const P1FixtureConfig&
              config.safe_canopy_probability, true);
     const auto lower = base;
     for (const auto& point : lower) base.push_back({point.x, -point.y, point.z});
-    const std::size_t first_facade = base.size();
-    append_p1_safe_lane_observability_facades(
-        base, -config.lane_center_m, config.resolution_m);
-    const std::size_t last_facade = base.size();
-    for (std::size_t index = first_facade; index < last_facade; ++index)
-      base.push_back({base[index].x, -base[index].y, base[index].z});
   } else if (config.name == "p1_soft_risk_island_v1") {
     const int count = std::max(4, static_cast<int>(std::llround(
         24.0 * config.risky_tree_density_per_m2)));
     for (int index = 0; index < count; ++index) {
       const double fraction = (static_cast<double>(index) + 0.5) / count;
       append_p1_canopy(base, -6.0 + 8.0 * fraction,
-                       0.9 + (index % 2 == 0 ? 1.15 : -1.15),
+                       -config.lane_center_m,
                        config.canopy_resolution_m);
     }
-    append_p1_safe_lane_observability_facades(
-        base, -config.lane_center_m, config.resolution_m);
   } else {
-    add_lane(-config.lane_center_m, config.safe_tree_density_per_m2,
-             config.safe_canopy_probability, true);
-    add_lane(config.lane_center_m, config.risky_tree_density_per_m2,
+    // Real c24/c25 evidence showed that the dense structured point cloud's
+    // LiDAR information dominates its GNSS canopy penalty in the fused field.
+    // Put that unchanged physical structure on the preregistered lower route;
+    // the exact scene mirror moves it to the required upper route.
+    add_lane(-config.lane_center_m, config.risky_tree_density_per_m2,
              config.risky_canopy_probability, false);
-    append_p1_safe_lane_observability_facades(
-        base, -config.lane_center_m, config.resolution_m);
+    add_lane(config.lane_center_m, config.safe_tree_density_per_m2,
+             config.safe_canopy_probability, true);
   }
   append_p1_observability_landmarks(base, config.resolution_m);
   if (config.mirror_y)

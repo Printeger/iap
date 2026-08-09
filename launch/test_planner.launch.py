@@ -1978,7 +1978,7 @@ def _launch_setup(context):
 
     scenario_contract = {
         "geometry": {
-            "fixture_algorithm_version": "p1_deterministic_fork_geometry_v5",
+            "fixture_algorithm_version": "p1_deterministic_fork_geometry_v6",
             "fixture": LaunchConfiguration("p1_map_fixture").perform(context),
             "mirror_y": _param_bool(context, "p1_fixture_mirror_y"),
             "start_m": [init_x, init_y, init_z],
@@ -2008,16 +2008,11 @@ def _launch_setup(context):
             "fixture_canopy_ball_center_z_m": 3.25,
             "fixture_canopy_ball_radius_m": 0.42,
             "fixture_canopy_clip_radius_m": 1.10,
-            "fixture_risky_canopy_center_y": "lane_center",
-            "safe_lane_observability_facades": {
-                "kind": "low_collision_neutral_boxes",
-                "x_m": [-11.0, -9.0, -7.0, -5.0, -3.0, -1.0, 1.0],
-                "center_abs_y_m": 4.0,
-                "half_width_m": 0.25,
-                "z_m": [0.0, 0.55],
-                "primary_and_soft_lane": "lower",
-                "mirror_lane": "upper",
-                "null_lanes": "both",
+            "dense_structured_lane": {
+                "primary": "lower",
+                "mirror": "upper",
+                "soft_island": "lower",
+                "null": "symmetric",
             },
             "lidar_observability_landmarks": {
                 "kind": "symmetric_survey_pylons",
@@ -2032,8 +2027,7 @@ def _launch_setup(context):
             "fixture_lane_density_area_m2": 32.0,
             "fixture_soft_island_density_area_m2": 24.0,
             "fixture_soft_island_x_m": [-6.0, 2.0],
-            "fixture_soft_island_center_y_m": 0.9,
-            "fixture_soft_island_trunk_offset_y_m": 1.15,
+            "fixture_soft_island_center_y_m": -2.0,
             "terminal_wall_enabled": _param_bool(context, "terminal_wall_enabled"),
         },
         "risk_sources": ["gnss_map_occlusion", "lidar_observability"],

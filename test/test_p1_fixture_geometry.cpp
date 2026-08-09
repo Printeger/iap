@@ -91,69 +91,38 @@ TEST(P1FixtureGeometry, SymmetricSafeLaneFeaturesStayBelowFlightLayer) {
   }));
 }
 
-TEST(P1FixtureGeometry, RiskyLaneTrunksLeaveConservativeCenterClearance) {
+TEST(P1FixtureGeometry, DenseLaneTrunksLeaveConservativeCenterClearance) {
   P1FixtureConfig config;
   config.name = "p1_fork_fused_v1";
   config.central_obstacle_enabled = false;
   const auto points = iap::planner::make_p1_fixture_points(config);
-  const auto risky_trunk = [&config](const auto& point) {
-    return point.z <= 2.0 && std::abs(point.y - config.lane_center_m) < 2.0;
+  const auto dense_trunk = [&config](const auto& point) {
+    return point.z <= 2.0 && std::abs(point.y + config.lane_center_m) < 2.0;
   };
-  ASSERT_GT(std::count_if(points.begin(), points.end(), risky_trunk), 0);
-  EXPECT_TRUE(std::all_of(points.begin(), points.end(), [&config, &risky_trunk](const auto& point) {
-    return !risky_trunk(point) ||
-           std::abs(point.y - config.lane_center_m) >= 1.35;
+  ASSERT_GT(std::count_if(points.begin(), points.end(), dense_trunk), 0);
+  EXPECT_TRUE(std::all_of(points.begin(), points.end(), [&config, &dense_trunk](const auto& point) {
+    return !dense_trunk(point) ||
+           std::abs(point.y + config.lane_center_m) >= 1.35;
   }));
 }
 
-TEST(P1FixtureGeometry, RiskyCanopiesOccludeGnssAboveButNotInsideFlightLane) {
+TEST(P1FixtureGeometry, DenseObservableCanopiesCoverDeclaredLowerRouteOnlyAboveFlight) {
   P1FixtureConfig config;
   config.name = "p1_fork_fused_v1";
   config.central_obstacle_enabled = false;
   const auto points = iap::planner::make_p1_fixture_points(config);
-  const auto over_risky_lane = [&config](const auto& point) {
-    return std::abs(point.y - config.lane_center_m) <=
+  const auto over_dense_lane = [&config](const auto& point) {
+    return std::abs(point.y + config.lane_center_m) <=
         config.resolution_m + 1.0e-12;
   };
   EXPECT_GT(std::count_if(points.begin(), points.end(),
-                          [&over_risky_lane](const auto& point) {
-                            return over_risky_lane(point) && point.z >= 2.83;
+                          [&over_dense_lane](const auto& point) {
+                            return over_dense_lane(point) && point.z >= 2.83;
                           }), 100);
   EXPECT_TRUE(std::none_of(points.begin(), points.end(),
-                           [&over_risky_lane](const auto& point) {
-                             return over_risky_lane(point) && point.z < 2.83;
+                           [&over_dense_lane](const auto& point) {
+                             return over_dense_lane(point) && point.z < 2.83;
                            }));
-}
-
-TEST(P1FixtureGeometry, SafeLaneGetsLowCollisionNeutralObservabilityFacades) {
-  P1FixtureConfig primary;
-  primary.name = "p1_fork_fused_v1";
-  primary.central_obstacle_enabled = false;
-  const auto points = iap::planner::make_p1_fixture_points(primary);
-  const auto facade_point = [](const auto& point, double y) {
-    return std::abs(point.x + 11.0) <= 0.25 + 1.0e-12 &&
-        std::abs(point.y - y) <= 0.25 + 1.0e-12 &&
-        point.z <= 0.55 + 1.0e-12;
-  };
-  EXPECT_GT(std::count_if(points.begin(), points.end(),
-                          [&facade_point](const auto& point) {
-                            return facade_point(point, -4.0);
-                          }), 100);
-  EXPECT_EQ(std::count_if(points.begin(), points.end(),
-                          [&facade_point](const auto& point) {
-                            return facade_point(point, 4.0);
-                          }), 0);
-
-  primary.name = "p1_fork_symmetric_null_v1";
-  const auto null_points = iap::planner::make_p1_fixture_points(primary);
-  EXPECT_EQ(std::count_if(null_points.begin(), null_points.end(),
-                          [&facade_point](const auto& point) {
-                            return facade_point(point, -4.0);
-                          }),
-            std::count_if(null_points.begin(), null_points.end(),
-                          [&facade_point](const auto& point) {
-                            return facade_point(point, 4.0);
-                          }));
 }
 
 TEST(P1FixtureGeometry, FormalFixturesProvideSymmetricCollisionNeutralLidarLandmarks) {

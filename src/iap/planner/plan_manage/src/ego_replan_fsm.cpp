@@ -519,19 +519,23 @@ namespace ego_planner
     // observe it against the latest immutable P0 snapshot instead.
     const auto latest_observation_snapshot =
         planner_manager_->acquireRiskGridSnapshot();
+    const double observation_now_s = plannerNow().seconds();
+    const auto &executing_incumbent = planner_manager_->local_data_;
+    const bool incumbent_is_executing = isP1IncumbentTrajectoryExecuting(
+        executing_incumbent.traj_id_, executing_incumbent.start_time_.seconds(),
+        executing_incumbent.duration_, observation_now_s);
     if (shouldAttemptP1ExecutingFormalObservation(
             planner_manager_->p1AdmissionEnabled(), p5_owns_admission,
             planner_manager_->p1FormalCheckpointRecorded(),
-            exec_state_ == EXEC_TRAJ,
+            incumbent_is_executing,
             static_cast<bool>(latest_observation_snapshot),
             p1_formal_observation_attempt_id_))
     {
-      const double now_s = plannerNow().seconds();
       planner_manager_->beginPlanningRiskContextWithSnapshot(
-          now_s, latest_observation_snapshot,
+          observation_now_s, latest_observation_snapshot,
           p1_formal_observation_attempt_id_);
       const bool recorded =
-          planner_manager_->recordP1FormalDecisionObservation(now_s);
+          planner_manager_->recordP1FormalDecisionObservation(observation_now_s);
       planner_manager_->clearPlanningRiskContext();
       if (recorded)
       {
