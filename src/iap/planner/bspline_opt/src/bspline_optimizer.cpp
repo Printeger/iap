@@ -3148,7 +3148,7 @@ namespace ego_planner
   }
 
   bool BsplineOptimizer::writeP1PrequalificationCandidateProfile(
-      UniformBspline candidate, const bool selected)
+      UniformBspline candidate, const bool selected, const std::string &phase)
   {
     if (!p1_config_.debug_csv_enable || p1_config_.debug_csv_path.empty() ||
         !risk_snapshot_ || !std::isfinite(risk_query_base_time_s_))
@@ -3163,7 +3163,7 @@ namespace ego_planner
     if (!out.good()) return false;
     out << std::setprecision(17);
     if (header) {
-      out << "schema_version,run_id,manifest_path,planning_attempt_id,candidate_id,snapshot_generation_id,query_base_time_s,phase,sample_index,t_s,x,y,z,valid,stale,c_pi,invalid_reason,collision_free,optimization_success,selected\n";
+      out << "schema_version,run_id,manifest_path,planning_attempt_id,candidate_id,snapshot_generation_id,query_base_time_s,phase,sample_index,t_s,x,y,z,valid,stale,c_pi,invalid_reason,collision_free,generation_success,selected\n";
     }
     const double duration = candidate.getTimeSum();
     for (int index = 0; index < kP1CandidateEvidenceSampleCount; ++index) {
@@ -3180,7 +3180,7 @@ namespace ego_planner
           << p1_risk_context_.planning_attempt_id << ','
           << p1_risk_context_.candidate_id << ','
           << risk_snapshot_->generation_id() << ','
-          << risk_query_base_time_s_ << ",final," << index << ',' << t_s << ','
+          << risk_query_base_time_s_ << ',' << phase << ',' << index << ',' << t_s << ','
           << point.x() << ',' << point.y() << ',' << point.z() << ','
           << (hit && sample.valid ? 1 : 0) << ','
           << (hit && sample.stale ? 1 : 0) << ',';

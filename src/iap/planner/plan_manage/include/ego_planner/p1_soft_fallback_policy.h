@@ -110,15 +110,16 @@ inline bool shouldRecordP1MetricsOnlyReferenceObservation(
 
 inline bool shouldRecordP1FormalCheckpointObservation(
     const bool formal_observation_enabled,
+    const bool checkpoint_already_recorded,
+    const bool profile_full_support,
     const uint64_t trajectory_id,
-    const uint64_t observed_trajectory_id,
     const double remaining_duration_s,
     const double snapshot_horizon_s,
     const double current_x_m,
     const double checkpoint_x_m,
     const double checkpoint_half_width_m) {
-  return formal_observation_enabled && trajectory_id > 0 &&
-      trajectory_id != observed_trajectory_id &&
+  return formal_observation_enabled && !checkpoint_already_recorded &&
+      profile_full_support && trajectory_id > 0 &&
       std::isfinite(remaining_duration_s) && remaining_duration_s > 0.0 &&
       std::isfinite(snapshot_horizon_s) && snapshot_horizon_s > 0.0 &&
       remaining_duration_s <= snapshot_horizon_s + 1.0e-9 &&

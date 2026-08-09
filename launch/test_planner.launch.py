@@ -1978,7 +1978,7 @@ def _launch_setup(context):
 
     scenario_contract = {
         "geometry": {
-            "fixture_algorithm_version": "p1_deterministic_fork_geometry_v2",
+            "fixture_algorithm_version": "p1_deterministic_fork_geometry_v3",
             "fixture": LaunchConfiguration("p1_map_fixture").perform(context),
             "mirror_y": _param_bool(context, "p1_fixture_mirror_y"),
             "start_m": [init_x, init_y, init_z],
@@ -2010,10 +2010,10 @@ def _launch_setup(context):
             "fixture_canopy_clip_radius_m": 1.10,
             "lidar_observability_landmarks": {
                 "kind": "symmetric_survey_pylons",
-                "x_m": [-10.5, -7.0, -3.5, 0.0],
-                "center_abs_y_m": 4.6,
+                "x_m": [-12.0, -10.0, -8.0, -6.0, -4.0, -2.0, 0.0],
+                "center_abs_y_m": 4.0,
                 "half_width_m": 0.25,
-                "z_m": [0.0, 1.25],
+                "z_m": [0.0, 3.0],
             },
             "fixture_lane_x_start_m": -7.8,
             "fixture_lane_x_span_m": 16.0,

@@ -371,13 +371,17 @@ TEST(P1SoftFallbackPolicyTest,
 TEST(P1SoftFallbackPolicyTest,
      FormalCheckpointObservationCoversEnabledRetainedIncumbent) {
   EXPECT_FALSE(ego_planner::shouldRecordP1FormalCheckpointObservation(
-      false, 7, 0, 2.0, 24.0, -9.5, -9.5, 0.4));
+      false, false, true, 7, 2.0, 24.0, -9.5, -9.5, 0.4));
   EXPECT_FALSE(ego_planner::shouldRecordP1FormalCheckpointObservation(
-      true, 7, 0, 25.0, 24.0, -9.5, -9.5, 0.4));
+      true, true, true, 7, 2.0, 24.0, -9.5, -9.5, 0.4));
   EXPECT_FALSE(ego_planner::shouldRecordP1FormalCheckpointObservation(
-      true, 7, 0, 2.0, 24.0, -8.9, -9.5, 0.4));
+      true, false, false, 7, 2.0, 24.0, -9.5, -9.5, 0.4));
+  EXPECT_FALSE(ego_planner::shouldRecordP1FormalCheckpointObservation(
+      true, false, true, 7, 25.0, 24.0, -9.5, -9.5, 0.4));
+  EXPECT_FALSE(ego_planner::shouldRecordP1FormalCheckpointObservation(
+      true, false, true, 7, 2.0, 24.0, -8.9, -9.5, 0.4));
   EXPECT_TRUE(ego_planner::shouldRecordP1FormalCheckpointObservation(
-      true, 7, 0, 2.0, 24.0, -9.2, -9.5, 0.4));
+      true, false, true, 7, 2.0, 24.0, -9.2, -9.5, 0.4));
 }
 
 TEST(P1SoftFallbackPolicyTest,

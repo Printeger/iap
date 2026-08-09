@@ -66,7 +66,36 @@ class P1PrequalificationTest(unittest.TestCase):
             MODULE._validate_provenance_rows(
                 [dict(row, run_id="other")], "run-1", manifest, "candidate")
 
-    def test_metrics_only_candidate_profile_is_strictly_export_bound(self):
+    def test_prequalification_requires_both_lanes_but_not_a_candidate_publish(self):
+        rows = []
+        for candidate_id, y in (("1", 2.0), ("2", -2.0)):
+            for sample_index in range(200):
+                rows.append({
+                    "candidate_id": candidate_id,
+                    "sample_index": str(sample_index),
+                    "y": str(y), "c_pi": "1.0", "valid": "1",
+                    "stale": "0", "collision_free": "1", "selected": "0",
+                })
+        result = MODULE.formal_metrics.candidate_route_precheck(
+            rows, require_selected=False
+        )
+        self.assertTrue(result["passed"])
+        self.assertIsNone(result["selected"])
+
+    def test_enabled_admitted_candidates_use_recorded_collision_result(self):
+        context = {
+            "planning_attempt_id": "7", "snapshot_generation_id": "11",
+            "query_base_time_s": "5.0",
+        }
+        candidate = {
+            **context, "candidate_id": "2", "phase": "admitted",
+            "sample_index": "0", "valid": "1", "stale": "0",
+            "collision_free": "1", "selected": "0",
+        }
+        rows = MODULE._prequalification_candidate_rows([candidate], context)
+        self.assertTrue(rows[0]["collision_free"])
+
+    def test_both_arms_use_strictly_export_bound_prequalification_candidates(self):
         with tempfile.TemporaryDirectory() as tmp:
             export = Path(tmp).resolve()
             expected = export / "planner_p1_prequalification_candidate_profile.csv"
@@ -83,6 +112,11 @@ class P1PrequalificationTest(unittest.TestCase):
             )
             optimization, candidates = MODULE._candidate_evidence_paths(
                 export, manifest, metrics_only=True
+            )
+            self.assertIsNone(optimization)
+            self.assertEqual(candidates, expected)
+            optimization, candidates = MODULE._candidate_evidence_paths(
+                export, manifest, metrics_only=False
             )
             self.assertIsNone(optimization)
             self.assertEqual(candidates, expected)

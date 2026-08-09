@@ -587,11 +587,15 @@ namespace ego_planner
         ? std::numeric_limits<double>::quiet_NaN() : *horizon_max_it;
     const Eigen::Vector3d observation_position =
         local_data_.position_traj_.evaluateDeBoorT(trajectory_start_t_s);
+    const auto observation_summary =
+        bspline_optimizer_->evaluateP1FixedLatticeRisk(
+            local_data_.position_traj_, trajectory_start_t_s,
+            remaining_duration_s);
     const bool formal_checkpoint_observation =
         pp_.p1_collision_fanout_preserve_homotopies_ &&
         shouldRecordP1FormalCheckpointObservation(
-            true, local_data_.traj_id_,
-            p1_formal_observed_trajectory_id_,
+            true, p1_formal_checkpoint_recorded_,
+            observation_summary.full_support, local_data_.traj_id_,
             remaining_duration_s, snapshot_horizon_s,
             observation_position.x(), -9.5, 0.4);
     const bool legacy_metrics_observation =
@@ -641,6 +645,8 @@ namespace ego_planner
     }
 
     p1_formal_observed_trajectory_id_ = local_data_.traj_id_;
+    if (formal_checkpoint_observation)
+      p1_formal_checkpoint_recorded_ = true;
     appendPlanningRiskContextTimeline(
         "reference_observation", observation_stamp_s, "recorded",
         observation_reason, "existing_trajectory");
@@ -1242,6 +1248,21 @@ namespace ego_planner
         if (candidate_prepasses.size() > trajs.size())
           candidate_prepasses.resize(trajs.size());
       }
+      if (pp_.p1_collision_fanout_preserve_homotopies_ && planning_snapshot &&
+          std::isfinite(planning_query_base_time_s))
+      {
+        bspline_optimizer_->setRiskSnapshot(
+            planning_snapshot, planning_query_base_time_s);
+        for (int index = static_cast<int>(trajs.size()) - 1; index >= 0; --index)
+        {
+          const uint64_t candidate_id = static_cast<uint64_t>(trajs.size() - index);
+          set_p1_context(candidate_id);
+          bspline_optimizer_->writeP1PrequalificationCandidateProfile(
+              UniformBspline(trajs[static_cast<std::size_t>(index)].points, 3, ts),
+              false, "admitted");
+        }
+        bspline_optimizer_->clearRiskSnapshot();
+      }
       cout << "\033[1;33m"
            << "multi-trajs=" << trajs.size() << "\033[1;0m" << endl;
 
@@ -1400,20 +1421,6 @@ namespace ego_planner
                  << ", fallback=" << p2_result.fallback_reason
                  << ", metrics_only=" << p2_config_.metrics_only << endl;
           }
-        }
-        if (pp_.p1_collision_fanout_preserve_homotopies_ &&
-            p1_config.metrics_only && planning_snapshot &&
-            std::isfinite(planning_query_base_time_s))
-        {
-          for (const auto &candidate : p2_candidates)
-          {
-            set_p1_context(static_cast<uint64_t>(candidate.candidate_id));
-            bspline_optimizer_->writeP1PrequalificationCandidateProfile(
-                UniformBspline(candidate.control_points, 3, ts),
-                candidate.candidate_id ==
-                    static_cast<int>(selected_p1_candidate_id));
-          }
-          set_p1_context(selected_p1_candidate_id);
         }
         if (!p1_candidate_traces.empty())
         {

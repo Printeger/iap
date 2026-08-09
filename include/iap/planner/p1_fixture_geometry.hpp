@@ -73,10 +73,10 @@ inline void append_p1_observability_landmarks(
   // Symmetric survey pylons outside both flight lanes add longitudinal and
   // vertical LiDAR structure without changing tree density/canopy parameters
   // or obstructing either fork homotopy.
-  for (const double x : {-10.5, -7.0, -3.5, 0.0}) {
+  for (const double x : {-12.0, -10.0, -8.0, -6.0, -4.0, -2.0, 0.0}) {
     const std::size_t first = points.size();
-    append_p1_box(points, x - 0.25, x + 0.25, -4.85, -4.35,
-                  0.0, 1.25, resolution);
+    append_p1_box(points, x - 0.25, x + 0.25, -4.25, -3.75,
+                  0.0, 3.0, resolution);
     const std::size_t last = points.size();
     for (std::size_t index = first; index < last; ++index)
       points.push_back({points[index].x, -points[index].y, points[index].z});

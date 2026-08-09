@@ -469,7 +469,8 @@ namespace ego_planner
     void setLastP1OptimizationSelected(bool selected);
     void writeP1OptimizationTrace(const P1OptimizationTrace &trace) const;
     bool writeP1PrequalificationCandidateProfile(
-        UniformBspline candidate, bool selected);
+        UniformBspline candidate, bool selected,
+        const std::string &phase = "final");
     void writeP1ReplacementDecision(const P1OptimizationTrace &trace,
                                     uint64_t incumbent_trajectory_id,
                                     double incumbent_start_stamp_s,

@@ -67,20 +67,10 @@ def _artifact(export: Path, manifest: dict[str, Any], key: str, filename: str) -
 def _candidate_evidence_paths(
     export: Path, manifest: dict[str, Any], metrics_only: bool
 ) -> tuple[Path | None, Path]:
-    if metrics_only:
-        return None, _artifact(
-            export, manifest, "p1.prequalification_candidate_profile_path",
-            "planner_p1_prequalification_candidate_profile.csv",
-        )
-    return (
-        _artifact(
-            export, manifest, "p1.candidate_optimization_path",
-            "planner_p1_candidate_optimization.csv",
-        ),
-        _artifact(
-            export, manifest, "p1.candidate_profile_path",
-            "planner_p1_candidate_profile.csv",
-        ),
+    del metrics_only
+    return None, _artifact(
+        export, manifest, "p1.prequalification_candidate_profile_path",
+        "planner_p1_prequalification_candidate_profile.csv",
     )
 
 
@@ -94,6 +84,21 @@ def _same_attempt_context(left: dict[str, Any], right: dict[str, Any]) -> bool:
     return all(str(left.get(key, "")) == str(right.get(key, "")) for key in (
         "planning_attempt_id", "snapshot_generation_id", "query_base_time_s"
     ))
+
+
+def _prequalification_candidate_rows(
+    candidates: list[dict[str, Any]], context: dict[str, Any]
+) -> list[dict[str, Any]]:
+    return [
+        {
+            **row,
+            "matched": _truthy(row.get("valid")) and not _truthy(row.get("stale")),
+            "collision_free": _truthy(row.get("collision_free")),
+            "selected": _truthy(row.get("selected")),
+        }
+        for row in candidates
+        if _same_attempt_context(row, context) and row.get("phase") == "admitted"
+    ]
 
 
 def _validate_provenance_rows(
@@ -293,31 +298,10 @@ def analyze_run(export_value: str | Path) -> dict[str, Any]:
                 optimization, run_id, manifest_path, "candidate optimization")
         _validate_provenance_rows(candidates, run_id, manifest_path, "candidate profile")
         context = profile[0]
-        metadata = {_identity(row): row for row in optimization
-                    if _same_attempt_context(row, context)}
-        precheck_rows = []
-        for row in candidates:
-            if not _same_attempt_context(row, context) or row.get("phase") != "final":
-                continue
-            matching = occupancy_final.get(
-                (*_identity(row), str(row.get("sample_index", ""))), [])
-            weight = sum((float(item["temporal_weight"]) * float(item["corner_weight"]))
-                         for item in matching)
-            meta = metadata.get(_identity(row), {})
-            precheck_rows.append({
-                **row,
-                "matched": _truthy(row.get("valid")) and not _truthy(row.get("stale")),
-                "collision_free": _truthy(row.get("collision_free"))
-                if metrics_only else (
-                    bool(matching) and abs(weight - 1.0) <= 1e-9
-                    and _truthy(meta.get("optimization_success"))
-                    and all(_truthy(item.get("occupancy_available"))
-                            and not _truthy(item.get("inflated_occupied"))
-                            for item in matching)),
-                "selected": _truthy(row.get("selected"))
-                if metrics_only else _truthy(meta.get("selected")),
-            })
-        precheck = formal_metrics.candidate_route_precheck(precheck_rows)
+        precheck_rows = _prequalification_candidate_rows(candidates, context)
+        precheck = formal_metrics.candidate_route_precheck(
+            precheck_rows, require_selected=False
+        )
         if not precheck.get("passed"):
             errors.append("candidate precheck lacks collision-feasible full-200 upper/lower routes")
     except (OSError, ValueError, KeyError, IndexError) as exc:

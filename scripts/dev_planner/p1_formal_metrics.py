@@ -118,7 +118,8 @@ def localization_pair_gate(
 
 
 def candidate_route_precheck(
-    rows: Iterable[dict[str, Any]], *, support_count: int = FIXED_SAMPLE_COUNT
+    rows: Iterable[dict[str, Any]], *, support_count: int = FIXED_SAMPLE_COUNT,
+    require_selected: bool = True,
 ) -> dict[str, Any]:
     """Summarize collision-feasible full-support upper/lower candidates."""
     grouped: dict[str, list[dict[str, Any]]] = {}
@@ -175,7 +176,10 @@ def candidate_route_precheck(
             "max_risk": max((item["max"] for item in candidates), default=None),
             "candidates": candidates,
         }
-    passed = all(lane_summary[lane]["candidate_count"] > 0 for lane in ("lower", "upper")) and len(selected) == 1
+    passed = all(
+        lane_summary[lane]["candidate_count"] > 0
+        for lane in ("lower", "upper")
+    ) and (len(selected) == 1 if require_selected else len(selected) <= 1)
     return {
         "passed": passed, "status": "PASS" if passed else "INCONCLUSIVE",
         "lanes": lane_summary, "selected": selected[0] if len(selected) == 1 else None,

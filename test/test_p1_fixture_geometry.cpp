@@ -126,6 +126,17 @@ TEST(P1FixtureGeometry, FormalFixturesProvideSymmetricCollisionNeutralLidarLandm
     EXPECT_GT(std::abs(point.y) - config.lane_center_m,
               config.lane_half_width_m + 1.0);
   }
+
+  const auto start_visible = [](const auto& point) {
+    const double dx = point.x + 12.0;
+    return std::sqrt(dx * dx + point.y * point.y) <= 4.5 + 1.0e-12 &&
+        point.z >= 0.0 && point.z <= 3.0 + 1.0e-12;
+  };
+  EXPECT_GT(std::count_if(points.begin(), points.end(), start_visible), 500);
+  EXPECT_TRUE(std::any_of(points.begin(), points.end(), [](const auto& point) {
+    return std::abs(point.x + 12.0) <= 0.3 && std::abs(point.y) >= 3.7 &&
+        point.z >= 2.5;
+  }));
 }
 
 }  // namespace

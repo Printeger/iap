@@ -83,7 +83,7 @@ python3 scripts/dev_planner/run_p1_2_campaign.py \
 
 #### A. 十次串行预资格
 
-状态机先运行主场景两组 reference/enabled，再运行 mirror、symmetric-null、soft-risk 各一组 reference/enabled。全部使用 `experiment:=p1_fork_formal`、90 秒、`lambda=1e-5`、normalization `0.30`、validator 开启、bag 关闭。formal preset 将 manager、optimizer 和 B-spline 的速度上限都固定为 `1.0 m/s`，并将 replan 周期固定为 `0.9 s`，使真实 replan 间距不跨过固定的 `x=-9.5+/-0.4 m` 决策窗口；P0 horizon 保留原 `0–2.5 s` 层，以最大 `1 s` 间隔延伸至 `24 s`，覆盖 c16 实测最长 22.8 s 的正常 checkpoint 轨迹且不超过原 1 s voxel-stale 限制。formal P0 横向范围是覆盖场景的 12 m；中央障碍是严格对称的 `x=-4.5..-1`、`|y|<=0.35`，使真实路径在入口前完成上下通道分离并满足保守插值净空。formal-only fanout 还在后续 replan 从端点弦重建两侧 homotopy，其候选顺序随精确 Y mirror 翻转；默认 planner 行为不变。若严格替换门保留 incumbent，formal-only 运行在实际执行轨迹进入同一窗口时写一次类型化、只读的 incumbent observation，继续使用当前 immutable snapshot、真实剩余轨迹、固定 200 点和完整 occupancy corners，不发布或替换轨迹。v2 fixture 在两条航道外 `y=+/-4.6 m` 加入精确对称 survey pylons，提供 LiDAR 纵向/竖向结构。这些值被 manifest、场景 fingerprint、校准和 formal binding 共同冻结。独立的 `analyze_p1_prequalification.py` 读取 manifest、truth/estimate、accepted/context、candidate、occupancy、validator 和 provenance；metrics-only 的候选 precheck 必须使用 export 内专用只读 base-optimizer profile，缺失或越界时 fail closed，不进入 formal analyzer。
+状态机先运行主场景两组 reference/enabled，再运行 mirror、symmetric-null、soft-risk 各一组 reference/enabled。全部使用 `experiment:=p1_fork_formal`、90 秒、`lambda=1e-5`、normalization `0.30`、validator 开启、bag 关闭。formal preset 将 manager、optimizer 和 B-spline 的速度上限都固定为 `1.0 m/s`，并将 replan 周期固定为 `0.9 s`，使真实 replan 间距不跨过固定的 `x=-9.5+/-0.4 m` 决策窗口；P0 horizon 保留原 `0–2.5 s` 层，以最大 `1 s` 间隔延伸至 `24 s`，覆盖 c16 实测最长 22.8 s 的正常 checkpoint 轨迹且不超过原 1 s voxel-stale 限制。formal P0 横向范围是覆盖场景的 12 m；中央障碍是严格对称的 `x=-8..-3`、`|y|<=0.65`，使真实路径在入口前完成上下通道分离并满足保守插值净空。formal-only fanout 还在后续 replan 从端点弦重建两侧 homotopy，其候选顺序随精确 Y mirror 翻转；默认 planner 行为不变。若严格替换门保留 incumbent，formal-only 运行只在实际执行轨迹进入同一窗口且完整固定 200 点可用时写一次类型化、只读的 incumbent observation，继续使用当前 immutable snapshot、真实剩余轨迹和完整 occupancy corners，不发布或替换轨迹。v3 fixture 在两条航道外 `|y|=3.75..4.25 m`、`x=-12..0 m` 加入精确对称的 `z=0..3 m` survey pylons，提供起点到分叉区的 LiDAR 纵向/横向/竖向结构。这些值被 manifest、场景 fingerprint、校准和 formal binding 共同冻结。独立的 `analyze_p1_prequalification.py` 读取 manifest、truth/estimate、accepted/context、candidate、occupancy、validator 和 provenance；reference/enabled 都必须使用同 attempt、export 内专用只读 admitted-fanout profile 证明双通道，缺失或越界时 fail closed，不进入 formal analyzer。
 
 预资格要求上下通道均 collision-feasible 且完整 `200/200`，检查点唯一，单次定位误差 `<=0.5 m`、pair 差值 `<=0.25 m`，P0/context/validator/provenance 门全部通过，并满足：
 
@@ -92,7 +92,7 @@ python3 scripts/dev_planner/run_p1_2_campaign.py \
 - null 的 mean/CVaR 绝对变化分别 `<=0.005574670273862936` / `<=0.004511997578310001`，路径增长 `<=5%`；
 - soft-risk enabled 从下方绕行，mean/CVaR 改善且 max 不回退。
 
-真实 publisher 点云是验收对象：主障碍对上下通道等净空；mirror 是逐点精确 Y 反射；null 点集严格对称；soft-risk 的风险岛在航道内仅生成 `z>=2.85 m` 的 overhead crown；低高度 survey pylons 全部位于 `|y|>=4.35 m`，不阻挡任何规定航道。
+真实 publisher 点云是验收对象：主障碍对上下通道等净空；mirror 是逐点精确 Y 反射；null 点集严格对称；soft-risk 的风险岛在航道内仅生成 `z>=2.85 m` 的 overhead crown；survey pylons 全部位于 `|y|>=3.75 m`，与 `|y|<=2.75 m` 的规定航道至少相隔 `1.0 m`。
 
 #### B. 二十次校准和 formal pair
 
