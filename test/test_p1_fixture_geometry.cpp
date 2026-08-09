@@ -19,8 +19,8 @@ auto key(const P1FixturePoint& point) {
 
 TEST(P1FixtureGeometry, CentralObstacleLeavesEqualLaneClearance) {
   P1FixtureConfig config;
-  EXPECT_DOUBLE_EQ(config.central_x_min_m, -9.0);
-  EXPECT_DOUBLE_EQ(config.central_x_max_m, -4.0);
+  EXPECT_DOUBLE_EQ(config.central_x_min_m, -8.0);
+  EXPECT_DOUBLE_EQ(config.central_x_max_m, -3.0);
   EXPECT_DOUBLE_EQ(config.central_y_half_width_m, 0.65);
   config.name = "p1_fork_fused_v1";
   const auto points = iap::planner::make_p1_fixture_points(config);
@@ -88,6 +88,21 @@ TEST(P1FixtureGeometry, SymmetricSafeLaneFeaturesStayBelowFlightLayer) {
   ASSERT_FALSE(points.empty());
   EXPECT_TRUE(std::all_of(points.begin(), points.end(), [](const auto& point) {
     return point.z <= 0.55 + 1.0e-12;
+  }));
+}
+
+TEST(P1FixtureGeometry, RiskyLaneTrunksLeaveConservativeCenterClearance) {
+  P1FixtureConfig config;
+  config.name = "p1_fork_fused_v1";
+  config.central_obstacle_enabled = false;
+  const auto points = iap::planner::make_p1_fixture_points(config);
+  const auto risky_trunk = [&config](const auto& point) {
+    return point.z <= 2.0 && std::abs(point.y - config.lane_center_m) < 2.0;
+  };
+  ASSERT_GT(std::count_if(points.begin(), points.end(), risky_trunk), 0);
+  EXPECT_TRUE(std::all_of(points.begin(), points.end(), [&config, &risky_trunk](const auto& point) {
+    return !risky_trunk(point) ||
+           std::abs(point.y - config.lane_center_m) >= 1.35;
   }));
 }
 

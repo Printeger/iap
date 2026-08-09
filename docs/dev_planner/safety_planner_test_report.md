@@ -9480,3 +9480,12 @@ checkpoint, and lowers only the safe/null short trunks to 0.55 m. Risky tall
 features, density/canopy, mirror/null symmetry, P0, lambda, and all gates remain
 unchanged. Raw c11 evidence remains under
 `results/planner_validation/campaigns/p1-2-20260809-bf001d0-c11/`.
+
+Clean c12 (`79b962e`) completed 10/10 validator-PASS runs. Nine checkpoint
+profiles were within 1–3 occupied samples of full support, all at the
+conservative backward footprint of the `x=-9` box entrance. One mirror run
+also grazed the inner risky-lane tall trunks. The next clean campaign centers
+the unchanged-length box at `x=-8..-3` and symmetrically moves both lanes'
+boundary features 0.4 m outward; generated-point tests enforce flight-layer
+trunk clearance. Raw c12 evidence remains under
+`results/planner_validation/campaigns/p1-2-20260809-79b962e-c12/`.
