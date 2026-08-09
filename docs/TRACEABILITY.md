@@ -1,5 +1,11 @@
 # Traceability Matrix (IAP)
 
+## 2026-08-09 P1-2 GNSS/LiDAR mask separation
+
+| Req ID | Evidence | Verification | Status |
+|---|---|---|---|
+| IAP-RQ-320 / IAP-RQ-400 / IAP-RQ-410 / IAP-RQ-422 | c32 candidate evidence proves the low v12 mask inverted fused contrast by improving upper-arm LiDAR observability. | Geometry v13 moves the physical mask to `z=7.30..7.55 m`, beyond the formal LiDAR bound `1.5 + 10 tan(30 deg)`, while GNSS continues raycasting the global cloud. `FormalReferenceArmGnssMaskStaysOutsideLidarVerticalFov` plus exact mirror/null/clearance tests pass. | **IMPLEMENTED; fresh campaign required; formal analyzer zero; P1-3 prohibited** |
+
 ## 2026-08-09 P1-2 c32 retained result and stop-rule correction
 
 | Req ID | Evidence | Verification | Status |

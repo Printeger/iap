@@ -97,14 +97,14 @@ inline void append_p1_overhead_observability_rafters(
 
 inline void append_p1_overhead_gnss_mask(
     std::vector<P1FixturePoint>& points, double center_y, double resolution) {
-  // The simulator classifies real map occlusion by sampling 0.5 m voxels at
-  // 0.25 m intervals along each satellite LOS.  A continuous, collision-
-  // neutral overhead surface therefore provides a reproducible urban/forest
-  // canopy mask without encoding any risk score or changing the registered
-  // tree/canopy population.  Its generous planform catches oblique LOS rays
-  // while remaining spatially separated from the opposite fork arm.
+  // The GNSS simulator consumes the global map while the simulated forward
+  // LiDAR rejects points whose vertical displacement exceeds
+  // sensing_horizon*tan(30 deg).  At the formal 1.5 m flight altitude and
+  // 10 m horizon, z >= 7.30 m is therefore a real GNSS-only part of the same
+  // physical scene.  Keeping the continuous mask there prevents its dense
+  // returns from improving LiDAR observability and inverting fused risk.
   append_p1_box(points, -11.5, 2.5, center_y - 1.25, center_y + 1.25,
-                2.85, 3.15, resolution);
+                7.30, 7.55, resolution);
 }
 
 inline std::vector<P1FixturePoint> make_p1_fixture_points(const P1FixtureConfig& config) {

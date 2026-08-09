@@ -93,6 +93,8 @@ v11 将 formal reference 明确定义为镜像绑定的无 P1 控制臂：只在
 
 v12 针对 c31 已证明的稀疏球形树冠 LOS 间隙，在 canonical reference 臂上方增加连续物理 GNSS mask：`x=-11.5..2.5 m`、横向半宽 `1.25 m`、`z=2.85..3.15 m`。它与 GNSS simulator 的真实 `0.5 m` map voxel / `0.25 m` ray sample 交互，不写死风险值；全体点保持在飞行层以上，primary/mirror 仍由同一生成点集逐点 Y 反射，null/soft 不生成该 mask。树木/树冠数值参数、固定 lambda/normalization、P0/P5、碰撞、急停、replacement 和 fallback 均不改变。
 
+v13 根据 c32 的完整候选证据隔离 GNSS 遮挡与 LiDAR 可观测性：连续 mask 的平面范围不变，只将高度移到 `z=7.30..7.55 m`。formal 飞行高度 `1.5 m`、LiDAR sensing horizon `10 m`，而 `pcl_render_node` 明确丢弃 `|delta z|/10 > tan(30 deg)` 的点，因此 mask 不进入真实 LiDAR cloud；GNSS simulator 仍对 `/map_generator/global_cloud` 做真实 raycast。测试绑定该不等式、精确 mirror、null/soft 隔离和飞行层净空，不改变任何风险常数或安全语义。
+
 预资格要求上下通道均 collision-feasible 且完整 `200/200`，检查点唯一，单次定位误差 `<=0.5 m`、pair 差值 `<=0.25 m`，P0/context/validator/provenance 门全部通过，并满足：
 
 - 两个主场景 enabled 均选下路，mean 改善 `>0.00836`、CVaR 改善 `>0.00677`、max 不回退；

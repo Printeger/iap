@@ -197,11 +197,16 @@ TEST(P1FixtureGeometry, UnchangedRiskyCanopiesOccludeOppositeBaselineRouteAboveF
                            }));
 }
 
-TEST(P1FixtureGeometry, FormalReferenceArmHasContinuousCollisionNeutralGnssMask) {
+TEST(P1FixtureGeometry, FormalReferenceArmGnssMaskStaysOutsideLidarVerticalFov) {
   P1FixtureConfig config;
   config.name = "p1_fork_fused_v1";
   config.central_obstacle_enabled = false;
   const auto points = iap::planner::make_p1_fixture_points(config);
+
+  constexpr double kFlightZ = 1.5;
+  constexpr double kLidarHorizon = 10.0;
+  const double lidar_max_z =
+      kFlightZ + kLidarHorizon * std::tan(M_PI / 6.0);
 
   // A continuous overhead surface is required because the GNSS simulator
   // samples 0.5 m occupancy voxels along each satellite LOS.  Sparse canopy
@@ -211,15 +216,16 @@ TEST(P1FixtureGeometry, FormalReferenceArmHasContinuousCollisionNeutralGnssMask)
          y <= config.lane_center_m + 0.75 + 1.0e-9; y += 0.5) {
       EXPECT_TRUE(std::any_of(points.begin(), points.end(), [x, y](const auto& point) {
         return std::abs(point.x - x) <= 0.11 &&
-            std::abs(point.y - y) <= 0.11 && point.z >= 2.85 - 1.0e-12;
+            std::abs(point.y - y) <= 0.11 && point.z >= 7.30 - 1.0e-12;
       })) << "missing overhead GNSS mask near x=" << x << ", y=" << y;
     }
   }
-  EXPECT_TRUE(std::all_of(points.begin(), points.end(), [&config](const auto& point) {
-    const bool inside_reference_arm =
-        point.x >= -10.1 && point.x <= 1.1 &&
-        std::abs(point.y - config.lane_center_m) <= 0.86;
-    return !inside_reference_arm || point.z >= 2.85 - 1.0e-12;
+  std::vector<P1FixturePoint> mask;
+  iap::planner::append_p1_overhead_gnss_mask(
+      mask, config.lane_center_m, config.resolution_m);
+  ASSERT_FALSE(mask.empty());
+  EXPECT_TRUE(std::all_of(mask.begin(), mask.end(), [lidar_max_z](const auto& point) {
+    return point.z > lidar_max_z;
   }));
 
   P1FixtureConfig null_config = config;
@@ -228,7 +234,7 @@ TEST(P1FixtureGeometry, FormalReferenceArmHasContinuousCollisionNeutralGnssMask)
   EXPECT_TRUE(std::none_of(null_points.begin(), null_points.end(), [&config](const auto& point) {
     return point.x >= -10.1 && point.x <= 1.1 &&
         std::abs(point.y - config.lane_center_m) <= 0.86 &&
-        point.z >= 2.85 - 1.0e-12;
+        point.z >= 7.30 - 1.0e-12;
   }));
 }
 

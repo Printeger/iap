@@ -9564,3 +9564,15 @@ Compact evidence and hashes are archived under
 `p1_formal_test_report_artifacts/2026-08-09-da5b15a/`; losslessly-gzipped raw
 evidence remains under
 `results/planner_validation/campaigns/p1-2-20260809-da5b15a-c32/`.
+
+### v13 GNSS/LiDAR physical-mask separation
+
+c32's complete candidate precheck showed upper mean risk near `1.2106` versus
+lower near `1.2371`: the v12 dense low mask improved upper-arm LiDAR
+observability and inverted the intended fused contrast. Geometry v13 keeps the
+same physical planform but moves it to `z=7.30..7.55 m`. At formal flight
+`z=1.5 m`, the simulated LiDAR's 10 m horizon and 30-degree vertical filter
+exclude every mask point, while GNSS continues to raycast the global physical
+cloud. A red/green generated-point test binds that inequality together with
+exact mirror and null/soft isolation. No risk parameter, fixed lambda,
+normalization, tree/canopy parameter, or safety/fallback semantic changes.

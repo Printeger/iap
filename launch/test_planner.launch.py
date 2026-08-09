@@ -1979,7 +1979,7 @@ def _launch_setup(context):
 
     scenario_contract = {
         "geometry": {
-            "fixture_algorithm_version": "p1_deterministic_fork_geometry_v12",
+            "fixture_algorithm_version": "p1_deterministic_fork_geometry_v13",
             "fixture": LaunchConfiguration("p1_map_fixture").perform(context),
             "mirror_y": _param_bool(context, "p1_fixture_mirror_y"),
             "start_m": [init_x, init_y, init_z],
@@ -2023,7 +2023,12 @@ def _launch_setup(context):
                     "primary": "upper", "mirror": "lower",
                     "x_m": [-11.5, 2.5],
                     "half_width_y_m": 1.25,
-                    "z_m": [2.85, 3.15],
+                    "z_m": [7.30, 7.55],
+                    "lidar_exclusion_contract": {
+                        "flight_z_m": 1.5,
+                        "sensing_horizon_m": 10.0,
+                        "vertical_half_fov_deg": 30.0,
+                    },
                 },
                 "soft_island": "y=-2.0_m",
                 "null": "symmetric",
