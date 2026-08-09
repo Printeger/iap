@@ -91,10 +91,41 @@ def _validate_provenance_rows(
             raise PrequalificationError(f"{label} provenance binding failed")
 
 
+def _scan_occupancy_evidence(
+    path: Path, run_id: str, manifest_path: Path, context: dict[str, Any]
+) -> tuple[list[dict[str, Any]], dict[tuple[str, ...], list[dict[str, Any]]]]:
+    """Validate the complete stream while retaining only one attempt's join rows."""
+    accepted: list[dict[str, Any]] = []
+    final: dict[tuple[str, ...], list[dict[str, Any]]] = {}
+    row_count = 0
+    expected_manifest = manifest_path.resolve()
+    with path.open(newline="") as handle:
+        for row in csv.DictReader(handle):
+            row_count += 1
+            if (
+                row.get("schema_version") != "p1_evidence_provenance_v4"
+                or row.get("run_id") != run_id
+                or Path(str(row.get("manifest_path", ""))).resolve()
+                != expected_manifest
+            ):
+                raise PrequalificationError("occupancy provenance binding failed")
+            if not _same_attempt_context(row, context):
+                continue
+            if row.get("phase") == "accepted" and _identity(row) == _identity(context):
+                accepted.append(row)
+            elif row.get("phase") == "final":
+                key = (*_identity(row), str(row.get("sample_index", "")))
+                final.setdefault(key, []).append(row)
+    if row_count == 0:
+        raise PrequalificationError("occupancy provenance is empty")
+    return accepted, final
+
+
 def analyze_run(export_value: str | Path) -> dict[str, Any]:
     export = Path(export_value).expanduser().resolve()
     manifest_path = export / "test_planner_manifest.json"
     errors: list[str] = []
+    occupancy_final: dict[tuple[str, ...], list[dict[str, Any]]] = {}
     try:
         manifest = json.loads(manifest_path.read_text())
     except (OSError, json.JSONDecodeError) as exc:
@@ -185,11 +216,11 @@ def analyze_run(export_value: str | Path) -> dict[str, Any]:
             horizons_s=manifest["p0.horizons_s"])
         if not sufficiency.get("passed"):
             errors.append("P0 sampling sufficiency failed")
-        corners = _read_csv(_artifact(
+        occupancy_path = _artifact(
             export, manifest, "p0.occupancy_query_evidence_path",
-            "planner_p0_occupancy_query_evidence.csv"))
-        accepted_corners = [row for row in corners if row.get("phase") == "accepted"
-                            and _identity(row) == _identity(profile[0])]
+            "planner_p0_occupancy_query_evidence.csv")
+        accepted_corners, occupancy_final = _scan_occupancy_evidence(
+            occupancy_path, run_id, manifest_path, profile[0])
         if not formal_metrics.corner_reconstruction_residual(
                 profile, accepted_corners).get("complete"):
             errors.append("P0 accepted-corner provenance is incomplete")
@@ -232,12 +263,8 @@ def analyze_run(export_value: str | Path) -> dict[str, Any]:
             "planner_p1_candidate_optimization.csv"))
         candidates = _read_csv(_artifact(
             export, manifest, "p1.candidate_profile_path", "planner_p1_candidate_profile.csv"))
-        occupancy = _read_csv(_artifact(
-            export, manifest, "p0.occupancy_query_evidence_path",
-            "planner_p0_occupancy_query_evidence.csv"))
         _validate_provenance_rows(optimization, run_id, manifest_path, "candidate optimization")
         _validate_provenance_rows(candidates, run_id, manifest_path, "candidate profile")
-        _validate_provenance_rows(occupancy, run_id, manifest_path, "occupancy")
         context = profile[0]
         metadata = {_identity(row): row for row in optimization
                     if _same_attempt_context(row, context)}
@@ -245,10 +272,8 @@ def analyze_run(export_value: str | Path) -> dict[str, Any]:
         for row in candidates:
             if not _same_attempt_context(row, context) or row.get("phase") != "final":
                 continue
-            matching = [item for item in occupancy
-                        if _identity(item) == _identity(row)
-                        and item.get("phase") == "final"
-                        and str(item.get("sample_index")) == str(row.get("sample_index"))]
+            matching = occupancy_final.get(
+                (*_identity(row), str(row.get("sample_index", ""))), [])
             weight = sum((float(item["temporal_weight"]) * float(item["corner_weight"]))
                          for item in matching)
             meta = metadata.get(_identity(row), {})

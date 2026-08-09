@@ -1,4 +1,6 @@
 import importlib.util
+import csv
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -24,6 +26,30 @@ def run(lane, mean, cvar, maximum, length=10.0):
 
 
 class P1PrequalificationTest(unittest.TestCase):
+    def test_occupancy_scan_indexes_only_the_selected_attempt(self):
+        manifest = Path("/e/test_planner_manifest.json")
+        common = {
+            "schema_version": "p1_evidence_provenance_v4",
+            "run_id": "run-1", "manifest_path": str(manifest),
+            "candidate_id": "2", "snapshot_generation_id": "11",
+            "query_base_time_s": "5.0", "sample_index": "3",
+        }
+        rows = [
+            {**common, "planning_attempt_id": "7", "phase": "accepted"},
+            {**common, "planning_attempt_id": "7", "phase": "final"},
+            {**common, "planning_attempt_id": "8", "phase": "final"},
+        ]
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "occupancy.csv"
+            with path.open("w", newline="") as handle:
+                writer = csv.DictWriter(handle, fieldnames=list(rows[0]))
+                writer.writeheader(); writer.writerows(rows)
+            accepted, final = MODULE._scan_occupancy_evidence(
+                path, "run-1", manifest, rows[0])
+
+        self.assertEqual(len(accepted), 1)
+        self.assertEqual(sum(map(len, final.values())), 1)
+
     def test_candidate_rows_require_run_manifest_and_attempt_context_binding(self):
         manifest = Path("/e/test_planner_manifest.json")
         row = {
