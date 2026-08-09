@@ -9605,3 +9605,28 @@ checkpoint. The generated-point regression proves their presence, symmetry,
 and clearance. The GNSS-only mask, risk parameters, tree/canopy parameters,
 exact mirror/null construction, lambda, normalization, and every safety and
 fallback semantic remain unchanged. A new clean campaign restarts at run one.
+
+### c34 retained incomplete result and v15 real-FOV repair
+
+Clean c34 (`62a7b55767bca87369247e7c51cd9d2cec546322`) completed all ten
+v14 prequalification runs. Nine passed every hard gate. Primary pair 1
+reference diverged within `0.1 s` while truth remained stationary at `x=-12 m`
+and reached `95.182 m` checkpoint localization error; the other nine errors
+were `0.130..0.366 m`. Primary pair 2 selected upper-to-lower and changed mean,
+smooth-CVaR, and max by `+0.004032405`, `+0.007865455`, and `-0.005481487`.
+Mirror, null, and soft-risk passed. c34 is therefore incomplete/non-comparable;
+only c31 and c32 count. Calibration, formal pair/analyzer, and P1-3 did not run.
+
+The v14 generated-point test had checked only range. The actual renderer also
+rejects a point when its normalized 3D direction dot vehicle yaw is below
+`0.5`; all new `|y|=4.5 m` points were outside that real startup FOV. The v15
+test-first repair replaces them with exact-symmetric low blocks at
+`x=-11.25/-10.75 m`, `|y|=0.5 m`, and `z=0..0.55 m`, only in primary/mirror.
+The regression applies the renderer's exact FOV inequality and requires over
+100 visible points. The blocks remain below the flight layer, at least `1.8 m`
+from formal lane centres, and behind checkpoint. GNSS mask, risk/tree/canopy
+parameters, exact mirror/null, safety, and fallback semantics are unchanged.
+Compact hashes are under
+`p1_formal_test_report_artifacts/2026-08-09-62a7b55/`; raw c34 evidence is
+retained losslessly compressed under
+`results/planner_validation/campaigns/p1-2-20260809-62a7b55-c34/`.

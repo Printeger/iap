@@ -98,7 +98,9 @@ TEST(P1FixtureGeometry, DenseLaneTrunksLeaveConservativeCenterClearance) {
   config.central_obstacle_enabled = false;
   const auto points = iap::planner::make_p1_fixture_points(config);
   const auto dense_trunk = [&config](const auto& point) {
-    return point.z <= 2.0 && std::abs(point.y + config.lane_center_m) < 2.0;
+    return point.x >= config.central_x_min_m &&
+        point.x <= config.central_x_max_m && point.z <= 2.0 &&
+        std::abs(point.y + config.lane_center_m) < 2.0;
   };
   ASSERT_GT(std::count_if(points.begin(), points.end(), dense_trunk), 0);
   EXPECT_TRUE(std::all_of(points.begin(), points.end(), [&config, &dense_trunk](const auto& point) {
@@ -128,7 +130,8 @@ TEST(P1FixtureGeometry, FormalInnerBoundaryTrunksStayBesideCentralObstacle) {
   config.lane_center_m = 2.5;
   const auto points = iap::planner::make_p1_fixture_points(config);
   const auto inner = [&config](const auto& point) {
-    return point.z <= 0.55 && std::abs(point.y) < config.lane_center_m;
+    return point.x >= config.central_x_min_m && point.z <= 0.55 &&
+        std::abs(point.y) < config.lane_center_m;
   };
   EXPECT_TRUE(std::any_of(points.begin(), points.end(), inner));
   EXPECT_TRUE(std::all_of(points.begin(), points.end(), [&config, &inner](const auto& point) {
@@ -277,13 +280,24 @@ TEST(P1FixtureGeometry, StartupLocalizationBeaconsAreSymmetricAndLaneExternal) {
   config.lane_center_m = 2.5;
   const auto points = iap::planner::make_p1_fixture_points(config);
   for (const double x : {-11.25, -10.75}) {
-    for (const double y : {-4.5, 4.5}) {
+    for (const double y : {-0.5, 0.5}) {
       EXPECT_TRUE(std::any_of(points.begin(), points.end(), [x, y](const auto& point) {
         return std::abs(point.x - x) <= 0.051 &&
-            std::abs(point.y - y) <= 0.051 && point.z >= 1.0 && point.z <= 2.0;
+            std::abs(point.y - y) <= 0.051 && point.z >= 0.2 && point.z <= 0.5;
       })) << "missing startup beacon near x=" << x << ", y=" << y;
     }
   }
+  const auto forward_lidar_visible = [](const P1FixturePoint& point) {
+    if (point.x < -11.51 || point.x > -10.49 || point.z > 0.55 + 1.0e-12)
+      return false;
+    const double dx = point.x + 12.0;
+    const double dy = point.y;
+    const double dz = point.z - 1.5;
+    const double norm = std::sqrt(dx * dx + dy * dy + dz * dz);
+    return norm > 0.0 && dx / norm >= 0.5 - 1.0e-12 &&
+        std::abs(dz) / 10.0 <= std::tan(M_PI / 6.0) + 1.0e-12;
+  };
+  EXPECT_GT(std::count_if(points.begin(), points.end(), forward_lidar_visible), 100);
   EXPECT_TRUE(std::all_of(points.begin(), points.end(), [&config](const auto& point) {
     const bool startup_region = point.x >= -11.51 && point.x <= -10.49 &&
         point.z <= 2.5;

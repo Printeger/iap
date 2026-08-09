@@ -1,5 +1,11 @@
 # Traceability Matrix (IAP)
 
+## 2026-08-09 P1-2 c34 retained result and real-FOV startup repair
+
+| Req ID | Evidence | Verification | Status |
+|---|---|---|---|
+| IAP-RQ-320 / IAP-RQ-400 / IAP-RQ-410 / IAP-RQ-422 | Clean c34 (`62a7b55`) passed 9/10 hard gates; primary reference diverged at stationary startup to `95.182 m`, while the other nine localization errors were `0.130..0.366 m`. Renderer source proves v14 lateral pylons fail its `direction dot yaw >=0.5` FOV test. | Geometry v15 uses symmetric `z<=0.55 m` startup blocks inside the exact 3D FOV, outside formal lane centres and behind checkpoint. Updated red/green `StartupLocalizationBeaconsAreSymmetricAndLaneExternal` verifies count/FOV/symmetry/clearance; all geometry tests pass. | **IMPLEMENTED; c34 incomplete/non-comparable; only c31/c32 count; fresh campaign required; formal analyzer zero; P1-3 prohibited** |
+
 ## 2026-08-09 P1-2 c33 retained result and startup localization repair
 
 | Req ID | Evidence | Verification | Status |

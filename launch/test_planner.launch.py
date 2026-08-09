@@ -1979,7 +1979,7 @@ def _launch_setup(context):
 
     scenario_contract = {
         "geometry": {
-            "fixture_algorithm_version": "p1_deterministic_fork_geometry_v14",
+            "fixture_algorithm_version": "p1_deterministic_fork_geometry_v15",
             "fixture": LaunchConfiguration("p1_map_fixture").perform(context),
             "mirror_y": _param_bool(context, "p1_fixture_mirror_y"),
             "start_m": [init_x, init_y, init_z],
@@ -2041,12 +2041,15 @@ def _launch_setup(context):
                 "z_m": [0.0, 3.0],
             },
             "startup_localization_beacons": {
-                "kind": "symmetric_staggered_pylons",
+                "kind": "symmetric_low_staggered_blocks",
+                "fixtures": ["p1_fork_fused_v1", "p1_fork_fused_mirror_v1"],
                 "x_m": [-11.25, -10.75],
-                "center_abs_y_m": 4.5,
-                "half_width_m": 0.25,
-                "z_m": [0.0, 3.0],
-                "formal_min_lane_center_clearance_m": 1.75,
+                "center_abs_y_m": 0.5,
+                "half_width_y_m": 0.2,
+                "half_width_x_m": 0.25,
+                "z_m": [0.0, 0.55],
+                "formal_min_lane_center_clearance_m": 1.8,
+                "lidar_forward_dot_min": 0.5,
                 "checkpoint_relation": "behind_vehicle",
             },
             "boundary_tree_layout": {
