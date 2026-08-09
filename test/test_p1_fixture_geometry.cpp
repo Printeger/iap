@@ -125,6 +125,37 @@ TEST(P1FixtureGeometry, RiskyCanopiesOccludeGnssAboveButNotInsideFlightLane) {
                            }));
 }
 
+TEST(P1FixtureGeometry, SafeLaneGetsLowCollisionNeutralObservabilityFacades) {
+  P1FixtureConfig primary;
+  primary.name = "p1_fork_fused_v1";
+  primary.central_obstacle_enabled = false;
+  const auto points = iap::planner::make_p1_fixture_points(primary);
+  const auto facade_point = [](const auto& point, double y) {
+    return std::abs(point.x + 11.0) <= 0.25 + 1.0e-12 &&
+        std::abs(point.y - y) <= 0.25 + 1.0e-12 &&
+        point.z <= 0.55 + 1.0e-12;
+  };
+  EXPECT_GT(std::count_if(points.begin(), points.end(),
+                          [&facade_point](const auto& point) {
+                            return facade_point(point, -4.0);
+                          }), 100);
+  EXPECT_EQ(std::count_if(points.begin(), points.end(),
+                          [&facade_point](const auto& point) {
+                            return facade_point(point, 4.0);
+                          }), 0);
+
+  primary.name = "p1_fork_symmetric_null_v1";
+  const auto null_points = iap::planner::make_p1_fixture_points(primary);
+  EXPECT_EQ(std::count_if(null_points.begin(), null_points.end(),
+                          [&facade_point](const auto& point) {
+                            return facade_point(point, -4.0);
+                          }),
+            std::count_if(null_points.begin(), null_points.end(),
+                          [&facade_point](const auto& point) {
+                            return facade_point(point, 4.0);
+                          }));
+}
+
 TEST(P1FixtureGeometry, FormalFixturesProvideSymmetricCollisionNeutralLidarLandmarks) {
   P1FixtureConfig config;
   config.name = "p1_soft_risk_island_v1";

@@ -144,11 +144,11 @@ inline bool shouldRecordP1FormalCheckpointObservation(
 inline bool shouldAttemptP1ExecutingFormalObservation(
     bool p1_admission_enabled, bool p5_owns_admission,
     bool checkpoint_already_recorded, bool executing_trajectory,
-    bool snapshot_available,
+    bool latest_snapshot_available,
     uint64_t observation_attempt_id) {
   return p1_admission_enabled && !p5_owns_admission &&
       !checkpoint_already_recorded && executing_trajectory &&
-      snapshot_available && observation_attempt_id > 0;
+      latest_snapshot_available && observation_attempt_id > 0;
 }
 
 inline P1SoftFallbackDecision decideP1BasePrepassFallback(

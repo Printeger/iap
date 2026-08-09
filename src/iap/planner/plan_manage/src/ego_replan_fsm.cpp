@@ -513,23 +513,28 @@ namespace ego_planner
     const bool p5_owns_admission = planner_manager_->p5_integrity_gate_ &&
         (planner_manager_->p5_integrity_gate_->runtimeEnabled() ||
          planner_manager_->p5_integrity_gate_->finalGateEnabled());
+    // The attempt identity belongs to the executing incumbent. Its original
+    // planning snapshot can legitimately age beyond the one-second P0
+    // admission freshness limit before the vehicle reaches the checkpoint, so
+    // observe it against the latest immutable P0 snapshot instead.
+    const auto latest_observation_snapshot =
+        planner_manager_->acquireRiskGridSnapshot();
     if (shouldAttemptP1ExecutingFormalObservation(
             planner_manager_->p1AdmissionEnabled(), p5_owns_admission,
             planner_manager_->p1FormalCheckpointRecorded(),
             exec_state_ == EXEC_TRAJ,
-            static_cast<bool>(p1_formal_observation_snapshot_),
+            static_cast<bool>(latest_observation_snapshot),
             p1_formal_observation_attempt_id_))
     {
       const double now_s = plannerNow().seconds();
       planner_manager_->beginPlanningRiskContextWithSnapshot(
-          now_s, p1_formal_observation_snapshot_,
+          now_s, latest_observation_snapshot,
           p1_formal_observation_attempt_id_);
       const bool recorded =
           planner_manager_->recordP1FormalDecisionObservation(now_s);
       planner_manager_->clearPlanningRiskContext();
       if (recorded)
       {
-        p1_formal_observation_snapshot_.reset();
         p1_formal_observation_attempt_id_ = 0;
       }
     }
@@ -986,15 +991,6 @@ namespace ego_planner
           generation, health.ready, stale, has_existing_trajectory);
       acquire_p1_context = admission.acquire_p1_context;
       p1_planning_attempt_id = admission.planning_attempt_id;
-      if (admission.allow_expensive_planning && admission.acquire_p1_context &&
-          admission.planning_attempt_id > 0 && admitted_snapshot)
-      {
-        // Retain the exact immutable attempt context for the executing-state
-        // checkpoint observer. Replanning is event-driven and can otherwise
-        // be silent while the incumbent traverses the fixed window.
-        p1_formal_observation_snapshot_ = admitted_snapshot;
-        p1_formal_observation_attempt_id_ = admission.planning_attempt_id;
-      }
       if (!admission.allow_expensive_planning)
       {
         planner_manager_->recordP1RetryDeferred(
@@ -1142,6 +1138,13 @@ namespace ego_planner
       {
         RCLCPP_WARN(node_->get_logger(),
                     "P1 published fresh bspline but could not write accepted-profile evidence");
+      }
+      if (acquire_p1_context && p1_planning_attempt_id > 0)
+      {
+        // Only a successfully published incumbent owns the observation
+        // identity; a failed planning attempt must not relabel the trajectory
+        // that remains in execution.
+        p1_formal_observation_attempt_id_ = p1_planning_attempt_id;
       }
       if (planner_manager_->p1AdmissionEnabled() && !p5_owns_admission)
       {
