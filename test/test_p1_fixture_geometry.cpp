@@ -271,4 +271,26 @@ TEST(P1FixtureGeometry, FormalFixturesProvideSymmetricCollisionNeutralLidarLandm
   }));
 }
 
+TEST(P1FixtureGeometry, StartupLocalizationBeaconsAreSymmetricAndLaneExternal) {
+  P1FixtureConfig config;
+  config.name = "p1_fork_fused_v1";
+  config.lane_center_m = 2.5;
+  const auto points = iap::planner::make_p1_fixture_points(config);
+  for (const double x : {-11.25, -10.75}) {
+    for (const double y : {-4.5, 4.5}) {
+      EXPECT_TRUE(std::any_of(points.begin(), points.end(), [x, y](const auto& point) {
+        return std::abs(point.x - x) <= 0.051 &&
+            std::abs(point.y - y) <= 0.051 && point.z >= 1.0 && point.z <= 2.0;
+      })) << "missing startup beacon near x=" << x << ", y=" << y;
+    }
+  }
+  EXPECT_TRUE(std::all_of(points.begin(), points.end(), [&config](const auto& point) {
+    const bool startup_region = point.x >= -11.51 && point.x <= -10.49 &&
+        point.z <= 2.5;
+    return !startup_region ||
+        std::min(std::abs(point.y - config.lane_center_m),
+                 std::abs(point.y + config.lane_center_m)) >= 1.70 - 1.0e-12;
+  }));
+}
+
 }  // namespace

@@ -83,6 +83,23 @@ inline void append_p1_observability_landmarks(
   }
 }
 
+inline void append_p1_startup_localization_beacons(
+    std::vector<P1FixturePoint>& points, double resolution) {
+  // A short, symmetric pair of staggered structures is visible in the
+  // forward LiDAR field while the vehicle is stationary at x=-12 m.  The
+  // structures remain outside both formal lanes and are behind the vehicle by
+  // the risk checkpoint, so they improve initialization without changing the
+  // registered fork comparison.
+  for (const double x : {-11.25, -10.75}) {
+    const std::size_t first = points.size();
+    append_p1_box(points, x - 0.25, x + 0.25, -4.75, -4.25,
+                  0.0, 3.0, resolution);
+    const std::size_t last = points.size();
+    for (std::size_t index = first; index < last; ++index)
+      points.push_back({points[index].x, -points[index].y, points[index].z});
+  }
+}
+
 inline void append_p1_overhead_observability_rafters(
     std::vector<P1FixturePoint>& points, double center_y, double resolution) {
   // Compact structured returns above the flight layer strengthen the real
@@ -185,6 +202,7 @@ inline std::vector<P1FixturePoint> make_p1_fixture_points(const P1FixtureConfig&
         base, config.lane_center_m, config.resolution_m);
   }
   append_p1_observability_landmarks(base, config.resolution_m);
+  append_p1_startup_localization_beacons(base, config.resolution_m);
   if (config.mirror_y)
     for (auto& point : base) point.y = -point.y;
   return base;

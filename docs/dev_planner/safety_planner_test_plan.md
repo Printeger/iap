@@ -95,6 +95,8 @@ v12 针对 c31 已证明的稀疏球形树冠 LOS 间隙，在 canonical referen
 
 v13 根据 c32 的完整候选证据隔离 GNSS 遮挡与 LiDAR 可观测性：连续 mask 的平面范围不变，只将高度移到 `z=7.30..7.55 m`。formal 飞行高度 `1.5 m`、LiDAR sensing horizon `10 m`，而 `pcl_render_node` 明确丢弃 `|delta z|/10 > tan(30 deg)` 的点，因此 mask 不进入真实 LiDAR cloud；GNSS simulator 仍对 `/map_generator/global_cloud` 做真实 raycast。测试绑定该不等式、精确 mirror、null/soft 隔离和飞行层净空，不改变任何风险常数或安全语义。
 
+v14 根据 c33 在 planner 启动前发生的单次镜像定位发散，增加仅用于真实 LiDAR 初始化的对称错列 pylons：`x=-11.25/-10.75 m`、`|y|=4.5 m`、`z=0..3 m`。它们在 `x=-12 m` 静止启动时位于前向视野，在固定 `x=-9.5 m` checkpoint 已位于机后；距 `|y|=2.5 m` formal lane centre 的最近点为 `1.75 m`。生成点测试约束存在性、精确对称和净空。该修复不改变 GNSS mask、风险参数、树木/树冠参数、mirror/null、碰撞或 fallback 语义。
+
 预资格要求上下通道均 collision-feasible 且完整 `200/200`，检查点唯一，单次定位误差 `<=0.5 m`、pair 差值 `<=0.25 m`，P0/context/validator/provenance 门全部通过，并满足：
 
 - 两个主场景 enabled 均选下路，mean 改善 `>0.00836`、CVaR 改善 `>0.00677`、max 不回退；

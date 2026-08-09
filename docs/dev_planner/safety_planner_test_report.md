@@ -9527,9 +9527,9 @@ soft-risk pairs passed. The two primary mean improvements were only
 `0.00141195` and `0.00199095`, and smooth-CVaR improvements were `0.00065593`
 and `0.00245669`, below the preregistered `0.00836` and `0.00677` thresholds.
 Mirror mean/CVaR improvements were `0.00117764`/`0.0000329`, with exact-max
-regression `0.00012166`. Thus c31 is the second complete comparable scientific
-failure after c17; calibration, formal preflight/pair/analyzer, and P1-3 did
-not start. Raw evidence is retained losslessly compressed under
+regression `0.00012166`. Under the corrected accounting (c17 was incomplete),
+c31 is the first complete comparable scientific failure; calibration, formal
+preflight/pair/analyzer, and P1-3 did not start. Raw evidence is retained losslessly compressed under
 `results/planner_validation/campaigns/p1-2-20260809-1958af4-c31/`.
 
 The compliant v12 repair adds a continuous collision-neutral physical GNSS
@@ -9576,3 +9576,32 @@ exclude every mask point, while GNSS continues to raycast the global physical
 cloud. A red/green generated-point test binds that inequality together with
 exact mirror and null/soft isolation. No risk parameter, fixed lambda,
 normalization, tree/canopy parameter, or safety/fallback semantic changes.
+
+### c33 retained incomplete prequalification and v14 startup repair
+
+Clean c33 (`7d4537b`) completed all ten prescribed serial 90-second v13
+prequalification runs. Nine runs passed every per-run hard gate. Primary
+reference selected upper twice and enabled selected lower twice. Pair 1 mean,
+smooth-CVaR, and max changes were `+0.005235524`, `+0.008341255`, and
+`-0.005345602`; pair 2 changes were `+0.002365485`, `+0.001631563`, and
+`-0.001364371`. Thus the physical direction was correct, but both mean gains
+and pair 2 CVaR remained below the preregistered thresholds. Null and soft-risk
+pairs passed.
+
+Mirror reference diverged before planner start and had `53.284 m` localization
+error at its otherwise unique checkpoint; mirror enabled localization error was
+`0.176 m`. Consequently c33 has only 9/10 hard-gate runs and is incomplete,
+not a third comparable scientific failure. Only c31 and c32 count toward the
+three-campaign stop rule. Calibration, formal preflight/pair/analyzer, and P1-3
+did not run; formal analyzer invocation count remains zero. Raw c33 evidence is
+retained losslessly compressed under
+`results/planner_validation/campaigns/p1-2-20260809-7d4537b-c33/`.
+
+The test-first v14 repair adds two staggered exact-symmetric pairs of physical
+LiDAR startup pylons at `x=-11.25/-10.75 m`, `|y|=4.5 m`, `z=0..3 m`. They
+are forward-visible at the stationary `x=-12 m` start, remain at least `1.75 m`
+from either formal lane centre, and are behind the vehicle by the immutable
+checkpoint. The generated-point regression proves their presence, symmetry,
+and clearance. The GNSS-only mask, risk parameters, tree/canopy parameters,
+exact mirror/null construction, lambda, normalization, and every safety and
+fallback semantic remain unchanged. A new clean campaign restarts at run one.

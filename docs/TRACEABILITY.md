@@ -1,5 +1,11 @@
 # Traceability Matrix (IAP)
 
+## 2026-08-09 P1-2 c33 retained result and startup localization repair
+
+| Req ID | Evidence | Verification | Status |
+|---|---|---|---|
+| IAP-RQ-320 / IAP-RQ-400 / IAP-RQ-410 / IAP-RQ-422 | Clean c33 (`7d4537b`) passed 9/10 per-run hard gates. Both primary enabled runs chose lower and improved all risk metrics, null and soft passed, but mirror reference diverged before planning and had `53.284 m` checkpoint localization error. | c33 is retained losslessly compressed and is incomplete/non-comparable. Geometry v14 adds exact-symmetric startup pylons at `x=-11.25/-10.75 m`, `|y|=4.5 m`; `StartupLocalizationBeaconsAreSymmetricAndLaneExternal` proves presence, symmetry, and `>=1.70 m` clearance. They are behind the vehicle at the fixed checkpoint. | **IMPLEMENTED; fresh campaign required; only c31/c32 count; formal analyzer zero; P1-3 prohibited** |
+
 ## 2026-08-09 P1-2 GNSS/LiDAR mask separation
 
 | Req ID | Evidence | Verification | Status |
