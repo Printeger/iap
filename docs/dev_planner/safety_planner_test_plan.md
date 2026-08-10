@@ -67,9 +67,15 @@ all
 | P3 | reference/local target bias | 替代 global obstacle-aware planner |
 | P4 | collision segment A* guide preference | 处理 collision-free high-risk 轨迹 |
 
-### 1.4 P1-2 一次性 fork campaign（预冻结容差）
+### 1.4 历史 Phase 3 v1：P1-2 一次性 fork campaign（停止使用）
 
-P1-2 只通过可恢复状态机入口运行，禁止手工跳过或删除失败运行：
+> **历史协议，不得再运行。** `run_p1_2_campaign.py` 及本节以下
+> fork/mirror/null/soft 流程仅用于复算 c31–c38 的既有结论。c31、c32、
+> c38 已构成三次完整可比的预资格失败，旧 P1-2 保持 `BLOCKED`，formal
+> analyzer 调用次数为 0；不得用 Phase 3 v2 追认旧 campaign PASS。
+
+历史 P1-2 曾只允许通过以下可恢复状态机入口运行；命令保留用于解释既有
+campaign provenance，**不得执行以创建新 campaign**：
 
 ```bash
 python3 scripts/dev_planner/run_p1_2_campaign.py --dry-run \
@@ -121,6 +127,29 @@ current_max - reference_max <= tau_max
 ```
 
 容差仅用于独立运行 formal 比较；生产 same-snapshot candidate/replacement exact-max gates、P5 权限和 fallback 语义不变。冻结后禁止修改或重建。状态机随后各运行一次 fresh 90 秒 reference/enabled（bag 开启），各调用一次 preflight；仅两者 PASS 才原子记录并消费唯一一次 formal analyzer invocation。conclusive FAIL/INCONCLUSIVE 后不得调参或重试。PASS 只记录“P1-3 获准”，本流程不运行 P1-3。
+
+---
+
+### 1.5 Phase 3 v2：固定候选、固定 P0 快照的 P1 验证协议
+
+Phase 3 v2 只验证低权重 P1 soft cost 能在固定候选和固定 P0 快照下温和
+降低定位风险，同时不破坏碰撞、动力学和 P5 权威。fork 上/下路线选择属于
+P2 ranking，移至 Phase 4 的 P2-2。以下门限必须在 future fresh campaign
+中预注册；不得从 c31–c38 的正向观测反推，null 非劣容差只能由该 fresh
+campaign 的预注册 null 数据冻结。
+
+| ID | 实验 | Phase 3 v2 设计与硬门 |
+|---|---|---|
+| P1-1 | Off/metrics-only 无干扰 | 同一初值和快照比较 P1 off 与 metrics-only；最终控制点、候选身份和 base objective 相同，`applied_to_objective=false`，`200/200` 证据及 provenance 完整。 |
+| P1-2 | 同快照因果机制 | 使用单一同伦走廊、10 个预定义 B-spline 初值及 affine、精确镜像、flat-null、平滑 risk-island 四种冻结字段。reference/enabled 绑定相同初值 hash、snapshot、时间基准和 support signature。非 null 场景要求 raw P1 objective 下降、`gradient·displacement<0`、mean PL 下降、min IM 上升；镜像方向相反；null 在数值容差内不动；max PL 在 null 非劣界内；碰撞和动力学全部通过。不再使用旧绝对降幅。 |
+| P1-3 | 权重与裁剪 sweep | 先验证原始 lambda `1e-6,3e-6,1e-5,3e-5,1e-4` 的缩放单调性。production normalized stage 固定 reference lambda `1e-5`，扫描有效预算 `0.01,0.03,0.05,0.10,0.20,0.30` 与 grad clip `0.05,0.1,0.2`。通过配置须无安全/可行性失败，至少 9/10 同向改善，归一化 P1/base 梯度比中位数 5%–20% 且 P95 不超过 20%；按最小有效预算、再最小 clip 冻结。 |
+| P1-4 | Fresh 闭环确认 | 先以 10 个 flat-null 配对冻结 mean/min-IM/max 非劣容差，再用未参与 sweep 的 10 个 seed 做 counterbalanced fresh reference/enabled 配对；唯一有效决策事件后结束，最长 60 s。mean PL 与 min IM 至少 9/10 改善，单侧 exact sign test `p<0.05`，中位改善超过冻结 null 容差；路径增长不超过 5%，无碰撞/动力学失败，P95 规划延迟不超过 baseline 110% 和规划周期预算。 |
+| P1-5 | Unknown/stale 策略 | 扫描 handbook stale timeout `0.5/1.0/2.0 s` 和冻结的 low/medium/high unknown penalty；覆盖 partial、全 unknown、stale、NaN。禁止把 unknown 当低风险，证据不足必须明确 fallback，且不得 NaN、崩溃或向 unknown 区域吸引。 |
+| P1-6 | P5 权威隔离 | 使用 query-aligned future-risk 注入执行 P1 off/on + P5 on 对照。P1 只能表达偏好；所有不满足安全条件的轨迹仍由 P5 replan/reject，P1 不得产生硬安全 PASS 或绕过 final gate。 |
+
+P2-2 使用 fork primary/mirror/null/soft 冻结场景，但必须在**同一次 planning
+attempt、同一候选集合、同一 P0 snapshot** 下验证 P2 ranking。旧 c38 运行时
+P2 关闭，只能作为场景迁移依据，不能算 P2 证据。
 
 ---
 
@@ -481,11 +510,12 @@ ros2 launch iap test_planner.launch.py \
 
 ---
 
-## S4：P1 metrics-only soft cost
+## S4：Phase 3 v2 P1-1 metrics-only soft cost
 
 ### 目的
 
-验证 P1 采样、cost、gradient、snapshot 固定和计算开销，不改变轨迹。
+按 P1-1 的同初值、同快照配对验证 P1 采样、cost、gradient 和计算开销，
+并要求最终控制点、候选身份与 base objective 精确保持一致。
 
 ### 场景
 
@@ -511,16 +541,19 @@ ros2 launch iap test_planner.launch.py \
 - `f_integrity`、`grad_norm_integrity`、`hit_count` 非零。
 - `sample_count <= max_samples_per_eval`。
 - snapshot generation 在一次 optimize attempt 内不变。
-- metrics-only 时轨迹与 baseline 基本一致。
+- metrics-only 时 `applied_to_objective=false`，最终控制点、候选身份与 base
+  objective 和同初值/同快照的 P1-off 对照相同，证据 `200/200`。
 - P1 不调用 raw PL / Predictor。
 
 ---
 
-## S5：P1 enabled soft cost effectiveness
+## S5：Phase 3 v2 P1-2 至 P1-6 soft cost effectiveness
 
 ### 目的
 
-验证 P1 作为低权重 risk preference 是否能将轨迹推离高风险区域。
+按 §1.5 的固定候选/固定快照机制、预注册 sweep、fresh 闭环、unknown/stale
+和 P5 隔离顺序，验证 P1 是低权重 risk preference。禁止使用历史 v1 fork
+跨运行绝对降幅作为 P1-2 判据。
 
 ### 场景
 
@@ -543,7 +576,7 @@ ros2 launch iap test_planner.launch.py \
 
 ### 评价指标
 
-对比 baseline 与 P1 enabled：
+同快照机制通过后，再按 P1-4 对比 fresh paired reference 与 enabled：
 
 | 指标 | 期望 |
 |---|---|
@@ -557,10 +590,12 @@ ros2 launch iap test_planner.launch.py \
 
 ### 通过标准
 
-- 轨迹有可解释的低 risk 偏移。
+- 非 null 同快照候选的 raw P1 objective、mean PL 下降，min IM 上升，且
+  `gradient·displacement<0`；镜像方向相反，flat-null 在冻结容差内不动。
+- fresh 闭环 mean PL/min IM 至少 9/10 改善且 exact sign test `p<0.05`。
 - 不穿障碍。
 - 不明显牺牲动力学可行性。
-- `grad_ratio` 不应长期 <1% 或 >30%。
+- normalized P1/base gradient ratio 中位数 5%–20%，P95 不超过 20%。
 
 ---
 
@@ -576,6 +611,9 @@ ros2 launch iap test_planner.launch.py \
 - 左右两条候选轨迹几何 cost 接近。
 - 一条穿过高 risk 区，另一条穿过低 risk 区。
 - P1 先关闭，再打开做 double-count 检查。
+- P2-2 将历史 fork primary/mirror/null/soft 仅作为冻结场景模板；每个判断
+  必须来自同一次 planning attempt、同一候选集合和同一 P0 snapshot。
+- c38 运行时 P2 关闭，因此不得用作 P2 ranking 证据。
 
 ### 命令
 
@@ -900,12 +938,16 @@ scenario:=fallback_only
 
 ## P1 通过标准
 
-- metrics-only 不改变轨迹。
-- enabled 后降低 trajectory risk。
-- gradient ratio 可解释，建议 5%–20%。
+- Phase 3 v2 P1-1 的 metrics-only 与同初值/同快照 P1-off 最终控制点、候选
+  身份和 base objective 相同，且 `applied_to_objective=false`。
+- P1-2 固定候选/快照的非 null 场景满足 raw objective、mean PL、min IM 和
+  梯度方向门；mirror/null 满足各自冻结合同。
+- P1-3/P1-4 通过预注册 sweep 与 fresh paired sign test；gradient ratio
+  中位数为 5%–20%，P95 不超过 20%。
 - 不破坏 collision/feasibility。
 - 不调用 raw PL / Predictor。
 - 一次 optimize 内 fixed snapshot。
+- P1-5 不把 unknown/stale/NaN 当低风险；P1-6 不绕过 P5 final/runtime gate。
 
 ## P2 通过标准
 

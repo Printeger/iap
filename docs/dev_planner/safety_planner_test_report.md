@@ -9736,3 +9736,51 @@ invocation count remains zero. P1-3 was not run. Compact evidence and hashes
 are under `p1_formal_test_report_artifacts/2026-08-09-c9782a5/`; raw evidence
 is retained losslessly compressed under
 `results/planner_validation/campaigns/c38_c9782a5/`.
+
+## 2026-08-10 P1-2 c31–c38 retrospective and Phase 3 v2 protocol freeze
+
+This entry is retrospective only. It preserves the historical result: c31,
+c32, and c38 are three complete comparable prequalification failures; c33–c37
+are incomplete diagnostics. Legacy P1-2 remains **BLOCKED**. No calibration,
+formal preflight, formal pair, or formal analyzer was run, and the formal
+analyzer invocation count remains **zero**. Phase 3 v2 applies only to a future
+fresh campaign and cannot alter this verdict or establish a product P1 PASS.
+
+The read-only archive script consumed the retained compact c31–c38 artifacts
+and c38 raw campaign without importing or invoking the formal analyzer. It
+normalized 80 run rows, 40 pair rows, and 2,632 mechanism/profile rows. All
+five PNGs are nonempty; derived JSON/CSV is recomputable; every input and output
+SHA256 verifies. The source inventory and exact inference limits are recorded
+in the [retrospective README](p1_formal_test_report_artifacts/2026-08-10-c9782a5-retrospective/README.md).
+
+The retrospective supports four bounded conclusions:
+
+1. c38's 10/10 runs passed validator, provenance, P0, safety, localization,
+   unique-checkpoint, and collision-feasible two-arm `200/200` gates. The
+   previously observed sensing, localization, candidate-support, and evidence-
+   chain blockers were closed for that campaign.
+2. c38 contains a local same-snapshot mechanism: all 632 objective-applied,
+   full-support candidate rows lowered raw P1 objective and mean PL and had
+   `gradient·displacement<0`. This is local causal evidence, not closed-loop
+   or product acceptance.
+3. The physical fork's upper/lower contrast was too small and independently
+   run paths were too noisy to support the old `0.00836/0.00677` cross-run
+   thresholds. The old experiment also mixed P2 route ranking, independent-run
+   noise, strict exact-max, and “fix lambda before sweep.” It therefore proves
+   neither “the P1 algorithm is ineffective” nor “product P1 has passed.”
+4. Phase 3 v2 separates fixed-candidate/snapshot P1 mechanism from Phase 4 P2
+   route ranking, freezes null tolerances before fresh paired confirmation, and
+   preserves collision, dynamics, and P5 authority. Its thresholds must not be
+   inferred from c31–c38.
+
+### Retrospective figures
+
+![c31-c38 completeness](p1_formal_test_report_artifacts/2026-08-10-c9782a5-retrospective/p1_2_campaign_completeness_overview.png)
+
+![complete primary pairs versus historical thresholds](p1_formal_test_report_artifacts/2026-08-10-c9782a5-retrospective/p1_2_primary_threshold_comparison.png)
+
+![c38 five-pair dashboard](p1_formal_test_report_artifacts/2026-08-10-c9782a5-retrospective/c38_pair_metric_dashboard.png)
+
+![c38 same-snapshot mechanism](p1_formal_test_report_artifacts/2026-08-10-c9782a5-retrospective/c38_same_snapshot_mechanism.png)
+
+![c38 primary trajectories and risk profiles](p1_formal_test_report_artifacts/2026-08-10-c9782a5-retrospective/c38_primary_trajectory_risk_profiles.png)

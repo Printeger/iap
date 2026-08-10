@@ -1,5 +1,11 @@
 #!/usr/bin/env python3
-"""Run the resumable, serial, one-shot P1-2 qualification/formal campaign."""
+"""Historical Phase 3 v1 P1-2 campaign runner; retained for evidence replay.
+
+STOP-USE: do not start new campaigns with this runner.  The c31/c32/c38 stop
+rule closed this protocol.  Future P1 validation must follow Phase 3 v2 in the
+safety-planner test plans.  This notice intentionally leaves the historical
+CLI and replay behavior unchanged.
+"""
 
 from __future__ import annotations
 

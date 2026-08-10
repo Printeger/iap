@@ -1,0 +1,252 @@
+{
+  "formal_analyzer_invoked": false,
+  "read_only": true,
+  "schema_version": "p1_2_retrospective_source_inventory_v1",
+  "sources": [
+    {
+      "path": "/home/dev/ws_iap/src/iap/docs/dev_planner/p1_formal_test_report_artifacts/2026-08-09-1958af4/c31_campaign.json",
+      "sha256": "f4b374aab09c38d1ea42321131f677d30860360e9bdf437eb97f57077ef9b991",
+      "size_bytes": 50562
+    },
+    {
+      "path": "/home/dev/ws_iap/src/iap/docs/dev_planner/p1_formal_test_report_artifacts/2026-08-09-1958af4/c31_prequalification_pairs.csv.gz",
+      "sha256": "ff7c8334b0962220d46862c0b375dac8d97758ba75b2a1f2aebdd8c38eebd499",
+      "size_bytes": 670
+    },
+    {
+      "path": "/home/dev/ws_iap/src/iap/docs/dev_planner/p1_formal_test_report_artifacts/2026-08-09-1958af4/c31_prequalification_runs.csv.gz",
+      "sha256": "c306152ec5ecabdeda87a065f06774e765be8eea331857146b0c8a96cf5b20b7",
+      "size_bytes": 1254
+    },
+    {
+      "path": "/home/dev/ws_iap/src/iap/docs/dev_planner/p1_formal_test_report_artifacts/2026-08-09-1958af4/c31_prequalification_summary.json",
+      "sha256": "7a7c9ad4335ab7019ced72f8a9c5343ae5f843cd1c5140cfa87575447cf4ca25",
+      "size_bytes": 23126
+    },
+    {
+      "path": "/home/dev/ws_iap/src/iap/docs/dev_planner/p1_formal_test_report_artifacts/2026-08-09-24b9b87/c36_campaign.json",
+      "sha256": "a995afcf0e8126281b20e045b33e80d4342ce465fcabc879e5eacbf3e31fe1ac",
+      "size_bytes": 48546
+    },
+    {
+      "path": "/home/dev/ws_iap/src/iap/docs/dev_planner/p1_formal_test_report_artifacts/2026-08-09-24b9b87/c36_prequalification_pairs.csv.gz",
+      "sha256": "795c02eaf17919dca8ea99e9e3435b2e56b57a7626fd7e526af82d7161dbf501",
+      "size_bytes": 664
+    },
+    {
+      "path": "/home/dev/ws_iap/src/iap/docs/dev_planner/p1_formal_test_report_artifacts/2026-08-09-24b9b87/c36_prequalification_runs.csv.gz",
+      "sha256": "7c67da7c815e1e0c4135900e4352f12ad31b4e84b21b5302ad8fdc4b905558d9",
+      "size_bytes": 1251
+    },
+    {
+      "path": "/home/dev/ws_iap/src/iap/docs/dev_planner/p1_formal_test_report_artifacts/2026-08-09-24b9b87/c36_prequalification_summary.json",
+      "sha256": "058a78102187aad8776f29241224fb47f436e5eaf446ab8a543aff984ef4f77d",
+      "size_bytes": 23457
+    },
+    {
+      "path": "/home/dev/ws_iap/src/iap/docs/dev_planner/p1_formal_test_report_artifacts/2026-08-09-62396ac/c35_campaign.json",
+      "sha256": "709f18096bb38a3c29c7e82793a9f5390a235937f66aba55d53f9daab223adfe",
+      "size_bytes": 50562
+    },
+    {
+      "path": "/home/dev/ws_iap/src/iap/docs/dev_planner/p1_formal_test_report_artifacts/2026-08-09-62396ac/c35_prequalification_pairs.csv.gz",
+      "sha256": "7d72c03e8745646ff0850339ed2acf3f8004d1641bfcfc6d258716ba52a680c9",
+      "size_bytes": 616
+    },
+    {
+      "path": "/home/dev/ws_iap/src/iap/docs/dev_planner/p1_formal_test_report_artifacts/2026-08-09-62396ac/c35_prequalification_runs.csv.gz",
+      "sha256": "80613565d794e8541658aad6e9ab862eac543b400c3d5197014f56c22710477c",
+      "size_bytes": 1227
+    },
+    {
+      "path": "/home/dev/ws_iap/src/iap/docs/dev_planner/p1_formal_test_report_artifacts/2026-08-09-62396ac/c35_prequalification_summary.json",
+      "sha256": "c97c96d60ca7020fc865f9dbaef7265caeea33fbb194b0b6e0a17714caf39fb2",
+      "size_bytes": 21569
+    },
+    {
+      "path": "/home/dev/ws_iap/src/iap/docs/dev_planner/p1_formal_test_report_artifacts/2026-08-09-62a7b55/c34_campaign.json",
+      "sha256": "349c25d6cc876a3b8b4ce4dece83b1a3974577c43aff90732f48eb5fbfe81866",
+      "size_bytes": 50562
+    },
+    {
+      "path": "/home/dev/ws_iap/src/iap/docs/dev_planner/p1_formal_test_report_artifacts/2026-08-09-62a7b55/c34_prequalification_pairs.csv.gz",
+      "sha256": "40ff482a75765e7463d8da8e3a0dd2af315c97db7e1001059860e4fce818ab4e",
+      "size_bytes": 666
+    },
+    {
+      "path": "/home/dev/ws_iap/src/iap/docs/dev_planner/p1_formal_test_report_artifacts/2026-08-09-62a7b55/c34_prequalification_runs.csv.gz",
+      "sha256": "e7fff184cd61b4598153526cadc39fe69971c07b9026eedbb8181331dd4b37a1",
+      "size_bytes": 1264
+    },
+    {
+      "path": "/home/dev/ws_iap/src/iap/docs/dev_planner/p1_formal_test_report_artifacts/2026-08-09-62a7b55/c34_prequalification_summary.json",
+      "sha256": "560f6eda42b5749f17c069695168a704fb0e451d4883757792fd1c7d657c0b9a",
+      "size_bytes": 23178
+    },
+    {
+      "path": "/home/dev/ws_iap/src/iap/docs/dev_planner/p1_formal_test_report_artifacts/2026-08-09-7d4537b/c33_campaign.json",
+      "sha256": "0cc578fffac6b713f9985550c77b84f6ec963f1896ffa8d8eb77ebe2c8e02c85",
+      "size_bytes": 50562
+    },
+    {
+      "path": "/home/dev/ws_iap/src/iap/docs/dev_planner/p1_formal_test_report_artifacts/2026-08-09-7d4537b/c33_prequalification_pairs.csv.gz",
+      "sha256": "cc9febe34e73532a8a8c77357996d5df1d650143d0cc0b6da1970526cf08fd95",
+      "size_bytes": 671
+    },
+    {
+      "path": "/home/dev/ws_iap/src/iap/docs/dev_planner/p1_formal_test_report_artifacts/2026-08-09-7d4537b/c33_prequalification_runs.csv.gz",
+      "sha256": "c67950ae432496fc0dc8efb670f0b46da488f5b775cbdaa34be3b45c041ca818",
+      "size_bytes": 1256
+    },
+    {
+      "path": "/home/dev/ws_iap/src/iap/docs/dev_planner/p1_formal_test_report_artifacts/2026-08-09-7d4537b/c33_prequalification_summary.json",
+      "sha256": "6f0f5aa27041bcd102121bab5a80134f4ca5fc85baa304c1de9e682c6466512b",
+      "size_bytes": 23208
+    },
+    {
+      "path": "/home/dev/ws_iap/src/iap/docs/dev_planner/p1_formal_test_report_artifacts/2026-08-09-c9782a5/c38_campaign.json",
+      "sha256": "73612a0e650e9cf8eba5f0fc74330ea4097ed18183d44d787318d4be44d8853b",
+      "size_bytes": 48546
+    },
+    {
+      "path": "/home/dev/ws_iap/src/iap/docs/dev_planner/p1_formal_test_report_artifacts/2026-08-09-c9782a5/c38_prequalification_pairs.csv.gz",
+      "sha256": "ed2d361bdd905e7dab1428b46b8a8ea6eed1134664a428daf2454c6e5413e593",
+      "size_bytes": 671
+    },
+    {
+      "path": "/home/dev/ws_iap/src/iap/docs/dev_planner/p1_formal_test_report_artifacts/2026-08-09-c9782a5/c38_prequalification_runs.csv.gz",
+      "sha256": "0bc87f86c6b82e4e7484991d6e3d9789dcc080dcfec528b013e5f5854198c7a1",
+      "size_bytes": 1238
+    },
+    {
+      "path": "/home/dev/ws_iap/src/iap/docs/dev_planner/p1_formal_test_report_artifacts/2026-08-09-c9782a5/c38_prequalification_summary.json",
+      "sha256": "55713510c34f230ad94601d02b22391078e8b0c1623a90e36b6138ce2d1f66e8",
+      "size_bytes": 22981
+    },
+    {
+      "path": "/home/dev/ws_iap/src/iap/docs/dev_planner/p1_formal_test_report_artifacts/2026-08-09-da5b15a/c32_campaign.json",
+      "sha256": "99976177bab0bcdbee527b323b6c4e078a4a820473e9ef4e2cdf1e2f29530f1b",
+      "size_bytes": 50562
+    },
+    {
+      "path": "/home/dev/ws_iap/src/iap/docs/dev_planner/p1_formal_test_report_artifacts/2026-08-09-da5b15a/c32_prequalification_pairs.csv.gz",
+      "sha256": "2ac1f40f069b91613ec226f1f6d8513d050bdde6d5e19c007e9808d765293cad",
+      "size_bytes": 664
+    },
+    {
+      "path": "/home/dev/ws_iap/src/iap/docs/dev_planner/p1_formal_test_report_artifacts/2026-08-09-da5b15a/c32_prequalification_runs.csv.gz",
+      "sha256": "589f6ed34dbcf42e9b34213798e6013801c7744f1e50e4c24b65f50a61ec454f",
+      "size_bytes": 1253
+    },
+    {
+      "path": "/home/dev/ws_iap/src/iap/docs/dev_planner/p1_formal_test_report_artifacts/2026-08-09-da5b15a/c32_prequalification_summary.json",
+      "sha256": "0eb31234564e6ed539def927073eb85bb5a3776ef7bd9e82b0bbdb3b45f02729",
+      "size_bytes": 23387
+    },
+    {
+      "path": "/home/dev/ws_iap/src/iap/docs/dev_planner/p1_formal_test_report_artifacts/2026-08-09-e52832a/c37_campaign.json",
+      "sha256": "356117e53d6c7c1b93c05181beebc59b0f9e033534675370ca6e69751b5169c4",
+      "size_bytes": 48546
+    },
+    {
+      "path": "/home/dev/ws_iap/src/iap/docs/dev_planner/p1_formal_test_report_artifacts/2026-08-09-e52832a/c37_prequalification_pairs.csv.gz",
+      "sha256": "5e054e20a04a3397d46311546c923d15262b9ce0e6a91d546eeb184a1559eb70",
+      "size_bytes": 665
+    },
+    {
+      "path": "/home/dev/ws_iap/src/iap/docs/dev_planner/p1_formal_test_report_artifacts/2026-08-09-e52832a/c37_prequalification_runs.csv.gz",
+      "sha256": "a030e4a8668b090cfef5e69c39f88a6f717555412e353381f7f532fcaad12f5c",
+      "size_bytes": 1241
+    },
+    {
+      "path": "/home/dev/ws_iap/src/iap/docs/dev_planner/p1_formal_test_report_artifacts/2026-08-09-e52832a/c37_prequalification_summary.json",
+      "sha256": "c565dd60c670eb4c74482097c5679328011841fbb74b1bbcd54c8350da5525c9",
+      "size_bytes": 23055
+    },
+    {
+      "path": "/home/dev/ws_iap/src/iap/results/planner_validation/campaigns/c38_c9782a5/campaign.json",
+      "sha256": "73612a0e650e9cf8eba5f0fc74330ea4097ed18183d44d787318d4be44d8853b",
+      "size_bytes": 48546
+    },
+    {
+      "path": "/home/dev/ws_iap/src/iap/results/planner_validation/campaigns/c38_c9782a5/prequalification_runs.json",
+      "sha256": "1ec3e931e06b6a3aa14c5becda519533b516215d8e704a6322c516e9ed878faa",
+      "size_bytes": 2324
+    },
+    {
+      "path": "/home/dev/ws_iap/src/iap/results/planner_validation/campaigns/c38_c9782a5/runs/pre_mirror_enabled/exports/test_planner_p1_fork_formal_p1_fork_fused_mirror_v1_4099645_1786315842854/planner_p1_accepted_trajectory_risk_profile.csv.gz",
+      "sha256": "558589605c6c9980d9e8e9676e43417578fbf9431513a2a507ca731130752d62",
+      "size_bytes": 260417
+    },
+    {
+      "path": "/home/dev/ws_iap/src/iap/results/planner_validation/campaigns/c38_c9782a5/runs/pre_mirror_enabled/exports/test_planner_p1_fork_formal_p1_fork_fused_mirror_v1_4099645_1786315842854/planner_p1_candidate_optimization.csv.gz",
+      "sha256": "c98234b3963af4807f7dfb82c9addbca514dbd2dd529d315d9060dfea83dc18d",
+      "size_bytes": 87183
+    },
+    {
+      "path": "/home/dev/ws_iap/src/iap/results/planner_validation/campaigns/c38_c9782a5/runs/pre_mirror_reference/exports/test_planner_p1_fork_formal_p1_fork_fused_mirror_v1_4080899_1786315747156/planner_p1_accepted_trajectory_risk_profile.csv.gz",
+      "sha256": "71619c3b8a85fa4a45cc27e082a556a05835eb9e7beb979ef015d44482733baf",
+      "size_bytes": 2675933
+    },
+    {
+      "path": "/home/dev/ws_iap/src/iap/results/planner_validation/campaigns/c38_c9782a5/runs/pre_null_enabled/exports/test_planner_p1_fork_formal_p1_fork_symmetric_null_v1_4137503_1786316034284/planner_p1_accepted_trajectory_risk_profile.csv.gz",
+      "sha256": "c3404b71abfe4ac90b59bcbc9e6dce919653c6ba64b5a6b01c3988fcf8cf6e95",
+      "size_bytes": 338126
+    },
+    {
+      "path": "/home/dev/ws_iap/src/iap/results/planner_validation/campaigns/c38_c9782a5/runs/pre_null_enabled/exports/test_planner_p1_fork_formal_p1_fork_symmetric_null_v1_4137503_1786316034284/planner_p1_candidate_optimization.csv.gz",
+      "sha256": "fca2a26a163bc4bba5f6a664db352082b70b39613db8c7b052d4b468554a7365",
+      "size_bytes": 87387
+    },
+    {
+      "path": "/home/dev/ws_iap/src/iap/results/planner_validation/campaigns/c38_c9782a5/runs/pre_null_reference/exports/test_planner_p1_fork_formal_p1_fork_symmetric_null_v1_4118470_1786315938571/planner_p1_accepted_trajectory_risk_profile.csv.gz",
+      "sha256": "93692fe75c75033b7b83b8ef839afd94a86f28034d3f00aa2dc14d94cb20d9ee",
+      "size_bytes": 1526976
+    },
+    {
+      "path": "/home/dev/ws_iap/src/iap/results/planner_validation/campaigns/c38_c9782a5/runs/pre_primary_1_enabled/exports/test_planner_p1_fork_formal_p1_fork_fused_v1_4024488_1786315454973/planner_p1_accepted_trajectory_risk_profile.csv.gz",
+      "sha256": "6b15fd274e4fb473f1bdba99fb909722576905aee8e2ee6735878022113944e9",
+      "size_bytes": 338278
+    },
+    {
+      "path": "/home/dev/ws_iap/src/iap/results/planner_validation/campaigns/c38_c9782a5/runs/pre_primary_1_enabled/exports/test_planner_p1_fork_formal_p1_fork_fused_v1_4024488_1786315454973/planner_p1_candidate_optimization.csv.gz",
+      "sha256": "edc9f61fdecefb48118b9377f652cd37dd2d064a6fe62a2c051586d0d0011969",
+      "size_bytes": 86742
+    },
+    {
+      "path": "/home/dev/ws_iap/src/iap/results/planner_validation/campaigns/c38_c9782a5/runs/pre_primary_1_reference/exports/test_planner_p1_fork_formal_p1_fork_fused_v1_4006079_1786315359262/planner_p1_accepted_trajectory_risk_profile.csv.gz",
+      "sha256": "0a406e6389e0df3e23e272ffd2bb8d9e622ecb07c069db1329e5234105c14c9a",
+      "size_bytes": 2146300
+    },
+    {
+      "path": "/home/dev/ws_iap/src/iap/results/planner_validation/campaigns/c38_c9782a5/runs/pre_primary_2_enabled/exports/test_planner_p1_fork_formal_p1_fork_fused_v1_4061987_1786315646406/planner_p1_accepted_trajectory_risk_profile.csv.gz",
+      "sha256": "ef765db1a1a46638cbb25be961b1901c5f5aece011c81643928cbc07bade6c35",
+      "size_bytes": 222733
+    },
+    {
+      "path": "/home/dev/ws_iap/src/iap/results/planner_validation/campaigns/c38_c9782a5/runs/pre_primary_2_enabled/exports/test_planner_p1_fork_formal_p1_fork_fused_v1_4061987_1786315646406/planner_p1_candidate_optimization.csv.gz",
+      "sha256": "9d563e6f292c89d24cbe61cda1eccb895fec13ac1813d66d081e36e0df396718",
+      "size_bytes": 89358
+    },
+    {
+      "path": "/home/dev/ws_iap/src/iap/results/planner_validation/campaigns/c38_c9782a5/runs/pre_primary_2_reference/exports/test_planner_p1_fork_formal_p1_fork_fused_v1_4043250_1786315550699/planner_p1_accepted_trajectory_risk_profile.csv.gz",
+      "sha256": "d2060c6c1f933b4b040364ec55fa843a27102e9433a99ebb551e7d471e0ef588",
+      "size_bytes": 2637182
+    },
+    {
+      "path": "/home/dev/ws_iap/src/iap/results/planner_validation/campaigns/c38_c9782a5/runs/pre_soft_enabled/exports/test_planner_p1_fork_formal_p1_soft_risk_island_v1_4175538_1786316225695/planner_p1_accepted_trajectory_risk_profile.csv.gz",
+      "sha256": "83125b63ca026b85229ebb88bed9fb71dd9b5dbe6accf0a7704d083bb76c4c59",
+      "size_bytes": 338042
+    },
+    {
+      "path": "/home/dev/ws_iap/src/iap/results/planner_validation/campaigns/c38_c9782a5/runs/pre_soft_enabled/exports/test_planner_p1_fork_formal_p1_soft_risk_island_v1_4175538_1786316225695/planner_p1_candidate_optimization.csv.gz",
+      "sha256": "4f66d2e600599958b32c00179df58b407556ef2d9534176e5329a08b8f10791b",
+      "size_bytes": 87065
+    },
+    {
+      "path": "/home/dev/ws_iap/src/iap/results/planner_validation/campaigns/c38_c9782a5/runs/pre_soft_reference/exports/test_planner_p1_fork_formal_p1_soft_risk_island_v1_4156303_1786316129990/planner_p1_accepted_trajectory_risk_profile.csv.gz",
+      "sha256": "2f70f03a33cc8ff5bd709da8e6e550ad293790c2a418736344601ec3b5d4f048",
+      "size_bytes": 2120590
+    }
+  ]
+}

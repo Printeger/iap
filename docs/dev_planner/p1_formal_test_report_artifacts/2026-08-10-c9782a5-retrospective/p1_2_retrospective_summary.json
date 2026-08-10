@@ -1,0 +1,108 @@
+{
+  "archive_date": "2026-08-10",
+  "campaigns": [
+    {
+      "campaign_id": "c31",
+      "classification": "complete_comparable_failure",
+      "compact_bundle": "2026-08-09-1958af4",
+      "hard_gate_passes": 10,
+      "old_protocol_passed": false,
+      "pair_count": 5,
+      "run_count": 10
+    },
+    {
+      "campaign_id": "c32",
+      "classification": "complete_comparable_failure",
+      "compact_bundle": "2026-08-09-da5b15a",
+      "hard_gate_passes": 10,
+      "old_protocol_passed": false,
+      "pair_count": 5,
+      "run_count": 10
+    },
+    {
+      "campaign_id": "c33",
+      "classification": "incomplete_diagnostic",
+      "compact_bundle": "2026-08-09-7d4537b",
+      "hard_gate_passes": 9,
+      "old_protocol_passed": false,
+      "pair_count": 5,
+      "run_count": 10
+    },
+    {
+      "campaign_id": "c34",
+      "classification": "incomplete_diagnostic",
+      "compact_bundle": "2026-08-09-62a7b55",
+      "hard_gate_passes": 9,
+      "old_protocol_passed": false,
+      "pair_count": 5,
+      "run_count": 10
+    },
+    {
+      "campaign_id": "c35",
+      "classification": "incomplete_diagnostic",
+      "compact_bundle": "2026-08-09-62396ac",
+      "hard_gate_passes": 4,
+      "old_protocol_passed": false,
+      "pair_count": 5,
+      "run_count": 10
+    },
+    {
+      "campaign_id": "c36",
+      "classification": "incomplete_diagnostic",
+      "compact_bundle": "2026-08-09-24b9b87",
+      "hard_gate_passes": 7,
+      "old_protocol_passed": false,
+      "pair_count": 5,
+      "run_count": 10
+    },
+    {
+      "campaign_id": "c37",
+      "classification": "incomplete_diagnostic",
+      "compact_bundle": "2026-08-09-e52832a",
+      "hard_gate_passes": 9,
+      "old_protocol_passed": false,
+      "pair_count": 5,
+      "run_count": 10
+    },
+    {
+      "campaign_id": "c38",
+      "classification": "complete_comparable_failure",
+      "compact_bundle": "2026-08-09-c9782a5",
+      "hard_gate_passes": 10,
+      "old_protocol_passed": false,
+      "pair_count": 5,
+      "run_count": 10
+    }
+  ],
+  "derived_tables": [
+    "p1_2_retrospective_runs.csv.gz",
+    "p1_2_retrospective_pairs.csv.gz",
+    "p1_2_retrospective_mechanism.csv.gz"
+  ],
+  "figures": [
+    "p1_2_campaign_completeness_overview.png",
+    "p1_2_primary_threshold_comparison.png",
+    "c38_pair_metric_dashboard.png",
+    "c38_same_snapshot_mechanism.png",
+    "c38_primary_trajectory_risk_profiles.png"
+  ],
+  "formal_analyzer_invocation_count": 0,
+  "future_campaign_required": true,
+  "future_protocol": "Phase 3 v2",
+  "historical_verdict": "BLOCKED",
+  "legacy_formal_analyzer_invoked": false,
+  "mechanism_observations": {
+    "gradient_dot_displacement_negative": 632,
+    "interpretation": "local same-snapshot descent evidence only; not a Phase 3 v2 PASS",
+    "mean_pl_decreased": 632,
+    "objective_applied_full_support_rows": 632,
+    "raw_p1_objective_decreased": 632
+  },
+  "old_cross_run_thresholds": {
+    "mean_improvement": 0.00836,
+    "retained_for_historical_reproduction_only": true,
+    "smooth_cvar_improvement": 0.00677
+  },
+  "product_p1_status_changed": false,
+  "schema_version": "p1_2_retrospective_summary_v1"
+}

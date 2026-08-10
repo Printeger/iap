@@ -579,6 +579,7 @@ if(DEFINED ENV{ROS_VERSION})
       scripts/dev_planner/verify_planner_recorder_smoke.py
       scripts/dev_planner/verify_safety_planner_evidence_bundle.py
       scripts/dev_planner/analyze_p1_candidate_diagnostic_smoke.py
+      scripts/dev_planner/archive_p1_2_retrospective.py
       scripts/dev_planner/analyze_safety_planner_run.py
       scripts/dev_planner/calibrate_p1_formal_tolerances.py
       scripts/dev_planner/p1_formal_metrics.py
@@ -665,6 +666,10 @@ if(DEFINED ENV{ROS_VERSION})
       add_test(
         NAME test_calibrate_p1_formal_tolerances
         COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test/test_calibrate_p1_formal_tolerances.py
+      )
+      add_test(
+        NAME test_archive_p1_2_retrospective
+        COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test/test_archive_p1_2_retrospective.py
       )
     endif()
     ament_export_include_directories(include ${EIGEN3_INCLUDE_DIR} ${OpenCV_INCLUDE_DIRS})
