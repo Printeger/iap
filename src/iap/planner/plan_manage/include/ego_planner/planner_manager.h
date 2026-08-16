@@ -24,6 +24,7 @@ namespace ego_planner
   class P0RiskGridRuntime;
   class P5RuntimeIntegrityGate;
   class SafetyRvizPublisher;
+  class Gate0QualificationWriter;
 }
 
 namespace iap
@@ -124,6 +125,7 @@ namespace ego_planner
         const std::string &reason, double stamp_s,
         std::shared_ptr<const iap::RiskGridSnapshot> snapshot);
     void recordP1StaleRejection(const std::string &reason, double stamp_s);
+    void recordGate0NormalBsplinePublish(double stamp_s);
 
     PlanParameters pp_;
     LocalTrajData local_data_;
@@ -133,6 +135,7 @@ namespace ego_planner
     SwarmTrajData swarm_trajs_buf_;
     std::unique_ptr<P0RiskGridRuntime> p0_risk_grid_runtime_;
     std::unique_ptr<P5RuntimeIntegrityGate> p5_integrity_gate_;
+    std::unique_ptr<Gate0QualificationWriter> gate0_writer_;
     std::shared_ptr<SafetyRvizPublisher> safety_viz_;
     P2CandidateRankingConfig p2_config_;
     P3ReferenceBiasConfig p3_config_;
@@ -155,6 +158,7 @@ namespace ego_planner
     bool has_p1_preference_incumbent_{false};
     uint64_t p2_batch_id_{0};
     uint64_t p3_batch_id_{0};
+    int gate0_bspline_publish_count_{0};
     PlanningRiskContext planning_risk_context_;
     TimeProvider time_provider_;
     std::string trajectory_frame_id_{"map"};

@@ -61,6 +61,7 @@ include_directories(
 add_executable(ego_planner_node
   src/ego_planner_node.cpp 
   src/ego_replan_fsm.cpp
+  src/gate0_qualification_writer.cpp
   src/planner_manager.cpp
   src/p0_risk_grid_runtime.cpp
   src/p1_replan_admission.cpp
@@ -101,6 +102,12 @@ ament_target_dependencies(traj_server
                           traj_utils cv_bridge pcl_conversions)
 
 if(BUILD_TESTING)
+  ament_add_gtest(test_gate0_qualification_writer
+    test/test_gate0_qualification_writer.cpp
+    src/gate0_qualification_writer.cpp
+  )
+  ament_target_dependencies(test_gate0_qualification_writer Eigen3)
+
   ament_add_gtest(test_p0_risk_grid_runtime
     test/test_p0_risk_grid_runtime.cpp
     src/p0_risk_grid_runtime.cpp
@@ -164,6 +171,7 @@ if(BUILD_TESTING)
 
   ament_add_gtest(test_planning_risk_context
     test/test_planning_risk_context.cpp
+    src/gate0_qualification_writer.cpp
     src/planner_manager.cpp
     src/p0_risk_grid_runtime.cpp
     src/p1_candidate_selection.cpp

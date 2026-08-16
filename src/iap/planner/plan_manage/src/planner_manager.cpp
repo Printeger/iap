@@ -1,5 +1,6 @@
 // #include <fstream>
 #include <ego_planner/planner_manager.h>
+#include <ego_planner/gate0_qualification_writer.h>
 #include <ego_planner/p1_candidate_selection.h>
 #include <ego_planner/p1_soft_fallback_policy.h>
 #include <ego_planner/p0_risk_grid_runtime.h>
@@ -150,6 +151,11 @@ namespace ego_planner
     node->declare_parameter("manager/p1_collision_fanout_mirror_y", false);
     node->declare_parameter("manager/use_distinctive_trajs", false);
     node->declare_parameter("manager/drone_id", -1);
+    node->declare_parameter("gate0.qualification_evidence_enable", false);
+    node->declare_parameter("gate0.candidate_events_path", "");
+    node->declare_parameter("gate0.control_points_path", "");
+    node->declare_parameter("gate0.evidence_run_id", "");
+    node->declare_parameter("gate0.evidence_manifest_path", "");
     node->declare_parameter("p2.enable_candidate_ranking", false);
     node->declare_parameter("p2.metrics_only", true);
     node->declare_parameter("p2.sample_dt_s", 0.2);
@@ -190,6 +196,18 @@ namespace ego_planner
                         pp_.p1_collision_fanout_mirror_y_);
     node->get_parameter("manager/use_distinctive_trajs", pp_.use_distinctive_trajs);
     node->get_parameter("manager/drone_id", pp_.drone_id);
+    Gate0QualificationConfig gate0_config;
+    node->get_parameter(
+        "gate0.qualification_evidence_enable", gate0_config.enabled);
+    node->get_parameter(
+        "gate0.candidate_events_path", gate0_config.candidate_events_path);
+    node->get_parameter(
+        "gate0.control_points_path", gate0_config.control_points_path);
+    node->get_parameter("gate0.evidence_run_id", gate0_config.run_id);
+    node->get_parameter(
+        "gate0.evidence_manifest_path", gate0_config.evidence_manifest_path);
+    gate0_writer_ = std::make_unique<Gate0QualificationWriter>(
+        std::move(gate0_config));
     node->get_parameter("p2.enable_candidate_ranking", p2_config_.enable_candidate_ranking);
     node->get_parameter("p2.metrics_only", p2_config_.metrics_only);
     node->get_parameter("p2.sample_dt_s", p2_config_.sample_dt_s);
@@ -691,6 +709,23 @@ namespace ego_planner
         reason, "existing_trajectory");
   }
 
+  void EGOPlannerManager::recordGate0NormalBsplinePublish(
+      const double stamp_s)
+  {
+    if (!gate0_writer_ || !gate0_writer_->enabled())
+    {
+      return;
+    }
+    Gate0QualificationEvent event;
+    event.event = "normal_bspline_publish";
+    event.stamp_s = stamp_s;
+    event.planning_attempt_id = planning_risk_context_.planning_attempt_id;
+    event.candidate_id = static_cast<int>(planning_risk_context_.candidate_id);
+    event.bspline_publish_count = ++gate0_bspline_publish_count_;
+    event.reason = "published";
+    gate0_writer_->appendEvent(event);
+  }
+
   void EGOPlannerManager::setPlanningRiskContextForTest(
       std::shared_ptr<const iap::RiskGridSnapshot> snapshot,
       const double query_base_time_s)
@@ -1084,6 +1119,32 @@ namespace ego_planner
     {
       // cout << "enter" << endl;
       std::vector<ControlPoints> trajs = bspline_optimizer_->distinctiveTrajs(segments);
+      const int gate0_base_generated_count = static_cast<int>(trajs.size());
+      if (gate0_writer_ && gate0_writer_->enabled())
+      {
+        Gate0QualificationEvent attempt_event;
+        attempt_event.event = "attempt_start";
+        attempt_event.stamp_s = plannerNow().seconds();
+        attempt_event.planning_attempt_id =
+            planning_risk_context_.planning_attempt_id;
+        attempt_event.collision_segment_count =
+            static_cast<int>(segments.size());
+        attempt_event.base_generated_count = gate0_base_generated_count;
+        attempt_event.reason = "base_distinctive_trajs";
+        gate0_writer_->appendEvent(attempt_event);
+        for (int i = static_cast<int>(trajs.size()) - 1; i >= 0; --i)
+        {
+          Gate0ControlPointEvidence evidence;
+          evidence.stage = "generated";
+          evidence.stamp_s = attempt_event.stamp_s;
+          evidence.planning_attempt_id = attempt_event.planning_attempt_id;
+          evidence.candidate_id = static_cast<int>(trajs.size()) - i;
+          evidence.degree = 3;
+          evidence.ts = ts;
+          evidence.control_points = trajs[static_cast<std::size_t>(i)].points;
+          gate0_writer_->appendControlPoints(evidence);
+        }
+      }
       std::vector<BsplineOptimizer::P1BasePrepassTrace> candidate_prepasses;
       const int candidate_limit = std::clamp(
           p1_config.max_candidates_per_attempt, 1, 8);
@@ -1123,6 +1184,17 @@ namespace ego_planner
           trajs.push_back(std::move(candidate));
         }
         collision_fanout_active = trajs.size() > 1;
+        if (gate0_writer_ && gate0_writer_->enabled() && collision_fanout_active)
+        {
+          Gate0QualificationEvent fanout_event;
+          fanout_event.event = "p1_fanout";
+          fanout_event.stamp_s = plannerNow().seconds();
+          fanout_event.planning_attempt_id =
+              planning_risk_context_.planning_attempt_id;
+          fanout_event.base_generated_count = gate0_base_generated_count;
+          fanout_event.reason = "collision_clearance_fanout";
+          gate0_writer_->appendEvent(fanout_event);
+        }
       }
       bool normalized_p1_stage = p1_objective_allowed &&
           !p1_config.metrics_only && p1_config.lambda_integrity != 0.0;
@@ -1227,6 +1299,17 @@ namespace ego_planner
           trajs.insert(trajs.end(), supplemental.begin(), supplemental.end());
           candidate_prepasses.insert(
               candidate_prepasses.end(), supplemental.size(), prepass);
+          if (gate0_writer_ && gate0_writer_->enabled() && !supplemental.empty())
+          {
+            Gate0QualificationEvent supplement_event;
+            supplement_event.event = "p1_supplement";
+            supplement_event.stamp_s = plannerNow().seconds();
+            supplement_event.planning_attempt_id =
+                planning_risk_context_.planning_attempt_id;
+            supplement_event.base_generated_count = gate0_base_generated_count;
+            supplement_event.reason = "risk_gradient_supplement";
+            gate0_writer_->appendEvent(supplement_event);
+          }
         }
         const bool p1_admitted = normalized_p1_stage && !trajs.empty();
         p1_objective_allowed = prepass_fallback.objective_allowed;
@@ -1272,9 +1355,39 @@ namespace ego_planner
 
       double final_cost;
       std::vector<P2CandidateInput> p2_candidates;
+      int gate0_optimizer_input_count = 0;
+      int gate0_optimizer_success_count = 0;
       for (int i = trajs.size() - 1; i >= 0; i--)
       {
         const uint64_t candidate_id = static_cast<uint64_t>(trajs.size() - i);
+        ++gate0_optimizer_input_count;
+        if (gate0_writer_ && gate0_writer_->enabled())
+        {
+          Gate0QualificationEvent input_event;
+          input_event.event = "optimizer_input";
+          input_event.stamp_s = plannerNow().seconds();
+          input_event.planning_attempt_id =
+              planning_risk_context_.planning_attempt_id;
+          input_event.candidate_id = static_cast<int>(candidate_id);
+          input_event.base_generated_count = gate0_base_generated_count;
+          input_event.optimizer_input_count = gate0_optimizer_input_count;
+          input_event.degree = 3;
+          input_event.ts = ts;
+          input_event.rows = trajs[static_cast<std::size_t>(i)].points.rows();
+          input_event.cols = trajs[static_cast<std::size_t>(i)].points.cols();
+          input_event.reason = "rebound_optimizer_input";
+          gate0_writer_->appendEvent(input_event);
+          Gate0ControlPointEvidence input_points;
+          input_points.stage = "optimizer_input";
+          input_points.stamp_s = input_event.stamp_s;
+          input_points.planning_attempt_id = input_event.planning_attempt_id;
+          input_points.candidate_id = input_event.candidate_id;
+          input_points.degree = 3;
+          input_points.ts = ts;
+          input_points.control_points =
+              trajs[static_cast<std::size_t>(i)].points;
+          gate0_writer_->appendControlPoints(input_points);
+        }
         set_p1_context(candidate_id);
         planning_risk_context_.optimizer_start_s = plannerNow().seconds();
         appendPlanningRiskContextTimeline(
@@ -1321,6 +1434,7 @@ namespace ego_planner
         }
         if (p1_candidate_success)
         {
+          ++gate0_optimizer_success_count;
 
           if (!p1_objective_allowed && p1_config.use_integrity_cost)
           {
@@ -1350,6 +1464,42 @@ namespace ego_planner
           p2_candidate.cost_breakdown = bspline_optimizer_->getLastOptimizerCostBreakdown();
           p2_candidates.push_back(p2_candidate);
 
+          if (gate0_writer_ && gate0_writer_->enabled())
+          {
+            Gate0QualificationEvent result_event;
+            result_event.event = "optimizer_result";
+            result_event.stamp_s = plannerNow().seconds();
+            result_event.planning_attempt_id =
+                planning_risk_context_.planning_attempt_id;
+            result_event.candidate_id = static_cast<int>(candidate_id);
+            result_event.base_generated_count = gate0_base_generated_count;
+            result_event.optimizer_input_count = gate0_optimizer_input_count;
+            result_event.optimizer_success = 1;
+            result_event.optimizer_success_count =
+                gate0_optimizer_success_count;
+            result_event.degree = 3;
+            result_event.ts = ts;
+            result_event.rows = ctrl_pts_temp.rows();
+            result_event.cols = ctrl_pts_temp.cols();
+            result_event.original_cost =
+                p2_candidate.cost_breakdown.original_cost;
+            result_event.final_cost = final_cost;
+            result_event.reason = "success";
+            gate0_writer_->appendEvent(result_event);
+            Gate0ControlPointEvidence optimized_points;
+            optimized_points.stage = "optimized";
+            optimized_points.stamp_s = result_event.stamp_s;
+            optimized_points.planning_attempt_id =
+                result_event.planning_attempt_id;
+            optimized_points.candidate_id = result_event.candidate_id;
+            optimized_points.degree = 3;
+            optimized_points.ts = ts;
+            optimized_points.original_cost = result_event.original_cost;
+            optimized_points.final_cost = result_event.final_cost;
+            optimized_points.control_points = ctrl_pts_temp;
+            gate0_writer_->appendControlPoints(optimized_points);
+          }
+
           // visualization
           point_set.clear();
           for (int j = 0; j < ctrl_pts_temp.cols(); j++)
@@ -1360,6 +1510,25 @@ namespace ego_planner
         }
         else
         {
+          if (gate0_writer_ && gate0_writer_->enabled())
+          {
+            Gate0QualificationEvent result_event;
+            result_event.event = "optimizer_result";
+            result_event.stamp_s = plannerNow().seconds();
+            result_event.planning_attempt_id =
+                planning_risk_context_.planning_attempt_id;
+            result_event.candidate_id = static_cast<int>(candidate_id);
+            result_event.base_generated_count = gate0_base_generated_count;
+            result_event.optimizer_input_count = gate0_optimizer_input_count;
+            result_event.optimizer_success = 0;
+            result_event.optimizer_success_count =
+                gate0_optimizer_success_count;
+            result_event.degree = 3;
+            result_event.ts = ts;
+            result_event.reason = optimizer_reason == "ok" ?
+                "optimizer_failure" : optimizer_reason;
+            gate0_writer_->appendEvent(result_event);
+          }
           if (!p1_objective_allowed && p1_config.use_integrity_cost)
           {
             writeP1PreAdmissionAttempt(
@@ -1369,6 +1538,22 @@ namespace ego_planner
           }
           cout << "traj " << trajs.size() - i << " failed." << endl;
         }
+      }
+
+      if (gate0_writer_ && gate0_writer_->enabled())
+      {
+        Gate0QualificationEvent summary_event;
+        summary_event.event = "attempt_candidates_complete";
+        summary_event.stamp_s = plannerNow().seconds();
+        summary_event.planning_attempt_id =
+            planning_risk_context_.planning_attempt_id;
+        summary_event.collision_segment_count =
+            static_cast<int>(segments.size());
+        summary_event.base_generated_count = gate0_base_generated_count;
+        summary_event.optimizer_input_count = gate0_optimizer_input_count;
+        summary_event.optimizer_success_count = gate0_optimizer_success_count;
+        summary_event.reason = "complete";
+        gate0_writer_->appendEvent(summary_event);
       }
 
       if (!p2_candidates.empty())
@@ -1434,6 +1619,46 @@ namespace ego_planner
                  << p2_candidates[selected_candidate_index].candidate_id
                  << ", fallback=" << p2_result.fallback_reason
                  << ", metrics_only=" << p2_config_.metrics_only << endl;
+          }
+          if (gate0_writer_ && gate0_writer_->enabled())
+          {
+            Gate0QualificationEvent selection_event;
+            selection_event.event = "selection";
+            selection_event.stamp_s = plannerNow().seconds();
+            selection_event.planning_attempt_id =
+                planning_risk_context_.planning_attempt_id;
+            selection_event.candidate_id =
+                p2_candidates[selected_candidate_index].candidate_id;
+            selection_event.base_generated_count = gate0_base_generated_count;
+            selection_event.optimizer_input_count = gate0_optimizer_input_count;
+            selection_event.optimizer_success_count =
+                gate0_optimizer_success_count;
+            selection_event.original_candidate_id =
+                p2_result.selected_index >= 0 &&
+                p2_result.selected_index < static_cast<int>(p2_candidates.size()) ?
+                p2_candidates[p2_result.selected_index].candidate_id : 0;
+            selection_event.selected_candidate_id =
+                p2_candidates[selected_candidate_index].candidate_id;
+            selection_event.original_cost =
+                p2_candidates[selected_candidate_index]
+                    .cost_breakdown.original_cost;
+            selection_event.final_cost =
+                p2_candidates[selected_candidate_index].final_cost;
+            selection_event.reason = p2_result.fallback_reason;
+            gate0_writer_->appendEvent(selection_event);
+            Gate0ControlPointEvidence selected_points;
+            selected_points.stage = "selected";
+            selected_points.stamp_s = selection_event.stamp_s;
+            selected_points.planning_attempt_id =
+                selection_event.planning_attempt_id;
+            selected_points.candidate_id = selection_event.candidate_id;
+            selected_points.degree = 3;
+            selected_points.ts = ts;
+            selected_points.original_cost = selection_event.original_cost;
+            selected_points.final_cost = selection_event.final_cost;
+            selected_points.control_points =
+                p2_candidates[selected_candidate_index].control_points;
+            gate0_writer_->appendControlPoints(selected_points);
           }
         }
         if (!p1_candidate_traces.empty())
@@ -1868,6 +2093,9 @@ namespace ego_planner
 
     /*** STEP 3: REFINE(RE-ALLOCATE TIME) IF NECESSARY ***/
     // Note: Only adjust time in single drone mode. But we still allow drone_0 to adjust its time profile.
+    bool gate0_entered_refinement = false;
+    bool gate0_ego_feasible = true;
+    bool gate0_refinement_success = true;
     if (pp_.drone_id <= 0)
     {
 
@@ -1875,6 +2103,7 @@ namespace ego_planner
       bool flag_step_2_success = true;
       if (!pos.checkFeasibility(ratio, false))
       {
+        gate0_entered_refinement = true;
         cout << "Need to reallocate time." << endl;
 
         Eigen::MatrixXd optimal_control_points;
@@ -1882,9 +2111,28 @@ namespace ego_planner
         if (flag_step_2_success)
           pos = UniformBspline(optimal_control_points, 3, ts);
       }
+      gate0_refinement_success = flag_step_2_success;
+      gate0_ego_feasible = flag_step_2_success;
 
       if (!flag_step_2_success)
       {
+        if (gate0_writer_ && gate0_writer_->enabled())
+        {
+          Gate0QualificationEvent refinement_event;
+          refinement_event.event = "refinement_result";
+          refinement_event.stamp_s = plannerNow().seconds();
+          refinement_event.planning_attempt_id =
+              planning_risk_context_.planning_attempt_id;
+          refinement_event.candidate_id =
+              static_cast<int>(selected_p1_candidate_id);
+          refinement_event.entered_refinement = 1;
+          refinement_event.ego_feasible = 0;
+          refinement_event.refinement_success = 0;
+          refinement_event.degree = 3;
+          refinement_event.ts = ts;
+          refinement_event.reason = "refinement_failed";
+          gate0_writer_->appendEvent(refinement_event);
+        }
         printf("\033[34mThis refined trajectory hits obstacles. It doesn't matter if appeares occasionally. But if continously appearing, Increase parameter \"lambda_fitness\".\n\033[0m");
         continous_failures_count_++;
         return false;
@@ -1902,6 +2150,38 @@ namespace ego_planner
 
     // t_refine = ros::Time::now() - t_start;
     t_refine = rclcpp::Clock().now() - t_start;
+
+    if (gate0_writer_ && gate0_writer_->enabled())
+    {
+      Gate0QualificationEvent refinement_event;
+      refinement_event.event = "refinement_result";
+      refinement_event.stamp_s = plannerNow().seconds();
+      refinement_event.planning_attempt_id =
+          planning_risk_context_.planning_attempt_id;
+      refinement_event.candidate_id =
+          static_cast<int>(selected_p1_candidate_id);
+      refinement_event.entered_refinement = gate0_entered_refinement ? 1 : 0;
+      refinement_event.ego_feasible = gate0_ego_feasible ? 1 : 0;
+      refinement_event.refinement_success =
+          gate0_refinement_success ? 1 : 0;
+      refinement_event.degree = 3;
+      refinement_event.ts = ts;
+      refinement_event.rows = pos.getControlPoint().rows();
+      refinement_event.cols = pos.getControlPoint().cols();
+      refinement_event.reason = gate0_entered_refinement ?
+          "refined" : "not_required";
+      gate0_writer_->appendEvent(refinement_event);
+      Gate0ControlPointEvidence refined_points;
+      refined_points.stage = "post_refinement";
+      refined_points.stamp_s = refinement_event.stamp_s;
+      refined_points.planning_attempt_id =
+          refinement_event.planning_attempt_id;
+      refined_points.candidate_id = refinement_event.candidate_id;
+      refined_points.degree = 3;
+      refined_points.ts = ts;
+      refined_points.control_points = pos.getControlPoint();
+      gate0_writer_->appendControlPoints(refined_points);
+    }
 
     // STEP3 is allowed to change both the control points and the interval.
     // Close the P1 publication decision over that actual final trajectory,
@@ -2122,6 +2402,22 @@ namespace ego_planner
           planning_snapshot, pos.evaluateDeBoorT(0.0).z(),
           accepted_time.seconds(), true);
     updateTrajInfo(pos, accepted_time);
+    if (gate0_writer_ && gate0_writer_->enabled())
+    {
+      Gate0QualificationEvent update_event;
+      update_event.event = "update_traj_info";
+      update_event.stamp_s = accepted_time.seconds();
+      update_event.planning_attempt_id =
+          planning_risk_context_.planning_attempt_id;
+      update_event.candidate_id = static_cast<int>(selected_p1_candidate_id);
+      update_event.update_traj_info = 1;
+      update_event.degree = 3;
+      update_event.ts = ts;
+      update_event.rows = pos.getControlPoint().rows();
+      update_event.cols = pos.getControlPoint().cols();
+      update_event.reason = "accepted";
+      gate0_writer_->appendEvent(update_event);
+    }
     if (objective_applied)
       has_p1_preference_incumbent_ = true;
 

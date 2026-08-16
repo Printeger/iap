@@ -1,5 +1,15 @@
 # Traceability Matrix (IAP)
 
+## 2026-08-16 ICRA Gate 0 read-only qualification
+
+| Req ID | Requirement/evidence seam | Implementation and retained evidence | Status |
+|---|---|---|---|
+| IAP-RQ-320 / IAP-RQ-400 / IAP-RQ-410 | Observe the natural rebound-optimizer-success candidate set without changing generation, optimization, ranking, refinement, feasibility, or publication | `Gate0QualificationWriter` header/source; append-only hooks in `planner_manager.cpp` and normal-publish hook in `ego_replan_fsm.cpp`; disabled/no-op, schema/full-matrix, and concurrent append gtest | **IMPLEMENTED READ-ONLY** |
+| IAP-RQ-400 / IAP-RQ-422 | Prove P1/P3/P4/P2/P5 isolation and retain legacy mirror behavior while allowing geometry mirror with fanout mirror false | `test_planner.launch.py` explicit-manager override resolver; fixed runner manifests; `test_test_planner_launch.py` and `test_gate0_runner.py` | **VERIFIED; legacy fallback preserved** |
+| IAP-RQ-320 / IAP-RQ-400 / IAP-RQ-422 | All Gate 0 attempts and complete staged control points must be grouped and hashed reproducibly | `gate0_analyzer.py`; `test_gate0_analyzer.py`; `results/icra27/gate0/candidate_qualification.csv`; `candidate_control_points.csv`; `.17g` canonical SHA256 contract | **378/378 attempts retained; every attempt singleton; NO-GO-P2** |
+| IAP-RQ-320 / IAP-RQ-422 | Fixed 76,800-query P0 workload must yield at least 20 successful generations before latency is interpreted | `gate0_capture_p0_health.py`; `p0_full_grid_benchmark.csv`; `p0_full_grid_summary.json`; report section 4 | **P0_PERFORMANCE_GATE_FAIL; 0 successful generations; snapshot unavailable** |
+| IAP-RQ-422 | External dependency and disk state must remain auditable without modifying sources or deleting prior evidence | read-only `gnss_comm-closure` tar/list/metadata/environment/doctor archive; `gate0_disk_audit.py`; `disk_archive_candidates.csv`; `GATE0_QUALIFICATION_REPORT.md` | **ARCHIVE VERIFIED; CAMPAIGN_DISK_NO_GO** |
+
 ## 2026-08-09 P1-2 c36 retained result and single-epoch GNSS binding
 
 | Req ID | Evidence | Verification | Status |

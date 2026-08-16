@@ -1,0 +1,28 @@
+{
+  "expected_refresh_query_count": 76800,
+  "failed_ratio": 1.0,
+  "failed_refresh_count": 100,
+  "failures": [
+    "fewer_than_20_successful_generations",
+    "refresh_query_shape_mismatch",
+    "refresh_p95_over_400_ms"
+  ],
+  "gate": "P0_PERFORMANCE_GATE_FAIL",
+  "generation_interval_ms_p50": null,
+  "generation_interval_ms_p95": null,
+  "manifest_failures": [],
+  "p95_over_refresh_period": null,
+  "query_shape_ok": false,
+  "recommendations": [
+    "evaluate predictor worker_count",
+    "reduce ICRA ROI",
+    "reduce frozen horizons",
+    "increase refresh period"
+  ],
+  "refresh_elapsed_ms_max": null,
+  "refresh_elapsed_ms_p50": null,
+  "refresh_elapsed_ms_p95": null,
+  "schema_version": "gate0_p0_summary_v1",
+  "stale_ratio": 1.0,
+  "successful_generation_count": 0
+}

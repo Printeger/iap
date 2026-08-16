@@ -1151,6 +1151,7 @@ namespace ego_planner
 
       /* 1. publish traj to traj_server */
       bspline_pub_->publish(bspline);
+      planner_manager_->recordGate0NormalBsplinePublish(plannerNow().seconds());
       if (!planner_manager_->finalizeP1AcceptedRiskProfile(
               plannerNow().seconds()))
       {

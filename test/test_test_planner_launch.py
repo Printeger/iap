@@ -129,6 +129,43 @@ class TestPlannerLaunchTest(unittest.TestCase):
         }
         self.assertEqual(differing, {"p1_map_fixture", "p1_fixture_mirror_y"})
 
+    def test_fanout_mirror_preserves_legacy_fallback_but_accepts_gate0_override(self):
+        self.assertTrue(
+            MODULE._resolve_fanout_mirror_value(
+                fixture_mirror=True,
+                manager_mirror=False,
+                explicit_overrides=set(),
+            )
+        )
+        self.assertFalse(
+            MODULE._resolve_fanout_mirror_value(
+                fixture_mirror=True,
+                manager_mirror=False,
+                explicit_overrides={"manager/p1_collision_fanout_mirror_y"},
+            )
+        )
+
+    def test_gate0_launch_contract_declares_all_read_only_evidence_fields(self):
+        defaults = dict(MODULE.ARG_DEFAULTS)
+        self.assertEqual(defaults["gate0.qualification_evidence_enable"], "false")
+        for field in (
+            "gate0.candidate_events_path",
+            "gate0.control_points_path",
+            "gate0.evidence_run_id",
+            "gate0.evidence_manifest_path",
+        ):
+            self.assertIn(field, defaults)
+            self.assertEqual(defaults[field], "")
+        source = Path(MODULE.__file__).read_text()
+        for field in (
+            '"p1_fixture_mirror_y":',
+            '"p2.enable_candidate_ranking":',
+            '"p3.enable_local_reference_bias":',
+            '"p4.enable_risk_aware_astar":',
+            '"manager/use_distinctive_trajs":',
+        ):
+            self.assertIn(field, source)
+
     def test_scenario_fingerprint_is_canonical_and_sensitive(self):
         payload = {"geometry": {"seed": 11, "density": 0.25}, "risk": ["gnss", "lidar"]}
         first = MODULE._scenario_fingerprint("p1_fork_fused_v1", payload)

@@ -157,6 +157,27 @@ def _launch_arg_overrides():
     return keys
 
 
+def _resolve_fanout_mirror_value(
+    fixture_mirror, manager_mirror, explicit_overrides
+):
+    if "manager/p1_collision_fanout_mirror_y" in explicit_overrides:
+        return bool(manager_mirror)
+    return bool(fixture_mirror)
+
+
+def _manager_fanout_mirror_y(context, explicit_overrides=None):
+    overrides = (
+        _launch_arg_overrides()
+        if explicit_overrides is None
+        else explicit_overrides
+    )
+    return _resolve_fanout_mirror_value(
+        _param_bool(context, "p1_fixture_mirror_y"),
+        _param_bool(context, "manager/p1_collision_fanout_mirror_y"),
+        overrides,
+    )
+
+
 def _launch_value(value):
     if isinstance(value, bool):
         return "true" if value else "false"
@@ -1068,6 +1089,11 @@ ARG_DEFAULTS = [
     ("manager/p1_collision_fanout_preserve_homotopies", "false"),
     ("manager/p1_collision_fanout_mirror_y", "false"),
     ("manager/use_distinctive_trajs", "true"),
+    ("gate0.qualification_evidence_enable", "false"),
+    ("gate0.candidate_events_path", ""),
+    ("gate0.control_points_path", ""),
+    ("gate0.evidence_run_id", ""),
+    ("gate0.evidence_manifest_path", ""),
     ("optimization/lambda_smooth", "1.0"),
     ("optimization/lambda_collision", "0.5"),
     ("optimization/lambda_feasibility", "0.1"),
@@ -1726,10 +1752,20 @@ def _ego_planner_node(context, drone_id, planner_odom_topic, cloud_topic, camera
                 context, "manager/p1_collision_fanout_clearance_m")},
             {"manager/p1_collision_fanout_preserve_homotopies": _param_bool(
                 context, "manager/p1_collision_fanout_preserve_homotopies")},
-            {"manager/p1_collision_fanout_mirror_y": _param_bool(
-                context, "p1_fixture_mirror_y")},
+            {"manager/p1_collision_fanout_mirror_y":
+                _manager_fanout_mirror_y(context, overrides)},
             {"manager/use_distinctive_trajs": _param_bool(context, "manager/use_distinctive_trajs")},
             {"manager/drone_id": int(drone_id)},
+            {"gate0.qualification_evidence_enable": _param_bool(
+                context, "gate0.qualification_evidence_enable")},
+            {"gate0.candidate_events_path": LaunchConfiguration(
+                "gate0.candidate_events_path").perform(context)},
+            {"gate0.control_points_path": LaunchConfiguration(
+                "gate0.control_points_path").perform(context)},
+            {"gate0.evidence_run_id": LaunchConfiguration(
+                "gate0.evidence_run_id").perform(context)},
+            {"gate0.evidence_manifest_path": LaunchConfiguration(
+                "gate0.evidence_manifest_path").perform(context)},
             {"manager/use_integrity_global_search": False},
             {"optimization/lambda_smooth": _param_float(context, "optimization/lambda_smooth")},
             {"optimization/lambda_collision": _param_float(context, "optimization/lambda_collision")},
@@ -1981,6 +2017,36 @@ def _launch_setup(context):
         if "p1.metrics_only" in overrides
         else (not p1_enabled_for_manifest)
     )
+    p2_use_for_manifest = (
+        _param_bool(context, "p2.enable_candidate_ranking")
+        if "p2.enable_candidate_ranking" in overrides
+        else bool(safety_enabled.get("p2"))
+    )
+    p3_local_for_manifest = (
+        _param_bool(context, "p3.enable_local_reference_bias")
+        if "p3.enable_local_reference_bias" in overrides
+        else bool(safety_enabled.get("p3_local"))
+    )
+    p3_global_for_manifest = (
+        _param_bool(context, "p3.enable_global_reference_bias")
+        if "p3.enable_global_reference_bias" in overrides
+        else bool(safety_enabled.get("p3_global"))
+    )
+    p4_use_for_manifest = (
+        _param_bool(context, "p4.enable_risk_aware_astar")
+        if "p4.enable_risk_aware_astar" in overrides
+        else bool(safety_enabled.get("p4"))
+    )
+    p5_runtime_for_manifest = (
+        _param_bool(context, "p5.enable_runtime_gate")
+        if "p5.enable_runtime_gate" in overrides
+        else bool(safety_enabled.get("p5_runtime"))
+    )
+    p5_final_for_manifest = (
+        _param_bool(context, "p5.enable_final_gate")
+        if "p5.enable_final_gate" in overrides
+        else bool(safety_enabled.get("p5_final"))
+    )
     p1_debug_path_for_manifest = LaunchConfiguration("p1.debug_csv_path").perform(context)
     if not p1_debug_path_for_manifest:
         p1_debug_path_for_manifest = str(Path(export_dir) / "planner_p1_integrity_cost_debug.csv")
@@ -2150,8 +2216,8 @@ def _launch_setup(context):
                 context, "manager/p1_collision_fanout_clearance_m"),
             "collision_fanout_preserve_homotopies": _param_bool(
                 context, "manager/p1_collision_fanout_preserve_homotopies"),
-            "collision_fanout_mirror_y": _param_bool(
-                context, "p1_fixture_mirror_y"),
+            "collision_fanout_mirror_y":
+                _manager_fanout_mirror_y(context, overrides),
             "local_update_range_x_m": _param_float(context, "grid_map/local_update_range_x"),
         },
         "p0_prediction": {
@@ -2189,13 +2255,27 @@ def _launch_setup(context):
             context, "manager/p1_collision_fanout_clearance_m"),
         "manager/p1_collision_fanout_preserve_homotopies": _param_bool(
             context, "manager/p1_collision_fanout_preserve_homotopies"),
-        "manager/p1_collision_fanout_mirror_y": _param_bool(
-            context, "p1_fixture_mirror_y"),
+        "manager/p1_collision_fanout_mirror_y":
+            _manager_fanout_mirror_y(context, overrides),
+        "manager/use_distinctive_trajs": _param_bool(
+            context, "manager/use_distinctive_trajs"),
+        "p1_fixture_mirror_y": _param_bool(context, "p1_fixture_mirror_y"),
+        "gate0.qualification_evidence_enable": _param_bool(
+            context, "gate0.qualification_evidence_enable"),
+        "gate0.candidate_events_path": LaunchConfiguration(
+            "gate0.candidate_events_path").perform(context),
+        "gate0.control_points_path": LaunchConfiguration(
+            "gate0.control_points_path").perform(context),
+        "gate0.evidence_run_id": LaunchConfiguration(
+            "gate0.evidence_run_id").perform(context),
+        "gate0.evidence_manifest_path": LaunchConfiguration(
+            "gate0.evidence_manifest_path").perform(context),
         "optimization/max_vel": _param_float(context, "optimization/max_vel"),
         "bspline/limit_vel": _param_float(context, "bspline/limit_vel"),
         "fsm.thresh_replan_time": _param_float(context, "fsm.thresh_replan_time"),
         "grid_map/local_update_range_x": _param_float(context, "grid_map/local_update_range_x"),
         "record_bag": record_bag,
+        "start_rviz": start_rviz,
         "run_validator": run_validator,
         "timebase": {
             "planning_timeline": {"domain": "sim_message", "field": "stamp_s"},
@@ -2206,12 +2286,28 @@ def _launch_setup(context):
             "bag_receive": {"domain": "system_receive", "field": "stamp"},
         },
         "planner_safety_profile": safety_profile,
+        "planner_enable_all_safety": _param_bool(
+            context, "planner_enable_all_safety"),
         "fsm.thresh_no_replan_meter": _fixed_lattice_no_replan_threshold(safety_enabled),
         "p0.enable_risk_grid": p0_enabled,
         "p1.use_integrity_cost": p1_use_for_manifest,
         "p1.metrics_only": p1_metrics_only_for_manifest,
         "p1.lambda_integrity": _param_float(context, "p1.lambda_integrity"),
+        "p1.debug_csv_enable": _param_bool(context, "p1.debug_csv_enable"),
         "p1.debug_csv_path": p1_debug_path_for_manifest,
+        "p2.enable_candidate_ranking": p2_use_for_manifest,
+        "p2.debug_csv_enable": _param_bool(context, "p2.debug_csv_enable"),
+        "p3.enable_local_reference_bias": p3_local_for_manifest,
+        "p3.enable_global_reference_bias": p3_global_for_manifest,
+        "p3.debug_csv_enable": _param_bool(context, "p3.debug_csv_enable"),
+        "p4.enable_risk_aware_astar": p4_use_for_manifest,
+        "p4.debug_csv_enable": _param_bool(context, "p4.debug_csv_enable"),
+        "p5.enable_runtime_gate": p5_runtime_for_manifest,
+        "p5.enable_final_gate": p5_final_for_manifest,
+        "forest_random_seed": _param_int(context, "forest_random_seed"),
+        "gnss_random_seed": _param_int(context, "gnss_random_seed"),
+        "terminal_wall_feature_seed": _param_int(
+            context, "terminal_wall_feature_seed"),
         "p1.max_candidates_per_attempt": max(1, min(8, _param_int(context, "p1.max_candidates_per_attempt"))),
         "p1.candidate_optimization_path": p1_candidate_optimization_path_for_manifest,
         "p1.candidate_control_points_path": p1_candidate_control_points_path_for_manifest,

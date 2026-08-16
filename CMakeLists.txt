@@ -597,6 +597,10 @@ if(DEFINED ENV{ROS_VERSION})
       scripts/dev_predictor/analyze_predictor_system_e11.py
       scripts/dev_predictor/analyze_predictor_system_e12.py
       scripts/dev_planner/analyze_planner_p0_phase1.py
+      scripts/dev_planner/gate0_analyzer.py
+      scripts/dev_planner/gate0_capture_p0_health.py
+      scripts/dev_planner/gate0_disk_audit.py
+      scripts/dev_planner/run_gate0_qualification.py
       DESTINATION lib/iap
     )
     install(DIRECTORY launch DESTINATION share/iap)
@@ -670,6 +674,18 @@ if(DEFINED ENV{ROS_VERSION})
       add_test(
         NAME test_archive_p1_2_retrospective
         COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test/test_archive_p1_2_retrospective.py
+      )
+      add_test(
+        NAME test_gate0_analyzer
+        COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test/test_gate0_analyzer.py
+      )
+      add_test(
+        NAME test_gate0_runner
+        COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test/test_gate0_runner.py
+      )
+      add_test(
+        NAME test_test_planner_launch
+        COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test/test_test_planner_launch.py
       )
     endif()
     ament_export_include_directories(include ${EIGEN3_INCLUDE_DIR} ${OpenCV_INCLUDE_DIRS})
