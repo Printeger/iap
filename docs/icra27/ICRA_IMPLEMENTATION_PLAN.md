@@ -18,7 +18,7 @@ Predictor advisory query
             ↓
 P0 predicted-PL field / snapshot
             ↓
-P2 ranking of the same successful candidate set
+P2 ranking of the same rebound-optimizer-success candidate set
             ↓
 P5 independent final gate
             ↓
@@ -29,24 +29,24 @@ P5 independent runtime gate
 
 实现和验收必须同时满足以下边界：
 
-1. P0 和 Predictor 只提供 advisory prediction，不发布或覆盖 current certified PL/AL/IM。
+1. P0 和 Predictor 只提供 advisory prediction；P0 可单向读取 current-integrity prior，但不得回写或覆盖 authoritative current-state monitor within the system。
 2. P2 是 preference，不是 safety authority；其输出不得命名为 hard PASS。
 3. P2 不生成候选，也不调用候选生成器。
 4. P2 不改变 optimizer success、碰撞检测和动力学可行性的定义。
-5. 一次 P2 比较只接受同一 planning attempt、同一 successful candidate set、同一 P0 snapshot。
-6. P2 基准项只读取 `BsplineOptimizer::ReboundCostBreakdown::original_cost`，不读取可能含 P1 的 `total_cost`。
-7. low-valid、unknown、stale、NaN/Inf、null field 或单候选时，P2 回退到 original ranking。
-8. P5 是 ICRA profile 中唯一 hard safety authority。
+5. 一次 P2 比较只接受同一 planning attempt、同一 rebound-optimizer-success candidate set、同一 P0 snapshot。
+6. P2 基准项只读取 `BsplineOptimizer::OptimizerCostBreakdown::original_cost`，不读取可能含 P1 的 `total_cost`。
+7. null、single、risk tie、任一样本 unknown/stale、任一非有限输入或 support/coverage 不一致时，P2 回退到 immutable original winner；`valid_ratio` 只作诊断。
+8. P5 是 IAP 层唯一 hard integrity gate；原始 EGO collision/dynamics checks 保持运动可行性 authority。
 9. P5 final gate 必须在正常 `/drone_0_planning/bspline` 发布前完成；P5 reject 必须阻止对应正常轨迹发布。
 10. P5 runtime gate 独立监控已经发布和执行的轨迹。
 11. unknown、stale 和非有限 PL/AL/IM 都不能解释为低风险。
-12. P5 current gate 继续使用 certified current monitor；P0/Predictor 结果只能进入 future/advisory 路径。
+12. P5 current gate 继续使用 authoritative current-state monitor within the system；P0/Predictor 结果只能进入 future/advisory 路径。本计划只主张 logical one-way separation，不主张 physical isolation 或 certification-level proof。
 
 ## 2. 实际调用链和目标插入点
 
 ```mermaid
 flowchart TD
-    A["Current certified integrity<br/>CurrentIntegrityState<br/>include/iap/planner/integrity_snapshot.hpp"]
+    A["Authoritative current-state monitor<br/>CurrentIntegrityState<br/>include/iap/planner/integrity_snapshot.hpp"]
     B["freeze current planning input<br/>P0RiskGridRuntime::currentFromMsg()/buildSnapshot()<br/>src/iap/planner/plan_manage/src/p0_risk_grid_runtime.cpp:1459,1533"]
     C["Predictor advisory batch query<br/>PredictorModuleRiskProvider::batchQuery()<br/>p0_risk_grid_runtime.cpp:165,173,211<br/>PredictorModule::queryBatch()<br/>src/iap/predictor/predictor_module.cpp:383"]
     D["P0 immutable generation/snapshot<br/>RiskGridMap::refreshFromProvider()/acquireSnapshot()<br/>src/iap/planner/risk_grid_map.cpp:911,821"]
@@ -71,9 +71,9 @@ P2 比较的所有候选绑定 planning context 已获取的同一个 snapshot�
 
 ## 3. 计划新增的内部接口和证据契约
 
-### 3.1 P0 generation provenance
+### 3.1 P0 Gate 0 evidence adapter
 
-在 `RiskGridSnapshot::Generation` 增加只读 provenance，不改变现有 query conservative-corner 语义：
+Gate 0 通过小型只读 adapter 消费既有 `RiskGridSnapshot::Generation` 和 `/planning/risk_grid_health`，不改变现有 query conservative-corner 语义。全量 Generation provenance 扩展属于会后可选工作。adapter 记录：
 
 - `schema_version`、`generation_id`、`snapshot_stamp_s`、`frame_id`；
 - snapshot 创建时冻结的 current integrity stamp、HAL/VAL、PL/IM freshness，只作为 advisory provenance；
@@ -81,7 +81,7 @@ P2 比较的所有候选绑定 planning context 已获取的同一个 snapshot�
 - full-grid query count、unique positions、LiDAR evaluation/cache hit、worker count；
 - refresh elapsed、provider batch elapsed、完成时间和失败/unknown/stale reason。
 
-`RiskGridSnapshot::health()` 仍返回 generation 创建时的不可变 health；动态 field age/stale 继续来自 `/planning/risk_grid_health` 和实际 voxel query，不回写旧 snapshot。
+`RiskGridSnapshot::health()` 仍返回 generation 创建时的不可变 health；动态 field age/stale 继续来自 `/planning/risk_grid_health` 和实际 voxel query，不回写旧 snapshot。incremental grid 或跨 generation cache 不在会议 Gate 0 范围。
 
 ### 3.2 P2 candidate-set boundary
 
@@ -111,7 +111,7 @@ P2CandidateRankingResult
   fallback_reason
 ```
 
-复用 `EGOPlannerManager::PlanningRiskContext` 和 `beginPlanningRiskContextWithSnapshot()`，将当前 `p1_planning_attempt_seq_` 中性化；禁止再建立第二个 attempt counter。
+复用 `EGOPlannerManager::PlanningRiskContext` 和 `beginPlanningRiskContextWithSnapshot()`；Gate 0 直接沿用现有 planning attempt ID。`p1_planning_attempt_seq_` 中性化重命名属于会后可选重构，禁止为 Gate 0 建立第二个 attempt counter。
 
 candidate ID 是 attempt-local ordinal。candidate hash 使用 `fnv1a64:<16hex>`，输入为 schema tag、B-spline degree、knot interval、control-point 维度和按固定次序序列化的 IEEE-754 字节。candidate-set hash 对排序后的 `(candidate_hash, multiplicity)` 计算，表示集合成员身份；运行时还必须断言 P2 只收到一个共享 candidate-set 对象和 snapshot 指针。artifact 文件使用 SHA256，不能用 FNV 替代文件完整性校验。
 
@@ -137,7 +137,7 @@ minimum_predicted_IM_i =
                     VAL_snapshot - VPL_pred))
 ```
 
-`mean(c_pi)` 和 `mean predicted PL` 分别记录，不宣称二者在插值后严格相同。HAL/VAL 来自该 P0 snapshot 冻结的 advisory provenance，只用于 P2 metrics，不替代 P5 current certified monitor。
+`mean(c_pi)` 和 `mean predicted PL` 分别记录，不宣称二者在插值后严格相同。HAL/VAL 来自该 P0 snapshot 冻结的 advisory provenance，只用于 P2 metrics，不替代 P5 authoritative current-state monitor。
 
 original winner 定义为最小 finite `original_optimizer_cost`，平局按 candidate ID。若所有 original cost 都非 finite，则返回 planner input failure `no_finite_original_candidate`；这不是 P2 safety reject。
 
@@ -158,12 +158,40 @@ original winner 定义为最小 finite `original_optimizer_cost`，平局按 can
 ### 3.5 ROS 和文件证据
 
 - 保留 `/planning/risk_grid_health` 和 `/planning/integrity_gate_status`。
-- 新增 `/planning/p2_candidate_ranking`，采用版本化 `std_msgs/msg/String` JSON，避免引入新 message package。
+- `/planning/p2_candidate_ranking` 版本化 JSON topic 降为会后可选诊断；Gate 0 正式证据使用 candidate CSV + manifest。
 - 保留现有 `/iap/rviz/p2_candidate_trajectories` 及 P0/P5 RViz；RViz 只用于图示，不作为 hard-gate 数据源。
 - 新增 `icra_candidate_set.csv`、`icra_candidate_control_points.csv`、`icra_p0_health.csv`、`icra_p2_score_decomposition.csv`、`icra_p5_action_timeline.csv`。
 - 每一行携带 `schema_version/run_id/manifest_path/git_commit/configuration_hash/seed/scenario`，再携带适用的 attempt/set/candidate/snapshot identity。
 
-## 4. W0：可复现性和 ICRA profile 隔离
+## 4. Gate 0：先证明候选资格与 P0 性能
+
+Gate 0 只增加默认关闭、只读的 instrumentation；不得改变候选生成、优化、排序、refinement、P5 decision 或 action。Gate 0A 为 `CONDITIONAL` 或 `NO-GO-P2` 时仍独立完成 Gate 0B；停止规则只阻止后续 P2 interface/scoring 开发。
+
+### 4.1 Gate 0A — rebound-optimizer-success candidate qualification
+
+- 固定映射：primary=`p1_fork_fused_v1`、mirror=`p1_fork_fused_mirror_v1`、flat-null=`p1_fork_symmetric_null_v1`；每场景三次，logical seed 11。
+- 组件 seed 固定为 `forest_random_seed=11`、`gnss_random_seed=20260011`、`terminal_wall_feature_seed=11022`。
+- P0/P1/P2/P3/P4/P5 及 P1 fanout/supplement 全部 effective false；保留 `manager/use_distinctive_trajs=true`，不录 bag，固定运行 90 s、验证窗口 85 s。
+- 每个 run 至少有一个同 attempt 的 `generated>=2 && optimizer_success>=2` 集合才合格；三次均满足才称稳定场景。所有 attempt 都进入分母，多数 attempt 少于两个 success candidate 判 `NO-GO-P2`。
+- 任一开关违规、optimizer input 与 base generated 不一致、P1 fanout/supplement 介入、attempt identity 不可证明或 planner crash，直接 `NO-GO-P2`。
+- 三场景均稳定且 selected candidate 进入原始 EGO 后续检查为 `GO`；部分稳定为 `CONDITIONAL`，不得自动增加 synthetic fixture。
+
+### 4.2 Gate 0B — P0 fixed full-grid benchmark
+
+- 单次 `gnss_open_sky` P0-only no-bag run：`30x30x6 m`、`0.75 m`、horizons `0.0..2.5 s` 步长 `0.5 s`、refresh `0.5 s`、worker 1、`p0.skip_occupied_voxels=true`、60 s。
+- 轻量 subscriber 只捕获 `/planning/risk_grid_health` JSON，按 refresh steady timestamp 去重；至少 20 个不同成功 generation。
+- `refresh_query_count` 必须为 `ceil(30/0.75) * ceil(30/0.75) * ceil(6/0.75) * 6 = 76,800`；`provider_query_count` 可因 occupied skip 更小，不得混写。
+- type-7 线性分位数报告 p50/p95、max、stale/failed ratio、实际 interval 和 `p95/500 ms`。少于 20 个成功 generation、shape 不符或 p95 > 400 ms 均输出 `P0_PERFORMANCE_GATE_FAIL`；只建议 worker、ROI、horizons、refresh period，不自动调参。
+
+### 4.3 Gate 0 产物与停止线
+
+聚合产物固定为 `candidate_qualification.csv`、`candidate_control_points.csv`、`effective_config.json`、`p0_full_grid_benchmark.csv`、`p0_full_grid_summary.json` 和 `GATE0_QUALIFICATION_REPORT.md`。候选 hash 由 Python 按 `.17g` 序列化 degree、`ts`、矩阵维度和有序 control points 后计算 SHA256；C++ writer 不引入密码依赖。
+
+若 Gate 0A 为 `NO-GO-P2`，停止 W2/W3 的 P2 主线并修订为 P0+P5 备用论文；若为 `CONDITIONAL`，只冻结可保留场景并评审是否接受显式 upstream controlled fixture。只有 `GO` 才进入最小 ICRA profile isolation 和 immutable P2 batch identity，且不先修改 scoring。
+
+明确后移的会后项包括：attempt counter 中性化重命名、Generation 全量 evidence、P2 JSON topic、通用 campaign framework、全量 artifact 包装、incremental grid/cross-generation cache 和全仓 formatter。Gate 0 只对 touched files 做 lint/compile，不借机格式化历史代码。
+
+## 5. W0：可复现性和 ICRA profile 隔离
 
 为保持表格可读，以下缩写均是仓库内唯一实际路径：`planner_manager.{h,cpp}`=`src/iap/planner/plan_manage/{include/ego_planner/planner_manager.h,src/planner_manager.cpp}`，`p2_candidate_ranking.{h,cpp}`和`p5_runtime_integrity_gate.{h,cpp}`同属该`plan_manage`包，`risk_grid_map.{hpp,cpp}`=`{include/iap/planner/risk_grid_map.hpp,src/iap/planner/risk_grid_map.cpp}`。标为“新增”的路径当前不存在，其余“当前代码位置”必须在冻结点可由`rg`定位。
 
@@ -173,7 +201,7 @@ original winner 定义为最小 finite `original_optimizer_cost`，平局按 can
 | W0-02 | 独立 launch 和 scope consistency gate | `_apply_preset_values()` `test_planner.launch.py:1091`；`_resolve_safety_switches()` `:1305` | 新增薄 wrapper，只暴露 arm、scenario、seed、duration、record mode/output、RViz；解析后执行 `_validate_icra_scope()`；拒绝 `all`、P1/P3/P4 及冲突 lower-level override | 新增 `launch/icra27_planner.launch.py`；修改 `launch/test_planner.launch.py` | 正向 C0/C1/C2 和逐个恶意 override launch tests | ICRA launch/preflight report | ICRA 入口无法启用 P1/P3/P4；旧入口行为不变 | 修改共享 resolver 影响 legacy profile | wrapper 负责 ICRA 校验，共享 resolver 只加无行为变化的 helper | 1.25 |
 | W0-03 | manifest 可证明真实配置 | `test_planner.launch.py` manifest 构造 `:1979-2239` 及 recorder finalizer | 新增 `icra27_evidence_v1`；保存 profile/config/threshold/topic hashes、所有 high/low switches、全部 P0/P2/P5 effective params、seed/scenario/record mode、runtime binary hashes | 修改 launch/finalizer；新增 schema helper | manifest golden/schema tests；缺字段 fail-closed | ICRA run manifest | 只读 manifest 即可证明 P1/P3/P4=false 及实际 C0/C1/C2 | 只记录 CLI 而漏 preset 派生值 | 记录传给 node 的解析后 effective map | 1.0 |
 | W0-04 | 限制录包并设置容量 gate | recorder topic list `test_planner.launch.py:2858`；`planner_bag_recorder_with_finalizer.py` | 增加 `none/light/representative`；启动前计算预算/可用空间；保存 resolved topic list/hash；超预算使 run 失败而非静默截断 | launch、recorder/finalizer、campaign helper | whitelist、重复 topic、低空间、超 size 测试 | bag metadata、capacity report | 普通正式 run 不录 raw LiDAR/depth/IMU/map/RViz | light bag 缺故障诊断 | 失败 run 保留 CSV/log/light bag；仅代表 run 录 expanded bag | 0.75 |
-| W0-05 | 不改变冻结 tag和旧 profile | 现有 `off,p1,p2,p3,p4,p5,all` 解析 | 保存 legacy effective-parameter golden；运行 baseline/full profile smoke；不修改 tag，不重命名 preset | launch tests、CI notes | Python launch tests；`colcon test --packages-select iap ego_planner` | regression report | baseline profile 与本改造前 golden 一致 | 新 ICRA alias 覆盖旧 preset 名 | ICRA 名称全部使用 `icra_*`；发现 diff 时撤回共享路径修改 | 0.75 |
+| W0-05 | 不改变冻结 tag和旧 profile | 现有 `off,p1,p2,p3,p4,p5,all` 解析 | 保存 legacy effective-parameter golden；运行 baseline/full profile smoke；不修改 tag，不重命名 preset | launch tests、CI notes | 顶层 `colcon test --packages-select iap`；nested `ego_planner` 独立 build/CTest | regression report | baseline profile 与本改造前 golden 一致 | 新 ICRA alias 覆盖旧 preset 名 | ICRA 名称全部使用 `icra_*`；发现 diff 时撤回共享路径修改 | 0.75 |
 
 ICRA profile 需要同时验证的关闭项如下，不能只检查高层 switch：
 
@@ -209,11 +237,11 @@ p4.debug_csv_enable=false
 | P0-only qualification | true | false / false | false / false | 非论文 no-op sanity |
 | P2 metrics-only qualification | true | true / true | false / false | 非论文 winner no-op 资格检查 |
 
-## 5. W1：P0 会议版稳定化
+## 6. W1：P0 会议版稳定化
 
 | ID | 目标 | 当前代码位置 | 具体修改 | 预计文件 | 测试 | 产物 | 验收标准 | 风险 | 回退方案 | 人日 |
 |---|---|---|---|---|---|---|---|---|---|---:|
-| W1-01 | 固化 snapshot identity/provenance | `include/iap/planner/risk_grid_map.hpp:RiskGridSnapshot`；`RiskGridSnapshot::Generation` `risk_grid_map.cpp:155`；`P0RiskGridRuntime::buildSnapshot()` `:1533` | 增加 schema、frame、current input、source aggregate 和 refresh provenance；保持 generation immutable | `risk_grid_map.hpp/.cpp`、`p0_risk_grid_runtime.h/.cpp` | `test_risk_grid_map`、`test_p0_risk_grid_runtime` | snapshot metadata | 同 snapshot 的 ID/stamp/frame/provenance 永不随查询变化 | 把动态 stale 写回 snapshot | 动态 age/stale 只进入 raw health/查询结果 | 1.25 |
+| W1-01 | 固化最小 snapshot identity；全量 provenance 会后可选 | `include/iap/planner/risk_grid_map.hpp:RiskGridSnapshot`；`RiskGridSnapshot::Generation` `risk_grid_map.cpp:155`；`P0RiskGridRuntime::buildSnapshot()` `:1533` | Gate 0 只使用既有 generation/health 标量和小型 evidence adapter；全量 performance/file provenance 写入 Generation 后移 | Gate 0 capture/analyzer；可选 `risk_grid_map.hpp/.cpp` | `test_risk_grid_map`、Gate 0 analyzer tests | snapshot/evidence metadata | 不改变 snapshot/query 语义，动态 stale 不回写旧 snapshot | 核心结构被论文 writer 污染 | 保持 adapter 边界 | 0.5 |
 | W1-02 | 输出正确的 P0 性能口径 | `P0RiskGridRuntime::refreshTimerCallback()` `:811`；provider performance `:915,945,972` | CSV 记录 full-grid refresh/provider latency、总 query、unique positions、LiDAR eval/cache hit、worker；候选查询另记，不混淆 | P0 runtime、CSV writer | fake clock、counter aggregation、CSV schema tests | `icra_p0_health.csv` | 每次 refresh 有完整 generation 级 timing；报告不使用几十微秒单 query 替代 full-grid | 同步写盘扰动刷新 | 使用缓冲 writer；逐样本数据只写 candidate CSV | 1.0 |
 | W1-03 | P0-only 不改变 winner | P0 与 selection 当前无直接边；manager snapshot acquire `planner_manager.cpp:296` | 增加 config dependency test；对open/null、degraded、corridor全部资格场景以冻结seeds做C0/P0-only配对，比较candidate set、original winner和final B-spline | profile、qualification analyzer | 每个资格场景10-seed paired qualification | P0-only sanity report | 所有纳入资格测试的场景candidate set、winner和final trajectory均不变 | 跨run ROS时序导致identity不等价 | 任一场景无法证明即qualification FAIL并披露；该结果只作sanity，P2正式结论仍来自同attempt | 1.25 |
 | W1-04 | 有条件调整 ROI/refresh | runtime默认`30×30×6 m`、`0.75 m`、5 horizons、`0.5 s`；`test_planner.launch.py:901`实际覆盖为6 horizons至`2.5 s` | benchmark和预算使用manifest中的6-layer effective值；仅当prequalification不满足已注册性能门时缩小ICRA local ROI/horizon或调整refresh，并记录原值/理由/最终值，不改共享默认 | ICRA YAML、manifest | frozen workload benchmark；runtime-default与launch-effective config test | 参数决策记录 | open/null/degraded/corridor仍覆盖且P0 p95 refresh过门 | 用5-layer默认低估正式负载或为速度牺牲覆盖 | 恢复当前6-layer launch值并缩小正式场景，不重写P0架构 | 1.0 |
@@ -226,16 +254,16 @@ P0 验收组合：
 - 上述每个资格场景的P0-only paired run都必须保持candidate set、winner和final trajectory；无法建立跨run等价即显式qualification failure；
 - 性能：同时报告 full-grid update latency、provider batch latency、candidate query latency 和 query count。
 
-## 6. W2：同候选、同 snapshot 排序
+## 7. W2：同候选、同 snapshot 排序
 
 | ID | 目标 | 当前代码位置 | 具体修改 | 预计文件 | 测试 | 产物 | 验收标准 | 风险 | 回退方案 | 人日 |
 |---|---|---|---|---|---|---|---|---|---|---:|
-| W2-01 | 中性 planning attempt | `planner_manager.h:44 PlanningRiskContext`；`beginPlanningRiskContextWithSnapshot()` `planner_manager.cpp:312`；`p1_planning_attempt_seq_` | 复用现有 context；将 sequence/member 命名中性化并保留旧 evidence alias；每次 replan 只创建一个 attempt | `planner_manager.h/.cpp`、context test | `test_planning_risk_context` | attempt timeline | 每个 P2 batch 精确对应一个 nonzero attempt ID 和一次 planning snapshot acquire | 破坏 P1 历史 schema | 旧字段由 adapter 输出，内部只维护一个计数器 | 1.0 |
-| W2-02 | 构造不可变 successful candidate set | `BsplineOptimizer::distinctiveTrajs()` `bspline_optimizer.cpp:474`；successful loop `planner_manager.cpp:1273-1351` | 所有上游 optimizer success 完成后一次性构造 `P2CandidateSet`；加入 candidate ID/hash/set hash；P2 只读，不触碰 generator/feasibility | `p2_candidate_ranking.h/.cpp`、`planner_manager.h/.cpp` | hash、duplicate、order、shared snapshot tests | candidate-set/control-point CSV | original 和 P2 比较行的 attempt/set/snapshot 完全一致 | hash 碰撞/候选后续原地改写 | 同时检查共享对象身份并保存完整 control points | 2.0 |
+| W2-01 | 复用 planning attempt；重命名会后可选 | `planner_manager.h:44 PlanningRiskContext`；`beginPlanningRiskContextWithSnapshot()` `planner_manager.cpp:312`；`p1_planning_attempt_seq_` | 每次 replan 只创建一个 attempt；本轮不做中性化重命名 | Gate 0 writer/context test | `test_planning_risk_context` | attempt timeline | 每个 P2 batch 精确对应一个 nonzero attempt ID 和一次 planning snapshot acquire | 破坏 P1 历史 schema | 不改现有字段 | 0.25 |
+| W2-02 | 构造不可变 rebound-optimizer-success candidate set | `BsplineOptimizer::distinctiveTrajs()` `bspline_optimizer.cpp:474`；optimizer-success loop `planner_manager.cpp:1273-1351` | 所有上游 optimizer success 完成后一次性构造 `P2CandidateSet`；加入 candidate ID/hash/set hash；P2 只读，不触碰 generator/feasibility | `p2_candidate_ranking.h/.cpp`、`planner_manager.h/.cpp` | hash、duplicate、order、shared snapshot tests | candidate-set/control-point CSV | original 和 P2 比较行的 attempt/set/snapshot 完全一致 | hash 碰撞/候选后续原地改写 | 同时检查共享对象身份并保存完整 control points | 2.0 |
 | W2-03 | 完整 score decomposition | `rankP2Candidates()` `p2_candidate_ranking.cpp:209`；当前采样 `:84,247`；`docs/spec/talk_spec.md` §F | 先在`docs/CHANGES.md`登记连续PL preference相对hinge objective的会议偏差并更新`docs/TRACEABILITY.md`；再按冻结公式记录original normalized term、`c_pi` mean/max、PL mean/max、min IM、ratios、length、sample/query/scoring latency | P2 ranking、CSV helper、`docs/CHANGES.md`、`docs/TRACEABILITY.md` | 手算公式、length、PL/IM、latency counter tests；偏差/需求ID文档检查 | `icra_p2_score_decomposition.csv`、偏差记录 | analyzer可从分项独立重算score，且偏差在代码合入前获scope审查 | `queryCost`与`queryPredictedPL`插值差异；偏差未获接受 | 两组值分列并记录query reason；未接受则P2 metrics-only并走P0+P5备用论文 | 2.5 |
-| W2-04 | 实现 fail-closed fallback | 当前只覆盖 null/all-low-valid；`p2_candidate_ranking.cpp:260-284` | null、单候选、任一候选 low-valid、任一样本 unknown/stale、任一 score input NaN/Inf、risk tie 均选 original winner；定义 typed fallback reason | P2 header/source | 表驱动 fallback gtests | fallback reason histogram | metrics-only/fallback 永不改变 actual winner | 所有 original cost 非 finite | 返回 `no_finite_original_candidate` planner input failure，不作 safety 判决 | 2.0 |
-| W2-05 | 区分三个 winner | 当前 result 只含 selected/fallback | 输出 `original_winner_id`、`score_winner_id`、`selected_winner_id`、`selection_applied`；metrics-only 计算 hypothetical winner 但 actual=original | P2 header/source、manager、RViz publisher | metrics-only/enabled/tie tests | candidate CSV、`/planning/p2_candidate_ranking`、RViz | 只有 enabled 且无 fallback 可 `selection_applied=true` | debug topic 被误当正式证据 | 正式 analyzer 以 CSV+manifest 为准，topic 用于 bag timeline | 1.5 |
-| W2-06 | 证明不读 P1 total、不 hard reject/造候选 | `ReboundCostBreakdown`；manager P2 调用 `:1374-1388` | 新增 total/original 排序相反 fixture；记录 candidate count before/after；禁止 P2 result 表达 PASS/REJECT | P2 gtest、manager integration test | `NormalizationUsesOriginalCostNotTotalCost` 扩展；API contract tests | Aug-22 gate report | total 含巨大 P1 cost 时 P2 仍按 original；前后 set hash/count 不变 | legacy disabled path使用 final cost | legacy profile 保持原行为；ICRA enabled/fallback 强制 original cost | 1.0 |
+| W2-04 | 实现 fail-closed fallback | 当前只覆盖 null/all-low-valid；`p2_candidate_ranking.cpp:260-284` | null、单候选、risk tie、任一样本 unknown/stale、任一非有限输入、support/coverage 不一致均返回 immutable original winner；`valid_ratio` 仅记录诊断，不作为 selection gate | P2 header/source | 表驱动 fallback gtests | fallback reason histogram | metrics-only/fallback 永不改变 actual winner | 所有 original cost 非 finite | 返回 `no_finite_original_candidate` planner input failure，不作 safety 判决 | 2.0 |
+| W2-05 | 区分三个 winner | 当前 result 只含 selected/fallback | 输出 `original_winner_id`、`score_winner_id`、`selected_winner_id`、`selection_applied`；metrics-only 计算 hypothetical winner 但 actual=original；JSON topic 会后可选 | P2 header/source、manager、CSV | metrics-only/enabled/tie tests | candidate CSV | 只有 enabled 且无 fallback 可 `selection_applied=true` | debug topic 被误当正式证据 | 正式 analyzer 以 CSV+manifest 为准 | 1.0 |
+| W2-06 | 证明不读 P1 total、不 hard reject/造候选 | `OptimizerCostBreakdown`；manager P2 调用 `:1374-1388` | 新增 total/original 排序相反 fixture；记录 candidate count before/after；禁止 P2 result 表达 PASS/REJECT | P2 gtest、manager integration test | `NormalizationUsesOriginalCostNotTotalCost` 扩展；API contract tests | Aug-22 gate report | total 含巨大 P1 cost 时 P2 仍按 original；前后 set hash/count 不变 | legacy disabled path使用 final cost | legacy profile 保持原行为；ICRA enabled/fallback 强制 original cost | 1.0 |
 | W2-07 | 同 attempt 系统场景 | 现有 `p1_fork_fused_v1`、mirror/null/soft preset；P2 仅有 `p2_degraded_lidar_good` | 新增 `icra_asymmetric_primary/mirror/flat_null/soft_risk` aliases；P1-off 预资格需产生至少两个真实 optimizer-success candidates | launch、fixture、ICRA analyzer tests | seed-11 prequalification 后 10 seeds | same-attempt comparison report | primary 风险排序偏低风险；mirror 风险方向反转；null no-op | P1-off 时 base `distinctiveTrajs()` 不能稳定产生两候选 | 标记 `BLOCKED_SCENARIO_MISSING`；先补 P2 之前的 deterministic upstream seed fixture，绝不在 P2 造候选 | 1.0 |
 
 W2 单元/系统测试矩阵必须显式覆盖：
@@ -248,7 +276,7 @@ W2 单元/系统测试矩阵必须显式覆盖：
 | null/flat field | original winner | risk spread 在冻结 epsilon 内时 no-op |
 | exact mirror | enabled winner | candidate correspondence成立，风险排序方向反转 |
 | soft risk | 按冻结 score | 不执行 hard reject |
-| low-valid | original winner | 任一候选低于 valid-ratio 门即 fallback |
+| low-valid | diagnostic only | 选择只由全量 support/coverage 与 unknown/stale fail-closed 规则控制，不使用 `0.30` gate |
 | stale | original winner | stale 不作为低风险 |
 | unknown | original winner | unknown 不作为低风险 |
 | single candidate | 唯一 original candidate | no-op，reason=`single_candidate` |
@@ -261,13 +289,13 @@ W2 单元/系统测试矩阵必须显式覆盖：
 |---|---|---|---|
 | P2 是否可能读取包含 P1 的 total cost | ICRA enabled、metrics-only及全部fallback只以`original_optimizer_cost`确定base winner；`legacy_total_cost`只写证据 | `NormalizationUsesOriginalCostNotTotalCost`构造original/total相反排序；CSV重算 | selected/base winner与original一致，改变total不改变P2结果 |
 | P2 是否会生成新候选 | `rankP2Candidates()`只接收一个const `P2CandidateSet`，不依赖`BsplineOptimizer`或generator接口 | 调用前后candidate count/hash/multiplicity；链接/API contract测试 | set hash、count和每个candidate hash完全不变 |
-| P2 是否会把候选直接判为 hard unsafe | result只允许preference、metrics、fallback和planner-input-error；没有PASS/REJECT/safety action | enum/API审查测试；soft/unknown/stale系统case | P2不能删除successful candidate；unknown/stale只能回退original |
+| P2 是否会把候选直接判为 hard unsafe | result只允许preference、metrics、fallback和planner-input-error；没有PASS/REJECT/safety action | enum/API审查测试；soft/unknown/stale系统case | P2不能删除rebound-optimizer-success candidate；unknown/stale只能回退original |
 | P2 是否能在 candidate set 不一致时进行比较 | 一次rank只接受一个set对象；合并不同set/attempt的evidence必须fail closed | tampered attempt/set hash负测试；analyzer identity gate | 不产生ranking结论，run标为evidence invalid并保留 |
 | P2 是否能绑定同一 P0 snapshot | set持有单一`shared_ptr<const RiskGridSnapshot>`；candidate不允许自带snapshot | pointer/generation/stamp断言；同attempt CSV group检查 | 所有candidate、original/score/selected行的snapshot tuple一致 |
 
 正式证据必须来自一条 `icra_candidate_set.csv` attempt group 内的 original 与 selected 对比；两个独立 ROS run 只能用于 P0-only sanity 或 mirror 场景对应性，不能替代 P2 因果证据。
 
-## 7. W3：P2 与 P5 权威隔离
+## 8. W3：P2 与 P5 权威隔离
 
 | ID | 目标 | 当前代码位置 | 具体修改 | 预计文件 | 测试 | 产物 | 验收标准 | 风险 | 回退方案 | 人日 |
 |---|---|---|---|---|---|---|---|---|---|---:|
@@ -284,7 +312,7 @@ W3 验收判定：
 - P5 runtime action 只绑定 committed trajectory 和自身 current/future evidence。
 - C1 的 P5-specific topic/RViz/action 为零；C2 nominal 场景 final reject/emergency 为零，且无 replan storm。
 
-## 8. W4：从会议范围关闭 P1、P3、P4
+## 9. W4：从会议范围关闭 P1、P3、P4
 
 | ID | 目标 | 当前代码位置 | 具体修改 | 预计文件 | 测试 | 产物 | 验收标准 | 风险 | 回退方案 | 人日 |
 |---|---|---|---|---|---|---|---|---|---|---:|
@@ -293,17 +321,17 @@ W3 验收判定：
 
 关闭后必须继续编译和运行 P1/P3/P4 历史单测，防止会议隔离破坏期刊分支。期刊 backlog 记录恢复方式为选择旧 profile 或新增期刊 profile，而不是撤销会议代码或维护 `#ifdef ICRA` 分叉。
 
-## 9. W5：ICRA 实验闭环
+## 10. W5：ICRA 实验闭环
 
 | ID | 目标 | 当前代码位置 | 具体修改 | 预计文件 | 测试 | 产物 | 验收标准 | 风险 | 回退方案 | 人日 |
 |---|---|---|---|---|---|---|---|---|---|---:|
 | W5-01 | 场景预资格和缺口判定 | 现有 `p1_fork_*` scenario presets、P0/P5 fixture 参数、`BsplineOptimizer::distinctiveTrajs()` | 建立 ICRA aliases；验证 P1-off 时同 attempt 至少2个成功候选、原始成本相近、primary/mirror对应；不满足即自动标记 blocker | launch、scenario helper、prequal analyzer | seed 11 快检，再跑冻结10 seeds | scenario qualification report | 每个正式场景在 campaign 前 PASS 或明确 `BLOCKED_SCENARIO_MISSING` | 现有 fixture依赖P1 fanout | 先调场景几何触发现有 generator；仍失败才新增P2之前的上游 seed fixture | 1.5 |
 | W5-02 | 冻结配置和 seeds | 无独立 ICRA campaign matrix | 固定 C0/C1/C2 和 seeds `[11,23,37,53,71,89,107,127,149,173]`；primary/mirror使用相同 seed 对；GNSS seed 由 `20260000+seed` 派生 | ICRA YAML、campaign runner | dry-run 唯一性/配对测试 | campaign matrix CSV | run ID、arm、scenario、seed组合无重复/遗漏 | 临时扩大主线 | runner拒绝未登记arm/scenario/seed | 1.5 |
 | W5-03 | 预注册并冻结数值阈值 | 当前阈值散落launch/analyzer | 阈值集中记录value/unit/basis/status/freeze commit/date；prequalification后、正式run前由独立commit从 `PROPOSED_THRESHOLD` 改为 `FROZEN` | `config/icra27/icra_thresholds.yaml`、validator | 未冻结阈值启动失败；结果目录不能覆盖 | threshold registry | 正式结果不能使用 proposed/事后修改阈值 | 根据正式结果调参 | campaign manifest绑定threshold SHA；变化必须产生新非正式campaign | 1.0 |
-| W5-04 | 可恢复 campaign runner | 当前单run launch/recorder/finalizer | 增加preflight、resume、timeout、atomic state、disk gate、failure classification、`diagnostic_rerun_of`和artifact index | 新增 `scripts/dev_planner/run_icra27_campaign.py`、helper/tests | fake process、崩溃恢复、磁盘不足、重复run tests | campaign state/logs | 失败run留在分母且不被同ID重跑覆盖 | ROS残留进程污染下一run | 每run新output目录，显式process cleanup和startup topic gate | 1.75 |
+| W5-04 | 通用 campaign framework（会后可选） | 当前单run launch/recorder/finalizer | Gate 0 仅提供固定 seed/scenario、不可覆盖的专用 runner；preflight/resume/通用 matrix/`diagnostic_rerun_of` 后移 | Gate 0 runner；会后 `run_icra27_campaign.py` | 固定参数拒绝、重复输出测试 | Gate 0 state/logs | Gate 0 不能演化为隐式通用 campaign | ROS残留进程污染下一run | 每run新 output 目录 | 0.5 |
 | W5-05 | 执行并冻结结果 | 无 ICRA frozen campaign | 仅在Aug-22/Aug-26 gates通过且threshold frozen后执行80个正式runs；Sep-2生成只读结果索引、hash和冻结commit | campaign outputs | per-run validation、campaign completeness、人工抽查 | frozen results bundle | 必需指标齐全，失败/缺失透明，artifact SHA可验证 | P2到Aug-26仍不稳定 | 激活预注册P0+P5备用论文，不新增场景/算法 | 2.25 |
 
-### 9.1 正式场景和 run matrix
+### 10.1 正式场景和 run matrix
 
 | 场景 | 配置 | 冻结 seeds | Run 数 | 主要判定 |
 |---|---|---:|---:|---|
@@ -316,7 +344,7 @@ W3 验收判定：
 
 Soft-risk difference保留为W2实现/资格模式，不增加第六类论文主场景。非论文资格运行包括：各资格场景的C0/P0-only配对、P2 metrics-only 10 runs，以及soft-risk C1 10 runs。P2因果证据始终使用C1单次attempt内部的original/selected字段，不使用C0跨run结果替代。
 
-### 9.2 正式指标
+### 10.2 正式指标
 
 每个run至少输出：
 
@@ -335,21 +363,21 @@ normal/emergency-stop trajectory publication counts
 mission success and failure classification
 ```
 
-### 9.3 失败和重跑规则
+### 10.3 失败和重跑规则
 
 - 算法失败计入mission/fallback/reject统计，不允许用同run ID重跑覆盖。
 - 基础设施失败保留manifest、CSV、日志和light bag；诊断重跑必须新建run并填写`diagnostic_rerun_of`。
 - 缺少多候选、mirror对应或unsafe注入能力时标记`BLOCKED_SCENARIO_MISSING`，不得编造或用跨run结果替代。
 - candidate set与snapshot identity不一致的attempt判为evidence invalid，P2不得比较；该run保留并计入evidence-failure统计。
 
-## 10. W6：分析器和论文产物
+## 11. W6：分析器和论文产物
 
 | ID | 目标 | 当前代码位置 | 具体修改 | 预计文件 | 测试 | 产物 | 验收标准 | 风险 | 回退方案 | 人日 |
 |---|---|---|---|---|---|---|---|---|---|---:|
 | W6-01 | 统一 evidence schema | 现有P0/P2/P5各自JSON/CSV；P1 schema不适合会议主线 | 新增公共schema/provenance/threshold helper；writers共享列定义和typed reason；拒绝混合schema | 新增 `scripts/dev_planner/icra27_metrics.py`；修改C++ writers | Python schema/golden tests、C++ CSV row tests | manifest和5类CSV | 任一candidate/action可回溯commit/config/run/attempt/set/snapshot | campaign中途schema变化 | `schema_version`强制；旧run只读，不原地迁移 | 1.5 |
 | W6-02 | run/campaign analyzer和图表 | `analyze_planner_p0_phase1.py`、`analyze_safety_planner_run.py` | 新增会议专用analyzer，复用可验证的P0/P5解析helper；生成top-down、candidate overlay、PL、IM、latency、fallback/reason图 | 新增 `analyze_icra27_run.py`、plot helper/tests | synthetic/golden CSV；primary/mirror/null/fallback/P5 cases | 用户要求的表格和图 | 图表只读取通过schema/identity校验的run并显示样本/失败数 | 选择性过滤失败run | campaign index是唯一输入；过滤原因写入summary | 2.0 |
-| W6-03 | artifact SHA256和analyzer版本 | 当前finalizer不hash全部产物 | 生成artifact index；记录analyzer schema、script SHA256及manifest/CSV/bag/log/plots SHA256 | finalizer、artifact helper | tamper、missing、duplicate path tests | `icra_artifact_index.json` | 任一产物变化都导致校验失败 | artifact index自哈希循环 | index不含自身hash；campaign state保存index SHA256 | 1.0 |
-| W6-04 | 论文交付和缺失披露 | 无ICRA汇总入口 | 输出caption-ready plots、aggregated CSV、失败run appendix、scenario blocker清单和C0/C1/C2表 | campaign analyzer、docs/CMake install | synthetic full campaign dry-run、artifact completeness | paper artifact bundle | 不隐藏失败、不编造blocker；Sep-2后不改变算法/阈值/场景 | 发现analyzer bug | 允许修复分析器并记录version；不得重调核心算法 | 1.5 |
+| W6-03 | 全量 artifact 包装（会后可选） | 当前finalizer不hash全部产物 | Gate 0 只 hash 聚合证据与外部依赖归档；bag/log/plot 全量 artifact index 后移 | 会后 finalizer/artifact helper | 会后 tamper/missing tests | 可选 `icra_artifact_index.json` | 不阻塞 Gate 0 | artifact index自哈希循环 | index不含自身hash | 0.25 |
+| W6-04 | caption-ready polish（会后可选） | 无ICRA汇总入口 | Gate 0 只输出审计表和 blocker；caption-ready plots、完整 appendix 和 C0/C1/C2 bundle 后移 | campaign analyzer/docs | 会后 dry-run | paper artifact bundle | 不隐藏失败、不编造blocker | 发现analyzer bug | 记录 analyzer version | 0.25 |
 
 必须生成的论文产物：
 
@@ -382,9 +410,9 @@ artifact index SHA256
 
 artifact index列出除自身以外的全部artifact SHA256；campaign state再保存artifact-index SHA256，避免自哈希循环。
 
-## 11. 录包 whitelist 和容量预算
+## 12. 录包 whitelist 和容量预算
 
-### 11.1 Light bag：正式普通run默认
+### 12.1 Light bag：正式普通run默认
 
 ```text
 /planning/evidence_provenance
@@ -400,7 +428,7 @@ artifact index列出除自身以外的全部artifact SHA256；campaign state再�
 
 只有analyzer证明需要坐标转换时才加入`/tf`和`/tf_static`。light模式排除raw LiDAR、depth、IMU、map、point cloud和全部RViz topics。
 
-### 11.2 Representative bag
+### 12.2 Representative bag
 
 在light基础上加入复现P0/P5因果所必需的sensor/map topics，以及P0/P2/P5 RViz topics；明确排除P1/P3/P4 CSV/topic/RViz。默认只保存以下6个seed-11代表run：
 
@@ -413,7 +441,7 @@ C2 / corridor stale/unknown
 C2 / targeted unsafe
 ```
 
-### 11.3 容量门
+### 12.3 容量门
 
 当前审计值：工作区文件系统可用约`32 GiB`、使用率`95%`，仓库`results/`约`104 GiB`。因此当前不满足正式campaign空间条件；工具只能报告并停止，不得自动删除用户结果。
 
@@ -427,13 +455,13 @@ C2 / targeted unsafe
 | representative run数 | 6 | 覆盖3 arms与关键因果场景 |
 | campaign disk gate | `max(40 GiB, 2×未完成run最坏预算)` | 中断、失败和诊断重跑余量 |
 
-## 12. `PROPOSED_THRESHOLD` 冻结表
+## 13. `PROPOSED_THRESHOLD` 冻结表
 
 所有未由现有规范明确给出的数值必须先以`PROPOSED_THRESHOLD`状态提交，附单位和依据；正式campaign拒绝任何未冻结项。预资格只验证fixture和measurement可用性，不能用正式结果事后调阈值。
 
 | 阈值 | 初始建议 | 依据 | 冻结时间 |
 |---|---:|---|---|
-| P2 all-candidate minimum valid ratio | 0.30 | 当前`p2.min_valid_ratio`默认值 | 不晚于2026-08-26 |
+| P2 all-candidate valid ratio | 诊断量，不是 selection gate | 严格 batch fallback 已由 unknown/stale/support coverage 规则冻结；删除矛盾的 `0.30` 门 | Gate 0 文档提交即冻结 |
 | unknown/stale fallback | 任一样本即fallback | 本计划不可变边界 | 代码合入即冻结 |
 | null/risk tie epsilon | `1e-9` | double数值稳定性 | 不晚于2026-08-26 |
 | P0 p95 full-grid latency | `≤0.8×refresh period` | 保留调度余量 | 不晚于2026-08-26 |
@@ -446,9 +474,9 @@ C2 / targeted unsafe
 | nominal P5 final reject/emergency | 0 | open-sky不误触发要求 | 代码合入即冻结 |
 | bag/artifact/disk数值 | 见第11节 | campaign容量预算 | 不晚于2026-08-26 |
 
-动态可行性必须为true、collision count必须为0，二者是上游successful candidate/mission硬条件，不作为P2可调score阈值。
+动态可行性必须为true、collision count必须为0，二者是原始 EGO winner 后续运动可行性/mission硬条件，不得误写成每个 rebound-optimizer-success candidate 在 P2 前都已通过。
 
-## 13. 三人并行排期和时间门
+## 14. 三人并行排期和时间门
 
 人员流：
 
@@ -461,7 +489,9 @@ C2 / targeted unsafe
 | 日期 | Gate | 必须完成 | Go/No-Go / 回退 |
 |---|---|---|---|
 | 2026-08-16 | 代码冻结、ICRA分支、scope | 固定`dev/icra`、冻结点、P0+P2+P5范围；不改tag | 已完成范围冻结后只允许会议计划内任务 |
-| 2026-08-19 | CODE_MAP和profile isolation | W0/W4、实际开关矩阵、manifest/whitelist设计完成 | 旧profile有diff则先修隔离，不进入P2系统实验 |
+| 2026-08-17 | Gate 0A | P1/P3/P4 全关时 primary/mirror/null 的 base generated/optimizer-success 计数与 lineage | `NO-GO-P2` 停止 P2；`CONDITIONAL` 只评审 fixture，不自动创建 |
+| 2026-08-18 | Gate 0B | 76,800-query P0 full refresh p50/p95、failure/stale ratio | 失败只给 ROI/horizon/worker/refresh 建议，不自动调参 |
+| 2026-08-19 | CODE_MAP和profile isolation | 仅在 Gate 0A GO 后启动 W0/W4、实际开关矩阵、manifest/whitelist | 旧profile有diff则先修隔离，不进入P2系统实验 |
 | 2026-08-22 | P2 deterministic mechanism | W2 attempt/set/snapshot identity、original-cost trap、同attempt fixture | 若同候选/同snapshot不能成立，停止扩大实验；相关场景标`BLOCKED_SCENARIO_MISSING` |
 | 2026-08-26 | P2 fallback + P5 authority | W2 fallback矩阵、W3 final/runtime、阈值冻结、场景预资格 | 若P2仍不能稳定偏好低risk，切换预注册P0+P5备用论文 |
 | 2026-09-02 | 正式结果冻结 | 80-run正式主线或已激活备用campaign、artifact/index/analyzer validation | 此后禁止新增P1/P3/P4、场景、阈值和核心算法 |
@@ -472,7 +502,7 @@ C2 / targeted unsafe
 
 备用论文在2026-08-26前预注册为C0 baseline与P0+P5（P2 off）对比。只有Go/No-Go记录可以激活；激活后不把失败P2结果包装为成功结论，也不扩大P1/P3/P4或新场景。
 
-## 14. 合并、测试和最终验收
+## 15. 合并、测试和最终验收
 
 建议按可回滚小提交顺序实施：
 
@@ -501,7 +531,8 @@ test_p3_reference_bias
 test_p4_risk_astar
 ICRA launch/profile/manifest/recorder Python tests
 ICRA analyzer/campaign/artifact Python tests
-colcon test --packages-select iap ego_planner
+colcon test --packages-select iap --event-handlers console_cohesion+
+ctest --test-dir /home/dev/ws_iap/build/ego_planner -L gtest --output-on-failure
 ```
 
 最终验收清单：
@@ -513,7 +544,7 @@ colcon test --packages-select iap ego_planner
 - metrics-only/null/mirror/soft/fallback/single/NaN/total-cost trap全部通过；
 - P2 candidate count/hash前后不变，没有hard reject/PASS/action；
 - P5 final发生在正常publish之前，reject无对应publish；runtime独立监控committed trajectory；
-- current certified monitor不被Predictor advisory覆盖，unknown不解释为低risk；
+- authoritative current-state monitor不被Predictor advisory覆盖，且只主张 logical one-way separation；unknown不解释为低risk；
 - 正式run的CSV、manifest、bag和图表全部通过schema、identity和SHA256校验；
 - 失败run、invalid evidence和`BLOCKED_SCENARIO_MISSING`均保留并进入汇总；
 - 2026-09-02后没有新增模块、场景、阈值或核心算法。
