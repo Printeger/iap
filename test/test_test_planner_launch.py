@@ -178,6 +178,9 @@ class TestPlannerLaunchTest(unittest.TestCase):
             self.assertEqual(
                 provenance["sha256"], hashlib.sha256(path.read_bytes()).hexdigest()
             )
+        self.assertEqual(MODULE._normalize_mapping_backend("CPU"), "cpu")
+        with self.assertRaisesRegex(RuntimeError, "gpu or cpu"):
+            MODULE._normalize_mapping_backend("auto")
 
     def test_scenario_fingerprint_is_canonical_and_sensitive(self):
         payload = {"geometry": {"seed": 11, "density": 0.25}, "risk": ["gnss", "lidar"]}

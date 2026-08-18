@@ -1,0 +1,32 @@
+{
+  "expected_refresh_query_count": 76800,
+  "failed_ratio": 1.0,
+  "failed_refresh_count": 0,
+  "failures": [
+    "zero_successful_generations",
+    "fewer_than_20_successful_generations",
+    "refresh_query_shape_mismatch",
+    "refresh_p95_over_400_ms",
+    "no_valid_integrity_report",
+    "p0_run_duration_s_mismatch",
+    "p0_runtime_run_duration_s_mismatch"
+  ],
+  "gate": "P0_INPUT_AVAILABILITY_FAIL",
+  "generation_interval_ms_p50": null,
+  "generation_interval_ms_p95": null,
+  "integrity_report_count": 0,
+  "manifest_failures": [
+    "p0_run_duration_s_mismatch",
+    "p0_runtime_run_duration_s_mismatch"
+  ],
+  "p95_over_refresh_period": null,
+  "query_shape_ok": false,
+  "recommendations": [],
+  "refresh_elapsed_ms_max": null,
+  "refresh_elapsed_ms_p50": null,
+  "refresh_elapsed_ms_p95": null,
+  "schema_version": "gate0_p0_summary_v1",
+  "stale_ratio": 1.0,
+  "successful_generation_count": 0,
+  "valid_integrity_report_count": 0
+}

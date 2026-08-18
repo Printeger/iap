@@ -1,4 +1,7 @@
 import importlib.util
+import subprocess
+import sys
+import time
 import unittest
 from pathlib import Path
 
@@ -13,6 +16,15 @@ SPEC = importlib.util.spec_from_file_location("run_gate0_qualification", MODULE_
 MODULE = importlib.util.module_from_spec(SPEC)
 assert SPEC.loader is not None
 SPEC.loader.exec_module(MODULE)
+
+
+def _wait_until(predicate, timeout_s: float = 3.0) -> bool:
+    deadline = time.monotonic() + timeout_s
+    while time.monotonic() < deadline:
+        if predicate():
+            return True
+        time.sleep(0.05)
+    return predicate()
 
 
 class Gate0RunnerTest(unittest.TestCase):
@@ -64,19 +76,154 @@ class Gate0RunnerTest(unittest.TestCase):
         ])
         self.assertEqual(config["p0.predictor.worker_count"], 1)
 
-    def test_required_process_monitor_fails_closed_on_missing_or_runtime_failure(self):
-        monitor = MODULE.RequiredProcessMonitor(
-            {"iap_rosnode": ["iap_rosnode"]}, 60.0
+    def test_runner_exit_requires_launch_capture_finalize_and_process_ok(self):
+        self.assertEqual(
+            MODULE._gate0b_runner_exit(0, 0, 0, {"required_processes_ok": True}),
+            0,
         )
-        self.assertFalse(monitor.ok([]))
-        monitor._seen.add("iap_rosnode")
-        self.assertTrue(monitor.ok([]))
-        monitor.failures.append({
-            "process_name": "iap_rosnode",
-            "phase": "runtime",
-            "reason": "died",
-        })
-        self.assertFalse(monitor.ok(monitor.failures))
+        self.assertEqual(
+            MODULE._gate0b_runner_exit(1, 0, 0, {"required_processes_ok": True}),
+            2,
+        )
+        self.assertEqual(
+            MODULE._gate0b_runner_exit(0, 1, 0, {"required_processes_ok": True}),
+            2,
+        )
+        self.assertEqual(
+            MODULE._gate0b_runner_exit(0, 0, 1, {"required_processes_ok": True}),
+            2,
+        )
+        self.assertEqual(
+            MODULE._gate0b_runner_exit(0, 0, 0, {"required_processes_ok": False}),
+            2,
+        )
+
+    def test_monitor_never_started_required_process(self):
+        monitor = MODULE.RequiredProcessMonitor(
+            999999, {"iap_rosnode": ["iap_rosnode"]}, 1.0
+        )
+        monitor.start()
+        monitor.launch_running = True
+        time.sleep(0.15)
+        result = monitor.finish()
+        self.assertFalse(result["required_processes_ok"])
+        self.assertFalse(
+            result["required_processes"]["iap_rosnode"]["seen"]
+        )
+        self.assertTrue(any(
+            item.get("phase") == "launch"
+            for item in result["process_failures"]
+        ))
+
+    def test_monitor_ignores_unrelated_same_name_process(self):
+        unrelated = subprocess.Popen([
+            sys.executable,
+            "-c",
+            "import time; time.sleep(30) # iap_rosnode",
+        ])
+        parent = subprocess.Popen([
+            sys.executable,
+            "-c",
+            "import time; time.sleep(30)",
+        ])
+        try:
+            monitor = MODULE.RequiredProcessMonitor(
+                parent.pid, {"iap_rosnode": ["iap_rosnode"]}, 1.0
+            )
+            monitor.start()
+            monitor.launch_running = True
+            time.sleep(0.3)
+            result = monitor.finish()
+            self.assertFalse(
+                result["required_processes"]["iap_rosnode"]["seen"]
+            )
+        finally:
+            unrelated.terminate()
+            parent.terminate()
+            unrelated.wait(timeout=5)
+            parent.wait(timeout=5)
+
+    def test_monitor_records_runtime_child_death(self):
+        parent = subprocess.Popen([
+            sys.executable,
+            "-c",
+            (
+                "import subprocess,sys,time\n"
+                "p=subprocess.Popen([sys.executable,'-c',"
+                "'import time; time.sleep(0.4) # iap_rosnode'])\n"
+                "time.sleep(30)\n"
+            ),
+        ])
+        try:
+            monitor = MODULE.RequiredProcessMonitor(
+                parent.pid, {"iap_rosnode": ["iap_rosnode"]}, 10.0
+            )
+            monitor.start()
+            monitor.launch_running = True
+            _wait_until(lambda: monitor.result()["required_processes"][
+                "iap_rosnode"
+            ]["seen"], 2.0)
+            _wait_until(lambda: any(
+                item.get("phase") == "runtime"
+                for item in monitor.result()["process_failures"]
+            ), 3.0)
+            result = monitor.finish()
+            self.assertFalse(result["required_processes_ok"])
+            self.assertTrue(any(
+                item.get("phase") == "runtime"
+                for item in result["process_failures"]
+            ))
+        finally:
+            parent.terminate()
+            parent.wait(timeout=5)
+            if parent.stdout:
+                parent.stdout.close()
+
+    def test_monitor_classifies_controlled_shutdown_separately(self):
+        parent = subprocess.Popen(
+            [
+                sys.executable,
+                "-c",
+                (
+                    "import subprocess,sys,time\n"
+                    "p=subprocess.Popen([sys.executable,'-c',"
+                    "'import time; time.sleep(30) # iap_rosnode'])\n"
+                    "print(p.pid, flush=True)\n"
+                    "time.sleep(30)\n"
+                ),
+            ],
+            stdout=subprocess.PIPE,
+            text=True,
+        )
+        try:
+            child_pid_line = parent.stdout.readline().strip()
+            self.assertTrue(child_pid_line.isdigit())
+            child_pid = int(child_pid_line)
+            monitor = MODULE.RequiredProcessMonitor(
+                parent.pid, {"iap_rosnode": ["iap_rosnode"]}, 10.0
+            )
+            monitor.start()
+            monitor.launch_running = True
+            _wait_until(lambda: monitor.result()["required_processes"][
+                "iap_rosnode"
+            ]["seen"], 2.0)
+            monitor.mark_controlled_shutdown()
+            child = MODULE.psutil.Process(child_pid)
+            child.terminate()
+            _wait_until(lambda: not child.is_running(), 5.0)
+            _wait_until(lambda: any(
+                item.get("phase") == "controlled_shutdown"
+                for item in monitor.result()["process_failures"]
+            ), 3.0)
+            result = monitor.finish()
+            self.assertTrue(result["required_processes_ok"])
+            self.assertTrue(any(
+                item.get("phase") == "controlled_shutdown"
+                for item in result["process_failures"]
+            ))
+        finally:
+            parent.terminate()
+            parent.wait(timeout=5)
 
 
 if __name__ == "__main__":

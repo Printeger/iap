@@ -1,13 +1,22 @@
 # Traceability Matrix (IAP)
 
+## 2026-08-18 ICRA-003 Gate 0B repair and one-shot smoke evidence
+
+| Req ID | Requirement/evidence seam | Implementation and retained evidence | Status |
+|---|---|---|---|
+| IAP-RQ-320 | P0 input path must report truthful live/stale source state and reject stale/future odometry/current integrity | `p0_risk_grid_runtime.h/.cpp`; `test_p0_risk_grid_runtime` covers source validity matrix, stale snapshot rejection, and non-recursive range callback | **IMPLEMENTED; smoke evidence BLOCKED / P0_INPUT_AVAILABILITY_FAIL** |
+| IAP-RQ-320 | Gate 0B runner must fail closed on launch/capture/finalize/required-process failure and monitor only launch descendants | `run_gate0_qualification.py`; `test_gate0_runner.py` lifecycle tests | **IMPLEMENTED; smoke runner exit 0, analyzer exit 1** |
+| IAP-RQ-320 | Analyzer must fail closed on incomplete timing/process evidence and serialize failure results with nonzero CLI status | `gate0_analyzer.py`; `test_gate0_analyzer.py`; `results/icra27/icra003/runs/smoke/analyzer` | **IMPLEMENTED; smoke analyzer exit 1** |
+| IAP-RQ-320 | Mandatory one-shot CPU smoke must be preserved as evidence and must stop the sequence on failure | `results/icra27/icra003/runs/smoke/{command.txt,gate0_run_manifest.json,stdout.log,analyzer}` | **BLOCKED: 0 health/integrity captures, 0 successful generations; no retry or benchmark** |
+
 ## 2026-08-18 ICRA-002 Gate 0B input-availability and required-process evidence
 
 | Req ID | Requirement/evidence seam | Implementation and retained evidence | Status |
 |---|---|---|---|
-| IAP-RQ-320 / IAP-RQ-400 / IAP-RQ-410 | Qualification-only CPU mapping backend must be explicit, validated, and manifest-bound | `iap_mapping_backend` launch arg (`gpu` default, exact `gpu\|cpu`); `_runtime_config` materializes odometry/sub-mapping/global-mapping configs and records SHA256 in `test_planner_manifest.json`; `test_test_planner_launch.py` and `test_gate0_analyzer.py` cover default/validation/hashes | **IMPLEMENTED; no automatic detection or fallback** |
-| IAP-RQ-320 / IAP-RQ-400 / IAP-RQ-410 | P0 must publish truthful source readiness and snapshot failure reasons without reinterpreting unknown/stale/missing as low risk | `p0_risk_grid_runtime.h/.cpp` publishes `snapshot_failure_reason` and per-source seen/valid/fresh stamps/counts; `test_p0_risk_grid_runtime` covers reason enum and readiness fields | **IMPLEMENTED; no runtime smoke due disk no-go** |
-| IAP-RQ-320 / IAP-RQ-400 / IAP-RQ-410 | Required child processes must fail closed, separate controlled shutdown from runtime death, and be analyzable from the runner manifest | `RequiredProcessMonitor` in `run_gate0_qualification.py`; manifest `required_processes_ok`, `process_failures`, `iap_rosnode_alive_through_runtime`; `test_gate0_runner.py` and `test_gate0_analyzer.py` cover fail-closed behavior | **IMPLEMENTED; ROS execution not run because available disk < formal threshold** |
-| IAP-RQ-320 / IAP-RQ-400 / IAP-RQ-410 | Analyzer must fail closed on required-process failure, non-finite original optimizer cost, missing/incomplete control-point evidence, and zero real P0 generations | `gate0_analyzer.py`; focused `test_gate0_analyzer.py` cases for zero generations and non-finite original cost; top-level `iap` suite passes | **IMPLEMENTED; Gate 0B summary remains unavailable pending smoke** |
+| IAP-RQ-320 | Qualification-only CPU mapping backend must be explicit, validated, and manifest-bound | `iap_mapping_backend` launch arg; `_runtime_config`; launch/analyzer tests | **SUPERSEDED by ICRA-003 final-hash-after-override repair** |
+| IAP-RQ-320 | P0 health schema must expose source readiness and exact snapshot-failure reasons | `p0_risk_grid_runtime.h/.cpp`; focused C++ tests | **SUPERSEDED by ICRA-003 live/stale/validity-matrix repair** |
+| IAP-RQ-320 | Required-process evidence must be structured and analyzer-visible | runner/monitor and analyzer fields | **SUPERSEDED by ICRA-003 descendant-only/controlled-shutdown repair** |
+| IAP-RQ-320 | Analyzer must fail closed on non-finite original cost, control-point gaps, and zero generations | `gate0_analyzer.py`; focused tests | **RETAINED and extended by ICRA-003** |
 
 ## 2026-08-16 ICRA Gate 0 read-only qualification
 

@@ -54,6 +54,8 @@ P0_FIELDS = (
     "gnss_epoch_satellite_count",
     "origin_seen",
     "origin_valid",
+    "origin_fresh",
+    "origin_stamp_s",
     "map_seen",
     "map_valid",
     "map_fresh",
@@ -200,10 +202,10 @@ def aggregate_candidate_events(
         if successes and attempt["selected_candidate_id"] not in successes:
             attempt["critical_reasons"].append("selected_candidate_not_successful")
         selected = attempt["selected_candidate_id"]
-        reached_downstream = selected > 0 and (
-            selected in attempt["updated_candidates"]
-            or selected in attempt["feasible_candidates"]
-        )
+        selected_refined = selected > 0 and selected in attempt["refinement_candidates"]
+        selected_update_reached = selected > 0 and selected in attempt["updated_candidates"]
+        selected_publish_reached = attempt["publish_count"] > 0
+        reached_downstream = selected_update_reached or selected_publish_reached
         critical = bool(attempt["critical_reasons"])
         qualified = (
             generated >= 2
@@ -220,6 +222,9 @@ def aggregate_candidate_events(
             "optimizer_success": len(successes),
             "original_candidate_id": attempt["original_candidate_id"],
             "selected_candidate_id": selected,
+            "selected_refinement_reached": selected_refined,
+            "selected_update_reached": selected_update_reached,
+            "selected_publish_reached": selected_publish_reached,
             "selected_reached_downstream": reached_downstream,
             "normal_bspline_publish_count": attempt["publish_count"],
             "critical_violation": critical,
@@ -428,6 +433,7 @@ def validate_gate0b_manifest(
         return ["p0_runner_manifest_missing"]
     failures = []
     config = manifest.get("effective_config", {})
+    expected_run_duration = 20 if manifest.get("run_id") == "p0-smoke" else 60
     expected = {
         "experiment": "p0_open_sky",
         "scenario": "gnss_open_sky",
@@ -444,7 +450,7 @@ def validate_gate0b_manifest(
         "p0.skip_occupied_voxels": True,
         "record_bag": False,
         "start_rviz": False,
-        "run_duration_s": 60,
+        "run_duration_s": expected_run_duration,
     }
     for field, value in expected.items():
         if config.get(field) != value:
@@ -478,7 +484,14 @@ def validate_gate0b_manifest(
         failures.append("p0_process_failure")
     if manifest.get("required_processes_ok") is not True:
         failures.append("p0_required_process_failure")
-    if manifest.get("iap_rosnode_alive_through_runtime") is not True:
+    required_processes = manifest.get("required_processes", {})
+    iap_rosnode_seen = bool(
+        required_processes.get("iap_rosnode", {}).get("seen", False)
+    )
+    iap_rosnode_runtime_failure = bool(
+        required_processes.get("iap_rosnode", {}).get("runtime_failure", False)
+    )
+    if not iap_rosnode_seen or iap_rosnode_runtime_failure:
         failures.append("p0_iap_rosnode_not_alive_through_runtime")
     if any(
         item.get("phase") == "runtime"
@@ -503,7 +516,7 @@ def validate_gate0b_manifest(
         "p0.skip_occupied_voxels": True,
         "record_bag": False,
         "start_rviz": False,
-        "run_duration_s": 60.0,
+        "run_duration_s": float(expected_run_duration),
     }
     for field, value in runtime_expected.items():
         if runtime_manifest.get(field) != value:
@@ -603,14 +616,20 @@ def analyze_p0_messages(
 
     successful = [row for row in rows if not _bool(row["failed_refresh"])]
     latencies = [_float(row.get("refresh_elapsed_ms")) for row in successful]
-    latencies = [value for value in latencies if math.isfinite(value)]
+    latency_evidence_failure = bool(successful) and any(
+        not math.isfinite(value) for value in latencies
+    )
     intervals = [_float(row.get("generation_interval_ms")) for row in successful]
     intervals = [value for value in intervals if math.isfinite(value)]
     shape_ok = bool(successful) and all(
         _int(row.get("refresh_query_count")) == EXPECTED_REFRESH_QUERY_COUNT
         for row in successful
     )
-    p95 = type7_quantile(latencies, 0.95)
+    p95 = (
+        math.nan
+        if latency_evidence_failure
+        else type7_quantile(latencies, 0.95)
+    )
     failures = []
     if len(successful) == 0:
         failures.append("zero_successful_generations")
@@ -618,6 +637,8 @@ def analyze_p0_messages(
         failures.append("fewer_than_20_successful_generations")
     if not shape_ok:
         failures.append("refresh_query_shape_mismatch")
+    if latency_evidence_failure:
+        failures.append("successful_generation_latency_nonfinite")
     if not math.isfinite(p95) or p95 > 400.0:
         failures.append("refresh_p95_over_400_ms")
     if len(successful) == 0:
@@ -870,6 +891,7 @@ def analyze_directory(root: Path, output: Path) -> dict[str, Any]:
         if event_identity_failure or point_identity_failure else "",
     )
     manifests = []
+    manifest_paths: dict[str, Path] = {}
     for path in sorted(root.glob("**/gate0_run_manifest.json")):
         manifest = json.loads(path.read_text())
         runtime_paths = sorted(
@@ -880,6 +902,7 @@ def analyze_directory(root: Path, output: Path) -> dict[str, Any]:
             json.loads(runtime_paths[0].read_text())
             if len(runtime_paths) == 1 else None
         )
+        manifest_paths[manifest["run_id"]] = path.parent
         manifests.append(manifest)
     scenarios = {manifest["run_id"]: manifest.get("scenario", "") for manifest in manifests}
     manifest_failures = {
@@ -901,6 +924,15 @@ def analyze_directory(root: Path, output: Path) -> dict[str, Any]:
             "selected_reached_downstream": any(
                 row["selected_reached_downstream"] for row in run_attempts
             ),
+            "selected_refinement_reached": any(
+                row["selected_refinement_reached"] for row in run_attempts
+            ),
+            "selected_update_reached": any(
+                row["selected_update_reached"] for row in run_attempts
+            ),
+            "selected_publish_reached": any(
+                row["selected_publish_reached"] for row in run_attempts
+            ),
             "critical_violation": (
                 any(row["critical_violation"] for row in run_attempts)
                 or bool(manifest_failures.get(run_id))
@@ -919,12 +951,40 @@ def analyze_directory(root: Path, output: Path) -> dict[str, Any]:
         json.dumps(_json_safe(effective), indent=2, sort_keys=True) + "\n"
     )
 
-    p0_messages = _read_jsonl(root / "p0" / "risk_grid_health.jsonl")
-    p0_rows, p0_summary = analyze_p0_messages(p0_messages)
-    p0_manifest = next(
-        (manifest for manifest in manifests if manifest.get("run_id") == "p0-full-grid"),
-        None,
+    p0_run_ids = [
+        run_id
+        for run_id in ("p0-smoke", "p0-full-grid")
+        if run_id in manifest_paths
+    ]
+    p0_manifest = (
+        next(
+            manifest
+            for manifest in manifests
+            if manifest.get("run_id") == p0_run_ids[-1]
+        )
+        if p0_run_ids else None
     )
+    p0_run_dir = (
+        manifest_paths[p0_run_ids[-1]]
+        if p0_run_ids else None
+    )
+    p0_messages = (
+        _read_jsonl(p0_run_dir / "risk_grid_health.jsonl")
+        if p0_run_dir else []
+    )
+    p0_rows, p0_summary = analyze_p0_messages(p0_messages)
+    integrity_messages = (
+        _read_jsonl(p0_run_dir / "integrity_report.jsonl")
+        if p0_run_dir else []
+    )
+    valid_integrity_count = sum(
+        _bool(item.get("valid")) for item in integrity_messages
+    )
+    p0_summary["integrity_report_count"] = len(integrity_messages)
+    p0_summary["valid_integrity_report_count"] = valid_integrity_count
+    if p0_run_ids and p0_run_ids[-1] == "p0-smoke" and valid_integrity_count == 0:
+        p0_summary["failures"].append("no_valid_integrity_report")
+        p0_summary["gate"] = "P0_INPUT_AVAILABILITY_FAIL"
     p0_manifest_failures = validate_gate0b_manifest(
         p0_manifest,
         p0_manifest.get("runtime_manifest") if p0_manifest else None,
@@ -937,8 +997,12 @@ def analyze_directory(root: Path, output: Path) -> dict[str, Any]:
         if p0_summary.get("gate") != "P0_INPUT_AVAILABILITY_FAIL":
             p0_summary["gate"] = "P0_PERFORMANCE_GATE_FAIL"
     p0_summary["manifest_failures"] = p0_manifest_failures
-    _write_csv(output / "p0_full_grid_benchmark.csv", p0_rows, P0_FIELDS)
-    (output / "p0_full_grid_summary.json").write_text(
+    p0_stem = (
+        "p0_full_grid" if p0_run_ids and p0_run_ids[-1] == "p0-full-grid"
+        else "p0_smoke"
+    )
+    _write_csv(output / f"{p0_stem}_benchmark.csv", p0_rows, P0_FIELDS)
+    (output / f"{p0_stem}_summary.json").write_text(
         json.dumps(_json_safe(p0_summary), indent=2, sort_keys=True) + "\n"
     )
     result = {"gate0a": gate0a, "gate0b": p0_summary, "runs": run_rows}
@@ -955,7 +1019,7 @@ def main() -> int:
     args = parser.parse_args()
     result = analyze_directory(args.gate0_root.resolve(), args.output_dir.resolve())
     print(json.dumps(_json_safe(result), indent=2, sort_keys=True))
-    return 0
+    return 0 if result.get("gate0b", {}).get("gate") == "PASS" else 1
 
 
 if __name__ == "__main__":

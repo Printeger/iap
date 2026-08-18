@@ -229,7 +229,12 @@ class Gate0AnalyzerTest(unittest.TestCase):
             "capture_exit_code": 0,
             "planner_crash": False,
             "required_processes_ok": True,
-            "iap_rosnode_alive_through_runtime": True,
+            "required_processes": {
+                "iap_rosnode": {
+                    "seen": True,
+                    "runtime_failure": False,
+                }
+            },
             "process_failures": [],
         }
         runtime = {
@@ -291,6 +296,69 @@ class Gate0AnalyzerTest(unittest.TestCase):
         self.assertEqual(summary["successful_generation_count"], 0)
         self.assertEqual(summary["gate"], "P0_INPUT_AVAILABILITY_FAIL")
         self.assertEqual(summary["recommendations"], [])
+
+    def test_successful_generation_with_nonfinite_latency_fails_closed(self):
+        messages = []
+        for generation in range(1, 21):
+            messages.append({
+                "generation_id": generation,
+                "refresh_callback_end_steady_s": float(generation),
+                "refresh_query_count": 76800,
+                "ready": True,
+                "stale": False,
+                "valid_ratio": 1.0,
+                "unknown_ratio": 0.0,
+                "reason": "ok",
+                "refresh_elapsed_ms": 100.0,
+                "generation_interval_ms": 500.0,
+                "refresh_stamp_s": float(generation),
+            })
+        messages[-1]["refresh_elapsed_ms"] = "null"
+        _, summary = MODULE.analyze_p0_messages(messages)
+        self.assertIn("successful_generation_latency_nonfinite", summary["failures"])
+        self.assertNotEqual(summary["gate"], "PASS")
+
+    def test_selected_reachability_stages_are_reported_independently(self):
+        rows = [
+            {
+                "run_id": "primary-r1", "event": "attempt_start",
+                "planning_attempt_id": "1", "candidate_id": "0",
+                "collision_segment_count": "1", "base_generated_count": "1",
+            },
+            {
+                "run_id": "primary-r1", "event": "optimizer_input",
+                "planning_attempt_id": "1", "candidate_id": "1",
+            },
+            {
+                "run_id": "primary-r1", "event": "optimizer_result",
+                "planning_attempt_id": "1", "candidate_id": "1",
+                "optimizer_success": "1", "original_cost": "5",
+            },
+            {
+                "run_id": "primary-r1", "event": "selection",
+                "planning_attempt_id": "1", "candidate_id": "1",
+                "original_candidate_id": "1", "selected_candidate_id": "1",
+            },
+            {
+                "run_id": "primary-r1", "event": "refinement_result",
+                "planning_attempt_id": "1", "candidate_id": "1",
+                "ego_feasible": "1",
+            },
+            {
+                "run_id": "primary-r1", "event": "normal_bspline_publish",
+                "planning_attempt_id": "1", "candidate_id": "0",
+                "bspline_publish_count": "1",
+            },
+            {
+                "run_id": "primary-r1", "event": "attempt_candidates_complete",
+                "planning_attempt_id": "1", "candidate_id": "0",
+            },
+        ]
+        _, attempts = MODULE.aggregate_candidate_events(rows)
+        self.assertTrue(attempts[0]["selected_refinement_reached"])
+        self.assertTrue(attempts[0]["selected_publish_reached"])
+        self.assertFalse(attempts[0]["selected_update_reached"])
+        self.assertTrue(attempts[0]["selected_reached_downstream"])
 
     def test_nonfinite_original_cost_fails_closed(self):
         rows = [

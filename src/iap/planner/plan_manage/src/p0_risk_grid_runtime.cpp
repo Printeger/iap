@@ -610,7 +610,7 @@ P0RiskGridRuntime::P0RiskGridRuntime(
 }
 
 iap::RiskGridHealth P0RiskGridRuntime::health() const {
-  const double now_s = currentMessageStamp();
+  const double now_s = liveNowSeconds();
   return addLidarPredictorInputHealth(
       std::isfinite(now_s) ? risk_grid_.health(now_s)
                            : risk_grid_.health());
@@ -792,7 +792,7 @@ void P0RiskGridRuntime::healthTimerCallback() {
   }
   const auto callback_start = std::chrono::steady_clock::now();
   const double callback_steady_s = steadyNowSeconds();
-  const double now_s = currentMessageStamp();
+  const double now_s = liveNowSeconds();
   {
     std::lock_guard<std::mutex> lock(health_state_mutex_);
     last_health_callback_stamp_s_ = now_s;
@@ -818,7 +818,7 @@ void P0RiskGridRuntime::refreshTimerCallback() {
   }
   const auto refresh_start = std::chrono::steady_clock::now();
   const double refresh_start_steady_s = steadyNowSeconds();
-  const double now_s = currentMessageStamp();
+  const double now_s = liveNowSeconds();
   const std::string pre_build_failure = snapshotFailureReason(now_s);
   {
     std::lock_guard<std::mutex> health_lock(health_state_mutex_);
@@ -843,7 +843,7 @@ void P0RiskGridRuntime::refreshTimerCallback() {
   }
   if (!std::isfinite(now_s) || now_s <= 0.0) {
     risk_grid_.markRefreshFailure(now_s, "message_stamp_unavailable");
-    const double refresh_end_stamp_s = currentMessageStamp();
+    const double refresh_end_stamp_s = liveNowSeconds();
     {
       std::lock_guard<std::mutex> health_lock(health_state_mutex_);
       last_refresh_elapsed_ms_ = std::chrono::duration<double, std::milli>(
@@ -856,7 +856,7 @@ void P0RiskGridRuntime::refreshTimerCallback() {
   iap::IntegritySnapshot snapshot;
   if (!buildSnapshot(now_s, &snapshot)) {
     risk_grid_.markRefreshFailure(now_s, "snapshot_unavailable");
-    const double refresh_end_stamp_s = currentMessageStamp();
+    const double refresh_end_stamp_s = liveNowSeconds();
     {
       std::lock_guard<std::mutex> health_lock(health_state_mutex_);
       last_refresh_elapsed_ms_ = std::chrono::duration<double, std::milli>(
@@ -947,7 +947,7 @@ void P0RiskGridRuntime::refreshTimerCallback() {
   }
   const iap::RiskGridHealth health = risk_grid_.health(now_s);
   const auto viz_snapshot = risk_grid_.acquireSnapshot();
-  const double refresh_end_stamp_s = currentMessageStamp();
+  const double refresh_end_stamp_s = liveNowSeconds();
   {
     std::lock_guard<std::mutex> health_lock(health_state_mutex_);
     last_grid_stamp_s_ = viz_snapshot ? viz_snapshot->stamp_s()
@@ -1106,6 +1106,8 @@ void P0RiskGridRuntime::publishHealth(const iap::RiskGridHealth& health,
       << readiness.gnss_epoch_satellite_count << ","
       << "\"origin_seen\":" << jsonBool(readiness.origin_seen) << ","
       << "\"origin_valid\":" << jsonBool(readiness.origin_valid) << ","
+      << "\"origin_fresh\":" << jsonBool(readiness.origin_fresh) << ","
+      << "\"origin_stamp_s\":" << jsonNumber(readiness.origin_stamp_s) << ","
       << "\"map_seen\":" << jsonBool(readiness.map_seen) << ","
       << "\"map_valid\":" << jsonBool(readiness.map_valid) << ","
       << "\"map_fresh\":" << jsonBool(readiness.map_fresh) << ","
@@ -1214,12 +1216,13 @@ P0RiskGridRuntime::inputReadiness(const double now_s) const {
   double odom_stamp = std::numeric_limits<double>::quiet_NaN();
   double current_stamp = std::numeric_limits<double>::quiet_NaN();
   double map_stamp = std::numeric_limits<double>::quiet_NaN();
+  double origin_stamp = std::numeric_limits<double>::quiet_NaN();
+  double gnss_epoch_stamp = std::numeric_limits<double>::quiet_NaN();
   bool odom_seen = false;
   bool odom_valid = false;
   bool current_seen = false;
   bool current_valid = false;
   bool epoch_seen = false;
-  double epoch_stamp = std::numeric_limits<double>::quiet_NaN();
   uint64_t epoch_satellite_count = 0;
   bool origin_seen = false;
   bool map_seen = false;
@@ -1232,12 +1235,15 @@ P0RiskGridRuntime::inputReadiness(const double now_s) const {
     current_valid = latest_current_valid_;
     current_stamp = latest_current_.stamp;
     epoch_seen = gnss_epoch_seen_;
+    gnss_epoch_stamp = latest_gnss_epoch_stamp_;
+    epoch_satellite_count = latest_gnss_epoch_satellite_count_;
     if (latest_epoch_) {
-      epoch_stamp = latest_epoch_->stamp;
+      gnss_epoch_stamp = latest_epoch_->stamp;
       epoch_satellite_count =
           static_cast<uint64_t>(latest_epoch_->sats.size());
     }
-    origin_seen = origin_set_;
+    origin_seen = origin_seen_;
+    origin_stamp = latest_origin_stamp_;
     map_seen = map_seen_;
     map_stamp = latest_map_stamp_;
   }
@@ -1267,15 +1273,22 @@ P0RiskGridRuntime::inputReadiness(const double now_s) const {
       (now_s - current_stamp) <= stale_timeout;
 
   readiness.gnss_epoch_seen = epoch_seen;
-  readiness.gnss_epoch_valid = epoch_seen && std::isfinite(epoch_stamp);
-  readiness.gnss_epoch_stamp_s = epoch_stamp;
+  readiness.gnss_epoch_valid = epoch_seen && latest_epoch_.has_value() &&
+                               std::isfinite(gnss_epoch_stamp) &&
+                               epoch_satellite_count > 0;
+  readiness.gnss_epoch_stamp_s = gnss_epoch_stamp;
   readiness.gnss_epoch_satellite_count = epoch_satellite_count;
   readiness.gnss_epoch_fresh =
-      readiness.gnss_epoch_valid && finite_now && std::isfinite(epoch_stamp) &&
-      (gnss_timeout < 0.0 || (now_s - epoch_stamp) <= gnss_timeout);
+      readiness.gnss_epoch_valid && finite_now &&
+      std::isfinite(gnss_epoch_stamp) &&
+      (gnss_timeout < 0.0 || (now_s - gnss_epoch_stamp) <= gnss_timeout);
 
   readiness.origin_seen = origin_seen;
-  readiness.origin_valid = origin_seen;
+  readiness.origin_valid = origin_seen && origin_set_;
+  readiness.origin_stamp_s = origin_stamp;
+  readiness.origin_fresh =
+      readiness.origin_valid && finite_now && std::isfinite(origin_stamp) &&
+      origin_stamp > 0.0 && (now_s - origin_stamp) <= stale_timeout;
 
   readiness.map_seen = map_seen;
   readiness.map_valid =
@@ -1356,21 +1369,42 @@ void P0RiskGridRuntime::rangeCallback(
     return;
   }
   recordInputCallback();
-  std::lock_guard<std::mutex> health_lock(health_state_mutex_);
-  if (!origin_set_) {
+
+  bool origin_valid = false;
+  Eigen::Vector3d origin_ecef = Eigen::Vector3d::Zero();
+  std::vector<double> iono_params;
+  std::unordered_map<uint32_t, gnss_comm::EphemPtr> ephem_cache;
+  std::unordered_map<uint32_t, gnss_comm::GloEphemPtr> glo_ephem_cache;
+  {
+    std::lock_guard<std::mutex> health_lock(health_state_mutex_);
+    gnss_epoch_seen_ = true;
+    latest_gnss_epoch_stamp_ = std::numeric_limits<double>::quiet_NaN();
+    origin_valid = origin_set_;
+    origin_ecef = origin_ecef_;
+    iono_params = iono_params_;
+    ephem_cache = ephem_cache_;
+    glo_ephem_cache = glo_ephem_cache_;
+  }
+  if (!origin_valid) {
+    std::lock_guard<std::mutex> health_lock(health_state_mutex_);
+    latest_gnss_epoch_satellite_count_ = 0;
     return;
   }
+
   const auto obs_list = gnss_comm::msg2meas(msg);
   if (obs_list.empty()) {
+    std::lock_guard<std::mutex> health_lock(health_state_mutex_);
+    latest_gnss_epoch_satellite_count_ = 0;
     return;
   }
 
   iap::GnssEpoch epoch;
   const auto utc_t = gnss_comm::gpst2utc(obs_list.front()->time);
   epoch.stamp = static_cast<double>(utc_t.time) + utc_t.sec;
+  const double gnss_epoch_stamp = epoch.stamp;
   epoch.gps_sec = static_cast<double>(obs_list.front()->time.time) +
                   obs_list.front()->time.sec;
-  epoch.iono_params = iono_params_;
+  epoch.iono_params = iono_params;
 
   for (const auto& obs : obs_list) {
     if (!obs) {
@@ -1397,15 +1431,15 @@ void P0RiskGridRuntime::rangeCallback(
     const auto t_tx = gnss_comm::time_add(obs->time, -pr / kLightSpeed);
 
     if (sys == SYS_GLO) {
-      const auto it = glo_ephem_cache_.find(sat_id);
-      if (it == glo_ephem_cache_.end()) {
+      const auto it = glo_ephem_cache.find(sat_id);
+      if (it == glo_ephem_cache.end()) {
         continue;
       }
       sat_ecef_pos = gnss_comm::geph2pos(t_tx, it->second, &svdt);
       sat_ecef_vel = gnss_comm::geph2vel(t_tx, it->second, &svddt);
     } else {
-      const auto it = ephem_cache_.find(sat_id);
-      if (it == ephem_cache_.end()) {
+      const auto it = ephem_cache.find(sat_id);
+      if (it == ephem_cache.end()) {
         continue;
       }
       sat_ecef_pos = gnss_comm::eph2pos(t_tx, it->second, &svdt);
@@ -1417,7 +1451,7 @@ void P0RiskGridRuntime::rangeCallback(
     }
 
     double azel[2] = {0.0, M_PI / 2.0};
-    gnss_comm::sat_azel(origin_ecef_, sat_ecef_pos, azel);
+    gnss_comm::sat_azel(origin_ecef, sat_ecef_pos, azel);
 
     iap::SatObs sat;
     sat.sat_id = static_cast<int>(sat_id);
@@ -1442,9 +1476,14 @@ void P0RiskGridRuntime::rangeCallback(
     epoch.sats.push_back(sat);
   }
 
+  {
+    std::lock_guard<std::mutex> health_lock(health_state_mutex_);
+    latest_gnss_epoch_stamp_ = gnss_epoch_stamp;
+    latest_gnss_epoch_satellite_count_ =
+        static_cast<uint64_t>(epoch.sats.size());
+  }
   if (!epoch.sats.empty()) {
     std::lock_guard<std::mutex> health_lock(health_state_mutex_);
-    gnss_epoch_seen_ = true;
     latest_epoch_ = std::move(epoch);
   }
 }
@@ -1479,7 +1518,10 @@ void P0RiskGridRuntime::receiverLlaCallback(
     return;
   }
   recordInputCallback();
+  const double message_stamp = stampToSec(msg->header.stamp);
   std::lock_guard<std::mutex> lock(health_state_mutex_);
+  origin_seen_ = true;
+  latest_origin_stamp_ = message_stamp;
   if (origin_set_) {
     return;
   }
@@ -1708,6 +1750,22 @@ bool P0RiskGridRuntime::buildSnapshot(
   if (!odom_valid || !current_valid) {
     return false;
   }
+  const auto age_valid = [](double stamp, double now_s, double max_age_s) {
+    if (!std::isfinite(stamp) || !std::isfinite(now_s) || stamp <= 0.0) {
+      return false;
+    }
+    const double age_s = now_s - stamp;
+    if (!std::isfinite(age_s) || age_s < 0.0) {
+      return false;
+    }
+    return max_age_s < 0.0 || age_s <= max_age_s;
+  };
+  if (!age_valid(odom_stamp, now_s, config_.grid.stale_timeout_s)) {
+    return false;
+  }
+  if (!age_valid(current.stamp, now_s, config_.grid.stale_timeout_s)) {
+    return false;
+  }
   iap::IntegritySnapshotBuilderInput input;
   input.stamp = now_s;
   input.has_pose = odom_valid;
@@ -1757,6 +1815,19 @@ double P0RiskGridRuntime::currentMessageStamp() const {
     return latest_current_.stamp;
   }
   return std::numeric_limits<double>::quiet_NaN();
+}
+
+double P0RiskGridRuntime::liveNowSeconds() const {
+  const bool use_sim_time =
+      node_ && node_->has_parameter("use_sim_time") &&
+      node_->get_parameter("use_sim_time").as_bool();
+  if (use_sim_time) {
+    const double now_s = node_->now().seconds();
+    if (std::isfinite(now_s) && now_s > 0.0) {
+      return now_s;
+    }
+  }
+  return currentMessageStamp();
 }
 
 double P0RiskGridRuntime::currentRefreshStamp() const {

@@ -100,3 +100,80 @@ Scope checked:
 ### Git
 Start HEAD: eeb3be6d2de5e878be773522b357a1a634bb62b2
 End HEAD: 489e4ca73424cdf8c68fae16fe3159a93f491f92
+
+## 2026-08-18T11:15:00Z — ICRA-003 START
+
+Branch: dev/icra
+Start HEAD: 7950b47bd09f8bce6752b762466b50153651ebf9
+Goal: Repair ICRA-002 findings and run the mandatory CPU smoke exactly once.
+Planned steps:
+1. Repair P0 live/stale source readiness and remove recursive rangeCallback mutex.
+2. Make required-process monitoring launch-descendant-only with runner-owned controlled shutdown.
+3. Harden backend provenance and analyzer fail-closed behavior.
+4. Run focused/package tests with repository-local build/install/log roots.
+5. Run one 20 s CPU smoke; stop on failure without retrying or running 60 s benchmark.
+6. Record BLOCKED evidence and hand back to Supervisor without editing Supervisor-owned state.
+
+Allowed files:
+- launch/test_planner.launch.py
+- scripts/dev_planner/run_gate0_qualification.py
+- scripts/dev_planner/gate0_analyzer.py
+- scripts/dev_planner/gate0_capture_p0_health.py
+- src/iap/planner/plan_manage/include/ego_planner/p0_risk_grid_runtime.h
+- src/iap/planner/plan_manage/src/p0_risk_grid_runtime.cpp
+- src/iap/planner/plan_manage/test/test_p0_risk_grid_runtime.cpp
+- test/test_gate0_analyzer.py
+- test/test_gate0_runner.py
+- test/test_test_planner_launch.py
+- package.xml
+- results/icra27/icra003/ (small text/JSON evidence only)
+- docs/CHANGES.md, docs/TRACEABILITY.md, DEV_LOG.md
+
+## 2026-08-18T11:45:00Z — ICRA-003 IMPLEMENTATION TESTS
+
+| Command | Working directory | Exit code | Result | Log |
+|---|---|---|---|---|
+| `python3 -m py_compile launch/test_planner.launch.py scripts/dev_planner/gate0_analyzer.py scripts/dev_planner/run_gate0_qualification.py scripts/dev_planner/gate0_capture_p0_health.py` | /home/dev/ws_iap/src/iap | 0 | PASS | terminal |
+| `python3 -m unittest discover -s test -p 'test_gate0_analyzer.py' -v` | /home/dev/ws_iap/src/iap | 0 | PASS 11 tests | terminal |
+| `python3 -m unittest discover -s test -p 'test_gate0_runner.py' -v` | /home/dev/ws_iap/src/iap | 0 | PASS 8 tests | terminal |
+| `python3 -m unittest discover -s test -p 'test_test_planner_launch.py' -v` | /home/dev/ws_iap/src/iap | 0 | PASS 11 tests | terminal |
+| `ctest --test-dir results/icra27/icra003/build_ego/ego_planner -R test_p0_risk_grid_runtime --output-on-failure --timeout 120` | /home/dev/ws_iap/src/iap | 0 | PASS | results/icra27/icra003/build_ego/ego_planner/Testing/Temporary/LastTest.log |
+| `ctest --test-dir results/icra27/icra003/build_ego/ego_planner -L gtest --output-on-failure --timeout 120` | /home/dev/ws_iap/src/iap | 0 | PASS 8/8 | same test dir |
+| `colcon test --packages-select iap` with repository-local build/install/log roots | /home/dev/ws_iap/src/iap | 0 | PASS 26/26 IAP targets | results/icra27/icra003/build_iap/iap/Testing/Temporary/LastTest.log |
+
+## 2026-08-18T11:50:16Z — ICRA-003 MANDATORY CPU SMOKE
+
+| Item | Value |
+|---|---|
+| Command | `python3 scripts/dev_planner/run_gate0_qualification.py --output-root results/icra27/icra003/runs --smoke` |
+| Environment | source `/opt/ros/jazzy/setup.bash`, existing workspace install, `results/icra27/icra003/install_iap/setup.bash`, `results/icra27/icra003/install_ego/setup.bash` |
+| Runner exit code | 0 |
+| Analyzer command | `python3 scripts/dev_planner/gate0_analyzer.py --gate0-root results/icra27/icra003/runs/smoke --output-dir results/icra27/icra003/runs/smoke/analyzer` |
+| Analyzer exit code | 1 |
+| `iap_rosnode` descendant seen | true |
+| Required runtime process failure | none |
+| Risk-grid health records | 0 |
+| Valid integrity report records | 0 |
+| Successful P0 generations | 0 |
+
+### Blocker
+`P0_INPUT_AVAILABILITY_FAIL`: the one mandated smoke produced no captured risk-grid health or integrity messages, therefore no successful 76,800-query generation could be verified. Evidence is preserved; no retry and no 60-second benchmark were run.
+
+### Evidence paths
+- `results/icra27/icra003/runs/smoke/command.txt`
+- `results/icra27/icra003/runs/smoke/gate0_run_manifest.json`
+- `results/icra27/icra003/runs/smoke/risk_grid_health.jsonl`
+- `results/icra27/icra003/runs/smoke/integrity_report.jsonl`
+- `results/icra27/icra003/runs/smoke/stdout.log`
+- `results/icra27/icra003/runs/smoke/capture_stdout.log`
+- `results/icra27/icra003/runs/smoke/analyzer/gate0_analysis.json`
+- `results/icra27/icra003/runs/smoke/analyzer/p0_smoke_summary.json`
+
+### Known issues
+- The smoke's ROS launch produced valid-looking GNSS/integrity logs, but the runner's health/integrity capture streams were empty at analyzer time, so the mandatory evidence contract could not be satisfied.
+- No benchmark was attempted after the smoke failure.
+- No edits were made to `AGENT_STATE.md`, `SUPERVISOR_LOG.md`, `NEXT_TASK.md`, or ICRA scope/plan/gate documents.
+
+### Git
+Start HEAD: 7950b47bd09f8bce6752b762466b50153651ebf9
+End HEAD: pending-final-sha

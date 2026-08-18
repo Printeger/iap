@@ -126,6 +126,8 @@ class P0RiskGridRuntime {
     uint64_t gnss_epoch_satellite_count = 0;
     bool origin_seen = false;
     bool origin_valid = false;
+    bool origin_fresh = false;
+    double origin_stamp_s = std::numeric_limits<double>::quiet_NaN();
     bool map_seen = false;
     bool map_valid = false;
     bool map_fresh = false;
@@ -193,6 +195,7 @@ class P0RiskGridRuntime {
   combinedOccupancyDiagnosticQuery() const;
   double currentMessageStamp() const;
   double currentRefreshStamp() const;
+  double liveNowSeconds() const;
 
   rclcpp::Node::SharedPtr node_;
   Config config_;
@@ -232,11 +235,14 @@ class P0RiskGridRuntime {
   Eigen::Quaterniond latest_odom_q_ = Eigen::Quaterniond::Identity();
   bool latest_odom_pose_valid_ = false;
   bool odom_seen_ = false;
+  double latest_origin_stamp_ = std::numeric_limits<double>::quiet_NaN();
   double latest_map_stamp_ = std::numeric_limits<double>::quiet_NaN();
   bool map_seen_ = false;
   iap::CurrentIntegrityState latest_current_;
   bool latest_current_valid_ = false;
   bool current_integrity_seen_ = false;
+  double latest_gnss_epoch_stamp_ = std::numeric_limits<double>::quiet_NaN();
+  uint64_t latest_gnss_epoch_satellite_count_ = 0;
   double last_refresh_stamp_s_ = std::numeric_limits<double>::quiet_NaN();
   double last_grid_stamp_s_ = std::numeric_limits<double>::quiet_NaN();
   double last_refresh_elapsed_ms_ = std::numeric_limits<double>::quiet_NaN();
@@ -270,6 +276,7 @@ class P0RiskGridRuntime {
   uint64_t input_callback_count_ = 0;
   uint64_t health_callback_count_ = 0;
   bool origin_set_ = false;
+  bool origin_seen_ = false;
   Eigen::Vector3d origin_ecef_ = Eigen::Vector3d::Zero();
   std::unordered_map<uint32_t, gnss_comm::EphemPtr> ephem_cache_;
   std::unordered_map<uint32_t, gnss_comm::GloEphemPtr> glo_ephem_cache_;

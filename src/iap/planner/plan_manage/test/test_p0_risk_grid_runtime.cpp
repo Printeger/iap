@@ -283,7 +283,41 @@ class P0RiskGridRuntimeStampTest : public ::testing::Test {
   }
 
   static void setOriginSeen(P0RiskGridRuntime* runtime, const bool seen) {
-    runtime->origin_set_ = seen;
+    runtime->origin_seen_ = seen;
+  }
+
+  static void setOriginValid(P0RiskGridRuntime* runtime, const bool valid) {
+    runtime->origin_set_ = valid;
+  }
+
+  static void setOriginStamp(P0RiskGridRuntime* runtime, const double stamp) {
+    runtime->latest_origin_stamp_ = stamp;
+  }
+
+  static void setGnssEpochSeen(P0RiskGridRuntime* runtime, const bool seen) {
+    runtime->gnss_epoch_seen_ = seen;
+  }
+
+  static void setGnssEpochStamp(P0RiskGridRuntime* runtime, const double stamp) {
+    runtime->latest_gnss_epoch_stamp_ = stamp;
+  }
+
+  static void setGnssEpochSatelliteCount(
+      P0RiskGridRuntime* runtime, const uint64_t count) {
+    runtime->latest_gnss_epoch_satellite_count_ = count;
+  }
+
+  static void setLatestGnssEpoch(
+      P0RiskGridRuntime* runtime, const iap::GnssEpoch& epoch) {
+    runtime->latest_epoch_ = epoch;
+  }
+
+  static bool gnssEpochSeen(const P0RiskGridRuntime& runtime) {
+    return runtime.gnss_epoch_seen_;
+  }
+
+  static uint64_t gnssEpochSatelliteCount(const P0RiskGridRuntime& runtime) {
+    return runtime.latest_gnss_epoch_satellite_count_;
   }
 
   static void setMapSeen(P0RiskGridRuntime* runtime, const bool seen) {
@@ -333,6 +367,12 @@ class P0RiskGridRuntimeStampTest : public ::testing::Test {
       P0RiskGridRuntime* runtime,
       const sensor_msgs::msg::PointCloud2::SharedPtr& msg) {
     runtime->cloudCallback(msg);
+  }
+
+  static void sendRange(
+      P0RiskGridRuntime* runtime,
+      const gnss_comm::msg::GnssMeasMsg::SharedPtr& msg) {
+    runtime->rangeCallback(msg);
   }
 
   static std::shared_ptr<const std::vector<Eigen::Vector3d>> lidarMapPoints(
@@ -1072,6 +1112,8 @@ TEST_F(P0RiskGridRuntimeStampTest, InputReadinessReportsSeenValidAndFreshSources
   setOdomSeen(&runtime, true);
   setCurrentSeen(&runtime, true);
   setOriginSeen(&runtime, true);
+  setOriginValid(&runtime, true);
+  setOriginStamp(&runtime, 99.0);
   setMapSeen(&runtime, true);
   setMapStamp(&runtime, 99.5);
   setMapPointCount(&runtime, 10);
@@ -1085,11 +1127,76 @@ TEST_F(P0RiskGridRuntimeStampTest, InputReadinessReportsSeenValidAndFreshSources
   EXPECT_TRUE(readiness.current_integrity_fresh);
   EXPECT_TRUE(readiness.origin_seen);
   EXPECT_TRUE(readiness.origin_valid);
+  EXPECT_TRUE(readiness.origin_fresh);
+  EXPECT_DOUBLE_EQ(readiness.origin_stamp_s, 99.0);
   EXPECT_TRUE(readiness.map_seen);
   EXPECT_TRUE(readiness.map_valid);
   EXPECT_TRUE(readiness.map_fresh);
   EXPECT_EQ(readiness.map_point_count, 10u);
   EXPECT_EQ(snapshotFailureReason(runtime, 100.0), "none");
+}
+
+TEST_F(P0RiskGridRuntimeStampTest, StaleOdomOrCurrentPreventsSnapshot) {
+  ensure_rclcpp();
+  auto node = std::make_shared<rclcpp::Node>(
+      "p0_stale_snapshot_test",
+      rclcpp::NodeOptions().allow_undeclared_parameters(false));
+  auto config = enabledConfig();
+  config.grid.stale_timeout_s = 1.0;
+  P0RiskGridRuntime runtime(node, config, std::make_unique<FakeProvider>());
+
+  seedValidInputs(&runtime, 98.0, 98.0);
+  setOdomSeen(&runtime, true);
+  setCurrentSeen(&runtime, true);
+  iap::IntegritySnapshot snapshot;
+  EXPECT_FALSE(buildSnapshot(&runtime, 100.0, &snapshot));
+
+  seedValidInputs(&runtime, 100.0, 100.0);
+  setOdomSeen(&runtime, true);
+  setCurrentSeen(&runtime, true);
+  EXPECT_TRUE(buildSnapshot(&runtime, 100.0, &snapshot));
+}
+
+TEST_F(P0RiskGridRuntimeStampTest, GnssRangeCallbackCompletesWithoutRecursiveLock) {
+  ensure_rclcpp();
+  auto node = std::make_shared<rclcpp::Node>(
+      "p0_range_callback_no_recursive_lock_test",
+      rclcpp::NodeOptions().allow_undeclared_parameters(false));
+  P0RiskGridRuntime runtime(node, enabledConfig(),
+                            std::make_unique<FakeProvider>());
+  auto msg = std::make_shared<gnss_comm::msg::GnssMeasMsg>();
+  sendRange(&runtime, msg);
+  EXPECT_TRUE(gnssEpochSeen(runtime));
+  EXPECT_EQ(gnssEpochSatelliteCount(runtime), 0u);
+}
+
+TEST_F(P0RiskGridRuntimeStampTest, GnssOriginMapValidityMatrixIsTruthful) {
+  ensure_rclcpp();
+  auto node = std::make_shared<rclcpp::Node>(
+      "p0_source_validity_matrix_test",
+      rclcpp::NodeOptions().allow_undeclared_parameters(false));
+  auto config = enabledConfig();
+  config.grid.stale_timeout_s = 1.0;
+  P0RiskGridRuntime runtime(node, config, std::make_unique<FakeProvider>());
+
+  setGnssEpochSeen(&runtime, true);
+  setGnssEpochStamp(&runtime, 99.0);
+  setGnssEpochSatelliteCount(&runtime, 0);
+  setOriginSeen(&runtime, true);
+  setOriginValid(&runtime, false);
+  setOriginStamp(&runtime, 99.0);
+  setMapSeen(&runtime, true);
+  setMapStamp(&runtime, 99.0);
+  setMapPointCount(&runtime, 0);
+
+  const auto readiness = inputReadiness(runtime, 100.0);
+  EXPECT_TRUE(readiness.gnss_epoch_seen);
+  EXPECT_FALSE(readiness.gnss_epoch_valid);
+  EXPECT_EQ(readiness.gnss_epoch_satellite_count, 0u);
+  EXPECT_TRUE(readiness.origin_seen);
+  EXPECT_FALSE(readiness.origin_valid);
+  EXPECT_TRUE(readiness.map_seen);
+  EXPECT_FALSE(readiness.map_valid);
 }
 
 TEST_F(P0RiskGridRuntimeStampTest, RefreshSnapshotUsesMessageStamp) {
@@ -1100,7 +1207,7 @@ TEST_F(P0RiskGridRuntimeStampTest, RefreshSnapshotUsesMessageStamp) {
   P0RiskGridRuntime runtime(node, enabledConfig(),
                             std::make_unique<FakeProvider>());
 
-  seedValidInputs(&runtime, 123.5, 456.5);
+  seedValidInputs(&runtime, 123.5, 123.5);
 
   ASSERT_TRUE(runtime.refreshOnceForTest());
   const auto snapshot = runtime.acquireSnapshot();
@@ -1295,7 +1402,7 @@ TEST_F(P0RiskGridRuntimeStampTest,
 }
 
 TEST_F(P0RiskGridRuntimeStampTest,
-       StaleCurrentPriorWithLidarGoodDoesNotMakeFieldStale) {
+       StaleCurrentPriorWithLidarGoodPreventsSnapshot) {
   ensure_rclcpp();
   auto node = std::make_shared<rclcpp::Node>(
       "p0_stale_current_prior_lidar_good_test",
@@ -1314,23 +1421,14 @@ TEST_F(P0RiskGridRuntimeStampTest,
   sendCloud(&runtime, makePointCloud(points, &normals));
   seedValidInputs(&runtime, 100.0, 99.0);
 
-  EXPECT_TRUE(runtime.refreshOnceForTest());
+  EXPECT_FALSE(runtime.refreshOnceForTest());
   const auto health = runtime.health();
-  EXPECT_TRUE(health.ready);
-  EXPECT_FALSE(health.stale);
-  EXPECT_GT(health.valid_ratio, 0.0);
-  EXPECT_LT(health.unknown_ratio, 1.0);
-  EXPECT_EQ(health.provider_stale_count, 0u);
-  EXPECT_GT(health.predictor_lidar_used_count, 0u);
-  EXPECT_EQ(health.predictor_gnss_used_count, 0u);
-  EXPECT_EQ(health.predictor_prior_used_count, 0u);
-  EXPECT_GT(health.predictor_stale_current_prior_count, 0u);
-  EXPECT_NE(health.reason, "stale_integrity");
-  EXPECT_NE(health.dominant_unknown_reason, "stale_integrity");
+  EXPECT_FALSE(health.ready);
+  EXPECT_EQ(health.reason, "snapshot_unavailable");
 }
 
 TEST_F(P0RiskGridRuntimeStampTest,
-       StaleCurrentWithNoUsablePredictorSourceStaysFullUnknown) {
+       StaleCurrentWithNoUsablePredictorSourcePreventsSnapshot) {
   ensure_rclcpp();
   auto node = std::make_shared<rclcpp::Node>(
       "p0_stale_current_no_predictor_source_test",
@@ -1345,17 +1443,10 @@ TEST_F(P0RiskGridRuntimeStampTest,
 
   seedValidInputs(&runtime, 100.0, 99.0);
 
-  EXPECT_TRUE(runtime.refreshOnceForTest());
+  EXPECT_FALSE(runtime.refreshOnceForTest());
   const auto health = runtime.health();
-  EXPECT_TRUE(health.ready);
-  EXPECT_DOUBLE_EQ(health.valid_ratio, 0.0);
-  EXPECT_DOUBLE_EQ(health.unknown_ratio, 1.0);
-  EXPECT_GT(health.provider_stale_count, 0u);
-  EXPECT_EQ(health.provider_invalid_count, 0u);
-  EXPECT_EQ(health.predictor_lidar_used_count, 0u);
-  EXPECT_EQ(health.predictor_stale_current_prior_count, 0u);
-  EXPECT_EQ(health.reason, "stale_integrity");
-  EXPECT_EQ(health.dominant_unknown_reason, "stale_integrity");
+  EXPECT_FALSE(health.ready);
+  EXPECT_EQ(health.reason, "snapshot_unavailable");
 }
 
 TEST_F(P0RiskGridRuntimeStampTest,

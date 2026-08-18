@@ -54,6 +54,16 @@ def _mapping_backend_config_provenance(path):
     return {"path": str(path), "sha256": _sha256_file(path)}
 
 
+def _normalize_mapping_backend(value):
+    backend = str(value).strip().lower()
+    if backend not in {"gpu", "cpu"}:
+        raise RuntimeError(
+            "iap_mapping_backend must be exactly gpu or cpu; "
+            f"got '{backend}'"
+        )
+    return backend
+
+
 def _formal_calibration_provenance(value):
     """Read immutable experiment provenance; never forward it to the planner."""
     raw = str(value).strip()
@@ -1261,14 +1271,9 @@ def _runtime_config(context, use_gnss, use_araim, allow_truth_alignment):
     config_ros_path = runtime_config_dir / "config_ros.json"
     config_gnss_path = runtime_config_dir / "config_gnss.json"
 
-    mapping_backend = LaunchConfiguration("iap_mapping_backend").perform(
-        context
-    ).strip().lower()
-    if mapping_backend not in {"gpu", "cpu"}:
-        raise RuntimeError(
-            "iap_mapping_backend must be exactly gpu or cpu; "
-            f"got '{mapping_backend}'"
-        )
+    mapping_backend = _normalize_mapping_backend(
+        LaunchConfiguration("iap_mapping_backend").perform(context)
+    )
 
     config_odometry_source = (
         base_config / "config_odometry_cpu.json"
@@ -1304,19 +1309,6 @@ def _runtime_config(context, use_gnss, use_araim, allow_truth_alignment):
         json.dump(root_config, f, indent=2)
         f.write("\n")
 
-    mapping_effective = {
-        "selected": mapping_backend,
-        "odometry_config": _mapping_backend_config_provenance(
-            config_odometry_path
-        ),
-        "sub_mapping_config": _mapping_backend_config_provenance(
-            sub_mapping_path
-        ),
-        "global_mapping_config": _mapping_backend_config_provenance(
-            global_mapping_path
-        ),
-    }
-
     odometry_initialization_mode = LaunchConfiguration(
         "odometry_initialization_mode"
     ).perform(context).strip().upper()
@@ -1329,6 +1321,19 @@ def _runtime_config(context, use_gnss, use_araim, allow_truth_alignment):
         _override_odometry_initialization_mode(
             config_odometry_path, odometry_initialization_mode
         )
+
+    mapping_effective = {
+        "selected": mapping_backend,
+        "odometry_config": _mapping_backend_config_provenance(
+            config_odometry_path
+        ),
+        "sub_mapping_config": _mapping_backend_config_provenance(
+            sub_mapping_path
+        ),
+        "global_mapping_config": _mapping_backend_config_provenance(
+            global_mapping_path
+        ),
+    }
 
     with config_ros_path.open() as f:
         config_ros = json.load(f)
