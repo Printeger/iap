@@ -1,5 +1,18 @@
 # ICRA 2027 P0 + P2 + P5 会议版改造实施计划
 
+## Activation addendum — 2026-08-18 Supervisor verdict
+
+This addendum is authoritative over the historical preregistration below wherever they conflict.
+
+- Gate 0A is `NO_GO_P2`: nine fixed seed-11 runs produced 378 optimizer-success attempts, all singleton, with zero eligible same-attempt multi-candidate sets. This narrow result freezes all W2 work and every P2 scoring, winner, batch-identity, fixture, candidate-generation or P2 experiment item in W0–W6.
+- Gate 0A is not a complete-system qualification. The same raw runs show `iap_rosnode` died with exit `-6` after `cudaErrorNoDevice`, while the integrity validator exited 2 with no messages. The singleton evidence still answers the narrow P2 treatment-domain question, but it does not qualify live integrity, P0 or P5 behavior.
+- Gate 0B has no valid performance conclusion. Its top-level launch returned 0 while `iap_rosnode` died; zero real P0 generations and zero 76,800-query refreshes occurred. P0 p50/p95/max are unmeasured. The historical `P0_PERFORMANCE_GATE_FAIL` label is superseded by `BLOCKED / P0_INPUT_AVAILABILITY_FAIL` until a required-process-clean run reaches provider evaluation.
+- The active conference route is P0 + P5. P0 provides only a future-PL advisory field; P5 final/runtime remains the IAP layer's sole hard integrity gate; original EGO collision/dynamics checks remain authoritative for motion feasibility. P1/P3/P4 remain closed.
+- The unique next task is `ICRA-002 / GATE_0B`, defined at repository root in `NEXT_TASK.md`: add explicit qualification-only CPU backend selection, truthful input/process evidence and fail-closed analysis; pass one 20 s smoke before the single unchanged 60 s full-grid benchmark.
+- No ROI, horizon, worker or refresh-period tuning is authorized in ICRA-002. No P2 or P5 decision logic, campaign, rosbag, external backup or disk remediation is authorized.
+
+The remainder of this file is retained unchanged as the historical P0 + P2 + P5 preregistration. It is not an active work queue and cannot be used to bypass this addendum.
+
 > 状态：工程计划，不是实验结果。
 > 计划基线：`dev/icra`；代码冻结点 `21180f3`；代码映射文档提交 `0f2e487`。
 > 代码位置和当前行为以 [`CODE_MAP.md`](CODE_MAP.md) 及上述冻结点为准；行号漂移时以类和函数名为权威定位。

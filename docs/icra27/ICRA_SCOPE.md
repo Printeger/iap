@@ -1,35 +1,46 @@
-# ICRA 2027 Conference Scope — IAP P0 + P2 + P5
+# ICRA 2027 Conference Scope — IAP P0 + P5
 
-## 研究问题
+> Activated 2026-08-18 by the Gate 0 Supervisor review. Gate 0A returned the narrow verdict `NO_GO_P2`; P2 is frozen. Gate 0B remains blocked by an upstream required-process failure and has not produced a P0 latency result.
 
-预测 protection-level field 是否能够在不改变原始候选生成和 EGO 可行性定义的前提下，对同一次 planning attempt 的 rebound-optimizer-success candidate set 进行完整性感知排序，并由独立的 IAP hard integrity gate 约束最终执行？
+## Research question
 
-## 唯一核心主张
+Can a future protection-level advisory field be generated reliably from live GNSS/LiDAR/odometry/current-integrity inputs and used by an independent IAP hard integrity gate to fail safely before and during trajectory execution, while leaving original EGO collision and dynamics feasibility authoritative?
 
-ICRA 版本只证明：在同一次 planning attempt、同一组 rebound optimizer 成功候选和同一个不可变 predicted-PL snapshot 下，完整性感知重排在不改变候选生成及 EGO 可行性定义的前提下，更倾向较低预测完整性风险的轨迹；P5 是 IAP 层唯一 hard integrity gate，原始 EGO collision/dynamics checks 继续负责运动可行性。
+## Core claim boundary
 
-> Given one planning attempt, the same rebound-optimizer-success candidate set, and one immutable predicted-PL snapshot, integrity-aware re-ranking prefers trajectories with lower predicted integrity-risk scores without altering candidate generation or EGO feasibility definitions. P5 remains the sole hard integrity gate in the IAP layer, while the original EGO collision and dynamics checks remain authoritative for motion feasibility.
+P0 provides only a future-PL advisory field. It may read the authoritative current-state monitor within the system as a one-way prior, but it cannot write back, override current PL/AL/IM, declare safety, or directly accept/reject a trajectory.
 
-## 保留与删除范围
+P5 final and runtime gates together are the only hard integrity-gate authority in the IAP layer. Original EGO collision and dynamics checks remain authoritative for motion feasibility. A trajectory must satisfy both authorities; P5 does not replace the EGO checks, and EGO feasibility does not imply integrity safety.
 
-**保留：** Current GNSS/LiDAR integrity interface；Predictor advisory query；P0 predicted-PL field；P2 candidate ranking；P5 runtime gate；P5 final gate；original EGO collision/dynamics feasibility；fail-safe handling of stale/unknown/no-source inputs。
+The claimed separation is logical and one-way. This scope does not claim physical isolation, certification-level proof, certified active perception, formal PHMI guarantees, or real-world generalization without evidence.
 
-**删除：** P1 B-spline integrity soft cost；P3 local/global reference bias；P4 risk-aware local A*；P1–P4 full stack；A-ALL integrated ablation；完整 robustness matrix；连续时间定位规划联合优化；BLOM/MINCO 新轨迹表示；PX4/实飞，除非已经存在可靠结果；认证级 PHMI 或 formal safety guarantee。
+## Included scope
 
-P1/P3/P4 只从会议范围删除，源码保留在冻结基线和后续期刊路线中。
+- Current GNSS/LiDAR integrity interface and authoritative current PL/AL/IM monitor.
+- Predictor advisory queries and P0 future predicted-PL field/generations.
+- Explicit, manifest-bound qualification backend selection for reproducible CPU/GPU execution.
+- Truthful source readiness, freshness, validity and required-process health evidence.
+- P5 final admission before normal trajectory publication.
+- P5 runtime monitoring of a committed trajectory.
+- Fail-safe handling of unknown, stale, missing-source, invalid and non-finite evidence.
+- Original EGO candidate generation, refinement, collision and dynamics behavior unchanged.
 
-## 系统边界
+## Frozen or excluded scope
 
-P0/Predictor 是 advisory；P2 只对 rebound-optimizer-success candidate set 重排，不生成候选、不 hard reject，并使用 original optimizer cost。P5 独立于 P2，是 IAP 层最终发布和运行阶段唯一 hard integrity gate；原始 EGO collision/dynamics checks 保持对运动可行性的 authority。
+- **P2 is frozen by Gate 0A `NO_GO_P2`.** Across nine fixed runs, all 378 optimizer-success attempts were singleton; there was no eligible same-attempt reranking set. No P2 scoring, winner selection, batch identity, candidate fixture or candidate-generation work is permitted on the active route.
+- P1 soft integrity cost, P3 local/global reference bias, P4 risk-aware local A*, A-ALL and the full P1-P4 stack remain closed for the conference route. Their source may remain in the frozen baseline.
+- Continuous-time localization/planning joint optimization, BLOM/MINCO or another trajectory representation, certification claims and PX4/real flight are excluded unless separately authorized by a future scope decision backed by evidence.
 
-Current monitor 统一称为 **authoritative current-state monitor within the system**。P0 可以单向读取 current-integrity prior；Predictor 和 P0 不得回写或覆盖 current monitor。该隔离只主张 logical one-way separation，不主张未经证明的 physical isolation，也不主张 certification-level proof。unknown/stale 不得视为安全。
+## Current gate interpretation
 
-## 最小实验
+- **Gate 0A: `NO_GO_P2` (narrow).** The 378 singleton-candidate observations qualify the candidate-set question only. They are sufficient to freeze P2 but are not a complete-system PASS.
+- **Gate 0B: `BLOCKED / P0_INPUT_AVAILABILITY_FAIL`.** `iap_rosnode` died with exit `-6` on a machine without a CUDA device; the top-level launch exit 0 did not expose that required-process failure. No real P0 generation or 76,800-query workload occurred, so P0 p50/p95/max are unmeasured.
+- The active recovery task is `ICRA-002 / GATE_0B`: explicitly select the CPU mapping backend, restore valid integrity input and one P0 generation, then run the unchanged fixed benchmark once.
 
-**配置：** C0 baseline；C1 P0+P2；C2 P0+P2+P5。
+## Minimum experiment route
 
-**场景：** null/open-sky；asymmetric degraded case；mirror case；stale/unknown case；targeted unsafe P5 case。
+1. Qualification-only CPU smoke proving live `iap_rosnode`, at least one valid integrity report and at least one 76,800-query P0 generation.
+2. One fixed Gate 0B run proving at least 20 distinct generations and p95 `<= 400 ms` without required-process failure.
+3. Only after Gate 0B passes, independent P5 final/runtime safe, unsafe, stale and unknown qualification under the P0 + P5 route.
 
-## 论文 Non-claims
-
-不声称：joint localization-planning optimization；continuous-time ARAIM；certified active perception；certification-level proof；P2 itself guarantees safety；full P0–P5 system completion；real-world generalization without real-world evidence。
+P0-only qualification is an evidence exercise, not a planner-winner claim. P5 decisions and EGO feasibility semantics must not be changed to make Gate 0B pass.
