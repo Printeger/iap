@@ -244,12 +244,58 @@ class P0RiskGridRuntimeStampTest : public ::testing::Test {
     return runtime.currentRefreshStamp();
   }
 
+  static P0RiskGridRuntime::InputReadiness inputReadiness(
+      const P0RiskGridRuntime& runtime, const double now_s) {
+    return runtime.inputReadiness(now_s);
+  }
+
+  static std::string snapshotFailureReason(
+      const P0RiskGridRuntime& runtime, const double now_s) {
+    return runtime.snapshotFailureReason(now_s);
+  }
+
   static void setOdomStamp(P0RiskGridRuntime* runtime, const double stamp) {
     runtime->latest_odom_stamp_ = stamp;
   }
 
   static void setCurrentStamp(P0RiskGridRuntime* runtime, const double stamp) {
     runtime->latest_current_.stamp = stamp;
+  }
+
+  static void setOdomSeen(P0RiskGridRuntime* runtime, const bool seen) {
+    runtime->odom_seen_ = seen;
+  }
+
+  static void setOdomPoseValid(P0RiskGridRuntime* runtime, const bool valid) {
+    runtime->latest_odom_pose_valid_ = valid;
+  }
+
+  static void setOdomStampExact(P0RiskGridRuntime* runtime, const double stamp) {
+    runtime->latest_odom_stamp_ = stamp;
+  }
+
+  static void setCurrentSeen(P0RiskGridRuntime* runtime, const bool seen) {
+    runtime->current_integrity_seen_ = seen;
+  }
+
+  static void setCurrentValid(P0RiskGridRuntime* runtime, const bool valid) {
+    runtime->latest_current_valid_ = valid;
+  }
+
+  static void setOriginSeen(P0RiskGridRuntime* runtime, const bool seen) {
+    runtime->origin_set_ = seen;
+  }
+
+  static void setMapSeen(P0RiskGridRuntime* runtime, const bool seen) {
+    runtime->map_seen_ = seen;
+  }
+
+  static void setMapStamp(P0RiskGridRuntime* runtime, const double stamp) {
+    runtime->latest_map_stamp_ = stamp;
+  }
+
+  static void setMapPointCount(P0RiskGridRuntime* runtime, const std::size_t count) {
+    runtime->latest_lidar_map_point_count_ = count;
   }
 
   static void seedValidInputs(P0RiskGridRuntime* runtime,
@@ -985,6 +1031,65 @@ TEST_F(P0RiskGridRuntimeStampTest, MessageStampIsNaNWhenMessageStampsInvalid) {
   const double stamp_s = currentRefreshStamp(runtime);
   EXPECT_TRUE(std::isnan(message_stamp_s));
   EXPECT_TRUE(std::isnan(stamp_s));
+}
+
+TEST_F(P0RiskGridRuntimeStampTest, SnapshotFailureReasonDistinguishesSourceStates) {
+  ensure_rclcpp();
+  auto node = std::make_shared<rclcpp::Node>(
+      "p0_snapshot_failure_reason_test",
+      rclcpp::NodeOptions().allow_undeclared_parameters(false));
+  P0RiskGridRuntime runtime(node, enabledConfig(),
+                            std::make_unique<FakeProvider>());
+
+  EXPECT_EQ(snapshotFailureReason(runtime, 10.0), "odom_missing");
+
+  setOdomSeen(&runtime, true);
+  setOdomPoseValid(&runtime, false);
+  EXPECT_EQ(snapshotFailureReason(runtime, 10.0), "odom_invalid");
+
+  setOdomPoseValid(&runtime, true);
+  setOdomStampExact(&runtime, 9.5);
+  EXPECT_EQ(snapshotFailureReason(runtime, 10.0),
+            "current_integrity_missing");
+
+  setCurrentSeen(&runtime, true);
+  setCurrentValid(&runtime, false);
+  setCurrentStamp(&runtime, 9.5);
+  EXPECT_EQ(snapshotFailureReason(runtime, 10.0),
+            "current_integrity_invalid");
+}
+
+TEST_F(P0RiskGridRuntimeStampTest, InputReadinessReportsSeenValidAndFreshSources) {
+  ensure_rclcpp();
+  auto node = std::make_shared<rclcpp::Node>(
+      "p0_input_readiness_test",
+      rclcpp::NodeOptions().allow_undeclared_parameters(false));
+  auto config = enabledConfig();
+  config.grid.stale_timeout_s = 1.0;
+  P0RiskGridRuntime runtime(node, config, std::make_unique<FakeProvider>());
+
+  seedValidInputs(&runtime, 100.0, 100.0);
+  setOdomSeen(&runtime, true);
+  setCurrentSeen(&runtime, true);
+  setOriginSeen(&runtime, true);
+  setMapSeen(&runtime, true);
+  setMapStamp(&runtime, 99.5);
+  setMapPointCount(&runtime, 10);
+
+  const auto readiness = inputReadiness(runtime, 100.0);
+  EXPECT_TRUE(readiness.odom_seen);
+  EXPECT_TRUE(readiness.odom_valid);
+  EXPECT_TRUE(readiness.odom_fresh);
+  EXPECT_TRUE(readiness.current_integrity_seen);
+  EXPECT_TRUE(readiness.current_integrity_valid);
+  EXPECT_TRUE(readiness.current_integrity_fresh);
+  EXPECT_TRUE(readiness.origin_seen);
+  EXPECT_TRUE(readiness.origin_valid);
+  EXPECT_TRUE(readiness.map_seen);
+  EXPECT_TRUE(readiness.map_valid);
+  EXPECT_TRUE(readiness.map_fresh);
+  EXPECT_EQ(readiness.map_point_count, 10u);
+  EXPECT_EQ(snapshotFailureReason(runtime, 100.0), "none");
 }
 
 TEST_F(P0RiskGridRuntimeStampTest, RefreshSnapshotUsesMessageStamp) {

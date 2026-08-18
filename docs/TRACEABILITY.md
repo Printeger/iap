@@ -1,5 +1,14 @@
 # Traceability Matrix (IAP)
 
+## 2026-08-18 ICRA-002 Gate 0B input-availability and required-process evidence
+
+| Req ID | Requirement/evidence seam | Implementation and retained evidence | Status |
+|---|---|---|---|
+| IAP-RQ-320 / IAP-RQ-400 / IAP-RQ-410 | Qualification-only CPU mapping backend must be explicit, validated, and manifest-bound | `iap_mapping_backend` launch arg (`gpu` default, exact `gpu\|cpu`); `_runtime_config` materializes odometry/sub-mapping/global-mapping configs and records SHA256 in `test_planner_manifest.json`; `test_test_planner_launch.py` and `test_gate0_analyzer.py` cover default/validation/hashes | **IMPLEMENTED; no automatic detection or fallback** |
+| IAP-RQ-320 / IAP-RQ-400 / IAP-RQ-410 | P0 must publish truthful source readiness and snapshot failure reasons without reinterpreting unknown/stale/missing as low risk | `p0_risk_grid_runtime.h/.cpp` publishes `snapshot_failure_reason` and per-source seen/valid/fresh stamps/counts; `test_p0_risk_grid_runtime` covers reason enum and readiness fields | **IMPLEMENTED; no runtime smoke due disk no-go** |
+| IAP-RQ-320 / IAP-RQ-400 / IAP-RQ-410 | Required child processes must fail closed, separate controlled shutdown from runtime death, and be analyzable from the runner manifest | `RequiredProcessMonitor` in `run_gate0_qualification.py`; manifest `required_processes_ok`, `process_failures`, `iap_rosnode_alive_through_runtime`; `test_gate0_runner.py` and `test_gate0_analyzer.py` cover fail-closed behavior | **IMPLEMENTED; ROS execution not run because available disk < formal threshold** |
+| IAP-RQ-320 / IAP-RQ-400 / IAP-RQ-410 | Analyzer must fail closed on required-process failure, non-finite original optimizer cost, missing/incomplete control-point evidence, and zero real P0 generations | `gate0_analyzer.py`; focused `test_gate0_analyzer.py` cases for zero generations and non-finite original cost; top-level `iap` suite passes | **IMPLEMENTED; Gate 0B summary remains unavailable pending smoke** |
+
 ## 2026-08-16 ICRA Gate 0 read-only qualification
 
 | Req ID | Requirement/evidence seam | Implementation and retained evidence | Status |
@@ -8,7 +17,7 @@
 | IAP-RQ-400 / IAP-RQ-422 | Prove P1/P3/P4/P2/P5 isolation and retain legacy mirror behavior while allowing geometry mirror with fanout mirror false | `test_planner.launch.py` explicit-manager override resolver; fixed runner manifests; `test_test_planner_launch.py` and `test_gate0_runner.py` | **VERIFIED; legacy fallback preserved** |
 | IAP-RQ-320 / IAP-RQ-400 / IAP-RQ-422 | All Gate 0 attempts and complete staged control points must be grouped and hashed reproducibly | `gate0_analyzer.py`; `test_gate0_analyzer.py`; `results/icra27/gate0/candidate_qualification.csv`; `candidate_control_points.csv`; `.17g` canonical SHA256 contract | **378/378 attempts retained; every attempt singleton; NO-GO-P2** |
 | IAP-RQ-320 / IAP-RQ-422 | Fixed 76,800-query P0 workload must yield at least 20 successful generations before latency is interpreted | `gate0_capture_p0_health.py`; `p0_full_grid_benchmark.csv`; `p0_full_grid_summary.json`; report section 4 | **P0_PERFORMANCE_GATE_FAIL; 0 successful generations; snapshot unavailable** |
-| IAP-RQ-422 | External dependency and disk state must remain auditable without modifying sources or deleting prior evidence | read-only `gnss_comm-closure` tar/list/metadata/environment/doctor archive; `gate0_disk_audit.py`; `disk_archive_candidates.csv`; `GATE0_QUALIFICATION_REPORT.md` | **ARCHIVE VERIFIED; CAMPAIGN_DISK_NO_GO** |
+| Operational audit (not IAP-RQ-422) | External dependency and disk state must remain auditable without modifying sources or deleting prior evidence | read-only `gnss_comm-closure` tar/list/metadata/environment/doctor archive; `gate0_disk_audit.py`; `disk_archive_candidates.csv`; `GATE0_QUALIFICATION_REPORT.md` | **ARCHIVE VERIFIED; CAMPAIGN_DISK_NO_GO; does not implement per-waypoint hinge** |
 
 ## 2026-08-09 P1-2 c36 retained result and single-epoch GNSS binding
 

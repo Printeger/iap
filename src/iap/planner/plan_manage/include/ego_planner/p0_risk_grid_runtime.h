@@ -110,6 +110,29 @@ class P0RiskGridRuntime {
   void publishHealth(const iap::RiskGridHealth& health, double now_s);
   void recordInputCallback();
 
+  struct InputReadiness {
+    bool odom_seen = false;
+    bool odom_valid = false;
+    bool odom_fresh = false;
+    double odom_stamp_s = std::numeric_limits<double>::quiet_NaN();
+    bool current_integrity_seen = false;
+    bool current_integrity_valid = false;
+    bool current_integrity_fresh = false;
+    double current_integrity_stamp_s = std::numeric_limits<double>::quiet_NaN();
+    bool gnss_epoch_seen = false;
+    bool gnss_epoch_valid = false;
+    bool gnss_epoch_fresh = false;
+    double gnss_epoch_stamp_s = std::numeric_limits<double>::quiet_NaN();
+    uint64_t gnss_epoch_satellite_count = 0;
+    bool origin_seen = false;
+    bool origin_valid = false;
+    bool map_seen = false;
+    bool map_valid = false;
+    bool map_fresh = false;
+    double map_stamp_s = std::numeric_limits<double>::quiet_NaN();
+    uint64_t map_point_count = 0;
+  };
+
   struct HealthPublicationState {
     double refresh_stamp_s = std::numeric_limits<double>::quiet_NaN();
     double refresh_start_stamp_s = std::numeric_limits<double>::quiet_NaN();
@@ -141,6 +164,8 @@ class P0RiskGridRuntime {
     bool snapshot_available = false;
   };
   HealthPublicationState healthPublicationStateSnapshot() const;
+  InputReadiness inputReadiness(double now_s) const;
+  std::string snapshotFailureReason(double now_s) const;
 
   void odomCallback(const nav_msgs::msg::Odometry::ConstSharedPtr msg);
   void integrityCallback(const iap::msg::IntegrityReport::ConstSharedPtr msg);
@@ -206,9 +231,12 @@ class P0RiskGridRuntime {
       Eigen::Vector3d::Constant(std::numeric_limits<double>::quiet_NaN());
   Eigen::Quaterniond latest_odom_q_ = Eigen::Quaterniond::Identity();
   bool latest_odom_pose_valid_ = false;
+  bool odom_seen_ = false;
   double latest_map_stamp_ = std::numeric_limits<double>::quiet_NaN();
+  bool map_seen_ = false;
   iap::CurrentIntegrityState latest_current_;
   bool latest_current_valid_ = false;
+  bool current_integrity_seen_ = false;
   double last_refresh_stamp_s_ = std::numeric_limits<double>::quiet_NaN();
   double last_grid_stamp_s_ = std::numeric_limits<double>::quiet_NaN();
   double last_refresh_elapsed_ms_ = std::numeric_limits<double>::quiet_NaN();
@@ -216,6 +244,7 @@ class P0RiskGridRuntime {
   double last_provider_batch_duration_ms_ = std::numeric_limits<double>::quiet_NaN();
   double last_generation_interval_ms_ = std::numeric_limits<double>::quiet_NaN();
   bool last_snapshot_available_ = false;
+  std::string last_snapshot_failure_reason_ = "none";
   std::size_t last_refresh_query_count_ = 0;
   std::size_t last_predictor_unique_positions_ = 0;
   std::size_t last_predictor_lidar_evaluations_ = 0;
@@ -246,6 +275,7 @@ class P0RiskGridRuntime {
   std::unordered_map<uint32_t, gnss_comm::GloEphemPtr> glo_ephem_cache_;
   std::vector<double> iono_params_;
   std::optional<iap::GnssEpoch> latest_epoch_;
+  bool gnss_epoch_seen_ = false;
 
   mutable std::mutex lidar_predictor_input_mutex_;
   std::shared_ptr<const std::vector<Eigen::Vector3d>>

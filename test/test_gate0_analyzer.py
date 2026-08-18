@@ -184,6 +184,142 @@ class Gate0AnalyzerTest(unittest.TestCase):
             {"effective_config": {}}, None, 0
         )
         self.assertIn("p0_process_failure", gate0b_failures)
+        self.assertIn("p0_required_process_failure", gate0b_failures)
+
+    def test_gate0b_manifest_requires_cpu_mapping_and_process_evidence(self):
+        config = {
+            "experiment": "p0_open_sky",
+            "scenario": "gnss_open_sky",
+            "iap_mapping_backend": "cpu",
+            "planner_safety_profile": "off",
+            "p0.enable_risk_grid": True,
+            "p0.size_x_m": 30.0,
+            "p0.size_y_m": 30.0,
+            "p0.size_z_m": 6.0,
+            "p0.resolution_m": 0.75,
+            "p0.horizons_s": "0.0,0.5,1.0,1.5,2.0,2.5",
+            "p0.refresh_period_s": 0.5,
+            "p0.predictor.worker_count": 1,
+            "p0.skip_occupied_voxels": True,
+            "record_bag": False,
+            "start_rviz": False,
+            "run_duration_s": 60,
+            "planner_enable_all_safety": False,
+            "planner_enable_p1": False,
+            "planner_enable_p2": False,
+            "planner_enable_p3_local": False,
+            "planner_enable_p3_global": False,
+            "planner_enable_p4": False,
+            "planner_enable_p5_runtime": False,
+            "planner_enable_p5_final": False,
+            "p1.use_integrity_cost": False,
+            "p1.metrics_only": False,
+            "p2.enable_candidate_ranking": False,
+            "p3.enable_local_reference_bias": False,
+            "p3.enable_global_reference_bias": False,
+            "p4.enable_risk_aware_astar": False,
+            "p5.enable_runtime_gate": False,
+            "p5.enable_final_gate": False,
+        }
+        manifest = {
+            "effective_config": config,
+            "scenario": "gnss_open_sky",
+            "run_id": "p0-full-grid",
+            "exit_code": 0,
+            "capture_exit_code": 0,
+            "planner_crash": False,
+            "required_processes_ok": True,
+            "iap_rosnode_alive_through_runtime": True,
+            "process_failures": [],
+        }
+        runtime = {
+            "experiment": "p0_open_sky",
+            "scenario": "gnss_open_sky",
+            "planner_safety_profile": "off",
+            "p0.enable_risk_grid": True,
+            "p0.size_x_m": 30.0,
+            "p0.size_y_m": 30.0,
+            "p0.size_z_m": 6.0,
+            "p0.resolution_m": 0.75,
+            "p0.horizons_s": [0.0, 0.5, 1.0, 1.5, 2.0, 2.5],
+            "p0.refresh_period_s": 0.5,
+            "p0.predictor.effective_worker_count": 1,
+            "p0.skip_occupied_voxels": True,
+            "record_bag": False,
+            "start_rviz": False,
+            "run_duration_s": 60.0,
+            "planner_enable_all_safety": False,
+            "planner_enable_p1": False,
+            "planner_enable_p2": False,
+            "planner_enable_p3_local": False,
+            "planner_enable_p3_global": False,
+            "planner_enable_p4": False,
+            "planner_enable_p5_runtime": False,
+            "planner_enable_p5_final": False,
+            "p1.use_integrity_cost": False,
+            "p1.metrics_only": False,
+            "p1.debug_csv_enable": False,
+            "p2.enable_candidate_ranking": False,
+            "p2.debug_csv_enable": False,
+            "p3.enable_local_reference_bias": False,
+            "p3.enable_global_reference_bias": False,
+            "p3.debug_csv_enable": False,
+            "p4.enable_risk_aware_astar": False,
+            "p4.debug_csv_enable": False,
+            "p5.enable_runtime_gate": False,
+            "p5.enable_final_gate": False,
+            "gate0.qualification_evidence_enable": False,
+            "iap_mapping_backend": "cpu",
+            "mapping_effective_config": {
+                "selected": "cpu",
+                "odometry_config": {"path": "/tmp/o.json", "sha256": "a" * 64},
+                "sub_mapping_config": {"path": "/tmp/s.json", "sha256": "b" * 64},
+                "global_mapping_config": {"path": "/tmp/g.json", "sha256": "c" * 64},
+            },
+        }
+        self.assertEqual(
+            MODULE.validate_gate0b_manifest(manifest, runtime, 1), []
+        )
+        runtime["iap_mapping_backend"] = "gpu"
+        self.assertIn(
+            "p0_runtime_mapping_backend_mismatch",
+            MODULE.validate_gate0b_manifest(manifest, runtime, 1),
+        )
+
+    def test_zero_p0_generations_are_input_availability_failure(self):
+        _, summary = MODULE.analyze_p0_messages([])
+        self.assertEqual(summary["successful_generation_count"], 0)
+        self.assertEqual(summary["gate"], "P0_INPUT_AVAILABILITY_FAIL")
+        self.assertEqual(summary["recommendations"], [])
+
+    def test_nonfinite_original_cost_fails_closed(self):
+        rows = [
+            {
+                "run_id": "primary-r1", "event": "attempt_start",
+                "planning_attempt_id": "1", "candidate_id": "0",
+                "collision_segment_count": "1", "base_generated_count": "1",
+            },
+            {
+                "run_id": "primary-r1", "event": "optimizer_input",
+                "planning_attempt_id": "1", "candidate_id": "1",
+            },
+            {
+                "run_id": "primary-r1", "event": "optimizer_result",
+                "planning_attempt_id": "1", "candidate_id": "1",
+                "optimizer_success": "1", "original_cost": "NaN",
+            },
+            {
+                "run_id": "primary-r1", "event": "attempt_candidates_complete",
+                "planning_attempt_id": "1", "candidate_id": "0",
+            },
+        ]
+        _, attempts = MODULE.aggregate_candidate_events(rows)
+        self.assertTrue(attempts[0]["critical_violation"])
+        self.assertIn(
+            "candidate_original_cost_nonfinite",
+            attempts[0]["critical_reasons"],
+        )
+        self.assertFalse(attempts[0]["qualified"])
 
     def test_type7_quantile_and_p0_deduplication_failure_gate(self):
         self.assertEqual(MODULE.type7_quantile([0.0, 10.0, 20.0, 30.0], 0.5), 15.0)

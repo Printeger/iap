@@ -148,6 +148,7 @@ class TestPlannerLaunchTest(unittest.TestCase):
     def test_gate0_launch_contract_declares_all_read_only_evidence_fields(self):
         defaults = dict(MODULE.ARG_DEFAULTS)
         self.assertEqual(defaults["gate0.qualification_evidence_enable"], "false")
+        self.assertEqual(defaults["iap_mapping_backend"], "gpu")
         for field in (
             "gate0.candidate_events_path",
             "gate0.control_points_path",
@@ -165,6 +166,18 @@ class TestPlannerLaunchTest(unittest.TestCase):
             '"manager/use_distinctive_trajs":',
         ):
             self.assertIn(field, source)
+
+    def test_iap_mapping_backend_is_declared_with_gpu_default_and_hashes_effective_config(self):
+        defaults = dict(MODULE.ARG_DEFAULTS)
+        self.assertEqual(defaults["iap_mapping_backend"], "gpu")
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "effective.json"
+            path.write_text("{}\n")
+            provenance = MODULE._mapping_backend_config_provenance(str(path))
+            self.assertEqual(provenance["path"], str(path.resolve()))
+            self.assertEqual(
+                provenance["sha256"], hashlib.sha256(path.read_bytes()).hexdigest()
+            )
 
     def test_scenario_fingerprint_is_canonical_and_sensitive(self):
         payload = {"geometry": {"seed": 11, "density": 0.25}, "risk": ["gnss", "lidar"]}

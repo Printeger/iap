@@ -77,6 +77,10 @@ std::string jsonString(const std::string& value) {
   return oss.str();
 }
 
+std::string jsonBool(bool value) {
+  return value ? "true" : "false";
+}
+
 bool hasPointField(const sensor_msgs::msg::PointCloud2& msg,
                    const std::string& name) {
   return std::any_of(msg.fields.begin(), msg.fields.end(),
@@ -815,6 +819,7 @@ void P0RiskGridRuntime::refreshTimerCallback() {
   const auto refresh_start = std::chrono::steady_clock::now();
   const double refresh_start_steady_s = steadyNowSeconds();
   const double now_s = currentMessageStamp();
+  const std::string pre_build_failure = snapshotFailureReason(now_s);
   {
     std::lock_guard<std::mutex> health_lock(health_state_mutex_);
     last_refresh_stamp_s_ = now_s;
@@ -831,6 +836,7 @@ void P0RiskGridRuntime::refreshTimerCallback() {
     last_refresh_start_stamp_s_ = now_s;
     last_refresh_start_steady_s_ = refresh_start_steady_s;
     last_snapshot_available_ = false;
+    last_snapshot_failure_reason_ = pre_build_failure;
     last_refresh_query_count_ = 0;
     last_provider_batch_duration_ms_ =
         std::numeric_limits<double>::quiet_NaN();
@@ -857,6 +863,9 @@ void P0RiskGridRuntime::refreshTimerCallback() {
           std::chrono::steady_clock::now() - refresh_start).count();
       last_refresh_end_stamp_s_ = refresh_end_stamp_s;
       last_refresh_end_steady_s_ = steadyNowSeconds();
+      if (pre_build_failure == "none") {
+        last_snapshot_failure_reason_ = "snapshot_builder_invalid";
+      }
     }
     publishHealth(risk_grid_.health(now_s), now_s);
     return;
@@ -864,6 +873,7 @@ void P0RiskGridRuntime::refreshTimerCallback() {
   {
     std::lock_guard<std::mutex> health_lock(health_state_mutex_);
     last_snapshot_available_ = true;
+    last_snapshot_failure_reason_ = "none";
   }
 
   std::unique_ptr<iap::RiskPredictionProvider> local_provider;
@@ -975,8 +985,10 @@ void P0RiskGridRuntime::publishHealth(const iap::RiskGridHealth& health,
   // mutex is held. A slow subscriber or RViz transport must not block input
   // callbacks or turn health into a self-fulfilling stale signal.
   const iap::RiskGridHealth enriched_health = addLidarPredictorInputHealth(health);
+  const InputReadiness readiness = inputReadiness(now_s);
   const auto mutex_wait_start = std::chrono::steady_clock::now();
   HealthPublicationState state;
+  std::string snapshot_failure_reason = "none";
   {
     std::lock_guard<std::mutex> health_lock(health_state_mutex_);
     const auto mutex_acquired = std::chrono::steady_clock::now();
@@ -1000,6 +1012,7 @@ void P0RiskGridRuntime::publishHealth(const iap::RiskGridHealth& health,
         std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - mutex_acquired).count();
     state.health_state_mutex_wait_ms = last_health_state_mutex_wait_ms_;
     state.health_state_mutex_hold_ms = last_health_state_mutex_hold_ms_;
+    snapshot_failure_reason = last_snapshot_failure_reason_;
   }
   if (safety_viz_) {
     safety_viz_->publishRiskGridHealth(enriched_health, now_s);
@@ -1070,6 +1083,34 @@ void P0RiskGridRuntime::publishHealth(const iap::RiskGridHealth& health,
       << "\"health_state_mutex_hold_ms\":" << jsonNumber(state.health_state_mutex_hold_ms) << ","
       << "\"snapshot_available\":"
       << (state.snapshot_available ? "true" : "false") << ","
+      << "\"snapshot_failure_reason\":"
+      << jsonString(snapshot_failure_reason) << ","
+      << "\"odom_seen\":" << jsonBool(readiness.odom_seen) << ","
+      << "\"odom_valid\":" << jsonBool(readiness.odom_valid) << ","
+      << "\"odom_fresh\":" << jsonBool(readiness.odom_fresh) << ","
+      << "\"odom_stamp_s\":" << jsonNumber(readiness.odom_stamp_s) << ","
+      << "\"current_integrity_seen\":"
+      << jsonBool(readiness.current_integrity_seen) << ","
+      << "\"current_integrity_valid\":"
+      << jsonBool(readiness.current_integrity_valid) << ","
+      << "\"current_integrity_fresh\":"
+      << jsonBool(readiness.current_integrity_fresh) << ","
+      << "\"current_integrity_stamp_s\":"
+      << jsonNumber(readiness.current_integrity_stamp_s) << ","
+      << "\"gnss_epoch_seen\":" << jsonBool(readiness.gnss_epoch_seen) << ","
+      << "\"gnss_epoch_valid\":" << jsonBool(readiness.gnss_epoch_valid) << ","
+      << "\"gnss_epoch_fresh\":" << jsonBool(readiness.gnss_epoch_fresh) << ","
+      << "\"gnss_epoch_stamp_s\":"
+      << jsonNumber(readiness.gnss_epoch_stamp_s) << ","
+      << "\"gnss_epoch_satellite_count\":"
+      << readiness.gnss_epoch_satellite_count << ","
+      << "\"origin_seen\":" << jsonBool(readiness.origin_seen) << ","
+      << "\"origin_valid\":" << jsonBool(readiness.origin_valid) << ","
+      << "\"map_seen\":" << jsonBool(readiness.map_seen) << ","
+      << "\"map_valid\":" << jsonBool(readiness.map_valid) << ","
+      << "\"map_fresh\":" << jsonBool(readiness.map_fresh) << ","
+      << "\"map_stamp_s\":" << jsonNumber(readiness.map_stamp_s) << ","
+      << "\"map_point_count\":" << readiness.map_point_count << ","
       << "\"refresh_query_count\":" << state.refresh_query_count << ","
       << "\"predictor_unique_positions\":" << state.predictor_unique_positions << ","
       << "\"predictor_lidar_evaluations\":" << state.predictor_lidar_evaluations << ","
@@ -1167,6 +1208,107 @@ P0RiskGridRuntime::healthPublicationStateSnapshot() const {
   return state;
 }
 
+P0RiskGridRuntime::InputReadiness
+P0RiskGridRuntime::inputReadiness(const double now_s) const {
+  InputReadiness readiness;
+  double odom_stamp = std::numeric_limits<double>::quiet_NaN();
+  double current_stamp = std::numeric_limits<double>::quiet_NaN();
+  double map_stamp = std::numeric_limits<double>::quiet_NaN();
+  bool odom_seen = false;
+  bool odom_valid = false;
+  bool current_seen = false;
+  bool current_valid = false;
+  bool epoch_seen = false;
+  double epoch_stamp = std::numeric_limits<double>::quiet_NaN();
+  uint64_t epoch_satellite_count = 0;
+  bool origin_seen = false;
+  bool map_seen = false;
+  {
+    std::lock_guard<std::mutex> health_lock(health_state_mutex_);
+    odom_seen = odom_seen_;
+    odom_valid = latest_odom_pose_valid_;
+    odom_stamp = latest_odom_stamp_;
+    current_seen = current_integrity_seen_;
+    current_valid = latest_current_valid_;
+    current_stamp = latest_current_.stamp;
+    epoch_seen = gnss_epoch_seen_;
+    if (latest_epoch_) {
+      epoch_stamp = latest_epoch_->stamp;
+      epoch_satellite_count =
+          static_cast<uint64_t>(latest_epoch_->sats.size());
+    }
+    origin_seen = origin_set_;
+    map_seen = map_seen_;
+    map_stamp = latest_map_stamp_;
+  }
+  std::size_t map_point_count = 0;
+  {
+    std::lock_guard<std::mutex> lidar_lock(lidar_predictor_input_mutex_);
+    map_point_count = latest_lidar_map_point_count_;
+  }
+
+  const double stale_timeout = config_.grid.stale_timeout_s;
+  const double gnss_timeout = config_.gnss_epoch_max_age_s;
+  const bool finite_now = std::isfinite(now_s);
+
+  readiness.odom_seen = odom_seen;
+  readiness.odom_valid = odom_seen && odom_valid;
+  readiness.odom_stamp_s = odom_stamp;
+  readiness.odom_fresh =
+      readiness.odom_valid && finite_now && std::isfinite(odom_stamp) &&
+      odom_stamp > 0.0 && (now_s - odom_stamp) <= stale_timeout;
+
+  readiness.current_integrity_seen = current_seen;
+  readiness.current_integrity_valid = current_seen && current_valid;
+  readiness.current_integrity_stamp_s = current_stamp;
+  readiness.current_integrity_fresh =
+      readiness.current_integrity_valid && finite_now &&
+      std::isfinite(current_stamp) && current_stamp > 0.0 &&
+      (now_s - current_stamp) <= stale_timeout;
+
+  readiness.gnss_epoch_seen = epoch_seen;
+  readiness.gnss_epoch_valid = epoch_seen && std::isfinite(epoch_stamp);
+  readiness.gnss_epoch_stamp_s = epoch_stamp;
+  readiness.gnss_epoch_satellite_count = epoch_satellite_count;
+  readiness.gnss_epoch_fresh =
+      readiness.gnss_epoch_valid && finite_now && std::isfinite(epoch_stamp) &&
+      (gnss_timeout < 0.0 || (now_s - epoch_stamp) <= gnss_timeout);
+
+  readiness.origin_seen = origin_seen;
+  readiness.origin_valid = origin_seen;
+
+  readiness.map_seen = map_seen;
+  readiness.map_valid =
+      map_seen && std::isfinite(map_stamp) && map_point_count > 0;
+  readiness.map_stamp_s = map_stamp;
+  readiness.map_point_count = static_cast<uint64_t>(map_point_count);
+  readiness.map_fresh =
+      readiness.map_valid && finite_now && std::isfinite(map_stamp) &&
+      map_stamp > 0.0 && (now_s - map_stamp) <= stale_timeout;
+  return readiness;
+}
+
+std::string P0RiskGridRuntime::snapshotFailureReason(
+    const double now_s) const {
+  if (!std::isfinite(now_s) || now_s <= 0.0) {
+    return "message_stamp_unavailable";
+  }
+  const InputReadiness readiness = inputReadiness(now_s);
+  if (!readiness.odom_seen) {
+    return "odom_missing";
+  }
+  if (!readiness.odom_valid) {
+    return "odom_invalid";
+  }
+  if (!readiness.current_integrity_seen) {
+    return "current_integrity_missing";
+  }
+  if (!readiness.current_integrity_valid) {
+    return "current_integrity_invalid";
+  }
+  return "none";
+}
+
 void P0RiskGridRuntime::recordInputCallback() {
   std::lock_guard<std::mutex> health_lock(health_state_mutex_);
   last_input_callback_steady_s_ = steadyNowSeconds();
@@ -1180,6 +1322,7 @@ void P0RiskGridRuntime::odomCallback(
   }
   recordInputCallback();
   std::lock_guard<std::mutex> health_lock(health_state_mutex_);
+  odom_seen_ = true;
   latest_odom_stamp_ = stampToSec(msg->header.stamp);
   latest_odom_p_ = Eigen::Vector3d(msg->pose.pose.position.x,
                                    msg->pose.pose.position.y,
@@ -1202,6 +1345,7 @@ void P0RiskGridRuntime::integrityCallback(
   }
   recordInputCallback();
   std::lock_guard<std::mutex> health_lock(health_state_mutex_);
+  current_integrity_seen_ = true;
   latest_current_ = currentFromMsg(*msg);
   latest_current_valid_ = latest_current_.valid;
 }
@@ -1299,6 +1443,8 @@ void P0RiskGridRuntime::rangeCallback(
   }
 
   if (!epoch.sats.empty()) {
+    std::lock_guard<std::mutex> health_lock(health_state_mutex_);
+    gnss_epoch_seen_ = true;
     latest_epoch_ = std::move(epoch);
   }
 }
@@ -1381,6 +1527,10 @@ void P0RiskGridRuntime::cloudCallback(
     return;
   }
 
+  {
+    std::lock_guard<std::mutex> health_lock(health_state_mutex_);
+    map_seen_ = true;
+  }
   {
     std::lock_guard<std::mutex> health_lock(health_state_mutex_);
     latest_map_stamp_ = stampToSec(msg->header.stamp);

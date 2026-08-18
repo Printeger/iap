@@ -54,6 +54,7 @@ class Gate0RunnerTest(unittest.TestCase):
 
     def test_p0_config_has_exact_query_shape(self):
         config = MODULE.p0_effective_config(Path("/tmp/p0"))
+        self.assertEqual(config["iap_mapping_backend"], "cpu")
         self.assertEqual(config["p0.size_x_m"], 30.0)
         self.assertEqual(config["p0.size_y_m"], 30.0)
         self.assertEqual(config["p0.size_z_m"], 6.0)
@@ -62,6 +63,20 @@ class Gate0RunnerTest(unittest.TestCase):
             "0.0", "0.5", "1.0", "1.5", "2.0", "2.5"
         ])
         self.assertEqual(config["p0.predictor.worker_count"], 1)
+
+    def test_required_process_monitor_fails_closed_on_missing_or_runtime_failure(self):
+        monitor = MODULE.RequiredProcessMonitor(
+            {"iap_rosnode": ["iap_rosnode"]}, 60.0
+        )
+        self.assertFalse(monitor.ok([]))
+        monitor._seen.add("iap_rosnode")
+        self.assertTrue(monitor.ok([]))
+        monitor.failures.append({
+            "process_name": "iap_rosnode",
+            "phase": "runtime",
+            "reason": "died",
+        })
+        self.assertFalse(monitor.ok(monitor.failures))
 
 
 if __name__ == "__main__":

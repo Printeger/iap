@@ -38,6 +38,27 @@ P0_FIELDS = (
     "generation_interval_ms",
     "refresh_stamp_s",
     "failed_refresh",
+    "snapshot_failure_reason",
+    "odom_seen",
+    "odom_valid",
+    "odom_fresh",
+    "odom_stamp_s",
+    "current_integrity_seen",
+    "current_integrity_valid",
+    "current_integrity_fresh",
+    "current_integrity_stamp_s",
+    "gnss_epoch_seen",
+    "gnss_epoch_valid",
+    "gnss_epoch_fresh",
+    "gnss_epoch_stamp_s",
+    "gnss_epoch_satellite_count",
+    "origin_seen",
+    "origin_valid",
+    "map_seen",
+    "map_valid",
+    "map_fresh",
+    "map_stamp_s",
+    "map_point_count",
 )
 
 
@@ -126,9 +147,15 @@ def aggregate_candidate_events(
         elif event == "optimizer_result" and candidate_id > 0:
             if _int(row.get("optimizer_success"), -1) == 1:
                 attempt["success_candidates"].add(candidate_id)
+            original_cost = _float(row.get("original_cost"))
+            final_cost = _float(row.get("final_cost"))
+            if not math.isfinite(original_cost):
+                reason = "candidate_original_cost_nonfinite"
+                if reason not in attempt["critical_reasons"]:
+                    attempt["critical_reasons"].append(reason)
             attempt["candidate_costs"][candidate_id] = (
-                _float(row.get("original_cost")),
-                _float(row.get("final_cost")),
+                original_cost,
+                final_cost,
             )
         elif event == "selection":
             attempt["selection_count"] += 1
@@ -404,6 +431,7 @@ def validate_gate0b_manifest(
     expected = {
         "experiment": "p0_open_sky",
         "scenario": "gnss_open_sky",
+        "iap_mapping_backend": "cpu",
         "planner_safety_profile": "off",
         "p0.enable_risk_grid": True,
         "p0.size_x_m": 30.0,
@@ -448,6 +476,15 @@ def validate_gate0b_manifest(
         or manifest.get("capture_exit_code") != 0
     ):
         failures.append("p0_process_failure")
+    if manifest.get("required_processes_ok") is not True:
+        failures.append("p0_required_process_failure")
+    if manifest.get("iap_rosnode_alive_through_runtime") is not True:
+        failures.append("p0_iap_rosnode_not_alive_through_runtime")
+    if any(
+        item.get("phase") == "runtime"
+        for item in manifest.get("process_failures", [])
+    ):
+        failures.append("p0_runtime_process_failure")
     if runtime_manifest_count != 1 or runtime_manifest is None:
         failures.append("p0_runtime_manifest_count_invalid")
         return failures
@@ -471,6 +508,27 @@ def validate_gate0b_manifest(
     for field, value in runtime_expected.items():
         if runtime_manifest.get(field) != value:
             failures.append(f"p0_runtime_{field}_mismatch")
+    if runtime_manifest.get("iap_mapping_backend") != "cpu":
+        failures.append("p0_runtime_mapping_backend_mismatch")
+    mapping_effective = runtime_manifest.get("mapping_effective_config")
+    if not isinstance(mapping_effective, dict) or mapping_effective.get(
+        "selected"
+    ) != "cpu":
+        failures.append("p0_runtime_mapping_effective_missing_or_wrong")
+    for field in (
+        "odometry_config",
+        "sub_mapping_config",
+        "global_mapping_config",
+    ):
+        entry = mapping_effective.get(field) if isinstance(mapping_effective, dict) else None
+        if not isinstance(entry, dict):
+            failures.append(f"p0_runtime_mapping_{field}_missing")
+            continue
+        if not str(entry.get("path", "")).strip():
+            failures.append(f"p0_runtime_mapping_{field}_path_missing")
+        sha = str(entry.get("sha256", ""))
+        if len(sha) != 64 or any(c not in "0123456789abcdef" for c in sha):
+            failures.append(f"p0_runtime_mapping_{field}_sha256_invalid")
     runtime_isolation_fields = (
         "planner_enable_all_safety",
         "planner_enable_p1",
@@ -554,12 +612,25 @@ def analyze_p0_messages(
     )
     p95 = type7_quantile(latencies, 0.95)
     failures = []
+    if len(successful) == 0:
+        failures.append("zero_successful_generations")
     if len(successful) < 20:
         failures.append("fewer_than_20_successful_generations")
     if not shape_ok:
         failures.append("refresh_query_shape_mismatch")
     if not math.isfinite(p95) or p95 > 400.0:
         failures.append("refresh_p95_over_400_ms")
+    if len(successful) == 0:
+        gate = "P0_INPUT_AVAILABILITY_FAIL"
+        recommendations: list[str] = []
+    else:
+        gate = "PASS" if not failures else "P0_PERFORMANCE_GATE_FAIL"
+        recommendations = [] if len(successful) < 20 or not failures else [
+            "evaluate predictor worker_count",
+            "reduce ICRA ROI",
+            "reduce frozen horizons",
+            "increase refresh period",
+        ]
     summary = {
         "schema_version": "gate0_p0_summary_v1",
         "expected_refresh_query_count": EXPECTED_REFRESH_QUERY_COUNT,
@@ -578,14 +649,9 @@ def analyze_p0_messages(
         "generation_interval_ms_p95": type7_quantile(intervals, 0.95),
         "p95_over_refresh_period": p95 / 500.0 if math.isfinite(p95) else math.nan,
         "query_shape_ok": shape_ok,
-        "gate": "PASS" if not failures else "P0_PERFORMANCE_GATE_FAIL",
+        "gate": gate,
         "failures": failures,
-        "recommendations": [] if not failures else [
-            "evaluate predictor worker_count",
-            "reduce ICRA ROI",
-            "reduce frozen horizons",
-            "increase refresh period",
-        ],
+        "recommendations": recommendations,
     }
     return rows, summary
 
@@ -833,8 +899,7 @@ def analyze_directory(root: Path, output: Path) -> dict[str, Any]:
             "scenario": scenarios.get(run_id, ""),
             "qualified": any(row["qualified"] for row in run_attempts),
             "selected_reached_downstream": any(
-                row["qualified"] and row["selected_reached_downstream"]
-                for row in run_attempts
+                row["selected_reached_downstream"] for row in run_attempts
             ),
             "critical_violation": (
                 any(row["critical_violation"] for row in run_attempts)
@@ -869,7 +934,8 @@ def analyze_directory(root: Path, output: Path) -> dict[str, Any]:
         p0_summary["failures"] = list(dict.fromkeys([
             *p0_summary["failures"], *p0_manifest_failures,
         ]))
-        p0_summary["gate"] = "P0_PERFORMANCE_GATE_FAIL"
+        if p0_summary.get("gate") != "P0_INPUT_AVAILABILITY_FAIL":
+            p0_summary["gate"] = "P0_PERFORMANCE_GATE_FAIL"
     p0_summary["manifest_failures"] = p0_manifest_failures
     _write_csv(output / "p0_full_grid_benchmark.csv", p0_rows, P0_FIELDS)
     (output / "p0_full_grid_summary.json").write_text(

@@ -47,6 +47,13 @@ def _sha256_file(path):
     return digest.hexdigest()
 
 
+def _mapping_backend_config_provenance(path):
+    path = Path(path).resolve()
+    if not path.is_file():
+        raise RuntimeError(f"effective mapping configuration is missing: {path}")
+    return {"path": str(path), "sha256": _sha256_file(path)}
+
+
 def _formal_calibration_provenance(value):
     """Read immutable experiment provenance; never forward it to the planner."""
     raw = str(value).strip()
@@ -735,6 +742,7 @@ ARG_DEFAULTS = [
     ("experiment", "baseline_fused_nominal_off"),
     ("scenario", "fused_nominal"),
     ("config_subdir", "sim_demo11"),
+    ("iap_mapping_backend", "gpu"),
     ("start_rviz", "true"),
     ("start_planner", "true"),
     ("record_bag", "false"),
@@ -1252,7 +1260,62 @@ def _runtime_config(context, use_gnss, use_araim, allow_truth_alignment):
 
     config_ros_path = runtime_config_dir / "config_ros.json"
     config_gnss_path = runtime_config_dir / "config_gnss.json"
-    config_odometry_path = runtime_config_dir / "config_odometry_gpu.json"
+
+    mapping_backend = LaunchConfiguration("iap_mapping_backend").perform(
+        context
+    ).strip().lower()
+    if mapping_backend not in {"gpu", "cpu"}:
+        raise RuntimeError(
+            "iap_mapping_backend must be exactly gpu or cpu; "
+            f"got '{mapping_backend}'"
+        )
+
+    config_odometry_source = (
+        base_config / "config_odometry_cpu.json"
+        if mapping_backend == "cpu"
+        else base_config / "config_odometry_gpu.json"
+    )
+    config_odometry_filename = f"config_odometry_{mapping_backend}.json"
+    config_odometry_path = runtime_config_dir / config_odometry_filename
+    shutil.copy2(config_odometry_source, config_odometry_path)
+
+    sub_mapping_filename = f"config_sub_mapping_{mapping_backend}.json"
+    global_mapping_filename = f"config_global_mapping_{mapping_backend}.json"
+    sub_mapping_path = runtime_root / "sim_ego" / sub_mapping_filename
+    global_mapping_path = runtime_root / "sim_ego" / global_mapping_filename
+    if not sub_mapping_path.is_file() or not global_mapping_path.is_file():
+        raise RuntimeError(
+            "mapping backend configuration is incomplete for "
+            f"backend '{mapping_backend}'"
+        )
+
+    config_path = runtime_config_dir / "config.json"
+    with config_path.open() as f:
+        root_config = json.load(f)
+    root_config.setdefault("global", {})
+    root_config["global"]["config_odometry"] = config_odometry_filename
+    root_config["global"]["config_sub_mapping"] = (
+        f"../sim_ego/{sub_mapping_filename}"
+    )
+    root_config["global"]["config_global_mapping"] = (
+        f"../sim_ego/{global_mapping_filename}"
+    )
+    with config_path.open("w") as f:
+        json.dump(root_config, f, indent=2)
+        f.write("\n")
+
+    mapping_effective = {
+        "selected": mapping_backend,
+        "odometry_config": _mapping_backend_config_provenance(
+            config_odometry_path
+        ),
+        "sub_mapping_config": _mapping_backend_config_provenance(
+            sub_mapping_path
+        ),
+        "global_mapping_config": _mapping_backend_config_provenance(
+            global_mapping_path
+        ),
+    }
 
     odometry_initialization_mode = LaunchConfiguration(
         "odometry_initialization_mode"
@@ -1325,7 +1388,12 @@ def _runtime_config(context, use_gnss, use_araim, allow_truth_alignment):
         json.dump(config_gnss, f, indent=2)
         f.write("\n")
 
-    return str(runtime_config_dir), str(runtime_root), str(export_dir)
+    return (
+        str(runtime_config_dir),
+        str(runtime_root),
+        str(export_dir),
+        mapping_effective,
+    )
 
 
 def _resolve_safety_switches(context, preset_keys=None):
@@ -1875,7 +1943,12 @@ def _launch_setup(context):
             f"got '{gnss_rinex_nav_file}'"
         )
 
-    runtime_config_path, runtime_root, export_dir = _runtime_config(context, use_gnss, use_araim, allow_truth_alignment)
+    (
+        runtime_config_path,
+        runtime_root,
+        export_dir,
+        mapping_effective,
+    ) = _runtime_config(context, use_gnss, use_araim, allow_truth_alignment)
     gnss_scenario_file = _materialize_gnss_scenario(gnss_scenario_file, export_dir)
 
     bag_root_dir = LaunchConfiguration("bag_output_dir").perform(context).strip()
@@ -2239,6 +2312,8 @@ def _launch_setup(context):
         "artifact_provenance": evidence,
         "experiment": experiment,
         "scenario": scenario,
+        "iap_mapping_backend": mapping_effective["selected"],
+        "mapping_effective_config": mapping_effective,
         "scenario_contract": scenario_contract,
         "scenario_fingerprint": scenario_fingerprint,
         "runtime_config_path": runtime_config_path,
