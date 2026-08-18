@@ -1,99 +1,93 @@
-# ICRA-003 — Repair ICRA-002 and complete Gate 0B qualification
+# ICRA-004 — Add GPU preflight and rerun the invalid-environment smoke once
 
 > Active gate: `GATE_0B`
 > Owner: `DEEPSEEK`
-> Review disposition: `REQUEST_CHANGES`
+> Review disposition: `ENVIRONMENT_RETRY_AUTHORIZED`
 > Route: P0 + P5; P2 frozen
-> Requirement mapping: use `IAP-RQ-320` only for the P0 prediction/input path. The operational backend, runner, analyzer and evidence plumbing do not by themselves implement `IAP-RQ-400`, `IAP-RQ-410` or `IAP-RQ-422`.
+> Requirement mapping: `IAP-RQ-320` only for the P0 prediction/input qualification path
 
-## Objective
+## Operator clarification and objective
 
-Correct the fail-open and evidence defects in ICRA-002, then execute the previously mandated CPU smoke exactly once. Only if the smoke passes may the unchanged 60-second Gate 0B benchmark run exactly once. This is a repair task, not a new feature or parameter-tuning task.
+The operator confirmed that the Docker container had lost functional GPU access during ICRA-003 and must be restarted to remount it. The IAP main flow still requires a working GPU even when Gate 0B explicitly selects the CPU mapping backend. ICRA-003's smoke is retained as `INVALID_ENVIRONMENT / GPU_NOT_READY`; it is not deleted or rewritten and does not authorize a performance conclusion.
 
-## Required repair
+After the operator restarts the container, implement a deterministic GPU preflight that protects all future ICRA main-flow runs. If and only if that preflight passes, rerun the same fixed 20-second smoke exactly once into a new ICRA-004 evidence directory. Do not run the 60-second benchmark in this task.
 
-### 1. P0 input state must be truthful and live
+## 1. Mandatory GPU preflight
 
-- Remove the recursive `health_state_mutex_` acquisition in `rangeCallback`; add a regression that exercises a valid nonempty GNSS epoch through the callback and proves completion.
-- Track `seen`, `valid`, `fresh` and the relevant stamp independently for odometry, current integrity, GNSS epoch, receiver origin and map. Add `origin_fresh` and `origin_stamp_s` to the health evidence and analyzer CSV.
-- A received-but-invalid GNSS epoch, origin or map must report `seen=true, valid=false`; it must not collapse to unseen. Empty/invalid GNSS observations must retain a truthful satellite count.
-- Compute freshness against a live ROS/steady reference, not against the last odometry stamp. Future, non-finite and over-age stamps are not fresh. Stopped odometry or current-integrity input must age out and prevent a successful snapshot/generation.
-- Preserve `reason` and the exact `snapshot_failure_reason` vocabulary from ICRA-002. Cover all seven values, stale source behavior, and the GNSS/origin/map validity matrix in focused tests.
+Before starting any ROS, launch, capture or simulator process, the qualification runner must verify all of:
 
-### 2. Required processes must fail closed
+- `nvidia-smi -L` exits 0 and reports at least one GPU;
+- a structured `nvidia-smi --query-gpu=index,name,uuid,driver_version --format=csv,noheader` command exits 0 and returns at least one row;
+- loading `libcuda.so.1`, calling CUDA Driver API `cuInit(0)`, and calling `cuDeviceGetCount` all succeed with `device_count >= 1`.
 
-- Monitor only descendants of the launch process started by this runner. A same-named process elsewhere on the host must never satisfy the contract.
-- Replace the `run_duration_s - 1` shutdown guess with an explicit runner-owned transition to `controlled_shutdown`. Record runtime death and runner-initiated shutdown separately, including process name, PID, exit code or signal, phase and reason.
-- Return a nonzero runner exit if launch, health capture, manifest finalization, or any required runtime process fails. Do not return the top-level launch code alone.
-- Expose one structured monitor result instead of reading private fields such as `_seen` from `run_gate0b`.
-- Either remove the new `psutil` dependency or declare its correct ROS/runtime dependency. Add real subprocess lifecycle tests for never-started, runtime death, unrelated same-name process, controlled shutdown and aggregate runner exit status.
+The existence of `/dev/nvidia*` nodes or successful `libcuda.so.1` loading alone is insufficient. Do not infer success from the requested mapping backend.
 
-### 3. Backend provenance and analyzer must be fail closed
+Add a reusable preflight result with at least: schema version, UTC time, commands, exit codes, bounded stdout/stderr, `cuInit` result, CUDA device count, `gpu_ready`, and exact failure reason. Persist it under the requested repository-local output root and include it in the smoke manifest.
 
-- Hash each final effective odometry, sub-mapping and global-mapping file after every runtime override. Test invalid backend rejection and all three final hashes; the manifest must not hash a pre-override odometry file.
-- Treat any successful-generation row with a missing or non-finite latency as evidence failure; do not silently drop it before p95. Keep stale/failed ratios truthful.
-- Report selected-candidate refinement, trajectory update and normal publication reachability independently of P2 qualification rather than collapsing the stages into one boolean.
-- The analyzer CLI must return nonzero when Gate 0B evidence fails, while still serializing the failure result. Zero generations remains `P0_INPUT_AVAILABILITY_FAIL`; fewer than 20 distinct successful generations yields no tuning advice.
+Add a `--gpu-preflight-only` runner mode and also invoke the same preflight automatically before every runner mode that starts the IAP main flow. Focused tests must cover missing command, nonzero NVML result, zero CUDA devices, CUDA initialization failure and PASS. Tests must prove that a failed preflight never calls the ROS launch path.
 
-## Fixed execution sequence
+If preflight fails in the restarted container:
 
-Write all runtime, build, test and result artifacts inside this repository. Do not use `/home/dev/ws_iap/build`, `/home/dev/ws_iap/install`, `/home/dev/ws_iap/log`, `/tmp`, or any other external path. The historical `CAMPAIGN_DISK_NO_GO` does not block this bounded no-bag smoke; it applies to a formal multi-run campaign, which remains forbidden. A genuine write or capacity failure inside the repository is a blocker and must be recorded without cleanup.
+- print `GPU_NOT_READY` and the exact reason;
+- return nonzero;
+- start no ROS/launch/capture process;
+- record `BLOCKED`, commands, outputs and exit codes in `DEV_LOG.md`;
+- commit/push the implementation and preflight evidence, then return control to Supervisor;
+- do not wait, retry, fall back or run the smoke.
 
-### CPU smoke — mandatory stop gate
+## 2. Smoke analyzer and capture readiness before the authorized run
 
-After focused and package tests pass, run exactly one seed-11, 20-second, no-bag, no-RViz CPU smoke with P1/P2/P3/P4/P5 all disabled. The runner must have a distinct smoke mode/config and must preserve its manifest, captured health, command and analyzer output under a new repository-local ICRA-003 result directory.
+- Fix the analyzer so `p0-smoke` is validated against its fixed 20-second/15-second smoke contract rather than the 60-second Gate 0B contract. Keep the full benchmark validation fixed at 60/55 seconds.
+- Preserve fail-closed handling of zero capture records. Confirm in focused tests that the capture subscriber topic names and QoS are compatible with the actual `/planning/risk_grid_health` and `/iap/integrity` publishers.
+- Do not use stdout-parsed health or integrity lines as a substitute for ROS topic evidence. They may remain diagnostic corroboration only.
+
+## 3. One authorized replacement smoke
+
+Only after the automatic preflight passes, run exactly once:
+
+```text
+python3 scripts/dev_planner/run_gate0_qualification.py \
+  --output-root results/icra27/icra004/runs \
+  --smoke
+```
+
+Use the fixed ICRA-003 smoke configuration unchanged: seed 11, 20 seconds, explicit CPU mapping backend, no bag, no RViz, `30 x 30 x 6 m`, `0.75 m`, horizons `0.0,0.5,1.0,1.5,2.0,2.5 s`, refresh `0.5 s`, one worker, occupied skip enabled, and P1/P2/P3/P4/P5 disabled.
 
 PASS requires all of:
 
-- `iap_rosnode` is a descendant of this launch and remains alive for the entire runtime phase;
-- at least one valid current-integrity report is captured;
-- at least one successful P0 generation is captured;
-- every successful generation has exactly 76,800 refresh queries;
-- runner and analyzer both return 0.
+- GPU preflight PASS recorded before ROS startup;
+- `iap_rosnode` is a descendant of this launch and remains alive throughout runtime;
+- at least one captured valid integrity report;
+- at least one captured successful P0 generation;
+- exactly 76,800 refresh queries for every captured successful generation;
+- runner and smoke analyzer both exit 0.
 
-If any condition fails, stop immediately. Record `BLOCKED`, the exact command, all exit codes, process failures and evidence paths in `DEV_LOG.md`; do not run the 60-second benchmark and do not edit `AGENT_STATE.md`.
-
-### Fixed Gate 0B — only after smoke PASS
-
-Run exactly once for 60 seconds with seed 11, explicit CPU backend, no bag and no RViz:
-
-- grid `30 x 30 x 6 m`;
-- resolution `0.75 m`;
-- horizons `0.0,0.5,1.0,1.5,2.0,2.5 s`;
-- refresh period `0.5 s`;
-- one worker;
-- occupied-voxel skip enabled;
-- P1/P2/P3/P4/P5 disabled.
-
-PASS requires no required-process failure, at least 20 distinct successful generations, exactly 76,800 queries for every successful generation, finite type-7 p95 full-refresh latency `<= 400 ms`, and truthful stale/failed ratios. Do not change the ROI, horizon set, worker count or refresh period.
+If the smoke fails, stop and report `BLOCKED` with the exact command, exit codes, process failures and evidence. Do not retry. Even if it passes, do not run the 60-second Gate 0B in ICRA-004; return to Supervisor for review and separate authorization.
 
 ## Verification, documentation and handoff
 
-- Run the focused launch/runner/analyzer/P0 tests and the relevant package suites using repository-local build/install/log roots. Do not reuse a command that writes CTest or colcon logs outside this repository.
-- Update `docs/CHANGES.md`, `docs/TRACEABILITY.md` and `DEV_LOG.md` with exact commands, exit codes and evidence paths. Correct the ICRA-002 rows that overclaim `IAP-RQ-400`/`IAP-RQ-410`, and do not claim untested enum/readiness coverage.
-- Preserve all historical Gate 0 artifacts. Add ICRA-003 evidence; do not rewrite ICRA-001 evidence or the Supervisor review.
-- Explicitly stage only the task-authorized implementation, tests, evidence and DeepSeek-owned documentation. Do not stage generated build/install/log trees.
-- Before handoff, verify the staged diff, remote divergence, clean worktree and that no ROS process started by this task remains. Record the final commit SHA in `DEV_LOG.md`; do not edit `AGENT_STATE.md`.
+- Keep all generated build, install, log, preflight and smoke evidence inside this repository.
+- Run focused runner/analyzer/capture tests and relevant package tests before the single smoke.
+- Update `docs/CHANGES.md`, `docs/TRACEABILITY.md` and `DEV_LOG.md` with truthful requirement mapping, exact commands, exit codes, GPU identity and evidence paths.
+- Preserve ICRA-003 evidence unchanged. Add new files under `results/icra27/icra004/`; never reuse its output directory.
+- Explicitly stage only authorized files. Before handoff verify staged diff, remote divergence, clean worktree and that no task-started ROS process remains.
+- Record the final commit SHA in `DEV_LOG.md`; do not edit Supervisor-owned files.
 
 ## Allowed files
 
-- `launch/test_planner.launch.py`
 - `scripts/dev_planner/run_gate0_qualification.py`
 - `scripts/dev_planner/gate0_analyzer.py`
-- `scripts/dev_planner/gate0_capture_p0_health.py` if required for valid-integrity evidence
-- `src/iap/planner/plan_manage/include/ego_planner/p0_risk_grid_runtime.h`
-- `src/iap/planner/plan_manage/src/p0_risk_grid_runtime.cpp`
-- `src/iap/planner/plan_manage/test/test_p0_risk_grid_runtime.cpp`
-- `test/test_gate0_analyzer.py`
+- `scripts/dev_planner/gate0_capture_p0_health.py` only for topic/QoS compatibility
 - `test/test_gate0_runner.py`
-- `test/test_test_planner_launch.py`
-- `CMakeLists.txt` and `package.xml` only if needed to register tests or declare a retained runtime dependency
-- new ICRA-003 evidence under `results/icra27/`
+- `test/test_gate0_analyzer.py`
+- focused capture test file and `CMakeLists.txt` registration if needed
+- new ICRA-004 evidence under `results/icra27/icra004/`
 - `docs/CHANGES.md`, `docs/TRACEABILITY.md`, `DEV_LOG.md`
 
 ## Forbidden
 
-- No P1/P2/P3/P4 work, candidate-generation/scoring/winner changes, or P5 decision/action changes.
-- No automatic backend detection, workload tuning, rosbag, campaign, retry loop or second smoke/benchmark attempt.
-- No write, build, log, archive or evidence creation outside this repository; no backup, disk cleanup, deletion, movement or compression.
-- No changes to `AGENT_STATE.md`, `SUPERVISOR_LOG.md`, `NEXT_TASK.md`, ICRA scope/plan/gate documents, `../glim`, or any other workspace repository.
+- No 60-second Gate 0B benchmark, second replacement smoke, retry loop or wait-for-GPU loop.
+- No backend auto-fallback, workload/ROI/horizon/refresh/worker tuning, rosbag or campaign.
+- No P1/P2/P3/P4 work, candidate changes, or P5 decision/action changes.
+- No external writes, backup, archive or disk cleanup; no changes to `../glim` or another repository.
+- No changes to `AGENTS.md`, `AGENT_STATE.md`, `SUPERVISOR_LOG.md`, `NEXT_TASK.md` or ICRA scope/plan/gate documents.

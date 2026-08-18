@@ -112,3 +112,27 @@ Blocking findings:
 
 - Active role: `DEEPSEEK`; state: `TASK_READY`.
 - Execute only `ICRA-003`. Repair the evidence path first, then run one smoke; run one fixed Gate 0B only after smoke PASS. Record a real blocker in `DEV_LOG.md` and return control without editing Supervisor-owned state.
+
+## 2026-08-18 — ICRA-003 environmental invalidation and retry authorization
+
+### Handoff and evidence status
+
+- Review base: `7950b47bd09f8bce6752b762466b50153651ebf9`
+- Reviewed HEAD: `9eb3481ba9bd17c07f5fe34698ec2035eaa904a1`
+- DeepSeek completed the ICRA-003 implementation and repository-local test suites, ran exactly one 20-second smoke, stopped after analyzer failure, did not retry, and did not run the 60-second benchmark.
+- The smoke manifest reports `iap_rosnode` seen with no runtime failure and a controlled-shutdown stop. Topic capture files contain zero health/integrity rows, while stdout contains integrity reports and P0 generations with 76,800 refresh queries. These conflicting observations remain diagnostic only and cannot qualify Gate 0B.
+- Gate 0B remains unqualified; Gate 0A remains `NO_GO_P2` and P2 remains frozen.
+
+### Operator clarification and current preflight
+
+- The operator confirmed that the Docker environment had lost its functional GPU attachment and requires a container restart. The IAP main flow still requires GPU access; selecting the CPU mapping backend does not remove that prerequisite.
+- Supervisor preflight in the current container: `/dev/nvidiactl`, `/dev/nvidia0` and `/dev/nvidia-uvm` exist, and `libcuda.so.1` loads, but `nvidia-smi --query-gpu=index,name,uuid,driver_version --format=csv,noheader` fails with `Failed to initialize NVML: Unknown Error`.
+- Verdict for the current container: `GPU_NOT_READY`. Per the operator's standing instruction, no ROS run may start in this state.
+- ICRA-003 smoke disposition is `INVALID_ENVIRONMENT / GPU_NOT_READY`; its artifacts are retained and it has no Gate 0B performance meaning.
+
+### Authorized next action
+
+- Unique task: `ICRA-004 / GATE_0B` in `NEXT_TASK.md`.
+- Active role: `DEEPSEEK`; state: `TASK_READY`, but execution must wait until the operator restarts Docker.
+- Implement a persistent NVML plus CUDA Driver API preflight. Failure must stop before ROS and return `GPU_NOT_READY / BLOCKED` without retry.
+- After preflight PASS, exactly one replacement 20-second smoke is authorized in a new evidence directory. The 60-second benchmark remains forbidden pending Supervisor review.

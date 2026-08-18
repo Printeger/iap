@@ -114,3 +114,5 @@ Implementation must follow docs/spec/conventions.md and docs/spec/talk_spec.md a
 - 不得修改 `src/glim` 或其他工作区仓库；不得把既有外部 artifact 删除或“修复”来掩盖历史越界。
 - 运行结束必须检查并清理本任务启动的 ROS 进程；不得终止无法证明由本任务启动的用户进程。
 - 发现权限、范围、真实输入或 required-process blocker 时，保留证据并报告 `BLOCKED`，不得调参、扩场景或修改算法来绕过 gate。
+- 任何启动 IAP 主流程的 ICRA smoke、qualification 或实验，必须在启动 ROS/launch 前执行 GPU preflight。PASS 至少要求 `nvidia-smi` 成功发现 GPU，且 CUDA Driver API `cuInit(0)` 成功并返回 `device_count >= 1`；仅存在 `/dev/nvidia*` 或能加载 `libcuda.so.1` 不算 PASS。
+- GPU preflight 失败时必须输出 `GPU_NOT_READY`，记录命令、stdout/stderr 与 exit code，立即报告 `BLOCKED` 并终止本次任务；不得启动 ROS、不得把 CPU mapping backend 当作整个 IAP 主流程无需 GPU 的证明，也不得在同一任务中循环等待或重试。
