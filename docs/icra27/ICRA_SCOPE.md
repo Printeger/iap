@@ -1,46 +1,122 @@
-# ICRA 2027 Conference Scope — IAP P0 + P5
+# ICRA 2027 Conference Scope — Conditional P0 → P4 → P5
 
-> Activated 2026-08-18 by the Gate 0 Supervisor review. Gate 0A returned the narrow verdict `NO_GO_P2`; P2 is frozen. Gate 0B remains blocked by an upstream required-process failure and has not produced a P0 latency result.
+> Scope pivot authorized 2026-08-20. Source audit is bound to `dev/icra` commit `bd3858a72ba06b7eb1551006876c55362c979bab`.
+
+> Current state: **P0 `BLOCKED/UNQUALIFIED` → P4 `NOT_QUALIFIED` → P5 `IMPLEMENTED-BUT-UNQUALIFIED`**.
+
+> Historical Gate 0A remains `NO_GO_P2`. The scope pivot does not convert that result into a P4 result and does not qualify any stage of the new route.
 
 ## Research question
 
-Can a future protection-level advisory field be generated reliably from live GNSS/LiDAR/odometry/current-integrity inputs and used by an independent IAP hard integrity gate to fail safely before and during trajectory execution, while leaving original EGO collision and dynamics feasibility authoritative?
+Can an immutable future-risk field guide collision-triggered local A* around lower predicted-integrity risk, while EGO retains motion-feasibility authority and P5 independently blocks unsafe final or executing trajectories?
 
-## Core claim boundary
+## Conference route
 
-P0 provides only a future-PL advisory field. It may read the authoritative current-state monitor within the system as a one-way prior, but it cannot write back, override current PL/AL/IM, declare safety, or directly accept/reject a trajectory.
+The route is conditional, not an unconditional serial call of all three modules.
 
-P5 final and runtime gates together are the only hard integrity-gate authority in the IAP layer. Original EGO collision and dynamics checks remain authoritative for motion feasibility. A trajectory must satisfy both authorities; P5 does not replace the EGO checks, and EGO feasibility does not imply integrity safety.
+```text
+P0 immutable advisory snapshot
+  → collision scan
+    → NO_COLLISION: original EGO planning; a later rebound collision re-enters the same scan/P4 seam
+    → CLOSED_SEGMENTS: P4 guide decision → EGO optimization/refinement → P5 final → publish → P5 runtime
+    → OPEN_ENDED_COLLISION or INVALID_INPUT: no new normal publish; existing FSM/P5 safety path
+```
 
-The claimed separation is logical and one-way. This scope does not claim physical isolation, certification-level proof, certified active perception, formal PHMI guarantees, or real-world generalization without evidence.
+If original EGO optimization completes without a later closed rebound collision, the NO_COLLISION branch continues to P5 final, normal publish and P5 runtime.
 
-## Included scope
+P0 supplies advisory `c_pi` and predicted PL evidence. P0 cannot write back to the current integrity monitor, declare safety, or accept a trajectory.
 
-- Current GNSS/LiDAR integrity interface and authoritative current PL/AL/IM monitor.
-- Predictor advisory queries and P0 future predicted-PL field/generations.
-- Explicit, manifest-bound qualification backend selection for reproducible CPU/GPU execution.
-- Truthful source readiness, freshness, validity and required-process health evidence.
-- P5 final admission before normal trajectory publication.
-- P5 runtime monitoring of a committed trajectory.
-- Fail-safe handling of unknown, stale, missing-source, invalid and non-finite evidence.
-- Original EGO candidate generation, refinement, collision and dynamics behavior unchanged.
+P4 may prefer a collision-free guide with lower advisory risk. It cannot make occupied space traversable, override dynamics, issue a safety PASS, or replace P5.
 
-## Frozen or excluded scope
+EGO occupancy, rebound optimization, refinement, collision checks and dynamics checks remain authoritative for motion feasibility.
 
-- **P2 is frozen by Gate 0A `NO_GO_P2`.** Across nine fixed runs, all 378 optimizer-success attempts were singleton; there was no eligible same-attempt reranking set. No P2 scoring, winner selection, batch identity, candidate fixture or candidate-generation work is permitted on the active route.
-- P1 soft integrity cost, P3 local/global reference bias, P4 risk-aware local A*, A-ALL and the full P1-P4 stack remain closed for the conference route. Their source may remain in the frozen baseline.
-- Continuous-time localization/planning joint optimization, BLOM/MINCO or another trajectory representation, certification claims and PX4/real flight are excluded unless separately authorized by a future scope decision backed by evidence.
+P5 final and runtime are the only IAP-layer hard integrity gates. P5 final runs before normal publication; P5 runtime monitors the committed trajectory.
 
-## Current gate interpretation
+## Collision contract
 
-- **Gate 0A: `NO_GO_P2` (narrow).** The 378 singleton-candidate observations qualify the candidate-set question only. They are sufficient to freeze P2 but are not a complete-system PASS.
-- **Gate 0B: `BLOCKED / P0_INPUT_AVAILABILITY_FAIL`.** `iap_rosnode` died with exit `-6` on a machine without a CUDA device; the top-level launch exit 0 did not expose that required-process failure. No real P0 generation or 76,800-query workload occurred, so P0 p50/p95/max are unmeasured.
-- The active recovery task is `ICRA-002 / GATE_0B`: explicitly select the CPU mapping backend, restore valid integrity input and one P0 generation, then run the unchanged fixed benchmark once.
+The initial seed is generated from a polynomial or the retained B-spline plus a polynomial tail. A* is called only after collision scanning; it does not generate the initial route.
 
-## Minimum experiment route
+A collision segment remains `free point → occupied interval → free point`. Its A* endpoints must both be free and shared by baseline and risk-aware searches.
 
-1. Qualification-only CPU smoke proving live `iap_rosnode`, at least one valid integrity report and at least one 76,800-query P0 generation.
-2. One fixed Gate 0B run proving at least 20 distinct generations and p95 `<= 400 ms` without required-process failure.
-3. Only after Gate 0B passes, independent P5 final/runtime safe, unsafe, stale and unknown qualification under the P0 + P5 route.
+The first two thirds of the seed are only the entry-trigger window. After an occupied entry is found there, scanning must continue to the seed tail until a stable free exit is found.
 
-P0-only qualification is an evidence exercise, not a planner-winner claim. P5 decisions and EGO feasibility semantics must not be changed to make Gate 0B pass.
+The planned scan result is:
+
+```cpp
+enum class CollisionScanStatus {
+  NO_COLLISION,
+  CLOSED_SEGMENTS,
+  OPEN_ENDED_COLLISION,
+  INVALID_INPUT
+};
+```
+
+`OPEN_ENDED_COLLISION` must not be reported as `NO_COLLISION`. It must not synthesize an occupied endpoint or allow a new normal trajectory to be published.
+
+## Included development
+
+- Qualify live P0 generation, query shape, freshness, source provenance and latency before starting P4 production work.
+- Add a deterministic collision-and-risk fixture before changing production collision or guide logic.
+- Return explicit collision-scan status and preserve the complete closed-segment definition.
+- Introduce one deep P4 module seam: `planCollisionGuide(request) -> decision`.
+- Generate original and risk-aware A* guides for the same event, endpoints, occupancy epoch, snapshot and query-time model.
+- Resample each final guide at 200 equal-arc-length points and compare mean/max risk, validity and path-length ratio.
+- Preserve the selected-guide identity through control-point constraints, rebound optimization, refinement and final B-spline evidence.
+- Qualify P5 final before normal publication and P5 runtime during execution.
+- Add the planned composite profile `icra_p0_p4_p5` with fail-closed effective-value validation.
+- Retain reproducible manifests, hashes, latency, fallback and generation lineage for each decision.
+
+## Retained but disabled modules
+
+P1, P2 and P3 remain in the repository. Their source, tests, CMake targets and legacy profiles must not be deleted.
+
+The ICRA treatment profile must disable both their high-level switches and lower-level objective, metrics, debug, fanout and visualization paths. `planner_enable_all_safety` must remain false.
+
+`manager/use_distinctive_trajs` is false in every P4 qualification, calibration and formal-comparison arm. This prevents legacy topology fanout or later candidate selection from obscuring P4 guide lineage.
+
+The P0-only ICRA-004 prerequisite is not a P4 experiment arm and retains its frozen smoke configuration unchanged.
+
+P2 remains historically frozen by `NO_GO_P2`. Re-enabling it requires a separate Supervisor decision and is not a fallback inside this route.
+
+## Excluded scope
+
+- P1 soft integrity objective, P2 candidate ranking and P3 local/global reference bias in ICRA runs.
+- A-ALL or the full P1–P4 stack as the conference treatment.
+- Candidate-generation changes introduced only to revive P2.
+- Continuous-time localization/planning joint optimization or a new trajectory representation such as BLOM/MINCO.
+- PX4 or real-flight claims without a separately authorized evidence program.
+- Certification, formal PHMI, physical isolation or general safety guarantees.
+
+## Gate sequence
+
+1. **Scope pivot:** docs, requirements, state and ICRA-004 agree on the conditional route.
+2. **P0 Gate-0B:** GPU preflight, valid integrity, real P0 generations, 76,800 queries per generation, at least 20 generations and p95 `≤400 ms`.
+3. **P4-G0A:** deterministic closed segment plus no-collision, open-ended, multi-obstacle and free-endpoint tests.
+4. **P4-G0B:** metrics-only same-event original/risk guides, immutable identity, final-path resampling and truthful fallback evidence.
+5. **P4-G0C:** metrics-only calibration, frozen thresholds, zero search timeout and complete 200/200 path coverage.
+6. **P4-G0D:** enable application only after threshold freeze; prove selected-guide lineage through B-spline and P5 final/runtime behavior.
+7. **Campaign:** only after GPU and `≥40 GiB` storage preflight pass.
+
+ICRA-004 remains the P0-only prerequisite. Its smoke keeps P1/P2/P3/P4/P5 disabled and cannot authorize P4 work or the fixed 60-second Gate-0B run.
+
+## Experiment arms
+
+The primary comparison is `P0+P5` versus `P0+P4+P5` over primary, exact-mirror and flat-null scenes with ten frozen seeds: 60 formal runs.
+
+EGO baseline, P4 metrics-only, and P0+P4 with P5 off are qualification or mechanism diagnostics. They do not replace the primary comparison.
+
+If a P4 gate fails, P4 is `BLOCKED`. `P0+P5` remains an explicit contingency and becomes the main route only after a new Supervisor decision.
+
+## Historical evidence interpretation
+
+Gate 0A observed 378/378 singleton optimizer-success attempts and no eligible P2 comparison set. That narrow result remains `NO_GO_P2`.
+
+The recorded early `collision_segment_count=0` does not prove that the seed was collision-free. In the audited fork scene, the two-thirds scan could see obstacle entry but stop before the exit.
+
+Later optimizer rebound evidence is compatible with a real collision. Historical rows are preserved; the new route fixes the observation and control contract rather than relabeling old runs.
+
+## Claim limits
+
+A successful P4 result may support a claim that advisory risk changed a collision guide and that the effect survived to a P5-evaluated B-spline under the frozen fixtures.
+
+It may not support certification, universal obstacle avoidance, guaranteed lower execution risk, or a claim that P0/P4 replaced current-integrity, occupancy, dynamics or P5 authority.

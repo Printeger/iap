@@ -1,10 +1,23 @@
 # ICRA-004 — Add GPU preflight and rerun the invalid-environment smoke once
 
-> Active gate: `GATE_0B`
+> Task gate on activation: `GATE_0B`
 > Owner: `DEEPSEEK`
-> Review disposition: `ENVIRONMENT_RETRY_AUTHORIZED`
-> Route: P0 + P5; P2 frozen
+> Review disposition: `SCOPE_PIVOT_AUTHORIZED_ICRA004_REISSUED`
+> Activation: `TASK_READY`
+> Conference target: conditional P0 -> P4 -> P5
+> This task: P0-only prerequisite; P1/P2/P3/P4/P5 disabled
+> Historical verdict: Gate 0A `NO_GO_P2`; P2 frozen
 > Requirement mapping: `IAP-RQ-320` only for the P0 prediction/input qualification path
+
+## Scope-pivot interpretation
+
+The 2026-08-20 Supervisor decision changes the conference development target, not the qualification status of the implementation. P0 remains blocked/unqualified, P4 is not qualified, and P5 is implemented but not system-qualified.
+
+ICRA-004 had not started when the scope changed, so it is reissued under the new route rather than cancelled or renumbered. Its command, evidence directory, one-shot rule and P0-only acceptance contract remain unchanged.
+
+This is the unique active task under `AGENT_STATE.md = DEEPSEEK / TASK_READY`. DeepSeek must synchronize `dev/icra`, preserve the existing worktree, and execute only the scope below.
+
+Passing this task authorizes only Supervisor review. A separate task is required for the fixed 60-second Gate 0B run. P4 test fixtures and production changes remain forbidden until P0 Gate 0B passes and the Supervisor issues a new task.
 
 ## Operator clarification and objective
 
@@ -70,7 +83,8 @@ If the smoke fails, stop and report `BLOCKED` with the exact command, exit codes
 - Run focused runner/analyzer/capture tests and relevant package tests before the single smoke.
 - Update `docs/CHANGES.md`, `docs/TRACEABILITY.md` and `DEV_LOG.md` with truthful requirement mapping, exact commands, exit codes, GPU identity and evidence paths.
 - Preserve ICRA-003 evidence unchanged. Add new files under `results/icra27/icra004/`; never reuse its output directory.
-- Explicitly stage only authorized files. Before handoff verify staged diff, remote divergence, clean worktree and that no task-started ROS process remains.
+- Explicitly stage only authorized files. Preserve and report pre-existing untracked user files; do not clean or stash them.
+- Before handoff verify the staged diff, remote divergence, absence of uncommitted task-owned changes, and that no task-started ROS process remains.
 - Record the final commit SHA in `DEV_LOG.md`; do not edit Supervisor-owned files.
 
 ## Allowed files
@@ -89,5 +103,7 @@ If the smoke fails, stop and report `BLOCKED` with the exact command, exit codes
 - No 60-second Gate 0B benchmark, second replacement smoke, retry loop or wait-for-GPU loop.
 - No backend auto-fallback, workload/ROI/horizon/refresh/worker tuning, rosbag or campaign.
 - No P1/P2/P3/P4 work, candidate changes, or P5 decision/action changes.
+- Do not add the planned `icra_p0_p4_p5` profile, `p4.metrics_only`, collision-scan states, P4 fixture, guide-decision seam or P4/P5 lineage in this task.
+- Do not modify, stage, delete, move or regenerate the pre-existing untracked `docs/icra27/dev/ICRA_SYSTEM_FLOW.pdf`.
 - No external writes, backup, archive or disk cleanup; no changes to `../glim` or another repository.
 - No changes to `AGENTS.md`, `AGENT_STATE.md`, `SUPERVISOR_LOG.md`, `NEXT_TASK.md` or ICRA scope/plan/gate documents.

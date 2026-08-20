@@ -1,3 +1,223 @@
+# ICRA 2027 P0 → P4 → P5 计划复审
+
+## Active re-review declaration — 2026-08-20
+
+本节至 `# Superseded historical review — P0 + P2 + P5` 为当前唯一有效复审。
+评审基线为 dev/icra@bd3858a72ba0，依据静态代码、Gate-0 artifacts 与 P4 audit；它不是 P4 实验结果。
+
+下方 P0 + P2 + P5 评审按原文保留。它记录旧路线的风险与当时判断，
+不得被改写成支持 P4 的证据，也不得继续授权 P2 工作。
+
+## 1. Verdict
+
+**CONDITIONAL GO。**
+
+P0 → P4 → P5 是比 P0 → P2 → P5 更直接使用 risk grid 的会议目标，
+但当前只批准文档化 scope pivot 和逐门资格验证，不批准跳过 P0 Gate-0B 或直接开展正式实验。
+
+这个 verdict 的含义是“目标架构值得按门实现”，不是“当前链路已闭环”。
+在 P0、collision fixture、dual guide、lineage 和 P5 integration 全部通过前，P4 保持 NOT_QUALIFIED。
+
+历史 Gate 0A 的 NO_GO_P2 保持有效。378/378 singleton 证明当时没有 P2 可比较集合，
+但不能推导 P4 可行、P4 无效，或 planner 没有发生碰撞。
+
+## 2. 为什么允许切换目标
+
+P4 在 A* edge cost 中直接消费 RiskGridSnapshot，对搜索拓扑产生局部 preference；
+它与 P0 risk field 的因果连接比“等待自然形成多个 P2 candidates”更短。
+
+P4 不需要同 attempt 的多候选 treatment domain。只要 collision scan 得到一个闭合 segment，
+同一事件即可运行 original/risk A* 并形成配对比较。
+
+该方向仍保留清楚的 authority split：P0 advisory，P4 guide preference，
+P5 hard integrity gate；EGO occupancy、collision、dynamics 和 feasibility 继续是运动 authority。
+
+但“更直接”不等于“更安全”或“更容易”。P4 增加第二次 A*、更多 risk queries、
+snapshot 生命周期和 guide lineage，必须由新 Gate-0 证明延迟与收益。
+
+## 3. 当前证据与已知断点
+
+### 3.1 P0 尚未 qualified
+
+旧 Gate 0B 中 iap_rosnode 因 cudaErrorNoDevice 退出，未形成真实 full-grid generations。
+因此 76,800-query refresh 的 p50/p95/max 仍未测得，P0 状态只能是 BLOCKED / UNQUALIFIED。
+
+ICRA-004 的 20 s smoke 和后续 60 s benchmark 是 P4 的硬前置条件。
+未经 required-process-clean P0 evidence，不应调试 P4 risk effect。
+
+### 3.2 零 early segment 不等于零 collision
+
+现有 seed 是 polynomial/B-spline，不是 A* path。initControlPoints 的早期扫描只检查约前 2/3，
+且只有看到 entry 后再看到 exit 才记录 closed segment。
+
+既有 central obstacle 场景中，扫描窗可先看到 entry，却在看到 exit 前停止。
+后续 rebound collision check 又能发现障碍并弯曲路径。
+
+所以历史 collision_segment_count=0 的正确解释是：
+早期闭合 segment 观察失败；它不能证明场景没有碰撞。
+
+修复必须保留 segment 的 free → occupied → free 语义。entry 在前 2/3 时继续向 seed 尾部找 exit；
+找不到 exit 返回 OPEN_ENDED_COLLISION，不能在首个 occupied 点伪造 endpoint。
+
+### 3.3 当前 P4 comparison 链断裂
+
+现有 initial initControlPoints 只调用一次由开关分派的 A*。它可能生成 risk-aware guide，
+但不同时生成 original/risk pair，也不填充 last_p4_guides。
+
+manager 在 initial init 后立即发布 P4 guides，因而可能发布空记录；
+随后又在 optimizer 前 clear P4 snapshot。
+
+真正包含 original/risk 双搜索、ratio gate、CSV 和 last_p4_guides 的逻辑位于
+check_collision_and_rebound。由于 snapshot 已清，它只能走 snapshot-unavailable fallback。
+
+旧 p4 profile 默认也不同时启用 P5 final/runtime。现有配置不能证明
+collision → paired P4 guide → selected B-spline → P5 final 的一次执行 lineage。
+
+### 3.4 现有 tests 和 fixtures 不足
+
+focused P4 gtests 只覆盖 edge-cost 公式、unknown penalty 和局部 metrics，
+没有覆盖完整 A* path、同事件 pair、collision scan、snapshot lifetime 或 P5 lineage。
+
+p4_manual_collision_guide 使用空 manual preset，不是无人值守 deterministic fixture。
+现有 Gate-0 场景也没有稳定产出 early closed segment。
+
+因此必须先提交 test-only red fixture。不得把 P5 decision fixture、occupied-low-risk fixture
+或 analyzer-only synthetic field 直接宣称为 P4 guide qualification。
+
+### 3.5 后续 planner 可能覆盖 P4 effect
+
+现有 distinctiveTrajs 会从 collision constraints 扩展 legacy candidates，
+后续 winner selection 可能使最终 B-spline 不再对应被审计的 P4 guide。
+
+所有 P4 qualification、calibration 和 formal-comparison arms 固定
+manager/use_distinctive_trajs=false 是必要隔离。
+
+P0-only ICRA-004 保持冻结 smoke 配置，不属于 P4 arm。论文只能主张 P4 guide lineage，
+不得混入 P2 或 legacy fanout 的选择效应。
+
+## 4. Interface review
+
+以 planCollisionGuide(P4GuideRequest) → P4GuideDecision 形成 deep module 是合适的。
+它把 dual A*、同 snapshot 比较、selection、fallback 和 evidence 收敛到单一 seam。
+
+request 必须在构造时验证 attempt、segment、free endpoints、snapshot、query base、
+time model 和 occupancy epoch。调用者不得在两次 A* 之间重新获取这些输入。
+
+decision 必须同时持有 original/risk/selected guide、hash、200 点 final-guide profile、
+mean/max/counts、length ratio、latency、identity、状态和 fallback reason。
+
+选择必须读取 decision 内的冻结指标。CSV、RViz 和 analyzer 若重新采样后反向影响 online decision，
+会破坏预注册和可复现性，因此明确禁止。
+
+p4.metrics_only 是必要的机制诊断 seam：它应计算完整 pair，但强制 selected=original。
+默认 false 合理；profile validator 必须防止 metrics-only 值被 preset 派生规则意外改写。
+
+G0B 和 G0C 必须显式覆盖为 metrics-only true、selection_applied=false。
+否则“先用阈值选择、再由 calibration 产生阈值”会形成循环依赖。
+
+只有 G0C freeze 完成后，G0D 才可设置 metrics-only false 并审计实际 guide application。
+
+## 5. Behavior and failure-mode review
+
+occupied-before-risk 的顺序必须保留。RiskGridSnapshot 只能增加 free edge 的 soft cost，
+不能让 occupied node 因低风险重新变得可通行。
+
+occupancy identity 未变化时，unknown、stale、non-finite、risk search failure 或 timeout
+回退 current-epoch original，符合 advisory authority。
+
+occupancy epoch 或 request identity mismatch 必须返回 DECISION_INVALID/REPLAN_REQUIRED。
+两条 guide 都不得注入，该 attempt 不得产生新 normal publish。
+
+original search 自身失败时不能返回 risk guide。否则 P4 会从 preference 变成替代 EGO
+可达性 authority，与研究 claim 冲突。
+
+occupancy epoch 变化必须使整个 decision 失效。只比较两个 path hash 不足以证明
+它们在同一 occupancy 事实下产生。
+
+OPEN_ENDED_COLLISION 必须使当前 replan 失败且不发布新 normal trajectory。
+这项策略偏保守，但比制造 occupied endpoint 更容易解释，并保留上层 FSM/P5 的安全职责。
+
+snapshot 保留到 selected guide 注入 control-point constraints 后再释放，是闭合当前断点的最低要求。
+initial/rebound 采用同一 seam，避免两套 fallback 与 evidence 语义漂移。
+
+P5 可以读取更新 generation。P4 与 P5 的独立 generation 应并列记录，
+不能要求同代，也不能把 P4 score传给 P5 decision state machine。
+
+## 6. Qualification and calibration review
+
+先 P0、再 collision red fixture、再 dual guide、最后 lineage/P5 的顺序正确。
+它把输入可用性、触发条件、局部算法效果和系统集成分开定位。
+
+dual-guide measurement 与 calibration 均保持 geometry no-op。阈值 freeze 是从 measurement
+进入 applied lineage 的唯一授权点。
+
+校准固定五个 seeds、各三次并要求至少 100 decisions，可避免只凭少量成功 case 冻结阈值。
+每条 path 200/200 valid 也消除了 support 不一致的歧义。
+
+mean/max 改善门各取 Q10，长度门取 min(1.30, Q95+0.02)，
+双搜索门取 min(0.40 s, Q95+max(0.01 s, 0.20×Q95))，规则足够明确。
+
+0.2 s 是当前源码硬编码的单次 A* timeout。1.30 在源码中是可覆盖参数的默认值，
+但 ICRA protocol 将它冻结为实验 hard cap；校准公式不能放宽二者。
+
+若改善量不高于 numerical noise、coverage 无效或任一搜索 timeout，则 BLOCKED，
+不通过排除 run、改 seed 或事后放宽阈值恢复 GO。这是可信实验的关键停止线。
+
+仍需在校准 freeze changeset 中给 numerical-noise floor 一个有单位的具体值与推导 artifact。
+在该 freeze 前，它是计划参数，不是已通过 threshold。
+
+## 7. Experiment and claim review
+
+primary、exact mirror、flat-null × P0+P5/P0+P4+P5 × 十个冻结 seeds，
+共 60 runs，足以把 P4 treatment 与 P0/P5 公共部分隔离。
+
+十个 formal seeds 必须在首个正式 run 前冻结，且不得与校准 seeds 重叠。
+失败运行进入分母，任何重跑使用新 run ID，不能覆盖原 artifact。
+
+EGO baseline、metrics-only 和 P5-off 只能回答资格或机制问题。
+它们不能替代正式两臂比较，也不能在看到结果后加入主效应。
+
+正式 campaign 仍受 GPU preflight 和至少 40 GiB 可用空间约束。
+磁盘不足时是明确 No-Go，不应自动删历史数据或缩减 evidence。
+
+推荐论文主张：
+
+> Given a closed collision segment and one immutable advisory risk snapshot,
+> P4 prefers a guide with lower measured predicted-risk metrics under preregistered
+> detour and latency bounds. P5 independently enforces the IAP integrity gate,
+> while EGO collision and dynamics checks remain authoritative for motion feasibility.
+
+中文对应：
+
+> 对同一闭合 collision segment 和同一个不可变 advisory risk snapshot，
+> P4 在预注册的绕行与延迟边界内偏好测得预测风险更低的 guide；
+> P5 独立执行 IAP integrity gate，EGO collision/dynamics checks 继续负责运动可行性。
+
+在正式 gate 通过前，禁止使用 improves safety、guarantees collision avoidance、
+certified integrity、always lower risk 或 end-to-end validated 等措辞。
+
+## 8. Final conditions
+
+以下条件全部满足时，CONDITIONAL GO 才转为 implementation/campaign GO：
+
+1. P0 required-process-clean benchmark 通过 76,800 queries、至少 20 generations 和 p95≤400 ms。
+2. deterministic fixture 稳定区分 no/closed/open-ended/invalid collision 状态。
+3. 同事件 dual guide 满足 identity、200-point risk 和 fallback 契约。
+4. snapshot 生命周期闭合，initial/rebound 使用同一 seam。
+5. selected hash 可追到 refined/final B-spline，P5 final-before-publish 得到运行证据。
+6. composite profiles 证明 P1/P2/P3 双层关闭、distinctive-off 和 P5 开启。
+7. calibration freeze 通过，GPU 与容量 preflight 通过。
+
+任一前置条件失败，P0 → P4 → P5 标记 BLOCKED。P0+P5 只是 contingency，
+是否切换必须由新的 Supervisor decision 决定。
+
+---
+
+# Superseded historical review — P0 + P2 + P5
+
+> 以下评审按原文保留，用于审计旧路线。它不构成当前 P4 的 Go 证据，
+> 也不再定义 active work queue、配置或正式实验。
+
 # ICRA 2027 P0 + P2 + P5 改造计划批判性评审
 
 > 评审日期：2026-08-16

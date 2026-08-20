@@ -136,3 +136,37 @@ Blocking findings:
 - Active role: `DEEPSEEK`; state: `TASK_READY`, but execution must wait until the operator restarts Docker.
 - Implement a persistent NVML plus CUDA Driver API preflight. Failure must stop before ROS and return `GPU_NOT_READY / BLOCKED` without retry.
 - After preflight PASS, exactly one replacement 20-second smoke is authorized in a new evidence directory. The 60-second benchmark remains forbidden pending Supervisor review.
+
+## 2026-08-20 — P0→P4→P5 scope pivot and ICRA-004 reissue
+
+### Decision identity and worktree protection
+
+- The operator explicitly authorized the conference target change from the P0+P5 contingency route to conditional `P0 -> P4 -> P5`.
+- The read-only review used `HEAD=bd3858a72ba06b7eb1551006876c55362c979bab`; `origin/dev/icra` matched with divergence `0 0` after `git fetch origin`.
+- ICRA-004 had no `DEV_LOG.md` start record and no `results/icra27/icra004/` directory. It is reissued, not cancelled or renumbered.
+- Existing untracked `Change_Needed.md`, `P4_GATE0_AUDIT.md` and `dev/ICRA_SYSTEM_FLOW.pdf` were preserved. The two Markdown inputs enter this preparation; the PDF remains untouched and untracked.
+
+### Scope verdict
+
+- Route verdict: `CONDITIONAL_GO_P0_P4_P5_PREPARATION`.
+- Current qualification state: `P0 BLOCKED/UNQUALIFIED -> P4 NOT_QUALIFIED -> P5 IMPLEMENTED-BUT-UNQUALIFIED`.
+- Gate 0A remains the historical `NO_GO_P2`: all 378 optimizer-success attempts were singleton. The new target does not alter that evidence and does not imply `GO_P4`.
+- P1/P2/P3 remain present in source, tests and legacy profiles. The future ICRA composite profile must disable their high- and low-level effective paths rather than delete them.
+- P4 is conditional on a closed `free -> occupied -> free` collision segment. With no closed segment, original EGO planning continues to P5 without forcing P4.
+- P4 remains advisory. Original EGO occupancy, collision, dynamics, refinement and feasibility checks retain motion authority. P5 final and runtime remain the IAP hard integrity gates.
+
+### Static audit disposition
+
+- The early Gate 0 collision counter observed no closed segments, but the seed crossed the central obstacle. The prepass stopped inside the obstacle before observing its exit; zero closed segments is not proof of no collision.
+- Initial collision handling dispatches only one A* and does not create an original/risk guide pair. The later dual-guide path normally sees no snapshot because the manager clears it before rebound optimization.
+- Existing P4 `path_mean_cost/path_max_cost` describe risk queries on expanded edges, not a risk profile of the returned guide. They cannot support a lower-risk claim.
+- With `manager/use_distinctive_trajs=true`, later legacy candidate selection can replace the P4-derived direction. All ICRA comparison arms will therefore freeze it to `false`.
+- P5-3/P5-4/P5-6 voxel fixtures can affect both `queryPredictedPL()` and P4 `queryCost()`. A separately named P4 fixture is still required to avoid coupling P4 and P5 evidence semantics.
+
+### Next task and stop line
+
+- Unique next task remains `ICRA-004 / GATE_0B`, reissued under conference route `P0_P4_P5` and handed off as `TASK_READY` in this changeset.
+- ICRA-004 remains a P0-only GPU-preflight and one-shot smoke task. Its smoke keeps P1/P2/P3/P4/P5 disabled and does not authorize the 60-second benchmark.
+- P4 code, fixtures, profiles and experiments remain prohibited until P0 Gate 0B passes and a later Supervisor task first authorizes deterministic red fixtures.
+- This scope-pivot preparation changes documentation and coordination state only. It runs no ROS experiment and creates no product-code qualification evidence.
+- The operator subsequently authorized the scope-pivot Markdown changeset to be committed and pushed, including the two preserved Markdown inputs but excluding the untracked PDF. This changeset therefore returns the active role to DeepSeek as `TASK_READY`; only ICRA-004 is authorized.

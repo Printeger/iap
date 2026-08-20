@@ -1,3 +1,373 @@
+# ICRA 2027 P0 → P4 → P5 正式开发实施计划
+
+## Active-plan declaration — 2026-08-20
+
+本节至 `# Superseded historical record — P0 + P2 + P5` 为 ICRA 分支唯一有效的实施计划。
+审阅基线为 dev/icra@bd3858a72ba0。下方旧正文仅保留历史原文，不再授权任务、配置、实验或论文主张。
+
+历史 Gate 0A 结论永久保留：9 个固定运行的 378/378 个成功优化 attempt 均为 singleton，
+裁决仍为 NO_GO_P2。该结果只否定当时的 P2 treatment domain，既不是 GO_P4，也不是完整系统资格证明。
+
+当前资格状态固定为：
+
+~~~text
+P0 BLOCKED / UNQUALIFIED
+  → P4 NOT_QUALIFIED
+  → P5 IMPLEMENTED-BUT-UNQUALIFIED
+~~~
+
+ICRA-004 不取消。Supervisor 只更新其路线元数据，任务仍限于 GPU preflight 和一次 20 s P0 smoke。
+该 smoke 中 P4、P5 及 P1/P2/P3 全关。P0 Gate-0B 经 Supervisor review 前，不得授权 P4 生产代码。
+
+## 1. 研究路线和 authority boundary
+
+目标是条件式 P0 → P4 → P5，不是无条件串行执行：
+
+~~~text
+P0 immutable advisory snapshot
+  → seed collision scan
+      ├─ NO_COLLISION → 原 EGO 路径
+      ├─ CLOSED_SEGMENTS → P4 guide preference
+      └─ OPEN_ENDED_COLLISION / INVALID_INPUT → 当前 replan 失败
+  → EGO optimization / refinement / feasibility
+  → P5 final
+  → normal publish
+  → P5 runtime
+~~~
+
+P0 只提供 future-risk advisory 数据。P4 只选择 collision guide，不改变 occupied/free 判定，
+不替代 EGO collision、dynamics、optimization、refinement 或 feasibility authority。
+
+P5 final 和 runtime 是 IAP 层唯一 hard integrity gate。P5 final 必须位于正常 B-spline 发布之前；
+P5 reject 不得产生该条正常发布。Emergency-stop 命令与正常发布分开统计。
+
+本计划只主张系统内的 logical one-way authority separation，不主张 physical isolation、
+certification-level proof，或 P4 对所有场景都降低真实风险。
+
+## 2. Collision scan contract
+
+未来 collision scan 的内部返回值冻结为：
+
+~~~cpp
+enum class CollisionScanStatus {
+  NO_COLLISION,
+  CLOSED_SEGMENTS,
+  OPEN_ENDED_COLLISION,
+  INVALID_INPUT
+};
+~~~
+
+前 2/3 seed 只定义“允许触发 collision entry”的窗口。若窗口内发现 free → occupied，
+扫描必须越过 2/3 继续到 seed 末端寻找 occupied → free，不得在 entry 点立即构造 segment。
+
+CLOSED_SEGMENTS 的每个 segment 必须有两个 free endpoint，且中间至少有一个 occupied sample。
+无 entry 返回 NO_COLLISION。输入或地图状态不可判定返回 INVALID_INPUT。
+
+若到 seed 末端仍未找到 exit，则返回 OPEN_ENDED_COLLISION。它不得伪装为 NO_COLLISION，
+不得使用 occupied endpoint，也不得交给 P4 A*。
+
+OPEN_ENDED_COLLISION 和 INVALID_INPUT 均使当前 replan fail closed，不发布新的 normal trajectory。
+上层沿既有 FSM/P5 安全路径处理，证据必须记录状态与原因。
+
+多障碍输入按扫描顺序返回闭合 segments。若已存在闭合 segment，随后又出现 open-ended entry，
+整个 scan 状态仍为 OPEN_ENDED_COLLISION，当前 replan 不消费部分结果。
+
+## 3. P4 deep-module interface
+
+未来唯一 P4 决策 seam 冻结为：
+
+~~~cpp
+P4GuideDecision planCollisionGuide(const P4GuideRequest&);
+~~~
+
+P4GuideRequest 必须一次性绑定：
+
+- planning attempt ID 和 collision segment ID；
+- 两个已验证为 free 的 endpoint；
+- shared immutable P0 RiskGridSnapshot；
+- snapshot generation、stamp、frame 和 query base；
+- 冻结的 travel-time/query-time model；
+- occupancy map epoch；
+- P4 config 与 metrics-only 标志。
+
+P4GuideDecision 必须返回：
+
+- original、risk-aware 和 selected guide；
+- 三者的 schema-versioned canonical path hash；
+- original/risk 最终 guide 的 200 点等弧长风险 profile；
+- mean/max、valid/unknown/stale/non-finite 数；
+- 路径长度及 risk/original ratio；
+- original search、risk search 和 total latency；
+- snapshot、query-base、occupancy-epoch identity；
+- selection status、selection_applied 和 fallback reason。
+
+CSV、manifest 和 RViz 只能消费 P4GuideDecision，不能重新计算或影响选择。RViz 不是 gate evidence。
+
+## 4. P4 搜索、比较和生命周期
+
+同一 decision 内先运行 original A*，再运行 risk-aware A*。两次搜索共享 endpoints、
+occupancy epoch、snapshot、query base 和 time model；不得跨 planning event 拼接结果。
+
+occupied neighbor 必须在任何 risk query 前由原 EGO occupancy 规则硬拒绝。P4 risk 只进入
+A* edge cost；不得进入 occupancy、heuristic 或硬可行性定义。
+
+两条最终 guide 均以同一 snapshot 做 200 点等弧长重采样。比较对象是 A* 返回的完整 guide，
+不是搜索期间的 edge 累积值，也不是后续 refined B-spline。
+
+只有 200/200 样本 valid、mean 与 max 同时达到冻结改善门、长度比不超过冻结门，
+且两次搜索均成功时，risk guide 才具备被选资格。否则 selected guide 为 original。
+
+snapshot 未就绪、unknown、stale、non-finite、搜索失败或超时均 fail closed 到 original。
+若 original search 自身失败，则返回 planner failure，不把 risk guide 当作安全替代。
+
+若 occupancy epoch 或 request identity 在两次搜索、比较或 control-point 注入前变化，返回
+DECISION_INVALID/REPLAN_REQUIRED。两条 guide 都不注入，本 attempt 不发布新 normal trajectory。
+
+只有 occupancy identity 未变化时，risk snapshot/query/search/coverage/ratio 失败才回退
+current-epoch original guide。证据必须区分 fallback 与 invalid-replan。
+
+snapshot 生命周期必须持续到双搜索、重采样、选择以及 selected guide 注入 control-point
+constraints 完成。initial collision 与 rebound collision 必须调用同一 seam。
+
+P5 final/runtime 可获取更新的 snapshot，但必须分别记录 P4 与 P5 generation。
+不同 generation 不得写成“同代验证”，P5 不接收 P4 score。
+
+p4.metrics_only=true 时仍生成两条 guide 和完整 evidence，但 selected guide 固定为 original，
+selection_applied=false。默认值为 false，以保持 P4 enable 的既有选择语义。
+
+P4-G0B 和全部 G0C calibration 必须显式设置 p4.metrics_only=true。
+threshold registry 冻结前不得把 risk guide 注入控制点；应用只从 G0D 开始。
+
+所有 P4 qualification、calibration 和 formal-comparison arms 固定
+manager/use_distinctive_trajs=false，防止 legacy candidate fanout 覆盖 guide lineage。
+
+P0-only ICRA-004 不是 P4 arm，继续使用冻结的 ICRA-003 smoke 配置，不在本任务追加该 override。
+
+## 5. Composite profile 与模块隔离
+
+新增唯一 route profile：icra_p0_p4_p5。它同时开启 P0、P4、P5 final/runtime，
+并执行 scope validator。不得用 all 或旧 p4 profile 代替。
+
+主对照 profile 为 icra_p0_p5。除 P4 enable 外，它与 treatment 使用相同的 P0、P5、
+场景、seed、规划器和 evidence 配置。
+
+两个正式 arms 均锁定以下 high-level 值：
+
+~~~text
+planner_enable_all_safety=false
+planner_enable_p1=false
+planner_enable_p2=false
+planner_enable_p3_local=false
+planner_enable_p3_global=false
+planner_enable_p4=<arm value>
+planner_enable_p5_runtime=true
+planner_enable_p5_final=true
+manager/use_distinctive_trajs=false
+~~~
+
+同时锁定 lower-level isolation：
+
+~~~text
+p1.use_integrity_cost=false
+p1.metrics_only=false
+p1.lambda_integrity=0.0
+p1.debug_csv_enable=false
+safety_viz.enable_p1_viz=false
+manager/p1_collision_fanout_clearance_m=0.0
+manager/p1_collision_fanout_preserve_homotopies=false
+manager/p1_collision_fanout_mirror_y=false
+
+p2.enable_candidate_ranking=false
+p2.metrics_only=false
+p2.debug_csv_enable=false
+safety_viz.enable_p2_viz=false
+
+p3.enable_local_reference_bias=false
+p3.enable_global_reference_bias=false
+p3.debug_csv_enable=false
+safety_viz.enable_p3_viz=false
+~~~
+
+treatment 还要求 p4.enable_risk_aware_astar=true、p4.metrics_only=false、
+p5.enable_final_gate=true、p5.enable_runtime_gate=true。P0 runtime/map 也必须为 enabled。
+
+scope validator 必须检查解析后的 effective map，并拒绝 all、旧 p4 profile、未知 key、
+P1/P2/P3 任一 high/low/metrics/debug/viz override、distinctive trajectories，
+以及 P5 final/runtime 关闭。
+
+只有 manifest 声明 gate=G0B/G0C 的注册 qualification arm 可把 p4.metrics_only 设为 true；
+正式 treatment 和 G0D 必须为 false。其他显式覆盖均拒绝。
+
+P1/P2/P3 的源码、接口、CMake targets、tests 和 legacy profiles 全部保留。
+本计划不删除模块，不加入 ICRA 条件编译，也不改变旧 profile 的默认行为。
+
+## 6. Event-gated qualification
+
+所有门按证据事件推进，不使用已经过期的日历日期。
+
+### 6.1 Scope pivot gate
+
+六份 ICRA 主文档、system flow、IAP-RQ-423、traceability、changes 和双 Agent 状态必须一致。
+历史 NO_GO_P2 与 active route 必须能同时读取，不能互相覆盖。
+
+AGENT_STATE 只能有一个 active role 和一个 unique next task。历史 verdict 使用独立字段；
+不得把 P4 标记 PASS、GO 或 implemented。
+
+### 6.2 P0 Gate-0B
+
+ICRA-004 先完成 GPU preflight 与单次 20 s P0 smoke。required processes 必须存活，
+integrity 输入有效，并观测到真实 P0 generation；P4/P5/P1/P2/P3 均关闭。
+
+smoke 经 Supervisor review 后，才授权单次冻结的 60 s full-grid benchmark。
+不得在两次运行之间调整 ROI、horizons、worker 或 refresh period。
+
+60 s gate 要求每代 refresh_query_count=76,800、至少 20 个成功 generation，
+并报告 type-7 p50/p95/max、stale/failed ratio 与实际 interval。p95 必须不超过 400 ms。
+
+进程退出、输入无效、零真实 generation、shape 错误、样本不足或 p95 超门均为 BLOCKED/FAIL。
+不得以 launch 顶层返回 0 替代 required-process health。
+
+### 6.3 P4-G0A — deterministic collision
+
+第一笔 P4 任务必须只提交 deterministic red fixture 和测试，不修改生产实现。
+fixture 必须稳定得到一个 free → occupied → free segment。
+
+red suite 同时覆盖 NO_COLLISION、CLOSED_SEGMENTS、OPEN_ENDED_COLLISION、INVALID_INPUT、
+多障碍、free endpoints，以及“entry 在前 2/3、exit 在后 1/3”。
+
+测试及预期失败经 Supervisor review 后，才允许第一笔 P4 生产改动。
+
+### 6.4 P4-G0B — dual guide
+
+新增独立 p4_collision_guide_v1 spatial-risk fixture。它必须在 free corridor 中提供
+可复现的高/低 c_pi，而 occupancy 几何保持一致。
+
+同事件 original/risk guide 必须共享 request identity。gate 验证 200 点最终路径重采样、
+mean/max 改善、长度比、fallback、snapshot 生命周期与 evidence 完整性。
+
+G0B 固定 p4.metrics_only=true 和 selection_applied=false。该门证明 measurement seam，
+不在阈值冻结前应用 risk guide。
+
+### 6.5 P4-G0C — calibration and freeze
+
+校准 seeds 固定为 [211, 223, 237, 253, 271]。每个 seed 运行三次，共 15 个不可覆盖运行，
+且至少取得 100 个 complete P4 decisions；不足即 BLOCKED。
+
+全部 calibration 固定 p4.metrics_only=true 和 selection_applied=false。
+校准数据只冻结阈值，不改变 online guide。
+
+每条被比较路径必须是 200/200 valid。每次 A* 的既有 hard timeout 保持 0.2 s，
+ICRA protocol 把可配置参数 p4.max_extra_path_ratio 的当前默认值 1.30 冻结为实验 hard cap。
+旧 profile 在 ICRA 外仍可覆盖该参数；ICRA calibration 不得放宽它。
+
+mean 与 max 的改善门分别取对应校准改善量的第 10 百分位：
+
+~~~text
+mean_improvement_gate = Q10(mean_original - mean_risk)
+max_improvement_gate  = Q10(max_original - max_risk)
+~~~
+
+长度门与双搜索延迟门冻结为：
+
+~~~text
+path_ratio_gate = min(1.30, Q95(path_ratio) + 0.02)
+dual_search_p95_gate =
+  min(0.40 s, Q95(total_search_s) + max(0.01 s, 0.20 * Q95(total_search_s)))
+~~~
+
+任一改善门不大于冻结的 numerical-noise floor、存在 invalid coverage，
+或任一次搜索 timeout，P4 Gate 失败。不得通过删 run 或放宽阈值补救。
+
+校准 runs 不进入论文统计。阈值、noise floor、fixture/config hash 和原始 run index
+必须在独立 freeze changeset 中固化；正式 runner 绑定该 changeset hash。
+
+### 6.6 P4-G0D — full lineage and P5
+
+selected decision/hash 必须可追到 control-point injection、rebound optimization、
+refinement/feasibility、LocalTrajData 和最终 B-spline hash。
+
+G0D 是第一个允许 p4.metrics_only=false、selection_applied=true 的 gate。
+它必须绑定已经冻结的 threshold-registry hash。
+
+P5 final 必须在 normal publish 前。final reject 的对应 normal-publish count 必须为零。
+P5 runtime 覆盖 safe、unsafe、stale、unknown 和 non-finite。
+
+initial/rebound 必须使用同一 P4 seam；metrics-only 必须是几何 no-op；
+P4/P5 generation identity 必须分别可审计。
+
+## 7. 正式实验冻结
+
+主比较只有两个 arms：
+
+- control：P0 + P5；
+- treatment：P0 + P4 + P5。
+
+正式矩阵为 primary、exact mirror、flat-null 三个场景 × 两个 arms × 十个冻结 seeds，
+共 60 runs。十个 seed 在首个正式 run 前写入冻结 registry，且不得与校准 seeds 重叠。
+
+EGO baseline、P4 metrics-only、P0+P4/P5-off 仅用于资格或机制诊断，
+不替代主比较，也不进入主 treatment effect。
+
+每个 formal run 绑定 git commit、composite profile hash、threshold hash、fixture hash、
+seed、scenario、arm、artifact manifest 和 analyzer version。失败 run 不覆盖且进入分母。
+
+campaign 前必须通过 GPU preflight 和可用空间不少于 40 GiB 的容量门。
+不满足时 runner fail closed，不自动清理、不降级录包、不开始正式运行。
+
+P4 任一资格门失败时，active target 标记 BLOCKED。P0+P5 仅保留为显式 contingency；
+切换论文主线必须另有 Supervisor decision，不能由 runner 或实现者自动降级。
+
+## 8. Tests and acceptance
+
+focused tests 必须覆盖 collision 状态机、同 identity 双 guide、200 点 mean/max、
+occupied-before-risk、unknown/stale/non-finite、搜索失败和 0.2 s timeout。
+
+integration tests 必须覆盖 occupancy epoch 变化、snapshot 生命周期、initial/rebound 共用 seam、
+metrics-only no-op、distinctive-off、B-spline lineage 和 refinement 后 hash。
+
+profile tests 必须覆盖 composite profile、control/treatment 只差 P4、P1/P2/P3 双层关闭，
+以及 all、旧 p4、P5-off、distinctive-on、metrics/debug/viz 和 lower-level 恶意 override 的 fail-closed。
+
+P5 tests 必须证明 final-before-publish、reject-no-normal-publish 和 runtime
+safe/unsafe/stale/unknown/non-finite。P1/P2/P3 历史回归测试继续运行。
+
+每个 gate 只在证据 artifact、manifest identity、analyzer 和测试同时满足时通过。
+文档中的 PLANNED、IMPLEMENTED、QUALIFIED、PASS 不得互相代替。
+
+## 9. Single-active-role work order
+
+1. Supervisor 完成本次 scope pivot，登记 IAP-RQ-423，并按新路线元数据重发 ICRA-004。
+2. DeepSeek 只执行 ICRA-004 的 GPU preflight 和 20 s P0 smoke，然后交回。
+3. Supervisor review smoke；通过后单独授权冻结的 60 s P0 benchmark。
+4. DeepSeek 执行 benchmark 并交回；Supervisor 裁决 P0 Gate-0B。
+5. 仅 P0 通过后，DeepSeek 提交 P4-G0A test-only red fixture，不改生产代码。
+6. Supervisor review red fixture；通过后授权 collision scan 与 open-ended 生产改动。
+7. DeepSeek 实现 scan contract 并交回；Supervisor review 后授权 P4 deep module。
+8. DeepSeek 实现 dual guide、snapshot lifecycle、metrics-only 和 focused evidence。
+9. Supervisor review P4-G0B；通过后只授权冻结 calibration 与 threshold registry。
+10. DeepSeek 运行 calibration 并交回；Supervisor 按预注册公式冻结 thresholds，裁决 P4-G0C。
+11. 仅 G0C 通过后，Supervisor 授权 composite profile、lineage 与 P5 integration。
+12. DeepSeek 完成 P4-G0D 并交回；Supervisor 裁决 integration gate。
+13. 只有全部 gate 通过后，DeepSeek 执行 60-run campaign；Supervisor 冻结结果与分析。
+
+任一时刻 AGENT_STATE 只能出现一个 active role。Supervisor review 未结束前不得预发下一项；
+DeepSeek 不修改 Supervisor-owned plan/scope/status，Supervisor 不修改 DEV_LOG。
+
+## 10. Requirements and change policy
+
+实现与证据由 IAP-RQ-423 追踪：collision contract、同事件 dual guide、风险改善选择、
+B-spline/P5 lineage。代码落地前 TRACEABILITY 状态保持 PLANNED / NOT_IMPLEMENTED。
+
+每笔生产改动必须更新 CHANGES 和 TRACEABILITY，并只修改当前 NEXT_TASK 允许的文件。
+不得删除 P1/P2/P3，不得修改冻结历史 artifact，不得把历史 NO_GO_P2 改写为 P4 证据。
+
+---
+
+# Superseded historical record — P0 + P2 + P5
+
+> 以下内容按原文保留，用于审计 2026-08-18 及更早的决策。它不是 active work queue；
+> 与上方计划冲突时，以上方 P0 → P4 → P5 active plan 为唯一权威。
+
 # ICRA 2027 P0 + P2 + P5 会议版改造实施计划
 
 ## Activation addendum — 2026-08-18 Supervisor verdict

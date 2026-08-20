@@ -1,5 +1,16 @@
 # Traceability Matrix (IAP)
 
+## 2026-08-20 ICRA P0→P4→P5 scope pivot
+
+| Req ID | Requirement/evidence seam | Planned implementation and evidence | Status |
+|---|---|---|---|
+| IAP-RQ-423 | Closed/open-ended collision contract and same-event guide identity/dominance | Active ICRA docs; planned collision-state tests, P4 fixture, and dual-guide evidence | **PLANNED / NOT_IMPLEMENTED** |
+| IAP-RQ-423 | Selected-guide B-spline lineage and P5 final/runtime authority | Planned lineage hashes, composite-profile checks, and publish-order tests | **PLANNED / NOT_IMPLEMENTED** |
+
+These rows register future work only. Current state is `P0 BLOCKED/UNQUALIFIED`, `P4 NOT_QUALIFIED`, and `P5 IMPLEMENTED-BUT-UNQUALIFIED`.
+
+They do not convert historical `NO-GO-P2`, failed P0 Gate-0B evidence, the static P4 audit, or an existing P5 source connection into PASS.
+
 ## 2026-08-18 ICRA-003 Gate 0B repair and one-shot smoke evidence
 
 | Req ID | Requirement/evidence seam | Implementation and retained evidence | Status |

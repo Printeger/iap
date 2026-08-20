@@ -82,3 +82,17 @@ Raw stdout, runner/resolved-runtime manifests, validator output, runtime/export 
 ## 8. Go/No-Go action
 
 Do not implement immutable P2 batch identity or alter P2 scoring on this branch after this result. The unique next task is to revise the conference route to P0+P5, while treating Gate 0B snapshot availability and the independent campaign disk gate as explicit blockers. Any proposal to retain P2 requires human review of an explicitly disclosed upstream controlled fixture; this task did not create one.
+
+## 9. 2026-08-20 post-report disposition
+
+本节记录报告后的范围迁移，不改写第 1–8 节的运行事实。`378/378 singleton`、`NO-GO-P2`、P0 的零成功 generation 和 `CAMPAIGN_DISK_NO_GO` 仍是历史有效结论。
+
+后续源码审计表明，Gate 0A 的早期碰撞扫描约在 seed 前 2/3 停止。已进入障碍但尚未观察到出口的情况被留作零个闭合 segment；后续 optimizer collision recheck 仍可能触发 rebound。
+
+因此，`collision_segment_count=0` 不能单独证明 seed 没有碰撞。该解释不改变 P2 结论：378 个 attempt 仍全部只有一个可比较候选，P2 的 treatment domain 没有形成。
+
+ICRA 的新开发目标是条件式 `P0 -> P4 -> P5`，同时保留 `P0+P5` 作为须经新 Supervisor 裁定才能启用的 contingency。该目标不是本报告测得的新结果。
+
+当前状态为 `P0 BLOCKED/UNQUALIFIED`、`P4 NOT_QUALIFIED`、`P5 IMPLEMENTED-BUT-UNQUALIFIED`。P4 Gate-0、P4 到 B-spline lineage 和 P5 final/runtime 均尚未获得运行资格证据。
+
+ICRA-004 仍只处理 GPU preflight 与 P0 smoke，且在该 smoke 中关闭 P4/P5。P0 Gate-0B 通过并经 Supervisor review 前，不开始 P4 生产代码。

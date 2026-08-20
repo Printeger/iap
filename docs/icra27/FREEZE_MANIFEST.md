@@ -224,3 +224,19 @@ results/icra27/gate0/disk_archive_candidates.csv
 - [x] 未执行 history rewrite、force push、destructive clean 或数据删除
 - [ ] 第二提交精确 SHA、普通 fast-forward push、远端 branch/tag SHA 和最终 clean
   status 由提交后命令及最终回复闭环
+
+## 11. 2026-08-20 post-freeze scope addendum
+
+本节是冻结后的范围裁定，不改写本清单第 1–10 节。冻结引用、构建结果、磁盘快照、artifact hash、`378/378 singleton`、`NO-GO-P2` 和 P0 原始失败均保持不变。
+
+ICRA 分支的新开发目标是条件式 `P0 -> P4 -> P5`。P0 提供 immutable advisory snapshot；只有完整的 `free -> occupied -> free` collision segment 才触发 P4；无碰撞时绕过 P4。
+
+P4 只提供 guide preference。EGO occupancy、动力学和可行性仍是运动规划权威；P5 final 和 runtime 保持 IAP hard integrity authority。
+
+当前资格状态是：`P0 BLOCKED/UNQUALIFIED -> P4 NOT_QUALIFIED -> P5 IMPLEMENTED-BUT-UNQUALIFIED`。该路线是开发目标，不是新的 Gate PASS，也不是 P4/P5 运行证据。
+
+Gate 0A 的早期 `collision_segment_count=0` 只说明截断扫描未观察到闭合 segment。它不能证明 seed 没有碰撞，也不能把历史 `NO-GO-P2` 推导为 `GO-P4`。
+
+P1、P2、P3 在新的 ICRA profile 中将通过 high-level 和 lower-level config 同时关闭。其源码、测试、CMake target 和既有 profile 保留，方便后续恢复完整 P0–P5 流程。
+
+ICRA-004 保留为 P0 Gate-0B GPU preflight 和单次 smoke。该任务不启用 P4/P5；P0 通过并经 Supervisor review 后，才可授权 P4 生产代码。

@@ -422,4 +422,27 @@ Talk: §7.3 hinge cost
 Acceptance:
 - Planner chooses safer path even if longer when integrity violated.
 
+### IAP-RQ-423 P4 collision-guide planning and P5 lineage
+Status: **PLANNED / NOT_IMPLEMENTED**
+
+Source: `docs/icra27/ICRA_SCOPE.md` and the 2026-08-20 Supervisor scope pivot. This requirement extends collision-guide planning evidence; it does not replace or verify the IAP-RQ-422 PL/AL admission rule.
+
+- [ ] Collision scan returns `NO_COLLISION`, `CLOSED_SEGMENTS`, `OPEN_ENDED_COLLISION`, or `INVALID_INPUT`.
+- [ ] The first 2/3 of the seed is the entry trigger window. After entry, scanning continues to the seed end to find a free exit.
+- [ ] `OPEN_ENDED_COLLISION` never becomes `NO_COLLISION`, never invents an occupied endpoint, and cannot publish a new normal trajectory.
+- [ ] Each closed segment produces original and risk-aware A* guides with one attempt/segment ID, free endpoints, occupancy epoch, immutable P0 snapshot, and query time model.
+- [ ] Occupied nodes remain hard rejected. Unknown, stale, non-finite, timeout, or failed risk search falls back to the current-epoch original guide with an explicit reason.
+- [ ] An occupancy-epoch or request-identity mismatch returns `DECISION_INVALID/REPLAN_REQUIRED`; neither guide is injected and that attempt cannot publish a new normal trajectory.
+- [ ] P4 selects the risk guide only after fixed-200, same-snapshot mean/max risk dominance and the frozen path-length gate pass. Metrics-only mode retains the original guide.
+- [ ] Before P4-G0C freezes thresholds, G0B and calibration run with `p4.metrics_only=true` and `selection_applied=false`; online risk-guide application begins only in G0D.
+- [ ] The selected guide and hash remain traceable through control-point constraints, rebound optimization, refinement, feasibility, and the final B-spline.
+- [ ] P5 final remains the hard integrity gate before normal publish; P5 runtime remains active after publish. P4 and P5 record snapshot generations separately.
+- [ ] P4 remains advisory. EGO occupancy/dynamics keep motion-feasibility authority, and P5 remains the IAP hard integrity gate.
+
+Acceptance:
+
+- Deterministic fixtures cover no collision, closed collision, open-ended collision, multiple obstacles, free endpoints, fallback, and occupancy-epoch change.
+- One event yields auditable original/risk/selected guides with `200/200` valid samples, frozen risk/length/latency gates, and no A* timeout.
+- The selected decision/hash reaches the final B-spline, and a P5 final rejection produces zero normal publication.
+
 ---
