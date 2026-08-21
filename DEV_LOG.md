@@ -927,3 +927,34 @@ Summary: Standards 0 findings; Spec 0 findings. `git diff --check` remains
 clean. Only implementation amend/push and the required final DEV_LOG-only
 handoff commit/push remain; this review does not mark ICRA-010 or Gate-0B PASS,
 authorize phase 2, choose calibration, authorize smoke or issue a next task.
+
+## 2026-08-21T09:03:43Z — ICRA-010 IMPLEMENTATION PUSHED / SUPERVISOR HANDOFF
+
+Implementation commit:
+`5c55c76ad4a8c42dbf44bf1ff1fb3b59cdefa26c` (`fix(ICRA-010): close
+covariance growth status semantics [IAP-RQ-320] [IAP-RQ-321]
+[IAP-RQ-322]`). `git push origin dev/icra` exited 0 and advanced the remote
+from `12c2396` to `5c55c76`; the immediate post-push
+`git rev-list --left-right --count HEAD...origin/dev/icra` result was `0 0`.
+
+Final handoff evidence:
+
+- Standards review: PASS, 0 findings; Spec review: PASS, 0 findings.
+- The two exact regressions passed 1/1 each after their retained RED evidence.
+  The six complete repository-local suites passed 6/6, 41/41, 35/35, 2/2,
+  3/3 and 47/47, for **134/134 PASS**.
+- Runtime linkage resolved the repaired ICRA-010 `libiap.so`; only the
+  unchanged ROS generated typesupport came from the retained ICRA-009 local
+  install facade. All exact commands, output paths and setup diagnostics are
+  recorded above.
+- No task process remains. No main flow, ROS launch, smoke, qualification,
+  bag, RViz, campaign, offline profile, analyzer, benchmark, GPU preflight,
+  phase-2 optimization, rolling/delta/reuse, production calibration or
+  P1/P2/P3/P4/P5 work ran or changed.
+- The preserved `docs/icra27/dev/ICRA_SYSTEM_FLOW.pdf` remains solely
+  untracked and unchanged at SHA-256
+  `1f07da5631a6551a2f98c02d46fd45bc87f2f1e3e7c14e95f9a7f4a0bac844f6`.
+
+This is the required final DEV_LOG-only handoff record. Control returns to
+`SUPERVISOR` review only. `DEEPSEEK` does not mark ICRA-010 or Gate-0B PASS,
+authorize phase 2 or smoke, choose calibration, or issue a next task.
