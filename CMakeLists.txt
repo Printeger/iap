@@ -223,6 +223,12 @@ if(BUILD_WITH_OPENCV)
 endif()
 list(APPEND iap_LIBRARIES iap)
 
+# Repository-local, non-ROS P0 provider profiler (IAP-RQ-320).
+add_executable(iap_predictor_offline_profile
+  apps/iap_predictor_offline_profile.cpp
+)
+target_link_libraries(iap_predictor_offline_profile iap iap_predictor)
+
 # Create shared libraries for estimation modules
 list(APPEND module_srcs
   src/iap/odometry/odometry_estimation_ct_create.cpp
@@ -650,6 +656,10 @@ if(DEFINED ENV{ROS_VERSION})
       add_test(
         NAME test_phase2_summary_schema
         COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test/test_phase2_summary_schema.py
+      )
+      add_test(
+        NAME test_icra006_provider_profile
+        COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test/test_icra006_provider_profile.py
       )
       add_test(
         NAME test_verify_planner_recorder_smoke

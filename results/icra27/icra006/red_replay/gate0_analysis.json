@@ -1,0 +1,52 @@
+{
+  "gate0a": {
+    "reason": "no_runs",
+    "stable_scenarios": [],
+    "status": "NO-GO-P2"
+  },
+  "gate0b": {
+    "expected_refresh_query_count": 76800,
+    "failed_ratio": 0.02702702702702703,
+    "failed_refresh_count": 2,
+    "failures": [
+      "refresh_p95_over_400_ms"
+    ],
+    "gate": "P0_PERFORMANCE_GATE_FAIL",
+    "generation_interval_ms_p50": 650.4311489999992,
+    "generation_interval_ms_p95": 658.0863929999996,
+    "integrity_report_count": 565,
+    "manifest_failures": [],
+    "minimum_successful_generations": 20,
+    "p95_over_refresh_period": 1.3144277758999998,
+    "protocol": "benchmark",
+    "query_shape_ok": true,
+    "recommendations": [
+      "evaluate predictor worker_count",
+      "reduce ICRA ROI",
+      "reduce frozen horizons",
+      "increase refresh period"
+    ],
+    "refresh_elapsed_ms_max": 661.487876,
+    "refresh_elapsed_ms_p50": 649.6330975,
+    "refresh_elapsed_ms_p95": 657.21388795,
+    "schema_version": "gate0_p0_summary_v1",
+    "stale_ratio": 0.5945945945945946,
+    "successful_generation_count": 72,
+    "valid_integrity_report_count": 565
+  },
+  "runs": [
+    {
+      "attempt_count": 0,
+      "critical_violation": false,
+      "manifest_failures": "",
+      "qualified": false,
+      "run_id": "p0-full-grid",
+      "scenario": "gnss_open_sky",
+      "selected_publish_reached": false,
+      "selected_reached_downstream": false,
+      "selected_refinement_reached": false,
+      "selected_update_reached": false,
+      "under_two_success_attempts": 0
+    }
+  ]
+}

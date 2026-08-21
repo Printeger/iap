@@ -322,3 +322,67 @@ Result: **BLOCKED / P0_PERFORMANCE_GATE_FAIL — RETURN TO SUPERVISOR REVIEW**.
 - Gate status is not changed by DEEPSEEK.
 - Two-axis review against task-start `a33beadffa51d4669501d194065bc20da51e36d9`: Standards found the pending final SHA plus non-blocking analyzer/test duplication smells; Spec found the incorrect START HEAD, pending SHA/push, and the ROS default log written outside the repository. The START HEAD is corrected above, the SHA is recorded below, and `/root/.ros/log/2026-08-21-03-51-32-690827-mint-X-365799` (one `launch.log`) was removed at `2026-08-21T03:58:54Z`. The judgement-only duplication smells were not refactored because they are outside the narrow authorized fix.
 - Final implementation commit SHA: `fba4c18dc6e1a8431af516cefbc9f71ded8f03bb`.
+
+## 2026-08-21T04:23:34Z — ICRA-006 START
+
+Branch: dev/icra
+
+Start HEAD: cf367231347e69cb3dec58016a94c2b48397af07
+
+Task/Gate: ICRA-006 / GATE_0B
+
+Requirement: IAP-RQ-320 only
+
+Allowed files:
+- new narrow offline profiler source under `apps/` or `test/`;
+- new narrow analyzer/runner under `scripts/dev_planner/` and its focused test under `test/`;
+- `apps/test_predictor_query_probe.cpp` only for narrow reuse;
+- `include/iap/predictor/predictor_module.hpp`, `src/iap/predictor/predictor_module.cpp`, `test/test_predictor_module.cpp` for additive diagnostics/tests only;
+- root `CMakeLists.txt` only to register the profiler/test;
+- compact evidence under `results/icra27/icra006/`;
+- `docs/CHANGES.md`, `docs/TRACEABILITY.md`, `DEV_LOG.md`.
+
+Scope: repository-local, non-ROS P0 provider diagnosis only. Reproduce the retained ICRA-005 red result offline, profile the exact 12,800-position x 6-horizon logical workload, decide horizon semantics by focused tests, and measure worker counts 1/2/4. Do not select or implement a production optimization, alter formal configuration/thresholds/evidence, or run any ROS/main-flow smoke/qualification/campaign.
+
+Pre-existing untracked file preserved: `docs/icra27/dev/ICRA_SYSTEM_FLOW.pdf`; do not modify, stage, delete, move or regenerate it.
+
+## 2026-08-21T04:41:34Z — ICRA-006 OFFLINE DIAGNOSTIC
+
+### Retained ICRA-005 red replay
+
+Command: `python3 scripts/dev_planner/gate0_analyzer.py --gate0-root results/icra27/icra005/runs/benchmark --output-dir results/icra27/icra006/red_replay`
+
+Exit code: `1` (expected fail-closed reproduction).
+
+Result: gate `P0_PERFORMANCE_GATE_FAIL`; sole failure `refresh_p95_over_400_ms`; 72 successful generations; refresh p95 `657.21388795 ms`. The committed ICRA-005 inputs and original analyzer output were read-only and unchanged.
+
+### Repository-local build and focused tests
+
+| Command | Exit code | Result |
+|---|---:|---|
+| `cmake -S . -B results/icra27/icra006/build -DCMAKE_BUILD_TYPE=RelWithDebInfo -DBUILD_WITH_CUDA=OFF -DBUILD_WITH_VIEWER=OFF -DBUILD_WITH_OPENCV=OFF` | 0 | PASS; all generated build files remain under the repository-local ICRA-006 result root |
+| `cmake --build results/icra27/icra006/build --target iap_predictor_offline_profile test_predictor_module -j2` | 0 | PASS |
+| `LD_LIBRARY_PATH="$PWD/results/icra27/icra006/build${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" results/icra27/icra006/build/test_predictor_module` | 0 | PASS 37/37, including six-horizon full scientific-field equivalence, explicit freshness reference and preserved batch/scalar equivalence |
+| `python3 -m unittest discover -s test -p 'test_icra006_provider_profile.py' -v` | 0 | PASS 1/1 machine-readable evidence contract |
+| `TMPDIR="$PWD/results/icra27/icra006/tmp" LD_LIBRARY_PATH="$PWD/results/icra27/icra006/build${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" ctest --test-dir results/icra27/icra006/build --output-on-failure` | 0 | PASS 28/28 complete registered IAP suite; temporary files redirected inside repository |
+
+The initial expected TDD red build failed only because `PredictorBatchDiagnostics` did not yet contain the three advisory invocation fields. One later direct test invocation loaded the old workspace-installed `libiap.so` and reported zero new counts; binding `LD_LIBRARY_PATH` to the repository-local build corrected the test environment, after which all focused tests passed. A separate Python module-style invocation failed because `test/` is not a package; the repository-standard discovery invocation above passed.
+
+### Production-shaped offline profile
+
+Command: `LD_LIBRARY_PATH="$PWD/results/icra27/icra006/build${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" results/icra27/icra006/build/iap_predictor_offline_profile --output results/icra27/icra006/p0_provider_profile.json --warmup 2 --iterations 7`
+
+Exit code: `0`; evidence `results/icra27/icra006/p0_provider_profile.json`; schema `p0_provider_offline_profile_v1`; status `PASS`; monotonic clock; `RelWithDebInfo`; CPU count 20.
+
+- Exact shape: `40 x 40 x 8 = 12,800` positions, horizons `0.0,0.5,1.0,1.5,2.0,2.5 s`, `76,800` logical and actually dispatched Predictor queries; every spatial group contains all six horizons.
+- Stable result contract: all 21 measured iterations are finite; all use scientific checksum `3776ad258ee63da7`; validity/source/flag counts are identical; horizon scientific mismatch count is zero. Every iteration has 76,800 GNSS and fusion invocations, 12,800 LiDAR evaluations, and 64,000 LiDAR cache hits.
+- Scientific equivalence whitelist: Predictor top-level status/query-source/source-flags and every GNSS, LiDAR and fusion result field. Metadata whitelist: `query_position_map`, `query_time_s`, `horizon_s`, `frame_id`. Explicit `snapshot.stamp` freshness reference is required; using the future query time correctly becomes stale.
+- Worker 1: provider p50/p95 `592.727364 / 595.4353094 ms`, speedup `1.0`, above diagnostic 400 ms budget.
+- Worker 2: provider p50/p95 `327.056405 / 330.3310191 ms`, speedup `1.8123092988`, below diagnostic 400 ms budget.
+- Worker 4: provider p50/p95 `188.959196 / 190.5518833 ms`, speedup `3.1368008361`, below diagnostic 400 ms budget.
+- Worker-1 cumulative component p50 ranking: GNSS advisory `428.049833 ms`; fusion advisory `55.932083 ms`; LiDAR advisory `28.936740 ms`. Other labelled p50 regions: grouping/index `2.623363 ms`, module setup `0.000904 ms`, input construction `12.688970 ms`, result materialization `6.267024 ms`.
+- Component timers are explicit opt-in for this profiler. Default Predictor callers retain counters without per-component clock sampling. Nested/cumulative worker timings are labelled non-additive relative to the outer provider wall time.
+
+No ROS launch, smoke, qualification, bag, RViz, campaign, formal configuration/threshold/algorithm/caching change, P1/P2/P3/P4/P5 work or production optimization selection occurred. Gate-0B remains `BLOCKED_PERFORMANCE`; return measurements to Supervisor for review.
+
+Final implementation commit SHA: `PENDING_COMMIT`.

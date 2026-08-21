@@ -1,5 +1,16 @@
 # Traceability Matrix (IAP)
 
+## 2026-08-21 ICRA-006 offline P0 provider diagnosis
+
+| Req ID | Requirement/evidence seam | Implementation and retained evidence | Status |
+|---|---|---|---|
+| IAP-RQ-320 | Retained ICRA-005 performance failure must reproduce without ROS or retained-output mutation | Current `gate0_analyzer.py` over committed ICRA-005 benchmark input; new `results/icra27/icra006/red_replay/` | **REPRODUCED: exit 1, sole `refresh_p95_over_400_ms`, 72 generations, p95 657.21388795 ms** |
+| IAP-RQ-320 | Offline diagnostic must execute the production-shaped 12,800-position x six-horizon Predictor workload and expose disjoint/labelled cost evidence | `iap_predictor_offline_profile.cpp`; opt-in timings and additive counters in `predictor_module.hpp/.cpp`; `p0_provider_profile.json` | **PASS: 76,800 logical/dispatched queries; GNSS/fusion 76,800 calls, LiDAR 12,800 evaluations + 64,000 cache hits; all timings finite** |
+| IAP-RQ-320 | Horizon reuse semantics must be decided by tests with freshness behavior and preserved scalar/batch equivalence | `FrozenSnapshotScientificFieldsAreInvariantAcrossSixHorizons`, `FreshnessReferenceNotFutureQueryTimeControlsSixHorizonValidity`, and the six-horizon batch/scalar regression in `test_predictor_module.cpp` | **HORIZON-INVARIANT under fixed P0 snapshot reference; all scientific fields equal, metadata whitelist explicit; 37/37 tests PASS** |
+| IAP-RQ-320 | Worker 1/2/4 diagnostics must preserve scientific results and report stable checksums/counts plus p50/p95/speedup | `p0_provider_profile.json`; `test_icra006_provider_profile.py` | **PASS: checksum `3776ad258ee63da7`; p50 speedup 1.0/1.8123093/3.1368008; provider p95 595.4353/330.3310/190.5519 ms; zero failed/non-finite iterations** |
+
+ICRA-006 is diagnostic-only. It does not change the formal worker count, Gate threshold, launch/profile, Predictor scientific results or caching behavior, and it does not select a production optimization. No ROS/main-flow smoke, qualification, bag, RViz, campaign or P4/P5 work ran.
+
 ## 2026-08-21 ICRA-005 retained evidence closure and fixed P0 benchmark
 
 | Req ID | Requirement/evidence seam | Implementation and retained evidence | Status |

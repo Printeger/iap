@@ -1,6 +1,7 @@
 #pragma once
 // Public entry point for the independent advisory Predictor module.
 
+#include <cstdint>
 #include <memory>
 #include <vector>
 
@@ -13,10 +14,17 @@
 namespace iap {
 
 struct PredictorBatchDiagnostics {
+  bool collect_component_timing = false;
   std::size_t query_count = 0;
   std::size_t unique_positions = 0;
   std::size_t lidar_evaluations = 0;
   std::size_t lidar_cache_hits = 0;
+  std::size_t gnss_advisory_invocations = 0;
+  std::size_t lidar_advisory_invocations = 0;
+  std::size_t fusion_advisory_invocations = 0;
+  std::uint64_t gnss_advisory_duration_ns = 0;
+  std::uint64_t lidar_advisory_duration_ns = 0;
+  std::uint64_t fusion_advisory_duration_ns = 0;
 };
 
 class PredictorModule {
@@ -45,7 +53,8 @@ class PredictorModule {
   FusionAdvisoryPredictor fusion_;
   PredictorQueryResult queryWithLidar(
       const PredictorQueryInput& input,
-      const LidarAdvisoryResult* cached_lidar) const;
+      const LidarAdvisoryResult* cached_lidar,
+      PredictorBatchDiagnostics* diagnostics) const;
 };
 
 }  // namespace iap

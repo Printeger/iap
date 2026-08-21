@@ -1,5 +1,6 @@
 #include <iap/predictor/predictor_module.hpp>
 
+#include <chrono>
 #include <cmath>
 #include <unordered_map>
 #include <utility>
@@ -257,12 +258,13 @@ void PredictorModule::set_lidar_map_points(
 
 PredictorQueryResult PredictorModule::query(
     const PredictorQueryInput& input) const {
-  return queryWithLidar(input, nullptr);
+  return queryWithLidar(input, nullptr, nullptr);
 }
 
 PredictorQueryResult PredictorModule::queryWithLidar(
     const PredictorQueryInput& input,
-    const LidarAdvisoryResult* cached_lidar) const {
+    const LidarAdvisoryResult* cached_lidar,
+    PredictorBatchDiagnostics* diagnostics) const {
   PredictorQueryResult out;
   out.query_position_map = input.query_position_map;
   out.query_time_s = input.query_time_s;
@@ -339,8 +341,20 @@ PredictorQueryResult PredictorModule::queryWithLidar(
       gnss_unavailable_reason = "no_gnss_epoch";
     }
     if (gnss_unavailable_reason.empty()) {
+      const auto begin = diagnostics && diagnostics->collect_component_timing
+                             ? std::chrono::steady_clock::now()
+                             : std::chrono::steady_clock::time_point{};
       out.gnss = gnss_.query(working_input.query_position_map,
                              working_input.snapshot);
+      if (diagnostics) {
+        ++diagnostics->gnss_advisory_invocations;
+        if (diagnostics->collect_component_timing) {
+          diagnostics->gnss_advisory_duration_ns +=
+              static_cast<std::uint64_t>(
+                  std::chrono::duration_cast<std::chrono::nanoseconds>(
+                      std::chrono::steady_clock::now() - begin).count());
+        }
+      }
     } else {
       out.gnss = disabled_gnss_result(gnss_unavailable_reason);
     }
@@ -349,14 +363,40 @@ PredictorQueryResult PredictorModule::queryWithLidar(
   }
 
   if (source_allows_lidar(params_.source_mode)) {
-    out.lidar = cached_lidar
-                    ? *cached_lidar
-                    : lidar_.query(working_input.query_position_map,
-                                   working_input.snapshot);
+    if (cached_lidar) {
+      out.lidar = *cached_lidar;
+    } else {
+      const auto begin = diagnostics && diagnostics->collect_component_timing
+                             ? std::chrono::steady_clock::now()
+                             : std::chrono::steady_clock::time_point{};
+      out.lidar = lidar_.query(working_input.query_position_map,
+                               working_input.snapshot);
+      if (diagnostics) {
+        ++diagnostics->lidar_advisory_invocations;
+        if (diagnostics->collect_component_timing) {
+          diagnostics->lidar_advisory_duration_ns +=
+              static_cast<std::uint64_t>(
+                  std::chrono::duration_cast<std::chrono::nanoseconds>(
+                      std::chrono::steady_clock::now() - begin).count());
+        }
+      }
+    }
   } else {
     out.lidar = disabled_lidar_result("lidar_disabled");
   }
+  const auto fusion_begin = diagnostics && diagnostics->collect_component_timing
+                                ? std::chrono::steady_clock::now()
+                                : std::chrono::steady_clock::time_point{};
   out.fused = fusion_.query(working_input.snapshot, out.gnss, out.lidar);
+  if (diagnostics) {
+    ++diagnostics->fusion_advisory_invocations;
+    if (diagnostics->collect_component_timing) {
+      diagnostics->fusion_advisory_duration_ns +=
+          static_cast<std::uint64_t>(
+              std::chrono::duration_cast<std::chrono::nanoseconds>(
+                  std::chrono::steady_clock::now() - fusion_begin).count());
+    }
+  }
   out.available = out.fused.available;
   out.valid = out.fused.valid;
   out.fallback = out.fused.fallback;
@@ -405,6 +445,8 @@ std::vector<PredictorQueryResult> PredictorModule::queryBatch(
   };
 
   PredictorBatchDiagnostics local;
+  local.collect_component_timing =
+      diagnostics && diagnostics->collect_component_timing;
   local.query_count = inputs.size();
   std::unordered_map<Key, LidarAdvisoryResult, Hash> lidar_cache;
   lidar_cache.reserve(inputs.size());
@@ -419,7 +461,7 @@ std::vector<PredictorQueryResult> PredictorModule::queryBatch(
     const auto cached = cacheable ? lidar_cache.find(key) : lidar_cache.end();
     const LidarAdvisoryResult* cached_lidar =
         cached == lidar_cache.end() ? nullptr : &cached->second;
-    PredictorQueryResult result = queryWithLidar(input, cached_lidar);
+    PredictorQueryResult result = queryWithLidar(input, cached_lidar, &local);
     if (cached_lidar) {
       ++local.lidar_cache_hits;
     } else if (cacheable &&
