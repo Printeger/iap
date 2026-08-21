@@ -594,3 +594,36 @@ the synthetic experiment inventory, launch-scope, rebuild-reason counter and
 verification-record gaps; all four report findings were corrected. Its final
 procedural handoff finding remains pending until the report commit is pushed
 and its SHA is recorded in the required final DEV_LOG-only commit.
+
+## 2026-08-21T06:57:26Z — ICRA-008 COMPLETE / SUPERVISOR HANDOFF
+
+Report commit:
+`a6d863e5c58c037e3aff4f3e712e1815f99259e6`
+(`docs(ICRA-008): audit P0 semantic seams [IAP-RQ-312] [IAP-RQ-314]
+[IAP-RQ-320] [IAP-RQ-321] [IAP-RQ-322]`).
+
+`git push origin dev/icra` exited 0 and advanced the remote from `6c122a3` to
+`a6d863e`; the immediate
+`git rev-list --left-right --count HEAD...origin/dev/icra` check exited 0 with
+`0 0`.
+
+Required two-axis closure review of the report commit:
+
+- Standards: PASS, no findings; allowed-file scope, requirement IDs, ownership,
+  map-LOS and empirical covariance-growth conventions conform.
+- Spec: PASS, no remaining content findings; the synthetic experiment
+  inventory, launch/config exclusion, `last_full_rebuild_reason`, and identical
+  exact verification records are all closed.
+
+Only this final `DEV_LOG.md` handoff record follows the report commit. The
+untracked `docs/icra27/dev/ICRA_SYSTEM_FLOW.pdf` remains unstaged and unchanged
+at SHA-256
+`1f07da5631a6551a2f98c02d46fd45bc87f2f1e3e7c14e95f9a7f4a0bac844f6`.
+No task process remains. No ROS-aware test, main flow, launch, smoke,
+qualification, GPU preflight, benchmark, P4/P5 development or external write
+was performed.
+
+Disposition: `IMPLEMENTATION_READY_FOR_ICRA009_REVIEW`. ICRA-008 is complete
+and returned to SUPERVISOR review. This handoff does not authorize ICRA-009 or
+change GATE_0B; production `sigma_grow_m_sqrt_s` remains fail closed pending
+explicit scientific provenance and configuration authority.
