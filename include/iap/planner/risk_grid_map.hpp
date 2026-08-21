@@ -81,6 +81,7 @@ struct P5_7RejectedTrajectoryFixtureConfig {
 
 struct RiskGridMapParams {
   std::string frame_id = "map";
+  Eigen::Vector3d lattice_anchor_w = Eigen::Vector3d::Zero();
   double resolution_m = 0.75;
   double size_x_m = 30.0;
   double size_y_m = 30.0;
@@ -300,7 +301,7 @@ class RiskGridMap {
 
   const RiskGridMapParams& params() const { return params_; }
   const Eigen::Vector3i& voxelNum() const { return voxel_num_; }
-  const Eigen::Vector3d& origin() const { return origin_; }
+  Eigen::Vector3d origin() const;
 
   bool posToIndex(const Eigen::Vector3d& pos, Eigen::Vector3i* id) const;
   Eigen::Vector3d indexToPos(const Eigen::Vector3i& id) const;
@@ -334,12 +335,13 @@ class RiskGridMap {
  private:
   bool validateParams(const RiskGridMapParams& params,
                       std::string* reason) const;
-  void updateGeometry(const Eigen::Vector3d& center_w);
 
   mutable std::mutex mutex_;
+  std::mutex refresh_mutex_;
   RiskGridMapParams params_;
   Eigen::Vector3i voxel_num_ = Eigen::Vector3i::Zero();
   Eigen::Vector3d origin_ = Eigen::Vector3d::Zero();
+  uint64_t configuration_epoch_ = 0;
   uint64_t next_generation_id_ = 1;
   RiskGridHealth health_;
   std::shared_ptr<const RiskGridSnapshot::Generation> active_;

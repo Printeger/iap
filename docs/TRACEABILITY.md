@@ -1,5 +1,19 @@
 # Traceability Matrix (IAP)
 
+## 2026-08-21 ICRA-013 phase-3A fixed world lattice
+
+| Req ID | Requirement/evidence seam | Implementation and focused evidence | Status |
+|---|---|---|---|
+| IAP-RQ-320 / IAP-RQ-322 | Window geometry must use one anchor-relative integer world lattice with frozen even-side and negative-floor rules | `RiskGridMapParams::lattice_anchor_w`; internal integer world/lower keys in `risk_grid_map.cpp`; default/even/negative, same-key, one-cell, multi-axis and non-zero-anchor regressions in `test_risk_grid_map.cpp` | **IMPLEMENTED / REVIEW PENDING: bitwise-stable same-key origins/query positions and exact resolution-multiple crossings** |
+| IAP-RQ-320 / IAP-RQ-322 | Proposed geometry and complete voxel data must publish atomically, while every failed shifted refresh retains the previous coherent generation | local proposed origin; serialized refresh writers; configuration epoch recheck in the success lock; mutex-protected value-return `origin()`; shifted provider, occupancy/prior and deterministic configure/concurrent-refresh regressions compare generation, origin and every ordered voxel | **IMPLEMENTED / REVIEW PENDING: failed/stale refresh never exposes proposed geometry; concurrent refresh IDs remain unique** |
+| IAP-RQ-320 | Fixed lattice must not silently become a delta/reuse optimization or change scientific query semantics | snapped-origin full-order/scalar-affine regression; complete root, Predictor, local occupancy, frozen epoch, adapters and P1–P5/P0 linked-consumer suites; runtime linkage log | **VERIFIED / REVIEW PENDING: 286/286 PASS against current repository-local ICRA-013 `libiap.so`; full non-occupied provider dispatch retained** |
+
+ICRA-013 is fixed-lattice geometry and atomic publication only. It does not add
+ring storage, entering-slab dispatch, cross-refresh cache/version/TTL logic,
+partial publication, restamping or performance savings, and it does not qualify
+Gate-0B. No main flow, ROS launch, smoke, qualification, analyzer, benchmark,
+GPU preflight, calibration or P1/P2/P3/P4/P5 behavior change ran.
+
 ## 2026-08-21 ICRA-012 phase-2 legacy diagnostic review repair
 
 | Req ID | Requirement/evidence seam | Implementation and focused evidence | Status |

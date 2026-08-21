@@ -1306,3 +1306,144 @@ Final handoff evidence:
 This final DEV_LOG-only commit returns control to `SUPERVISOR` review.
 `DEEPSEEK` does not mark ICRA-011/012 or Gate-0B PASS, start phase 3, choose
 production calibration, authorize smoke or issue a next task.
+
+## 2026-08-21T11:45:20Z — ICRA-013 START
+
+Start HEAD: `61376de73544fbe9afb0a26103e19c0e5ace6ea1` after required
+`dev/icra` synchronization (`HEAD...origin/dev/icra = 0 0`, no pull).
+Active task: `ICRA-013 / GATE_0B`, phase-3A fixed world lattice and atomic
+geometry publication only.
+
+Exact allowlist:
+
+- `include/iap/planner/risk_grid_map.hpp`
+- `src/iap/planner/risk_grid_map.cpp`
+- `test/test_risk_grid_map.cpp`
+- `DEV_LOG.md`
+- `docs/CHANGES.md`
+- `docs/TRACEABILITY.md`
+
+Fixed contract: integer world keys use mathematical floor relative to a
+finite world-frame lattice anchor (default map origin); lower keys subtract
+`floor(voxel_num/2)`, fixing an even 40-cell axis at local index 20; voxel
+centres remain `origin + (index + 0.5) * resolution`. Proposed origin and all
+voxel data must publish atomically only after complete provider/source
+validation success. Failed shifted refreshes retain generation ID, origin,
+ordered voxels and public `origin()`.
+
+Explicit no-cache boundary: every successful refresh continues full provider
+evaluation/materialization. No ring storage, entering-slab-only calls,
+cross-refresh evidence/result reuse, TTL/delta/watchdog, partial publication,
+calibration, worker/default/workload change, ROS parameter/YAML/launch knob,
+main flow, ROS launch, smoke, qualification, benchmark, analyzer, GPU work or
+P1/P2/P3/P4/P5 behavior is authorized. All generated output stays below
+`results/icra27/icra013/`. The retained ICRA-011 JSON remains read-only at
+SHA-256 `778abd22158805c41150b4eeed9c37a3f660237a0bb0599e9a567e3533c7b32c`.
+The protected PDF remains solely untracked and unchanged at SHA-256
+`1f07da5631a6551a2f98c02d46fd45bc87f2f1e3e7c14e95f9a7f4a0bac844f6`.
+
+## 2026-08-21T12:02:55Z — ICRA-013 IMPLEMENTATION / VERIFICATION COMPLETE, REVIEW PENDING
+
+`RiskGridMapParams` now contains only the minimum finite world-frame lattice
+anchor, defaulting to zero. `RiskGridMap` derives a proposed origin from
+anchor-relative integer keys using mathematical floor and the frozen
+`voxel_num / 2` lower-key offset. Proposed geometry remains local throughout
+provider evaluation and both source-validation checks; only a complete
+successful generation commits the immutable snapshot and public origin under
+one lock. A failed shifted provider, occupancy validation or prior validation
+therefore retains the previous generation ID, origin, ordered voxels and public
+map origin. Every successful refresh still dispatches every non-occupied
+logical query and materializes every configured horizon in the existing order.
+
+TDD evidence:
+
+| Slice | RED | GREEN |
+|---|---|---|
+| Default anchor / even side / negative floor | `logs/red_test_fixed_lattice_default.log`, exit 1: old continuous origin `(-2.1,-1.8,-1.1)` instead of `(-3,-2,-2)` | `logs/green_test_fixed_lattice_default.log`, 1/1 PASS |
+| Complete lattice and atomic-retention contract | focused filter in `logs/test_fixed_lattice_focused.log` | 9/9 PASS: same-key ordered queries, exact crossings, anchor validation, reconfigure, full science and shifted failure retention |
+| Two-axis review atomicity closure | Spec review identified concurrent configure/refresh publication, duplicate concurrent generation IDs, unlocked public-origin reads and missing stationary coverage | `logs/test_review_atomicity_repair.log`, 2/2 PASS: configuration epoch rejection, serialized refresh IDs, locked value-origin and exact stationary refresh |
+
+All commands below ran from `/home/dev/ws_iap/src/iap`; all output stayed under
+`results/icra27/icra013/`. Root configuration used `build_root`. The current
+root library was built there. A repository-local install attempt stopped
+fail-closed because unrelated non-task odometry targets had not been built;
+no external output was created. Planner consumers therefore used the retained
+repository-local ICRA-009 generated ROS typesupport facade with current source
+headers forced first, while runtime `LD_LIBRARY_PATH` forced the current
+ICRA-013 `build_root/libiap.so`. Plan environment, P4 path searching, P1
+B-spline optimization and plan-manage used `build_plan_env`,
+`build_path_searching`, `build_bspline_opt` and `build_plan_manage` respectively.
+Their corresponding installs remained below the same ICRA-013 result root.
+
+Exact principal build commands and exits:
+
+| Command | Exit | Evidence |
+|---|---:|---|
+| `cmake -S . -B results/icra27/icra013/build_root -DCMAKE_BUILD_TYPE=RelWithDebInfo -DBUILD_WITH_CUDA=ON -DBUILD_WITH_VIEWER=ON -DBUILD_WITH_OPENCV=ON` | 0 | `logs/configure_root.log` |
+| `cmake --build results/icra27/icra013/build_root --target test_risk_grid_map test_predictor_module test_local_occupancy test_pi_cost_adapter test_unified_risk_grid -j2` | 0 | `logs/build_root_post_review.log`; final risk-grid rebuild in `logs/build_review_atomicity_repair.log` |
+| `cmake --build results/icra27/icra013/build_plan_env --target plan_env test_grid_map_occupancy_epoch -j2` | 0 | `logs/build_plan_env.log` |
+| `cmake --build results/icra27/icra013/build_path_searching --target path_searching test_p4_risk_astar -j2` | 0 | `logs/build_path_searching.log` |
+| `cmake --build results/icra27/icra013/build_bspline_opt --target bspline_opt test_p1_integrity_cost -j2` | 0 | `logs/build_bspline_opt.log` |
+| `cmake --build results/icra27/icra013/build_plan_manage --target test_p2_candidate_ranking test_p3_reference_bias test_planning_risk_context test_p5_runtime_integrity_gate test_p0_risk_grid_runtime test_p0_occupancy_epoch_adapter -j2` | 0 | `logs/build_plan_manage_consumers.log` |
+
+Exact run convention: root tests used
+`LD_LIBRARY_PATH="$PWD/results/icra27/icra013/build_root${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"`.
+Planner tests additionally prepended current `build_plan_manage`,
+`build_bspline_opt`, `build_path_searching`, `build_plan_env` and their local
+install `lib` directories; each set `ROS_HOME`, `ROS_LOG_DIR` and `TMPDIR` to
+its named subdirectory below `results/icra27/icra013/`. The exact executable
+paths, exits and results were:
+
+| Executable | Exit | Result / log |
+|---|---:|---|
+| `results/icra27/icra013/build_root/test_risk_grid_map` | 0 | 43/43; `logs/test_risk_grid_map_full.log` |
+| `results/icra27/icra013/build_root/test_local_occupancy` | 0 | 6/6; `logs/test_local_occupancy.log` |
+| `results/icra27/icra013/build_root/test_predictor_module` with `IAP_TEST_ARTIFACT_DIR=$PWD/results/icra27/icra013/test_artifacts/predictor` | 0 | 45/45; `logs/test_predictor_module.log` |
+| `results/icra27/icra013/build_root/test_pi_cost_adapter` | 0 | 11/11; `logs/test_pi_cost_adapter.log` |
+| `results/icra27/icra013/build_root/test_unified_risk_grid` | 0 | 11/11; `logs/test_unified_risk_grid.log` |
+| `results/icra27/icra013/build_plan_env/test_grid_map_occupancy_epoch` | 0 | 2/2; `logs/test_grid_map_occupancy_epoch.log` |
+| `results/icra27/icra013/build_bspline_opt/test_p1_integrity_cost` | 0 | 39/39; `logs/test_p1_integrity_cost.log` |
+| `results/icra27/icra013/build_plan_manage/test_p2_candidate_ranking` | 0 | 6/6; `logs/test_p2_candidate_ranking.log` |
+| `results/icra27/icra013/build_plan_manage/test_p3_reference_bias` | 0 | 9/9; `logs/test_p3_reference_bias.log` |
+| `results/icra27/icra013/build_plan_manage/test_planning_risk_context` | 0 | 26/26; `logs/test_planning_risk_context.log` |
+| `results/icra27/icra013/build_path_searching/test_p4_risk_astar` | 0 | 4/4; `logs/test_p4_risk_astar.log` |
+| `results/icra27/icra013/build_plan_manage/test_p5_runtime_integrity_gate` | 0 | 33/33; `logs/test_p5_runtime_integrity_gate.log` |
+| `results/icra27/icra013/build_plan_manage/test_p0_occupancy_epoch_adapter` | 0 | 3/3; `logs/test_p0_occupancy_epoch_adapter.log` |
+| `results/icra27/icra013/build_plan_manage/test_p0_risk_grid_runtime` | 0 | 48/48; `logs/test_p0_risk_grid_runtime.log` |
+
+Total: **286/286 PASS**. `logs/runtime_linkage.log` checks each required P1,
+P2, P3, planning-context, P4, P5 and P0 binary with `ldd`; every one resolves
+`libiap.so` to
+`/home/dev/ws_iap/src/iap/results/icra27/icra013/build_root/libiap.so`.
+
+The retained ICRA-011 JSON was not regenerated or staged and remains exactly
+SHA-256 `778abd22158805c41150b4eeed9c37a3f660237a0bb0599e9a567e3533c7b32c`.
+The protected PDF remains solely untracked and exactly SHA-256
+`1f07da5631a6551a2f98c02d46fd45bc87f2f1e3e7c14e95f9a7f4a0bac844f6`.
+No main flow, ROS launch, smoke, qualification, bag, RViz, campaign, Gate
+analyzer, benchmark, GPU preflight, performance/calibration selection,
+ring/cache optimization or P1/P2/P3/P4/P5 product work ran or changed.
+ICRA-013 and Gate-0B are not marked PASS; two-axis review, explicit staging,
+implementation commit/push and final DEV_LOG-only handoff remain.
+
+## 2026-08-21T12:16:55Z — ICRA-013 TWO-AXIS REVIEW CLOSURE / PRE-PUSH
+
+Standards review: **PASS, zero remaining findings**. Spec review initially
+identified concurrent refresh generation-ID reuse, stale in-flight publication
+across `configure()`, an unlocked reference-return public origin and missing
+stationary coverage. The repair serializes refresh writers, rechecks a clearly
+named configuration epoch in the success publication lock, returns public
+origin by locked value, and adds deterministic stationary/configure/concurrent-
+refresh coverage with fail-safe provider release. Spec re-review: **PASS, zero
+remaining findings**. A final Standards re-review also passed after CHANGES and
+TRACEABILITY explicitly recorded the interface/logic repair and regression.
+
+Post-review focused atomicity tests pass 2/2 in
+`logs/test_review_atomicity_repair.log`; the complete root suite passes 43/43
+and all repository-local retained/downstream suites pass 286/286 against the
+current ICRA-013 library. `git diff --check` is clean. Only the six authorized
+files differ from start commit `61376de73544fbe9afb0a26103e19c0e5ace6ea1`.
+The retained JSON/PDF hashes remain exact, the PDF remains solely untracked,
+and no ICRA-013 build/test process remains. The implementation commit and push,
+then a final DEV_LOG-only handoff commit/push, remain; Supervisor alone reviews
+and decides ICRA-013/phase-3/Gate-0B status.

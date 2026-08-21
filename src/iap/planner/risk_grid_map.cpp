@@ -27,6 +27,43 @@ bool finite_nonnegative(const double v) {
   return std::isfinite(v) && v >= 0.0;
 }
 
+using WorldVoxelKey = Eigen::Matrix<std::int64_t, 3, 1>;
+
+bool fixed_lattice_origin(const Eigen::Vector3d& position_w,
+                          const RiskGridMapParams& params,
+                          const Eigen::Vector3i& voxel_num,
+                          Eigen::Vector3d* origin_w) {
+  if (origin_w == nullptr || !position_w.allFinite() ||
+      !params.lattice_anchor_w.allFinite() ||
+      !finite_positive(params.resolution_m)) {
+    return false;
+  }
+
+  constexpr double kMaxExactInteger = 9007199254740991.0;
+  WorldVoxelKey center_key;
+  WorldVoxelKey lower_key;
+  for (int i = 0; i < 3; ++i) {
+    const double floored_key = std::floor(
+        (position_w(i) - params.lattice_anchor_w(i)) /
+        params.resolution_m);
+    const std::int64_t half_extent =
+        static_cast<std::int64_t>(voxel_num(i) / 2);
+    const double min_center_key = -kMaxExactInteger +
+                                  static_cast<double>(half_extent);
+    const double max_center_key = kMaxExactInteger;
+    if (!std::isfinite(floored_key) || floored_key < min_center_key ||
+        floored_key > max_center_key) {
+      return false;
+    }
+    center_key(i) = static_cast<std::int64_t>(floored_key);
+    lower_key(i) = center_key(i) - half_extent;
+    (*origin_w)(i) = params.lattice_anchor_w(i) +
+                     params.resolution_m *
+                         static_cast<double>(lower_key(i));
+  }
+  return origin_w->allFinite();
+}
+
 double clamp_cost(const double value, const double max_value) {
   if (!std::isfinite(value)) {
     return std::numeric_limits<double>::quiet_NaN();
@@ -780,17 +817,27 @@ bool RiskGridMap::configure(RiskGridMapParams params, std::string* reason) {
     }
     return false;
   }
+  Eigen::Vector3i voxel_num;
+  for (int i = 0; i < 3; ++i) {
+    const double size = i == 0 ? params.size_x_m
+                        : i == 1 ? params.size_y_m
+                                 : params.size_z_m;
+    voxel_num(i) = static_cast<int>(std::ceil(size / params.resolution_m));
+  }
+  Eigen::Vector3d origin;
+  if (!fixed_lattice_origin(params.lattice_anchor_w, params, voxel_num,
+                            &origin)) {
+    if (reason) {
+      *reason = "invalid_geometry";
+    }
+    return false;
+  }
+
   std::lock_guard<std::mutex> lock(mutex_);
   params_ = std::move(params);
-  for (int i = 0; i < 3; ++i) {
-    const double size = i == 0 ? params_.size_x_m
-                        : i == 1 ? params_.size_y_m
-                                 : params_.size_z_m;
-    voxel_num_(i) = static_cast<int>(std::ceil(size / params_.resolution_m));
-  }
-  origin_ = Eigen::Vector3d(-0.5 * params_.size_x_m,
-                            -0.5 * params_.size_y_m,
-                            -0.5 * params_.size_z_m);
+  voxel_num_ = voxel_num;
+  origin_ = origin;
+  ++configuration_epoch_;
   next_generation_id_ = 1;
   active_.reset();
   health_ = RiskGridHealth{};
@@ -825,6 +872,11 @@ std::shared_ptr<const RiskGridSnapshot> RiskGridMap::acquireSnapshot() const {
   }
   return std::shared_ptr<const RiskGridSnapshot>(
       new RiskGridSnapshot(active_));
+}
+
+Eigen::Vector3d RiskGridMap::origin() const {
+  std::lock_guard<std::mutex> lock(mutex_);
+  return origin_;
 }
 
 bool RiskGridMap::posToIndex(const Eigen::Vector3d& pos,
@@ -925,6 +977,7 @@ bool RiskGridMap::refreshFromProvider(
     const OccupancyDiagnosticQuery& occupancy_query,
     const SourceValidator& source_validator,
     std::string* reason) {
+  std::lock_guard<std::mutex> refresh_lock(refresh_mutex_);
   if (!uav_position_w.allFinite() || !std::isfinite(now_s)) {
     if (reason) {
       *reason = "invalid_refresh_input";
@@ -961,14 +1014,22 @@ bool RiskGridMap::refreshFromProvider(
   RiskGridMapParams params_copy;
   Eigen::Vector3i voxel_num_copy;
   Eigen::Vector3d origin_copy;
+  uint64_t configuration_epoch = 0;
   uint64_t generation_id = 0;
   {
     std::lock_guard<std::mutex> lock(mutex_);
-    updateGeometry(uav_position_w);
     params_copy = params_;
     voxel_num_copy = voxel_num_;
-    origin_copy = origin_;
+    configuration_epoch = configuration_epoch_;
     generation_id = next_generation_id_;
+  }
+  if (!fixed_lattice_origin(uav_position_w, params_copy, voxel_num_copy,
+                            &origin_copy)) {
+    if (reason) {
+      *reason = "invalid_refresh_input";
+    }
+    markRefreshFailure(now_s, "invalid_refresh_input");
+    return false;
   }
 
   const int layer_size =
@@ -1232,8 +1293,15 @@ bool RiskGridMap::refreshFromProvider(
 
   {
     std::lock_guard<std::mutex> lock(mutex_);
+    if (configuration_epoch != configuration_epoch_) {
+      if (reason) {
+        *reason = "configuration_changed";
+      }
+      return false;
+    }
     active_ = next;
     health_ = new_health;
+    origin_ = origin_copy;
     next_generation_id_ = generation_id + 1;
   }
   if (reason) {
@@ -1272,6 +1340,10 @@ bool RiskGridMap::validateParams(const RiskGridMapParams& params,
     if (reason) *reason = "invalid_geometry";
     return false;
   }
+  if (!params.lattice_anchor_w.allFinite()) {
+    if (reason) *reason = "invalid_lattice_anchor";
+    return false;
+  }
   if (params.horizons_s.empty()) {
     if (reason) *reason = "empty_horizons";
     return false;
@@ -1297,12 +1369,6 @@ bool RiskGridMap::validateParams(const RiskGridMapParams& params,
     *reason = "ok";
   }
   return true;
-}
-
-void RiskGridMap::updateGeometry(const Eigen::Vector3d& center_w) {
-  origin_ = center_w - Eigen::Vector3d(0.5 * params_.size_x_m,
-                                      0.5 * params_.size_y_m,
-                                      0.5 * params_.size_z_m);
 }
 
 }  // namespace iap
