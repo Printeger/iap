@@ -227,7 +227,9 @@ list(APPEND iap_LIBRARIES iap)
 add_executable(iap_predictor_offline_profile
   apps/iap_predictor_offline_profile.cpp
 )
-target_link_libraries(iap_predictor_offline_profile iap iap_predictor)
+target_link_libraries(iap_predictor_offline_profile
+  iap iap_predictor iap_planner_risk_grid
+)
 
 # Create shared libraries for estimation modules
 list(APPEND module_srcs
@@ -639,6 +641,12 @@ if(DEFINED ENV{ROS_VERSION})
       target_link_libraries(test_future_pl_field_predictor iap iap_prediction_integrity)
       ament_add_gtest(test_predictor_module test/test_predictor_module.cpp)
       target_link_libraries(test_predictor_module iap iap_predictor)
+      ament_add_gtest(test_predictor_risk_conversion
+        test/test_predictor_risk_conversion.cpp
+      )
+      target_link_libraries(test_predictor_risk_conversion
+        iap iap_predictor iap_planner_risk_grid
+      )
       ament_add_gtest(test_risk_grid_map test/test_risk_grid_map.cpp)
       target_link_libraries(test_risk_grid_map iap iap_planner_risk_grid)
       ament_add_gtest(test_pi_cost_adapter test/test_pi_cost_adapter.cpp)
@@ -660,6 +668,10 @@ if(DEFINED ENV{ROS_VERSION})
       add_test(
         NAME test_icra006_provider_profile
         COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test/test_icra006_provider_profile.py
+      )
+      add_test(
+        NAME test_icra007_provider_profile
+        COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test/test_icra007_provider_profile.py
       )
       add_test(
         NAME test_verify_planner_recorder_smoke

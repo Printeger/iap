@@ -16,6 +16,7 @@
 #include <gnss_comm/gnss_constant.hpp>
 #include <gnss_comm/gnss_ros.hpp>
 #include <gnss_comm/gnss_utility.hpp>
+#include <iap/planner/predictor_risk_conversion.hpp>
 #include <iap/predictor/predictor_module.hpp>
 #include <sensor_msgs/point_cloud2_iterator.hpp>
 
@@ -115,22 +116,6 @@ PredictorPositionCacheKey makePredictorPositionCacheKey(
   return PredictorPositionCacheKey{position.x(), position.y(), position.z()};
 }
 
-iap::RiskPredictionResult makeRiskPredictionResult(
-    const iap::PredictorQueryResult& prediction) {
-  iap::RiskPredictionResult out;
-  out.available = prediction.available;
-  out.valid = prediction.valid;
-  out.stale = prediction.fallback &&
-              (prediction.fallback_reason.find("stale") !=
-               std::string::npos);
-  out.hpl_pred = prediction.fused.hpl;
-  out.vpl_pred = prediction.fused.vpl;
-  out.source_flags = prediction.source_flags;
-  out.reason = prediction.fallback_reason.empty() ? "ok"
-                                                  : prediction.fallback_reason;
-  return out;
-}
-
 iap::PredictorSourceMode parsePredictorSourceMode(
     const std::string& value) {
   if (value == "fusion") {
@@ -215,7 +200,7 @@ class PredictorModuleRiskProvider final : public iap::RiskPredictionProvider {
               const auto predictions = worker_module.queryBatch(inputs, &diagnostics);
               for (std::size_t local = 0; local < predictions.size(); ++local) {
                 (*results)[groups[group_index][local]] =
-                    makeRiskPredictionResult(predictions[local]);
+                    iap::makeRiskPredictionResult(predictions[local]);
               }
               aggregate.query_count += diagnostics.query_count;
               aggregate.unique_positions += diagnostics.unique_positions;

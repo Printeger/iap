@@ -1,0 +1,3431 @@
+{
+  "build_type": "RelWithDebInfo",
+  "clock": "std::chrono::steady_clock",
+  "cpu_count": 20,
+  "diagnostic_execution_status": "PASS",
+  "diagnostic_latency_budget_ms": 400.0,
+  "frozen_runtime_contract": {
+    "conservative_max_with_gnss": false,
+    "freshness_max_gnss_age_s": 2.0,
+    "freshness_max_integrity_age_s": 1.0,
+    "freshness_max_odom_age_s": 1.0,
+    "freshness_max_snapshot_age_s": 1.0,
+    "gnss_epoch_policy": "auto",
+    "lidar_fim_radius_m": 12.0,
+    "lidar_legacy_observability": true,
+    "production_gnss_local_occupancy_binding": false,
+    "production_result_conversion": "iap::makeRiskPredictionResult shared pure helper",
+    "source_mode": "fusion",
+    "use_current_integrity_prior": true
+  },
+  "horizon_semantics": {
+    "freshness_reference": "fixed snapshot.stamp",
+    "frozen_scientific_fields_invariant": true,
+    "metadata_fields_excluded": [
+      "query_position_map",
+      "query_time_s",
+      "horizon_s",
+      "frame_id"
+    ],
+    "observation_is_not_conformance": true,
+    "required_semantics": "empirical covariance growth with horizon-dependent Sigma_pred and PL_pred",
+    "scientific_field_whitelist": [
+      "PredictorQueryResult.available",
+      "PredictorQueryResult.valid",
+      "PredictorQueryResult.fallback",
+      "PredictorQueryResult.fallback_reason",
+      "PredictorQueryResult.query_source",
+      "PredictorQueryResult.source_flags",
+      "GnssAdvisoryResult.available",
+      "GnssAdvisoryResult.valid",
+      "GnssAdvisoryResult.fallback",
+      "GnssAdvisoryResult.fallback_reason",
+      "GnssAdvisoryResult.information_state",
+      "GnssAdvisoryResult.hpl",
+      "GnssAdvisoryResult.vpl",
+      "GnssAdvisoryResult.pl_scalar",
+      "GnssAdvisoryResult.pl_e",
+      "GnssAdvisoryResult.pl_n",
+      "GnssAdvisoryResult.pl_u",
+      "GnssAdvisoryResult.pl_ff_h",
+      "GnssAdvisoryResult.pl_ff_v",
+      "GnssAdvisoryResult.sigma_h",
+      "GnssAdvisoryResult.sigma_v",
+      "GnssAdvisoryResult.pdop",
+      "GnssAdvisoryResult.hdop",
+      "GnssAdvisoryResult.vdop",
+      "GnssAdvisoryResult.effective_sigma_mean",
+      "GnssAdvisoryResult.effective_sigma_max",
+      "GnssAdvisoryResult.n_visible",
+      "GnssAdvisoryResult.n_used",
+      "GnssAdvisoryResult.n_hypotheses",
+      "GnssAdvisoryResult.n_excluded",
+      "GnssAdvisoryResult.visible_sat_ids",
+      "GnssAdvisoryResult.used_sat_ids",
+      "GnssAdvisoryResult.excluded_sat_ids",
+      "GnssAdvisoryResult.lambda_gnss",
+      "GnssAdvisoryResult.fim_valid",
+      "GnssAdvisoryResult.fim_regularized",
+      "GnssAdvisoryResult.lambda_trace",
+      "GnssAdvisoryResult.lambda_min_eig",
+      "GnssAdvisoryResult.lambda_max_eig",
+      "GnssAdvisoryResult.lambda_condition",
+      "GnssAdvisoryResult.fim_fallback_reason",
+      "LidarAdvisoryResult.available",
+      "LidarAdvisoryResult.valid",
+      "LidarAdvisoryResult.fallback",
+      "LidarAdvisoryResult.fallback_reason",
+      "LidarAdvisoryResult.information_state",
+      "LidarAdvisoryResult.lambda_lidar",
+      "LidarAdvisoryResult.legacy_delta_lambda",
+      "LidarAdvisoryResult.fim_valid",
+      "LidarAdvisoryResult.legacy_valid",
+      "LidarAdvisoryResult.fim_regularized",
+      "LidarAdvisoryResult.lidar_alpha",
+      "LidarAdvisoryResult.tdop_proxy",
+      "LidarAdvisoryResult.condition",
+      "LidarAdvisoryResult.n_primitives",
+      "LidarAdvisoryResult.n_valid_normals",
+      "LidarAdvisoryResult.bias_h",
+      "LidarAdvisoryResult.bias_v",
+      "LidarAdvisoryResult.lambda_trace",
+      "LidarAdvisoryResult.lambda_min_eig",
+      "LidarAdvisoryResult.lambda_max_eig",
+      "LidarAdvisoryResult.lambda_condition",
+      "FusionAdvisoryResult.available",
+      "FusionAdvisoryResult.valid",
+      "FusionAdvisoryResult.fallback",
+      "FusionAdvisoryResult.fallback_reason",
+      "FusionAdvisoryResult.information_state",
+      "FusionAdvisoryResult.hpl",
+      "FusionAdvisoryResult.vpl",
+      "FusionAdvisoryResult.pl_scalar",
+      "FusionAdvisoryResult.sigma_h",
+      "FusionAdvisoryResult.sigma_v",
+      "FusionAdvisoryResult.lambda_prior",
+      "FusionAdvisoryResult.lambda_gnss",
+      "FusionAdvisoryResult.lambda_lidar",
+      "FusionAdvisoryResult.lambda_pred",
+      "FusionAdvisoryResult.sigma_pos",
+      "FusionAdvisoryResult.prior_valid",
+      "FusionAdvisoryResult.gnss_used",
+      "FusionAdvisoryResult.lidar_used",
+      "FusionAdvisoryResult.epsilon_applied",
+      "FusionAdvisoryResult.degeneracy_regularized",
+      "FusionAdvisoryResult.conservative_max_applied",
+      "FusionAdvisoryResult.fusion_mode",
+      "FusionAdvisoryResult.lambda_prior_trace",
+      "FusionAdvisoryResult.lambda_gnss_trace",
+      "FusionAdvisoryResult.lambda_lidar_trace",
+      "FusionAdvisoryResult.lambda_pred_trace",
+      "FusionAdvisoryResult.lambda_pred_min_eig",
+      "FusionAdvisoryResult.lambda_pred_max_eig",
+      "FusionAdvisoryResult.lambda_pred_condition"
+    ],
+    "whole_result_cross_horizon_reuse_prohibited": true
+  },
+  "measured_iterations": 5,
+  "modes": [
+    {
+      "current_production_contract": true,
+      "gnss_local_occupancy_installed": false,
+      "gnss_visibility_model": "elevation_mask_only_current_runtime",
+      "horizon_scientific_fields_invariant": true,
+      "mode": "frozen_runtime",
+      "production_label": "CURRENT_PRODUCTION",
+      "production_result_checksum_fnv1a64": "f3391b97ded03f07",
+      "scientific_checksum_fnv1a64": "b37eb6a4d154e457",
+      "validation": {
+        "counter_vs_component_timing_contract_exact": true,
+        "finite_iterations": true,
+        "production_result_checksums_stable_across_phases_and_workers": true,
+        "query_and_conversion_shape_exact": true,
+        "scientific_checksums_stable_across_phases_and_workers": true,
+        "validity_source_flag_counts_stable_across_phases_and_workers": true
+      },
+      "workers": [
+        {
+          "component_percentage_status": "COST_RANKING_DIAGNOSTIC",
+          "component_timed": {
+            "budget_timing_authority": false,
+            "collect_component_timing": true,
+            "component_cost_percentages_of_outer_p50": {
+              "fusion_advisory": 9.648259062052869,
+              "gnss_advisory": 73.77070625067893,
+              "lidar_advisory": 8.64302116094452
+            },
+            "iterations": [
+              {
+                "available_count": 76800,
+                "collect_component_timing": true,
+                "counts": {
+                  "fusion_advisory_invocations": 76800,
+                  "gnss_advisory_invocations": 76800,
+                  "lidar_advisory_invocations": 12800,
+                  "lidar_cache_hits": 64000,
+                  "lidar_evaluations": 12800,
+                  "unique_positions": 12800
+                },
+                "dispatched_predictor_query_count": 76800,
+                "fallback_count": 0,
+                "finite": true,
+                "fusion_valid_count": 76800,
+                "gnss_valid_count": 76800,
+                "horizon_scientific_mismatch_count": 0,
+                "iteration": 0,
+                "lidar_valid_count": 76800,
+                "logical_query_count": 76800,
+                "production_result_checksum_fnv1a64": "f3391b97ded03f07",
+                "production_result_conversion_count": 76800,
+                "scientific_checksum_fnv1a64": "b37eb6a4d154e457",
+                "source_flags_histogram": {
+                  "1533": 76800
+                },
+                "timings_ms": {
+                  "cumulative_fusion_advisory": 56.059867999999994,
+                  "cumulative_gnss_advisory": 427.58858999999995,
+                  "cumulative_input_construction": 14.901454000000111,
+                  "cumulative_lidar_advisory": 50.114101999999995,
+                  "cumulative_predictor_batch": 556.4262230000021,
+                  "cumulative_result_materialization": 1.1491730000000238,
+                  "cumulative_worker_module_setup": 0.000689,
+                  "query_grouping_index": 2.518373,
+                  "scientific_validation_replay_outside_provider_timer": 615.329721,
+                  "total_predictor_provider": 579.923566,
+                  "worker_wall": 576.969433
+                },
+                "valid_count": 76800
+              },
+              {
+                "available_count": 76800,
+                "collect_component_timing": true,
+                "counts": {
+                  "fusion_advisory_invocations": 76800,
+                  "gnss_advisory_invocations": 76800,
+                  "lidar_advisory_invocations": 12800,
+                  "lidar_cache_hits": 64000,
+                  "lidar_evaluations": 12800,
+                  "unique_positions": 12800
+                },
+                "dispatched_predictor_query_count": 76800,
+                "fallback_count": 0,
+                "finite": true,
+                "fusion_valid_count": 76800,
+                "gnss_valid_count": 76800,
+                "horizon_scientific_mismatch_count": 0,
+                "iteration": 1,
+                "lidar_valid_count": 76800,
+                "logical_query_count": 76800,
+                "production_result_checksum_fnv1a64": "f3391b97ded03f07",
+                "production_result_conversion_count": 76800,
+                "scientific_checksum_fnv1a64": "b37eb6a4d154e457",
+                "source_flags_histogram": {
+                  "1533": 76800
+                },
+                "timings_ms": {
+                  "cumulative_fusion_advisory": 55.781889,
+                  "cumulative_gnss_advisory": 426.632302,
+                  "cumulative_input_construction": 14.89021900000013,
+                  "cumulative_lidar_advisory": 49.984502,
+                  "cumulative_predictor_batch": 555.0387490000024,
+                  "cumulative_result_materialization": 1.1488820000000213,
+                  "cumulative_worker_module_setup": 0.000651,
+                  "query_grouping_index": 2.372758,
+                  "scientific_validation_replay_outside_provider_timer": 617.535329,
+                  "total_predictor_provider": 578.322106,
+                  "worker_wall": 575.528595
+                },
+                "valid_count": 76800
+              },
+              {
+                "available_count": 76800,
+                "collect_component_timing": true,
+                "counts": {
+                  "fusion_advisory_invocations": 76800,
+                  "gnss_advisory_invocations": 76800,
+                  "lidar_advisory_invocations": 12800,
+                  "lidar_cache_hits": 64000,
+                  "lidar_evaluations": 12800,
+                  "unique_positions": 12800
+                },
+                "dispatched_predictor_query_count": 76800,
+                "fallback_count": 0,
+                "finite": true,
+                "fusion_valid_count": 76800,
+                "gnss_valid_count": 76800,
+                "horizon_scientific_mismatch_count": 0,
+                "iteration": 2,
+                "lidar_valid_count": 76800,
+                "logical_query_count": 76800,
+                "production_result_checksum_fnv1a64": "f3391b97ded03f07",
+                "production_result_conversion_count": 76800,
+                "scientific_checksum_fnv1a64": "b37eb6a4d154e457",
+                "source_flags_histogram": {
+                  "1533": 76800
+                },
+                "timings_ms": {
+                  "cumulative_fusion_advisory": 56.123324999999994,
+                  "cumulative_gnss_advisory": 426.96805,
+                  "cumulative_input_construction": 14.868296000000033,
+                  "cumulative_lidar_advisory": 50.071642,
+                  "cumulative_predictor_batch": 555.8324189999988,
+                  "cumulative_result_materialization": 1.1426710000000113,
+                  "cumulative_worker_module_setup": 0.001322,
+                  "query_grouping_index": 2.434751,
+                  "scientific_validation_replay_outside_provider_timer": 614.56359,
+                  "total_predictor_provider": 579.065235,
+                  "worker_wall": 576.296041
+                },
+                "valid_count": 76800
+              },
+              {
+                "available_count": 76800,
+                "collect_component_timing": true,
+                "counts": {
+                  "fusion_advisory_invocations": 76800,
+                  "gnss_advisory_invocations": 76800,
+                  "lidar_advisory_invocations": 12800,
+                  "lidar_cache_hits": 64000,
+                  "lidar_evaluations": 12800,
+                  "unique_positions": 12800
+                },
+                "dispatched_predictor_query_count": 76800,
+                "fallback_count": 0,
+                "finite": true,
+                "fusion_valid_count": 76800,
+                "gnss_valid_count": 76800,
+                "horizon_scientific_mismatch_count": 0,
+                "iteration": 3,
+                "lidar_valid_count": 76800,
+                "logical_query_count": 76800,
+                "production_result_checksum_fnv1a64": "f3391b97ded03f07",
+                "production_result_conversion_count": 76800,
+                "scientific_checksum_fnv1a64": "b37eb6a4d154e457",
+                "source_flags_histogram": {
+                  "1533": 76800
+                },
+                "timings_ms": {
+                  "cumulative_fusion_advisory": 55.798015,
+                  "cumulative_gnss_advisory": 423.80082,
+                  "cumulative_input_construction": 14.630721999999963,
+                  "cumulative_lidar_advisory": 49.666685,
+                  "cumulative_predictor_batch": 551.6483930000009,
+                  "cumulative_result_materialization": 1.1329460000000249,
+                  "cumulative_worker_module_setup": 0.000701,
+                  "query_grouping_index": 2.515483,
+                  "scientific_validation_replay_outside_provider_timer": 608.720582,
+                  "total_predictor_provider": 574.736865,
+                  "worker_wall": 571.889631
+                },
+                "valid_count": 76800
+              },
+              {
+                "available_count": 76800,
+                "collect_component_timing": true,
+                "counts": {
+                  "fusion_advisory_invocations": 76800,
+                  "gnss_advisory_invocations": 76800,
+                  "lidar_advisory_invocations": 12800,
+                  "lidar_cache_hits": 64000,
+                  "lidar_evaluations": 12800,
+                  "unique_positions": 12800
+                },
+                "dispatched_predictor_query_count": 76800,
+                "fallback_count": 0,
+                "finite": true,
+                "fusion_valid_count": 76800,
+                "gnss_valid_count": 76800,
+                "horizon_scientific_mismatch_count": 0,
+                "iteration": 4,
+                "lidar_valid_count": 76800,
+                "logical_query_count": 76800,
+                "production_result_checksum_fnv1a64": "f3391b97ded03f07",
+                "production_result_conversion_count": 76800,
+                "scientific_checksum_fnv1a64": "b37eb6a4d154e457",
+                "source_flags_histogram": {
+                  "1533": 76800
+                },
+                "timings_ms": {
+                  "cumulative_fusion_advisory": 55.122921999999996,
+                  "cumulative_gnss_advisory": 418.387048,
+                  "cumulative_input_construction": 14.567341000000038,
+                  "cumulative_lidar_advisory": 48.981514999999995,
+                  "cumulative_predictor_batch": 544.634687999999,
+                  "cumulative_result_materialization": 1.1137280000000256,
+                  "cumulative_worker_module_setup": 0.000747,
+                  "query_grouping_index": 2.65329,
+                  "scientific_validation_replay_outside_provider_timer": 621.447826,
+                  "total_predictor_provider": 567.690087,
+                  "worker_wall": 564.606061
+                },
+                "valid_count": 76800
+              }
+            ],
+            "phase": "component_timed_cost_ranking",
+            "summary_ms": {
+              "cumulative_fusion_advisory": {
+                "p50_ms": 55.798015,
+                "p95_ms": 56.11063359999999
+              },
+              "cumulative_gnss_advisory": {
+                "p50_ms": 426.632302,
+                "p95_ms": 427.464482
+              },
+              "cumulative_input_construction": {
+                "p50_ms": 14.868296000000033,
+                "p95_ms": 14.899207000000114
+              },
+              "cumulative_lidar_advisory": {
+                "p50_ms": 49.984502,
+                "p95_ms": 50.10561
+              },
+              "cumulative_predictor_batch": {
+                "p50_ms": 555.0387490000024,
+                "p95_ms": 556.3074622000015
+              },
+              "cumulative_result_materialization": {
+                "p50_ms": 1.1426710000000113,
+                "p95_ms": 1.1491148000000233
+              },
+              "cumulative_worker_module_setup": {
+                "p50_ms": 0.000701,
+                "p95_ms": 0.001207
+              },
+              "query_grouping_index": {
+                "p50_ms": 2.515483,
+                "p95_ms": 2.6263066000000004
+              },
+              "scientific_validation_replay_outside_provider_timer": {
+                "p50_ms": 615.329721,
+                "p95_ms": 620.6653266
+              },
+              "total_predictor_provider": {
+                "p50_ms": 578.322106,
+                "p95_ms": 579.7518998
+              },
+              "worker_wall": {
+                "p50_ms": 575.528595,
+                "p95_ms": 576.8347546
+              }
+            }
+          },
+          "component_timer_perturbation": {
+            "p50_delta_ms": 0.9028819999999769,
+            "p50_percent": 0.1563650745372442,
+            "p95_delta_ms": 1.8211030000001074,
+            "p95_percent": 0.3151074505950446
+          },
+          "counter_only": {
+            "budget_timing_authority": true,
+            "collect_component_timing": false,
+            "iterations": [
+              {
+                "available_count": 76800,
+                "collect_component_timing": false,
+                "counts": {
+                  "fusion_advisory_invocations": 76800,
+                  "gnss_advisory_invocations": 76800,
+                  "lidar_advisory_invocations": 12800,
+                  "lidar_cache_hits": 64000,
+                  "lidar_evaluations": 12800,
+                  "unique_positions": 12800
+                },
+                "dispatched_predictor_query_count": 76800,
+                "fallback_count": 0,
+                "finite": true,
+                "fusion_valid_count": 76800,
+                "gnss_valid_count": 76800,
+                "horizon_scientific_mismatch_count": 0,
+                "iteration": 0,
+                "lidar_valid_count": 76800,
+                "logical_query_count": 76800,
+                "production_result_checksum_fnv1a64": "f3391b97ded03f07",
+                "production_result_conversion_count": 76800,
+                "scientific_checksum_fnv1a64": "b37eb6a4d154e457",
+                "source_flags_histogram": {
+                  "1533": 76800
+                },
+                "timings_ms": {
+                  "cumulative_fusion_advisory": 0.0,
+                  "cumulative_gnss_advisory": 0.0,
+                  "cumulative_input_construction": 14.911362000000052,
+                  "cumulative_lidar_advisory": 0.0,
+                  "cumulative_predictor_batch": 552.9200260000001,
+                  "cumulative_result_materialization": 1.161477000000013,
+                  "cumulative_worker_module_setup": 0.000765,
+                  "query_grouping_index": 3.015119,
+                  "scientific_validation_replay_outside_provider_timer": 605.395711,
+                  "total_predictor_provider": 577.929308,
+                  "worker_wall": 573.356005
+                },
+                "valid_count": 76800
+              },
+              {
+                "available_count": 76800,
+                "collect_component_timing": false,
+                "counts": {
+                  "fusion_advisory_invocations": 76800,
+                  "gnss_advisory_invocations": 76800,
+                  "lidar_advisory_invocations": 12800,
+                  "lidar_cache_hits": 64000,
+                  "lidar_evaluations": 12800,
+                  "unique_positions": 12800
+                },
+                "dispatched_predictor_query_count": 76800,
+                "fallback_count": 0,
+                "finite": true,
+                "fusion_valid_count": 76800,
+                "gnss_valid_count": 76800,
+                "horizon_scientific_mismatch_count": 0,
+                "iteration": 1,
+                "lidar_valid_count": 76800,
+                "logical_query_count": 76800,
+                "production_result_checksum_fnv1a64": "f3391b97ded03f07",
+                "production_result_conversion_count": 76800,
+                "scientific_checksum_fnv1a64": "b37eb6a4d154e457",
+                "source_flags_histogram": {
+                  "1533": 76800
+                },
+                "timings_ms": {
+                  "cumulative_fusion_advisory": 0.0,
+                  "cumulative_gnss_advisory": 0.0,
+                  "cumulative_input_construction": 14.824783000000048,
+                  "cumulative_lidar_advisory": 0.0,
+                  "cumulative_predictor_batch": 551.1414110000002,
+                  "cumulative_result_materialization": 1.1386110000000242,
+                  "cumulative_worker_module_setup": 0.001166,
+                  "query_grouping_index": 2.502434,
+                  "scientific_validation_replay_outside_provider_timer": 610.635027,
+                  "total_predictor_provider": 574.485103,
+                  "worker_wall": 571.556336
+                },
+                "valid_count": 76800
+              },
+              {
+                "available_count": 76800,
+                "collect_component_timing": false,
+                "counts": {
+                  "fusion_advisory_invocations": 76800,
+                  "gnss_advisory_invocations": 76800,
+                  "lidar_advisory_invocations": 12800,
+                  "lidar_cache_hits": 64000,
+                  "lidar_evaluations": 12800,
+                  "unique_positions": 12800
+                },
+                "dispatched_predictor_query_count": 76800,
+                "fallback_count": 0,
+                "finite": true,
+                "fusion_valid_count": 76800,
+                "gnss_valid_count": 76800,
+                "horizon_scientific_mismatch_count": 0,
+                "iteration": 2,
+                "lidar_valid_count": 76800,
+                "logical_query_count": 76800,
+                "production_result_checksum_fnv1a64": "f3391b97ded03f07",
+                "production_result_conversion_count": 76800,
+                "scientific_checksum_fnv1a64": "b37eb6a4d154e457",
+                "source_flags_histogram": {
+                  "1533": 76800
+                },
+                "timings_ms": {
+                  "cumulative_fusion_advisory": 0.0,
+                  "cumulative_gnss_advisory": 0.0,
+                  "cumulative_input_construction": 14.925104000000061,
+                  "cumulative_lidar_advisory": 0.0,
+                  "cumulative_predictor_batch": 554.0006219999973,
+                  "cumulative_result_materialization": 1.2367920000000119,
+                  "cumulative_worker_module_setup": 0.000672,
+                  "query_grouping_index": 2.457868,
+                  "scientific_validation_replay_outside_provider_timer": 614.738824,
+                  "total_predictor_provider": 577.419224,
+                  "worker_wall": 574.539675
+                },
+                "valid_count": 76800
+              },
+              {
+                "available_count": 76800,
+                "collect_component_timing": false,
+                "counts": {
+                  "fusion_advisory_invocations": 76800,
+                  "gnss_advisory_invocations": 76800,
+                  "lidar_advisory_invocations": 12800,
+                  "lidar_cache_hits": 64000,
+                  "lidar_evaluations": 12800,
+                  "unique_positions": 12800
+                },
+                "dispatched_predictor_query_count": 76800,
+                "fallback_count": 0,
+                "finite": true,
+                "fusion_valid_count": 76800,
+                "gnss_valid_count": 76800,
+                "horizon_scientific_mismatch_count": 0,
+                "iteration": 3,
+                "lidar_valid_count": 76800,
+                "logical_query_count": 76800,
+                "production_result_checksum_fnv1a64": "f3391b97ded03f07",
+                "production_result_conversion_count": 76800,
+                "scientific_checksum_fnv1a64": "b37eb6a4d154e457",
+                "source_flags_histogram": {
+                  "1533": 76800
+                },
+                "timings_ms": {
+                  "cumulative_fusion_advisory": 0.0,
+                  "cumulative_gnss_advisory": 0.0,
+                  "cumulative_input_construction": 14.885064000000028,
+                  "cumulative_lidar_advisory": 0.0,
+                  "cumulative_predictor_batch": 552.2973439999994,
+                  "cumulative_result_materialization": 1.1747280000000149,
+                  "cumulative_worker_module_setup": 0.000709,
+                  "query_grouping_index": 2.526787,
+                  "scientific_validation_replay_outside_provider_timer": 613.588293,
+                  "total_predictor_provider": 575.843691,
+                  "worker_wall": 572.864716
+                },
+                "valid_count": 76800
+              },
+              {
+                "available_count": 76800,
+                "collect_component_timing": false,
+                "counts": {
+                  "fusion_advisory_invocations": 76800,
+                  "gnss_advisory_invocations": 76800,
+                  "lidar_advisory_invocations": 12800,
+                  "lidar_cache_hits": 64000,
+                  "lidar_evaluations": 12800,
+                  "unique_positions": 12800
+                },
+                "dispatched_predictor_query_count": 76800,
+                "fallback_count": 0,
+                "finite": true,
+                "fusion_valid_count": 76800,
+                "gnss_valid_count": 76800,
+                "horizon_scientific_mismatch_count": 0,
+                "iteration": 4,
+                "lidar_valid_count": 76800,
+                "logical_query_count": 76800,
+                "production_result_checksum_fnv1a64": "f3391b97ded03f07",
+                "production_result_conversion_count": 76800,
+                "scientific_checksum_fnv1a64": "b37eb6a4d154e457",
+                "source_flags_histogram": {
+                  "1533": 76800
+                },
+                "timings_ms": {
+                  "cumulative_fusion_advisory": 0.0,
+                  "cumulative_gnss_advisory": 0.0,
+                  "cumulative_input_construction": 14.921267000000066,
+                  "cumulative_lidar_advisory": 0.0,
+                  "cumulative_predictor_batch": 554.4249199999988,
+                  "cumulative_result_materialization": 1.1527590000000116,
+                  "cumulative_worker_module_setup": 0.000806,
+                  "query_grouping_index": 2.40741,
+                  "scientific_validation_replay_outside_provider_timer": 614.622308,
+                  "total_predictor_provider": 577.931169,
+                  "worker_wall": 575.09383
+                },
+                "valid_count": 76800
+              }
+            ],
+            "p95_within_400_ms_diagnostic_budget": false,
+            "phase": "counter_only_budget",
+            "speedup_vs_worker_1_p50": 1.0,
+            "summary_ms": {
+              "cumulative_fusion_advisory": {
+                "p50_ms": 0.0,
+                "p95_ms": 0.0
+              },
+              "cumulative_gnss_advisory": {
+                "p50_ms": 0.0,
+                "p95_ms": 0.0
+              },
+              "cumulative_input_construction": {
+                "p50_ms": 14.911362000000052,
+                "p95_ms": 14.924336600000062
+              },
+              "cumulative_lidar_advisory": {
+                "p50_ms": 0.0,
+                "p95_ms": 0.0
+              },
+              "cumulative_predictor_batch": {
+                "p50_ms": 552.9200260000001,
+                "p95_ms": 554.3400603999985
+              },
+              "cumulative_result_materialization": {
+                "p50_ms": 1.161477000000013,
+                "p95_ms": 1.2243792000000124
+              },
+              "cumulative_worker_module_setup": {
+                "p50_ms": 0.000765,
+                "p95_ms": 0.001094
+              },
+              "query_grouping_index": {
+                "p50_ms": 2.502434,
+                "p95_ms": 2.9174526
+              },
+              "scientific_validation_replay_outside_provider_timer": {
+                "p50_ms": 613.588293,
+                "p95_ms": 614.7155208
+              },
+              "total_predictor_provider": {
+                "p50_ms": 577.419224,
+                "p95_ms": 577.9307967999999
+              },
+              "worker_wall": {
+                "p50_ms": 573.356005,
+                "p95_ms": 574.9829990000001
+              }
+            }
+          },
+          "worker_count": 1
+        },
+        {
+          "component_percentage_status": "COST_RANKING_DIAGNOSTIC",
+          "component_timed": {
+            "budget_timing_authority": false,
+            "collect_component_timing": true,
+            "component_cost_percentages_of_outer_p50": {
+              "fusion_advisory": 19.24722713994186,
+              "gnss_advisory": 145.82654674028853,
+              "lidar_advisory": 17.691377992101593
+            },
+            "iterations": [
+              {
+                "available_count": 76800,
+                "collect_component_timing": true,
+                "counts": {
+                  "fusion_advisory_invocations": 76800,
+                  "gnss_advisory_invocations": 76800,
+                  "lidar_advisory_invocations": 12800,
+                  "lidar_cache_hits": 64000,
+                  "lidar_evaluations": 12800,
+                  "unique_positions": 12800
+                },
+                "dispatched_predictor_query_count": 76800,
+                "fallback_count": 0,
+                "finite": true,
+                "fusion_valid_count": 76800,
+                "gnss_valid_count": 76800,
+                "horizon_scientific_mismatch_count": 0,
+                "iteration": 0,
+                "lidar_valid_count": 76800,
+                "logical_query_count": 76800,
+                "production_result_checksum_fnv1a64": "f3391b97ded03f07",
+                "production_result_conversion_count": 76800,
+                "scientific_checksum_fnv1a64": "b37eb6a4d154e457",
+                "source_flags_histogram": {
+                  "1533": 76800
+                },
+                "timings_ms": {
+                  "cumulative_fusion_advisory": 57.764759999999995,
+                  "cumulative_gnss_advisory": 437.654495,
+                  "cumulative_input_construction": 15.144339999999975,
+                  "cumulative_lidar_advisory": 52.865607999999995,
+                  "cumulative_predictor_batch": 570.7347260000004,
+                  "cumulative_result_materialization": 1.7484850000000174,
+                  "cumulative_worker_module_setup": 0.0012000000000000001,
+                  "query_grouping_index": 2.680787,
+                  "scientific_validation_replay_outside_provider_timer": 336.576472,
+                  "total_predictor_provider": 300.119906,
+                  "worker_wall": 296.948896
+                },
+                "valid_count": 76800
+              },
+              {
+                "available_count": 76800,
+                "collect_component_timing": true,
+                "counts": {
+                  "fusion_advisory_invocations": 76800,
+                  "gnss_advisory_invocations": 76800,
+                  "lidar_advisory_invocations": 12800,
+                  "lidar_cache_hits": 64000,
+                  "lidar_evaluations": 12800,
+                  "unique_positions": 12800
+                },
+                "dispatched_predictor_query_count": 76800,
+                "fallback_count": 0,
+                "finite": true,
+                "fusion_valid_count": 76800,
+                "gnss_valid_count": 76800,
+                "horizon_scientific_mismatch_count": 0,
+                "iteration": 1,
+                "lidar_valid_count": 76800,
+                "logical_query_count": 76800,
+                "production_result_checksum_fnv1a64": "f3391b97ded03f07",
+                "production_result_conversion_count": 76800,
+                "scientific_checksum_fnv1a64": "b37eb6a4d154e457",
+                "source_flags_histogram": {
+                  "1533": 76800
+                },
+                "timings_ms": {
+                  "cumulative_fusion_advisory": 57.435939,
+                  "cumulative_gnss_advisory": 437.116068,
+                  "cumulative_input_construction": 15.327926999999974,
+                  "cumulative_lidar_advisory": 53.095347,
+                  "cumulative_predictor_batch": 570.325170000001,
+                  "cumulative_result_materialization": 1.9036380000000048,
+                  "cumulative_worker_module_setup": 0.001059,
+                  "query_grouping_index": 2.507311,
+                  "scientific_validation_replay_outside_provider_timer": 335.61644,
+                  "total_predictor_provider": 299.166906,
+                  "worker_wall": 296.330079
+                },
+                "valid_count": 76800
+              },
+              {
+                "available_count": 76800,
+                "collect_component_timing": true,
+                "counts": {
+                  "fusion_advisory_invocations": 76800,
+                  "gnss_advisory_invocations": 76800,
+                  "lidar_advisory_invocations": 12800,
+                  "lidar_cache_hits": 64000,
+                  "lidar_evaluations": 12800,
+                  "unique_positions": 12800
+                },
+                "dispatched_predictor_query_count": 76800,
+                "fallback_count": 0,
+                "finite": true,
+                "fusion_valid_count": 76800,
+                "gnss_valid_count": 76800,
+                "horizon_scientific_mismatch_count": 0,
+                "iteration": 2,
+                "lidar_valid_count": 76800,
+                "logical_query_count": 76800,
+                "production_result_checksum_fnv1a64": "f3391b97ded03f07",
+                "production_result_conversion_count": 76800,
+                "scientific_checksum_fnv1a64": "b37eb6a4d154e457",
+                "source_flags_histogram": {
+                  "1533": 76800
+                },
+                "timings_ms": {
+                  "cumulative_fusion_advisory": 58.038709,
+                  "cumulative_gnss_advisory": 437.80144199999995,
+                  "cumulative_input_construction": 15.21618199999995,
+                  "cumulative_lidar_advisory": 53.190261,
+                  "cumulative_predictor_batch": 571.5936199999999,
+                  "cumulative_result_materialization": 1.6866070000000275,
+                  "cumulative_worker_module_setup": 0.001911,
+                  "query_grouping_index": 2.502831,
+                  "scientific_validation_replay_outside_provider_timer": 338.58902,
+                  "total_predictor_provider": 300.266186,
+                  "worker_wall": 297.325793
+                },
+                "valid_count": 76800
+              },
+              {
+                "available_count": 76800,
+                "collect_component_timing": true,
+                "counts": {
+                  "fusion_advisory_invocations": 76800,
+                  "gnss_advisory_invocations": 76800,
+                  "lidar_advisory_invocations": 12800,
+                  "lidar_cache_hits": 64000,
+                  "lidar_evaluations": 12800,
+                  "unique_positions": 12800
+                },
+                "dispatched_predictor_query_count": 76800,
+                "fallback_count": 0,
+                "finite": true,
+                "fusion_valid_count": 76800,
+                "gnss_valid_count": 76800,
+                "horizon_scientific_mismatch_count": 0,
+                "iteration": 3,
+                "lidar_valid_count": 76800,
+                "logical_query_count": 76800,
+                "production_result_checksum_fnv1a64": "f3391b97ded03f07",
+                "production_result_conversion_count": 76800,
+                "scientific_checksum_fnv1a64": "b37eb6a4d154e457",
+                "source_flags_histogram": {
+                  "1533": 76800
+                },
+                "timings_ms": {
+                  "cumulative_fusion_advisory": 57.753978,
+                  "cumulative_gnss_advisory": 437.351999,
+                  "cumulative_input_construction": 15.337977999999978,
+                  "cumulative_lidar_advisory": 53.186273,
+                  "cumulative_predictor_batch": 571.0003799999995,
+                  "cumulative_result_materialization": 1.9956050000000112,
+                  "cumulative_worker_module_setup": 0.000971,
+                  "query_grouping_index": 2.486573,
+                  "scientific_validation_replay_outside_provider_timer": 343.567728,
+                  "total_predictor_provider": 299.795338,
+                  "worker_wall": 296.862065
+                },
+                "valid_count": 76800
+              },
+              {
+                "available_count": 76800,
+                "collect_component_timing": true,
+                "counts": {
+                  "fusion_advisory_invocations": 76800,
+                  "gnss_advisory_invocations": 76800,
+                  "lidar_advisory_invocations": 12800,
+                  "lidar_cache_hits": 64000,
+                  "lidar_evaluations": 12800,
+                  "unique_positions": 12800
+                },
+                "dispatched_predictor_query_count": 76800,
+                "fallback_count": 0,
+                "finite": true,
+                "fusion_valid_count": 76800,
+                "gnss_valid_count": 76800,
+                "horizon_scientific_mismatch_count": 0,
+                "iteration": 4,
+                "lidar_valid_count": 76800,
+                "logical_query_count": 76800,
+                "production_result_checksum_fnv1a64": "f3391b97ded03f07",
+                "production_result_conversion_count": 76800,
+                "scientific_checksum_fnv1a64": "b37eb6a4d154e457",
+                "source_flags_histogram": {
+                  "1533": 76800
+                },
+                "timings_ms": {
+                  "cumulative_fusion_advisory": 58.098738999999995,
+                  "cumulative_gnss_advisory": 437.921614,
+                  "cumulative_input_construction": 15.202544000000005,
+                  "cumulative_lidar_advisory": 53.039578999999996,
+                  "cumulative_predictor_batch": 571.8745039999991,
+                  "cumulative_result_materialization": 2.169664000000002,
+                  "cumulative_worker_module_setup": 0.001075,
+                  "query_grouping_index": 2.551317,
+                  "scientific_validation_replay_outside_provider_timer": 341.141688,
+                  "total_predictor_provider": 300.528087,
+                  "worker_wall": 297.53661
+                },
+                "valid_count": 76800
+              }
+            ],
+            "phase": "component_timed_cost_ranking",
+            "summary_ms": {
+              "cumulative_fusion_advisory": {
+                "p50_ms": 57.764759999999995,
+                "p95_ms": 58.086732999999995
+              },
+              "cumulative_gnss_advisory": {
+                "p50_ms": 437.654495,
+                "p95_ms": 437.8975796
+              },
+              "cumulative_input_construction": {
+                "p50_ms": 15.21618199999995,
+                "p95_ms": 15.335967799999978
+              },
+              "cumulative_lidar_advisory": {
+                "p50_ms": 53.095347,
+                "p95_ms": 53.189463399999994
+              },
+              "cumulative_predictor_batch": {
+                "p50_ms": 571.0003799999995,
+                "p95_ms": 571.8183271999992
+              },
+              "cumulative_result_materialization": {
+                "p50_ms": 1.9036380000000048,
+                "p95_ms": 2.1348522000000036
+              },
+              "cumulative_worker_module_setup": {
+                "p50_ms": 0.001075,
+                "p95_ms": 0.0017687999999999998
+              },
+              "query_grouping_index": {
+                "p50_ms": 2.507311,
+                "p95_ms": 2.654893
+              },
+              "scientific_validation_replay_outside_provider_timer": {
+                "p50_ms": 338.58902,
+                "p95_ms": 343.08252000000005
+              },
+              "total_predictor_provider": {
+                "p50_ms": 300.119906,
+                "p95_ms": 300.4757068
+              },
+              "worker_wall": {
+                "p50_ms": 296.948896,
+                "p95_ms": 297.4944466
+              }
+            }
+          },
+          "component_timer_perturbation": {
+            "p50_delta_ms": 0.22534400000000687,
+            "p50_percent": 0.07514107574915176,
+            "p95_delta_ms": 0.22369420000001128,
+            "p95_percent": 0.0745021483995912
+          },
+          "counter_only": {
+            "budget_timing_authority": true,
+            "collect_component_timing": false,
+            "iterations": [
+              {
+                "available_count": 76800,
+                "collect_component_timing": false,
+                "counts": {
+                  "fusion_advisory_invocations": 76800,
+                  "gnss_advisory_invocations": 76800,
+                  "lidar_advisory_invocations": 12800,
+                  "lidar_cache_hits": 64000,
+                  "lidar_evaluations": 12800,
+                  "unique_positions": 12800
+                },
+                "dispatched_predictor_query_count": 76800,
+                "fallback_count": 0,
+                "finite": true,
+                "fusion_valid_count": 76800,
+                "gnss_valid_count": 76800,
+                "horizon_scientific_mismatch_count": 0,
+                "iteration": 0,
+                "lidar_valid_count": 76800,
+                "logical_query_count": 76800,
+                "production_result_checksum_fnv1a64": "f3391b97ded03f07",
+                "production_result_conversion_count": 76800,
+                "scientific_checksum_fnv1a64": "b37eb6a4d154e457",
+                "source_flags_histogram": {
+                  "1533": 76800
+                },
+                "timings_ms": {
+                  "cumulative_fusion_advisory": 0.0,
+                  "cumulative_gnss_advisory": 0.0,
+                  "cumulative_input_construction": 15.086652999999949,
+                  "cumulative_lidar_advisory": 0.0,
+                  "cumulative_predictor_batch": 569.3998730000003,
+                  "cumulative_result_materialization": 1.360285000000028,
+                  "cumulative_worker_module_setup": 0.002362,
+                  "query_grouping_index": 2.476487,
+                  "scientific_validation_replay_outside_provider_timer": 339.862342,
+                  "total_predictor_provider": 299.955415,
+                  "worker_wall": 297.057443
+                },
+                "valid_count": 76800
+              },
+              {
+                "available_count": 76800,
+                "collect_component_timing": false,
+                "counts": {
+                  "fusion_advisory_invocations": 76800,
+                  "gnss_advisory_invocations": 76800,
+                  "lidar_advisory_invocations": 12800,
+                  "lidar_cache_hits": 64000,
+                  "lidar_evaluations": 12800,
+                  "unique_positions": 12800
+                },
+                "dispatched_predictor_query_count": 76800,
+                "fallback_count": 0,
+                "finite": true,
+                "fusion_valid_count": 76800,
+                "gnss_valid_count": 76800,
+                "horizon_scientific_mismatch_count": 0,
+                "iteration": 1,
+                "lidar_valid_count": 76800,
+                "logical_query_count": 76800,
+                "production_result_checksum_fnv1a64": "f3391b97ded03f07",
+                "production_result_conversion_count": 76800,
+                "scientific_checksum_fnv1a64": "b37eb6a4d154e457",
+                "source_flags_histogram": {
+                  "1533": 76800
+                },
+                "timings_ms": {
+                  "cumulative_fusion_advisory": 0.0,
+                  "cumulative_gnss_advisory": 0.0,
+                  "cumulative_input_construction": 15.352452999999988,
+                  "cumulative_lidar_advisory": 0.0,
+                  "cumulative_predictor_batch": 570.8989399999995,
+                  "cumulative_result_materialization": 2.921418,
+                  "cumulative_worker_module_setup": 0.00183,
+                  "query_grouping_index": 2.484877,
+                  "scientific_validation_replay_outside_provider_timer": 341.641311,
+                  "total_predictor_provider": 299.894562,
+                  "worker_wall": 296.98036
+                },
+                "valid_count": 76800
+              },
+              {
+                "available_count": 76800,
+                "collect_component_timing": false,
+                "counts": {
+                  "fusion_advisory_invocations": 76800,
+                  "gnss_advisory_invocations": 76800,
+                  "lidar_advisory_invocations": 12800,
+                  "lidar_cache_hits": 64000,
+                  "lidar_evaluations": 12800,
+                  "unique_positions": 12800
+                },
+                "dispatched_predictor_query_count": 76800,
+                "fallback_count": 0,
+                "finite": true,
+                "fusion_valid_count": 76800,
+                "gnss_valid_count": 76800,
+                "horizon_scientific_mismatch_count": 0,
+                "iteration": 2,
+                "lidar_valid_count": 76800,
+                "logical_query_count": 76800,
+                "production_result_checksum_fnv1a64": "f3391b97ded03f07",
+                "production_result_conversion_count": 76800,
+                "scientific_checksum_fnv1a64": "b37eb6a4d154e457",
+                "source_flags_histogram": {
+                  "1533": 76800
+                },
+                "timings_ms": {
+                  "cumulative_fusion_advisory": 0.0,
+                  "cumulative_gnss_advisory": 0.0,
+                  "cumulative_input_construction": 15.263022999999965,
+                  "cumulative_lidar_advisory": 0.0,
+                  "cumulative_predictor_batch": 571.7683269999995,
+                  "cumulative_result_materialization": 2.8549819999999997,
+                  "cumulative_worker_module_setup": 0.00115,
+                  "query_grouping_index": 2.494782,
+                  "scientific_validation_replay_outside_provider_timer": 336.613404,
+                  "total_predictor_provider": 300.326162,
+                  "worker_wall": 297.395598
+                },
+                "valid_count": 76800
+              },
+              {
+                "available_count": 76800,
+                "collect_component_timing": false,
+                "counts": {
+                  "fusion_advisory_invocations": 76800,
+                  "gnss_advisory_invocations": 76800,
+                  "lidar_advisory_invocations": 12800,
+                  "lidar_cache_hits": 64000,
+                  "lidar_evaluations": 12800,
+                  "unique_positions": 12800
+                },
+                "dispatched_predictor_query_count": 76800,
+                "fallback_count": 0,
+                "finite": true,
+                "fusion_valid_count": 76800,
+                "gnss_valid_count": 76800,
+                "horizon_scientific_mismatch_count": 0,
+                "iteration": 3,
+                "lidar_valid_count": 76800,
+                "logical_query_count": 76800,
+                "production_result_checksum_fnv1a64": "f3391b97ded03f07",
+                "production_result_conversion_count": 76800,
+                "scientific_checksum_fnv1a64": "b37eb6a4d154e457",
+                "source_flags_histogram": {
+                  "1533": 76800
+                },
+                "timings_ms": {
+                  "cumulative_fusion_advisory": 0.0,
+                  "cumulative_gnss_advisory": 0.0,
+                  "cumulative_input_construction": 15.384454999999964,
+                  "cumulative_lidar_advisory": 0.0,
+                  "cumulative_predictor_batch": 569.4139029999993,
+                  "cumulative_result_materialization": 1.4521999999999993,
+                  "cumulative_worker_module_setup": 0.001903,
+                  "query_grouping_index": 2.297461,
+                  "scientific_validation_replay_outside_provider_timer": 336.7702,
+                  "total_predictor_provider": 299.192708,
+                  "worker_wall": 296.467783
+                },
+                "valid_count": 76800
+              },
+              {
+                "available_count": 76800,
+                "collect_component_timing": false,
+                "counts": {
+                  "fusion_advisory_invocations": 76800,
+                  "gnss_advisory_invocations": 76800,
+                  "lidar_advisory_invocations": 12800,
+                  "lidar_cache_hits": 64000,
+                  "lidar_evaluations": 12800,
+                  "unique_positions": 12800
+                },
+                "dispatched_predictor_query_count": 76800,
+                "fallback_count": 0,
+                "finite": true,
+                "fusion_valid_count": 76800,
+                "gnss_valid_count": 76800,
+                "horizon_scientific_mismatch_count": 0,
+                "iteration": 4,
+                "lidar_valid_count": 76800,
+                "logical_query_count": 76800,
+                "production_result_checksum_fnv1a64": "f3391b97ded03f07",
+                "production_result_conversion_count": 76800,
+                "scientific_checksum_fnv1a64": "b37eb6a4d154e457",
+                "source_flags_histogram": {
+                  "1533": 76800
+                },
+                "timings_ms": {
+                  "cumulative_fusion_advisory": 0.0,
+                  "cumulative_gnss_advisory": 0.0,
+                  "cumulative_input_construction": 15.19704899999995,
+                  "cumulative_lidar_advisory": 0.0,
+                  "cumulative_predictor_batch": 570.4465299999993,
+                  "cumulative_result_materialization": 1.3665140000000056,
+                  "cumulative_worker_module_setup": 0.002006,
+                  "query_grouping_index": 2.438413,
+                  "scientific_validation_replay_outside_provider_timer": 334.479274,
+                  "total_predictor_provider": 299.833664,
+                  "worker_wall": 296.951931
+                },
+                "valid_count": 76800
+              }
+            ],
+            "p95_within_400_ms_diagnostic_budget": true,
+            "phase": "counter_only_budget",
+            "speedup_vs_worker_1_p50": 1.9254074503691734,
+            "summary_ms": {
+              "cumulative_fusion_advisory": {
+                "p50_ms": 0.0,
+                "p95_ms": 0.0
+              },
+              "cumulative_gnss_advisory": {
+                "p50_ms": 0.0,
+                "p95_ms": 0.0
+              },
+              "cumulative_input_construction": {
+                "p50_ms": 15.263022999999965,
+                "p95_ms": 15.378054599999967
+              },
+              "cumulative_lidar_advisory": {
+                "p50_ms": 0.0,
+                "p95_ms": 0.0
+              },
+              "cumulative_predictor_batch": {
+                "p50_ms": 570.4465299999993,
+                "p95_ms": 571.5944495999995
+              },
+              "cumulative_result_materialization": {
+                "p50_ms": 1.4521999999999993,
+                "p95_ms": 2.9081308
+              },
+              "cumulative_worker_module_setup": {
+                "p50_ms": 0.001903,
+                "p95_ms": 0.0022908
+              },
+              "query_grouping_index": {
+                "p50_ms": 2.476487,
+                "p95_ms": 2.492801
+              },
+              "scientific_validation_replay_outside_provider_timer": {
+                "p50_ms": 336.7702,
+                "p95_ms": 341.2855172
+              },
+              "total_predictor_provider": {
+                "p50_ms": 299.894562,
+                "p95_ms": 300.2520126
+              },
+              "worker_wall": {
+                "p50_ms": 296.98036,
+                "p95_ms": 297.327967
+              }
+            }
+          },
+          "worker_count": 2
+        },
+        {
+          "component_percentage_status": "COST_RANKING_DIAGNOSTIC",
+          "component_timed": {
+            "budget_timing_authority": false,
+            "collect_component_timing": true,
+            "component_cost_percentages_of_outer_p50": {
+              "fusion_advisory": 37.760498855043615,
+              "gnss_advisory": 287.89847379740365,
+              "lidar_advisory": 35.321422029640395
+            },
+            "iterations": [
+              {
+                "available_count": 76800,
+                "collect_component_timing": true,
+                "counts": {
+                  "fusion_advisory_invocations": 76800,
+                  "gnss_advisory_invocations": 76800,
+                  "lidar_advisory_invocations": 12800,
+                  "lidar_cache_hits": 64000,
+                  "lidar_evaluations": 12800,
+                  "unique_positions": 12800
+                },
+                "dispatched_predictor_query_count": 76800,
+                "fallback_count": 0,
+                "finite": true,
+                "fusion_valid_count": 76800,
+                "gnss_valid_count": 76800,
+                "horizon_scientific_mismatch_count": 0,
+                "iteration": 0,
+                "lidar_valid_count": 76800,
+                "logical_query_count": 76800,
+                "production_result_checksum_fnv1a64": "f3391b97ded03f07",
+                "production_result_conversion_count": 76800,
+                "scientific_checksum_fnv1a64": "b37eb6a4d154e457",
+                "source_flags_histogram": {
+                  "1533": 76800
+                },
+                "timings_ms": {
+                  "cumulative_fusion_advisory": 59.368251,
+                  "cumulative_gnss_advisory": 455.275043,
+                  "cumulative_input_construction": 15.188451000000013,
+                  "cumulative_lidar_advisory": 55.636669999999995,
+                  "cumulative_predictor_batch": 592.6366110000004,
+                  "cumulative_result_materialization": 2.056432000000001,
+                  "cumulative_worker_module_setup": 0.002959,
+                  "query_grouping_index": 2.472347,
+                  "scientific_validation_replay_outside_provider_timer": 188.962257,
+                  "total_predictor_provider": 160.201389,
+                  "worker_wall": 157.285504
+                },
+                "valid_count": 76800
+              },
+              {
+                "available_count": 76800,
+                "collect_component_timing": true,
+                "counts": {
+                  "fusion_advisory_invocations": 76800,
+                  "gnss_advisory_invocations": 76800,
+                  "lidar_advisory_invocations": 12800,
+                  "lidar_cache_hits": 64000,
+                  "lidar_evaluations": 12800,
+                  "unique_positions": 12800
+                },
+                "dispatched_predictor_query_count": 76800,
+                "fallback_count": 0,
+                "finite": true,
+                "fusion_valid_count": 76800,
+                "gnss_valid_count": 76800,
+                "horizon_scientific_mismatch_count": 0,
+                "iteration": 1,
+                "lidar_valid_count": 76800,
+                "logical_query_count": 76800,
+                "production_result_checksum_fnv1a64": "f3391b97ded03f07",
+                "production_result_conversion_count": 76800,
+                "scientific_checksum_fnv1a64": "b37eb6a4d154e457",
+                "source_flags_histogram": {
+                  "1533": 76800
+                },
+                "timings_ms": {
+                  "cumulative_fusion_advisory": 59.151604,
+                  "cumulative_gnss_advisory": 451.56521499999997,
+                  "cumulative_input_construction": 15.299210000000013,
+                  "cumulative_lidar_advisory": 55.401216,
+                  "cumulative_predictor_batch": 588.4670459999988,
+                  "cumulative_result_materialization": 2.0066440000000023,
+                  "cumulative_worker_module_setup": 0.0021230000000000003,
+                  "query_grouping_index": 2.456907,
+                  "scientific_validation_replay_outside_provider_timer": 191.336363,
+                  "total_predictor_provider": 156.84877,
+                  "worker_wall": 153.942431
+                },
+                "valid_count": 76800
+              },
+              {
+                "available_count": 76800,
+                "collect_component_timing": true,
+                "counts": {
+                  "fusion_advisory_invocations": 76800,
+                  "gnss_advisory_invocations": 76800,
+                  "lidar_advisory_invocations": 12800,
+                  "lidar_cache_hits": 64000,
+                  "lidar_evaluations": 12800,
+                  "unique_positions": 12800
+                },
+                "dispatched_predictor_query_count": 76800,
+                "fallback_count": 0,
+                "finite": true,
+                "fusion_valid_count": 76800,
+                "gnss_valid_count": 76800,
+                "horizon_scientific_mismatch_count": 0,
+                "iteration": 2,
+                "lidar_valid_count": 76800,
+                "logical_query_count": 76800,
+                "production_result_checksum_fnv1a64": "f3391b97ded03f07",
+                "production_result_conversion_count": 76800,
+                "scientific_checksum_fnv1a64": "b37eb6a4d154e457",
+                "source_flags_histogram": {
+                  "1533": 76800
+                },
+                "timings_ms": {
+                  "cumulative_fusion_advisory": 59.168437,
+                  "cumulative_gnss_advisory": 450.783533,
+                  "cumulative_input_construction": 15.246691999999992,
+                  "cumulative_lidar_advisory": 55.032771999999994,
+                  "cumulative_predictor_batch": 587.2661559999999,
+                  "cumulative_result_materialization": 1.8388340000000098,
+                  "cumulative_worker_module_setup": 0.002004,
+                  "query_grouping_index": 2.419353,
+                  "scientific_validation_replay_outside_provider_timer": 189.21333,
+                  "total_predictor_provider": 155.706063,
+                  "worker_wall": 152.84975
+                },
+                "valid_count": 76800
+              },
+              {
+                "available_count": 76800,
+                "collect_component_timing": true,
+                "counts": {
+                  "fusion_advisory_invocations": 76800,
+                  "gnss_advisory_invocations": 76800,
+                  "lidar_advisory_invocations": 12800,
+                  "lidar_cache_hits": 64000,
+                  "lidar_evaluations": 12800,
+                  "unique_positions": 12800
+                },
+                "dispatched_predictor_query_count": 76800,
+                "fallback_count": 0,
+                "finite": true,
+                "fusion_valid_count": 76800,
+                "gnss_valid_count": 76800,
+                "horizon_scientific_mismatch_count": 0,
+                "iteration": 3,
+                "lidar_valid_count": 76800,
+                "logical_query_count": 76800,
+                "production_result_checksum_fnv1a64": "f3391b97ded03f07",
+                "production_result_conversion_count": 76800,
+                "scientific_checksum_fnv1a64": "b37eb6a4d154e457",
+                "source_flags_histogram": {
+                  "1533": 76800
+                },
+                "timings_ms": {
+                  "cumulative_fusion_advisory": 60.043153,
+                  "cumulative_gnss_advisory": 457.688501,
+                  "cumulative_input_construction": 15.114110000000018,
+                  "cumulative_lidar_advisory": 56.623976,
+                  "cumulative_predictor_batch": 596.9480589999994,
+                  "cumulative_result_materialization": 2.7339900000000026,
+                  "cumulative_worker_module_setup": 0.001594,
+                  "query_grouping_index": 2.497347,
+                  "scientific_validation_replay_outside_provider_timer": 191.22275,
+                  "total_predictor_provider": 158.273437,
+                  "worker_wall": 155.307254
+                },
+                "valid_count": 76800
+              },
+              {
+                "available_count": 76800,
+                "collect_component_timing": true,
+                "counts": {
+                  "fusion_advisory_invocations": 76800,
+                  "gnss_advisory_invocations": 76800,
+                  "lidar_advisory_invocations": 12800,
+                  "lidar_cache_hits": 64000,
+                  "lidar_evaluations": 12800,
+                  "unique_positions": 12800
+                },
+                "dispatched_predictor_query_count": 76800,
+                "fallback_count": 0,
+                "finite": true,
+                "fusion_valid_count": 76800,
+                "gnss_valid_count": 76800,
+                "horizon_scientific_mismatch_count": 0,
+                "iteration": 4,
+                "lidar_valid_count": 76800,
+                "logical_query_count": 76800,
+                "production_result_checksum_fnv1a64": "f3391b97ded03f07",
+                "production_result_conversion_count": 76800,
+                "scientific_checksum_fnv1a64": "b37eb6a4d154e457",
+                "source_flags_histogram": {
+                  "1533": 76800
+                },
+                "timings_ms": {
+                  "cumulative_fusion_advisory": 59.226878,
+                  "cumulative_gnss_advisory": 451.321895,
+                  "cumulative_input_construction": 15.195421000000021,
+                  "cumulative_lidar_advisory": 55.120177999999996,
+                  "cumulative_predictor_batch": 587.9120270000003,
+                  "cumulative_result_materialization": 1.7424740000000094,
+                  "cumulative_worker_module_setup": 0.0026369999999999996,
+                  "query_grouping_index": 2.599635,
+                  "scientific_validation_replay_outside_provider_timer": 191.56804,
+                  "total_predictor_provider": 156.282384,
+                  "worker_wall": 153.225055
+                },
+                "valid_count": 76800
+              }
+            ],
+            "phase": "component_timed_cost_ranking",
+            "summary_ms": {
+              "cumulative_fusion_advisory": {
+                "p50_ms": 59.226878,
+                "p95_ms": 59.9081726
+              },
+              "cumulative_gnss_advisory": {
+                "p50_ms": 451.56521499999997,
+                "p95_ms": 457.20580939999996
+              },
+              "cumulative_input_construction": {
+                "p50_ms": 15.195421000000021,
+                "p95_ms": 15.28870640000001
+              },
+              "cumulative_lidar_advisory": {
+                "p50_ms": 55.401216,
+                "p95_ms": 56.42651479999999
+              },
+              "cumulative_predictor_batch": {
+                "p50_ms": 588.4670459999988,
+                "p95_ms": 596.0857693999995
+              },
+              "cumulative_result_materialization": {
+                "p50_ms": 2.0066440000000023,
+                "p95_ms": 2.5984784000000025
+              },
+              "cumulative_worker_module_setup": {
+                "p50_ms": 0.0021230000000000003,
+                "p95_ms": 0.0028945999999999998
+              },
+              "query_grouping_index": {
+                "p50_ms": 2.472347,
+                "p95_ms": 2.5791774000000003
+              },
+              "scientific_validation_replay_outside_provider_timer": {
+                "p50_ms": 191.22275,
+                "p95_ms": 191.5217046
+              },
+              "total_predictor_provider": {
+                "p50_ms": 156.84877,
+                "p95_ms": 159.8157986
+              },
+              "worker_wall": {
+                "p50_ms": 153.942431,
+                "p95_ms": 156.88985399999999
+              }
+            }
+          },
+          "component_timer_perturbation": {
+            "p50_delta_ms": 1.4618830000000003,
+            "p50_percent": 0.9408020382054505,
+            "p95_delta_ms": 3.824648599999989,
+            "p95_percent": 2.451836915107036
+          },
+          "counter_only": {
+            "budget_timing_authority": true,
+            "collect_component_timing": false,
+            "iterations": [
+              {
+                "available_count": 76800,
+                "collect_component_timing": false,
+                "counts": {
+                  "fusion_advisory_invocations": 76800,
+                  "gnss_advisory_invocations": 76800,
+                  "lidar_advisory_invocations": 12800,
+                  "lidar_cache_hits": 64000,
+                  "lidar_evaluations": 12800,
+                  "unique_positions": 12800
+                },
+                "dispatched_predictor_query_count": 76800,
+                "fallback_count": 0,
+                "finite": true,
+                "fusion_valid_count": 76800,
+                "gnss_valid_count": 76800,
+                "horizon_scientific_mismatch_count": 0,
+                "iteration": 0,
+                "lidar_valid_count": 76800,
+                "logical_query_count": 76800,
+                "production_result_checksum_fnv1a64": "f3391b97ded03f07",
+                "production_result_conversion_count": 76800,
+                "scientific_checksum_fnv1a64": "b37eb6a4d154e457",
+                "source_flags_histogram": {
+                  "1533": 76800
+                },
+                "timings_ms": {
+                  "cumulative_fusion_advisory": 0.0,
+                  "cumulative_gnss_advisory": 0.0,
+                  "cumulative_input_construction": 15.219968000000017,
+                  "cumulative_lidar_advisory": 0.0,
+                  "cumulative_predictor_batch": 588.1293750000002,
+                  "cumulative_result_materialization": 2.4100190000000046,
+                  "cumulative_worker_module_setup": 0.0020340000000000002,
+                  "query_grouping_index": 2.565785,
+                  "scientific_validation_replay_outside_provider_timer": 195.233145,
+                  "total_predictor_provider": 156.065395,
+                  "worker_wall": 153.030243
+                },
+                "valid_count": 76800
+              },
+              {
+                "available_count": 76800,
+                "collect_component_timing": false,
+                "counts": {
+                  "fusion_advisory_invocations": 76800,
+                  "gnss_advisory_invocations": 76800,
+                  "lidar_advisory_invocations": 12800,
+                  "lidar_cache_hits": 64000,
+                  "lidar_evaluations": 12800,
+                  "unique_positions": 12800
+                },
+                "dispatched_predictor_query_count": 76800,
+                "fallback_count": 0,
+                "finite": true,
+                "fusion_valid_count": 76800,
+                "gnss_valid_count": 76800,
+                "horizon_scientific_mismatch_count": 0,
+                "iteration": 1,
+                "lidar_valid_count": 76800,
+                "logical_query_count": 76800,
+                "production_result_checksum_fnv1a64": "f3391b97ded03f07",
+                "production_result_conversion_count": 76800,
+                "scientific_checksum_fnv1a64": "b37eb6a4d154e457",
+                "source_flags_histogram": {
+                  "1533": 76800
+                },
+                "timings_ms": {
+                  "cumulative_fusion_advisory": 0.0,
+                  "cumulative_gnss_advisory": 0.0,
+                  "cumulative_input_construction": 15.254208000000013,
+                  "cumulative_lidar_advisory": 0.0,
+                  "cumulative_predictor_batch": 585.4087350000002,
+                  "cumulative_result_materialization": 1.9459530000000036,
+                  "cumulative_worker_module_setup": 0.0031190000000000002,
+                  "query_grouping_index": 2.485427,
+                  "scientific_validation_replay_outside_provider_timer": 189.366354,
+                  "total_predictor_provider": 155.69417,
+                  "worker_wall": 152.774749
+                },
+                "valid_count": 76800
+              },
+              {
+                "available_count": 76800,
+                "collect_component_timing": false,
+                "counts": {
+                  "fusion_advisory_invocations": 76800,
+                  "gnss_advisory_invocations": 76800,
+                  "lidar_advisory_invocations": 12800,
+                  "lidar_cache_hits": 64000,
+                  "lidar_evaluations": 12800,
+                  "unique_positions": 12800
+                },
+                "dispatched_predictor_query_count": 76800,
+                "fallback_count": 0,
+                "finite": true,
+                "fusion_valid_count": 76800,
+                "gnss_valid_count": 76800,
+                "horizon_scientific_mismatch_count": 0,
+                "iteration": 2,
+                "lidar_valid_count": 76800,
+                "logical_query_count": 76800,
+                "production_result_checksum_fnv1a64": "f3391b97ded03f07",
+                "production_result_conversion_count": 76800,
+                "scientific_checksum_fnv1a64": "b37eb6a4d154e457",
+                "source_flags_histogram": {
+                  "1533": 76800
+                },
+                "timings_ms": {
+                  "cumulative_fusion_advisory": 0.0,
+                  "cumulative_gnss_advisory": 0.0,
+                  "cumulative_input_construction": 15.240456000000025,
+                  "cumulative_lidar_advisory": 0.0,
+                  "cumulative_predictor_batch": 585.2536869999997,
+                  "cumulative_result_materialization": 2.269342000000003,
+                  "cumulative_worker_module_setup": 0.001747,
+                  "query_grouping_index": 2.490835,
+                  "scientific_validation_replay_outside_provider_timer": 189.226261,
+                  "total_predictor_provider": 155.386887,
+                  "worker_wall": 152.47294
+                },
+                "valid_count": 76800
+              },
+              {
+                "available_count": 76800,
+                "collect_component_timing": false,
+                "counts": {
+                  "fusion_advisory_invocations": 76800,
+                  "gnss_advisory_invocations": 76800,
+                  "lidar_advisory_invocations": 12800,
+                  "lidar_cache_hits": 64000,
+                  "lidar_evaluations": 12800,
+                  "unique_positions": 12800
+                },
+                "dispatched_predictor_query_count": 76800,
+                "fallback_count": 0,
+                "finite": true,
+                "fusion_valid_count": 76800,
+                "gnss_valid_count": 76800,
+                "horizon_scientific_mismatch_count": 0,
+                "iteration": 3,
+                "lidar_valid_count": 76800,
+                "logical_query_count": 76800,
+                "production_result_checksum_fnv1a64": "f3391b97ded03f07",
+                "production_result_conversion_count": 76800,
+                "scientific_checksum_fnv1a64": "b37eb6a4d154e457",
+                "source_flags_histogram": {
+                  "1533": 76800
+                },
+                "timings_ms": {
+                  "cumulative_fusion_advisory": 0.0,
+                  "cumulative_gnss_advisory": 0.0,
+                  "cumulative_input_construction": 15.147271000000018,
+                  "cumulative_lidar_advisory": 0.0,
+                  "cumulative_predictor_batch": 583.1811009999999,
+                  "cumulative_result_materialization": 2.0596139999999976,
+                  "cumulative_worker_module_setup": 0.001837,
+                  "query_grouping_index": 2.517146,
+                  "scientific_validation_replay_outside_provider_timer": 190.518399,
+                  "total_predictor_provider": 155.072504,
+                  "worker_wall": 152.230626
+                },
+                "valid_count": 76800
+              },
+              {
+                "available_count": 76800,
+                "collect_component_timing": false,
+                "counts": {
+                  "fusion_advisory_invocations": 76800,
+                  "gnss_advisory_invocations": 76800,
+                  "lidar_advisory_invocations": 12800,
+                  "lidar_cache_hits": 64000,
+                  "lidar_evaluations": 12800,
+                  "unique_positions": 12800
+                },
+                "dispatched_predictor_query_count": 76800,
+                "fallback_count": 0,
+                "finite": true,
+                "fusion_valid_count": 76800,
+                "gnss_valid_count": 76800,
+                "horizon_scientific_mismatch_count": 0,
+                "iteration": 4,
+                "lidar_valid_count": 76800,
+                "logical_query_count": 76800,
+                "production_result_checksum_fnv1a64": "f3391b97ded03f07",
+                "production_result_conversion_count": 76800,
+                "scientific_checksum_fnv1a64": "b37eb6a4d154e457",
+                "source_flags_histogram": {
+                  "1533": 76800
+                },
+                "timings_ms": {
+                  "cumulative_fusion_advisory": 0.0,
+                  "cumulative_gnss_advisory": 0.0,
+                  "cumulative_input_construction": 15.088503000000038,
+                  "cumulative_lidar_advisory": 0.0,
+                  "cumulative_predictor_batch": 584.6357760000003,
+                  "cumulative_result_materialization": 2.0023080000000064,
+                  "cumulative_worker_module_setup": 0.0015769999999999998,
+                  "query_grouping_index": 2.555073,
+                  "scientific_validation_replay_outside_provider_timer": 187.622852,
+                  "total_predictor_provider": 155.093755,
+                  "worker_wall": 152.09912
+                },
+                "valid_count": 76800
+              }
+            ],
+            "p95_within_400_ms_diagnostic_budget": true,
+            "phase": "counter_only_budget",
+            "speedup_vs_worker_1_p50": 3.716009987380724,
+            "summary_ms": {
+              "cumulative_fusion_advisory": {
+                "p50_ms": 0.0,
+                "p95_ms": 0.0
+              },
+              "cumulative_gnss_advisory": {
+                "p50_ms": 0.0,
+                "p95_ms": 0.0
+              },
+              "cumulative_input_construction": {
+                "p50_ms": 15.219968000000017,
+                "p95_ms": 15.251457600000014
+              },
+              "cumulative_lidar_advisory": {
+                "p50_ms": 0.0,
+                "p95_ms": 0.0
+              },
+              "cumulative_predictor_batch": {
+                "p50_ms": 585.2536869999997,
+                "p95_ms": 587.5852470000002
+              },
+              "cumulative_result_materialization": {
+                "p50_ms": 2.0596139999999976,
+                "p95_ms": 2.381883600000004
+              },
+              "cumulative_worker_module_setup": {
+                "p50_ms": 0.001837,
+                "p95_ms": 0.002902
+              },
+              "query_grouping_index": {
+                "p50_ms": 2.517146,
+                "p95_ms": 2.5636425999999997
+              },
+              "scientific_validation_replay_outside_provider_timer": {
+                "p50_ms": 189.366354,
+                "p95_ms": 194.29019580000002
+              },
+              "total_predictor_provider": {
+                "p50_ms": 155.386887,
+                "p95_ms": 155.99115
+              },
+              "worker_wall": {
+                "p50_ms": 152.47294,
+                "p95_ms": 152.9791442
+              }
+            }
+          },
+          "worker_count": 4
+        }
+      ]
+    },
+    {
+      "current_production_contract": false,
+      "gnss_local_occupancy_installed": true,
+      "gnss_visibility_model": "LocalOccupancyGrid ray-based LOS plus elevation mask",
+      "horizon_scientific_fields_invariant": true,
+      "mode": "map_los_candidate",
+      "production_label": "NOT_CURRENT_PRODUCTION",
+      "production_result_checksum_fnv1a64": "b626bfd2deb3d373",
+      "scientific_checksum_fnv1a64": "34549ced6ce305eb",
+      "validation": {
+        "counter_vs_component_timing_contract_exact": true,
+        "finite_iterations": true,
+        "production_result_checksums_stable_across_phases_and_workers": true,
+        "query_and_conversion_shape_exact": true,
+        "scientific_checksums_stable_across_phases_and_workers": true,
+        "validity_source_flag_counts_stable_across_phases_and_workers": true
+      },
+      "workers": [
+        {
+          "component_percentage_status": "COST_RANKING_DIAGNOSTIC",
+          "component_timed": {
+            "budget_timing_authority": false,
+            "collect_component_timing": true,
+            "component_cost_percentages_of_outer_p50": {
+              "fusion_advisory": 4.868613233998277,
+              "gnss_advisory": 86.79259906572354,
+              "lidar_advisory": 4.338944046191345
+            },
+            "iterations": [
+              {
+                "available_count": 76800,
+                "collect_component_timing": true,
+                "counts": {
+                  "fusion_advisory_invocations": 76800,
+                  "gnss_advisory_invocations": 76800,
+                  "lidar_advisory_invocations": 12800,
+                  "lidar_cache_hits": 64000,
+                  "lidar_evaluations": 12800,
+                  "unique_positions": 12800
+                },
+                "dispatched_predictor_query_count": 76800,
+                "fallback_count": 0,
+                "finite": true,
+                "fusion_valid_count": 76800,
+                "gnss_valid_count": 76800,
+                "horizon_scientific_mismatch_count": 0,
+                "iteration": 0,
+                "lidar_valid_count": 76800,
+                "logical_query_count": 76800,
+                "production_result_checksum_fnv1a64": "b626bfd2deb3d373",
+                "production_result_conversion_count": 76800,
+                "scientific_checksum_fnv1a64": "34549ced6ce305eb",
+                "source_flags_histogram": {
+                  "1533": 76800
+                },
+                "timings_ms": {
+                  "cumulative_fusion_advisory": 57.884133999999996,
+                  "cumulative_gnss_advisory": 1019.0306599999999,
+                  "cumulative_input_construction": 14.949797000000114,
+                  "cumulative_lidar_advisory": 50.979693,
+                  "cumulative_predictor_batch": 1151.4746160000045,
+                  "cumulative_result_materialization": 1.1836770000000147,
+                  "cumulative_worker_module_setup": 0.001164,
+                  "query_grouping_index": 2.377781,
+                  "scientific_validation_replay_outside_provider_timer": 1190.167119,
+                  "total_predictor_provider": 1174.8367,
+                  "worker_wall": 1172.032073
+                },
+                "valid_count": 76800
+              },
+              {
+                "available_count": 76800,
+                "collect_component_timing": true,
+                "counts": {
+                  "fusion_advisory_invocations": 76800,
+                  "gnss_advisory_invocations": 76800,
+                  "lidar_advisory_invocations": 12800,
+                  "lidar_cache_hits": 64000,
+                  "lidar_evaluations": 12800,
+                  "unique_positions": 12800
+                },
+                "dispatched_predictor_query_count": 76800,
+                "fallback_count": 0,
+                "finite": true,
+                "fusion_valid_count": 76800,
+                "gnss_valid_count": 76800,
+                "horizon_scientific_mismatch_count": 0,
+                "iteration": 1,
+                "lidar_valid_count": 76800,
+                "logical_query_count": 76800,
+                "production_result_checksum_fnv1a64": "b626bfd2deb3d373",
+                "production_result_conversion_count": 76800,
+                "scientific_checksum_fnv1a64": "34549ced6ce305eb",
+                "source_flags_histogram": {
+                  "1533": 76800
+                },
+                "timings_ms": {
+                  "cumulative_fusion_advisory": 57.952701999999995,
+                  "cumulative_gnss_advisory": 1020.925266,
+                  "cumulative_input_construction": 15.00672500000012,
+                  "cumulative_lidar_advisory": 51.089811999999995,
+                  "cumulative_predictor_batch": 1153.6496450000025,
+                  "cumulative_result_materialization": 1.1616550000000352,
+                  "cumulative_worker_module_setup": 0.0007,
+                  "query_grouping_index": 2.435489,
+                  "scientific_validation_replay_outside_provider_timer": 1213.246607,
+                  "total_predictor_provider": 1177.09509,
+                  "worker_wall": 1174.22632
+                },
+                "valid_count": 76800
+              },
+              {
+                "available_count": 76800,
+                "collect_component_timing": true,
+                "counts": {
+                  "fusion_advisory_invocations": 76800,
+                  "gnss_advisory_invocations": 76800,
+                  "lidar_advisory_invocations": 12800,
+                  "lidar_cache_hits": 64000,
+                  "lidar_evaluations": 12800,
+                  "unique_positions": 12800
+                },
+                "dispatched_predictor_query_count": 76800,
+                "fallback_count": 0,
+                "finite": true,
+                "fusion_valid_count": 76800,
+                "gnss_valid_count": 76800,
+                "horizon_scientific_mismatch_count": 0,
+                "iteration": 2,
+                "lidar_valid_count": 76800,
+                "logical_query_count": 76800,
+                "production_result_checksum_fnv1a64": "b626bfd2deb3d373",
+                "production_result_conversion_count": 76800,
+                "scientific_checksum_fnv1a64": "34549ced6ce305eb",
+                "source_flags_histogram": {
+                  "1533": 76800
+                },
+                "timings_ms": {
+                  "cumulative_fusion_advisory": 57.202951999999996,
+                  "cumulative_gnss_advisory": 1019.755039,
+                  "cumulative_input_construction": 14.947154000000005,
+                  "cumulative_lidar_advisory": 50.974273,
+                  "cumulative_predictor_batch": 1151.5251289999994,
+                  "cumulative_result_materialization": 1.1634550000000239,
+                  "cumulative_worker_module_setup": 0.001302,
+                  "query_grouping_index": 2.50036,
+                  "scientific_validation_replay_outside_provider_timer": 1211.300914,
+                  "total_predictor_provider": 1174.933174,
+                  "worker_wall": 1172.112296
+                },
+                "valid_count": 76800
+              },
+              {
+                "available_count": 76800,
+                "collect_component_timing": true,
+                "counts": {
+                  "fusion_advisory_invocations": 76800,
+                  "gnss_advisory_invocations": 76800,
+                  "lidar_advisory_invocations": 12800,
+                  "lidar_cache_hits": 64000,
+                  "lidar_evaluations": 12800,
+                  "unique_positions": 12800
+                },
+                "dispatched_predictor_query_count": 76800,
+                "fallback_count": 0,
+                "finite": true,
+                "fusion_valid_count": 76800,
+                "gnss_valid_count": 76800,
+                "horizon_scientific_mismatch_count": 0,
+                "iteration": 3,
+                "lidar_valid_count": 76800,
+                "logical_query_count": 76800,
+                "production_result_checksum_fnv1a64": "b626bfd2deb3d373",
+                "production_result_conversion_count": 76800,
+                "scientific_checksum_fnv1a64": "34549ced6ce305eb",
+                "source_flags_histogram": {
+                  "1533": 76800
+                },
+                "timings_ms": {
+                  "cumulative_fusion_advisory": 57.121359,
+                  "cumulative_gnss_advisory": 1018.7257629999999,
+                  "cumulative_input_construction": 14.907219000000048,
+                  "cumulative_lidar_advisory": 50.882918,
+                  "cumulative_predictor_batch": 1150.2394429999995,
+                  "cumulative_result_materialization": 1.1678430000000124,
+                  "cumulative_worker_module_setup": 0.000512,
+                  "query_grouping_index": 2.513733,
+                  "scientific_validation_replay_outside_provider_timer": 1216.902082,
+                  "total_predictor_provider": 1173.623387,
+                  "worker_wall": 1170.782258
+                },
+                "valid_count": 76800
+              },
+              {
+                "available_count": 76800,
+                "collect_component_timing": true,
+                "counts": {
+                  "fusion_advisory_invocations": 76800,
+                  "gnss_advisory_invocations": 76800,
+                  "lidar_advisory_invocations": 12800,
+                  "lidar_cache_hits": 64000,
+                  "lidar_evaluations": 12800,
+                  "unique_positions": 12800
+                },
+                "dispatched_predictor_query_count": 76800,
+                "fallback_count": 0,
+                "finite": true,
+                "fusion_valid_count": 76800,
+                "gnss_valid_count": 76800,
+                "horizon_scientific_mismatch_count": 0,
+                "iteration": 4,
+                "lidar_valid_count": 76800,
+                "logical_query_count": 76800,
+                "production_result_checksum_fnv1a64": "b626bfd2deb3d373",
+                "production_result_conversion_count": 76800,
+                "scientific_checksum_fnv1a64": "34549ced6ce305eb",
+                "source_flags_histogram": {
+                  "1533": 76800
+                },
+                "timings_ms": {
+                  "cumulative_fusion_advisory": 57.169374999999995,
+                  "cumulative_gnss_advisory": 1019.8371579999999,
+                  "cumulative_input_construction": 14.944587000000064,
+                  "cumulative_lidar_advisory": 50.99859,
+                  "cumulative_predictor_batch": 1151.6003539999951,
+                  "cumulative_result_materialization": 1.1790770000000168,
+                  "cumulative_worker_module_setup": 0.000822,
+                  "query_grouping_index": 2.379527,
+                  "scientific_validation_replay_outside_provider_timer": 1212.715907,
+                  "total_predictor_provider": 1175.024147,
+                  "worker_wall": 1172.30757
+                },
+                "valid_count": 76800
+              }
+            ],
+            "phase": "component_timed_cost_ranking",
+            "summary_ms": {
+              "cumulative_fusion_advisory": {
+                "p50_ms": 57.202951999999996,
+                "p95_ms": 57.9389884
+              },
+              "cumulative_gnss_advisory": {
+                "p50_ms": 1019.755039,
+                "p95_ms": 1020.7076443999999
+              },
+              "cumulative_input_construction": {
+                "p50_ms": 14.947154000000005,
+                "p95_ms": 14.995339400000118
+              },
+              "cumulative_lidar_advisory": {
+                "p50_ms": 50.979693,
+                "p95_ms": 51.0715676
+              },
+              "cumulative_predictor_batch": {
+                "p50_ms": 1151.5251289999994,
+                "p95_ms": 1153.239786800001
+              },
+              "cumulative_result_materialization": {
+                "p50_ms": 1.1678430000000124,
+                "p95_ms": 1.1827570000000152
+              },
+              "cumulative_worker_module_setup": {
+                "p50_ms": 0.000822,
+                "p95_ms": 0.0012744
+              },
+              "query_grouping_index": {
+                "p50_ms": 2.435489,
+                "p95_ms": 2.5110584000000005
+              },
+              "scientific_validation_replay_outside_provider_timer": {
+                "p50_ms": 1212.715907,
+                "p95_ms": 1216.170987
+              },
+              "total_predictor_provider": {
+                "p50_ms": 1174.933174,
+                "p95_ms": 1176.6809014
+              },
+              "worker_wall": {
+                "p50_ms": 1172.112296,
+                "p95_ms": 1173.84257
+              }
+            }
+          },
+          "component_timer_perturbation": {
+            "p50_delta_ms": 4.585692999999992,
+            "p50_percent": 0.39182320417195754,
+            "p95_delta_ms": 4.265447199999926,
+            "p95_percent": 0.363817039831709
+          },
+          "counter_only": {
+            "budget_timing_authority": true,
+            "collect_component_timing": false,
+            "iterations": [
+              {
+                "available_count": 76800,
+                "collect_component_timing": false,
+                "counts": {
+                  "fusion_advisory_invocations": 76800,
+                  "gnss_advisory_invocations": 76800,
+                  "lidar_advisory_invocations": 12800,
+                  "lidar_cache_hits": 64000,
+                  "lidar_evaluations": 12800,
+                  "unique_positions": 12800
+                },
+                "dispatched_predictor_query_count": 76800,
+                "fallback_count": 0,
+                "finite": true,
+                "fusion_valid_count": 76800,
+                "gnss_valid_count": 76800,
+                "horizon_scientific_mismatch_count": 0,
+                "iteration": 0,
+                "lidar_valid_count": 76800,
+                "logical_query_count": 76800,
+                "production_result_checksum_fnv1a64": "b626bfd2deb3d373",
+                "production_result_conversion_count": 76800,
+                "scientific_checksum_fnv1a64": "34549ced6ce305eb",
+                "source_flags_histogram": {
+                  "1533": 76800
+                },
+                "timings_ms": {
+                  "cumulative_fusion_advisory": 0.0,
+                  "cumulative_gnss_advisory": 0.0,
+                  "cumulative_input_construction": 14.841714000000065,
+                  "cumulative_lidar_advisory": 0.0,
+                  "cumulative_predictor_batch": 1141.5310270000089,
+                  "cumulative_result_materialization": 1.1691790000000248,
+                  "cumulative_worker_module_setup": 0.000624,
+                  "query_grouping_index": 2.484551,
+                  "scientific_validation_replay_outside_provider_timer": 1195.681224,
+                  "total_predictor_provider": 1164.995749,
+                  "worker_wall": 1162.07285
+                },
+                "valid_count": 76800
+              },
+              {
+                "available_count": 76800,
+                "collect_component_timing": false,
+                "counts": {
+                  "fusion_advisory_invocations": 76800,
+                  "gnss_advisory_invocations": 76800,
+                  "lidar_advisory_invocations": 12800,
+                  "lidar_cache_hits": 64000,
+                  "lidar_evaluations": 12800,
+                  "unique_positions": 12800
+                },
+                "dispatched_predictor_query_count": 76800,
+                "fallback_count": 0,
+                "finite": true,
+                "fusion_valid_count": 76800,
+                "gnss_valid_count": 76800,
+                "horizon_scientific_mismatch_count": 0,
+                "iteration": 1,
+                "lidar_valid_count": 76800,
+                "logical_query_count": 76800,
+                "production_result_checksum_fnv1a64": "b626bfd2deb3d373",
+                "production_result_conversion_count": 76800,
+                "scientific_checksum_fnv1a64": "34549ced6ce305eb",
+                "source_flags_histogram": {
+                  "1533": 76800
+                },
+                "timings_ms": {
+                  "cumulative_fusion_advisory": 0.0,
+                  "cumulative_gnss_advisory": 0.0,
+                  "cumulative_input_construction": 14.803187000000065,
+                  "cumulative_lidar_advisory": 0.0,
+                  "cumulative_predictor_batch": 1140.7009199999948,
+                  "cumulative_result_materialization": 1.1525390000000253,
+                  "cumulative_worker_module_setup": 0.000512,
+                  "query_grouping_index": 2.463536,
+                  "scientific_validation_replay_outside_provider_timer": 1213.34922,
+                  "total_predictor_provider": 1164.013463,
+                  "worker_wall": 1161.116209
+                },
+                "valid_count": 76800
+              },
+              {
+                "available_count": 76800,
+                "collect_component_timing": false,
+                "counts": {
+                  "fusion_advisory_invocations": 76800,
+                  "gnss_advisory_invocations": 76800,
+                  "lidar_advisory_invocations": 12800,
+                  "lidar_cache_hits": 64000,
+                  "lidar_evaluations": 12800,
+                  "unique_positions": 12800
+                },
+                "dispatched_predictor_query_count": 76800,
+                "fallback_count": 0,
+                "finite": true,
+                "fusion_valid_count": 76800,
+                "gnss_valid_count": 76800,
+                "horizon_scientific_mismatch_count": 0,
+                "iteration": 2,
+                "lidar_valid_count": 76800,
+                "logical_query_count": 76800,
+                "production_result_checksum_fnv1a64": "b626bfd2deb3d373",
+                "production_result_conversion_count": 76800,
+                "scientific_checksum_fnv1a64": "34549ced6ce305eb",
+                "source_flags_histogram": {
+                  "1533": 76800
+                },
+                "timings_ms": {
+                  "cumulative_fusion_advisory": 0.0,
+                  "cumulative_gnss_advisory": 0.0,
+                  "cumulative_input_construction": 14.885317000000025,
+                  "cumulative_lidar_advisory": 0.0,
+                  "cumulative_predictor_batch": 1147.333347000002,
+                  "cumulative_result_materialization": 1.1734170000000232,
+                  "cumulative_worker_module_setup": 0.000629,
+                  "query_grouping_index": 2.455156,
+                  "scientific_validation_replay_outside_provider_timer": 1203.474223,
+                  "total_predictor_provider": 1170.761203,
+                  "worker_wall": 1167.870612
+                },
+                "valid_count": 76800
+              },
+              {
+                "available_count": 76800,
+                "collect_component_timing": false,
+                "counts": {
+                  "fusion_advisory_invocations": 76800,
+                  "gnss_advisory_invocations": 76800,
+                  "lidar_advisory_invocations": 12800,
+                  "lidar_cache_hits": 64000,
+                  "lidar_evaluations": 12800,
+                  "unique_positions": 12800
+                },
+                "dispatched_predictor_query_count": 76800,
+                "fallback_count": 0,
+                "finite": true,
+                "fusion_valid_count": 76800,
+                "gnss_valid_count": 76800,
+                "horizon_scientific_mismatch_count": 0,
+                "iteration": 3,
+                "lidar_valid_count": 76800,
+                "logical_query_count": 76800,
+                "production_result_checksum_fnv1a64": "b626bfd2deb3d373",
+                "production_result_conversion_count": 76800,
+                "scientific_checksum_fnv1a64": "34549ced6ce305eb",
+                "source_flags_histogram": {
+                  "1533": 76800
+                },
+                "timings_ms": {
+                  "cumulative_fusion_advisory": 0.0,
+                  "cumulative_gnss_advisory": 0.0,
+                  "cumulative_input_construction": 14.943140000000097,
+                  "cumulative_lidar_advisory": 0.0,
+                  "cumulative_predictor_batch": 1146.9491629999961,
+                  "cumulative_result_materialization": 1.1575350000000135,
+                  "cumulative_worker_module_setup": 0.000724,
+                  "query_grouping_index": 2.462625,
+                  "scientific_validation_replay_outside_provider_timer": 1218.17191,
+                  "total_predictor_provider": 1170.347481,
+                  "worker_wall": 1167.44392
+                },
+                "valid_count": 76800
+              },
+              {
+                "available_count": 76800,
+                "collect_component_timing": false,
+                "counts": {
+                  "fusion_advisory_invocations": 76800,
+                  "gnss_advisory_invocations": 76800,
+                  "lidar_advisory_invocations": 12800,
+                  "lidar_cache_hits": 64000,
+                  "lidar_evaluations": 12800,
+                  "unique_positions": 12800
+                },
+                "dispatched_predictor_query_count": 76800,
+                "fallback_count": 0,
+                "finite": true,
+                "fusion_valid_count": 76800,
+                "gnss_valid_count": 76800,
+                "horizon_scientific_mismatch_count": 0,
+                "iteration": 4,
+                "lidar_valid_count": 76800,
+                "logical_query_count": 76800,
+                "production_result_checksum_fnv1a64": "b626bfd2deb3d373",
+                "production_result_conversion_count": 76800,
+                "scientific_checksum_fnv1a64": "34549ced6ce305eb",
+                "source_flags_histogram": {
+                  "1533": 76800
+                },
+                "timings_ms": {
+                  "cumulative_fusion_advisory": 0.0,
+                  "cumulative_gnss_advisory": 0.0,
+                  "cumulative_input_construction": 14.911526000000126,
+                  "cumulative_lidar_advisory": 0.0,
+                  "cumulative_predictor_batch": 1149.1939670000056,
+                  "cumulative_result_materialization": 1.1874140000000235,
+                  "cumulative_worker_module_setup": 0.001479,
+                  "query_grouping_index": 2.581639,
+                  "scientific_validation_replay_outside_provider_timer": 1199.514122,
+                  "total_predictor_provider": 1172.829017,
+                  "worker_wall": 1169.788189
+                },
+                "valid_count": 76800
+              }
+            ],
+            "p95_within_400_ms_diagnostic_budget": false,
+            "phase": "counter_only_budget",
+            "speedup_vs_worker_1_p50": 1.0,
+            "summary_ms": {
+              "cumulative_fusion_advisory": {
+                "p50_ms": 0.0,
+                "p95_ms": 0.0
+              },
+              "cumulative_gnss_advisory": {
+                "p50_ms": 0.0,
+                "p95_ms": 0.0
+              },
+              "cumulative_input_construction": {
+                "p50_ms": 14.885317000000025,
+                "p95_ms": 14.936817200000103
+              },
+              "cumulative_lidar_advisory": {
+                "p50_ms": 0.0,
+                "p95_ms": 0.0
+              },
+              "cumulative_predictor_batch": {
+                "p50_ms": 1146.9491629999961,
+                "p95_ms": 1148.821843000005
+              },
+              "cumulative_result_materialization": {
+                "p50_ms": 1.1691790000000248,
+                "p95_ms": 1.1846146000000235
+              },
+              "cumulative_worker_module_setup": {
+                "p50_ms": 0.000629,
+                "p95_ms": 0.0013279999999999998
+              },
+              "query_grouping_index": {
+                "p50_ms": 2.463536,
+                "p95_ms": 2.5622214
+              },
+              "scientific_validation_replay_outside_provider_timer": {
+                "p50_ms": 1203.474223,
+                "p95_ms": 1217.207372
+              },
+              "total_predictor_provider": {
+                "p50_ms": 1170.347481,
+                "p95_ms": 1172.4154542
+              },
+              "worker_wall": {
+                "p50_ms": 1167.44392,
+                "p95_ms": 1169.4046736
+              }
+            }
+          },
+          "worker_count": 1
+        },
+        {
+          "component_percentage_status": "COST_RANKING_DIAGNOSTIC",
+          "component_timed": {
+            "budget_timing_authority": false,
+            "collect_component_timing": true,
+            "component_cost_percentages_of_outer_p50": {
+              "fusion_advisory": 9.786029516875873,
+              "gnss_advisory": 171.67990783759998,
+              "lidar_advisory": 9.1161847096871
+            },
+            "iterations": [
+              {
+                "available_count": 76800,
+                "collect_component_timing": true,
+                "counts": {
+                  "fusion_advisory_invocations": 76800,
+                  "gnss_advisory_invocations": 76800,
+                  "lidar_advisory_invocations": 12800,
+                  "lidar_cache_hits": 64000,
+                  "lidar_evaluations": 12800,
+                  "unique_positions": 12800
+                },
+                "dispatched_predictor_query_count": 76800,
+                "fallback_count": 0,
+                "finite": true,
+                "fusion_valid_count": 76800,
+                "gnss_valid_count": 76800,
+                "horizon_scientific_mismatch_count": 0,
+                "iteration": 0,
+                "lidar_valid_count": 76800,
+                "logical_query_count": 76800,
+                "production_result_checksum_fnv1a64": "b626bfd2deb3d373",
+                "production_result_conversion_count": 76800,
+                "scientific_checksum_fnv1a64": "34549ced6ce305eb",
+                "source_flags_histogram": {
+                  "1533": 76800
+                },
+                "timings_ms": {
+                  "cumulative_fusion_advisory": 59.567837999999995,
+                  "cumulative_gnss_advisory": 1043.360673,
+                  "cumulative_input_construction": 15.905344000000035,
+                  "cumulative_lidar_advisory": 55.888555,
+                  "cumulative_predictor_batch": 1183.2265980000018,
+                  "cumulative_result_materialization": 1.8565360000000108,
+                  "cumulative_worker_module_setup": 0.001604,
+                  "query_grouping_index": 2.429281,
+                  "scientific_validation_replay_outside_provider_timer": 644.7468,
+                  "total_predictor_provider": 607.704683,
+                  "worker_wall": 604.810664
+                },
+                "valid_count": 76800
+              },
+              {
+                "available_count": 76800,
+                "collect_component_timing": true,
+                "counts": {
+                  "fusion_advisory_invocations": 76800,
+                  "gnss_advisory_invocations": 76800,
+                  "lidar_advisory_invocations": 12800,
+                  "lidar_cache_hits": 64000,
+                  "lidar_evaluations": 12800,
+                  "unique_positions": 12800
+                },
+                "dispatched_predictor_query_count": 76800,
+                "fallback_count": 0,
+                "finite": true,
+                "fusion_valid_count": 76800,
+                "gnss_valid_count": 76800,
+                "horizon_scientific_mismatch_count": 0,
+                "iteration": 1,
+                "lidar_valid_count": 76800,
+                "logical_query_count": 76800,
+                "production_result_checksum_fnv1a64": "b626bfd2deb3d373",
+                "production_result_conversion_count": 76800,
+                "scientific_checksum_fnv1a64": "34549ced6ce305eb",
+                "source_flags_histogram": {
+                  "1533": 76800
+                },
+                "timings_ms": {
+                  "cumulative_fusion_advisory": 59.793167,
+                  "cumulative_gnss_advisory": 1044.404746,
+                  "cumulative_input_construction": 16.007851000000013,
+                  "cumulative_lidar_advisory": 56.294888,
+                  "cumulative_predictor_batch": 1185.1042140000031,
+                  "cumulative_result_materialization": 1.722030000000004,
+                  "cumulative_worker_module_setup": 0.0011819999999999999,
+                  "query_grouping_index": 2.354888,
+                  "scientific_validation_replay_outside_provider_timer": 646.08713,
+                  "total_predictor_provider": 608.937592,
+                  "worker_wall": 606.141111
+                },
+                "valid_count": 76800
+              },
+              {
+                "available_count": 76800,
+                "collect_component_timing": true,
+                "counts": {
+                  "fusion_advisory_invocations": 76800,
+                  "gnss_advisory_invocations": 76800,
+                  "lidar_advisory_invocations": 12800,
+                  "lidar_cache_hits": 64000,
+                  "lidar_evaluations": 12800,
+                  "unique_positions": 12800
+                },
+                "dispatched_predictor_query_count": 76800,
+                "fallback_count": 0,
+                "finite": true,
+                "fusion_valid_count": 76800,
+                "gnss_valid_count": 76800,
+                "horizon_scientific_mismatch_count": 0,
+                "iteration": 2,
+                "lidar_valid_count": 76800,
+                "logical_query_count": 76800,
+                "production_result_checksum_fnv1a64": "b626bfd2deb3d373",
+                "production_result_conversion_count": 76800,
+                "scientific_checksum_fnv1a64": "34549ced6ce305eb",
+                "source_flags_histogram": {
+                  "1533": 76800
+                },
+                "timings_ms": {
+                  "cumulative_fusion_advisory": 59.156479,
+                  "cumulative_gnss_advisory": 1038.8179169999999,
+                  "cumulative_input_construction": 15.82179,
+                  "cumulative_lidar_advisory": 55.364978,
+                  "cumulative_predictor_batch": 1177.628834999996,
+                  "cumulative_result_materialization": 1.7093770000000088,
+                  "cumulative_worker_module_setup": 0.002895,
+                  "query_grouping_index": 2.502345,
+                  "scientific_validation_replay_outside_provider_timer": 643.048902,
+                  "total_predictor_provider": 605.174969,
+                  "worker_wall": 602.2436
+                },
+                "valid_count": 76800
+              },
+              {
+                "available_count": 76800,
+                "collect_component_timing": true,
+                "counts": {
+                  "fusion_advisory_invocations": 76800,
+                  "gnss_advisory_invocations": 76800,
+                  "lidar_advisory_invocations": 12800,
+                  "lidar_cache_hits": 64000,
+                  "lidar_evaluations": 12800,
+                  "unique_positions": 12800
+                },
+                "dispatched_predictor_query_count": 76800,
+                "fallback_count": 0,
+                "finite": true,
+                "fusion_valid_count": 76800,
+                "gnss_valid_count": 76800,
+                "horizon_scientific_mismatch_count": 0,
+                "iteration": 3,
+                "lidar_valid_count": 76800,
+                "logical_query_count": 76800,
+                "production_result_checksum_fnv1a64": "b626bfd2deb3d373",
+                "production_result_conversion_count": 76800,
+                "scientific_checksum_fnv1a64": "34549ced6ce305eb",
+                "source_flags_histogram": {
+                  "1533": 76800
+                },
+                "timings_ms": {
+                  "cumulative_fusion_advisory": 59.161249,
+                  "cumulative_gnss_advisory": 1040.069159,
+                  "cumulative_input_construction": 15.892227000000048,
+                  "cumulative_lidar_advisory": 55.190619999999996,
+                  "cumulative_predictor_batch": 1178.6105000000011,
+                  "cumulative_result_materialization": 1.5902250000000095,
+                  "cumulative_worker_module_setup": 0.001035,
+                  "query_grouping_index": 2.416157,
+                  "scientific_validation_replay_outside_provider_timer": 642.398611,
+                  "total_predictor_provider": 606.197372,
+                  "worker_wall": 603.345464
+                },
+                "valid_count": 76800
+              },
+              {
+                "available_count": 76800,
+                "collect_component_timing": true,
+                "counts": {
+                  "fusion_advisory_invocations": 76800,
+                  "gnss_advisory_invocations": 76800,
+                  "lidar_advisory_invocations": 12800,
+                  "lidar_cache_hits": 64000,
+                  "lidar_evaluations": 12800,
+                  "unique_positions": 12800
+                },
+                "dispatched_predictor_query_count": 76800,
+                "fallback_count": 0,
+                "finite": true,
+                "fusion_valid_count": 76800,
+                "gnss_valid_count": 76800,
+                "horizon_scientific_mismatch_count": 0,
+                "iteration": 4,
+                "lidar_valid_count": 76800,
+                "logical_query_count": 76800,
+                "production_result_checksum_fnv1a64": "b626bfd2deb3d373",
+                "production_result_conversion_count": 76800,
+                "scientific_checksum_fnv1a64": "34549ced6ce305eb",
+                "source_flags_histogram": {
+                  "1533": 76800
+                },
+                "timings_ms": {
+                  "cumulative_fusion_advisory": 59.433121,
+                  "cumulative_gnss_advisory": 1042.657057,
+                  "cumulative_input_construction": 15.82483100000001,
+                  "cumulative_lidar_advisory": 55.286170999999996,
+                  "cumulative_predictor_batch": 1181.5429140000042,
+                  "cumulative_result_materialization": 1.6320600000000267,
+                  "cumulative_worker_module_setup": 0.000818,
+                  "query_grouping_index": 2.473024,
+                  "scientific_validation_replay_outside_provider_timer": 644.796152,
+                  "total_predictor_provider": 607.326198,
+                  "worker_wall": 604.397592
+                },
+                "valid_count": 76800
+              }
+            ],
+            "phase": "component_timed_cost_ranking",
+            "summary_ms": {
+              "cumulative_fusion_advisory": {
+                "p50_ms": 59.433121,
+                "p95_ms": 59.748101199999994
+              },
+              "cumulative_gnss_advisory": {
+                "p50_ms": 1042.657057,
+                "p95_ms": 1044.1959314
+              },
+              "cumulative_input_construction": {
+                "p50_ms": 15.892227000000048,
+                "p95_ms": 15.987349600000016
+              },
+              "cumulative_lidar_advisory": {
+                "p50_ms": 55.364978,
+                "p95_ms": 56.2136214
+              },
+              "cumulative_predictor_batch": {
+                "p50_ms": 1181.5429140000042,
+                "p95_ms": 1184.7286908000028
+              },
+              "cumulative_result_materialization": {
+                "p50_ms": 1.7093770000000088,
+                "p95_ms": 1.8296348000000096
+              },
+              "cumulative_worker_module_setup": {
+                "p50_ms": 0.0011819999999999999,
+                "p95_ms": 0.0026368
+              },
+              "query_grouping_index": {
+                "p50_ms": 2.429281,
+                "p95_ms": 2.4964808
+              },
+              "scientific_validation_replay_outside_provider_timer": {
+                "p50_ms": 644.7468,
+                "p95_ms": 645.8289344
+              },
+              "total_predictor_provider": {
+                "p50_ms": 607.326198,
+                "p95_ms": 608.6910101999999
+              },
+              "worker_wall": {
+                "p50_ms": 604.397592,
+                "p95_ms": 605.8750216
+              }
+            }
+          },
+          "component_timer_perturbation": {
+            "p50_delta_ms": 3.816467999999986,
+            "p50_percent": 0.6323788681915677,
+            "p95_delta_ms": 2.1142161999998734,
+            "p95_percent": 0.3485488104577692
+          },
+          "counter_only": {
+            "budget_timing_authority": true,
+            "collect_component_timing": false,
+            "iterations": [
+              {
+                "available_count": 76800,
+                "collect_component_timing": false,
+                "counts": {
+                  "fusion_advisory_invocations": 76800,
+                  "gnss_advisory_invocations": 76800,
+                  "lidar_advisory_invocations": 12800,
+                  "lidar_cache_hits": 64000,
+                  "lidar_evaluations": 12800,
+                  "unique_positions": 12800
+                },
+                "dispatched_predictor_query_count": 76800,
+                "fallback_count": 0,
+                "finite": true,
+                "fusion_valid_count": 76800,
+                "gnss_valid_count": 76800,
+                "horizon_scientific_mismatch_count": 0,
+                "iteration": 0,
+                "lidar_valid_count": 76800,
+                "logical_query_count": 76800,
+                "production_result_checksum_fnv1a64": "b626bfd2deb3d373",
+                "production_result_conversion_count": 76800,
+                "scientific_checksum_fnv1a64": "34549ced6ce305eb",
+                "source_flags_histogram": {
+                  "1533": 76800
+                },
+                "timings_ms": {
+                  "cumulative_fusion_advisory": 0.0,
+                  "cumulative_gnss_advisory": 0.0,
+                  "cumulative_input_construction": 15.831028999999976,
+                  "cumulative_lidar_advisory": 0.0,
+                  "cumulative_predictor_batch": 1175.011151,
+                  "cumulative_result_materialization": 1.5655050000000235,
+                  "cumulative_worker_module_setup": 0.00228,
+                  "query_grouping_index": 2.445976,
+                  "scientific_validation_replay_outside_provider_timer": 641.189895,
+                  "total_predictor_provider": 604.918406,
+                  "worker_wall": 602.015553
+                },
+                "valid_count": 76800
+              },
+              {
+                "available_count": 76800,
+                "collect_component_timing": false,
+                "counts": {
+                  "fusion_advisory_invocations": 76800,
+                  "gnss_advisory_invocations": 76800,
+                  "lidar_advisory_invocations": 12800,
+                  "lidar_cache_hits": 64000,
+                  "lidar_evaluations": 12800,
+                  "unique_positions": 12800
+                },
+                "dispatched_predictor_query_count": 76800,
+                "fallback_count": 0,
+                "finite": true,
+                "fusion_valid_count": 76800,
+                "gnss_valid_count": 76800,
+                "horizon_scientific_mismatch_count": 0,
+                "iteration": 1,
+                "lidar_valid_count": 76800,
+                "logical_query_count": 76800,
+                "production_result_checksum_fnv1a64": "b626bfd2deb3d373",
+                "production_result_conversion_count": 76800,
+                "scientific_checksum_fnv1a64": "34549ced6ce305eb",
+                "source_flags_histogram": {
+                  "1533": 76800
+                },
+                "timings_ms": {
+                  "cumulative_fusion_advisory": 0.0,
+                  "cumulative_gnss_advisory": 0.0,
+                  "cumulative_input_construction": 15.967957000000045,
+                  "cumulative_lidar_advisory": 0.0,
+                  "cumulative_predictor_batch": 1180.2723180000005,
+                  "cumulative_result_materialization": 1.8275800000000135,
+                  "cumulative_worker_module_setup": 0.001133,
+                  "query_grouping_index": 2.482996,
+                  "scientific_validation_replay_outside_provider_timer": 647.565703,
+                  "total_predictor_provider": 606.991391,
+                  "worker_wall": 604.1823
+                },
+                "valid_count": 76800
+              },
+              {
+                "available_count": 76800,
+                "collect_component_timing": false,
+                "counts": {
+                  "fusion_advisory_invocations": 76800,
+                  "gnss_advisory_invocations": 76800,
+                  "lidar_advisory_invocations": 12800,
+                  "lidar_cache_hits": 64000,
+                  "lidar_evaluations": 12800,
+                  "unique_positions": 12800
+                },
+                "dispatched_predictor_query_count": 76800,
+                "fallback_count": 0,
+                "finite": true,
+                "fusion_valid_count": 76800,
+                "gnss_valid_count": 76800,
+                "horizon_scientific_mismatch_count": 0,
+                "iteration": 2,
+                "lidar_valid_count": 76800,
+                "logical_query_count": 76800,
+                "production_result_checksum_fnv1a64": "b626bfd2deb3d373",
+                "production_result_conversion_count": 76800,
+                "scientific_checksum_fnv1a64": "34549ced6ce305eb",
+                "source_flags_histogram": {
+                  "1533": 76800
+                },
+                "timings_ms": {
+                  "cumulative_fusion_advisory": 0.0,
+                  "cumulative_gnss_advisory": 0.0,
+                  "cumulative_input_construction": 15.741796000000015,
+                  "cumulative_lidar_advisory": 0.0,
+                  "cumulative_predictor_batch": 1168.4998620000013,
+                  "cumulative_result_materialization": 1.5682460000000185,
+                  "cumulative_worker_module_setup": 0.001292,
+                  "query_grouping_index": 2.731828,
+                  "scientific_validation_replay_outside_provider_timer": 647.273477,
+                  "total_predictor_provider": 600.74365,
+                  "worker_wall": 597.557333
+                },
+                "valid_count": 76800
+              },
+              {
+                "available_count": 76800,
+                "collect_component_timing": false,
+                "counts": {
+                  "fusion_advisory_invocations": 76800,
+                  "gnss_advisory_invocations": 76800,
+                  "lidar_advisory_invocations": 12800,
+                  "lidar_cache_hits": 64000,
+                  "lidar_evaluations": 12800,
+                  "unique_positions": 12800
+                },
+                "dispatched_predictor_query_count": 76800,
+                "fallback_count": 0,
+                "finite": true,
+                "fusion_valid_count": 76800,
+                "gnss_valid_count": 76800,
+                "horizon_scientific_mismatch_count": 0,
+                "iteration": 3,
+                "lidar_valid_count": 76800,
+                "logical_query_count": 76800,
+                "production_result_checksum_fnv1a64": "b626bfd2deb3d373",
+                "production_result_conversion_count": 76800,
+                "scientific_checksum_fnv1a64": "34549ced6ce305eb",
+                "source_flags_histogram": {
+                  "1533": 76800
+                },
+                "timings_ms": {
+                  "cumulative_fusion_advisory": 0.0,
+                  "cumulative_gnss_advisory": 0.0,
+                  "cumulative_input_construction": 15.859984999999991,
+                  "cumulative_lidar_advisory": 0.0,
+                  "cumulative_predictor_batch": 1171.5835780000004,
+                  "cumulative_result_materialization": 1.656260999999993,
+                  "cumulative_worker_module_setup": 0.001111,
+                  "query_grouping_index": 2.433392,
+                  "scientific_validation_replay_outside_provider_timer": 640.140219,
+                  "total_predictor_provider": 603.393214,
+                  "worker_wall": 600.515765
+                },
+                "valid_count": 76800
+              },
+              {
+                "available_count": 76800,
+                "collect_component_timing": false,
+                "counts": {
+                  "fusion_advisory_invocations": 76800,
+                  "gnss_advisory_invocations": 76800,
+                  "lidar_advisory_invocations": 12800,
+                  "lidar_cache_hits": 64000,
+                  "lidar_evaluations": 12800,
+                  "unique_positions": 12800
+                },
+                "dispatched_predictor_query_count": 76800,
+                "fallback_count": 0,
+                "finite": true,
+                "fusion_valid_count": 76800,
+                "gnss_valid_count": 76800,
+                "horizon_scientific_mismatch_count": 0,
+                "iteration": 4,
+                "lidar_valid_count": 76800,
+                "logical_query_count": 76800,
+                "production_result_checksum_fnv1a64": "b626bfd2deb3d373",
+                "production_result_conversion_count": 76800,
+                "scientific_checksum_fnv1a64": "34549ced6ce305eb",
+                "source_flags_histogram": {
+                  "1533": 76800
+                },
+                "timings_ms": {
+                  "cumulative_fusion_advisory": 0.0,
+                  "cumulative_gnss_advisory": 0.0,
+                  "cumulative_input_construction": 15.799513000000001,
+                  "cumulative_lidar_advisory": 0.0,
+                  "cumulative_predictor_batch": 1177.0415620000017,
+                  "cumulative_result_materialization": 2.8176479999999984,
+                  "cumulative_worker_module_setup": 0.0020280000000000003,
+                  "query_grouping_index": 2.644778,
+                  "scientific_validation_replay_outside_provider_timer": 644.844264,
+                  "total_predictor_provider": 603.50973,
+                  "worker_wall": 600.412262
+                },
+                "valid_count": 76800
+              }
+            ],
+            "p95_within_400_ms_diagnostic_budget": false,
+            "phase": "counter_only_budget",
+            "speedup_vs_worker_1_p50": 1.9392354800973963,
+            "summary_ms": {
+              "cumulative_fusion_advisory": {
+                "p50_ms": 0.0,
+                "p95_ms": 0.0
+              },
+              "cumulative_gnss_advisory": {
+                "p50_ms": 0.0,
+                "p95_ms": 0.0
+              },
+              "cumulative_input_construction": {
+                "p50_ms": 15.831028999999976,
+                "p95_ms": 15.946362600000034
+              },
+              "cumulative_lidar_advisory": {
+                "p50_ms": 0.0,
+                "p95_ms": 0.0
+              },
+              "cumulative_predictor_batch": {
+                "p50_ms": 1175.011151,
+                "p95_ms": 1179.6261668000006
+              },
+              "cumulative_result_materialization": {
+                "p50_ms": 1.656260999999993,
+                "p95_ms": 2.619634400000001
+              },
+              "cumulative_worker_module_setup": {
+                "p50_ms": 0.001292,
+                "p95_ms": 0.0022296
+              },
+              "query_grouping_index": {
+                "p50_ms": 2.482996,
+                "p95_ms": 2.714418
+              },
+              "scientific_validation_replay_outside_provider_timer": {
+                "p50_ms": 644.844264,
+                "p95_ms": 647.5072577999999
+              },
+              "total_predictor_provider": {
+                "p50_ms": 603.50973,
+                "p95_ms": 606.5767940000001
+              },
+              "worker_wall": {
+                "p50_ms": 600.515765,
+                "p95_ms": 603.7489506000001
+              }
+            }
+          },
+          "worker_count": 2
+        },
+        {
+          "component_percentage_status": "COST_RANKING_DIAGNOSTIC",
+          "component_timed": {
+            "budget_timing_authority": false,
+            "collect_component_timing": true,
+            "component_cost_percentages_of_outer_p50": {
+              "fusion_advisory": 19.270590538814904,
+              "gnss_advisory": 339.5255042200622,
+              "lidar_advisory": 18.121819466778256
+            },
+            "iterations": [
+              {
+                "available_count": 76800,
+                "collect_component_timing": true,
+                "counts": {
+                  "fusion_advisory_invocations": 76800,
+                  "gnss_advisory_invocations": 76800,
+                  "lidar_advisory_invocations": 12800,
+                  "lidar_cache_hits": 64000,
+                  "lidar_evaluations": 12800,
+                  "unique_positions": 12800
+                },
+                "dispatched_predictor_query_count": 76800,
+                "fallback_count": 0,
+                "finite": true,
+                "fusion_valid_count": 76800,
+                "gnss_valid_count": 76800,
+                "horizon_scientific_mismatch_count": 0,
+                "iteration": 0,
+                "lidar_valid_count": 76800,
+                "logical_query_count": 76800,
+                "production_result_checksum_fnv1a64": "b626bfd2deb3d373",
+                "production_result_conversion_count": 76800,
+                "scientific_checksum_fnv1a64": "34549ced6ce305eb",
+                "source_flags_histogram": {
+                  "1533": 76800
+                },
+                "timings_ms": {
+                  "cumulative_fusion_advisory": 60.330748,
+                  "cumulative_gnss_advisory": 1060.865902,
+                  "cumulative_input_construction": 16.073656000000028,
+                  "cumulative_lidar_advisory": 57.23881,
+                  "cumulative_predictor_batch": 1202.4933899999994,
+                  "cumulative_result_materialization": 1.891736000000003,
+                  "cumulative_worker_module_setup": 0.003191,
+                  "query_grouping_index": 2.582896,
+                  "scientific_validation_replay_outside_provider_timer": 349.304454,
+                  "total_predictor_provider": 314.004213,
+                  "worker_wall": 310.980302
+                },
+                "valid_count": 76800
+              },
+              {
+                "available_count": 76800,
+                "collect_component_timing": true,
+                "counts": {
+                  "fusion_advisory_invocations": 76800,
+                  "gnss_advisory_invocations": 76800,
+                  "lidar_advisory_invocations": 12800,
+                  "lidar_cache_hits": 64000,
+                  "lidar_evaluations": 12800,
+                  "unique_positions": 12800
+                },
+                "dispatched_predictor_query_count": 76800,
+                "fallback_count": 0,
+                "finite": true,
+                "fusion_valid_count": 76800,
+                "gnss_valid_count": 76800,
+                "horizon_scientific_mismatch_count": 0,
+                "iteration": 1,
+                "lidar_valid_count": 76800,
+                "logical_query_count": 76800,
+                "production_result_checksum_fnv1a64": "b626bfd2deb3d373",
+                "production_result_conversion_count": 76800,
+                "scientific_checksum_fnv1a64": "34549ced6ce305eb",
+                "source_flags_histogram": {
+                  "1533": 76800
+                },
+                "timings_ms": {
+                  "cumulative_fusion_advisory": 60.032565999999996,
+                  "cumulative_gnss_advisory": 1058.5923129999999,
+                  "cumulative_input_construction": 15.95012300000002,
+                  "cumulative_lidar_advisory": 56.593491,
+                  "cumulative_predictor_batch": 1198.9397960000001,
+                  "cumulative_result_materialization": 2.0942340000000015,
+                  "cumulative_worker_module_setup": 0.0015439999999999998,
+                  "query_grouping_index": 2.531995,
+                  "scientific_validation_replay_outside_provider_timer": 344.588993,
+                  "total_predictor_provider": 311.23712,
+                  "worker_wall": 308.26193
+                },
+                "valid_count": 76800
+              },
+              {
+                "available_count": 76800,
+                "collect_component_timing": true,
+                "counts": {
+                  "fusion_advisory_invocations": 76800,
+                  "gnss_advisory_invocations": 76800,
+                  "lidar_advisory_invocations": 12800,
+                  "lidar_cache_hits": 64000,
+                  "lidar_evaluations": 12800,
+                  "unique_positions": 12800
+                },
+                "dispatched_predictor_query_count": 76800,
+                "fallback_count": 0,
+                "finite": true,
+                "fusion_valid_count": 76800,
+                "gnss_valid_count": 76800,
+                "horizon_scientific_mismatch_count": 0,
+                "iteration": 2,
+                "lidar_valid_count": 76800,
+                "logical_query_count": 76800,
+                "production_result_checksum_fnv1a64": "b626bfd2deb3d373",
+                "production_result_conversion_count": 76800,
+                "scientific_checksum_fnv1a64": "34549ced6ce305eb",
+                "source_flags_histogram": {
+                  "1533": 76800
+                },
+                "timings_ms": {
+                  "cumulative_fusion_advisory": 59.739661999999996,
+                  "cumulative_gnss_advisory": 1054.034247,
+                  "cumulative_input_construction": 15.839544000000025,
+                  "cumulative_lidar_advisory": 56.133016,
+                  "cumulative_predictor_batch": 1193.4873669999997,
+                  "cumulative_result_materialization": 1.9183130000000075,
+                  "cumulative_worker_module_setup": 0.0031680000000000002,
+                  "query_grouping_index": 2.441141,
+                  "scientific_validation_replay_outside_provider_timer": 344.932819,
+                  "total_predictor_provider": 309.24625,
+                  "worker_wall": 306.331325
+                },
+                "valid_count": 76800
+              },
+              {
+                "available_count": 76800,
+                "collect_component_timing": true,
+                "counts": {
+                  "fusion_advisory_invocations": 76800,
+                  "gnss_advisory_invocations": 76800,
+                  "lidar_advisory_invocations": 12800,
+                  "lidar_cache_hits": 64000,
+                  "lidar_evaluations": 12800,
+                  "unique_positions": 12800
+                },
+                "dispatched_predictor_query_count": 76800,
+                "fallback_count": 0,
+                "finite": true,
+                "fusion_valid_count": 76800,
+                "gnss_valid_count": 76800,
+                "horizon_scientific_mismatch_count": 0,
+                "iteration": 3,
+                "lidar_valid_count": 76800,
+                "logical_query_count": 76800,
+                "production_result_checksum_fnv1a64": "b626bfd2deb3d373",
+                "production_result_conversion_count": 76800,
+                "scientific_checksum_fnv1a64": "34549ced6ce305eb",
+                "source_flags_histogram": {
+                  "1533": 76800
+                },
+                "timings_ms": {
+                  "cumulative_fusion_advisory": 59.83233,
+                  "cumulative_gnss_advisory": 1053.6313539999999,
+                  "cumulative_input_construction": 15.832792000000024,
+                  "cumulative_lidar_advisory": 56.179663999999995,
+                  "cumulative_predictor_batch": 1193.3036169999993,
+                  "cumulative_result_materialization": 2.0418120000000037,
+                  "cumulative_worker_module_setup": 0.001644,
+                  "query_grouping_index": 2.490939,
+                  "scientific_validation_replay_outside_provider_timer": 347.951714,
+                  "total_predictor_provider": 309.549508,
+                  "worker_wall": 306.601845
+                },
+                "valid_count": 76800
+              },
+              {
+                "available_count": 76800,
+                "collect_component_timing": true,
+                "counts": {
+                  "fusion_advisory_invocations": 76800,
+                  "gnss_advisory_invocations": 76800,
+                  "lidar_advisory_invocations": 12800,
+                  "lidar_cache_hits": 64000,
+                  "lidar_evaluations": 12800,
+                  "unique_positions": 12800
+                },
+                "dispatched_predictor_query_count": 76800,
+                "fallback_count": 0,
+                "finite": true,
+                "fusion_valid_count": 76800,
+                "gnss_valid_count": 76800,
+                "horizon_scientific_mismatch_count": 0,
+                "iteration": 4,
+                "lidar_valid_count": 76800,
+                "logical_query_count": 76800,
+                "production_result_checksum_fnv1a64": "b626bfd2deb3d373",
+                "production_result_conversion_count": 76800,
+                "scientific_checksum_fnv1a64": "34549ced6ce305eb",
+                "source_flags_histogram": {
+                  "1533": 76800
+                },
+                "timings_ms": {
+                  "cumulative_fusion_advisory": 59.977230999999996,
+                  "cumulative_gnss_advisory": 1056.729401,
+                  "cumulative_input_construction": 15.919219000000032,
+                  "cumulative_lidar_advisory": 56.401829,
+                  "cumulative_predictor_batch": 1196.8574299999996,
+                  "cumulative_result_materialization": 1.9535599999999995,
+                  "cumulative_worker_module_setup": 0.00165,
+                  "query_grouping_index": 2.400006,
+                  "scientific_validation_replay_outside_provider_timer": 346.435967,
+                  "total_predictor_provider": 311.634794,
+                  "worker_wall": 308.795207
+                },
+                "valid_count": 76800
+              }
+            ],
+            "phase": "component_timed_cost_ranking",
+            "summary_ms": {
+              "cumulative_fusion_advisory": {
+                "p50_ms": 59.977230999999996,
+                "p95_ms": 60.2711116
+              },
+              "cumulative_gnss_advisory": {
+                "p50_ms": 1056.729401,
+                "p95_ms": 1060.4111842
+              },
+              "cumulative_input_construction": {
+                "p50_ms": 15.919219000000032,
+                "p95_ms": 16.048949400000026
+              },
+              "cumulative_lidar_advisory": {
+                "p50_ms": 56.401829,
+                "p95_ms": 57.109746200000004
+              },
+              "cumulative_predictor_batch": {
+                "p50_ms": 1196.8574299999996,
+                "p95_ms": 1201.7826711999996
+              },
+              "cumulative_result_materialization": {
+                "p50_ms": 1.9535599999999995,
+                "p95_ms": 2.0837496000000018
+              },
+              "cumulative_worker_module_setup": {
+                "p50_ms": 0.00165,
+                "p95_ms": 0.0031864
+              },
+              "query_grouping_index": {
+                "p50_ms": 2.490939,
+                "p95_ms": 2.5727158
+              },
+              "scientific_validation_replay_outside_provider_timer": {
+                "p50_ms": 346.435967,
+                "p95_ms": 349.033906
+              },
+              "total_predictor_provider": {
+                "p50_ms": 311.23712,
+                "p95_ms": 313.5303292
+              },
+              "worker_wall": {
+                "p50_ms": 308.26193,
+                "p95_ms": 310.543283
+              }
+            }
+          },
+          "component_timer_perturbation": {
+            "p50_delta_ms": 0.97195099999999,
+            "p50_percent": 0.3132646191425986,
+            "p95_delta_ms": 1.6400295999999344,
+            "p95_percent": 0.5258353985690725
+          },
+          "counter_only": {
+            "budget_timing_authority": true,
+            "collect_component_timing": false,
+            "iterations": [
+              {
+                "available_count": 76800,
+                "collect_component_timing": false,
+                "counts": {
+                  "fusion_advisory_invocations": 76800,
+                  "gnss_advisory_invocations": 76800,
+                  "lidar_advisory_invocations": 12800,
+                  "lidar_cache_hits": 64000,
+                  "lidar_evaluations": 12800,
+                  "unique_positions": 12800
+                },
+                "dispatched_predictor_query_count": 76800,
+                "fallback_count": 0,
+                "finite": true,
+                "fusion_valid_count": 76800,
+                "gnss_valid_count": 76800,
+                "horizon_scientific_mismatch_count": 0,
+                "iteration": 0,
+                "lidar_valid_count": 76800,
+                "logical_query_count": 76800,
+                "production_result_checksum_fnv1a64": "b626bfd2deb3d373",
+                "production_result_conversion_count": 76800,
+                "scientific_checksum_fnv1a64": "34549ced6ce305eb",
+                "source_flags_histogram": {
+                  "1533": 76800
+                },
+                "timings_ms": {
+                  "cumulative_fusion_advisory": 0.0,
+                  "cumulative_gnss_advisory": 0.0,
+                  "cumulative_input_construction": 15.751703000000006,
+                  "cumulative_lidar_advisory": 0.0,
+                  "cumulative_predictor_batch": 1190.4969129999986,
+                  "cumulative_result_materialization": 1.7840740000000113,
+                  "cumulative_worker_module_setup": 0.001319,
+                  "query_grouping_index": 2.544294,
+                  "scientific_validation_replay_outside_provider_timer": 345.603501,
+                  "total_predictor_provider": 309.685935,
+                  "worker_wall": 306.70707
+                },
+                "valid_count": 76800
+              },
+              {
+                "available_count": 76800,
+                "collect_component_timing": false,
+                "counts": {
+                  "fusion_advisory_invocations": 76800,
+                  "gnss_advisory_invocations": 76800,
+                  "lidar_advisory_invocations": 12800,
+                  "lidar_cache_hits": 64000,
+                  "lidar_evaluations": 12800,
+                  "unique_positions": 12800
+                },
+                "dispatched_predictor_query_count": 76800,
+                "fallback_count": 0,
+                "finite": true,
+                "fusion_valid_count": 76800,
+                "gnss_valid_count": 76800,
+                "horizon_scientific_mismatch_count": 0,
+                "iteration": 1,
+                "lidar_valid_count": 76800,
+                "logical_query_count": 76800,
+                "production_result_checksum_fnv1a64": "b626bfd2deb3d373",
+                "production_result_conversion_count": 76800,
+                "scientific_checksum_fnv1a64": "34549ced6ce305eb",
+                "source_flags_histogram": {
+                  "1533": 76800
+                },
+                "timings_ms": {
+                  "cumulative_fusion_advisory": 0.0,
+                  "cumulative_gnss_advisory": 0.0,
+                  "cumulative_input_construction": 16.075688000000007,
+                  "cumulative_lidar_advisory": 0.0,
+                  "cumulative_predictor_batch": 1194.8576620000008,
+                  "cumulative_result_materialization": 2.085041999999998,
+                  "cumulative_worker_module_setup": 0.002836,
+                  "query_grouping_index": 2.561208,
+                  "scientific_validation_replay_outside_provider_timer": 348.35358,
+                  "total_predictor_provider": 309.656254,
+                  "worker_wall": 306.637436
+                },
+                "valid_count": 76800
+              },
+              {
+                "available_count": 76800,
+                "collect_component_timing": false,
+                "counts": {
+                  "fusion_advisory_invocations": 76800,
+                  "gnss_advisory_invocations": 76800,
+                  "lidar_advisory_invocations": 12800,
+                  "lidar_cache_hits": 64000,
+                  "lidar_evaluations": 12800,
+                  "unique_positions": 12800
+                },
+                "dispatched_predictor_query_count": 76800,
+                "fallback_count": 0,
+                "finite": true,
+                "fusion_valid_count": 76800,
+                "gnss_valid_count": 76800,
+                "horizon_scientific_mismatch_count": 0,
+                "iteration": 2,
+                "lidar_valid_count": 76800,
+                "logical_query_count": 76800,
+                "production_result_checksum_fnv1a64": "b626bfd2deb3d373",
+                "production_result_conversion_count": 76800,
+                "scientific_checksum_fnv1a64": "34549ced6ce305eb",
+                "source_flags_histogram": {
+                  "1533": 76800
+                },
+                "timings_ms": {
+                  "cumulative_fusion_advisory": 0.0,
+                  "cumulative_gnss_advisory": 0.0,
+                  "cumulative_input_construction": 16.111338000000014,
+                  "cumulative_lidar_advisory": 0.0,
+                  "cumulative_predictor_batch": 1194.5256699999993,
+                  "cumulative_result_materialization": 1.9948140000000025,
+                  "cumulative_worker_module_setup": 0.0017690000000000002,
+                  "query_grouping_index": 2.547909,
+                  "scientific_validation_replay_outside_provider_timer": 343.755811,
+                  "total_predictor_provider": 310.265169,
+                  "worker_wall": 307.269526
+                },
+                "valid_count": 76800
+              },
+              {
+                "available_count": 76800,
+                "collect_component_timing": false,
+                "counts": {
+                  "fusion_advisory_invocations": 76800,
+                  "gnss_advisory_invocations": 76800,
+                  "lidar_advisory_invocations": 12800,
+                  "lidar_cache_hits": 64000,
+                  "lidar_evaluations": 12800,
+                  "unique_positions": 12800
+                },
+                "dispatched_predictor_query_count": 76800,
+                "fallback_count": 0,
+                "finite": true,
+                "fusion_valid_count": 76800,
+                "gnss_valid_count": 76800,
+                "horizon_scientific_mismatch_count": 0,
+                "iteration": 3,
+                "lidar_valid_count": 76800,
+                "logical_query_count": 76800,
+                "production_result_checksum_fnv1a64": "b626bfd2deb3d373",
+                "production_result_conversion_count": 76800,
+                "scientific_checksum_fnv1a64": "34549ced6ce305eb",
+                "source_flags_histogram": {
+                  "1533": 76800
+                },
+                "timings_ms": {
+                  "cumulative_fusion_advisory": 0.0,
+                  "cumulative_gnss_advisory": 0.0,
+                  "cumulative_input_construction": 16.03139100000002,
+                  "cumulative_lidar_advisory": 0.0,
+                  "cumulative_predictor_batch": 1193.3194340000002,
+                  "cumulative_result_materialization": 1.7367520000000072,
+                  "cumulative_worker_module_setup": 0.002272,
+                  "query_grouping_index": 2.528753,
+                  "scientific_validation_replay_outside_provider_timer": 346.597473,
+                  "total_predictor_provider": 311.946519,
+                  "worker_wall": 308.977436
+                },
+                "valid_count": 76800
+              },
+              {
+                "available_count": 76800,
+                "collect_component_timing": false,
+                "counts": {
+                  "fusion_advisory_invocations": 76800,
+                  "gnss_advisory_invocations": 76800,
+                  "lidar_advisory_invocations": 12800,
+                  "lidar_cache_hits": 64000,
+                  "lidar_evaluations": 12800,
+                  "unique_positions": 12800
+                },
+                "dispatched_predictor_query_count": 76800,
+                "fallback_count": 0,
+                "finite": true,
+                "fusion_valid_count": 76800,
+                "gnss_valid_count": 76800,
+                "horizon_scientific_mismatch_count": 0,
+                "iteration": 4,
+                "lidar_valid_count": 76800,
+                "logical_query_count": 76800,
+                "production_result_checksum_fnv1a64": "b626bfd2deb3d373",
+                "production_result_conversion_count": 76800,
+                "scientific_checksum_fnv1a64": "34549ced6ce305eb",
+                "source_flags_histogram": {
+                  "1533": 76800
+                },
+                "timings_ms": {
+                  "cumulative_fusion_advisory": 0.0,
+                  "cumulative_gnss_advisory": 0.0,
+                  "cumulative_input_construction": 15.97022400000001,
+                  "cumulative_lidar_advisory": 0.0,
+                  "cumulative_predictor_batch": 1193.4860059999996,
+                  "cumulative_result_materialization": 1.7859370000000068,
+                  "cumulative_worker_module_setup": 0.003328,
+                  "query_grouping_index": 2.405616,
+                  "scientific_validation_replay_outside_provider_timer": 344.318582,
+                  "total_predictor_provider": 311.665422,
+                  "worker_wall": 308.797793
+                },
+                "valid_count": 76800
+              }
+            ],
+            "p95_within_400_ms_diagnostic_budget": true,
+            "phase": "counter_only_budget",
+            "speedup_vs_worker_1_p50": 3.772087871713373,
+            "summary_ms": {
+              "cumulative_fusion_advisory": {
+                "p50_ms": 0.0,
+                "p95_ms": 0.0
+              },
+              "cumulative_gnss_advisory": {
+                "p50_ms": 0.0,
+                "p95_ms": 0.0
+              },
+              "cumulative_input_construction": {
+                "p50_ms": 16.03139100000002,
+                "p95_ms": 16.104208000000014
+              },
+              "cumulative_lidar_advisory": {
+                "p50_ms": 0.0,
+                "p95_ms": 0.0
+              },
+              "cumulative_predictor_batch": {
+                "p50_ms": 1193.4860059999996,
+                "p95_ms": 1194.7912636000005
+              },
+              "cumulative_result_materialization": {
+                "p50_ms": 1.7859370000000068,
+                "p95_ms": 2.066996399999999
+              },
+              "cumulative_worker_module_setup": {
+                "p50_ms": 0.002272,
+                "p95_ms": 0.0032295999999999996
+              },
+              "query_grouping_index": {
+                "p50_ms": 2.544294,
+                "p95_ms": 2.5585482000000006
+              },
+              "scientific_validation_replay_outside_provider_timer": {
+                "p50_ms": 345.603501,
+                "p95_ms": 348.0023586
+              },
+              "total_predictor_provider": {
+                "p50_ms": 310.265169,
+                "p95_ms": 311.89029960000005
+              },
+              "worker_wall": {
+                "p50_ms": 307.269526,
+                "p95_ms": 308.94150740000003
+              }
+            }
+          },
+          "worker_count": 4
+        }
+      ]
+    }
+  ],
+  "p0_horizon_semantic_status": "MISSING_SIGMA_GROWTH",
+  "production_gap": {
+    "current_production_installs_gnss_local_occupancy": false,
+    "map_based_gnss_occlusion_required_by_conventions": true,
+    "map_los_candidate_absolute_latency_characterizes_icra005": false,
+    "map_los_candidate_repairs_product_behavior": false,
+    "non_occupancy_inputs_and_parameters_identical_between_modes": true
+  },
+  "retained_icra005_authority": {
+    "gate_limit_ms": 400.0,
+    "gate_status": "P0_PERFORMANCE_GATE_FAIL",
+    "provider_p95_ms_approx": 639.377,
+    "total_refresh_p95_ms": 657.21388795
+  },
+  "schema_version": "p0_provider_offline_profile_v2",
+  "scientific_checksum_algorithm": "FNV-1a-64 over all scientific fields",
+  "standards_conformance_status": "BLOCKED_MISSING_SIGMA_GROWTH_AND_PRODUCTION_MAP_LOS",
+  "synthetic_inputs": {
+    "gnss_epoch": "deterministic synthetic 31-satellite epoch",
+    "lidar_fim_primitives": "deterministic synthetic 704-primitive model",
+    "lidar_map_points": "deterministic synthetic 23309-point model",
+    "map_los_occupancy": "deterministic synthetic 704-point occupancy model",
+    "values_are_synthetic": true
+  },
+  "timing_relationships": {
+    "advisory_metrics": "component-timed cost ranking only; nested and not additive to outer wall",
+    "result_materialization": "shared production makeRiskPredictionResult conversion",
+    "scientific_validation_replay": "real identical-input replay after the provider timer; checksum/count validation only",
+    "total_predictor_provider": "outer wall time; counter-only phase is diagnostic budget authority",
+    "worker_metrics": "cumulative per-worker times; workers may overlap"
+  },
+  "validation": {
+    "counter_vs_component_timing_contract_exact": true,
+    "finite_iterations": true,
+    "production_result_checksums_stable_per_mode": true,
+    "query_and_conversion_shape_exact": true,
+    "scientific_checksums_stable_per_mode": true,
+    "validity_source_flag_counts_stable_per_mode": true
+  },
+  "warmup_iterations": 1,
+  "workload": {
+    "grid_shape": [
+      40,
+      40,
+      8
+    ],
+    "grouping": "spatial_position_then_all_six_horizons",
+    "horizons_s": [
+      0.0,
+      0.5,
+      1.0,
+      1.5,
+      2.0,
+      2.5
+    ],
+    "lidar_fim_primitive_count": 704,
+    "lidar_map_point_count": 23309,
+    "logical_position_count": 12800,
+    "logical_query_count": 76800,
+    "map_los_candidate_occupancy_point_count": 704,
+    "resolution_m": 0.75,
+    "snapshot_satellite_count": 31
+  }
+}

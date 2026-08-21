@@ -392,3 +392,129 @@ No ROS launch, smoke, qualification, bag, RViz, campaign, formal configuration/t
 - After corrections, the final profile rerun exited 0 with the values above. The evidence contract test, 37/37 Predictor tests, and complete repo-local CTest 28/28 all passed again.
 
 Final implementation commit SHA: `b929821885df78407eecb5e4ee9f519594e18c7d`.
+
+## 2026-08-21T05:22:53Z — ICRA-007 START
+
+Branch: dev/icra
+
+Start HEAD: 62646b4b5262a921b6895f7192d610e5b80100c6
+
+Task/Gate: ICRA-007 / GATE_0B
+
+Requirement: IAP-RQ-320 only
+
+Allowed files:
+- `apps/iap_predictor_offline_profile.cpp`;
+- a narrow ICRA-007 evidence-contract test (or the existing ICRA-006 test);
+- additive Predictor diagnostic files and focused Predictor assertions only if required;
+- a narrow shared production result conversion declaration/definition and focused test;
+- root/planner `CMakeLists.txt` only as required for profiler/tests;
+- compact new evidence under `results/icra27/icra007/`;
+- `docs/CHANGES.md`, `docs/TRACEABILITY.md`, `DEV_LOG.md`.
+
+Scope: repository-local, non-ROS diagnostic fidelity repair only. Profile both
+`frozen_runtime` and `map_los_candidate`, keep the exact 40 x 40 x 8 x six-horizon
+workload, separate counter-only budget timing from component-timed cost ranking,
+quantify timer perturbation, use the production `RiskPredictionResult` mapping,
+and report frozen six-horizon invariance as `MISSING_SIGMA_GROWTH`.
+
+Pre-existing untracked file preserved: `docs/icra27/dev/ICRA_SYSTEM_FLOW.pdf`;
+do not modify, stage, delete, move or regenerate it.
+
+No ROS launch, smoke, qualification, bag, RViz, campaign, production optimization,
+covariance-growth implementation, caching/numerical/config/threshold change, GPU
+work, or P1/P2/P3/P4/P5 work is authorized.
+
+## 2026-08-21T05:40:00Z — ICRA-007 OFFLINE PROFILE FIDELITY REPAIR
+
+### TDD and repository-local builds
+
+| Command | Exit | Result |
+|---|---:|---|
+| `python3 -m unittest discover -s test -p 'test_icra007_provider_profile.py' -v` before evidence | 1 | Expected RED: only `FileNotFoundError` for the not-yet-created ICRA-007 profile |
+| `cmake -S . -B results/icra27/icra007/build -DCMAKE_BUILD_TYPE=RelWithDebInfo -DBUILD_WITH_CUDA=OFF -DBUILD_WITH_VIEWER=OFF -DBUILD_WITH_OPENCV=OFF` | 0 | PASS; build files remained under the repository-local ICRA-007 root |
+| `cmake --build results/icra27/icra007/build --target iap_predictor_offline_profile test_predictor_risk_conversion test_predictor_module -j2` | 0 | PASS |
+| repo-local `test_predictor_risk_conversion` | 0 | PASS 2/2 shared production conversion assertions |
+| repo-local `test_predictor_module` | 0 | PASS 37/37, including frozen six-horizon scientific invariance and freshness-reference behavior |
+| `cmake --build results/icra27/icra007/build -j2` | 0 | PASS complete root build; existing deprecation warnings only; no executable launched by the build |
+| `TMPDIR="$PWD/results/icra27/icra007/tmp" LD_LIBRARY_PATH="$PWD/results/icra27/icra007/build${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" ctest --test-dir results/icra27/icra007/build --output-on-failure` | 0 | PASS 30/30 complete registered root suite |
+| repository-local nested planner configure without sourced/missing package paths (two attempts) | 1 / 1 | Environment-only preflight failures: `plan_env` package config was not initially discoverable; no compilation or product execution occurred |
+| nested planner configure with explicit installed dependency config paths, then `cmake --build results/icra27/icra007/planner_build --target test_p0_risk_grid_runtime -j2` | 0 | PASS; production `p0_risk_grid_runtime.cpp` compiled against the source-tree shared conversion helper |
+| repo-local `test_p0_risk_grid_runtime` | 0 | PASS 40/40 focused runtime tests; no ROS launch/main-flow run |
+
+The ROS-aware focused P0 unit test automatically wrote
+`/root/.ros/log/test_p0_risk_grid_runtime_484375_1787290745847.log`. This single
+task-generated external log was identified exactly, removed immediately, and a
+post-cleanup search found no task-time file under `/root/.ros/log`. No task
+process remained.
+
+### Final offline profile
+
+Command: `LD_LIBRARY_PATH="$PWD/results/icra27/icra007/build${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" results/icra27/icra007/build/iap_predictor_offline_profile --output results/icra27/icra007/p0_provider_profile.json --warmup 1 --iterations 5`
+
+Exit code: `0`; evidence: `results/icra27/icra007/p0_provider_profile.json`;
+schema `p0_provider_offline_profile_v2`; `diagnostic_execution_status=PASS`;
+`p0_horizon_semantic_status=MISSING_SIGMA_GROWTH`;
+`standards_conformance_status=BLOCKED_MISSING_SIGMA_GROWTH_AND_PRODUCTION_MAP_LOS`.
+The same offline command was used for two preliminary contract/schema runs and
+then for this final evidence after the two-axis review removed profiler-only
+science capture from the provider timer. No ROS/main-flow run or formal
+benchmark occurred; the task has no one-shot restriction on this offline tool.
+
+Every cell used one warm-up and five real `steady_clock` measurements. All raw
+iterations were finite and exactly `76,800` logical, dispatched and production-
+converted queries, with `76,800` GNSS/fusion invocations, `12,800` LiDAR
+evaluations and `64,000` LiDAR cache hits. Counter-only and component-timed
+phases retain identical per-mode scientific checksums, production-result
+checksums, validity/source/flag counts and zero horizon mismatches.
+
+| Mode | Worker | Counter p50 / p95 ms | p50 speedup | Counter p95 <= 400 | Component timer p50 delta ms / % | p95 delta ms / % |
+|---|---:|---:|---:|---|---:|---:|
+| `frozen_runtime` / `CURRENT_PRODUCTION` | 1 | 577.419224 / 577.930797 | 1.000000 | no | +0.902882 / +0.156365% | +1.821103 / +0.315107% |
+| `frozen_runtime` / `CURRENT_PRODUCTION` | 2 | 299.894562 / 300.252013 | 1.925407 | yes | +0.225344 / +0.075141% | +0.223694 / +0.074502% |
+| `frozen_runtime` / `CURRENT_PRODUCTION` | 4 | 155.386887 / 155.991150 | 3.716010 | yes | +1.461883 / +0.940802% | +3.824649 / +2.451837% |
+| `map_los_candidate` / `NOT_CURRENT_PRODUCTION` | 1 | 1170.347481 / 1172.415454 | 1.000000 | no | +4.585693 / +0.391823% | +4.265447 / +0.363817% |
+| `map_los_candidate` / `NOT_CURRENT_PRODUCTION` | 2 | 603.509730 / 606.576794 | 1.939235 | no | +3.816468 / +0.632379% | +2.114216 / +0.348549% |
+| `map_los_candidate` / `NOT_CURRENT_PRODUCTION` | 4 | 310.265169 / 311.890300 | 3.772088 | yes | +0.971951 / +0.313265% | +1.640030 / +0.525835% |
+
+Worker-1 timed component p50 ranking is GNSS/LiDAR/fusion
+`426.632302/49.984502/55.798015 ms` for frozen runtime and
+`1019.755039/50.979693/57.202952 ms` for map LOS. Worker-1 perturbation is below
+5% in both modes, so component percentages are labelled
+`COST_RANKING_DIAGNOSTIC`; component data does not decide the 400 ms crossing.
+
+Frozen scientific checksum is `b37eb6a4d154e457` and shared production-result
+checksum is `f3391b97ded03f07`. Map-LOS checksum is `34549ced6ce305eb` and its
+production-result checksum is `b626bfd2deb3d373`. The two modes are not
+interchangeable: frozen runtime does not bind GNSS occupancy, while the candidate
+binds the deterministic 704-point model and changes no other input or parameter.
+Its absolute latency is not used to characterize ICRA-005.
+
+The retained ICRA-005 provider/total-refresh p95 remains approximately
+`639.377/657.21388795 ms` against the formal `400 ms` gate. ICRA-007 selects no
+CPU remediation. Production still lacks standards-required map GNSS LOS and
+horizon-dependent covariance/PL growth; whole-result cross-horizon reuse is
+explicitly prohibited. Gate-0B remains blocked and is returned to Supervisor.
+
+### Two-axis review and correction — 2026-08-21
+
+- Standards found no new hard documented-standard violation and three
+  judgement-only smells: duplicated production/profile grouping shape, a
+  multi-responsibility diagnostic source, and raw-string mode/status values.
+  The grouping duplication is the worst drift risk, but `NEXT_TASK.md`
+  authorizes only a shared production conversion seam and forbids unrelated
+  runtime change; the diagnostic remains one narrow executable, so these smells
+  were not expanded into a production refactor.
+- Spec found that the first reviewed counter-only outer time still enclosed a
+  profiler-only move of every full `PredictorQueryResult`. This was corrected:
+  provider timing now stops after production-shaped grouping, dispatch, shared
+  `makeRiskPredictionResult()` conversion and worker join. The 91-field
+  checksum/count validation is a separately labelled, real identical-input
+  replay after the provider timer. The profile was regenerated and the complete
+  registered suite passed 30/30 again with the final values above.
+- Spec also identified the task-generated `/root/.ros/log` file as a procedural
+  external-write violation. It was already removed exactly and is retained in
+  this log rather than hidden. No further ROS-aware test was run after cleanup.
+- The remaining review item is procedural final SHA/push evidence. It will be
+  closed by the handoff commit and push; it does not change Gate-0B or the
+  diagnostic/scientific statuses.

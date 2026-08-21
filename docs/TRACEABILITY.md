@@ -1,5 +1,17 @@
 # Traceability Matrix (IAP)
 
+## 2026-08-21 ICRA-007 P0 profile fidelity repair
+
+| Req ID | Requirement/evidence seam | Implementation and retained evidence | Status |
+|---|---|---|---|
+| IAP-RQ-320 | Current P0 runtime and standards-required map LOS must be measured as different modes | `iap_predictor_offline_profile.cpp`; `results/icra27/icra007/p0_provider_profile.json`; `test_icra007_provider_profile.py` | **PASS diagnostic contract: `frozen_runtime=CURRENT_PRODUCTION` without GNSS occupancy; `map_los_candidate=NOT_CURRENT_PRODUCTION` with the sole 704-point occupancy difference** |
+| IAP-RQ-320 | Offline result materialization must match production and resist field-mapping drift | `predictor_risk_conversion.hpp`; production `p0_risk_grid_runtime.cpp`; profiler; `test_predictor_risk_conversion.cpp` | **SHARED PURE 7-FIELD MAPPING; 2/2 focused conversion tests and 40/40 production P0 tests PASS; runtime behavior unchanged** |
+| IAP-RQ-320 | Budget timing must exclude component clocks and profiler-only science capture, then quantify timer perturbation | Per-cell counter-only/component-timed raw iterations, type-7 summaries, post-timer real science replay and perturbation in `p0_provider_profile.json` | **PASS: all timer/count contracts exact; worker-1 perturbation frozen `+0.902882 ms/+0.156365%`, map LOS `+4.585693 ms/+0.391823%`; both `COST_RANKING_DIAGNOSTIC`** |
+| IAP-RQ-320 | Horizon invariance observation must not be reported as scientific conformance | 91-field checksum/equivalence contract; existing frozen-horizon and freshness tests; profile semantic fields | **`MISSING_SIGMA_GROWTH`; standards conformance BLOCKED; whole-result cross-horizon reuse prohibited; no covariance-growth implementation** |
+| IAP-RQ-320 | Worker 1/2/4 rankings must remain reproducible per mode | Counter-only evidence and `test_icra007_provider_profile.py` | **Frozen p95 `577.930797/300.252013/155.991150 ms`; map LOS p95 `1172.415454/606.576794/311.890300 ms`; checksums/counts stable; root CTest 30/30 PASS** |
+
+ICRA-007 is a repository-local offline diagnostic repair only. It does not qualify Gate-0B, select a CPU remediation, repair production map LOS or horizon propagation, change the 400 ms limit, or authorize any smoke/qualification/P4/P5 work. The retained ICRA-005 `P0_PERFORMANCE_GATE_FAIL` remains authoritative.
+
 ## 2026-08-21 ICRA-006 offline P0 provider diagnosis
 
 | Req ID | Requirement/evidence seam | Implementation and retained evidence | Status |
