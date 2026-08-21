@@ -526,3 +526,71 @@ judgement-only duplication risk; this remains bounded to the diagnostic source
 and is guarded by cross-phase checksum/count and exact input-contract tests.
 
 Final implementation commit SHA: `3b6c5e24a6e0ad3033f889118a83efcd28615b59`.
+
+## 2026-08-21T06:34:36Z — ICRA-008 START
+
+Branch: dev/icra
+
+Start HEAD: 6c122a318bbe0970eb6a45eab817a5bdc24ba43a
+
+Task/Gate: ICRA-008 / GATE_0B
+
+Requirements: IAP-RQ-312, IAP-RQ-314, IAP-RQ-320, IAP-RQ-321,
+IAP-RQ-322
+
+Exact allowed files:
+- `results/icra27/icra008/P0_SEMANTIC_SEAM_AUDIT.md`;
+- `DEV_LOG.md`.
+
+Scope: repository-local, read-only implementation-readiness audit only. Map
+the frozen `P0_ROLLING_RISK_WINDOW_DESIGN.md` onto current production ownership,
+lifetime, version, map-LOS, covariance-growth, phase-1 tests, evidence counters
+and the minimal ICRA-009 file set. Recommend one concrete Seam per blocker, but
+do not implement any product or test behavior.
+
+Pre-existing untracked file preserved: `docs/icra27/dev/ICRA_SYSTEM_FLOW.pdf`;
+do not modify, stage, delete, move or regenerate it.
+
+No product/header/test/CMake/launch/config/analyzer/evidence mutation, ROS-aware
+test, main-flow execution, full offline profile, GPU preflight, external write,
+workspace-level output, P4/P5 work or Gate decision is authorized.
+
+## 2026-08-21T06:48:25Z — ICRA-008 AUDIT COMPLETE / REVIEW PENDING
+
+Created only
+`results/icra27/icra008/P0_SEMANTIC_SEAM_AUDIT.md`. The audit maps current
+production ownership/lifetime/version behavior, all concrete covariance-growth
+candidates, the exact phase-1 test matrix, future counter semantics/schema
+boundary, and the bounded ICRA-009 file set. It recommends one immutable
+`GridMap` epoch shared by occupied-skip and GNSS LOS plus one internal
+`PredictorModule` empirical prior-growth Seam. No product behavior was changed.
+
+Exact verification commands and exits:
+
+| Command | Exit | Result |
+|---|---:|---|
+| `git status --short --branch` | 0 | Start state tracked `origin/dev/icra`; only the allowed `DEV_LOG.md` START edit and preserved untracked PDF were present. |
+| `git fetch origin` | 0 | Fetch completed. |
+| `git rev-list --left-right --count HEAD...origin/dev/icra` | 0 | Output `0 0`; no pull was permitted or needed. |
+| `rg -n 'set_local_occupancy\|captureOccupancyDiagnosticQuery\|occupancyGeneration\|horizon_s\|lambda_pred\|sigma_grow\|sigma_process\|make_noise' include/iap src/iap apps/iap_experiment.cpp test/test_predictor_module.cpp docs/spec docs/methodology/methodology.tex >/dev/null` | 0 | Current repository candidates and call seams were found read-only. |
+| `git show 9cf22a3:src/iap/planner/predicted_integrity.cpp \| rg -n 'sigma_grow\|new_var\|sqrt' >/dev/null` | 0 | Deleted legacy formula evidence was found read-only. |
+| `results/icra27/icra007/build/test_predictor_module --gtest_filter='PredictorModuleTest.BatchMatchesScalarAndCachesLidarPerPosition:PredictorModuleTest.FrozenSnapshotScientificFieldsAreInvariantAcrossSixHorizons'` | 1 | Initial invocation resolved stale `/home/dev/ws_iap/install/iap/lib/libiap.so`: the invariant test passed, while batch diagnostic assertions exposed the build/library mismatch; no source failure was attributed. |
+| `LD_LIBRARY_PATH="$PWD/results/icra27/icra007/build${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" ldd results/icra27/icra007/build/test_predictor_module \| rg 'libiap\.so'` | 0 | The retained binary resolved coherent `results/icra27/icra007/build/libiap.so`. |
+| `LD_LIBRARY_PATH="$PWD/results/icra27/icra007/build${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" results/icra27/icra007/build/test_predictor_module --gtest_filter='PredictorModuleTest.BatchMatchesScalarAndCachesLidarPerPosition:PredictorModuleTest.FrozenSnapshotScientificFieldsAreInvariantAcrossSixHorizons'` | 0 | 2/2 focused non-ROS tests passed. |
+| `LD_LIBRARY_PATH="$PWD/results/icra27/icra007/build${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" results/icra27/icra007/build/test_risk_grid_map --gtest_filter='RiskGridMapTest.RefreshRejectsChangingOccupancyGeneration:RiskGridMapTest.RefreshFailureKeepsPreviousActiveSnapshot'` | 0 | 2/2 focused non-ROS fail-closed tests passed. |
+| `git diff --check` | 0 | No whitespace errors. |
+| `git diff --cached --name-status` | 0 | Before the report commit, exactly `DEV_LOG.md` and `results/icra27/icra008/P0_SEMANTIC_SEAM_AUDIT.md` were staged. |
+| `sha256sum docs/icra27/dev/ICRA_SYSTEM_FLOW.pdf` | 0 | Preserved hash `1f07da5631a6551a2f98c02d46fd45bc87f2f1e3e7c14e95f9a7f4a0bac844f6`. |
+| `ps -eo pid=,comm=,args= \| awk '$2 ~ /^(ros2\|rviz2\|colcon\|ctest\|pytest\|iap_predictor_offline_profile\|test_predictor_module\|test_risk_grid_map)$/ {print}'` | 0 | No task process was listed. |
+
+No rebuild or workspace/external write was performed.
+
+Static audit disposition:
+`IMPLEMENTATION_READY_FOR_ICRA009_REVIEW`, with production
+`sigma_grow_m_sqrt_s` required to have explicit scientific provenance and to
+fail closed if absent/invalid. This does not authorize ICRA-009 or change
+GATE_0B. The Standards review reported no findings. The Spec review identified
+the synthetic experiment inventory, launch-scope, rebuild-reason counter and
+verification-record gaps; all four report findings were corrected. Its final
+procedural handoff finding remains pending until the report commit is pushed
+and its SHA is recorded in the required final DEV_LOG-only commit.
