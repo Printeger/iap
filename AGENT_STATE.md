@@ -6,28 +6,28 @@ branch: dev/icra
 active_role: DEEPSEEK
 status: TASK_READY
 gate: GATE_0B
-task_id: ICRA-009
-review_base: 6c122a318bbe0970eb6a45eab817a5bdc24ba43a
-reviewed_head: 8b60d95d9ffa561f8e4408a68c47ff685747bcd5
+task_id: ICRA-010
+review_base: e67906df71444d0fb576c6dcaca02883108b4424
+reviewed_head: 0069303008c719a708970f59732c44c2a05ad5b0
 conference_route: P0_P4_P5
 route_status: PREQUALIFICATION
 historical_gate0a_verdict: NO_GO_P2
 p0_gate0b_status: BLOCKED_PERFORMANCE_AND_SEMANTICS
 p4_status: NOT_QUALIFIED
 p5_status: IMPLEMENTED_BUT_UNQUALIFIED
-supervisor_verdict: ICRA008_AUDIT_ACCEPTED_WITH_SUPERVISOR_CORRECTIONS
-review_disposition: ICRA009_P0_PHASE1_SEMANTIC_IMPLEMENTATION_AUTHORIZED
+supervisor_verdict: ICRA009_REQUEST_CHANGES_TYPED_STATUS
+review_disposition: ICRA010_PHASE1_TYPED_STATUS_REPAIR_AUTHORIZED
 handoff_status: TASK_READY
 next_task: NEXT_TASK.md
-updated_utc: 2026-08-21T07:15:08Z
+updated_utc: 2026-08-21T08:35:34Z
 ```
 
 The conference development target remains conditional `P0 -> P4 -> P5`, but this state does not qualify any of those stages.
 
 Gate 0A remains the historical `NO_GO_P2`. P2 stays configuration-disabled for ICRA while its source and tests remain available.
 
-The Supervisor reviewed ICRA-008 at `8b60d95`. The audit stayed within its two-file scope and its Standards axis passes. Its map-LOS and covariance-growth inventory is accepted, but the implementation-ready claim requires three Supervisor corrections: keep the `plan_env` epoch contract independent of IAP, validate prior as well as occupancy generation at refresh start/end, and prove that LOS adaptation cannot truncate occupied voxels.
+The Supervisor reviewed ICRA-009 over `e67906d..0069303`. Its Standards axis passes, all 26 changed paths are authorized, the untracked PDF remains unchanged, and the Supervisor independently reproduced all six focused suites (132/132 PASS). The map epoch, immutable LOS Adapter, prior/occupancy generation checks and covariance-growth algebra conform to the frozen phase-1 design.
 
-`DEEPSEEK` may begin only `ICRA-009` after synchronizing `dev/icra`. It is P0 phase-1 product development: bind one versioned immutable planner occupancy epoch into production GNSS map-LOS, add prior/occupancy start-end source validation, and implement empirical horizon covariance growth behind the existing Predictor query Interface. The exact dependency, capacity and version contracts are frozen in `NEXT_TASK.md` and `docs/icra27/P0_ROLLING_RISK_WINDOW_DESIGN.md`.
+The Spec axis has one P1: positive-horizon frame/freshness early returns can falsely retain `CovarianceGrowthStatus::APPLIED` even though propagation never ran, defeating the provider's required whole-batch rejection. `DEEPSEEK` may begin only the narrow ICRA-010 repair in `NEXT_TASK.md`. Once it passes review, the following task enters frozen phase 2 (within-refresh spatial advisory deduplication) without another broad audit.
 
-P1/P2/P3/P4/P5 remain disabled. No rolling window, spatial deduplication, smoke, qualification rerun, production calibration, performance optimization, GPU port, worker/workload tuning, threshold change or P4 work is authorized. Gate-0B remains blocked until semantics and performance are repaired and a later qualification cycle passes.
+P1/P2/P3/P4/P5 remain disabled. No phase-2 spatial deduplication, rolling window, smoke, qualification rerun, production calibration, performance optimization, GPU port, worker/workload tuning, threshold change or P4 work is authorized in ICRA-010. Gate-0B remains blocked until semantics and performance are repaired and a later qualification cycle passes.

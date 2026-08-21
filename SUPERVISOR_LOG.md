@@ -1,5 +1,58 @@
 # ICRA Supervisor Log
 
+## 2026-08-21 — ICRA-009 review and ICRA-010 typed-status repair authorization
+
+### Review identity and verification
+
+- Review base: `e67906df71444d0fb576c6dcaca02883108b4424`.
+- Reviewed HEAD: `0069303008c719a708970f59732c44c2a05ad5b0`.
+- Reviewed commits: `172556c` and `0069303`; both bind the applicable phase-1
+  requirements, and `dev/icra` matched `origin/dev/icra` at divergence `0 0`.
+- All 26 aggregate-diff paths are explicitly authorized by ICRA-009. `git diff --check`
+  passed. The preserved untracked `docs/icra27/dev/ICRA_SYSTEM_FLOW.pdf` remained unchanged at
+  SHA-256 `1f07da5631a6551a2f98c02d46fd45bc87f2f1e3e7c14e95f9a7f4a0bac844f6`.
+- The Supervisor independently reran the six repository-local focused suites: local occupancy
+  6/6, Predictor 40/40, risk grid 35/35, frozen map epoch 2/2, Adapter 3/3 and P0 runtime 46/46,
+  for 132/132 PASS. Two initial Supervisor invocations overwrote the system
+  `LD_LIBRARY_PATH` and exited 127 before test execution; appending the existing environment
+  reproduced 2/2 and 46/46. No ROS launch, main flow, smoke, qualification, profile or GPU
+  preflight ran.
+
+### Standards axis
+
+- PASS: file scope, commit requirement IDs, synchronized `CHANGES`/`TRACEABILITY`/`DEV_LOG`,
+  repository-local outputs and handoff procedure conform.
+- Judgement-only smells: frozen and live occupancy diagnostics duplicate address/classification
+  logic; the Adapter's private field forwarding is a Data Clump. Neither is a phase-1 hard
+  finding or authorized refactor target.
+
+### Spec axis
+
+- PASS: the neutral frozen `GridMap` epoch preserves dependency direction and binds complete
+  raw/fused LOS from the same immutable generation as diagnostics; inflated-only cells remain
+  collision diagnostics.
+- PASS: exact-capacity adaptation, provider ownership, occupancy/prior start-end validation,
+  prior generation capture and atomic old-snapshot retention conform.
+- PASS: valid tau-zero and positive-horizon covariance algebra, finite/SPD/monotonic tests and
+  worker 1/2/4 equivalence conform.
+- P1: `PredictorModule::queryWithLidar()` preassigns `APPLIED` before frame/freshness
+  validation. A finite positive-horizon early return can therefore claim propagation happened
+  when the helper never ran. Because the production provider rejects only required
+  non-`APPLIED` results, this can publish an invalid/unknown replacement generation instead of
+  failing the whole batch and retaining the active snapshot. Existing tests assert fallback
+  reasons but not this status/publication contract.
+
+### Disposition and next task
+
+- Verdict: `ICRA009_REQUEST_CHANGES_TYPED_STATUS`. Gate-0B remains
+  `BLOCKED_PERFORMANCE_AND_SEMANTICS`; P4 remains `NOT_QUALIFIED`.
+- Unique task: `ICRA-010 / GATE_0B` in `NEXT_TASK.md`.
+- ICRA-010 is a narrow product repair: make covariance-growth status truthful on every early
+  return and prove production whole-batch retention. It does not reopen map/covariance design.
+- If ICRA-010 passes review, the following task enters frozen phase 2, within-refresh spatial
+  advisory deduplication, without another broad audit. Phase 2, rolling, profile, smoke,
+  qualification, calibration, GPU and P4 are not authorized by this task.
+
 ## 2026-08-21 — ICRA-008 review and ICRA-009 phase-1 development authorization
 
 ### Review identity and verification
