@@ -1271,3 +1271,38 @@ runtime regressions were rerun and passed 5/5 and 3/3 (`logs/post_review_exact_p
 Spec 0 findings. This review does not mark ICRA-011/012 or Gate-0B PASS,
 authorize phase 3/main flow/smoke/qualification, select calibration or issue a
 next task. Implementation amend/push and final DEV_LOG-only handoff remain.
+
+## 2026-08-21T11:23:54Z — ICRA-012 IMPLEMENTATION PUSHED / SUPERVISOR HANDOFF
+
+Implementation commit:
+`4deb13698cedacab5cfbe1b9342c707ccf0d3c8e` (`fix(ICRA-012): restore
+legacy LiDAR diagnostics [IAP-RQ-320] [IAP-RQ-322]`). `git push origin
+dev/icra` exited 0 and advanced the remote from `3fc24b9` to `4deb136`; the
+immediate post-push `git rev-list --left-right --count
+HEAD...origin/dev/icra` was `0 0`.
+
+Final handoff evidence:
+
+- Standards review: PASS, 0 open findings after the naming-only cleanup.
+  Spec review: PASS, 0 findings.
+- Exact phase-2/legacy tests pass 5/5 Predictor and 3/3 production runtime;
+  the retained profile contract passes 2/2. Six complete suites pass 6/6,
+  45/45, 35/35, 2/2, 3/3 and 48/48, for **139/139**.
+- Current production-runtime linkage resolves IAP product code to
+  `results/icra27/icra012/build_root/libiap.so`; only unchanged generated ROS
+  typesupport comes from the repository-local ICRA-009 facade.
+- The existing ICRA-011 CHANGES entry now contains executable Predictor,
+  production-runtime, offline-profile and Python-contract reproduction
+  commands. TRACEABILITY remains review-pending and makes no Gate claim.
+- The retained ICRA-011 JSON was not regenerated or staged and remains
+  SHA-256 `778abd22158805c41150b4eeed9c37a3f660237a0bb0599e9a567e3533c7b32c`.
+  The protected PDF remains solely untracked and unchanged at SHA-256
+  `1f07da5631a6551a2f98c02d46fd45bc87f2f1e3e7c14e95f9a7f4a0bac844f6`.
+- No task process remains. No main flow, ROS launch, smoke, qualification,
+  bag, RViz, campaign, Gate analyzer, benchmark, GPU preflight, phase-3 work,
+  production calibration, worker/default/threshold change or
+  P1/P2/P3/P4/P5 work ran or changed.
+
+This final DEV_LOG-only commit returns control to `SUPERVISOR` review.
+`DEEPSEEK` does not mark ICRA-011/012 or Gate-0B PASS, start phase 3, choose
+production calibration, authorize smoke or issue a next task.
