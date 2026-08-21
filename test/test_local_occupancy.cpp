@@ -119,3 +119,30 @@ TEST(LocalOccupancyGridTest, DiagnosticsTrackInsertedEvictedRejectedAndSize) {
   EXPECT_EQ(diag.rejected_count, 1u);
   EXPECT_TRUE(grid.occupied_at(p(2.0)));
 }
+
+TEST(LocalOccupancyGridTest,
+     NonZeroLatticeOriginPreservesVoxelAndRaySemantics) {
+  iap::LocalOccupancyGrid::Params params;
+  params.voxel_size = 1.0;
+  params.lattice_origin = Eigen::Vector3d(0.35, -0.2, 0.6);
+  params.max_voxels = 1;
+  params.n_kappa_steps = 8;
+  params.enable_eviction = false;
+  iap::LocalOccupancyGrid grid(params);
+
+  const Eigen::Vector3d occupied_center =
+      params.lattice_origin + Eigen::Vector3d::Constant(0.5);
+  grid.insert_points({occupied_center});
+
+  EXPECT_TRUE(grid.occupied_at(occupied_center));
+  EXPECT_TRUE(grid.occupied_at(params.lattice_origin +
+                               Eigen::Vector3d(0.01, 0.01, 0.01)));
+  EXPECT_FALSE(grid.occupied_at(params.lattice_origin +
+                                Eigen::Vector3d(1.01, 0.01, 0.01)));
+
+  const Eigen::Vector3d ray_origin =
+      params.lattice_origin + Eigen::Vector3d(-0.25, 0.5, 0.5);
+  EXPECT_TRUE(grid.ray_occluded(ray_origin, Eigen::Vector3d::UnitX(), 2.0));
+  EXPECT_GT(grid.occupancy_ratio(ray_origin, Eigen::Vector3d::UnitX(), 2.0),
+            0.0);
+}

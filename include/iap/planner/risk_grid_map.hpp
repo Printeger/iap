@@ -12,6 +12,12 @@
 
 namespace iap {
 
+enum class RiskGridSourceValidation {
+  VALID = 0,
+  OCCUPANCY_GENERATION_CHANGED,
+  PRIOR_GENERATION_CHANGED,
+};
+
 constexpr uint32_t RISK_GRID_SOURCE_OCCUPIED_SKIP = 1u << 31;
 
 struct P5_3HighRiskZoneFixtureConfig {
@@ -281,6 +287,7 @@ class RiskGridMap {
   using OccupancyPredicate = std::function<bool(const Eigen::Vector3d&)>;
   using OccupancyDiagnosticQuery =
       std::function<RiskOccupancyDiagnostic(const Eigen::Vector3d&)>;
+  using SourceValidator = std::function<RiskGridSourceValidation()>;
 
   RiskGridMap();
   explicit RiskGridMap(RiskGridMapParams params);
@@ -314,6 +321,12 @@ class RiskGridMap {
                            double now_s,
                            RiskPredictionProvider& provider,
                            const OccupancyDiagnosticQuery& occupancy_query,
+                           std::string* reason = nullptr);
+  bool refreshFromProvider(const Eigen::Vector3d& uav_position_w,
+                           double now_s,
+                           RiskPredictionProvider& provider,
+                           const OccupancyDiagnosticQuery& occupancy_query,
+                           const SourceValidator& source_validator,
                            std::string* reason = nullptr);
 
   void markRefreshFailure(double now_s, const std::string& reason);

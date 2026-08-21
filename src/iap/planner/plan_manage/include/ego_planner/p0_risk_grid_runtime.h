@@ -13,6 +13,7 @@
 #include <Eigen/Core>
 #include <Eigen/Geometry>
 #include <ego_planner/safety_rviz_publisher.h>
+#include <ego_planner/p0_occupancy_epoch_adapter.h>
 #include <geometry_msgs/msg/pose_stamped.hpp>
 #include <gnss_comm/msg/gnss_ephem_msg.hpp>
 #include <gnss_comm/msg/gnss_glo_ephem_msg.hpp>
@@ -73,6 +74,8 @@ class P0RiskGridRuntime {
     bool predictor_lidar_legacy_observability = true;
     double predictor_lidar_fim_radius_m =
         iap::LidarObservabilityFim::Params{}.fim_radius_m;
+    double predictor_sigma_grow_m_sqrt_s =
+        std::numeric_limits<double>::quiet_NaN();
     int predictor_requested_worker_count = 1;
     int predictor_effective_worker_count = 1;
     P0_6FixtureConfig p0_6_fixture;
@@ -100,6 +103,8 @@ class P0RiskGridRuntime {
       iap::RiskGridMap::OccupancyDiagnosticQuery query);
   void setOccupancyDiagnosticQueryFactory(
       std::function<iap::RiskGridMap::OccupancyDiagnosticQuery()> factory);
+  void setOccupancyEpochFactory(
+      std::function<P0OccupancyEpochCapture()> factory);
 
  private:
   friend class P0RiskGridRuntimeStampTest;
@@ -192,7 +197,8 @@ class P0RiskGridRuntime {
   bool p0_6_fixture_occupied(const Eigen::Vector3d& pos) const;
   iap::RiskGridMap::OccupancyPredicate combinedOccupancyPredicate() const;
   iap::RiskGridMap::OccupancyDiagnosticQuery
-  combinedOccupancyDiagnosticQuery() const;
+  combinedOccupancyDiagnosticQuery(
+      iap::RiskGridMap::OccupancyDiagnosticQuery base_query = {}) const;
   double currentMessageStamp() const;
   double currentRefreshStamp() const;
   double liveNowSeconds() const;
@@ -205,6 +211,7 @@ class P0RiskGridRuntime {
   iap::RiskGridMap::OccupancyDiagnosticQuery occupancy_diagnostic_query_;
   std::function<iap::RiskGridMap::OccupancyDiagnosticQuery()>
       occupancy_diagnostic_query_factory_;
+  std::function<P0OccupancyEpochCapture()> occupancy_epoch_factory_;
   iap::IntegritySnapshotBuilder snapshot_builder_;
 
   // Inputs, heavy refresh, and health publication deliberately use distinct
@@ -241,6 +248,7 @@ class P0RiskGridRuntime {
   iap::CurrentIntegrityState latest_current_;
   bool latest_current_valid_ = false;
   bool current_integrity_seen_ = false;
+  uint64_t latest_current_generation_ = 0;
   double latest_gnss_epoch_stamp_ = std::numeric_limits<double>::quiet_NaN();
   uint64_t latest_gnss_epoch_satellite_count_ = 0;
   double last_refresh_stamp_s_ = std::numeric_limits<double>::quiet_NaN();
@@ -250,6 +258,7 @@ class P0RiskGridRuntime {
   double last_provider_batch_duration_ms_ = std::numeric_limits<double>::quiet_NaN();
   double last_generation_interval_ms_ = std::numeric_limits<double>::quiet_NaN();
   bool last_snapshot_available_ = false;
+  bool last_refresh_succeeded_ = false;
   std::string last_snapshot_failure_reason_ = "none";
   std::size_t last_refresh_query_count_ = 0;
   std::size_t last_predictor_unique_positions_ = 0;

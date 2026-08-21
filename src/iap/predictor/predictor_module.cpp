@@ -1,5 +1,8 @@
 #include <iap/predictor/predictor_module.hpp>
 
+#include <Eigen/Cholesky>
+#include <Eigen/Eigenvalues>
+
 #include <chrono>
 #include <cmath>
 #include <unordered_map>
@@ -225,6 +228,89 @@ LidarAdvisoryResult disabled_lidar_result(const std::string& reason) {
   return result;
 }
 
+struct CovarianceGrowthOutcome {
+  CovarianceGrowthStatus status = CovarianceGrowthStatus::NUMERICAL_FAILURE;
+  std::string reason;
+};
+
+CovarianceGrowthOutcome apply_covariance_growth(
+    const PredictorQueryInput& input,
+    const EmpiricalCovarianceGrowthParams& params,
+    const bool stale_current_prior,
+    IntegritySnapshot* snapshot) {
+  if (input.horizon_s == 0.0) {
+    return {CovarianceGrowthStatus::NOT_REQUIRED_TAU_ZERO, ""};
+  }
+  if (!std::isfinite(params.sigma_grow_m_sqrt_s) ||
+      params.sigma_grow_m_sqrt_s < 0.0) {
+    return {CovarianceGrowthStatus::INVALID_PARAMETER,
+            "invalid_covariance_growth_parameter"};
+  }
+  if (stale_current_prior) {
+    return {CovarianceGrowthStatus::STALE_PRIOR,
+            "stale_covariance_growth_prior"};
+  }
+  if (snapshot == nullptr || !snapshot->has_lambda_base) {
+    return {CovarianceGrowthStatus::MISSING_PRIOR,
+            "missing_covariance_growth_prior"};
+  }
+  if (!snapshot->lambda_base_pos.allFinite()) {
+    return {CovarianceGrowthStatus::INVALID_PRIOR,
+            "invalid_covariance_growth_prior"};
+  }
+  const double lambda_scale =
+      std::max(1.0, snapshot->lambda_base_pos.cwiseAbs().maxCoeff());
+  if ((snapshot->lambda_base_pos - snapshot->lambda_base_pos.transpose())
+          .cwiseAbs()
+          .maxCoeff() >
+      1.0e-12 * lambda_scale) {
+    return {CovarianceGrowthStatus::INVALID_PRIOR,
+            "invalid_covariance_growth_prior"};
+  }
+
+  const Eigen::Matrix3d lambda_zero =
+      0.5 * (snapshot->lambda_base_pos +
+             snapshot->lambda_base_pos.transpose());
+  Eigen::SelfAdjointEigenSolver<Eigen::Matrix3d> lambda_eigen(
+      lambda_zero, Eigen::EigenvaluesOnly);
+  if (lambda_eigen.info() != Eigen::Success ||
+      !lambda_eigen.eigenvalues().allFinite() ||
+      lambda_eigen.eigenvalues().minCoeff() <= 0.0) {
+    return {CovarianceGrowthStatus::INVALID_PRIOR,
+            "invalid_covariance_growth_prior"};
+  }
+  Eigen::LDLT<Eigen::Matrix3d> lambda_ldlt(lambda_zero);
+  if (lambda_ldlt.info() != Eigen::Success || !lambda_ldlt.isPositive()) {
+    return {CovarianceGrowthStatus::INVALID_PRIOR,
+            "invalid_covariance_growth_prior"};
+  }
+  Eigen::Matrix3d sigma =
+      lambda_ldlt.solve(Eigen::Matrix3d::Identity());
+  sigma = 0.5 * (sigma + sigma.transpose());
+  const double growth_variance =
+      params.sigma_grow_m_sqrt_s * params.sigma_grow_m_sqrt_s *
+      input.horizon_s;
+  if (!sigma.allFinite() || !std::isfinite(growth_variance)) {
+    return {CovarianceGrowthStatus::NUMERICAL_FAILURE,
+            "invalid_covariance_growth_prior"};
+  }
+  sigma += growth_variance * Eigen::Matrix3d::Identity();
+  Eigen::LDLT<Eigen::Matrix3d> sigma_ldlt(sigma);
+  if (sigma_ldlt.info() != Eigen::Success || !sigma_ldlt.isPositive()) {
+    return {CovarianceGrowthStatus::NUMERICAL_FAILURE,
+            "invalid_covariance_growth_prior"};
+  }
+  Eigen::Matrix3d grown_lambda =
+      sigma_ldlt.solve(Eigen::Matrix3d::Identity());
+  grown_lambda = 0.5 * (grown_lambda + grown_lambda.transpose());
+  if (!grown_lambda.allFinite()) {
+    return {CovarianceGrowthStatus::NUMERICAL_FAILURE,
+            "invalid_covariance_growth_prior"};
+  }
+  snapshot->lambda_base_pos = grown_lambda;
+  return {CovarianceGrowthStatus::APPLIED, ""};
+}
+
 }  // namespace
 
 PredictorModule::PredictorModule() : PredictorModule(PredictorParams{}) {}
@@ -285,12 +371,16 @@ PredictorQueryResult PredictorModule::queryWithLidar(
     return out;
   }
   if (!std::isfinite(input.horizon_s) || input.horizon_s < 0.0) {
+    out.covariance_growth_status = CovarianceGrowthStatus::INVALID_HORIZON;
     out.valid = false;
     out.fallback = true;
     out.fallback_reason = "invalid_horizon";
     out.source_flags = make_source_flags(out);
     return out;
   }
+  out.covariance_growth_status = input.horizon_s == 0.0
+      ? CovarianceGrowthStatus::NOT_REQUIRED_TAU_ZERO
+      : CovarianceGrowthStatus::APPLIED;
   if (input.frame_id.empty() ||
       (input.frame_id != "map" && input.frame_id != "enu")) {
     out.valid = false;
@@ -323,6 +413,18 @@ PredictorQueryResult PredictorModule::queryWithLidar(
   const bool stale_current_prior =
       current_freshness_reason == "stale_integrity";
   PredictorQueryInput working_input = input;
+  const CovarianceGrowthOutcome growth = apply_covariance_growth(
+      input, params_.covariance_growth, stale_current_prior,
+      &working_input.snapshot);
+  out.covariance_growth_status = growth.status;
+  if (!growth.reason.empty()) {
+    out.available = false;
+    out.valid = false;
+    out.fallback = true;
+    out.fallback_reason = growth.reason;
+    out.source_flags = make_source_flags(out);
+    return out;
+  }
   if (stale_current_prior) {
     working_input.snapshot.has_lambda_base = false;
     working_input.snapshot.lambda_base_pos.setZero();

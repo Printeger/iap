@@ -1252,3 +1252,59 @@ TEST(RiskGridMapTest, RefreshFailureKeepsPreviousActiveSnapshot) {
   EXPECT_EQ(grid.health().generation_id, first_id);
   EXPECT_EQ(grid.health().reason, "provider_refresh_failed");
 }
+
+TEST(RiskGridMapTest,
+     SourceValidatorRunsAtStartAndImmediatelyBeforeAtomicPublish) {
+  iap::RiskGridMap grid(base_params());
+  AffineProvider provider;
+  int validator_calls = 0;
+  const auto validator = [&]() {
+    ++validator_calls;
+    return iap::RiskGridSourceValidation::VALID;
+  };
+  std::string reason;
+
+  ASSERT_TRUE(grid.refreshFromProvider(
+      Eigen::Vector3d::Zero(), 10.0, provider,
+      iap::RiskGridMap::OccupancyDiagnosticQuery{}, validator, &reason))
+      << reason;
+  EXPECT_EQ(validator_calls, 2);
+  EXPECT_EQ(reason, "ok");
+  ASSERT_NE(grid.acquireSnapshot(), nullptr);
+  EXPECT_EQ(grid.acquireSnapshot()->generation_id(), 1u);
+}
+
+TEST(RiskGridMapTest,
+     PriorGenerationFailureKeepsPreviousActiveSnapshot) {
+  iap::RiskGridMap grid(base_params());
+  const auto first = make_snapshot(&grid, 10.0);
+  ASSERT_NE(first, nullptr);
+  const uint64_t first_id = first->generation_id();
+  iap::RiskCostSample first_sample;
+  ASSERT_TRUE(first->queryCost(Eigen::Vector3d::Zero(), 10.0,
+                               &first_sample));
+
+  AffineProvider provider;
+  int validator_calls = 0;
+  const auto validator = [&]() {
+    return ++validator_calls == 1
+        ? iap::RiskGridSourceValidation::VALID
+        : iap::RiskGridSourceValidation::PRIOR_GENERATION_CHANGED;
+  };
+  std::string reason;
+  EXPECT_FALSE(grid.refreshFromProvider(
+      Eigen::Vector3d::Zero(), 10.5, provider,
+      iap::RiskGridMap::OccupancyDiagnosticQuery{}, validator, &reason));
+  EXPECT_EQ(validator_calls, 2);
+  EXPECT_EQ(reason, "prior_generation_changed");
+
+  const auto still_active = grid.acquireSnapshot();
+  ASSERT_NE(still_active, nullptr);
+  EXPECT_EQ(still_active->generation_id(), first_id);
+  iap::RiskCostSample retained_sample;
+  ASSERT_TRUE(still_active->queryCost(Eigen::Vector3d::Zero(), 10.0,
+                                      &retained_sample));
+  EXPECT_DOUBLE_EQ(retained_sample.cost, first_sample.cost);
+  EXPECT_EQ(grid.health().generation_id, first_id);
+  EXPECT_EQ(grid.health().reason, "prior_generation_changed");
+}

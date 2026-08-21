@@ -53,6 +53,11 @@ struct PredictorFreshnessGuardParams {
   double max_snapshot_age_s = 0.5;
 };
 
+struct EmpiricalCovarianceGrowthParams {
+  double sigma_grow_m_sqrt_s =
+      std::numeric_limits<double>::quiet_NaN();
+};
+
 enum class PredictorSourceMode {
   Fusion = 0,
   GnssOnly = 1,
@@ -71,6 +76,7 @@ struct PredictorParams {
   LidarAdvisoryPredictorParams lidar;
   FusionAdvisoryPredictorParams fusion;
   PredictorFreshnessGuardParams freshness;
+  EmpiricalCovarianceGrowthParams covariance_growth;
   PredictorSourceMode source_mode = PredictorSourceMode::Fusion;
   PredictorGnssEpochPolicy gnss_epoch_policy =
       PredictorGnssEpochPolicy::Auto;
@@ -235,6 +241,17 @@ enum PredictorResultFlags : uint32_t {
   PREDICTOR_RESULT_STALE_CURRENT_PRIOR = 1u << 11,
 };
 
+enum class CovarianceGrowthStatus {
+  NOT_REQUIRED_TAU_ZERO = 0,
+  APPLIED,
+  INVALID_HORIZON,
+  INVALID_PARAMETER,
+  MISSING_PRIOR,
+  STALE_PRIOR,
+  INVALID_PRIOR,
+  NUMERICAL_FAILURE,
+};
+
 struct PredictorQueryResult {
   bool available = false;
   bool valid = false;
@@ -247,6 +264,8 @@ struct PredictorQueryResult {
   double horizon_s = std::numeric_limits<double>::quiet_NaN();
   std::string frame_id = "map";
   uint32_t source_flags = 0u;
+  CovarianceGrowthStatus covariance_growth_status =
+      CovarianceGrowthStatus::NOT_REQUIRED_TAU_ZERO;
 
   GnssAdvisoryResult gnss;
   LidarAdvisoryResult lidar;

@@ -914,11 +914,47 @@ bool RiskGridMap::refreshFromProvider(
     RiskPredictionProvider& provider,
     const OccupancyDiagnosticQuery& occupancy_query,
     std::string* reason) {
+  return refreshFromProvider(uav_position_w, now_s, provider,
+                             occupancy_query, SourceValidator{}, reason);
+}
+
+bool RiskGridMap::refreshFromProvider(
+    const Eigen::Vector3d& uav_position_w,
+    const double now_s,
+    RiskPredictionProvider& provider,
+    const OccupancyDiagnosticQuery& occupancy_query,
+    const SourceValidator& source_validator,
+    std::string* reason) {
   if (!uav_position_w.allFinite() || !std::isfinite(now_s)) {
     if (reason) {
       *reason = "invalid_refresh_input";
     }
     markRefreshFailure(now_s, "invalid_refresh_input");
+    return false;
+  }
+
+  const auto validate_sources = [&]() {
+    const RiskGridSourceValidation validation = source_validator
+        ? source_validator()
+        : RiskGridSourceValidation::VALID;
+    std::string failure;
+    switch (validation) {
+      case RiskGridSourceValidation::VALID:
+        return true;
+      case RiskGridSourceValidation::OCCUPANCY_GENERATION_CHANGED:
+        failure = "occupancy_generation_changed";
+        break;
+      case RiskGridSourceValidation::PRIOR_GENERATION_CHANGED:
+        failure = "prior_generation_changed";
+        break;
+    }
+    if (reason) {
+      *reason = failure;
+    }
+    markRefreshFailure(now_s, failure);
+    return false;
+  };
+  if (!validate_sources()) {
     return false;
   }
 
@@ -1189,6 +1225,10 @@ bool RiskGridMap::refreshFromProvider(
                             : new_health.dominant_unknown_reason;
   }
   next->health = new_health;
+
+  if (!validate_sources()) {
+    return false;
+  }
 
   {
     std::lock_guard<std::mutex> lock(mutex_);

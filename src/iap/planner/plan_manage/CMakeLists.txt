@@ -64,6 +64,7 @@ add_executable(ego_planner_node
   src/gate0_qualification_writer.cpp
   src/planner_manager.cpp
   src/p0_risk_grid_runtime.cpp
+  src/p0_occupancy_epoch_adapter.cpp
   src/p1_replan_admission.cpp
   src/p1_candidate_selection.cpp
   src/p2_candidate_ranking.cpp
@@ -111,8 +112,18 @@ if(BUILD_TESTING)
   ament_add_gtest(test_p0_risk_grid_runtime
     test/test_p0_risk_grid_runtime.cpp
     src/p0_risk_grid_runtime.cpp
+    src/p0_occupancy_epoch_adapter.cpp
     src/safety_rviz_publisher.cpp
   )
+
+  ament_add_gtest(test_p0_occupancy_epoch_adapter
+    test/test_p0_occupancy_epoch_adapter.cpp
+    src/p0_occupancy_epoch_adapter.cpp
+  )
+  ament_target_dependencies(test_p0_occupancy_epoch_adapter
+    Eigen3 iap
+  )
+  target_link_libraries(test_p0_occupancy_epoch_adapter iap::iap)
 
   ament_add_gtest(test_p1_replan_admission
     test/test_p1_replan_admission.cpp
@@ -174,6 +185,7 @@ if(BUILD_TESTING)
     src/gate0_qualification_writer.cpp
     src/planner_manager.cpp
     src/p0_risk_grid_runtime.cpp
+    src/p0_occupancy_epoch_adapter.cpp
     src/p1_candidate_selection.cpp
     src/p2_candidate_ranking.cpp
     src/p3_reference_bias.cpp

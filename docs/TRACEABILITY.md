@@ -1,5 +1,19 @@
 # Traceability Matrix (IAP)
 
+## 2026-08-21 ICRA-009 P0 phase-1 semantic implementation
+
+| Req ID | Requirement/evidence seam | Implementation and focused evidence | Status |
+|---|---|---|---|
+| IAP-RQ-312 / IAP-RQ-314 | Production GNSS LOS and occupied-skip diagnostics must consume the same complete immutable map epoch | `GridMap::captureFrozenOccupancyEpoch`; `P0OccupancyEpochAdapter`; manager/runtime binding; nonzero-lattice, raw/fused/inflated-only, exact-capacity and production LOS regressions | **IMPLEMENTED PHASE 1; complete raw-cloud + fused-depth centres, inflated-only excluded; no open-sky fallback on invalid production epoch** |
+| IAP-RQ-320 / IAP-RQ-321 | Positive horizons must grow the current finite SPD prior while tau zero preserves the accepted path | `EmpiricalCovarianceGrowthParams`, `CovarianceGrowthStatus`, internal Predictor propagation before advisory fusion; tau-zero, six-horizon, PSD/monotonic and invalid-input regressions | **IMPLEMENTED PHASE 1; `sigma_grow_m_sqrt_s` default remains invalid NaN; production calibration and qualification pending** |
+| IAP-RQ-320 / IAP-RQ-322 | Occupancy and integrity-prior publication races must not publish mixed generations | immutable epoch live probe, `prior_source_generation`, `RiskGridSourceValidation`, start/end validation and fail-closed active-snapshot retention tests | **IMPLEMENTED PHASE 1; exact reasons include occupancy snapshot/adapter/frame/stale/generation and missing/stale/invalid prior states** |
+| IAP-RQ-320 / IAP-RQ-322 | Worker parallelism must preserve ordered scientific output and existing logical evidence semantics | `MapLosAndGrowthWorkersOneTwoFourAreScientificallyEquivalent`; complete P0 runtime and root focused suites | **PASS: workers 1/2/4 equivalent within absolute 1e-12; 132 affected tests pass; 76,800 logical-shape semantics unchanged** |
+
+ICRA-009 implements only the frozen phase-1 semantic seams. Rolling/delta/reuse,
+performance qualification, production growth calibration and Gate-0B remain pending. No main
+flow, smoke, qualification, benchmark, GPU preflight, analyzer or P1/P2/P3/P4/P5 behavior was
+run or changed.
+
 ## 2026-08-21 ICRA P0 rolling-window design freeze
 
 | Req ID | Requirement/evidence seam | Frozen design / next evidence | Status |

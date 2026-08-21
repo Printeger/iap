@@ -13,18 +13,20 @@ LocalOccupancyGrid::LocalOccupancyGrid(const Params& p) : params_(p) {}
 // ---------------------------------------------------------------------------
 VoxelKey LocalOccupancyGrid::to_key(const Eigen::Vector3d& p) const {
   const double inv = 1.0 / params_.voxel_size;
+  const Eigen::Vector3d local = p - params_.lattice_origin;
   return {
-      static_cast<int>(std::floor(p.x() * inv)),
-      static_cast<int>(std::floor(p.y() * inv)),
-      static_cast<int>(std::floor(p.z() * inv))
+      static_cast<int>(std::floor(local.x() * inv)),
+      static_cast<int>(std::floor(local.y() * inv)),
+      static_cast<int>(std::floor(local.z() * inv))
   };
 }
 
 Eigen::Vector3d LocalOccupancyGrid::key_center(const VoxelKey& k) const {
   const double vs = params_.voxel_size;
-  return Eigen::Vector3d((static_cast<double>(k.x) + 0.5) * vs,
-                         (static_cast<double>(k.y) + 0.5) * vs,
-                         (static_cast<double>(k.z) + 0.5) * vs);
+  return params_.lattice_origin +
+      Eigen::Vector3d((static_cast<double>(k.x) + 0.5) * vs,
+                      (static_cast<double>(k.y) + 0.5) * vs,
+                      (static_cast<double>(k.z) + 0.5) * vs);
 }
 
 bool LocalOccupancyGrid::is_occupied(const VoxelKey& k) const {
@@ -260,9 +262,10 @@ bool LocalOccupancyGrid::ray_occluded(const Eigen::Vector3d& origin,
   const double inv = 1.0 / vs;
 
   // Current voxel index
-  int cx = static_cast<int>(std::floor(origin.x() * inv));
-  int cy = static_cast<int>(std::floor(origin.y() * inv));
-  int cz = static_cast<int>(std::floor(origin.z() * inv));
+  const Eigen::Vector3d local_origin = origin - params_.lattice_origin;
+  int cx = static_cast<int>(std::floor(local_origin.x() * inv));
+  int cy = static_cast<int>(std::floor(local_origin.y() * inv));
+  int cz = static_cast<int>(std::floor(local_origin.z() * inv));
 
   // Step direction
   const int sx = (dir_unit.x() >= 0.0) ? 1 : -1;
@@ -270,15 +273,20 @@ bool LocalOccupancyGrid::ray_occluded(const Eigen::Vector3d& origin,
   const int sz = (dir_unit.z() >= 0.0) ? 1 : -1;
 
   // t at which we cross the next voxel boundary in each axis
-  auto t_boundary = [&](double o, double d, int c) -> double {
+  auto t_boundary = [&](double o, double d, int c,
+                        double lattice_origin) -> double {
     if (std::abs(d) < 1e-12) return 1e30;
-    const double boundary = (d > 0) ? (c + 1) * vs : c * vs;
+    const double boundary = lattice_origin +
+        ((d > 0) ? (c + 1) * vs : c * vs);
     return (boundary - o) / d;
   };
 
-  double tx = t_boundary(origin.x(), dir_unit.x(), cx);
-  double ty = t_boundary(origin.y(), dir_unit.y(), cy);
-  double tz = t_boundary(origin.z(), dir_unit.z(), cz);
+  double tx = t_boundary(origin.x(), dir_unit.x(), cx,
+                         params_.lattice_origin.x());
+  double ty = t_boundary(origin.y(), dir_unit.y(), cy,
+                         params_.lattice_origin.y());
+  double tz = t_boundary(origin.z(), dir_unit.z(), cz,
+                         params_.lattice_origin.z());
 
   // Delta t to cross one voxel in each axis
   const double dtx = (std::abs(dir_unit.x()) < 1e-12) ? 1e30 : vs / std::abs(dir_unit.x());

@@ -78,6 +78,7 @@ struct IntegritySnapshot {
   // Optional prior information for advisory future prediction only.
   bool has_lambda_base = false;
   Eigen::Matrix3d lambda_base_pos = Eigen::Matrix3d::Zero();
+  uint64_t prior_source_generation = 0;
 
   bool has_lidar_snapshot = false;
   bool lidar_snapshot_valid = false;

@@ -150,6 +150,38 @@ struct MappingData
   EIGEN_MAKE_ALIGNED_OPERATOR_NEW
 };
 
+struct GridMapOccupancyDiagnostic
+{
+  bool available = false;
+  bool raw_occupied = false;
+  bool inflated_occupied = false;
+  Eigen::Vector3i voxel_index = Eigen::Vector3i::Constant(-1);
+  Eigen::Vector3d voxel_center = Eigen::Vector3d::Constant(
+      std::numeric_limits<double>::quiet_NaN());
+  double resolution_m = std::numeric_limits<double>::quiet_NaN();
+  double inflation_m = std::numeric_limits<double>::quiet_NaN();
+  std::string frame_id;
+  double cloud_stamp_s = std::numeric_limits<double>::quiet_NaN();
+  uint64_t generation = 0;
+  std::string source = "unavailable";
+};
+
+using GridMapOccupancyDiagnosticQuery =
+    std::function<GridMapOccupancyDiagnostic(const Eigen::Vector3d &)>;
+
+struct FrozenOccupancyEpoch
+{
+  GridMapOccupancyDiagnosticQuery diagnostic_query;
+  std::shared_ptr<const std::vector<Eigen::Vector3d>>
+      raw_occupied_voxel_centers;
+  Eigen::Vector3d lattice_origin = Eigen::Vector3d::Constant(
+      std::numeric_limits<double>::quiet_NaN());
+  double resolution_m = std::numeric_limits<double>::quiet_NaN();
+  std::string frame_id;
+  double cloud_stamp_s = std::numeric_limits<double>::quiet_NaN();
+  uint64_t generation = 0;
+};
+
 class GridMap
 {
 public:
@@ -163,23 +195,9 @@ public:
     INVALID_IDX = -10000
   };
 
-  struct OccupancyDiagnostic
-  {
-    bool available = false;
-    bool raw_occupied = false;
-    bool inflated_occupied = false;
-    Eigen::Vector3i voxel_index = Eigen::Vector3i::Constant(-1);
-    Eigen::Vector3d voxel_center = Eigen::Vector3d::Constant(
-        std::numeric_limits<double>::quiet_NaN());
-    double resolution_m = std::numeric_limits<double>::quiet_NaN();
-    double inflation_m = std::numeric_limits<double>::quiet_NaN();
-    std::string frame_id;
-    double cloud_stamp_s = std::numeric_limits<double>::quiet_NaN();
-    uint64_t generation = 0;
-    std::string source = "unavailable";
-  };
-  using OccupancyDiagnosticQuery =
-      std::function<OccupancyDiagnostic(const Eigen::Vector3d &)>;
+  using OccupancyDiagnostic = GridMapOccupancyDiagnostic;
+  using OccupancyDiagnosticQuery = GridMapOccupancyDiagnosticQuery;
+  using FrozenOccupancyEpoch = ::FrozenOccupancyEpoch;
 
   // occupancy map management
   void resetBuffer();
@@ -200,6 +218,8 @@ public:
   OccupancyDiagnostic queryOccupancyDiagnostic(
       const Eigen::Vector3d &pos) const;
   OccupancyDiagnosticQuery captureOccupancyDiagnosticQuery() const;
+  std::shared_ptr<const FrozenOccupancyEpoch>
+  captureFrozenOccupancyEpoch() const;
   uint64_t occupancyGeneration() const;
 
   inline void boundIndex(Eigen::Vector3i &id);
@@ -228,6 +248,8 @@ public:
   EIGEN_MAKE_ALIGNED_OPERATOR_NEW
 
 private:
+  friend struct GridMapTestAccess;
+
   MappingParameters mp_;
   MappingData md_;
 

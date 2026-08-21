@@ -18,12 +18,72 @@
 #include <gnss_comm/gnss_utility.hpp>
 #include <iap/planner/predictor_risk_conversion.hpp>
 #include <iap/predictor/predictor_module.hpp>
+#include <Eigen/Eigenvalues>
 #include <sensor_msgs/point_cloud2_iterator.hpp>
 
 namespace ego_planner {
 namespace {
 
 constexpr double kLightSpeed = 2.99792458e8;
+
+enum class P0SemanticFailure {
+  NONE = 0,
+  OCCUPANCY_SNAPSHOT_UNAVAILABLE,
+  OCCUPANCY_LOS_ADAPTER_INVALID,
+  OCCUPANCY_FRAME_MISMATCH,
+  OCCUPANCY_STALE,
+  OCCUPANCY_GENERATION_CHANGED,
+  PRIOR_GENERATION_CHANGED,
+  INVALID_COVARIANCE_GROWTH_PARAMETER,
+  MISSING_COVARIANCE_GROWTH_PRIOR,
+  STALE_COVARIANCE_GROWTH_PRIOR,
+  INVALID_COVARIANCE_GROWTH_PRIOR,
+};
+
+const char* semanticFailureReason(const P0SemanticFailure failure) {
+  switch (failure) {
+    case P0SemanticFailure::NONE:
+      return "none";
+    case P0SemanticFailure::OCCUPANCY_SNAPSHOT_UNAVAILABLE:
+      return "occupancy_snapshot_unavailable";
+    case P0SemanticFailure::OCCUPANCY_LOS_ADAPTER_INVALID:
+      return "occupancy_los_adapter_invalid";
+    case P0SemanticFailure::OCCUPANCY_FRAME_MISMATCH:
+      return "occupancy_frame_mismatch";
+    case P0SemanticFailure::OCCUPANCY_STALE:
+      return "occupancy_stale";
+    case P0SemanticFailure::OCCUPANCY_GENERATION_CHANGED:
+      return "occupancy_generation_changed";
+    case P0SemanticFailure::PRIOR_GENERATION_CHANGED:
+      return "prior_generation_changed";
+    case P0SemanticFailure::INVALID_COVARIANCE_GROWTH_PARAMETER:
+      return "invalid_covariance_growth_parameter";
+    case P0SemanticFailure::MISSING_COVARIANCE_GROWTH_PRIOR:
+      return "missing_covariance_growth_prior";
+    case P0SemanticFailure::STALE_COVARIANCE_GROWTH_PRIOR:
+      return "stale_covariance_growth_prior";
+    case P0SemanticFailure::INVALID_COVARIANCE_GROWTH_PRIOR:
+      return "invalid_covariance_growth_prior";
+  }
+  return "invalid_semantic_failure";
+}
+
+bool finiteSpd(const Eigen::Matrix3d& matrix) {
+  if (!matrix.allFinite()) {
+    return false;
+  }
+  const double scale = std::max(1.0, matrix.cwiseAbs().maxCoeff());
+  if ((matrix - matrix.transpose()).cwiseAbs().maxCoeff() >
+      1.0e-12 * scale) {
+    return false;
+  }
+  const Eigen::Matrix3d symmetric = 0.5 * (matrix + matrix.transpose());
+  Eigen::SelfAdjointEigenSolver<Eigen::Matrix3d> eigen(
+      symmetric, Eigen::EigenvaluesOnly);
+  return eigen.info() == Eigen::Success &&
+         eigen.eigenvalues().allFinite() &&
+         eigen.eigenvalues().minCoeff() > 0.0;
+}
 
 double stampToSec(const builtin_interfaces::msg::Time& stamp) {
   return static_cast<double>(stamp.sec) +
@@ -153,11 +213,17 @@ iap::PredictorGnssEpochPolicy parsePredictorGnssEpochPolicy(
 
 class PredictorModuleRiskProvider final : public iap::RiskPredictionProvider {
  public:
-  PredictorModuleRiskProvider(iap::PredictorModule module,
+  PredictorModuleRiskProvider(
+                              std::shared_ptr<const iap::LocalOccupancyGrid>
+                                  occupancy_owner,
+                              iap::PredictorModule module,
                               iap::IntegritySnapshot snapshot,
                               int worker_count)
-      : module_(std::move(module)), snapshot_(std::move(snapshot)),
-        worker_count_(std::max(1, worker_count)) {}
+      : occupancy_owner_(std::move(occupancy_owner)),
+        module_(std::move(module)), snapshot_(std::move(snapshot)),
+        worker_count_(std::max(1, worker_count)) {
+    module_.set_local_occupancy(occupancy_owner_.get());
+  }
 
   bool batchQuery(const std::vector<iap::RiskPredictionQuery>& queries,
                   std::vector<iap::RiskPredictionResult>* results) override {
@@ -179,13 +245,17 @@ class PredictorModuleRiskProvider final : public iap::RiskPredictionProvider {
       groups[inserted.first->second].push_back(index);
     }
     const int worker_count = std::min<int>(worker_count_, groups.size());
-    std::vector<std::future<iap::PredictorBatchDiagnostics>> workers;
+    struct WorkerOutcome {
+      iap::PredictorBatchDiagnostics diagnostics;
+      bool growth_valid = true;
+    };
+    std::vector<std::future<WorkerOutcome>> workers;
     workers.reserve(static_cast<std::size_t>(worker_count));
     for (int worker_id = 0; worker_id < worker_count; ++worker_id) {
       workers.push_back(std::async(std::launch::async,
           [this, &queries, &groups, results, worker_id, worker_count]() {
             iap::PredictorModule worker_module = module_;
-            iap::PredictorBatchDiagnostics aggregate;
+            WorkerOutcome outcome;
             for (std::size_t group_index = static_cast<std::size_t>(worker_id);
                  group_index < groups.size();
                  group_index += static_cast<std::size_t>(worker_count)) {
@@ -199,26 +269,34 @@ class PredictorModuleRiskProvider final : public iap::RiskPredictionProvider {
               iap::PredictorBatchDiagnostics diagnostics;
               const auto predictions = worker_module.queryBatch(inputs, &diagnostics);
               for (std::size_t local = 0; local < predictions.size(); ++local) {
+                if (inputs[local].horizon_s > 0.0 &&
+                    predictions[local].covariance_growth_status !=
+                        iap::CovarianceGrowthStatus::APPLIED) {
+                  outcome.growth_valid = false;
+                }
                 (*results)[groups[group_index][local]] =
                     iap::makeRiskPredictionResult(predictions[local]);
               }
-              aggregate.query_count += diagnostics.query_count;
-              aggregate.unique_positions += diagnostics.unique_positions;
-              aggregate.lidar_evaluations += diagnostics.lidar_evaluations;
-              aggregate.lidar_cache_hits += diagnostics.lidar_cache_hits;
+              outcome.diagnostics.query_count += diagnostics.query_count;
+              outcome.diagnostics.unique_positions += diagnostics.unique_positions;
+              outcome.diagnostics.lidar_evaluations += diagnostics.lidar_evaluations;
+              outcome.diagnostics.lidar_cache_hits += diagnostics.lidar_cache_hits;
             }
-            return aggregate;
+            return outcome;
           }));
     }
     last_diagnostics_ = {};
+    bool growth_valid = true;
     for (auto& worker : workers) {
-      const auto diagnostics = worker.get();
+      const auto outcome = worker.get();
+      const auto& diagnostics = outcome.diagnostics;
+      growth_valid = growth_valid && outcome.growth_valid;
       last_diagnostics_.query_count += diagnostics.query_count;
       last_diagnostics_.unique_positions += diagnostics.unique_positions;
       last_diagnostics_.lidar_evaluations += diagnostics.lidar_evaluations;
       last_diagnostics_.lidar_cache_hits += diagnostics.lidar_cache_hits;
     }
-    return true;
+    return growth_valid;
   }
 
   const iap::PredictorBatchDiagnostics& diagnostics() const {
@@ -226,6 +304,7 @@ class PredictorModuleRiskProvider final : public iap::RiskPredictionProvider {
   }
 
  private:
+  std::shared_ptr<const iap::LocalOccupancyGrid> occupancy_owner_;
   iap::PredictorModule module_;
   iap::IntegritySnapshot snapshot_;
   int worker_count_ = 1;
@@ -328,6 +407,10 @@ P0RiskGridRuntime::Config P0RiskGridRuntime::declareAndReadConfig(
       node->declare_parameter<double>(
           "p0.predictor.lidar_fim_radius_m",
           config.predictor_lidar_fim_radius_m);
+  config.predictor_sigma_grow_m_sqrt_s =
+      node->declare_parameter<double>(
+          "p0.predictor.sigma_grow_m_sqrt_s",
+          config.predictor_sigma_grow_m_sqrt_s);
   config.predictor_requested_worker_count = static_cast<int>(std::max<int64_t>(1,
       node->declare_parameter<int>("p0.predictor.worker_count", 1)));
   config.predictor_effective_worker_count = config.predictor_requested_worker_count;
@@ -603,7 +686,8 @@ iap::RiskGridHealth P0RiskGridRuntime::health() const {
 
 bool P0RiskGridRuntime::refreshOnceForTest() {
   refreshTimerCallback();
-  return risk_grid_.health().ready;
+  std::lock_guard<std::mutex> lock(health_state_mutex_);
+  return last_refresh_succeeded_;
 }
 
 void P0RiskGridRuntime::setOccupancyPredicate(
@@ -619,6 +703,11 @@ void P0RiskGridRuntime::setOccupancyDiagnosticQuery(
 void P0RiskGridRuntime::setOccupancyDiagnosticQueryFactory(
     std::function<iap::RiskGridMap::OccupancyDiagnosticQuery()> factory) {
   occupancy_diagnostic_query_factory_ = std::move(factory);
+}
+
+void P0RiskGridRuntime::setOccupancyEpochFactory(
+    std::function<P0OccupancyEpochCapture()> factory) {
+  occupancy_epoch_factory_ = std::move(factory);
 }
 
 bool P0RiskGridRuntime::p0_6_fixture_occupied(
@@ -650,11 +739,15 @@ P0RiskGridRuntime::combinedOccupancyPredicate() const {
 }
 
 iap::RiskGridMap::OccupancyDiagnosticQuery
-P0RiskGridRuntime::combinedOccupancyDiagnosticQuery() const {
-  auto query = occupancy_diagnostic_query_factory_
-      ? occupancy_diagnostic_query_factory_()
-      : occupancy_diagnostic_query_;
-  if (occupancy_diagnostic_query_factory_ && !query) {
+P0RiskGridRuntime::combinedOccupancyDiagnosticQuery(
+    iap::RiskGridMap::OccupancyDiagnosticQuery base_query) const {
+  auto query = std::move(base_query);
+  if (!query) {
+    query = occupancy_diagnostic_query_factory_
+        ? occupancy_diagnostic_query_factory_()
+        : occupancy_diagnostic_query_;
+  }
+  if (!query && occupancy_diagnostic_query_factory_) {
     query = [](const Eigen::Vector3d&) {
       iap::RiskOccupancyDiagnostic diagnostic;
       diagnostic.source = "occupancy_snapshot_unavailable";
@@ -821,6 +914,7 @@ void P0RiskGridRuntime::refreshTimerCallback() {
     last_refresh_start_stamp_s_ = now_s;
     last_refresh_start_steady_s_ = refresh_start_steady_s;
     last_snapshot_available_ = false;
+    last_refresh_succeeded_ = false;
     last_snapshot_failure_reason_ = pre_build_failure;
     last_refresh_query_count_ = 0;
     last_provider_batch_duration_ms_ =
@@ -837,6 +931,28 @@ void P0RiskGridRuntime::refreshTimerCallback() {
       last_refresh_end_steady_s_ = steadyNowSeconds();
     }
     return;
+  }
+  const auto fail_semantic_refresh = [&](const P0SemanticFailure failure) {
+    const std::string failure_reason = semanticFailureReason(failure);
+    risk_grid_.markRefreshFailure(now_s, failure_reason);
+    const double refresh_end_stamp_s = liveNowSeconds();
+    std::lock_guard<std::mutex> health_lock(health_state_mutex_);
+    last_snapshot_failure_reason_ = failure_reason;
+    last_refresh_succeeded_ = false;
+    last_refresh_elapsed_ms_ = std::chrono::duration<double, std::milli>(
+        std::chrono::steady_clock::now() - refresh_start).count();
+    last_refresh_end_stamp_s_ = refresh_end_stamp_s;
+    last_refresh_end_steady_s_ = steadyNowSeconds();
+  };
+  const bool production_predictor = provider_ == nullptr;
+  if (production_predictor && config_.predictor_use_current_integrity_prior) {
+    const InputReadiness readiness = inputReadiness(now_s);
+    if (readiness.current_integrity_seen &&
+        readiness.current_integrity_valid &&
+        !readiness.current_integrity_fresh) {
+      fail_semantic_refresh(P0SemanticFailure::STALE_COVARIANCE_GROWTH_PRIOR);
+      return;
+    }
   }
   iap::IntegritySnapshot snapshot;
   if (!buildSnapshot(now_s, &snapshot)) {
@@ -861,6 +977,74 @@ void P0RiskGridRuntime::refreshTimerCallback() {
     last_snapshot_failure_reason_ = "none";
   }
 
+  std::optional<P0OccupancyEpoch> occupancy_epoch;
+  if (occupancy_epoch_factory_) {
+    P0OccupancyEpochCapture capture = occupancy_epoch_factory_();
+    if (capture.status ==
+        P0OccupancyEpochCaptureStatus::SNAPSHOT_UNAVAILABLE) {
+      fail_semantic_refresh(
+          P0SemanticFailure::OCCUPANCY_SNAPSHOT_UNAVAILABLE);
+      return;
+    }
+    if (capture.status == P0OccupancyEpochCaptureStatus::ADAPTER_INVALID ||
+        !capture.epoch.has_value()) {
+      fail_semantic_refresh(P0SemanticFailure::OCCUPANCY_LOS_ADAPTER_INVALID);
+      return;
+    }
+    occupancy_epoch = std::move(capture.epoch);
+    if (!occupancy_epoch->diagnostic_query ||
+        !occupancy_epoch->los_owner || !occupancy_epoch->live_generation ||
+        occupancy_epoch->generation == 0u) {
+      fail_semantic_refresh(P0SemanticFailure::OCCUPANCY_LOS_ADAPTER_INVALID);
+      return;
+    }
+    if (occupancy_epoch->frame_id != config_.grid.frame_id ||
+        occupancy_epoch->frame_id != "map") {
+      fail_semantic_refresh(P0SemanticFailure::OCCUPANCY_FRAME_MISMATCH);
+      return;
+    }
+    const double occupancy_age_s = now_s - occupancy_epoch->cloud_stamp_s;
+    if (!std::isfinite(occupancy_epoch->cloud_stamp_s) ||
+        !std::isfinite(occupancy_age_s) || occupancy_age_s < 0.0 ||
+        (config_.grid.stale_timeout_s >= 0.0 &&
+         occupancy_age_s > config_.grid.stale_timeout_s)) {
+      fail_semantic_refresh(P0SemanticFailure::OCCUPANCY_STALE);
+      return;
+    }
+    if (occupancy_epoch->live_generation() != occupancy_epoch->generation) {
+      fail_semantic_refresh(
+          P0SemanticFailure::OCCUPANCY_GENERATION_CHANGED);
+      return;
+    }
+  }
+
+  if (production_predictor && !occupancy_epoch.has_value()) {
+    fail_semantic_refresh(P0SemanticFailure::OCCUPANCY_SNAPSHOT_UNAVAILABLE);
+    return;
+  }
+  if (production_predictor &&
+      (!std::isfinite(config_.predictor_sigma_grow_m_sqrt_s) ||
+       config_.predictor_sigma_grow_m_sqrt_s < 0.0)) {
+    fail_semantic_refresh(
+        P0SemanticFailure::INVALID_COVARIANCE_GROWTH_PARAMETER);
+    return;
+  }
+  if (production_predictor && !snapshot.has_lambda_base) {
+    fail_semantic_refresh(
+        config_.predictor_use_current_integrity_prior
+            ? P0SemanticFailure::INVALID_COVARIANCE_GROWTH_PRIOR
+            : P0SemanticFailure::MISSING_COVARIANCE_GROWTH_PRIOR);
+    return;
+  }
+  if (production_predictor && snapshot.prior_source_generation == 0u) {
+    fail_semantic_refresh(P0SemanticFailure::MISSING_COVARIANCE_GROWTH_PRIOR);
+    return;
+  }
+  if (production_predictor && !finiteSpd(snapshot.lambda_base_pos)) {
+    fail_semantic_refresh(P0SemanticFailure::INVALID_COVARIANCE_GROWTH_PRIOR);
+    return;
+  }
+
   std::unique_ptr<iap::RiskPredictionProvider> local_provider;
   iap::RiskPredictionProvider* provider = provider_.get();
   PredictorModuleRiskProvider* predictor_provider = nullptr;
@@ -882,6 +1066,8 @@ void P0RiskGridRuntime::refreshTimerCallback() {
         config_.predictor_conservative_max_with_gnss;
     predictor_params.lidar.enable_legacy_observability =
         config_.predictor_lidar_legacy_observability;
+    predictor_params.covariance_growth.sigma_grow_m_sqrt_s =
+        config_.predictor_sigma_grow_m_sqrt_s;
     if (std::isfinite(config_.predictor_lidar_fim_radius_m) &&
         config_.predictor_lidar_fim_radius_m > 0.0) {
       predictor_params.lidar.fim_params.fim_radius_m =
@@ -901,7 +1087,8 @@ void P0RiskGridRuntime::refreshTimerCallback() {
     module.set_lidar_map_points(std::move(lidar_map_points));
     module.set_lidar_fim_primitives(std::move(lidar_fim_primitives));
     auto owned_predictor_provider = std::make_unique<PredictorModuleRiskProvider>(
-        std::move(module), snapshot, config_.predictor_effective_worker_count);
+        occupancy_epoch->los_owner, std::move(module), snapshot,
+        config_.predictor_effective_worker_count);
     predictor_provider = owned_predictor_provider.get();
     local_provider = std::move(owned_predictor_provider);
     provider = local_provider.get();
@@ -918,17 +1105,47 @@ void P0RiskGridRuntime::refreshTimerCallback() {
     last_refresh_query_count_ =
         layer_voxel_count * config_.grid.horizons_s.size();
   }
-  const auto occupancy_diagnostic_query =
-      combinedOccupancyDiagnosticQuery();
+  const auto occupancy_diagnostic_query = combinedOccupancyDiagnosticQuery(
+      occupancy_epoch ? occupancy_epoch->diagnostic_query
+                      : iap::RiskGridMap::OccupancyDiagnosticQuery{});
   const auto occupancy_predicate = combinedOccupancyPredicate();
+  iap::RiskGridMap::SourceValidator source_validator;
+  if (occupancy_epoch) {
+    const auto live_occupancy_generation = occupancy_epoch->live_generation;
+    const uint64_t captured_occupancy_generation =
+        occupancy_epoch->generation;
+    const uint64_t captured_prior_generation =
+        snapshot.prior_source_generation;
+    source_validator =
+        [this, live_occupancy_generation, captured_occupancy_generation,
+         captured_prior_generation]() {
+          if (!live_occupancy_generation ||
+              live_occupancy_generation() !=
+                  captured_occupancy_generation) {
+            return iap::RiskGridSourceValidation::
+                OCCUPANCY_GENERATION_CHANGED;
+          }
+          uint64_t live_prior_generation = 0;
+          {
+            std::lock_guard<std::mutex> lock(health_state_mutex_);
+            live_prior_generation = latest_current_generation_;
+          }
+          if (captured_prior_generation == 0u ||
+              live_prior_generation != captured_prior_generation) {
+            return iap::RiskGridSourceValidation::PRIOR_GENERATION_CHANGED;
+          }
+          return iap::RiskGridSourceValidation::VALID;
+        };
+  }
   TimedRiskProvider timed_provider(provider);
+  bool refresh_succeeded = false;
   if (occupancy_diagnostic_query) {
-    risk_grid_.refreshFromProvider(
+    refresh_succeeded = risk_grid_.refreshFromProvider(
         snapshot.p_wb, now_s, timed_provider,
-        occupancy_diagnostic_query, &reason);
+        occupancy_diagnostic_query, source_validator, &reason);
   } else {
-    risk_grid_.refreshFromProvider(snapshot.p_wb, now_s, timed_provider,
-                                   occupancy_predicate, &reason);
+    refresh_succeeded = risk_grid_.refreshFromProvider(
+        snapshot.p_wb, now_s, timed_provider, occupancy_predicate, &reason);
   }
   const iap::RiskGridHealth health = risk_grid_.health(now_s);
   const auto viz_snapshot = risk_grid_.acquireSnapshot();
@@ -948,6 +1165,7 @@ void P0RiskGridRuntime::refreshTimerCallback() {
       last_predictor_lidar_cache_hits_ = diagnostics.lidar_cache_hits;
     }
     last_refresh_end_stamp_s_ = refresh_end_stamp_s;
+    last_refresh_succeeded_ = refresh_succeeded;
     last_refresh_end_steady_s_ = steadyNowSeconds();
     last_generation_interval_ms_ = std::isfinite(last_generation_end_steady_s_)
         ? 1000.0 * (last_refresh_end_steady_s_ -
@@ -1343,6 +1561,10 @@ void P0RiskGridRuntime::integrityCallback(
   }
   recordInputCallback();
   std::lock_guard<std::mutex> health_lock(health_state_mutex_);
+  ++latest_current_generation_;
+  if (latest_current_generation_ == 0u) {
+    ++latest_current_generation_;
+  }
   current_integrity_seen_ = true;
   latest_current_ = currentFromMsg(*msg);
   latest_current_valid_ = latest_current_.valid;
@@ -1721,6 +1943,8 @@ bool P0RiskGridRuntime::buildSnapshot(
   bool odom_valid = false;
   iap::CurrentIntegrityState current;
   bool current_valid = false;
+  uint64_t prior_source_generation = 0;
+  Eigen::Matrix3d lambda_prior = Eigen::Matrix3d::Zero();
   std::optional<iap::GnssEpoch> epoch;
   {
     std::lock_guard<std::mutex> lock(health_state_mutex_);
@@ -1730,6 +1954,10 @@ bool P0RiskGridRuntime::buildSnapshot(
     odom_valid = latest_odom_pose_valid_;
     current = latest_current_;
     current_valid = latest_current_valid_;
+    prior_source_generation = latest_current_generation_;
+    if (config_.predictor_use_current_integrity_prior) {
+      lambda_prior = currentPriorInformation(current);
+    }
     epoch = latest_epoch_;
   }
   if (!odom_valid || !current_valid) {
@@ -1765,15 +1993,14 @@ bool P0RiskGridRuntime::buildSnapshot(
       input.gnss_epoch = &*epoch;
     }
   }
-  const Eigen::Matrix3d lambda_prior =
-      config_.predictor_use_current_integrity_prior
-          ? currentPriorInformation(current)
-          : Eigen::Matrix3d::Zero();
   if (config_.predictor_use_current_integrity_prior &&
       lambda_prior.trace() > 0.0 && lambda_prior.allFinite()) {
     input.lambda_base_pos = &lambda_prior;
   }
   *snapshot = snapshot_builder_.build_from_latest(input);
+  if (snapshot->has_lambda_base) {
+    snapshot->prior_source_generation = prior_source_generation;
+  }
   return snapshot->valid;
 }
 

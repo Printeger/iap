@@ -66,6 +66,8 @@ class LocalOccupancyGrid {
 
   struct Params {
     double voxel_size  = 0.2;        ///< voxel edge length [m]
+    Eigen::Vector3d lattice_origin = Eigen::Vector3d::Zero();
+                                      ///< world origin of voxel key (0,0,0)
     int    max_voxels  = 200'000;    ///< maximum occupied voxels kept
     int    n_kappa_steps = 20;       ///< samples for occupancy_ratio()
     bool   enable_eviction = false;  ///< preserve legacy full-map behavior when false

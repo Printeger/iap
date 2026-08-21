@@ -7,6 +7,7 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <cstdlib>
 #include <filesystem>
 #include <fstream>
 #include <limits>
@@ -22,6 +23,11 @@ namespace {
 constexpr double kPi = 3.14159265358979323846;
 
 std::filesystem::path predictor_artifact_dir() {
+  if (const char* configured = std::getenv("IAP_TEST_ARTIFACT_DIR")) {
+    std::filesystem::path path(configured);
+    std::filesystem::create_directories(path);
+    return path;
+  }
   std::filesystem::path path(IAP_SOURCE_ROOT);
   path /= "docs/dev_predictor/predictor_isolated_test_coverage_artifacts";
   std::filesystem::create_directories(path);
@@ -163,6 +169,7 @@ iap::PredictorParams make_params() {
   params.fusion.fim_epsilon = 1.0e-6;
   params.fusion.K_H_adv = 5.0;
   params.fusion.K_V_adv = 5.0;
+  params.covariance_growth.sigma_grow_m_sqrt_s = 0.0;
   return params;
 }
 
@@ -534,6 +541,9 @@ TEST(PredictorModuleTest, GnssMapOcclusionReducesVisibleCountAndDegradesProtecti
   EXPECT_GT(occluded.pdop, open_sky.pdop);
   EXPECT_GT(occluded.hpl, open_sky.hpl);
   EXPECT_GT(occluded.vpl, open_sky.vpl);
+  EXPECT_LT(occluded.lambda_trace, open_sky.lambda_trace);
+  EXPECT_GE(sorted_eigenvalues(open_sky.lambda_gnss).minCoeff(), -1.0e-12);
+  EXPECT_GE(sorted_eigenvalues(occluded.lambda_gnss).minCoeff(), -1.0e-12);
 
   std::ofstream csv(predictor_artifact_dir() /
                     "gnss_occlusion_pl_degradation.csv");
@@ -905,9 +915,45 @@ TEST(PredictorModuleTest, BatchMatchesScalarAndCachesLidarPerPosition) {
   }
 }
 
+TEST(PredictorModuleTest, TauZeroCovarianceGrowthMatchesAcceptedBaseline) {
+  auto baseline_params = make_params();
+  baseline_params.covariance_growth.sigma_grow_m_sqrt_s =
+      std::numeric_limits<double>::quiet_NaN();
+  auto growth_params = baseline_params;
+  growth_params.covariance_growth.sigma_grow_m_sqrt_s = 0.2;
+
+  iap::PredictorModule baseline(baseline_params);
+  iap::PredictorModule growth(growth_params);
+  const auto primitives = make_lidar_primitives();
+  baseline.set_lidar_fim_primitives(primitives);
+  growth.set_lidar_fim_primitives(primitives);
+  const auto snapshot = make_snapshot(true, true);
+  const iap::PredictorQueryInput input(Eigen::Vector3d(1.0, 2.0, 3.0),
+                                       snapshot, 100.0, 0.0, "map",
+                                       snapshot.stamp);
+
+  const auto accepted = baseline.query(input);
+  const auto tau_zero = growth.query(input);
+
+  ASSERT_TRUE(accepted.valid) << accepted.fallback_reason;
+  ASSERT_TRUE(tau_zero.valid) << tau_zero.fallback_reason;
+  EXPECT_EQ(accepted.covariance_growth_status,
+            iap::CovarianceGrowthStatus::NOT_REQUIRED_TAU_ZERO);
+  EXPECT_EQ(tau_zero.covariance_growth_status,
+            iap::CovarianceGrowthStatus::NOT_REQUIRED_TAU_ZERO);
+  EXPECT_TRUE(tau_zero.fused.lambda_prior.isApprox(
+      accepted.fused.lambda_prior, 1.0e-12));
+  EXPECT_TRUE(tau_zero.fused.sigma_pos.isApprox(
+      accepted.fused.sigma_pos, 1.0e-12));
+  EXPECT_NEAR(tau_zero.fused.hpl, accepted.fused.hpl, 1.0e-12);
+  EXPECT_NEAR(tau_zero.fused.vpl, accepted.fused.vpl, 1.0e-12);
+  EXPECT_EQ(tau_zero.source_flags, accepted.source_flags);
+}
+
 TEST(PredictorModuleTest,
-     FrozenSnapshotScientificFieldsAreInvariantAcrossSixHorizons) {
+     FrozenSpatialAdvisoryIsReusedButHorizonRiskGrowsAcrossSixHorizons) {
   auto params = make_params();
+  params.covariance_growth.sigma_grow_m_sqrt_s = 0.2;
   params.freshness.enabled = true;
   params.freshness.max_odom_age_s = 0.5;
   params.freshness.max_integrity_age_s = 0.5;
@@ -928,12 +974,149 @@ TEST(PredictorModuleTest,
 
   ASSERT_EQ(results.size(), horizons.size());
   ASSERT_TRUE(results.front().valid) << results.front().fallback_reason;
+  EXPECT_EQ(results.front().covariance_growth_status,
+            iap::CovarianceGrowthStatus::NOT_REQUIRED_TAU_ZERO);
   for (std::size_t index = 0; index < results.size(); ++index) {
+    ASSERT_TRUE(results[index].valid) << results[index].fallback_reason;
     EXPECT_TRUE(results[index].query_position_map.isApprox(position, 0.0));
     EXPECT_DOUBLE_EQ(results[index].query_time_s, 100.0 + horizons[index]);
     EXPECT_DOUBLE_EQ(results[index].horizon_s, horizons[index]);
     EXPECT_EQ(results[index].frame_id, "map");
-    expect_scientific_result_eq(results[index], results.front());
+    expect_gnss_scientific_eq(results[index].gnss, results.front().gnss);
+    expect_lidar_scientific_eq(results[index].lidar, results.front().lidar);
+    if (index == 0) {
+      continue;
+    }
+    EXPECT_EQ(results[index].covariance_growth_status,
+              iap::CovarianceGrowthStatus::APPLIED);
+    const Eigen::Matrix3d covariance_delta =
+        results[index].fused.sigma_pos - results[index - 1].fused.sigma_pos;
+    EXPECT_GE(sorted_eigenvalues(covariance_delta).minCoeff(), -1.0e-12);
+    EXPECT_GE(results[index].fused.hpl + 1.0e-12,
+              results[index - 1].fused.hpl);
+    EXPECT_GE(results[index].fused.vpl + 1.0e-12,
+              results[index - 1].fused.vpl);
+  }
+  EXPECT_FALSE(results.back().fused.sigma_pos.isApprox(
+      results.front().fused.sigma_pos, 1.0e-12));
+  EXPECT_LT(results.back().fused.lambda_prior_trace,
+            results.front().fused.lambda_prior_trace);
+  EXPECT_TRUE(results.back().fused.hpl > results.front().fused.hpl ||
+              results.back().fused.vpl > results.front().fused.vpl);
+}
+
+TEST(PredictorModuleTest,
+     CovarianceGrowthRemainsFiniteSymmetricPsdAndPlNondecreasing) {
+  auto params = make_params();
+  params.covariance_growth.sigma_grow_m_sqrt_s = 0.15;
+  iap::PredictorModule module(params);
+  module.set_lidar_fim_primitives(make_lidar_primitives());
+  auto snapshot = make_snapshot(true, true);
+  snapshot.lambda_base_pos =
+      (Eigen::Vector3d(1.0, 0.5, 0.25)).asDiagonal();
+  const std::array<double, 4> horizons{{0.0, 0.5, 2.5, 100.0}};
+
+  std::vector<iap::PredictorQueryResult> results;
+  for (const double horizon_s : horizons) {
+    results.push_back(module.query(iap::PredictorQueryInput(
+        Eigen::Vector3d(0.5, -0.25, 1.0), snapshot,
+        snapshot.stamp + horizon_s, horizon_s, "map", snapshot.stamp)));
+  }
+
+  ASSERT_EQ(results.size(), horizons.size());
+  for (std::size_t index = 0; index < results.size(); ++index) {
+    ASSERT_TRUE(results[index].valid) << results[index].fallback_reason;
+    const Eigen::Matrix3d covariance = results[index].fused.sigma_pos;
+    EXPECT_TRUE(covariance.allFinite());
+    EXPECT_LE((covariance - covariance.transpose()).cwiseAbs().maxCoeff(),
+              1.0e-12);
+    EXPECT_GE(sorted_eigenvalues(covariance).minCoeff(), -1.0e-12);
+    if (index == 0) {
+      continue;
+    }
+    const Eigen::Matrix3d delta =
+        covariance - results[index - 1].fused.sigma_pos;
+    EXPECT_GE(sorted_eigenvalues(delta).minCoeff(), -1.0e-12);
+    EXPECT_GE(results[index].fused.hpl + 1.0e-12,
+              results[index - 1].fused.hpl);
+    EXPECT_GE(results[index].fused.vpl + 1.0e-12,
+              results[index - 1].fused.vpl);
+  }
+}
+
+TEST(PredictorModuleTest,
+     InvalidCovarianceGrowthInputsAreExplicitFallbacks) {
+  struct Case {
+    const char* name;
+    double horizon_s;
+    double sigma_grow;
+    bool has_prior;
+    Eigen::Matrix3d prior;
+    bool stale_prior;
+    iap::CovarianceGrowthStatus expected_status;
+    const char* expected_reason;
+  };
+  const double nan = std::numeric_limits<double>::quiet_NaN();
+  Eigen::Matrix3d asymmetric_prior = Eigen::Matrix3d::Identity();
+  asymmetric_prior(0, 1) = 0.5;
+  const std::vector<Case> cases = {
+      {"negative_horizon", -0.5, 0.1, true, Eigen::Matrix3d::Identity(),
+       false, iap::CovarianceGrowthStatus::INVALID_HORIZON,
+       "invalid_horizon"},
+      {"nan_horizon", nan, 0.1, true, Eigen::Matrix3d::Identity(), false,
+       iap::CovarianceGrowthStatus::INVALID_HORIZON, "invalid_horizon"},
+      {"nan_parameter", 0.5, nan, true, Eigen::Matrix3d::Identity(), false,
+       iap::CovarianceGrowthStatus::INVALID_PARAMETER,
+       "invalid_covariance_growth_parameter"},
+      {"negative_parameter", 0.5, -0.1, true,
+       Eigen::Matrix3d::Identity(), false,
+       iap::CovarianceGrowthStatus::INVALID_PARAMETER,
+       "invalid_covariance_growth_parameter"},
+      {"missing_prior", 0.5, 0.1, false, Eigen::Matrix3d::Zero(), false,
+       iap::CovarianceGrowthStatus::MISSING_PRIOR,
+       "missing_covariance_growth_prior"},
+      {"nonfinite_prior", 0.5, 0.1, true,
+       nan * Eigen::Matrix3d::Identity(), false,
+       iap::CovarianceGrowthStatus::INVALID_PRIOR,
+       "invalid_covariance_growth_prior"},
+      {"indefinite_prior", 0.5, 0.1, true,
+       (Eigen::Vector3d(1.0, -0.1, 1.0)).asDiagonal(), false,
+       iap::CovarianceGrowthStatus::INVALID_PRIOR,
+       "invalid_covariance_growth_prior"},
+      {"asymmetric_prior", 0.5, 0.1, true, asymmetric_prior, false,
+       iap::CovarianceGrowthStatus::INVALID_PRIOR,
+       "invalid_covariance_growth_prior"},
+      {"stale_prior", 0.5, 0.1, true, Eigen::Matrix3d::Identity(), true,
+       iap::CovarianceGrowthStatus::STALE_PRIOR,
+       "stale_covariance_growth_prior"},
+  };
+
+  for (const auto& test_case : cases) {
+    SCOPED_TRACE(test_case.name);
+    auto params = make_params();
+    params.covariance_growth.sigma_grow_m_sqrt_s = test_case.sigma_grow;
+    params.freshness.enabled = true;
+    params.freshness.max_odom_age_s = 2.0;
+    params.freshness.max_integrity_age_s = 0.5;
+    params.freshness.max_gnss_age_s = 2.0;
+    params.freshness.max_snapshot_age_s = 2.0;
+    iap::PredictorModule module(params);
+    module.set_lidar_fim_primitives(make_lidar_primitives());
+    auto snapshot = make_snapshot(true, test_case.has_prior);
+    snapshot.lambda_base_pos = test_case.prior;
+    if (test_case.stale_prior) {
+      snapshot.current.stamp = 99.0;
+    }
+    const auto result = module.query(iap::PredictorQueryInput(
+        Eigen::Vector3d::Zero(), snapshot, 100.5, test_case.horizon_s,
+        "map", 100.5));
+    EXPECT_FALSE(result.valid);
+    EXPECT_FALSE(result.available);
+    EXPECT_TRUE(result.fallback);
+    EXPECT_EQ(result.covariance_growth_status, test_case.expected_status);
+    EXPECT_EQ(result.fallback_reason, test_case.expected_reason);
+    EXPECT_FALSE(std::isfinite(result.fused.hpl));
+    EXPECT_FALSE(std::isfinite(result.fused.vpl));
   }
 }
 

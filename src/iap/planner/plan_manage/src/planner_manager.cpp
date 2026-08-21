@@ -256,32 +256,28 @@ namespace ego_planner
           {
             return grid_map_ && grid_map_->getInflateOccupancy(pos) > 0;
           });
-      p0_risk_grid_runtime_->setOccupancyDiagnosticQueryFactory(
-          [this]() -> iap::RiskGridMap::OccupancyDiagnosticQuery
+      p0_risk_grid_runtime_->setOccupancyEpochFactory(
+          [this]() -> P0OccupancyEpochCapture
           {
             if (!grid_map_)
-              return {};
-            auto frozen_query = grid_map_->captureOccupancyDiagnosticQuery();
-            if (!frozen_query)
-              return {};
-            return [frozen_query = std::move(frozen_query)](
-                       const Eigen::Vector3d &pos)
-            {
-              iap::RiskOccupancyDiagnostic out;
-              const auto source = frozen_query(pos);
-              out.available = source.available;
-              out.raw_occupied = source.raw_occupied;
-              out.inflated_occupied = source.inflated_occupied;
-              out.voxel_index = source.voxel_index;
-              out.voxel_center = source.voxel_center;
-              out.resolution_m = source.resolution_m;
-              out.inflation_m = source.inflation_m;
-              out.frame_id = source.frame_id;
-              out.cloud_stamp_s = source.cloud_stamp_s;
-              out.occupancy_generation = source.generation;
-              out.source = source.source;
-              return out;
-            };
+              return {P0OccupancyEpochCaptureStatus::SNAPSHOT_UNAVAILABLE,
+                      std::nullopt};
+            const auto frozen_epoch =
+                grid_map_->captureFrozenOccupancyEpoch();
+            if (!frozen_epoch)
+              return {P0OccupancyEpochCaptureStatus::SNAPSHOT_UNAVAILABLE,
+                      std::nullopt};
+            const std::weak_ptr<GridMap> owner = grid_map_;
+            auto adapted = P0OccupancyEpochAdapter::adapt(
+                *frozen_epoch, [owner]() {
+                  const auto grid_map = owner.lock();
+                  return grid_map ? grid_map->occupancyGeneration() : 0u;
+                });
+            if (!adapted)
+              return {P0OccupancyEpochCaptureStatus::ADAPTER_INVALID,
+                      std::nullopt};
+            return {P0OccupancyEpochCaptureStatus::VALID,
+                    std::move(adapted)};
           });
     }
     p5_integrity_gate_ = P5RuntimeIntegrityGate::createIfEnabled(node);

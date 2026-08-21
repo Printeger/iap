@@ -1,5 +1,6 @@
 #include <ego_planner/p0_risk_grid_runtime.h>
 
+#include <algorithm>
 #include <cmath>
 #include <atomic>
 #include <chrono>
@@ -114,6 +115,35 @@ class BlockingProvider final : public iap::RiskPredictionProvider {
   bool released_ = false;
 };
 
+class CallbackProvider final : public iap::RiskPredictionProvider {
+ public:
+  explicit CallbackProvider(std::function<void()> callback)
+      : callback_(std::move(callback)) {}
+
+  bool batchQuery(const std::vector<iap::RiskPredictionQuery>& queries,
+                  std::vector<iap::RiskPredictionResult>* results) override {
+    if (results == nullptr) {
+      return false;
+    }
+    if (callback_) {
+      callback_();
+    }
+    results->assign(queries.size(), iap::RiskPredictionResult{});
+    for (auto& result : *results) {
+      result.available = true;
+      result.valid = true;
+      result.stale = false;
+      result.hpl_pred = 1.0;
+      result.vpl_pred = 2.0;
+      result.reason = "ok";
+    }
+    return true;
+  }
+
+ private:
+  std::function<void()> callback_;
+};
+
 ego_planner::P0RiskGridRuntime::Config enabledConfig() {
   ego_planner::P0RiskGridRuntime::Config config;
   config.enable_risk_grid = true;
@@ -124,8 +154,185 @@ ego_planner::P0RiskGridRuntime::Config enabledConfig() {
   config.grid.horizons_s = {0.0, 1.0};
   config.grid.refresh_period_s = 1000.0;
   config.grid.stale_timeout_s = 100.0;
+  config.predictor_sigma_grow_m_sqrt_s = 0.1;
   config.debug_metrics_enable = false;
   return config;
+}
+
+iap::GnssEpoch makeGnssEpoch(const int satellite_count,
+                             const double stamp_s) {
+  constexpr double kPi = 3.14159265358979323846;
+  iap::GnssEpoch epoch;
+  epoch.stamp = stamp_s;
+  epoch.gps_sec = 2100000.0;
+  for (int index = 0; index < satellite_count; ++index) {
+    iap::SatObs satellite;
+    satellite.sat_id = 300 + index;
+    satellite.constellation = 'G';
+    satellite.elevation = 0.45 + 0.08 * static_cast<double>(index % 4);
+    satellite.azimuth = 2.0 * kPi * static_cast<double>(index) /
+                        static_cast<double>(std::max(1, satellite_count));
+    satellite.pr_sigma = 3.0 + static_cast<double>(index % 2);
+    epoch.sats.push_back(satellite);
+  }
+  return epoch;
+}
+
+ego_planner::P0OccupancyEpochCapture makeOccupancyEpochCapture(
+    const std::shared_ptr<std::atomic<uint64_t>>& live_generation,
+    const uint64_t captured_generation,
+    const double stamp_s,
+    const std::string& frame_id,
+    const std::vector<Eigen::Vector3d>& occupied_centers = {}) {
+  iap::LocalOccupancyGrid::Params params;
+  params.voxel_size = 1.0;
+  params.lattice_origin = Eigen::Vector3d(-1.5, -1.5, -1.5);
+  params.max_voxels = static_cast<int>(
+      std::max<std::size_t>(1u, occupied_centers.size()));
+  params.enable_eviction = false;
+  auto owner = std::make_shared<iap::LocalOccupancyGrid>(params);
+  owner->insert_points(occupied_centers);
+
+  ego_planner::P0OccupancyEpoch epoch;
+  epoch.generation = captured_generation;
+  epoch.cloud_stamp_s = stamp_s;
+  epoch.frame_id = frame_id;
+  epoch.los_owner = owner;
+  epoch.live_generation = [live_generation]() {
+    return live_generation->load();
+  };
+  epoch.diagnostic_query =
+      [owner, captured_generation, stamp_s, frame_id](
+          const Eigen::Vector3d& position) {
+        iap::RiskOccupancyDiagnostic diagnostic;
+        diagnostic.available = true;
+        diagnostic.raw_occupied = owner->occupied_at(position);
+        diagnostic.inflated_occupied = diagnostic.raw_occupied;
+        diagnostic.voxel_center = position;
+        diagnostic.resolution_m = owner->params().voxel_size;
+        diagnostic.inflation_m = 0.0;
+        diagnostic.frame_id = frame_id;
+        diagnostic.cloud_stamp_s = stamp_s;
+        diagnostic.occupancy_generation = captured_generation;
+        diagnostic.source = "frozen_test_epoch";
+        return diagnostic;
+      };
+  return {ego_planner::P0OccupancyEpochCaptureStatus::VALID,
+          std::move(epoch)};
+}
+
+std::vector<Eigen::Vector3d> riskGridCenters() {
+  std::vector<Eigen::Vector3d> centers;
+  for (int x = -1; x <= 1; ++x) {
+    for (int y = -1; y <= 1; ++y) {
+      for (int z = -1; z <= 1; ++z) {
+        centers.emplace_back(static_cast<double>(x),
+                             static_cast<double>(y),
+                             static_cast<double>(z));
+      }
+    }
+  }
+  return centers;
+}
+
+std::vector<Eigen::Vector3d> gnssLosBlockers(const iap::GnssEpoch& epoch) {
+  std::vector<Eigen::Vector3d> points = riskGridCenters();
+  for (const auto& origin : riskGridCenters()) {
+    for (const auto& satellite : epoch.sats) {
+      const double cos_elevation = std::cos(satellite.elevation);
+      const Eigen::Vector3d direction(
+          cos_elevation * std::sin(satellite.azimuth),
+          cos_elevation * std::cos(satellite.azimuth),
+          std::sin(satellite.elevation));
+      for (double distance = 1.0; distance <= 6.0; distance += 0.5) {
+        points.push_back(origin + distance * direction);
+      }
+    }
+  }
+  return points;
+}
+
+void expectEquivalentDouble(const double lhs, const double rhs) {
+  if (std::isfinite(lhs) || std::isfinite(rhs)) {
+    ASSERT_TRUE(std::isfinite(lhs));
+    ASSERT_TRUE(std::isfinite(rhs));
+    EXPECT_NEAR(lhs, rhs, 1.0e-12);
+    return;
+  }
+  EXPECT_EQ(std::isnan(lhs), std::isnan(rhs));
+  if (std::isinf(lhs) || std::isinf(rhs)) {
+    EXPECT_EQ(lhs, rhs);
+  }
+}
+
+void expectSnapshotsScientificallyEquivalent(
+    const std::shared_ptr<const iap::RiskGridSnapshot>& lhs,
+    const std::shared_ptr<const iap::RiskGridSnapshot>& rhs,
+    const bool require_same_generation = true) {
+  ASSERT_NE(lhs, nullptr);
+  ASSERT_NE(rhs, nullptr);
+  if (require_same_generation) {
+    EXPECT_EQ(lhs->generation_id(), rhs->generation_id());
+  }
+  EXPECT_EQ(lhs->horizonCount(), rhs->horizonCount());
+  EXPECT_EQ(lhs->layerVoxelCount(), rhs->layerVoxelCount());
+  EXPECT_EQ(lhs->voxelNum(), rhs->voxelNum());
+  expectEquivalentDouble(lhs->stamp_s(), rhs->stamp_s());
+  ASSERT_EQ(lhs->params().horizons_s.size(), rhs->params().horizons_s.size());
+  for (std::size_t index = 0; index < lhs->params().horizons_s.size(); ++index) {
+    expectEquivalentDouble(lhs->params().horizons_s[index],
+                           rhs->params().horizons_s[index]);
+  }
+  const Eigen::Vector3i dims = lhs->voxelNum();
+  for (int horizon = 0; horizon < lhs->horizonCount(); ++horizon) {
+    for (int x = 0; x < dims.x(); ++x) {
+      for (int y = 0; y < dims.y(); ++y) {
+        for (int z = 0; z < dims.z(); ++z) {
+          iap::RiskVoxel lhs_voxel;
+          iap::RiskVoxel rhs_voxel;
+          const Eigen::Vector3i index(x, y, z);
+          ASSERT_TRUE(lhs->voxelAt(horizon, index, &lhs_voxel));
+          ASSERT_TRUE(rhs->voxelAt(horizon, index, &rhs_voxel));
+          EXPECT_EQ(lhs_voxel.valid, rhs_voxel.valid);
+          EXPECT_EQ(lhs_voxel.stale, rhs_voxel.stale);
+          EXPECT_EQ(lhs_voxel.unknown, rhs_voxel.unknown);
+          EXPECT_EQ(lhs_voxel.source_flags, rhs_voxel.source_flags);
+          EXPECT_EQ(lhs_voxel.reason, rhs_voxel.reason);
+          expectEquivalentDouble(lhs_voxel.c_pi, rhs_voxel.c_pi);
+          expectEquivalentDouble(lhs_voxel.hpl_pred, rhs_voxel.hpl_pred);
+          expectEquivalentDouble(lhs_voxel.vpl_pred, rhs_voxel.vpl_pred);
+          expectEquivalentDouble(lhs_voxel.stamp_s, rhs_voxel.stamp_s);
+          ASSERT_EQ(lhs_voxel.occupancy == nullptr,
+                    rhs_voxel.occupancy == nullptr);
+          if (lhs_voxel.occupancy && rhs_voxel.occupancy) {
+            EXPECT_EQ(lhs_voxel.occupancy->available,
+                      rhs_voxel.occupancy->available);
+            EXPECT_EQ(lhs_voxel.occupancy->raw_occupied,
+                      rhs_voxel.occupancy->raw_occupied);
+            EXPECT_EQ(lhs_voxel.occupancy->inflated_occupied,
+                      rhs_voxel.occupancy->inflated_occupied);
+            EXPECT_EQ(lhs_voxel.occupancy->occupancy_generation,
+                      rhs_voxel.occupancy->occupancy_generation);
+            EXPECT_EQ(lhs_voxel.occupancy->frame_id,
+                      rhs_voxel.occupancy->frame_id);
+            EXPECT_EQ(lhs_voxel.occupancy->source,
+                      rhs_voxel.occupancy->source);
+            expectEquivalentDouble(lhs_voxel.occupancy->cloud_stamp_s,
+                                   rhs_voxel.occupancy->cloud_stamp_s);
+          }
+        }
+      }
+    }
+  }
+}
+
+void expectSameActiveGeneration(
+    const std::shared_ptr<const iap::RiskGridSnapshot>& accepted,
+    const std::shared_ptr<const iap::RiskGridSnapshot>& retained) {
+  ASSERT_NE(accepted, nullptr);
+  ASSERT_NE(retained, nullptr);
+  EXPECT_EQ(&accepted->params(), &retained->params());
+  expectSnapshotsScientificallyEquivalent(accepted, retained);
 }
 
 sensor_msgs::msg::PointCloud2::SharedPtr makePointCloud(
@@ -312,6 +519,34 @@ class P0RiskGridRuntimeStampTest : public ::testing::Test {
     runtime->latest_epoch_ = epoch;
   }
 
+  static void seedGnssEpoch(P0RiskGridRuntime* runtime,
+                            const double stamp_s,
+                            const int satellite_count = 8) {
+    runtime->latest_epoch_ = makeGnssEpoch(satellite_count, stamp_s);
+    runtime->gnss_epoch_seen_ = true;
+    runtime->latest_gnss_epoch_stamp_ = stamp_s;
+    runtime->latest_gnss_epoch_satellite_count_ =
+        static_cast<uint64_t>(satellite_count);
+  }
+
+  static std::shared_ptr<std::atomic<uint64_t>> installOccupancyEpoch(
+      P0RiskGridRuntime* runtime,
+      const double stamp_s,
+      const std::vector<Eigen::Vector3d>& occupied_centers = {},
+      const std::string& frame_id = "map",
+      const uint64_t generation = 2u) {
+    auto live_generation =
+        std::make_shared<std::atomic<uint64_t>>(generation);
+    runtime->setOccupancyEpochFactory(
+        [live_generation, generation, stamp_s, frame_id,
+         occupied_centers]() {
+          return makeOccupancyEpochCapture(live_generation, generation,
+                                           stamp_s, frame_id,
+                                           occupied_centers);
+        });
+    return live_generation;
+  }
+
   static bool gnssEpochSeen(const P0RiskGridRuntime& runtime) {
     return runtime.gnss_epoch_seen_;
   }
@@ -339,6 +574,7 @@ class P0RiskGridRuntimeStampTest : public ::testing::Test {
     runtime->latest_odom_p_ = Eigen::Vector3d::Zero();
     runtime->latest_odom_q_ = Eigen::Quaterniond::Identity();
     runtime->latest_odom_pose_valid_ = true;
+    runtime->odom_seen_ = true;
     runtime->latest_current_.stamp = current_stamp;
     runtime->latest_current_.valid = true;
     runtime->latest_current_.hpl = 1.0;
@@ -347,6 +583,40 @@ class P0RiskGridRuntimeStampTest : public ::testing::Test {
     runtime->latest_current_.val = 10.0;
     runtime->latest_current_.im = 9.0;
     runtime->latest_current_valid_ = true;
+    runtime->current_integrity_seen_ = true;
+    if (runtime->latest_current_generation_ == 0u) {
+      runtime->latest_current_generation_ = 1u;
+    }
+  }
+
+  static void advancePriorGeneration(P0RiskGridRuntime* runtime) {
+    std::lock_guard<std::mutex> lock(runtime->health_state_mutex_);
+    ++runtime->latest_current_generation_;
+    if (runtime->latest_current_generation_ == 0u) {
+      ++runtime->latest_current_generation_;
+    }
+  }
+
+  static void setPriorGeneration(P0RiskGridRuntime* runtime,
+                                 const uint64_t generation) {
+    runtime->latest_current_generation_ = generation;
+  }
+
+  static void setCurrentProtectionLevels(P0RiskGridRuntime* runtime,
+                                         const double hpl,
+                                         const double vpl) {
+    runtime->latest_current_.hpl = hpl;
+    runtime->latest_current_.vpl = vpl;
+  }
+
+  static void setGrowthPriorEnabled(P0RiskGridRuntime* runtime,
+                                    const bool enabled) {
+    runtime->config_.predictor_use_current_integrity_prior = enabled;
+  }
+
+  static void setGrowthSigma(P0RiskGridRuntime* runtime,
+                             const double sigma) {
+    runtime->config_.predictor_sigma_grow_m_sqrt_s = sigma;
   }
 
   static bool buildSnapshot(P0RiskGridRuntime* runtime,
@@ -425,6 +695,7 @@ TEST(P0RiskGridRuntimeTest, GnssEpochFreshnessDefaultIsTwoSeconds) {
   EXPECT_TRUE(config.predictor_lidar_legacy_observability);
   EXPECT_DOUBLE_EQ(config.predictor_lidar_fim_radius_m,
                    iap::LidarObservabilityFim::Params{}.fim_radius_m);
+  EXPECT_TRUE(std::isnan(config.predictor_sigma_grow_m_sqrt_s));
   EXPECT_FALSE(config.grid.p5_3_fixture.enabled);
   EXPECT_EQ(config.grid.p5_3_fixture.name, "future_high_risk_zone_v1");
   EXPECT_DOUBLE_EQ(config.grid.p5_3_fixture.x_min_m, -10.8);
@@ -485,6 +756,7 @@ TEST(P0RiskGridRuntimeTest, PredictorParamsCanBeOverridden) {
       rclcpp::Parameter("p0.predictor.conservative_max_with_gnss", true),
       rclcpp::Parameter("p0.predictor.lidar_legacy_observability", false),
       rclcpp::Parameter("p0.predictor.lidar_fim_radius_m", 12.0),
+      rclcpp::Parameter("p0.predictor.sigma_grow_m_sqrt_s", 0.08),
   });
   auto node = std::make_shared<rclcpp::Node>(
       "p0_predictor_params_override_test", options);
@@ -499,6 +771,7 @@ TEST(P0RiskGridRuntimeTest, PredictorParamsCanBeOverridden) {
   EXPECT_TRUE(config.predictor_conservative_max_with_gnss);
   EXPECT_FALSE(config.predictor_lidar_legacy_observability);
   EXPECT_DOUBLE_EQ(config.predictor_lidar_fim_radius_m, 12.0);
+  EXPECT_DOUBLE_EQ(config.predictor_sigma_grow_m_sqrt_s, 0.08);
 }
 
 TEST(P0RiskGridRuntimeTest, P0_6FixtureParamsCanBeOverridden) {
@@ -1331,6 +1604,7 @@ TEST_F(P0RiskGridRuntimeStampTest,
   P0RiskGridRuntime runtime(node, config);
 
   seedValidInputs(&runtime, 123.5, 123.5);
+  installOccupancyEpoch(&runtime, 123.5);
   EXPECT_TRUE(runtime.refreshOnceForTest());
   const auto health = runtime.health();
 
@@ -1351,7 +1625,7 @@ TEST_F(P0RiskGridRuntimeStampTest,
   config.predictor_source_mode = iap::PredictorSourceMode::LidarOnly;
   config.predictor_gnss_epoch_policy =
       iap::PredictorGnssEpochPolicy::Disabled;
-  config.predictor_use_current_integrity_prior = false;
+  config.predictor_use_current_integrity_prior = true;
   config.predictor_lidar_legacy_observability = false;
   P0RiskGridRuntime runtime(node, config);
   const auto points = sixAxisPrimitivePoints();
@@ -1359,6 +1633,7 @@ TEST_F(P0RiskGridRuntimeStampTest,
 
   sendCloud(&runtime, makePointCloud(points, &normals));
   seedValidInputs(&runtime, 123.5, 123.5);
+  installOccupancyEpoch(&runtime, 123.5);
 
   EXPECT_TRUE(runtime.refreshOnceForTest());
   const auto health = runtime.health();
@@ -1387,6 +1662,7 @@ TEST_F(P0RiskGridRuntimeStampTest,
 
   sendCloud(&runtime, makePointCloud(points, &normals));
   seedValidInputs(&runtime, 123.5, 123.5);
+  installOccupancyEpoch(&runtime, 123.5);
 
   EXPECT_TRUE(runtime.refreshOnceForTest());
   const auto health = runtime.health();
@@ -1420,11 +1696,12 @@ TEST_F(P0RiskGridRuntimeStampTest,
 
   sendCloud(&runtime, makePointCloud(points, &normals));
   seedValidInputs(&runtime, 100.0, 99.0);
+  installOccupancyEpoch(&runtime, 100.0);
 
   EXPECT_FALSE(runtime.refreshOnceForTest());
   const auto health = runtime.health();
   EXPECT_FALSE(health.ready);
-  EXPECT_EQ(health.reason, "snapshot_unavailable");
+  EXPECT_EQ(health.reason, "stale_covariance_growth_prior");
 }
 
 TEST_F(P0RiskGridRuntimeStampTest,
@@ -1442,11 +1719,12 @@ TEST_F(P0RiskGridRuntimeStampTest,
   P0RiskGridRuntime runtime(node, config);
 
   seedValidInputs(&runtime, 100.0, 99.0);
+  installOccupancyEpoch(&runtime, 100.0);
 
   EXPECT_FALSE(runtime.refreshOnceForTest());
   const auto health = runtime.health();
   EXPECT_FALSE(health.ready);
-  EXPECT_EQ(health.reason, "snapshot_unavailable");
+  EXPECT_EQ(health.reason, "stale_covariance_growth_prior");
 }
 
 TEST_F(P0RiskGridRuntimeStampTest,
@@ -1462,6 +1740,7 @@ TEST_F(P0RiskGridRuntimeStampTest,
   P0RiskGridRuntime runtime(node, config);
 
   seedValidInputs(&runtime, 123.5, 123.5);
+  installOccupancyEpoch(&runtime, 123.5);
   EXPECT_TRUE(runtime.refreshOnceForTest());
   const auto health = runtime.health();
 
@@ -1470,6 +1749,238 @@ TEST_F(P0RiskGridRuntimeStampTest,
   EXPECT_GT(health.provider_invalid_count, 0u);
   EXPECT_EQ(health.predictor_gnss_used_count, 0u);
   EXPECT_NE(health.reason, "stale_gnss_epoch");
+}
+
+TEST_F(P0RiskGridRuntimeStampTest,
+       ProductionProviderBindsVersionedImmutableGnssOccupancyEpoch) {
+  ensure_rclcpp();
+  auto node = std::make_shared<rclcpp::Node>(
+      "p0_production_immutable_occupancy_epoch_test",
+      rclcpp::NodeOptions().allow_undeclared_parameters(false));
+  auto config = enabledConfig();
+  config.grid.skip_occupied_voxels = false;
+  config.predictor_source_mode = iap::PredictorSourceMode::GnssOnly;
+  config.predictor_gnss_epoch_policy =
+      iap::PredictorGnssEpochPolicy::Required;
+  P0RiskGridRuntime runtime(node, config);
+
+  seedValidInputs(&runtime, 100.0, 100.0);
+  seedGnssEpoch(&runtime, 100.0);
+  installOccupancyEpoch(&runtime, 100.0, {}, "map", 2u);
+  ASSERT_TRUE(refreshOnce(&runtime));
+  const auto open_snapshot = runtime.acquireSnapshot();
+  ASSERT_NE(open_snapshot, nullptr);
+  const auto open_health = runtime.health();
+  EXPECT_GT(open_health.predictor_gnss_used_count, 0u);
+
+  advancePriorGeneration(&runtime);
+  seedValidInputs(&runtime, 100.5, 100.5);
+  seedGnssEpoch(&runtime, 100.5);
+  const auto blocked_live = installOccupancyEpoch(
+      &runtime, 100.5, gnssLosBlockers(makeGnssEpoch(8, 100.5)),
+      "map", 4u);
+  ASSERT_TRUE(refreshOnce(&runtime));
+  const auto blocked_snapshot = runtime.acquireSnapshot();
+  ASSERT_NE(blocked_snapshot, nullptr);
+  EXPECT_GT(blocked_snapshot->generation_id(), open_snapshot->generation_id());
+  EXPECT_EQ(runtime.health().predictor_gnss_used_count,
+            open_health.predictor_gnss_used_count);
+
+  iap::RiskVoxel blocked_voxel;
+  ASSERT_TRUE(blocked_snapshot->voxelAt(
+      0, Eigen::Vector3i(1, 1, 1), &blocked_voxel));
+  ASSERT_NE(blocked_voxel.occupancy, nullptr);
+  EXPECT_TRUE(blocked_voxel.occupancy->raw_occupied);
+  EXPECT_EQ(blocked_voxel.occupancy->occupancy_generation, 4u);
+  EXPECT_DOUBLE_EQ(blocked_voxel.occupancy->cloud_stamp_s, 100.5);
+  EXPECT_EQ(blocked_voxel.occupancy->frame_id, "map");
+  iap::RiskVoxel open_voxel;
+  ASSERT_TRUE(open_snapshot->voxelAt(
+      0, Eigen::Vector3i(1, 1, 1), &open_voxel));
+  EXPECT_GT(blocked_voxel.hpl_pred, open_voxel.hpl_pred);
+  EXPECT_GT(blocked_voxel.vpl_pred, open_voxel.vpl_pred);
+
+  blocked_live->store(6u);
+  iap::RiskVoxel still_frozen;
+  ASSERT_TRUE(blocked_snapshot->voxelAt(
+      0, Eigen::Vector3i(1, 1, 1), &still_frozen));
+  ASSERT_NE(still_frozen.occupancy, nullptr);
+  EXPECT_EQ(still_frozen.occupancy->occupancy_generation, 4u);
+  EXPECT_EQ(still_frozen.occupancy->raw_occupied,
+            blocked_voxel.occupancy->raw_occupied);
+}
+
+TEST_F(P0RiskGridRuntimeStampTest,
+       OccupancyGenerationChangeDuringProviderBatchKeepsPreviousGeneration) {
+  ensure_rclcpp();
+  auto node = std::make_shared<rclcpp::Node>(
+      "p0_occupancy_generation_race_test",
+      rclcpp::NodeOptions().allow_undeclared_parameters(false));
+  auto live_generation = std::make_shared<std::atomic<uint64_t>>(2u);
+  std::atomic<bool> mutate{false};
+  auto provider = std::make_unique<CallbackProvider>([&]() {
+    if (mutate.load()) {
+      live_generation->store(4u);
+    }
+  });
+  P0RiskGridRuntime runtime(node, enabledConfig(), std::move(provider));
+  runtime.setOccupancyEpochFactory([live_generation]() {
+    return makeOccupancyEpochCapture(live_generation, 2u, 100.0, "map");
+  });
+  seedValidInputs(&runtime, 100.0, 100.0);
+
+  ASSERT_TRUE(refreshOnce(&runtime));
+  const auto accepted = runtime.acquireSnapshot();
+  ASSERT_NE(accepted, nullptr);
+  mutate.store(true);
+  EXPECT_FALSE(refreshOnce(&runtime));
+  EXPECT_EQ(runtime.health().reason, "occupancy_generation_changed");
+  const auto retained = runtime.acquireSnapshot();
+  EXPECT_EQ(retained->generation_id(), accepted->generation_id());
+  expectSameActiveGeneration(accepted, retained);
+}
+
+TEST_F(P0RiskGridRuntimeStampTest,
+       PriorGenerationChangeDuringProviderBatchKeepsPreviousGeneration) {
+  ensure_rclcpp();
+  auto node = std::make_shared<rclcpp::Node>(
+      "p0_prior_generation_race_test",
+      rclcpp::NodeOptions().allow_undeclared_parameters(false));
+  std::atomic<bool> mutate{false};
+  P0RiskGridRuntime* runtime_ptr = nullptr;
+  auto provider = std::make_unique<CallbackProvider>([&]() {
+    if (mutate.load()) {
+      advancePriorGeneration(runtime_ptr);
+    }
+  });
+  P0RiskGridRuntime runtime(node, enabledConfig(), std::move(provider));
+  runtime_ptr = &runtime;
+  installOccupancyEpoch(&runtime, 100.0);
+  seedValidInputs(&runtime, 100.0, 100.0);
+
+  ASSERT_TRUE(refreshOnce(&runtime));
+  const auto accepted = runtime.acquireSnapshot();
+  ASSERT_NE(accepted, nullptr);
+  mutate.store(true);
+  EXPECT_FALSE(refreshOnce(&runtime));
+  EXPECT_EQ(runtime.health().reason, "prior_generation_changed");
+  const auto retained = runtime.acquireSnapshot();
+  EXPECT_EQ(retained->generation_id(), accepted->generation_id());
+  expectSameActiveGeneration(accepted, retained);
+}
+
+TEST_F(P0RiskGridRuntimeStampTest,
+       MissingStaleOrWrongFrameOccupancyEpochKeepsPreviousGeneration) {
+  ensure_rclcpp();
+  auto node = std::make_shared<rclcpp::Node>(
+      "p0_invalid_occupancy_epoch_retention_test",
+      rclcpp::NodeOptions().allow_undeclared_parameters(false));
+  auto config = enabledConfig();
+  config.grid.stale_timeout_s = 0.5;
+  P0RiskGridRuntime runtime(node, config, std::make_unique<FakeProvider>());
+  seedValidInputs(&runtime, 100.0, 100.0);
+  installOccupancyEpoch(&runtime, 100.0);
+  ASSERT_TRUE(refreshOnce(&runtime));
+  const auto accepted = runtime.acquireSnapshot();
+  ASSERT_NE(accepted, nullptr);
+
+  runtime.setOccupancyEpochFactory([]() {
+    return P0OccupancyEpochCapture{
+        P0OccupancyEpochCaptureStatus::SNAPSHOT_UNAVAILABLE, std::nullopt};
+  });
+  EXPECT_FALSE(refreshOnce(&runtime));
+  EXPECT_EQ(runtime.health().reason, "occupancy_snapshot_unavailable");
+  expectSameActiveGeneration(accepted, runtime.acquireSnapshot());
+
+  installOccupancyEpoch(&runtime, 99.0);
+  EXPECT_FALSE(refreshOnce(&runtime));
+  EXPECT_EQ(runtime.health().reason, "occupancy_stale");
+  expectSameActiveGeneration(accepted, runtime.acquireSnapshot());
+
+  installOccupancyEpoch(&runtime, 100.0, {}, "odom");
+  EXPECT_FALSE(refreshOnce(&runtime));
+  EXPECT_EQ(runtime.health().reason, "occupancy_frame_mismatch");
+  expectSameActiveGeneration(accepted, runtime.acquireSnapshot());
+}
+
+TEST_F(P0RiskGridRuntimeStampTest,
+       MissingStaleOrInvalidGrowthPriorKeepsPreviousGeneration) {
+  ensure_rclcpp();
+  auto node = std::make_shared<rclcpp::Node>(
+      "p0_invalid_growth_prior_retention_test",
+      rclcpp::NodeOptions().allow_undeclared_parameters(false));
+  auto config = enabledConfig();
+  config.grid.stale_timeout_s = 0.5;
+  config.predictor_source_mode = iap::PredictorSourceMode::GnssOnly;
+  config.predictor_gnss_epoch_policy =
+      iap::PredictorGnssEpochPolicy::Required;
+  P0RiskGridRuntime runtime(node, config);
+  seedValidInputs(&runtime, 100.0, 100.0);
+  seedGnssEpoch(&runtime, 100.0);
+  installOccupancyEpoch(&runtime, 100.0);
+  ASSERT_TRUE(refreshOnce(&runtime));
+  const auto accepted = runtime.acquireSnapshot();
+  ASSERT_NE(accepted, nullptr);
+
+  setPriorGeneration(&runtime, 0u);
+  EXPECT_FALSE(refreshOnce(&runtime));
+  EXPECT_EQ(runtime.health().reason, "missing_covariance_growth_prior");
+  expectSameActiveGeneration(accepted, runtime.acquireSnapshot());
+
+  setPriorGeneration(&runtime, 1u);
+  seedValidInputs(&runtime, 100.0, 99.0);
+  EXPECT_FALSE(refreshOnce(&runtime));
+  EXPECT_EQ(runtime.health().reason, "stale_covariance_growth_prior");
+  expectSameActiveGeneration(accepted, runtime.acquireSnapshot());
+
+  seedValidInputs(&runtime, 100.0, 100.0);
+  setCurrentProtectionLevels(&runtime, 0.0, 1.0);
+  EXPECT_FALSE(refreshOnce(&runtime));
+  EXPECT_EQ(runtime.health().reason, "invalid_covariance_growth_prior");
+  expectSameActiveGeneration(accepted, runtime.acquireSnapshot());
+}
+
+TEST_F(P0RiskGridRuntimeStampTest,
+       MapLosAndGrowthWorkersOneTwoFourAreScientificallyEquivalent) {
+  ensure_rclcpp();
+  const std::vector<int> worker_counts = {1, 2, 4};
+  std::vector<std::shared_ptr<const iap::RiskGridSnapshot>> snapshots;
+  std::vector<iap::RiskGridHealth> health_states;
+  for (const int worker_count : worker_counts) {
+    auto node = std::make_shared<rclcpp::Node>(
+        "p0_worker_equivalence_" + std::to_string(worker_count),
+        rclcpp::NodeOptions().allow_undeclared_parameters(false));
+    auto config = enabledConfig();
+    config.grid.skip_occupied_voxels = false;
+    config.predictor_source_mode = iap::PredictorSourceMode::GnssOnly;
+    config.predictor_gnss_epoch_policy =
+        iap::PredictorGnssEpochPolicy::Required;
+    config.predictor_requested_worker_count = worker_count;
+    config.predictor_effective_worker_count = worker_count;
+    P0RiskGridRuntime runtime(node, config);
+    seedValidInputs(&runtime, 100.0, 100.0);
+    seedGnssEpoch(&runtime, 100.0);
+    installOccupancyEpoch(&runtime, 100.0,
+                          {Eigen::Vector3d(0.0, 0.0, 0.0)});
+
+    ASSERT_TRUE(refreshOnce(&runtime));
+    snapshots.push_back(runtime.acquireSnapshot());
+    health_states.push_back(runtime.health());
+  }
+
+  ASSERT_EQ(snapshots.size(), 3u);
+  expectSnapshotsScientificallyEquivalent(snapshots[0], snapshots[1]);
+  expectSnapshotsScientificallyEquivalent(snapshots[0], snapshots[2]);
+  for (std::size_t index = 1; index < health_states.size(); ++index) {
+    EXPECT_EQ(health_states[index].provider_query_count,
+              health_states[0].provider_query_count);
+    EXPECT_EQ(health_states[index].predictor_gnss_used_count,
+              health_states[0].predictor_gnss_used_count);
+    EXPECT_EQ(health_states[index].predictor_lidar_used_count,
+              health_states[0].predictor_lidar_used_count);
+    EXPECT_EQ(health_states[index].predictor_prior_used_count,
+              health_states[0].predictor_prior_used_count);
+  }
 }
 
 }  // namespace ego_planner

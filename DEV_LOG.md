@@ -627,3 +627,159 @@ Disposition: `IMPLEMENTATION_READY_FOR_ICRA009_REVIEW`. ICRA-008 is complete
 and returned to SUPERVISOR review. This handoff does not authorize ICRA-009 or
 change GATE_0B; production `sigma_grow_m_sqrt_s` remains fail closed pending
 explicit scientific provenance and configuration authority.
+## 2026-08-21T07:18:41Z — ICRA-009 START
+
+Start HEAD: `e67906df71444d0fb576c6dcaca02883108b4424`.
+
+Task: `ICRA-009 / GATE_0B`, P0 phase-1 semantic implementation only: bind one
+versioned immutable planner occupancy epoch to production GNSS map-LOS, validate
+occupancy and integrity-prior generations at refresh start/end, and implement
+empirical horizon covariance growth behind the existing Predictor query
+Interface with whole-batch fail-closed behavior. No main flow, smoke,
+qualification, GPU preflight, performance work, rolling reuse, production
+calibration, P1/P2/P3/P4/P5 work or Gate decision is authorized.
+
+Exact allowed files:
+
+- `src/iap/planner/plan_env/include/plan_env/grid_map.h`
+- `src/iap/planner/plan_env/src/grid_map.cpp`
+- `include/iap/map/local_occupancy.hpp`
+- `src/iap/map/local_occupancy.cpp`
+- `include/iap/planner/integrity_snapshot.hpp`
+- `include/iap/predictor/predictor_types.hpp`
+- `src/iap/predictor/predictor_module.cpp`
+- `include/iap/planner/risk_grid_map.hpp`
+- `src/iap/planner/risk_grid_map.cpp`
+- `src/iap/planner/plan_manage/include/ego_planner/p0_risk_grid_runtime.h`
+- `src/iap/planner/plan_manage/include/ego_planner/p0_occupancy_epoch_adapter.h`
+- `src/iap/planner/plan_manage/src/p0_risk_grid_runtime.cpp`
+- `src/iap/planner/plan_manage/src/p0_occupancy_epoch_adapter.cpp`
+- `src/iap/planner/plan_manage/src/planner_manager.cpp`
+- `test/test_local_occupancy.cpp`
+- `test/test_predictor_module.cpp`
+- `test/test_risk_grid_map.cpp`
+- `src/iap/planner/plan_env/test/test_grid_map_occupancy_epoch.cpp`
+- `src/iap/planner/plan_env/CMakeLists.txt`
+- `src/iap/planner/plan_env/package.xml`
+- `src/iap/planner/plan_manage/CMakeLists.txt`
+- `src/iap/planner/plan_manage/test/test_p0_occupancy_epoch_adapter.cpp`
+- `src/iap/planner/plan_manage/test/test_p0_risk_grid_runtime.cpp`
+- `DEV_LOG.md`
+- `docs/CHANGES.md`
+- `docs/TRACEABILITY.md`
+
+Pre-existing untracked file preserved and excluded from all task operations:
+`docs/icra27/dev/ICRA_SYSTEM_FLOW.pdf`, SHA-256
+`1f07da5631a6551a2f98c02d46fd45bc87f2f1e3e7c14e95f9a7f4a0bac844f6`.
+
+## 2026-08-21T08:06:24Z — ICRA-009 IMPLEMENTATION COMPLETE / REVIEW PENDING
+
+Implemented only the frozen P0 phase-1 semantic seams:
+
+- `GridMap::captureFrozenOccupancyEpoch()` freezes raw-cloud and fused-depth
+  occupancy, diagnostics, lattice origin, resolution, frame, cloud stamp and
+  one even nonzero generation. Inflated-only cells remain diagnostics and do
+  not enter the GNSS LOS centre set.
+- The sole `P0OccupancyEpochAdapter` materializes one exact-capacity,
+  eviction-disabled `LocalOccupancyGrid`, preserving the captured lattice and
+  rejecting invalid metadata, duplicate-key/count collapse, incomplete
+  insertion and nonrepresentable capacity. A valid empty set remains open sky.
+- Production P0 owns that immutable LOS grid for the full Predictor provider
+  lifetime and binds it before worker copies. Occupancy and current-integrity
+  prior generations are validated before provider work and immediately before
+  atomic risk-grid publication; failures keep the previous generation/data.
+- Positive horizons apply the empirical prior covariance rule
+  `Sigma(tau)=Sigma(0)+sigma_grow^2*tau*I3` with typed status and whole-batch
+  fail-closed behavior. Tau zero exactly bypasses propagation. The runtime
+  parameter defaults to invalid `NaN`; no launch/config preset or production
+  calibration was selected.
+
+Exact new domain reasons are `occupancy_snapshot_unavailable`,
+`occupancy_los_adapter_invalid`, `occupancy_frame_mismatch`,
+`occupancy_stale`, `occupancy_generation_changed`,
+`prior_generation_changed`, `invalid_covariance_growth_parameter`,
+`missing_covariance_growth_prior`, `stale_covariance_growth_prior` and
+`invalid_covariance_growth_prior`.
+
+TDD record:
+
+- nonzero lattice-origin test first failed compilation with absent
+  `Params::lattice_origin` (exit 2), then passed 1/1;
+- tau-zero growth test first failed compilation with absent growth types
+  (exit 2), positive-growth behavior then failed before propagation (exit 1),
+  and the final six-test growth/GNSS/batch focus passed 6/6;
+- source-validator tests first failed compilation with the absent overload
+  (exit 2), then passed 4/4 after correcting the test to compare immutable
+  generation/data;
+- frozen `GridMap` epoch and sole Adapter tests first failed compilation with
+  absent Interfaces/sources, then passed 2/2 and 3/3;
+- runtime exact-name tests initially exposed a semantic-failure self-deadlock
+  and two reason/fixture assertions; the timestamp read moved outside the
+  health mutex and the final exact six-test focus passed 6/6.
+
+All build/test/ROS/temp output is repository-local:
+
+- root build: `results/icra27/icra009/build_root`;
+- plan_env build/install facade: `results/icra27/icra009/{build_plan_env,install_plan_env}`;
+- plan_manage build: `results/icra27/icra009/build_plan_manage`;
+- ROS/temp: `results/icra27/icra009/{ros_home,ros_log,tmp}`;
+- Predictor artifacts: `results/icra27/icra009/test_artifacts/predictor`;
+- stdout/stderr logs: `results/icra27/icra009/logs/final_*.log`.
+
+Final verification commands and exits follow. Each pipeline was run under
+`set -o pipefail`; the recorded exit is `${PIPESTATUS[0]}`, so `tee` cannot
+mask a build or test failure.
+
+| Command | Exit | Result / stdout+stderr |
+|---|---:|---|
+| `cmake --build results/icra27/icra009/build_root --target iap test_local_occupancy test_predictor_module test_risk_grid_map -j2 2>&1 \| tee results/icra27/icra009/logs/final_build_root.log` | 0 | All four targets built; complete stdout/stderr in the named log. |
+| `cmake --build results/icra27/icra009/build_plan_env --target plan_env test_grid_map_occupancy_epoch -j2 2>&1 \| tee results/icra27/icra009/logs/final_build_plan_env.log` | 0 | Both targets built; complete stdout/stderr in the named log. |
+| `cmake --build results/icra27/icra009/build_plan_manage --target ego_planner_node test_p0_occupancy_epoch_adapter test_p0_risk_grid_runtime -j2 2>&1 \| tee results/icra27/icra009/logs/final_build_plan_manage.log` | 0 | Affected planner executable and both tests linked; complete stdout/stderr in the named log. The executable was not started. |
+| `LD_LIBRARY_PATH="$PWD/results/icra27/icra009/build_root:$PWD/results/icra27/icra009/install_root/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" results/icra27/icra009/build_root/test_local_occupancy 2>&1 \| tee results/icra27/icra009/logs/final_test_local_occupancy.log` | 0 | 6/6 PASS; complete stdout/stderr in the named log. |
+| `IAP_TEST_ARTIFACT_DIR="$PWD/results/icra27/icra009/test_artifacts/predictor" LD_LIBRARY_PATH="$PWD/results/icra27/icra009/build_root:$PWD/results/icra27/icra009/install_root/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" results/icra27/icra009/build_root/test_predictor_module 2>&1 \| tee results/icra27/icra009/logs/final_test_predictor_module.log` | 0 | 40/40 PASS; complete stdout/stderr in the named log. |
+| `LD_LIBRARY_PATH="$PWD/results/icra27/icra009/build_root:$PWD/results/icra27/icra009/install_root/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" results/icra27/icra009/build_root/test_risk_grid_map 2>&1 \| tee results/icra27/icra009/logs/final_test_risk_grid_map.log` | 0 | 35/35 PASS; complete stdout/stderr in the named log. |
+| `ROS_HOME="$PWD/results/icra27/icra009/ros_home" ROS_LOG_DIR="$PWD/results/icra27/icra009/ros_log" TMPDIR="$PWD/results/icra27/icra009/tmp" LD_LIBRARY_PATH="$PWD/results/icra27/icra009/build_plan_env:$PWD/results/icra27/icra009/install_plan_env/lib:$PWD/results/icra27/icra009/build_root:$PWD/results/icra27/icra009/install_root/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" results/icra27/icra009/build_plan_env/test_grid_map_occupancy_epoch 2>&1 \| tee results/icra27/icra009/logs/final_test_grid_map_occupancy_epoch.log` | 0 | 2/2 PASS; complete stdout/stderr in the named log. |
+| `ROS_HOME="$PWD/results/icra27/icra009/ros_home" ROS_LOG_DIR="$PWD/results/icra27/icra009/ros_log" TMPDIR="$PWD/results/icra27/icra009/tmp" LD_LIBRARY_PATH="$PWD/results/icra27/icra009/build_plan_manage:$PWD/results/icra27/icra009/build_plan_env:$PWD/results/icra27/icra009/install_plan_env/lib:$PWD/results/icra27/icra009/build_root:$PWD/results/icra27/icra009/install_root/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" results/icra27/icra009/build_plan_manage/test_p0_occupancy_epoch_adapter 2>&1 \| tee results/icra27/icra009/logs/final_test_p0_occupancy_epoch_adapter.log` | 0 | 3/3 PASS; complete stdout/stderr in the named log. |
+| `ROS_HOME="$PWD/results/icra27/icra009/ros_home" ROS_LOG_DIR="$PWD/results/icra27/icra009/ros_log" TMPDIR="$PWD/results/icra27/icra009/tmp" LD_LIBRARY_PATH="$PWD/results/icra27/icra009/build_plan_manage:$PWD/results/icra27/icra009/build_plan_env:$PWD/results/icra27/icra009/install_plan_env/lib:$PWD/results/icra27/icra009/build_root:$PWD/results/icra27/icra009/install_root/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" results/icra27/icra009/build_plan_manage/test_p0_risk_grid_runtime 2>&1 \| tee results/icra27/icra009/logs/final_test_p0_risk_grid_runtime.log` | 0 | 46/46 PASS; complete stdout/stderr in the named log. |
+
+Total affected focused suites: **132/132 PASS**. One earlier unbound
+`test_local_occupancy` invocation resolved the stale workspace-installed
+`libiap.so` despite the local executable RUNPATH and exited 139 after an ABI
+mismatch. `ldd` identified the wrong library; the required explicit local
+`LD_LIBRARY_PATH` produced the authoritative 6/6 result above. No source defect
+or external output was attributed to that incoherent invocation.
+
+No main flow, ROS launch, smoke, qualification, bag, RViz, campaign, offline
+profile, benchmark, GPU preflight, rolling/delta/reuse work, production
+calibration or P1/P2/P3/P4/P5 behavior was run or changed. Gate-0B is not
+marked PASS. Two-axis Standards/Spec review and the required implementation
+commit/push plus final DEV_LOG-only handoff commit remain pending.
+
+## 2026-08-21T08:25:12Z — ICRA-009 TWO-AXIS REVIEW CLOSURE / PRE-PUSH
+
+The required fixed-point review used start commit
+`e67906df71444d0fb576c6dcaca02883108b4424` and closed with **Standards PASS**
+and **Spec PASS**. Review-driven corrections reject materially asymmetric
+growth priors, keep numerical failure typed as `NUMERICAL_FAILURE` while
+exposing only the authorized `invalid_covariance_growth_prior` reason, prove
+shared active-generation identity on every named failure-after-success path,
+and record complete reproducible commands without environment shorthand.
+The three advisory code-smell observations (large refresh orchestration,
+Adapter field cluster and legacy reason conversion) were not hard findings and
+were not expanded into an out-of-scope refactor.
+
+A final allowed-file audit found the implementation commit had assigned the
+new prior generation inside unlisted `src/iap/planner/integrity_snapshot.cpp`.
+That hunk was fully reversed so the file has no aggregate diff from the start
+commit; the authorized P0 runtime now assigns the generation immediately after
+snapshot construction when the prior exists. The post-correction aggregate
+diff contains only the 26 files explicitly authorized by `NEXT_TASK.md`.
+Affected targets rebuilt successfully, root tests passed 6/6, 40/40 and 35/35,
+and the corrected P0 runtime passed 46/46. The complete six-suite result remains
+132/132 PASS. `git diff --check` is clean. No task process remains. The PDF is
+still untracked and its SHA-256 remains
+`1f07da5631a6551a2f98c02d46fd45bc87f2f1e3e7c14e95f9a7f4a0bac844f6`.
+
+Implementation amend/push and the required final DEV_LOG-only handoff commit
+remain pending. This review closure does not mark Gate-0B PASS or authorize any
+runtime qualification, smoke, production calibration or next task.
