@@ -783,3 +783,29 @@ still untracked and its SHA-256 remains
 Implementation amend/push and the required final DEV_LOG-only handoff commit
 remain pending. This review closure does not mark Gate-0B PASS or authorize any
 runtime qualification, smoke, production calibration or next task.
+
+## 2026-08-21T08:26:14Z — ICRA-009 IMPLEMENTATION PUSHED / SUPERVISOR HANDOFF
+
+Implementation commit:
+`172556c0583fd12c9ffc193a48da6cb0bff3375b` (`feat(ICRA-009): implement P0
+phase-1 semantics [IAP-RQ-312] [IAP-RQ-314] [IAP-RQ-320] [IAP-RQ-321]
+[IAP-RQ-322]`). `git push origin dev/icra` exited 0 and advanced the remote
+from `e67906d` to `172556c`; the immediate post-push
+`git rev-list --left-right --count HEAD...origin/dev/icra` result was `0 0`.
+
+Final handoff evidence:
+
+- Standards review: PASS; Spec review: PASS, including the post-correction
+  allowed-file audit.
+- Final repository-local focused suites: 6/6 local occupancy, 40/40 Predictor,
+  35/35 risk grid, 2/2 frozen occupancy epoch, 3/3 Adapter and 46/46 P0 runtime,
+  for 132/132 PASS. Exact commands, paths, logs and exits are recorded above.
+- No IAP main flow, ROS launch, smoke, qualification, bag, RViz, campaign,
+  offline performance profile, benchmark or GPU preflight ran. No production
+  growth value was selected and no P1/P2/P3/P4/P5 behavior changed.
+- No task process remained at handoff. The preserved PDF remains untracked and
+  unchanged at SHA-256
+  `1f07da5631a6551a2f98c02d46fd45bc87f2f1e3e7c14e95f9a7f4a0bac844f6`.
+
+Control returns to `SUPERVISOR` review only. `DEEPSEEK` does not mark Gate-0B
+PASS, authorize runtime qualification or issue a next task.
