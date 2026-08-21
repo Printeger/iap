@@ -1,5 +1,78 @@
 # ICRA Supervisor Log
 
+## 2026-08-21 — ICRA-014 review and ICRA-015 narrow repair authorization
+
+### Review identity and independent verification
+
+- Fixed review base: `597f3b79a098842589b340e1919234c4182cee9d`.
+- Reviewed HEAD: `363be82694797c3a499c1e26dd08ed7100e76aa0`.
+- Reviewed commits: `8b0c594` and `363be82`; the implementation commit carries all applicable
+  requirement IDs. `dev/icra` matched `origin/dev/icra` at divergence `0 0`.
+- The aggregate diff contains exactly the fifteen ICRA-014 allowlisted files and passes
+  `git diff --check`. The protected PDF remains the sole untracked file at SHA-256
+  `1f07da5631a6551a2f98c02d46fd45bc87f2f1e3e7c14e95f9a7f4a0bac844f6`.
+- Supervisor independently rebuilt the current root rolling/Predictor/RiskGrid/occupancy/snapshot/
+  conversion targets, the complete P0/Adapter/P1/P2/P3/P5 consumer set and P4 A*. The fifteen
+  authorized GTest suites pass 263/263 executed tests; the retained ICRA-011 profile passes 2/2.
+  An initial planning-context invocation loaded the workspace's stale `plan_env` and failed at the
+  dynamic loader before tests; adding the prescribed ICRA-014 `build_plan_env` path made the full
+  26/26 suite pass. This was an environment-path error, not a product assertion failure.
+- Seven linked planner consumers resolve the current repository-local
+  `results/icra27/icra014/build_iap/libiap.so`, SHA-256
+  `bca1648834fffe32a6d88adcb8fd88890bfddeb54ef10dee9cc2b9c4f7663977`.
+- The canonical ICRA-014 diagnostic remains read-only at SHA-256
+  `44f47b23137d17f4b0cbc81af6827156865bdecb36089bf53f770960a2fb963d`; the retained ICRA-011
+  JSON remains `778abd22158805c41150b4eeed9c37a3f660237a0bb0599e9a567e3533c7b32c`.
+  No main flow, ROS launch, smoke, qualification, benchmark, analyzer or GPU preflight ran.
+
+### Standards axis
+
+- **FAIL: one adjudicated hard finding; one design judgement retained.** The ICRA-014
+  `docs/CHANGES.md` entry contains result prose but no executable rolling/P0/canonical-read-only
+  reproduction command. `AGENTS.md` requires a command in CHANGES or README; `DEV_LOG.md` does not
+  substitute for that location.
+- The Standards reviewer also classified public `beginRefresh/commitRefresh/abortRefresh` as a hard
+  Interface leak. Supervisor does not adopt that classification: `NEXT_TASK.md` expressly allowed
+  the new rolling header and a PIMPL/friend/internal session Seam, the protocol was not added to
+  `RiskPredictionProvider` or fake providers, and P4/P5 still see only `RiskGridMap`/immutable
+  snapshot. The explicit transaction remains a non-blocking design judgement; ICRA-015 must not
+  widen it further.
+- Repeated shared-owner equality helpers are a minor duplication judgement, not justification for a
+  repair-scope abstraction. Standards count after adjudication: one hard finding and two
+  non-blocking judgements. Worst Standards issue: missing reproduction commands.
+
+### Spec axis
+
+- **FAIL: one P0 and one P1 finding.** The accepted core is substantial: fixed-capacity dense ring,
+  signed world-key validation, transactional candidate rollback, exact first/stationary/`+1 x`
+  `12800/0/320` spatial recomputes, `0/12800/12480` retained positions and 76,800 horizon fusion/
+  materializations. Fresh-full scientific equivalence, worker determinism and retained suites pass.
+- **P0:** spatial identity is compared unconditionally across disabled sources. GNSS epoch/occupancy
+  affect `LidarOnly`; LiDAR owners/current affect `GnssOnly`; and `current.stamp/valid`, which belong
+  to per-horizon freshness/validation, affect Fusion spatial identity. The current tests change only
+  the prior while holding these values fixed, so they do not expose that normal production updates
+  conservatively erase the intended ring reuse.
+- **P1:** a slot retained from a previous refresh increments legacy `lidar_cache_hits` for all
+  horizons while `unique_positions/lidar_evaluations` stay zero. That silently changes the frozen
+  phase-2 call-local populated-cache contract from `1/1/(H-1)` or `0/0/0` to `0/0/H`; additive
+  rolling counters, not legacy fields, must represent cross-refresh reuse.
+- Spec count: two findings. Worst Spec issue: the P0 identity projection defect defeats the central
+  production optimization under irrelevant or freshness-only source changes.
+
+### Disposition and next task
+
+- Verdict: `ICRA014_REQUEST_CHANGES`. Phase 3B, phase 3 and Gate-0B remain open. P4 remains
+  `NOT_QUALIFIED`; P5 remains implemented but unqualified.
+- Unique task: `ICRA-015 / GATE_0B` in `NEXT_TASK.md`.
+- ICRA-015 is a narrow review repair. It projects GNSS/LiDAR cache identity by active source mode and
+  fields actually consumed by spatial science, keeps `current.stamp/valid` in per-horizon validation,
+  restores truthful phase-2 legacy LiDAR diagnostic semantics and adds the missing executable
+  reproduction commands. It must preserve the accepted ring, transaction, movement counts,
+  full-horizon work and scientific equivalence.
+- Phase-4 versions/TTL/occupancy delta/watchdog, CPU calibration/scaling, main-flow smoke,
+  qualification, GPU work and P1-P5 changes remain forbidden. Phase 4 may be authorized only after a
+  separate Supervisor review closes ICRA-015.
+
 ## 2026-08-21 — ICRA-013 review, phase-3A closure and ICRA-014 phase-3B authorization
 
 ### Review identity and independent verification
