@@ -1109,3 +1109,40 @@ findings after the documentation-only repair. `git diff --check` remains
 clean. This review does not mark ICRA-011 or Gate-0B PASS, select production
 calibration, authorize phase 3/main flow/smoke/qualification, or issue a next
 task. Implementation amend, push and final Supervisor handoff remain.
+
+## 2026-08-21T10:41:28Z — ICRA-011 IMPLEMENTATION PUSHED / SUPERVISOR HANDOFF
+
+Implementation commit:
+`7be95f04c1aaef21e7af110f43d2755929de167b` (`feat(ICRA-011):
+deduplicate spatial advisories within refresh [IAP-RQ-312] [IAP-RQ-314]
+[IAP-RQ-320] [IAP-RQ-321] [IAP-RQ-322]`). `git push origin dev/icra`
+exited 0 and advanced the remote from `c865c74` to `7be95f0`; the immediate
+post-push `git rev-list --left-right --count HEAD...origin/dev/icra` was
+`0 0`.
+
+Final handoff evidence:
+
+- Standards review: PASS, 0 hard findings and one documented non-blocking
+  explicit-mapping judgement. Spec review: PASS after its sole documentation
+  finding was closed by recording and rerunning the exact 2/2 Predictor and
+  1/1 production-runtime commands.
+- Six retained suites pass 6/6, 43/43, 35/35, 2/2, 3/3 and 48/48, for
+  **137/137**. The fail-closed Python profile contract passes 2/2.
+- The committed diagnostic SHA-256 is
+  `778abd22158805c41150b4eeed9c37a3f660237a0bb0599e9a567e3533c7b32c`;
+  canonical `76800/12800/64000` counts, scalar equivalence and workers 1/2/4
+  stability are exact. All latency values remain
+  `COST_RANKING_DIAGNOSTIC`; Gate qualification is `NOT_RUN` and production
+  calibration is unset.
+- No task process remains. No main flow, ROS launch, smoke, qualification,
+  bag, RViz, campaign, Gate analyzer, benchmark, GPU preflight, phase-3
+  lattice/ring/cross-refresh work, worker/default/scheduler change,
+  production calibration or P1/P2/P3/P4/P5 work ran or changed.
+- `docs/icra27/dev/ICRA_SYSTEM_FLOW.pdf` remains solely untracked and
+  unchanged at SHA-256
+  `1f07da5631a6551a2f98c02d46fd45bc87f2f1e3e7c14e95f9a7f4a0bac844f6`.
+
+This final DEV_LOG-only commit returns control to `SUPERVISOR` review.
+`DEEPSEEK` does not mark ICRA-011 or Gate-0B PASS, start phase 3, change
+worker defaults, choose production calibration, authorize smoke or issue a
+next task.
