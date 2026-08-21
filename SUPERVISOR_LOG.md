@@ -1,5 +1,64 @@
 # ICRA Supervisor Log
 
+## 2026-08-21 — ICRA-012 review, phase-2 closure and ICRA-013 phase-3A authorization
+
+### Review identity and independent verification
+
+- Fixed review base: `3fc24b98f8227dc4764a7daa8fb09ce9cb34876e`.
+- Reviewed HEAD: `f9e5c68a1f01738c7c93d6e81b482783e5f8c5ec`.
+- Reviewed commits: `4deb136` and `f9e5c68`; both carry applicable requirement IDs.
+  `dev/icra` matched `origin/dev/icra` at divergence `0 0`.
+- The aggregate diff contains exactly the six ICRA-012 allowlisted files and passes
+  `git diff --check`. The only untracked file remains
+  `docs/icra27/dev/ICRA_SYSTEM_FLOW.pdf`, unchanged at SHA-256
+  `1f07da5631a6551a2f98c02d46fd45bc87f2f1e3e7c14e95f9a7f4a0bac844f6`.
+- Supervisor rebuilt the affected root, plan-env and plan-manage targets. Runtime linkage with the
+  prescribed environment resolves product code to the current ICRA-012 `libiap.so`; only retained
+  generated ROS typesupport comes from the repository-local ICRA-009 facade.
+- The five exact Predictor regressions passed 5/5, the three exact production runtime regressions
+  passed 3/3, and the Python profile contract passed 2/2.
+- All six retained suites passed 6/6, 45/45, 35/35, 2/2, 3/3 and 48/48, for **139/139**.
+  The retained ICRA-011 profile JSON remains byte-identical at SHA-256
+  `778abd22158805c41150b4eeed9c37a3f660237a0bb0599e9a567e3533c7b32c`.
+  No main flow, ROS launch, smoke, qualification, benchmark, analyzer or GPU preflight ran.
+
+### Standards axis
+
+- **PASS, zero findings.** File ownership/scope, exact allowlist, applicable requirement IDs,
+  synchronized `CHANGES`/`TRACEABILITY`/`DEV_LOG`, repository-local verification and handoff conform.
+- The ICRA-011 `docs/CHANGES.md` entry now contains executable Predictor, production runtime,
+  offline-profile and Python evidence-contract commands in the required location.
+- No reportable judgement smell was introduced by the bounded counter repair. Worst Standards
+  issue: none.
+
+### Spec axis
+
+- **PASS, zero findings.** GNSS-only six-horizon work reports generalized spatial `1/5`, actual
+  GNSS/LiDAR/fusion `1/0/6`, legacy LiDAR `0/0/0`, and scalar-equivalent ordered results.
+- LidarOnly preserves generalized `1/5` and legacy `1/1/5`; Fusion retains the accepted two-position
+  legacy shape. Non-cacheable LiDAR increments actual invocation without fabricating a populated
+  legacy cache. Valid-then-early-invalid distinguishes lookup hit from actual reuse, and invalid-first
+  does not poison the cache.
+- Production workers 1/2/4 assert zero GNSS-only legacy counters while preserving nonzero and
+  scientifically identical generalized spatial/GNSS/fusion counts.
+- The private call-local `SpatialAdvisory`, coherent key, per-horizon covariance growth/fusion,
+  failure retention, public Interfaces and canonical profile evidence remain unchanged. No phase-3,
+  calibration, GPU or P1-P5 expansion entered the changeset. Worst Spec issue: none.
+
+### Disposition and next task
+
+- Verdict: `ICRA012_PASS_PHASE2_CLOSED`. The two ICRA-011 findings are closed and P0 phase 2 is
+  accepted. This is an implementation-stage verdict, not Gate-0B qualification; P4 remains
+  `NOT_QUALIFIED` and P5 remains implemented but unqualified.
+- Unique task: `ICRA-013 / GATE_0B` in `NEXT_TASK.md`.
+- ICRA-013 is phase 3A: deepen the existing `RiskGridMap` Module with a fixed world-aligned lattice,
+  deterministic integer world keys and atomic geometry-plus-generation publication. The existing
+  `refreshFromProvider()`/immutable `RiskGridSnapshot` Interface remains the consumer Seam.
+- This slice deliberately retains full provider evaluation. Dense ring storage, entering-slab-only
+  spatial work and cross-refresh evidence reuse require a separately reviewed cache-validity Seam;
+  they must not be approximated by caching complete time-dependent `HorizonRisk` results.
+- Calibration, main-flow smoke, qualification, worker/default tuning, GPU and P4 remain forbidden.
+
 ## 2026-08-21 — ICRA-011 review and ICRA-012 narrow repair authorization
 
 ### Review identity and independent verification
