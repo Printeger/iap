@@ -177,3 +177,71 @@ Allowed files:
 ### Git
 Start HEAD: 7950b47bd09f8bce6752b762466b50153651ebf9
 End HEAD: cfb7579a83cfaa0255f152ad635970f7be04e33b
+
+## 2026-08-21T03:18:00Z — ICRA-004 START
+
+Branch: dev/icra
+
+Start HEAD: 73cbdddd0f44165f61138dcd74c61ab8dd96ebae
+
+Task/Gate: ICRA-004 / GATE_0B
+Requirement: IAP-RQ-320 only
+
+Scope executed:
+1. Add deterministic `nvidia-smi` plus CUDA Driver API preflight and a preflight-only mode.
+2. Fail before capture/ROS/launch on any GPU preflight failure.
+3. Add capture subscription readiness and verify actual topic/QoS compatibility.
+4. Separate the fixed 20/15-second smoke analyzer contract from the unchanged 60/55-second benchmark contract.
+5. Run focused/package tests, then one and only one authorized 20-second P0 smoke.
+
+Preserved pre-existing worktree item: untracked `docs/icra27/dev/ICRA_SYSTEM_FLOW.pdf`; not modified, staged, deleted or regenerated.
+
+## 2026-08-21T03:20:28Z — ICRA-004 GPU PREFLIGHT AND ONE-SHOT SMOKE
+
+### GPU preflight
+
+| Item | Result |
+|---|---|
+| Evidence | `results/icra27/icra004/runs/gpu_preflight.json` |
+| `nvidia-smi -L` | exit 0; `NVIDIA GeForce RTX 4070 Ti SUPER`; UUID `GPU-18669b5b-29eb-0bdc-00c2-65c35b8e1af9` |
+| Structured `nvidia-smi` query | exit 0; driver `580.126.09` |
+| `libcuda.so.1` | loaded |
+| `cuInit(0)` | 0 |
+| `cuDeviceGetCount` | 0; `device_count=1` |
+| Result | `GPU_READY` / PASS |
+
+### Verification before smoke
+
+| Command | Exit code | Result / evidence |
+|---|---:|---|
+| `python3 -m py_compile scripts/dev_planner/run_gate0_qualification.py scripts/dev_planner/gate0_analyzer.py scripts/dev_planner/gate0_capture_p0_health.py test/test_gate0_runner.py test/test_gate0_analyzer.py test/test_gate0_capture_p0_health.py` | 0 | PASS |
+| `python3 -m unittest discover -s test -p 'test_gate0_runner.py' -v` | 0 | PASS 15 tests |
+| `python3 -m unittest discover -s test -p 'test_gate0_analyzer.py' -v` | 0 | PASS 13 tests |
+| `python3 -m unittest discover -s test -p 'test_gate0_capture_p0_health.py' -v` | 0 | PASS 1 test |
+| repository-local `colcon build --packages-select iap` | 0 | PASS; `results/icra27/icra004/{build_iap,install_iap,log}` |
+| repository-local `colcon test --packages-select iap` | 0 | PASS 27/27 registered targets; 292 tests, 0 failures |
+
+### Single authorized replacement smoke
+
+| Item | Value |
+|---|---|
+| Command | `python3 scripts/dev_planner/run_gate0_qualification.py --output-root results/icra27/icra004/runs --smoke` |
+| Runner exit | 0 |
+| Analyzer command | `python3 scripts/dev_planner/gate0_analyzer.py --gate0-root results/icra27/icra004/runs/smoke --output-dir results/icra27/icra004/runs/smoke/analyzer` |
+| Analyzer exit | 0 |
+| Capture readiness | PASS before launch; exact health/integrity topics, reliable/volatile keep-last depth 100 |
+| Required process | `iap_rosnode` descendant seen; no runtime failure; stopped only during controlled shutdown |
+| Captured evidence | 30 health rows; 165 integrity rows, all 165 valid |
+| P0 generations | 10 successful; every successful generation exactly 76,800 queries |
+| Analyzer verdict | `PASS` under the fixed `p0-smoke` 20/15-second contract |
+
+### Handoff
+
+Result: **ICRA-004 SMOKE PASS; RETURN TO SUPERVISOR REVIEW**.
+
+- The 60-second Gate 0B benchmark was not run.
+- No smoke retry, GPU wait/retry loop, bag, campaign, P1/P2/P3/P4/P5 product work, backend fallback or workload tuning was performed.
+- ICRA-003 evidence is unchanged.
+- No task-started ROS/capture/launch process remains.
+- Gate 0B, P4 and P5 qualification status is not self-promoted; a separate Supervisor task is required.
+- Final implementation commit SHA: `PENDING_COMMIT`.

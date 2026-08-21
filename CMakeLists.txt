@@ -684,6 +684,10 @@ if(DEFINED ENV{ROS_VERSION})
         COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test/test_gate0_runner.py
       )
       add_test(
+        NAME test_gate0_capture_p0_health
+        COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test/test_gate0_capture_p0_health.py
+      )
+      add_test(
         NAME test_test_planner_launch
         COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test/test_test_planner_launch.py
       )

@@ -434,6 +434,9 @@ def validate_gate0b_manifest(
     failures = []
     config = manifest.get("effective_config", {})
     expected_run_duration = 20 if manifest.get("run_id") == "p0-smoke" else 60
+    expected_validation_duration = (
+        15 if manifest.get("run_id") == "p0-smoke" else 55
+    )
     expected = {
         "experiment": "p0_open_sky",
         "scenario": "gnss_open_sky",
@@ -451,6 +454,7 @@ def validate_gate0b_manifest(
         "record_bag": False,
         "start_rviz": False,
         "run_duration_s": expected_run_duration,
+        "validation_duration_s": expected_validation_duration,
     }
     for field, value in expected.items():
         if config.get(field) != value:
@@ -484,6 +488,20 @@ def validate_gate0b_manifest(
         failures.append("p0_process_failure")
     if manifest.get("required_processes_ok") is not True:
         failures.append("p0_required_process_failure")
+    gpu_preflight = manifest.get("gpu_preflight", {})
+    if (
+        gpu_preflight.get("schema_version") != "iap_gpu_preflight_v1"
+        or gpu_preflight.get("gpu_ready") is not True
+        or gpu_preflight.get("failure_reason") not in ("", None)
+    ):
+        failures.append("p0_gpu_preflight_not_ready")
+    capture_readiness = manifest.get("capture_readiness", {})
+    if (
+        capture_readiness.get("schema_version")
+        != "gate0_capture_readiness_v1"
+        or capture_readiness.get("ready") is not True
+    ):
+        failures.append("p0_capture_not_ready_before_launch")
     required_processes = manifest.get("required_processes", {})
     iap_rosnode_seen = bool(
         required_processes.get("iap_rosnode", {}).get("seen", False)
@@ -517,6 +535,7 @@ def validate_gate0b_manifest(
         "record_bag": False,
         "start_rviz": False,
         "run_duration_s": float(expected_run_duration),
+        "validation_duration_s": float(expected_validation_duration),
     }
     for field, value in runtime_expected.items():
         if runtime_manifest.get(field) != value:
@@ -586,7 +605,10 @@ def type7_quantile(values: Iterable[float], probability: float) -> float:
 
 def analyze_p0_messages(
     messages: Iterable[dict[str, Any]],
+    protocol: str = "benchmark",
 ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    if protocol not in {"smoke", "benchmark"}:
+        raise ValueError(f"unsupported P0 protocol: {protocol}")
     callbacks: dict[float, dict[str, Any]] = {}
     for message in messages:
         callback_key = _float(message.get("refresh_callback_end_steady_s"))
@@ -633,20 +655,25 @@ def analyze_p0_messages(
     failures = []
     if len(successful) == 0:
         failures.append("zero_successful_generations")
-    if len(successful) < 20:
+    minimum_successful_generations = 1 if protocol == "smoke" else 20
+    if len(successful) < minimum_successful_generations:
         failures.append("fewer_than_20_successful_generations")
     if not shape_ok:
         failures.append("refresh_query_shape_mismatch")
     if latency_evidence_failure:
         failures.append("successful_generation_latency_nonfinite")
-    if not math.isfinite(p95) or p95 > 400.0:
+    if protocol == "benchmark" and (not math.isfinite(p95) or p95 > 400.0):
         failures.append("refresh_p95_over_400_ms")
     if len(successful) == 0:
         gate = "P0_INPUT_AVAILABILITY_FAIL"
         recommendations: list[str] = []
     else:
         gate = "PASS" if not failures else "P0_PERFORMANCE_GATE_FAIL"
-        recommendations = [] if len(successful) < 20 or not failures else [
+        recommendations = [] if (
+            protocol == "smoke"
+            or len(successful) < 20
+            or not failures
+        ) else [
             "evaluate predictor worker_count",
             "reduce ICRA ROI",
             "reduce frozen horizons",
@@ -654,6 +681,8 @@ def analyze_p0_messages(
         ]
     summary = {
         "schema_version": "gate0_p0_summary_v1",
+        "protocol": protocol,
+        "minimum_successful_generations": minimum_successful_generations,
         "expected_refresh_query_count": EXPECTED_REFRESH_QUERY_COUNT,
         "successful_generation_count": len(successful),
         "failed_refresh_count": len(rows) - len(successful),
@@ -972,7 +1001,13 @@ def analyze_directory(root: Path, output: Path) -> dict[str, Any]:
         _read_jsonl(p0_run_dir / "risk_grid_health.jsonl")
         if p0_run_dir else []
     )
-    p0_rows, p0_summary = analyze_p0_messages(p0_messages)
+    p0_protocol = (
+        "smoke" if p0_run_ids and p0_run_ids[-1] == "p0-smoke"
+        else "benchmark"
+    )
+    p0_rows, p0_summary = analyze_p0_messages(
+        p0_messages, protocol=p0_protocol
+    )
     integrity_messages = (
         _read_jsonl(p0_run_dir / "integrity_report.jsonl")
         if p0_run_dir else []

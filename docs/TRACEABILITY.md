@@ -1,5 +1,16 @@
 # Traceability Matrix (IAP)
 
+## 2026-08-21 ICRA-004 GPU preflight and one-shot P0 smoke
+
+| Req ID | Requirement/evidence seam | Implementation and retained evidence | Status |
+|---|---|---|---|
+| IAP-RQ-320 | Every ICRA main-flow run must prove NVML and CUDA Driver API device readiness before capture or ROS startup | `run_gate0_qualification.py` structured `iap_gpu_preflight_v1`, automatic mode guard and `--gpu-preflight-only`; `test_gate0_runner.py` covers missing command, NVML nonzero, `cuInit` failure, zero devices, PASS and no launch after failure; `results/icra27/icra004/runs/gpu_preflight.json` | **PASS: both `nvidia-smi` commands exit 0; `cuInit=0`; `cuDeviceGetCount=0`; one RTX 4070 Ti SUPER** |
+| IAP-RQ-320 | Capture must subscribe to the real P0 health/integrity topics with compatible QoS and be ready before launch | `gate0_capture_p0_health.py`; `test_gate0_capture_p0_health.py`; `capture_ready.json`; reliable/volatile keep-last depth 100 for `/planning/risk_grid_health` and `/iap/integrity`; runner fails before launch on absent/malformed readiness | **PASS: readiness recorded before launch; 30 health and 165 valid integrity rows captured** |
+| IAP-RQ-320 | Smoke and full benchmark must retain distinct fixed validation contracts without weakening zero-record/query-shape failure | `gate0_analyzer.py`; `test_gate0_analyzer.py`; smoke is 20/15 s with at least one successful generation, full remains 60/55 s with at least 20 and p95 `<=400 ms` | **PASS for ICRA-004 smoke only; 10 successful generations, every generation exactly 76,800 queries** |
+| IAP-RQ-320 | The one authorized replacement smoke must retain CPU mapping, P1/P2/P3/P4/P5 isolation, required-process lifetime and nonzero runner/analyzer exits on failure | `results/icra27/icra004/runs/smoke/{command.txt,gate0_run_manifest.json,risk_grid_health.jsonl,integrity_report.jsonl,stdout.log,analyzer}` | **SMOKE PASS: runner 0, analyzer 0, `iap_rosnode` alive through runtime; no retry and no 60-second benchmark** |
+
+This smoke PASS authorizes Supervisor review only. Gate 0B remains unqualified until a separate task authorizes and reviews the fixed 60-second benchmark; P4/P5 qualification is unchanged.
+
 ## 2026-08-20 ICRA P0→P4→P5 scope pivot
 
 | Req ID | Requirement/evidence seam | Planned implementation and evidence | Status |

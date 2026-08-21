@@ -1,0 +1,45 @@
+{
+  "gate0a": {
+    "reason": "no_runs",
+    "stable_scenarios": [],
+    "status": "NO-GO-P2"
+  },
+  "gate0b": {
+    "expected_refresh_query_count": 76800,
+    "failed_ratio": 0.3333333333333333,
+    "failed_refresh_count": 5,
+    "failures": [],
+    "gate": "PASS",
+    "generation_interval_ms_p50": 638.6585549999993,
+    "generation_interval_ms_p95": 657.3273888000001,
+    "integrity_report_count": 165,
+    "manifest_failures": [],
+    "minimum_successful_generations": 1,
+    "p95_over_refresh_period": 1.3153269964999998,
+    "protocol": "smoke",
+    "query_shape_ok": true,
+    "recommendations": [],
+    "refresh_elapsed_ms_max": 657.885769,
+    "refresh_elapsed_ms_p50": 638.5255245000001,
+    "refresh_elapsed_ms_p95": 657.66349825,
+    "schema_version": "gate0_p0_summary_v1",
+    "stale_ratio": 0.7333333333333333,
+    "successful_generation_count": 10,
+    "valid_integrity_report_count": 165
+  },
+  "runs": [
+    {
+      "attempt_count": 0,
+      "critical_violation": false,
+      "manifest_failures": "",
+      "qualified": false,
+      "run_id": "p0-smoke",
+      "scenario": "gnss_open_sky",
+      "selected_publish_reached": false,
+      "selected_reached_downstream": false,
+      "selected_refinement_reached": false,
+      "selected_update_reached": false,
+      "under_two_success_attempts": 0
+    }
+  ]
+}

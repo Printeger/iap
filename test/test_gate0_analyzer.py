@@ -204,6 +204,7 @@ class Gate0AnalyzerTest(unittest.TestCase):
             "record_bag": False,
             "start_rviz": False,
             "run_duration_s": 60,
+            "validation_duration_s": 55,
             "planner_enable_all_safety": False,
             "planner_enable_p1": False,
             "planner_enable_p2": False,
@@ -236,6 +237,15 @@ class Gate0AnalyzerTest(unittest.TestCase):
                 }
             },
             "process_failures": [],
+            "gpu_preflight": {
+                "schema_version": "iap_gpu_preflight_v1",
+                "gpu_ready": True,
+                "failure_reason": "",
+            },
+            "capture_readiness": {
+                "schema_version": "gate0_capture_readiness_v1",
+                "ready": True,
+            },
         }
         runtime = {
             "experiment": "p0_open_sky",
@@ -253,6 +263,7 @@ class Gate0AnalyzerTest(unittest.TestCase):
             "record_bag": False,
             "start_rviz": False,
             "run_duration_s": 60.0,
+            "validation_duration_s": 55.0,
             "planner_enable_all_safety": False,
             "planner_enable_p1": False,
             "planner_enable_p2": False,
@@ -290,6 +301,42 @@ class Gate0AnalyzerTest(unittest.TestCase):
             "p0_runtime_mapping_backend_mismatch",
             MODULE.validate_gate0b_manifest(manifest, runtime, 1),
         )
+
+    def test_smoke_and_benchmark_use_distinct_fixed_contracts(self):
+        messages = [{
+            "generation_id": 1,
+            "refresh_callback_end_steady_s": 1.0,
+            "refresh_query_count": 76800,
+            "ready": True,
+            "stale": False,
+            "valid_ratio": 1.0,
+            "unknown_ratio": 0.0,
+            "reason": "ok",
+            "refresh_elapsed_ms": 900.0,
+            "generation_interval_ms": 500.0,
+            "refresh_stamp_s": 1.0,
+        }]
+        _, smoke = MODULE.analyze_p0_messages(messages, protocol="smoke")
+        _, benchmark = MODULE.analyze_p0_messages(messages, protocol="benchmark")
+        self.assertEqual(smoke["gate"], "PASS")
+        self.assertNotIn("fewer_than_20_successful_generations", smoke["failures"])
+        self.assertNotIn("refresh_p95_over_400_ms", smoke["failures"])
+        self.assertIn("fewer_than_20_successful_generations", benchmark["failures"])
+        self.assertIn("refresh_p95_over_400_ms", benchmark["failures"])
+
+    def test_smoke_manifest_requires_20_and_15_seconds(self):
+        manifest = {
+            "run_id": "p0-smoke",
+            "effective_config": {
+                "run_duration_s": 60,
+                "validation_duration_s": 55,
+            },
+            "gpu_preflight": {"gpu_ready": True},
+            "capture_readiness": {"ready": True},
+        }
+        failures = MODULE.validate_gate0b_manifest(manifest, None, 0)
+        self.assertIn("p0_run_duration_s_mismatch", failures)
+        self.assertIn("p0_validation_duration_s_mismatch", failures)
 
     def test_zero_p0_generations_are_input_availability_failure(self):
         _, summary = MODULE.analyze_p0_messages([])

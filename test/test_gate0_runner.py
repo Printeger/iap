@@ -1,9 +1,12 @@
 import importlib.util
+import json
 import subprocess
 import sys
+import tempfile
 import time
 import unittest
 from pathlib import Path
+from unittest import mock
 
 
 MODULE_PATH = (
@@ -28,6 +31,107 @@ def _wait_until(predicate, timeout_s: float = 3.0) -> bool:
 
 
 class Gate0RunnerTest(unittest.TestCase):
+    @staticmethod
+    def _nvidia_smi_runner(returncodes=(0, 0)):
+        calls = []
+
+        def run(command, **kwargs):
+            index = len(calls)
+            calls.append((command, kwargs))
+            stdout = (
+                "GPU 0: Test GPU (UUID: GPU-test)\n"
+                if "-L" in command
+                else "0, Test GPU, GPU-test, 555.55\n"
+            )
+            return subprocess.CompletedProcess(
+                command, returncodes[index], stdout=stdout, stderr=""
+            )
+
+        return run, calls
+
+    def test_gpu_preflight_missing_command_fails_closed(self):
+        def missing(command, **kwargs):
+            raise FileNotFoundError("nvidia-smi")
+
+        with tempfile.TemporaryDirectory() as directory:
+            result = MODULE.run_gpu_preflight(
+                Path(directory), command_runner=missing,
+                cuda_probe=lambda: {"cuInit_result": 0,
+                                    "cuDeviceGetCount_result": 0,
+                                    "device_count": 1},
+            )
+            persisted = json.loads(
+                (Path(directory) / "gpu_preflight.json").read_text()
+            )
+        self.assertFalse(result["gpu_ready"])
+        self.assertEqual(result, persisted)
+        self.assertIn("nvidia_smi_missing", result["failure_reason"])
+
+    def test_gpu_preflight_nonzero_nvml_fails_closed(self):
+        runner, _ = self._nvidia_smi_runner((1, 0))
+        with tempfile.TemporaryDirectory() as directory:
+            result = MODULE.run_gpu_preflight(
+                Path(directory), command_runner=runner,
+                cuda_probe=lambda: {"cuInit_result": 0,
+                                    "cuDeviceGetCount_result": 0,
+                                    "device_count": 1},
+            )
+        self.assertFalse(result["gpu_ready"])
+        self.assertIn("nvidia_smi_list_exit_1", result["failure_reason"])
+
+    def test_gpu_preflight_zero_cuda_devices_fails_closed(self):
+        runner, _ = self._nvidia_smi_runner()
+        with tempfile.TemporaryDirectory() as directory:
+            result = MODULE.run_gpu_preflight(
+                Path(directory), command_runner=runner,
+                cuda_probe=lambda: {"cuInit_result": 0,
+                                    "cuDeviceGetCount_result": 0,
+                                    "device_count": 0},
+            )
+        self.assertFalse(result["gpu_ready"])
+        self.assertEqual(result["failure_reason"], "cuda_device_count_zero")
+
+    def test_gpu_preflight_cuda_initialization_failure_fails_closed(self):
+        runner, _ = self._nvidia_smi_runner()
+        with tempfile.TemporaryDirectory() as directory:
+            result = MODULE.run_gpu_preflight(
+                Path(directory), command_runner=runner,
+                cuda_probe=lambda: {"cuInit_result": 999,
+                                    "cuDeviceGetCount_result": None,
+                                    "device_count": None},
+            )
+        self.assertFalse(result["gpu_ready"])
+        self.assertEqual(result["failure_reason"], "cuInit_failed_999")
+
+    def test_gpu_preflight_pass_records_bounded_commands_and_cuda(self):
+        runner, calls = self._nvidia_smi_runner()
+        with tempfile.TemporaryDirectory() as directory:
+            result = MODULE.run_gpu_preflight(
+                Path(directory), command_runner=runner,
+                cuda_probe=lambda: {"cuInit_result": 0,
+                                    "cuDeviceGetCount_result": 0,
+                                    "device_count": 1},
+            )
+        self.assertTrue(result["gpu_ready"])
+        self.assertEqual(result["failure_reason"], "")
+        self.assertEqual(len(result["commands"]), 2)
+        self.assertEqual(len(calls), 2)
+        self.assertEqual(result["cuda"]["device_count"], 1)
+
+    def test_failed_preflight_never_calls_ros_launch_path(self):
+        failed = {
+            "schema_version": "iap_gpu_preflight_v1",
+            "gpu_ready": False,
+            "failure_reason": "cuInit_failed_999",
+        }
+        with tempfile.TemporaryDirectory() as directory, mock.patch.object(
+            MODULE, "run_gpu_preflight", return_value=failed
+        ), mock.patch.object(MODULE, "run_gate0_smoke") as smoke, mock.patch.object(
+            sys, "argv", [str(MODULE_PATH), "--output-root", directory, "--smoke"]
+        ):
+            self.assertNotEqual(MODULE.main(), 0)
+        smoke.assert_not_called()
+
     def test_gate0a_matrix_is_fixed_to_three_scenarios_three_repeats(self):
         matrix = MODULE.gate0a_matrix()
         self.assertEqual(len(matrix), 9)
@@ -97,6 +201,26 @@ class Gate0RunnerTest(unittest.TestCase):
             MODULE._gate0b_runner_exit(0, 0, 0, {"required_processes_ok": False}),
             2,
         )
+
+    def test_capture_readiness_is_required_before_launch(self):
+        class Capture:
+            def poll(self):
+                return None
+
+        with tempfile.TemporaryDirectory() as directory:
+            ready_path = Path(directory) / "capture_ready.json"
+            ready_path.write_text(json.dumps({
+                "schema_version": "gate0_capture_readiness_v1",
+                "ready": True,
+                "subscriptions": [
+                    {"topic": "/planning/risk_grid_health"},
+                    {"topic": "/iap/integrity"},
+                ],
+            }))
+            readiness = MODULE._wait_for_capture_ready(
+                Capture(), ready_path, timeout_s=0.1
+            )
+        self.assertTrue(readiness["ready"])
 
     def test_monitor_never_started_required_process(self):
         monitor = MODULE.RequiredProcessMonitor(
