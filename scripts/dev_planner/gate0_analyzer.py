@@ -706,6 +706,38 @@ def analyze_p0_messages(
     return rows, summary
 
 
+def apply_integrity_evidence_gate(
+    summary: dict[str, Any],
+    messages: Iterable[dict[str, Any]],
+    protocol: str,
+) -> dict[str, Any]:
+    """Require captured finite integrity evidence for smoke and benchmark."""
+    if protocol not in {"smoke", "benchmark"}:
+        raise ValueError(f"unsupported P0 protocol: {protocol}")
+    integrity_messages = list(messages)
+    valid_integrity_count = sum(
+        _bool(item.get("valid"))
+        and all(
+            math.isfinite(_float(item.get(field)))
+            for field in ("hpl", "vpl", "hal", "val", "im")
+        )
+        for item in integrity_messages
+    )
+    result = dict(summary)
+    result["failures"] = list(summary.get("failures", []))
+    result["integrity_report_count"] = len(integrity_messages)
+    result["valid_integrity_report_count"] = valid_integrity_count
+    if valid_integrity_count == 0:
+        if "no_valid_integrity_report" not in result["failures"]:
+            result["failures"].append("no_valid_integrity_report")
+        result["gate"] = "P0_INPUT_AVAILABILITY_FAIL"
+    return result
+
+
+def analyzer_exit_code(result: dict[str, Any]) -> int:
+    return 0 if result.get("gate0b", {}).get("gate") == "PASS" else 1
+
+
 def _read_csvs(paths: Iterable[Path]) -> list[dict[str, Any]]:
     rows = []
     for path in paths:
@@ -1012,14 +1044,9 @@ def analyze_directory(root: Path, output: Path) -> dict[str, Any]:
         _read_jsonl(p0_run_dir / "integrity_report.jsonl")
         if p0_run_dir else []
     )
-    valid_integrity_count = sum(
-        _bool(item.get("valid")) for item in integrity_messages
+    p0_summary = apply_integrity_evidence_gate(
+        p0_summary, integrity_messages, p0_protocol
     )
-    p0_summary["integrity_report_count"] = len(integrity_messages)
-    p0_summary["valid_integrity_report_count"] = valid_integrity_count
-    if p0_run_ids and p0_run_ids[-1] == "p0-smoke" and valid_integrity_count == 0:
-        p0_summary["failures"].append("no_valid_integrity_report")
-        p0_summary["gate"] = "P0_INPUT_AVAILABILITY_FAIL"
     p0_manifest_failures = validate_gate0b_manifest(
         p0_manifest,
         p0_manifest.get("runtime_manifest") if p0_manifest else None,
@@ -1054,7 +1081,7 @@ def main() -> int:
     args = parser.parse_args()
     result = analyze_directory(args.gate0_root.resolve(), args.output_dir.resolve())
     print(json.dumps(_json_safe(result), indent=2, sort_keys=True))
-    return 0 if result.get("gate0b", {}).get("gate") == "PASS" else 1
+    return analyzer_exit_code(result)
 
 
 if __name__ == "__main__":

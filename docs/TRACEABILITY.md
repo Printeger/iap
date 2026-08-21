@@ -1,5 +1,15 @@
 # Traceability Matrix (IAP)
 
+## 2026-08-21 ICRA-005 retained evidence closure and fixed P0 benchmark
+
+| Req ID | Requirement/evidence seam | Implementation and retained evidence | Status |
+|---|---|---|---|
+| IAP-RQ-320 | The reviewed ICRA-004 smoke must retain the exact runtime manifest and analyzer-resolved configuration used for its verdict | Tracked `results/icra27/icra004/runs/smoke/exports/.../test_planner_manifest.json` (`111d57f7...f818`) and `results/icra27/icra004/runs/smoke/analyzer/effective_config.json` (`f9997494...263f`) | **RETAINED BY EXACT HASH; ICRA-004 not rerun or reconstructed** |
+| IAP-RQ-320 | Smoke and benchmark integrity evidence must fail closed on zero valid captured reports, including non-finite reports marked valid | `apply_integrity_evidence_gate`, finite HPL/VPL/HAL/VAL/IM validation and shared CLI exit helper in `gate0_analyzer.py`; zero-row and invalid/non-finite benchmark tests in `test_gate0_analyzer.py` | **IMPLEMENTED; focused tests PASS** |
+| IAP-RQ-320 | Fixed P0 full-grid benchmark must preserve GPU/capture/process/config/query-shape evidence and meet type-7 p95 `<=400 ms` | `results/icra27/icra005/runs/{gpu_preflight.json,benchmark/}`; 60/55 seconds, CPU mapping, fixed 30x30x6 m / 0.75 m / six horizons / 0.5 s / one worker / occupied skip; 565 valid integrity, 72 successful generations, 76,800 queries each | **P0_PERFORMANCE_GATE_FAIL: p95 657.21388795 ms > 400 ms; runner 0, analyzer 1** |
+
+The single authorized ICRA-005 benchmark was not retried or tuned. This evidence is returned to Supervisor without changing Gate-0B, P4 or P5 status.
+
 ## 2026-08-21 ICRA-004 GPU preflight and one-shot P0 smoke
 
 | Req ID | Requirement/evidence seam | Implementation and retained evidence | Status |

@@ -344,6 +344,45 @@ class Gate0AnalyzerTest(unittest.TestCase):
         self.assertEqual(summary["gate"], "P0_INPUT_AVAILABILITY_FAIL")
         self.assertEqual(summary["recommendations"], [])
 
+    def test_benchmark_zero_integrity_rows_fail_input_availability(self):
+        summary = MODULE.apply_integrity_evidence_gate(
+            {"gate": "PASS", "failures": []}, [], protocol="benchmark"
+        )
+        self.assertEqual(summary["integrity_report_count"], 0)
+        self.assertEqual(summary["valid_integrity_report_count"], 0)
+        self.assertIn("no_valid_integrity_report", summary["failures"])
+        self.assertEqual(summary["gate"], "P0_INPUT_AVAILABILITY_FAIL")
+        self.assertEqual(MODULE.analyzer_exit_code({"gate0b": summary}), 1)
+
+    def test_benchmark_invalid_or_nonfinite_integrity_rows_fail_closed(self):
+        messages = [
+            {
+                "valid": False,
+                "hpl": 1.0,
+                "vpl": 2.0,
+                "hal": 10.0,
+                "val": 10.0,
+                "im": 8.0,
+            },
+            {
+                "valid": True,
+                "hpl": math.nan,
+                "vpl": 2.0,
+                "hal": 10.0,
+                "val": 10.0,
+                "im": 8.0,
+            },
+        ]
+        summary = MODULE.apply_integrity_evidence_gate(
+            {"gate": "PASS", "failures": []},
+            messages,
+            protocol="benchmark",
+        )
+        self.assertEqual(summary["integrity_report_count"], 2)
+        self.assertEqual(summary["valid_integrity_report_count"], 0)
+        self.assertEqual(summary["gate"], "P0_INPUT_AVAILABILITY_FAIL")
+        self.assertEqual(MODULE.analyzer_exit_code({"gate0b": summary}), 1)
+
     def test_successful_generation_with_nonfinite_latency_fails_closed(self):
         messages = []
         for generation in range(1, 21):

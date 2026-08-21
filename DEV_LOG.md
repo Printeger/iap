@@ -218,6 +218,7 @@ Preserved pre-existing worktree item: untracked `docs/icra27/dev/ICRA_SYSTEM_FLO
 | `python3 -m unittest discover -s test -p 'test_gate0_runner.py' -v` | 0 | PASS 15 tests |
 | `python3 -m unittest discover -s test -p 'test_gate0_analyzer.py' -v` | 0 | PASS 13 tests |
 | `python3 -m unittest discover -s test -p 'test_gate0_capture_p0_health.py' -v` | 0 | PASS 1 test |
+| `ctest --test-dir results/icra27/icra004/build_iap/iap --output-on-failure` | 0 | PASS 27/27 registered IAP targets after the analyzer change; no ROS main flow |
 | repository-local `colcon build --packages-select iap` | 0 | PASS; `results/icra27/icra004/{build_iap,install_iap,log}` |
 | repository-local `colcon test --packages-select iap` | 0 | PASS 27/27 registered targets; 292 tests, 0 failures |
 
@@ -246,3 +247,77 @@ Result: **ICRA-004 SMOKE PASS; RETURN TO SUPERVISOR REVIEW**.
 - Gate 0B, P4 and P5 qualification status is not self-promoted; a separate Supervisor task is required.
 - Two-axis review: Standards found the missing reproduction command and one non-blocking capture-lifecycle duplication smell; Spec found the pending SHA and an incomplete publisher-compatibility test. `docs/CHANGES.md` now records exact commands, and `test_gate0_capture_p0_health.py` is bound to both production publisher declarations. Focused runner/analyzer/capture tests remain PASS. The duplication was not refactored after the one-shot smoke because it is a judgement-only smell and a post-evidence behavior rewrite would add unnecessary risk.
 - Final implementation commit SHA: `20d3c5d7641d2f46b79698704f4cceb1584e346f`.
+
+## 2026-08-21T03:40:00Z — ICRA-005 START
+
+Branch: dev/icra
+
+Start HEAD: 3de08928ec6fe57922e64bd892c7f55882e1b8a0
+
+Task/Gate: ICRA-005 / GATE_0B
+
+Requirement: IAP-RQ-320 only
+
+Allowed files:
+- `scripts/dev_planner/gate0_analyzer.py`
+- `test/test_gate0_analyzer.py`
+- the two exact retained ICRA-004 manifest/effective-config files named in `NEXT_TASK.md`
+- compact evidence under `results/icra27/icra005/`
+- `docs/CHANGES.md`, `docs/TRACEABILITY.md`, `DEV_LOG.md`
+
+One-shot rule: after retained-evidence hashes and focused tests pass, run exactly one fixed 60-second `--benchmark`; do not retry, tune or run another main-flow experiment regardless of result.
+
+Pre-existing untracked file preserved: `docs/icra27/dev/ICRA_SYSTEM_FLOW.pdf`; do not modify, stage, delete, move or regenerate it.
+
+Retained ICRA-004 evidence pre-stage hashes:
+- `test_planner_manifest.json`: `111d57f74192d1bf17ec7b54c2af198d648b1807920a3f088bdd73ec80d7f818` (MATCH)
+- `effective_config.json`: `f9997494731b9b155712519e31522010112541be460528e69c9655efbaa2263f` (MATCH)
+
+## 2026-08-21T03:51:32Z — ICRA-005 FIXED BENCHMARK
+
+### Pre-ROS verification
+
+| Command | Exit code | Result |
+|---|---:|---|
+| `python3 -m py_compile scripts/dev_planner/gate0_analyzer.py test/test_gate0_analyzer.py` | 0 | PASS |
+| `python3 -m unittest discover -s test -p 'test_gate0_runner.py' -v` | 0 | PASS 15 tests |
+| `python3 -m unittest discover -s test -p 'test_gate0_analyzer.py' -v` | 0 | PASS 15 tests, including benchmark zero/invalid/non-finite integrity fail-closed |
+| `python3 -m unittest discover -s test -p 'test_gate0_capture_p0_health.py' -v` | 0 | PASS 1 test |
+
+### Automatic GPU preflight
+
+| Item | Result |
+|---|---|
+| Evidence | `results/icra27/icra005/runs/gpu_preflight.json` |
+| `nvidia-smi -L` | exit 0; NVIDIA GeForce RTX 4070 Ti SUPER; UUID `GPU-18669b5b-29eb-0bdc-00c2-65c35b8e1af9` |
+| Structured `nvidia-smi` query | exit 0; driver `580.126.09` |
+| CUDA Driver API | `libcuda.so.1` loaded; `cuInit(0)=0`; `cuDeviceGetCount=0`; `device_count=1` |
+| Result | `GPU_READY` / PASS before capture and ROS |
+
+### Single authorized 60-second benchmark
+
+| Item | Value |
+|---|---|
+| Runner command | `python3 scripts/dev_planner/run_gate0_qualification.py --output-root results/icra27/icra005/runs --benchmark` |
+| Runner exit | 0 |
+| Analyzer command | `python3 scripts/dev_planner/gate0_analyzer.py --gate0-root results/icra27/icra005/runs/benchmark --output-dir results/icra27/icra005/runs/benchmark/analyzer` |
+| Analyzer exit | 1 |
+| Runtime contract | 60 s runtime / 55 s validation; frozen CPU mapping and P0 configuration |
+| Capture/process | readiness PASS; `iap_rosnode` descendant alive through runtime; no runtime process failure; controlled shutdown only |
+| Integrity | 565 captured, 565 valid |
+| Generations | 72 successful, 2 failed; all successful generations exactly 76,800 queries |
+| Refresh latency | p50 `649.6330975 ms`; type-7 p95 `657.21388795 ms`; max `661.487876 ms` |
+| Generation interval | p50 `650.4311489999992 ms`; p95 `658.0863929999996 ms` |
+| Ratios | stale `0.5945945945945946`; failed `0.02702702702702703` |
+| Verdict | `P0_PERFORMANCE_GATE_FAIL` because p95 exceeds fixed 400 ms threshold |
+
+### Handoff
+
+Result: **BLOCKED / P0_PERFORMANCE_GATE_FAIL — RETURN TO SUPERVISOR REVIEW**.
+
+- No ICRA-004 smoke rerun and no second ICRA-005 benchmark occurred.
+- No workload/config/backend tuning, bag, RViz, campaign or P1/P2/P3/P4/P5 work occurred.
+- Analyzer recommendations are retained as output only and were not acted on.
+- No task-started ROS/capture/launch process remains.
+- Gate status is not changed by DEEPSEEK.
+- Final implementation commit SHA: `PENDING_COMMIT`.

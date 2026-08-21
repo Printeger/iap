@@ -1,0 +1,56 @@
+{
+  "checked_utc": "2026-08-21T03:51:32Z",
+  "commands": [
+    {
+      "argv": [
+        "nvidia-smi",
+        "-L"
+      ],
+      "exception": "",
+      "exit_code": 0,
+      "name": "nvidia_smi_list",
+      "stderr": {
+        "original_length": 0,
+        "text": "",
+        "truncated": false
+      },
+      "stdout": {
+        "original_length": 89,
+        "text": "GPU 0: NVIDIA GeForce RTX 4070 Ti SUPER (UUID: GPU-18669b5b-29eb-0bdc-00c2-65c35b8e1af9)\n",
+        "truncated": false
+      }
+    },
+    {
+      "argv": [
+        "nvidia-smi",
+        "--query-gpu=index,name,uuid,driver_version",
+        "--format=csv,noheader"
+      ],
+      "exception": "",
+      "exit_code": 0,
+      "name": "nvidia_smi_query",
+      "stderr": {
+        "original_length": 0,
+        "text": "",
+        "truncated": false
+      },
+      "stdout": {
+        "original_length": 90,
+        "text": "0, NVIDIA GeForce RTX 4070 Ti SUPER, GPU-18669b5b-29eb-0bdc-00c2-65c35b8e1af9, 580.126.09\n",
+        "truncated": false
+      }
+    }
+  ],
+  "cuda": {
+    "cuDeviceGetCount_result": 0,
+    "cuInit_result": 0,
+    "device_count": 1,
+    "library": "libcuda.so.1",
+    "library_loaded": true,
+    "load_error": ""
+  },
+  "failure_reason": "",
+  "failure_reasons": [],
+  "gpu_ready": true,
+  "schema_version": "iap_gpu_preflight_v1"
+}
