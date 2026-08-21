@@ -1,5 +1,64 @@
 # ICRA Supervisor Log
 
+## 2026-08-21 — ICRA-013 review, phase-3A closure and ICRA-014 phase-3B authorization
+
+### Review identity and independent verification
+
+- Fixed review base: `61376de73544fbe9afb0a26103e19c0e5ace6ea1`.
+- Reviewed HEAD: `ac5bda07cb61ba48aebd5e7e77845a67baa0d39b`.
+- Reviewed commits: `86b926b` and `ac5bda0`; both carry applicable requirement IDs.
+  `dev/icra` matched `origin/dev/icra` at divergence `0 0`.
+- The aggregate diff contains exactly the six ICRA-013 allowlisted files and passes
+  `git diff --check`. The only untracked file remains
+  `docs/icra27/dev/ICRA_SYSTEM_FLOW.pdf`, unchanged at SHA-256
+  `1f07da5631a6551a2f98c02d46fd45bc87f2f1e3e7c14e95f9a7f4a0bac844f6`.
+- Supervisor independently rebuilt current root, plan-env, P1, P4 and plan-manage targets. With the
+  prescribed environment, all seven P1/P2/P3/planning-context/P4/P5/P0 consumers resolve
+  `libiap.so` to the current ICRA-013 repository-local build.
+- Complete root suites passed: risk grid 43/43, Predictor 45/45, local occupancy 6/6, PI adapter
+  11/11 and unified risk grid 11/11.
+- Retained/downstream suites passed: frozen occupancy epoch 2/2, P1 integrity cost 39/39, P2 ranking
+  6/6, P3 bias 9/9, planning context 26/26, P4 risk A* 4/4, P5 runtime gate 33/33, P0 occupancy
+  Adapter 3/3 and P0 runtime 48/48. Total: **286/286**.
+- The retained ICRA-011 JSON remains byte-identical at SHA-256
+  `778abd22158805c41150b4eeed9c37a3f660237a0bb0599e9a567e3533c7b32c`.
+  No main flow, ROS launch, smoke, qualification, benchmark, analyzer or GPU preflight ran.
+
+### Standards axis
+
+- **PASS, zero findings.** The six modified files match the exact allowlist; requirement IDs,
+  synchronized `CHANGES`/`TRACEABILITY`/`DEV_LOG`, repository-local verification and two-commit
+  handoff conform to `AGENTS.md`.
+- The fixed lattice does not change Predictor/integrity/planning science, add ring/cache behavior or
+  cross repository scope. All Fowler smell-baseline categories were checked; no reportable judgement
+  smell was introduced. Worst Standards issue: none.
+
+### Spec axis
+
+- **PASS, zero findings.** Finite anchor, integer world/lower keys, mathematical negative floor,
+  frozen even-side rule, stationary/sub-voxel stability and exact one/multi-cell crossing conform.
+- Proposed geometry stays local until complete publication; provider and occupancy/prior failures
+  retain generation, origin and every ordered voxel. Configure resets the generation, and
+  configuration epoch plus serialized refresh writers prevent stale concurrent publication and
+  duplicate generation IDs.
+- Full provider dispatch and immutable snapshot consumer semantics remain intact. No ring, cache,
+  TTL/delta, performance claim, runtime behavior or P1-P5 scope entered the task. Worst Spec issue:
+  none.
+
+### Disposition and next task
+
+- Verdict: `ICRA013_PASS_PHASE3A_CLOSED`. The fixed-lattice and atomic-geometry foundation is
+  accepted. This does not close phase 3 or qualify Gate-0B; P4 remains `NOT_QUALIFIED` and P5 remains
+  implemented but unqualified.
+- Unique task: `ICRA-014 / GATE_0B` in `NEXT_TASK.md`.
+- ICRA-014 adds a dense fixed-capacity ring for exact-identity GNSS/LiDAR `SpatialAdvisory` reuse.
+  It hides ring state behind the production P0 provider Module, validates every slot by world key,
+  stages ring changes transactionally and preserves the existing P4/P5 snapshot Interface.
+- All 76,800 horizon results still execute freshness validation, covariance growth, fusion and
+  materialization. Source identity changes conservatively force full spatial invalidation; TTL,
+  occupancy delta, watchdog and finer invalidation remain phase 4.
+- Calibration, main-flow smoke, qualification, GPU work and P4 remain forbidden.
+
 ## 2026-08-21 — ICRA-012 review, phase-2 closure and ICRA-013 phase-3A authorization
 
 ### Review identity and independent verification
