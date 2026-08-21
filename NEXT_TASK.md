@@ -1,29 +1,27 @@
-# ICRA-010 — Close P0 phase-1 covariance-growth status semantics
+# ICRA-011 — Implement P0 phase-2 within-refresh spatial advisory deduplication
 
 > Active gate: `GATE_0B`
 > Owner: `DEEPSEEK`
 > Activation: `TASK_READY`
-> Review disposition: `ICRA009_REQUEST_CHANGES_TYPED_STATUS_ICRA010_REPAIR_AUTHORIZED`
-> Requirement mapping: `IAP-RQ-320`, `IAP-RQ-321`, `IAP-RQ-322`
+> Review disposition: `ICRA010_PASS_PHASE1_CLOSED_ICRA011_PHASE2_AUTHORIZED`
+> Requirement mapping: `IAP-RQ-312`, `IAP-RQ-314`, `IAP-RQ-320`, `IAP-RQ-321`, `IAP-RQ-322`
 > Conference route: conditional P0 -> P4 -> P5
-> This task: one narrow phase-1 correctness repair and focused tests; no phase-2 or runtime qualification
+> This task: phase-2 product implementation, focused tests and repository-local offline diagnostic; no rolling window or qualification
 
 ## Supervisor verdict
 
-ICRA-009 is not accepted as phase-1 complete. Its Standards axis passes and the map epoch,
-complete immutable LOS Adapter, prior-generation validation and empirical covariance formula
-conform to the frozen design. The Supervisor independently reproduced all six focused suites,
-132/132 tests passing. One Spec P1 remains:
+ICRA-010 passes both review axes with no findings. The Supervisor independently reproduced the
+two exact regressions (1/1 each) and all six focused suites (134/134). P0 phase-1 semantics are
+closed: production map LOS, covariance growth, source generations, truthful typed status and
+whole-batch fail-closed publication now conform to the frozen design.
+This closes the implementation contract, not production calibration or runtime qualification;
+the production `sigma_grow` preset remains intentionally unset.
 
-- `PredictorModule::queryWithLidar()` assigns `CovarianceGrowthStatus::APPLIED` to every
-  positive horizon before frame and freshness validation. An early return can therefore claim
-  growth was applied even though `apply_covariance_growth()` never ran. The production provider
-  rejects only required non-`APPLIED` results, so this false status can let an invalid/unknown
-  generation publish instead of retaining the previous active snapshot.
-
-ICRA-010 repairs only that contract. It is product development, not another audit. After this
-task passes Supervisor review, the next task will enter frozen phase 2: within-refresh spatial
-advisory deduplication.
+ICRA-011 enters phase 2 directly. The authority is
+`docs/icra27/P0_ROLLING_RISK_WINDOW_DESIGN.md` §4 and §9 phase 2: calculate GNSS and LiDAR
+spatial evidence once per spatial position inside one refresh, then independently propagate,
+fuse and materialize all horizons. This is not cross-refresh reuse and does not authorize the
+fixed lattice/ring window of phase 3.
 
 ## 1. Start, synchronize and record
 
@@ -31,136 +29,241 @@ advisory deduplication.
   remote lead; do not reset, stash, rebase, clean or overwrite another role's work.
 - Preserve the untracked `docs/icra27/dev/ICRA_SYSTEM_FLOW.pdf` exactly. Do not modify, stage,
   delete, move or regenerate it.
-- Record an ICRA-010 START entry in `DEV_LOG.md` with start HEAD, the exact allowed files below,
-  this single defect and the preserved PDF.
+- Record an ICRA-011 START entry in `DEV_LOG.md` with start HEAD, exact allowed files, phase-2
+  boundaries and the preserved PDF.
 - Do not edit Supervisor-owned state/task/log/scope/plan/design/Gate documents.
 
-## 2. Required typed-status repair
+## 2. Required Module and Seam
 
-Keep the existing `PredictorModule` constructor, `query()`, `queryBatch()` and production
-provider Interfaces. Repair the Implementation so the status describes what actually happened:
+Keep the public `PredictorModule::query()` and `queryBatch()` Interfaces and all
+`PredictorQueryInput`/`PredictorQueryResult` fields source-compatible. Inside the
+`PredictorModule` Implementation, create one private/internal `SpatialAdvisory` value or
+equivalent that owns exactly the spatial GNSS and LiDAR advisory results needed by horizon
+fusion.
 
-1. Add one explicit non-success state such as `NOT_EVALUATED` to
-   `CovarianceGrowthStatus`; use the final local spelling consistently. It is the default for a
-   query that returns before the growth helper is reached.
-2. Do not assign `APPLIED` speculatively. Only `apply_covariance_growth()` may produce
-   `APPLIED`, and only after it has successfully materialized the positive-horizon grown prior.
-3. `tau == 0` returns `NOT_REQUIRED_TAU_ZERO` only after the query reaches the growth helper;
-   preserve the exact accepted-path bypass and its `1e-12` baseline contract.
-4. Invalid negative/nonfinite horizon remains `INVALID_HORIZON`. Existing growth-specific
-   failures remain `INVALID_PARAMETER`, `MISSING_PRIOR`, `STALE_PRIOR`, `INVALID_PRIOR` or
-   `NUMERICAL_FAILURE` as applicable.
-5. A finite positive-horizon frame/input/freshness failure before propagation must remain a
-   non-`APPLIED` status. Do not relabel it as a covariance numerical or prior failure when that
-   is not the cause.
-6. Preserve the production provider rule: any positive-horizon result whose status is not
-   `APPLIED` fails the whole batch. The failed refresh must retain the previous active snapshot
-   identity, generation and data; no partial or all-unknown replacement generation may publish.
+This is an internal Seam, not a new public caller contract:
 
-Do not change GNSS/LiDAR science, covariance algebra, freshness thresholds, query ordering,
-worker count, grid shape, public health strings or failure-reason mapping merely to satisfy the
-test.
+- `query()` remains the scalar authority;
+- `queryBatch()` remains the only batch Interface used by production and tests;
+- no public `querySpatial*()` method, external cache owner or caller-managed cache token;
+- no new dependency direction and no change to the P4/P5 `RiskGridSnapshot` Interface.
 
-## 3. Required focused tests
+The internal value must hide cache/key mechanics and provide Leverage and Locality: one fix in
+the Predictor Module controls both production and offline callers, while callers continue to
+know only scalar or batch queries.
+
+## 3. Required within-refresh behavior
+
+For each `queryBatch()` invocation:
+
+1. Group/cache only by exact spatial position plus coherent spatial-source identity. The key
+   must distinguish at least frame, immutable snapshot identity/stamp, current/prior source
+   generation or stamp, GNSS epoch presence/stamp and freshness reference. Horizon and future
+   query time are intentionally excluded. Do not use approximate spatial quantization that can
+   merge distinct risk voxels.
+2. Run input/frame/freshness and horizon-growth validation with the same ordering and results as
+   scalar `query()`. An early invalid input must not create or poison a reusable spatial entry.
+3. For the first valid query at a spatial key, evaluate each enabled GNSS/LiDAR spatial
+   advisory exactly once and store their complete result/diagnostics in the private value.
+4. For other horizons at that key, reuse only the GNSS/LiDAR spatial advisory. Every horizon
+   must still independently apply covariance growth, call fusion, set status/reasons/flags and
+   materialize one ordered `PredictorQueryResult`.
+5. Destroy the cache before `queryBatch()` returns. It must not be static, a Module member that
+   survives the call, shared between refreshes, or restamped.
+
+The canonical complete unoccupied workload remains 12,800 spatial cells x six horizons:
+
+- logical risk voxels: 76,800;
+- provider horizon queries and result conversions: 76,800;
+- spatial advisory recomputes: 12,800;
+- within-refresh spatial advisory reuses: 64,000;
+- GNSS advisory invocations: 12,800 when enabled;
+- LiDAR advisory invocations: 12,800 when enabled;
+- horizon fusion invocations: 76,800.
+
+Occupied-skip may reduce provider work as it does today, but it must not change the complete
+logical shape. Do not cache a complete cross-horizon result, grown prior, fused covariance,
+PL/cost, status, source flags or reason.
+
+## 4. Scientific equivalence and failure contract
+
+- For identical ordered inputs, optimized `queryBatch()` results must match independent scalar
+  `query()` results: exact booleans/enums/strings/IDs/vector ordering and absolute `1e-12` for
+  finite scalar/matrix scientific values. NaN/nonfinite state must match by classification.
+- Valid positive horizons must retain phase-1 covariance growth and nondecreasing risk;
+  tau zero remains the exact bypass; fusion/conservative-max remains per horizon.
+- GNSS map LOS, satellite geometry/noise/FIM and LiDAR observability/FIM are spatial evidence
+  only under the same frozen source identity. A different source identity must recompute even
+  at the same position.
+- `NOT_EVALUATED`, growth-specific statuses and exact fallback reasons remain truthful for
+  mixed valid/invalid batch input and arbitrary input ordering.
+- Any positive-horizon non-`APPLIED` production result still fails the whole provider batch.
+  Occupancy/prior start/end validation and prior active-snapshot retention remain unchanged.
+- Worker 1/2/4 output ordering and science remain equivalent. Do not change requested/effective
+  worker defaults or scheduling policy.
+
+## 5. Required diagnostic counters
+
+Extend `PredictorBatchDiagnostics` additively with explicit counters equivalent to:
+
+- `spatial_advisory_recompute_count`;
+- `spatial_advisory_reuse_count`.
+
+Keep all existing field meanings:
+
+- `query_count` is logical batch inputs;
+- `unique_positions`, `lidar_evaluations` and `lidar_cache_hits` retain their established
+  meanings;
+- `gnss_advisory_invocations` and `lidar_advisory_invocations` count actual expensive calls;
+- `fusion_advisory_invocations` counts per-horizon fusion calls.
+
+Aggregate every field across production workers. Add the following exact additive JSON keys to
+P0 health publication state, populated from the current refresh attempt and reset to zero at
+the next attempt before any early failure:
+
+- `predictor_spatial_advisory_recompute_count`;
+- `predictor_spatial_advisory_reuse_count`;
+- `predictor_gnss_advisory_invocation_count`;
+- `predictor_lidar_advisory_invocation_count`;
+- `predictor_horizon_fusion_count`.
+
+Do not redefine `refresh_query_count`, `provider_query_count`,
+`predictor_unique_positions`, `predictor_lidar_evaluations`,
+`predictor_lidar_cache_hits` or any `*_used_count`. In particular,
+`predictor_gnss_used_count` remains the number of logical results that used GNSS; it is not an
+invocation counter. These new fields are additive diagnostics, so this task does not change an
+existing evidence field or Gate threshold.
+
+## 6. Required focused tests
 
 ### Predictor Module
 
-In `test/test_predictor_module.cpp`, add or strengthen one focused regression named:
+In `test/test_predictor_module.cpp`, replace or strengthen the old batch-cache regression with:
 
-`PredictorModuleTest.PositiveHorizonEarlyValidationFailuresNeverReportGrowthApplied`
+`PredictorModuleTest.BatchReusesSpatialAdvisoryAndRebuildsEveryHorizonRisk`
 
-At minimum cover a finite positive horizon for:
+Use at least two positions and the six frozen horizons. Assert:
 
-- unsupported frame;
-- stale odometry or stale snapshot under the freshness guard;
-- required stale/missing GNSS epoch.
+- batch vs independent scalar equivalence for every result field;
+- `query_count=12`, spatial recompute/reuse `2/10`, GNSS/LiDAR invocations `2/2`,
+  LiDAR evaluations/hits `2/10`, and fusion invocations `12`;
+- positive-horizon covariance/PL behavior remains distinct from tau zero.
 
-For every case assert invalid/unavailable fallback, the existing exact fallback reason, no
-finite PL accepted as valid, and `covariance_growth_status != APPLIED`. Also retain assertions
-that a valid positive horizon is `APPLIED`, a valid tau-zero query is
-`NOT_REQUIRED_TAU_ZERO`, and an invalid horizon is `INVALID_HORIZON`.
+Add:
 
-### P0 production-provider publication
+`PredictorModuleTest.SpatialDedupDoesNotCrossSourceIdentityOrEarlyFailure`
 
-In `src/iap/planner/plan_manage/test/test_p0_risk_grid_runtime.cpp`, add one regression named:
+Cover the same position with different coherent snapshot/current/GNSS identities, plus an early
+invalid query before a valid query and shuffled horizon order. Assert no cross-identity reuse,
+no cache poisoning, scalar equivalence and exact counters.
 
-`P0RiskGridRuntimeStampTest.PositiveHorizonEarlyFailureKeepsPreviousGeneration`
+Retain all phase-1 covariance, LOS, typed-status and batch/scalar regressions.
 
-Use the real production Predictor provider path and an existing small deterministic grid
-fixture. First publish one successful generation. Then make a required positive-horizon input
-fail before covariance growth (prefer required missing/stale GNSS without changing production
-code solely for test access). Assert:
+### Production runtime
 
-- refresh returns false;
-- exact existing health failure reason `provider_refresh_failed` is asserted;
-- active snapshot pointer identity, generation ID and ordered voxel data equal the successful
-  baseline;
-- no partial-horizon or replacement all-unknown generation publishes.
+In `src/iap/planner/plan_manage/test/test_p0_risk_grid_runtime.cpp`, add:
 
-Strengthen existing early-return tests where useful; do not duplicate broad fixtures.
+`P0RiskGridRuntimeStampTest.WithinRefreshSpatialDedupReportsExactProductionCounts`
 
-## 4. Compatibility and evidence contract
+Use the real production provider, versioned occupancy epoch and a deterministic small
+unoccupied grid. Assert complete logical/provider shape, exact spatial recompute/reuse and
+GNSS/LiDAR/fusion invocation counts, plus the distinction between GNSS result-used count and
+GNSS invocation count.
 
-- The complete logical shape remains `12,800 x 6 = 76,800`; no counter is redefined.
-- No evidence schema, analyzer, launch/config preset, production `sigma_grow` value or Gate
-  threshold changes.
-- No map epoch, LOS Adapter, source-generation, covariance formula, P4/P5 consumer Interface or
-  existing failure string changes.
-- Update `docs/CHANGES.md`, `docs/TRACEABILITY.md` and `DEV_LOG.md` truthfully for this repair.
-- Record the review base and focused test totals. The pre-existing 132 tests plus the two named
-  regressions must pass; the expected complete focused total is 134/134 unless an existing test
-  is strengthened in place, in which case report and explain the exact total.
+Strengthen
+`P0RiskGridRuntimeStampTest.MapLosAndGrowthWorkersOneTwoFourAreScientificallyEquivalent` to
+assert identical new counts for workers 1/2/4 in addition to ordered scientific equivalence.
 
-## 5. Verification boundary
+At least one failure-after-success regression must continue to prove identical active snapshot
+identity/generation/data and zero partial publication under the optimized path.
 
-- All build, test, ROS home/log and temporary outputs must stay under
-  `results/icra27/icra010/`. Do not write to workspace-level `build/`, `install/`, `log/`,
+## 7. Repository-local offline diagnostic
+
+Update `apps/iap_predictor_offline_profile.cpp` for the current phase-2 semantic contract while
+leaving the committed ICRA-006/007 JSON artifacts and their historical tests untouched.
+
+Generate and explicitly stage only:
+
+`results/icra27/icra011/p0_phase2_spatial_dedup_profile.json`
+
+The profile must:
+
+- use the exact 40 x 40 x 8 x six-horizon shape, immutable map-LOS occupancy and a documented
+  finite synthetic `sigma_grow` test constant; the constant is algebra/profile input, not
+  production calibration;
+- run workers 1/2/4 with at least one warmup and five measured counter-only iterations;
+- keep scalar scientific validation outside the provider wall timer and compare every optimized
+  result with its scalar authority, including query metadata and covariance-growth status;
+- record 76,800 logical/dispatched/conversion/fusion counts, 12,800 spatial and GNSS/LiDAR
+  recomputes, 64,000 spatial reuses, stable checksums/counts and zero scientific mismatches;
+- report provider/component p50/p95 only as `COST_RANKING_DIAGNOSTIC`, never as Gate-0B PASS or
+  current runtime qualification;
+- use a new truthful schema/status that no longer labels missing production LOS or missing
+  sigma growth as the current state.
+
+Add `test/test_icra011_spatial_dedup_profile.py` and register it in `CMakeLists.txt`. It must
+fail closed on schema/status, workload, worker set, raw iteration count, exact invocation and
+reuse counts, scalar equivalence, stable science, finite type-7 summaries and diagnostic-only
+latency status.
+
+## 8. Verification boundary
+
+- All build, test, ROS home/log, profile and temporary outputs must stay under
+  `results/icra27/icra011/`. Do not write to workspace-level `build/`, `install/`, `log/`,
   `/root/.ros`, `/tmp` or any external path.
-- Before the ROS-aware P0 test, bind `ROS_HOME`, `ROS_LOG_DIR`, `TMPDIR` and related outputs to
-  directories under `results/icra27/icra010/`.
-- Build and run the six ICRA-009 focused suites against the repaired local libraries:
-  `test_local_occupancy`, `test_predictor_module`, `test_risk_grid_map`,
-  `test_grid_map_occupancy_epoch`, `test_p0_occupancy_epoch_adapter` and
-  `test_p0_risk_grid_runtime`. Rebuild their affected library/executable dependencies; do not
-  rely on a stale workspace-installed `libiap.so`.
-- Run the two exact new regressions first, then all six complete suites. Record commands,
-  stdout/stderr paths, counts and exit codes in `DEV_LOG.md`.
+- Before ROS-aware focused tests, bind `ROS_HOME`, `ROS_LOG_DIR`, `TMPDIR` and related outputs
+  under `results/icra27/icra011/`.
+- Build the affected root Predictor/profile targets and plan-manage P0 runtime test against
+  current repository-local libraries. Prove dynamic linkage; do not use a stale workspace
+  `libiap.so`.
+- Run the two exact Predictor regressions, the exact new runtime regression, all six retained
+  ICRA-010 focused suites, the offline profile and its Python evidence-contract test. Record
+  exact commands, paths, counts and exits in `DEV_LOG.md`.
 - Run `git diff --check`, inspect the staged diff, verify no task process remains, and verify
-  the PDF remains untracked with the same SHA-256.
-- No IAP main flow, ROS launch, smoke, qualification, bag, RViz, campaign, offline profile,
-  benchmark or GPU preflight is authorized. GPU preflight is unnecessary because the main
-  flow may not start.
+  the PDF remains solely untracked with the same SHA-256.
+- No IAP main flow, ROS launch, smoke, qualification, bag, RViz, campaign, Gate analyzer or GPU
+  preflight is authorized. GPU preflight is unnecessary because the main flow may not start.
 
-## 6. Acceptance and handoff
+## 9. Acceptance and handoff
 
-ICRA-010 is ready for Supervisor review only when:
+ICRA-011 is ready for Supervisor review only when:
 
-- no early-return path can falsely report positive-horizon growth as `APPLIED`;
-- only successful positive-horizon propagation reports `APPLIED`;
-- the production provider converts every required non-`APPLIED` result into whole-batch
-  failure and preserves the previous active generation;
-- tau zero and all ICRA-009 scientific/source-version contracts remain unchanged;
-- all six complete focused suites pass from repository-local outputs;
-- only allowed files changed and the preserved PDF remains untouched.
+- one private within-refresh SpatialAdvisory Seam deduplicates enabled GNSS and LiDAR spatial
+  work without enlarging the public Predictor Interface;
+- complete batch results are scalar-equivalent while all horizons still grow/fuse/materialize;
+- canonical counts are exactly 76,800 logical/provider/fusion, 12,800 spatial/GNSS/LiDAR
+  recompute and 64,000 spatial reuse;
+- production health exposes current-attempt counters without redefining legacy evidence;
+- worker 1/2/4 science and counts are deterministic;
+- the repository-local offline diagnostic passes its fail-closed contract without making a
+  Gate or production-calibration claim;
+- focused tests pass, only allowed files change and the PDF remains untouched.
 
-Explicitly stage only allowed files. Inspect the staged diff, commit with all applicable
-`IAP-RQ-XXX` IDs, push `dev/icra`, record the implementation commit SHA in a final
-`DEV_LOG.md` handoff commit, push again, and return control to Supervisor.
+Explicitly stage only allowed files, including the single profile JSON but no build/log/temp
+artifact. Inspect the staged diff, commit with all applicable `IAP-RQ-XXX` IDs, push
+`dev/icra`, record the implementation commit SHA in a final `DEV_LOG.md` handoff commit, push
+again, and return control to Supervisor.
 
-`DEEPSEEK` must not mark ICRA-009/010 or Gate-0B PASS, start phase 2, tune performance, choose a
-production growth value, authorize a smoke or issue the next task.
+`DEEPSEEK` must not mark ICRA-011 or Gate-0B PASS, start phase 3, change worker defaults, choose
+production calibration, authorize smoke or issue the next task.
 
 ## Allowed files
 
-### Product
+### Product and runtime evidence
 
-- `include/iap/predictor/predictor_types.hpp`;
-- `src/iap/predictor/predictor_module.cpp`.
+- `include/iap/predictor/predictor_module.hpp`;
+- `src/iap/predictor/predictor_module.cpp`;
+- `src/iap/planner/plan_manage/include/ego_planner/p0_risk_grid_runtime.h`;
+- `src/iap/planner/plan_manage/src/p0_risk_grid_runtime.cpp`;
+- `apps/iap_predictor_offline_profile.cpp`.
 
-### Tests
+### Tests and committed diagnostic
 
 - `test/test_predictor_module.cpp`;
-- `src/iap/planner/plan_manage/test/test_p0_risk_grid_runtime.cpp`.
+- `src/iap/planner/plan_manage/test/test_p0_risk_grid_runtime.cpp`;
+- `test/test_icra011_spatial_dedup_profile.py`;
+- `CMakeLists.txt`;
+- `results/icra27/icra011/p0_phase2_spatial_dedup_profile.json`.
 
 ### Required documentation
 
@@ -170,10 +273,11 @@ production growth value, authorize a smoke or issue the next task.
 
 ## Forbidden
 
-- No changes to any other product/test/build file or to `AGENTS.md`, `AGENT_STATE.md`,
+- No changes to any other product/test/build/evidence file or to `AGENTS.md`, `AGENT_STATE.md`,
   `SUPERVISOR_LOG.md`, `NEXT_TASK.md`, `docs/REQS.md`, any `docs/icra27/*.md`, launch/config,
   analyzer or Gate document.
-- No phase-2 spatial dedup, rolling/ring window, fixed lattice risk publication,
-  cross-refresh cache, source TTL/delta, worker/scheduler change, performance claim,
-  production calibration, GPU/CUDA path or iKD-tree.
-- No P1/P2/P3/P4/P5 behavior and no modification of `../glim` or another workspace repository.
+- No fixed world-lattice risk publication, rolling/ring window, boundary slab, cross-refresh
+  cache/reuse, source TTL/delta/watchdog, occupancy reverse-ray dependency, partial generation
+  publication, worker/scheduler/default change, production calibration, GPU/CUDA or iKD-tree.
+- No ROI/resolution/horizon/refresh-period/threshold reduction and no P1/P2/P3/P4/P5 behavior.
+- No modification of `../glim` or another workspace repository.

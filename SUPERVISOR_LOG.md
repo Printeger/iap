@@ -1,5 +1,55 @@
 # ICRA Supervisor Log
 
+## 2026-08-21 — ICRA-010 review and ICRA-011 phase-2 authorization
+
+### Review identity and verification
+
+- Review base: `12c2396f9b9fe31038831547e57b08f57b87cd78`.
+- Reviewed HEAD: `b0280367dae3cf61176cf80bc72f2b52e1452ce0`.
+- Reviewed commits: `5c55c76` and `b028036`; both carry `IAP-RQ-320`,
+  `IAP-RQ-321` and `IAP-RQ-322`. `dev/icra` matched `origin/dev/icra` at divergence `0 0`.
+- The aggregate diff contains exactly the seven ICRA-010 allowlisted files and passes
+  `git diff --check`. The preserved untracked PDF remains unchanged at SHA-256
+  `1f07da5631a6551a2f98c02d46fd45bc87f2f1e3e7c14e95f9a7f4a0bac844f6`.
+- The Supervisor independently reran both exact regressions (1/1 each) and the six complete
+  repository-local suites: 6/6, 41/41, 35/35, 2/2, 3/3 and 47/47, for 134/134 PASS. Runtime
+  linkage resolves the ICRA-010 `libiap.so`. No main flow, ROS launch, smoke, qualification,
+  profile, benchmark or GPU preflight ran during review.
+
+### Standards axis
+
+- PASS with zero findings: file ownership/scope, requirement IDs, synchronized
+  `CHANGES`/`TRACEABILITY`/`DEV_LOG`, repository-local evidence and handoff all conform.
+- No reportable baseline smell: `NOT_EVALUATED` is a proper domain state, the test lambda
+  removes repetition, and Module-level vs production-publication regressions cover distinct
+  Interfaces.
+
+### Spec axis
+
+- PASS with zero findings: `NOT_EVALUATED` is the default before the growth helper; only the
+  helper returns `APPLIED` or `NOT_REQUIRED_TAU_ZERO`; invalid horizon remains explicitly typed.
+- PASS: unsupported frame, stale odometry/snapshot and missing required GNSS remain non-applied;
+  valid positive/tau-zero/invalid controls are covered.
+- PASS: the real production provider rejects the positive-horizon early failure as
+  `provider_refresh_failed` and retains identical active snapshot identity, generation and
+  ordered data. No unrequested behavior or phase-2 work entered ICRA-010.
+
+### Disposition and next task
+
+- Verdict: `ICRA010_PASS_PHASE1_CLOSED`. Phase-1 P0 semantic implementation is accepted.
+- Gate-0B remains blocked, now on the staged performance refactor, production
+  calibration/activation and later qualification; this review does not qualify P0 or
+  authorize P4.
+- Unique task: `ICRA-011 / GATE_0B` in `NEXT_TASK.md`.
+- ICRA-011 enters frozen phase 2 directly: a private within-refresh SpatialAdvisory Seam inside
+  the Predictor Module reuses GNSS/LiDAR spatial work while every horizon still performs
+  covariance growth, fusion and result materialization. The public Predictor and
+  `RiskGridSnapshot` Interfaces remain unchanged, preserving Depth and Locality.
+- Canonical target counts are 76,800 logical/provider/fusion results, 12,800 spatial/GNSS/LiDAR
+  recomputes and 64,000 within-refresh reuses. Focused scalar equivalence and a repository-local
+  offline diagnostic must prove the boundary. Phase 3 rolling, cross-refresh reuse, worker
+  tuning, calibration, smoke, qualification, GPU and P4 remain unauthorized.
+
 ## 2026-08-21 — ICRA-009 review and ICRA-010 typed-status repair authorization
 
 ### Review identity and verification
