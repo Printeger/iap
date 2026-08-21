@@ -313,11 +313,6 @@ CovarianceGrowthOutcome apply_covariance_growth(
 
 }  // namespace
 
-struct PredictorModule::SpatialAdvisory {
-  GnssAdvisoryResult gnss;
-  LidarAdvisoryResult lidar;
-};
-
 PredictorModule::PredictorModule() : PredictorModule(PredictorParams{}) {}
 
 PredictorModule::PredictorModule(const PredictorParams& params)

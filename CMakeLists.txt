@@ -174,6 +174,7 @@ add_library(iap SHARED
   src/iap/predictor/lidar_advisory_predictor.cpp
   src/iap/predictor/fusion_advisory_predictor.cpp
   src/iap/predictor/predictor_module.cpp
+  src/iap/predictor/rolling_spatial_advisory_window.cpp
   # integrity monitoring (IAP-RQ-200/210/220)
   src/iap/integrity/integrity_monitor.cpp
   src/iap/integrity/integrity_fusion_policy.cpp
@@ -641,6 +642,12 @@ if(DEFINED ENV{ROS_VERSION})
       target_link_libraries(test_future_pl_field_predictor iap iap_prediction_integrity)
       ament_add_gtest(test_predictor_module test/test_predictor_module.cpp)
       target_link_libraries(test_predictor_module iap iap_predictor)
+      ament_add_gtest(test_rolling_spatial_advisory_window
+        test/test_rolling_spatial_advisory_window.cpp
+      )
+      target_link_libraries(test_rolling_spatial_advisory_window
+        iap iap_predictor
+      )
       ament_add_gtest(test_predictor_risk_conversion
         test/test_predictor_risk_conversion.cpp
       )

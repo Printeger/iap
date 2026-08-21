@@ -13,6 +13,8 @@
 
 namespace iap {
 
+class RollingSpatialAdvisoryWindow;
+
 struct PredictorBatchDiagnostics {
   bool collect_component_timing = false;
   std::size_t query_count = 0;
@@ -49,7 +51,12 @@ class PredictorModule {
   const PredictorParams& params() const { return params_; }
 
  private:
-  struct SpatialAdvisory;
+  friend class RollingSpatialAdvisoryWindow;
+
+  struct SpatialAdvisory {
+    GnssAdvisoryResult gnss;
+    LidarAdvisoryResult lidar;
+  };
 
   PredictorParams params_;
   GnssAdvisoryPredictor gnss_;

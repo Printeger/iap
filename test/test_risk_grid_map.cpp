@@ -1653,7 +1653,8 @@ TEST(RiskGridMapTest,
   int validator_calls = 0;
   for (const auto failure : {
            iap::RiskGridSourceValidation::OCCUPANCY_GENERATION_CHANGED,
-           iap::RiskGridSourceValidation::PRIOR_GENERATION_CHANGED}) {
+           iap::RiskGridSourceValidation::PRIOR_GENERATION_CHANGED,
+           iap::RiskGridSourceValidation::PREDICTOR_SPATIAL_SOURCE_CHANGED}) {
     validator_calls = 0;
     const auto validator = [&]() {
       return ++validator_calls == 1
@@ -1665,11 +1666,13 @@ TEST(RiskGridMapTest,
         Eigen::Vector3d(8.0, -7.0, 6.0), 10.5, provider,
         iap::RiskGridMap::OccupancyDiagnosticQuery{}, validator, &reason));
     EXPECT_EQ(validator_calls, 2);
-    EXPECT_EQ(reason,
-              failure ==
-                      iap::RiskGridSourceValidation::OCCUPANCY_GENERATION_CHANGED
-                  ? "occupancy_generation_changed"
-                  : "prior_generation_changed");
+    const char* expected_reason =
+        failure == iap::RiskGridSourceValidation::OCCUPANCY_GENERATION_CHANGED
+            ? "occupancy_generation_changed"
+        : failure == iap::RiskGridSourceValidation::PRIOR_GENERATION_CHANGED
+            ? "prior_generation_changed"
+            : "predictor_spatial_source_changed";
+    EXPECT_EQ(reason, expected_reason);
 
     const auto still_active = grid.acquireSnapshot();
     ASSERT_NE(still_active, nullptr);

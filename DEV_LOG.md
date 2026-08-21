@@ -1467,3 +1467,141 @@ This DEV_LOG-only commit returns control to `SUPERVISOR` review. `DEEPSEEK`
 does not mark ICRA-013, phase 3 or Gate-0B PASS, begin ring/cross-refresh reuse,
 select calibration, authorize main flow/smoke/qualification/GPU work, change
 P1/P2/P3/P4/P5 behavior, or issue a next task.
+
+## 2026-08-21T13:00:26Z — ICRA-014 START
+
+Start HEAD: `597f3b79a098842589b340e1919234c4182cee9d` after the required
+`dev/icra` synchronization (`HEAD...origin/dev/icra = 0 0`, no pull).
+`AGENT_STATE.md` is `TASK_READY` for the sole active task
+`ICRA-014 / GATE_0B`; Supervisor verdict is
+`ICRA013_PASS_PHASE3A_CLOSED` and authorizes only phase-3B dense rolling
+`SpatialAdvisory` reuse.
+
+Exact allowlist:
+
+- `CMakeLists.txt`
+- `include/iap/predictor/predictor_module.hpp`
+- `include/iap/predictor/predictor_types.hpp`
+- `include/iap/predictor/rolling_spatial_advisory_window.hpp` (new, if used)
+- `src/iap/predictor/predictor_module.cpp`
+- `src/iap/predictor/rolling_spatial_advisory_window.cpp` (new, if used)
+- `include/iap/planner/risk_grid_map.hpp`
+- `src/iap/planner/risk_grid_map.cpp`
+- `src/iap/planner/plan_manage/include/ego_planner/p0_risk_grid_runtime.h`
+- `src/iap/planner/plan_manage/src/p0_risk_grid_runtime.cpp`
+- `test/test_predictor_module.cpp`
+- `test/test_risk_grid_map.cpp`
+- `test/test_rolling_spatial_advisory_window.cpp` (new, if used)
+- `src/iap/planner/plan_manage/test/test_p0_risk_grid_runtime.cpp`
+- `DEV_LOG.md`
+- `docs/CHANGES.md`
+- `docs/TRACEABILITY.md`
+
+The sole cacheable payload is the existing private spatial GNSS/LiDAR
+`SpatialAdvisory`, including original timestamps, exact source identity and
+validity/fallback provenance. Complete Predictor results, grown priors,
+horizon risk, PL/cost/flags/staleness and materialized `RiskVoxel` data are not
+cacheable. Reuse requires collision-safe equality over frame/lattice/shape,
+Predictor configuration, GNSS epoch/policy/satellite inputs, occupancy
+generation plus immutable owner, LiDAR owner/current-integrity inputs and
+source mode; missing, ambiguous, invalid or changed identity conservatively
+invalidates affected slots. Prior-only changes remain horizon/fusion inputs
+and do not invalidate spatial GNSS evidence.
+
+The frozen no-skip `40 x 40 x 8 x 6` contract is first
+`12,800 recompute / 0 retained / 12,800 entered / 0 evicted / 76,800 fusion`,
+stationary `0 / 12,800 / 0 / 0 / 76,800`, and `+1 x`
+`320 / 12,480 / 320 / 320 / 76,800`. Candidate ring changes commit only with
+the corresponding complete immutable generation; every failure aborts without
+poisoning reusable active slots.
+
+Explicit phase-4 stop: no TTL, occupancy delta, watchdog, reverse-ray
+dependency, restamping, complete-result cache, calibration, worker/default/
+threshold/workload change, GPU/CUDA, main flow, ROS launch, smoke,
+qualification, formal benchmark, Gate analyzer or P1/P2/P3/P4/P5 product work
+is authorized. All generated output stays below `results/icra27/icra014/`.
+The retained ICRA-011 JSON remains read-only at SHA-256
+`778abd22158805c41150b4eeed9c37a3f660237a0bb0599e9a567e3533c7b32c`;
+the protected PDF remains solely untracked and unchanged at SHA-256
+`1f07da5631a6551a2f98c02d46fd45bc87f2f1e3e7c14e95f9a7f4a0bac844f6`.
+
+## 2026-08-21T13:37:08Z — ICRA-014 IMPLEMENTATION / VERIFICATION
+
+Implemented the phase-3B dense rolling `SpatialAdvisory` window and connected
+it only to the production P0 refresh provider. The ring keeps exact signed
+world keys and collision-safe immutable source identity, treats prior-only
+changes as horizon/fusion inputs, and fails closed for missing/non-finite or
+changed spatial identity. Candidate slots commit only after the corresponding
+complete RiskGrid refresh succeeds; failed or unfinished refreshes abort and
+leave the prior active window unchanged. Complete Predictor results, grown
+priors, horizon risk, PL/cost/flags/staleness, and materialized `RiskVoxel`
+state are not cached.
+
+The sole canonical non-ROS diagnostic invocation wrote
+`results/icra27/icra014/canonical_rolling_spatial_diagnostic.json`, SHA-256
+`44f47b23137d17f4b0cbc81af6827156865bdecb36089bf53f770960a2fb963d`.
+It records first/stationary/`+1 x` recompute `12800/0/320`, retained
+`0/12800/12480`, entered `12800/0/320`, evicted `0/0/320`, and fusion
+`76800/76800/76800`; every rolling result is scientifically equal to a fresh
+full rebuild.
+
+Current repository-local builds pass rolling 7/7, Predictor 45/45, RiskGrid
+43/43, LocalOccupancy 6/6, IntegritySnapshot 4/4, predictor conversion 2/2,
+P0 runtime 52/52, occupancy adapter 3/3, P1 admission 6/6, P1 selection
+17/17, P2 ranking 6/6, P3 bias 9/9, planning context 26/26, P5 gate 33/33,
+P4 A* 4/4, and the retained ICRA-011 Python profile 2/2. Final planner tests
+were rebuilt with generated ROS types, IAP, and plan_env inputs rooted below
+`results/icra27/icra014/`; tested IAP-linked consumers resolve the matching
+library SHA-256
+`bca1648834fffe32a6d88adcb8fd88890bfddeb54ef10dee9cc2b9c4f7663977`.
+
+The first two-axis review identified caller/source identity forgery, missing-
+identity hits, fresh-adapter occupancy owner churn, incomplete end validation,
+and gaps in the explicit identity/equivalence matrix. Repairs bind LiDAR owners
+inside the rolling Module, reject mismatched query snapshots/positions, force
+recompute for incomplete/non-finite identity, retain the last successful
+occupancy-generation owner, and reject concurrent current/GNSS/LiDAR source
+changes before RiskGrid publication. Tests now use a genuinely fresh adapted
+occupancy owner per capture, cover exact GNSS exclusion/noise/policy and
+distinct-owner changes, preserve the old generation on GNSS/LiDAR races, and
+compare first/stationary/sub-voxel/`+1 x` production snapshots for workers
+1/2/4 with fresh full rebuilds. The final atomicity repair captures the GNSS
+epoch and its generation under the same input-state lock. Standards and Spec
+re-reviews both PASS with zero remaining findings.
+
+The retained ICRA-011 JSON remains exact at SHA-256
+`778abd22158805c41150b4eeed9c37a3f660237a0bb0599e9a567e3533c7b32c`.
+The protected PDF remains solely untracked and exact at SHA-256
+`1f07da5631a6551a2f98c02d46fd45bc87f2f1e3e7c14e95f9a7f4a0bac844f6`.
+No ROS launch, main flow, smoke, qualification, benchmark, Gate analyzer,
+GPU/CUDA, calibration, phase-4 reuse, or P1/P2/P3/P4/P5 product work ran.
+Two-axis review, implementation commit/push, and the final DEV_LOG-only
+SUPERVISOR handoff remain.
+
+## 2026-08-21T14:01:44Z — ICRA-014 TWO-AXIS REVIEW CLOSURE / PRE-PUSH
+
+Standards and Spec re-reviews both PASS with zero remaining findings. The
+closed findings cover internal owner binding, query/candidate identity,
+missing/non-finite identity recomputation, successful-generation occupancy
+owner retention across fresh adapter captures, atomic GNSS epoch/generation
+capture, end-of-attempt current/GNSS/LiDAR validation, source-race rollback,
+and the required fresh-full equivalence matrix.
+
+Final repository-local suites pass: rolling 7/7 (the canonical test remains
+disabled and was not rerun), Predictor 45/45, RiskGrid 43/43,
+LocalOccupancy 6/6, IntegritySnapshot 4/4, predictor conversion 2/2, P0
+runtime 52/52, occupancy adapter 3/3, P1 admission 6/6, P1 selection 17/17,
+P2 ranking 6/6, P3 bias 9/9, planning context 26/26, P5 gate 33/33, P4 A*
+4/4, and retained ICRA-011 profile 2/2. Seven linked consumers resolve
+`results/icra27/icra014/build_iap/libiap.so`, SHA-256
+`bca1648834fffe32a6d88adcb8fd88890bfddeb54ef10dee9cc2b9c4f7663977`.
+`git diff --check` is clean.
+
+The sole canonical artifact remains SHA-256
+`44f47b23137d17f4b0cbc81af6827156865bdecb36089bf53f770960a2fb963d`;
+the retained ICRA-011 JSON remains
+`778abd22158805c41150b4eeed9c37a3f660237a0bb0599e9a567e3533c7b32c`;
+the protected, solely untracked PDF remains
+`1f07da5631a6551a2f98c02d46fd45bc87f2f1e3e7c14e95f9a7f4a0bac844f6`.
+No forbidden flow ran. Implementation commit/push and the final DEV_LOG-only
+SUPERVISOR handoff remain; DEEPSEEK does not mark phase 3 or Gate-0B PASS.

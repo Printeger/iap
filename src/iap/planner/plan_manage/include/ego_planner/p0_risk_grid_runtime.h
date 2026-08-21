@@ -24,6 +24,7 @@
 #include <iap/planner/integrity_snapshot.hpp>
 #include <iap/planner/risk_grid_map.hpp>
 #include <iap/predictor/predictor_types.hpp>
+#include <iap/predictor/rolling_spatial_advisory_window.hpp>
 #include <nav_msgs/msg/odometry.hpp>
 #include <rclcpp/rclcpp.hpp>
 #include <sensor_msgs/msg/nav_sat_fix.hpp>
@@ -171,6 +172,11 @@ class P0RiskGridRuntime {
     std::size_t predictor_gnss_advisory_invocation_count = 0;
     std::size_t predictor_lidar_advisory_invocation_count = 0;
     std::size_t predictor_horizon_fusion_count = 0;
+    std::size_t predictor_spatial_retained_position_count = 0;
+    std::size_t predictor_spatial_entered_position_count = 0;
+    std::size_t predictor_spatial_evicted_position_count = 0;
+    std::size_t predictor_spatial_full_invalidation_count = 0;
+    std::string predictor_spatial_invalidation_reason = "none";
     uint64_t input_callback_count = 0;
     uint64_t health_callback_count = 0;
     bool snapshot_available = false;
@@ -196,7 +202,9 @@ class P0RiskGridRuntime {
   const iap::GnssEpoch* activeGnssEpoch(double query_stamp) const;
   Eigen::Matrix3d currentPriorInformation(
       const iap::CurrentIntegrityState& current) const;
-  bool buildSnapshot(double now_s, iap::IntegritySnapshot* snapshot) const;
+  bool buildSnapshot(
+      double now_s, iap::IntegritySnapshot* snapshot,
+      uint64_t* gnss_epoch_generation = nullptr) const;
   iap::RiskGridHealth addLidarPredictorInputHealth(
       iap::RiskGridHealth health) const;
   bool p0_6_fixture_occupied(const Eigen::Vector3d& pos) const;
@@ -218,6 +226,10 @@ class P0RiskGridRuntime {
       occupancy_diagnostic_query_factory_;
   std::function<P0OccupancyEpochCapture()> occupancy_epoch_factory_;
   iap::IntegritySnapshotBuilder snapshot_builder_;
+  iap::RollingSpatialAdvisoryWindow rolling_spatial_window_;
+  std::shared_ptr<const iap::LocalOccupancyGrid>
+      rolling_occupancy_owner_;
+  uint64_t rolling_occupancy_generation_ = 0;
 
   // Inputs, heavy refresh, and health publication deliberately use distinct
   // execution paths.  Refresh may take longer than a sensor period, but must
@@ -256,6 +268,7 @@ class P0RiskGridRuntime {
   uint64_t latest_current_generation_ = 0;
   double latest_gnss_epoch_stamp_ = std::numeric_limits<double>::quiet_NaN();
   uint64_t latest_gnss_epoch_satellite_count_ = 0;
+  uint64_t latest_gnss_epoch_generation_ = 0;
   double last_refresh_stamp_s_ = std::numeric_limits<double>::quiet_NaN();
   double last_grid_stamp_s_ = std::numeric_limits<double>::quiet_NaN();
   double last_refresh_elapsed_ms_ = std::numeric_limits<double>::quiet_NaN();
@@ -274,6 +287,7 @@ class P0RiskGridRuntime {
   std::size_t last_predictor_gnss_advisory_invocation_count_ = 0;
   std::size_t last_predictor_lidar_advisory_invocation_count_ = 0;
   std::size_t last_predictor_horizon_fusion_count_ = 0;
+  iap::RollingSpatialRefreshDiagnostics last_rolling_spatial_diagnostics_;
   double last_refresh_start_stamp_s_ = std::numeric_limits<double>::quiet_NaN();
   double last_refresh_end_stamp_s_ = std::numeric_limits<double>::quiet_NaN();
   double last_health_callback_stamp_s_ = std::numeric_limits<double>::quiet_NaN();

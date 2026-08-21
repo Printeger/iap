@@ -1000,6 +1000,9 @@ bool RiskGridMap::refreshFromProvider(
       case RiskGridSourceValidation::PRIOR_GENERATION_CHANGED:
         failure = "prior_generation_changed";
         break;
+      case RiskGridSourceValidation::PREDICTOR_SPATIAL_SOURCE_CHANGED:
+        failure = "predictor_spatial_source_changed";
+        break;
     }
     if (reason) {
       *reason = failure;
