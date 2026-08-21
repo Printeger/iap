@@ -214,6 +214,20 @@ bool flag_set(const uint32_t flags, const iap::PredictorResultFlags flag) {
   return (flags & static_cast<uint32_t>(flag)) != 0u;
 }
 
+void expect_scalar_equivalent(const double actual, const double expected) {
+  if (std::isfinite(actual) || std::isfinite(expected)) {
+    ASSERT_TRUE(std::isfinite(actual));
+    ASSERT_TRUE(std::isfinite(expected));
+    EXPECT_NEAR(actual, expected, 1.0e-12);
+    return;
+  }
+  EXPECT_EQ(std::isnan(actual), std::isnan(expected));
+  EXPECT_EQ(std::isinf(actual), std::isinf(expected));
+  if (std::isinf(actual) && std::isinf(expected)) {
+    EXPECT_EQ(std::signbit(actual), std::signbit(expected));
+  }
+}
+
 void expect_gnss_scientific_eq(const iap::GnssAdvisoryResult& actual,
                                const iap::GnssAdvisoryResult& expected) {
   EXPECT_EQ(actual.available, expected.available);
@@ -221,21 +235,23 @@ void expect_gnss_scientific_eq(const iap::GnssAdvisoryResult& actual,
   EXPECT_EQ(actual.fallback, expected.fallback);
   EXPECT_EQ(actual.fallback_reason, expected.fallback_reason);
   EXPECT_EQ(actual.information_state, expected.information_state);
-  EXPECT_DOUBLE_EQ(actual.hpl, expected.hpl);
-  EXPECT_DOUBLE_EQ(actual.vpl, expected.vpl);
-  EXPECT_DOUBLE_EQ(actual.pl_scalar, expected.pl_scalar);
-  EXPECT_DOUBLE_EQ(actual.pl_e, expected.pl_e);
-  EXPECT_DOUBLE_EQ(actual.pl_n, expected.pl_n);
-  EXPECT_DOUBLE_EQ(actual.pl_u, expected.pl_u);
-  EXPECT_DOUBLE_EQ(actual.pl_ff_h, expected.pl_ff_h);
-  EXPECT_DOUBLE_EQ(actual.pl_ff_v, expected.pl_ff_v);
-  EXPECT_DOUBLE_EQ(actual.sigma_h, expected.sigma_h);
-  EXPECT_DOUBLE_EQ(actual.sigma_v, expected.sigma_v);
-  EXPECT_DOUBLE_EQ(actual.pdop, expected.pdop);
-  EXPECT_DOUBLE_EQ(actual.hdop, expected.hdop);
-  EXPECT_DOUBLE_EQ(actual.vdop, expected.vdop);
-  EXPECT_DOUBLE_EQ(actual.effective_sigma_mean, expected.effective_sigma_mean);
-  EXPECT_DOUBLE_EQ(actual.effective_sigma_max, expected.effective_sigma_max);
+  expect_scalar_equivalent(actual.hpl, expected.hpl);
+  expect_scalar_equivalent(actual.vpl, expected.vpl);
+  expect_scalar_equivalent(actual.pl_scalar, expected.pl_scalar);
+  expect_scalar_equivalent(actual.pl_e, expected.pl_e);
+  expect_scalar_equivalent(actual.pl_n, expected.pl_n);
+  expect_scalar_equivalent(actual.pl_u, expected.pl_u);
+  expect_scalar_equivalent(actual.pl_ff_h, expected.pl_ff_h);
+  expect_scalar_equivalent(actual.pl_ff_v, expected.pl_ff_v);
+  expect_scalar_equivalent(actual.sigma_h, expected.sigma_h);
+  expect_scalar_equivalent(actual.sigma_v, expected.sigma_v);
+  expect_scalar_equivalent(actual.pdop, expected.pdop);
+  expect_scalar_equivalent(actual.hdop, expected.hdop);
+  expect_scalar_equivalent(actual.vdop, expected.vdop);
+  expect_scalar_equivalent(actual.effective_sigma_mean,
+                           expected.effective_sigma_mean);
+  expect_scalar_equivalent(actual.effective_sigma_max,
+                           expected.effective_sigma_max);
   EXPECT_EQ(actual.n_visible, expected.n_visible);
   EXPECT_EQ(actual.n_used, expected.n_used);
   EXPECT_EQ(actual.n_hypotheses, expected.n_hypotheses);
@@ -246,10 +262,10 @@ void expect_gnss_scientific_eq(const iap::GnssAdvisoryResult& actual,
   EXPECT_TRUE(actual.lambda_gnss.isApprox(expected.lambda_gnss, 0.0));
   EXPECT_EQ(actual.fim_valid, expected.fim_valid);
   EXPECT_EQ(actual.fim_regularized, expected.fim_regularized);
-  EXPECT_DOUBLE_EQ(actual.lambda_trace, expected.lambda_trace);
-  EXPECT_DOUBLE_EQ(actual.lambda_min_eig, expected.lambda_min_eig);
-  EXPECT_DOUBLE_EQ(actual.lambda_max_eig, expected.lambda_max_eig);
-  EXPECT_DOUBLE_EQ(actual.lambda_condition, expected.lambda_condition);
+  expect_scalar_equivalent(actual.lambda_trace, expected.lambda_trace);
+  expect_scalar_equivalent(actual.lambda_min_eig, expected.lambda_min_eig);
+  expect_scalar_equivalent(actual.lambda_max_eig, expected.lambda_max_eig);
+  expect_scalar_equivalent(actual.lambda_condition, expected.lambda_condition);
   EXPECT_EQ(actual.fim_fallback_reason, expected.fim_fallback_reason);
 }
 
@@ -266,17 +282,17 @@ void expect_lidar_scientific_eq(const iap::LidarAdvisoryResult& actual,
   EXPECT_EQ(actual.fim_valid, expected.fim_valid);
   EXPECT_EQ(actual.legacy_valid, expected.legacy_valid);
   EXPECT_EQ(actual.fim_regularized, expected.fim_regularized);
-  EXPECT_DOUBLE_EQ(actual.lidar_alpha, expected.lidar_alpha);
-  EXPECT_DOUBLE_EQ(actual.tdop_proxy, expected.tdop_proxy);
-  EXPECT_DOUBLE_EQ(actual.condition, expected.condition);
+  expect_scalar_equivalent(actual.lidar_alpha, expected.lidar_alpha);
+  expect_scalar_equivalent(actual.tdop_proxy, expected.tdop_proxy);
+  expect_scalar_equivalent(actual.condition, expected.condition);
   EXPECT_EQ(actual.n_primitives, expected.n_primitives);
   EXPECT_EQ(actual.n_valid_normals, expected.n_valid_normals);
-  EXPECT_DOUBLE_EQ(actual.bias_h, expected.bias_h);
-  EXPECT_DOUBLE_EQ(actual.bias_v, expected.bias_v);
-  EXPECT_DOUBLE_EQ(actual.lambda_trace, expected.lambda_trace);
-  EXPECT_DOUBLE_EQ(actual.lambda_min_eig, expected.lambda_min_eig);
-  EXPECT_DOUBLE_EQ(actual.lambda_max_eig, expected.lambda_max_eig);
-  EXPECT_DOUBLE_EQ(actual.lambda_condition, expected.lambda_condition);
+  expect_scalar_equivalent(actual.bias_h, expected.bias_h);
+  expect_scalar_equivalent(actual.bias_v, expected.bias_v);
+  expect_scalar_equivalent(actual.lambda_trace, expected.lambda_trace);
+  expect_scalar_equivalent(actual.lambda_min_eig, expected.lambda_min_eig);
+  expect_scalar_equivalent(actual.lambda_max_eig, expected.lambda_max_eig);
+  expect_scalar_equivalent(actual.lambda_condition, expected.lambda_condition);
 }
 
 void expect_fusion_scientific_eq(const iap::FusionAdvisoryResult& actual,
@@ -286,11 +302,11 @@ void expect_fusion_scientific_eq(const iap::FusionAdvisoryResult& actual,
   EXPECT_EQ(actual.fallback, expected.fallback);
   EXPECT_EQ(actual.fallback_reason, expected.fallback_reason);
   EXPECT_EQ(actual.information_state, expected.information_state);
-  EXPECT_DOUBLE_EQ(actual.hpl, expected.hpl);
-  EXPECT_DOUBLE_EQ(actual.vpl, expected.vpl);
-  EXPECT_DOUBLE_EQ(actual.pl_scalar, expected.pl_scalar);
-  EXPECT_DOUBLE_EQ(actual.sigma_h, expected.sigma_h);
-  EXPECT_DOUBLE_EQ(actual.sigma_v, expected.sigma_v);
+  expect_scalar_equivalent(actual.hpl, expected.hpl);
+  expect_scalar_equivalent(actual.vpl, expected.vpl);
+  expect_scalar_equivalent(actual.pl_scalar, expected.pl_scalar);
+  expect_scalar_equivalent(actual.sigma_h, expected.sigma_h);
+  expect_scalar_equivalent(actual.sigma_v, expected.sigma_v);
   EXPECT_TRUE(actual.lambda_prior.isApprox(expected.lambda_prior, 0.0));
   EXPECT_TRUE(actual.lambda_gnss.isApprox(expected.lambda_gnss, 0.0));
   EXPECT_TRUE(actual.lambda_lidar.isApprox(expected.lambda_lidar, 0.0));
@@ -305,13 +321,20 @@ void expect_fusion_scientific_eq(const iap::FusionAdvisoryResult& actual,
   EXPECT_EQ(actual.conservative_max_applied,
             expected.conservative_max_applied);
   EXPECT_EQ(actual.fusion_mode, expected.fusion_mode);
-  EXPECT_DOUBLE_EQ(actual.lambda_prior_trace, expected.lambda_prior_trace);
-  EXPECT_DOUBLE_EQ(actual.lambda_gnss_trace, expected.lambda_gnss_trace);
-  EXPECT_DOUBLE_EQ(actual.lambda_lidar_trace, expected.lambda_lidar_trace);
-  EXPECT_DOUBLE_EQ(actual.lambda_pred_trace, expected.lambda_pred_trace);
-  EXPECT_DOUBLE_EQ(actual.lambda_pred_min_eig, expected.lambda_pred_min_eig);
-  EXPECT_DOUBLE_EQ(actual.lambda_pred_max_eig, expected.lambda_pred_max_eig);
-  EXPECT_DOUBLE_EQ(actual.lambda_pred_condition, expected.lambda_pred_condition);
+  expect_scalar_equivalent(actual.lambda_prior_trace,
+                           expected.lambda_prior_trace);
+  expect_scalar_equivalent(actual.lambda_gnss_trace,
+                           expected.lambda_gnss_trace);
+  expect_scalar_equivalent(actual.lambda_lidar_trace,
+                           expected.lambda_lidar_trace);
+  expect_scalar_equivalent(actual.lambda_pred_trace,
+                           expected.lambda_pred_trace);
+  expect_scalar_equivalent(actual.lambda_pred_min_eig,
+                           expected.lambda_pred_min_eig);
+  expect_scalar_equivalent(actual.lambda_pred_max_eig,
+                           expected.lambda_pred_max_eig);
+  expect_scalar_equivalent(actual.lambda_pred_condition,
+                           expected.lambda_pred_condition);
 }
 
 void expect_scientific_result_eq(const iap::PredictorQueryResult& actual,
@@ -321,7 +344,14 @@ void expect_scientific_result_eq(const iap::PredictorQueryResult& actual,
   EXPECT_EQ(actual.fallback, expected.fallback);
   EXPECT_EQ(actual.fallback_reason, expected.fallback_reason);
   EXPECT_EQ(actual.query_source, expected.query_source);
+  EXPECT_TRUE(actual.query_position_map.isApprox(
+      expected.query_position_map, 0.0));
+  expect_scalar_equivalent(actual.query_time_s, expected.query_time_s);
+  expect_scalar_equivalent(actual.horizon_s, expected.horizon_s);
+  EXPECT_EQ(actual.frame_id, expected.frame_id);
   EXPECT_EQ(actual.source_flags, expected.source_flags);
+  EXPECT_EQ(actual.covariance_growth_status,
+            expected.covariance_growth_status);
   expect_gnss_scientific_eq(actual.gnss, expected.gnss);
   expect_lidar_scientific_eq(actual.lidar, expected.lidar);
   expect_fusion_scientific_eq(actual.fused, expected.fused);
@@ -876,8 +906,11 @@ TEST(PredictorModuleTest, ModuleFusesGnssAndLidarWithoutGridFields) {
   write_fusion_lambda_artifact(result.fused);
 }
 
-TEST(PredictorModuleTest, BatchMatchesScalarAndCachesLidarPerPosition) {
-  iap::PredictorModule module(make_params());
+TEST(PredictorModuleTest,
+     BatchReusesSpatialAdvisoryAndRebuildsEveryHorizonRisk) {
+  auto params = make_params();
+  params.covariance_growth.sigma_grow_m_sqrt_s = 0.15;
+  iap::PredictorModule module(params);
   module.set_lidar_fim_primitives(make_lidar_primitives());
   const auto snapshot = make_snapshot(true, true);
   std::vector<iap::PredictorQueryInput> inputs;
@@ -896,23 +929,110 @@ TEST(PredictorModuleTest, BatchMatchesScalarAndCachesLidarPerPosition) {
   ASSERT_EQ(batch.size(), inputs.size());
   EXPECT_EQ(diagnostics.query_count, 12U);
   EXPECT_EQ(diagnostics.unique_positions, 2U);
+  EXPECT_EQ(diagnostics.spatial_advisory_recompute_count, 2U);
+  EXPECT_EQ(diagnostics.spatial_advisory_reuse_count, 10U);
   EXPECT_EQ(diagnostics.lidar_evaluations, 2U);
   EXPECT_EQ(diagnostics.lidar_cache_hits, 10U);
-  EXPECT_EQ(diagnostics.gnss_advisory_invocations, 12U);
+  EXPECT_EQ(diagnostics.gnss_advisory_invocations, 2U);
   EXPECT_EQ(diagnostics.lidar_advisory_invocations, 2U);
   EXPECT_EQ(diagnostics.fusion_advisory_invocations, 12U);
   EXPECT_GT(diagnostics.gnss_advisory_duration_ns, 0U);
   EXPECT_GT(diagnostics.lidar_advisory_duration_ns, 0U);
   EXPECT_GT(diagnostics.fusion_advisory_duration_ns, 0U);
   for (std::size_t index = 0; index < inputs.size(); ++index) {
+    SCOPED_TRACE(index);
     const auto scalar = module.query(inputs[index]);
-    EXPECT_EQ(batch[index].valid, scalar.valid);
-    EXPECT_EQ(batch[index].fallback_reason, scalar.fallback_reason);
-    EXPECT_DOUBLE_EQ(batch[index].fused.hpl, scalar.fused.hpl);
-    EXPECT_DOUBLE_EQ(batch[index].fused.vpl, scalar.fused.vpl);
-    EXPECT_TRUE(batch[index].lidar.lambda_lidar.isApprox(
-        scalar.lidar.lambda_lidar, 1.0e-12));
+    expect_scientific_result_eq(batch[index], scalar);
   }
+  EXPECT_LT(batch[5].fused.lambda_prior_trace,
+            batch.front().fused.lambda_prior_trace);
+  EXPECT_LT(batch.front().fused.hpl, batch[5].fused.hpl);
+}
+
+TEST(PredictorModuleTest,
+     SpatialDedupDoesNotCrossSourceIdentityOrEarlyFailure) {
+  auto params = make_params();
+  params.covariance_growth.sigma_grow_m_sqrt_s = 0.15;
+  params.freshness.enabled = true;
+  params.freshness.max_odom_age_s = 0.5;
+  params.freshness.max_integrity_age_s = 0.5;
+  params.freshness.max_gnss_age_s = 0.5;
+  params.freshness.max_snapshot_age_s = 0.5;
+  iap::PredictorModule module(params);
+  module.set_lidar_fim_primitives(make_lidar_primitives());
+
+  auto source_a = make_snapshot(true, true);
+  source_a.prior_source_generation = 1u;
+  auto source_b = source_a;
+  source_b.stamp = 101.0;
+  source_b.pose_stamp = 101.0;
+  source_b.current.stamp = 101.0;
+  source_b.gnss_epoch.stamp = 101.0;
+  source_b.prior_source_generation = 2u;
+
+  const Eigen::Vector3d position(0.5, -0.25, 1.0);
+  std::vector<iap::PredictorQueryInput> inputs;
+  inputs.emplace_back(position, source_a, 100.5, 0.5, "world", 100.0);
+  inputs.emplace_back(position, source_a, 101.5, 1.5, "map", 100.0);
+  inputs.emplace_back(position, source_b, 103.5, 2.5, "map", 101.0);
+  inputs.emplace_back(position, source_a, 100.0, 0.0, "map", 100.0);
+  inputs.emplace_back(position, source_a, 100.5, 0.5, "enu", 100.0);
+  inputs.emplace_back(position, source_b, 101.0, 0.0, "map", 101.0);
+  inputs.emplace_back(position, source_a, 102.0, 2.0, "enu", 100.0);
+
+  iap::PredictorBatchDiagnostics diagnostics;
+  const auto batch = module.queryBatch(inputs, &diagnostics);
+
+  ASSERT_EQ(batch.size(), inputs.size());
+  for (std::size_t index = 0; index < inputs.size(); ++index) {
+    SCOPED_TRACE(index);
+    expect_scientific_result_eq(batch[index], module.query(inputs[index]));
+  }
+  EXPECT_EQ(batch.front().fallback_reason, "unsupported_query_frame");
+  EXPECT_EQ(batch.front().covariance_growth_status,
+            iap::CovarianceGrowthStatus::NOT_EVALUATED);
+  EXPECT_EQ(diagnostics.query_count, 7U);
+  EXPECT_EQ(diagnostics.unique_positions, 3U);
+  EXPECT_EQ(diagnostics.spatial_advisory_recompute_count, 3U);
+  EXPECT_EQ(diagnostics.spatial_advisory_reuse_count, 3U);
+  EXPECT_EQ(diagnostics.gnss_advisory_invocations, 3U);
+  EXPECT_EQ(diagnostics.lidar_advisory_invocations, 3U);
+  EXPECT_EQ(diagnostics.lidar_evaluations, 3U);
+  EXPECT_EQ(diagnostics.lidar_cache_hits, 3U);
+  EXPECT_EQ(diagnostics.fusion_advisory_invocations, 6U);
+}
+
+TEST(PredictorModuleTest,
+     SpatialDedupUsesEffectiveFreshnessReferenceWhenImplicit) {
+  auto params = make_params();
+  params.freshness.enabled = true;
+  params.freshness.max_odom_age_s = 2.0;
+  params.freshness.max_integrity_age_s = 2.0;
+  params.freshness.max_gnss_age_s = 0.5;
+  params.freshness.max_snapshot_age_s = 2.0;
+  iap::PredictorModule module(params);
+  module.set_lidar_fim_primitives(make_lidar_primitives());
+
+  const auto snapshot = make_snapshot(true, true);
+  const Eigen::Vector3d position(0.5, -0.25, 1.0);
+  std::vector<iap::PredictorQueryInput> inputs;
+  inputs.emplace_back(position, snapshot, 100.25, 0.0, "map");
+  inputs.emplace_back(position, snapshot, 100.75, 0.0, "map");
+
+  iap::PredictorBatchDiagnostics diagnostics;
+  const auto batch = module.queryBatch(inputs, &diagnostics);
+
+  ASSERT_EQ(batch.size(), inputs.size());
+  expect_scientific_result_eq(batch[0], module.query(inputs[0]));
+  expect_scientific_result_eq(batch[1], module.query(inputs[1]));
+  EXPECT_TRUE(batch[0].gnss.available);
+  EXPECT_FALSE(batch[1].gnss.available);
+  EXPECT_EQ(batch[1].gnss.fallback_reason, "stale_gnss_epoch");
+  EXPECT_EQ(diagnostics.spatial_advisory_recompute_count, 2U);
+  EXPECT_EQ(diagnostics.spatial_advisory_reuse_count, 0U);
+  EXPECT_EQ(diagnostics.gnss_advisory_invocations, 1U);
+  EXPECT_EQ(diagnostics.lidar_advisory_invocations, 2U);
+  EXPECT_EQ(diagnostics.fusion_advisory_invocations, 2U);
 }
 
 TEST(PredictorModuleTest, TauZeroCovarianceGrowthMatchesAcceptedBaseline) {

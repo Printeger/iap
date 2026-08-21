@@ -281,6 +281,16 @@ class PredictorModuleRiskProvider final : public iap::RiskPredictionProvider {
               outcome.diagnostics.unique_positions += diagnostics.unique_positions;
               outcome.diagnostics.lidar_evaluations += diagnostics.lidar_evaluations;
               outcome.diagnostics.lidar_cache_hits += diagnostics.lidar_cache_hits;
+              outcome.diagnostics.spatial_advisory_recompute_count +=
+                  diagnostics.spatial_advisory_recompute_count;
+              outcome.diagnostics.spatial_advisory_reuse_count +=
+                  diagnostics.spatial_advisory_reuse_count;
+              outcome.diagnostics.gnss_advisory_invocations +=
+                  diagnostics.gnss_advisory_invocations;
+              outcome.diagnostics.lidar_advisory_invocations +=
+                  diagnostics.lidar_advisory_invocations;
+              outcome.diagnostics.fusion_advisory_invocations +=
+                  diagnostics.fusion_advisory_invocations;
             }
             return outcome;
           }));
@@ -295,6 +305,16 @@ class PredictorModuleRiskProvider final : public iap::RiskPredictionProvider {
       last_diagnostics_.unique_positions += diagnostics.unique_positions;
       last_diagnostics_.lidar_evaluations += diagnostics.lidar_evaluations;
       last_diagnostics_.lidar_cache_hits += diagnostics.lidar_cache_hits;
+      last_diagnostics_.spatial_advisory_recompute_count +=
+          diagnostics.spatial_advisory_recompute_count;
+      last_diagnostics_.spatial_advisory_reuse_count +=
+          diagnostics.spatial_advisory_reuse_count;
+      last_diagnostics_.gnss_advisory_invocations +=
+          diagnostics.gnss_advisory_invocations;
+      last_diagnostics_.lidar_advisory_invocations +=
+          diagnostics.lidar_advisory_invocations;
+      last_diagnostics_.fusion_advisory_invocations +=
+          diagnostics.fusion_advisory_invocations;
     }
     return growth_valid;
   }
@@ -917,6 +937,11 @@ void P0RiskGridRuntime::refreshTimerCallback() {
     last_refresh_succeeded_ = false;
     last_snapshot_failure_reason_ = pre_build_failure;
     last_refresh_query_count_ = 0;
+    last_predictor_spatial_advisory_recompute_count_ = 0;
+    last_predictor_spatial_advisory_reuse_count_ = 0;
+    last_predictor_gnss_advisory_invocation_count_ = 0;
+    last_predictor_lidar_advisory_invocation_count_ = 0;
+    last_predictor_horizon_fusion_count_ = 0;
     last_provider_batch_duration_ms_ =
         std::numeric_limits<double>::quiet_NaN();
   }
@@ -1163,6 +1188,16 @@ void P0RiskGridRuntime::refreshTimerCallback() {
       last_predictor_unique_positions_ = diagnostics.unique_positions;
       last_predictor_lidar_evaluations_ = diagnostics.lidar_evaluations;
       last_predictor_lidar_cache_hits_ = diagnostics.lidar_cache_hits;
+      last_predictor_spatial_advisory_recompute_count_ =
+          diagnostics.spatial_advisory_recompute_count;
+      last_predictor_spatial_advisory_reuse_count_ =
+          diagnostics.spatial_advisory_reuse_count;
+      last_predictor_gnss_advisory_invocation_count_ =
+          diagnostics.gnss_advisory_invocations;
+      last_predictor_lidar_advisory_invocation_count_ =
+          diagnostics.lidar_advisory_invocations;
+      last_predictor_horizon_fusion_count_ =
+          diagnostics.fusion_advisory_invocations;
     }
     last_refresh_end_stamp_s_ = refresh_end_stamp_s;
     last_refresh_succeeded_ = refresh_succeeded;
@@ -1320,6 +1355,16 @@ void P0RiskGridRuntime::publishHealth(const iap::RiskGridHealth& health,
       << "\"predictor_unique_positions\":" << state.predictor_unique_positions << ","
       << "\"predictor_lidar_evaluations\":" << state.predictor_lidar_evaluations << ","
       << "\"predictor_lidar_cache_hits\":" << state.predictor_lidar_cache_hits << ","
+      << "\"predictor_spatial_advisory_recompute_count\":"
+      << state.predictor_spatial_advisory_recompute_count << ","
+      << "\"predictor_spatial_advisory_reuse_count\":"
+      << state.predictor_spatial_advisory_reuse_count << ","
+      << "\"predictor_gnss_advisory_invocation_count\":"
+      << state.predictor_gnss_advisory_invocation_count << ","
+      << "\"predictor_lidar_advisory_invocation_count\":"
+      << state.predictor_lidar_advisory_invocation_count << ","
+      << "\"predictor_horizon_fusion_count\":"
+      << state.predictor_horizon_fusion_count << ","
       << "\"predictor_requested_worker_count\":" << config_.predictor_requested_worker_count << ","
       << "\"predictor_effective_worker_count\":" << config_.predictor_effective_worker_count << ","
       << "\"reason\":" << jsonString(out_health.reason)
@@ -1407,6 +1452,16 @@ P0RiskGridRuntime::healthPublicationStateSnapshot() const {
   state.predictor_unique_positions = last_predictor_unique_positions_;
   state.predictor_lidar_evaluations = last_predictor_lidar_evaluations_;
   state.predictor_lidar_cache_hits = last_predictor_lidar_cache_hits_;
+  state.predictor_spatial_advisory_recompute_count =
+      last_predictor_spatial_advisory_recompute_count_;
+  state.predictor_spatial_advisory_reuse_count =
+      last_predictor_spatial_advisory_reuse_count_;
+  state.predictor_gnss_advisory_invocation_count =
+      last_predictor_gnss_advisory_invocation_count_;
+  state.predictor_lidar_advisory_invocation_count =
+      last_predictor_lidar_advisory_invocation_count_;
+  state.predictor_horizon_fusion_count =
+      last_predictor_horizon_fusion_count_;
   state.input_callback_count = input_callback_count_;
   state.health_callback_count = health_callback_count_;
   state.snapshot_available = last_snapshot_available_;

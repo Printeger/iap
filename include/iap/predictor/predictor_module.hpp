@@ -19,6 +19,8 @@ struct PredictorBatchDiagnostics {
   std::size_t unique_positions = 0;
   std::size_t lidar_evaluations = 0;
   std::size_t lidar_cache_hits = 0;
+  std::size_t spatial_advisory_recompute_count = 0;
+  std::size_t spatial_advisory_reuse_count = 0;
   std::size_t gnss_advisory_invocations = 0;
   std::size_t lidar_advisory_invocations = 0;
   std::size_t fusion_advisory_invocations = 0;
@@ -47,13 +49,16 @@ class PredictorModule {
   const PredictorParams& params() const { return params_; }
 
  private:
+  struct SpatialAdvisory;
+
   PredictorParams params_;
   GnssAdvisoryPredictor gnss_;
   LidarAdvisoryPredictor lidar_;
   FusionAdvisoryPredictor fusion_;
-  PredictorQueryResult queryWithLidar(
+  PredictorQueryResult queryWithSpatialAdvisory(
       const PredictorQueryInput& input,
-      const LidarAdvisoryResult* cached_lidar,
+      const SpatialAdvisory* cached_spatial_advisory,
+      SpatialAdvisory* evaluated_spatial_advisory,
       PredictorBatchDiagnostics* diagnostics) const;
 };
 

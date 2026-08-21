@@ -1,6 +1,6 @@
 // Repository-local, non-ROS profiling seam for the production-shaped P0
 // Predictor provider workload. This executable is diagnostic only: it does
-// not alter the runtime provider, formal worker count, caching, or results.
+// not alter runtime configuration, formal worker count, or published results.
 
 #include <iap/planner/predictor_risk_conversion.hpp>
 #include <iap/predictor/predictor_module.hpp>
@@ -42,6 +42,7 @@ constexpr int kGridY = 40;
 constexpr int kGridZ = 8;
 constexpr double kResolutionM = 0.75;
 constexpr std::array<double, 6> kHorizons{{0.0, 0.5, 1.0, 1.5, 2.0, 2.5}};
+constexpr double kSyntheticSigmaGrowMSqrtS = 0.15;
 constexpr std::size_t kLogicalPositionCount =
     static_cast<std::size_t>(kGridX * kGridY * kGridZ);
 constexpr std::size_t kLogicalQueryCount =
@@ -196,7 +197,12 @@ std::uint64_t scientific_hash(const iap::PredictorQueryResult& value) {
   hash_bool(&hash, value.fallback);
   hash_string(&hash, value.fallback_reason);
   hash_string(&hash, value.query_source);
+  hash_eigen(&hash, value.query_position_map);
+  hash_double(&hash, value.query_time_s);
+  hash_double(&hash, value.horizon_s);
+  hash_string(&hash, value.frame_id);
   hash_scalar(&hash, value.source_flags);
+  hash_scalar(&hash, static_cast<int>(value.covariance_growth_status));
   hash_gnss(&hash, value.gnss);
   hash_lidar(&hash, value.lidar);
   hash_fusion(&hash, value.fused);
@@ -262,6 +268,7 @@ iap::IntegritySnapshot make_snapshot() {
   snapshot.gnss_epoch = make_epoch();
   snapshot.has_lambda_base = true;
   snapshot.lambda_base_pos = 0.25 * Eigen::Matrix3d::Identity();
+  snapshot.prior_source_generation = 1u;
   return snapshot;
 }
 
@@ -316,6 +323,8 @@ iap::PredictorModule make_module(
   params.lidar.enable_legacy_observability = true;
   params.lidar.fim_params.fim_radius_m = 12.0;
   params.lidar.fim_params.search_radius_m = 12.0;
+  params.covariance_growth.sigma_grow_m_sqrt_s =
+      kSyntheticSigmaGrowMSqrtS;
   iap::PredictorModule module(params);
   if (occupancy != nullptr) {
     module.set_local_occupancy(occupancy);
@@ -332,7 +341,12 @@ std::vector<std::string> scientific_field_whitelist() {
       "PredictorQueryResult.fallback",
       "PredictorQueryResult.fallback_reason",
       "PredictorQueryResult.query_source",
+      "PredictorQueryResult.query_position_map",
+      "PredictorQueryResult.query_time_s",
+      "PredictorQueryResult.horizon_s",
+      "PredictorQueryResult.frame_id",
       "PredictorQueryResult.source_flags",
+      "PredictorQueryResult.covariance_growth_status",
       "GnssAdvisoryResult.available",
       "GnssAdvisoryResult.valid",
       "GnssAdvisoryResult.fallback",
@@ -486,6 +500,10 @@ void add_diagnostics(iap::PredictorBatchDiagnostics* target,
   target->unique_positions += source.unique_positions;
   target->lidar_evaluations += source.lidar_evaluations;
   target->lidar_cache_hits += source.lidar_cache_hits;
+  target->spatial_advisory_recompute_count +=
+      source.spatial_advisory_recompute_count;
+  target->spatial_advisory_reuse_count +=
+      source.spatial_advisory_reuse_count;
   target->gnss_advisory_invocations += source.gnss_advisory_invocations;
   target->lidar_advisory_invocations += source.lidar_advisory_invocations;
   target->fusion_advisory_invocations += source.fusion_advisory_invocations;
@@ -508,7 +526,7 @@ struct IterationMetrics {
   iap::PredictorBatchDiagnostics diagnostics;
   std::size_t dispatched_query_count = 0;
   std::size_t production_conversion_count = 0;
-  std::size_t horizon_scientific_mismatch_count = 0;
+  std::size_t scalar_scientific_mismatch_count = 0;
   std::size_t valid_count = 0;
   std::size_t available_count = 0;
   std::size_t fallback_count = 0;
@@ -618,6 +636,7 @@ IterationMetrics run_iteration(const iap::PredictorModule& base_module,
   // timing mode, but it cannot inflate the provider p50/p95 budget evidence.
   const auto validation_begin = Clock::now();
   std::vector<iap::PredictorQueryResult> results(queries.size());
+  std::vector<std::uint8_t> scalar_matches(queries.size(), 0u);
   std::vector<std::future<void>> validation_workers;
   validation_workers.reserve(static_cast<std::size_t>(worker_count));
   for (int worker_id = 0; worker_id < worker_count; ++worker_id) {
@@ -641,8 +660,14 @@ IterationMetrics run_iteration(const iap::PredictorModule& base_module,
             auto predictions =
                 worker_module.queryBatch(inputs, &replay_diagnostics);
             for (std::size_t local = 0; local < predictions.size(); ++local) {
-              results[groups[group_index][local]] =
-                  std::move(predictions[local]);
+              const auto scalar = worker_module.query(inputs[local]);
+              const std::size_t result_index = groups[group_index][local];
+              scalar_matches[result_index] =
+                  scientific_hash(predictions[local]) ==
+                          scientific_hash(scalar)
+                      ? 1u
+                      : 0u;
+              results[result_index] = std::move(predictions[local]);
             }
           }
         }));
@@ -652,11 +677,8 @@ IterationMetrics run_iteration(const iap::PredictorModule& base_module,
 
   std::uint64_t aggregate_hash = kFnvOffset;
   std::uint64_t aggregate_production_hash = kFnvOffset;
-  std::vector<std::uint64_t> per_result_hash;
-  per_result_hash.reserve(results.size());
   for (const auto& result : results) {
     const std::uint64_t result_hash = scientific_hash(result);
-    per_result_hash.push_back(result_hash);
     hash_scalar(&aggregate_hash, result_hash);
     metrics.valid_count += result.valid ? 1U : 0U;
     metrics.available_count += result.available ? 1U : 0U;
@@ -672,17 +694,9 @@ IterationMetrics run_iteration(const iap::PredictorModule& base_module,
     hash_scalar(&aggregate_production_hash, result_hash);
   }
   metrics.production_result_checksum = hex_hash(aggregate_production_hash);
-  for (const auto& group : groups) {
-    if (group.size() != kHorizons.size()) {
-      ++metrics.horizon_scientific_mismatch_count;
-      continue;
-    }
-    const std::uint64_t expected = per_result_hash[group.front()];
-    for (const std::size_t index : group) {
-      if (per_result_hash[index] != expected) {
-        ++metrics.horizon_scientific_mismatch_count;
-        break;
-      }
+  for (const std::uint8_t matches : scalar_matches) {
+    if (matches == 0u) {
+      ++metrics.scalar_scientific_mismatch_count;
     }
   }
 
@@ -712,7 +726,8 @@ double percentile(std::vector<double> values, const double fraction) {
 }
 
 Json summary_pair(const std::vector<double>& values) {
-  return {{"p50_ms", percentile(values, 0.50)},
+  return {{"percentile_method", "R-7 linear interpolation"},
+          {"p50_ms", percentile(values, 0.50)},
           {"p95_ms", percentile(values, 0.95)}};
 }
 
@@ -756,8 +771,8 @@ Json summarize_phase(const std::string& phase,
         {"scientific_checksum_fnv1a64", item.checksum},
         {"production_result_checksum_fnv1a64",
          item.production_result_checksum},
-        {"horizon_scientific_mismatch_count",
-         item.horizon_scientific_mismatch_count},
+        {"scalar_scientific_mismatch_count",
+         item.scalar_scientific_mismatch_count},
         {"logical_query_count", kLogicalQueryCount},
         {"dispatched_predictor_query_count", item.dispatched_query_count},
         {"production_result_conversion_count",
@@ -770,7 +785,12 @@ Json summarize_phase(const std::string& phase,
         {"fusion_valid_count", item.fusion_valid_count},
         {"source_flags_histogram", histogram},
         {"counts",
-         {{"unique_positions", item.diagnostics.unique_positions},
+         {{"query_count", item.diagnostics.query_count},
+          {"unique_positions", item.diagnostics.unique_positions},
+          {"spatial_advisory_recompute_count",
+           item.diagnostics.spatial_advisory_recompute_count},
+          {"spatial_advisory_reuse_count",
+           item.diagnostics.spatial_advisory_reuse_count},
           {"gnss_advisory_invocations",
            item.diagnostics.gnss_advisory_invocations},
           {"lidar_advisory_invocations",
@@ -800,6 +820,8 @@ Json summarize_phase(const std::string& phase,
   return {
       {"phase", phase},
       {"collect_component_timing", collect_component_timing},
+      {"latency_status", "COST_RANKING_DIAGNOSTIC"},
+      {"qualification_authority", false},
       {"iterations", raw},
       {"summary_ms",
        {{"query_grouping_index", summary_pair(grouping)},
@@ -880,9 +902,8 @@ int main(int argc, char** argv) {
       const char* production_label;
       const iap::LocalOccupancyGrid* occupancy;
     };
-    const std::array<ModeDefinition, 2> mode_definitions{{
-        {"frozen_runtime", "CURRENT_PRODUCTION", nullptr},
-        {"map_los_candidate", "NOT_CURRENT_PRODUCTION", &occupancy},
+    const std::array<ModeDefinition, 1> mode_definitions{{
+        {"phase2_map_los", "PRODUCTION_SHAPED_PHASE2_DIAGNOSTIC", &occupancy},
     }};
 
     Json modes = Json::array();
@@ -892,7 +913,7 @@ int main(int argc, char** argv) {
     bool all_counts_stable = true;
     bool all_query_shapes_exact = true;
     bool all_phase_contracts_exact = true;
-    bool frozen_horizon_invariant = false;
+    bool all_scalar_equivalent = true;
 
     for (const auto& mode_definition : mode_definitions) {
       const auto module = make_module(mode_definition.occupancy,
@@ -909,8 +930,7 @@ int main(int argc, char** argv) {
       bool mode_counts_stable = true;
       bool mode_query_shape_exact = true;
       bool mode_phase_contracts_exact = true;
-      bool mode_horizon_invariant = true;
-      bool worker_one_component_timing_perturbs = false;
+      bool mode_scalar_equivalent = true;
 
       for (const int worker_count : {1, 2, 4}) {
         for (int warmup = 0; warmup < options.warmup_iterations; ++warmup) {
@@ -960,8 +980,13 @@ int main(int argc, char** argv) {
               item.dispatched_query_count == kLogicalQueryCount &&
               item.production_conversion_count == kLogicalQueryCount &&
               item.diagnostics.query_count == kLogicalQueryCount &&
+              item.diagnostics.unique_positions == kLogicalPositionCount &&
+              item.diagnostics.spatial_advisory_recompute_count ==
+                  kLogicalPositionCount &&
+              item.diagnostics.spatial_advisory_reuse_count ==
+                  kLogicalQueryCount - kLogicalPositionCount &&
               item.diagnostics.gnss_advisory_invocations ==
-                  kLogicalQueryCount &&
+                  kLogicalPositionCount &&
               item.diagnostics.fusion_advisory_invocations ==
                   kLogicalQueryCount &&
               item.diagnostics.lidar_advisory_invocations ==
@@ -983,8 +1008,8 @@ int main(int argc, char** argv) {
               item.diagnostics.collect_component_timing == expected_timing &&
               (expected_timing ? component_durations_present
                                : component_durations_absent);
-          mode_horizon_invariant = mode_horizon_invariant &&
-              item.horizon_scientific_mismatch_count == 0;
+          mode_scalar_equivalent = mode_scalar_equivalent &&
+              item.scalar_scientific_mismatch_count == 0;
         };
         for (const auto& item : counter_only) {
           validate_iteration(item, false);
@@ -1007,16 +1032,9 @@ int main(int argc, char** argv) {
             ["total_predictor_provider"]["p95_ms"];
         if (worker_count == 1) {
           worker_one_counter_p50 = counter_p50;
-          worker_one_component_timing_perturbs =
-              std::abs(100.0 * (component_p50 - counter_p50) /
-                       counter_p50) > 5.0;
         }
-        counter_summary["budget_timing_authority"] = true;
         counter_summary["speedup_vs_worker_1_p50"] =
             worker_one_counter_p50 / counter_p50;
-        counter_summary["p95_within_400_ms_diagnostic_budget"] =
-            counter_p95 <= 400.0;
-        component_summary["budget_timing_authority"] = false;
         component_summary["component_cost_percentages_of_outer_p50"] = {
             {"gnss_advisory", 100.0 * static_cast<double>(
                  component_summary["summary_ms"]["cumulative_gnss_advisory"]
@@ -1031,6 +1049,7 @@ int main(int argc, char** argv) {
 
         workers_json.push_back({
             {"worker_count", worker_count},
+            {"latency_status", "COST_RANKING_DIAGNOSTIC"},
             {"counter_only", std::move(counter_summary)},
             {"component_timed", std::move(component_summary)},
             {"component_timer_perturbation",
@@ -1043,15 +1062,6 @@ int main(int argc, char** argv) {
         });
       }
 
-      const std::string component_percentage_status =
-          worker_one_component_timing_perturbs
-              ? "PERTURBING_DIAGNOSTIC"
-              : "COST_RANKING_DIAGNOSTIC";
-      for (auto& worker : workers_json) {
-        worker["component_percentage_status"] =
-            component_percentage_status;
-      }
-
       all_finite = all_finite && mode_finite;
       all_checksums_stable = all_checksums_stable && mode_checksums_stable;
       all_production_checksums_stable =
@@ -1062,15 +1072,13 @@ int main(int argc, char** argv) {
           all_query_shapes_exact && mode_query_shape_exact;
       all_phase_contracts_exact =
           all_phase_contracts_exact && mode_phase_contracts_exact;
-      if (std::string(mode_definition.name) == "frozen_runtime") {
-        frozen_horizon_invariant = mode_horizon_invariant;
-      }
+      all_scalar_equivalent =
+          all_scalar_equivalent && mode_scalar_equivalent;
 
       modes.push_back({
           {"mode", mode_definition.name},
           {"production_label", mode_definition.production_label},
-          {"current_production_contract",
-           std::string(mode_definition.name) == "frozen_runtime"},
+          {"latency_status", "COST_RANKING_DIAGNOSTIC"},
           {"gnss_local_occupancy_installed",
            mode_definition.occupancy != nullptr},
           {"gnss_visibility_model",
@@ -1080,8 +1088,6 @@ int main(int argc, char** argv) {
           {"scientific_checksum_fnv1a64", reference_checksum},
           {"production_result_checksum_fnv1a64",
            reference_production_checksum},
-          {"horizon_scientific_fields_invariant",
-           mode_horizon_invariant},
           {"validation",
            {{"finite_iterations", mode_finite},
             {"scientific_checksums_stable_across_phases_and_workers",
@@ -1091,6 +1097,8 @@ int main(int argc, char** argv) {
             {"validity_source_flag_counts_stable_across_phases_and_workers",
              mode_counts_stable},
             {"query_and_conversion_shape_exact", mode_query_shape_exact},
+            {"exact_phase2_counts", mode_query_shape_exact},
+            {"scalar_equivalence_exact", mode_scalar_equivalent},
             {"counter_vs_component_timing_contract_exact",
              mode_phase_contracts_exact}}},
           {"workers", std::move(workers_json)},
@@ -1100,34 +1108,35 @@ int main(int argc, char** argv) {
     const bool pass = all_finite && all_checksums_stable &&
                       all_production_checksums_stable &&
                       all_counts_stable && all_query_shapes_exact &&
-                      all_phase_contracts_exact;
-    const std::string horizon_semantic_status = frozen_horizon_invariant
-        ? "MISSING_SIGMA_GROWTH"
-        : "OBSERVED_HORIZON_VARIATION_REQUIRES_REVIEW";
+                      all_phase_contracts_exact && all_scalar_equivalent;
 
     Json output = {
-        {"schema_version", "p0_provider_offline_profile_v2"},
+        {"schema_version", "p0_phase2_spatial_dedup_profile_v1"},
         {"diagnostic_execution_status", pass ? "PASS" : "FAIL"},
-        {"p0_horizon_semantic_status", horizon_semantic_status},
-        {"standards_conformance_status",
-         "BLOCKED_MISSING_SIGMA_GROWTH_AND_PRODUCTION_MAP_LOS"},
+        {"phase2_semantic_status",
+         "WITHIN_REFRESH_SPATIAL_ADVISORY_DEDUP_VALIDATED"},
+        {"production_semantic_status",
+         "PHASE1_MAP_LOS_AND_COVARIANCE_GROWTH_PRESENT"},
+        {"latency_status", "COST_RANKING_DIAGNOSTIC"},
+        {"gate0b_qualification_status", "NOT_RUN"},
+        {"production_calibration_status", "UNSET_PROFILE_SYNTHETIC_ONLY"},
         {"build_type", IAP_BUILD_TYPE},
         {"clock", "std::chrono::steady_clock"},
         {"cpu_count", std::thread::hardware_concurrency()},
         {"warmup_iterations", options.warmup_iterations},
         {"measured_iterations", options.measured_iterations},
-        {"diagnostic_latency_budget_ms", 400.0},
         {"validation",
          {{"finite_iterations", all_finite},
-          {"scientific_checksums_stable_per_mode",
+          {"scientific_checksums_stable_across_workers",
            all_checksums_stable},
-          {"production_result_checksums_stable_per_mode",
+          {"production_checksums_stable_across_workers",
            all_production_checksums_stable},
-          {"validity_source_flag_counts_stable_per_mode",
+          {"validity_source_flag_counts_stable",
            all_counts_stable},
           {"query_and_conversion_shape_exact", all_query_shapes_exact},
           {"counter_vs_component_timing_contract_exact",
-           all_phase_contracts_exact}}},
+           all_phase_contracts_exact},
+          {"zero_scalar_mismatches", all_scalar_equivalent}}},
         {"workload",
          {{"grid_shape", {kGridX, kGridY, kGridZ}},
           {"resolution_m", kResolutionM},
@@ -1136,14 +1145,19 @@ int main(int argc, char** argv) {
           {"logical_query_count", kLogicalQueryCount},
           {"grouping", "spatial_position_then_all_six_horizons"},
           {"snapshot_satellite_count", 31},
-          {"map_los_candidate_occupancy_point_count",
+          {"map_los_occupancy_point_count",
            occupancy_points.size()},
           {"lidar_fim_primitive_count", 704},
           {"lidar_map_point_count", 23309}}},
-        {"frozen_runtime_contract",
+        {"phase2_profile_contract",
          {{"source_mode", "fusion"},
           {"gnss_epoch_policy", "auto"},
           {"use_current_integrity_prior", true},
+          {"map_los_installed", true},
+          {"covariance_growth_enabled", true},
+          {"cache_lifetime", "one queryBatch invocation"},
+          {"cached_value", "GNSS and LiDAR SpatialAdvisory only"},
+          {"per_horizon_work", "growth fusion ordered materialization"},
           {"conservative_max_with_gnss", false},
           {"lidar_legacy_observability", true},
           {"lidar_fim_radius_m", 12.0},
@@ -1151,11 +1165,12 @@ int main(int argc, char** argv) {
           {"freshness_max_integrity_age_s", 1.0},
           {"freshness_max_gnss_age_s", 2.0},
           {"freshness_max_snapshot_age_s", 1.0},
-          {"production_gnss_local_occupancy_binding", false},
           {"production_result_conversion",
            "iap::makeRiskPredictionResult shared pure helper"}}},
         {"synthetic_inputs",
          {{"values_are_synthetic", true},
+          {"sigma_grow_m_sqrt_s", kSyntheticSigmaGrowMSqrtS},
+          {"sigma_grow_is_production_calibration", false},
           {"gnss_epoch", "deterministic synthetic 31-satellite epoch"},
           {"lidar_fim_primitives",
            "deterministic synthetic 704-primitive model"},
@@ -1163,33 +1178,10 @@ int main(int argc, char** argv) {
            "deterministic synthetic 23309-point model"},
           {"map_los_occupancy",
            "deterministic synthetic 704-point occupancy model"}}},
-        {"horizon_semantics",
-         {{"frozen_scientific_fields_invariant",
-           frozen_horizon_invariant},
-          {"observation_is_not_conformance", true},
-          {"required_semantics",
-           "empirical covariance growth with horizon-dependent Sigma_pred and PL_pred"},
-          {"whole_result_cross_horizon_reuse_prohibited", true},
-          {"scientific_field_whitelist", scientific_field_whitelist()},
-          {"metadata_fields_excluded",
-           {"query_position_map", "query_time_s", "horizon_s", "frame_id"}},
-          {"freshness_reference", "fixed snapshot.stamp"}}},
-        {"production_gap",
-         {{"map_based_gnss_occlusion_required_by_conventions", true},
-          {"current_production_installs_gnss_local_occupancy", false},
-          {"non_occupancy_inputs_and_parameters_identical_between_modes",
-           true},
-          {"map_los_candidate_repairs_product_behavior", false},
-          {"map_los_candidate_absolute_latency_characterizes_icra005",
-           false}}},
-        {"retained_icra005_authority",
-         {{"provider_p95_ms_approx", 639.377},
-          {"total_refresh_p95_ms", 657.21388795},
-          {"gate_limit_ms", 400.0},
-          {"gate_status", "P0_PERFORMANCE_GATE_FAIL"}}},
+        {"scalar_equivalence_field_whitelist", scientific_field_whitelist()},
         {"timing_relationships",
          {{"total_predictor_provider",
-           "outer wall time; counter-only phase is diagnostic budget authority"},
+           "outer wall time; cost-ranking diagnostic only"},
           {"worker_metrics",
            "cumulative per-worker times; workers may overlap"},
           {"advisory_metrics",
@@ -1197,8 +1189,9 @@ int main(int argc, char** argv) {
           {"result_materialization",
            "shared production makeRiskPredictionResult conversion"},
           {"scientific_validation_replay",
-           "real identical-input replay after the provider timer; checksum/count validation only"}}},
-        {"scientific_checksum_algorithm", "FNV-1a-64 over all scientific fields"},
+           "optimized batch versus independent scalar authority after the provider timer"}}},
+        {"scientific_checksum_algorithm",
+         "FNV-1a-64 over metadata, typed status and all scientific fields"},
         {"modes", std::move(modes)}};
 
     std::filesystem::create_directories(output_path.parent_path());

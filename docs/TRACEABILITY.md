@@ -1,5 +1,19 @@
 # Traceability Matrix (IAP)
 
+## 2026-08-21 ICRA-011 P0 phase-2 within-refresh spatial advisory deduplication
+
+| Req ID | Requirement/evidence seam | Implementation and focused evidence | Status |
+|---|---|---|---|
+| IAP-RQ-312 / IAP-RQ-314 / IAP-RQ-320 / IAP-RQ-321 | Deduplicate only coherent spatial GNSS/LiDAR evidence while preserving scalar-equivalent per-horizon growth and fusion | private call-local `PredictorModule::SpatialAdvisory`; exact source-identity key; `BatchReusesSpatialAdvisoryAndRebuildsEveryHorizonRisk`, source/early-failure isolation and effective-freshness regressions | **PASS: 2/10 recompute/reuse for 2 x 6; GNSS/LiDAR 2/2; fusion 12; full result equivalence including typed/nonfinite state** |
+| IAP-RQ-320 / IAP-RQ-322 | Production health must expose actual layer work for the current refresh attempt without changing logical/result-used evidence | additive Predictor diagnostics; worker aggregation; five exact P0 health JSON fields; real production-provider count/reset regression and worker 1/2/4 equivalence | **PASS: deterministic recompute/reuse/invocation/fusion counts; logical GNSS-used remains distinct; next early failure resets new fields to zero** |
+| IAP-RQ-320 / IAP-RQ-321 / IAP-RQ-322 | Canonical phase-2 workload and science must be reproducible offline without claiming qualification or calibration | `p0_phase2_spatial_dedup_profile.json`; fail-closed Python contract; synthetic finite growth constant and immutable map-LOS input; R-7 diagnostic summaries | **PASS DIAGNOSTIC: 76,800 logical/provider/conversion/fusion, 12,800 spatial/GNSS/LiDAR recompute, 64,000 reuse, zero scalar mismatch, stable workers 1/2/4 checksums; Gate `NOT_RUN`** |
+| IAP-RQ-320 / IAP-RQ-322 | Phase-2 change must retain existing P0 science, fail-closed publication and focused coverage | six repository-local suites against the current `libiap.so` | **PASS: 137/137; no cross-refresh/phase-3 behavior, runtime qualification or production calibration** |
+
+ICRA-011 closes only the phase-2 within-refresh implementation contract. It does not qualify
+Gate-0B, select production `sigma_grow`, implement the phase-3 lattice/ring/cross-refresh window,
+or authorize main flow, smoke, qualification, analyzer, benchmark, GPU preflight or
+P1/P2/P3/P4/P5 work.
+
 ## 2026-08-21 ICRA-010 positive-horizon typed-status repair
 
 | Req ID | Requirement/evidence seam | Implementation and focused evidence | Status |

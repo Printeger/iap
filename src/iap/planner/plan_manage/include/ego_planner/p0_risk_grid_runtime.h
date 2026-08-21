@@ -166,6 +166,11 @@ class P0RiskGridRuntime {
     std::size_t predictor_unique_positions = 0;
     std::size_t predictor_lidar_evaluations = 0;
     std::size_t predictor_lidar_cache_hits = 0;
+    std::size_t predictor_spatial_advisory_recompute_count = 0;
+    std::size_t predictor_spatial_advisory_reuse_count = 0;
+    std::size_t predictor_gnss_advisory_invocation_count = 0;
+    std::size_t predictor_lidar_advisory_invocation_count = 0;
+    std::size_t predictor_horizon_fusion_count = 0;
     uint64_t input_callback_count = 0;
     uint64_t health_callback_count = 0;
     bool snapshot_available = false;
@@ -264,6 +269,11 @@ class P0RiskGridRuntime {
   std::size_t last_predictor_unique_positions_ = 0;
   std::size_t last_predictor_lidar_evaluations_ = 0;
   std::size_t last_predictor_lidar_cache_hits_ = 0;
+  std::size_t last_predictor_spatial_advisory_recompute_count_ = 0;
+  std::size_t last_predictor_spatial_advisory_reuse_count_ = 0;
+  std::size_t last_predictor_gnss_advisory_invocation_count_ = 0;
+  std::size_t last_predictor_lidar_advisory_invocation_count_ = 0;
+  std::size_t last_predictor_horizon_fusion_count_ = 0;
   double last_refresh_start_stamp_s_ = std::numeric_limits<double>::quiet_NaN();
   double last_refresh_end_stamp_s_ = std::numeric_limits<double>::quiet_NaN();
   double last_health_callback_stamp_s_ = std::numeric_limits<double>::quiet_NaN();

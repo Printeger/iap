@@ -443,6 +443,25 @@ namespace ego_planner {
 
 class P0RiskGridRuntimeStampTest : public ::testing::Test {
  protected:
+  struct PredictorDiagnosticCounts {
+    std::size_t spatial_recompute = 0;
+    std::size_t spatial_reuse = 0;
+    std::size_t gnss_invocations = 0;
+    std::size_t lidar_invocations = 0;
+    std::size_t horizon_fusions = 0;
+  };
+
+  static PredictorDiagnosticCounts predictorDiagnosticCounts(
+      const P0RiskGridRuntime& runtime) {
+    std::lock_guard<std::mutex> lock(runtime.health_state_mutex_);
+    const auto state = runtime.healthPublicationStateSnapshot();
+    return {state.predictor_spatial_advisory_recompute_count,
+            state.predictor_spatial_advisory_reuse_count,
+            state.predictor_gnss_advisory_invocation_count,
+            state.predictor_lidar_advisory_invocation_count,
+            state.predictor_horizon_fusion_count};
+  }
+
   static double currentMessageStamp(const P0RiskGridRuntime& runtime) {
     return runtime.currentMessageStamp();
   }
@@ -1153,6 +1172,21 @@ TEST_F(P0RiskGridRuntimeStampTest,
             std::string::npos);
   EXPECT_NE(last_health_message.find("\"process_cpu_delta_ms\":"),
             std::string::npos);
+  EXPECT_NE(last_health_message.find(
+                "\"predictor_spatial_advisory_recompute_count\":"),
+            std::string::npos);
+  EXPECT_NE(last_health_message.find(
+                "\"predictor_spatial_advisory_reuse_count\":"),
+            std::string::npos);
+  EXPECT_NE(last_health_message.find(
+                "\"predictor_gnss_advisory_invocation_count\":"),
+            std::string::npos);
+  EXPECT_NE(last_health_message.find(
+                "\"predictor_lidar_advisory_invocation_count\":"),
+            std::string::npos);
+  EXPECT_NE(last_health_message.find(
+                "\"predictor_horizon_fusion_count\":"),
+            std::string::npos);
 }
 
 TEST_F(P0RiskGridRuntimeStampTest,
@@ -1838,6 +1872,45 @@ TEST_F(P0RiskGridRuntimeStampTest,
 }
 
 TEST_F(P0RiskGridRuntimeStampTest,
+       WithinRefreshSpatialDedupReportsExactProductionCounts) {
+  ensure_rclcpp();
+  auto node = std::make_shared<rclcpp::Node>(
+      "p0_within_refresh_spatial_dedup_count_test",
+      rclcpp::NodeOptions().allow_undeclared_parameters(false));
+  auto config = enabledConfig();
+  config.grid.skip_occupied_voxels = false;
+  config.predictor_source_mode = iap::PredictorSourceMode::Fusion;
+  config.predictor_gnss_epoch_policy =
+      iap::PredictorGnssEpochPolicy::Required;
+  P0RiskGridRuntime runtime(node, config);
+  seedValidInputs(&runtime, 100.0, 100.0);
+  seedGnssEpoch(&runtime, 100.0);
+  installOccupancyEpoch(&runtime, 100.0, {}, "map", 2u);
+
+  ASSERT_TRUE(refreshOnce(&runtime));
+  const auto health = runtime.health();
+  const auto counts = predictorDiagnosticCounts(runtime);
+  EXPECT_EQ(health.provider_query_count, 54u);
+  EXPECT_EQ(health.predictor_gnss_used_count, 54u);
+  EXPECT_EQ(counts.spatial_recompute, 27u);
+  EXPECT_EQ(counts.spatial_reuse, 27u);
+  EXPECT_EQ(counts.gnss_invocations, 27u);
+  EXPECT_EQ(counts.lidar_invocations, 27u);
+  EXPECT_EQ(counts.horizon_fusions, 54u);
+  EXPECT_NE(health.predictor_gnss_used_count, counts.gnss_invocations);
+
+  setOdomStamp(&runtime, std::numeric_limits<double>::quiet_NaN());
+  setCurrentStamp(&runtime, std::numeric_limits<double>::quiet_NaN());
+  EXPECT_FALSE(refreshOnce(&runtime));
+  const auto reset_counts = predictorDiagnosticCounts(runtime);
+  EXPECT_EQ(reset_counts.spatial_recompute, 0u);
+  EXPECT_EQ(reset_counts.spatial_reuse, 0u);
+  EXPECT_EQ(reset_counts.gnss_invocations, 0u);
+  EXPECT_EQ(reset_counts.lidar_invocations, 0u);
+  EXPECT_EQ(reset_counts.horizon_fusions, 0u);
+}
+
+TEST_F(P0RiskGridRuntimeStampTest,
        OccupancyGenerationChangeDuringProviderBatchKeepsPreviousGeneration) {
   ensure_rclcpp();
   auto node = std::make_shared<rclcpp::Node>(
@@ -1973,6 +2046,7 @@ TEST_F(P0RiskGridRuntimeStampTest,
   const std::vector<int> worker_counts = {1, 2, 4};
   std::vector<std::shared_ptr<const iap::RiskGridSnapshot>> snapshots;
   std::vector<iap::RiskGridHealth> health_states;
+  std::vector<PredictorDiagnosticCounts> diagnostic_counts;
   for (const int worker_count : worker_counts) {
     auto node = std::make_shared<rclcpp::Node>(
         "p0_worker_equivalence_" + std::to_string(worker_count),
@@ -1993,6 +2067,7 @@ TEST_F(P0RiskGridRuntimeStampTest,
     ASSERT_TRUE(refreshOnce(&runtime));
     snapshots.push_back(runtime.acquireSnapshot());
     health_states.push_back(runtime.health());
+    diagnostic_counts.push_back(predictorDiagnosticCounts(runtime));
   }
 
   ASSERT_EQ(snapshots.size(), 3u);
@@ -2007,6 +2082,16 @@ TEST_F(P0RiskGridRuntimeStampTest,
               health_states[0].predictor_lidar_used_count);
     EXPECT_EQ(health_states[index].predictor_prior_used_count,
               health_states[0].predictor_prior_used_count);
+    EXPECT_EQ(diagnostic_counts[index].spatial_recompute,
+              diagnostic_counts[0].spatial_recompute);
+    EXPECT_EQ(diagnostic_counts[index].spatial_reuse,
+              diagnostic_counts[0].spatial_reuse);
+    EXPECT_EQ(diagnostic_counts[index].gnss_invocations,
+              diagnostic_counts[0].gnss_invocations);
+    EXPECT_EQ(diagnostic_counts[index].lidar_invocations,
+              diagnostic_counts[0].lidar_invocations);
+    EXPECT_EQ(diagnostic_counts[index].horizon_fusions,
+              diagnostic_counts[0].horizon_fusions);
   }
 }
 

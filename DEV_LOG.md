@@ -958,3 +958,154 @@ Final handoff evidence:
 This is the required final DEV_LOG-only handoff record. Control returns to
 `SUPERVISOR` review only. `DEEPSEEK` does not mark ICRA-010 or Gate-0B PASS,
 authorize phase 2 or smoke, choose calibration, or issue a next task.
+
+## 2026-08-21T10:07:57Z — ICRA-011 START
+
+Start HEAD: `c865c74317e23b9cb5339174e662d1fc7e87a4ec`; Supervisor review
+base: `12c2396f9b9fe31038831547e57b08f57b87cd78`; reviewed ICRA-010
+head: `b0280367dae3cf61176cf80bc72f2b52e1452ce0`.
+
+Task: `ICRA-011 / GATE_0B`, frozen P0 phase-2 within-refresh spatial
+advisory deduplication only. The authorized private Predictor seam computes
+coherent GNSS/LiDAR spatial evidence once per exact spatial/source identity
+inside one `queryBatch()` call while every horizon independently performs
+growth, fusion and ordered result materialization. Production health receives
+additive current-attempt invocation/recompute/reuse counters, and one
+repository-local offline diagnostic proves exact counts and scalar science.
+
+Exact allowed files:
+
+- `include/iap/predictor/predictor_module.hpp`
+- `src/iap/predictor/predictor_module.cpp`
+- `src/iap/planner/plan_manage/include/ego_planner/p0_risk_grid_runtime.h`
+- `src/iap/planner/plan_manage/src/p0_risk_grid_runtime.cpp`
+- `apps/iap_predictor_offline_profile.cpp`
+- `test/test_predictor_module.cpp`
+- `src/iap/planner/plan_manage/test/test_p0_risk_grid_runtime.cpp`
+- `test/test_icra011_spatial_dedup_profile.py`
+- `CMakeLists.txt`
+- `results/icra27/icra011/p0_phase2_spatial_dedup_profile.json`
+- `DEV_LOG.md`
+- `docs/CHANGES.md`
+- `docs/TRACEABILITY.md`
+
+No phase-3 fixed lattice/ring window, boundary slab, cross-refresh reuse,
+source TTL/delta/watchdog, occupancy reverse-ray dependency, partial
+publication, worker/default/scheduler change, production calibration,
+ROI/resolution/horizon/refresh/threshold reduction, GPU/CUDA/iKD-tree,
+main flow, ROS launch, smoke, qualification, bag, RViz, campaign, Gate
+analyzer or P1/P2/P3/P4/P5 behavior is authorized. All generated build, test,
+ROS, profile and temporary outputs will remain below
+`results/icra27/icra011/`; only the single named profile JSON may be staged.
+The pre-existing `docs/icra27/dev/ICRA_SYSTEM_FLOW.pdf` remains solely
+untracked and excluded from all task operations at SHA-256
+`1f07da5631a6551a2f98c02d46fd45bc87f2f1e3e7c14e95f9a7f4a0bac844f6`.
+
+## 2026-08-21T10:36:58Z — ICRA-011 IMPLEMENTATION / VERIFICATION COMPLETE, REVIEW PENDING
+
+Implemented the frozen phase-2 seam without changing the public Predictor
+Interface. `queryBatch()` now owns one private, call-local `SpatialAdvisory`
+cache keyed by exact position and coherent frame/snapshot/current/prior/GNSS/
+effective-freshness identity. It reuses only complete GNSS/LiDAR advisory
+results. Scalar validation ordering, covariance growth, fusion, flags/reasons
+and ordered materialization remain per query; early failures never populate
+the cache. When freshness is enabled and no explicit reference is supplied,
+the key uses the scalar-effective query-time reference, preventing reuse
+across different GNSS freshness states.
+
+Production workers aggregate additive recompute/reuse and actual advisory/
+fusion invocation diagnostics. Health serialization adds exactly
+`predictor_spatial_advisory_recompute_count`,
+`predictor_spatial_advisory_reuse_count`,
+`predictor_gnss_advisory_invocation_count`,
+`predictor_lidar_advisory_invocation_count` and
+`predictor_horizon_fusion_count`; each refresh attempt zeroes these fields
+before any early failure. Existing logical-query, result-used and legacy
+LiDAR cache counter meanings are unchanged.
+
+TDD evidence stayed repository-local:
+
+| Seam | RED | GREEN |
+|---|---|---|
+| Predictor spatial diagnostics | `logs/red_build_predictor_spatial_dedup.log`, build exit 2 because the new counters did not exist | `logs/green_test_predictor_spatial_dedup.log`, exact required regressions 2/2 |
+| Production health counters | `logs/red_build_runtime_spatial_counts.log`, build exit 2 because the five health fields did not exist | `logs/green_test_runtime_spatial_counts.log`, exact runtime regression 1/1 |
+| Offline profile contract | `logs/red_test_icra011_spatial_dedup_profile.log`, pytest exit 5 while the authorized JSON was absent | `logs/green_test_icra011_spatial_dedup_profile.log`, 2/2 |
+
+The final repository-local build used
+`results/icra27/icra011/{build_root,build_plan_env,install_plan_env,build_plan_manage}`.
+Root, plan-env and plan-manage configure/build/install logs are
+`logs/final_{configure,build,install}_*.log`. The plan-manage facade used only
+retained ICRA-009 generated ROS typesupport metadata because the partial
+current package install does not generate that metadata; runtime linkage in
+`logs/final_runtime_linkage.log` resolves product code to the current
+`results/icra27/icra011/build_root/libiap.so`. Earlier failed configuration/
+link attempts are retained truthfully in `logs/red_configure_plan_manage*.log`
+and did not change or expand product scope. `clang-format` is unavailable
+(exit 127, `logs/clang_format_check.log`); compilation, tests and
+`git diff --check` are authoritative and pass.
+
+Final focused commands and exits:
+
+| Command | Exit | Result |
+|---|---:|---|
+| `cmake --build results/icra27/icra011/build_root --target test_predictor_module iap_predictor_offline_profile -j2` | 0 | Current Predictor/profile targets built. |
+| `LD_LIBRARY_PATH="$PWD/results/icra27/icra011/build_root${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" results/icra27/icra011/build_root/test_predictor_module --gtest_filter='PredictorModuleTest.BatchReusesSpatialAdvisoryAndRebuildsEveryHorizonRisk:PredictorModuleTest.SpatialDedupDoesNotCrossSourceIdentityOrEarlyFailure'` | 0 | Required exact Predictor regressions 2/2; `logs/final3_exact_predictor_spatial_dedup.log`. |
+| `ROS_HOME="$PWD/results/icra27/icra011/ros_home/runtime_exact" ROS_LOG_DIR="$PWD/results/icra27/icra011/ros_log/runtime_exact" TMPDIR="$PWD/results/icra27/icra011/tmp" LD_LIBRARY_PATH="$PWD/results/icra27/icra011/build_root:$PWD/results/icra27/icra011/build_plan_env:$PWD/results/icra27/icra011/install_plan_env/lib:$PWD/results/icra27/icra009/install_root/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" results/icra27/icra011/build_plan_manage/test_p0_risk_grid_runtime --gtest_filter='P0RiskGridRuntimeStampTest.WithinRefreshSpatialDedupReportsExactProductionCounts'` | 0 | Required exact production runtime regression 1/1; `logs/final3_exact_runtime_spatial_counts.log`. |
+| `LD_LIBRARY_PATH="$PWD/results/icra27/icra011/build_root${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" results/icra27/icra011/build_root/test_predictor_module --gtest_filter='PredictorModuleTest.BatchReusesSpatialAdvisoryAndRebuildsEveryHorizonRisk:PredictorModuleTest.SpatialDedupDoesNotCrossSourceIdentityOrEarlyFailure:PredictorModuleTest.SpatialDedupUsesEffectiveFreshnessReferenceWhenImplicit'` | 0 | 3/3; `logs/final_effective_freshness_regression.log`. |
+| `TMPDIR="$PWD/results/icra27/icra011/tmp" LD_LIBRARY_PATH="$PWD/results/icra27/icra011/build_root${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" results/icra27/icra011/build_root/iap_predictor_offline_profile --output results/icra27/icra011/p0_phase2_spatial_dedup_profile.json --warmup 1 --iterations 5` | 0 | Single authorized phase-2 diagnostic target regenerated; stdout/stderr in `logs/profile_*_after_review.log`. |
+| `python3 test/test_icra011_spatial_dedup_profile.py` | 0 | 2/2; `logs/final_test_icra011_spatial_dedup_profile_after_review.log`. |
+| `LD_LIBRARY_PATH="$PWD/results/icra27/icra011/build_root${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" results/icra27/icra011/build_root/test_local_occupancy` | 0 | 6/6; `logs/final2_test_local_occupancy.log`. |
+| `IAP_TEST_ARTIFACT_DIR="$PWD/results/icra27/icra011/test_artifacts/predictor" LD_LIBRARY_PATH="$PWD/results/icra27/icra011/build_root${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" results/icra27/icra011/build_root/test_predictor_module` | 0 | 43/43; `logs/final2_test_predictor_module.log`. |
+| `LD_LIBRARY_PATH="$PWD/results/icra27/icra011/build_root${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" results/icra27/icra011/build_root/test_risk_grid_map` | 0 | 35/35; `logs/final2_test_risk_grid_map.log`. |
+| `ROS_HOME="$PWD/results/icra27/icra011/ros_home/grid_epoch" ROS_LOG_DIR="$PWD/results/icra27/icra011/ros_log/grid_epoch" TMPDIR="$PWD/results/icra27/icra011/tmp" LD_LIBRARY_PATH="$PWD/results/icra27/icra011/build_plan_env:$PWD/results/icra27/icra011/install_plan_env/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" results/icra27/icra011/build_plan_env/test_grid_map_occupancy_epoch` | 0 | 2/2; `logs/final2_test_grid_map_occupancy_epoch.log`. |
+| `ROS_HOME="$PWD/results/icra27/icra011/ros_home/adapter" ROS_LOG_DIR="$PWD/results/icra27/icra011/ros_log/adapter" TMPDIR="$PWD/results/icra27/icra011/tmp" LD_LIBRARY_PATH="$PWD/results/icra27/icra011/build_root:$PWD/results/icra27/icra011/build_plan_env:$PWD/results/icra27/icra011/install_plan_env/lib:$PWD/results/icra27/icra009/install_root/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" results/icra27/icra011/build_plan_manage/test_p0_occupancy_epoch_adapter` | 0 | 3/3; `logs/final2_test_p0_occupancy_epoch_adapter.log`. |
+| `ROS_HOME="$PWD/results/icra27/icra011/ros_home/runtime" ROS_LOG_DIR="$PWD/results/icra27/icra011/ros_log/runtime" TMPDIR="$PWD/results/icra27/icra011/tmp" LD_LIBRARY_PATH="$PWD/results/icra27/icra011/build_root:$PWD/results/icra27/icra011/build_plan_env:$PWD/results/icra27/icra011/install_plan_env/lib:$PWD/results/icra27/icra009/install_root/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" results/icra27/icra011/build_plan_manage/test_p0_risk_grid_runtime` | 0 | 48/48; `logs/final2_test_p0_risk_grid_runtime.log`. |
+
+The six retained suites pass **137/137** against the current library. The
+profile contract passes with schema `p0_phase2_spatial_dedup_profile_v1`,
+exact per-iteration counts `76800/12800/64000` for logical+fusion /
+spatial+GNSS+LiDAR recompute / spatial reuse, zero scalar mismatches and
+stable scientific checksum `32eb7557f1307c94`. Its final JSON SHA-256 is
+`778abd22158805c41150b4eeed9c37a3f660237a0bb0599e9a567e3533c7b32c`.
+Workers 1/2/4 counter-only provider R-7 p50/p95 are respectively
+`375.795723/377.5126378`, `197.059007/199.9180596` and
+`104.626079/105.7337242 ms`; all are **COST_RANKING_DIAGNOSTIC only**.
+Gate qualification is `NOT_RUN`, and synthetic `sigma_grow=0.15` is not a
+production calibration.
+
+No main flow, ROS launch, smoke, qualification, bag, RViz, campaign, Gate
+analyzer, benchmark, GPU preflight, fixed lattice/ring window, cross-refresh
+reuse, worker/default/scheduler change, production calibration or
+P1/P2/P3/P4/P5 work ran or changed. Gate-0B is not marked PASS. The PDF
+remains solely untracked and unchanged at SHA-256
+`1f07da5631a6551a2f98c02d46fd45bc87f2f1e3e7c14e95f9a7f4a0bac844f6`.
+Two-axis fixed-point review, commit, push and Supervisor handoff remain.
+
+## 2026-08-21T10:40:44Z — ICRA-011 TWO-AXIS REVIEW CLOSURE / PRE-PUSH
+
+The required fixed-point review compared implementation commit `9cbad17`
+against ICRA-011 start commit
+`c865c74317e23b9cb5339174e662d1fc7e87a4ec` with
+`git diff c865c74317e23b9cb5339174e662d1fc7e87a4ec...HEAD`.
+
+- **Standards PASS**: 0 hard violations. The reviewer confirmed the RQ-tagged
+  commit, required documentation, 13-file allowlist, sole authorized JSON,
+  repository-local evidence and PDF exclusion. One non-blocking
+  Duplicated-Code/Data-Clumps judgement noted the explicit flat diagnostic
+  aggregation/health mappings; these extend the existing schema pattern and
+  preserve the exact externally required JSON keys, so no scope-expanding
+  abstraction was introduced.
+- **Spec PASS after documentation repair**: implementation, scope, counters,
+  scalar semantics, required tests/profile and prohibitions had no finding.
+  One low-severity evidence-documentation finding noted that the DEV_LOG RED/
+  GREEN table named the exact 2/2 and 1/1 logs without spelling out their
+  commands. The two exact current-code commands were rerun (2/2 and 1/1,
+  exits 0) and added to the table above with paths
+  `logs/final3_exact_predictor_spatial_dedup.log` and
+  `logs/final3_exact_runtime_spatial_counts.log`.
+
+Summary: Standards 0 hard findings (1 non-blocking judgement); Spec 0 open
+findings after the documentation-only repair. `git diff --check` remains
+clean. This review does not mark ICRA-011 or Gate-0B PASS, select production
+calibration, authorize phase 3/main flow/smoke/qualification, or issue a next
+task. Implementation amend, push and final Supervisor handoff remain.

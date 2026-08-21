@@ -313,6 +313,11 @@ CovarianceGrowthOutcome apply_covariance_growth(
 
 }  // namespace
 
+struct PredictorModule::SpatialAdvisory {
+  GnssAdvisoryResult gnss;
+  LidarAdvisoryResult lidar;
+};
+
 PredictorModule::PredictorModule() : PredictorModule(PredictorParams{}) {}
 
 PredictorModule::PredictorModule(const PredictorParams& params)
@@ -344,12 +349,13 @@ void PredictorModule::set_lidar_map_points(
 
 PredictorQueryResult PredictorModule::query(
     const PredictorQueryInput& input) const {
-  return queryWithLidar(input, nullptr, nullptr);
+  return queryWithSpatialAdvisory(input, nullptr, nullptr, nullptr);
 }
 
-PredictorQueryResult PredictorModule::queryWithLidar(
+PredictorQueryResult PredictorModule::queryWithSpatialAdvisory(
     const PredictorQueryInput& input,
-    const LidarAdvisoryResult* cached_lidar,
+    const SpatialAdvisory* cached_spatial_advisory,
+    SpatialAdvisory* evaluated_spatial_advisory,
     PredictorBatchDiagnostics* diagnostics) const {
   PredictorQueryResult out;
   out.query_position_map = input.query_position_map;
@@ -427,44 +433,57 @@ PredictorQueryResult PredictorModule::queryWithLidar(
     working_input.snapshot.lambda_base_pos.setZero();
   }
 
-  const bool gnss_allowed =
-      source_allows_gnss(params_.source_mode) &&
-      !gnss_policy_disables_gnss(params_.gnss_epoch_policy);
-  if (gnss_allowed) {
-    std::string gnss_unavailable_reason;
-    if (params_.freshness.enabled) {
-      gnss_unavailable_reason =
-          gnss_epoch_unavailable_reason(input, params_.freshness,
-                                        "no_gnss_epoch");
-    } else if (!input.snapshot.has_epoch) {
-      gnss_unavailable_reason = "no_gnss_epoch";
-    }
-    if (gnss_unavailable_reason.empty()) {
-      const auto begin = diagnostics && diagnostics->collect_component_timing
-                             ? std::chrono::steady_clock::now()
-                             : std::chrono::steady_clock::time_point{};
-      out.gnss = gnss_.query(working_input.query_position_map,
-                             working_input.snapshot);
-      if (diagnostics) {
-        ++diagnostics->gnss_advisory_invocations;
-        if (diagnostics->collect_component_timing) {
-          diagnostics->gnss_advisory_duration_ns +=
-              static_cast<std::uint64_t>(
-                  std::chrono::duration_cast<std::chrono::nanoseconds>(
-                      std::chrono::steady_clock::now() - begin).count());
-        }
+  if (cached_spatial_advisory != nullptr) {
+    out.gnss = cached_spatial_advisory->gnss;
+    out.lidar = cached_spatial_advisory->lidar;
+    if (diagnostics) {
+      ++diagnostics->spatial_advisory_reuse_count;
+      if (source_allows_lidar(params_.source_mode)) {
+        ++diagnostics->lidar_cache_hits;
       }
-    } else {
-      out.gnss = disabled_gnss_result(gnss_unavailable_reason);
     }
   } else {
-    out.gnss = disabled_gnss_result("gnss_disabled");
-  }
-
-  if (source_allows_lidar(params_.source_mode)) {
-    if (cached_lidar) {
-      out.lidar = *cached_lidar;
+    if (diagnostics) {
+      ++diagnostics->spatial_advisory_recompute_count;
+      if (source_allows_lidar(params_.source_mode)) {
+        ++diagnostics->lidar_evaluations;
+      }
+    }
+    const bool gnss_allowed =
+        source_allows_gnss(params_.source_mode) &&
+        !gnss_policy_disables_gnss(params_.gnss_epoch_policy);
+    if (gnss_allowed) {
+      std::string gnss_unavailable_reason;
+      if (params_.freshness.enabled) {
+        gnss_unavailable_reason =
+            gnss_epoch_unavailable_reason(input, params_.freshness,
+                                          "no_gnss_epoch");
+      } else if (!input.snapshot.has_epoch) {
+        gnss_unavailable_reason = "no_gnss_epoch";
+      }
+      if (gnss_unavailable_reason.empty()) {
+        const auto begin = diagnostics && diagnostics->collect_component_timing
+                               ? std::chrono::steady_clock::now()
+                               : std::chrono::steady_clock::time_point{};
+        out.gnss = gnss_.query(working_input.query_position_map,
+                               working_input.snapshot);
+        if (diagnostics) {
+          ++diagnostics->gnss_advisory_invocations;
+          if (diagnostics->collect_component_timing) {
+            diagnostics->gnss_advisory_duration_ns +=
+                static_cast<std::uint64_t>(
+                    std::chrono::duration_cast<std::chrono::nanoseconds>(
+                        std::chrono::steady_clock::now() - begin).count());
+          }
+        }
+      } else {
+        out.gnss = disabled_gnss_result(gnss_unavailable_reason);
+      }
     } else {
+      out.gnss = disabled_gnss_result("gnss_disabled");
+    }
+
+    if (source_allows_lidar(params_.source_mode)) {
       const auto begin = diagnostics && diagnostics->collect_component_timing
                              ? std::chrono::steady_clock::now()
                              : std::chrono::steady_clock::time_point{};
@@ -479,9 +498,13 @@ PredictorQueryResult PredictorModule::queryWithLidar(
                       std::chrono::steady_clock::now() - begin).count());
         }
       }
+    } else {
+      out.lidar = disabled_lidar_result("lidar_disabled");
     }
-  } else {
-    out.lidar = disabled_lidar_result("lidar_disabled");
+    if (evaluated_spatial_advisory != nullptr) {
+      evaluated_spatial_advisory->gnss = out.gnss;
+      evaluated_spatial_advisory->lidar = out.lidar;
+    }
   }
   const auto fusion_begin = diagnostics && diagnostics->collect_component_timing
                                 ? std::chrono::steady_clock::now()
@@ -526,19 +549,44 @@ std::vector<PredictorQueryResult> PredictorModule::queryBatch(
     double x;
     double y;
     double z;
+    std::string frame_id;
     double snapshot_stamp;
+    double pose_stamp;
+    double current_stamp;
+    std::uint64_t prior_source_generation;
+    bool has_gnss_epoch;
+    double gnss_epoch_stamp;
+    bool has_freshness_reference;
+    double freshness_reference;
     bool operator==(const Key& other) const {
       return x == other.x && y == other.y && z == other.z &&
-             snapshot_stamp == other.snapshot_stamp;
+             frame_id == other.frame_id &&
+             snapshot_stamp == other.snapshot_stamp &&
+             pose_stamp == other.pose_stamp &&
+             current_stamp == other.current_stamp &&
+             prior_source_generation == other.prior_source_generation &&
+             has_gnss_epoch == other.has_gnss_epoch &&
+             gnss_epoch_stamp == other.gnss_epoch_stamp &&
+             has_freshness_reference == other.has_freshness_reference &&
+             freshness_reference == other.freshness_reference;
     }
   };
   struct Hash {
     std::size_t operator()(const Key& key) const {
       std::size_t seed = std::hash<double>{}(key.x);
-      for (const double value : {key.y, key.z, key.snapshot_stamp}) {
-        seed ^= std::hash<double>{}(value) + 0x9e3779b9u + (seed << 6) +
-                (seed >> 2);
+      const auto combine = [&seed](const std::size_t value) {
+        seed ^= value + 0x9e3779b9u + (seed << 6) + (seed >> 2);
+      };
+      for (const double value :
+           {key.y, key.z, key.snapshot_stamp, key.pose_stamp,
+            key.current_stamp, key.gnss_epoch_stamp,
+            key.freshness_reference}) {
+        combine(std::hash<double>{}(value));
       }
+      combine(std::hash<std::string>{}(key.frame_id));
+      combine(std::hash<std::uint64_t>{}(key.prior_source_generation));
+      combine(std::hash<bool>{}(key.has_gnss_epoch));
+      combine(std::hash<bool>{}(key.has_freshness_reference));
       return seed;
     }
   };
@@ -547,30 +595,49 @@ std::vector<PredictorQueryResult> PredictorModule::queryBatch(
   local.collect_component_timing =
       diagnostics && diagnostics->collect_component_timing;
   local.query_count = inputs.size();
-  std::unordered_map<Key, LidarAdvisoryResult, Hash> lidar_cache;
-  lidar_cache.reserve(inputs.size());
+  std::unordered_map<Key, SpatialAdvisory, Hash> spatial_cache;
+  spatial_cache.reserve(inputs.size());
   std::vector<PredictorQueryResult> outputs;
   outputs.reserve(inputs.size());
   for (const auto& input : inputs) {
-    const bool cacheable = source_allows_lidar(params_.source_mode) &&
-                           input.query_position_map.allFinite() &&
-                           std::isfinite(input.snapshot.stamp);
+    const bool has_freshness_reference =
+        std::isfinite(input.freshness_reference_time_s);
+    const double freshness_reference =
+        has_freshness_reference
+            ? input.freshness_reference_time_s
+            : (params_.freshness.enabled ? input.query_time_s : 0.0);
+    const double gnss_epoch_stamp =
+        input.snapshot.has_epoch ? input.snapshot.gnss_epoch.stamp : 0.0;
+    const bool cacheable =
+        input.query_position_map.allFinite() &&
+        std::isfinite(input.snapshot.stamp) &&
+        std::isfinite(input.snapshot.pose_stamp) &&
+        std::isfinite(input.snapshot.current.stamp) &&
+        std::isfinite(freshness_reference) &&
+        (!input.snapshot.has_epoch || std::isfinite(gnss_epoch_stamp));
     const Key key{input.query_position_map.x(), input.query_position_map.y(),
-                  input.query_position_map.z(), input.snapshot.stamp};
-    const auto cached = cacheable ? lidar_cache.find(key) : lidar_cache.end();
-    const LidarAdvisoryResult* cached_lidar =
-        cached == lidar_cache.end() ? nullptr : &cached->second;
-    PredictorQueryResult result = queryWithLidar(input, cached_lidar, &local);
-    if (cached_lidar) {
-      ++local.lidar_cache_hits;
-    } else if (cacheable &&
-               result.lidar.fallback_reason != "not_evaluated") {
-      lidar_cache.emplace(key, result.lidar);
-      ++local.lidar_evaluations;
+                  input.query_position_map.z(), input.frame_id,
+                  input.snapshot.stamp, input.snapshot.pose_stamp,
+                  input.snapshot.current.stamp,
+                  input.snapshot.prior_source_generation,
+                  input.snapshot.has_epoch, gnss_epoch_stamp,
+                  has_freshness_reference, freshness_reference};
+    const auto cached = cacheable ? spatial_cache.find(key)
+                                  : spatial_cache.end();
+    const SpatialAdvisory* cached_spatial_advisory =
+        cached == spatial_cache.end() ? nullptr : &cached->second;
+    SpatialAdvisory evaluated_spatial_advisory;
+    const std::size_t recomputes_before =
+        local.spatial_advisory_recompute_count;
+    PredictorQueryResult result = queryWithSpatialAdvisory(
+        input, cached_spatial_advisory, &evaluated_spatial_advisory, &local);
+    if (cacheable && cached_spatial_advisory == nullptr &&
+        local.spatial_advisory_recompute_count > recomputes_before) {
+      spatial_cache.emplace(key, std::move(evaluated_spatial_advisory));
     }
     outputs.push_back(std::move(result));
   }
-  local.unique_positions = lidar_cache.size();
+  local.unique_positions = spatial_cache.size();
   if (diagnostics) *diagnostics = local;
   return outputs;
 }
