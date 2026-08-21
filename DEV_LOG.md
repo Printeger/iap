@@ -391,4 +391,4 @@ No ROS launch, smoke, qualification, bag, RViz, campaign, formal configuration/t
 - Spec reported three findings: preallocated result size was not proof of actual dispatch, the broad field-group labels were not an exact whitelist, and SHA/push remained pending. Worker threads now accumulate `inputs.size()` at each real `queryBatch` dispatch; profile JSON reports all 91 exact scientific field names; handoff closes SHA/push.
 - After corrections, the final profile rerun exited 0 with the values above. The evidence contract test, 37/37 Predictor tests, and complete repo-local CTest 28/28 all passed again.
 
-Final implementation commit SHA: `PENDING_COMMIT`.
+Final implementation commit SHA: `b929821885df78407eecb5e4ee9f519594e18c7d`.
