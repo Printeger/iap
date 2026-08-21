@@ -1960,6 +1960,9 @@ TEST_F(P0RiskGridRuntimeStampTest,
   EXPECT_EQ(health.predictor_gnss_used_count, 54u);
   EXPECT_EQ(counts.spatial_recompute, 27u);
   EXPECT_EQ(counts.spatial_reuse, 27u);
+  EXPECT_EQ(counts.legacy_unique_positions, 27u);
+  EXPECT_EQ(counts.legacy_lidar_evaluations, 27u);
+  EXPECT_EQ(counts.legacy_lidar_cache_hits, 27u);
   EXPECT_EQ(counts.gnss_invocations, 27u);
   EXPECT_EQ(counts.lidar_invocations, 27u);
   EXPECT_EQ(counts.horizon_fusions, 54u);
@@ -1999,11 +2002,17 @@ TEST_F(P0RiskGridRuntimeStampTest,
   EXPECT_EQ(first.entered_positions, 27u);
   EXPECT_EQ(first.retained_positions, 0u);
 
+  seedValidInputs(&runtime, 100.5, 100.5);
   advancePriorGeneration(&runtime);
   setCurrentProtectionLevels(&runtime, 1.5, 1.25);
   ASSERT_TRUE(refreshOnce(&runtime));
+  const auto rolling_snapshot = runtime.acquireSnapshot();
   const auto stationary = predictorDiagnosticCounts(runtime);
   EXPECT_EQ(stationary.spatial_recompute, 0u);
+  EXPECT_EQ(stationary.spatial_reuse, 54u);
+  EXPECT_EQ(stationary.legacy_unique_positions, 0u);
+  EXPECT_EQ(stationary.legacy_lidar_evaluations, 0u);
+  EXPECT_EQ(stationary.legacy_lidar_cache_hits, 0u);
   EXPECT_EQ(stationary.gnss_invocations, 0u);
   EXPECT_EQ(stationary.lidar_invocations, 0u);
   EXPECT_EQ(stationary.horizon_fusions, 54u);
@@ -2012,6 +2021,85 @@ TEST_F(P0RiskGridRuntimeStampTest,
   EXPECT_EQ(stationary.evicted_positions, 0u);
   EXPECT_EQ(stationary.full_invalidations, 0u);
   EXPECT_EQ(stationary.invalidation_reason, "none");
+
+  auto fresh_node = std::make_shared<rclcpp::Node>(
+      "p0_cross_refresh_spatial_reuse_fresh_full_test",
+      rclcpp::NodeOptions().allow_undeclared_parameters(false));
+  P0RiskGridRuntime fresh(fresh_node, config);
+  seedValidInputs(&fresh, 100.5, 100.5);
+  setPriorGeneration(&fresh, 2u);
+  setCurrentProtectionLevels(&fresh, 1.5, 1.25);
+  seedGnssEpoch(&fresh, 100.0);
+  seedEmptyLidarOwners(&fresh);
+  installOccupancyEpoch(&fresh, 100.0, {}, "map", 2u);
+  ASSERT_TRUE(refreshOnce(&fresh));
+  expectSnapshotsScientificallyEquivalent(
+      rolling_snapshot, fresh.acquireSnapshot(), false);
+}
+
+TEST_F(P0RiskGridRuntimeStampTest,
+       DisabledProductionSourcesDoNotEraseStationarySpatialReuse) {
+  ensure_rclcpp();
+  for (const auto mode : {iap::PredictorSourceMode::GnssOnly,
+                          iap::PredictorSourceMode::LidarOnly}) {
+    const bool gnss_only = mode == iap::PredictorSourceMode::GnssOnly;
+    const std::string mode_name = gnss_only ? "gnss" : "lidar";
+    auto config = enabledConfig();
+    config.grid.skip_occupied_voxels = false;
+    config.predictor_source_mode = mode;
+    config.predictor_gnss_epoch_policy =
+        gnss_only ? iap::PredictorGnssEpochPolicy::Required
+                  : iap::PredictorGnssEpochPolicy::Disabled;
+
+    auto node = std::make_shared<rclcpp::Node>(
+        "p0_disabled_source_reuse_" + mode_name,
+        rclcpp::NodeOptions().allow_undeclared_parameters(false));
+    P0RiskGridRuntime runtime(node, config);
+    seedValidInputs(&runtime, 100.0, 100.0);
+    seedGnssEpoch(&runtime, 100.0);
+    seedEmptyLidarOwners(&runtime);
+    installOccupancyEpoch(&runtime, 100.0, {}, "map", 2u);
+    ASSERT_TRUE(refreshOnce(&runtime));
+
+    seedValidInputs(&runtime, 100.5, 100.5);
+    advancePriorGeneration(&runtime);
+    if (gnss_only) {
+      seedEmptyLidarOwners(&runtime);
+    } else {
+      seedGnssEpoch(&runtime, 100.5);
+      installOccupancyEpoch(&runtime, 100.5, {}, "map", 4u);
+    }
+    ASSERT_TRUE(refreshOnce(&runtime));
+    const auto rolling_snapshot = runtime.acquireSnapshot();
+    const auto counts = predictorDiagnosticCounts(runtime);
+    EXPECT_EQ(counts.spatial_recompute, 0u) << mode_name;
+    EXPECT_EQ(counts.spatial_reuse, 54u) << mode_name;
+    EXPECT_EQ(counts.retained_positions, 27u) << mode_name;
+    EXPECT_EQ(counts.entered_positions, 0u) << mode_name;
+    EXPECT_EQ(counts.evicted_positions, 0u) << mode_name;
+    EXPECT_EQ(counts.horizon_fusions, 54u) << mode_name;
+    EXPECT_EQ(counts.full_invalidations, 0u) << mode_name;
+    EXPECT_EQ(counts.invalidation_reason, "none") << mode_name;
+    if (gnss_only) {
+      EXPECT_EQ(counts.legacy_unique_positions, 0u);
+      EXPECT_EQ(counts.legacy_lidar_evaluations, 0u);
+      EXPECT_EQ(counts.legacy_lidar_cache_hits, 0u);
+    }
+
+    auto fresh_node = std::make_shared<rclcpp::Node>(
+        "p0_disabled_source_reuse_fresh_" + mode_name,
+        rclcpp::NodeOptions().allow_undeclared_parameters(false));
+    P0RiskGridRuntime fresh(fresh_node, config);
+    seedValidInputs(&fresh, 100.5, 100.5);
+    setPriorGeneration(&fresh, 2u);
+    seedGnssEpoch(&fresh, gnss_only ? 100.0 : 100.5);
+    seedEmptyLidarOwners(&fresh);
+    installOccupancyEpoch(&fresh, gnss_only ? 100.0 : 100.5, {}, "map",
+                          gnss_only ? 2u : 4u);
+    ASSERT_TRUE(refreshOnce(&fresh));
+    expectSnapshotsScientificallyEquivalent(
+        rolling_snapshot, fresh.acquireSnapshot(), false);
+  }
 }
 
 TEST_F(P0RiskGridRuntimeStampTest,
@@ -2226,6 +2314,36 @@ TEST_F(P0RiskGridRuntimeStampTest,
   EXPECT_FALSE(refreshOnce(&runtime));
   EXPECT_EQ(runtime.health().reason, "predictor_spatial_source_changed");
   expectSameActiveGeneration(accepted, runtime.acquireSnapshot());
+}
+
+TEST_F(P0RiskGridRuntimeStampTest,
+       DisabledLegacyMapOwnerChangeDoesNotAbortProductionRefresh) {
+  ensure_rclcpp();
+  auto node = std::make_shared<rclcpp::Node>(
+      "p0_disabled_legacy_map_owner_race_test",
+      rclcpp::NodeOptions().allow_undeclared_parameters(false));
+  auto config = enabledConfig();
+  config.predictor_source_mode = iap::PredictorSourceMode::LidarOnly;
+  config.predictor_gnss_epoch_policy =
+      iap::PredictorGnssEpochPolicy::Disabled;
+  config.predictor_lidar_legacy_observability = false;
+  P0RiskGridRuntime runtime(node, config);
+  seedValidInputs(&runtime, 100.0, 100.0);
+  seedEmptyLidarOwners(&runtime);
+  std::atomic<bool> mutate{false};
+  installOccupancyEpochWithFirstQueryHook(&runtime, [&]() {
+    if (mutate.load()) {
+      replaceLidarMapOwner(&runtime);
+    }
+  });
+
+  ASSERT_TRUE(refreshOnce(&runtime));
+  const auto accepted = runtime.acquireSnapshot();
+  ASSERT_NE(accepted, nullptr);
+  mutate.store(true);
+  EXPECT_TRUE(refreshOnce(&runtime));
+  EXPECT_GT(runtime.acquireSnapshot()->generation_id(),
+            accepted->generation_id());
 }
 
 TEST_F(P0RiskGridRuntimeStampTest,

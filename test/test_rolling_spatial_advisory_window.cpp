@@ -26,6 +26,20 @@ IntegritySnapshot makeSnapshot(const std::uint64_t prior_generation) {
   return snapshot;
 }
 
+IntegritySnapshot makeGnssSnapshot(const std::uint64_t prior_generation,
+                                   const int satellite_id = 3) {
+  IntegritySnapshot snapshot = makeSnapshot(prior_generation);
+  snapshot.has_epoch = true;
+  snapshot.gnss_epoch.stamp = 100.0;
+  SatObs satellite;
+  satellite.sat_id = satellite_id;
+  satellite.elevation = 0.7;
+  satellite.azimuth = 1.2;
+  satellite.pr_sigma = 2.0;
+  snapshot.gnss_epoch.sats.push_back(satellite);
+  return snapshot;
+}
+
 RollingSpatialRefreshInput makeRefreshInput(
     const std::shared_ptr<const LocalOccupancyGrid>& occupancy,
     const IntegritySnapshot& snapshot) {
@@ -46,6 +60,18 @@ RollingSpatialRefreshInput makeRefreshInput(
   input.occupancy_generation = 7;
   input.lidar_map_points_owner = kEmptyLidarMapPoints;
   input.lidar_fim_primitives_owner = kEmptyLidarFimPrimitives;
+  return input;
+}
+
+RollingSpatialRefreshInput makeGnssRefreshInput(
+    const std::shared_ptr<const LocalOccupancyGrid>& occupancy,
+    const IntegritySnapshot& snapshot,
+    const PredictorSourceMode source_mode = PredictorSourceMode::GnssOnly) {
+  auto input = makeRefreshInput(occupancy, snapshot);
+  auto params = input.module.params();
+  params.source_mode = source_mode;
+  params.gnss_epoch_policy = PredictorGnssEpochPolicy::Required;
+  input.module.set_params(params);
   return input;
 }
 
@@ -83,6 +109,9 @@ PredictorBatchDiagnostics queryWindow(
           }
         }
         total.query_count += local.query_count;
+        total.unique_positions += local.unique_positions;
+        total.lidar_evaluations += local.lidar_evaluations;
+        total.lidar_cache_hits += local.lidar_cache_hits;
         total.spatial_advisory_recompute_count +=
             local.spatial_advisory_recompute_count;
         total.spatial_advisory_reuse_count +=
@@ -105,19 +134,118 @@ bool samePrediction(const PredictorQueryResult& lhs,
   const auto same_double = [](const double a, const double b) {
     return a == b || (std::isnan(a) && std::isnan(b));
   };
+  const auto same_matrix = [&same_double](const Eigen::Matrix3d& a,
+                                          const Eigen::Matrix3d& b) {
+    for (int row = 0; row < 3; ++row) {
+      for (int column = 0; column < 3; ++column) {
+        if (!same_double(a(row, column), b(row, column))) return false;
+      }
+    }
+    return true;
+  };
+  const auto same_position = [&same_double](const Eigen::Vector3d& a,
+                                            const Eigen::Vector3d& b) {
+    return same_double(a.x(), b.x()) && same_double(a.y(), b.y()) &&
+           same_double(a.z(), b.z());
+  };
+  const auto& lg = lhs.gnss;
+  const auto& rg = rhs.gnss;
+  const bool same_gnss =
+      lg.available == rg.available && lg.valid == rg.valid &&
+      lg.fallback == rg.fallback &&
+      lg.fallback_reason == rg.fallback_reason &&
+      lg.information_state == rg.information_state &&
+      same_double(lg.hpl, rg.hpl) && same_double(lg.vpl, rg.vpl) &&
+      same_double(lg.pl_scalar, rg.pl_scalar) &&
+      same_double(lg.pl_e, rg.pl_e) && same_double(lg.pl_n, rg.pl_n) &&
+      same_double(lg.pl_u, rg.pl_u) &&
+      same_double(lg.pl_ff_h, rg.pl_ff_h) &&
+      same_double(lg.pl_ff_v, rg.pl_ff_v) &&
+      same_double(lg.sigma_h, rg.sigma_h) &&
+      same_double(lg.sigma_v, rg.sigma_v) &&
+      same_double(lg.pdop, rg.pdop) && same_double(lg.hdop, rg.hdop) &&
+      same_double(lg.vdop, rg.vdop) &&
+      same_double(lg.effective_sigma_mean, rg.effective_sigma_mean) &&
+      same_double(lg.effective_sigma_max, rg.effective_sigma_max) &&
+      lg.n_visible == rg.n_visible && lg.n_used == rg.n_used &&
+      lg.n_hypotheses == rg.n_hypotheses &&
+      lg.n_excluded == rg.n_excluded &&
+      lg.visible_sat_ids == rg.visible_sat_ids &&
+      lg.used_sat_ids == rg.used_sat_ids &&
+      lg.excluded_sat_ids == rg.excluded_sat_ids &&
+      same_matrix(lg.lambda_gnss, rg.lambda_gnss) &&
+      lg.fim_valid == rg.fim_valid &&
+      lg.fim_regularized == rg.fim_regularized &&
+      same_double(lg.lambda_trace, rg.lambda_trace) &&
+      same_double(lg.lambda_min_eig, rg.lambda_min_eig) &&
+      same_double(lg.lambda_max_eig, rg.lambda_max_eig) &&
+      same_double(lg.lambda_condition, rg.lambda_condition) &&
+      lg.fim_fallback_reason == rg.fim_fallback_reason;
+
+  const auto& ll = lhs.lidar;
+  const auto& rl = rhs.lidar;
+  const bool same_lidar =
+      ll.available == rl.available && ll.valid == rl.valid &&
+      ll.fallback == rl.fallback &&
+      ll.fallback_reason == rl.fallback_reason &&
+      ll.information_state == rl.information_state &&
+      same_matrix(ll.lambda_lidar, rl.lambda_lidar) &&
+      same_matrix(ll.legacy_delta_lambda, rl.legacy_delta_lambda) &&
+      ll.fim_valid == rl.fim_valid && ll.legacy_valid == rl.legacy_valid &&
+      ll.fim_regularized == rl.fim_regularized &&
+      same_double(ll.lidar_alpha, rl.lidar_alpha) &&
+      same_double(ll.tdop_proxy, rl.tdop_proxy) &&
+      same_double(ll.condition, rl.condition) &&
+      ll.n_primitives == rl.n_primitives &&
+      ll.n_valid_normals == rl.n_valid_normals &&
+      same_double(ll.bias_h, rl.bias_h) &&
+      same_double(ll.bias_v, rl.bias_v) &&
+      same_double(ll.lambda_trace, rl.lambda_trace) &&
+      same_double(ll.lambda_min_eig, rl.lambda_min_eig) &&
+      same_double(ll.lambda_max_eig, rl.lambda_max_eig) &&
+      same_double(ll.lambda_condition, rl.lambda_condition);
+
+  const auto& lf = lhs.fused;
+  const auto& rf = rhs.fused;
+  const bool same_fusion =
+      lf.available == rf.available && lf.valid == rf.valid &&
+      lf.fallback == rf.fallback &&
+      lf.fallback_reason == rf.fallback_reason &&
+      lf.information_state == rf.information_state &&
+      same_double(lf.hpl, rf.hpl) && same_double(lf.vpl, rf.vpl) &&
+      same_double(lf.pl_scalar, rf.pl_scalar) &&
+      same_double(lf.sigma_h, rf.sigma_h) &&
+      same_double(lf.sigma_v, rf.sigma_v) &&
+      same_matrix(lf.lambda_prior, rf.lambda_prior) &&
+      same_matrix(lf.lambda_gnss, rf.lambda_gnss) &&
+      same_matrix(lf.lambda_lidar, rf.lambda_lidar) &&
+      same_matrix(lf.lambda_pred, rf.lambda_pred) &&
+      same_matrix(lf.sigma_pos, rf.sigma_pos) &&
+      lf.prior_valid == rf.prior_valid &&
+      lf.gnss_used == rf.gnss_used && lf.lidar_used == rf.lidar_used &&
+      lf.epsilon_applied == rf.epsilon_applied &&
+      lf.degeneracy_regularized == rf.degeneracy_regularized &&
+      lf.conservative_max_applied == rf.conservative_max_applied &&
+      lf.fusion_mode == rf.fusion_mode &&
+      same_double(lf.lambda_prior_trace, rf.lambda_prior_trace) &&
+      same_double(lf.lambda_gnss_trace, rf.lambda_gnss_trace) &&
+      same_double(lf.lambda_lidar_trace, rf.lambda_lidar_trace) &&
+      same_double(lf.lambda_pred_trace, rf.lambda_pred_trace) &&
+      same_double(lf.lambda_pred_min_eig, rf.lambda_pred_min_eig) &&
+      same_double(lf.lambda_pred_max_eig, rf.lambda_pred_max_eig) &&
+      same_double(lf.lambda_pred_condition, rf.lambda_pred_condition);
+
   return lhs.available == rhs.available && lhs.valid == rhs.valid &&
          lhs.fallback == rhs.fallback &&
          lhs.fallback_reason == rhs.fallback_reason &&
+         lhs.query_source == rhs.query_source &&
+         same_position(lhs.query_position_map, rhs.query_position_map) &&
+         same_double(lhs.query_time_s, rhs.query_time_s) &&
+         same_double(lhs.horizon_s, rhs.horizon_s) &&
+         lhs.frame_id == rhs.frame_id &&
          lhs.source_flags == rhs.source_flags &&
          lhs.covariance_growth_status == rhs.covariance_growth_status &&
-         lhs.gnss.valid == rhs.gnss.valid &&
-         lhs.lidar.valid == rhs.lidar.valid &&
-         lhs.fused.valid == rhs.fused.valid &&
-         lhs.gnss.lambda_gnss.isApprox(rhs.gnss.lambda_gnss, 0.0) &&
-         lhs.lidar.lambda_lidar.isApprox(rhs.lidar.lambda_lidar, 0.0) &&
-         lhs.fused.lambda_pred.isApprox(rhs.fused.lambda_pred, 0.0) &&
-         same_double(lhs.fused.hpl, rhs.fused.hpl) &&
-         same_double(lhs.fused.vpl, rhs.fused.vpl);
+         same_gnss && same_lidar && same_fusion;
 }
 
 TEST(RollingSpatialAdvisoryWindowTest,
@@ -130,6 +258,9 @@ TEST(RollingSpatialAdvisoryWindowTest,
   EXPECT_EQ(first.spatial_advisory_recompute_count, 27u);
   EXPECT_EQ(first.lidar_advisory_invocations, 27u);
   EXPECT_EQ(first.fusion_advisory_invocations, 54u);
+  EXPECT_EQ(first.unique_positions, 27u);
+  EXPECT_EQ(first.lidar_evaluations, 27u);
+  EXPECT_EQ(first.lidar_cache_hits, 27u);
   EXPECT_EQ(window.diagnostics().retained_position_count, 0u);
   EXPECT_EQ(window.diagnostics().entered_position_count, 27u);
   EXPECT_EQ(window.diagnostics().evicted_position_count, 0u);
@@ -143,6 +274,9 @@ TEST(RollingSpatialAdvisoryWindowTest,
   EXPECT_EQ(stationary.spatial_advisory_recompute_count, 0u);
   EXPECT_EQ(stationary.lidar_advisory_invocations, 0u);
   EXPECT_EQ(stationary.fusion_advisory_invocations, 54u);
+  EXPECT_EQ(stationary.unique_positions, 0u);
+  EXPECT_EQ(stationary.lidar_evaluations, 0u);
+  EXPECT_EQ(stationary.lidar_cache_hits, 0u);
   EXPECT_EQ(window.diagnostics().retained_position_count, 27u);
   EXPECT_EQ(window.diagnostics().entered_position_count, 0u);
   EXPECT_EQ(window.diagnostics().evicted_position_count, 0u);
@@ -157,6 +291,33 @@ TEST(RollingSpatialAdvisoryWindowTest,
   EXPECT_EQ(window.diagnostics().retained_position_count, 18u);
   EXPECT_EQ(window.diagnostics().entered_position_count, 9u);
   EXPECT_EQ(window.diagnostics().evicted_position_count, 9u);
+}
+
+TEST(RollingSpatialAdvisoryWindowTest,
+     LegacyLidarCacheHitCountsOnlySuccessfulSameCallReuse) {
+  auto occupancy = std::make_shared<LocalOccupancyGrid>();
+  const auto snapshot = makeSnapshot(1);
+  RollingSpatialAdvisoryWindow window;
+  ASSERT_TRUE(window.beginRefresh(makeRefreshInput(occupancy, snapshot)));
+
+  const Eigen::Vector3d position(0.5, 0.5, 0.5);
+  std::vector<PredictorQueryInput> inputs;
+  inputs.emplace_back(position, snapshot, 100.0, 0.0, "map", 100.0);
+  inputs.emplace_back(position, snapshot, 100.0, -1.0, "map", 100.0);
+  inputs.emplace_back(position, snapshot, 101.0, 1.0, "map", 100.0);
+  PredictorBatchDiagnostics diagnostics;
+  const auto outputs = window.queryPositionHorizons(inputs, &diagnostics);
+
+  ASSERT_EQ(outputs.size(), inputs.size());
+  EXPECT_FALSE(outputs[1].valid);
+  EXPECT_EQ(outputs[1].fallback_reason, "invalid_horizon");
+  EXPECT_EQ(diagnostics.spatial_advisory_recompute_count, 1u);
+  EXPECT_EQ(diagnostics.spatial_advisory_reuse_count, 1u);
+  EXPECT_EQ(diagnostics.lidar_advisory_invocations, 1u);
+  EXPECT_EQ(diagnostics.fusion_advisory_invocations, 2u);
+  EXPECT_EQ(diagnostics.unique_positions, 1u);
+  EXPECT_EQ(diagnostics.lidar_evaluations, 1u);
+  EXPECT_EQ(diagnostics.lidar_cache_hits, 1u);
 }
 
 TEST(RollingSpatialAdvisoryWindowTest,
@@ -214,15 +375,18 @@ TEST(RollingSpatialAdvisoryWindowTest,
      IdentityChangeInvalidatesButPriorChangeDoesNot) {
   auto occupancy = std::make_shared<LocalOccupancyGrid>();
   RollingSpatialAdvisoryWindow window;
-  const auto snapshot = makeSnapshot(1);
-  ASSERT_TRUE(window.beginRefresh(makeRefreshInput(occupancy, snapshot)));
-  queryWindow(&window, snapshot, 0);
+  const auto snapshot = makeGnssSnapshot(1);
+  const auto make_gnss_input = [&]() {
+    return makeGnssRefreshInput(occupancy, snapshot);
+  };
+  ASSERT_TRUE(window.beginRefresh(make_gnss_input()));
+  queryWindow(&window, snapshot, 0, false);
   window.commitRefresh();
 
-  auto changed = makeRefreshInput(occupancy, snapshot);
+  auto changed = make_gnss_input();
   changed.occupancy_generation = 8;
   ASSERT_TRUE(window.beginRefresh(std::move(changed)));
-  queryWindow(&window, snapshot, 0);
+  queryWindow(&window, snapshot, 0, false);
   const auto diagnostics = window.diagnostics();
   EXPECT_EQ(diagnostics.retained_position_count, 0u);
   EXPECT_EQ(diagnostics.entered_position_count, 27u);
@@ -230,6 +394,213 @@ TEST(RollingSpatialAdvisoryWindowTest,
   EXPECT_EQ(diagnostics.full_invalidation_count, 1u);
   EXPECT_EQ(diagnostics.invalidation_reason,
             RollingSpatialInvalidationReason::OccupancySourceChanged);
+}
+
+TEST(RollingSpatialAdvisoryWindowTest,
+     GnssOnlyIgnoresDisabledLidarAndCurrentSpatialIdentity) {
+  auto occupancy = std::make_shared<LocalOccupancyGrid>();
+  const auto snapshot = makeGnssSnapshot(1);
+
+  const auto make_gnss_input = [&]() {
+    return makeGnssRefreshInput(occupancy, snapshot);
+  };
+
+  RollingSpatialAdvisoryWindow window;
+  ASSERT_TRUE(window.beginRefresh(make_gnss_input()));
+  queryWindow(&window, snapshot, 0, false);
+  window.commitRefresh();
+
+  auto changed = make_gnss_input();
+  changed.lidar_map_points_owner =
+      std::make_shared<const std::vector<Eigen::Vector3d>>();
+  changed.lidar_fim_primitives_owner =
+      std::make_shared<const std::vector<LidarFimPrimitive>>();
+  changed.snapshot.current.n_trunks_observed = 5;
+  changed.snapshot.current.tdop = 3.0;
+  changed.snapshot.current.excluded_trunk_ids = {11, 12};
+  changed.snapshot.current.stamp = 101.0;
+  changed.snapshot.current.valid = false;
+  ASSERT_TRUE(window.beginRefresh(std::move(changed)));
+
+  const auto counts = queryWindow(&window, snapshot, 0, false);
+  EXPECT_EQ(counts.spatial_advisory_recompute_count, 0u);
+  EXPECT_EQ(window.diagnostics().retained_position_count, 27u);
+  EXPECT_EQ(window.diagnostics().full_invalidation_count, 0u);
+  EXPECT_EQ(window.diagnostics().invalidation_reason,
+            RollingSpatialInvalidationReason::None);
+}
+
+TEST(RollingSpatialAdvisoryWindowTest,
+     LidarOnlyIgnoresDisabledGnssAndOccupancySpatialIdentity) {
+  auto occupancy = std::make_shared<LocalOccupancyGrid>();
+  const auto snapshot = makeSnapshot(1);
+  RollingSpatialAdvisoryWindow window;
+  ASSERT_TRUE(window.beginRefresh(makeRefreshInput(occupancy, snapshot)));
+  queryWindow(&window, snapshot, 0);
+  window.commitRefresh();
+
+  auto changed_snapshot = snapshot;
+  changed_snapshot.has_epoch = true;
+  changed_snapshot.gnss_epoch.stamp = 101.0;
+  SatObs satellite;
+  satellite.sat_id = 9;
+  satellite.elevation = 0.8;
+  satellite.azimuth = 2.1;
+  satellite.pr_sigma = 4.0;
+  changed_snapshot.gnss_epoch.sats.push_back(satellite);
+  auto changed = makeRefreshInput(occupancy, changed_snapshot);
+  changed.occupancy_owner = std::make_shared<LocalOccupancyGrid>();
+  changed.occupancy_generation = 8;
+  ASSERT_TRUE(window.beginRefresh(std::move(changed)));
+
+  const auto counts = queryWindow(&window, changed_snapshot, 0);
+  EXPECT_EQ(counts.spatial_advisory_recompute_count, 0u);
+  EXPECT_EQ(window.diagnostics().retained_position_count, 27u);
+  EXPECT_EQ(window.diagnostics().full_invalidation_count, 0u);
+  EXPECT_EQ(window.diagnostics().invalidation_reason,
+            RollingSpatialInvalidationReason::None);
+}
+
+TEST(RollingSpatialAdvisoryWindowTest,
+     LidarOnlyWithoutLegacyFallbackIgnoresMapAndCurrentButTracksFimOwner) {
+  auto occupancy = std::make_shared<LocalOccupancyGrid>();
+  const auto snapshot = makeSnapshot(1);
+  const auto make_input = [&]() {
+    auto input = makeRefreshInput(occupancy, snapshot);
+    auto params = input.module.params();
+    params.lidar.enable_legacy_observability = false;
+    input.module.set_params(params);
+    return input;
+  };
+
+  RollingSpatialAdvisoryWindow window;
+  ASSERT_TRUE(window.beginRefresh(make_input()));
+  queryWindow(&window, snapshot, 0, false);
+  window.commitRefresh();
+
+  auto inactive_changed = make_input();
+  inactive_changed.lidar_map_points_owner =
+      std::make_shared<const std::vector<Eigen::Vector3d>>();
+  inactive_changed.snapshot.current.n_trunks_observed = 5;
+  inactive_changed.snapshot.current.tdop = 3.0;
+  inactive_changed.snapshot.current.excluded_trunk_ids = {11};
+  ASSERT_TRUE(window.beginRefresh(std::move(inactive_changed)));
+  const auto retained = queryWindow(&window, snapshot, 0, false);
+  EXPECT_EQ(retained.spatial_advisory_recompute_count, 0u);
+  EXPECT_EQ(window.diagnostics().retained_position_count, 27u);
+  EXPECT_EQ(window.diagnostics().invalidation_reason,
+            RollingSpatialInvalidationReason::None);
+  window.commitRefresh();
+
+  auto fim_changed = make_input();
+  fim_changed.lidar_fim_primitives_owner =
+      std::make_shared<const std::vector<LidarFimPrimitive>>();
+  ASSERT_TRUE(window.beginRefresh(std::move(fim_changed)));
+  EXPECT_EQ(window.diagnostics().full_invalidation_count, 1u);
+  EXPECT_EQ(window.diagnostics().invalidation_reason,
+            RollingSpatialInvalidationReason::LidarSourceChanged);
+}
+
+TEST(RollingSpatialAdvisoryWindowTest,
+     FusionCurrentStampChangeRetainsSpatialEvidenceAndRerunsHorizons) {
+  auto occupancy = std::make_shared<LocalOccupancyGrid>();
+  const auto snapshot = makeGnssSnapshot(1);
+
+  const auto make_fusion_input = [&](const IntegritySnapshot& value) {
+    return makeGnssRefreshInput(occupancy, value,
+                                PredictorSourceMode::Fusion);
+  };
+  const Eigen::Vector3d position(0.5, 0.5, 0.5);
+  const auto make_queries = [&](const IntegritySnapshot& value) {
+    std::vector<PredictorQueryInput> queries;
+    queries.emplace_back(position, value, value.stamp, 0.0, "map",
+                         value.stamp);
+    queries.emplace_back(position, value, value.stamp + 1.0, 1.0, "map",
+                         value.stamp);
+    return queries;
+  };
+
+  RollingSpatialAdvisoryWindow window;
+  ASSERT_TRUE(window.beginRefresh(make_fusion_input(snapshot)));
+  ASSERT_EQ(window.queryPositionHorizons(make_queries(snapshot)).size(), 2u);
+  window.commitRefresh();
+
+  auto refreshed = snapshot;
+  refreshed.stamp = 101.0;
+  refreshed.pose_stamp = 101.0;
+  refreshed.current.stamp = 101.0;
+  refreshed.prior_source_generation = 2;
+  refreshed.lambda_base_pos = 2.0 * Eigen::Matrix3d::Identity();
+  ASSERT_TRUE(window.beginRefresh(make_fusion_input(refreshed)));
+  PredictorBatchDiagnostics diagnostics;
+  const auto outputs =
+      window.queryPositionHorizons(make_queries(refreshed), &diagnostics);
+
+  EXPECT_EQ(diagnostics.spatial_advisory_recompute_count, 0u);
+  EXPECT_EQ(diagnostics.spatial_advisory_reuse_count, 2u);
+  EXPECT_EQ(diagnostics.fusion_advisory_invocations, 2u);
+  EXPECT_EQ(window.diagnostics().retained_position_count, 1u);
+  EXPECT_EQ(window.diagnostics().full_invalidation_count, 0u);
+  EXPECT_EQ(window.diagnostics().invalidation_reason,
+            RollingSpatialInvalidationReason::None);
+
+  auto fresh = make_fusion_input(refreshed);
+  fresh.module.set_local_occupancy(fresh.occupancy_owner.get());
+  fresh.module.set_lidar_map_points(fresh.lidar_map_points_owner);
+  fresh.module.set_lidar_fim_primitives(fresh.lidar_fim_primitives_owner);
+  const auto queries = make_queries(refreshed);
+  ASSERT_EQ(outputs.size(), queries.size());
+  for (std::size_t index = 0; index < queries.size(); ++index) {
+    expectSamePrediction(outputs[index], fresh.module.query(queries[index]));
+  }
+  window.commitRefresh();
+
+  auto consumed_changed = refreshed;
+  consumed_changed.current.n_trunks_observed = 1;
+  ASSERT_TRUE(window.beginRefresh(make_fusion_input(consumed_changed)));
+  EXPECT_EQ(window.diagnostics().full_invalidation_count, 1u);
+  EXPECT_EQ(window.diagnostics().invalidation_reason,
+            RollingSpatialInvalidationReason::CurrentIntegrityChanged);
+}
+
+TEST(RollingSpatialAdvisoryWindowTest,
+     GnssIdentityIgnoresSatelliteFieldsNotConsumedBySpatialScience) {
+  auto occupancy = std::make_shared<LocalOccupancyGrid>();
+  const auto snapshot = makeGnssSnapshot(1);
+
+  const auto make_gnss_input = [&](const IntegritySnapshot& value) {
+    return makeGnssRefreshInput(occupancy, value);
+  };
+
+  RollingSpatialAdvisoryWindow window;
+  ASSERT_TRUE(window.beginRefresh(make_gnss_input(snapshot)));
+  queryWindow(&window, snapshot, 0, false);
+  window.commitRefresh();
+
+  auto changed = snapshot;
+  auto& sat = changed.gnss_epoch.sats.front();
+  sat.constellation = 'E';
+  sat.pr_meas = 123.0;
+  sat.dop_meas = 4.0;
+  sat.dop_sigma = 7.0;
+  sat.sat_pos = Eigen::Vector3d(1.0, 2.0, 3.0);
+  sat.sat_vel = Eigen::Vector3d(4.0, 5.0, 6.0);
+  sat.tgd = 8.0;
+  sat.svddt = 9.0;
+  sat.kappa = 0.5;
+  sat.pr_residual = 10.0;
+  sat.nis_pr = 11.0;
+  sat.nis_dop = 12.0;
+  changed.gnss_epoch.gps_sec = 2100001.0;
+  changed.gnss_epoch.iono_params = {1.0, 2.0};
+  ASSERT_TRUE(window.beginRefresh(make_gnss_input(changed)));
+
+  const auto counts = queryWindow(&window, changed, 0, false);
+  EXPECT_EQ(counts.spatial_advisory_recompute_count, 0u);
+  EXPECT_EQ(window.diagnostics().retained_position_count, 27u);
+  EXPECT_EQ(window.diagnostics().full_invalidation_count, 0u);
+  EXPECT_EQ(window.diagnostics().invalidation_reason,
+            RollingSpatialInvalidationReason::None);
 }
 
 TEST(RollingSpatialAdvisoryWindowTest,
@@ -273,14 +644,14 @@ TEST(RollingSpatialAdvisoryWindowTest,
       RollingSpatialInvalidationReason::SourcePolicyChanged);
   expect_reason(
       [](RollingSpatialRefreshInput* input) {
-        input->snapshot.has_epoch = true;
-        input->snapshot.gnss_epoch.stamp = 100.0;
-      },
-      RollingSpatialInvalidationReason::GnssEpochChanged);
-  expect_reason(
-      [](RollingSpatialRefreshInput* input) {
         input->lidar_map_points_owner =
             std::make_shared<const std::vector<Eigen::Vector3d>>();
+      },
+      RollingSpatialInvalidationReason::LidarSourceChanged);
+  expect_reason(
+      [](RollingSpatialRefreshInput* input) {
+        input->lidar_fim_primitives_owner =
+            std::make_shared<const std::vector<LidarFimPrimitive>>();
       },
       RollingSpatialInvalidationReason::LidarSourceChanged);
   expect_reason(
@@ -290,26 +661,17 @@ TEST(RollingSpatialAdvisoryWindowTest,
       RollingSpatialInvalidationReason::CurrentIntegrityChanged);
   expect_reason(
       [](RollingSpatialRefreshInput* input) {
-        input->snapshot.current.stamp = 101.0;
+        input->snapshot.current.tdop = 19.0;
       },
       RollingSpatialInvalidationReason::CurrentIntegrityChanged);
-
-  auto gnss_snapshot = snapshot;
-  gnss_snapshot.has_epoch = true;
-  gnss_snapshot.gnss_epoch.stamp = 100.0;
-  SatObs satellite;
-  satellite.sat_id = 3;
-  satellite.elevation = 0.7;
-  satellite.azimuth = 1.2;
-  satellite.pr_sigma = 2.0;
-  gnss_snapshot.gnss_epoch.sats.push_back(satellite);
+  expect_reason(
+      [](RollingSpatialRefreshInput* input) {
+        input->snapshot.current.excluded_trunk_ids = {7};
+      },
+      RollingSpatialInvalidationReason::CurrentIntegrityChanged);
+  const auto gnss_snapshot = makeGnssSnapshot(1);
   const auto make_gnss_input = [&]() {
-    auto input = makeRefreshInput(occupancy, gnss_snapshot);
-    auto params = input.module.params();
-    params.source_mode = PredictorSourceMode::GnssOnly;
-    params.gnss_epoch_policy = PredictorGnssEpochPolicy::Required;
-    input.module.set_params(params);
-    return input;
+    return makeGnssRefreshInput(occupancy, gnss_snapshot);
   };
   const auto expect_gnss_reason =
       [&](const auto& mutate,
@@ -327,12 +689,38 @@ TEST(RollingSpatialAdvisoryWindowTest,
       };
   expect_gnss_reason(
       [](RollingSpatialRefreshInput* input) {
+        input->snapshot.gnss_epoch.stamp = 101.0;
+      },
+      RollingSpatialInvalidationReason::GnssEpochChanged);
+  expect_gnss_reason(
+      [](RollingSpatialRefreshInput* input) {
+        input->snapshot.gnss_epoch.sats.front().sat_id = 4;
+      },
+      RollingSpatialInvalidationReason::GnssEpochChanged);
+  expect_gnss_reason(
+      [](RollingSpatialRefreshInput* input) {
         input->snapshot.gnss_epoch.sats.front().excluded = true;
       },
       RollingSpatialInvalidationReason::GnssEpochChanged);
   expect_gnss_reason(
       [](RollingSpatialRefreshInput* input) {
+        input->snapshot.gnss_epoch.sats.front().elevation = 0.8;
+      },
+      RollingSpatialInvalidationReason::GnssEpochChanged);
+  expect_gnss_reason(
+      [](RollingSpatialRefreshInput* input) {
+        input->snapshot.gnss_epoch.sats.front().azimuth = 1.3;
+      },
+      RollingSpatialInvalidationReason::GnssEpochChanged);
+  expect_gnss_reason(
+      [](RollingSpatialRefreshInput* input) {
         input->snapshot.gnss_epoch.sats.front().pr_sigma = 3.0;
+      },
+      RollingSpatialInvalidationReason::GnssEpochChanged);
+  expect_gnss_reason(
+      [](RollingSpatialRefreshInput* input) {
+        input->snapshot.gnss_epoch.sats.push_back(
+            input->snapshot.gnss_epoch.sats.front());
       },
       RollingSpatialInvalidationReason::GnssEpochChanged);
   expect_gnss_reason(
@@ -345,6 +733,11 @@ TEST(RollingSpatialAdvisoryWindowTest,
   expect_gnss_reason(
       [](RollingSpatialRefreshInput* input) {
         input->occupancy_owner = std::make_shared<LocalOccupancyGrid>();
+      },
+      RollingSpatialInvalidationReason::OccupancySourceChanged);
+  expect_gnss_reason(
+      [](RollingSpatialRefreshInput* input) {
+        input->occupancy_generation = 8;
       },
       RollingSpatialInvalidationReason::OccupancySourceChanged);
 }
@@ -371,6 +764,31 @@ TEST(RollingSpatialAdvisoryWindowTest,
       std::numeric_limits<double>::quiet_NaN();
   EXPECT_FALSE(window.beginRefresh(std::move(invalid), &reason));
   EXPECT_EQ(reason, "invalid_gnss_epoch_identity");
+
+  const auto expect_invalid_satellite_identity = [&](const auto& mutate) {
+    auto invalid_satellite = makeRefreshInput(occupancy, snapshot);
+    invalid_satellite.module.set_params(params);
+    invalid_satellite.snapshot.has_epoch = true;
+    invalid_satellite.snapshot.gnss_epoch.stamp = 100.0;
+    SatObs satellite;
+    satellite.sat_id = 3;
+    satellite.elevation = 0.7;
+    satellite.azimuth = 1.2;
+    satellite.pr_sigma = 2.0;
+    invalid_satellite.snapshot.gnss_epoch.sats.push_back(satellite);
+    mutate(&invalid_satellite.snapshot.gnss_epoch.sats.front());
+    EXPECT_FALSE(window.beginRefresh(std::move(invalid_satellite), &reason));
+    EXPECT_EQ(reason, "invalid_gnss_satellite_identity");
+  };
+  expect_invalid_satellite_identity([](SatObs* satellite) {
+    satellite->elevation = std::numeric_limits<double>::quiet_NaN();
+  });
+  expect_invalid_satellite_identity([](SatObs* satellite) {
+    satellite->azimuth = std::numeric_limits<double>::infinity();
+  });
+  expect_invalid_satellite_identity([](SatObs* satellite) {
+    satellite->pr_sigma = std::numeric_limits<double>::quiet_NaN();
+  });
 
   auto missing_occupancy = makeRefreshInput(occupancy, snapshot);
   missing_occupancy.module.set_params(params);
@@ -425,9 +843,9 @@ TEST(RollingSpatialAdvisoryWindowTest,
 TEST(RollingSpatialAdvisoryWindowTest,
      CachedAdvisoryDoesNotBypassCurrentFreshnessValidation) {
   auto occupancy = std::make_shared<LocalOccupancyGrid>();
-  auto snapshot = makeSnapshot(1);
-  auto make_fresh_input = [&]() {
-    auto input = makeRefreshInput(occupancy, snapshot);
+  const auto snapshot = makeSnapshot(1);
+  const auto make_fresh_input = [&](const IntegritySnapshot& value) {
+    auto input = makeRefreshInput(occupancy, value);
     auto params = input.module.params();
     params.freshness.enabled = true;
     params.freshness.max_odom_age_s = 0.5;
@@ -437,25 +855,47 @@ TEST(RollingSpatialAdvisoryWindowTest,
     return input;
   };
   RollingSpatialAdvisoryWindow window;
-  ASSERT_TRUE(window.beginRefresh(make_fresh_input()));
+  ASSERT_TRUE(window.beginRefresh(make_fresh_input(snapshot)));
   std::vector<PredictorQueryInput> initial;
   initial.emplace_back(Eigen::Vector3d(0.5, 0.5, 0.5), snapshot, 100.0,
                        0.0, "map", 100.0);
   ASSERT_EQ(window.queryPositionHorizons(initial).size(), 1u);
   window.commitRefresh();
 
-  snapshot.stamp = 200.0;
-  ASSERT_TRUE(window.beginRefresh(make_fresh_input()));
-  std::vector<PredictorQueryInput> stale;
-  stale.emplace_back(Eigen::Vector3d(0.5, 0.5, 0.5), snapshot, 200.0, 0.0,
-                     "map", 200.0);
-  PredictorBatchDiagnostics diagnostics;
-  const auto outputs = window.queryPositionHorizons(stale, &diagnostics);
-  ASSERT_EQ(outputs.size(), 1u);
-  EXPECT_FALSE(outputs.front().valid);
-  EXPECT_EQ(outputs.front().fallback_reason, "stale_odom");
-  EXPECT_EQ(diagnostics.spatial_advisory_reuse_count, 0u);
-  EXPECT_EQ(diagnostics.fusion_advisory_invocations, 0u);
+  auto invalid_current = snapshot;
+  invalid_current.current.valid = false;
+  ASSERT_TRUE(window.beginRefresh(make_fresh_input(invalid_current)));
+  std::vector<PredictorQueryInput> invalid_queries;
+  invalid_queries.emplace_back(Eigen::Vector3d(0.5, 0.5, 0.5),
+                               invalid_current, 100.0, 0.0, "map", 100.0);
+  PredictorBatchDiagnostics invalid_diagnostics;
+  const auto invalid_outputs =
+      window.queryPositionHorizons(invalid_queries, &invalid_diagnostics);
+  ASSERT_EQ(invalid_outputs.size(), 1u);
+  EXPECT_FALSE(invalid_outputs.front().valid);
+  EXPECT_EQ(invalid_outputs.front().fallback_reason, "stale_integrity");
+  EXPECT_EQ(window.diagnostics().retained_position_count, 1u);
+  EXPECT_EQ(invalid_diagnostics.spatial_advisory_recompute_count, 0u);
+  EXPECT_EQ(invalid_diagnostics.spatial_advisory_reuse_count, 0u);
+  EXPECT_EQ(invalid_diagnostics.fusion_advisory_invocations, 0u);
+  window.commitRefresh();
+
+  auto stale_current = snapshot;
+  stale_current.current.stamp = 99.0;
+  ASSERT_TRUE(window.beginRefresh(make_fresh_input(stale_current)));
+  std::vector<PredictorQueryInput> stale_queries;
+  stale_queries.emplace_back(Eigen::Vector3d(0.5, 0.5, 0.5), stale_current,
+                             100.0, 0.0, "map", 100.0);
+  PredictorBatchDiagnostics stale_diagnostics;
+  const auto stale_outputs =
+      window.queryPositionHorizons(stale_queries, &stale_diagnostics);
+  ASSERT_EQ(stale_outputs.size(), 1u);
+  EXPECT_FALSE(stale_outputs.front().valid);
+  EXPECT_EQ(stale_outputs.front().fallback_reason, "stale_integrity");
+  EXPECT_EQ(window.diagnostics().retained_position_count, 1u);
+  EXPECT_EQ(stale_diagnostics.spatial_advisory_recompute_count, 0u);
+  EXPECT_EQ(stale_diagnostics.spatial_advisory_reuse_count, 1u);
+  EXPECT_EQ(stale_diagnostics.fusion_advisory_invocations, 1u);
 }
 
 TEST(RollingSpatialAdvisoryWindowTest,

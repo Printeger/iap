@@ -681,7 +681,48 @@
 ## 2026-08-21 (ICRA-014 rolling spatial-advisory reuse)
 
 - IAP-RQ-312/IAP-RQ-314/IAP-RQ-320/IAP-RQ-321/IAP-RQ-322: added a dense, collision-safe rolling window for the existing private GNSS/LiDAR `SpatialAdvisory`. Slots retain their exact world key, validity generation, original source timestamps, source identity, and fallback provenance; complete Predictor results, prior growth, horizon risk, protection levels, flags, staleness, and materialized risk voxels remain uncached.
-- Reuse now requires exact equality of lattice geometry, Predictor configuration, GNSS epoch/satellite/policy input, immutable occupancy owner plus generation, LiDAR owners, current-integrity input, and source mode. Missing, non-finite, ambiguous, or changed identity invalidates conservatively, while prior-only changes deliberately rerun horizon/fusion without invalidating spatial evidence.
+- Reuse requires collision-safe equality of lattice geometry, complete Predictor configuration and the active spatial-source projection. Active GNSS identity is the original epoch stamp, ordered satellite count and consumed `sat_id/excluded/elevation/azimuth/pr_sigma`, plus immutable nonzero-generation occupancy identity. Active LiDAR identity always includes the FIM-primitives owner and includes the map owner plus `n_trunks_observed/tdop/excluded_trunk_ids` only while legacy observability fallback is enabled. Disabled sources, unconsumed `SatObs` fields, `current.stamp/current.valid`, prior matrices and prior generation do not invalidate spatial evidence; their per-horizon validation, growth, fusion and materialization still run on every logical query. Missing, non-finite, ambiguous or changed active identity remains conservative.
 - P0 owns one transactional candidate refresh: successful complete immutable RiskGrid publication commits the rolling candidate, while every failure or unfinished provider aborts it and preserves the prior active window. Existing worker-count behavior, `40 x 40 x 8 x 6` geometry, thresholds, fallback policy, and P1/P2/P3/P4/P5 behavior are unchanged.
-- Production P0 retains the immutable LOS owner for the last successfully published occupancy generation, so a fresh adapter capture of that same generation preserves exact owner identity. End-of-refresh validation also rejects concurrent current-integrity, atomically captured GNSS-epoch-generation, or LiDAR-owner changes before RiskGrid publication; the rolling module binds declared LiDAR owners internally and rejects mismatched query identity.
+- Production P0 retains the immutable LOS owner for the last successfully published occupancy generation, so a fresh adapter capture of that same generation preserves exact owner identity. End-of-refresh validation rejects occupancy/prior changes, active GNSS generation changes, active LiDAR FIM-owner changes and legacy map-owner changes only when legacy fallback can consume that map. The rolling module binds declared LiDAR owners internally and rejects mismatched query identity.
 - The one permitted repository-local canonical diagnostic records first/stationary/`+1 x` recompute counts `12800/0/320`, retained `0/12800/12480`, entered `12800/0/320`, evicted `0/0/320`, and fusion `76800` for every refresh, with fresh-full-rebuild scientific equivalence. Focused, retained, and downstream unit suites pass; no ROS launch, main flow, smoke, qualification, benchmark, GPU work, or phase-4 reuse was run.
+
+### ICRA-015 source-identity and legacy-diagnostic review repair
+
+- IAP-RQ-312/IAP-RQ-314/IAP-RQ-320/IAP-RQ-321/IAP-RQ-322: project the rolling identity by configured source path and only the fields consumed by spatial GNSS/LiDAR science. `GnssOnly` no longer loses GNSS slots on LiDAR/current updates; `LidarOnly` no longer loses LiDAR slots on GNSS/occupancy updates; Fusion retains slots across `current.stamp` changes while rerunning freshness, growth, fusion and RiskGrid materialization. Active consumed-field and owner changes still invalidate conservatively, and non-finite active GNSS/current identity never produces an unproven hit.
+- The legacy `unique_positions/lidar_evaluations/lidar_cache_hits` fields again describe only LiDAR-capable advisories populated and actually reused during the current call: a fresh position with `H` successful horizons reports `1/1/(H-1)`, a stationary cross-refresh position reports `0/0/0`, and `GnssOnly` reports `0/0/0`. Rolling retained/entered/evicted and generalized recompute/reuse/invocation/fusion counters remain authoritative for cross-refresh work; an early-rejected horizon never fabricates a hit.
+- Deterministic rolling and production P0 regressions cover active/disabled source projections, every consumed and representative unconsumed GNSS field, missing/non-finite identity, retained `current.valid=false` and stale-current-stamp freshness outcomes, fresh/stationary legacy counts, all three production source modes, complete fresh-full RiskGrid equivalence, active source races, rollback and retained movement/worker behavior.
+
+Repository-local focused reproduction from the repository root (after the normal ROS/dependency environment is active):
+
+```bash
+repo_root="$(pwd)"
+cmake -S "$repo_root" -B "$repo_root/results/icra27/icra015/build_iap" \
+  -DCMAKE_BUILD_TYPE=RelWithDebInfo \
+  -DCMAKE_INSTALL_PREFIX="$repo_root/results/icra27/icra015/install"
+cmake --build "$repo_root/results/icra27/icra015/build_iap" -j2
+cmake --install "$repo_root/results/icra27/icra015/build_iap"
+
+cmake -S "$repo_root/src/iap/planner/plan_env" \
+  -B "$repo_root/results/icra27/icra015/build_plan_env" \
+  -DCMAKE_INSTALL_PREFIX="$repo_root/results/icra27/icra015/install_plan_env"
+cmake --build "$repo_root/results/icra27/icra015/build_plan_env" -j2
+cmake --install "$repo_root/results/icra27/icra015/build_plan_env"
+
+cmake -S "$repo_root/src/iap/planner/plan_manage" \
+  -B "$repo_root/results/icra27/icra015/build_ego" \
+  -Diap_DIR="$repo_root/results/icra27/icra015/install/share/iap" \
+  -Dplan_env_DIR="$repo_root/results/icra27/icra015/install_plan_env/share/plan_env/cmake"
+cmake --build "$repo_root/results/icra27/icra015/build_ego" \
+  --target test_p0_risk_grid_runtime -j2
+
+export LD_LIBRARY_PATH="$repo_root/results/icra27/icra015/build_iap:$repo_root/results/icra27/icra015/install/lib:$repo_root/results/icra27/icra015/install_plan_env/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+export ROS_HOME="$repo_root/results/icra27/icra015/ros_home"
+export ROS_LOG_DIR="$repo_root/results/icra27/icra015/ros_log"
+mkdir -p "$ROS_HOME" "$ROS_LOG_DIR"
+ctest --test-dir "$repo_root/results/icra27/icra015/build_iap" \
+  --output-on-failure -R 'test_rolling_spatial_advisory_window|test_icra011_spatial_dedup_profile'
+ctest --test-dir "$repo_root/results/icra27/icra015/build_ego" \
+  --output-on-failure -R '^test_p0_risk_grid_runtime$'
+ldd "$repo_root/results/icra27/icra015/build_ego/test_p0_risk_grid_runtime" \
+  | rg -F "libiap.so => $repo_root/results/icra27/icra015/build_iap/libiap.so"
+```

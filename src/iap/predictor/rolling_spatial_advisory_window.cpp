@@ -13,6 +13,23 @@ namespace {
 
 using WorldKey = Eigen::Matrix<std::int64_t, 3, 1>;
 
+struct SpatialSourceProjection {
+  bool gnss = false;
+  bool lidar = false;
+  bool legacy_lidar = false;
+};
+
+SpatialSourceProjection spatialSourceProjection(const PredictorParams& params) {
+  SpatialSourceProjection projection;
+  projection.gnss =
+      params.source_mode != PredictorSourceMode::LidarOnly &&
+      params.gnss_epoch_policy != PredictorGnssEpochPolicy::Disabled;
+  projection.lidar = params.source_mode != PredictorSourceMode::GnssOnly;
+  projection.legacy_lidar =
+      projection.lidar && params.lidar.enable_legacy_observability;
+  return projection;
+}
+
 template <typename T>
 bool sameOwner(const std::shared_ptr<const T>& lhs,
                const std::shared_ptr<const T>& rhs) {
@@ -122,31 +139,10 @@ bool exactParams(const PredictorParams& lhs, const PredictorParams& rhs) {
 }
 
 bool exactSat(const SatObs& lhs, const SatObs& rhs) {
-  return lhs.sat_id == rhs.sat_id && lhs.constellation == rhs.constellation &&
-         exactDouble(lhs.pr_meas, rhs.pr_meas) &&
-         exactDouble(lhs.dop_meas, rhs.dop_meas) &&
-         exactDouble(lhs.pr_sigma, rhs.pr_sigma) &&
-         exactDouble(lhs.dop_sigma, rhs.dop_sigma) &&
-         exactVector(lhs.sat_pos, rhs.sat_pos) &&
-         exactVector(lhs.sat_vel, rhs.sat_vel) &&
-         exactDouble(lhs.tgd, rhs.tgd) &&
-         exactDouble(lhs.svddt, rhs.svddt) &&
+  return lhs.sat_id == rhs.sat_id && lhs.excluded == rhs.excluded &&
          exactDouble(lhs.elevation, rhs.elevation) &&
          exactDouble(lhs.azimuth, rhs.azimuth) &&
-         exactDouble(lhs.kappa, rhs.kappa) &&
-         exactDouble(lhs.pr_residual, rhs.pr_residual) &&
-         exactDouble(lhs.nis_pr, rhs.nis_pr) &&
-         exactDouble(lhs.nis_dop, rhs.nis_dop) &&
-         lhs.excluded == rhs.excluded;
-}
-
-bool exactDoubles(const std::vector<double>& lhs,
-                  const std::vector<double>& rhs) {
-  if (lhs.size() != rhs.size()) return false;
-  for (std::size_t index = 0; index < lhs.size(); ++index) {
-    if (!exactDouble(lhs[index], rhs[index])) return false;
-  }
-  return true;
+         exactDouble(lhs.pr_sigma, rhs.pr_sigma);
 }
 
 bool exactEpoch(const IntegritySnapshot& lhs, const IntegritySnapshot& rhs) {
@@ -154,10 +150,7 @@ bool exactEpoch(const IntegritySnapshot& lhs, const IntegritySnapshot& rhs) {
   if (!lhs.has_epoch) return true;
   const auto& a = lhs.gnss_epoch;
   const auto& b = rhs.gnss_epoch;
-  if (!exactDouble(a.stamp, b.stamp) ||
-      !exactDouble(a.gps_sec, b.gps_sec) ||
-      !exactDoubles(a.iono_params, b.iono_params) ||
-      a.sats.size() != b.sats.size()) {
+  if (!exactDouble(a.stamp, b.stamp) || a.sats.size() != b.sats.size()) {
     return false;
   }
   for (std::size_t index = 0; index < a.sats.size(); ++index) {
@@ -168,8 +161,7 @@ bool exactEpoch(const IntegritySnapshot& lhs, const IntegritySnapshot& rhs) {
 
 bool exactCurrentSpatial(const CurrentIntegrityState& lhs,
                          const CurrentIntegrityState& rhs) {
-  return exactDouble(lhs.stamp, rhs.stamp) && lhs.valid == rhs.valid &&
-         lhs.n_trunks_observed == rhs.n_trunks_observed &&
+  return lhs.n_trunks_observed == rhs.n_trunks_observed &&
          exactDouble(lhs.tdop, rhs.tdop) &&
          lhs.excluded_trunk_ids == rhs.excluded_trunk_ids;
 }
@@ -240,42 +232,45 @@ struct RollingSpatialAdvisoryWindow::Impl {
     if (!exactParams(active.params, incoming.params)) {
       return RollingSpatialInvalidationReason::PredictorParametersChanged;
     }
-    const bool gnss_spatial_enabled =
-        incoming.params.source_mode != PredictorSourceMode::LidarOnly &&
-        incoming.params.gnss_epoch_policy !=
-            PredictorGnssEpochPolicy::Disabled;
-    if (gnss_spatial_enabled &&
-        (!active.snapshot.has_epoch || !incoming.snapshot.has_epoch)) {
-      return RollingSpatialInvalidationReason::GnssEpochChanged;
+    const SpatialSourceProjection projection =
+        spatialSourceProjection(incoming.params);
+    if (projection.gnss) {
+      if (!active.snapshot.has_epoch || !incoming.snapshot.has_epoch ||
+          !exactEpoch(active.snapshot, incoming.snapshot)) {
+        return RollingSpatialInvalidationReason::GnssEpochChanged;
+      }
+      if (active.occupancy_generation != incoming.occupancy_generation ||
+          !sameOwner(active.occupancy_owner, incoming.occupancy_owner)) {
+        return RollingSpatialInvalidationReason::OccupancySourceChanged;
+      }
     }
-    if (!exactEpoch(active.snapshot, incoming.snapshot)) {
-      return RollingSpatialInvalidationReason::GnssEpochChanged;
-    }
-    if (active.occupancy_generation != incoming.occupancy_generation ||
-        !sameOwner(active.occupancy_owner, incoming.occupancy_owner)) {
-      return RollingSpatialInvalidationReason::OccupancySourceChanged;
-    }
-    const bool lidar_spatial_enabled =
-        incoming.params.source_mode != PredictorSourceMode::GnssOnly;
-    if (lidar_spatial_enabled &&
-        (!std::isfinite(active.snapshot.current.stamp) ||
-         !std::isfinite(incoming.snapshot.current.stamp) ||
-         !std::isfinite(active.snapshot.current.tdop) ||
+    if (projection.legacy_lidar &&
+        (!std::isfinite(active.snapshot.current.tdop) ||
          !std::isfinite(incoming.snapshot.current.tdop))) {
       return RollingSpatialInvalidationReason::CurrentIntegrityChanged;
     }
-    if (lidar_spatial_enabled &&
-        (!active.lidar_points_owner || !incoming.lidar_points_owner ||
-         !active.lidar_fim_owner || !incoming.lidar_fim_owner)) {
+    if (projection.lidar &&
+        (!active.lidar_fim_owner || !incoming.lidar_fim_owner)) {
       return RollingSpatialInvalidationReason::LidarSourceChanged;
     }
-    if (!sameOwner(active.lidar_points_owner, incoming.lidar_points_owner) ||
-        !sameOwner(active.lidar_fim_owner, incoming.lidar_fim_owner)) {
+    if (projection.legacy_lidar &&
+        (!active.lidar_points_owner || !incoming.lidar_points_owner)) {
       return RollingSpatialInvalidationReason::LidarSourceChanged;
     }
-    if (!exactCurrentSpatial(active.snapshot.current,
-                             incoming.snapshot.current)) {
-      return RollingSpatialInvalidationReason::CurrentIntegrityChanged;
+    if (projection.lidar) {
+      if (!sameOwner(active.lidar_fim_owner, incoming.lidar_fim_owner)) {
+        return RollingSpatialInvalidationReason::LidarSourceChanged;
+      }
+    }
+    if (projection.legacy_lidar) {
+      if (!sameOwner(active.lidar_points_owner,
+                     incoming.lidar_points_owner)) {
+        return RollingSpatialInvalidationReason::LidarSourceChanged;
+      }
+      if (!exactCurrentSpatial(active.snapshot.current,
+                               incoming.snapshot.current)) {
+        return RollingSpatialInvalidationReason::CurrentIntegrityChanged;
+      }
     }
     return RollingSpatialInvalidationReason::None;
   }
@@ -288,16 +283,12 @@ struct RollingSpatialAdvisoryWindow::Impl {
       return false;
     }
     const PredictorParams& params = candidate->identity.params;
-    const bool gnss_spatial_enabled =
-        params.source_mode != PredictorSourceMode::LidarOnly &&
-        params.gnss_epoch_policy != PredictorGnssEpochPolicy::Disabled;
-    if (gnss_spatial_enabled &&
+    const SpatialSourceProjection projection = spatialSourceProjection(params);
+    if (projection.gnss &&
         !exactEpoch(input.snapshot, candidate->identity.snapshot)) {
       return false;
     }
-    const bool lidar_spatial_enabled =
-        params.source_mode != PredictorSourceMode::GnssOnly;
-    return !lidar_spatial_enabled ||
+    return !projection.legacy_lidar ||
            exactCurrentSpatial(input.snapshot.current,
                                candidate->identity.snapshot.current);
   }
@@ -390,21 +381,19 @@ bool RollingSpatialAdvisoryWindow::beginRefresh(
     capacity *= extent;
   }
   const PredictorParams& params = input.module.params();
-  const bool gnss_spatial_enabled =
-      params.source_mode != PredictorSourceMode::LidarOnly &&
-      params.gnss_epoch_policy != PredictorGnssEpochPolicy::Disabled;
-  if (gnss_spatial_enabled &&
+  const SpatialSourceProjection projection = spatialSourceProjection(params);
+  if (projection.gnss &&
       (!input.occupancy_owner || input.occupancy_generation == 0u)) {
     if (reason) *reason = "missing_occupancy_identity";
     return false;
   }
-  if (gnss_spatial_enabled &&
+  if (projection.gnss &&
       params.gnss_epoch_policy == PredictorGnssEpochPolicy::Required &&
       !input.snapshot.has_epoch) {
     if (reason) *reason = "missing_required_gnss_epoch_identity";
     return false;
   }
-  if (gnss_spatial_enabled && input.snapshot.has_epoch) {
+  if (projection.gnss && input.snapshot.has_epoch) {
     const GnssEpoch& epoch = input.snapshot.gnss_epoch;
     if (!std::isfinite(epoch.stamp)) {
       if (reason) *reason = "invalid_gnss_epoch_identity";
@@ -521,16 +510,16 @@ RollingSpatialAdvisoryWindow::queryPositionHorizons(
   }
 
   const PredictorModule::SpatialAdvisory* cached = hit ? &slot.advisory : nullptr;
+  bool populated_lidar_this_call = false;
   for (const auto& input : inputs) {
     PredictorModule::SpatialAdvisory evaluated;
     const std::size_t recomputes_before =
         local.spatial_advisory_recompute_count;
-    const bool used_cached = cached != nullptr;
+    const std::size_t reuses_before = local.spatial_advisory_reuse_count;
     outputs.push_back(impl_->candidate->module.queryWithSpatialAdvisory(
         input, cached, &evaluated, &local));
-    if (used_cached &&
-        impl_->candidate->identity.params.source_mode !=
-            PredictorSourceMode::GnssOnly) {
+    if (populated_lidar_this_call &&
+        local.spatial_advisory_reuse_count > reuses_before) {
       ++local.lidar_cache_hits;
     }
     if (!cached && local.spatial_advisory_recompute_count > recomputes_before) {
@@ -541,6 +530,7 @@ RollingSpatialAdvisoryWindow::queryPositionHorizons(
       slot.advisory = std::move(evaluated);
       cached = &slot.advisory;
       if (local.lidar_advisory_invocations > 0) {
+        populated_lidar_this_call = true;
         ++local.unique_positions;
         ++local.lidar_evaluations;
       }

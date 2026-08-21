@@ -1631,3 +1631,108 @@ This DEV_LOG-only commit returns control to `SUPERVISOR` review. `DEEPSEEK`
 does not mark ICRA-014, phase 3 or Gate-0B PASS, begin phase-4 TTL/delta,
 select calibration, run main flow/smoke/qualification/benchmark/analyzer/GPU
 work, change P1/P2/P3/P4/P5 behavior, or issue a next task.
+
+## 2026-08-21T15:10:05Z — ICRA-015 START
+
+Synchronized start HEAD is
+`eb66c078a97d00360e542bfd28bea897a66510e6`. The worktree contains only the
+protected, untracked `docs/icra27/dev/ICRA_SYSTEM_FLOW.pdf`, unchanged at
+SHA-256
+`1f07da5631a6551a2f98c02d46fd45bc87f2f1e3e7c14e95f9a7f4a0bac844f6`.
+The retained ICRA-011 profile and sole ICRA-014 canonical artifact remain
+read-only at SHA-256
+`778abd22158805c41150b4eeed9c37a3f660237a0bb0599e9a567e3533c7b32c` and
+`44f47b23137d17f4b0cbc81af6827156865bdecb36089bf53f770960a2fb963d`.
+
+The exact ICRA-015 allowlist is:
+
+- `src/iap/predictor/rolling_spatial_advisory_window.cpp`;
+- `test/test_rolling_spatial_advisory_window.cpp`;
+- `src/iap/planner/plan_manage/src/p0_risk_grid_runtime.cpp`;
+- `src/iap/planner/plan_manage/test/test_p0_risk_grid_runtime.cpp`;
+- `DEV_LOG.md`;
+- `docs/CHANGES.md`;
+- `docs/TRACEABILITY.md`.
+
+This bounded review repair addresses only three findings: project rolling
+identity by the active source mode and actually consumed spatial fields;
+restore the three legacy LiDAR counters to their phase-2 call-local populated-
+cache semantics; and add executable repository-local reproduction commands to
+the ICRA-014/015 change record.
+
+The source projection keeps frame/lattice/shape, source-mode/policy and full
+Predictor configuration conservative. Active GNSS identity contains epoch
+presence/original stamp, ordered `sat_id`, `excluded`, `elevation`, `azimuth`
+and `pr_sigma`, plus immutable nonzero-generation occupancy identity. Active
+LiDAR identity contains immutable FIM-primitives owner identity and, only when
+legacy observability fallback can consume them, the legacy map owner plus
+`n_trunks_observed`, `tdop` and `excluded_trunk_ids`. Disabled sources do not
+invalidate the active component; `current.stamp/current.valid` remain per-
+horizon validation/freshness inputs, not spatial identity. Missing, ambiguous
+or non-finite active identity forces recomputation or fails closed.
+
+Explicit phase-4 stop: no TTL, source version bucket, occupancy delta,
+watchdog, reverse-ray dependency, calibration, restamping, complete-result or
+risk-voxel cache, worker/default/threshold change, launch/config, GPU/CUDA,
+main flow, ROS launch, smoke, qualification, bag, RViz, campaign, Gate
+analyzer, formal benchmark, or P1/P2/P3/P4/P5 product work is authorized. All
+generated output stays below `results/icra27/icra015/`.
+
+## 2026-08-21T15:48:13Z — ICRA-015 IMPLEMENTATION / VERIFICATION / REVIEW CLOSURE
+
+The bounded identity repair is complete. One named source projection now
+drives rolling begin validation, cross-refresh identity comparison and query
+identity checks; an equivalent private projection drives production P0 live-
+source validation. Active GNSS equality contains only epoch presence/original
+stamp, ordered satellite count and the consumed
+`sat_id/excluded/elevation/azimuth/pr_sigma` fields plus immutable occupancy
+identity. Active LiDAR equality always contains FIM-primitives ownership and
+contains legacy map ownership plus
+`n_trunks_observed/tdop/excluded_trunk_ids` only when legacy observability can
+consume them. `current.stamp/current.valid` remain uncached logical-query
+freshness inputs. Missing/non-finite active identity remains fail-closed.
+
+TDD red/green evidence covered disabled-source false invalidation in
+`GnssOnly` and `LidarOnly`, Fusion current-stamp/prior refresh, ignored
+unconsumed `SatObs` fields, each consumed GNSS/current field, missing and
+non-finite active identity, disabled legacy map-owner publication validation,
+and restored call-local legacy counters. Review then exposed a real red case:
+valid populate followed by an invalid horizon and one valid reuse reported two
+legacy hits. The repair increments `lidar_cache_hits` only after
+`queryWithSpatialAdvisory` proves generalized reuse, and the regression now
+reports exactly one. Further regressions prove finite active `tdop` and
+`excluded_trunk_ids` changes invalidate, while retained `current.valid=false`
+and stale-current-stamp queries still produce their per-query fail-closed
+outcomes with zero spatial recompute.
+
+Repository-local verification passes 271/271 active GTests: rolling 13/13
+(the canonical case remains disabled), Predictor 45/45, RiskGrid 43/43,
+LocalOccupancy 6/6, IntegritySnapshot 4/4, conversion 2/2, P0 runtime 54/54,
+occupancy adapter 3/3, P1 admission 6/6, P1 selection 17/17, P2 ranking 6/6,
+P3 bias 9/9, planning context 26/26, P5 gate 33/33 and P4 A* 4/4. The retained
+ICRA-011 profile passes 2/2, for 273/273 listed cases. An initial unfiltered
+`build_plan_env` CTest reached the repository's pre-existing uncrustify
+divergence and was stopped; the task-authoritative filtered root/planner/P4
+suites above all pass. No tracked source was changed by that repository-local
+lint attempt.
+
+All eight checked rolling/Predictor/RiskGrid/P0/P2/P3/P5/P4 consumers resolve
+`results/icra27/icra015/build_iap/libiap.so`, SHA-256
+`7be09389420ca1b2a9e9653734cdb45e511cacfa64e0ca952d34105a7f4c2358`.
+The installed library is SHA-256
+`02250cc1f7caa86ff889d77df02a3f1b843a39d688706fb2a54caecce377c1af`;
+the hashes differ because installation strips the build-tree runtime path.
+Standards and Spec re-reviews both PASS with zero remaining findings, and
+`git diff --check` is clean.
+
+The disabled canonical was not rerun and remains SHA-256
+`44f47b23137d17f4b0cbc81af6827156865bdecb36089bf53f770960a2fb963d`.
+The retained ICRA-011 JSON remains
+`778abd22158805c41150b4eeed9c37a3f660237a0bb0599e9a567e3533c7b32c`;
+the protected PDF remains solely untracked at
+`1f07da5631a6551a2f98c02d46fd45bc87f2f1e3e7c14e95f9a7f4a0bac844f6`.
+No main flow, ROS launch, smoke, qualification, bag, RViz, campaign, Gate
+analyzer, formal benchmark, GPU preflight/CUDA, calibration, phase-4 reuse or
+P1/P2/P3/P4/P5 product work ran. Implementation commit/push and the final
+DEV_LOG-only SUPERVISOR handoff remain; DEEPSEEK does not mark phase 3 or
+Gate-0B PASS.

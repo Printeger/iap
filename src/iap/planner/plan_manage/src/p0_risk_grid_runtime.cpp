@@ -32,6 +32,25 @@ bool sameSharedOwner(const std::shared_ptr<const T>& lhs,
   return !lhs.owner_before(rhs) && !rhs.owner_before(lhs);
 }
 
+struct PredictorSpatialSourceProjection {
+  bool gnss = false;
+  bool lidar = false;
+  bool legacy_lidar = false;
+};
+
+PredictorSpatialSourceProjection predictorSpatialSourceProjection(
+    const iap::PredictorParams& params) {
+  PredictorSpatialSourceProjection projection;
+  projection.gnss =
+      params.source_mode != iap::PredictorSourceMode::LidarOnly &&
+      params.gnss_epoch_policy != iap::PredictorGnssEpochPolicy::Disabled;
+  projection.lidar =
+      params.source_mode != iap::PredictorSourceMode::GnssOnly;
+  projection.legacy_lidar =
+      projection.lidar && params.lidar.enable_legacy_observability;
+  return projection;
+}
+
 enum class P0SemanticFailure {
   NONE = 0,
   OCCUPANCY_SNAPSHOT_UNAVAILABLE,
@@ -1128,6 +1147,7 @@ void P0RiskGridRuntime::refreshTimerCallback() {
   PredictorModuleRiskProvider* predictor_provider = nullptr;
   bool validate_gnss_spatial_source = false;
   bool validate_lidar_spatial_source = false;
+  bool validate_lidar_legacy_source = false;
   std::shared_ptr<const std::vector<Eigen::Vector3d>>
       captured_lidar_map_points;
   std::shared_ptr<const std::vector<iap::LidarFimPrimitive>>
@@ -1152,12 +1172,11 @@ void P0RiskGridRuntime::refreshTimerCallback() {
         config_.predictor_lidar_legacy_observability;
     predictor_params.covariance_growth.sigma_grow_m_sqrt_s =
         config_.predictor_sigma_grow_m_sqrt_s;
-    validate_gnss_spatial_source =
-        predictor_params.source_mode != iap::PredictorSourceMode::LidarOnly &&
-        predictor_params.gnss_epoch_policy !=
-            iap::PredictorGnssEpochPolicy::Disabled;
-    validate_lidar_spatial_source =
-        predictor_params.source_mode != iap::PredictorSourceMode::GnssOnly;
+    const PredictorSpatialSourceProjection source_projection =
+        predictorSpatialSourceProjection(predictor_params);
+    validate_gnss_spatial_source = source_projection.gnss;
+    validate_lidar_spatial_source = source_projection.lidar;
+    validate_lidar_legacy_source = source_projection.legacy_lidar;
     if (std::isfinite(config_.predictor_lidar_fim_radius_m) &&
         config_.predictor_lidar_fim_radius_m > 0.0) {
       predictor_params.lidar.fim_params.fim_radius_m =
@@ -1219,7 +1238,8 @@ void P0RiskGridRuntime::refreshTimerCallback() {
     source_validator =
         [this, live_occupancy_generation, captured_occupancy_generation,
          captured_prior_generation, validate_gnss_spatial_source,
-         validate_lidar_spatial_source, captured_gnss_epoch_generation,
+         validate_lidar_spatial_source, validate_lidar_legacy_source,
+         captured_gnss_epoch_generation,
          captured_lidar_map_points, captured_lidar_fim_primitives]() {
           if (!live_occupancy_generation ||
               live_occupancy_generation() !=
@@ -1246,10 +1266,14 @@ void P0RiskGridRuntime::refreshTimerCallback() {
           }
           if (validate_lidar_spatial_source) {
             std::lock_guard<std::mutex> lock(lidar_predictor_input_mutex_);
-            if (!sameSharedOwner(latest_lidar_map_points_,
-                                 captured_lidar_map_points) ||
-                !sameSharedOwner(latest_lidar_fim_primitives_,
+            if (!sameSharedOwner(latest_lidar_fim_primitives_,
                                  captured_lidar_fim_primitives)) {
+              return iap::RiskGridSourceValidation::
+                  PREDICTOR_SPATIAL_SOURCE_CHANGED;
+            }
+            if (validate_lidar_legacy_source &&
+                !sameSharedOwner(latest_lidar_map_points_,
+                                 captured_lidar_map_points)) {
               return iap::RiskGridSourceValidation::
                   PREDICTOR_SPATIAL_SOURCE_CHANGED;
             }
