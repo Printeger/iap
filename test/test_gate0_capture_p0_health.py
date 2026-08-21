@@ -97,6 +97,33 @@ class Gate0CaptureTest(unittest.TestCase):
         self.assertTrue(readiness["ready"])
         self.assertEqual(readiness["schema_version"], "gate0_capture_readiness_v1")
 
+        repository = Path(__file__).resolve().parents[1]
+        health_publisher = (
+            repository
+            / "src/iap/planner/plan_manage/src/p0_risk_grid_runtime.cpp"
+        ).read_text()
+        integrity_publisher = (
+            repository / "src/iap/integrity/integrity_extension.cpp"
+        ).read_text()
+        self.assertIn(
+            'create_publisher<std_msgs::msg::String>(\n'
+            '      "/planning/risk_grid_health", 10)',
+            health_publisher,
+        )
+        self.assertIn(
+            'pub_topic_        = config.param<std::string>("integrity", '
+            '"publish_topic",\n'
+            '                                                "/iap/integrity")',
+            integrity_publisher,
+        )
+        self.assertIn(
+            "node.create_publisher<MsgT>(pub_topic_, rclcpp::QoS(10))",
+            integrity_publisher,
+        )
+        # Integer depth and rclcpp::QoS(depth) both use KEEP_LAST with the
+        # default reliable/volatile policies. The assertions above bind these
+        # subscriber checks to both production publisher declarations.
+
 
 if __name__ == "__main__":
     unittest.main()
