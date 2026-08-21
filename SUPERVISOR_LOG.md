@@ -170,3 +170,33 @@ Blocking findings:
 - P4 code, fixtures, profiles and experiments remain prohibited until P0 Gate 0B passes and a later Supervisor task first authorizes deterministic red fixtures.
 - This scope-pivot preparation changes documentation and coordination state only. It runs no ROS experiment and creates no product-code qualification evidence.
 - The operator subsequently authorized the scope-pivot Markdown changeset to be committed and pushed, including the two preserved Markdown inputs but excluding the untracked PDF. This changeset therefore returns the active role to DeepSeek as `TASK_READY`; only ICRA-004 is authorized.
+
+## 2026-08-21 — ICRA-004 review and ICRA-005 authorization
+
+### Review identity and synchronization
+
+- Review base: `73cbdddd0f44165f61138dcd74c61ab8dd96ebae`.
+- Reviewed HEAD: `3de08928ec6fe57922e64bd892c7f55882e1b8a0`.
+- Commits: `728d53d`, `20d3c5d`, `3de0892`; all bind `IAP-RQ-320`.
+- `dev/icra` matched `origin/dev/icra` at divergence `0 0`. The only untracked item remained `docs/icra27/dev/ICRA_SYSTEM_FLOW.pdf`.
+- No task-started `iap_rosnode`, capture or test-planner launch process remained during review.
+
+### Two-axis review
+
+- Standards: PASS with no hard violation. Non-blocking smells were duplicated smoke/benchmark lifecycle code and the benchmark-specific failure name `fewer_than_20_successful_generations` remaining misleading in smoke mode.
+- Spec: PASS with no blocking ICRA-004 deviation. Changes stayed within allowed files; no P4/P5 product work, benchmark run, Supervisor-owned edit or external-repository change occurred.
+- Supervisor reran `test_gate0_runner.py` (15), `test_gate0_analyzer.py` (13) and `test_gate0_capture_p0_health.py` (1); all passed. One ResourceWarning in the controlled-shutdown test is non-blocking.
+
+### Evidence verdict
+
+- GPU evidence records both required `nvidia-smi` commands at exit 0, `cuInit(0)=0`, `cuDeviceGetCount=0`, and one RTX 4070 Ti SUPER.
+- The one 20-second smoke retained 30 health rows, 165/165 valid integrity rows and 10 successful generations, each with exactly 76,800 queries.
+- Runner and analyzer exited 0. `iap_rosnode` was observed as a launch descendant, had no runtime failure, and stopped only during controlled shutdown.
+- Frozen configuration remained CPU mapping, `20/15`, no bag/RViz and P1/P2/P3/P4/P5 disabled. No smoke retry or 60-second benchmark occurred.
+- Verdict: `ICRA004_SMOKE_PASS`. This is only the Gate-0B prerequisite; P0 remains unqualified pending the fixed benchmark.
+
+### Evidence boundary and next task
+
+- The analyzer consumed a runtime `test_planner_manifest.json` and produced `effective_config.json`, but both were ignored and absent from the ICRA-004 Git changeset. Their retained hashes are now frozen in `NEXT_TASK.md`; ICRA-005 must force-add the unchanged files before running anything.
+- The existing analyzer only applies zero-valid-integrity fail-closed classification to `p0-smoke`. ICRA-005 must extend that same evidence rule to `p0-full-grid` and add focused tests before the benchmark.
+- Unique next task: `ICRA-005 / GATE_0B`. After those two bounded closures pass, exactly one unchanged 60-second benchmark is authorized. Any failure stops without retry or tuning and returns to Supervisor.

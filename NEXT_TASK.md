@@ -1,109 +1,123 @@
-# ICRA-004 — Add GPU preflight and rerun the invalid-environment smoke once
+# ICRA-005 — Close the evidence boundary and run the frozen 60-second P0 Gate-0B once
 
-> Task gate on activation: `GATE_0B`
+> Active gate: `GATE_0B`
 > Owner: `DEEPSEEK`
-> Review disposition: `SCOPE_PIVOT_AUTHORIZED_ICRA004_REISSUED`
 > Activation: `TASK_READY`
-> Conference target: conditional P0 -> P4 -> P5
-> This task: P0-only prerequisite; P1/P2/P3/P4/P5 disabled
-> Historical verdict: Gate 0A `NO_GO_P2`; P2 frozen
-> Requirement mapping: `IAP-RQ-320` only for the P0 prediction/input qualification path
+> Review disposition: `ICRA004_SMOKE_PASS_ICRA005_AUTHORIZED`
+> Requirement mapping: `IAP-RQ-320` only
+> Conference route: conditional P0 -> P4 -> P5
+> This task: P0-only evidence closure and one benchmark; P1/P2/P3/P4/P5 disabled
 
-## Scope-pivot interpretation
+## Supervisor verdict and objective
 
-The 2026-08-20 Supervisor decision changes the conference development target, not the qualification status of the implementation. P0 remains blocked/unqualified, P4 is not qualified, and P5 is implemented but not system-qualified.
+The Supervisor reviewed `73cbddd...3de0892`. ICRA-004 passed its single 20-second smoke prerequisite: GPU preflight passed before ROS, `iap_rosnode` remained alive through runtime, 165 valid integrity reports were captured, and 10 successful P0 generations each recorded exactly 76,800 queries. Focused runner/analyzer/capture tests pass. This does not qualify P0 Gate-0B.
 
-ICRA-004 had not started when the scope changed, so it is reissued under the new route rather than cancelled or renumbered. Its command, evidence directory, one-shot rule and P0-only acceptance contract remain unchanged.
+ICRA-005 must first close two benchmark evidence boundaries without starting ROS. If those checks pass, run the unchanged fixed 60-second full-grid benchmark exactly once. Do not tune the workload before or after the run.
 
-This is the unique active task under `AGENT_STATE.md = DEEPSEEK / TASK_READY`. DeepSeek must synchronize `dev/icra`, preserve the existing worktree, and execute only the scope below.
+## 1. Start and synchronize
 
-Passing this task authorizes only Supervisor review. A separate task is required for the fixed 60-second Gate 0B run. P4 test fixtures and production changes remain forbidden until P0 Gate 0B passes and the Supervisor issues a new task.
+- Follow the `AGENTS.md` synchronization protocol. Stop as `REMOTE_DIVERGED` if both sides lead.
+- Preserve the existing untracked `docs/icra27/dev/ICRA_SYSTEM_FLOW.pdf`; do not modify, stage, delete, move or regenerate it.
+- Record ICRA-005 START in `DEV_LOG.md` with start HEAD, allowed files, one-shot rule and the pre-existing PDF.
+- Do not edit Supervisor-owned state, task, log, scope, plan or gate documents.
 
-## Operator clarification and objective
+## 2. Close the retained ICRA-004 evidence boundary without rerunning it
 
-The operator confirmed that the Docker container had lost functional GPU access during ICRA-003 and must be restarted to remount it. The IAP main flow still requires a working GPU even when Gate 0B explicitly selects the CPU mapping backend. ICRA-003's smoke is retained as `INVALID_ENVIRONMENT / GPU_NOT_READY`; it is not deleted or rewritten and does not authorize a performance conclusion.
+The analyzer used two repository-local files that were ignored and therefore absent from the ICRA-004 Git changeset. Preserve their bytes and explicitly force-add them in ICRA-005:
 
-After the operator restarts the container, implement a deterministic GPU preflight that protects all future ICRA main-flow runs. If and only if that preflight passes, rerun the same fixed 20-second smoke exactly once into a new ICRA-004 evidence directory. Do not run the 60-second benchmark in this task.
+- `results/icra27/icra004/runs/smoke/exports/test_planner_p0_open_sky_gnss_open_sky_332493_1787282428501/test_planner_manifest.json`
+  - required SHA256: `111d57f74192d1bf17ec7b54c2af198d648b1807920a3f088bdd73ec80d7f818`
+- `results/icra27/icra004/runs/smoke/analyzer/effective_config.json`
+  - required SHA256: `f9997494731b9b155712519e31522010112541be460528e69c9655efbaa2263f`
 
-## 1. Mandatory GPU preflight
+Hash both files before staging. A missing file or hash mismatch is `BLOCKED / RETAINED_EVIDENCE_MISMATCH`; do not recreate it, rerun ICRA-004, or infer its contents from stdout. Do not add the large truth CSV, runtime tree, build tree or any other ignored ICRA-004 artifact.
 
-Before starting any ROS, launch, capture or simulator process, the qualification runner must verify all of:
+## 3. Make benchmark integrity evidence fail closed
 
-- `nvidia-smi -L` exits 0 and reports at least one GPU;
-- a structured `nvidia-smi --query-gpu=index,name,uuid,driver_version --format=csv,noheader` command exits 0 and returns at least one row;
-- loading `libcuda.so.1`, calling CUDA Driver API `cuInit(0)`, and calling `cuDeviceGetCount` all succeed with `device_count >= 1`.
+Before the benchmark, make the narrow analyzer correction that both `p0-smoke` and `p0-full-grid` require at least one captured valid `/iap/integrity` report. Zero captured rows or zero valid rows must produce `P0_INPUT_AVAILABILITY_FAIL` and a nonzero analyzer exit.
 
-The existence of `/dev/nvidia*` nodes or successful `libcuda.so.1` loading alone is insufficient. Do not infer success from the requested mapping backend.
+- Modify only `scripts/dev_planner/gate0_analyzer.py` and `test/test_gate0_analyzer.py` for this correction.
+- Add focused coverage for a benchmark with zero integrity rows and with only invalid/non-finite integrity rows.
+- Preserve the fixed benchmark contract: 60-second runtime, 55-second validation, at least 20 successful generations, exact 76,800-query shape and type-7 p95 `<=400 ms`.
+- Do not change the runner command, launch configuration, P0 algorithm, ROI, resolution, horizons, refresh period, worker count, occupied skip, backend, process monitor or capture QoS.
 
-Add a reusable preflight result with at least: schema version, UTC time, commands, exit codes, bounded stdout/stderr, `cuInit` result, CUDA device count, `gpu_ready`, and exact failure reason. Persist it under the requested repository-local output root and include it in the smoke manifest.
+Run before ROS:
 
-Add a `--gpu-preflight-only` runner mode and also invoke the same preflight automatically before every runner mode that starts the IAP main flow. Focused tests must cover missing command, nonzero NVML result, zero CUDA devices, CUDA initialization failure and PASS. Tests must prove that a failed preflight never calls the ROS launch path.
+```text
+python3 -m py_compile \
+  scripts/dev_planner/gate0_analyzer.py \
+  test/test_gate0_analyzer.py
 
-If preflight fails in the restarted container:
+python3 -m unittest discover -s test -p 'test_gate0_runner.py' -v
+python3 -m unittest discover -s test -p 'test_gate0_analyzer.py' -v
+python3 -m unittest discover -s test -p 'test_gate0_capture_p0_health.py' -v
+```
 
-- print `GPU_NOT_READY` and the exact reason;
-- return nonzero;
-- start no ROS/launch/capture process;
-- record `BLOCKED`, commands, outputs and exit codes in `DEV_LOG.md`;
-- commit/push the implementation and preflight evidence, then return control to Supervisor;
-- do not wait, retry, fall back or run the smoke.
+Any failure blocks the benchmark. Do not repair unrelated smells or refactor duplicated smoke/benchmark lifecycle code in this task.
 
-## 2. Smoke analyzer and capture readiness before the authorized run
+## 4. One authorized fixed benchmark
 
-- Fix the analyzer so `p0-smoke` is validated against its fixed 20-second/15-second smoke contract rather than the 60-second Gate 0B contract. Keep the full benchmark validation fixed at 60/55 seconds.
-- Preserve fail-closed handling of zero capture records. Confirm in focused tests that the capture subscriber topic names and QoS are compatible with the actual `/planning/risk_grid_health` and `/iap/integrity` publishers.
-- Do not use stdout-parsed health or integrity lines as a substitute for ROS topic evidence. They may remain diagnostic corroboration only.
-
-## 3. One authorized replacement smoke
-
-Only after the automatic preflight passes, run exactly once:
+Only after Sections 2 and 3 pass, run exactly once:
 
 ```text
 python3 scripts/dev_planner/run_gate0_qualification.py \
-  --output-root results/icra27/icra004/runs \
-  --smoke
+  --output-root results/icra27/icra005/runs \
+  --benchmark
 ```
 
-Use the fixed ICRA-003 smoke configuration unchanged: seed 11, 20 seconds, explicit CPU mapping backend, no bag, no RViz, `30 x 30 x 6 m`, `0.75 m`, horizons `0.0,0.5,1.0,1.5,2.0,2.5 s`, refresh `0.5 s`, one worker, occupied skip enabled, and P1/P2/P3/P4/P5 disabled.
+The runner's automatic GPU preflight must pass before capture or ROS. A failed preflight prints `GPU_NOT_READY`, returns nonzero, starts no ROS process and ends the task `BLOCKED` without retry.
+
+After the runner finishes, invoke the analyzer once if the retained output is sufficient:
+
+```text
+python3 scripts/dev_planner/gate0_analyzer.py \
+  --gate0-root results/icra27/icra005/runs/benchmark \
+  --output-dir results/icra27/icra005/runs/benchmark/analyzer
+```
+
+Do not rerun the benchmark or overwrite its output directory if the runner or analyzer fails.
+
+## 5. Gate-0B acceptance
 
 PASS requires all of:
 
-- GPU preflight PASS recorded before ROS startup;
-- `iap_rosnode` is a descendant of this launch and remains alive throughout runtime;
+- GPU preflight PASS before capture/ROS, with both `nvidia-smi` commands, `cuInit(0)=0` and `device_count>=1` recorded;
+- capture readiness before launch for the exact health and integrity topics;
+- `iap_rosnode` seen as a launch descendant and alive throughout runtime;
+- runner and analyzer exit 0, with no runtime required-process failure;
+- fixed `60/55` runtime/validation contract and unchanged frozen P0 configuration;
 - at least one captured valid integrity report;
-- at least one captured successful P0 generation;
-- exactly 76,800 refresh queries for every captured successful generation;
-- runner and smoke analyzer both exit 0.
+- at least 20 successful P0 generations;
+- every successful generation has exactly 76,800 queries and finite latency;
+- type-7 p95 refresh latency `<=400 ms`, with p50/p95/max, interval, stale ratio and failed ratio retained.
 
-If the smoke fails, stop and report `BLOCKED` with the exact command, exit codes, process failures and evidence. Do not retry. Even if it passes, do not run the 60-second Gate 0B in ICRA-004; return to Supervisor for review and separate authorization.
+Any failure is `BLOCKED/FAIL` with its exact analyzer classification. In particular, p95 above 400 ms is `P0_PERFORMANCE_GATE_FAIL`, not an environment excuse. Stop without tuning, retrying or launching another run.
 
-## Verification, documentation and handoff
+## 6. Evidence, documentation and handoff
 
-- Keep all generated build, install, log, preflight and smoke evidence inside this repository.
-- Run focused runner/analyzer/capture tests and relevant package tests before the single smoke.
-- Update `docs/CHANGES.md`, `docs/TRACEABILITY.md` and `DEV_LOG.md` with truthful requirement mapping, exact commands, exit codes, GPU identity and evidence paths.
-- Preserve ICRA-003 evidence unchanged. Add new files under `results/icra27/icra004/`; never reuse its output directory.
-- Explicitly stage only authorized files. Preserve and report pre-existing untracked user files; do not clean or stash them.
-- Before handoff verify the staged diff, remote divergence, absence of uncommitted task-owned changes, and that no task-started ROS process remains.
-- Record the final commit SHA in `DEV_LOG.md`; do not edit Supervisor-owned files.
+- Keep generated files inside the repository. Do not write build/log/evidence outside `src/iap`.
+- Force-add only the compact ICRA-005 evidence needed to reproduce the analyzer: GPU preflight, command, runner manifest, capture readiness, health/integrity JSONL, stdout/capture logs, the single runtime `test_planner_manifest.json`, and analyzer CSV/JSON/effective-config outputs. Do not add build/install trees or large truth CSVs.
+- Update `docs/CHANGES.md`, `docs/TRACEABILITY.md` and `DEV_LOG.md` with exact commands, exit codes, metrics, evidence paths and truthful `IAP-RQ-320` mapping.
+- Record whether any task-started ROS process remains; stop only processes proven to belong to this task.
+- Explicitly stage only authorized files. Review staged diff, test exit codes, evidence hashes, remote divergence and the preserved untracked PDF.
+- Commit with `IAP-RQ-320`, push `dev/icra`, record the final SHA in `DEV_LOG.md`, and return control to Supervisor without changing Gate status.
 
 ## Allowed files
 
-- `scripts/dev_planner/run_gate0_qualification.py`
 - `scripts/dev_planner/gate0_analyzer.py`
-- `scripts/dev_planner/gate0_capture_p0_health.py` only for topic/QoS compatibility
-- `test/test_gate0_runner.py`
 - `test/test_gate0_analyzer.py`
-- focused capture test file and `CMakeLists.txt` registration if needed
-- new ICRA-004 evidence under `results/icra27/icra004/`
-- `docs/CHANGES.md`, `docs/TRACEABILITY.md`, `DEV_LOG.md`
+- the two exact retained ICRA-004 files and hashes listed in Section 2
+- new compact evidence under `results/icra27/icra005/`
+- `docs/CHANGES.md`
+- `docs/TRACEABILITY.md`
+- `DEV_LOG.md`
 
 ## Forbidden
 
-- No 60-second Gate 0B benchmark, second replacement smoke, retry loop or wait-for-GPU loop.
-- No backend auto-fallback, workload/ROI/horizon/refresh/worker tuning, rosbag or campaign.
-- No P1/P2/P3/P4 work, candidate changes, or P5 decision/action changes.
-- Do not add the planned `icra_p0_p4_p5` profile, `p4.metrics_only`, collision-scan states, P4 fixture, guide-decision seam or P4/P5 lineage in this task.
-- Do not modify, stage, delete, move or regenerate the pre-existing untracked `docs/icra27/dev/ICRA_SYSTEM_FLOW.pdf`.
-- No external writes, backup, archive or disk cleanup; no changes to `../glim` or another repository.
+- No ICRA-004 smoke rerun and no second ICRA-005 benchmark.
+- No changes to `run_gate0_qualification.py`, capture code/QoS, launch/config, P0 product code or tests outside the one analyzer test file.
+- No ROI/horizon/resolution/refresh/worker/backend/occupied-skip tuning and no analyzer threshold relaxation.
+- No P1/P2/P3/P4/P5 code, fixture, profile, experiment or decision/action change.
+- No bag, RViz, campaign, disk cleanup, wait/retry loop or backend fallback.
+- No external writes and no changes to `../glim` or any other repository.
 - No changes to `AGENTS.md`, `AGENT_STATE.md`, `SUPERVISOR_LOG.md`, `NEXT_TASK.md` or ICRA scope/plan/gate documents.

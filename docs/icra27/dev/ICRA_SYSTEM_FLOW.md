@@ -147,8 +147,8 @@ The existing `p4` profile does not enable P5. The existing `all` profile enables
 | Gate/event | Entry condition | Exit evidence | Current state |
 |---|---|---|---|
 | Scope pivot | Supervisor authorizes new route | Docs, requirement, state and task agree | `CONDITIONAL_GO` for preparation |
-| ICRA-004 smoke | Supervisor changeset handed off and functional GPU preflight | Valid integrity, one real P0 generation, 76,800 queries | `TASK_READY`; run not started |
-| P0 Gate-0B | Reviewed smoke PASS | ≥20 generations and p95 `≤400 ms` | `BLOCKED/UNQUALIFIED` |
+| ICRA-004 smoke | Supervisor changeset handed off and functional GPU preflight | Valid integrity, one real P0 generation, 76,800 queries | `PASS`; reviewed at `3de0892` |
+| P0 Gate-0B | Reviewed smoke PASS | ≥20 generations and p95 `≤400 ms` | `ICRA-005 TASK_READY`; benchmark pending |
 | P4-G0A | P0 Gate-0B PASS; red fixture reviewed | Closed/no/open/multi scan cases PASS | `NOT_QUALIFIED` |
 | P4-G0B | G0A PASS | Metrics-only pair, identity and 200/200 profiles; no application | `NOT_QUALIFIED` |
 | P4-G0C | G0B PASS | Metrics-only calibration, frozen thresholds and zero timeout | `NOT_QUALIFIED` |
