@@ -1,5 +1,64 @@
 # ICRA Supervisor Log
 
+## 2026-08-21 — ICRA-015 review, phase-3B closure and ICRA-016 phase-4A authorization
+
+### Review identity and independent verification
+
+- Fixed review base: `eb66c078a97d00360e542bfd28bea897a66510e6`.
+- Reviewed HEAD: `eb1cb67889960d995f7ca8dab318da649af82cb4`.
+- Reviewed commits: `4d46187` and `eb1cb67`; both carry applicable requirement IDs.
+  `dev/icra` matched `origin/dev/icra` at divergence `0 0`.
+- The aggregate diff contains exactly the seven ICRA-015 allowlisted files and passes
+  `git diff --check`. The protected PDF remains the sole untracked file at SHA-256
+  `1f07da5631a6551a2f98c02d46fd45bc87f2f1e3e7c14e95f9a7f4a0bac844f6`.
+- Supervisor independently rebuilt the current root rolling/Predictor/RiskGrid/occupancy/snapshot/
+  conversion targets, the complete P0/Adapter/P1/P2/P3/P5 consumer set and P4 A*. All active suites
+  pass: 271/271 GTests plus 2/2 registered retained-profile tests.
+- Ten checked planner/test consumers resolve the current repository-local
+  `results/icra27/icra015/build_iap/libiap.so`, SHA-256
+  `7be09389420ca1b2a9e9653734cdb45e511cacfa64e0ca952d34105a7f4c2358`.
+- The retained ICRA-011 JSON remains byte-identical at SHA-256
+  `778abd22158805c41150b4eeed9c37a3f660237a0bb0599e9a567e3533c7b32c`; the canonical ICRA-014
+  diagnostic remains read-only at SHA-256
+  `44f47b23137d17f4b0cbc81af6827156865bdecb36089bf53f770960a2fb963d`. No main flow, ROS launch,
+  smoke, qualification, benchmark, analyzer or GPU preflight ran, and no task process remains.
+
+### Standards axis
+
+- **PASS, zero hard findings.** Exact allowlist, ownership, requirement IDs, synchronized
+  `CHANGES`/`TRACEABILITY`/`DEV_LOG`, repository-local verification commands and two-commit handoff
+  conform to `AGENTS.md` and ICRA-015.
+- One non-blocking design judgement remains: rolling and production runtime independently spell the
+  same three-boolean active-source projection. The duplication is small and did not justify widening
+  the repair, but Phase-4A should centralize it so invalidation and publication validation cannot
+  drift. Worst Standards issue: no hard issue; duplicated internal source projection is the sole
+  judgement.
+
+### Spec axis
+
+- **PASS, zero findings.** GNSS, LiDAR and legacy-current identity now projects only active fields
+  consumed by spatial science. Inactive-source changes do not erase reuse; active owner/consumed
+  field changes still invalidate; non-finite active evidence remains conservative.
+- `current.stamp/valid` remain per-horizon validation/freshness inputs. Stationary production refresh
+  updates current time/prior generation, retains spatial advice without restamping it, performs all
+  horizon work and matches forced-fresh science.
+- Legacy LiDAR fields again report same-call populated-cache work (`1/1/(H-1)` for fresh work and
+  `0/0/0` for cross-refresh-only retention); additive rolling diagnostics report retained work.
+  ICRA-014/015 reproduction commands are present and all accepted ring, movement, rollback, worker
+  and scientific-equivalence behavior remains green. Worst Spec issue: none.
+
+### Disposition and next task
+
+- Verdict: `ICRA015_PASS_PHASE3B_CLOSED`. The ICRA-014 findings are closed, and phase 3B/phase 3 are
+  accepted as implementation stages. This does not qualify P0 or Gate-0B; P4 remains
+  `NOT_QUALIFIED`, and P5 remains implemented but unqualified.
+- Unique task: `ICRA-016 / GATE_0B` in `NEXT_TASK.md`.
+- ICRA-016 is Phase-4A development: centralize active-source projection, capture atomic monotonic
+  source provenance, add per-slot original timestamps, bounded GNSS/legacy-current TTL retention and
+  a successful-full-refresh watchdog. All policies default disabled; tests use synthetic values.
+- Occupancy delta/reverse-ray work is deferred to Phase-4B. Production activation/calibration,
+  worker/default tuning, main-flow smoke, qualification, GPU work and P1-P5 changes remain forbidden.
+
 ## 2026-08-21 — ICRA-014 review and ICRA-015 narrow repair authorization
 
 ### Review identity and independent verification

@@ -6,45 +6,40 @@ branch: dev/icra
 active_role: DEEPSEEK
 status: TASK_READY
 gate: GATE_0B
-task_id: ICRA-015
-review_base: 597f3b79a098842589b340e1919234c4182cee9d
-reviewed_head: 363be82694797c3a499c1e26dd08ed7100e76aa0
+task_id: ICRA-016
+review_base: eb66c078a97d00360e542bfd28bea897a66510e6
+reviewed_head: eb1cb67889960d995f7ca8dab318da649af82cb4
 conference_route: P0_P4_P5
 route_status: PREQUALIFICATION
 historical_gate0a_verdict: NO_GO_P2
-p0_gate0b_status: BLOCKED_PHASE3B_REVIEW_REPAIR_PHASE4_INVALIDATION_AND_CALIBRATION_PENDING
+p0_gate0b_status: BLOCKED_PHASE4A_VERSION_TTL_WATCHDOG_PHASE4B_DELTA_AND_CALIBRATION_PENDING
 p4_status: NOT_QUALIFIED
 p5_status: IMPLEMENTED_BUT_UNQUALIFIED
-supervisor_verdict: ICRA014_REQUEST_CHANGES
-review_disposition: ICRA015_PHASE3B_IDENTITY_AND_DIAGNOSTIC_REPAIR_AUTHORIZED
+supervisor_verdict: ICRA015_PASS_PHASE3B_CLOSED
+review_disposition: ICRA016_PHASE4A_VERSION_TTL_WATCHDOG_AUTHORIZED
 handoff_status: TASK_READY
 next_task: NEXT_TASK.md
-updated_utc: 2026-08-21T15:03:52Z
+updated_utc: 2026-08-21T15:59:52Z
 ```
 
 The conference development target remains conditional `P0 -> P4 -> P5`, but this state does not
 qualify any of those stages. Gate 0A remains the historical `NO_GO_P2`; P2 stays disabled for the
 ICRA route while its source and retained tests remain available.
 
-The Supervisor reviewed ICRA-014 over `597f3b7..363be82`. The dense fixed-capacity ring, world-key
-validation, candidate rollback, canonical `12,800/12,480/320` position counts, repeated `76,800`
-horizon fusion/materialization and fresh-full scientific equivalence are present. All independently
-rerun authorized suites pass: 263/263 GTests plus 2/2 retained profile tests. The ICRA-011 JSON and
-protected PDF hashes remain exact.
+The Supervisor reviewed ICRA-015 over `eb66c07..eb1cb67`. Active-source identity now contains only
+the spatial evidence actually consumed by each source mode; `current.stamp/valid` still runs through
+per-horizon validation without invalidating or restamping retained spatial advice. Legacy LiDAR
+counters again describe only same-call population/reuse, while rolling counters carry cross-refresh
+work. Reproduction commands are present. Standards and Spec both pass. Independent current builds
+pass 271/271 active GTests plus 2/2 retained profile tests, and all retained artifacts remain exact.
 
-ICRA-014 is not accepted because the rolling identity compares disabled or non-spatial sources.
-`GnssOnly` is invalidated by LiDAR/current changes, `LidarOnly` by GNSS/occupancy changes, and Fusion
-by `current.stamp/valid` even though those fields belong to per-horizon freshness rather than LiDAR
-spatial science. This defeats production rolling reuse. Cross-refresh ring hits also changed the
-three legacy LiDAR cache counters from their phase-2 call-local meanings, and `docs/CHANGES.md` lacks
-the required reproduction commands.
+ICRA-015 closes the ICRA-014 repair and phase 3B/phase 3 implementation stage. It does not qualify
+P0 or Gate-0B. `DEEPSEEK` may begin only ICRA-016 after synchronizing `dev/icra`: add atomic,
+versioned provenance for active spatial sources, bounded continuous-source TTL retention and a
+successful-full-refresh watchdog while keeping all policy disabled by default and preserving the
+existing RiskGrid/P4/P5 consumer Seam.
 
-`DEEPSEEK` may begin only ICRA-015 after synchronizing `dev/icra`. It is a bounded review repair:
-project exact spatial source identity by active source mode and actually consumed fields, restore
-truthful legacy counter semantics, add the missing regressions and reproduction commands, and
-preserve the accepted ICRA-014 ring/transaction/science behavior.
-
-Phase-4 source versions, TTL, occupancy delta and watchdog remain unauthorized. P1/P2/P3/P4/P5,
-calibration, worker/default tuning, main-flow smoke, qualification, formal benchmark, analyzer and
-GPU/CUDA work remain disabled. Gate-0B remains blocked until ICRA-015 review, phase 4, CPU scaling,
-calibration/activation and an explicitly authorized qualification sequence complete.
+Occupancy delta/reverse-ray work remains a separate Phase-4B task. Production TTL/watchdog values,
+CPU calibration/scaling, launch defaults, P1/P2/P3/P4/P5 behavior, main-flow smoke, qualification,
+formal benchmark, analyzer and GPU/CUDA work remain disabled. Gate-0B stays blocked until phase 4,
+CPU scaling, calibration/activation and an explicitly authorized qualification sequence complete.
