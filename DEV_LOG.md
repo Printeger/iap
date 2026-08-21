@@ -1736,3 +1736,29 @@ analyzer, formal benchmark, GPU preflight/CUDA, calibration, phase-4 reuse or
 P1/P2/P3/P4/P5 product work ran. Implementation commit/push and the final
 DEV_LOG-only SUPERVISOR handoff remain; DEEPSEEK does not mark phase 3 or
 Gate-0B PASS.
+
+## 2026-08-21T15:49:17Z — ICRA-015 IMPLEMENTATION PUSHED / SUPERVISOR HANDOFF
+
+Implementation commit
+`4d461874e644caa34fd20f1d46bb10a2484df786`
+(`fix(ICRA-015): repair rolling source identity IAP-RQ-312 IAP-RQ-314
+IAP-RQ-320 IAP-RQ-321 IAP-RQ-322`) was pushed to `origin/dev/icra`. It
+contains exactly the seven ICRA-015 allowlisted files.
+
+Final repository-local evidence remains 271/271 active GTests plus 2/2
+retained profile cases, eight consumers resolving the ICRA-015 build library,
+and Standards/Spec re-reviews passing with zero findings. The build library is
+SHA-256
+`7be09389420ca1b2a9e9653734cdb45e511cacfa64e0ca952d34105a7f4c2358`;
+the disabled, never-rerun canonical remains
+`44f47b23137d17f4b0cbc81af6827156865bdecb36089bf53f770960a2fb963d`;
+the retained ICRA-011 JSON remains
+`778abd22158805c41150b4eeed9c37a3f660237a0bb0599e9a567e3533c7b32c`;
+and the protected PDF remains solely untracked at
+`1f07da5631a6551a2f98c02d46fd45bc87f2f1e3e7c14e95f9a7f4a0bac844f6`.
+No forbidden flow or task process remains.
+
+This DEV_LOG-only commit returns control to `SUPERVISOR` review. `DEEPSEEK`
+does not mark ICRA-015, phase 3 or Gate-0B PASS; run main flow, smoke,
+qualification, benchmark, analyzer or GPU work; start phase-4 TTL/delta;
+change P1/P2/P3/P4/P5 behavior; or issue a next task.
