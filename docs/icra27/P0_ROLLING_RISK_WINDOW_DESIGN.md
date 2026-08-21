@@ -129,6 +129,41 @@ occupancy 变化对 GNSS LOS 有非局部影响：一个新增障碍 voxel 可�
 
 ## 6. Module、Interface 与 Seam
 
+### 6.1 Phase-1 semantic Seam freeze
+
+ICRA-008 的审计结论可用于开发，但 Supervisor review 冻结以下修正；后续任务不得
+重新选择依赖方向、source version 或 LOS 容量策略。
+
+`plan_env` 不依赖 IAP 核心库。`GridMap` Module 的小 Interface 只返回一个
+repository-neutral、不可变的 `FrozenOccupancyEpoch`：同一锁内捕获的 diagnostic query、
+raw/fused occupied voxel centres、lattice origin/resolution、frame、cloud stamp 和 generation。
+raw/fused/inflated buffers、occupancy threshold 与锁仍属于 `GridMap` Implementation，不能
+通过 Interface 暴露；`plan_env` 也不能直接构造或返回 `iap::LocalOccupancyGrid`。
+
+`ego_planner` 同时依赖 `plan_env` 与 `iap`，因此唯一合法 Adapter 是该包内独立、可单测的
+`P0OccupancyEpochAdapter`，`planner_manager` 只负责调用它。Adapter 把一个
+`FrozenOccupancyEpoch` 转换为 P0 的 `P0OccupancyEpoch`，并且只允许一次从 captured occupied
+centres 到 immutable `LocalOccupancyGrid` hash 的物化。该物化不是第二 map source 或第二
+callback snapshot：voxel size 和 lattice origin 必须来自同一 captured epoch，容量必须至少
+等于 captured unique occupied count，完成后必须逐项验证 voxel count、rejected count 和
+generation；任何截断、重复折叠异常、非有限 centre 或容量溢出都以
+`occupancy_los_adapter_invalid` fail closed。默认 `max_voxels=200000` 不能作为生产上限静默
+截断 map-LOS。
+
+phase 1 同时给 integrity-derived prior 增加单调非零 `prior_source_generation`。P0 在同一
+`health_state_mutex_` 临界区捕获 current integrity、由其导出的 prior 和 generation；每个
+integrity callback 都推进 live generation。`RiskGridMap` 的 source validator 在 provider
+前和 immutable publication 前各运行一次，同时比较 occupancy generation 与 prior
+generation。任一 source 为零、变化或处于更新中都保留旧 snapshot，并分别报告
+`occupancy_generation_changed` 或 `prior_generation_changed`。失败原因在 Module 内使用 enum/
+常量表示，仅在 health/evidence boundary 序列化为字符串，避免多个 caller 自造词汇。
+
+这是 phase-1 的依赖与一致性 Seam。它先修复 map-LOS 和 covariance-growth 语义，仍然执行
+完整 generation 构造；不得在此阶段加入 rolling window、cross-refresh cache 或
+within-refresh spatial dedup。这个小 Interface 隐藏了三个 Module 的复杂 Implementation，
+保持依赖 Locality，并为后续 rolling Module 提供 Leverage，而不把 ring/window 细节泄漏给
+P4/P5。
+
 建议建立深 Module `RollingRiskWindow`，用小 Interface 隐藏 ring、dirty set、TTL、
 version validation、copy-on-write 和 publication 等 Implementation 复杂度：
 

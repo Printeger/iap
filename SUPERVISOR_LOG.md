@@ -1,5 +1,69 @@
 # ICRA Supervisor Log
 
+## 2026-08-21 — ICRA-008 review and ICRA-009 phase-1 development authorization
+
+### Review identity and verification
+
+- Review base: `6c122a318bbe0970eb6a45eab817a5bdc24ba43a`.
+- Reviewed HEAD: `8b60d95d9ffa561f8e4408a68c47ff685747bcd5`.
+- Reviewed commits: `a6d863e` and `8b60d95`; both bind `IAP-RQ-312`,
+  `IAP-RQ-314`, `IAP-RQ-320`, `IAP-RQ-321` and `IAP-RQ-322`.
+- `dev/icra` matched `origin/dev/icra` at divergence `0 0`. The only worktree item was the
+  preserved untracked `docs/icra27/dev/ICRA_SYSTEM_FLOW.pdf`, whose SHA-256 remained
+  `1f07da5631a6551a2f98c02d46fd45bc87f2f1e3e7c14e95f9a7f4a0bac844f6`.
+- `git diff --check` passed. The review used source inspection and the Builder's retained
+  repository-local focused-test record; no ROS, main flow, smoke, qualification, profile or
+  GPU preflight ran.
+
+### Standards axis
+
+- PASS: exactly `DEV_LOG.md` and
+  `results/icra27/icra008/P0_SEMANTIC_SEAM_AUDIT.md` changed; both commits contain all mapped
+  requirement IDs; no product/test/config/analyzer/Supervisor document changed.
+- PASS: the report preserves the frozen design as authority, makes no Gate claim, records the
+  initial stale-library test failure as well as the corrected test invocations, and contains
+  no forbidden runtime/external-write evidence.
+- Low judgement smell: proposed reasons were raw strings. ICRA-009 therefore requires domain
+  enum/constants inside the Module and string serialization only at the health boundary.
+
+### Spec axis
+
+- Accepted: the audit correctly proves that current production occupied-skip diagnostics and
+  the unbound GNSS `LocalOccupancyGrid` are separate map inputs; it selects one immutable
+  same-generation binding and rejects `../glim`, mutable and different-source alternatives.
+- Accepted: it inventories current/legacy covariance candidates, freezes the empirical
+  `Sigma_base(tau) = Sigma_base(0) + sigma_grow^2 tau I3` Seam behind the existing Predictor
+  Interface, preserves exact tau-zero behavior, and defines finite/PSD/monotonic/fail-closed
+  rules without inventing a production value.
+- Accepted: the exact test matrix, invariance-test replacement, 76,800 logical shape, current
+  counter meanings and phase-1 no-schema-change conclusion are suitable for development.
+- High correction: the report placed construction of `LocalOccupancyGrid` in `plan_env`, but
+  that package has no IAP dependency and its proposed file set forbade adding one. The frozen
+  resolution is a neutral `GridMap::FrozenOccupancyEpoch` Interface and an explicit testable
+  `P0OccupancyEpochAdapter` in `ego_planner`, the package that already depends on both Modules;
+  `planner_manager` only invokes it.
+- High correction: occupancy received start/end version validation, but the required
+  integrity-derived prior did not. ICRA-009 adds `prior_source_generation` and validates both
+  source generations before provider work and immediately before atomic publication.
+- Medium correction: default `LocalOccupancyGrid::max_voxels=200000` can silently truncate
+  LOS. ICRA-009 requires exact capacity, insertion diagnostics and final unique-count equality;
+  any mismatch retains the old snapshot.
+
+### Disposition and next task
+
+- Verdict: `ICRA008_AUDIT_ACCEPTED_WITH_SUPERVISOR_CORRECTIONS`. This is not an unqualified
+  implementation-ready PASS, but all gaps are now concrete Supervisor decisions and do not
+  justify another audit cycle.
+- Gate-0B remains `BLOCKED_PERFORMANCE_AND_SEMANTICS`; P4 remains `NOT_QUALIFIED`; P5 remains
+  implemented but unqualified.
+- Unique task: `ICRA-009 / GATE_0B` in `NEXT_TASK.md`.
+- ICRA-009 enters P0 phase-1 product development: neutral versioned map epoch, complete
+  immutable production GNSS LOS Adapter, occupancy/prior source validator, and empirical
+  horizon covariance growth with focused tests.
+- The growth parameter is declared with an invalid fail-closed production default. Numerical
+  calibration/activation, rolling window, within-refresh spatial dedup, performance work,
+  smoke, qualification, GPU and P4 are separate future authority decisions.
+
 ## 2026-08-21 — ICRA-007 review, P0 design freeze and ICRA-008 authorization
 
 ### Review identity and verification

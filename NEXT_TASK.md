@@ -1,154 +1,367 @@
-# ICRA-008 — Freeze the concrete P0 semantic Seam before implementation
+# ICRA-009 — Implement P0 phase-1 map-LOS and horizon-growth semantics
 
 > Active gate: `GATE_0B`
 > Owner: `DEEPSEEK`
 > Activation: `TASK_READY`
-> Review disposition: `ICRA007_TECHNICAL_PASS_PROCEDURAL_NONCONFORMANCE_ICRA008_AUTHORIZED`
+> Review disposition: `ICRA008_AUDIT_ACCEPTED_WITH_SUPERVISOR_CORRECTIONS_ICRA009_AUTHORIZED`
 > Requirement mapping: `IAP-RQ-312`, `IAP-RQ-314`, `IAP-RQ-320`, `IAP-RQ-321`, `IAP-RQ-322`
 > Conference route: conditional P0 -> P4 -> P5
-> This task: repository-local implementation-readiness audit only; no product implementation
+> This task: P0 phase-1 product implementation and focused tests; no runtime qualification
 
-## Supervisor verdict and objective
+## Supervisor verdict
 
-ICRA-007 now faithfully separates the current frozen P0 provider from the standards-required
-map-LOS candidate and proves that GNSS dominates both workloads. Its technical diagnostic
-contract passes, but its ROS-aware test created and then deleted an external `/root/.ros/log`
-artifact, so the review is recorded as `TECHNICAL_PASS / PROCEDURAL_NONCONFORMANCE` rather
-than a clean PASS.
+ICRA-008 stayed within its two-file audit scope. The Standards axis is `PASS`; the report's
+map-source inventory, covariance formula, invariants, test matrix and counter meanings are
+accepted. The Spec axis found three implementation-readiness gaps, which this authority task
+now resolves without another audit:
 
-The P0 refactor architecture is frozen in
-`docs/icra27/P0_ROLLING_RISK_WINDOW_DESIGN.md`. Before product code changes, one bounded
-audit must map that design onto the current concrete ownership/lifetime and computation
-seams. ICRA-008 must remove the remaining implementation ambiguity so the next reviewed task
-can start phase-1 product development without reopening a broad audit.
+1. `plan_env` must not acquire an `iap` dependency. `GridMap` returns a neutral frozen epoch;
+   an explicit testable Adapter in `ego_planner` constructs `LocalOccupancyGrid`, and
+   `planner_manager` only invokes it.
+2. publication must validate the integrity-derived prior generation as well as the occupancy
+   generation at refresh start and end;
+3. the LOS Adapter must size and verify the complete occupied-voxel set and fail closed rather
+   than silently hitting `LocalOccupancyGrid::max_voxels`.
 
-## 1. Start and synchronize
+The frozen authority is `docs/icra27/P0_ROLLING_RISK_WINDOW_DESIGN.md`, especially §6.1.
+The Builder audit `results/icra27/icra008/P0_SEMANTIC_SEAM_AUDIT.md` supplies the remaining
+current-code evidence and formula/test detail, but it does not override the corrections here.
 
-- Follow the `AGENTS.md` synchronization protocol. Stop as `REMOTE_DIVERGED` if both sides lead.
-- Preserve the existing untracked `docs/icra27/dev/ICRA_SYSTEM_FLOW.pdf`; do not modify,
-  stage, delete, move or regenerate it.
-- Record ICRA-008 START in `DEV_LOG.md` with start HEAD, exact allowed files, audit-only scope
-  and the pre-existing PDF.
-- Do not edit Supervisor-owned state, task, log, scope, plan, design-freeze or Gate documents.
+## 1. Start, synchronize and record
 
-## 2. Produce one concrete audit artifact
+- Follow the `AGENTS.md` synchronization protocol. Stop as `REMOTE_DIVERGED` if both local and
+  remote lead; do not reset, stash, rebase, clean or overwrite another role's work.
+- Preserve the untracked `docs/icra27/dev/ICRA_SYSTEM_FLOW.pdf` exactly. Do not modify, stage,
+  delete, move or regenerate it.
+- Record an ICRA-009 START entry in `DEV_LOG.md` with start HEAD, exact allowed files, semantic
+  phase-1 scope and the pre-existing PDF.
+- Do not edit Supervisor-owned state/task/log/scope/plan/design/Gate documents.
+- This is the promised entry into product development. Do not reopen a broad audit or replace
+  the fixed Seams below with a different architecture.
 
-Create exactly:
+## 2. Required map-LOS ownership Seam
 
-`results/icra27/icra008/P0_SEMANTIC_SEAM_AUDIT.md`
+### 2.1 Neutral `GridMap` epoch Interface
 
-The report is a DEEPSEEK technical audit artifact, not an authority source. It must reference
-the frozen design instead of copying or rewriting it, and it must answer every item below with
-current file/symbol/line evidence.
+In `plan_env/grid_map.h/.cpp`, replace or extend the current diagnostic-only capture with one
+small repository-neutral value contract equivalent to:
 
-### A. Production GNSS map-LOS ownership and lifetime
+```cpp
+struct FrozenOccupancyEpoch {
+  OccupancyDiagnosticQuery diagnostic_query;
+  std::shared_ptr<const std::vector<Eigen::Vector3d>>
+      raw_occupied_voxel_centers;
+  Eigen::Vector3d lattice_origin;
+  double resolution_m;
+  std::string frame_id;
+  double cloud_stamp_s;
+  uint64_t generation;
+};
+```
 
-- Trace the current map input from callback/storage through `P0RiskGridRuntime`,
-  `PredictorModuleRiskProvider`, `PredictorModule`, `GnssAdvisoryPredictor` and
-  `VisibilityPredictor`.
-- Explain why the current occupancy predicate/diagnostic query is not automatically the
-  `LocalOccupancyGrid` ray-LOS input required by `PredictorModule::set_local_occupancy()`.
-- Enumerate only concrete repository-supported binding options, including ownership,
-  immutability, version/stamp, frame, callback concurrency and lifetime through all workers.
-- Select one minimal recommended production Seam for ICRA-009. State exactly which existing
-  data is copied, shared or adapted and how start/end source-version validation fails closed.
-- Reject any option that requires modifying `../glim`, exposing mutable occupancy across
-  worker threads, or silently rebuilding from a different map source than P0 health records.
+The exact public type spelling may follow local style, but these fields and meanings may not
+change. Capture under `occupancy_epoch_mutex_` and require an even, nonzero update sequence,
+finite positive resolution, finite lattice origin/cloud stamp and nonempty frame. The
+diagnostic closure and occupied-centre vector must be derived from the same captured
+raw/fused/inflated buffers and threshold:
 
-### B. Empirical covariance-growth implementation point
+- LOS centres: exactly one centre for each cell satisfying
+  `raw_cloud != 0 || fused > min_occupancy_log`;
+- occupied-skip diagnostics: preserve raw/fused/inflated distinctions;
+- inflated-only neighbours are collision diagnostics, not GNSS blockers;
+- the returned value and everything reachable from it are immutable.
 
-- Locate every existing repository implementation or parameter claiming covariance growth,
-  `Sigma_pred`, information propagation or horizon-dependent PL.
-- For each candidate, record its state frame/dimension, formula, parameters, freshness model,
-  inputs and current callers; distinguish reusable Implementation from incompatible legacy
-  behavior.
-- Select the smallest internal Seam that lets the active Predictor produce horizon-dependent
-  `Sigma_pred/PL_pred` while preserving the public `PredictorModule` query Interface and
-  current `tau=0` behavior.
-- Define monotonicity, finite/PSD, conservative-max and invalid-input rules. Do not invent
-  numerical parameter values or choose them from performance outcomes.
+`GridMap` remains a deep Module: buffers, locks, threshold and capture mechanics stay in its
+Implementation. Do not expose mutable buffers. Do not include an IAP header, call
+`LocalOccupancyGrid`, add `find_package(iap)`, link `iap::iap`, or add `<depend>iap</depend>` in
+`plan_env`.
 
-### C. Phase-1 test matrix
+Keep `occupancyGeneration()` as the live version probe. It returns zero while the sequence is
+odd and the current even generation otherwise.
 
-Specify exact proposed test names, test files, fixtures and observable assertions for the next
-development task. At minimum cover:
+### 2.2 The sole Adapter and complete LOS materialization
 
-- production P0 binds a versioned immutable GNSS occupancy snapshot;
-- open-sky versus blocked map LOS changes visible set/information/PL as expected;
-- `tau=0` matches the accepted baseline within a declared numerical tolerance;
-- increasing valid horizons apply covariance growth and do not produce invariant whole
-  scientific results;
-- covariance remains finite, symmetric and PSD, with PL nondecreasing for a fixed advisory;
-- stale/missing/mixed-version occupancy or prior fails closed without publishing a partial
-  generation;
-- scalar/batch and worker 1/2/4 scientific equivalence remains intact.
+Define the P0-side immutable value contract in a focused
+`ego_planner/p0_occupancy_epoch_adapter.h` with:
 
-Do not commit intentionally failing tests in ICRA-008. The report must identify which current
-invariance assertion will be replaced, not layered indefinitely, when phase-1 behavior changes.
+- one `iap::RiskGridMap::OccupancyDiagnosticQuery`;
+- one `std::shared_ptr<const iap::LocalOccupancyGrid>` LOS owner;
+- one live occupancy-generation probe;
+- captured generation, cloud stamp and frame.
 
-### D. Evidence counters and schema impact
+Implement the sole `P0OccupancyEpochAdapter` in the `ego_planner` package, which already
+depends on both Modules. `planner_manager.cpp` only captures the `GridMap` epoch, calls this
+Adapter and installs the resulting factory into P0. The Adapter must:
 
-- Confirm that `refresh_query_count` remains the 76,800 logical-risk-voxel shape.
-- Define the exact meaning and update site for future spatial recompute/reuse,
-  GNSS/LiDAR invocation, horizon-fusion, window-shift and full-rebuild counters.
-- State whether phase 1 can preserve the current health/evidence schema. Any field whose
-  meaning would change must be called out for an explicit later schema version; no silent
-  redefinition is allowed.
+- create one new `LocalOccupancyGrid` with voxel size and lattice origin from the captured
+  epoch, eviction disabled, and capacity equal to the exact captured unique occupied count
+  (use capacity 1 for a valid empty/open-sky set);
+- reject nonfinite centres, a count not representable by the current capacity type, any
+  insertion rejection, or final `voxel_count != captured_unique_count`;
+- retain legacy zero-origin behavior for all existing `LocalOccupancyGrid` users;
+- convert the diagnostic closure without changing generation/stamp/frame/source semantics;
+- capture the live probe from the same `GridMap` owner;
+- return no P0 epoch on any Adapter failure. Production must report
+  `occupancy_los_adapter_invalid` and retain the prior active risk snapshot.
 
-### E. Minimal ICRA-009 change set
+One centre-to-hash materialization is authorized. A second subscription, point-cloud
+snapshot, full buffer copy in the manager, mutable shared grid, silent capacity truncation or
+use of `P0RiskGridRuntime::latest_lidar_map_points_` as GNSS LOS is forbidden.
 
-- Give the exact minimal product/test/document files required for phase-1 semantic
-  implementation.
-- Separate required files from optional files and explain every optional file.
-- List explicit forbidden adjacent refactors. The proposed set must exclude rolling-window
-  storage, cross-refresh caching, worker/config changes, GPU/CUDA, P4/P5 and analyzer/Gate
-  threshold changes.
+### 2.3 Runtime lifetime and validation
 
-## 3. Verification
+The production `PredictorModuleRiskProvider` must own the
+`shared_ptr<const LocalOccupancyGrid>` for its full lifetime and bind
+`module_.set_local_occupancy(owner.get())` before any worker copy is created. Member order
+must make the owner outlive the Module and all worker futures must join before provider
+destruction. Workers may read but never mutate the grid.
 
-- Use read-only source inspection and existing repository-local, non-ROS focused tests only.
-- Do not run any ROS-aware test known to create logs. If a harmless tool may consult ROS
-  paths, bind `ROS_HOME`, `ROS_LOG_DIR`, `TMPDIR` and related output to a new directory under
-  `results/icra27/icra008/` before it starts.
-- Do not run the IAP main flow, launch, smoke, qualification, bag, RViz, campaign, full offline
-  profile or GPU preflight; none is necessary for this static audit.
-- Record exact commands and exit codes in both the report and `DEV_LOG.md`.
-- Run `git diff --check`, verify no task process remains, and verify the preserved PDF is still
-  untracked and untouched.
+Before production provider dispatch require:
 
-## 4. Acceptance and handoff
+- non-null diagnostic query, LOS owner and live-generation probe;
+- nonzero captured occupancy generation;
+- finite, nonfuture cloud stamp whose age is within the existing P0 stale timeout;
+- `frame_id == config_.grid.frame_id == "map"`;
+- live occupancy generation equals the captured generation.
 
-ICRA-008 is ready for Supervisor review only when:
+Use the exact domain reasons `occupancy_snapshot_unavailable`,
+`occupancy_los_adapter_invalid`, `occupancy_frame_mismatch`, `occupancy_stale` and
+`occupancy_generation_changed`. Centralize new source-validation reasons as enum/constants;
+serialize to strings only at the health/evidence boundary.
 
-- the report answers A–E with exact current-code evidence and one recommended Seam per blocker;
-- source ownership/lifetime/version validation is concrete enough to implement without a new
-  design decision;
-- covariance growth has a formula/parameter provenance and testable invariants, not merely a
-  class-name recommendation;
-- the proposed phase-1 tests and minimal file set are precise and bounded;
-- no product, test, launch/config, analyzer, threshold, evidence or Supervisor-owned document
-  changed;
-- all writes stayed inside the repository and the pre-existing PDF is preserved.
+Existing injected-provider tests and the old predicate overload remain supported. The
+production Predictor path may not fall back to open sky when the epoch is absent or invalid.
 
-Explicitly stage only the two allowed files, inspect the staged diff, commit with all applicable
-`IAP-RQ-XXX` IDs, push `dev/icra`, record the report commit SHA in the final `DEV_LOG.md`
-handoff commit, push again, and return control to Supervisor.
+## 3. Required prior/source-version publication Seam
 
-`DEEPSEEK` may recommend one concrete phase-1 Seam but must not implement it, authorize a
-smoke/benchmark, change the Gate verdict, start P4 or create the next task.
+- Add a nonzero `prior_source_generation` to `IntegritySnapshot`. It represents the exact
+  current-integrity message from which `lambda_base_pos` was derived.
+- Add `latest_current_generation_` under `health_state_mutex_`; advance it for every non-null
+  integrity callback, including an invalid new message. Capture current state, derived prior
+  and generation in the same critical section. Generation zero is unavailable.
+- The production phase-1 path requires a present, fresh, finite SPD prior and nonzero prior
+  generation because every batch contains horizons greater than zero. Missing/stale/invalid
+  prior must fail the whole refresh and retain the previous generation.
+- Add a small `RiskGridMap` source-validation Interface. Use a domain enum with exactly the
+  logical states `VALID`, `OCCUPANCY_GENERATION_CHANGED` and
+  `PRIOR_GENERATION_CHANGED`; do not pass caller-invented raw strings through the Module.
+- The P0 validator compares both live occupancy generation and live prior generation with the
+  captured values. `RiskGridMap::refreshFromProvider()` invokes it once before query/provider
+  work and once after complete voxel materialization, immediately before the atomic active
+  snapshot assignment. Either failed probe calls `markRefreshFailure()`, leaves generation ID
+  and active snapshot unchanged, and maps to the exact corresponding health reason.
+- Preserve the current refresh overloads by routing them through an empty/always-valid
+  validator. Do not hold a P0 input mutex during provider computation.
+
+This task does not add GNSS/LiDAR/odom cross-refresh versions. Their data are already copied
+into the immutable provider snapshot; phase-1 specifically closes the audited occupancy and
+integrity-prior publication races. Later rolling invalidation remains a separate task.
+
+## 4. Empirical horizon covariance-growth Seam
+
+Add `EmpiricalCovarianceGrowthParams` inside `PredictorParams` with one scalar
+`sigma_grow_m_sqrt_s`. Its default must be invalid (`NaN`), not a guessed production value.
+Declare/read `p0.predictor.sigma_grow_m_sqrt_s` into the P0 runtime Config, but do not change a
+launch/config preset or choose a numerical production calibration in this task.
+
+Keep the public `PredictorModule` constructor, `query()` and `queryBatch()` Interfaces. Add a
+private/pure Implementation helper in `predictor_module.cpp` after freshness/input validation
+and before advisory fusion:
+
+```text
+Sigma_base(0)   = inverse(symmetrize(lambda_base_pos))
+Sigma_base(tau) = Sigma_base(0) + sigma_grow_m_sqrt_s^2 * tau * I3
+Lambda_base(tau)= inverse(Sigma_base(tau))
+Lambda_pred     = Lambda_base(tau) + Lambda_gnss + Lambda_lidar
+Sigma_pred      = inverse(Lambda_pred + existing_epsilon * I3)
+```
+
+Rules:
+
+- `tau == 0` is an exact bypass through the accepted current path; do not invert/reconstruct
+  the prior, and match the baseline within absolute `1e-12`;
+- `tau > 0` requires finite nonnegative growth, present/fresh finite symmetric positive-
+  definite map/ENU `lambda_base_pos`, and successful finite propagation;
+- symmetrize matrices, use self-adjoint/LDLT checks, retain the existing epsilon/
+  regularization path and reject materially indefinite input; test eigenvalue tolerance is
+  `-1e-12`;
+- for fixed spatial advisory and `tau2 >= tau1`, propagated and fused covariance are
+  Loewner-nondecreasing within `1e-12`, HPL/VPL do not decrease, and positive growth with a
+  larger horizon changes covariance and at least one PL field;
+- GNSS and LiDAR information are fixed spatial evidence for this phase and are each fused
+  once. Do not add growth to GNSS measurement covariance or add a second final-PL margin;
+- preserve `conservative_max_with_gnss` exactly after grown fusion;
+- freshness remains measured at `freshness_reference_time_s`, not future query time.
+
+Add a typed covariance-growth status to `PredictorQueryResult`, covering at least
+`NOT_REQUIRED_TAU_ZERO`, `APPLIED`, `INVALID_HORIZON`, `INVALID_PARAMETER`, `MISSING_PRIOR`,
+`STALE_PRIOR`, `INVALID_PRIOR` and `NUMERICAL_FAILURE`. A required `tau > 0` failure returns no
+finite PL as valid. The production provider treats any required non-`APPLIED` result as a
+whole-batch failure so `RiskGridMap` cannot publish a mix of grown and unpropagated horizons.
+
+The formula provenance is `docs/spec/conventions.md` §4, `docs/spec/talk_spec.md` §E and
+`docs/methodology/methodology.tex` around equation `sigma_grow`. Test constants validate
+algebra only. The deleted legacy default and `apps/iap_experiment.cpp` value `0.04` are not
+production calibration authority.
+
+## 5. Required focused tests
+
+Use the exact test names below. Strengthen or replace existing fixtures instead of duplicating
+contradictory assertions.
+
+### Root IAP tests
+
+- `test/test_local_occupancy.cpp`
+  - `LocalOccupancyGridTest.NonZeroLatticeOriginPreservesVoxelAndRaySemantics`.
+- `test/test_predictor_module.cpp`
+  - retain and strengthen
+    `PredictorModuleTest.GnssMapOcclusionReducesVisibleCountAndDegradesProtectionLevels` with
+    GNSS information-trace and PSD assertions;
+  - `PredictorModuleTest.TauZeroCovarianceGrowthMatchesAcceptedBaseline`;
+  - replace `FrozenSnapshotScientificFieldsAreInvariantAcrossSixHorizons` with
+    `PredictorModuleTest.FrozenSpatialAdvisoryIsReusedButHorizonRiskGrowsAcrossSixHorizons`;
+  - `PredictorModuleTest.CovarianceGrowthRemainsFiniteSymmetricPsdAndPlNondecreasing`;
+  - `PredictorModuleTest.InvalidCovarianceGrowthInputsAreExplicitFallbacks`;
+  - retain `PredictorModuleTest.BatchMatchesScalarAndCachesLidarPerPosition`, including its
+    current phase-1 logical GNSS/fusion and LiDAR evaluation/hit counts.
+- `test/test_risk_grid_map.cpp`
+  - retain `RiskGridMapTest.RefreshRejectsChangingOccupancyGeneration` and
+    `RiskGridMapTest.RefreshFailureKeepsPreviousActiveSnapshot`;
+  - `RiskGridMapTest.SourceValidatorRunsAtStartAndImmediatelyBeforeAtomicPublish`;
+  - `RiskGridMapTest.PriorGenerationFailureKeepsPreviousActiveSnapshot`.
+
+### Planner package tests
+
+- New `src/iap/planner/plan_env/test/test_grid_map_occupancy_epoch.cpp`
+  - `GridMapOccupancyEpochTest.CaptureSharesFrozenRawFusedGenerationWithDiagnostic`;
+  - `GridMapOccupancyEpochTest.InProgressOrPreCloudCaptureFailsClosed`.
+  The first test must prove raw and fused cells enter the neutral centre set, inflated-only does
+  not; diagnostic metadata matches; live mutation cannot change the frozen result.
+- New `src/iap/planner/plan_manage/test/test_p0_occupancy_epoch_adapter.cpp`
+  - `P0OccupancyEpochAdapterTest.CompleteCapturedSetProducesMatchingImmutableLosGrid`;
+  - `P0OccupancyEpochAdapterTest.CapacityOrCountMismatchFailsClosed`;
+  - `P0OccupancyEpochAdapterTest.NonFiniteOrInvalidMetadataFailsClosed`.
+  Use duplicate centres to prove that unexpected key collapse is rejected; use a valid empty
+  set to prove open sky is representable without a zero-capacity failure.
+- `src/iap/planner/plan_manage/test/test_p0_risk_grid_runtime.cpp`
+  - `P0RiskGridRuntimeStampTest.ProductionProviderBindsVersionedImmutableGnssOccupancyEpoch`;
+  - `P0RiskGridRuntimeStampTest.OccupancyGenerationChangeDuringProviderBatchKeepsPreviousGeneration`;
+  - `P0RiskGridRuntimeStampTest.PriorGenerationChangeDuringProviderBatchKeepsPreviousGeneration`;
+  - `P0RiskGridRuntimeStampTest.MissingStaleOrWrongFrameOccupancyEpochKeepsPreviousGeneration`;
+  - `P0RiskGridRuntimeStampTest.MissingStaleOrInvalidGrowthPriorKeepsPreviousGeneration`;
+  - `P0RiskGridRuntimeStampTest.MapLosAndGrowthWorkersOneTwoFourAreScientificallyEquivalent`.
+
+For every failure-after-one-success fixture, assert refresh false, exact reason, identical
+active snapshot identity/generation/data and no partial horizon publication. Worker 1/2/4 must
+have identical ordered voxel shape, validity/status/source fields and scientific values within
+absolute `1e-12`.
+
+## 6. Evidence and compatibility contract
+
+- `refresh_query_count` remains the complete `12,800 x 6 = 76,800` logical shape.
+- Do not redefine `provider_query_count`, `predictor_unique_positions`, any `*_used_count`,
+  LiDAR evaluation/hit counters or existing health field.
+- Phase 1 adds no rolling/delta/reuse counter and requires no evidence schema version change.
+- The only new externally visible failure strings are the exact source/Adapter/prior reasons
+  fixed above. Update focused tests for them; do not modify analyzers or Gate thresholds.
+- Corrected PL/covariance values are expected behavior changes. P4/P5 still acquire the same
+  immutable `RiskGridSnapshot` Interface.
+- Existing `LocalOccupancyGrid` zero-origin callers and old `RiskGridMap` refresh overloads
+  must remain source-compatible and keep their focused tests passing.
+
+## 7. Verification boundary
+
+- All build, test, ROS home/log and temporary outputs must stay under
+  `results/icra27/icra009/`. Do not write to workspace-level `build/`, `install/`, `log/`,
+  `/root/.ros`, `/tmp` or any external path.
+- Before any ROS-aware unit test, bind `ROS_HOME`, `ROS_LOG_DIR`, `TMPDIR` and related test
+  outputs to newly created directories under `results/icra27/icra009/`. Record those paths.
+- Build and run the affected root focused tests plus the new `plan_env` test and P0 runtime
+  test. A repository-local colcon/CMake build is authorized only for these targets and their
+  dependencies.
+- Also run the existing relevant focused suites needed to prove source compatibility. Record
+  exact commands, target/test counts, stdout/stderr locations and exit codes in `DEV_LOG.md`.
+- Run `git diff --check`, inspect the staged diff, verify no task process remains, and verify
+  the PDF is still untracked with the same SHA-256.
+- No IAP main flow, ROS launch, smoke, qualification, bag, RViz, campaign, offline performance
+  profile or GPU preflight is authorized. GPU preflight is unnecessary because no main flow
+  may start.
+
+## 8. Acceptance and handoff
+
+ICRA-009 is ready for Supervisor review only when:
+
+- production GNSS receives the complete immutable LOS grid derived from the same
+  generation/stamp/frame as occupied-skip diagnostics;
+- no `plan_env -> iap` dependency was introduced; the sole Adapter remains the focused
+  `ego_planner` Adapter Module and `planner_manager` only invokes it;
+- occupancy and prior start/end generation changes both retain the old active snapshot;
+- LOS capacity/count mismatch cannot silently publish an incomplete open-sky model;
+- tau zero preserves baseline while positive horizons perform finite, symmetric, PSD,
+  monotonic covariance growth and no invalid mixed batch publishes;
+- all named focused tests pass with output confined to the repository;
+- `docs/CHANGES.md`, `docs/TRACEABILITY.md` and `DEV_LOG.md` truthfully map implementation,
+  tests, reasons and the lack of production calibration/runtime qualification;
+- only allowed files changed and the preserved PDF remains untouched.
+
+Explicitly stage only allowed files. Inspect the staged diff, commit with all applicable
+`IAP-RQ-XXX` IDs, push `dev/icra`, record the implementation commit SHA in a final
+`DEV_LOG.md` handoff commit, push again, and return control to Supervisor.
+
+`DEEPSEEK` must not mark Gate-0B PASS, choose a production growth value, authorize a smoke,
+start phase 2, tune performance or issue the next task.
 
 ## Allowed files
 
-- `results/icra27/icra008/P0_SEMANTIC_SEAM_AUDIT.md`;
-- `DEV_LOG.md`.
+### Product
+
+- `src/iap/planner/plan_env/include/plan_env/grid_map.h`;
+- `src/iap/planner/plan_env/src/grid_map.cpp`;
+- `include/iap/map/local_occupancy.hpp`;
+- `src/iap/map/local_occupancy.cpp`;
+- `include/iap/planner/integrity_snapshot.hpp`;
+- `include/iap/predictor/predictor_types.hpp`;
+- `src/iap/predictor/predictor_module.cpp`;
+- `include/iap/planner/risk_grid_map.hpp`;
+- `src/iap/planner/risk_grid_map.cpp`;
+- `src/iap/planner/plan_manage/include/ego_planner/p0_risk_grid_runtime.h`;
+- `src/iap/planner/plan_manage/include/ego_planner/p0_occupancy_epoch_adapter.h`;
+- `src/iap/planner/plan_manage/src/p0_risk_grid_runtime.cpp`;
+- `src/iap/planner/plan_manage/src/p0_occupancy_epoch_adapter.cpp`;
+- `src/iap/planner/plan_manage/src/planner_manager.cpp`.
+
+### Tests/build registration
+
+- `test/test_local_occupancy.cpp`;
+- `test/test_predictor_module.cpp`;
+- `test/test_risk_grid_map.cpp`;
+- `src/iap/planner/plan_env/test/test_grid_map_occupancy_epoch.cpp`;
+- `src/iap/planner/plan_env/CMakeLists.txt`;
+- `src/iap/planner/plan_env/package.xml`;
+- `src/iap/planner/plan_manage/CMakeLists.txt`;
+- `src/iap/planner/plan_manage/test/test_p0_occupancy_epoch_adapter.cpp`;
+- `src/iap/planner/plan_manage/test/test_p0_risk_grid_runtime.cpp`.
+
+`plan_env/package.xml` is authorized only to add the test dependency required to register the
+new focused test, not an IAP runtime dependency.
+
+### Required documentation
+
+- `DEV_LOG.md`;
+- `docs/CHANGES.md`;
+- `docs/TRACEABILITY.md`.
 
 ## Forbidden
 
-- No product source, header, test, CMake, launch/config, analyzer or runtime/evidence changes.
-- No new prototype, dependency, iKD-tree, cache, ring buffer, covariance implementation,
-  occupancy Adapter implementation, worker/profile change or GPU/CUDA work.
-- No ROS/main-flow execution and no mutation of ICRA-004/005/006/007 retained evidence.
 - No changes to `AGENTS.md`, `AGENT_STATE.md`, `SUPERVISOR_LOG.md`, `NEXT_TASK.md`,
-  `docs/REQS.md`, `docs/CHANGES.md`, `docs/TRACEABILITY.md` or any `docs/icra27/*.md` file.
-- No external writes, workspace-level build/log output, disk cleanup or changes to `../glim`
-  or any other repository.
+  `docs/REQS.md`, any `docs/icra27/*.md`, launch/config presets, analyzers or Gate documents.
+- No rolling/ring window, fixed-lattice risk publication, boundary slab, delta, TTL,
+  cross-refresh cache, within-refresh GNSS spatial dedup, worker/scheduler/default change,
+  profile, benchmark or performance claim.
+- No new runtime dependency, `plan_env -> iap` dependency, iKD-tree, GPU/CUDA path or
+  modification of `../glim` or another workspace repository.
+- No P1/P2/P3/P4/P5 behavior, planner objective, AL/IM/cost, qualification threshold, evidence
+  acceptance, smoke or main-flow execution.
+- No revival of `PredictedIntegrityComputer`, migration through `FuturePLFieldPredictor`, use
+  of inflated-only cells as GNSS blockers, mutable occupancy sharing, open-sky fallback on
+  missing production occupancy, or guessed production `sigma_grow` value.
