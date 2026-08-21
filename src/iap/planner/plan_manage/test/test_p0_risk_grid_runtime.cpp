@@ -444,6 +444,9 @@ namespace ego_planner {
 class P0RiskGridRuntimeStampTest : public ::testing::Test {
  protected:
   struct PredictorDiagnosticCounts {
+    std::size_t legacy_unique_positions = 0;
+    std::size_t legacy_lidar_evaluations = 0;
+    std::size_t legacy_lidar_cache_hits = 0;
     std::size_t spatial_recompute = 0;
     std::size_t spatial_reuse = 0;
     std::size_t gnss_invocations = 0;
@@ -455,7 +458,10 @@ class P0RiskGridRuntimeStampTest : public ::testing::Test {
       const P0RiskGridRuntime& runtime) {
     std::lock_guard<std::mutex> lock(runtime.health_state_mutex_);
     const auto state = runtime.healthPublicationStateSnapshot();
-    return {state.predictor_spatial_advisory_recompute_count,
+    return {state.predictor_unique_positions,
+            state.predictor_lidar_evaluations,
+            state.predictor_lidar_cache_hits,
+            state.predictor_spatial_advisory_recompute_count,
             state.predictor_spatial_advisory_reuse_count,
             state.predictor_gnss_advisory_invocation_count,
             state.predictor_lidar_advisory_invocation_count,
@@ -2073,6 +2079,16 @@ TEST_F(P0RiskGridRuntimeStampTest,
   ASSERT_EQ(snapshots.size(), 3u);
   expectSnapshotsScientificallyEquivalent(snapshots[0], snapshots[1]);
   expectSnapshotsScientificallyEquivalent(snapshots[0], snapshots[2]);
+  for (const auto& counts : diagnostic_counts) {
+    EXPECT_EQ(counts.legacy_unique_positions, 0u);
+    EXPECT_EQ(counts.legacy_lidar_evaluations, 0u);
+    EXPECT_EQ(counts.legacy_lidar_cache_hits, 0u);
+    EXPECT_GT(counts.spatial_recompute, 0u);
+    EXPECT_GT(counts.spatial_reuse, 0u);
+    EXPECT_GT(counts.gnss_invocations, 0u);
+    EXPECT_EQ(counts.lidar_invocations, 0u);
+    EXPECT_GT(counts.horizon_fusions, 0u);
+  }
   for (std::size_t index = 1; index < health_states.size(); ++index) {
     EXPECT_EQ(health_states[index].provider_query_count,
               health_states[0].provider_query_count);

@@ -438,16 +438,10 @@ PredictorQueryResult PredictorModule::queryWithSpatialAdvisory(
     out.lidar = cached_spatial_advisory->lidar;
     if (diagnostics) {
       ++diagnostics->spatial_advisory_reuse_count;
-      if (source_allows_lidar(params_.source_mode)) {
-        ++diagnostics->lidar_cache_hits;
-      }
     }
   } else {
     if (diagnostics) {
       ++diagnostics->spatial_advisory_recompute_count;
-      if (source_allows_lidar(params_.source_mode)) {
-        ++diagnostics->lidar_evaluations;
-      }
     }
     const bool gnss_allowed =
         source_allows_gnss(params_.source_mode) &&
@@ -626,6 +620,11 @@ std::vector<PredictorQueryResult> PredictorModule::queryBatch(
                                   : spatial_cache.end();
     const SpatialAdvisory* cached_spatial_advisory =
         cached == spatial_cache.end() ? nullptr : &cached->second;
+    const bool tracks_legacy_lidar_cache =
+        source_allows_lidar(params_.source_mode);
+    if (cached_spatial_advisory != nullptr && tracks_legacy_lidar_cache) {
+      ++local.lidar_cache_hits;
+    }
     SpatialAdvisory evaluated_spatial_advisory;
     const std::size_t recomputes_before =
         local.spatial_advisory_recompute_count;
@@ -633,11 +632,15 @@ std::vector<PredictorQueryResult> PredictorModule::queryBatch(
         input, cached_spatial_advisory, &evaluated_spatial_advisory, &local);
     if (cacheable && cached_spatial_advisory == nullptr &&
         local.spatial_advisory_recompute_count > recomputes_before) {
-      spatial_cache.emplace(key, std::move(evaluated_spatial_advisory));
+      const auto inserted = spatial_cache.emplace(
+          key, std::move(evaluated_spatial_advisory));
+      if (inserted.second && tracks_legacy_lidar_cache) {
+        ++local.unique_positions;
+        ++local.lidar_evaluations;
+      }
     }
     outputs.push_back(std::move(result));
   }
-  local.unique_positions = spatial_cache.size();
   if (diagnostics) *diagnostics = local;
   return outputs;
 }

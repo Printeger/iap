@@ -950,6 +950,110 @@ TEST(PredictorModuleTest,
 }
 
 TEST(PredictorModuleTest,
+     BatchPreservesLegacyLidarCacheDiagnosticsAcrossSourceModes) {
+  const auto snapshot = make_snapshot(true, true);
+  const Eigen::Vector3d position(1.0, 2.0, 3.0);
+  std::vector<iap::PredictorQueryInput> inputs;
+  for (int horizon = 0; horizon < 6; ++horizon) {
+    inputs.emplace_back(position, snapshot, 123.5 + 0.5 * horizon,
+                        0.5 * horizon, "map");
+  }
+
+  for (const auto source_mode : {iap::PredictorSourceMode::GnssOnly,
+                                 iap::PredictorSourceMode::LidarOnly}) {
+    SCOPED_TRACE(static_cast<int>(source_mode));
+    auto params = make_params();
+    params.source_mode = source_mode;
+    params.covariance_growth.sigma_grow_m_sqrt_s = 0.15;
+    iap::PredictorModule module(params);
+    module.set_lidar_fim_primitives(make_lidar_primitives());
+
+    iap::PredictorBatchDiagnostics diagnostics;
+    const auto batch = module.queryBatch(inputs, &diagnostics);
+
+    ASSERT_EQ(batch.size(), inputs.size());
+    for (std::size_t index = 0; index < inputs.size(); ++index) {
+      SCOPED_TRACE(index);
+      expect_scientific_result_eq(batch[index], module.query(inputs[index]));
+    }
+    EXPECT_EQ(diagnostics.query_count, 6U);
+    EXPECT_EQ(diagnostics.spatial_advisory_recompute_count, 1U);
+    EXPECT_EQ(diagnostics.spatial_advisory_reuse_count, 5U);
+    EXPECT_EQ(diagnostics.fusion_advisory_invocations, 6U);
+    if (source_mode == iap::PredictorSourceMode::GnssOnly) {
+      EXPECT_EQ(diagnostics.gnss_advisory_invocations, 1U);
+      EXPECT_EQ(diagnostics.lidar_advisory_invocations, 0U);
+      EXPECT_EQ(diagnostics.unique_positions, 0U);
+      EXPECT_EQ(diagnostics.lidar_evaluations, 0U);
+      EXPECT_EQ(diagnostics.lidar_cache_hits, 0U);
+    } else {
+      EXPECT_EQ(diagnostics.gnss_advisory_invocations, 0U);
+      EXPECT_EQ(diagnostics.lidar_advisory_invocations, 1U);
+      EXPECT_EQ(diagnostics.unique_positions, 1U);
+      EXPECT_EQ(diagnostics.lidar_evaluations, 1U);
+      EXPECT_EQ(diagnostics.lidar_cache_hits, 5U);
+    }
+  }
+}
+
+TEST(PredictorModuleTest,
+     BatchSeparatesLidarInvocationLookupAndSpatialReuseDiagnostics) {
+  auto params = make_params();
+  params.source_mode = iap::PredictorSourceMode::LidarOnly;
+  params.covariance_growth.sigma_grow_m_sqrt_s = 0.15;
+  iap::PredictorModule module(params);
+  module.set_lidar_fim_primitives(make_lidar_primitives());
+  const Eigen::Vector3d position(1.0, 2.0, 3.0);
+
+  auto non_cacheable_snapshot = make_snapshot(true, true);
+  non_cacheable_snapshot.stamp =
+      std::numeric_limits<double>::quiet_NaN();
+  const std::vector<iap::PredictorQueryInput> non_cacheable_inputs{
+      {position, non_cacheable_snapshot, 100.0, 0.0, "map"}};
+  iap::PredictorBatchDiagnostics non_cacheable_diagnostics;
+  const auto non_cacheable_batch =
+      module.queryBatch(non_cacheable_inputs, &non_cacheable_diagnostics);
+  ASSERT_EQ(non_cacheable_batch.size(), 1U);
+  expect_scientific_result_eq(
+      non_cacheable_batch.front(), module.query(non_cacheable_inputs.front()));
+  ASSERT_TRUE(non_cacheable_batch.front().valid)
+      << non_cacheable_batch.front().fallback_reason;
+  EXPECT_EQ(non_cacheable_diagnostics.spatial_advisory_recompute_count, 1U);
+  EXPECT_EQ(non_cacheable_diagnostics.spatial_advisory_reuse_count, 0U);
+  EXPECT_EQ(non_cacheable_diagnostics.lidar_advisory_invocations, 1U);
+  EXPECT_EQ(non_cacheable_diagnostics.fusion_advisory_invocations, 1U);
+  EXPECT_EQ(non_cacheable_diagnostics.unique_positions, 0U);
+  EXPECT_EQ(non_cacheable_diagnostics.lidar_evaluations, 0U);
+  EXPECT_EQ(non_cacheable_diagnostics.lidar_cache_hits, 0U);
+
+  const auto snapshot = make_snapshot(true, true);
+  const iap::PredictorQueryInput valid(position, snapshot, 100.0, 0.0,
+                                       "map", 100.0);
+  const iap::PredictorQueryInput early_invalid(position, snapshot, 100.0,
+                                               -0.1, "map", 100.0);
+  for (const auto inputs :
+       {std::vector<iap::PredictorQueryInput>{valid, early_invalid},
+        std::vector<iap::PredictorQueryInput>{early_invalid, valid}}) {
+    SCOPED_TRACE(inputs.front().horizon_s);
+    iap::PredictorBatchDiagnostics diagnostics;
+    const auto batch = module.queryBatch(inputs, &diagnostics);
+    ASSERT_EQ(batch.size(), inputs.size());
+    for (std::size_t index = 0; index < inputs.size(); ++index) {
+      SCOPED_TRACE(index);
+      expect_scientific_result_eq(batch[index], module.query(inputs[index]));
+    }
+    EXPECT_EQ(diagnostics.spatial_advisory_recompute_count, 1U);
+    EXPECT_EQ(diagnostics.spatial_advisory_reuse_count, 0U);
+    EXPECT_EQ(diagnostics.lidar_advisory_invocations, 1U);
+    EXPECT_EQ(diagnostics.fusion_advisory_invocations, 1U);
+    EXPECT_EQ(diagnostics.unique_positions, 1U);
+    EXPECT_EQ(diagnostics.lidar_evaluations, 1U);
+    EXPECT_EQ(diagnostics.lidar_cache_hits,
+              inputs.front().horizon_s == 0.0 ? 1U : 0U);
+  }
+}
+
+TEST(PredictorModuleTest,
      SpatialDedupDoesNotCrossSourceIdentityOrEarlyFailure) {
   auto params = make_params();
   params.covariance_growth.sigma_grow_m_sqrt_s = 0.15;

@@ -1,5 +1,17 @@
 # Traceability Matrix (IAP)
 
+## 2026-08-21 ICRA-012 phase-2 legacy diagnostic review repair
+
+| Req ID | Requirement/evidence seam | Implementation and focused evidence | Status |
+|---|---|---|---|
+| IAP-RQ-320 / IAP-RQ-322 | Preserve legacy LiDAR-cache diagnostics while retaining generalized phase-2 spatial reuse | `PredictorModule::queryBatch()` counts legacy positions/evaluations only on successful LiDAR-capable cache population and legacy hits on coherent lookup; source-mode, non-cacheable and early-invalid ordering regressions | **IMPLEMENTED / REVIEW PENDING: GNSS-only legacy `0/0/0`; Fusion/LidarOnly semantics retained; actual invocation and generalized reuse remain separate** |
+| IAP-RQ-320 / IAP-RQ-322 | Production GNSS-only workers must expose zero legacy LiDAR counters without losing deterministic phase-2 evidence | strengthened `MapLosAndGrowthWorkersOneTwoFourAreScientificallyEquivalent`; health snapshot assertions; current-library linkage log | **VERIFIED / REVIEW PENDING: workers 1/2/4 require legacy `0/0/0`, nonzero spatial/GNSS/fusion counts and equivalent science; six retained suites pass 139/139** |
+| IAP-RQ-320 | Phase-2 reproduction commands must appear in the repository Definition-of-Done location | existing ICRA-011 `docs/CHANGES.md` entry now contains exact Predictor, production-runtime, offline-profile and Python-contract commands | **DOCUMENTED / REVIEW PENDING; retained JSON is read-only and Gate qualification remains `NOT_RUN`** |
+
+ICRA-012 is a bounded review repair. It does not qualify ICRA-011/012 or Gate-0B,
+implement phase 3, select production calibration, or authorize main flow, smoke,
+qualification, analyzer, benchmark, GPU preflight or P1/P2/P3/P4/P5 work.
+
 ## 2026-08-21 ICRA-011 P0 phase-2 within-refresh spatial advisory deduplication
 
 | Req ID | Requirement/evidence seam | Implementation and focused evidence | Status |
@@ -9,10 +21,11 @@
 | IAP-RQ-320 / IAP-RQ-321 / IAP-RQ-322 | Canonical phase-2 workload and science must be reproducible offline without claiming qualification or calibration | `p0_phase2_spatial_dedup_profile.json`; fail-closed Python contract; synthetic finite growth constant and immutable map-LOS input; R-7 diagnostic summaries | **PASS DIAGNOSTIC: 76,800 logical/provider/conversion/fusion, 12,800 spatial/GNSS/LiDAR recompute, 64,000 reuse, zero scalar mismatch, stable workers 1/2/4 checksums; Gate `NOT_RUN`** |
 | IAP-RQ-320 / IAP-RQ-322 | Phase-2 change must retain existing P0 science, fail-closed publication and focused coverage | six repository-local suites against the current `libiap.so` | **PASS: 137/137; no cross-refresh/phase-3 behavior, runtime qualification or production calibration** |
 
-ICRA-011 closes only the phase-2 within-refresh implementation contract. It does not qualify
-Gate-0B, select production `sigma_grow`, implement the phase-3 lattice/ring/cross-refresh window,
-or authorize main flow, smoke, qualification, analyzer, benchmark, GPU preflight or
-P1/P2/P3/P4/P5 work.
+ICRA-011's core phase-2 seam and scientific/profile evidence are accepted, but phase 2 remains
+review-pending until the bounded ICRA-012 legacy-counter and reproduction-document repair is
+verified by Supervisor. Neither task qualifies Gate-0B, selects production `sigma_grow`,
+implements the phase-3 lattice/ring/cross-refresh window, or authorizes main flow, smoke,
+qualification, analyzer, benchmark, GPU preflight or P1/P2/P3/P4/P5 work.
 
 ## 2026-08-21 ICRA-010 positive-horizon typed-status repair
 

@@ -1146,3 +1146,128 @@ This final DEV_LOG-only commit returns control to `SUPERVISOR` review.
 `DEEPSEEK` does not mark ICRA-011 or Gate-0B PASS, start phase 3, change
 worker defaults, choose production calibration, authorize smoke or issue a
 next task.
+
+## 2026-08-21T11:06:45Z — ICRA-012 START
+
+Start HEAD: `3fc24b98f8227dc4764a7daa8fb09ce9cb34876e` after the required
+`dev/icra` synchronization (`HEAD...origin/dev/icra = 0 0`, so no pull).
+Active task: `ICRA-012 / GATE_0B`, narrow phase-2 review repair only.
+
+Supervisor findings to close:
+
+1. Restore `unique_positions`, `lidar_evaluations` and `lidar_cache_hits` as
+   legacy populated-LiDAR-cache diagnostics. In particular, GNSS-only must
+   retain `0/0/0`, while the additive generalized spatial and actual
+   invocation counters remain truthful.
+2. Extend the existing ICRA-011 `docs/CHANGES.md` entry with runnable
+   repository-root Predictor, production-runtime and offline-profile commands
+   required by the repository Definition of Done.
+
+Exact allowlist:
+
+- `src/iap/predictor/predictor_module.cpp`
+- `test/test_predictor_module.cpp`
+- `src/iap/planner/plan_manage/test/test_p0_risk_grid_runtime.cpp`
+- `DEV_LOG.md`
+- `docs/CHANGES.md`
+- `docs/TRACEABILITY.md`
+
+No public Predictor header/type, P0 runtime product source/header, profiler,
+CMake, committed JSON, launch/config/analyzer/Gate or other file may change.
+No phase-3 lattice/ring/window, cross-refresh reuse, calibration, worker/
+default/threshold change, main flow, ROS launch, smoke, qualification,
+benchmark, analyzer, GPU preflight or P1/P2/P3/P4/P5 work is authorized. All
+generated outputs will remain under `results/icra27/icra012/`. The retained
+ICRA-011 profile remains byte-identical at SHA-256
+`778abd22158805c41150b4eeed9c37a3f660237a0bb0599e9a567e3533c7b32c`.
+The pre-existing PDF remains solely untracked and untouched at SHA-256
+`1f07da5631a6551a2f98c02d46fd45bc87f2f1e3e7c14e95f9a7f4a0bac844f6`.
+
+## 2026-08-21T11:19:04Z — ICRA-012 IMPLEMENTATION / VERIFICATION COMPLETE, REVIEW PENDING
+
+The accepted private `SpatialAdvisory` seam and coherent key are unchanged.
+Only legacy diagnostic ownership moved: generalized recompute/reuse remains
+inside the scalar-ordered advisory helper, while `queryBatch()` now records
+legacy LiDAR hits on coherent lookup and legacy positions/evaluations only
+after a LiDAR-capable cache entry is successfully populated. Consequently,
+GNSS-only retains generalized deduplication with legacy `0/0/0`, a valid
+non-cacheable LiDAR query records an actual invocation but no fabricated cache
+population, and a cached early-invalid lookup records a legacy hit without
+recording actual spatial reuse.
+
+TDD evidence:
+
+| Slice | RED | GREEN |
+|---|---|---|
+| Source-mode legacy semantics | `logs/red_test_predictor_source_mode_legacy_counters.log`, exit 1: GNSS-only `unique_positions=1`, expected 0 | `logs/green_test_predictor_source_mode_legacy_counters.log`, 1/1 PASS |
+| Non-cacheable / early-invalid lookup semantics | `logs/red_test_predictor_lookup_semantics.log`, exit 1: non-cacheable `lidar_evaluations=1`, expected 0; cached early-invalid `lidar_cache_hits=0`, expected 1 | `logs/green_test_predictor_legacy_semantics.log`, both legacy regressions 2/2 PASS |
+
+All outputs are below `results/icra27/icra012/`. Root configuration/build used
+`build_root`; plan environment configuration/build/install used
+`build_plan_env` and `install_plan_env`; plan-manage used `build_plan_manage`.
+The first plan-manage configure failed closed because the current shell prefix
+omitted retained `path_searching` (`logs/configure_plan_manage.log`). The
+retry used the prior repository-workspace dependency list but initially
+compiled against old installed IAP headers and failed (`logs/build_plan_manage.log`).
+The final configuration explicitly placed current repository headers first
+and succeeded (`logs/configure_plan_manage_current_headers.log`,
+`logs/build_plan_manage_current_headers.log`). Runtime linkage in
+`logs/runtime_linkage.log` resolves `libiap.so` to
+`results/icra27/icra012/build_root/libiap.so`; only generated ROS typesupport
+resolves to the retained repository-local ICRA-009 facade.
+
+Final exact commands and exits:
+
+| Command | Exit | Result |
+|---|---:|---|
+| `IAP_TEST_ARTIFACT_DIR="$PWD/results/icra27/icra012/test_artifacts/predictor" LD_LIBRARY_PATH="$PWD/results/icra27/icra012/build_root${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" results/icra27/icra012/build_root/test_predictor_module --gtest_filter='PredictorModuleTest.BatchReusesSpatialAdvisoryAndRebuildsEveryHorizonRisk:PredictorModuleTest.SpatialDedupDoesNotCrossSourceIdentityOrEarlyFailure:PredictorModuleTest.SpatialDedupUsesEffectiveFreshnessReferenceWhenImplicit:PredictorModuleTest.BatchPreservesLegacyLidarCacheDiagnosticsAcrossSourceModes:PredictorModuleTest.BatchSeparatesLidarInvocationLookupAndSpatialReuseDiagnostics'` | 0 | 5/5; `logs/final_exact_predictor_legacy_and_phase2.log`. |
+| `ROS_HOME="$PWD/results/icra27/icra012/ros_home/runtime_exact" ROS_LOG_DIR="$PWD/results/icra27/icra012/ros_log/runtime_exact" TMPDIR="$PWD/results/icra27/icra012/tmp" LD_LIBRARY_PATH="$PWD/results/icra27/icra012/build_root:$PWD/results/icra27/icra012/build_plan_env:$PWD/results/icra27/icra012/install_plan_env/lib:$PWD/results/icra27/icra009/install_root/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" results/icra27/icra012/build_plan_manage/test_p0_risk_grid_runtime --gtest_filter='P0RiskGridRuntimeStampTest.WithinRefreshSpatialDedupReportsExactProductionCounts:P0RiskGridRuntimeStampTest.MapLosAndGrowthWorkersOneTwoFourAreScientificallyEquivalent:P0RiskGridRuntimeStampTest.PositiveHorizonEarlyFailureKeepsPreviousGeneration'` | 0 | 3/3; `logs/final_exact_runtime_phase2.log`. |
+| `python3 test/test_icra011_spatial_dedup_profile.py` | 0 | 2/2; `logs/final_test_icra011_spatial_dedup_profile.log`. The profiler was not run. |
+
+Six retained-suite commands and exits:
+
+| Executable | Exit | Result / log |
+|---|---:|---|
+| `LD_LIBRARY_PATH="$PWD/results/icra27/icra012/build_root${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" results/icra27/icra012/build_root/test_local_occupancy` | 0 | 6/6; `logs/final_test_local_occupancy.log` |
+| `IAP_TEST_ARTIFACT_DIR="$PWD/results/icra27/icra012/test_artifacts/predictor" LD_LIBRARY_PATH="$PWD/results/icra27/icra012/build_root${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" results/icra27/icra012/build_root/test_predictor_module` | 0 | 45/45; `logs/final_test_predictor_module.log` |
+| `LD_LIBRARY_PATH="$PWD/results/icra27/icra012/build_root${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" results/icra27/icra012/build_root/test_risk_grid_map` | 0 | 35/35; `logs/final_test_risk_grid_map.log` |
+| `ROS_HOME="$PWD/results/icra27/icra012/ros_home/grid_epoch" ROS_LOG_DIR="$PWD/results/icra27/icra012/ros_log/grid_epoch" TMPDIR="$PWD/results/icra27/icra012/tmp" LD_LIBRARY_PATH="$PWD/results/icra27/icra012/build_plan_env:$PWD/results/icra27/icra012/install_plan_env/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" results/icra27/icra012/build_plan_env/test_grid_map_occupancy_epoch` | 0 | 2/2; `logs/final_test_grid_map_occupancy_epoch.log` |
+| `ROS_HOME="$PWD/results/icra27/icra012/ros_home/adapter" ROS_LOG_DIR="$PWD/results/icra27/icra012/ros_log/adapter" TMPDIR="$PWD/results/icra27/icra012/tmp" LD_LIBRARY_PATH="$PWD/results/icra27/icra012/build_root:$PWD/results/icra27/icra012/build_plan_env:$PWD/results/icra27/icra012/install_plan_env/lib:$PWD/results/icra27/icra009/install_root/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" results/icra27/icra012/build_plan_manage/test_p0_occupancy_epoch_adapter` | 0 | 3/3; `logs/final_test_p0_occupancy_epoch_adapter.log` |
+| `ROS_HOME="$PWD/results/icra27/icra012/ros_home/runtime" ROS_LOG_DIR="$PWD/results/icra27/icra012/ros_log/runtime" TMPDIR="$PWD/results/icra27/icra012/tmp" LD_LIBRARY_PATH="$PWD/results/icra27/icra012/build_root:$PWD/results/icra27/icra012/build_plan_env:$PWD/results/icra27/icra012/install_plan_env/lib:$PWD/results/icra27/icra009/install_root/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" results/icra27/icra012/build_plan_manage/test_p0_risk_grid_runtime` | 0 | 48/48; `logs/final_test_p0_risk_grid_runtime.log` |
+
+Total retained suites: **139/139 PASS**. `git diff --check` is clean. The
+ICRA-011 profile was read only and remains byte-identical at SHA-256
+`778abd22158805c41150b4eeed9c37a3f660237a0bb0599e9a567e3533c7b32c`.
+No main flow, ROS launch, smoke, qualification, bag, RViz, campaign, Gate
+analyzer, benchmark, GPU preflight, phase-3 work, calibration, worker/default/
+threshold change or P1/P2/P3/P4/P5 work ran or changed. Gate-0B is not marked
+PASS. The PDF remains solely untracked and unchanged at SHA-256
+`1f07da5631a6551a2f98c02d46fd45bc87f2f1e3e7c14e95f9a7f4a0bac844f6`.
+Two-axis review, implementation commit/push and final DEV_LOG-only handoff
+remain.
+
+## 2026-08-21T11:23:11Z — ICRA-012 TWO-AXIS REVIEW CLOSURE / PRE-PUSH
+
+The required fixed-point review compared implementation commit `b3277a9`
+against ICRA-012 start commit
+`3fc24b98f8227dc4764a7daa8fb09ce9cb34876e` with
+`git diff 3fc24b98f8227dc4764a7daa8fb09ce9cb34876e...HEAD`.
+
+- **Standards PASS**: 0 hard violations. Allowlist, RQ-tagged commit,
+  documentation/Definition-of-Done commands, repository-local evidence,
+  retained JSON and PDF boundaries all conform. The sole non-blocking
+  Mysterious-Name judgement noted that `lidar_cache_enabled` could be read as
+  a generalized-cache switch; it was renamed to
+  `tracks_legacy_lidar_cache` without behavior change.
+- **Spec PASS**: 0 findings. The reviewer closed the unchanged public/private
+  seam, GNSS-only generalized `1/5` plus actual `1/0/6` and legacy `0/0/0`,
+  Fusion/LidarOnly semantics, non-cacheable and early-invalid ordering,
+  production workers 1/2/4, reproduction commands, review-pending trace,
+  exact/retained evidence, hashes and forbidden scope.
+
+After the naming-only cleanup, the five exact Predictor and three exact
+runtime regressions were rerun and passed 5/5 and 3/3 (`logs/post_review_exact_predictor.log`,
+`logs/post_review_exact_runtime.log`). Summary: Standards 0 open findings;
+Spec 0 findings. This review does not mark ICRA-011/012 or Gate-0B PASS,
+authorize phase 3/main flow/smoke/qualification, select calibration or issue a
+next task. Implementation amend/push and final DEV_LOG-only handoff remain.
