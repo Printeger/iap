@@ -1811,6 +1811,33 @@ TEST_F(P0RiskGridRuntimeStampTest,
 }
 
 TEST_F(P0RiskGridRuntimeStampTest,
+       PositiveHorizonEarlyFailureKeepsPreviousGeneration) {
+  ensure_rclcpp();
+  auto node = std::make_shared<rclcpp::Node>(
+      "p0_positive_horizon_early_failure_retention_test",
+      rclcpp::NodeOptions().allow_undeclared_parameters(false));
+  auto config = enabledConfig();
+  config.predictor_source_mode = iap::PredictorSourceMode::GnssOnly;
+  config.predictor_gnss_epoch_policy =
+      iap::PredictorGnssEpochPolicy::Required;
+  config.gnss_epoch_max_age_s = 0.25;
+  P0RiskGridRuntime runtime(node, config);
+
+  seedValidInputs(&runtime, 100.0, 100.0);
+  seedGnssEpoch(&runtime, 100.0);
+  installOccupancyEpoch(&runtime, 100.0, {}, "map", 2u);
+  ASSERT_TRUE(refreshOnce(&runtime));
+  const auto accepted = runtime.acquireSnapshot();
+  ASSERT_NE(accepted, nullptr);
+
+  seedValidInputs(&runtime, 100.5, 100.5);
+  installOccupancyEpoch(&runtime, 100.5, {}, "map", 4u);
+  EXPECT_FALSE(refreshOnce(&runtime));
+  EXPECT_EQ(runtime.health().reason, "provider_refresh_failed");
+  expectSameActiveGeneration(accepted, runtime.acquireSnapshot());
+}
+
+TEST_F(P0RiskGridRuntimeStampTest,
        OccupancyGenerationChangeDuringProviderBatchKeepsPreviousGeneration) {
   ensure_rclcpp();
   auto node = std::make_shared<rclcpp::Node>(

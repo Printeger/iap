@@ -378,9 +378,6 @@ PredictorQueryResult PredictorModule::queryWithLidar(
     out.source_flags = make_source_flags(out);
     return out;
   }
-  out.covariance_growth_status = input.horizon_s == 0.0
-      ? CovarianceGrowthStatus::NOT_REQUIRED_TAU_ZERO
-      : CovarianceGrowthStatus::APPLIED;
   if (input.frame_id.empty() ||
       (input.frame_id != "map" && input.frame_id != "enu")) {
     out.valid = false;

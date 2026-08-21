@@ -1,5 +1,17 @@
 # Traceability Matrix (IAP)
 
+## 2026-08-21 ICRA-010 positive-horizon typed-status repair
+
+| Req ID | Requirement/evidence seam | Implementation and focused evidence | Status |
+|---|---|---|---|
+| IAP-RQ-320 / IAP-RQ-321 | A positive-horizon result may report covariance growth `APPLIED` only after the helper actually applies growth | `CovarianceGrowthStatus::NOT_EVALUATED` is the result default; the pre-validation speculative assignment is removed; exact Predictor regression covers four early failures plus applied/tau-zero/invalid controls | **PASS: early failures are `NOT_EVALUATED`; helper-reached positive is `APPLIED`; helper-reached tau zero is `NOT_REQUIRED_TAU_ZERO`; invalid horizon remains typed** |
+| IAP-RQ-320 / IAP-RQ-322 | Any required non-`APPLIED` positive-horizon provider result must reject the complete refresh without replacing active data | real `P0RiskGridRuntime` production-provider regression induces stale required GNSS only after one accepted refresh and compares active snapshot identity, generation and ordered voxel data | **PASS: failed refresh reports `provider_refresh_failed` and preserves the previous immutable generation/data** |
+| IAP-RQ-320 / IAP-RQ-321 / IAP-RQ-322 | The narrow repair must preserve established P0 phase-1 behavior | six repository-local affected suites | **PASS: 134/134; reason strings, algebra, configuration, counters, source logic and scientific outputs unchanged** |
+
+ICRA-010 is a typed-status correctness repair only. It does not qualify Gate-0B,
+select production growth calibration, implement rolling/delta/reuse, or run main flow, smoke,
+qualification, analyzer, profile, benchmark, GPU preflight or P1/P2/P3/P4/P5 work.
+
 ## 2026-08-21 ICRA-009 P0 phase-1 semantic implementation
 
 | Req ID | Requirement/evidence seam | Implementation and focused evidence | Status |

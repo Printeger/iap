@@ -1690,6 +1690,71 @@ TEST(PredictorModuleTest, UnsupportedFrameFallsBackBeforePrediction) {
   EXPECT_FALSE(result.fused.valid);
 }
 
+TEST(PredictorModuleTest,
+     PositiveHorizonEarlyValidationFailuresNeverReportGrowthApplied) {
+  auto params = make_params();
+  params.gnss_epoch_policy = iap::PredictorGnssEpochPolicy::Required;
+  params.freshness.enabled = true;
+  params.freshness.max_odom_age_s = 0.5;
+  params.freshness.max_integrity_age_s = 0.5;
+  params.freshness.max_gnss_age_s = 0.5;
+  params.freshness.max_snapshot_age_s = 0.5;
+  iap::PredictorModule module(params);
+  module.set_lidar_fim_primitives(make_lidar_primitives());
+
+  const auto expect_early_failure =
+      [&module](const iap::IntegritySnapshot& snapshot,
+                const std::string& frame_id,
+                const std::string& expected_reason) {
+        const auto result = module.query(iap::PredictorQueryInput(
+            Eigen::Vector3d::Zero(), snapshot, 100.0, 1.0, frame_id, 100.0));
+        EXPECT_FALSE(result.valid);
+        EXPECT_FALSE(result.available);
+        EXPECT_TRUE(result.fallback);
+        EXPECT_EQ(result.fallback_reason, expected_reason);
+        EXPECT_EQ(result.covariance_growth_status,
+                  iap::CovarianceGrowthStatus::NOT_EVALUATED);
+        EXPECT_FALSE(std::isfinite(result.fused.hpl));
+        EXPECT_FALSE(std::isfinite(result.fused.vpl));
+      };
+
+  expect_early_failure(make_snapshot(true, true), "world",
+                       "unsupported_query_frame");
+
+  auto stale_odom = make_snapshot(true, true);
+  stale_odom.pose_stamp = 99.0;
+  expect_early_failure(stale_odom, "map", "stale_odom");
+
+  auto stale_snapshot = make_snapshot(true, true);
+  stale_snapshot.stamp = 99.0;
+  expect_early_failure(stale_snapshot, "map", "stale_snapshot");
+
+  expect_early_failure(make_snapshot(false, true), "map",
+                       "stale_gnss_epoch");
+
+  const auto applied = module.query(iap::PredictorQueryInput(
+      Eigen::Vector3d::Zero(), make_snapshot(true, true), 100.0, 1.0,
+      "map", 100.0));
+  ASSERT_TRUE(applied.valid) << applied.fallback_reason;
+  EXPECT_EQ(applied.covariance_growth_status,
+            iap::CovarianceGrowthStatus::APPLIED);
+
+  const auto tau_zero = module.query(iap::PredictorQueryInput(
+      Eigen::Vector3d::Zero(), make_snapshot(true, true), 100.0, 0.0,
+      "map", 100.0));
+  ASSERT_TRUE(tau_zero.valid) << tau_zero.fallback_reason;
+  EXPECT_EQ(tau_zero.covariance_growth_status,
+            iap::CovarianceGrowthStatus::NOT_REQUIRED_TAU_ZERO);
+
+  const auto invalid_horizon = module.query(iap::PredictorQueryInput(
+      Eigen::Vector3d::Zero(), make_snapshot(true, true), 100.0, -0.1,
+      "map", 100.0));
+  EXPECT_FALSE(invalid_horizon.valid);
+  EXPECT_EQ(invalid_horizon.fallback_reason, "invalid_horizon");
+  EXPECT_EQ(invalid_horizon.covariance_growth_status,
+            iap::CovarianceGrowthStatus::INVALID_HORIZON);
+}
+
 TEST(PredictorModuleTest, FusionRejectsIndefinitePriorButKeepsGnssOnly) {
   const auto params = make_params();
   iap::GnssAdvisoryPredictor gnss_predictor(params.gnss);

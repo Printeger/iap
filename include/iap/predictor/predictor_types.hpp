@@ -250,6 +250,7 @@ enum class CovarianceGrowthStatus {
   STALE_PRIOR,
   INVALID_PRIOR,
   NUMERICAL_FAILURE,
+  NOT_EVALUATED,
 };
 
 struct PredictorQueryResult {
@@ -265,7 +266,7 @@ struct PredictorQueryResult {
   std::string frame_id = "map";
   uint32_t source_flags = 0u;
   CovarianceGrowthStatus covariance_growth_status =
-      CovarianceGrowthStatus::NOT_REQUIRED_TAU_ZERO;
+      CovarianceGrowthStatus::NOT_EVALUATED;
 
   GnssAdvisoryResult gnss;
   LidarAdvisoryResult lidar;

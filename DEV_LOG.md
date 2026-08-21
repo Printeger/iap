@@ -809,3 +809,121 @@ Final handoff evidence:
 
 Control returns to `SUPERVISOR` review only. `DEEPSEEK` does not mark Gate-0B
 PASS, authorize runtime qualification or issue a next task.
+
+## 2026-08-21T08:43:57Z — ICRA-010 START
+
+Start HEAD: `12c2396f9b9fe31038831547e57b08f57b87cd78`; review base:
+`e67906df71444d0fb576c6dcaca02883108b4424`; reviewed ICRA-009 head:
+`0069303008c719a708970f59732c44c2a05ad5b0`.
+
+Task: `ICRA-010 / GATE_0B`, one narrow P0 phase-1 typed-status repair. A
+finite positive-horizon query currently receives speculative
+`CovarianceGrowthStatus::APPLIED` before frame/freshness validation, so an
+early return can falsely claim propagation and evade the production
+provider's required whole-batch rejection. The confirmed public test seams
+are Predictor query results and the real P0 production-provider refresh path.
+
+Exact allowed files:
+
+- `include/iap/predictor/predictor_types.hpp`
+- `src/iap/predictor/predictor_module.cpp`
+- `test/test_predictor_module.cpp`
+- `src/iap/planner/plan_manage/test/test_p0_risk_grid_runtime.cpp`
+- `DEV_LOG.md`
+- `docs/CHANGES.md`
+- `docs/TRACEABILITY.md`
+
+No phase-2 spatial deduplication, rolling/delta/cache work, performance tuning,
+production calibration, launch/config/analyzer/Gate change, main flow, ROS
+launch, smoke, qualification, bag, RViz, campaign, profile, benchmark, GPU
+preflight or P1/P2/P3/P4/P5 behavior is authorized. The pre-existing untracked
+`docs/icra27/dev/ICRA_SYSTEM_FLOW.pdf` is preserved and excluded from task
+operations; its SHA-256 is
+`1f07da5631a6551a2f98c02d46fd45bc87f2f1e3e7c14e95f9a7f4a0bac844f6`.
+
+## 2026-08-21T08:58:20Z — ICRA-010 IMPLEMENTATION COMPLETE / REVIEW PENDING
+
+Implemented the single authorized typed-status repair. `NOT_EVALUATED` is
+appended to `CovarianceGrowthStatus` so all existing enumerator values remain
+stable, and it is now the default query-result state. The speculative
+pre-validation positive-horizon `APPLIED` assignment was removed. Therefore
+only `apply_covariance_growth()` can set `APPLIED` after real positive-horizon
+growth or `NOT_REQUIRED_TAU_ZERO` after the helper is reached with tau zero;
+negative/non-finite horizon still sets `INVALID_HORIZON`. No helper algebra,
+reason, freshness/source validation, counter, configuration or scientific
+output was changed.
+
+TDD evidence:
+
+- `PredictorModuleTest.PositiveHorizonEarlyValidationFailuresNeverReportGrowthApplied`
+  first failed with four early paths still equal to `APPLIED` (exit 1,
+  `logs/red_test_positive_horizon_status.log`), then passed 1/1 with exact
+  `NOT_EVALUATED` assertions (exit 0,
+  `logs/green_test_positive_horizon_status.log`).
+- `P0RiskGridRuntimeStampTest.PositiveHorizonEarlyFailureKeepsPreviousGeneration`
+  first showed the production refresh incorrectly returned true, replaced
+  generation 1 with generation 2, and exposed `stale_gnss_epoch` instead of
+  whole-batch `provider_refresh_failed` (exit 1,
+  `logs/red_test_positive_horizon_runtime.log`). It then passed 1/1, proving
+  refresh rejection plus identical active pointer, generation and ordered
+  voxel data (exit 0, `logs/green_test_positive_horizon_runtime.log`).
+
+All build, test, ROS, temp and artifact output is repository-local beneath
+`results/icra27/icra010/`. Initial package-install attempts were not product
+tests: root install exited 1 because unrelated unbuilt
+`libodometry_estimation_ct.so` was required; plan_env install exited 1 until
+its package install target `obj_generator` was built. Plan-manage configuration
+also rejected an incomplete/wrong package prefix before the final local
+configuration succeeded. The final build uses current source headers and the
+ICRA-010 root library; retained ICRA-009 CMake/typesupport artifacts supply
+only package metadata/ROS generated support. `final_runtime_linkage.log`
+proves `libiap.so` resolves to
+`results/icra27/icra010/build_root/libiap.so`. These setup exits and retries
+are retained in `logs/red_install_*.log` and
+`logs/red_configure_plan_manage*.log`; they did not expand product scope.
+
+Final verification commands and exits:
+
+| Command | Exit | Result / stdout+stderr |
+|---|---:|---|
+| `cmake --build results/icra27/icra010/build_root --target iap test_local_occupancy test_predictor_module test_risk_grid_map -j2 > results/icra27/icra010/logs/final_build_root.log 2>&1` | 0 | All root targets built. |
+| `cmake --build results/icra27/icra010/build_plan_env --target plan_env test_grid_map_occupancy_epoch -j2 > results/icra27/icra010/logs/final_build_plan_env.log 2>&1` | 0 | Both plan_env targets built. |
+| `cmake --build results/icra27/icra010/build_plan_manage --target test_p0_occupancy_epoch_adapter test_p0_risk_grid_runtime -j2 > results/icra27/icra010/logs/final_build_plan_manage.log 2>&1` | 0 | Both plan-manage tests linked; no node was started. |
+| `LD_LIBRARY_PATH="$PWD/results/icra27/icra010/build_root:$PWD/results/icra27/icra010/install_root/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" results/icra27/icra010/build_root/test_local_occupancy > results/icra27/icra010/logs/final_test_local_occupancy.log 2>&1` | 0 | 6/6 PASS. |
+| `IAP_TEST_ARTIFACT_DIR="$PWD/results/icra27/icra010/test_artifacts/predictor" LD_LIBRARY_PATH="$PWD/results/icra27/icra010/build_root:$PWD/results/icra27/icra010/install_root/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" results/icra27/icra010/build_root/test_predictor_module > results/icra27/icra010/logs/final_test_predictor_module.log 2>&1` | 0 | 41/41 PASS. |
+| `LD_LIBRARY_PATH="$PWD/results/icra27/icra010/build_root:$PWD/results/icra27/icra010/install_root/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" results/icra27/icra010/build_root/test_risk_grid_map > results/icra27/icra010/logs/final_test_risk_grid_map.log 2>&1` | 0 | 35/35 PASS. |
+| `ROS_HOME="$PWD/results/icra27/icra010/ros_home/grid_epoch" ROS_LOG_DIR="$PWD/results/icra27/icra010/ros_log/grid_epoch" TMPDIR="$PWD/results/icra27/icra010/tmp" LD_LIBRARY_PATH="$PWD/results/icra27/icra010/build_plan_env:$PWD/results/icra27/icra010/install_plan_env/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" results/icra27/icra010/build_plan_env/test_grid_map_occupancy_epoch > results/icra27/icra010/logs/final_test_grid_map_occupancy_epoch.log 2>&1` | 0 | 2/2 PASS. |
+| `ROS_HOME="$PWD/results/icra27/icra010/ros_home/adapter" ROS_LOG_DIR="$PWD/results/icra27/icra010/ros_log/adapter" TMPDIR="$PWD/results/icra27/icra010/tmp" LD_LIBRARY_PATH="$PWD/results/icra27/icra010/build_root:$PWD/results/icra27/icra010/install_root/lib:$PWD/results/icra27/icra010/build_plan_env:$PWD/results/icra27/icra010/install_plan_env/lib:$PWD/results/icra27/icra009/install_root/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" results/icra27/icra010/build_plan_manage/test_p0_occupancy_epoch_adapter > results/icra27/icra010/logs/final_test_p0_occupancy_epoch_adapter.log 2>&1` | 0 | 3/3 PASS. |
+| `ROS_HOME="$PWD/results/icra27/icra010/ros_home/runtime" ROS_LOG_DIR="$PWD/results/icra27/icra010/ros_log/runtime" TMPDIR="$PWD/results/icra27/icra010/tmp" LD_LIBRARY_PATH="$PWD/results/icra27/icra010/build_root:$PWD/results/icra27/icra010/install_root/lib:$PWD/results/icra27/icra010/build_plan_env:$PWD/results/icra27/icra010/install_plan_env/lib:$PWD/results/icra27/icra009/install_root/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" results/icra27/icra010/build_plan_manage/test_p0_risk_grid_runtime > results/icra27/icra010/logs/final_test_p0_risk_grid_runtime.log 2>&1` | 0 | 47/47 PASS. |
+
+Total affected focused suites: **134/134 PASS**. `git diff --check` is clean.
+No main flow, ROS launch, smoke, qualification, bag, RViz, campaign, offline
+profile, analyzer, benchmark, GPU preflight, phase-2 optimization,
+rolling/delta/reuse, production calibration or P1/P2/P3/P4/P5 behavior ran or
+changed. Gate-0B is not marked PASS. Two-axis Standards/Spec review and the
+required implementation commit/push plus final DEV_LOG-only handoff commit
+remain pending. The preserved PDF remains untracked and unchanged at SHA-256
+`1f07da5631a6551a2f98c02d46fd45bc87f2f1e3e7c14e95f9a7f4a0bac844f6`.
+
+## 2026-08-21T09:03:02Z — ICRA-010 TWO-AXIS REVIEW CLOSURE / PRE-PUSH
+
+The required fixed-point review compared implementation commit `86c1e51`
+against ICRA-010 start commit
+`12c2396f9b9fe31038831547e57b08f57b87cd78` using
+`git diff 12c2396f9b9fe31038831547e57b08f57b87cd78...HEAD`.
+
+- **Standards PASS**: no documented-standard violation and no baseline smell.
+  The minimal typed state, helper authority, focused fixtures, requirement
+  mappings and repository-local evidence conform to `AGENTS.md`, `CONTEXT.md`,
+  `.clang-format` and the task standards.
+- **Spec PASS**: no missing/partial requirement, unrequested behavior, scope
+  creep or incorrect implementation. The review specifically closed the
+  seven-file allowlist; default/early-return/positive/tau-zero/invalid-horizon
+  states; real production-provider batch rejection and immutable generation
+  retention; exact test names; 134/134 totals; forbidden-runtime boundary;
+  and preserved PDF.
+
+Summary: Standards 0 findings; Spec 0 findings. `git diff --check` remains
+clean. Only implementation amend/push and the required final DEV_LOG-only
+handoff commit/push remain; this review does not mark ICRA-010 or Gate-0B PASS,
+authorize phase 2, choose calibration, authorize smoke or issue a next task.
