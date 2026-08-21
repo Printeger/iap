@@ -1,5 +1,19 @@
 # Traceability Matrix (IAP)
 
+## 2026-08-21 ICRA-016 phase-4A versioned provenance and bounded retention
+
+| Req ID | Requirement/evidence seam | Implementation and focused evidence | Status |
+|---|---|---|---|
+| IAP-RQ-312 / IAP-RQ-314 / IAP-RQ-320 / IAP-RQ-322 | Every active spatial source must have coherent, monotonic provenance and publication-race validation | authoritative `predictorSpatialSourceUsage`; rolling provenance record; atomic GNSS/current capture; LiDAR generation/stamp/owner acceptance and clearing under one mutex; occupancy/GNSS/current/LiDAR end validation; rolling-owned canonical/start/live occupancy visibility equivalence over every touched slot and its original epoch; contradictory/regressed/source-race and same-generation canopy-ray owner tests | **IMPLEMENTED / SUPERVISOR REVIEW PENDING: active races roll back RiskGrid and rolling candidates; stable missing LiDAR remains conservative and non-reusable** |
+| IAP-RQ-312 / IAP-RQ-314 / IAP-RQ-320 / IAP-RQ-321 | Only defined continuous spatial fields may retain advice for a bounded per-slot age without restamping | default-disabled GNSS and legacy-current TTL policies; slot-local source snapshot/provenance; discrete satellite/trunk invalidation; original GNSS stamp substituted for retained-advisory freshness; deterministic retention, expiry, entering-position and fresh-equivalence tests | **IMPLEMENTED / SUPERVISOR REVIEW PENDING: no complete-result or partial-component cache; per-horizon validation/growth/fusion/materialization preserved** |
+| IAP-RQ-320 / IAP-RQ-322 | Periodic full rebuild must be based on the last successfully committed full refresh and remain rollback-safe | default-disabled successful-full-refresh watchdog; commit-only epoch advance; stationary threshold, aborted race, same-time retry and post-commit reuse tests in rolling and production P0 | **IMPLEMENTED / SUPERVISOR REVIEW PENDING: failed candidates do not postpone the next forced rebuild** |
+| IAP-RQ-320 / IAP-RQ-322 | Health evidence must separate exact/TTL retention, expiry, watchdog and invalid provenance without redefining legacy fields | additive typed rolling diagnostics and deterministic P0 JSON fields; aborted-candidate diagnostic clearing; retained root/profile/P0/P1–P5 suites and current-library linkage evidence | **VERIFIED / SUPERVISOR REVIEW PENDING: policies remain `NaN`/disabled; no calibrated or qualification claim** |
+
+ICRA-016 is Phase-4A only. It does not implement occupancy delta/reverse-ray,
+partial component caching, calibration, or production activation, and it does
+not qualify Gate-0B. No main flow, ROS launch, smoke, qualification, analyzer,
+benchmark, bag/RViz/campaign or GPU preflight ran.
+
 ## 2026-08-21 ICRA-013 phase-3A fixed world lattice
 
 | Req ID | Requirement/evidence seam | Implementation and focused evidence | Status |

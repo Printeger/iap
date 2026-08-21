@@ -82,6 +82,28 @@ struct PredictorParams {
       PredictorGnssEpochPolicy::Auto;
 };
 
+// Authoritative description of which spatial evidence the configured
+// Predictor can consume. Cache identity and production transaction guards
+// share this projection so inactive sources cannot accidentally invalidate
+// active work.
+struct PredictorSpatialSourceUsage {
+  bool gnss = false;
+  bool lidar = false;
+  bool legacy_lidar = false;
+};
+
+inline PredictorSpatialSourceUsage predictorSpatialSourceUsage(
+    const PredictorParams& params) {
+  PredictorSpatialSourceUsage usage;
+  usage.gnss = params.source_mode != PredictorSourceMode::LidarOnly &&
+               params.gnss_epoch_policy !=
+                   PredictorGnssEpochPolicy::Disabled;
+  usage.lidar = params.source_mode != PredictorSourceMode::GnssOnly;
+  usage.legacy_lidar =
+      usage.lidar && params.lidar.enable_legacy_observability;
+  return usage;
+}
+
 enum class PredictorInformationState {
   // Common fusion state for Predictor: 3D position-only information in the
   // map/ENU frame. GNSS clock and any LiDAR pose states must be eliminated

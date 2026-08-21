@@ -32,23 +32,76 @@ bool sameSharedOwner(const std::shared_ptr<const T>& lhs,
   return !lhs.owner_before(rhs) && !rhs.owner_before(lhs);
 }
 
-struct PredictorSpatialSourceProjection {
-  bool gnss = false;
-  bool lidar = false;
-  bool legacy_lidar = false;
+bool exactVector(const Eigen::Vector3d& lhs, const Eigen::Vector3d& rhs) {
+  return (lhs.array() == rhs.array()).all();
+}
+
+bool sameOccupancyParams(const iap::LocalOccupancyGrid::Params& lhs,
+                         const iap::LocalOccupancyGrid::Params& rhs) {
+  return lhs.voxel_size == rhs.voxel_size &&
+         exactVector(lhs.lattice_origin, rhs.lattice_origin) &&
+         lhs.max_voxels == rhs.max_voxels &&
+         lhs.n_kappa_steps == rhs.n_kappa_steps &&
+         lhs.enable_eviction == rhs.enable_eviction &&
+         lhs.local_radius_m == rhs.local_radius_m &&
+         lhs.max_age_s == rhs.max_age_s &&
+         lhs.eviction_policy == rhs.eviction_policy;
+}
+
+bool sameOccupancyDiagnostic(const iap::RiskOccupancyDiagnostic& lhs,
+                             const iap::RiskOccupancyDiagnostic& rhs) {
+  return lhs.available == rhs.available &&
+         lhs.raw_occupied == rhs.raw_occupied &&
+         lhs.inflated_occupied == rhs.inflated_occupied &&
+         (lhs.voxel_index.array() == rhs.voxel_index.array()).all() &&
+         exactVector(lhs.voxel_center, rhs.voxel_center) &&
+         lhs.resolution_m == rhs.resolution_m &&
+         lhs.inflation_m == rhs.inflation_m &&
+         lhs.frame_id == rhs.frame_id &&
+         lhs.cloud_stamp_s == rhs.cloud_stamp_s &&
+         lhs.occupancy_generation == rhs.occupancy_generation &&
+         lhs.source == rhs.source;
+}
+
+struct OccupancyObservation {
+  Eigen::Vector3d position = Eigen::Vector3d::Zero();
+  iap::RiskOccupancyDiagnostic diagnostic;
 };
 
-PredictorSpatialSourceProjection predictorSpatialSourceProjection(
-    const iap::PredictorParams& params) {
-  PredictorSpatialSourceProjection projection;
-  projection.gnss =
-      params.source_mode != iap::PredictorSourceMode::LidarOnly &&
-      params.gnss_epoch_policy != iap::PredictorGnssEpochPolicy::Disabled;
-  projection.lidar =
-      params.source_mode != iap::PredictorSourceMode::GnssOnly;
-  projection.legacy_lidar =
-      projection.lidar && params.lidar.enable_legacy_observability;
-  return projection;
+// The plan_env Adapter intentionally materializes a fresh LocalOccupancyGrid
+// owner for each frozen capture.  Therefore pointer equality across two live
+// captures would reject an unchanged source.  Bind those immutable owners by
+// exact parameters plus every occupancy observation consumed by this P0
+// candidate; any same-generation replacement that can affect the candidate is
+// rejected before publication.
+bool sameOccupancyEvidence(
+    const P0OccupancyEpoch& expected,
+    const P0OccupancyEpoch& observed,
+    const std::vector<OccupancyObservation>& observations) {
+  if (!expected.los_owner || !observed.los_owner ||
+      !expected.diagnostic_query || !observed.diagnostic_query ||
+      expected.generation != observed.generation ||
+      expected.cloud_stamp_s != observed.cloud_stamp_s ||
+      expected.frame_id != observed.frame_id ||
+      expected.los_owner->size() != observed.los_owner->size() ||
+      !sameOccupancyParams(expected.los_owner->params(),
+                           observed.los_owner->params())) {
+    return false;
+  }
+  if (sameSharedOwner(expected.los_owner, observed.los_owner)) {
+    return true;
+  }
+
+  for (const auto& observation : observations) {
+    if (expected.los_owner->occupied_at(observation.position) !=
+            observed.los_owner->occupied_at(observation.position) ||
+        !sameOccupancyDiagnostic(
+            observation.diagnostic,
+            observed.diagnostic_query(observation.position))) {
+      return false;
+    }
+  }
+  return true;
 }
 
 enum class P0SemanticFailure {
@@ -117,6 +170,12 @@ double stampToSec(const builtin_interfaces::msg::Time& stamp) {
 
 bool finite(double value) {
   return std::isfinite(value);
+}
+
+void advanceNonzeroGeneration(uint64_t* generation) {
+  if (!generation) return;
+  ++*generation;
+  if (*generation == 0u) ++*generation;
 }
 
 double steadyNowSeconds() {
@@ -242,10 +301,11 @@ class PredictorModuleRiskProvider final : public iap::RiskPredictionProvider {
       iap::RollingSpatialAdvisoryWindow* rolling_window,
       iap::RollingSpatialWindowGeometry geometry,
       std::shared_ptr<const iap::LocalOccupancyGrid> occupancy_owner,
-      std::uint64_t occupancy_generation,
       std::shared_ptr<const std::vector<Eigen::Vector3d>> lidar_map_points,
       std::shared_ptr<const std::vector<iap::LidarFimPrimitive>>
           lidar_fim_primitives,
+      iap::RollingSpatialRetentionPolicy retention_policy,
+      iap::RollingSpatialSourceProvenance source_provenance,
       iap::PredictorModule module,
       iap::IntegritySnapshot snapshot,
       int worker_count)
@@ -256,8 +316,9 @@ class PredictorModuleRiskProvider final : public iap::RiskPredictionProvider {
     input.geometry = std::move(geometry);
     input.module = std::move(module);
     input.snapshot = snapshot_;
+    input.policy = retention_policy;
+    input.provenance = source_provenance;
     input.occupancy_owner = occupancy_owner_;
-    input.occupancy_generation = occupancy_generation;
     input.lidar_map_points_owner = std::move(lidar_map_points);
     input.lidar_fim_primitives_owner = std::move(lidar_fim_primitives);
     ready_ = rolling_window_ &&
@@ -376,6 +437,8 @@ class PredictorModuleRiskProvider final : public iap::RiskPredictionProvider {
     return rolling_window_ ? rolling_window_->diagnostics()
                            : iap::RollingSpatialRefreshDiagnostics{};
   }
+
+  bool ready() const { return ready_; }
 
   void finish(const bool success) {
     if (!rolling_window_ || !ready_) return;
@@ -1046,9 +1109,9 @@ void P0RiskGridRuntime::refreshTimerCallback() {
     }
   }
   iap::IntegritySnapshot snapshot;
-  uint64_t captured_gnss_epoch_generation = 0;
+  PredictorSourceCapture captured_predictor_sources;
   if (!buildSnapshot(now_s, &snapshot,
-                     &captured_gnss_epoch_generation)) {
+                     &captured_predictor_sources)) {
     risk_grid_.markRefreshFailure(now_s, "snapshot_unavailable");
     const double refresh_end_stamp_s = liveNowSeconds();
     {
@@ -1071,6 +1134,7 @@ void P0RiskGridRuntime::refreshTimerCallback() {
   }
 
   std::optional<P0OccupancyEpoch> occupancy_epoch;
+  std::optional<P0OccupancyEpoch> captured_occupancy_epoch;
   if (occupancy_epoch_factory_) {
     P0OccupancyEpochCapture capture = occupancy_epoch_factory_();
     if (capture.status ==
@@ -1109,6 +1173,7 @@ void P0RiskGridRuntime::refreshTimerCallback() {
           P0SemanticFailure::OCCUPANCY_GENERATION_CHANGED);
       return;
     }
+    captured_occupancy_epoch = *occupancy_epoch;
     if (production_predictor && rolling_occupancy_owner_ &&
         rolling_occupancy_generation_ == occupancy_epoch->generation) {
       occupancy_epoch->los_owner = rolling_occupancy_owner_;
@@ -1152,6 +1217,9 @@ void P0RiskGridRuntime::refreshTimerCallback() {
       captured_lidar_map_points;
   std::shared_ptr<const std::vector<iap::LidarFimPrimitive>>
       captured_lidar_fim_primitives;
+  uint64_t captured_lidar_generation = 0;
+  double captured_lidar_stamp =
+      std::numeric_limits<double>::quiet_NaN();
   if (provider == nullptr) {
     iap::PredictorParams predictor_params;
     predictor_params.freshness.enabled = true;
@@ -1172,9 +1240,10 @@ void P0RiskGridRuntime::refreshTimerCallback() {
         config_.predictor_lidar_legacy_observability;
     predictor_params.covariance_growth.sigma_grow_m_sqrt_s =
         config_.predictor_sigma_grow_m_sqrt_s;
-    const PredictorSpatialSourceProjection source_projection =
-        predictorSpatialSourceProjection(predictor_params);
-    validate_gnss_spatial_source = source_projection.gnss;
+    const iap::PredictorSpatialSourceUsage source_projection =
+        iap::predictorSpatialSourceUsage(predictor_params);
+    validate_gnss_spatial_source =
+        source_projection.gnss && snapshot.has_epoch;
     validate_lidar_spatial_source = source_projection.lidar;
     validate_lidar_legacy_source = source_projection.legacy_lidar;
     if (std::isfinite(config_.predictor_lidar_fim_radius_m) &&
@@ -1191,6 +1260,8 @@ void P0RiskGridRuntime::refreshTimerCallback() {
       std::lock_guard<std::mutex> lock(lidar_predictor_input_mutex_);
       lidar_map_points = latest_lidar_map_points_;
       lidar_fim_primitives = latest_lidar_fim_primitives_;
+      captured_lidar_generation = latest_lidar_generation_;
+      captured_lidar_stamp = latest_lidar_stamp_;
     }
     captured_lidar_map_points = lidar_map_points;
     captured_lidar_fim_primitives = lidar_fim_primitives;
@@ -1202,10 +1273,32 @@ void P0RiskGridRuntime::refreshTimerCallback() {
     rolling_geometry.lattice_anchor_w = config_.grid.lattice_anchor_w;
     rolling_geometry.resolution_m = config_.grid.resolution_m;
     rolling_geometry.shape = risk_grid_.voxelNum();
+    iap::RollingSpatialRetentionPolicy retention_policy;
+    retention_policy.gnss_spatial_ttl_s =
+        config_.predictor_gnss_spatial_ttl_s;
+    retention_policy.legacy_current_spatial_ttl_s =
+        config_.predictor_legacy_current_spatial_ttl_s;
+    retention_policy.full_refresh_watchdog_s =
+        config_.predictor_full_refresh_watchdog_s;
+    iap::RollingSpatialSourceProvenance source_provenance;
+    source_provenance.gnss_epoch_generation =
+        captured_predictor_sources.gnss_epoch_generation;
+    source_provenance.gnss_epoch_stamp =
+        captured_predictor_sources.gnss_epoch_stamp;
+    source_provenance.occupancy_generation = occupancy_epoch->generation;
+    source_provenance.occupancy_stamp = occupancy_epoch->cloud_stamp_s;
+    source_provenance.lidar_generation = captured_lidar_generation;
+    source_provenance.lidar_stamp = captured_lidar_stamp;
+    source_provenance.current_generation =
+        captured_predictor_sources.current_generation;
+    source_provenance.current_stamp =
+        captured_predictor_sources.current_stamp;
+    source_provenance.refresh_reference_time_s = now_s;
     auto owned_predictor_provider = std::make_unique<PredictorModuleRiskProvider>(
         &rolling_spatial_window_, std::move(rolling_geometry),
-        occupancy_epoch->los_owner, occupancy_epoch->generation,
+        occupancy_epoch->los_owner,
         std::move(lidar_map_points), std::move(lidar_fim_primitives),
+        retention_policy, source_provenance,
         std::move(module), snapshot,
         config_.predictor_effective_worker_count);
     predictor_provider = owned_predictor_provider.get();
@@ -1224,9 +1317,29 @@ void P0RiskGridRuntime::refreshTimerCallback() {
     last_refresh_query_count_ =
         layer_voxel_count * config_.grid.horizons_s.size();
   }
-  const auto occupancy_diagnostic_query = combinedOccupancyDiagnosticQuery(
+  const auto combined_occupancy_diagnostic_query =
+      combinedOccupancyDiagnosticQuery(
       occupancy_epoch ? occupancy_epoch->diagnostic_query
                       : iap::RiskGridMap::OccupancyDiagnosticQuery{});
+  const auto occupancy_observations =
+      std::make_shared<std::vector<OccupancyObservation>>();
+  const auto captured_occupancy_query =
+      captured_occupancy_epoch
+          ? captured_occupancy_epoch->diagnostic_query
+          : iap::RiskGridMap::OccupancyDiagnosticQuery{};
+  iap::RiskGridMap::OccupancyDiagnosticQuery occupancy_diagnostic_query;
+  if (combined_occupancy_diagnostic_query) {
+    occupancy_diagnostic_query =
+        [combined_occupancy_diagnostic_query, captured_occupancy_query,
+         occupancy_observations](const Eigen::Vector3d& position) {
+          auto diagnostic = combined_occupancy_diagnostic_query(position);
+          if (captured_occupancy_query) {
+            occupancy_observations->push_back(
+                {position, captured_occupancy_query(position)});
+          }
+          return diagnostic;
+        };
+  }
   const auto occupancy_predicate = combinedOccupancyPredicate();
   iap::RiskGridMap::SourceValidator source_validator;
   if (occupancy_epoch) {
@@ -1239,34 +1352,69 @@ void P0RiskGridRuntime::refreshTimerCallback() {
         [this, live_occupancy_generation, captured_occupancy_generation,
          captured_prior_generation, validate_gnss_spatial_source,
          validate_lidar_spatial_source, validate_lidar_legacy_source,
-         captured_gnss_epoch_generation,
-         captured_lidar_map_points, captured_lidar_fim_primitives]() {
+         captured_predictor_sources, captured_lidar_generation,
+         captured_lidar_map_points, captured_lidar_fim_primitives,
+         captured_occupancy_epoch, canonical_occupancy_epoch = *occupancy_epoch,
+         occupancy_observations, predictor_provider]() {
           if (!live_occupancy_generation ||
               live_occupancy_generation() !=
                   captured_occupancy_generation) {
             return iap::RiskGridSourceValidation::
                 OCCUPANCY_GENERATION_CHANGED;
           }
+          if (!captured_occupancy_epoch || !occupancy_epoch_factory_) {
+            return iap::RiskGridSourceValidation::
+                OCCUPANCY_GENERATION_CHANGED;
+          }
+          const P0OccupancyEpochCapture live_capture =
+              occupancy_epoch_factory_();
+          if (live_capture.status != P0OccupancyEpochCaptureStatus::VALID ||
+              !live_capture.epoch || !live_capture.epoch->live_generation ||
+              live_capture.epoch->live_generation() !=
+                  captured_occupancy_generation ||
+              !sameOccupancyEvidence(
+                  *captured_occupancy_epoch, *live_capture.epoch,
+                  *occupancy_observations) ||
+              !sameOccupancyEvidence(
+                  canonical_occupancy_epoch, *captured_occupancy_epoch,
+                  *occupancy_observations)) {
+            return iap::RiskGridSourceValidation::
+                OCCUPANCY_GENERATION_CHANGED;
+          }
+          if (predictor_provider && predictor_provider->ready() &&
+              (!rolling_spatial_window_.candidateOccupancyEvidenceMatches(
+                   captured_occupancy_epoch->los_owner) ||
+               !rolling_spatial_window_.candidateOccupancyEvidenceMatches(
+                   live_capture.epoch->los_owner))) {
+            return iap::RiskGridSourceValidation::
+                OCCUPANCY_GENERATION_CHANGED;
+          }
           uint64_t live_prior_generation = 0;
+          uint64_t live_gnss_epoch_generation = 0;
           {
             std::lock_guard<std::mutex> lock(health_state_mutex_);
             live_prior_generation = latest_current_generation_;
+            live_gnss_epoch_generation = latest_gnss_epoch_generation_;
           }
           if (captured_prior_generation == 0u ||
+              captured_predictor_sources.current_generation == 0u ||
+              captured_prior_generation !=
+                  captured_predictor_sources.current_generation ||
               live_prior_generation != captured_prior_generation) {
             return iap::RiskGridSourceValidation::PRIOR_GENERATION_CHANGED;
           }
           if (validate_gnss_spatial_source) {
-            std::lock_guard<std::mutex> lock(health_state_mutex_);
-            if (latest_gnss_epoch_generation_ !=
-                captured_gnss_epoch_generation) {
+            if (captured_predictor_sources.gnss_epoch_generation == 0u ||
+                live_gnss_epoch_generation !=
+                    captured_predictor_sources.gnss_epoch_generation) {
               return iap::RiskGridSourceValidation::
                   PREDICTOR_SPATIAL_SOURCE_CHANGED;
             }
           }
           if (validate_lidar_spatial_source) {
             std::lock_guard<std::mutex> lock(lidar_predictor_input_mutex_);
-            if (!sameSharedOwner(latest_lidar_fim_primitives_,
+            if (latest_lidar_generation_ != captured_lidar_generation ||
+                !sameSharedOwner(latest_lidar_fim_primitives_,
                                  captured_lidar_fim_primitives)) {
               return iap::RiskGridSourceValidation::
                   PREDICTOR_SPATIAL_SOURCE_CHANGED;
@@ -1298,6 +1446,9 @@ void P0RiskGridRuntime::refreshTimerCallback() {
   if (predictor_provider) {
     rolling_diagnostics = predictor_provider->rollingDiagnostics();
     predictor_provider->finish(refresh_succeeded);
+    if (!refresh_succeeded) {
+      rolling_diagnostics = {};
+    }
     if (refresh_succeeded && occupancy_epoch) {
       rolling_occupancy_owner_ = occupancy_epoch->los_owner;
       rolling_occupancy_generation_ = occupancy_epoch->generation;
@@ -1502,6 +1653,19 @@ void P0RiskGridRuntime::publishHealth(const iap::RiskGridHealth& health,
       << state.predictor_spatial_evicted_position_count << ","
       << "\"predictor_spatial_full_invalidation_count\":"
       << state.predictor_spatial_full_invalidation_count << ","
+      << "\"predictor_spatial_exact_retained_position_count\":"
+      << state.predictor_spatial_exact_retained_position_count << ","
+      << "\"predictor_spatial_ttl_retained_position_count\":"
+      << state.predictor_spatial_ttl_retained_position_count << ","
+      << "\"predictor_spatial_gnss_ttl_expired_position_count\":"
+      << state.predictor_spatial_gnss_ttl_expired_position_count << ","
+      << "\"predictor_spatial_legacy_current_ttl_expired_position_count\":"
+      << state.predictor_spatial_legacy_current_ttl_expired_position_count
+      << ","
+      << "\"predictor_spatial_watchdog_forced_full_rebuild_count\":"
+      << state.predictor_spatial_watchdog_forced_full_rebuild_count << ","
+      << "\"predictor_spatial_invalid_source_provenance_count\":"
+      << state.predictor_spatial_invalid_source_provenance_count << ","
       << "\"predictor_spatial_invalidation_reason\":"
       << jsonString(state.predictor_spatial_invalidation_reason) << ","
       << "\"predictor_requested_worker_count\":" << config_.predictor_requested_worker_count << ","
@@ -1609,6 +1773,21 @@ P0RiskGridRuntime::healthPublicationStateSnapshot() const {
       last_rolling_spatial_diagnostics_.evicted_position_count;
   state.predictor_spatial_full_invalidation_count =
       last_rolling_spatial_diagnostics_.full_invalidation_count;
+  state.predictor_spatial_exact_retained_position_count =
+      last_rolling_spatial_diagnostics_.exact_retained_position_count;
+  state.predictor_spatial_ttl_retained_position_count =
+      last_rolling_spatial_diagnostics_.ttl_retained_position_count;
+  state.predictor_spatial_gnss_ttl_expired_position_count =
+      last_rolling_spatial_diagnostics_.gnss_ttl_expired_position_count;
+  state.predictor_spatial_legacy_current_ttl_expired_position_count =
+      last_rolling_spatial_diagnostics_
+          .legacy_current_ttl_expired_position_count;
+  state.predictor_spatial_watchdog_forced_full_rebuild_count =
+      last_rolling_spatial_diagnostics_
+          .watchdog_forced_full_rebuild_count;
+  state.predictor_spatial_invalid_source_provenance_count =
+      last_rolling_spatial_diagnostics_
+          .invalid_source_provenance_count;
   state.predictor_spatial_invalidation_reason =
       iap::rollingSpatialInvalidationReasonName(
           last_rolling_spatial_diagnostics_.invalidation_reason);
@@ -1766,10 +1945,7 @@ void P0RiskGridRuntime::integrityCallback(
   }
   recordInputCallback();
   std::lock_guard<std::mutex> health_lock(health_state_mutex_);
-  ++latest_current_generation_;
-  if (latest_current_generation_ == 0u) {
-    ++latest_current_generation_;
-  }
+  advanceNonzeroGeneration(&latest_current_generation_);
   current_integrity_seen_ = true;
   latest_current_ = currentFromMsg(*msg);
   latest_current_valid_ = latest_current_.valid;
@@ -1893,13 +2069,9 @@ void P0RiskGridRuntime::rangeCallback(
     latest_gnss_epoch_stamp_ = gnss_epoch_stamp;
     latest_gnss_epoch_satellite_count_ =
         static_cast<uint64_t>(epoch.sats.size());
-  }
-  if (!epoch.sats.empty()) {
-    std::lock_guard<std::mutex> health_lock(health_state_mutex_);
-    latest_epoch_ = std::move(epoch);
-    ++latest_gnss_epoch_generation_;
-    if (latest_gnss_epoch_generation_ == 0u) {
-      ++latest_gnss_epoch_generation_;
+    if (!epoch.sats.empty()) {
+      latest_epoch_ = std::move(epoch);
+      advanceNonzeroGeneration(&latest_gnss_epoch_generation_);
     }
   }
 }
@@ -1966,7 +2138,8 @@ void P0RiskGridRuntime::cloudCallback(
   if (msg) {
     recordInputCallback();
   }
-  auto clear_lidar_inputs = [this](const std::string& reason) {
+  auto clear_lidar_inputs =
+      [this](const std::string& reason, const double source_stamp) {
     iap::LidarFimPrimitiveGenerationDiagnostics diagnostics;
     diagnostics.valid = false;
     diagnostics.fallback_reason = reason;
@@ -1978,12 +2151,17 @@ void P0RiskGridRuntime::cloudCallback(
     latest_lidar_fim_primitive_count_ = 0;
     latest_lidar_fim_valid_normal_count_ = 0;
     latest_lidar_fim_fallback_reason_ = reason;
+    advanceNonzeroGeneration(&latest_lidar_generation_);
+    latest_lidar_stamp_ = source_stamp;
   };
 
   if (!msg) {
-    clear_lidar_inputs("null_lidar_pointcloud");
+    clear_lidar_inputs("null_lidar_pointcloud",
+                       std::numeric_limits<double>::quiet_NaN());
     return;
   }
+
+  const double source_stamp = stampToSec(msg->header.stamp);
 
   {
     std::lock_guard<std::mutex> health_lock(health_state_mutex_);
@@ -1991,7 +2169,7 @@ void P0RiskGridRuntime::cloudCallback(
   }
   {
     std::lock_guard<std::mutex> health_lock(health_state_mutex_);
-    latest_map_stamp_ = stampToSec(msg->header.stamp);
+    latest_map_stamp_ = source_stamp;
   }
 
   auto points = std::make_shared<std::vector<Eigen::Vector3d>>();
@@ -2028,12 +2206,13 @@ void P0RiskGridRuntime::cloudCallback(
       }
     }
   } catch (const std::exception& e) {
-    clear_lidar_inputs(std::string("invalid_lidar_pointcloud:") + e.what());
+    clear_lidar_inputs(std::string("invalid_lidar_pointcloud:") + e.what(),
+                       source_stamp);
     return;
   }
 
   if (points->empty()) {
-    clear_lidar_inputs("empty_lidar_pointcloud");
+    clear_lidar_inputs("empty_lidar_pointcloud", source_stamp);
     return;
   }
 
@@ -2061,6 +2240,8 @@ void P0RiskGridRuntime::cloudCallback(
     latest_lidar_fim_primitive_count_ = primitive_count;
     latest_lidar_fim_valid_normal_count_ = valid_normal_count;
     latest_lidar_fim_fallback_reason_ = fallback_reason;
+    advanceNonzeroGeneration(&latest_lidar_generation_);
+    latest_lidar_stamp_ = source_stamp;
   }
 }
 
@@ -2141,7 +2322,7 @@ Eigen::Matrix3d P0RiskGridRuntime::currentPriorInformation(
 bool P0RiskGridRuntime::buildSnapshot(
     const double now_s,
     iap::IntegritySnapshot* snapshot,
-    uint64_t* gnss_epoch_generation) const {
+    PredictorSourceCapture* source_capture) const {
   if (snapshot == nullptr) {
     return false;
   }
@@ -2172,8 +2353,13 @@ bool P0RiskGridRuntime::buildSnapshot(
     epoch = latest_epoch_;
     captured_gnss_epoch_generation = latest_gnss_epoch_generation_;
   }
-  if (gnss_epoch_generation) {
-    *gnss_epoch_generation = captured_gnss_epoch_generation;
+  if (source_capture) {
+    source_capture->current_generation = prior_source_generation;
+    source_capture->current_stamp = current.stamp;
+    source_capture->gnss_epoch_generation =
+        captured_gnss_epoch_generation;
+    source_capture->gnss_epoch_stamp =
+        epoch ? epoch->stamp : std::numeric_limits<double>::quiet_NaN();
   }
   if (!odom_valid || !current_valid) {
     return false;

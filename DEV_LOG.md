@@ -1762,3 +1762,97 @@ This DEV_LOG-only commit returns control to `SUPERVISOR` review. `DEEPSEEK`
 does not mark ICRA-015, phase 3 or Gate-0B PASS; run main flow, smoke,
 qualification, benchmark, analyzer or GPU work; start phase-4 TTL/delta;
 change P1/P2/P3/P4/P5 behavior; or issue a next task.
+
+## 2026-08-21T17:49:28Z — ICRA-016 START
+
+Synchronized start HEAD is
+`6686b917c090bbe39bd1edfba30b1693cfe77082`; local `dev/icra` is ahead of
+`origin/dev/icra` only by the Supervisor authorization commit, so no pull was
+permitted. The protected PDF remains solely untracked and exact at SHA-256
+`1f07da5631a6551a2f98c02d46fd45bc87f2f1e3e7c14e95f9a7f4a0bac844f6`.
+The retained ICRA-011 profile and the disabled ICRA-014 canonical remain
+read-only at SHA-256
+`778abd22158805c41150b4eeed9c37a3f660237a0bb0599e9a567e3533c7b32c` and
+`44f47b23137d17f4b0cbc81af6827156865bdecb36089bf53f770960a2fb963d`.
+
+The exact ICRA-016 allowlist is:
+
+- `include/iap/predictor/predictor_types.hpp`;
+- `include/iap/predictor/predictor_module.hpp`;
+- `include/iap/predictor/rolling_spatial_advisory_window.hpp`;
+- `src/iap/predictor/predictor_module.cpp`;
+- `src/iap/predictor/rolling_spatial_advisory_window.cpp`;
+- `test/test_predictor_module.cpp`;
+- `test/test_rolling_spatial_advisory_window.cpp`;
+- `src/iap/planner/plan_manage/include/ego_planner/p0_risk_grid_runtime.h`;
+- `src/iap/planner/plan_manage/src/p0_risk_grid_runtime.cpp`;
+- `src/iap/planner/plan_manage/test/test_p0_risk_grid_runtime.cpp`;
+- root or `plan_manage` `CMakeLists.txt` only if required for registration;
+- `DEV_LOG.md`, `docs/CHANGES.md`, and `docs/TRACEABILITY.md`.
+
+The task adds one Predictor-owned source-usage policy, coherent nonzero
+GNSS/occupancy/LiDAR/current provenance, per-slot original source stamps,
+bounded GNSS/legacy-current spatial retention, a successful-full-refresh
+watchdog and additive typed diagnostics. All three policy values default to
+`NaN` and therefore disabled; no production activation value is selected.
+Discrete source/content/owner changes remain immediate invalidations, while
+continuous GNSS elevation/azimuth/epoch and legacy `tdop` changes may retain
+only within an explicitly enabled synthetic TTL. Failed candidates never
+advance accepted provenance, slot age, watchdog epoch, RiskGrid generation or
+published snapshot.
+
+Explicit Phase-4B/calibration stop: no occupancy cell/ray delta, reverse-ray
+index, second map, partial-component or complete-result cache, calibration,
+CPU scaling, tuning, production TTL/watchdog value, launch/YAML/default,
+worker/geometry/horizon change, P1/P2/P3/P4/P5 product work, GPU/CUDA, main
+flow, ROS launch, smoke, qualification, bag, RViz, campaign, Gate analyzer or
+formal benchmark is authorized. All generated output must remain below
+`results/icra27/icra016/`.
+
+## 2026-08-21T18:58:41Z — ICRA-016 IMPLEMENTATION EVIDENCE / REVIEW READY
+
+Implemented Phase-4A only: one authoritative Predictor spatial-source
+projection, atomic nonzero GNSS/occupancy/LiDAR/current provenance, discrete
+source invalidation, default-disabled per-slot GNSS and legacy-current TTL,
+original-stamp freshness, commit-only successful-full-refresh watchdog state,
+and additive exact/TTL/expiry/watchdog/invalid-provenance diagnostics. P0
+captures and validates every active generation/owner at publication. Because
+the frozen occupancy Adapter rematerializes an equivalent LOS owner for each
+capture, the rolling deep Module also compares canonical/start/live occupancy
+visibility for every touched slot using that slot's actual original GNSS epoch.
+The production regression relocates an equal-size same-generation voxel onto a
+canopy ray while all RiskGrid query origins remain unoccupied; publication
+aborts and retains the prior RiskGrid and rolling generation.
+
+Terminal repository-local verification is green:
+
+- root CTest selection: 7/7 suites (`IntegritySnapshot`,
+  `LocalOccupancy`, Predictor, rolling window, conversion, RiskGrid and the
+  read-only ICRA-011 retained profile);
+- production P0 runtime: 60/60 active GTests;
+- retained planner selection: 7/7 suites (occupancy Adapter, P1 admission and
+  selection, P2 ranking, P3 bias, planning context and P5 gate);
+- retained P4 A* and P1 integrity-cost: 1/1 suite each;
+- eight directly linked consumers resolve
+  `results/icra27/icra016/build_iap/libiap.so`; P1 admission/selection have no
+  direct `libiap` dependency;
+- Standards and Spec final independent re-reviews both PASS with no remaining
+  finding, and `git diff --check` is clean.
+
+Terminal logs are under `results/icra27/icra016/logs/`, including
+`test_root_terminal_pass.log`, `test_p0_terminal_pass.log`,
+`test_planner_retained_terminal_pass.log`, `test_p4_terminal_pass.log`,
+`test_p1_terminal_pass.log` and `linkage_final.log`. Final `libiap.so` SHA-256
+is `43d824ce44c155298d2df31d51ddf0eeed3f94cd50f3241df04ee150f79e478d`.
+The read-only ICRA-011 JSON remains
+`778abd22158805c41150b4eeed9c37a3f660237a0bb0599e9a567e3533c7b32c`;
+the disabled canonical, never rerun, remains
+`44f47b23137d17f4b0cbc81af6827156865bdecb36089bf53f770960a2fb963d`;
+and the protected PDF remains solely untracked at
+`1f07da5631a6551a2f98c02d46fd45bc87f2f1e3e7c14e95f9a7f4a0bac844f6`.
+No task process remains. No main flow, ROS launch, smoke, qualification, bag,
+RViz, campaign, Gate analyzer, formal benchmark, GPU preflight/CUDA,
+calibration, Phase-4B occupancy delta/reverse-ray, production activation or
+P1/P2/P3/P4/P5 product development ran. Implementation commit/push and the
+required DEV_LOG-only SUPERVISOR handoff remain; DEEPSEEK does not mark
+ICRA-016, Phase 4 or Gate-0B PASS.

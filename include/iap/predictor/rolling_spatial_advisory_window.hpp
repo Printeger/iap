@@ -4,6 +4,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <limits>
 #include <memory>
 #include <string>
 #include <vector>
@@ -24,6 +25,8 @@ enum class RollingSpatialInvalidationReason {
   CurrentIntegrityChanged,
   SourcePolicyChanged,
   WindowDisjoint,
+  SourceProvenanceInvalid,
+  WatchdogForced,
 };
 
 const char* rollingSpatialInvalidationReasonName(
@@ -36,12 +39,34 @@ struct RollingSpatialWindowGeometry {
   Eigen::Vector3i shape = Eigen::Vector3i::Ones();
 };
 
+struct RollingSpatialRetentionPolicy {
+  double gnss_spatial_ttl_s = std::numeric_limits<double>::quiet_NaN();
+  double legacy_current_spatial_ttl_s =
+      std::numeric_limits<double>::quiet_NaN();
+  double full_refresh_watchdog_s =
+      std::numeric_limits<double>::quiet_NaN();
+};
+
+struct RollingSpatialSourceProvenance {
+  std::uint64_t gnss_epoch_generation = 0;
+  double gnss_epoch_stamp = std::numeric_limits<double>::quiet_NaN();
+  std::uint64_t occupancy_generation = 0;
+  double occupancy_stamp = std::numeric_limits<double>::quiet_NaN();
+  std::uint64_t lidar_generation = 0;
+  double lidar_stamp = std::numeric_limits<double>::quiet_NaN();
+  std::uint64_t current_generation = 0;
+  double current_stamp = std::numeric_limits<double>::quiet_NaN();
+  double refresh_reference_time_s =
+      std::numeric_limits<double>::quiet_NaN();
+};
+
 struct RollingSpatialRefreshInput {
   RollingSpatialWindowGeometry geometry;
   PredictorModule module;
   IntegritySnapshot snapshot;
+  RollingSpatialRetentionPolicy policy;
+  RollingSpatialSourceProvenance provenance;
   std::shared_ptr<const LocalOccupancyGrid> occupancy_owner;
-  std::uint64_t occupancy_generation = 0;
   std::shared_ptr<const std::vector<Eigen::Vector3d>> lidar_map_points_owner;
   std::shared_ptr<const std::vector<LidarFimPrimitive>>
       lidar_fim_primitives_owner;
@@ -52,6 +77,12 @@ struct RollingSpatialRefreshDiagnostics {
   std::size_t entered_position_count = 0;
   std::size_t evicted_position_count = 0;
   std::size_t full_invalidation_count = 0;
+  std::size_t exact_retained_position_count = 0;
+  std::size_t ttl_retained_position_count = 0;
+  std::size_t gnss_ttl_expired_position_count = 0;
+  std::size_t legacy_current_ttl_expired_position_count = 0;
+  std::size_t watchdog_forced_full_rebuild_count = 0;
+  std::size_t invalid_source_provenance_count = 0;
   RollingSpatialInvalidationReason invalidation_reason =
       RollingSpatialInvalidationReason::None;
 };
@@ -74,6 +105,8 @@ class RollingSpatialAdvisoryWindow {
   std::vector<PredictorQueryResult> queryPositionHorizons(
       const std::vector<PredictorQueryInput>& inputs,
       PredictorBatchDiagnostics* diagnostics = nullptr);
+  bool candidateOccupancyEvidenceMatches(
+      const std::shared_ptr<const LocalOccupancyGrid>& observed_owner) const;
   void commitRefresh();
   void abortRefresh();
 

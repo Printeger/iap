@@ -3,6 +3,50 @@
 > 规则：任何代码改动必须在这里记录，并包含 IAP-RQ-XXX。
 
 ## Unreleased
+- feat(icra-016-phase4a-versioned-retention): IAP-RQ-312 / IAP-RQ-314 / IAP-RQ-320 / IAP-RQ-321 / IAP-RQ-322 — add one Predictor-owned active-source projection and explicit P0-to-rolling provenance for GNSS epoch, immutable occupancy epoch, LiDAR owners/generation/original cloud stamp, current integrity generation/original stamp, and the finite refresh-reference time. Production callbacks capture and validate active source generations/owners atomically; the rolling Module validates canonical/start/live occupancy owners against every touched slot's actual GNSS epoch, including retained epochs, so a same-version canopy-ray change aborts publication without duplicating Predictor science in P0. Any active-source race aborts publication and rolling commit.
+  - Add independent `gnss_spatial_ttl_s`, `legacy_current_spatial_ttl_s`, and successful-full-refresh watchdog policies. All default to `NaN`/disabled and no ROS parameter, launch/YAML value, tuning, or production activation is introduced. Only GNSS elevation/azimuth/epoch and legacy-current `tdop` continuous updates may retain per-slot spatial advice within an explicitly injected finite test TTL. Discrete satellite/trunk fields, source policy, occupancy and LiDAR versions/owners invalidate immediately. Retained slots preserve their original component stamps for age and Predictor freshness; entering/expired slots use the current coherent sources.
+  - The watchdog advances only after a successfully published full rebuild. Aborts retain the previous immutable RiskGrid generation, rolling slots, accepted provenance, component ages, and watchdog epoch. Additive rolling/P0 diagnostics distinguish exact/TTL retention, each TTL expiry, watchdog rebuild, and invalid provenance; P0 clears candidate rolling diagnostics after a failed publication.
+  - Deterministic rolling and production tests cover disabled compatibility, TTL retention/expiry/freshness, contradictory/regressed/zero/non-finite provenance, source-owner/generation races, LiDAR callback generation/stamp acceptance and clearing, worker/movement/scientific equivalence, and watchdog rollback/retry. Retained root, profile, occupancy Adapter, P1/P2/P3/planning-context/P4/P5 suites pass against the current repository-local library. Phase-4B occupancy delta/reverse-ray, calibration, product activation, main flow, smoke, qualification, analyzer, benchmark, and GPU work remain out of scope.
+
+Repository-local focused reproduction from the repository root:
+
+```bash
+repo_root="$(pwd)"
+cmake -S "$repo_root" -B "$repo_root/results/icra27/icra016/build_iap" \
+  -DCMAKE_BUILD_TYPE=RelWithDebInfo \
+  -DCMAKE_INSTALL_PREFIX="$repo_root/results/icra27/icra016/install"
+cmake --build "$repo_root/results/icra27/icra016/build_iap" -j2
+cmake --install "$repo_root/results/icra27/icra016/build_iap"
+
+cmake -S "$repo_root/src/iap/planner/plan_env" \
+  -B "$repo_root/results/icra27/icra016/build_plan_env" \
+  -DCMAKE_INSTALL_PREFIX="$repo_root/results/icra27/icra016/install_plan_env"
+cmake --build "$repo_root/results/icra27/icra016/build_plan_env" -j2
+cmake --install "$repo_root/results/icra27/icra016/build_plan_env"
+
+cmake -S "$repo_root/src/iap/planner/plan_manage" \
+  -B "$repo_root/results/icra27/icra016/build_ego" \
+  -Diap_DIR="$repo_root/results/icra27/icra016/install/share/iap" \
+  -Dplan_env_DIR="$repo_root/results/icra27/icra016/install_plan_env/share/plan_env/cmake" \
+  -Dpath_searching_DIR="/home/dev/ws_iap/install/path_searching/share/path_searching/cmake" \
+  -Dbspline_opt_DIR="/home/dev/ws_iap/install/bspline_opt/share/bspline_opt/cmake" \
+  -Dtraj_utils_DIR="/home/dev/ws_iap/install/traj_utils/share/traj_utils/cmake"
+cmake --build "$repo_root/results/icra27/icra016/build_ego" \
+  --target test_p0_risk_grid_runtime test_p0_occupancy_epoch_adapter -j2
+
+export LD_LIBRARY_PATH="$repo_root/results/icra27/icra016/build_iap:$repo_root/results/icra27/icra016/install/lib:$repo_root/results/icra27/icra016/install_plan_env/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+export ROS_HOME="$repo_root/results/icra27/icra016/ros_home"
+export ROS_LOG_DIR="$repo_root/results/icra27/icra016/ros_log"
+export TMPDIR="$repo_root/results/icra27/icra016/tmp"
+mkdir -p "$ROS_HOME" "$ROS_LOG_DIR" "$TMPDIR"
+ctest --test-dir "$repo_root/results/icra27/icra016/build_iap" \
+  --output-on-failure -R '^(test_rolling_spatial_advisory_window|test_predictor_module|test_risk_grid_map|test_local_occupancy|test_integrity_snapshot|test_predictor_risk_conversion|test_icra011_spatial_dedup_profile)$'
+ctest --test-dir "$repo_root/results/icra27/icra016/build_ego" \
+  --output-on-failure -R '^(test_p0_risk_grid_runtime|test_p0_occupancy_epoch_adapter)$'
+ldd "$repo_root/results/icra27/icra016/build_ego/test_p0_risk_grid_runtime" \
+  | rg -F "libiap.so => $repo_root/results/icra27/icra016/build_iap/libiap.so"
+```
+
 - feat(icra-013-fixed-world-lattice): IAP-RQ-320 / IAP-RQ-322 — add the minimum finite `RiskGridMapParams::lattice_anchor_w` configuration (default world/map origin) and derive every proposed window from integer world keys using mathematical floor. The frozen even-side rule places the centre key at local index `voxel_num / 2`; negative coordinates, one-cell crossings and multi-axis jumps therefore move by exact integer-resolution deltas without accumulated continuous-centering drift.
   - Build proposed geometry locally and publish `origin_` in the same success critical section as the complete immutable generation. Serialize refresh writers for unique generation IDs, and reject stale in-flight work using a configuration epoch rechecked in that publication lock. Public `origin()` changes from an unlocked reference to a mutex-protected value return, preventing torn geometry reads. Shifted provider, occupancy-generation and prior-generation failures retain the previous generation ID, origin, ordered voxel data and public map origin. `configure()` rejects non-finite anchors, resets active state, and recomputes deterministic anchor-relative geometry.
   - Preserve full-refresh science: every successful refresh still materializes all horizons and dispatches every non-occupied logical query in scalar order. No ring/dense reuse store, entering-slab dispatch, cross-refresh evidence/result cache, TTL/delta/watchdog, partial publication, restamping, worker/default/workload/threshold change or performance saving is introduced.

@@ -13,23 +13,6 @@ namespace {
 
 using WorldKey = Eigen::Matrix<std::int64_t, 3, 1>;
 
-struct SpatialSourceProjection {
-  bool gnss = false;
-  bool lidar = false;
-  bool legacy_lidar = false;
-};
-
-SpatialSourceProjection spatialSourceProjection(const PredictorParams& params) {
-  SpatialSourceProjection projection;
-  projection.gnss =
-      params.source_mode != PredictorSourceMode::LidarOnly &&
-      params.gnss_epoch_policy != PredictorGnssEpochPolicy::Disabled;
-  projection.lidar = params.source_mode != PredictorSourceMode::GnssOnly;
-  projection.legacy_lidar =
-      projection.lidar && params.lidar.enable_legacy_observability;
-  return projection;
-}
-
 template <typename T>
 bool sameOwner(const std::shared_ptr<const T>& lhs,
                const std::shared_ptr<const T>& rhs) {
@@ -65,6 +48,25 @@ bool exactVisibility(const VisibilityPredictor::Params& lhs,
          exactDouble(lhs.ray_start_offset, rhs.ray_start_offset) &&
          lhs.hard_occlusion == rhs.hard_occlusion &&
          exactCanopy(lhs.canopy, rhs.canopy);
+}
+
+bool exactVisibilityResult(const VisibilityResult& lhs,
+                           const VisibilityResult& rhs) {
+  if (lhs.n_vis != rhs.n_vis || lhs.vis_flags != rhs.vis_flags ||
+      lhs.kappas.size() != rhs.kappas.size() ||
+      lhs.sigma_effs.size() != rhs.sigma_effs.size() ||
+      !exactDouble(lhs.mean_kappa, rhs.mean_kappa)) {
+    return false;
+  }
+  for (std::size_t index = 0; index < lhs.kappas.size(); ++index) {
+    if (!exactDouble(lhs.kappas[index], rhs.kappas[index])) return false;
+  }
+  for (std::size_t index = 0; index < lhs.sigma_effs.size(); ++index) {
+    if (!exactDouble(lhs.sigma_effs[index], rhs.sigma_effs[index])) {
+      return false;
+    }
+  }
+  return true;
 }
 
 bool exactGeometry(const GnssGeometryPlPredictorParams& lhs,
@@ -159,11 +161,48 @@ bool exactEpoch(const IntegritySnapshot& lhs, const IntegritySnapshot& rhs) {
   return true;
 }
 
+bool exactEpochDiscrete(const IntegritySnapshot& lhs,
+                        const IntegritySnapshot& rhs) {
+  if (lhs.has_epoch != rhs.has_epoch) return false;
+  if (!lhs.has_epoch) return true;
+  const auto& a = lhs.gnss_epoch;
+  const auto& b = rhs.gnss_epoch;
+  if (a.sats.size() != b.sats.size()) return false;
+  for (std::size_t index = 0; index < a.sats.size(); ++index) {
+    const SatObs& left = a.sats[index];
+    const SatObs& right = b.sats[index];
+    if (left.sat_id != right.sat_id || left.excluded != right.excluded ||
+        !exactDouble(left.pr_sigma, right.pr_sigma)) {
+      return false;
+    }
+  }
+  return true;
+}
+
 bool exactCurrentSpatial(const CurrentIntegrityState& lhs,
                          const CurrentIntegrityState& rhs) {
   return lhs.n_trunks_observed == rhs.n_trunks_observed &&
          exactDouble(lhs.tdop, rhs.tdop) &&
          lhs.excluded_trunk_ids == rhs.excluded_trunk_ids;
+}
+
+bool exactCurrentDiscrete(const CurrentIntegrityState& lhs,
+                          const CurrentIntegrityState& rhs) {
+  return lhs.n_trunks_observed == rhs.n_trunks_observed &&
+         lhs.excluded_trunk_ids == rhs.excluded_trunk_ids;
+}
+
+bool policyEnabled(const double value) {
+  return std::isfinite(value) && value >= 0.0;
+}
+
+bool exactPolicy(const RollingSpatialRetentionPolicy& lhs,
+                 const RollingSpatialRetentionPolicy& rhs) {
+  return exactDouble(lhs.gnss_spatial_ttl_s, rhs.gnss_spatial_ttl_s) &&
+         exactDouble(lhs.legacy_current_spatial_ttl_s,
+                     rhs.legacy_current_spatial_ttl_s) &&
+         exactDouble(lhs.full_refresh_watchdog_s,
+                     rhs.full_refresh_watchdog_s);
 }
 
 bool exactGeometry(const RollingSpatialWindowGeometry& lhs,
@@ -187,8 +226,9 @@ struct RollingSpatialAdvisoryWindow::Impl {
     RollingSpatialWindowGeometry geometry;
     PredictorParams params;
     IntegritySnapshot snapshot;
+    RollingSpatialRetentionPolicy policy;
+    RollingSpatialSourceProvenance provenance;
     std::shared_ptr<const LocalOccupancyGrid> occupancy_owner;
-    std::uint64_t occupancy_generation = 0;
     std::shared_ptr<const std::vector<Eigen::Vector3d>> lidar_points_owner;
     std::shared_ptr<const std::vector<LidarFimPrimitive>> lidar_fim_owner;
     std::uint64_t validity_generation = 0;
@@ -199,6 +239,8 @@ struct RollingSpatialAdvisoryWindow::Impl {
     WorldKey world_key = WorldKey::Zero();
     std::uint64_t validity_generation = 0;
     PredictorModule::SpatialAdvisory advisory;
+    IntegritySnapshot source_snapshot;
+    RollingSpatialSourceProvenance provenance;
   };
 
   struct Candidate {
@@ -209,16 +251,25 @@ struct RollingSpatialAdvisoryWindow::Impl {
     std::atomic<std::size_t> retained{0};
     std::atomic<std::size_t> entered{0};
     std::atomic<std::size_t> evicted{0};
+    std::atomic<std::size_t> exact_retained{0};
+    std::atomic<std::size_t> ttl_retained{0};
+    std::atomic<std::size_t> gnss_ttl_expired{0};
+    std::atomic<std::size_t> legacy_current_ttl_expired{0};
+    std::atomic<std::size_t> invalid_source_provenance{0};
     std::atomic<bool> source_identity_valid{true};
     std::size_t full_invalidations = 0;
     RollingSpatialInvalidationReason invalidation_reason =
         RollingSpatialInvalidationReason::None;
+    bool full_rebuild = false;
+    bool watchdog_forced = false;
   };
 
   std::optional<Identity> active_identity;
   std::vector<Slot> active_slots;
   std::unique_ptr<Candidate> candidate;
   std::uint64_t next_validity_generation = 1;
+  double last_successful_full_refresh_reference_time_s =
+      std::numeric_limits<double>::quiet_NaN();
 
   static RollingSpatialInvalidationReason compareIdentity(
       const Identity& active, const Identity& incoming) {
@@ -232,47 +283,201 @@ struct RollingSpatialAdvisoryWindow::Impl {
     if (!exactParams(active.params, incoming.params)) {
       return RollingSpatialInvalidationReason::PredictorParametersChanged;
     }
-    const SpatialSourceProjection projection =
-        spatialSourceProjection(incoming.params);
-    if (projection.gnss) {
-      if (!active.snapshot.has_epoch || !incoming.snapshot.has_epoch ||
-          !exactEpoch(active.snapshot, incoming.snapshot)) {
-        return RollingSpatialInvalidationReason::GnssEpochChanged;
+    if (!exactPolicy(active.policy, incoming.policy)) {
+      return RollingSpatialInvalidationReason::PredictorParametersChanged;
+    }
+    if (incoming.provenance.refresh_reference_time_s <
+        active.provenance.refresh_reference_time_s) {
+      return RollingSpatialInvalidationReason::SourceProvenanceInvalid;
+    }
+    const PredictorSpatialSourceUsage projection =
+        predictorSpatialSourceUsage(incoming.params);
+    if (projection.lidar &&
+        (incoming.provenance.lidar_generation == 0u ||
+         !std::isfinite(incoming.provenance.lidar_stamp) ||
+         !incoming.lidar_fim_owner ||
+         (projection.legacy_lidar && !incoming.lidar_points_owner))) {
+      return RollingSpatialInvalidationReason::SourceProvenanceInvalid;
+    }
+    const bool active_gnss = projection.gnss && active.snapshot.has_epoch;
+    const bool incoming_gnss =
+        projection.gnss && incoming.snapshot.has_epoch;
+    if (active_gnss != incoming_gnss) {
+      return RollingSpatialInvalidationReason::GnssEpochChanged;
+    }
+    if (incoming_gnss) {
+      const auto& old_source = active.provenance;
+      const auto& new_source = incoming.provenance;
+      if (new_source.occupancy_generation <
+              old_source.occupancy_generation ||
+          new_source.gnss_epoch_generation <
+              old_source.gnss_epoch_generation) {
+        return RollingSpatialInvalidationReason::SourceProvenanceInvalid;
       }
-      if (active.occupancy_generation != incoming.occupancy_generation ||
+      if (old_source.occupancy_generation !=
+              new_source.occupancy_generation ||
           !sameOwner(active.occupancy_owner, incoming.occupancy_owner)) {
         return RollingSpatialInvalidationReason::OccupancySourceChanged;
       }
-    }
-    if (projection.legacy_lidar &&
-        (!std::isfinite(active.snapshot.current.tdop) ||
-         !std::isfinite(incoming.snapshot.current.tdop))) {
-      return RollingSpatialInvalidationReason::CurrentIntegrityChanged;
-    }
-    if (projection.lidar &&
-        (!active.lidar_fim_owner || !incoming.lidar_fim_owner)) {
-      return RollingSpatialInvalidationReason::LidarSourceChanged;
-    }
-    if (projection.legacy_lidar &&
-        (!active.lidar_points_owner || !incoming.lidar_points_owner)) {
-      return RollingSpatialInvalidationReason::LidarSourceChanged;
+      if (!exactDouble(old_source.occupancy_stamp,
+                       new_source.occupancy_stamp)) {
+        return RollingSpatialInvalidationReason::SourceProvenanceInvalid;
+      }
+      if (old_source.gnss_epoch_generation ==
+          new_source.gnss_epoch_generation) {
+        if (!exactDouble(old_source.gnss_epoch_stamp,
+                         new_source.gnss_epoch_stamp) ||
+            !exactEpoch(active.snapshot, incoming.snapshot)) {
+          return RollingSpatialInvalidationReason::SourceProvenanceInvalid;
+        }
+      } else if (!exactEpochDiscrete(active.snapshot, incoming.snapshot) ||
+                 !policyEnabled(incoming.policy.gnss_spatial_ttl_s)) {
+        return RollingSpatialInvalidationReason::GnssEpochChanged;
+      }
     }
     if (projection.lidar) {
-      if (!sameOwner(active.lidar_fim_owner, incoming.lidar_fim_owner)) {
+      if (incoming.provenance.lidar_generation <
+          active.provenance.lidar_generation) {
+        return RollingSpatialInvalidationReason::SourceProvenanceInvalid;
+      }
+      if (incoming.provenance.lidar_generation ==
+              active.provenance.lidar_generation &&
+          (!sameOwner(active.lidar_fim_owner, incoming.lidar_fim_owner) ||
+           !exactDouble(active.provenance.lidar_stamp,
+                        incoming.provenance.lidar_stamp))) {
+        return RollingSpatialInvalidationReason::SourceProvenanceInvalid;
+      }
+      if (incoming.provenance.lidar_generation !=
+              active.provenance.lidar_generation ||
+          !sameOwner(active.lidar_fim_owner, incoming.lidar_fim_owner)) {
         return RollingSpatialInvalidationReason::LidarSourceChanged;
       }
     }
     if (projection.legacy_lidar) {
-      if (!sameOwner(active.lidar_points_owner,
-                     incoming.lidar_points_owner)) {
-        return RollingSpatialInvalidationReason::LidarSourceChanged;
+      if (!sameOwner(active.lidar_points_owner, incoming.lidar_points_owner)) {
+        return incoming.provenance.lidar_generation ==
+                       active.provenance.lidar_generation
+                   ? RollingSpatialInvalidationReason::SourceProvenanceInvalid
+                   : RollingSpatialInvalidationReason::LidarSourceChanged;
       }
-      if (!exactCurrentSpatial(active.snapshot.current,
-                               incoming.snapshot.current)) {
+      if (incoming.provenance.current_generation <
+          active.provenance.current_generation) {
+        return RollingSpatialInvalidationReason::SourceProvenanceInvalid;
+      }
+      if (incoming.provenance.current_generation ==
+          active.provenance.current_generation) {
+        if ((policyEnabled(
+                 incoming.policy.legacy_current_spatial_ttl_s) &&
+             !exactDouble(active.provenance.current_stamp,
+                          incoming.provenance.current_stamp)) ||
+            !exactCurrentSpatial(active.snapshot.current,
+                                 incoming.snapshot.current)) {
+          return RollingSpatialInvalidationReason::SourceProvenanceInvalid;
+        }
+      } else if (!exactCurrentSpatial(active.snapshot.current,
+                                      incoming.snapshot.current)) {
+        if (!exactCurrentDiscrete(active.snapshot.current,
+                                  incoming.snapshot.current) ||
+            !policyEnabled(
+                incoming.policy.legacy_current_spatial_ttl_s)) {
+          return RollingSpatialInvalidationReason::CurrentIntegrityChanged;
+        }
+      }
+      if (!std::isfinite(active.snapshot.current.tdop) ||
+          !std::isfinite(incoming.snapshot.current.tdop)) {
         return RollingSpatialInvalidationReason::CurrentIntegrityChanged;
       }
     }
     return RollingSpatialInvalidationReason::None;
+  }
+
+  struct SlotRetention {
+    bool reusable = false;
+    bool ttl = false;
+    bool gnss_expired = false;
+    bool legacy_current_expired = false;
+    bool invalid_provenance = false;
+  };
+
+  SlotRetention evaluateSlotRetention(const Slot& slot) const {
+    SlotRetention out;
+    if (!candidate || !slot.valid) return out;
+    const Identity& incoming = candidate->identity;
+    const PredictorSpatialSourceUsage usage =
+        predictorSpatialSourceUsage(incoming.params);
+    bool exact = true;
+    if (usage.gnss && incoming.snapshot.has_epoch) {
+      const bool gnss_exact =
+          slot.provenance.gnss_epoch_generation ==
+              incoming.provenance.gnss_epoch_generation &&
+          exactDouble(slot.provenance.gnss_epoch_stamp,
+                      incoming.provenance.gnss_epoch_stamp) &&
+          exactEpoch(slot.source_snapshot, incoming.snapshot);
+      const bool gnss_ttl_enabled =
+          policyEnabled(incoming.policy.gnss_spatial_ttl_s);
+      if (!gnss_exact) {
+        exact = false;
+        if (!exactEpochDiscrete(slot.source_snapshot, incoming.snapshot) ||
+            !gnss_ttl_enabled) {
+          out.gnss_expired = true;
+          return out;
+        }
+      }
+      if (gnss_ttl_enabled) {
+        const double age_s =
+            incoming.provenance.refresh_reference_time_s -
+            slot.provenance.gnss_epoch_stamp;
+        if (!std::isfinite(age_s) || age_s < 0.0) {
+          out.invalid_provenance = true;
+          out.gnss_expired = true;
+          return out;
+        }
+        if (age_s > incoming.policy.gnss_spatial_ttl_s) {
+          out.gnss_expired = true;
+          return out;
+        }
+      }
+    }
+    if (usage.legacy_lidar) {
+      const bool current_spatial_exact =
+          exactCurrentSpatial(slot.source_snapshot.current,
+                              incoming.snapshot.current);
+      const bool current_version_exact =
+          slot.provenance.current_generation ==
+              incoming.provenance.current_generation &&
+          exactDouble(slot.provenance.current_stamp,
+                      incoming.provenance.current_stamp);
+      const bool current_ttl_enabled = policyEnabled(
+          incoming.policy.legacy_current_spatial_ttl_s);
+      if (!current_spatial_exact) {
+        exact = false;
+        if (!exactCurrentDiscrete(slot.source_snapshot.current,
+                                  incoming.snapshot.current) ||
+            !current_ttl_enabled) {
+          out.legacy_current_expired = true;
+          return out;
+        }
+      } else if (current_ttl_enabled && !current_version_exact) {
+        exact = false;
+      }
+      if (current_ttl_enabled) {
+        const double age_s =
+            incoming.provenance.refresh_reference_time_s -
+            slot.provenance.current_stamp;
+        if (!std::isfinite(age_s) || age_s < 0.0) {
+          out.invalid_provenance = true;
+          out.legacy_current_expired = true;
+          return out;
+        }
+        if (age_s > incoming.policy.legacy_current_spatial_ttl_s) {
+          out.legacy_current_expired = true;
+          return out;
+        }
+      }
+    }
+    out.reusable = true;
+    out.ttl = !exact;
+    return out;
   }
 
   bool queryMatchesCandidateIdentity(
@@ -283,7 +488,8 @@ struct RollingSpatialAdvisoryWindow::Impl {
       return false;
     }
     const PredictorParams& params = candidate->identity.params;
-    const SpatialSourceProjection projection = spatialSourceProjection(params);
+    const PredictorSpatialSourceUsage projection =
+        predictorSpatialSourceUsage(params);
     if (projection.gnss &&
         !exactEpoch(input.snapshot, candidate->identity.snapshot)) {
       return false;
@@ -343,6 +549,10 @@ const char* rollingSpatialInvalidationReasonName(
       return "source_policy_changed";
     case RollingSpatialInvalidationReason::WindowDisjoint:
       return "window_disjoint";
+    case RollingSpatialInvalidationReason::SourceProvenanceInvalid:
+      return "source_provenance_invalid";
+    case RollingSpatialInvalidationReason::WatchdogForced:
+      return "watchdog_forced";
   }
   return "invalid";
 }
@@ -381,9 +591,22 @@ bool RollingSpatialAdvisoryWindow::beginRefresh(
     capacity *= extent;
   }
   const PredictorParams& params = input.module.params();
-  const SpatialSourceProjection projection = spatialSourceProjection(params);
-  if (projection.gnss &&
-      (!input.occupancy_owner || input.occupancy_generation == 0u)) {
+  const PredictorSpatialSourceUsage projection =
+      predictorSpatialSourceUsage(params);
+  const auto& source = input.provenance;
+  if (!std::isfinite(source.refresh_reference_time_s)) {
+    if (reason) *reason = "invalid_refresh_reference_time";
+    return false;
+  }
+  if (source.current_generation == 0u ||
+      !std::isfinite(source.current_stamp) ||
+      !exactDouble(source.current_stamp, input.snapshot.current.stamp)) {
+    if (reason) *reason = "invalid_current_provenance";
+    return false;
+  }
+  if (projection.gnss && input.snapshot.has_epoch &&
+      (!input.occupancy_owner || source.occupancy_generation == 0u ||
+       !std::isfinite(source.occupancy_stamp))) {
     if (reason) *reason = "missing_occupancy_identity";
     return false;
   }
@@ -395,7 +618,10 @@ bool RollingSpatialAdvisoryWindow::beginRefresh(
   }
   if (projection.gnss && input.snapshot.has_epoch) {
     const GnssEpoch& epoch = input.snapshot.gnss_epoch;
-    if (!std::isfinite(epoch.stamp)) {
+    if (source.gnss_epoch_generation == 0u ||
+        !std::isfinite(source.gnss_epoch_stamp) ||
+        !std::isfinite(epoch.stamp) ||
+        !exactDouble(source.gnss_epoch_stamp, epoch.stamp)) {
       if (reason) *reason = "invalid_gnss_epoch_identity";
       return false;
     }
@@ -408,12 +634,23 @@ bool RollingSpatialAdvisoryWindow::beginRefresh(
       }
     }
   }
+  const bool invalid_lidar_provenance =
+      projection.lidar &&
+      (!input.lidar_fim_primitives_owner || source.lidar_generation == 0u ||
+       !std::isfinite(source.lidar_stamp) ||
+       (projection.legacy_lidar && !input.lidar_map_points_owner));
+  if (projection.legacy_lidar &&
+      !std::isfinite(input.snapshot.current.tdop)) {
+    if (reason) *reason = "invalid_legacy_lidar_provenance";
+    return false;
+  }
   auto candidate = std::make_unique<Impl::Candidate>();
   candidate->identity.geometry = std::move(input.geometry);
   candidate->identity.params = input.module.params();
   candidate->identity.snapshot = input.snapshot;
+  candidate->identity.policy = input.policy;
+  candidate->identity.provenance = input.provenance;
   candidate->identity.occupancy_owner = std::move(input.occupancy_owner);
-  candidate->identity.occupancy_generation = input.occupancy_generation;
   candidate->identity.lidar_points_owner =
       std::move(input.lidar_map_points_owner);
   candidate->identity.lidar_fim_owner =
@@ -431,6 +668,23 @@ bool RollingSpatialAdvisoryWindow::beginRefresh(
   if (impl_->active_identity) {
     invalidation = Impl::compareIdentity(*impl_->active_identity,
                                          candidate->identity);
+    if (invalidation == RollingSpatialInvalidationReason::None &&
+        policyEnabled(candidate->identity.policy.full_refresh_watchdog_s)) {
+      const double elapsed =
+          candidate->identity.provenance.refresh_reference_time_s -
+          impl_->last_successful_full_refresh_reference_time_s;
+      if (!std::isfinite(elapsed) || elapsed < 0.0) {
+        invalidation =
+            RollingSpatialInvalidationReason::SourceProvenanceInvalid;
+      } else if (elapsed >=
+                 candidate->identity.policy.full_refresh_watchdog_s) {
+        invalidation = RollingSpatialInvalidationReason::WatchdogForced;
+        candidate->watchdog_forced = true;
+      }
+    }
+  }
+  if (invalid_lidar_provenance) {
+    invalidation = RollingSpatialInvalidationReason::SourceProvenanceInvalid;
   }
   candidate->invalidation_reason = invalidation;
   if (impl_->active_identity &&
@@ -439,6 +693,7 @@ bool RollingSpatialAdvisoryWindow::beginRefresh(
         impl_->active_identity->validity_generation;
     candidate->slots = impl_->active_slots;
   } else {
+    candidate->full_rebuild = true;
     candidate->identity.validity_generation = impl_->next_validity_generation++;
     candidate->slots.resize(capacity);
     if (impl_->active_identity) {
@@ -494,17 +749,41 @@ RollingSpatialAdvisoryWindow::queryPositionHorizons(
   }
   const std::size_t address = impl_->address(key);
   Impl::Slot& slot = impl_->candidate->slots[address];
-  const bool hit = slot.valid && slot.world_key == key &&
-                   slot.validity_generation ==
-                       impl_->candidate->identity.validity_generation;
+  const bool slot_matches =
+      slot.valid && slot.world_key == key &&
+      slot.validity_generation ==
+          impl_->candidate->identity.validity_generation;
+  const Impl::SlotRetention retention =
+      slot_matches ? impl_->evaluateSlotRetention(slot)
+                   : Impl::SlotRetention{};
+  const bool hit = slot_matches && retention.reusable;
   if (!impl_->candidate->touched[address]) {
     impl_->candidate->touched[address] = 1u;
     if (hit) {
       impl_->candidate->retained.fetch_add(1, std::memory_order_relaxed);
+      if (retention.ttl) {
+        impl_->candidate->ttl_retained.fetch_add(1,
+                                                 std::memory_order_relaxed);
+      } else {
+        impl_->candidate->exact_retained.fetch_add(
+            1, std::memory_order_relaxed);
+      }
     } else {
       impl_->candidate->entered.fetch_add(1, std::memory_order_relaxed);
       if (slot.valid) {
         impl_->candidate->evicted.fetch_add(1, std::memory_order_relaxed);
+      }
+      if (retention.gnss_expired) {
+        impl_->candidate->gnss_ttl_expired.fetch_add(
+            1, std::memory_order_relaxed);
+      }
+      if (retention.legacy_current_expired) {
+        impl_->candidate->legacy_current_ttl_expired.fetch_add(
+            1, std::memory_order_relaxed);
+      }
+      if (retention.invalid_provenance) {
+        impl_->candidate->invalid_source_provenance.fetch_add(
+            1, std::memory_order_relaxed);
       }
     }
   }
@@ -512,12 +791,18 @@ RollingSpatialAdvisoryWindow::queryPositionHorizons(
   const PredictorModule::SpatialAdvisory* cached = hit ? &slot.advisory : nullptr;
   bool populated_lidar_this_call = false;
   for (const auto& input : inputs) {
+    PredictorQueryInput evaluated_input = input;
+    if (cached && predictorSpatialSourceUsage(
+                      impl_->candidate->identity.params).gnss) {
+      evaluated_input.snapshot.gnss_epoch.stamp =
+          slot.provenance.gnss_epoch_stamp;
+    }
     PredictorModule::SpatialAdvisory evaluated;
     const std::size_t recomputes_before =
         local.spatial_advisory_recompute_count;
     const std::size_t reuses_before = local.spatial_advisory_reuse_count;
     outputs.push_back(impl_->candidate->module.queryWithSpatialAdvisory(
-        input, cached, &evaluated, &local));
+        evaluated_input, cached, &evaluated, &local));
     if (populated_lidar_this_call &&
         local.spatial_advisory_reuse_count > reuses_before) {
       ++local.lidar_cache_hits;
@@ -528,6 +813,8 @@ RollingSpatialAdvisoryWindow::queryPositionHorizons(
       slot.validity_generation =
           impl_->candidate->identity.validity_generation;
       slot.advisory = std::move(evaluated);
+      slot.source_snapshot = impl_->candidate->identity.snapshot;
+      slot.provenance = impl_->candidate->identity.provenance;
       cached = &slot.advisory;
       if (local.lidar_advisory_invocations > 0) {
         populated_lidar_this_call = true;
@@ -540,12 +827,56 @@ RollingSpatialAdvisoryWindow::queryPositionHorizons(
   return outputs;
 }
 
+bool RollingSpatialAdvisoryWindow::candidateOccupancyEvidenceMatches(
+    const std::shared_ptr<const LocalOccupancyGrid>& observed_owner) const {
+  if (!impl_->candidate || !observed_owner) return false;
+  const auto& candidate = *impl_->candidate;
+  const PredictorSpatialSourceUsage source_usage =
+      predictorSpatialSourceUsage(candidate.identity.params);
+  if (!source_usage.gnss) return true;
+  if (!candidate.identity.occupancy_owner) return false;
+  if (sameOwner(candidate.identity.occupancy_owner, observed_owner)) {
+    return true;
+  }
+  if (candidate.identity.occupancy_owner->size() == 0u &&
+      observed_owner->size() == 0u) {
+    return true;
+  }
+
+  VisibilityPredictor expected(
+      candidate.identity.params.gnss.visibility_params);
+  VisibilityPredictor observed(
+      candidate.identity.params.gnss.visibility_params);
+  expected.set_occupancy(candidate.identity.occupancy_owner.get());
+  observed.set_occupancy(observed_owner.get());
+  const auto& geometry = candidate.identity.geometry;
+  for (std::size_t index = 0; index < candidate.slots.size(); ++index) {
+    if (!candidate.touched[index]) continue;
+    const Impl::Slot& slot = candidate.slots[index];
+    if (!slot.valid || !slot.source_snapshot.has_epoch) continue;
+    const Eigen::Vector3d position =
+        (slot.world_key.cast<double>() + Eigen::Vector3d::Constant(0.5)) *
+            geometry.resolution_m +
+        geometry.lattice_anchor_w;
+    if (!exactVisibilityResult(
+            expected.predict(position, slot.source_snapshot.gnss_epoch),
+            observed.predict(position, slot.source_snapshot.gnss_epoch))) {
+      return false;
+    }
+  }
+  return true;
+}
+
 void RollingSpatialAdvisoryWindow::commitRefresh() {
   if (!impl_->candidate) return;
   if (!impl_->candidate->source_identity_valid.load(
           std::memory_order_relaxed)) {
     impl_->candidate.reset();
     return;
+  }
+  if (impl_->candidate->full_rebuild) {
+    impl_->last_successful_full_refresh_reference_time_s =
+        impl_->candidate->identity.provenance.refresh_reference_time_s;
   }
   impl_->active_identity = std::move(impl_->candidate->identity);
   impl_->active_slots = std::move(impl_->candidate->slots);
@@ -567,6 +898,23 @@ RollingSpatialRefreshDiagnostics RollingSpatialAdvisoryWindow::diagnostics()
   out.evicted_position_count =
       impl_->candidate->evicted.load(std::memory_order_relaxed);
   out.full_invalidation_count = impl_->candidate->full_invalidations;
+  out.exact_retained_position_count =
+      impl_->candidate->exact_retained.load(std::memory_order_relaxed);
+  out.ttl_retained_position_count =
+      impl_->candidate->ttl_retained.load(std::memory_order_relaxed);
+  out.gnss_ttl_expired_position_count =
+      impl_->candidate->gnss_ttl_expired.load(std::memory_order_relaxed);
+  out.legacy_current_ttl_expired_position_count =
+      impl_->candidate->legacy_current_ttl_expired.load(
+          std::memory_order_relaxed);
+  out.watchdog_forced_full_rebuild_count =
+      impl_->candidate->watchdog_forced ? 1u : 0u;
+  out.invalid_source_provenance_count =
+      impl_->candidate->invalidation_reason ==
+              RollingSpatialInvalidationReason::SourceProvenanceInvalid
+          ? 1u
+          : impl_->candidate->invalid_source_provenance.load(
+                std::memory_order_relaxed);
   out.invalidation_reason = impl_->candidate->invalidation_reason;
   if (impl_->active_identity && out.full_invalidation_count == 0 &&
       out.retained_position_count == 0 &&

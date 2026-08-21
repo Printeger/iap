@@ -22,6 +22,43 @@ namespace {
 
 constexpr double kPi = 3.14159265358979323846;
 
+TEST(PredictorSourceUsageTest, ProjectsOnlyConfiguredSpatialSources) {
+  iap::PredictorParams params;
+
+  params.source_mode = iap::PredictorSourceMode::Fusion;
+  params.gnss_epoch_policy = iap::PredictorGnssEpochPolicy::Required;
+  params.lidar.enable_legacy_observability = true;
+  auto usage = iap::predictorSpatialSourceUsage(params);
+  EXPECT_TRUE(usage.gnss);
+  EXPECT_TRUE(usage.lidar);
+  EXPECT_TRUE(usage.legacy_lidar);
+
+  params.source_mode = iap::PredictorSourceMode::GnssOnly;
+  usage = iap::predictorSpatialSourceUsage(params);
+  EXPECT_TRUE(usage.gnss);
+  EXPECT_FALSE(usage.lidar);
+  EXPECT_FALSE(usage.legacy_lidar);
+
+  params.source_mode = iap::PredictorSourceMode::LidarOnly;
+  usage = iap::predictorSpatialSourceUsage(params);
+  EXPECT_FALSE(usage.gnss);
+  EXPECT_TRUE(usage.lidar);
+  EXPECT_TRUE(usage.legacy_lidar);
+
+  params.lidar.enable_legacy_observability = false;
+  usage = iap::predictorSpatialSourceUsage(params);
+  EXPECT_FALSE(usage.gnss);
+  EXPECT_TRUE(usage.lidar);
+  EXPECT_FALSE(usage.legacy_lidar);
+
+  params.source_mode = iap::PredictorSourceMode::Fusion;
+  params.gnss_epoch_policy = iap::PredictorGnssEpochPolicy::Disabled;
+  usage = iap::predictorSpatialSourceUsage(params);
+  EXPECT_FALSE(usage.gnss);
+  EXPECT_TRUE(usage.lidar);
+  EXPECT_FALSE(usage.legacy_lidar);
+}
+
 std::filesystem::path predictor_artifact_dir() {
   if (const char* configured = std::getenv("IAP_TEST_ARTIFACT_DIR")) {
     std::filesystem::path path(configured);

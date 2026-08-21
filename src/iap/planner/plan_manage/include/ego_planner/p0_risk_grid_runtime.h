@@ -77,6 +77,12 @@ class P0RiskGridRuntime {
         iap::LidarObservabilityFim::Params{}.fim_radius_m;
     double predictor_sigma_grow_m_sqrt_s =
         std::numeric_limits<double>::quiet_NaN();
+    double predictor_gnss_spatial_ttl_s =
+        std::numeric_limits<double>::quiet_NaN();
+    double predictor_legacy_current_spatial_ttl_s =
+        std::numeric_limits<double>::quiet_NaN();
+    double predictor_full_refresh_watchdog_s =
+        std::numeric_limits<double>::quiet_NaN();
     int predictor_requested_worker_count = 1;
     int predictor_effective_worker_count = 1;
     P0_6FixtureConfig p0_6_fixture;
@@ -176,6 +182,12 @@ class P0RiskGridRuntime {
     std::size_t predictor_spatial_entered_position_count = 0;
     std::size_t predictor_spatial_evicted_position_count = 0;
     std::size_t predictor_spatial_full_invalidation_count = 0;
+    std::size_t predictor_spatial_exact_retained_position_count = 0;
+    std::size_t predictor_spatial_ttl_retained_position_count = 0;
+    std::size_t predictor_spatial_gnss_ttl_expired_position_count = 0;
+    std::size_t predictor_spatial_legacy_current_ttl_expired_position_count = 0;
+    std::size_t predictor_spatial_watchdog_forced_full_rebuild_count = 0;
+    std::size_t predictor_spatial_invalid_source_provenance_count = 0;
     std::string predictor_spatial_invalidation_reason = "none";
     uint64_t input_callback_count = 0;
     uint64_t health_callback_count = 0;
@@ -199,12 +211,18 @@ class P0RiskGridRuntime {
 
   iap::CurrentIntegrityState currentFromMsg(
       const iap::msg::IntegrityReport& msg) const;
+  struct PredictorSourceCapture {
+    uint64_t current_generation = 0;
+    double current_stamp = std::numeric_limits<double>::quiet_NaN();
+    uint64_t gnss_epoch_generation = 0;
+    double gnss_epoch_stamp = std::numeric_limits<double>::quiet_NaN();
+  };
   const iap::GnssEpoch* activeGnssEpoch(double query_stamp) const;
   Eigen::Matrix3d currentPriorInformation(
       const iap::CurrentIntegrityState& current) const;
   bool buildSnapshot(
       double now_s, iap::IntegritySnapshot* snapshot,
-      uint64_t* gnss_epoch_generation = nullptr) const;
+      PredictorSourceCapture* source_capture = nullptr) const;
   iap::RiskGridHealth addLidarPredictorInputHealth(
       iap::RiskGridHealth health) const;
   bool p0_6_fixture_occupied(const Eigen::Vector3d& pos) const;
@@ -328,6 +346,8 @@ class P0RiskGridRuntime {
   std::size_t latest_lidar_fim_primitive_count_ = 0;
   std::size_t latest_lidar_fim_valid_normal_count_ = 0;
   std::string latest_lidar_fim_fallback_reason_ = "not_evaluated";
+  uint64_t latest_lidar_generation_ = 0;
+  double latest_lidar_stamp_ = std::numeric_limits<double>::quiet_NaN();
   mutable std::mutex health_state_mutex_;
 };
 
