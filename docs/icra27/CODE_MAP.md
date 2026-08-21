@@ -47,6 +47,29 @@ P0 cannot write back to current PL/AL/IM. A P4/P5 consumer may acquire an immuta
 
 Current status is `BLOCKED/UNQUALIFIED`. ICRA-004 is still a P0-only GPU-preflight and 20-second smoke task; P4 and P5 remain off in that smoke.
 
+### 2.1 Frozen P0 refactor target
+
+`docs/icra27/P0_ROLLING_RISK_WINDOW_DESIGN.md` supersedes no retained evidence;
+it defines the target Implementation behind the existing immutable snapshot Interface.
+
+The planned deep Module is `RollingRiskWindow`. Its external Seam remains deliberately
+small: update from one coherent versioned input and acquire one immutable
+`RiskGridSnapshot`. Ring offsets, world-key slots, dirty sets, TTL, source invalidation,
+copy-on-write and atomic publication stay inside the Implementation.
+
+The current production gaps are concrete:
+
+- `RiskGridMap::updateGeometry()` follows the continuous UAV position, so every refresh
+  moves all voxel centres and rebuilds the full local field;
+- production P0 supplies LiDAR points/primitives to `PredictorModule` but does not bind
+  `LocalOccupancyGrid` for GNSS map LOS;
+- LiDAR is reused by spatial position, while GNSS and fusion run once per horizon query;
+- the current Predictor result is scientifically invariant across the six frozen horizons
+  because empirical covariance growth is absent.
+
+The staged target first corrects those semantics, then reduces spatial work, then adds the
+rolling storage. P4/P5 callers must not learn the cache or ring Interface.
+
 ## 3. Initial seed and collision scan
 
 ### 3.1 Initial seed is not A*

@@ -1,5 +1,18 @@
 # Traceability Matrix (IAP)
 
+## 2026-08-21 ICRA P0 rolling-window design freeze
+
+| Req ID | Requirement/evidence seam | Frozen design / next evidence | Status |
+|---|---|---|---|
+| IAP-RQ-312 / IAP-RQ-314 | Active production P0 must bind map-based GNSS visibility and canopy-aware effective information | `docs/icra27/P0_ROLLING_RISK_WINDOW_DESIGN.md`; ICRA-008 concrete Seam audit; later focused production tests | **PREDICTOR CAPABILITY EXISTS; ACTIVE P0 BINDING MISSING** |
+| IAP-RQ-320 / IAP-RQ-321 | Horizon risk must propagate covariance/PL rather than reuse an invariant whole result | frozen `SpatialAdvisory` versus `HorizonRisk` separation; later monotonic/equivalence/fail-closed tests | **ACTIVE P0 MISSING SIGMA GROWTH** |
+| IAP-RQ-322 | Fixed lattice, rolling local window, version/TTL invalidation and coherent immutable publication | design sections 3–7; staged implementation and forced-full equivalence tests | **PLANNED / NOT_IMPLEMENTED** |
+| IAP-RQ-320 / IAP-RQ-322 | Gate evidence must preserve 76,800 logical voxels while separating actual recompute/reuse/invocation counts | design section 10; active scope and implementation-plan addenda | **CONTRACT FROZEN; EVIDENCE SCHEMA NOT_IMPLEMENTED** |
+
+This design freeze changes no product source, threshold, ROI, horizon, worker configuration,
+runtime result or historical evidence. ICRA-008 is a bounded implementation-readiness audit;
+it cannot mark any planned row implemented or start P4.
+
 ## 2026-08-21 ICRA-007 P0 profile fidelity repair
 
 | Req ID | Requirement/evidence seam | Implementation and retained evidence | Status |

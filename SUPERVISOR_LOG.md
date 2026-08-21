@@ -1,5 +1,69 @@
 # ICRA Supervisor Log
 
+## 2026-08-21 — ICRA-007 review, P0 design freeze and ICRA-008 authorization
+
+### Review identity and verification
+
+- Review base: `62646b4b5262a921b6895f7192d610e5b80100c6`.
+- Reviewed HEAD: `bb3a87136361032b463985a002c844a430f99e07`.
+- Reviewed commits: `3b6c5e2` and `bb3a871`; both bind `IAP-RQ-320`.
+- `dev/icra` matched `origin/dev/icra` at divergence `0 0`; the pre-existing
+  `docs/icra27/dev/ICRA_SYSTEM_FLOW.pdf` remained untracked and untouched.
+- `git diff --check` passed. Supervisor reran the repository-local, non-ROS
+  `test_predictor_risk_conversion` (2/2), `test_predictor_module` (37/37) and
+  ICRA-007 evidence contract (1/1); all passed. The ROS-aware P0 test was not
+  rerun because the Builder already proved it writes outside the repository.
+
+### Standards axis
+
+- Hard procedural nonconformance: the ROS-aware focused P0 test created
+  `/root/.ros/log/test_p0_risk_grid_runtime_484375_1787290745847.log` and the
+  Builder then deleted it. This violates both the task's no-external-write/no-cleanup
+  rule and `AGENTS.md` repository-boundary preservation. Recording the event is
+  truthful but cannot make the execution a clean PASS.
+- Judgement risks: the offline profiler duplicates production grouping/dispatch and
+  its own replay loop; the 1,214-line diagnostic owns fixture, timing, hashing,
+  validation and serialization; modes/statuses are raw strings. These do not block
+  the accepted diagnostic but must not be copied into the product refactor.
+
+### Spec axis
+
+- PASS: `frozen_runtime=CURRENT_PRODUCTION` does not bind GNSS occupancy;
+  `map_los_candidate=NOT_CURRENT_PRODUCTION` binds only the deterministic 704-point
+  occupancy difference.
+- PASS: both modes preserve 76,800 logical/dispatched/conversion queries, 76,800
+  GNSS/fusion invocations, 12,800 LiDAR evaluations and 64,000 LiDAR hits per cell.
+- PASS: provider timing stops after production-shaped grouping, dispatch, shared
+  result conversion and worker join; real scientific replay stays outside the timer.
+- PASS: component timer perturbation is below 0.4% at worker 1, checksums/counts are
+  stable, and horizon invariance is truthfully classified as `MISSING_SIGMA_GROWTH`.
+- PASS: no production science/cache/config/threshold, worker, GPU or P4/P5 change.
+
+### P0 disposition and design freeze
+
+- Verdict: `ICRA007_TECHNICAL_PASS_PROCEDURAL_NONCONFORMANCE`.
+- Gate-0B remains `BLOCKED_PERFORMANCE_AND_SEMANTICS`; P4 remains `NOT_QUALIFIED`.
+- Retained ICRA-005 provider/refresh p95 remains approximately `639.377/657.214 ms`.
+  Faithful ICRA-007 worker-1 frozen provider p95 is `577.931 ms`; map-LOS candidate
+  p95 is `1172.415 ms`. GNSS is the dominant ranked cost.
+- `docs/icra27/P0_ROLLING_RISK_WINDOW_DESIGN.md` is frozen as the sole P0 refactor
+  architecture source. Active scope, plan, requirements, code map, traceability and
+  changes now distinguish the 76,800 logical field from actual spatial recompute,
+  reuse, provider/advisory invocation and horizon-fusion work.
+- The frozen sequence is semantic correctness, within-refresh spatial deduplication,
+  fixed lattice/ring window, version/TTL/delta invalidation, CPU scaling, then an
+  independently authorized smoke and Gate-0B qualification. P4 cannot start earlier.
+
+### Required next action
+
+- Unique task: `ICRA-008 / GATE_0B` in `NEXT_TASK.md`.
+- Perform one repository-local implementation-readiness audit of the concrete
+  production GNSS occupancy ownership/lifetime Seam, existing covariance-growth
+  implementations, phase-1 tests, evidence counters and minimal ICRA-009 file scope.
+- Do not change product/test/launch/analyzer code or run ROS. If ICRA-008 resolves the
+  requested concrete decisions and passes review, the following task will enter P0
+  phase-1 product development without another broad audit.
+
 ## 2026-08-21 — ICRA-006 review and ICRA-007 fidelity repair
 
 ### Review identity and verification

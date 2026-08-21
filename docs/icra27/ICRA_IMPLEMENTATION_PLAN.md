@@ -221,11 +221,34 @@ integrity 输入有效，并观测到真实 P0 generation；P4/P5/P1/P2/P3 均�
 smoke 经 Supervisor review 后，才授权单次冻结的 60 s full-grid benchmark。
 不得在两次运行之间调整 ROI、horizons、worker 或 refresh period。
 
-60 s gate 要求每代 refresh_query_count=76,800、至少 20 个成功 generation，
-并报告 type-7 p50/p95/max、stale/failed ratio 与实际 interval。p95 必须不超过 400 ms。
+60 s gate 要求每代 `refresh_query_count=76,800` 个 logical risk voxels、至少 20 个成功
+generation，并报告实际 provider dispatch、spatial recompute/reuse、GNSS/LiDAR invocation、
+horizon fusion、window shift/full-rebuild reason、type-7 p50/p95/max、stale/failed ratio 与
+实际 interval。p95 必须不超过 400 ms。
 
 进程退出、输入无效、零真实 generation、shape 错误、样本不足或 p95 超门均为 BLOCKED/FAIL。
 不得以 launch 顶层返回 0 替代 required-process health。
+
+#### 6.2.1 P0 staged refactor contract
+
+`docs/icra27/P0_ROLLING_RISK_WINDOW_DESIGN.md` 是 P0 重构的唯一架构设计源。
+实现顺序固定为：
+
+1. production map-LOS + empirical covariance growth + spatial/horizon Seam；
+2. 单 refresh 内空间证据去重；
+3. fixed world lattice + dense ring window；
+4. source version/TTL/occupancy delta 与 fail-closed publication；
+5. worker 1/2/4 CPU profile；
+6. 独立 smoke 和 60 s qualification。
+
+每一步必须是独立 task 和 review。不得把 whole-result cross-horizon cache、rolling
+window、worker 调整或 GPU 实现混入第一阶段。每代发布仍是完整 immutable snapshot；
+“增量”只描述内部计算与复用，不允许消费者读取 partial generation。
+
+`refresh_query_count` 继续表示完整 logical shape。`provider_query_count` 保留为实际
+provider horizon-query count，但若后续 Interface 使该字段语义不再成立，必须先升级 health/
+evidence schema 和 analyzer tests，不能静默重定义。cold start、周期 full rebuild 和 steady
+rolling refresh 必须明确标记；正式 benchmark 如何纳入分位数必须在运行前由独立任务冻结。
 
 ### 6.3 P4-G0A — deterministic collision
 

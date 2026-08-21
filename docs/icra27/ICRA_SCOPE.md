@@ -66,6 +66,27 @@ enum class CollisionScanStatus {
 - Add the planned composite profile `icra_p0_p4_p5` with fail-closed effective-value validation.
 - Retain reproducible manifests, hashes, latency, fallback and generation lineage for each decision.
 
+## P0 rolling-window design freeze
+
+The authoritative P0 refactor design is
+`docs/icra27/P0_ROLLING_RISK_WINDOW_DESIGN.md`. It freezes a fixed world-aligned
+risk lattice, a UAV-centred dense rolling window, version/TTL-bound spatial reuse and
+atomic immutable generation publication.
+
+The refactor does not change the ICRA ROI, `0.75 m` resolution, six horizons,
+`0.5 s` refresh period or formal `400 ms` threshold. Every successful generation still
+contains 76,800 logical risk voxels. Actual spatial recomputation, provider dispatch,
+GNSS/LiDAR invocations, horizon fusion, window shift and full-rebuild reason must be
+reported separately.
+
+Development is ordered: correct production map LOS and horizon covariance semantics;
+deduplicate spatial work within one refresh; add the fixed lattice/ring window; add
+version/TTL/delta invalidation; then profile CPU workers and qualify. GPU/CUDA and an
+iKD-tree risk-grid replacement are outside this sequence unless a later reviewed CPU
+profile creates a new explicit task.
+
+No P4 production task may start until the completed P0 sequence passes Gate-0B.
+
 ## Retained but disabled modules
 
 P1, P2 and P3 remain in the repository. Their source, tests, CMake targets and legacy profiles must not be deleted.
@@ -90,7 +111,7 @@ P2 remains historically frozen by `NO_GO_P2`. Re-enabling it requires a separate
 ## Gate sequence
 
 1. **Scope pivot:** docs, requirements, state and ICRA-004 agree on the conditional route.
-2. **P0 Gate-0B:** GPU preflight, valid integrity, real P0 generations, 76,800 queries per generation, at least 20 generations and p95 `≤400 ms`.
+2. **P0 Gate-0B:** GPU preflight, valid integrity, real P0 generations, 76,800 logical risk voxels per generation, separately reported recompute/reuse/invocation counts, at least 20 generations and p95 `≤400 ms`.
 3. **P4-G0A:** deterministic closed segment plus no-collision, open-ended, multi-obstacle and free-endpoint tests.
 4. **P4-G0B:** metrics-only same-event original/risk guides, immutable identity, final-path resampling and truthful fallback evidence.
 5. **P4-G0C:** metrics-only calibration, frozen thresholds, zero search timeout and complete 200/200 path coverage.

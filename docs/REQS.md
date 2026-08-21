@@ -328,6 +328,36 @@ Talk: §7.2 predicted covariance from predicted geometry/information
 Acceptance:
 - Different candidates yield different PL_pred sequences.
 
+### IAP-RQ-322 Coherent rolling P0 risk window
+Status: PLANNED for the active ICRA P0 runtime; design frozen in
+`docs/icra27/P0_ROLLING_RISK_WINDOW_DESIGN.md`.
+- [ ] Use a fixed world-aligned risk-voxel lattice and a UAV-centred local window.
+- [ ] Recompute only newly exposed or explicitly invalidated spatial evidence while
+      preserving all 76,800 logical risk voxels in each published generation.
+- [ ] Bind reuse to source version/stamp, TTL and frame/config identity without restamping.
+- [ ] Publish only coherent immutable generations; mixed-version or partial updates fail closed.
+
+Acceptance:
+- A one-cell window shift recomputes only the entering slab and evicts the leaving slab.
+- Incremental and forced-full rebuilds are scientifically equivalent for identical inputs.
+- Source changes, TTL expiry and frame reset invalidate the documented minimum safe region.
+- P4/P5 continue to consume the existing immutable `RiskGridSnapshot` Interface.
+
+### Active ICRA P0 conformance note — 2026-08-21
+
+The checked items above describe capabilities present somewhere in the repository; they do
+not by themselves qualify the active ICRA P0 runtime. ICRA-007 established that the current
+production P0 provider does not bind the available `LocalOccupancyGrid` into GNSS visibility
+and that its six frozen horizons do not apply empirical covariance growth. Consequently:
+
+- IAP-RQ-311 is implemented as a reusable occupancy Module;
+- IAP-RQ-312 and IAP-RQ-314 have tested predictor implementations but are not bound into the
+  active production P0 GNSS path;
+- IAP-RQ-320 and IAP-RQ-321 remain unqualified for the active P0 runtime because
+  `Sigma_pred/PL_pred` lacks horizon growth;
+- IAP-RQ-322 is planned and must not be reported as implemented before its staged tests and
+  Gate-0B qualification pass.
+
 ---
 
 ## Phase-2: Turn trunks into real constraints (Talk §4.2, §5.1)

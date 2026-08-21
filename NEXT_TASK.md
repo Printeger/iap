@@ -1,126 +1,154 @@
-# ICRA-007 — Repair P0 profile fidelity before selecting the CPU optimization
+# ICRA-008 — Freeze the concrete P0 semantic Seam before implementation
 
 > Active gate: `GATE_0B`
 > Owner: `DEEPSEEK`
 > Activation: `TASK_READY`
-> Review disposition: `ICRA006_REQUEST_CHANGES_ICRA007_AUTHORIZED`
-> Requirement mapping: `IAP-RQ-320` only
+> Review disposition: `ICRA007_TECHNICAL_PASS_PROCEDURAL_NONCONFORMANCE_ICRA008_AUTHORIZED`
+> Requirement mapping: `IAP-RQ-312`, `IAP-RQ-314`, `IAP-RQ-320`, `IAP-RQ-321`, `IAP-RQ-322`
 > Conference route: conditional P0 -> P4 -> P5
-> This task: offline diagnostic repair only; no production optimization or main-flow run
+> This task: repository-local implementation-readiness audit only; no product implementation
 
 ## Supervisor verdict and objective
 
-ICRA-006 produced reproducible tests and useful structural evidence, but it does not yet support a current-runtime component verdict:
+ICRA-007 now faithfully separates the current frozen P0 provider from the standards-required
+map-LOS candidate and proves that GNSS dominates both workloads. Its technical diagnostic
+contract passes, but its ROS-aware test created and then deleted an external `/root/.ros/log`
+artifact, so the review is recorded as `TECHNICAL_PASS / PROCEDURAL_NONCONFORMANCE` rather
+than a clean PASS.
 
-1. Its profiler installs a 704-point `LocalOccupancyGrid` for GNSS ray LOS. The frozen production P0 provider currently installs only LiDAR map points/primitives and does not call `PredictorModule::set_local_occupancy()`.
-2. Its `result_materialization` timer measures moving `PredictorQueryResult` objects, while production converts every result through `makeRiskPredictionResult()`.
-3. It makes six-horizon scientific invariance part of profile PASS even though the repository conventions require empirical covariance growth and horizon-dependent `Sigma_pred`/`PL_pred`.
-
-The retained ICRA-005 production result remains authoritative: provider p95 approximately `639.377 ms`, total refresh p95 `657.21388795 ms`, Gate limit `400 ms`. ICRA-007 must repair the offline evidence so Supervisor can choose one bounded CPU remediation without conflating current runtime, a standards-required map-LOS path, and missing horizon propagation.
+The P0 refactor architecture is frozen in
+`docs/icra27/P0_ROLLING_RISK_WINDOW_DESIGN.md`. Before product code changes, one bounded
+audit must map that design onto the current concrete ownership/lifetime and computation
+seams. ICRA-008 must remove the remaining implementation ambiguity so the next reviewed task
+can start phase-1 product development without reopening a broad audit.
 
 ## 1. Start and synchronize
 
 - Follow the `AGENTS.md` synchronization protocol. Stop as `REMOTE_DIVERGED` if both sides lead.
-- Preserve the existing untracked `docs/icra27/dev/ICRA_SYSTEM_FLOW.pdf`; do not modify, stage, delete, move or regenerate it.
-- Record ICRA-007 START in `DEV_LOG.md` with start HEAD, allowed files, diagnostic-only scope and the pre-existing PDF.
-- Do not edit Supervisor-owned state, task, log, scope, plan or gate documents.
+- Preserve the existing untracked `docs/icra27/dev/ICRA_SYSTEM_FLOW.pdf`; do not modify,
+  stage, delete, move or regenerate it.
+- Record ICRA-008 START in `DEV_LOG.md` with start HEAD, exact allowed files, audit-only scope
+  and the pre-existing PDF.
+- Do not edit Supervisor-owned state, task, log, scope, plan, design-freeze or Gate documents.
 
-## 2. Preserve accepted ICRA-006 evidence
+## 2. Produce one concrete audit artifact
 
-- Do not alter or overwrite `results/icra27/icra006/red_replay/` or the committed ICRA-005 evidence.
-- Keep the exact logical workload `40 x 40 x 8`, six horizons and 76,800 logical queries.
-- Preserve stable scientific checksums, validity/source/flag counts and worker 1/2/4 equivalence.
-- Existing component invocation counters and opt-in timers may be reused, but no Predictor scientific output or caching behavior may change.
+Create exactly:
 
-Write all new output under `results/icra27/icra007/`.
+`results/icra27/icra008/P0_SEMANTIC_SEAM_AUDIT.md`
 
-## 3. Separate two explicit profiling modes
+The report is a DEEPSEEK technical audit artifact, not an authority source. It must reference
+the frozen design instead of copying or rewriting it, and it must answer every item below with
+current file/symbol/line evidence.
 
-The profiler must run and label both modes without presenting either as the other.
+### A. Production GNSS map-LOS ownership and lifetime
 
-### A. `frozen_runtime`
+- Trace the current map input from callback/storage through `P0RiskGridRuntime`,
+  `PredictorModuleRiskProvider`, `PredictorModule`, `GnssAdvisoryPredictor` and
+  `VisibilityPredictor`.
+- Explain why the current occupancy predicate/diagnostic query is not automatically the
+  `LocalOccupancyGrid` ray-LOS input required by `PredictorModule::set_local_occupancy()`.
+- Enumerate only concrete repository-supported binding options, including ownership,
+  immutability, version/stamp, frame, callback concurrency and lifetime through all workers.
+- Select one minimal recommended production Seam for ICRA-009. State exactly which existing
+  data is copied, shared or adapted and how start/end source-version validation fails closed.
+- Reject any option that requires modifying `../glim`, exposing mutable occupancy across
+  worker threads, or silently rebuilding from a different map source than P0 health records.
 
-This mode represents the current P0 provider path:
+### B. Empirical covariance-growth implementation point
 
-- do not install GNSS local occupancy;
-- bind the same effective Predictor source/freshness/GNSS policy/conservative-fusion/LiDAR settings used by the committed ICRA-005 configuration;
-- retain deterministic GNSS epoch and LiDAR inputs, while clearly labelling synthetic input values;
-- group position then six horizons exactly as production does;
-- convert each prediction into `RiskPredictionResult` with the same field mapping and validity semantics as production `makeRiskPredictionResult()`;
-- time that conversion as production result materialization;
-- report logical query count and actually dispatched Predictor query count separately.
+- Locate every existing repository implementation or parameter claiming covariance growth,
+  `Sigma_pred`, information propagation or horizon-dependent PL.
+- For each candidate, record its state frame/dimension, formula, parameters, freshness model,
+  inputs and current callers; distinguish reusable Implementation from incompatible legacy
+  behavior.
+- Select the smallest internal Seam that lets the active Predictor produce horizon-dependent
+  `Sigma_pred/PL_pred` while preserving the public `PredictorModule` query Interface and
+  current `tau=0` behavior.
+- Define monotonicity, finite/PSD, conservative-max and invalid-input rules. Do not invent
+  numerical parameter values or choose them from performance outcomes.
 
-The implementation must prevent the production mapping and profiler mapping from silently drifting. Prefer one small shared pure conversion helper with focused tests if it can be introduced without changing runtime behavior; otherwise add a fail-closed field-by-field parity test.
+### C. Phase-1 test matrix
 
-### B. `map_los_candidate`
+Specify exact proposed test names, test files, fixtures and observable assertions for the next
+development task. At minimum cover:
 
-This mode represents the standards-required GNSS map-LOS candidate path:
+- production P0 binds a versioned immutable GNSS occupancy snapshot;
+- open-sky versus blocked map LOS changes visible set/information/PL as expected;
+- `tau=0` matches the accepted baseline within a declared numerical tolerance;
+- increasing valid horizons apply covariance growth and do not produce invariant whole
+  scientific results;
+- covariance remains finite, symmetric and PSD, with PL nondecreasing for a fixed advisory;
+- stale/missing/mixed-version occupancy or prior fails closed without publishing a partial
+  generation;
+- scalar/batch and worker 1/2/4 scientific equivalence remains intact.
 
-- install the deterministic 704-point occupancy model used by ICRA-006;
-- keep every other input and parameter identical to `frozen_runtime`;
-- label it `NOT_CURRENT_PRODUCTION` in machine-readable output;
-- do not use its absolute latency to characterize ICRA-005.
+Do not commit intentionally failing tests in ICRA-008. The report must identify which current
+invariance assertion will be replaced, not layered indefinitely, when phase-1 behavior changes.
 
-The evidence must state explicitly that production currently lacks the map-based GNSS occlusion binding required by `docs/spec/conventions.md`; ICRA-007 does not repair that product behavior.
+### D. Evidence counters and schema impact
 
-## 4. Separate timing overhead from budget timing
+- Confirm that `refresh_query_count` remains the 76,800 logical-risk-voxel shape.
+- Define the exact meaning and update site for future spatial recompute/reuse,
+  GNSS/LiDAR invocation, horizon-fusion, window-shift and full-rebuild counters.
+- State whether phase 1 can preserve the current health/evidence schema. Any field whose
+  meaning would change must be called out for an explicit later schema version; no silent
+  redefinition is allowed.
 
-For each mode and worker count `1`, `2`, `4`, execute:
+### E. Minimal ICRA-009 change set
 
-- a counter-only outer-wall profile with `collect_component_timing=false`; use only this run for provider p50/p95, speedup and diagnostic budget comparison;
-- a separately labelled component-timed profile with identical inputs and `collect_component_timing=true`; use it for cost ranking, not the `400 ms` crossing;
-- identical scientific checksum and count validation between counter-only and component-timed runs.
+- Give the exact minimal product/test/document files required for phase-1 semantic
+  implementation.
+- Separate required files from optional files and explain every optional file.
+- List explicit forbidden adjacent refactors. The proposed set must exclude rolling-window
+  storage, cross-refresh caching, worker/config changes, GPU/CUDA, P4/P5 and analyzer/Gate
+  threshold changes.
 
-Report component-timer perturbation as both milliseconds and percentage for each worker/mode. If the perturbation exceeds 5% at worker 1, mark component percentages `PERTURBING_DIAGNOSTIC`; do not treat them as exact production shares.
+## 3. Verification
 
-Use at least one warm-up and five measured iterations per cell. Retain raw iterations plus type-7 p50/p95. No mocked time, sleep or extrapolated row may be included as measurement.
+- Use read-only source inspection and existing repository-local, non-ROS focused tests only.
+- Do not run any ROS-aware test known to create logs. If a harmless tool may consult ROS
+  paths, bind `ROS_HOME`, `ROS_LOG_DIR`, `TMPDIR` and related output to a new directory under
+  `results/icra27/icra008/` before it starts.
+- Do not run the IAP main flow, launch, smoke, qualification, bag, RViz, campaign, full offline
+  profile or GPU preflight; none is necessary for this static audit.
+- Record exact commands and exit codes in both the report and `DEV_LOG.md`.
+- Run `git diff --check`, verify no task process remains, and verify the preserved PDF is still
+  untracked and untouched.
 
-## 5. Report horizon semantics truthfully
+## 4. Acceptance and handoff
 
-Keep the focused test that proves the current frozen snapshot path is scientifically invariant across six horizons, but separate observation from conformance:
+ICRA-008 is ready for Supervisor review only when:
 
-- `diagnostic_execution_status` may PASS when the measurement contract is complete;
-- `p0_horizon_semantic_status` must be `MISSING_SIGMA_GROWTH` while all scientific fields remain invariant;
-- do not make invariance a condition for scientific/conformance PASS;
-- retain the exact metadata/scientific field lists and freshness-reference test;
-- explicitly prohibit whole-result cross-horizon reuse as the remediation while this semantic blocker exists.
+- the report answers A–E with exact current-code evidence and one recommended Seam per blocker;
+- source ownership/lifetime/version validation is concrete enough to implement without a new
+  design decision;
+- covariance growth has a formula/parameter provenance and testable invariants, not merely a
+  class-name recommendation;
+- the proposed phase-1 tests and minimal file set are precise and bounded;
+- no product, test, launch/config, analyzer, threshold, evidence or Supervisor-owned document
+  changed;
+- all writes stayed inside the repository and the pre-existing PDF is preserved.
 
-Do not implement covariance growth in ICRA-007.
+Explicitly stage only the two allowed files, inspect the staged diff, commit with all applicable
+`IAP-RQ-XXX` IDs, push `dev/icra`, record the report commit SHA in the final `DEV_LOG.md`
+handoff commit, push again, and return control to Supervisor.
 
-## 6. Acceptance and handoff
-
-ICRA-007 is ready for Supervisor review only when:
-
-- both modes are present and machine-readable, and `map_los_candidate` is marked not-current-production;
-- frozen-runtime construction matches the current P0 provider contract and production result conversion;
-- counter-only worker 1/2/4 results have stable checksums/counts and finite p50/p95;
-- component timing is separately labelled and its perturbation quantified;
-- horizon invariance is reported as `MISSING_SIGMA_GROWTH`, not scientific PASS;
-- focused tests and the complete registered repository-local suite pass;
-- no production result, cache, launch/config, threshold or retained evidence changes.
-
-Update `docs/CHANGES.md`, `docs/TRACEABILITY.md` and `DEV_LOG.md` with exact commands, exit codes, both mode results, timer perturbation and evidence paths. Explicitly stage only authorized files, verify the staged diff and preserved PDF, commit with `IAP-RQ-320`, push `dev/icra`, record the final SHA in `DEV_LOG.md`, and return control to Supervisor.
-
-`DEEPSEEK` may report measured rankings but must not choose the production remediation, authorize a smoke/benchmark, change the Gate verdict, start P4 or create the next task.
+`DEEPSEEK` may recommend one concrete phase-1 Seam but must not implement it, authorize a
+smoke/benchmark, change the Gate verdict, start P4 or create the next task.
 
 ## Allowed files
 
-- `apps/iap_predictor_offline_profile.cpp`;
-- `test/test_icra006_provider_profile.py`, or a narrowly renamed/replacement ICRA-007 evidence-contract test;
-- `include/iap/predictor/predictor_module.hpp` and `src/iap/predictor/predictor_module.cpp` only for additive diagnostic correction;
-- `test/test_predictor_module.cpp` only for diagnostic/equivalence assertions;
-- the narrow production conversion declaration/definition and its focused test only if needed to share or prove exact mapping; no other runtime change;
-- root or planner `CMakeLists.txt` only as needed for the profiler/test target;
-- compact new evidence under `results/icra27/icra007/`;
-- `docs/CHANGES.md`;
-- `docs/TRACEABILITY.md`;
+- `results/icra27/icra008/P0_SEMANTIC_SEAM_AUDIT.md`;
 - `DEV_LOG.md`.
 
 ## Forbidden
 
-- No ROS launch, IAP main-flow smoke, qualification benchmark, bag, RViz or campaign.
-- No GNSS/LiDAR/fusion caching change, covariance-growth implementation, numerical approximation, worker/profile change or GPU/CUDA implementation.
-- No change to the formal `400 ms` threshold, `gate0_analyzer.py`, ICRA-005/006 evidence, ROI, horizons, resolution, refresh period, backend or occupied-skip behavior.
-- No P1/P2/P3/P4/P5 code, fixture, profile, experiment or decision/action change.
-- No external writes, workspace-level build/log output, disk cleanup or changes to `../glim` or any other repository.
-- No changes to `AGENTS.md`, `AGENT_STATE.md`, `SUPERVISOR_LOG.md`, `NEXT_TASK.md` or ICRA scope/plan/gate documents.
+- No product source, header, test, CMake, launch/config, analyzer or runtime/evidence changes.
+- No new prototype, dependency, iKD-tree, cache, ring buffer, covariance implementation,
+  occupancy Adapter implementation, worker/profile change or GPU/CUDA work.
+- No ROS/main-flow execution and no mutation of ICRA-004/005/006/007 retained evidence.
+- No changes to `AGENTS.md`, `AGENT_STATE.md`, `SUPERVISOR_LOG.md`, `NEXT_TASK.md`,
+  `docs/REQS.md`, `docs/CHANGES.md`, `docs/TRACEABILITY.md` or any `docs/icra27/*.md` file.
+- No external writes, workspace-level build/log output, disk cleanup or changes to `../glim`
+  or any other repository.
