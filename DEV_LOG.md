@@ -244,4 +244,5 @@ Result: **ICRA-004 SMOKE PASS; RETURN TO SUPERVISOR REVIEW**.
 - ICRA-003 evidence is unchanged.
 - No task-started ROS/capture/launch process remains.
 - Gate 0B, P4 and P5 qualification status is not self-promoted; a separate Supervisor task is required.
-- Final implementation commit SHA: `PENDING_COMMIT`.
+- Two-axis review: Standards found the missing reproduction command and one non-blocking capture-lifecycle duplication smell; Spec found the pending SHA and an incomplete publisher-compatibility test. `docs/CHANGES.md` now records exact commands, and `test_gate0_capture_p0_health.py` is bound to both production publisher declarations. Focused runner/analyzer/capture tests remain PASS. The duplication was not refactored after the one-shot smoke because it is a judgement-only smell and a post-evidence behavior rewrite would add unnecessary risk.
+- Final implementation commit SHA: `20d3c5d7641d2f46b79698704f4cceb1584e346f`.
