@@ -372,17 +372,23 @@ The initial expected TDD red build failed only because `PredictorBatchDiagnostic
 
 Command: `LD_LIBRARY_PATH="$PWD/results/icra27/icra006/build${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" results/icra27/icra006/build/iap_predictor_offline_profile --output results/icra27/icra006/p0_provider_profile.json --warmup 2 --iterations 7`
 
-Exit code: `0`; evidence `results/icra27/icra006/p0_provider_profile.json`; schema `p0_provider_offline_profile_v1`; status `PASS`; monotonic clock; `RelWithDebInfo`; CPU count 20.
+Exit code: `0`; evidence `results/icra27/icra006/p0_provider_profile.json`; schema `p0_provider_offline_profile_v1`; status `PASS`; monotonic clock; `RelWithDebInfo`; CPU count 20. The final reviewed profile binds GNSS visibility to a deterministic 704-point `LocalOccupancyGrid` ray-based LOS model plus elevation mask.
 
 - Exact shape: `40 x 40 x 8 = 12,800` positions, horizons `0.0,0.5,1.0,1.5,2.0,2.5 s`, `76,800` logical and actually dispatched Predictor queries; every spatial group contains all six horizons.
-- Stable result contract: all 21 measured iterations are finite; all use scientific checksum `3776ad258ee63da7`; validity/source/flag counts are identical; horizon scientific mismatch count is zero. Every iteration has 76,800 GNSS and fusion invocations, 12,800 LiDAR evaluations, and 64,000 LiDAR cache hits.
-- Scientific equivalence whitelist: Predictor top-level status/query-source/source-flags and every GNSS, LiDAR and fusion result field. Metadata whitelist: `query_position_map`, `query_time_s`, `horizon_s`, `frame_id`. Explicit `snapshot.stamp` freshness reference is required; using the future query time correctly becomes stale.
-- Worker 1: provider p50/p95 `592.727364 / 595.4353094 ms`, speedup `1.0`, above diagnostic 400 ms budget.
-- Worker 2: provider p50/p95 `327.056405 / 330.3310191 ms`, speedup `1.8123092988`, below diagnostic 400 ms budget.
-- Worker 4: provider p50/p95 `188.959196 / 190.5518833 ms`, speedup `3.1368008361`, below diagnostic 400 ms budget.
-- Worker-1 cumulative component p50 ranking: GNSS advisory `428.049833 ms`; fusion advisory `55.932083 ms`; LiDAR advisory `28.936740 ms`. Other labelled p50 regions: grouping/index `2.623363 ms`, module setup `0.000904 ms`, input construction `12.688970 ms`, result materialization `6.267024 ms`.
+- Stable result contract: all 21 measured iterations are finite; all use scientific checksum `bc296383f5cb17cf`; validity/source/flag counts are identical; horizon scientific mismatch count is zero. Every iteration has 76,800 actually dispatched GNSS and fusion invocations, 12,800 LiDAR evaluations, and 64,000 LiDAR cache hits.
+- Exact scientific equivalence whitelist: the profile's `horizon_equivalence.scientific_field_whitelist` names all 91 compared Predictor/GNSS/LiDAR/fusion fields individually. Metadata whitelist: `query_position_map`, `query_time_s`, `horizon_s`, `frame_id`. Explicit `snapshot.stamp` freshness reference is required; using the future query time correctly becomes stale.
+- Worker 1: provider p50/p95 `1191.603286 / 1193.7742217 ms`, speedup `1.0`, above diagnostic 400 ms budget.
+- Worker 2: provider p50/p95 `628.549481 / 629.975666 ms`, speedup `1.8957986953`, above diagnostic 400 ms budget.
+- Worker 4: provider p50/p95 `340.780581 / 341.2318608 ms`, speedup `3.4966877587`, below diagnostic 400 ms budget.
+- Worker-1 cumulative component p50 ranking: GNSS advisory `1020.909675 ms`; fusion advisory `57.701628 ms`; LiDAR advisory `30.104770 ms`. Other labelled p50 regions: grouping/index `2.793801 ms`, module setup `0.000961 ms`, input construction `13.290222 ms`, result materialization `6.321590 ms`.
 - Component timers are explicit opt-in for this profiler. Default Predictor callers retain counters without per-component clock sampling. Nested/cumulative worker timings are labelled non-additive relative to the outer provider wall time.
 
 No ROS launch, smoke, qualification, bag, RViz, campaign, formal configuration/threshold/algorithm/caching change, P1/P2/P3/P4/P5 work or production optimization selection occurred. Gate-0B remains `BLOCKED_PERFORMANCE`; return measurements to Supervisor for review.
+
+### Two-axis review and correction — 2026-08-21T04:53:02Z
+
+- Standards reported three hard findings: missing map-based GNSS occlusion, horizon invariance versus the baseline future-propagation convention, and pending handoff SHA. The profiler now binds deterministic `LocalOccupancyGrid` ray LOS. The horizon result is retained as an observation of the current frozen P0 input contract because ICRA-006 explicitly requires deciding equivalence and forbids implementing an algorithm/propagation rewrite; it is not treated as authorization for cross-horizon reuse. The SHA is closed in the log-only handoff commit. Two judgement-only duplication smells (three timing blocks; hash/test field enumeration) were not refactored outside the narrow diagnostic scope.
+- Spec reported three findings: preallocated result size was not proof of actual dispatch, the broad field-group labels were not an exact whitelist, and SHA/push remained pending. Worker threads now accumulate `inputs.size()` at each real `queryBatch` dispatch; profile JSON reports all 91 exact scientific field names; handoff closes SHA/push.
+- After corrections, the final profile rerun exited 0 with the values above. The evidence contract test, 37/37 Predictor tests, and complete repo-local CTest 28/28 all passed again.
 
 Final implementation commit SHA: `PENDING_COMMIT`.

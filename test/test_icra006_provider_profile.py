@@ -31,6 +31,16 @@ class Icra006ProviderProfileTest(unittest.TestCase):
         self.assertEqual(workload["logical_position_count"], 12_800)
         self.assertEqual(workload["horizons_s"], [0.0, 0.5, 1.0, 1.5, 2.0, 2.5])
         self.assertEqual(workload["logical_query_count"], 76_800)
+        self.assertEqual(workload["gnss_occupancy_point_count"], 704)
+        self.assertEqual(
+            workload["gnss_visibility_model"],
+            "LocalOccupancyGrid ray-based LOS plus elevation mask",
+        )
+        whitelist = profile["horizon_equivalence"]["scientific_field_whitelist"]
+        self.assertEqual(len(whitelist), 91)
+        self.assertEqual(len(whitelist), len(set(whitelist)))
+        self.assertTrue(all("." in field for field in whitelist))
+        self.assertNotIn("GnssAdvisoryResult all fields", whitelist)
 
         reference_checksum = profile["scientific_checksum_fnv1a64"]
         reference_counts = None
@@ -64,6 +74,10 @@ class Icra006ProviderProfileTest(unittest.TestCase):
                     "lidar_evaluations": 12_800,
                     "unique_positions": 12_800,
                 })
+                self.assertEqual(
+                    iteration["dispatched_predictor_query_count"],
+                    iteration["counts"]["gnss_advisory_invocations"],
+                )
             for region in worker["summary_ms"].values():
                 self.assertTrue(math.isfinite(region["p50_ms"]))
                 self.assertTrue(math.isfinite(region["p95_ms"]))

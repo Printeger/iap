@@ -287,7 +287,10 @@ std::shared_ptr<const std::vector<Eigen::Vector3d>> make_lidar_map_points() {
   return points;
 }
 
-iap::PredictorModule make_module() {
+iap::PredictorModule make_module(
+    const iap::LocalOccupancyGrid* occupancy,
+    std::shared_ptr<const std::vector<iap::LidarFimPrimitive>> primitives,
+    std::shared_ptr<const std::vector<Eigen::Vector3d>> map_points) {
   iap::PredictorParams params;
   params.freshness.enabled = true;
   params.freshness.max_odom_age_s = 0.5;
@@ -299,9 +302,106 @@ iap::PredictorModule make_module() {
   params.fusion.conservative_max_with_gnss = false;
   params.lidar.enable_legacy_observability = true;
   iap::PredictorModule module(params);
-  module.set_lidar_fim_primitives(make_lidar_primitives());
-  module.set_lidar_map_points(make_lidar_map_points());
+  module.set_local_occupancy(occupancy);
+  module.set_lidar_fim_primitives(std::move(primitives));
+  module.set_lidar_map_points(std::move(map_points));
   return module;
+}
+
+std::vector<std::string> scientific_field_whitelist() {
+  return {
+      "PredictorQueryResult.available",
+      "PredictorQueryResult.valid",
+      "PredictorQueryResult.fallback",
+      "PredictorQueryResult.fallback_reason",
+      "PredictorQueryResult.query_source",
+      "PredictorQueryResult.source_flags",
+      "GnssAdvisoryResult.available",
+      "GnssAdvisoryResult.valid",
+      "GnssAdvisoryResult.fallback",
+      "GnssAdvisoryResult.fallback_reason",
+      "GnssAdvisoryResult.information_state",
+      "GnssAdvisoryResult.hpl",
+      "GnssAdvisoryResult.vpl",
+      "GnssAdvisoryResult.pl_scalar",
+      "GnssAdvisoryResult.pl_e",
+      "GnssAdvisoryResult.pl_n",
+      "GnssAdvisoryResult.pl_u",
+      "GnssAdvisoryResult.pl_ff_h",
+      "GnssAdvisoryResult.pl_ff_v",
+      "GnssAdvisoryResult.sigma_h",
+      "GnssAdvisoryResult.sigma_v",
+      "GnssAdvisoryResult.pdop",
+      "GnssAdvisoryResult.hdop",
+      "GnssAdvisoryResult.vdop",
+      "GnssAdvisoryResult.effective_sigma_mean",
+      "GnssAdvisoryResult.effective_sigma_max",
+      "GnssAdvisoryResult.n_visible",
+      "GnssAdvisoryResult.n_used",
+      "GnssAdvisoryResult.n_hypotheses",
+      "GnssAdvisoryResult.n_excluded",
+      "GnssAdvisoryResult.visible_sat_ids",
+      "GnssAdvisoryResult.used_sat_ids",
+      "GnssAdvisoryResult.excluded_sat_ids",
+      "GnssAdvisoryResult.lambda_gnss",
+      "GnssAdvisoryResult.fim_valid",
+      "GnssAdvisoryResult.fim_regularized",
+      "GnssAdvisoryResult.lambda_trace",
+      "GnssAdvisoryResult.lambda_min_eig",
+      "GnssAdvisoryResult.lambda_max_eig",
+      "GnssAdvisoryResult.lambda_condition",
+      "GnssAdvisoryResult.fim_fallback_reason",
+      "LidarAdvisoryResult.available",
+      "LidarAdvisoryResult.valid",
+      "LidarAdvisoryResult.fallback",
+      "LidarAdvisoryResult.fallback_reason",
+      "LidarAdvisoryResult.information_state",
+      "LidarAdvisoryResult.lambda_lidar",
+      "LidarAdvisoryResult.legacy_delta_lambda",
+      "LidarAdvisoryResult.fim_valid",
+      "LidarAdvisoryResult.legacy_valid",
+      "LidarAdvisoryResult.fim_regularized",
+      "LidarAdvisoryResult.lidar_alpha",
+      "LidarAdvisoryResult.tdop_proxy",
+      "LidarAdvisoryResult.condition",
+      "LidarAdvisoryResult.n_primitives",
+      "LidarAdvisoryResult.n_valid_normals",
+      "LidarAdvisoryResult.bias_h",
+      "LidarAdvisoryResult.bias_v",
+      "LidarAdvisoryResult.lambda_trace",
+      "LidarAdvisoryResult.lambda_min_eig",
+      "LidarAdvisoryResult.lambda_max_eig",
+      "LidarAdvisoryResult.lambda_condition",
+      "FusionAdvisoryResult.available",
+      "FusionAdvisoryResult.valid",
+      "FusionAdvisoryResult.fallback",
+      "FusionAdvisoryResult.fallback_reason",
+      "FusionAdvisoryResult.information_state",
+      "FusionAdvisoryResult.hpl",
+      "FusionAdvisoryResult.vpl",
+      "FusionAdvisoryResult.pl_scalar",
+      "FusionAdvisoryResult.sigma_h",
+      "FusionAdvisoryResult.sigma_v",
+      "FusionAdvisoryResult.lambda_prior",
+      "FusionAdvisoryResult.lambda_gnss",
+      "FusionAdvisoryResult.lambda_lidar",
+      "FusionAdvisoryResult.lambda_pred",
+      "FusionAdvisoryResult.sigma_pos",
+      "FusionAdvisoryResult.prior_valid",
+      "FusionAdvisoryResult.gnss_used",
+      "FusionAdvisoryResult.lidar_used",
+      "FusionAdvisoryResult.epsilon_applied",
+      "FusionAdvisoryResult.degeneracy_regularized",
+      "FusionAdvisoryResult.conservative_max_applied",
+      "FusionAdvisoryResult.fusion_mode",
+      "FusionAdvisoryResult.lambda_prior_trace",
+      "FusionAdvisoryResult.lambda_gnss_trace",
+      "FusionAdvisoryResult.lambda_lidar_trace",
+      "FusionAdvisoryResult.lambda_pred_trace",
+      "FusionAdvisoryResult.lambda_pred_min_eig",
+      "FusionAdvisoryResult.lambda_pred_max_eig",
+      "FusionAdvisoryResult.lambda_pred_condition",
+  };
 }
 
 struct LogicalQuery {
@@ -356,6 +456,7 @@ struct WorkerMetrics {
   double input_construction_ms = 0.0;
   double predictor_batch_ms = 0.0;
   double result_materialization_ms = 0.0;
+  std::size_t dispatched_query_count = 0;
   iap::PredictorBatchDiagnostics diagnostics;
 };
 
@@ -459,6 +560,7 @@ IterationMetrics run_iteration(const iap::PredictorModule& base_module,
             const auto batch_begin = Clock::now();
             auto predictions = worker_module.queryBatch(inputs, &diagnostics);
             worker_metrics.predictor_batch_ms += elapsed_ms(batch_begin);
+            worker_metrics.dispatched_query_count += inputs.size();
             add_diagnostics(&worker_metrics.diagnostics, diagnostics);
 
             const auto materialization_begin = Clock::now();
@@ -479,12 +581,11 @@ IterationMetrics run_iteration(const iap::PredictorModule& base_module,
     metrics.cumulative_predictor_batch_ms += result.predictor_batch_ms;
     metrics.cumulative_result_materialization_ms +=
         result.result_materialization_ms;
+    metrics.dispatched_query_count += result.dispatched_query_count;
     add_diagnostics(&metrics.diagnostics, result.diagnostics);
   }
   metrics.worker_wall_ms = elapsed_ms(worker_begin);
   metrics.total_provider_ms = elapsed_ms(provider_begin);
-  metrics.dispatched_query_count = results.size();
-
   std::uint64_t aggregate_hash = kFnvOffset;
   std::vector<std::uint64_t> per_result_hash;
   per_result_hash.reserve(results.size());
@@ -673,7 +774,19 @@ int main(int argc, char** argv) {
     const Options options = parse_options(argc, argv);
     const auto output_path = repository_local_output(options.output);
     const auto snapshot = make_snapshot();
-    const auto module = make_module();
+    const auto lidar_primitives = make_lidar_primitives();
+    const auto lidar_map_points = make_lidar_map_points();
+    iap::LocalOccupancyGrid::Params occupancy_params;
+    occupancy_params.voxel_size = kResolutionM;
+    iap::LocalOccupancyGrid occupancy(occupancy_params);
+    std::vector<Eigen::Vector3d> occupancy_points;
+    occupancy_points.reserve(lidar_primitives->size());
+    for (const auto& primitive : *lidar_primitives) {
+      occupancy_points.push_back(primitive.center_w);
+    }
+    occupancy.insert_points(occupancy_points);
+    const auto module =
+        make_module(&occupancy, lidar_primitives, lidar_map_points);
     const auto queries = make_queries();
     if (queries.size() != kLogicalQueryCount) {
       throw std::runtime_error("logical query shape mismatch");
@@ -766,16 +879,15 @@ int main(int argc, char** argv) {
           {"logical_query_count", kLogicalQueryCount},
           {"grouping", "spatial_position_then_all_six_horizons"},
           {"snapshot_satellite_count", 31},
+          {"gnss_occupancy_point_count", occupancy_points.size()},
+          {"gnss_visibility_model",
+           "LocalOccupancyGrid ray-based LOS plus elevation mask"},
           {"lidar_fim_primitive_count", 704},
           {"lidar_map_point_count", 23309}}},
         {"horizon_equivalence",
          {{"scientific_fields_invariant",
            horizon_scientific_fields_invariant},
-          {"scientific_field_whitelist",
-           {"PredictorQueryResult status/query_source/source_flags",
-            "GnssAdvisoryResult all fields",
-            "LidarAdvisoryResult all fields",
-            "FusionAdvisoryResult all fields"}},
+          {"scientific_field_whitelist", scientific_field_whitelist()},
           {"metadata_fields_excluded",
            {"query_position_map", "query_time_s", "horizon_s", "frame_id"}},
           {"freshness_reference", "fixed snapshot.stamp"}}},

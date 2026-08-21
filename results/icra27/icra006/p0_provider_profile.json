@@ -12,17 +12,104 @@
       "frame_id"
     ],
     "scientific_field_whitelist": [
-      "PredictorQueryResult status/query_source/source_flags",
-      "GnssAdvisoryResult all fields",
-      "LidarAdvisoryResult all fields",
-      "FusionAdvisoryResult all fields"
+      "PredictorQueryResult.available",
+      "PredictorQueryResult.valid",
+      "PredictorQueryResult.fallback",
+      "PredictorQueryResult.fallback_reason",
+      "PredictorQueryResult.query_source",
+      "PredictorQueryResult.source_flags",
+      "GnssAdvisoryResult.available",
+      "GnssAdvisoryResult.valid",
+      "GnssAdvisoryResult.fallback",
+      "GnssAdvisoryResult.fallback_reason",
+      "GnssAdvisoryResult.information_state",
+      "GnssAdvisoryResult.hpl",
+      "GnssAdvisoryResult.vpl",
+      "GnssAdvisoryResult.pl_scalar",
+      "GnssAdvisoryResult.pl_e",
+      "GnssAdvisoryResult.pl_n",
+      "GnssAdvisoryResult.pl_u",
+      "GnssAdvisoryResult.pl_ff_h",
+      "GnssAdvisoryResult.pl_ff_v",
+      "GnssAdvisoryResult.sigma_h",
+      "GnssAdvisoryResult.sigma_v",
+      "GnssAdvisoryResult.pdop",
+      "GnssAdvisoryResult.hdop",
+      "GnssAdvisoryResult.vdop",
+      "GnssAdvisoryResult.effective_sigma_mean",
+      "GnssAdvisoryResult.effective_sigma_max",
+      "GnssAdvisoryResult.n_visible",
+      "GnssAdvisoryResult.n_used",
+      "GnssAdvisoryResult.n_hypotheses",
+      "GnssAdvisoryResult.n_excluded",
+      "GnssAdvisoryResult.visible_sat_ids",
+      "GnssAdvisoryResult.used_sat_ids",
+      "GnssAdvisoryResult.excluded_sat_ids",
+      "GnssAdvisoryResult.lambda_gnss",
+      "GnssAdvisoryResult.fim_valid",
+      "GnssAdvisoryResult.fim_regularized",
+      "GnssAdvisoryResult.lambda_trace",
+      "GnssAdvisoryResult.lambda_min_eig",
+      "GnssAdvisoryResult.lambda_max_eig",
+      "GnssAdvisoryResult.lambda_condition",
+      "GnssAdvisoryResult.fim_fallback_reason",
+      "LidarAdvisoryResult.available",
+      "LidarAdvisoryResult.valid",
+      "LidarAdvisoryResult.fallback",
+      "LidarAdvisoryResult.fallback_reason",
+      "LidarAdvisoryResult.information_state",
+      "LidarAdvisoryResult.lambda_lidar",
+      "LidarAdvisoryResult.legacy_delta_lambda",
+      "LidarAdvisoryResult.fim_valid",
+      "LidarAdvisoryResult.legacy_valid",
+      "LidarAdvisoryResult.fim_regularized",
+      "LidarAdvisoryResult.lidar_alpha",
+      "LidarAdvisoryResult.tdop_proxy",
+      "LidarAdvisoryResult.condition",
+      "LidarAdvisoryResult.n_primitives",
+      "LidarAdvisoryResult.n_valid_normals",
+      "LidarAdvisoryResult.bias_h",
+      "LidarAdvisoryResult.bias_v",
+      "LidarAdvisoryResult.lambda_trace",
+      "LidarAdvisoryResult.lambda_min_eig",
+      "LidarAdvisoryResult.lambda_max_eig",
+      "LidarAdvisoryResult.lambda_condition",
+      "FusionAdvisoryResult.available",
+      "FusionAdvisoryResult.valid",
+      "FusionAdvisoryResult.fallback",
+      "FusionAdvisoryResult.fallback_reason",
+      "FusionAdvisoryResult.information_state",
+      "FusionAdvisoryResult.hpl",
+      "FusionAdvisoryResult.vpl",
+      "FusionAdvisoryResult.pl_scalar",
+      "FusionAdvisoryResult.sigma_h",
+      "FusionAdvisoryResult.sigma_v",
+      "FusionAdvisoryResult.lambda_prior",
+      "FusionAdvisoryResult.lambda_gnss",
+      "FusionAdvisoryResult.lambda_lidar",
+      "FusionAdvisoryResult.lambda_pred",
+      "FusionAdvisoryResult.sigma_pos",
+      "FusionAdvisoryResult.prior_valid",
+      "FusionAdvisoryResult.gnss_used",
+      "FusionAdvisoryResult.lidar_used",
+      "FusionAdvisoryResult.epsilon_applied",
+      "FusionAdvisoryResult.degeneracy_regularized",
+      "FusionAdvisoryResult.conservative_max_applied",
+      "FusionAdvisoryResult.fusion_mode",
+      "FusionAdvisoryResult.lambda_prior_trace",
+      "FusionAdvisoryResult.lambda_gnss_trace",
+      "FusionAdvisoryResult.lambda_lidar_trace",
+      "FusionAdvisoryResult.lambda_pred_trace",
+      "FusionAdvisoryResult.lambda_pred_min_eig",
+      "FusionAdvisoryResult.lambda_pred_max_eig",
+      "FusionAdvisoryResult.lambda_pred_condition"
     ],
     "scientific_fields_invariant": true
   },
   "measured_iterations": 7,
   "schema_version": "p0_provider_offline_profile_v1",
   "scientific_checksum_algorithm": "FNV-1a-64 over all scientific fields",
-  "scientific_checksum_fnv1a64": "3776ad258ee63da7",
+  "scientific_checksum_fnv1a64": "bc296383f5cb17cf",
   "status": "PASS",
   "timing_relationships": {
     "advisory_metrics": "disjoint nested calls inside predictor_batch; do not add to outer wall time",
@@ -60,21 +147,21 @@
           "iteration": 0,
           "lidar_valid_count": 76800,
           "logical_query_count": 76800,
-          "scientific_checksum_fnv1a64": "3776ad258ee63da7",
+          "scientific_checksum_fnv1a64": "bc296383f5cb17cf",
           "source_flags_histogram": {
             "1533": 76800
           },
           "timings_ms": {
-            "cumulative_fusion_advisory": 55.365356,
-            "cumulative_gnss_advisory": 422.499492,
-            "cumulative_input_construction": 12.530611000000077,
-            "cumulative_lidar_advisory": 28.534926,
-            "cumulative_predictor_batch": 528.3518239999993,
-            "cumulative_result_materialization": 6.2467609999999665,
-            "cumulative_worker_module_setup": 0.001264,
-            "query_grouping_index": 2.6484,
-            "total_predictor_provider": 585.949017,
-            "worker_wall": 549.813152
+            "cumulative_fusion_advisory": 57.746268,
+            "cumulative_gnss_advisory": 1022.2356309999999,
+            "cumulative_input_construction": 13.322189000000016,
+            "cumulative_lidar_advisory": 30.191497,
+            "cumulative_predictor_batch": 1134.208876000002,
+            "cumulative_result_materialization": 6.349125000000004,
+            "cumulative_worker_module_setup": 0.000961,
+            "query_grouping_index": 2.76052,
+            "total_predictor_provider": 1193.128471,
+            "worker_wall": 1156.497622
           },
           "valid_count": 76800
         },
@@ -97,21 +184,21 @@
           "iteration": 1,
           "lidar_valid_count": 76800,
           "logical_query_count": 76800,
-          "scientific_checksum_fnv1a64": "3776ad258ee63da7",
+          "scientific_checksum_fnv1a64": "bc296383f5cb17cf",
           "source_flags_histogram": {
             "1533": 76800
           },
           "timings_ms": {
-            "cumulative_fusion_advisory": 55.434545,
-            "cumulative_gnss_advisory": 422.857867,
-            "cumulative_input_construction": 12.51363900000007,
-            "cumulative_lidar_advisory": 28.540933,
-            "cumulative_predictor_batch": 528.7767270000002,
-            "cumulative_result_materialization": 6.263673999999986,
-            "cumulative_worker_module_setup": 0.000537,
-            "query_grouping_index": 2.644078,
-            "total_predictor_provider": 586.357905,
-            "worker_wall": 550.195575
+            "cumulative_fusion_advisory": 57.588668,
+            "cumulative_gnss_advisory": 1018.818421,
+            "cumulative_input_construction": 13.265778999999949,
+            "cumulative_lidar_advisory": 30.10477,
+            "cumulative_predictor_batch": 1130.5036379999979,
+            "cumulative_result_materialization": 6.349547999999991,
+            "cumulative_worker_module_setup": 0.001289,
+            "query_grouping_index": 2.699034,
+            "total_predictor_provider": 1188.58958,
+            "worker_wall": 1152.728751
           },
           "valid_count": 76800
         },
@@ -134,21 +221,21 @@
           "iteration": 2,
           "lidar_valid_count": 76800,
           "logical_query_count": 76800,
-          "scientific_checksum_fnv1a64": "3776ad258ee63da7",
+          "scientific_checksum_fnv1a64": "bc296383f5cb17cf",
           "source_flags_histogram": {
             "1533": 76800
           },
           "timings_ms": {
-            "cumulative_fusion_advisory": 56.141155999999995,
-            "cumulative_gnss_advisory": 428.049833,
-            "cumulative_input_construction": 12.728896000000146,
-            "cumulative_lidar_advisory": 29.058609999999998,
-            "cumulative_predictor_batch": 535.594577999998,
-            "cumulative_result_materialization": 6.415964999999976,
-            "cumulative_worker_module_setup": 0.000877,
-            "query_grouping_index": 2.582867,
-            "total_predictor_provider": 594.009498,
-            "worker_wall": 557.288255
+            "cumulative_fusion_advisory": 57.701628,
+            "cumulative_gnss_advisory": 1020.909675,
+            "cumulative_input_construction": 13.310038999999959,
+            "cumulative_lidar_advisory": 30.075077,
+            "cumulative_predictor_batch": 1132.7177509999965,
+            "cumulative_result_materialization": 6.304143999999971,
+            "cumulative_worker_module_setup": 0.001167,
+            "query_grouping_index": 2.825959,
+            "total_predictor_provider": 1191.019278,
+            "worker_wall": 1154.947749
           },
           "valid_count": 76800
         },
@@ -171,21 +258,21 @@
           "iteration": 3,
           "lidar_valid_count": 76800,
           "logical_query_count": 76800,
-          "scientific_checksum_fnv1a64": "3776ad258ee63da7",
+          "scientific_checksum_fnv1a64": "bc296383f5cb17cf",
           "source_flags_histogram": {
             "1533": 76800
           },
           "timings_ms": {
-            "cumulative_fusion_advisory": 55.932083,
-            "cumulative_gnss_advisory": 428.28171299999997,
-            "cumulative_input_construction": 12.688970000000058,
-            "cumulative_lidar_advisory": 28.947063,
-            "cumulative_predictor_batch": 535.4051300000004,
-            "cumulative_result_materialization": 6.245036999999991,
-            "cumulative_worker_module_setup": 0.000565,
-            "query_grouping_index": 2.623363,
-            "total_predictor_provider": 592.727364,
-            "worker_wall": 557.035188
+            "cumulative_fusion_advisory": 57.704010999999994,
+            "cumulative_gnss_advisory": 1023.6333159999999,
+            "cumulative_input_construction": 13.29022199999999,
+            "cumulative_lidar_advisory": 30.166504,
+            "cumulative_predictor_batch": 1135.5512289999915,
+            "cumulative_result_materialization": 6.363929999999956,
+            "cumulative_worker_module_setup": 0.000887,
+            "query_grouping_index": 2.793801,
+            "total_predictor_provider": 1194.050972,
+            "worker_wall": 1157.812059
           },
           "valid_count": 76800
         },
@@ -208,21 +295,21 @@
           "iteration": 4,
           "lidar_valid_count": 76800,
           "logical_query_count": 76800,
-          "scientific_checksum_fnv1a64": "3776ad258ee63da7",
+          "scientific_checksum_fnv1a64": "bc296383f5cb17cf",
           "source_flags_histogram": {
             "1533": 76800
           },
           "timings_ms": {
-            "cumulative_fusion_advisory": 56.102644,
-            "cumulative_gnss_advisory": 431.01473899999996,
-            "cumulative_input_construction": 12.753953000000019,
-            "cumulative_lidar_advisory": 29.08852,
-            "cumulative_predictor_batch": 538.6840830000006,
-            "cumulative_result_materialization": 6.331869999999981,
-            "cumulative_worker_module_setup": 0.000952,
-            "query_grouping_index": 2.593604,
-            "total_predictor_provider": 595.966529,
-            "worker_wall": 560.326537
+            "cumulative_fusion_advisory": 57.533001,
+            "cumulative_gnss_advisory": 1020.659514,
+            "cumulative_input_construction": 13.241265999999971,
+            "cumulative_lidar_advisory": 30.053410999999997,
+            "cumulative_predictor_batch": 1132.2469099999985,
+            "cumulative_result_materialization": 6.32158999999997,
+            "cumulative_worker_module_setup": 0.000869,
+            "query_grouping_index": 2.901134,
+            "total_predictor_provider": 1191.603286,
+            "worker_wall": 1154.561991
           },
           "valid_count": 76800
         },
@@ -245,21 +332,21 @@
           "iteration": 5,
           "lidar_valid_count": 76800,
           "logical_query_count": 76800,
-          "scientific_checksum_fnv1a64": "3776ad258ee63da7",
+          "scientific_checksum_fnv1a64": "bc296383f5cb17cf",
           "source_flags_histogram": {
             "1533": 76800
           },
           "timings_ms": {
-            "cumulative_fusion_advisory": 56.032941,
-            "cumulative_gnss_advisory": 428.914241,
-            "cumulative_input_construction": 12.717972000000135,
-            "cumulative_lidar_advisory": 28.93674,
-            "cumulative_predictor_batch": 536.1653949999971,
-            "cumulative_result_materialization": 6.382507000000013,
-            "cumulative_worker_module_setup": 0.001004,
-            "query_grouping_index": 2.632072,
-            "total_predictor_provider": 594.195797,
-            "worker_wall": 557.911891
+            "cumulative_fusion_advisory": 57.863653,
+            "cumulative_gnss_advisory": 1021.6035509999999,
+            "cumulative_input_construction": 13.315908999999996,
+            "cumulative_lidar_advisory": 30.118449,
+            "cumulative_predictor_batch": 1133.6532820000002,
+            "cumulative_result_materialization": 6.274968999999964,
+            "cumulative_worker_module_setup": 0.001304,
+            "query_grouping_index": 2.776615,
+            "total_predictor_provider": 1192.598725,
+            "worker_wall": 1155.976125
           },
           "valid_count": 76800
         },
@@ -282,21 +369,21 @@
           "iteration": 6,
           "lidar_valid_count": 76800,
           "logical_query_count": 76800,
-          "scientific_checksum_fnv1a64": "3776ad258ee63da7",
+          "scientific_checksum_fnv1a64": "bc296383f5cb17cf",
           "source_flags_histogram": {
             "1533": 76800
           },
           "timings_ms": {
-            "cumulative_fusion_advisory": 55.765262,
-            "cumulative_gnss_advisory": 427.06821399999995,
-            "cumulative_input_construction": 12.623058000000078,
-            "cumulative_lidar_advisory": 28.859147,
-            "cumulative_predictor_batch": 533.8914100000012,
-            "cumulative_result_materialization": 6.267023999999997,
-            "cumulative_worker_module_setup": 0.000904,
-            "query_grouping_index": 2.617131,
-            "total_predictor_provider": 591.643269,
-            "worker_wall": 555.458443
+            "cumulative_fusion_advisory": 56.982748,
+            "cumulative_gnss_advisory": 1008.049185,
+            "cumulative_input_construction": 13.174762000000003,
+            "cumulative_lidar_advisory": 29.762832,
+            "cumulative_predictor_batch": 1118.5517140000002,
+            "cumulative_result_materialization": 6.312763999999997,
+            "cumulative_worker_module_setup": 0.000852,
+            "query_grouping_index": 2.804999,
+            "total_predictor_provider": 1177.754957,
+            "worker_wall": 1140.725908
           },
           "valid_count": 76800
         }
@@ -305,44 +392,44 @@
       "speedup_vs_worker_1_p50": 1.0,
       "summary_ms": {
         "cumulative_fusion_advisory": {
-          "p50_ms": 55.932083,
-          "p95_ms": 56.129602399999996
+          "p50_ms": 57.701628,
+          "p95_ms": 57.8284375
         },
         "cumulative_gnss_advisory": {
-          "p50_ms": 428.049833,
-          "p95_ms": 430.3845895999999
+          "p50_ms": 1020.909675,
+          "p95_ms": 1023.2140104999999
         },
         "cumulative_input_construction": {
-          "p50_ms": 12.688970000000058,
-          "p95_ms": 12.746435900000057
+          "p50_ms": 13.29022199999999,
+          "p95_ms": 13.320305000000008
         },
         "cumulative_lidar_advisory": {
-          "p50_ms": 28.93674,
-          "p95_ms": 29.079546999999998
+          "p50_ms": 30.10477,
+          "p95_ms": 30.1839991
         },
         "cumulative_predictor_batch": {
-          "p50_ms": 535.4051300000004,
-          "p95_ms": 537.9284765999995
+          "p50_ms": 1132.7177509999965,
+          "p95_ms": 1135.1485230999947
         },
         "cumulative_result_materialization": {
-          "p50_ms": 6.267023999999997,
-          "p95_ms": 6.405927599999987
+          "p50_ms": 6.32158999999997,
+          "p95_ms": 6.359615399999967
         },
         "cumulative_worker_module_setup": {
-          "p50_ms": 0.000904,
-          "p95_ms": 0.0011859999999999998
+          "p50_ms": 0.000961,
+          "p95_ms": 0.0012994999999999999
         },
         "query_grouping_index": {
-          "p50_ms": 2.623363,
-          "p95_ms": 2.6471034
+          "p50_ms": 2.793801,
+          "p95_ms": 2.8785815
         },
         "total_predictor_provider": {
-          "p50_ms": 592.727364,
-          "p95_ms": 595.4353094
+          "p50_ms": 1191.603286,
+          "p95_ms": 1193.7742217
         },
         "worker_wall": {
-          "p50_ms": 557.035188,
-          "p95_ms": 559.6021432
+          "p50_ms": 1154.947749,
+          "p95_ms": 1157.4177279
         }
       },
       "worker_count": 1
@@ -369,21 +456,21 @@
           "iteration": 0,
           "lidar_valid_count": 76800,
           "logical_query_count": 76800,
-          "scientific_checksum_fnv1a64": "3776ad258ee63da7",
+          "scientific_checksum_fnv1a64": "bc296383f5cb17cf",
           "source_flags_histogram": {
             "1533": 76800
           },
           "timings_ms": {
-            "cumulative_fusion_advisory": 58.82956,
-            "cumulative_gnss_advisory": 445.991041,
-            "cumulative_input_construction": 14.004089,
-            "cumulative_lidar_advisory": 32.394801,
-            "cumulative_predictor_batch": 560.1487319999998,
-            "cumulative_result_materialization": 12.590989,
-            "cumulative_worker_module_setup": 0.002015,
-            "query_grouping_index": 2.612172,
-            "total_predictor_provider": 330.77595,
-            "worker_wall": 294.887574
+            "cumulative_fusion_advisory": 59.516472,
+            "cumulative_gnss_advisory": 1037.924356,
+            "cumulative_input_construction": 14.038598000000016,
+            "cumulative_lidar_advisory": 32.791169,
+            "cumulative_predictor_batch": 1154.1908260000016,
+            "cumulative_result_materialization": 11.536553999999972,
+            "cumulative_worker_module_setup": 0.00115,
+            "query_grouping_index": 2.675261,
+            "total_predictor_provider": 629.442693,
+            "worker_wall": 592.519231
           },
           "valid_count": 76800
         },
@@ -406,21 +493,21 @@
           "iteration": 1,
           "lidar_valid_count": 76800,
           "logical_query_count": 76800,
-          "scientific_checksum_fnv1a64": "3776ad258ee63da7",
+          "scientific_checksum_fnv1a64": "bc296383f5cb17cf",
           "source_flags_histogram": {
             "1533": 76800
           },
           "timings_ms": {
-            "cumulative_fusion_advisory": 57.546639,
-            "cumulative_gnss_advisory": 439.533032,
-            "cumulative_input_construction": 13.42140299999998,
-            "cumulative_lidar_advisory": 31.271836999999998,
-            "cumulative_predictor_batch": 550.4925859999996,
-            "cumulative_result_materialization": 12.221153000000013,
-            "cumulative_worker_module_setup": 0.0011459999999999999,
-            "query_grouping_index": 2.310586,
-            "total_predictor_provider": 327.837692,
-            "worker_wall": 291.103868
+            "cumulative_fusion_advisory": 59.334905,
+            "cumulative_gnss_advisory": 1039.380044,
+            "cumulative_input_construction": 14.066977999999992,
+            "cumulative_lidar_advisory": 32.597125,
+            "cumulative_predictor_batch": 1155.185014999998,
+            "cumulative_result_materialization": 11.551996999999972,
+            "cumulative_worker_module_setup": 0.001546,
+            "query_grouping_index": 2.530272,
+            "total_predictor_provider": 628.934363,
+            "worker_wall": 592.594036
           },
           "valid_count": 76800
         },
@@ -443,21 +530,21 @@
           "iteration": 2,
           "lidar_valid_count": 76800,
           "logical_query_count": 76800,
-          "scientific_checksum_fnv1a64": "3776ad258ee63da7",
+          "scientific_checksum_fnv1a64": "bc296383f5cb17cf",
           "source_flags_histogram": {
             "1533": 76800
           },
           "timings_ms": {
-            "cumulative_fusion_advisory": 57.571942,
-            "cumulative_gnss_advisory": 438.575985,
-            "cumulative_input_construction": 13.474847000000016,
-            "cumulative_lidar_advisory": 31.051726,
-            "cumulative_predictor_batch": 549.3296530000002,
-            "cumulative_result_materialization": 11.971672000000021,
-            "cumulative_worker_module_setup": 0.001144,
-            "query_grouping_index": 2.513703,
-            "total_predictor_provider": 325.079834,
-            "worker_wall": 288.947322
+            "cumulative_fusion_advisory": 59.428939,
+            "cumulative_gnss_advisory": 1038.650259,
+            "cumulative_input_construction": 14.208626000000004,
+            "cumulative_lidar_advisory": 32.532904,
+            "cumulative_predictor_batch": 1154.501059000002,
+            "cumulative_result_materialization": 11.73831199999998,
+            "cumulative_worker_module_setup": 0.001477,
+            "query_grouping_index": 2.648089,
+            "total_predictor_provider": 628.549481,
+            "worker_wall": 592.370617
           },
           "valid_count": 76800
         },
@@ -480,21 +567,21 @@
           "iteration": 3,
           "lidar_valid_count": 76800,
           "logical_query_count": 76800,
-          "scientific_checksum_fnv1a64": "3776ad258ee63da7",
+          "scientific_checksum_fnv1a64": "bc296383f5cb17cf",
           "source_flags_histogram": {
             "1533": 76800
           },
           "timings_ms": {
-            "cumulative_fusion_advisory": 57.86944,
-            "cumulative_gnss_advisory": 439.78083499999997,
-            "cumulative_input_construction": 13.713045999999999,
-            "cumulative_lidar_advisory": 31.281053999999997,
-            "cumulative_predictor_batch": 551.1968300000005,
-            "cumulative_result_materialization": 12.147230000000029,
-            "cumulative_worker_module_setup": 0.00167,
-            "query_grouping_index": 2.421946,
-            "total_predictor_provider": 329.292847,
-            "worker_wall": 290.417065
+            "cumulative_fusion_advisory": 59.730138,
+            "cumulative_gnss_advisory": 1038.238153,
+            "cumulative_input_construction": 14.043716000000023,
+            "cumulative_lidar_advisory": 32.987694,
+            "cumulative_predictor_batch": 1155.0739100000021,
+            "cumulative_result_materialization": 12.341308000000001,
+            "cumulative_worker_module_setup": 0.001568,
+            "query_grouping_index": 2.426448,
+            "total_predictor_provider": 630.204083,
+            "worker_wall": 594.182202
           },
           "valid_count": 76800
         },
@@ -517,21 +604,21 @@
           "iteration": 4,
           "lidar_valid_count": 76800,
           "logical_query_count": 76800,
-          "scientific_checksum_fnv1a64": "3776ad258ee63da7",
+          "scientific_checksum_fnv1a64": "bc296383f5cb17cf",
           "source_flags_histogram": {
             "1533": 76800
           },
           "timings_ms": {
-            "cumulative_fusion_advisory": 57.955419,
-            "cumulative_gnss_advisory": 441.282538,
-            "cumulative_input_construction": 13.70136199999998,
-            "cumulative_lidar_advisory": 31.427649,
-            "cumulative_predictor_batch": 553.0406249999999,
-            "cumulative_result_materialization": 11.954120000000007,
-            "cumulative_worker_module_setup": 0.001746,
-            "query_grouping_index": 2.562991,
-            "total_predictor_provider": 326.966958,
-            "worker_wall": 290.863347
+            "cumulative_fusion_advisory": 59.219994,
+            "cumulative_gnss_advisory": 1036.747066,
+            "cumulative_input_construction": 14.03988499999997,
+            "cumulative_lidar_advisory": 32.730731999999996,
+            "cumulative_predictor_batch": 1152.5803249999994,
+            "cumulative_result_materialization": 12.000096999999997,
+            "cumulative_worker_module_setup": 0.001218,
+            "query_grouping_index": 2.70766,
+            "total_predictor_provider": 627.930569,
+            "worker_wall": 592.013205
           },
           "valid_count": 76800
         },
@@ -554,21 +641,21 @@
           "iteration": 5,
           "lidar_valid_count": 76800,
           "logical_query_count": 76800,
-          "scientific_checksum_fnv1a64": "3776ad258ee63da7",
+          "scientific_checksum_fnv1a64": "bc296383f5cb17cf",
           "source_flags_histogram": {
             "1533": 76800
           },
           "timings_ms": {
-            "cumulative_fusion_advisory": 57.836394999999996,
-            "cumulative_gnss_advisory": 441.387596,
-            "cumulative_input_construction": 13.556135999999967,
-            "cumulative_lidar_advisory": 31.315448,
-            "cumulative_predictor_batch": 552.8141139999989,
-            "cumulative_result_materialization": 12.024291000000002,
-            "cumulative_worker_module_setup": 0.003028,
-            "query_grouping_index": 2.450426,
-            "total_predictor_provider": 327.056405,
-            "worker_wall": 290.858764
+            "cumulative_fusion_advisory": 59.135315999999996,
+            "cumulative_gnss_advisory": 1031.786486,
+            "cumulative_input_construction": 13.91622300000001,
+            "cumulative_lidar_advisory": 32.508972,
+            "cumulative_predictor_batch": 1147.1269529999988,
+            "cumulative_result_materialization": 12.126472999999992,
+            "cumulative_worker_module_setup": 0.0011090000000000002,
+            "query_grouping_index": 2.443681,
+            "total_predictor_provider": 627.209267,
+            "worker_wall": 589.092547
           },
           "valid_count": 76800
         },
@@ -591,67 +678,67 @@
           "iteration": 6,
           "lidar_valid_count": 76800,
           "logical_query_count": 76800,
-          "scientific_checksum_fnv1a64": "3776ad258ee63da7",
+          "scientific_checksum_fnv1a64": "bc296383f5cb17cf",
           "source_flags_histogram": {
             "1533": 76800
           },
           "timings_ms": {
-            "cumulative_fusion_advisory": 57.208985,
-            "cumulative_gnss_advisory": 435.39725699999997,
-            "cumulative_input_construction": 13.36756700000001,
-            "cumulative_lidar_advisory": 30.755136,
-            "cumulative_predictor_batch": 545.3226799999993,
-            "cumulative_result_materialization": 11.915734999999987,
-            "cumulative_worker_module_setup": 0.001525,
-            "query_grouping_index": 2.48604,
-            "total_predictor_provider": 323.22107,
-            "worker_wall": 287.228557
+            "cumulative_fusion_advisory": 59.078019999999995,
+            "cumulative_gnss_advisory": 1032.446451,
+            "cumulative_input_construction": 13.952538000000011,
+            "cumulative_lidar_advisory": 32.51189,
+            "cumulative_predictor_batch": 1147.7572770000006,
+            "cumulative_result_materialization": 11.677473000000042,
+            "cumulative_worker_module_setup": 0.001201,
+            "query_grouping_index": 2.611681,
+            "total_predictor_provider": 627.52568,
+            "worker_wall": 591.502285
           },
           "valid_count": 76800
         }
       ],
-      "p95_within_400_ms_diagnostic_budget": true,
-      "speedup_vs_worker_1_p50": 1.8123092987584206,
+      "p95_within_400_ms_diagnostic_budget": false,
+      "speedup_vs_worker_1_p50": 1.8957986952820347,
       "summary_ms": {
         "cumulative_fusion_advisory": {
-          "p50_ms": 57.836394999999996,
-          "p95_ms": 58.567317700000004
+          "p50_ms": 59.334905,
+          "p95_ms": 59.6660382
         },
         "cumulative_gnss_advisory": {
-          "p50_ms": 439.78083499999997,
-          "p95_ms": 444.61000749999994
+          "p50_ms": 1037.924356,
+          "p95_ms": 1039.1611085
         },
         "cumulative_input_construction": {
-          "p50_ms": 13.556135999999967,
-          "p95_ms": 13.9167761
+          "p50_ms": 14.03988499999997,
+          "p95_ms": 14.1661316
         },
         "cumulative_lidar_advisory": {
-          "p50_ms": 31.281053999999997,
-          "p95_ms": 32.1046554
+          "p50_ms": 32.597125,
+          "p95_ms": 32.9287365
         },
         "cumulative_predictor_batch": {
-          "p50_ms": 551.1968300000005,
-          "p95_ms": 558.0162998999998
+          "p50_ms": 1154.1908260000016,
+          "p95_ms": 1155.1516834999993
         },
         "cumulative_result_materialization": {
-          "p50_ms": 12.024291000000002,
-          "p95_ms": 12.480038200000003
+          "p50_ms": 11.73831199999998,
+          "p95_ms": 12.276857499999998
         },
         "cumulative_worker_module_setup": {
-          "p50_ms": 0.00167,
-          "p95_ms": 0.0027240999999999993
+          "p50_ms": 0.001218,
+          "p95_ms": 0.0015614000000000001
         },
         "query_grouping_index": {
-          "p50_ms": 2.48604,
-          "p95_ms": 2.5974177
+          "p50_ms": 2.611681,
+          "p95_ms": 2.6979403
         },
         "total_predictor_provider": {
-          "p50_ms": 327.056405,
-          "p95_ms": 330.33101910000005
+          "p50_ms": 628.549481,
+          "p95_ms": 629.975666
         },
         "worker_wall": {
-          "p50_ms": 290.858764,
-          "p95_ms": 293.75246219999997
+          "p50_ms": 592.370617,
+          "p95_ms": 593.7057522
         }
       },
       "worker_count": 2
@@ -678,21 +765,21 @@
           "iteration": 0,
           "lidar_valid_count": 76800,
           "logical_query_count": 76800,
-          "scientific_checksum_fnv1a64": "3776ad258ee63da7",
+          "scientific_checksum_fnv1a64": "bc296383f5cb17cf",
           "source_flags_histogram": {
             "1533": 76800
           },
           "timings_ms": {
-            "cumulative_fusion_advisory": 59.29642,
-            "cumulative_gnss_advisory": 455.55231,
-            "cumulative_input_construction": 13.768931000000004,
-            "cumulative_lidar_advisory": 32.645814,
-            "cumulative_predictor_batch": 569.7087920000005,
-            "cumulative_result_materialization": 13.777402000000006,
-            "cumulative_worker_module_setup": 0.001973,
-            "query_grouping_index": 2.55683,
-            "total_predictor_provider": 188.959196,
-            "worker_wall": 152.773279
+            "cumulative_fusion_advisory": 60.245822999999994,
+            "cumulative_gnss_advisory": 1059.952257,
+            "cumulative_input_construction": 14.30060599999999,
+            "cumulative_lidar_advisory": 33.78291,
+            "cumulative_predictor_batch": 1177.4939240000003,
+            "cumulative_result_materialization": 13.317379,
+            "cumulative_worker_module_setup": 0.0018299999999999998,
+            "query_grouping_index": 2.659149,
+            "total_predictor_provider": 341.289456,
+            "worker_wall": 303.911058
           },
           "valid_count": 76800
         },
@@ -715,21 +802,21 @@
           "iteration": 1,
           "lidar_valid_count": 76800,
           "logical_query_count": 76800,
-          "scientific_checksum_fnv1a64": "3776ad258ee63da7",
+          "scientific_checksum_fnv1a64": "bc296383f5cb17cf",
           "source_flags_histogram": {
             "1533": 76800
           },
           "timings_ms": {
-            "cumulative_fusion_advisory": 59.794456,
-            "cumulative_gnss_advisory": 458.55624,
-            "cumulative_input_construction": 13.920139000000011,
-            "cumulative_lidar_advisory": 33.383603,
-            "cumulative_predictor_batch": 574.3360260000002,
-            "cumulative_result_materialization": 14.024507000000005,
-            "cumulative_worker_module_setup": 0.0016489999999999999,
-            "query_grouping_index": 2.720207,
-            "total_predictor_provider": 189.004968,
-            "worker_wall": 153.089227
+            "cumulative_fusion_advisory": 60.190967,
+            "cumulative_gnss_advisory": 1058.684108,
+            "cumulative_input_construction": 14.320692000000015,
+            "cumulative_lidar_advisory": 33.608449,
+            "cumulative_predictor_batch": 1175.995821999998,
+            "cumulative_result_materialization": 13.570717999999989,
+            "cumulative_worker_module_setup": 0.0017510000000000002,
+            "query_grouping_index": 2.589235,
+            "total_predictor_provider": 341.097472,
+            "worker_wall": 305.800865
           },
           "valid_count": 76800
         },
@@ -752,21 +839,21 @@
           "iteration": 2,
           "lidar_valid_count": 76800,
           "logical_query_count": 76800,
-          "scientific_checksum_fnv1a64": "3776ad258ee63da7",
+          "scientific_checksum_fnv1a64": "bc296383f5cb17cf",
           "source_flags_histogram": {
             "1533": 76800
           },
           "timings_ms": {
-            "cumulative_fusion_advisory": 59.707927,
-            "cumulative_gnss_advisory": 460.466231,
-            "cumulative_input_construction": 13.701361999999996,
-            "cumulative_lidar_advisory": 32.950649,
-            "cumulative_predictor_batch": 575.5049380000004,
-            "cumulative_result_materialization": 14.292954000000003,
-            "cumulative_worker_module_setup": 0.0019730000000000004,
-            "query_grouping_index": 2.63914,
-            "total_predictor_provider": 190.325588,
-            "worker_wall": 153.48641
+            "cumulative_fusion_advisory": 60.270688,
+            "cumulative_gnss_advisory": 1061.2722589999998,
+            "cumulative_input_construction": 14.252196000000007,
+            "cumulative_lidar_advisory": 33.759918,
+            "cumulative_predictor_batch": 1178.8784889999984,
+            "cumulative_result_materialization": 13.370640000000002,
+            "cumulative_worker_module_setup": 0.0036049999999999997,
+            "query_grouping_index": 2.561102,
+            "total_predictor_provider": 340.975013,
+            "worker_wall": 305.240601
           },
           "valid_count": 76800
         },
@@ -789,21 +876,21 @@
           "iteration": 3,
           "lidar_valid_count": 76800,
           "logical_query_count": 76800,
-          "scientific_checksum_fnv1a64": "3776ad258ee63da7",
+          "scientific_checksum_fnv1a64": "bc296383f5cb17cf",
           "source_flags_histogram": {
             "1533": 76800
           },
           "timings_ms": {
-            "cumulative_fusion_advisory": 59.427724999999995,
-            "cumulative_gnss_advisory": 456.060237,
-            "cumulative_input_construction": 13.802359000000012,
-            "cumulative_lidar_advisory": 32.777271,
-            "cumulative_predictor_batch": 570.4746519999994,
-            "cumulative_result_materialization": 13.730761999999979,
-            "cumulative_worker_module_setup": 0.002817,
-            "query_grouping_index": 2.70556,
-            "total_predictor_provider": 188.686182,
-            "worker_wall": 152.414912
+            "cumulative_fusion_advisory": 59.914133,
+            "cumulative_gnss_advisory": 1056.6593,
+            "cumulative_input_construction": 14.381252999999987,
+            "cumulative_lidar_advisory": 33.64192,
+            "cumulative_predictor_batch": 1173.8035370000011,
+            "cumulative_result_materialization": 13.500947000000009,
+            "cumulative_worker_module_setup": 0.0025399999999999997,
+            "query_grouping_index": 2.556517,
+            "total_predictor_provider": 339.181476,
+            "worker_wall": 303.152795
           },
           "valid_count": 76800
         },
@@ -826,21 +913,21 @@
           "iteration": 4,
           "lidar_valid_count": 76800,
           "logical_query_count": 76800,
-          "scientific_checksum_fnv1a64": "3776ad258ee63da7",
+          "scientific_checksum_fnv1a64": "bc296383f5cb17cf",
           "source_flags_histogram": {
             "1533": 76800
           },
           "timings_ms": {
-            "cumulative_fusion_advisory": 59.392835999999996,
-            "cumulative_gnss_advisory": 455.71977799999996,
-            "cumulative_input_construction": 13.846071000000002,
-            "cumulative_lidar_advisory": 32.762087,
-            "cumulative_predictor_batch": 570.1767599999997,
-            "cumulative_result_materialization": 13.834210000000004,
-            "cumulative_worker_module_setup": 0.0022909999999999996,
-            "query_grouping_index": 2.709826,
-            "total_predictor_provider": 187.16812,
-            "worker_wall": 150.708344
+            "cumulative_fusion_advisory": 60.107575,
+            "cumulative_gnss_advisory": 1058.228865,
+            "cumulative_input_construction": 14.392531000000016,
+            "cumulative_lidar_advisory": 33.646923,
+            "cumulative_predictor_batch": 1175.5752810000008,
+            "cumulative_result_materialization": 13.601273,
+            "cumulative_worker_module_setup": 0.0017629999999999998,
+            "query_grouping_index": 2.645374,
+            "total_predictor_provider": 339.669247,
+            "worker_wall": 303.114118
           },
           "valid_count": 76800
         },
@@ -863,21 +950,21 @@
           "iteration": 5,
           "lidar_valid_count": 76800,
           "logical_query_count": 76800,
-          "scientific_checksum_fnv1a64": "3776ad258ee63da7",
+          "scientific_checksum_fnv1a64": "bc296383f5cb17cf",
           "source_flags_histogram": {
             "1533": 76800
           },
           "timings_ms": {
-            "cumulative_fusion_advisory": 59.214572999999994,
-            "cumulative_gnss_advisory": 455.612885,
-            "cumulative_input_construction": 13.780748999999993,
-            "cumulative_lidar_advisory": 32.514873,
-            "cumulative_predictor_batch": 569.679479,
-            "cumulative_result_materialization": 13.945882999999995,
-            "cumulative_worker_module_setup": 0.001779,
-            "query_grouping_index": 2.655911,
-            "total_predictor_provider": 186.606567,
-            "worker_wall": 150.369829
+            "cumulative_fusion_advisory": 60.209134,
+            "cumulative_gnss_advisory": 1058.71633,
+            "cumulative_input_construction": 14.269464,
+            "cumulative_lidar_advisory": 33.660644999999995,
+            "cumulative_predictor_batch": 1176.0877580000013,
+            "cumulative_result_materialization": 13.185029999999987,
+            "cumulative_worker_module_setup": 0.001268,
+            "query_grouping_index": 2.620688,
+            "total_predictor_provider": 339.528576,
+            "worker_wall": 303.304447
           },
           "valid_count": 76800
         },
@@ -900,73 +987,75 @@
           "iteration": 6,
           "lidar_valid_count": 76800,
           "logical_query_count": 76800,
-          "scientific_checksum_fnv1a64": "3776ad258ee63da7",
+          "scientific_checksum_fnv1a64": "bc296383f5cb17cf",
           "source_flags_histogram": {
             "1533": 76800
           },
           "timings_ms": {
-            "cumulative_fusion_advisory": 59.429472999999994,
-            "cumulative_gnss_advisory": 457.023696,
-            "cumulative_input_construction": 13.836576999999998,
-            "cumulative_lidar_advisory": 32.851062,
-            "cumulative_predictor_batch": 571.6844060000001,
-            "cumulative_result_materialization": 13.627718999999988,
-            "cumulative_worker_module_setup": 0.0018110000000000001,
-            "query_grouping_index": 2.722339,
-            "total_predictor_provider": 190.648867,
-            "worker_wall": 154.784654
+            "cumulative_fusion_advisory": 60.304959999999994,
+            "cumulative_gnss_advisory": 1058.602201,
+            "cumulative_input_construction": 14.426177000000006,
+            "cumulative_lidar_advisory": 33.876692,
+            "cumulative_predictor_batch": 1176.532975999999,
+            "cumulative_result_materialization": 13.625587000000005,
+            "cumulative_worker_module_setup": 0.001834,
+            "query_grouping_index": 2.597206,
+            "total_predictor_provider": 340.780581,
+            "worker_wall": 304.232981
           },
           "valid_count": 76800
         }
       ],
       "p95_within_400_ms_diagnostic_budget": true,
-      "speedup_vs_worker_1_p50": 3.136800836091618,
+      "speedup_vs_worker_1_p50": 3.4966877587429197,
       "summary_ms": {
         "cumulative_fusion_advisory": {
-          "p50_ms": 59.427724999999995,
-          "p95_ms": 59.76849729999999
+          "p50_ms": 60.209134,
+          "p95_ms": 60.294678399999995
         },
         "cumulative_gnss_advisory": {
-          "p50_ms": 456.060237,
-          "p95_ms": 459.8932337
+          "p50_ms": 1058.684108,
+          "p95_ms": 1060.8762583999999
         },
         "cumulative_input_construction": {
-          "p50_ms": 13.802359000000012,
-          "p95_ms": 13.897918600000008
+          "p50_ms": 14.320692000000015,
+          "p95_ms": 14.416083200000008
         },
         "cumulative_lidar_advisory": {
-          "p50_ms": 32.777271,
-          "p95_ms": 33.2537168
+          "p50_ms": 33.660644999999995,
+          "p95_ms": 33.8485574
         },
         "cumulative_predictor_batch": {
-          "p50_ms": 570.4746519999994,
-          "p95_ms": 575.1542644000003
+          "p50_ms": 1176.0877580000013,
+          "p95_ms": 1178.463119499999
         },
         "cumulative_result_materialization": {
-          "p50_ms": 13.834210000000004,
-          "p95_ms": 14.212419900000004
+          "p50_ms": 13.500947000000009,
+          "p95_ms": 13.618292800000003
         },
         "cumulative_worker_module_setup": {
-          "p50_ms": 0.001973,
-          "p95_ms": 0.0026591999999999996
+          "p50_ms": 0.0018299999999999998,
+          "p95_ms": 0.003285499999999999
         },
         "query_grouping_index": {
-          "p50_ms": 2.70556,
-          "p95_ms": 2.7216994
+          "p50_ms": 2.597206,
+          "p95_ms": 2.6550165000000003
         },
         "total_predictor_provider": {
-          "p50_ms": 188.959196,
-          "p95_ms": 190.5518833
+          "p50_ms": 340.780581,
+          "p95_ms": 341.2318608
         },
         "worker_wall": {
-          "p50_ms": 152.773279,
-          "p95_ms": 154.3951808
+          "p50_ms": 303.911058,
+          "p95_ms": 305.6327858
         }
       },
       "worker_count": 4
     }
   ],
   "workload": {
+    "gnss_occupancy_point_count": 704,
+    "gnss_visibility_model": "LocalOccupancyGrid ray-based LOS plus elevation mask",
     "grid_shape": [
       40,
       40,
