@@ -252,7 +252,7 @@ Result: **ICRA-004 SMOKE PASS; RETURN TO SUPERVISOR REVIEW**.
 
 Branch: dev/icra
 
-Start HEAD: 3de08928ec6fe57922e64bd892c7f55882e1b8a0
+Start HEAD: a33beadffa51d4669501d194065bc20da51e36d9
 
 Task/Gate: ICRA-005 / GATE_0B
 
@@ -320,4 +320,5 @@ Result: **BLOCKED / P0_PERFORMANCE_GATE_FAIL — RETURN TO SUPERVISOR REVIEW**.
 - Analyzer recommendations are retained as output only and were not acted on.
 - No task-started ROS/capture/launch process remains.
 - Gate status is not changed by DEEPSEEK.
-- Final implementation commit SHA: `PENDING_COMMIT`.
+- Two-axis review against task-start `a33beadffa51d4669501d194065bc20da51e36d9`: Standards found the pending final SHA plus non-blocking analyzer/test duplication smells; Spec found the incorrect START HEAD, pending SHA/push, and the ROS default log written outside the repository. The START HEAD is corrected above, the SHA is recorded below, and `/root/.ros/log/2026-08-21-03-51-32-690827-mint-X-365799` (one `launch.log`) was removed at `2026-08-21T03:58:54Z`. The judgement-only duplication smells were not refactored because they are outside the narrow authorized fix.
+- Final implementation commit SHA: `fba4c18dc6e1a8431af516cefbc9f71ded8f03bb`.
