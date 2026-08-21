@@ -1,5 +1,71 @@
 # ICRA Supervisor Log
 
+## 2026-08-21 — ICRA-011 review and ICRA-012 narrow repair authorization
+
+### Review identity and independent verification
+
+- Fixed review base: `c865c74317e23b9cb5339174e662d1fc7e87a4ec`.
+- Reviewed HEAD: `9faf12139d49b93c259af014249c3c1b447e179c`.
+- Reviewed commits: `7be95f0` and `9faf121`; both carry applicable requirement IDs.
+  `dev/icra` matched `origin/dev/icra` at divergence `0 0`.
+- The aggregate diff contains exactly the 13 ICRA-011 allowlisted files and passes
+  `git diff --check`. The only untracked file remains
+  `docs/icra27/dev/ICRA_SYSTEM_FLOW.pdf`, unchanged at SHA-256
+  `1f07da5631a6551a2f98c02d46fd45bc87f2f1e3e7c14e95f9a7f4a0bac844f6`.
+- Supervisor rebuilt the root Predictor/profile, plan-env and plan-manage test targets. Dynamic
+  linkage with the prescribed environment resolves product code to the current ICRA-011
+  `results/icra27/icra011/build_root/libiap.so`; only retained generated ROS typesupport comes
+  from the repository-local ICRA-009 facade.
+- The three exact Predictor regressions passed 3/3. The exact production count, worker 1/2/4
+  equivalence and failure-after-success retention regressions passed 3/3. The Python profile
+  evidence contract passed 2/2.
+- All six retained suites passed 6/6, 43/43, 35/35, 2/2, 3/3 and 48/48, for **137/137**.
+  No main flow, ROS launch, smoke, qualification, benchmark, analyzer or GPU preflight ran.
+
+### Standards axis
+
+- **FAIL, one hard finding:** the ICRA-011 entry in `docs/CHANGES.md` records results but no
+  reproducible command, and README contains no ICRA-011 command. `AGENTS.md` Definition of Done
+  requires the command in `docs/CHANGES.md` or README; `DEV_LOG.md` alone does not satisfy the
+  prescribed location.
+- One non-blocking Data-Clump/Shotgun-Surgery judgement: the five exact diagnostics repeat
+  through Predictor, production state, reset/aggregation/copy and JSON serialization. This
+  follows the existing flat schema and the task's exact keys, so ICRA-012 must not introduce a
+  scope-expanding abstraction.
+- Standards count: one hard finding and one non-blocking judgement. Worst Standards issue:
+  missing reproduction command in the prescribed document.
+
+### Spec axis
+
+- **FAIL, one medium finding:** fixed-base `unique_positions` was the populated LiDAR-cache
+  size, and therefore zero in `GnssOnly`. ICRA-011 now assigns it from the generalized
+  `SpatialAdvisory` cache, causing `unique_positions` and production
+  `predictor_unique_positions` to become nonzero in GNSS-only mode. This violates the explicit
+  requirement that legacy `unique_positions`, `lidar_evaluations` and `lidar_cache_hits`
+  retain their meanings. The existing GNSS-only worker regression checks the new counters but
+  omits these legacy fields.
+- All other phase-2 requirements conform: exact allowlist, private call-local internal Seam,
+  coherent source key, early-failure non-poisoning, per-horizon growth/fusion/materialization,
+  current-attempt health reset, worker aggregation, canonical `76800/12800/64000` profile
+  counts, zero scalar mismatches and diagnostic-only latency.
+- Spec count: one medium finding. Worst Spec issue: legacy LiDAR position-counter semantics
+  changed in GNSS-only mode.
+
+### Design disposition and next task
+
+- Verdict: `ICRA011_REQUEST_CHANGES`. The core phase-2 implementation and performance evidence
+  are accepted, but phase 2 is not closed while either review axis fails. Gate-0B remains
+  `BLOCKED_PERFORMANCE_AND_CALIBRATION_PENDING`; P4 remains `NOT_QUALIFIED`.
+- The Predictor remains a deep Module: callers retain only `query()`/`queryBatch()`, while
+  `SpatialAdvisory` stays a private internal Seam. The repair must preserve that Depth and
+  Locality; no public cache Interface or extra Adapter is justified.
+- Unique next task: `ICRA-012 / GATE_0B` in `NEXT_TASK.md`. It restores legacy LiDAR diagnostics
+  across source modes/non-cacheable/early-invalid cases, strengthens GNSS-only production
+  worker evidence, and adds required ICRA-011 reproduction commands to `docs/CHANGES.md`.
+- Phase 3 fixed-lattice/rolling-window work is the intended following stage only after this
+  narrow repair passes a separate Supervisor review. It is not authorized now. Calibration,
+  main-flow smoke, qualification, GPU work and P4 remain forbidden.
+
 ## 2026-08-21 — ICRA-010 review and ICRA-011 phase-2 authorization
 
 ### Review identity and verification
