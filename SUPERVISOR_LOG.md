@@ -1,5 +1,41 @@
 # ICRA Supervisor Log
 
+## 2026-08-21 — ICRA-006 review and ICRA-007 fidelity repair
+
+### Review identity and verification
+
+- Review base: `cf367231347e69cb3dec58016a94c2b48397af07`.
+- Reviewed HEAD: `b4fc5746dc4de401dbf8ccf7c0f93706dbdabb88`.
+- Reviewed commits: `f2ad7e3`, `b929821` and `b4fc574`; all bind `IAP-RQ-320`.
+- `dev/icra` matched `origin/dev/icra` at divergence `0 0`; the preserved PDF remained the only untracked file.
+- `git diff --check cf36723...b4fc574` passed. Supervisor reran `test_predictor_module` (37/37) and the profile evidence contract (1/1); both passed.
+- A separate repository-local 1-warmup/5-iteration run reproduced status PASS, checksum `bc296383f5cb17cf`, worker 1/2/4 p95 `1182.208 / 628.348 / 341.097 ms`, and worker-1 GNSS/LiDAR/fusion cumulative p50 `1009.607 / 29.592 / 56.728 ms`. This is reproducibility evidence for the committed profiler, not current-runtime qualification.
+
+### Standards axis
+
+- Hard: the new test and profile make scientific equality over horizons `0.0..2.5 s` part of PASS. This truthfully observes current behavior but conflicts with `docs/spec/conventions.md` and `docs/spec/talk_spec.md`, which require empirical `Sigma -> Sigma_pred` future propagation and PL derived from it. The invariant result cannot authorize whole-result cross-horizon caching.
+- Judgement-only duplicated-code smells: three nearly identical component timing blocks in `predictor_module.cpp`; the same 91 scientific fields are independently enumerated by hashing, whitelist output and test equality helpers.
+
+### Spec axis
+
+- High: the profiler does not exercise the frozen provider's GNSS path. It installs a 704-point `LocalOccupancyGrid` and performs map ray LOS, while `P0RiskGridRuntime::refreshTimerCallback()` currently sets only LiDAR map points/primitives on the production Predictor module. The offline worker-1 provider p95 `1193.774 ms` versus retained production provider p95 approximately `639.377 ms` corroborates the mismatch. Absolute component percentages and diagnostic-budget crossings cannot be attributed directly to current P0.
+- Medium: the profiler's `result_materialization` moves `PredictorQueryResult` objects into another vector. Production materialization calls `makeRiskPredictionResult()` for every query. The reported region is not the production conversion cost requested by `NEXT_TASK.md`.
+- No forbidden ROS/main-flow run, formal configuration change, threshold change, production optimization, P4/P5 work or ownership breach was found.
+
+### Accepted diagnostic facts and verdict
+
+- Accepted: exact logical shape; actual offline dispatch counts; stable worker checksums/counts; one LiDAR evaluation plus five cache hits per position; GNSS and fusion invoked once per dispatched horizon query; strong CPU scaling; current six-horizon scientific invariance; repository-local execution and documentation.
+- Confirmed from ICRA-005: current production provider p95 is approximately `639.377 ms`, with total refresh p95 `657.214 ms`; the provider envelope is the runtime blocker.
+- Code inspection confirms only LiDAR is cached per position. GNSS and fusion are recomputed for every horizon. The ICRA-006 map-LOS profile makes GNSS the largest cost in its intended-mode workload, but the exact current-runtime GNSS share remains unqualified until the path mismatch is repaired.
+- Verdict: `ICRA006_REQUEST_CHANGES`. Gate 0B remains `BLOCKED_PERFORMANCE_AND_SEMANTICS`; P4 remains `NOT_QUALIFIED`.
+- GPU acceleration is not authorized. Four CPU workers achieved about `3.47x` reproducibly on a 20-core CPU, while the larger algorithmic opportunity is to compute spatial GNSS/LiDAR advisory once per position and retain only a cheap horizon-dependent propagation/fusion stage.
+
+### Required next action
+
+- Unique task: `ICRA-007 / GATE_0B` in `NEXT_TASK.md`.
+- Repair the profiler to distinguish exact frozen-runtime behavior from a separately labelled map-LOS candidate path, measure real production result conversion, quantify component-timer perturbation, and report missing horizon propagation as a blocker.
+- Do not implement caching, covariance growth, worker/profile changes or a GPU path in ICRA-007. Supervisor will use faithful evidence to issue one bounded CPU remediation task.
+
 ## 2026-08-21 — ICRA-005 review and ICRA-006 diagnostic authorization
 
 ### Review identity and synchronization

@@ -1,121 +1,126 @@
-# ICRA-006 — Decompose P0 provider latency and produce optimization evidence
+# ICRA-007 — Repair P0 profile fidelity before selecting the CPU optimization
 
 > Active gate: `GATE_0B`
 > Owner: `DEEPSEEK`
 > Activation: `TASK_READY`
-> Review disposition: `ICRA005_REVIEWED_ICRA006_DIAGNOSTIC_AUTHORIZED`
+> Review disposition: `ICRA006_REQUEST_CHANGES_ICRA007_AUTHORIZED`
 > Requirement mapping: `IAP-RQ-320` only
 > Conference route: conditional P0 -> P4 -> P5
-> This task: offline P0 provider diagnosis only; no selected optimization and no main-flow run
+> This task: offline diagnostic repair only; no production optimization or main-flow run
 
 ## Supervisor verdict and objective
 
-ICRA-005 is reviewed as `BLOCKED / P0_PERFORMANCE_GATE_FAIL`. The fixed 60/55-second benchmark was process-clean and input-valid, produced 72 successful generations with 76,800 logical queries each, and failed only `refresh_p95_over_400_ms`: refresh p50/p95/max were `649.6330975 / 657.21388795 / 661.487876 ms`, with stale ratio `0.5945945945945946`.
+ICRA-006 produced reproducible tests and useful structural evidence, but it does not yet support a current-runtime component verdict:
 
-Read-only decomposition of the retained raw health trace shows provider batch p50/p95 approximately `633.259 / 639.377 ms`, while median non-provider refresh overhead is approximately `16.235 ms`. The confirmed bottleneck envelope is therefore the P0 predictor provider. Existing evidence does not yet prove which computation inside that provider dominates.
+1. Its profiler installs a 704-point `LocalOccupancyGrid` for GNSS ray LOS. The frozen production P0 provider currently installs only LiDAR map points/primitives and does not call `PredictorModule::set_local_occupancy()`.
+2. Its `result_materialization` timer measures moving `PredictorQueryResult` objects, while production converts every result through `makeRiskPredictionResult()`.
+3. It makes six-horizon scientific invariance part of profile PASS even though the repository conventions require empirical covariance growth and horizon-dependent `Sigma_pred`/`PL_pred`.
 
-ICRA-006 must build a fast, repository-local and non-main-flow diagnostic loop that measures the production-shaped provider workload, tests whether repeated horizons are computationally equivalent under the frozen snapshot semantics, and measures worker scaling without changing the formal runtime configuration. Return measurements to Supervisor; do not select or implement the production optimization in this task.
+The retained ICRA-005 production result remains authoritative: provider p95 approximately `639.377 ms`, total refresh p95 `657.21388795 ms`, Gate limit `400 ms`. ICRA-007 must repair the offline evidence so Supervisor can choose one bounded CPU remediation without conflating current runtime, a standards-required map-LOS path, and missing horizon propagation.
 
 ## 1. Start and synchronize
 
 - Follow the `AGENTS.md` synchronization protocol. Stop as `REMOTE_DIVERGED` if both sides lead.
 - Preserve the existing untracked `docs/icra27/dev/ICRA_SYSTEM_FLOW.pdf`; do not modify, stage, delete, move or regenerate it.
-- Record ICRA-006 START in `DEV_LOG.md` with start HEAD, allowed files, diagnostic-only scope and the pre-existing PDF.
+- Record ICRA-007 START in `DEV_LOG.md` with start HEAD, allowed files, diagnostic-only scope and the pre-existing PDF.
 - Do not edit Supervisor-owned state, task, log, scope, plan or gate documents.
 
-## 2. Freeze the retained red feedback loop
+## 2. Preserve accepted ICRA-006 evidence
 
-Before changing code, replay the committed ICRA-005 `risk_grid_health.jsonl` through the current analyzer logic without ROS. The replay must reproduce:
+- Do not alter or overwrite `results/icra27/icra006/red_replay/` or the committed ICRA-005 evidence.
+- Keep the exact logical workload `40 x 40 x 8`, six horizons and 76,800 logical queries.
+- Preserve stable scientific checksums, validity/source/flag counts and worker 1/2/4 equivalence.
+- Existing component invocation counters and opt-in timers may be reused, but no Predictor scientific output or caching behavior may change.
 
-- gate `P0_PERFORMANCE_GATE_FAIL`;
-- sole failure `refresh_p95_over_400_ms`;
-- 72 successful generations;
-- refresh p95 `657.21388795 ms`.
+Write all new output under `results/icra27/icra007/`.
 
-Record the command and exit/result in `DEV_LOG.md`. Do not alter `gate0_analyzer.py`, its threshold, the retained ICRA-005 evidence or analyzer output.
+## 3. Separate two explicit profiling modes
 
-## 3. Add one offline production-shaped profiling seam
+The profiler must run and label both modes without presenting either as the other.
 
-Prefer a new small non-ROS executable and a narrow analysis script rather than expanding the existing ROS query probe. It must instantiate the real predictor classes with a deterministic snapshot and exercise the same essential shape as the frozen provider path:
+### A. `frozen_runtime`
 
-- logical grid: `40 x 40 x 8 = 12,800` positions;
-- horizons: `0.0, 0.5, 1.0, 1.5, 2.0, 2.5 s`;
-- logical query count: exactly `76,800`;
-- group by spatial position and process all six horizons for that position;
-- report both logical query count and actually dispatched predictor query count;
-- no mocked timing, sleeps or fabricated performance rows.
+This mode represents the current P0 provider path:
 
-The profiler must use monotonic wall time, include warm-up, run enough measured iterations to report p50/p95, and retain compact machine-readable output under `results/icra27/icra006/`. All paths must be repository-local; no `/tmp`, home-directory ROS logs or workspace-level build/log output.
+- do not install GNSS local occupancy;
+- bind the same effective Predictor source/freshness/GNSS policy/conservative-fusion/LiDAR settings used by the committed ICRA-005 configuration;
+- retain deterministic GNSS epoch and LiDAR inputs, while clearly labelling synthetic input values;
+- group position then six horizons exactly as production does;
+- convert each prediction into `RiskPredictionResult` with the same field mapping and validity semantics as production `makeRiskPredictionResult()`;
+- time that conversion as production result materialization;
+- report logical query count and actually dispatched Predictor query count separately.
 
-At minimum, measure or count these disjoint or clearly labelled regions:
+The implementation must prevent the production mapping and profiler mapping from silently drifting. Prefer one small shared pure conversion helper with focused tests if it can be introduced without changing runtime behavior; otherwise add a fail-closed field-by-field parity test.
 
-- query grouping/index construction;
-- worker/module setup and result materialization;
-- GNSS advisory;
-- LiDAR advisory, evaluations and cache hits;
-- fusion advisory;
-- total predictor/provider wall time.
+### B. `map_los_candidate`
 
-If precise nested wall times would perturb the workload materially, retain invocation counters plus a separately labelled component microprofile. Do not present overlapping timers as additive.
+This mode represents the standards-required GNSS map-LOS candidate path:
 
-## 4. Test horizon semantics before proposing reuse
+- install the deterministic 704-point occupancy model used by ICRA-006;
+- keep every other input and parameter identical to `frozen_runtime`;
+- label it `NOT_CURRENT_PRODUCTION` in machine-readable output;
+- do not use its absolute latency to characterize ICRA-005.
 
-Add focused tests using one fixed position and snapshot over all six horizons.
+The evidence must state explicitly that production currently lacks the map-based GNSS occlusion binding required by `docs/spec/conventions.md`; ICRA-007 does not repair that product behavior.
 
-- Compare every scientific result field across horizons separately from expected metadata fields such as `query_time_s` and `horizon_s`.
-- Cover freshness-reference behavior explicitly.
-- Preserve the existing batch-versus-scalar equivalence contract.
-- Report whether GNSS, LiDAR and fusion are currently horizon-invariant under the P0 runtime input contract; do not assume that they are.
+## 4. Separate timing overhead from budget timing
 
-If the outputs differ scientifically, retain the evidence and do not add cross-horizon reuse. If they are equivalent, report the exact field whitelist and measured redundant invocation counts, but still do not implement production cross-horizon caching in ICRA-006.
+For each mode and worker count `1`, `2`, `4`, execute:
 
-## 5. Measure worker scaling without changing formal configuration
+- a counter-only outer-wall profile with `collect_component_timing=false`; use only this run for provider p50/p95, speedup and diagnostic budget comparison;
+- a separately labelled component-timed profile with identical inputs and `collect_component_timing=true`; use it for cost ranking, not the `400 ms` crossing;
+- identical scientific checksum and count validation between counter-only and component-timed runs.
 
-Run the same offline workload with worker counts `1`, `2` and `4`, one variable at a time.
+Report component-timer perturbation as both milliseconds and percentage for each worker/mode. If the perturbation exceeds 5% at worker 1, mark component percentages `PERTURBING_DIAGNOSTIC`; do not treat them as exact production shares.
 
-- Keep snapshot, query order, horizons, build type and all predictor parameters identical.
-- Require identical scientific-result checksum and validity/source/flag counts across worker counts.
-- Report p50/p95, speedup relative to worker 1, CPU count and any failed/non-finite iteration.
-- Worker variants are diagnostic only. Do not change launch defaults, ICRA profiles, manifests or the frozen worker count of the formal Gate.
+Use at least one warm-up and five measured iterations per cell. Retain raw iterations plus type-7 p50/p95. No mocked time, sleep or extrapolated row may be included as measurement.
+
+## 5. Report horizon semantics truthfully
+
+Keep the focused test that proves the current frozen snapshot path is scientifically invariant across six horizons, but separate observation from conformance:
+
+- `diagnostic_execution_status` may PASS when the measurement contract is complete;
+- `p0_horizon_semantic_status` must be `MISSING_SIGMA_GROWTH` while all scientific fields remain invariant;
+- do not make invariance a condition for scientific/conformance PASS;
+- retain the exact metadata/scientific field lists and freshness-reference test;
+- explicitly prohibit whole-result cross-horizon reuse as the remediation while this semantic blocker exists.
+
+Do not implement covariance growth in ICRA-007.
 
 ## 6. Acceptance and handoff
 
-ICRA-006 is ready for Supervisor review only when:
+ICRA-007 is ready for Supervisor review only when:
 
-- the committed ICRA-005 red result is reproduced without a main-flow run;
-- the offline profile proves exact `12,800 x 6 = 76,800` logical shape;
-- component timings/counters and worker `1/2/4` results are finite and machine-readable;
-- scientific-result checksums are stable across repeated runs and worker variants;
-- horizon equivalence is decided by focused tests, not inspection alone;
-- no formal configuration, runtime algorithm, Gate threshold or retained evidence changed;
-- focused tests pass and documentation maps only the diagnostic seam to `IAP-RQ-320`.
+- both modes are present and machine-readable, and `map_los_candidate` is marked not-current-production;
+- frozen-runtime construction matches the current P0 provider contract and production result conversion;
+- counter-only worker 1/2/4 results have stable checksums/counts and finite p50/p95;
+- component timing is separately labelled and its perturbation quantified;
+- horizon invariance is reported as `MISSING_SIGMA_GROWTH`, not scientific PASS;
+- focused tests and the complete registered repository-local suite pass;
+- no production result, cache, launch/config, threshold or retained evidence changes.
 
-Update `docs/CHANGES.md`, `docs/TRACEABILITY.md` and `DEV_LOG.md` with exact commands, exit codes, profile schema, measured results and evidence paths. Explicitly stage only authorized files, verify the staged diff and preserved PDF, commit with `IAP-RQ-320`, push `dev/icra`, record the final SHA in `DEV_LOG.md`, and return control to Supervisor.
+Update `docs/CHANGES.md`, `docs/TRACEABILITY.md` and `DEV_LOG.md` with exact commands, exit codes, both mode results, timer perturbation and evidence paths. Explicitly stage only authorized files, verify the staged diff and preserved PDF, commit with `IAP-RQ-320`, push `dev/icra`, record the final SHA in `DEV_LOG.md`, and return control to Supervisor.
 
-The handoff may rank measured cost centers and report which variants crossed an offline latency budget. `DEEPSEEK` must not change the Gate verdict, choose the production optimization, authorize a smoke/benchmark, start P4, or create the next task.
+`DEEPSEEK` may report measured rankings but must not choose the production remediation, authorize a smoke/benchmark, change the Gate verdict, start P4 or create the next task.
 
 ## Allowed files
 
-- new narrow offline profiler source under `apps/` or `test/`;
-- a new narrow analyzer/runner under `scripts/dev_planner/` and its focused test under `test/`;
-- `apps/test_predictor_query_probe.cpp` only if a small reuse is clearly narrower than a new executable;
-- `include/iap/predictor/predictor_module.hpp`;
-- `src/iap/predictor/predictor_module.cpp`;
-- `test/test_predictor_module.cpp`;
-- root `CMakeLists.txt` only as needed to register the profiler/test;
-- compact new evidence under `results/icra27/icra006/`;
+- `apps/iap_predictor_offline_profile.cpp`;
+- `test/test_icra006_provider_profile.py`, or a narrowly renamed/replacement ICRA-007 evidence-contract test;
+- `include/iap/predictor/predictor_module.hpp` and `src/iap/predictor/predictor_module.cpp` only for additive diagnostic correction;
+- `test/test_predictor_module.cpp` only for diagnostic/equivalence assertions;
+- the narrow production conversion declaration/definition and its focused test only if needed to share or prove exact mapping; no other runtime change;
+- root or planner `CMakeLists.txt` only as needed for the profiler/test target;
+- compact new evidence under `results/icra27/icra007/`;
 - `docs/CHANGES.md`;
 - `docs/TRACEABILITY.md`;
 - `DEV_LOG.md`.
 
-Changes to `predictor_module` are limited to additive diagnostic counters/timers with tests. They may not change selection, validity, PL/FIM/fusion values, caching behavior or returned scientific results.
-
 ## Forbidden
 
 - No ROS launch, IAP main-flow smoke, qualification benchmark, bag, RViz or campaign.
-- No changes to `gate0_analyzer.py`, ICRA-005 evidence, the `400 ms` threshold or failure classification.
-- No production optimization, cross-horizon cache, algorithm rewrite or numerical approximation.
-- No ROI, horizon, resolution, refresh-period, worker, backend, occupied-skip or launch/profile change.
+- No GNSS/LiDAR/fusion caching change, covariance-growth implementation, numerical approximation, worker/profile change or GPU/CUDA implementation.
+- No change to the formal `400 ms` threshold, `gate0_analyzer.py`, ICRA-005/006 evidence, ROI, horizons, resolution, refresh period, backend or occupied-skip behavior.
 - No P1/P2/P3/P4/P5 code, fixture, profile, experiment or decision/action change.
 - No external writes, workspace-level build/log output, disk cleanup or changes to `../glim` or any other repository.
 - No changes to `AGENTS.md`, `AGENT_STATE.md`, `SUPERVISOR_LOG.md`, `NEXT_TASK.md` or ICRA scope/plan/gate documents.
