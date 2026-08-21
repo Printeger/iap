@@ -1,5 +1,46 @@
 # ICRA Supervisor Log
 
+## 2026-08-21 — ICRA-005 review and ICRA-006 diagnostic authorization
+
+### Review identity and synchronization
+
+- Review base: `a33beadffa51d4669501d194065bc20da51e36d9`.
+- Reviewed HEAD: `381ea49ea197a3fbba992650831f93e44bd95b8c`.
+- Reviewed commits: `fba4c18` and `381ea49`; both bind `IAP-RQ-320`.
+- `dev/icra` matched `origin/dev/icra` at divergence `0 0` after `git fetch origin`.
+- The only untracked item remained `docs/icra27/dev/ICRA_SYSTEM_FLOW.pdf`; it was preserved and excluded.
+- `git diff --check a33bead...381ea49` passed. The focused analyzer suite passed 15/15, and a read-only raw-trace replay reproduced the committed performance failure.
+
+### Evidence verdict
+
+- The retained-evidence hashes matched, and the benchmark integrity analyzer was correctly changed to fail closed on zero or invalid/non-finite captured integrity reports.
+- GPU preflight passed before capture/ROS with both required `nvidia-smi` calls, `cuInit(0)=0`, `device_count=1` and one RTX 4070 Ti SUPER.
+- The one authorized fixed benchmark preserved the 60/55-second contract, CPU mapping, one worker, six horizons and 76,800-query logical shape. P1/P2/P3/P4/P5 stayed disabled.
+- `iap_rosnode` remained alive through runtime; 565/565 integrity reports were valid. There were 72 successful and 2 failed generations, and every successful generation recorded 76,800 logical queries.
+- Refresh p50/p95/max were `649.6330975 / 657.21388795 / 661.487876 ms`; interval p50/p95 were `650.4311489999992 / 658.0863929999996 ms`; stale ratio was `0.5945945945945946` and failed ratio `0.02702702702702703`.
+- Analyzer exit 1 had exactly one failure: `refresh_p95_over_400_ms`.
+- Supervisor verdict: `ICRA005_P0_PERFORMANCE_GATE_FAIL`. Gate 0B is `BLOCKED_PERFORMANCE`; P4 remains `NOT_QUALIFIED` and P5 remains `IMPLEMENTED_BUT_UNQUALIFIED`.
+
+### Performance diagnosis boundary
+
+- Retained raw health rows place provider batch p50/p95 at approximately `633.259 / 639.377 ms`; median non-provider refresh overhead is approximately `16.235 ms`. The provider consumes about 97% of median refresh wall time.
+- The frozen provider processes up to 12,800 spatial positions across six horizons with one worker. Existing diagnostics show one LiDAR evaluation plus five LiDAR cache hits per repeated position, while code inspection indicates GNSS and fusion remain invoked per horizon.
+- Historical predictor microprofile evidence ranks GNSS above LiDAR and fusion per query, but it is not the same ICRA-005 workload. It is a hypothesis for measurement, not a formal component-level conclusion.
+- The formal analyzer CSV drops finite provider-duration rows during health-row deduplication even though the raw JSONL retains them. ICRA-006 may use a separate diagnostic parser but may not change the formal analyzer or retained verdict.
+
+### Standards and scope findings
+
+- Spec disposition: PASS for the one-shot benchmark contract; the truthful performance result is a Gate failure, not an incomplete execution.
+- Standards disposition: accepted with one recorded boundary violation. ROS created `/root/.ros/log/2026-08-21-03-51-32-690827-mint-X-365799/launch.log` outside the repository and DeepSeek then removed it. This did not change the retained performance evidence, but it violated the no-external-write/no-cleanup rule and must not recur.
+- No benchmark retry, workload tuning, backend fallback or P4/P5 work is accepted or authorized.
+
+### Required next action
+
+- Unique task: `ICRA-006 / GATE_0B`, defined in `NEXT_TASK.md`.
+- Active role: `DEEPSEEK`; state: `TASK_READY`.
+- Build a non-main-flow, repository-local profiling loop; decompose provider cost, test horizon semantics, and measure worker 1/2/4 scaling with output equivalence.
+- ICRA-006 does not implement the selected optimization. Supervisor will use its evidence to authorize one bounded remediation task, followed by a separate smoke and fixed benchmark sequence.
+
 ## 2026-08-18 — Reconciled bootstrap and ICRA-001 review
 
 ### Review identity and synchronization

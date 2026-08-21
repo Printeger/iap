@@ -1,123 +1,121 @@
-# ICRA-005 — Close the evidence boundary and run the frozen 60-second P0 Gate-0B once
+# ICRA-006 — Decompose P0 provider latency and produce optimization evidence
 
 > Active gate: `GATE_0B`
 > Owner: `DEEPSEEK`
 > Activation: `TASK_READY`
-> Review disposition: `ICRA004_SMOKE_PASS_ICRA005_AUTHORIZED`
+> Review disposition: `ICRA005_REVIEWED_ICRA006_DIAGNOSTIC_AUTHORIZED`
 > Requirement mapping: `IAP-RQ-320` only
 > Conference route: conditional P0 -> P4 -> P5
-> This task: P0-only evidence closure and one benchmark; P1/P2/P3/P4/P5 disabled
+> This task: offline P0 provider diagnosis only; no selected optimization and no main-flow run
 
 ## Supervisor verdict and objective
 
-The Supervisor reviewed `73cbddd...3de0892`. ICRA-004 passed its single 20-second smoke prerequisite: GPU preflight passed before ROS, `iap_rosnode` remained alive through runtime, 165 valid integrity reports were captured, and 10 successful P0 generations each recorded exactly 76,800 queries. Focused runner/analyzer/capture tests pass. This does not qualify P0 Gate-0B.
+ICRA-005 is reviewed as `BLOCKED / P0_PERFORMANCE_GATE_FAIL`. The fixed 60/55-second benchmark was process-clean and input-valid, produced 72 successful generations with 76,800 logical queries each, and failed only `refresh_p95_over_400_ms`: refresh p50/p95/max were `649.6330975 / 657.21388795 / 661.487876 ms`, with stale ratio `0.5945945945945946`.
 
-ICRA-005 must first close two benchmark evidence boundaries without starting ROS. If those checks pass, run the unchanged fixed 60-second full-grid benchmark exactly once. Do not tune the workload before or after the run.
+Read-only decomposition of the retained raw health trace shows provider batch p50/p95 approximately `633.259 / 639.377 ms`, while median non-provider refresh overhead is approximately `16.235 ms`. The confirmed bottleneck envelope is therefore the P0 predictor provider. Existing evidence does not yet prove which computation inside that provider dominates.
+
+ICRA-006 must build a fast, repository-local and non-main-flow diagnostic loop that measures the production-shaped provider workload, tests whether repeated horizons are computationally equivalent under the frozen snapshot semantics, and measures worker scaling without changing the formal runtime configuration. Return measurements to Supervisor; do not select or implement the production optimization in this task.
 
 ## 1. Start and synchronize
 
 - Follow the `AGENTS.md` synchronization protocol. Stop as `REMOTE_DIVERGED` if both sides lead.
 - Preserve the existing untracked `docs/icra27/dev/ICRA_SYSTEM_FLOW.pdf`; do not modify, stage, delete, move or regenerate it.
-- Record ICRA-005 START in `DEV_LOG.md` with start HEAD, allowed files, one-shot rule and the pre-existing PDF.
+- Record ICRA-006 START in `DEV_LOG.md` with start HEAD, allowed files, diagnostic-only scope and the pre-existing PDF.
 - Do not edit Supervisor-owned state, task, log, scope, plan or gate documents.
 
-## 2. Close the retained ICRA-004 evidence boundary without rerunning it
+## 2. Freeze the retained red feedback loop
 
-The analyzer used two repository-local files that were ignored and therefore absent from the ICRA-004 Git changeset. Preserve their bytes and explicitly force-add them in ICRA-005:
+Before changing code, replay the committed ICRA-005 `risk_grid_health.jsonl` through the current analyzer logic without ROS. The replay must reproduce:
 
-- `results/icra27/icra004/runs/smoke/exports/test_planner_p0_open_sky_gnss_open_sky_332493_1787282428501/test_planner_manifest.json`
-  - required SHA256: `111d57f74192d1bf17ec7b54c2af198d648b1807920a3f088bdd73ec80d7f818`
-- `results/icra27/icra004/runs/smoke/analyzer/effective_config.json`
-  - required SHA256: `f9997494731b9b155712519e31522010112541be460528e69c9655efbaa2263f`
+- gate `P0_PERFORMANCE_GATE_FAIL`;
+- sole failure `refresh_p95_over_400_ms`;
+- 72 successful generations;
+- refresh p95 `657.21388795 ms`.
 
-Hash both files before staging. A missing file or hash mismatch is `BLOCKED / RETAINED_EVIDENCE_MISMATCH`; do not recreate it, rerun ICRA-004, or infer its contents from stdout. Do not add the large truth CSV, runtime tree, build tree or any other ignored ICRA-004 artifact.
+Record the command and exit/result in `DEV_LOG.md`. Do not alter `gate0_analyzer.py`, its threshold, the retained ICRA-005 evidence or analyzer output.
 
-## 3. Make benchmark integrity evidence fail closed
+## 3. Add one offline production-shaped profiling seam
 
-Before the benchmark, make the narrow analyzer correction that both `p0-smoke` and `p0-full-grid` require at least one captured valid `/iap/integrity` report. Zero captured rows or zero valid rows must produce `P0_INPUT_AVAILABILITY_FAIL` and a nonzero analyzer exit.
+Prefer a new small non-ROS executable and a narrow analysis script rather than expanding the existing ROS query probe. It must instantiate the real predictor classes with a deterministic snapshot and exercise the same essential shape as the frozen provider path:
 
-- Modify only `scripts/dev_planner/gate0_analyzer.py` and `test/test_gate0_analyzer.py` for this correction.
-- Add focused coverage for a benchmark with zero integrity rows and with only invalid/non-finite integrity rows.
-- Preserve the fixed benchmark contract: 60-second runtime, 55-second validation, at least 20 successful generations, exact 76,800-query shape and type-7 p95 `<=400 ms`.
-- Do not change the runner command, launch configuration, P0 algorithm, ROI, resolution, horizons, refresh period, worker count, occupied skip, backend, process monitor or capture QoS.
+- logical grid: `40 x 40 x 8 = 12,800` positions;
+- horizons: `0.0, 0.5, 1.0, 1.5, 2.0, 2.5 s`;
+- logical query count: exactly `76,800`;
+- group by spatial position and process all six horizons for that position;
+- report both logical query count and actually dispatched predictor query count;
+- no mocked timing, sleeps or fabricated performance rows.
 
-Run before ROS:
+The profiler must use monotonic wall time, include warm-up, run enough measured iterations to report p50/p95, and retain compact machine-readable output under `results/icra27/icra006/`. All paths must be repository-local; no `/tmp`, home-directory ROS logs or workspace-level build/log output.
 
-```text
-python3 -m py_compile \
-  scripts/dev_planner/gate0_analyzer.py \
-  test/test_gate0_analyzer.py
+At minimum, measure or count these disjoint or clearly labelled regions:
 
-python3 -m unittest discover -s test -p 'test_gate0_runner.py' -v
-python3 -m unittest discover -s test -p 'test_gate0_analyzer.py' -v
-python3 -m unittest discover -s test -p 'test_gate0_capture_p0_health.py' -v
-```
+- query grouping/index construction;
+- worker/module setup and result materialization;
+- GNSS advisory;
+- LiDAR advisory, evaluations and cache hits;
+- fusion advisory;
+- total predictor/provider wall time.
 
-Any failure blocks the benchmark. Do not repair unrelated smells or refactor duplicated smoke/benchmark lifecycle code in this task.
+If precise nested wall times would perturb the workload materially, retain invocation counters plus a separately labelled component microprofile. Do not present overlapping timers as additive.
 
-## 4. One authorized fixed benchmark
+## 4. Test horizon semantics before proposing reuse
 
-Only after Sections 2 and 3 pass, run exactly once:
+Add focused tests using one fixed position and snapshot over all six horizons.
 
-```text
-python3 scripts/dev_planner/run_gate0_qualification.py \
-  --output-root results/icra27/icra005/runs \
-  --benchmark
-```
+- Compare every scientific result field across horizons separately from expected metadata fields such as `query_time_s` and `horizon_s`.
+- Cover freshness-reference behavior explicitly.
+- Preserve the existing batch-versus-scalar equivalence contract.
+- Report whether GNSS, LiDAR and fusion are currently horizon-invariant under the P0 runtime input contract; do not assume that they are.
 
-The runner's automatic GPU preflight must pass before capture or ROS. A failed preflight prints `GPU_NOT_READY`, returns nonzero, starts no ROS process and ends the task `BLOCKED` without retry.
+If the outputs differ scientifically, retain the evidence and do not add cross-horizon reuse. If they are equivalent, report the exact field whitelist and measured redundant invocation counts, but still do not implement production cross-horizon caching in ICRA-006.
 
-After the runner finishes, invoke the analyzer once if the retained output is sufficient:
+## 5. Measure worker scaling without changing formal configuration
 
-```text
-python3 scripts/dev_planner/gate0_analyzer.py \
-  --gate0-root results/icra27/icra005/runs/benchmark \
-  --output-dir results/icra27/icra005/runs/benchmark/analyzer
-```
+Run the same offline workload with worker counts `1`, `2` and `4`, one variable at a time.
 
-Do not rerun the benchmark or overwrite its output directory if the runner or analyzer fails.
+- Keep snapshot, query order, horizons, build type and all predictor parameters identical.
+- Require identical scientific-result checksum and validity/source/flag counts across worker counts.
+- Report p50/p95, speedup relative to worker 1, CPU count and any failed/non-finite iteration.
+- Worker variants are diagnostic only. Do not change launch defaults, ICRA profiles, manifests or the frozen worker count of the formal Gate.
 
-## 5. Gate-0B acceptance
+## 6. Acceptance and handoff
 
-PASS requires all of:
+ICRA-006 is ready for Supervisor review only when:
 
-- GPU preflight PASS before capture/ROS, with both `nvidia-smi` commands, `cuInit(0)=0` and `device_count>=1` recorded;
-- capture readiness before launch for the exact health and integrity topics;
-- `iap_rosnode` seen as a launch descendant and alive throughout runtime;
-- runner and analyzer exit 0, with no runtime required-process failure;
-- fixed `60/55` runtime/validation contract and unchanged frozen P0 configuration;
-- at least one captured valid integrity report;
-- at least 20 successful P0 generations;
-- every successful generation has exactly 76,800 queries and finite latency;
-- type-7 p95 refresh latency `<=400 ms`, with p50/p95/max, interval, stale ratio and failed ratio retained.
+- the committed ICRA-005 red result is reproduced without a main-flow run;
+- the offline profile proves exact `12,800 x 6 = 76,800` logical shape;
+- component timings/counters and worker `1/2/4` results are finite and machine-readable;
+- scientific-result checksums are stable across repeated runs and worker variants;
+- horizon equivalence is decided by focused tests, not inspection alone;
+- no formal configuration, runtime algorithm, Gate threshold or retained evidence changed;
+- focused tests pass and documentation maps only the diagnostic seam to `IAP-RQ-320`.
 
-Any failure is `BLOCKED/FAIL` with its exact analyzer classification. In particular, p95 above 400 ms is `P0_PERFORMANCE_GATE_FAIL`, not an environment excuse. Stop without tuning, retrying or launching another run.
+Update `docs/CHANGES.md`, `docs/TRACEABILITY.md` and `DEV_LOG.md` with exact commands, exit codes, profile schema, measured results and evidence paths. Explicitly stage only authorized files, verify the staged diff and preserved PDF, commit with `IAP-RQ-320`, push `dev/icra`, record the final SHA in `DEV_LOG.md`, and return control to Supervisor.
 
-## 6. Evidence, documentation and handoff
-
-- Keep generated files inside the repository. Do not write build/log/evidence outside `src/iap`.
-- Force-add only the compact ICRA-005 evidence needed to reproduce the analyzer: GPU preflight, command, runner manifest, capture readiness, health/integrity JSONL, stdout/capture logs, the single runtime `test_planner_manifest.json`, and analyzer CSV/JSON/effective-config outputs. Do not add build/install trees or large truth CSVs.
-- Update `docs/CHANGES.md`, `docs/TRACEABILITY.md` and `DEV_LOG.md` with exact commands, exit codes, metrics, evidence paths and truthful `IAP-RQ-320` mapping.
-- Record whether any task-started ROS process remains; stop only processes proven to belong to this task.
-- Explicitly stage only authorized files. Review staged diff, test exit codes, evidence hashes, remote divergence and the preserved untracked PDF.
-- Commit with `IAP-RQ-320`, push `dev/icra`, record the final SHA in `DEV_LOG.md`, and return control to Supervisor without changing Gate status.
+The handoff may rank measured cost centers and report which variants crossed an offline latency budget. `DEEPSEEK` must not change the Gate verdict, choose the production optimization, authorize a smoke/benchmark, start P4, or create the next task.
 
 ## Allowed files
 
-- `scripts/dev_planner/gate0_analyzer.py`
-- `test/test_gate0_analyzer.py`
-- the two exact retained ICRA-004 files and hashes listed in Section 2
-- new compact evidence under `results/icra27/icra005/`
-- `docs/CHANGES.md`
-- `docs/TRACEABILITY.md`
-- `DEV_LOG.md`
+- new narrow offline profiler source under `apps/` or `test/`;
+- a new narrow analyzer/runner under `scripts/dev_planner/` and its focused test under `test/`;
+- `apps/test_predictor_query_probe.cpp` only if a small reuse is clearly narrower than a new executable;
+- `include/iap/predictor/predictor_module.hpp`;
+- `src/iap/predictor/predictor_module.cpp`;
+- `test/test_predictor_module.cpp`;
+- root `CMakeLists.txt` only as needed to register the profiler/test;
+- compact new evidence under `results/icra27/icra006/`;
+- `docs/CHANGES.md`;
+- `docs/TRACEABILITY.md`;
+- `DEV_LOG.md`.
+
+Changes to `predictor_module` are limited to additive diagnostic counters/timers with tests. They may not change selection, validity, PL/FIM/fusion values, caching behavior or returned scientific results.
 
 ## Forbidden
 
-- No ICRA-004 smoke rerun and no second ICRA-005 benchmark.
-- No changes to `run_gate0_qualification.py`, capture code/QoS, launch/config, P0 product code or tests outside the one analyzer test file.
-- No ROI/horizon/resolution/refresh/worker/backend/occupied-skip tuning and no analyzer threshold relaxation.
+- No ROS launch, IAP main-flow smoke, qualification benchmark, bag, RViz or campaign.
+- No changes to `gate0_analyzer.py`, ICRA-005 evidence, the `400 ms` threshold or failure classification.
+- No production optimization, cross-horizon cache, algorithm rewrite or numerical approximation.
+- No ROI, horizon, resolution, refresh-period, worker, backend, occupied-skip or launch/profile change.
 - No P1/P2/P3/P4/P5 code, fixture, profile, experiment or decision/action change.
-- No bag, RViz, campaign, disk cleanup, wait/retry loop or backend fallback.
-- No external writes and no changes to `../glim` or any other repository.
+- No external writes, workspace-level build/log output, disk cleanup or changes to `../glim` or any other repository.
 - No changes to `AGENTS.md`, `AGENT_STATE.md`, `SUPERVISOR_LOG.md`, `NEXT_TASK.md` or ICRA scope/plan/gate documents.
