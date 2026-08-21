@@ -1856,3 +1856,31 @@ calibration, Phase-4B occupancy delta/reverse-ray, production activation or
 P1/P2/P3/P4/P5 product development ran. Implementation commit/push and the
 required DEV_LOG-only SUPERVISOR handoff remain; DEEPSEEK does not mark
 ICRA-016, Phase 4 or Gate-0B PASS.
+
+## 2026-08-21T18:59:42Z — ICRA-016 IMPLEMENTATION PUSHED / SUPERVISOR HANDOFF
+
+Implementation commit
+`0a6870d001477ff4f62b76dbb6a95aebd50e8c17`
+(`feat(ICRA-016): add versioned spatial retention IAP-RQ-312 IAP-RQ-314
+IAP-RQ-320 IAP-RQ-321 IAP-RQ-322`) was pushed to `origin/dev/icra`. It
+contains exactly the eleven ICRA-016 allowlisted files recorded above.
+
+Final repository-local evidence remains green: root 7/7 selected suites,
+production P0 60/60 active GTests, retained planner 7/7 selected suites, P4
+A* 1/1 and P1 integrity-cost 1/1. Eight directly linked consumers resolve the
+current ICRA-016 `libiap.so`; Standards and Spec final re-reviews both PASS
+with zero findings. The build library SHA-256 is
+`43d824ce44c155298d2df31d51ddf0eeed3f94cd50f3241df04ee150f79e478d`;
+the read-only ICRA-011 profile remains
+`778abd22158805c41150b4eeed9c37a3f660237a0bb0599e9a567e3533c7b32c`;
+the disabled, never-rerun ICRA-014 canonical remains
+`44f47b23137d17f4b0cbc81af6827156865bdecb36089bf53f770960a2fb963d`;
+and the protected PDF remains solely untracked at
+`1f07da5631a6551a2f98c02d46fd45bc87f2f1e3e7c14e95f9a7f4a0bac844f6`.
+No forbidden flow or task process remains.
+
+This DEV_LOG-only commit returns control to `SUPERVISOR` review. `DEEPSEEK`
+does not mark ICRA-016, Phase 4 or Gate-0B PASS; start Phase-4B or calibration;
+choose production activation values; run main flow, smoke, qualification,
+benchmark, analyzer or GPU work; change P1/P2/P3/P4/P5 behavior; or issue the
+next task.
