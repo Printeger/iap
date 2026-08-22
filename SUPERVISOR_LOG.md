@@ -1,5 +1,69 @@
 # ICRA Supervisor Log
 
+## 2026-08-22 — ICRA-022 review and ICRA-023 provenance-repair authorization
+
+### Review identity and synchronization
+
+- Fixed review range: `af8fe3a87d6d660cc26e5026aa630b5c170200c6...2bd5ba4f472fefab877a85fcdac352fe2b27292a`.
+- Reviewed commits: `544451f` product/tests, `5cb6af4` documentation/evidence and `2bd5ba4`
+  final DEV_LOG handoff. Branch and `origin/dev/icra` matched at divergence `0 0` after fetch.
+- All ten changed paths are in the ICRA-022 allowlist; no Supervisor-owned file, P0 runtime
+  production source, launch/default, P4/P5 code or external repository changed. Aggregate
+  `git diff --check` passes. The protected PDF remains the sole untracked file and all frozen
+  ICRA-011/014/020/021 hashes remain exact.
+
+### Standards axis
+
+- Verdict: FAIL with two documented-process findings and no material code smell.
+- Medium: `DEV_LOG.md` and `verification_summary.txt` call the Builder self-check a “final two-axis
+  review” and declare Standards/Spec verdicts. `AGENTS.md` reserves final review/verdict authority to
+  Supervisor; returning for Supervisor review does not cure the self-adjudication wording.
+- Low: pushed final handoff commit `2bd5ba4` contains no `IAP-RQ-XXX`, contrary to the repository's
+  unconditional commit-message traceability rule. History must not be rewritten; ICRA-023 records
+  the breach and requires RQ IDs on every new commit.
+- No code/domain-convention, allowlist, documentation-sync, fail-closed, product-default or generated-
+  artifact tracking violation was found.
+
+### Spec axis
+
+- Verdict: `PASS_WITH_ISSUED_SPEC_CONTRADICTION`; no missing/partial product requirement, scope creep
+  or incorrect product behavior was found.
+- Medium: ICRA-022 simultaneously required a new P0 clock-domain test in
+  `test_p0_risk_grid_runtime.cpp`, required the ICRA-020 read-only validator to pass, and did not
+  allow that validator to change. The historical validator requires current-tree equality to
+  ICRA-020 for that same P0 test. These conditions cannot all hold.
+- The Builder correctly ran the validator, retained exit 1 and did not alter a non-allowlisted file.
+  This is an internal issued-spec/historical-provenance conflict, not an implementation or external-
+  environment failure. The ICRA-020 canonical JSON and immutable implementation commit remain exact.
+
+### Supervisor verification and product verdict
+
+- Repository-local rebuild at current HEAD exits zero for IAP, plan-env, path-searching, bspline-opt
+  and Ego targets. Warnings are retained historical planner/compiler debt, not ICRA-022 failures.
+- Independent suites pass: plan-env 6/6, P0 76/76, Adapter 7/7, rolling 23/23, retained Ego 8/8,
+  P4 4/4, P1 integrity 39/39, analyzer 25/25, runner 16/16 and capture 1/1.
+- Selected root is 7/8 only because the ICRA-020 validator runs `git diff --quiet` against its
+  historical implementation commit for the intentionally changed P0 test. Direct validator exit is
+  also 1 with the same sole cause.
+- Linkage resolves retained ICRA-022 `libiap.so` and `libplan_env.so`; their hashes remain
+  `d988f19ce7a4f08f145cd4643f7cd66e26f3f9849d03db836107cae23ebcbe31` and
+  `cadd44115d026695547a53b4ac884d4c80a851882d9cd1c942103dfe43ae1ecf`.
+- Product verdict: timestamp authority, atomic occupancy publication, invalid/future/stale fail-
+  closed behavior and analyzer classifications meet ICRA-022. No live flow was authorized or run.
+
+### Disposition and next action
+
+- Overall disposition: `ICRA022_PRODUCT_PASS_STANDARDS_REPAIR_REQUIRED`; Gate-0B remains
+  `NOT_QUALIFIED`, P4 remains `NOT_QUALIFIED`, and P5 remains implemented but unqualified.
+- Unique next task: `ICRA-023 / GATE_0B`. Correct Builder-review labels, acknowledge the immutable
+  RQ-less handoff commit, and make the ICRA-020 read-only validator validate source paths at its
+  recorded immutable commit rather than current-tree equality. No product or live-flow work.
+- The 4.8 GB ICRA-022 build/install set is retained because overall review has not passed. After
+  ICRA-023 review PASS and management-document push, Supervisor will delete it under the operator's
+  retention policy.
+- Only after that repair passes may a later task freeze the formal-generation distribution and
+  decide whether to authorize one replacement smoke with the unchanged four-worker configuration.
+
 ## 2026-08-22 — ICRA-021 review and ICRA-022 occupancy-clock repair authorization
 
 ### Review identity and synchronization
