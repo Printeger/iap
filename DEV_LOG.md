@@ -2914,3 +2914,20 @@ documentation/log files and bounded reviewable ICRA-024 evidence. It contains
 no build/install/runtime/ROS-log tree, PDF, historical artifact or
 Supervisor-owned file; `git diff --cached --check` passes. **ICRA-024 remains
 BLOCKED and Gate-0B remains NOT_QUALIFIED pending Supervisor review.**
+
+## 2026-08-22T16:08:37Z — ICRA-024 BUILDER TASK RETURN
+
+The implementation, documentation and bounded evidence commit
+`724a550c92e4b078ac7a46142f6bb94d87d224e7` is pushed to
+`origin/dev/icra`. Repository-local build/test/linkage passed, mandatory GPU
+preflight passed, and the single immutable smoke stopped before IAP startup on
+the recorded isolated-prefix `so3_control` resolution failure. The sole
+analyzer consequently recorded `P0_INPUT_AVAILABILITY_FAIL`; no correction,
+retry, benchmark, tuning, qualification, P4/P5 execution or Gate promotion
+occurred.
+
+Builder self-check has zero remaining Spec findings and zero hard Standards
+violations, with the two documented non-blocking analyzer design judgments.
+This is not a final Standards/Spec review or Supervisor verdict. **ICRA-024 is
+returned BLOCKED; Gate-0B remains NOT_QUALIFIED.** DEEPSEEK issues no next
+task or Gate decision and returns control to Supervisor review.
