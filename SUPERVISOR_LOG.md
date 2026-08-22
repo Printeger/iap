@@ -1,5 +1,68 @@
 # ICRA Supervisor Log
 
+## 2026-08-22 — ICRA-024 review and ICRA-025 repair authorization
+
+### Review identity and synchronization
+
+- Fixed review range: `e675d81dc26d18153bf65708f075300743807f13...f31fce839cf6cf8316b03486fb58d29c4f2dd12b`.
+- Reviewed commits: `724a550` and `f31fce8`; both bind `IAP-RQ-320` and `IAP-RQ-322`.
+- After fetch, `HEAD` and `origin/dev/icra` matched at divergence `0 0`. The protected PDF remained
+  the sole untracked file. All 19 changed paths are allowed Builder files or bounded ICRA-024
+  evidence; no product, Supervisor-owned, build/install, historical-evidence or external-repository
+  file changed. `git diff --check` passed.
+
+### Standards axis
+
+- Verdict: `PASS` with zero hard violations and one Low judgment smell.
+- Low, non-blocking Primitive Obsession/Shotgun Surgery risk: Gate names and precedence remain raw
+  strings distributed across `analyze_p0_messages()`, integrity composition and manifest composition.
+  Centralizing precedence would reduce future regression risk, but that broader refactor is outside
+  this bounded analyzer repair.
+
+### Spec axis
+
+- Verdict: `REQUEST_CHANGES`, one Medium finding.
+- `analyze_p0_messages()` first filters `ready=true` rows into successful claims and de-duplicates
+  only that subset. A later `ready=false` callback representative for the same positive generation
+  therefore cannot replace the earlier success. Independent reproduction with generation 1 success
+  followed by generation 1 failure returns `PASS`, reports one successful generation and emits both
+  a success and a failed row.
+- This violates the frozen contract requiring exactly one final captured representative per
+  generation before strict success/failure classification. The existing focused test covers only
+  success-to-success order and misses success-to-failure and failure-to-success.
+- No other Spec deviation was found. The build/linkage sequence, mandatory preflight, exactly one
+  smoke and analyzer invocation, fail-closed process evidence, no retry, allowed paths and artifact
+  retention conform to the issued task.
+
+### Execution and evidence disposition
+
+- Supervisor independently passed validator 5/5, analyzer 31/31, runner 16/16, capture 1/1,
+  selected root 8/8, plan-env 6/6, P0 76/76, Adapter 7/7, rolling 23/23, retained Ego 8/8, P4 4/4
+  and P1 integrity 39/39. The missing success/failure ordering case demonstrates that this green
+  suite is incomplete rather than contradicting the Spec finding.
+- Direct consumers resolve only retained ICRA-024 `libiap.so` and `libplan_env.so`, whose hashes are
+  `980abf79...c3ecb86` and `ecd6a3fc...14dfaf`. Protected artifact hashes remain exact and no task
+  process remains.
+- GPU preflight truthfully passed on one RTX 4070 Ti SUPER. The sole smoke exited after 0.164 s,
+  before `iap_rosnode` started, because the supplied prefix search could not resolve `so3_control`.
+  The package is present at `/home/dev/ws_iap/install/so3_control` and resolves after sourcing the
+  workspace setup, proving an environment-assembly/provenance defect rather than an absent external
+  dependency. Empty health/integrity capture and `P0_INPUT_AVAILABILITY_FAIL` have no P0 performance
+  meaning. Stopping without correction or retry was correct.
+- Overall verdict: `ICRA024_REQUEST_CHANGES`; Gate-0B remains `NOT_QUALIFIED`.
+
+### Required next action and artifact lifecycle
+
+- Unique task: `ICRA-025 / GATE_0B`, defined in `NEXT_TASK.md`.
+- Repair generation de-duplication before classification, cover both ordering directions, and add a
+  fail-closed launch-dependency preflight that records the exact ament prefix closure and stops
+  before capture/launch when a required package is absent or shadowed.
+- ICRA-025 is unit/static verification only. It authorizes no GPU preflight, ROS, replacement smoke,
+  benchmark, retry, tuning, qualification, P4/P5 execution or Gate promotion.
+- Per operator policy, the approximately 4.8 GiB ICRA-024 build/install trees remain retained: the
+  review did not pass, so deletion conditions are not met. They may be reused read-only through
+  ICRA-025 development and Supervisor review.
+
 ## 2026-08-22 — ICRA-023 review and ICRA-024 authorization
 
 ### Review identity and synchronization
