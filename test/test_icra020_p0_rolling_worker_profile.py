@@ -17,6 +17,9 @@ PROFILE = (
     / "icra020"
     / "p0_rolling_worker_profile.json"
 )
+PROFILE_SHA256 = (
+    "2f68e3123426b5a1117e86bb5abc7c69117a070bcf583ec759974fddeb71a0bd"
+)
 
 SCHEMA = "p0_rolling_stage5_profile_v1"
 WORKERS = {1, 2, 4}
@@ -175,12 +178,58 @@ def percentile_r7(values, probability):
     return ordered[lower] + fraction * (ordered[lower + 1] - ordered[lower])
 
 
+def validate_recorded_commit_provenance(implementation_sha, implementation_files):
+    subprocess.run(
+        ["git", "cat-file", "-e", f"{implementation_sha}^{{commit}}"],
+        cwd=ROOT,
+        check=True,
+        capture_output=True,
+    )
+    for path in implementation_files:
+        object_type = subprocess.run(
+            ["git", "cat-file", "-t", f"{implementation_sha}:{path}"],
+            cwd=ROOT,
+            check=True,
+            capture_output=True,
+            text=True,
+        ).stdout.strip()
+        if object_type != "blob":
+            raise AssertionError(
+                f"recorded implementation path is not a blob: {path}"
+            )
+
+
 class Icra020P0RollingWorkerProfileTest(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         if not PROFILE.is_file():
             raise AssertionError(f"missing ICRA-020 profile: {PROFILE}")
+        if sha256(PROFILE) != PROFILE_SHA256:
+            raise AssertionError(f"modified ICRA-020 profile: {PROFILE}")
         cls.profile = json.loads(PROFILE.read_text(encoding="utf-8"))
+
+    def test_recorded_commit_provenance_accepts_required_blobs(self):
+        validate_recorded_commit_provenance(
+            self.profile["provenance"]["implementation_sha"],
+            IMPLEMENTATION_FILES,
+        )
+
+    def test_recorded_commit_provenance_rejects_nonexistent_commit(self):
+        with self.assertRaises(subprocess.CalledProcessError):
+            validate_recorded_commit_provenance(
+                "0" * 40,
+                IMPLEMENTATION_FILES,
+            )
+
+    def test_recorded_commit_provenance_rejects_missing_path(self):
+        with self.assertRaises(subprocess.CalledProcessError):
+            validate_recorded_commit_provenance(
+                self.profile["provenance"]["implementation_sha"],
+                (*IMPLEMENTATION_FILES, "missing/icra020/source.cpp"),
+            )
+
+    def test_canonical_profile_hash_is_frozen(self):
+        self.assertEqual(sha256(PROFILE), PROFILE_SHA256)
 
     def test_profile_is_complete_truthful_and_reproducible(self):
         profile = self.profile
@@ -275,22 +324,9 @@ class Icra020P0RollingWorkerProfileTest(unittest.TestCase):
         )
         implementation_sha = provenance["implementation_sha"]
         self.assertRegex(implementation_sha, r"^[0-9a-f]{40}$")
-        subprocess.run(
-            ["git", "cat-file", "-e", f"{implementation_sha}^{{commit}}"],
-            cwd=ROOT,
-            check=True,
-        )
-        subprocess.run(
-            [
-                "git",
-                "diff",
-                "--quiet",
-                implementation_sha,
-                "--",
-                *IMPLEMENTATION_FILES,
-            ],
-            cwd=ROOT,
-            check=True,
+        validate_recorded_commit_provenance(
+            implementation_sha,
+            IMPLEMENTATION_FILES,
         )
         for key in ("test_binary", "libiap"):
             item = provenance[key]

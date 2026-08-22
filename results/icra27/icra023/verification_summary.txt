@@ -1,0 +1,104 @@
+ICRA-023 repository-local verification
+UTC: 2026-08-22T15:07:35Z
+Synchronized HEAD: 4b2e82d9f533e96ccd6b2f070af2998469de6937
+Scope: documentation/provenance validator and retained-binary verification
+only. No product code, build/install, GPU preflight, ROS/main flow, live
+capture/analyzer, smoke, qualification, campaign, or disabled profile ran.
+
+TDD evidence
+- RED command:
+  python3 test/test_icra020_p0_rolling_worker_profile.py Icra020P0RollingWorkerProfileTest.test_recorded_commit_provenance_accepts_required_blobs
+  exit 1: NameError, validate_recorded_commit_provenance was not defined.
+- First GREEN command: the same command after adding recorded commit/blob
+  validation; exit 0, 1/1 PASS.
+- Focused valid/invalid provenance command:
+  python3 test/test_icra020_p0_rolling_worker_profile.py Icra020P0RollingWorkerProfileTest.test_recorded_commit_provenance_accepts_required_blobs Icra020P0RollingWorkerProfileTest.test_recorded_commit_provenance_rejects_nonexistent_commit Icra020P0RollingWorkerProfileTest.test_recorded_commit_provenance_rejects_missing_path
+  exit 0, 3/3 PASS.
+- Canonical-artifact RED command:
+  python3 test/test_icra020_p0_rolling_worker_profile.py Icra020P0RollingWorkerProfileTest.test_canonical_profile_hash_is_frozen
+  exit 1: NameError, PROFILE_SHA256 was not defined.
+- Canonical-artifact GREEN: the same command after freezing the accepted
+  SHA-256; exit 0, 1/1 PASS. The full validator rejects any modified JSON
+  before parsing its otherwise internally consistent values.
+
+Final validator and retained regression commands
+python3 test/test_icra020_p0_rolling_worker_profile.py
+exit 0, 5/5 PASS.
+
+icra023_ld_path=/home/dev/ws_iap/src/iap/results/icra27/icra022/install_ego/lib:/home/dev/ws_iap/src/iap/results/icra27/icra022/install_plan_env/lib:/home/dev/ws_iap/src/iap/results/icra27/icra022/install_path_searching/lib:/home/dev/ws_iap/src/iap/results/icra27/icra022/install_bspline_opt/lib:/home/dev/ws_iap/src/iap/results/icra27/icra022/install/lib:/home/dev/ws_iap/install/gnss_comm/lib:/home/dev/ws_iap/install/traj_utils/lib:/home/dev/ws_iap/install/quadrotor_msgs/lib:/opt/ros/jazzy/lib
+
+env LD_LIBRARY_PATH="$icra023_ld_path" ctest --test-dir results/icra27/icra022/build_iap -R 'test_integrity_snapshot|test_local_occupancy|test_predictor_module|test_rolling_spatial_advisory_window|test_predictor_risk_conversion|test_risk_grid_map|test_icra011_spatial_dedup_profile|test_icra020_p0_rolling_worker_profile' --output-on-failure
+exit 0, selected root 8/8 PASS.
+
+python3 test/test_gate0_analyzer.py
+exit 0, 25/25 PASS.
+python3 test/test_gate0_runner.py
+exit 0, 16/16 PASS. GPU_NOT_READY:cuInit_failed_999 is a mocked unit-test
+fixture; no real GPU preflight ran.
+python3 test/test_gate0_capture_p0_health.py
+exit 0, 1/1 PASS.
+
+env LD_LIBRARY_PATH="$icra023_ld_path" results/icra27/icra022/build_plan_env/test_grid_map_occupancy_epoch --gtest_brief=1
+exit 0, 6/6 PASS.
+env LD_LIBRARY_PATH="$icra023_ld_path" results/icra27/icra022/build_ego/test_p0_risk_grid_runtime --gtest_brief=1
+exit 0, 76/76 PASS; one historical opt-in test remained disabled.
+env LD_LIBRARY_PATH="$icra023_ld_path" results/icra27/icra022/build_ego/test_p0_occupancy_epoch_adapter --gtest_brief=1
+exit 0, 7/7 PASS.
+env LD_LIBRARY_PATH="$icra023_ld_path" results/icra27/icra022/build_iap/test_rolling_spatial_advisory_window --gtest_brief=1
+exit 0, 23/23 PASS; disabled ICRA-014 was not invoked.
+env LD_LIBRARY_PATH="$icra023_ld_path" ctest --test-dir results/icra27/icra022/build_ego -R 'test_p0_risk_grid_runtime|test_p0_occupancy_epoch_adapter|test_p1_replan_admission|test_p1_candidate_selection|test_p5_runtime_integrity_gate|test_p2_candidate_ranking|test_p3_reference_bias|test_planning_risk_context' --output-on-failure
+exit 0, retained Ego 8/8 PASS.
+env LD_LIBRARY_PATH="$icra023_ld_path" results/icra27/icra022/build_path_searching/test_p4_risk_astar --gtest_brief=1
+exit 0, 4/4 PASS.
+env LD_LIBRARY_PATH="$icra023_ld_path" results/icra27/icra022/build_bspline_opt/test_p1_integrity_cost --gtest_brief=1
+exit 0, 39/39 PASS.
+
+Linkage commands (all ldd commands had no `not found` entry)
+env LD_LIBRARY_PATH="$icra023_ld_path" ldd results/icra27/icra022/build_iap/test_rolling_spatial_advisory_window
+env LD_LIBRARY_PATH="$icra023_ld_path" ldd results/icra27/icra022/build_plan_env/test_grid_map_occupancy_epoch
+env LD_LIBRARY_PATH="$icra023_ld_path" ldd results/icra27/icra022/build_ego/test_p0_risk_grid_runtime
+env LD_LIBRARY_PATH="$icra023_ld_path" ldd results/icra27/icra022/build_ego/test_p0_occupancy_epoch_adapter
+env LD_LIBRARY_PATH="$icra023_ld_path" ldd results/icra27/icra022/build_path_searching/test_p4_risk_astar
+env LD_LIBRARY_PATH="$icra023_ld_path" ldd results/icra27/icra022/build_bspline_opt/test_p1_integrity_cost
+env LD_LIBRARY_PATH="$icra023_ld_path" ldd results/icra27/icra022/build_ego/test_planning_risk_context
+- Direct consumers resolved libiap.so only to
+  /home/dev/ws_iap/src/iap/results/icra27/icra022/install/lib/libiap.so.
+- Direct consumers resolved libplan_env.so only to
+  /home/dev/ws_iap/src/iap/results/icra27/icra022/install_plan_env/lib/libplan_env.so.
+
+Hash command
+sha256sum results/icra27/icra022/install/lib/libiap.so results/icra27/icra022/install_plan_env/lib/libplan_env.so docs/icra27/dev/ICRA_SYSTEM_FLOW.pdf results/icra27/icra011/p0_phase2_spatial_dedup_profile.json results/icra27/icra014/canonical_rolling_spatial_diagnostic.json results/icra27/icra020/p0_rolling_worker_profile.json results/icra27/icra021/runs/smoke/risk_grid_health.jsonl results/icra27/icra021/runs/smoke/integrity_report.jsonl
+- libiap.so d988f19ce7a4f08f145cd4643f7cd66e26f3f9849d03db836107cae23ebcbe31
+- libplan_env.so cadd44115d026695547a53b4ac884d4c80a851882d9cd1c942103dfe43ae1ecf
+- PDF 1f07da5631a6551a2f98c02d46fd45bc87f2f1e3e7c14e95f9a7f4a0bac844f6
+- ICRA-011 778abd22158805c41150b4eeed9c37a3f660237a0bb0599e9a567e3533c7b32c
+- ICRA-014 44f47b23137d17f4b0cbc81af6827156865bdecb36089bf53f770960a2fb963d
+- ICRA-020 2f68e3123426b5a1117e86bb5abc7c69117a070bcf583ec759974fddeb71a0bd
+- ICRA-021 health 59f88a7eb9cde2695aad20aef7e6f32c4f065e1caf0bf127907f2a814b40ee59
+- ICRA-021 integrity b82089044a2088d02b0e44c9a3a2eebd2e43168d559578046afe989352052aca
+
+git diff --check
+exit 0.
+
+Staged allowlist/process audit
+- Initial explicit add of the ignored `results/` path was rejected before any
+  commit; the two allowed summaries were then added with `git add -f`. No
+  build/install path was staged.
+- git diff --cached --check
+  exit 0.
+- git diff --cached --name-only
+  output exactly:
+  DEV_LOG.md
+  docs/CHANGES.md
+  docs/TRACEABILITY.md
+  results/icra27/icra022/verification_summary.txt
+  results/icra27/icra023/verification_summary.txt
+  test/test_icra020_p0_rolling_worker_profile.py
+- ps -eo pid,args | rg 'results/icra27/icra023|test_icra020_p0_rolling_worker_profile|test_gate0_(analyzer|runner|capture)|test_grid_map_occupancy_epoch|test_p0_risk_grid_runtime|test_p0_occupancy_epoch_adapter|test_rolling_spatial_advisory_window|test_p4_risk_astar|test_p1_integrity_cost|run_gate0_qualification|gate0_capture|ego_planner_node|iap_rosnode'
+  No task process remained; output contained only the inspection shell and rg.
+
+Historical package-wide lint debt was not rerun or swept; ICRA-023 changes
+only Python validator/docs/logs. Builder self-check found the issued validator
+provenance and role-label contracts satisfied. This is not a final
+Standards/Spec verdict or Gate decision. Gate-0B remains NOT_QUALIFIED pending
+Supervisor review.

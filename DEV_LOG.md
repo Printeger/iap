@@ -2676,3 +2676,88 @@ No GPU preflight, ROS/main flow, live analyzer, replacement smoke, retry,
 qualification or campaign ran. **ICRA-022 BLOCKED; Gate-0B NOT_QUALIFIED.**
 Control returns to SUPERVISOR review; DEEPSEEK issues no next task or Gate
 decision.
+
+## 2026-08-22T15:04:24Z — ICRA-023 START
+
+Synchronized `dev/icra` at
+`4b2e82d9f533e96ccd6b2f070af2998469de6937`; `HEAD...origin/dev/icra` is
+`0 0`. The protected untracked PDF, ICRA-011, disabled ICRA-014, canonical
+ICRA-020, and ICRA-021 health/integrity evidence remain exact at SHA-256
+`1f07da5631a6551a2f98c02d46fd45bc87f2f1e3e7c14e95f9a7f4a0bac844f6`,
+`778abd22158805c41150b4eeed9c37a3f660237a0bb0599e9a567e3533c7b32c`,
+`44f47b23137d17f4b0cbc81af6827156865bdecb36089bf53f770960a2fb963d`,
+`2f68e3123426b5a1117e86bb5abc7c69117a070bcf583ec759974fddeb71a0bd`,
+`59f88a7eb9cde2695aad20aef7e6f32c4f065e1caf0bf127907f2a814b40ee59`
+and `b82089044a2088d02b0e44c9a3a2eebd2e43168d559578046afe989352052aca`
+respectively. The accepted ICRA-022 implementation commit
+`544451f19e879a944fbc3264415248d1e43aa03a` exists and its retained
+`build*`/`install*` trees remain present and will be reused read-only.
+
+The exact allowlist is
+`test/test_icra020_p0_rolling_worker_profile.py`, role/blocker-label-only
+corrections in `results/icra27/icra022/verification_summary.txt`, new logs
+below `results/icra27/icra023/`, `DEV_LOG.md`, `docs/CHANGES.md`, and
+`docs/TRACEABILITY.md`. Supervisor-owned state/task/log/scope/plan/design/Gate
+documents and every ICRA-022 product file are excluded.
+
+Explicit stop line: documentation/provenance validator, unit-test, retained
+binary and linkage work only. No product changes, new build/install trees,
+GPU preflight, ROS/main flow, live capture/analyzer, smoke, qualification,
+campaign, disabled ICRA-014/020 profile, formal-generation distribution,
+Gate decision, or P4/P5 work is authorized.
+
+## 2026-08-22T15:06:00Z — ICRA-023 ICRA-022 ROLE / TRACEABILITY ERRATUM
+
+The ICRA-022 Builder entries used the phrases “final two-axis review”,
+“Standards PASS”, and “Spec PASS_WITH_EXTERNAL_BLOCKER”. Those statements were
+Builder self-checks only. They were not a final Standards/Spec review, a
+Supervisor verdict, or a Gate decision. The ICRA-020 validator failure was an
+internally contradictory issued-spec/historical-provenance requirement, not
+an external environment blocker or product defect.
+
+The pushed final handoff commit
+`2bd5ba4f472fefab877a85fcdac352fe2b27292a` omitted the mandatory applicable
+`IAP-RQ-XXX` in its commit subject. Existing pushed history is preserved
+without amend, rebase, replacement, or force-push. This erratum acknowledges
+the breach; every ICRA-023 commit, including the final `DEV_LOG.md`-only task
+return, will contain `IAP-RQ-320` and/or `IAP-RQ-322`. Builder will report
+results and return control, but will not declare a final review verdict,
+Supervisor PASS, Gate decision, replacement-smoke authorization, or next task.
+
+## 2026-08-22T15:07:35Z — ICRA-023 IMPLEMENTATION / VERIFICATION
+
+Repaired only the read-only ICRA-020 validator provenance seam. The validator
+continues to require a 40-hex implementation SHA, now proves that it resolves
+to a commit and that both required implementation paths resolve as blobs in
+that exact commit, and no longer compares those historical blobs with the
+current evolving worktree. Focused coverage accepts the canonical recorded
+commit and rejects a nonexistent commit and missing recorded path. The
+canonical JSON, implementation SHA, paths, hashes, workload, science,
+counters, timing, percentile, build provenance, ephemeral-file and
+no-promotion assertions are unchanged.
+
+TDD recorded the expected initial `NameError` RED before the provenance helper
+existed, then GREEN at 1/1 and 3/3 focused cases. A second RED/Green cycle
+froze the canonical JSON SHA-256 before parse. Final verification passes
+validator 5/5, selected root 8/8, analyzer 25/25, runner 16/16, capture 1/1,
+plan-env 6/6, P0 76/76, Adapter 7/7, rolling 23/23, retained Ego 8/8, P4 4/4
+and P1 integrity 39/39. Retained direct consumers resolve only the ICRA-022
+`libiap.so` and `libplan_env.so`, whose SHA-256 values remain
+`d988f19ce7a4f08f145cd4643f7cd66e26f3f9849d03db836107cae23ebcbe31`
+and `cadd44115d026695547a53b4ac884d4c80a851882d9cd1c942103dfe43ae1ecf`.
+Exact commands, exits and hashes are in
+`results/icra27/icra023/verification_summary.txt`.
+
+No product file or retained build/install tree changed. Protected evidence
+remains exact. No GPU preflight, ROS/main flow, live capture/analyzer, smoke,
+qualification, campaign, disabled ICRA-014/020 profile, formal-generation
+distribution, Gate decision or P4/P5 work ran. Builder self-check finds the
+issued provenance and role-label requirements satisfied; this is not a final
+Standards/Spec verdict. **Gate-0B remains NOT_QUALIFIED pending Supervisor
+review.** Control will return to Supervisor without issuing a next task.
+
+The staged allowlist self-audit passed `git diff --cached --check` and contains
+exactly the validator, both allowed verification summaries, and the three
+Builder-owned documentation/log files. The ignored summaries were explicitly
+force-staged; no `build*`/`install*` path is staged. The residual-process check
+found only its own inspection shell/`rg`, with no task process remaining.

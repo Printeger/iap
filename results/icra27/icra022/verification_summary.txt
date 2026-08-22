@@ -39,15 +39,16 @@ Final task-required tests
 - python3 test/test_gate0_capture_p0_health.py: exit 0, 1/1 PASS.
 - selected root CTest regex for integrity/local occupancy/predictor/rolling/
   conversion/risk-grid/ICRA-011/ICRA-020: exit 8, 7/8 PASS; only ICRA-020
-  validator failed for the exact blocker below.
+  validator exposed the issued-spec/historical-provenance conflict below.
 - python3 test/test_icra020_p0_rolling_worker_profile.py: exit 1, 0/1.
   CalledProcessError command:
   git diff --quiet ffc09c4b28b7c38b5f6682220d41cd0f4937b963 --
   CMakeLists.txt src/iap/planner/plan_manage/test/test_p0_risk_grid_runtime.cpp
   ICRA-022 requires a new P0 clock-domain case in that allowed file, while the
   read-only historical validator requires it to have no diff. The validator is
-  outside the ICRA-022 allowlist and was not changed. This is the sole task
-  blocker and requires Supervisor disposition.
+  outside the ICRA-022 allowlist and was not changed. This was an internally
+  contradictory issued requirement and required Supervisor disposition; it
+  was neither a product defect nor an external environment blocker.
 
 Environment correction retained for audit
 - The first aggregate planner CTest used an incomplete LD_LIBRARY_PATH and
@@ -91,8 +92,11 @@ Protected inputs reverified exact
 - ICRA-021 health: 59f88a7eb9cde2695aad20aef7e6f32c4f065e1caf0bf127907f2a814b40ee59
 - ICRA-021 integrity: b82089044a2088d02b0e44c9a3a2eebd2e43168d559578046afe989352052aca
 
-Review: Standards CODE PASS; Spec PASS_WITH_EXTERNAL_BLOCKER.
-Verdict: ICRA-022 BLOCKED; Gate-0B NOT_QUALIFIED. Supervisor review required.
+Builder self-check: implementation/contract checks completed with the issued-
+spec historical-provenance conflict above. This is not a final Standards/Spec
+review or Supervisor verdict.
+Builder task return: ICRA-022 returned for Supervisor review; Gate-0B remained
+NOT_QUALIFIED pending a later Supervisor decision.
 
 Literal repository-local command record
 

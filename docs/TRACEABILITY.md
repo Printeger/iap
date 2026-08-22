@@ -1,5 +1,18 @@
 # Traceability Matrix (IAP)
 
+## 2026-08-22 ICRA-023 review ownership and historical provenance repair
+
+| Req ID | Requirement/evidence seam | Implementation and focused evidence | Status |
+|---|---|---|---|
+| IAP-RQ-320 / IAP-RQ-322 | Historical ICRA-020 evidence must bind to its immutable recorded implementation, not demand that a later tree remain unchanged | `validate_recorded_commit_provenance()` requires the exact recorded commit object and a blob at each required `implementation_sha:path`; the current ICRA-022 tree is intentionally allowed to evolve independently | **IMPLEMENTED / validator 5/5; selected root 8/8** |
+| IAP-RQ-320 / IAP-RQ-322 | Provenance failure must remain fail-closed without weakening the canonical artifact | Focused tests reject a nonexistent 40-hex commit and a missing recorded path; the accepted JSON SHA-256 is frozen before parse; schema/workload/science/counters/timing/percentiles/commands/build provenance, existing-file hashes and no-promotion assertions are unchanged | **VERIFIED / canonical ICRA-020 SHA-256 unchanged** |
+| IAP-RQ-320 / IAP-RQ-322 | Builder result reporting must not impersonate final Supervisor review or rewrite pushed history | ICRA-022 role wording is corrected to Builder self-check; the issued-spec conflict and RQ-less `2bd5ba4` are acknowledged without amend/rebase/force-push; every ICRA-023 commit is required to carry an applicable RQ ID | **DOCUMENTED / SUPERVISOR review required** |
+| IAP-RQ-320 / IAP-RQ-322 | Provenance-only repair must preserve all accepted product binaries and regressions | Retained artifacts pass plan-env 6/6, P0 76/76, Adapter 7/7, rolling 23/23, Ego 8/8, P4 4/4 and P1 39/39; analyzer/runner/capture pass 25/25, 16/16, 1/1; direct linkage and recorded library hashes remain exact | **VERIFIED / Gate-0B NOT_QUALIFIED pending Supervisor decision** |
+
+Exact commands, exits, counts, linkage and protected hashes are recorded in
+`results/icra27/icra023/verification_summary.txt`. No product/build/live-flow
+work or disabled diagnostic was performed.
+
 ## 2026-08-22 ICRA-022 occupancy-epoch timestamp authority repair
 
 | Req ID | Requirement/evidence seam | Implementation and focused evidence | Status |
