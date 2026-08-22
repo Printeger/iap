@@ -2293,7 +2293,7 @@ SUPERVISOR for review; only the Supervisor may accept ICRA-019 or update Phase
 ## 2026-08-22T07:47:00Z — ICRA-020 START
 
 Synchronized `dev/icra` at
-`d94252bcfb66f2fca6b7fac38f2cc0e89b36c31b`; local and
+`60f22b4a3d010301258f8b6a495ac6cd4fb41549`; local and
 `origin/dev/icra` are equal (`0 0`), so no pull was permitted. The protected
 PDF remains solely untracked and exact at SHA-256
 `1f07da5631a6551a2f98c02d46fd45bc87f2f1e3e7c14e95f9a7f4a0bac844f6`.
@@ -2371,7 +2371,7 @@ reverse-ray work, worker selection or production tuning has run.
 ## 2026-08-22T08:25:54Z — ICRA-020 INDEPENDENT IMPLEMENTATION REVIEW
 
 Independent Spec and Standards reviews used fixed base
-`d94252bcfb66f2fca6b7fac38f2cc0e89b36c31b`. The first pass identified
+`60f22b4a3d010301258f8b6a495ac6cd4fb41549`. The first pass identified
 incomplete frozen-workload/speedup validation, bypassable extra promotion
 fields, insufficiently bound executable/library and exact-command provenance,
 and one non-default LiDAR primitive support field that contradicted the
@@ -2386,3 +2386,57 @@ canonical command. The LiDAR primitive generator again matches the ICRA-011
 formula including default support fields and matching diagnostics. The updated
 target compiles successfully. Final independent Spec review PASSes and final
 independent Standards review PASSes with no remaining finding.
+
+Pre-push history audit verified that `60f22b4a3d010301258f8b6a495ac6cd4fb41549`
+is both the TASK_READY activation commit and the direct implementation parent.
+It corrected two draft log references that had named the preceding ICRA-019
+handoff `d94252b`; the canonical profile's actual clean implementation SHA
+remains `ffc09c4b28b7c38b5f6682220d41cd0f4937b963`.
+
+## 2026-08-22T08:30:48Z — ICRA-020 CANONICAL EVIDENCE
+
+From exact clean implementation commit
+`ffc09c4b28b7c38b5f6682220d41cd0f4937b963`, the explicitly disabled
+ICRA-020 profile was invoked once with the exact required filter and provenance
+environment. It PASSed 1/1 in `99.292 s` and wrote only
+`results/icra27/icra020/p0_rolling_worker_profile.json`. The canonical JSON
+SHA-256 is
+`2f68e3123426b5a1117e86bb5abc7c69117a070bcf583ec759974fddeb71a0bd`.
+The exact profile binary SHA-256 is
+`17e937fd57f502ed863dc765f1d990bb56c4efb090580050b73a449e2a8e8881`;
+the repository-local `libiap.so` SHA-256 is
+`5adf0c0df2bc695e6385fd753aa3fd81674f4ec9713f99635e1917a760267293`.
+
+All 120 measured samples are present across the exact 3-worker x 4-scenario
+matrix after 24 unrecorded warmups. Every row has the exact logical/provider,
+recompute/reuse, retained/entered/evicted, GNSS/LiDAR invocation, horizon
+fusion, invalidation and current-source provenance contracts, and every
+scientific hash matches its fresh rebuild and is stable across workers and
+samples. R-7 wall p50 cost rankings are:
+
+- worker 1: cold `425.966 ms`, stationary empty `161.543 ms`, +1-x empty
+  `164.577 ms`, stationary nonempty `439.169 ms`;
+- worker 2: `233.468 / 101.526 / 105.455 / 238.657 ms`;
+- worker 4: `133.604 / 71.502 / 74.901 / 139.004 ms`.
+
+These values are synthetic cost-ranking observations only. They do not apply
+the formal 400 ms threshold, qualify Gate-0B, select a production worker,
+authorize reverse-ray, or evaluate GPU readiness.
+
+The direct validator and registered validator CTest each PASS 1/1. Retained
+verification PASSes: ordinary P0 75/75 with the profile still disabled,
+Adapter 7/7, rolling 23/23 with ICRA-014 still disabled and not rerun, selected
+root 7/7 including read-only ICRA-011, plan-env 1/1, retained Ego 8/8, P4 A*
+4/4 and P1 integrity cost 39/39. Fourteen direct consumers resolve the current
+repository-local ICRA-020 `libiap.so`; three header-only/direct-independent
+consumers are explicitly labelled in `linkage_final.log`.
+
+The protected PDF remains solely untracked at SHA-256
+`1f07da5631a6551a2f98c02d46fd45bc87f2f1e3e7c14e95f9a7f4a0bac844f6`;
+read-only ICRA-011 remains
+`778abd22158805c41150b4eeed9c37a3f660237a0bb0599e9a567e3533c7b32c`;
+disabled, never-rerun ICRA-014 remains
+`44f47b23137d17f4b0cbc81af6827156865bdecb36089bf53f770960a2fb963d`.
+No main flow, ROS launch, smoke, qualification, analyzer, formal benchmark,
+GPU preflight, reverse-ray work, worker tuning/selection, bag, RViz or campaign
+ran.
