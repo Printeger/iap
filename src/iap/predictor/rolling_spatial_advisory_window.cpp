@@ -290,20 +290,30 @@ struct RollingSpatialAdvisoryWindow::Impl {
     if (incoming_gnss) {
       const auto& old_source = active.provenance;
       const auto& new_source = incoming.provenance;
-      if (new_source.occupancy_generation <
+      if (old_source.occupancy_content_identity == 0u ||
+          new_source.occupancy_content_identity == 0u ||
+          new_source.occupancy_generation <
               old_source.occupancy_generation ||
           new_source.gnss_epoch_generation <
               old_source.gnss_epoch_generation) {
         return RollingSpatialInvalidationReason::SourceProvenanceInvalid;
       }
-      if (old_source.occupancy_generation !=
-              new_source.occupancy_generation ||
-          !sameOwner(active.occupancy_owner, incoming.occupancy_owner)) {
+      if (old_source.occupancy_generation ==
+          new_source.occupancy_generation) {
+        if (!exactDouble(old_source.occupancy_stamp,
+                         new_source.occupancy_stamp) ||
+            old_source.occupancy_content_identity !=
+                new_source.occupancy_content_identity ||
+            !sameOwner(active.occupancy_owner, incoming.occupancy_owner)) {
+          return RollingSpatialInvalidationReason::SourceProvenanceInvalid;
+        }
+      } else if (old_source.occupancy_content_identity ==
+                 new_source.occupancy_content_identity) {
+        if (!sameOwner(active.occupancy_owner, incoming.occupancy_owner)) {
+          return RollingSpatialInvalidationReason::SourceProvenanceInvalid;
+        }
+      } else {
         return RollingSpatialInvalidationReason::OccupancySourceChanged;
-      }
-      if (!exactDouble(old_source.occupancy_stamp,
-                       new_source.occupancy_stamp)) {
-        return RollingSpatialInvalidationReason::SourceProvenanceInvalid;
       }
       if (old_source.gnss_epoch_generation ==
           new_source.gnss_epoch_generation) {
@@ -594,7 +604,11 @@ bool RollingSpatialAdvisoryWindow::beginRefresh(
   }
   if (projection.gnss && input.snapshot.has_epoch &&
       (!input.occupancy_owner || source.occupancy_generation == 0u ||
-       !std::isfinite(source.occupancy_stamp))) {
+       !std::isfinite(source.occupancy_stamp) ||
+       source.occupancy_content_identity == 0u)) {
+    if (source.occupancy_content_identity == 0u) {
+      return reject_provenance("missing_occupancy_content_identity");
+    }
     return reject_provenance("missing_occupancy_identity");
   }
   if (projection.gnss &&

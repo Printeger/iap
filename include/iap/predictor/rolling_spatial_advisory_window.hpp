@@ -52,6 +52,9 @@ struct RollingSpatialSourceProvenance {
   double gnss_epoch_stamp = std::numeric_limits<double>::quiet_NaN();
   std::uint64_t occupancy_generation = 0;
   double occupancy_stamp = std::numeric_limits<double>::quiet_NaN();
+  // Stable identity of raw LOS content, independent of authoritative source
+  // generation. Zero means that content equality was not proven.
+  std::uint64_t occupancy_content_identity = 0;
   std::uint64_t lidar_generation = 0;
   double lidar_stamp = std::numeric_limits<double>::quiet_NaN();
   std::uint64_t current_generation = 0;

@@ -1,5 +1,19 @@
 # Traceability Matrix (IAP)
 
+## 2026-08-22 ICRA-019 Phase-4B1 immutable occupancy delta
+
+| Req ID | Requirement/evidence seam | Implementation and focused evidence | Status |
+|---|---|---|---|
+| IAP-RQ-311 / IAP-RQ-312 / IAP-RQ-314 | The complete frozen raw-occupancy capture must have one deterministic fixed-lattice identity and an exact net delta | `P0RawOccupancyIdentity` and `P0RawOccupancyDelta` behind `P0OccupancyEpochAdapter`; finite centre alignment, mathematical floor, integer range, one-key-per-centre, sorted uniqueness, exact source/frame/origin/resolution/generation comparison, linear added/removed set difference and changed bounds; Adapter 7/7 covers reorder, negative keys, added/removed/mixed, skipped generations and every unavailable-proof case | **IMPLEMENTED / SUPERVISOR REVIEW PENDING: no second map, journal, callback or GridMap change** |
+| IAP-RQ-312 / IAP-RQ-314 / IAP-RQ-320 / IAP-RQ-321 | Authoritative occupancy source version and raw LOS content identity must remain distinct | P0 retains the last successfully committed normalized base/source/canonical owner/content identity; same-producer newer-generation empty delta reuses only the canonical LOS owner while current diagnostic query, occupancy generation/stamp, horizon growth/fusion and materialization remain current; rolling provenance validates nonzero content identity and same-generation contradictions | **IMPLEMENTED / SUPERVISOR REVIEW PENDING: empty delta yields 0 GNSS/LiDAR spatial recomputes, 27 retained positions and 54 current horizon fusions** |
+| IAP-RQ-320 / IAP-RQ-321 / IAP-RQ-322 | Nonempty or unprovable occupancy change must remain conservative and transaction rollback-safe | added-only, removed-only and mixed production scenarios each produce `occupancy_source_changed`, rebuild all 27 active-GNSS positions and match a fresh complete RiskGrid; changed producer cannot reuse; same-version contradiction/regression fail closed; occupancy/prior/GNSS/LiDAR races after delta abort publication and retry from the unchanged committed base | **VERIFIED / SUPERVISOR REVIEW PENDING: no reverse-ray dependency or partial dirty-ray recomputation** |
+| IAP-RQ-312 / IAP-RQ-314 / IAP-RQ-320 / IAP-RQ-321 / IAP-RQ-322 | Phase-4B1 must preserve inactive-source isolation and all retained consumers | LidarOnly/GNSS-disabled/Optional/Auto, TTL/watchdog, worker 1/2/4, boundary movement and fresh-equivalence regressions remain green; repository-local root 7/7, plan-env 1/1, Ego 8/8, P4 4/4 and P1 integrity 39/39 pass; 14 direct consumers resolve current ICRA-019 `libiap.so`; ICRA-011 profile remains read-only | **VERIFIED / SUPERVISOR REVIEW PENDING: P0/Gate-0B remain unqualified** |
+
+ICRA-019 is only Phase-4B1 empty-delta LOS reuse. It does not implement
+reverse-ray/dirty-ray propagation, profile or tune CPU workers, develop or
+assess GPU code, select production policy values, qualify P0/Gate-0B, or run
+main flow, ROS launch, smoke, analyzer, benchmark, bag/RViz/campaign work.
+
 ## 2026-08-22 ICRA-018 absent-GNSS generation race repair
 
 | Req ID | Requirement/evidence seam | Implementation and focused evidence | Status |

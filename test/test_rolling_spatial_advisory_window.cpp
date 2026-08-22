@@ -67,6 +67,7 @@ RollingSpatialRefreshInput makeRefreshInput(
   input.occupancy_owner = occupancy;
   input.provenance.occupancy_generation = 7;
   input.provenance.occupancy_stamp = 100.0;
+  input.provenance.occupancy_content_identity = 23;
   input.provenance.lidar_generation = 11;
   input.provenance.lidar_stamp = 100.0;
   input.provenance.current_generation = 17;
@@ -401,6 +402,7 @@ TEST(RollingSpatialAdvisoryWindowTest,
 
   auto changed = make_gnss_input();
   changed.provenance.occupancy_generation = 8;
+  ++changed.provenance.occupancy_content_identity;
   ASSERT_TRUE(window.beginRefresh(std::move(changed)));
   queryWindow(&window, snapshot, 0, false);
   const auto diagnostics = window.diagnostics();
@@ -410,6 +412,84 @@ TEST(RollingSpatialAdvisoryWindowTest,
   EXPECT_EQ(diagnostics.full_invalidation_count, 1u);
   EXPECT_EQ(diagnostics.invalidation_reason,
             RollingSpatialInvalidationReason::OccupancySourceChanged);
+}
+
+TEST(RollingSpatialAdvisoryWindowTest,
+     NewerOccupancyGenerationWithSameLosContentRetainsSpatialAdvisory) {
+  auto occupancy = std::make_shared<LocalOccupancyGrid>();
+  const auto snapshot = makeGnssSnapshot(1);
+  RollingSpatialAdvisoryWindow window;
+  auto first = makeGnssRefreshInput(occupancy, snapshot);
+  first.provenance.occupancy_content_identity = 41u;
+  ASSERT_TRUE(window.beginRefresh(std::move(first)));
+
+  const Eigen::Vector3d position(0.5, 0.5, 0.5);
+  std::vector<PredictorQueryInput> inputs;
+  inputs.emplace_back(position, snapshot, 100.0, 0.0, "map", 100.0);
+  inputs.emplace_back(position, snapshot, 101.0, 1.0, "map", 100.0);
+  PredictorBatchDiagnostics cold_counts;
+  ASSERT_EQ(window.queryPositionHorizons(inputs, &cold_counts).size(), 2u);
+  EXPECT_EQ(cold_counts.gnss_advisory_invocations, 1u);
+  window.commitRefresh();
+
+  auto identical = makeGnssRefreshInput(occupancy, snapshot);
+  identical.provenance.occupancy_generation = 10u;
+  identical.provenance.occupancy_stamp = 101.0;
+  identical.provenance.occupancy_content_identity = 41u;
+  PredictorModule fresh = identical.module;
+  fresh.set_local_occupancy(occupancy.get());
+  ASSERT_TRUE(window.beginRefresh(std::move(identical)));
+  PredictorBatchDiagnostics retained_counts;
+  const auto retained =
+      window.queryPositionHorizons(inputs, &retained_counts);
+
+  ASSERT_EQ(retained.size(), inputs.size());
+  EXPECT_EQ(retained_counts.spatial_advisory_recompute_count, 0u);
+  EXPECT_EQ(retained_counts.spatial_advisory_reuse_count, 2u);
+  EXPECT_EQ(retained_counts.gnss_advisory_invocations, 0u);
+  EXPECT_EQ(retained_counts.fusion_advisory_invocations, 2u);
+  EXPECT_EQ(window.diagnostics().retained_position_count, 1u);
+  EXPECT_EQ(window.diagnostics().full_invalidation_count, 0u);
+  EXPECT_EQ(window.diagnostics().invalidation_reason,
+            RollingSpatialInvalidationReason::None);
+  for (std::size_t index = 0; index < inputs.size(); ++index) {
+    expectSamePrediction(retained[index], fresh.query(inputs[index]));
+  }
+}
+
+TEST(RollingSpatialAdvisoryWindowTest,
+     MissingOrContradictoryLosContentIdentityNeverReusesGnssSpatialState) {
+  auto occupancy = std::make_shared<LocalOccupancyGrid>();
+  const auto snapshot = makeGnssSnapshot(1);
+  RollingSpatialAdvisoryWindow window;
+  auto missing = makeGnssRefreshInput(occupancy, snapshot);
+  missing.provenance.occupancy_content_identity = 0u;
+  std::string reason;
+  EXPECT_FALSE(window.beginRefresh(std::move(missing), &reason));
+  EXPECT_EQ(reason, "missing_occupancy_content_identity");
+
+  auto first = makeGnssRefreshInput(occupancy, snapshot);
+  first.provenance.occupancy_content_identity = 51u;
+  ASSERT_TRUE(window.beginRefresh(std::move(first)));
+  std::vector<PredictorQueryInput> inputs;
+  inputs.emplace_back(Eigen::Vector3d(0.5, 0.5, 0.5), snapshot,
+                      100.0, 0.0, "map", 100.0);
+  ASSERT_EQ(window.queryPositionHorizons(inputs).size(), 1u);
+  window.commitRefresh();
+
+  auto contradictory = makeGnssRefreshInput(occupancy, snapshot);
+  contradictory.provenance.occupancy_content_identity = 52u;
+  ASSERT_TRUE(window.beginRefresh(std::move(contradictory)));
+  EXPECT_EQ(window.diagnostics().retained_position_count, 0u);
+  EXPECT_EQ(window.diagnostics().full_invalidation_count, 1u);
+  EXPECT_EQ(window.diagnostics().invalidation_reason,
+            RollingSpatialInvalidationReason::SourceProvenanceInvalid);
+  window.abortRefresh();
+
+  auto inactive = makeRefreshInput(occupancy, makeSnapshot(1));
+  inactive.provenance.occupancy_content_identity = 0u;
+  RollingSpatialAdvisoryWindow lidar_only;
+  EXPECT_TRUE(lidar_only.beginRefresh(std::move(inactive), &reason));
 }
 
 TEST(RollingSpatialAdvisoryWindowTest,
@@ -1256,10 +1336,11 @@ TEST(RollingSpatialAdvisoryWindowTest,
       [](RollingSpatialRefreshInput* input) {
         input->occupancy_owner = std::make_shared<LocalOccupancyGrid>();
       },
-      RollingSpatialInvalidationReason::OccupancySourceChanged);
+      RollingSpatialInvalidationReason::SourceProvenanceInvalid);
   expect_gnss_reason(
       [](RollingSpatialRefreshInput* input) {
         input->provenance.occupancy_generation = 8;
+        ++input->provenance.occupancy_content_identity;
       },
       RollingSpatialInvalidationReason::OccupancySourceChanged);
 }

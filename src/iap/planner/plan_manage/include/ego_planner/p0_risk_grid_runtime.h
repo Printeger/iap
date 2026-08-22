@@ -247,8 +247,13 @@ class P0RiskGridRuntime {
   iap::RollingSpatialAdvisoryWindow rolling_spatial_window_;
   std::shared_ptr<const iap::LocalOccupancyGrid>
       rolling_occupancy_owner_;
+  std::shared_ptr<const P0RawOccupancyIdentity>
+      rolling_raw_occupancy_identity_;
   P0OccupancyEpoch::SourceOwner rolling_occupancy_source_owner_;
   uint64_t rolling_occupancy_generation_ = 0;
+  double rolling_occupancy_stamp_ =
+      std::numeric_limits<double>::quiet_NaN();
+  uint64_t rolling_occupancy_content_identity_ = 0;
 
   // Inputs, heavy refresh, and health publication deliberately use distinct
   // execution paths.  Refresh may take longer than a sensor period, but must

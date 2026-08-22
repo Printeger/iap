@@ -15,6 +15,63 @@
 
 namespace ego_planner {
 
+struct P0RawOccupancyChangedBounds {
+  iap::VoxelKey minimum;
+  iap::VoxelKey maximum;
+};
+
+// Immutable normalized identity for one complete raw-occupancy capture. Keys
+// are unique and lexicographically sorted on the captured fixed lattice.
+class P0RawOccupancyIdentity {
+ public:
+  const std::vector<iap::VoxelKey>& keys() const { return keys_; }
+  const Eigen::Vector3d& latticeOrigin() const { return lattice_origin_; }
+  double resolutionM() const { return resolution_m_; }
+  const std::string& frameId() const { return frame_id_; }
+
+ private:
+  friend class P0OccupancyEpochAdapter;
+  P0RawOccupancyIdentity(std::vector<iap::VoxelKey> keys,
+                         Eigen::Vector3d lattice_origin,
+                         double resolution_m,
+                         std::string frame_id)
+      : keys_(std::move(keys)),
+        lattice_origin_(std::move(lattice_origin)),
+        resolution_m_(resolution_m),
+        frame_id_(std::move(frame_id)) {}
+
+  std::vector<iap::VoxelKey> keys_;
+  Eigen::Vector3d lattice_origin_;
+  double resolution_m_;
+  std::string frame_id_;
+};
+
+// Complete net set difference between two coherent immutable captures.
+// Absence of this object means the comparison could not be proven safely.
+class P0RawOccupancyDelta {
+ public:
+  uint64_t baseGeneration() const { return base_generation_; }
+  uint64_t targetGeneration() const { return target_generation_; }
+  const std::vector<iap::VoxelKey>& addedKeys() const { return added_keys_; }
+  const std::vector<iap::VoxelKey>& removedKeys() const {
+    return removed_keys_;
+  }
+  const std::optional<P0RawOccupancyChangedBounds>& changedBounds() const {
+    return changed_bounds_;
+  }
+  bool empty() const {
+    return added_keys_.empty() && removed_keys_.empty();
+  }
+
+ private:
+  friend class P0OccupancyEpochAdapter;
+  uint64_t base_generation_ = 0;
+  uint64_t target_generation_ = 0;
+  std::vector<iap::VoxelKey> added_keys_;
+  std::vector<iap::VoxelKey> removed_keys_;
+  std::optional<P0RawOccupancyChangedBounds> changed_bounds_;
+};
+
 struct P0OccupancyEpoch {
   using SourceOwner = std::shared_ptr<const void>;
   using LiveSourceOwner = std::function<SourceOwner()>;
@@ -22,6 +79,7 @@ struct P0OccupancyEpoch {
 
   iap::RiskGridMap::OccupancyDiagnosticQuery diagnostic_query;
   std::shared_ptr<const iap::LocalOccupancyGrid> los_owner;
+  std::shared_ptr<const P0RawOccupancyIdentity> raw_identity;
   SourceOwner source_owner;
   LiveSourceOwner live_source_owner;
   LiveGeneration live_generation;
@@ -79,6 +137,11 @@ class P0OccupancyEpochAdapter {
                        std::move(live_source_owner),
                        std::move(live_generation));
   }
+
+  static bool sameVersion(const P0OccupancyEpoch& base,
+                          const P0OccupancyEpoch& target);
+  static std::optional<P0RawOccupancyDelta> completeDelta(
+      const P0OccupancyEpoch& base, const P0OccupancyEpoch& target);
 
  private:
   static std::optional<P0OccupancyEpoch> adaptFields(

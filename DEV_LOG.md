@@ -2132,3 +2132,136 @@ No task process or forbidden flow remains and no gate is self-promoted.
 Return ICRA-018 to SUPERVISOR for review; only the Supervisor may accept
 ICRA-017/018, update Phase 4/Gate-0B, authorize Phase-4B/calibration/
 qualification/GPU work or issue the next task.
+
+## 2026-08-22T06:48:23Z — ICRA-019 START
+
+Synchronized `dev/icra` at
+`08d6f1f31f923ce837026e045a8575f7349ed140`; local and
+`origin/dev/icra` are equal (`0 0`), so no pull was permitted. The protected
+PDF remains solely untracked and exact at SHA-256
+`1f07da5631a6551a2f98c02d46fd45bc87f2f1e3e7c14e95f9a7f4a0bac844f6`.
+The read-only ICRA-011 JSON and disabled, never-rerun ICRA-014 canonical remain
+exact at SHA-256
+`778abd22158805c41150b4eeed9c37a3f660237a0bb0599e9a567e3533c7b32c` and
+`44f47b23137d17f4b0cbc81af6827156865bdecb36089bf53f770960a2fb963d`.
+
+The exact ICRA-019 allowlist is:
+
+- `include/iap/predictor/rolling_spatial_advisory_window.hpp`;
+- `src/iap/predictor/rolling_spatial_advisory_window.cpp`;
+- `test/test_rolling_spatial_advisory_window.cpp`;
+- `src/iap/planner/plan_manage/include/ego_planner/p0_occupancy_epoch_adapter.h`;
+- `src/iap/planner/plan_manage/src/p0_occupancy_epoch_adapter.cpp`;
+- `src/iap/planner/plan_manage/test/test_p0_occupancy_epoch_adapter.cpp`;
+- `src/iap/planner/plan_manage/include/ego_planner/p0_risk_grid_runtime.h`;
+- `src/iap/planner/plan_manage/src/p0_risk_grid_runtime.cpp`;
+- `src/iap/planner/plan_manage/test/test_p0_risk_grid_runtime.cpp`;
+- root or plan-manage `CMakeLists.txt`, only if required to register a
+  source/test;
+- `DEV_LOG.md`;
+- `docs/CHANGES.md`;
+- `docs/TRACEABILITY.md`.
+
+This task implements only Phase-4B1: complete immutable raw-occupancy
+normalization/delta at the existing Adapter seam and same-producer,
+newer-generation empty-delta LOS-content reuse through the rolling Module.
+Every nonempty, contradictory or unprovable delta remains a conservative full
+active-GNSS spatial invalidation, and aborted candidates cannot advance the
+committed base.
+
+Explicit stop line: no reverse-ray dependency or partial dirty-ray work; no
+CPU worker profile/tuning, GPU feasibility/implementation or preflight,
+production TTL/watchdog value, calibration/activation, launch/YAML/default,
+P1/P2/P3/P4/P5 product change, main flow, ROS launch, smoke, qualification,
+bag, RViz, campaign, analyzer or formal benchmark is authorized. All generated
+output must remain below `results/icra27/icra019/`.
+
+## 2026-08-22T07:16:47Z — ICRA-019 IMPLEMENTATION EVIDENCE / REVIEW READY
+
+Implemented the authorized Phase-4B1 seam without changing `GridMap` or any
+Supervisor-owned file. The Adapter now validates every captured centre as one
+finite, aligned fixed-lattice voxel, retains an immutable sorted unique
+`iap::VoxelKey` identity, and returns only complete coherent deltas containing
+exact base/target generations, sorted added/removed keys and changed bounds.
+Reorder and skipped generations are supported because complete snapshots are
+compared directly; duplicate folding, misalignment, nonfinite input,
+owner/geometry/version contradiction, regression and invalid bases yield no
+empty-delta proof.
+
+P0 now retains raw occupancy base/source version, canonical LOS owner and a
+separate nonzero LOS-content identity only after successful RiskGrid and
+rolling commit. A same-producer newer generation with a proven empty raw delta
+keeps the content identity/canonical LOS owner while advancing authoritative
+generation/stamp. Every nonempty or unprovable change gets a new content
+identity and conservatively invalidates the complete active-GNSS rolling
+window; same-generation contradiction and same-producer regression fail
+closed. Inactive GNSS modes do not read or advance this base. The current
+captured diagnostic query is always used, and current horizon growth, fusion,
+materialization and immutable publication remain unchanged.
+
+TDD and retained evidence is repository-local under
+`results/icra27/icra019/logs/`:
+
+- `adapter_contract_red.log` is the expected public-seam compile RED before
+  `raw_identity`, `completeDelta()` and `sameVersion()` existed;
+- `rolling_content_identity_red.log` is the expected rolling compile RED
+  before the LOS-content provenance field existed;
+- `adapter_contract_green.log`: Adapter 7/7 PASS, including exact
+  added-only/removed-only/mixed/skipped-generation and negative-key behavior;
+- `rolling_content_identity_green.log` and `test_rolling_full.log`: focused
+  content identity 3/3 and complete rolling 23/23 PASS (the disabled ICRA-014
+  canonical diagnostic remains disabled and was not rerun);
+- `p0_delta_contract_green.log` and `post_delta_races_green.log`: empty delta
+  retains 27/27 positions with zero spatial/GNSS recomputes and 54 current
+  horizon fusions; added/removed/mixed rebuild all 27 and match fresh; same
+  version, changed producer, occupancy/prior/GNSS/LiDAR race and retry base
+  semantics PASS;
+- `test_p0_full.log`: complete P0 runtime 75/75 PASS;
+- `test_root_terminal.log`: rolling/Predictor/RiskGrid/occupancy/snapshot/
+  conversion plus read-only ICRA-011 profile 7/7 PASS;
+- `test_plan_env_terminal.log`: frozen occupancy epoch 1/1 PASS;
+- `test_ego_terminal.log`: P0/Adapter and retained P1/P2/P3/planning-context/
+  P5 8/8 PASS;
+- `test_p4_terminal.log`: P4 A* 4/4 PASS;
+- `test_p1_integrity_terminal.log`: P1 integrity cost 39/39 PASS;
+- `linkage_final.log`: 14 direct root/P0/Adapter/P2/P3/planning-context/P4/
+  P5/P1/node consumers resolve current repository-local
+  `results/icra27/icra019/build_iap/libiap.so`; header-only/direct-independent
+  consumers and the Python ICRA-011 profile are explicitly labelled.
+
+Current `libiap.so` SHA-256 is
+`444b7f83390e2eb42856a26e9a3d237e743525f45aa3bdae29bebd51565734a0`.
+The initial narrow install attempt correctly reported missing unbuilt install
+targets; the complete repository-local builds then generated those targets,
+installed successfully and produced the passing evidence above. No test
+executable failed after the implementation reached GREEN.
+
+The protected PDF remains solely untracked at SHA-256
+`1f07da5631a6551a2f98c02d46fd45bc87f2f1e3e7c14e95f9a7f4a0bac844f6`;
+the retained ICRA-011 JSON remains
+`778abd22158805c41150b4eeed9c37a3f660237a0bb0599e9a567e3533c7b32c`;
+and the disabled, never-rerun ICRA-014 canonical remains
+`44f47b23137d17f4b0cbc81af6827156865bdecb36089bf53f770960a2fb963d`.
+
+No reverse-ray/dirty-ray work, CPU profile/tuning, GPU feasibility/code or
+preflight, production policy value, calibration/activation, launch/default,
+P1/P2/P3/P4/P5 product change, main flow, ROS launch, smoke, qualification,
+bag, RViz, campaign, analyzer or formal benchmark ran. ICRA-019, Phase 4 and
+Gate-0B remain Supervisor-review pending and are not marked PASS.
+
+## 2026-08-22T07:22:36Z — ICRA-019 INDEPENDENT REVIEW
+
+The fixed review base is
+`08d6f1f31f923ce837026e045a8575f7349ed140`. Independent Spec review PASSes
+with no missing requirement, incorrect behavior or scope creep. Independent
+Standards review finds no documented-standard violation and one low-priority
+judgement-only Data Clumps observation: the committed occupancy owner, raw
+identity, source owner, generation, stamp and content identity could later be
+grouped into one optional state type. The current narrow representation is
+kept for this task because it is fail-closed against partial state, all fields
+have one transaction owner, and no functional or repository rule is violated.
+
+After the review-only include audit, the Adapter target rebuilt and its 7/7
+tests PASS again. `git diff --check` is clean, all twelve changed files are on
+the ICRA-019 allowlist, and no task-owned process remains. The protected PDF
+is still solely untracked and all three retained artifact hashes remain exact.

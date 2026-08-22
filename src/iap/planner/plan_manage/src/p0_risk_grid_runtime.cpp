@@ -1131,13 +1131,6 @@ void P0RiskGridRuntime::refreshTimerCallback() {
       fail_semantic_refresh(P0SemanticFailure::OCCUPANCY_STALE);
       return;
     }
-    if (production_predictor && rolling_occupancy_owner_ &&
-        rolling_occupancy_source_owner_ &&
-        sameSharedOwner(rolling_occupancy_source_owner_,
-                        occupancy_epoch->source_owner) &&
-        rolling_occupancy_generation_ == occupancy_epoch->generation) {
-      occupancy_epoch->los_owner = rolling_occupancy_owner_;
-    }
   }
 
   if (production_predictor && !occupancy_epoch.has_value()) {
@@ -1169,6 +1162,8 @@ void P0RiskGridRuntime::refreshTimerCallback() {
   bool validate_gnss_spatial_source = false;
   bool validate_lidar_spatial_source = false;
   bool validate_lidar_legacy_source = false;
+  bool active_gnss_occupancy_content = false;
+  uint64_t candidate_occupancy_content_identity = 0;
   std::shared_ptr<const std::vector<Eigen::Vector3d>>
       captured_lidar_map_points;
   std::shared_ptr<const std::vector<iap::LidarFimPrimitive>>
@@ -1201,6 +1196,80 @@ void P0RiskGridRuntime::refreshTimerCallback() {
     validate_gnss_spatial_source = source_projection.gnss;
     validate_lidar_spatial_source = source_projection.lidar;
     validate_lidar_legacy_source = source_projection.legacy_lidar;
+    active_gnss_occupancy_content =
+        source_projection.gnss && snapshot.has_epoch;
+    if (active_gnss_occupancy_content) {
+      if (!occupancy_epoch->raw_identity) {
+        fail_semantic_refresh(
+            P0SemanticFailure::OCCUPANCY_LOS_ADAPTER_INVALID);
+        return;
+      }
+      const bool has_committed_base =
+          rolling_occupancy_owner_ && rolling_raw_occupancy_identity_ &&
+          rolling_occupancy_source_owner_ &&
+          rolling_occupancy_generation_ != 0u &&
+          std::isfinite(rolling_occupancy_stamp_) &&
+          rolling_occupancy_content_identity_ != 0u;
+      const bool partial_committed_base =
+          static_cast<bool>(rolling_occupancy_owner_) ||
+          static_cast<bool>(rolling_raw_occupancy_identity_) ||
+          static_cast<bool>(rolling_occupancy_source_owner_) ||
+          rolling_occupancy_generation_ != 0u ||
+          std::isfinite(rolling_occupancy_stamp_) ||
+          rolling_occupancy_content_identity_ != 0u;
+      if (!has_committed_base && partial_committed_base) {
+        fail_semantic_refresh(
+            P0SemanticFailure::OCCUPANCY_LOS_ADAPTER_INVALID);
+        return;
+      }
+
+      bool retain_committed_content = false;
+      if (has_committed_base) {
+        P0OccupancyEpoch committed_base;
+        committed_base.los_owner = rolling_occupancy_owner_;
+        committed_base.raw_identity = rolling_raw_occupancy_identity_;
+        committed_base.source_owner = rolling_occupancy_source_owner_;
+        committed_base.generation = rolling_occupancy_generation_;
+        committed_base.cloud_stamp_s = rolling_occupancy_stamp_;
+        committed_base.frame_id = rolling_raw_occupancy_identity_->frameId();
+        if (sameSharedOwner(rolling_occupancy_source_owner_,
+                            occupancy_epoch->source_owner)) {
+          if (occupancy_epoch->generation == rolling_occupancy_generation_) {
+            if (!P0OccupancyEpochAdapter::sameVersion(
+                    committed_base, *occupancy_epoch)) {
+              fail_semantic_refresh(
+                  P0SemanticFailure::OCCUPANCY_LOS_ADAPTER_INVALID);
+              return;
+            }
+            retain_committed_content = true;
+          } else if (occupancy_epoch->generation <
+                     rolling_occupancy_generation_) {
+            fail_semantic_refresh(
+                P0SemanticFailure::OCCUPANCY_LOS_ADAPTER_INVALID);
+            return;
+          } else {
+            const auto delta = P0OccupancyEpochAdapter::completeDelta(
+                committed_base, *occupancy_epoch);
+            retain_committed_content = delta && delta->empty();
+          }
+        }
+      }
+
+      if (retain_committed_content) {
+        occupancy_epoch->los_owner = rolling_occupancy_owner_;
+        candidate_occupancy_content_identity =
+            rolling_occupancy_content_identity_;
+      } else {
+        if (rolling_occupancy_content_identity_ ==
+            std::numeric_limits<uint64_t>::max()) {
+          fail_semantic_refresh(
+              P0SemanticFailure::OCCUPANCY_LOS_ADAPTER_INVALID);
+          return;
+        }
+        candidate_occupancy_content_identity =
+            rolling_occupancy_content_identity_ + 1u;
+      }
+    }
     if (std::isfinite(config_.predictor_lidar_fim_radius_m) &&
         config_.predictor_lidar_fim_radius_m > 0.0) {
       predictor_params.lidar.fim_params.fim_radius_m =
@@ -1242,6 +1311,8 @@ void P0RiskGridRuntime::refreshTimerCallback() {
         captured_predictor_sources.gnss_epoch_stamp;
     source_provenance.occupancy_generation = occupancy_epoch->generation;
     source_provenance.occupancy_stamp = occupancy_epoch->cloud_stamp_s;
+    source_provenance.occupancy_content_identity =
+        candidate_occupancy_content_identity;
     source_provenance.lidar_generation = captured_lidar_generation;
     source_provenance.lidar_stamp = captured_lidar_stamp;
     source_provenance.current_generation =
@@ -1384,10 +1455,15 @@ void P0RiskGridRuntime::refreshTimerCallback() {
     if (!refresh_succeeded) {
       rolling_diagnostics = {};
     }
-    if (refresh_succeeded && occupancy_epoch) {
+    if (refresh_succeeded && occupancy_epoch &&
+        active_gnss_occupancy_content) {
       rolling_occupancy_owner_ = occupancy_epoch->los_owner;
+      rolling_raw_occupancy_identity_ = occupancy_epoch->raw_identity;
       rolling_occupancy_source_owner_ = occupancy_epoch->source_owner;
       rolling_occupancy_generation_ = occupancy_epoch->generation;
+      rolling_occupancy_stamp_ = occupancy_epoch->cloud_stamp_s;
+      rolling_occupancy_content_identity_ =
+          candidate_occupancy_content_identity;
     }
   }
   {
