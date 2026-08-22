@@ -1,5 +1,61 @@
 # ICRA Supervisor Log
 
+## 2026-08-22 — ICRA-019 review, Phase-4 delta closure and ICRA-020 Stage-5 diagnostic authorization
+
+### Review identity and independent verification
+
+- Fixed review base: `08d6f1f31f923ce837026e045a8575f7349ed140`.
+- Reviewed HEAD: `d94252bcfb66f2fca6b7fac38f2cc0e89b36c31b`.
+- Reviewed commits: `a689d0e` and `d94252b`; both carry applicable requirement IDs.
+  `dev/icra` matched `origin/dev/icra` at divergence `0 0`.
+- The aggregate diff contains exactly twelve ICRA-019 allowlisted files and passes
+  `git diff --check`. No Supervisor-owned file changed. The protected PDF remains the sole untracked
+  file at SHA-256 `1f07da5631a6551a2f98c02d46fd45bc87f2f1e3e7c14e95f9a7f4a0bac844f6`.
+- Supervisor independently rebuilt current root IAP, plan-env, plan-manage P0/Adapter/P1/P2/P3/P5,
+  P4 A* and P1 integrity-cost targets. Complete P0 passes 75/75, Adapter 7/7 and rolling 23/23;
+  selected root passes 7/7, plan-env 1/1, retained Ego 8/8, P4 A* 4/4 and P1 integrity-cost 39/39.
+- Fourteen directly linked consumers, including the planner node, resolve the current repository-
+  local `results/icra27/icra019/build_iap/libiap.so`, SHA-256
+  `444b7f83390e2eb42856a26e9a3d237e743525f45aa3bdae29bebd51565734a0`.
+- The retained ICRA-011 JSON and disabled ICRA-014 canonical remain exact at SHA-256
+  `778abd22158805c41150b4eeed9c37a3f660237a0bb0599e9a567e3533c7b32c` and
+  `44f47b23137d17f4b0cbc81af6827156865bdecb36089bf53f770960a2fb963d`. No main flow, ROS launch,
+  smoke, qualification, benchmark, analyzer or GPU preflight ran, and no task process remains.
+
+### Standards axis
+
+- **PASS: zero hard violations and one Low judgement call.** The only observation is possible Data
+  Clumps in the six committed occupancy-state fields in `P0RiskGridRuntime`. They are always
+  validated and committed together and could later become one optional state object.
+- The current representation is complete and fail-closed, so the observation is not a repair
+  request. Scope, ownership, requirement IDs, synchronized developer documentation, exact allowlist
+  and two-commit handoff comply with the repository protocol. Worst Standards issue: Low.
+
+### Spec axis
+
+- **PASS, zero findings.** The Adapter proves a deterministic sorted unique raw `VoxelKey` identity
+  and exact complete added/removed delta across skipped generations. Malformed, duplicate,
+  misaligned, incoherent or regressed comparisons cannot create an empty-delta proof.
+- P0 keeps authoritative source generation/stamp separate from LOS content identity. Proven
+  same-producer empty deltas retain canonical LOS content while current diagnostics, generation,
+  horizon fusion and immutable publication remain current; nonempty/unprovable changes rebuild the
+  full active GNSS window. Same-version contradiction and occupancy/prior/GNSS/LiDAR races retain
+  the last committed base, and inactive GNSS modes remain independent. Worst Spec issue: none.
+
+### Disposition and next task
+
+- Verdict: `ICRA019_PASS_PHASE4_DELTA_COMPLETE`. This closes the required Phase-4 occupancy-delta
+  stage, not P0/Gate-0B. P4 remains `NOT_QUALIFIED`; P5 remains implemented but unqualified.
+- Exact reverse-ray/partial dirty propagation is optional in the frozen design and is not yet
+  justified. The next step follows the frozen order: Stage-5 worker-scaling evidence before adding
+  another dependency index or considering GPU code.
+- Unique task: `ICRA-020 / GATE_0B` in `NEXT_TASK.md`. It is a test/evidence-only full-workload
+  diagnostic of cold rebuild, stationary empty-delta reuse, one-voxel boundary shift and nonempty-
+  delta full invalidation at worker counts 1/2/4.
+- ICRA-020 changes no production runtime/default and makes no 400 ms, worker-selection, reverse-ray,
+  GPU or Gate claim. Its reviewed cost shape will decide whether Phase-4B2 is worth its complexity
+  or whether P0 should proceed toward the separately authorized smoke sequence.
+
 ## 2026-08-22 — ICRA-018 review, Phase-4A closure and ICRA-019 Phase-4B1 authorization
 
 ### Review identity and independent verification
