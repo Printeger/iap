@@ -3050,3 +3050,19 @@ summary. It excludes the PDF, every ICRA-024 artifact/build/install path,
 Supervisor-owned files and all forbidden product/live-flow scope;
 `git diff --cached --check` passes after restaging. **Gate-0B remains
 NOT_QUALIFIED pending Supervisor review.**
+
+## 2026-08-22T16:58:25Z — ICRA-025 BUILDER TASK RETURN
+
+The implementation, documentation and bounded verification commit
+`b9e9737801c5e1611062b46d70d84c7cda26d81f` is pushed to
+`origin/dev/icra`. Analyzer 36/36, runner 21/21, capture 1/1, validator 5/5
+and every required retained ICRA-024 regression/linkage check pass. Static
+ament-index resolution proves the complete nine-package closure and exact
+isolated `so3_control` prefix without any live flow.
+
+No build, GPU preflight, capture, ROS daemon/graph/launch, simulator, smoke,
+benchmark, qualification, P4/P5 execution or Gate promotion ran. Builder
+self-check has zero remaining Standards or Spec findings; this is not a final
+review or Supervisor verdict. **Gate-0B remains NOT_QUALIFIED.** DEEPSEEK
+issues no replacement-smoke authorization, next task or Gate decision and
+returns control to Supervisor review.
