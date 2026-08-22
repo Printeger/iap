@@ -259,19 +259,24 @@ namespace ego_planner
       p0_risk_grid_runtime_->setOccupancyEpochFactory(
           [this]() -> P0OccupancyEpochCapture
           {
-            if (!grid_map_)
+            const std::shared_ptr<GridMap> captured_grid_map = grid_map_;
+            if (!captured_grid_map)
               return {P0OccupancyEpochCaptureStatus::SNAPSHOT_UNAVAILABLE,
                       std::nullopt};
             const auto frozen_epoch =
-                grid_map_->captureFrozenOccupancyEpoch();
+                captured_grid_map->captureFrozenOccupancyEpoch();
             if (!frozen_epoch)
               return {P0OccupancyEpochCaptureStatus::SNAPSHOT_UNAVAILABLE,
                       std::nullopt};
-            const std::weak_ptr<GridMap> owner = grid_map_;
+            const P0OccupancyEpoch::SourceOwner source_owner =
+                captured_grid_map;
             auto adapted = P0OccupancyEpochAdapter::adapt(
-                *frozen_epoch, [owner]() {
-                  const auto grid_map = owner.lock();
-                  return grid_map ? grid_map->occupancyGeneration() : 0u;
+                *frozen_epoch, source_owner,
+                [this]() -> P0OccupancyEpoch::SourceOwner {
+                  return grid_map_;
+                },
+                [this]() {
+                  return grid_map_ ? grid_map_->occupancyGeneration() : 0u;
                 });
             if (!adapted)
               return {P0OccupancyEpochCaptureStatus::ADAPTER_INVALID,

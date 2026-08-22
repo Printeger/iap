@@ -73,9 +73,11 @@ TEST(P0OccupancyEpochAdapterTest,
                           origin + Eigen::Vector3d(1.5, 0.5, 0.5),
                           origin + Eigen::Vector3d(2.5, 0.5, 0.5)});
   uint64_t live_generation = epoch.generation;
+  const auto source_owner = std::make_shared<const int>(1);
 
   const auto adapted = ego_planner::P0OccupancyEpochAdapter::adapt(
-      epoch, [&live_generation]() { return live_generation; });
+      epoch, source_owner, [source_owner]() { return source_owner; },
+      [&live_generation]() { return live_generation; });
 
   ASSERT_TRUE(adapted.has_value());
   ASSERT_NE(adapted->los_owner, nullptr);
@@ -93,6 +95,8 @@ TEST(P0OccupancyEpochAdapterTest,
   EXPECT_DOUBLE_EQ(adapted->cloud_stamp_s, 100.0);
   EXPECT_EQ(adapted->frame_id, "map");
   EXPECT_EQ(adapted->live_generation(), 7u);
+  EXPECT_EQ(adapted->source_owner, source_owner);
+  EXPECT_EQ(adapted->live_source_owner(), source_owner);
   const auto diagnostic = adapted->diagnostic_query(origin +
       Eigen::Vector3d(0.5, 0.5, 0.5));
   EXPECT_TRUE(diagnostic.available);
@@ -101,14 +105,17 @@ TEST(P0OccupancyEpochAdapterTest,
 }
 
 TEST(P0OccupancyEpochAdapterTest, CapacityOrCountMismatchFailsClosed) {
+  const auto source_owner = std::make_shared<const int>(1);
   const Eigen::Vector3d center(0.85, 0.3, 1.1);
   const auto duplicate_epoch = makeEpoch({center, center});
   EXPECT_FALSE(ego_planner::P0OccupancyEpochAdapter::adapt(
-      duplicate_epoch, []() { return 7u; }).has_value());
+      duplicate_epoch, source_owner, [source_owner]() { return source_owner; },
+      []() { return 7u; }).has_value());
 
   const auto empty_epoch = makeEpoch({});
   const auto empty = ego_planner::P0OccupancyEpochAdapter::adapt(
-      empty_epoch, []() { return 7u; });
+      empty_epoch, source_owner, [source_owner]() { return source_owner; },
+      []() { return 7u; });
   ASSERT_TRUE(empty.has_value());
   ASSERT_NE(empty->los_owner, nullptr);
   EXPECT_EQ(empty->los_owner->size(), 0u);
@@ -123,8 +130,10 @@ TEST(P0OccupancyEpochAdapterTest, NonFiniteOrInvalidMetadataFailsClosed) {
   const auto expect_invalid = [](const FakeFrozenOccupancyEpoch& epoch,
                                  ego_planner::P0OccupancyEpoch::LiveGeneration
                                      live_generation) {
+    const auto source_owner = std::make_shared<const int>(1);
     EXPECT_FALSE(ego_planner::P0OccupancyEpochAdapter::adapt(
-        epoch, std::move(live_generation)).has_value());
+        epoch, source_owner, [source_owner]() { return source_owner; },
+        std::move(live_generation)).has_value());
   };
 
   auto epoch = makeEpoch({center});
@@ -155,4 +164,14 @@ TEST(P0OccupancyEpochAdapterTest, NonFiniteOrInvalidMetadataFailsClosed) {
   expect_invalid(epoch, []() { return 7u; });
   epoch = makeEpoch({center});
   expect_invalid(epoch, {});
+}
+
+TEST(P0OccupancyEpochAdapterTest, MissingStableSourceSeamFailsClosed) {
+  const auto epoch = makeEpoch({Eigen::Vector3d(0.85, 0.3, 1.1)});
+  const auto source_owner = std::make_shared<const int>(1);
+  EXPECT_FALSE(ego_planner::P0OccupancyEpochAdapter::adapt(
+      epoch, {}, [source_owner]() { return source_owner; },
+      []() { return 7u; }));
+  EXPECT_FALSE(ego_planner::P0OccupancyEpochAdapter::adapt(
+      epoch, source_owner, {}, []() { return 7u; }));
 }

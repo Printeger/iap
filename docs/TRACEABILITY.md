@@ -1,5 +1,19 @@
 # Traceability Matrix (IAP)
 
+## 2026-08-22 ICRA-017 Phase-4A provenance review repair
+
+| Req ID | Requirement/evidence seam | Implementation and focused evidence | Status |
+|---|---|---|---|
+| IAP-RQ-312 / IAP-RQ-314 / IAP-RQ-320 / IAP-RQ-322 | Every non-null GNSS range callback is one observable valid-or-absent source update | parse from a coherent dependency copy; one final `health_state_mutex_` publication advances the nonzero generation, updates seen/stamp/count and installs or clears `latest_epoch_`; no-origin, empty conversion, all-filtered, missing-ephemeris, null no-op, in-flight abort and recovery regressions | **IMPLEMENTED / SUPERVISOR REVIEW PENDING: stale epochs cannot survive an invalid callback or evade the end validator** |
+| IAP-RQ-312 / IAP-RQ-314 / IAP-RQ-320 | Occupancy authority is a stable producer owner plus exact generation, while each candidate retains one immutable LOS materialization | `P0OccupancyEpoch` stable token/live-owner/live-generation seam; Adapter validation; `GridMap` manager wiring; P0 start/end owner-generation checks and token-bound canonical LOS reuse; factory/probe-count, token replacement/expiry and coincident-generation regressions | **IMPLEMENTED / SUPERVISOR REVIEW PENDING: sampled recapture, observation equivalence and direct Visibility replay removed** |
+| IAP-RQ-320 / IAP-RQ-321 / IAP-RQ-322 | Pre-candidate active-source rejection must reach P0 as typed current-attempt evidence without accepted work | retained rolling attempt diagnostic; production provider detailed begin reason; P0 pre-batch failure path; missing/zero/nonfinite current/GNSS/LiDAR, Required epoch and invalid-satellite regressions; previous generation/slots/watchdog retained | **VERIFIED / SUPERVISOR REVIEW PENDING: count `1`, reason `source_provenance_invalid`, all accepted-work counters zero** |
+| IAP-RQ-320 / IAP-RQ-322 | The narrow repair must preserve Phase-4A TTL/watchdog/science and every retained consumer | repository-local root, plan-env, P0/Adapter, P1/P2/P3/planning-context/P4/P5 suites; read-only ICRA-011 profile; exact current-`libiap.so` linkage | **VERIFIED / SUPERVISOR REVIEW PENDING: no Phase-4B, activation, calibration or qualification** |
+
+ICRA-017 repairs only the three ICRA-016 review findings. It does not qualify
+ICRA-016/017, Phase 4 or Gate-0B; implement occupancy delta/reverse-ray; select
+TTL/watchdog values; or run main flow, ROS launch, smoke, qualification,
+analyzer, benchmark, bag/RViz/campaign or GPU work.
+
 ## 2026-08-21 ICRA-016 phase-4A versioned provenance and bounded retention
 
 | Req ID | Requirement/evidence seam | Implementation and focused evidence | Status |

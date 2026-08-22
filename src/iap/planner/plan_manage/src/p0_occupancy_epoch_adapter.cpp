@@ -14,8 +14,11 @@ std::optional<P0OccupancyEpoch> P0OccupancyEpochAdapter::adaptFields(
     const double cloud_stamp_s,
     const uint64_t generation,
     iap::RiskGridMap::OccupancyDiagnosticQuery diagnostic_query,
+    P0OccupancyEpoch::SourceOwner source_owner,
+    P0OccupancyEpoch::LiveSourceOwner live_source_owner,
     P0OccupancyEpoch::LiveGeneration live_generation) {
-  if (!diagnostic_query || !occupied_centers || !live_generation ||
+  if (!diagnostic_query || !occupied_centers || !source_owner ||
+      !live_source_owner || !live_generation ||
       generation == 0u || !std::isfinite(cloud_stamp_s) ||
       frame_id.empty() || !std::isfinite(resolution_m) ||
       resolution_m <= 0.0 || !lattice_origin.allFinite()) {
@@ -52,6 +55,8 @@ std::optional<P0OccupancyEpoch> P0OccupancyEpochAdapter::adaptFields(
   P0OccupancyEpoch adapted;
   adapted.diagnostic_query = std::move(diagnostic_query);
   adapted.los_owner = std::move(los_owner);
+  adapted.source_owner = std::move(source_owner);
+  adapted.live_source_owner = std::move(live_source_owner);
   adapted.live_generation = std::move(live_generation);
   adapted.generation = generation;
   adapted.cloud_stamp_s = cloud_stamp_s;

@@ -16,10 +16,14 @@
 namespace ego_planner {
 
 struct P0OccupancyEpoch {
+  using SourceOwner = std::shared_ptr<const void>;
+  using LiveSourceOwner = std::function<SourceOwner()>;
   using LiveGeneration = std::function<uint64_t()>;
 
   iap::RiskGridMap::OccupancyDiagnosticQuery diagnostic_query;
   std::shared_ptr<const iap::LocalOccupancyGrid> los_owner;
+  SourceOwner source_owner;
+  LiveSourceOwner live_source_owner;
   LiveGeneration live_generation;
   uint64_t generation = 0;
   double cloud_stamp_s = std::numeric_limits<double>::quiet_NaN();
@@ -43,6 +47,8 @@ class P0OccupancyEpochAdapter {
   template <typename CapturedEpoch>
   static std::optional<P0OccupancyEpoch> adapt(
       const CapturedEpoch& epoch,
+      P0OccupancyEpoch::SourceOwner source_owner,
+      P0OccupancyEpoch::LiveSourceOwner live_source_owner,
       P0OccupancyEpoch::LiveGeneration live_generation) {
     iap::RiskGridMap::OccupancyDiagnosticQuery diagnostic_query;
     if (epoch.diagnostic_query) {
@@ -69,6 +75,8 @@ class P0OccupancyEpochAdapter {
                        epoch.lattice_origin, epoch.resolution_m,
                        epoch.frame_id, epoch.cloud_stamp_s,
                        epoch.generation, std::move(diagnostic_query),
+                       std::move(source_owner),
+                       std::move(live_source_owner),
                        std::move(live_generation));
   }
 
@@ -81,6 +89,8 @@ class P0OccupancyEpochAdapter {
       double cloud_stamp_s,
       uint64_t generation,
       iap::RiskGridMap::OccupancyDiagnosticQuery diagnostic_query,
+      P0OccupancyEpoch::SourceOwner source_owner,
+      P0OccupancyEpoch::LiveSourceOwner live_source_owner,
       P0OccupancyEpoch::LiveGeneration live_generation);
 };
 

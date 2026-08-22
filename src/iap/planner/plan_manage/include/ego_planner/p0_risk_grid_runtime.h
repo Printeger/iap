@@ -247,6 +247,7 @@ class P0RiskGridRuntime {
   iap::RollingSpatialAdvisoryWindow rolling_spatial_window_;
   std::shared_ptr<const iap::LocalOccupancyGrid>
       rolling_occupancy_owner_;
+  P0OccupancyEpoch::SourceOwner rolling_occupancy_source_owner_;
   uint64_t rolling_occupancy_generation_ = 0;
 
   // Inputs, heavy refresh, and health publication deliberately use distinct

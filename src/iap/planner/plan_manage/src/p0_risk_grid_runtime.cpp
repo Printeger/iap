@@ -32,78 +32,6 @@ bool sameSharedOwner(const std::shared_ptr<const T>& lhs,
   return !lhs.owner_before(rhs) && !rhs.owner_before(lhs);
 }
 
-bool exactVector(const Eigen::Vector3d& lhs, const Eigen::Vector3d& rhs) {
-  return (lhs.array() == rhs.array()).all();
-}
-
-bool sameOccupancyParams(const iap::LocalOccupancyGrid::Params& lhs,
-                         const iap::LocalOccupancyGrid::Params& rhs) {
-  return lhs.voxel_size == rhs.voxel_size &&
-         exactVector(lhs.lattice_origin, rhs.lattice_origin) &&
-         lhs.max_voxels == rhs.max_voxels &&
-         lhs.n_kappa_steps == rhs.n_kappa_steps &&
-         lhs.enable_eviction == rhs.enable_eviction &&
-         lhs.local_radius_m == rhs.local_radius_m &&
-         lhs.max_age_s == rhs.max_age_s &&
-         lhs.eviction_policy == rhs.eviction_policy;
-}
-
-bool sameOccupancyDiagnostic(const iap::RiskOccupancyDiagnostic& lhs,
-                             const iap::RiskOccupancyDiagnostic& rhs) {
-  return lhs.available == rhs.available &&
-         lhs.raw_occupied == rhs.raw_occupied &&
-         lhs.inflated_occupied == rhs.inflated_occupied &&
-         (lhs.voxel_index.array() == rhs.voxel_index.array()).all() &&
-         exactVector(lhs.voxel_center, rhs.voxel_center) &&
-         lhs.resolution_m == rhs.resolution_m &&
-         lhs.inflation_m == rhs.inflation_m &&
-         lhs.frame_id == rhs.frame_id &&
-         lhs.cloud_stamp_s == rhs.cloud_stamp_s &&
-         lhs.occupancy_generation == rhs.occupancy_generation &&
-         lhs.source == rhs.source;
-}
-
-struct OccupancyObservation {
-  Eigen::Vector3d position = Eigen::Vector3d::Zero();
-  iap::RiskOccupancyDiagnostic diagnostic;
-};
-
-// The plan_env Adapter intentionally materializes a fresh LocalOccupancyGrid
-// owner for each frozen capture.  Therefore pointer equality across two live
-// captures would reject an unchanged source.  Bind those immutable owners by
-// exact parameters plus every occupancy observation consumed by this P0
-// candidate; any same-generation replacement that can affect the candidate is
-// rejected before publication.
-bool sameOccupancyEvidence(
-    const P0OccupancyEpoch& expected,
-    const P0OccupancyEpoch& observed,
-    const std::vector<OccupancyObservation>& observations) {
-  if (!expected.los_owner || !observed.los_owner ||
-      !expected.diagnostic_query || !observed.diagnostic_query ||
-      expected.generation != observed.generation ||
-      expected.cloud_stamp_s != observed.cloud_stamp_s ||
-      expected.frame_id != observed.frame_id ||
-      expected.los_owner->size() != observed.los_owner->size() ||
-      !sameOccupancyParams(expected.los_owner->params(),
-                           observed.los_owner->params())) {
-    return false;
-  }
-  if (sameSharedOwner(expected.los_owner, observed.los_owner)) {
-    return true;
-  }
-
-  for (const auto& observation : observations) {
-    if (expected.los_owner->occupied_at(observation.position) !=
-            observed.los_owner->occupied_at(observation.position) ||
-        !sameOccupancyDiagnostic(
-            observation.diagnostic,
-            observed.diagnostic_query(observation.position))) {
-      return false;
-    }
-  }
-  return true;
-}
-
 enum class P0SemanticFailure {
   NONE = 0,
   OCCUPANCY_SNAPSHOT_UNAVAILABLE,
@@ -321,8 +249,11 @@ class PredictorModuleRiskProvider final : public iap::RiskPredictionProvider {
     input.occupancy_owner = occupancy_owner_;
     input.lidar_map_points_owner = std::move(lidar_map_points);
     input.lidar_fim_primitives_owner = std::move(lidar_fim_primitives);
-    ready_ = rolling_window_ &&
-             rolling_window_->beginRefresh(std::move(input));
+    ready_ = rolling_window_ && rolling_window_->beginRefresh(
+        std::move(input), &begin_failure_reason_);
+    if (rolling_window_ && !ready_) {
+      begin_diagnostics_ = rolling_window_->diagnostics();
+    }
   }
 
   ~PredictorModuleRiskProvider() override {
@@ -434,11 +365,14 @@ class PredictorModuleRiskProvider final : public iap::RiskPredictionProvider {
   }
 
   iap::RollingSpatialRefreshDiagnostics rollingDiagnostics() const {
-    return rolling_window_ ? rolling_window_->diagnostics()
-                           : iap::RollingSpatialRefreshDiagnostics{};
+    return ready_ && rolling_window_ ? rolling_window_->diagnostics()
+                                    : begin_diagnostics_;
   }
 
   bool ready() const { return ready_; }
+  const std::string& beginFailureReason() const {
+    return begin_failure_reason_;
+  }
 
   void finish(const bool success) {
     if (!rolling_window_ || !ready_) return;
@@ -456,6 +390,8 @@ class PredictorModuleRiskProvider final : public iap::RiskPredictionProvider {
   iap::IntegritySnapshot snapshot_;
   int worker_count_ = 1;
   bool ready_ = false;
+  std::string begin_failure_reason_ = "provider_refresh_failed";
+  iap::RollingSpatialRefreshDiagnostics begin_diagnostics_;
   iap::PredictorBatchDiagnostics last_diagnostics_;
 };
 
@@ -1065,6 +1001,9 @@ void P0RiskGridRuntime::refreshTimerCallback() {
     last_refresh_succeeded_ = false;
     last_snapshot_failure_reason_ = pre_build_failure;
     last_refresh_query_count_ = 0;
+    last_predictor_unique_positions_ = 0;
+    last_predictor_lidar_evaluations_ = 0;
+    last_predictor_lidar_cache_hits_ = 0;
     last_predictor_spatial_advisory_recompute_count_ = 0;
     last_predictor_spatial_advisory_reuse_count_ = 0;
     last_predictor_gnss_advisory_invocation_count_ = 0;
@@ -1103,7 +1042,8 @@ void P0RiskGridRuntime::refreshTimerCallback() {
     const InputReadiness readiness = inputReadiness(now_s);
     if (readiness.current_integrity_seen &&
         readiness.current_integrity_valid &&
-        !readiness.current_integrity_fresh) {
+        !readiness.current_integrity_fresh &&
+        std::isfinite(readiness.current_integrity_stamp_s)) {
       fail_semantic_refresh(P0SemanticFailure::STALE_COVARIANCE_GROWTH_PRIOR);
       return;
     }
@@ -1112,7 +1052,23 @@ void P0RiskGridRuntime::refreshTimerCallback() {
   PredictorSourceCapture captured_predictor_sources;
   if (!buildSnapshot(now_s, &snapshot,
                      &captured_predictor_sources)) {
-    risk_grid_.markRefreshFailure(now_s, "snapshot_unavailable");
+    const bool invalid_current_provenance =
+        production_predictor &&
+        (captured_predictor_sources.current_generation == 0u ||
+         !std::isfinite(captured_predictor_sources.current_stamp));
+    const bool invalid_gnss_provenance =
+        production_predictor &&
+        config_.predictor_source_mode != iap::PredictorSourceMode::LidarOnly &&
+        config_.predictor_gnss_epoch_policy !=
+            iap::PredictorGnssEpochPolicy::Disabled &&
+        captured_predictor_sources.gnss_epoch_generation != 0u &&
+        !std::isfinite(captured_predictor_sources.gnss_epoch_stamp);
+    const std::string failure_reason =
+        invalid_current_provenance
+            ? "invalid_current_provenance"
+            : invalid_gnss_provenance ? "invalid_gnss_epoch_identity"
+                                      : "snapshot_unavailable";
+    risk_grid_.markRefreshFailure(now_s, failure_reason);
     const double refresh_end_stamp_s = liveNowSeconds();
     {
       std::lock_guard<std::mutex> health_lock(health_state_mutex_);
@@ -1120,7 +1076,13 @@ void P0RiskGridRuntime::refreshTimerCallback() {
           std::chrono::steady_clock::now() - refresh_start).count();
       last_refresh_end_stamp_s_ = refresh_end_stamp_s;
       last_refresh_end_steady_s_ = steadyNowSeconds();
-      if (pre_build_failure == "none") {
+      if (invalid_current_provenance || invalid_gnss_provenance) {
+        last_snapshot_failure_reason_ = failure_reason;
+        last_rolling_spatial_diagnostics_.invalid_source_provenance_count =
+            1u;
+        last_rolling_spatial_diagnostics_.invalidation_reason =
+            iap::RollingSpatialInvalidationReason::SourceProvenanceInvalid;
+      } else if (pre_build_failure == "none") {
         last_snapshot_failure_reason_ = "snapshot_builder_invalid";
       }
     }
@@ -1134,7 +1096,6 @@ void P0RiskGridRuntime::refreshTimerCallback() {
   }
 
   std::optional<P0OccupancyEpoch> occupancy_epoch;
-  std::optional<P0OccupancyEpoch> captured_occupancy_epoch;
   if (occupancy_epoch_factory_) {
     P0OccupancyEpochCapture capture = occupancy_epoch_factory_();
     if (capture.status ==
@@ -1150,7 +1111,9 @@ void P0RiskGridRuntime::refreshTimerCallback() {
     }
     occupancy_epoch = std::move(capture.epoch);
     if (!occupancy_epoch->diagnostic_query ||
-        !occupancy_epoch->los_owner || !occupancy_epoch->live_generation ||
+        !occupancy_epoch->los_owner || !occupancy_epoch->source_owner ||
+        !occupancy_epoch->live_source_owner ||
+        !occupancy_epoch->live_generation ||
         occupancy_epoch->generation == 0u) {
       fail_semantic_refresh(P0SemanticFailure::OCCUPANCY_LOS_ADAPTER_INVALID);
       return;
@@ -1168,13 +1131,10 @@ void P0RiskGridRuntime::refreshTimerCallback() {
       fail_semantic_refresh(P0SemanticFailure::OCCUPANCY_STALE);
       return;
     }
-    if (occupancy_epoch->live_generation() != occupancy_epoch->generation) {
-      fail_semantic_refresh(
-          P0SemanticFailure::OCCUPANCY_GENERATION_CHANGED);
-      return;
-    }
-    captured_occupancy_epoch = *occupancy_epoch;
     if (production_predictor && rolling_occupancy_owner_ &&
+        rolling_occupancy_source_owner_ &&
+        sameSharedOwner(rolling_occupancy_source_owner_,
+                        occupancy_epoch->source_owner) &&
         rolling_occupancy_generation_ == occupancy_epoch->generation) {
       occupancy_epoch->los_owner = rolling_occupancy_owner_;
     }
@@ -1196,10 +1156,6 @@ void P0RiskGridRuntime::refreshTimerCallback() {
         config_.predictor_use_current_integrity_prior
             ? P0SemanticFailure::INVALID_COVARIANCE_GROWTH_PRIOR
             : P0SemanticFailure::MISSING_COVARIANCE_GROWTH_PRIOR);
-    return;
-  }
-  if (production_predictor && snapshot.prior_source_generation == 0u) {
-    fail_semantic_refresh(P0SemanticFailure::MISSING_COVARIANCE_GROWTH_PRIOR);
     return;
   }
   if (production_predictor && !finiteSpd(snapshot.lambda_base_pos)) {
@@ -1306,6 +1262,24 @@ void P0RiskGridRuntime::refreshTimerCallback() {
     provider = local_provider.get();
   }
 
+  if (predictor_provider && !predictor_provider->ready()) {
+    const std::string failure_reason = predictor_provider->beginFailureReason();
+    risk_grid_.markRefreshFailure(now_s, failure_reason);
+    const double refresh_end_stamp_s = liveNowSeconds();
+    {
+      std::lock_guard<std::mutex> health_lock(health_state_mutex_);
+      last_snapshot_failure_reason_ = failure_reason;
+      last_rolling_spatial_diagnostics_ =
+          predictor_provider->rollingDiagnostics();
+      last_refresh_elapsed_ms_ = std::chrono::duration<double, std::milli>(
+          std::chrono::steady_clock::now() - refresh_start).count();
+      last_refresh_end_stamp_s_ = refresh_end_stamp_s;
+      last_refresh_end_steady_s_ = steadyNowSeconds();
+    }
+    publishHealth(risk_grid_.health(now_s), now_s);
+    return;
+  }
+
   std::string reason;
   const Eigen::Vector3i voxel_num = risk_grid_.voxelNum();
   const auto layer_voxel_count =
@@ -1321,71 +1295,34 @@ void P0RiskGridRuntime::refreshTimerCallback() {
       combinedOccupancyDiagnosticQuery(
       occupancy_epoch ? occupancy_epoch->diagnostic_query
                       : iap::RiskGridMap::OccupancyDiagnosticQuery{});
-  const auto occupancy_observations =
-      std::make_shared<std::vector<OccupancyObservation>>();
-  const auto captured_occupancy_query =
-      captured_occupancy_epoch
-          ? captured_occupancy_epoch->diagnostic_query
-          : iap::RiskGridMap::OccupancyDiagnosticQuery{};
-  iap::RiskGridMap::OccupancyDiagnosticQuery occupancy_diagnostic_query;
-  if (combined_occupancy_diagnostic_query) {
-    occupancy_diagnostic_query =
-        [combined_occupancy_diagnostic_query, captured_occupancy_query,
-         occupancy_observations](const Eigen::Vector3d& position) {
-          auto diagnostic = combined_occupancy_diagnostic_query(position);
-          if (captured_occupancy_query) {
-            occupancy_observations->push_back(
-                {position, captured_occupancy_query(position)});
-          }
-          return diagnostic;
-        };
-  }
+  const iap::RiskGridMap::OccupancyDiagnosticQuery occupancy_diagnostic_query =
+      combined_occupancy_diagnostic_query;
   const auto occupancy_predicate = combinedOccupancyPredicate();
   iap::RiskGridMap::SourceValidator source_validator;
   if (occupancy_epoch) {
+    const auto captured_occupancy_source_owner =
+        occupancy_epoch->source_owner;
+    const auto live_occupancy_source_owner =
+        occupancy_epoch->live_source_owner;
     const auto live_occupancy_generation = occupancy_epoch->live_generation;
     const uint64_t captured_occupancy_generation =
         occupancy_epoch->generation;
     const uint64_t captured_prior_generation =
         snapshot.prior_source_generation;
     source_validator =
-        [this, live_occupancy_generation, captured_occupancy_generation,
+        [this, captured_occupancy_source_owner,
+         live_occupancy_source_owner, live_occupancy_generation,
+         captured_occupancy_generation,
          captured_prior_generation, validate_gnss_spatial_source,
          validate_lidar_spatial_source, validate_lidar_legacy_source,
          captured_predictor_sources, captured_lidar_generation,
-         captured_lidar_map_points, captured_lidar_fim_primitives,
-         captured_occupancy_epoch, canonical_occupancy_epoch = *occupancy_epoch,
-         occupancy_observations, predictor_provider]() {
-          if (!live_occupancy_generation ||
+         captured_lidar_map_points, captured_lidar_fim_primitives]() {
+          if (!captured_occupancy_source_owner ||
+              !live_occupancy_source_owner || !live_occupancy_generation ||
+              !sameSharedOwner(captured_occupancy_source_owner,
+                               live_occupancy_source_owner()) ||
               live_occupancy_generation() !=
                   captured_occupancy_generation) {
-            return iap::RiskGridSourceValidation::
-                OCCUPANCY_GENERATION_CHANGED;
-          }
-          if (!captured_occupancy_epoch || !occupancy_epoch_factory_) {
-            return iap::RiskGridSourceValidation::
-                OCCUPANCY_GENERATION_CHANGED;
-          }
-          const P0OccupancyEpochCapture live_capture =
-              occupancy_epoch_factory_();
-          if (live_capture.status != P0OccupancyEpochCaptureStatus::VALID ||
-              !live_capture.epoch || !live_capture.epoch->live_generation ||
-              live_capture.epoch->live_generation() !=
-                  captured_occupancy_generation ||
-              !sameOccupancyEvidence(
-                  *captured_occupancy_epoch, *live_capture.epoch,
-                  *occupancy_observations) ||
-              !sameOccupancyEvidence(
-                  canonical_occupancy_epoch, *captured_occupancy_epoch,
-                  *occupancy_observations)) {
-            return iap::RiskGridSourceValidation::
-                OCCUPANCY_GENERATION_CHANGED;
-          }
-          if (predictor_provider && predictor_provider->ready() &&
-              (!rolling_spatial_window_.candidateOccupancyEvidenceMatches(
-                   captured_occupancy_epoch->los_owner) ||
-               !rolling_spatial_window_.candidateOccupancyEvidenceMatches(
-                   live_capture.epoch->los_owner))) {
             return iap::RiskGridSourceValidation::
                 OCCUPANCY_GENERATION_CHANGED;
           }
@@ -1451,6 +1388,7 @@ void P0RiskGridRuntime::refreshTimerCallback() {
     }
     if (refresh_succeeded && occupancy_epoch) {
       rolling_occupancy_owner_ = occupancy_epoch->los_owner;
+      rolling_occupancy_source_owner_ = occupancy_epoch->source_owner;
       rolling_occupancy_generation_ = occupancy_epoch->generation;
     }
   }
@@ -1965,113 +1903,108 @@ void P0RiskGridRuntime::rangeCallback(
   std::unordered_map<uint32_t, gnss_comm::GloEphemPtr> glo_ephem_cache;
   {
     std::lock_guard<std::mutex> health_lock(health_state_mutex_);
-    gnss_epoch_seen_ = true;
-    latest_gnss_epoch_stamp_ = std::numeric_limits<double>::quiet_NaN();
     origin_valid = origin_set_;
     origin_ecef = origin_ecef_;
     iono_params = iono_params_;
     ephem_cache = ephem_cache_;
     glo_ephem_cache = glo_ephem_cache_;
   }
-  if (!origin_valid) {
-    std::lock_guard<std::mutex> health_lock(health_state_mutex_);
-    latest_gnss_epoch_satellite_count_ = 0;
-    return;
-  }
-
-  const auto obs_list = gnss_comm::msg2meas(msg);
-  if (obs_list.empty()) {
-    std::lock_guard<std::mutex> health_lock(health_state_mutex_);
-    latest_gnss_epoch_satellite_count_ = 0;
-    return;
-  }
+  const auto obs_list = origin_valid
+      ? gnss_comm::msg2meas(msg)
+      : decltype(gnss_comm::msg2meas(msg)){};
 
   iap::GnssEpoch epoch;
-  const auto utc_t = gnss_comm::gpst2utc(obs_list.front()->time);
-  epoch.stamp = static_cast<double>(utc_t.time) + utc_t.sec;
-  const double gnss_epoch_stamp = epoch.stamp;
-  epoch.gps_sec = static_cast<double>(obs_list.front()->time.time) +
-                  obs_list.front()->time.sec;
-  epoch.iono_params = iono_params;
+  if (!obs_list.empty() && obs_list.front()) {
+    const auto utc_t = gnss_comm::gpst2utc(obs_list.front()->time);
+    epoch.stamp = static_cast<double>(utc_t.time) + utc_t.sec;
+    epoch.gps_sec = static_cast<double>(obs_list.front()->time.time) +
+                    obs_list.front()->time.sec;
+    epoch.iono_params = iono_params;
 
-  for (const auto& obs : obs_list) {
-    if (!obs) {
-      continue;
-    }
-    int l1_idx = -1;
-    const double freq = gnss_comm::L1_freq(obs, &l1_idx);
-    if (l1_idx < 0 || freq < 0.0 ||
-        static_cast<int>(obs->psr.size()) <= l1_idx) {
-      continue;
-    }
-    const double pr = obs->psr[l1_idx];
-    if (pr <= 0.0 || !std::isfinite(pr)) {
-      continue;
-    }
-
-    const uint32_t sat_id = obs->sat;
-    const uint32_t sys = gnss_comm::satsys(sat_id, nullptr);
-    Eigen::Vector3d sat_ecef_pos = Eigen::Vector3d::Zero();
-    Eigen::Vector3d sat_ecef_vel = Eigen::Vector3d::Zero();
-    double svdt = 0.0;
-    double svddt = 0.0;
-    double tgd = 0.0;
-    const auto t_tx = gnss_comm::time_add(obs->time, -pr / kLightSpeed);
-
-    if (sys == SYS_GLO) {
-      const auto it = glo_ephem_cache.find(sat_id);
-      if (it == glo_ephem_cache.end()) {
+    for (const auto& obs : obs_list) {
+      if (!obs) {
         continue;
       }
-      sat_ecef_pos = gnss_comm::geph2pos(t_tx, it->second, &svdt);
-      sat_ecef_vel = gnss_comm::geph2vel(t_tx, it->second, &svddt);
-    } else {
-      const auto it = ephem_cache.find(sat_id);
-      if (it == ephem_cache.end()) {
+      int l1_idx = -1;
+      const double freq = gnss_comm::L1_freq(obs, &l1_idx);
+      if (l1_idx < 0 || freq < 0.0 ||
+          static_cast<int>(obs->psr.size()) <= l1_idx) {
         continue;
       }
-      sat_ecef_pos = gnss_comm::eph2pos(t_tx, it->second, &svdt);
-      sat_ecef_vel = gnss_comm::eph2vel(t_tx, it->second, &svddt);
-      tgd = it->second->tgd[0];
-    }
-    if (!sat_ecef_pos.allFinite() || !sat_ecef_vel.allFinite()) {
-      continue;
-    }
+      const double pr = obs->psr[l1_idx];
+      if (pr <= 0.0 || !std::isfinite(pr)) {
+        continue;
+      }
 
-    double azel[2] = {0.0, M_PI / 2.0};
-    gnss_comm::sat_azel(origin_ecef, sat_ecef_pos, azel);
+      const uint32_t sat_id = obs->sat;
+      const uint32_t sys = gnss_comm::satsys(sat_id, nullptr);
+      Eigen::Vector3d sat_ecef_pos = Eigen::Vector3d::Zero();
+      Eigen::Vector3d sat_ecef_vel = Eigen::Vector3d::Zero();
+      double svdt = 0.0;
+      double svddt = 0.0;
+      double tgd = 0.0;
+      const auto t_tx = gnss_comm::time_add(obs->time, -pr / kLightSpeed);
 
-    iap::SatObs sat;
-    sat.sat_id = static_cast<int>(sat_id);
-    sat.constellation = (sys == SYS_GLO) ? 'R'
-                        : (sys == SYS_GAL) ? 'E'
-                        : (sys == SYS_BDS) ? 'C'
-                                           : 'G';
-    sat.pr_meas = pr + svdt * kLightSpeed;
-    sat.dop_meas = 0.0 + svddt * kLightSpeed;
-    sat.pr_sigma =
-        static_cast<int>(obs->psr_std.size()) > l1_idx &&
-                obs->psr_std[l1_idx] > 0.05
-            ? obs->psr_std[l1_idx]
-            : 5.0;
-    sat.dop_sigma = 0.5;
-    sat.sat_pos = sat_ecef_pos;
-    sat.sat_vel = sat_ecef_vel;
-    sat.elevation = azel[1];
-    sat.azimuth = azel[0];
-    sat.tgd = tgd;
-    sat.svddt = svddt;
-    epoch.sats.push_back(sat);
+      if (sys == SYS_GLO) {
+        const auto it = glo_ephem_cache.find(sat_id);
+        if (it == glo_ephem_cache.end()) {
+          continue;
+        }
+        sat_ecef_pos = gnss_comm::geph2pos(t_tx, it->second, &svdt);
+        sat_ecef_vel = gnss_comm::geph2vel(t_tx, it->second, &svddt);
+      } else {
+        const auto it = ephem_cache.find(sat_id);
+        if (it == ephem_cache.end()) {
+          continue;
+        }
+        sat_ecef_pos = gnss_comm::eph2pos(t_tx, it->second, &svdt);
+        sat_ecef_vel = gnss_comm::eph2vel(t_tx, it->second, &svddt);
+        tgd = it->second->tgd[0];
+      }
+      if (!sat_ecef_pos.allFinite() || !sat_ecef_vel.allFinite()) {
+        continue;
+      }
+
+      double azel[2] = {0.0, M_PI / 2.0};
+      gnss_comm::sat_azel(origin_ecef, sat_ecef_pos, azel);
+
+      iap::SatObs sat;
+      sat.sat_id = static_cast<int>(sat_id);
+      sat.constellation = (sys == SYS_GLO) ? 'R'
+                          : (sys == SYS_GAL) ? 'E'
+                          : (sys == SYS_BDS) ? 'C'
+                                             : 'G';
+      sat.pr_meas = pr + svdt * kLightSpeed;
+      sat.dop_meas = 0.0 + svddt * kLightSpeed;
+      sat.pr_sigma =
+          static_cast<int>(obs->psr_std.size()) > l1_idx &&
+                  obs->psr_std[l1_idx] > 0.05
+              ? obs->psr_std[l1_idx]
+              : 5.0;
+      sat.dop_sigma = 0.5;
+      sat.sat_pos = sat_ecef_pos;
+      sat.sat_vel = sat_ecef_vel;
+      sat.elevation = azel[1];
+      sat.azimuth = azel[0];
+      sat.tgd = tgd;
+      sat.svddt = svddt;
+      epoch.sats.push_back(sat);
+    }
   }
 
   {
     std::lock_guard<std::mutex> health_lock(health_state_mutex_);
-    latest_gnss_epoch_stamp_ = gnss_epoch_stamp;
+    advanceNonzeroGeneration(&latest_gnss_epoch_generation_);
+    gnss_epoch_seen_ = true;
     latest_gnss_epoch_satellite_count_ =
         static_cast<uint64_t>(epoch.sats.size());
     if (!epoch.sats.empty()) {
+      latest_gnss_epoch_stamp_ = epoch.stamp;
       latest_epoch_ = std::move(epoch);
-      advanceNonzeroGeneration(&latest_gnss_epoch_generation_);
+    } else {
+      latest_gnss_epoch_stamp_ =
+          std::numeric_limits<double>::quiet_NaN();
+      latest_epoch_.reset();
     }
   }
 }
@@ -2378,6 +2311,9 @@ bool P0RiskGridRuntime::buildSnapshot(
     return false;
   }
   if (!age_valid(current.stamp, now_s, config_.grid.stale_timeout_s)) {
+    return false;
+  }
+  if (epoch && !std::isfinite(epoch->stamp)) {
     return false;
   }
   iap::IntegritySnapshotBuilderInput input;

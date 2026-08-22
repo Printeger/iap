@@ -1037,10 +1037,10 @@ TEST(RollingSpatialAdvisoryWindowTest,
 
   auto zero_lidar = makeRefreshInput(occupancy, makeSnapshot(1));
   zero_lidar.provenance.lidar_generation = 0;
-  ASSERT_TRUE(lidar_window.beginRefresh(std::move(zero_lidar)));
+  ASSERT_FALSE(lidar_window.beginRefresh(std::move(zero_lidar), &reason));
+  EXPECT_EQ(reason, "invalid_lidar_provenance");
   EXPECT_EQ(lidar_window.diagnostics().invalidation_reason,
             RollingSpatialInvalidationReason::SourceProvenanceInvalid);
-  lidar_window.abortRefresh();
 
   auto regressed_lidar = makeRefreshInput(occupancy, makeSnapshot(1));
   regressed_lidar.provenance.lidar_generation = 10;
@@ -1064,12 +1064,11 @@ TEST(RollingSpatialAdvisoryWindowTest,
   auto nonfinite_lidar = makeRefreshInput(occupancy, makeSnapshot(1));
   nonfinite_lidar.provenance.lidar_stamp =
       std::numeric_limits<double>::quiet_NaN();
-  EXPECT_TRUE(lidar_window.beginRefresh(std::move(nonfinite_lidar), &reason));
-  EXPECT_EQ(reason, "ok");
+  EXPECT_FALSE(lidar_window.beginRefresh(std::move(nonfinite_lidar), &reason));
+  EXPECT_EQ(reason, "invalid_lidar_provenance");
   EXPECT_EQ(lidar_window.diagnostics().invalidation_reason,
             RollingSpatialInvalidationReason::SourceProvenanceInvalid);
   EXPECT_EQ(lidar_window.diagnostics().invalid_source_provenance_count, 1u);
-  lidar_window.abortRefresh();
 }
 
 TEST(RollingSpatialAdvisoryWindowTest,
@@ -1278,6 +1277,9 @@ TEST(RollingSpatialAdvisoryWindowTest,
   std::string reason;
   EXPECT_FALSE(window.beginRefresh(std::move(required), &reason));
   EXPECT_EQ(reason, "missing_required_gnss_epoch_identity");
+  EXPECT_EQ(window.diagnostics().invalid_source_provenance_count, 1u);
+  EXPECT_EQ(window.diagnostics().invalidation_reason,
+            RollingSpatialInvalidationReason::SourceProvenanceInvalid);
 
   auto invalid = makeRefreshInput(occupancy, snapshot);
   params.gnss_epoch_policy = PredictorGnssEpochPolicy::Optional;
@@ -1287,6 +1289,9 @@ TEST(RollingSpatialAdvisoryWindowTest,
       std::numeric_limits<double>::quiet_NaN();
   EXPECT_FALSE(window.beginRefresh(std::move(invalid), &reason));
   EXPECT_EQ(reason, "invalid_gnss_epoch_identity");
+  EXPECT_EQ(window.diagnostics().invalid_source_provenance_count, 1u);
+  EXPECT_EQ(window.diagnostics().invalidation_reason,
+            RollingSpatialInvalidationReason::SourceProvenanceInvalid);
 
   const auto expect_invalid_satellite_identity = [&](const auto& mutate) {
     auto invalid_satellite =
@@ -1294,6 +1299,9 @@ TEST(RollingSpatialAdvisoryWindowTest,
     mutate(&invalid_satellite.snapshot.gnss_epoch.sats.front());
     EXPECT_FALSE(window.beginRefresh(std::move(invalid_satellite), &reason));
     EXPECT_EQ(reason, "invalid_gnss_satellite_identity");
+    EXPECT_EQ(window.diagnostics().invalid_source_provenance_count, 1u);
+    EXPECT_EQ(window.diagnostics().invalidation_reason,
+              RollingSpatialInvalidationReason::SourceProvenanceInvalid);
   };
   expect_invalid_satellite_identity([](SatObs* satellite) {
     satellite->elevation = std::numeric_limits<double>::quiet_NaN();
@@ -1319,19 +1327,40 @@ TEST(RollingSpatialAdvisoryWindowTest,
   RollingSpatialAdvisoryWindow invalid_current_window;
   EXPECT_FALSE(invalid_current_window.beginRefresh(invalid_current, &reason));
   EXPECT_EQ(reason, "invalid_legacy_lidar_provenance");
+  EXPECT_EQ(invalid_current_window.diagnostics()
+                .invalid_source_provenance_count,
+            1u);
+  EXPECT_EQ(invalid_current_window.diagnostics().invalidation_reason,
+            RollingSpatialInvalidationReason::SourceProvenanceInvalid);
 
   RollingSpatialAdvisoryWindow missing_lidar_window;
   auto missing_lidar = makeRefreshInput(occupancy, snapshot);
   missing_lidar.lidar_map_points_owner.reset();
   missing_lidar.lidar_fim_primitives_owner.reset();
-  EXPECT_TRUE(missing_lidar_window.beginRefresh(missing_lidar, &reason));
-  EXPECT_EQ(reason, "ok");
+  EXPECT_FALSE(missing_lidar_window.beginRefresh(missing_lidar, &reason));
+  EXPECT_EQ(reason, "invalid_lidar_provenance");
   EXPECT_EQ(missing_lidar_window.diagnostics().invalidation_reason,
             RollingSpatialInvalidationReason::SourceProvenanceInvalid);
   EXPECT_EQ(
       missing_lidar_window.diagnostics().invalid_source_provenance_count,
       1u);
-  missing_lidar_window.abortRefresh();
+
+  auto zero_lidar = makeRefreshInput(occupancy, snapshot);
+  zero_lidar.provenance.lidar_generation = 0u;
+  EXPECT_FALSE(missing_lidar_window.beginRefresh(zero_lidar, &reason));
+  EXPECT_EQ(reason, "invalid_lidar_provenance");
+  EXPECT_EQ(missing_lidar_window.diagnostics()
+                .invalid_source_provenance_count,
+            1u);
+
+  auto nonfinite_lidar = makeRefreshInput(occupancy, snapshot);
+  nonfinite_lidar.provenance.lidar_stamp =
+      std::numeric_limits<double>::quiet_NaN();
+  EXPECT_FALSE(missing_lidar_window.beginRefresh(nonfinite_lidar, &reason));
+  EXPECT_EQ(reason, "invalid_lidar_provenance");
+  EXPECT_EQ(missing_lidar_window.diagnostics()
+                .invalid_source_provenance_count,
+            1u);
 
   auto optional_missing_epoch = makeRefreshInput(occupancy, snapshot);
   params.gnss_epoch_policy = PredictorGnssEpochPolicy::Optional;

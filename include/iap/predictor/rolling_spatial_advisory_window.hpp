@@ -105,8 +105,6 @@ class RollingSpatialAdvisoryWindow {
   std::vector<PredictorQueryResult> queryPositionHorizons(
       const std::vector<PredictorQueryInput>& inputs,
       PredictorBatchDiagnostics* diagnostics = nullptr);
-  bool candidateOccupancyEvidenceMatches(
-      const std::shared_ptr<const LocalOccupancyGrid>& observed_owner) const;
   void commitRefresh();
   void abortRefresh();
 

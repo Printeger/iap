@@ -1884,3 +1884,101 @@ does not mark ICRA-016, Phase 4 or Gate-0B PASS; start Phase-4B or calibration;
 choose production activation values; run main flow, smoke, qualification,
 benchmark, analyzer or GPU work; change P1/P2/P3/P4/P5 behavior; or issue the
 next task.
+
+## 2026-08-22T03:04:49Z — ICRA-017 START
+
+Synchronized `dev/icra` at
+`3790561da9def98c986d089c547a296d461879e8`; local and
+`origin/dev/icra` are equal (`0 0`), so no pull was permitted. The protected
+PDF remains solely untracked and exact at SHA-256
+`1f07da5631a6551a2f98c02d46fd45bc87f2f1e3e7c14e95f9a7f4a0bac844f6`.
+The retained ICRA-011 JSON and disabled, never-rerun ICRA-014 canonical remain
+read-only at SHA-256
+`778abd22158805c41150b4eeed9c37a3f660237a0bb0599e9a567e3533c7b32c` and
+`44f47b23137d17f4b0cbc81af6827156865bdecb36089bf53f770960a2fb963d`.
+
+The exact ICRA-017 allowlist is:
+
+- `include/iap/predictor/rolling_spatial_advisory_window.hpp`;
+- `src/iap/predictor/rolling_spatial_advisory_window.cpp`;
+- `test/test_rolling_spatial_advisory_window.cpp`;
+- `src/iap/planner/plan_manage/include/ego_planner/p0_occupancy_epoch_adapter.h`;
+- `src/iap/planner/plan_manage/src/p0_occupancy_epoch_adapter.cpp`;
+- `src/iap/planner/plan_manage/test/test_p0_occupancy_epoch_adapter.cpp`;
+- `src/iap/planner/plan_manage/include/ego_planner/p0_risk_grid_runtime.h`;
+- `src/iap/planner/plan_manage/src/p0_risk_grid_runtime.cpp`;
+- `src/iap/planner/plan_manage/test/test_p0_risk_grid_runtime.cpp`;
+- `src/iap/planner/plan_manage/src/planner_manager.cpp` only for stable
+  occupancy source-token wiring;
+- root or `plan_manage` `CMakeLists.txt` only if required for test/source
+  registration;
+- `DEV_LOG.md`, `docs/CHANGES.md`, and `docs/TRACEABILITY.md`.
+
+This repair closes only three ICRA-016 findings: every non-null GNSS callback
+must atomically publish a new valid or explicit absent generation; occupancy
+validation must use a stable producer token plus generation instead of sampled
+re-capture/visibility replay; and rolling begin rejection must reach P0 as
+typed invalid-provenance attempt evidence with all accepted-work counters
+zero. Existing default-disabled TTL/watchdog behavior and transaction rollback
+remain unchanged.
+
+Explicit stop line: no Phase-4B occupancy cell/ray delta, reverse-ray index,
+map-layout/storage rewrite, second map, tuning, production TTL/watchdog value,
+calibration/activation, CPU scaling, worker/default/geometry/horizon change,
+P1/P2/P3/P4/P5 product work, main flow, ROS launch, smoke, qualification, bag,
+RViz, campaign, analyzer, formal benchmark or GPU/CUDA work is authorized.
+All generated output must remain below `results/icra27/icra017/`.
+
+## 2026-08-22T03:41:57Z — ICRA-017 IMPLEMENTATION EVIDENCE / REVIEW READY
+
+Implemented only the three authorized ICRA-016 review repairs. Every non-null
+range callback now publishes exactly one nonzero GNSS generation under one
+final health-state lock, with coherent seen/stamp/count state and either a new
+nonempty epoch or an explicit cleared/absent epoch. The occupancy Adapter and
+runtime now carry a stable producer owner, live owner and live generation;
+P0 checks the exact token/generation at RiskGrid start/end and canonicalizes a
+rematerialized LOS owner only for that unchanged version. The sampled
+observation comparison, extra factory capture and direct Visibility replay
+were removed. Rolling begin failures retain typed current-attempt provenance
+diagnostics, and production P0 returns before batch dispatch with the detailed
+reason, count one, zero accepted-work counters and the prior RiskGrid/rolling/
+watchdog state unchanged.
+
+TDD evidence is repository-local under `results/icra27/icra017/logs/`:
+
+- `rolling_red.log` records the expected old-behavior failure for missing
+  typed begin diagnostics and nominal missing-LiDAR candidate creation;
+- `rolling_green.log`, `p0_gnss_occupancy.log`, `p0_typed.log` and
+  `test_p0_compat.log` record focused green repair slices;
+- `test_root_terminal.log`: 7/7 selected root suites PASS, including rolling,
+  Predictor, RiskGrid, LocalOccupancy, IntegritySnapshot, conversion and the
+  read-only ICRA-011 profile;
+- `test_plan_env_terminal.log`: frozen occupancy epoch 1/1 PASS;
+- `test_ego_terminal_final.log`: P0/Adapter and retained P1/P2/P3/planning
+  context/P5 8/8 suites PASS; full P0 contains 66/66 active GTests and the
+  Adapter contains 4/4;
+- `test_p4_terminal.log`: P4 A* 4/4 PASS;
+- `test_p1_integrity_terminal.log`: P1 integrity cost 39/39 PASS;
+- `linkage_final.log`: rolling, Predictor, RiskGrid, P0, P2, P3, P5, P4, P1
+  integrity-cost and the planner node all resolve the current repository-local
+  `results/icra27/icra017/build_iap/libiap.so`.
+
+The first retained planner CTest selection correctly reported six `Not Run`
+entries because those retained binaries had not yet been generated in the new
+ICRA-017 build tree; `build_ego_retained.log` generated them and the complete
+retry above passed. No test executable failed in that attempt.
+
+Current `libiap.so` SHA-256 is
+`81a6198c030d791c6db8f001b538488912f37a9f311338254fec0bf8197a955d`.
+The protected PDF remains solely untracked at
+`1f07da5631a6551a2f98c02d46fd45bc87f2f1e3e7c14e95f9a7f4a0bac844f6`;
+the retained ICRA-011 JSON remains
+`778abd22158805c41150b4eeed9c37a3f660237a0bb0599e9a567e3533c7b32c`;
+and the disabled, never-rerun ICRA-014 canonical remains
+`44f47b23137d17f4b0cbc81af6827156865bdecb36089bf53f770960a2fb963d`.
+
+No Phase-4B occupancy delta/reverse-ray work, production policy value,
+activation, calibration, worker/default/workload change, main flow, ROS
+launch, smoke, qualification, bag, RViz, campaign, analyzer, formal benchmark,
+GPU/CUDA work or P1/P2/P3/P4/P5 product development ran. ICRA-016, ICRA-017,
+Phase 4 and Gate-0B remain Supervisor-review pending and are not marked PASS.
