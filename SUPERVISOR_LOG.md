@@ -1,5 +1,71 @@
 # ICRA Supervisor Log
 
+## 2026-08-22 — ICRA-016 review and ICRA-017 narrow repair authorization
+
+### Review identity and independent verification
+
+- Fixed review base: `6686b917c090bbe39bd1edfba30b1693cfe77082`.
+- Reviewed HEAD: `c7841ba78d333d1e11f625fbd4b61c2ebb02ce68`.
+- Reviewed commits: `0a6870d` and `c7841ba`; both carry applicable requirement IDs.
+  `dev/icra` matched `origin/dev/icra` at divergence `0 0`.
+- The aggregate diff contains exactly the eleven ICRA-016 allowlisted files and passes
+  `git diff --check`. No Supervisor-owned file changed. The protected PDF remains the sole untracked
+  file at SHA-256 `1f07da5631a6551a2f98c02d46fd45bc87f2f1e3e7c14e95f9a7f4a0bac844f6`.
+- Supervisor independently rebuilt the current root, plan-env, P0/Adapter/P1/P2/P3/P5, P4 A* and
+  P1 integrity-cost targets. Required active suites pass 287/287 GTests plus 2/2 retained-profile
+  tests; the additional retained P1 integrity-cost suite passes 39/39.
+- Eight directly linked consumers resolve the current repository-local
+  `results/icra27/icra016/build_iap/libiap.so`, SHA-256
+  `43d824ce44c155298d2df31d51ddf0eeed3f94cd50f3241df04ee150f79e478d`; P1 admission/selection have
+  no direct `libiap` dependency.
+- The retained ICRA-011 JSON remains byte-identical at SHA-256
+  `778abd22158805c41150b4eeed9c37a3f660237a0bb0599e9a567e3533c7b32c`; the disabled ICRA-014
+  canonical remains read-only at SHA-256
+  `44f47b23137d17f4b0cbc81af6827156865bdecb36089bf53f770960a2fb963d`. No main flow, ROS launch,
+  smoke, qualification, benchmark, analyzer or GPU preflight ran, and no task process remains.
+
+### Standards axis
+
+- **PASS, zero hard violations; one non-blocking judgement.** Exact allowlist, ownership,
+  requirement IDs, synchronized `CHANGES`/`TRACEABILITY`/`DEV_LOG`, repository-local commands and
+  two-commit handoff conform to `AGENTS.md` and ICRA-016. Defaults remain disabled, and no forbidden
+  product/config/qualification scope changed.
+- The P0 provenance lifecycle is spread across configuration, callbacks, refresh capture/validation,
+  health copying and JSON publication. This is a non-blocking Divergent Change/Shotgun Surgery
+  judgement because P0 runtime owns those production edges; ICRA-017 must reduce the occupancy
+  workaround rather than add another layer. Worst Standards issue: production-runtime locality debt.
+
+### Spec axis
+
+- **FAIL: one high and two medium findings.** The accepted core is substantial: one authoritative
+  source projection, per-slot original GNSS/current provenance, bounded default-disabled TTL,
+  immediate discrete invalidation, successful-commit-only watchdog state, rollback, typed candidate
+  diagnostics and retained scientific/worker behavior are present and green.
+- **High:** `rangeCallback()` advances `latest_gnss_epoch_generation_` only when a nonempty epoch is
+  accepted. No-origin, empty-conversion and all-filtered cases leave `latest_epoch_` and its generation
+  live. P0 can therefore continue using old GNSS evidence after a newer unusable callback, and an
+  in-flight end validator cannot observe that source update.
+- **Medium:** the occupancy end guard accepts unequal rematerialized owners after sampled diagnostic
+  and visibility comparison. This substitutes semantic sampling for the required stable source-owner
+  identity, adds a second frozen capture and replays visibility outside the normal Predictor path.
+- **Medium:** zero/non-finite/missing active provenance rejected before candidate construction leaves
+  `diagnostics()` at defaults, while the production provider discards the detailed begin reason.
+  Required invalid provenance therefore does not reach typed P0 health count/reason.
+- Spec count: three findings. Worst Spec issue: stale accepted GNSS epoch survives a newer invalid
+  callback without a generation change.
+
+### Disposition and next task
+
+- Verdict: `ICRA016_REQUEST_CHANGES`. Phase-4A and Gate-0B remain open. P4 remains
+  `NOT_QUALIFIED`; P5 remains implemented but unqualified.
+- Unique task: `ICRA-017 / GATE_0B` in `NEXT_TASK.md`.
+- ICRA-017 is a narrow review repair: atomically publish every non-null GNSS callback as valid or
+  explicitly absent, replace occupancy sampled replay with a stable producer-owner token plus live
+  generation Seam, and preserve typed pre-candidate provenance failure at P0 with zero accepted-work
+  counters.
+- Phase-4B occupancy delta/reverse-ray, production activation/calibration, CPU scaling, main-flow
+  smoke, qualification, GPU work and P1-P5 changes remain forbidden.
+
 ## 2026-08-21 — ICRA-015 review, phase-3B closure and ICRA-016 phase-4A authorization
 
 ### Review identity and independent verification
