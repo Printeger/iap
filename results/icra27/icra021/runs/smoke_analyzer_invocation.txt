@@ -1,0 +1,1 @@
+python3 scripts/dev_planner/gate0_analyzer.py --gate0-root results/icra27/icra021/runs --output-dir results/icra27/icra021/runs/smoke/analyzer
