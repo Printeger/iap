@@ -1,5 +1,67 @@
 # ICRA Supervisor Log
 
+## 2026-08-22 — ICRA-021 review and ICRA-022 occupancy-clock repair authorization
+
+### Review identity and synchronization
+
+- Fixed review range: `b908291603d29e892413a29dd7d9844983d64c21...5f6b64943d351df17fc478386eb6cf1c54ec1f30`.
+- Reviewed commits: `1f84359` implementation, `8a2a80e` bounded blocked evidence and `5f6b649`
+  handoff; implementation commits bind `IAP-RQ-320` and `IAP-RQ-322`.
+- `dev/icra` matched `origin/dev/icra` at divergence `0 0` after fetch. The protected PDF remained
+  the sole untracked file and all ICRA-011/014/020/PDF hashes remained exact.
+- The aggregate 27-file diff is wholly allowlisted and passes `git diff --check`. It changes no
+  product source/default, Supervisor-owned document, P4/P5 code or external repository.
+
+### Two-axis review
+
+- Spec: overall PASS with one Low diagnostic finding. Smoke correctly requires one successful
+  generation, but its zero-generation failure string remains benchmark-specific
+  `fewer_than_20_successful_generations`. Gate behavior is still fail closed.
+- Standards: zero hard violations and one Medium judgement finding. Availability, evidence-contract
+  and latency failures converge on `P0_PERFORMANCE_GATE_FAIL`; a contract-corrupt benchmark could
+  emit worker/ROI/horizon/period tuning recommendations even if latency itself is valid. This is a
+  Mysterious Name/Divergent Change issue, not an ICRA-021 execution invalidation. ICRA-022 must
+  separate these classes before any later live analysis.
+- Independent Supervisor verification passes runner 16/16, analyzer 22/22, capture 1/1 and the
+  ICRA-020 read-only validator 1/1. Repository-local retained suites pass selected root 8/8,
+  plan-env 1/1, Ego 8/8, P4 A* 1/1 (4 cases) and P1 integrity-cost 1/1 (39 cases). The Ego run
+  includes P0 75/75 and Adapter 7/7; root includes rolling 23/23. Direct linkage records 14 consumers
+  resolving the ICRA-021 `libiap.so` at SHA-256
+  `4170b982d77e0efbdd7c3b8019cea556cf2aa18d1e11ab2e7b63ec1e55580dd5`.
+- An exploratory full-package ament lint invocation reproduced broad pre-existing planner formatting
+  debt outside the ICRA-021 diff. Task-required selected tests remained green; no out-of-scope style
+  rewrite was made.
+
+### Live evidence verdict and root cause
+
+- GPU preflight is valid: RTX 4070 Ti SUPER, driver `580.126.09`, both required `nvidia-smi`
+  commands exit 0, `cuInit(0)=0` and `device_count=1`.
+- The sole authorized `20/15 s` no-bag smoke records requested/effective worker pair `(4,4)`, capture
+  ready before launch, required `iap_rosnode` seen with no runtime death, controlled shutdown
+  separated, runner/capture exit 0 and no surviving task process.
+- 210/210 integrity rows are finite and valid. All 24 P0 health callbacks are unsuccessful:
+  22 `occupancy_stale` after two startup `message_stamp_unavailable` rows. Analyzer exit 1 and
+  `P0_INPUT_AVAILABILITY_FAIL` are correct. No retry, tuning or qualification occurred.
+- Raw rows show occupancy/map stamps near `1787390373 s` but odometry, current integrity, origin and
+  refresh stamps near `1657065613 s`. Code inspection proves the depth-fusion producer writes
+  `node_->now()` through `last_occ_update_time_` into `occupancy_cloud_stamp_s_`, while P0 computes
+  age from message time and correctly rejects negative age. The point-cloud producer instead uses
+  its message header. The current blocker is therefore inconsistent occupancy timestamp authority,
+  not GPU readiness, four-worker throughput or a measured 400 ms performance failure.
+
+### Disposition and next action
+
+- Implementation/evidence verdict: `ICRA021_IMPLEMENTATION_PASS_SMOKE_BLOCKED_OCCUPANCY_CLOCK_DOMAIN`.
+- Gate-0B remains `NOT_QUALIFIED`; P4 remains `NOT_QUALIFIED`; P5 remains implemented but unqualified.
+- Unique next task: `ICRA-022 / GATE_0B`. Bind depth-fused occupancy content to the exact depth-image
+  header stamp, keep receipt/watchdog time separate, preserve fail-closed negative/stale age checks,
+  and repair analyzer failure classification. Unit/build/linkage work only; no GPU preflight, ROS,
+  replacement smoke or qualification.
+- After ICRA-022 passes review, a later task will freeze the formal-generation distribution rule and
+  may authorize exactly one replacement smoke with the same four-worker scientific configuration.
+- Per operator retention policy, after this management changeset is pushed the Supervisor deletes
+  only ICRA-021 generated `build*`/`install*` directories. Tracked smoke evidence and logs remain.
+
 ## 2026-08-22 — ICRA-020 review, four-worker selection and ICRA-021 smoke authorization
 
 ### Review identity and independent verification
