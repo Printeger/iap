@@ -1,5 +1,74 @@
 # ICRA Supervisor Log
 
+## 2026-08-22 — ICRA-020 review, four-worker selection and ICRA-021 smoke authorization
+
+### Review identity and independent verification
+
+- Fixed review base: `60f22b4a3d010301258f8b6a495ac6cd4fb41549`.
+- Reviewed HEAD: `9004f5be2d82a45efe8eba6d99ead750c35a06ec`.
+- Reviewed commits: `ffc09c4`, `8bac479` and `9004f5b`; all carry applicable requirement IDs.
+  `dev/icra` matched `origin/dev/icra` at divergence `0 0` before review.
+- The aggregate diff contains exactly seven ICRA-020 allowlisted files and passes
+  `git diff --check`. No Supervisor-owned file changed. The PDF remains the sole untracked file at
+  SHA-256 `1f07da5631a6551a2f98c02d46fd45bc87f2f1e3e7c14e95f9a7f4a0bac844f6`.
+- The canonical JSON validator passes and the artifact remains exact at SHA-256
+  `2f68e3123426b5a1117e86bb5abc7c69117a070bcf583ec759974fddeb71a0bd`. Its bound test binary and
+  `libiap.so` remain exact at SHA-256 `17e937fd57f502ed863dc765f1d990bb56c4efb090580050b73a449e2a8e8881`
+  and `5adf0c0df2bc695e6385fd753aa3fd81674f4ec9713f99635e1917a760267293`.
+- Supervisor independently rebuilt current repository-local targets. P0 passes 75/75, Adapter 7/7,
+  rolling 23/23, selected root including the ICRA-020 validator 8/8, plan-env 1/1, retained Ego 8/8,
+  P4 A* 4/4 and P1 integrity-cost 39/39. Direct consumers resolve the ICRA-020 library.
+- ICRA-011 and the disabled, never-rerun ICRA-014 canonical remain exact at SHA-256
+  `778abd22158805c41150b4eeed9c37a3f660237a0bb0599e9a567e3533c7b32c` and
+  `44f47b23137d17f4b0cbc81af6827156865bdecb36089bf53f770960a2fb963d`. No main flow, ROS launch,
+  GPU preflight, smoke, qualification, bag, RViz or campaign ran during Supervisor review, and no
+  task process remains.
+
+### Standards axis
+
+- **PASS: zero hard violations and two Low judgement calls.** The frozen C++ test uses repeated
+  scenario branches that could later become a `ProfileExpectedContract` table. The C++ producer and
+  Python validator intentionally duplicate the scenario oracle; this is justified by the task's
+  independent fail-closed requirement and should not be deduplicated into a single fallible source.
+- Scope, ownership, requirement IDs, synchronized developer documentation, exact allowlist and
+  implementation/evidence/handoff commits comply with repository protocol. Worst Standards issue:
+  Low; neither observation requests repair.
+
+### Spec axis
+
+- **PASS, zero findings.** The disabled profile exercises the real synchronous production P0 seam
+  at the exact three-worker by four-scenario matrix, after two warmups and for ten stored samples per
+  cell. All 120 samples carry finite raw wall/refresh/provider timings and exact logical/provider,
+  recompute/reuse, retained/entered/evicted, source invocation/fusion, invalidation and provenance
+  contracts.
+- Every measured snapshot is scientifically equal to a fresh rebuild and hashes are stable across
+  workers/samples. R-7 summaries and speedups derive exactly from raw samples. Artifact schema,
+  implementation/binary/library hashes and non-promotion labels fail closed. No production,
+  reverse-ray, GPU or Gate scope entered the changeset. Worst Spec issue: none.
+
+### Cost decision and next task
+
+- Worker-1 wall p50/p95 for cold, stationary-empty, `+1 x` empty and stationary-nonempty are
+  `425.966/458.373`, `161.543/163.775`, `164.577/167.428` and `439.169/440.764 ms`.
+- Worker-4 wall p50/p95 for the same rows are `133.604/136.310`, `71.502/72.148`,
+  `74.901/81.468` and `139.004/139.771 ms`. Output and exact work remain identical, while cold/full-
+  invalidation margins are roughly 260 ms below the formal threshold in this synthetic diagnostic.
+- Verdict: `ICRA020_PASS_STAGE5_WORKER4_SELECTED`. Four CPU workers are selected before live testing
+  for the new post-refactor smoke/qualification pair. The ICRA-020 artifact stays immutable and
+  diagnostic-only; this Supervisor decision does not qualify P0 or Gate-0B.
+- Reverse-ray/partial dirty-ray complexity is not justified, and P0 GPU/CUDA work is not authorized.
+  The IAP main-flow GPU preflight remains mandatory and independent of the CPU P0 worker decision.
+- Unique task: `ICRA-021 / GATE_0B`. It migrates only the existing runner/analyzer/test evidence seam
+  to workers `(4,4)` and the current rolling counters, performs focused fail-closed verification,
+  then runs exactly one 20-second no-bag post-refactor smoke after GPU preflight PASS.
+- Per the operator's new retention policy, Supervisor deletes the reviewed ICRA-020 `build*` and
+  `install*` directories after this management changeset is pushed. ICRA-021 must migrate the
+  ICRA-020 validator so exact recorded implementation/binary/library hashes remain mandatory while
+  absence of those approved ephemeral paths no longer invalidates the retained canonical JSON;
+  existing files with a wrong hash must still fail.
+- ICRA-021 cannot retry, tune, run the 60-second qualification, mark Gate-0B PASS or begin P4/P5.
+  A reviewed smoke PASS is required before a separate ICRA-022 qualification task.
+
 ## 2026-08-22 — ICRA-019 review, Phase-4 delta closure and ICRA-020 Stage-5 diagnostic authorization
 
 ### Review identity and independent verification
