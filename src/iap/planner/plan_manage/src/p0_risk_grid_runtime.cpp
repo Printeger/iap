@@ -1198,8 +1198,7 @@ void P0RiskGridRuntime::refreshTimerCallback() {
         config_.predictor_sigma_grow_m_sqrt_s;
     const iap::PredictorSpatialSourceUsage source_projection =
         iap::predictorSpatialSourceUsage(predictor_params);
-    validate_gnss_spatial_source =
-        source_projection.gnss && snapshot.has_epoch;
+    validate_gnss_spatial_source = source_projection.gnss;
     validate_lidar_spatial_source = source_projection.lidar;
     validate_lidar_legacy_source = source_projection.legacy_lidar;
     if (std::isfinite(config_.predictor_lidar_fim_radius_m) &&
@@ -1341,9 +1340,8 @@ void P0RiskGridRuntime::refreshTimerCallback() {
             return iap::RiskGridSourceValidation::PRIOR_GENERATION_CHANGED;
           }
           if (validate_gnss_spatial_source) {
-            if (captured_predictor_sources.gnss_epoch_generation == 0u ||
-                live_gnss_epoch_generation !=
-                    captured_predictor_sources.gnss_epoch_generation) {
+            if (live_gnss_epoch_generation !=
+                captured_predictor_sources.gnss_epoch_generation) {
               return iap::RiskGridSourceValidation::
                   PREDICTOR_SPATIAL_SOURCE_CHANGED;
             }

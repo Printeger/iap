@@ -2017,3 +2017,92 @@ SHA-256
 No task process remains, no forbidden product/configuration work was changed,
 and no gate is self-promoted. Return ICRA-017 to SUPERVISOR for review; only
 the Supervisor may issue PASS or the next task.
+## 2026-08-22T05:54:19Z — ICRA-018 START
+
+Synchronized `dev/icra` at
+`07999a88fa64568f17203b60a0a337d58267f770`; local and
+`origin/dev/icra` are equal (`0 0`), so no pull was permitted. The protected
+PDF remains solely untracked and exact at SHA-256
+`1f07da5631a6551a2f98c02d46fd45bc87f2f1e3e7c14e95f9a7f4a0bac844f6`.
+The read-only ICRA-011 JSON and disabled, never-rerun ICRA-014 canonical remain
+exact at SHA-256
+`778abd22158805c41150b4eeed9c37a3f660237a0bb0599e9a567e3533c7b32c` and
+`44f47b23137d17f4b0cbc81af6827156865bdecb36089bf53f770960a2fb963d`.
+
+The exact ICRA-018 allowlist is:
+
+- `src/iap/planner/plan_manage/src/p0_risk_grid_runtime.cpp`;
+- `src/iap/planner/plan_manage/test/test_p0_risk_grid_runtime.cpp`;
+- `DEV_LOG.md`;
+- `docs/CHANGES.md`;
+- `docs/TRACEABILITY.md`.
+
+This task closes only the ICRA-017 review finding that the production end
+validator enabled GNSS generation validation only when the captured snapshot
+already contained an epoch. Whenever the authoritative active-source
+projection consumes GNSS, the existing captured/live generation guard must
+also cover explicit-absent and stable never-seen Optional/Auto state. Any
+concurrent non-null callback must abort the candidate; inactive GNSS modes
+remain independent.
+
+Explicit stop line: no Phase-4B occupancy delta/reverse-ray work, production
+TTL/watchdog value, tuning, calibration/activation, CPU scaling, worker/
+default/workload/lattice/ROI/resolution/horizon change, Predictor science,
+P1/P2/P3/P4/P5 product work, main flow, ROS launch, smoke, qualification,
+bag, RViz, campaign, analyzer, formal benchmark or GPU/CUDA work is
+authorized. All generated output must remain below
+`results/icra27/icra018/`.
+
+## 2026-08-22T06:16:50Z — ICRA-018 IMPLEMENTATION EVIDENCE / REVIEW READY
+
+Implemented the sole authorized review repair at the existing production P0
+capture/validator seam. `validate_gnss_spatial_source` now follows the
+authoritative `predictorSpatialSourceUsage().gnss` projection regardless of
+whether the captured snapshot contains an epoch. The existing end validator
+compares captured/live generation exactly: stable never-seen `0 == 0` remains
+usable, while every non-null callback-created mismatch aborts before RiskGrid
+publication. No callback, source version, timer, lock, cache, public Interface
+or Predictor science changed.
+
+TDD and retained evidence is repository-local under
+`results/icra27/icra018/logs/`:
+
+- `optional_absent_valid_red.log` is the expected old-behavior RED: an
+  Optional explicit-absent candidate incorrectly published generation 2 and
+  reported 54 spatial reuses after the callback changed the GNSS generation;
+- `optional_absent_valid_green.log`, `explicit_absent_races_green.log`,
+  `active_gnss_races_green.log` and `icra018_focused_green.log` record the
+  repaired slices; the final focused selection passes 7/7 across Optional,
+  Auto, never-seen, Required, LidarOnly and GNSS-disabled behavior. Both
+  explicit-absent races restore their captured test version after abort,
+  prove 27 rolling slots/54 horizon fusions remain reusable at the original
+  time, then prove the unchanged successful-full-refresh watchdog epoch still
+  forces a full rebuild at its five-second boundary;
+- `test_p0_full_green.log`: complete P0 runtime 70/70 PASS;
+- `test_root_terminal.log`: selected rolling/Predictor/RiskGrid/occupancy/
+  snapshot/conversion and read-only ICRA-011 profile 7/7 PASS;
+- `test_plan_env_terminal.log`: frozen occupancy epoch 1/1 PASS;
+- `test_ego_terminal.log`: P0/Adapter and retained P1/P2/P3/planning-context/
+  P5 8/8 PASS;
+- `test_p4_terminal.log`: P4 A* 4/4 PASS;
+- `test_p1_integrity_terminal.log`: P1 integrity cost 39/39 PASS;
+- `linkage_final.log`: twelve directly linked root/P0/Adapter/P2/P3/planning-
+  context/P4/P5/P1/node consumers resolve the current repository-local
+  `results/icra27/icra018/build_iap/libiap.so`; P1 admission/selection have no
+  direct `libiap` dependency and pass in the retained Ego selection.
+
+Current `libiap.so` SHA-256 is
+`d51e5feb89e5daf69f0fa17c8a02d4dc40c28a1e628e96212e46554531006dd0`.
+The protected PDF remains solely untracked at SHA-256
+`1f07da5631a6551a2f98c02d46fd45bc87f2f1e3e7c14e95f9a7f4a0bac844f6`;
+the retained ICRA-011 JSON remains
+`778abd22158805c41150b4eeed9c37a3f660237a0bb0599e9a567e3533c7b32c`;
+and the disabled, never-rerun ICRA-014 canonical remains
+`44f47b23137d17f4b0cbc81af6827156865bdecb36089bf53f770960a2fb963d`.
+
+`git diff --check` is clean and no task process remains. No Phase-4B,
+production policy value, tuning, calibration/activation, CPU scaling,
+worker/default/workload or planner behavior change, main flow, ROS launch,
+smoke, qualification, bag, RViz, campaign, analyzer, formal benchmark,
+GPU/CUDA work or external write ran. ICRA-017/018, Phase 4 and Gate-0B remain
+Supervisor-review pending and are not marked PASS.

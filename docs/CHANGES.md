@@ -3,6 +3,75 @@
 > 规则：任何代码改动必须在这里记录，并包含 IAP-RQ-XXX。
 
 ## Unreleased
+- fix(icra-018-absent-gnss-generation-guard): IAP-RQ-312 / IAP-RQ-314 / IAP-RQ-320 / IAP-RQ-321 / IAP-RQ-322 — use the existing authoritative Predictor spatial-source projection to validate the exact captured/live GNSS generation at both RiskGrid source-validation points even when the captured Optional/Auto snapshot has no epoch. Stable never-seen `0 == 0` remains valid; every concurrent non-null callback changes the generation and aborts an active-GNSS candidate. Required missing-epoch behavior, LidarOnly and GNSS-disabled isolation, callback publication, Predictor science, rolling identity and public Interfaces remain unchanged.
+  - Production regressions cover Optional explicit-absent to valid callback, Auto explicit-absent to invalid callback, stable never-seen Optional/Auto and first callback, retained rolling slots and successful-full-refresh watchdog epoch after rollback, Required typed failure/valid-to-invalid races, and inactive LidarOnly/GNSS-disabled callbacks. Complete retained root, plan-env, P0/Adapter, P1/P2/P3/planning-context/P4/P5 and read-only ICRA-011 suites pass. No Phase-4B, policy activation/calibration, main flow, smoke, qualification, analyzer, benchmark or GPU work ran.
+
+Repository-local ICRA-018 reproduction from the repository root:
+
+```bash
+repo_root="$(pwd)"
+cmake -S "$repo_root" -B "$repo_root/results/icra27/icra018/build_iap" \
+  -DCMAKE_BUILD_TYPE=RelWithDebInfo \
+  -DCMAKE_INSTALL_PREFIX="$repo_root/results/icra27/icra018/install"
+cmake --build "$repo_root/results/icra27/icra018/build_iap" -j2
+cmake --install "$repo_root/results/icra27/icra018/build_iap"
+
+cmake -S "$repo_root/src/iap/planner/plan_env" \
+  -B "$repo_root/results/icra27/icra018/build_plan_env" \
+  -DCMAKE_INSTALL_PREFIX="$repo_root/results/icra27/icra018/install_plan_env"
+cmake --build "$repo_root/results/icra27/icra018/build_plan_env" -j2
+cmake --install "$repo_root/results/icra27/icra018/build_plan_env"
+
+cmake -S "$repo_root/src/iap/planner/path_searching" \
+  -B "$repo_root/results/icra27/icra018/build_path_searching" \
+  -DCMAKE_INSTALL_PREFIX="$repo_root/results/icra27/icra018/install_path_searching" \
+  -Diap_DIR="$repo_root/results/icra27/icra018/install/share/iap" \
+  -Dplan_env_DIR="$repo_root/results/icra27/icra018/install_plan_env/share/plan_env/cmake"
+cmake --build "$repo_root/results/icra27/icra018/build_path_searching" \
+  --target path_searching test_p4_risk_astar -j2
+cmake --install "$repo_root/results/icra27/icra018/build_path_searching"
+
+cmake -S "$repo_root/src/iap/planner/bspline_opt" \
+  -B "$repo_root/results/icra27/icra018/build_bspline_opt" \
+  -Diap_DIR="$repo_root/results/icra27/icra018/install/share/iap" \
+  -Dplan_env_DIR="$repo_root/results/icra27/icra018/install_plan_env/share/plan_env/cmake" \
+  -Dpath_searching_DIR="$repo_root/results/icra27/icra018/install_path_searching/share/path_searching/cmake" \
+  -Dtraj_utils_DIR="/home/dev/ws_iap/install/traj_utils/share/traj_utils/cmake"
+cmake --build "$repo_root/results/icra27/icra018/build_bspline_opt" \
+  --target bspline_opt test_p1_integrity_cost -j2
+
+cmake -S "$repo_root/src/iap/planner/plan_manage" \
+  -B "$repo_root/results/icra27/icra018/build_ego" \
+  -Diap_DIR="$repo_root/results/icra27/icra018/install/share/iap" \
+  -Dplan_env_DIR="$repo_root/results/icra27/icra018/install_plan_env/share/plan_env/cmake" \
+  -Dpath_searching_DIR="/home/dev/ws_iap/install/path_searching/share/path_searching/cmake" \
+  -Dbspline_opt_DIR="/home/dev/ws_iap/install/bspline_opt/share/bspline_opt/cmake" \
+  -Dtraj_utils_DIR="/home/dev/ws_iap/install/traj_utils/share/traj_utils/cmake"
+cmake --build "$repo_root/results/icra27/icra018/build_ego" \
+  --target ego_planner_node test_p0_risk_grid_runtime \
+  test_p0_occupancy_epoch_adapter test_p1_replan_admission \
+  test_p1_candidate_selection test_p2_candidate_ranking \
+  test_p3_reference_bias test_planning_risk_context \
+  test_p5_runtime_integrity_gate -j2
+
+export LD_LIBRARY_PATH="$repo_root/results/icra27/icra018/build_iap:$repo_root/results/icra27/icra018/install/lib:$repo_root/results/icra27/icra018/build_bspline_opt:$repo_root/results/icra27/icra018/build_path_searching:$repo_root/results/icra27/icra018/install_path_searching/lib:$repo_root/results/icra27/icra018/build_plan_env:$repo_root/results/icra27/icra018/install_plan_env/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+export ROS_HOME="$repo_root/results/icra27/icra018/ros_home"
+export ROS_LOG_DIR="$repo_root/results/icra27/icra018/ros_log"
+export TMPDIR="$repo_root/results/icra27/icra018/tmp"
+mkdir -p "$ROS_HOME" "$ROS_LOG_DIR" "$TMPDIR"
+
+"$repo_root/results/icra27/icra018/build_ego/test_p0_risk_grid_runtime" \
+  --gtest_filter='P0RiskGridRuntimeStampTest.OptionalExplicitAbsentToValidCallbackDuringProviderWorkRollsBack:P0RiskGridRuntimeStampTest.AutoExplicitAbsentToAbsentCallbackRollsBackRollingState:P0RiskGridRuntimeStampTest.NeverSeenOptionalAndAutoAbortOnFirstCallbackDuringProviderWork:P0RiskGridRuntimeStampTest.InactiveGnssCallbacksDoNotAbortLidarOnlyOrDisabledRefresh:P0RiskGridRuntimeStampTest.RequiredGnssAndZeroCurrentProvenancePublishTypedAttemptFailure:P0RiskGridRuntimeStampTest.InvalidGnssCallbackDuringProviderWorkAbortsAndLaterEpochRecovers:P0RiskGridRuntimeStampTest.GnssEpochChangeDuringProductionRefreshKeepsPreviousGeneration'
+ctest --test-dir "$repo_root/results/icra27/icra018/build_iap" \
+  --output-on-failure -R '^(test_integrity_snapshot|test_local_occupancy|test_predictor_module|test_rolling_spatial_advisory_window|test_predictor_risk_conversion|test_risk_grid_map|test_icra011_spatial_dedup_profile)$'
+ctest --test-dir "$repo_root/results/icra27/icra018/build_plan_env" \
+  --output-on-failure -R '^test_grid_map_occupancy_epoch$'
+ctest --test-dir "$repo_root/results/icra27/icra018/build_ego" \
+  --output-on-failure -R '^(test_p0_risk_grid_runtime|test_p0_occupancy_epoch_adapter|test_p1_replan_admission|test_p1_candidate_selection|test_p2_candidate_ranking|test_p3_reference_bias|test_planning_risk_context|test_p5_runtime_integrity_gate)$'
+"$repo_root/results/icra27/icra018/build_path_searching/test_p4_risk_astar"
+"$repo_root/results/icra27/icra018/build_bspline_opt/test_p1_integrity_cost"
+```
+
 - fix(icra-017-phase4a-provenance-review): IAP-RQ-312 / IAP-RQ-314 / IAP-RQ-320 / IAP-RQ-321 / IAP-RQ-322 — atomically publish every non-null GNSS measurement callback as exactly one nonzero generation containing either a coherent nonempty epoch or an explicit absent state, so invalid callbacks clear stale epochs and invalidate in-flight production work. Replace the ICRA-016 sampled occupancy recapture/visibility replay with a stable type-erased producer-owner token, live-owner probe and exact generation checks at RiskGrid start/end; unchanged producer versions canonicalize rematerialized immutable LOS owners without an extra factory capture. Rolling pre-candidate active-source failures now retain typed attempt diagnostics, and production P0 publishes the detailed failure before batch dispatch with all accepted-work counters zero while preserving the prior RiskGrid, rolling slots and watchdog epoch.
   - Deterministic regressions cover no-origin/empty/filtered/missing-ephemeris callbacks, null-callback no-op, callback races and recovery, Required/Optional/Auto/LidarOnly behavior, one frozen capture per refresh, stable-token reuse/replacement/expiry, exact live-probe call counts, and missing/zero/nonfinite current/GNSS/LiDAR provenance. Default-disabled TTL/watchdog behavior remains unchanged. Phase-4B, policy activation/calibration, main flow, smoke, qualification, analyzer, benchmark and GPU work remain out of scope.
 

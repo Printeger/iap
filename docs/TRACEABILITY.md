@@ -1,5 +1,19 @@
 # Traceability Matrix (IAP)
 
+## 2026-08-22 ICRA-018 absent-GNSS generation race repair
+
+| Req ID | Requirement/evidence seam | Implementation and focused evidence | Status |
+|---|---|---|---|
+| IAP-RQ-312 / IAP-RQ-314 / IAP-RQ-320 / IAP-RQ-322 | Active GNSS absence is a versioned transaction state, including explicit-absent nonzero and never-seen zero generations | `p0_risk_grid_runtime.cpp` derives validation solely from `predictorSpatialSourceUsage().gnss` and compares captured/live generation exactly at both existing RiskGrid source checks without requiring `snapshot.has_epoch`; stable `0 == 0` proceeds, while every callback-created mismatch returns `PREDICTOR_SPATIAL_SOURCE_CHANGED` | **IMPLEMENTED / SUPERVISOR REVIEW PENDING: no new version, callback, lock, timer, cache or Interface** |
+| IAP-RQ-320 / IAP-RQ-321 / IAP-RQ-322 | Optional/Auto callback races must roll back immutable RiskGrid and transactional rolling/watchdog state | production P0 regressions cover Optional explicit-absent to valid callback, Auto explicit-absent to invalid callback, and zero-to-nonzero first callbacks; exact ordered snapshot comparison, zero committed rolling diagnostics, same-version retries proving 27 retained slots/54 horizon fusions, and boundary retries proving the aborted candidate did not advance the successful-full-refresh watchdog epoch | **VERIFIED / SUPERVISOR REVIEW PENDING: callback work cannot publish an obsolete absent candidate** |
+| IAP-RQ-312 / IAP-RQ-314 / IAP-RQ-320 | Inactive GNSS configurations must not acquire a false transaction dependency | LidarOnly/Auto valid-callback and Fusion/GNSS-disabled invalid-callback regressions publish normally with generation changes, 27 retained positions, 54 spatial reuses and 54 horizon fusions; Required missing typed failure and valid-to-invalid races remain green | **VERIFIED / SUPERVISOR REVIEW PENDING: authoritative active-source selection preserved** |
+| IAP-RQ-320 / IAP-RQ-322 | The review repair must preserve retained Phase-4A science and downstream behavior | repository-local focused 7/7, P0 70/70, root 7/7, plan-env 1/1, Ego 8/8, P4 4/4 and P1 integrity 39/39; directly linked consumers resolve the current ICRA-018 library; retained ICRA-011 profile remains read-only | **VERIFIED / SUPERVISOR REVIEW PENDING: no Phase-4B, calibration, activation or qualification** |
+
+ICRA-018 closes only the absent-GNSS generation race. It does not accept
+ICRA-017/018, qualify Phase 4 or Gate-0B, implement Phase-4B, choose production
+policy values, or authorize main flow, ROS launch, smoke, qualification,
+analyzer, benchmark, bag/RViz/campaign or GPU work.
+
 ## 2026-08-22 ICRA-017 Phase-4A provenance review repair
 
 | Req ID | Requirement/evidence seam | Implementation and focused evidence | Status |

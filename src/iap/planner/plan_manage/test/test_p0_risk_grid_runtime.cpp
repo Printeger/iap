@@ -836,6 +836,95 @@ class P0RiskGridRuntimeStampTest : public ::testing::Test {
     return msg;
   }
 
+  struct ExplicitAbsentGnssRaceScenario {
+    std::string node_name;
+    iap::PredictorSourceMode mode = iap::PredictorSourceMode::GnssOnly;
+    iap::PredictorGnssEpochPolicy policy =
+        iap::PredictorGnssEpochPolicy::Optional;
+    bool needs_lidar = false;
+    bool callback_produces_valid_epoch = false;
+  };
+
+  static void expectExplicitAbsentGnssRaceRollback(
+      const ExplicitAbsentGnssRaceScenario& scenario) {
+    SCOPED_TRACE(scenario.node_name);
+    ensure_rclcpp();
+    auto node = std::make_shared<rclcpp::Node>(
+        scenario.node_name,
+        rclcpp::NodeOptions().allow_undeclared_parameters(false));
+    auto config = enabledConfig();
+    config.predictor_source_mode = scenario.mode;
+    config.predictor_gnss_epoch_policy = scenario.policy;
+    config.predictor_full_refresh_watchdog_s = 5.0;
+    P0RiskGridRuntime runtime(node, config);
+    seedValidInputs(&runtime, 100.0, 100.0);
+    if (scenario.needs_lidar) {
+      seedEmptyLidarOwners(&runtime);
+    }
+    sendRange(&runtime, std::make_shared<gnss_comm::msg::GnssMeasMsg>());
+    ASSERT_FALSE(hasLatestGnssEpoch(runtime));
+    const uint64_t absent_generation = gnssEpochGeneration(runtime);
+    ASSERT_NE(absent_generation, 0u);
+
+    std::atomic<bool> publish_callback{false};
+    installOccupancyEpochWithFirstQueryHook(&runtime, [&]() {
+      if (!publish_callback.exchange(false)) {
+        return;
+      }
+      if (scenario.callback_produces_valid_epoch) {
+        sendRange(&runtime, makeValidGloRange(&runtime, 2200u, 100.0));
+      } else {
+        sendRange(&runtime,
+                  std::make_shared<gnss_comm::msg::GnssMeasMsg>());
+      }
+    });
+    ASSERT_TRUE(refreshOnce(&runtime));
+    const auto accepted = runtime.acquireSnapshot();
+    ASSERT_NE(accepted, nullptr);
+
+    seedValidInputs(&runtime, 105.0, 105.0);
+    publish_callback.store(true);
+    EXPECT_FALSE(refreshOnce(&runtime));
+    EXPECT_EQ(runtime.health().reason, "predictor_spatial_source_changed");
+    EXPECT_EQ(gnssEpochGeneration(runtime), absent_generation + 1u);
+    EXPECT_EQ(hasLatestGnssEpoch(runtime),
+              scenario.callback_produces_valid_epoch);
+    expectSameActiveGeneration(accepted, runtime.acquireSnapshot());
+    const auto aborted = predictorDiagnosticCounts(runtime);
+    EXPECT_EQ(aborted.retained_positions, 0u);
+    EXPECT_EQ(aborted.exact_retained_positions, 0u);
+    EXPECT_EQ(aborted.ttl_retained_positions, 0u);
+    EXPECT_EQ(aborted.entered_positions, 0u);
+    EXPECT_EQ(aborted.evicted_positions, 0u);
+    EXPECT_EQ(aborted.watchdog_forced_full_rebuilds, 0u);
+
+    // Reconstruct the captured explicit-absent source version only to
+    // observe the committed rolling slots and watchdog epoch after abort.
+    if (scenario.callback_produces_valid_epoch) {
+      sendRange(&runtime,
+                std::make_shared<gnss_comm::msg::GnssMeasMsg>());
+    }
+    setGnssEpochGeneration(&runtime, absent_generation);
+    ASSERT_FALSE(hasLatestGnssEpoch(runtime));
+    seedValidInputs(&runtime, 100.0, 100.0);
+    ASSERT_TRUE(refreshOnce(&runtime));
+    const auto rolling_retry = predictorDiagnosticCounts(runtime);
+    EXPECT_EQ(rolling_retry.spatial_recompute, 0u);
+    EXPECT_EQ(rolling_retry.spatial_reuse, 54u);
+    EXPECT_EQ(rolling_retry.retained_positions, 27u);
+    EXPECT_EQ(rolling_retry.exact_retained_positions, 27u);
+    EXPECT_EQ(rolling_retry.horizon_fusions, 54u);
+    EXPECT_EQ(rolling_retry.watchdog_forced_full_rebuilds, 0u);
+
+    seedValidInputs(&runtime, 105.0, 105.0);
+    ASSERT_TRUE(refreshOnce(&runtime));
+    const auto watchdog_retry = predictorDiagnosticCounts(runtime);
+    EXPECT_EQ(watchdog_retry.spatial_recompute, 27u);
+    EXPECT_EQ(watchdog_retry.retained_positions, 0u);
+    EXPECT_EQ(watchdog_retry.watchdog_forced_full_rebuilds, 1u);
+    EXPECT_EQ(watchdog_retry.invalidation_reason, "watchdog_forced");
+  }
+
   static std::shared_ptr<const std::vector<Eigen::Vector3d>> lidarMapPoints(
       const P0RiskGridRuntime& runtime) {
     std::lock_guard<std::mutex> lock(runtime.lidar_predictor_input_mutex_);
@@ -1824,6 +1913,134 @@ TEST_F(P0RiskGridRuntimeStampTest,
   EXPECT_TRUE(refreshOnce(&runtime));
   EXPECT_GT(runtime.acquireSnapshot()->generation_id(),
             accepted->generation_id());
+}
+
+TEST_F(P0RiskGridRuntimeStampTest,
+       OptionalExplicitAbsentToValidCallbackDuringProviderWorkRollsBack) {
+  expectExplicitAbsentGnssRaceRollback(
+      {"p0_optional_absent_to_valid_gnss_race_test",
+       iap::PredictorSourceMode::GnssOnly,
+       iap::PredictorGnssEpochPolicy::Optional,
+       false, true});
+}
+
+TEST_F(P0RiskGridRuntimeStampTest,
+       AutoExplicitAbsentToAbsentCallbackRollsBackRollingState) {
+  expectExplicitAbsentGnssRaceRollback(
+      {"p0_auto_absent_to_absent_gnss_race_test",
+       iap::PredictorSourceMode::Fusion,
+       iap::PredictorGnssEpochPolicy::Auto,
+       true, false});
+}
+
+TEST_F(P0RiskGridRuntimeStampTest,
+       NeverSeenOptionalAndAutoAbortOnFirstCallbackDuringProviderWork) {
+  ensure_rclcpp();
+  const std::array<iap::PredictorGnssEpochPolicy, 2> policies = {
+      iap::PredictorGnssEpochPolicy::Optional,
+      iap::PredictorGnssEpochPolicy::Auto};
+  for (std::size_t index = 0; index < policies.size(); ++index) {
+    const bool auto_policy =
+        policies[index] == iap::PredictorGnssEpochPolicy::Auto;
+    auto node = std::make_shared<rclcpp::Node>(
+        "p0_never_seen_gnss_race_test_" + std::to_string(index),
+        rclcpp::NodeOptions().allow_undeclared_parameters(false));
+    auto config = enabledConfig();
+    config.predictor_source_mode =
+        auto_policy ? iap::PredictorSourceMode::Fusion
+                    : iap::PredictorSourceMode::GnssOnly;
+    config.predictor_gnss_epoch_policy = policies[index];
+    P0RiskGridRuntime runtime(node, config);
+    seedValidInputs(&runtime, 100.0, 100.0);
+    if (auto_policy) {
+      seedEmptyLidarOwners(&runtime);
+    }
+    ASSERT_EQ(gnssEpochGeneration(runtime), 0u);
+    ASSERT_FALSE(hasLatestGnssEpoch(runtime));
+
+    std::atomic<bool> publish_first_absent{false};
+    installOccupancyEpochWithFirstQueryHook(&runtime, [&]() {
+      if (publish_first_absent.exchange(false)) {
+        sendRange(&runtime,
+                  std::make_shared<gnss_comm::msg::GnssMeasMsg>());
+      }
+    });
+    ASSERT_TRUE(refreshOnce(&runtime)) << index;
+    ASSERT_EQ(gnssEpochGeneration(runtime), 0u) << index;
+    const auto accepted = runtime.acquireSnapshot();
+    ASSERT_NE(accepted, nullptr);
+
+    publish_first_absent.store(true);
+    EXPECT_FALSE(refreshOnce(&runtime)) << index;
+    EXPECT_EQ(runtime.health().reason, "predictor_spatial_source_changed")
+        << index;
+    EXPECT_EQ(gnssEpochGeneration(runtime), 1u) << index;
+    EXPECT_FALSE(hasLatestGnssEpoch(runtime)) << index;
+    expectSameActiveGeneration(accepted, runtime.acquireSnapshot());
+    const auto aborted = predictorDiagnosticCounts(runtime);
+    EXPECT_EQ(aborted.retained_positions, 0u) << index;
+    EXPECT_EQ(aborted.exact_retained_positions, 0u) << index;
+    EXPECT_EQ(aborted.ttl_retained_positions, 0u) << index;
+    EXPECT_EQ(aborted.watchdog_forced_full_rebuilds, 0u) << index;
+  }
+}
+
+TEST_F(P0RiskGridRuntimeStampTest,
+       InactiveGnssCallbacksDoNotAbortLidarOnlyOrDisabledRefresh) {
+  ensure_rclcpp();
+  struct Scenario {
+    iap::PredictorSourceMode mode;
+    iap::PredictorGnssEpochPolicy policy;
+    bool publish_valid;
+  };
+  const std::array<Scenario, 2> scenarios = {{
+      {iap::PredictorSourceMode::LidarOnly,
+       iap::PredictorGnssEpochPolicy::Auto, true},
+      {iap::PredictorSourceMode::Fusion,
+       iap::PredictorGnssEpochPolicy::Disabled, false},
+  }};
+  for (std::size_t index = 0; index < scenarios.size(); ++index) {
+    auto node = std::make_shared<rclcpp::Node>(
+        "p0_inactive_gnss_race_test_" + std::to_string(index),
+        rclcpp::NodeOptions().allow_undeclared_parameters(false));
+    auto config = enabledConfig();
+    config.predictor_source_mode = scenarios[index].mode;
+    config.predictor_gnss_epoch_policy = scenarios[index].policy;
+    P0RiskGridRuntime runtime(node, config);
+    seedValidInputs(&runtime, 100.0, 100.0);
+    seedEmptyLidarOwners(&runtime);
+
+    std::atomic<bool> publish_callback{false};
+    installOccupancyEpochWithFirstQueryHook(&runtime, [&]() {
+      if (!publish_callback.exchange(false)) {
+        return;
+      }
+      if (scenarios[index].publish_valid) {
+        sendRange(&runtime, makeValidGloRange(&runtime, 2200u, 100.0));
+      } else {
+        sendRange(&runtime,
+                  std::make_shared<gnss_comm::msg::GnssMeasMsg>());
+      }
+    });
+    ASSERT_TRUE(refreshOnce(&runtime)) << index;
+    const auto accepted = runtime.acquireSnapshot();
+    ASSERT_NE(accepted, nullptr);
+    ASSERT_EQ(gnssEpochGeneration(runtime), 0u);
+
+    publish_callback.store(true);
+    EXPECT_TRUE(refreshOnce(&runtime)) << index;
+    EXPECT_EQ(gnssEpochGeneration(runtime), 1u) << index;
+    EXPECT_NE(runtime.health().reason, "predictor_spatial_source_changed")
+        << index;
+    EXPECT_GT(runtime.acquireSnapshot()->generation_id(),
+              accepted->generation_id())
+        << index;
+    const auto counts = predictorDiagnosticCounts(runtime);
+    EXPECT_EQ(counts.spatial_recompute, 0u) << index;
+    EXPECT_EQ(counts.spatial_reuse, 54u) << index;
+    EXPECT_EQ(counts.retained_positions, 27u) << index;
+    EXPECT_EQ(counts.horizon_fusions, 54u) << index;
+  }
 }
 
 TEST_F(P0RiskGridRuntimeStampTest,
