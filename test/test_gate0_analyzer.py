@@ -1,5 +1,7 @@
 import importlib.util
+import json
 import math
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -555,6 +557,41 @@ class Gate0AnalyzerTest(unittest.TestCase):
         self.assertEqual(summary["gate"], "P0_INPUT_AVAILABILITY_FAIL")
         self.assertEqual(MODULE.analyzer_exit_code({"gate0b": summary}), 1)
 
+    def test_evidence_contract_failure_survives_missing_integrity_and_manifest(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory) / "runs"
+            smoke = root / "smoke"
+            output = smoke / "analyzer"
+            smoke.mkdir(parents=True)
+            manifest = {
+                "run_id": "p0-smoke",
+                "scenario": "gnss_open_sky",
+                "effective_config": {},
+                "gpu_preflight": {"gpu_ready": True},
+                "capture_readiness": {"ready": True},
+            }
+            (smoke / "gate0_run_manifest.json").write_text(
+                json.dumps(manifest) + "\n"
+            )
+            malformed = valid_p0_message()
+            del malformed["refresh_callback_end_steady_s"]
+            (smoke / "risk_grid_health.jsonl").write_text(
+                json.dumps(malformed) + "\n"
+            )
+            (smoke / "integrity_report.jsonl").write_text("")
+
+            result = MODULE.analyze_directory(root, output)
+
+            self.assertEqual(
+                result["gate0b"]["gate"], "P0_EVIDENCE_CONTRACT_FAIL"
+            )
+            self.assertIn(
+                "refresh_callback_end_steady_s_invalid",
+                result["gate0b"]["failures"],
+            )
+            self.assertIn("no_valid_integrity_report", result["gate0b"]["failures"])
+            self.assertNotEqual(MODULE.analyzer_exit_code(result), 0)
+
     def test_successful_generation_with_nonfinite_latency_fails_closed(self):
         messages = []
         for generation in range(1, 21):
@@ -802,6 +839,218 @@ class Gate0AnalyzerTest(unittest.TestCase):
                     [valid_p0_message(snapshot_available=value)], protocol="smoke"
                 )
                 self.assertIn("snapshot_unavailable", summary["failures"])
+
+    def test_p0_final_observation_deduplication_is_visible(self):
+        messages = [
+            valid_p0_message(
+                generation_id=1,
+                refresh_callback_end_steady_s=30.0,
+                refresh_stamp_s=30.0,
+                refresh_elapsed_ms=300.0,
+            ),
+            valid_p0_message(
+                generation_id=2,
+                refresh_callback_end_steady_s=20.0,
+                refresh_stamp_s=20.0,
+                refresh_elapsed_ms=200.0,
+            ),
+            valid_p0_message(
+                generation_id=1,
+                refresh_callback_end_steady_s=10.0,
+                refresh_stamp_s=10.0,
+                refresh_elapsed_ms=100.0,
+            ),
+            valid_p0_message(
+                generation_id=3,
+                refresh_callback_end_steady_s=40.0,
+                refresh_stamp_s=40.0,
+                refresh_elapsed_ms=400.0,
+            ),
+            valid_p0_message(
+                generation_id=4,
+                refresh_callback_end_steady_s=40.0,
+                refresh_stamp_s=41.0,
+                refresh_elapsed_ms=450.0,
+            ),
+        ]
+
+        rows, summary = MODULE.analyze_p0_messages(messages, protocol="smoke")
+
+        self.assertEqual([row["generation_id"] for row in rows], [1, 2, 4])
+        self.assertEqual(
+            [row["refresh_elapsed_ms"] for row in rows], [100.0, 200.0, 450.0]
+        )
+        self.assertEqual(summary["captured_observation_count"], 5)
+        self.assertEqual(summary["callback_representative_count"], 4)
+        self.assertEqual(summary["duplicate_callback_observation_count"], 1)
+        self.assertEqual(summary["duplicate_successful_generation_observation_count"], 1)
+        self.assertEqual(summary["successful_generation_count"], 3)
+        self.assertEqual(summary["gate"], "PASS")
+
+    def test_p0_malformed_callback_identity_fails_without_stamp_fallback(self):
+        malformed = valid_p0_message(
+            generation_id=2,
+            refresh_stamp_s=2.0,
+        )
+        del malformed["refresh_callback_end_steady_s"]
+
+        rows, summary = MODULE.analyze_p0_messages(
+            [valid_p0_message(), malformed], protocol="smoke"
+        )
+
+        self.assertEqual(summary["captured_observation_count"], 2)
+        self.assertEqual(summary["callback_representative_count"], 1)
+        self.assertEqual(summary["malformed_callback_identity_count"], 1)
+        self.assertEqual(summary["successful_generation_count"], 1)
+        self.assertEqual(summary["failed_refresh_count"], 1)
+        self.assertIn(
+            "refresh_callback_end_steady_s_invalid", summary["failures"]
+        )
+        self.assertEqual(summary["gate"], "P0_EVIDENCE_CONTRACT_FAIL")
+        self.assertEqual(len(rows), 2)
+        self.assertEqual(rows[-1]["refresh_callback_end_steady_s"], "")
+        self.assertEqual(rows[-1]["failed_refresh"], 1)
+
+    def test_p0_success_claim_requires_strict_complete_evidence(self):
+        defects = (
+            (
+                {"generation_id": "1"},
+                "successful_generation_id_not_positive_integral",
+            ),
+            (
+                {"generation_id": True},
+                "successful_generation_id_not_positive_integral",
+            ),
+            (
+                {"generation_id": 0},
+                "successful_generation_id_not_positive_integral",
+            ),
+            ({"reason": "occupancy_stale"}, "health_reason_not_ok"),
+            ({"snapshot_available": False}, "snapshot_unavailable"),
+            (
+                {"refresh_query_count": "76800"},
+                "required_counter_non_integral:refresh_query_count",
+            ),
+            (
+                {"refresh_elapsed_ms": math.nan},
+                "successful_generation_latency_nonfinite",
+            ),
+        )
+        for override, failure in defects:
+            with self.subTest(failure=failure):
+                rows, summary = MODULE.analyze_p0_messages(
+                    [valid_p0_message(**override)], protocol="smoke"
+                )
+                self.assertEqual(summary["successful_generation_count"], 0)
+                self.assertEqual(summary["failed_refresh_count"], 1)
+                self.assertIn(failure, summary["failures"])
+                self.assertEqual(summary["gate"], "P0_EVIDENCE_CONTRACT_FAIL")
+                self.assertEqual(rows[0]["failed_refresh"], 1)
+
+    def test_p0_all_successful_generation_classes_share_one_distribution(self):
+        messages = [
+            valid_p0_message(
+                generation_id=1,
+                refresh_callback_end_steady_s=1.0,
+                refresh_stamp_s=1.0,
+                predictor_spatial_invalidation_reason="uninitialized",
+                refresh_elapsed_ms=50.0,
+            ),
+            valid_p0_message(
+                generation_id=2,
+                refresh_callback_end_steady_s=2.0,
+                refresh_stamp_s=2.0,
+                predictor_spatial_invalidation_reason="rolling_shift",
+                predictor_spatial_advisory_recompute_count=320,
+                predictor_spatial_advisory_reuse_count=76480,
+                predictor_gnss_advisory_invocation_count=320,
+                predictor_lidar_advisory_invocation_count=320,
+                predictor_spatial_retained_position_count=12480,
+                predictor_spatial_entered_position_count=320,
+                predictor_spatial_evicted_position_count=320,
+                refresh_elapsed_ms=100.0,
+            ),
+            valid_p0_message(
+                generation_id=3,
+                refresh_callback_end_steady_s=3.0,
+                refresh_stamp_s=3.0,
+                predictor_spatial_invalidation_reason="exact_reuse",
+                predictor_spatial_advisory_recompute_count=0,
+                predictor_spatial_advisory_reuse_count=76800,
+                predictor_gnss_advisory_invocation_count=0,
+                predictor_lidar_advisory_invocation_count=0,
+                predictor_spatial_retained_position_count=12800,
+                predictor_spatial_entered_position_count=0,
+                predictor_spatial_exact_retained_position_count=12800,
+                refresh_elapsed_ms=150.0,
+            ),
+            valid_p0_message(
+                generation_id=4,
+                refresh_callback_end_steady_s=4.0,
+                refresh_stamp_s=4.0,
+                predictor_spatial_invalidation_reason="gnss_ttl_reuse",
+                predictor_spatial_advisory_recompute_count=0,
+                predictor_spatial_advisory_reuse_count=76800,
+                predictor_gnss_advisory_invocation_count=0,
+                predictor_lidar_advisory_invocation_count=0,
+                predictor_spatial_retained_position_count=12800,
+                predictor_spatial_entered_position_count=0,
+                predictor_spatial_ttl_retained_position_count=12800,
+                refresh_elapsed_ms=200.0,
+            ),
+            valid_p0_message(
+                generation_id=5,
+                refresh_callback_end_steady_s=5.0,
+                refresh_stamp_s=5.0,
+                predictor_spatial_invalidation_reason="occupancy_full_rebuild",
+                predictor_spatial_full_invalidation_count=1,
+                refresh_elapsed_ms=250.0,
+            ),
+            valid_p0_message(
+                generation_id=6,
+                refresh_callback_end_steady_s=6.0,
+                refresh_stamp_s=6.0,
+                predictor_spatial_invalidation_reason="warm_empty_delta",
+                predictor_spatial_advisory_recompute_count=0,
+                predictor_spatial_advisory_reuse_count=76800,
+                predictor_gnss_advisory_invocation_count=0,
+                predictor_lidar_advisory_invocation_count=0,
+                predictor_spatial_retained_position_count=12800,
+                predictor_spatial_entered_position_count=0,
+                predictor_spatial_exact_retained_position_count=12800,
+                refresh_elapsed_ms=900.0,
+            ),
+        ]
+
+        rows, summary = MODULE.analyze_p0_messages(messages, protocol="smoke")
+
+        self.assertEqual([row["generation_id"] for row in rows], list(range(1, 7)))
+        self.assertEqual(summary["successful_generation_count"], 6)
+        self.assertEqual(summary["refresh_elapsed_ms_p50"], 175.0)
+        self.assertEqual(summary["refresh_elapsed_ms_p95"], 737.5)
+        self.assertEqual(summary["refresh_elapsed_ms_max"], 900.0)
+        self.assertEqual(summary["gate"], "PASS")
+
+    def test_p0_complete_type7_distribution_does_not_trim_tail_or_outlier(self):
+        messages = [
+            valid_p0_message(
+                generation_id=generation,
+                refresh_callback_end_steady_s=float(generation),
+                refresh_stamp_s=float(generation),
+                refresh_elapsed_ms=(1000.0 if generation == 20 else float(generation)),
+            )
+            for generation in range(1, 21)
+        ]
+
+        rows, summary = MODULE.analyze_p0_messages(messages, protocol="benchmark")
+
+        self.assertEqual(len(rows), 20)
+        self.assertEqual(summary["minimum_successful_generations"], 20)
+        self.assertEqual(summary["successful_generation_count"], 20)
+        self.assertEqual(summary["refresh_elapsed_ms_p50"], 10.5)
+        self.assertAlmostEqual(summary["refresh_elapsed_ms_p95"], 68.05)
+        self.assertEqual(summary["refresh_elapsed_ms_max"], 1000.0)
+        self.assertEqual(summary["gate"], "PASS")
 
     def test_malformed_ready_value_is_not_a_successful_generation(self):
         _, summary = MODULE.analyze_p0_messages(

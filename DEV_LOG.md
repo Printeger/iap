@@ -2776,3 +2776,141 @@ Builder self-check found no open findings; this statement is not a final
 Standards/Spec review or Supervisor verdict. **Gate-0B remains NOT_QUALIFIED
 pending Supervisor review.** DEEPSEEK issues no next task or Gate decision and
 returns control to Supervisor review.
+
+## 2026-08-22T15:33:17Z — ICRA-024 START
+
+Synchronized `dev/icra` at
+`e675d81dc26d18153bf65708f075300743807f13`; `HEAD...origin/dev/icra` is
+`0 0`. The protected untracked PDF and historical ICRA-011/014/020/021
+evidence remain exact at SHA-256
+`1f07da5631a6551a2f98c02d46fd45bc87f2f1e3e7c14e95f9a7f4a0bac844f6`,
+`778abd22158805c41150b4eeed9c37a3f660237a0bb0599e9a567e3533c7b32c`,
+`44f47b23137d17f4b0cbc81af6827156865bdecb36089bf53f770960a2fb963d`,
+`2f68e3123426b5a1117e86bb5abc7c69117a070bcf583ec759974fddeb71a0bd`,
+`59f88a7eb9cde2695aad20aef7e6f32c4f065e1caf0bf127907f2a814b40ee59`
+and `b82089044a2088d02b0e44c9a3a2eebd2e43168d559578046afe989352052aca`
+respectively. The reviewed ICRA-022 build/install trees are absent as the
+Supervisor documented; they will not be restored.
+
+The exact allowlist is `scripts/dev_planner/gate0_analyzer.py`,
+`test/test_gate0_analyzer.py`; only if focused tests prove strictly necessary,
+the capture script/test and runner script/test named by `NEXT_TASK.md`; new
+bounded logs/evidence below `results/icra27/icra024/` excluding staged
+build/install/runtime/ROS-log copies; `DEV_LOG.md`, `docs/CHANGES.md`, and
+`docs/TRACEABILITY.md`. Supervisor-owned state/task/log/scope/plan/design/Gate
+documents, product sources and all historical evidence are excluded.
+
+Explicit stop line: freeze only the formal successful-generation analyzer
+contract, create repository-local ICRA-024 build/install/evidence, run the
+authorized build/test/linkage matrix, then one mandatory GPU preflight and—on
+PASS only—exactly one 20-second P0-only replacement smoke plus one analyzer
+invocation. No 60-second benchmark, retry, tuning, parameter/backend change,
+disabled profile, qualification, campaign, bag, RViz, P4/P5 execution, Gate
+promotion, historical rewrite, external output, cleanup or user-data mutation
+is authorized.
+
+## 2026-08-22T15:40:00Z — ICRA-024 SAMPLE CONTRACT FROZEN
+
+Before any GPU preflight, ROS command or live-output observation, the analyzer
+contract and Builder-owned traceability were frozen. Only finite
+`refresh_callback_end_steady_s` identifies callbacks; final captured callback
+and successful-generation representatives win at their respective de-dup
+stages, with duplicate and malformed counts visible. A success is a strict
+boolean-ready row with positive non-boolean integral generation ID, `ok`
+reason, clean available snapshot and every existing source/counter/timing/work
+identity satisfied. Invalid success claims fail the evidence contract and do
+not enter latency percentiles; ordinary failed rows remain in failed/stale
+ratios.
+
+Focused tests cover capture-order final observations, duplicate visibility,
+steady-identity fail-closed behavior without message-stamp fallback, strict
+success classification, cold/rolling/exact/TTL/full/warm class inclusion,
+complete-set type-7 p50/p95/max without trimming, and unchanged smoke/benchmark
+minimum rules. The initial frozen analyzer suite passed 30/30. No capture or runner
+change proved necessary. No GPU preflight, ROS/main flow, smoke, benchmark,
+qualification, P4/P5 execution or Gate decision has occurred. **Gate-0B
+remains NOT_QUALIFIED.**
+
+## 2026-08-22T15:58:12Z — ICRA-024 VERIFICATION / ONE-SHOT BLOCKED
+
+Repository-local configure/build/install completed with exit 0 for `iap`,
+`plan_env`, `path_searching`, `bspline_opt` and `ego_planner`. The direct
+ICRA-020 validator passes 5/5; selected root 8/8; analyzer 31/31; runner 16/16;
+capture 1/1; plan-env 6/6; P0 76/76; Adapter 7/7; rolling 23/23; retained Ego
+8/8; P4 4/4; and P1 integrity 39/39. Historical opt-in/disabled profiles were
+not invoked. Seven direct consumers have no `not found`, stale ICRA-022 or
+external build-tree resolution and use only task-local `libiap.so` and
+`libplan_env.so`, SHA-256
+`980abf79b7efe6083f80a0269290bdf83d31082b5a7af0a1c465e7f5f13ecb86`
+and `ecd6a3fcb17cd378d02cad43310459489fb85c829324b04faaca1cfe5a14dfaf`.
+Retained build/install trees remain below `results/icra27/icra024/` and will
+not be staged.
+
+After all required verification passed, the runner's mandatory preflight ran
+as part of the exact single authorized smoke command. It records `GPU_READY`
+on GPU 0 `NVIDIA GeForce RTX 4070 Ti SUPER`, driver `580.126.09`: both
+`nvidia-smi` commands exit 0, CUDA `libcuda.so.1` loads, `cuInit(0)` and
+`cuDeviceGetCount` return 0, and `device_count=1`. The preflight JSON SHA-256
+is `3471df2a88ef6d680bb75ba8458f0027bab4be62b5cb3d7d5afa32dd5ed9597a`.
+
+The following authorized command ran exactly once and the runner exited 2:
+
+```text
+python3 scripts/dev_planner/run_gate0_qualification.py --output-root results/icra27/icra024/runs --smoke
+```
+
+Capture became ready, then ROS launch exited before IAP startup because the
+supplied isolated-prefix environment did not expose workspace package
+`so3_control`. The bounded stdout records the package search over the five
+ICRA-024 install prefixes, workspace merged root and ROS Jazzy. Required
+`iap_rosnode` was never observed (`elapsed_s=0.1642740450333804`), so the run
+manifest records `exit_code=1`, `planner_crash=true` and
+`required_processes_ok=false`; its SHA-256 is
+`a9a69226e0e774029508bccab34ff7809b4899fb89bc805ed51661938b5daa95`.
+This is a launch-environment/provenance failure before the product ran, not a
+P0 scientific or product-failure result.
+
+The formal analyzer then ran exactly once and exited 1. With zero health and
+integrity rows and no runtime manifest, it truthfully records
+`P0_INPUT_AVAILABILITY_FAIL`, zero successful generations and the required
+process/runtime-manifest failures. The analysis, P0 summary and CSV SHA-256
+values are `68173ed45ef875d6f7049ee3ddfcdf33e83fb2312d7a7f0475a6a09e2100a1cd`,
+`8faf4181e4c931b0a4dded834a540274de6bebe564c20339082f813e354e7d22`
+and `a11f5789b9be19384d2692423da25c668c29b36e7c3ac132b1674561e676beda`.
+Exact bounded commands, exits, tests, linkage and hashes are retained in
+`results/icra27/icra024/verification_summary.txt`.
+
+The final Builder Spec self-check found that missing integrity could overwrite
+an already proven evidence-contract failure. A new end-to-end RED reproduced
+`P0_INPUT_AVAILABILITY_FAIL`; the smallest GREEN preserves
+`P0_EVIDENCE_CONTRACT_FAIL` through integrity and manifest composition, and
+the final analyzer suite passes 31/31. This unit-only correction did not
+change or rerun the immutable live evidence.
+
+The task-owned process audit found no residual capture, launch, ROS or test
+process and no process was manually killed. Per the one-shot rule, the launch
+environment was not corrected and preflight, smoke and analyzer were not
+rerun. No 60-second benchmark, tuning, parameter/backend switch,
+qualification, campaign, bag/RViz, disabled profile, P4/P5 execution, Gate
+promotion or next task occurred. Protected hashes remain exact and the PDF
+remains untracked and untouched. **ICRA-024 BLOCKED; Gate-0B
+NOT_QUALIFIED.** Control will return to Supervisor review after the required
+commits; this is a Builder result, not a final Standards/Spec or Supervisor
+verdict.
+
+## 2026-08-22T16:07:38Z — ICRA-024 BUILDER SELF-CHECK
+
+The final staged-diff Builder self-check reports zero remaining Spec findings
+and zero hard Standards violations. It retains two non-blocking judgment
+smells: string-valued Gate precedence is distributed across composition seams,
+and `analyze_p0_messages()` remains a long multi-responsibility function.
+Extracting a new Gate type/precedence framework or broader helpers would exceed
+this task's smallest-change analyzer scope; the new end-to-end regression pins
+the required fail-closed behavior. These are Builder self-check observations,
+not final Standards/Spec findings or a Supervisor verdict.
+
+The staged allowlist contains only the analyzer/test, three Builder-owned
+documentation/log files and bounded reviewable ICRA-024 evidence. It contains
+no build/install/runtime/ROS-log tree, PDF, historical artifact or
+Supervisor-owned file; `git diff --cached --check` passes. **ICRA-024 remains
+BLOCKED and Gate-0B remains NOT_QUALIFIED pending Supervisor review.**

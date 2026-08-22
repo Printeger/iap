@@ -1,5 +1,22 @@
 # Traceability Matrix (IAP)
 
+## 2026-08-22 ICRA-024 Gate-0B successful-generation sample freeze
+
+| Req ID | Requirement/evidence seam | Implementation and focused evidence | Status |
+|---|---|---|---|
+| IAP-RQ-320 / IAP-RQ-322 | Callback identity must be steady-clock-only, fail closed when malformed and retain the final captured representative | `gate0_analyzer.py::analyze_p0_messages()` accepts only finite `refresh_callback_end_steady_s`, preserves it in P0 rows, retains the last captured duplicate callback, and reports captured/representative/duplicate/malformed counts; focused tests prove a valid `refresh_stamp_s` is never a fallback | **IMPLEMENTED / fail-closed** |
+| IAP-RQ-320 / IAP-RQ-322 | Formal latency must contain exactly one final contract-complete representative per successful generation | Strict success requires boolean `ready`, positive non-boolean integral `generation_id`, `reason=ok`, clean available snapshot and every existing source/counter/timing/workload contract; generation duplicates use the last captured candidate and remain visible in summary counts; integration coverage proves missing integrity/manifest evidence cannot downgrade an already proven evidence-contract failure | **IMPLEMENTED / analyzer 31/31** |
+| IAP-RQ-320 / IAP-RQ-322 | Distribution selection must be frozen independently of class and observed latency | Focused fixtures include cold, rolling-shift, retained/entered, full-rebuild, exact-reuse, TTL-reuse, warm and slow rows in one distribution; a 20-row fixture proves no tail/outlier trimming and exact complete-set type-7 p50/p95/max | **FROZEN before live output** |
+| IAP-RQ-320 / IAP-RQ-322 | Preserve fixed Gate-0B protocol thresholds and failure attribution | Failed callback representatives remain in failed/stale ratios and outside latency percentiles; smoke minimum remains 1 with no performance threshold, benchmark minimum remains 20 with one p95 `<=400 ms` threshold, and fixed worker count remains four | **VERIFIED / Gate-0B NOT_QUALIFIED** |
+| IAP-RQ-320 / IAP-RQ-322 | Execute the replacement protocol once after repository-local verification and mandatory preflight | Required build/test/linkage checks pass and preflight records `gpu_ready=true`, `cuInit_result=0`, `device_count=1`; the sole smoke then fails before IAP startup because its isolated prefix search cannot find workspace package `so3_control`, and the sole analyzer truthfully records zero observations and `P0_INPUT_AVAILABILITY_FAIL` | **BLOCKED / no retry** |
+
+No P0 product, runner/capture, workload, threshold, P4/P5 or Gate decision
+changed. The bounded command, manifest, preflight, empty raw captures, analyzer
+output and verification summary are retained under `results/icra27/icra024/`.
+This launch-environment failure occurred before `iap_rosnode` started and is
+not a P0 product/scientific result. The one-shot rule prohibited correction or
+retry; **Gate-0B remains NOT_QUALIFIED** pending Supervisor review.
+
 ## 2026-08-22 ICRA-023 review ownership and historical provenance repair
 
 | Req ID | Requirement/evidence seam | Implementation and focused evidence | Status |

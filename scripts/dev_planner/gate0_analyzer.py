@@ -59,6 +59,7 @@ REQUIRED_P0_SOURCE_PREFIXES = (
 )
 P0_FIELDS = (
     "generation_id",
+    "refresh_callback_end_steady_s",
     *REQUIRED_P0_COUNTER_FIELDS,
     "predictor_spatial_invalidation_reason",
     *REQUIRED_P0_TIMING_FIELDS,
@@ -739,27 +740,70 @@ def analyze_p0_messages(
 ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
     if protocol not in {"smoke", "benchmark"}:
         raise ValueError(f"unsupported P0 protocol: {protocol}")
-    callbacks: dict[float, dict[str, Any]] = {}
+    callbacks: dict[float, tuple[int, dict[str, Any]]] = {}
+    malformed_callback_rows: list[dict[str, Any]] = []
+    captured_observation_count = 0
+    duplicate_callback_observation_count = 0
     for message in messages:
+        captured_observation_count += 1
         callback_key = _float(message.get("refresh_callback_end_steady_s"))
         if not math.isfinite(callback_key):
-            callback_key = _float(message.get("refresh_stamp_s"))
-        if math.isfinite(callback_key):
-            callbacks[callback_key] = message
+            row = {field: message.get(field, "") for field in P0_FIELDS}
+            row["generation_id"] = _int(message.get("generation_id"))
+            row["failed_refresh"] = 1
+            malformed_callback_rows.append(row)
+            continue
+        if callback_key in callbacks:
+            duplicate_callback_observation_count += 1
+        callbacks[callback_key] = (captured_observation_count, message)
 
-    rows: list[dict[str, Any]] = []
-    successful_generations: dict[int, dict[str, Any]] = {}
-    for _, message in sorted(callbacks.items()):
-        generation_id = _int(message.get("generation_id"))
-        success = generation_id > 0 and message.get("ready") is True
+    rows: list[dict[str, Any]] = list(malformed_callback_rows)
+    successful_generation_claims: dict[int, tuple[int, dict[str, Any]]] = {}
+    duplicate_successful_generation_observation_count = 0
+    evidence_contract_failures: list[str] = []
+    for capture_order, message in sorted(callbacks.values(), key=lambda item: item[0]):
+        generation_value = message.get("generation_id")
+        generation_is_positive_integral = (
+            isinstance(generation_value, int)
+            and not isinstance(generation_value, bool)
+            and generation_value > 0
+        )
+        generation_id = generation_value if generation_is_positive_integral else 0
+        success_claimed = message.get("ready") is True
         row = {field: message.get(field, "") for field in P0_FIELDS}
         row["generation_id"] = generation_id
-        row["failed_refresh"] = 0 if success else 1
-        if success:
-            successful_generations[generation_id] = row
+        if success_claimed and generation_is_positive_integral:
+            if generation_id in successful_generation_claims:
+                duplicate_successful_generation_observation_count += 1
+            successful_generation_claims[generation_id] = (capture_order, row)
         else:
+            row["failed_refresh"] = 1
             rows.append(row)
-    rows.extend(successful_generations[generation] for generation in sorted(successful_generations))
+            if success_claimed:
+                evidence_contract_failures.append(
+                    "successful_generation_id_not_positive_integral"
+                )
+
+    for _, row in sorted(
+        successful_generation_claims.values(), key=lambda item: item[0]
+    ):
+        claim_failures = [
+            *_p0_counter_contract_failures(row),
+            *_p0_source_contract_failures(row),
+        ]
+        for field in REQUIRED_P0_TIMING_FIELDS:
+            if not math.isfinite(_float(row.get(field))):
+                claim_failures.append(
+                    f"successful_generation_timing_nonfinite:{field}"
+                )
+        if not math.isfinite(_float(row.get("refresh_elapsed_ms"))):
+            claim_failures.append("successful_generation_latency_nonfinite")
+        row["failed_refresh"] = 1 if claim_failures else 0
+        rows.append(row)
+        for failure in claim_failures:
+            if failure not in evidence_contract_failures:
+                evidence_contract_failures.append(failure)
+
     rows.sort(key=lambda row: (_float(row.get("refresh_stamp_s")), _int(row.get("generation_id"))))
 
     successful = [row for row in rows if not _bool(row["failed_refresh"])]
@@ -782,7 +826,9 @@ def analyze_p0_messages(
         if latency_evidence_failure
         else type7_quantile(latencies, 0.95)
     )
-    failures = []
+    failures = list(evidence_contract_failures)
+    if malformed_callback_rows:
+        failures.insert(0, "refresh_callback_end_steady_s_invalid")
     if len(successful) == 0:
         failures.append("zero_successful_generations")
     minimum_successful_generations = 1 if protocol == "smoke" else 20
@@ -792,19 +838,10 @@ def analyze_p0_messages(
         failures.append("refresh_query_shape_mismatch")
     if latency_evidence_failure:
         failures.append("successful_generation_latency_nonfinite")
-    for row in successful:
-        for failure in _p0_counter_contract_failures(row):
-            if failure not in failures:
-                failures.append(failure)
-        for failure in _p0_source_contract_failures(row):
-            if failure not in failures:
-                failures.append(failure)
-        for field in REQUIRED_P0_TIMING_FIELDS:
-            if not math.isfinite(_float(row.get(field))):
-                failure = f"successful_generation_timing_nonfinite:{field}"
-                if failure not in failures:
-                    failures.append(failure)
     contract_complete = not failures
+    evidence_contract_violation = bool(
+        malformed_callback_rows or evidence_contract_failures
+    )
     performance_failure = (
         protocol == "benchmark"
         and contract_complete
@@ -813,7 +850,10 @@ def analyze_p0_messages(
     )
     if performance_failure:
         failures.append("refresh_p95_over_400_ms")
-    if len(successful) == 0:
+    if evidence_contract_violation:
+        gate = "P0_EVIDENCE_CONTRACT_FAIL"
+        recommendations = []
+    elif len(successful) == 0:
         gate = "P0_INPUT_AVAILABILITY_FAIL"
         recommendations: list[str] = []
     elif not contract_complete:
@@ -835,6 +875,13 @@ def analyze_p0_messages(
         "protocol": protocol,
         "minimum_successful_generations": minimum_successful_generations,
         "expected_refresh_query_count": EXPECTED_REFRESH_QUERY_COUNT,
+        "captured_observation_count": captured_observation_count,
+        "callback_representative_count": len(callbacks),
+        "duplicate_callback_observation_count": duplicate_callback_observation_count,
+        "malformed_callback_identity_count": len(malformed_callback_rows),
+        "duplicate_successful_generation_observation_count": (
+            duplicate_successful_generation_observation_count
+        ),
         "successful_generation_count": len(successful),
         "failed_refresh_count": len(rows) - len(successful),
         "refresh_elapsed_ms_p50": type7_quantile(latencies, 0.50),
@@ -883,7 +930,8 @@ def apply_integrity_evidence_gate(
     if valid_integrity_count == 0:
         if "no_valid_integrity_report" not in result["failures"]:
             result["failures"].append("no_valid_integrity_report")
-        result["gate"] = "P0_INPUT_AVAILABILITY_FAIL"
+        if result.get("gate") != "P0_EVIDENCE_CONTRACT_FAIL":
+            result["gate"] = "P0_INPUT_AVAILABILITY_FAIL"
         result["recommendations"] = []
     return result
 
