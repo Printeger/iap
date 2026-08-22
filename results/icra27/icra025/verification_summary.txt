@@ -1,0 +1,166 @@
+ICRA-025 repository-local analyzer/dependency-preflight verification
+UTC: 2026-08-22T16:48:50Z
+Synchronized base: dc5fd2362d03930057508c2081e0e92cfeeaab32
+Scope: analyzer final-generation classification, runner dependency preflight,
+static ament prefix resolution and retained ICRA-024 binary verification only.
+No build, GPU preflight, capture, ROS daemon/graph/launch, simulator, smoke,
+formal live analyzer, benchmark, qualification, P4/P5 execution or Gate action.
+
+Analyzer TDD
+- RED command:
+  python3 test/test_gate0_analyzer.py Gate0AnalyzerTest.test_p0_final_generation_success_to_failure_replaces_obsolete_success
+  exit 1: expected one final row, old implementation returned two and retained
+  the obsolete successful generation.
+- GREEN: same command after de-duplicating all positive integral generations
+  before classification; exit 0, 1/1 PASS.
+- Focused failure-to-success, success-to-success and final-invalid-success
+  commands each exited 0 after the minimal general repair. Existing callback
+  identity and analyze_directory Gate-precedence coverage remains active.
+- End-to-end `analyze_directory()` coverage feeds success-to-failure duplicate
+  health rows through integrity/manifest composition and proves non-PASS,
+  exactly one failed CSV row and no successful latency.
+- Final command: python3 test/test_gate0_analyzer.py
+  exit 0, 36/36 PASS; stdout `OK`, stderr empty.
+
+Runner TDD
+- RED command:
+  python3 test/test_gate0_runner.py Gate0RunnerTest.test_launch_dependency_preflight_records_complete_ament_closure
+  exit 1: REQUIRED_LAUNCH_PACKAGES/function absent.
+- GREEN: same command after adding the structured ament-index check; exit 0.
+- Missing `so3_control`, shadowed IAP and bare-workspace-root focused checks
+  each exit 0 and prove distinct fail-closed reasons.
+- Orchestration RED command:
+  python3 test/test_gate0_runner.py Gate0RunnerTest.test_failed_launch_dependency_preflight_never_starts_capture_or_launch
+  exit 1: old main returned 2 and entered the smoke path.
+- GREEN: same command after the dependency preflight was placed after an
+  authorized future GPU PASS and before every capture/launch path; exit 0,
+  distinct runner exit 4, and all capture/launch mocks remain uncalled.
+- Final command: python3 test/test_gate0_runner.py
+  exit 0, 21/21 PASS. Printed GPU_READY, LAUNCH_DEPENDENCY_NOT_READY and
+  GPU_NOT_READY lines are mocked unit fixtures; no live preflight or ROS ran.
+  Stderr also contained a non-failing ResourceWarning from the existing
+  process-monitor fixture; the suite completed `OK`.
+
+Static/read-only ament environment recipe
+The recipe modifies only one subprocess environment. It performs package
+index reads only and starts no daemon, graph query, capture or launch.
+
+source /opt/ros/jazzy/setup.bash
+source /home/dev/ws_iap/install/setup.bash
+icra025_prefix_root="$PWD/results/icra27/icra024"
+export AMENT_PREFIX_PATH="$icra025_prefix_root/install_ego:$icra025_prefix_root/install_bspline_opt:$icra025_prefix_root/install_path_searching:$icra025_prefix_root/install_plan_env:$icra025_prefix_root/install${AMENT_PREFIX_PATH:+:$AMENT_PREFIX_PATH}"
+export LD_LIBRARY_PATH="$icra025_prefix_root/install_ego/lib:$icra025_prefix_root/install_bspline_opt/lib:$icra025_prefix_root/install_path_searching/lib:$icra025_prefix_root/install_plan_env/lib:$icra025_prefix_root/install/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+python3 -c 'import json, os; from ament_index_python.packages import get_package_prefix; packages=("iap","ego_planner","local_sensing","odom_visualization","poscmd_2_odom","gnss_sim","so3_quadrotor_simulator","so3_control","rclcpp_components"); print(json.dumps({"ament_prefix_path":os.environ["AMENT_PREFIX_PATH"].split(":"),"packages":{name:get_package_prefix(name) for name in packages}}, indent=2, sort_keys=True))'
+
+Recipe exit 0. Ordered prepended prefixes:
+1. /home/dev/ws_iap/src/iap/results/icra27/icra024/install_ego
+2. /home/dev/ws_iap/src/iap/results/icra27/icra024/install_bspline_opt
+3. /home/dev/ws_iap/src/iap/results/icra27/icra024/install_path_searching
+4. /home/dev/ws_iap/src/iap/results/icra27/icra024/install_plan_env
+5. /home/dev/ws_iap/src/iap/results/icra27/icra024/install
+
+Observed inherited tail, in order:
+6. /home/dev/ws_iap/install/so3_quadrotor_simulator
+7. /home/dev/ws_iap/install/uav_utils
+8. /home/dev/ws_iap/install/ego_planner
+9. /home/dev/ws_iap/install/bspline_opt
+10. /home/dev/ws_iap/install/path_searching
+11. /home/dev/ws_iap/install/iap
+12. /home/dev/ws_iap/install/traj_utils
+13. /home/dev/ws_iap/install/so3_control
+14. /home/dev/ws_iap/install/poscmd_2_odom
+15. /home/dev/ws_iap/install/odom_visualization
+16. /home/dev/ws_iap/install/local_sensing
+17. /home/dev/ws_iap/install/quadrotor_msgs
+18. /home/dev/ws_iap/install/pose_utils
+19. /home/dev/ws_iap/install/plan_env
+20. /home/dev/ws_iap/install/mockamap
+21. /home/dev/ws_iap/install/map_generator
+22. /home/dev/ws_iap/install/gnss_sim
+23. /home/dev/ws_iap/install/gnss_comm
+24. /home/dev/ws_iap/install/cmake_utils
+25. /root/ros2_ws/install/glim_ros
+26. /root/ros2_ws/install/glim
+27. /opt/ros/jazzy
+
+Resolved package-prefix stdout:
+- iap: /home/dev/ws_iap/src/iap/results/icra27/icra024/install
+- ego_planner: /home/dev/ws_iap/src/iap/results/icra27/icra024/install_ego
+- local_sensing: /home/dev/ws_iap/install/local_sensing
+- odom_visualization: /home/dev/ws_iap/install/odom_visualization
+- poscmd_2_odom: /home/dev/ws_iap/install/poscmd_2_odom
+- gnss_sim: /home/dev/ws_iap/install/gnss_sim
+- so3_quadrotor_simulator: /home/dev/ws_iap/install/so3_quadrotor_simulator
+- so3_control: /home/dev/ws_iap/install/so3_control
+- rclcpp_components: /opt/ros/jazzy
+Stderr empty. This proves a bare `/home/dev/ws_iap/install` entry is not used
+as evidence for its isolated packages; their exact isolated prefixes occur in
+the active ament index after workspace setup is sourced.
+
+Final Python/static suites
+- python3 test/test_gate0_capture_p0_health.py
+  exit 0, 1/1 PASS.
+- python3 test/test_icra020_p0_rolling_worker_profile.py
+  exit 0, 5/5 PASS.
+
+Retained ICRA-024 test commands
+icra025_ld_path=/home/dev/ws_iap/src/iap/results/icra27/icra024/install_ego/lib:/home/dev/ws_iap/src/iap/results/icra27/icra024/install_plan_env/lib:/home/dev/ws_iap/src/iap/results/icra27/icra024/install_path_searching/lib:/home/dev/ws_iap/src/iap/results/icra27/icra024/install_bspline_opt/lib:/home/dev/ws_iap/src/iap/results/icra27/icra024/install/lib:/home/dev/ws_iap/install/gnss_comm/lib:/home/dev/ws_iap/install/traj_utils/lib:/home/dev/ws_iap/install/quadrotor_msgs/lib:/opt/ros/jazzy/lib
+
+env LD_LIBRARY_PATH="$icra025_ld_path" ctest --test-dir results/icra27/icra024/build_iap -R 'test_integrity_snapshot|test_local_occupancy|test_predictor_module|test_rolling_spatial_advisory_window|test_predictor_risk_conversion|test_risk_grid_map|test_icra011_spatial_dedup_profile|test_icra020_p0_rolling_worker_profile' --output-on-failure
+exit 0, selected root 8/8 PASS.
+
+env LD_LIBRARY_PATH="$icra025_ld_path" results/icra27/icra024/build_plan_env/test_grid_map_occupancy_epoch --gtest_brief=1
+exit 0, plan-env 6/6 PASS.
+env LD_LIBRARY_PATH="$icra025_ld_path" results/icra27/icra024/build_ego/test_p0_risk_grid_runtime --gtest_brief=1
+exit 0, P0 76/76 PASS; one historical opt-in remained disabled.
+env LD_LIBRARY_PATH="$icra025_ld_path" results/icra27/icra024/build_ego/test_p0_occupancy_epoch_adapter --gtest_brief=1
+exit 0, Adapter 7/7 PASS.
+env LD_LIBRARY_PATH="$icra025_ld_path" results/icra27/icra024/build_iap/test_rolling_spatial_advisory_window --gtest_brief=1
+exit 0, rolling 23/23 PASS; disabled ICRA-014 was not invoked.
+env LD_LIBRARY_PATH="$icra025_ld_path" ctest --test-dir results/icra27/icra024/build_ego -R 'test_p0_risk_grid_runtime|test_p0_occupancy_epoch_adapter|test_p1_replan_admission|test_p1_candidate_selection|test_p5_runtime_integrity_gate|test_p2_candidate_ranking|test_p3_reference_bias|test_planning_risk_context' --output-on-failure
+exit 0, retained Ego 8/8 PASS.
+env LD_LIBRARY_PATH="$icra025_ld_path" results/icra27/icra024/build_path_searching/test_p4_risk_astar --gtest_brief=1
+exit 0, P4 4/4 PASS.
+env LD_LIBRARY_PATH="$icra025_ld_path" results/icra27/icra024/build_bspline_opt/test_p1_integrity_cost --gtest_brief=1
+exit 0, P1 integrity 39/39 PASS.
+
+Retained linkage commands
+The following binaries were checked with `env LD_LIBRARY_PATH="$icra025_ld_path" ldd`:
+- results/icra27/icra024/build_iap/test_rolling_spatial_advisory_window
+- results/icra27/icra024/build_plan_env/test_grid_map_occupancy_epoch
+- results/icra27/icra024/build_ego/test_p0_risk_grid_runtime
+- results/icra27/icra024/build_ego/test_p0_occupancy_epoch_adapter
+- results/icra27/icra024/build_path_searching/test_p4_risk_astar
+- results/icra27/icra024/build_bspline_opt/test_p1_integrity_cost
+- results/icra27/icra024/build_ego/test_planning_risk_context
+All seven commands exit 0 with no `not found`, ICRA-022 or external build-tree
+entry. Direct consumers resolve libiap.so only to
+/home/dev/ws_iap/src/iap/results/icra27/icra024/install/lib/libiap.so and
+libplan_env.so only to
+/home/dev/ws_iap/src/iap/results/icra27/icra024/install_plan_env/lib/libplan_env.so.
+
+Protected/retained SHA-256
+- libiap.so: 980abf79b7efe6083f80a0269290bdf83d31082b5a7af0a1c465e7f5f13ecb86
+- libplan_env.so: ecd6a3fcb17cd378d02cad43310459489fb85c829324b04faaca1cfe5a14dfaf
+- PDF: 1f07da5631a6551a2f98c02d46fd45bc87f2f1e3e7c14e95f9a7f4a0bac844f6
+- ICRA-011: 778abd22158805c41150b4eeed9c37a3f660237a0bb0599e9a567e3533c7b32c
+- ICRA-014: 44f47b23137d17f4b0cbc81af6827156865bdecb36089bf53f770960a2fb963d
+- ICRA-020: 2f68e3123426b5a1117e86bb5abc7c69117a070bcf583ec759974fddeb71a0bd
+- ICRA-021 health: 59f88a7eb9cde2695aad20aef7e6f32c4f065e1caf0bf127907f2a814b40ee59
+- ICRA-021 integrity: b82089044a2088d02b0e44c9a3a2eebd2e43168d559578046afe989352052aca
+- ICRA-024 committed evidence has no worktree diff; its build/install trees
+  remain present and were neither deleted, restored nor rebuilt. Installed
+  library hashes remain exact.
+
+Builder result: repair and authorized verification complete. Gate-0B remains
+NOT_QUALIFIED pending Supervisor review. No replacement live run is authorized
+or requested here, and this is not a Supervisor verdict.
+
+Final Builder two-axis self-check (2026-08-22T16:57:31Z)
+- Spec: zero remaining findings after adding the end-to-end directory/CSV
+  success-to-failure precedence regression.
+- Standards: zero hard violations and zero remaining baseline-smell findings
+  after placing a runnable reproduction command in CHANGES, unifying the
+  process-environment source and extracting the repeated dependency fixture.
+- These are Builder self-check observations, not a final Standards/Spec review
+  or Supervisor verdict.

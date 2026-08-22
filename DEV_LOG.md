@@ -2931,3 +2931,122 @@ violations, with the two documented non-blocking analyzer design judgments.
 This is not a final Standards/Spec review or Supervisor verdict. **ICRA-024 is
 returned BLOCKED; Gate-0B remains NOT_QUALIFIED.** DEEPSEEK issues no next
 task or Gate decision and returns control to Supervisor review.
+
+## 2026-08-22T16:40:28Z — ICRA-025 START
+
+Synchronized `dev/icra` at
+`dc5fd2362d03930057508c2081e0e92cfeeaab32`; `HEAD...origin/dev/icra` is
+`0 0`. The protected untracked PDF and ICRA-011/014/020/021 evidence remain
+exact at SHA-256
+`1f07da5631a6551a2f98c02d46fd45bc87f2f1e3e7c14e95f9a7f4a0bac844f6`,
+`778abd22158805c41150b4eeed9c37a3f660237a0bb0599e9a567e3533c7b32c`,
+`44f47b23137d17f4b0cbc81af6827156865bdecb36089bf53f770960a2fb963d`,
+`2f68e3123426b5a1117e86bb5abc7c69117a070bcf583ec759974fddeb71a0bd`,
+`59f88a7eb9cde2695aad20aef7e6f32c4f065e1caf0bf127907f2a814b40ee59`
+and `b82089044a2088d02b0e44c9a3a2eebd2e43168d559578046afe989352052aca`.
+Committed ICRA-024 evidence has no worktree diff. All ten retained ICRA-024
+build/install directories are present and read-only for this task;
+`libiap.so` and `libplan_env.so` remain
+`980abf79b7efe6083f80a0269290bdf83d31082b5a7af0a1c465e7f5f13ecb86`
+and `ecd6a3fcb17cd378d02cad43310459489fb85c829324b04faaca1cfe5a14dfaf`.
+
+The exact allowlist is `scripts/dev_planner/gate0_analyzer.py`,
+`test/test_gate0_analyzer.py`,
+`scripts/dev_planner/run_gate0_qualification.py`, `test/test_gate0_runner.py`,
+new bounded logs below `results/icra27/icra025/`, `DEV_LOG.md`,
+`docs/CHANGES.md`, `docs/TRACEABILITY.md`, and only the narrow ICRA-024
+Builder-owned prose correction if necessary. Supervisor-owned files, product
+sources/tests, launch/default/YAML and all existing evidence are excluded.
+
+Explicit stop line: repair only final-generation classification and supplied
+launch-dependency provenance; reuse ICRA-024 binaries read-only and perform
+only static/read-only ament package-prefix resolution. No new build/install,
+GPU preflight, capture subscription, ROS daemon/graph query, launch,
+simulator, smoke, formal analyzer over live evidence, benchmark, retry,
+qualification, tuning, backend/parameter/workload change, disabled profile,
+P4/P5 execution, Gate promotion, cleanup or external mutation is authorized.
+The TDD seams are the public analyzer result (`analyze_p0_messages()` and
+`analyze_directory()`) and the runner's pre-capture orchestration/result
+manifest boundary prescribed by `NEXT_TASK.md`.
+
+## 2026-08-22T16:48:50Z — ICRA-025 IMPLEMENTATION / VERIFICATION
+
+The analyzer now performs callback-key de-duplication first, then selects the
+final captured representative for every positive non-boolean integral
+generation before inspecting `ready`. Success-to-failure therefore retains
+one failed row and no obsolete latency; failure-to-success and
+success-to-success retain only the final row; a final invalid success claim
+fails closed without falling back. The visible
+`duplicate_generation_observation_count` covers all overwritten positive-
+generation representatives rather than only success claims. Malformed
+callback identity, strict success validation, complete class inclusion,
+type-7 complete-set statistics, 1/20 minima, fixed worker four and the single
+benchmark threshold remain unchanged.
+
+The runner now performs a distinct launch-dependency preflight after any
+future mandatory GPU PASS but before every capture/launch path. It validates
+the supplied ordered `AMENT_PREFIX_PATH` and active ament-index resolution for
+`iap`, `ego_planner`, `local_sensing`, `odom_visualization`,
+`poscmd_2_odom`, `gnss_sim`, `so3_quadrotor_simulator`, `so3_control` and
+`rclcpp_components`. The bounded JSON records every API call/result,
+existence, exact-prefix membership, expected task-local IAP/EGO identity and
+failure reason. It never edits the inherited environment. Missing, malformed
+or shadowed closure returns `LAUNCH_DEPENDENCY_NOT_READY` with distinct exit 4
+before capture or launch.
+
+TDD recorded the required analyzer RED: success-to-failure returned two rows;
+the focused test passes after the generation-before-classification repair.
+Runner REDs recorded the absent dependency contract and the old orchestration
+entering smoke/returning 2; GREEN records the complete serialized closure and
+ensures capture/launch functions are uncalled on dependency failure. Final
+Python suites pass analyzer 36/36, runner 21/21, capture 1/1 and direct
+ICRA-020 validator 5/5. Retained ICRA-024 verification passes selected root
+8/8, plan-env 6/6, P0 76/76, Adapter 7/7, rolling 23/23, retained Ego 8/8,
+P4 4/4 and P1 integrity 39/39; disabled profiles were not invoked.
+
+The documented read-only environment recipe sources ROS Jazzy and the
+existing workspace setup, then prepends retained ICRA-024 EGO/bspline/path/
+plan-env/IAP prefixes and libraries. Static `get_package_prefix()` resolution
+exits 0 for all nine packages: IAP/EGO resolve to the retained ICRA-024
+installs, isolated simulator/control packages resolve to their exact workspace
+prefixes (including `/home/dev/ws_iap/install/so3_control`), and
+`rclcpp_components` resolves to `/opt/ros/jazzy`. Seven direct consumers have
+no `not found`, stale ICRA-022 or external build-tree resolution and retain
+the accepted `libiap.so`/`libplan_env.so` hashes. Exact commands, stdout/
+stderr, exits, recipe, mapping, linkage and hashes are in
+`results/icra27/icra025/verification_summary.txt`.
+
+Builder Spec self-check added the required end-to-end
+`analyze_directory()` case: duplicate success-to-failure health evidence
+remains non-PASS through integrity/manifest composition, emits exactly one
+failed CSV row and no successful latency. Builder Standards self-check also
+placed the runnable changed-seam command directly in `docs/CHANGES.md` and
+removed the split environment/resolver source by reading both prefix evidence
+and the default ament resolver from one process environment. The final
+analyzer/runner counts above include these corrections.
+
+No build/install was created, deleted, restored or rebuilt. No GPU preflight,
+capture subscription, ROS daemon/graph query, launch, simulator, smoke,
+formal analyzer over live evidence, benchmark, retry, qualification, tuning,
+P4/P5 execution or Gate promotion ran. ICRA-024 committed run evidence is
+unchanged; protected hashes and the untracked PDF remain exact. **Gate-0B
+remains NOT_QUALIFIED pending Supervisor review.** This is a Builder result,
+not a final Standards/Spec or Supervisor verdict.
+
+## 2026-08-22T16:57:31Z — ICRA-025 BUILDER SELF-CHECK
+
+The final staged-diff Builder two-axis self-check has zero remaining Spec
+findings, zero hard Standards violations and zero remaining baseline-smell
+findings. The initial findings were closed by the end-to-end
+success-to-failure directory/CSV regression, a runnable command in
+`docs/CHANGES.md`, one process-environment source for both prefix evidence and
+default ament resolution, and a shared dependency fixture. This is Builder
+self-check input only, not a final Standards/Spec review or Supervisor
+verdict.
+
+The exact staged allowlist contains only four authorized scripts/tests, three
+Builder-owned documentation/log files and the bounded ICRA-025 verification
+summary. It excludes the PDF, every ICRA-024 artifact/build/install path,
+Supervisor-owned files and all forbidden product/live-flow scope;
+`git diff --cached --check` passes after restaging. **Gate-0B remains
+NOT_QUALIFIED pending Supervisor review.**

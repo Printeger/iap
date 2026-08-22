@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import ctypes
 import json
+import os
 import signal
 import subprocess
 import sys
@@ -31,10 +32,122 @@ GPU_PREFLIGHT_SCHEMA = "iap_gpu_preflight_v1"
 GPU_PREFLIGHT_FILENAME = "gpu_preflight.json"
 PREFLIGHT_OUTPUT_LIMIT = 16384
 CAPTURE_READINESS_SCHEMA = "gate0_capture_readiness_v1"
+LAUNCH_DEPENDENCY_PREFLIGHT_SCHEMA = "gate0_launch_dependency_preflight_v1"
+LAUNCH_DEPENDENCY_PREFLIGHT_FILENAME = "launch_dependency_preflight.json"
+REQUIRED_LAUNCH_PACKAGES = (
+    "iap",
+    "ego_planner",
+    "local_sensing",
+    "odom_visualization",
+    "poscmd_2_odom",
+    "gnss_sim",
+    "so3_quadrotor_simulator",
+    "so3_control",
+    "rclcpp_components",
+)
 REQUIRED_CAPTURE_TOPICS = {
     "/planning/risk_grid_health",
     "/iap/integrity",
 }
+
+
+def _resolve_ament_package_prefix(package: str) -> str:
+    from ament_index_python.packages import get_package_prefix
+
+    return str(get_package_prefix(package))
+
+
+def run_launch_dependency_preflight(
+    output_root: Path,
+    package_resolver=None,
+) -> dict[str, object]:
+    """Validate and persist the supplied ament package-prefix closure."""
+    output_root = output_root.resolve()
+    output_root.mkdir(parents=True, exist_ok=True)
+    resolver = package_resolver or _resolve_ament_package_prefix
+    raw_ament_prefix_path = os.environ.get("AMENT_PREFIX_PATH", "")
+    prefix_values = raw_ament_prefix_path.split(":") if raw_ament_prefix_path else []
+    failures: list[str] = []
+    if not prefix_values:
+        failures.append("ament_prefix_path_missing")
+    normalized_prefixes: list[str] = []
+    for index, value in enumerate(prefix_values):
+        path = Path(value)
+        if not value:
+            failures.append(f"ament_prefix_path_empty_entry:{index}")
+            normalized_prefixes.append("")
+            continue
+        if not path.is_absolute():
+            failures.append(f"ament_prefix_path_not_absolute:{index}")
+        normalized = str(path.resolve())
+        normalized_prefixes.append(normalized)
+        if not path.is_dir():
+            failures.append(f"ament_prefix_path_not_directory:{index}")
+
+    expected_prefixes = {
+        "iap": str((output_root.parent / "install").resolve()),
+        "ego_planner": str((output_root.parent / "install_ego").resolve()),
+    }
+    package_results: list[dict[str, object]] = []
+    for package in REQUIRED_LAUNCH_PACKAGES:
+        package_failures: list[str] = []
+        resolved_prefix = ""
+        exception = ""
+        try:
+            resolved_prefix = str(Path(resolver(package)).resolve())
+        except Exception as exc:
+            exception = f"{type(exc).__name__}: {exc}"
+            package_failures.append(f"package_not_found:{package}")
+        prefix_exists = bool(resolved_prefix) and Path(resolved_prefix).is_dir()
+        in_ament_prefix_path = (
+            bool(resolved_prefix) and resolved_prefix in normalized_prefixes
+        )
+        expected_prefix = expected_prefixes.get(package, "")
+        matches_expected_prefix = (
+            resolved_prefix == expected_prefix if expected_prefix else None
+        )
+        if resolved_prefix and not prefix_exists:
+            package_failures.append(f"package_prefix_not_directory:{package}")
+        if resolved_prefix and not in_ament_prefix_path:
+            package_failures.append(f"package_prefix_not_in_ament_path:{package}")
+        if expected_prefix and not matches_expected_prefix:
+            package_failures.append(f"package_prefix_shadowed:{package}")
+        for failure in package_failures:
+            if failure not in failures:
+                failures.append(failure)
+        package_results.append({
+            "package": package,
+            "check": {
+                "api": "ament_index_python.packages.get_package_prefix",
+                "arguments": [package],
+                "result": resolved_prefix,
+                "exception": exception,
+            },
+            "resolved_prefix": resolved_prefix,
+            "prefix_exists": prefix_exists,
+            "in_ament_prefix_path": in_ament_prefix_path,
+            "expected_prefix": expected_prefix,
+            "matches_expected_prefix": matches_expected_prefix,
+            "ready": not package_failures,
+            "failure_reasons": package_failures,
+        })
+
+    result = {
+        "schema_version": LAUNCH_DEPENDENCY_PREFLIGHT_SCHEMA,
+        "checked_utc": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+        "ament_prefix_path_raw": raw_ament_prefix_path,
+        "ament_prefix_path": prefix_values,
+        "required_packages": list(REQUIRED_LAUNCH_PACKAGES),
+        "expected_task_local_prefixes": expected_prefixes,
+        "packages": package_results,
+        "launch_dependencies_ready": not failures,
+        "failure_reason": failures[0] if failures else "",
+        "failure_reasons": failures,
+    }
+    (output_root / LAUNCH_DEPENDENCY_PREFLIGHT_FILENAME).write_text(
+        json.dumps(result, indent=2, sort_keys=True) + "\n"
+    )
+    return result
 
 
 def _bounded_output(value: object, limit: int = PREFLIGHT_OUTPUT_LIMIT) -> dict[str, object]:
@@ -842,6 +955,13 @@ def main() -> int:
     print("GPU_READY")
     if args.gpu_preflight_only:
         return 0
+    launch_dependency_preflight = run_launch_dependency_preflight(root)
+    if not launch_dependency_preflight.get("launch_dependencies_ready"):
+        print(
+            "LAUNCH_DEPENDENCY_NOT_READY: "
+            f"{launch_dependency_preflight.get('failure_reason', 'unknown')}"
+        )
+        return 4
     capture_script = Path(__file__).with_name("gate0_capture_p0_health.py")
     exit_codes = []
     if args.gate0a_only or (not args.smoke and not args.benchmark):

@@ -49,6 +49,27 @@ class Gate0RunnerTest(unittest.TestCase):
 
         return run, calls
 
+    @staticmethod
+    def _launch_dependency_fixture(task_root, overrides=None, omitted=()):
+        prefixes = {
+            package: task_root / "deps" / package
+            for package in MODULE.REQUIRED_LAUNCH_PACKAGES
+        }
+        prefixes["iap"] = task_root / "install"
+        prefixes["ego_planner"] = task_root / "install_ego"
+        prefixes.update(overrides or {})
+        omitted = set(omitted)
+        for package, prefix in prefixes.items():
+            if package not in omitted:
+                prefix.mkdir(parents=True, exist_ok=True)
+        environment = {
+            "AMENT_PREFIX_PATH": ":".join(
+                str(prefix) for package, prefix in prefixes.items()
+                if package not in omitted
+            )
+        }
+        return task_root / "runs", prefixes, environment
+
     def test_gpu_preflight_missing_command_fails_closed(self):
         def missing(command, **kwargs):
             raise FileNotFoundError("nvidia-smi")
@@ -131,6 +152,137 @@ class Gate0RunnerTest(unittest.TestCase):
         ):
             self.assertNotEqual(MODULE.main(), 0)
         smoke.assert_not_called()
+
+    def test_launch_dependency_preflight_records_complete_ament_closure(self):
+        with tempfile.TemporaryDirectory() as directory:
+            task_root = Path(directory)
+            output_root, prefixes, environment = self._launch_dependency_fixture(
+                task_root
+            )
+            ordered_prefixes = list(environment["AMENT_PREFIX_PATH"].split(":"))
+            with mock.patch.dict(MODULE.os.environ, environment, clear=True):
+                result = MODULE.run_launch_dependency_preflight(
+                    output_root,
+                    package_resolver=lambda package: str(prefixes[package]),
+                )
+                persisted = json.loads(
+                    (output_root / "launch_dependency_preflight.json").read_text()
+                )
+
+        self.assertTrue(result["launch_dependencies_ready"])
+        self.assertEqual(result, persisted)
+        self.assertEqual(result["ament_prefix_path"], ordered_prefixes)
+        self.assertEqual(
+            [item["package"] for item in result["packages"]],
+            list(MODULE.REQUIRED_LAUNCH_PACKAGES),
+        )
+        self.assertTrue(all(item["ready"] for item in result["packages"]))
+        self.assertEqual(result["failure_reasons"], [])
+
+    def test_launch_dependency_preflight_fails_when_so3_control_is_missing(self):
+        with tempfile.TemporaryDirectory() as directory:
+            task_root = Path(directory)
+            output_root, prefixes, environment = self._launch_dependency_fixture(
+                task_root, omitted={"so3_control"}
+            )
+
+            def resolve(package):
+                if package == "so3_control":
+                    raise LookupError("package not found")
+                return str(prefixes[package])
+
+            with mock.patch.dict(MODULE.os.environ, environment, clear=True):
+                result = MODULE.run_launch_dependency_preflight(
+                    output_root, package_resolver=resolve
+                )
+
+        self.assertFalse(result["launch_dependencies_ready"])
+        self.assertIn("package_not_found:so3_control", result["failure_reasons"])
+        so3 = next(
+            item for item in result["packages"]
+            if item["package"] == "so3_control"
+        )
+        self.assertFalse(so3["ready"])
+        self.assertIn("LookupError", so3["check"]["exception"])
+
+    def test_launch_dependency_preflight_rejects_shadowed_iap_prefix(self):
+        with tempfile.TemporaryDirectory() as directory:
+            task_root = Path(directory)
+            output_root, prefixes, environment = self._launch_dependency_fixture(
+                task_root, overrides={"iap": task_root / "stale" / "install"}
+            )
+            (task_root / "install").mkdir()
+            with mock.patch.dict(MODULE.os.environ, environment, clear=True):
+                result = MODULE.run_launch_dependency_preflight(
+                    output_root,
+                    package_resolver=lambda package: str(prefixes[package]),
+                )
+
+        self.assertFalse(result["launch_dependencies_ready"])
+        self.assertIn("package_prefix_shadowed:iap", result["failure_reasons"])
+        iap = next(item for item in result["packages"] if item["package"] == "iap")
+        self.assertEqual(iap["expected_prefix"], str(task_root / "install"))
+        self.assertFalse(iap["matches_expected_prefix"])
+        self.assertFalse(iap["ready"])
+
+    def test_launch_dependency_preflight_rejects_bare_workspace_install_root(self):
+        with tempfile.TemporaryDirectory() as directory:
+            task_root = Path(directory)
+            workspace_install = task_root / "workspace" / "install"
+            output_root, prefixes, environment = self._launch_dependency_fixture(
+                task_root,
+                overrides={"so3_control": workspace_install / "so3_control"},
+            )
+            active_prefixes = [
+                str(workspace_install) if package == "so3_control" else str(prefix)
+                for package, prefix in prefixes.items()
+            ]
+            environment = {"AMENT_PREFIX_PATH": ":".join(active_prefixes)}
+            with mock.patch.dict(MODULE.os.environ, environment, clear=True):
+                result = MODULE.run_launch_dependency_preflight(
+                    output_root,
+                    package_resolver=lambda package: str(prefixes[package]),
+                )
+
+        self.assertFalse(result["launch_dependencies_ready"])
+        self.assertIn(
+            "package_prefix_not_in_ament_path:so3_control",
+            result["failure_reasons"],
+        )
+
+    def test_failed_launch_dependency_preflight_never_starts_capture_or_launch(self):
+        gpu_ready = {
+            "schema_version": "iap_gpu_preflight_v1",
+            "gpu_ready": True,
+            "failure_reason": "",
+        }
+        dependencies_failed = {
+            "schema_version": "gate0_launch_dependency_preflight_v1",
+            "launch_dependencies_ready": False,
+            "failure_reason": "package_not_found:so3_control",
+            "failure_reasons": ["package_not_found:so3_control"],
+        }
+        with tempfile.TemporaryDirectory() as directory, mock.patch.object(
+            MODULE, "run_gpu_preflight", return_value=gpu_ready
+        ), mock.patch.object(
+            MODULE,
+            "run_launch_dependency_preflight",
+            return_value=dependencies_failed,
+        ) as dependency_preflight, mock.patch.object(
+            MODULE, "run_gate0_smoke"
+        ) as smoke, mock.patch.object(
+            MODULE, "_start_capture"
+        ) as start_capture, mock.patch.object(
+            MODULE, "_run_launch_with_monitor"
+        ) as launch, mock.patch.object(
+            sys, "argv", [str(MODULE_PATH), "--output-root", directory, "--smoke"]
+        ):
+            self.assertEqual(MODULE.main(), 4)
+
+        dependency_preflight.assert_called_once()
+        smoke.assert_not_called()
+        start_capture.assert_not_called()
+        launch.assert_not_called()
 
     def test_gate0a_matrix_is_fixed_to_three_scenarios_three_repeats(self):
         matrix = MODULE.gate0a_matrix()

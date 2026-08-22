@@ -758,8 +758,8 @@ def analyze_p0_messages(
         callbacks[callback_key] = (captured_observation_count, message)
 
     rows: list[dict[str, Any]] = list(malformed_callback_rows)
-    successful_generation_claims: dict[int, tuple[int, dict[str, Any]]] = {}
-    duplicate_successful_generation_observation_count = 0
+    generation_representatives: dict[int, tuple[int, dict[str, Any]]] = {}
+    duplicate_generation_observation_count = 0
     evidence_contract_failures: list[str] = []
     for capture_order, message in sorted(callbacks.values(), key=lambda item: item[0]):
         generation_value = message.get("generation_id")
@@ -769,24 +769,29 @@ def analyze_p0_messages(
             and generation_value > 0
         )
         generation_id = generation_value if generation_is_positive_integral else 0
-        success_claimed = message.get("ready") is True
+        if generation_is_positive_integral:
+            if generation_id in generation_representatives:
+                duplicate_generation_observation_count += 1
+            generation_representatives[generation_id] = (capture_order, message)
+            continue
         row = {field: message.get(field, "") for field in P0_FIELDS}
         row["generation_id"] = generation_id
-        if success_claimed and generation_is_positive_integral:
-            if generation_id in successful_generation_claims:
-                duplicate_successful_generation_observation_count += 1
-            successful_generation_claims[generation_id] = (capture_order, row)
-        else:
+        row["failed_refresh"] = 1
+        rows.append(row)
+        if message.get("ready") is True:
+            evidence_contract_failures.append(
+                "successful_generation_id_not_positive_integral"
+            )
+
+    for _, message in sorted(
+        generation_representatives.values(), key=lambda item: item[0]
+    ):
+        row = {field: message.get(field, "") for field in P0_FIELDS}
+        row["generation_id"] = message["generation_id"]
+        if message.get("ready") is not True:
             row["failed_refresh"] = 1
             rows.append(row)
-            if success_claimed:
-                evidence_contract_failures.append(
-                    "successful_generation_id_not_positive_integral"
-                )
-
-    for _, row in sorted(
-        successful_generation_claims.values(), key=lambda item: item[0]
-    ):
+            continue
         claim_failures = [
             *_p0_counter_contract_failures(row),
             *_p0_source_contract_failures(row),
@@ -879,8 +884,8 @@ def analyze_p0_messages(
         "callback_representative_count": len(callbacks),
         "duplicate_callback_observation_count": duplicate_callback_observation_count,
         "malformed_callback_identity_count": len(malformed_callback_rows),
-        "duplicate_successful_generation_observation_count": (
-            duplicate_successful_generation_observation_count
+        "duplicate_generation_observation_count": (
+            duplicate_generation_observation_count
         ),
         "successful_generation_count": len(successful),
         "failed_refresh_count": len(rows) - len(successful),

@@ -1,5 +1,20 @@
 # Traceability Matrix (IAP)
 
+## 2026-08-22 ICRA-025 final-generation and launch-dependency repair
+
+| Req ID | Requirement/evidence seam | Implementation and focused evidence | Status |
+|---|---|---|---|
+| IAP-RQ-320 / IAP-RQ-322 | Classify only the final captured representative for every positive integral generation | `gate0_analyzer.py::analyze_p0_messages()` de-duplicates all positive non-boolean integral generation IDs after callback-key selection and only then classifies/validates the final row; focused tests cover success→failure, failure→success, success→success and final invalid success, while `analyze_directory()` proves the final failure remains non-PASS with one CSV row | **IMPLEMENTED / analyzer 36/36** |
+| IAP-RQ-320 / IAP-RQ-322 | Make generation de-duplication visible without success-only semantics | Summary field `duplicate_generation_observation_count` counts every overwritten positive-generation callback representative regardless of `ready`; the misleading success-only field is no longer emitted | **VERIFIED** |
+| IAP-RQ-320 / IAP-RQ-322 | Refuse capture/launch unless the supplied ament package closure is complete and correctly shadowed | `run_launch_dependency_preflight()` records ordered prefixes, nine required package resolutions, path existence/index membership and expected task-local IAP/EGO identity; `main()` returns distinct exit 4 before capture/launch on failure | **IMPLEMENTED / runner 21/21** |
+| IAP-RQ-320 / IAP-RQ-322 | Prove a reproducible environment without running live flow | Read-only resolution after sourcing ROS Jazzy/workspace setup and prepending retained ICRA-024 planner prefixes resolves IAP/EGO task-locally, `so3_control` from its isolated workspace prefix and `rclcpp_components` from ROS Jazzy; exact recipe/results are in `results/icra27/icra025/verification_summary.txt` | **VERIFIED / no ROS launch** |
+| IAP-RQ-320 / IAP-RQ-322 | Preserve accepted binaries, evidence and disabled/live boundaries | Retained ICRA-024 regressions/linkage pass at exact `libiap.so` and `libplan_env.so` hashes; protected evidence and ICRA-024 committed run artifacts remain unchanged | **VERIFIED / Gate-0B NOT_QUALIFIED** |
+
+No new build/install tree, GPU preflight, capture subscription, ROS daemon or
+graph query, launch, simulator, smoke, formal live analyzer, benchmark,
+qualification, P4/P5 execution or Gate decision occurred. The preflight
+validates and reports the supplied environment; it never silently repairs it.
+
 ## 2026-08-22 ICRA-024 Gate-0B successful-generation sample freeze
 
 | Req ID | Requirement/evidence seam | Implementation and focused evidence | Status |
