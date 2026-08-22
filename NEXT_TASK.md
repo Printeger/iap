@@ -1,25 +1,30 @@
-# ICRA-018 — Absent-GNSS generation race review repair
+# ICRA-019 — Phase-4B1 immutable raw-occupancy delta and LOS content identity
 
 > Active gate: `GATE_0B`
 > Owner: `DEEPSEEK`
 > Activation: `TASK_READY`
-> Supervisor verdict: `ICRA017_REQUEST_CHANGES`
-> Requirement mapping: `IAP-RQ-312`, `IAP-RQ-314`, `IAP-RQ-320`, `IAP-RQ-321`, `IAP-RQ-322`
+> Supervisor verdict: `ICRA018_PASS_PHASE4A_CLOSED`
+> Requirement mapping: `IAP-RQ-311`, `IAP-RQ-312`, `IAP-RQ-314`, `IAP-RQ-320`, `IAP-RQ-321`, `IAP-RQ-322`
 > Conference route: conditional P0 -> P4 -> P5
-> This task: close the sole ICRA-017 review finding; do not begin Phase-4B
+> This task: Phase-4B1 development; trustworthy net occupancy delta and empty-delta reuse only
 
-## Supervisor verdict
+## Supervisor verdict and design decision
 
-ICRA-017 is not accepted. Standards reports zero findings and most of the repair is correct: every
-non-null range callback atomically publishes valid-or-absent state; stable occupancy owner plus
-generation replaces sampled replay; pre-candidate provenance failure reaches typed P0 health; and
-the retained TTL/watchdog, rollback and scientific behavior remain green.
+ICRA-018 passes Standards and Spec with zero findings. Independent current builds and all selected
+focused/retained suites pass. The absent-GNSS race is closed, so ICRA-016/017/018 close Phase-4A as
+an implementation stage. P0 and Gate-0B remain unqualified.
 
-One high Spec finding remains. In production P0,
-`validate_gnss_spatial_source = source_projection.gnss && snapshot.has_epoch`. An Optional/Auto
-refresh that captures an explicit-absent GNSS state therefore skips the start/end GNSS generation
-guard. If any non-null range callback completes during provider work, the live generation changes
-but the obsolete absent-snapshot candidate may still publish. ICRA-018 repairs only this race.
+ICRA-019 begins Phase-4B through the existing deep Module seam. `GridMap` already exposes one
+immutable `FrozenOccupancyEpoch` containing the complete raw/fused occupied-centre set. Do not add a
+second map, update journal or mutation hook. The `P0OccupancyEpochAdapter` shall normalize that
+captured set and compute an exact net delta against the last successfully committed P0 occupancy
+content. P0 owns transaction/source validation; the rolling Module owns spatial-advisory cache
+identity. P4/P5 continue to see only the complete immutable `RiskGridSnapshot` Interface.
+
+This first slice does not attempt to infer which GNSS rays a changed voxel affects. A complete empty
+raw delta may retain LOS spatial advice across a newer source generation. Any nonempty, malformed or
+unprovable delta conservatively invalidates the full active GNSS spatial window. Reverse-ray/dirty-ray
+propagation is a separately reviewed Phase-4B2 decision.
 
 ## 1. Start, synchronize and protect the worktree
 
@@ -31,99 +36,144 @@ but the obsolete absent-snapshot candidate may still publish. ICRA-018 repairs o
   `778abd22158805c41150b4eeed9c37a3f660237a0bb0599e9a567e3533c7b32c`.
 - Preserve the disabled, never-rerun ICRA-014 canonical artifact at SHA-256
   `44f47b23137d17f4b0cbc81af6827156865bdecb36089bf53f770960a2fb963d`.
-- Record an ICRA-018 START entry in `DEV_LOG.md` with synchronized HEAD, exact allowlist, this one
-  finding and an explicit Phase-4B/calibration stop line.
+- Record an ICRA-019 START entry in `DEV_LOG.md` with synchronized HEAD, exact allowlist and the
+  reverse-ray/CPU/GPU/qualification stop line.
 - Do not edit Supervisor-owned state/task/log/scope/plan/design/Gate documents.
 
-## 2. Make GNSS absence part of the transaction identity
+## 2. Add one exact delta Interface at the existing Adapter seam
 
-Use the existing authoritative `predictorSpatialSourceUsage()` projection. When its `gnss` field is
-true, the source validator must compare the exact captured GNSS generation with the live generation
-at both existing RiskGrid validation points, regardless of `snapshot.has_epoch`.
+Use the already captured `raw_occupied_voxel_centers`; do not alter `GridMap`, its callbacks,
+buffers, locks, generation counter or `FrozenOccupancyEpoch` Interface.
 
-- A captured nonzero explicit-absent generation is a real source version. It is valid only while the
-  live generation remains exactly equal.
-- A never-seen Optional/Auto state may have captured generation zero. It may proceed only while the
-  live generation also remains zero; do not manufacture a generation or reject stable zero-to-zero
-  absence merely to satisfy the guard.
-- Any concurrent non-null range callback, whether it produces a valid epoch or another absent state,
-  advances the generation and must abort the in-flight candidate before publication.
-- Required policy must retain its existing pre-candidate missing-epoch fail-closed behavior.
-- `LidarOnly`, GNSS-disabled configurations and inactive GNSS changes must remain independent.
-- On abort, retain the previous immutable RiskGrid generation/voxels, rolling slots and successful
-  full-refresh watchdog epoch. Do not relabel candidate work as committed reuse.
+Behind `P0OccupancyEpochAdapter`, create one small immutable raw-occupancy identity and delta model:
 
-Prefer the smallest change at the existing production capture/validator Seam. Do not change the
-GNSS callback again unless a new deterministic test proves the ICRA-017 atomic publication itself is
-incorrect. Do not add a new source version, timer, lock, callback, cache or public Interface.
+- normalize every captured centre to its fixed-lattice `iap::VoxelKey` using the epoch lattice
+  origin and resolution;
+- validate finite inputs, exact one-key-per-centre cardinality and deterministic sorted uniqueness;
+- retain the immutable normalized key set with the adapted epoch;
+- compute a complete net set difference between a committed base and current capture, including
+  exact `base_generation`, `target_generation`, added keys, removed keys and changed-key bounds;
+- support skipped source generations by comparing the two complete snapshots directly; the delta is
+  not required to be generation-adjacent;
+- report delta unavailable rather than guessing when stable source owner, frame, lattice origin,
+  resolution, generations or normalized identities cannot form a coherent comparison.
 
-## 3. Required regressions
+The Interface must describe the domain invariant, not expose hash-container/mutation details. Keep
+normalization/diff complexity inside the Adapter Module so callers and tests cross the same seam.
 
-Add deterministic production P0 tests covering all of the following:
+## 3. Separate source transaction identity from LOS content identity
 
-1. Establish a successful Optional refresh from a nonzero explicit-absent GNSS generation. During
-   the next provider work, publish a valid non-null GNSS callback. The candidate must fail with
-   `predictor_spatial_source_changed`; RiskGrid generation/ordered voxels and rolling/watchdog state
-   remain unchanged.
-2. Establish the analogous Auto absent-state refresh. During the next provider work, publish an
-   invalid/empty non-null callback. Its generation advances exactly once and the candidate aborts
-   with the same rollback guarantees.
-3. Stable never-seen Optional and Auto state (`captured=0`, `live=0`) can publish normally, but a
-   callback changing `0 -> nonzero` during provider work aborts.
-4. Required missing-epoch typed begin failure and the existing Required valid-to-invalid race remain
-   green. LidarOnly and GNSS-disabled regressions prove GNSS callbacks do not invalidate inactive
-   source configurations.
-5. Existing occupancy token/generation start/end probe counts, no-extra-factory/no-visibility-replay,
-   typed provenance failure, default-disabled TTL, bounded TTL, watchdog rollback/retry, worker
-   1/2/4 and complete scientific-equivalence tests remain green.
+The authoritative occupancy source owner/generation/stamp remains unchanged and must still be
+validated at RiskGrid start and immediately before publication. It is never replaced by content
+equality.
 
-Do not weaken exact generation equality, active-source selection, freshness or rollback.
+Add the minimum rolling provenance needed to distinguish that source version from raw LOS content:
 
-## 4. Reproduction and verification
+- cold start creates a nonzero LOS-content identity and performs a full spatial rebuild;
+- same stable producer and same source generation require exactly consistent stamp, normalized raw
+  identity and immutable owner; contradiction fails closed rather than being treated as a delta;
+- a newer source generation with a complete empty raw delta retains the committed LOS-content
+  identity and canonical immutable LOS owner while advancing authoritative source generation/stamp;
+- a newer generation with added or removed raw keys creates a new LOS-content identity and causes
+  conservative full active-GNSS spatial invalidation with the existing
+  `occupancy_source_changed` reason;
+- changed producer owner, regressed generation, changed lattice/frame/resolution or unavailable/
+  contradictory proof must never reuse the prior LOS content;
+- inactive GNSS configurations must not acquire a false rolling dependency on raw-occupancy delta.
 
-- Add executable ICRA-018 focused build/test commands to `docs/CHANGES.md` for the exact P0 tests
-  and retained suites.
-- Keep all generated output below `results/icra27/icra018/`; do not write workspace-level `build/`,
+Do not reuse the prior diagnostic query: every successful RiskGrid generation uses the current
+captured immutable diagnostic query and current authoritative occupancy generation. Only the
+Predictor's raw-map LOS `SpatialAdvisory` may be retained for a proven empty delta. All horizon
+freshness, covariance growth, fusion, materialization, occupancy diagnostics and complete immutable
+snapshot publication still run normally.
+
+Update the retained base key set, source version, canonical LOS owner and LOS-content identity only
+after successful RiskGrid plus rolling commit. Any provider/source/configuration failure preserves
+the prior base and makes a retry compare against the last successful generation.
+
+## 4. Required deterministic regressions
+
+### Adapter and delta contract
+
+1. Identical sets with reordered centres produce a complete empty delta; negative world coordinates
+   follow mathematical floor and deterministic lattice keys.
+2. Added-only, removed-only and mixed changes produce exact sorted keys and changed bounds.
+3. Skipped generations produce the exact net delta between the two complete snapshots.
+4. Duplicate-folding, non-finite/misaligned input, geometry mismatch, source-token mismatch, zero/
+   regressed/contradictory generation or invalid base produces no reusable empty-delta proof.
+
+### Rolling and production P0
+
+5. Stationary, same-token, newer-generation, identical raw content performs zero GNSS/LiDAR spatial
+   recomputes, retains every spatial position, performs every horizon fusion/materialization, uses
+   current occupancy diagnostics/generation, and is scientifically equivalent to a forced-fresh
+   result.
+6. One added key, one removed key and mixed net changes each force a complete active-GNSS spatial
+   rebuild and match a fresh rebuild exactly. Do not implement partial dirty rays in this task.
+7. Same generation with different content fails closed and retains the prior RiskGrid/rolling base;
+   changed source owner with coincident generation cannot reuse.
+8. A source/prior/GNSS/LiDAR race after delta calculation aborts publication. Retry proves the delta
+   base and watchdog epoch still refer to the last successful commit.
+9. LidarOnly and GNSS-disabled modes remain independent. Required/Optional/Auto GNSS generation
+   behavior, TTL/watchdog, one occupancy factory capture, no visibility replay, worker 1/2/4,
+   boundary-slab movement and complete scientific equivalence remain green.
+
+Use small synthetic grids for exact delta tests. Do not claim production latency improvement from
+unit counts.
+
+## 5. Reproduction and verification
+
+- Add executable ICRA-019 focused build/test commands to `docs/CHANGES.md`.
+- Keep all generated output below `results/icra27/icra019/`; do not write workspace-level `build/`,
   `install/`, `log/`, `/root/.ros`, `/tmp` or another repository.
-- Build current root rolling/Predictor/RiskGrid/occupancy/snapshot/conversion, plan-env Adapter, P0
-  runtime, P1/P2/P3/P4/P5 retained consumers and P1 integrity-cost. Prove directly linked consumers
-  resolve the current ICRA-018 `libiap.so`.
-- Run the complete rolling, Predictor, RiskGrid, LocalOccupancy, IntegritySnapshot, conversion, P0,
-  occupancy Adapter, P1 admission/selection/integrity-cost, P2, P3, planning-context, P4 A*, P5 and
-  read-only ICRA-011 profile suites.
+- Build current root rolling/Predictor/RiskGrid/occupancy/snapshot/conversion, plan-env frozen-epoch
+  consumer, P0/Adapter and retained P1/P2/P3/P4/P5 consumers. Prove directly linked consumers resolve
+  the current ICRA-019 `libiap.so`.
+- Run complete rolling, Predictor, RiskGrid, LocalOccupancy, IntegritySnapshot, conversion, P0,
+  Adapter, P1 admission/selection/integrity-cost, P2, P3, planning-context, P4 A*, P5 and read-only
+  ICRA-011 profile suites.
 - Do not rerun or regenerate ICRA-014. Run `git diff --check`, inspect staged files, verify no task
-  process remains, and confirm the protected PDF is solely untracked and exact.
+  process remains and confirm the protected PDF is solely untracked and exact.
 - No IAP main flow, ROS launch, smoke, qualification, bag, RViz, campaign, Gate analyzer, formal
   benchmark or GPU preflight is authorized.
 
-## 5. Acceptance and handoff
+## 6. Acceptance and handoff
 
-ICRA-018 is review-ready only when every active GNSS state—present, explicit absent or never seen—is
-covered by one exact captured/live generation transaction guard; all callback races roll back; all
-retained suites pass; and only allowlisted files change.
+ICRA-019 is review-ready only when the delta is exact and complete, empty-delta LOS reuse is bound to
+the same producer and successful committed base, every nonempty/unprovable change remains
+conservative, aborted candidates cannot advance the base, all retained suites pass and only
+allowlisted files change.
 
 Explicitly stage only allowed files. Every code commit must carry all actually applicable
 `IAP-RQ-*` IDs and synchronize `DEV_LOG.md`, `docs/CHANGES.md` and `docs/TRACEABILITY.md`. Push the
 implementation, then add a final `DEV_LOG.md`-only handoff commit naming the implementation SHA and
-push again. Return control to Supervisor. `DEEPSEEK` must not mark ICRA-017/018, Phase 4 or Gate-0B
-PASS; begin Phase-4B; choose production policy values; run qualification; authorize GPU work; or
-issue the next task.
+push again. Return control to Supervisor. `DEEPSEEK` must not mark ICRA-019, Phase 4 or Gate-0B PASS;
+begin reverse-ray/Phase-4B2; run CPU profile; develop GPU code; select production policy values; run
+qualification; or issue the next task.
 
 ## Allowed files
 
+- `include/iap/predictor/rolling_spatial_advisory_window.hpp`;
+- `src/iap/predictor/rolling_spatial_advisory_window.cpp`;
+- `test/test_rolling_spatial_advisory_window.cpp`;
+- `src/iap/planner/plan_manage/include/ego_planner/p0_occupancy_epoch_adapter.h`;
+- `src/iap/planner/plan_manage/src/p0_occupancy_epoch_adapter.cpp`;
+- `src/iap/planner/plan_manage/test/test_p0_occupancy_epoch_adapter.cpp`;
+- `src/iap/planner/plan_manage/include/ego_planner/p0_risk_grid_runtime.h`;
 - `src/iap/planner/plan_manage/src/p0_risk_grid_runtime.cpp`;
 - `src/iap/planner/plan_manage/test/test_p0_risk_grid_runtime.cpp`;
+- root or plan-manage `CMakeLists.txt` only if required to register a source/test;
 - `DEV_LOG.md`;
 - `docs/CHANGES.md`;
 - `docs/TRACEABILITY.md`.
 
 ## Forbidden
 
-- No rolling/Predictor/RiskGrid/occupancy Adapter/plan-env/planner-manager Interface or product
-  behavior change beyond the exact active-GNSS generation guard.
-- No occupancy delta, reverse-ray index, map-layout/storage rewrite, second map, iKD-tree, TTL/
-  watchdog production value, tuning, calibration, worker/default or workload change.
-- No lattice/ROI/resolution/horizon/refresh-period change, Predictor science change, current-prior
-  authority change, P1/P2/P3/P4/P5 behavior change or external repository edit.
-- No main-flow smoke, qualification, bag, RViz, campaign, analyzer, formal benchmark or GPU/CUDA
-  work.
+- No `GridMap`/plan-env callback, buffer, lock, generation, frozen-epoch Interface or storage change;
+  no second map, capture journal, mutation hook or extra occupancy factory capture.
+- No reverse-ray index, changed-voxel-to-ray dependency, partial dirty-ray recomputation or sampled/
+  semantic visibility-equivalence fallback.
+- No whole-result/horizon cache, partial immutable RiskGrid publication, query-shape reduction,
+  Predictor science, P1/P2/P3/P4/P5 or external-repository change.
+- No CPU worker profile/tuning, GPU/CUDA implementation, production TTL/watchdog value,
+  calibration, launch/YAML/default, main-flow smoke, qualification, analyzer or benchmark work.

@@ -1,5 +1,65 @@
 # ICRA Supervisor Log
 
+## 2026-08-22 — ICRA-018 review, Phase-4A closure and ICRA-019 Phase-4B1 authorization
+
+### Review identity and independent verification
+
+- Fixed review base: `07999a88fa64568f17203b60a0a337d58267f770`.
+- Reviewed HEAD: `05794510cd218e212f4eae2bcd65a0ce7293b50a`.
+- Reviewed commits: `7c65ff9` and `0579451`; both carry applicable requirement IDs.
+  `dev/icra` matched `origin/dev/icra` at divergence `0 0`.
+- The aggregate diff contains exactly the five ICRA-018 allowlisted files and passes
+  `git diff --check`. No Supervisor-owned file changed. The protected PDF remains the sole untracked
+  file at SHA-256 `1f07da5631a6551a2f98c02d46fd45bc87f2f1e3e7c14e95f9a7f4a0bac844f6`.
+- Supervisor independently rebuilt the current root, plan-env, P0/Adapter/P1/P2/P3/P5, P4 A* and
+  P1 integrity-cost targets. Focused P0 passes 7/7; selected root 7/7, plan-env 1/1, retained Ego
+  8/8, P4 A* 4/4 and P1 integrity-cost 39/39 also pass.
+- Twelve directly linked consumers, including the planner node, resolve the current repository-local
+  `results/icra27/icra018/build_iap/libiap.so`, SHA-256
+  `d51e5feb89e5daf69f0fa17c8a02d4dc40c28a1e628e96212e46554531006dd0`; plan-env has no direct IAP
+  dependency, and P1 admission/selection remain green without direct `libiap` linkage.
+- The retained ICRA-011 JSON and disabled ICRA-014 canonical remain exact at SHA-256
+  `778abd22158805c41150b4eeed9c37a3f660237a0bb0599e9a567e3533c7b32c` and
+  `44f47b23137d17f4b0cbc81af6827156865bdecb36089bf53f770960a2fb963d`. No main flow, ROS launch,
+  smoke, qualification, benchmark, analyzer or GPU preflight ran.
+
+### Standards axis
+
+- **PASS, zero hard findings and zero judgement smells.** The production change stays at the
+  existing authoritative source-projection/validation seam. The tests consolidate repeated
+  explicit-absent rollback setup in one named scenario helper and use compact policy/mode tables.
+- Requirement IDs, synchronized `CHANGES`/`TRACEABILITY`/`DEV_LOG`, exact allowlist and two-commit
+  handoff conform to `AGENTS.md`. No conventions/talk-spec deviation is introduced. Worst Standards
+  issue: none.
+
+### Spec axis
+
+- **PASS, zero findings.** Active GNSS validation no longer depends on epoch presence. Exact
+  captured/live generation equality permits stable never-seen `0 == 0`, while Optional/Auto
+  explicit-absent and first-callback mismatches abort through the same start/end RiskGrid validator.
+- Required missing-epoch and valid-to-invalid behavior stays fail closed. LidarOnly and GNSS-disabled
+  callbacks remain independent. The regressions prove immutable RiskGrid rollback, zero committed
+  candidate diagnostics, retained rolling slots and an unadvanced successful-full-refresh watchdog
+  epoch. No forbidden Phase-4B, tuning, GPU or qualification scope entered ICRA-018. Worst Spec
+  issue: none.
+
+### Disposition and next task
+
+- Verdict: `ICRA018_PASS_PHASE4A_CLOSED`. Together, ICRA-016/017/018 close Phase-4A as an
+  implementation stage. P0/Gate-0B remain unqualified; P4 remains `NOT_QUALIFIED`; P5 remains
+  implemented but unqualified.
+- Unique task: `ICRA-019 / GATE_0B` in `NEXT_TASK.md`.
+- ICRA-019 is Phase-4B1 development. At the existing frozen-epoch Adapter seam, normalize the
+  complete captured raw occupancy into deterministic lattice keys and compute an exact net delta
+  against the last successfully committed P0 base. A newer source generation with an empty delta may
+  retain canonical LOS content; any nonempty or unprovable delta still forces full GNSS spatial
+  invalidation.
+- The design keeps a small Interface and hides normalization/diff inside the Adapter Module. It
+  separates source transaction generation from LOS content identity without changing GridMap,
+  adding a second map or leaking rolling state to P4/P5.
+- Reverse-ray/partial dirty-ray work is Phase-4B2 and remains forbidden. CPU profile is a later
+  decision gate on the completed incremental path; GPU code is not authorized before that evidence.
+
 ## 2026-08-22 — ICRA-017 review and ICRA-018 absent-GNSS race repair authorization
 
 ### Review identity and independent verification
