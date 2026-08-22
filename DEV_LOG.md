@@ -1982,3 +1982,38 @@ activation, calibration, worker/default/workload change, main flow, ROS
 launch, smoke, qualification, bag, RViz, campaign, analyzer, formal benchmark,
 GPU/CUDA work or P1/P2/P3/P4/P5 product development ran. ICRA-016, ICRA-017,
 Phase 4 and Gate-0B remain Supervisor-review pending and are not marked PASS.
+
+## 2026-08-22T03:53:04Z — ICRA-017 IMPLEMENTATION PUSHED / SUPERVISOR HANDOFF
+
+Implementation commit
+`0712276f6a18f934ce9ef675e0b4a3e2b6a550ab` was pushed to
+`origin/dev/icra`. It contains exactly the thirteen ICRA-017 allowlisted files
+recorded above. Independent Standards and Spec reviews both PASS. The sole
+initial Spec finding was repaired before push: the LidarOnly regression now
+starts from a valid GNSS epoch, publishes an invalid non-null callback, proves
+the epoch generation advances and the old epoch is cleared, then proves a
+normal two-horizon/current rebuild with 54 horizon fusions, zero GNSS
+invocations and complete scientific equivalence to a fresh no-GNSS LidarOnly
+build.
+
+Final selected verification remains green: root 7/7, frozen occupancy epoch
+1/1, P0/Adapter/P1/P2/P3/planning-context/P5 8/8, P4 A* 4/4 and P1 integrity
+39/39. The final selected Ego result is retained in
+`results/icra27/icra017/logs/test_ego_terminal_final.log`; the focused valid
+GNSS recovery and LidarOnly invalid-callback regressions are retained in
+`test_valid_callback_recovery.log` and
+`test_lidar_invalid_callback_regression.log`. One overbroad intermediate
+CTest selection included the unbuilt qualification-writer target, which
+reported `Not Run`; no qualification executable, main flow, smoke, launch or
+analyzer ran. The final evidence log was replaced by the exact permitted
+eight-test selection and passes 8/8.
+
+The protected PDF remains solely untracked and exact at SHA-256
+`1f07da5631a6551a2f98c02d46fd45bc87f2f1e3e7c14e95f9a7f4a0bac844f6`.
+The retained ICRA-011 JSON and disabled ICRA-014 canonical remain read-only at
+SHA-256
+`778abd22158805c41150b4eeed9c37a3f660237a0bb0599e9a567e3533c7b32c` and
+`44f47b23137d17f4b0cbc81af6827156865bdecb36089bf53f770960a2fb963d`.
+No task process remains, no forbidden product/configuration work was changed,
+and no gate is self-promoted. Return ICRA-017 to SUPERVISOR for review; only
+the Supervisor may issue PASS or the next task.
