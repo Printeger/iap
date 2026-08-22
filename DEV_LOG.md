@@ -2460,3 +2460,109 @@ and ICRA-011/ICRA-014 remain exact and untouched.
 ICRA-020 is returned to SUPERVISOR review as diagnostic-only evidence. No
 Gate-0B qualification, production worker selection, reverse-ray decision or
 GPU readiness claim is made, and no next task is issued here.
+
+## 2026-08-22T08:58:04Z — ICRA-021 START
+
+Synchronized `dev/icra` at
+`b908291603d29e892413a29dd7d9844983d64c21`; `HEAD...origin/dev/icra` is
+`0 0`. The protected untracked PDF remains exact at SHA-256
+`1f07da5631a6551a2f98c02d46fd45bc87f2f1e3e7c14e95f9a7f4a0bac844f6`.
+Read-only ICRA-011, disabled ICRA-014 and accepted ICRA-020 remain exact at
+their required SHA-256 values
+`778abd22158805c41150b4eeed9c37a3f660237a0bb0599e9a567e3533c7b32c`,
+`44f47b23137d17f4b0cbc81af6827156865bdecb36089bf53f770960a2fb963d`
+and `2f68e3123426b5a1117e86bb5abc7c69117a070bcf583ec759974fddeb71a0bd`
+respectively.
+
+The exact allowlist is the Gate-0B runner/analyzer and focused tests,
+`test/test_icra020_p0_rolling_worker_profile.py` only for the approved
+ephemeral-path retention rule, root `CMakeLists.txt` only if focused test
+registration requires it, new evidence below
+`results/icra27/icra021/runs/`, and `DEV_LOG.md`, `docs/CHANGES.md`, and
+`docs/TRACEABILITY.md`. Production runtime/interfaces/defaults and all
+Supervisor-owned files are excluded.
+
+One-shot stop line: only after all pre-smoke verification is green may the
+mandatory GPU preflight run; a preflight failure or the single authorized
+20-second smoke failure permits no retry, waiting or tuning. No 60-second
+qualification, main-flow alternative, bag, RViz, Gate promotion or P4/P5
+product work is authorized.
+
+## 2026-08-22T09:21:08Z — ICRA-021 IMPLEMENTED / ONE-SHOT SMOKE BLOCKED
+
+The Gate-0B-only runner now requests four P0 Predictor workers for both the
+distinct `20/15 s` smoke and future `60/55 s` benchmark contracts. The global
+launch/runtime declaration remains unchanged at one. Runner, run manifest,
+runtime manifest and successful health evidence require requested/effective
+four. The analyzer CSV retains all exact current rolling counters,
+invalidation reason, readiness/failure fields and refresh/provider/generation
+timings. Every successful row is rejected for missing/non-integral/negative
+counters, non-finite timing, values outside the frozen 12,800-position bound,
+non-four workers, a violated production identity, a health reason other than
+`ok`, any non-true source seen/valid/fresh flag, a non-finite/non-positive
+source stamp, or unavailable/failed snapshot evidence. Smoke does not apply the
+400 ms threshold; benchmark
+still requires 20 generations and R-7 p95 at most 400 ms.
+
+The ICRA-020 validator was migrated first: canonical JSON schema, recorded
+implementation sources, paths/hashes and every scientific/counter/timing
+contract remain exact. Supervisor-deleted bound build/install paths may be
+absent, while any existing bound path must be a regular file matching the
+recorded SHA-256. The canonical JSON was only read and was not regenerated.
+
+RED/GREEN and retained repository-local verification below
+`results/icra27/icra021/runs/logs/` passed:
+
+- runner 16/16, analyzer 22/22, capture 1/1 and ICRA-020 validator 1/1;
+- P0 75/75, Adapter 7/7 and rolling 23/23, with both disabled diagnostics
+  still disabled;
+- selected root including read-only ICRA-011 and ICRA-020 8/8, plan-env 1/1,
+  retained Ego 8/8, P4 A* 4/4 and P1 integrity-cost 39/39;
+- 14 direct consumers resolve
+  `results/icra27/icra021/runs/install/lib/libiap.so`, SHA-256
+  `4170b982d77e0efbdd7c3b8019cea556cf2aa18d1e11ab2e7b63ec1e55580dd5`;
+  three header-only/direct-independent consumers are explicitly labelled.
+
+After and only after those checks passed, the exact authorized command ran
+once:
+
+```text
+python3 scripts/dev_planner/run_gate0_qualification.py --output-root results/icra27/icra021/runs --smoke
+```
+
+GPU preflight preceded capture and every main-flow process. It passed on GPU
+0 `NVIDIA GeForce RTX 4070 Ti SUPER`, UUID
+`GPU-18669b5b-29eb-0bdc-00c2-65c35b8e1af9`, driver `580.126.09`;
+`nvidia-smi -L` and the fixed query both exited 0, CUDA `libcuda.so.1` loaded,
+`cuInit(0)` returned 0 and `cuDeviceGetCount` returned 0 with `device_count=1`.
+The preflight JSON SHA-256 is
+`4bfda37b2a4d917e37e8f7b22161a97333329c56c5ce904c19d670239bdf9b8d`.
+
+The sole 20-second smoke runner exited 0. Capture readiness was recorded
+before launch; `iap_rosnode` was observed as a launch descendant, had no
+runtime-phase death, and its later stop was classified controlled shutdown.
+Capture exited 0 and no task process remains. Run manifest SHA-256 is
+`429633aa4818832461cdd852f31a9b128894220663e7e73162a1d9954c180ac0`;
+runtime manifest SHA-256 is
+`30cd0c2fe7d1731ac15d06a46219a8d27573b93cb4bb735cf90e48d9c859df02`.
+Runner/runtime/raw health all record worker pair `(4,4)`.
+
+The one analyzer invocation exited 1 and therefore ends the task BLOCKED.
+All 210 integrity rows were valid and finite, but none of 24 health rows was
+a successful generation: 22 report the proven runtime reason
+`occupancy_stale` and two report `message_stamp_unavailable`. The analyzer
+records `P0_INPUT_AVAILABILITY_FAIL`, `zero_successful_generations`, zero
+latency distribution and no tuning recommendation. Raw health/integrity
+SHA-256 values are
+`59f88a7eb9cde2695aad20aef7e6f32c4f065e1caf0bf127907f2a814b40ee59`
+and `b82089044a2088d02b0e44c9a3a2eebd2e43168d559578046afe989352052aca`;
+analyzer result, summary and CSV are
+`ad4d489fada54978c089c75a8638ce096ea48367c954b4f635dcadf12c693dc3`,
+`87a8a946e4c07b8f26a86315bf6d6381d20b15fc4c63569ee0e280325c9cf98a`
+and `d763d22b0ae1e9eca6fd19ab30cbcad7bbc831f43886d9432037941cb3705446`
+respectively.
+
+Per the one-shot rule there was no retry, wait, tuning, alternate flow,
+60-second qualification, Gate promotion, bag/RViz, P4/P5 product work or next
+task. **Gate-0B NOT_QUALIFIED.** ICRA-021 is returned BLOCKED to Supervisor
+review with the exact bounded evidence.

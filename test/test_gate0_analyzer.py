@@ -16,6 +16,95 @@ assert SPEC.loader is not None
 SPEC.loader.exec_module(MODULE)
 
 
+REQUIRED_COUNTER_FIELDS = (
+    "refresh_query_count",
+    "provider_query_count",
+    "occupied_skip_count",
+    "predictor_unique_positions",
+    "predictor_requested_worker_count",
+    "predictor_effective_worker_count",
+    "predictor_spatial_advisory_recompute_count",
+    "predictor_spatial_advisory_reuse_count",
+    "predictor_gnss_advisory_invocation_count",
+    "predictor_lidar_advisory_invocation_count",
+    "predictor_horizon_fusion_count",
+    "predictor_spatial_retained_position_count",
+    "predictor_spatial_entered_position_count",
+    "predictor_spatial_evicted_position_count",
+    "predictor_spatial_full_invalidation_count",
+    "predictor_spatial_exact_retained_position_count",
+    "predictor_spatial_ttl_retained_position_count",
+    "predictor_spatial_gnss_ttl_expired_position_count",
+    "predictor_spatial_legacy_current_ttl_expired_position_count",
+    "predictor_spatial_watchdog_forced_full_rebuild_count",
+    "predictor_spatial_invalid_source_provenance_count",
+)
+
+
+def valid_p0_message(**overrides):
+    message = {
+        "generation_id": 1,
+        "refresh_callback_end_steady_s": 1.0,
+        "refresh_query_count": 76800,
+        "provider_query_count": 76800,
+        "occupied_skip_count": 0,
+        "predictor_unique_positions": 12800,
+        "predictor_requested_worker_count": 4,
+        "predictor_effective_worker_count": 4,
+        "predictor_spatial_advisory_recompute_count": 12800,
+        "predictor_spatial_advisory_reuse_count": 64000,
+        "predictor_gnss_advisory_invocation_count": 12800,
+        "predictor_lidar_advisory_invocation_count": 12800,
+        "predictor_horizon_fusion_count": 76800,
+        "predictor_spatial_retained_position_count": 0,
+        "predictor_spatial_entered_position_count": 12800,
+        "predictor_spatial_evicted_position_count": 0,
+        "predictor_spatial_full_invalidation_count": 0,
+        "predictor_spatial_exact_retained_position_count": 0,
+        "predictor_spatial_ttl_retained_position_count": 0,
+        "predictor_spatial_gnss_ttl_expired_position_count": 0,
+        "predictor_spatial_legacy_current_ttl_expired_position_count": 0,
+        "predictor_spatial_watchdog_forced_full_rebuild_count": 0,
+        "predictor_spatial_invalid_source_provenance_count": 0,
+        "predictor_spatial_invalidation_reason": "uninitialized",
+        "ready": True,
+        "stale": False,
+        "valid_ratio": 1.0,
+        "unknown_ratio": 0.0,
+        "reason": "ok",
+        "refresh_elapsed_ms": 100.0,
+        "provider_batch_duration_ms": 80.0,
+        "generation_interval_ms": 500.0,
+        "refresh_stamp_s": 1.0,
+        "snapshot_available": True,
+        "snapshot_failure_reason": "none",
+        "odom_seen": True,
+        "odom_valid": True,
+        "odom_fresh": True,
+        "odom_stamp_s": 1.0,
+        "current_integrity_seen": True,
+        "current_integrity_valid": True,
+        "current_integrity_fresh": True,
+        "current_integrity_stamp_s": 1.0,
+        "gnss_epoch_seen": True,
+        "gnss_epoch_valid": True,
+        "gnss_epoch_fresh": True,
+        "gnss_epoch_stamp_s": 1.0,
+        "gnss_epoch_satellite_count": 31,
+        "origin_seen": True,
+        "origin_valid": True,
+        "origin_fresh": True,
+        "origin_stamp_s": 1.0,
+        "map_seen": True,
+        "map_valid": True,
+        "map_fresh": True,
+        "map_stamp_s": 1.0,
+        "map_point_count": 23309,
+    }
+    message.update(overrides)
+    return message
+
+
 class Gate0AnalyzerTest(unittest.TestCase):
     def test_canonical_control_point_hash_is_frozen(self):
         digest, canonical = MODULE.canonical_control_points_hash(
@@ -199,7 +288,7 @@ class Gate0AnalyzerTest(unittest.TestCase):
             "p0.resolution_m": 0.75,
             "p0.horizons_s": "0.0,0.5,1.0,1.5,2.0,2.5",
             "p0.refresh_period_s": 0.5,
-            "p0.predictor.worker_count": 1,
+            "p0.predictor.worker_count": 4,
             "p0.skip_occupied_voxels": True,
             "record_bag": False,
             "start_rviz": False,
@@ -258,7 +347,8 @@ class Gate0AnalyzerTest(unittest.TestCase):
             "p0.resolution_m": 0.75,
             "p0.horizons_s": [0.0, 0.5, 1.0, 1.5, 2.0, 2.5],
             "p0.refresh_period_s": 0.5,
-            "p0.predictor.effective_worker_count": 1,
+            "p0.predictor.requested_worker_count": 4,
+            "p0.predictor.effective_worker_count": 4,
             "p0.skip_occupied_voxels": True,
             "record_bag": False,
             "start_rviz": False,
@@ -296,26 +386,42 @@ class Gate0AnalyzerTest(unittest.TestCase):
         self.assertEqual(
             MODULE.validate_gate0b_manifest(manifest, runtime, 1), []
         )
+        runtime["p0.predictor.requested_worker_count"] = 1
+        self.assertIn(
+            "p0_runtime_p0.predictor.requested_worker_count_mismatch",
+            MODULE.validate_gate0b_manifest(manifest, runtime, 1),
+        )
+        runtime["p0.predictor.requested_worker_count"] = 4
+        runtime["p0.predictor.effective_worker_count"] = 2
+        self.assertIn(
+            "p0_runtime_p0.predictor.effective_worker_count_mismatch",
+            MODULE.validate_gate0b_manifest(manifest, runtime, 1),
+        )
+        runtime["p0.predictor.effective_worker_count"] = 4
         runtime["iap_mapping_backend"] = "gpu"
         self.assertIn(
             "p0_runtime_mapping_backend_mismatch",
             MODULE.validate_gate0b_manifest(manifest, runtime, 1),
         )
 
+    def test_gate0b_manifest_rejects_one_and_every_non_four_worker_value(self):
+        for worker_count in (1, 2, 3, 5, 8):
+            with self.subTest(worker_count=worker_count):
+                manifest = {
+                    "run_id": "p0-smoke",
+                    "effective_config": {
+                        "p0.predictor.worker_count": worker_count,
+                        "run_duration_s": 20,
+                        "validation_duration_s": 15,
+                    },
+                    "gpu_preflight": {"gpu_ready": True},
+                    "capture_readiness": {"ready": True},
+                }
+                failures = MODULE.validate_gate0b_manifest(manifest, None, 0)
+                self.assertIn("p0_p0.predictor.worker_count_mismatch", failures)
+
     def test_smoke_and_benchmark_use_distinct_fixed_contracts(self):
-        messages = [{
-            "generation_id": 1,
-            "refresh_callback_end_steady_s": 1.0,
-            "refresh_query_count": 76800,
-            "ready": True,
-            "stale": False,
-            "valid_ratio": 1.0,
-            "unknown_ratio": 0.0,
-            "reason": "ok",
-            "refresh_elapsed_ms": 900.0,
-            "generation_interval_ms": 500.0,
-            "refresh_stamp_s": 1.0,
-        }]
+        messages = [valid_p0_message(refresh_elapsed_ms=900.0)]
         _, smoke = MODULE.analyze_p0_messages(messages, protocol="smoke")
         _, benchmark = MODULE.analyze_p0_messages(messages, protocol="benchmark")
         self.assertEqual(smoke["gate"], "PASS")
@@ -386,19 +492,11 @@ class Gate0AnalyzerTest(unittest.TestCase):
     def test_successful_generation_with_nonfinite_latency_fails_closed(self):
         messages = []
         for generation in range(1, 21):
-            messages.append({
-                "generation_id": generation,
-                "refresh_callback_end_steady_s": float(generation),
-                "refresh_query_count": 76800,
-                "ready": True,
-                "stale": False,
-                "valid_ratio": 1.0,
-                "unknown_ratio": 0.0,
-                "reason": "ok",
-                "refresh_elapsed_ms": 100.0,
-                "generation_interval_ms": 500.0,
-                "refresh_stamp_s": float(generation),
-            })
+            messages.append(valid_p0_message(
+                generation_id=generation,
+                refresh_callback_end_steady_s=float(generation),
+                refresh_stamp_s=float(generation),
+            ))
         messages[-1]["refresh_elapsed_ms"] = "null"
         _, summary = MODULE.analyze_p0_messages(messages)
         self.assertIn("successful_generation_latency_nonfinite", summary["failures"])
@@ -482,25 +580,12 @@ class Gate0AnalyzerTest(unittest.TestCase):
         )
         messages = []
         for generation in range(1, 22):
-            messages.append({
-                "generation_id": generation,
-                "refresh_callback_end_steady_s": float(generation),
-                "refresh_query_count": 76800,
-                "provider_query_count": 76000,
-                "predictor_unique_positions": 12800,
-                "predictor_effective_worker_count": 1,
-                "refresh_elapsed_ms": 100.0 + generation,
-                "provider_batch_duration_ms": 80.0,
-                "predictor_lidar_evaluations": 100,
-                "predictor_lidar_cache_hits": 50,
-                "ready": True,
-                "stale": False,
-                "valid_ratio": 1.0,
-                "unknown_ratio": 0.0,
-                "reason": "ok",
-                "generation_interval_ms": 500.0,
-                "refresh_stamp_s": float(generation),
-            })
+            messages.append(valid_p0_message(
+                generation_id=generation,
+                refresh_callback_end_steady_s=float(generation),
+                refresh_elapsed_ms=100.0 + generation,
+                refresh_stamp_s=float(generation),
+            ))
         messages.append(dict(messages[-1]))
         rows, summary = MODULE.analyze_p0_messages(messages)
         self.assertEqual(len(rows), 21)
@@ -514,6 +599,150 @@ class Gate0AnalyzerTest(unittest.TestCase):
         _, failed = MODULE.analyze_p0_messages(slow)
         self.assertEqual(failed["gate"], "P0_PERFORMANCE_GATE_FAIL")
         self.assertGreater(failed["refresh_elapsed_ms_p95"], 400.0)
+
+    def test_successful_generation_requires_every_rolling_counter(self):
+        self.assertEqual(tuple(MODULE.REQUIRED_P0_COUNTER_FIELDS), REQUIRED_COUNTER_FIELDS)
+        self.assertTrue(set(REQUIRED_COUNTER_FIELDS).issubset(MODULE.P0_FIELDS))
+        self.assertIn("predictor_spatial_invalidation_reason", MODULE.P0_FIELDS)
+        self.assertTrue(set(MODULE.REQUIRED_P0_TIMING_FIELDS).issubset(MODULE.P0_FIELDS))
+        for field in REQUIRED_COUNTER_FIELDS:
+            with self.subTest(field=field, defect="missing"):
+                message = valid_p0_message()
+                del message[field]
+                _, summary = MODULE.analyze_p0_messages([message], protocol="smoke")
+                self.assertIn(f"required_counter_missing:{field}", summary["failures"])
+            with self.subTest(field=field, defect="malformed"):
+                _, summary = MODULE.analyze_p0_messages(
+                    [valid_p0_message(**{field: "not-an-integer"})], protocol="smoke"
+                )
+                self.assertIn(f"required_counter_non_integral:{field}", summary["failures"])
+            with self.subTest(field=field, defect="negative"):
+                _, summary = MODULE.analyze_p0_messages(
+                    [valid_p0_message(**{field: -1})], protocol="smoke"
+                )
+                self.assertIn(f"required_counter_negative:{field}", summary["failures"])
+
+    def test_successful_generation_rejects_each_counter_identity_violation(self):
+        contradictions = {
+            "refresh_query_count_mismatch": {"refresh_query_count": 76799},
+            "provider_plus_occupied_skip_mismatch": {"provider_query_count": 76799},
+            "spatial_recompute_plus_reuse_mismatch": {
+                "predictor_spatial_advisory_reuse_count": 63999,
+            },
+            "horizon_fusion_mismatch": {"predictor_horizon_fusion_count": 76799},
+            "gnss_advisory_invocation_mismatch": {
+                "predictor_gnss_advisory_invocation_count": 12799,
+            },
+            "lidar_advisory_invocation_mismatch": {
+                "predictor_lidar_advisory_invocation_count": 12799,
+            },
+            "retained_plus_entered_mismatch": {
+                "predictor_spatial_entered_position_count": 12799,
+            },
+            "predictor_unique_positions_out_of_range": {
+                "predictor_unique_positions": 12801,
+            },
+            "predictor_spatial_retained_position_count_out_of_range": {
+                "predictor_spatial_retained_position_count": 12801,
+            },
+            "predictor_spatial_entered_position_count_out_of_range": {
+                "predictor_spatial_entered_position_count": 12801,
+            },
+            "predictor_spatial_evicted_position_count_out_of_range": {
+                "predictor_spatial_evicted_position_count": 12801,
+            },
+            "requested_worker_count_mismatch": {"predictor_requested_worker_count": 1},
+            "effective_worker_count_mismatch": {"predictor_effective_worker_count": 2},
+        }
+        for failure, override in contradictions.items():
+            with self.subTest(failure=failure):
+                _, summary = MODULE.analyze_p0_messages(
+                    [valid_p0_message(**override)], protocol="smoke"
+                )
+                self.assertIn(failure, summary["failures"])
+
+    def test_successful_generation_requires_finite_timings_and_invalidation_reason(self):
+        for field in ("refresh_elapsed_ms", "provider_batch_duration_ms", "generation_interval_ms"):
+            with self.subTest(field=field, defect="missing"):
+                message = valid_p0_message()
+                del message[field]
+                _, summary = MODULE.analyze_p0_messages([message], protocol="smoke")
+                self.assertIn(f"successful_generation_timing_nonfinite:{field}", summary["failures"])
+            with self.subTest(field=field, defect="nonfinite"):
+                _, summary = MODULE.analyze_p0_messages(
+                    [valid_p0_message(**{field: math.inf})], protocol="smoke"
+                )
+                self.assertIn(f"successful_generation_timing_nonfinite:{field}", summary["failures"])
+        for value in (None, ""):
+            with self.subTest(invalidation_reason=value):
+                _, summary = MODULE.analyze_p0_messages(
+                    [valid_p0_message(predictor_spatial_invalidation_reason=value)],
+                    protocol="smoke",
+                )
+                self.assertIn("spatial_invalidation_reason_missing", summary["failures"])
+
+    def test_successful_generation_requires_source_readiness_and_stamps(self):
+        self.assertIn("snapshot_available", MODULE.P0_FIELDS)
+        for prefix in MODULE.REQUIRED_P0_SOURCE_PREFIXES:
+            for suffix in ("seen", "valid", "fresh"):
+                field = f"{prefix}_{suffix}"
+                with self.subTest(field=field, defect="missing"):
+                    message = valid_p0_message()
+                    del message[field]
+                    _, summary = MODULE.analyze_p0_messages([message], protocol="smoke")
+                    self.assertIn(
+                        f"source_readiness_not_true:{field}", summary["failures"]
+                    )
+                with self.subTest(field=field, defect="malformed"):
+                    _, summary = MODULE.analyze_p0_messages(
+                        [valid_p0_message(**{field: "true"})], protocol="smoke"
+                    )
+                    self.assertIn(
+                        f"source_readiness_not_true:{field}", summary["failures"]
+                    )
+                with self.subTest(field=field, defect="false"):
+                    _, summary = MODULE.analyze_p0_messages(
+                        [valid_p0_message(**{field: False})], protocol="smoke"
+                    )
+                    self.assertIn(
+                        f"source_readiness_not_true:{field}", summary["failures"]
+                    )
+            stamp_field = f"{prefix}_stamp_s"
+            for value in (None, "not-a-number", math.inf, 0.0, -1.0):
+                with self.subTest(field=stamp_field, value=value):
+                    _, summary = MODULE.analyze_p0_messages(
+                        [valid_p0_message(**{stamp_field: value})], protocol="smoke"
+                    )
+                    self.assertIn(
+                        f"source_stamp_invalid:{stamp_field}", summary["failures"]
+                    )
+
+    def test_successful_generation_requires_clean_snapshot_failure_reason(self):
+        for value in (None, "", "odom_missing"):
+            with self.subTest(snapshot_failure_reason=value):
+                _, summary = MODULE.analyze_p0_messages(
+                    [valid_p0_message(snapshot_failure_reason=value)], protocol="smoke"
+                )
+                self.assertIn("snapshot_failure_reason_not_none", summary["failures"])
+        for value in (None, "", 7, "occupancy_stale"):
+            with self.subTest(reason=value):
+                _, summary = MODULE.analyze_p0_messages(
+                    [valid_p0_message(reason=value)], protocol="smoke"
+                )
+                self.assertIn("health_reason_not_ok", summary["failures"])
+        for value in (None, False, "true"):
+            with self.subTest(snapshot_available=value):
+                _, summary = MODULE.analyze_p0_messages(
+                    [valid_p0_message(snapshot_available=value)], protocol="smoke"
+                )
+                self.assertIn("snapshot_unavailable", summary["failures"])
+
+    def test_malformed_ready_value_is_not_a_successful_generation(self):
+        _, summary = MODULE.analyze_p0_messages(
+            [valid_p0_message(ready="true")], protocol="smoke"
+        )
+        self.assertEqual(summary["successful_generation_count"], 0)
+        self.assertIn("zero_successful_generations", summary["failures"])
 
 
 if __name__ == "__main__":

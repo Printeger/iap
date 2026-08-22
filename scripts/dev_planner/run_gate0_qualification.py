@@ -466,7 +466,7 @@ def p0_effective_config(
         "p0.resolution_m": 0.75,
         "p0.horizons_s": "0.0,0.5,1.0,1.5,2.0,2.5",
         "p0.refresh_period_s": 0.5,
-        "p0.predictor.worker_count": 1,
+        "p0.predictor.worker_count": 4,
         "p0.skip_occupied_voxels": True,
         "p1.use_integrity_cost": False,
         "p1.metrics_only": False,

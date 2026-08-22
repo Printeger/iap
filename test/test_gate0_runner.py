@@ -178,7 +178,17 @@ class Gate0RunnerTest(unittest.TestCase):
         self.assertEqual(config["p0.horizons_s"].split(","), [
             "0.0", "0.5", "1.0", "1.5", "2.0", "2.5"
         ])
-        self.assertEqual(config["p0.predictor.worker_count"], 1)
+        self.assertEqual(config["p0.predictor.worker_count"], 4)
+
+    def test_p0_config_freezes_four_workers_for_both_durations(self):
+        smoke = MODULE.p0_effective_config(
+            Path("/tmp/p0-smoke"), run_duration_s=20, validation_duration_s=15
+        )
+        benchmark = MODULE.p0_effective_config(Path("/tmp/p0-benchmark"))
+        self.assertEqual(smoke["p0.predictor.worker_count"], 4)
+        self.assertEqual(benchmark["p0.predictor.worker_count"], 4)
+        self.assertEqual((smoke["run_duration_s"], smoke["validation_duration_s"]), (20, 15))
+        self.assertEqual((benchmark["run_duration_s"], benchmark["validation_duration_s"]), (60, 55))
 
     def test_runner_exit_requires_launch_capture_finalize_and_process_ok(self):
         self.assertEqual(

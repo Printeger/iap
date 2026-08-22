@@ -1,5 +1,31 @@
 # Traceability Matrix (IAP)
 
+## 2026-08-22 ICRA-021 four-worker Gate-0B smoke
+
+| Req ID | Requirement/evidence seam | Implementation and focused evidence | Status |
+|---|---|---|---|
+| IAP-RQ-320 / IAP-RQ-322 | The post-refactor Gate-0B pair must use one preselected worker count without changing product defaults | `p0_effective_config()` requests exactly four for both `20/15 s` smoke and future `60/55 s` benchmark; runner, run manifest, runtime manifest, and every successful health row require requested/effective `(4,4)`; tests reject one and every sampled non-four value | **IMPLEMENTED / VERIFIED: global launch/runtime default remains one** |
+| IAP-RQ-320 / IAP-RQ-322 | Current rolling production evidence must not be dropped or accepted when malformed/incoherent | `gate0_analyzer.py` CSV retains all exact rolling work/provenance counters, invalidation reason, source readiness/failure fields and refresh/provider/generation timing; per-success strict integer/nonnegative/range checks, all seven production identities, exact `ok` health reason, source seen/valid/fresh booleans, positive finite source stamps and clean snapshot state fail closed | **IMPLEMENTED / VERIFIED: analyzer 22/22, runner 16/16, capture 1/1** |
+| IAP-RQ-320 / IAP-RQ-322 | Smoke is availability/lifecycle evidence and must not apply the later formal latency threshold | smoke requires at least one successful generation and one finite integrity report but ignores `400 ms`; benchmark retains at least 20 generations and R-7 p95 `<=400 ms`; zero generation/integrity, process death and capture-readiness failures remain nonzero | **IMPLEMENTED / VERIFIED: focused contracts green** |
+| IAP-RQ-320 / IAP-RQ-322 | The mandatory one-shot live evidence must stop on failure without tuning or qualification | GPU preflight PASS: RTX 4070 Ti SUPER, driver `580.126.09`, `cuInit=0`, `device_count=1`; exactly one 20-second smoke had capture ready first, required `iap_rosnode` observed/alive through runtime, controlled shutdown and runner exit 0, but 24/24 P0 rows were unsuccessful (`occupancy_stale` 22, `message_stamp_unavailable` 2) despite 210/210 finite integrity rows; analyzer exit 1 | **BLOCKED / Gate-0B NOT_QUALIFIED: no retry or 60-second run** |
+
+Canonical bounded evidence hashes: GPU preflight
+`4bfda37b2a4d917e37e8f7b22161a97333329c56c5ce904c19d670239bdf9b8d`;
+run manifest
+`429633aa4818832461cdd852f31a9b128894220663e7e73162a1d9954c180ac0`;
+raw health
+`59f88a7eb9cde2695aad20aef7e6f32c4f065e1caf0bf127907f2a814b40ee59`;
+raw integrity
+`b82089044a2088d02b0e44c9a3a2eebd2e43168d559578046afe989352052aca`;
+runtime manifest
+`30cd0c2fe7d1731ac15d06a46219a8d27573b93cb4bb735cf90e48d9c859df02`;
+analyzer result
+`ad4d489fada54978c089c75a8638ce096ea48367c954b4f635dcadf12c693dc3`,
+summary `87a8a946e4c07b8f26a86315bf6d6381d20b15fc4c63569ee0e280325c9cf98a`,
+and CSV `d763d22b0ae1e9eca6fd19ab30cbcad7bbc831f43886d9432037941cb3705446`.
+ICRA-011, disabled ICRA-014, accepted ICRA-020 and the protected untracked PDF
+remain exact and were not regenerated or modified.
+
 ## 2026-08-22 ICRA-020 Stage-5 rolling P0 worker-scaling diagnostic
 
 | Req ID | Requirement/evidence seam | Implementation and focused evidence | Status |

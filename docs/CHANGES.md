@@ -3,6 +3,74 @@
 > 规则：任何代码改动必须在这里记录，并包含 IAP-RQ-XXX。
 
 ## Unreleased
+- test(icra-021-gate0b-four-worker-smoke): IAP-RQ-320 / IAP-RQ-322 — freeze the Gate-0B smoke/future-qualification runner at requested worker count four without changing the global launch/runtime default or any P0 science. The runner manifest, runtime manifest, and every successful health generation must agree on requested/effective `(4,4)`. The analyzer CSV now retains the exact production rolling counters, invalidation reason, source-readiness evidence, and refresh/provider/generation timing fields; successful rows fail closed on missing, non-integral, negative, non-finite, out-of-range, or contradictory work identities, any health reason other than `ok`, non-true source seen/valid/fresh flags, invalid source stamps, and unavailable/failed snapshot evidence. Smoke still requires one complete generation and one finite integrity report without applying the `400 ms` threshold; benchmark retains 20 generations and R-7 p95 `<= 400 ms`.
+  - The approved post-review ICRA-020 validator still checks the exact canonical schema, recorded implementation sources, paths/hashes and all science/counter/timing contracts. Its bound build/install files may be absent after Supervisor retention, but any existing bound path must be a regular file with the recorded SHA-256.
+  - Repository-local verification passed runner 16/16, analyzer 22/22, capture 1/1, ICRA-020 validator 1/1, P0 75/75, Adapter 7/7, rolling 23/23, selected root including ICRA-011/020 8/8, plan-env 1/1, retained Ego 8/8, P4 A* 4/4 and P1 integrity-cost 39/39. Fourteen direct consumers resolved `results/icra27/icra021/runs/install/lib/libiap.so` at SHA-256 `4170b982d77e0efbdd7c3b8019cea556cf2aa18d1e11ab2e7b63ec1e55580dd5`.
+  - The mandatory GPU preflight passed on one `NVIDIA GeForce RTX 4070 Ti SUPER`, driver `580.126.09`; CUDA Driver API returned `cuInit(0)=0`, `cuDeviceGetCount=0`, `device_count=1`. Exactly one 20-second smoke was then run. Runner/capture/process lifecycle exited zero and 210/210 integrity reports were finite, but all 24 health rows were unsuccessful (`22 occupancy_stale`, `2 message_stamp_unavailable`), so the analyzer exited 1 with `P0_INPUT_AVAILABILITY_FAIL`. No retry, tuning, 60-second qualification, or Gate promotion was performed. **Gate-0B NOT_QUALIFIED; ICRA-021 BLOCKED pending Supervisor review.** Bounded SHA-256 evidence is: preflight `4bfda37b2a4d917e37e8f7b22161a97333329c56c5ce904c19d670239bdf9b8d`; run manifest `429633aa4818832461cdd852f31a9b128894220663e7e73162a1d9954c180ac0`; runtime manifest `30cd0c2fe7d1731ac15d06a46219a8d27573b93cb4bb735cf90e48d9c859df02`; raw health `59f88a7eb9cde2695aad20aef7e6f32c4f065e1caf0bf127907f2a814b40ee59`; raw integrity `b82089044a2088d02b0e44c9a3a2eebd2e43168d559578046afe989352052aca`; analyzer result `ad4d489fada54978c089c75a8638ce096ea48367c954b4f635dcadf12c693dc3`; analyzer summary `87a8a946e4c07b8f26a86315bf6d6381d20b15fc4c63569ee0e280325c9cf98a`; analyzer CSV `d763d22b0ae1e9eca6fd19ab30cbcad7bbc831f43886d9432037941cb3705446`.
+
+Repository-local ICRA-021 reproduction/verification commands from the repository root:
+
+```bash
+repo_root="$(pwd)"
+run_root="$repo_root/results/icra27/icra021/runs"
+cmake -S "$repo_root" -B "$run_root/build_iap" \
+  -DCMAKE_BUILD_TYPE=RelWithDebInfo -DCMAKE_INSTALL_PREFIX="$run_root/install" \
+  -DBUILD_WITH_CUDA=ON -DBUILD_WITH_VIEWER=ON -DBUILD_WITH_OPENCV=ON
+cmake --build "$run_root/build_iap" -j2
+cmake --install "$run_root/build_iap"
+
+cmake -S "$repo_root/src/iap/planner/plan_env" -B "$run_root/build_plan_env" \
+  -DCMAKE_BUILD_TYPE=RelWithDebInfo -DCMAKE_INSTALL_PREFIX="$run_root/install_plan_env"
+cmake --build "$run_root/build_plan_env" -j2
+cmake --install "$run_root/build_plan_env"
+
+cmake -S "$repo_root/src/iap/planner/path_searching" -B "$run_root/build_path_searching" \
+  -DCMAKE_BUILD_TYPE=RelWithDebInfo -DCMAKE_INSTALL_PREFIX="$run_root/install_path_searching" \
+  -Diap_DIR="$run_root/install/share/iap" \
+  -Dplan_env_DIR="$run_root/install_plan_env/share/plan_env/cmake"
+cmake --build "$run_root/build_path_searching" -j2
+cmake --install "$run_root/build_path_searching"
+
+cmake -S "$repo_root/src/iap/planner/bspline_opt" -B "$run_root/build_bspline_opt" \
+  -DCMAKE_BUILD_TYPE=RelWithDebInfo -DCMAKE_INSTALL_PREFIX="$run_root/install_bspline_opt" \
+  -Diap_DIR="$run_root/install/share/iap" \
+  -Dplan_env_DIR="$run_root/install_plan_env/share/plan_env/cmake" \
+  -Dpath_searching_DIR="$run_root/install_path_searching/share/path_searching/cmake"
+cmake --build "$run_root/build_bspline_opt" -j2
+cmake --install "$run_root/build_bspline_opt"
+
+cmake -S "$repo_root/src/iap/planner/plan_manage" -B "$run_root/build_ego" \
+  -DCMAKE_BUILD_TYPE=RelWithDebInfo -DCMAKE_INSTALL_PREFIX="$run_root/install_ego" \
+  -Diap_DIR="$run_root/install/share/iap" \
+  -Dplan_env_DIR="$run_root/install_plan_env/share/plan_env/cmake" \
+  -Dpath_searching_DIR="$run_root/install_path_searching/share/path_searching/cmake" \
+  -Dbspline_opt_DIR="$run_root/install_bspline_opt/share/bspline_opt/cmake"
+cmake --build "$run_root/build_ego" -j2
+cmake --install "$run_root/build_ego"
+
+python3 test/test_gate0_runner.py
+python3 test/test_gate0_analyzer.py
+python3 test/test_gate0_capture_p0_health.py
+python3 test/test_icra020_p0_rolling_worker_profile.py
+"$run_root/build_ego/test_p0_risk_grid_runtime"
+"$run_root/build_ego/test_p0_occupancy_epoch_adapter"
+"$run_root/build_iap/test_rolling_spatial_advisory_window"
+ctest --test-dir "$run_root/build_iap" --output-on-failure \
+  -R 'test_integrity_snapshot|test_local_occupancy|test_predictor_module|test_rolling_spatial_advisory_window|test_predictor_risk_conversion|test_risk_grid_map|test_icra011_spatial_dedup_profile|test_icra020_p0_rolling_worker_profile'
+ctest --test-dir "$run_root/build_plan_env" -R '^test_grid_map_occupancy_epoch$' --output-on-failure
+ctest --test-dir "$run_root/build_ego" --output-on-failure \
+  -R 'test_p0_risk_grid_runtime|test_p0_occupancy_epoch_adapter|test_p1_replan_admission|test_p1_candidate_selection|test_p5_runtime_integrity_gate|test_p2_candidate_ranking|test_p3_reference_bias|test_planning_risk_context'
+"$run_root/build_path_searching/test_p4_risk_astar"
+"$run_root/build_bspline_opt/test_p1_integrity_cost"
+
+# These two commands are historical one-shot evidence and must not be rerun.
+python3 scripts/dev_planner/run_gate0_qualification.py \
+  --output-root results/icra27/icra021/runs --smoke
+python3 scripts/dev_planner/gate0_analyzer.py \
+  --gate0-root results/icra27/icra021/runs \
+  --output-dir results/icra27/icra021/runs/smoke/analyzer
+```
+
 - test(icra-020-stage5-worker-profile): IAP-RQ-310 / IAP-RQ-311 / IAP-RQ-312 / IAP-RQ-314 / IAP-RQ-320 / IAP-RQ-321 / IAP-RQ-322 — add one explicitly disabled, fail-closed production `P0RiskGridRuntime::refreshOnceForTest()` worker-scaling profile at the existing friend-only test seam. The fixed `40 x 40 x 8 x 6` Fusion/required-GNSS workload uses 31 satellites, 704 aligned occupancy voxels, 704 deterministic LiDAR FIM primitives and 23,309 LiDAR map points at requested/effective workers 1/2/4. Each cold, stationary empty-delta, `+1 x` empty-delta and stationary nonempty-delta row requires two unrecorded warmups, ten measured fresh-runtime samples, exact work counters and untimed fresh scientific equivalence.
   - The canonical schema stores raw wall, runtime refresh and provider-batch samples plus R-7 p50/p95/max and worker-1 speedups. It records the implementation commit, compiler/build type, binary/current-library hashes, CPU model/core count and exact opt-in command. `test_icra020_p0_rolling_worker_profile.py` rejects a missing/stale artifact, implementation/source or binary mismatch, incomplete matrix, wrong counts/provenance/hashes, nonfinite timing, non-derivable summaries and any latency/Gate/worker/reverse-ray/GPU promotion. This is synthetic cost-ranking evidence only: no worker selection, production tuning, reverse-ray, GPU work, main flow, smoke, qualification, analyzer or formal benchmark is performed.
 

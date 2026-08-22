@@ -20,14 +20,48 @@ GATE0A_SCENARIO_MAP = {
 }
 GATE0A_SCENARIOS = tuple(GATE0A_SCENARIO_MAP)
 EXPECTED_REFRESH_QUERY_COUNT = 76800
-P0_FIELDS = (
-    "generation_id",
+EXPECTED_UNIQUE_POSITION_COUNT = 12800
+EXPECTED_WORKER_COUNT = 4
+REQUIRED_P0_COUNTER_FIELDS = (
     "refresh_query_count",
     "provider_query_count",
+    "occupied_skip_count",
     "predictor_unique_positions",
+    "predictor_requested_worker_count",
     "predictor_effective_worker_count",
+    "predictor_spatial_advisory_recompute_count",
+    "predictor_spatial_advisory_reuse_count",
+    "predictor_gnss_advisory_invocation_count",
+    "predictor_lidar_advisory_invocation_count",
+    "predictor_horizon_fusion_count",
+    "predictor_spatial_retained_position_count",
+    "predictor_spatial_entered_position_count",
+    "predictor_spatial_evicted_position_count",
+    "predictor_spatial_full_invalidation_count",
+    "predictor_spatial_exact_retained_position_count",
+    "predictor_spatial_ttl_retained_position_count",
+    "predictor_spatial_gnss_ttl_expired_position_count",
+    "predictor_spatial_legacy_current_ttl_expired_position_count",
+    "predictor_spatial_watchdog_forced_full_rebuild_count",
+    "predictor_spatial_invalid_source_provenance_count",
+)
+REQUIRED_P0_TIMING_FIELDS = (
     "refresh_elapsed_ms",
     "provider_batch_duration_ms",
+    "generation_interval_ms",
+)
+REQUIRED_P0_SOURCE_PREFIXES = (
+    "odom",
+    "current_integrity",
+    "gnss_epoch",
+    "origin",
+    "map",
+)
+P0_FIELDS = (
+    "generation_id",
+    *REQUIRED_P0_COUNTER_FIELDS,
+    "predictor_spatial_invalidation_reason",
+    *REQUIRED_P0_TIMING_FIELDS,
     "predictor_lidar_evaluations",
     "predictor_lidar_cache_hits",
     "ready",
@@ -35,9 +69,9 @@ P0_FIELDS = (
     "valid_ratio",
     "unknown_ratio",
     "reason",
-    "generation_interval_ms",
     "refresh_stamp_s",
     "failed_refresh",
+    "snapshot_available",
     "snapshot_failure_reason",
     "odom_seen",
     "odom_valid",
@@ -449,7 +483,7 @@ def validate_gate0b_manifest(
         "p0.resolution_m": 0.75,
         "p0.horizons_s": "0.0,0.5,1.0,1.5,2.0,2.5",
         "p0.refresh_period_s": 0.5,
-        "p0.predictor.worker_count": 1,
+        "p0.predictor.worker_count": EXPECTED_WORKER_COUNT,
         "p0.skip_occupied_voxels": True,
         "record_bag": False,
         "start_rviz": False,
@@ -530,7 +564,8 @@ def validate_gate0b_manifest(
         "p0.resolution_m": 0.75,
         "p0.horizons_s": [0.0, 0.5, 1.0, 1.5, 2.0, 2.5],
         "p0.refresh_period_s": 0.5,
-        "p0.predictor.effective_worker_count": 1,
+        "p0.predictor.requested_worker_count": EXPECTED_WORKER_COUNT,
+        "p0.predictor.effective_worker_count": EXPECTED_WORKER_COUNT,
         "p0.skip_occupied_voxels": True,
         "record_bag": False,
         "start_rviz": False,
@@ -603,6 +638,101 @@ def type7_quantile(values: Iterable[float], probability: float) -> float:
     return ordered[lower] + fraction * (ordered[upper] - ordered[lower])
 
 
+def _p0_counter_contract_failures(row: dict[str, Any]) -> list[str]:
+    failures: list[str] = []
+    counters: dict[str, int] = {}
+    for field in REQUIRED_P0_COUNTER_FIELDS:
+        value = row.get(field)
+        if value is None or value == "":
+            failures.append(f"required_counter_missing:{field}")
+        elif isinstance(value, bool) or not isinstance(value, int):
+            failures.append(f"required_counter_non_integral:{field}")
+        elif value < 0:
+            failures.append(f"required_counter_negative:{field}")
+        else:
+            counters[field] = value
+
+    def values(*fields: str) -> tuple[int, ...] | None:
+        if not all(field in counters for field in fields):
+            return None
+        return tuple(counters[field] for field in fields)
+
+    refresh = values("refresh_query_count")
+    if refresh is not None and refresh[0] != EXPECTED_REFRESH_QUERY_COUNT:
+        failures.append("refresh_query_count_mismatch")
+    provider_shape = values("provider_query_count", "occupied_skip_count")
+    if provider_shape is not None and sum(provider_shape) != EXPECTED_REFRESH_QUERY_COUNT:
+        failures.append("provider_plus_occupied_skip_mismatch")
+    spatial = values(
+        "predictor_spatial_advisory_recompute_count",
+        "predictor_spatial_advisory_reuse_count",
+        "provider_query_count",
+    )
+    if spatial is not None and spatial[0] + spatial[1] != spatial[2]:
+        failures.append("spatial_recompute_plus_reuse_mismatch")
+    fusion = values("predictor_horizon_fusion_count", "provider_query_count")
+    if fusion is not None and fusion[0] != fusion[1]:
+        failures.append("horizon_fusion_mismatch")
+    gnss = values(
+        "predictor_gnss_advisory_invocation_count",
+        "predictor_spatial_advisory_recompute_count",
+    )
+    if gnss is not None and gnss[0] != gnss[1]:
+        failures.append("gnss_advisory_invocation_mismatch")
+    lidar = values(
+        "predictor_lidar_advisory_invocation_count",
+        "predictor_spatial_advisory_recompute_count",
+    )
+    if lidar is not None and lidar[0] != lidar[1]:
+        failures.append("lidar_advisory_invocation_mismatch")
+    rolling_shape = values(
+        "predictor_spatial_retained_position_count",
+        "predictor_spatial_entered_position_count",
+        "predictor_unique_positions",
+    )
+    if rolling_shape is not None and rolling_shape[0] + rolling_shape[1] != rolling_shape[2]:
+        failures.append("retained_plus_entered_mismatch")
+    for field in (
+        "predictor_unique_positions",
+        "predictor_spatial_retained_position_count",
+        "predictor_spatial_entered_position_count",
+        "predictor_spatial_evicted_position_count",
+    ):
+        if field in counters and counters[field] > EXPECTED_UNIQUE_POSITION_COUNT:
+            failures.append(f"{field}_out_of_range")
+    requested = values("predictor_requested_worker_count")
+    if requested is not None and requested[0] != EXPECTED_WORKER_COUNT:
+        failures.append("requested_worker_count_mismatch")
+    effective = values("predictor_effective_worker_count")
+    if effective is not None and effective[0] != EXPECTED_WORKER_COUNT:
+        failures.append("effective_worker_count_mismatch")
+    reason = row.get("predictor_spatial_invalidation_reason")
+    if not isinstance(reason, str) or not reason.strip():
+        failures.append("spatial_invalidation_reason_missing")
+    return failures
+
+
+def _p0_source_contract_failures(row: dict[str, Any]) -> list[str]:
+    failures: list[str] = []
+    reason = row.get("reason")
+    if reason != "ok":
+        failures.append("health_reason_not_ok")
+    if row.get("snapshot_available") is not True:
+        failures.append("snapshot_unavailable")
+    if row.get("snapshot_failure_reason") != "none":
+        failures.append("snapshot_failure_reason_not_none")
+    for prefix in REQUIRED_P0_SOURCE_PREFIXES:
+        for suffix in ("seen", "valid", "fresh"):
+            field = f"{prefix}_{suffix}"
+            if row.get(field) is not True:
+                failures.append(f"source_readiness_not_true:{field}")
+        stamp_field = f"{prefix}_stamp_s"
+        stamp = _float(row.get(stamp_field))
+        if not math.isfinite(stamp) or stamp <= 0.0:
+            failures.append(f"source_stamp_invalid:{stamp_field}")
+    return failures
+
+
 def analyze_p0_messages(
     messages: Iterable[dict[str, Any]],
     protocol: str = "benchmark",
@@ -621,11 +751,7 @@ def analyze_p0_messages(
     successful_generations: dict[int, dict[str, Any]] = {}
     for _, message in sorted(callbacks.items()):
         generation_id = _int(message.get("generation_id"))
-        success = (
-            generation_id > 0
-            and _bool(message.get("ready"))
-            and _int(message.get("refresh_query_count")) > 0
-        )
+        success = generation_id > 0 and message.get("ready") is True
         row = {field: message.get(field, "") for field in P0_FIELDS}
         row["generation_id"] = generation_id
         row["failed_refresh"] = 0 if success else 1
@@ -641,10 +767,14 @@ def analyze_p0_messages(
     latency_evidence_failure = bool(successful) and any(
         not math.isfinite(value) for value in latencies
     )
+    provider_latencies = [
+        _float(row.get("provider_batch_duration_ms")) for row in successful
+    ]
     intervals = [_float(row.get("generation_interval_ms")) for row in successful]
-    intervals = [value for value in intervals if math.isfinite(value)]
     shape_ok = bool(successful) and all(
-        _int(row.get("refresh_query_count")) == EXPECTED_REFRESH_QUERY_COUNT
+        isinstance(row.get("refresh_query_count"), int)
+        and not isinstance(row.get("refresh_query_count"), bool)
+        and row.get("refresh_query_count") == EXPECTED_REFRESH_QUERY_COUNT
         for row in successful
     )
     p95 = (
@@ -662,6 +792,18 @@ def analyze_p0_messages(
         failures.append("refresh_query_shape_mismatch")
     if latency_evidence_failure:
         failures.append("successful_generation_latency_nonfinite")
+    for row in successful:
+        for failure in _p0_counter_contract_failures(row):
+            if failure not in failures:
+                failures.append(failure)
+        for failure in _p0_source_contract_failures(row):
+            if failure not in failures:
+                failures.append(failure)
+        for field in REQUIRED_P0_TIMING_FIELDS:
+            if not math.isfinite(_float(row.get(field))):
+                failure = f"successful_generation_timing_nonfinite:{field}"
+                if failure not in failures:
+                    failures.append(failure)
     if protocol == "benchmark" and (not math.isfinite(p95) or p95 > 400.0):
         failures.append("refresh_p95_over_400_ms")
     if len(successful) == 0:
@@ -689,6 +831,8 @@ def analyze_p0_messages(
         "refresh_elapsed_ms_p50": type7_quantile(latencies, 0.50),
         "refresh_elapsed_ms_p95": p95,
         "refresh_elapsed_ms_max": max(latencies) if latencies else math.nan,
+        "provider_batch_duration_ms_p50": type7_quantile(provider_latencies, 0.50),
+        "provider_batch_duration_ms_p95": type7_quantile(provider_latencies, 0.95),
         "stale_ratio": (
             sum(_bool(row.get("stale")) for row in rows) / len(rows) if rows else 1.0
         ),
