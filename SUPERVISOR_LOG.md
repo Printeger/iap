@@ -1,5 +1,61 @@
 # ICRA Supervisor Log
 
+## 2026-08-22 — ICRA-023 review and ICRA-024 authorization
+
+### Review identity and synchronization
+
+- Review base: `4b2e82d9f533e96ccd6b2f070af2998469de6937`.
+- Reviewed HEAD: `6609f88ef16d66ef737d054409374b390be5c5af`.
+- Reviewed commits: `057aea2` and `6609f88`; both bind `IAP-RQ-320` and `IAP-RQ-322`.
+- After `git fetch origin`, `HEAD...origin/dev/icra` was `0 0`. The only untracked item remained
+  `docs/icra27/dev/ICRA_SYSTEM_FLOW.pdf`; it was preserved and excluded.
+- The fixed-range allowlist contains only the validator, authorized role-label summary correction,
+  new ICRA-023 summary, and Builder-owned change/traceability/log files. No product,
+  build/install, Supervisor-owned or external-repository file changed.
+
+### Two-axis verdict
+
+- Standards: `PASS`, zero findings. ICRA-022's unauthorized final-review wording is explicitly
+  reclassified as Builder self-check, the RQ-less pushed commit is acknowledged without history
+  rewrite, both ICRA-023 commits contain applicable RQ IDs, and the final task-return commit changes
+  only `DEV_LOG.md`.
+- Spec: `PASS`, zero findings. The validator retains the canonical artifact hash and every science,
+  workload, counter, timing, command, build-provenance, ephemeral-file and no-promotion assertion.
+  It now additionally proves that the exact 40-hex implementation SHA is a commit and that each
+  required implementation path is a blob in that commit. Nonexistent commits and missing paths
+  fail closed; legitimate later current-tree evolution passes.
+- Overall verdict: `ICRA023_REVIEW_PASS`. The prior review/provenance blocker is closed. Gate-0B
+  remains `NOT_QUALIFIED`; this review is not a P0 performance or live-flow Gate promotion.
+
+### Independent verification and retained artifacts
+
+- Passed: validator 5/5, selected root 8/8, analyzer 25/25, runner 16/16, capture 1/1, plan-env 6/6,
+  P0 76/76, Adapter 7/7, rolling 23/23, retained Ego 8/8, P4 4/4 and P1 integrity 39/39.
+- Direct consumers resolved only the retained repository-local ICRA-022 `libiap.so` and
+  `libplan_env.so`; their SHA-256 values remained `d988f19...be31` and `cadd4411...e1ecf`, with no
+  `not found` entry.
+- The PDF and ICRA-011/014/020/021 protected artifacts retained their frozen hashes. No task ROS,
+  IAP, capture, rosbag or planner process remained.
+- Per the operator's lifecycle rule, ICRA-022 build/install trees were retained throughout Builder
+  work and Supervisor review. They become eligible for deletion only after this review/task
+  management changeset is pushed. The exact ten task-local trees total approximately 4.8 GiB and
+  are reproducible; no evidence, source or user artifact is eligible for deletion.
+
+### Formal sample freeze and required next action
+
+- Before any new live output, the later Gate-0B distribution is frozen to every distinct successful
+  generation after the existing final-observation callback/generation de-duplication. It cannot
+  select by cold/warm, full/rolling, retained/entered, reuse/invalidation class, latency, startup,
+  tail or outlier status. Failed callbacks remain in ratios; malformed claimed-success evidence
+  fails closed; type-7 statistics use the complete included set.
+- Unique task: `ICRA-024 / GATE_0B`, defined in `NEXT_TASK.md`.
+- ICRA-024 first encodes/tests that evidence contract, rebuilds current source below its own results
+  directory, verifies linkage, performs mandatory GPU preflight, then runs exactly one 20-second
+  replacement smoke. Any failure stops without retry or tuning.
+- The fixed 60-second qualification remains forbidden pending Supervisor review of ICRA-024. P4
+  remains `NOT_QUALIFIED`; P5 remains implemented but unqualified; P2 remains frozen by historical
+  Gate-0A `NO_GO_P2`.
+
 ## 2026-08-22 — ICRA-022 review and ICRA-023 provenance-repair authorization
 
 ### Review identity and synchronization
