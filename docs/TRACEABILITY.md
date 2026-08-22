@@ -1,5 +1,19 @@
 # Traceability Matrix (IAP)
 
+## 2026-08-22 ICRA-020 Stage-5 rolling P0 worker-scaling diagnostic
+
+| Req ID | Requirement/evidence seam | Implementation and focused evidence | Status |
+|---|---|---|---|
+| IAP-RQ-310 / IAP-RQ-311 / IAP-RQ-312 / IAP-RQ-314 | Measure the accepted production P0 runtime path without adding a public test Interface or timing simplified science | Explicitly disabled `P0RiskGridRuntimeStampTest.DISABLED_ICRA020_ProductionRuntimeWorkerScalingProfile`; exact opt-in filter/output/provenance requirements; wall interval covers only the real synchronous `refreshOnceForTest()` call while fresh replay, hashing and serialization stay untimed | **IMPLEMENTED / SUPERVISOR REVIEW PENDING: test/evidence-only** |
+| IAP-RQ-320 / IAP-RQ-321 / IAP-RQ-322 | Freeze the complete worker/scenario workload and prove exact semantic work | workers 1/2/4; `40 x 40 x 8 x 6`; Fusion/required GNSS; 31 satellites, 704 occupancy voxels/FIM primitives and 23,309 map points; cold `12800`, stationary `0`, `+1 x` `320` and nonempty-delta `12800` spatial recomputes with exact retained/entered/evicted/source/fusion/invalidation contracts | **IMPLEMENTED / PROFILE EVIDENCE PENDING: two warmups plus ten measured samples per matrix cell** |
+| IAP-RQ-320 / IAP-RQ-322 | Every measured result must be scientifically equal to a fresh complete rebuild and fail closed before PASS serialization | fresh deterministic runtime and untimed accepted base per sample; generation/stamp-independent full snapshot hash; stable source/content versions and current occupancy diagnostic checks; atomic artifact rename only after the complete matrix, finite timing, exact counters and stable cross-worker hashes validate | **IMPLEMENTED / PROFILE EVIDENCE PENDING: failed or incomplete execution writes no PASS artifact** |
+| IAP-RQ-310 / IAP-RQ-320 / IAP-RQ-321 / IAP-RQ-322 | Canonical cost-ranking evidence must be reproducible without promoting a Gate or production decision | fail-closed `p0_rolling_stage5_profile_v1` validator checks implementation/source and executable/library SHA-256, raw sample-derived R-7 summaries, exact 3 x 4 matrix and prohibited promotion claims; artifact labels latency diagnostic-only, Gate not run, worker not selected, reverse-ray pending and GPU not evaluated | **IMPLEMENTED / SUPERVISOR REVIEW PENDING: no 400 ms verdict, qualification or production selection** |
+
+ICRA-020 is a synthetic Stage-5 cost-ranking diagnostic only. It does not
+select a worker count, authorize reverse-ray or GPU work, qualify P0/Gate-0B,
+or run main flow, ROS launch, smoke, analyzer, formal benchmark, bag, RViz or
+campaign work.
+
 ## 2026-08-22 ICRA-019 Phase-4B1 immutable occupancy delta
 
 | Req ID | Requirement/evidence seam | Implementation and focused evidence | Status |

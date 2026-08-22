@@ -3,6 +3,92 @@
 > 规则：任何代码改动必须在这里记录，并包含 IAP-RQ-XXX。
 
 ## Unreleased
+- test(icra-020-stage5-worker-profile): IAP-RQ-310 / IAP-RQ-311 / IAP-RQ-312 / IAP-RQ-314 / IAP-RQ-320 / IAP-RQ-321 / IAP-RQ-322 — add one explicitly disabled, fail-closed production `P0RiskGridRuntime::refreshOnceForTest()` worker-scaling profile at the existing friend-only test seam. The fixed `40 x 40 x 8 x 6` Fusion/required-GNSS workload uses 31 satellites, 704 aligned occupancy voxels, 704 deterministic LiDAR FIM primitives and 23,309 LiDAR map points at requested/effective workers 1/2/4. Each cold, stationary empty-delta, `+1 x` empty-delta and stationary nonempty-delta row requires two unrecorded warmups, ten measured fresh-runtime samples, exact work counters and untimed fresh scientific equivalence.
+  - The canonical schema stores raw wall, runtime refresh and provider-batch samples plus R-7 p50/p95/max and worker-1 speedups. It records the implementation commit, compiler/build type, binary/current-library hashes, CPU model/core count and exact opt-in command. `test_icra020_p0_rolling_worker_profile.py` rejects a missing/stale artifact, implementation/source or binary mismatch, incomplete matrix, wrong counts/provenance/hashes, nonfinite timing, non-derivable summaries and any latency/Gate/worker/reverse-ray/GPU promotion. This is synthetic cost-ranking evidence only: no worker selection, production tuning, reverse-ray, GPU work, main flow, smoke, qualification, analyzer or formal benchmark is performed.
+
+Repository-local ICRA-020 reproduction from the repository root:
+
+```bash
+repo_root="$(pwd)"
+cmake -S "$repo_root" -B "$repo_root/results/icra27/icra020/build_iap" \
+  -DCMAKE_BUILD_TYPE=RelWithDebInfo \
+  -DCMAKE_INSTALL_PREFIX="$repo_root/results/icra27/icra020/install"
+cmake --build "$repo_root/results/icra27/icra020/build_iap" -j2
+cmake --install "$repo_root/results/icra27/icra020/build_iap"
+
+cmake -S "$repo_root/src/iap/planner/plan_env" \
+  -B "$repo_root/results/icra27/icra020/build_plan_env" \
+  -DCMAKE_INSTALL_PREFIX="$repo_root/results/icra27/icra020/install_plan_env"
+cmake --build "$repo_root/results/icra27/icra020/build_plan_env" -j2
+cmake --install "$repo_root/results/icra27/icra020/build_plan_env"
+
+cmake -S "$repo_root/src/iap/planner/path_searching" \
+  -B "$repo_root/results/icra27/icra020/build_path_searching" \
+  -DCMAKE_BUILD_TYPE=RelWithDebInfo \
+  -DCMAKE_INSTALL_PREFIX="$repo_root/results/icra27/icra020/install_path_searching" \
+  -Diap_DIR="$repo_root/results/icra27/icra020/install/share/iap" \
+  -Dplan_env_DIR="$repo_root/results/icra27/icra020/install_plan_env/share/plan_env/cmake"
+cmake --build "$repo_root/results/icra27/icra020/build_path_searching" -j2
+cmake --install "$repo_root/results/icra27/icra020/build_path_searching"
+
+cmake -S "$repo_root/src/iap/planner/bspline_opt" \
+  -B "$repo_root/results/icra27/icra020/build_bspline_opt" \
+  -DCMAKE_BUILD_TYPE=RelWithDebInfo \
+  -DCMAKE_INSTALL_PREFIX="$repo_root/results/icra27/icra020/install_bspline_opt" \
+  -Diap_DIR="$repo_root/results/icra27/icra020/install/share/iap" \
+  -Dplan_env_DIR="$repo_root/results/icra27/icra020/install_plan_env/share/plan_env/cmake" \
+  -Dpath_searching_DIR="$repo_root/results/icra27/icra020/install_path_searching/share/path_searching/cmake" \
+  -Dtraj_utils_DIR="/home/dev/ws_iap/install/traj_utils/share/traj_utils/cmake"
+cmake --build "$repo_root/results/icra27/icra020/build_bspline_opt" -j2
+cmake --install "$repo_root/results/icra27/icra020/build_bspline_opt"
+
+cmake -S "$repo_root/src/iap/planner/plan_manage" \
+  -B "$repo_root/results/icra27/icra020/build_ego" \
+  -DCMAKE_BUILD_TYPE=RelWithDebInfo \
+  -Diap_DIR="$repo_root/results/icra27/icra020/install/share/iap" \
+  -Dplan_env_DIR="$repo_root/results/icra27/icra020/install_plan_env/share/plan_env/cmake" \
+  -Dpath_searching_DIR="$repo_root/results/icra27/icra020/install_path_searching/share/path_searching/cmake" \
+  -Dbspline_opt_DIR="$repo_root/results/icra27/icra020/install_bspline_opt/share/bspline_opt/cmake" \
+  -Dtraj_utils_DIR="/home/dev/ws_iap/install/traj_utils/share/traj_utils/cmake"
+cmake --build "$repo_root/results/icra27/icra020/build_ego" \
+  --target ego_planner_node test_p0_risk_grid_runtime \
+  test_p0_occupancy_epoch_adapter test_p1_replan_admission \
+  test_p1_candidate_selection test_p2_candidate_ranking \
+  test_p3_reference_bias test_planning_risk_context \
+  test_p5_runtime_integrity_gate -j2
+
+export LD_LIBRARY_PATH="$repo_root/results/icra27/icra020/install/lib:$repo_root/results/icra27/icra020/install_plan_env/lib:$repo_root/results/icra27/icra020/install_path_searching/lib:$repo_root/results/icra27/icra020/install_bspline_opt/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+export ROS_HOME="$repo_root/results/icra27/icra020/ros_home"
+export ROS_LOG_DIR="$repo_root/results/icra27/icra020/ros_log"
+export TMPDIR="$repo_root/results/icra27/icra020/tmp"
+mkdir -p "$ROS_HOME" "$ROS_LOG_DIR" "$TMPDIR"
+
+implementation_sha="$(git rev-parse HEAD)"
+test_binary_path="results/icra27/icra020/build_ego/test_p0_risk_grid_runtime"
+libiap_path="results/icra27/icra020/install/lib/libiap.so"
+test_binary_sha256="$(sha256sum "$test_binary_path" | awk '{print $1}')"
+libiap_sha256="$(sha256sum "$libiap_path" | awk '{print $1}')"
+profile_filter="P0RiskGridRuntimeStampTest.DISABLED_ICRA020_ProductionRuntimeWorkerScalingProfile"
+exact_command="env IAP_ICRA020_PROFILE_OUTPUT=results/icra27/icra020/p0_rolling_worker_profile.json IAP_ICRA020_IMPLEMENTATION_SHA=$implementation_sha IAP_ICRA020_BUILD_TYPE=RelWithDebInfo IAP_ICRA020_TEST_BINARY_PATH=$test_binary_path IAP_ICRA020_TEST_BINARY_SHA256=$test_binary_sha256 IAP_ICRA020_LIBIAP_PATH=$libiap_path IAP_ICRA020_LIBIAP_SHA256=$libiap_sha256 $test_binary_path --gtest_also_run_disabled_tests --gtest_filter=$profile_filter"
+env \
+  IAP_ICRA020_PROFILE_OUTPUT="results/icra27/icra020/p0_rolling_worker_profile.json" \
+  IAP_ICRA020_IMPLEMENTATION_SHA="$implementation_sha" \
+  IAP_ICRA020_BUILD_TYPE="RelWithDebInfo" \
+  IAP_ICRA020_EXACT_COMMAND="$exact_command" \
+  IAP_ICRA020_TEST_BINARY_PATH="$test_binary_path" \
+  IAP_ICRA020_TEST_BINARY_SHA256="$test_binary_sha256" \
+  IAP_ICRA020_LIBIAP_PATH="$libiap_path" \
+  IAP_ICRA020_LIBIAP_SHA256="$libiap_sha256" \
+  "$test_binary_path" --gtest_also_run_disabled_tests \
+  --gtest_filter="$profile_filter"
+
+python3 test/test_icra020_p0_rolling_worker_profile.py
+ctest --test-dir "$repo_root/results/icra27/icra020/build_iap" \
+  --output-on-failure -R '^test_icra020_p0_rolling_worker_profile$'
+ctest --test-dir "$repo_root/results/icra27/icra020/build_ego" \
+  --output-on-failure -R '^test_p0_risk_grid_runtime$'
+```
+
 - feat(icra-019-phase4b1-occupancy-delta): IAP-RQ-311 / IAP-RQ-312 / IAP-RQ-314 / IAP-RQ-320 / IAP-RQ-321 / IAP-RQ-322 — normalize the complete captured raw-occupancy centre set into an immutable, deterministic fixed-lattice `VoxelKey` identity at the existing P0 Adapter seam and compute exact complete added/removed net deltas with source generations and changed-key bounds. Production P0 now keeps authoritative occupancy owner/generation/stamp validation separate from the rolling LOS-content identity: a same-producer newer generation with a proven empty delta advances current diagnostics/source version while retaining the canonical LOS owner and spatial advice; every nonempty or unprovable change remains a conservative full active-GNSS invalidation. Same-version contradiction and regressed generation fail closed, source/provider races cannot advance the committed base, and inactive GNSS modes do not acquire a delta dependency.
   - Adapter regressions cover reordered and negative-world keys, added-only/removed-only/mixed/skipped-generation deltas, sorted bounds, duplicate folding, nonfinite/misaligned captures, geometry/source/version contradiction and invalid bases. Rolling/P0 regressions cover cold-start content identity, exact empty-delta reuse with current diagnostics and fresh scientific equivalence, complete added/removed/mixed rebuild equivalence, changed producer isolation, occupancy/prior/GNSS/LiDAR race rollback and last-successful-base retry. No reverse-ray index, dirty-ray recomputation, CPU/GPU work, policy calibration, launch/default change, main flow, smoke, qualification, analyzer or benchmark was performed.
 

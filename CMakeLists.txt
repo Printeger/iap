@@ -685,6 +685,10 @@ if(DEFINED ENV{ROS_VERSION})
         COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test/test_icra011_spatial_dedup_profile.py
       )
       add_test(
+        NAME test_icra020_p0_rolling_worker_profile
+        COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test/test_icra020_p0_rolling_worker_profile.py
+      )
+      add_test(
         NAME test_verify_planner_recorder_smoke
         COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test/test_verify_planner_recorder_smoke.py
       )

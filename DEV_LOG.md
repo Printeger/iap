@@ -2289,3 +2289,100 @@ The protected PDF remains solely untracked at SHA-256
 No forbidden flow ran and no gate is self-promoted. Return ICRA-019 to
 SUPERVISOR for review; only the Supervisor may accept ICRA-019 or update Phase
 4/Gate-0B and authorize any later Phase-4B2 or qualification work.
+
+## 2026-08-22T07:47:00Z — ICRA-020 START
+
+Synchronized `dev/icra` at
+`d94252bcfb66f2fca6b7fac38f2cc0e89b36c31b`; local and
+`origin/dev/icra` are equal (`0 0`), so no pull was permitted. The protected
+PDF remains solely untracked and exact at SHA-256
+`1f07da5631a6551a2f98c02d46fd45bc87f2f1e3e7c14e95f9a7f4a0bac844f6`.
+The read-only ICRA-011 JSON and disabled, never-rerun ICRA-014 canonical remain
+exact at SHA-256
+`778abd22158805c41150b4eeed9c37a3f660237a0bb0599e9a567e3533c7b32c` and
+`44f47b23137d17f4b0cbc81af6827156865bdecb36089bf53f770960a2fb963d`.
+
+The exact ICRA-020 allowlist is:
+
+- `src/iap/planner/plan_manage/test/test_p0_risk_grid_runtime.cpp`;
+- root `CMakeLists.txt`, only to register the fail-closed artifact test;
+- `test/test_icra020_p0_rolling_worker_profile.py`;
+- `results/icra27/icra020/p0_rolling_worker_profile.json`, the only
+  authorized forced-added result;
+- `DEV_LOG.md`;
+- `docs/CHANGES.md`;
+- `docs/TRACEABILITY.md`.
+
+This task adds only the explicitly disabled production-P0 worker-scaling
+profile at the existing friend test seam and its fail-closed canonical-artifact
+validator. The frozen workload is workers 1/2/4 over cold full rebuild,
+stationary empty delta, +1-x boundary shift with empty delta, and stationary
+nonempty delta; it produces cost-ranking evidence only.
+
+Explicit stop line: no production header/source/default/config/health change;
+no reverse-ray or partial dirty-ray work; no worker selection or production
+tuning; no affinity/scheduler/clock manipulation; no GPU/CUDA work or
+preflight; no main flow, ROS launch, smoke, qualification, analyzer, formal
+benchmark, bag, RViz, campaign, P4/P5 product work or Gate decision. All
+generated build/log/tmp/ROS output must remain below
+`results/icra27/icra020/`.
+
+## 2026-08-22T08:14:34Z — ICRA-020 IMPLEMENTATION READY FOR REVIEW
+
+Added one explicitly disabled ICRA-020 profile inside the existing
+`P0RiskGridRuntimeStampTest` friend seam. It exercises only the real production
+`P0RiskGridRuntime::refreshOnceForTest()` path at workers 1/2/4 and the frozen
+`40 x 40 x 8 x 6` Fusion/required-GNSS workload. Every scenario/sample creates
+a fresh runtime, non-cold rows construct one untimed accepted base, the wall
+interval surrounds only the synchronous refresh, and a second fresh runtime
+performs untimed scientific validation. The harness validates all exact
+recompute/reuse/retained/entered/evicted/source/fusion/invalidation and source
+version/content contracts before atomically renaming a PASS artifact.
+
+Added the fail-closed canonical JSON validator and root CTest registration. It
+checks the implementation-source commit, current test-binary and `libiap.so`
+hashes, exact 3-worker x 4-scenario x 10-sample matrix, current source
+generations/diagnostics, scientific hashes, finite raw samples, R-7 summaries
+derived from those samples, and rejects Gate/latency/worker/reverse-ray/GPU
+promotion. The reproduction and non-qualification contract is synchronized in
+`docs/CHANGES.md` and `docs/TRACEABILITY.md`.
+
+TDD/precommit evidence under `results/icra27/icra020/logs/` currently records:
+
+- expected artifact-validator RED for the absent canonical JSON;
+- successful root IAP and planner-dependency builds plus successful
+  RelWithDebInfo `test_p0_risk_grid_runtime` compilation;
+- ordinary P0 runtime 75/75 PASS with the new profile reported disabled;
+- explicit profile-filter invocation without required environment fails
+  closed with exit 1 and writes no canonical artifact.
+
+An exploratory package-wide ament lint run is non-green on the existing
+planner baseline: `lint_cmake` reports pre-existing whitespace in the
+unchanged plan-manage CMake file, `uncrustify` reports 34 existing package
+files (including the already divergent shared P0 test file), and `xmllint`
+times out. No out-of-allowlist repair was made. Task-required retained tests
+and the single clean-commit profile invocation remain pending until the
+independent implementation review completes.
+
+No canonical ICRA-020 JSON exists yet. No profile timing run, main flow, ROS
+launch, smoke, qualification, analyzer, formal benchmark, GPU preflight,
+reverse-ray work, worker selection or production tuning has run.
+
+## 2026-08-22T08:25:54Z — ICRA-020 INDEPENDENT IMPLEMENTATION REVIEW
+
+Independent Spec and Standards reviews used fixed base
+`d94252bcfb66f2fca6b7fac38f2cc0e89b36c31b`. The first pass identified
+incomplete frozen-workload/speedup validation, bypassable extra promotion
+fields, insufficiently bound executable/library and exact-command provenance,
+and one non-default LiDAR primitive support field that contradicted the
+documented ICRA-011 formula reuse.
+
+The repair makes the validator schema exact at every level, verifies every
+frozen workload/timing-seam field and derives each reported speedup from the
+stored worker-1 p50. Binary and library paths are fixed, the opt-in harness
+checks current HEAD, clean tracked state and actual SHA-256 before any timing
+work, and both harness and validator reconstruct and require the same exact
+canonical command. The LiDAR primitive generator again matches the ICRA-011
+formula including default support fields and matching diagnostics. The updated
+target compiles successfully. Final independent Spec review PASSes and final
+independent Standards review PASSes with no remaining finding.

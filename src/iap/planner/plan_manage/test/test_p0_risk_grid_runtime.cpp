@@ -2,19 +2,26 @@
 
 #include <algorithm>
 #include <array>
-#include <cmath>
 #include <atomic>
 #include <chrono>
+#include <cmath>
 #include <condition_variable>
+#include <cstdio>
+#include <cstdint>
+#include <cstdlib>
+#include <filesystem>
+#include <fstream>
+#include <iomanip>
 #include <limits>
 #include <memory>
 #include <mutex>
 #include <set>
+#include <sstream>
 #include <stdexcept>
 #include <string>
+#include <thread>
 #include <tuple>
 #include <vector>
-#include <thread>
 
 #include <gtest/gtest.h>
 #include <sensor_msgs/point_cloud2_iterator.hpp>
@@ -214,10 +221,13 @@ ego_planner::P0OccupancyEpochCapture makeOccupancyEpochCapture(
     const std::string& frame_id,
     const std::vector<Eigen::Vector3d>& occupied_centers = {},
     ego_planner::P0OccupancyEpoch::SourceOwner source_owner = {},
-    ego_planner::P0OccupancyEpoch::LiveSourceOwner live_source_owner = {}) {
+    ego_planner::P0OccupancyEpoch::LiveSourceOwner live_source_owner = {},
+    const double resolution_m = 1.0,
+    const Eigen::Vector3d& lattice_origin =
+        Eigen::Vector3d(-1.5, -1.5, -1.5)) {
   iap::LocalOccupancyGrid::Params params;
-  params.voxel_size = 1.0;
-  params.lattice_origin = Eigen::Vector3d(-1.5, -1.5, -1.5);
+  params.voxel_size = resolution_m;
+  params.lattice_origin = lattice_origin;
   std::vector<Eigen::Vector3d> normalized_centers;
   normalized_centers.reserve(occupied_centers.size());
   std::set<std::tuple<int, int, int>> normalized_keys;
@@ -493,6 +503,600 @@ std::vector<Eigen::Vector3d> planePcaPoints() {
   return points;
 }
 
+using ProfileClock = std::chrono::steady_clock;
+
+constexpr int kProfileGridX = 40;
+constexpr int kProfileGridY = 40;
+constexpr int kProfileGridZ = 8;
+constexpr double kProfileResolutionM = 0.75;
+constexpr std::array<double, 6> kProfileHorizons{
+    {0.0, 0.5, 1.0, 1.5, 2.0, 2.5}};
+constexpr std::size_t kProfileLogicalPositions = 12800u;
+constexpr std::size_t kProfileLogicalQueries = 76800u;
+constexpr std::size_t kProfileWarmups = 2u;
+constexpr std::size_t kProfileMeasuredSamples = 10u;
+constexpr std::uint64_t kProfileFnvOffset = 1469598103934665603ULL;
+constexpr std::uint64_t kProfileFnvPrime = 1099511628211ULL;
+constexpr char kProfileFilter[] =
+    "P0RiskGridRuntimeStampTest."
+    "DISABLED_ICRA020_ProductionRuntimeWorkerScalingProfile";
+constexpr char kProfileTestBinaryPath[] =
+    "results/icra27/icra020/build_ego/test_p0_risk_grid_runtime";
+constexpr char kProfileLibiapPath[] =
+    "results/icra27/icra020/install/lib/libiap.so";
+constexpr char kProfileOutputPath[] =
+    "results/icra27/icra020/p0_rolling_worker_profile.json";
+
+enum class ProfileScenario {
+  ColdFullRebuild,
+  StationaryEmptyDelta,
+  ShiftPlusOneXEmptyDelta,
+  StationaryNonemptyDelta,
+};
+
+const char* profileScenarioName(const ProfileScenario scenario) {
+  switch (scenario) {
+    case ProfileScenario::ColdFullRebuild:
+      return "cold_full_rebuild";
+    case ProfileScenario::StationaryEmptyDelta:
+      return "stationary_empty_delta";
+    case ProfileScenario::ShiftPlusOneXEmptyDelta:
+      return "shift_plus_one_x_empty_delta";
+    case ProfileScenario::StationaryNonemptyDelta:
+      return "stationary_nonempty_delta";
+  }
+  return "invalid";
+}
+
+struct ProfileSample {
+  std::size_t sample_index = 0;
+  bool refresh_succeeded = false;
+  bool scientifically_equal_to_fresh = false;
+  double wall_ms = std::numeric_limits<double>::quiet_NaN();
+  double refresh_elapsed_ms = std::numeric_limits<double>::quiet_NaN();
+  double provider_batch_duration_ms =
+      std::numeric_limits<double>::quiet_NaN();
+  std::size_t logical_query_count = 0;
+  std::size_t provider_query_count = 0;
+  std::size_t spatial_recompute_count = 0;
+  std::size_t spatial_reuse_count = 0;
+  std::size_t retained_position_count = 0;
+  std::size_t entered_position_count = 0;
+  std::size_t evicted_position_count = 0;
+  std::size_t gnss_advisory_invocation_count = 0;
+  std::size_t lidar_advisory_invocation_count = 0;
+  std::size_t horizon_fusion_count = 0;
+  bool full_rebuild = false;
+  std::size_t full_invalidation_count = 0;
+  std::string invalidation_reason;
+  std::uint64_t gnss_generation = 0;
+  std::uint64_t lidar_generation = 0;
+  std::uint64_t prior_generation = 0;
+  std::uint64_t occupancy_generation = 0;
+  std::uint64_t occupancy_content_identity = 0;
+  std::uint64_t snapshot_occupancy_generation = 0;
+  double snapshot_occupancy_stamp_s =
+      std::numeric_limits<double>::quiet_NaN();
+  std::string snapshot_scientific_hash;
+  std::string fresh_scientific_hash;
+};
+
+struct ProfileTimingSummary {
+  double p50_ms = std::numeric_limits<double>::quiet_NaN();
+  double p95_ms = std::numeric_limits<double>::quiet_NaN();
+  double max_ms = std::numeric_limits<double>::quiet_NaN();
+};
+
+struct ProfileScenarioRow {
+  ProfileScenario scenario = ProfileScenario::ColdFullRebuild;
+  std::vector<ProfileSample> samples;
+  ProfileTimingSummary wall;
+  ProfileTimingSummary refresh;
+  ProfileTimingSummary provider;
+  double wall_speedup = std::numeric_limits<double>::quiet_NaN();
+  double refresh_speedup = std::numeric_limits<double>::quiet_NaN();
+  double provider_speedup = std::numeric_limits<double>::quiet_NaN();
+};
+
+struct ProfileWorkerRow {
+  int requested_worker_count = 0;
+  int effective_worker_count = 0;
+  std::vector<ProfileScenarioRow> scenarios;
+};
+
+void profileHashBytes(std::uint64_t* hash, const void* data,
+                      const std::size_t size) {
+  const auto* bytes = static_cast<const unsigned char*>(data);
+  for (std::size_t index = 0; index < size; ++index) {
+    *hash ^= bytes[index];
+    *hash *= kProfileFnvPrime;
+  }
+}
+
+template <typename T>
+void profileHashScalar(std::uint64_t* hash, const T& value) {
+  profileHashBytes(hash, &value, sizeof(value));
+}
+
+void profileHashBool(std::uint64_t* hash, const bool value) {
+  const std::uint8_t normalized = value ? 1u : 0u;
+  profileHashScalar(hash, normalized);
+}
+
+void profileHashString(std::uint64_t* hash, const std::string& value) {
+  profileHashScalar(hash, value.size());
+  profileHashBytes(hash, value.data(), value.size());
+}
+
+void profileHashVector(std::uint64_t* hash, const Eigen::Vector3d& value) {
+  for (int axis = 0; axis < 3; ++axis) profileHashScalar(hash, value(axis));
+}
+
+void profileHashVector(std::uint64_t* hash, const Eigen::Vector3i& value) {
+  for (int axis = 0; axis < 3; ++axis) profileHashScalar(hash, value(axis));
+}
+
+std::string profileHexHash(const std::uint64_t value) {
+  std::ostringstream output;
+  output << std::hex << std::setfill('0') << std::setw(16) << value;
+  return output.str();
+}
+
+std::string profileSnapshotScientificHash(
+    const std::shared_ptr<const iap::RiskGridSnapshot>& snapshot) {
+  if (!snapshot) return {};
+  std::uint64_t hash = kProfileFnvOffset;
+  profileHashVector(&hash, snapshot->origin());
+  profileHashVector(&hash, snapshot->voxelNum());
+  profileHashScalar(&hash, snapshot->params().resolution_m);
+  profileHashString(&hash, snapshot->params().frame_id);
+  profileHashScalar(&hash, snapshot->params().horizons_s.size());
+  for (const double horizon : snapshot->params().horizons_s) {
+    profileHashScalar(&hash, horizon);
+  }
+  const Eigen::Vector3i dimensions = snapshot->voxelNum();
+  for (int horizon = 0; horizon < snapshot->horizonCount(); ++horizon) {
+    for (int x = 0; x < dimensions.x(); ++x) {
+      for (int y = 0; y < dimensions.y(); ++y) {
+        for (int z = 0; z < dimensions.z(); ++z) {
+          iap::RiskVoxel voxel;
+          if (!snapshot->voxelAt(horizon, Eigen::Vector3i(x, y, z), &voxel)) {
+            return {};
+          }
+          profileHashScalar(&hash, voxel.c_pi);
+          profileHashScalar(&hash, voxel.hpl_pred);
+          profileHashScalar(&hash, voxel.vpl_pred);
+          profileHashBool(&hash, voxel.valid);
+          profileHashBool(&hash, voxel.stale);
+          profileHashBool(&hash, voxel.unknown);
+          profileHashScalar(&hash, voxel.source_flags);
+          profileHashString(&hash, voxel.reason);
+          profileHashBool(&hash, static_cast<bool>(voxel.occupancy));
+          if (voxel.occupancy) {
+            profileHashBool(&hash, voxel.occupancy->available);
+            profileHashBool(&hash, voxel.occupancy->raw_occupied);
+            profileHashBool(&hash, voxel.occupancy->inflated_occupied);
+            profileHashVector(&hash, voxel.occupancy->voxel_index);
+            profileHashVector(&hash, voxel.occupancy->voxel_center);
+            profileHashScalar(&hash, voxel.occupancy->resolution_m);
+            profileHashScalar(&hash, voxel.occupancy->inflation_m);
+            profileHashString(&hash, voxel.occupancy->frame_id);
+            profileHashString(&hash, voxel.occupancy->source);
+          }
+        }
+      }
+    }
+  }
+  return profileHexHash(hash);
+}
+
+std::vector<Eigen::Vector3d> profileOccupancyCenters() {
+  std::vector<Eigen::Vector3d> centers;
+  centers.reserve(704u);
+  for (int x = 0; x < 16; ++x) {
+    for (int y = 0; y < 11; ++y) {
+      for (int z = 0; z < 4; ++z) {
+        const Eigen::Vector3i key(-19 + 2 * x, -19 + 3 * y, -3 + 2 * z);
+        centers.push_back((key.cast<double>() +
+                           Eigen::Vector3d::Constant(0.5)) *
+                          kProfileResolutionM);
+      }
+    }
+  }
+  return centers;
+}
+
+std::vector<Eigen::Vector3d> profileChangedOccupancyCenters() {
+  auto centers = profileOccupancyCenters();
+  centers.back() = Eigen::Vector3d(15.375, 14.625, 2.625);
+  return centers;
+}
+
+std::shared_ptr<const std::vector<iap::LidarFimPrimitive>>
+profileLidarPrimitives() {
+  auto primitives = std::make_shared<std::vector<iap::LidarFimPrimitive>>();
+  primitives->reserve(704u);
+  for (int x = 0; x < 16; ++x) {
+    for (int y = 0; y < 11; ++y) {
+      for (int z = 0; z < 4; ++z) {
+        iap::LidarFimPrimitive primitive;
+        primitive.center_w = Eigen::Vector3d(-14.0 + 1.8 * x,
+                                             -14.0 + 2.7 * y,
+                                             -2.0 + 1.3 * z);
+        const int axis = (x + y + z) % 3;
+        primitive.normal_w = axis == 0 ? Eigen::Vector3d::UnitX()
+                             : axis == 1 ? Eigen::Vector3d::UnitY()
+                                         : Eigen::Vector3d::UnitZ();
+        primitives->push_back(primitive);
+      }
+    }
+  }
+  return primitives;
+}
+
+std::shared_ptr<const std::vector<Eigen::Vector3d>> profileLidarMapPoints() {
+  auto points = std::make_shared<std::vector<Eigen::Vector3d>>();
+  points->reserve(23309u);
+  for (std::size_t index = 0; index < 23309u; ++index) {
+    const int x = static_cast<int>(index % 47u);
+    const int y = static_cast<int>((index / 47u) % 47u);
+    const int z = static_cast<int>((index / (47u * 47u)) % 11u);
+    points->emplace_back(-14.5 + 0.63 * x, -14.5 + 0.63 * y,
+                         -2.5 + 0.55 * z);
+  }
+  return points;
+}
+
+iap::GnssEpoch profileGnssEpoch(const double stamp_s) {
+  constexpr double kPi = 3.14159265358979323846;
+  iap::GnssEpoch epoch;
+  epoch.stamp = stamp_s;
+  epoch.gps_sec = 2100000.0;
+  for (int index = 0; index < 31; ++index) {
+    iap::SatObs satellite;
+    satellite.sat_id = 100 + index;
+    satellite.constellation = 'G';
+    satellite.azimuth = 2.0 * kPi * static_cast<double>(index) / 31.0;
+    satellite.elevation = 0.25 + 0.06 * static_cast<double>(index % 10);
+    satellite.pr_sigma = 3.0 + 0.25 * static_cast<double>(index % 4);
+    epoch.sats.push_back(satellite);
+  }
+  return epoch;
+}
+
+double profilePercentileR7(std::vector<double> values,
+                           const double probability) {
+  std::sort(values.begin(), values.end());
+  const double position =
+      static_cast<double>(values.size() - 1u) * probability;
+  const auto lower = static_cast<std::size_t>(std::floor(position));
+  const double fraction = position - static_cast<double>(lower);
+  if (lower + 1u >= values.size()) return values[lower];
+  return values[lower] + fraction * (values[lower + 1u] - values[lower]);
+}
+
+ProfileTimingSummary profileTimingSummary(std::vector<double> values) {
+  return {profilePercentileR7(values, 0.50),
+          profilePercentileR7(values, 0.95),
+          *std::max_element(values.begin(), values.end())};
+}
+
+std::string profileJsonString(const std::string& value) {
+  std::ostringstream output;
+  output << '"';
+  for (const unsigned char character : value) {
+    switch (character) {
+      case '"':
+        output << "\\\"";
+        break;
+      case '\\':
+        output << "\\\\";
+        break;
+      case '\n':
+        output << "\\n";
+        break;
+      case '\r':
+        output << "\\r";
+        break;
+      case '\t':
+        output << "\\t";
+        break;
+      default:
+        if (character < 0x20u) {
+          output << "\\u00" << std::hex << std::setw(2)
+                 << std::setfill('0') << static_cast<int>(character)
+                 << std::dec;
+        } else {
+          output << static_cast<char>(character);
+        }
+    }
+  }
+  output << '"';
+  return output.str();
+}
+
+std::string profileRequiredEnvironment(const char* name) {
+  const char* value = std::getenv(name);
+  if (!value || !*value) {
+    throw std::runtime_error(std::string("missing environment variable: ") +
+                             name);
+  }
+  return value;
+}
+
+std::string profileCommandOutput(const std::string& command) {
+  FILE* pipe = popen(command.c_str(), "r");
+  if (!pipe) {
+    throw std::runtime_error("unable to start provenance command");
+  }
+  std::string output;
+  char buffer[256];
+  while (fgets(buffer, sizeof(buffer), pipe) != nullptr) output += buffer;
+  const int status = pclose(pipe);
+  if (status != 0) {
+    throw std::runtime_error("provenance command failed: " + command);
+  }
+  while (!output.empty() &&
+         (output.back() == '\n' || output.back() == '\r' ||
+          output.back() == ' ' || output.back() == '\t')) {
+    output.pop_back();
+  }
+  return output;
+}
+
+bool profileIsLowerHex(const std::string& value, const std::size_t size) {
+  return value.size() == size &&
+      std::all_of(value.begin(), value.end(), [](const char character) {
+        return (character >= '0' && character <= '9') ||
+               (character >= 'a' && character <= 'f');
+      });
+}
+
+std::string profileFileSha256(const std::string& repository_relative_path) {
+  const std::string output = profileCommandOutput(
+      "/usr/bin/sha256sum -- " + repository_relative_path);
+  const auto separator = output.find_first_of(" \t");
+  const std::string digest = output.substr(0, separator);
+  if (!profileIsLowerHex(digest, 64u)) {
+    throw std::runtime_error("invalid sha256sum output for " +
+                             repository_relative_path);
+  }
+  return digest;
+}
+
+std::string profileCpuModel() {
+  std::ifstream cpuinfo("/proc/cpuinfo");
+  std::string line;
+  while (std::getline(cpuinfo, line)) {
+    constexpr char kPrefix[] = "model name";
+    if (line.rfind(kPrefix, 0) == 0) {
+      const auto separator = line.find(':');
+      if (separator != std::string::npos) {
+        const auto first = line.find_first_not_of(" \t", separator + 1u);
+        if (first != std::string::npos) return line.substr(first);
+      }
+    }
+  }
+  return {};
+}
+
+struct ProfileProvenance {
+  std::string implementation_sha;
+  std::string build_type;
+  std::string exact_command;
+  std::string test_binary_path;
+  std::string test_binary_sha256;
+  std::string libiap_path;
+  std::string libiap_sha256;
+  std::string cpu_model;
+  unsigned int logical_core_count = 0;
+};
+
+std::string profileCanonicalCommand(const ProfileProvenance& provenance) {
+  return std::string("env IAP_ICRA020_PROFILE_OUTPUT=") +
+      kProfileOutputPath + " IAP_ICRA020_IMPLEMENTATION_SHA=" +
+      provenance.implementation_sha + " IAP_ICRA020_BUILD_TYPE=" +
+      provenance.build_type + " IAP_ICRA020_TEST_BINARY_PATH=" +
+      provenance.test_binary_path + " IAP_ICRA020_TEST_BINARY_SHA256=" +
+      provenance.test_binary_sha256 + " IAP_ICRA020_LIBIAP_PATH=" +
+      provenance.libiap_path + " IAP_ICRA020_LIBIAP_SHA256=" +
+      provenance.libiap_sha256 + " " + provenance.test_binary_path +
+      " --gtest_also_run_disabled_tests --gtest_filter=" + kProfileFilter;
+}
+
+void writeProfileTimingSummary(std::ostream& output,
+                               const ProfileTimingSummary& summary) {
+  output << "{\"percentile_method\":\"R-7 linear interpolation\","
+         << "\"p50_ms\":" << summary.p50_ms << ","
+         << "\"p95_ms\":" << summary.p95_ms << ","
+         << "\"max_ms\":" << summary.max_ms << "}";
+}
+
+std::string profileArtifactJson(const std::vector<ProfileWorkerRow>& workers,
+                                const ProfileProvenance& provenance) {
+  std::ostringstream output;
+  output << std::setprecision(17);
+  output << "{\n"
+         << "  \"schema_version\": \"p0_rolling_stage5_profile_v1\",\n"
+         << "  \"diagnostic_execution_status\": \"PASS\",\n"
+         << "  \"latency_status\": \"COST_RANKING_DIAGNOSTIC\",\n"
+         << "  \"gate0b_qualification_status\": \"NOT_RUN\",\n"
+         << "  \"production_worker_selection_status\": \"NOT_SELECTED\",\n"
+         << "  \"reverse_ray_decision_status\": \"SUPERVISOR_REVIEW_PENDING\",\n"
+         << "  \"gpu_status\": \"NOT_EVALUATED\",\n"
+         << "  \"percentile_method\": \"R-7 linear interpolation\",\n"
+         << "  \"warmup_samples_per_scenario\": " << kProfileWarmups
+         << ",\n"
+         << "  \"measured_samples_per_scenario\": "
+         << kProfileMeasuredSamples << ",\n"
+         << "  \"provenance\": {\n"
+         << "    \"implementation_sha\": "
+         << profileJsonString(provenance.implementation_sha) << ",\n"
+         << "    \"compiler\": " << profileJsonString(__VERSION__)
+         << ",\n"
+         << "    \"build_type\": "
+         << profileJsonString(provenance.build_type) << ",\n"
+         << "    \"clock\": \"std::chrono::steady_clock\",\n"
+         << "    \"cpu_model\": "
+         << profileJsonString(provenance.cpu_model) << ",\n"
+         << "    \"logical_core_count\": "
+         << provenance.logical_core_count << ",\n"
+         << "    \"exact_command\": "
+         << profileJsonString(provenance.exact_command) << ",\n"
+         << "    \"test_binary\": {\"repository_relative_path\": "
+         << profileJsonString(provenance.test_binary_path)
+         << ", \"sha256\": "
+         << profileJsonString(provenance.test_binary_sha256) << "},\n"
+         << "    \"libiap\": {\"repository_relative_path\": "
+         << profileJsonString(provenance.libiap_path)
+         << ", \"sha256\": "
+         << profileJsonString(provenance.libiap_sha256) << "}\n"
+         << "  },\n"
+         << "  \"workload\": {\n"
+         << "    \"profile_path\": \"production P0RiskGridRuntime::refreshOnceForTest\",\n"
+         << "    \"grid_shape\": [40, 40, 8],\n"
+         << "    \"resolution_m\": 0.75,\n"
+         << "    \"fixed_map_lattice_anchor\": [0.0, 0.0, 0.0],\n"
+         << "    \"horizons_s\": [0.0, 0.5, 1.0, 1.5, 2.0, 2.5],\n"
+         << "    \"logical_position_count\": 12800,\n"
+         << "    \"logical_risk_voxel_count\": 76800,\n"
+         << "    \"predictor_source_mode\": \"Fusion\",\n"
+         << "    \"gnss_epoch_policy\": \"Required\",\n"
+         << "    \"satellite_count\": 31,\n"
+         << "    \"map_los_occupied_voxel_count\": 704,\n"
+         << "    \"lidar_fim_primitive_count\": 704,\n"
+         << "    \"lidar_map_point_count\": 23309,\n"
+         << "    \"sigma_grow_m_sqrt_s\": 0.15,\n"
+         << "    \"skip_occupied_voxels\": false,\n"
+         << "    \"requested_effective_worker_pairs\": [[1, 1], [2, 2], [4, 4]],\n"
+         << "    \"ttl_watchdog_policy\": \"DISABLED_TEST_ONLY\",\n"
+         << "    \"affinity_scheduler_clock_manipulation\": \"NONE\",\n"
+         << "    \"fresh_runtime_per_sample\": true,\n"
+         << "    \"untimed_base_per_non_cold_sample\": true,\n"
+         << "    \"fresh_scientific_validation_outside_measured_interval\": true,\n"
+         << "    \"fixture_sources\": {\n"
+         << "      \"gnss\": \"ICRA-011 deterministic 31-satellite dimensions and formula\",\n"
+         << "      \"occupancy\": \"704 unique centers aligned to the 0.75 m fixed map lattice\",\n"
+         << "      \"lidar_fim\": \"ICRA-011 deterministic 704-primitive dimensions and formula\",\n"
+         << "      \"lidar_map\": \"ICRA-011 deterministic 23309-point dimensions and formula\"\n"
+         << "    }\n"
+         << "  },\n"
+         << "  \"workers\": [\n";
+  for (std::size_t worker_index = 0; worker_index < workers.size();
+       ++worker_index) {
+    const auto& worker = workers[worker_index];
+    output << "    {\n"
+           << "      \"requested_worker_count\": "
+           << worker.requested_worker_count << ",\n"
+           << "      \"effective_worker_count\": "
+           << worker.effective_worker_count << ",\n"
+           << "      \"scenarios\": [\n";
+    for (std::size_t scenario_index = 0;
+         scenario_index < worker.scenarios.size(); ++scenario_index) {
+      const auto& scenario = worker.scenarios[scenario_index];
+      output << "        {\n"
+             << "          \"scenario\": "
+             << profileJsonString(profileScenarioName(scenario.scenario))
+             << ",\n"
+             << "          \"samples\": [\n";
+      for (std::size_t sample_index = 0;
+           sample_index < scenario.samples.size(); ++sample_index) {
+        const auto& sample = scenario.samples[sample_index];
+        output << "            {"
+               << "\"sample_index\":" << sample.sample_index << ","
+               << "\"refresh_succeeded\":"
+               << (sample.refresh_succeeded ? "true" : "false") << ","
+               << "\"scientifically_equal_to_fresh\":"
+               << (sample.scientifically_equal_to_fresh ? "true" : "false")
+               << ","
+               << "\"wall_ms\":" << sample.wall_ms << ","
+               << "\"refresh_elapsed_ms\":" << sample.refresh_elapsed_ms
+               << ","
+               << "\"provider_batch_duration_ms\":"
+               << sample.provider_batch_duration_ms << ","
+               << "\"logical_query_count\":"
+               << sample.logical_query_count << ","
+               << "\"provider_query_count\":"
+               << sample.provider_query_count << ","
+               << "\"spatial_recompute_count\":"
+               << sample.spatial_recompute_count << ","
+               << "\"spatial_reuse_count\":"
+               << sample.spatial_reuse_count << ","
+               << "\"retained_position_count\":"
+               << sample.retained_position_count << ","
+               << "\"entered_position_count\":"
+               << sample.entered_position_count << ","
+               << "\"evicted_position_count\":"
+               << sample.evicted_position_count << ","
+               << "\"gnss_advisory_invocation_count\":"
+               << sample.gnss_advisory_invocation_count << ","
+               << "\"lidar_advisory_invocation_count\":"
+               << sample.lidar_advisory_invocation_count << ","
+               << "\"horizon_fusion_count\":"
+               << sample.horizon_fusion_count << ","
+               << "\"full_rebuild\":"
+               << (sample.full_rebuild ? "true" : "false") << ","
+               << "\"full_invalidation_count\":"
+               << sample.full_invalidation_count << ","
+               << "\"invalidation_reason\":"
+               << profileJsonString(sample.invalidation_reason) << ","
+               << "\"gnss_generation\":" << sample.gnss_generation << ","
+               << "\"lidar_generation\":" << sample.lidar_generation
+               << ","
+               << "\"prior_generation\":" << sample.prior_generation
+               << ","
+               << "\"occupancy_generation\":"
+               << sample.occupancy_generation << ","
+               << "\"occupancy_content_identity\":"
+               << sample.occupancy_content_identity << ","
+               << "\"snapshot_occupancy_generation\":"
+               << sample.snapshot_occupancy_generation << ","
+               << "\"snapshot_occupancy_stamp_s\":"
+               << sample.snapshot_occupancy_stamp_s << ","
+               << "\"snapshot_scientific_hash_fnv1a64\":"
+               << profileJsonString(sample.snapshot_scientific_hash) << ","
+               << "\"fresh_scientific_hash_fnv1a64\":"
+               << profileJsonString(sample.fresh_scientific_hash) << "}";
+        if (sample_index + 1u != scenario.samples.size()) output << ',';
+        output << '\n';
+      }
+      output << "          ],\n"
+             << "          \"summary_ms\": {\n"
+             << "            \"wall_ms\": ";
+      writeProfileTimingSummary(output, scenario.wall);
+      output << ",\n            \"refresh_elapsed_ms\": ";
+      writeProfileTimingSummary(output, scenario.refresh);
+      output << ",\n            \"provider_batch_duration_ms\": ";
+      writeProfileTimingSummary(output, scenario.provider);
+      output << "\n          },\n"
+             << "          \"speedup_vs_worker_1_p50\": {"
+             << "\"wall_ms\":" << scenario.wall_speedup << ","
+             << "\"refresh_elapsed_ms\":" << scenario.refresh_speedup
+             << ","
+             << "\"provider_batch_duration_ms\":"
+             << scenario.provider_speedup << "}\n"
+             << "        }";
+      if (scenario_index + 1u != worker.scenarios.size()) output << ',';
+      output << '\n';
+    }
+    output << "      ]\n    }";
+    if (worker_index + 1u != workers.size()) output << ',';
+    output << '\n';
+  }
+  output << "  ],\n"
+         << "  \"validation\": {\n"
+         << "    \"complete_worker_scenario_matrix\": true,\n"
+         << "    \"all_refreshes_succeeded\": true,\n"
+         << "    \"all_timings_finite\": true,\n"
+         << "    \"exact_work_contracts\": true,\n"
+         << "    \"scientific_equivalence_to_fresh\": true,\n"
+         << "    \"scientific_hashes_stable_across_samples_and_workers\": true,\n"
+         << "    \"current_source_provenance_recorded\": true\n"
+         << "  }\n"
+         << "}\n";
+  return output.str();
+}
+
 }  // namespace
 
 namespace ego_planner {
@@ -544,6 +1148,332 @@ class P0RiskGridRuntimeStampTest : public ::testing::Test {
             state.predictor_spatial_watchdog_forced_full_rebuild_count,
             state.predictor_spatial_invalid_source_provenance_count,
             state.predictor_spatial_invalidation_reason};
+  }
+
+  struct ProfileRuntimeObservation {
+    P0RiskGridRuntime::HealthPublicationState state;
+    iap::RiskGridHealth health;
+  };
+
+  static ProfileRuntimeObservation profileRuntimeObservation(
+      const P0RiskGridRuntime& runtime) {
+    std::lock_guard<std::mutex> lock(runtime.health_state_mutex_);
+    return {runtime.healthPublicationStateSnapshot(), runtime.risk_grid_.health()};
+  }
+
+  static P0RiskGridRuntime::Config profileConfig(const int worker_count) {
+    auto config = enabledConfig();
+    config.grid.frame_id = "map";
+    config.grid.lattice_anchor_w = Eigen::Vector3d::Zero();
+    config.grid.resolution_m = kProfileResolutionM;
+    config.grid.size_x_m = 30.0;
+    config.grid.size_y_m = 30.0;
+    config.grid.size_z_m = 6.0;
+    config.grid.horizons_s.assign(kProfileHorizons.begin(),
+                                 kProfileHorizons.end());
+    config.grid.skip_occupied_voxels = false;
+    config.grid.use_predictor_batch_query = true;
+    config.grid.stale_timeout_s = 100.0;
+    config.predictor_source_mode = iap::PredictorSourceMode::Fusion;
+    config.predictor_gnss_epoch_policy =
+        iap::PredictorGnssEpochPolicy::Required;
+    config.predictor_use_current_integrity_prior = true;
+    config.predictor_conservative_max_with_gnss = false;
+    config.predictor_lidar_legacy_observability = false;
+    config.predictor_lidar_fim_radius_m = 12.0;
+    config.predictor_sigma_grow_m_sqrt_s = 0.15;
+    config.predictor_gnss_spatial_ttl_s =
+        std::numeric_limits<double>::quiet_NaN();
+    config.predictor_legacy_current_spatial_ttl_s =
+        std::numeric_limits<double>::quiet_NaN();
+    config.predictor_full_refresh_watchdog_s =
+        std::numeric_limits<double>::quiet_NaN();
+    config.predictor_requested_worker_count = worker_count;
+    config.predictor_effective_worker_count = worker_count;
+    return config;
+  }
+
+  static void seedProfileCurrentInputs(P0RiskGridRuntime* runtime,
+                                       const double stamp_s,
+                                       const std::uint64_t prior_generation,
+                                       const Eigen::Vector3d& position) {
+    seedValidInputs(runtime, stamp_s, stamp_s);
+    runtime->latest_odom_p_ = position;
+    runtime->latest_current_.hpl = 4.0;
+    runtime->latest_current_.vpl = 5.0;
+    runtime->latest_current_.hal = 30.0;
+    runtime->latest_current_.val = 20.0;
+    runtime->latest_current_.im = 15.0;
+    runtime->latest_current_.n_sv_used = 31;
+    runtime->latest_current_.pdop = 2.0;
+    runtime->latest_current_.n_hypotheses = 31;
+    runtime->latest_current_.tdop = 2.0;
+    runtime->latest_current_.n_trunks_observed = 4;
+    runtime->latest_current_generation_ = prior_generation;
+  }
+
+  static void seedProfileGnss(P0RiskGridRuntime* runtime) {
+    runtime->latest_epoch_ = profileGnssEpoch(100.0);
+    runtime->latest_gnss_epoch_generation_ = 1u;
+    runtime->gnss_epoch_seen_ = true;
+    runtime->latest_gnss_epoch_stamp_ = 100.0;
+    runtime->latest_gnss_epoch_satellite_count_ = 31u;
+  }
+
+  static void seedProfileLidar(P0RiskGridRuntime* runtime) {
+    const auto points = profileLidarMapPoints();
+    const auto primitives = profileLidarPrimitives();
+    {
+      std::lock_guard<std::mutex> lock(runtime->health_state_mutex_);
+      runtime->map_seen_ = true;
+      runtime->latest_map_stamp_ = 100.0;
+    }
+    {
+      std::lock_guard<std::mutex> lock(
+          runtime->lidar_predictor_input_mutex_);
+      runtime->latest_lidar_map_points_ = points;
+      runtime->latest_lidar_fim_primitives_ = primitives;
+      runtime->latest_lidar_fim_diagnostics_.valid = true;
+      runtime->latest_lidar_fim_diagnostics_.fallback_reason = "ok";
+      runtime->latest_lidar_fim_diagnostics_.lidar_pca_primitives_total = 704;
+      runtime->latest_lidar_fim_diagnostics_.lidar_pca_valid_normals = 704;
+      runtime->latest_lidar_fim_diagnostics_.lidar_pca_invalid_normals = 0;
+      runtime->latest_lidar_fim_diagnostics_.lidar_pca_support_mean = 0.0;
+      runtime->latest_lidar_fim_diagnostics_.lidar_pca_support_min = 0;
+      runtime->latest_lidar_map_point_count_ = points->size();
+      runtime->latest_lidar_fim_primitive_count_ = primitives->size();
+      runtime->latest_lidar_fim_valid_normal_count_ = primitives->size();
+      runtime->latest_lidar_fim_fallback_reason_ = "ok";
+      runtime->latest_lidar_generation_ = 1u;
+      runtime->latest_lidar_stamp_ = 100.0;
+    }
+  }
+
+  static void installProfileOccupancyEpoch(
+      P0RiskGridRuntime* runtime,
+      const std::shared_ptr<std::atomic<std::uint64_t>>& live_generation,
+      const P0OccupancyEpoch::SourceOwner& source_owner,
+      const std::uint64_t generation, const double stamp_s,
+      const std::vector<Eigen::Vector3d>& occupied_centers) {
+    live_generation->store(generation);
+    runtime->setOccupancyEpochFactory(
+        [live_generation, source_owner, generation, stamp_s,
+         occupied_centers]() {
+          return makeOccupancyEpochCapture(
+              live_generation, generation, stamp_s, "map", occupied_centers,
+              source_owner, [source_owner]() { return source_owner; },
+              kProfileResolutionM, Eigen::Vector3d::Zero());
+        });
+  }
+
+  static void validateProfileWorkContract(const ProfileScenario scenario,
+                                          const ProfileSample& sample) {
+    const bool cold = scenario == ProfileScenario::ColdFullRebuild;
+    const bool stationary = scenario == ProfileScenario::StationaryEmptyDelta;
+    const bool shifted =
+        scenario == ProfileScenario::ShiftPlusOneXEmptyDelta;
+    const bool changed =
+        scenario == ProfileScenario::StationaryNonemptyDelta;
+    const auto require = [scenario](const bool condition,
+                                    const std::string& field) {
+      if (!condition) {
+        throw std::runtime_error(std::string(profileScenarioName(scenario)) +
+                                 ": " + field);
+      }
+    };
+    require(sample.refresh_succeeded, "refresh failed");
+    require(sample.scientifically_equal_to_fresh,
+            "fresh scientific hash mismatch");
+    require(std::isfinite(sample.wall_ms), "nonfinite wall_ms");
+    require(std::isfinite(sample.refresh_elapsed_ms),
+            "nonfinite refresh_elapsed_ms");
+    require(std::isfinite(sample.provider_batch_duration_ms),
+            "nonfinite provider_batch_duration_ms");
+    require(sample.logical_query_count == kProfileLogicalQueries,
+            "logical_query_count");
+    require(sample.provider_query_count == kProfileLogicalQueries,
+            "provider_query_count");
+    require(sample.spatial_recompute_count ==
+                (shifted ? 320u : stationary ? 0u : 12800u),
+            "spatial_recompute_count");
+    require(sample.spatial_reuse_count ==
+                (shifted ? 76480u : stationary ? 76800u : 64000u),
+            "spatial_reuse_count");
+    require(sample.retained_position_count ==
+                (shifted ? 12480u : stationary ? 12800u : 0u),
+            "retained_position_count");
+    require(sample.entered_position_count ==
+                (shifted ? 320u : stationary ? 0u : 12800u),
+            "entered_position_count");
+    require(sample.evicted_position_count ==
+                (changed ? 12800u : shifted ? 320u : 0u),
+            "evicted_position_count");
+    require(sample.gnss_advisory_invocation_count ==
+                (shifted ? 320u : stationary ? 0u : 12800u),
+            "gnss_advisory_invocation_count");
+    require(sample.lidar_advisory_invocation_count ==
+                (shifted ? 320u : stationary ? 0u : 12800u),
+            "lidar_advisory_invocation_count");
+    require(sample.horizon_fusion_count == kProfileLogicalQueries,
+            "horizon_fusion_count");
+    require(sample.full_rebuild == (cold || changed), "full_rebuild");
+    require(sample.full_invalidation_count == (changed ? 1u : 0u),
+            "full_invalidation_count");
+    require(sample.invalidation_reason ==
+                (cold ? "uninitialized"
+                      : changed ? "occupancy_source_changed" : "none"),
+            "invalidation_reason");
+    require(sample.gnss_generation == 1u, "gnss_generation");
+    require(sample.lidar_generation == 1u, "lidar_generation");
+    require(sample.prior_generation == (cold ? 1u : 2u),
+            "prior_generation");
+    require(sample.occupancy_generation == (cold ? 2u : 3u),
+            "occupancy_generation");
+    require(sample.occupancy_content_identity == (changed ? 2u : 1u),
+            "occupancy_content_identity");
+    require(sample.snapshot_occupancy_generation ==
+                sample.occupancy_generation,
+            "current occupancy diagnostic generation");
+    require(sample.snapshot_occupancy_stamp_s ==
+                (cold ? 100.0 : 100.5),
+            "current occupancy diagnostic stamp");
+    require(!sample.snapshot_scientific_hash.empty(),
+            "empty scientific hash");
+  }
+
+  static ProfileSample runProfileSample(
+      const int worker_count, const ProfileScenario scenario,
+      const std::size_t sample_index, const bool warmup) {
+    const auto config = profileConfig(worker_count);
+    const std::string suffix = std::to_string(worker_count) + "_" +
+        profileScenarioName(scenario) + "_" +
+        (warmup ? "warmup_" : "sample_") + std::to_string(sample_index);
+    auto node = std::make_shared<rclcpp::Node>(
+        "icra020_measured_" + suffix,
+        rclcpp::NodeOptions().allow_undeclared_parameters(false));
+    P0RiskGridRuntime runtime(node, config);
+    seedProfileCurrentInputs(&runtime, 100.0, 1u,
+                             Eigen::Vector3d::Zero());
+    seedProfileGnss(&runtime);
+    seedProfileLidar(&runtime);
+    const auto source_owner = std::make_shared<const int>(worker_count);
+    const auto live_generation =
+        std::make_shared<std::atomic<std::uint64_t>>(2u);
+    const auto base_occupancy = profileOccupancyCenters();
+    installProfileOccupancyEpoch(&runtime, live_generation, source_owner,
+                                 2u, 100.0, base_occupancy);
+
+    if (scenario != ProfileScenario::ColdFullRebuild) {
+      if (!refreshOnce(&runtime)) {
+        throw std::runtime_error(suffix + ": accepted base refresh failed");
+      }
+      const Eigen::Vector3d target_position =
+          scenario == ProfileScenario::ShiftPlusOneXEmptyDelta
+              ? Eigen::Vector3d(kProfileResolutionM, 0.0, 0.0)
+              : Eigen::Vector3d::Zero();
+      seedProfileCurrentInputs(&runtime, 100.5, 2u, target_position);
+      installProfileOccupancyEpoch(
+          &runtime, live_generation, source_owner, 3u, 100.5,
+          scenario == ProfileScenario::StationaryNonemptyDelta
+              ? profileChangedOccupancyCenters()
+              : base_occupancy);
+    }
+
+    const auto wall_begin = ProfileClock::now();
+    const bool succeeded = refreshOnce(&runtime);
+    const double wall_ms =
+        std::chrono::duration<double, std::milli>(ProfileClock::now() -
+                                                  wall_begin)
+            .count();
+    if (!succeeded) {
+      throw std::runtime_error(suffix + ": measured refresh failed");
+    }
+    const auto snapshot = runtime.acquireSnapshot();
+    if (!snapshot) {
+      throw std::runtime_error(suffix + ": missing measured snapshot");
+    }
+    const auto observation = profileRuntimeObservation(runtime);
+    const auto counts = predictorDiagnosticCounts(runtime);
+
+    const bool cold = scenario == ProfileScenario::ColdFullRebuild;
+    const Eigen::Vector3d target_position =
+        scenario == ProfileScenario::ShiftPlusOneXEmptyDelta
+            ? Eigen::Vector3d(kProfileResolutionM, 0.0, 0.0)
+            : Eigen::Vector3d::Zero();
+    const auto target_occupancy =
+        scenario == ProfileScenario::StationaryNonemptyDelta
+            ? profileChangedOccupancyCenters()
+            : base_occupancy;
+    auto fresh_node = std::make_shared<rclcpp::Node>(
+        "icra020_fresh_" + suffix,
+        rclcpp::NodeOptions().allow_undeclared_parameters(false));
+    P0RiskGridRuntime fresh(fresh_node, config);
+    seedProfileCurrentInputs(&fresh, cold ? 100.0 : 100.5,
+                             cold ? 1u : 2u, target_position);
+    seedProfileGnss(&fresh);
+    seedProfileLidar(&fresh);
+    const auto fresh_owner = std::make_shared<const int>(100 + worker_count);
+    const auto fresh_live = std::make_shared<std::atomic<std::uint64_t>>(
+        cold ? 2u : 3u);
+    installProfileOccupancyEpoch(&fresh, fresh_live, fresh_owner,
+                                 cold ? 2u : 3u,
+                                 cold ? 100.0 : 100.5,
+                                 target_occupancy);
+    if (!refreshOnce(&fresh)) {
+      throw std::runtime_error(suffix + ": fresh refresh failed");
+    }
+    const auto fresh_snapshot = fresh.acquireSnapshot();
+    const std::string measured_hash =
+        profileSnapshotScientificHash(snapshot);
+    const std::string fresh_hash =
+        profileSnapshotScientificHash(fresh_snapshot);
+
+    iap::RiskVoxel diagnostic_voxel;
+    if (!snapshot->voxelAt(0, Eigen::Vector3i::Zero(), &diagnostic_voxel) ||
+        !diagnostic_voxel.occupancy) {
+      throw std::runtime_error(suffix + ": missing occupancy diagnostic");
+    }
+
+    ProfileSample sample;
+    sample.sample_index = sample_index;
+    sample.refresh_succeeded = succeeded;
+    sample.scientifically_equal_to_fresh =
+        !measured_hash.empty() && measured_hash == fresh_hash;
+    sample.wall_ms = wall_ms;
+    sample.refresh_elapsed_ms = observation.state.refresh_elapsed_ms;
+    sample.provider_batch_duration_ms =
+        observation.state.provider_batch_duration_ms;
+    sample.logical_query_count = observation.state.refresh_query_count;
+    sample.provider_query_count = observation.health.provider_query_count;
+    sample.spatial_recompute_count = counts.spatial_recompute;
+    sample.spatial_reuse_count = counts.spatial_reuse;
+    sample.retained_position_count = counts.retained_positions;
+    sample.entered_position_count = counts.entered_positions;
+    sample.evicted_position_count = counts.evicted_positions;
+    sample.gnss_advisory_invocation_count = counts.gnss_invocations;
+    sample.lidar_advisory_invocation_count = counts.lidar_invocations;
+    sample.horizon_fusion_count = counts.horizon_fusions;
+    sample.full_rebuild = counts.spatial_recompute == kProfileLogicalPositions &&
+                          counts.retained_positions == 0u;
+    sample.full_invalidation_count = counts.full_invalidations;
+    sample.invalidation_reason = counts.invalidation_reason;
+    sample.gnss_generation = runtime.latest_gnss_epoch_generation_;
+    {
+      std::lock_guard<std::mutex> lock(runtime.lidar_predictor_input_mutex_);
+      sample.lidar_generation = runtime.latest_lidar_generation_;
+    }
+    sample.prior_generation = runtime.latest_current_generation_;
+    sample.occupancy_generation = rollingOccupancyGeneration(runtime);
+    sample.occupancy_content_identity =
+        rollingOccupancyContentIdentity(runtime);
+    sample.snapshot_occupancy_generation =
+        diagnostic_voxel.occupancy->occupancy_generation;
+    sample.snapshot_occupancy_stamp_s =
+        diagnostic_voxel.occupancy->cloud_stamp_s;
+    sample.snapshot_scientific_hash = measured_hash;
+    sample.fresh_scientific_hash = fresh_hash;
+    validateProfileWorkContract(scenario, sample);
+    return sample;
   }
 
   static double currentMessageStamp(const P0RiskGridRuntime& runtime) {
@@ -3936,6 +4866,163 @@ TEST_F(P0RiskGridRuntimeStampTest,
     EXPECT_EQ(diagnostic_counts[index].horizon_fusions,
               diagnostic_counts[0].horizon_fusions);
   }
+}
+
+TEST_F(P0RiskGridRuntimeStampTest,
+       DISABLED_ICRA020_ProductionRuntimeWorkerScalingProfile) {
+  ensure_rclcpp();
+  ASSERT_EQ(GTEST_FLAG_GET(filter), kProfileFilter)
+      << "ICRA-020 requires the exact gtest filter";
+
+  ProfileProvenance provenance;
+  std::filesystem::path output_path;
+  try {
+    output_path = profileRequiredEnvironment("IAP_ICRA020_PROFILE_OUTPUT");
+    provenance.implementation_sha =
+        profileRequiredEnvironment("IAP_ICRA020_IMPLEMENTATION_SHA");
+    provenance.build_type =
+        profileRequiredEnvironment("IAP_ICRA020_BUILD_TYPE");
+    provenance.exact_command =
+        profileRequiredEnvironment("IAP_ICRA020_EXACT_COMMAND");
+    provenance.test_binary_path =
+        profileRequiredEnvironment("IAP_ICRA020_TEST_BINARY_PATH");
+    provenance.test_binary_sha256 =
+        profileRequiredEnvironment("IAP_ICRA020_TEST_BINARY_SHA256");
+    provenance.libiap_path =
+        profileRequiredEnvironment("IAP_ICRA020_LIBIAP_PATH");
+    provenance.libiap_sha256 =
+        profileRequiredEnvironment("IAP_ICRA020_LIBIAP_SHA256");
+  } catch (const std::exception& error) {
+    FAIL() << error.what();
+  }
+  provenance.cpu_model = profileCpuModel();
+  provenance.logical_core_count = std::thread::hardware_concurrency();
+
+  const auto repository_root = std::filesystem::current_path();
+  const auto expected_output =
+      repository_root / "results" / "icra27" / "icra020" /
+      "p0_rolling_worker_profile.json";
+  ASSERT_TRUE(std::filesystem::exists(repository_root / ".git"))
+      << "profile must run from the repository root";
+  ASSERT_EQ(std::filesystem::absolute(output_path).lexically_normal(),
+            expected_output.lexically_normal())
+      << "profile output must be the one authorized repository-local path";
+  ASSERT_TRUE(std::filesystem::is_directory(expected_output.parent_path()));
+  ASSERT_FALSE(std::filesystem::exists(expected_output))
+      << "refusing to overwrite an existing canonical profile";
+  ASSERT_TRUE(profileIsLowerHex(provenance.implementation_sha, 40u));
+  ASSERT_TRUE(profileIsLowerHex(provenance.test_binary_sha256, 64u));
+  ASSERT_TRUE(profileIsLowerHex(provenance.libiap_sha256, 64u));
+  ASSERT_EQ(provenance.build_type, "RelWithDebInfo");
+  ASSERT_FALSE(provenance.cpu_model.empty());
+  ASSERT_GT(provenance.logical_core_count, 0u);
+  for (const auto& path : {provenance.test_binary_path,
+                           provenance.libiap_path}) {
+    const std::filesystem::path relative(path);
+    ASSERT_TRUE(relative.is_relative());
+    ASSERT_EQ(relative.lexically_normal().string(), path);
+    ASSERT_EQ(path.find(".."), std::string::npos);
+    ASSERT_TRUE(std::filesystem::is_regular_file(repository_root / relative));
+  }
+  ASSERT_EQ(provenance.test_binary_path, kProfileTestBinaryPath);
+  ASSERT_EQ(provenance.libiap_path, kProfileLibiapPath);
+  ASSERT_EQ(provenance.exact_command, profileCanonicalCommand(provenance));
+  try {
+    ASSERT_EQ(profileCommandOutput("git rev-parse HEAD"),
+              provenance.implementation_sha);
+    ASSERT_EQ(profileCommandOutput(
+                  "git diff --quiet HEAD -- && git diff --cached --quiet "
+                  "HEAD -- && printf clean"),
+              "clean");
+    ASSERT_EQ(profileFileSha256(provenance.test_binary_path),
+              provenance.test_binary_sha256);
+    ASSERT_EQ(profileFileSha256(provenance.libiap_path),
+              provenance.libiap_sha256);
+  } catch (const std::exception& error) {
+    FAIL() << error.what();
+  }
+
+  const std::array<ProfileScenario, 4> scenarios{
+      {ProfileScenario::ColdFullRebuild,
+       ProfileScenario::StationaryEmptyDelta,
+       ProfileScenario::ShiftPlusOneXEmptyDelta,
+       ProfileScenario::StationaryNonemptyDelta}};
+  std::vector<ProfileWorkerRow> workers;
+  try {
+    for (const int worker_count : {1, 2, 4}) {
+      ProfileWorkerRow worker;
+      worker.requested_worker_count = worker_count;
+      worker.effective_worker_count = worker_count;
+      for (const ProfileScenario scenario : scenarios) {
+        for (std::size_t warmup = 0; warmup < kProfileWarmups; ++warmup) {
+          static_cast<void>(
+              runProfileSample(worker_count, scenario, warmup, true));
+        }
+        ProfileScenarioRow row;
+        row.scenario = scenario;
+        std::vector<double> wall_samples;
+        std::vector<double> refresh_samples;
+        std::vector<double> provider_samples;
+        for (std::size_t sample_index = 0;
+             sample_index < kProfileMeasuredSamples; ++sample_index) {
+          row.samples.push_back(runProfileSample(
+              worker_count, scenario, sample_index, false));
+          wall_samples.push_back(row.samples.back().wall_ms);
+          refresh_samples.push_back(row.samples.back().refresh_elapsed_ms);
+          provider_samples.push_back(
+              row.samples.back().provider_batch_duration_ms);
+        }
+        row.wall = profileTimingSummary(std::move(wall_samples));
+        row.refresh = profileTimingSummary(std::move(refresh_samples));
+        row.provider = profileTimingSummary(std::move(provider_samples));
+        worker.scenarios.push_back(std::move(row));
+      }
+      workers.push_back(std::move(worker));
+    }
+  } catch (const std::exception& error) {
+    FAIL() << error.what();
+  }
+
+  ASSERT_EQ(workers.size(), 3u);
+  for (std::size_t scenario_index = 0; scenario_index < scenarios.size();
+       ++scenario_index) {
+    const auto& baseline = workers.front().scenarios[scenario_index];
+    std::set<std::string> stable_hashes;
+    for (auto& worker : workers) {
+      auto& scenario = worker.scenarios[scenario_index];
+      ASSERT_EQ(scenario.samples.size(), kProfileMeasuredSamples);
+      scenario.wall_speedup = baseline.wall.p50_ms / scenario.wall.p50_ms;
+      scenario.refresh_speedup =
+          baseline.refresh.p50_ms / scenario.refresh.p50_ms;
+      scenario.provider_speedup =
+          baseline.provider.p50_ms / scenario.provider.p50_ms;
+      ASSERT_TRUE(std::isfinite(scenario.wall_speedup));
+      ASSERT_TRUE(std::isfinite(scenario.refresh_speedup));
+      ASSERT_TRUE(std::isfinite(scenario.provider_speedup));
+      ASSERT_GT(scenario.wall_speedup, 0.0);
+      ASSERT_GT(scenario.refresh_speedup, 0.0);
+      ASSERT_GT(scenario.provider_speedup, 0.0);
+      for (const auto& sample : scenario.samples) {
+        stable_hashes.insert(sample.snapshot_scientific_hash);
+      }
+    }
+    ASSERT_EQ(stable_hashes.size(), 1u)
+        << profileScenarioName(scenarios[scenario_index]);
+  }
+
+  const std::string artifact = profileArtifactJson(workers, provenance);
+  ASSERT_NE(artifact.find("\"diagnostic_execution_status\": \"PASS\""),
+            std::string::npos);
+  const auto temporary_output = expected_output.string() + ".tmp";
+  {
+    std::ofstream stream(temporary_output, std::ios::binary | std::ios::trunc);
+    ASSERT_TRUE(stream.good());
+    stream << artifact;
+    stream.flush();
+    ASSERT_TRUE(stream.good());
+  }
+  std::filesystem::rename(temporary_output, expected_output);
+  ASSERT_TRUE(std::filesystem::is_regular_file(expected_output));
 }
 
 }  // namespace ego_planner
