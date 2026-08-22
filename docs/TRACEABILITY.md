@@ -1,5 +1,20 @@
 # Traceability Matrix (IAP)
 
+## 2026-08-22 ICRA-022 occupancy-epoch timestamp authority repair
+
+| Req ID | Requirement/evidence seam | Implementation and focused evidence | Status |
+|---|---|---|---|
+| IAP-RQ-311 / IAP-RQ-320 / IAP-RQ-322 | A depth-fused occupancy generation must use the exact scientific image-header time, never node receipt/watchdog time | Both real depth callbacks validate finite positive sec/nanosec and bind source time with pending image/pose under `occupancy_epoch_mutex_`; the shared private commit helper keeps receipt time only for the watchdog and atomically publishes buffers/generation/source stamp. Tests prove `100.25 s`/`101.75 s` epochs with host receipt around `10000 s`, immutable prior generations, and point-cloud input-header semantics | **IMPLEMENTED / FOCUSED TESTS PASS 6/6** |
+| IAP-RQ-311 / IAP-RQ-320 | Invalid pending time must fail closed without publishing partial or restamped content; P0 must keep strict clock-domain freshness | Invalid pending time exits before sequence/buffer/stamp mutation; the test compares generation, stamp, centers, and all 64 frozen diagnostic cells. P0 message-domain test accepts equal current/occupancy time and rejects future `+0.001 s` and stale `-0.501 s` as `occupancy_stale` | **IMPLEMENTED / P0 76/76; Adapter 7/7** |
+| IAP-RQ-320 / IAP-RQ-322 | Analyzer diagnostics must distinguish availability, evidence-contract, and complete-benchmark performance failures | Protocol-neutral insufficient-count name; zero success input failure; malformed/incoherent/insufficient evidence-contract failure; tuning and `P0_PERFORMANCE_GATE_FAIL` only for a complete benchmark over `400 ms`; smoke has neither threshold nor advice | **IMPLEMENTED / analyzer 25/25; runner 16/16; capture 1/1** |
+| IAP-RQ-311 / IAP-RQ-320 / IAP-RQ-322 | Repository-local verification must retain historical evidence and stop before any live run | IAP/planner builds and all non-conflicting required suites pass; linkage resolves local `libiap.so`/`libplan_env.so`; protected PDF and ICRA-011/014/020/021 hashes remain exact. The historical ICRA-020 validator alone fails because its zero-diff pin includes the P0 test file that ICRA-022 requires changing; validator is not allowlisted | **BLOCKED / Gate-0B NOT_QUALIFIED; SUPERVISOR disposition required** |
+
+Exact commands, exit codes, counts, linkage, binary hashes and separately
+identified plan-env package lint debt are recorded in
+`results/icra27/icra022/verification_summary.txt`. No GPU preflight, ROS/main
+flow, live analyzer, smoke, qualification, campaign, disabled ICRA-014
+diagnostic, or ICRA-020 opt-in profile was invoked.
+
 ## 2026-08-22 ICRA-021 four-worker Gate-0B smoke
 
 | Req ID | Requirement/evidence seam | Implementation and focused evidence | Status |

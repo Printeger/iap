@@ -2583,3 +2583,76 @@ generation (`22 occupancy_stale`, `2 message_stamp_unavailable`). No retry,
 tuning, alternate flow, 60-second qualification or Gate promotion occurred.
 **ICRA-021 BLOCKED; Gate-0B NOT_QUALIFIED.** Control returns to SUPERVISOR
 review. DEEPSEEK issues no next task or Gate decision.
+
+## 2026-08-22T14:04:39Z — ICRA-022 START
+
+Synchronized `dev/icra` at
+`af8fe3a87d6d660cc26e5026aa630b5c170200c6`; `HEAD...origin/dev/icra` is
+`0 0`. The protected untracked PDF remains exact at SHA-256
+`1f07da5631a6551a2f98c02d46fd45bc87f2f1e3e7c14e95f9a7f4a0bac844f6`.
+Read-only ICRA-011, disabled ICRA-014, accepted ICRA-020 and blocked ICRA-021
+raw health/integrity remain exact at their required SHA-256 values
+`778abd22158805c41150b4eeed9c37a3f660237a0bb0599e9a567e3533c7b32c`,
+`44f47b23137d17f4b0cbc81af6827156865bdecb36089bf53f770960a2fb963d`,
+`2f68e3123426b5a1117e86bb5abc7c69117a070bcf583ec759974fddeb71a0bd`,
+`59f88a7eb9cde2695aad20aef7e6f32c4f065e1caf0bf127907f2a814b40ee59`
+and `b82089044a2088d02b0e44c9a3a2eebd2e43168d559578046afe989352052aca`.
+
+The exact allowlist is `grid_map.h`, `grid_map.cpp`, the existing plan-env
+occupancy-epoch test and its CMake registration only if necessary; the
+existing P0 runtime test; the Gate-0 analyzer and focused analyzer test; new
+verification logs below `results/icra27/icra022/`; and `DEV_LOG.md`,
+`docs/CHANGES.md`, and `docs/TRACEABILITY.md`. All Supervisor-owned files,
+public P0 Interface/runtime behavior and unrelated product work are excluded.
+
+Explicit stop line: this task authorizes unit, repository-local build and
+linkage work only. It forbids GPU preflight, ROS/main flow, live analyzer,
+replacement smoke, retry, qualification and campaigns regardless of test
+outcome.
+
+## 2026-08-22T14:38:33Z — ICRA-022 IMPLEMENTATION / BLOCKED VERIFICATION
+
+Implemented the bounded occupancy timestamp-authority repair. The real pose
+and odometry depth callbacks now validate a finite positive header time down
+to nanoseconds and bind it to pending image/pose state under the existing
+occupancy mutex. The shared private update seam keeps node receipt time solely
+for the unchanged watchdog and commits buffers, generation and scientific
+source time coherently. Invalid pending time exits before sequence/buffer/stamp
+mutation. The independent point-cloud path and public frozen epoch/Adapter
+Interface remain unchanged.
+
+Producer tests cover delayed host receipt (`10000 s`) versus source time
+(`100.25 s`), successive pose/odom generations (`100.25 s` / `101.75 s`),
+prior-epoch immutability, all 64 frozen diagnostic cells on invalid pending
+time, and point-cloud source authority. P0 adds only a test proving fresh
+message-domain acceptance and retained future/stale `occupancy_stale`
+rejection. Analyzer diagnostics now use
+`fewer_than_required_successful_generations`, classify nonzero incomplete
+evidence as `P0_EVIDENCE_CONTRACT_FAIL`, and reserve performance failure and
+tuning recommendations for a contract-complete over-threshold benchmark.
+
+Repository-local configure/build/install passed for IAP, plan-env,
+path_searching, bspline_opt and plan_manage. Final focused counts are plan-env
+6/6, P0 76/76, Adapter 7/7, rolling 23/23, retained Ego 8/8, P4 4/4, P1
+integrity 39/39, analyzer 25/25, runner 16/16 and capture 1/1. Seven of eight
+selected-root tests pass. Direct consumers resolve the ICRA-022 `libiap.so`
+at SHA-256
+`d988f19ce7a4f08f145cd4643f7cd66e26f3f9849d03db836107cae23ebcbe31`
+and `libplan_env.so` at
+`cadd44115d026695547a53b4ac884d4c80a851882d9cd1c942103dfe43ae1ecf`.
+Exact commands, exits, hashes, linkage and separate package lint debt are in
+`results/icra27/icra022/verification_summary.txt`.
+
+The sole blocker is the required read-only ICRA-020 validator. It exits 1 on
+`git diff --quiet ffc09c4b28b7c38b5f6682220d41cd0f4937b963 -- CMakeLists.txt
+src/iap/planner/plan_manage/test/test_p0_risk_grid_runtime.cpp`: ICRA-022
+explicitly requires the new P0 clock-domain case in that allowlisted file,
+while the historical validator requires the file to have no diff. The
+validator is not allowlisted and was not modified. Two-axis review is
+Standards CODE PASS and Spec PASS_WITH_EXTERNAL_BLOCKER.
+
+Protected PDF/ICRA-011/014/020/021 hashes remain exact. No GPU preflight,
+ROS/main flow, live analyzer, replacement smoke, retry, qualification,
+campaign, disabled ICRA-014 diagnostic, or ICRA-020 opt-in profile ran.
+**ICRA-022 BLOCKED; Gate-0B NOT_QUALIFIED.** Control must return to Supervisor
+review; DEEPSEEK issues no next task or Gate decision.

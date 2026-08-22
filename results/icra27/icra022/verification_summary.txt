@@ -1,0 +1,144 @@
+ICRA-022 repository-local verification
+UTC: 2026-08-22T14:38:33Z
+Synchronized base: af8fe3a87d6d660cc26e5026aa630b5c170200c6
+Scope: unit/build/linkage only; no GPU preflight, ROS/main flow, live analyzer,
+smoke, qualification, campaign, or ICRA-020 opt-in profile.
+
+Build/install (all exit 0; all outputs below results/icra27/icra022/)
+- cmake -S . -B results/icra27/icra022/build_iap
+  -DCMAKE_BUILD_TYPE=RelWithDebInfo
+  -DCMAKE_INSTALL_PREFIX=$PWD/results/icra27/icra022/install
+  -DBUILD_WITH_CUDA=ON -DBUILD_WITH_VIEWER=ON -DBUILD_WITH_OPENCV=ON
+- cmake --build results/icra27/icra022/build_iap -j2
+- cmake --install results/icra27/icra022/build_iap
+- cmake -S src/iap/planner/plan_env
+  -B results/icra27/icra022/build_plan_env
+  -DCMAKE_BUILD_TYPE=RelWithDebInfo
+  -DCMAKE_INSTALL_PREFIX=$PWD/results/icra27/icra022/install_plan_env
+- cmake --build results/icra27/icra022/build_plan_env -j2
+- cmake --install results/icra27/icra022/build_plan_env
+- path_searching, bspline_opt, and plan_manage were configured with
+  CMAKE_BUILD_TYPE=RelWithDebInfo and explicit ICRA-022 iap/plan_env/
+  path_searching/bspline_opt package directories, then built and installed;
+  configure/build/install all exited 0.
+
+Final task-required tests
+- test_grid_map_occupancy_epoch --gtest_brief=1: exit 0, 6/6 PASS.
+- test_p0_risk_grid_runtime --gtest_brief=1: exit 0, 76/76 PASS;
+  one historical opt-in test remains disabled and was not invoked.
+- test_p0_occupancy_epoch_adapter --gtest_brief=1: exit 0, 7/7 PASS.
+- test_rolling_spatial_advisory_window --gtest_brief=1: exit 0, 23/23 PASS;
+  disabled ICRA-014 was not invoked.
+- retained Ego CTest regex (P0, Adapter, P1 admission/selection, P2, P3, P5,
+  planning context): exit 0, 8/8 PASS.
+- test_p4_risk_astar --gtest_brief=1: exit 0, 4/4 PASS.
+- test_p1_integrity_cost --gtest_brief=1: exit 0, 39/39 PASS.
+- python3 test/test_gate0_analyzer.py: exit 0, 25/25 PASS.
+- python3 test/test_gate0_runner.py: exit 0, 16/16 PASS. The printed
+  GPU_NOT_READY:cuInit_failed_999 is a mocked unit-test fixture; no preflight ran.
+- python3 test/test_gate0_capture_p0_health.py: exit 0, 1/1 PASS.
+- selected root CTest regex for integrity/local occupancy/predictor/rolling/
+  conversion/risk-grid/ICRA-011/ICRA-020: exit 8, 7/8 PASS; only ICRA-020
+  validator failed for the exact blocker below.
+- python3 test/test_icra020_p0_rolling_worker_profile.py: exit 1, 0/1.
+  CalledProcessError command:
+  git diff --quiet ffc09c4b28b7c38b5f6682220d41cd0f4937b963 --
+  CMakeLists.txt src/iap/planner/plan_manage/test/test_p0_risk_grid_runtime.cpp
+  ICRA-022 requires a new P0 clock-domain case in that allowed file, while the
+  read-only historical validator requires it to have no diff. The validator is
+  outside the ICRA-022 allowlist and was not changed. This is the sole task
+  blocker and requires Supervisor disposition.
+
+Environment correction retained for audit
+- The first aggregate planner CTest used an incomplete LD_LIBRARY_PATH and
+  exited 8 because libgnss_comm/libtraj_utils could not be loaded. Repeating
+  the identical test selection with explicit repository/workspace dependency
+  library directories exited 0 as recorded above. No product change resulted.
+- A first `python3 -m unittest test.<name>` invocation exited 1 because test/
+  is not a Python package. Direct file invocations above are authoritative.
+
+Package-wide lint debt (separate from task-required tests)
+- plan_env package CTest: unit test and cppcheck passed; lint_cmake failed on
+  12 existing issues in unchanged CMakeLists.txt; uncrustify reported broad
+  divergence in 9 files (including pre-existing unrelated files and the task
+  grid-map files); xmllint timed out at 60.02 s. LastTestsFailed: lint_cmake,
+  uncrustify, xmllint. No out-of-scope formatting sweep was performed.
+
+Repository-local linkage proof (explicit LD_LIBRARY_PATH)
+- rolling, P0, Adapter, P4, and P1 integrity consumers resolved libiap.so to
+  $PWD/results/icra27/icra022/install/lib/libiap.so.
+- plan-env epoch, P1 integrity, and planning-context consumers resolved
+  libplan_env.so to
+  $PWD/results/icra27/icra022/install_plan_env/lib/libplan_env.so.
+- ldd reported no `not found` entries for the inspected direct consumers.
+
+Relevant SHA-256
+- libiap.so: d988f19ce7a4f08f145cd4643f7cd66e26f3f9849d03db836107cae23ebcbe31
+- libplan_env.so: cadd44115d026695547a53b4ac884d4c80a851882d9cd1c942103dfe43ae1ecf
+- test_grid_map_occupancy_epoch: 769d92d8eaa84f157cc3f5c6da1da3fdf49f0978e55a6e5ea30cc33df981d89c
+- test_p0_risk_grid_runtime: 1c86b5f438c086434a940472a6333349eda00e0238ab6330698d97ad4431a47a
+- test_p0_occupancy_epoch_adapter: efa42856c72222ef80dc4b98289b5d5cd3bc02a10d142e1ab9c09ebbfb00926a
+- test_rolling_spatial_advisory_window: 892b88139b87e6395c74f0fc50479b3149151e9ac03ea642ea31f6b95b7945f3
+- test_p4_risk_astar: cce62d8a72e01ff396b34396f95f6216713c2a50466a6c59e17d5bf7d23cfdf8
+- test_p1_integrity_cost: d7195bcbd7281aae5c5ab929b45d5702314ded7a77ee91caf3f2b52f3e3005d0
+- test_planning_risk_context: 73ce2faeeb1f252cd09ffdfd25aad4173f3252a73a6d1ce2760e9834a89c050d
+
+Protected inputs reverified exact
+- PDF: 1f07da5631a6551a2f98c02d46fd45bc87f2f1e3e7c14e95f9a7f4a0bac844f6
+- ICRA-011: 778abd22158805c41150b4eeed9c37a3f660237a0bb0599e9a567e3533c7b32c
+- ICRA-014: 44f47b23137d17f4b0cbc81af6827156865bdecb36089bf53f770960a2fb963d
+- ICRA-020: 2f68e3123426b5a1117e86bb5abc7c69117a070bcf583ec759974fddeb71a0bd
+- ICRA-021 health: 59f88a7eb9cde2695aad20aef7e6f32c4f065e1caf0bf127907f2a814b40ee59
+- ICRA-021 integrity: b82089044a2088d02b0e44c9a3a2eebd2e43168d559578046afe989352052aca
+
+Review: Standards CODE PASS; Spec PASS_WITH_EXTERNAL_BLOCKER.
+Verdict: ICRA-022 BLOCKED; Gate-0B NOT_QUALIFIED. Supervisor review required.
+
+Literal repository-local command record
+
+cmake -S /home/dev/ws_iap/src/iap -B /home/dev/ws_iap/src/iap/results/icra27/icra022/build_iap -DCMAKE_BUILD_TYPE=RelWithDebInfo -DCMAKE_INSTALL_PREFIX=/home/dev/ws_iap/src/iap/results/icra27/icra022/install -DBUILD_WITH_CUDA=ON -DBUILD_WITH_VIEWER=ON -DBUILD_WITH_OPENCV=ON
+cmake --build /home/dev/ws_iap/src/iap/results/icra27/icra022/build_iap -j2
+cmake --install /home/dev/ws_iap/src/iap/results/icra27/icra022/build_iap
+
+cmake -S /home/dev/ws_iap/src/iap/src/iap/planner/plan_env -B /home/dev/ws_iap/src/iap/results/icra27/icra022/build_plan_env -DCMAKE_BUILD_TYPE=RelWithDebInfo -DCMAKE_INSTALL_PREFIX=/home/dev/ws_iap/src/iap/results/icra27/icra022/install_plan_env
+cmake --build /home/dev/ws_iap/src/iap/results/icra27/icra022/build_plan_env -j2
+cmake --install /home/dev/ws_iap/src/iap/results/icra27/icra022/build_plan_env
+
+cmake -S /home/dev/ws_iap/src/iap/src/iap/planner/path_searching -B /home/dev/ws_iap/src/iap/results/icra27/icra022/build_path_searching -DCMAKE_BUILD_TYPE=RelWithDebInfo -DCMAKE_INSTALL_PREFIX=/home/dev/ws_iap/src/iap/results/icra27/icra022/install_path_searching -Diap_DIR=/home/dev/ws_iap/src/iap/results/icra27/icra022/install/share/iap -Dplan_env_DIR=/home/dev/ws_iap/src/iap/results/icra27/icra022/install_plan_env/share/plan_env/cmake
+cmake --build /home/dev/ws_iap/src/iap/results/icra27/icra022/build_path_searching -j2
+cmake --install /home/dev/ws_iap/src/iap/results/icra27/icra022/build_path_searching
+
+cmake -S /home/dev/ws_iap/src/iap/src/iap/planner/bspline_opt -B /home/dev/ws_iap/src/iap/results/icra27/icra022/build_bspline_opt -DCMAKE_BUILD_TYPE=RelWithDebInfo -DCMAKE_INSTALL_PREFIX=/home/dev/ws_iap/src/iap/results/icra27/icra022/install_bspline_opt -Diap_DIR=/home/dev/ws_iap/src/iap/results/icra27/icra022/install/share/iap -Dplan_env_DIR=/home/dev/ws_iap/src/iap/results/icra27/icra022/install_plan_env/share/plan_env/cmake -Dpath_searching_DIR=/home/dev/ws_iap/src/iap/results/icra27/icra022/install_path_searching/share/path_searching/cmake
+cmake --build /home/dev/ws_iap/src/iap/results/icra27/icra022/build_bspline_opt -j2
+cmake --install /home/dev/ws_iap/src/iap/results/icra27/icra022/build_bspline_opt
+
+cmake -S /home/dev/ws_iap/src/iap/src/iap/planner/plan_manage -B /home/dev/ws_iap/src/iap/results/icra27/icra022/build_ego -DCMAKE_BUILD_TYPE=RelWithDebInfo -DCMAKE_INSTALL_PREFIX=/home/dev/ws_iap/src/iap/results/icra27/icra022/install_ego -Diap_DIR=/home/dev/ws_iap/src/iap/results/icra27/icra022/install/share/iap -Dplan_env_DIR=/home/dev/ws_iap/src/iap/results/icra27/icra022/install_plan_env/share/plan_env/cmake -Dpath_searching_DIR=/home/dev/ws_iap/src/iap/results/icra27/icra022/install_path_searching/share/path_searching/cmake -Dbspline_opt_DIR=/home/dev/ws_iap/src/iap/results/icra27/icra022/install_bspline_opt/share/bspline_opt/cmake
+cmake --build /home/dev/ws_iap/src/iap/results/icra27/icra022/build_ego -j2
+cmake --install /home/dev/ws_iap/src/iap/results/icra27/icra022/build_ego
+
+icra022_ld_path=/home/dev/ws_iap/src/iap/results/icra27/icra022/install_ego/lib:/home/dev/ws_iap/src/iap/results/icra27/icra022/install_plan_env/lib:/home/dev/ws_iap/src/iap/results/icra27/icra022/install_path_searching/lib:/home/dev/ws_iap/src/iap/results/icra27/icra022/install_bspline_opt/lib:/home/dev/ws_iap/src/iap/results/icra27/icra022/install/lib:/home/dev/ws_iap/install/gnss_comm/lib:/home/dev/ws_iap/install/traj_utils/lib:/home/dev/ws_iap/install/quadrotor_msgs/lib:/opt/ros/jazzy/lib
+env LD_LIBRARY_PATH="$icra022_ld_path" results/icra27/icra022/build_plan_env/test_grid_map_occupancy_epoch --gtest_brief=1
+env LD_LIBRARY_PATH="$icra022_ld_path" results/icra27/icra022/build_ego/test_p0_risk_grid_runtime --gtest_brief=1
+env LD_LIBRARY_PATH="$icra022_ld_path" results/icra27/icra022/build_ego/test_p0_occupancy_epoch_adapter --gtest_brief=1
+env LD_LIBRARY_PATH="$icra022_ld_path" results/icra27/icra022/build_iap/test_rolling_spatial_advisory_window --gtest_brief=1
+env LD_LIBRARY_PATH="$icra022_ld_path" results/icra27/icra022/build_path_searching/test_p4_risk_astar --gtest_brief=1
+env LD_LIBRARY_PATH="$icra022_ld_path" results/icra27/icra022/build_bspline_opt/test_p1_integrity_cost --gtest_brief=1
+env LD_LIBRARY_PATH="$icra022_ld_path" ctest --test-dir results/icra27/icra022/build_ego -R 'test_p0_risk_grid_runtime|test_p0_occupancy_epoch_adapter|test_p1_replan_admission|test_p1_candidate_selection|test_p5_runtime_integrity_gate|test_p2_candidate_ranking|test_p3_reference_bias|test_planning_risk_context' --output-on-failure
+env LD_LIBRARY_PATH="$icra022_ld_path" ctest --test-dir results/icra27/icra022/build_iap -R 'test_integrity_snapshot|test_local_occupancy|test_predictor_module|test_rolling_spatial_advisory_window|test_predictor_risk_conversion|test_risk_grid_map|test_icra011_spatial_dedup_profile|test_icra020_p0_rolling_worker_profile' --output-on-failure
+python3 test/test_gate0_analyzer.py
+python3 test/test_gate0_runner.py
+python3 test/test_gate0_capture_p0_health.py
+python3 test/test_icra020_p0_rolling_worker_profile.py
+
+env LD_LIBRARY_PATH="$icra022_ld_path" ldd results/icra27/icra022/build_iap/test_rolling_spatial_advisory_window
+env LD_LIBRARY_PATH="$icra022_ld_path" ldd results/icra27/icra022/build_plan_env/test_grid_map_occupancy_epoch
+env LD_LIBRARY_PATH="$icra022_ld_path" ldd results/icra27/icra022/build_ego/test_p0_risk_grid_runtime
+env LD_LIBRARY_PATH="$icra022_ld_path" ldd results/icra27/icra022/build_ego/test_p0_occupancy_epoch_adapter
+env LD_LIBRARY_PATH="$icra022_ld_path" ldd results/icra27/icra022/build_path_searching/test_p4_risk_astar
+env LD_LIBRARY_PATH="$icra022_ld_path" ldd results/icra27/icra022/build_bspline_opt/test_p1_integrity_cost
+env LD_LIBRARY_PATH="$icra022_ld_path" ldd results/icra27/icra022/build_ego/test_planning_risk_context
+
+env LD_LIBRARY_PATH="$icra022_ld_path" ctest --test-dir results/icra27/icra022/build_plan_env --output-on-failure
+git diff --check
+sha256sum results/icra27/icra022/install/lib/libiap.so results/icra27/icra022/install_plan_env/lib/libplan_env.so results/icra27/icra022/build_plan_env/test_grid_map_occupancy_epoch results/icra27/icra022/build_ego/test_p0_risk_grid_runtime results/icra27/icra022/build_ego/test_p0_occupancy_epoch_adapter results/icra27/icra022/build_iap/test_rolling_spatial_advisory_window results/icra27/icra022/build_path_searching/test_p4_risk_astar results/icra27/icra022/build_bspline_opt/test_p1_integrity_cost results/icra27/icra022/build_ego/test_planning_risk_context
+sha256sum docs/icra27/dev/ICRA_SYSTEM_FLOW.pdf results/icra27/icra011/p0_phase2_spatial_dedup_profile.json results/icra27/icra014/canonical_rolling_spatial_diagnostic.json results/icra27/icra020/p0_rolling_worker_profile.json results/icra27/icra021/runs/smoke/risk_grid_health.jsonl results/icra27/icra021/runs/smoke/integrity_report.jsonl
