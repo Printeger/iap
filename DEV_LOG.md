@@ -2106,3 +2106,29 @@ worker/default/workload or planner behavior change, main flow, ROS launch,
 smoke, qualification, bag, RViz, campaign, analyzer, formal benchmark,
 GPU/CUDA work or external write ran. ICRA-017/018, Phase 4 and Gate-0B remain
 Supervisor-review pending and are not marked PASS.
+
+## 2026-08-22T06:29:39Z — ICRA-018 IMPLEMENTATION PUSHED / SUPERVISOR HANDOFF
+
+Implementation commit
+`7c65ff9de01130c44a520232f0c52543c5f3ab89` was pushed to
+`origin/dev/icra`. It contains exactly the five ICRA-018 allowlisted files.
+Independent Standards and Spec reviews both PASS after the absent-race
+regressions directly proved rolling-slot and successful-full-refresh watchdog
+rollback for Optional and Auto, and the common white-box reconstruction was
+consolidated in one named scenario helper.
+
+Final repository-local evidence remains focused 7/7, complete P0 70/70, root
+7/7, plan-env 1/1, Ego retained 8/8, P4 A* 4/4 and P1 integrity 39/39. Twelve
+direct consumers resolve the current ICRA-018 `libiap.so` at SHA-256
+`d51e5feb89e5daf69f0fa17c8a02d4dc40c28a1e628e96212e46554531006dd0`.
+The protected PDF remains solely untracked at SHA-256
+`1f07da5631a6551a2f98c02d46fd45bc87f2f1e3e7c14e95f9a7f4a0bac844f6`;
+the retained ICRA-011 JSON and disabled, never-rerun ICRA-014 canonical remain
+read-only at SHA-256
+`778abd22158805c41150b4eeed9c37a3f660237a0bb0599e9a567e3533c7b32c` and
+`44f47b23137d17f4b0cbc81af6827156865bdecb36089bf53f770960a2fb963d`.
+
+No task process or forbidden flow remains and no gate is self-promoted.
+Return ICRA-018 to SUPERVISOR for review; only the Supervisor may accept
+ICRA-017/018, update Phase 4/Gate-0B, authorize Phase-4B/calibration/
+qualification/GPU work or issue the next task.
