@@ -1,145 +1,114 @@
-# ICRA-025 — Repair final-generation classification and launch dependency provenance
+# ICRA-026 — Rebuild and run one dependency-guarded replacement smoke
 
 > Active gate: `GATE_0B`
 > Owner: `DEEPSEEK`
 > Activation: `TASK_READY`
-> Supervisor verdict: `ICRA024_STANDARDS_PASS_SPEC_REQUEST_CHANGES`
+> Supervisor verdict: `ICRA025_REVIEW_PASS`
 > Requirement mapping: `IAP-RQ-320`, `IAP-RQ-322`
 > Conference route: conditional P0 -> P4 -> P5
-> This task: analyzer and launch-environment preflight repair only; no GPU or live flow
+> This task: repository-local rebuild and exactly one P0-only replacement smoke
 
 ## Supervisor decision
 
-ICRA-024's build, linkage, mandatory GPU preflight, one-shot stop behavior and truthful blocked-run
-evidence are accepted. The smoke did not exercise P0: launch exited after 0.164 s because its
-manually assembled prefix search did not expose `so3_control`, although that package exists at
-`/home/dev/ws_iap/install/so3_control` and resolves after the workspace setup is sourced. This is an
-environment-assembly defect, not a missing external dependency, GPU failure or P0 result.
+ICRA-025 passes Standards and Spec review with zero findings. The analyzer now selects the final
+callback representative for every positive integral generation before classification, and the
+runner validates a structured, task-local launch dependency closure after GPU PASS but before
+capture/launch. Static resolution proves that `so3_control` and the other frozen dependencies exist
+when the workspace setup and task-local prefixes are assembled correctly.
 
-Overall review is `REQUEST_CHANGES`. The analyzer de-duplicates only rows that already claim
-success. Therefore a generation observed first as `ready=true` and later as `ready=false` retains
-both rows, still counts the early success in the latency distribution and can return `PASS`. The
-frozen contract requires one final callback representative per generation before success/failure
-classification.
-
-Repair both pre-execution contracts without running another smoke. Supervisor will review ICRA-025
-before authorizing any replacement live run.
+Per the operator's artifact lifecycle, Supervisor deleted the reviewed ICRA-024 build/install trees
+only after ICRA-025 code/documentation and this management changeset were pushed. Rebuild the current
+tree below ICRA-026, verify the exact environment and run one replacement smoke. The 60-second fixed
+Gate-0B benchmark remains forbidden pending Supervisor review.
 
 ## 1. Synchronize and preserve
 
-- Follow the `AGENTS.md` synchronization protocol. Stop as `REMOTE_DIVERGED` if both sides lead;
-  never reset, clean, stash, rebase, amend pushed history or overwrite another role's work.
-- Preserve the untracked PDF and ICRA-011/014/020/021 evidence at the hashes frozen in ICRA-024.
-  Preserve all committed ICRA-024 run evidence byte-for-byte; do not rewrite the failed smoke.
-- Retain every ICRA-024 `build*`/`install*` tree unchanged throughout development and Supervisor
-  review. Reuse it read-only for verification/linkage; do not delete, rebuild or restore ICRA-022.
-  Because ICRA-024 Review did not pass, its approximately 4.8 GiB trees are not yet cleanup-eligible.
-- Write new bounded logs only below `results/icra27/icra025/`. Do not create a new build/install tree.
-- Record an ICRA-025 START entry with the exact allowlist and stop line. Do not edit Supervisor-owned
+- Follow `AGENTS.md` synchronization. Stop as `REMOTE_DIVERGED` if both sides lead; never reset,
+  clean, stash, rebase, amend pushed history or overwrite another role's work.
+- Preserve the untracked PDF, ICRA-011/014/020/021 protected artifacts, committed ICRA-024 blocked
+  run and ICRA-025 verification summary exactly at their reviewed hashes. Do not recreate or depend
+  on deleted ICRA-022/024 build paths.
+- Create every build/install/log/runtime/evidence path only below `results/icra27/icra026/`.
+  Retain all ICRA-026 build/install trees throughout development and Supervisor review; Supervisor
+  deletes them only after Review PASS and pushed code/documentation/handoff.
+- Record an ICRA-026 START entry with exact allowlist and stop line. Do not edit Supervisor-owned
   state/task/log/scope/plan/design/Gate documents.
 
-## 2. Classify only the final representative of each generation
+## 2. Rebuild, test, link, and freeze the environment
 
-In `analyze_p0_messages()`, preserve callback-key de-duplication first, then apply generation-key
-de-duplication to **all** callback representatives with a positive, non-boolean integral
-`generation_id`, regardless of `ready` value. Only after the final captured representative for each
-generation has been selected may it be classified and validated.
+- Configure/build/install current pushed source into task-local trees for `iap`, `plan_env`,
+  `path_searching`, `bspline_opt` and `ego_planner`. Use repository-local temporary and log paths.
+- Run analyzer, runner, capture and direct ICRA-020 validator suites; run selected-root 8/8,
+  plan-env 6/6, P0 76/76, Adapter 7/7, rolling 23/23, retained Ego 8/8, P4 4/4 and P1 integrity
+  39/39. Do not invoke disabled ICRA-014/020 profiles.
+- Prove with `ldd` that all direct consumers resolve only ICRA-026 `libiap.so` and `libplan_env.so`,
+  with no `not found`, deleted ICRA-024 or external build-tree entry. Record hashes.
+- Assemble the future runner environment literally in this order:
+  1. source `/opt/ros/jazzy/setup.bash`;
+  2. source `/home/dev/ws_iap/install/setup.bash` read-only;
+  3. prepend ICRA-026 `install_ego`, `install_bspline_opt`, `install_path_searching`,
+     `install_plan_env`, and `install` to `AMENT_PREFIX_PATH` in that order;
+  4. prepend the corresponding `lib` directories to `LD_LIBRARY_PATH`.
+- Before GPU preflight, use read-only ament-index resolution to prove all required packages resolve,
+  `iap`/`ego_planner` resolve exactly to ICRA-026 installs, and every resolved prefix occurs as an
+  exact active `AMENT_PREFIX_PATH` entry. Record the ordered path and package mapping.
+- Any build, test, linkage or static dependency failure stops the task before GPU/ROS. Do not repair,
+  tune or fall back to deleted/older task artifacts.
 
-- `success -> failure` for one generation must produce only the final failed representative and must
-  not contribute that generation to latency statistics.
-- `failure -> success` must produce only the final success representative, subject to every strict
-  success contract.
-- `success -> success` keeps only the final success observation. A final malformed success claim
-  fails closed as `P0_EVIDENCE_CONTRACT_FAIL` and does not fall back to an earlier valid observation.
-- Callback representatives without a positive integral generation remain ordinary failed rows unless
-  they claim success; an invalid success claim remains an evidence-contract failure.
-- Keep malformed callback identity fail-closed behavior. Do not restore `refresh_stamp_s` fallback.
-- Report a visible duplicate-generation count whose name and semantics cover all de-duplicated
-  positive-generation representatives, not only `ready=true` rows. If the old field is retained for
-  compatibility, document its exact semantics and do not publish a misleading value.
-- Preserve inclusion of every final successful generation class, complete-set type-7 statistics,
-  smoke/benchmark minima 1/20, fixed worker four and benchmark p95 `<=400 ms`.
+## 3. Mandatory preflight and exactly one live smoke
 
-Add focused RED/GREEN coverage for success-to-failure, failure-to-success, success-to-success,
-final-invalid-success, duplicate count semantics and end-to-end Gate precedence. The prior
-success-to-failure reproduction must not return `PASS` or retain two rows for one generation.
+Only after Section 2 passes, in the exact environment validated there:
 
-## 3. Add a fail-closed launch dependency preflight
+- Run exactly once:
 
-The next one-shot run must not start capture or launch with an incomplete ament prefix closure.
-Make the smallest runner/test change that checks and records required runtime packages before capture
-or ROS starts.
+  `python3 scripts/dev_planner/run_gate0_qualification.py --output-root results/icra27/icra026/runs --smoke`
 
-- Check at least: `iap`, `ego_planner`, `local_sensing`, `odom_visualization`, `poscmd_2_odom`,
-  `gnss_sim`, `so3_quadrotor_simulator`, `so3_control` and `rclcpp_components`. Derive any additional
-  unconditional package from the frozen P0 smoke launch rather than guessing.
-- Each package must resolve through the active ament index to an existing package prefix. Record the
-  ordered `AMENT_PREFIX_PATH`, package-to-prefix mapping, check command/result and failure reasons in
-  a structured manifest field or separate bounded JSON artifact.
-- For future task-local execution, `iap` and `ego_planner` must resolve to the then-current task-local
-  install prefixes; non-IAP simulator/control dependencies may resolve from their existing isolated
-  workspace prefixes. A bare `/home/dev/ws_iap/install` entry is not proof that an isolated package
-  underneath it is discoverable.
-- A missing, malformed or wrongly shadowed required package must stop before capture and launch with
-  a distinct dependency-preflight failure and nonzero runner exit. Do not classify it as
-  `GPU_NOT_READY`, required-process runtime death or P0 input availability.
-- Add unit tests for complete closure, missing `so3_control`, wrong/shadowed IAP prefix, evidence
-  serialization and proof that capture/launch functions are not called on failure.
-- Document a literal reproducible shell environment recipe that sources ROS Jazzy and the existing
-  workspace setup, then prepends the current task-local IAP/EGO/planner prefixes and libraries. In
-  this task, validate that recipe only with read-only package-prefix resolution; do not launch ROS.
+- The runner must first pass mandatory GPU preflight: successful `nvidia-smi`, CUDA Driver API
+  `cuInit(0)` and `device_count >= 1`. Failure outputs `GPU_NOT_READY`, stops before dependency
+  preflight/capture/launch and is not retried.
+- After GPU PASS, the new dependency preflight must pass and persist its complete structured evidence
+  before capture/launch. Failure outputs `LAUNCH_DEPENDENCY_NOT_READY`, exits 4 and is not retried.
+- Preserve frozen smoke configuration: CPU mapping backend, worker 4, `20/15 s`, `30 x 30 x 6 m`,
+  `0.75 m`, horizons `0,0.5,1.0,1.5,2.0,2.5 s`, refresh `0.5 s`, occupied skip on, no bag/RViz,
+  safety profile off and P1/P2/P3/P4/P5 disabled.
+- Smoke acceptance requires runner exit 0 with capture readiness, required process alive through
+  runtime and controlled shutdown, plus analyzer proof of valid integrity and at least one successful
+  76,800-query P0 generation under the frozen final-generation evidence contract.
+- Run the formal analyzer exactly once on the immutable smoke evidence. Record its exact command,
+  exit, classification and hashes.
+- Whether any stage passes or fails, stop after this single runner invocation and single analyzer
+  invocation. Do not correct the environment, retry, tune, switch backend, run benchmark/campaign,
+  or execute P4/P5.
+- Audit task-owned processes and terminate only a process proven to have been started by this task.
 
-Do not hard-code a deleted ICRA-022 path or make the runner silently repair an inherited environment.
-It must validate and report the supplied environment fail-closed.
+## 4. Documentation and handoff
 
-## 4. Verification
-
-- Run the analyzer, runner and capture Python suites, including the new focused cases.
-- Run the direct ICRA-020 validator and selected-root 8/8 suite.
-- Reuse ICRA-024 binaries read-only for plan-env 6/6, P0 76/76, Adapter 7/7, rolling 23/23, retained
-  Ego 8/8, P4 4/4 and P1 integrity 39/39.
-- Recheck that direct consumers resolve only retained ICRA-024 `libiap.so` and `libplan_env.so` at
-  SHA-256 `980abf79b7efe6083f80a0269290bdf83d31082b5a7af0a1c465e7f5f13ecb86` and
-  `ecd6a3fcb17cd378d02cad43310459489fb85c829324b04faaca1cfe5a14dfaf`.
-- Verify protected hashes, `git diff --check`, exact staged allowlist and no task process remains.
-- Record exact commands, environment recipe, stdout/stderr and exits below `results/icra27/icra025/`.
-
-No GPU preflight, capture subscription, ROS daemon/graph query, launch, simulator, smoke, formal
-analyzer over new live evidence, benchmark, qualification, retry, tuning, P4 or P5 execution is
-authorized. Static/read-only ament package-prefix resolution is allowed.
-
-## 5. Documentation and handoff
-
-- Update `docs/CHANGES.md`, `docs/TRACEABILITY.md` and `DEV_LOG.md` with the final-generation repair,
-  dependency-preflight contract and exact verification.
-- Correct ICRA-024 wording only if necessary to distinguish “package absent” from “package not
-  discoverable in the supplied environment”; never alter its commands, exit codes, hashes or run
-  artifacts.
-- Every ICRA-025 commit, including the final `DEV_LOG.md`-only task return, must contain applicable
+- Update `docs/CHANGES.md`, `docs/TRACEABILITY.md` and `DEV_LOG.md` with exact build/test/linkage,
+  environment, GPU/dependency preflight, runner/analyzer commands/exits and truthful smoke outcome.
+- Store bounded reviewable logs/evidence below `results/icra27/icra026/`. Do not stage build/install,
+  runtime copies, ROS logs, the PDF or historical artifacts.
+- Every commit, including the final `DEV_LOG.md`-only task return, must contain applicable
   `IAP-RQ-320` and/or `IAP-RQ-322`.
-- Builder may state test results and a Builder self-check. It may not declare final Standards/Spec
-  verdicts, Gate promotion, replacement-smoke authorization or a next task.
-- Push the implementation/documentation commit and then one final `DEV_LOG.md`-only task-return
-  commit. Return control to Supervisor.
+- Builder may state a self-check only. Do not declare final Standards/Spec verdict, Gate promotion,
+  benchmark authorization or a next task.
+- Push the implementation/evidence/documentation commit, then push one final `DEV_LOG.md`-only task
+  return. Return control to Supervisor.
 
 ## Allowed files
 
-- `scripts/dev_planner/gate0_analyzer.py`;
-- `test/test_gate0_analyzer.py`;
-- `scripts/dev_planner/run_gate0_qualification.py`;
-- `test/test_gate0_runner.py`;
-- new bounded logs below `results/icra27/icra025/`;
+- new ICRA-026 build/install/runtime/log/evidence below `results/icra27/icra026/`, with only bounded
+  review evidence staged;
 - `DEV_LOG.md`, `docs/CHANGES.md`, `docs/TRACEABILITY.md`;
-- ICRA-024 Builder-owned prose only for the narrow environment-label correction above; no JSON,
-  CSV, raw capture, command, manifest, hash or stdout modification.
+- no source/test change is expected. If a pre-run verification exposes a real code defect, stop and
+  return `BLOCKED`; do not repair it under this execution-only task.
 
 ## Forbidden
 
-- No product header/source/test, launch/default/YAML, workload/worker/ROI/resolution/horizon/refresh/
-  threshold, Predictor/RiskGrid/rolling/Adapter/plan-env or P1/P2/P3/P4/P5 change.
-- No deletion/rebuild/modification/staging of ICRA-024 build/install or committed run evidence.
-- No GPU preflight, capture, ROS/launch, smoke, benchmark, retry, qualification, campaign, bag, RViz,
-  tuning, backend switch, P4/P5 arm or Gate promotion.
-- No history rewrite, disabled-profile invocation, external write/cleanup, backup/archive or user-data
-  mutation.
+- No product, analyzer, runner, capture, launch/default/YAML, workload/worker/ROI/resolution/horizon/
+  refresh/threshold or P1/P2/P3/P4/P5 source/test change.
+- No reuse/recreation of deleted ICRA-022/024 build/install; no modification of historical evidence.
+- No retry, 60-second benchmark, qualification, campaign, bag, RViz, tuning, backend/parameter
+  switch, P4/P5 arm or Gate promotion.
+- No disabled-profile invocation, history rewrite, external output/cleanup, backup/archive or
+  user-data mutation.
 - No modification of the untracked PDF, `src/glim`, another repository or external user data.

@@ -1,5 +1,57 @@
 # ICRA Supervisor Log
 
+## 2026-08-22 — ICRA-025 review and ICRA-026 replacement-smoke authorization
+
+### Review identity and synchronization
+
+- Fixed review range: `dc5fd2362d03930057508c2081e0e92cfeeaab32...67aa7ed2b78168c67f6700eb81dd8b59e04ba835`.
+- Reviewed commits: `b9e9737` and `67aa7ed`; both bind `IAP-RQ-320` and `IAP-RQ-322`.
+- `HEAD` and `origin/dev/icra` matched at divergence `0 0` after fetch. The protected PDF remained
+  the sole untracked file. The eight changed paths exactly match the ICRA-025 allowlist; no product,
+  Supervisor-owned, ICRA-024 build/install/evidence or external-repository path changed.
+
+### Two-axis verdict
+
+- Standards: `PASS`, zero findings. Commit traceability, Builder ownership, CHANGES/TRACEABILITY/
+  DEV_LOG synchronization, bounded evidence and handoff wording all conform. No baseline smell was
+  introduced by the cohesive dependency-preflight seam.
+- Spec: `PASS`, zero findings. Callback-key de-duplication remains first; every positive integral
+  generation is then reduced to its final captured representative before `ready` classification.
+  Tests cover success-to-failure, failure-to-success, success-to-success, final-invalid-success,
+  visible duplicate semantics and end-to-end non-PASS/one-row CSV composition.
+- The runner validates all nine unconditional frozen launch packages through the active ament index,
+  requires exact task-local IAP/EGO prefixes, records ordered prefix/mapping/failures, and returns
+  distinct exit 4 before capture/launch on incomplete or shadowed closure.
+- Overall verdict: `ICRA025_REVIEW_PASS`. Gate-0B remains `NOT_QUALIFIED`; this is a repair review,
+  not a live smoke or performance promotion.
+
+### Independent verification
+
+- Passed: analyzer 36/36, runner 21/21, capture 1/1, direct validator 5/5, selected root 8/8,
+  plan-env 6/6, P0 76/76, Adapter 7/7, rolling 23/23, retained Ego 8/8, P4 4/4 and P1 integrity
+  39/39. The runner's GPU/dependency messages are mocked unit fixtures; no live preflight ran.
+- Direct success-to-failure reproduction yields one failed row, zero successes and
+  `P0_INPUT_AVAILABILITY_FAIL`; failure-to-success yields one success and PASS.
+- The literal read-only environment resolves IAP/EGO to retained ICRA-024 installs and all remaining
+  dependencies to exact isolated workspace/ROS prefixes, including
+  `/home/dev/ws_iap/install/so3_control`. Every resolved prefix is an active exact
+  `AMENT_PREFIX_PATH` entry.
+- Seven consumers resolve only retained ICRA-024 `libiap.so` and `libplan_env.so` at hashes
+  `980abf79...c3ecb86` and `ecd6a3fc...14dfaf`; protected evidence hashes remain exact. No task
+  process remains.
+
+### Required next action and artifact lifecycle
+
+- Unique task: `ICRA-026 / GATE_0B`, defined in `NEXT_TASK.md`.
+- Rebuild current source below ICRA-026, pass full test/linkage and static dependency closure, then
+  run exactly one 20-second P0-only replacement smoke under mandatory GPU and launch-dependency
+  preflights. Run the formal analyzer exactly once and stop regardless of outcome.
+- No retry, tuning, 60-second benchmark, qualification, P4/P5 execution or Gate promotion is
+  authorized. A successful ICRA-026 smoke must return for Supervisor review before qualification.
+- Per operator policy, the approximately 4.8 GiB ICRA-024 build/install trees were retained through
+  ICRA-025 development and this review. They become deletion-eligible only after this management
+  changeset is pushed; ICRA-026 must not reuse or recreate those deleted paths.
+
 ## 2026-08-22 — ICRA-024 review and ICRA-025 repair authorization
 
 ### Review identity and synchronization
