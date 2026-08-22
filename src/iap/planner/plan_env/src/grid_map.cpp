@@ -3,6 +3,21 @@
 // #define current_img_ md_.depth_image_[image_cnt_ & 1]
 // #define last_img_ md_.depth_image_[!(image_cnt_ & 1)]
 
+namespace
+{
+
+bool sourceStampSeconds(const builtin_interfaces::msg::Time &stamp,
+                        double *stamp_s)
+{
+  if (stamp.sec < 0 || stamp.nanosec >= 1000000000U || stamp_s == nullptr)
+    return false;
+  *stamp_s = static_cast<double>(stamp.sec) +
+             static_cast<double>(stamp.nanosec) * 1e-9;
+  return std::isfinite(*stamp_s) && *stamp_s > 0.0;
+}
+
+}  // namespace
+
 void GridMap::initMap(rclcpp::Node::SharedPtr node)
 {
   node_ = node;
@@ -192,6 +207,8 @@ void GridMap::initMap(rclcpp::Node::SharedPtr node)
   md_.has_cloud_ = false;
   md_.image_cnt_ = 0;
   md_.last_occ_update_time_ = rclcpp::Time(0, 0, RCL_SYSTEM_TIME);
+  md_.pending_depth_source_stamp_s_ =
+      std::numeric_limits<double>::quiet_NaN();
 
   md_.fuse_time_ = 0.0;
   md_.update_num_ = 0;
@@ -710,25 +727,53 @@ void GridMap::visCallback()
 
 void GridMap::updateOccupancyCallback()
 {
+  const rclcpp::Time receipt_time = node_->now();
+  bool watchdog_timed_out = false;
+  double last_receipt_time_s = std::numeric_limits<double>::quiet_NaN();
+  updateOccupancyFromPendingDepth(
+      receipt_time, &watchdog_timed_out, &last_receipt_time_s);
+  if (watchdog_timed_out)
+  {
+    RCLCPP_ERROR(node_->get_logger(),
+                 "odom or depth lost! now=%f, last_occ_update_time=%f, odom_depth_timeout=%f",
+                 receipt_time.seconds(),
+                 last_receipt_time_s,
+                 mp_.odom_depth_timeout_);
+  }
+}
+
+bool GridMap::updateOccupancyFromPendingDepth(
+    const rclcpp::Time &receipt_time, bool *watchdog_timed_out,
+    double *last_receipt_time_s)
+{
+  std::lock_guard<std::mutex> occupancy_lock(occupancy_epoch_mutex_);
+  if (watchdog_timed_out)
+    *watchdog_timed_out = false;
   if (md_.last_occ_update_time_.seconds() < 1.0)
-    md_.last_occ_update_time_ = node_->now();
+    md_.last_occ_update_time_ = receipt_time;
 
   if (!md_.occ_need_update_)
   {
     if (md_.flag_use_depth_fusion &&
-        (node_->now() - md_.last_occ_update_time_).seconds() > mp_.odom_depth_timeout_)
+        (receipt_time - md_.last_occ_update_time_).seconds() >
+            mp_.odom_depth_timeout_)
     {
-      RCLCPP_ERROR(node_->get_logger(),
-                   "odom or depth lost! now=%f, last_occ_update_time=%f, odom_depth_timeout=%f",
-                   node_->now().seconds(),
-                   md_.last_occ_update_time_.seconds(),
-                   mp_.odom_depth_timeout_);
       md_.flag_depth_odom_timeout_ = true;
+      if (watchdog_timed_out)
+        *watchdog_timed_out = true;
+      if (last_receipt_time_s)
+        *last_receipt_time_s = md_.last_occ_update_time_.seconds();
     }
-    return;
+    return false;
   }
-  md_.last_occ_update_time_ = node_->now();
-  std::lock_guard<std::mutex> occupancy_lock(occupancy_epoch_mutex_);
+  const double source_stamp_s = md_.pending_depth_source_stamp_s_;
+  if (!std::isfinite(source_stamp_s) || source_stamp_s <= 0.0)
+  {
+    md_.occ_need_update_ = false;
+    md_.local_updated_ = false;
+    return false;
+  }
+  md_.last_occ_update_time_ = receipt_time;
   occupancy_update_sequence_.fetch_add(1, std::memory_order_acq_rel);
 
   /* update occupancy */
@@ -744,7 +789,7 @@ void GridMap::updateOccupancyCallback()
     clearAndInflateLocalMap();
 
   occupancy_cloud_stamp_s_.store(
-      md_.last_occ_update_time_.seconds(), std::memory_order_release);
+      source_stamp_s, std::memory_order_release);
   occupancy_update_sequence_.fetch_add(1, std::memory_order_release);
 
   // t4 = ros::Time::now();
@@ -761,11 +806,19 @@ void GridMap::updateOccupancyCallback()
 
   md_.occ_need_update_ = false;
   md_.local_updated_ = false;
+  md_.pending_depth_source_stamp_s_ =
+      std::numeric_limits<double>::quiet_NaN();
+  return true;
 }
 
 void GridMap::depthPoseCallback(const sensor_msgs::msg::Image::ConstPtr &img,
                                 const geometry_msgs::msg::PoseStamped::ConstPtr &pose)
 {
+  double source_stamp_s = std::numeric_limits<double>::quiet_NaN();
+  if (!sourceStampSeconds(img->header.stamp, &source_stamp_s))
+    return;
+
+  std::lock_guard<std::mutex> occupancy_lock(occupancy_epoch_mutex_);
   /* get depth image */
   cv_bridge::CvImagePtr cv_ptr;
   cv_ptr = cv_bridge::toCvCopy(img, img->encoding);
@@ -790,10 +843,13 @@ void GridMap::depthPoseCallback(const sensor_msgs::msg::Image::ConstPtr &img,
     md_.has_odom_ = true;
     md_.update_num_ += 1;
     md_.occ_need_update_ = true;
+    md_.pending_depth_source_stamp_s_ = source_stamp_s;
   }
   else
   {
     md_.occ_need_update_ = false;
+    md_.pending_depth_source_stamp_s_ =
+        std::numeric_limits<double>::quiet_NaN();
   }
 
   md_.flag_use_depth_fusion = true;
@@ -1281,6 +1337,11 @@ void GridMap::extrinsicCallback(const nav_msgs::msg::Odometry::ConstPtr &odom)
 void GridMap::depthOdomCallback(const sensor_msgs::msg::Image::ConstPtr &img,
                                 const nav_msgs::msg::Odometry::ConstPtr &odom)
 {
+  double source_stamp_s = std::numeric_limits<double>::quiet_NaN();
+  if (!sourceStampSeconds(img->header.stamp, &source_stamp_s))
+    return;
+
+  std::lock_guard<std::mutex> occupancy_lock(occupancy_epoch_mutex_);
   /* get pose */
   Eigen::Quaterniond body_q = Eigen::Quaterniond(odom->pose.pose.orientation.w,
                                                  odom->pose.pose.orientation.x,
@@ -1310,5 +1371,6 @@ void GridMap::depthOdomCallback(const sensor_msgs::msg::Image::ConstPtr &img,
   cv_ptr->image.copyTo(md_.depth_image_);
 
   md_.occ_need_update_ = true;
+  md_.pending_depth_source_stamp_s_ = source_stamp_s;
   md_.flag_use_depth_fusion = true;
 }

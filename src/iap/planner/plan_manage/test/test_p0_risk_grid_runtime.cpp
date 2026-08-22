@@ -4766,6 +4766,43 @@ TEST_F(P0RiskGridRuntimeStampTest,
 }
 
 TEST_F(P0RiskGridRuntimeStampTest,
+       OccupancyFreshnessUsesMessageClockAndRejectsFutureOrStaleEpochs) {
+  ensure_rclcpp();
+  auto config = enabledConfig();
+  config.grid.stale_timeout_s = 0.5;
+
+  auto fresh_node = std::make_shared<rclcpp::Node>(
+      "p0_message_clock_fresh_occupancy_test",
+      rclcpp::NodeOptions().allow_undeclared_parameters(false));
+  P0RiskGridRuntime fresh(fresh_node, config,
+                          std::make_unique<FakeProvider>());
+  seedValidInputs(&fresh, 100.0, 100.0);
+  installOccupancyEpoch(&fresh, 100.0);
+  EXPECT_TRUE(refreshOnce(&fresh));
+  EXPECT_EQ(fresh.health().reason, "ok");
+
+  auto future_node = std::make_shared<rclcpp::Node>(
+      "p0_message_clock_future_occupancy_test",
+      rclcpp::NodeOptions().allow_undeclared_parameters(false));
+  P0RiskGridRuntime future(future_node, config,
+                           std::make_unique<FakeProvider>());
+  seedValidInputs(&future, 100.0, 100.0);
+  installOccupancyEpoch(&future, 100.001);
+  EXPECT_FALSE(refreshOnce(&future));
+  EXPECT_EQ(future.health().reason, "occupancy_stale");
+
+  auto stale_node = std::make_shared<rclcpp::Node>(
+      "p0_message_clock_stale_occupancy_test",
+      rclcpp::NodeOptions().allow_undeclared_parameters(false));
+  P0RiskGridRuntime stale(stale_node, config,
+                          std::make_unique<FakeProvider>());
+  seedValidInputs(&stale, 100.0, 100.0);
+  installOccupancyEpoch(&stale, 99.499);
+  EXPECT_FALSE(refreshOnce(&stale));
+  EXPECT_EQ(stale.health().reason, "occupancy_stale");
+}
+
+TEST_F(P0RiskGridRuntimeStampTest,
        MissingStaleOrInvalidGrowthPriorKeepsPreviousGeneration) {
   ensure_rclcpp();
   auto node = std::make_shared<rclcpp::Node>(

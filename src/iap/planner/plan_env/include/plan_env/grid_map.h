@@ -121,8 +121,11 @@ struct MappingData
   bool has_first_depth_;
   bool has_odom_, has_cloud_;
 
-  // odom_depth_timeout_
+  // Node-clock receipt time used only by the depth/odometry watchdog.
+  // It is never the scientific timestamp of a published occupancy epoch.
   rclcpp::Time last_occ_update_time_;
+  double pending_depth_source_stamp_s_ =
+      std::numeric_limits<double>::quiet_NaN();
   bool flag_depth_odom_timeout_;
   bool flag_use_depth_fusion;
 
@@ -263,6 +266,10 @@ private:
 
   // update occupancy by raycasting
   void updateOccupancyCallback();
+  bool updateOccupancyFromPendingDepth(
+      const rclcpp::Time &receipt_time,
+      bool *watchdog_timed_out = nullptr,
+      double *last_receipt_time_s = nullptr);
   void visCallback();
 
   // main update process

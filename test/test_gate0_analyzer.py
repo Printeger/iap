@@ -425,10 +425,16 @@ class Gate0AnalyzerTest(unittest.TestCase):
         _, smoke = MODULE.analyze_p0_messages(messages, protocol="smoke")
         _, benchmark = MODULE.analyze_p0_messages(messages, protocol="benchmark")
         self.assertEqual(smoke["gate"], "PASS")
-        self.assertNotIn("fewer_than_20_successful_generations", smoke["failures"])
+        self.assertNotIn(
+            "fewer_than_required_successful_generations", smoke["failures"]
+        )
         self.assertNotIn("refresh_p95_over_400_ms", smoke["failures"])
-        self.assertIn("fewer_than_20_successful_generations", benchmark["failures"])
-        self.assertIn("refresh_p95_over_400_ms", benchmark["failures"])
+        self.assertIn(
+            "fewer_than_required_successful_generations", benchmark["failures"]
+        )
+        self.assertNotIn("refresh_p95_over_400_ms", benchmark["failures"])
+        self.assertEqual(benchmark["gate"], "P0_EVIDENCE_CONTRACT_FAIL")
+        self.assertEqual(benchmark["recommendations"], [])
 
     def test_smoke_manifest_requires_20_and_15_seconds(self):
         manifest = {
@@ -445,10 +451,70 @@ class Gate0AnalyzerTest(unittest.TestCase):
         self.assertIn("p0_validation_duration_s_mismatch", failures)
 
     def test_zero_p0_generations_are_input_availability_failure(self):
-        _, summary = MODULE.analyze_p0_messages([])
+        _, summary = MODULE.analyze_p0_messages([], protocol="smoke")
         self.assertEqual(summary["successful_generation_count"], 0)
+        self.assertEqual(summary["minimum_successful_generations"], 1)
+        self.assertIn(
+            "fewer_than_required_successful_generations", summary["failures"]
+        )
+        self.assertNotIn("fewer_than_20_successful_generations", summary["failures"])
         self.assertEqual(summary["gate"], "P0_INPUT_AVAILABILITY_FAIL")
         self.assertEqual(summary["recommendations"], [])
+
+    def test_malformed_successful_generation_is_evidence_contract_failure(self):
+        defects = (
+            (
+                {"provider_query_count": "76800"},
+                "required_counter_non_integral:provider_query_count",
+            ),
+            ({"odom_seen": False}, "source_readiness_not_true:odom_seen"),
+            ({"snapshot_available": False}, "snapshot_unavailable"),
+            (
+                {"provider_batch_duration_ms": math.nan},
+                "successful_generation_timing_nonfinite:provider_batch_duration_ms",
+            ),
+        )
+        for override, failure in defects:
+            with self.subTest(failure=failure):
+                _, summary = MODULE.analyze_p0_messages(
+                    [valid_p0_message(**override)], protocol="smoke"
+                )
+                self.assertIn(failure, summary["failures"])
+                self.assertEqual(summary["gate"], "P0_EVIDENCE_CONTRACT_FAIL")
+                self.assertEqual(summary["recommendations"], [])
+
+    def test_insufficient_benchmark_is_evidence_contract_failure(self):
+        messages = [
+            valid_p0_message(
+                generation_id=generation,
+                refresh_callback_end_steady_s=float(generation),
+                refresh_stamp_s=float(generation),
+            )
+            for generation in range(1, 20)
+        ]
+        _, summary = MODULE.analyze_p0_messages(messages, protocol="benchmark")
+        self.assertEqual(summary["minimum_successful_generations"], 20)
+        self.assertIn(
+            "fewer_than_required_successful_generations", summary["failures"]
+        )
+        self.assertNotIn("refresh_p95_over_400_ms", summary["failures"])
+        self.assertEqual(summary["gate"], "P0_EVIDENCE_CONTRACT_FAIL")
+        self.assertEqual(summary["recommendations"], [])
+
+    def test_complete_over_threshold_benchmark_is_performance_failure(self):
+        messages = [
+            valid_p0_message(
+                generation_id=generation,
+                refresh_callback_end_steady_s=float(generation),
+                refresh_elapsed_ms=500.0,
+                refresh_stamp_s=float(generation),
+            )
+            for generation in range(1, 21)
+        ]
+        _, summary = MODULE.analyze_p0_messages(messages, protocol="benchmark")
+        self.assertEqual(summary["failures"], ["refresh_p95_over_400_ms"])
+        self.assertEqual(summary["gate"], "P0_PERFORMANCE_GATE_FAIL")
+        self.assertNotEqual(summary["recommendations"], [])
 
     def test_benchmark_zero_integrity_rows_fail_input_availability(self):
         summary = MODULE.apply_integrity_evidence_gate(

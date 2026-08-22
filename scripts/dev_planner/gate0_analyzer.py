@@ -787,7 +787,7 @@ def analyze_p0_messages(
         failures.append("zero_successful_generations")
     minimum_successful_generations = 1 if protocol == "smoke" else 20
     if len(successful) < minimum_successful_generations:
-        failures.append("fewer_than_20_successful_generations")
+        failures.append("fewer_than_required_successful_generations")
     if not shape_ok:
         failures.append("refresh_query_shape_mismatch")
     if latency_evidence_failure:
@@ -804,23 +804,32 @@ def analyze_p0_messages(
                 failure = f"successful_generation_timing_nonfinite:{field}"
                 if failure not in failures:
                     failures.append(failure)
-    if protocol == "benchmark" and (not math.isfinite(p95) or p95 > 400.0):
+    contract_complete = not failures
+    performance_failure = (
+        protocol == "benchmark"
+        and contract_complete
+        and math.isfinite(p95)
+        and p95 > 400.0
+    )
+    if performance_failure:
         failures.append("refresh_p95_over_400_ms")
     if len(successful) == 0:
         gate = "P0_INPUT_AVAILABILITY_FAIL"
         recommendations: list[str] = []
-    else:
-        gate = "PASS" if not failures else "P0_PERFORMANCE_GATE_FAIL"
-        recommendations = [] if (
-            protocol == "smoke"
-            or len(successful) < 20
-            or not failures
-        ) else [
+    elif not contract_complete:
+        gate = "P0_EVIDENCE_CONTRACT_FAIL"
+        recommendations = []
+    elif performance_failure:
+        gate = "P0_PERFORMANCE_GATE_FAIL"
+        recommendations = [
             "evaluate predictor worker_count",
             "reduce ICRA ROI",
             "reduce frozen horizons",
             "increase refresh period",
         ]
+    else:
+        gate = "PASS"
+        recommendations = []
     summary = {
         "schema_version": "gate0_p0_summary_v1",
         "protocol": protocol,
@@ -875,6 +884,7 @@ def apply_integrity_evidence_gate(
         if "no_valid_integrity_report" not in result["failures"]:
             result["failures"].append("no_valid_integrity_report")
         result["gate"] = "P0_INPUT_AVAILABILITY_FAIL"
+        result["recommendations"] = []
     return result
 
 
@@ -1201,7 +1211,8 @@ def analyze_directory(root: Path, output: Path) -> dict[str, Any]:
             *p0_summary["failures"], *p0_manifest_failures,
         ]))
         if p0_summary.get("gate") != "P0_INPUT_AVAILABILITY_FAIL":
-            p0_summary["gate"] = "P0_PERFORMANCE_GATE_FAIL"
+            p0_summary["gate"] = "P0_EVIDENCE_CONTRACT_FAIL"
+        p0_summary["recommendations"] = []
     p0_summary["manifest_failures"] = p0_manifest_failures
     p0_stem = (
         "p0_full_grid" if p0_run_ids and p0_run_ids[-1] == "p0-full-grid"
