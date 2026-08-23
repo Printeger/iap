@@ -1,5 +1,86 @@
 # ICRA Supervisor Log
 
+## 2026-08-23 — ICRA-032 review and ICRA-033 atomic refresh-evidence authorization
+
+### Review identity and synchronization
+
+- Fixed review range: `ae5b93768d23c13b412d3df3d14cfa4b3b003ea2...d769c88659f0d4f2a609879ec0ec92ef27c38f59`.
+- Reviewed commits: `3396ab6` and final DEV_LOG-only return `d769c88`; both carry applicable
+  `IAP-RQ-320`, `IAP-RQ-321` and `IAP-RQ-322` identifiers.
+- After fetch, `HEAD` and `origin/dev/icra` matched at divergence `0 0`. The protected PDF remains
+  the sole untracked file. The 157 changed paths match the ICRA-032 allowlist; no Supervisor-owned,
+  launch/runner/capture/config, P1--P5, historical, external-repository or cross-repository file
+  changed. ICRA-032 build/install trees remain present at approximately 4.3 GiB total.
+
+### Standards axis
+
+- Verdict: `PASS`, zero hard violations and three Low judgment smells; worst Low.
+- Low Data Clump/Divergent Change: the large refresh validator carries current/GNSS/LiDAR/occupancy
+  generations, stamps, owners and switches as loose locals; a future captured-transaction type would
+  reduce drift. Do not refactor it during the evidence-only ICRA-033 repair.
+- Low Repeated Switches: the source-race test branches on the same `Race` to choose mutation and later
+  expectations; scenario records could bind them. Low Duplicated Code: smoke/analyzer wrappers repeat
+  environment bootstrap. Neither affects current evidence credibility.
+- RQ/document synchronization, allowlist, ownership, PDF/history preservation, exactly-one guards,
+  GPU/process/log contracts, build retention and truthful BLOCKED return conform.
+
+### Spec axis
+
+- Verdict: `REQUEST_CHANGES`; task discipline and bounded implementation pass, but formal smoke
+  acceptance fails. Findings: one High and two Medium; worst High.
+- High: generation evidence is not an atomic transaction. At refresh start the runtime clears mutable
+  attempt counters and snapshot status, while publication still reads the retained active
+  `RiskGridHealth.generation_id`. Concurrent health rows therefore combine an old positive generation
+  and callback end with a new start, zero query/recompute/fusion counters and null provider timing.
+  A failed refresh likewise retains active generation 5 while reporting `snapshot_unavailable`.
+  Analyzer exit 1 and its eight failure classes are a correct fail-closed response to ambiguity.
+- Medium: `_is_p0_pre_refresh_observation()` omits `generation_interval_ms`,
+  `predictor_lidar_evaluations` and `predictor_lidar_cache_hits`; a row claiming only one can be
+  incorrectly classified as startup instead of malformed.
+- Medium: first-generation interval semantics are inconsistent. Runtime intentionally emits null/NaN
+  because no previous success exists, while analyzer requires every successful generation interval
+  to be finite. The value must remain truthful and receive an explicit cold-start contract.
+- All captured-source transaction requirements, fail-closed negative cases, ICRA-031 replay, exact
+  `0.01` C++ behavior, build/linkage, exactly-one execution, allowlist and stop line conform. No scope
+  creep was found.
+
+### Causal diagnosis
+
+- ICRA-032 removed the actual computation starvation: raw health contains completed publications for
+  generations 1 through 13. Five formal representatives (4, 7, 8, 9 and 13) are already strict
+  successes with 76,800 logical queries, finite refresh/provider timing, correct counter algebra and
+  `ready/ok` source state. Provider p50/p95 is approximately `147.996/154.684 ms`; GPU performance and
+  the predictor are not current blockers.
+- The remaining failures arise because one JSON row mixes retained-map state, current-attempt state
+  and observation timing. Analyzer currently groups by callback-end float and active generation, so
+  a later in-progress/failed observation can overwrite a prior completed success. Fixing individual
+  analyzer errors would be another whack-a-mole cycle; ICRA-033 must introduce explicit attempt state,
+  attempt ID and result-generation ID, then atomically freeze completed evidence.
+- Completed failures are legitimate observations and may retain an older safe active map. They must
+  remain visible but must not claim or overwrite a successful result generation.
+
+### Supervisor verification and artifact lifecycle
+
+- `git diff --check ae5b937...d769c88`: exit 0.
+- The first Supervisor CTest command supplied current task libraries but omitted workspace dependency
+  `libgnss_comm_lib.so`; three C++ tests exited 127 before execution. This was an invalid review
+  environment, not a product result. After sourcing the declared workspace environment and then
+  prepending exact ICRA-032/026 libraries, IAP affected suites pass 6/6, EGO suites pass 2/2 and the
+  direct analyzer suite passes 40/40.
+- Supervisor ran no GPU preflight, ROS, smoke or analyzer and did not alter immutable live evidence.
+- Overall Review is not PASS because the formal smoke analyzer exited 1. No ICRA-032 or prerequisite
+  build/install is deletion-eligible; all are retained for ICRA-033 development, linkage and review.
+
+### Required next action
+
+- Unique task: `ICRA-033 / GATE_0B`, defined in `NEXT_TASK.md`; active role is `DEEPSEEK`, state
+  `TASK_READY`.
+- Separate active-map identity from refresh attempt/result identity, atomically publish completed
+  evidence, define cold-start interval semantics, close the startup-field inventory, and prove exact
+  ICRA-032-shaped interleavings statically before one replacement smoke/analyzer.
+- No retry, 60-second benchmark, tuning, science/workload change, P4/P5 execution, cleanup or Gate
+  promotion is authorized.
+
 ## 2026-08-23 — ICRA-031 review and ICRA-032 immutable-source transaction authorization
 
 ### Review identity and synchronization
