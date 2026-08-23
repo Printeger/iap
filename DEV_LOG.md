@@ -4080,3 +4080,28 @@ made. No smoke/analyzer retry, post-live product/test/analyzer correction,
 alternate sigma, tuning, 60-second benchmark, qualification campaign, P4/P5
 execution, cleanup, Gate promotion or next-task selection occurred. Control
 returns only to SUPERVISOR review after the required commits and pushes.
+
+## 2026-08-23T14:28:42Z — ICRA-032 FINAL HANDOFF
+
+IAP-RQ-320 / IAP-RQ-321 / IAP-RQ-322: the bounded implementation, tests,
+replay, current IAP/EGO build/linkage evidence, unique smoke/analyzer evidence,
+postrun audit and Builder documentation were committed as
+`3396ab638cf51e8e3f31f08b2152181832dd358f` and pushed to
+`origin/dev/icra`. The final staged allowlist contained only NEXT_TASK-authorized
+paths; staged diff whitespace passed. Supervisor-owned files were unchanged.
+The protected PDF remains untracked, unstaged and hash-identical at
+`1f07da5631a6551a2f98c02d46fd45bc87f2f1e3e7c14e95f9a7f4a0bac844f6`.
+
+Builder two-axis review is Standards PASS and Spec BLOCKED on the documented
+startup-predicate omission of `generation_interval_ms`,
+`predictor_lidar_evaluations` and `predictor_lidar_cache_hits`. The hard gap was
+found after the unique live boundary and was deliberately not corrected under
+the no-post-live-correction rule. The sole runner remains exit 0; the sole
+analyzer remains exit 1 / `P0_EVIDENCE_CONTRACT_FAIL`, despite five successful
+generations and 166/166 valid integrity reports. There was no live retry,
+post-live product/test/analyzer correction, benchmark, P4/P5 execution,
+cleanup, Gate promotion or next-task selection.
+
+**ICRA-032 BLOCKED; Gate-0B NOT_QUALIFIED.** This Builder returns control only
+to SUPERVISOR review and does not declare Review PASS or authorize cleanup,
+benchmark, Gate promotion or further task work.
