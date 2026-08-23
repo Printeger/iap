@@ -1,0 +1,84 @@
+ICRA-028 static verification summary
+UTC stop: 2026-08-23T09:57:17Z
+Requirements: IAP-RQ-311, IAP-RQ-320, IAP-RQ-322
+Synchronized base: 83aae4d5e935e1e64edfb45c0352da003536c6bf
+Builder result: BLOCKED by a semantic phase-1 generated-whitespace false PASS.
+
+Bounded implementation
+
+- Removed only the unused std::array overload and its unused includes from
+  include/iap/sim/demo11_publication_stamp_authority.hpp.
+- Rewrote the focused test to call the sole production variadic API with
+  seven named global/local/trunk/canopy/terminal-wall/P0/P1-shaped clouds.
+- The test proves no publication without authority and exact identical stamp
+  assignment to all seven clouds.
+- After accepting 10 s + 20 ns, it proves exact rejection results for zero,
+  negative-sec, nanosecond overflow and regression, and proves each rejection
+  retains the accepted snapshot. A valid 10 s + 21 ns update then advances the
+  next seven-cloud publication.
+- No publisher or clock-authority semantics and no forbidden product file
+  changed.
+
+Immutable phase-1 provenance
+
+The complete phase-1 environment, commands, redirections and assertions were
+materialized before the first build/test/linkage command in
+phase1_verification.sh. Its pre-execution and retained post-execution SHA-256
+is:
+
+33db6b9aa0461934f7bb69de3d2e9fcfde5e1038edf0435f8531bffe3027997e
+
+The script ran exactly once and returned 0. It was not edited, replaced,
+resumed or rerun.
+
+Reported zero-exit commands
+
+- Script pre-hash, bash syntax and code/test diff whitespace checks.
+- Repository-local configure, full build and install below ICRA-028.
+- launch/test_planner suite: 14/14 PASS.
+- gate0 runner suite: 24/24 PASS. Printed GPU/dependency/preflight statuses
+  are mocked fixtures; no hardware query or live flow ran. The existing
+  ResourceWarning is non-failing.
+- Selected root regressions: 5/5 PASS for publication authority, run log
+  manager, integrity snapshot, local occupancy and risk grid map.
+- Two direct ldd calls and semantic linkage assertion:
+  manager_total=1 manager_exact=1 demo_total=0 demo_exact=0, with the exact
+  manager target at results/icra27/icra028/install/lib/libiap.so and no
+  missing, build-tree or stale-task resolution.
+- Task artifact hashes:
+  libiap.so 92754f9fdc7a1a7492c3cc895ca112adc0a121a025ca5756b259378edd0f616f;
+  Demo11 publisher 3fd340f71a170c54e95056db7e6d42551ed20b89248e2521946a6a2074e84360;
+  authority test a65dc85dd987e0c030b0b2c777d007513633c80a4e17878a4d9052756d45d4ff;
+  run-log-manager test e00b0d4857c5529bf75c933336af61ba8176b7b675a4485b148d2d6ec7e814c7.
+- Protected hashes, committed ICRA-024/026/027 aggregates, exact 30-file /
+  1,387,884-byte ICRA-026 leak identity, retained ICRA-026/027/028 trees,
+  zero task-owned processes and the post-script hash all reported intact.
+
+Semantic fail-closed stop
+
+The generated_text_whitespace command was not a valid PASS. Its retained
+stdout contains real trailing-space matches from logs/configure_iap.log. The
+command included its own already-open redirected
+logs/generated_text_whitespace.log in the grep operands. After printing the
+matches, grep reported that its input file was also the output and returned an
+error. Because the assertion was written as `if grep ...; then exit 1; fi`,
+the grep error followed the false branch and the wrapper recorded exit 0.
+
+The explicit task requirement is that generated command/TSV/log lines contain
+no trailing whitespace. The retained violations and erroneous assertion mean
+phase 1 fails semantically despite the top-level zero exit. Builder did not
+normalize logs, correct or replace the immutable script, rerun any command, or
+materialize/run phase 2. Per NEXT_TASK.md, no Builder review agents or further
+verification commands ran after this failure was identified.
+
+Boundaries
+
+No GPU/CUDA preflight, ROS daemon/graph/launch, simulator, capture, smoke,
+analyzer over live evidence, benchmark, qualification/campaign, bag/RViz,
+disabled profile, tuning, P4/P5 work, Gate promotion, external cleanup or
+next-task selection ran. The PDF, historical evidence, ICRA-026 leak and
+retained ICRA-026/027 trees were not edited, deleted, moved, staged or
+concealed.
+
+ICRA-028 returns BLOCKED on the phase-1 generated-whitespace audit false PASS.
+Gate-0B remains NOT_QUALIFIED pending Supervisor review.

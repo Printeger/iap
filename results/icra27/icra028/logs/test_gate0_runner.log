@@ -1,0 +1,12 @@
+................./usr/lib/python3.12/unittest/case.py:589: ResourceWarning: unclosed file <_io.TextIOWrapper name=3 encoding='UTF-8'>
+  if method() is not None:
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+.......
+----------------------------------------------------------------------
+Ran 24 tests in 6.107s
+
+OK
+GPU_READY
+LAUNCH_DEPENDENCY_NOT_READY: package_not_found:so3_control
+GPU_NOT_READY: cuInit_failed_999
+EFFECTIVE_LOG_PATH_NOT_READY: iap_log_root_not_below_runtime

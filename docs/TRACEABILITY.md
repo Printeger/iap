@@ -1,5 +1,21 @@
 # Traceability Matrix (IAP)
 
+## 2026-08-23 ICRA-028 production publication seam and verification repair
+
+| Req ID | Requirement/evidence seam | Implementation and focused evidence | Status |
+|---|---|---|---|
+| IAP-RQ-311 / IAP-RQ-320 | Tests must exercise the same publication API as Demo11 production | Remove the unused array overload; `test_demo11_publication_stamp_authority.cpp` calls the sole variadic API with seven named production-shaped clouds and proves authority gating plus bit-identical fanout stamps | **IMPLEMENTED / focused root 5/5 PASS** |
+| IAP-RQ-311 / IAP-RQ-320 | Invalid message stamps must not replace an accepted authority | After accepting `10 s + 20 ns`, test exact `kNonPositive`, `kMalformed`, `kMalformed` and `kRegressed` results for zero, negative-sec, nanosecond overflow and regression; each retains `10/20`, then `10/21` advances the next seven-cloud publication | **IMPLEMENTED / focused root 5/5 PASS** |
+| IAP-RQ-320 / IAP-RQ-322 | Linkage verification must express consumer semantics instead of a fixed aggregate count | Phase-1 logs require `test_run_log_manager` exactly `1/1` at ICRA-028 `libiap.so`, allow Demo11 `0/0`, and reject missing, build-tree and every non-ICRA-028 task resolution | **VERIFIED / semantic linkage exit 0** |
+| IAP-RQ-320 / IAP-RQ-322 | Immutable phase 1 must verify whitespace and every repository-local audit before phase 2 | Script `33db6b9a…3027997e` ran once and reported all commands exit 0, but its whitespace command printed real trailing-space matches and then misclassified a `grep` self-output error as success | **BLOCKED / semantic false PASS / no phase 2** |
+
+The ICRA-028 build/install and raw evidence remain below
+`results/icra27/icra028/`. Protected hashes, historical aggregates, the
+ICRA-026 leak identity, retained trees and zero task process matches were
+reported intact before the semantic failure was identified, but the task does
+not claim an overall phase-1 PASS. No forbidden product file or live-flow
+boundary changed; Gate-0B remains `NOT_QUALIFIED` pending Supervisor review.
+
 ## 2026-08-23 ICRA-027 occupancy-clock, runtime-log and provenance repair
 
 | Req ID | Requirement/evidence seam | Implementation and focused evidence | Status |

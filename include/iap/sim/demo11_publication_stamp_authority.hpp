@@ -1,7 +1,5 @@
 #pragma once
 
-#include <array>
-#include <cstddef>
 #include <cstdint>
 #include <optional>
 
@@ -46,20 +44,6 @@ class Demo11PublicationStampAuthority {
 
   std::optional<builtin_interfaces::msg::Time> accepted_;
 };
-
-template <std::size_t N>
-bool stamp_demo11_publication(
-    const Demo11PublicationStampAuthority& authority,
-    std::array<sensor_msgs::msg::PointCloud2, N>& clouds) {
-  const auto stamp = authority.snapshot();
-  if (!stamp) {
-    return false;
-  }
-  for (auto& cloud : clouds) {
-    cloud.header.stamp = *stamp;
-  }
-  return true;
-}
 
 template <typename... Clouds>
 bool stamp_demo11_publication(

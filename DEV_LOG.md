@@ -3430,3 +3430,89 @@ evidence, benchmark, qualification/campaign, disabled profile, P4/P5 flow,
 Gate promotion or external cleanup ran. **ICRA-027 returns BLOCKED and Gate-0B
 remains NOT_QUALIFIED pending Supervisor review.** DEEPSEEK makes no Supervisor
 verdict or next-task decision.
+
+## 2026-08-23T09:45:50Z — ICRA-028 START
+
+Synchronized `dev/icra` at
+`83aae4d5e935e1e64edfb45c0352da003536c6bf`; `HEAD...origin/dev/icra` is
+`0 0`. The protected PDF, ICRA-011/014/020/021 evidence and committed
+ICRA-026 verification summary remain exact at SHA-256
+`1f07da5631a6551a2f98c02d46fd45bc87f2f1e3e7c14e95f9a7f4a0bac844f6`,
+`778abd22158805c41150b4eeed9c37a3f660237a0bb0599e9a567e3533c7b32c`,
+`44f47b23137d17f4b0cbc81af6827156865bdecb36089bf53f770960a2fb963d`,
+`2f68e3123426b5a1117e86bb5abc7c69117a070bcf583ec759974fddeb71a0bd`,
+`59f88a7eb9cde2695aad20aef7e6f32c4f065e1caf0bf127907f2a814b40ee59`,
+`b82089044a2088d02b0e44c9a3a2eebd2e43168d559578046afe989352052aca`
+and `2f73c7c203ab9d86f43d964b0b2bc4b546b3695e04f23764e950616d6b51c76c`.
+The committed ICRA-024/026/027 evidence aggregates are respectively
+`695d03a689ff99c7ead6d22a2b85ea3d2d50e45a568427f3f7c27829cd1d1948`
+over 14 files,
+`b4fb7ef12c1428bf92260aa15493f7047dbf5ee304f43966c761b084603869db`
+over 24 files and
+`c643c5ec4d45229e3b66529d287760ba8b6ac5aac42f5c8dd4ccf139726a249d`
+over 13 files. The ignored ICRA-026 leak remains 30 files / 1,387,884
+bytes with sorted-file aggregate
+`b97560f578bac9968fc04bf548c92e2f8ac53f90d467bd6c170d2f52a0f5aa74`;
+all ten ICRA-026 and both ICRA-027 build/install trees are present.
+
+The exact allowlist is
+`include/iap/sim/demo11_publication_stamp_authority.hpp` only to remove the
+duplicate array API; `test/test_demo11_publication_stamp_authority.cpp` for
+production-variadic and invalid-retention coverage; new bounded ICRA-028
+build/install/log/tmp/evidence only below `results/icra27/icra028/`; and
+Builder-owned `DEV_LOG.md`, `docs/CHANGES.md`, `docs/TRACEABILITY.md`. No
+Supervisor-owned file, publisher, launch, runner, analyzer, capture, config,
+P0/GridMap/predictor/rolling or P1-P5 product file is authorized.
+
+Explicit stop line: write the focused public-seam tests before the minimal
+array-overload removal, without a pre-script red run. Before the first
+build/test/linkage command, materialize and hash one immutable phase-1 script
+and run it exactly once. Any phase-1 failure stops immediately without repair,
+rerun, replacement command or Builder review. Only phase-1 PASS permits
+documentation/evidence updates and one pre-materialized, pre-hashed phase-2
+finalize script; any phase-2 failure has the same stop rule. No GPU/CUDA
+preflight, ROS daemon/graph/launch, simulator, capture, smoke, live analyzer,
+benchmark, qualification/campaign, bag/RViz, disabled profile, tuning, Gate
+promotion, external cleanup or next-task selection is permitted.
+
+## 2026-08-23T09:57:17Z — ICRA-028 PHASE-1 SEMANTIC FAILURE / BLOCKED
+
+The focused test now invokes only the production variadic publication API
+with seven named global/local/trunk/canopy/terminal-wall/P0/P1-shaped clouds.
+It proves no publication before authority, identical seven-cloud stamping,
+exact zero/negative-sec/nanosecond-overflow/regression rejection after an
+accepted stamp, retention after every rejection, and a monotonic next-stamp
+publication. The duplicate `std::array` API and its now-unused includes are
+removed; authority semantics and every forbidden product file remain
+unchanged. No pre-script red test ran because the task required all build/test
+commands to live in one immutable script.
+
+The immutable phase-1 script SHA-256 is
+`33db6b9aa0461934f7bb69de3d2e9fcfde5e1038edf0435f8531bffe3027997e`.
+It ran exactly once and returned 0. Its self-hash/syntax and code/test diff
+whitespace checks, configure/build/install, launch 14/14, runner 24/24,
+selected root 5/5, two direct `ldd` calls, semantic linkage assertion,
+artifact/protected/history/leak/tree/process audits and post-hash command all
+reported exit 0. Linkage records manager `1/1` at the exact ICRA-028 install
+and Demo11 `0/0`, with no missing, build-tree or stale-task resolution. The
+task process audit records zero matches.
+
+However, retained output proves the generated-text whitespace command was a
+false PASS. `configure_iap.log` contains CMake lines ending in spaces. The
+command also included its own already-open redirected output file in the
+`grep` operands; after printing the real matches, `grep` reported `input file
+is also the output` and returned its error status. Because the script used
+`if grep ...; then`, that nonzero error bypassed the intended failure branch,
+and `generated_text_whitespace` was recorded as exit 0. This violates the
+explicit requirement that generated command/TSV/log lines contain no trailing
+whitespace, regardless of the script's top-level zero exit.
+
+Per the phase-1 fail-closed rule, the script and evidence were not changed,
+normalized, replaced or rerun. Phase 2 was neither materialized nor run; no
+Builder review agents or further verification commands were invoked after the
+failure was identified. The ICRA-028 build/install and raw evidence remain
+retained. No GPU/CUDA preflight, ROS flow, simulator, capture, smoke, live
+analyzer, benchmark, qualification/campaign, disabled profile, tuning, P4/P5
+work, Gate promotion or external cleanup ran. **ICRA-028 is BLOCKED on the
+phase-1 generated-whitespace audit false PASS; Gate-0B remains NOT_QUALIFIED
+pending Supervisor review.**
