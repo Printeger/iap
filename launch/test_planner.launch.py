@@ -760,12 +760,14 @@ ARG_DEFAULTS = [
     ("bag_output_dir", "/home/dev/ws_iap/src/iap/results/planner_validation/bags"),
     ("runtime_root_dir", ""),
     ("export_root_dir", ""),
+    ("iap_log_root", ""),
     ("run_duration_s", "90"),
     ("validation_duration_s", "85"),
     ("allow_truth_alignment", "true"),
     ("planner_start_delay_s", "0.0"),
     ("lidar_start_delay_s", "0.0"),
     ("odometry_initialization_mode", ""),
+    ("corridor_map_stamp_authority_topic", "/sim/drone_0/truth_odom"),
     ("fsm.thresh_replan_time", "1.0"),
     ("enable_preflight_takeoff", "false"),
     ("preflight_ground_z", "0.0"),
@@ -1244,6 +1246,66 @@ def _override_odometry_initialization_mode(config_path, mode):
     path.write_text(updated)
 
 
+def _strict_descendant(path, root):
+    try:
+        path.relative_to(root)
+    except ValueError:
+        return False
+    return path != root
+
+
+def _materialize_iap_logging_config(config_path, runtime_base, iap_log_root):
+    """Bind every IAP log/timing path to one validated run-local root."""
+    config_path = Path(config_path).resolve()
+    runtime_base = Path(runtime_base).expanduser()
+    requested_raw = str(iap_log_root).strip()
+    if not requested_raw:
+        raise RuntimeError("iap_log_root is required")
+    requested = Path(requested_raw).expanduser()
+    if not requested.is_absolute():
+        raise RuntimeError("iap_log_root must be absolute")
+    runtime_base = runtime_base.resolve()
+    requested = requested.resolve()
+    if not _strict_descendant(requested, runtime_base):
+        raise RuntimeError(
+            f"iap_log_root must be below runtime_root_dir: {requested}"
+        )
+    if not _strict_descendant(config_path, runtime_base):
+        raise RuntimeError("effective config.json must be below runtime_root_dir")
+
+    root_config = json.loads(config_path.read_text())
+    global_config = root_config.get("global")
+    logging_config = root_config.get("logging")
+    if not isinstance(global_config, dict) or not isinstance(logging_config, dict):
+        raise RuntimeError("effective config.json lacks global/logging blocks")
+    logging_reference = str(global_config.get("config_logging", "")).strip()
+    if not logging_reference:
+        raise RuntimeError("effective config.json lacks global.config_logging")
+    referenced_path = (config_path.parent / logging_reference).resolve()
+    if not _strict_descendant(referenced_path, runtime_base):
+        raise RuntimeError("referenced config_logging must be below runtime_root_dir")
+    referenced = json.loads(referenced_path.read_text())
+    referenced_logging = referenced.get("logging")
+    if not isinstance(referenced_logging, dict):
+        raise RuntimeError("referenced config_logging lacks logging block")
+
+    timing_path = (requested / "profiling" / "iap_timing.csv").resolve()
+    if not _strict_descendant(timing_path, runtime_base):
+        raise RuntimeError("derived IAP timing path escapes runtime_root_dir")
+
+    logging_config["log_dir"] = str(requested)
+    referenced_logging["log_dir"] = str(requested)
+    global_config["timing_csv_path"] = str(timing_path)
+    config_path.write_text(json.dumps(root_config, indent=2) + "\n")
+    referenced_path.write_text(json.dumps(referenced, indent=2) + "\n")
+    return {
+        "log_root": str(requested),
+        "timing_csv_path": str(timing_path),
+        "root_config_path": str(config_path),
+        "referenced_logging_config_path": str(referenced_path),
+    }
+
+
 def _runtime_config(context, use_gnss, use_araim, allow_truth_alignment):
     iap_share = Path(get_package_share_directory("iap"))
     base_config = iap_share / "config"
@@ -1270,6 +1332,11 @@ def _runtime_config(context, use_gnss, use_araim, allow_truth_alignment):
 
     config_ros_path = runtime_config_dir / "config_ros.json"
     config_gnss_path = runtime_config_dir / "config_gnss.json"
+    logging_effective = _materialize_iap_logging_config(
+        runtime_config_dir / "config.json",
+        Path(LaunchConfiguration("runtime_root_dir").perform(context).strip()).resolve(),
+        LaunchConfiguration("iap_log_root").perform(context),
+    )
 
     mapping_backend = _normalize_mapping_backend(
         LaunchConfiguration("iap_mapping_backend").perform(context)
@@ -1398,6 +1465,7 @@ def _runtime_config(context, use_gnss, use_araim, allow_truth_alignment):
         str(runtime_root),
         str(export_dir),
         mapping_effective,
+        logging_effective,
     )
 
 
@@ -1953,6 +2021,7 @@ def _launch_setup(context):
         runtime_root,
         export_dir,
         mapping_effective,
+        logging_effective,
     ) = _runtime_config(context, use_gnss, use_araim, allow_truth_alignment)
     gnss_scenario_file = _materialize_gnss_scenario(gnss_scenario_file, export_dir)
 
@@ -2322,6 +2391,9 @@ def _launch_setup(context):
         "scenario_contract": scenario_contract,
         "scenario_fingerprint": scenario_fingerprint,
         "runtime_config_path": runtime_config_path,
+        "iap_logging_effective_config": logging_effective,
+        "corridor_map_stamp_authority_topic": LaunchConfiguration(
+            "corridor_map_stamp_authority_topic").perform(context),
         "export_dir": export_dir,
         "run_duration_s": run_duration_s,
         "validation_duration_s": validation_duration_s,
@@ -2760,6 +2832,8 @@ def _launch_setup(context):
                 {"resolution_m": _param_float(context, "corridor_map_resolution_m")},
                 {"publish_rate_hz": _param_float(context, "corridor_map_publish_rate_hz")},
                 {"frame_id": "map"},
+                {"stamp_authority_topic": LaunchConfiguration(
+                    "corridor_map_stamp_authority_topic").perform(context)},
                 {"forest_size_x_m": _param_float(context, "forest_size_x_m")},
                 {"forest_size_y_m": _param_float(context, "forest_size_y_m")},
                 {"tree_density_lower_left_per_m2": _param_float(context, "tree_density_lower_left_per_m2")},

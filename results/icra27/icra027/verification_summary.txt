@@ -1,0 +1,85 @@
+ICRA-027 immutable verification summary
+UTC stop: 2026-08-23T07:40:30Z
+Requirements: IAP-RQ-311, IAP-RQ-320, IAP-RQ-322
+Synchronized base: d5cd12b3f20ea86e9284465e0783e5a2a18ba4d1
+Result: BLOCKED by the first nonzero immutable-script command.
+
+Immutable command provenance
+
+The complete intended literal environment, commands, redirections and
+assertions were materialized before execution in verification_commands.sh.
+Its pre-execution SHA-256 sidecar is:
+
+72234f096298682f2fce0d01678f5d639b0dcc6e885b7208c383ac21ed414a3e
+
+The script ran exactly once. Its own pre-hash and syntax assertions exited 0.
+The script was not edited, replaced, resumed or rerun.
+
+Commands completed before the stop
+
+- configure_iap: exit 0.
+- build_iap: exit 0; full current IAP build reached 100%.
+- install_iap: exit 0 into results/icra27/icra027/install.
+- test_test_planner_launch.py: exit 0, 14/14 PASS.
+- test_gate0_runner.py: exit 0, 24/24 PASS. GPU/dependency/status lines are
+  mocked fixtures; no GPU or live flow ran. The existing ResourceWarning is
+  non-failing.
+- selected root regressions: exit 0, 5/5 PASS:
+  test_demo11_publication_stamp_authority, test_run_log_manager,
+  test_integrity_snapshot, test_local_occupancy and test_risk_grid_map.
+- direct_linkage: exit 0 over the task-built Demo11 publisher and
+  test_run_log_manager.
+
+Fail-closed stop
+
+The immutable linkage_assertion exited 1. Its preserved output is:
+
+libiap_total=1 libiap_exact=1
+expected=/home/dev/ws_iap/src/iap/results/icra27/icra027/install/lib/libiap.so
+
+The retained ldd log has no `not found`, deleted/retained old-task path or
+external build-tree resolution. test_run_log_manager directly resolves the
+intended ICRA-027 installed libiap.so. The Demo11 publisher has no dynamic
+libiap.so entry because the linker eliminated the unused/as-needed dependency,
+so the pre-recorded assertion's exact count of two was wrong. Per NEXT_TASK.md,
+an incorrect or failing listed command stops the task; the assertion was not
+changed or replaced.
+
+Not executed after the stop
+
+task_artifact_hashes, the phase-1 documentation pause, git diff check, exact
+allowlist assertion, protected hash recheck, ICRA-026 leak identity recheck,
+retained-tree assertion, task-process audit and post-execution script-hash
+assertion did not execute. They remain visible verbatim in the immutable
+script and must not be described as PASS.
+
+Review-period command violation and findings
+
+After the immutable script stopped, the required Standards reviewer
+mistakenly invoked one out-of-script `git diff --cached --check` despite an
+explicit instruction to run no commands. It exited 1 and reported trailing
+whitespace in verification_commands.sh, verification_results.tsv and
+verification_script_stdout_stderr.log. It modified no file. Builder did not
+correct the whitespace or rerun the check. The immutable script's own final
+git-diff command remains unexecuted, and the out-of-script command is a
+disclosed fail-stop violation rather than PASS evidence.
+
+Spec review found one Medium coverage gap: tests use the std::array stamping
+overload, while production uses the variadic overload, so the exact production
+publication fanout is not deterministically exercised. It found one Low gap:
+zero and malformed authority values are tested only before an accepted stamp,
+so their retention of an existing accepted stamp is not proven. No other
+missing behavior or scope creep was found. The post-stop rule prohibits
+correcting these tests in ICRA-027.
+
+Boundaries
+
+No nvidia-smi/CUDA preflight, ROS daemon/graph/launch, simulator, capture,
+smoke, analyzer over live evidence, benchmark, qualification/campaign,
+bag/RViz, disabled profile or P4/P5 flow ran. The ICRA-026 leak was not
+deleted, moved, edited, staged or concealed. ICRA-026/027 build/install trees
+remain retained and the PDF remains untracked and untouched.
+
+Builder result: ICRA-027 BLOCKED on the immutable verification command error,
+the disclosed review-period post-stop command violation/nonzero result and the
+two disclosed test-coverage gaps. This is not a Gate or Supervisor verdict.

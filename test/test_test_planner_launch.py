@@ -14,6 +14,39 @@ SPEC.loader.exec_module(MODULE)
 
 
 class TestPlannerLaunchTest(unittest.TestCase):
+    @staticmethod
+    def _runtime_logging_fixture(root: Path):
+        runtime_base = root / "runtime"
+        config_dir = runtime_base / "iap_sim_demo11_test_planner_fixture" / "sim_demo11"
+        logging_path = config_dir.parent / "sim_ego" / "config_logging.json"
+        config_dir.mkdir(parents=True)
+        logging_path.parent.mkdir(parents=True)
+        config_path = config_dir / "config.json"
+        config_path.write_text(json.dumps({
+            "global": {
+                "config_logging": "../sim_ego/config_logging.json",
+                "enable_timing_csv": True,
+                "timing_csv_path": "/repo/log/profiling/iap_timing.csv",
+            },
+            "logging": {
+                "log_dir": "/repo/log/",
+                "save_logs": True,
+                "rotate_logs": True,
+                "max_file_size_kb": 8192,
+                "max_files": 10,
+            },
+        }, indent=2) + "\n")
+        logging_path.write_text(json.dumps({
+            "logging": {
+                "log_dir": "/repo/log/",
+                "save_logs": True,
+                "rotate_logs": True,
+                "max_file_size_kb": 8192,
+                "max_files": 10,
+            }
+        }, indent=2) + "\n")
+        return runtime_base, config_path, logging_path
+
     def test_so3_feedback_uses_world_linear_acceleration_not_iap_specific_force(self):
         self.assertEqual(
             MODULE._so3_feedback_imu_topic(
@@ -35,6 +68,57 @@ class TestPlannerLaunchTest(unittest.TestCase):
             export,
             Path("/work/exports/test_planner_p1_fork_formal_p1_fork_fused_v1_1234"),
         )
+
+    def test_runtime_logging_materialization_routes_root_reference_and_timing(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            runtime_base, config_path, logging_path = self._runtime_logging_fixture(root)
+            requested = runtime_base / "iap_logs"
+
+            effective = MODULE._materialize_iap_logging_config(
+                config_path, runtime_base, requested
+            )
+            root_config = json.loads(config_path.read_text())
+            referenced = json.loads(logging_path.read_text())
+
+        self.assertEqual(root_config["logging"]["log_dir"], str(requested.resolve()))
+        self.assertEqual(
+            referenced["logging"]["log_dir"], str(requested.resolve())
+        )
+        self.assertEqual(
+            root_config["global"]["timing_csv_path"],
+            str((requested / "profiling" / "iap_timing.csv").resolve()),
+        )
+        self.assertTrue(root_config["logging"]["save_logs"])
+        self.assertTrue(root_config["logging"]["rotate_logs"])
+        self.assertEqual(root_config["logging"]["max_file_size_kb"], 8192)
+        self.assertEqual(root_config["logging"]["max_files"], 10)
+        self.assertEqual(effective["log_root"], str(requested.resolve()))
+        self.assertNotIn("/repo/log", json.dumps(root_config))
+        self.assertNotIn("/repo/log", json.dumps(referenced))
+
+    def test_runtime_logging_materialization_rejects_missing_relative_and_escape(self):
+        for requested in ("", "relative/log", "/outside/runtime/log"):
+            with self.subTest(requested=requested), tempfile.TemporaryDirectory() as tmp:
+                runtime_base, config_path, logging_path = self._runtime_logging_fixture(
+                    Path(tmp)
+                )
+                root_before = config_path.read_text()
+                logging_before = logging_path.read_text()
+                with self.assertRaisesRegex(RuntimeError, "iap_log_root"):
+                    MODULE._materialize_iap_logging_config(
+                        config_path, runtime_base, requested
+                    )
+                self.assertEqual(config_path.read_text(), root_before)
+                self.assertEqual(logging_path.read_text(), logging_before)
+
+    def test_frozen_map_wiring_selects_truth_odom_stamp_authority(self):
+        defaults = dict(MODULE.ARG_DEFAULTS)
+        self.assertEqual(
+            defaults["corridor_map_stamp_authority_topic"],
+            "/sim/drone_0/truth_odom",
+        )
+        self.assertEqual(defaults["iap_log_root"], "")
 
     def test_p1_redesign_scenarios_are_named_and_have_fixed_contracts(self):
         expected = {

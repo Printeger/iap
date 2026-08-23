@@ -34,6 +34,8 @@ PREFLIGHT_OUTPUT_LIMIT = 16384
 CAPTURE_READINESS_SCHEMA = "gate0_capture_readiness_v1"
 LAUNCH_DEPENDENCY_PREFLIGHT_SCHEMA = "gate0_launch_dependency_preflight_v1"
 LAUNCH_DEPENDENCY_PREFLIGHT_FILENAME = "launch_dependency_preflight.json"
+EFFECTIVE_LOG_PATH_PREFLIGHT_SCHEMA = "gate0_effective_log_path_preflight_v1"
+EFFECTIVE_LOG_PATH_PREFLIGHT_FILENAME = "effective_log_path_preflight.json"
 REQUIRED_LAUNCH_PACKAGES = (
     "iap",
     "ego_planner",
@@ -145,6 +147,75 @@ def run_launch_dependency_preflight(
         "failure_reasons": failures,
     }
     (output_root / LAUNCH_DEPENDENCY_PREFLIGHT_FILENAME).write_text(
+        json.dumps(result, indent=2, sort_keys=True) + "\n"
+    )
+    return result
+
+
+def _strict_descendant(path: Path, root: Path) -> bool:
+    try:
+        path.relative_to(root)
+    except ValueError:
+        return False
+    return path != root
+
+
+def run_effective_log_path_preflight(
+    run_dir: Path,
+    config: dict[str, object],
+) -> dict[str, object]:
+    """Persist the fail-closed future-launch IAP log-path contract."""
+    run_dir = run_dir.resolve()
+    runtime_dir = (run_dir / "runtime").resolve()
+    failures: list[str] = []
+
+    runtime_raw = config.get("runtime_root_dir")
+    runtime_value = runtime_raw.strip() if isinstance(runtime_raw, str) else ""
+    supplied_runtime = Path(runtime_value).expanduser() if runtime_value else None
+    if supplied_runtime is None:
+        failures.append("runtime_root_dir_missing")
+    elif not supplied_runtime.is_absolute():
+        failures.append("runtime_root_dir_not_absolute")
+    elif supplied_runtime.resolve() != runtime_dir:
+        failures.append("runtime_root_dir_mismatch")
+
+    log_raw = config.get("iap_log_root")
+    log_value = log_raw.strip() if isinstance(log_raw, str) else ""
+    requested_log = Path(log_value).expanduser() if log_value else None
+    requested_resolved = requested_log.resolve() if requested_log else None
+    if requested_log is None:
+        failures.append("iap_log_root_missing")
+    elif not requested_log.is_absolute():
+        failures.append("iap_log_root_not_absolute")
+    elif not _strict_descendant(requested_resolved, runtime_dir):
+        failures.append("iap_log_root_not_below_runtime")
+
+    timing_path = (
+        (requested_resolved / "profiling" / "iap_timing.csv").resolve()
+        if requested_resolved else None
+    )
+    if timing_path is None:
+        failures.append("iap_timing_path_missing")
+    elif not _strict_descendant(timing_path, runtime_dir):
+        failures.append("iap_timing_path_not_below_runtime")
+
+    result = {
+        "schema_version": EFFECTIVE_LOG_PATH_PREFLIGHT_SCHEMA,
+        "checked_utc": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+        "run_dir": str(run_dir),
+        "required_runtime_dir": str(runtime_dir),
+        "supplied_runtime_root": (
+            str(supplied_runtime.resolve()) if supplied_runtime else ""
+        ),
+        "requested_log_root": (
+            str(requested_resolved) if requested_resolved else ""
+        ),
+        "derived_timing_path": str(timing_path) if timing_path else "",
+        "effective_log_paths_ready": not failures,
+        "failure_reason": failures[0] if failures else "",
+        "failure_reasons": failures,
+    }
+    (run_dir / EFFECTIVE_LOG_PATH_PREFLIGHT_FILENAME).write_text(
         json.dumps(result, indent=2, sort_keys=True) + "\n"
     )
     return result
@@ -508,6 +579,7 @@ def gate0a_effective_config(
         "forest_random_seed": 11,
         "gnss_random_seed": 20260011,
         "terminal_wall_feature_seed": 11022,
+        "corridor_map_stamp_authority_topic": "/sim/drone_0/truth_odom",
         "planner_safety_profile": "off",
         "planner_enable_all_safety": False,
         "planner_enable_p1": False,
@@ -551,6 +623,7 @@ def gate0a_effective_config(
         ),
         "runtime_root_dir": str(run_dir / "runtime"),
         "export_root_dir": str(run_dir / "exports"),
+        "iap_log_root": str(run_dir / "runtime" / "iap_logs"),
     }
 
 
@@ -563,6 +636,7 @@ def p0_effective_config(
         "experiment": "p0_open_sky",
         "scenario": "gnss_open_sky",
         "iap_mapping_backend": "cpu",
+        "corridor_map_stamp_authority_topic": "/sim/drone_0/truth_odom",
         "planner_safety_profile": "off",
         "planner_enable_all_safety": False,
         "planner_enable_p1": False,
@@ -596,6 +670,7 @@ def p0_effective_config(
         "validation_duration_s": validation_duration_s,
         "runtime_root_dir": str(root / "runtime"),
         "export_root_dir": str(root / "exports"),
+        "iap_log_root": str(root / "runtime" / "iap_logs"),
     }
 
 
@@ -610,8 +685,9 @@ def _write_run_files(
     run_dir: Path, run_id: str, scenario_label: str,
     config: dict[str, object], command: list[str],
     gpu_preflight: dict[str, object], gpu_preflight_path: Path,
-) -> None:
+) -> dict[str, object]:
     run_dir.mkdir(parents=True, exist_ok=False)
+    log_path_preflight = run_effective_log_path_preflight(run_dir, config)
     manifest = {
         "schema_version": "gate0_run_manifest_v1",
         "run_id": run_id,
@@ -620,12 +696,17 @@ def _write_run_files(
         "effective_config": config,
         "gpu_preflight": gpu_preflight,
         "gpu_preflight_path": str(gpu_preflight_path),
+        "effective_log_path_preflight": log_path_preflight,
+        "effective_log_path_preflight_path": str(
+            run_dir / EFFECTIVE_LOG_PATH_PREFLIGHT_FILENAME
+        ),
         "started_utc": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
     }
     (run_dir / "gate0_run_manifest.json").write_text(
         json.dumps(manifest, indent=2, sort_keys=True) + "\n"
     )
     (run_dir / "command.txt").write_text(" ".join(command) + "\n")
+    return log_path_preflight
 
 
 def _run(command: list[str], stdout_path: Path) -> int:
@@ -646,10 +727,23 @@ def run_gate0a(root: Path, gpu_preflight: dict[str, object]) -> list[int]:
         run_dir = root / "gate0a" / run_id
         config = gate0a_effective_config(run_id, scenario, run_dir)
         command = launch_command(config)
-        _write_run_files(
+        log_path_preflight = _write_run_files(
             run_dir, run_id, label, config, command, gpu_preflight,
             root / GPU_PREFLIGHT_FILENAME,
         )
+        if not log_path_preflight.get("effective_log_paths_ready"):
+            print(
+                "EFFECTIVE_LOG_PATH_NOT_READY: "
+                f"{log_path_preflight.get('failure_reason', 'unknown')}"
+            )
+            _finalize_manifest(
+                run_dir,
+                exit_code=None,
+                planner_crash=False,
+                launch_started=False,
+            )
+            exit_codes.append(5)
+            return exit_codes
         exit_code = _run(command, run_dir / "stdout.log")
         exit_codes.append(exit_code)
         manifest_path = run_dir / "gate0_run_manifest.json"
@@ -812,10 +906,23 @@ def run_gate0_smoke(
     run_dir = root / "smoke"
     config = p0_effective_config(run_dir, run_duration_s=20, validation_duration_s=15)
     command = launch_command(config)
-    _write_run_files(
+    log_path_preflight = _write_run_files(
         run_dir, "p0-smoke", "gnss_open_sky", config, command,
         gpu_preflight, root / GPU_PREFLIGHT_FILENAME,
     )
+    if not log_path_preflight.get("effective_log_paths_ready"):
+        print(
+            "EFFECTIVE_LOG_PATH_NOT_READY: "
+            f"{log_path_preflight.get('failure_reason', 'unknown')}"
+        )
+        _finalize_manifest(
+            run_dir,
+            exit_code=None,
+            capture_exit_code=None,
+            planner_crash=False,
+            launch_started=False,
+        )
+        return 5
     ready_path = run_dir / "capture_ready.json"
     capture_command = [
         sys.executable,
@@ -874,10 +981,23 @@ def run_gate0_benchmark(
     run_dir = root / "benchmark"
     config = p0_effective_config(run_dir)
     command = launch_command(config)
-    _write_run_files(
+    log_path_preflight = _write_run_files(
         run_dir, "p0-full-grid", "gnss_open_sky", config, command,
         gpu_preflight, root / GPU_PREFLIGHT_FILENAME,
     )
+    if not log_path_preflight.get("effective_log_paths_ready"):
+        print(
+            "EFFECTIVE_LOG_PATH_NOT_READY: "
+            f"{log_path_preflight.get('failure_reason', 'unknown')}"
+        )
+        _finalize_manifest(
+            run_dir,
+            exit_code=None,
+            capture_exit_code=None,
+            planner_crash=False,
+            launch_started=False,
+        )
+        return 5
     ready_path = run_dir / "capture_ready.json"
     capture_command = [
         sys.executable,

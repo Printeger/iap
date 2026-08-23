@@ -3271,3 +3271,134 @@ whole-task-root process audit has zero matches, protected hashes remain exact,
 and the PDF remains solely untracked and untouched. **Gate-0B remains
 NOT_QUALIFIED.** DEEPSEEK makes no Supervisor verdict, Gate authorization or
 next-task decision and returns control to Supervisor review.
+
+## 2026-08-23T07:23:03Z — ICRA-027 START
+
+Synchronized `dev/icra` at
+`d5cd12b3f20ea86e9284465e0783e5a2a18ba4d1`; `HEAD...origin/dev/icra` is
+`0 0`. The protected PDF, ICRA-011/014/020/021 evidence and committed
+ICRA-026 verification summary remain exact at SHA-256
+`1f07da5631a6551a2f98c02d46fd45bc87f2f1e3e7c14e95f9a7f4a0bac844f6`,
+`778abd22158805c41150b4eeed9c37a3f660237a0bb0599e9a567e3533c7b32c`,
+`44f47b23137d17f4b0cbc81af6827156865bdecb36089bf53f770960a2fb963d`,
+`2f68e3123426b5a1117e86bb5abc7c69117a070bcf583ec759974fddeb71a0bd`,
+`59f88a7eb9cde2695aad20aef7e6f32c4f065e1caf0bf127907f2a814b40ee59`,
+`b82089044a2088d02b0e44c9a3a2eebd2e43168d559578046afe989352052aca`
+and `2f73c7c203ab9d86f43d964b0b2bc4b546b3695e04f23764e950616d6b51c76c`.
+The ignored ICRA-026 leak contains 30 files / 1,387,884 bytes with sorted-file
+SHA-256 aggregate
+`b97560f578bac9968fc04bf548c92e2f8ac53f90d467bd6c170d2f52a0f5aa74`.
+All ten required ICRA-026 build/install trees remain present.
+
+The exact allowlist is `apps/demo11_corridor_map_publisher.cpp`; the smallest
+IAP-owned timestamp-authority header, focused C++ test and required CMake
+dependency/target entries; `launch/test_planner.launch.py`;
+`scripts/dev_planner/run_gate0_qualification.py` only for static effective-log
+path validation; `test/test_test_planner_launch.py`,
+`test/test_gate0_runner.py`; new ICRA-027 build/install/log/tmp/evidence only
+below `results/icra27/icra027/`; and Builder-owned `DEV_LOG.md`,
+`docs/CHANGES.md`, `docs/TRACEABILITY.md`. No Supervisor-owned file, P0
+consumer science, external package, historical artifact, retained ICRA-026
+tree/leak or PDF change is authorized.
+
+Explicit stop line: repair only Demo11 truth-odom message-stamp authority,
+task-local root/referenced/timing logging materialization and runner static
+log-path leakage preflight. Before the first build/test/linkage command,
+materialize and hash one immutable `verification_commands.sh`; then run only
+that script. Any listed command/configure/build/test/linkage/assertion failure
+stops ICRA-027 as `BLOCKED` without correcting the script, retrying or
+reconstructing a command. No GPU/CUDA preflight, ROS daemon/graph/launch,
+simulator, capture, smoke, live analyzer, benchmark, qualification/campaign,
+bag/RViz, disabled profile, P4/P5 flow, Gate promotion, external cleanup or
+next-task selection is permitted.
+
+## 2026-08-23T07:23:03Z — ICRA-027 BOUNDED REPAIR IMPLEMENTED / UNVERIFIED
+
+The three pre-agreed public seams were specified in tests before their minimal
+implementation, without executing an expected-failing red command because
+ICRA-027 permits only one immutable pass-or-stop verification script.
+
+`Demo11PublicationStampAuthority` accepts only positive normalized simulator
+message stamps, retains the last accepted value across regression and exposes
+one publication snapshot. The IAP-owned Demo11 publisher now subscribes to the
+explicit frozen `/sim/drone_0/truth_odom` authority and publishes no cloud
+before authority exists. A single helper stamps all member clouds before the
+global/local/trunk/canopy/terminal-wall/P0/P1 fixture fanout; the consumer,
+geometry, point count, seed, rate, frame and QoS paths are unchanged.
+
+The launch adds one explicit `iap_log_root`. Its pure materializer rejects a
+missing, relative or escaping value before effective-config writes, then sets
+the root logging block, its referenced `config_logging.json` and the root
+timing CSV to the exact validated descendant while retaining save, rotation,
+size and count semantics. The effective launch manifest records the resolved
+logging paths. The qualification runner freezes the requested root at
+`<run_dir>/runtime/iap_logs`, persists a structured static audit in each run
+manifest and returns 5 before capture/launch on any runtime/log/timing path
+contract failure.
+
+No verification command has run yet. The next and only executable verification
+step is the pre-materialized, pre-hashed
+`results/icra27/icra027/verification_commands.sh`; it will stop on the first
+nonzero result and will not be edited, replaced or rerun.
+
+## 2026-08-23T07:40:30Z — ICRA-027 IMMUTABLE VERIFICATION BLOCKED
+
+The pre-materialized script SHA-256 is
+`72234f096298682f2fce0d01678f5d639b0dcc6e885b7208c383ac21ed414a3e`.
+It ran exactly once. Script self-hash/syntax, configure, full build, install,
+launch suite 14/14, runner suite 24/24, selected root 5/5 and the recorded
+two-binary `ldd` command all exited 0. The runner suite's GPU/dependency lines
+are mocked fixtures; no hardware query or live flow ran.
+
+The next immutable command, `linkage_assertion`, exited 1 and stopped the
+script. Its exact output was `libiap_total=1 libiap_exact=1`, with the sole
+entry resolving `test_run_log_manager` to the intended
+`results/icra27/icra027/install/lib/libiap.so`. The Demo11 publisher has no
+dynamic `libiap.so` entry because its unused/as-needed link dependency was
+eliminated. The pre-recorded assertion required exactly two, so the command
+itself was wrong. It was not edited, replaced, resumed or rerun.
+
+Consequently, task artifact hashes, the documentation pause, final diff and
+allowlist checks, protected/leak identity rechecks, retained-tree assertion,
+task-process audit and post-script hash did not execute. Builder makes no PASS
+claim for them. Build/install trees and bounded stop evidence remain below
+ICRA-027; the ICRA-026 leak was not modified or cleaned. No GPU/CUDA preflight,
+ROS daemon/graph/launch, simulator, capture, smoke, live analyzer, benchmark,
+qualification/campaign, bag/RViz, disabled profile or P4/P5 flow ran.
+
+**ICRA-027 is BLOCKED on its immutable verification command error.** Per the
+fail-closed rule, no code/script correction or retry is made. This is a
+Builder result, not a final Standards/Spec, Gate or Supervisor verdict.
+
+## 2026-08-23T07:46:00Z — ICRA-027 BUILDER REVIEW / BLOCKED
+
+The required two-axis review completed after the immutable script had already
+stopped. Standards review found no product-code standards defect, but its
+read-only reviewer mistakenly invoked one out-of-script
+`git diff --cached --check` despite the explicit post-stop no-command
+instruction. That command exited 1 and reported trailing whitespace in the
+immutable verification script, its TSV and captured script stdout. It changed
+no file. This extra review-period verification call violated the fail-stop
+boundary; Builder did not correct the whitespace, rerun the check or rerun any
+part of the immutable script. The script's own final diff command remains
+unexecuted. The duplicated strict-descendant helpers were noted as a judgment
+smell, but they preserve the task-required independent launch/runner
+enforcement and cannot be consolidated within the issued allowlist.
+
+Spec review found one Medium gap: focused tests call the `std::array`
+publication overload while production calls the variadic overload, so the
+exact production stamping fanout is not deterministically exercised. It found
+one Low gap: regression retention is tested after a valid authority stamp, but
+zero and malformed values are tested only before any accepted stamp and do not
+prove retention of an existing accepted value. No other missing behavior or
+scope creep was found. These findings are not corrected because the immutable
+verification failure had already closed the task against code/test changes or
+retry.
+
+ICRA-027 therefore remains **BLOCKED** on the incorrect immutable linkage
+assertion, the review-period post-stop command violation/nonzero whitespace
+result, and the two disclosed coverage gaps. No hashes, final allowlist,
+protected/leak identity, retained-tree, process or post-script audit is claimed
+as PASS. No GPU/CUDA query, ROS flow, smoke, analyzer, benchmark,
+qualification, P4/P5 work or external cleanup ran. Control returns to
+Supervisor review without a Gate decision.

@@ -538,7 +538,11 @@ if(DEFINED ENV{ROS_VERSION})
       apps/demo11_corridor_map_publisher.cpp
     )
     target_link_libraries(demo11_corridor_map_publisher iap)
-    ament_target_dependencies(demo11_corridor_map_publisher rclcpp sensor_msgs)
+    ament_target_dependencies(demo11_corridor_map_publisher
+      rclcpp
+      nav_msgs
+      sensor_msgs
+    )
     list(APPEND iap_LIBRARIES demo11_corridor_map_publisher)
 
     add_executable(demo11_compare_paths_visualizer
@@ -666,8 +670,15 @@ if(DEFINED ENV{ROS_VERSION})
       target_link_libraries(test_alert_limit_model iap)
       ament_add_gtest(test_run_log_manager test/test_run_log_manager.cpp)
       ament_add_gtest(test_p1_fixture_geometry test/test_p1_fixture_geometry.cpp)
+      ament_add_gtest(test_demo11_publication_stamp_authority
+        test/test_demo11_publication_stamp_authority.cpp
+      )
       target_link_libraries(test_run_log_manager iap)
       target_link_libraries(test_p1_fixture_geometry iap)
+      target_link_libraries(test_demo11_publication_stamp_authority iap)
+      ament_target_dependencies(test_demo11_publication_stamp_authority
+        sensor_msgs
+      )
       add_test(
         NAME test_phase2_summary_schema
         COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test/test_phase2_summary_schema.py

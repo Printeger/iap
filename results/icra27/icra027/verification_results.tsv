@@ -1,0 +1,11 @@
+label	exit_code	command
+verification_script_pre_hash	0	sha256sum -c /home/dev/ws_iap/src/iap/results/icra27/icra027/verification_commands.sha256 
+verification_script_syntax	0	bash -n /home/dev/ws_iap/src/iap/results/icra27/icra027/verification_commands.sh 
+configure_iap	0	cmake -S /home/dev/ws_iap/src/iap -B /home/dev/ws_iap/src/iap/results/icra27/icra027/build_iap -DCMAKE_BUILD_TYPE=RelWithDebInfo -DBUILD_WITH_CUDA=ON -DBUILD_WITH_VIEWER=ON -DBUILD_WITH_OPENCV=ON -DCMAKE_INSTALL_PREFIX=/home/dev/ws_iap/src/iap/results/icra27/icra027/install 
+build_iap	0	cmake --build /home/dev/ws_iap/src/iap/results/icra27/icra027/build_iap -j2 
+install_iap	0	cmake --install /home/dev/ws_iap/src/iap/results/icra27/icra027/build_iap 
+test_test_planner_launch	0	python3 test/test_test_planner_launch.py 
+test_gate0_runner	0	python3 test/test_gate0_runner.py 
+selected_root_regressions	0	ctest --test-dir /home/dev/ws_iap/src/iap/results/icra27/icra027/build_iap --output-on-failure -R \^\(test_demo11_publication_stamp_authority\|test_run_log_manager\|test_integrity_snapshot\|test_local_occupancy\|test_risk_grid_map\)\$ 
+direct_linkage	0	bash -c $'\n  set -u -o pipefail\n  for binary in "$@"; do\n    printf "%s:\\n" "$binary"\n    ldd "$binary"\n  done\n' _ /home/dev/ws_iap/src/iap/results/icra27/icra027/build_iap/demo11_corridor_map_publisher /home/dev/ws_iap/src/iap/results/icra27/icra027/build_iap/test_run_log_manager 
+linkage_assertion	1	bash -c $'\n  set -u -o pipefail\n  log=$1\n  expected=$2\n  if grep -E "not found|icra0(22|24|26)| => .*results/icra27/.*/build" "$log"; then\n    exit 1\n  fi\n  total=$(awk \'$1 == "libiap.so" && $2 == "=>" {n++} END {print n+0}\' "$log")\n  exact=$(awk -v expected="$expected" \'$1 == "libiap.so" && $2 == "=>" && $3 == expected {n++} END {print n+0}\' "$log")\n  printf "libiap_total=%s libiap_exact=%s expected=%s\\n" "$total" "$exact" "$expected"\n  test "$total" -eq 2\n  test "$exact" -eq 2\n' _ /home/dev/ws_iap/src/iap/results/icra27/icra027/logs/direct_linkage.log /home/dev/ws_iap/src/iap/results/icra27/icra027/install/lib/libiap.so 

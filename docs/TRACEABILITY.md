@@ -1,5 +1,30 @@
 # Traceability Matrix (IAP)
 
+## 2026-08-23 ICRA-027 occupancy-clock, runtime-log and provenance repair
+
+| Req ID | Requirement/evidence seam | Implementation and focused evidence | Status |
+|---|---|---|---|
+| IAP-RQ-311 / IAP-RQ-320 | All Demo11 occupancy producers share one authoritative simulator message clock | `Demo11PublicationStampAuthority`; `demo11_corridor_map_publisher.cpp` truth-odom subscription and one-shot multi-cloud stamp snapshot; `test_demo11_publication_stamp_authority.cpp` covers no-publish, regression retention, monotonic update and seven-cloud identity, but review found it exercises the array overload rather than the production variadic fanout and does not prove zero/malformed retention after acceptance | **IMPLEMENTED / focused root 5/5 PASS / REVIEW GAPS MEDIUM+LOW** |
+| IAP-RQ-320 / IAP-RQ-322 | Future IAP runtime logs cannot fall back to repository `log/` | `_materialize_iap_logging_config()` rewrites root/referenced logging plus timing only after strict descendant validation; `test_test_planner_launch.py` proves paths and preserved logging semantics in a temporary runtime tree | **IMPLEMENTED / launch 14/14 PASS** |
+| IAP-RQ-320 / IAP-RQ-322 | Qualification must reject missing, relative or escaping effective log paths before capture/launch | `run_effective_log_path_preflight()` structured evidence, manifest binding and exit 5; `test_gate0_runner.py` covers valid evidence, invalid values and zero capture/launch calls | **IMPLEMENTED / runner 24/24 PASS** |
+| IAP-RQ-311 / IAP-RQ-320 / IAP-RQ-322 | Verification commands are immutable and complete before execution | Pre-execution script SHA-256 `72234f09…ed414a3e`; configure/build/install, tests and `ldd` exit 0; immutable assertion exits 1 because only one of its two consumers has a dynamic `libiap.so` entry, so later script hashes/final audits do not execute. A subsequent reviewer mistakenly ran one out-of-script cached-diff check, which exited 1 on evidence whitespace and modified nothing | **BLOCKED / script not changed or retried / post-stop violation disclosed** |
+
+No P0 consumer science, freshness threshold, workload, external
+`local_sensing`, global checked-in logging default, scenario geometry,
+planner/P4/P5 behavior or Gate state is changed. ICRA-026 retained trees,
+ignored leaked log evidence and the PDF remain protected.
+
+Exact commands and exits are in
+`results/icra27/icra027/verification_commands.sh`,
+`verification_results.tsv` and `verification_summary.txt`. Builder does not
+claim the post-stop allowlist, hash, leak-identity, process or retained-tree
+assertions passed.
+
+The required two-axis review found no other scope or behavior defect. The
+review-period cached-diff command is not the immutable script's unexecuted
+final diff assertion and supplies no PASS evidence; its violation and nonzero
+result remain part of this BLOCKED handoff.
+
 ## 2026-08-23 ICRA-026 dependency-guarded replacement smoke
 
 | Req ID | Requirement/evidence seam | Implementation and focused evidence | Status |

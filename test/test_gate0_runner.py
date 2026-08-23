@@ -331,6 +331,86 @@ class Gate0RunnerTest(unittest.TestCase):
             "0.0", "0.5", "1.0", "1.5", "2.0", "2.5"
         ])
         self.assertEqual(config["p0.predictor.worker_count"], 4)
+        self.assertEqual(
+            config["corridor_map_stamp_authority_topic"],
+            "/sim/drone_0/truth_odom",
+        )
+        self.assertEqual(
+            config["iap_log_root"], "/tmp/p0/runtime/iap_logs"
+        )
+
+    def test_effective_log_path_preflight_records_bounded_descendants(self):
+        with tempfile.TemporaryDirectory() as directory:
+            run_dir = Path(directory) / "smoke"
+            run_dir.mkdir()
+            config = MODULE.p0_effective_config(run_dir)
+            result = MODULE.run_effective_log_path_preflight(run_dir, config)
+            persisted = json.loads(
+                (run_dir / "effective_log_path_preflight.json").read_text()
+            )
+
+        self.assertTrue(result["effective_log_paths_ready"])
+        self.assertEqual(result, persisted)
+        self.assertEqual(result["failure_reasons"], [])
+        self.assertEqual(
+            result["requested_log_root"],
+            str((run_dir / "runtime" / "iap_logs").resolve()),
+        )
+        self.assertEqual(
+            result["derived_timing_path"],
+            str(
+                (run_dir / "runtime" / "iap_logs" / "profiling"
+                 / "iap_timing.csv").resolve()
+            ),
+        )
+
+    def test_effective_log_path_preflight_rejects_missing_relative_and_escape(self):
+        with tempfile.TemporaryDirectory() as directory:
+            run_dir = Path(directory) / "smoke"
+            run_dir.mkdir()
+            for requested in (None, "relative/log", "/outside/runtime/log"):
+                with self.subTest(requested=requested):
+                    config = MODULE.p0_effective_config(run_dir)
+                    if requested is None:
+                        config.pop("iap_log_root")
+                    else:
+                        config["iap_log_root"] = requested
+                    result = MODULE.run_effective_log_path_preflight(
+                        run_dir, config
+                    )
+                    self.assertFalse(result["effective_log_paths_ready"])
+                    self.assertTrue(result["failure_reasons"])
+
+    def test_invalid_effective_log_path_never_starts_capture_or_launch(self):
+        gpu_ready = {
+            "schema_version": "iap_gpu_preflight_v1",
+            "gpu_ready": True,
+            "failure_reason": "",
+        }
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            invalid = MODULE.p0_effective_config(root / "smoke")
+            invalid["iap_log_root"] = "/outside/runtime/log"
+            with mock.patch.object(
+                MODULE, "p0_effective_config", return_value=invalid
+            ), mock.patch.object(
+                MODULE, "_start_capture"
+            ) as start_capture, mock.patch.object(
+                MODULE, "_run_launch_with_monitor"
+            ) as launch:
+                self.assertEqual(
+                    MODULE.run_gate0_smoke(
+                        root, Path("unused_capture.py"), gpu_ready
+                    ),
+                    5,
+                )
+            evidence = json.loads(
+                (root / "smoke" / "effective_log_path_preflight.json")
+                .read_text()
+            )
+        self.assertFalse(evidence["effective_log_paths_ready"])
+        start_capture.assert_not_called()
+        launch.assert_not_called()
 
     def test_p0_config_freezes_four_workers_for_both_durations(self):
         smoke = MODULE.p0_effective_config(

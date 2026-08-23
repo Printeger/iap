@@ -1,0 +1,31 @@
+BEGIN verification_script_pre_hash
+COMMAND sha256sum -c /home/dev/ws_iap/src/iap/results/icra27/icra027/verification_commands.sha256 
+END verification_script_pre_hash exit=0 log=/home/dev/ws_iap/src/iap/results/icra27/icra027/logs/verification_script_pre_hash.log
+BEGIN verification_script_syntax
+COMMAND bash -n /home/dev/ws_iap/src/iap/results/icra27/icra027/verification_commands.sh 
+END verification_script_syntax exit=0 log=/home/dev/ws_iap/src/iap/results/icra27/icra027/logs/verification_script_syntax.log
+BEGIN configure_iap
+COMMAND cmake -S /home/dev/ws_iap/src/iap -B /home/dev/ws_iap/src/iap/results/icra27/icra027/build_iap -DCMAKE_BUILD_TYPE=RelWithDebInfo -DBUILD_WITH_CUDA=ON -DBUILD_WITH_VIEWER=ON -DBUILD_WITH_OPENCV=ON -DCMAKE_INSTALL_PREFIX=/home/dev/ws_iap/src/iap/results/icra27/icra027/install 
+END configure_iap exit=0 log=/home/dev/ws_iap/src/iap/results/icra27/icra027/logs/configure_iap.log
+BEGIN build_iap
+COMMAND cmake --build /home/dev/ws_iap/src/iap/results/icra27/icra027/build_iap -j2 
+END build_iap exit=0 log=/home/dev/ws_iap/src/iap/results/icra27/icra027/logs/build_iap.log
+BEGIN install_iap
+COMMAND cmake --install /home/dev/ws_iap/src/iap/results/icra27/icra027/build_iap 
+END install_iap exit=0 log=/home/dev/ws_iap/src/iap/results/icra27/icra027/logs/install_iap.log
+BEGIN test_test_planner_launch
+COMMAND python3 test/test_test_planner_launch.py 
+END test_test_planner_launch exit=0 log=/home/dev/ws_iap/src/iap/results/icra27/icra027/logs/test_test_planner_launch.log
+BEGIN test_gate0_runner
+COMMAND python3 test/test_gate0_runner.py 
+END test_gate0_runner exit=0 log=/home/dev/ws_iap/src/iap/results/icra27/icra027/logs/test_gate0_runner.log
+BEGIN selected_root_regressions
+COMMAND ctest --test-dir /home/dev/ws_iap/src/iap/results/icra27/icra027/build_iap --output-on-failure -R \^\(test_demo11_publication_stamp_authority\|test_run_log_manager\|test_integrity_snapshot\|test_local_occupancy\|test_risk_grid_map\)\$ 
+END selected_root_regressions exit=0 log=/home/dev/ws_iap/src/iap/results/icra27/icra027/logs/selected_root_regressions.log
+BEGIN direct_linkage
+COMMAND bash -c $'\n  set -u -o pipefail\n  for binary in "$@"; do\n    printf "%s:\\n" "$binary"\n    ldd "$binary"\n  done\n' _ /home/dev/ws_iap/src/iap/results/icra27/icra027/build_iap/demo11_corridor_map_publisher /home/dev/ws_iap/src/iap/results/icra27/icra027/build_iap/test_run_log_manager 
+END direct_linkage exit=0 log=/home/dev/ws_iap/src/iap/results/icra27/icra027/logs/direct_linkage.log
+BEGIN linkage_assertion
+COMMAND bash -c $'\n  set -u -o pipefail\n  log=$1\n  expected=$2\n  if grep -E "not found|icra0(22|24|26)| => .*results/icra27/.*/build" "$log"; then\n    exit 1\n  fi\n  total=$(awk \'$1 == "libiap.so" && $2 == "=>" {n++} END {print n+0}\' "$log")\n  exact=$(awk -v expected="$expected" \'$1 == "libiap.so" && $2 == "=>" && $3 == expected {n++} END {print n+0}\' "$log")\n  printf "libiap_total=%s libiap_exact=%s expected=%s\\n" "$total" "$exact" "$expected"\n  test "$total" -eq 2\n  test "$exact" -eq 2\n' _ /home/dev/ws_iap/src/iap/results/icra27/icra027/logs/direct_linkage.log /home/dev/ws_iap/src/iap/results/icra27/icra027/install/lib/libiap.so 
+END linkage_assertion exit=1 log=/home/dev/ws_iap/src/iap/results/icra27/icra027/logs/linkage_assertion.log
+verification_script_exit=1

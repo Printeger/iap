@@ -9,10 +9,12 @@
 #include <vector>
 
 #include <rclcpp/rclcpp.hpp>
+#include <nav_msgs/msg/odometry.hpp>
 #include <sensor_msgs/msg/point_cloud2.hpp>
 #include <sensor_msgs/point_cloud2_iterator.hpp>
 
 #include <iap/planner/p1_fixture_geometry.hpp>
+#include <iap/sim/demo11_publication_stamp_authority.hpp>
 
 namespace {
 
@@ -228,6 +230,8 @@ class Demo11CorridorMapPublisher : public rclcpp::Node {
     resolution_ = declare_parameter<double>("resolution_m", 0.10);
     publish_rate_hz_ = declare_parameter<double>("publish_rate_hz", 2.0);
     frame_id_ = declare_parameter<std::string>("frame_id", "map");
+    stamp_authority_topic_ = declare_parameter<std::string>(
+        "stamp_authority_topic", "/sim/drone_0/truth_odom");
     forest_size_x_m_ = declare_parameter<double>("forest_size_x_m", 20.0);
     forest_size_y_m_ = declare_parameter<double>("forest_size_y_m", 20.0);
     tree_density_lower_left_per_m2_ =
@@ -373,6 +377,23 @@ class Demo11CorridorMapPublisher : public rclcpp::Node {
         "/demo11/p0_6_fixture_cloud", qos);
     p1_fixture_pub_ = create_publisher<sensor_msgs::msg::PointCloud2>(
         "/demo11/p1_fixture_cloud", qos);
+    stamp_authority_sub_ = create_subscription<nav_msgs::msg::Odometry>(
+        stamp_authority_topic_, rclcpp::QoS(10).best_effort(),
+        [this](const nav_msgs::msg::Odometry::SharedPtr msg) {
+          const auto result = stamp_authority_.update(msg->header.stamp);
+          if (result == iap::sim::StampUpdateResult::kMalformed ||
+              result == iap::sim::StampUpdateResult::kNonPositive) {
+            RCLCPP_WARN(
+                get_logger(),
+                "Ignoring invalid Demo11 publication authority stamp %d.%09u",
+                msg->header.stamp.sec, msg->header.stamp.nanosec);
+          } else if (result == iap::sim::StampUpdateResult::kRegressed) {
+            RCLCPP_WARN(
+                get_logger(),
+                "Ignoring regressed Demo11 publication authority stamp %d.%09u",
+                msg->header.stamp.sec, msg->header.stamp.nanosec);
+          }
+        });
 
     const auto period = std::chrono::duration<double>(
         1.0 / std::max(0.1, publish_rate_hz_));
@@ -811,13 +832,11 @@ class Demo11CorridorMapPublisher : public rclcpp::Node {
   }
 
   void publish_map() {
-    const auto stamp = now();
-    global_cloud_.header.stamp = stamp;
-    trunk_cloud_.header.stamp = stamp;
-    canopy_cloud_.header.stamp = stamp;
-    terminal_wall_cloud_.header.stamp = stamp;
-    p0_6_fixture_cloud_.header.stamp = stamp;
-    p1_fixture_cloud_.header.stamp = stamp;
+    if (!iap::sim::stamp_demo11_publication(
+            stamp_authority_, global_cloud_, trunk_cloud_, canopy_cloud_,
+            terminal_wall_cloud_, p0_6_fixture_cloud_, p1_fixture_cloud_)) {
+      return;
+    }
     global_pub_->publish(global_cloud_);
     local_pub_->publish(global_cloud_);
     trunk_pub_->publish(trunk_cloud_);
@@ -830,6 +849,7 @@ class Demo11CorridorMapPublisher : public rclcpp::Node {
   double resolution_ = 0.10;
   double publish_rate_hz_ = 2.0;
   std::string frame_id_ = "map";
+  std::string stamp_authority_topic_ = "/sim/drone_0/truth_odom";
   double forest_size_x_m_ = 20.0;
   double forest_size_y_m_ = 20.0;
   double tree_density_lower_left_per_m2_ = 0.25;
@@ -915,7 +935,9 @@ class Demo11CorridorMapPublisher : public rclcpp::Node {
   rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr terminal_wall_pub_;
   rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr p0_6_fixture_pub_;
   rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr p1_fixture_pub_;
+  rclcpp::Subscription<nav_msgs::msg::Odometry>::SharedPtr stamp_authority_sub_;
   rclcpp::TimerBase::SharedPtr timer_;
+  iap::sim::Demo11PublicationStampAuthority stamp_authority_;
 };
 
 int main(int argc, char** argv) {
