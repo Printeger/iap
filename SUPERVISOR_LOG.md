@@ -1,5 +1,79 @@
 # ICRA Supervisor Log
 
+## 2026-08-23 — ICRA-033 review and ICRA-034 analyzer-only reanalysis authorization
+
+### Review identity and synchronization
+
+- Fixed review range: `bb546fbd4dee039e982d8b07a74b8a07abc05bee...ea6ebc585f6617299ad93f708814ba0d026777b5`.
+- Reviewed commits: `60f9189` and final DEV_LOG-only return `ea6ebc5`; both carry applicable
+  `IAP-RQ-320`, `IAP-RQ-321` and/or `IAP-RQ-322` identifiers.
+- After fetch, `HEAD` and `origin/dev/icra` matched at divergence `0 0`. The protected PDF remains the
+  sole untracked file. All 32 changed paths match the ICRA-033 allowlist; no Supervisor-owned,
+  launch/runner/capture/config, P1--P5, historical, external-repository or cross-repository file
+  changed.
+
+### Standards axis
+
+- Verdict: `PASS`, zero hard violations and two Low judgment smells; worst Low.
+- Low Divergent Change: the analyzer's completed-attempt routine owns state transitions,
+  duplicate/conflict handling, identity-chain validation, statistics and final gate calculation.
+  Splitting those concerns may improve maintainability, but doing so is outside the bounded repair.
+- Low Primitive Obsession/schema drift: refresh-state strings are repeated in Python validation and
+  C++ serialization. C++ already uses an internal enum; a shared generated schema is not warranted
+  during qualification repair.
+- RQ/document synchronization, allowlist, ownership, PDF/history preservation, exactly-one guards,
+  GPU/process/log contracts, build retention and truthful result reporting conform.
+
+### Spec axis
+
+- Verdict: `REQUEST_CHANGES`; atomic runtime evidence and task procedure pass, but formal analyzer
+  acceptance fails. Findings: one High; worst High.
+- High: the analyzer unconditionally requires finite message-domain refresh/start/end stamps for all
+  completed attempts. Attempts 4 and 5 are explicit `COMPLETED_FAILURE` records whose precise reason
+  is `message_stamp_unavailable`; their all-null message stamps are truthful and accompanied by
+  nonzero attempt IDs, finite ordered steady-clock start/end, finite elapsed time, result generation
+  zero, unavailable snapshot and zero work. Requiring fabricated message time is an incoherent
+  contract and falsely rejects valid failure evidence.
+- All other ICRA-033 requirements pass: active/result/previous generation separation, atomic completed
+  records, in-progress isolation, first-generation interval truth, complete field inventory,
+  equivalent/conflicting duplicate handling, ICRA-032 replay, build/linkage/frozen configuration,
+  allowlist and one-shot stop line.
+
+### Live evidence and causal diagnosis
+
+- The sole smoke has 31 observations, 16 completed attempts, 14 strict successful generations, two
+  coherent startup failures, three in-progress observations, 12 equivalent completed duplicates and
+  zero conflicts. All successful generations perform exactly 76,800 logical queries; all 166
+  integrity reports are valid.
+- Refresh/provider/generation-interval p95 is approximately `194.485/150.429/506.176 ms`. The runner
+  exits 0. The analyzer exits 1 only for the three message-domain identity fields on attempts 4 and 5.
+- This is an analyzer false rejection, not a runtime atomicity, GPU, predictor, workload or performance
+  blocker. Completed success still requires finite message and steady identity. Only the exact typed
+  `message_stamp_unavailable` failure may require all three message stamps to be null together, with
+  strict finite steady identity and zero-work/result invariants; every partial or broader exemption
+  must fail closed.
+
+### Supervisor verification and artifact lifecycle
+
+- `git diff --check bb546fb...ea6ebc5`: exit 0.
+- With the declared task-local/workspace dependency environment, affected IAP CTest passes 7/7, EGO
+  CTest passes 2/2 and the direct analyzer suite passes 38/38.
+- Supervisor ran no GPU preflight, ROS, smoke or analyzer and did not alter immutable live evidence.
+- Overall Review is not PASS because the formal analyzer exited 1. Current ICRA-033 artifacts remain
+  retained: IAP build about 2.4 GiB, install about 662 MiB, EGO build about 1.2 GiB, install about
+  158 MiB, plus the disclosed temporary IAP install about 662 MiB. Nothing is deletion-eligible yet.
+
+### Required next action
+
+- Unique task: `ICRA-034 / GATE_0B`, defined in `NEXT_TASK.md`; active role is `DEEPSEEK`, state
+  `TASK_READY`.
+- Repair only the analyzer's state-specific message-clock-unavailable contract, prove positive and
+  fail-closed cases, hash the immutable ICRA-033 raw inputs, then run exactly one formal reanalysis
+  into ICRA-034 evidence.
+- No GPU, ROS, smoke, runtime/product change, retry, tuning, benchmark, P4/P5 execution, cleanup or
+  Gate promotion is authorized. If ICRA-034 passes Supervisor review, the next task can proceed to the
+  fixed 60-second benchmark and obsolete reviewed build/install trees can then be cleanup candidates.
+
 ## 2026-08-23 — ICRA-032 review and ICRA-033 atomic refresh-evidence authorization
 
 ### Review identity and synchronization
