@@ -4803,9 +4803,11 @@ at `49a676a5ff51538ab961c814409f6c2dfb7ba4679a861d4e8e94cc7d5679c788`.
 All seven former RED assertions are GREEN: late exit is `CLOSED_SEGMENTS`
 `(7,11)`; open tail and closed-then-open are `OPEN_ENDED_COLLISION` with no
 segments; empty, non-finite, structural and unavailable occupancy are
-`INVALID_INPUT` with no segments. Final focused coverage is 14/14, including
-initial/rebound open/invalid tests with absent A* and one valid closed `(3,6)`
-integration case. Existing P1 is 39/39; retained path-searching P4 is 4/4;
+`INVALID_INPUT` with no segments. Initial/rebound open/invalid tests use absent
+A*, and one valid closed `(3,6)` integration case passes. Review then added a
+genuine same-control-interval overlap regression: it failed with two duplicate
+endpoint pairs before production merged the pair, and passes afterward. Final
+focused coverage is 15/15. Existing P1 is 39/39; retained path-searching P4 is 4/4;
 occupancy epoch is 6/6; affected plan-manager CTest is 9/9.
 
 Fresh IAP, bspline and plan-manager configure/build/install complete under

@@ -46,6 +46,7 @@ namespace ego_planner
   };
 
   const char *collisionScanStatusName(CollisionScanStatus status);
+  bool collisionScanFailsClosed(CollisionScanStatus status);
 
   class ControlPoints
   {

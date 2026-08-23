@@ -5,7 +5,7 @@
   "result": "P4_G0A_COLLISION_SCAN_GREEN_READY_FOR_REVIEW",
   "frozen_fixture_sha256": "49a676a5ff51538ab961c814409f6c2dfb7ba4679a861d4e8e94cc7d5679c788",
   "focused_contract": {
-    "tests": 14,
+    "tests": 15,
     "failures": 0,
     "prior_red_now_green": [
       {
@@ -47,7 +47,8 @@
     "integration": {
       "initial_open_invalid_stop_before_astar": true,
       "rebound_open_invalid_stop_before_astar": true,
-      "closed_segment": [3, 6]
+      "closed_segment": [3, 6],
+      "same_control_interval_runs_merged_segment": [2, 3]
     }
   },
   "regression": {

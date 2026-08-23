@@ -28,15 +28,17 @@ struct GridMapTestAccess
   static constexpr int kYCells = 16;
   static constexpr int kZCells = 8;
 
-  static void configure(GridMap * map, const CollisionCase & fixture)
+  static void configure(
+    GridMap * map, const CollisionCase & fixture,
+    const int x_cells = kXCells)
   {
     map->mp_.map_origin_ = Eigen::Vector3d(-1.0, -2.0, -1.0);
     map->mp_.map_size_ = Eigen::Vector3d(
-        kXCells * kResolutionM, kYCells * kResolutionM,
+        x_cells * kResolutionM, kYCells * kResolutionM,
         kZCells * kResolutionM);
     map->mp_.map_min_boundary_ = map->mp_.map_origin_;
     map->mp_.map_max_boundary_ = map->mp_.map_origin_ + map->mp_.map_size_;
-    map->mp_.map_voxel_num_ = Eigen::Vector3i(kXCells, kYCells, kZCells);
+    map->mp_.map_voxel_num_ = Eigen::Vector3i(x_cells, kYCells, kZCells);
     map->mp_.resolution_ = kResolutionM;
     map->mp_.resolution_inv_ = 1.0 / kResolutionM;
     map->mp_.obstacles_inflation_ = 0.0;
@@ -46,12 +48,12 @@ struct GridMapTestAccess
     map->mp_.frame_id_ = "map";
 
     const std::size_t cell_count =
-      static_cast<std::size_t>(kXCells * kYCells * kZCells);
+      static_cast<std::size_t>(x_cells * kYCells * kZCells);
     map->md_.occupancy_buffer_.assign(cell_count, -2.01);
     map->md_.occupancy_buffer_inflate_.assign(cell_count, 0);
     map->md_.occupancy_buffer_raw_cloud_.assign(cell_count, 0);
 
-    for (int x_index = 0; x_index < kXCells; ++x_index) {
+    for (int x_index = 0; x_index < x_cells; ++x_index) {
       const double x = map->mp_.map_origin_.x() +
         (static_cast<double>(x_index) + 0.5) * kResolutionM;
       const int nearest_sample = static_cast<int>(std::lround(x));
@@ -248,6 +250,25 @@ TEST(P4CollisionScanLegacyGreen, ClosedSegmentHasFreeEndpoints) {
 TEST(P4CollisionScanLegacyGreen,
      MultipleClosedSegmentsAreOrderedAndNonOverlapping) {
   expectExpectedResult(p4_collision_fixture::kMultipleClosed);
+}
+
+TEST(P4CollisionScanLegacyGreen,
+     MultipleRunsInsideOneControlIntervalAreMergedWithoutOverlap) {
+  auto map = std::make_shared<GridMap>();
+  GridMapTestAccess::configure(
+    map.get(), p4_collision_fixture::kMultipleClosed, 568);
+  auto optimizer = makeOptimizer(map, false);
+  Eigen::MatrixXd seed = seedMatrix(p4_collision_fixture::kNoCollision);
+  seed(0, 2) = 2.0;
+  seed(0, 3) = 8.0;
+  for (Eigen::Index index = 4; index < seed.cols(); ++index) {
+    seed(0, index) = 8.0 + 12.0 * static_cast<double>(index - 3);
+  }
+
+  const auto result = optimizer->scanCollisionSegments(seed);
+  ASSERT_EQ(result.status, ego_planner::CollisionScanStatus::CLOSED_SEGMENTS);
+  ASSERT_EQ(result.closed_segments.size(), 1U);
+  EXPECT_EQ(result.closed_segments.front(), std::make_pair(2, 3));
 }
 
 TEST(P4CollisionScanMissingContract,

@@ -1097,9 +1097,7 @@ namespace ego_planner
     }
     const auto collision_scan =
         bspline_optimizer_->initControlPoints(ctrl_pts, true);
-    if (collision_scan.status ==
-            CollisionScanStatus::OPEN_ENDED_COLLISION ||
-        collision_scan.status == CollisionScanStatus::INVALID_INPUT)
+    if (collisionScanFailsClosed(collision_scan.status))
     {
       bspline_optimizer_->clearP4RiskSnapshot();
       RCLCPP_WARN(

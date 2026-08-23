@@ -980,6 +980,12 @@ namespace ego_planner
     return "INVALID_INPUT";
   }
 
+  bool collisionScanFailsClosed(const CollisionScanStatus status)
+  {
+    return status == CollisionScanStatus::OPEN_ENDED_COLLISION ||
+           status == CollisionScanStatus::INVALID_INPUT;
+  }
+
   CollisionScanResult BsplineOptimizer::scanCollisionSegments(
       const Eigen::MatrixXd &points) const
   {
@@ -1058,8 +1064,17 @@ namespace ego_planner
               points.col(free_end_index));
           if (start_occupancy != 0 || end_occupancy != 0)
             return CollisionScanResult{};
-          result.closed_segments.emplace_back(
-              free_start_index, free_end_index);
+          if (!result.closed_segments.empty() &&
+              free_start_index <= result.closed_segments.back().second)
+          {
+            result.closed_segments.back().second = std::max(
+                result.closed_segments.back().second, free_end_index);
+          }
+          else
+          {
+            result.closed_segments.emplace_back(
+                free_start_index, free_end_index);
+          }
           active_entry = false;
           possible_exit = false;
         }
@@ -1875,10 +1890,7 @@ namespace ego_planner
   {
     last_p4_guides_.clear();
     last_collision_scan_result_ = scanCollisionSegments(cps_.points);
-    if (last_collision_scan_result_.status ==
-            CollisionScanStatus::OPEN_ENDED_COLLISION ||
-        last_collision_scan_result_.status ==
-            CollisionScanStatus::INVALID_INPUT)
+    if (collisionScanFailsClosed(last_collision_scan_result_.status))
     {
       force_stop_type_ = STOP_FOR_ERROR;
       return false;
@@ -2501,9 +2513,7 @@ namespace ego_planner
           success = false;
           restart_nums++;
           const auto collision_scan = initControlPoints(cps_.points, false);
-          if (collision_scan.status ==
-                  CollisionScanStatus::OPEN_ENDED_COLLISION ||
-              collision_scan.status == CollisionScanStatus::INVALID_INPUT)
+          if (collisionScanFailsClosed(collision_scan.status))
             return false;
           new_lambda2_ *= 2; // 提高规避权重
 
@@ -2606,9 +2616,7 @@ namespace ego_planner
         {
           restart_nums++;
           const auto collision_scan = initControlPoints(cps_.points, false);
-          if (collision_scan.status ==
-                  CollisionScanStatus::OPEN_ENDED_COLLISION ||
-              collision_scan.status == CollisionScanStatus::INVALID_INPUT)
+          if (collisionScanFailsClosed(collision_scan.status))
             return false;
           new_lambda2_ *= 2;
 
