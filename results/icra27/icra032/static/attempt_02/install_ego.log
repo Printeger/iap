@@ -1,0 +1,31 @@
+-- Install configuration: "Release"
+-- Installing: /home/dev/ws_iap/src/iap/results/icra27/icra032/install_ego/lib/ego_planner/ego_planner_node
+-- Set non-toolchain portion of runtime path of "/home/dev/ws_iap/src/iap/results/icra27/icra032/install_ego/lib/ego_planner/ego_planner_node" to ""
+-- Installing: /home/dev/ws_iap/src/iap/results/icra27/icra032/install_ego/lib/ego_planner/traj_server
+-- Set non-toolchain portion of runtime path of "/home/dev/ws_iap/src/iap/results/icra27/icra032/install_ego/lib/ego_planner/traj_server" to ""
+-- Installing: /home/dev/ws_iap/src/iap/results/icra27/icra032/install_ego/share/ego_planner/launch
+-- Installing: /home/dev/ws_iap/src/iap/results/icra27/icra032/install_ego/share/ego_planner/launch/default.rviz
+-- Installing: /home/dev/ws_iap/src/iap/results/icra27/icra032/install_ego/share/ego_planner/launch/single_run_in_sim.launch.py
+-- Installing: /home/dev/ws_iap/src/iap/results/icra27/icra032/install_ego/share/ego_planner/launch/swarm_large.launch.py
+-- Installing: /home/dev/ws_iap/src/iap/results/icra27/icra032/install_ego/share/ego_planner/launch/__pycache__
+-- Installing: /home/dev/ws_iap/src/iap/results/icra27/icra032/install_ego/share/ego_planner/launch/__pycache__/advanced_param.launch.cpython-312.pyc
+-- Installing: /home/dev/ws_iap/src/iap/results/icra27/icra032/install_ego/share/ego_planner/launch/run_in_sim.launch.py
+-- Installing: /home/dev/ws_iap/src/iap/results/icra27/icra032/install_ego/share/ego_planner/launch/advanced_param.launch.py
+-- Installing: /home/dev/ws_iap/src/iap/results/icra27/icra032/install_ego/share/ego_planner/launch/swarm.launch.py
+-- Installing: /home/dev/ws_iap/src/iap/results/icra27/icra032/install_ego/share/ego_planner/launch/simulator.launch.py
+-- Installing: /home/dev/ws_iap/src/iap/results/icra27/icra032/install_ego/share/ego_planner/launch/rviz.launch.py
+-- Installing: /home/dev/ws_iap/src/iap/results/icra27/icra032/install_ego/share/ament_index/resource_index/package_run_dependencies/ego_planner
+-- Installing: /home/dev/ws_iap/src/iap/results/icra27/icra032/install_ego/share/ament_index/resource_index/parent_prefix_path/ego_planner
+-- Installing: /home/dev/ws_iap/src/iap/results/icra27/icra032/install_ego/share/ego_planner/environment/ament_prefix_path.sh
+-- Installing: /home/dev/ws_iap/src/iap/results/icra27/icra032/install_ego/share/ego_planner/environment/ament_prefix_path.dsv
+-- Installing: /home/dev/ws_iap/src/iap/results/icra27/icra032/install_ego/share/ego_planner/environment/path.sh
+-- Installing: /home/dev/ws_iap/src/iap/results/icra27/icra032/install_ego/share/ego_planner/environment/path.dsv
+-- Installing: /home/dev/ws_iap/src/iap/results/icra27/icra032/install_ego/share/ego_planner/local_setup.bash
+-- Installing: /home/dev/ws_iap/src/iap/results/icra27/icra032/install_ego/share/ego_planner/local_setup.sh
+-- Installing: /home/dev/ws_iap/src/iap/results/icra27/icra032/install_ego/share/ego_planner/local_setup.zsh
+-- Installing: /home/dev/ws_iap/src/iap/results/icra27/icra032/install_ego/share/ego_planner/local_setup.dsv
+-- Installing: /home/dev/ws_iap/src/iap/results/icra27/icra032/install_ego/share/ego_planner/package.dsv
+-- Installing: /home/dev/ws_iap/src/iap/results/icra27/icra032/install_ego/share/ament_index/resource_index/packages/ego_planner
+-- Installing: /home/dev/ws_iap/src/iap/results/icra27/icra032/install_ego/share/ego_planner/cmake/ego_plannerConfig.cmake
+-- Installing: /home/dev/ws_iap/src/iap/results/icra27/icra032/install_ego/share/ego_planner/cmake/ego_plannerConfig-version.cmake
+-- Installing: /home/dev/ws_iap/src/iap/results/icra27/icra032/install_ego/share/ego_planner/package.xml

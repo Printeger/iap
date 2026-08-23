@@ -1,0 +1,95 @@
+Internal ctest changing into directory: /home/dev/ws_iap/src/iap/results/icra27/icra032/build_iap
+Test project /home/dev/ws_iap/src/iap/results/icra27/icra032/build_iap
+    Start  9: test_predictor_module
+1/6 Test  #9: test_predictor_module ..................***Failed    0.12 sec
+-- run_test.py: invoking following command in '/home/dev/ws_iap/src/iap/results/icra27/icra032/build_iap':
+ - /home/dev/ws_iap/src/iap/results/icra27/icra032/build_iap/test_predictor_module --gtest_output=xml:/home/dev/ws_iap/src/iap/results/icra27/icra032/build_iap/test_results/iap/test_predictor_module.gtest.xml
+Running main() from /opt/ros/jazzy/src/gtest_vendor/src/gtest_main.cc
+[==========] Running 46 tests from 2 test suites.
+[----------] Global test environment set-up.
+[----------] 1 test from PredictorSourceUsageTest
+[ RUN      ] PredictorSourceUsageTest.ProjectsOnlyConfiguredSpatialSources
+[       OK ] PredictorSourceUsageTest.ProjectsOnlyConfiguredSpatialSources (0 ms)
+[----------] 1 test from PredictorSourceUsageTest (0 ms total)
+
+[----------] 45 tests from PredictorModuleTest
+[ RUN      ] PredictorModuleTest.GnssOpenSkyProducesFinitePlAndFim
+[       OK ] PredictorModuleTest.GnssOpenSkyProducesFinitePlAndFim (0 ms)
+[ RUN      ] PredictorModuleTest.GnssMissingEpochIsExplicitFallback
+[       OK ] PredictorModuleTest.GnssMissingEpochIsExplicitFallback (0 ms)
+[ RUN      ] PredictorModuleTest.GnssTooFewSatsDoesNotReturnFiniteFallbackPl
+[       OK ] PredictorModuleTest.GnssTooFewSatsDoesNotReturnFiniteFallbackPl (0 ms)
+[ RUN      ] PredictorModuleTest.GnssExcludedSatellitesReduceUsedCountAndFallbackExplicitly
+[       OK ] PredictorModuleTest.GnssExcludedSatellitesReduceUsedCountAndFallbackExplicitly (0 ms)
+[ RUN      ] PredictorModuleTest.GnssMapOcclusionReducesVisibleCountAndDegradesProtectionLevels
+/home/dev/ws_iap/src/iap/test/test_predictor_module.cpp:604: Failure
+Expected: (occluded.n_visible) < (open_sky.n_visible), actual: 8 vs 8
+
+/home/dev/ws_iap/src/iap/test/test_predictor_module.cpp:605: Failure
+Expected: (occluded.n_used) < (open_sky.n_used), actual: 8 vs 8
+
+/home/dev/ws_iap/src/iap/test/test_predictor_module.cpp:606: Failure
+Expected equality of these values:
+  occluded.n_visible
+    Which is: 8
+  6
+
+/home/dev/ws_iap/src/iap/test/test_predictor_module.cpp:607: Failure
+Expected equality of these values:
+  occluded.n_used
+    Which is: 8
+  6
+
+/home/dev/ws_iap/src/iap/test/test_predictor_module.cpp:608: Failure
+Expected: (occluded.pdop) > (open_sky.pdop), actual: 24.818369439498692 vs 24.818369439498692
+
+/home/dev/ws_iap/src/iap/test/test_predictor_module.cpp:609: Failure
+Expected: (occluded.hpl) > (open_sky.hpl), actual: 15.819528923918377 vs 15.819528923918377
+
+/home/dev/ws_iap/src/iap/test/test_predictor_module.cpp:610: Failure
+Expected: (occluded.vpl) > (open_sky.vpl), actual: 122.14422829454564 vs 122.14422829454564
+
+/home/dev/ws_iap/src/iap/test/test_predictor_module.cpp:611: Failure
+Expected: (occluded.lambda_trace) < (open_sky.lambda_trace), actual: 0.21111941339897622 vs 0.21111941339897622
+
+-- run_test.py: return code -11
+-- run_test.py: generate result file '/home/dev/ws_iap/src/iap/results/icra27/icra032/build_iap/test_results/iap/test_predictor_module.gtest.xml' with failed test
+-- run_test.py: verify result file '/home/dev/ws_iap/src/iap/results/icra27/icra032/build_iap/test_results/iap/test_predictor_module.gtest.xml'
+
+    Start 10: test_rolling_spatial_advisory_window
+2/6 Test #10: test_rolling_spatial_advisory_window ...***Failed    0.05 sec
+-- run_test.py: invoking following command in '/home/dev/ws_iap/src/iap/results/icra27/icra032/build_iap':
+ - /home/dev/ws_iap/src/iap/results/icra27/icra032/build_iap/test_rolling_spatial_advisory_window --gtest_output=xml:/home/dev/ws_iap/src/iap/results/icra27/icra032/build_iap/test_results/iap/test_rolling_spatial_advisory_window.gtest.xml
+/home/dev/ws_iap/src/iap/results/icra27/icra032/build_iap/test_rolling_spatial_advisory_window: symbol lookup error: /home/dev/ws_iap/src/iap/results/icra27/icra032/build_iap/test_rolling_spatial_advisory_window: undefined symbol: _ZN3iap28RollingSpatialAdvisoryWindow12abortRefreshEv
+-- run_test.py: return code 127
+-- run_test.py: generate result file '/home/dev/ws_iap/src/iap/results/icra27/icra032/build_iap/test_results/iap/test_rolling_spatial_advisory_window.gtest.xml' with failed test
+-- run_test.py: verify result file '/home/dev/ws_iap/src/iap/results/icra27/icra032/build_iap/test_results/iap/test_rolling_spatial_advisory_window.gtest.xml'
+
+    Start 12: test_risk_grid_map
+3/6 Test #12: test_risk_grid_map .....................***Failed    0.05 sec
+-- run_test.py: invoking following command in '/home/dev/ws_iap/src/iap/results/icra27/icra032/build_iap':
+ - /home/dev/ws_iap/src/iap/results/icra27/icra032/build_iap/test_risk_grid_map --gtest_output=xml:/home/dev/ws_iap/src/iap/results/icra27/icra032/build_iap/test_results/iap/test_risk_grid_map.gtest.xml
+/home/dev/ws_iap/src/iap/results/icra27/icra032/build_iap/test_risk_grid_map: symbol lookup error: /home/dev/ws_iap/src/iap/results/icra27/icra032/build_iap/test_risk_grid_map: undefined symbol: _ZN3iap11RiskGridMap19refreshFromProviderERKN5Eigen6MatrixIdLi3ELi1ELi0ELi3ELi1EEEdRNS_22RiskPredictionProviderERKSt8functionIFNS_23RiskOccupancyDiagnosticES5_EERKS8_IFNS_24RiskGridSourceValidationEvEEPNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEE
+-- run_test.py: return code 127
+-- run_test.py: generate result file '/home/dev/ws_iap/src/iap/results/icra27/icra032/build_iap/test_results/iap/test_risk_grid_map.gtest.xml' with failed test
+-- run_test.py: verify result file '/home/dev/ws_iap/src/iap/results/icra27/icra032/build_iap/test_results/iap/test_risk_grid_map.gtest.xml'
+
+    Start 31: test_gate0_analyzer
+4/6 Test #31: test_gate0_analyzer ....................   Passed    0.06 sec
+    Start 32: test_gate0_runner
+5/6 Test #32: test_gate0_runner ......................   Passed    6.16 sec
+    Start 34: test_test_planner_launch
+6/6 Test #34: test_test_planner_launch ...............   Passed    0.12 sec
+
+50% tests passed, 3 tests failed out of 6
+
+Label Time Summary:
+gtest    =   0.21 sec*proc (3 tests)
+
+Total Test time (real) =   6.56 sec
+
+The following tests FAILED:
+	  9 - test_predictor_module (Failed)
+	 10 - test_rolling_spatial_advisory_window (Failed)
+	 12 - test_risk_grid_map (Failed)
+Errors while running CTest

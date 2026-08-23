@@ -1,0 +1,2 @@
+postrun_pass=1
+evidence_correction=initial canonical hash command named nonexistent gate0_summary.json; corrected to actual analyzer filenames without rerunning smoke or analyzer

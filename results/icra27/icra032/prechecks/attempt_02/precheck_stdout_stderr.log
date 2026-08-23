@@ -1,0 +1,46 @@
+BEGIN artifact_mapping
+COMMAND bash -c $'\n  set -u\n  cmp "$1/libiap.so" "$2/lib/libiap.so"\n  cmp "$3/ego_planner_node" "$4/lib/ego_planner/ego_planner_node"\n  sha256sum "$1/libiap.so" "$2/lib/libiap.so" "$3/ego_planner_node" "$4/lib/ego_planner/ego_planner_node"\n' _ /home/dev/ws_iap/src/iap/results/icra27/icra032/build_iap /home/dev/ws_iap/src/iap/results/icra27/icra032/install /home/dev/ws_iap/src/iap/results/icra27/icra032/build_ego /home/dev/ws_iap/src/iap/results/icra27/icra032/install_ego
+END artifact_mapping exit=0
+BEGIN installed_analyzer_exact
+COMMAND cmp scripts/dev_planner/gate0_analyzer.py /home/dev/ws_iap/src/iap/results/icra27/icra032/install/lib/iap/gate0_analyzer.py
+END installed_analyzer_exact exit=0
+BEGIN installed_launch_exact
+COMMAND cmp launch/test_planner.launch.py /home/dev/ws_iap/src/iap/results/icra27/icra032/install/share/iap/launch/test_planner.launch.py
+END installed_launch_exact exit=0
+BEGIN python_compile
+COMMAND python3 -m py_compile launch/test_planner.launch.py scripts/dev_planner/run_gate0_qualification.py scripts/dev_planner/gate0_analyzer.py
+END python_compile exit=0
+BEGIN ament_index
+COMMAND python3 /home/dev/ws_iap/src/iap/results/icra27/icra032/ament_precheck.py /home/dev/ws_iap/src/iap/results/icra27/icra032/prechecks/attempt_02/ament_environment.json
+END ament_index exit=0
+BEGIN frozen_config
+COMMAND python3 /home/dev/ws_iap/src/iap/results/icra27/icra032/config_precheck.py /home/dev/ws_iap/src/iap/results/icra27/icra032/prechecks/attempt_02/frozen_config.json
+END frozen_config exit=0
+BEGIN ldd_test_run_log_manager
+COMMAND ldd /home/dev/ws_iap/src/iap/results/icra27/icra032/build_iap/test_run_log_manager
+END ldd_test_run_log_manager exit=0
+BEGIN ldd_test_rolling_spatial_advisory_window
+COMMAND ldd /home/dev/ws_iap/src/iap/results/icra27/icra032/build_iap/test_rolling_spatial_advisory_window
+END ldd_test_rolling_spatial_advisory_window exit=0
+BEGIN ldd_test_risk_grid_map
+COMMAND ldd /home/dev/ws_iap/src/iap/results/icra27/icra032/build_iap/test_risk_grid_map
+END ldd_test_risk_grid_map exit=0
+BEGIN ldd_test_p0_risk_grid_runtime
+COMMAND ldd /home/dev/ws_iap/src/iap/results/icra27/icra032/build_ego/test_p0_risk_grid_runtime
+END ldd_test_p0_risk_grid_runtime exit=0
+BEGIN ldd_test_p0_occupancy_epoch_adapter
+COMMAND ldd /home/dev/ws_iap/src/iap/results/icra27/icra032/build_ego/test_p0_occupancy_epoch_adapter
+END ldd_test_p0_occupancy_epoch_adapter exit=0
+BEGIN ldd_test_planning_risk_context
+COMMAND ldd /home/dev/ws_iap/src/iap/results/icra27/icra032/build_ego/test_planning_risk_context
+END ldd_test_planning_risk_context exit=0
+BEGIN linkage_assertion
+COMMAND python3 /home/dev/ws_iap/src/iap/results/icra27/icra032/linkage_precheck.py /home/dev/ws_iap/src/iap/results/icra27/icra032/prechecks/attempt_02/linkage.json /home/dev/ws_iap/src/iap/results/icra27/icra032/install/lib/libiap.so /home/dev/ws_iap/src/iap/results/icra27/icra026/install_plan_env/lib/libplan_env.so /home/dev/ws_iap/src/iap/results/icra27/icra032/install /home/dev/ws_iap/src/iap/results/icra27/icra032/install_ego /home/dev/ws_iap/src/iap/results/icra27/icra026/install_bspline_opt /home/dev/ws_iap/src/iap/results/icra27/icra026/install_path_searching /home/dev/ws_iap/src/iap/results/icra27/icra026/install_plan_env /home/dev/ws_iap/src/iap/results/icra27/icra032/prechecks/attempt_02/ldd_test_run_log_manager.log /home/dev/ws_iap/src/iap/results/icra27/icra032/prechecks/attempt_02/ldd_test_rolling_spatial_advisory_window.log /home/dev/ws_iap/src/iap/results/icra27/icra032/prechecks/attempt_02/ldd_test_risk_grid_map.log /home/dev/ws_iap/src/iap/results/icra27/icra032/prechecks/attempt_02/ldd_test_p0_risk_grid_runtime.log /home/dev/ws_iap/src/iap/results/icra27/icra032/prechecks/attempt_02/ldd_test_p0_occupancy_epoch_adapter.log /home/dev/ws_iap/src/iap/results/icra27/icra032/prechecks/attempt_02/ldd_test_planning_risk_context.log
+END linkage_assertion exit=0
+BEGIN external_log_snapshot
+COMMAND bash -c $'\n  set -u -o pipefail\n  output=$1\n  identity=$2\n  find log -type f -print0 | sort -z | xargs -0 sha256sum > "$output"\n  aggregate=$(sha256sum "$output" | awk "{print \\$1}")\n  count=$(wc -l < "$output")\n  bytes=$(du -sb log | awk "{print \\$1}")\n  printf "aggregate=%s count=%s bytes=%s\\n" "$aggregate" "$count" "$bytes" > "$identity"\n  cat "$identity"\n' _ /home/dev/ws_iap/src/iap/results/icra27/icra032/prechecks/attempt_02/external_log_before_files.sha256 /home/dev/ws_iap/src/iap/results/icra27/icra032/prechecks/attempt_02/external_log_before_identity.txt
+END external_log_snapshot exit=0
+BEGIN process_precheck
+COMMAND bash -c $'\n  set -u -o pipefail\n  task_root=$1\n  declare -A excluded=()\n  ancestor=$$\n  while [ "$ancestor" -gt 1 ] && [ -r "/proc/$ancestor/stat" ]; do\n    excluded[$ancestor]=1\n    ancestor=$(awk "{print \\$4}" "/proc/$ancestor/stat")\n  done\n  matches=0\n  for proc_path in /proc/[0-9]*; do\n    pid=${proc_path#/proc/}\n    [ -n "${excluded[$pid]:-}" ] && continue\n    [ -r "$proc_path/cmdline" ] || continue\n    cmdline=$(tr "\\0" " " < "$proc_path/cmdline" 2>/dev/null) || continue\n    case "$cmdline" in *"$task_root"*) printf "%s\\t%s\\n" "$pid" "$cmdline"; matches=$((matches + 1));; esac\n  done\n  printf "task_process_matches=%d\\n" "$matches"\n  test "$matches" -eq 0\n' _ /home/dev/ws_iap/src/iap/results/icra27/icra032
+END process_precheck exit=0
+ICRA032_PRECHECK_PASS

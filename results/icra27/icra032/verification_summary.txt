@@ -1,0 +1,104 @@
+ICRA-032 / GATE_0B bounded verification summary
+Requirements: IAP-RQ-320, IAP-RQ-321, IAP-RQ-322
+Task-start HEAD: ae5b93768d23c13b412d3df3d14cfa4b3b003ea2
+Outcome: BLOCKED; Gate-0B NOT_QUALIFIED; SUPERVISOR review required
+
+Implemented boundary
+- One refresh owns its captured current/GNSS/LiDAR/occupancy transaction.
+- Normal newer live versions do not revoke coherent captured data; the next
+  refresh observes them and applies rolling invalidation/recompute.
+- Missing/zero/mismatched, stale/invalid, mutable/incomplete, regressed,
+  same-generation-mutated and partial/mixed provenance remains fail closed.
+- Strict startup not_ready rows are counted as pre-refresh observations.
+- Known final-review gap: generation_interval_ms,
+  predictor_lidar_evaluations and predictor_lidar_cache_hits are not checked by
+  the startup predicate. This was discovered after live and was not corrected
+  under the no-post-live-correction rule.
+
+Deterministic evidence
+- Analyzer suite: 40/40 PASS.
+- P0 runtime: 78 active PASS, one existing disabled profile.
+- P0 occupancy adapter: 7/7 PASS.
+- Predictor: 46/46 PASS.
+- Rolling spatial advisory: 23 active PASS, one existing disabled profile.
+- RiskGrid map: 43/43 PASS.
+- Qualification runner and launch CTests: PASS.
+- Exact runtime sigma 0.01 reaches prediction, tau-zero does not grow and
+  positive horizons grow monotonically.
+- Immutable ICRA-031 replay: 34 observations, pre-refresh=1, callback
+  representatives=19, successful generations=0, P0_INPUT_AVAILABILITY_FAIL.
+
+Failed static attempts retained
+- analyzer_red.log: invalid unittest module path, exit 1.
+- analyzer_red_attempt_02.log: expected new behavior RED, exit 1.
+- runtime_green_build.log: missing lambda capture, exit 2.
+- runtime_green.log: brittle coordinate assertion, exit 1.
+- runtime_full_attempt_01.log: 12 obsolete newer-live-abort expectations,
+  exit 1.
+- static/attempt_03: IAP C++ command inherited workspace-default libiap.so;
+  overall CTest exit 8. EGO and Python portions passed.
+- prechecks/attempt_01: every internal check passed, but the outer tee opened
+  before its destination directory and did not retain aggregate stdout.
+- All corresponding corrected attempts passed before live execution.
+
+Build / install / mapping
+- Current IAP and current ego_planner configured, built and installed below
+  results/icra27/icra032.
+- libiap.so SHA-256:
+  6aabef3604d9a4bc89691f392b8788bc1b8f36699e71d6cdd7f355e59ff7ea1c
+- ego_planner_node SHA-256:
+  3a62cc0c27fdf7f089ac0de352e4b684628626ac7ecacf4a55906708f62bc2b3
+- Retained ICRA-026 libplan_env.so SHA-256:
+  360cf23a8d4b1f2add6a5e1f59f47d936039b3ca61aee1bde0a644c542f46447
+- Precheck attempt_02 exact ament and direct linkage PASS with ICRA-032
+  IAP/EGO and intended ICRA-026 plan-env/path-searching/bspline only.
+- Frozen config PASS: CPU, worker 4, run/validation 20/15 seconds,
+  30 x 30 x 6 m, 0.75 m, six horizons, 0.5-second refresh, occupied skip,
+  no bag, no RViz, safety off, P1-P5 disabled, 76,800 logical queries,
+  sigma 0.01 and legacy_iap_rq320_baseline_v1. The sigma/profile are
+  provisional qualification inputs, not empirical calibration.
+
+Unique live commands
+1. python3 scripts/dev_planner/run_gate0_qualification.py --output-root
+   results/icra27/icra032/runs --smoke
+   Guarded invocation count: one. Exit: 0.
+   Config, GPU, dependency, effective-log and capture preflights PASS.
+   GPU: RTX 4070 Ti SUPER; nvidia-smi exit 0; cuInit(0)=0; device_count=1.
+2. python3 scripts/dev_planner/gate0_analyzer.py --gate0-root
+   results/icra27/icra032/runs --output-dir
+   results/icra27/icra032/runs/smoke/analyzer
+   Guarded invocation count: one. Exit: 1.
+
+Formal analyzer truth
+- Gate: P0_EVIDENCE_CONTRACT_FAIL.
+- Integrity: 166/166 valid.
+- Captured observations: 34; callback representatives: 19;
+  pre-refresh observations: 1; malformed callback identities: 0.
+- Successful generations: 5; failed refreshes: 13.
+- Failures: successful generation_interval_ms non-finite, query count,
+  recompute+reuse and horizon-fusion mismatches, snapshot_unavailable,
+  successful provider timing non-finite, non-ok health reason and non-none
+  snapshot failure reason.
+- Raw health SHA-256:
+  e920605ef23e923d5bc1ae19590acfa2ac43a0bbc2e3b293b985890931e62061
+- Raw integrity SHA-256:
+  5b29a344ea8013f6611049bd662a16f46b7b25b2a44757d7257d1f73d1fcfa17
+- Manifest SHA-256:
+  5693dd86542e297da1dd0d6b7e7a595d947d66a51cdaaf4cb0120c6055588228
+- Analysis / summary / CSV SHA-256:
+  260bc614983eb86fd43fc81746af2534ff35aa485d2ab7ba40b0cdb8f67a4e04
+  9c80e178942812635a751934ce35bcf6b5eeacad8ed973e86c9d238974c58c43
+  25a5193ae53ecfd10fcb4528c432edb55da2ef50d576ab79674a3868c797f53c
+
+Postrun
+- External log/ before/after identity is byte-identical:
+  a07fbf7945ec9800e95f6ef49d0d9c8bbdee8e2e8ff1500f919e1037cc4221f0,
+  43,763 files, 15,834,674,969 bytes.
+- Bag count: zero. Task process matches: zero.
+- Protected PDF remains untracked and unchanged:
+  1f07da5631a6551a2f98c02d46fd45bc87f2f1e3e7c14e95f9a7f4a0bac844f6.
+- Initial canonical-hash command named nonexistent gate0_summary.json; it was
+  corrected to actual analyzer filenames without rerunning smoke/analyzer.
+- No live retry, post-live product/test/analyzer correction, tuning,
+  60-second benchmark, campaign, P4/P5 execution, cleanup, Gate promotion or
+  next-task selection occurred.

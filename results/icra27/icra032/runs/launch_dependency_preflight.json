@@ -1,0 +1,216 @@
+{
+  "ament_prefix_path": [
+    "/home/dev/ws_iap/src/iap/results/icra27/icra032/install",
+    "/home/dev/ws_iap/src/iap/results/icra27/icra032/install_ego",
+    "/home/dev/ws_iap/src/iap/results/icra27/icra026/install_bspline_opt",
+    "/home/dev/ws_iap/src/iap/results/icra27/icra026/install_path_searching",
+    "/home/dev/ws_iap/src/iap/results/icra27/icra026/install_plan_env",
+    "/home/dev/ws_iap/install/so3_quadrotor_simulator",
+    "/home/dev/ws_iap/install/uav_utils",
+    "/home/dev/ws_iap/install/ego_planner",
+    "/home/dev/ws_iap/install/bspline_opt",
+    "/home/dev/ws_iap/install/path_searching",
+    "/home/dev/ws_iap/install/iap",
+    "/home/dev/ws_iap/install/traj_utils",
+    "/home/dev/ws_iap/install/so3_control",
+    "/home/dev/ws_iap/install/poscmd_2_odom",
+    "/home/dev/ws_iap/install/odom_visualization",
+    "/home/dev/ws_iap/install/local_sensing",
+    "/home/dev/ws_iap/install/quadrotor_msgs",
+    "/home/dev/ws_iap/install/pose_utils",
+    "/home/dev/ws_iap/install/plan_env",
+    "/home/dev/ws_iap/install/mockamap",
+    "/home/dev/ws_iap/install/map_generator",
+    "/home/dev/ws_iap/install/gnss_sim",
+    "/home/dev/ws_iap/install/gnss_comm",
+    "/home/dev/ws_iap/install/cmake_utils",
+    "/root/ros2_ws/install/glim_ros",
+    "/root/ros2_ws/install/glim",
+    "/opt/ros/jazzy"
+  ],
+  "ament_prefix_path_raw": "/home/dev/ws_iap/src/iap/results/icra27/icra032/install:/home/dev/ws_iap/src/iap/results/icra27/icra032/install_ego:/home/dev/ws_iap/src/iap/results/icra27/icra026/install_bspline_opt:/home/dev/ws_iap/src/iap/results/icra27/icra026/install_path_searching:/home/dev/ws_iap/src/iap/results/icra27/icra026/install_plan_env:/home/dev/ws_iap/install/so3_quadrotor_simulator:/home/dev/ws_iap/install/uav_utils:/home/dev/ws_iap/install/ego_planner:/home/dev/ws_iap/install/bspline_opt:/home/dev/ws_iap/install/path_searching:/home/dev/ws_iap/install/iap:/home/dev/ws_iap/install/traj_utils:/home/dev/ws_iap/install/so3_control:/home/dev/ws_iap/install/poscmd_2_odom:/home/dev/ws_iap/install/odom_visualization:/home/dev/ws_iap/install/local_sensing:/home/dev/ws_iap/install/quadrotor_msgs:/home/dev/ws_iap/install/pose_utils:/home/dev/ws_iap/install/plan_env:/home/dev/ws_iap/install/mockamap:/home/dev/ws_iap/install/map_generator:/home/dev/ws_iap/install/gnss_sim:/home/dev/ws_iap/install/gnss_comm:/home/dev/ws_iap/install/cmake_utils:/root/ros2_ws/install/glim_ros:/root/ros2_ws/install/glim:/opt/ros/jazzy",
+  "checked_utc": "2026-08-23T14:18:43Z",
+  "expected_task_local_prefixes": {
+    "ego_planner": "/home/dev/ws_iap/src/iap/results/icra27/icra032/install_ego",
+    "iap": "/home/dev/ws_iap/src/iap/results/icra27/icra032/install"
+  },
+  "failure_reason": "",
+  "failure_reasons": [],
+  "launch_dependencies_ready": true,
+  "packages": [
+    {
+      "check": {
+        "api": "ament_index_python.packages.get_package_prefix",
+        "arguments": [
+          "iap"
+        ],
+        "exception": "",
+        "result": "/home/dev/ws_iap/src/iap/results/icra27/icra032/install"
+      },
+      "expected_prefix": "/home/dev/ws_iap/src/iap/results/icra27/icra032/install",
+      "failure_reasons": [],
+      "in_ament_prefix_path": true,
+      "matches_expected_prefix": true,
+      "package": "iap",
+      "prefix_exists": true,
+      "ready": true,
+      "resolved_prefix": "/home/dev/ws_iap/src/iap/results/icra27/icra032/install"
+    },
+    {
+      "check": {
+        "api": "ament_index_python.packages.get_package_prefix",
+        "arguments": [
+          "ego_planner"
+        ],
+        "exception": "",
+        "result": "/home/dev/ws_iap/src/iap/results/icra27/icra032/install_ego"
+      },
+      "expected_prefix": "/home/dev/ws_iap/src/iap/results/icra27/icra032/install_ego",
+      "failure_reasons": [],
+      "in_ament_prefix_path": true,
+      "matches_expected_prefix": true,
+      "package": "ego_planner",
+      "prefix_exists": true,
+      "ready": true,
+      "resolved_prefix": "/home/dev/ws_iap/src/iap/results/icra27/icra032/install_ego"
+    },
+    {
+      "check": {
+        "api": "ament_index_python.packages.get_package_prefix",
+        "arguments": [
+          "local_sensing"
+        ],
+        "exception": "",
+        "result": "/home/dev/ws_iap/install/local_sensing"
+      },
+      "expected_prefix": "",
+      "failure_reasons": [],
+      "in_ament_prefix_path": true,
+      "matches_expected_prefix": null,
+      "package": "local_sensing",
+      "prefix_exists": true,
+      "ready": true,
+      "resolved_prefix": "/home/dev/ws_iap/install/local_sensing"
+    },
+    {
+      "check": {
+        "api": "ament_index_python.packages.get_package_prefix",
+        "arguments": [
+          "odom_visualization"
+        ],
+        "exception": "",
+        "result": "/home/dev/ws_iap/install/odom_visualization"
+      },
+      "expected_prefix": "",
+      "failure_reasons": [],
+      "in_ament_prefix_path": true,
+      "matches_expected_prefix": null,
+      "package": "odom_visualization",
+      "prefix_exists": true,
+      "ready": true,
+      "resolved_prefix": "/home/dev/ws_iap/install/odom_visualization"
+    },
+    {
+      "check": {
+        "api": "ament_index_python.packages.get_package_prefix",
+        "arguments": [
+          "poscmd_2_odom"
+        ],
+        "exception": "",
+        "result": "/home/dev/ws_iap/install/poscmd_2_odom"
+      },
+      "expected_prefix": "",
+      "failure_reasons": [],
+      "in_ament_prefix_path": true,
+      "matches_expected_prefix": null,
+      "package": "poscmd_2_odom",
+      "prefix_exists": true,
+      "ready": true,
+      "resolved_prefix": "/home/dev/ws_iap/install/poscmd_2_odom"
+    },
+    {
+      "check": {
+        "api": "ament_index_python.packages.get_package_prefix",
+        "arguments": [
+          "gnss_sim"
+        ],
+        "exception": "",
+        "result": "/home/dev/ws_iap/install/gnss_sim"
+      },
+      "expected_prefix": "",
+      "failure_reasons": [],
+      "in_ament_prefix_path": true,
+      "matches_expected_prefix": null,
+      "package": "gnss_sim",
+      "prefix_exists": true,
+      "ready": true,
+      "resolved_prefix": "/home/dev/ws_iap/install/gnss_sim"
+    },
+    {
+      "check": {
+        "api": "ament_index_python.packages.get_package_prefix",
+        "arguments": [
+          "so3_quadrotor_simulator"
+        ],
+        "exception": "",
+        "result": "/home/dev/ws_iap/install/so3_quadrotor_simulator"
+      },
+      "expected_prefix": "",
+      "failure_reasons": [],
+      "in_ament_prefix_path": true,
+      "matches_expected_prefix": null,
+      "package": "so3_quadrotor_simulator",
+      "prefix_exists": true,
+      "ready": true,
+      "resolved_prefix": "/home/dev/ws_iap/install/so3_quadrotor_simulator"
+    },
+    {
+      "check": {
+        "api": "ament_index_python.packages.get_package_prefix",
+        "arguments": [
+          "so3_control"
+        ],
+        "exception": "",
+        "result": "/home/dev/ws_iap/install/so3_control"
+      },
+      "expected_prefix": "",
+      "failure_reasons": [],
+      "in_ament_prefix_path": true,
+      "matches_expected_prefix": null,
+      "package": "so3_control",
+      "prefix_exists": true,
+      "ready": true,
+      "resolved_prefix": "/home/dev/ws_iap/install/so3_control"
+    },
+    {
+      "check": {
+        "api": "ament_index_python.packages.get_package_prefix",
+        "arguments": [
+          "rclcpp_components"
+        ],
+        "exception": "",
+        "result": "/opt/ros/jazzy"
+      },
+      "expected_prefix": "",
+      "failure_reasons": [],
+      "in_ament_prefix_path": true,
+      "matches_expected_prefix": null,
+      "package": "rclcpp_components",
+      "prefix_exists": true,
+      "ready": true,
+      "resolved_prefix": "/opt/ros/jazzy"
+    }
+  ],
+  "required_packages": [
+    "iap",
+    "ego_planner",
+    "local_sensing",
+    "odom_visualization",
+    "poscmd_2_odom",
+    "gnss_sim",
+    "so3_quadrotor_simulator",
+    "so3_control",
+    "rclcpp_components"
+  ],
+  "schema_version": "gate0_launch_dependency_preflight_v1"
+}

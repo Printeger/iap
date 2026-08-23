@@ -1,0 +1,5 @@
+[ 44%] Built target gtest
+[ 33%] Built target gtest_main
+[ 55%] Building CXX object CMakeFiles/test_p0_risk_grid_runtime.dir/src/p0_risk_grid_runtime.cpp.o
+[ 66%] Linking CXX executable test_p0_risk_grid_runtime
+[100%] Built target test_p0_risk_grid_runtime

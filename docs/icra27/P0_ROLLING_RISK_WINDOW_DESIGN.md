@@ -152,11 +152,13 @@ generation；任何截断、重复折叠异常、非有限 centre 或容量溢�
 
 phase 1 同时给 integrity-derived prior 增加单调非零 `prior_source_generation`。P0 在同一
 `health_state_mutex_` 临界区捕获 current integrity、由其导出的 prior 和 generation；每个
-integrity callback 都推进 live generation。`RiskGridMap` 的 source validator 在 provider
-前和 immutable publication 前各运行一次，同时比较 occupancy generation 与 prior
-generation。任一 source 为零、变化或处于更新中都保留旧 snapshot，并分别报告
-`occupancy_generation_changed` 或 `prior_generation_changed`。失败原因在 Module 内使用 enum/
-常量表示，仅在 health/evidence boundary 序列化为字符串，避免多个 caller 自造词汇。
+integrity callback 都推进 live generation。current/prior、GNSS epoch、LiDAR immutable
+vectors 和 materialized occupancy epoch 共同组成一次 refresh 的 captured transaction。
+`RiskGridMap` 的 source validator 在 provider 前和 immutable publication 前各运行一次：
+它拒绝零代、捕获内部不一致、同版本 owner/stamp 替换、版本回退或不完整 source，但 live
+callback 在计算期间发布的更高版本不会追溯撤销仍由 refresh 持有的 immutable 捕获版本。
+失败原因在 Module 内使用 enum/常量表示，仅在 health/evidence boundary 序列化为字符串，
+避免多个 caller 自造词汇。
 
 这是 phase-1 的依赖与一致性 Seam。它先修复 map-LOS 和 covariance-growth 语义，仍然执行
 完整 generation 构造；不得在此阶段加入 rolling window、cross-refresh cache 或
@@ -204,14 +206,20 @@ struct OccupancyDelta {
 
 一次 update 必须：
 
-1. 捕获所有输入 source version；
+1. 在各 source 自己的同步边界内捕获非零 version、原始 stamp 和 immutable owner/copy，形成
+   单一 captured transaction；
 2. 在非 active generation 上计算 dirty spatial evidence 和全部 horizon risk；
-3. 计算结束时重新验证 source version；
-4. 只有所有 voxel、stamp、version 和 health 自洽时才原子发布新 generation；
-5. 若 provider 失败、source 在计算中变化或出现混合 version，不发布部分结果，保留旧
-   snapshot，并按现有 stale/health 语义 fail closed。
+3. 计算结束时重新验证 captured provenance：同版本 owner/stamp 必须仍一致，live version
+   不得回退；更高 live version 只属于下一 refresh，不替换本次捕获内容；
+4. 只有所有 voxel、stamp、captured version 和 health 自洽时才原子发布新 generation；
+5. 下一 refresh 捕获当时最新版本，再按第 5 节规则执行 rolling reuse、TTL retention 或
+   invalidation/recompute；
+6. 若 provider 失败、captured source 不完整/可变、版本回退或出现部分/混合 publication，
+   不发布部分结果，保留旧 snapshot，并按现有 stale/health 语义 fail closed。
 
 增量更新指计算量增量，不意味着向消费者暴露半张新图和半张旧图。
+这一 captured/live 版本区分只完成 ICRA-032 授权的事务语义修复，不代表
+`IAP-RQ-322` 已全部实现或完成资格验证。
 
 ## 8. 为什么不使用 iKD-tree 作为 risk grid
 

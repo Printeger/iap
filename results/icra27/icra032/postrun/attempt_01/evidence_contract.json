@@ -1,0 +1,26 @@
+{
+  "analyzer_failures": [
+    "successful_generation_timing_nonfinite:generation_interval_ms",
+    "refresh_query_count_mismatch",
+    "spatial_recompute_plus_reuse_mismatch",
+    "horizon_fusion_mismatch",
+    "snapshot_unavailable",
+    "successful_generation_timing_nonfinite:provider_batch_duration_ms",
+    "health_reason_not_ok",
+    "snapshot_failure_reason_not_none"
+  ],
+  "analyzer_gate": "P0_EVIDENCE_CONTRACT_FAIL",
+  "bag_count": 0,
+  "evidence_correction": "initial canonical-hash command named nonexistent gate0_summary.json; no live command rerun; corrected to actual analyzer filenames",
+  "external_log_unchanged": true,
+  "failed_refresh_count": 13,
+  "malformed_callback_identity_count": 0,
+  "manifest_failures": [],
+  "pdf_sha256": "1f07da5631a6551a2f98c02d46fd45bc87f2f1e3e7c14e95f9a7f4a0bac844f6",
+  "postrun_ready": true,
+  "pre_refresh_observation_count": 1,
+  "smoke_analyzer_exit_code": 1,
+  "smoke_runner_exit_code": 0,
+  "successful_generation_count": 5,
+  "task_process_matches": 0
+}

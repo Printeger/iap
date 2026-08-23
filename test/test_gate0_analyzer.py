@@ -1090,6 +1090,95 @@ class Gate0AnalyzerTest(unittest.TestCase):
         self.assertEqual(rows[-1]["refresh_callback_end_steady_s"], "")
         self.assertEqual(rows[-1]["failed_refresh"], 1)
 
+    def test_p0_zero_generation_not_ready_without_refresh_identity_is_startup(self):
+        startup = {
+            "generation_id": 0,
+            "refresh_callback_start_stamp_s": None,
+            "refresh_callback_start_steady_s": None,
+            "refresh_callback_end_stamp_s": None,
+            "refresh_callback_end_steady_s": None,
+            "refresh_query_count": 0,
+            "ready": False,
+            "reason": "not_ready",
+        }
+
+        rows, summary = MODULE.analyze_p0_messages([startup], protocol="smoke")
+
+        self.assertEqual(rows, [])
+        self.assertEqual(summary["captured_observation_count"], 1)
+        self.assertEqual(summary["pre_refresh_observation_count"], 1)
+        self.assertEqual(summary["malformed_callback_identity_count"], 0)
+        self.assertEqual(summary["successful_generation_count"], 0)
+        self.assertEqual(summary["failed_refresh_count"], 0)
+        self.assertEqual(summary["gate"], "P0_INPUT_AVAILABILITY_FAIL")
+
+    def test_p0_startup_observation_does_not_contaminate_valid_generation(self):
+        startup = {
+            "generation_id": 0,
+            "refresh_callback_start_stamp_s": None,
+            "refresh_callback_start_steady_s": None,
+            "refresh_callback_end_stamp_s": None,
+            "refresh_callback_end_steady_s": None,
+            "refresh_query_count": 0,
+            "ready": False,
+            "reason": "not_ready",
+        }
+
+        rows, summary = MODULE.analyze_p0_messages(
+            [startup, valid_p0_message()], protocol="smoke"
+        )
+
+        self.assertEqual([row["generation_id"] for row in rows], [1])
+        self.assertEqual(summary["pre_refresh_observation_count"], 1)
+        self.assertEqual(summary["malformed_callback_identity_count"], 0)
+        self.assertEqual(summary["successful_generation_count"], 1)
+        self.assertEqual(summary["failed_refresh_count"], 0)
+        self.assertEqual(summary["gate"], "PASS")
+
+    def test_p0_incomplete_refresh_claim_without_end_identity_is_malformed(self):
+        incomplete = valid_p0_message(
+            generation_id=0,
+            refresh_callback_start_stamp_s=1.0,
+            refresh_callback_start_steady_s=1.0,
+            refresh_callback_end_stamp_s=None,
+            refresh_callback_end_steady_s=None,
+            ready=False,
+            reason="not_ready",
+        )
+
+        rows, summary = MODULE.analyze_p0_messages(
+            [incomplete], protocol="smoke"
+        )
+
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(summary["pre_refresh_observation_count"], 0)
+        self.assertEqual(summary["malformed_callback_identity_count"], 1)
+        self.assertEqual(summary["failed_refresh_count"], 1)
+        self.assertEqual(summary["gate"], "P0_EVIDENCE_CONTRACT_FAIL")
+
+    def test_icra031_health_replay_only_reclassifies_startup_observation(self):
+        replay_path = (
+            Path(__file__).resolve().parents[1]
+            / "results"
+            / "icra27"
+            / "icra031"
+            / "runs"
+            / "smoke"
+            / "risk_grid_health.jsonl"
+        )
+        messages = [
+            json.loads(line)
+            for line in replay_path.read_text().splitlines()
+            if line.strip()
+        ]
+
+        _, summary = MODULE.analyze_p0_messages(messages, protocol="smoke")
+
+        self.assertEqual(summary["pre_refresh_observation_count"], 1)
+        self.assertEqual(summary["malformed_callback_identity_count"], 0)
+        self.assertEqual(summary["successful_generation_count"], 0)
+        self.assertNotEqual(summary["gate"], "PASS")
+
     def test_p0_success_claim_requires_strict_complete_evidence(self):
         defects = (
             (

@@ -1,0 +1,49 @@
+EEEE
+======================================================================
+ERROR: test_gate0_analyzer (unittest.loader._FailedTest.test_gate0_analyzer)
+----------------------------------------------------------------------
+ImportError: Failed to import test module: test_gate0_analyzer
+Traceback (most recent call last):
+  File "/usr/lib/python3.12/unittest/loader.py", line 137, in loadTestsFromName
+    module = __import__(module_name)
+             ^^^^^^^^^^^^^^^^^^^^^^^
+ModuleNotFoundError: No module named 'test.test_gate0_analyzer'
+
+
+======================================================================
+ERROR: test_gate0_analyzer (unittest.loader._FailedTest.test_gate0_analyzer)
+----------------------------------------------------------------------
+ImportError: Failed to import test module: test_gate0_analyzer
+Traceback (most recent call last):
+  File "/usr/lib/python3.12/unittest/loader.py", line 137, in loadTestsFromName
+    module = __import__(module_name)
+             ^^^^^^^^^^^^^^^^^^^^^^^
+ModuleNotFoundError: No module named 'test.test_gate0_analyzer'
+
+
+======================================================================
+ERROR: test_gate0_analyzer (unittest.loader._FailedTest.test_gate0_analyzer)
+----------------------------------------------------------------------
+ImportError: Failed to import test module: test_gate0_analyzer
+Traceback (most recent call last):
+  File "/usr/lib/python3.12/unittest/loader.py", line 137, in loadTestsFromName
+    module = __import__(module_name)
+             ^^^^^^^^^^^^^^^^^^^^^^^
+ModuleNotFoundError: No module named 'test.test_gate0_analyzer'
+
+
+======================================================================
+ERROR: test_gate0_analyzer (unittest.loader._FailedTest.test_gate0_analyzer)
+----------------------------------------------------------------------
+ImportError: Failed to import test module: test_gate0_analyzer
+Traceback (most recent call last):
+  File "/usr/lib/python3.12/unittest/loader.py", line 137, in loadTestsFromName
+    module = __import__(module_name)
+             ^^^^^^^^^^^^^^^^^^^^^^^
+ModuleNotFoundError: No module named 'test.test_gate0_analyzer'
+
+
+----------------------------------------------------------------------
+Ran 4 tests in 0.000s
+
+FAILED (errors=4)

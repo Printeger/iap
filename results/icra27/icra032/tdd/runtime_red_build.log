@@ -1,0 +1,12 @@
+[ 22%] Building CXX object gtest/CMakeFiles/gtest.dir/src/gtest-all.cc.o
+[ 22%] Building CXX object gtest/CMakeFiles/gtest_main.dir/src/gtest_main.cc.o
+[ 33%] Linking CXX static library libgtest_main.a
+[ 33%] Built target gtest_main
+[ 44%] Linking CXX static library libgtest.a
+[ 44%] Built target gtest
+[ 66%] Building CXX object CMakeFiles/test_p0_risk_grid_runtime.dir/src/p0_risk_grid_runtime.cpp.o
+[ 66%] Building CXX object CMakeFiles/test_p0_risk_grid_runtime.dir/test/test_p0_risk_grid_runtime.cpp.o
+[ 77%] Building CXX object CMakeFiles/test_p0_risk_grid_runtime.dir/src/p0_occupancy_epoch_adapter.cpp.o
+[ 88%] Building CXX object CMakeFiles/test_p0_risk_grid_runtime.dir/src/safety_rviz_publisher.cpp.o
+[100%] Linking CXX executable test_p0_risk_grid_runtime
+[100%] Built target test_p0_risk_grid_runtime

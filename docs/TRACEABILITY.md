@@ -1,5 +1,24 @@
 # Traceability Matrix (IAP)
 
+## 2026-08-23 ICRA-032 immutable captured-source publication
+
+| Req ID | Requirement/evidence seam | Implementation and focused evidence | Status |
+|---|---|---|---|
+| IAP-RQ-320 / IAP-RQ-321 / IAP-RQ-322 | A coherent captured refresh transaction must survive normal newer live source publication without mixing versions | `p0_risk_grid_runtime.cpp` terminal validation retains captured nonzero/internal owner, generation and finite stamp requirements; same-generation mutation and regression fail, while newer current/GNSS/LiDAR/occupancy versions cannot revoke the captured transaction and are applied by the next refresh's invalidation/recompute. Production-shaped all-source in-flight and focused source-race/rollback tests cover the boundary | **IMPLEMENTED / deterministic evidence only; full IAP-RQ-322 not claimed** |
+| IAP-RQ-320 | Exact provisional sigma `0.01 m/sqrt(s)` must execute the runtime prediction algebra | C++ regression uses exact `0.01`, reaches prediction, proves tau-zero equality to the reference covariance and strict monotonic growth at positive horizons | **VERIFIED / provisional baseline, not empirical calibration** |
+| IAP-RQ-320 / IAP-RQ-322 | Startup observation classification must not weaken completed-callback evidence | Analyzer counts strict generation-zero/no-start/no-end `not_ready` rows as pre-refresh observations and its 40 tests plus immutable ICRA-031 replay pass. Final review found three omitted possible work claims (`generation_interval_ms`, LiDAR evaluations/cache hits), which can still be misclassified. The finding occurred after the one-shot stop and was not repaired | **PARTIAL / BLOCKED / no post-live correction** |
+| IAP-RQ-320 / IAP-RQ-321 / IAP-RQ-322 | Current build, tests, frozen config and linkage must pass before live use | Current IAP/EGO build/install pass under ICRA-032. Active counts pass: P0 runtime 78, adapter 7, Predictor 46, rolling 23 and RiskGrid 43; runner/launch pass. Ament/direct linkage resolve ICRA-032 IAP/EGO and intended ICRA-026 plan-env/path/bspline only. Frozen CPU, worker 4, 20/15 s, 30 x 30 x 6 m, 0.75 m, six horizons, 0.5 s, occupied skip, no bag/RViz, safety off and P1–P5 disabled contract passes | **PASS / all failed static attempts disclosed** |
+| IAP-RQ-320 / IAP-RQ-322 | Run exactly one guarded replacement smoke and one strict analyzer after preflight | Config, GPU (`nvidia-smi`, `cuInit(0)=0`, one device), dependency, task-local log and capture readiness pass; sole runner exits 0. Sole analyzer exits 1: 166/166 integrity reports are valid and five final generations succeed, but 13 failed refreshes and timing/work/snapshot inconsistencies produce `P0_EVIDENCE_CONTRACT_FAIL` | **BLOCKED / no live retry / Gate-0B NOT_QUALIFIED** |
+| IAP-RQ-320 / IAP-RQ-322 | Outputs and terminal state must remain repository-local and immutable | Runtime/analyzer evidence is below ICRA-032; no bag exists; external `log/` remains byte-identical at `a07fbf79…4221f0`, 43,763 files and 15,834,674,969 bytes; task-process matches are zero; protected PDF hash remains `1f07da56…44f6` | **PASS** |
+
+Exact TDD/static/precheck attempts, replay, one-shot guards/exits, live evidence
+and postrun audit are retained below `results/icra27/icra032/`. An initial
+postrun canonical-hash operand used a nonexistent analyzer filename and was
+corrected to the actual outputs without rerunning smoke or analyzer. No
+post-live product correction, tuning, benchmark, P4/P5 execution, cleanup,
+Gate promotion or next-task selection occurred. Gate-0B remains
+`NOT_QUALIFIED` pending Supervisor review.
+
 ## 2026-08-23 ICRA-031 covariance-growth qualification bind
 
 | Req ID | Requirement/evidence seam | Implementation and focused evidence | Status |

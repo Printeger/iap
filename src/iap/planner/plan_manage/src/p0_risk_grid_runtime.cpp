@@ -1193,7 +1193,8 @@ void P0RiskGridRuntime::refreshTimerCallback() {
         config_.predictor_sigma_grow_m_sqrt_s;
     const iap::PredictorSpatialSourceUsage source_projection =
         iap::predictorSpatialSourceUsage(predictor_params);
-    validate_gnss_spatial_source = source_projection.gnss;
+    validate_gnss_spatial_source =
+        source_projection.gnss && snapshot.has_epoch;
     validate_lidar_spatial_source = source_projection.lidar;
     validate_lidar_legacy_source = source_projection.legacy_lidar;
     active_gnss_occupancy_content =
@@ -1386,48 +1387,87 @@ void P0RiskGridRuntime::refreshTimerCallback() {
          captured_prior_generation, validate_gnss_spatial_source,
          validate_lidar_spatial_source, validate_lidar_legacy_source,
          captured_predictor_sources, captured_lidar_generation,
-         captured_lidar_map_points, captured_lidar_fim_primitives]() {
+         captured_lidar_stamp, captured_lidar_map_points,
+         captured_lidar_fim_primitives]() {
           if (!captured_occupancy_source_owner ||
               !live_occupancy_source_owner || !live_occupancy_generation ||
-              !sameSharedOwner(captured_occupancy_source_owner,
-                               live_occupancy_source_owner()) ||
-              live_occupancy_generation() !=
-                  captured_occupancy_generation) {
+              captured_occupancy_generation == 0u) {
+            return iap::RiskGridSourceValidation::
+                OCCUPANCY_GENERATION_CHANGED;
+          }
+          const uint64_t live_occupancy_version =
+              live_occupancy_generation();
+          if (live_occupancy_version == 0u ||
+              live_occupancy_version < captured_occupancy_generation ||
+              (live_occupancy_version == captured_occupancy_generation &&
+               !sameSharedOwner(captured_occupancy_source_owner,
+                                live_occupancy_source_owner()))) {
             return iap::RiskGridSourceValidation::
                 OCCUPANCY_GENERATION_CHANGED;
           }
           uint64_t live_prior_generation = 0;
           uint64_t live_gnss_epoch_generation = 0;
+          bool live_gnss_epoch_available = false;
+          double live_current_stamp =
+              std::numeric_limits<double>::quiet_NaN();
+          double live_gnss_epoch_stamp =
+              std::numeric_limits<double>::quiet_NaN();
           {
             std::lock_guard<std::mutex> lock(health_state_mutex_);
             live_prior_generation = latest_current_generation_;
             live_gnss_epoch_generation = latest_gnss_epoch_generation_;
+            live_gnss_epoch_available = latest_epoch_.has_value();
+            live_current_stamp = latest_current_.stamp;
+            live_gnss_epoch_stamp = latest_epoch_
+                ? latest_epoch_->stamp
+                : std::numeric_limits<double>::quiet_NaN();
           }
           if (captured_prior_generation == 0u ||
               captured_predictor_sources.current_generation == 0u ||
               captured_prior_generation !=
                   captured_predictor_sources.current_generation ||
-              live_prior_generation != captured_prior_generation) {
+              !std::isfinite(captured_predictor_sources.current_stamp) ||
+              live_prior_generation < captured_prior_generation ||
+              (live_prior_generation == captured_prior_generation &&
+               live_current_stamp !=
+                   captured_predictor_sources.current_stamp)) {
             return iap::RiskGridSourceValidation::PRIOR_GENERATION_CHANGED;
           }
           if (validate_gnss_spatial_source) {
-            if (live_gnss_epoch_generation !=
-                captured_predictor_sources.gnss_epoch_generation) {
+            if (captured_predictor_sources.gnss_epoch_generation == 0u ||
+                !std::isfinite(
+                    captured_predictor_sources.gnss_epoch_stamp) ||
+                live_gnss_epoch_generation <
+                    captured_predictor_sources.gnss_epoch_generation ||
+                (live_gnss_epoch_generation >
+                     captured_predictor_sources.gnss_epoch_generation &&
+                 (!live_gnss_epoch_available ||
+                  !std::isfinite(live_gnss_epoch_stamp))) ||
+                (live_gnss_epoch_generation ==
+                     captured_predictor_sources.gnss_epoch_generation &&
+                 live_gnss_epoch_stamp !=
+                     captured_predictor_sources.gnss_epoch_stamp)) {
               return iap::RiskGridSourceValidation::
                   PREDICTOR_SPATIAL_SOURCE_CHANGED;
             }
           }
           if (validate_lidar_spatial_source) {
             std::lock_guard<std::mutex> lock(lidar_predictor_input_mutex_);
-            if (latest_lidar_generation_ != captured_lidar_generation ||
-                !sameSharedOwner(latest_lidar_fim_primitives_,
-                                 captured_lidar_fim_primitives)) {
+            if (captured_lidar_generation == 0u ||
+                !captured_lidar_fim_primitives ||
+                latest_lidar_generation_ < captured_lidar_generation ||
+                (latest_lidar_generation_ == captured_lidar_generation &&
+                 (!sameSharedOwner(latest_lidar_fim_primitives_,
+                                   captured_lidar_fim_primitives) ||
+                  latest_lidar_stamp_ != captured_lidar_stamp))) {
               return iap::RiskGridSourceValidation::
                   PREDICTOR_SPATIAL_SOURCE_CHANGED;
             }
             if (validate_lidar_legacy_source &&
-                !sameSharedOwner(latest_lidar_map_points_,
-                                 captured_lidar_map_points)) {
+                (!captured_lidar_map_points ||
+                 (latest_lidar_generation_ == captured_lidar_generation &&
+                  !sameSharedOwner(latest_lidar_map_points_,
+                                   captured_lidar_map_points)))) {
               return iap::RiskGridSourceValidation::
                   PREDICTOR_SPATIAL_SOURCE_CHANGED;
             }

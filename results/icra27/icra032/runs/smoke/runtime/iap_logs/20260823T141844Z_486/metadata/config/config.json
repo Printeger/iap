@@ -1,0 +1,28 @@
+{
+  "global": {
+    "config_global_mapping": "../sim_ego/config_global_mapping_cpu.json",
+    "config_gnss": "config_gnss.json",
+    "config_logging": "../sim_ego/config_logging.json",
+    "config_odometry": "config_odometry_cpu.json",
+    "config_path": "/home/dev/ws_iap/src/iap/results/icra27/icra032/runs/smoke/runtime/iap_sim_demo11_test_planner_3506407_1787494724193/sim_demo11",
+    "config_preprocess": "../sim_ego/config_sensors.json",
+    "config_ros": "config_ros.json",
+    "config_sensors": "../sim_ego/config_sensors.json",
+    "config_sub_mapping": "../sim_ego/config_sub_mapping_cpu.json",
+    "config_viewer": "../sim_ego/config_viewer.json",
+    "enable_timing_csv": true,
+    "timing_csv_path": "/home/dev/ws_iap/src/iap/results/icra27/icra032/runs/smoke/runtime/iap_logs/profiling/iap_timing.csv"
+  },
+  "logging": {
+    "log_dir": "/home/dev/ws_iap/src/iap/results/icra27/icra032/runs/smoke/runtime/iap_logs",
+    "max_file_size_kb": 8192,
+    "max_files": 10,
+    "rotate_logs": true,
+    "save_logs": true
+  },
+  "meta": {
+    "base_frame_id": "imu",
+    "imu_frame_id": "imu",
+    "lidar_frame_id": "lidar"
+  }
+}

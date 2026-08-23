@@ -3,6 +3,43 @@
 > 规则：任何代码改动必须在这里记录，并包含 IAP-RQ-XXX。
 
 ## Unreleased
+- fix(icra-032-immutable-source-publication): IAP-RQ-320 / IAP-RQ-321 / IAP-RQ-322 — validate one captured P0 refresh transaction by its immutable current/GNSS/LiDAR/occupancy provenance rather than requiring a normal newer live version to remain equal. Captured zero, inconsistent, stale, invalid, regressed, mutable/incomplete or same-generation owner/stamp mutation still fails closed; a coherent captured version may publish once while newer versions wait for the next refresh's rolling invalidation/recompute. Production-shaped tests advance all active sources in flight without mixed-version reads, retain rollback/negative coverage, and prove exact runtime sigma `0.01` reaches prediction with tau-zero equality and monotonic positive-horizon growth. The rolling-window design records this distinction without claiming full IAP-RQ-322 completion.
+  - `gate0_analyzer.py` now counts a strict generation-zero `not_ready` row with no callback identity or work claim as `pre_refresh_observation_count`, while any partial start/end/work/generation claim remains malformed. Analyzer 40/40, P0 runtime 78/78 active tests (one existing disabled), occupancy adapter 7/7, Predictor 46/46, rolling 23/23 active (one existing disabled), RiskGrid 43/43, runner and launch suites pass. Immutable ICRA-031 replay reports 34 observations, one pre-refresh row, 19 failed callback representatives, zero successful generations and remains `P0_INPUT_AVAILABILITY_FAIL`.
+  - Current IAP/EGO configure, build and install pass below ICRA-032; ament/direct linkage resolve only ICRA-032 IAP/EGO plus the intended ICRA-026 dependencies. Static failures are retained: the initial analyzer command used an invalid unittest module path; the first runtime GREEN build omitted one lambda capture; its next run used a brittle coordinate assertion; the first full runtime run exposed 12 obsolete newer-live-abort expectations; static attempt 03 inherited the wrong `libiap.so`; and precheck attempt 01 lost only its outer `tee` aggregate because the directory did not yet exist. Corrected static/precheck attempts all pass before live execution.
+  - Exactly one guarded 20-second P0 smoke ran after frozen CPU/worker-4/20–15 s/76,800-query/sigma-profile, GPU, dependency, repository-local log and capture preflights passed; runner exit is 0. The sole analyzer exits 1 with `P0_EVIDENCE_CONTRACT_FAIL`: 166/166 integrity reports are valid and immutable publication now yields five successful generations, but 13 failed refresh representatives plus successful-generation timing/work inconsistencies violate the strict contract (`snapshot_unavailable`, non-finite interval/provider timing, query/recompute/reuse/fusion mismatches and failed health/snapshot reasons). Startup evidence reports one pre-refresh observation and zero malformed identities. Final Builder review found the startup predicate still omits three possible work claims (`generation_interval_ms`, LiDAR evaluations/cache hits); because this was found after the one-shot boundary, the analyzer/test gap is disclosed and left unchanged under the no-post-live-correction rule. External `log/` identity is unchanged, no bag or task process remains, and the protected PDF hash is unchanged. One postrun hash command named a nonexistent output and was corrected without rerunning live work. No smoke/analyzer retry, tuning, 60-second benchmark, campaign, P4/P5 work, cleanup or Gate promotion occurred. The `0.01 m/sqrt(s)` profile remains provisional, not empirically calibrated. **ICRA-032 is BLOCKED; Gate-0B remains NOT_QUALIFIED pending Supervisor review.**
+
+Repository-local deterministic reproduction for ICRA-032 (the historical
+one-shot smoke/analyzer must not be rerun):
+
+```bash
+repo_root="$(pwd)"
+task_root="$repo_root/results/icra27/icra032"
+cmake -S "$repo_root" -B "$task_root/build_iap" \
+  -DCMAKE_BUILD_TYPE=RelWithDebInfo \
+  -DCMAKE_INSTALL_PREFIX="$task_root/install"
+cmake --build "$task_root/build_iap" -j2
+cmake --install "$task_root/build_iap"
+
+cmake -S "$repo_root/src/iap/planner/plan_manage" \
+  -B "$task_root/build_ego" \
+  -DCMAKE_BUILD_TYPE=RelWithDebInfo \
+  -DCMAKE_INSTALL_PREFIX="$task_root/install_ego" \
+  -Diap_DIR="$task_root/install/share/iap" \
+  -Dplan_env_DIR="$repo_root/results/icra27/icra026/install_plan_env/share/plan_env/cmake" \
+  -Dpath_searching_DIR="$repo_root/results/icra27/icra026/install_path_searching/share/path_searching/cmake" \
+  -Dbspline_opt_DIR="$repo_root/results/icra27/icra026/install_bspline_opt/share/bspline_opt/cmake"
+cmake --build "$task_root/build_ego" -j2
+cmake --install "$task_root/build_ego"
+
+source /opt/ros/jazzy/setup.bash
+export LD_LIBRARY_PATH="$task_root/install/lib:$task_root/install_ego/lib:$repo_root/results/icra27/icra026/install_bspline_opt/lib:$repo_root/results/icra27/icra026/install_path_searching/lib:$repo_root/results/icra27/icra026/install_plan_env/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+ctest --test-dir "$task_root/build_iap" --output-on-failure \
+  -R '^(test_predictor_module|test_rolling_spatial_advisory_window|test_risk_grid_map|test_gate0_analyzer|test_gate0_runner|test_test_planner_launch)$'
+ctest --test-dir "$task_root/build_ego" --output-on-failure \
+  -R '^(test_p0_risk_grid_runtime|test_p0_occupancy_epoch_adapter)$'
+python3 test/test_gate0_analyzer.py
+```
+
 - fix(icra-031-covariance-growth-qualification-bind): IAP-RQ-311 / IAP-RQ-320 / IAP-RQ-321 / IAP-RQ-322 — add a qualification-only launch seam that materializes exact finite `p0.predictor.sigma_grow_m_sqrt_s=0.01` into the EGO ROS parameter while generic/unconfigured launch behavior stays explicit invalid `NaN`. The Gate-0B runner freezes profile `legacy_iap_rq320_baseline_v1`, persists exact requested/effective config plus provisional-not-empirically-calibrated provenance, and rejects missing, nonnumeric, NaN, infinity, negative, non-exact or profile-mismatched values before GPU/ROS. No C++ default, covariance algebra, P0 science, analyzer/capture or P1–P5 behavior changed.
   - TDD finishes with launch 16/16 and runner 27/27 passing. Current IAP configure/build/install exit 0; after one disclosed inherited-library-path command error, affected CTest passes 4/4 with ICRA-031 first, and retained ICRA-026 P0 runtime passes 1/1 (76 tests) linked to ICRA-031 `libiap.so`. Exact ament/linkage, installed launch, frozen config and log/process prechecks pass; a static-only precheck was repeated once solely because its first outer `tee` opened before its output directory.
   - Exactly one guarded 20-second smoke ran: config/GPU/dependency/log/capture preflights pass, runner exits 0, `iap_rosnode` remains healthy through runtime, and exact sigma/profile requested/effective evidence is present. The sole analyzer exits 1 with `P0_EVIDENCE_CONTRACT_FAIL`: 166/166 integrity reports are valid, but 34 health observations yield zero accepted generations; raw reasons are `prior_generation_changed=28`, `message_stamp_unavailable=5`, `not_ready=1`, with one malformed callback identity. Post-run audit proves 30 IAP log files plus timing remain task-local, external `log/` is byte-identical and no task process remains. No live retry, tuning, 60-second benchmark, campaign, P4/P5 work, cleanup or Gate promotion occurred. The `0.01 m/sqrt(s)` value remains a provisional original IAP-RQ-320 qualification baseline, not final empirical calibration. **ICRA-031 is BLOCKED; Gate-0B remains NOT_QUALIFIED pending Supervisor review.**

@@ -3911,3 +3911,172 @@ byte-identical, no task process remains, and the protected PDF remains
 untracked at its preserved hash without modification, staging, deletion or
 regeneration. **DEEPSEEK returns ICRA-031 BLOCKED and hands the exact evidence
 to SUPERVISOR for review.**
+
+## 2026-08-23T13:47:07Z — ICRA-032 START
+
+Synchronized the actual repository `/home/dev/ws_iap/src/iap` at
+`ae5b93768d23c13b412d3df3d14cfa4b3b003ea2`; `HEAD...origin/dev/icra` is
+`0 0`. The first read-only sync command was mistakenly issued from workspace
+root `/home/dev/ws_iap`, which is neither this repository nor contains
+`AGENTS.md`; it exited 128 and wrote nothing. The corrected repository command
+passed. The protected PDF remains untracked at
+`1f07da5631a6551a2f98c02d46fd45bc87f2f1e3e7c14e95f9a7f4a0bac844f6`.
+Every historical/protected evidence tree and retained build/install tree is
+preservation-only; every new ICRA-032 path will be below
+`results/icra27/icra032/`.
+
+The exact allowlist is the P0 runtime header only if the smallest interface
+adjustment is required; P0 runtime implementation and test; the smallest
+directly affected RiskGrid/rolling test only if required; Gate-0 analyzer and
+its test; `docs/icra27/P0_ROLLING_RISK_WINDOW_DESIGN.md`; new bounded ICRA-032
+build/install/log/tmp/ROS/run/replay/evidence; and Builder-owned `DEV_LOG.md`,
+`docs/CHANGES.md`, `docs/TRACEABILITY.md`. Supervisor-owned state/task/log,
+launch, runner, capture, config, covariance value/algebra, workload and P1–P5
+files are not authorized.
+
+The public TDD seams are the production-shaped `P0RiskGridRuntime` refresh/
+snapshot interface and `gate0_analyzer.py` directory/message analysis output.
+An immutable refresh transaction must retain the captured current prior, GNSS,
+LiDAR and materialized occupancy owners, nonzero internally consistent versions
+and original finite/fresh stamps while newer valid live callbacks advance. It
+must publish only the captured transaction, and the next refresh must capture
+and invalidate/recompute for the newer versions. Missing/zero/mismatched/
+mutable provenance, stale/invalid input, regression, frame/config reset and
+partial/mixed publication remain fail closed. Input callbacks will not be
+serialized behind provider work and no quiet-interval retry or speed workaround
+is allowed.
+
+Analyzer RED/GREEN will distinguish a pure generation-zero `not_ready` row with
+no refresh start/end/work fields as an explicit pre-refresh observation. Any
+row claiming partial refresh identity/work/generation without a finite end
+identity remains malformed and forces evidence-contract failure. Immutable
+ICRA-031 JSONL will be replayed only into ICRA-032: startup malformation may be
+removed, but zero successful generations and non-PASS must remain.
+
+Before live execution, focused RED/GREEN tests must cover in-flight advancement
+of current/GNSS/LiDAR/occupancy, next-refresh version adoption, captured-source
+negative cases, exact `0.01 m/sqrt(s)` tau-zero and positive-horizon behavior,
+startup/in-progress analyzer cases and replay. Current IAP and EGO will be
+configured/built/installed only below ICRA-032; unchanged ICRA-026 plan-env/
+path-searching/bspline artifacts are read-only. Direct P0/source-validation/
+rolling/analyzer/runner/launch suites, exact ament/linkage and the frozen CPU/
+worker-4/20–15 s/30×30×6 m/0.75 m/six-horizon/0.5 s/occupied-skip/no-bag/
+no-RViz/safety-off/P1–P5-disabled plus exact provisional sigma/profile contract
+must pass before GPU/ROS.
+
+Explicit live stop line: only after every static, replay, build, mapping,
+linkage and config condition passes, invoke
+`python3 scripts/dev_planner/run_gate0_qualification.py --output-root
+results/icra27/icra032/runs --smoke` exactly once. Qualification config, GPU,
+dependencies, task-local logging and capture must pass before ROS. If live
+evidence exists, invoke `python3 scripts/dev_planner/gate0_analyzer.py
+--gate0-root results/icra27/icra032/runs --output-dir
+results/icra27/icra032/runs/smoke/analyzer` exactly once, then stop regardless
+of outcome. No live/analyzer retry, post-live product correction, alternate
+sigma, tuning, 60-second benchmark, campaign, bag/RViz, P4/P5 execution,
+cleanup, Gate promotion or next-task selection is permitted.
+
+## 2026-08-23T14:21:50Z — ICRA-032 IMPLEMENTATION / ONE-SHOT RESULT
+
+IAP-RQ-320 / IAP-RQ-321 / IAP-RQ-322: P0 terminal source validation now
+distinguishes the refresh-owned immutable transaction from a newer live source
+version. Captured current, GNSS, LiDAR and occupancy inputs retain their
+original nonzero internally consistent generation/owner provenance and finite
+stamp. Regression, same-generation mutation, missing/zero/mismatched capture,
+mutable/incomplete occupancy, stale/invalid input, frame/config reset and
+partial publication remain fail closed. A normal newer live version no longer
+revokes a coherent captured transaction; the next refresh captures it and
+performs the existing rolling invalidation/recompute. The design document makes
+that boundary explicit and does not claim full IAP-RQ-322 completion.
+
+The analyzer now classifies only a strict generation-zero `not_ready` row with
+no refresh start/end or selected work claim as a pre-refresh observation and
+reports `pre_refresh_observation_count`. Partial callback identity or the
+checked work claims remain malformed. New tests cover pure startup, startup
+then valid completion, missing-end failure and immutable ICRA-031 replay. The
+replay reads the ICRA-031 JSONL without modification (before/after SHA-256
+equal) and writes only below ICRA-032: 34 observations, one pre-refresh
+observation, 19 failed callback representatives, zero successful generations,
+replay-operation exit 0 and non-PASS `P0_INPUT_AVAILABILITY_FAIL` as required.
+
+TDD/static attempt disclosure follows. Analyzer RED attempt 01 used an invalid
+`python3 -m unittest test...` module path and exited 1 with four import errors;
+correct RED attempt 02 exited 1 on the new assertions, then focused GREEN and
+the complete 40-test analyzer suite passed. Runtime RED reproduced in-flight
+source starvation while the exact-sigma test already passed. GREEN build
+attempt 01 exited 2 because `captured_lidar_stamp` was absent from a lambda
+capture; build attempt 02 passed, but focused run attempt 01 exited 1 on a
+brittle fixed-coordinate occupancy assertion; focused attempt 02 passed. Full
+runtime attempt 01 exposed 12 obsolete tests that still expected newer live
+versions to abort; after updating only those task-authorized expectations, full
+attempt 02 passed 78 active tests with one existing disabled profile. Exact
+`0.01 m/sqrt(s)` reaches prediction, preserves tau-zero covariance and grows
+strictly at positive horizons.
+
+Current IAP and EGO were configured, built and installed below ICRA-032 using
+the unchanged ICRA-026 plan-env/path-searching/bspline dependencies. EGO runtime
+and adapter pass 2/2 CTests (78 active plus 7 tests); analyzer, runner and launch
+pass 3/3 CTests. Static IAP C++ attempt 03 inherited the workspace-default
+`libiap.so`, causing two undefined-symbol failures and one Predictor crash;
+EGO and all Python tests in that attempt passed. With ICRA-032 `LD_LIBRARY_PATH`
+first, attempt 04 passes Predictor 46/46, rolling 23 active (one existing
+disabled) and RiskGrid 43/43. This was a command-environment correction, not a
+product change. Direct `ldd` and ament checks resolve only ICRA-032 IAP/EGO plus
+the intended ICRA-026 libraries, with no missing, build-tree or stale task
+resolution. Frozen CPU, worker-4, 20/15-second, 30 x 30 x 6 m, 0.75 m,
+six-horizon, 0.5-second, occupied-skip, no-bag/no-RViz, safety-off,
+P1–P5-disabled, exact `0.01`/`legacy_iap_rq320_baseline_v1` precheck passes.
+The profile remains provisional, not empirically calibrated.
+
+Precheck attempt 01 passed every internal config/ament/linkage/install/log and
+process check but its outer `tee` opened before the attempt directory existed,
+so the aggregate stdout file was absent. The complete read-only attempt 02
+passed after creating that directory; no GPU/ROS/live work occurred in either
+precheck. After all static checks passed, the exact guarded runner command ran
+once only:
+
+```text
+python3 scripts/dev_planner/run_gate0_qualification.py --output-root results/icra27/icra032/runs --smoke
+```
+
+It exited 0. Qualification config, RTX 4070 Ti SUPER `nvidia-smi`,
+`cuInit(0)=0`, device count 1, dependency, effective-log and capture readiness
+all passed. Live evidence existed, so the exact guarded analyzer command then
+ran once only:
+
+```text
+python3 scripts/dev_planner/gate0_analyzer.py --gate0-root results/icra27/icra032/runs --output-dir results/icra27/icra032/runs/smoke/analyzer
+```
+
+It exited 1 with `P0_EVIDENCE_CONTRACT_FAIL`. All 166 integrity reports are
+valid. Publication starvation is removed sufficiently to produce five strict
+successful generations and the startup row is isolated
+(`pre_refresh_observation_count=1`, malformed callback identity count 0), but
+13 failed callback representatives and successful-generation evidence include
+non-finite interval/provider timing, query/recompute-plus-reuse/fusion
+mismatches, `snapshot_unavailable`, non-`ok` health and non-`none` snapshot
+failure. Therefore ICRA-032 is **BLOCKED** and Gate-0B remains
+`NOT_QUALIFIED`; this Builder does not declare Supervisor Review PASS.
+
+Postrun audit finds no bag, no ICRA-032 task process, byte-identical external
+`log/` identity (`a07fbf79…4221f0`, 43,763 files, 15,834,674,969 bytes), and
+the protected untracked PDF unchanged at
+`1f07da5631a6551a2f98c02d46fd45bc87f2f1e3e7c14e95f9a7f4a0bac844f6`.
+The first canonical-hash command named nonexistent `gate0_summary.json`; the
+actual analyzer filenames were then hashed and the evidence correction was
+recorded without rerunning any live command.
+
+The required two-axis Builder review found and the documentation now corrects
+one hard documentation/traceability omission. It also found a remaining hard
+spec gap: `_is_p0_pre_refresh_observation()` checks the callback work counters
+but omits `generation_interval_ms`, `predictor_lidar_evaluations` and
+`predictor_lidar_cache_hits`, so an otherwise startup-shaped row claiming only
+one of those fields could be misclassified instead of malformed. This was
+discovered after the one-shot live boundary; the explicit stop line forbids
+post-live analyzer/test correction, so it is retained as a Supervisor-visible
+blocker rather than repaired. Standards also noted non-blocking Data Clump /
+Duplicated Code / Repeated Switches judgments; no scope-expanding refactor was
+made. No smoke/analyzer retry, post-live product/test/analyzer correction,
+alternate sigma, tuning, 60-second benchmark, qualification campaign, P4/P5
+execution, cleanup, Gate promotion or next-task selection occurred. Control
+returns only to SUPERVISOR review after the required commits and pushes.

@@ -1,0 +1,17 @@
+[ 44%] Built target gtest_main
+[ 44%] Built target gtest
+[ 55%] Building CXX object CMakeFiles/test_p0_risk_grid_runtime.dir/src/p0_risk_grid_runtime.cpp.o
+/home/dev/ws_iap/src/iap/src/iap/planner/plan_manage/src/p0_risk_grid_runtime.cpp: In lambda function:
+/home/dev/ws_iap/src/iap/src/iap/planner/plan_manage/src/p0_risk_grid_runtime.cpp:1454:42: error: ‘captured_lidar_stamp’ is not captured
+ 1454 |                   latest_lidar_stamp_ != captured_lidar_stamp))) {
+      |                                          ^~~~~~~~~~~~~~~~~~~~
+/home/dev/ws_iap/src/iap/src/iap/planner/plan_manage/src/p0_risk_grid_runtime.cpp:1389:66: note: the lambda has no capture-default
+ 1389 |          captured_lidar_map_points, captured_lidar_fim_primitives]() {
+      |                                                                  ^
+/home/dev/ws_iap/src/iap/src/iap/planner/plan_manage/src/p0_risk_grid_runtime.cpp:1172:10: note: ‘double captured_lidar_stamp’ declared here
+ 1172 |   double captured_lidar_stamp =
+      |          ^~~~~~~~~~~~~~~~~~~~
+gmake[3]: *** [CMakeFiles/test_p0_risk_grid_runtime.dir/build.make:90: CMakeFiles/test_p0_risk_grid_runtime.dir/src/p0_risk_grid_runtime.cpp.o] Error 1
+gmake[2]: *** [CMakeFiles/Makefile2:255: CMakeFiles/test_p0_risk_grid_runtime.dir/all] Error 2
+gmake[1]: *** [CMakeFiles/Makefile2:262: CMakeFiles/test_p0_risk_grid_runtime.dir/rule] Error 2
+gmake: *** [Makefile:244: test_p0_risk_grid_runtime] Error 2

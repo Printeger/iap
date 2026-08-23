@@ -1,0 +1,792 @@
+[  3%] Building CXX object CMakeFiles/traj_server.dir/src/traj_server.cpp.o
+[  3%] Building CXX object CMakeFiles/ego_planner_node.dir/src/ego_planner_node.cpp.o
+/home/dev/ws_iap/src/iap/src/iap/planner/plan_manage/src/traj_server.cpp:32:60: warning: ‘traj_utils::msg::Bspline_<std::allocator<void> >::ConstPtr’ is deprecated [-Wdeprecated-declarations]
+   32 | void bsplineCallback(traj_utils::msg::Bspline::ConstPtr msg)
+      |                                                            ^
+In file included from /home/dev/ws_iap/install/traj_utils/include/traj_utils/traj_utils/msg/bspline.hpp:7,
+                 from /home/dev/ws_iap/src/iap/src/iap/planner/plan_manage/src/traj_server.cpp:4:
+/home/dev/ws_iap/install/traj_utils/include/traj_utils/traj_utils/msg/detail/bspline__struct.hpp:185:5: note: declared here
+  185 |     ConstPtr;
+      |     ^~~~~~~~
+In file included from /home/dev/ws_iap/src/iap/results/icra27/icra026/install_path_searching/include/path_searching/dyn_a_star.h:7,
+                 from /home/dev/ws_iap/src/iap/results/icra27/icra026/install_bspline_opt/include/bspline_opt/bspline_optimizer.h:7,
+                 from /home/dev/ws_iap/src/iap/src/iap/planner/plan_manage/include/ego_planner/ego_replan_fsm.h:15,
+                 from /home/dev/ws_iap/src/iap/src/iap/planner/plan_manage/src/ego_planner_node.cpp:7:
+/home/dev/ws_iap/src/iap/results/icra27/icra026/install_plan_env/include/plan_env/grid_map.h:38:27: warning: ‘template<class _Arg, class _Result> struct std::unary_function’ is deprecated [-Wdeprecated-declarations]
+   38 | struct matrix_hash : std::unary_function<T, size_t>
+      |                           ^~~~~~~~~~~~~~
+In file included from /usr/include/c++/13/bits/unique_ptr.h:37,
+                 from /usr/include/c++/13/memory:78,
+                 from /opt/ros/jazzy/include/rclcpp/rclcpp/rclcpp.hpp:169,
+                 from /home/dev/ws_iap/src/iap/src/iap/planner/plan_manage/src/ego_planner_node.cpp:1:
+/usr/include/c++/13/bits/stl_function.h:117:12: note: declared here
+  117 |     struct unary_function
+      |            ^~~~~~~~~~~~~~
+/home/dev/ws_iap/src/iap/results/icra27/icra026/install_plan_env/include/plan_env/grid_map.h:261:79: warning: ‘sensor_msgs::msg::Image_<std::allocator<void> >::ConstPtr’ is deprecated [-Wdeprecated-declarations]
+  261 |                          const geometry_msgs::msg::PoseStamped::ConstPtr &pose);
+      |                                                                               ^
+In file included from /opt/ros/jazzy/include/sensor_msgs/sensor_msgs/msg/image.hpp:7,
+                 from /opt/ros/jazzy/include/cv_bridge/cv_bridge/cv_bridge.hpp:40,
+                 from /home/dev/ws_iap/src/iap/results/icra27/icra026/install_plan_env/include/plan_env/grid_map.h:8:
+/opt/ros/jazzy/include/sensor_msgs/sensor_msgs/msg/detail/image__struct.hpp:177:5: note: declared here
+  177 |     ConstPtr;
+      |     ^~~~~~~~
+/home/dev/ws_iap/src/iap/results/icra27/icra026/install_plan_env/include/plan_env/grid_map.h:261:79: warning: ‘geometry_msgs::msg::PoseStamped_<std::allocator<void> >::ConstPtr’ is deprecated [-Wdeprecated-declarations]
+  261 |                          const geometry_msgs::msg::PoseStamped::ConstPtr &pose);
+      |                                                                               ^
+In file included from /opt/ros/jazzy/include/nav_msgs/nav_msgs/msg/detail/path__struct.hpp:26,
+                 from /opt/ros/jazzy/include/nav_msgs/nav_msgs/msg/path.hpp:7,
+                 from /home/dev/ws_iap/src/iap/src/iap/planner/plan_manage/include/ego_planner/ego_replan_fsm.h:7:
+/opt/ros/jazzy/include/geometry_msgs/geometry_msgs/msg/detail/pose_stamped__struct.hpp:119:5: note: declared here
+  119 |     ConstPtr;
+      |     ^~~~~~~~
+/home/dev/ws_iap/src/iap/results/icra27/icra026/install_plan_env/include/plan_env/grid_map.h:262:71: warning: ‘nav_msgs::msg::Odometry_<std::allocator<void> >::ConstPtr’ is deprecated [-Wdeprecated-declarations]
+  262 |   void extrinsicCallback(const nav_msgs::msg::Odometry::ConstPtr &odom);
+      |                                                                       ^
+In file included from /opt/ros/jazzy/include/nav_msgs/nav_msgs/msg/odometry.hpp:7,
+                 from /home/dev/ws_iap/src/iap/src/iap/planner/plan_manage/include/ego_planner/ego_replan_fsm.h:8:
+/opt/ros/jazzy/include/nav_msgs/nav_msgs/msg/detail/odometry__struct.hpp:150:5: note: declared here
+  150 |     ConstPtr;
+      |     ^~~~~~~~
+/home/dev/ws_iap/src/iap/results/icra27/icra026/install_plan_env/include/plan_env/grid_map.h:263:117: warning: ‘sensor_msgs::msg::Image_<std::allocator<void> >::ConstPtr’ is deprecated [-Wdeprecated-declarations]
+  263 |   void depthOdomCallback(const sensor_msgs::msg::Image::ConstPtr &img, const nav_msgs::msg::Odometry::ConstPtr &odom);
+      |                                                                                                                     ^
+/opt/ros/jazzy/include/sensor_msgs/sensor_msgs/msg/detail/image__struct.hpp:177:5: note: declared here
+  177 |     ConstPtr;
+      |     ^~~~~~~~
+/home/dev/ws_iap/src/iap/results/icra27/icra026/install_plan_env/include/plan_env/grid_map.h:263:117: warning: ‘nav_msgs::msg::Odometry_<std::allocator<void> >::ConstPtr’ is deprecated [-Wdeprecated-declarations]
+  263 |   void depthOdomCallback(const sensor_msgs::msg::Image::ConstPtr &img, const nav_msgs::msg::Odometry::ConstPtr &odom);
+      |                                                                                                                     ^
+/opt/ros/jazzy/include/nav_msgs/nav_msgs/msg/detail/odometry__struct.hpp:150:5: note: declared here
+  150 |     ConstPtr;
+      |     ^~~~~~~~
+/home/dev/ws_iap/src/iap/results/icra27/icra026/install_plan_env/include/plan_env/grid_map.h:264:72: warning: ‘sensor_msgs::msg::PointCloud2_<std::allocator<void> >::ConstPtr’ is deprecated [-Wdeprecated-declarations]
+  264 |   void cloudCallback(const sensor_msgs::msg::PointCloud2::ConstPtr &img);
+      |                                                                        ^
+In file included from /opt/ros/jazzy/include/sensor_msgs/sensor_msgs/msg/point_cloud2.hpp:7,
+                 from /opt/ros/jazzy/include/pcl_conversions/pcl_conversions/pcl_conversions.h:59,
+                 from /home/dev/ws_iap/src/iap/results/icra27/icra026/install_plan_env/include/plan_env/grid_map.h:23:
+/opt/ros/jazzy/include/sensor_msgs/sensor_msgs/msg/detail/point_cloud2__struct.hpp:198:5: note: declared here
+  198 |     ConstPtr;
+      |     ^~~~~~~~
+In file included from /home/dev/ws_iap/src/iap/results/icra27/icra026/install_bspline_opt/include/bspline_opt/bspline_optimizer.h:10:
+/home/dev/ws_iap/src/iap/results/icra27/icra026/install_plan_env/include/plan_env/obj_predictor.h:126:75: warning: ‘geometry_msgs::msg::PoseStamped_<std::allocator<void> >::ConstPtr’ is deprecated [-Wdeprecated-declarations]
+  126 |     void poseCallback(const geometry_msgs::msg::PoseStamped::ConstPtr &msg);
+      |                                                                           ^
+/opt/ros/jazzy/include/geometry_msgs/geometry_msgs/msg/detail/pose_stamped__struct.hpp:119:5: note: declared here
+  119 |     ConstPtr;
+      |     ^~~~~~~~
+/home/dev/ws_iap/src/iap/results/icra27/icra026/install_plan_env/include/plan_env/obj_predictor.h:163:77: warning: ‘visualization_msgs::msg::Marker_<std::allocator<void> >::ConstPtr’ is deprecated [-Wdeprecated-declarations]
+  163 |     void markerCallback(const visualization_msgs::msg::Marker::ConstPtr &msg);
+      |                                                                             ^
+In file included from /opt/ros/jazzy/include/visualization_msgs/visualization_msgs/msg/marker.hpp:7,
+                 from /home/dev/ws_iap/src/iap/src/iap/planner/plan_manage/src/ego_planner_node.cpp:3:
+/opt/ros/jazzy/include/visualization_msgs/visualization_msgs/msg/detail/marker__struct.hpp:370:5: note: declared here
+  370 |     ConstPtr;
+      |     ^~~~~~~~
+In file included from /home/dev/ws_iap/src/iap/results/icra27/icra026/install_bspline_opt/include/bspline_opt/bspline_optimizer.h:13:
+/home/dev/ws_iap/src/iap/results/icra27/icra026/install_bspline_opt/include/bspline_opt/lbfgs.hpp: In function ‘int lbfgs::line_search_morethuente(int, double*, double*, double*, double*, double*, const double*, const double*, const double*, const double*, callback_data_t*, const lbfgs_parameter_t*)’:
+/home/dev/ws_iap/src/iap/results/icra27/icra026/install_bspline_opt/include/bspline_opt/lbfgs.hpp:723:54: warning: unused parameter ‘gp’ [-Wunused-parameter]
+  723 |                                        const double *gp,
+      |                                        ~~~~~~~~~~~~~~^~
+[  5%] Building CXX object CMakeFiles/ego_planner_node.dir/src/ego_replan_fsm.cpp.o
+In file included from /home/dev/ws_iap/src/iap/results/icra27/icra026/install_path_searching/include/path_searching/dyn_a_star.h:7,
+                 from /home/dev/ws_iap/src/iap/results/icra27/icra026/install_bspline_opt/include/bspline_opt/bspline_optimizer.h:7,
+                 from /home/dev/ws_iap/src/iap/src/iap/planner/plan_manage/include/ego_planner/ego_replan_fsm.h:15,
+                 from /home/dev/ws_iap/src/iap/src/iap/planner/plan_manage/src/ego_replan_fsm.cpp:2:
+/home/dev/ws_iap/src/iap/results/icra27/icra026/install_plan_env/include/plan_env/grid_map.h:38:27: warning: ‘template<class _Arg, class _Result> struct std::unary_function’ is deprecated [-Wdeprecated-declarations]
+   38 | struct matrix_hash : std::unary_function<T, size_t>
+      |                           ^~~~~~~~~~~~~~
+In file included from /usr/include/c++/13/string:49,
+                 from /usr/include/c++/13/bits/locale_classes.h:40,
+                 from /usr/include/c++/13/bits/ios_base.h:41,
+                 from /usr/include/c++/13/ios:44,
+                 from /usr/include/c++/13/istream:40,
+                 from /usr/include/c++/13/sstream:40,
+                 from /usr/include/c++/13/complex:45,
+                 from /usr/include/eigen3/Eigen/Core:50,
+                 from /usr/include/eigen3/Eigen/Dense:1,
+                 from /usr/include/eigen3/Eigen/Eigen:1,
+                 from /home/dev/ws_iap/src/iap/src/iap/planner/plan_manage/include/ego_planner/ego_replan_fsm.h:4:
+/usr/include/c++/13/bits/stl_function.h:117:12: note: declared here
+  117 |     struct unary_function
+      |            ^~~~~~~~~~~~~~
+/home/dev/ws_iap/src/iap/results/icra27/icra026/install_plan_env/include/plan_env/grid_map.h:261:79: warning: ‘sensor_msgs::msg::Image_<std::allocator<void> >::ConstPtr’ is deprecated [-Wdeprecated-declarations]
+  261 |                          const geometry_msgs::msg::PoseStamped::ConstPtr &pose);
+      |                                                                               ^
+In file included from /opt/ros/jazzy/include/sensor_msgs/sensor_msgs/msg/image.hpp:7,
+                 from /opt/ros/jazzy/include/cv_bridge/cv_bridge/cv_bridge.hpp:40,
+                 from /home/dev/ws_iap/src/iap/results/icra27/icra026/install_plan_env/include/plan_env/grid_map.h:8:
+/opt/ros/jazzy/include/sensor_msgs/sensor_msgs/msg/detail/image__struct.hpp:177:5: note: declared here
+  177 |     ConstPtr;
+      |     ^~~~~~~~
+/home/dev/ws_iap/src/iap/results/icra27/icra026/install_plan_env/include/plan_env/grid_map.h:261:79: warning: ‘geometry_msgs::msg::PoseStamped_<std::allocator<void> >::ConstPtr’ is deprecated [-Wdeprecated-declarations]
+  261 |                          const geometry_msgs::msg::PoseStamped::ConstPtr &pose);
+      |                                                                               ^
+In file included from /opt/ros/jazzy/include/nav_msgs/nav_msgs/msg/detail/path__struct.hpp:26,
+                 from /opt/ros/jazzy/include/nav_msgs/nav_msgs/msg/path.hpp:7,
+                 from /home/dev/ws_iap/src/iap/src/iap/planner/plan_manage/include/ego_planner/ego_replan_fsm.h:7:
+/opt/ros/jazzy/include/geometry_msgs/geometry_msgs/msg/detail/pose_stamped__struct.hpp:119:5: note: declared here
+  119 |     ConstPtr;
+      |     ^~~~~~~~
+/home/dev/ws_iap/src/iap/results/icra27/icra026/install_plan_env/include/plan_env/grid_map.h:262:71: warning: ‘nav_msgs::msg::Odometry_<std::allocator<void> >::ConstPtr’ is deprecated [-Wdeprecated-declarations]
+  262 |   void extrinsicCallback(const nav_msgs::msg::Odometry::ConstPtr &odom);
+      |                                                                       ^
+In file included from /opt/ros/jazzy/include/nav_msgs/nav_msgs/msg/odometry.hpp:7,
+                 from /home/dev/ws_iap/src/iap/src/iap/planner/plan_manage/include/ego_planner/ego_replan_fsm.h:8:
+/opt/ros/jazzy/include/nav_msgs/nav_msgs/msg/detail/odometry__struct.hpp:150:5: note: declared here
+  150 |     ConstPtr;
+      |     ^~~~~~~~
+/home/dev/ws_iap/src/iap/results/icra27/icra026/install_plan_env/include/plan_env/grid_map.h:263:117: warning: ‘sensor_msgs::msg::Image_<std::allocator<void> >::ConstPtr’ is deprecated [-Wdeprecated-declarations]
+  263 |   void depthOdomCallback(const sensor_msgs::msg::Image::ConstPtr &img, const nav_msgs::msg::Odometry::ConstPtr &odom);
+      |                                                                                                                     ^
+/opt/ros/jazzy/include/sensor_msgs/sensor_msgs/msg/detail/image__struct.hpp:177:5: note: declared here
+  177 |     ConstPtr;
+      |     ^~~~~~~~
+/home/dev/ws_iap/src/iap/results/icra27/icra026/install_plan_env/include/plan_env/grid_map.h:263:117: warning: ‘nav_msgs::msg::Odometry_<std::allocator<void> >::ConstPtr’ is deprecated [-Wdeprecated-declarations]
+  263 |   void depthOdomCallback(const sensor_msgs::msg::Image::ConstPtr &img, const nav_msgs::msg::Odometry::ConstPtr &odom);
+      |                                                                                                                     ^
+/opt/ros/jazzy/include/nav_msgs/nav_msgs/msg/detail/odometry__struct.hpp:150:5: note: declared here
+  150 |     ConstPtr;
+      |     ^~~~~~~~
+/home/dev/ws_iap/src/iap/results/icra27/icra026/install_plan_env/include/plan_env/grid_map.h:264:72: warning: ‘sensor_msgs::msg::PointCloud2_<std::allocator<void> >::ConstPtr’ is deprecated [-Wdeprecated-declarations]
+  264 |   void cloudCallback(const sensor_msgs::msg::PointCloud2::ConstPtr &img);
+      |                                                                        ^
+In file included from /opt/ros/jazzy/include/sensor_msgs/sensor_msgs/msg/point_cloud2.hpp:7,
+                 from /opt/ros/jazzy/include/pcl_conversions/pcl_conversions/pcl_conversions.h:59,
+                 from /home/dev/ws_iap/src/iap/results/icra27/icra026/install_plan_env/include/plan_env/grid_map.h:23:
+/opt/ros/jazzy/include/sensor_msgs/sensor_msgs/msg/detail/point_cloud2__struct.hpp:198:5: note: declared here
+  198 |     ConstPtr;
+      |     ^~~~~~~~
+In file included from /home/dev/ws_iap/src/iap/results/icra27/icra026/install_bspline_opt/include/bspline_opt/bspline_optimizer.h:10:
+/home/dev/ws_iap/src/iap/results/icra27/icra026/install_plan_env/include/plan_env/obj_predictor.h:126:75: warning: ‘geometry_msgs::msg::PoseStamped_<std::allocator<void> >::ConstPtr’ is deprecated [-Wdeprecated-declarations]
+  126 |     void poseCallback(const geometry_msgs::msg::PoseStamped::ConstPtr &msg);
+      |                                                                           ^
+/opt/ros/jazzy/include/geometry_msgs/geometry_msgs/msg/detail/pose_stamped__struct.hpp:119:5: note: declared here
+  119 |     ConstPtr;
+      |     ^~~~~~~~
+/home/dev/ws_iap/src/iap/results/icra27/icra026/install_plan_env/include/plan_env/obj_predictor.h:163:77: warning: ‘visualization_msgs::msg::Marker_<std::allocator<void> >::ConstPtr’ is deprecated [-Wdeprecated-declarations]
+  163 |     void markerCallback(const visualization_msgs::msg::Marker::ConstPtr &msg);
+      |                                                                             ^
+In file included from /opt/ros/jazzy/include/visualization_msgs/visualization_msgs/msg/marker.hpp:7,
+                 from /home/dev/ws_iap/src/iap/src/iap/planner/plan_manage/include/ego_planner/ego_replan_fsm.h:13:
+/opt/ros/jazzy/include/visualization_msgs/visualization_msgs/msg/detail/marker__struct.hpp:370:5: note: declared here
+  370 |     ConstPtr;
+      |     ^~~~~~~~
+In file included from /home/dev/ws_iap/src/iap/results/icra27/icra026/install_bspline_opt/include/bspline_opt/bspline_optimizer.h:13:
+/home/dev/ws_iap/src/iap/results/icra27/icra026/install_bspline_opt/include/bspline_opt/lbfgs.hpp: In function ‘int lbfgs::line_search_morethuente(int, double*, double*, double*, double*, double*, const double*, const double*, const double*, const double*, callback_data_t*, const lbfgs_parameter_t*)’:
+/home/dev/ws_iap/src/iap/results/icra27/icra026/install_bspline_opt/include/bspline_opt/lbfgs.hpp:723:54: warning: unused parameter ‘gp’ [-Wunused-parameter]
+  723 |                                        const double *gp,
+      |                                        ~~~~~~~~~~~~~~^~
+/home/dev/ws_iap/src/iap/src/iap/planner/plan_manage/src/ego_replan_fsm.cpp: In member function ‘void ego_planner::EGOReplanFSM::triggerCallback(const std::shared_ptr<const geometry_msgs::msg::PoseStamped_<std::allocator<void> > >&)’:
+/home/dev/ws_iap/src/iap/src/iap/planner/plan_manage/src/ego_replan_fsm.cpp:246:100: warning: unused parameter ‘msg’ [-Wunused-parameter]
+  246 |   void EGOReplanFSM::triggerCallback(const std::shared_ptr<const geometry_msgs::msg::PoseStamped> &msg)
+      |                                      ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^~~
+[  7%] Linking CXX executable traj_server
+[  7%] Built target traj_server
+[ 10%] Built target gtest_main
+[ 14%] Built target gtest
+[ 15%] Building CXX object CMakeFiles/ego_planner_node.dir/src/gate0_qualification_writer.cpp.o
+[ 17%] Building CXX object CMakeFiles/ego_planner_node.dir/src/planner_manager.cpp.o
+In file included from /home/dev/ws_iap/src/iap/results/icra27/icra026/install_path_searching/include/path_searching/dyn_a_star.h:7,
+                 from /home/dev/ws_iap/src/iap/results/icra27/icra026/install_bspline_opt/include/bspline_opt/bspline_optimizer.h:7,
+                 from /home/dev/ws_iap/src/iap/src/iap/planner/plan_manage/include/ego_planner/planner_manager.h:11,
+                 from /home/dev/ws_iap/src/iap/src/iap/planner/plan_manage/src/planner_manager.cpp:2:
+/home/dev/ws_iap/src/iap/results/icra27/icra026/install_plan_env/include/plan_env/grid_map.h:38:27: warning: ‘template<class _Arg, class _Result> struct std::unary_function’ is deprecated [-Wdeprecated-declarations]
+   38 | struct matrix_hash : std::unary_function<T, size_t>
+      |                           ^~~~~~~~~~~~~~
+In file included from /usr/include/c++/13/functional:49,
+                 from /home/dev/ws_iap/src/iap/src/iap/planner/plan_manage/include/ego_planner/planner_manager.h:7:
+/usr/include/c++/13/bits/stl_function.h:117:12: note: declared here
+  117 |     struct unary_function
+      |            ^~~~~~~~~~~~~~
+/home/dev/ws_iap/src/iap/results/icra27/icra026/install_plan_env/include/plan_env/grid_map.h:261:79: warning: ‘sensor_msgs::msg::Image_<std::allocator<void> >::ConstPtr’ is deprecated [-Wdeprecated-declarations]
+  261 |                          const geometry_msgs::msg::PoseStamped::ConstPtr &pose);
+      |                                                                               ^
+In file included from /opt/ros/jazzy/include/sensor_msgs/sensor_msgs/msg/image.hpp:7,
+                 from /opt/ros/jazzy/include/cv_bridge/cv_bridge/cv_bridge.hpp:40,
+                 from /home/dev/ws_iap/src/iap/results/icra27/icra026/install_plan_env/include/plan_env/grid_map.h:8:
+/opt/ros/jazzy/include/sensor_msgs/sensor_msgs/msg/detail/image__struct.hpp:177:5: note: declared here
+  177 |     ConstPtr;
+      |     ^~~~~~~~
+/home/dev/ws_iap/src/iap/results/icra27/icra026/install_plan_env/include/plan_env/grid_map.h:261:79: warning: ‘geometry_msgs::msg::PoseStamped_<std::allocator<void> >::ConstPtr’ is deprecated [-Wdeprecated-declarations]
+  261 |                          const geometry_msgs::msg::PoseStamped::ConstPtr &pose);
+      |                                                                               ^
+In file included from /opt/ros/jazzy/include/geometry_msgs/geometry_msgs/msg/pose_stamped.hpp:7,
+                 from /home/dev/ws_iap/src/iap/results/icra27/icra026/install_plan_env/include/plan_env/grid_map.h:9:
+/opt/ros/jazzy/include/geometry_msgs/geometry_msgs/msg/detail/pose_stamped__struct.hpp:119:5: note: declared here
+  119 |     ConstPtr;
+      |     ^~~~~~~~
+/home/dev/ws_iap/src/iap/results/icra27/icra026/install_plan_env/include/plan_env/grid_map.h:262:71: warning: ‘nav_msgs::msg::Odometry_<std::allocator<void> >::ConstPtr’ is deprecated [-Wdeprecated-declarations]
+  262 |   void extrinsicCallback(const nav_msgs::msg::Odometry::ConstPtr &odom);
+      |                                                                       ^
+In file included from /opt/ros/jazzy/include/nav_msgs/nav_msgs/msg/odometry.hpp:7,
+                 from /home/dev/ws_iap/src/iap/results/icra27/icra026/install_plan_env/include/plan_env/grid_map.h:15:
+/opt/ros/jazzy/include/nav_msgs/nav_msgs/msg/detail/odometry__struct.hpp:150:5: note: declared here
+  150 |     ConstPtr;
+      |     ^~~~~~~~
+/home/dev/ws_iap/src/iap/results/icra27/icra026/install_plan_env/include/plan_env/grid_map.h:263:117: warning: ‘sensor_msgs::msg::Image_<std::allocator<void> >::ConstPtr’ is deprecated [-Wdeprecated-declarations]
+  263 |   void depthOdomCallback(const sensor_msgs::msg::Image::ConstPtr &img, const nav_msgs::msg::Odometry::ConstPtr &odom);
+      |                                                                                                                     ^
+/opt/ros/jazzy/include/sensor_msgs/sensor_msgs/msg/detail/image__struct.hpp:177:5: note: declared here
+  177 |     ConstPtr;
+      |     ^~~~~~~~
+/home/dev/ws_iap/src/iap/results/icra27/icra026/install_plan_env/include/plan_env/grid_map.h:263:117: warning: ‘nav_msgs::msg::Odometry_<std::allocator<void> >::ConstPtr’ is deprecated [-Wdeprecated-declarations]
+  263 |   void depthOdomCallback(const sensor_msgs::msg::Image::ConstPtr &img, const nav_msgs::msg::Odometry::ConstPtr &odom);
+      |                                                                                                                     ^
+/opt/ros/jazzy/include/nav_msgs/nav_msgs/msg/detail/odometry__struct.hpp:150:5: note: declared here
+  150 |     ConstPtr;
+      |     ^~~~~~~~
+/home/dev/ws_iap/src/iap/results/icra27/icra026/install_plan_env/include/plan_env/grid_map.h:264:72: warning: ‘sensor_msgs::msg::PointCloud2_<std::allocator<void> >::ConstPtr’ is deprecated [-Wdeprecated-declarations]
+  264 |   void cloudCallback(const sensor_msgs::msg::PointCloud2::ConstPtr &img);
+      |                                                                        ^
+In file included from /opt/ros/jazzy/include/sensor_msgs/sensor_msgs/msg/point_cloud2.hpp:7,
+                 from /opt/ros/jazzy/include/pcl_conversions/pcl_conversions/pcl_conversions.h:59,
+                 from /home/dev/ws_iap/src/iap/results/icra27/icra026/install_plan_env/include/plan_env/grid_map.h:23:
+/opt/ros/jazzy/include/sensor_msgs/sensor_msgs/msg/detail/point_cloud2__struct.hpp:198:5: note: declared here
+  198 |     ConstPtr;
+      |     ^~~~~~~~
+In file included from /home/dev/ws_iap/src/iap/results/icra27/icra026/install_bspline_opt/include/bspline_opt/bspline_optimizer.h:10:
+/home/dev/ws_iap/src/iap/results/icra27/icra026/install_plan_env/include/plan_env/obj_predictor.h:126:75: warning: ‘geometry_msgs::msg::PoseStamped_<std::allocator<void> >::ConstPtr’ is deprecated [-Wdeprecated-declarations]
+  126 |     void poseCallback(const geometry_msgs::msg::PoseStamped::ConstPtr &msg);
+      |                                                                           ^
+/opt/ros/jazzy/include/geometry_msgs/geometry_msgs/msg/detail/pose_stamped__struct.hpp:119:5: note: declared here
+  119 |     ConstPtr;
+      |     ^~~~~~~~
+/home/dev/ws_iap/src/iap/results/icra27/icra026/install_plan_env/include/plan_env/obj_predictor.h:163:77: warning: ‘visualization_msgs::msg::Marker_<std::allocator<void> >::ConstPtr’ is deprecated [-Wdeprecated-declarations]
+  163 |     void markerCallback(const visualization_msgs::msg::Marker::ConstPtr &msg);
+      |                                                                             ^
+In file included from /opt/ros/jazzy/include/visualization_msgs/visualization_msgs/msg/marker.hpp:7,
+                 from /home/dev/ws_iap/src/iap/results/icra27/icra026/install_plan_env/include/plan_env/grid_map.h:19:
+/opt/ros/jazzy/include/visualization_msgs/visualization_msgs/msg/detail/marker__struct.hpp:370:5: note: declared here
+  370 |     ConstPtr;
+      |     ^~~~~~~~
+In file included from /home/dev/ws_iap/src/iap/results/icra27/icra026/install_bspline_opt/include/bspline_opt/bspline_optimizer.h:13:
+/home/dev/ws_iap/src/iap/results/icra27/icra026/install_bspline_opt/include/bspline_opt/lbfgs.hpp: In function ‘int lbfgs::line_search_morethuente(int, double*, double*, double*, double*, double*, const double*, const double*, const double*, const double*, callback_data_t*, const lbfgs_parameter_t*)’:
+/home/dev/ws_iap/src/iap/results/icra27/icra026/install_bspline_opt/include/bspline_opt/lbfgs.hpp:723:54: warning: unused parameter ‘gp’ [-Wunused-parameter]
+  723 |                                        const double *gp,
+      |                                        ~~~~~~~~~~~~~~^~
+[ 19%] Building CXX object CMakeFiles/ego_planner_node.dir/src/p0_risk_grid_runtime.cpp.o
+[ 21%] Building CXX object CMakeFiles/ego_planner_node.dir/src/p0_occupancy_epoch_adapter.cpp.o
+[ 22%] Building CXX object CMakeFiles/ego_planner_node.dir/src/p1_replan_admission.cpp.o
+[ 24%] Building CXX object CMakeFiles/ego_planner_node.dir/src/p1_candidate_selection.cpp.o
+[ 26%] Building CXX object CMakeFiles/ego_planner_node.dir/src/p2_candidate_ranking.cpp.o
+In file included from /home/dev/ws_iap/src/iap/results/icra27/icra026/install_path_searching/include/path_searching/dyn_a_star.h:7,
+                 from /home/dev/ws_iap/src/iap/results/icra27/icra026/install_bspline_opt/include/bspline_opt/bspline_optimizer.h:7,
+                 from /home/dev/ws_iap/src/iap/src/iap/planner/plan_manage/include/ego_planner/p2_candidate_ranking.h:10,
+                 from /home/dev/ws_iap/src/iap/src/iap/planner/plan_manage/src/p2_candidate_ranking.cpp:1:
+/home/dev/ws_iap/src/iap/results/icra27/icra026/install_plan_env/include/plan_env/grid_map.h:38:27: warning: ‘template<class _Arg, class _Result> struct std::unary_function’ is deprecated [-Wdeprecated-declarations]
+   38 | struct matrix_hash : std::unary_function<T, size_t>
+      |                           ^~~~~~~~~~~~~~
+In file included from /usr/include/c++/13/bits/unique_ptr.h:37,
+                 from /usr/include/c++/13/memory:78,
+                 from /home/dev/ws_iap/src/iap/src/iap/planner/plan_manage/include/ego_planner/p2_candidate_ranking.h:5:
+/usr/include/c++/13/bits/stl_function.h:117:12: note: declared here
+  117 |     struct unary_function
+      |            ^~~~~~~~~~~~~~
+/home/dev/ws_iap/src/iap/results/icra27/icra026/install_plan_env/include/plan_env/grid_map.h:261:79: warning: ‘sensor_msgs::msg::Image_<std::allocator<void> >::ConstPtr’ is deprecated [-Wdeprecated-declarations]
+  261 |                          const geometry_msgs::msg::PoseStamped::ConstPtr &pose);
+      |                                                                               ^
+In file included from /opt/ros/jazzy/include/sensor_msgs/sensor_msgs/msg/image.hpp:7,
+                 from /opt/ros/jazzy/include/cv_bridge/cv_bridge/cv_bridge.hpp:40,
+                 from /home/dev/ws_iap/src/iap/results/icra27/icra026/install_plan_env/include/plan_env/grid_map.h:8:
+/opt/ros/jazzy/include/sensor_msgs/sensor_msgs/msg/detail/image__struct.hpp:177:5: note: declared here
+  177 |     ConstPtr;
+      |     ^~~~~~~~
+/home/dev/ws_iap/src/iap/results/icra27/icra026/install_plan_env/include/plan_env/grid_map.h:261:79: warning: ‘geometry_msgs::msg::PoseStamped_<std::allocator<void> >::ConstPtr’ is deprecated [-Wdeprecated-declarations]
+  261 |                          const geometry_msgs::msg::PoseStamped::ConstPtr &pose);
+      |                                                                               ^
+In file included from /opt/ros/jazzy/include/geometry_msgs/geometry_msgs/msg/pose_stamped.hpp:7,
+                 from /home/dev/ws_iap/src/iap/results/icra27/icra026/install_plan_env/include/plan_env/grid_map.h:9:
+/opt/ros/jazzy/include/geometry_msgs/geometry_msgs/msg/detail/pose_stamped__struct.hpp:119:5: note: declared here
+  119 |     ConstPtr;
+      |     ^~~~~~~~
+/home/dev/ws_iap/src/iap/results/icra27/icra026/install_plan_env/include/plan_env/grid_map.h:262:71: warning: ‘nav_msgs::msg::Odometry_<std::allocator<void> >::ConstPtr’ is deprecated [-Wdeprecated-declarations]
+  262 |   void extrinsicCallback(const nav_msgs::msg::Odometry::ConstPtr &odom);
+      |                                                                       ^
+In file included from /opt/ros/jazzy/include/nav_msgs/nav_msgs/msg/odometry.hpp:7,
+                 from /home/dev/ws_iap/src/iap/results/icra27/icra026/install_plan_env/include/plan_env/grid_map.h:15:
+/opt/ros/jazzy/include/nav_msgs/nav_msgs/msg/detail/odometry__struct.hpp:150:5: note: declared here
+  150 |     ConstPtr;
+      |     ^~~~~~~~
+/home/dev/ws_iap/src/iap/results/icra27/icra026/install_plan_env/include/plan_env/grid_map.h:263:117: warning: ‘sensor_msgs::msg::Image_<std::allocator<void> >::ConstPtr’ is deprecated [-Wdeprecated-declarations]
+  263 |   void depthOdomCallback(const sensor_msgs::msg::Image::ConstPtr &img, const nav_msgs::msg::Odometry::ConstPtr &odom);
+      |                                                                                                                     ^
+/opt/ros/jazzy/include/sensor_msgs/sensor_msgs/msg/detail/image__struct.hpp:177:5: note: declared here
+  177 |     ConstPtr;
+      |     ^~~~~~~~
+/home/dev/ws_iap/src/iap/results/icra27/icra026/install_plan_env/include/plan_env/grid_map.h:263:117: warning: ‘nav_msgs::msg::Odometry_<std::allocator<void> >::ConstPtr’ is deprecated [-Wdeprecated-declarations]
+  263 |   void depthOdomCallback(const sensor_msgs::msg::Image::ConstPtr &img, const nav_msgs::msg::Odometry::ConstPtr &odom);
+      |                                                                                                                     ^
+/opt/ros/jazzy/include/nav_msgs/nav_msgs/msg/detail/odometry__struct.hpp:150:5: note: declared here
+  150 |     ConstPtr;
+      |     ^~~~~~~~
+/home/dev/ws_iap/src/iap/results/icra27/icra026/install_plan_env/include/plan_env/grid_map.h:264:72: warning: ‘sensor_msgs::msg::PointCloud2_<std::allocator<void> >::ConstPtr’ is deprecated [-Wdeprecated-declarations]
+  264 |   void cloudCallback(const sensor_msgs::msg::PointCloud2::ConstPtr &img);
+      |                                                                        ^
+In file included from /opt/ros/jazzy/include/sensor_msgs/sensor_msgs/msg/point_cloud2.hpp:7,
+                 from /opt/ros/jazzy/include/pcl_conversions/pcl_conversions/pcl_conversions.h:59,
+                 from /home/dev/ws_iap/src/iap/results/icra27/icra026/install_plan_env/include/plan_env/grid_map.h:23:
+/opt/ros/jazzy/include/sensor_msgs/sensor_msgs/msg/detail/point_cloud2__struct.hpp:198:5: note: declared here
+  198 |     ConstPtr;
+      |     ^~~~~~~~
+In file included from /home/dev/ws_iap/src/iap/results/icra27/icra026/install_bspline_opt/include/bspline_opt/bspline_optimizer.h:10:
+/home/dev/ws_iap/src/iap/results/icra27/icra026/install_plan_env/include/plan_env/obj_predictor.h:126:75: warning: ‘geometry_msgs::msg::PoseStamped_<std::allocator<void> >::ConstPtr’ is deprecated [-Wdeprecated-declarations]
+  126 |     void poseCallback(const geometry_msgs::msg::PoseStamped::ConstPtr &msg);
+      |                                                                           ^
+/opt/ros/jazzy/include/geometry_msgs/geometry_msgs/msg/detail/pose_stamped__struct.hpp:119:5: note: declared here
+  119 |     ConstPtr;
+      |     ^~~~~~~~
+/home/dev/ws_iap/src/iap/results/icra27/icra026/install_plan_env/include/plan_env/obj_predictor.h:163:77: warning: ‘visualization_msgs::msg::Marker_<std::allocator<void> >::ConstPtr’ is deprecated [-Wdeprecated-declarations]
+  163 |     void markerCallback(const visualization_msgs::msg::Marker::ConstPtr &msg);
+      |                                                                             ^
+In file included from /opt/ros/jazzy/include/visualization_msgs/visualization_msgs/msg/marker.hpp:7,
+                 from /home/dev/ws_iap/src/iap/results/icra27/icra026/install_plan_env/include/plan_env/grid_map.h:19:
+/opt/ros/jazzy/include/visualization_msgs/visualization_msgs/msg/detail/marker__struct.hpp:370:5: note: declared here
+  370 |     ConstPtr;
+      |     ^~~~~~~~
+In file included from /home/dev/ws_iap/src/iap/results/icra27/icra026/install_bspline_opt/include/bspline_opt/bspline_optimizer.h:13:
+/home/dev/ws_iap/src/iap/results/icra27/icra026/install_bspline_opt/include/bspline_opt/lbfgs.hpp: In function ‘int lbfgs::line_search_morethuente(int, double*, double*, double*, double*, double*, const double*, const double*, const double*, const double*, callback_data_t*, const lbfgs_parameter_t*)’:
+/home/dev/ws_iap/src/iap/results/icra27/icra026/install_bspline_opt/include/bspline_opt/lbfgs.hpp:723:54: warning: unused parameter ‘gp’ [-Wunused-parameter]
+  723 |                                        const double *gp,
+      |                                        ~~~~~~~~~~~~~~^~
+[ 28%] Building CXX object CMakeFiles/ego_planner_node.dir/src/p3_reference_bias.cpp.o
+[ 29%] Building CXX object CMakeFiles/ego_planner_node.dir/src/p5_runtime_integrity_gate.cpp.o
+[ 31%] Building CXX object CMakeFiles/ego_planner_node.dir/src/safety_rviz_publisher.cpp.o
+[ 33%] Building CXX object CMakeFiles/test_gate0_qualification_writer.dir/test/test_gate0_qualification_writer.cpp.o
+[ 35%] Linking CXX executable ego_planner_node
+[ 36%] Building CXX object CMakeFiles/test_gate0_qualification_writer.dir/src/gate0_qualification_writer.cpp.o
+[ 38%] Linking CXX executable test_gate0_qualification_writer
+[ 38%] Built target test_gate0_qualification_writer
+[ 47%] Built target test_p0_risk_grid_runtime
+[ 49%] Building CXX object CMakeFiles/test_p0_occupancy_epoch_adapter.dir/test/test_p0_occupancy_epoch_adapter.cpp.o
+[ 49%] Built target ego_planner_node
+[ 50%] Building CXX object CMakeFiles/test_p1_replan_admission.dir/test/test_p1_replan_admission.cpp.o
+[ 52%] Building CXX object CMakeFiles/test_p1_replan_admission.dir/src/p1_replan_admission.cpp.o
+[ 54%] Building CXX object CMakeFiles/test_p0_occupancy_epoch_adapter.dir/src/p0_occupancy_epoch_adapter.cpp.o
+[ 56%] Linking CXX executable test_p1_replan_admission
+[ 56%] Built target test_p1_replan_admission
+[ 57%] Building CXX object CMakeFiles/test_p1_candidate_selection.dir/test/test_p1_candidate_selection.cpp.o
+[ 59%] Linking CXX executable test_p0_occupancy_epoch_adapter
+[ 59%] Built target test_p0_occupancy_epoch_adapter
+[ 61%] Building CXX object CMakeFiles/test_p5_runtime_integrity_gate.dir/test/test_p5_runtime_integrity_gate.cpp.o
+[ 63%] Building CXX object CMakeFiles/test_p1_candidate_selection.dir/src/p1_candidate_selection.cpp.o
+[ 64%] Linking CXX executable test_p1_candidate_selection
+[ 64%] Built target test_p1_candidate_selection
+[ 66%] Building CXX object CMakeFiles/test_p2_candidate_ranking.dir/test/test_p2_candidate_ranking.cpp.o
+In file included from /home/dev/ws_iap/src/iap/results/icra27/icra026/install_path_searching/include/path_searching/dyn_a_star.h:7,
+                 from /home/dev/ws_iap/src/iap/results/icra27/icra026/install_bspline_opt/include/bspline_opt/bspline_optimizer.h:7,
+                 from /home/dev/ws_iap/src/iap/src/iap/planner/plan_manage/include/ego_planner/p2_candidate_ranking.h:10,
+                 from /home/dev/ws_iap/src/iap/src/iap/planner/plan_manage/test/test_p2_candidate_ranking.cpp:1:
+/home/dev/ws_iap/src/iap/results/icra27/icra026/install_plan_env/include/plan_env/grid_map.h:38:27: warning: ‘template<class _Arg, class _Result> struct std::unary_function’ is deprecated [-Wdeprecated-declarations]
+   38 | struct matrix_hash : std::unary_function<T, size_t>
+      |                           ^~~~~~~~~~~~~~
+In file included from /usr/include/c++/13/bits/unique_ptr.h:37,
+                 from /usr/include/c++/13/memory:78,
+                 from /home/dev/ws_iap/src/iap/src/iap/planner/plan_manage/include/ego_planner/p2_candidate_ranking.h:5:
+/usr/include/c++/13/bits/stl_function.h:117:12: note: declared here
+  117 |     struct unary_function
+      |            ^~~~~~~~~~~~~~
+/home/dev/ws_iap/src/iap/results/icra27/icra026/install_plan_env/include/plan_env/grid_map.h:261:79: warning: ‘sensor_msgs::msg::Image_<std::allocator<void> >::ConstPtr’ is deprecated [-Wdeprecated-declarations]
+  261 |                          const geometry_msgs::msg::PoseStamped::ConstPtr &pose);
+      |                                                                               ^
+In file included from /opt/ros/jazzy/include/sensor_msgs/sensor_msgs/msg/image.hpp:7,
+                 from /opt/ros/jazzy/include/cv_bridge/cv_bridge/cv_bridge.hpp:40,
+                 from /home/dev/ws_iap/src/iap/results/icra27/icra026/install_plan_env/include/plan_env/grid_map.h:8:
+/opt/ros/jazzy/include/sensor_msgs/sensor_msgs/msg/detail/image__struct.hpp:177:5: note: declared here
+  177 |     ConstPtr;
+      |     ^~~~~~~~
+/home/dev/ws_iap/src/iap/results/icra27/icra026/install_plan_env/include/plan_env/grid_map.h:261:79: warning: ‘geometry_msgs::msg::PoseStamped_<std::allocator<void> >::ConstPtr’ is deprecated [-Wdeprecated-declarations]
+  261 |                          const geometry_msgs::msg::PoseStamped::ConstPtr &pose);
+      |                                                                               ^
+In file included from /opt/ros/jazzy/include/geometry_msgs/geometry_msgs/msg/pose_stamped.hpp:7,
+                 from /home/dev/ws_iap/src/iap/results/icra27/icra026/install_plan_env/include/plan_env/grid_map.h:9:
+/opt/ros/jazzy/include/geometry_msgs/geometry_msgs/msg/detail/pose_stamped__struct.hpp:119:5: note: declared here
+  119 |     ConstPtr;
+      |     ^~~~~~~~
+/home/dev/ws_iap/src/iap/results/icra27/icra026/install_plan_env/include/plan_env/grid_map.h:262:71: warning: ‘nav_msgs::msg::Odometry_<std::allocator<void> >::ConstPtr’ is deprecated [-Wdeprecated-declarations]
+  262 |   void extrinsicCallback(const nav_msgs::msg::Odometry::ConstPtr &odom);
+      |                                                                       ^
+In file included from /opt/ros/jazzy/include/nav_msgs/nav_msgs/msg/odometry.hpp:7,
+                 from /home/dev/ws_iap/src/iap/results/icra27/icra026/install_plan_env/include/plan_env/grid_map.h:15:
+/opt/ros/jazzy/include/nav_msgs/nav_msgs/msg/detail/odometry__struct.hpp:150:5: note: declared here
+  150 |     ConstPtr;
+      |     ^~~~~~~~
+/home/dev/ws_iap/src/iap/results/icra27/icra026/install_plan_env/include/plan_env/grid_map.h:263:117: warning: ‘sensor_msgs::msg::Image_<std::allocator<void> >::ConstPtr’ is deprecated [-Wdeprecated-declarations]
+  263 |   void depthOdomCallback(const sensor_msgs::msg::Image::ConstPtr &img, const nav_msgs::msg::Odometry::ConstPtr &odom);
+      |                                                                                                                     ^
+/opt/ros/jazzy/include/sensor_msgs/sensor_msgs/msg/detail/image__struct.hpp:177:5: note: declared here
+  177 |     ConstPtr;
+      |     ^~~~~~~~
+/home/dev/ws_iap/src/iap/results/icra27/icra026/install_plan_env/include/plan_env/grid_map.h:263:117: warning: ‘nav_msgs::msg::Odometry_<std::allocator<void> >::ConstPtr’ is deprecated [-Wdeprecated-declarations]
+  263 |   void depthOdomCallback(const sensor_msgs::msg::Image::ConstPtr &img, const nav_msgs::msg::Odometry::ConstPtr &odom);
+      |                                                                                                                     ^
+/opt/ros/jazzy/include/nav_msgs/nav_msgs/msg/detail/odometry__struct.hpp:150:5: note: declared here
+  150 |     ConstPtr;
+      |     ^~~~~~~~
+/home/dev/ws_iap/src/iap/results/icra27/icra026/install_plan_env/include/plan_env/grid_map.h:264:72: warning: ‘sensor_msgs::msg::PointCloud2_<std::allocator<void> >::ConstPtr’ is deprecated [-Wdeprecated-declarations]
+  264 |   void cloudCallback(const sensor_msgs::msg::PointCloud2::ConstPtr &img);
+      |                                                                        ^
+In file included from /opt/ros/jazzy/include/sensor_msgs/sensor_msgs/msg/point_cloud2.hpp:7,
+                 from /opt/ros/jazzy/include/pcl_conversions/pcl_conversions/pcl_conversions.h:59,
+                 from /home/dev/ws_iap/src/iap/results/icra27/icra026/install_plan_env/include/plan_env/grid_map.h:23:
+/opt/ros/jazzy/include/sensor_msgs/sensor_msgs/msg/detail/point_cloud2__struct.hpp:198:5: note: declared here
+  198 |     ConstPtr;
+      |     ^~~~~~~~
+In file included from /home/dev/ws_iap/src/iap/results/icra27/icra026/install_bspline_opt/include/bspline_opt/bspline_optimizer.h:10:
+/home/dev/ws_iap/src/iap/results/icra27/icra026/install_plan_env/include/plan_env/obj_predictor.h:126:75: warning: ‘geometry_msgs::msg::PoseStamped_<std::allocator<void> >::ConstPtr’ is deprecated [-Wdeprecated-declarations]
+  126 |     void poseCallback(const geometry_msgs::msg::PoseStamped::ConstPtr &msg);
+      |                                                                           ^
+/opt/ros/jazzy/include/geometry_msgs/geometry_msgs/msg/detail/pose_stamped__struct.hpp:119:5: note: declared here
+  119 |     ConstPtr;
+      |     ^~~~~~~~
+/home/dev/ws_iap/src/iap/results/icra27/icra026/install_plan_env/include/plan_env/obj_predictor.h:163:77: warning: ‘visualization_msgs::msg::Marker_<std::allocator<void> >::ConstPtr’ is deprecated [-Wdeprecated-declarations]
+  163 |     void markerCallback(const visualization_msgs::msg::Marker::ConstPtr &msg);
+      |                                                                             ^
+In file included from /opt/ros/jazzy/include/visualization_msgs/visualization_msgs/msg/marker.hpp:7,
+                 from /home/dev/ws_iap/src/iap/results/icra27/icra026/install_plan_env/include/plan_env/grid_map.h:19:
+/opt/ros/jazzy/include/visualization_msgs/visualization_msgs/msg/detail/marker__struct.hpp:370:5: note: declared here
+  370 |     ConstPtr;
+      |     ^~~~~~~~
+In file included from /home/dev/ws_iap/src/iap/results/icra27/icra026/install_bspline_opt/include/bspline_opt/bspline_optimizer.h:13:
+/home/dev/ws_iap/src/iap/results/icra27/icra026/install_bspline_opt/include/bspline_opt/lbfgs.hpp: In function ‘int lbfgs::line_search_morethuente(int, double*, double*, double*, double*, double*, const double*, const double*, const double*, const double*, callback_data_t*, const lbfgs_parameter_t*)’:
+/home/dev/ws_iap/src/iap/results/icra27/icra026/install_bspline_opt/include/bspline_opt/lbfgs.hpp:723:54: warning: unused parameter ‘gp’ [-Wunused-parameter]
+  723 |                                        const double *gp,
+      |                                        ~~~~~~~~~~~~~~^~
+[ 68%] Building CXX object CMakeFiles/test_p2_candidate_ranking.dir/src/p2_candidate_ranking.cpp.o
+In file included from /home/dev/ws_iap/src/iap/results/icra27/icra026/install_path_searching/include/path_searching/dyn_a_star.h:7,
+                 from /home/dev/ws_iap/src/iap/results/icra27/icra026/install_bspline_opt/include/bspline_opt/bspline_optimizer.h:7,
+                 from /home/dev/ws_iap/src/iap/src/iap/planner/plan_manage/include/ego_planner/p2_candidate_ranking.h:10,
+                 from /home/dev/ws_iap/src/iap/src/iap/planner/plan_manage/src/p2_candidate_ranking.cpp:1:
+/home/dev/ws_iap/src/iap/results/icra27/icra026/install_plan_env/include/plan_env/grid_map.h:38:27: warning: ‘template<class _Arg, class _Result> struct std::unary_function’ is deprecated [-Wdeprecated-declarations]
+   38 | struct matrix_hash : std::unary_function<T, size_t>
+      |                           ^~~~~~~~~~~~~~
+In file included from /usr/include/c++/13/bits/unique_ptr.h:37,
+                 from /usr/include/c++/13/memory:78,
+                 from /home/dev/ws_iap/src/iap/src/iap/planner/plan_manage/include/ego_planner/p2_candidate_ranking.h:5:
+/usr/include/c++/13/bits/stl_function.h:117:12: note: declared here
+  117 |     struct unary_function
+      |            ^~~~~~~~~~~~~~
+/home/dev/ws_iap/src/iap/results/icra27/icra026/install_plan_env/include/plan_env/grid_map.h:261:79: warning: ‘sensor_msgs::msg::Image_<std::allocator<void> >::ConstPtr’ is deprecated [-Wdeprecated-declarations]
+  261 |                          const geometry_msgs::msg::PoseStamped::ConstPtr &pose);
+      |                                                                               ^
+In file included from /opt/ros/jazzy/include/sensor_msgs/sensor_msgs/msg/image.hpp:7,
+                 from /opt/ros/jazzy/include/cv_bridge/cv_bridge/cv_bridge.hpp:40,
+                 from /home/dev/ws_iap/src/iap/results/icra27/icra026/install_plan_env/include/plan_env/grid_map.h:8:
+/opt/ros/jazzy/include/sensor_msgs/sensor_msgs/msg/detail/image__struct.hpp:177:5: note: declared here
+  177 |     ConstPtr;
+      |     ^~~~~~~~
+/home/dev/ws_iap/src/iap/results/icra27/icra026/install_plan_env/include/plan_env/grid_map.h:261:79: warning: ‘geometry_msgs::msg::PoseStamped_<std::allocator<void> >::ConstPtr’ is deprecated [-Wdeprecated-declarations]
+  261 |                          const geometry_msgs::msg::PoseStamped::ConstPtr &pose);
+      |                                                                               ^
+In file included from /opt/ros/jazzy/include/geometry_msgs/geometry_msgs/msg/pose_stamped.hpp:7,
+                 from /home/dev/ws_iap/src/iap/results/icra27/icra026/install_plan_env/include/plan_env/grid_map.h:9:
+/opt/ros/jazzy/include/geometry_msgs/geometry_msgs/msg/detail/pose_stamped__struct.hpp:119:5: note: declared here
+  119 |     ConstPtr;
+      |     ^~~~~~~~
+/home/dev/ws_iap/src/iap/results/icra27/icra026/install_plan_env/include/plan_env/grid_map.h:262:71: warning: ‘nav_msgs::msg::Odometry_<std::allocator<void> >::ConstPtr’ is deprecated [-Wdeprecated-declarations]
+  262 |   void extrinsicCallback(const nav_msgs::msg::Odometry::ConstPtr &odom);
+      |                                                                       ^
+In file included from /opt/ros/jazzy/include/nav_msgs/nav_msgs/msg/odometry.hpp:7,
+                 from /home/dev/ws_iap/src/iap/results/icra27/icra026/install_plan_env/include/plan_env/grid_map.h:15:
+/opt/ros/jazzy/include/nav_msgs/nav_msgs/msg/detail/odometry__struct.hpp:150:5: note: declared here
+  150 |     ConstPtr;
+      |     ^~~~~~~~
+/home/dev/ws_iap/src/iap/results/icra27/icra026/install_plan_env/include/plan_env/grid_map.h:263:117: warning: ‘sensor_msgs::msg::Image_<std::allocator<void> >::ConstPtr’ is deprecated [-Wdeprecated-declarations]
+  263 |   void depthOdomCallback(const sensor_msgs::msg::Image::ConstPtr &img, const nav_msgs::msg::Odometry::ConstPtr &odom);
+      |                                                                                                                     ^
+/opt/ros/jazzy/include/sensor_msgs/sensor_msgs/msg/detail/image__struct.hpp:177:5: note: declared here
+  177 |     ConstPtr;
+      |     ^~~~~~~~
+/home/dev/ws_iap/src/iap/results/icra27/icra026/install_plan_env/include/plan_env/grid_map.h:263:117: warning: ‘nav_msgs::msg::Odometry_<std::allocator<void> >::ConstPtr’ is deprecated [-Wdeprecated-declarations]
+  263 |   void depthOdomCallback(const sensor_msgs::msg::Image::ConstPtr &img, const nav_msgs::msg::Odometry::ConstPtr &odom);
+      |                                                                                                                     ^
+/opt/ros/jazzy/include/nav_msgs/nav_msgs/msg/detail/odometry__struct.hpp:150:5: note: declared here
+  150 |     ConstPtr;
+      |     ^~~~~~~~
+/home/dev/ws_iap/src/iap/results/icra27/icra026/install_plan_env/include/plan_env/grid_map.h:264:72: warning: ‘sensor_msgs::msg::PointCloud2_<std::allocator<void> >::ConstPtr’ is deprecated [-Wdeprecated-declarations]
+  264 |   void cloudCallback(const sensor_msgs::msg::PointCloud2::ConstPtr &img);
+      |                                                                        ^
+In file included from /opt/ros/jazzy/include/sensor_msgs/sensor_msgs/msg/point_cloud2.hpp:7,
+                 from /opt/ros/jazzy/include/pcl_conversions/pcl_conversions/pcl_conversions.h:59,
+                 from /home/dev/ws_iap/src/iap/results/icra27/icra026/install_plan_env/include/plan_env/grid_map.h:23:
+/opt/ros/jazzy/include/sensor_msgs/sensor_msgs/msg/detail/point_cloud2__struct.hpp:198:5: note: declared here
+  198 |     ConstPtr;
+      |     ^~~~~~~~
+In file included from /home/dev/ws_iap/src/iap/results/icra27/icra026/install_bspline_opt/include/bspline_opt/bspline_optimizer.h:10:
+/home/dev/ws_iap/src/iap/results/icra27/icra026/install_plan_env/include/plan_env/obj_predictor.h:126:75: warning: ‘geometry_msgs::msg::PoseStamped_<std::allocator<void> >::ConstPtr’ is deprecated [-Wdeprecated-declarations]
+  126 |     void poseCallback(const geometry_msgs::msg::PoseStamped::ConstPtr &msg);
+      |                                                                           ^
+/opt/ros/jazzy/include/geometry_msgs/geometry_msgs/msg/detail/pose_stamped__struct.hpp:119:5: note: declared here
+  119 |     ConstPtr;
+      |     ^~~~~~~~
+/home/dev/ws_iap/src/iap/results/icra27/icra026/install_plan_env/include/plan_env/obj_predictor.h:163:77: warning: ‘visualization_msgs::msg::Marker_<std::allocator<void> >::ConstPtr’ is deprecated [-Wdeprecated-declarations]
+  163 |     void markerCallback(const visualization_msgs::msg::Marker::ConstPtr &msg);
+      |                                                                             ^
+In file included from /opt/ros/jazzy/include/visualization_msgs/visualization_msgs/msg/marker.hpp:7,
+                 from /home/dev/ws_iap/src/iap/results/icra27/icra026/install_plan_env/include/plan_env/grid_map.h:19:
+/opt/ros/jazzy/include/visualization_msgs/visualization_msgs/msg/detail/marker__struct.hpp:370:5: note: declared here
+  370 |     ConstPtr;
+      |     ^~~~~~~~
+In file included from /home/dev/ws_iap/src/iap/results/icra27/icra026/install_bspline_opt/include/bspline_opt/bspline_optimizer.h:13:
+/home/dev/ws_iap/src/iap/results/icra27/icra026/install_bspline_opt/include/bspline_opt/lbfgs.hpp: In function ‘int lbfgs::line_search_morethuente(int, double*, double*, double*, double*, double*, const double*, const double*, const double*, const double*, callback_data_t*, const lbfgs_parameter_t*)’:
+/home/dev/ws_iap/src/iap/results/icra27/icra026/install_bspline_opt/include/bspline_opt/lbfgs.hpp:723:54: warning: unused parameter ‘gp’ [-Wunused-parameter]
+  723 |                                        const double *gp,
+      |                                        ~~~~~~~~~~~~~~^~
+[ 70%] Building CXX object CMakeFiles/test_p5_runtime_integrity_gate.dir/src/p5_runtime_integrity_gate.cpp.o
+[ 71%] Linking CXX executable test_p2_candidate_ranking
+[ 71%] Built target test_p2_candidate_ranking
+[ 73%] Building CXX object CMakeFiles/test_p3_reference_bias.dir/test/test_p3_reference_bias.cpp.o
+[ 75%] Building CXX object CMakeFiles/test_p3_reference_bias.dir/src/p3_reference_bias.cpp.o
+[ 77%] Linking CXX executable test_p3_reference_bias
+[ 77%] Built target test_p3_reference_bias
+[ 78%] Building CXX object CMakeFiles/test_planning_risk_context.dir/test/test_planning_risk_context.cpp.o
+[ 80%] Building CXX object CMakeFiles/test_p5_runtime_integrity_gate.dir/src/safety_rviz_publisher.cpp.o
+In file included from /home/dev/ws_iap/src/iap/results/icra27/icra026/install_path_searching/include/path_searching/dyn_a_star.h:7,
+                 from /home/dev/ws_iap/src/iap/results/icra27/icra026/install_bspline_opt/include/bspline_opt/bspline_optimizer.h:7,
+                 from /home/dev/ws_iap/src/iap/src/iap/planner/plan_manage/include/ego_planner/planner_manager.h:11,
+                 from /home/dev/ws_iap/src/iap/src/iap/planner/plan_manage/test/test_planning_risk_context.cpp:1:
+/home/dev/ws_iap/src/iap/results/icra27/icra026/install_plan_env/include/plan_env/grid_map.h:38:27: warning: ‘template<class _Arg, class _Result> struct std::unary_function’ is deprecated [-Wdeprecated-declarations]
+   38 | struct matrix_hash : std::unary_function<T, size_t>
+      |                           ^~~~~~~~~~~~~~
+In file included from /usr/include/c++/13/functional:49,
+                 from /home/dev/ws_iap/src/iap/src/iap/planner/plan_manage/include/ego_planner/planner_manager.h:7:
+/usr/include/c++/13/bits/stl_function.h:117:12: note: declared here
+  117 |     struct unary_function
+      |            ^~~~~~~~~~~~~~
+/home/dev/ws_iap/src/iap/results/icra27/icra026/install_plan_env/include/plan_env/grid_map.h:261:79: warning: ‘sensor_msgs::msg::Image_<std::allocator<void> >::ConstPtr’ is deprecated [-Wdeprecated-declarations]
+  261 |                          const geometry_msgs::msg::PoseStamped::ConstPtr &pose);
+      |                                                                               ^
+In file included from /opt/ros/jazzy/include/sensor_msgs/sensor_msgs/msg/image.hpp:7,
+                 from /opt/ros/jazzy/include/cv_bridge/cv_bridge/cv_bridge.hpp:40,
+                 from /home/dev/ws_iap/src/iap/results/icra27/icra026/install_plan_env/include/plan_env/grid_map.h:8:
+/opt/ros/jazzy/include/sensor_msgs/sensor_msgs/msg/detail/image__struct.hpp:177:5: note: declared here
+  177 |     ConstPtr;
+      |     ^~~~~~~~
+/home/dev/ws_iap/src/iap/results/icra27/icra026/install_plan_env/include/plan_env/grid_map.h:261:79: warning: ‘geometry_msgs::msg::PoseStamped_<std::allocator<void> >::ConstPtr’ is deprecated [-Wdeprecated-declarations]
+  261 |                          const geometry_msgs::msg::PoseStamped::ConstPtr &pose);
+      |                                                                               ^
+In file included from /opt/ros/jazzy/include/geometry_msgs/geometry_msgs/msg/pose_stamped.hpp:7,
+                 from /home/dev/ws_iap/src/iap/results/icra27/icra026/install_plan_env/include/plan_env/grid_map.h:9:
+/opt/ros/jazzy/include/geometry_msgs/geometry_msgs/msg/detail/pose_stamped__struct.hpp:119:5: note: declared here
+  119 |     ConstPtr;
+      |     ^~~~~~~~
+/home/dev/ws_iap/src/iap/results/icra27/icra026/install_plan_env/include/plan_env/grid_map.h:262:71: warning: ‘nav_msgs::msg::Odometry_<std::allocator<void> >::ConstPtr’ is deprecated [-Wdeprecated-declarations]
+  262 |   void extrinsicCallback(const nav_msgs::msg::Odometry::ConstPtr &odom);
+      |                                                                       ^
+In file included from /opt/ros/jazzy/include/nav_msgs/nav_msgs/msg/odometry.hpp:7,
+                 from /home/dev/ws_iap/src/iap/results/icra27/icra026/install_plan_env/include/plan_env/grid_map.h:15:
+/opt/ros/jazzy/include/nav_msgs/nav_msgs/msg/detail/odometry__struct.hpp:150:5: note: declared here
+  150 |     ConstPtr;
+      |     ^~~~~~~~
+/home/dev/ws_iap/src/iap/results/icra27/icra026/install_plan_env/include/plan_env/grid_map.h:263:117: warning: ‘sensor_msgs::msg::Image_<std::allocator<void> >::ConstPtr’ is deprecated [-Wdeprecated-declarations]
+  263 |   void depthOdomCallback(const sensor_msgs::msg::Image::ConstPtr &img, const nav_msgs::msg::Odometry::ConstPtr &odom);
+      |                                                                                                                     ^
+/opt/ros/jazzy/include/sensor_msgs/sensor_msgs/msg/detail/image__struct.hpp:177:5: note: declared here
+  177 |     ConstPtr;
+      |     ^~~~~~~~
+/home/dev/ws_iap/src/iap/results/icra27/icra026/install_plan_env/include/plan_env/grid_map.h:263:117: warning: ‘nav_msgs::msg::Odometry_<std::allocator<void> >::ConstPtr’ is deprecated [-Wdeprecated-declarations]
+  263 |   void depthOdomCallback(const sensor_msgs::msg::Image::ConstPtr &img, const nav_msgs::msg::Odometry::ConstPtr &odom);
+      |                                                                                                                     ^
+/opt/ros/jazzy/include/nav_msgs/nav_msgs/msg/detail/odometry__struct.hpp:150:5: note: declared here
+  150 |     ConstPtr;
+      |     ^~~~~~~~
+/home/dev/ws_iap/src/iap/results/icra27/icra026/install_plan_env/include/plan_env/grid_map.h:264:72: warning: ‘sensor_msgs::msg::PointCloud2_<std::allocator<void> >::ConstPtr’ is deprecated [-Wdeprecated-declarations]
+  264 |   void cloudCallback(const sensor_msgs::msg::PointCloud2::ConstPtr &img);
+      |                                                                        ^
+In file included from /opt/ros/jazzy/include/sensor_msgs/sensor_msgs/msg/point_cloud2.hpp:7,
+                 from /opt/ros/jazzy/include/pcl_conversions/pcl_conversions/pcl_conversions.h:59,
+                 from /home/dev/ws_iap/src/iap/results/icra27/icra026/install_plan_env/include/plan_env/grid_map.h:23:
+/opt/ros/jazzy/include/sensor_msgs/sensor_msgs/msg/detail/point_cloud2__struct.hpp:198:5: note: declared here
+  198 |     ConstPtr;
+      |     ^~~~~~~~
+In file included from /home/dev/ws_iap/src/iap/results/icra27/icra026/install_bspline_opt/include/bspline_opt/bspline_optimizer.h:10:
+/home/dev/ws_iap/src/iap/results/icra27/icra026/install_plan_env/include/plan_env/obj_predictor.h:126:75: warning: ‘geometry_msgs::msg::PoseStamped_<std::allocator<void> >::ConstPtr’ is deprecated [-Wdeprecated-declarations]
+  126 |     void poseCallback(const geometry_msgs::msg::PoseStamped::ConstPtr &msg);
+      |                                                                           ^
+/opt/ros/jazzy/include/geometry_msgs/geometry_msgs/msg/detail/pose_stamped__struct.hpp:119:5: note: declared here
+  119 |     ConstPtr;
+      |     ^~~~~~~~
+/home/dev/ws_iap/src/iap/results/icra27/icra026/install_plan_env/include/plan_env/obj_predictor.h:163:77: warning: ‘visualization_msgs::msg::Marker_<std::allocator<void> >::ConstPtr’ is deprecated [-Wdeprecated-declarations]
+  163 |     void markerCallback(const visualization_msgs::msg::Marker::ConstPtr &msg);
+      |                                                                             ^
+In file included from /opt/ros/jazzy/include/visualization_msgs/visualization_msgs/msg/marker.hpp:7,
+                 from /home/dev/ws_iap/src/iap/results/icra27/icra026/install_plan_env/include/plan_env/grid_map.h:19:
+/opt/ros/jazzy/include/visualization_msgs/visualization_msgs/msg/detail/marker__struct.hpp:370:5: note: declared here
+  370 |     ConstPtr;
+      |     ^~~~~~~~
+In file included from /home/dev/ws_iap/src/iap/results/icra27/icra026/install_bspline_opt/include/bspline_opt/bspline_optimizer.h:13:
+/home/dev/ws_iap/src/iap/results/icra27/icra026/install_bspline_opt/include/bspline_opt/lbfgs.hpp: In function ‘int lbfgs::line_search_morethuente(int, double*, double*, double*, double*, double*, const double*, const double*, const double*, const double*, callback_data_t*, const lbfgs_parameter_t*)’:
+/home/dev/ws_iap/src/iap/results/icra27/icra026/install_bspline_opt/include/bspline_opt/lbfgs.hpp:723:54: warning: unused parameter ‘gp’ [-Wunused-parameter]
+  723 |                                        const double *gp,
+      |                                        ~~~~~~~~~~~~~~^~
+[ 82%] Linking CXX executable test_p5_runtime_integrity_gate
+[ 82%] Built target test_p5_runtime_integrity_gate
+[ 84%] Building CXX object CMakeFiles/test_planning_risk_context.dir/src/gate0_qualification_writer.cpp.o
+[ 85%] Building CXX object CMakeFiles/test_planning_risk_context.dir/src/planner_manager.cpp.o
+In file included from /home/dev/ws_iap/src/iap/results/icra27/icra026/install_path_searching/include/path_searching/dyn_a_star.h:7,
+                 from /home/dev/ws_iap/src/iap/results/icra27/icra026/install_bspline_opt/include/bspline_opt/bspline_optimizer.h:7,
+                 from /home/dev/ws_iap/src/iap/src/iap/planner/plan_manage/include/ego_planner/planner_manager.h:11,
+                 from /home/dev/ws_iap/src/iap/src/iap/planner/plan_manage/src/planner_manager.cpp:2:
+/home/dev/ws_iap/src/iap/results/icra27/icra026/install_plan_env/include/plan_env/grid_map.h:38:27: warning: ‘template<class _Arg, class _Result> struct std::unary_function’ is deprecated [-Wdeprecated-declarations]
+   38 | struct matrix_hash : std::unary_function<T, size_t>
+      |                           ^~~~~~~~~~~~~~
+In file included from /usr/include/c++/13/functional:49,
+                 from /home/dev/ws_iap/src/iap/src/iap/planner/plan_manage/include/ego_planner/planner_manager.h:7:
+/usr/include/c++/13/bits/stl_function.h:117:12: note: declared here
+  117 |     struct unary_function
+      |            ^~~~~~~~~~~~~~
+/home/dev/ws_iap/src/iap/results/icra27/icra026/install_plan_env/include/plan_env/grid_map.h:261:79: warning: ‘sensor_msgs::msg::Image_<std::allocator<void> >::ConstPtr’ is deprecated [-Wdeprecated-declarations]
+  261 |                          const geometry_msgs::msg::PoseStamped::ConstPtr &pose);
+      |                                                                               ^
+In file included from /opt/ros/jazzy/include/sensor_msgs/sensor_msgs/msg/image.hpp:7,
+                 from /opt/ros/jazzy/include/cv_bridge/cv_bridge/cv_bridge.hpp:40,
+                 from /home/dev/ws_iap/src/iap/results/icra27/icra026/install_plan_env/include/plan_env/grid_map.h:8:
+/opt/ros/jazzy/include/sensor_msgs/sensor_msgs/msg/detail/image__struct.hpp:177:5: note: declared here
+  177 |     ConstPtr;
+      |     ^~~~~~~~
+/home/dev/ws_iap/src/iap/results/icra27/icra026/install_plan_env/include/plan_env/grid_map.h:261:79: warning: ‘geometry_msgs::msg::PoseStamped_<std::allocator<void> >::ConstPtr’ is deprecated [-Wdeprecated-declarations]
+  261 |                          const geometry_msgs::msg::PoseStamped::ConstPtr &pose);
+      |                                                                               ^
+In file included from /opt/ros/jazzy/include/geometry_msgs/geometry_msgs/msg/pose_stamped.hpp:7,
+                 from /home/dev/ws_iap/src/iap/results/icra27/icra026/install_plan_env/include/plan_env/grid_map.h:9:
+/opt/ros/jazzy/include/geometry_msgs/geometry_msgs/msg/detail/pose_stamped__struct.hpp:119:5: note: declared here
+  119 |     ConstPtr;
+      |     ^~~~~~~~
+/home/dev/ws_iap/src/iap/results/icra27/icra026/install_plan_env/include/plan_env/grid_map.h:262:71: warning: ‘nav_msgs::msg::Odometry_<std::allocator<void> >::ConstPtr’ is deprecated [-Wdeprecated-declarations]
+  262 |   void extrinsicCallback(const nav_msgs::msg::Odometry::ConstPtr &odom);
+      |                                                                       ^
+In file included from /opt/ros/jazzy/include/nav_msgs/nav_msgs/msg/odometry.hpp:7,
+                 from /home/dev/ws_iap/src/iap/results/icra27/icra026/install_plan_env/include/plan_env/grid_map.h:15:
+/opt/ros/jazzy/include/nav_msgs/nav_msgs/msg/detail/odometry__struct.hpp:150:5: note: declared here
+  150 |     ConstPtr;
+      |     ^~~~~~~~
+/home/dev/ws_iap/src/iap/results/icra27/icra026/install_plan_env/include/plan_env/grid_map.h:263:117: warning: ‘sensor_msgs::msg::Image_<std::allocator<void> >::ConstPtr’ is deprecated [-Wdeprecated-declarations]
+  263 |   void depthOdomCallback(const sensor_msgs::msg::Image::ConstPtr &img, const nav_msgs::msg::Odometry::ConstPtr &odom);
+      |                                                                                                                     ^
+/opt/ros/jazzy/include/sensor_msgs/sensor_msgs/msg/detail/image__struct.hpp:177:5: note: declared here
+  177 |     ConstPtr;
+      |     ^~~~~~~~
+/home/dev/ws_iap/src/iap/results/icra27/icra026/install_plan_env/include/plan_env/grid_map.h:263:117: warning: ‘nav_msgs::msg::Odometry_<std::allocator<void> >::ConstPtr’ is deprecated [-Wdeprecated-declarations]
+  263 |   void depthOdomCallback(const sensor_msgs::msg::Image::ConstPtr &img, const nav_msgs::msg::Odometry::ConstPtr &odom);
+      |                                                                                                                     ^
+/opt/ros/jazzy/include/nav_msgs/nav_msgs/msg/detail/odometry__struct.hpp:150:5: note: declared here
+  150 |     ConstPtr;
+      |     ^~~~~~~~
+/home/dev/ws_iap/src/iap/results/icra27/icra026/install_plan_env/include/plan_env/grid_map.h:264:72: warning: ‘sensor_msgs::msg::PointCloud2_<std::allocator<void> >::ConstPtr’ is deprecated [-Wdeprecated-declarations]
+  264 |   void cloudCallback(const sensor_msgs::msg::PointCloud2::ConstPtr &img);
+      |                                                                        ^
+In file included from /opt/ros/jazzy/include/sensor_msgs/sensor_msgs/msg/point_cloud2.hpp:7,
+                 from /opt/ros/jazzy/include/pcl_conversions/pcl_conversions/pcl_conversions.h:59,
+                 from /home/dev/ws_iap/src/iap/results/icra27/icra026/install_plan_env/include/plan_env/grid_map.h:23:
+/opt/ros/jazzy/include/sensor_msgs/sensor_msgs/msg/detail/point_cloud2__struct.hpp:198:5: note: declared here
+  198 |     ConstPtr;
+      |     ^~~~~~~~
+In file included from /home/dev/ws_iap/src/iap/results/icra27/icra026/install_bspline_opt/include/bspline_opt/bspline_optimizer.h:10:
+/home/dev/ws_iap/src/iap/results/icra27/icra026/install_plan_env/include/plan_env/obj_predictor.h:126:75: warning: ‘geometry_msgs::msg::PoseStamped_<std::allocator<void> >::ConstPtr’ is deprecated [-Wdeprecated-declarations]
+  126 |     void poseCallback(const geometry_msgs::msg::PoseStamped::ConstPtr &msg);
+      |                                                                           ^
+/opt/ros/jazzy/include/geometry_msgs/geometry_msgs/msg/detail/pose_stamped__struct.hpp:119:5: note: declared here
+  119 |     ConstPtr;
+      |     ^~~~~~~~
+/home/dev/ws_iap/src/iap/results/icra27/icra026/install_plan_env/include/plan_env/obj_predictor.h:163:77: warning: ‘visualization_msgs::msg::Marker_<std::allocator<void> >::ConstPtr’ is deprecated [-Wdeprecated-declarations]
+  163 |     void markerCallback(const visualization_msgs::msg::Marker::ConstPtr &msg);
+      |                                                                             ^
+In file included from /opt/ros/jazzy/include/visualization_msgs/visualization_msgs/msg/marker.hpp:7,
+                 from /home/dev/ws_iap/src/iap/results/icra27/icra026/install_plan_env/include/plan_env/grid_map.h:19:
+/opt/ros/jazzy/include/visualization_msgs/visualization_msgs/msg/detail/marker__struct.hpp:370:5: note: declared here
+  370 |     ConstPtr;
+      |     ^~~~~~~~
+In file included from /home/dev/ws_iap/src/iap/results/icra27/icra026/install_bspline_opt/include/bspline_opt/bspline_optimizer.h:13:
+/home/dev/ws_iap/src/iap/results/icra27/icra026/install_bspline_opt/include/bspline_opt/lbfgs.hpp: In function ‘int lbfgs::line_search_morethuente(int, double*, double*, double*, double*, double*, const double*, const double*, const double*, const double*, callback_data_t*, const lbfgs_parameter_t*)’:
+/home/dev/ws_iap/src/iap/results/icra27/icra026/install_bspline_opt/include/bspline_opt/lbfgs.hpp:723:54: warning: unused parameter ‘gp’ [-Wunused-parameter]
+  723 |                                        const double *gp,
+      |                                        ~~~~~~~~~~~~~~^~
+[ 87%] Building CXX object CMakeFiles/test_planning_risk_context.dir/src/p0_risk_grid_runtime.cpp.o
+[ 89%] Building CXX object CMakeFiles/test_planning_risk_context.dir/src/p0_occupancy_epoch_adapter.cpp.o
+[ 91%] Building CXX object CMakeFiles/test_planning_risk_context.dir/src/p1_candidate_selection.cpp.o
+[ 92%] Building CXX object CMakeFiles/test_planning_risk_context.dir/src/p2_candidate_ranking.cpp.o
+In file included from /home/dev/ws_iap/src/iap/results/icra27/icra026/install_path_searching/include/path_searching/dyn_a_star.h:7,
+                 from /home/dev/ws_iap/src/iap/results/icra27/icra026/install_bspline_opt/include/bspline_opt/bspline_optimizer.h:7,
+                 from /home/dev/ws_iap/src/iap/src/iap/planner/plan_manage/include/ego_planner/p2_candidate_ranking.h:10,
+                 from /home/dev/ws_iap/src/iap/src/iap/planner/plan_manage/src/p2_candidate_ranking.cpp:1:
+/home/dev/ws_iap/src/iap/results/icra27/icra026/install_plan_env/include/plan_env/grid_map.h:38:27: warning: ‘template<class _Arg, class _Result> struct std::unary_function’ is deprecated [-Wdeprecated-declarations]
+   38 | struct matrix_hash : std::unary_function<T, size_t>
+      |                           ^~~~~~~~~~~~~~
+In file included from /usr/include/c++/13/bits/unique_ptr.h:37,
+                 from /usr/include/c++/13/memory:78,
+                 from /home/dev/ws_iap/src/iap/src/iap/planner/plan_manage/include/ego_planner/p2_candidate_ranking.h:5:
+/usr/include/c++/13/bits/stl_function.h:117:12: note: declared here
+  117 |     struct unary_function
+      |            ^~~~~~~~~~~~~~
+/home/dev/ws_iap/src/iap/results/icra27/icra026/install_plan_env/include/plan_env/grid_map.h:261:79: warning: ‘sensor_msgs::msg::Image_<std::allocator<void> >::ConstPtr’ is deprecated [-Wdeprecated-declarations]
+  261 |                          const geometry_msgs::msg::PoseStamped::ConstPtr &pose);
+      |                                                                               ^
+In file included from /opt/ros/jazzy/include/sensor_msgs/sensor_msgs/msg/image.hpp:7,
+                 from /opt/ros/jazzy/include/cv_bridge/cv_bridge/cv_bridge.hpp:40,
+                 from /home/dev/ws_iap/src/iap/results/icra27/icra026/install_plan_env/include/plan_env/grid_map.h:8:
+/opt/ros/jazzy/include/sensor_msgs/sensor_msgs/msg/detail/image__struct.hpp:177:5: note: declared here
+  177 |     ConstPtr;
+      |     ^~~~~~~~
+/home/dev/ws_iap/src/iap/results/icra27/icra026/install_plan_env/include/plan_env/grid_map.h:261:79: warning: ‘geometry_msgs::msg::PoseStamped_<std::allocator<void> >::ConstPtr’ is deprecated [-Wdeprecated-declarations]
+  261 |                          const geometry_msgs::msg::PoseStamped::ConstPtr &pose);
+      |                                                                               ^
+In file included from /opt/ros/jazzy/include/geometry_msgs/geometry_msgs/msg/pose_stamped.hpp:7,
+                 from /home/dev/ws_iap/src/iap/results/icra27/icra026/install_plan_env/include/plan_env/grid_map.h:9:
+/opt/ros/jazzy/include/geometry_msgs/geometry_msgs/msg/detail/pose_stamped__struct.hpp:119:5: note: declared here
+  119 |     ConstPtr;
+      |     ^~~~~~~~
+/home/dev/ws_iap/src/iap/results/icra27/icra026/install_plan_env/include/plan_env/grid_map.h:262:71: warning: ‘nav_msgs::msg::Odometry_<std::allocator<void> >::ConstPtr’ is deprecated [-Wdeprecated-declarations]
+  262 |   void extrinsicCallback(const nav_msgs::msg::Odometry::ConstPtr &odom);
+      |                                                                       ^
+In file included from /opt/ros/jazzy/include/nav_msgs/nav_msgs/msg/odometry.hpp:7,
+                 from /home/dev/ws_iap/src/iap/results/icra27/icra026/install_plan_env/include/plan_env/grid_map.h:15:
+/opt/ros/jazzy/include/nav_msgs/nav_msgs/msg/detail/odometry__struct.hpp:150:5: note: declared here
+  150 |     ConstPtr;
+      |     ^~~~~~~~
+/home/dev/ws_iap/src/iap/results/icra27/icra026/install_plan_env/include/plan_env/grid_map.h:263:117: warning: ‘sensor_msgs::msg::Image_<std::allocator<void> >::ConstPtr’ is deprecated [-Wdeprecated-declarations]
+  263 |   void depthOdomCallback(const sensor_msgs::msg::Image::ConstPtr &img, const nav_msgs::msg::Odometry::ConstPtr &odom);
+      |                                                                                                                     ^
+/opt/ros/jazzy/include/sensor_msgs/sensor_msgs/msg/detail/image__struct.hpp:177:5: note: declared here
+  177 |     ConstPtr;
+      |     ^~~~~~~~
+/home/dev/ws_iap/src/iap/results/icra27/icra026/install_plan_env/include/plan_env/grid_map.h:263:117: warning: ‘nav_msgs::msg::Odometry_<std::allocator<void> >::ConstPtr’ is deprecated [-Wdeprecated-declarations]
+  263 |   void depthOdomCallback(const sensor_msgs::msg::Image::ConstPtr &img, const nav_msgs::msg::Odometry::ConstPtr &odom);
+      |                                                                                                                     ^
+/opt/ros/jazzy/include/nav_msgs/nav_msgs/msg/detail/odometry__struct.hpp:150:5: note: declared here
+  150 |     ConstPtr;
+      |     ^~~~~~~~
+/home/dev/ws_iap/src/iap/results/icra27/icra026/install_plan_env/include/plan_env/grid_map.h:264:72: warning: ‘sensor_msgs::msg::PointCloud2_<std::allocator<void> >::ConstPtr’ is deprecated [-Wdeprecated-declarations]
+  264 |   void cloudCallback(const sensor_msgs::msg::PointCloud2::ConstPtr &img);
+      |                                                                        ^
+In file included from /opt/ros/jazzy/include/sensor_msgs/sensor_msgs/msg/point_cloud2.hpp:7,
+                 from /opt/ros/jazzy/include/pcl_conversions/pcl_conversions/pcl_conversions.h:59,
+                 from /home/dev/ws_iap/src/iap/results/icra27/icra026/install_plan_env/include/plan_env/grid_map.h:23:
+/opt/ros/jazzy/include/sensor_msgs/sensor_msgs/msg/detail/point_cloud2__struct.hpp:198:5: note: declared here
+  198 |     ConstPtr;
+      |     ^~~~~~~~
+In file included from /home/dev/ws_iap/src/iap/results/icra27/icra026/install_bspline_opt/include/bspline_opt/bspline_optimizer.h:10:
+/home/dev/ws_iap/src/iap/results/icra27/icra026/install_plan_env/include/plan_env/obj_predictor.h:126:75: warning: ‘geometry_msgs::msg::PoseStamped_<std::allocator<void> >::ConstPtr’ is deprecated [-Wdeprecated-declarations]
+  126 |     void poseCallback(const geometry_msgs::msg::PoseStamped::ConstPtr &msg);
+      |                                                                           ^
+/opt/ros/jazzy/include/geometry_msgs/geometry_msgs/msg/detail/pose_stamped__struct.hpp:119:5: note: declared here
+  119 |     ConstPtr;
+      |     ^~~~~~~~
+/home/dev/ws_iap/src/iap/results/icra27/icra026/install_plan_env/include/plan_env/obj_predictor.h:163:77: warning: ‘visualization_msgs::msg::Marker_<std::allocator<void> >::ConstPtr’ is deprecated [-Wdeprecated-declarations]
+  163 |     void markerCallback(const visualization_msgs::msg::Marker::ConstPtr &msg);
+      |                                                                             ^
+In file included from /opt/ros/jazzy/include/visualization_msgs/visualization_msgs/msg/marker.hpp:7,
+                 from /home/dev/ws_iap/src/iap/results/icra27/icra026/install_plan_env/include/plan_env/grid_map.h:19:
+/opt/ros/jazzy/include/visualization_msgs/visualization_msgs/msg/detail/marker__struct.hpp:370:5: note: declared here
+  370 |     ConstPtr;
+      |     ^~~~~~~~
+In file included from /home/dev/ws_iap/src/iap/results/icra27/icra026/install_bspline_opt/include/bspline_opt/bspline_optimizer.h:13:
+/home/dev/ws_iap/src/iap/results/icra27/icra026/install_bspline_opt/include/bspline_opt/lbfgs.hpp: In function ‘int lbfgs::line_search_morethuente(int, double*, double*, double*, double*, double*, const double*, const double*, const double*, const double*, callback_data_t*, const lbfgs_parameter_t*)’:
+/home/dev/ws_iap/src/iap/results/icra27/icra026/install_bspline_opt/include/bspline_opt/lbfgs.hpp:723:54: warning: unused parameter ‘gp’ [-Wunused-parameter]
+  723 |                                        const double *gp,
+      |                                        ~~~~~~~~~~~~~~^~
+[ 94%] Building CXX object CMakeFiles/test_planning_risk_context.dir/src/p3_reference_bias.cpp.o
+[ 96%] Building CXX object CMakeFiles/test_planning_risk_context.dir/src/p5_runtime_integrity_gate.cpp.o
+[ 98%] Building CXX object CMakeFiles/test_planning_risk_context.dir/src/safety_rviz_publisher.cpp.o
+[100%] Linking CXX executable test_planning_risk_context
+[100%] Built target test_planning_risk_context

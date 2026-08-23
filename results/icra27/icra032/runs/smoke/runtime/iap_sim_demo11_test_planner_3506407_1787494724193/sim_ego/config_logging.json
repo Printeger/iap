@@ -1,0 +1,9 @@
+{
+  "logging": {
+    "log_dir": "/home/dev/ws_iap/src/iap/results/icra27/icra032/runs/smoke/runtime/iap_logs",
+    "save_logs": true,
+    "rotate_logs": true,
+    "max_file_size_kb": 8192,
+    "max_files": 10
+  }
+}

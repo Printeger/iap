@@ -734,6 +734,51 @@ def _p0_source_contract_failures(row: dict[str, Any]) -> list[str]:
     return failures
 
 
+def _is_p0_pre_refresh_observation(message: dict[str, Any]) -> bool:
+    """Recognize only the health publisher's strict pre-refresh startup row."""
+    generation = message.get("generation_id")
+    if (
+        not isinstance(generation, int)
+        or isinstance(generation, bool)
+        or generation != 0
+        or message.get("reason") != "not_ready"
+        or message.get("ready") is not False
+    ):
+        return False
+    identity_fields = (
+        "refresh_callback_start_stamp_s",
+        "refresh_callback_start_steady_s",
+        "refresh_callback_end_stamp_s",
+        "refresh_callback_end_steady_s",
+    )
+    if any(message.get(field) not in (None, "") for field in identity_fields):
+        return False
+    work_counter_fields = tuple(
+        field
+        for field in REQUIRED_P0_COUNTER_FIELDS
+        if field
+        not in {
+            "predictor_requested_worker_count",
+            "predictor_effective_worker_count",
+        }
+    )
+    if any(
+        message.get(field) not in (None, "", 0)
+        or isinstance(message.get(field), bool)
+        for field in work_counter_fields
+    ):
+        return False
+    work_timing_fields = (
+        "refresh_scheduled_steady_s",
+        "refresh_queue_delay_ms",
+        "refresh_duration_ms",
+        "refresh_elapsed_ms",
+        "provider_batch_duration_ms",
+        "refresh_stamp_s",
+    )
+    return all(message.get(field) in (None, "") for field in work_timing_fields)
+
+
 def analyze_p0_messages(
     messages: Iterable[dict[str, Any]],
     protocol: str = "benchmark",
@@ -743,9 +788,13 @@ def analyze_p0_messages(
     callbacks: dict[float, tuple[int, dict[str, Any]]] = {}
     malformed_callback_rows: list[dict[str, Any]] = []
     captured_observation_count = 0
+    pre_refresh_observation_count = 0
     duplicate_callback_observation_count = 0
     for message in messages:
         captured_observation_count += 1
+        if _is_p0_pre_refresh_observation(message):
+            pre_refresh_observation_count += 1
+            continue
         callback_key = _float(message.get("refresh_callback_end_steady_s"))
         if not math.isfinite(callback_key):
             row = {field: message.get(field, "") for field in P0_FIELDS}
@@ -881,6 +930,7 @@ def analyze_p0_messages(
         "minimum_successful_generations": minimum_successful_generations,
         "expected_refresh_query_count": EXPECTED_REFRESH_QUERY_COUNT,
         "captured_observation_count": captured_observation_count,
+        "pre_refresh_observation_count": pre_refresh_observation_count,
         "callback_representative_count": len(callbacks),
         "duplicate_callback_observation_count": duplicate_callback_observation_count,
         "malformed_callback_identity_count": len(malformed_callback_rows),

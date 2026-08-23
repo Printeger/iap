@@ -1,0 +1,62 @@
+{
+  "gate0a": {
+    "reason": "no_runs",
+    "stable_scenarios": [],
+    "status": "NO-GO-P2"
+  },
+  "gate0b": {
+    "callback_representative_count": 19,
+    "captured_observation_count": 34,
+    "duplicate_callback_observation_count": 14,
+    "duplicate_generation_observation_count": 1,
+    "expected_refresh_query_count": 76800,
+    "failed_ratio": 0.7222222222222222,
+    "failed_refresh_count": 13,
+    "failures": [
+      "successful_generation_timing_nonfinite:generation_interval_ms",
+      "refresh_query_count_mismatch",
+      "spatial_recompute_plus_reuse_mismatch",
+      "horizon_fusion_mismatch",
+      "snapshot_unavailable",
+      "successful_generation_timing_nonfinite:provider_batch_duration_ms",
+      "health_reason_not_ok",
+      "snapshot_failure_reason_not_none"
+    ],
+    "gate": "P0_EVIDENCE_CONTRACT_FAIL",
+    "generation_interval_ms_p50": 500.10367199999985,
+    "generation_interval_ms_p95": 509.0746564,
+    "integrity_report_count": 166,
+    "malformed_callback_identity_count": 0,
+    "manifest_failures": [],
+    "minimum_successful_generations": 1,
+    "p95_over_refresh_period": 0.3783751252,
+    "pre_refresh_observation_count": 1,
+    "protocol": "smoke",
+    "provider_batch_duration_ms_p50": 147.99563,
+    "provider_batch_duration_ms_p95": 154.6838798,
+    "query_shape_ok": true,
+    "recommendations": [],
+    "refresh_elapsed_ms_max": 191.647152,
+    "refresh_elapsed_ms_p50": 176.912748,
+    "refresh_elapsed_ms_p95": 189.1875626,
+    "schema_version": "gate0_p0_summary_v1",
+    "stale_ratio": 0.3333333333333333,
+    "successful_generation_count": 5,
+    "valid_integrity_report_count": 166
+  },
+  "runs": [
+    {
+      "attempt_count": 0,
+      "critical_violation": false,
+      "manifest_failures": "",
+      "qualified": false,
+      "run_id": "p0-smoke",
+      "scenario": "gnss_open_sky",
+      "selected_publish_reached": false,
+      "selected_reached_downstream": false,
+      "selected_refinement_reached": false,
+      "selected_update_reached": false,
+      "under_two_success_attempts": 0
+    }
+  ]
+}

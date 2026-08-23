@@ -1,0 +1,24 @@
+Running main() from /opt/ros/jazzy/src/gtest_vendor/src/gtest_main.cc
+Note: Google Test filter = P0RiskGridRuntimeStampTest.NewerLiveSourcesDoNotRevokeCapturedProductionTransaction:P0RiskGridRuntimeStampTest.FrozenPointZeroOneSigmaReachesPredictionAndGrowsMonotonically
+[==========] Running 2 tests from 1 test suite.
+[----------] Global test environment set-up.
+[----------] 2 tests from P0RiskGridRuntimeStampTest
+[ RUN      ] P0RiskGridRuntimeStampTest.NewerLiveSourcesDoNotRevokeCapturedProductionTransaction
+[INFO] [1787493925.311520563] [p0_captured_transaction_starvation_test]: [p0] risk grid ready=1 stale=0 age=0.000 valid=1.000 unknown=0.000 gen=1 provider_queries=54 occupied_skip=0 provider_stale=0 provider_invalid=0 gnss_used=54 lidar_used=0 prior_used=54 stale_current_prior=0 regularized=54 conservative_max=0 lidar_points=0 lidar_fim_primitives=0 lidar_fim_valid_normals=0 lidar_fim_fallback=not_evaluated dominant_unknown=:0 refresh_stamp=100.000000 grid_stamp=100.000000 elapsed_ms=0.834 queries=54 reason=ok
+/home/dev/ws_iap/src/iap/src/iap/planner/plan_manage/test/test_p0_risk_grid_runtime.cpp:3613: Failure
+Value of: newer_voxel.occupancy->raw_occupied
+  Actual: false
+Expected: true
+
+[  FAILED  ] P0RiskGridRuntimeStampTest.NewerLiveSourcesDoNotRevokeCapturedProductionTransaction (24 ms)
+[ RUN      ] P0RiskGridRuntimeStampTest.FrozenPointZeroOneSigmaReachesPredictionAndGrowsMonotonically
+[       OK ] P0RiskGridRuntimeStampTest.FrozenPointZeroOneSigmaReachesPredictionAndGrowsMonotonically (10 ms)
+[----------] 2 tests from P0RiskGridRuntimeStampTest (35 ms total)
+
+[----------] Global test environment tear-down
+[==========] 2 tests from 1 test suite ran. (35 ms total)
+[  PASSED  ] 1 test.
+[  FAILED  ] 1 test, listed below:
+[  FAILED  ] P0RiskGridRuntimeStampTest.NewerLiveSourcesDoNotRevokeCapturedProductionTransaction
+
+ 1 FAILED TEST

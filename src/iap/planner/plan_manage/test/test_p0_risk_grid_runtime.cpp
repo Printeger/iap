@@ -1723,6 +1723,19 @@ class P0RiskGridRuntimeStampTest : public ::testing::Test {
         std::make_shared<const std::vector<Eigen::Vector3d>>();
   }
 
+  static void publishNewerEmptyLidarVersion(P0RiskGridRuntime* runtime) {
+    std::lock_guard<std::mutex> lock(
+        runtime->lidar_predictor_input_mutex_);
+    runtime->latest_lidar_map_points_ =
+        std::make_shared<const std::vector<Eigen::Vector3d>>();
+    runtime->latest_lidar_fim_primitives_ =
+        std::make_shared<const std::vector<iap::LidarFimPrimitive>>();
+    ++runtime->latest_lidar_generation_;
+    if (runtime->latest_lidar_generation_ == 0u) {
+      ++runtime->latest_lidar_generation_;
+    }
+  }
+
   static void seedValidInputs(P0RiskGridRuntime* runtime,
                               const double odom_stamp,
                               const double current_stamp) {
@@ -1860,7 +1873,7 @@ class P0RiskGridRuntimeStampTest : public ::testing::Test {
     bool callback_produces_valid_epoch = false;
   };
 
-  static void expectExplicitAbsentGnssRaceRollback(
+  static void expectExplicitAbsentGnssRacePublication(
       const ExplicitAbsentGnssRaceScenario& scenario) {
     SCOPED_TRACE(scenario.node_name);
     ensure_rclcpp();
@@ -1899,45 +1912,23 @@ class P0RiskGridRuntimeStampTest : public ::testing::Test {
 
     seedValidInputs(&runtime, 105.0, 105.0);
     publish_callback.store(true);
-    EXPECT_FALSE(refreshOnce(&runtime));
-    EXPECT_EQ(runtime.health().reason, "predictor_spatial_source_changed");
+    ASSERT_TRUE(refreshOnce(&runtime));
     EXPECT_EQ(gnssEpochGeneration(runtime), absent_generation + 1u);
     EXPECT_EQ(hasLatestGnssEpoch(runtime),
               scenario.callback_produces_valid_epoch);
-    expectSameActiveGeneration(accepted, runtime.acquireSnapshot());
-    const auto aborted = predictorDiagnosticCounts(runtime);
-    EXPECT_EQ(aborted.retained_positions, 0u);
-    EXPECT_EQ(aborted.exact_retained_positions, 0u);
-    EXPECT_EQ(aborted.ttl_retained_positions, 0u);
-    EXPECT_EQ(aborted.entered_positions, 0u);
-    EXPECT_EQ(aborted.evicted_positions, 0u);
-    EXPECT_EQ(aborted.watchdog_forced_full_rebuilds, 0u);
+    EXPECT_GT(runtime.acquireSnapshot()->generation_id(),
+              accepted->generation_id());
 
-    // Reconstruct the captured explicit-absent source version only to
-    // observe the committed rolling slots and watchdog epoch after abort.
-    if (scenario.callback_produces_valid_epoch) {
-      sendRange(&runtime,
-                std::make_shared<gnss_comm::msg::GnssMeasMsg>());
-    }
-    setGnssEpochGeneration(&runtime, absent_generation);
-    ASSERT_FALSE(hasLatestGnssEpoch(runtime));
-    seedValidInputs(&runtime, 100.0, 100.0);
     ASSERT_TRUE(refreshOnce(&runtime));
-    const auto rolling_retry = predictorDiagnosticCounts(runtime);
-    EXPECT_EQ(rolling_retry.spatial_recompute, 0u);
-    EXPECT_EQ(rolling_retry.spatial_reuse, 54u);
-    EXPECT_EQ(rolling_retry.retained_positions, 27u);
-    EXPECT_EQ(rolling_retry.exact_retained_positions, 27u);
-    EXPECT_EQ(rolling_retry.horizon_fusions, 54u);
-    EXPECT_EQ(rolling_retry.watchdog_forced_full_rebuilds, 0u);
-
-    seedValidInputs(&runtime, 105.0, 105.0);
-    ASSERT_TRUE(refreshOnce(&runtime));
-    const auto watchdog_retry = predictorDiagnosticCounts(runtime);
-    EXPECT_EQ(watchdog_retry.spatial_recompute, 27u);
-    EXPECT_EQ(watchdog_retry.retained_positions, 0u);
-    EXPECT_EQ(watchdog_retry.watchdog_forced_full_rebuilds, 1u);
-    EXPECT_EQ(watchdog_retry.invalidation_reason, "watchdog_forced");
+    const auto next_refresh = predictorDiagnosticCounts(runtime);
+    EXPECT_EQ(next_refresh.spatial_recompute,
+              scenario.callback_produces_valid_epoch ? 27u : 0u);
+    EXPECT_EQ(next_refresh.retained_positions,
+              scenario.callback_produces_valid_epoch ? 0u : 27u);
+    EXPECT_EQ(next_refresh.invalidation_reason,
+              scenario.callback_produces_valid_epoch
+                  ? "gnss_epoch_changed"
+                  : "none");
   }
 
   static std::shared_ptr<const std::vector<Eigen::Vector3d>> lidarMapPoints(
@@ -2931,8 +2922,8 @@ TEST_F(P0RiskGridRuntimeStampTest,
 }
 
 TEST_F(P0RiskGridRuntimeStampTest,
-       OptionalExplicitAbsentToValidCallbackDuringProviderWorkRollsBack) {
-  expectExplicitAbsentGnssRaceRollback(
+       OptionalExplicitAbsentToValidCallbackPublishesCapturedAbsence) {
+  expectExplicitAbsentGnssRacePublication(
       {"p0_optional_absent_to_valid_gnss_race_test",
        iap::PredictorSourceMode::GnssOnly,
        iap::PredictorGnssEpochPolicy::Optional,
@@ -2940,8 +2931,8 @@ TEST_F(P0RiskGridRuntimeStampTest,
 }
 
 TEST_F(P0RiskGridRuntimeStampTest,
-       AutoExplicitAbsentToAbsentCallbackRollsBackRollingState) {
-  expectExplicitAbsentGnssRaceRollback(
+       AutoExplicitAbsentToAbsentCallbackPublishesCapturedAbsence) {
+  expectExplicitAbsentGnssRacePublication(
       {"p0_auto_absent_to_absent_gnss_race_test",
        iap::PredictorSourceMode::Fusion,
        iap::PredictorGnssEpochPolicy::Auto,
@@ -2949,7 +2940,7 @@ TEST_F(P0RiskGridRuntimeStampTest,
 }
 
 TEST_F(P0RiskGridRuntimeStampTest,
-       NeverSeenOptionalAndAutoAbortOnFirstCallbackDuringProviderWork) {
+       NeverSeenOptionalAndAutoPublishCapturedAbsenceOnFirstCallback) {
   ensure_rclcpp();
   const std::array<iap::PredictorGnssEpochPolicy, 2> policies = {
       iap::PredictorGnssEpochPolicy::Optional,
@@ -2986,17 +2977,15 @@ TEST_F(P0RiskGridRuntimeStampTest,
     ASSERT_NE(accepted, nullptr);
 
     publish_first_absent.store(true);
-    EXPECT_FALSE(refreshOnce(&runtime)) << index;
-    EXPECT_EQ(runtime.health().reason, "predictor_spatial_source_changed")
-        << index;
+    EXPECT_TRUE(refreshOnce(&runtime)) << index;
     EXPECT_EQ(gnssEpochGeneration(runtime), 1u) << index;
     EXPECT_FALSE(hasLatestGnssEpoch(runtime)) << index;
-    expectSameActiveGeneration(accepted, runtime.acquireSnapshot());
-    const auto aborted = predictorDiagnosticCounts(runtime);
-    EXPECT_EQ(aborted.retained_positions, 0u) << index;
-    EXPECT_EQ(aborted.exact_retained_positions, 0u) << index;
-    EXPECT_EQ(aborted.ttl_retained_positions, 0u) << index;
-    EXPECT_EQ(aborted.watchdog_forced_full_rebuilds, 0u) << index;
+    EXPECT_GT(runtime.acquireSnapshot()->generation_id(),
+              accepted->generation_id()) << index;
+    ASSERT_TRUE(refreshOnce(&runtime)) << index;
+    const auto next_refresh = predictorDiagnosticCounts(runtime);
+    EXPECT_EQ(next_refresh.spatial_recompute, 0u) << index;
+    EXPECT_EQ(next_refresh.retained_positions, 27u) << index;
   }
 }
 
@@ -3510,6 +3499,107 @@ TEST_F(P0RiskGridRuntimeStampTest,
 }
 
 TEST_F(P0RiskGridRuntimeStampTest,
+       NewerLiveSourcesDoNotRevokeCapturedProductionTransaction) {
+  ensure_rclcpp();
+  auto node = std::make_shared<rclcpp::Node>(
+      "p0_captured_transaction_starvation_test",
+      rclcpp::NodeOptions().allow_undeclared_parameters(false));
+  auto config = enabledConfig();
+  config.grid.skip_occupied_voxels = false;
+  config.predictor_source_mode = iap::PredictorSourceMode::Fusion;
+  config.predictor_gnss_epoch_policy =
+      iap::PredictorGnssEpochPolicy::Required;
+  P0RiskGridRuntime runtime(node, config);
+  seedValidInputs(&runtime, 100.0, 100.0);
+  seedGnssEpoch(&runtime, 100.0, 8);
+  seedEmptyLidarOwners(&runtime);
+
+  const std::vector<Eigen::Vector3d> original_content = {
+      Eigen::Vector3d(-1.0, 0.0, 0.0)};
+  const std::vector<Eigen::Vector3d> newer_content = {
+      Eigen::Vector3d(1.0, 0.0, 0.0)};
+  auto live_occupancy_generation =
+      std::make_shared<std::atomic<uint64_t>>(2u);
+  auto live_occupancy_owner =
+      std::make_shared<P0OccupancyEpoch::SourceOwner>(
+          std::make_shared<const int>(1));
+  auto publish_newer_sources = std::make_shared<std::atomic<bool>>(false);
+  runtime.setOccupancyEpochFactory(
+      [&runtime, live_occupancy_generation, live_occupancy_owner,
+       publish_newer_sources, original_content, newer_content]() {
+        const uint64_t captured_generation =
+            live_occupancy_generation->load();
+        const auto captured_owner = *live_occupancy_owner;
+        auto capture = makeOccupancyEpochCapture(
+            live_occupancy_generation, captured_generation, 100.0, "map",
+            captured_generation == 2u ? original_content : newer_content,
+            captured_owner,
+            [live_occupancy_owner]() { return *live_occupancy_owner; });
+        auto original_query = capture.epoch->diagnostic_query;
+        auto query_invoked = std::make_shared<std::atomic<bool>>(false);
+        capture.epoch->diagnostic_query =
+            [&runtime, original_query, query_invoked,
+             publish_newer_sources, live_occupancy_generation,
+             live_occupancy_owner](const Eigen::Vector3d& position) {
+              if (!query_invoked->exchange(true) &&
+                  publish_newer_sources->exchange(false)) {
+                advancePriorGeneration(&runtime);
+                setCurrentProtectionLevels(&runtime, 2.0, 2.0);
+                seedGnssEpoch(&runtime, 100.0, 9);
+                publishNewerEmptyLidarVersion(&runtime);
+                *live_occupancy_owner = std::make_shared<const int>(2);
+                live_occupancy_generation->store(4u);
+              }
+              return original_query(position);
+            };
+        return capture;
+      });
+
+  ASSERT_TRUE(refreshOnce(&runtime));
+  const auto original_snapshot = runtime.acquireSnapshot();
+  ASSERT_NE(original_snapshot, nullptr);
+  ASSERT_EQ(rollingOccupancyGeneration(runtime), 2u);
+
+  publish_newer_sources->store(true);
+  ASSERT_TRUE(refreshOnce(&runtime));
+  const auto captured_snapshot = runtime.acquireSnapshot();
+  ASSERT_NE(captured_snapshot, nullptr);
+  EXPECT_GT(captured_snapshot->generation_id(),
+            original_snapshot->generation_id());
+  expectSnapshotsScientificallyEquivalent(
+      captured_snapshot, original_snapshot, false);
+  EXPECT_EQ(rollingOccupancyGeneration(runtime), 2u);
+
+  ASSERT_TRUE(refreshOnce(&runtime));
+  const auto newer_snapshot = runtime.acquireSnapshot();
+  ASSERT_NE(newer_snapshot, nullptr);
+  EXPECT_GT(newer_snapshot->generation_id(),
+            captured_snapshot->generation_id());
+  const auto diagnostics = predictorDiagnosticCounts(runtime);
+  EXPECT_EQ(diagnostics.spatial_recompute, 27u);
+  EXPECT_EQ(diagnostics.retained_positions, 0u);
+  EXPECT_EQ(diagnostics.full_invalidations, 1u);
+  EXPECT_EQ(diagnostics.invalidation_reason, "occupancy_source_changed");
+  EXPECT_EQ(rollingOccupancyGeneration(runtime), 4u);
+  bool found_newer_occupied_diagnostic = false;
+  const Eigen::Vector3i voxel_num = newer_snapshot->voxelNum();
+  for (int x = 0; x < voxel_num.x(); ++x) {
+    for (int y = 0; y < voxel_num.y(); ++y) {
+      for (int z = 0; z < voxel_num.z(); ++z) {
+        iap::RiskVoxel voxel;
+        ASSERT_TRUE(newer_snapshot->voxelAt(
+            0, Eigen::Vector3i(x, y, z), &voxel));
+        if (voxel.occupancy && voxel.occupancy->raw_occupied &&
+            voxel.occupancy->occupancy_generation == 4u) {
+          found_newer_occupied_diagnostic = true;
+        }
+      }
+    }
+  }
+  EXPECT_TRUE(found_newer_occupied_diagnostic);
+}
+
+TEST_F(P0RiskGridRuntimeStampTest,
        PositiveHorizonEarlyFailureKeepsPreviousGeneration) {
   ensure_rclcpp();
   auto node = std::make_shared<rclcpp::Node>(
@@ -3781,7 +3871,7 @@ TEST_F(P0RiskGridRuntimeStampTest,
 }
 
 TEST_F(P0RiskGridRuntimeStampTest,
-       ContradictorySameVersionAndDeltaRacePreserveLastCommittedBase) {
+       SameVersionContradictionFailsButNewerVersionDoesNotRevokeCapture) {
   ensure_rclcpp();
   auto config = enabledConfig();
   config.grid.skip_occupied_voxels = false;
@@ -3819,9 +3909,9 @@ TEST_F(P0RiskGridRuntimeStampTest,
   installStableOccupancyEpoch(
       &runtime, live_generation, source_owner, 4u, 100.5, base,
       [live_generation]() { live_generation->store(5u); });
-  EXPECT_FALSE(refreshOnce(&runtime));
-  EXPECT_EQ(runtime.health().reason, "occupancy_generation_changed");
-  EXPECT_EQ(rollingOccupancyGeneration(runtime), 2u);
+  ASSERT_TRUE(refreshOnce(&runtime));
+  EXPECT_EQ(runtime.health().reason, "ok");
+  EXPECT_EQ(rollingOccupancyGeneration(runtime), 4u);
   EXPECT_EQ(rollingOccupancyContentIdentity(runtime), accepted_content);
 
   installStableOccupancyEpoch(&runtime, live_generation, source_owner,
@@ -3837,7 +3927,7 @@ TEST_F(P0RiskGridRuntimeStampTest,
 }
 
 TEST_F(P0RiskGridRuntimeStampTest,
-       PriorGnssAndLidarRacesAfterEmptyDeltaAbortWithoutAdvancingBase) {
+       NewerPriorGnssAndLidarVersionsPublishThenApplyOnNextRefresh) {
   ensure_rclcpp();
   enum class Race { Prior, Gnss, Lidar };
   const std::vector<std::pair<const char*, Race>> races = {
@@ -3865,15 +3955,11 @@ TEST_F(P0RiskGridRuntimeStampTest,
     installStableOccupancyEpoch(&runtime, live_generation, source_owner,
                                 2u, 100.0, content);
     ASSERT_TRUE(refreshOnce(&runtime)) << race.first;
-    const auto accepted = runtime.acquireSnapshot();
     const uint64_t accepted_content =
         rollingOccupancyContentIdentity(runtime);
 
     seedValidInputs(&runtime, 100.5, 100.5);
     advancePriorGeneration(&runtime);
-    const uint64_t captured_prior = 2u;
-    const uint64_t captured_gnss = gnssEpochGeneration(runtime);
-    const uint64_t captured_lidar = 1u;
     std::function<void()> mutate;
     if (race.second == Race::Prior) {
       mutate = [&runtime]() { advancePriorGeneration(&runtime); };
@@ -3884,24 +3970,27 @@ TEST_F(P0RiskGridRuntimeStampTest,
     }
     installStableOccupancyEpoch(&runtime, live_generation, source_owner,
                                 5u, 100.5, content, std::move(mutate));
-    EXPECT_FALSE(refreshOnce(&runtime)) << race.first;
-    EXPECT_EQ(rollingOccupancyGeneration(runtime), 2u) << race.first;
+    ASSERT_TRUE(refreshOnce(&runtime)) << race.first;
+    EXPECT_EQ(rollingOccupancyGeneration(runtime), 5u) << race.first;
     EXPECT_EQ(rollingOccupancyContentIdentity(runtime), accepted_content)
         << race.first;
-    expectSameActiveGeneration(accepted, runtime.acquireSnapshot());
 
-    setPriorGeneration(&runtime, captured_prior);
-    setGnssEpochGeneration(&runtime, captured_gnss);
-    setLidarGeneration(&runtime, captured_lidar);
-    installStableOccupancyEpoch(&runtime, live_generation, source_owner,
-                                9u, 100.5, content);
     ASSERT_TRUE(refreshOnce(&runtime)) << race.first;
-    const auto retry = predictorDiagnosticCounts(runtime);
-    EXPECT_EQ(retry.spatial_recompute, 0u) << race.first;
-    EXPECT_EQ(retry.spatial_reuse, 54u) << race.first;
-    EXPECT_EQ(retry.retained_positions, 27u) << race.first;
-    EXPECT_EQ(retry.full_invalidations, 0u) << race.first;
-    EXPECT_EQ(rollingOccupancyGeneration(runtime), 9u) << race.first;
+    const auto next_refresh = predictorDiagnosticCounts(runtime);
+    const bool spatial_source_changed = race.second != Race::Prior;
+    EXPECT_EQ(next_refresh.spatial_recompute,
+              spatial_source_changed ? 27u : 0u) << race.first;
+    EXPECT_EQ(next_refresh.retained_positions,
+              spatial_source_changed ? 0u : 27u) << race.first;
+    EXPECT_EQ(next_refresh.full_invalidations,
+              spatial_source_changed ? 1u : 0u) << race.first;
+    EXPECT_EQ(next_refresh.invalidation_reason,
+              race.second == Race::Gnss
+                  ? "gnss_epoch_changed"
+                  : race.second == Race::Lidar
+                        ? "lidar_source_changed"
+                        : "none") << race.first;
+    EXPECT_EQ(rollingOccupancyGeneration(runtime), 5u) << race.first;
     EXPECT_EQ(rollingOccupancyContentIdentity(runtime), accepted_content)
         << race.first;
   }
@@ -4108,7 +4197,7 @@ TEST_F(P0RiskGridRuntimeStampTest,
 }
 
 TEST_F(P0RiskGridRuntimeStampTest,
-       OccupancyGenerationChangeDuringProviderBatchKeepsPreviousGeneration) {
+       NewerOccupancyGenerationPublishesCaptureThenAppearsNextRefresh) {
   ensure_rclcpp();
   auto node = std::make_shared<rclcpp::Node>(
       "p0_occupancy_generation_race_test",
@@ -4116,13 +4205,14 @@ TEST_F(P0RiskGridRuntimeStampTest,
   auto live_generation = std::make_shared<std::atomic<uint64_t>>(2u);
   std::atomic<bool> mutate{false};
   auto provider = std::make_unique<CallbackProvider>([&]() {
-    if (mutate.load()) {
+    if (mutate.exchange(false)) {
       live_generation->store(4u);
     }
   });
   P0RiskGridRuntime runtime(node, enabledConfig(), std::move(provider));
   runtime.setOccupancyEpochFactory([live_generation]() {
-    return makeOccupancyEpochCapture(live_generation, 2u, 100.0, "map");
+    return makeOccupancyEpochCapture(
+        live_generation, live_generation->load(), 100.0, "map");
   });
   seedValidInputs(&runtime, 100.0, 100.0);
 
@@ -4130,11 +4220,22 @@ TEST_F(P0RiskGridRuntimeStampTest,
   const auto accepted = runtime.acquireSnapshot();
   ASSERT_NE(accepted, nullptr);
   mutate.store(true);
-  EXPECT_FALSE(refreshOnce(&runtime));
-  EXPECT_EQ(runtime.health().reason, "occupancy_generation_changed");
-  const auto retained = runtime.acquireSnapshot();
-  EXPECT_EQ(retained->generation_id(), accepted->generation_id());
-  expectSameActiveGeneration(accepted, retained);
+  ASSERT_TRUE(refreshOnce(&runtime));
+  const auto captured = runtime.acquireSnapshot();
+  ASSERT_NE(captured, nullptr);
+  EXPECT_GT(captured->generation_id(), accepted->generation_id());
+  iap::RiskVoxel captured_voxel;
+  ASSERT_TRUE(captured->voxelAt(
+      0, Eigen::Vector3i::Zero(), &captured_voxel));
+  ASSERT_NE(captured_voxel.occupancy, nullptr);
+  EXPECT_EQ(captured_voxel.occupancy->occupancy_generation, 2u);
+
+  ASSERT_TRUE(refreshOnce(&runtime));
+  iap::RiskVoxel newer_voxel;
+  ASSERT_TRUE(runtime.acquireSnapshot()->voxelAt(
+      0, Eigen::Vector3i::Zero(), &newer_voxel));
+  ASSERT_NE(newer_voxel.occupancy, nullptr);
+  EXPECT_EQ(newer_voxel.occupancy->occupancy_generation, 4u);
 }
 
 TEST_F(P0RiskGridRuntimeStampTest,
@@ -4512,10 +4613,24 @@ TEST_F(P0RiskGridRuntimeStampTest,
   seedValidInputs(&runtime, 100.0, 100.0);
   seedGnssEpoch(&runtime, 100.0);
   std::atomic<bool> mutate{false};
-  installOccupancyEpochWithFirstQueryHook(&runtime, [&]() {
-    if (mutate.exchange(false)) {
-      advancePriorGeneration(&runtime);
-    }
+  auto live_generation = std::make_shared<std::atomic<uint64_t>>(2u);
+  const auto source_owner = std::make_shared<const int>(1);
+  auto live_source_owner =
+      std::make_shared<P0OccupancyEpoch::SourceOwner>(source_owner);
+  runtime.setOccupancyEpochFactory([&]() {
+    auto capture = makeOccupancyEpochCapture(
+        live_generation, 2u, 100.0, "map", {}, source_owner,
+        [live_source_owner]() { return *live_source_owner; });
+    auto original = capture.epoch->diagnostic_query;
+    auto invoked = std::make_shared<std::atomic<bool>>(false);
+    capture.epoch->diagnostic_query =
+        [&, original, invoked](const Eigen::Vector3d& position) {
+          if (!invoked->exchange(true) && mutate.exchange(false)) {
+            live_source_owner->reset();
+          }
+          return original(position);
+        };
+    return capture;
   });
 
   ASSERT_TRUE(refreshOnce(&runtime));
@@ -4529,6 +4644,7 @@ TEST_F(P0RiskGridRuntimeStampTest,
   EXPECT_EQ(aborted.spatial_recompute, 27u);
   EXPECT_EQ(aborted.retained_positions, 0u);
 
+  *live_source_owner = source_owner;
   ASSERT_TRUE(refreshOnce(&runtime));
   const auto retried = predictorDiagnosticCounts(runtime);
   EXPECT_EQ(retried.watchdog_forced_full_rebuilds, 1u);
@@ -4585,7 +4701,7 @@ TEST_F(P0RiskGridRuntimeStampTest,
 }
 
 TEST_F(P0RiskGridRuntimeStampTest,
-       PriorGenerationChangeDuringProviderBatchKeepsPreviousGeneration) {
+       NewerPriorGenerationDoesNotRevokeCapturedProviderBatch) {
   ensure_rclcpp();
   auto node = std::make_shared<rclcpp::Node>(
       "p0_prior_generation_race_test",
@@ -4593,7 +4709,7 @@ TEST_F(P0RiskGridRuntimeStampTest,
   std::atomic<bool> mutate{false};
   P0RiskGridRuntime* runtime_ptr = nullptr;
   auto provider = std::make_unique<CallbackProvider>([&]() {
-    if (mutate.load()) {
+    if (mutate.exchange(false)) {
       advancePriorGeneration(runtime_ptr);
     }
   });
@@ -4606,15 +4722,17 @@ TEST_F(P0RiskGridRuntimeStampTest,
   const auto accepted = runtime.acquireSnapshot();
   ASSERT_NE(accepted, nullptr);
   mutate.store(true);
-  EXPECT_FALSE(refreshOnce(&runtime));
-  EXPECT_EQ(runtime.health().reason, "prior_generation_changed");
-  const auto retained = runtime.acquireSnapshot();
-  EXPECT_EQ(retained->generation_id(), accepted->generation_id());
-  expectSameActiveGeneration(accepted, retained);
+  ASSERT_TRUE(refreshOnce(&runtime));
+  EXPECT_GT(runtime.acquireSnapshot()->generation_id(),
+            accepted->generation_id());
+  const auto captured_generation = runtime.acquireSnapshot()->generation_id();
+  ASSERT_TRUE(refreshOnce(&runtime));
+  EXPECT_GT(runtime.acquireSnapshot()->generation_id(),
+            captured_generation);
 }
 
 TEST_F(P0RiskGridRuntimeStampTest,
-       GnssEpochChangeDuringProductionRefreshKeepsPreviousGeneration) {
+       NewerGnssEpochPublishesCaptureThenInvalidatesNextRefresh) {
   ensure_rclcpp();
   auto node = std::make_shared<rclcpp::Node>(
       "p0_gnss_epoch_generation_race_test",
@@ -4628,7 +4746,7 @@ TEST_F(P0RiskGridRuntimeStampTest,
   seedGnssEpoch(&runtime, 100.0);
   std::atomic<bool> mutate{false};
   installOccupancyEpochWithFirstQueryHook(&runtime, [&]() {
-    if (mutate.load()) {
+    if (mutate.exchange(false)) {
       advanceGnssEpochGeneration(&runtime);
     }
   });
@@ -4636,9 +4754,15 @@ TEST_F(P0RiskGridRuntimeStampTest,
   ASSERT_TRUE(refreshOnce(&runtime));
   const auto accepted = runtime.acquireSnapshot();
   mutate.store(true);
-  EXPECT_FALSE(refreshOnce(&runtime));
-  EXPECT_EQ(runtime.health().reason, "predictor_spatial_source_changed");
-  expectSameActiveGeneration(accepted, runtime.acquireSnapshot());
+  ASSERT_TRUE(refreshOnce(&runtime));
+  EXPECT_GT(runtime.acquireSnapshot()->generation_id(),
+            accepted->generation_id());
+  ASSERT_TRUE(refreshOnce(&runtime));
+  const auto next_refresh = predictorDiagnosticCounts(runtime);
+  EXPECT_EQ(next_refresh.spatial_recompute, 27u);
+  EXPECT_EQ(next_refresh.retained_positions, 0u);
+  EXPECT_EQ(next_refresh.full_invalidations, 1u);
+  EXPECT_EQ(next_refresh.invalidation_reason, "gnss_epoch_changed");
 }
 
 TEST_F(P0RiskGridRuntimeStampTest,
@@ -4670,7 +4794,7 @@ TEST_F(P0RiskGridRuntimeStampTest,
 }
 
 TEST_F(P0RiskGridRuntimeStampTest,
-       LidarGenerationChangeDuringProductionRefreshKeepsPreviousGeneration) {
+       NewerLidarGenerationPublishesCaptureThenInvalidatesNextRefresh) {
   ensure_rclcpp();
   auto node = std::make_shared<rclcpp::Node>(
       "p0_lidar_generation_race_test",
@@ -4692,13 +4816,15 @@ TEST_F(P0RiskGridRuntimeStampTest,
   ASSERT_TRUE(refreshOnce(&runtime));
   const auto accepted = runtime.acquireSnapshot();
   mutate.store(true);
-  EXPECT_FALSE(refreshOnce(&runtime));
-  EXPECT_EQ(runtime.health().reason, "predictor_spatial_source_changed");
-  expectSameActiveGeneration(accepted, runtime.acquireSnapshot());
-  const auto diagnostics = predictorDiagnosticCounts(runtime);
-  EXPECT_EQ(diagnostics.retained_positions, 0u);
-  EXPECT_EQ(diagnostics.ttl_retained_positions, 0u);
-  EXPECT_EQ(diagnostics.watchdog_forced_full_rebuilds, 0u);
+  ASSERT_TRUE(refreshOnce(&runtime));
+  EXPECT_GT(runtime.acquireSnapshot()->generation_id(),
+            accepted->generation_id());
+  ASSERT_TRUE(refreshOnce(&runtime));
+  const auto next_refresh = predictorDiagnosticCounts(runtime);
+  EXPECT_EQ(next_refresh.spatial_recompute, 27u);
+  EXPECT_EQ(next_refresh.retained_positions, 0u);
+  EXPECT_EQ(next_refresh.full_invalidations, 1u);
+  EXPECT_EQ(next_refresh.invalidation_reason, "lidar_source_changed");
 }
 
 TEST_F(P0RiskGridRuntimeStampTest,
@@ -4838,6 +4964,64 @@ TEST_F(P0RiskGridRuntimeStampTest,
   EXPECT_FALSE(refreshOnce(&runtime));
   EXPECT_EQ(runtime.health().reason, "invalid_covariance_growth_prior");
   expectSameActiveGeneration(accepted, runtime.acquireSnapshot());
+}
+
+TEST_F(P0RiskGridRuntimeStampTest,
+       FrozenPointZeroOneSigmaReachesPredictionAndGrowsMonotonically) {
+  ensure_rclcpp();
+  auto config = enabledConfig();
+  config.grid.horizons_s = {0.0, 0.5, 1.0, 2.0};
+  config.grid.skip_occupied_voxels = false;
+  config.predictor_source_mode = iap::PredictorSourceMode::GnssOnly;
+  config.predictor_gnss_epoch_policy =
+      iap::PredictorGnssEpochPolicy::Required;
+  config.predictor_sigma_grow_m_sqrt_s = 0.01;
+  auto node = std::make_shared<rclcpp::Node>(
+      "p0_frozen_point_zero_one_sigma_growth_test",
+      rclcpp::NodeOptions().allow_undeclared_parameters(false));
+  P0RiskGridRuntime runtime(node, config);
+  seedValidInputs(&runtime, 100.0, 100.0);
+  seedGnssEpoch(&runtime, 100.0);
+  installOccupancyEpoch(&runtime, 100.0);
+
+  ASSERT_TRUE(refreshOnce(&runtime));
+  const auto snapshot = runtime.acquireSnapshot();
+  ASSERT_NE(snapshot, nullptr);
+  EXPECT_GT(runtime.health().predictor_prior_used_count, 0u);
+  std::vector<iap::RiskVoxel> grown_voxels;
+  for (int horizon = 0; horizon < snapshot->horizonCount(); ++horizon) {
+    iap::RiskVoxel voxel;
+    ASSERT_TRUE(snapshot->voxelAt(
+        horizon, Eigen::Vector3i(1, 1, 1), &voxel));
+    ASSERT_TRUE(voxel.valid);
+    ASSERT_TRUE(std::isfinite(voxel.hpl_pred));
+    ASSERT_TRUE(std::isfinite(voxel.vpl_pred));
+    grown_voxels.push_back(voxel);
+  }
+  for (std::size_t horizon = 1; horizon < grown_voxels.size(); ++horizon) {
+    EXPECT_GT(grown_voxels[horizon].hpl_pred,
+              grown_voxels[horizon - 1].hpl_pred);
+    EXPECT_GT(grown_voxels[horizon].vpl_pred,
+              grown_voxels[horizon - 1].vpl_pred);
+  }
+
+  auto zero_growth_config = config;
+  zero_growth_config.predictor_sigma_grow_m_sqrt_s = 0.0;
+  auto zero_growth_node = std::make_shared<rclcpp::Node>(
+      "p0_tau_zero_growth_reference_test",
+      rclcpp::NodeOptions().allow_undeclared_parameters(false));
+  P0RiskGridRuntime zero_growth(zero_growth_node, zero_growth_config);
+  seedValidInputs(&zero_growth, 100.0, 100.0);
+  seedGnssEpoch(&zero_growth, 100.0);
+  installOccupancyEpoch(&zero_growth, 100.0);
+  ASSERT_TRUE(refreshOnce(&zero_growth));
+  iap::RiskVoxel zero_growth_tau_zero;
+  ASSERT_TRUE(zero_growth.acquireSnapshot()->voxelAt(
+      0, Eigen::Vector3i(1, 1, 1), &zero_growth_tau_zero));
+  EXPECT_DOUBLE_EQ(grown_voxels.front().hpl_pred,
+                   zero_growth_tau_zero.hpl_pred);
+  EXPECT_DOUBLE_EQ(grown_voxels.front().vpl_pred,
+                   zero_growth_tau_zero.vpl_pred);
 }
 
 TEST_F(P0RiskGridRuntimeStampTest,
