@@ -1,5 +1,59 @@
 # ICRA Supervisor Log
 
+## 2026-08-23 — ICRA-036 review PASS and ICRA-037 collision-scan GREEN authorization
+
+### Review identity and synchronization
+
+- Fixed review range: `71ee608b3a4ec82f0ca70a22d2da3a71a3b9bc6d...da002d92d339cc55af95eea4bb19494e58b66d9c`.
+- Reviewed commits: fixture `6bc516c`, two-axis review evidence `26f3d99` and final DEV_LOG-only
+  handoff `da002d9`; all carry applicable `IAP-RQ-423`.
+- After the last successful fetch, `HEAD` and `origin/dev/icra` matched at divergence `0 0`. The
+  protected PDF remains the sole untracked file. All ten changed paths match the ICRA-036 allowlist;
+  no production header/source, Supervisor-owned, historical, PDF or external-repository file changed.
+
+### Standards axis
+
+- Verdict: `PASS`; zero hard findings and zero judgment-call smells; worst none.
+- The CMake change only registers the focused test. The deterministic observer calls the current
+  production surface and contains no hidden reference scan, fixture-derived status or synthesized
+  endpoint. Requirement IDs, documentation, allowlist, ownership, history/PDF preservation, three-
+  commit handoff and build retention all conform.
+
+### Spec axis
+
+- Verdict: `PASS`; zero missing/partial, scope-creep or implemented-wrong findings; worst none.
+- The fixed 15-sample fixture covers no collision, ordinary and late-exit closed segments, open-ended
+  tail, empty/non-finite/structural/unavailable invalidity, multiple closed segments and closed-then-
+  open behavior with exact ordered free endpoints.
+- The focused target compiles. Supervisor reproduced 11 registered cases: four pass and seven exact
+  intentional assertion-level RED cases. Late exit and open-ended tail currently collapse to
+  `NO_COLLISION`; the four invalid forms lack `INVALID_INPUT`; closed-then-open currently exposes one
+  partial `CLOSED_SEGMENTS` result. These are precisely the missing production contract, not build,
+  link, crash, process, environment or nondeterminism failures.
+- Existing bspline functional coverage remains 39/39 green, the frozen suite's already supported cases
+  remain 4/4 green, relevant path-searching remains 4/4 green and occupancy-epoch remains 6/6 green.
+  Current task and retained dependency linkage checks pass. No GPU, ROS or live flow ran.
+
+### Verdict and artifact lifecycle
+
+- Verdict: `ICRA036_REVIEW_PASS_RED_CONTRACT_FROZEN`. This approves the test-first RED deliverable; it
+  does not claim the missing production behavior is already green or promote P4-G0A.
+- During development and review, ICRA-036 retained `build_iap`, `install`, `build_bspline` and
+  `install_bspline`, approximately 3.3 GiB total, and none contains tracked files. After this Review
+  PASS and pushed Builder/Supervisor code and documentation, Supervisor permanently deletes exactly
+  those four reproducible trees under `results/icra27/icra036/`. Compact evidence, tests, source,
+  documentation and the protected PDF remain.
+
+### Required next action
+
+- Unique task: `ICRA-037 / P4_G0A`, defined in `NEXT_TASK.md`; active role is `DEEPSEEK`, state
+  `TASK_READY`.
+- Implement one explicit shared production collision-scan result and make all eleven frozen cases
+  green. Initial and rebound collision handling must use the same seam; open-ended and invalid input
+  fail closed without partial-segment consumption or downstream guide/A* invocation.
+- No dual-guide generation, risk scoring/selection, P5, GPU/ROS/live flow, tuning, cleanup or Gate
+  promotion is authorized. ICRA-037 build/install must remain through Supervisor review.
+
 ## 2026-08-23 — ICRA-035 review PASS, Gate-0B qualified and P4-G0A RED authorization
 
 ### Review identity and synchronization
